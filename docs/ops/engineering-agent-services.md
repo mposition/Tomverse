@@ -40,8 +40,6 @@
    (`preserve()`). apply 직후 대시보드에서 각 서비스에 아래 이름만 설정하고
    Deploy합니다. 목록 밖의 이름은 다음 apply가 지웁니다.
    - Runner: `ENGINEERING_AGENT_APP_URL`, `ENGINEERING_AGENT_RUNNER_SECRET`,
-     `ENGINEERING_AGENT_ANTHROPIC_API_KEY`(퇴역 대기: 2026-11-06 이후의 이미지는 읽지 않습니다.
-     그 이미지의 digest를 pin하는 변경에서 IaC 선언과 함께 지우고, 그 뒤 공급자 콘솔에서 key를 폐기합니다),
      `ENGINEERING_AGENT_GITHUB_READ_TOKEN`(이 저장소 하나, 읽기 전용),
      `ENGINEERING_AGENT_RUNNER_DEADMAN_URL`
    - Publisher: `ENGINEERING_AGENT_APP_URL`, `ENGINEERING_AGENT_PUBLISHER_SECRET`,
@@ -53,11 +51,33 @@
    Pull requests write, Metadata read뿐입니다. **Workflows 권한을 주지 않습니다.**
    서비스는 이 셋 밖의 권한이 실린 토큰을 받으면 즉시 폐기하고 멈춥니다.
 6. **dead-man monitor** — 두 서비스에 각각 하나씩, 앱·Railway·GitHub와 무관한
-   외부 monitor를 만들고 알림 채널을 연결합니다. 확인했으면 Admin의 엔지니어링
-   에이전트 화면에서 "monitor 확인"을 기록합니다(armed gate가 읽습니다).
+   외부 monitor를 만들고 알림 채널을 연결합니다(2026-11-16부터 앱에 확인을 기록하지
+   않습니다: armed gate를 없앴습니다).
 7. **확인** — `npm run railway:agents:plan`이 변경 없음을 보이면 변수 이름이 선언과
    같다는 뜻입니다. 두 서비스는 모드가 `off`인 동안 회차를 끝까지 돌고 아무것도
    하지 않으며, 정상 종료마다 dead-man monitor에 성공 신호를 보냅니다.
+
+## 이미지를 바꿀 때 (운영자)
+
+게시 서비스나 runner 코드(`scripts/engineering-agent-*.mjs`, 그것이 읽는
+`lib/engineeringAgentCore.ts`)가 바뀐 PR이 `main`에 병합되면, 서비스는 digest로 고정된
+옛 이미지를 계속 씁니다. 새 코드는 아래 순서를 마쳐야 돌기 시작합니다. 앱 쪽 변경은
+앱 배포로 먼저 들어가도 됩니다. 앱은 새 기능(예: `pull_request_resume`)을 밝히지 않은
+옛 게시 서비스에는 그 기능의 일을 넘기지 않고 기다리게 합니다.
+
+1. **digest 확인** — GitHub › Actions › `Engineering Agent Image` 실행 중 그 `main`
+   commit의 실행 요약에서 `ghcr.io/mposition/tomverse-engineering-agent@sha256:…`를
+   읽습니다(웹 브라우저, 읽기 전용).
+2. **digest PR** — `.railway/agent-runners.ts`의 `ENGINEERING_AGENT_SERVICES` 두 항목의
+   `digest`를 그 값으로 바꾸는 PR을 운영자가 만들고 직접 검토해 병합합니다. 에이전트는
+   이 값을 바꾸지 않습니다(§13).
+3. **apply** — 로컬 PC의 PowerShell, clone 폴더(병합된 `main`)에서
+   `npm run railway:iac:install` → `npm run railway:agents:use-production` →
+   `npm run railway:agents:plan` → `npm run railway:agents:apply`. production Railway에
+   쓰는 단계이며 Railway 로그인(자격증명)이 필요합니다. plan에는 두 서비스의 image
+   digest 변경만 있어야 합니다.
+4. **확인** — Railway › `Tomverse Agents` › Engineering Agent Publisher의 다음 회차(10분
+   주기) 로그에 `engineering_publisher_cycle`이 찍히는지 봅니다.
 
 ## `Tomverse` project에서 옮길 때 (한 번)
 
@@ -90,7 +110,7 @@
    그 시각 이후 각 dead-man monitor에 ping이 들어왔는지 봅니다.
    `npm run railway:agents:use-production` → `npm run railway:agents:plan`이 변경
    없음을 보이는지도 봅니다.
-6. 그다음에만 모드를 다시 켭니다(armed gate가 최근 종료와 monitor 확인을 다시 봅니다).
+6. 그다음에 모드를 다시 켭니다.
 7. `npm run railway:iac:use-staging`으로 CLI 연결을 되돌려 둡니다.
 
 **되돌리기.** 이 변경을 되돌리는 PR(revert)로 합니다. 옛 선언은 이 변경 바로 앞의

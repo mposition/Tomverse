@@ -7,17 +7,18 @@ import {
   DM_LAUNCHER_SOCKET_PATHS,
   DM_LAUNCH_LINE_MAX_BYTES,
   DM_LINE_WRITE_TIMEOUT_MS,
+  DM_PART_LINE_MAX_BYTES,
   DM_READY_LINE_MAX_BYTES,
   DM_REQUEST_READ_TIMEOUT_MS,
   DM_RESULT_LINE_MAX_BYTES,
   dmBrokerAnswer,
   dmEncodeLaunchRequest,
-  dmEncodeSnapshotAnswer,
-  dmIsSnapshotRequestLine,
-  dmParseSnapshotRequest,
+  dmEncodePartStored,
+  dmEncodeSendParts,
   dmLauncherReadyFits,
   dmParseLaunchRequest,
   dmParseLauncherAnswer,
+  dmParsePartLine,
   type DmBrokerAnswer,
   type DmBrokerLaunchView,
   type DmBrokerRefusal,
@@ -32,9 +33,27 @@ import {
   dmVendorGroupId,
   type DmLauncherHost,
 } from "./decisionMakerLauncherFs.ts";
-import { buildDmSnapshot, dmSnapshotHttpClient, type DmSnapshotHttp } from "./decisionMakerSnapshot.ts";
 import { dmCloseStream, dmReadLine, dmWriteLine } from "./decisionMakerSocketLine.ts";
 import type { DmInstanceScope } from "./decisionMakerSwitchCore.ts";
+import {
+  buildDmWorkspace,
+  dmWorkspaceHttpClient,
+  prepareDmWorkspace,
+  type DmWorkspaceBuildOptions,
+  type DmWorkspaceHttp,
+} from "./decisionMakerWorkspaceBuild.ts";
+import {
+  DM_WORKSPACE_TIME_LIMIT_MS,
+  dmAssembleWorkspace,
+  dmEncodeWorkspaceAnswer,
+  dmIsWorkspaceRequestLine,
+  dmLaunchWorkspaceRefusal,
+  dmParseWorkspaceRequest,
+  type DmLaunchWorkspace,
+  type DmLaunchWorkspaceParts,
+  type DmWorkspaceEvidenceName,
+} from "./decisionMakerWorkspaceCore.ts";
+import { amuxV22TransferChunkCount } from "./v22TransferCore.ts";
 
 /**
  * The AMUX Decision Maker broker: docs/policy/amux-decision-maker.md policy
@@ -55,7 +74,13 @@ import type { DmInstanceScope } from "./decisionMakerSwitchCore.ts";
  *   4. §5: the request root holds nothing but requests in flight, the
  *      vendor's group is the one S0 made, and the request's directory is made
  *      empty, broker-owned, that group, `0750`. The card goes on stdin
- *      (§5a); the S2b snapshot, if any, is already inside the payload.
+ *      (§5a). The launch's workspace must be the one the payload names (its
+ *      manifest lines end the payload the intent recorded); the broker builds
+ *      it in the directory (lib/amux/decisionMakerWorkspaceBuild.ts) and hands
+ *      it to the vendor's group read-only. One it cannot build is refused:
+ *      nothing is sent. A workspace named by description (the parts protocol,
+ *      lib/amux/decisionMakerBrokerCore.ts) has its bytes received first, on
+ *      this connection and in memory, after step 3 and before anything is made.
  *   5. Ask the instance's launcher (`ready`, then the request) and wait for
  *      its one answer, past the launcher unit's own hard limit.
  *   6. Always, once anything may have been made: delete the request directory
@@ -71,12 +96,15 @@ export type DmBrokerTimeouts = {
   requestRead: number;
   launcherReady: number;
   launcherResponse: number;
+  /** The workspace's one time limit: the parts' arrival and the build together. */
+  workspace: number;
 };
 
 const SYSTEM_TIMEOUTS: DmBrokerTimeouts = Object.freeze({
   requestRead: DM_REQUEST_READ_TIMEOUT_MS,
   launcherReady: DM_LAUNCHER_READY_TIMEOUT_MS,
   launcherResponse: DM_LAUNCHER_RESPONSE_TIMEOUT_MS,
+  workspace: DM_WORKSPACE_TIME_LIMIT_MS,
 });
 
 /** One line per request; codes, ids and durations only. */
@@ -90,6 +118,8 @@ export type DmBrokerLogEntry = {
   result: string;
   cleanup: string;
   residue: string[];
+  /** The workspace's outcome (`none`, `built:<patch>`, `failed:<reason>`); absent when no launch reached it. */
+  workspace?: string;
   durationMs: number;
 };
 
@@ -100,8 +130,10 @@ export type DmBrokerOptions = {
   /** Test host only. */
   timeouts?: Partial<DmBrokerTimeouts>;
   log?: (entry: DmBrokerLogEntry) => void;
-  /** Test host only: the snapshot's public reads. The system host uses the credential-free client. */
-  snapshotHttp?: DmSnapshotHttp;
+  /** Test host only: the workspace's public commit lookups. The system host uses the credential-free client. */
+  workspaceHttp?: DmWorkspaceHttp;
+  /** Test host only: the workspace's git and repository. The system host uses /usr/bin/git and GitHub. */
+  workspaceGit?: DmWorkspaceBuildOptions["git"];
 };
 
 const defaultLog = (entry: DmBrokerLogEntry) => {
@@ -183,12 +215,51 @@ const callLauncher = async (
   }
 };
 
-export type DmSnapshotBrokerAnswer = ReturnType<typeof dmEncodeSnapshotAnswer>;
+export type DmWorkspaceBrokerAnswer = ReturnType<typeof dmEncodeWorkspaceAnswer>;
+
+/**
+ * The parts of a launch, received on its connection: `send_parts`, then each
+ * file's chunks in order, each answered `part_stored`. Whole files are
+ * assembled in memory (the bytes of one file at its description's size, filled
+ * chunk by chunk) and nothing touches the disk. The result is the workspace
+ * the files make once checked (`dmAssembleWorkspace`), `mismatch` for anything
+ * the bridge sent that is not what its launch line described, or
+ * `unavailable` when the bridge aborted, stopped sending or went away.
+ */
+const receiveWorkspaceParts = async (
+  socket: Duplex,
+  requestId: string,
+  launch: DmLaunchWorkspaceParts,
+  deadlineAt: number,
+): Promise<DmLaunchWorkspace | "mismatch" | "unavailable"> => {
+  if (launch.parts.length === 0) return { state: launch.state, targetSha: launch.targetSha, files: [] };
+  if (!(await dmWriteLine(socket, dmEncodeSendParts(requestId), DM_LINE_WRITE_TIMEOUT_MS))) return "unavailable";
+  const received = new Map<DmWorkspaceEvidenceName, Buffer>();
+  for (const part of launch.parts) {
+    const whole = Buffer.allocUnsafe(part.bytes);
+    const count = amuxV22TransferChunkCount(part.bytes);
+    let offset = 0;
+    for (let index = 0; index < count; index += 1) {
+      const left = deadlineAt - Date.now();
+      if (left <= 0) return "unavailable";
+      const read = await dmReadLine(socket, DM_PART_LINE_MAX_BYTES, left);
+      if (!read.ok) return read.error === "timeout" || read.error === "closed" ? "unavailable" : "mismatch";
+      const next = dmParsePartLine(read.line, { requestId, name: part.name, index, totalBytes: part.bytes });
+      if (next === null) return "mismatch";
+      if (next.kind === "abort") return "unavailable";
+      next.bytes.copy(whole, offset);
+      offset += next.bytes.length;
+      if (!(await dmWriteLine(socket, dmEncodePartStored(part.name, index), DM_LINE_WRITE_TIMEOUT_MS))) return "unavailable";
+    }
+    received.set(part.name, whole);
+  }
+  return dmAssembleWorkspace(launch, received) ?? "mismatch";
+};
 
 export type DecisionMakerBroker = {
   /** Serves one bridge connection to its end. Never rejects. */
-  /** A launch is answered with its result; a snapshot request (stage S2b) with its lines. */
-  handleConnection: (socket: Duplex) => Promise<DmBrokerAnswer | DmSnapshotBrokerAnswer>;
+  /** A launch is answered with its result; a workspace request with its payload lines. */
+  handleConnection: (socket: Duplex) => Promise<DmBrokerAnswer | DmWorkspaceBrokerAnswer>;
   /** The request in flight per instance, for tests and the log. */
   inFlight: () => ReadonlyMap<DmInstanceScope, string>;
 };
@@ -201,12 +272,22 @@ export const createDecisionMakerBroker = (options: DmBrokerOptions = {}): Decisi
   const connect = options.connectLauncher ?? connectSystemLauncher;
   const timeouts: DmBrokerTimeouts = { ...SYSTEM_TIMEOUTS, ...options.timeouts };
   const log = options.log ?? defaultLog;
-  // A test host may fake the public reads only on a test root, like the launcher.
-  const snapshotHttp = host.root !== null && options.snapshotHttp !== undefined ? options.snapshotHttp : dmSnapshotHttpClient;
+  // A test host may fake the public reads and git only on a test root, like the launcher.
+  const workspaceHttp = host.root !== null && options.workspaceHttp !== undefined ? options.workspaceHttp : dmWorkspaceHttpClient;
+  const workspaceBuild: DmWorkspaceBuildOptions = host.root !== null && options.workspaceGit !== undefined ? { git: options.workspaceGit } : {};
   const inFlight = new Map<DmInstanceScope, string>();
 
-  /** Steps 3 to 6, for a request that is now this broker's. */
-  const run = async (request: DmLaunchRequest): Promise<DmBrokerAnswer> => {
+  /**
+   * Steps 3 to 6, for a request that is now this broker's. `note` takes the
+   * workspace's outcome for the log; `receive` fetches the bytes of a workspace
+   * named by description, for the deadline it is given.
+   */
+  const run = async (
+    initial: DmLaunchRequest,
+    note: { workspace: string | null },
+    receive: (launch: DmLaunchWorkspaceParts, deadlineAt: number) => ReturnType<typeof receiveWorkspaceParts>,
+  ): Promise<DmBrokerAnswer> => {
+    let request = initial;
     const answer = (
       view: DmBrokerLaunchView,
       requestDirectory: DmCleanupOutcome | null,
@@ -225,6 +306,18 @@ export const createDecisionMakerBroker = (options: DmBrokerOptions = {}): Decisi
 
     const intent = dmTransmitIntentRefusal(request, request.transmitIntent, request.requestKey, request.payload);
     if (intent) return refused(intent);
+    // One time limit for the parts' arrival and the build that follows.
+    const workspaceDeadline = Date.now() + timeouts.workspace;
+    if (request.workspaceParts !== null) {
+      const arrived = await receive(request.workspaceParts, workspaceDeadline);
+      if (arrived === "mismatch") return refused("workspace_mismatch");
+      if (arrived === "unavailable") return refused("workspace_unavailable");
+      request = { ...request, workspace: arrived };
+    }
+    // The workspace the payload names, and only that one: what the broker
+    // builds is what the intent's payload digest recorded.
+    const mismatch = dmLaunchWorkspaceRefusal(request.payload, request.workspace);
+    if (mismatch) return refused(mismatch);
 
     const others = new Set([...inFlight.values()].filter((id) => id !== request.requestId));
     const root = dmRequestRootState(host, others);
@@ -242,9 +335,19 @@ export const createDecisionMakerBroker = (options: DmBrokerOptions = {}): Decisi
     const progress = { contacted: false };
     let view: DmBrokerLaunchView;
     try {
-      view = dmCreateRequestDirectory(host, request.instance, request.requestId, group.groupId)
-        ? await callLauncher(connect, request, timeouts, progress)
-        : { kind: "broker_refused", refusals: ["request_directory_unusable"] };
+      if (!dmCreateRequestDirectory(host, request.instance, request.requestId, group.groupId)) {
+        view = { kind: "broker_refused", refusals: ["request_directory_unusable"] };
+      } else {
+        const built = request.workspace === null ? null : await buildDmWorkspace(host,
+          { instance: request.instance, requestId: request.requestId, workspace: request.workspace, groupId: group.groupId,
+            deadlineAt: workspaceDeadline },
+          workspaceBuild).catch(() => ({ ok: false as const, reason: "write_failed" as const }));
+        note.workspace = built === null ? "none" : built.ok ? `built:${built.patch}` :
+          `failed:${built.reason}${"step" in built ? `:${built.step}` : ""}`;
+        view = built !== null && !built.ok
+          ? { kind: "broker_refused", refusals: ["workspace_unavailable"] }
+          : await callLauncher(connect, request, timeouts, progress);
+      }
     } catch {
       view = { kind: "broker_fault", contacted: progress.contacted };
     }
@@ -258,23 +361,27 @@ export const createDecisionMakerBroker = (options: DmBrokerOptions = {}): Decisi
     return answer(view, requestDirectory);
   };
 
-  const handleConnection = async (socket: Duplex): Promise<DmBrokerAnswer | DmSnapshotBrokerAnswer> => {
+  const handleConnection = async (socket: Duplex): Promise<DmBrokerAnswer | DmWorkspaceBrokerAnswer> => {
     const started = Date.now();
     socket.on("error", () => {});
     let response: DmBrokerAnswer;
+    const note: { workspace: string | null } = { workspace: null };
     try {
       const read = await dmReadLine(socket, DM_LAUNCH_LINE_MAX_BYTES, timeouts.requestRead);
-      // Stage S2b: a snapshot request touches no directory and no launcher.
-      if (read.ok && dmIsSnapshotRequestLine(read.line)) {
-        const request = dmParseSnapshotRequest(read.line);
-        const snapshot = request === null ? null : await buildDmSnapshot(request.paths, snapshotHttp).catch(() => null);
-        const answer = dmEncodeSnapshotAnswer(request?.requestId ?? null, snapshot);
+      // Before the intent: a workspace request touches no directory and no
+      // launcher. It confirms the commit and accepts the evidence, and the
+      // bridge appends the answer's lines to the payload.
+      if (read.ok && dmIsWorkspaceRequestLine(read.line)) {
+        const request = dmParseWorkspaceRequest(read.line);
+        const prepared = request === null ? null : await prepareDmWorkspace(request, workspaceHttp).catch(() => null);
+        const answer = dmEncodeWorkspaceAnswer(request?.requestId ?? null, prepared === null ? { ok: false } : { ok: true, ...prepared });
         log({
           event: "amux_dm_broker_request",
           requestId: answer.requestId,
           instance: null,
-          launch: "snapshot",
-          reasons: [answer.reason ?? answer.state, ...Object.entries(answer.excluded).map(([reason, n]) => `${reason}:${n}`)],
+          launch: "workspace",
+          reasons: [answer.reason ?? answer.state, `files:${answer.files.length}`,
+            ...Object.entries(answer.excluded).map(([reason, n]) => `${reason}:${n}`)],
           transmission: "not_started",
           result: "none",
           cleanup: "verified",
@@ -310,7 +417,7 @@ export const createDecisionMakerBroker = (options: DmBrokerOptions = {}): Decisi
         } else {
           inFlight.set(request.instance, request.requestId);
           try {
-            response = await run(request);
+            response = await run(request, note, (launch, deadlineAt) => receiveWorkspaceParts(socket, request.requestId, launch, deadlineAt));
           } finally {
             inFlight.delete(request.instance);
           }
@@ -337,6 +444,7 @@ export const createDecisionMakerBroker = (options: DmBrokerOptions = {}): Decisi
       result: response.result.kind,
       cleanup: response.cleanup.status,
       residue: response.cleanup.status === "verified" ? [] : response.cleanup.residue.map((entry) => `${entry.scope}:${entry.kind}`),
+      ...(note.workspace === null ? {} : { workspace: note.workspace }),
       durationMs: Date.now() - started,
     });
     await dmWriteLine(socket, response, DM_LINE_WRITE_TIMEOUT_MS);

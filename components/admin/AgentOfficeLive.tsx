@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 
 import AgentOfficeBriefing from "@/components/admin/AgentOfficeBriefing";
 import AgentOfficeCliMonitor from "@/components/admin/AgentOfficeCliMonitor";
@@ -25,18 +25,21 @@ type FloorCopy = AdminMessageShape<AgentOfficeFloorCopy>;
 import { isAgentOfficeCliWorker, type AgentOfficeCliWorker } from "@/lib/agentOfficeCliMonitorCore";
 import {
   AGENT_OFFICE_CHANNELS,
+  AGENT_OFFICE_QUOTA_CHANNELS,
   agentOfficeChannel,
+  agentOfficeQuotaChannel,
   agentOfficeFloorLayout,
   brisbaneHour,
   floorLightAt,
   workerNeedsLook,
   workerPlace,
   type AgentOfficeChannel,
+  type AgentOfficeQuotaChannel,
   type FloorLight,
 } from "@/lib/agentOffice/floor";
 import {
   AGENT_OFFICE_QUOTA_FRESH_MS,
-  agentOfficeChannelQuota,
+  agentOfficeChannelQuotaRows,
   agentOfficeInbox,
   agentOfficeQuotaReading,
   inboxTotal,
@@ -61,7 +64,12 @@ const WORKERS_HREF = "/admin/amux-settings?tab=workers";
 const SAFETY_HREF = "/admin/amux-recovery?tab=safety";
 const CARDS_HREF = "/admin/amux-execution?tab=cards";
 /** A floor worker with what the office may say about its quota. */
-type LiveWorker = FloorWorker & { quota: AgentOfficeQuotaReading };
+type LiveWorker = FloorWorker & {
+  quota: AgentOfficeQuotaReading;
+  quotaChannel: AgentOfficeQuotaChannel | null;
+  /** The model its v22 profile runs, when the catalog names one. */
+  model: string | null;
+};
 const QUOTA_FRESH_MINUTES = AGENT_OFFICE_QUOTA_FRESH_MS / 60_000;
 
 const RUNNING: readonly AgentOfficeAmuxWorkerState[] = ["ready", "idle", "busy", "starting", "error", "lost", "paused", "isolated", "blocked"];
@@ -250,6 +258,8 @@ export default function AgentOfficeLive({
         return {
           name: w.name,
           channel: agentOfficeChannel(w.provider),
+          quotaChannel: agentOfficeQuotaChannel(w.provider),
+          model: w.model ?? null,
           state: w.state,
           label: m.real.amux.states[w.state],
           quota,
@@ -621,9 +631,15 @@ function Kpis({
   }));
   const costTotal = costByChannel.reduce((a, b) => a + b.micro, 0);
   const costMax = Math.max(1, ...costByChannel.map((x) => x.micro));
-  const channelQuota = AGENT_OFFICE_CHANNELS.map((ch) => ({
-    ch,
-    q: agentOfficeChannelQuota(workers.filter((w) => w.channel === ch).map((w) => w.quota)),
+  // Antigravity is one row per model: each agy model group has its own limit.
+  // A model row sits under its channel's name, drawn once above the first.
+  const channelQuota = agentOfficeChannelQuotaRows(AGENT_OFFICE_QUOTA_CHANNELS, workers).map((row, i, rows) => ({
+    key: row.model ? `${row.channel}:${row.model}` : row.channel,
+    label: row.model ?? f.quotaChannels[row.channel],
+    heading: row.model !== null && rows.findIndex((other) => other.channel === row.channel) === i ?
+      f.quotaChannels[row.channel] : null,
+    sub: row.model !== null,
+    q: row.quota,
   }));
   return (
     <section className={s.kpis} aria-label={f.inbox.title}>
@@ -692,9 +708,11 @@ function Kpis({
       <div className={s.kpi} data-testid="agent-office-kpi-quota">
         <div className={s.qbars}>
           <div className={s.kl}>{f.kpi.quota}</div>
-          {channelQuota.map(({ ch, q }) => (
-            <div key={ch} className={s.qrow} data-quota={q.kind}>
-              <span>{f.channels[ch]}</span>
+          {channelQuota.map(({ key, label, heading, sub, q }) => (
+            <Fragment key={key}>
+            {heading ? <div className={s.qhead}>{heading}</div> : null}
+            <div className={cn(s.qrow, sub && s.qsub)} data-quota={q.kind}>
+              <span>{label}</span>
               {q.kind === "fresh" ? (
                 <>
                   <span className={s.qtrack}>
@@ -715,6 +733,7 @@ function Kpis({
                 </>
               )}
             </div>
+            </Fragment>
           ))}
           {channelQuota.some(({ q }) => q.kind === "missing") ? <div className={s.qhint}>{f.kpi.quotaNotCollectedHint}</div> : null}
         </div>

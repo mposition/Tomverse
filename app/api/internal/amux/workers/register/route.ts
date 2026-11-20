@@ -13,7 +13,6 @@ import {
   isAmuxInputError,
 } from "@/lib/amux/internalRoute";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
-import { isAmuxExecutionApiEnabled } from "@/lib/amux/executionGate";
 import { amuxWorkerCatalogRefusal } from "@/lib/amux/workerAssignmentCatalog";
 import {
   AmuxWorkerRegistrationRefusedError,
@@ -38,12 +37,6 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!isAmuxExecutionApiEnabled()) {
-    return amuxJsonNoStore(
-      { registered: false, reason: "execution_api_disabled" },
-      409,
-    );
-  }
 
   return withAmuxRouteBudget(async () => {
     try {

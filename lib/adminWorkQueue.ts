@@ -2,6 +2,7 @@ import { FEEDBACK_AWAITING_OPERATOR_STATUSES } from "@/lib/feedbackLifecycleCore
 import { OPEN_WORK_ITEM_STATUSES } from "@/lib/modelLifecycleWorkItemCore";
 import { prisma } from "@/lib/prisma";
 import { getScheduledJobsDashboard } from "@/lib/scheduledJobs";
+import { ADMIN_NOTIFICATION_ATTENTION_WHERE, DAILY_PRODUCT_AGENT_NOTICE_TARGET } from "@/lib/adminNotificationAttention";
 
 /**
  * One queue for everything waiting on an operator.
@@ -122,10 +123,10 @@ export async function loadAdminWorkQueue(now = new Date()): Promise<AdminWorkQue
       },
     }),
     prisma.adminNotificationLog.findMany({
-      where: { status: "failed", acknowledgedAt: null },
+      where: ADMIN_NOTIFICATION_ATTENTION_WHERE,
       orderBy: { createdAt: "asc" },
       take: WORK_QUEUE_SOURCE_LIMIT,
-      select: { id: true, title: true, channel: true, createdAt: true },
+      select: { id: true, title: true, channel: true, targetType: true, createdAt: true },
     }),
     prisma.modelLifecycleWorkItem.findMany({
       where: { status: { in: [...OPEN_WORK_ITEM_STATUSES] } },
@@ -242,8 +243,10 @@ export async function loadAdminWorkQueue(now = new Date()): Promise<AdminWorkQue
     id: `alert:${row.id}`,
     category: "Alert",
     severity: "high",
-    title: `Undelivered alert: ${row.title}`,
-    detail: `${row.channel} delivery failed and has not been acknowledged`,
+    title: row.targetType === DAILY_PRODUCT_AGENT_NOTICE_TARGET ? row.title : `Undelivered alert: ${row.title}`,
+    detail: row.targetType === DAILY_PRODUCT_AGENT_NOTICE_TARGET
+      ? "Daily product run stopped and awaits acknowledgement"
+      : `${row.channel} delivery failed and has not been acknowledged`,
     href: "/admin/alerts?tab=deliveries",
     openedAt: row.createdAt.toISOString(),
   }));

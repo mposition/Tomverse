@@ -9,10 +9,6 @@ import test from "node:test";
 
 import {
   AMUX_CONTRACT_PATHS,
-  AMUX_EXECUTION_GRADE_CODE_LATCH,
-  AMUX_EXECUTION_GRADE_ENV,
-  amuxExecutionGradeRoutingEnabled,
-  amuxExecutionGradeRoutingOpen,
   amuxV52ReviewRequired,
   amuxWorkerMatchesExecutionGrade,
   classifyAmuxExecutionPath,
@@ -28,18 +24,6 @@ const task = (overrides = {}) => ({
   expectedPaths: ["components/chat/OrdinaryPanel.tsx"],
   proposedGrade: "advanced",
   ...overrides,
-});
-
-test("v52 code latch requires the exact enabled operation switch", () => {
-  assert.equal(AMUX_EXECUTION_GRADE_CODE_LATCH, true);
-  assert.equal(AMUX_EXECUTION_GRADE_ENV, "TOMVERSE_AMUX_EXECUTION_GRADE");
-  assert.equal(amuxExecutionGradeRoutingEnabled("enabled"), true);
-  assert.equal(amuxExecutionGradeRoutingOpen(true, "enabled"), true);
-  for (const value of [undefined, "", "true", "ENABLED", " enabled"]) {
-    assert.equal(amuxExecutionGradeRoutingEnabled(value), false);
-    assert.equal(amuxExecutionGradeRoutingOpen(true, value), false);
-  }
-  assert.equal(amuxExecutionGradeRoutingOpen(false, "enabled"), false);
 });
 
 test("only v20-or-later confirmed Tasks opt into exact grade routing", () => {

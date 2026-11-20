@@ -1,4 +1,10 @@
+import { researchRunMessage } from "../../../lib/researchPreviewRunClient";
+import type { ResearchPreviewRunDto } from "../../../lib/researchPreviewRunTypes";
+import { createWorkspaceTransport } from "./workspaceTransport";
 import { createApiClient, ApiClientError, requestChatLocationIntent } from "@tomverse/api-client";
+import { CONTINUATION_RECEIPT_HEADER, receiptForAttempt, type ContinuationReceipt } from "../../../lib/continuationReceipt";
+import { PASSAGE_HEADER, encodePassages } from "../../../lib/continuationPassages";
+import { parseChatStreamTrailer } from "../../../lib/webSearchStreamTrailer";
 import { consumeChatStream } from "../../../lib/chatStreamConsumer";
 import { fitChatRequestTranscript } from "../../../lib/chatRequestLimits";
 import { toChatRequestMessage } from "../../../lib/chatMessageSerialization";
@@ -8,6 +14,7 @@ import { isPubliclySelectableModel } from "../../../lib/models";
 import type { PublicCatalogModel } from "../../../lib/publicModelCatalog";
 import { mobileApiFetch, MobileAuth } from "./authBridge";
 import { artifactDownloadPath, ARTIFACT_LIMITS } from "../../../lib/generatedArtifactCore";
+import { artifactVersionsPath, parseGeneratedArtifactVersions } from "../../../lib/generatedArtifactVersions";
 import { saveMobileResponse } from "./fileSave";
 import { askReviewRoute } from "../../../lib/reviewRoutingClient";
 import { displayTimeZoneHeaders } from "../../../lib/continuationTitleContext";
@@ -15,7 +22,7 @@ import { readChatImageTurnRequest, readChatImageTurnRef, type ChatImageTurnReque
 import { askChatImageIntent } from "../../../lib/chatImageIntentClient";
 import { IMAGE_EDIT_SOURCE_MEDIA_TYPES } from "../../../lib/imageGenerationPricing";
 import { uploadMobileFile } from "./nativeUpload";
-import type { ChatTransport, Conversation, ImportedTranscript, MobileAttachment, MobileCapabilities } from "./chatTransport";
+import type { ChatTransport, Conversation, ImportedTranscript, MobileAttachment, MobileCapabilities, ContinuationTurnContext, PreparedArtifactRevision } from "./chatTransport";
 
 import { nativeChatLocation } from "./chatLocation";
 import type { MobileRequestInit } from "./authenticatedFetch";
@@ -31,17 +38,22 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
   let locationIdentity: string | null = null;
   let sessionRevision = 0;
   let capabilityCache: { value: MobileCapabilities; expires: number } | null = null;
-  let capabilityRequest: Promise<MobileCapabilities> | null = null;
+  let capabilityRequest: { revision: number; promise: Promise<MobileCapabilities> } | null = null;
   const routedModelByMessage = new Map<string, string>();
-  const clearSessionState = () => { sessionRevision++; locationIdentity = null; location.setIdentity(null); capabilityCache = null; unlockGrants.clear(); pinSequences.clear(); routedModelByMessage.clear(); };
+  const sourceReceiptByMessage = new Map<string, ContinuationReceipt>();
+  const clearSessionState = () => { sessionRevision++; locationIdentity = null; location.setIdentity(null); capabilityCache = null; capabilityRequest = null; unlockGrants.clear(); pinSequences.clear(); routedModelByMessage.clear(); sourceReceiptByMessage.clear(); };
   const notifySessionLost = () => { clearSessionState(); for (const listener of listeners) listener(); };
   const run = async (path: string, init?: MobileRequestInit): Promise<Response> => {
     try {
       for (const [id, token] of unlockGrants) if (Number(token.split(".")[0]) <= Date.now() / 1000) unlockGrants.delete(id);
-      if (typeof init !== "function" && unlockGrants.size && /^\/api\/conversations(?:\/|\?)/.test(path)) {
-        const headers = new Headers(init?.headers);
-        headers.set("X-Tomverse-Conversation-Unlocks", [...unlockGrants].map(([id, token]) => `${id}=${token}`).join("; "));
-        init = { ...init, headers };
+      if (unlockGrants.size && (/^\/api\/(?:conversations|artifacts)(?:\/|\?)/.test(path) || path.startsWith("/api/chat/research-preview/") || path === "/api/chat" || path === "/api/chat/preflight")) {
+        const grantHeaders = (value?: RequestInit) => {
+          const headers = new Headers(value?.headers);
+          headers.set("X-Tomverse-Conversation-Unlocks", [...unlockGrants].map(([id, token]) => `${id}=${token}`).join("; "));
+          return { ...value, headers };
+        };
+        const original = init;
+        init = typeof original === "function" ? () => grantHeaders(original()) : grantHeaders(original);
       }
       const response = await source(path, init);
       if (response.status === 401) notifySessionLost();
@@ -55,11 +67,13 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
   async function requireParity(refresh = false) {
     if (refresh) capabilityCache = null;
     if (capabilityCache && capabilityCache.expires > Date.now()) return capabilityCache.value;
-    capabilityRequest ??= request<MobileCapabilities>("/api/products/mobile/capabilities");
-    try { const value = await capabilityRequest;
+    const pending = capabilityRequest ?? { revision: sessionRevision, promise: request<MobileCapabilities>("/api/products/mobile/capabilities") };
+    capabilityRequest = pending;
+    try { const value = await pending.promise;
+      if (pending.revision !== sessionRevision) throw new DOMException("Session changed", "AbortError");
       if (typeof value.reviewEasy !== "boolean" || typeof value.assistants !== "boolean" || !["Guest", "Free", "Pro", "Max"].includes(value.plan) || !Number.isInteger(value.maxModels) || value.maxModels < 1 || value.maxModels > 8) throw Error("NATIVE_CAPABILITIES_INVALID");
       capabilityCache = { value, expires: Date.now() + 30_000 }; return value; }
-    finally { capabilityRequest = null; }
+    finally { if (capabilityRequest === pending) capabilityRequest = null; }
   }
   const json = (method: string, body: unknown): RequestInit => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const pathFor = (id: string) => `/api/conversations/${encodeURIComponent(id)}`;
@@ -102,6 +116,17 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     }
     if (researchChanged) item = await readConversation(id);
     const messages = [...item.messages];
+    if (capabilityCache?.value.researchPreview?.enabled) {
+      try {
+      const result = await request<{ runs: ResearchPreviewRunDto[] }>(`/api/chat/research-preview/runs?conversationId=${encodeURIComponent(id)}`, { cache: "no-store" });
+      for (const run of result.runs) {
+        if (run.conversationId !== id) continue;
+        const index = messages.findIndex(message => message.id === run.assistantMessageId);
+        if (index >= 0) messages[index] = { ...messages[index], researchRunId: run.id };
+        else messages.push(researchRunMessage(run));
+      }
+      } catch (error) { if ((error as { status?: number }).status === 401) throw error; }
+    }
     for (const attempt of item.responseAttempts ?? []) {
       if (messages.some((message) => message.id === attempt.assistantMessageId)) continue;
       messages.push({ id: attempt.assistantMessageId, role: "assistant", content: attempt.partialContent,
@@ -110,32 +135,32 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     const withRouting = messages.map(message => {
       const attempt = item.responseAttempts?.find(value => value.assistantMessageId === message.id);
       const modelId = attempt?.actualModelId ?? message.modelId;
-      return { ...message, ...(modelId ? { modelId } : {}), ...(routedModelByMessage.has(message.id) ? { routedModelId: attempt?.actualModelId ?? routedModelByMessage.get(message.id) } : {}) };
+      return { ...message, ...(sourceReceiptByMessage.has(message.id) ? { continuationReceipt: sourceReceiptByMessage.get(message.id) } : {}), ...(modelId ? { modelId } : {}), ...(routedModelByMessage.has(message.id) ? { routedModelId: attempt?.actualModelId ?? routedModelByMessage.get(message.id) } : {}) };
     });
     // A continuation carries its imported original; an unreadable source is
     // drawn as the divider alone rather than as an ordinary empty chat.
     const imported = item.surface === "continuation" ? await continuationSource(id).catch(() => undefined) : undefined;
-    return { ...item, ...(imported ? { imported } : {}), messages: withRouting, assistantProfileId: item.assistantProfile?.profileId ?? item.assistantProfileId ?? null, activeAttempt: messages.some(message => Boolean(message.pendingJobId) && message.status === "pending") || Boolean(item.responseAttempts?.some((attempt) => ["claimed", "streaming"].includes(attempt.status))) };
+    return { ...item, ...(imported ? { imported, ...(imported.reviewHandoff ? { reviewHandoff: imported.reviewHandoff } : {}) } : {}), messages: withRouting, assistantProfileId: item.assistantProfile?.profileId ?? item.assistantProfileId ?? null, activeAttempt: messages.some(message => Boolean(message.pendingJobId) && message.status === "pending") || Boolean(item.responseAttempts?.some((attempt) => ["claimed", "streaming"].includes(attempt.status))) };
   }
   // The imported original of a continuation, one page at a time; `offset`
   // omitted asks for the page that ends at the divider (policy §8.2 of
   // docs/policy/external-conversation-continuation.md).
   async function continuationSource(id: string, offset?: number): Promise<ImportedTranscript> {
-    const value = await request<{ provider: string; importedAt: string; source: { status: string; messageTotal?: number; offset?: number; limit?: number; messages?: Array<{ id: string; role: string; content: string; sourceModelLabel?: string | null }> } }>(
+    const value = await request<{ provider: string; importedAt: string; reviewHandoff?: import("./chatTransport").ReviewHandoffSummary; source: { status: string; messageTotal?: number; offset?: number; limit?: number; messages?: Array<{ id: string; role: string; content: string; ordinal?: number; sourceModelLabel?: string | null }> } }>(
       `${pathFor(id)}/continuation?offset=${offset === undefined ? "end" : Math.max(0, Math.trunc(offset))}`, { cache: "no-store" });
     const status = value.source.status === "deleted" || value.source.status === "locked" ? value.source.status : "available";
     const messages = status === "available" ? (value.source.messages ?? []).filter(message => message.role === "user" || message.role === "assistant")
-      .map(message => ({ id: message.id, role: message.role as "user" | "assistant", content: message.content, sourceModelLabel: message.sourceModelLabel ?? null })) : [];
-    return { provider: value.provider, importedAt: value.importedAt, status, messages, offset: value.source.offset ?? 0, pageSize: value.source.limit ?? 100 };
+      .map(message => ({ id: message.id, role: message.role as "user" | "assistant", content: message.content, ordinal: message.ordinal, sourceModelLabel: message.sourceModelLabel ?? null })) : [];
+    return { provider: value.provider, importedAt: value.importedAt, status, messages, messageTotal: value.source.messageTotal, offset: value.source.offset ?? 0, pageSize: value.source.limit ?? 100, ...(value.reviewHandoff ? { reviewHandoff: value.reviewHandoff } : {}) };
   }
   async function configure(id: string, modelId: string, auto: boolean) {
     await request(pathFor(id), json("PATCH", { selectionMode: auto ? "auto" : "manual", ...(!auto ? { selectedModels: [modelId] } : {}) }));
     return load(id);
   }
-  async function persistQuestion(conversation: Conversation, text: string, files: MobileAttachment[], signal: AbortSignal) {
+  async function persistQuestion(conversation: Conversation, text: string, files: MobileAttachment[], signal: AbortSignal, draft?: { revision: number }) {
     const requestId = crypto.randomUUID();
     const saved = await request<{ messageMappings: Array<{ requestId: string; messageId: string }> }>(`${pathFor(conversation.id)}/messages`, {
-      ...json("POST", { messages: [{ clientRequestId: requestId, role: "user", content: text,
+      ...json("POST", { ...(draft ? { draftConsume: { scopeKey: conversation.id, expectedRevision: draft.revision, requestId } } : {}), messages: [{ clientRequestId: requestId, role: "user", content: text,
         ...(files.length ? { attachmentUploadIds: files.map(file => file.uploadId) } : {}) }] }), signal,
     });
     const sourceId = saved.messageMappings.find(mapping => mapping.requestId === requestId)?.messageId;
@@ -174,8 +199,13 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       ? { modelIds: decision.modelId ? [decision.modelId] : [], preset: decision.preset, edit: true }
       : null;
   }
-  async function streamModel(persisted: Conversation, sourceId: string, modelId: string, signal: AbortSignal, progress: (text: string) => void, review = false, admission?: { admissionToken: string; contextBundle?: string }) {
-    const messages = fitChatRequestTranscript(persisted.messages.filter(message =>
+  async function streamModel(persisted: Conversation, sourceId: string, modelId: string, signal: AbortSignal, progress: (text: string) => void, review = false, admission?: { admissionToken: string; contextBundle?: string }, continuation?: ContinuationTurnContext, research?: { locale: string }) {
+    // A prepared Review binds the saved authored question. Concurrent appends
+    // cannot become its current query or alter the transcript being verified.
+    const sourceIndex = admission?.contextBundle ? persisted.messages.findIndex(message => message.id === sourceId) : -1;
+    if (admission?.contextBundle && sourceIndex < 0) throw Error("SAVED_MESSAGE_MISSING");
+    const transcript = admission?.contextBundle ? persisted.messages.slice(0, sourceIndex + 1) : persisted.messages;
+    const messages = research ? persisted.messages.filter(message => message.id === sourceId && message.role === "user").map(message => ({ id: message.id, role: "user" as const, content: message.content })) : fitChatRequestTranscript(transcript.filter(message =>
       (message.role === "user" || !review || message.modelId === modelId) &&
       (message.role === "user" || message.status === "normal" || message.status === "incomplete" || !message.status))
       .map(message => toChatRequestMessage({ id: message.id, role: message.role, content: message.content, attachments: message.attachments })));
@@ -185,9 +215,16 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     if (signal.aborted) controller.abort();
     const scope = locationIdentity;
     const revision = sessionRevision;
+    let sourceReceipt: ContinuationReceipt | undefined;
+    let sourceAttemptTextLength = 0;
+    const publishReceipt = (receipt: ContinuationReceipt | undefined) => {
+      if (!receipt || revision !== sessionRevision || signal.aborted) return;
+      sourceReceipt = receipt; sourceReceiptByMessage.set(assistantMessageId, receipt);
+      continuation?.onReceipt?.(receipt);
+    };
     let watchdog: ReturnType<typeof createChatLivenessWatchdog> | undefined;
     try {
-      const fix = await location.readForTurn(scope, controller.signal, {
+      const fix = research ? null : await location.readForTurn(scope, controller.signal, {
         turnId: sourceId,
         requiresLocation: () => requestChatLocationIntent(String(persisted.messages.find(message => message.id === sourceId && message.role === "user")?.content ?? ""), (path, init) => run(path, () => {
           if (revision !== sessionRevision) throw new DOMException("Session changed", "AbortError");
@@ -199,11 +236,16 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       const response = await run("/api/chat", () => {
         controller.signal.throwIfAborted();
         if (revision !== sessionRevision) throw new DOMException("Session changed", "AbortError");
-        return { ...json("POST", { messages, modelId, webSearchMode: persisted.webSearchMode ?? "off", conversationId: persisted.id,
+        return { ...json("POST", { messages, modelId, webSearchMode: research ? "always" : persisted.webSearchMode ?? "off", conversationId: persisted.id,
+          ...(research ? { researchMode: "preview" } : {}),
           assistantMessageId, sourceUserMessageId: sourceId, ...(admission ?? {}),
-          ...(fix && location.canShare(fix, scope) ? { currentLocation: fix } : {}) }), signal: controller.signal };
+          ...(fix && location.canShare(fix, scope) ? { currentLocation: fix } : {}) }),
+          ...(continuation?.sourcePassages !== undefined && !review && !research ? { headers: { "Content-Type": "application/json",
+            [PASSAGE_HEADER]: encodePassages(continuation.sourcePassages) } } : {}), ...(research ? { headers: { "Content-Type": "application/json", "Accept-Language": research.locale } } : {}), signal: controller.signal };
       });
       watchdog.noteHeaders();
+      const traceId = response.headers.get("X-Request-ID");
+      publishReceipt(receiptForAttempt(response.headers.get(CONTINUATION_RECEIPT_HEADER), traceId, assistantMessageId));
       // Auto's choice arrives only as a header, as on the web; it is kept for
       // this session and attached to the message when the conversation reloads.
       const routed = response.headers.get("X-Chat-Routed-Model");
@@ -239,14 +281,58 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       }
       if (!response.body) throw Error("CHAT_STREAM_MISSING");
       const reader = response.body.getReader();
-      try { await consumeChatStream({ reader, liveness: watchdog, onProgress: ({ displayText }) => progress(displayText) }); }
+      try {
+        const result = await consumeChatStream({ reader, liveness: watchdog, onProgress: ({ displayText, retryingWithModelId }) => {
+          if (revision !== sessionRevision || signal.aborted) return;
+          const retryStarted = Boolean(retryingWithModelId && sourceReceipt?.attempt === 0);
+          if (displayText.length > sourceAttemptTextLength && displayText.trim() && sourceReceipt?.status === "unknown" && !retryStarted)
+            publishReceipt({ ...sourceReceipt, status: "dispatched" });
+          if (retryStarted && sourceReceipt) {
+            sourceAttemptTextLength = displayText.length;
+            publishReceipt({ ...sourceReceipt, attempt: 1, status: "unknown" });
+          }
+          progress(displayText);
+        } });
+        const trailer = parseChatStreamTrailer(result.searchMetadataJson);
+        publishReceipt(receiptForAttempt(trailer?.continuationReceipt, traceId, assistantMessageId, sourceReceipt));
+      }
       finally { reader.releaseLock(); }
       const final = await load(persisted.id);
       if (!final.messages.some(message => message.id === assistantMessageId && ["normal", "incomplete"].includes(message.status ?? ""))) throw Error("CHAT_OUTCOME_PENDING");
     } finally { watchdog?.stop(); signal.removeEventListener("abort", abort); }
   }
   return {
+    get workspace() {
+      const revision = sessionRevision;
+      const assertScope = () => { if (revision !== sessionRevision) throw Error("SIGN_IN_REQUIRED"); };
+      return createWorkspaceTransport(async <T,>(path: string, init?: RequestInit) => {
+        assertScope(); const value = await request<T>(path, init); assertScope(); return value;
+      }, async () => { assertScope(); const value = await requireParity(); assertScope(); return value; }, async (url, headers, file) => { assertScope(); await uploadFile(url, headers, file); assertScope(); });
+    },
     location,
+    researchPreviewOffer: async (input, signal, locale) => {
+      if (!(await requireParity()).researchPreview?.enabled) return { offered: false, reason: "disabled" };
+      return request("/api/chat/research-preview/offer", { ...json("POST", input), ...(locale ? { headers: { "Content-Type": "application/json", "Accept-Language": locale } } : {}), signal });
+    },
+    researchRuns: {
+      read: async (id, signal) => { if (!(await requireParity()).researchPreview?.enabled) throw Error("NATIVE_RESEARCH_UNAVAILABLE"); return (await request<{ run: ResearchPreviewRunDto }>(`/api/chat/research-preview/runs/${encodeURIComponent(id)}`, { cache: "no-store", signal })).run; },
+      resume: async id => { if (!(await requireParity()).researchPreview?.enabled) throw Error("NATIVE_RESEARCH_UNAVAILABLE"); return (await request<{ run: ResearchPreviewRunDto }>(`/api/chat/research-preview/runs/${encodeURIComponent(id)}/resume`, { method: "POST" })).run; },
+      cancel: async id => { if (!(await requireParity()).researchPreview?.enabled) throw Error("NATIVE_RESEARCH_UNAVAILABLE"); return (await request<{ run: ResearchPreviewRunDto }>(`/api/chat/research-preview/runs/${encodeURIComponent(id)}/cancel`, { method: "POST" })).run; },
+    },
+    sendResearchPreview: async (conversation, text, files, signal, progress, options) => {
+      const refusal = () => Object.assign(Error("RESEARCH_PREVIEW_UNAVAILABLE"), { questionPersisted: false });
+      if (files.length || !text.trim() || text.trim().length > 4000 || conversation.selectionMode !== "manual" || conversation.selectedModels.length !== 1) throw refusal();
+      if (!(await requireParity()).researchPreview?.enabled) throw refusal();
+      const offered = await request<{ offered: boolean; features?: { durableRuns: boolean } }>("/api/chat/research-preview/offer", { ...json("POST", { conversationId: conversation.id, modelId: conversation.selectedModels[0], question: text.trim() }), headers: { "Content-Type": "application/json", "Accept-Language": options.locale }, signal });
+      if (!offered.offered) throw refusal();
+      const { persisted, sourceId } = await persistQuestion(conversation, text.trim(), [], signal);
+      if (persisted.selectionMode !== "manual" || persisted.selectedModels.length !== 1 || persisted.selectedModels[0] !== conversation.selectedModels[0]) throw Error("RESEARCH_PREVIEW_SELECTION_CHANGED");
+      if (options.durable && offered.features?.durableRuns) {
+        await request("/api/chat/research-preview/runs", { ...json("POST", { conversationId: persisted.id, sourceUserMessageId: sourceId, assistantMessageId: crypto.randomUUID(), modelId: persisted.selectedModels[0], locale: options.locale }), signal });
+        return;
+      }
+      await streamModel(persisted, sourceId, persisted.selectedModels[0], signal, progress, false, undefined, undefined, { locale: options.locale });
+    },
     history: {
       projects: async () => { await historySupport(); return (await request<{ projects: import("./chatTransport").HistoryProject[] }>("/api/projects")).projects; },
       saveProject: (id, name) => historyWrite(id ? `/api/projects/${encodeURIComponent(id)}` : "/api/projects", id ? "PATCH" : "POST", { name }),
@@ -344,7 +430,26 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     unlockDevice: async (reason) => { await bridge.unlockDevice({ reason }); },
     // A Review continuation is listed with Review (owner request 2026-10-26).
     listReview: async () => (await request<Array<import("./chatTransport").ChatSummary & { surface: string; kind: string }>>("/api/conversations", { headers: displayTimeZoneHeaders() })).filter(row => (row.surface === "workspace" && ["chat", "image"].includes(row.kind)) || (row.surface === "continuation" && row.productKey === "review")),
-    createReview: async (models) => { await requireParity(); const value = await request<{ id: string }>("/api/products/review/conversations", json("POST", { selectedModels: models, webSearchMode: "always" })); return load(value.id); },
+    createReview: async (models, assistantProfileId) => { await requireParity(); const value = await request<{ id: string }>("/api/products/review/conversations", json("POST", { selectedModels: models, webSearchMode: "always", ...(assistantProfileId ? { assistantProfileId } : {}) })); return load(value.id); },
+    prepareReviewHandoff: async (id, input, signal) => {
+      const revision = sessionRevision;
+      const result = await request<import("./chatTransport").ReviewHandoffResult>(`${pathFor(id)}/continuation/review-handoff`, { ...json("POST", input), signal });
+      if (revision !== sessionRevision) throw new DOMException("Session changed", "AbortError");
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(result.conversationId) || !result.reviewHandoff) throw Error("REVIEW_HANDOFF_INVALID");
+      return result;
+    },
+    reviewHandoffDraft: {
+      get: id => request(`${pathFor(id)}/continuation/review-handoff/draft`),
+      put: async (id, input) => {
+        const result = await request<{ draft: import("./chatTransport").ReviewHandoffDraft }>(`${pathFor(id)}/continuation/review-handoff/draft`, json("PUT", input));
+        return { scopeKey: id, draft: result.draft };
+      },
+      remove: async (id, expectedRevision) => {
+        const response = await client.response(`${pathFor(id)}/continuation/review-handoff/draft`, json("DELETE", { expectedRevision }));
+        if (!response.ok) { const body = await response.json().catch(() => ({})); throw new ApiClientError(response.status, body.code ?? "REVIEW_HANDOFF_DRAFT_DELETE_FAILED"); }
+        return { scopeKey: id, draft: null };
+      },
+    },
     configureReview: async (id, models) => { await request(pathFor(id), json("PATCH", { selectedModels: models, selectionMode: "manual" })); return load(id); },
     routeReview: async (input) => { await requireParity(); const result = await askReviewRoute(input, (path, init) => { if (typeof path !== "string" || path !== "/api/review/route") throw Error("INVALID_REVIEW_ROUTE"); return run(path, init); }); if (!result || result.kind === "blocked") throw Error("REVIEW_ROUTE_UNAVAILABLE"); return result; },
     reviewPreview: async (id, mode = "balanced", synthesis = false) => { await requireParity(); return request(`${pathFor(id)}/comparison-reviews?reviewMode=${encodeURIComponent(mode)}&includeSynthesis=${synthesis}`); },
@@ -360,6 +465,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       const revision = sessionRevision;
       const profile = await request<{ id: string; name?: string | null; email?: string | null; actionsEnabled: boolean }>("/api/user/account");
       if (revision !== sessionRevision) throw new DOMException("Session changed", "AbortError");
+      if (locationIdentity && locationIdentity !== profile.id) clearSessionState();
       locationIdentity = profile.id; location.setIdentity(profile.id);
       return profile;
     },
@@ -383,6 +489,33 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       if (bytes.byteLength > ARTIFACT_LIMITS.maxOutputBytes || bytes.byteLength !== artifact.byteSize) throw Error("ARTIFACT_SIZE_MISMATCH");
       await saveFile(new Response(bytes, { headers: response.headers }), artifact.filename);
     },
+    prepareArtifactRevision: async (input) => {
+      if (!(await requireParity()).generatedFileRevisions) throw new ApiClientError(503, "GENERATED_ARTIFACT_REVISION_DISABLED");
+      const revision = sessionRevision;
+      const result = await request<PreparedArtifactRevision>("/api/chat", json("PUT", { action: "generated-artifact-copy", ...input }));
+      if (revision !== sessionRevision) throw new DOMException("Session changed", "AbortError");
+      if (!result || typeof result.uploadId !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(result.uploadId) ||
+          typeof result.name !== "string" || !result.name || result.name.length > 255 ||
+          typeof result.mediaType !== "string" || result.mediaType.length > 200 ||
+          !Number.isSafeInteger(result.size) || result.size <= 0 || result.size > 50 * 1024 * 1024) throw Error("ARTIFACT_REVISION_RECEIPT_INVALID");
+      return { uploadId: result.uploadId, name: result.name, mediaType: result.mediaType, size: result.size,
+        ...(["workbook", "workbook-values"].includes(result.revisionMode ?? "") ? { revisionMode: result.revisionMode } : {}) };
+    },
+    discardAttachment: async (uploadId) => {
+      if (!(await requireParity()).generatedFileRevisions) return;
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(uploadId)) throw Error("ATTACHMENT_RECEIPT_INVALID");
+      const response = await run("/api/chat", json("DELETE", { uploadId }));
+      if (!response.ok) throw new ApiClientError(response.status, "ATTACHMENT_CLEANUP_FAILED");
+      await response.body?.cancel().catch(() => {});
+    },
+    artifactVersions: async (artifactId, cursor) => {
+      if (!(await requireParity()).generatedFileRevisions) throw new ApiClientError(503, "GENERATED_ARTIFACT_REVISION_DISABLED");
+      const revision = sessionRevision;
+      const result = parseGeneratedArtifactVersions(await request(artifactVersionsPath(artifactId, cursor), { cache: "no-store" }));
+      if (revision !== sessionRevision) throw new DOMException("Session changed", "AbortError");
+      if (!result) throw Error("ARTIFACT_VERSIONS_INVALID");
+      return result;
+    },
     onSessionLost: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     session: async () => { const active = (await bridge.hasSession()).signedIn; if (!active) clearSessionState(); return active; },
     signIn: async () => { clearSessionState(); await bridge.signIn(); },
@@ -400,25 +533,36 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     models: async () => (await request<{ models: PublicCatalogModel[] }>("/api/models/catalog")).models.filter(isPubliclySelectableModel),
     capabilities: async () => ({ offered: (await request<{ autoSelection: { offered: boolean } }>("/api/products/chat/capabilities")).autoSelection.offered }),
     configure,
-    create: async (title) => {
-      const item = await request<{ id: string }>("/api/products/chat/conversations", json("POST", { webSearchMode: "always", ...(title ? { title: title.slice(0, 30) } : {}) }));
+    create: async (title, assistantProfileId) => {
+      const item = await request<{ id: string }>("/api/products/chat/conversations", json("POST", { webSearchMode: "always", ...(assistantProfileId ? { assistantProfileId } : {}), ...(title ? { title: title.slice(0, 30) } : {}) }));
       const detail = await load(item.id);
-      return detail.autoSelection?.offered ? configure(item.id, "", true) : detail;
+      return !assistantProfileId && detail.autoSelection?.offered ? configure(item.id, "", true) : detail;
     },
-    send: async (conversation, text, files, signal, onProgress) => {
+    send: async (conversation, text, files, signal, onProgress, continuation) => {
       const { persisted, sourceId } = await persistQuestion(conversation, text, files, signal);
       const edit = await manualPhotoEdit(persisted, text, files, signal);
       if (edit) {
         await postImageTurn(persisted.id, sourceId, crypto.randomUUID(), persisted.selectedModels[0], edit, signal);
         return;
       }
-      await streamModel(persisted, sourceId, persisted.selectedModels[0], signal, onProgress);
+      await streamModel(persisted, sourceId, persisted.selectedModels[0], signal, onProgress, false, undefined, continuation);
     },
-    sendReview: async (conversation, text, files, signal, progress) => {
+    sendReview: async (conversation, text, files, signal, progress, draft) => {
+      // Match the ordinary message persistence route before pricing its query.
+      const prompt = draft ? text : text.trim();
+      const handoffTarget = conversation.productKey === "review" && Boolean(conversation.reviewHandoff ?? conversation.imported?.reviewHandoff);
+      const handoffSessionRevision = handoffTarget ? sessionRevision : null;
       let admission: { admissionToken: string; contextBundle?: string } | undefined;
-      try { if (conversation.selectedModels.length > 1) {
+      try {
+        if (handoffTarget && conversation.selectedModels.length === 1) {
+          // The existing source loader validates both resources and every linked
+          // reference before a single-model send can consume its editable draft.
+          const context = await request<{ reviewHandoff?: { status?: string } }>(`${pathFor(conversation.id)}/continuation?limit=1&offset=end`, { signal });
+          if (context.reviewHandoff?.status !== "available") throw new ApiClientError(409, "REVIEW_HANDOFF_UNAVAILABLE");
+        }
+        if (conversation.selectedModels.length > 1) {
         await requireParity();
-        const input = { comparisonId: Date.now().toString(), conversationId: conversation.id, modelIds: conversation.selectedModels, prompt: text, attachments: files.map(file => ({ mediaType: file.mediaType, size: file.size })), webSearchMode: conversation.webSearchMode ?? "off" };
+        const input = { comparisonId: Date.now().toString(), conversationId: conversation.id, modelIds: conversation.selectedModels, prompt, attachments: files.map(file => ({ mediaType: file.mediaType, size: file.size })), webSearchMode: conversation.webSearchMode ?? "off" };
         for (let attempt = 0; attempt < 2; attempt++) {
           try {
             const response = await client.response("/api/chat/preflight", { ...json("POST", input), signal });
@@ -441,8 +585,11 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
           }
         }
       } } catch (error) { throw Object.assign(error instanceof Error ? error : new Error("COMPARISON_PREFLIGHT_FAILED"), { questionPersisted: false }); }
+      if (handoffTarget && handoffSessionRevision !== sessionRevision) {
+        throw Object.assign(new DOMException("Session changed", "AbortError"), { questionPersisted: false });
+      }
       if (signal.aborted) throw new DOMException("Stopped", "AbortError");
-      const { persisted, sourceId } = await persistQuestion(conversation, text, files, signal);
+      const { persisted, sourceId } = await persistQuestion(conversation, prompt, files, signal, draft);
       const outcomes = await Promise.allSettled(persisted.selectedModels.map(modelId =>
         streamModel(persisted, sourceId, modelId, signal, value => progress(modelId, value), true, admission)));
       return { failedModelIds: persisted.selectedModels.filter((_, index) => outcomes[index].status === "rejected") };

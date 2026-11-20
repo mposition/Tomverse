@@ -214,6 +214,16 @@ domains:
     implementationStatus: implemented
     inUnifiedExport: included_filtered
 
+  - domain: mcpCustomServer
+    prismaModel: McpCustomServer
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+
   - domain: mcpInvocation
     prismaModel: McpInvocation
     userLinkageRole: subject
@@ -243,6 +253,24 @@ domains:
     retentionPolicy: immediate
     implementationStatus: implemented
     inUnifiedExport: included
+
+  - domain: researchPreviewRun
+    prismaModel: ResearchPreviewRun
+    userLinkageRole: subject
+    owner: backend-ai
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+    note: >-
+      Durable Research Preview orchestration owned by the account and
+      conversation. Account or conversation deletion cascades the row and its
+      transient checkpoint immediately. Unified export includes the public run
+      lifecycle, selected model, bounded counters and timestamps; it withholds
+      the restart checkpoint and page bodies, provider/API binding, reservation,
+      lease, digest, settlement usage and internal error fields. Terminal runs
+      purge the checkpoint independently of account deletion.
 
   - domain: conversationProject
     prismaModel: ConversationProject
@@ -588,6 +616,28 @@ domains:
     retentionPolicy: immediate
     implementationStatus: implemented
     inUnifiedExport: included_filtered
+
+  - domain: semanticRetrievalCache
+    prismaModel: SemanticRetrievalCache
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: excluded
+    note: >-
+      The outcome of one semantic retrieval call (import/memory policy §9a):
+      candidate ids with relevance scores, the vector of one question, or a
+      recorded failure, under a SHA-256 key. Never memory or knowledge text.
+      Kept ten minutes so every rebuild of a turn's context reaches the same
+      selection, then removed by sweepSemanticRetrievalCache; an account
+      deletion removes its rows at once through the cascade. Excluded from the
+      export because it is a derived, minutes-lived working copy of data the
+      export already carries at its source. The embedding and embeddingModel
+      columns on AssistantKnowledgeChunk and MemoryItem are the same kind of
+      thing -- derived from the row's own text, deleted with the row -- and are
+      likewise not exported.
 
   - domain: assistantProfileImport
     prismaModel: AssistantProfileImport
@@ -2701,6 +2751,49 @@ domains:
       Its expiry and key retirement do not by themselves decide account
       deletion or unified export; a public develop PR needs separate consent.
 
+  - domain: amuxTaskChangedPaths
+    prismaModel: AmuxV22TaskChangedPaths
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-v22-result-transfer.md 2.3 and 2.6, v22 Task changed-path list account deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      The paths a v22 run changed, encrypted and tied to an operator idea by
+      ideaId; settlement names them by digest. The body expires with the
+      attempt's result, 90 days after the Task ends, and the purge queues the
+      key's deletion. That expiry does not by itself decide account deletion
+      or unified export. The chunked transfer's staging tables hold sealed
+      chunks only until the commit or the retention sweep and are not
+      registered.
+
+  - domain: amuxReviewFindings
+    prismaModel: AmuxV52ReviewFindings
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/engineering-agent.md v4, v22 Task patch account deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      A rejected review's findings are encrypted and tied to an operator idea by
+      ideaId. They expire with the attempt's result, 90 days after the Task
+      ends, and the purge queues the key's deletion. That expiry does not by
+      itself decide account deletion or unified export.
+
   - domain: amuxPortfolioAssessment
     prismaModel: AmuxPortfolioAssessment
     userLinkageRole: actor
@@ -3649,6 +3742,48 @@ domains:
       history and a database trigger refuses UPDATE and DELETE, so an erasure decision here needs a
       migration; undecided on every axis.
 
+  - domain: imageModelBillingTerms
+    prismaModel: ImageModelBillingTerms
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      The operator who confirmed an image billing term, by id and address. The rows are append-only
+      billing history and are not reachable from User by cascade; undecided on every axis.
+
+  - domain: imageBillingMeasurement
+    prismaModel: ImageBillingMeasurement
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      The operator who approved a paid image billing measurement, by id and address. No user credits
+      or images are stored; not reachable from User by cascade; undecided on every axis.
+
+  - domain: codingProviderTerms
+    prismaModel: CodingProviderTerms
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      The operator who last applied or re-checked a provider's coding terms, by id and address. One
+      row per provider, no user content; not reachable from User by cascade; undecided on every axis.
+
   - domain: providerBillingConfig
     prismaModel: ProviderBillingConfig
     userLinkageRole: actor
@@ -4078,6 +4213,36 @@ domains:
       takeover path is email and the collateral is correspondingly larger.
       The `id` is a server-issued random value, so it identifies the device to
       Tomverse and to nothing else.
+
+  - domain: externalApiKey
+    prismaModel: ExternalApiKey
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+    note: >-
+      A key the person issued for the external inference API
+      (docs/policy/external-api.md): name, public prefix, optional credit cap,
+      expiry, revocation and last use. Only a SHA-256 digest of the secret is
+      stored, and the export withholds it.
+
+  - domain: externalApiRequest
+    prismaModel: ExternalApiRequest
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+    note: >-
+      The content-free link from one API request to its key and to the shared
+      ChatCreditReservation. Removed with the key, which is removed with the
+      account; the reservation row stays detached like every Chat reservation.
+      Holds no prompt, output, tool argument or image.
 
   - domain: mobileTokenFamily
     prismaModel: MobileTokenFamily

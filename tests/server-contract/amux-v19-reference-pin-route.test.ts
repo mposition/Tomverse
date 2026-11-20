@@ -10,9 +10,7 @@ const ideaId = "ea86a25b-919f-4714-a3d8-45ef5a18b175";
 const reservationId = "dc86a25b-919f-4714-a3d8-45ef5a18b175";
 const claimId = "bc86a25b-919f-4714-a3d8-45ef5a18b175";
 const names = ["TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET",
-  "TOMVERSE_AMUX_SYNC_SECRET", "TOMVERSE_AMUX_V19_REFERENCE_PIN_READ",
-  "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_QUEUE_READ",
-  "TOMVERSE_AMUX_SESSION_INTAKE", "TOMVERSE_AMUX_V4_ANALYSIS_QUEUE_READ"] as const;
+  "TOMVERSE_AMUX_SYNC_SECRET"] as const;
 const prior = Object.fromEntries(names.map((name) => [name, process.env[name]]));
 let reads = 0;
 let fail = false;
@@ -36,7 +34,6 @@ const reset = () => {
   reads = 0; fail = false; received = undefined;
   process.env.TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET = secret;
   delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
-  for (const name of names.slice(2)) process.env[name] = "enabled";
 };
 const post = (body: unknown = { ideaId, reservationId, referenceOrdinal: 0 },
   headers: Record<string, string> = {}) => new Request(
@@ -46,14 +43,11 @@ const post = (body: unknown = { ideaId, reservationId, referenceOrdinal: 0 },
       ...headers }, body: JSON.stringify(body),
   });
 
-test("reference-pin read requires the exact agent and closed switches", async () => {
+test("reference-pin read requires the exact agent", async () => {
   reset();
   assert.equal((await route.POST(post(undefined, { authorization: "" }))).status, 401);
   process.env.TOMVERSE_AMUX_SYNC_SECRET = secret;
   assert.equal((await route.POST(post())).status, 401);
-  reset();
-  delete process.env.TOMVERSE_AMUX_V19_REFERENCE_PIN_READ;
-  assert.equal((await route.POST(post())).status, 409);
   assert.equal(reads, 0);
 });
 

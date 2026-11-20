@@ -5,7 +5,9 @@ import { ARTIFACT_LIMITS } from "../lib/generatedArtifactCore.ts";
 import { ArtifactToolRejectionLog } from "../lib/generatedArtifactRejectionLog.ts";
 import {
   ALL_ARTIFACT_TOOL_NAMES,
+  ARTIFACT_TOOL_NAMES,
   CREATE_DOCUMENT_BATCH_TOOL_NAME,
+  CREATE_SPREADSHEET_TOOL_NAME,
   GeneratedArtifactCollector,
   buildGeneratedArtifactToolConfig,
 } from "../lib/generatedArtifactTool.ts";
@@ -87,7 +89,11 @@ const runRejectedBatchWithDiagnostic = async (input, overrides = {}) => {
     toolName: CREATE_DOCUMENT_BATCH_TOOL_NAME,
     requestedFormat: null,
     rejectionCode: "spec_rejected",
+    // Counts only: how many files were listed to the model and how many read.
+    listedAttachments: calls[0][4].listedAttachments,
+    readAttachments: calls[0][4].readAttachments,
   }]);
+  assert.equal(typeof calls[0][4].readAttachments, "number");
   assert.doesNotMatch(lines[0], /SECRET_|contracts|att_[0-9]|계약서양식|명단|메모/);
   assert.equal(artifacts.failed.length, 1);
   assert.equal(artifacts.failed[0].failureCode, "spec_rejected");
@@ -128,8 +134,58 @@ test("the tool name list covers every tool that can be registered", () => {
   }
 });
 
+test("the spreadsheet tool asks for totals and derived columns that add up", () => {
+  // The writer stores values only (no `<f>`), so a total row the model
+  // miscomputes reaches the user as a wrong number nobody recalculates.
+  const description = buildGeneratedArtifactToolConfig(collector()).tools[
+    CREATE_SPREADSHEET_TOOL_NAME
+  ].description;
+  assert.match(description, /values only, never formulas/);
+  assert.match(description, /total row must equal the sum of the rows above it/);
+  assert.match(description, /revenue minus cost/);
+});
+
+test("the presentation tool spreads finance and schedule instead of packing one slide", () => {
+  // A business-plan deck once arrived with budget, monthly P&L, break-even and
+  // a six-week schedule crammed into long sentences on its last slide.
+  const description = buildGeneratedArtifactToolConfig(collector()).tools[
+    ARTIFACT_TOOL_NAMES.presentation
+  ].description;
+  assert.match(description, /no slide carrying far more than the others/);
+  assert.match(description, /'item: amount' bullet/);
+  assert.match(description, /short\s+timeline/);
+  assert.match(description, /never pack them into one long sentence/);
+  assert.doesNotMatch(description, /compact finance and execution slide/);
+});
+
+test("the presentation tool derives break-even from fixed costs and the variable cost ratio", () => {
+  // A deck once reported break-even revenue as the total costs at the stated
+  // revenue instead of fixed costs over the contribution margin ratio.
+  const description = buildGeneratedArtifactToolConfig(collector()).tools[
+    ARTIFACT_TOOL_NAMES.presentation
+  ].description;
+  assert.match(description, /variable costs .* and fixed costs/);
+  assert.match(description, /fixed costs \/ \(1 - variable cost ratio\) rather than reusing total costs/);
+  assert.match(description, /show the cost assumptions and that formula on the break-even slide/);
+});
+
+test("document headings describe the full schedule and respect the requested time span", () => {
+  const description = buildGeneratedArtifactToolConfig(collector()).tools[ARTIFACT_TOOL_NAMES.document].description;
+  assert.match(description, /Match every heading and table caption to the full time span/);
+  assert.match(description, /first-day, first-week and first-month rows/);
+  assert.match(description, /if the user asks for only the first week, keep the rows within that week/);
+});
+
+test("document tables name change units and index bases", () => {
+  const description = buildGeneratedArtifactToolConfig(collector()).tools[ARTIFACT_TOOL_NAMES.document].description;
+  assert.match(description, /Name every numeric column's unit in its header/);
+  assert.match(description, /percent change \(%\) or a point change \(%p\)/);
+  assert.match(description, /write changes with their sign/);
+  assert.match(description, /For an index, state its base period and base value/);
+});
+
 /* -------------------------------------------------------------------------- */
-/* Refusals that never touch storage                                            */
+/* Refusals that never touch storage                                          */
 /* -------------------------------------------------------------------------- */
 
 test("a handle that names nothing on this turn is refused, and the real ones are listed", async () => {

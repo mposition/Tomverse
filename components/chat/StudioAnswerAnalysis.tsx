@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
+import { ReviewChatAction } from "./ReviewChatHandoff";
+import { ReviewAnalysisActions } from "./ReviewAnalysisActions";
 import { ArrowUpRight, Check, ChevronRight, Sparkles, X } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useModalDialog } from "@/components/useModalDialog";
@@ -10,11 +12,12 @@ import { useGuestVerification } from "./GuestVerificationProvider";
 import { ComparisonReviewWorkspace } from "./ComparisonReviewWorkspace";
 import { ReviewItemFeedback, VerifyItemButton, type GuestReviewSource } from "./ComparisonReviewDialog";
 import { SourceGroundingBadge } from "./SourceGroundingBadge";
-import { StudioAnswerAnalysisSession } from "@/lib/studioAnswerAnalysisSession";
+import { StudioAnswerAnalysisSession, StudioAnalysisKnownFailure } from "@/lib/studioAnswerAnalysisSession";
 import { studioAnswerAnalysisCopy } from "@/lib/studioAnswerAnalysisCopy";
 import { toSourceGrounding } from "@/lib/sourceGrounding";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { readReviewProgress, REVIEW_STREAM_TYPE } from "@/lib/comparisonReviewProgress";
 import type { ComparisonReview, ReviewSetup } from "../../packages/chat-core/src/review";
 import type { AiReviewAccess } from "./ComparisonActionRail";
 import "./studio-answer-analysis.css";
@@ -89,6 +92,10 @@ export function StudioAnswerAnalysis({
     trackProductEvent("comparison_review_viewed", entry?.review?.responseMap.length ?? entry?.setup?.responses?.length ?? 0);
     setOpenScope(scope);
     setIsOpen(true);
+    if (entry?.phase === "error" && entry.executionStarted && !isGuest) {
+      void session.recover(scope, loadAccount);
+      return;
+    }
     if (entry?.review || entry?.phase === "running") return;
     const guest = isGuest ? getGuestSource?.() : null;
     const load = isGuest ? async (): Promise<ReviewSetup> => {
@@ -104,7 +111,7 @@ export function StudioAnswerAnalysis({
       const setup = await response.json() as ReviewSetup;
       return { ...setup, source: { question: guest.question, responses: guest.responses } };
     } : loadAccount;
-    void session.open(scope, load, async (setup) => {
+    void session.open(scope, load, async (setup, publish) => {
       if (!(access.kind === "account" || access.kind === "guestTrial")) throw new Error("Access unavailable");
       if (!guest && (!setup.promptMessageId || !setup.assistantMessageIds)) throw new Error("No completed answers");
       const keyScope = JSON.stringify([identityKey, guest]);
@@ -112,7 +119,7 @@ export function StudioAnswerAnalysis({
       const send = (turnstileToken?: string) => fetch(guest
         ? "/api/chat/comparison-review"
         : `/api/conversations/${conversationId}/comparison-reviews`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json", Accept: REVIEW_STREAM_TYPE },
         body: JSON.stringify({
           ...(guest ? { ...guest, idempotencyKey: keys.current.get(keyScope), ...(turnstileToken ? { turnstileToken } : {}) }
             : { promptMessageId: setup.promptMessageId, assistantMessageIds: setup.assistantMessageIds }),
@@ -133,8 +140,13 @@ export function StudioAnswerAnalysis({
           keys.current.delete(keyScope);
         }
       }
-      const data = await response.json() as ComparisonReview;
-      if (!response.ok || !data.result) throw new Error("Analysis failed");
+      const data = await readReviewProgress(response, value => {
+        const primary = value as ComparisonReview;
+        if (primary?.result?.primary && Array.isArray(primary.responseMap)) {
+          publish({ ...primary, id: "", persisted: false });
+        }
+      }) as ComparisonReview;
+      if (!response.ok || !data.result) throw new StudioAnalysisKnownFailure("Analysis failed");
       trackProductEvent("comparison_review_completed", data.responseMap.length, { review_mode: "balanced", cached: data.cached });
       onCompleted?.();
       return data;
@@ -145,17 +157,20 @@ export function StudioAnswerAnalysis({
   const review = entry?.review;
   const source = entry?.setup?.source;
   const persisted = review?.persisted !== false && !isGuest;
+  const handoffSource = review && entry?.setup && conversationId ? {
+    kind: "review" as const, conversationId, setup: entry.setup, review, mode: "balanced" as const, includeSynthesis: false, reviewer,
+  } : null;
   const slots = review ? (["primary", ...(review.result.secondary ? ["secondary"] : [])] as const) : [];
   if (!active) return null;
 
   return <>
-    <div className="studio-analysis-entry" data-testid="studio-analysis-entry" data-state={review ? "done" : "new"}>
+    <div className="studio-analysis-entry" data-testid="studio-analysis-entry" data-state={entry?.phase === "error" ? "error" : review ? busy ? "partial" : "done" : "new"}>
       <button type="button" onClick={show} disabled={!ready && !review && !busy} aria-haspopup="dialog" aria-expanded={open}>
-        {review ? <Check size={17} /> : <Sparkles size={17} />}
-        <span>{review ? copy.view : entry?.phase === "checking" ? copy.checking : busy ? copy.running : copy.start}</span><ChevronRight size={16} />
+        {review && entry?.phase !== "error" ? <Check size={17} /> : <Sparkles size={17} />}
+        <span>{entry?.phase === "error" ? copy.retry : review ? copy.view : entry?.phase === "checking" ? copy.checking : busy ? copy.running : copy.start}</span><ChevronRight size={16} />
       </button>
       {busy && <div className="studio-analysis-progress" role="progressbar" aria-label={copy.running}><span /></div>}
-      <p>{review ? copy.reuse : !ready ? copy.wait : copy.ready}</p>
+      <p>{entry?.phase === "error" ? copy.failed : review ? copy.reuse : !ready ? copy.wait : copy.ready}</p>
     </div>
     {openScope === scope && createPortal(
       <div ref={dialogRef} className="studio-analysis-overlay" style={{ display: open ? undefined : "none" }}
@@ -164,7 +179,7 @@ export function StudioAnswerAnalysis({
           <header className="studio-analysis-header">
             <Image unoptimized src="/tomverse-logo.png" width={36} height={36} alt="" />
             <div><h2 id={`${id}-title`}>{copy.title}</h2><p>{copy.intro}</p></div>
-            {review && <span className="studio-analysis-saved"><Check size={13} />{persisted ? copy.saved : copy.local}</span>}
+            {review && (persisted || isGuest || busy) && <span className="studio-analysis-saved"><Check size={13} />{persisted ? copy.saved : isGuest ? copy.local : copy.running}</span>}
             <button type="button" className="studio-analysis-close" aria-label={copy.close} onClick={close}><X size={21} /></button>
           </header>
           {source && <div className="studio-analysis-question"><span>Q</span><p>{source.question}</p><small>{review?.responseMap.length ?? source.responses.length} {t("chat.aiReviewResponse")}</small></div>}
@@ -177,6 +192,7 @@ export function StudioAnswerAnalysis({
             </div><p>{review ? copy.reuse : copy.progress}</p>
           </div>
           <div className="studio-analysis-body">
+            {review && busy && <div role="status" aria-live="polite"><p>{entry?.phase === "checking" ? copy.checking : t("reviewActions.partial")}</p><div className="studio-analysis-progress" role="progressbar" aria-label={copy.running}><span /></div></div>}
             {!review && entry?.phase !== "error" && <div className="studio-analysis-loading" role="status" aria-live="polite">
               <span className="studio-analysis-mark"><Sparkles size={30} /></span>
               <h3>{entry?.phase === "checking" ? copy.checking : copy.running}</h3><p>{copy.progress}</p>
@@ -224,12 +240,15 @@ export function StudioAnswerAnalysis({
                     }} />
                     <ComparisonReviewWorkspace result={result} responseMap={review.responseMap} source={source} renderActions={(item) => <>
                       {item.section === "verificationNeeded" && <>
-                        {isGuest || !conversationId || review.webVerificationAvailable === false ? <p>{t(isGuest ? "chat.guestAiReviewVerifySignIn" : "chat.aiReviewWebUnavailable")}</p> : <>
+                        {busy || (!persisted && !isGuest) ? <p>{t("reviewActions.partialUnavailable")}</p> : isGuest || !conversationId || review.webVerificationAvailable === false ? <p>{t(isGuest ? "chat.guestAiReviewVerifySignIn" : "chat.aiReviewWebUnavailable")}</p> : <>
                           <VerifyItemButton conversationId={conversationId} item={item.text} checkLabel={t("chat.aiReviewVerifyWithWeb")} checkingLabel={t("chat.aiReviewVerifying")} failedLabel={copy.failed} showServerError={false}
                             statusLabels={{ supported: t("chat.aiReviewVerifySupported"), unsupported: t("chat.aiReviewVerifyUnsupported"), inconclusive: t("chat.aiReviewVerifyInconclusive") }} />
                           <p className="studio-analysis-fineprint">{copy.external}</p>
                         </>}
                       </>}
+                      <ReviewChatAction source={handoffSource ? { ...handoffSource, reviewer: slot as "primary" | "secondary" } : null} scope={scope}
+                        ready={!busy && ready && !isGuest} selection={{ section: item.section, ordinal: item.ordinal,
+                          itemId: review.reviewItems?.find(value => value.reviewer === slot && value.section === item.section && value.ordinal === item.ordinal)?.id }} />
                       <ReviewItemFeedback conversationId={conversationId} reviewId={review.id} guest={isGuest}
                         itemId={review.reviewItems?.find((value) => value.reviewer === slot && value.section === item.section && value.ordinal === item.ordinal)?.id} />
                     </>} />
@@ -239,7 +258,7 @@ export function StudioAnswerAnalysis({
               })}
             </>}
           </div>
-          <footer className="studio-analysis-footer"><p>{copy.disclaimer}</p><button type="button" onClick={close}>{copy.close}</button></footer>
+          <ReviewAnalysisActions source={handoffSource} ready={entry?.phase === "done" && ready && persisted} scope={scope} onClose={close} disclaimer={copy.disclaimer} />
         </div>
       </div>, document.body)}
   </>;

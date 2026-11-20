@@ -120,8 +120,8 @@ test("analysis and execution say what is actually happening, not only which stag
     "an unknown outcome claims neither");
   const lane = (state) => amuxIdeaProgress(facts({ lane: { state, attempts: 1, prNumber: null, lastOutcome: null,
     part: 1, continues: false, previousPrNumber: null } })).activity;
-  assert.deepEqual(["running", "queued", "failed", "pr_open", "merged"].map(lane),
-    ["running", "waiting", "blocked", null, null]);
+  assert.deepEqual(["running", "queued", "pr_open", "merged"].map(lane),
+    ["running", "waiting", null, null]);
 });
 
 test("each stopped state names the one notice that says what the owner can do", () => {
@@ -143,8 +143,8 @@ test("each stopped state names the one notice that says what the owner can do", 
   assert.equal(notice({ submissionOrigin: "session", state: "awaiting_owner" }), null, "its own notice and panel say it");
   const lane = (state) => { const value = { state, attempts: 1, prNumber: 7, lastOutcome: null, part: 1,
     continues: false, previousPrNumber: null }; return notice({ lane: value }, { lane: value }); };
-  assert.deepEqual(["running", "queued", "failed", "pr_closed", "pr_open", "merged"].map(lane),
-    ["lane_running", "lane_waiting", "lane_failed", "lane_pr_closed", "review", null]);
+  assert.deepEqual(["running", "queued", "pr_closed", "pr_open", "merged"].map(lane),
+    ["lane_running", "lane_waiting", "lane_pr_closed", "review", null]);
 });
 
 test("only a reason from the closed vocabulary reaches the page, never stored free text", () => {
@@ -260,7 +260,9 @@ test("a failed read is tried once more, outside a route too, except for the boun
   const source = read("lib/amux/ideaProgressRead.ts");
   const body = source.slice(source.indexOf("export async function readAmuxIdeaProgressForOwner"), source.indexOf("type SqlChunk"));
   assert.ok(body.includes("return attempt();"), "one more attempt");
-  assert.ok(body.includes('"AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED"') && body.includes('"AMUX_DB_COMMIT_CHECK_MISSING"'));
+  assert.ok(body.includes('"AMUX_DB_COMMIT_CHECK_MISSING"'));
+  // No count of ours refuses a call any more (owner direction 2026-11-18).
+  assert.equal(body.includes("CALL_CEILING"), false);
   assert.equal((body.match(/\battempt\(\)/g) ?? []).length, 2, "called twice at most");
   assert.equal(/\b(?:while|for)\s*\(/.test(body), false, "never a loop");
   assert.equal(body.includes("isAmuxDbBusyError"), false,
@@ -287,9 +289,9 @@ test("a failed read logs a reason made of codes and class names only", () => {
 
 test("the Ideas main follows the approved mockup: inbox on top, the input above the list, and opens a row's idea by its request id", () => {
   const page = read("app/(site)/(application)/admin/amux-backlog/page.tsx");
-  assert.match(page, /tab\.id === "ideas" && ideaReadBackAvailable && !hasRecentAdminAuthentication\(session\)\) \{\n    ideaProgress = "reauthenticate";/,
+  assert.match(page, /tab\.id === "ideas" && !hasRecentAdminAuthentication\(session\)\) \{\n    ideaProgress = "reauthenticate";/,
     "a stale sign-in reads nothing");
-  assert.match(page, /\} else if \(tab\.id === "ideas" && ideaReadBackAvailable\) \{/, "read only for the open Ideas tab, behind its switch");
+  assert.match(page, /\} else if \(tab\.id === "ideas"\) \{/, "read only for the open Ideas tab");
   // The opened idea is read even when older than the newest ones.
   assert.match(page, /readAmuxIdeaProgressForOwner\(session\.user\.id, openRequestId\)\.catch/);
   assert.equal(page.split("readAmuxIdeaProgressForOwner(").length - 1, 1, "a single server read feeds the inbox and the list");

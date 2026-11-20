@@ -1,11 +1,17 @@
+import type { ContinuationReceipt } from "../../../lib/continuationReceipt";
+import { createDemoWorkspace } from "./demoWorkspace";
+import { createDemoReviewHandoff } from "./demoReviewHandoff";
 import type { ChatTransport, Conversation, UserPreferences, MemoryPreferences, HistoryProject, ChatSummary } from "./chatTransport";
 
 /** Synthetic transport. Imported only by the explicitly selected development demo. */
 export function createDemoTransport(): ChatTransport {
   const key = "tomverse-native-synthetic-demo";
   let signedIn = localStorage.getItem(key + ":session") === "signed-in";
-  const read = (): Conversation[] => JSON.parse(localStorage.getItem(key) ?? "[]");
-  const write = (items: Conversation[]) => localStorage.setItem(key, JSON.stringify(items));
+  const sourceReceipts = new Map<string, ContinuationReceipt>();
+  const read = (): Conversation[] => (JSON.parse(localStorage.getItem(key) ?? "[]") as Conversation[]).map(item => ({ ...item,
+    messages: item.messages.map(message => ({ ...message, ...(sourceReceipts.has(message.id) ? { continuationReceipt: sourceReceipts.get(message.id) } : {}) })) }));
+  const write = (items: Conversation[]) => localStorage.setItem(key, JSON.stringify(items.map(item => ({ ...item,
+    messages: item.messages.map(message => { const value = { ...message }; delete value.continuationReceipt; return value; }) }))));
   const projects = (): HistoryProject[] => JSON.parse(localStorage.getItem(key + ':projects') ?? '[]');
   const passwords = new Map<string, string>(); const unlocked = new Set<string>();
   const patch = async (id: string, data: object) => { write(read().map(item => item.id === id ? { ...item, ...data } : item)); };
@@ -16,7 +22,10 @@ export function createDemoTransport(): ChatTransport {
   ];
   const preferences = (): UserPreferences => JSON.parse(localStorage.getItem(key + ":preferences") ?? JSON.stringify({ theme: "system", language: "en", defaultModel: "demo", timeZone: "UTC", imageHandoffAutoGenerate: false, reviewEasyEffectiveProviders: ["Synthetic A", "Synthetic B", "Synthetic C"], reviewEasyProviderOptions: ["Synthetic A", "Synthetic B", "Synthetic C"], reviewEasyMaxProviders: 3 }));
   const memory = (): MemoryPreferences => JSON.parse(localStorage.getItem(key + ":memory") ?? JSON.stringify({ masterEnabled: true, styleEnabled: true, defaultConversationMode: "on" }));
+  const workspaceFixture = createDemoWorkspace(key, item => write([item, ...read()]));
+  const reviewHandoff = createDemoReviewHandoff(key, read, write);
   return {
+    workspace: workspaceFixture.workspace,
     history: {
       projects: async () => projects(),
       saveProject: async (id, name) => { const rows = projects(); localStorage.setItem(key + ':projects', JSON.stringify(id ? rows.map(row => row.id === id ? { ...row, name } : row) : [...rows, { id: crypto.randomUUID(), name }])); },
@@ -29,21 +38,29 @@ export function createDemoTransport(): ChatTransport {
       password: async (id, password, currentPassword) => { if (password === null && passwords.get(id) !== currentPassword) throw { status: 403 }; if (password) passwords.set(id, password); else passwords.delete(id); unlocked.delete(id); await patch(id, { isLocked: password !== null }); },
       unlock: async (id, password) => { if (passwords.get(id) !== password) throw { status: 403 }; unlocked.add(id); }, unlocked: id => unlocked.has(id),
     },
-    mobileCapabilities: async () => ({ historyActions: true, historyFeatures: { sharing: true, downloads: true }, reviewEasy: true, maxModels: 3, assistants: true, plan: "Max" }),
+    mobileCapabilities: async () => ({ workspace: { assistantEditing: true, assistantKnowledge: true, externalImport: true }, historyActions: true, historyFeatures: { sharing: true, downloads: true }, reviewEasy: true, maxModels: 3, assistants: true, plan: "Max" }),
     preferences: async () => preferences(),
     savePreferences: async input => { localStorage.setItem(key + ":preferences", JSON.stringify({ ...preferences(), ...input })); },
     reportAnswer: async input => { const reports = [...JSON.parse(localStorage.getItem(key + ":reports") ?? "[]"), input]; localStorage.setItem(key + ":reports", JSON.stringify(reports)); return { reference: `TV-DEMO-${reports.length}` }; },
     memoryPreferences: async () => memory(),
     saveMemoryPreferences: async input => { localStorage.setItem(key + ":memory", JSON.stringify(input)); },
-    assistants: async () => [{ id: "demo-assistant", name: "Synthetic writing assistant" }],
+    assistants: async () => workspaceFixture.profiles().map(row => ({ id: row.id, name: row.name })),
     configureTools: async (id, input) => { const items = read(); const item = items.find(value => value.id === id)!; Object.assign(item, input); write(items); return item; },
     listReview: async () => read().filter(item => item.surface === "workspace" || (item.surface === "continuation" && item.productKey === "review")),
-    createReview: async models => { const item: Conversation = { id: crypto.randomUUID(), title: "New Review", selectedModels: models, selectionMode: "manual", webSearchMode: "always", surface: "workspace", messages: [] }; write([item, ...read()]); return item; },
+    createReview: async (models, assistantProfileId) => { const item: Conversation = { id: crypto.randomUUID(), title: "New Review", assistantProfileId, selectedModels: models, selectionMode: "manual", webSearchMode: "always", surface: "workspace", messages: [] }; write([item, ...read()]); return item; },
+    prepareReviewHandoff: reviewHandoff.prepare,
+    reviewHandoffDraft: reviewHandoff.draft,
     configureReview: async (id, models) => { const items = read(); const item = items.find(value => value.id === id)!; item.selectedModels = models; write(items); return item; },
-    routeReview: async input => ({ kind: "text", preset: "standard", choices: input.providers.map(provider => ({ provider, modelId: catalog.find(model => model.provider === provider)?.id ?? null })) }),
-    sendReview: async (conversation, text, files, signal, progress) => {
+    // Counted so the synthetic UI suite can prove a route was or was not asked for.
+    routeReview: async input => (localStorage.setItem("tomverse-native-synthetic-demo:review-routes", String(Number(localStorage.getItem("tomverse-native-synthetic-demo:review-routes") ?? "0") + 1)), { kind: "text", preset: "standard", choices: input.providers.map(provider => ({ provider, modelId: catalog.find(model => model.provider === provider)?.id ?? null })) }),
+    sendReview: async (conversation, text, files, signal, progress, draft) => {
       const item = read().find(value => value.id === conversation.id)!;
+      if (draft) await reviewHandoff.consume(item.id, text, draft.revision);
       item.title = text.slice(0,48); item.messages.push({ id: crypto.randomUUID(), role: "user", content: text }); write(read().map(value => value.id === item.id ? item : value));
+      if (localStorage.getItem(`${key}:review-send-unknown`) === "true") {
+        localStorage.removeItem(`${key}:review-send-unknown`);
+        throw Error("Synthetic connection loss after saving the question");
+      }
       await Promise.all(item.selectedModels.map(async modelId => {
         const answer = `## ${catalog.find(model => model.id === modelId)?.name}\n\nA synthetic perspective on “${text}”.\n\n- One saved question\n- An independent response\n- Restore this comparison after reopening the app`;
         for (let index=0;index<answer.length;index+=12) { if(signal.aborted) throw new DOMException("Stopped", "AbortError"); progress(modelId,answer.slice(0,index)); await new Promise(resolve=>setTimeout(resolve,15)); }
@@ -59,14 +76,14 @@ export function createDemoTransport(): ChatTransport {
     downloadArtifact: async () => {},
     session: async () => signedIn,
     signIn: async () => { signedIn = true; localStorage.setItem(key + ":session", "signed-in"); },
-    signOut: async () => { signedIn = false; localStorage.removeItem(key + ":session"); localStorage.removeItem(key); },
+    signOut: async () => { sourceReceipts.clear(); signedIn = false; localStorage.removeItem(key + ":session"); localStorage.removeItem(key); },
     list: async () => read().filter(item => item.surface !== "workspace" && !(item.surface === "continuation" && item.productKey === "review")),
     // A fixture continuation stores its end page as `imported` and earlier pages
     // by offset, so the older-messages button can be exercised without a server.
-    continuationSource: async (id, offset) => { const item = read().find(value => value.id === id) as (Conversation & { importedPages?: Record<string, NonNullable<Conversation["imported"]>> }) | undefined; const page = offset === undefined ? item?.imported : item?.importedPages?.[String(offset)]; if (!page) throw Error("Conversation unavailable"); return page; },
-    load: async (id) => { const item = read().find((c) => c.id === id); if (!item) throw Error("Conversation unavailable"); return item; },
-    create: async () => {
-      const item: Conversation = { id: crypto.randomUUID(), title: "New chat", selectedModels: ["demo"], selectionMode: "auto", autoSelection: { offered: true }, webSearchMode: "always", surface: "chat", messages: [] };
+    continuationSource: async (id, offset) => { const item = read().find(value => value.id === id) as (Conversation & { importedPages?: Record<string, NonNullable<Conversation["imported"]>> }) | undefined; const page = offset === undefined ? item && reviewHandoff.imported(item) : item?.importedPages?.[String(offset)]; if (!page) throw Error("Conversation unavailable"); return page; },
+    load: async (id) => { const item = read().find((c) => c.id === id); if (!item) throw Error("Conversation unavailable"); return { ...item, imported: reviewHandoff.imported(item) }; },
+    create: async (title, assistantProfileId) => {
+      const item: Conversation = { id: crypto.randomUUID(), title: title ?? "New chat", assistantProfileId, selectedModels: ["demo"], selectionMode: "auto", autoSelection: { offered: true }, webSearchMode: "always", surface: "chat", messages: [] };
       write([item, ...read()]); return item;
     },
     models: async () => catalog,
@@ -75,7 +92,7 @@ export function createDemoTransport(): ChatTransport {
       const items = read(); const item = items.find((c) => c.id === id)!;
       item.selectedModels = [modelId]; item.selectionMode = auto ? "auto" : "manual"; write(items); return item;
     },
-    send: async (conversation, text, files, signal, progress) => {
+    send: async (conversation, text, files, signal, progress, continuation) => {
       const item = read().find((c) => c.id === conversation.id)!;
       item.messages.push({ id: crypto.randomUUID(), role: "user", content: text, attachments: files.map((file) => ({ id: file.uploadId, uploadId: file.uploadId, name: file.name, mediaType: file.mediaType, size: file.size, kind: "file" })) });
       item.title = text.slice(0, 48) || files[0]?.name || item.title;
@@ -89,7 +106,19 @@ export function createDemoTransport(): ChatTransport {
         await new Promise((resolve) => setTimeout(resolve, 18));
       }
       progress(answer);
-      item.messages.push({ id: crypto.randomUUID(), role: "assistant", modelId: item.selectedModels[0], content: answer });
+      const answerId = crypto.randomUUID();
+      if (item.surface === "continuation") {
+        const selected = continuation?.sourcePassages ?? [];
+        const recent = item.imported?.messages.slice(-2) ?? [];
+        const receipt: ContinuationReceipt = { traceId: crypto.randomUUID(), assistantMessageId: answerId, attempt: 0,
+          mode: selected.length ? "selected_recent" : "automatic", status: item.imported?.status === "available" ? "dispatched" : "not_sent",
+          outcome: item.imported?.status === "available" ? "seeded" : item.imported?.status ?? "source_deleted",
+          plannerVersion: selected.length ? "ext-seed-v3-selected-recent" : "ext-seed-v2", selectedCount: selected.length,
+          recentCount: recent.length, uniqueMessageCount: new Set([...selected.map(part => part.ordinal), ...recent.map(message => message.ordinal)]).size,
+          partial: selected.length > 0, omitted: (item.imported?.offset ?? 0) > 0 };
+        sourceReceipts.set(answerId, receipt); continuation?.onReceipt?.(receipt);
+      }
+      item.messages.push({ id: answerId, role: "assistant", modelId: item.selectedModels[0], content: answer });
       write(read().map((c) => c.id === item.id ? item : c));
     },
     upload: async (file) => ({ uploadId: crypto.randomUUID(), key: "synthetic", name: file.name, mediaType: file.type, size: file.size }),

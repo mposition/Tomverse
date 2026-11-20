@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  parsePromptRefinerExecutionHeaders,
   parsePromptRefinerProductAutoPrepare,
   parsePromptRefinerProductProposal,
   promptRefinerChatDecision,
@@ -94,23 +93,6 @@ test("auto preparation accepts only the initiating scope and server decision", (
     outcome: "original_fallback",
     reason: "budget_exhausted",
   });
-});
-
-test("execution headers are paired content-free observations", () => {
-  const headers = new Headers({
-    "X-Prompt-Refiner-Execution": "applied",
-    "X-Prompt-Refiner-Mode": "auto",
-  });
-  assert.deepEqual(parsePromptRefinerExecutionHeaders(headers), {
-    execution: "applied",
-    mode: "auto",
-  });
-  headers.delete("X-Prompt-Refiner-Mode");
-  assert.equal(parsePromptRefinerExecutionHeaders(headers), null);
-  assert.equal(parsePromptRefinerExecutionHeaders(new Headers({
-    "X-Prompt-Refiner-Execution": "accepted",
-    "X-Prompt-Refiner-Mode": "explicit",
-  })), null);
 });
 
 test("a held decision disables automatic Chat recovery replay", () => {

@@ -178,7 +178,7 @@ export async function buildContinuationSourceExport(input: {
                     id: true,
                     title: true,
                     createdAt: true,
-                    password: true,
+                    password: true, passwordVersion: true,
                     kind: true,
                     productKey: true,
                     continuationBridge: {
@@ -189,7 +189,7 @@ export async function buildContinuationSourceExport(input: {
                             sourceImportedAt: true,
                             externalConversationId: true,
                             externalConversation: {
-                                select: { id: true, title: true, password: true, userId: true, finalized: true, messageCount: true },
+                                select: { id: true, title: true, password: true, passwordVersion: true, userId: true, finalized: true, messageCount: true },
                             },
                         },
                     },
@@ -203,7 +203,7 @@ export async function buildContinuationSourceExport(input: {
                     input.request,
                     input.userId,
                     conversation.id,
-                    conversation.password
+                    conversation.password == null ? null : conversation.passwordVersion
                 )
             ) {
                 return { kind: "locked" as const };
@@ -230,7 +230,7 @@ export async function buildContinuationSourceExport(input: {
                     input.request,
                     input.userId,
                     snapshot.id,
-                    snapshot.password
+                    snapshot.password == null ? null : snapshot.passwordVersion
                 )
             ) {
                 return { kind: "refusal" as const, refusal: refusal("EXPORT_SOURCE_LOCKED") };
@@ -410,13 +410,13 @@ export async function continuationSourceExportStillPermitted(
     const conversation = await tx.conversation.findFirst({
         where: { id: input.conversationId, userId: input.userId },
         select: {
-            password: true,
+            password: true, passwordVersion: true,
             continuationBridge: {
                 select: {
                     id: true,
                     externalConversationId: true,
                     externalConversation: {
-                        select: { id: true, password: true, finalized: true, userId: true },
+                        select: { id: true, password: true, passwordVersion: true, finalized: true, userId: true },
                     },
                 },
             },
@@ -443,7 +443,7 @@ export async function continuationSourceExportStillPermitted(
     ) {
         return refusal("EXPORT_SOURCE_LOCKED");
     }
-    if (!hasConversationUnlockGrant(input.request, input.userId, input.conversationId, conversation.password)) {
+    if (!hasConversationUnlockGrant(input.request, input.userId, input.conversationId, conversation.password == null ? null : conversation.passwordVersion)) {
         return refusal("EXPORT_SOURCE_LOCKED");
     }
     if (
@@ -452,7 +452,7 @@ export async function continuationSourceExportStillPermitted(
             input.request,
             input.userId,
             snapshot.id,
-            snapshot.password
+            snapshot.password == null ? null : snapshot.passwordVersion
         )
     ) {
         return refusal("EXPORT_SOURCE_LOCKED");

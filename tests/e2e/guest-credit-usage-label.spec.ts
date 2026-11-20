@@ -5,7 +5,10 @@ import { setDeterministicTheme } from "./support/chat-state-fixtures";
 test.use({ hasTouch: true, timezoneId: "Australia/Brisbane" });
 test.setTimeout(90_000);
 
-for (const appearance of ["classic", "studio"] as const) {
+// The badge lives in the mobile chat shell. An empty Chat new chat hides its
+// row until the first message (9e5777a78), and Studio's Review workspace has
+// no such badge, so the label is read on Classic Review, where it stays.
+for (const appearance of ["classic"] as const) {
   for (const theme of ["light", "dark"] as const) {
     test(`${appearance} ${theme} identifies used credits and the server reset`, async ({ page }) => {
       await page.setViewportSize({ width: 320, height: 568 });
@@ -15,7 +18,7 @@ for (const appearance of ["classic", "studio"] as const) {
         used: 7, limit: 80, remaining: 73, creditsAvailable: 73,
         aiReviewTrial: null, resetsAt: "2099-01-01T00:00:00.000Z",
       } }));
-      await page.goto("/chat?lang=ko&entry=guest-preview");
+      await page.goto("/review?lang=ko&entry=guest-preview");
       const badge = page.getByTestId("mobile-guest-usage-badge");
       await expect(badge).toHaveText("게스트 크레딧 7/80 사용", { timeout: 60_000 });
       await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
@@ -40,7 +43,7 @@ for (const resetsAt of [null, "invalid-date"]) {
     await page.setViewportSize({ width: 320, height: 568 });
     await prepareGuestPage(page, "en");
     await page.route("**/api/user/guest-usage", (route) => route.fulfill({ json: { used: 1, limit: 80, resetsAt } }));
-    await page.goto("/chat?lang=en&entry=guest-preview");
+    await page.goto("/review?lang=en&entry=guest-preview");
     const badge = page.getByTestId("mobile-guest-usage-badge");
     await expect(badge).toHaveText("Guest credits 1/80 used", { timeout: 60_000 });
     await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });

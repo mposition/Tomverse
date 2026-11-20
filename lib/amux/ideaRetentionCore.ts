@@ -4,13 +4,24 @@
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 
-export const AMUX_ANALYSIS_MAX_AGE_MS = 7 * DAY_MS;
+/** Owner direction 2026-11-15: an internal development idea is never stopped
+ * by its age. The deadline column stays (NOT NULL, immutable, set from the
+ * submission time, CHECK AmuxIdeaSubmission_analysis_deadline_check) so every
+ * reader keeps one rule, but a new idea's deadline is a hundred years out. It
+ * ends only when the analysis completes or is cancelled. */
+export const AMUX_ANALYSIS_OPEN_MAX_AGE_DAYS = 36_500;
+export const AMUX_ANALYSIS_OPEN_MAX_AGE_MS = AMUX_ANALYSIS_OPEN_MAX_AGE_DAYS * DAY_MS;
 export const AMUX_RAW_PURGE_WINDOW_MS = 24 * HOUR_MS;
-export const AMUX_UNDECIDED_DRAFT_WINDOW_MS = 30 * DAY_MS;
+/** Operator, 2026-11-16: an undecided draft is never expired by its age. The
+ * column stays (the draft unit guards set it from the first completed chunk),
+ * but the clock is the open 36,500-day horizon, so a late look finds it. */
+export const AMUX_UNDECIDED_DRAFT_WINDOW_MS = AMUX_ANALYSIS_OPEN_MAX_AGE_MS;
 export const AMUX_EXPIRED_DRAFT_PURGE_WINDOW_MS = 24 * HOUR_MS;
 export const AMUX_DECIDED_DRAFT_RETENTION_MS = 30 * DAY_MS;
 export const AMUX_BRIEF_RETENTION_MS = 90 * DAY_MS;
-export const AMUX_HOLD_MAX_MS = 90 * DAY_MS;
+/** A retention hold runs as long as the owner sets it, up to the same open
+ * horizon (operator, 2026-11-16; AmuxIdeaRetentionHold_clock_check). */
+export const AMUX_HOLD_MAX_MS = AMUX_ANALYSIS_OPEN_MAX_AGE_MS;
 export const AMUX_HOLD_NOTICE_LEAD_MS = 7 * DAY_MS;
 
 const timestamp = (value: Date): number => {
@@ -30,20 +41,25 @@ const after = (base: Date, intervalMs: number): Date => {
 
 const reached = (dbNow: Date, dueAt: Date) => timestamp(dbNow) >= timestamp(dueAt);
 
+/** The deadline a new submission stores. Every later check reads the stored
+ * value, never this function: a row keeps the deadline it was written with
+ * (an idea submitted before 2026-11-15 carries seven days). */
 export const analysisDeadlineAt = (submittedAt: Date) =>
-  after(submittedAt, AMUX_ANALYSIS_MAX_AGE_MS);
+  after(submittedAt, AMUX_ANALYSIS_OPEN_MAX_AGE_MS);
 
 type AnalysisClock = {
   submittedAt: Date;
+  /** The stored, immutable AmuxIdeaSubmission.analysisDeadlineAt. */
+  analysisDeadlineAt: Date;
   analysisCompletedAt: Date | null;
   cancelledAt: Date | null;
 };
 
-/** The policy terminates an unfinished analysis at day seven even if a
- * cleanup worker records its cancellation later. Never anchor purge to that
+/** The policy terminates an unfinished analysis at its stored deadline even if
+ * a cleanup worker records its cancellation later. Never anchor purge to that
  * late write. */
 export function effectiveAnalysisTerminationAt(input: AnalysisClock & { dbNow: Date }): Date | null {
-  const deadline = timestamp(analysisDeadlineAt(input.submittedAt));
+  const deadline = timestamp(input.analysisDeadlineAt);
   const ends = [input.analysisCompletedAt, input.cancelledAt]
     .filter((value): value is Date => value !== null)
     .map(timestamp);
@@ -74,25 +90,45 @@ export const executionBriefPurgeAt = (ownerTerminalAt: Date) =>
 
 /** Use this at dispatch and completion as well as when scheduling cleanup:
  * a delayed cleanup job must not make an expired analysis runnable again. */
-export function analysisCanContinue(input: {
-  submittedAt: Date;
-  analysisCompletedAt: Date | null;
-  cancelledAt: Date | null;
-  dbNow: Date;
-}): boolean {
+export function analysisCanContinue(input: AnalysisClock & { dbNow: Date }): boolean {
   return input.analysisCompletedAt === null && input.cancelledAt === null &&
-    !reached(input.dbNow, analysisDeadlineAt(input.submittedAt));
+    !reached(input.dbNow, input.analysisDeadlineAt);
 }
 
-/** Activity and worker restarts must not extend the absolute seven-day limit. */
-export function shouldAutoCancelAnalysis(input: {
-  submittedAt: Date;
-  analysisCompletedAt: Date | null;
-  cancelledAt: Date | null;
-  dbNow: Date;
-}): boolean {
+/** Activity and worker restarts never move the stored deadline. */
+export function shouldAutoCancelAnalysis(input: AnalysisClock & { dbNow: Date }): boolean {
   return input.analysisCompletedAt === null && input.cancelledAt === null &&
-    reached(input.dbNow, analysisDeadlineAt(input.submittedAt));
+    reached(input.dbNow, input.analysisDeadlineAt);
+}
+
+/** An analysis that can write nothing more: completed, cancelled, or past its
+ * stored deadline. */
+export const amuxAnalysisEnded = (input: Omit<AnalysisClock, "submittedAt"> & { dbNow: Date }) =>
+  input.analysisCompletedAt !== null || input.cancelledAt !== null ||
+  reached(input.dbNow, input.analysisDeadlineAt);
+
+/** The same rule as a Prisma filter on AmuxIdeaSubmission, for a purge queue. */
+export const amuxAnalysisEndedWhere = (dbNow: Date) => ({
+  OR: [{ analysisCompletedAt: { not: null } }, { cancelledAt: { not: null } },
+    { analysisDeadlineAt: { lte: dbNow } }],
+});
+
+/** How long a v19 session analysis keeps the content it wrote after intake:
+ * each page's CLI answer, its read manifests and an orphan content key of
+ * either. Ninety days (before 2026-11-15 it was seven), the longest content
+ * retention AMUX already had (AMUX_BRIEF_RETENTION_MS). The database refuses a
+ * purge before day seven; nothing here ever purges sooner than that. */
+export const AMUX_SESSION_CONTENT_OPEN_RETENTION_DAYS = 90;
+export const amuxSessionContentRetentionDays = (): number => AMUX_SESSION_CONTENT_OPEN_RETENTION_DAYS;
+export const amuxSessionContentRetentionMs = (): number => amuxSessionContentRetentionDays() * DAY_MS;
+
+/** Session content is due only once its retention has passed AND the
+ * analysis has ended. An idea analysed past its retention keeps every page's
+ * content until it ends: a later page still reads it (owner direction
+ * 2026-11-15). */
+export function amuxSessionContentPurgeDue(input: AnalysisClock & { dbNow: Date }): boolean {
+  return reached(input.dbNow, after(input.submittedAt, amuxSessionContentRetentionMs())) &&
+    amuxAnalysisEnded(input);
 }
 
 /** Check at the decision/registration transaction. An expiry job running

@@ -61,10 +61,12 @@ response.
 
 The product condition is not a third clause bolted on — **it is answered
 before the cohort is consulted**, and `lib/autoProductBoundary.ts` is the one
-place that answers it. Three surfaces ask the question (surface entry,
-`offered`, and turn routing), and if each decided separately the screen and
-the execution would be free to disagree, which is exactly the control this
-section forbids.
+place that answers it. Two surfaces ask the question (`offered` and turn
+routing), and if each decided separately the screen and the execution would be
+free to disagree, which is exactly the control this section forbids. Starting a
+Chat is not gated by it: every account may open a blank Chat, and when Auto is
+not offered the Chat simply runs with manual model selection (owner decision
+2026-11-12).
 
 The order matters for the numbers as well as for correctness. A Review
 conversation is not *outside* the cohort; it was never a subject of the cohort
@@ -85,18 +87,56 @@ either way. A turn with *no conversation at all* is a different thing:
 A server-offered blank Chat draft paints Smart Adaptive ON as its default
 **draft intent**. That display is not a claim that a conversation row or stored
 mode already exists: merely entering Chat creates no row and performs no paid
-call. Before the first Send, the client must create the owned Chat row, read
-its canonical detail, store `selectionMode: auto`, and adopt that confirmed
-row. Send waits for this sequence.
+call. On the first Send, the client requests `X-Chat-Initial-Selection-Mode: auto`
+from the Chat creation endpoint. The server's Auto availability for the account
+authorizes the mode (when it refuses, the Chat is created manual), which is stored in the same insert as the owned
+Chat and its selected models. Send waits for the returned row to confirm the
+owner, product, mode, capability and model settings. An older server can
+ignore the header; the client reads the same created row and stores Auto
+through its existing PATCH before dispatch.
 
 If a signed-in user has chosen manual on the blank draft and explicitly switches Smart
 Adaptive back on, the same server-confirmation sequence runs immediately. In
 that explicit transition only, the switch remains pending or returns to manual
-until every step succeeds. These network steps are deliberately not described
-as one database transaction. An unknown outcome stops for readback and is never
-retried blindly. Review and other product surfaces do not gain this account
-draft capability, and account routing itself still requires the stored owned
-row.
+until the mode is confirmed. An unknown creation outcome blocks another create.
+A lost legacy PATCH response allows one read-only check. Review and other
+product surfaces do not gain this account draft capability, and account
+routing itself still requires the stored owned row.
+
+On an existing signed-in Auto Chat, the location decision can accompany the
+Router once the current question is saved. This requires both Router/location
+master switches and `CHAT_EXISTING_ROUTER_LOCATION_FUSION_ENABLED`. The
+browser keeps the authored message and its held Refiner decision together
+on the request and its consent continuation. A positive decision goes through
+the device's normal permission flow. Changing accounts, models or the selected
+conversation prevents a late positive decision from sharing coordinates.
+Confirmed unsupported routes use the saved-turn location lookup once.
+
+When the LLM Router was asked and failed -- it timed out, errored or answered
+with nothing usable -- the turn is answered by the requested model (normally
+the default) if it is eligible, not by the rule's cheapest fit. The rule cannot
+see whether the message asks for a file or carries a photo, and on 2026-11-13 a
+timed-out Router left a two-photo PDF request with a model that had no file
+tools. The reason stays `fallback_order`. A turn the Router never looked at
+(no Router model, too few candidates, budget) keeps the rule's choice.
+
+The router's question (4,000 UTF-16 units) and previous answer (600) retain
+both ends when long, with an explicit omitted-middle marker and no split
+surrogate pairs. Short inputs remain unchanged. Live requests, permitted
+decision samples and replay use the same bounded representation; old samples
+retain only the text that was stored. Version `auto-llm-router-v2-bounded`
+identifies this input contract. Extra image, location and search-plan inputs
+are not retained for replay, so those combined calls are excluded from the
+tool-free optimizer sample.
+
+Temporary exclusions remain soft: fewer than two remaining models restores
+the original eligible menu. When applied, the exact offered menu bounds the
+normal LLM selection and its fallback candidates, further narrowed by file
+capability for an identified file request. The requested-model recovery on
+an actual router failure remains a separate path using hard eligibility.
+If the offered menu has no file-capable model, file intent remains explicit
+and an offered model gives the existing unavailable-file response without
+file failover. This grants no artifact tool capability.
 
 Guest Chat follows a narrower one-turn contract. Entry and the visible default
 remain rowless and free. Immediately before Send, the client obtains a fresh

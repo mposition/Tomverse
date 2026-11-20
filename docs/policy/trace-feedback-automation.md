@@ -58,9 +58,13 @@ Token이 증명하지 않는 것: 사용자 서술의 사실 여부, client가 �
 - `app/api/chat/route.ts`의 `tracedJsonError` (JSON 오류 전체)
 - 같은 route의 `ChatAccessError` exit (limit·entitlement 거절)
 - `app/api/chat/deep-research/status/route.ts`의 failed poll 응답
+- `app/api/chat/route.ts`의 stream 정산 중 서버가 실패로 판정한 두 분기: 빈 응답
+  (`isEmptyResponse`)과 stream 실패(§3.3)
 
 전달은 response header `X-Error-Report-Token`
 (`ERROR_REPORT_TOKEN_HEADER`)로, 기존 `X-Request-ID` 계약과 나란히 실린다.
+이미 200으로 시작된 stream은 header를 더 쓸 수 없으므로 stream trailer의
+`errorReport`(`lib/webSearchStreamTrailer.ts`)에 실린다.
 
 발급 조건: Node route가 **직접 생성한** `server_generated` Trace의
 서버 분류(reportable) 오류일 것. 다음에는 발급하지 않는다.
@@ -68,22 +72,46 @@ Token이 증명하지 않는 것: 사용자 서술의 사실 여부, client가 �
 - client가 보낸 `x-request-id` / `X-Client-Request-ID` / `clientTraceId`
 - `proxy.ts` 등 Edge 경로 (token 모듈은 `node:crypto` 의존 Node 전용이며
   Edge bundle에 import되지 않아야 한다)
-- 정상 HTTP 200 stream 종료 후 client가 분류한 `EMPTY_RESPONSE`
-- 정상 stream에 대한 선발급 (빈 응답 대비 목적 포함, Phase 1 금지)
+- client가 스스로 분류한 오류 코드 (client가 붙인 `EMPTY_RESPONSE`라는 이름,
+  client watchdog의 timeout). 서버가 같은 턴을 직접 실패로 판정했을 때만 §3.3이
+  서버 코드로 발급한다
+- 정상 stream에 대한 선발급 (빈 응답 대비 목적 포함). 정상 완료한 턴과
+  사용자가 중단한 턴에는 발급하지 않는다
 
-### 3.3 EMPTY_RESPONSE 정책 (Phase 1: A안)
+### 3.3 stream 안에서 끝난 실패 (운영자 결정 2026-11-16)
 
-서버 stream은 빈 응답을 감지하면 내부적으로 `AI_EMPTY_RESPONSE.*` provider
-failure를 **기록만** 하고(`recordProviderFailure`), 이미 시작된 200 stream에
-오류 frame을 보내지 않는다. 사용자-facing `EMPTY_RESPONSE`는 client 분류다.
+Phase 1(A안)은 빈 응답을 `recordProviderFailure`로 기록만 하고 token을 발급하지
+않았다. 그래서 200으로 시작된 뒤 stream 안에서 실패한 대화의 신고는 전부
+`missing_token`으로 남았고, case가 만들어지지 않아 §8·§8a의 분석과 수정 인계에
+닿지 못했다. 운영자가 이 결정을 바꿨다: **서버가 stream 정산에서 직접 실패로
+판정한 턴에는 그 자리에서 token을 발급한다.**
 
-- 빈 응답 신고는 정상 접수되고 `missing_token`/unverified로 표시된다.
-- Trace가 일치하는 provider event가 발견돼도 Feedback을 verified로
-  승격하지 않는다.
-- Admin은 "Client-classified EMPTY_RESPONSE — server token not issued"로
-  표시한다.
-- stream-start header 선발급 또는 final control frame 방식의 verified 지원은
-  Phase 2 검토 항목이다.
+- **발급 지점**: 빈 응답 분기(`AI_EMPTY_RESPONSE.*`)와 stream 실패 분기
+  (`AI_STREAM_FAILED.*`) 두 곳. 발급은 여전히 `issueChatErrorReportGrant` 한
+  곳이고, grant 내용은 `lib/chatStreamErrorReport.ts`가 서버가 관찰한 사실만으로
+  만든다(`httpStatus` 200, `phase` `stream`). Research Preview의 예산·중단 사유로
+  끝난 stream은 limit이 제 일을 한 것이므로 발급하지 않는다.
+- **전달**: stream trailer의 `errorReport { token, code }`. 빈 응답은 trailer 뒤에
+  stream이 정상 종료한다. stream 실패는 trailer를 먼저 쓰고 다음 pull에서 stream을
+  오류로 끝낸다(`controller.error()`는 대기 중인 chunk를 버리기 때문). 연결이 먼저
+  끊겨 trailer가 도착하지 못하면 신고는 지금처럼 `missing_token`이다.
+- **client**: trailer의 token을 메모리에만 두고 feedback 제출 1회에 싣는다(§3.5
+  그대로). token이 있으면 신고의 오류 코드는 서버 코드, 분류 출처는 `server`다.
+  화면에 보이는 `EMPTY_RESPONSE`는 client가 붙인 이름으로 남는다.
+- **서버 내부 오류의 표시**: provider stream이 `onError`로 알린 오류가 이 프로세스의
+  runtime 오용(`ERR_INVALID_STATE` 등 Node `ERR_INVALID_*` 계열)이면 grant의
+  오류 코드를 그 오류로 적고(`AI_EMPTY_RESPONSE.ERR_INVALID_STATE`) evidence의
+  `failureLayer`를 `application`으로 기록한다. 그 밖에는 `provider_stream`이다.
+- **Sentry**: grant가 Sentry로 넘기는 오류는 원본 객체가 아니다. provider 오류의
+  message·cause·body에는 요청과 답변 내용이 들어 있을 수 있고, stack도 message로
+  시작하므로 믿을 수 없다. 이름·코드·HTTP 상태·재시도성만 담은 오류를 새로 만들어
+  넘기고 원본 stack은 넘기지 않는다(`contentFreeError`).
+- token이 없는 빈 응답 신고(옛 서버, 서명 미설정)는 계속 정상 접수되고
+  unverified다. Admin은 "Client-classified EMPTY_RESPONSE — server token not
+  issued"로 표시한다. Trace가 일치하는 provider event가 있어도 verified로 승격하지
+  않는다.
+- 첫 token 기한 초과(`stalled` keepalive)로 서버가 끝낸 턴은 이 절의 대상이
+  아니다. 그 신고는 지금처럼 unverified다.
 
 ### 3.4 만료·서명·fail-closed
 
@@ -139,7 +167,8 @@ user agent, cookie/header 원문, provider 원시 payload, 원시 token, secret,
 
 - **기록 대상 필터** (`traceEvidenceRecordability`): 애플리케이션·provider
   실패(`AI_PROVIDER_ERROR`, `AI_REQUEST_FAILED`, `DEEP_RESEARCH_JOB_FAILED`,
-  `AI_EMPTY_RESPONSE`, 5xx)만 새 row를 만든다. limit·quota·credit·
+  `AI_EMPTY_RESPONSE`, `AI_STREAM_FAILED`, 5xx)만 새 row를 만든다. 기록 대상
+  코드는 첫 `.` 앞의 root로 맞춘다(`AI_EMPTY_RESPONSE.STOP`). limit·quota·credit·
   concurrency·guardrail 거절은 token은 받되 기존 `ChatLimitDecisionEvent`
   등을 참조한다(`existing_limit_event`). routine 4xx는 기록하지 않는다.
 - **운영 write cap**: `TRACE_EVIDENCE_MAX_WRITES_PER_MINUTE`(기본 120),
@@ -165,7 +194,7 @@ user agent, cookie/header 원문, provider 원시 payload, 원시 token, secret,
 - Token 검증 성공은 evidence row가 없어도 유지된다.
 - 검증 상태: `verified`, `missing_token`, `expired`, `invalid_signature`,
   `payload_mismatch`, `unsupported_version`, `untrusted_trace_source`.
-- 분류 출처: `server`(verified token의 code), `client`(EMPTY_RESPONSE 등),
+- 분류 출처: `server`(verified token의 code), `client`(token 없는 EMPTY_RESPONSE 등),
   `provider`, `unknown`. client 분류는 server 사실로 승격되지 않는다.
 - availability: `recorded`, `intentionally_not_recorded`,
   `existing_limit_event`, `existing_provider_event`, `not_yet_available`
@@ -192,8 +221,8 @@ user agent, cookie/header 원문, provider 원시 payload, 원시 token, secret,
 
 Phase 2는 관찰 인프라다: PR·branch·코드 수정이 없고, LLM을 호출하지 않으며,
 LLM confidence는 관찰용 컬럼(`llmConfidence`, 항상 null)일 뿐 게이트가
-아니다. client-supplied Trace와 client-classified `EMPTY_RESPONSE`는 자동
-진단 대상에서 제외된다.
+아니다. client-supplied Trace와 token 없는 client-classified `EMPTY_RESPONSE`는
+자동 진단 대상에서 제외된다.
 
 구현 요약:
 
@@ -220,7 +249,9 @@ LLM confidence는 관찰용 컬럼(`llmConfidence`, 항상 null)일 뿐 게이�
   점을 명시해 둔다.
 - **분류(결정적 규칙)**: untrusted_trace(미검증) / client_classified /
   operational_limit(기존 limit event 참조) / provider_transient(retryable
-  또는 `AI_EMPTY_RESPONSE*`·`DEEP_RESEARCH_JOB*`) / evidence_incomplete /
+  또는 `AI_EMPTY_RESPONSE*`·`DEEP_RESEARCH_JOB*`. 단 evidence의 `failureLayer`가
+  `application`·`storage`면 이 프로세스에서 난 실패이므로 여기에 넣지 않는다 —
+  운영자 결정 2026-11-16) / evidence_incomplete /
   **application_candidate**(검증 + 기록된 비일시적 서버 실패)만 사람 검토
   대기(awaiting_human_review)로 간다. candidate는 "수정 대상"이 아니라
   "사람이 볼 가치가 있음"이라는 뜻이다.
@@ -249,7 +280,7 @@ LLM confidence는 관찰용 컬럼(`llmConfidence`, 항상 null)일 뿐 게이�
   아니게 되면 멈춘다. 제출 감사는 소유자 행위로 꾸미지 않고 시스템 행위자 `trace-report-analysis`로 남기며,
   승인한 소유자를 metadata에 적는다. 모델은 지원 Triage가 쓰는 모델이고, Triage 스위치나 모델이 꺼져 있으면 분석도 돌지 않는다.
   새 신고가 case가 되려면 §8의 `FEEDBACK_AUTOFIX_SHADOW_ENABLED`가 켜져 있어야 하며, 꺼진 환경은 패널이 그렇게 표시한다.
-- **입력은 서버 기록뿐이다**: §8의 진단 요약 중 허용 목록의 필드(요약의 `errorCode`는 증거가 없으면 client 값이라 제외), fingerprint의 서버 오류
+- **입력은 서버 기록뿐이다**: §8의 진단 요약 중 허용 목록의 필드(`failureLayer` 포함. 요약의 `errorCode`는 증거가 없으면 client 값이라 제외), fingerprint의 서버 오류
   코드와 release, 같은 Trace의 provider·limit event 코드 필드. 신고자의 글과 경로, provider 메시지는 넣지
   않는다. 이 답이 branch에 쓰는 coding agent의 지시문이 되므로, 신고가 그 글을 쓸 수 없어야 한다.
 - **draft PR 조건**: 모델이 `code_fix`를 신뢰도 medium 이상으로 답하고, 서버 판정이 `operational_limit`·

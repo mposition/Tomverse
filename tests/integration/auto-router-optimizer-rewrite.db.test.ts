@@ -1,3 +1,6 @@
+import { Prisma } from "@prisma/client";
+import { verifiedOptimizerSummary } from "../fixtures/optimizerVerifiedSummary";
+const VERIFIED_SUMMARY = verifiedOptimizerSummary();
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, beforeEach, test } from "node:test";
@@ -100,6 +103,7 @@ const seedCycle = (data: {
   spentMicroUsd?: number;
   startedBy?: string;
   cases?: object[];
+  summary?: Prisma.InputJsonValue | null;
 }) =>
   prisma.autoRouterOptimizerCycle.create({
     data: {
@@ -112,6 +116,7 @@ const seedCycle = (data: {
       reservedMicroUsd: 0,
       spentMicroUsd: data.spentMicroUsd ?? 0,
       status: data.status,
+      summary: data.summary === null ? Prisma.JsonNull : data.summary ?? VERIFIED_SUMMARY,
       target: data.target,
       startedBy: data.startedBy ?? "person",
       ...(data.cases ? { cases: data.cases } : {}),
@@ -171,6 +176,22 @@ test("the database refuses a target outside the closed list", async () => {
   );
 });
 
+test("rewrite promotion shares manual/system eligibility while legacy active guidance can roll back", async () => {
+  const legacy = await seedCycle({ target: "rewrite", status: "passed", candidateGuidance: REWRITE_PROPOSAL, summary: null });
+  const unknown = await seedCycle({ target: "rewrite", status: "passed", candidateGuidance: REWRITE_PROPOSAL,
+    summary: { ...VERIFIED_SUMMARY, costCoverage: { ...VERIFIED_SUMMARY.costCoverage, complete: false, unknownCalls: 1 } } });
+  for (const who of [actor, "system" as const]) {
+    assert.deepEqual(await promoteAutoRewriteOptimizerCycle(legacy.id, who), { refused: "legacy_unverified" });
+    assert.deepEqual(await promoteAutoRewriteOptimizerCycle(unknown.id, who), { refused: "cost_unconfirmed" });
+  }
+  assert.equal((await readActiveRouterGuidance(prisma, "rewrite")).cycleId, null);
+  const valid = await seedCycle({ target: "rewrite", status: "passed", candidateGuidance: REWRITE_PROPOSAL });
+  assert.deepEqual(await promoteAutoRewriteOptimizerCycle(valid.id, actor), { ok: true });
+  await prisma.autoRouterOptimizerCycle.update({ where: { id: valid.id }, data: { summary: Prisma.JsonNull } });
+  assert.equal((await readActiveRouterGuidance(prisma, "rewrite")).cycleId, valid.id);
+  assert.deepEqual(await rollBackAutoRewriteGuidance(actor), { ok: true });
+});
+
 test("a rewrite promotion writes the rewrite guidance only, and each kind refuses the other's cycle", async () => {
   const rewrite = await seedCycle({ target: "rewrite", status: "passed", candidateGuidance: REWRITE_PROPOSAL });
   const routing = await seedCycle({ target: "routing", status: "passed", candidateGuidance: ROUTING_PROPOSAL });
@@ -195,7 +216,7 @@ test("a rewrite promotion writes the rewrite guidance only, and each kind refuse
   const rival = await seedCycle({ target: "rewrite", status: "passed", candidateGuidance: `${REWRITE_PROPOSAL}\nKeep the tone.` });
   assert.deepEqual(await promoteAutoRewriteOptimizerCycle(rival.id, actor), { refused: "stale" });
   const failed = await seedCycle({ target: "rewrite", status: "failed", candidateGuidance: REWRITE_PROPOSAL });
-  assert.deepEqual(await promoteAutoRewriteOptimizerCycle(failed.id, actor), { refused: "not_passed" });
+  assert.deepEqual(await promoteAutoRewriteOptimizerCycle(failed.id, actor), { refused: "quality_not_passed" });
 });
 
 test("an automatic rewrite promotion is the optimizer's system actor", async () => {
@@ -302,12 +323,12 @@ test("the own-process run returns only when its cycle is recorded, with how it e
     assert.equal(result.started, true);
     assert.ok(result.started);
     assert.equal(result.target, "routing");
-    assert.deepEqual(result.outcome, { recorded: true, status: "failed", failure: "too_few_cases" });
+    assert.deepEqual(result.outcome, { recorded: true, status: "failed", failure: "cost_unknown" });
     assert.equal(optimizerProcessExitCode(result), 0);
     // Returned after the row was closed, not while it was still running.
     const row = await prisma.autoRouterOptimizerCycle.findUniqueOrThrow({ where: { id: result.cycleId } });
     assert.equal(row.status, "failed");
-    assert.equal(row.failure, "too_few_cases");
+    assert.equal(row.failure, "cost_unknown");
     assert.equal(row.startedBy, "system");
     assert.equal(row.spentMicroUsd, 0);
     assert.ok(row.finishedAt);
@@ -395,8 +416,12 @@ test("only follow-ups the live router was asked to rewrite are sampled", async (
   await decision({ version: "auto-llm-router-v1+rewrite", routerContext: null }); // not a follow-up
   await decision({ version: "auto-llm-router-v1+rewrite", outcome: "error" });
   await decision({ version: "auto-llm-router-v1+rewrite", routerInput: "x".repeat(1_501) });
+  for (const marker of ["+image-intent-v3", "+search-plan-v2", "+location-v1"]) {
+    await decision({ version: `auto-llm-router-v2-bounded+rewrite${marker}` });
+  }
 
   const sampled = await loadRewriteDecisions();
   assert.deepEqual(sampled.map((item) => item.id).sort(), [kept.id, keptPromoted.id].sort());
   assert.ok(sampled.every((item) => item.routerContext === "def f(): pass" && item.pickedModelId === "strong"));
+  assert.ok(sampled.every((item) => item.inputVersion?.startsWith("auto-llm-router-v1") === true));
 });

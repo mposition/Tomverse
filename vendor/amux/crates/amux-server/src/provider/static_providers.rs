@@ -500,6 +500,55 @@ impl ProviderAdapter for CopilotAdapter {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Google Antigravity CLI
+// ---------------------------------------------------------------------------
+
+/// Google Antigravity CLI (`agy`, 1.5.4 on the server). The flags were checked
+/// against `agy --help` (2026-11-11). On the server a v22 sidecar runs the
+/// real turns in print mode; this adapter is the local lane the worker bridge
+/// registers, so its pane only has to start and sit at the prompt.
+///
+/// - `structured_events: false` — agy has `--print --output-format
+///   stream-json`, but takes the prompt as an argument there, which amux's
+///   headless protocol cannot drive (the same reasoning as CopilotAdapter).
+/// - `hooks: false`, `hot_model_switch: false` — not verified either way.
+/// - `reports_usage: false` — `agy -p /usage --output-format json` exists, but
+///   the v22 sidecar reads it; this server does not probe it.
+/// - `models()` returns the shared catalog's worker ids (none today) rather
+///   than a guessed list.
+pub struct AntigravityAdapter;
+
+#[async_trait]
+impl ProviderAdapter for AntigravityAdapter {
+    fn id(&self) -> ProviderId {
+        ProviderId::new("antigravity")
+    }
+
+    fn capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities {
+            hot_model_switch: false,
+            reports_usage: false,
+            structured_events: false,
+            hooks: false,
+        }
+    }
+
+    async fn usage(&self) -> ProviderUsage {
+        ProviderUsage::unknown(self.id())
+    }
+
+    async fn models(&self) -> Vec<String> {
+        crate::provider::model_catalog::worker_model_ids("antigravity")
+    }
+
+    fn build_command(&self, _prompt_mode: PromptMode) -> Vec<String> {
+        // The interactive TUI in both modes (see `structured_events` above).
+        // Flags belong to the launch arm in session_verbs.rs.
+        vec!["agy".into()]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -513,6 +562,8 @@ mod tests {
             &DevinAdapter,
             &OllamaAdapter::default(),
             &CursorAdapter,
+            &CopilotAdapter,
+            &AntigravityAdapter,
         ] {
             let usage = adapter.usage().await;
             assert_eq!(usage.provider, adapter.id());

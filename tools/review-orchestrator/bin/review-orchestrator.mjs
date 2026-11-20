@@ -36,7 +36,9 @@ const print = (value) => process.stdout.write(`${JSON.stringify(value, null, 2)}
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function decodeRpc(token) {
-  if (typeof token !== "string" || !/^[A-Za-z0-9_-]{1,65536}$/.test(token)) {
+  // The token rides one SSH command argument (Linux allows 131,072 bytes per argument), so
+  // this is that bound, not a policy one: a 60,000-byte scope note is about 80,000 characters.
+  if (typeof token !== "string" || !/^[A-Za-z0-9_-]{1,120000}$/.test(token)) {
     throw new UsageError("rpc_invalid");
   }
   let request;
@@ -86,7 +88,7 @@ function overview(store, config, quotas = null) {
   const load = computeLoad(jobs, Date.now());
   const queued = jobs.reduce((n, { slots }) => n + slots.filter((s) => s.status === "queued").length, 0);
   return {
-    capabilities: ["reviewer-selection-v1"],
+    capabilities: ["reviewer-selection-v1", "reviewer-avoid-vendors-v1"],
     draining: isDraining(config),
     runningReviews: Object.values(load).reduce((n, entry) => n + entry.running, 0),
     queuedReviews: queued,
@@ -101,6 +103,8 @@ function overview(store, config, quotas = null) {
       quotaUnit: quotas?.[p.id]?.unit ?? (quotas?.[p.id]?.remainingPercent === undefined ? null : "percent"),
       // Credit left after the included pool (Cursor), shown only when the probe read it.
       ...(Number.isFinite(quotas?.[p.id]?.creditUsd) ? { creditUsd: quotas[p.id].creditUsd } : {}),
+      // Codex prepaid credit, shown when the probe read it (useCredits on).
+      ...(Number.isFinite(quotas?.[p.id]?.credits) ? { credits: quotas[p.id].credits } : {}),
     })),
   };
 }
@@ -176,7 +180,7 @@ async function daemon(config) {
   const log = (line) => process.stdout.write(`${new Date().toISOString()} ${line}\n`);
   const orchestrator = new Orchestrator(config, { log });
   const recovered = orchestrator.recoverOrphans();
-  if (recovered > 0) log(`closed ${recovered} orphaned review(s) as unknown`);
+  if (recovered > 0) log(`${recovered} review(s) cut off by the last stop go back to the queue`);
   let stopping = false;
   const stop = () => {
     stopping = true;
@@ -223,8 +227,8 @@ async function daemon(config) {
     await sleep(config.pollMs);
   }
   // Reviewers run in their own process groups, so they would outlive the
-  // daemon. Kill them; the next start closes their slots as unknown.
-  log(`stopping with ${orchestrator.inflight.size} review(s) in flight; they will be closed as unknown`);
+  // daemon. Kill them; their slots go back to the queue (now, or at the next start).
+  log(`stopping with ${orchestrator.inflight.size} review(s) in flight; they will run again from the start`);
   orchestrator.killAll();
   await Promise.race([orchestrator.idle(), sleep(10_000)]);
   releaseLock();

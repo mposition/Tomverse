@@ -10,8 +10,6 @@ import { heartbeatAmuxV22TaskExecution } from "@/lib/amux/execution";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import { amuxInternalErrorResponse, amuxJsonNoStore,
   isAmuxInputError } from "@/lib/amux/internalRoute";
-import { AMUX_V22_TASK_EXECUTION_CODE_LATCH } from
-  "@/lib/amux/v22TaskExecutionCore";
 
 const requestSchema = z.object({ attempt_id: z.string().uuid(),
   worker: amuxMachineIdSchema, instance_id: z.string().uuid(),
@@ -22,11 +20,6 @@ const requestSchema = z.object({ attempt_id: z.string().uuid(),
 export async function POST(request: Request) {
   if (!isAmuxSyncAuthorized(request))
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
-  // Admission's environment switch may be closed while an existing attempt
-  // still needs a heartbeat. A code-latch-off build never admits v22 work.
-  if (!AMUX_V22_TASK_EXECUTION_CODE_LATCH)
-    return amuxJsonNoStore({ accepted: false,
-      reason: "v22_execution_disabled" }, 409);
   return withAmuxRouteBudget(async () => {
     try {
       const body = await readLimitedJson(request, 4 * 1_024, requestSchema);

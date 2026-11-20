@@ -101,6 +101,18 @@ if (group) {
   console.log(`[db-integration] Lane ${group}. Suites outside it run elsewhere.`);
 }
 
+// Local focused runs keep the same database safety checks and schema setup.
+// Only suites named by an existing run() below can be selected.
+const focusedSuites = new Set((process.env.DB_INTEGRATION_SUITES || "")
+  .split(",").map((suite) => suite.trim()).filter(Boolean));
+for (const suite of focusedSuites) {
+  if (!/^tests\/integration\/[A-Za-z0-9_-]+\.db\.test\.(?:ts|mjs)$/.test(suite)) {
+    fail("DB_INTEGRATION_SUITES must contain comma-separated integration suite paths.");
+  }
+}
+const selectedFocusedSuites = new Set();
+if (focusedSuites.size) console.log(`[db-integration] Focused suites: ${[...focusedSuites].join(", ")}.`);
+
 /**
  * Runs a step, dropping the suites that belong to another lane.
  *
@@ -114,13 +126,14 @@ if (group) {
 const run = (args, label, environmentOverrides = {}) => {
   const suites = args.filter((arg) => arg.startsWith("tests/"));
   let selected = args;
-  if (group && suites.length > 0) {
+  if ((group || focusedSuites.size) && suites.length > 0) {
     const mine = suites.filter((suite) =>
-      group === POSTGRES16_COMPAT_GROUP
+      (!focusedSuites.size || focusedSuites.has(suite)) && (!group || (group === POSTGRES16_COMPAT_GROUP
         ? POSTGRES16_COMPAT_SUITES.includes(suite)
-        : dbIntegrationGroupOf(suite) === group
+        : dbIntegrationGroupOf(suite) === group))
     );
     if (mine.length === 0) return;
+    for (const suite of mine) selectedFocusedSuites.add(suite);
     selected = args.filter((arg) => !arg.startsWith("tests/") || mine.includes(arg));
   }
   console.log(`\n[db-integration] ${label}`);
@@ -261,6 +274,9 @@ run(
     // A run the v52 review rejected twice may be retried by the owner; the
     // retry reaches the claim and its first rejection returns once more.
     "tests/integration/amuxV22ReviewRejectedTwiceRetry.db.test.mjs",
+    // A rejected v52 review's findings are one sealed content unit bound to
+    // its rejected record, read back for cards and prompts, purged once.
+    "tests/integration/amuxV52ReviewFindingsSchema.db.test.mjs",
     // A v22 result in review with no pull request may be run again by the
     // owner; the proposal and decision guards accept review -> retry -> todo.
     "tests/integration/amuxV22PrlessReviewRetry.db.test.mjs",
@@ -325,7 +341,11 @@ run(
     // AMUX one-person review proposals and decisions must be DB-enforced,
     // append-only, and bound to the task, escalation and audit chain.
     "tests/integration/amux-agent-review-approval.db.test.ts",
+    // An owner usage acceptance and a review resolution on one Task at once
+    // both finish: each takes the audit chain lock before the Task row.
+    "tests/integration/amux-review-audit-lock-order.db.test.ts",
     "tests/integration/amuxV4PrlessReviewGuard.db.test.mjs",
+    "tests/integration/amuxV22NoChangeCompletion.db.test.mjs",
     // Explicit intake registration writes one backlog card, one body-free
     // draft, one consumed approval and one audit row, and leaves execution
     // and credit counts unchanged.
@@ -418,11 +438,49 @@ run(
     // its status kept, its escalation resolved and one chained audit entry;
     // a running, changed or other-source card refuses, a held card is busy.
     "tests/integration/amux-legacy-card.db.test.ts",
+    // The owner settles any stopped v22 Task (owner decision 2026-11-12):
+    // completes it as done or closes it, with every migration trigger and the
+    // deferred constraints checked, its unknown usage accepted and one audit.
+    "tests/integration/amux-owner-settlement.db.test.ts",
+    // One v22 implement card end to end, through the product's own services
+    // on one rollback-only transaction with commit-time checks at each
+    // service's own transaction (helpers/amuxLifecycleHarness.ts): the
+    // publisher's bound pull request, GitHub as the approval observer reads
+    // it, and the card done. Each scenario is a way this stopped in production
+    // during 2026-11. It found, on its first run, that the observer's two
+    // mismatch cause keys were longer than the store admits.
+    "tests/integration/amux-card-lifecycle-e2e.db.test.ts",
+    // Owner decision 2026-11-15: a worker's platform failure spends no card
+    // attempt, the next claim prefers another worker, a worker failing again
+    // and again is quarantined until its usage reads again, and why a card
+    // waits and the box's sign-in signals are stored for Admin.
+    "tests/integration/amux-infra-failure-routing.db.test.ts",
+    // Owner decision 2026-11-14: an unchanged score's active window is
+    // extended by the system refresher, up to its baseline, never past it.
+    "tests/integration/amux-portfolio-score-refresh.db.test.ts",
     // AMUX-FILEREQ-004 (2026-11-09): the owner closes the escalation an
     // earlier attempt left open on a done or todo card, with one chained
     // audit entry; review, blocked and running cards refuse.
     "tests/integration/amux-settled-card-escalation.db.test.ts",
     "tests/integration/amux-v22-result-review.db.test.ts",
+    // The owner queue through the Decision Maker (owner decision 2026-11-13):
+    // one settlement per escalation, filed only behind its switch; retry,
+    // complete, close and remake applied as the system within their statement
+    // ceilings; a review pull request's approval only recorded; a Task that
+    // moved, or a person who answered first, cancels it.
+    "tests/integration/amux-dm-owner-settlement.db.test.ts",
+    // The Decision Maker's develop merge (owner decision 2026-11-13): an
+    // approval marked ready once, audited first, only behind its switch and
+    // beside the line; a change a revert cannot undo left to the person; the
+    // merge lane's list and the observer's read follow the approval.
+    "tests/integration/amux-dm-t2-merge.db.test.ts",
+    // The AMUX process analysis agent (owner request 2026-11-14): the figures'
+    // SQL over the real schema, and one run's claim, report and retention.
+    "tests/integration/amux-process-audit.db.test.ts",
+    // A v22 implement Task's review pull request (2026-11-11): its v4 row
+    // cannot hold the number, so the engineering binding holds it, the record
+    // is never refused, and only the bound pull request's merge completes it.
+    "tests/integration/amux-v22-review-pr-binding.db.test.ts",
     // Engineering adapter: the run is written in the AMUX writer's own
     // transaction after every AMUX lock, one fact or neither, and its
     // settlement meets delivery ack and expired recovery without a deadlock.
@@ -606,10 +664,12 @@ run(
     "tests/integration/apple-account-deletion.db.test.ts",
     "tests/integration/conversation-title.db.test.ts",
     "tests/integration/conversation-lock-migration.db.test.ts",
+    "tests/integration/conversation-password-version.db.test.ts",
     // Durable Chat recovery is a database coordination contract: duplicate
     // claims, draft/checkpoint CAS, DB-clock leases and deletion cascades can
     // all look correct in one process while failing under PostgreSQL races.
     "tests/integration/chat-durable-recovery.db.test.ts",
+    "tests/integration/review-continuation-handoff.db.test.ts",
     "tests/integration/provider-recovery.db.test.ts",
     "tests/integration/provider-failure-scope.db.test.ts",
     "tests/integration/provider-probe.db.test.ts",
@@ -885,6 +945,7 @@ run(
     // An operator's status for a cycle's code and setting recommendations:
     // stored in the summary with its audit entry, never losing a concurrent one.
     "tests/integration/auto-router-optimizer-recommendations.db.test.ts",
+    "tests/integration/smart-adaptive-daily.db.test.ts",
     // Excluding a discovered model and reviewing it again: the structured
     // decision record, a rescan that leaves the exclusion alone, and the
     // history constraints that refuse a decision without its record.
@@ -911,6 +972,10 @@ run(
     "tests/integration/retention-sweep.db.test.ts",
     "tests/integration/memory-review.db.test.ts",
     "tests/integration/memory-retrieval.db.test.ts",
+    // docs/policy/external-conversation-import-and-memory.md §9a: an external relevance score may add a relevance-gated memory and
+    // never remove a core one, and a paraphrase goes through the newer-wins
+    // rule instead of becoming a second memory.
+    "tests/integration/memory-semantic-retrieval.db.test.ts",
     "tests/integration/memory-source-deletion.db.test.ts",
     "tests/integration/external-conversation-lock.db.test.ts",
     "tests/integration/memory-expiry.db.test.ts",
@@ -924,6 +989,7 @@ run(
     // that the 90-day purge reaches only what it should.
     "tests/integration/comparison-review-run-telemetry.db.test.ts",
     "tests/integration/response-latency.db.test.ts",
+    "tests/integration/chat-router-location-preparation.db.test.ts",
     // The per-item feedback contract: the unique index really is the
     // idempotency key, a verdict is scoped to one person, and both cascades
     // are the deletion path the data-domain registry claims.
@@ -982,6 +1048,11 @@ run(
     // deletion order, and that the GIN term index is actually queryable.
     "tests/integration/assistant-knowledge-schema.db.test.ts",
     "tests/integration/assistant-knowledge-pipeline.db.test.ts",
+    // docs/policy/external-conversation-import-and-memory.md §9a: semantic knowledge retrieval behind its switches -- an off switch
+    // sends nothing, the budget is held and settled in its own bucket, the
+    // first outcome of a turn is every rebuild's outcome, and a vector never
+    // reads across accounts.
+    "tests/integration/assistant-knowledge-semantic.db.test.ts",
     "tests/integration/assistant-package-import.db.test.ts",
     "tests/integration/assistant-package-import-flag.db.test.ts",
     "tests/integration/assistant-package-export.db.test.ts",
@@ -998,6 +1069,7 @@ run(
     // deletion, and that a download ticket is spent exactly once under
     // concurrency.
     "tests/integration/account-data-export.db.test.ts",
+    "tests/integration/research-preview-persistence.db.test.ts",
     "tests/integration/account-data-export-ticket.db.test.ts",
     "tests/integration/account-anonymisation.db.test.ts",
     // docs/policy/marketing-automation.md §10.1: the event-name check admits
@@ -1040,6 +1112,16 @@ run(
     DATABASE_URL: oneShotTestUrl.toString(),
     DIRECT_DATABASE_URL: oneShotTestUrl.toString() },
 );
+// The v22 chunked result transfer (docs/policy/amux-v22-result-transfer.md):
+// upload, commit and readback routes against a seeded live attempt, sliced
+// reads of sealed bodies, and the staging sweep. Its Prisma, guard and key
+// store mocks stay in their own process.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1", "tests/integration/amuxV22TransferStaging.db.test.mjs"],
+  "Running the v22 chunked result transfer, sliced read and staging sweep scenarios",
+);
 // Native pass redemption uses real promotion/entitlement rows with mocked
 // authentication and email/provider seams. Keep those mocks in their own process.
 run(
@@ -1056,6 +1138,36 @@ run(
     "--test-concurrency=1",
     "tests/integration/code-managed-execution.db.test.mjs"],
   "Running the managed Code reservation, settlement, reconciliation, and timezone scenarios",
+);
+// The external inference API fakes only the model provider and exercises the
+// real shared credit ledger, key cap and revocation race. Own process for its
+// module mocks.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1",
+    "tests/integration/external-api.db.test.mjs"],
+  "Running the external API key, reservation, cap, idempotency and failure scenarios",
+);
+// The Tomverse CLI over the real external API handlers and shared ledger: one
+// reservation and receipt per step, session cost = its receipts, key cap and
+// revocation stops, and the built CLI process (built by the suite if absent).
+// Fakes only the model provider; own process for its module mocks.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1",
+    "tests/integration/tomverse-cli.db.test.mjs"],
+  "Running the Tomverse CLI receipt, cost, cap, revocation and process scenarios over the real gateway",
+);
+// The native protocols (Claude Code Messages, Codex Responses) fake only the
+// one upstream module and run on the same ledger, key cap and receipts.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1",
+    "tests/integration/external-api-native.db.test.mjs"],
+  "Running the native-protocol relay, refusal, cache, cancellation and cross-protocol cap scenarios",
 );
 // The budget suite mocks Prisma and the audit writer while exercising real
 // PostgreSQL constraints. Module mocks must be isolated from the batch above.
@@ -1374,6 +1486,10 @@ run(
   ],
   "Running restored question attachment persistence scenarios"
 );
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks", "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test", "--test-concurrency=1", "tests/integration/generated-artifacts-revision.db.test.ts", "tests/integration/generated-artifacts-lineage.db.test.ts"],
+  "Running exact generated artifact input-copy scenarios"
+);
 // The dynamic model catalogue: a refused enable writes nothing, accepted
 // writes carry their audit row, price revisions and snapshots are immutable.
 run(
@@ -1386,6 +1502,20 @@ run(
     "tests/integration/model-catalog.db.test.ts",
   ],
   "Running the dynamic model catalogue scenarios"
+);
+// The admin image billing measurement: off by default, its maximum held
+// against the provider budget and the unspent part returned, one run at a
+// time, and confirmed terms admitting a model the code tables could not bound.
+run(
+  [
+    "--conditions=react-server",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/image-billing-measurement.db.test.ts",
+  ],
+  "Running the image billing measurement scenarios"
 );
 // The weekly production-to-staging/dev catalogue copy: references land on this
 // environment's ids, the sync actor's audit entry, and a price revision an
@@ -1402,3 +1532,23 @@ run(
   ],
   "Running the model catalogue environment copy scenarios"
 );
+
+// Research Preview uses the real route/SDK/reservations with an offline model
+// and fake search backend; its transport mocks stay in this isolated process.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1", "tests/integration/research-preview-route.db.test.ts"],
+  "Running Research Preview route and cumulative settlement scenarios"
+);
+
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1", "tests/integration/research-preview-durable-run.db.test.ts"],
+  "Running durable Research Preview service, checkpoint and dispatch CAS scenarios"
+);
+
+if ([...focusedSuites].some((suite) => !selectedFocusedSuites.has(suite))) {
+  fail("a requested DB_INTEGRATION_SUITES path is not registered in this lane.");
+}

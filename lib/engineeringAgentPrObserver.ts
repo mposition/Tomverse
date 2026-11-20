@@ -2,13 +2,18 @@ import "server-only";
 
 import { Prisma } from "@prisma/client";
 
+import type { AmuxDmT2MergeObservedFacts } from "@/lib/amux/dmT2MergeRead";
+import { readAmuxDmT2MergeEvidence } from "@/lib/amux/dmT2MergeService";
 import { completeAmuxV22ReviewOnObservedMerge } from "@/lib/amux/reviewMergeObserved";
 import {
   EngineeringAgentGitHubReadError,
   readEngineeringAgentPullObservation,
+  type EngineeringAgentPullDigestOptions,
   type EngineeringAgentPullObservation,
 } from "@/lib/engineeringAgentGitHubRead";
-import { decideEngineeringAgentMergedPr, decideEngineeringAgentPrApproval } from "@/lib/engineeringAgentPrApprovalCore";
+import {
+  decideEngineeringAgentDmApprovedMerge, decideEngineeringAgentMergedPr, decideEngineeringAgentPrApproval,
+} from "@/lib/engineeringAgentPrApprovalCore";
 import {
   engineeringAgentBindingSnapshotSchema,
   engineeringAgentTransactionInAmux,
@@ -17,6 +22,7 @@ import {
   runEngineeringAgentTransaction,
 } from "@/lib/engineeringAgentStore";
 import { prisma } from "@/lib/prisma";
+import { pullDigestCurrent, pullDigestHolds, pullDigestVersion } from "@/lib/pullDiffDigestCore";
 
 /**
  * The approval observer (engineering-agent.md §9-10, version 5 item 1). Each
@@ -27,9 +33,14 @@ import { prisma } from "@/lib/prisma";
  *   conditions hold. Nothing else is recorded before the merge: "not yet
  *   reviewed" is read again next round, never frozen as a verdict.
  * - once it is merged, completes the AMUX card in the same transaction that
- *   records the merge -- if, and only if, the approval was recorded before the
- *   merge. A merge without that is not approved and goes to a person as a
- *   state mismatch, which halts the agent.
+ *   records the merge -- if the approval was recorded before the merge, or the
+ *   merge was an authorised approver's own into develop, of whatever head and
+ *   diff it merged (owner decisions 2026-11-12 and 2026-11-15), or -- behind
+ *   TOMVERSE_AMUX_DM_T2_MERGE -- the merge lane's own merge into develop of a
+ *   pull request the Decision Maker approved before it, at the merged head and
+ *   diff (owner decision 2026-11-13). Any other merge is not approved and goes
+ *   to a person as a state mismatch on that card's run, which holds that card
+ *   only (the card-scoped hold).
  *
  * A read that fails decides nothing; the binding is looked at again next round.
  */
@@ -43,6 +54,18 @@ const OBSERVATION_PRISMA_CALLS = 12;
 const PAGE_SIZE = 20;
 const ROUND_CEILING = 200;
 
+/**
+ * The cause-key prefixes of the two mismatches this observer opens. The store
+ * admits a prefix of at most 20 characters (CAUSE_KEY in
+ * lib/engineeringAgentStore.ts). Until 2026-11-12 these were the reason codes
+ * themselves, 22 and 23 characters long, so the store refused both: the
+ * mismatch was never opened, its transaction rolled the merge observation
+ * back, and the round ended in an error at that pull request every time
+ * (production: nothing was observed after #3702 merged on 2026-11-10).
+ */
+export const ENGINEERING_AGENT_PR_FILE_MISMATCH_CAUSE = "pr_file_mismatch";
+export const ENGINEERING_AGENT_UNAPPROVED_MERGE_CAUSE = "unapproved_merge";
+
 export type EngineeringAgentPrObserverOutcome =
   | "approved"
   | "completed"
@@ -53,11 +76,25 @@ export type EngineeringAgentPrObserverOutcome =
   | "pr_file_state_mismatch";
 
 type Ports = {
-  read: (prNumber: number) => Promise<EngineeringAgentPullObservation>;
+  /** `legacyDiff`: the binding was bound before v2, so its v1 diff digest is read too (lib/pullDiffDigestCore.ts). */
+  read: (prNumber: number, options?: EngineeringAgentPullDigestOptions) => Promise<EngineeringAgentPullObservation>;
   now: () => Date;
+  /**
+   * The Decision Maker's approval of a merged binding's pull request and the
+   * merge lane's record of that merge (owner decision 2026-11-13), or null.
+   * Evidence, not a gate: read whatever the switches say now, so a merge the
+   * lane made while they were on is judged on what happened. Absent, the
+   * second basis of approval is never consulted.
+   */
+  dmMerge?: (input: { bindingId: string; prNumber: number; headSha: string; mergeCommitSha: string }) =>
+    Promise<AmuxDmT2MergeObservedFacts | null>;
 };
 
-const livePorts: Ports = { read: (prNumber) => readEngineeringAgentPullObservation(prNumber), now: () => new Date() };
+const livePorts: Ports = {
+  read: (prNumber, options) => readEngineeringAgentPullObservation(prNumber, {}, options),
+  now: () => new Date(),
+  dmMerge: (input) => readAmuxDmT2MergeEvidence(input),
+};
 
 type Approval = { verdict: string; reviewId?: number; observedAt?: string } | null;
 
@@ -84,17 +121,28 @@ async function* watchedBindings() {
   }
 }
 
+/** One binding's outcome; `code` is the read error's own code when the round could not read it. */
+export type EngineeringAgentPrObservation = {
+  bindingId: string; outcome: EngineeringAgentPrObserverOutcome; code?: string };
+
 export async function observeEngineeringAgentPullRequests(
   ports: Ports = livePorts,
-): Promise<Array<{ bindingId: string; outcome: EngineeringAgentPrObserverOutcome }>> {
-  const results: Array<{ bindingId: string; outcome: EngineeringAgentPrObserverOutcome }> = [];
+): Promise<EngineeringAgentPrObservation[]> {
+  const results: EngineeringAgentPrObservation[] = [];
   for await (const binding of watchedBindings()) {
     let pull: EngineeringAgentPullObservation;
+    // A binding made before v2 is compared in v1, so only then is the diff read
+    // (a Decision Maker approval names its binding's own digest).
+    const boundDigest = (binding.snapshot as { diffDigest?: unknown } | null)?.diffDigest;
     try {
-      pull = await ports.read(binding.prNumber);
+      pull = await ports.read(binding.prNumber, { legacyDiff: pullDigestVersion(boundDigest) === 1 });
     } catch (error) {
       if (!(error instanceof EngineeringAgentGitHubReadError)) throw error;
-      results.push({ bindingId: binding.id, outcome: "unreadable" });
+      // The code only (never upstream text): a round that cannot read decides
+      // nothing, and until 2026-11-12 it also said nothing, so a token that
+      // lost a permission left merged pull requests unobserved for days.
+      results.push({ bindingId: binding.id, outcome: "unreadable",
+        ...(typeof error.code === "string" ? { code: error.code } : {}) });
       continue;
     }
     const approval = binding.approvalObservation as Approval;
@@ -113,7 +161,7 @@ export async function observeEngineeringAgentPullRequests(
         requiredChecks: pull.requiredChecks,
         reviews: pull.reviews,
         snapshot: { ...snapshot, recordedAt: binding.createdAt },
-        current: pull.diffDigest === null ? null : { baseSha: pull.baseSha, diffDigest: pull.diffDigest },
+        current: { baseSha: pull.baseSha, changeDigest: pull.changeDigest, diffDigest: pull.diffDigest },
       });
       if (verdict.verdict !== "approved") {
         results.push({ bindingId: binding.id, outcome: "waiting" });
@@ -138,6 +186,54 @@ export async function observeEngineeringAgentPullRequests(
       continue;
     }
 
+    const approvedBeforeMerge = approval?.verdict === "approved" && typeof approval.observedAt === "string" &&
+      new Date(approval.observedAt).getTime() <= pull.mergedAt!.getTime();
+    // The merged head is the verified commit, or its change is still the
+    // bound one. A v1 binding compares the diff, so develop merged into the
+    // branch (GitHub's "Update branch") that moved the head without changing
+    // the diff still counts (#3828, 2026-11-13); a v2 binding names the head
+    // commit itself, so a moved head is never the bound change. Anything that
+    // differs, or could not be read, is not verified.
+    const bound = engineeringAgentBindingSnapshotSchema.safeParse(binding.snapshot);
+    const sameChange = bound.success && pullDigestHolds(bound.data.diffDigest, pull);
+    const headVerified = pull.headSha === binding.verifiedHeadSha || sameChange;
+    // Owner decision 2026-11-15: an approver's develop merge approves the diff
+    // it merged, a moved head included (the CI auto-fix's develop merge on
+    // #3942 and #3944 halted the agent for nine hours). The merged head and
+    // diff ride the merge's audit entry, so what was approved is on record.
+    let merge = decideEngineeringAgentMergedPr({ merged: true, approvalRecordedBeforeMerge: approvedBeforeMerge,
+      mergedByApprover: pull.mergedByApprover === true, baseRef: pull.baseRef,
+      headVerified });
+    // The second basis (owner decision 2026-11-13): the merge lane's own merge
+    // into develop of a pull request the Decision Maker approved before it, at
+    // exactly the merged head and diff. Consulted only for a merge that would
+    // otherwise stop the agent; an unread approval, or a lane report still to
+    // come, decides nothing this round.
+    let dmSettlementId: string | null = null;
+    if (merge === "merged_without_approval" && ports.dmMerge) {
+      let facts: AmuxDmT2MergeObservedFacts | null;
+      try {
+        facts = await ports.dmMerge({ bindingId: binding.id, prNumber: binding.prNumber, headSha: pull.headSha,
+          mergeCommitSha: pull.mergeCommitSha! });
+      } catch {
+        results.push({ bindingId: binding.id, outcome: "unreadable", code: "dm_approval_unreadable" });
+        continue;
+      }
+      const dm = decideEngineeringAgentDmApprovedMerge({ baseRef: pull.baseRef, headSha: pull.headSha,
+        changeDigest: pull.changeDigest, diffDigest: pull.diffDigest, mergedAt: pull.mergedAt!,
+        mergedByKind: pull.mergedByKind,
+        approval: facts, laneMerge: facts?.laneMerge ?? null });
+      if (dm === "waiting") {
+        results.push({ bindingId: binding.id, outcome: "waiting" });
+        continue;
+      }
+      if (dm === "done") {
+        merge = "done";
+        dmSettlementId = facts!.settlementId;
+      }
+    }
+    // No review was recorded first: the approver's own merge, or the Decision Maker's approval, is the approval.
+    const approvedByMerge = merge === "done" && !approvedBeforeMerge && dmSettlementId === null;
     const mergeObservation = {
       merged: true,
       mergeCommitSha: pull.mergeCommitSha,
@@ -145,23 +241,27 @@ export async function observeEngineeringAgentPullRequests(
       mergedByKind: pull.mergedByKind,
       observedAt,
     };
-    const approvedBeforeMerge = approval?.verdict === "approved" && typeof approval.observedAt === "string" &&
-      new Date(approval.observedAt).getTime() <= pull.mergedAt!.getTime();
-    const merge = decideEngineeringAgentMergedPr({ merged: true, approvalRecordedBeforeMerge: approvedBeforeMerge });
+    const mergeRecord = { bindingId: binding.id, kind: "merge" as const, observation: mergeObservation,
+      ...(approvedByMerge ? { approvedByMerge: true as const } : {}),
+      ...(dmSettlementId !== null ? { approvedByDm: true as const } : {}),
+      // The merged change's digest in the binding's own version: what was compared.
+      mergedChange: { headSha: pull.headSha, headVerified, diffDigest: bound.success ?
+        pullDigestCurrent(bound.data.diffDigest, pull) : pull.changeDigest } };
 
     if (merge === "done") {
       const cardId = binding.run?.cardId ?? null;
       const attemptId = binding.run?.amuxAttemptId ?? null;
-      if (cardId !== null && attemptId !== null && typeof approval?.reviewId === "number") {
+      const approvalReviewId = approvedByMerge || dmSettlementId !== null ? null :
+        typeof approval?.reviewId === "number" ? approval.reviewId : undefined;
+      if (cardId !== null && attemptId !== null && approvalReviewId !== undefined) {
         const completed = await completeAmuxV22ReviewOnObservedMerge(
           { taskId: cardId, attemptId, prNumber: binding.prNumber, mergeCommitSha: pull.mergeCommitSha!,
-            approvalReviewId: approval.reviewId, changedFiles: pull.changedFiles ?? null },
+            approvalReviewId, changedFiles: pull.changedFiles ?? null, bindingId: binding.id,
+            ...(dmSettlementId !== null ? { dmSettlementId } : {}) },
           {
             prismaCalls: OBSERVATION_PRISMA_CALLS,
             work: async (lent) => {
-              await recordEngineeringAgentBindingObservation(engineeringAgentTransactionInAmux(lent), {
-                bindingId: binding.id, kind: "merge", observation: mergeObservation,
-              });
+              await recordEngineeringAgentBindingObservation(engineeringAgentTransactionInAmux(lent), mergeRecord);
             },
           },
         );
@@ -171,12 +271,10 @@ export async function observeEngineeringAgentPullRequests(
         }
         if (completed.reason === "pr_file_state_mismatch") {
           await runEngineeringAgentTransaction(prisma, async (tx) => {
-            await recordEngineeringAgentBindingObservation(tx, {
-              bindingId: binding.id, kind: "merge", observation: mergeObservation,
-            });
+            await recordEngineeringAgentBindingObservation(tx, mergeRecord);
             await openEngineeringAgentWorkItem(tx, {
               kind: "state_mismatch",
-              causeKey: `pr_file_state_mismatch:${binding.id}`,
+              causeKey: `${ENGINEERING_AGENT_PR_FILE_MISMATCH_CAUSE}:${binding.id}`,
               runId: binding.runId,
               reason: "pr_file_state_mismatch",
             });
@@ -188,7 +286,7 @@ export async function observeEngineeringAgentPullRequests(
       // Not a v22 implement card (or it has moved on): its review stays the
       // Admin console's; the merge is still recorded.
       await runEngineeringAgentTransaction(prisma, (tx) =>
-        recordEngineeringAgentBindingObservation(tx, { bindingId: binding.id, kind: "merge", observation: mergeObservation }),
+        recordEngineeringAgentBindingObservation(tx, mergeRecord),
       );
       results.push({ bindingId: binding.id, outcome: "merge_recorded" });
       continue;
@@ -203,10 +301,10 @@ export async function observeEngineeringAgentPullRequests(
           reviewer: null,
         });
       }
-      await recordEngineeringAgentBindingObservation(tx, { bindingId: binding.id, kind: "merge", observation: mergeObservation });
+      await recordEngineeringAgentBindingObservation(tx, mergeRecord);
       await openEngineeringAgentWorkItem(tx, {
         kind: "state_mismatch",
-        causeKey: `merged_without_approval:${binding.id}`,
+        causeKey: `${ENGINEERING_AGENT_UNAPPROVED_MERGE_CAUSE}:${binding.id}`,
         runId: binding.runId,
         reason: "merged_without_approval",
       });

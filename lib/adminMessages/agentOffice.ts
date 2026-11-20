@@ -1,4 +1,5 @@
 import { defineAdminMessages } from "@/lib/adminLocale";
+import { adminAutoRouterOptimizerMessages } from "@/lib/adminMessages/autoRouterOptimizer";
 
 /**
  * Copy for the Agent office (/admin/office): the pixel office shell for the
@@ -649,6 +650,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         badges: {
           running: "Running",
           passed: "Passed",
+          rejected: "Kept current",
           failed: "Failed",
           error: "Error",
           none: "No cycle yet",
@@ -660,8 +662,12 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         none: "No optimizer cycle recorded yet",
         running: (target: string, time: string) => `Latest ${target} cycle running since ${time}`,
         passed: (target: string, time: string) => `Latest ${target} cycle passed · ${time}`,
-        failed: (target: string, time: string, code: string) => `Latest ${target} cycle failed · ${time} · ${code}`,
-        error: (target: string, time: string, code: string) => `Latest ${target} cycle errored · ${time} · ${code}`,
+        rejected: (target: string, time: string) =>
+          `Latest ${target} proposal did not clear the bar, so the current guidance stays · ${time}`,
+        failed: (target: string, time: string) => `Latest ${target} cycle failed · ${time}`,
+        error: (target: string, time: string) => `Latest ${target} cycle errored · ${time}`,
+        reasons: adminAutoRouterOptimizerMessages.en.reasons,
+        whereToLook: "reason and comparisons on Admin › Routing › Optimizer",
         capReached: (cap: "day" | "month"): string => (cap === "day" ? "daily spend cap reached" : "monthly spend cap reached"),
         spend: (spent: string, cap: string, period: "day" | "month") =>
           `${spent} / ${cap} ${period === "day" ? "today" : "this month"}`,
@@ -1551,6 +1557,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         badges: {
           running: "실행 중",
           passed: "합격",
+          rejected: "기존 유지",
           failed: "실패",
           error: "오류",
           none: "cycle 없음",
@@ -1562,8 +1569,11 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         none: "아직 optimizer cycle 기록 없음",
         running: (target: string, time: string) => `${target} cycle ${time}부터 실행 중`,
         passed: (target: string, time: string) => `직전 ${target} cycle 합격 · ${time}`,
-        failed: (target: string, time: string, code: string) => `직전 ${target} cycle 실패 · ${time} · ${code}`,
-        error: (target: string, time: string, code: string) => `직전 ${target} cycle 오류 · ${time} · ${code}`,
+        rejected: (target: string, time: string) => `직전 ${target} 개선안이 기준을 넘지 못해 기존 지침 유지 · ${time}`,
+        failed: (target: string, time: string) => `직전 ${target} cycle 실패 · ${time}`,
+        error: (target: string, time: string) => `직전 ${target} cycle 오류 · ${time}`,
+        reasons: adminAutoRouterOptimizerMessages.ko.reasons,
+        whereToLook: "사유와 비교 결과는 Admin › 라우팅 › 최적화 탭",
         capReached: (cap: "day" | "month"): string => (cap === "day" ? "일 지출 상한 도달" : "월 지출 상한 도달"),
         spend: (spent: string, cap: string, period: "day" | "month") =>
           `${period === "day" ? "오늘" : "이번 달"} ${spent} / ${cap}`,

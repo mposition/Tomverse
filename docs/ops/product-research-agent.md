@@ -309,7 +309,7 @@ walker는 page origin과 `PRODUCT_RESEARCH_SCOUT_INGEST_URL`의 origin이 같을
 
 1. **[브라우저 — 쓰기]** 그 환경의 사이트에서 관리자가 아닌 새 계정을 일반 가입 절차로 만들고, 필요한 만큼 크레딧을 넣습니다. 이미지까지 보려면 Pro 또는 Max여야 합니다.
 2. **[Railway 대시보드 — Tomverse 프로젝트, 그 환경의 앱]** `PRODUCT_RESEARCH_SCOUT_TEST_ACCOUNT_EMAIL`에 그 주소를 넣습니다. 이 단계부터 로그인 화면을 봅니다.
-3. **[Admin › 제품 리서치 › 실행과 비용]** 실제 생성 하루 횟수를 정합니다(0이면 생성 없음, 한 번 실행에 5). 모델 호출 상한은 약 39회로 올립니다.
+3. **[Admin › 제품 리서치 › 실행과 비용]** 실제 생성 하루 횟수를 정합니다(0이면 생성 없음, 한 번 실행에 5. 아래 "첨부 요청·모델이 정한 요청"을 켜면 그만큼 더). 모델 호출 상한은 약 39회로 올립니다.
 4. **[Railway 대시보드 — Agents 프로젝트, Scout 서비스]** Run now 후 실행 줄의 `signedInPages`와 `generated`를 읽습니다.
 
 끄기: 2의 변수를 지우면 다음 실행부터 로그인하지 않습니다. 이미 받은 session은 발급 후 1시간에 끝납니다.
@@ -341,7 +341,7 @@ walker는 page origin과 `PRODUCT_RESEARCH_SCOUT_INGEST_URL`의 origin이 같을
    | Source | GitHub `mposition/Tomverse`, branch `develop`(dev) 또는 `main`(production), Root directory 비움 |
    | Build → Builder | **Dockerfile**, 경로 `docker/product-research-scout.Dockerfile`(앞에 `/` 없이) |
    | Deploy → Start command | `npm run agent:product-research-scout` |
-   | Deploy → Cron schedule | `0 18 * * *` |
+   | Deploy → Cron schedule | `0 * * * *` (매시; 18:00 UTC만 전체 실행, 나머지는 배포 점검) |
    | Deploy → Restart policy | **Never** |
    | Region | `asia-southeast1-eqsg3a`, replica 1 |
    | Networking | 공개 domain을 만들지 않음 |
@@ -354,3 +354,55 @@ walker는 page origin과 `PRODUCT_RESEARCH_SCOUT_INGEST_URL`의 origin이 같을
 
 실행 결과는 walker 로그의 마지막 줄 `product_research_scout_run`(보낸 수, 저장한 제안 수, `model_off`·상한 도달·거절·실패
 수)과 Admin의 오늘 사용량에서 봅니다. 한 실행은 45분에 강제로 끝나고, 결과를 모르는 전송은 다시 보내지 않습니다.
+
+## Scout 이슈 정리 켜기 (정책 §10)
+
+기본 꺼짐입니다. 켜면 walker의 마지막 단계가 `/api/internal/product-research/scout/issues`를 부르고, 앱이 최신 관측 행의
+열린 이슈마다 "닫기 / 진행 / 대기" 제안을 하나씩 만듭니다(Admin › 제품 리서치 › 개선 제안, 대상 "이슈 #번호").
+
+1. **[Railway 대시보드 — Tomverse 프로젝트, 그 환경의 앱]** `PRODUCT_RESEARCH_SCOUT_ISSUE_TRIAGE_ENABLED`에 아무 값을 넣습니다.
+   walker 변수는 바꾸지 않습니다. 없으면 route는 404이고 walker는 이 단계를 조용히 건너뜁니다.
+2. 비용은 하루 모델 호출 1회(텍스트만, 출력 상한 6,000 token)이고 Admin의 같은 하루 호출 상한에서 차감됩니다. 상한이
+   이미 빠듯하면 1을 올립니다(owner).
+
+같은 이슈에 열린 제안이 있거나 14일 안에 제안이 있었으면 다시 묻지 않고, 물을 이슈가 없거나 48시간 안의 성공 관측이
+없으면 호출하지 않습니다. 끄려면 변수를 지웁니다.
+
+## Scout 첨부 요청·모델이 정한 요청 켜기 (정책 §14)
+
+모두 기본 꺼짐이고, 테스트 계정(위 "Scout 테스트 계정 켜기")이 켜져 있어야 의미가 있습니다. 테스트 계정 크레딧과 모델 호출을
+쓰므로 owner가 켭니다. walker 변수는 바꾸지 않습니다.
+
+- **첨부 요청**(`generated.attachment-pdf`): walker가 그린 예시 이미지 두 장(막대 차트 PNG, 카페 영수증 JPEG)을 새 대화
+  초안에 첨부하고 "두 이미지를 하나의 PDF로" 요청합니다. 하루 생성 1회와 판정 호출 1회가 더 듭니다.
+- **같은 대화에서 첨부 두 번**(`generated.attachment-follow-up`): 같은 요청을 보낸 뒤 같은 대화에 새 이미지 두 장을 붙여 다시
+  요청합니다(유료 턴 2번). 하루 생성 1회와 판정 호출 1회가 더 듭니다.
+- **모델이 정한 요청**(`generated.explore`): 앱이 Scout 모델에게 실제 사용자가 할 법한 요청 하나를 받아(텍스트 호출 1회, 출력
+  상한 1,000 token) walker가 그대로 보냅니다. 첨부가 필요하면 위 두 이미지와 예시 CSV 중에서 고릅니다. 하루 생성 1회와 모델 호출 2회
+  (요청 작성, 판정)가 더 듭니다.
+
+1. **[Railway 대시보드 — Tomverse 프로젝트, 그 환경의 앱]** 첨부 요청은 `PRODUCT_RESEARCH_SCOUT_ATTACHMENT_TASK_ENABLED`,
+   같은 대화에서 첨부 두 번은 `PRODUCT_RESEARCH_SCOUT_ATTACHMENT_FOLLOW_UP_TASK_ENABLED`,
+   모델이 정한 요청은 `PRODUCT_RESEARCH_SCOUT_EXPLORE_TASK_ENABLED`에 아무 값을 넣고 Deploy합니다.
+2. **[Admin › 제품 리서치 › 실행과 비용]** 생성 허가는 고정 5종 다음 순서로 나가므로 실제 생성 하루 횟수를 켠 수만큼 올립니다(셋 다면 8).
+   올리지 않으면 스위치가 켜져 있어도 허가가 없어 생성하지 않습니다. 모델 호출 상한도 켠 만큼(첨부 요청 1, 첨부 두 번 1, 모델이 정한 요청 2) 올립니다.
+3. 다음 실행의 `product_research_scout_run`에서 `generated`가 늘었는지 보고, Admin › 개선 제안에서 대상
+   "실제 생성 · 첨부 이미지를 PDF로", "실제 생성 · 같은 대화에서 첨부 이미지 PDF 두 번", "실제 생성 · 모델이 정한 요청"을 봅니다.
+
+끄려면 1의 변수를 지웁니다. 다음 실행부터 그 허가를 내주지 않습니다.
+
+## 가져온 대화의 최종 결정·예외 평가
+
+배포 및 운영 활성화 후 기존 Product Research Scout가 매일 18:00 UTC(브리즈번 04:00)에 8개 제품 언어를 한 번씩 평가합니다. 앱 서비스의 `PRODUCT_RESEARCH_SCOUT_MEMORY_ENABLED=1`과 기존 Scout 스위치·인증·선택 모델·호출 여유분이 모두 필요합니다. 새 cron, 사용자 계정이나 별도 API 키는 필요하지 않습니다. 기본은 꺼짐입니다.
+
+Admin → Product research → 개선 제안에서 언어별 브리즈번 측정 시각·모델·시나리오·결과를 확인하고 가져온 대화 권장안만 필터링합니다. 누락은 원문 발췌에 최종 결정이 없었다는 뜻입니다. 미측정은 성공이 아닙니다. 제안의 실제/기대 결과를 비교한 뒤 기존 권한으로 해제·완료·AMUX 전송을 선택합니다. 미반영 시 제안 상태로 남습니다.
+
+Scout 전체 호출 상한을 공유합니다. 이 단계는 최대 8회 측정 + 1회 종합을 쓸 수 있으므로 다른 리서치 항목까지 처리할 호출 여유를 확인하세요. 상한은 자동 변경되지 않습니다. 언어 순서를 매일 순환하며 한도에 이르면 멈춥니다. 같은 UTC 날짜의 불명확·실패 호출은 재시도하지 않고 다음 날 새로 측정합니다. 중단하려면 메모리 전용 스위치를 끕니다.
+
+### 8개 언어의 근거 검색 방식 비교
+
+Admin → Product research → 개선 제안에서 **기록된 비교 실험**은 합성 사례 32개로 얻은 실제 답변 96개를 보여줍니다. **일일 Scout · 최근 7일**은 선택 모델·언어·원문이 같은 세 응답이 모두 완료된 날만 비교합니다. 언어별 완료 사례 수와 개별 응답 수로 부분 실행을 구별할 수 있습니다. 선택 모델의 최근 측정이 없으면 마지막으로 측정한 모델명을 표시합니다.
+
+배포 후 앱에 기존 Scout·메모리 스위치와 `PRODUCT_RESEARCH_SCOUT_MEMORY_COMPARISON_ENABLED=1`을 설정하면 기존 일일 워커가 언어별 한 사례를 측정합니다. 네 시나리오는 4일에 걸쳐 순환합니다. 앱은 `PRODUCT_RESEARCH_SCOUT_COHERE_API_KEY` 또는 웹서비스의 `COHERE_API_KEY`를 사용해 고정된 Cohere Rerank API에 합성 원문과 질의만 보냅니다. 워커에는 이 키가 필요하지 않습니다. 기본은 꺼짐입니다.
+
+8개 언어의 전체 비교는 기존 Scout 공유 한도에서 하루 최대 32회(답변 24회, 검색 8회)를 추가로 사용합니다. 최근 7일의 측정치를 보관하며, 같은 UTC 날짜·언어·방식의 중복 예약을 거절합니다. 사용량이 모자라면 부분 완료로 남습니다. Admin의 비용은 완료된 요청의 공급자 사용량에 단가를 적용한 평균 추정 USD입니다. Rerank 5 Fast는 청구 입력 토큰 100만 개당 US$0.02이며, 답변에는 앱의 모델별 단가를 적용합니다. 사용량이나 검증된 단가가 없으면 대시를 표시합니다. 별도의 사용자 크레딧 차감은 없습니다.

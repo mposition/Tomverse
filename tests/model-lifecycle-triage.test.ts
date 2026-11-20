@@ -1129,3 +1129,35 @@ test("a wave with no base model queued leaves the derivative on its own merits",
     flashAlone.pointsKo.join(" | ")
   );
 });
+
+// Production 2026-11-11: 26 adopted, live models sat at validation_pending and
+// read "later version 'grok-4.7' is served" about grok-4.7 itself.
+test("an adopted model that is already served reads as a rollout to close, not as superseded", () => {
+  const assessment = assessModelLifecycleItem({
+    action: "add",
+    apiModel: "grok-4.7",
+    providers: ["xai"],
+    availability: "current",
+    lifecycle: null,
+    servedByTomverse: true,
+    supersededBy: null,
+    rolloutFinishable: true,
+  });
+  assert.equal(assessment.priority, "review");
+  assert.notEqual(assessment.kind, "superseded_version");
+  assert.match(assessment.verdictKo, /이미 서비스/);
+  assert.match(assessment.nextStepKo, /롤아웃 완료/);
+  // A retirement keeps its own reading even if the flag were set.
+  assert.equal(
+    assessModelLifecycleItem({
+      action: "retire",
+      apiModel: "grok-4.7",
+      providers: ["xai"],
+      availability: "stale",
+      lifecycle: null,
+      servedByTomverse: true,
+      rolloutFinishable: true,
+    }).kind,
+    "retirement"
+  );
+});

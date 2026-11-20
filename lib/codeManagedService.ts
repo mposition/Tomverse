@@ -12,7 +12,7 @@ import { lockCreditAccount, offsetCreditDebt } from "@/lib/creditDebt";
 import { AddOnCreditError, reserveAddOnCredits, settleAddOnCredits, type AddOnCreditReservationEntry } from "@/lib/creditLedger";
 import { getChatCreditAllocation } from "@/lib/chatCreditAllocation";
 import { getUserDayWindow } from "@/lib/userDailyUsage";
-import { assertUserOperationalAccess, getChatCostGuardrails, getUserChatUsageKey, holdChatUsageBucket, readUsageBucketCount, usagePeriodStart } from "@/lib/chatSecurity";
+import { assertUserOperationalAccess, dailyPlanCreditBucketLimit, getChatCostGuardrails, getUserChatUsageKey, holdChatUsageBucket, readUsageBucketCount, usagePeriodStart } from "@/lib/chatSecurity";
 import { getBillingPlanByTier, getBillingPlansWithFieldSources, planIdForTier } from "@/lib/billingConfig";
 import { effectivePlanForAccess, STORE_ENTITLEMENT_SELECT } from "@/lib/foundingTesterPassCore";
 import { getProviderCostBudget } from "@/lib/providerCostBudget";
@@ -20,7 +20,7 @@ import { providerBucketKey } from "@/lib/chatProviderHolds";
 import { COST_PER_CREDIT_CEILING_MICRO_USD } from "@/lib/chatCostGuardrails";
 import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
 import { loadCodingCatalog, servableCodingRows } from "@/lib/modelCatalog";
-import { canonicalJson, codingProfileSchema, type CodingCatalogRow } from "@/lib/modelCatalogCore";
+import { CODE_MANAGED_UNBOUNDED_PROVIDERS, canonicalJson, codingCatalogRowSchema, type CodingCatalogRow } from "@/lib/modelCatalogCore";
 import { isAiProvider } from "@/lib/modelRegistryShared";
 import { isMissingDatabaseSchemaError } from "@/lib/databaseError";
 import { getModelPricingProfile, resolveModelPricing } from "@/lib/modelPricing";
@@ -153,14 +153,16 @@ async function modelPair(userId: string, request: Pick<ReserveRequest, "catalogV
         }).modelId === id) as Record<string, unknown> | undefined;
         if (!raw)
             return fail(403, "CODE_MODEL_UNAVAILABLE");
-        const profile = { ...raw };
-        delete profile.modelId;
-        const parsed = codingProfileSchema.safeParse(profile);
+        // A row published before chat links existed has no source or channels
+        // and reads as a dedicated row offered to Code, as the resolved one does.
+        const parsed = codingCatalogRowSchema.safeParse(raw);
         if (!parsed.success)
             return fail(503, "CODE_CATALOG_INVALID");
-        const row = { modelId: id, ...parsed.data } as CodingCatalogRow;
+        const row: CodingCatalogRow = parsed.data;
         const current = available.find(r => r.modelId === id);
-        if (!current || canonicalJson(current) !== canonicalJson(row) || row.capabilities.structuredOutput === "none")
+        // Inherited chat values are resolved in, so a chat price or limit that
+        // moved since the snapshot fails here until it is published again.
+        if (!current || canonicalJson(current) !== canonicalJson(row) || row.capabilities.structuredOutput === "none" || !row.channels.includes("code"))
             return fail(403, "CODE_MODEL_UNAVAILABLE");
         const rank = { Free: 0, Pro: 1, Max: 2 };
         if (rank[plan] < rank[row.minimumPlan])
@@ -169,7 +171,7 @@ async function modelPair(userId: string, request: Pick<ReserveRequest, "catalogV
             return fail(403, "CODE_PROVIDER_UNSUPPORTED");
         // Inference hosts/aggregators need their own destination pin, while
         // Perplexity's native search fees are not represented by token-only rows.
-        if (["openrouter", "deepinfra", "together", "sail", "perplexity"].includes(row.provider))
+        if (CODE_MANAGED_UNBOUNDED_PROVIDERS.includes(row.provider))
             return fail(403, "CODE_PROVIDER_COST_UNBOUNDED");
         // The coding catalogue is independent of Chat's static model registry.
         // Endpoints and credential aliases still come solely from getActiveAiModel.
@@ -247,8 +249,8 @@ async function reserve(userId: string, request: ReserveRequest) {
             return fail(402, "CREDIT_BALANCE_INSUFFICIENT");
         if (allocation.dailyPlanGuardrailBlocked)
             return fail(429, "PLAN_DAILY_CREDIT_LIMIT_REACHED");
-        if (limits.dailyMessageLimit > 0)
-            await hold(tx, subject, "day", day.start, limits.dailyMessageLimit, allocation.planReservedCredits, "PLAN_DAILY_CREDIT_LIMIT_REACHED");
+        // Held even without a daily limit: the day bucket is also the "used today" counter.
+        await hold(tx, subject, "day", day.start, dailyPlanCreditBucketLimit(limits.dailyMessageLimit), allocation.planReservedCredits, "PLAN_DAILY_CREDIT_LIMIT_REACHED");
         await hold(tx, subject, "month", month, limits.monthlyMessageLimit, allocation.planReservedCredits, "CREDIT_BALANCE_INSUFFICIENT");
         const cost = request.approvedCredits * COST_PER_CREDIT_CEILING_MICRO_USD;
         const share = allocation.planReservedCredits / request.approvedCredits, planCost = Math.ceil(cost * share);
@@ -261,7 +263,7 @@ async function reserve(userId: string, request: ReserveRequest) {
         const entries = await reserveAddOnCredits(tx, { userId, reservationId: id, credits: allocation.addOnCreditsRequired, fundedCostMicroUsd: cost - planCost, now });
         const publicPair = { executor: pair.executor.row, reviewer: pair.reviewer.row };
         await tx.$executeRaw `INSERT INTO "CodeTaskReservation" ("id","userId","subjectKey","clientTaskId","requestDigest","catalogVersion","contentHash","modelPair","reservedCredits","planHeldCredits","planDayHeld","addOnEntries","reservedCostMicroUsd","heldCostMicroUsd","planHeldCostMicroUsd","planFundingShare","dayStart","monthStart","leaseExpiresAt")
-      VALUES (${id},${userId},${subject},${request.taskId},${hash},${request.catalogVersion},${request.contentHash},${JSON.stringify(publicPair)}::jsonb,${request.approvedCredits},${allocation.planReservedCredits},${limits.dailyMessageLimit > 0},${JSON.stringify(entries)}::jsonb,${BigInt(cost)},${BigInt(cost)},${BigInt(planCost)},${share},${day.start},${month},${new Date(now.getTime() + CODE_TASK_TTL_MS)})`;
+      VALUES (${id},${userId},${subject},${request.taskId},${hash},${request.catalogVersion},${request.contentHash},${JSON.stringify(publicPair)}::jsonb,${request.approvedCredits},${allocation.planReservedCredits},${true},${JSON.stringify(entries)}::jsonb,${BigInt(cost)},${BigInt(cost)},${BigInt(planCost)},${share},${day.start},${month},${new Date(now.getTime() + CODE_TASK_TTL_MS)})`;
         return receipt((await tasks(tx, id, userId))[0], []);
     });
 }
@@ -312,7 +314,7 @@ async function refundUnused(tx: Tx, task: Task, records: Call[]) {
         return fail(503, "CODE_ACCOUNTING_UNAVAILABLE");
     const now = new Date(), currentDay = await getUserDayWindow(tx, task.userId!, now);
     for (const [period, start, currentStart] of [["day", task.dayStart, currentDay.start], ["month", task.monthStart, usagePeriodStart("month", now)]] as const) {
-        // A plan with no daily credit ceiling did not create a daily credit hold.
+        // Tasks reserved before every plan held the day bucket did not create a daily credit hold.
         if (period !== "day" || task.planDayHeld)
             await decrement(tx, task.subjectKey, period, start, planRefund, currentStart);
         await decrement(tx, task.subjectKey, `cost-${period}`, start, numeric(task.planHeldCostMicroUsd) - planCostKeep, currentStart);

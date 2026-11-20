@@ -1,0 +1,1731 @@
+{
+  "version": "continuation-decisions-v1",
+  "day": "2026-11-12",
+  "requestedModel": "gemma-4-E4B-it-Q4_K_M",
+  "startedAt": "2026-11-12T11:21:58.514Z",
+  "sampling": {
+    "temperature": 0,
+    "max_tokens": 256
+  },
+  "results": [
+    {
+      "locale": "en",
+      "mode": "recent",
+      "visible": true,
+      "usedTurns": 2,
+      "promptDigest": "66d40892df4e40d934bdbea93abc3b8cf1a653e7e01da1fdd1fbdbd5c5198763",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 136,
+        "prompt_tokens": 537,
+        "total_tokens": 673,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "latencyMs": 6975,
+      "expected": {
+        "A": "R-1d10cd",
+        "B": "R-8966be",
+        "C": "R-1d10cd",
+        "D": "R-1d10cd"
+      },
+      "original": {
+        "A": "R-1d10cd",
+        "B": "R-8966be",
+        "C": "R-1d10cd",
+        "D": "R-1d10cd"
+      },
+      "raw": "```json\n{\n  \"A\": \"R-1d10cd\",\n  \"B\": \"R-8966be\",\n  \"C\": \"R-1d10cd\",\n  \"D\": \"UNKNOWN\",\n  \"reason\": \"The final decision specifies R-1d10cd as the general rule, R-8966be for G-1afc members before noon, and the normal rule (which defaults to R-1d10cd if not specified otherwise) at or after noon, with no rule provided for G-227f members.\"\n}\n```",
+      "answers": {
+        "A": "R-1d10cd",
+        "B": "R-8966be",
+        "C": "R-1d10cd",
+        "D": "UNKNOWN"
+      },
+      "wellFormed": true,
+      "wrong": [
+        "D"
+      ],
+      "grounded": false,
+      "originalCorrect": false,
+      "reason": "The final decision specifies R-1d10cd as the general rule, R-8966be for G-1afc members before noon, and the normal rule (which defaults to R-1d10cd if not specified otherwise) at or after noon, with no rule provided for G-227f members."
+    },
+    {
+      "locale": "en",
+      "mode": "counterfactual",
+      "visible": true,
+      "usedTurns": 2,
+      "promptDigest": "79b18af75be7c7fe2b3b6d2962231bfb5c1893f05de16b5827efd1a43720d209",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 121,
+        "prompt_tokens": 538,
+        "total_tokens": 659,
+        "prompt_tokens_details": {
+          "cached_tokens": 277
+        }
+      },
+      "latencyMs": 1862,
+      "expected": {
+        "A": "R-1d10cd",
+        "B": "R-1d10cd",
+        "C": "R-1d10cd",
+        "D": "R-8966be"
+      },
+      "original": {
+        "A": "R-1d10cd",
+        "B": "R-1d10cd",
+        "C": "R-1d10cd",
+        "D": "R-8966be"
+      },
+      "raw": "```json\n{\n  \"A\": \"R-1d10cd\",\n  \"B\": \"R-8966be\",\n  \"C\": \"R-1d10cd\",\n  \"D\": \"R-8966be\",\n  \"reason\": \"The final decision dictates R-1d10cd generally, R-8966be for G-227f members booking before noon, and the normal rule (R-1d10cd) at or after noon.\"\n}\n```",
+      "answers": {
+        "A": "R-1d10cd",
+        "B": "R-8966be",
+        "C": "R-1d10cd",
+        "D": "R-8966be"
+      },
+      "wellFormed": true,
+      "wrong": [
+        "B"
+      ],
+      "grounded": false,
+      "originalCorrect": false,
+      "reason": "The final decision dictates R-1d10cd generally, R-8966be for G-227f members booking before noon, and the normal rule (R-1d10cd) at or after noon."
+    },
+    {
+      "locale": "en",
+      "mode": "long-auto",
+      "visible": false,
+      "usedTurns": 2,
+      "promptDigest": "e437d469a1cbb6ea8195cc0131bd12594669cf0b050b98d87d4ce3266691ab51",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 69,
+        "prompt_tokens": 1295,
+        "total_tokens": 1364,
+        "prompt_tokens_details": {
+          "cached_tokens": 276
+        }
+      },
+      "latencyMs": 8594,
+      "expected": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN",
+        "C": "UNKNOWN",
+        "D": "UNKNOWN"
+      },
+      "original": {
+        "A": "R-1d10cd",
+        "B": "R-8966be",
+        "C": "R-1d10cd",
+        "D": "R-1d10cd"
+      },
+      "raw": "```json\n{\n  \"A\": \"UNKNOWN\",\n  \"B\": \"UNKNOWN\",\n  \"C\": \"UNKNOWN\",\n  \"D\": \"UNKNOWN\",\n  \"reason\": \"The provided conversation excerpt does not contain the final decision or the necessary routing rules to determine the correct route codes.\"\n}\n```",
+      "answers": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN",
+        "C": "UNKNOWN",
+        "D": "UNKNOWN"
+      },
+      "wellFormed": true,
+      "wrong": [],
+      "grounded": true,
+      "originalCorrect": false,
+      "reason": "The provided conversation excerpt does not contain the final decision or the necessary routing rules to determine the correct route codes."
+    },
+    {
+      "locale": "en",
+      "mode": "picked",
+      "visible": true,
+      "usedTurns": 1,
+      "promptDigest": "cb23b660220f4ee554929542c00be8ae2bd961026a5c9c750db3c37d5a9c868d",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 106,
+        "prompt_tokens": 521,
+        "total_tokens": 627,
+        "prompt_tokens_details": {
+          "cached_tokens": 276
+        }
+      },
+      "latencyMs": 1767,
+      "expected": {
+        "A": "R-1d10cd",
+        "B": "R-8966be",
+        "C": "R-1d10cd",
+        "D": "R-1d10cd"
+      },
+      "original": {
+        "A": "R-1d10cd",
+        "B": "R-8966be",
+        "C": "R-1d10cd",
+        "D": "R-1d10cd"
+      },
+      "raw": "```json\n{\n  \"A\": \"R-1d10cd\",\n  \"B\": \"R-8966be\",\n  \"C\": \"R-1d10cd\",\n  \"D\": \"UNKNOWN\",\n  \"reason\": \"The final decision specifies R-1d10cd for all bookings unless the member is in G-1afc and books before noon, in which case R-8966be applies.\"\n}\n```",
+      "answers": {
+        "A": "R-1d10cd",
+        "B": "R-8966be",
+        "C": "R-1d10cd",
+        "D": "UNKNOWN"
+      },
+      "wellFormed": true,
+      "wrong": [
+        "D"
+      ],
+      "grounded": false,
+      "originalCorrect": false,
+      "reason": "The final decision specifies R-1d10cd for all bookings unless the member is in G-1afc and books before noon, in which case R-8966be applies."
+    },
+    {
+      "locale": "en",
+      "mode": "empty",
+      "visible": false,
+      "usedTurns": 0,
+      "promptDigest": "6545b2cec82a36fcfe70ffe5dfa03654e7cc548d03073e2e3413e312eff3108b",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 70,
+        "prompt_tokens": 114,
+        "total_tokens": 184,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "latencyMs": 1060,
+      "expected": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN",
+        "C": "UNKNOWN",
+        "D": "UNKNOWN"
+      },
+      "original": {
+        "A": "R-1d10cd",
+        "B": "R-8966be",
+        "C": "R-1d10cd",
+        "D": "R-1d10cd"
+      },
+      "raw": "```json\n{\n  \"A\": \"UNKNOWN\",\n  \"B\": \"UNKNOWN\",\n  \"C\": \"UNKNOWN\",\n  \"D\": \"UNKNOWN\",\n  \"reason\": \"The final decision and associated rules are not provided, making it impossible to determine the correct route code for any option.\"\n}\n```",
+      "answers": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN",
+        "C": "UNKNOWN",
+        "D": "UNKNOWN"
+      },
+      "wellFormed": true,
+      "wrong": [],
+      "grounded": true,
+      "originalCorrect": false,
+      "reason": "The final decision and associated rules are not provided, making it impossible to determine the correct route code for any option."
+    },
+    {
+      "locale": "ko",
+      "mode": "recent",
+      "visible": true,
+      "usedTurns": 2,
+      "promptDigest": "2d92fa010d9e5d285ac2683a0881be0dec08bf04cbf29550713d2c7d87f2657d",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 145,
+        "prompt_tokens": 561,
+        "total_tokens": 706,
+        "prompt_tokens_details": {
+          "cached_tokens": 276
+        }
+      },
+      "latencyMs": 2225,
+      "expected": {
+        "A": "R-37664d",
+        "B": "R-cef7fa",
+        "C": "R-37664d",
+        "D": "R-37664d"
+      },
+      "original": {
+        "A": "R-37664d",
+        "B": "R-cef7fa",
+        "C": "R-37664d",
+        "D": "R-37664d"
+      },
+      "raw": "```json\n{\n  \"A\": \"R-37664d\",\n  \"B\": \"R-cef7fa\",\n  \"C\": \"R-37664d\",\n  \"D\": \"R-37664d\",\n  \"reason\": \"최종 결정에 따르면, 일반 예약은 R-37664d 경로를 사용하며, G-8206 회원이 정오 전에 예약한 경우에만 R-cef7fa 경로를 사용합니다. G-6d33 회원은 G-8206 회원이 아니므로 일반 규칙을 따릅니다.\"\n}\n```",
+      "answers": {
+        "A": "R-37664d",
+        "B": "R-cef7fa",
+        "C": "R-37664d",
+        "D": "R-37664d"
+      },
+      "wellFormed": true,
+      "wrong": [],
+      "grounded": true,
+      "originalCorrect": true,
+      "reason": "최종 결정에 따르면, 일반 예약은 R-37664d 경로를 사용하며, G-8206 회원이 정오 전에 예약한 경우에만 R-cef7fa 경로를 사용합니다. G-6d33 회원은 G-8206 회원이 아니므로 일반 규칙을 따릅니다."
+    },
+    {
+      "locale": "ko",
+      "mode": "counterfactual",
+      "visible": true,
+      "usedTurns": 2,
+      "promptDigest": "0be60f1d2805584805d55967872fbadce7cfc71e16f68d0cce743ee628db084e",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 120,
+        "prompt_tokens": 561,
+        "total_tokens": 681,
+        "prompt_tokens_details": {
+          "cached_tokens": 275
+        }
+      },
+      "latencyMs": 1900,
+      "expected": {
+        "A": "R-37664d",
+        "B": "R-37664d",
+        "C": "R-37664d",
+        "D": "R-cef7fa"
+      },
+      "original": {
+        "A": "R-37664d",
+        "B": "R-37664d",
+        "C": "R-37664d",
+        "D": "R-cef7fa"
+      },
+      "raw": "```json\n{\n  \"A\": \"R-37664d\",\n  \"B\": \"R-37664d\",\n  \"C\": \"R-37664d\",\n  \"D\": \"R-cef7fa\",\n  \"reason\": \"최종 결정에 따르면, 일반 예약은 R-37664d 경로를 사용하며, G-6d33 회원이 정오 전에 예약한 경우에만 R-cef7fa 경로를 사용합니다.\"\n}\n```",
+      "answers": {
+        "A": "R-37664d",
+        "B": "R-37664d",
+        "C": "R-37664d",
+        "D": "R-cef7fa"
+      },
+      "wellFormed": true,
+      "wrong": [],
+      "grounded": true,
+      "originalCorrect": true,
+      "reason": "최종 결정에 따르면, 일반 예약은 R-37664d 경로를 사용하며, G-6d33 회원이 정오 전에 예약한 경우에만 R-cef7fa 경로를 사용합니다."
+    },
+    {
+      "locale": "ko",
+      "mode": "long-auto",
+      "visible": false,
+      "usedTurns": 0,
+      "promptDigest": "df552b4eb54e3b132654f6eeef76bd86c02a626c9110f40c03cba84cefe823e5",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 65,
+        "prompt_tokens": 117,
+        "total_tokens": 182,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "latencyMs": 1008,
+      "expected": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN",
+        "C": "UNKNOWN",
+        "D": "UNKNOWN"
+      },
+      "original": {
+        "A": "R-37664d",
+        "B": "R-cef7fa",
+        "C": "R-37664d",
+        "D": "R-37664d"
+      },
+      "raw": "```json\n{\n  \"A\": \"UNKNOWN\",\n  \"B\": \"UNKNOWN\",\n  \"C\": \"UNKNOWN\",\n  \"D\": \"UNKNOWN\",\n  \"reason\": \"최종 결정에 대한 규칙이 제공되지 않아 각 경로를 판단할 수 없습니다.\"\n}\n```",
+      "answers": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN",
+        "C": "UNKNOWN",
+        "D": "UNKNOWN"
+      },
+      "wellFormed": true,
+      "wrong": [],
+      "grounded": true,
+      "originalCorrect": false,
+      "reason": "최종 결정에 대한 규칙이 제공되지 않아 각 경로를 판단할 수 없습니다."
+    },
+    {
+      "locale": "ko",
+      "mode": "picked",
+      "visible": true,
+      "usedTurns": 1,
+      "promptDigest": "48bc2075b3ca911f71ff8a4f1e8833a8186ad0f7a627d10385607057fcda8293",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 115,
+        "prompt_tokens": 539,
+        "total_tokens": 654,
+        "prompt_tokens_details": {
+          "cached_tokens": 275
+        }
+      },
+      "latencyMs": 1826,
+      "expected": {
+        "A": "R-37664d",
+        "B": "R-cef7fa",
+        "C": "R-37664d",
+        "D": "R-37664d"
+      },
+      "original": {
+        "A": "R-37664d",
+        "B": "R-cef7fa",
+        "C": "R-37664d",
+        "D": "R-37664d"
+      },
+      "raw": "```json\n{\n  \"A\": \"R-37664d\",\n  \"B\": \"R-cef7fa\",\n  \"C\": \"R-37664d\",\n  \"D\": \"R-37664d\",\n  \"reason\": \"G-8206 회원이 정오 전에 예약한 경우에만 R-cef7fa 경로를 사용하고, 그 외의 경우는 R-37664d 경로를 사용합니다.\"\n}\n```",
+      "answers": {
+        "A": "R-37664d",
+        "B": "R-cef7fa",
+        "C": "R-37664d",
+        "D": "R-37664d"
+      },
+      "wellFormed": true,
+      "wrong": [],
+      "grounded": true,
+      "originalCorrect": true,
+      "reason": "G-8206 회원이 정오 전에 예약한 경우에만 R-cef7fa 경로를 사용하고, 그 외의 경우는 R-37664d 경로를 사용합니다."
+    },
+    {
+      "locale": "ko",
+      "mode": "empty",
+      "visible": false,
+      "usedTurns": 0,
+      "promptDigest": "df552b4eb54e3b132654f6eeef76bd86c02a626c9110f40c03cba84cefe823e5",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 65,
+        "prompt_tokens": 117,
+        "total_tokens": 182,
+        "prompt_tokens_details": {
+          "cached_tokens": 112
+        }
+      },
+      "latencyMs": 824,
+      "expected": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN",
+        "C": "UNKNOWN",
+        "D": "UNKNOWN"
+      },
+      "original": {
+        "A": "R-37664d",
+        "B": "R-cef7fa",
+        "C": "R-37664d",
+        "D": "R-37664d"
+      },
+      "raw": "```json\n{\n  \"A\": \"UNKNOWN\",\n  \"B\": \"UNKNOWN\",\n  \"C\": \"UNKNOWN\",\n  \"D\": \"UNKNOWN\",\n  \"reason\": \"최종 결정에 대한 규칙이 제공되지 않아 각 경로를 판단할 수 없습니다.\"\n}\n```",
+      "answers": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN",
+        "C": "UNKNOWN",
+        "D": "UNKNOWN"
+      },
+      "wellFormed": true,
+      "wrong": [],
+      "grounded": true,
+      "originalCorrect": false,
+      "reason": "최종 결정에 대한 규칙이 제공되지 않아 각 경로를 판단할 수 없습니다."
+    },
+    {
+      "locale": "de",
+      "mode": "recent",
+      "visible": true,
+      "usedTurns": 2,
+      "promptDigest": "f542f94ca292a5bf7b9a6e248678728162d031362121493c668d804d8d662225",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 101,
+        "prompt_tokens": 555,
+        "total_tokens": 656,
+        "prompt_tokens_details": {
+          "cached_tokens": 274
+        }
+      },
+      "latencyMs": 1677,
+      "expected": {
+        "A": "R-9ce6ea",
+        "B": "R-30854a",
+        "C": "R-9ce6ea",
+        "D": "R-9ce6ea"
+      },
+      "original": {
+        "A": "R-9ce6ea",
+        "B": "R-30854a",
+        "C": "R-9ce6ea",
+        "D": "R-9ce6ea"
+      },
+      "raw": "```json\n{\n  \"A\": \"R-9ce6ea\",\n  \"B\": \"R-30854a\",\n  \"C\": \"Regelmäßig\",\n  \"D\": \"UNKNOWN\",\n  \"reason\": \"Nach dem endgültigen Beschluss gilt R-9ce6ea für alle Buchungen, während Mitglieder von G-ff2d vor zwölf Uhr R-30854a nutzen.\"\n}\n```",
+      "answers": {
+        "A": "R-9ce6ea",
+        "B": "R-30854a",
+        "C": "INVALID",
+        "D": "UNKNOWN"
+      },
+      "wellFormed": false,
+      "wrong": [
+        "C",
+        "D"
+      ],
+      "grounded": false,
+      "originalCorrect": false,
+      "reason": "Nach dem endgültigen Beschluss gilt R-9ce6ea für alle Buchungen, während Mitglieder von G-ff2d vor zwölf Uhr R-30854a nutzen."
+    },
+    {
+      "locale": "de",
+      "mode": "counterfactual",
+      "visible": true,
+      "usedTurns": 2,
+      "promptDigest": "799103f0065cc51a8b9e15355c0ac1fccda5eb127ec605d10e02e8d6fbe47222",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 109,
+        "prompt_tokens": 556,
+        "total_tokens": 665,
+        "prompt_tokens_details": {
+          "cached_tokens": 273
+        }
+      },
+      "latencyMs": 1713,
+      "expected": {
+        "A": "R-9ce6ea",
+        "B": "R-9ce6ea",
+        "C": "R-9ce6ea",
+        "D": "R-30854a"
+      },
+      "original": {
+        "A": "R-9ce6ea",
+        "B": "R-9ce6ea",
+        "C": "R-9ce6ea",
+        "D": "R-30854a"
+      },
+      "raw": "```json\n{\n  \"A\": \"R-9ce6ea\",\n  \"B\": \"R-30854a\",\n  \"C\": \"Regelmäßig\",\n  \"D\": \"R-30854a\",\n  \"reason\": \"Nach dem endgültigen Beschluss gilt R-9ce6ea für alle Buchungen, während Mitglieder von G-1775 vor zwölf Uhr R-30854a nutzen.\"\n}\n```",
+      "answers": {
+        "A": "R-9ce6ea",
+        "B": "R-30854a",
+        "C": "INVALID",
+        "D": "R-30854a"
+      },
+      "wellFormed": false,
+      "wrong": [
+        "B",
+        "C"
+      ],
+      "grounded": false,
+      "originalCorrect": false,
+      "reason": "Nach dem endgültigen Beschluss gilt R-9ce6ea für alle Buchungen, während Mitglieder von G-1775 vor zwölf Uhr R-30854a nutzen."
+    },
+    {
+      "locale": "de",
+      "mode": "long-auto",
+      "visible": false,
+      "usedTurns": 2,
+      "promptDigest": "ae57537040ab57beecc182ffb8e136cc68f986dd66a1a77f8d7ecdbfbfb612de",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 69,
+        "prompt_tokens": 1426,
+        "total_tokens": 1495,
+        "prompt_tokens_details": {
+          "cached_tokens": 272
+        }
+      },
+      "latencyMs": 2721,
+      "expected": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN",
+        "C": "UNKNOWN",
+        "D": "UNKNOWN"
+      },
+      "original": {
+        "A": "R-9ce6ea",
+        "B": "R-30854a",
+        "C": "R-9ce6ea",
+        "D": "R-9ce6ea"
+      },
+      "raw": "```json\n{\n  \"A\": \"UNKNOWN\",\n  \"B\": \"UNKNOWN\",\n  \"C\": \"UNKNOWN\",\n  \"D\": \"UNKNOWN\",\n  \"reason\": \"Der bereitgestellte Kontext enthält keine Informationen über einen endgültigen Beschluss oder die entsprechenden Routen.\"\n}\n```",
+      "answers": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN",
+        "C": "UNKNOWN",
+        "D": "UNKNOWN"
+      },
+      "wellFormed": true,
+      "wrong": [],
+      "grounded": true,
+      "originalCorrect": false,
+      "reason": "Der bereitgestellte Kontext enthält keine Informationen über einen endgültigen Beschluss oder die entsprechenden Routen."
+    },
+    {
+      "locale": "de",
+      "mode": "picked",
+      "visible": true,
+      "usedTurns": 1,
+      "promptDigest": "3e1d596a60a1dbae92f713b4ac3932ca078781bbb2abc2452419162145304d4a",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 108,
+        "prompt_tokens": 532,
+        "total_tokens": 640,
+        "prompt_tokens_details": {
+          "cached_tokens": 274
+        }
+      },
+      "latencyMs": 1774,
+      "expected": {
+        "A": "R-9ce6ea",
+        "B": "R-30854a",
+        "C": "R-9ce6ea",
+        "D": "R-9ce6ea"
+      },
+      "original": {
+        "A": "R-9ce6ea",
+        "B": "R-30854a",
+        "C": "R-9ce6ea",
+        "D": "R-9ce6ea"
+      },
+      "raw": "```json\n{\n  \"A\": \"R-9ce6ea\",\n  \"B\": \"R-30854a\",\n  \"C\": \"R-9ce6ea\",\n  \"D\": \"UNKNOWN\",\n  \"reason\": \"Nach dem endgültigen Beschluss gilt für alle Buchungen R-9ce6ea, außer für Mitglieder von G-ff2d vor zwölf Uhr, für die R-30854a gilt.\"\n}\n```",
+      "answers": {
+        "A": "R-9ce6ea",
+        "B": "R-30854a",
+        "C": "R-9ce6ea",
+        "D": "UNKNOWN"
+      },
+      "wellFormed": true,
+      "wrong": [
+        "D"
+      ],
+      "grounded": false,
+      "originalCorrect": false,
+      "reason": "Nach dem endgültigen Beschluss gilt für alle Buchungen R-9ce6ea, außer für Mitglieder von G-ff2d vor zwölf Uhr, für die R-30854a gilt."
+    },
+    {
+      "locale": "de",
+      "mode": "empty",
+      "visible": false,
+      "usedTurns": 0,
+      "promptDigest": "4e5d4b08b50cf8ffa7be94f17a67b8a697382ee42636621eb1a4cb3058433c83",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 65,
+        "prompt_tokens": 113,
+        "total_tokens": 178,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "latencyMs": 1029,
+      "expected": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN",
+        "C": "UNKNOWN",
+        "D": "UNKNOWN"
+      },
+      "original": {
+        "A": "R-9ce6ea",
+        "B": "R-30854a",
+        "C": "R-9ce6ea",
+        "D": "R-9ce6ea"
+      },
+      "raw": "```json\n{\n  \"A\": \"UNKNOWN\",\n  \"B\": \"UNKNOWN\",\n  \"C\": \"UNKNOWN\",\n  \"D\": \"UNKNOWN\",\n  \"reason\": \"Es wurde kein endgültiger Beschluss genannt, daher kann keine der Optionen bestimmt werden.\"\n}\n```",
+      "answers": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN",
+        "C": "UNKNOWN",
+        "D": "UNKNOWN"
+      },
+      "wellFormed": true,
+      "wrong": [],
+      "grounded": true,
+      "originalCorrect": false,
+      "reason": "Es wurde kein endgültiger Beschluss genannt, daher kann keine der Optionen bestimmt werden."
+    },
+    {
+      "locale": "es",
+      "mode": "recent",
+      "visible": true,
+      "usedTurns": 2,
+      "promptDigest": "df4c089025828f30cd5066cffd2c924f8780d05940ee5f7b4f4ed21ad9824e08",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 118,
+        "prompt_tokens": 562,
+        "total_tokens": 680,
+        "prompt_tokens_details": {
+          "cached_tokens": 272
+        }
+      },
+      "latencyMs": 1885,
+      "expected": {
+        "A": "R-ec8d78",
+        "B": "R-5a3e67",
+        "C": "R-ec8d78",
+        "D": "R-ec8d78"
+      },
+      "original": {
+        "A": "R-ec8d78",
+        "B": "R-5a3e67",
+        "C": "R-ec8d78",
+        "D": "R-ec8d78"
+      },
+      "raw": "```json\n{\n  \"A\": \"R-ec8d78\",\n  \"B\": \"R-5a3e67\",\n  \"C\": \"R-ec8d78\",\n  \"D\": \"UNKNOWN\",\n  \"reason\": \"La decisión definitiva establece R-ec8d78 para reservas normales, R-5a3e67 para miembros de G-6f2f antes del mediodía, y R-ec8d78 después del mediodía.\"\n}\n```",
+      "answers": {
+        "A": "R-ec8d78",
+        "B": "R-5a3e67",
+        "C": "R-ec8d78",
+        "D": "UNKNOWN"
+      },
+      "wellFormed": true,
+      "wrong": [
+        "D"
+      ],
+      "grounded": false,
+      "originalCorrect": false,
+      "reason": "La decisión definitiva establece R-ec8d78 para reservas normales, R-5a3e67 para miembros de G-6f2f antes del mediodía, y R-ec8d78 después del mediodía."
+    },
+    {
+      "locale": "es",
+      "mode": "counterfactual",
+      "visible": true,
+      "usedTurns": 2,
+      "promptDigest": "37fb12c4f73ea7b3a03be10cdd23431e7b165e389bb565890070cff75d45ffec",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 116,
+        "prompt_tokens": 562,
+        "total_tokens": 678,
+        "prompt_tokens_details": {
+          "cached_tokens": 271
+        }
+      },
+      "latencyMs": 1827,
+      "expected": {
+        "A": "R-ec8d78",
+        "B": "R-ec8d78",
+        "C": "R-ec8d78",
+        "D": "R-5a3e67"
+      },
+      "original": {
+        "A": "R-ec8d78",
+        "B": "R-ec8d78",
+        "C": "R-ec8d78",
+        "D": "R-5a3e67"
+      },
+      "raw": "```json\n{\n  \"A\": \"R-ec8d78\",\n  \"B\": \"UNKNOWN\",\n  \"C\": \"R-ec8d78\",\n  \"D\": \"R-5a3e67\",\n  \"reason\": \"La decisión definitiva establece R-ec8d78 como la regla general, R-5a3e67 para miembros de G-2249 antes del mediodía, y la regla general aplica después del mediodía.\"\n}\n```",
+      "answers": {
+        "A": "R-ec8d78",
+        "B": "UNKNOWN",
+        "C": "R-ec8d78",
+        "D": "R-5a3e67"
+      },
+      "wellFormed": true,
+      "wrong": [
+        "B"
+      ],
+      "grounded": false,
+      "originalCorrect": false,
+      "reason": "La decisión definitiva establece R-ec8d78 como la regla general, R-5a3e67 para miembros de G-2249 antes del mediodía, y la regla general aplica después del mediodía."
+    },
+    {
+      "locale": "es",
+      "mode": "long-auto",
+      "visible": false,
+      "usedTurns": 2,
+      "promptDigest": "d4b4ecbeee39878413609f2aa16d468e64e963cf31a91f11ea6336b3a300d8b2",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 61,
+        "prompt_tokens": 1462,
+        "total_tokens": 1523,
+        "prompt_tokens_details": {
+          "cached_tokens": 270
+        }
+      },
+      "latencyMs": 2697,
+      "expected": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN",
+        "C": "UNKNOWN",
+        "D": "UNKNOWN"
+      },
+      "original": {
+        "A": "R-ec8d78",
+        "B": "R-5a3e67",
+        "C": "R-ec8d78",
+        "D": "R-ec8d78"
+      },
+      "raw": "```json\n{\n  \"A\": \"UNKNOWN\",\n  \"B\": \"UNKNOWN\",\n  \"C\": \"UNKNOWN\",\n  \"D\": \"UNKNOWN\",\n  \"reason\": \"La conversación importada no contiene ninguna decisión definitiva sobre rutas o códigos.\"\n}\n```",
+      "answers": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN",
+        "C": "UNKNOWN",
+        "D": "UNKNOWN"
+      },
+      "wellFormed": true,
+      "wrong": [],
+      "grounded": true,
+      "originalCorrect": false,
+      "reason": "La conversación importada no contiene ninguna decisión definitiva sobre rutas o códigos."
+    },
+    {
+      "locale": "es",
+      "mode": "picked",
+      "visible": true,
+      "usedTurns": 1,
+      "promptDigest": "6a9e6a50f8b8f9459aea257cb64e791fad41b5606a53dd4768cff42f959cf72e",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 122,
+        "prompt_tokens": 540,
+        "total_tokens": 662,
+        "prompt_tokens_details": {
+          "cached_tokens": 273
+        }
+      },
+      "latencyMs": 1953,
+      "expected": {
+        "A": "R-ec8d78",
+        "B": "R-5a3e67",
+        "C": "R-ec8d78",
+        "D": "R-ec8d78"
+      },
+      "original": {
+        "A": "R-ec8d78",
+        "B": "R-5a3e67",
+        "C": "R-ec8d78",
+        "D": "R-ec8d78"
+      },
+      "raw": "```json\n{\n  \"A\": \"R-ec8d78\",\n  \"B\": \"R-5a3e67\",\n  \"C\": \"R-ec8d78\",\n  \"D\": \"UNKNOWN\",\n  \"reason\": \"La decisión establece R-ec8d78 para reservas normales, R-5a3e67 para miembros de G-6f2f antes del mediodía, y la regla general (R-ec8d78) después del mediodía.\"\n}\n```",
+      "answers": {
+        "A": "R-ec8d78",
+        "B": "R-5a3e67",
+        "C": "R-ec8d78",
+        "D": "UNKNOWN"
+      },
+      "wellFormed": true,
+      "wrong": [
+        "D"
+      ],
+      "grounded": false,
+      "originalCorrect": false,
+      "reason": "La decisión establece R-ec8d78 para reservas normales, R-5a3e67 para miembros de G-6f2f antes del mediodía, y la regla general (R-ec8d78) después del mediodía."
+    },
+    {
+      "locale": "es",
+      "mode": "empty",
+      "visible": false,
+      "usedTurns": 0,
+      "promptDigest": "a6fbf1f1b0d5144299e0538e22b9446998990d1971d66dc6b8e18174b1178c1c",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 61,
+        "prompt_tokens": 122,
+        "total_tokens": 183,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "latencyMs": 979,
+      "expected": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN",
+        "C": "UNKNOWN",
+        "D": "UNKNOWN"
+      },
+      "original": {
+        "A": "R-ec8d78",
+        "B": "R-5a3e67",
+        "C": "R-ec8d78",
+        "D": "R-ec8d78"
+      },
+      "raw": "```json\n{\n  \"A\": \"UNKNOWN\",\n  \"B\": \"UNKNOWN\",\n  \"C\": \"UNKNOWN\",\n  \"D\": \"UNKNOWN\",\n  \"reason\": \"No se proporcionó ninguna regla o contexto para determinar la ruta correcta.\"\n}\n```",
+      "answers": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN",
+        "C": "UNKNOWN",
+        "D": "UNKNOWN"
+      },
+      "wellFormed": true,
+      "wrong": [],
+      "grounded": true,
+      "originalCorrect": false,
+      "reason": "No se proporcionó ninguna regla o contexto para determinar la ruta correcta."
+    },
+    {
+      "locale": "fr",
+      "mode": "recent",
+      "visible": true,
+      "usedTurns": 2,
+      "promptDigest": "0e75f046b0282a674f4d03aa4e9fe4e4f3526ca06e53194d9864b615acfc94a8",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 120,
+        "prompt_tokens": 545,
+        "total_tokens": 665,
+        "prompt_tokens_details": {
+          "cached_tokens": 270
+        }
+      },
+      "latencyMs": 1918,
+      "expected": {
+        "A": "R-4cee49",
+        "B": "R-329de5",
+        "C": "R-4cee49",
+        "D": "R-4cee49"
+      },
+      "original": {
+        "A": "R-4cee49",
+        "B": "R-329de5",
+        "C": "R-4cee49",
+        "D": "R-4cee49"
+      },
+      "raw": "```json\n{\n  \"A\": \"R-4cee49\",\n  \"B\": \"R-329de5\",\n  \"C\": \"R-4cee49\",\n  \"D\": \"UNKNOWN\",\n  \"reason\": \"La décision définitive stipule que R-4cee49 est la règle générale, et R-329de5 est utilisé par les membres de G-7af7 avant midi ; à midi pile, la règle générale s'applique donc R-4cee49.\"\n}\n```",
+      "answers": {
+        "A": "R-4cee49",
+        "B": "R-329de5",
+        "C": "R-4cee49",
+        "D": "UNKNOWN"
+      },
+      "wellFormed": true,
+      "wrong": [
+        "D"
+      ],
+      "grounded": false,
+      "originalCorrect": false,
+      "reason": "La décision définitive stipule que R-4cee49 est la règle générale, et R-329de5 est utilisé par les membres de G-7af7 avant midi ; à midi pile, la règle générale s'applique donc R-4cee49."
+    },
+    {
+      "locale": "fr",
+      "mode": "counterfactual",
+      "visible": true,
+      "usedTurns": 2,
+      "promptDigest": "aa1c98af619dee9441c4db98f9cc581d2f63d36c5b315d9e415ddfd4490eaa37",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 111,
+        "prompt_tokens": 545,
+        "total_tokens": 656,
+        "prompt_tokens_details": {
+          "cached_tokens": 269
+        }
+      },
+      "latencyMs": 1782,
+      "expected": {
+        "A": "R-4cee49",
+        "B": "R-4cee49",
+        "C": "R-4cee49",
+        "D": "R-329de5"
+      },
+      "original": {
+        "A": "R-4cee49",
+        "B": "R-4cee49",
+        "C": "R-4cee49",
+        "D": "R-329de5"
+      },
+      "raw": "```json\n{\n  \"A\": \"R-4cee49\",\n  \"B\": \"UNKNOWN\",\n  \"C\": \"R-4cee49\",\n  \"D\": \"R-329de5\",\n  \"reason\": \"La décision définitive stipule que R-4cee49 est la règle générale, R-329de5 est pour les membres de G-0bfe avant midi, et après midi, la règle générale s'applique.\"\n}\n```",
+      "answers": {
+        "A": "R-4cee49",
+        "B": "UNKNOWN",
+        "C": "R-4cee49",
+        "D": "R-329de5"
+      },
+      "wellFormed": true,
+      "wrong": [
+        "B"
+      ],
+      "grounded": false,
+      "originalCorrect": false,
+      "reason": "La décision définitive stipule que R-4cee49 est la règle générale, R-329de5 est pour les membres de G-0bfe avant midi, et après midi, la règle générale s'applique."
+    },
+    {
+      "locale": "fr",
+      "mode": "long-auto",
+      "visible": false,
+      "usedTurns": 2,
+      "promptDigest": "a8e092a42735312ccec15fdf611025cd196bce7201aebae893761e62c02c7707",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 67,
+        "prompt_tokens": 1450,
+        "total_tokens": 1517,
+        "prompt_tokens_details": {
+          "cached_tokens": 268
+        }
+      },
+      "latencyMs": 2718,
+      "expected": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN",
+        "C": "UNKNOWN",
+        "D": "UNKNOWN"
+      },
+      "original": {
+        "A": "R-4cee49",
+        "B": "R-329de5",
+        "C": "R-4cee49",
+        "D": "R-4cee49"
+      },
+      "raw": "```json\n{\n  \"A\": \"UNKNOWN\",\n  \"B\": \"UNKNOWN\",\n  \"C\": \"UNKNOWN\",\n  \"D\": \"UNKNOWN\",\n  \"reason\": \"Le contexte nécessaire pour déterminer le circuit à suivre selon une décision définitive n'a pas été fourni.\"\n}\n```",
+      "answers": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN",
+        "C": "UNKNOWN",
+        "D": "UNKNOWN"
+      },
+      "wellFormed": true,
+      "wrong": [],
+      "grounded": true,
+      "originalCorrect": false,
+      "reason": "Le contexte nécessaire pour déterminer le circuit à suivre selon une décision définitive n'a pas été fourni."
+    },
+    {
+      "locale": "fr",
+      "mode": "picked",
+      "visible": true,
+      "usedTurns": 1,
+      "promptDigest": "67cf98242506ac2de45387c172535306d954e29e57ea1c3b3530956d265adef7",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 120,
+        "prompt_tokens": 524,
+        "total_tokens": 644,
+        "prompt_tokens_details": {
+          "cached_tokens": 272
+        }
+      },
+      "latencyMs": 1917,
+      "expected": {
+        "A": "R-4cee49",
+        "B": "R-329de5",
+        "C": "R-4cee49",
+        "D": "R-4cee49"
+      },
+      "original": {
+        "A": "R-4cee49",
+        "B": "R-329de5",
+        "C": "R-4cee49",
+        "D": "R-4cee49"
+      },
+      "raw": "```json\n{\n  \"A\": \"R-4cee49\",\n  \"B\": \"R-329de5\",\n  \"C\": \"R-4cee49\",\n  \"D\": \"UNKNOWN\",\n  \"reason\": \"La décision stipule que R-4cee49 est le circuit par défaut, et R-329de5 est réservé aux membres de G-7af7 avant midi ; à midi, la règle générale (R-4cee49) s'applique.\"\n}\n```",
+      "answers": {
+        "A": "R-4cee49",
+        "B": "R-329de5",
+        "C": "R-4cee49",
+        "D": "UNKNOWN"
+      },
+      "wellFormed": true,
+      "wrong": [
+        "D"
+      ],
+      "grounded": false,
+      "originalCorrect": false,
+      "reason": "La décision stipule que R-4cee49 est le circuit par défaut, et R-329de5 est réservé aux membres de G-7af7 avant midi ; à midi, la règle générale (R-4cee49) s'applique."
+    },
+    {
+      "locale": "fr",
+      "mode": "empty",
+      "visible": false,
+      "usedTurns": 0,
+      "promptDigest": "3dddd6b138b5f0469c299d7e10bd223525fa164c5d340eaa334b5b63ef66240d",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 69,
+        "prompt_tokens": 111,
+        "total_tokens": 180,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "latencyMs": 1090,
+      "expected": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN",
+        "C": "UNKNOWN",
+        "D": "UNKNOWN"
+      },
+      "original": {
+        "A": "R-4cee49",
+        "B": "R-329de5",
+        "C": "R-4cee49",
+        "D": "R-4cee49"
+      },
+      "raw": "```json\n{\n  \"A\": \"UNKNOWN\",\n  \"B\": \"UNKNOWN\",\n  \"C\": \"UNKNOWN\",\n  \"D\": \"UNKNOWN\",\n  \"reason\": \"La décision définitive n'a pas été fournie, il est donc impossible de déterminer le circuit à suivre.\"\n}\n```",
+      "answers": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN",
+        "C": "UNKNOWN",
+        "D": "UNKNOWN"
+      },
+      "wellFormed": true,
+      "wrong": [],
+      "grounded": true,
+      "originalCorrect": false,
+      "reason": "La décision définitive n'a pas été fournie, il est donc impossible de déterminer le circuit à suivre."
+    },
+    {
+      "locale": "pt",
+      "mode": "recent",
+      "visible": true,
+      "usedTurns": 2,
+      "promptDigest": "8dc4adf2166cc66a1a362dd069cae0ba9855b601bb833fcb875d05ecb192b186",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 110,
+        "prompt_tokens": 558,
+        "total_tokens": 668,
+        "prompt_tokens_details": {
+          "cached_tokens": 271
+        }
+      },
+      "latencyMs": 1801,
+      "expected": {
+        "A": "R-3db2ef",
+        "B": "R-bde385",
+        "C": "R-3db2ef",
+        "D": "R-3db2ef"
+      },
+      "original": {
+        "A": "R-3db2ef",
+        "B": "R-bde385",
+        "C": "R-3db2ef",
+        "D": "R-3db2ef"
+      },
+      "raw": "```json\n{\n  \"A\": \"R-3db2ef\",\n  \"B\": \"R-bde385\",\n  \"C\": \"R-bde385\",\n  \"D\": \"UNKNOWN\",\n  \"reason\": \"A decisão final estabelece R-3db2ef como padrão, R-bde385 para membros de G-6a03 antes do meio-dia, e a regra geral após o meio-dia.\"\n}\n```",
+      "answers": {
+        "A": "R-3db2ef",
+        "B": "R-bde385",
+        "C": "R-bde385",
+        "D": "UNKNOWN"
+      },
+      "wellFormed": true,
+      "wrong": [
+        "C",
+        "D"
+      ],
+      "grounded": false,
+      "originalCorrect": false,
+      "reason": "A decisão final estabelece R-3db2ef como padrão, R-bde385 para membros de G-6a03 antes do meio-dia, e a regra geral após o meio-dia."
+    },
+    {
+      "locale": "pt",
+      "mode": "counterfactual",
+      "visible": true,
+      "usedTurns": 2,
+      "promptDigest": "f9653034033d2bcb60d0dd9ab323d4e9f577a6e3db053fa890f9b544f6775e95",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 109,
+        "prompt_tokens": 558,
+        "total_tokens": 667,
+        "prompt_tokens_details": {
+          "cached_tokens": 270
+        }
+      },
+      "latencyMs": 1726,
+      "expected": {
+        "A": "R-3db2ef",
+        "B": "R-3db2ef",
+        "C": "R-3db2ef",
+        "D": "R-bde385"
+      },
+      "original": {
+        "A": "R-3db2ef",
+        "B": "R-3db2ef",
+        "C": "R-3db2ef",
+        "D": "R-bde385"
+      },
+      "raw": "```json\n{\n  \"A\": \"R-3db2ef\",\n  \"B\": \"UNKNOWN\",\n  \"C\": \"R-3db2ef\",\n  \"D\": \"R-bde385\",\n  \"reason\": \"A decisão final estabelece R-3db2ef como padrão, R-bde385 para membros de G-c57e antes do meio-dia, e a regra geral após o meio-dia.\"\n}\n```",
+      "answers": {
+        "A": "R-3db2ef",
+        "B": "UNKNOWN",
+        "C": "R-3db2ef",
+        "D": "R-bde385"
+      },
+      "wellFormed": true,
+      "wrong": [
+        "B"
+      ],
+      "grounded": false,
+      "originalCorrect": false,
+      "reason": "A decisão final estabelece R-3db2ef como padrão, R-bde385 para membros de G-c57e antes do meio-dia, e a regra geral após o meio-dia."
+    },
+    {
+      "locale": "pt",
+      "mode": "long-auto",
+      "visible": false,
+      "usedTurns": 2,
+      "promptDigest": "965cd31d031c4cc6152cb2c70e1ef91ee08bc4c721df675aefeca1707c15f8e4",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 68,
+        "prompt_tokens": 1524,
+        "total_tokens": 1592,
+        "prompt_tokens_details": {
+          "cached_tokens": 269
+        }
+      },
+      "latencyMs": 2858,
+      "expected": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN",
+        "C": "UNKNOWN",
+        "D": "UNKNOWN"
+      },
+      "original": {
+        "A": "R-3db2ef",
+        "B": "R-bde385",
+        "C": "R-3db2ef",
+        "D": "R-3db2ef"
+      },
+      "raw": "```json\n{\n  \"A\": \"UNKNOWN\",\n  \"B\": \"UNKNOWN\",\n  \"C\": \"UNKNOWN\",\n  \"D\": \"UNKNOWN\",\n  \"reason\": \"As informações fornecidas no histórico de conversas não contêm a decisão final sobre qual rota se aplica.\"\n}\n```",
+      "answers": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN",
+        "C": "UNKNOWN",
+        "D": "UNKNOWN"
+      },
+      "wellFormed": true,
+      "wrong": [],
+      "grounded": true,
+      "originalCorrect": false,
+      "reason": "As informações fornecidas no histórico de conversas não contêm a decisão final sobre qual rota se aplica."
+    },
+    {
+      "locale": "pt",
+      "mode": "picked",
+      "visible": true,
+      "usedTurns": 1,
+      "promptDigest": "841b63d4c31b74527027ab6126b1b47e00298a6a6308c5d53fe9fc4809231dc7",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 101,
+        "prompt_tokens": 533,
+        "total_tokens": 634,
+        "prompt_tokens_details": {
+          "cached_tokens": 269
+        }
+      },
+      "latencyMs": 1681,
+      "expected": {
+        "A": "R-3db2ef",
+        "B": "R-bde385",
+        "C": "R-3db2ef",
+        "D": "R-3db2ef"
+      },
+      "original": {
+        "A": "R-3db2ef",
+        "B": "R-bde385",
+        "C": "R-3db2ef",
+        "D": "R-3db2ef"
+      },
+      "raw": "```json\n{\n  \"A\": \"R-3db2ef\",\n  \"B\": \"R-bde385\",\n  \"C\": \"R-3db2ef\",\n  \"D\": \"UNKNOWN\",\n  \"reason\": \"A regra geral é R-3db2ef, e a exceção para membros de G-6a03 antes do meio-dia é R-bde385.\"\n}\n```",
+      "answers": {
+        "A": "R-3db2ef",
+        "B": "R-bde385",
+        "C": "R-3db2ef",
+        "D": "UNKNOWN"
+      },
+      "wellFormed": true,
+      "wrong": [
+        "D"
+      ],
+      "grounded": false,
+      "originalCorrect": false,
+      "reason": "A regra geral é R-3db2ef, e a exceção para membros de G-6a03 antes do meio-dia é R-bde385."
+    },
+    {
+      "locale": "pt",
+      "mode": "empty",
+      "visible": false,
+      "usedTurns": 0,
+      "promptDigest": "e65eaeb063009154b3ae3d4dba982483a44ac10a9a5a03e0dec6445cf00eebb6",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 63,
+        "prompt_tokens": 116,
+        "total_tokens": 179,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "latencyMs": 992,
+      "expected": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN",
+        "C": "UNKNOWN",
+        "D": "UNKNOWN"
+      },
+      "original": {
+        "A": "R-3db2ef",
+        "B": "R-bde385",
+        "C": "R-3db2ef",
+        "D": "R-3db2ef"
+      },
+      "raw": "```json\n{\n  \"A\": \"UNKNOWN\",\n  \"B\": \"UNKNOWN\",\n  \"C\": \"UNKNOWN\",\n  \"D\": \"UNKNOWN\",\n  \"reason\": \"Não foi fornecida nenhuma decisão final ou regra para determinar qual rota se aplica.\"\n}\n```",
+      "answers": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN",
+        "C": "UNKNOWN",
+        "D": "UNKNOWN"
+      },
+      "wellFormed": true,
+      "wrong": [],
+      "grounded": true,
+      "originalCorrect": false,
+      "reason": "Não foi fornecida nenhuma decisão final ou regra para determinar qual rota se aplica."
+    },
+    {
+      "locale": "zh",
+      "mode": "recent",
+      "visible": true,
+      "usedTurns": 2,
+      "promptDigest": "f7aaaffadcd3bd68051b5b26b486d570d07930f19a3cd74dc76307fda525170a",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 140,
+        "prompt_tokens": 564,
+        "total_tokens": 704,
+        "prompt_tokens_details": {
+          "cached_tokens": 269
+        }
+      },
+      "latencyMs": 2147,
+      "expected": {
+        "A": "R-339ad8",
+        "B": "R-5e774a",
+        "C": "R-339ad8",
+        "D": "R-339ad8"
+      },
+      "original": {
+        "A": "R-339ad8",
+        "B": "R-5e774a",
+        "C": "R-339ad8",
+        "D": "R-339ad8"
+      },
+      "raw": "```json\n{\n  \"A\": \"R-339ad8\",\n  \"B\": \"R-5e774a\",\n  \"C\": \"R-339ad8\",\n  \"D\": \"UNKNOWN\",\n  \"reason\": \"普通预订走 R-339ad8；中午十二点前预订的 G-6f50 会员走 R-5e774a；十二点整或之后预订按一般规则（R-339ad8）处理；D 选项的 G-c650 不符合任何特定规则。\"\n}\n```",
+      "answers": {
+        "A": "R-339ad8",
+        "B": "R-5e774a",
+        "C": "R-339ad8",
+        "D": "UNKNOWN"
+      },
+      "wellFormed": true,
+      "wrong": [
+        "D"
+      ],
+      "grounded": false,
+      "originalCorrect": false,
+      "reason": "普通预订走 R-339ad8；中午十二点前预订的 G-6f50 会员走 R-5e774a；十二点整或之后预订按一般规则（R-339ad8）处理；D 选项的 G-c650 不符合任何特定规则。"
+    },
+    {
+      "locale": "zh",
+      "mode": "counterfactual",
+      "visible": true,
+      "usedTurns": 2,
+      "promptDigest": "d4626b8410df6320232e2285fa6163e02db36b1633b054d420ccb7249be04cd0",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 117,
+        "prompt_tokens": 564,
+        "total_tokens": 681,
+        "prompt_tokens_details": {
+          "cached_tokens": 268
+        }
+      },
+      "latencyMs": 1851,
+      "expected": {
+        "A": "R-339ad8",
+        "B": "R-339ad8",
+        "C": "R-339ad8",
+        "D": "R-5e774a"
+      },
+      "original": {
+        "A": "R-339ad8",
+        "B": "R-339ad8",
+        "C": "R-339ad8",
+        "D": "R-5e774a"
+      },
+      "raw": "```json\n{\n  \"A\": \"R-339ad8\",\n  \"B\": \"R-339ad8\",\n  \"C\": \"R-339ad8\",\n  \"D\": \"R-5e774a\",\n  \"reason\": \"根据最终决定，所有预订走 R-339ad8，除非是 G-c650 会员在中午十二点之前预订，则走 R-5e774a。\"\n}\n```",
+      "answers": {
+        "A": "R-339ad8",
+        "B": "R-339ad8",
+        "C": "R-339ad8",
+        "D": "R-5e774a"
+      },
+      "wellFormed": true,
+      "wrong": [],
+      "grounded": true,
+      "originalCorrect": true,
+      "reason": "根据最终决定，所有预订走 R-339ad8，除非是 G-c650 会员在中午十二点之前预订，则走 R-5e774a。"
+    },
+    {
+      "locale": "zh",
+      "mode": "long-auto",
+      "visible": false,
+      "usedTurns": 0,
+      "promptDigest": "f3042c0587abbb1fbfcd0e9ce3ba6e1035fbaf6ae811f2bc1b34228e2810b342",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 63,
+        "prompt_tokens": 130,
+        "total_tokens": 193,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "latencyMs": 1002,
+      "expected": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN",
+        "C": "UNKNOWN",
+        "D": "UNKNOWN"
+      },
+      "original": {
+        "A": "R-339ad8",
+        "B": "R-5e774a",
+        "C": "R-339ad8",
+        "D": "R-339ad8"
+      },
+      "raw": "```json\n{\n  \"A\": \"UNKNOWN\",\n  \"B\": \"UNKNOWN\",\n  \"C\": \"UNKNOWN\",\n  \"D\": \"UNKNOWN\",\n  \"reason\": \"未提供最终决定或路线规则，无法确定预订应走的路线。\"\n}\n```",
+      "answers": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN",
+        "C": "UNKNOWN",
+        "D": "UNKNOWN"
+      },
+      "wellFormed": true,
+      "wrong": [],
+      "grounded": true,
+      "originalCorrect": false,
+      "reason": "未提供最终决定或路线规则，无法确定预订应走的路线。"
+    },
+    {
+      "locale": "zh",
+      "mode": "picked",
+      "visible": true,
+      "usedTurns": 1,
+      "promptDigest": "6249fb70fdd361cf7c93e8f0a4c0f3d61ba516c2e860c3d71560e87834507798",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 139,
+        "prompt_tokens": 546,
+        "total_tokens": 685,
+        "prompt_tokens_details": {
+          "cached_tokens": 268
+        }
+      },
+      "latencyMs": 2113,
+      "expected": {
+        "A": "R-339ad8",
+        "B": "R-5e774a",
+        "C": "R-339ad8",
+        "D": "R-339ad8"
+      },
+      "original": {
+        "A": "R-339ad8",
+        "B": "R-5e774a",
+        "C": "R-339ad8",
+        "D": "R-339ad8"
+      },
+      "raw": "```json\n{\n  \"A\": \"R-339ad8\",\n  \"B\": \"R-5e774a\",\n  \"C\": \"R-339ad8\",\n  \"D\": \"R-339ad8\",\n  \"reason\": \"根据最终决定，所有预订走 R-339ad8，除非是 G-6f50 会员在中午十二点之前预订，则走 R-5e774a；G-c650 预订走一般规则（R-339ad8）。\"\n}\n```",
+      "answers": {
+        "A": "R-339ad8",
+        "B": "R-5e774a",
+        "C": "R-339ad8",
+        "D": "R-339ad8"
+      },
+      "wellFormed": true,
+      "wrong": [],
+      "grounded": true,
+      "originalCorrect": true,
+      "reason": "根据最终决定，所有预订走 R-339ad8，除非是 G-6f50 会员在中午十二点之前预订，则走 R-5e774a；G-c650 预订走一般规则（R-339ad8）。"
+    },
+    {
+      "locale": "zh",
+      "mode": "empty",
+      "visible": false,
+      "usedTurns": 0,
+      "promptDigest": "f3042c0587abbb1fbfcd0e9ce3ba6e1035fbaf6ae811f2bc1b34228e2810b342",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 63,
+        "prompt_tokens": 130,
+        "total_tokens": 193,
+        "prompt_tokens_details": {
+          "cached_tokens": 125
+        }
+      },
+      "latencyMs": 845,
+      "expected": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN",
+        "C": "UNKNOWN",
+        "D": "UNKNOWN"
+      },
+      "original": {
+        "A": "R-339ad8",
+        "B": "R-5e774a",
+        "C": "R-339ad8",
+        "D": "R-339ad8"
+      },
+      "raw": "```json\n{\n  \"A\": \"UNKNOWN\",\n  \"B\": \"UNKNOWN\",\n  \"C\": \"UNKNOWN\",\n  \"D\": \"UNKNOWN\",\n  \"reason\": \"未提供最终决定或路线规则，无法确定预订应走的路线。\"\n}\n```",
+      "answers": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN",
+        "C": "UNKNOWN",
+        "D": "UNKNOWN"
+      },
+      "wellFormed": true,
+      "wrong": [],
+      "grounded": true,
+      "originalCorrect": false,
+      "reason": "未提供最终决定或路线规则，无法确定预订应走的路线。"
+    },
+    {
+      "locale": "zh-Hant",
+      "mode": "recent",
+      "visible": true,
+      "usedTurns": 2,
+      "promptDigest": "19a8d8de0148f22b59e8a4f419e4eaf08fa16f085fbbaa5db9d1c44a0300976f",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 156,
+        "prompt_tokens": 570,
+        "total_tokens": 726,
+        "prompt_tokens_details": {
+          "cached_tokens": 267
+        }
+      },
+      "latencyMs": 2360,
+      "expected": {
+        "A": "R-ca39ee",
+        "B": "R-496f00",
+        "C": "R-ca39ee",
+        "D": "R-ca39ee"
+      },
+      "original": {
+        "A": "R-ca39ee",
+        "B": "R-496f00",
+        "C": "R-ca39ee",
+        "D": "R-ca39ee"
+      },
+      "raw": "```json\n{\n  \"A\": \"R-ca39ee\",\n  \"B\": \"R-496f00\",\n  \"C\": \"R-ca39ee\",\n  \"D\": \"R-ca39ee\",\n  \"reason\": \"根據最終決議，一般預訂走 R-ca39ee；中午十二點前預訂的 G-1472 會員走 R-496f00；從十二點整起（包含 12:00 整）適用一般規則 R-ca39ee。D 預訂的 G-41fd 並未提及特殊規則，故走一般規則。\"\n}\n```",
+      "answers": {
+        "A": "R-ca39ee",
+        "B": "R-496f00",
+        "C": "R-ca39ee",
+        "D": "R-ca39ee"
+      },
+      "wellFormed": true,
+      "wrong": [],
+      "grounded": true,
+      "originalCorrect": true,
+      "reason": "根據最終決議，一般預訂走 R-ca39ee；中午十二點前預訂的 G-1472 會員走 R-496f00；從十二點整起（包含 12:00 整）適用一般規則 R-ca39ee。D 預訂的 G-41fd 並未提及特殊規則，故走一般規則。"
+    },
+    {
+      "locale": "zh-Hant",
+      "mode": "counterfactual",
+      "visible": true,
+      "usedTurns": 2,
+      "promptDigest": "c590d93a616e6ee7f98ae85964ed9d86d4444ad079a89638bae1d39d59edb7f7",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 177,
+        "prompt_tokens": 569,
+        "total_tokens": 746,
+        "prompt_tokens_details": {
+          "cached_tokens": 266
+        }
+      },
+      "latencyMs": 2576,
+      "expected": {
+        "A": "R-ca39ee",
+        "B": "R-ca39ee",
+        "C": "R-ca39ee",
+        "D": "R-496f00"
+      },
+      "original": {
+        "A": "R-ca39ee",
+        "B": "R-ca39ee",
+        "C": "R-ca39ee",
+        "D": "R-496f00"
+      },
+      "raw": "```json\n{\n  \"A\": \"R-ca39ee\",\n  \"B\": \"R-496f00\",\n  \"C\": \"R-ca39ee\",\n  \"D\": \"R-496f00\",\n  \"reason\": \"根據最終決議：所有預訂走 R-ca39ee；中午十二點前預訂的 G-41fd 會員走 R-496f00；十二點整起適用一般規則（即 R-ca39ee）。A為一般預訂；B為G-41fd會員且在中午前；C為G-1472會員且在中午整（適用一般規則）；D為G-41fd會員且在中午前。\"\n}\n```",
+      "answers": {
+        "A": "R-ca39ee",
+        "B": "R-496f00",
+        "C": "R-ca39ee",
+        "D": "R-496f00"
+      },
+      "wellFormed": true,
+      "wrong": [
+        "B"
+      ],
+      "grounded": false,
+      "originalCorrect": false,
+      "reason": "根據最終決議：所有預訂走 R-ca39ee；中午十二點前預訂的 G-41fd 會員走 R-496f00；十二點整起適用一般規則（即 R-ca39ee）。A為一般預訂；B為G-41fd會員且在中午前；C為G-1472會員且在中午整（適用一般規則）；D為G-41fd會員且在中午前。"
+    },
+    {
+      "locale": "zh-Hant",
+      "mode": "long-auto",
+      "visible": false,
+      "usedTurns": 0,
+      "promptDigest": "57b51e981dd8e5c8dfbaa76de023342273b46d89cdf413a2cb9cb1825187c818",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 67,
+        "prompt_tokens": 137,
+        "total_tokens": 204,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "latencyMs": 1076,
+      "expected": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN",
+        "C": "UNKNOWN",
+        "D": "UNKNOWN"
+      },
+      "original": {
+        "A": "R-ca39ee",
+        "B": "R-496f00",
+        "C": "R-ca39ee",
+        "D": "R-ca39ee"
+      },
+      "raw": "```json\n{\n  \"A\": \"UNKNOWN\",\n  \"B\": \"UNKNOWN\",\n  \"C\": \"UNKNOWN\",\n  \"D\": \"UNKNOWN\",\n  \"reason\": \"未提供最終決議或相關規則，無法判斷預訂應走哪條路線。\"\n}\n```",
+      "answers": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN",
+        "C": "UNKNOWN",
+        "D": "UNKNOWN"
+      },
+      "wellFormed": true,
+      "wrong": [],
+      "grounded": true,
+      "originalCorrect": false,
+      "reason": "未提供最終決議或相關規則，無法判斷預訂應走哪條路線。"
+    },
+    {
+      "locale": "zh-Hant",
+      "mode": "picked",
+      "visible": true,
+      "usedTurns": 1,
+      "promptDigest": "d5db5925bdd13298403b3fa9073be54c9f3caff866b44075bb7a3150240f2910",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 125,
+        "prompt_tokens": 553,
+        "total_tokens": 678,
+        "prompt_tokens_details": {
+          "cached_tokens": 267
+        }
+      },
+      "latencyMs": 1964,
+      "expected": {
+        "A": "R-ca39ee",
+        "B": "R-496f00",
+        "C": "R-ca39ee",
+        "D": "R-ca39ee"
+      },
+      "original": {
+        "A": "R-ca39ee",
+        "B": "R-496f00",
+        "C": "R-ca39ee",
+        "D": "R-ca39ee"
+      },
+      "raw": "```json\n{\n  \"A\": \"R-ca39ee\",\n  \"B\": \"R-496f00\",\n  \"C\": \"R-ca39ee\",\n  \"D\": \"R-ca39ee\",\n  \"reason\": \"根據最終決議，所有預訂預設走 R-ca39ee，只有中午十二點前預訂的 G-1472 會員走 R-496f00；C 點為十二點整，適用一般規則。\"\n}\n```",
+      "answers": {
+        "A": "R-ca39ee",
+        "B": "R-496f00",
+        "C": "R-ca39ee",
+        "D": "R-ca39ee"
+      },
+      "wellFormed": true,
+      "wrong": [],
+      "grounded": true,
+      "originalCorrect": true,
+      "reason": "根據最終決議，所有預訂預設走 R-ca39ee，只有中午十二點前預訂的 G-1472 會員走 R-496f00；C 點為十二點整，適用一般規則。"
+    },
+    {
+      "locale": "zh-Hant",
+      "mode": "empty",
+      "visible": false,
+      "usedTurns": 0,
+      "promptDigest": "57b51e981dd8e5c8dfbaa76de023342273b46d89cdf413a2cb9cb1825187c818",
+      "model": "gemma-4-E4B-it-Q4_K_M",
+      "finish": "stop",
+      "usage": {
+        "completion_tokens": 67,
+        "prompt_tokens": 137,
+        "total_tokens": 204,
+        "prompt_tokens_details": {
+          "cached_tokens": 132
+        }
+      },
+      "latencyMs": 831,
+      "expected": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN",
+        "C": "UNKNOWN",
+        "D": "UNKNOWN"
+      },
+      "original": {
+        "A": "R-ca39ee",
+        "B": "R-496f00",
+        "C": "R-ca39ee",
+        "D": "R-ca39ee"
+      },
+      "raw": "```json\n{\n  \"A\": \"UNKNOWN\",\n  \"B\": \"UNKNOWN\",\n  \"C\": \"UNKNOWN\",\n  \"D\": \"UNKNOWN\",\n  \"reason\": \"未提供最終決議或相關規則，無法判斷預訂應走哪條路線。\"\n}\n```",
+      "answers": {
+        "A": "UNKNOWN",
+        "B": "UNKNOWN",
+        "C": "UNKNOWN",
+        "D": "UNKNOWN"
+      },
+      "wellFormed": true,
+      "wrong": [],
+      "grounded": true,
+      "originalCorrect": false,
+      "reason": "未提供最終決議或相關規則，無法判斷預訂應走哪條路線。"
+    }
+  ],
+  "variant": "baseline",
+  "candidate": null
+}

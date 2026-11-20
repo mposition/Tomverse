@@ -14,6 +14,7 @@ export const clientLatencyStagesSchema = z.object({
   panelHandoffMs: duration.optional(),
   locationMs: duration.optional(),
   locationIntentMs: duration.optional(),
+  freshLocationOverlapMs: duration.optional(),
   responseHeadersMs: duration.optional(),
   dispatchToContentMs: duration.optional(),
   contentToEndMs: duration.optional(),
@@ -27,6 +28,7 @@ export const responseLatencyTimingsSchema = z.object({
   completionMs: duration.optional(),
   settlementMs: duration.optional(),
   routingMs: duration.optional(),
+  presearchMs: duration.optional(),
   contextMs: duration.optional(),
   preProviderMs: duration.optional(),
   beforeRoutingMs: duration.optional(),
@@ -36,6 +38,34 @@ export const responseLatencyTimingsSchema = z.object({
   reviewMs: duration.optional(),
 }).strict();
 export type ResponseLatencyTimings = z.infer<typeof responseLatencyTimingsSchema>;
+const configuredFlag = z.enum(["true", "false", "unset", "other"]);
+export const responseLatencyContextSchema = z.object({
+  build: z.string().regex(/^[a-f0-9]{40}$/).nullable(),
+  routerPresearch: configuredFlag,
+  parallelContextPrecheck: configuredFlag,
+  compactSearchMenu: configuredFlag,
+}).strict();
+export type ResponseLatencyContext = z.infer<typeof responseLatencyContextSchema>;
+
+/** An allowlist of configuration states, never arbitrary environment values. */
+export function responseLatencyContext(env: Record<string, string | undefined>): ResponseLatencyContext {
+  const flag = (value: string | undefined) => value === undefined ? "unset" : value === "true" || value === "false" ? value : "other";
+  return {
+    build: /^[a-f0-9]{40}$/.test(env.RAILWAY_GIT_COMMIT_SHA ?? "") ? env.RAILWAY_GIT_COMMIT_SHA! : null,
+    routerPresearch: flag(env.CHAT_ROUTER_PRESEARCH_ENABLED),
+    parallelContextPrecheck: flag(env.CHAT_ROUTER_PARALLEL_CONTEXT_PRECHECK_ENABLED),
+    compactSearchMenu: flag(env.CHAT_ROUTER_COMPACT_SEARCH_MENU_ENABLED),
+  };
+}
+
+/** Backward-compatible storage in the existing JSON column; not a timing stage. */
+export function storedResponseLatencyTimings(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const { _context, ...durations } = value as Record<string, unknown>;
+  const timings = responseLatencyTimingsSchema.safeParse(durations);
+  const context = responseLatencyContextSchema.safeParse(_context);
+  return timings.success ? { timings: timings.data, context: context.success ? context.data : undefined } : null;
+}
 export const responseLatencyDimensionsSchema = z.object({
   product: z.enum(["chat", "review", "unknown"]),
   mode: z.enum(["auto", "manual", "cross_review", "unknown"]),
@@ -48,7 +78,21 @@ export type ResponseLatencySample = ResponseLatencyDimensions & {
   source: "server" | "client" | "review";
   outcome: z.infer<typeof responseLatencyOutcomeSchema>;
   timings: ResponseLatencyTimings;
+  context?: ResponseLatencyContext;
 };
+
+/** Attribute browser timing to the request's server sample, never ingestion time. */
+export function attributePairedClientLatency(rows: (ResponseLatencySample & { id: string })[]): ResponseLatencySample[] {
+  const servers = new Map(rows.filter(row => row.source === "server" && typeof row.id === "string" && row.id.endsWith(":server"))
+    .map(row => [row.id.slice(0, -7), row]));
+  return rows.map(({ id, ...sample }) => {
+    if (sample.source !== "client" || typeof id !== "string" || !id.endsWith(":client")) return sample;
+    const server = servers.get(id.slice(0, -7));
+    const context = responseLatencyContextSchema.safeParse(server?.context);
+    if (!server || !context.success || server.product !== sample.product || server.mode !== sample.mode) return { ...sample, context: undefined };
+    return { ...sample, modelId: server.modelId, provider: server.provider, context: context.data };
+  });
+}
 export const clientLatencyBodySchema = z.object({
   token: z.string().min(1).max(2_048),
   outcome: z.enum(["completed", "cancelled", "failed"]),
@@ -58,7 +102,9 @@ export const clientLatencyBodySchema = z.object({
   stages: clientLatencyStagesSchema.optional(),
 }).strict().refine(value => value.prepareMs <= value.completionMs &&
   (value.firstContentMs === null || (value.firstContentMs >= value.prepareMs && value.firstContentMs <= value.completionMs)) &&
-  Object.values(value.stages ?? {}).every(ms => ms <= value.completionMs),
+  Object.values(value.stages ?? {}).every(ms => ms <= value.completionMs) &&
+  (value.stages?.freshLocationOverlapMs === undefined ||
+    (value.stages.locationIntentMs !== undefined && value.stages.freshLocationOverlapMs <= value.stages.locationIntentMs)),
   "Timing events must follow submission order.");
 
 export function latencyDistribution(values: number[]) {
@@ -71,7 +117,9 @@ export function latencyDistribution(values: number[]) {
 export function summarizeResponseLatency(samples: ResponseLatencySample[]) {
   const groups = new Map<string, ResponseLatencySample[]>();
   for (const sample of samples) {
-    const key = JSON.stringify([sample.product, sample.mode, sample.source, sample.modelId, sample.outcome]);
+    const parsed = responseLatencyContextSchema.safeParse(sample.context);
+    const context = parsed.success ? parsed.data : undefined;
+    const key = JSON.stringify([sample.product, sample.mode, sample.source, sample.modelId, sample.outcome, context]);
     groups.set(key, [...(groups.get(key) ?? []), sample]);
   }
   const sorted = [...groups.values()].sort((a, b) => b.length - a.length);
@@ -81,6 +129,7 @@ export function summarizeResponseLatency(samples: ResponseLatencySample[]) {
     groups: sorted.slice(0, 24).map(rows => ({
       product: rows[0].product, mode: rows[0].mode, source: rows[0].source,
       modelId: rows[0].modelId, outcome: rows[0].outcome, count: rows.length,
+      context: responseLatencyContextSchema.safeParse(rows[0].context).data,
       evidence: rows.length < 30 ? "small_sample" : "observational",
       outcomes: Object.fromEntries([...new Set(rows.map(row => row.outcome))].map(outcome =>
         [outcome, rows.filter(row => row.outcome === outcome).length])),
@@ -96,12 +145,17 @@ export function summarizeResponseLatency(samples: ResponseLatencySample[]) {
 
 export const RESPONSE_LATENCY_ANALYSIS_RULE =
   "responseLatency is content-free observational timing evidence, not a causal benchmark. " +
-  "Compare only the same product, mode, source and outcome. Client timings are untrusted browser reports; " +
+  "Compare only the same product, mode, source, model, outcome and recorded deployment/configuration context. Missing historical context is unknown. " +
+  "Context records configured environment states, not proof that a request used an experiment. chatPresearchLatency windows are not split by deployment/configuration. " +
+  "Client timings are untrusted browser reports; " +
   "Client firstContentMs ends when text reaches UI state, not actual browser paint; completionMs ends when the client handler finishes. " +
   "Review firstReviewMs and reviewMs start at service entry and exclude route persistence. Sample count counts measurements, not unique requests. " +
   "server firstContentMs starts at API receipt and settlementMs is not completion. " +
   "Parallel timings overlap: never sum them or subtract unrelated percentiles. Missing measurements are unknown. " +
-  "contextPrepareMs and draftPrepareMs run together. locationIntentMs is nested within locationMs, which also includes device and human permission waits. " +
+  "chatPresearchLatency covers only Smart Adaptive attempts with an app presearch timer, not all search. Its 24h and 7d windows overlap. " +
+  "Use completed browser p95 and the fraction of all recorded attempts confirmed complete with content within 10s together. Report missing clients and sample size. " +
+  "These aggregates alone cannot identify a slow model, establish answer quality or justify a routing change; propose a matched test with the same questions and official sources. " +
+  "contextPrepareMs and draftPrepareMs run together. locationIntentMs may overlap new conversation preparation or refinerPrepareMs. freshLocationOverlapMs measures the portion of a reused new conversation intent request that elapsed before the saved turn needed its result. locationMs includes remaining intent, device and human permission waits. " +
   "Report sample counts; small samples cannot prove a model is faster. Keep failed/cancelled/primary-only outcomes visible. " +
   "Recommend concrete code or setting experiments that reduce waiting while preserving selected models, both reviewers, " +
   "grounding, tools, memory, authorization, credits and quality. Distinguish earlier display from faster final completion. " +

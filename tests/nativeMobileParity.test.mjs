@@ -4,8 +4,48 @@ import { createApiTransport } from "../apps/mobile/src/apiTransport.ts";
 import { nativeParityBearerRoute } from "../lib/nativeBearerGate.ts";
 import { validateMobileUpload } from "../apps/mobile/src/nativeUpload.ts";
 import { mobileErrorText } from "../locales/mobileErrors.ts";
+import { buildMemoryQueryPlan } from "../lib/memoryQueryPlan.ts";
+import { latestUserPromptText } from "../lib/chatMemoryContextCore.ts";
 const bridge = { hasSession: async () => ({ signedIn: true }), signOut: async () => {} };
 const capability = { reviewEasy: true, assistants: true, maxModels: 3, plan: "Max" };
+
+test("Review preflight and persisted send use the same bounded Memory query for padded long text", async () => {
+  const conversation = { id: "memory-review", selectedModels: ["a", "b"], messages: [] };
+  const text = ` \n커피 ${Array.from({ length: 100 }, (_, i) => `condition${i}`).join(" ")} 마지막 일정 e\u0301\n `;
+  assert.notDeepEqual(buildMemoryQueryPlan(text), buildMemoryQueryPlan(text.trim()), "padding must expose the previous drift");
+  let prepared;
+  let saved;
+  let sends = 0;
+  const sentPlans = [];
+  const transport = createApiTransport(async (path, init = {}) => {
+    if (typeof init === "function") init = init();
+    if (path.includes("capabilities")) return Response.json(capability);
+    if (path === "/api/chat/preflight") {
+      prepared = buildMemoryQueryPlan(JSON.parse(init.body).prompt);
+      return Response.json({ ok: true, admissionToken: "admission", contextBundle: "context" });
+    }
+    if (path.endsWith("/messages")) {
+      const input = JSON.parse(init.body).messages[0];
+      saved = input.content.trim(); // The real persistence route trims ordinary messages.
+      conversation.messages.push({ id: "source", role: "user", content: saved });
+      return Response.json({ messageMappings: [{ requestId: input.clientRequestId, messageId: "source" }] });
+    }
+    if (path === "/api/chat") {
+      const input = JSON.parse(init.body);
+      sentPlans.push(buildMemoryQueryPlan(latestUserPromptText(input.messages)));
+      assert.equal(input.contextBundle, "context");
+      sends += 1;
+      conversation.messages.push({ id: input.assistantMessageId, role: "assistant", modelId: input.modelId, content: "Answer", status: "normal" });
+      return new Response("Answer");
+    }
+    return Response.json(conversation);
+  }, bridge);
+  const outcome = await transport.sendReview(conversation, text, [], new AbortController().signal, () => {});
+  assert.equal(saved, text.trim());
+  assert.equal(sends, 2);
+  assert.deepEqual(sentPlans, [prepared, prepared]);
+  assert.deepEqual(outcome.failedModelIds, []);
+});
 
 test("parity enrollment is default-off and never includes adjacent administrative or publishing operations", () => {
   const allowed = [["/api/products/mobile/capabilities", "GET"], ["/api/user/settings", "POST"], ["/api/memories/settings", "PUT"], ["/api/images/groups/g1", "GET"], ["/api/images/generations", "POST"], ["/api/conversations/c1/comparison-reviews", "POST"], ["/api/conversations/c1/comparison-reviews/item-feedback", "PUT"], ["/api/conversations/c1/comparison-reviews/item-feedback", "DELETE"], ["/api/feedback", "POST"]];
@@ -59,6 +99,77 @@ for (const bundle of [null, "priced-context"]) test(`Review saves once and isola
   const result=await transport.sendReview(conversation,"Follow-up",[],new AbortController().signal,()=>{});
   assert.deepEqual(result.failedModelIds,[]);assert.equal(calls.filter(call=>call.path.endsWith("/messages")).length,1);assert.equal(calls.filter(call=>call.path==="/api/chat").length,2);assert.equal(calls.filter(call=>call.path==="/api/chat/preflight").length,1);
   assert.ok(calls.findIndex(call=>call.path==="/api/chat/preflight")<calls.findIndex(call=>call.path.endsWith("/messages")));
+});
+
+for (const modelIds of [["a", "b"], ["a", "b", "c"]]) test(`native Review carries one prepared snapshot through persistence and ${modelIds.length} sibling sends`, async () => {
+  const calls = [];
+  const conversation = { id: "snapshot-review", selectedModels: modelIds, messages: [
+    { id: "first-source", role: "user", content: "아틀라스 출시" },
+    { id: "old-answer", role: "assistant", modelId: "a", content: "Prior answer" },
+    { id: "second-source", role: "user", content: "마감은 금요일로 변경" },
+  ] };
+  let snapshot;
+  const transport = createApiTransport(async (path, init = {}) => {
+    if (typeof init === "function") init = init();
+    calls.push(path);
+    if (path.includes("capabilities")) return Response.json(capability);
+    if (path === "/api/chat/preflight") {
+      assert.equal(conversation.messages.some(message => message.id === "current-source"), false);
+      snapshot = conversation.messages.filter(message => message.role === "user").slice(-2).map(message => message.id);
+      return Response.json({ ok: true, admissionToken: "aggregate", contextBundle: "snapshot-before-current-save" });
+    }
+    if (path.endsWith("/messages")) {
+      const message = JSON.parse(init.body).messages[0];
+      conversation.messages.push({ id: "current-source", role: "user", content: message.content });
+      conversation.messages.push({ id: "other-tab-source", role: "user", content: "Concurrent append" });
+      return Response.json({ messageMappings: [{ requestId: message.clientRequestId, messageId: "current-source" }] });
+    }
+    if (path === "/api/chat") {
+      const message = JSON.parse(init.body);
+      assert.deepEqual(snapshot, ["first-source", "second-source"]);
+      assert.equal(message.contextBundle, "snapshot-before-current-save");
+      assert.equal(message.admissionToken, "aggregate");
+      assert.equal(message.sourceUserMessageId, "current-source");
+      assert.equal(message.messages.filter(row => row.role === "user").at(-1).content, "그 프로젝트 마감은?");
+      assert.equal(message.messages.some(row => row.id === "other-tab-source"), false);
+      assert.equal(message.messages.some(row => row.role === "assistant" && row.content === "Done"), false);
+      conversation.messages.push({ id: message.assistantMessageId, role: "assistant", modelId: message.modelId, content: "Done", status: "normal" });
+      return new Response("Done");
+    }
+    return Response.json(conversation);
+  }, bridge);
+  assert.deepEqual((await transport.sendReview(conversation, "그 프로젝트 마감은?", [], new AbortController().signal, () => {})).failedModelIds, []);
+  assert.equal(calls.filter(path => path === "/api/chat/preflight").length, 1);
+  assert.equal(calls.filter(path => path.endsWith("/messages")).length, 1);
+  assert.equal(calls.filter(path => path === "/api/chat").length, modelIds.length);
+  assert.equal(calls.includes("/api/chat/context"), false);
+});
+
+for (const surface of ["Chat", "Review"]) test(`native single-model ${surface} retains its no-bundle path`, async () => {
+  const calls = [];
+  const conversation = { id: "single", selectedModels: ["a"], messages: [] };
+  const transport = createApiTransport(async (path, init = {}) => {
+    if (typeof init === "function") init = init();
+    calls.push(path);
+    if (path.endsWith("/messages")) {
+      const message = JSON.parse(init.body).messages[0];
+      conversation.messages.push({ id: "current", role: "user", content: message.content });
+      return Response.json({ messageMappings: [{ requestId: message.clientRequestId, messageId: "current" }] });
+    }
+    if (path === "/api/chat") {
+      const message = JSON.parse(init.body);
+      assert.equal("contextBundle" in message, false);
+      assert.equal("admissionToken" in message, false);
+      conversation.messages.push({ id: message.assistantMessageId, role: "assistant", modelId: "a", content: "Done", status: "normal" });
+      return new Response("Done");
+    }
+    return Response.json(conversation);
+  }, bridge);
+  if (surface === "Chat") await transport.send(conversation, "Question", [], new AbortController().signal, () => {});
+  else assert.deepEqual((await transport.sendReview(conversation, "Question", [], new AbortController().signal, () => {})).failedModelIds, []);
+  assert.equal(calls.includes("/api/chat/preflight"), false);
+  assert.equal(calls.includes("/api/chat/context"), false);
+  assert.equal(calls.filter(path => path === "/api/chat").length, 1);
 });
 
 for (const infrastructure of [500,503,"offline"]) test(`comparison preflight retries ${infrastructure} once then uses ordinary model admission`, async () => {

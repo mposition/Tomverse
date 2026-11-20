@@ -1,6 +1,9 @@
+import { CHAT_MAX_MESSAGE_BODY_BYTES, CHAT_MAX_MESSAGE_CHARACTERS } from "@/lib/chatRequestLimits";
+import { CHAT_MAX_ATTACHMENTS_PER_MESSAGE } from "@/lib/chatAttachmentLimits";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 ﻿import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { reviewHandoffDescriptorSchema } from "@/lib/reviewContinuationHandoffCore";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
@@ -81,7 +84,7 @@ const userMessageSchema = z
     content: z.string(),
     status: z.literal("normal").optional().default("normal"),
     modelId: modelIdSchema.optional(),
-    attachmentUploadIds: z.array(attachmentUploadIdSchema).max(5).optional(),
+    attachmentUploadIds: z.array(attachmentUploadIdSchema).max(CHAT_MAX_ATTACHMENTS_PER_MESSAGE).optional(),
     attachmentReferences: savedMessageAttachmentReferencesSchema.optional(),
   })
   .strict()
@@ -119,7 +122,7 @@ const saveMessagesSchema = z
   )
   .refine(
     (body) => body.messages.every((message) =>
-      (body.draftConsume ? message.content : message.content.trim()).length <= 50_000
+      (body.draftConsume ? message.content : message.content.trim()).length <= CHAT_MAX_MESSAGE_CHARACTERS
     ),
     { message: "Message content is too long.", path: ["messages"] }
   )
@@ -159,7 +162,8 @@ export async function POST(
       });
       const existingConv = await prisma.conversation.findUnique({
           where: { id: conversationId },
-          select: { userId: true, password: true, kind: true, productKey: true }
+          select: { userId: true, password: true, passwordVersion: true, kind: true, productKey: true,
+            continuationBridge: { select: { reviewHandoff: true } } }
       });
 
       if (!existingConv || existingConv.userId !== userId) {
@@ -170,13 +174,13 @@ export async function POST(
           req,
           userId,
           conversationId,
-          existingConv.password
+          existingConv.password == null ? null : existingConv.passwordVersion
         )
       ) {
         return conversationLockedResponse();
       }
 
-    const body = await readLimitedJson(req, 160 * 1024, saveMessagesSchema);
+    const body = await readLimitedJson(req, CHAT_MAX_MESSAGE_BODY_BYTES, saveMessagesSchema);
     const messageMappings = body.messages.map((message) => ({
       requestId: message.clientRequestId,
       messageId: scopedMessageId(conversationId, message.clientRequestId),
@@ -195,8 +199,13 @@ export async function POST(
           messageId: internalIdByRequest.get(body.draftConsume.requestId)!,
         }
       : undefined;
+    const handoffDraft = existingConv.productKey === "review" &&
+      reviewHandoffDescriptorSchema.safeParse(existingConv.continuationBridge?.reviewHandoff).success &&
+      body.draftConsume?.scopeKey === conversationId &&
+      body.messages.every(message => (message.attachmentUploadIds?.length ?? 0) === 0 &&
+        (message.attachmentReferences?.length ?? 0) === 0);
     if (body.draftConsume &&
-        (existingConv.kind !== "chat" || existingConv.productKey !== "chat")) {
+        (existingConv.kind !== "chat" || (existingConv.productKey !== "chat" && !handoffDraft))) {
       return NextResponse.json(
         {
           error: "This draft cannot be consumed for this conversation.",
@@ -425,7 +434,7 @@ export async function DELETE(
         });
         const existingConv = await prisma.conversation.findUnique({
             where: { id: conversationId },
-            select: { userId: true, password: true }
+            select: { userId: true, password: true, passwordVersion: true }
         });
 
         if (!existingConv || existingConv.userId !== userId) {
@@ -436,7 +445,7 @@ export async function DELETE(
             req,
             userId,
             conversationId,
-            existingConv.password
+            existingConv.password == null ? null : existingConv.passwordVersion
           )
         ) {
           return conversationLockedResponse();

@@ -3,6 +3,9 @@ import test from "node:test";
 
 import {
   AMUX_V22_WORKER_AUTHORITY_NOTICE,
+  AMUX_V22_WORKSPACE_NOTICE_IMPLEMENT,
+  AMUX_V22_WORKSPACE_NOTICE_READ,
+  amuxV22WorkspaceNotice,
   assertAmuxV22LocalCliTools,
   classifyAmuxV22DeploymentReadback,
   classifyAmuxV22PrReadback,
@@ -79,5 +82,22 @@ test("deployment readback never treats an absent or mismatched release as retrya
     { ...row, deploymentId: "00000000-0000-4000-8000-000000000002" }]) {
     assert.equal(classifyAmuxV22DeploymentReadback({ ...expected, observed }).status,
       "outcome_unknown");
+  }
+});
+
+test("the workspace notice says the base is checked out and offline is by design", () => {
+  const implement = amuxV22WorkspaceNotice("implement");
+  assert.equal(implement, AMUX_V22_WORKSPACE_NOTICE_IMPLEMENT);
+  assert.match(implement, /already checked out the commit/);
+  assert.match(implement, /origin\/develop may be older than HEAD/);
+  assert.match(implement, /no network and \.git is read-only by design/);
+  assert.match(implement, /not a blocker/);
+  assert.match(implement, /leave it uncommitted/);
+  for (const role of ["investigate", "design", "review", "verify"]) {
+    const read = amuxV22WorkspaceNotice(role);
+    assert.equal(read, AMUX_V22_WORKSPACE_NOTICE_READ);
+    assert.match(read, /no network/);
+    // A read role is never told to edit files.
+    assert.doesNotMatch(read, /editing files|uncommitted|pull request/);
   }
 });

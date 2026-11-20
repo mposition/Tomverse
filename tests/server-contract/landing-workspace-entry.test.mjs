@@ -34,9 +34,6 @@ mock.module(mod("components/marketing/MarketingChatAvailability.tsx"), {
 mock.module(mod("components/LanguageProvider.tsx"), {
   namedExports: { LanguageProvider: () => null },
 });
-mock.module(mod("components/analytics/MarketingConsentReservation.tsx"), {
-  namedExports: { MarketingConsentReservation: () => null },
-});
 mock.module(mod("components/AppToastViewport.tsx"), {
   namedExports: { AppToastViewport: () => null },
 });

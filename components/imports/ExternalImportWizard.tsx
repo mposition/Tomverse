@@ -1,5 +1,7 @@
 "use client";
 
+import "./importJourney.css";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
     useCallback,
@@ -40,6 +42,10 @@ import {
     type StagedConversationSummary,
 } from "@/lib/externalImportWizard";
 import type { WorkerResponse } from "@/lib/workers/externalImportWorker";
+import {
+    askPerplexitySplitHints,
+    sameOriginPerplexitySplitSend,
+} from "@/lib/perplexitySplitClient";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 
@@ -93,6 +99,8 @@ export function ExternalImportWizard() {
     const [capacity, setCapacity] = useState<CapacityState>({ kind: "loading" });
     const [busy, setBusy] = useState(false);
 
+    const savedImport = useSearchParams().get("saved");
+    const [fileName, setFileName] = useState("");
     const workerRef = useRef<Worker | null>(null);
     const parsedRef = useRef<ParsedExternalConversation[]>([]);
     /**
@@ -190,6 +198,7 @@ export function ExternalImportWizard() {
     /* Worker parsing                                                     */
     /* ----------------------------------------------------------------- */
     const handleFileSelected = useCallback((file: File) => {
+        setFileName(file.name);
         workerRef.current?.terminate();
         const worker = new Worker(
             new URL("../../lib/workers/externalImportWorker.ts", import.meta.url),
@@ -212,6 +221,19 @@ export function ExternalImportWizard() {
                 dispatch({
                     type: "parse_progress",
                     conversationsFound: message.conversationsFound,
+                });
+                return;
+            }
+            if (message.type === "split_questions") {
+                // The worker never calls the network; the page asks with its
+                // own session and answers. Null keeps the file's split.
+                void askPerplexitySplitHints(
+                    message.questions,
+                    sameOriginPerplexitySplitSend()
+                ).then((hints) => {
+                    if (workerRef.current === worker) {
+                        worker.postMessage({ type: "split_hints", hints });
+                    }
                 });
                 return;
             }
@@ -591,6 +613,7 @@ export function ExternalImportWizard() {
             trackProductEvent("external_import_finalized", 0, {
                 import_provider: state.detectedProvider ?? "unknown",
             });
+            window.history.replaceState(null, "", `?saved=${encodeURIComponent(review.importId)}`);
             dispatch({
                 type: "finalize_succeeded",
                 finalizedConversations: body.finalizedConversations,
@@ -650,9 +673,16 @@ export function ExternalImportWizard() {
         );
     }
 
+    if (savedImport || state.status.kind === "completed") {
+        const importId = savedImport || state.review?.importId;
+        if (importId) return <WizardShell completed><ImportStepIndicator currentStep="done" />
+            <section><ImportCompletedStep key={importId} importId={importId}
+                initialCount={state.status.kind === "completed" ? state.status.finalizedConversations : undefined}
+                onStartAnother={() => {window.history.replaceState(null, "", "/settings/imports/new"); dispatch({type:"reset"});}} /></section></WizardShell>;
+    }
     return (
         <WizardShell>
-            <div className={sectionClass}>
+            <div>
                 <ImportStepIndicator currentStep={stepId} />
             </div>
 
@@ -660,7 +690,6 @@ export function ExternalImportWizard() {
                 {state.status.kind === "guide" && (
                     <ProviderGuideStep
                         guidanceProvider={state.guidanceProvider}
-                        guidanceEntry={state.guidanceEntry}
                         onChooseProvider={(provider) =>
                             dispatch({
                                 type: "choose_guidance_provider",
@@ -670,8 +699,11 @@ export function ExternalImportWizard() {
                         onChooseEntry={(entry) =>
                             dispatch({ type: "choose_guidance_entry", entry })
                         }
-                        onContinue={() => dispatch({ type: "open_file_selection" })}
-                    />
+                    >
+                        <FileInspectionStep status={{kind:"file_selection"}} compact
+                            onFileSelected={file => { dispatch({type:"open_file_selection"}); handleFileSelected(file); }}
+                            onCancelParsing={cancelParsing} onBack={() => {}} onRetry={() => {}} />
+                    </ProviderGuideStep>
                 )}
 
                 {(state.status.kind === "file_selection" ||
@@ -704,6 +736,8 @@ export function ExternalImportWizard() {
                         )}
                         <ConversationSelectionStep
                             state={state}
+                            fileName={fileName}
+                            onOnly={id => dispatch({type:"select_only", id})}
                             capacityRemaining={
                                 capacity.kind === "ready"
                                     ? capacity.remaining
@@ -843,14 +877,6 @@ export function ExternalImportWizard() {
                     </div>
                 )}
 
-                {state.status.kind === "completed" && (
-                    <ImportCompletedStep
-                        finalizedConversations={
-                            state.status.finalizedConversations
-                        }
-                        onStartAnother={() => dispatch({ type: "reset" })}
-                    />
-                )}
             </section>
 
             {!canGoBack(state) && state.status.kind !== "completed" && (
@@ -896,27 +922,10 @@ function QuotaRevisionNotice({
     );
 }
 
-function WizardShell({ children }: { children: React.ReactNode }) {
+function WizardShell({ children, completed = false }: { children: React.ReactNode; completed?:boolean }) {
     const { t } = useLanguage();
-    return (
-        <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-8">
-            <div>
-                <Link
-                    href="/settings/imports"
-                    className="inline-flex items-center gap-1.5 text-sm font-semibold text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
-                    data-testid="external-import-back"
-                >
-                    <ArrowLeft className="h-4 w-4" />
-                    {t("externalImport.backToImports")}
-                </Link>
-                <h1 className="mt-3 text-xl font-bold">
-                    {t("externalImport.pageTitle")}
-                </h1>
-                <p className="mt-1 text-sm leading-6 text-zinc-500">
-                    {t("externalImport.pageDescription")}
-                </p>
-            </div>
-            {children}
-        </div>
-    );
+    return <div className="import-journey">
+        <div className="journey-layout">{children}</div>
+        {!completed && <Link href="/settings/imports" className="journey-back" data-testid="external-import-back"><ArrowLeft size={15}/>{t("externalImport.backToImports")}</Link>}
+    </div>;
 }

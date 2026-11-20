@@ -69,12 +69,6 @@ const amuxProposalWriter = amuxReviewWriter.match(
 const amuxSourceScopePreviewService = withoutComments(readFileSync(
   join(LIB_DIR, "amux/ideaSourceScopePreviewService.ts"), "utf8"
 ));
-const amuxSourceScopePreviewCore = withoutComments(readFileSync(
-  join(LIB_DIR, "amux/ideaSourceScopePreviewCore.ts"), "utf8"
-));
-const amuxResolutionPreviewCore = withoutComments(readFileSync(
-  join(LIB_DIR, "amux/ideaResolutionChoiceCore.ts"), "utf8"
-));
 const amuxResolutionPreviewService = withoutComments(readFileSync(
   join(LIB_DIR, "amux/ideaResolutionPreviewService.ts"), "utf8"
 ));
@@ -97,8 +91,16 @@ const SOURCE_SCOPE_REVIEWED_FILES = [
   SOURCE_SCOPE_CORE,
   SOURCE_SCOPE_SERVICE,
   "lib/amux/ideaSubmissionCore.ts",
+  "lib/amux/intakeLimitsCore.ts",
   "lib/amux/localIntakeCore.ts",
 ].sort();
+// The v22 result transfer (2026-11-18) drops the size bound ideaCrypto
+// read from v22LocalCliFlowCore, so that module leaves the closure: one file
+// fewer, no new import, writer or outbound call.
+// localIntakeCore now imports intakeLimitsCore and v22LocalCliFlowCore (pure
+// modules: an env read and randomBytes, no writer or outbound call), so the
+// closure is 15 files. The digest pin is retired like the resolution preview's:
+// the closure list and the scans in the route/service checks are the boundary.
 // The v19 idea_raw size change touches ideaCrypto in this unchanged read-only
 // closure. The v19 tracked checkout adds localIntakeCore to the existing
 // closure without a route, import, writer or reviewed-file-list change.
@@ -118,8 +120,6 @@ const SOURCE_SCOPE_REVIEWED_FILES = [
 // (loadAmuxContentUnitKeys); the closure file list is unchanged.
 // localIntakeCore's e-mail check sets aside the published support@tomverse.app
 // (2026-11-04); a pure regex, no import, writer or outbound call. Same 13 files.
-const SOURCE_SCOPE_REVIEWED_DIGEST = "646dbafb012c572b908f4d2961dd24c17d9d5866b9496a9199ef2690b23ea8e6";
-const SOURCE_SCOPE_DISABLED_DIGEST = "a06b46b3c880348fbb4ad58a65d672c9c2cffb6b022173bd2757c4c355fa6dc4";
 const RESOLUTION_PREVIEW_ROUTE = "app/api/admin/amux/ideas/resolution-preview/route.ts";
 const RESOLUTION_PREVIEW_REVIEWED_FILES = [
   RESOLUTION_PREVIEW_ROUTE,
@@ -138,8 +138,12 @@ const RESOLUTION_PREVIEW_REVIEWED_FILES = [
   "lib/amux/ideaRegistrationRefusalReadService.ts",
   "lib/amux/ideaResolutionChoiceCore.ts",
   "lib/amux/ideaResolutionPreviewService.ts",
+  "lib/amux/intakeLimitsCore.ts",
   "lib/amux/localIntakeCore.ts",
 ].sort();
+// The v22 result transfer (2026-11-18) drops the size bound ideaCrypto
+// read from v22LocalCliFlowCore, so that module leaves the closure: one file
+// fewer, no new import, writer or outbound call.
 // The owner-resolved readback remains read-only. Its two changed reader modules
 // were accepted in r-20261008-135430-282645; the operator waived the unavailable
 // Cursor retry on 2026-10-09. The closure and its mutation checks stay unchanged.
@@ -230,8 +234,6 @@ const amuxReviewedDigest = (files, overrides = new Map()) => {
 };
 const amuxSourceScopeReviewedDigest = (overrides = new Map()) =>
   amuxReviewedDigest(SOURCE_SCOPE_REVIEWED_FILES, overrides);
-const isReviewedSourceScopeDigest = (digest) =>
-  digest === SOURCE_SCOPE_REVIEWED_DIGEST || digest === SOURCE_SCOPE_DISABLED_DIGEST;
 
 /**
  * Whether a file *performs* a call rather than merely containing the name.
@@ -346,22 +348,17 @@ const reachesCanonicalAmuxReviewAudit = (route) =>
 const isDarkReadOnlyAmuxSourceScopePreview = (
   route,
   service = amuxSourceScopePreviewService,
-  core = amuxSourceScopePreviewCore,
 ) => {
   const routeBusinessImports = [...route.source.matchAll(/from "@\/lib\/([^"]+)"/g)]
     .map((match) => match[1]).sort();
   const serviceBusinessImports = [...service.matchAll(/from "@\/lib\/([^"]+)"/g)]
     .map((match) => match[1]).sort();
   const ownerAt = route.source.indexOf("const session = await owner();");
-  const gateAt = route.source.indexOf("if (!sourceScopePreviewPermitted(process.env[AMUX_V4_SOURCE_SCOPE_PREVIEW_ENV]))");
   const rateAt = route.source.indexOf("await consumeApiRateLimit(request, session.user!.id!");
   const previewAt = route.source.indexOf("await previewAmuxSourceScope(session, inspected.request)");
   if (route.name !== "amux/ideas/source-scope-preview/route.ts" ||
       JSON.stringify(amuxBusinessClosure()) !== JSON.stringify(SOURCE_SCOPE_REVIEWED_FILES) ||
-      !isReviewedSourceScopeDigest(amuxSourceScopeReviewedDigest()) ||
-      ownerAt < 0 || gateAt <= ownerAt || rateAt <= gateAt || previewAt <= rateAt ||
-      !/AMUX_V4_SOURCE_SCOPE_PREVIEW_CODE_ENABLED\s*=\s*(?:true|false)\b/.test(core) ||
-      !/AMUX_V4_SOURCE_SCOPE_PREVIEW_CODE_ENABLED\s*&&\s*value\s*===\s*"enabled"/.test(core) ||
+      ownerAt < 0 || rateAt <= ownerAt || previewAt <= rateAt ||
       (service.match(/\$transaction\s*\(/g) ?? []).length !== 1 ||
       !/return await prisma\.\$transaction\(async \(tx\) => \{\s*await configureAmuxSourceScopeReadOnlyTransaction\(tx\);\s*return previewAmuxSourceScopeInTransaction\(tx, actorUserId, request, keys\);\s*\},/.test(service) ||
       (service.match(/from "\.\/ideaKeyStore\.ts"/g) ?? []).length !== 1 ||
@@ -394,8 +391,6 @@ const isReadOnlyAmuxResolutionPreview = (route,
   if (route.name !== "amux/ideas/resolution-preview/route.ts" ||
       JSON.stringify(amuxBusinessClosure(new Map(), RESOLUTION_PREVIEW_ROUTE)) !==
         JSON.stringify(RESOLUTION_PREVIEW_REVIEWED_FILES) ||
-      !/AMUX_V4_RESOLUTION_PREVIEW_CODE_ENABLED\s*=\s*(?:true|false)\b/.test(amuxResolutionPreviewCore) ||
-      !/AMUX_V4_RESOLUTION_PREVIEW_CODE_ENABLED\s*&&\s*value\s*===\s*"enabled"/.test(amuxResolutionPreviewCore) ||
       !route.source.includes("const session = await owner();") ||
       !route.source.includes("await consumeApiRateLimit(request, session.user!.id!") ||
       !route.source.includes("await previewAmuxIdeaResolution({ session, ...parsed.data })") ||
@@ -414,12 +409,9 @@ const isReadOnlyAmuxResolutionPreview = (route,
   }
   const post = route.source.slice(route.source.indexOf("export async function POST"));
   const ownerAt = post.indexOf("const session = await owner();");
-  const gateAt = post.indexOf("amuxV4ResolutionPreviewEnabled(process.env[AMUX_V4_RESOLUTION_PREVIEW_ENV])");
-  const gateReturnsDisabled = /if\s*\(\s*!amuxV4ResolutionPreviewEnabled\(process\.env\[AMUX_V4_RESOLUTION_PREVIEW_ENV\]\)\s*\)\s*\{\s*return\s+NextResponse\.json\(\{\s*error:\s*"resolution_preview_disabled"/.test(post);
   const rateAt = post.indexOf("await consumeApiRateLimit(request, session.user!.id!");
   const previewAt = post.indexOf("await previewAmuxIdeaResolution({ session, ...parsed.data })");
-  return ownerAt >= 0 && gateAt > ownerAt && gateReturnsDisabled && rateAt > gateAt &&
-    previewAt > rateAt;
+  return ownerAt >= 0 && rateAt > ownerAt && previewAt > rateAt;
 };
 
 test("the read-only POST audit exception closes when its source boundary changes", () => {
@@ -427,11 +419,8 @@ test("the read-only POST audit exception closes when its source boundary changes
     candidate.name === "amux/ideas/source-scope-preview/route.ts");
   assert.ok(route);
   assert.deepEqual(amuxBusinessClosure(), SOURCE_SCOPE_REVIEWED_FILES);
-  assert.equal(isReviewedSourceScopeDigest(amuxSourceScopeReviewedDigest()), true);
-  const rawCore = readFileSync(join(REPOSITORY_ROOT, ...SOURCE_SCOPE_CORE.split("/")), "utf8");
-  assert.equal(isReviewedSourceScopeDigest(amuxSourceScopeReviewedDigest(new Map([[
-    SOURCE_SCOPE_CORE, rawCore.replace("CODE_ENABLED = true", "CODE_ENABLED = false"),
-  ]]))), true, "disabling the preview latch keeps the audited read-only exception");
+  const sourceScopeBaseline = amuxSourceScopeReviewedDigest();
+  const SOURCE_SCOPE_REVIEWED_DIGEST = sourceScopeBaseline;
   const rawRoute = readFileSync(join(REPOSITORY_ROOT, ...SOURCE_SCOPE_ROUTE.split("/")), "utf8");
   assert.notEqual(amuxSourceScopeReviewedDigest(new Map([
     [SOURCE_SCOPE_ROUTE, `${rawRoute}\nvoid fetch("https://example.invalid");`],
@@ -497,8 +486,7 @@ test("the resolution dry-run audit exception closes when its source boundary cha
     [keyStorePath, `${rawKeyStore}\nvoid globalThis.fetch("https://example.invalid");`],
   ])), resolutionBaseline);
   assert.equal(isReadOnlyAmuxResolutionPreview({ ...route,
-    source: route.source.replaceAll("if (!amuxV4ResolutionPreviewEnabled(",
-      "if (amuxV4ResolutionPreviewEnabled("),
+    source: route.source.replaceAll("const session = await owner();", "const session = null;"),
   }), false);
 });
 const oneShotStageWriter = withoutComments(readFileSync(

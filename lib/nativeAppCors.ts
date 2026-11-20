@@ -74,6 +74,7 @@ const ALLOWED_REQUEST_HEADERS = [
   "X-Request-ID",
   "X-Tomverse-Trace-Id",
   "X-Tomverse-Conversation-Unlocks",
+  "X-Tomverse-Source-Passages",
   "X-Tomverse-Time-Zone",
 ] as const;
 
@@ -184,7 +185,7 @@ export const nativeAppCorsHeaders = (
     // differed only by case or surrounding whitespace is answered with the
     // canonical form rather than with its own input echoed back.
     "Access-Control-Allow-Origin": (origin as string).trim().toLowerCase(),
-    "Access-Control-Expose-Headers": "Content-Disposition, Content-Length, X-Request-ID, X-Chat-Routed-Model, X-Chat-Response-Mode, Retry-After",
+    "Access-Control-Expose-Headers": "Content-Disposition, Content-Length, X-Request-ID, X-Chat-Routed-Model, X-Chat-Response-Mode, X-Chat-Continuation-Receipt, Retry-After",
   };
 };
 

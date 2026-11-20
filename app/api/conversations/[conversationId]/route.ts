@@ -1,4 +1,5 @@
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
+import { consumeConversationUpdateLimit } from "@/lib/conversationUpdateRateLimit";
 ﻿export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
@@ -164,7 +165,7 @@ export async function GET(
 
     const existingConv = await prisma.conversation.findUnique({
         where: { id: params.conversationId },
-        select: { userId: true, password: true }
+        select: { userId: true, password: true, passwordVersion: true }
     });
 
     if (!existingConv || existingConv.userId !== userId) {
@@ -176,7 +177,7 @@ export async function GET(
             req,
             userId,
             conversationId,
-            existingConv.password
+            existingConv.password == null ? null : existingConv.passwordVersion
         )
     ) {
         return privateNoStore(conversationLockedResponse());
@@ -224,13 +225,13 @@ export async function GET(
         shareExpiresAt: true,
         createdAt: true,
         updatedAt: true,
-        password: true,
+        password: true, passwordVersion: true,
         assistantProfileVersionId: true,
         assistantProfileRemovedAt: true,
         // Existence only (docs/policy/external-conversation-continuation.md
         // §8.2). A deep link into the workspace has to be able to correct
         // itself, and the row is the only thing that knows.
-        continuationBridge: { select: { id: true } },
+        continuationBridge: { select: { id: true, reviewHandoff: true } },
       },
     });
 
@@ -291,6 +292,7 @@ export async function GET(
         // Spread above would emit the relation object itself; this replaces it
         // with the one fact the client is owed.
         continuationBridge: undefined,
+        ...(conversation.continuationBridge?.reviewHandoff != null ? { reviewHandoff: true } : {}),
         surface: conversationSurface({
           hasContinuationBridge: conversation.continuationBridge !== null,
           productKey: conversation.productKey,
@@ -354,7 +356,7 @@ export async function GET(
           conversation.assistantProfileRemovedAt?.toISOString() ?? null,
         shareToken: undefined,
         shareSnapshot: undefined,
-        password: undefined
+        password: undefined, passwordVersion: undefined
     }));
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
@@ -381,10 +383,7 @@ export async function PATCH(
         }
 
         const userId = session.user.id;
-        await consumeApiRateLimit(req, userId, "conversation-update", {
-            minute: 30,
-            day: 1000,
-        });
+        await consumeConversationUpdateLimit(req, userId);
         const body = await readLimitedJson(
             req,
             16 * 1024,
@@ -403,7 +402,7 @@ export async function PATCH(
             select: {
                 userId: true,
                 selectedModels: true,
-                password: true,
+                password: true, passwordVersion: true,
                 memoryMode: true,
                 // The stored product is the authority for a PATCH: the request
                 // body cannot carry one, and §3 does not offer a PATCH that
@@ -461,7 +460,7 @@ export async function PATCH(
               req,
               userId,
               conversationId,
-              existingConv.password
+              existingConv.password == null ? null : existingConv.passwordVersion
           )
       ) {
           return conversationLockedResponse();
@@ -761,7 +760,7 @@ export async function PATCH(
           updatedConversation.assistantProfileRemovedAt?.toISOString() ?? null,
         shareToken: undefined,
         shareSnapshot: undefined,
-        password: undefined
+        password: undefined, passwordVersion: undefined
     });
     if (password !== undefined) {
       response.headers.append(
@@ -807,7 +806,7 @@ export async function DELETE(req: Request, { params }: Params) {
 
       const existingConv = await prisma.conversation.findUnique({
           where: { id: conversationId },
-          select: { userId: true, password: true }
+          select: { userId: true, password: true, passwordVersion: true }
       });
 
       if (!existingConv) {
@@ -828,7 +827,7 @@ export async function DELETE(req: Request, { params }: Params) {
         req,
         userId,
         conversationId,
-        existingConv.password
+        existingConv.password == null ? null : existingConv.passwordVersion
       )
     ) {
       logSecurityAuditEvent("conversation.delete", {

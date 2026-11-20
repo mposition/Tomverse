@@ -27,6 +27,12 @@ export function ffmpeg(args) {
   return execFileSync(file, ["-v", "error", "-y", ...args], { env, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
 }
 
+/** ffmpeg's raw output bytes (a decoded picture), for an output of `-`. */
+export function ffmpegBytes(args) {
+  const { file, env } = binary("ffmpeg");
+  return execFileSync(file, ["-v", "error", ...args], { env, maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
+}
+
 /** ffprobe's JSON for a file: streams and format. */
 export function probe(file) {
   const { file: bin, env } = binary("ffprobe");

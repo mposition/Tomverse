@@ -1,7 +1,8 @@
 "use client";
 
-import { ChevronRight, LockKeyhole, Sparkles } from "lucide-react";
-import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
+import { ChevronRight, LockKeyhole } from "lucide-react";
+import { ModelLogo } from "@/components/chat/ModelLogo";
+import { UsageMeter } from "@/components/credits/UsageMeter";
 import { useLanguage } from "@/components/LanguageProvider";
 import {
   imageModelBrandParts,
@@ -19,11 +20,11 @@ import { useImageModelCatalog } from "@/components/images/ImageModelCatalogProvi
 // different pricing. Mixing the two into one list would make that word mean
 // two things in the same column.
 //
-// Every registered model is listed, including the ones held disabled by the
-// section 12 price verification rule -- a model the product has decided about
-// but cannot yet run is more honest as a stated hold than as an absence. A held
-// model is not selectable; only the verification state changes that, never a
-// click here.
+// Only models that can run are listed. Owner decision 2026-11-13: a held
+// model (an unverified price, an unbounded worst case, an operator hold) is
+// operator state, and a row a user cannot pick is noise in the picker. The
+// Admin catalogue is where holds are stated. Each row carries its owner's
+// logo, the same ModelLogo the chat list uses.
 
 const interpolate = (template: string, values: Record<string, string | number>) =>
   Object.entries(values).reduce(
@@ -50,6 +51,7 @@ const OWNER_LABELS: Record<ImageModelOwner, string> = {
   xai: "xAI",
   fal: "fal",
   qwen: "Qwen",
+  bfl: "Black Forest Labs",
 };
 
 /** Same table, for the supplier when it differs from the owner. */
@@ -59,7 +61,47 @@ const PROVIDER_LABELS: Record<ImageModelProvider, string> = {
   xai: "xAI",
   fal: "fal",
   qwen: "Alibaba Cloud",
+  bfl: "Black Forest Labs",
 };
+
+/**
+ * Owners in the order the chat list shows its providers (OpenAI, then Google),
+ * the rest after them in this order. Grouped by owner, not supplier: Nano
+ * Banana 2 through fal sits with Google, and its row still names fal.
+ */
+const OWNER_DISPLAY_ORDER: readonly ImageModelOwner[] = ["openai", "google", "xai", "qwen", "bfl", "fal"];
+
+/** Enabled models grouped by owner; within a group, the catalogue's own order. */
+export const groupImageModelsByOwner = <T extends Parameters<typeof imageModelBrandParts>[0]>(
+  models: readonly T[]
+): { owner: ImageModelOwner; models: T[] }[] => {
+  const groups = new Map<ImageModelOwner, T[]>();
+  for (const model of models) {
+    const owner = imageModelBrandParts(model).owner;
+    const group = groups.get(owner);
+    if (group) group.push(model);
+    else groups.set(owner, [model]);
+  }
+  const rank = (owner: ImageModelOwner) => {
+    const index = OWNER_DISPLAY_ORDER.indexOf(owner);
+    return index === -1 ? OWNER_DISPLAY_ORDER.length : index;
+  };
+  return [...groups.entries()]
+    .sort(([a], [b]) => rank(a) - rank(b))
+    .map(([owner, grouped]) => ({ owner, models: grouped }));
+};
+
+/** What the model is for, in the user's words; the chat list's "Fast everyday questions". */
+export const IMAGE_USE_CASE_LABEL_KEYS = {
+  text: "chat.imageModelUseText",
+  detail: "chat.imageModelUseDetail",
+  fast: "chat.imageModelUseFast",
+  edit: "chat.imageModelUseEdit",
+  layout: "chat.imageModelUseLayout",
+  reference: "chat.imageModelUseReference",
+  value: "chat.imageModelUseValue",
+  general: "chat.imageModelUseGeneral",
+} as const;
 
 const LATENCY_LABEL_KEYS = {
   fast: "chat.imageModelLatencyFast",
@@ -91,7 +133,9 @@ export function ImageModelTabPanel({
   isKeyboardCompact,
 }: ImageModelTabPanelProps) {
   const { t } = useLanguage();
-  const { models } = useImageModelCatalog();
+  const { models: catalogue } = useImageModelCatalog();
+  const models = catalogue.filter((model) => model.disabledReason === null);
+  const groups = groupImageModelsByOwner(models);
 
   return (
     <div
@@ -106,108 +150,100 @@ export function ImageModelTabPanel({
         {t("chat.imageModelTabSubtitle")}
       </p>
 
-      <ul className="space-y-2">
-        {models.map((model) => {
-          const held = model.disabledReason !== null;
-          const brand = imageModelBrandParts(model);
-          // "From" pricing: the picker does not know which quality and size the
-          // workspace will end on, so it quotes the cheapest option rather than
-          // a number the composer might contradict.
-          const fromCredits = model.prices.length
-            ? Math.min(...model.prices.map((price) => price.credits))
-            : null;
-          return (
-            <li key={model.id}>
-              <button
-                type="button"
-                data-testid="image-model-option"
-                data-model-id={model.id}
-                data-held={held ? "true" : "false"}
-                data-locked={!held && lock ? "true" : "false"}
-                disabled={held}
-                onClick={() => {
-                  if (held) return;
-                  if (lock) {
-                    onLockedClick(lock);
-                    return;
-                  }
-                  onSelectModel(model.id);
-                }}
-                className={`flex w-full items-start gap-3 rounded-xl border px-3 text-left transition ${
-                  touchTarget ? "min-h-14 py-2.5" : "py-2.5"
-                } ${
-                  held
-                    ? "cursor-not-allowed border-zinc-200 bg-zinc-50 opacity-70 dark:border-zinc-800 dark:bg-zinc-900/40"
-                    : "border-zinc-200 bg-white hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800"
-                }`}
-              >
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-image-500/10 text-accent-image-500">
-                  <Sparkles className="h-5 w-5" aria-hidden="true" />
-                </span>
-                <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate text-sm font-bold text-zinc-900 dark:text-zinc-100">
-                    {model.name}
-                  </span>
-                  <span className="mt-0.5 text-[11px] leading-4 text-zinc-500 dark:text-zinc-400">
-                    {/* Brand names, not copy: never translated. */}
-                    {OWNER_LABELS[brand.owner]}
-                    {brand.gateway !== null && (
-                      <>
-                        {" · "}
-                        {/* Named, not hidden (policy section 16.1). Whose model
-                            it is and who supplies it are different facts, and a
-                            row that showed only one of them would be wrong
-                            about the other. */}
-                        <span data-testid="image-model-gateway">
-                          {interpolate(t("chat.imageModelViaGateway"), {
-                            gateway: PROVIDER_LABELS[brand.gateway],
-                          })}
+      {groups.map((group) => (
+        <div key={group.owner} className="space-y-1" data-testid="image-model-group" data-owner={group.owner}>
+          {/* The chat list's provider heading: a brand, never translated. */}
+          <div className="px-2 text-[11px] font-bold uppercase tracking-wide text-zinc-400">
+            {OWNER_LABELS[group.owner].toUpperCase()}
+          </div>
+          {/* Two to a row where there is room, like the chat list; one on a phone. */}
+          <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2" data-testid="image-model-grid">
+            {group.models.map((model) => {
+              const brand = imageModelBrandParts(model);
+              // "From" pricing: the picker does not know which quality and size the
+              // workspace will end on, so it quotes the cheapest option rather than
+              // a number the composer might contradict.
+              const fromCredits = model.prices.length
+                ? Math.min(...model.prices.map((price) => price.credits))
+                : null;
+              return (
+                <li key={model.id} className="min-w-0">
+                  <button
+                    type="button"
+                    data-testid="image-model-option"
+                    data-model-id={model.id}
+                    data-locked={lock ? "true" : "false"}
+                    onClick={() => {
+                      if (lock) {
+                        onLockedClick(lock);
+                        return;
+                      }
+                      onSelectModel(model.id);
+                    }}
+                    className={`flex h-full w-full items-start gap-3 rounded-xl border px-3 text-left transition ${
+                      touchTarget ? "min-h-14 py-2.5" : "py-2.5"
+                    } border-zinc-200 bg-white hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800`}
+                  >
+                    {/* Whose model it is, like the chat list: Nano Banana 2 through
+                        fal shows Google's mark, and the subtitle names fal. */}
+                    <ModelLogo provider={brand.owner} size="lg" className="h-9 w-9" />
+                    <span className="flex min-w-0 flex-1 flex-col">
+                      <span className="truncate text-sm font-bold text-zinc-900 dark:text-zinc-100">
+                        {model.name}
+                      </span>
+                      {model.useCase && (
+                        <span
+                          data-testid="image-model-use-case"
+                          className="mt-0.5 text-xs leading-4 text-zinc-600 dark:text-zinc-300"
+                        >
+                          {t(IMAGE_USE_CASE_LABEL_KEYS[model.useCase])}
                         </span>
-                      </>
-                    )}
-                    {" · "}
-                    {t(LATENCY_LABEL_KEYS[model.latencyClass])}
-                  </span>
-                  {held && (
-                    <span
-                      data-testid="image-model-hold-note"
-                      className="mt-1 text-[11px] font-bold leading-4 text-amber-600 dark:text-amber-400"
-                    >
-                      {t("chat.imageModelHoldPriceUnverified")}
+                      )}
+                      <span className="mt-0.5 text-[11px] leading-4 text-zinc-500 dark:text-zinc-400">
+                        {/* Brand names, not copy: never translated. */}
+                        {OWNER_LABELS[brand.owner]}
+                        {brand.gateway !== null && (
+                          <>
+                            {" · "}
+                            {/* Named, not hidden (policy section 16.1). Whose model
+                                it is and who supplies it are different facts, and a
+                                row that showed only one of them would be wrong
+                                about the other. */}
+                            <span data-testid="image-model-gateway">
+                              {interpolate(t("chat.imageModelViaGateway"), {
+                                gateway: PROVIDER_LABELS[brand.gateway],
+                              })}
+                            </span>
+                          </>
+                        )}
+                        {" · "}
+                        {t(LATENCY_LABEL_KEYS[model.latencyClass])}
+                      </span>
+                      {lock && (
+                        <span className="mt-1 flex items-center gap-1 text-[11px] font-bold text-accent-image-600 dark:text-accent-image-300">
+                          <LockKeyhole className="h-3 w-3" aria-hidden="true" />
+                          {lock === "sign_in"
+                            ? t("modelStatusReasons.loginRequired")
+                            : t("modelStatusReasons.upgradeRequired")}
+                        </span>
+                      )}
                     </span>
-                  )}
-                  {!held && lock && (
-                    <span className="mt-1 flex items-center gap-1 text-[11px] font-bold text-accent-image-600 dark:text-accent-image-300">
-                      <LockKeyhole className="h-3 w-3" aria-hidden="true" />
-                      {lock === "sign_in"
-                        ? t("modelStatusReasons.loginRequired")
-                        : t("modelStatusReasons.upgradeRequired")}
+                    <span className="flex shrink-0 items-center gap-2">
+                      {fromCredits !== null && (
+                        <UsageMeter credits={fromCredits} kind="image" testId="image-model-credit-badge" />
+                      )}
+                      <ChevronRight
+                        className="h-4 w-4 text-zinc-400"
+                        aria-hidden="true"
+                      />
                     </span>
-                  )}
-                </span>
-                <span className="flex shrink-0 items-center gap-2">
-                  {fromCredits !== null && (
-                    <CreditCostBadge
-                      credits={fromCredits}
-                      size="xs"
-                      testId="image-model-credit-badge"
-                      label={interpolate(t("chat.imageModelCreditsFrom"), {
-                        credits: fromCredits,
-                      })}
-                    />
-                  )}
-                  {!held && (
-                    <ChevronRight
-                      className="h-4 w-4 text-zinc-400"
-                      aria-hidden="true"
-                    />
-                  )}
-                </span>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ))}
     </div>
   );
 }

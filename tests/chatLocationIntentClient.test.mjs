@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { setImmediate } from "node:timers/promises";
-import { requestChatLocationIntent } from "../packages/api-client/src/index.ts";
+import { requestChatLocationIntent, requestFreshChatLocationIntent } from "../packages/api-client/src/index.ts";
 
 test("intent transport accepts only an explicit boolean and sends no device data", async () => {
   for (const value of [true, false, "true", null]) {
@@ -16,6 +16,28 @@ test("intent transport accepts only an explicit boolean and sends no device data
 test("network and ordinary HTTP failures leave chat available", async () => {
   assert.equal(await requestChatLocationIntent("Where am I?", async () => { throw Error("offline"); }), false);
   assert.equal(await requestChatLocationIntent("Where am I?", async () => Response.json({ code: "UNAVAILABLE" }, { status: 503 })), false);
+});
+test("only an explicit fresh response distinguishes a decision or a known unspent call", async () => {
+  const signal = new AbortController().signal;
+  for (const [body, expected] of [
+    [{ preparationOutcome: "classified", requiresLocation: true }, "classified"],
+    [{ preparationOutcome: "classified", requiresLocation: false }, "classified"],
+    [{ preparationOutcome: "not_dispatched", requiresLocation: false }, "not_dispatched"],
+    [{ preparationOutcome: "classified", requiresLocation: "true" }, "unknown"],
+    [{ preparationOutcome: "not_dispatched", requiresLocation: true }, "unknown"],
+    [{ requiresLocation: true }, "unknown"],
+  ]) {
+    let calls = 0;
+    const result = await requestFreshChatLocationIntent("Where am I?", "owner", signal, async (_path, init) => {
+      calls++;
+      assert.deepEqual(JSON.parse(init.body), { text: "Where am I?", freshAccountId: "owner" });
+      return Response.json(body);
+    });
+    assert.deepEqual(result, { outcome: expected, requiresLocation: expected === "classified" && body.requiresLocation === true });
+    assert.equal(calls, 1);
+  }
+  const offline = await requestFreshChatLocationIntent("Where am I?", "owner", signal, async () => { throw Error("offline"); });
+  assert.equal(offline.outcome, "unknown");
 });
 test("guest verification redeems the token before a separate tokenless analysis", async () => {
   await assert.rejects(requestChatLocationIntent("Where am I?", async () => Response.json({ code: "TURNSTILE_REQUIRED" }, { status: 403 })), { code: "TURNSTILE_REQUIRED" });

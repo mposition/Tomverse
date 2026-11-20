@@ -3,7 +3,6 @@ export const dynamic = "force-dynamic";
 import { readLimitedJson } from "@/lib/apiSecurity";
 import { withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
-import { isAmuxExecutionApiEnabled } from "@/lib/amux/executionGate";
 import {
   amuxBoundedJsonNoStore,
   amuxInternalErrorResponse,
@@ -11,7 +10,7 @@ import {
   AmuxResponseCapacityError,
   isAmuxInputError,
 } from "@/lib/amux/internalRoute";
-import { AmuxQueueCapacityError, listOwnedTodos } from "@/lib/amux/store";
+import { listOwnedTodos } from "@/lib/amux/store";
 import {
   amuxOwnedQueueResponseSchema,
   keepCanonicalAmuxQueueRows,
@@ -25,12 +24,6 @@ export async function POST(request: Request) {
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
   }
 
-  if (!isAmuxExecutionApiEnabled()) {
-    return amuxJsonNoStore(
-      { available: false, reason: "execution_api_disabled" },
-      409,
-    );
-  }
 
   return withAmuxRouteBudget(async () => {
     try {
@@ -47,10 +40,9 @@ export async function POST(request: Request) {
       if (isAmuxInputError(error)) {
         return amuxJsonNoStore({ error: "Invalid request." }, 400);
       }
-      if (
-        error instanceof AmuxQueueCapacityError ||
-        error instanceof AmuxResponseCapacityError
-      ) {
+      // A queue longer than one answer is answered with its head (store.ts);
+      // only an answer past the wire's 512 KiB is refused.
+      if (error instanceof AmuxResponseCapacityError) {
         return amuxJsonNoStore(
           {
             error: "Queue capacity exceeded.",

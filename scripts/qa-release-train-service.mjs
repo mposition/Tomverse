@@ -7,7 +7,7 @@
 //
 // It holds the lane's app secret, the GitHub App id and key, the operator
 // control revision, its enable flag, its departure hours and, for the model
-// conflict resolver (off unless QA_RELEASE_TRAIN_MODEL_RESOLVE is "true"), its
+// conflict resolver (off unless QA_RELEASE_TRAIN_MODEL_RESOLVE is "enabled", or the earlier "true"), its
 // own Anthropic key -- nothing else.
 // All decisions are in lib/qaReleaseTrainService.ts; this file only connects
 // the ports. The output is the outcome and a short failure code -- never a
@@ -16,6 +16,7 @@
 import { qaReleaseInstallationToken } from "../lib/qaReleaseMergeLaneGithub.ts";
 import { createQaReleaseTrainAppPorts, createQaReleaseTrainGitPorts, createQaReleaseTrainGithubPorts } from "../lib/qaReleaseTrainPorts.ts";
 import { createQaReleaseTrainResolver } from "../lib/qaReleaseTrainResolve.ts";
+import { qaReleaseSwitchOff, qaReleaseSwitchOn } from "../lib/qaReleaseServiceEnvCore.ts";
 import { runQaReleaseTrainRound } from "../lib/qaReleaseTrainService.ts";
 import {
   createQaReleaseTrainVerdictGit,
@@ -67,7 +68,7 @@ const readHttp = httpWith(READ_TIMEOUT_MS);
 const token = qaReleaseInstallationToken(readHttp, (env.QA_RELEASE_MERGE_LANE_APP_ID ?? "").trim(), privateKey, Date.now);
 const apiKey = (env.QA_RELEASE_TRAIN_ANTHROPIC_API_KEY ?? "").trim();
 const resolve =
-  (env.QA_RELEASE_TRAIN_MODEL_RESOLVE ?? "").trim() === "true" && apiKey !== ""
+  qaReleaseSwitchOn(env.QA_RELEASE_TRAIN_MODEL_RESOLVE) && apiKey !== ""
     ? createQaReleaseTrainResolver({ http: httpWith(MODEL_TIMEOUT_MS), apiKey })
     : undefined;
 const git = createQaReleaseTrainGitPorts({ token, resolve });
@@ -83,7 +84,7 @@ const train = await runQaReleaseTrainRound(
 
 // The verdict round (owner, 2026-10-29; lib/qaReleaseTrainVerdict.ts): after
 // the train, whatever it did, unless the service is off. Its model is on with
-// the train's key unless QA_RELEASE_TRAIN_MODEL_VERDICT is "false"; its own
+// the train's key unless QA_RELEASE_TRAIN_MODEL_VERDICT is "disabled" (or the earlier "false"); its own
 // failure never changes the round's exit code.
 let verdict = { verdict: "skipped" };
 if (train.train !== "disabled" && train.train !== "refused_to_start" && Date.now() - STARTED_MS < VERDICT_START_BY_MS) {
@@ -94,7 +95,7 @@ if (train.train !== "disabled" && train.train !== "refused_to_start" && Date.now
       git: verdictGit,
       github: createQaReleaseTrainVerdictGithub({ http: readHttp, token }),
       ask:
-        apiKey !== "" && (env.QA_RELEASE_TRAIN_MODEL_VERDICT ?? "").trim() !== "false"
+        apiKey !== "" && !qaReleaseSwitchOff(env.QA_RELEASE_TRAIN_MODEL_VERDICT)
           ? createQaReleaseTrainVerdictModel({ http: httpWith(MODEL_TIMEOUT_MS), apiKey })
           : undefined,
     },
@@ -106,7 +107,7 @@ if (train.train !== "disabled" && train.train !== "refused_to_start" && Date.now
 // and its failure never changes the round's exit code.
 let ciAdvice = "off";
 if (
-  (env.QA_RELEASE_CI_ADVICE_ENABLED ?? "").trim() === "true" &&
+  qaReleaseSwitchOn(env.QA_RELEASE_CI_ADVICE_ENABLED) &&
   apiKey !== "" &&
   train.train !== "disabled" &&
   train.train !== "refused_to_start" &&

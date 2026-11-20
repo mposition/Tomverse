@@ -1,7 +1,10 @@
 import "server-only";
 
 import { generateText, Output } from "ai";
-import { createReviewAttemptQueue } from "@/lib/comparisonReviewAttempts";
+import {
+  createReviewAttemptQueue,
+  shouldRetryReviewGeneration,
+} from "@/lib/comparisonReviewAttempts";
 import { recordResponseLatency } from "@/lib/responseLatencyStore";
 import { getActiveAiModel } from "@/lib/activeAiModel";
 import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
@@ -38,6 +41,7 @@ import {
 import type { PerplexityUsageCostSnapshot } from "@/lib/perplexityUsageCore";
 import { safeErrorMetadata } from "@/lib/providerErrorClassification";
 import {
+  comparisonReviewPrimaryOnlyCause,
   comparisonReviewRunOutcome,
   emptyAttemptRecord,
   type ComparisonReviewAttemptRecord,
@@ -383,6 +387,7 @@ export const runComparisonReview = async (
         } catch (error) {
           generationError = error;
           retryCount += 1;
+          if (!shouldRetryReviewGeneration(error)) break;
         }
       }
       if (!generated) throw generationError || new Error("No review output.");
@@ -605,12 +610,22 @@ export const runComparisonReview = async (
     }
 
     let secondaryAttempt: ReviewAttempt | null = null;
+    const secondaryRecords: ComparisonReviewAttemptRecord[] = [];
     for (const candidate of candidates) {
       if (candidate.id === primaryAttempt.candidate.id) continue;
       const outcome = await attempts.run(candidate);
       recorder?.noteAttempt("secondary", outcome.record);
+      secondaryRecords.push(outcome.record);
       secondaryAttempt = outcome.attempt;
       if (secondaryAttempt) break;
+    }
+    if (!secondaryAttempt) {
+      console.warn(JSON.stringify({
+        event: "comparison_review_primary_only",
+        traceId,
+        reviewerModelId: primaryAttempt.candidate.id,
+        ...comparisonReviewPrimaryOnlyCause(secondaryRecords),
+      }));
     }
 
     const dualResult: DualComparisonReviewResult = {

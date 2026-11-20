@@ -601,7 +601,12 @@ test("malformed PR artifacts never become completion or retry evidence", () => {
     html_url: "https://github.com/mposition/Tomverse/pull/812",
   };
   assert.equal(isValidAmuxReviewArtifact(artifact), true);
+  // Owner decision 2026-11-18: the v2 change digest, and a diff that is not shown, are an artifact.
+  assert.equal(isValidAmuxReviewArtifact({ ...artifact, diff_digest: `v2:${"e".repeat(64)}`, diff_text: null,
+    diff_hidden: "oversized" }), true);
   const malformed = [
+    { ...artifact, diff_digest: `v3:${"e".repeat(64)}` },
+    { ...artifact, diff_digest: `v2:${"e".repeat(63)}` },
     { ...artifact, pr_number: 0 },
     { ...artifact, pr_number: -1 },
     { ...artifact, pr_number: Number.NaN },
@@ -967,8 +972,8 @@ test("a card the recovery inspections do not apply to says so instead of offerin
   assert.equal(byTestId(legacy, "admin-amux-technical-recovery").length, 1);
   assert.equal(panel(legacy).length, 0);
   assert.equal(byTestId(legacy, "admin-amux-recovery-not-inspectable").length, 1);
-  assert.match(textOf(legacy), /not a v4 Task/);
-  // A v4 Task, or a server that does not send the flag, keeps the inspections.
+  assert.match(textOf(legacy), /not an idea Task/);
+  // An idea Task, or a server that does not send the flag, keeps the inspections.
   for (const task of [{ ...stopped.task, recovery_inspectable: true }, stopped.task]) {
     const tree = render({ ...stopped, task });
     assert.equal(panel(tree).length, 1);

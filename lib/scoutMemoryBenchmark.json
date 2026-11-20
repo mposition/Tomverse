@@ -1,0 +1,398 @@
+{
+  "model": "gemma-4-E4B-it-Q4_K_M",
+  "day": "2026-11-12",
+  "rows": [
+    {
+      "locale": "ko",
+      "observed": 12,
+      "pairs": 4,
+      "arms": [
+        {
+          "arm": "current",
+          "n": 4,
+          "retrieved": 1,
+          "sources": 3,
+          "exact": 0,
+          "decision": 0,
+          "exceptions": 0,
+          "controls": 1,
+          "abstained": 1,
+          "elapsedMs": 3741.25,
+          "priced": 4,
+          "meanMicroUsd": 0
+        },
+        {
+          "arm": "cohere",
+          "n": 4,
+          "retrieved": 3,
+          "sources": 3,
+          "exact": 0,
+          "decision": 3,
+          "exceptions": 0,
+          "controls": 1,
+          "abstained": 1,
+          "elapsedMs": 3569.75,
+          "priced": 4,
+          "meanMicroUsd": 188.935
+        },
+        {
+          "arm": "oracle",
+          "n": 4,
+          "retrieved": 3,
+          "sources": 3,
+          "exact": 1,
+          "decision": 3,
+          "exceptions": 1,
+          "controls": 1,
+          "abstained": 1,
+          "elapsedMs": 2009.25,
+          "priced": 4,
+          "meanMicroUsd": 0
+        }
+      ]
+    },
+    {
+      "locale": "en",
+      "observed": 12,
+      "pairs": 4,
+      "arms": [
+        {
+          "arm": "current",
+          "n": 4,
+          "retrieved": 2,
+          "sources": 3,
+          "exact": 0,
+          "decision": 2,
+          "exceptions": 0,
+          "controls": 1,
+          "abstained": 1,
+          "elapsedMs": 7489,
+          "priced": 4,
+          "meanMicroUsd": 0
+        },
+        {
+          "arm": "cohere",
+          "n": 4,
+          "retrieved": 3,
+          "sources": 3,
+          "exact": 0,
+          "decision": 3,
+          "exceptions": 0,
+          "controls": 1,
+          "abstained": 1,
+          "elapsedMs": 2896.25,
+          "priced": 4,
+          "meanMicroUsd": 128.98999999999998
+        },
+        {
+          "arm": "oracle",
+          "n": 4,
+          "retrieved": 3,
+          "sources": 3,
+          "exact": 0,
+          "decision": 3,
+          "exceptions": 0,
+          "controls": 1,
+          "abstained": 1,
+          "elapsedMs": 2015,
+          "priced": 4,
+          "meanMicroUsd": 0
+        }
+      ]
+    },
+    {
+      "locale": "zh",
+      "observed": 12,
+      "pairs": 4,
+      "arms": [
+        {
+          "arm": "current",
+          "n": 4,
+          "retrieved": 1,
+          "sources": 3,
+          "exact": 0,
+          "decision": 1,
+          "exceptions": 0,
+          "controls": 1,
+          "abstained": 1,
+          "elapsedMs": 6125,
+          "priced": 4,
+          "meanMicroUsd": 0
+        },
+        {
+          "arm": "cohere",
+          "n": 4,
+          "retrieved": 3,
+          "sources": 3,
+          "exact": 0,
+          "decision": 3,
+          "exceptions": 0,
+          "controls": 1,
+          "abstained": 1,
+          "elapsedMs": 3801.5,
+          "priced": 4,
+          "meanMicroUsd": 291.495
+        },
+        {
+          "arm": "oracle",
+          "n": 4,
+          "retrieved": 3,
+          "sources": 3,
+          "exact": 2,
+          "decision": 3,
+          "exceptions": 2,
+          "controls": 1,
+          "abstained": 1,
+          "elapsedMs": 4650,
+          "priced": 4,
+          "meanMicroUsd": 0
+        }
+      ]
+    },
+    {
+      "locale": "zh-Hant",
+      "observed": 12,
+      "pairs": 4,
+      "arms": [
+        {
+          "arm": "current",
+          "n": 4,
+          "retrieved": 1,
+          "sources": 3,
+          "exact": 0,
+          "decision": 1,
+          "exceptions": 0,
+          "controls": 1,
+          "abstained": 1,
+          "elapsedMs": 5894,
+          "priced": 4,
+          "meanMicroUsd": 0
+        },
+        {
+          "arm": "cohere",
+          "n": 4,
+          "retrieved": 3,
+          "sources": 3,
+          "exact": 1,
+          "decision": 3,
+          "exceptions": 1,
+          "controls": 1,
+          "abstained": 1,
+          "elapsedMs": 4321.5,
+          "priced": 4,
+          "meanMicroUsd": 293.735
+        },
+        {
+          "arm": "oracle",
+          "n": 4,
+          "retrieved": 3,
+          "sources": 3,
+          "exact": 3,
+          "decision": 3,
+          "exceptions": 3,
+          "controls": 1,
+          "abstained": 1,
+          "elapsedMs": 4625.25,
+          "priced": 4,
+          "meanMicroUsd": 0
+        }
+      ]
+    },
+    {
+      "locale": "fr",
+      "observed": 12,
+      "pairs": 4,
+      "arms": [
+        {
+          "arm": "current",
+          "n": 4,
+          "retrieved": 3,
+          "sources": 3,
+          "exact": 0,
+          "decision": 3,
+          "exceptions": 0,
+          "controls": 1,
+          "abstained": 1,
+          "elapsedMs": 9354.25,
+          "priced": 4,
+          "meanMicroUsd": 0
+        },
+        {
+          "arm": "cohere",
+          "n": 4,
+          "retrieved": 3,
+          "sources": 3,
+          "exact": 0,
+          "decision": 3,
+          "exceptions": 0,
+          "controls": 1,
+          "abstained": 1,
+          "elapsedMs": 2637.5,
+          "priced": 4,
+          "meanMicroUsd": 101.845
+        },
+        {
+          "arm": "oracle",
+          "n": 4,
+          "retrieved": 3,
+          "sources": 3,
+          "exact": 0,
+          "decision": 3,
+          "exceptions": 0,
+          "controls": 1,
+          "abstained": 1,
+          "elapsedMs": 3068.75,
+          "priced": 4,
+          "meanMicroUsd": 0
+        }
+      ]
+    },
+    {
+      "locale": "de",
+      "observed": 12,
+      "pairs": 4,
+      "arms": [
+        {
+          "arm": "current",
+          "n": 4,
+          "retrieved": 3,
+          "sources": 3,
+          "exact": 0,
+          "decision": 3,
+          "exceptions": 0,
+          "controls": 1,
+          "abstained": 1,
+          "elapsedMs": 14902.75,
+          "priced": 4,
+          "meanMicroUsd": 0
+        },
+        {
+          "arm": "cohere",
+          "n": 4,
+          "retrieved": 3,
+          "sources": 3,
+          "exact": 0,
+          "decision": 3,
+          "exceptions": 0,
+          "controls": 1,
+          "abstained": 1,
+          "elapsedMs": 2533.75,
+          "priced": 4,
+          "meanMicroUsd": 99.915
+        },
+        {
+          "arm": "oracle",
+          "n": 4,
+          "retrieved": 3,
+          "sources": 3,
+          "exact": 0,
+          "decision": 3,
+          "exceptions": 0,
+          "controls": 1,
+          "abstained": 1,
+          "elapsedMs": 3149,
+          "priced": 4,
+          "meanMicroUsd": 0
+        }
+      ]
+    },
+    {
+      "locale": "es",
+      "observed": 12,
+      "pairs": 4,
+      "arms": [
+        {
+          "arm": "current",
+          "n": 4,
+          "retrieved": 3,
+          "sources": 3,
+          "exact": 0,
+          "decision": 3,
+          "exceptions": 0,
+          "controls": 1,
+          "abstained": 1,
+          "elapsedMs": 10680.75,
+          "priced": 4,
+          "meanMicroUsd": 0
+        },
+        {
+          "arm": "cohere",
+          "n": 4,
+          "retrieved": 3,
+          "sources": 3,
+          "exact": 0,
+          "decision": 3,
+          "exceptions": 0,
+          "controls": 1,
+          "abstained": 1,
+          "elapsedMs": 3685.25,
+          "priced": 4,
+          "meanMicroUsd": 104.52000000000001
+        },
+        {
+          "arm": "oracle",
+          "n": 4,
+          "retrieved": 3,
+          "sources": 3,
+          "exact": 0,
+          "decision": 3,
+          "exceptions": 0,
+          "controls": 1,
+          "abstained": 1,
+          "elapsedMs": 5896,
+          "priced": 4,
+          "meanMicroUsd": 0
+        }
+      ]
+    },
+    {
+      "locale": "pt",
+      "observed": 12,
+      "pairs": 4,
+      "arms": [
+        {
+          "arm": "current",
+          "n": 4,
+          "retrieved": 3,
+          "sources": 3,
+          "exact": 0,
+          "decision": 3,
+          "exceptions": 0,
+          "controls": 1,
+          "abstained": 1,
+          "elapsedMs": 10054.5,
+          "priced": 4,
+          "meanMicroUsd": 0
+        },
+        {
+          "arm": "cohere",
+          "n": 4,
+          "retrieved": 3,
+          "sources": 3,
+          "exact": 0,
+          "decision": 3,
+          "exceptions": 0,
+          "controls": 1,
+          "abstained": 1,
+          "elapsedMs": 3855.75,
+          "priced": 4,
+          "meanMicroUsd": 109.345
+        },
+        {
+          "arm": "oracle",
+          "n": 4,
+          "retrieved": 3,
+          "sources": 3,
+          "exact": 0,
+          "decision": 3,
+          "exceptions": 0,
+          "controls": 1,
+          "abstained": 1,
+          "elapsedMs": 3907.25,
+          "priced": 4,
+          "meanMicroUsd": 0
+        }
+      ]
+    }
+  ]
+}

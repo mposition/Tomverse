@@ -180,16 +180,26 @@ test("Task brief and approved cost must match the stored proposal and current pr
   assert.equal(inspectAmuxV4CardRegistration(stalePrice).ok, false);
 });
 
+// Owner direction 2026-11-15: no path count limit, and a path repeated after
+// normalisation counts once.
+const fortyOnePaths = () => Array.from({ length: 41 }, (_, index) => `src/${index}.ts`);
+
+test("a Task with many or repeated paths registers", () => {
+  const proposal = taskFixture().input.proposal;
+  // More than 40 paths settles to frontier, as grade derivation always did.
+  assert.deepEqual(inspectAmuxV20TaskRegistration({ ...structuredClone(proposal),
+    expectedPaths: fortyOnePaths() }), { ok: true, executionGrade: "frontier" });
+  const repeated = inspectAmuxV20TaskRegistration({ ...structuredClone(proposal),
+    expectedPaths: ["src/worker.ts", "./src/worker.ts"] });
+  assert.equal(repeated.ok, true);
+});
+
 test("v20 Task guard reports each path and role refusal before registration", () => {
   const proposal = taskFixture().input.proposal;
   for (const [mutate, code] of [
     [(value) => { delete value.expectedPaths; }, "task_expected_paths_missing"],
     [(value) => { value.expectedPaths = []; }, "task_expected_paths_out_of_range"],
-    [(value) => { value.expectedPaths = Array.from({ length: 41 }, (_, index) => `src/${index}.ts`); },
-      "task_expected_paths_out_of_range"],
     [(value) => { value.expectedPaths = ["../escape.ts"]; }, "task_expected_path_invalid"],
-    [(value) => { value.expectedPaths = ["src/worker.ts", "./src/worker.ts"]; },
-      "task_expected_paths_duplicate"],
     [(value) => { value.expectedPaths = ["lib/amux/guard.ts", "src/worker.ts"]; },
       "task_expected_paths_mixed"],
     [(value) => { value.taskRole = "review"; }, "task_role_review_refused"],
@@ -225,11 +235,7 @@ test("the final card registration boundary preserves v20 path and role refusals"
   for (const [options, code] of [
     [{ expectedPaths: undefined }, "task_expected_paths_missing"],
     [{ expectedPaths: [] }, "task_expected_paths_out_of_range"],
-    [{ expectedPaths: Array.from({ length: 41 }, (_, index) => `src/${index}.ts`) },
-      "task_expected_paths_out_of_range"],
     [{ expectedPaths: ["../escape.ts"] }, "task_expected_path_invalid"],
-    [{ expectedPaths: ["src/worker.ts", "./src/worker.ts"] },
-      "task_expected_paths_duplicate"],
     [{ expectedPaths: ["lib/amux/guard.ts", "src/worker.ts"] },
       "task_expected_paths_mixed"],
     [{ taskRole: "review" }, "task_role_review_refused"],

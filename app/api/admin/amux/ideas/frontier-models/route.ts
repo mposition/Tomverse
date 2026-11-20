@@ -13,10 +13,6 @@ import { apiSecurityResponse, consumeApiRateLimit, readLimitedText } from "@/lib
 import { authOptions } from "@/lib/auth";
 import {
   AMUX_V4_FRONTIER_CATALOG_BODY_MAX_BYTES,
-  AMUX_V4_FRONTIER_CATALOG_READ_ENV,
-  AMUX_V4_FRONTIER_CATALOG_WRITE_ENV,
-  frontierCatalogReadPermitted,
-  frontierCatalogWritePermitted,
   inspectFrontierCatalogWrite,
   isFrontierApprovalId,
 } from "@/lib/amux/ideaFrontierCatalogWriteCore";
@@ -77,9 +73,6 @@ export async function POST(request: Request) {
   try {
     const session = await owner();
     if (session instanceof NextResponse) return session;
-    if (!frontierCatalogWritePermitted(process.env[AMUX_V4_FRONTIER_CATALOG_WRITE_ENV])) {
-      return NextResponse.json({ error: "write_disabled" }, { status: 503, headers: noStore });
-    }
     if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !== "application/json") {
       return NextResponse.json({ error: "content_type_refused" },
         { status: 415, headers: noStore });
@@ -110,9 +103,6 @@ export async function GET(request: Request) {
   try {
     const session = await owner();
     if (session instanceof NextResponse) return session;
-    if (!frontierCatalogReadPermitted(process.env[AMUX_V4_FRONTIER_CATALOG_READ_ENV])) {
-      return NextResponse.json({ error: "read_disabled" }, { status: 503, headers: noStore });
-    }
     await consumeApiRateLimit(request, session.user!.id!, "admin-amux-v4-frontier-catalog-read", {
       minute: 15, day: 100,
     });

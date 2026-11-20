@@ -1,17 +1,8 @@
 /**
  * Orchestration policy v52: one execution grade for each newly registered v4 Task.
  * This module is pure so intake, the runner and the app's PR observer can apply
- * the same path judgement without reading a switch or calling a model.
+ * the same path judgement without calling a model.
  */
-
-export const AMUX_EXECUTION_GRADE_CODE_LATCH = true;
-export const AMUX_EXECUTION_GRADE_ENV = "TOMVERSE_AMUX_EXECUTION_GRADE";
-
-export const amuxExecutionGradeRoutingOpen = (codeLatch: boolean,
-  value: string | undefined) => codeLatch && value === "enabled";
-
-export const amuxExecutionGradeRoutingEnabled = (value: string | undefined) =>
-  amuxExecutionGradeRoutingOpen(AMUX_EXECUTION_GRADE_CODE_LATCH, value);
 
 /** The sole contract-path list. Change it only with the approved policy. */
 export const AMUX_CONTRACT_PATHS = [
@@ -153,17 +144,29 @@ export const decideAmuxV52ChangedPaths = (grade: unknown,
   return contract && grade !== "frontier" ? "escalate" : "pass";
 };
 
-/** A publish candidate must be covered by the runner's complete path inventory. */
+/** Every path a patch names must be covered by the runner's complete path
+ * inventory (`patchPaths`: what the patch text names, with any file an older
+ * sidecar stored bytes for). */
 export const decideAmuxV52SettlementPaths = (grade: unknown,
-  changedPaths: unknown, publishFiles: readonly { path: string }[] | null):
+  changedPaths: unknown, patchPaths: readonly { path: string }[] | null):
   AmuxV52PathDecision => {
   const reported = decideAmuxV52ChangedPaths(grade, changedPaths);
-  if (reported === "blocked" || !publishFiles?.length) return reported;
-  const names = changedPaths as string[];
-  const missing = publishFiles.map((file) => file.path)
-    .filter((path) => !names.includes(path));
+  if (reported === "blocked" || !patchPaths?.length) return reported;
+  const names = new Set(changedPaths as string[]);
+  const missing = patchPaths.map((file) => file.path)
+    .filter((path) => !names.has(path));
   return missing.length === 0 ? reported : "blocked";
 };
+
+/**
+ * Whether a lower grade's escalation may be judged at frontier in place (the
+ * local CLI flow, owner decision 2026-11-15): its complete inventory must
+ * pass at frontier, so only the contract touch is what raises it. An invalid
+ * or uncovered path still blocks.
+ */
+export const amuxV52InPlaceEscalationAllowed = (changedPaths: unknown,
+  publishFiles: readonly { path: string }[] | null) =>
+  decideAmuxV52SettlementPaths("frontier", changedPaths, publishFiles) === "pass";
 
 /** An implement run that succeeded with a diff needs its v52 review. One that
  * reported no changed path and left no patch has nothing to review: it settles

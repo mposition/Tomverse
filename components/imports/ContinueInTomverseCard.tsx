@@ -57,19 +57,21 @@ export function ContinueInTomverseCard({
      * A default that hides is the one that fails safe.
      */
     enabled = false,
+    fromJourney = false,
 }: {
     externalConversationId: string;
     enabled?: boolean;
+    fromJourney?: boolean;
 }) {
     const { t } = useLanguage();
     const [state, setState] = useState<CardState>({ kind: "idle" });
-    const launcher = useContinuationLauncher({ externalConversationId });
+    const launcher = useContinuationLauncher({ externalConversationId }, { journeyEntry: "import_viewer" });
     const creating = launcher.status === "creating";
 
-    // Arming does not mint anything. A failed attempt collapses back to this
+    // Arming starts the observation, but does not mint a product idempotency key. A failed attempt collapses back to this
     // CTA, so pressing it again is a retry of that attempt and must keep its
     // key; only `launcher.cancel()` below says otherwise.
-    const arm = useCallback(() => setState({ kind: "armed" }), []);
+    const arm = useCallback(() => { launcher.begin(); setState({ kind: "armed" }); }, [launcher]);
 
     if (!enabled) return null;
 
@@ -97,6 +99,8 @@ export function ContinueInTomverseCard({
                         {t("continuation.ctaAction")}
                         <ArrowRight className="h-4 w-4" aria-hidden="true" />
                     </button>
+                    {fromJourney && <button className="ml-2 inline-flex min-h-11 items-center text-sm font-semibold text-blue-600" disabled={creating}
+                        onClick={() => void launcher.start(true)}>{t("journey.pickSource")}</button>}
                     {launcher.status === "failed" ? (
                         <p
                             className="mt-2 text-sm leading-6 text-red-600 dark:text-red-300"

@@ -212,7 +212,7 @@ test("PG17 permits atomic zero-consumption v2 to v4 recovery and terminal receip
         "catalogDeleted" BOOLEAN NOT NULL DEFAULT false, "reasoning" TEXT,
         "contextWindowTokens" INTEGER, "supportsImage" BOOLEAN NOT NULL DEFAULT false,
         "supportsNativePdf" BOOLEAN NOT NULL DEFAULT false,
-        "webSearchOverride" TEXT, "maxImages" INTEGER,
+        "webSearchOverride" TEXT, "fileToolsOverride" BOOLEAN, "maxImages" INTEGER,
         "maxBase64ImagePayloadBytes" INTEGER,
         "maxOutputTokens" INTEGER, "reservationOutputTokens" INTEGER,
         "inputUsdPerMillionTokens" DOUBLE PRECISION,

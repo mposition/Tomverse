@@ -26,7 +26,22 @@ export const AI_LINE = Object.freeze({
   "zh-Hant": "影片：部分由 AI 生成",
   "zh-Hans": "视频：部分由 AI 生成",
 });
-export const LIMITS = Object.freeze({ shots: 3, lines: [3, 10], lineChars: 200, localeChars: 700, screenLines: 16, screenChars: 60, altChars: 400, promptChars: 2500, seconds: [15, 38] });
+export const LIMITS = Object.freeze({ shots: 3, lines: [3, 10], lineChars: 200, localeChars: 700, screenLines: 16, screenChars: 60, altChars: 400, promptChars: 2500, seconds: [15, 38], filmSeconds: 40 });
+
+/**
+ * Characters (spaces left out) each locale's fixed ElevenLabs voice speaks a second, measured on
+ * this job's own takes (38 lines each, runs 20261112-20261113-2): the estimate came within about
+ * 2 s of the real narration on every run.
+ */
+export const SPEECH_RATE = Object.freeze({ en: 11.5, ko: 6.0, "zh-Hant": 5.2, "zh-Hans": 5.2 });
+/** Room left for the estimate's error. */
+export const NARRATION_MARGIN = 1.5;
+/** About how long a locale's narration runs, with the breaths between lines and the end card (as the voice step counts it). */
+export function narrationSeconds(lines, locale) {
+  const rate = SPEECH_RATE[locale] ?? SPEECH_RATE.en;
+  const chars = lines.reduce((sum, line) => sum + String(line).replace(/\s+/gu, "").length, 0);
+  return chars / rate + 0.35 * Math.max(0, lines.length - 1) + 2.5;
+}
 const URL_LIKE = /https?:|www\.|\b[a-z0-9-]+\.(?:com|net|org|ai|io|co)\b/iu;
 
 const isText = (value, max) => typeof value === "string" && value.trim().length > 0 && value.length <= max;
@@ -41,6 +56,70 @@ export const compact = (text) => String(text ?? "").toLowerCase().normalize("NFK
 export function fileRule(tool, file, resolve = path.resolve, sep = path.sep) {
   const absolute = resolve(file).split(sep).join("/").replace(/^([A-Za-z]):/u, (_, drive) => `/${drive.toLowerCase()}`);
   return `${tool}(/${absolute})`;
+}
+
+/**
+ * The stills in `dir` as posix paths, sorted, at most about `keep` of them spread evenly. The plan
+ * and review calls have Read only, which cannot list a folder, so every still they are to look at
+ * is named in the prompt (run 20261111's review saw none and gave no verdict).
+ */
+export function stillsIn(dir, keep = Infinity) {
+  const files = existsSync(dir) ? readdirSync(dir).filter((file) => /\.(?:png|jpe?g)$/u.test(file)).sort() : [];
+  const step = Math.max(1, Math.ceil(files.length / keep));
+  return files.filter((_, index) => index % step === 0).map((file) => path.join(dir, file).split(path.sep).join("/"));
+}
+
+/** The final answer in a Claude CLI stream-json transcript, or null. */
+export function answerOf(stream) {
+  let answer = null;
+  for (const line of String(stream ?? "").split(/\r?\n/u)) {
+    try {
+      const event = JSON.parse(line);
+      if (event.type === "result" && typeof event.result === "string") answer = event.result;
+    } catch {
+      // not an event
+    }
+  }
+  return answer;
+}
+
+/**
+ * Where a run's build stands, from its calls/ transcripts: how many build rounds ran and the last
+ * review's verdict (null when none answered). A rebuild (owner 2026-11-11) goes on from there with
+ * the run's paid shots, music and voice, so it spends nothing.
+ */
+export function lastBuild(callsDir) {
+  const files = existsSync(callsDir) ? readdirSync(callsDir) : [];
+  const rounds = (prefix) => files.map((file) => new RegExp(`^${prefix}-(\\d+)\\.jsonl$`, "u").exec(file)?.[1]).filter(Boolean).map(Number);
+  const builds = rounds("build");
+  const reviews = rounds("review");
+  const last = reviews.length > 0 ? Math.max(...reviews) : 0;
+  const review = last > 0 ? jsonLine(answerOf(readFileSync(path.join(callsDir, `review-${last}.jsonl`), "utf8")), "review") : null;
+  return { rounds: builds.length > 0 ? Math.max(...builds) : 0, review: review && typeof review === "object" ? review : null };
+}
+
+/**
+ * The pack a run's copied captures came from, among `packs` (approved now): the one of the topic
+ * and locale whose present captures are exactly the files in `captureDir`, by name and byte. A
+ * rebuild renders those copies, so its words and claims must come from that pack and no other; when
+ * none matches (the pack changed or is no longer approved), null.
+ * @returns {{pack: object, words: string[]} | null}
+ */
+export function packOfRun(captureDir, packs, topic, locale) {
+  const copied = existsSync(captureDir) ? readdirSync(captureDir).sort() : [];
+  if (copied.length === 0) return null;
+  for (const pack of packs) {
+    if (pack.topic !== topic || pack.locale !== locale) continue;
+    const entries = Object.entries(pack.captures);
+    const named = entries.map(([name, { file }]) => `${name}${path.extname(file)}`);
+    if (named.length !== copied.length || [...named].sort().some((name, index) => name !== copied[index])) continue;
+    const same = entries.every(([name, { file }]) => {
+      const from = path.join(pack.dir, file);
+      return existsSync(from) && readFileSync(from).equals(readFileSync(path.join(captureDir, `${name}${path.extname(file)}`)));
+    });
+    if (same) return { pack, words: entries.map(([, { text }]) => text) };
+  }
+  return null;
 }
 
 /** The JSON object on the first line of `text` that has `key`, or null. */
@@ -89,7 +168,18 @@ export function checkPlan(answer, { packs, history = [] }) {
     if (!Array.isArray(words.lines) || words.lines.length < LIMITS.lines[0] || words.lines.length > LIMITS.lines[1]) return refuse(`${locale}: lines is a list of ${LIMITS.lines[0]}-${LIMITS.lines[1]} narration lines`);
     if (!words.lines.every((line) => isText(line, LIMITS.lineChars))) return refuse(`${locale}: a narration line is empty or longer than ${LIMITS.lineChars}`);
     if (words.lines.join("").length > LIMITS.localeChars) return refuse(`${locale}: the narration is longer than ${LIMITS.localeChars} characters`);
-    if (!Array.isArray(words.screen) || words.screen.length > LIMITS.screenLines || !words.screen.every((line) => isText(line, LIMITS.screenChars))) return refuse(`${locale}: screen is at most ${LIMITS.screenLines} lines of at most ${LIMITS.screenChars}`);
+    // Before anything is paid for: the voice step drops a locale whose narration runs past the film's
+    // length, after paying for it (run 20261113-3: 42-50 s, all three dropped).
+    const runs = narrationSeconds(words.lines, locale);
+    if (runs > LIMITS.filmSeconds - NARRATION_MARGIN) {
+      const rate = SPEECH_RATE[locale] ?? SPEECH_RATE.en;
+      return refuse(`${locale}: the narration would run about ${runs.toFixed(0)} s with the end card, more than ${LIMITS.filmSeconds - NARRATION_MARGIN}; cut about ${Math.ceil((runs - (LIMITS.filmSeconds - NARRATION_MARGIN)) * rate)} characters from its lines`);
+    }
+    if (!Array.isArray(words.screen) || words.screen.length > LIMITS.screenLines || !words.screen.every((line) => isText(line, LIMITS.screenChars))) {
+      // Name the line to mend, so a retry changes that line and nothing else.
+      const long = Array.isArray(words.screen) ? words.screen.find((line) => !isText(line, LIMITS.screenChars)) : undefined;
+      return refuse(`${locale}: screen is at most ${LIMITS.screenLines} lines of at most ${LIMITS.screenChars} characters${Array.isArray(words.screen) && words.screen.length > LIMITS.screenLines ? ` (it has ${words.screen.length})` : ""}${long !== undefined ? `; shorten or split ${JSON.stringify(String(long).slice(0, 120))}` : ""}`);
+    }
     if (!words.screen.includes(AI_LINE[locale])) return refuse(`${locale}: screen must include the AI line "${AI_LINE[locale]}" exactly`);
     if (!isText(words.alt, LIMITS.altChars)) return refuse(`${locale}: alt is missing or longer than ${LIMITS.altChars}`);
     if ([...words.lines, ...words.screen].some((line) => URL_LIKE.test(line))) return refuse(`${locale}: no web address in the words (the end card carries tomverse.app)`);
@@ -102,6 +192,8 @@ export function checkPlan(answer, { packs, history = [] }) {
 
 /** Import specifiers the film may use; anything else (and every package) is refused. */
 const ALLOWED_IMPORTS = new Set(["react", "remotion"]);
+/** The creative kit (creative-kit/), copied into the run by render-creative.mjs: the job's code, not the film's. */
+const KIT_IMPORT = "../kit";
 const LOCAL_IMPORT = /^\.\/([A-Za-z0-9_-]+)(\.tsx?)?$/u;
 /**
  * A second, cruder layer after the parser: words that have no place in a film
@@ -116,6 +208,9 @@ const FORBIDDEN = [
   [/https?:\/\/|\/\/[a-z0-9-]+\.[a-z]|\bnew\s+URL\b/iu, "a URL"],
   [/localStorage|sessionStorage|indexedDB|\bcookie\b/u, "browser storage"],
   [/Math\.random\s*\(|Date\.now\s*\(|new\s+Date\s*\(|performance\.now/u, "randomness or the clock (a frame must be a pure function of time)"],
+  // Screens, the logo and AI clips come only through the kit (Screen, Logo, Shot), which keeps
+  // their words whole, readable and in the safe area, and the AI line on every clip.
+  [/\b(?:Img|OffthreadVideo|IFrame|staticFile)\b|<Video\b|<img\b|<video\b/u, "Img, a video or staticFile (show screens with the kit's Screen, clips with Shot, the logo with Logo, the voice with Narration)"],
 ];
 
 /**
@@ -142,9 +237,9 @@ async function importProblems(dir, names) {
           return { path: args.path, external: true };
         };
         if (args.kind !== "import-statement") return refuse(`${args.kind} of ${args.path} (static imports only)`);
-        if (ALLOWED_IMPORTS.has(args.path)) return { path: args.path, external: true };
+        if (ALLOWED_IMPORTS.has(args.path) || args.path === KIT_IMPORT) return { path: args.path, external: true };
         const local = LOCAL_IMPORT.exec(args.path);
-        if (!local) return refuse(`imports ${args.path} (only react, remotion and ./ files)`);
+        if (!local) return refuse(`imports ${args.path} (only react, remotion, ../kit and ./ files)`);
         const file = (local[2] ? [args.path] : [`${args.path}.tsx`, `${args.path}.ts`]).map((name) => path.join(filmDir, name)).find((candidate) => existsSync(candidate));
         if (!file) return refuse(`imports ${args.path}, which is not a file in film/`);
         return { path: file };
@@ -257,28 +352,37 @@ export function creativeAsset({ id, locale, words, captureWords = [], claimIds =
   const channels = CHANNELS[locale];
   if (!channels) throw new Error(`no channels for ${locale}`);
   const validUntil = new Date(today.getTime() + 90 * 86_400_000).toISOString().slice(0, 10);
-  const inside = captureWords.map((text) => String(text).replace(/\s+/gu, " ").trim()).filter(Boolean);
+  // A space after an ideographic stop before Latin letters, as it is typeset: the Guard reads
+  // "分析。AI 生成" as the host 析.ai (".ai" is a top-level domain) and says to write it this way
+  // (lib/marketingGuardNormalise.ts); run 20261113-2's zh-Hant alt was refused on it.
+  const spaced = (text) => String(text).replace(/。(?=[A-Za-z])/gu, "。 ");
+  const inside = captureWords.map((text) => spaced(text).replace(/\s+/gu, " ").trim()).filter(Boolean);
   return {
     asset: {
       id,
       provenance: "capture_with_ai_media",
       allowedChannels: [...channels],
-      alt: { [locale]: words.alt },
+      alt: { [locale]: spaced(words.alt) },
       claimIds: [...new Set(claimIds)],
       validUntil,
       disclosure: Object.fromEntries(channels.map((channel) => [channel, DISCLOSURE[channel]])),
       depictsProductInterface: true,
     },
-    transcript: { [locale]: [words.lines.join(" "), [...words.screen, "tomverse.app"].join("\n"), ...(inside.length > 0 ? [inside.join("\n")] : [])].join("\n\n") },
+    transcript: { [locale]: [spaced(words.lines.join(" ")), [...words.screen.map(spaced), "tomverse.app"].join("\n"), ...(inside.length > 0 ? [inside.join("\n")] : [])].join("\n\n") },
   };
 }
 
-/** The scores CREATIVE-REVIEW.md asks for; a pass needs every one at 8 or more. */
+/** The scores CREATIVE-REVIEW.md asks for: notes for the person in Admin, not a gate. */
 export const REVIEW_SCORES = Object.freeze(["creative", "craft", "readability", "truth", "disclosure"]);
-/** Whether the review call's answer passes the film: the verdict and every score, checked here. */
+/**
+ * The gates a film must clear to reach Admin (owner 2026-11-13: only what must never reach a
+ * person is held back; craft is judged there). Each must be exactly true in the answer.
+ */
+export const REVIEW_GATES = Object.freeze(["truth", "tone", "disclosure"]);
+/** Whether the review call's answer lets the film go to Admin: a `pass` with every gate true, checked here. */
 export function reviewPassed(review) {
-  if (review?.verdict !== "pass" || !review.scores || typeof review.scores !== "object") return false;
-  return REVIEW_SCORES.every((key) => Number.isFinite(review.scores[key]) && review.scores[key] >= 8 && review.scores[key] <= 10);
+  if (review?.verdict !== "pass" || !review.gates || typeof review.gates !== "object") return false;
+  return REVIEW_GATES.every((key) => review.gates[key] === true);
 }
 
 const PACK_LOCALE = /-(?:en|ko|zh-hant|zh-hans)$/u;

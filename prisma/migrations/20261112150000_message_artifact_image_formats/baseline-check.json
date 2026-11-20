@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "migrationSqlSha256": "3488ab864e247901892202e7d4dc28969735e3a51363c54dd65528f8e63dd7a9",
+  "replacedChecks": [
+    {
+      "table": "MessageArtifact",
+      "constraint": "MessageArtifact_format_check",
+      "previousDefinitionSha256": "775f79215228a4a4b4de465318ff8eb2e7dbb2814f9ff2db7b9f3d563e26e6d3"
+    }
+  ]
+}

@@ -22,7 +22,7 @@ export function scanAmuxNodeDuplicates(input: {
 }): { ok: true; scan: AmuxIdeaDuplicateScan } | { ok: false;
   code: "invalid_input" | "catalog_incomplete" | "too_many_candidates" } {
   if (!REF.test(input.unitId) || typeof input.title !== "string" ||
-      input.title.length < 1 || input.title.length > 200 ||
+      input.title.length < 1 ||
       !["initiative", "epic", "feature"].includes(input.level) ||
       (input.parentId !== null && !REF.test(input.parentId)) ||
       !(input.checkedAt instanceof Date) ||

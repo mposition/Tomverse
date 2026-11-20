@@ -1,12 +1,16 @@
 import { isCanonicalRepoPath } from "@/lib/agentAuthorityFiles";
+import { v22PatchBinaryPayloads } from "@/lib/amux/v22PatchBinary";
+import { AMUX_V22_LEGACY_INLINE_PATCH_MAX_BYTES } from "@/lib/amux/v22PatchLimit";
 import { detectSecrets } from "@/lib/engineeringAgentSecretPatterns";
 import { createHash } from "node:crypto";
 
 export type V22PublishFile = { path: string; mode: "100644";
   bytesBase64: string };
 
-const MAX_PATCH_BYTES = 65_536;
-const MAX_FILE_BYTES = 48 * 1024;
+/** The JSON (files) evidence a sidecar before 2026-11-15 sent keeps the old
+ * inline bound. Text evidence has none of ours (owner decision 2026-11-18,
+ * docs/policy/amux-v22-result-transfer.md): it is the patch itself. */
+const MAX_JSON_EVIDENCE_BYTES = AMUX_V22_LEGACY_INLINE_PATCH_MAX_BYTES;
 const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 const utf8 = new TextDecoder("utf-8", { fatal: true });
 
@@ -16,18 +20,22 @@ export function v22PublishFilesSha256(files: readonly V22PublishFile[]): string 
   return createHash("sha256").update(JSON.stringify(files)).digest("hex");
 }
 
-/** Sparse file evidence is never publication authority by itself. */
-export function encodeV22PatchEvidence(text: string,
-  files?: readonly V22PublishFile[]): Buffer {
-  if (!text.startsWith("diff --git ") || detectSecrets(text).length)
-    throw new Error("invalid_patch_evidence");
-  if (!files) {
-    const bytes = Buffer.from(text, "utf8");
-    if (bytes.length < 1 || bytes.length > MAX_PATCH_BYTES ||
-        text.includes("\0")) throw new Error("invalid_patch_evidence");
-    return bytes;
-  }
-  if (files.length < 1 || files.length > 5)
+type V22PublishFileLimits = Readonly<{ maxFiles: number;
+  maxFileBytes: number; maxTotalBytes: number }>;
+
+/** File bytes a sidecar before 2026-11-15 stored beside the patch text (it
+ * sent up to five, 48 KiB in all). Still accepted, so its settlement and the
+ * rows it left keep their evidence, but bounded only as the evidence is: the
+ * candidate rebuilds from the text and reads none of them. */
+export const V22_STORED_FILE_LIMITS: V22PublishFileLimits = Object.freeze({
+  maxFiles: Number.MAX_SAFE_INTEGER, maxFileBytes: MAX_JSON_EVIDENCE_BYTES,
+  maxTotalBytes: MAX_JSON_EVIDENCE_BYTES });
+
+/** Canonical paths and base64, UTF-8 text with no NUL and no secret. Throws
+ * `invalid_patch_evidence`; returns copies of the checked fields. */
+export function checkV22PublishFiles(files: readonly V22PublishFile[],
+  limits: V22PublishFileLimits): V22PublishFile[] {
+  if (files.length < 1 || files.length > limits.maxFiles)
     throw new Error("invalid_patch_evidence");
   const seen = new Set<string>();
   let aggregate = 0;
@@ -40,10 +48,11 @@ export function encodeV22PatchEvidence(text: string,
     const bytes = Buffer.from(file.bytesBase64, "base64");
     try {
       if (bytes.toString("base64") !== file.bytesBase64 ||
-          bytes.length < 1 || bytes.length > MAX_FILE_BYTES)
+          bytes.length < 1 || bytes.length > limits.maxFileBytes)
         throw new Error("invalid_patch_evidence");
       aggregate += bytes.length;
-      if (aggregate > MAX_FILE_BYTES) throw new Error("invalid_patch_evidence");
+      if (aggregate > limits.maxTotalBytes)
+        throw new Error("invalid_patch_evidence");
       const content = utf8.decode(bytes);
       if (content.includes("\0") || detectSecrets(content).length)
         throw new Error("invalid_patch_evidence");
@@ -51,9 +60,43 @@ export function encodeV22PatchEvidence(text: string,
         bytesBase64: file.bytesBase64 });
     } finally { bytes.fill(0); }
   }
+  return checked;
+}
+
+const utf8Strict = new TextDecoder("utf-8", { fatal: true });
+const latin1 = new TextDecoder("latin1");
+
+/** A secret in the patch text, or inside a binary file it carries (whose
+ * bytes are base85 text of deflated data, so the text shows none of them).
+ * A binary section that cannot be read cannot be shown clean. */
+function patchCarriesSecret(text: string): boolean {
+  if (detectSecrets(text).length) return true;
+  const payloads = v22PatchBinaryPayloads(text);
+  if (payloads === null) return true;
+  return payloads.some((payload) => {
+    let content: string;
+    try { content = utf8Strict.decode(payload); } catch { content = latin1.decode(payload); }
+    return detectSecrets(content).length > 0;
+  });
+}
+
+/** Sparse file evidence is never publication authority by itself. */
+export function encodeV22PatchEvidence(text: string,
+  files?: readonly V22PublishFile[]): Buffer {
+  if (!text.startsWith("diff --git ") || patchCarriesSecret(text))
+    throw new Error("invalid_patch_evidence");
+  if (!files) {
+    const bytes = Buffer.from(text, "utf8");
+    if (bytes.length < 1 || text.includes("\0")) {
+      bytes.fill(0);
+      throw new Error("invalid_patch_evidence");
+    }
+    return bytes;
+  }
+  const checked = checkV22PublishFiles(files, V22_STORED_FILE_LIMITS);
   const encoded = Buffer.from(JSON.stringify({ version: 1, text,
     files: checked }), "utf8");
-  if (encoded.length > MAX_PATCH_BYTES) {
+  if (encoded.length > MAX_JSON_EVIDENCE_BYTES) {
     encoded.fill(0);
     throw new Error("invalid_patch_evidence");
   }

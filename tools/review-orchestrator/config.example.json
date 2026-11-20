@@ -1,6 +1,6 @@
 {
   "stateDir": "/var/lib/review-orchestrator",
-  "timeoutSeconds": 2400,
+  "timeoutSeconds": 7200,
   "waitMaxSeconds": 540,
   "repos": {
     "tomverse": {
@@ -39,6 +39,7 @@
       "id": "codex",
       "vendor": "openai",
       "quotaProbe": "amux",
+      "useCredits": false,
       "enabled": true,
       "maxConcurrent": 2,
       "command": "codex",
@@ -71,6 +72,69 @@
         "--permission-mode", "auto",
         "--model", "{model}"
       ]
+    },
+    {
+      "id": "antigravity-argon",
+      "vendor": "google",
+      "quotaProbe": "antigravity",
+      "quotaGroups": ["Gemini 4 Argon"],
+      "io": "antigravity-stream-json",
+      "enabled": false,
+      "maxConcurrent": 1,
+      "model": "gemini-4-argon-medium",
+      "command": "agy",
+      "args": [
+        "-p", "",
+        "--input-format", "stream-json",
+        "--output-format", "stream-json",
+        "--model", "{model}",
+        "--agent", "review-read",
+        "--disable-slash-commands",
+        "--settings", "{\"permissions\":{\"deny\":[\"command(*)\",\"write_file(*)\",\"read_url(*)\",\"execute_url(*)\",\"mcp(*)\"]}}"
+      ],
+      "passEnv": ["AGY_CLI_DISABLE_AUTO_UPDATE"]
+    },
+    {
+      "id": "antigravity-hydrogen",
+      "vendor": "google",
+      "quotaProbe": "antigravity",
+      "quotaGroups": ["Gemini Models"],
+      "io": "antigravity-stream-json",
+      "enabled": false,
+      "maxConcurrent": 1,
+      "model": "gemini-4-hydrogen-high",
+      "command": "agy",
+      "args": [
+        "-p", "",
+        "--input-format", "stream-json",
+        "--output-format", "stream-json",
+        "--model", "{model}",
+        "--agent", "review-read",
+        "--disable-slash-commands",
+        "--settings", "{\"permissions\":{\"deny\":[\"command(*)\",\"write_file(*)\",\"read_url(*)\",\"execute_url(*)\",\"mcp(*)\"]}}"
+      ],
+      "passEnv": ["AGY_CLI_DISABLE_AUTO_UPDATE"]
+    },
+    {
+      "id": "antigravity-opus",
+      "vendor": "anthropic",
+      "quotaProbe": "antigravity",
+      "quotaGroups": ["Claude and GPT models"],
+      "io": "antigravity-stream-json",
+      "enabled": false,
+      "maxConcurrent": 1,
+      "model": "claude-opus-5-5-high",
+      "command": "agy",
+      "args": [
+        "-p", "",
+        "--input-format", "stream-json",
+        "--output-format", "stream-json",
+        "--model", "{model}",
+        "--agent", "review-read",
+        "--disable-slash-commands",
+        "--settings", "{\"permissions\":{\"deny\":[\"command(*)\",\"write_file(*)\",\"read_url(*)\",\"execute_url(*)\",\"mcp(*)\"]}}"
+      ],
+      "passEnv": ["AGY_CLI_DISABLE_AUTO_UPDATE"]
     },
     {
       "id": "copilot",

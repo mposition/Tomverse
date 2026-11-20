@@ -264,9 +264,10 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
     {
         key: "scheduledJobRuns",
         label: "Scheduled job runs",
-        // The Jobs screen reads the newest 150 across every job, the auto-fix
-        // queue reads unattended failures, and the threshold monitor reads the
-        // last cycle. 30 days is far above all three, and an unattended failure
+        // The Jobs screen reads each job's latest run, latest success, latest
+        // failure, and failures since its latest success. The auto-fix queue
+        // reads unattended failures, and the threshold monitor reads the last
+        // cycle. 30 days is far above all three, and an unattended failure
         // that old is not going to be auto-fixed.
         policy: "Delete scheduled job run records older than 30 days.",
         action: "delete",

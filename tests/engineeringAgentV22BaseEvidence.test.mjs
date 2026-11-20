@@ -119,7 +119,7 @@ test("base evidence admits exact image bytes and the base build's exclusions", a
   assert.equal(result.baseFiles.find((file) =>
     file.path === "tests/support/helper.mjs").text, source.get("helper.mjs"));
   assert.match(result.exclusionDigest, /^[0-9a-f]{64}$/);
-  assert.equal(result.installedVersions.next, "16.3.8");
+  assert.equal("installedVersions" in result, false);
   assert.ok(result.policyDocuments.some((text) =>
     text.includes("tests/e2e/support/canonical-visual.ts")));
 });
@@ -164,7 +164,8 @@ test("a file the running image has at another revision is read from the base blo
       Buffer.from("main revision") : ports.read(path),
     fetchBlob: async (oid, maxBytes) => {
       fetched.push(oid);
-      assert.equal(maxBytes, 2 * 1024 * 1024);
+      // GitHub's own file limit (lib/amux/v22PatchLimit.ts), 2 MiB until 2026-11-15.
+      assert.equal(maxBytes, 100 * 1024 * 1024);
       return fetchBlob(oid);
     },
   });
@@ -174,7 +175,9 @@ test("a file the running image has at another revision is read from the base blo
   assert.equal(result.workflows[0].text, source.get("x.yml"));
 });
 
-test("a fetched blob must match its OID, and fetching is bounded", async () => {
+// Owner decision 2026-11-15: every file that differs is fetched (1,000 at
+// most until then), and a fetch GitHub refuses is retried by the round.
+test("a fetched blob must match its OID, and every differing file is fetched", async () => {
   assert.equal(await loadEngineeringAgentV22BaseEvidence({
     ...ports,
     read: async () => { throw new Error("empty image"); },
@@ -188,13 +191,13 @@ test("a fetched blob must match its OID, and fetching is bounded", async () => {
       type: "blob", oid };
   });
   let calls = 0;
-  assert.equal(await loadEngineeringAgentV22BaseEvidence({
+  assert.ok(await loadEngineeringAgentV22BaseEvidence({
     ...ports, tree: [...tree, ...many],
     read: async (path) => path.includes("generated") ?
       Promise.reject(new Error("absent")) : ports.read(path),
     fetchBlob: async (oid) => { calls += 1; return fetchBlob(oid); },
-  }), null);
-  assert.equal(calls, 1000);
+  }));
+  assert.equal(calls, 1001);
 });
 
 test("vendored AMUX control-plane assets do not exhaust source-reading limits", async () => {
@@ -260,7 +263,18 @@ test("the first missing text starts no further reads", async () => {
     });
     return { result, calls };
   };
-  const missing = await run(async () => { throw new Error("absent"); });
-  assert.equal(missing.result, null);
-  assert.ok(missing.calls <= 16, `calls ${missing.calls}`);
+  // A blob GitHub refuses fails the read (the round retries), and the first
+  // refusal starts no further reads.
+  let calls = 0;
+  await assert.rejects(loadEngineeringAgentV22BaseEvidence({
+    ...ports, tree: [...tree, ...many],
+    read: async (path) => path.includes("/stop/") ?
+      Promise.reject(new Error("not_in_image")) : ports.read(path),
+    fetchBlob: async () => { calls += 1; throw new Error("rate_limited"); },
+  }), /rate_limited/);
+  assert.ok(calls <= 16, `calls ${calls}`);
+  // A blob that does not hash to its id is not text this can trust: T2.
+  const forged = await run(async () => Buffer.from("forged"));
+  assert.equal(forged.result, null);
+  assert.ok(forged.calls <= 16, `calls ${forged.calls}`);
 });

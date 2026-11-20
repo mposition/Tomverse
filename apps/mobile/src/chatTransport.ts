@@ -1,4 +1,6 @@
 export type ChatMessage = {
+  continuationReceipt?: import("../../../lib/continuationReceipt").ContinuationReceipt;
+  researchRunId?: string | null;
   id: string;
   role: "user" | "assistant";
   content: string;
@@ -8,19 +10,42 @@ export type ChatMessage = {
   status?: string;
   pendingJobId?: string | null;
   artifacts?: import("../../../lib/generatedArtifactCore").ChatStreamArtifact[];
-  searchMetadata?: { citations: Array<{ url: string; title?: string }> };
+  searchMetadata?: { citations: Array<{ url: string; title?: string }> } | null;
   attachments?: import("../../../components/chat/types").ChatAttachment[];
   imageTurn?: { groupId: string; modelIds: string[] };
 };
 /** The imported original above a continuation's own turns. Read-only. */
 export type ImportedTranscript = {
+  reviewHandoff?: ReviewHandoffSummary;
   provider: string;
   importedAt: string;
   status: "available" | "deleted" | "locked";
-  messages: Array<{ id: string; role: "user" | "assistant"; content: string; sourceModelLabel: string | null }>;
+  messages: Array<{ id: string; ordinal?: number; role: "user" | "assistant"; content: string; sourceModelLabel: string | null }>;
+  messageTotal?: number;
   /** Index of the first loaded message; earlier ones load a page at a time. */
   offset: number;
   pageSize: number;
+};
+export type ReviewHandoffSummary = {
+  sourceMode: "recorded" | "legacy";
+  nativeTurnCount: number;
+  nativeOmittedCount: number;
+  sourceTurnCount: number;
+  sourceOmittedCount: number;
+  attachmentsSupported: false;
+};
+export type ReviewHandoffDraft = {
+  scopeKey: string;
+  text: string;
+  revision: number;
+  attachmentReferences: [];
+};
+export type ReviewHandoffDraftEnvelope = { scopeKey: string; draft: ReviewHandoffDraft | null };
+export type ReviewHandoffResult = {
+  conversationId: string;
+  route: string;
+  idempotentReplay: boolean;
+  reviewHandoff: ReviewHandoffSummary;
 };
 export type Conversation = {
   id: string;
@@ -36,6 +61,7 @@ export type Conversation = {
   assistantProfileId?: string | null;
   productKey?: string | null;
   imported?: ImportedTranscript;
+  reviewHandoff?: true | ReviewHandoffSummary;
 };
 export type MobileImageGroup = {
   status: string;
@@ -43,7 +69,7 @@ export type MobileImageGroup = {
   generations: Array<{ generationId: string; status: string; prompt: string; quality?: string; preset?: string; assets: Array<{ role: string; url: string; urlExpiresAt?: string }> }>;
 };
 export type MobileImageModel = { id: string; name: string; provider: string; pricingVersion: string; prices: Array<{ quality: "low" | "medium" | "high"; size: "1024x1024" | "1536x1024" | "1024x1536"; credits: number }> };
-export type MobileCapabilities = { historyFeatures?: { sharing: boolean; downloads: boolean }; historyActions?: boolean; conversationTitles?: boolean; accountUsage?: boolean; chatImageTurns?: boolean; chatImageEdits?: boolean; reviewEasy: boolean; maxModels: number; assistants: boolean; images?: { enabled: boolean; maxModels: number; models: MobileImageModel[] }; plan: import("../../../lib/models").ModelTier | "Guest" };
+export type MobileCapabilities = { researchPreview?: { enabled: boolean; pageReading: boolean; durableRuns: boolean }; generatedFileRevisions?: boolean; workspace?: import("./iosWorkspaceContract").WorkspaceFeatures; historyFeatures?: { sharing: boolean; downloads: boolean }; historyActions?: boolean; conversationTitles?: boolean; accountUsage?: boolean; chatImageTurns?: boolean; chatImageEdits?: boolean; reviewEasy: boolean; maxModels: number; assistants: boolean; images?: { enabled: boolean; maxModels: number; models: MobileImageModel[] }; plan: import("../../../lib/models").ModelTier | "Guest" };
 export type AccountUsage = { plan: string; usage: { creditsMonth: number }; limits: { creditsMonth: number } };
 export type UserPreferences = { reviewEasyEffectiveProviders?: string[]; reviewEasyProviderOptions?: string[]; reviewEasyMaxProviders?: number; theme: "system" | "light" | "dark"; language: string; defaultModel: string; timeZone: string; timeZoneChangeAllowedAt?: string | null; imageHandoffAutoGenerate: boolean };
 export type MemoryPreferences = { masterEnabled: boolean; styleEnabled: boolean; defaultConversationMode: "on" | "off" };
@@ -68,8 +94,18 @@ export interface HistoryTransport {
   unlocked(id: string): boolean;
 }
 export type MobileAttachment = { uploadId: string; name: string; mediaType: string; size: number };
+export type ContinuationTurnContext = {
+  sourcePassages?: readonly import("../../../lib/continuationPassages").Passage[];
+  onReceipt?: (receipt: import("../../../lib/continuationReceipt").ContinuationReceipt) => void;
+};
+export type PreparedArtifactRevision = MobileAttachment & { revisionMode?: "workbook" | "workbook-values" };
 export type MobileModel = { id: string; name: string; provider: string; minimumPlan: import("../../../lib/models").AiModel["minimumPlan"] };
 export interface ChatTransport {
+  researchPreviewOffer?(input: import("../../../components/chat/useResearchPreview").ResearchPreviewOfferInput, signal?: AbortSignal, locale?: string): Promise<unknown>;
+  researchRuns?: import("../../../lib/researchPreviewRunClient").ResearchPreviewRunTransport;
+  sendResearchPreview?(conversation: Conversation, text: string, files: MobileAttachment[], signal: AbortSignal, progress: (text: string) => void, options: { durable: boolean; locale: string }): Promise<void>;
+
+  workspace?: import("./iosWorkspaceContract").WorkspaceTransport;
   location?: ReturnType<typeof import("@tomverse/chat-core").createChatLocationSession>;
   history?: HistoryTransport;
   voiceConfiguration?(): Promise<{ enabled: boolean; maxSeconds: number | null }>;
@@ -85,10 +121,16 @@ export interface ChatTransport {
   imageHistory?(id: string): Promise<{ generations: Array<{ groupId: string; prompt: string }> }>;
   imageRequest?(key: string): Promise<{ groupId: string; conversationId: string }>;
   listReview?(): Promise<ChatSummary[]>;
-  createReview?(models: string[]): Promise<Conversation>;
+  createReview?(models: string[], assistantProfileId?: string): Promise<Conversation>;
+  prepareReviewHandoff?(id: string, input: { assistantMessageId: string; idempotencyKey: string }, signal?: AbortSignal): Promise<ReviewHandoffResult>;
+  reviewHandoffDraft?: {
+    get(id: string): Promise<ReviewHandoffDraftEnvelope>;
+    put(id: string, input: { text: string; attachmentReferences: []; expectedRevision: number }): Promise<ReviewHandoffDraftEnvelope>;
+    remove(id: string, expectedRevision: number): Promise<ReviewHandoffDraftEnvelope>;
+  };
   configureReview?(id: string, models: string[]): Promise<Conversation>;
   routeReview?(input: { text: string; context: string; providers: string[]; hasImages: boolean }): Promise<import("../../../lib/reviewRoutingCore").ReviewRouteDecision>;
-  sendReview?(conversation: Conversation, text: string, files: MobileAttachment[], signal: AbortSignal, progress: (modelId: string, text: string) => void): Promise<{ failedModelIds: string[] }>;
+  sendReview?(conversation: Conversation, text: string, files: MobileAttachment[], signal: AbortSignal, progress: (modelId: string, text: string) => void, draft?: { revision: number }): Promise<{ failedModelIds: string[] }>;
   mobileCapabilities?(refresh?: boolean): Promise<MobileCapabilities>;
   usage?(): Promise<AccountUsage>;
   generateTitle?(conversation: Conversation): Promise<string | null>;
@@ -108,6 +150,9 @@ export interface ChatTransport {
   exportAccount(): Promise<void>;
   deleteAccount(confirmationText: string): Promise<void>;
   downloadArtifact(artifact: import("../../../lib/generatedArtifactCore").ChatStreamArtifact): Promise<void>;
+  prepareArtifactRevision?(input: { artifactId: string; conversationId: string; operationId: string }): Promise<PreparedArtifactRevision>;
+  discardAttachment?(uploadId: string): Promise<void>;
+  artifactVersions?(artifactId: string, cursor?: string | null): Promise<import("../../../lib/generatedArtifactVersions").GeneratedArtifactVersions>;
   onSessionLost?(listener: () => void): () => void;
   session(): Promise<boolean>;
   signIn(): Promise<void>;
@@ -117,12 +162,12 @@ export interface ChatTransport {
   list(): Promise<ChatSummary[]>;
   load(id: string): Promise<Conversation>;
   continuationSource?(id: string, offset?: number): Promise<ImportedTranscript>;
-  create(title?: string): Promise<Conversation>;
+  create(title?: string, assistantProfileId?: string): Promise<Conversation>;
   models(): Promise<MobileModel[]>;
   capabilities(): Promise<{ offered: boolean }>;
   configure(id: string, modelId: string, auto: boolean): Promise<Conversation>;
   send(conversation: Conversation, text: string, files: MobileAttachment[], signal: AbortSignal,
-    progress: (text: string) => void): Promise<void>;
+    progress: (text: string) => void, continuation?: ContinuationTurnContext): Promise<void>;
   upload(file: File): Promise<MobileAttachment>;
   transcribe(clip: Blob, signal?: AbortSignal): Promise<string>;
 }

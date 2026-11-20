@@ -32,6 +32,8 @@ export const adminUiMessages = defineAdminMessages({
       comments: "Comment alerts",
       runs: "Runs",
       pullRequests: "Pull requests",
+      switches: "Switches",
+      adFacts: "Ad facts",
     },
     stepUpAction: (label: string) => `Sign in again and ${label.toLowerCase()}`,
     tone: {
@@ -70,6 +72,8 @@ export const adminUiMessages = defineAdminMessages({
       comments: "댓글 알림",
       runs: "실행",
       pullRequests: "Pull request",
+      switches: "스위치",
+      adFacts: "광고 기능 목록",
     },
     stepUpAction: (label: string) => `다시 인증하고 ${label}`,
     tone: {

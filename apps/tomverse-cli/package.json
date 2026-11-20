@@ -1,0 +1,48 @@
+{
+  "name": "@tomverse/cli",
+  "version": "0.1.0",
+  "description": "Tomverse coding CLI: work on your own folder with a Tomverse API key.",
+  "license": "SEE LICENSE IN LICENSE",
+  "author": "Tomverse",
+  "homepage": "https://tomverse.app",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mposition/Tomverse.git",
+    "directory": "apps/tomverse-cli"
+  },
+  "keywords": [
+    "tomverse",
+    "cli",
+    "coding-agent",
+    "ai"
+  ],
+  "type": "module",
+  "bin": {
+    "tomverse": "dist/cli.js"
+  },
+  "files": [
+    "dist/**/*.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "node scripts/build.mjs",
+    "build:binary": "node scripts/build.mjs && node scripts/build-binary.mjs",
+    "test": "node --import tsx --test --test-concurrency=1 tests/*.test.ts",
+    "pack:verify": "node scripts/pack-verify.mjs",
+    "prepublishOnly": "node scripts/build.mjs && node scripts/pack-verify.mjs"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "4.0.114",
+    "ai": "7.0.169",
+    "zod": "4.6.7"
+  }
+}

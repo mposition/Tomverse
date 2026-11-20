@@ -110,13 +110,49 @@ export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
   // historical version on 2026-11-05. Later observations may differ; they need
   // their own approval before this gate permits release-note publication.
   // Current observed copy is evidence only; its digest is not a new approval.
+  // The 2026-11-15 provider-table repair preserves reviewed rows and names
+  // Cohere with an explicit unverified-account notice. This observation does
+  // not add its digest to APPROVED_AMENDED_DIGESTS or authorize any email.
+  // The semantic-search notice (flag false, so the page does not show it yet)
+  // moved this digest on 2026-11-12: evidence only, not approval, and it is not
+  // in APPROVED_AMENDED_DIGESTS.
+  // The fallback-provider disclosure in English and Korean changes the observed
+  // content on 2026-11-15. This records that content, not publication approval.
+  // The Memory semantic-search copy correction also changes the source digest
+  // while its notice remains hidden. Record the observation without approving it.
+  // 2026-11-17: the provider table gains unverified rows for the image-only
+  // providers fal and Black Forest Labs (enabled FLUX 3 models). Observation
+  // only; not added to APPROVED_AMENDED_DIGESTS and authorizes no email.
+  // 2026-11-19: accuracy pass from the policy-page review (Tomverse-chosen
+  // helper calls, image tools, scanned-PDF OCR, Google Drive, API keys,
+  // service providers, OAIC complaint route, share links, locks, and that a
+  // lock does not close an existing share link; zh/fr/de/es/pt fallback and
+  // refusal lines brought in line with en). Observation
+  // only; the effective date did not move, nothing is added to
+  // APPROVED_AMENDED_DIGESTS and no email is authorized.
+  // 2026-11-19: the external-import notice names Perplexity and says that, for
+  // a Perplexity export, short excerpts of each question and the answer text
+  // around it go to an AI model provider (OpenAI) to find where questions end
+  // (owner decision in chat; docs/policy/external-conversation-import-and-memory.md
+  // §16). Observation only; the effective date did not move, nothing is added
+  // to APPROVED_AMENDED_DIGESTS and no email is authorized.
+  // 2026-11-20: V2 page design (components/marketing/v2/policy): only
+  // PrivacyPolicy.tsx's layout moved; no wording changed (the privacyPolicy
+  // locale copy, ProviderDestinationTable.tsx, providerDataDestinations.ts and
+  // privacyNoticeStatus.ts are byte-for-byte the same). Observation only, not
+  // an approval; the effective date did not move, nothing is added to
+  // APPROVED_AMENDED_DIGESTS and no email is authorized.
   "/privacy": {
     date: "2026-11-16",
-    contentSha256: "b0bc2c14d4e3c4283f480971cb84b57492d01319696ecea665117f0f525f5a0d",
+    contentSha256: "0f3fb8cdf9a10347d278d40328fedac94a1299df2c8cf4a2e258561ac34910c9",
   },
+  // 2026-11-19: terms gain the API-key clause, the app-store billing and
+  // non-expiring store credit sentences, and the missing zh clauses.
+  // Observation only, like the privacy entry above; its "Last updated" line
+  // did not move.
   "/terms": {
     date: "2026-11-16",
-    contentSha256: "c3dfd8bbb90a8da7f3f81c43d74b973abe205331b5d13938d64569404c456ffb",
+    contentSha256: "bac70ced1f7468914835335f877bca60e879e4186982d7d40dfee3931411ef26",
   },
 };
 

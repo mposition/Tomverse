@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { Session } from "next-auth";
 import type { Prisma } from "@prisma/client";
 
-import { writeAdminAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
 import { SYSTEM_AUDIT_ACTOR_METADATA_KEY } from "@/lib/adminAuditSystemActors";
 import {
@@ -18,11 +18,9 @@ import {
 import { boardPromotionCardWrite } from "@/lib/amux/boardPromotionCore";
 import { AMUX_INCIDENT_SETTING_KEY, parseAmuxIncidentSetting } from "@/lib/amux/incidentCore";
 import {
-  RECOMMENDATION_APPLY_ENV,
   RECOMMENDATION_AUDIT_KEYS,
   RECOMMENDATION_CAPACITY_AUDIT_KEYS,
   RECOMMENDATION_CAPACITY_ID,
-  RECOMMENDATION_CODE_LATCH,
   RECOMMENDATION_EXPIRY_MS,
   RECOMMENDATION_LOCK_NAME,
   RECOMMENDATION_POLICY_VERSION,
@@ -35,7 +33,6 @@ import {
   parseRecommendationCapacityRequest,
   parseRecommendationDecisionRequest,
   parseRecommendationPrepareRequest,
-  recommendationApplyPermitted,
   recommendationApproveStillIncluded,
   recommendationAuditMetadata,
   recommendationReviewAfterAccepted,
@@ -112,6 +109,8 @@ const withRecommendationTransaction = async <T>(
       async (tx) => {
         await tx.$executeRaw`SELECT set_config('statement_timeout', ${BOARD_IMPORT_STATEMENT_TIMEOUT}, true)`;
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${RECOMMENDATION_LOCK_NAME}))`;
+        // Audit chain before any card row (lib/adminAudit.ts takeAuditChainLock).
+        await takeAuditChainLock(tx);
         return run(tx, await databaseNow(tx));
       },
       { maxWait: 5_000, timeout: 20_000 },
@@ -403,10 +402,8 @@ const excludedView = (rows: readonly RecommendationRow[]) =>
 
 const viewOf = (
   selection: ReturnType<typeof selectRecommendationRows>,
-  applyPermitted: boolean,
   refusal: string | null = null,
 ) => ({
-  applyPermitted,
   refusal,
   occupied: selection.occupied,
   wipLimit: selection.wipLimit,
@@ -418,23 +415,16 @@ const viewOf = (
   classificationCapacity: "closed" as const,
 });
 
-const writesPermitted = (): boolean =>
-  recommendationApplyPermitted({
-    envValue: process.env[RECOMMENDATION_APPLY_ENV],
-    codeLatch: RECOMMENDATION_CODE_LATCH,
-  });
-
 export async function previewRecommendation(raw: string) {
   const parsed = parseRecommendationPrepareRequest(raw);
   if (!parsed.ok) throw new BoardImportError(parsed.code, 400);
   const now = new Date();
   try {
     const selection = await selectionFor(prisma, now);
-    return viewOf(selection, writesPermitted());
+    return viewOf(selection);
   } catch (error) {
     if (error instanceof BoardImportError && error.code === "snapshot_backstop") {
       return {
-        applyPermitted: writesPermitted(),
         refusal: "snapshot_backstop",
         occupied: 0,
         wipLimit: null,
@@ -512,7 +502,6 @@ export async function commitRecommendationSnapshot(
     status: "prepared" as const,
     includedCount: selection.includedCount,
     rowCount: selection.rows.length,
-    applyPermitted: true,
     included: includedView(selection.rows),
   };
 }
@@ -520,7 +509,6 @@ export async function commitRecommendationSnapshot(
 export async function prepareRecommendation(input: { session: Session; request: Request; raw: string }) {
   const parsed = parseRecommendationPrepareRequest(input.raw);
   if (!parsed.ok) throw new BoardImportError(parsed.code, 400);
-  if (!writesPermitted()) throw new BoardImportError("apply_disabled", 409);
   const snapshotId = randomUUID();
   return withRecommendationTransaction(snapshotId, (tx, now) =>
     commitRecommendationSnapshot(tx, { session: input.session, request: input.request, snapshotId, now }),
@@ -546,7 +534,6 @@ const rowFromItem = (item: {
 });
 
 export async function decideRecommendation(input: { session: Session; request: Request; raw: string }) {
-  if (!writesPermitted()) throw new BoardImportError("apply_disabled", 409);
   let snapshotId: string | null = null;
   try {
     const body = JSON.parse(input.raw) as { snapshotId?: unknown };

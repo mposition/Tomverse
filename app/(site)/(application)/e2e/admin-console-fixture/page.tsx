@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { AmuxExecutionWorkspace } from "@/components/admin/AmuxExecutionWorkspace";
 import { AdminLocaleProvider } from "@/components/admin/AdminLocaleProvider";
+import { QaReleaseCiAdviceSection } from "@/components/admin/QaReleaseCiAdviceSection";
 import { AdminConsoleShell } from "@/components/admin/AdminConsoleShell";
 import { AdminNotesBox } from "@/components/admin/AdminNotesBox";
 import { AdminMemoryImportPanel } from "@/components/admin/AdminMemoryImportPanel";
@@ -186,6 +187,13 @@ export default async function AdminConsoleFixturePage({
         {single(params.drawer) === "open" &&
           <AmuxDecisionMakerRequestDrawer view={dmFixtureDetail} closeHref="/e2e/admin-console-fixture?view=dm" />}
       </AdminLocaleProvider>}
+      {view === "ci-advice" ? <AdminLocaleProvider locale={single(params.locale) === "ko" ? "ko" : "en"}>
+        <QaReleaseCiAdviceSection canWrite={single(params.readOnly) !== "true"} canSend={single(params.readOnly) !== "true"}
+          advice={{ askedAt: "2026-11-13T08:32:00.000Z", answeredAt: "2026-11-13T08:32:00.000Z", suggestions: [
+            { id: "a".repeat(64), title: "Reuse CI fixtures", why: "The unit check takes six minutes.", change: "Reuse the existing compiled fixtures.", savesMinutes: 2, createdAt: "2026-11-13T08:32:00.000Z", status: "open", at: null, amuxIdeaId: null },
+            { id: "b".repeat(64), title: "Review a queued outlier", why: "One run took fifteen minutes.", change: "Inspect the queue before changing the shard count.", savesMinutes: null, createdAt: "2026-11-13T08:32:00.000Z", status: "open", at: null, amuxIdeaId: null },
+          ] }} />
+      </AdminLocaleProvider> : null}
       {view === "narrow" ? (
         <section className="mt-4 flex flex-col gap-4">
           <AdminPrivacyRequestsPanel />

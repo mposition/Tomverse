@@ -42,6 +42,7 @@ import {
 } from "@/lib/adminModelRegistryFilters";
 import { AI_PROVIDERS, PROVIDER_API_CONFIGURATION } from "@/lib/modelRegistryShared";
 import { webSearchCapabilityFromCode } from "@/lib/webSearchCapability";
+import { autoArtifactToolSupport } from "@/lib/generatedArtifactToolPolicy";
 import {
   WEB_SEARCH_OVERRIDE_REFUSED_PROVIDERS,
   isWebSearchOverride,
@@ -94,6 +95,8 @@ type FormState = {
   supportsNativePdf: boolean;
   /** Null follows the code; see lib/webSearchOverride.ts. */
   webSearchOverride: WebSearchOverride | null;
+  /** Null follows the automatic answer; see autoArtifactToolSupport. */
+  fileToolsOverride: boolean | null;
   maxImages: number | null;
   maxBase64ImagePayloadBytes: number | null;
   maxOutputTokens: number | null;
@@ -124,6 +127,7 @@ const emptyForm = (): FormState => ({
   supportsImage: false,
   supportsNativePdf: false,
   webSearchOverride: null,
+  fileToolsOverride: null,
   maxImages: null,
   maxBase64ImagePayloadBytes: null,
   maxOutputTokens: 2048,
@@ -154,6 +158,7 @@ const formFromModel = (model: AdminModel): FormState => ({
   supportsImage: model.inputCapabilities?.image === true,
   supportsNativePdf: model.inputCapabilities?.nativePdf === true,
   webSearchOverride: model.webSearchOverride ?? null,
+  fileToolsOverride: typeof model.fileToolsOverride === "boolean" ? model.fileToolsOverride : null,
   maxImages: model.inputCapabilities?.maxImages || null,
   maxBase64ImagePayloadBytes: model.inputCapabilities?.maxBase64ImagePayloadBytes || null,
   maxOutputTokens: model.maxOutputTokens || null,
@@ -225,6 +230,64 @@ function WebSearchOverrideField({
         {refused ? messages.webSearchRefused : messages.webSearchHelp}
       </span>
     </label>
+  );
+}
+
+/**
+ * The file tools for one model, as a tick box. Unticked or ticked by the code
+ * when nobody has touched it -- recognised from the verified register and the
+ * provider, so a newly added model arrives already set -- and an operator's
+ * click is saved only when it differs from that, so a model left alone keeps
+ * following the code (lib/generatedArtifactToolPolicy.ts).
+ */
+export function FileToolsField({
+  form,
+  messages,
+  onChange,
+}: {
+  form: FormState;
+  messages: {
+    fileTools: string;
+    fileToolsAuto: (on: boolean) => string;
+    fileToolsOverridden: (autoOn: boolean) => string;
+    fileToolsReset: string;
+  };
+  onChange: (value: boolean | null) => void;
+}) {
+  const automatic =
+    autoArtifactToolSupport({ id: form.id, provider: form.provider, usageClass: form.usageClass }) === "verified";
+  const checked = form.fileToolsOverride ?? automatic;
+  return (
+    <div className="md:col-span-2">
+      <label className="flex items-center gap-2 text-sm font-bold text-zinc-300">
+        <input
+          type="checkbox"
+          data-testid="model-file-tools"
+          checked={checked}
+          onChange={(e) => onChange(e.target.checked === automatic ? null : e.target.checked)}
+          className="h-4 w-4"
+        />
+        {messages.fileTools}
+      </label>
+      <span
+        data-testid="model-file-tools-state"
+        className="mt-1 flex flex-wrap items-center gap-2 text-[11px] font-normal normal-case tracking-normal text-zinc-500"
+      >
+        {form.fileToolsOverride === null
+          ? messages.fileToolsAuto(automatic)
+          : messages.fileToolsOverridden(automatic)}
+        {form.fileToolsOverride === null ? null : (
+          <button
+            type="button"
+            data-testid="model-file-tools-reset"
+            onClick={() => onChange(null)}
+            className="rounded-md border border-zinc-700 px-2 py-0.5 font-bold text-zinc-300 hover:bg-zinc-800"
+          >
+            {messages.fileToolsReset}
+          </button>
+        )}
+      </span>
+    </div>
   );
 }
 
@@ -1672,6 +1735,11 @@ export function AdminModelRegistryPanel() {
                   form={form}
                   messages={m.capabilities}
                   onChange={(value) => setField("webSearchOverride", value)}
+                />
+                <FileToolsField
+                  form={form}
+                  messages={m.capabilities}
+                  onChange={(value) => setField("fileToolsOverride", value)}
                 />
               </fieldset>
 

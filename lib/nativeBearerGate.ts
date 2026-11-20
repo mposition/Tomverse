@@ -165,14 +165,44 @@ export function nativeChatBearerRoute(path: string, method: string, enabled = fa
   return false;
 }
 
-/** Native web-parity additions require their own reviewed operational activation. */
-export function nativeParityBearerRoute(path: string, method: string, enabled = false): boolean {
+/** Exact workspace calls consumed by the bundled client; no deletion or sharing. */
+export function nativeWorkspaceBearerRoute(path: string, method: string, enabled = false): boolean {
   if (!enabled) return false;
+  if (path === "/api/assistant-profiles") return method === "POST";
+  // This static subtree is the separate assistant-package import API.
+  if (path === "/api/assistant-profiles/imports" || path.startsWith("/api/assistant-profiles/imports/")) return false;
+  if (/^\/api\/assistant-profiles\/[A-Za-z0-9_-]{1,100}$/.test(path)) return ["GET", "PATCH"].includes(method);
+  if (/^\/api\/assistant-profiles\/[A-Za-z0-9_-]{1,100}\/versions$/.test(path)) return method === "POST";
+  if (/^\/api\/assistant-profiles\/[A-Za-z0-9_-]{1,100}\/knowledge$/.test(path)) return ["GET", "POST"].includes(method);
+  if (path === "/api/imports/external") return method === "POST";
+  if (path === "/api/imports/external/capacity") return method === "GET";
+  // Split hints for a Perplexity file the iOS import sheet is opening:
+  // excerpts in, counts out, nothing stored (lib/perplexitySplitHints.ts).
+  if (path === "/api/imports/external/perplexity-split") return method === "POST";
+  if (/^\/api\/imports\/external\/[A-Za-z0-9_-]{1,100}\/(batches|seal|finalize)$/.test(path)) return method === "POST";
+  if (path === "/api/external-conversations") return method === "GET";
+  if (/^\/api\/external-conversations\/[A-Za-z0-9_-]{1,100}$/.test(path)) return method === "GET";
+  if (/^\/api\/external-conversations\/[A-Za-z0-9_-]{1,100}\/continuations$/.test(path)) return method === "POST";
+  return false;
+}
+
+/** Native web-parity additions require their own reviewed operational activation. */
+export function nativeParityBearerRoute(path: string, method: string, enabled = false, workspaceEnabled = false): boolean {
+  if (!enabled) return false;
+  if (nativeWorkspaceBearerRoute(path, method, workspaceEnabled)) return true;
+  if (process.env.RESEARCH_PREVIEW_NATIVE_ENABLED === "true") {
+    if (path === "/api/chat/research-preview/offer" || path === "/api/chat/research-preview/runs") return method === "POST" || (path.endsWith("/runs") && method === "GET");
+    if (/^\/api\/chat\/research-preview\/runs\/[A-Za-z0-9_-]{1,100}$/.test(path)) return method === "GET";
+    if (/^\/api\/chat\/research-preview\/runs\/[A-Za-z0-9_-]{1,100}\/(?:resume|cancel)$/.test(path)) return method === "POST";
+  }
   // Checkout itself restricts bearer requests to complimentary internal passes.
   if (path === "/api/billing/checkout") return method === "POST";
   if (path === "/api/user/usage") return method === "GET";
   if (path === "/api/conversations/search") return method === "GET";
   if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/continuation$/.test(path)) return method === "GET";
+  if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/continuation\/review-handoff$/.test(path)) return method === "POST";
+  if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/continuation\/review-handoff\/draft$/.test(path)) return ["GET", "PUT", "DELETE"].includes(method);
+  if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/messages\/receipt$/.test(path)) return method === "POST";
   if (path === "/api/projects") return ["GET", "POST"].includes(method);
   if (/^\/api\/projects\/[A-Za-z0-9_-]{1,100}$/.test(path)) return ["PATCH", "DELETE"].includes(method);
   if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}$/.test(path)) return method === "DELETE";
@@ -203,4 +233,20 @@ export function nativeParityBearerRoute(path: string, method: string, enabled = 
   if (/^\/api\/conversations\/[A-Za-z0-9_-]{1,100}\/comparison-reviews\/item-feedback$/.test(path)) return ["GET", "PUT", "DELETE"].includes(method);
   if (/^\/api\/images\/groups\/[A-Za-z0-9_-]{1,100}$/.test(path)) return method === "GET";
   return false;
+}
+
+/**
+ * The generated-file revision switch. Enabled by default; an explicit false
+ * disables the connection, not downloads. `generatedArtifactRevisionCore`
+ * re-exports it; it lives here because proxy.ts needs it and this file has no
+ * imports.
+ */
+export const generatedArtifactRevisionEnabled = () =>
+  (process.env.GENERATED_ARTIFACT_REVISION_ENABLED ?? "true") === "true";
+
+/** Callers resolve the revision switch; Native enrollment still fails closed. */
+export function nativeArtifactRevisionBearerRoute(path: string, method: string, enabled = false): boolean {
+  if (!enabled) return false;
+  if (path === "/api/chat") return method === "DELETE";
+  return method === "GET" && /^\/api\/artifacts\/[A-Za-z0-9_-]{1,64}\/versions$/.test(path);
 }

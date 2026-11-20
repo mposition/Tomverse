@@ -15,31 +15,18 @@ test("stored Chat routes additively while bridge, legacy and Review remain on th
   assert.equal(conversationHandoffHref("chat", "a/b", "/review"), "/chat?conversation=a%2Fb");
   assert.equal(surfaceHasContinuationBridge("chat"), false);
 });
-test("an offered gate is not ownership and legacy product is not Chat authority", () => {
-  assert.deepEqual(decideChatWorkspaceEntry({ authenticated: true, requestedConversation: true, ownedConversation: null, offered: true }), { action: "not_found" });
-  assert.deepEqual(decideChatWorkspaceEntry({ authenticated: true, requestedConversation: true, ownedConversation: { productKey: null, hasContinuationBridge: false }, offered: true }), { action: "redirect", surface: "workspace" });
+test("entry is not ownership and legacy product is not Chat authority", () => {
+  assert.deepEqual(decideChatWorkspaceEntry({ authenticated: true, requestedConversation: true, ownedConversation: null }), { action: "not_found" });
+  assert.deepEqual(decideChatWorkspaceEntry({ authenticated: true, requestedConversation: true, ownedConversation: { productKey: null, hasContinuationBridge: false } }), { action: "redirect", surface: "workspace" });
 });
-test("guest trial opens only a blank local Chat and never treats a URL id as ownership", () => {
-  assert.deepEqual(decideChatWorkspaceEntry({
-    authenticated: false,
-    requestedConversation: false,
-    ownedConversation: null,
-    offered: false,
-    guestTrialAvailable: true,
-  }), { action: "open" });
+test("a blank Chat opens for guests and accounts; a guest URL id is never ownership", () => {
+  for (const authenticated of [false, true]) {
+    assert.deepEqual(decideChatWorkspaceEntry({ authenticated, requestedConversation: false, ownedConversation: null }), { action: "open" });
+  }
   assert.deepEqual(decideChatWorkspaceEntry({
     authenticated: false,
     requestedConversation: true,
-    ownedConversation: null,
-    offered: false,
-    guestTrialAvailable: true,
-  }), { action: "not_found" });
-  assert.deepEqual(decideChatWorkspaceEntry({
-    authenticated: false,
-    requestedConversation: false,
-    ownedConversation: null,
-    offered: true,
-    guestTrialAvailable: false,
+    ownedConversation: { productKey: "chat", hasContinuationBridge: false },
   }), { action: "not_found" });
 });
 test("single-model admission refuses original multi-choice without mutating it", () => {

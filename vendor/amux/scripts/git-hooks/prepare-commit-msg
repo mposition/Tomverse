@@ -151,7 +151,10 @@ fi
 # Still reached when the ancestry walk above found nothing: `tmux
 # display-message` resolves through $TMUX rather than the process tree, so it
 # covers a lane whose pane pid the walk could not see.
-if [ -z "$stamp" ]; then
+# Only inside a pane: without $TMUX, `tmux display-message` names the server's
+# most recently used session, so a commit made from cron or a systemd job would
+# be stamped as whichever lane was touched last.
+if [ -z "$stamp" ] && [ -n "${TMUX:-}" ]; then
   _mr43_tname="$(tmux display-message -p '#S' 2>/dev/null)"
   case "$_mr43_tname" in
     # Same env-file requirement as the walk above (AMUX-4602): recovering a

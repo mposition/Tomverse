@@ -58,6 +58,14 @@ export type CompoundFileEntry = {
 export type CompoundFile = {
     /** Every stream in the container, keyed by lowercased name. */
     readonly streams: ReadonlyMap<string, CompoundFileEntry>;
+    /**
+     * Every stream, duplicates of a name included. `streams` keeps the first
+     * of each name, which is right for looking a fixed stream up and wrong
+     * for anything that must see all of them: two storages may each hold a
+     * stream of the same name, and a measurement that saw one would miss the
+     * other.
+     */
+    readonly allStreams: readonly CompoundFileEntry[];
     /** Reads one stream's bytes, against the budget. */
     readonly read: (entry: CompoundFileEntry) => Uint8Array;
 };
@@ -322,6 +330,7 @@ export function openCompoundFile(
 
     return {
         streams,
+        allStreams: entries.filter((entry) => entry.type === TYPE_STREAM),
         read: (entry) => {
             if (entry.size === 0) return new Uint8Array(0);
             return entry.size < miniStreamCutoff

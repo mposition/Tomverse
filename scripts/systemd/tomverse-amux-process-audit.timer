@@ -1,0 +1,15 @@
+# Asks the app every hour whether a run is due. The cadence (default seven
+# days), the schedule switch (default off) and "run now" are in Admin ›
+# Execution board › Process analysis; a poll that is not due writes nothing.
+[Unit]
+Description=Poll the Tomverse AMUX process analysis schedule
+
+[Timer]
+OnBootSec=10min
+OnUnitInactiveSec=1h
+AccuracySec=1min
+Persistent=false
+Unit=tomverse-amux-process-audit.service
+
+[Install]
+WantedBy=timers.target

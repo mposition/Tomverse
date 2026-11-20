@@ -2,8 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  AMUX_V4_ANALYSIS_RESULT_READ_CODE_ENABLED,
-  amuxV4AnalysisResultReadEnabled,
   matchesAmuxIdeaAnalysisUnitCommitments,
   parseAmuxIdeaAnalysisResultView,
 } from "../lib/amux/ideaAnalysisResultReadCore.ts";
@@ -39,17 +37,11 @@ test("analysis audit commitments reject a changed, missing or reordered unit", (
   const manyCommitments = manyUnits.map((unit) => ({ id: unit.id,
     localRef: unit.localRef, kind: unit.unitKind,
     digest: unit.bodyDigest, digestKeyId: unit.bodyDigestKeyId }));
-  assert.equal(matchesAmuxIdeaAnalysisUnitCommitments(manyCommitments, manyUnits), false);
+  // Owner direction 2026-11-15: a page may hold more than 40 units.
+  assert.equal(matchesAmuxIdeaAnalysisUnitCommitments(manyCommitments, manyUnits), true);
   assert.equal(matchesAmuxIdeaAnalysisUnitCommitments([
     commitments[0], { ...commitments[1], unexpected: "text" },
   ], units), false);
-});
-
-test("the owner result read requires its exact environment switch", () => {
-  assert.equal(AMUX_V4_ANALYSIS_RESULT_READ_CODE_ENABLED, true);
-  assert.equal(amuxV4AnalysisResultReadEnabled("enabled"), true);
-  assert.equal(amuxV4AnalysisResultReadEnabled("disabled"), false);
-  assert.equal(amuxV4AnalysisResultReadEnabled(undefined), false);
 });
 
 test("Admin accepts only its exact idea's bounded result shape", () => {

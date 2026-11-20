@@ -18,49 +18,8 @@ import {
   amuxTabChips,
 } from "../lib/adminAmuxTabStatus.ts";
 import { AUTO_PROMOTION_APPLY_ENV, AUTO_PROMOTION_CODE_LATCH } from "../lib/amux/autoPromotionCore.ts";
-import { BACKLOG_METADATA_APPLY_ENV, BACKLOG_METADATA_CODE_LATCH } from "../lib/amux/backlogMetadataCore.ts";
-import { BOARD_IMPORT_APPLY_CODE_LATCH, BOARD_IMPORT_APPLY_ENV } from "../lib/amux/boardImportCore.ts";
-import { BOARD_PROMOTION_APPLY_CODE_LATCH, BOARD_PROMOTION_APPLY_ENV } from "../lib/amux/boardPromotionCore.ts";
-import {
-  AMUX_RECONCILIATION_APPLY_CODE_LATCH,
-  AMUX_RECONCILIATION_APPLY_ENV,
-} from "../lib/amux/boardReconciliationCore.ts";
-import { AMUX_INTAKE_APPLY_CODE_LATCH, AMUX_INTAKE_APPLY_ENV } from "../lib/amux/intakeCore.ts";
-import { RECOMMENDATION_APPLY_ENV, RECOMMENDATION_CODE_LATCH } from "../lib/amux/recommendationPoolCore.ts";
-import {
-  AMUX_V22_AUTO_PROMOTION_CODE_LATCH,
-  AMUX_V22_AUTO_PROMOTION_ENV,
-} from "../lib/amux/v22AutoPromotionCore.ts";
 
 const read = (path) => readFileSync(join(process.cwd(), path), "utf8");
-
-test("legacy auto-promotion and v22 automatic admission have independent chips", () => {
-  const v22Only = {
-    TOMVERSE_AMUX_BOARD_AUTO_PROMOTE: "disabled",
-    TOMVERSE_AMUX_V22_AUTO_PROMOTE: "enabled",
-  };
-  assert.equal(
-    amuxSwitchedTabStatus("auto-promotion", v22Only),
-    "behind_server_switch"
-  );
-  assert.equal(
-    amuxSwitchedTabStatus("automatic-admission", v22Only),
-    "server_switch_on"
-  );
-
-  const legacyOnly = {
-    TOMVERSE_AMUX_BOARD_AUTO_PROMOTE: "enabled",
-    TOMVERSE_AMUX_V22_AUTO_PROMOTE: "disabled",
-  };
-  assert.equal(
-    amuxSwitchedTabStatus("auto-promotion", legacyOnly),
-    "server_switch_on"
-  );
-  assert.equal(
-    amuxSwitchedTabStatus("automatic-admission", legacyOnly),
-    "behind_server_switch"
-  );
-});
 
 /**
  * For each gated tab: the variable, the shipped latch, and the file where the
@@ -69,46 +28,6 @@ test("legacy auto-promotion and v22 automatic admission have independent chips",
  * test only asks that the chip follow it.
  */
 const SWITCHES = {
-  intake: {
-    env: AMUX_INTAKE_APPLY_ENV,
-    envName: "AMUX_INTAKE_APPLY_ENV",
-    latch: AMUX_INTAKE_APPLY_CODE_LATCH,
-    reader: "app/api/admin/amux/intake/route.ts",
-  },
-  import: {
-    env: BOARD_IMPORT_APPLY_ENV,
-    envName: "BOARD_IMPORT_APPLY_ENV",
-    latch: BOARD_IMPORT_APPLY_CODE_LATCH,
-    latchName: "BOARD_IMPORT_APPLY_CODE_LATCH",
-    reader: "lib/amux/boardImportService.ts",
-  },
-  reconciliation: {
-    env: AMUX_RECONCILIATION_APPLY_ENV,
-    envName: "AMUX_RECONCILIATION_APPLY_ENV",
-    latch: AMUX_RECONCILIATION_APPLY_CODE_LATCH,
-    reader: "app/api/admin/amux/reconciliation/route.ts",
-  },
-  metadata: {
-    env: BACKLOG_METADATA_APPLY_ENV,
-    envName: "BACKLOG_METADATA_APPLY_ENV",
-    latch: BACKLOG_METADATA_CODE_LATCH,
-    latchName: "BACKLOG_METADATA_CODE_LATCH",
-    reader: "lib/amux/backlogMetadataService.ts",
-  },
-  recommendation: {
-    env: RECOMMENDATION_APPLY_ENV,
-    envName: "RECOMMENDATION_APPLY_ENV",
-    latch: RECOMMENDATION_CODE_LATCH,
-    latchName: "RECOMMENDATION_CODE_LATCH",
-    reader: "lib/amux/recommendationPoolService.ts",
-  },
-  promotion: {
-    env: BOARD_PROMOTION_APPLY_ENV,
-    envName: "BOARD_PROMOTION_APPLY_ENV",
-    latch: BOARD_PROMOTION_APPLY_CODE_LATCH,
-    latchName: "BOARD_PROMOTION_APPLY_CODE_LATCH",
-    reader: "lib/amux/boardPromotionService.ts",
-  },
   "auto-promotion": {
     env: AUTO_PROMOTION_APPLY_ENV,
     envName: "AUTO_PROMOTION_APPLY_ENV",
@@ -116,17 +35,7 @@ const SWITCHES = {
     latchName: "AUTO_PROMOTION_CODE_LATCH",
     reader: "lib/amux/autoPromotionService.ts",
   },
-  "automatic-admission": {
-    env: AMUX_V22_AUTO_PROMOTION_ENV,
-    envName: "AMUX_V22_AUTO_PROMOTION_ENV",
-    latch: AMUX_V22_AUTO_PROMOTION_CODE_LATCH,
-    permitName: "amuxV22AutoPromotionEnabled",
-    reader: "lib/amux/v22AutoPromotionService.ts",
-  },
 };
-
-const isServerSwitch = (tab) =>
-  tab === "auto-promotion" || tab === "automatic-admission";
 
 test("every gated AMUX tab has a switch, and nothing else does", () => {
   assert.deepEqual(Object.keys(AMUX_TAB_SWITCHES).sort(), Object.keys(SWITCHES).sort());
@@ -154,26 +63,14 @@ test("each chip reads the variable its section's own route reads", () => {
 
 test("with the variable unset every chip says the writes are closed", () => {
   for (const tab of Object.keys(SWITCHES)) {
-    assert.equal(
-      amuxSwitchedTabStatus(tab, {}),
-      isServerSwitch(tab) ? "behind_server_switch" : "preview_apply_off",
-      tab
-    );
+    assert.equal(amuxSwitchedTabStatus(tab, {}), "behind_server_switch", tab);
   }
 });
 
 test("with the variable enabled a chip says open exactly when the shipped latch is armed", () => {
   for (const [tab, entry] of Object.entries(SWITCHES)) {
     const status = amuxSwitchedTabStatus(tab, { [entry.env]: "enabled" });
-    const expected =
-      isServerSwitch(tab)
-        ? entry.latch
-          ? "server_switch_on"
-          : "behind_server_switch"
-        : entry.latch
-          ? "apply_on"
-          : "preview_apply_off";
-    assert.equal(status, expected, tab);
+    assert.equal(status, entry.latch ? "server_switch_on" : "behind_server_switch", tab);
   }
 });
 
@@ -182,7 +79,7 @@ test("only the exact value opens a switch", () => {
     for (const value of ["Enabled", "true", "1", " enabled", ""]) {
       assert.equal(
         amuxSwitchedTabStatus(tab, { [entry.env]: value }),
-        isServerSwitch(tab) ? "behind_server_switch" : "preview_apply_off",
+        "behind_server_switch",
         `${tab}=${JSON.stringify(value)}`
       );
     }
@@ -191,49 +88,43 @@ test("only the exact value opens a switch", () => {
 
 test("an open switch is drawn for attention and a closed one is not", () => {
   const labels = {
-    preview_apply_off: "off",
-    apply_on: "on",
     behind_server_switch: "behind",
     server_switch_on: "switch on",
     read_only: "read",
   };
   assert.deepEqual(
     amuxTabChips(
-      { intake: "apply_on", import: "preview_apply_off", cards: "read_only", assignment: undefined },
+      { reconciliation: "behind_server_switch", "auto-promotion": "server_switch_on", cards: "read_only", assignment: undefined },
       labels
     ),
     {
-      intake: { label: "on", attention: true },
-      import: { label: "off", attention: false },
+      reconciliation: { label: "behind", attention: false },
+      "auto-promotion": { label: "switch on", attention: true },
       cards: { label: "read", attention: false },
     }
   );
   assert.deepEqual(amuxSwitchedTabStatuses(["auto-promotion"], {}), {
     "auto-promotion": "behind_server_switch",
   });
-  assert.deepEqual(amuxSwitchedTabStatuses(["automatic-admission"], {}), {
-    "automatic-admission": "behind_server_switch",
-  });
 });
 
 test("the pages ask the switches rather than writing the state", () => {
-  // The six retired tools are the Legacy tools of Safety & recovery; the page
-  // reads each one's switch rather than writing the state.
+  // The five retired tools are the Legacy tools of Safety & recovery; the page
+  // reads the switch of each one that still has one rather than writing the state.
   const recovery = read("app/(site)/(application)/admin/amux-recovery/page.tsx");
   assert.ok(
-    recovery.includes("amuxSwitchedTabStatuses(LEGACY_SECTIONS)"),
-    "amux-recovery does not read every legacy section's switch"
+    recovery.includes("amuxSwitchedTabStatuses(SWITCHED_LEGACY_SECTIONS)"),
+    "amux-recovery does not read every switched legacy section's switch"
   );
-  for (const section of ["import", "reconciliation", "metadata", "recommendation", "promotion", "auto-promotion"]) {
+  for (const section of ["reconciliation", "metadata", "recommendation", "promotion", "auto-promotion"]) {
     assert.ok(recovery.includes(`"${section}",`), `${section} is not a legacy section`);
   }
   assert.doesNotMatch(recovery, /apply off|apply_off"|server switch/i, "amux-recovery writes a state");
   assert.doesNotMatch(read("app/(site)/(application)/admin/amux-backlog/page.tsx"), /amuxSwitchedTabStatuses/);
   const settings = read("app/(site)/(application)/admin/amux-settings/page.tsx");
-  assert.match(
-    settings,
-    /amuxSwitchedTabStatus\("automatic-admission"\)/
-  );
+  // Automatic admission has no server switch: its section shows the Admin control alone.
+  assert.doesNotMatch(settings, /amuxSwitchedTabStatus/);
+
   assert.match(settings, /<AmuxV22PromotionControl \/>/);
   assert.doesNotMatch(recovery, /AmuxV22PromotionControl/);
   const execution = read("app/(site)/(application)/admin/amux-execution/page.tsx");

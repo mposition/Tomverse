@@ -17,6 +17,11 @@ import {
   imageExecutionDrift,
   imageExecutionProfile,
   isOfficialSourceUrl,
+  DEFAULT_CODING_CAPABILITY_SOURCES,
+  DEFAULT_PRICE_SOURCES,
+  defaultCodingCapabilitySources,
+  defaultPriceSources,
+  OFFICIAL_SOURCE_HOSTS,
   judgeCodingModel,
   judgeImageModel,
   judgeVideoModel,
@@ -26,8 +31,20 @@ import {
   snapshotIsCurrent,
   SNAPSHOT_RENEWAL_WINDOW_MS,
   stalePricingVersions,
+  applyImageCreditOverrides,
+  freePricingVersion,
+  imageCreditOverrideSchema,
+  reviewImageDraft,
 } from "../lib/modelCatalogCore.ts";
-import { codingDraftFromAnswer, draftPricingVersion, imageDraftFromAnswer, pageToText } from "../lib/modelCatalogDraftLlm.ts";
+import {
+  codingDraftFromAnswer,
+  draftPricingVersion,
+  imageDraftFromAnswer,
+  imageOptionCostMicroUsd,
+  MAX_DRAFT_SOURCES,
+  pageToText,
+} from "../lib/modelCatalogDraftLlm.ts";
+import { AI_PROVIDERS } from "../lib/modelRegistryShared.ts";
 
 const NOW = new Date("2026-10-19T12:00:00Z");
 const enabledSeed = IMAGE_MODEL_REGISTRY.find((model) => model.disabledReason === null);
@@ -131,6 +148,70 @@ test("a thinking cap stated for a provider whose request cannot hold it does not
     priceVerification: googleRevision(heldSeed.id).verification,
   };
   assert.ok(judge()(statedGoogle).reasons.includes("worst_case_cost_unbounded"));
+});
+
+test("a measured Google model serves on its measured bound and only with the measured request", () => {
+  // Owner decision 2026-11-13: Flash's thinking cap is twice the 2,048 output
+  // limit the request sends, at $3.00 per 1M -- 12,288 microUSD, floor 94.
+  const flash = IMAGE_MODEL_REGISTRY.find((model) => model.id === "gemini-3.1-flash-image");
+  const revision = (credits, cap, modelId = flash.id) => ({
+    modelId,
+    pricingVersion: `${modelId}-${credits}-${cap}`,
+    effectiveFrom: new Date("2026-10-19T00:00:00Z"),
+    prices: [{ quality: "medium", size: "1024x1024", credits, outputCostMicroUsd: 67_200 }],
+    verification: {
+      verifiedAt: "2026-10-19",
+      sources: ["https://ai.google.dev/gemini-api/docs/pricing"],
+      thinkingCapMicroUsd: cap,
+    },
+  });
+  const served = (rows, revisions, id = flash.id) => resolve(rows, revisions).models.find((m) => m.id === id);
+
+  // Held as shipped, and still held when priced but not turned on.
+  assert.equal(served([], []).disabledReason, "operational_hold");
+  assert.equal(served([], [revision(94, 12_288)]).disabledReason, "operational_hold");
+  assert.equal(served([row(flash.id, { enabled: true })], [revision(94, 12_288)]).disabledReason, null);
+  // Below the floor, or with a cap under the bound, it does not serve.
+  assert.notEqual(served([row(flash.id, { enabled: true })], [revision(93, 12_288)]).disabledReason, null);
+  assert.equal(
+    served([row(flash.id, { enabled: true })], [revision(10_000, 12_287)]).disabledReason,
+    "worst_case_cost_unbounded"
+  );
+  // No budget, no service.
+  assert.notEqual(
+    resolve([row(flash.id, { enabled: true })], [revision(94, 12_288)], false).models.find((m) => m.id === flash.id).disabledReason,
+    null
+  );
+
+  // A runtime row for the same API model that sends another limit, or pins a
+  // thinking level, is not the request that was measured.
+  const profile = (extra) => ({
+    provider: "google",
+    apiModelId: flash.apiModelId,
+    name: "Runtime Flash",
+    lifecycle: "stable",
+    sizes: ["1024x1024"],
+    qualities: ["medium"],
+    latencyClass: "fast",
+    provenance: ["synthid"],
+    outputMimeTypes: ["image/jpeg"],
+    deliveryMimeType: "image/jpeg",
+    ...extra,
+  });
+  const runtime = (extra) =>
+    served([row("flash-runtime", { profile: profile(extra), enabled: true })], [revision(94, 12_288, "flash-runtime")], "flash-runtime");
+  assert.equal(runtime({ maxOutputTokens: 2_048 }).disabledReason, null);
+  assert.equal(runtime({ maxOutputTokens: 32_768 }).disabledReason, "worst_case_cost_unbounded");
+  assert.equal(runtime({}).disabledReason, "worst_case_cost_unbounded");
+  assert.equal(runtime({ maxOutputTokens: 2_048, thinkingLevel: "high" }).disabledReason, "worst_case_cost_unbounded");
+  const refused = judge()({
+    ...flash,
+    disabledReason: null,
+    maxOutputTokens: 32_768,
+    prices: revision(94, 12_288).prices,
+    priceVerification: revision(94, 12_288).verification,
+  });
+  assert.ok(refused.reasons.includes("measured_request_required:max_output_tokens_2048_no_thinking_level"));
 });
 
 test("a fal revision whose thinking cap is below the pinned surcharge does not serve", () => {
@@ -353,6 +434,42 @@ test("sources must be the provider's own https documentation", () => {
   // A provider name that is an Object prototype key is unknown, not a crash.
   assert.equal(isOfficialSourceUrl("toString", "https://openai.com/x"), false);
   assert.equal(isOfficialSourceUrl("constructor", "https://openai.com/x"), false);
+  // Google's Gemini API docs moved to AI Studio, under /docs/ only: the rest
+  // of that host is user-built apps and shared prompts.
+  assert.equal(isOfficialSourceUrl("google", "https://aistudio.google.com/docs/pricing"), true);
+  assert.equal(isOfficialSourceUrl("google", "https://aistudio.google.com/apps/shared-app"), false);
+  assert.equal(isOfficialSourceUrl("google", "https://aistudio.google.com/docsx/pricing"), false);
+  assert.equal(isOfficialSourceUrl("google", "https://aistudio.google.com/docs/../apps/x"), false);
+  assert.equal(isOfficialSourceUrl("google", "https://ai.google.dev/gemini-api/docs/pricing"), true);
+  // QwenCloud: pricing path and the docs host only.
+  assert.equal(isOfficialSourceUrl("qwen", "https://www.qwencloud.com/pricing/api?region=ap-southeast-1"), true);
+  assert.equal(isOfficialSourceUrl("qwen", "https://docs.qwencloud.com/developer-guides/getting-started/model-prices"), true);
+  assert.equal(isOfficialSourceUrl("qwen", "https://www.qwencloud.com/models"), false);
+  assert.equal(isOfficialSourceUrl("qwen", "https://qwencloud.com/pricing/api"), false);
+  assert.equal(isOfficialSourceUrl("openai", "https://www.qwencloud.com/pricing/api"), false);
+});
+
+test("default price sources are official for their provider and fit the draft limit", () => {
+  for (const [provider, urls] of Object.entries(DEFAULT_PRICE_SOURCES)) {
+    assert.ok(urls.length >= 1 && urls.length <= MAX_DRAFT_SOURCES, provider);
+    for (const url of urls) assert.equal(isOfficialSourceUrl(provider, url), true, url);
+  }
+  assert.deepEqual(defaultPriceSources("qwen"), ["https://www.alibabacloud.com/help/en/model-studio/model-pricing"]);
+  assert.deepEqual(defaultPriceSources("toString"), []);
+  assert.deepEqual(defaultPriceSources("unknown"), []);
+});
+
+test("every chat draft provider has an official tool calling and structured output page", () => {
+  const draftProviders = AI_PROVIDERS.filter((provider) => Object.hasOwn(OFFICIAL_SOURCE_HOSTS, provider));
+  assert.deepEqual(Object.keys(DEFAULT_CODING_CAPABILITY_SOURCES).sort(), [...draftProviders].sort());
+  for (const [provider, sources] of Object.entries(DEFAULT_CODING_CAPABILITY_SOURCES)) {
+    assert.notEqual(sources.toolCalling, sources.structuredOutput, provider);
+    for (const url of [sources.toolCalling, sources.structuredOutput]) assert.equal(isOfficialSourceUrl(provider, url), true, url);
+  }
+  assert.equal(defaultCodingCapabilitySources("toString"), null);
+  assert.equal(defaultCodingCapabilitySources("openrouter"), null);
+  // platform.claude.com also serves the Console; only /docs/ there is documentation.
+  assert.equal(isOfficialSourceUrl("anthropic", "https://platform.claude.com/settings/keys"), false);
 });
 
 test("the registry lookups read the active catalogue and fall back to the seed", () => {
@@ -436,6 +553,83 @@ test("an LLM image answer becomes a price revision draft at the policy floor", (
   assert.throws(() => imageDraftFromAnswer({ options: [] }, [], "x"));
 });
 
+test("an image draft takes the thinking cap the code already knows for the model", () => {
+  const answer = {
+    options: [{ quality: "high", size: "1024x1024", outputCostMicroUsd: 35_000, outputTokens: null }],
+    outputUsdPerMTok: null,
+    thinkingCapMicroUsd: null,
+    noPriceReason: null,
+  };
+  const sources = ["https://www.alibabacloud.com/help/en/model-studio/model-pricing"];
+  // qwen-image models are billed per image with no thinking charge.
+  assert.equal(imageDraftFromAnswer(answer, sources, "qwen-image-2.0", "qwen").verification.thinkingCapMicroUsd, 0);
+  // A larger stated cap is kept: the draft never lowers what the pages say.
+  assert.equal(
+    imageDraftFromAnswer({ ...answer, thinkingCapMicroUsd: 500 }, sources, "qwen-image-2.0", "qwen").verification.thinkingCapMicroUsd,
+    500
+  );
+  // Another model on the same endpoint has no proven bound, nor does an
+  // unmeasured Google model; a measured one takes its measured bound.
+  assert.equal(imageDraftFromAnswer(answer, sources, "z-image-turbo", "qwen").verification.thinkingCapMicroUsd, null);
+  assert.equal(imageDraftFromAnswer(answer, sources, "gemini-3-pro-image", "google").verification.thinkingCapMicroUsd, null);
+  const flash = imageDraftFromAnswer(
+    { ...answer, options: [{ quality: "medium", size: "1024x1024", outputCostMicroUsd: 67_200, outputTokens: null }] },
+    sources,
+    "gemini-3.1-flash-image",
+    "google"
+  );
+  assert.equal(flash.verification.thinkingCapMicroUsd, 12_288);
+  assert.equal(flash.prices[0].credits, 94);
+  assert.equal(imageDraftFromAnswer(answer, sources, "qwen-image-2.0").verification.thinkingCapMicroUsd, null);
+});
+
+test("an image answer with only token counts is priced by code, not by the model", () => {
+  // OpenAI's table for models before gpt-image-2: high 1024x1024 is 4,160
+  // output tokens; at US$30 per million that is 124,800 micro-USD.
+  const draft = imageDraftFromAnswer(
+    {
+      options: [
+        { quality: "high", size: "1024x1024", outputCostMicroUsd: null, outputTokens: 4_160 },
+        { quality: "low", size: "1024x1024", outputCostMicroUsd: null, outputTokens: null },
+      ],
+      outputUsdPerMTok: 30,
+      thinkingCapMicroUsd: 0,
+      noPriceReason: null,
+    },
+    ["https://developers.openai.com/api/docs/guides/image-generation"],
+    "gpt-image-1.5"
+  );
+  // The option with neither a price nor a token count is dropped, not guessed.
+  assert.equal(draft.prices.length, 1);
+  assert.equal(draft.prices[0].outputCostMicroUsd, 124_800);
+});
+
+test("a per-image cost takes the larger of the stated price and the token arithmetic", () => {
+  assert.equal(imageOptionCostMicroUsd(100_000, 4_160, 30), 124_800);
+  assert.equal(imageOptionCostMicroUsd(130_000, 4_160, 30), 130_000);
+  assert.equal(imageOptionCostMicroUsd(null, 4_160, null), null);
+  assert.equal(imageOptionCostMicroUsd(null, null, 30), null);
+  assert.equal(imageOptionCostMicroUsd(null, 1_120, 30.5), 34_160);
+  assert.equal(imageOptionCostMicroUsd(-5, 0, 30), null);
+});
+
+test("an image answer without a usable price says why", () => {
+  const answer = {
+    options: [{ quality: "high", size: "1024x1024", outputCostMicroUsd: null, outputTokens: null }],
+    outputUsdPerMTok: 30,
+    thinkingCapMicroUsd: null,
+    noPriceReason: "Only per-token rates,\n no tokens per image.",
+  };
+  assert.throws(
+    () => imageDraftFromAnswer(answer, [], "gpt-image-2.5-flare"),
+    (error) => error.code === "draft_rejected" && error.detail === "no_options: Only per-token rates, no tokens per image."
+  );
+  assert.throws(
+    () => imageDraftFromAnswer({ ...answer, noPriceReason: null }, [], "x"),
+    (error) => error.detail === "no_options"
+  );
+});
+
 test("an LLM coding answer cannot cite a page it did not fetch", () => {
   const sources = ["https://developers.openai.com/pricing", "https://platform.openai.com/docs/guides/your-data"];
   const answer = {
@@ -498,6 +692,15 @@ test("the scheduled renewal extends identical content inside the last week and n
   assert.equal(decideSnapshotRenewal(snapshot(29), other, NOW), "content_changed");
   assert.equal(decideSnapshotRenewal(snapshot(2), other, NOW), "content_changed");
   assert.equal(decideSnapshotRenewal(snapshot(-3), other, NOW), "content_changed");
+  // A snapshot written before a row gained defaulted fields: its stored hash
+  // differs, its rows read through today's schema match, so it is renewed.
+  const legacy = (daysLeft) => ({ ...snapshot(daysLeft, other), normalizedHash: same });
+  assert.equal(decideSnapshotRenewal(legacy(2), same, NOW), "renew");
+  assert.equal(decideSnapshotRenewal(legacy(-3), same, NOW), "renew");
+  assert.equal(decideSnapshotRenewal(legacy(29), same, NOW), "not_due");
+  // Normalised content that still differs is not renewed.
+  assert.equal(decideSnapshotRenewal({ ...snapshot(2, other), normalizedHash: "c".repeat(64) }, same, NOW), "content_changed");
+  assert.equal(decideSnapshotRenewal({ ...snapshot(2, other), normalizedHash: null }, same, NOW), "content_changed");
 });
 
 test("page text drops scripts and tags", () => {
@@ -529,7 +732,7 @@ test("page text preserves bodies of tags that only start with script or style", 
 
 test("page text keeps ordinary whitespace normalization and the input budget", () => {
   assert.equal(pageToText("<p> one&nbsp; \n two </p>"), "one two");
-  assert.equal(pageToText("a".repeat(40_001)).length, 40_000);
+  assert.equal(pageToText("a".repeat(120_001)).length, 120_000);
 });
 
 test("a draft's pricing version fits the revision schema for any API model id", () => {
@@ -539,4 +742,70 @@ test("a draft's pricing version fits the revision schema for any API model id", 
     assert.match(version, pattern, id);
     assert.ok(version.endsWith("-2026-10-19-llm"));
   }
+});
+
+test("an image draft review gives each option's floor and the judge's answer at the draft prices", () => {
+  const draft = {
+    prices: enabledSeed.prices.map((price) => ({ ...price })),
+    verification: { ...enabledSeed.priceVerification, verifiedAt: "2026-11-12" },
+  };
+  const review = reviewImageDraft(enabledSeed, draft, { minimumCredits: minimumCreditsForImageOption });
+  assert.equal(review.floors.length, draft.prices.length);
+  for (const [index, floor] of review.floors.entries()) {
+    assert.equal(floor.quality, draft.prices[index].quality);
+    assert.equal(floor.floor, minimumCreditsForImageOption(enabledSeed, draft.prices[index]));
+  }
+  assert.deepEqual(review.reasons, []);
+
+  // One option a credit under its floor is named by quality and size.
+  const low = draft.prices[0];
+  const floor = minimumCreditsForImageOption(enabledSeed, low);
+  const under = reviewImageDraft(
+    enabledSeed,
+    { ...draft, prices: [{ ...low, credits: floor - 1 }, ...draft.prices.slice(1)] },
+    { minimumCredits: minimumCreditsForImageOption }
+  );
+  assert.deepEqual(under.reasons, [`credits_below_floor:${low.quality}/${low.size}`]);
+
+  // No reasoning cap: no floor can be computed and the judge refuses.
+  const uncapped = reviewImageDraft(
+    enabledSeed,
+    { ...draft, verification: { ...draft.verification, thinkingCapMicroUsd: null } },
+    { minimumCredits: minimumCreditsForImageOption }
+  );
+  if (enabledSeed.priceVerification.thinkingCapMicroUsd !== null) {
+    assert.ok(uncapped.floors.every((entry) => entry.floor === null));
+    assert.ok(uncapped.reasons.includes("worst_case_cost_unbounded"));
+  }
+});
+
+test("credit overrides change only credits, only for options the draft priced", () => {
+  const prices = [
+    { quality: "low", size: "1024x1024", credits: 24, outputCostMicroUsd: 20_000 },
+    { quality: "medium", size: "1024x1024", credits: 41, outputCostMicroUsd: 35_000 },
+  ];
+  const applied = applyImageCreditOverrides(prices, [
+    { quality: "medium", size: "1024x1024", credits: 45 },
+    { quality: "low", size: "1024x1024", credits: 24 },
+  ]);
+  assert.equal(applied.ok, true);
+  assert.deepEqual(applied.prices, [prices[0], { ...prices[1], credits: 45 }]);
+  assert.deepEqual(applied.edits, [{ quality: "medium", size: "1024x1024", from: 41, to: 45 }]);
+  // The draft's own objects are not changed.
+  assert.equal(prices[1].credits, 41);
+
+  const unknown = applyImageCreditOverrides(prices, [{ quality: "high", size: "1536x1024", credits: 90 }]);
+  assert.deepEqual(unknown, { ok: false, unknown: ["high|1536x1024"] });
+  assert.equal(imageCreditOverrideSchema.safeParse([{ quality: "low", size: "1024x1024", credits: 0 }]).success, false);
+  assert.equal(imageCreditOverrideSchema.safeParse([{ quality: "low", size: "1024x1024", credits: 3, outputCostMicroUsd: 1 }]).success, false);
+});
+
+test("a draft applied again the same day gets the next free version name within 80 characters", () => {
+  assert.equal(freePricingVersion("qwen-image-2.0-2026-11-12-llm", new Set()), "qwen-image-2.0-2026-11-12-llm");
+  assert.equal(freePricingVersion("v-llm", new Set(["v-llm"])), "v-llm-2");
+  assert.equal(freePricingVersion("v-llm", new Set(["v-llm", "v-llm-2"])), "v-llm-3");
+  const long = "x".repeat(80);
+  const next = freePricingVersion(long, new Set([long]));
+  assert.equal(next.length, 80);
+  assert.ok(next.endsWith("-2"));
 });

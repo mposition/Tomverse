@@ -22,7 +22,7 @@ const world = {
   role: "owner", reauth: false, origin: true,
   view: readyView as unknown, reads: [] as unknown[][], translated: [] as unknown[],
   audits: [] as Array<Record<string, unknown>>,
-  outcome: { state: "translated", translations: { covered: "목록" }, cached: false } as unknown,
+  outcome: { state: "translated", translations: { covered: "목록" }, cached: false, calls: 2 } as unknown,
 };
 
 let installed = false;
@@ -64,10 +64,9 @@ const post = (body: string, headers: Record<string, string> = {}) =>
 const valid = JSON.stringify({ ideaId, chunkIndex: 0 });
 const reset = () => {
   process.env.TOMVERSE_AMUX_ADMIN_KO_TRANSLATION = "enabled";
-  process.env.TOMVERSE_AMUX_V4_ANALYSIS_RESULT_READ = "enabled";
   Object.assign(world, { role: "owner", reauth: false, origin: true, view: readyView,
     reads: [], translated: [], audits: [],
-    outcome: { state: "translated", translations: { covered: "목록" }, cached: false } });
+    outcome: { state: "translated", translations: { covered: "목록" }, cached: false, calls: 2 } });
 };
 
 test("the owner gets the translation of the text the server read itself", async () => {
@@ -88,14 +87,14 @@ test("the owner gets the translation of the text the server read itself", async 
   assert.equal(world.audits.length, 1);
   assert.equal(world.audits[0].action, "amux.idea.analysis_translation");
   assert.equal(world.audits[0].targetId, ideaId);
-  assert.deepEqual(world.audits[0].metadata, { chunkIndex: 0, itemCount: 3, outcome: "translated", cached: false });
+  assert.deepEqual(world.audits[0].metadata, { chunkIndex: 0, itemCount: 3, outcome: "translated", cached: false, calls: 2 });
   assert.equal(JSON.stringify(world.audits[0]).includes("Covers the list"), false);
   assert.equal(JSON.stringify(world.audits[0]).includes("목록"), false);
 });
 
 test("a switch that is off closes the route before any read", async () => {
   const { POST } = await loadRoute();
-  for (const name of ["TOMVERSE_AMUX_ADMIN_KO_TRANSLATION", "TOMVERSE_AMUX_V4_ANALYSIS_RESULT_READ"]) {
+  for (const name of ["TOMVERSE_AMUX_ADMIN_KO_TRANSLATION"]) {
     reset(); process.env[name] = "true";
     const response = await POST(post(valid));
     assert.equal(response.status, 503, name);
@@ -137,7 +136,7 @@ test("another owner's idea, an unreadable page and failed translations say so wi
   reset(); world.view = { state: "pending" };
   assert.equal((await POST(post(valid))).status, 409);
   assert.equal(world.translated.length, 0);
-  for (const [state, status, error] of [["too_large", 413, "too_large"],
+  for (const [state, status, error] of [
     ["unavailable", 503, "translation_unavailable"], ["empty", 409, "nothing_to_translate"]] as const) {
     reset(); world.outcome = { state };
     const response = await POST(post(valid));

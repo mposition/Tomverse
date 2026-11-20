@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
-import { writeAdminAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { getAdminRole } from "@/lib/adminAuth";
 import {
   amuxReviewAllowedOutcomes,
@@ -16,8 +16,11 @@ import {
   amuxReviewSubjectDigest,
   amuxReviewTargetStatus,
   amuxReviewPublicationMayOpenPr,
+  amuxV22NoChangeCompletionAllowed,
+  amuxV22UnpublishedPatchNotice,
   amuxV22PrlessReviewRetryAllowed,
   amuxV22ReviewRetryHasVerifiedOutcome,
+  AMUX_REVIEW_NO_CHANGE_BASIS,
   amuxV4ReviewEvidenceMatches,
   amuxV4ReviewReportProjection,
   sha256Hex,
@@ -25,7 +28,8 @@ import {
   type AmuxReviewOutcome,
   type AmuxReviewSubject,
 } from "@/lib/amux/reviewApprovalCore";
-import { AMUX_MAX_EXECUTION_ATTEMPTS, decideAmuxAttemptBudget } from "@/lib/amux/executionBudgetCore";
+import { decideAmuxAttemptBudget } from "@/lib/amux/executionBudgetCore";
+import { readAmuxAttemptBudgetFacts } from "@/lib/amux/infraFailureStore";
 import { amuxV52RejectedTwiceReviewAttemptId } from "@/lib/amux/v52ReviewRejections";
 import { normalizeAmuxUntrustedReason, openAmuxHumanEscalation, publicAmuxEscalationReasonCode } from "@/lib/amux/escalation";
 import { readAmuxReviewPullRequest, type AmuxReviewPullRequest } from "@/lib/amux/reviewGitHub";
@@ -35,6 +39,7 @@ import { evaluateLockedAmuxCostAdmission, lockAmuxResourcePolicies } from "@/lib
 import { amuxResourceRefs } from "@/lib/amux/resourcePolicyCore";
 import { ENGINEERING_AGENT_V22_TIER_PENDING_REASON } from "@/lib/engineeringAgentCore";
 import { prisma } from "@/lib/prisma";
+import { pullDigestHolds } from "@/lib/pullDiffDigestCore";
 import { amuxV22TaskUnknownUsageAttemptIds, recordAmuxV22UsageAcceptances } from "@/lib/amux/v22AttemptUsageAcceptance";
 
 export class AmuxReviewRefusal extends Error {
@@ -103,7 +108,11 @@ const dbNow = async (tx: Client) => {
   return rows[0].now;
 };
 
+/** Every caller writes its admin audit entry last, so the audit chain lock is
+ * taken here, before the Task row (lib/adminAudit.ts takeAuditChainLock). A
+ * retry's resource policy locks come before this, as in execution admission. */
 async function lockTaskAndEscalation(tx: Client, escalationId: string) {
+  await takeAuditChainLock(tx);
   const identity = await tx.amuxHumanEscalation.findUnique({
     where: { id: escalationId },
     select: { taskId: true },
@@ -157,16 +166,15 @@ async function snapshot(
   const task = escalation.task;
   const artifact = task.status === "review" &&
     task.reviewPrNumber === fetchedArtifact?.prNumber ? fetchedArtifact : null;
-  const [lastAttempt, attemptCount, activeDelivery, previousBlock, latestV4Result] = await Promise.all([
+  const [lastAttempt, attemptFacts, activeDelivery, previousBlock, latestV4Result] = await Promise.all([
     tx.amuxExecutionAttempt.findFirst({
       where: { taskId: task.id },
       orderBy: [{ taskRevision: "desc" }, { startedAt: "desc" }, { id: "desc" }],
     }),
-    tx.amuxExecutionAttempt.aggregate({
-      where: { taskId: task.id },
-      _count: { _all: true },
-      _max: { attemptNumber: true },
-    }),
+    // The claim's own count (owner decision 2026-11-15): infrastructure
+    // failures keep their number but use none of the card's attempts. The
+    // review proposal guard counts none since 20261118100000_amux_review_retry_no_attempt_bound.
+    readAmuxAttemptBudgetFacts(tx, task.id),
     tx.amuxWorkDelivery.findFirst({
       where: { taskId: task.id, status: { in: ["queued", "leased"] } },
       select: { attemptId: true },
@@ -182,11 +190,15 @@ async function snapshot(
         select: { attemptId: true, sourceSha256: true, bodyPurgedAt: true } }) :
       Promise.resolve(null),
   ]);
+  // A person's decision is not refused by the infrastructure bound; their
+  // retry starts it over (lib/amux/infraFailureStore.ts).
   const budget = decideAmuxAttemptBudget({
-    historical_rows: attemptCount._count._all,
-    greatest_attempt_number: attemptCount._max.attemptNumber,
+    historical_rows: attemptFacts.historicalRows,
+    greatest_attempt_number: attemptFacts.greatestAttemptNumber,
+    infra_rows: attemptFacts.infraRows,
   });
-  const used = budget.allowed ? budget.next_attempt_number - 1 : budget.attempts_used;
+  const used = Math.max(0, Math.max(attemptFacts.historicalRows,
+    attemptFacts.greatestAttemptNumber ?? 0) - attemptFacts.infraRows);
   const lastTerminal = !lastAttempt ||
     (lastAttempt.endedAt !== null && lastAttempt.outcome !== null && lastAttempt.toStatus !== null);
   const reviewAttempt = task.status === "review" && lastAttempt !== null &&
@@ -232,15 +244,52 @@ async function snapshot(
   // publisher takes first. A promotion racing the retry can still open a
   // draft PR, but the moved Task never records it
   // (reviewPullRequest.ts: not_the_workers_review).
-  const publication = inReview && task.sourceSystem === "admin-idea-v4" &&
-    task.reviewPrNumber === null && lastAttempt !== null ?
-    await tx.engineeringAgentWorkItem.findMany({
-      where: { run: { amuxAttemptId: lastAttempt.id } },
-      select: { kind: true, state: true, reason: true },
-    }) : null;
+  const prlessAttempt = inReview && task.sourceSystem === "admin-idea-v4" &&
+    task.reviewPrNumber === null ? lastAttempt : null;
+  const [publication, storedPatch, publicationRun] = prlessAttempt ?
+    await Promise.all([
+      tx.engineeringAgentWorkItem.findMany({
+        where: { run: { amuxAttemptId: prlessAttempt.id } },
+        select: { kind: true, state: true, reason: true },
+      }),
+      // A stored patch is immutable evidence that this attempt changed code.
+      tx.amuxV22TaskPatch.findUnique({ where: { attemptId: prlessAttempt.id },
+        select: { attemptId: true } }),
+      // A v22 implement Task's PR lives on its run's binding, not on the card
+      // (reviewPullRequest.ts), so an open or merged binding carries the patch.
+      tx.engineeringAgentRun.findUnique({ where: { amuxAttemptId: prlessAttempt.id },
+        select: { id: true, bindings: { where: { supersededAt: null },
+          select: { state: true, mergeObservation: true, prNumber: true,
+            currentPrNumber: true } } } }),
+    ]) : [null, null, null];
+  const publicationMayOpenPr = publication !== null &&
+    amuxReviewPublicationMayOpenPr(publication, ENGINEERING_AGENT_V22_TIER_PENDING_REASON);
+  // "No change needed" is refused for any stored patch; the screen also says
+  // when no pull request carries it (AMUX-FILEGEN2-002, 2026-11-13).
+  const unpublishedPatch = amuxV22UnpublishedPatchNotice({
+    patchStored: storedPatch !== null, publicationMayOpenPr,
+    run: publicationRun === null ? null : { bindings: publicationRun.bindings },
+  });
+  // Why an unrecorded card PR is not "no pull request": the run's open binding
+  // carries one, or publication work may still open one.
+  const openBinding = publicationRun?.bindings.find((binding) => binding.state === "open") ?? null;
+  const publicationHold = openBinding ?
+    { state: "pr_open" as const, pr_number: openBinding.currentPrNumber ?? openBinding.prNumber } :
+    publicationMayOpenPr ? { state: "pending" as const, pr_number: null } : null;
   // A twice-rejected run is retryable only with its own audited reject verdict.
   const rejectedReviewAttemptId = task.sourceSystem === "admin-idea-v4" ?
     await amuxV52RejectedTwiceReviewAttemptId(tx, task.id, lastAttempt) : null;
+  const prlessEvidence = publication === null ? null : {
+    sourceSystem: task.sourceSystem, cardType: task.cardType,
+    taskRole: task.taskRole, reviewPrNumber: task.reviewPrNumber,
+    attempt: lastAttempt, v4EvidenceVerified: v4Valid,
+    publicationMayOpenPr,
+    displayTruncated, displayExact, patchStored: storedPatch !== null,
+  };
+  // An implement Task that left no change, completed by the owner as "no
+  // change needed" (owner decision 2026-11-11): approve, on that basis.
+  const noChangeCompletion = prlessEvidence !== null &&
+    amuxV22NoChangeCompletionAllowed(prlessEvidence);
   const outcomes = amuxReviewAllowedOutcomes({
     eligible: baseEligible,
     taskStatus: task.status,
@@ -250,14 +299,9 @@ async function snapshot(
       reviewPrNumber: task.reviewPrNumber,
       artifactAvailable: artifact !== null,
       v4EvidenceVerified: v4Valid, displayTruncated,
-      displayExact }),
-    prlessRetryAllowed: publication !== null && amuxV22PrlessReviewRetryAllowed({
-      sourceSystem: task.sourceSystem,
-      cardType: task.cardType, reviewPrNumber: task.reviewPrNumber,
-      attempt: lastAttempt, v4EvidenceVerified: v4Valid,
-      publicationMayOpenPr: amuxReviewPublicationMayOpenPr(publication,
-        ENGINEERING_AGENT_V22_TIER_PENDING_REASON),
-      displayTruncated, displayExact }),
+      displayExact, noChangeCompletionAllowed: noChangeCompletion }),
+    prlessRetryAllowed: prlessEvidence !== null &&
+      amuxV22PrlessReviewRetryAllowed(prlessEvidence),
     blockedRetryVerified: amuxV22ReviewRetryHasVerifiedOutcome({
       sourceSystem: task.sourceSystem, attempt: lastAttempt,
       storedResultAttemptId: latestV4Result?.attemptId ?? null,
@@ -293,7 +337,8 @@ async function snapshot(
     review_pr_number: artifact?.prNumber ?? null,
     review_base_sha: artifact?.baseSha ?? null,
     review_head_sha: artifact?.headSha ?? null,
-    review_diff_digest: artifact?.diffDigest ?? null,
+    // The v2 change digest the approval binds (lib/pullDiffDigestCore.ts).
+    review_diff_digest: artifact?.changeDigest ?? null,
     ...(task.sourceSystem === "admin-idea-v4" ? { v4_evidence: {
       title_digest: task.v4TitleDigest,
       body_digest: task.v4BodyDigest,
@@ -325,9 +370,12 @@ async function snapshot(
   });
   const lastAttemptResultStored = lastAttempt !== null &&
     latestV4Result?.attemptId === lastAttempt.id;
+  const approvalBasis = !outcomes.includes("approve") ? null :
+    noChangeCompletion ? "no_change" as const : "evidence" as const;
   return { escalation, task, lastAttempt, budget, used, subject, digest, text,
     context, report, displayTruncated, displayExact, outcomes, artifact,
-    lastAttemptResultStored, decisionHold };
+    lastAttemptResultStored, decisionHold, approvalBasis, unpublishedPatch,
+    publicationHold };
 }
 
 export async function getAmuxReviewDetail(escalationId: string) {
@@ -335,9 +383,9 @@ export async function getAmuxReviewDetail(escalationId: string) {
     artifactForEscalation(escalationId), v4EvidenceForEscalation(escalationId),
   ]);
   const state = await prisma.$transaction((tx) => snapshot(tx, escalationId, fetchedArtifact, fetchedV4));
-  const { escalation, task, lastAttempt, used, digest, text, context, report,
+  const { escalation, task, lastAttempt, budget, used, digest, text, context, report,
     displayTruncated, displayExact, outcomes, artifact, lastAttemptResultStored,
-    decisionHold } = state;
+    decisionHold, approvalBasis, unpublishedPatch, publicationHold } = state;
   // The Task's ended runs whose CLI usage is unknown and not yet accepted:
   // each holds its worker in the v22 usage gate (owner decision 2026-11-10).
   const unknownUsageIds = task.sourceSystem === "admin-idea-v4" ?
@@ -390,14 +438,31 @@ export async function getAmuxReviewDetail(escalationId: string) {
       pr_number: artifact.prNumber,
       base_sha: artifact.baseSha,
       head_sha: artifact.headSha,
-      diff_digest: artifact.diffDigest,
+      diff_digest: artifact.changeDigest,
+      // Null when the diff is not shown here (too large, binary or unsafe to
+      // display): the person reviews the pull request on GitHub.
       diff_text: artifact.diffText,
+      diff_hidden: artifact.diffHidden,
       html_url: artifact.htmlUrl,
     } : null,
     allowed_outcomes: outcomes,
+    // What an offered approve rests on: "no_change" is the owner's "no change
+    // needed" for an implement Task that left none (owner decision 2026-11-11).
+    approval_basis: approvalBasis,
+    // The attempt stored a patch that no pull request carries to develop:
+    // "no change needed" is refused for it; retry or restore the publication.
+    unpublished_patch: unpublishedPatch,
+    // A v22 implement Task's pull request lives on its run's binding, so the
+    // card has none of its own: this says the engineering agent has one open
+    // ("pr_open") or may still open one ("pending"), which is also why a retry
+    // is not offered -- running the Task again would race that publication.
+    publication_hold: publicationHold,
     // Why no decision is open at all; null while the server offers one.
     decision_hold: decisionHold,
-    retry: { used, limit: AMUX_MAX_EXECUTION_ATTEMPTS, remaining: Math.max(0, AMUX_MAX_EXECUTION_ATTEMPTS - used) },
+    // No bound for an ordinary card (owner direction 2026-11-18): limit and
+    // remaining are null, never a large number.
+    retry: { used, limit: budget.max_attempts,
+      remaining: budget.max_attempts === null ? null : Math.max(0, budget.max_attempts - used) },
     proposed_transitions: {
       approve: outcomes.includes("approve") ? "done" : null,
       retry: outcomes.includes("retry") ? "todo" : null,
@@ -443,7 +508,7 @@ export async function createAmuxReviewProposal(input: {
         reviewPrNumber: input.outcome === "approve" ? state.artifact?.prNumber ?? null : null,
         reviewBaseSha: input.outcome === "approve" ? state.artifact?.baseSha ?? null : null,
         reviewHeadSha: input.outcome === "approve" ? state.artifact?.headSha ?? null : null,
-        reviewDiffDigest: input.outcome === "approve" ? state.artifact?.diffDigest ?? null : null,
+        reviewDiffDigest: input.outcome === "approve" ? state.artifact?.changeDigest ?? null : null,
         issuedAt: new Date(),
         expiresAt: new Date(Date.now() + 86_400_000),
       },
@@ -612,7 +677,9 @@ export async function resolveAmuxReview(input: {
         (proposal.reviewPrNumber !== (state.artifact?.prNumber ?? null) ||
          proposal.reviewBaseSha !== (state.artifact?.baseSha ?? null) ||
          proposal.reviewHeadSha !== (state.artifact?.headSha ?? null) ||
-         proposal.reviewDiffDigest !== (state.artifact?.diffDigest ?? null))) {
+         // In the proposal's own version: v2 now, v1 for one prepared before it.
+         (proposal.reviewDiffDigest === null ? state.artifact !== null :
+           state.artifact === null || !pullDigestHolds(proposal.reviewDiffDigest, state.artifact)))) {
       return refuse("AMUX_REVIEW_SOURCE_CHANGED");
     }
     const target = amuxReviewTargetStatus(
@@ -659,13 +726,18 @@ export async function resolveAmuxReview(input: {
     const acceptedUnknownUsageAttemptIds = proposal.outcome === "retry" &&
         state.task.sourceSystem === "admin-idea-v4" && getAdminRole(input.session) === "owner" ?
       await amuxV22TaskUnknownUsageAttemptIds(tx, taskId) : [];
+    // The approval rests on the snapshot the outcome check above just read.
+    const noChangeCompletion = proposal.outcome === "approve" &&
+      state.approvalBasis === "no_change";
     const auditLogId = await writeAdminAuditLog({
       session: input.session,
       request: input.request,
       action: "amux.human_escalation.resolved",
       targetType: "AmuxWorkItem",
       targetId: taskId,
-      summary: "Resolved an AMUX human review escalation.",
+      summary: noChangeCompletion ?
+        "Completed an AMUX implement Task: no change needed (owner verified)." :
+        "Resolved an AMUX human review escalation.",
       metadata: {
         decision_id: decisionId,
         proposal_id: proposal.id,
@@ -675,6 +747,8 @@ export async function resolveAmuxReview(input: {
         review_base_sha: proposal.reviewBaseSha,
         previous_revision: proposal.taskRevision,
         next_revision: proposal.taskRevision + 1,
+        ...(noChangeCompletion ? { approval_basis: AMUX_REVIEW_NO_CHANGE_BASIS,
+          result_sha256: state.context.result_sha256 } : {}),
         ...(acceptedUnknownUsageAttemptIds.length ?
           { accepted_unknown_usage_attempt_ids: acceptedUnknownUsageAttemptIds } : {}),
       },

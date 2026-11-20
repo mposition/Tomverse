@@ -106,7 +106,7 @@ test("the approved sitemap is the table: every group, entry and tab, in order", 
     ],
     "AI Platform": [
       ["providers", "/admin/providers", ["health", "usage-cost", "incidents"]],
-      ["models", "/admin/models", ["registry", "discovery", "defaults", "catalog"]],
+      ["models", "/admin/models", ["registry", "discovery", "defaults", "catalog", "coding"]],
       ["routing", "/admin/routing", ["auto", "optimizer", "shadow", "stats"]],
     ],
     "AI Agents": [
@@ -119,7 +119,7 @@ test("the approved sitemap is the table: every group, entry and tab, in order", 
     ],
     Development: [
       ["amux-backlog", "/admin/amux-backlog", ["ideas", "list", "portfolio"]],
-      ["amux-execution", "/admin/amux-execution", ["cards", "review", "diagnostics"]],
+      ["amux-execution", "/admin/amux-execution", ["cards", "review", "diagnostics", "process-audit"]],
       ["release", "/admin/release", ["qa", "ci"]],
       ["amux-settings", "/admin/amux-settings", ["automatic-admission", "workers", "decision-maker", "analysis"]],
       ["amux-recovery", "/admin/amux-recovery", ["safety", "reservations", "legacy"]],
@@ -574,7 +574,7 @@ test("the discovery backlog keeps a way in", () => {
   assert.equal(models.badge, "modelLifecycle");
   assert.deepEqual(
     models.tabs?.map((tab) => tab.id),
-    ["registry", "discovery", "defaults", "catalog"]
+    ["registry", "discovery", "defaults", "catalog", "coding"]
   );
   // The registry stays the default: an operator opening /admin/models is far
   // more often there for the catalogue than for the backlog.
@@ -582,6 +582,7 @@ test("the discovery backlog keeps a way in", () => {
   assert.equal(resolveAdminTab(adminNavItemTabs("models"), "discovery").id, "discovery");
   assert.equal(resolveAdminTab(adminNavItemTabs("models"), "defaults").id, "defaults");
   assert.equal(resolveAdminTab(adminNavItemTabs("models"), "catalog").id, "catalog");
+  assert.equal(resolveAdminTab(adminNavItemTabs("models"), "coding").id, "coding");
 });
 
 // ---------------------------------------------------------------------------
@@ -618,7 +619,7 @@ test("the Development group holds Ideas, the execution board, Release, AMUX sett
   );
   assert.deepEqual(
     adminNavItemTabs("amux-execution").map((tab) => tab.id),
-    ["cards", "review", "diagnostics"]
+    ["cards", "review", "diagnostics", "process-audit"]
   );
   assert.deepEqual(
     adminNavItemTabs("amux-settings").map((tab) => tab.id),
@@ -874,6 +875,7 @@ test("view roles never promise more than the pages grant, nor hide what they gra
   assert.deepEqual(restrictedTabs, [
     "routing/stats",
     "amux-execution/cards",
+    "amux-execution/process-audit",
     "amux-settings/automatic-admission",
     "amux-settings/analysis",
     "amux-recovery/reservations",
@@ -911,7 +913,7 @@ test("view roles never promise more than the pages grant, nor hide what they gra
   const cardsBranch = page.slice(branchAt);
   const gateAt = cardsBranch.search(OWNER_GATE);
   assert.ok(
-    gateAt >= 0 && gateAt < cardsBranch.indexOf("listAmuxCardsForExecutionList()"),
+    gateAt >= 0 && gateAt < cardsBranch.indexOf("listAmuxCardsForExecutionList("),
     "the Cards branch reads the list before refusing a non-owner"
   );
   assert.match(page, /if \(!resolved\) notFound\(\);/);
@@ -1006,7 +1008,7 @@ test("execution board and Safety & recovery count distinct actions without dupli
   assert.match(queueRead, /prisma\.amuxWorkItem\.count\(\{ where: amuxOwnerQueueWhere\(\) \}\)/);
   assert.match(queueRead, /const where = amuxOwnerQueueWhere\(\);/);
   assert.match(queueRead, /findMany\(\{\s*where, orderBy/);
-  assert.match(queueRead, /take: AMUX_OWNER_QUEUE_LIMIT/);
+  assert.match(queueRead, /take: limit/);
   // The list is bounded and says so: its total counts the same set as the badge.
   assert.match(queueRead, /return \{ items, total, processedToday/);
   // The page's tab badge turns a failed read into no badge.
@@ -1160,13 +1162,12 @@ test("legacy execution controls retain their exact section and query", () => {
   assert.doesNotMatch(settingsPage, /AmuxOrchestratorHaltsPanel/);
   const backlogPage = readPage("amux-backlog");
   assert.ok(backlogPage.includes("ADMIN_AMUX_BACKLOG_LEGACY_TABS[requestedTab]"));
-  assert.doesNotMatch(backlogPage, /AmuxBoardImportPanel|AmuxReconciliationPanel|AmuxBacklogMetadataPanel/);
+  assert.doesNotMatch(backlogPage, /AmuxReconciliationPanel|AmuxBacklogMetadataPanel/);
 });
 
 test("the legacy tools tab holds every panel the retired pages held, each behind its own switch", () => {
   const page = readPage("amux-recovery");
   for (const panel of [
-    "AmuxBoardImportPanel",
     "AmuxReconciliationPanel",
     "AmuxBacklogMetadataPanel",
     "AmuxBoardRecommendationPanel",
@@ -1177,12 +1178,11 @@ test("the legacy tools tab holds every panel the retired pages held, each behind
   }
   assert.match(
     page,
-    /const LEGACY_SECTIONS = \[\s*"import",\s*"reconciliation",\s*"metadata",\s*"recommendation",\s*"promotion",\s*"auto-promotion",\s*\] as const;/
+    /const LEGACY_SECTIONS = \[\s*"reconciliation",\s*"metadata",\s*"recommendation",\s*"promotion",\s*"auto-promotion",\s*\] as const;/
   );
-  assert.ok(page.includes("amuxSwitchedTabStatuses(LEGACY_SECTIONS)"));
+  assert.ok(page.includes("amuxSwitchedTabStatuses(SWITCHED_LEGACY_SECTIONS)"));
   // Each panel's step-up returns to the tab, not to a retired address.
   for (const file of [
-    "AmuxBoardImportPanel",
     "AmuxReconciliationPanel",
     "AmuxBacklogMetadataPanel",
     "AmuxBoardRecommendationPanel",

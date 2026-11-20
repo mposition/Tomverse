@@ -18,6 +18,9 @@ import { amuxV22ReadOnlyActualLauncherConfigDigest, amuxV22ReadOnlyLaunchScope,
   amuxV22ReadOnlyLaunchScopeDigest } from
   "../lib/amux/v22ReadOnlyRetryProtocol.mjs";
 
+// The local CLI flow (always on since 2026-11-16) is covered further in
+// amuxV22LocalCliFlow.test.mjs.
+
 const attemptId = "00000000-0000-4000-8000-000000000001";
 const request = { version: 1, attemptId, worker: "worker-a",
   role: "implement", modelId: "claude-opus-5-5",
@@ -251,8 +254,10 @@ function fakeSpawn(result, options = {}) {
 }
 
 test("sidecar requires its own exact Ubuntu environment switch", () => {
+  assert.equal(amuxV22SidecarEnabled("enabled"), true);
+  // Production already sets the earlier value `1`; it means the same.
   assert.equal(amuxV22SidecarEnabled("1"), true);
-  for (const flag of [undefined, "", "0", "enabled", "true", " 1", "1 "]) {
+  for (const flag of [undefined, "", "0", "disabled", "true", " 1", "1 ", " enabled", "ENABLED"]) {
     assert.equal(amuxV22SidecarEnabled(flag), false);
   }
 });
@@ -278,13 +283,14 @@ test("the one-shot request and CLI command have bounded capabilities", () => {
   assert.equal(args.includes("--max-turns"), false,
     "an ordinary run has no turn limit (owner decision 2026-11-06)");
   // Owner request 2026-11-09: implement gets Bash, which the sidecar runs
-  // in the jail; the read roles keep their read tools only.
+  // in the jail; since 2026-11-15 the read roles get it too, but not the
+  // file tools.
   assert.equal(args[args.indexOf("--tools") + 1], "Read,Grep,Glob,Edit,Write,Bash");
   assert.equal(args[args.indexOf("--allowedTools") + 1], "Read,Grep,Glob,Edit,Write,Bash");
   for (const role of ["design", "investigate", "review"]) {
     const read = amuxV22ClaudeArgs({ ...request, role });
-    assert.equal(read[read.indexOf("--tools") + 1], "Read,Grep,Glob", role);
-    assert.equal(read.some((arg) => arg.includes("Bash")), false, role);
+    assert.equal(read[read.indexOf("--tools") + 1], "Read,Grep,Glob,Bash", role);
+    assert.equal(read.some((arg) => arg.includes("Edit") || arg.includes("Write")), false, role);
   }
 });
 
@@ -389,7 +395,7 @@ test("one child returns a reviewable result and a content-free receipt", async (
     undefined);
 });
 
-test("v52 guard inventories non-implement attempts and withholds a contract patch", async () => {
+test("v52 guard inventories every attempt and keeps a lower grade's contract patch for review in place", async () => {
   const baseline = async (_path, options) => {
     assert.equal(options.guardIgnoredContract, true);
     return { ok: true, baseSha: "a".repeat(40) };
@@ -413,14 +419,21 @@ test("v52 guard inventories non-implement attempts and withholds a contract patc
         files: ["lib/amux/execution.ts"],
         contractPaths: ["lib/amux/execution.ts"] }),
       discardAttemptChanges: async () => { discarded++; return true; },
-      capturePatch: async () => { patchCalls++; throw new Error("not reachable"); },
+      capturePatch: async () => { patchCalls++; return { ok: true, baseSha: "a".repeat(40),
+        patchDigest: "c".repeat(64),
+        patchBody: "diff --git a/lib/amux/execution.ts b/lib/amux/execution.ts\n",
+        publishFiles: [] }; },
+      captureReviewCommit: async (_worktree, base) => ({ ok: true, baseSha: base,
+        commitSha: "b".repeat(40), reviewRef: `refs/amux-v52-review/${attemptId}` }),
     });
+  // The change is kept and goes to the review and a person at frontier in
+  // place; nothing is discarded and re-run.
   assert.deepEqual(contract.changedPaths, ["lib/amux/execution.ts"]);
-  assert.equal(contract.patchDigest, undefined);
-  assert.equal(contract.reviewCommitSha, undefined);
-  assert.equal(contract.reviewTouchesContract, undefined);
-  assert.equal(patchCalls, 0);
-  assert.equal(discarded, 1);
+  assert.equal(contract.patchDigest, "c".repeat(64));
+  assert.equal(contract.reviewCommitSha, "b".repeat(40));
+  assert.equal(contract.reviewTouchesContract, true);
+  assert.equal(patchCalls, 1);
+  assert.equal(discarded, 0);
   const readOnlyEdit = await runAmuxV22OneShot({ ...request,
     role: "investigate", gradeGuard: true, executionGrade: "advanced" },
     config, { syntheticPlatform: true, spawnChild: fake.spawnChild,
@@ -429,8 +442,10 @@ test("v52 guard inventories non-implement attempts and withholds a contract patc
         files: ["lib/ordinary.ts"], contractPaths: [] }),
       discardAttemptChanges: async () => { discarded++; return true; },
     });
-  assert.deepEqual(readOnlyEdit.changedPaths, ["lib/ordinary.ts"]);
-  assert.equal(discarded, 2);
+  // A read role publishes nothing: its change is listed apart and reported.
+  assert.deepEqual(readOnlyEdit.changedPaths, []);
+  assert.deepEqual(readOnlyEdit.readRoleChangedPaths, ["lib/ordinary.ts"]);
+  assert.equal(discarded, 0);
   const missing = await runAmuxV22OneShot({ ...request, gradeGuard: true,
     executionGrade: "routine" },
     config, { syntheticPlatform: true, spawnChild: fake.spawnChild,
@@ -440,7 +455,7 @@ test("v52 guard inventories non-implement attempts and withholds a contract patc
       capturePatch: async () => { patchCalls++; throw new Error("not reachable"); },
     });
   assert.equal(missing.changedPathsReason, "changed_paths_unavailable");
-  assert.equal(patchCalls, 0);
+  assert.equal(patchCalls, 1, "an inventory that failed takes no patch");
 });
 
 test("v52 frontier implement binds a review commit to the captured patch", async () => {
@@ -492,10 +507,10 @@ test("implement refuses a dirty baseline before CLI and holds a patch only in me
   const patchBody = "diff --git a/example b/example\n";
   const patchDigest = (await import("node:crypto")).createHash("sha256")
     .update(patchBody).digest("hex");
+  // A capture that still names file bytes (a sidecar before 2026-11-15) has
+  // none of them sent: the patch text alone is the evidence.
   const publishFiles = [{ path: "tests/example.test.mjs", mode: "100644",
     bytesBase64: "YQ==" }];
-  const filesDigest = (await import("node:crypto")).createHash("sha256")
-    .update(JSON.stringify(publishFiles)).digest("hex");
   try {
     const fake = fakeSpawn(JSON.stringify(usage));
     const handler = createAmuxV22SidecarHandler({ worker: "worker-a",
@@ -510,22 +525,20 @@ test("implement refuses a dirty baseline before CLI and holds a patch only in me
     const result = await readFinished(handler);
     assert.equal(result.patchBody, patchBody);
     assert.equal(result.patchDigest, patchDigest);
-    assert.deepEqual(result.publishFiles, publishFiles);
-    assert.equal(result.publishFilesDigest, filesDigest);
+    assert.equal(result.publishFiles, undefined);
+    assert.equal(result.publishFilesDigest, undefined);
     assert.equal((await readFile(join(stateDir, `${attemptId}.result`),
       "utf8")).includes(patchBody), false);
-    assert.equal((await readFile(join(stateDir, `${attemptId}.result`),
-      "utf8")).includes(filesDigest), true);
     assert.equal((await handler({ op: "confirm_patch", attemptId,
       patchDigest })).kind, "confirmed");
     assert.equal((await handler({ op: "readback", attemptId })).patchBody,
       undefined);
     assert.equal((await handler({ op: "readback", attemptId }))
-      .publishFilesDigest, filesDigest);
+      .publishFilesDigest, undefined);
   } finally { await rm(stateDir, { recursive: true, force: true }); }
 });
 
-test("unknown output and deadline never become success or retry", async () => {
+test("unknown output and a silent run never become success or retry", async () => {
   const malformed = fakeSpawn("not-json");
   const malformedResult = await runAmuxV22OneShot(request, config, {
     syntheticPlatform: true, spawnChild: malformed.spawnChild, logInvalidOutput: () => {},
@@ -542,14 +555,23 @@ test("unknown output and deadline never become success or retry", async () => {
     failure: wrongShapeResult.failure },
     { kind: "outcome_unknown", failure: "invalid_result" });
 
+  // A CLI that stays silent is not ended for it (owner decision 2026-11-18):
+  // the old `stallMs` option is ignored, and only the operator's stop ends it.
   const hanging = fakeSpawn("", { hang: true });
-  const timeoutResult = await runAmuxV22OneShot(request, config, {
+  const controller = new AbortController();
+  const pending = runAmuxV22OneShot(request, config, {
     syntheticPlatform: true, spawnChild: hanging.spawnChild,
-    deadlineMs: 5,
+    stallMs: 30, progressPollMs: 10, signal: controller.signal,
   });
+  let settled = false;
+  void pending.then(() => { settled = true; });
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal(settled, false, "silence alone ends nothing");
+  controller.abort();
+  const timeoutResult = await pending;
   assert.deepEqual({ kind: timeoutResult.kind,
     failure: timeoutResult.failure },
-    { kind: "outcome_unknown", failure: "deadline" });
+    { kind: "outcome_unknown", failure: "operator_stop" });
   assert.equal(hanging.calls.length, 1);
 });
 
@@ -586,7 +608,7 @@ test("a failed Claude result names its cause as a closed enum, never the CLI tex
   assert.equal(Object.hasOwn(longResult.usageReceipt, "cliFailure"), false);
 });
 
-test("a signal or a deadline stays an unknown outcome with no failure cause", async () => {
+test("a signal or an operator stop stays an unknown outcome with no failure cause", async () => {
   const killed = fakeSpawn(JSON.stringify({ ...usage, subtype: "error_max_turns",
     is_error: true }), { signal: "SIGTERM" });
   const killedResult = await runAmuxV22OneShot(request, config, {
@@ -596,12 +618,15 @@ test("a signal or a deadline stays an unknown outcome with no failure cause", as
     receipt: killedResult.usageReceipt },
   { kind: "outcome_unknown", failure: "signal", receipt: undefined });
   const hanging = fakeSpawn("", { hang: true });
-  const timeoutResult = await runAmuxV22OneShot(request, config, {
-    syntheticPlatform: true, spawnChild: hanging.spawnChild, deadlineMs: 5,
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), 100);
+  const stoppedResult = await runAmuxV22OneShot(request, config, {
+    syntheticPlatform: true, spawnChild: hanging.spawnChild,
+    progressPollMs: 10, signal: controller.signal,
   });
-  assert.deepEqual({ kind: timeoutResult.kind, failure: timeoutResult.failure,
-    receipt: timeoutResult.usageReceipt },
-  { kind: "outcome_unknown", failure: "deadline", receipt: undefined });
+  assert.deepEqual({ kind: stoppedResult.kind, failure: stoppedResult.failure,
+    receipt: stoppedResult.usageReceipt },
+  { kind: "outcome_unknown", failure: "operator_stop", receipt: undefined });
 });
 
 test("durable claim prevents duplicate CLI invocation across handler restart", async () => {
@@ -651,6 +676,40 @@ test("result text is available for exact transfer but never persisted in the sid
       sourceSha256: sha256 })).kind, "confirmed");
     assert.equal((await handler({ op: "readback", attemptId })).resultText,
       undefined);
+  } finally { await rm(stateDir, { recursive: true, force: true }); }
+});
+
+test("a finished result and patch wait on disk until confirmed, across a restart", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "amux-v22-pending-"));
+  try {
+    const { createHash } = await import("node:crypto");
+    const text = "Result that outlives the memory window";
+    const patchBody = "diff --git a/example b/example\n";
+    const sha = (value) => createHash("sha256").update(value).digest("hex");
+    const run = async (input) => ({ kind: "succeeded", attemptId: input.attemptId,
+      resultText: text, resultSha256: sha(text), patchBody, patchDigest: sha(patchBody),
+      patchBaseSha: "a".repeat(40) });
+    const first = createAmuxV22SidecarHandler({ worker: "worker-a", stateDir, run });
+    assert.equal((await first({ op: "execute", ...request })).kind, "in_progress");
+    const finished = await readFinished(first);
+    assert.equal(finished.resultText, text);
+    assert.equal(finished.patchBody, patchBody);
+    // The journal never holds the text; two owner-only files do.
+    assert.equal((await readFile(join(stateDir, `${attemptId}.result`), "utf8")).includes(text), false);
+    const files = await readdir(stateDir);
+    assert.ok(files.includes(`${attemptId}.result.pending`));
+    assert.ok(files.includes(`${attemptId}.patch.pending`));
+    // A new process (the unit restarted) still serves both.
+    const second = createAmuxV22SidecarHandler({ worker: "worker-a", stateDir, run: () => { throw new Error("no rerun"); } });
+    const again = await second({ op: "readback", attemptId });
+    assert.equal(again.resultText, text);
+    assert.equal(again.patchBody, patchBody);
+    assert.equal((await second({ op: "confirm_result", attemptId, sourceSha256: sha(text) })).kind, "confirmed");
+    assert.equal((await second({ op: "readback", attemptId })).resultText, undefined);
+    assert.equal((await second({ op: "readback", attemptId })).patchBody, patchBody);
+    assert.equal((await second({ op: "confirm_patch", attemptId, patchDigest: sha(patchBody) })).kind, "confirmed");
+    assert.equal((await second({ op: "readback", attemptId })).patchBody, undefined);
+    assert.deepEqual((await readdir(stateDir)).filter((name) => name.endsWith(".pending")), []);
   } finally { await rm(stateDir, { recursive: true, force: true }); }
 });
 
@@ -705,13 +764,24 @@ test("Ubuntu runs one synthetic CLI process and replays its durable result",
           ...config, binaryPath, worktreePath: root, homePath: root,
           claudeConfigDir: root,
         }, {
-          // The temp worktree is not a git checkout; base sync has its own tests.
+          // The temp worktree is not a git checkout; base sync, the baseline,
+          // the changed-path inventory, the package install and the shell jail
+          // have their own tests. Every role has a shell, so the run needs them.
+          // The leftover preservation and the context files are git steps of
+          // the local CLI flow, covered in amuxV22LocalCliFlow.test.mjs.
+          preserveWorkingTree: async () => ({ ok: true, changed: false }),
+          writeContextFiles: async () => ({ ok: true }),
           syncBase: async () => ({ ok: true, baseSha: "d".repeat(40) }),
+          captureBaseline: async () => ({ ok: true, baseSha: "d".repeat(40) }),
+          captureChangedPaths: async () => ({ ok: true, files: [], contractPaths: [] }),
+          ensureDependencies: async () => ({ ok: true, installed: false }),
+          createShellJail: async () => ({ binPath: join(root, "jail-bin"),
+            prefixPath: join(root, "jail-prefix"), cleanup: async () => {} }),
         }) });
       const execute = { op: "execute", ...request, role: "review" };
       assert.equal((await handler(execute)).kind, "in_progress");
       const finished = await readFinished(handler);
-      assert.equal(finished.kind, "succeeded");
+      assert.equal(finished.kind, "succeeded", JSON.stringify(finished));
       assert.match(finished.outputDigest, /^[0-9a-f]{64}$/);
       const restarted = createAmuxV22SidecarHandler({ worker: "worker-a",
         stateDir, run: () => { throw new Error("duplicate CLI invocation"); } });
@@ -791,7 +861,7 @@ test("a Codex implement run gets the base's locked packages and a writable temp 
   for (const [role, deps, expectedTmp] of [
     ["implement", { ok: true }, join(config.worktreePath, "node_modules", ".cache", "amux-tmp")],
     ["implement", { ok: false, reason: "install_failed" }, undefined],
-    ["investigate", null, undefined],
+    ["investigate", { ok: true }, join(config.worktreePath, "node_modules", ".cache", "amux-tmp")],
   ]) {
     const seen = [];
     const fake = fakeSpawn(output);
@@ -807,9 +877,10 @@ test("a Codex implement run gets the base's locked packages and a writable temp 
   }
 });
 
-test("Claude and Copilot implement runs get the jailed shell; read roles and a missing jail get none", async () => {
-  // Owner request 2026-11-09: implement only. The jail (v22ShellJail.mjs) is
-  // named in the CLI environment the way each CLI was measured to take it.
+test("Claude and Copilot runs of every role get the jailed shell; a missing jail gets none", async () => {
+  // Owner request 2026-11-09 (implement), 2026-11-15 (every role). The jail
+  // (v22ShellJail.mjs) is named in the CLI environment the way each CLI was
+  // measured to take it.
   const tmp = join(config.worktreePath, "node_modules", ".cache", "amux-tmp");
   const jail = (made) => async (paths) => { made.push(paths);
     return { binPath: "/home/run/shell-1/bin", prefixPath: "/home/run/shell-1/claude-shell-prefix",
@@ -823,17 +894,12 @@ test("Claude and Copilot implement runs get the jailed shell; read roles and a m
       ensureDependencies: async () => ({ ok: true, installed: false }) });
     const { env } = fake.calls[0].spawnOptions;
     const tools = fake.calls[0].args[fake.calls[0].args.indexOf("--tools") + 1];
-    if (role === "implement") {
-      assert.deepEqual(made, [{ worktreePath: config.worktreePath, tmpPath: tmp,
-        homePath: config.homePath }, "cleaned"]);
-      assert.equal(env.CLAUDE_CODE_SHELL_PREFIX, "/home/run/shell-1/claude-shell-prefix");
-      assert.equal(env.CLAUDE_CODE_TMPDIR, tmp);
-      assert.match(tools, /,Bash$/);
-    } else {
-      assert.deepEqual(made, [], role);
-      assert.equal(env.CLAUDE_CODE_SHELL_PREFIX, undefined, role);
-      assert.equal(tools.includes("Bash"), false, role);
-    }
+    assert.deepEqual(made, [{ worktreePath: config.worktreePath, tmpPath: tmp,
+      homePath: config.homePath }, "cleaned"], role);
+    assert.equal(env.CLAUDE_CODE_SHELL_PREFIX, "/home/run/shell-1/claude-shell-prefix", role);
+    assert.equal(env.CLAUDE_CODE_TMPDIR, tmp, role);
+    assert.match(tools, /,Bash$/, role);
+    assert.equal(tools.includes("Edit"), role === "implement", role);
     assert.equal(env.PATH, "/usr/bin:/bin");
   }
   // No jail, no run: Bash would otherwise run open.
@@ -865,20 +931,13 @@ test("Claude and Copilot implement runs get the jailed shell; read roles and a m
     const { env } = fake.calls[0].spawnOptions;
     const args = fake.calls[0].args;
     assert.equal(homeCleaned, 1);
-    if (role === "implement") {
-      assert.equal(made[0].homePath, "/run-home");
-      assert.equal(made.at(-1), "cleaned");
-      assert.equal(env.PATH, "/home/run/shell-1/bin:/usr/bin:/bin");
-      assert.equal(env.SHELL, "/home/run/shell-1/bin/bash");
-      // The jail's temp dir exists even when the package install failed.
-      assert.equal(env.TMPDIR, tmp);
-      assert.ok(args.includes("bash") && args.includes("read_bash"));
-    } else {
-      assert.deepEqual(made, []);
-      assert.equal(env.PATH, "/usr/bin:/bin");
-      assert.equal(env.SHELL, undefined);
-      assert.ok(!args.includes("bash"));
-    }
+    assert.equal(made[0].homePath, "/run-home");
+    assert.equal(made.at(-1), "cleaned");
+    assert.equal(env.PATH, "/home/run/shell-1/bin:/usr/bin:/bin");
+    assert.equal(env.SHELL, "/home/run/shell-1/bin/bash");
+    // The jail's temp dir exists even when the package install failed.
+    assert.equal(env.TMPDIR, tmp);
+    assert.ok(args.includes("bash") && args.includes("read_bash"));
   }
 });
 
@@ -942,7 +1001,8 @@ test("a Codex sidecar runs its own CLI under the role's sandbox and returns a Co
   const [call] = fake.calls;
   assert.equal(call.binary, "/opt/tomverse-amux-v22/codex");
   assert.deepEqual(call.args.slice(0, 4), ["-a", "never", "--no-daemon", "exec"]);
-  assert.ok(call.args.includes("read-only") && call.args.includes("gpt-6-luna"));
+  // Every role has the shell, so a read role runs workspace-write too.
+  assert.ok(call.args.includes("workspace-write") && call.args.includes("gpt-6-luna"));
   // The CLI sees the fresh run home, never the sidecar's own config dir.
   assert.equal(call.spawnOptions.env.CODEX_HOME, "/run-home/codex");
   assert.equal(call.spawnOptions.env.HOME, "/run-home");
@@ -980,7 +1040,7 @@ test("a Codex sidecar runs its own CLI under the role's sandbox and returns a Co
 });
 
 // The sidecar takes absolute POSIX paths only.
-test("a Codex or Copilot run never holds the operator's refresh token, and an expiring login never starts",
+test("a Codex or Copilot run never holds the operator's refresh token, and an expired login never starts",
   { skip: process.platform === "win32" }, async () => {
   const root = await mkdtemp(join(tmpdir(), "amux-v22-sidecar-auth-"));
   try {
@@ -1019,12 +1079,19 @@ test("a Codex or Copilot run never holds the operator's refresh token, and an ex
     // The operator's own file is untouched.
     assert.match(await readFile(join(cli, "auth.json"), "utf8"), /synthetic-operator-refresh-secret/);
 
-    await writeFile(join(cli, "auth.json"), login(5 * 60 * 60 * 1000));
-    const expiring = await runAmuxV22OneShot(investigate, codex,
+    // A login that expires soon still runs: there is no margin of ours
+    // (owner direction 2026-11-16); only an expired one is refused.
+    await writeFile(join(cli, "auth.json"), login(5 * 60 * 1000));
+    const soon = await runAmuxV22OneShot(investigate, codex,
       { syntheticPlatform: true, spawnChild, channelPreflight: () => null });
-    assert.deepEqual([expiring.kind, expiring.cliStarted, expiring.failure],
+    assert.equal(soon.kind, "succeeded");
+    assert.equal(fake.calls.length, 2);
+    await writeFile(join(cli, "auth.json"), login(-60_000));
+    const expired = await runAmuxV22OneShot(investigate, codex,
+      { syntheticPlatform: true, spawnChild, channelPreflight: () => null });
+    assert.deepEqual([expired.kind, expired.cliStarted, expired.failure],
       ["failed", false, "channel_auth_refused"]);
-    assert.equal(fake.calls.length, 1);
+    assert.equal(fake.calls.length, 2);
 
     // Copilot: the checked token is the only sign-in, carried in its env.
     const copilot = { ...codex, provider: "github-copilot",
@@ -1034,14 +1101,14 @@ test("a Codex or Copilot run never holds the operator's refresh token, and an ex
     await writeFile(join(cli, "auth-token"), `${token}\n`);
     await runAmuxV22OneShot(copilotRequest, copilot,
       { syntheticPlatform: true, spawnChild: fake.spawnChild, channelPreflight: () => null });
-    assert.equal(fake.calls.length, 2);
-    assert.equal(fake.calls[1].spawnOptions.env.COPILOT_GITHUB_TOKEN, token);
+    assert.equal(fake.calls.length, 3);
+    assert.equal(fake.calls[2].spawnOptions.env.COPILOT_GITHUB_TOKEN, token);
     await writeFile(join(cli, "auth-token"), "not-a-token");
     const badToken = await runAmuxV22OneShot(copilotRequest, copilot,
       { syntheticPlatform: true, spawnChild: fake.spawnChild, channelPreflight: () => null });
     assert.deepEqual([badToken.kind, badToken.cliStarted, badToken.failure],
       ["failed", false, "channel_auth_refused"]);
-    assert.equal(fake.calls.length, 2);
+    assert.equal(fake.calls.length, 3);
     // Every run home was removed.
     assert.deepEqual((await readdir(home)).filter((name) => name.startsWith("run-")), []);
   } finally { await rm(root, { recursive: true, force: true }); }

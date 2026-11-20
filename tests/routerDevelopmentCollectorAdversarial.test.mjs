@@ -35,7 +35,7 @@ after(() => {
 
 const {
   COLLECTION_ASSUMPTIONS, COLLECTION_LIMITS, COLLECTION_VERSION,
-  buildCollectionManifest, ceilTokenMicroUsd, collectionHash,
+  buildCollectionManifest, ceilTokenMicroUsd, collectionHash, isCollectionProviderSupported,
   emptyCollectionObservation, estimateCollectionUsageCost, reserveCollectionCost,
   sumCollectionMoney, validateCollectionApproval, validateCollectionLimits,
   validateCollectionManifest, validateCollectionOutcome,
@@ -58,7 +58,8 @@ const corpus = parseDevelopmentCorpus(readFileSync(new URL("../docs/ops/router-d
 const source = { commit: "a".repeat(40), dirty: false, files: { "synthetic-test-only": "b".repeat(64) } };
 const instant = "2026-09-10T00:00:00.000Z";
 const plan = buildDevelopmentPlan({ corpus, models: AVAILABLE_MODELS, source, requestedModelId: DEFAULT_MODEL_ID, plan: "Pro", createdAt: instant });
-const eligible = plan.rows.filter((row) => row.benchmarkEligibility.eligible);
+const staticallyEligibleCount = plan.rows.filter((row) => row.benchmarkEligibility.eligible).length;
+const eligible = plan.rows.filter((row) => row.benchmarkEligibility.eligible && isCollectionProviderSupported(row.provider));
 const limits = {
   maxTotalMicroUsd: 1_000_000_000, maxRequestMicroUsd: 1_000_000_000,
   maxCalls: 1008, requestTimeoutMs: 1000, runTimeoutMs: 60_000,
@@ -557,10 +558,10 @@ test("export preserves blank and failed rows in the original eligible denominato
   const results = await exportDevelopmentCollection(fix.input);
   const score = scoreDevelopmentResults(corpus, plan, results);
   assert.equal(results.rows.length, 2);
-  assert.equal(score.summary.planned, eligible.length);
+  assert.equal(score.summary.planned, staticallyEligibleCount);
   assert.equal(score.summary.blank, 1);
   assert.equal(score.summary.failed, 1);
-  assert.equal(score.summary.notRun, eligible.length - 2);
+  assert.equal(score.summary.notRun, staticallyEligibleCount - 2);
   assert.equal(score.summary.correctnessRate, null);
   assert.equal(score.reportedMetrics.providerCostUsd.total, null);
   for (const row of results.rows) assert.equal(row.metrics.providerCostUsd, null);
@@ -575,7 +576,7 @@ test("controlled timeout terminal is exported as timeout without releasing its r
   assert.equal(results.rows[0].status, "timeout");
   assert.equal(results.rows[0].metrics.providerCostUsd, null);
   assert.equal(scoreDevelopmentResults(corpus, plan, results).summary.timeout, 1);
-  assert.equal(scoreDevelopmentResults(corpus, plan, results).summary.planned, eligible.length);
+  assert.equal(scoreDevelopmentResults(corpus, plan, results).summary.planned, staticallyEligibleCount);
   assert.ok(report.committedReservationMicroUsd > 0);
   assert.equal(report.actualInvoiceMicroUsd, null);
 });
@@ -599,8 +600,8 @@ test("durable timeout stops later rows and resume while remaining exportable as 
   assert.equal(results.rows[0].status, "timeout");
   const score = scoreDevelopmentResults(corpus, plan, results);
   assert.equal(score.summary.timeout, 1);
-  assert.equal(score.summary.notRun, eligible.length - 1);
-  assert.equal(score.summary.planned, eligible.length);
+  assert.equal(score.summary.notRun, staticallyEligibleCount - 1);
+  assert.equal(score.summary.planned, staticallyEligibleCount);
 });
 
 test("whole-document v1 export limit refuses rather than dropping large valid rows", async (t) => {

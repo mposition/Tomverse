@@ -13,7 +13,7 @@ let held = true; let fail = false; let calls = 0; let holds = 0;
 let output: unknown = { requiresLocation: true };
 const settlements: number[] = [];
 mock.module("ai", { namedExports: { ...ai, generateText: async (input: { maxRetries: number; maxOutputTokens: number; prompt: string }) => {
-  calls++; assert.equal(input.maxRetries, 0); assert.equal(input.maxOutputTokens, 400);
+  calls++; assert.equal(input.maxRetries, 0); assert.equal(input.maxOutputTokens, 8_192);
   assert.equal(JSON.parse(input.prompt).userMessage, "지금 제가 있는 위치가 어디인가요?");
   if (fail) throw Error("unknown provider outcome");
   return { output, usage: { inputTokens: 30, outputTokens: 10 } };
@@ -54,4 +54,28 @@ test("only a validated semantic decision can request permission, with actual usa
 });
 test("unknown model outcomes keep their hold and fall back without granting permission", async () => {
   reset(); fail = true; assert.equal(await ask(), false); assert.equal(calls, 1); assert.equal(holds, 1); assert.equal(settlements.length, 0);
+});
+test("early decisions distinguish rejected admission from an uncertain provider outcome", async () => {
+  const detect = (await load()).detectChatLocationIntent;
+  const outcomes: string[] = [];
+  const controller = new AbortController();
+  const options = { signal: controller.signal, onOutcome: (value: string) => outcomes.push(value) };
+  const classify = () => detect("지금 제가 있는 위치가 어디인가요?", options);
+  reset();
+  held = false;
+  assert.equal(await classify(), false);
+  assert.equal(calls, 0);
+  held = true;
+  fail = true;
+  assert.equal(await classify(), false);
+  assert.equal(settlements.length, 0);
+  fail = false;
+  output = { requiresLocation: false };
+  assert.equal(await classify(), false);
+  controller.abort();
+  assert.equal(await classify(), false);
+  assert.deepEqual(outcomes, ["not_dispatched", "unknown", "classified", "not_dispatched"]);
+  assert.equal(calls, 2);
+  assert.equal(holds, 3);
+  assert.equal(settlements.length, 1);
 });

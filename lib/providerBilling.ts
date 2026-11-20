@@ -11,6 +11,7 @@ import type {
 const DOCUMENTED_DEFAULTS: Record<AiProvider, ProviderBillingProfile> = {
   openai: defaultProfile("usage_based", "prepaid"),
   anthropic: defaultProfile("usage_based", "prepaid"),
+  cohere: defaultProfile("usage_based", "unknown"),
   google: defaultProfile("usage_based", "unknown"),
   groq: defaultProfile("usage_based", "postpaid"),
   xai: defaultProfile("usage_based", "hybrid"),

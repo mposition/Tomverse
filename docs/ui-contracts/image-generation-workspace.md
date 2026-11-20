@@ -29,7 +29,7 @@ its own complete full-width row.
 | Workspace: composer, option rows, timeline, comparison grid | `components/images/ImageGenerationWorkspace.tsx` |
 | Unified new-conversation launcher (split button / menu rows) | `components/chat/NewConversationLauncher.tsx` |
 | Catalogue `Chat \| Image` tabs | `components/chat/ModelPickerPanel.tsx` |
-| Image tab rows, hold state, "from" pricing | `components/chat/ImageModelTabPanel.tsx` |
+| Image tab rows, logos, usage meter | `components/chat/ImageModelTabPanel.tsx` |
 | Composer model-picker wiring | `components/chat/ChatInput.tsx` |
 | Draft carry-over/restore, lock derivation, workspace mounting | `app/(site)/(application)/chat/ChatPageClient.tsx` |
 | Sidebar placement of the launcher | `components/chat/ChatSidebar.tsx` |
@@ -63,8 +63,15 @@ submitted prompt through the existing LLM routing.
 On Review (`/review`) entry 3 and the starter catalogue's image card
 do not open this workspace: they arm the Review composer's image mode
 (`review-image-mode`) and the answer is generated inside the conversation
-(`docs/ui-contracts/review-studio.md`, owner direction 2026-10-23). The sidebar
-and drawer launcher stay explicit entries to this workspace there too.
+(`docs/ui-contracts/review-studio.md`, owner direction 2026-10-23). With no
+model chosen, the card arms an active model from the image catalogue, never a
+fixed default. The sidebar and drawer launcher stay explicit entries to this
+workspace there too.
+
+On Chat (`/chat`) no starter card opens this workspace (owner direction
+2026-11-13). Chat's image card (`make-an-image`) seeds an ordinary Chat draft;
+the send is answered with an image in the same conversation (policy §13 ⑥), and
+the card is hidden when image triage is off.
 
 The Chat **image-request handoff chip** that used to be a fifth entry point was
 **deleted on 2026-10-20**: the LLM judgement on send (policy §13 ⑥,
@@ -170,15 +177,14 @@ Tab requirements:
 
 ## The image tab's rows
 
-- **Every registered model is listed**, including the ones the
-  price-verification rule holds disabled. A model the product has decided about
-  but cannot yet run is stated as a hold (`image-model-hold-note`), never
-  silently absent — otherwise the catalogue answers "why is this model
-  missing?" with nothing. The e2e assertion counts holds from the registry
-  rather than hard-coding a number, so registering another candidate is not a
-  test failure.
-- A held row is `disabled` and carries no clickable path to a run. Only the
-  verification state changes that; never a click.
+- **Only models that can run are listed** (owner decision 2026-11-13). A
+  held model — unverified price, unbounded worst case, operator hold — is
+  operator state and is stated in the Admin catalogue, not in the user's
+  picker. The e2e assertion counts enabled models from the registry rather than
+  hard-coding a number.
+- Each row carries its owner's logo (`ModelLogo`, the chat list's), so a model
+  bought through a gateway shows its maker's mark and the subtitle names the
+  gateway.
 - Prices are quoted as **"from N credits"** — the cheapest option — because the
   tab does not know which quality and size the composer will land on. The
   composer, which does know, is the only place an exact price is stated.

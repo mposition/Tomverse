@@ -19,6 +19,8 @@ import {
   AmuxOwnerQueueDecision,
   useAmuxOwnerQueueElapsed,
 } from "@/components/admin/AmuxOwnerQueueDecision";
+import { amuxOwnerQueueDmFrom } from "@/components/admin/AmuxOwnerQueueDm";
+import { AmuxOwnerQueueDmRelayChip } from "@/components/admin/AmuxOwnerQueueDmRequest";
 import { AdminChannelIcon } from "@/components/admin/ui/AdminChannelIcon";
 import { AdminStateBlock } from "@/components/admin/ui/AdminStateBlock";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
@@ -28,6 +30,8 @@ import { adminAmuxOwnerQueueMessages } from "@/lib/adminMessages/amuxOwnerQueue"
 import { amuxVisibleInspectionText } from "@/lib/amux/adminExecutionViewCore";
 import {
   AMUX_OWNER_QUEUE_GROUPS,
+  AMUX_OWNER_QUEUE_LIMIT,
+  AMUX_OWNER_QUEUE_MAX_LIMIT,
   amuxOwnerQueueGroup,
   amuxOwnerQueueGroupCounts,
   amuxOwnerQueueVisible,
@@ -64,7 +68,7 @@ export type AmuxOwnerQueueStatus = "loading" | "failed" | "ready";
  */
 export function AmuxOwnerQueueView({
   status, read, selectedId, onSelect, navLocked, query, onQuery, groupFilter, onGroupFilter,
-  focusMode, onToggleFocus, onRetry, detail,
+  focusMode, onToggleFocus, onRetry, onShowMore, detail,
 }: {
   status: AmuxOwnerQueueStatus;
   read: AmuxOwnerQueueRead | null;
@@ -78,6 +82,8 @@ export function AmuxOwnerQueueView({
   focusMode: boolean;
   onToggleFocus: () => void;
   onRetry: () => void;
+  /** Reads one more page of the queue; offered while the list holds only part of it. */
+  onShowMore: () => void;
   detail: ReactNode;
 }) {
   const copy = useAdminMessages(adminAmuxOwnerQueueMessages);
@@ -115,6 +121,7 @@ export function AmuxOwnerQueueView({
             {read === null ? copy.strip.unknown : read.total}
           </strong>
         </div>
+        <AmuxOwnerQueueDmRelayChip relay={read?.dmRelay} />
         <div className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-2">
           <p className="hidden items-center gap-1.5 text-xs text-zinc-400 md:flex" data-testid="amux-owner-queue-keys">
             <kbd className="rounded bg-zinc-800 px-1.5 py-0.5 text-zinc-300">J</kbd>
@@ -175,6 +182,13 @@ export function AmuxOwnerQueueView({
               <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs leading-5 text-amber-200"
                 data-testid="amux-owner-queue-partial">
                 {copy.list.partial(read.items.length, read.total)}
+                {read.items.length < AMUX_OWNER_QUEUE_MAX_LIMIT ? (
+                  <button type="button" data-testid="amux-owner-queue-show-more"
+                    onClick={onShowMore}
+                    className="ml-2 inline-flex min-h-8 items-center rounded-lg border border-amber-500/40 px-3 font-bold hover:bg-amber-500/10">
+                    {copy.list.showMore(Math.min(AMUX_OWNER_QUEUE_LIMIT, read.total - read.items.length))}
+                  </button>
+                ) : null}
               </p>
             ) : null}
             {visible.length === 0 ? (
@@ -209,6 +223,12 @@ export function AmuxOwnerQueueView({
                                   {amuxVisibleInspectionText(item.displayKey ?? item.taskId)}
                                 </span>
                                 <span className="text-xs text-zinc-400">{reason ?? copy.group[group]}</span>
+                                {item.publicationPathMissing ? (
+                                  <span className="rounded-md bg-amber-500/15 px-1.5 py-0.5 text-xs font-bold text-amber-200"
+                                    data-testid="amux-owner-queue-publication-path-missing">
+                                    {copy.list.publicationPathMissing}
+                                  </span>
+                                ) : null}
                               </span>
                               <span className="mt-0.5 block break-words text-sm font-bold text-zinc-100">
                                 {item.title === null ? copy.list.untitled : amuxVisibleInspectionText(item.title)}
@@ -249,8 +269,13 @@ const isEditable = (target: EventTarget | null) => {
  * recorded only by those parts and their routes: this screen reads, selects and
  * moves on, and never skips a confirmation.
  */
-export function AmuxOwnerQueueScreen({ canInspectCards, focusEscalationId = null }: {
+export function AmuxOwnerQueueScreen({ canInspectCards, canWriteEngineering = false, canAskDecisionMaker = false,
+  focusEscalationId = null }: {
   canInspectCards: boolean;
+  /** `ops:write`: the Decision Maker box offers its button. */
+  canAskDecisionMaker?: boolean;
+  /** `engineering-agent:write`: a card's engineering items offer their buttons. */
+  canWriteEngineering?: boolean;
   /** A step-up that came back here names the escalation it was working on. */
   focusEscalationId?: string | null;
 }) {
@@ -264,6 +289,8 @@ export function AmuxOwnerQueueScreen({ canInspectCards, focusEscalationId = null
   const [focusMode, setFocusMode] = useState(false);
   const requestId = useRef(0);
   const firstRead = useRef(true);
+  // How many cards the list asks for: one page, and one more each time "show more" is pressed.
+  const wanted = useRef(AMUX_OWNER_QUEUE_LIMIT);
   const loadRef = useRef<(select?: string | null) => Promise<void>>(async () => {});
   // What the callbacks below need from the latest render without being rebuilt by it.
   const live = useRef<{ visible: AmuxOwnerQueueItem[]; selectedId: string | null; advance: boolean }>(
@@ -274,7 +301,8 @@ export function AmuxOwnerQueueScreen({ canInspectCards, focusEscalationId = null
     const id = ++requestId.current;
     setStatus("loading");
     try {
-      const response = await adminFetch("/api/admin/amux/owner-queue", { cache: "no-store" });
+      const more = wanted.current > AMUX_OWNER_QUEUE_LIMIT ? `?limit=${wanted.current}` : "";
+      const response = await adminFetch("/api/admin/amux/owner-queue" + more, { cache: "no-store" });
       if (id !== requestId.current) return;
       const body: unknown = response.ok ? await response.json() : null;
       if (id !== requestId.current) return;
@@ -292,7 +320,8 @@ export function AmuxOwnerQueueScreen({ canInspectCards, focusEscalationId = null
         next = focused ?? amuxOwnerQueueVisible(body.items, { group: null, query: "" })[0]?.taskId ?? null;
       }
       firstRead.current = false;
-      setRead(body);
+      // A settlement this screen cannot draw is shown as unread, never trusted as read.
+      setRead({ ...body, items: body.items.map((item) => ({ ...item, dmSettlement: amuxOwnerQueueDmFrom(item.dmSettlement) })) });
       setStatus("ready");
       setSelectedId(next);
     } catch {
@@ -303,6 +332,10 @@ export function AmuxOwnerQueueScreen({ canInspectCards, focusEscalationId = null
     }
   }, [focusEscalationId]);
   useEffect(() => { loadRef.current = load; }, [load]);
+  const showMore = useCallback(() => {
+    wanted.current = Math.min(AMUX_OWNER_QUEUE_MAX_LIMIT, wanted.current + AMUX_OWNER_QUEUE_LIMIT);
+    void load();
+  }, [load]);
   useEffect(() => { queueMicrotask(() => void load()); }, [load]);
 
   const items = useMemo(() => read?.items ?? [], [read]);
@@ -339,6 +372,14 @@ export function AmuxOwnerQueueScreen({ canInspectCards, focusEscalationId = null
     opened.current = escalationId;
     queueMicrotask(() => void openReview(escalationId));
   }, [escalationId, selectedEscalationId, pendingDecision, pendingDecisionChecked, openReview, closeReview]);
+
+  // An engineering action on the card: read the queue and this card's review
+  // again, staying on the card (its own escalation may have moved on).
+  const refreshCard = useCallback(() => {
+    void loadRef.current();
+    const id = opened.current;
+    if (id !== null) queueMicrotask(() => void openReview(id));
+  }, [openReview]);
 
   const select = useCallback((taskId: string) => { if (!navLocked) setSelectedId(taskId); }, [navLocked]);
   const step = useCallback((delta: 1 | -1) => {
@@ -383,7 +424,8 @@ export function AmuxOwnerQueueScreen({ canInspectCards, focusEscalationId = null
       generatedAt={read.generatedAt} navLocked={navLocked} advance={advance} onAdvanceChange={setAdvance}
       onPrevious={selectedIndex > 0 ? () => step(-1) : null}
       onNext={selectedIndex >= 0 && selectedIndex < visible.length - 1 ? () => step(1) : null}
-      onAnswered={decided} />
+      onAnswered={decided} canWriteEngineering={canWriteEngineering} onEngineeringChanged={refreshCard}
+      dmRelay={read.dmRelay} canAskDecisionMaker={canAskDecisionMaker} />
   );
 
   return (
@@ -392,7 +434,7 @@ export function AmuxOwnerQueueScreen({ canInspectCards, focusEscalationId = null
       <AmuxOwnerQueueView status={status} read={read} selectedId={selectedId} onSelect={select}
         navLocked={navLocked} query={query} onQuery={setQuery} groupFilter={groupFilter}
         onGroupFilter={setGroupFilter} focusMode={focusMode} onToggleFocus={() => setFocusMode((on) => !on)}
-        onRetry={() => void load()} detail={detail} />
+        onRetry={() => void load()} onShowMore={showMore} detail={detail} />
     </div>
   );
 }

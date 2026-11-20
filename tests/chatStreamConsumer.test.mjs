@@ -574,7 +574,6 @@ test("a settled turn leaves no timer armed, on every path", async () => {
   assert.equal(timedOut.pendingCount(), 0);
 });
 
-
 test("consumer exposes only validated artifact unavailable notices from a fragmented trailer", async () => {
   for (const reason of ["model_unverified", "native_search_conflict", "unknown"]) {
     const notice = { reason, ...(reason === "model_unverified" ? { suggestedModelId: "first" } : {}) };
@@ -591,4 +590,50 @@ test("consumer exposes only validated artifact unavailable notices from a fragme
     assert.equal(result.displayText, "Answer");
     assert.deepEqual(result.artifactUnavailable, reason === "unknown" ? undefined : notice);
   }
+});
+
+/* ------------------------------------------- a stream the server failed ---- */
+
+test("a stream that breaks after its error-report trailer hands the trailer over before rethrowing", async () => {
+  const stream = scriptedStream();
+  const interrupted = [];
+  const run = consumeChatStream({
+    reader: stream.reader,
+    liveness: { noteKeepalive: () => undefined, noteVisibleChunk: () => undefined },
+    onProgress: () => undefined,
+    onInterrupted: (json) => interrupted.push(json),
+  });
+  stream.push("Half an answer");
+  stream.push(
+    buildChatStreamTrailerChunk({
+      searchMetadata: null,
+      errorReport: { token: "terr1.payload.signature", code: "AI_STREAM_FAILED.ECONNRESET" },
+    })
+  );
+  await flush();
+  stream.fail(new TypeError("network error"));
+  await assert.rejects(run, /network error/);
+
+  assert.equal(interrupted.length, 1);
+  assert.deepEqual(parseChatStreamTrailer(interrupted[0]).errorReport, {
+    token: "terr1.payload.signature",
+    code: "AI_STREAM_FAILED.ECONNRESET",
+  });
+});
+
+test("a connection that simply drops has no trailer to hand over", async () => {
+  const stream = scriptedStream();
+  const interrupted = [];
+  const run = consumeChatStream({
+    reader: stream.reader,
+    liveness: { noteKeepalive: () => undefined, noteVisibleChunk: () => undefined },
+    onProgress: () => undefined,
+    onInterrupted: (json) => interrupted.push(json),
+  });
+  stream.push("Half an answer");
+  await flush();
+  stream.fail(new TypeError("network error"));
+  await assert.rejects(run, /network error/);
+  // Unverified, exactly as before: nothing the server signed ever arrived.
+  assert.deepEqual(interrupted, [null]);
 });

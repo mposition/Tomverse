@@ -12,8 +12,6 @@ type PromptRefinerCopy = {
   selectedForSend: string;
   useSuggestion: string;
   keepOriginal: string;
-  autoApplied: string;
-  useOriginalNext: string;
   close: string;
   failed: string;
   retry: string;
@@ -37,8 +35,6 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     selectedForSend: "다음 전송에서 이 제안문을 실행 입력으로 사용합니다. 저장되는 메시지는 원문을 유지합니다.",
     useSuggestion: "이 문장 사용",
     keepOriginal: "원문 유지",
-    autoApplied: "이 답변에는 Refiner 제안문을 적용했습니다. 저장된 메시지는 원문 그대로입니다.",
-    useOriginalNext: "다음에는 원문 사용",
     close: "닫기",
     failed: "문장을 제안하지 못했습니다. 원문은 바뀌지 않았습니다.",
     retry: "다시 시도",
@@ -60,8 +56,6 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     selectedForSend: "This suggestion will be used for the next send. Your saved message will keep the original wording.",
     useSuggestion: "Use this wording",
     keepOriginal: "Keep original",
-    autoApplied: "Applied the Refiner suggestion for this answer. Your saved message keeps the original.",
-    useOriginalNext: "Use original next time",
     close: "Close",
     failed: "A suggestion could not be prepared. Your original was not changed.",
     retry: "Try again",
@@ -83,8 +77,6 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     selectedForSend: "下次发送将使用此建议作为执行输入，保存的消息仍保留原文。",
     useSuggestion: "使用此表述",
     keepOriginal: "保留原文",
-    autoApplied: "此回答已应用 Refiner 建议，保存的消息仍保留原文。",
-    useOriginalNext: "下次使用原文",
     close: "关闭",
     failed: "无法生成建议，原文未被更改。",
     retry: "重试",
@@ -106,8 +98,6 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     selectedForSend: "下次傳送將使用此建議作為執行輸入，儲存的訊息仍保留原文。",
     useSuggestion: "使用此表述",
     keepOriginal: "保留原文",
-    autoApplied: "此回答已套用 Refiner 建議，儲存的訊息仍保留原文。",
-    useOriginalNext: "下次使用原文",
     close: "關閉",
     failed: "無法產生建議，原文未被變更。",
     retry: "重試",
@@ -129,8 +119,6 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     selectedForSend: "Cette proposition sera utilisée au prochain envoi. Le message enregistré conservera le texte original.",
     useSuggestion: "Utiliser cette formulation",
     keepOriginal: "Garder l’original",
-    autoApplied: "La proposition du Refiner a été appliquée à cette réponse. Le message enregistré conserve l’original.",
-    useOriginalNext: "Utiliser l’original ensuite",
     close: "Fermer",
     failed: "Aucune suggestion n’a pu être préparée. L’original est inchangé.",
     retry: "Réessayer",
@@ -152,8 +140,6 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     selectedForSend: "Dieser Vorschlag wird beim nächsten Senden verwendet. Die gespeicherte Nachricht behält den Originaltext.",
     useSuggestion: "Diese Formulierung verwenden",
     keepOriginal: "Original behalten",
-    autoApplied: "Der Refiner-Vorschlag wurde für diese Antwort angewendet. Die gespeicherte Nachricht behält das Original.",
-    useOriginalNext: "Nächstes Mal Original verwenden",
     close: "Schließen",
     failed: "Kein Vorschlag möglich. Das Original wurde nicht geändert.",
     retry: "Erneut versuchen",
@@ -175,8 +161,6 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     selectedForSend: "Esta sugerencia se usará en el próximo envío. El mensaje guardado conservará el texto original.",
     useSuggestion: "Usar esta redacción",
     keepOriginal: "Conservar original",
-    autoApplied: "La sugerencia del Refiner se aplicó a esta respuesta. El mensaje guardado conserva el original.",
-    useOriginalNext: "Usar el original la próxima vez",
     close: "Cerrar",
     failed: "No se pudo preparar una sugerencia. El original no cambió.",
     retry: "Reintentar",
@@ -198,8 +182,6 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     selectedForSend: "Esta sugestão será usada no próximo envio. A mensagem salva manterá o texto original.",
     useSuggestion: "Usar esta redação",
     keepOriginal: "Manter original",
-    autoApplied: "A sugestão do Refiner foi aplicada a esta resposta. A mensagem salva mantém o original.",
-    useOriginalNext: "Usar o original na próxima vez",
     close: "Fechar",
     failed: "Não foi possível preparar uma sugestão. O original não mudou.",
     retry: "Tentar novamente",

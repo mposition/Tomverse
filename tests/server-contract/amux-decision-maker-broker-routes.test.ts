@@ -98,7 +98,6 @@ const RESULT_BINDING = {
 
 type World = {
   authorized: boolean;
-  env: string | undefined;
   budgetDepth: number;
   boundaries: Array<{ operation: string; inBudget: boolean }>;
   calls: Array<{ store: string; input: Record<string, unknown> }>;
@@ -114,12 +113,13 @@ type World = {
   cleanupLatchError: Error | null;
   internalErrors: Array<{ operation: string; error: unknown }>;
   logged: string[];
+  /** Operational incidents the result route reported (a DM run that ended unavailable). */
+  incidents: Array<Record<string, unknown>>;
 };
 let world: World;
 const reset = (changes: Partial<World> = {}) => {
   world = {
     authorized: true,
-    env: "enabled",
     budgetDepth: 0,
     boundaries: [],
     calls: [],
@@ -133,10 +133,9 @@ const reset = (changes: Partial<World> = {}) => {
     cleanupLatchError: null,
     internalErrors: [],
     logged: [],
+    incidents: [],
     ...changes,
   };
-  if (world.env === undefined) delete process.env.TOMVERSE_AMUX_DM_ROUTING;
-  else process.env.TOMVERSE_AMUX_DM_ROUTING = world.env;
 };
 reset();
 
@@ -275,7 +274,8 @@ const ROUTES: Route[] = [
     operation: "decision_maker_result_submission",
     store: "submitDecisionMakerOutput",
     envelope: "submitted",
-    maxBodyBytes: 256 * 1_024,
+    // 2026-11-16: the worst case an output under the launcher's cap can make (it was 1,152 KiB).
+    maxBodyBytes: 4 * 1_024 * 1_024,
     body: {
       request_id: REQUEST_ID,
       instance: "decision-maker-openai",
@@ -490,6 +490,13 @@ async function loadRoute(route: Route): Promise<{ POST: (request: Request) => Pr
         },
       },
     });
+    mock.module(mod("lib/operationalMonitoring.ts"), {
+      namedExports: {
+        reportOperationalIncident: async (incident: Record<string, unknown>) => {
+          world.incidents.push(incident);
+        },
+      },
+    });
     const realInternal = require(resolve(ROOT, "lib/amux/internalRoute.ts"));
     mock.module(mod("lib/amux/internalRoute.ts"), {
       namedExports: {
@@ -517,7 +524,7 @@ const post = (route: Route, body: unknown) =>
     body: typeof body === "string" ? body : JSON.stringify(body),
   });
 
-test("only the sync token reaches each route, and each stays closed until the operator enables it", async () => {
+test("only the sync token reaches each route", async () => {
   for (const route of ROUTES) {
     const { POST } = await loadRoute(route);
 
@@ -527,17 +534,6 @@ test("only the sync token reaches each route, and each stays closed until the op
     assert.deepEqual(world.calls, [], route.name);
     assert.deepEqual(world.boundaries, [], route.name);
 
-    for (const env of [undefined, "", "true", "ENABLED", "enabled ", "on"]) {
-      reset({ env });
-      const closed = await POST(post(route, route.body));
-      assert.equal(closed.status, 409, `${route.name} ${String(env)}`);
-      assert.deepEqual(await closed.json(), { [route.envelope]: false, reason: "dm_routing_disabled" }, route.name);
-      assert.equal(closed.headers.get("cache-control"), "no-store", route.name);
-      // Closed means no database at all: no boundary, no store, not even the key ring.
-      assert.deepEqual(world.boundaries, [], route.name);
-      assert.deepEqual(world.calls, [], route.name);
-      assert.equal(world.keyRingLoads, 0, route.name);
-    }
   }
 });
 
@@ -676,21 +672,23 @@ test("a body outside each route's strict shape or size never reaches the store",
   }
 });
 
-test("the result route's size cap holds the largest output the store could accept", async () => {
-  // §6's largest answer and rationale, every byte a control character, which JSON writes as six
-  // characters and the request body carries as seven, with options as long as §5's card allows.
+test("the result route's size cap holds the largest output the launcher returns", async () => {
+  // A raw output just under the launcher's 256 KiB, every byte a control character (six
+  // characters as JSON, seven as the request carries it), with options as long as §5's one card
+  // cap (256 KiB since 2026-11-15) allows.
   const route = ROUTES.find((entry) => entry.name === "result submission")!;
   const { POST } = await loadRoute(route);
   const raw = JSON.stringify({
     kind: "free_text",
-    answer: "\u0001".repeat(8 * 1_024),
-    rationale: "\u0001".repeat(4 * 1_024),
+    answer: "\u0001".repeat(40 * 1_024),
+    rationale: "\u0001".repeat(2 * 1_024),
     irreversible: false,
   });
-  const options = [{ id: "a", label: "x".repeat(16 * 1_024) }];
+  assert.ok(Buffer.byteLength(raw, "utf8") < 256 * 1_024, String(raw.length));
+  const options = [{ id: "a", label: "x".repeat(250 * 1_024) }];
   const body = { ...route.body, output: { kind: "output", raw, options } };
   const bytes = Buffer.byteLength(JSON.stringify(body), "utf8");
-  assert.ok(bytes > 96 * 1_024 && bytes < route.maxBodyBytes, String(bytes));
+  assert.ok(bytes > 512 * 1_024 && bytes < route.maxBodyBytes, String(bytes));
   reset();
   const answer = await POST(post(route, body));
   assert.equal(answer.status, 200);
@@ -900,6 +898,38 @@ test("a validation failure the ledger holds runs §8's latch check in a boundary
   reset({ storeResult: { status: "option_set_mismatch" } });
   assert.equal((await POST(post(route, route.body))).status, 409);
   assert.deepEqual(world.calls.map((call) => call.store), ["submitDecisionMakerOutput"]);
+});
+
+test("a DM run the ledger first records as unavailable is reported once as an operational incident", async () => {
+  const route = ROUTES.find((entry) => entry.name === "result submission")!;
+  const { POST } = await loadRoute(route);
+  const submitted = (result: Record<string, unknown>, resultKind: string) => ({
+    status: "submitted", resultKind, validationFailure: null, resultDigest: DIGEST_C, result, detail: null, storedFields: [],
+  });
+
+  reset({ storeResult: submitted({ status: "accepted", event: EVENT, resultKind: "unavailable" }, "unavailable") });
+  const answer = await POST(post(route, route.body));
+  assert.equal(answer.status, 200);
+  assert.equal((await answer.json()).result_kind, "unavailable");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(world.incidents.length, 1);
+  assert.equal(world.incidents[0]!.code, "AMUX_DM_RUN_UNAVAILABLE");
+  assert.deepEqual(world.incidents[0]!.context, {
+    instance: (route.body as Record<string, unknown>).instance,
+    requestId: (route.body as Record<string, unknown>).request_id,
+  });
+
+  // The same result again, any judgment and a timeout are not reported.
+  for (const storeResult of [
+    submitted({ status: "existing", eventId: EVENT.eventId, resultKind: "unavailable" }, "unavailable"),
+    submitted({ status: "accepted", event: EVENT, resultKind: "escalate" }, "escalate"),
+    submitted({ status: "accepted", event: EVENT, resultKind: "timeout" }, "timeout"),
+  ]) {
+    reset({ storeResult });
+    assert.equal((await POST(post(route, route.body))).status, 200);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(world.incidents, [], storeResult.resultKind);
+  }
 });
 
 test("a cleanup report recorded or found runs §5's latch check in a boundary of its own, and the answer stays the report's", async () => {

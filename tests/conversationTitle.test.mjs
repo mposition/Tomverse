@@ -4,6 +4,8 @@ import { readFileSync } from "node:fs";
 import {
   sanitizeGeneratedTitle,
   generateConversationTitle,
+  titleGenerationSettings,
+  interimTitleFromFirstMessage,
 } from "../lib/conversationTitle.ts";
 
 // The default title model (gpt-5-4-mini) is only "available" once an OpenAI
@@ -253,6 +255,54 @@ test("generateConversationTitle result never carries anything resembling credit/
       assert.ok(!keys.includes(forbidden), `unexpected credit-shaped key: ${forbidden}`);
     }
   });
+});
+
+test("titleGenerationSettings leaves a reasoning model room to answer after reasoning", () => {
+  // Production 2026-11-17: GPT Luna (reasoning "medium") returned empty text
+  // on every title call under a flat 32-token cap.
+  const settings = titleGenerationSettings({
+    id: "gpt-6-luna",
+    provider: "openai",
+    reasoning: "medium",
+  });
+  assert.ok(settings.maxOutputTokens >= 512);
+  assert.equal(settings.providerOptions?.openai?.reasoningEffort, "low");
+  assert.equal("temperature" in settings, false);
+});
+
+test("titleGenerationSettings keeps the short cap for a non-reasoning model", () => {
+  const settings = titleGenerationSettings({ id: "gpt-5-4-mini", provider: "openai" });
+  assert.equal(settings.maxOutputTokens, 32);
+  assert.equal(settings.temperature, 0.2);
+});
+
+test("generateConversationTitle sends the reasoning budget to the default Luna model", async () => {
+  await withEnv({ OPENAI_API_KEY: "test-key", CONVERSATION_TITLE_MODEL_ID: undefined }, async () => {
+    const requests = [];
+    const result = await generateConversationTitle("Plan my weekend trip.", {
+      generate: async (request) => {
+        requests.push(request);
+        return { text: "Weekend Trip Planning", usage: { inputTokens: 10, outputTokens: 300 } };
+      },
+    });
+    assert.equal(result.ok, true);
+    assert.equal(requests.length, 1, "the default model should succeed without a fallback");
+    assert.equal(result.modelId, "gpt-5-6-luna");
+    assert.ok(requests[0].maxOutputTokens >= 512);
+  });
+});
+
+test("interimTitleFromFirstMessage reproduces the client's 30-character interim title", () => {
+  // The stored row from the 2026-11-18 report: the client cut the prompt at
+  // 30 characters and the server must derive the identical string.
+  const prompt = "호주에서 구입가능한 Apple Vineger 중에 가장 좋은 제품을 추천해 주세요";
+  assert.equal(
+    interimTitleFromFirstMessage(prompt),
+    "호주에서 구입가능한 Apple Vineger 중에 가장"
+  );
+  // A cut that lands on a space is trimmed, as the create route stores it.
+  assert.equal(interimTitleFromFirstMessage(`  ${"a".repeat(29)} tail`), "a".repeat(29));
+  assert.equal(interimTitleFromFirstMessage("   "), null);
 });
 
 test("lib/conversationTitle.ts never references credit-charging functions", () => {

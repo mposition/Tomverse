@@ -1,10 +1,15 @@
 "use client";
 
+import type { ResearchPreviewControls } from "@/components/chat/useResearchPreview";
+
+import type { ChatPanelLocationIntent, RouterLocationTurn } from "@/lib/chatLocationClient";
+
 import type { ReactNode } from "react";
 import type { PendingSendEcho } from "@/components/chat/ChatMessageList";
 import type { VisibleStarterCard } from "@/lib/chatStarterAvailability";
 import type { ReviewWorkspaceControls, WorkspaceAppearanceControls } from "./useReviewWorkspace";
 import { ChatCommandBar, ReviewCommandBar, ReviewNavigation, ReviewStudioWelcome, ReviewUnsupportedProviders } from "./ReviewStudioChrome";
+import { useConversationDocumentTitle } from "./useConversationDocumentTitle";
 import { reviewFocusHint, reviewReorderHint, reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
 import "./review-studio.css";
 import type { ConversationSurface } from "@/lib/continuationRoutes";
@@ -96,6 +101,9 @@ type PromptPayload = {
   submittedAtMonotonicMs?: number;
   preparationTimings?: import("@/lib/responseLatencyCore").ClientLatencyStages;
   preparationReadyAtMonotonicMs?: number;
+  sourcePassages?: string;
+  preparedLocationIntent?: ChatPanelLocationIntent;
+  routerLocationTurn?: RouterLocationTurn;
   id: string;
   text: string;
   chatId: string;
@@ -106,6 +114,8 @@ type PromptPayload = {
   /** The models this send was made for; other panels must not consume it. */
   modelIds: string[];
   attachments: ChatAttachment[];
+  researchDurable?: boolean;
+    researchMode?: "preview";
   deepResearchDepth?: "quick" | "standard" | "deep";
   admissionToken?: string | null;
   contextBundle?: string | null;
@@ -117,6 +127,7 @@ export type DesktopChatShellProps = {
   getGuestReviewSource?: () => GuestReviewSource | null;
   onAnalysisCompleted?: () => void;
   workspaceNotice?: import("react").ReactNode;
+  continuationNotice?: import("react").ReactNode;
   review?: ReviewWorkspaceControls;
   chatWorkspace?: WorkspaceAppearanceControls;
   studioStarterCards?: readonly VisibleStarterCard[];
@@ -127,7 +138,9 @@ export type DesktopChatShellProps = {
   onProductSwitch?: (nextProduct: ChatWorkspaceProduct) => boolean;
   transcriptScope?: "model" | "conversation";
   onRestorePrompt?: (prompt: { text: string; attachments: ChatAttachment[]; targetChatId: string }) => void;
+  onRetryPrompt?: (prompt: { text: string; attachments: ChatAttachment[]; targetChatId: string }) => void;
   onCompareInReview?: (seed: string) => void;
+  onCompareContinuationInReview?: (assistantMessageId: string) => void;
   conversations: Conversation[];
   currentChatId: string | null;
   selectedModels: string[];
@@ -157,11 +170,6 @@ export type DesktopChatShellProps = {
   onPromptRefinerRequest?: (sourcePrompt: string) => void;
   onPromptRefinerDecision?: (resolution: PromptRefinerResolution) => void;
   onPromptRefinerDismiss?: (requestId: string) => boolean;
-  onPromptRefinerExecution?: (input: {
-    promptId: string | null;
-    execution: "applied" | "original";
-    mode: "explicit" | "auto";
-  }) => void;
   /** Passed straight through to the composer; see ChatInput's own prop. */
   onVoiceTranscript?: (transcript: string, scopeId: string | null) => void;
   /** Passed straight through to the composer; see ChatInput's own prop. */
@@ -234,6 +242,7 @@ export type DesktopChatShellProps = {
   importedMessages?: Message[];
   /** Provenance and paging for that transcript (`ChatMessageList`). */
   importedTranscript?: {
+    contextCard?: React.ReactNode;
     status: "available" | "deleted" | "locked";
     provider: string;
     importedAt: string;
@@ -305,7 +314,10 @@ export type DesktopChatShellProps = {
   assistantProfileOptions?: ChatAssistantProfileOption[];
   onAssistantProfileChange?: (profileId: string | null) => void;
   onMemoryModeChange?: (mode: ConversationMemoryMode) => void;
-  accountMemoryDefault?: "on" | "off";
+  accountMemoryDefault?: "on" | "off" | null;
+  accountMemoryMasterEnabled?: boolean | null;
+  onMemorySettingsRefresh?: () => void;
+  researchPreview?: ResearchPreviewControls;
   onOpenDeepResearchSetup: () => void;
   isDeepResearchPending: boolean;
   onDismissDeepResearchChip: () => void;
@@ -432,6 +444,7 @@ export type DesktopChatShellProps = {
 
 export function DesktopChatShell({
   workspaceNotice,
+  continuationNotice,
   review,
   chatWorkspace,
   studioStarterCards,
@@ -441,7 +454,9 @@ export function DesktopChatShell({
   onProductSwitch,
   transcriptScope = "model",
   onRestorePrompt,
+  onRetryPrompt,
   onCompareInReview,
+  onCompareContinuationInReview,
   conversations,
   currentChatId,
   selectedModels,
@@ -466,7 +481,6 @@ export function DesktopChatShell({
   onPromptRefinerRequest,
   onPromptRefinerDecision,
   onPromptRefinerDismiss,
-  onPromptRefinerExecution,
   onVoiceTranscript,
   identityKey,
   guestPreviewMode = false,
@@ -515,6 +529,9 @@ export function DesktopChatShell({
   onAssistantProfileChange,
   onMemoryModeChange,
   accountMemoryDefault,
+  accountMemoryMasterEnabled,
+  onMemorySettingsRefresh,
+  researchPreview,
   onOpenDeepResearchSetup,
   isDeepResearchPending,
   onDismissDeepResearchChip,
@@ -588,6 +605,8 @@ export function DesktopChatShell({
   // Identity of the conversation currently on screen, used to scope
   // per-conversation UI state (the active tab below).
   const conversationStateKey = currentChatId || "new";
+  const conversationTitle = conversations.find((conversation) => conversation.id === currentChatId)?.title?.trim() || null;
+  useConversationDocumentTitle(conversationTitle);
   const [studioPanelOrder, setStudioPanelOrder] = useState<{ chatKey: string; slots: number[] } | null>(null);
   // Keep each panel's original slot key so moving it preserves its live ChatApp.
   const panelEntries = useMemo(() => {
@@ -1019,9 +1038,10 @@ export function DesktopChatShell({
         onReview={() => onProductSwitch?.("review") ?? false} /> : sidebarElement}
 
       <section className="review-workspace-section flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        {review && <ReviewCommandBar review={review} showModeSwitcher={false} locked={productSwitchDisabled || isAnyModelResponding}
+        {review && <ReviewCommandBar review={review} showModeSwitcher={false} conversationTitle={conversationTitle} locked={productSwitchDisabled || isAnyModelResponding}
           view={studioView} setView={studio ? setStudioView : undefined} />}
-        {chatWorkspace && <ChatCommandBar workspace={chatWorkspace} locked={productSwitchDisabled || isAnyModelResponding || durableDraftLocked} />}
+        {chatWorkspace && <ChatCommandBar workspace={chatWorkspace} conversationTitle={conversationTitle} locked={productSwitchDisabled || isAnyModelResponding || durableDraftLocked} />}
+        {continuationNotice}
         <div className={studio ? "review-studio-body" : "contents"}>
 
         {/*
@@ -1183,7 +1203,7 @@ export function DesktopChatShell({
             // No recent-conversation cards here: the sidebar next to this
             // screen already lists the same conversations.
             <div className="absolute inset-0 z-10 overflow-y-auto bg-zinc-100/80 dark:bg-zinc-950/80">
-              {studio && !singleTranscript ? <ReviewStudioWelcome cards={studioStarterCards} onStarter={onStudioStarter} starterGallery={starterGallery} onSeed={text => setInputValue(inputValue.trim() ? `${inputValue}\n\n${text}` : text)} /> : <ChatWelcomeScreen starterGallery={starterGallery} />}
+              {studio && !singleTranscript ? <ReviewStudioWelcome cards={studioStarterCards} onStarter={onStudioStarter} starterGallery={starterGallery} onSeed={text => setInputValue(inputValue.trim() ? `${inputValue}\n\n${text}` : text)} /> : <ChatWelcomeScreen product={currentProduct === "chat" ? "chat" : "review"} starterGallery={starterGallery} />}
             </div>
           )}
           {selectedModels.length === 0 && (
@@ -1431,7 +1451,9 @@ export function DesktopChatShell({
                   transcriptScope={transcriptScope}
                   otherPanelModelIds={selectedModels}
                   onRestorePrompt={onRestorePrompt}
+                  onRetryPrompt={onRetryPrompt}
                   onCompareInReview={onCompareInReview}
+                  onCompareContinuationInReview={onCompareContinuationInReview}
                   hasImportedTranscript={hasImportedTranscript}
                   importedMessages={importedMessages}
                   importedTranscript={importedTranscript}
@@ -1450,7 +1472,6 @@ export function DesktopChatShell({
                   onDurableUndispatchedAccepted={onDurableUndispatchedAccepted}
                   onProviderDispatchStarted={onProviderDispatchStarted}
                   onResponseComplete={handleAnalysisResponseComplete}
-                  onPromptRefinerExecution={onPromptRefinerExecution}
                   onTurnError={onTurnError}
                   onFollowupSent={onFollowupSent}
                   onContextBundleStale={onContextBundleStale}
@@ -1617,6 +1638,9 @@ export function DesktopChatShell({
               onAssistantProfileChange={onAssistantProfileChange}
               onMemoryModeChange={onMemoryModeChange}
               accountMemoryDefault={accountMemoryDefault}
+              accountMemoryMasterEnabled={accountMemoryMasterEnabled}
+              onMemorySettingsRefresh={onMemorySettingsRefresh}
+              researchPreview={researchPreview}
               onOpenDeepResearchSetup={onOpenDeepResearchSetup}
               isDeepResearchPending={isDeepResearchPending}
               onDismissDeepResearchChip={onDismissDeepResearchChip}

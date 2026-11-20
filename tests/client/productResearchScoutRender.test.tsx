@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
+import benchmark from "@/lib/scoutMemoryBenchmark.json";
 import { AdminScoutRunsPanel } from "@/components/admin/AdminScoutRunsPanel";
 import { AdminScoutSuggestionsPanel, scoutSuggestionBrief } from "@/components/admin/AdminScoutSuggestionsPanel";
 import { SCOUT_SEND_BATCH, SCOUT_SEND_SPACING_MS, nextScoutSendBatch, runScoutSuggestionBatch } from "@/lib/adminScoutDisplay";
@@ -69,6 +70,24 @@ const WEEK = Array.from({ length: 7 }, (_, index) => ({
   inputTokens: 350_000,
   outputTokens: 30_000,
 }));
+
+test("the source card shows a draft PR or a blocked outcome without completing the suggestion", () => {
+  const prUrl = "https://github.com/mposition/Tomverse/pull/4000";
+  for (const agentWork of [{ status: "pr_opened" as const, prUrl }, { status: "failed" as const, reason: "no_change" }]) {
+    const initial = view({ open: [{ ...suggestion("one", "home.en", "high", "copy", "Source improvement"), agentWork }] });
+    const html = renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={initial} week={null} />);
+    assert.match(html, /data-testid="scout-agent-work"/);
+    assert.match(html, agentWork.status === "pr_opened" ? /href="https:\/\/github.com\/mposition\/Tomverse\/pull\/4000"/ : /Agent blocked.*no_change/);
+    assert.equal(initial.counts.completed, 0);
+  }
+});
+
+test("only the owner sees retry for a known pre-publication failure", () => {
+  const open = [{ ...suggestion("one", "home.en", "high", "copy", "Source improvement"), agentWork: { status: "failed" as const, reason: "setup_failed", retryable: true } }];
+  assert.match(renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view({ open })} week={null} />), /Retry coding agent/);
+  assert.doesNotMatch(renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view({ open, canConfigure: false })} week={null} />), /Retry coding agent/);
+  assert.doesNotMatch(renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view({ open: [{ ...open[0], agentWork: { status: "needs_lookup" } }] })} week={null} />), /Retry coding agent/);
+});
 
 test("the side tiles say what the Scout kept, today's calls against the limit and the last run, before any list", () => {
   const html = renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view()} week={WEEK} />);
@@ -191,6 +210,9 @@ test("every page, file and the catalogue the walker sends has a name in both lan
     }
   }
   assert.deepEqual(scoutSubjectInfo("catalogue"), { kind: "catalogue" });
+  assert.deepEqual(scoutSubjectInfo("issue.881"), { kind: "issue", number: "881", href: "https://github.com/mposition/Tomverse/issues/881" });
+  assert.deepEqual(scoutSubjectInfo("issue.0"), { kind: "other" });
+  for (const locale of ["en", "ko"] as const) assert.match(adminProductResearchScoutMessages[locale].issue, /\{number\}/);
   assert.deepEqual(scoutSubjectInfo("something-else"), { kind: "other" });
 });
 
@@ -253,4 +275,32 @@ test("every suggestion offers Copy brief, even without the right to send, and th
   // A file or the catalogue has no page to name.
   const file = suggestion("s4", "pdf.document", "low", "generated_file", "PDF title is body-sized");
   assert.equal(scoutSuggestionBrief(file, "https://tomverse.app"), [suggestionIdeaText(file), ko.briefDone].join("\n"));
+});
+
+test("the memory panel distinguishes a missing decision from an unmeasured language and shows the previous date", () => {
+  const measurement = {version:"continuation-decisions-v1", day:"2026-11-11", measuredAt:"2026-11-11T18:15:00Z", locale:"en", mode:"long-auto", model:"fixture", outcome:"omission", visible:false, usedTurns:2, originalCorrect:false, expected:{A:"UNKNOWN",B:"UNKNOWN",C:"UNKNOWN",D:"UNKNOWN"}, answers:{A:"UNKNOWN",B:"UNKNOWN",C:"UNKNOWN",D:"UNKNOWN"}} as const;
+  const html = renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view({memoryQuality:{enabled:true,day:"2026-11-12",readings:[measurement,{...measurement,locale:"fr",day:"2026-11-11",measuredAt:"2026-11-11T02:00:00Z"}]}})} week={WEEK} />);
+  assert.match(html,/Measured today: 1\/8/);
+  assert.ok(html.includes(m.memoryStatus.omission));
+  assert.equal(html.split(m.memoryWaiting).length-1,7);
+  assert.ok(html.includes("2026-11-12 04:15 AEST"));
+  assert.ok(html.includes("2026-11-11 12:00 AEST"));
+  assert.ok(html.includes(m.languages["zh-Hant"]));
+  assert.ok(html.includes(m.memoryFilter));
+});
+
+test("the recorded three-arm benchmark is visible before the daily Scout has any paired data", () => {
+  const recorded=benchmark as NonNullable<ScoutConsoleView["memoryComparison"]>["benchmark"];
+  const memoryComparison={enabled:false,daily:{model:null,day:"2026-11-12",rows:[]},benchmark:recorded};
+  const html=renderToStaticMarkup(<AdminScoutSuggestionsPanel initial={view({memoryComparison})} week={WEEK} />);
+  assert.ok(html.includes(recorded.model!));
+  assert.equal(recorded.rows.length,8);
+  for (const row of recorded.rows) {
+    assert.equal(row.pairs,4);
+    assert.equal(row.observed,12);
+    assert.ok(html.includes(m.languages[row.locale]));
+    for (const arm of row.arms) assert.ok(html.includes(m.experimentArms[arm.arm]));
+  }
+  assert.ok(html.includes("Mean est. USD"));
+  assert.ok(html.includes("Evidence found"));
 });

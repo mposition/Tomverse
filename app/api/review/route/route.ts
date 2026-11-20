@@ -6,6 +6,7 @@ import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib
 import { isImageGenerationEnabledCached } from "@/lib/appSettings";
 import { effectivePlanModelLimit, getUserBillingPlan, planAllowsFeature } from "@/lib/billingEntitlements";
 import { assertUserOperationalAccess } from "@/lib/chatSecurity";
+import { readImageModelTypicalSeconds } from "@/lib/imageModelSpeed";
 import { refreshImageModelCatalog } from "@/lib/modelCatalog";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { reviewEasyEnabled, routeReviewPrompt } from "@/lib/reviewRouting";
@@ -44,8 +45,8 @@ export async function POST(req: Request) {
     if (body.requestedKind === "image" && !imagesAvailable) {
       return NextResponse.json({ error: "IMAGE_UNAVAILABLE" }, { status: 403, headers });
     }
-    const imageModels = await refreshImageModelCatalog();
-    const candidates = reviewRoutingCandidates({ providers: body.providers, models, imageModels, plan: plan.tier, hasImages: body.hasImages });
+    const [imageModels, imageSeconds] = await Promise.all([refreshImageModelCatalog(), readImageModelTypicalSeconds()]);
+    const candidates = reviewRoutingCandidates({ providers: body.providers, models, imageModels, plan: plan.tier, hasImages: body.hasImages, imageSeconds });
     if (body.providers.some(provider => !candidates.text.some(model => model.provider === provider))) {
       return NextResponse.json({ error: "PROVIDER_UNAVAILABLE" }, { status: 400, headers });
     }

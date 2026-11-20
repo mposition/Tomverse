@@ -102,24 +102,16 @@ test("Admin UI gates preparation on an observed idea-only plan and provides exac
   const panel = readFileSync(new URL("../components/admin/AmuxFrontierModelsPanel.tsx", import.meta.url), "utf8");
   const input = readFileSync(new URL("../components/admin/AmuxIdeaInputPanel.tsx", import.meta.url), "utf8");
   const plan = readFileSync(new URL("../components/admin/AmuxInitialPlanPanel.tsx", import.meta.url), "utf8");
-  const page = readFileSync(new URL("../app/(site)/(application)/admin/amux-backlog/page.tsx", import.meta.url), "utf8");
-  assert.match(panel, /!previewAvailable \|\| !planReady \|\| declaredExternalSources/);
+  assert.match(panel, /!planReady \|\| declaredExternalSources/);
   assert.match(panel, /reservePreviewReceipt\(receiptStore\(\), operatorId, ideaId, previewId/);
   assert.match(panel, /new URLSearchParams\(\{ previewId: pendingId \}\)/);
   assert.match(panel, /readPreparedIdeaTransferPreview\(response\.status, body/);
   assert.match(plan, /onCommitted\?\.\(ideaId\)/);
   assert.match(input, /planReady=\{submission\.kind === "submitted" && planReadyIdeaId === submission\.ideaId\}/);
-  assert.match(page, /transferPreviewWritePermitted\(process\.env\[AMUX_V4_TRANSFER_PREVIEW_WRITE_ENV\]\)/);
-  assert.match(page, /transferPreviewReadPermitted\(process\.env\[AMUX_V4_TRANSFER_PREVIEW_READ_ENV\]\)/);
 });
 
-test("Admin confirmation uses a separate dark gate and a one-shot browser receipt", () => {
+test("Admin confirmation uses a one-shot browser receipt", () => {
   const panel = readFileSync(new URL("../components/admin/AmuxFrontierModelsPanel.tsx", import.meta.url), "utf8");
-  const input = readFileSync(new URL("../components/admin/AmuxIdeaInputPanel.tsx", import.meta.url), "utf8");
-  const page = readFileSync(new URL("../app/(site)/(application)/admin/amux-backlog/page.tsx", import.meta.url), "utf8");
-  assert.match(page, /transferConfirmWritePermitted\(process\.env\[AMUX_V4_TRANSFER_CONFIRM_WRITE_ENV\]\)/);
-  assert.match(page, /transferConfirmReadPermitted\(process\.env\[AMUX_V4_TRANSFER_CONFIRM_READ_ENV\]\)/);
-  assert.match(input, /confirmAvailable=\{transferConfirmAvailable\}/);
   assert.match(panel, /reserveConfirmationAttempt\(receiptStore\(\), operatorId, value\.previewId/);
   assert.match(panel, /readConfirmationAttempt\(receiptStore\(\), operatorId, pendingId/);
   assert.match(panel, /await readConfirmation\(value\.previewId, ideaId/);

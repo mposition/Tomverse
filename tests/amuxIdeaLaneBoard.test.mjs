@@ -32,8 +32,10 @@ test("each lane state sits in the board column of the same stage", () => {
   assert.equal(column(idea([ended("pr_open", { prNumber: 3301, mergedAtMs: NOW - 60 * MIN })])), "done");
   assert.equal(column(idea([ended("pr_open", { prNumber: 3301, prClosedAtMs: NOW - MIN })])), "attention",
     "a PR closed without a merge needs the owner");
-  assert.equal(column(idea([ended("cli_failed"), ended("no_change"), ended("job_failed")])), "attention",
-    "out of attempts");
+  assert.equal(column(idea([ended("job_failed"), ended("job_failed"), ended("job_failed")])), "amux_backlog",
+    "the same failure three times in a row only waits out a longer backoff (owner direction 2026-11-16)");
+  assert.equal(column(idea([ended("cli_failed"), ended("no_change"), ended("job_failed")])), "amux_backlog",
+    "failures keep it waiting for a retry");
   assert.equal(column(idea([ended("cli_failed")])), "amux_backlog", "a failed run with attempts left waits for its retry");
 });
 
@@ -130,7 +132,7 @@ test("both locales name every lane state", async () => {
   const { adminAmuxExecutionMessages } = await import("../lib/adminMessages/amuxExecution.ts");
   for (const locale of ["en", "ko"]) {
     const lane = adminAmuxExecutionMessages[locale].ideaLane;
-    assert.deepEqual(Object.keys(lane.state).sort(), ["failed", "merged", "pr_closed", "pr_open", "queued", "running"]);
+    assert.deepEqual(Object.keys(lane.state).sort(), ["merged", "pr_closed", "pr_open", "queued", "running"]);
     assert.equal(typeof lane.group(2), "string");
   }
 });

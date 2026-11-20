@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   COMPARISON_REVIEW_RUN_OUTCOMES,
   buildComparisonReviewRunRecord,
+  comparisonReviewPrimaryOnlyCause,
   comparisonReviewRunOutcome,
   dispatchedAttempts,
   settlementReconciliation,
@@ -306,4 +307,23 @@ test("no user content can reach an attempt row either", () => {
     input({ attempts: [entry(), entry({ ordinal: 2 })] })
   );
   assert.deepEqual(contentFreeViolations(record, forbidden), []);
+});
+
+test("primary-only cause separates a missing, refused and failed second reviewer", () => {
+  assert.deepEqual(comparisonReviewPrimaryOnlyCause([]), {
+    cause: "no_secondary_candidate", secondaryAttempts: 0, secondaryFailed: 0, secondaryTimedOut: 0, secondaryMs: 0, lastErrorCode: null,
+  });
+  const refused = { ...emptyAttemptRecord(), status: "refused", errorCode: "CREDITS_EXHAUSTED" };
+  assert.deepEqual(comparisonReviewPrimaryOnlyCause([refused]), {
+    cause: "secondary_refused", secondaryAttempts: 1, secondaryFailed: 0, secondaryTimedOut: 0, secondaryMs: 0, lastErrorCode: "CREDITS_EXHAUSTED",
+  });
+  const failed = { ...emptyAttemptRecord(), status: "failed", errorCode: "COMPARISON_REVIEW_FAILED" };
+  assert.deepEqual(comparisonReviewPrimaryOnlyCause([failed, refused]), {
+    cause: "secondary_failed", secondaryAttempts: 2, secondaryFailed: 1, secondaryTimedOut: 0, secondaryMs: 0, lastErrorCode: "CREDITS_EXHAUSTED",
+  });
+  const timedOut = { ...failed, errorCategory: "TimeoutError", durationMs: 45_000 };
+  assert.deepEqual(comparisonReviewPrimaryOnlyCause([timedOut, { ...timedOut, errorCategory: "AbortError" }]), {
+    cause: "secondary_failed", secondaryAttempts: 2, secondaryFailed: 2, secondaryTimedOut: 2, secondaryMs: 90_000,
+    lastErrorCode: "COMPARISON_REVIEW_FAILED",
+  });
 });

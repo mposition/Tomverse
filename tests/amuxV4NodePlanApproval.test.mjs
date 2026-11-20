@@ -22,11 +22,10 @@ test("the real duplicate scanner admits the plan's own new nodes and nothing els
   assert.equal(child.status, 0, child.stderr || child.stdout);
 });
 
-test("the node plan route keeps the single routes' owner, origin, step-up and switch checks", () => {
+test("the node plan route keeps the single routes' owner, origin and step-up checks", () => {
   const route = readFileSync("app/api/admin/amux/ideas/unit-decisions/nodes/plan/route.ts", "utf8");
   assert.match(route, /getAdminRole\(session\) !== "owner" \|\| !hasValidMutationOrigin\(request\)/);
   assert.match(route, /assertRecentAdminAuthentication\(session\)/);
-  assert.match(route, /amuxV4UnitWriteEnabled\(process\.env\[AMUX_V4_UNIT_WRITE_ENV\]\)/);
   assert.match(route, /consumeApiRateLimit\(/);
   assert.match(route, /\.strict\(\)/);
 });

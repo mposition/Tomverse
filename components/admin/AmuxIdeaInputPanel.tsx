@@ -90,21 +90,13 @@ function parsePullRequests(value: string): Array<{ repository: string; number: n
   return result;
 }
 
-export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvailable,
-  initialPlanAvailable, frontierModelsAvailable, transferPreviewAvailable,
-  transferConfirmAvailable, analysisResultAvailable, analysisBudgetAvailable, operatorId,
-  analysisStopAvailable, sessionIntake = false, analysisTranslationAvailable = false,
+export function AmuxIdeaInputPanel({ analysisBudgetAvailable, operatorId,
+  analysisTranslationAvailable = false,
   openRequestId = null, openedStage = null, progressRows, laneAvailable = false }: {
-  submissionAvailable: boolean; sourceScopePreviewAvailable: boolean;
-  initialPlanAvailable: boolean; frontierModelsAvailable: boolean;
-  transferPreviewAvailable: boolean; transferConfirmAvailable: boolean;
-  analysisResultAvailable: boolean; analysisBudgetAvailable: boolean;
-  analysisStopAvailable: boolean; operatorId: string;
+  analysisBudgetAvailable: boolean;
+  operatorId: string;
   /** The Korean reading aid on the analysis result (TOMVERSE_AMUX_ADMIN_KO_TRANSLATION). */
   analysisTranslationAvailable?: boolean;
-  /** amux-intake v19 item 1: session intake is on, so a saved idea joins the
-   * automatic analysis queue instead of the v4 approval steps. */
-  sessionIntake?: boolean;
   /** The idea a list row opened (`?idea=<requestId>`); read back like a saved request. */
   openRequestId?: string | null;
   /** Where that idea really is, from the progress read; null when it could not be read. */
@@ -117,21 +109,19 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   const messages = useAdminMessages(adminAmuxIdeaInputMessages);
   const screens = useAdminMessages(adminAmuxScreensMessages).ideas;
   const [idea, setIdea] = useState("");
-  const [repositories, setRepositories] = useState("");
   const [pullRequests, setPullRequests] = useState("");
-  // Session intake: the repositories come from the Admin operating scope, all selected unless unchecked.
+  // The repositories come from the Admin operating scope, all selected unless unchecked.
   const [scopeRead, setScopeRead] = useState<ScopeRepositoryRead>({ kind: "loading" });
   const [deselectedRepositories, setDeselectedRepositories] = useState<string[]>([]);
-  const selectedRepositories = sessionIntake
-    ? pickedScopeRepositories(scopeRead, deselectedRepositories) : lines(repositories);
-  // Session intake: the analysis model, the scope's unless the owner picks another approved one.
+  const selectedRepositories = pickedScopeRepositories(scopeRead, deselectedRepositories);
+  // The analysis model, the scope's unless the owner picks another approved one.
   const [sessionModels, setSessionModels] = useState<AvailableFrontierModel[] | null | "error">(null);
   const [sessionModel, setSessionModel] = useState<SessionModelChoice>(SESSION_MODEL_SCOPE_DEFAULT);
-  const sessionModelBody = sessionIntake
-    ? sessionModelSelection(Array.isArray(sessionModels) ? sessionModels : null, sessionModel) : null;
-  const scopeBlocked = sessionIntake && (scopeRepositoryBlock(scopeRead, selectedRepositories) !== null ||
-    sessionModelBody === "incomplete");
-  const hasUnsavedInput = !!(idea.trim() || repositories.trim() || pullRequests.trim());
+  const sessionModelBody =
+    sessionModelSelection(Array.isArray(sessionModels) ? sessionModels : null, sessionModel);
+  const scopeBlocked = scopeRepositoryBlock(scopeRead, selectedRepositories) !== null ||
+    sessionModelBody === "incomplete";
+  const hasUnsavedInput = !!(idea.trim() || pullRequests.trim());
   const [pending, setPending] = useState(false);
   const [readBackPending, setReadBackPending] = useState(false);
   // The idea whose execution approval was recorded in this browser: its analysis result is then watched on its own.
@@ -193,7 +183,6 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
     inputRevision.current += 1;
     inFlight.current = false;
     setIdea("");
-    setRepositories("");
     setDeselectedRepositories([]);
     setPullRequests("");
     setResult(null);
@@ -228,7 +217,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   };
 
   const checkSourceScope = async () => {
-    if (submission.kind !== "submitted" || !sourceScopePreviewAvailable || sourceScopePending ||
+    if (submission.kind !== "submitted" || sourceScopePending ||
         !sourceRepository.trim() || !sourceCommitSha.trim() || !sourcePath.trim()) return;
     const ideaId = submission.ideaId;
     const requested = { repository: sourceRepository.trim(),
@@ -293,7 +282,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         return;
       }
       rememberConfirmedIdeaRequest(receiptStore(), operatorId, requestId);
-      setIdea(""); setRepositories(""); setDeselectedRepositories([]); setPullRequests(""); setResult(null);
+      setIdea(""); setDeselectedRepositories([]); setPullRequests(""); setResult(null);
       setPlanReadyIdeaId(null); setContinuationChunkIndex(0);
       setSourceRepository(""); setSourceCommitSha(""); setSourcePath("");
       setSourceScopeResult({ kind: "idle" });
@@ -346,9 +335,8 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
     return () => { active = false; };
   }, [recoverFromReceipts]);
 
-  // The operating scope's repositories (existing GET, read only), needed only while session intake is on.
+  // The operating scope's repositories (existing GET, read only).
   useEffect(() => {
-    if (!sessionIntake) return;
     let active = true;
     void (async () => {
       let next: ScopeRepositoryRead;
@@ -361,11 +349,10 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
       if (active) setScopeRead(next);
     })();
     return () => { active = false; };
-  }, [sessionIntake]);
+  }, []);
 
   // The approved Frontier models (existing GET, read only) the owner may pick for this idea.
   useEffect(() => {
-    if (!sessionIntake) return;
     let active = true;
     void (async () => {
       let next: AvailableFrontierModel[] | "error";
@@ -378,10 +365,10 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
       if (active) setSessionModels(next);
     })();
     return () => { active = false; };
-  }, [sessionIntake]);
+  }, []);
 
   const submit = async (inputChecked = false, toLane = false) => {
-    if (!submissionAvailable || !recoveryChecked || inFlight.current || scopeBlocked ||
+    if (!recoveryChecked || inFlight.current || scopeBlocked ||
         (!inputChecked && result?.outcome !== "input_checked") ||
         submission.kind === "pending" || submission.kind === "outcome_unknown" ||
         submission.kind === "submitted") return;
@@ -402,7 +389,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         body: JSON.stringify({
           version: 1, requestId,
           input: { version: 1, idea, repositories: selectedRepositories, pullRequests: refs },
-          ...(!toLane && sessionModelBody && sessionModelBody !== "incomplete" ? { model: sessionModelBody } : {}),
+          ...(!toLane && sessionModelBody ? { model: sessionModelBody } : {}),
         }),
       });
       const decision = classifyIdeaSubmissionPost({
@@ -459,7 +446,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   // here, so a lost answer recovers exactly as a lost submission does.
   const buildRefs = parsePullRequests(pullRequests);
   const buildHooks: AmuxBuildPreviewHooks = {
-    draft: submissionAvailable && recoveryChecked && submission.kind === "idle" &&
+    draft: recoveryChecked && submission.kind === "idle" &&
       idea.trim() !== "" && buildRefs !== null
       ? { idea, repositories: selectedRepositories, pullRequests: buildRefs } : null,
     beforeBuild: () => checkInput(),
@@ -538,11 +525,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
     <AmuxFrontierModelsPanel
       key={submission.kind === "submitted" ?
         `${submission.ideaId}:${continuationChunkIndex}` : "none"}
-      available={frontierModelsAvailable}
-      previewAvailable={transferPreviewAvailable}
-      confirmAvailable={transferConfirmAvailable}
       analysisBudgetAvailable={analysisBudgetAvailable}
-      analysisStopAvailable={analysisStopAvailable}
       ideaId={submission.kind === "submitted" ? submission.ideaId : null}
       ideaText={submission.kind === "submitted" ? idea.trim() : ""}
       planReady={submission.kind === "submitted" && planReadyIdeaId === submission.ideaId}
@@ -661,11 +644,6 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
                     <p className="text-xs text-zinc-400">{screens.cardHint}</p>
                   </div>
                 </div>
-                <span data-testid="amux-idea-save-chip" className={`rounded-md border px-2 py-0.5 text-xs font-medium ${submissionAvailable
-                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
-                  : "border-zinc-700 bg-zinc-800 text-zinc-300"}`}>
-                  {submissionAvailable ? messages.saveOpen : messages.saveClosed}
-                </span>
               </div>
               <label htmlFor="amux-v4-idea" className="font-medium">{messages.ideaLabel}</label>
               <textarea
@@ -673,7 +651,6 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
                 value={idea}
                 onChange={(event) => { setIdea(event.target.value); invalidateResult(); }}
                 disabled={pending || frozen}
-                maxLength={8192}
                 className="min-h-56 w-full rounded-lg border p-3 text-base font-normal focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300 border-zinc-700 bg-zinc-900 text-zinc-100"
                 aria-describedby="amux-v4-idea-hint amux-v4-idea-count"
               />
@@ -682,29 +659,17 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
                 <span id="amux-v4-idea-count">{messages.byteCount(ideaBytes)}</span>
               </p>
               {analysisBudgetAvailable ? <AmuxAnalysisBudgetMeter /> : null}
-              {/* Session intake: the saved repositories are chosen from the operating scope, never typed. */}
-              {sessionIntake ? (
-                <AmuxIdeaScopeRepositoryPicker read={scopeRead} deselected={deselectedRepositories}
-                  disabled={pending || frozen} stepUpHref={STEP_UP_HREF}
-                  onToggle={(repository, checked) => {
-                    setDeselectedRepositories((current) => toggleScopeRepository(current, repository, checked));
-                    invalidateResult();
-                  }} />
-              ) : null}
+              {/* The saved repositories are chosen from the operating scope, never typed. */}
+              <AmuxIdeaScopeRepositoryPicker read={scopeRead} deselected={deselectedRepositories}
+                disabled={pending || frozen} stepUpHref={STEP_UP_HREF}
+                onToggle={(repository, checked) => {
+                  setDeselectedRepositories((current) => toggleScopeRepository(current, repository, checked));
+                  invalidateResult();
+                }} />
               <details className="rounded-lg border p-3 border-zinc-800">
                 <summary className="min-h-11 cursor-pointer content-center font-medium text-blue-300">{messages.sourceSection}</summary>
                 <p className="mt-2 text-xs leading-5 text-zinc-400">{messages.sourceSectionHint}</p>
-                <div className={`mt-3 grid gap-3 ${sessionIntake ? "" : "md:grid-cols-2"}`}>
-                  {sessionIntake ? null : <label className="flex flex-col gap-2 font-medium" htmlFor="amux-v4-repositories">
-                    {messages.repositoriesLabel}
-                    <textarea
-                      id="amux-v4-repositories"
-                      value={repositories}
-                      onChange={(event) => { setRepositories(event.target.value); invalidateResult(); }}
-                      disabled={pending || frozen}
-                      className="min-h-24 w-full rounded-lg border p-3 text-sm font-normal focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300 border-zinc-700 bg-zinc-900 text-zinc-100"
-                    />
-                  </label>}
+                <div className="mt-3 grid gap-3">
                   <label className="flex flex-col gap-2 font-medium" htmlFor="amux-v4-pull-requests">
                     {messages.pullRequestsLabel}
                     <textarea
@@ -727,7 +692,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
                   <button
                     type="button"
                     onClick={() => void checkInput()}
-                    disabled={pending || frozen || scopeBlocked || idea.trim().length === 0 || ideaBytes > 8192}
+                    disabled={pending || frozen || scopeBlocked || idea.trim().length === 0}
                     className="min-h-11 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300 disabled:opacity-50"
                   >
                     {messages.preview}
@@ -735,13 +700,13 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
                   <button
                     type="button"
                     onClick={() => void submit()}
-                    disabled={!submissionAvailable || !recoveryChecked || result?.outcome !== "input_checked" || frozen || scopeBlocked}
+                    disabled={!recoveryChecked || result?.outcome !== "input_checked" || frozen || scopeBlocked}
                     className="min-h-11 rounded-lg border border-blue-400 px-4 text-sm font-medium text-blue-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300 disabled:opacity-50"
                   >
                     {messages.submit}
                   </button>
                   <span className="text-xs text-zinc-400">
-                    {submissionAvailable ? messages.submitBoundary : messages.submitUnavailable}
+                    {messages.submitBoundary}
                   </span>
                 </div>
               </details>
@@ -761,7 +726,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
           {/* The model line and the one button. It stays mounted while a request is in flight (the status card
               replaces the idea card then, and this strip is only hidden), and moves below as the execution
               approval once the idea is saved. */}
-          {submission.kind !== "submitted" && sessionIntake ? (
+          {submission.kind !== "submitted" ? (
             <div className={card === null ? "flex flex-wrap items-center gap-3" : "hidden"}
               data-testid="amux-idea-session-submit">
               <AmuxIdeaSessionModelPicker models={sessionModels}
@@ -769,16 +734,13 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
                 choice={sessionModel} disabled={pending || frozen} onChange={setSessionModel} />
               <button type="button"
                 onClick={() => void (async () => { if (await checkInput()) await submit(true); })()}
-                disabled={!submissionAvailable || !recoveryChecked || pending || frozen || scopeBlocked ||
-                  idea.trim().length === 0 || ideaBytes > 8192}
+                disabled={!recoveryChecked || pending || frozen || scopeBlocked ||
+                  idea.trim().length === 0}
                 className="min-h-11 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300 disabled:opacity-50">
                 {messages.sessionSubmit}
               </button>
               <span className="text-xs text-zinc-400">{messages.sessionSubmitHint}</span>
             </div>
-          ) : null}
-          {submission.kind !== "submitted" && !sessionIntake ? (
-            <div className={card === null ? "block" : "hidden"} data-testid="amux-idea-compose-slot">{composePanel}</div>
           ) : null}
           {/* Temporary test entry for the idea lane: an owner idea with no analysis, the kind the lane claims. */}
           {submission.kind !== "submitted" && laneAvailable ? (
@@ -786,8 +748,8 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
               data-testid="amux-idea-lane-submit">
               <button type="button"
                 onClick={() => void (async () => { if (await checkInput()) await submit(true, true); })()}
-                disabled={!submissionAvailable || !recoveryChecked || pending || frozen || scopeBlocked ||
-                  idea.trim().length === 0 || ideaBytes > 8192}
+                disabled={!recoveryChecked || pending || frozen || scopeBlocked ||
+                  idea.trim().length === 0}
                 className="min-h-11 rounded-lg border border-emerald-400 px-4 text-sm font-medium text-emerald-200 hover:bg-emerald-500/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300 disabled:opacity-50">
                 {messages.laneSubmit}
               </button>
@@ -838,12 +800,12 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
       {submission.kind === "submitted" && submission.origin !== "session" && !laneTaken ? <div
         key={`plan-wrapper:${submission.ideaId}`} className={approvalClosed ? "hidden" : "contents"}>
         <AmuxInitialPlanPanel key={`plan:${submission.ideaId}`} ideaId={submission.ideaId}
-          operatorId={operatorId} available={initialPlanAvailable}
+          operatorId={operatorId}
           declaredExternalSources={submission.hasExternalSources}
           onCommitted={onInitialPlanCommitted} />
       </div> : null}
       {submission.kind === "submitted" && submission.origin !== "session" && !laneTaken ? composePanel : null}
-      {analysisResultAvailable && submission.kind === "submitted" && !laneTaken ?
+      {submission.kind === "submitted" && !laneTaken ?
         <AmuxIdeaAnalysisResultPanel key={`result:${submission.ideaId}`}
           ideaId={submission.ideaId}
           watchToken={analysisWatch?.ideaId === submission.ideaId ? analysisWatch.token : 0}
@@ -872,11 +834,10 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
             </label>
           </div>
           <button type="button" onClick={checkSourceScope}
-            disabled={!sourceScopePreviewAvailable || sourceScopePending || !sourceRepository.trim() || !sourceCommitSha.trim() || !sourcePath.trim()}
+            disabled={sourceScopePending || !sourceRepository.trim() || !sourceCommitSha.trim() || !sourcePath.trim()}
             className="min-h-11 rounded-lg border px-4 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50 border-blue-400 text-blue-200 focus-visible:outline-blue-300">
             {sourceScopePending ? messages.sourceScopeChecking : messages.sourceScopeCheck}
           </button>
-          {!sourceScopePreviewAvailable ? <p className="text-sm text-zinc-400">{messages.sourceScopeUnavailable}</p> : null}
           {sourceScopeResult.kind === "checked" ? (
             <div role="status" className="space-y-2 text-sm text-zinc-100">
               <p>{messages.sourceScopeChecked}</p>

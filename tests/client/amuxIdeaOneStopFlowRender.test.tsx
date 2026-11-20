@@ -73,19 +73,16 @@ test("the analysis is watched on a gentle, bounded schedule that respects the re
 
 test("the default new-idea view has one primary button; the separate steps wait in a collapsed recovery section", () => {
   const markup = renderToStaticMarkup(createElement(AmuxIdeaInputPanel, {
-    submissionAvailable: true, sourceScopePreviewAvailable: true, initialPlanAvailable: true, frontierModelsAvailable: true,
-    transferPreviewAvailable: true, transferConfirmAvailable: true, analysisResultAvailable: true, analysisBudgetAvailable: true,
-    analysisStopAvailable: false,
+    analysisBudgetAvailable: true,
     operatorId: "owner-1",
   }));
   // Buttons that sit outside every <details>: the default view's controls.
   const outside = markup.replace(/<details[\s\S]*?<\/details>/g, "");
   const defaultButtons = [...outside.matchAll(/<button[^>]*>/g)].map((match) => match[0]);
   assert.equal(defaultButtons.length, 1, `only the one primary button is visible by default: ${defaultButtons.join(" | ")}`);
-  assert.ok(defaultButtons[0].includes('data-testid="amux-idea-compose-action"'));
   // Rendered without a provider: whichever locale the default is.
-  const m = markup.includes(adminAmuxIdeaInputMessages.ko.composeAction) ? adminAmuxIdeaInputMessages.ko : adminAmuxIdeaInputMessages.en;
-  assert.ok(markup.includes(m.composeAction));
+  const m = markup.includes(adminAmuxIdeaInputMessages.ko.sessionSubmit) ? adminAmuxIdeaInputMessages.ko : adminAmuxIdeaInputMessages.en;
+  assert.ok(outside.includes(m.sessionSubmit), "the one primary button queues the idea for automatic analysis");
   assert.ok(markup.includes('data-testid="amux-idea-stepwise"'), "the separate steps remain, collapsed, for recovery");
   const stepwise = /<details[^>]*data-testid="amux-idea-stepwise"[\s\S]*?<\/details>/.exec(markup)?.[0] ?? "";
   assert.ok(stepwise.includes(m.preview) && stepwise.includes(m.submit), "check input and save live only in the recovery section");
@@ -94,7 +91,6 @@ test("the default new-idea view has one primary button; the separate steps wait 
   for (const label of [m.preview, m.submit, m.frontierSelectionCheck, m.transferPreviewPrepare, m.initialPlanPrepare, m.frontierModelsRefresh]) {
     assert.equal(outside.includes(label), false, `${label} is not a default control`);
   }
-  assert.equal(markup.includes('data-testid="amux-idea-compose-model-details"'), true, "the model is collapsed under one line");
 });
 
 test("the default path holds exactly two decisions: the execution approval and the plan approval", () => {

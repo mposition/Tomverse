@@ -22,25 +22,20 @@ const valid = { verdict: "proceed", findings: "The router fails on empty input."
   handoff: [{ task: "AMUX-ROUTERFAIL-004", note: "Guard the empty case first." }],
   evidence: ["lib/autoRouter.ts"] };
 
-test("the conclusion is the last line, strictly shaped", () => {
+test("the conclusion is the last marker line, read leniently", () => {
   assert.deepEqual(parseAmuxV22Conclusion(`work done\n\n${line(valid)}\n`), valid);
   assert.deepEqual(parseAmuxV22Conclusion(line({ verdict: "stop", findings: "x" })),
     { verdict: "stop", findings: "x", handoff: [], evidence: [] }, "handoff and evidence default empty");
-  assert.equal(parseAmuxV22Conclusion(`${line(valid)}\nmore text`), null, "only the last line counts");
   assert.equal(parseAmuxV22Conclusion("no conclusion"), null);
   assert.equal(parseAmuxV22Conclusion(`${AMUX_V22_CONCLUSION_MARKER} {not json`), null);
-  for (const bad of [
-    { ...valid, verdict: "approve" },
-    { ...valid, findings: "" },
-    { ...valid, findings: "x".repeat(4_001) },
-    { ...valid, extra: true },
-    { ...valid, handoff: [{ task: "bad key with spaces", note: "n" }] },
-    { ...valid, handoff: [{ task: "A-1", note: "n", more: 1 }] },
-    { ...valid, handoff: Array.from({ length: 13 }, () => ({ task: "A-1", note: "n" })) },
-    { ...valid, evidence: ["two words"] },
-    { ...valid, evidence: Array.from({ length: 21 }, () => "a") },
-    { ...valid, findings: "bell\u0007" },
-  ]) assert.equal(parseAmuxV22Conclusion(line(bad)), null, JSON.stringify(bad).slice(0, 80));
+  // No length or count bound, and unknown keys are ignored.
+  assert.equal(parseAmuxV22Conclusion(line({ ...valid, findings: "x".repeat(20_000), extra: true }))
+    ?.findings.length, 20_000);
+  assert.equal(parseAmuxV22Conclusion(line({ ...valid, handoff: Array.from({ length: 30 },
+    () => ({ task: "A-1", note: "n" })) }))?.handoff.length, 30);
+  // An unusable verdict is no conclusion; a missing finding is not a reason to lose one.
+  assert.equal(parseAmuxV22Conclusion(line({ ...valid, verdict: "approve" })), null);
+  assert.equal(parseAmuxV22Conclusion(line({ verdict: "stop" }))?.findings, "(no findings given)");
 });
 
 test("the digest binds every field and is stable", () => {
@@ -135,7 +130,8 @@ test("labels name the brief's local reference beside the display key; handoff no
 test("delivery wiring: rules for investigate only, the section after the resume answer, its digest in the receipt audit", () => {
   const source = readFileSync(new URL("../lib/amux/delivery.ts", import.meta.url), "utf8");
   assert.match(source, /conclusionMode !== "off" &&\s+amuxV22ExecutionRole\(assignment\.role\) === "investigate"/);
-  assert.match(source, /prompt: head \+ resumeSection \+ priorSection \+ tail,/,
+  // The earlier flow's inline prompt; the review section (#4006) sits beside the prior one.
+  assert.match(source, /prompt: head \+ resumeSection \+ priorSection \+ reviewSection \+ tail,/,
     "the brief stays whole in the tail; the section is beside it, not in it");
   assert.match(source, /prior_conclusion_digest: content\.priorConclusionDigest/);
   assert.match(source, /AMUX_V22_RESUME_PROMPT_MAX_BYTES - 2 -\s+Buffer\.byteLength\(head \+ resumeSection \+ tail/,
@@ -157,5 +153,5 @@ test("settlement wiring: the verdict applies behind auto, proceed is terminal, a
   assert.match(source, /if \(conclusionApplied\)\s+await writeSystemAuditLog\(\{ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,\s+action: "amux\.v22\.conclusion\.applied"/);
   assert.doesNotMatch(source, /adminAuditLog\.create/, "never the audit table directly");
   const store = readFileSync(new URL("../lib/amux/v22TaskResultStore.ts", import.meta.url), "utf8");
-  assert.match(store, /conclusionVerdict: conclusion\?\.verdict \?\? null,/);
+  assert.match(store, /conclusionVerdict: prepared\.conclusion\?\.verdict \?\? null,/);
 });

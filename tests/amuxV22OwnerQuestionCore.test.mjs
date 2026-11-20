@@ -1,16 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { DM_CARD_TEXT_MAX_BYTES } from "../lib/amux/decisionMakerCore.ts";
+import { dmWorkspaceCardPointer } from "../lib/amux/decisionMakerWorkspaceCore.ts";
 import {
-  AMUX_V22_OWNER_QUESTION_LIMIT,
+  AMUX_V22_OWNER_ANSWER_MAX_BYTES,
+  AMUX_V22_OWNER_ANSWER_MAX_CHARS,
   AMUX_V22_OWNER_QUESTION_MARKER,
   AMUX_V22_OWNER_QUESTION_RULES,
+  AMUX_V22_OWNER_TEXT_MAX_CHARS,
   AMUX_V22_RESUME_PROMPT_MAX_BYTES,
   amuxV22ResumeMinimumBytes,
   amuxV22OwnerQuestionSettlement,
   amuxV22OwnerQuestionSettlementPlan,
   amuxV22OwnerQuestionSha256,
-  amuxV22QuestionCardBytes,
   amuxV22QuestionDmCard,
   buildAmuxV22ResumeSection,
   normalizeAmuxV22OwnerAnswer,
@@ -34,21 +37,35 @@ test("only a well-formed last line is an owner question", () => {
     line([asked]),
     line({ ...asked, question: " " }),
     line({ ...asked, unblocks: undefined }),
-    line({ ...asked, question: "x".repeat(2_001) }),
+    line({ ...asked, question: "x".repeat(AMUX_V22_OWNER_TEXT_MAX_CHARS + 1) }),
+    line({ ...asked, unblocks: "x".repeat(AMUX_V22_OWNER_TEXT_MAX_CHARS + 1) }),
+    line({ ...asked, options: [{ id: "a", label: "x".repeat(AMUX_V22_OWNER_TEXT_MAX_CHARS + 1) }] }),
     line({ ...asked, question: "bell\u0007" }),
     line({ ...asked, options: [{ id: "A", label: "upper" }] }),
     line({ ...asked, options: [{ id: "a", label: "x" }, { id: "a", label: "y" }] }),
-    line({ ...asked, options: Array.from({ length: 7 }, (_, i) =>
-      ({ id: `o${i}`, label: "x" })) }),
     line({ ...asked, options: "a" }),
   ]) assert.equal(parseAmuxV22OwnerQuestion(bad), null, bad);
 });
 
+test("a question may carry any number of options", () => {
+  const many = Array.from({ length: 20 }, (_, i) => ({ id: `o${i}`, label: "x" }));
+  assert.equal(parseAmuxV22OwnerQuestion(line({ ...asked, options: many })).options.length, 20);
+});
+
 test("the bounds are on the raw text, the same the bridge reads", () => {
   // apps/tomverse-orchestrator v22_result_asks_owner mirrors these cases.
-  assert.equal(parseAmuxV22OwnerQuestion(line({ ...asked, question: `${" ".repeat(2_000)}Q` })), null);
+  // One cap for every text field: the card's (the Decision Maker's prompt), no field has its own.
+  assert.equal(AMUX_V22_OWNER_TEXT_MAX_CHARS, DM_CARD_TEXT_MAX_BYTES);
+  assert.equal(AMUX_V22_OWNER_TEXT_MAX_CHARS, 256 * 1024);
+  assert.equal(parseAmuxV22OwnerQuestion(line({ ...asked, question: `${" ".repeat(AMUX_V22_OWNER_TEXT_MAX_CHARS)}Q` })), null);
   assert.equal(parseAmuxV22OwnerQuestion(line({ ...asked, question: "Q\u0007" })), null);
   assert.ok(parseAmuxV22OwnerQuestion(line({ question: "가".repeat(2_000), unblocks: "u\u0085" })));
+  // The old 2,000-character question and 1,000-character unblocks are no limit.
+  const long = parseAmuxV22OwnerQuestion(line({ question: `${"q".repeat(50_000)}?`, unblocks: "u".repeat(50_000),
+    options: [{ id: "a", label: "l".repeat(50_000) }] }));
+  assert.equal(long.question.length, 50_001);
+  assert.equal(long.unblocks.length, 50_000);
+  assert.equal(long.options[0].label.length, 50_000);
 });
 
 test("the digest binds the question, what it unblocks and the options", () => {
@@ -59,19 +76,32 @@ test("the digest binds the question, what it unblocks and the options", () => {
   assert.notEqual(amuxV22OwnerQuestionSha256({ ...asked, options: [] }), digest);
 });
 
-test("a Task may ask three questions; the fourth needs a person", () => {
-  assert.equal(AMUX_V22_OWNER_QUESTION_LIMIT, 3);
-  for (const sequence of [1, 2, 3]) assert.deepEqual(
+test("a Task may ask as many questions as it needs: every one opens", () => {
+  // Owner decision 2026-11-15: the three-question limit is gone; a Task's runs are bounded by its attempt budget.
+  for (const sequence of [1, 2, 3, 4, 5, 50, 1_000]) assert.deepEqual(
     amuxV22OwnerQuestionSettlement(sequence),
-    { questionState: "open", reason: "owner_question" });
-  assert.deepEqual(amuxV22OwnerQuestionSettlement(4),
-    { questionState: "cancelled", reason: "owner_question_limit" });
+    { questionState: "open", reason: "owner_question" }, String(sequence));
 });
 
-test("an answer is trimmed, bounded and free of control characters", () => {
+test("an answer is trimmed, bounded by its one backstop and free of control characters", () => {
   assert.equal(normalizeAmuxV22OwnerAnswer("  Name it.\r\nThanks  "), "Name it.\nThanks");
-  for (const bad of ["", "   ", 7, null, "x".repeat(8_001), "a\u0000b"])
+  // Owner decision 2026-11-15: the answer is a context file in the local CLI
+  // flow, so its one cap holds the Decision Maker's or an operator's longest
+  // answer (256 KiB) with the line naming who gave it, in bytes and characters.
+  assert.equal(AMUX_V22_OWNER_ANSWER_MAX_BYTES, 512 * 1_024);
+  assert.equal(AMUX_V22_OWNER_ANSWER_MAX_CHARS, AMUX_V22_OWNER_ANSWER_MAX_BYTES);
+  assert.ok(AMUX_V22_OWNER_ANSWER_MAX_BYTES > AMUX_V22_RESUME_PROMPT_MAX_BYTES,
+    "the earlier flow's 30 KiB prompt is checked by the service when the answer is given");
+  // The old 8,000-character and 30 KiB answers are no limit: they go whole.
+  assert.equal(normalizeAmuxV22OwnerAnswer("x".repeat(8_001)), "x".repeat(8_001));
+  assert.equal(normalizeAmuxV22OwnerAnswer("x".repeat(AMUX_V22_RESUME_PROMPT_MAX_BYTES + 1)), "x".repeat(AMUX_V22_RESUME_PROMPT_MAX_BYTES + 1));
+  assert.equal(normalizeAmuxV22OwnerAnswer("x".repeat(AMUX_V22_OWNER_ANSWER_MAX_BYTES)), "x".repeat(AMUX_V22_OWNER_ANSWER_MAX_BYTES));
+  const threeByteChars = Math.floor(AMUX_V22_OWNER_ANSWER_MAX_BYTES / 3);
+  for (const bad of ["", "   ", 7, null, "x".repeat(AMUX_V22_OWNER_ANSWER_MAX_BYTES + 1),
+    // Within the characters, over the bytes.
+    "가".repeat(threeByteChars + 1), "a\u0000b"])
     assert.equal(normalizeAmuxV22OwnerAnswer(bad), null);
+  assert.equal(normalizeAmuxV22OwnerAnswer("가".repeat(threeByteChars)), "가".repeat(threeByteChars));
 });
 
 test("the worker reads how to ask, and that the Task is not finished", () => {
@@ -120,7 +150,7 @@ test("the answer always goes whole: the change, options, unblocks and question g
   assert.ok(amuxV22ResumeMinimumBytes(answer, "operator") > Buffer.byteLength(answer, "utf8"));
 });
 
-test("a settlement parks a questioning run blocked, escalating only over the limit", () => {
+test("a settlement parks a questioning run blocked; only a cancelled question opens an escalation", () => {
   assert.equal(amuxV22OwnerQuestionSettlementPlan(null), null);
   assert.deepEqual(amuxV22OwnerQuestionSettlementPlan({ state: "open" }),
     { toStatus: "blocked", reason: "owner_question", openEscalation: false });
@@ -136,10 +166,22 @@ test("a question may carry what the worker found and the files to read; a bad on
   assert.equal(withContext.context, "lib/amux/fileRetry.ts retries twice and shows nothing.");
   // Once each, repository-relative only.
   assert.deepEqual(withContext.paths, ["lib/amux/fileRetry.ts", "components/chat/FileCard.tsx"]);
-  const tooLong = parseAmuxV22OwnerQuestion(line({ ...asked, context: "x".repeat(2_001), paths: "not a list" }));
+  // A context far past the old 2,000 characters stays, whole; a paths list that is no list is left out.
+  const longContext = parseAmuxV22OwnerQuestion(line({ ...asked, context: "x".repeat(50_000), paths: "not a list" }));
+  assert.equal(longContext.context, "x".repeat(50_000));
+  assert.equal("paths" in longContext, false);
+  // Past the card's one cap too (owner decision 2026-11-15): kept whole, for the
+  // Decision Maker's workspace (evidence/CONTEXT.md), never dropped for its length.
+  const tooLong = parseAmuxV22OwnerQuestion(line({ ...asked, context: "x".repeat(AMUX_V22_OWNER_TEXT_MAX_CHARS + 1), paths: "not a list" }));
   assert.equal(tooLong.question, asked.question);
-  assert.equal("context" in tooLong, false);
+  assert.equal(tooLong.context, "x".repeat(AMUX_V22_OWNER_TEXT_MAX_CHARS + 1));
   assert.equal("paths" in tooLong, false);
+  // A context that is no text, or carries a control character, is still left out.
+  assert.equal("context" in parseAmuxV22OwnerQuestion(line({ ...asked, context: 7 })), false);
+  assert.equal("context" in parseAmuxV22OwnerQuestion(line({ ...asked, context: "a\u0007b" })), false);
+  // No count cap on the paths (it was 32): every distinct valid one is kept.
+  const manyPaths = Array.from({ length: 100 }, (_, i) => `lib/dir/file${i}.ts`);
+  assert.deepEqual(parseAmuxV22OwnerQuestion(line({ ...asked, paths: manyPaths })).paths, manyPaths);
   // A question without them parses exactly as before, so its digest is unchanged.
   assert.deepEqual(Object.keys(parseAmuxV22OwnerQuestion(line(asked))).sort(), ["options", "question", "unblocks"]);
   assert.equal(amuxV22OwnerQuestionSha256(withContext), amuxV22OwnerQuestionSha256(parseAmuxV22OwnerQuestion(line(asked))));
@@ -152,7 +194,8 @@ test("the Decision Maker's card names the asking card and carries the worker's c
     taskId: "cdd90973-16bd-4729-8940-1219cc639be5", sequence: 1, displayKey: "AMUX-AUTOFILE-003",
     cardTitle: "File retry trailer signal", question });
   assert.equal(card.title, "AMUX-AUTOFILE-003 File retry trailer signal");
-  assert.equal(card.context, 'Card: AMUX-AUTOFILE-003 "File retry trailer signal", question 1 from worker codex-impl.\n\nTwo retry paths exist.');
+  // The workspace is always on (owner direction 2026-11-16): what the worker found is evidence/CONTEXT.md.
+  assert.equal(card.context, `Card: AMUX-AUTOFILE-003 "File retry trailer signal", question 1 from worker codex-impl.\n\n${dmWorkspaceCardPointer(["CONTEXT.md"])}`);
   assert.deepEqual(card.context_paths, ["lib/amux/fileRetry.ts"]);
   assert.deepEqual(card.options, asked.options);
   assert.equal(card.provider, "codex");
@@ -162,12 +205,18 @@ test("the Decision Maker's card names the asking card and carries the worker's c
   assert.equal(bare.title, "v22 Task t-1 question 2");
   assert.equal(bare.context, "Card: v22 Task t-1, question 2 from worker codex-impl.");
   assert.deepEqual(bare.context_paths, []);
-  // Local AMUX's bounds: a 200-unit title, a 4000-unit context.
+  // Nothing is cut: no 200-unit title, no 4000-unit context (owner decision 2026-11-15).
   const long = amuxV22QuestionDmCard({ questionId: "q-1", worker: "w", providerClass: "codex", taskId: "t",
     sequence: 1, displayKey: "K-1", cardTitle: "가".repeat(400),
-    question: { ...question, context: "y".repeat(2_000) } });
-  assert.ok(long.title.length <= 200 && long.title.endsWith("…"));
-  assert.ok(long.context.length <= 4_000);
+    question: { ...question, context: "y".repeat(10_000) } });
+  assert.equal(long.title, `K-1 ${"가".repeat(400)}`);
+  assert.ok(!long.title.endsWith("…"));
+  assert.equal(long.context, `Card: K-1 "${"가".repeat(400)}", question 1 from worker w.\n\n${dmWorkspaceCardPointer(["CONTEXT.md"])}`);
+  // What the worker found is the workspace's evidence/CONTEXT.md, whole, however large; the card points at it.
+  const huge = amuxV22QuestionDmCard({ questionId: "q-1", worker: "w", providerClass: "codex", taskId: "t",
+    sequence: 1, displayKey: "K-1", cardTitle: null, question: { ...question, context: "z".repeat(400_000) } });
+  assert.equal(huge.context, `Card: K-1, question 1 from worker w.\n\n${dmWorkspaceCardPointer(["CONTEXT.md"])}`);
+  assert.deepEqual(huge.context_paths, ["lib/amux/fileRetry.ts"]);
 });
 
 test("the rules ask for options, context and paths, and say the Decision Maker escalates without grounds", () => {
@@ -176,22 +225,22 @@ test("the rules ask for options, context and paths, and say the Decision Maker e
   assert.match(AMUX_V22_OWNER_QUESTION_RULES, /escalates a question it has no grounds for/);
 });
 
-test("a card whose optional parts would pass 16 KiB gives them up, paths first, so it still reaches the Decision Maker", () => {
+test("a card keeps every part of what the worker wrote: nothing is given up to fit, however much there is", () => {
   const big = { question: `${"가".repeat(600)}?`, unblocks: "나".repeat(300),
     options: Array.from({ length: 6 }, (_, i) => ({ id: `o${i}`, label: "다".repeat(300) })),
     context: "라".repeat(2_000),
-    paths: Array.from({ length: 32 }, (_, i) => `lib/${String(i).padStart(2, "0")}/${"p".repeat(190)}`) };
+    paths: Array.from({ length: 64 }, (_, i) => `lib/${String(i).padStart(2, "0")}/${"p".repeat(190)}`) };
   const question = parseAmuxV22OwnerQuestion(line(big));
-  assert.equal(question.paths.length, 32);
+  assert.equal(question.paths.length, 64);
   const card = amuxV22QuestionDmCard({ questionId: "q-1", worker: "codex-impl", providerClass: "codex",
     taskId: "t", sequence: 1, displayKey: "AMUX-AUTOFILE-003", cardTitle: "File retry", question });
-  const bytes = amuxV22QuestionCardBytes({ ...card, paths: card.context_paths });
-  assert.ok(bytes <= 15 * 1_024, `${bytes}`);
-  // The question, what it unblocks and the options are never cut; the card line stays.
+  // Far past the 16 KiB the card used to be fitted into: still every path, option and word.
+  assert.ok(Buffer.byteLength(JSON.stringify(card), "utf8") > 16 * 1_024);
   assert.equal(card.question, big.question);
-  assert.equal(card.options.length, 6);
-  assert.match(card.context, /^Card: AMUX-AUTOFILE-003 "File retry"/);
-  assert.ok(card.context_paths.length < 32);
+  assert.equal(card.unblocks, big.unblocks);
+  assert.deepEqual(card.options, big.options);
+  assert.equal(card.context, `Card: AMUX-AUTOFILE-003 "File retry", question 1 from worker codex-impl.\n\n${dmWorkspaceCardPointer(["CONTEXT.md"])}`);
+  assert.deepEqual(card.context_paths, big.paths);
   // A small card keeps everything.
   const small = amuxV22QuestionDmCard({ questionId: "q-1", worker: "w", providerClass: "codex", taskId: "t",
     sequence: 1, displayKey: "K", cardTitle: null, question: parseAmuxV22OwnerQuestion(line({ ...asked,

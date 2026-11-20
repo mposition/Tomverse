@@ -143,7 +143,7 @@ test("case 2: each flow panel has one distinct key, so React never leaves a stal
 
 test("the plan button says why it cannot be pressed yet", () => {
   const markup = render(createElement(AmuxInitialPlanPanel, { ideaId: "cfa39925-f53e-4d19-9eb7-3b8ec2e94f68",
-    operatorId: "owner-1", available: true, declaredExternalSources: false }));
+    operatorId: "owner-1", declaredExternalSources: false }));
   assert.match(markup, /<button[^>]*disabled/, "the first read has not answered");
   const input = adminAmuxIdeaInputMessages;
   assert.ok(markup.includes(input.ko.initialPlanChecking) || markup.includes(input.en.initialPlanChecking));

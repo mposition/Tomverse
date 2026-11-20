@@ -22,10 +22,9 @@ import { amuxV22TaskWritesPatch } from "@/lib/amux/v22WorkerClaimCore";
 
 /** Prisma calls `readAmuxV22PriorConclusionRows` makes, for its caller's boundary. */
 export const AMUX_V22_PRIOR_CONCLUSION_ROWS_PRISMA_CALLS = 3;
-/** Prerequisites read per delivery; the section bound decides how many fit. */
-export const AMUX_V22_PRIOR_CONCLUSION_MAX_DEPENDENCIES = 8;
-
-const SEALED = { ideaId: true, ciphertext: true, keyId: true, keyVersion: true,
+// Every finished prerequisite is carried (v22LocalCliFlowCore.ts).
+// No body: it is read in slices when the row is opened (sealedByteaRead.ts).
+const SEALED = { ideaId: true, keyId: true, keyVersion: true,
   digest: true, digestKeyId: true, bodyPurgedAt: true } as const;
 // The brief names sibling cards by the draft unit's local reference; the card
 // keeps it only through the decision that registered it.
@@ -44,13 +43,12 @@ export async function readAmuxV22PriorConclusionRows(tx: Prisma.TransactionClien
   const self = { id: found.id, displayKey: found.displayKey,
     localRef: localRefOf(found) };
   const links = await tx.amuxWorkDependency.findMany({ where: { taskId },
-    orderBy: { dependencyId: "asc" }, take: 32,
+    orderBy: { dependencyId: "asc" },
     select: { dependency: { select: { id: true, displayKey: true, status: true,
       sourceSystem: true, v4TerminalAt: true, taskRole: true, ...LOCAL_REF } } } });
   const done = links.map((link) => link.dependency).filter((item) =>
     item.status === "done" && item.v4TerminalAt !== null &&
-    item.sourceSystem === "admin-idea-v4")
-    .slice(0, AMUX_V22_PRIOR_CONCLUSION_MAX_DEPENDENCIES);
+    item.sourceSystem === "admin-idea-v4");
   if (done.length === 0) return null;
   // The newest result of each prerequisite first, whatever it holds: when
   // that run gave no conclusion, an earlier run's conclusion is not revived.

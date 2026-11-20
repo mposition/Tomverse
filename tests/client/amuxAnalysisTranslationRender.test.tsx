@@ -11,7 +11,7 @@ import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 // analysis result, marked as a reference, behind a default-off switch.
 
 const KEYS = ["translationShow", "translationHide", "translationLoading", "translationLabel",
-  "translationHint", "translationTooLarge", "translationUnavailable", "translationStale"] as const;
+  "translationHint", "translationUnavailable", "translationStale"] as const;
 
 test("every translation string exists in English and Korean, and they differ", () => {
   for (const key of KEYS) {
@@ -43,7 +43,6 @@ test("the toggle names its action and reports each failure in words", () => {
   assert.ok(render({ shown: true }).includes(m.translationHide));
   assert.match(render({ state: "loading" }), /disabled=""/);
   assert.ok(render({ state: "loading" }).includes(m.translationLoading));
-  assert.ok(render({ state: "too_large" }).includes(m.translationTooLarge));
   assert.ok(render({ state: "unavailable" }).includes(m.translationUnavailable));
   assert.ok(render({ stale: true }).includes(m.translationStale));
   assert.equal(render({}).includes(m.translationStale), false);

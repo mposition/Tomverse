@@ -25,6 +25,28 @@ const NARROW = { width: 320, height: 568 } as const;
 
 test.use({ viewport: NARROW });
 
+test("desktop provider tables show their final column without horizontal scrolling", async ({ page }) => {
+    await prepareGuestPage(page, "en");
+    await page.goto("/privacy?lang=en");
+    const scroller = page.getByRole("region", { name: en.privacyPolicy.providerTableTitle });
+    await expect(scroller).toBeVisible();
+    for (const width of [1024, 1440]) {
+        await page.setViewportSize({ width, height: 1000 });
+        await scroller.scrollIntoViewIfNeeded();
+        const layout = await scroller.evaluate(node => {
+            const outer = node.getBoundingClientRect();
+            const cells = Array.from(node.querySelectorAll("tr > :last-child"));
+            return { overflow: node.scrollWidth - node.clientWidth, finalColumn: cells.map(cell => {
+                const rect = cell.getBoundingClientRect();
+                return { text: cell.textContent?.trim(), inside: rect.left >= outer.left && rect.right <= outer.right + 1, textFits: cell.scrollWidth <= cell.clientWidth + 1 };
+            }) };
+        });
+        expect(layout.overflow).toBeLessThanOrEqual(1);
+        expect(layout.finalColumn.length).toBeGreaterThan(1);
+        expect(layout.finalColumn.every(cell => cell.text && cell.inside && cell.textFits), JSON.stringify(layout)).toBe(true);
+    }
+});
+
 test("the provider section wraps at 320px while its table scrolls", {
     tag: "@ui-risk",
 }, async ({ page }) => {
@@ -62,8 +84,12 @@ test("the provider section wraps at 320px while its table scrolls", {
                 candidate.querySelector("table, [role='region']") !== null &&
                 candidate.querySelector("h2") !== null
         );
+        // The table's own cells (an unverified row's notice is a <p>) live in
+        // the scroller, which is allowed to be wider than the screen.
         const prose = section
-            ? Array.from(section.querySelectorAll("p, li, h2, h3"))
+            ? Array.from(section.querySelectorAll("p, li, h2, h3")).filter(
+                (element) => !element.closest("[role='region']")
+            )
             : [];
         let widest = 0;
         let offender: string | null = null;

@@ -933,6 +933,47 @@ test.describe("Mobile composer: keyboard, zoom and text scaling", { tag: "@ui-ri
     });
   }
 
+  // The footer model button is capped at 4rem below md. A count badge beside
+  // the "3 AIs" label left the label 6px and clipped it to "3 A" at both
+  // reference widths, which only a pixel golden had caught (2026-11-10).
+  for (const lang of ["en", "ko"] as const) {
+    for (const width of [390, 320]) {
+      test(`${lang} ${width}px shows the whole three-model count label on one actions row`, async ({ page }) => {
+        await enterMobileComposer(page, { lang, viewport: { width, height: 680 } });
+        const composer = page.getByTestId("chat-input");
+        const model = composer.getByTestId("composer-model-select");
+        await expect(model).toHaveAccessibleName(/3/);
+        const fit = await model.evaluate(button => {
+          const label = button.querySelector<HTMLElement>('[data-testid="composer-active-model-count"]')!;
+          const outer = button.getBoundingClientRect();
+          const inner = label.getBoundingClientRect();
+          return {
+            text: label.innerText.replace(/\s+/g, " ").trim(),
+            labelWidth: inner.width,
+            overflowX: label.scrollWidth - label.clientWidth,
+            overflowY: label.scrollHeight - label.clientHeight,
+            inside: inner.left >= outer.left - 0.5 && inner.right <= outer.right + 0.5 && inner.top >= outer.top - 0.5 && inner.bottom <= outer.bottom + 0.5,
+            height: outer.height,
+          };
+        });
+        expect(fit.text).toMatch(/^3\s?\S/);
+        expect(fit.labelWidth).toBeGreaterThan(16);
+        expect(fit.overflowX, "label is not clipped sideways").toBeLessThanOrEqual(0.5);
+        expect(fit.overflowY, "label is not clipped below").toBeLessThanOrEqual(0.5);
+        expect(fit.inside).toBe(true);
+        expect(fit.height).toBeGreaterThanOrEqual(43.5);
+        const centre = async (id: string) => {
+          const box = (await composer.getByTestId(id).boundingBox())!;
+          return box.y + box.height / 2;
+        };
+        const row = await centre("chat-send-button");
+        expect(Math.abs((await centre("composer-tools-button")) - row)).toBeLessThan(2);
+        expect(Math.abs((await centre("composer-model-select")) - row)).toBeLessThan(2);
+        await expectComposerContract(page, `${lang} ${width}px three-model label`);
+      });
+    }
+  }
+
   for (const lang of ["en", "de", "fr", "es", "pt", "ko", "zh"] as const) {
     for (const mode of ["text", "page"] as const) {
       test(`${lang} three Review models reflow at 200% ${mode} scaling`, async ({ page }) => {

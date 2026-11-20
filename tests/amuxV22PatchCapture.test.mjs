@@ -6,6 +6,7 @@ import { captureAmuxV22Patch, captureAmuxV22PatchBaseline,
   captureAmuxV52ChangedPaths, captureAmuxV52ReviewCommit,
   discardAmuxV52AttemptChanges, syncAmuxV22WorktreeBase } from
   "../lib/amux/v22PatchCapture.mjs";
+import { AMUX_V22_GIT_STEP_TIMEOUT_MS } from "../lib/amux/v22PatchLimit.ts";
 
 const BASE = "a".repeat(40);
 const PATCH = "diff --git a/lib/example.ts b/lib/example.ts\n" +
@@ -49,7 +50,42 @@ test("a review commit is made from the exact patch and leaves HEAD clean", async
   assert.equal(calls.at(-1)[0], "status");
 });
 
-test("v52 includes a new regular file in the patch, publish evidence, and review commit", async () => {
+test("a review commit with a path list past 32 KiB reads git without a bound of ours", async () => {
+  // Review r-20261116-204328-14b84a: the path list passed the inventory and
+  // then failed the review commit's diff-tree at 32 KiB; since 2026-11-18 no
+  // git read has a bound of ours.
+  const paths = Array.from({ length: 1500 }, (_, index) =>
+    `lib/generated/a-fairly-long-directory-name/module-${index}.ts`).sort();
+  assert.ok(paths.join("\0").length > 32 * 1024);
+  const buffers = [];
+  const run = async (_binary, args, options) => {
+    const command = args.slice(6);
+    const answer = (text) => {
+      const stdout = Buffer.from(text);
+      // As execFile does: an answer past maxBuffer fails.
+      if (stdout.length > options.maxBuffer) throw new Error("maxBuffer exceeded");
+      return { stdout };
+    };
+    if (command[0] === "rev-parse") return answer(
+      command[1] === "--show-toplevel" ? "/repo" : BASE);
+    if (command[0] === "diff" && command.includes("--cached")) return answer(PATCH);
+    if (command[0] === "write-tree") return answer("c".repeat(40));
+    if (command[0] === "-c" && command.includes("commit-tree")) return answer("d".repeat(40));
+    if (command[0] === "diff-tree") {
+      buffers.push(options.maxBuffer);
+      return answer(paths.join("\0") + "\0");
+    }
+    if (["add", "reset", "status", "update-ref"].includes(command[0])) return answer("");
+    throw new Error("unexpected git command");
+  };
+  const result = await captureAmuxV52ReviewCommit("/repo", BASE,
+    "11111111-1111-4111-8111-111111111111", paths, PATCH,
+    { run, realpath: async (value) => value });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(buffers, [Infinity]);
+});
+
+test("v52 includes a new regular file in the patch and the review commit", async () => {
   const newPatch = "diff --git a/lib/new.ts b/lib/new.ts\n" +
     "new file mode 100644\n--- /dev/null\n+++ b/lib/new.ts\n@@ -0,0 +1 @@\n+new\n";
   const calls = [];
@@ -83,8 +119,9 @@ test("v52 includes a new regular file in the patch, publish evidence, and review
   const candidate = await captureAmuxV22Patch("/repo", BASE, options);
   assert.equal(candidate.ok, true);
   assert.equal(candidate.patchBody, newPatch);
-  assert.deepEqual(candidate.publishFiles, [{ path: "lib/new.ts", mode: "100644",
-    bytesBase64: Buffer.from("new\n").toString("base64") }]);
+  // No file bytes ride beside the text (owner decision 2026-11-15).
+  assert.equal(candidate.publishFiles, undefined);
+  assert.ok(!calls.some((call) => call[0] === "diff" && call.includes("--name-status")));
   assert.ok(calls.some((call) => call[0] === "add" &&
     call.includes("-N") && call.includes(":(literal)lib/new.ts")));
   assert.ok(calls.some((call) => call[0] === "reset" &&
@@ -149,24 +186,20 @@ test("clean fixed base yields only a bounded local candidate, never publication"
   assert.deepEqual(candidate, {
     ok: true, baseSha: BASE, patchBody: PATCH,
     patchDigest: createHash("sha256").update(PATCH).digest("hex"),
-    publishFiles: [{ path: "lib/example.ts", mode: "100644",
-      bytesBase64: Buffer.from("new\n").toString("base64") }],
   });
   assert.equal(options.calls.at(-1)[0], "diff");
   assert.ok(options.calls.every((call) => call[0] !== "diff" ||
     call.includes("--no-ext-diff")));
 });
 
-test("non-modified or oversized files keep the private patch but no publish evidence", async () => {
-  const added = await captureAmuxV22Patch("/repo", BASE,
-    fixture({ names: "A\0lib/example.ts\0" }));
-  assert.equal(added.ok, true);
-  assert.equal(added.publishReason, "publish_files_unsupported");
-  assert.equal(added.publishFiles, undefined);
-  const oversized = await captureAmuxV22Patch("/repo", BASE,
-    fixture({ file: "x".repeat(48 * 1024 + 1) }));
-  assert.equal(oversized.ok, true);
-  assert.equal(oversized.publishReason, "publish_files_unsupported");
+test("the patch text alone is the evidence: no file is read beside it", async () => {
+  for (const options of [fixture({ names: "A\0lib/example.ts\0" }),
+    fixture({ file: "x".repeat(48 * 1024 + 1) })]) {
+    const candidate = await captureAmuxV22Patch("/repo", BASE, options);
+    assert.equal(candidate.ok, true);
+    assert.equal(candidate.publishFiles, undefined);
+    assert.equal(candidate.publishReason, undefined);
+  }
 });
 
 test("dirty or foreign baseline is rejected before a model run", async () => {
@@ -218,16 +251,27 @@ test("moved HEAD and untracked files never produce a partial candidate", async (
     { ok: false, reason: "untracked_files" });
 });
 
-test("empty, binary and oversized patches fail closed", async () => {
+test("empty and binary patches fail closed; a patch has no size bound", async () => {
   assert.deepEqual(await captureAmuxV22Patch("/repo", BASE,
     fixture({ patch: "" })),
     { ok: false, reason: "no_change" });
   assert.deepEqual(await captureAmuxV22Patch("/repo", BASE,
     fixture({ patch: "abc\0def" })),
     { ok: false, reason: "patch_not_bounded_text" });
-  assert.deepEqual(await captureAmuxV22Patch("/repo", BASE,
-    fixture({ patch: "x".repeat(65_537) })),
-    { ok: false, reason: "patch_not_bounded_text" });
+  // No size bound of ours (owner decision 2026-11-18; it was 4 MiB until
+  // then). A patch past 4 MiB, even one whose JSON escape is far past twice
+  // its size, is an ordinary candidate: it travels to the app in chunks.
+  const large = await captureAmuxV22Patch("/repo", BASE,
+    fixture({ patch: PATCH + `+${"x".repeat(65_537)}\n` }));
+  assert.equal(large.ok, true);
+  const huge = PATCH + `+${"x".repeat(5 * 1024 * 1024)}\n`;
+  const hugeResult = await captureAmuxV22Patch("/repo", BASE,
+    fixture({ patch: huge }));
+  assert.equal(hugeResult.ok, true);
+  assert.equal(Buffer.byteLength(hugeResult.patchBody, "utf8"),
+    Buffer.byteLength(huge, "utf8"));
+  assert.equal((await captureAmuxV22Patch("/repo", BASE,
+    fixture({ patch: PATCH + `+${"\u0001".repeat(2 * 1024 * 1024)}\n` }))).ok, true);
 });
 
 test("local scanner refuses patch secrets and withholds unsafe file evidence", async () => {
@@ -235,11 +279,55 @@ test("local scanner refuses patch secrets and withholds unsafe file evidence", a
   assert.deepEqual(await captureAmuxV22Patch("/repo", BASE,
     fixture({ patch: PATCH + `+${secret}\n` })),
     { ok: false, reason: "patch_secret_detected" });
+  // A file is not read beside the patch; the app scans every rebuilt file.
   const file = await captureAmuxV22Patch("/repo", BASE,
     fixture({ file: `token = ${secret}\n` }));
   assert.equal(file.ok, true);
-  assert.equal(file.publishReason, "publish_files_secret_or_binary");
   assert.equal(file.publishFiles, undefined);
+});
+
+// A binary file's bytes are base85 text of deflated data in the patch, so
+// the local scanner reads them decoded (review r-20261115-110149-a6ba38).
+const B85 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz" +
+  "!#$%&()*+-;<=>?@^_`{|}~";
+const base85Lines = (bytes) => {
+  const lines = [];
+  for (let at = 0; at < bytes.length; at += 52) {
+    const chunk = bytes.subarray(at, at + 52);
+    const padded = Buffer.concat([chunk, Buffer.alloc((4 - chunk.length % 4) % 4)]);
+    let line = String.fromCharCode(chunk.length <= 26 ? 64 + chunk.length : 70 + chunk.length);
+    for (let i = 0; i < padded.length; i += 4) {
+      let value = padded.readUInt32BE(i);
+      const digits = [];
+      for (let k = 0; k < 5; k++) { digits.unshift(B85[value % 85]); value = Math.floor(value / 85); }
+      line += digits.join("");
+    }
+    lines.push(line);
+  }
+  return lines;
+};
+const binaryPatch = (content) => {
+  const { deflateSync } = createRequireZlib();
+  return "diff --git a/lib/blob.bin b/lib/blob.bin\nnew file mode 100644\n" +
+    `index ${"0".repeat(40)}..${"1".repeat(40)}\nGIT binary patch\n` +
+    `literal ${content.length}\n${base85Lines(deflateSync(content)).join("\n")}\n\n`;
+};
+const createRequireZlib = () => process.getBuiltinModule("node:zlib");
+
+test("a secret inside a binary file is found before the patch leaves the box", async () => {
+  const token = ["gh", "p_", "Q".repeat(36)].join("");
+  const secret = binaryPatch(Buffer.concat([Buffer.from([0, 1, 2]),
+    Buffer.from(token), Buffer.from([3, 4])]));
+  assert.doesNotMatch(secret, new RegExp(token));
+  assert.deepEqual(await captureAmuxV22Patch("/repo", BASE,
+    fixture({ patch: secret })), { ok: false, reason: "patch_secret_detected" });
+  const clean = await captureAmuxV22Patch("/repo", BASE,
+    fixture({ patch: binaryPatch(Buffer.from([0, 9, 8, 7, 6])) }));
+  assert.equal(clean.ok, true);
+  // A binary section that cannot be read cannot be shown clean.
+  assert.deepEqual(await captureAmuxV22Patch("/repo", BASE, fixture({
+    patch: binaryPatch(Buffer.from([0, 9])).replace(/^literal 2$/m, "literal 3") })),
+  { ok: false, reason: "patch_not_bounded_text" });
 });
 
 test("v52 inventories every changed name independently of the publish patch cap", async () => {
@@ -264,8 +352,10 @@ test("v52 inventories every changed name independently of the publish patch cap"
   assert.equal(result.files.length, 45);
   assert.deepEqual(result.contractPaths,
     ["LIB/AMUX/Execution.ts", "docs/policy/new.md"]);
-  assert.equal(calls.find(({ command }) => command[0] === "diff")
-    .maxBuffer, 32 * 1024);
+  // Every read of git names is unbounded: no list is cut for its size.
+  for (const call of calls.filter(({ command }) =>
+    ["diff", "ls-files"].includes(command[0])))
+    assert.equal(call.maxBuffer, Infinity);
 });
 
 test("v52 includes ignored contract paths without scanning unrelated ignored files", async () => {
@@ -305,25 +395,26 @@ test("v52 treats missing, malformed and invalid path inventories as unavailable"
   assert.deepEqual(await captureAmuxV52ChangedPaths("/repo", BASE,
     { run: async () => { throw new Error("git failed"); } }),
     { ok: false, reason: "changed_paths_unavailable" });
-  const tooMany = Array.from({ length: 4_097 }, (_, index) =>
-    `${index.toString(36)}\0`).join("");
-  assert.deepEqual(await captureAmuxV52ChangedPaths("/repo", BASE,
-    { run: async (_binary, args) => ({ stdout: Buffer.from(
-      args.slice(6)[0] === "rev-parse" ?
-        args.slice(6)[1] === "--show-toplevel" ? "/repo" : BASE :
-        args.slice(6)[0] === "diff" ? tooMany : "") }),
-      realpath: async (path) => path }),
-    { ok: false, reason: "changed_paths_unavailable" });
-  const tooLarge = Array.from({ length: 600 }, (_, index) =>
-    `p/${index.toString(36).padStart(3, "0")}${"x".repeat(36)}\0`).join("");
-  assert.ok(Buffer.byteLength(tooLarge, "utf8") < 32 * 1024);
-  assert.deepEqual(await captureAmuxV52ChangedPaths("/repo", BASE,
-    { run: async (_binary, args) => ({ stdout: Buffer.from(
-      args.slice(6)[0] === "rev-parse" ?
-        args.slice(6)[1] === "--show-toplevel" ? "/repo" : BASE :
-        args.slice(6)[0] === "diff" ? tooLarge : "") }),
-      realpath: async (path) => path }),
-    { ok: false, reason: "changed_paths_unavailable" });
+  const diffOf = (names) => async (_binary, args) => ({ stdout: Buffer.from(
+    args.slice(6)[0] === "rev-parse" ?
+      args.slice(6)[1] === "--show-toplevel" ? "/repo" : BASE :
+      args.slice(6)[0] === "diff" ? names : "") });
+  // No count of ours: tens of thousands of short names are still reported.
+  const many = Array.from({ length: 50_000 }, (_, index) =>
+    `d/${index.toString(36)}\0`).join("");
+  const manyResult = await captureAmuxV52ChangedPaths("/repo", BASE,
+    { run: diffOf(many), realpath: async (path) => path });
+  assert.equal(manyResult.ok, true);
+  assert.equal(manyResult.files.length, 50_000);
+  // A list past 4 MiB (the old bound, the settlement body's proxy buffer) is
+  // reported whole; it travels as a pending part in chunks.
+  const large = Array.from({ length: 30_000 }, (_, index) =>
+    `p/${index.toString(36).padStart(5, "0")}${"x".repeat(150)}\0`).join("");
+  assert.ok(Buffer.byteLength(large, "utf8") > 4 * 1024 * 1024);
+  const largeResult = await captureAmuxV52ChangedPaths("/repo", BASE,
+    { run: diffOf(large), realpath: async (path) => path });
+  assert.equal(largeResult.ok, true);
+  assert.equal(largeResult.files.length, 30_000);
 });
 
 test("v52 discards a contract attempt only from its original clean base", async () => {
@@ -355,7 +446,7 @@ test("v52 discards a contract attempt only from its original clean base", async 
       realpath: async (path) => path }), false);
 });
 
-test("a worker checkout moves to its publication base only when clean and the base is present", async () => {
+test("a worker checkout moves to its publication base once clean and the base is present", async () => {
   const base = "b".repeat(40);
   const repo = (state) => {
     const calls = [];
@@ -363,6 +454,15 @@ test("a worker checkout moves to its publication base only when clean and the ba
       const command = args.slice(6);
       calls.push({ command, timeout: options.timeout });
       if (command[0] === "status") return { stdout: Buffer.from(state.dirty ? " M x\0" : "") };
+      // What an attempt cut off mid-run left: dropped unless the checkout cannot be cleaned.
+      if (command[0] === "reset") {
+        if (state.resetFails) throw new Error("locked");
+        return { stdout: Buffer.alloc(0) };
+      }
+      if (command[0] === "clean") {
+        if (!state.stuck) state.dirty = false;
+        return { stdout: Buffer.alloc(0) };
+      }
       if (command[0] === "cat-file") {
         if (state.present) return { stdout: Buffer.alloc(0) };
         throw new Error("missing");
@@ -386,10 +486,24 @@ test("a worker checkout moves to its publication base only when clean and the ba
     .filter((name) => name !== "rev-parse");
   const realpath = async (value) => value;
 
+  // Leftovers of a cut-off attempt are dropped and the attempt goes on (2026-11-12):
+  // tracked changes reset to HEAD, untracked files removed, ignored files kept.
   const dirty = repo({ dirty: true, present: true });
   assert.deepEqual(await syncAmuxV22WorktreeBase("/repo", base, { run: dirty.run, realpath }),
-    { ok: false, reason: "worktree_dirty" });
-  assert.deepEqual(names(dirty.calls), ["status"]);
+    { ok: true, baseSha: base, discardedLeftovers: true });
+  assert.deepEqual(names(dirty.calls).slice(0, 4), ["status", "reset", "clean", "status"]);
+  assert.equal(names(dirty.calls).at(-1), "checkout");
+  assert.deepEqual(dirty.calls.find((call) => call.command[0] === "reset").command,
+    ["reset", "--hard", "--quiet", "HEAD"]);
+  assert.deepEqual(dirty.calls.find((call) => call.command[0] === "clean").command,
+    ["clean", "-fd", "--quiet", "--"]);
+  // A checkout that stays dirty, or cannot be reset, still fails the attempt before the CLI runs.
+  for (const state of [{ stuck: true }, { resetFails: true }]) {
+    const stuck = repo({ dirty: true, present: true, ...state });
+    assert.deepEqual(await syncAmuxV22WorktreeBase("/repo", base, { run: stuck.run, realpath }),
+      { ok: false, reason: "worktree_dirty" });
+    assert.equal(names(stuck.calls).includes("checkout"), false);
+  }
 
   const local = repo({ present: true });
   assert.deepEqual(await syncAmuxV22WorktreeBase("/repo", base, { run: local.run, realpath }),
@@ -410,7 +524,7 @@ test("a worker checkout moves to its publication base only when clean and the ba
   const fetch = fetched.calls.find((call) => call.command[0] === "fetch");
   assert.deepEqual(fetch.command, ["fetch", "--no-tags", "--quiet", "origin",
     "refs/heads/develop"]);
-  assert.equal(fetch.timeout, 120_000);
+  assert.equal(fetch.timeout, AMUX_V22_GIT_STEP_TIMEOUT_MS);
 
   const exact = repo({ fetchable: [base] });
   assert.deepEqual(await syncAmuxV22WorktreeBase("/repo", base, { run: exact.run, realpath }),
@@ -438,10 +552,13 @@ test("a worker checkout moves to its publication base only when clean and the ba
     ["fetch", "--no-tags", "--quiet", "origin", "refs/heads/develop"]);
   assert.deepEqual(latest.calls.find((call) => call.command[0] === "checkout").command.at(-1), tip);
 
-  const dirtyLatest = repo({ dirty: true, fetchHead: tip });
+  const dirtyLatest = repo({ dirty: true, stuck: true, fetchHead: tip });
   assert.deepEqual(await syncAmuxV22WorktreeBase("/repo", null,
     { run: dirtyLatest.run, realpath }), { ok: false, reason: "worktree_dirty" });
-  assert.deepEqual(names(dirtyLatest.calls), ["status"]);
+  assert.deepEqual(names(dirtyLatest.calls), ["status", "reset", "clean", "status"]);
+  const cleanedLatest = repo({ dirty: true, fetchable: ["refs/heads/develop"], fetchHead: tip, head: base });
+  assert.deepEqual(await syncAmuxV22WorktreeBase("/repo", null, { run: cleanedLatest.run, realpath }),
+    { ok: true, baseSha: tip, discardedLeftovers: true });
 
   for (const state of [{ fetchFails: true, fetchHead: tip }, { fetchHead: "not-a-sha" }]) {
     const offline = repo(state);

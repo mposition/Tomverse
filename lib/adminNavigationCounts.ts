@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { getScheduledJobsDashboard } from "@/lib/scheduledJobs";
 import { abandonedLegalEmailCount } from "@/lib/adminEmailDeliveries";
-import { countOpenWorkItems } from "@/lib/modelLifecycleWorkItems";
+import { countOpenWorkItemFamilies } from "@/lib/modelLifecycleWorkItems";
 import { overdueCampaignWaveCount } from "@/lib/adminEmailCampaigns";
 import type { AdminNavigationCounts } from "@/lib/adminNavigationBadges";
 import { FEEDBACK_AWAITING_OPERATOR_STATUSES } from "@/lib/feedbackLifecycleCore";
@@ -9,6 +9,7 @@ import { AMUX_ESCALATION_AWAITING_STATUSES } from "@/lib/amux/humanReviewCore";
 import { countOpenAmuxOrchestratorHalts } from "@/lib/amux/orchestratorHaltStore";
 import { countDecisionMakerAttention } from "@/lib/amux/decisionMakerAttention";
 import { countAmuxOwnerQueue } from "@/lib/amux/adminOwnerQueueRead";
+import { ADMIN_NOTIFICATION_ATTENTION_WHERE } from "@/lib/adminNotificationAttention";
 
 export {
   EMPTY_ADMIN_NAVIGATION_COUNTS,
@@ -87,10 +88,11 @@ export async function getAdminNavigationCounts(): Promise<{
     prisma.stripeWebhookEventLog.count({ where: { status: "failed" } }),
     getScheduledJobsDashboard(),
     prisma.adminNotificationLog.count({
-      where: { status: "failed", acknowledgedAt: null },
+      where: ADMIN_NOTIFICATION_ATTENTION_WHERE,
     }),
     abandonedLegalEmailCount(),
-    countOpenWorkItems(),
+    // Families, not rows: the discovery tab lists and decides by family.
+    countOpenWorkItemFamilies(),
     overdueCampaignWaveCount({ now }),
     countPendingMarketingApprovals(),
     prisma.productResearchSuggestion.count({ where: { status: "open" } }),

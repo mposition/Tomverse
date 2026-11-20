@@ -352,9 +352,35 @@ export function v4TaskCeilingDecision(
     check.reason !== "task_route_changed" ? "allow" : check.decision;
 }
 
+/** Switches in v4TaskNewModelRouteSwitch.ts; both default off. */
+export type V4TaskNewModelRouteOptions = {
+  newModelRouteWithinCeiling?: boolean;
+  newModelRouteOverCeiling?: boolean;
+};
+
+/**
+ * Whether a route on a model the approval did not name may run the Task. No
+ * token or attempt bound may have grown. Within the ceiling: its per-attempt
+ * cost times the current attempt bound is at most the approved ceiling (owner
+ * decision 2026-11-14). Over the ceiling (owner decision 2026-11-15): any
+ * cost; the ceiling check then reads `ceiling_increased`, which never stops an
+ * ordinary Task (v4TaskCeilingDecision) and still stops a recovery, and claim
+ * and execution start record the overrun (amuxApprovedCeilingOverrun).
+ */
+const newModelRouteAdmitted = (
+  perAttemptMicroUsd: string,
+  maxAttempts: number,
+  approvedAmount: bigint,
+  boundsIncreased: boolean,
+  options: V4TaskNewModelRouteOptions,
+) => !boundsIncreased && (!!options.newModelRouteOverCeiling ||
+  (!!options.newModelRouteWithinCeiling &&
+    BigInt(perAttemptMicroUsd) * BigInt(maxAttempts) <= approvedAmount));
+
 export function checkV4TaskApprovedCeiling(
   approved: unknown,
   current: V4TaskCostCeilingResult,
+  options: V4TaskNewModelRouteOptions = {},
 ): { decision: "allow" | "reconfirm" | "hold"; reason: string } {
   if (!approvedReceiptValid(approved)) {
     return { decision: "hold", reason: "approval_invalid" };
@@ -368,25 +394,107 @@ export function checkV4TaskApprovedCeiling(
   if (approvedRoutes.size !== approved.routes.length) {
     return { decision: "hold", reason: "approval_invalid" };
   }
-  if (current.receipt.routes.some((route) => {
-    const old = approvedRoutes.get(route.routeId);
-    return !old || old.workerName !== route.workerName ||
-      old.provider !== route.provider || old.modelId !== route.modelId ||
-      old.routePolicyDigest !== route.routePolicyDigest;
-  })) {
-    return { decision: "reconfirm", reason: "task_route_changed" };
-  }
-  if (
+  // A route the receipt did not name still counts as approved when it runs
+  // the same provider and model as a route the receipt did name: a worker
+  // added on an approved model, priced from the same entry (owner decision
+  // 2026-11-13). Until then every worker added -- even one more codex-chore on
+  // gpt-6-luna -- sent every waiting Task back for reconfirmation. A route the
+  // receipt named must still match it exactly, a new model still asks, and the
+  // bounds and ceiling checks below still apply.
+  //
+  // With options.newModelRouteWithinCeiling (owner decision 2026-11-14,
+  // default off: v4TaskNewModelRouteSwitch.ts) a route on a model the receipt
+  // did not name passes too, but only while its own per-attempt cost times the
+  // current attempt bound stays within the approved ceiling and no token or
+  // attempt bound grew: the same expected-cost test the receipt's own ceiling
+  // applies to the routes it named. It admits a route; it does not bound
+  // cumulative spend (claim and start count attempts against their own
+  // attempt budget, not caps.maxAttempts). Until then every worker added on a new model
+  // (antigravity-impl, 2026-11-13) sent every waiting Task of its grade back
+  // for reconfirmation. With options.newModelRouteOverCeiling (owner decision
+  // 2026-11-15, default off) such a route passes at any cost while no bound
+  // grew; the ceiling check below then reports it (newModelRouteAdmitted).
+  const approvedModels = new Set(approved.routes.map((route) =>
+    JSON.stringify([route.provider, route.modelId])));
+  const boundsIncreased =
     current.receipt.caps.uncachedInputTokens > approved.caps.uncachedInputTokens ||
     current.receipt.caps.outputTokens > approved.caps.outputTokens ||
     current.receipt.caps.cacheReadTokens > approved.caps.cacheReadTokens ||
     current.receipt.caps.cacheWriteTokens > approved.caps.cacheWriteTokens ||
-    current.receipt.caps.maxAttempts > approved.caps.maxAttempts
-  ) {
+    current.receipt.caps.maxAttempts > approved.caps.maxAttempts;
+  let newModelRoute = false;
+  for (const route of current.receipt.routes) {
+    const old = approvedRoutes.get(route.routeId);
+    if (old) {
+      if (old.workerName !== route.workerName ||
+        old.provider !== route.provider || old.modelId !== route.modelId ||
+        old.routePolicyDigest !== route.routePolicyDigest) {
+        return { decision: "reconfirm", reason: "task_route_changed" };
+      }
+      continue;
+    }
+    if (approvedModels.has(JSON.stringify([route.provider, route.modelId]))) continue;
+    if (!newModelRouteAdmitted(route.perAttemptMicroUsd, current.receipt.caps.maxAttempts,
+      approvedAmount, boundsIncreased, options)) {
+      return { decision: "reconfirm", reason: "task_route_changed" };
+    }
+    newModelRoute = true;
+  }
+  if (boundsIncreased) {
     return { decision: "reconfirm", reason: "task_bounds_increased" };
   }
   if (BigInt(current.receipt.ceilingMicroUsd) > approvedAmount) {
     return { decision: "reconfirm", reason: "ceiling_increased" };
   }
-  return { decision: "allow", reason: "within_approved_ceiling" };
+  return { decision: "allow",
+    reason: newModelRoute ? "new_model_route_within_ceiling" : "within_approved_ceiling" };
+}
+
+/**
+ * The current receipt with only the routes this Task's approval can run on
+ * (owner decision 2026-11-14: "구조 수정").
+ *
+ * A route on a model the approval did not name, that the switches do not admit
+ * (both off, a grown bound, or -- with only the within-ceiling switch on -- its
+ * own per-attempt cost times the attempt bound over the approved ceiling), is
+ * left out for this Task instead of sending the whole Task back for
+ * reconfirmation (newModelRouteAdmitted). On 2026-11-14 antigravity-impl (Gemini 4 Argon,
+ * $5.90 x 2) held three advanced Tasks approved at $8.20 although the two
+ * routes they were approved on were unchanged and idle.
+ *
+ * Every other route stays, so `checkV4TaskApprovedCeiling` still decides on
+ * it: a route the approval named but that changed still asks for
+ * reconfirmation, and a new worker on an approved model still passes. The
+ * readiness check, the claim and the execution start all narrow with this, so
+ * a left-out route can neither be counted nor be claimed nor start. An invalid
+ * approval returns the receipt unchanged (the check holds it).
+ */
+export function v4TaskReceiptForApprovedRoutes(
+  approved: unknown,
+  current: V4TaskCostCeilingReceipt,
+  options: V4TaskNewModelRouteOptions = {},
+): V4TaskCostCeilingReceipt {
+  if (!approvedReceiptValid(approved) ||
+    approved.role !== current.role || approved.grade !== current.grade) return current;
+  const approvedAmount = BigInt(approved.ceilingMicroUsd);
+  const approvedIds = new Set(approved.routes.map((route) => route.routeId));
+  const approvedModels = new Set(approved.routes.map((route) =>
+    JSON.stringify([route.provider, route.modelId])));
+  const boundsIncreased =
+    current.caps.uncachedInputTokens > approved.caps.uncachedInputTokens ||
+    current.caps.outputTokens > approved.caps.outputTokens ||
+    current.caps.cacheReadTokens > approved.caps.cacheReadTokens ||
+    current.caps.cacheWriteTokens > approved.caps.cacheWriteTokens ||
+    current.caps.maxAttempts > approved.caps.maxAttempts;
+  const routes = current.routes.filter((route) =>
+    approvedIds.has(route.routeId) ||
+    approvedModels.has(JSON.stringify([route.provider, route.modelId])) ||
+    newModelRouteAdmitted(route.perAttemptMicroUsd, current.caps.maxAttempts,
+      approvedAmount, boundsIncreased, options));
+  if (routes.length === current.routes.length) return current;
+  const ceiling = routes.reduce((max, route) => {
+    const amount = BigInt(route.perAttemptMicroUsd);
+    return amount > max ? amount : max;
+  }, BigInt(0)) * BigInt(current.caps.maxAttempts);
+  return { ...current, routes, ceilingMicroUsd: ceiling.toString() };
 }

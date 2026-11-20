@@ -3,13 +3,13 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { irreversibleTermCategories } from "../lib/amux/decisionMakerCore.ts";
+import { dmWorkspaceCardPointer } from "../lib/amux/decisionMakerWorkspaceCore.ts";
 import {
   AMUX_V22_RESULT_REVIEW_KINDS,
   AMUX_V22_RESULT_REVIEW_KIND_TEXT,
   amuxDmApproverEnabled,
   amuxDmProposalAutoApplicable,
   amuxV22ResultReviewDecisionFromAnswer,
-  amuxV22ResultReviewDmEnabled,
   amuxV22ResultReviewKind,
   amuxV22ResultReviewRelayCard,
   amuxV22ResultReviewTarget,
@@ -17,12 +17,12 @@ import {
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
-test("both switches are off unless set to enabled", () => {
-  assert.equal(amuxV22ResultReviewDmEnabled({}), false);
-  assert.equal(amuxV22ResultReviewDmEnabled({ TOMVERSE_AMUX_V22_RESULT_REVIEW_DM: "true" }), false);
-  assert.equal(amuxV22ResultReviewDmEnabled({ TOMVERSE_AMUX_V22_RESULT_REVIEW_DM: "enabled" }), true);
-  assert.equal(amuxDmApproverEnabled({}), false);
+test("the DM approver is on unless set to disabled", () => {
+  assert.equal(amuxDmApproverEnabled({}), true);
+  assert.equal(amuxDmApproverEnabled({ TOMVERSE_AMUX_DM_APPROVER: undefined }), true);
   assert.equal(amuxDmApproverEnabled({ TOMVERSE_AMUX_DM_APPROVER: "enabled" }), true);
+  assert.equal(amuxDmApproverEnabled({ TOMVERSE_AMUX_DM_APPROVER: "disabled" }), false);
+  assert.equal(amuxDmApproverEnabled({ TOMVERSE_AMUX_DM_APPROVER: "false" }), true);
 });
 
 test("only a result with no patch is put to review, and its kind says why", () => {
@@ -53,13 +53,22 @@ test("the card's fixed words hit no routing term, so it reaches a DM", () => {
     assert.equal(card.worker, "amux-result-review");
     assert.equal(card.provider, "claude");
   }
-  const whole = amuxV22ResultReviewRelayCard({ reviewId: "00000000-0000-4000-8000-00000000000a",
-    taskLabel: "T", role: null, kind: "needs_owner", criteria: ["A", "B"], findings: "done" });
-  assert.match(whole.question, /Its completion criteria:\n- A\n- B\nIts findings: done/);
-  for (const [criteria, findings] of [[["A"], "x".repeat(2_000)], [[], "done"], [["A"], " "]])
-    assert.equal(amuxV22ResultReviewRelayCard({ reviewId: "00000000-0000-4000-8000-00000000000a",
-      taskLabel: "T", role: null, kind: "needs_owner", criteria, findings }), null,
-      "evidence that does not fit whole, or is missing, is left to the person");
+  const input = { reviewId: "00000000-0000-4000-8000-00000000000a",
+    taskLabel: "T", role: null, kind: "needs_owner", criteria: ["A", "B"], findings: "done" };
+  // A workspace: the findings are evidence/FINDINGS.md, and the card only points at it.
+  const whole = amuxV22ResultReviewRelayCard({ ...input });
+  assert.match(whole.question, /Its completion criteria:\n- A\n- B\nIts run's report is in the evidence named below\./);
+  assert.doesNotMatch(whole.question, /done\n|Its findings/, "the report is not in the question");
+  assert.equal(whole.context, dmWorkspaceCardPointer(["FINDINGS.md"]));
+  // No size is too long for it (the old 1,700-character findings left the card unfiled): the card points at the
+  // whole report, and the workspace is always on (owner direction 2026-11-16).
+  for (const findings of [`${"x".repeat(100_000)}END`, "x".repeat(2_000)]) {
+    assert.equal(amuxV22ResultReviewRelayCard({ ...input, findings }).context, dmWorkspaceCardPointer(["FINDINGS.md"]));
+  }
+  // Only missing evidence is left to the person.
+  for (const [criteria, findings] of [[[], "done"], [["A"], " "]])
+    assert.equal(amuxV22ResultReviewRelayCard({ ...input, criteria, findings }), null,
+      "evidence that is missing is left to the person");
 });
 
 test("an answer decides only by its fixed words, with the delivery's precedence", () => {
@@ -94,15 +103,15 @@ test("applying a review: system resolution in one transaction through the chain 
     "a block leaves the person's escalation open");
   assert.match(source, /resolvedById: AMUX_V22_RESULT_REVIEW_RESOLVER/, "the system resolves, never a borrowed person");
   assert.match(source, /AMUX_V22_RESULT_REVIEW_RESOLVER = "system:amux-v22-result-review"/);
-  assert.match(source, /settlementDestinationForBudget\(\{ requested_status: "todo"/, "a retry stays inside the attempt budget");
+  assert.doesNotMatch(source, /settlementDestinationForBudget/, "no count of attempts turns a retry into a block (2026-11-18)");
   assert.match(source, /row\.newestAttemptId !== row\.attemptId/, "a Task that ran again cancels the review");
   assert.match(source, /writeSystemAuditLog\(\{ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,\s+action: AMUX_V22_RESULT_REVIEW_APPLIED_ACTION/);
   assert.doesNotMatch(source, /adminAuditLog\./);
 });
 
-test("settlement files a review only behind its switch, beside the person's escalation", () => {
+test("settlement files a review beside the person's escalation", () => {
   const source = read("lib/amux/execution.ts");
-  assert.match(source, /const resultReviewKind = resultReviewDm && humanReview && !questionPlan &&/);
+  assert.match(source, /const resultReviewKind = humanReview && !questionPlan &&/);
   assert.match(source, /if \(\(humanReview \|\| next === "blocked"\) &&\s+\(!questionPlan \|\| questionPlan\.openEscalation\)\)\s+await openAmuxHumanEscalation/,
     "the human escalation still opens first");
 });
@@ -112,7 +121,7 @@ test("the DM approver: behind its switch, irreversible stays human, answers are 
   assert.match(source, /if \(!amuxDmApproverEnabled\(env\)\) return null;/);
   assert.match(source, /amuxDmProposalAutoApplicable\(\{ resultKind: "proposal",\s+outputKind: detail\.outputKind, irreversible: detail\.irreversible \}\)/);
   assert.match(source, /state\.closing !== null/, "a judged or closed request is never applied again");
-  assert.equal((source.match(/source: "dm"/g) ?? []).length, 4, "each of the four question types records dm");
+  assert.equal((source.match(/source: "dm"/g) ?? []).length, 5, "each of the five question types records dm");
   const close = source.indexOf("closeDecisionMakerRequestOnDirectAnswer(tx");
   assert.ok(close > 0 && close < source.indexOf("applyAmuxV22DmAnswer(tx"),
     "the request is closed first, under the chain lock, so a judgment that came first wins");

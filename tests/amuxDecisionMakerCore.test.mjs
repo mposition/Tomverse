@@ -4,17 +4,20 @@ import { test } from "node:test";
 import {
   AMUX_ASK_TYPES,
   DM_ALLOWED_ASK_TYPES,
+  DM_IRREVERSIBLE_TERMS,
   DM_CARD_TEXT_FORMAT,
   DM_CARD_TEXT_KEYS,
+  DM_ANSWER_MAX_BYTES,
   DM_CARD_TEXT_MAX_BYTES,
-  DM_CONTEXT_PATHS_MAX,
+  DM_ESCALATION_MAX_BYTES,
   DM_INSTANCE_FOR_PROVIDER,
+  DM_OUTPUT_TEXT_MAX_BYTES,
   DM_POLICY_VERSION,
+  DM_RATIONALE_MAX_BYTES,
   DM_RESOLUTIONS,
-  DM_THROUGHPUT_PER_DAY,
-  DM_THROUGHPUT_PER_HOUR,
   dmCardText,
   dmCardTextBytes,
+  dmRunUnavailableIncident,
   encodeRepositoryPath,
   irreversibleTermCategories,
   isFetchableTreeMode,
@@ -96,10 +99,14 @@ test("switches fail closed: kill switch, off instance and unreadable settings", 
 });
 
 test("customer_outbound and unknown ask types never reach a DM", () => {
+  // A message to a customer leaves Tomverse; the DM approver (§0a-1) would apply it without a person.
   for (const askType of ["customer_outbound", "approval", ""]) {
     const decision = routeDmQuestion(input({ card: card({ askType }) }));
     assert.equal(decision.route, "operator");
     assert.ok(decision.refusals.includes("ask_type_not_allowed"));
+  }
+  for (const askType of ["decision", "judgment", "budget"]) {
+    assert.deepEqual(routeDmQuestion(input({ card: card({ askType }) })), { route: "dm_proposal", instance: "decision-maker-openai", refusals: [] }, askType);
   }
 });
 
@@ -127,7 +134,7 @@ test("every check runs: all refusals are recorded, not only the first", () => {
       killSwitch: true,
       askingProvider: "gemini",
       card: card({ askType: "customer_outbound", question: "Deploy to production now?" }),
-      throughput: { lastHour: DM_THROUGHPUT_PER_HOUR, lastDay: 0 },
+      throughput: { lastHour: 1_000_000, lastDay: 1_000_000 },
     }),
   );
   assert.equal(decision.route, "operator");
@@ -136,7 +143,6 @@ test("every check runs: all refusals are recorded, not only the first", () => {
     "ask_type_not_allowed",
     "irreversible_term",
     "provider_unverified",
-    "throughput_exceeded",
   ]);
   assert.deepEqual(decision.termCategories, ["release"]);
 });
@@ -146,9 +152,14 @@ test("irreversible terms: Korean substrings, English whole words, case-insensiti
   assert.deepEqual(irreversibleTermCategories("Can I MERGE INTO MAIN?"), ["main_merge"]);
   assert.deepEqual(irreversibleTermCategories("이 행을 삭제할까요"), ["destroy"]);
   assert.deepEqual(irreversibleTermCategories("force-push the branch?"), ["destroy"]);
-  assert.deepEqual(irreversibleTermCategories("Run the migration?"), ["migration"]);
   assert.deepEqual(irreversibleTermCategories("환불 처리"), ["money"]);
   assert.deepEqual(irreversibleTermCategories("Paste the API key here"), ["secret"]);
+  assert.deepEqual(irreversibleTermCategories("프로덕션에 올릴까요?"), ["release"]);
+  assert.deepEqual(irreversibleTermCategories("Drop table users?"), ["destroy"]);
+  assert.deepEqual(irreversibleTermCategories("Publish the release notes?"), ["outbound"]);
+  assert.deepEqual(irreversibleTermCategories("고객에게 메일을 발송할까요?"), ["outbound"]);
+  assert.deepEqual(irreversibleTermCategories("GitHub 토큰을 교체할까요?"), ["secret"]);
+  assert.deepEqual(irreversibleTermCategories("Which permissions does the bot need?"), ["access"]);
   assert.deepEqual(irreversibleTermCategories("Edit .github/workflows/ci.yml?"), ["gate"]);
   assert.deepEqual(irreversibleTermCategories("Turn on branch protection"), ["gate"]);
   // Whole words only: these are not hits.
@@ -157,36 +168,95 @@ test("irreversible terms: Korean substrings, English whole words, case-insensiti
   assert.deepEqual(irreversibleTermCategories("Which retry approach is simpler?"), []);
 });
 
+test("a DM run that ended unavailable is an operational incident naming only instance and request", () => {
+  const incident = dmRunUnavailableIncident("decision-maker-anthropic", "d85a4806-a06a-40a4-ba65-8ecccdfd4da8");
+  assert.equal(incident.code, "AMUX_DM_RUN_UNAVAILABLE");
+  assert.equal(incident.severity, "warning");
+  assert.deepEqual(incident.context, { instance: "decision-maker-anthropic", requestId: "d85a4806-a06a-40a4-ba65-8ecccdfd4da8" });
+  assert.deepEqual(dmRunUnavailableIncident({ x: 1 }, 7).context, { instance: null, requestId: null });
+});
+
+test("the terms are the human boundaries; the migration category and broad words are gone", () => {
+  // Owner direction 2026-11-16: only what a person must still decide (§0a-4) stays.
+  assert.deepEqual(DM_IRREVERSIBLE_TERMS.map((entry) => entry.category),
+    ["main_merge", "release", "destroy", "money", "outbound", "secret", "access", "gate"]);
+  for (const text of [
+    "Run the migration?", "마이그레이션을 추가할까요?",
+    "배포 전에 확인할까요?", "Ship the cache layer?", "Release the latch?", "Deploy to the dev lane?",
+    "Overwrite the fixture?", "설정을 초기화할까요?", "Drop the option?",
+  ]) {
+    assert.deepEqual(irreversibleTermCategories(text), [], text);
+  }
+});
+
+test("Korean access terms name a grant or change, not a plan's entitlement", () => {
+  // AMUX-PRICINGCOPY-002's context: a plan list that tells the tiers apart is not an access change.
+  assert.deepEqual(irreversibleTermCategories("플랜별 목록은 Free·Pro·Max 권한을 구분합니다."), []);
+  // A question about a plan's entitlement is not the narrow description exception: it still goes to the operator.
+  assert.deepEqual(irreversibleTermCategories("Pro 플랜 권한에 이미지 생성이 있나요?"), ["access"]);
+  assert.deepEqual(irreversibleTermCategories("플랜 권한에 따라 문구가 다릅니다"), []);
+  // The card that went to the operator on 2026-11-14, question and worker context as filed.
+  assert.deepEqual(irreversibleTermCategories([
+    "이미지 생성 안내를 어떤 플랜의 기능 목록에 추가할까요?",
+    "components/marketing/PricingPageContent.tsx의 모든 언어별 플랜 features 배열에는 현재 이미지 생성이 없습니다. FAQ는 'Where available'로 안내하지만, 플랜별 목록은 Free·Pro·Max 권한을 구분합니다. 이미지 생성 플래그는 server-only lib/marketingClaimGates.ts에 연결되어 있고 확인한 공개 설정 신호는 없습니다. 따라서 어떤 플랜 목록에 문구를 넣을지는 제품 동작을 정하는 선택입니다.",
+  ].join("\n")), []);
+  // A change verb in another sentence does not count against this one.
+  assert.deepEqual(irreversibleTermCategories("문구를 고쳤습니다. 플랜별 목록은 Free·Pro·Max 권한을 구분합니다."), []);
+  for (const text of [
+    "저장소 쓰기 권한을 주세요", "관리자 권한을 부여할까요?", "권한 변경이 필요합니다", "접근 권한을 열어 주세요", "접근 설정을 바꿀까요?",
+    // Independent review r-20261114-140745-6ebb4e: real access changes the narrow list missed.
+    "저장소 읽기 권한을 줘도 될까요?", "사용자의 권한을 수정할까요?", "권한 설정을 바꿀까요?", "봇에게 권한이 필요합니다",
+    "이 계정의 권한을 회수할까요?", "Pro 사용자에게 권한을 추가할까요?",
+    // Independent review r-20261114-141502-426751: modifiers between the word and the verb, and raising.
+    "봇의 권한을 더 줄까요?", "이 계정의 권한을 모두 회수할까요?", "계정 권한을 높여도 될까요?",
+    // Any other "권한" is still a hit, as before; a plan's entitlement with a change verb is too.
+    "권한 문제로 실패했습니다", "Pro 플랜 권한을 올릴까요?", "Max 권한을 Free에도 줄까요?",
+    // Independent review r-20261114-141720-0ec475: the verb before the word, in the same sentence.
+    "봇에게 부여할 것은 Pro 권한입니다.", "봇에게 줄 것은 Max 권한입니다.",
+    // Independent review r-20261114-141903-1bbe85: a change verb no list named. The exception now needs a
+    // describing word right after "권한" in a sentence that is not a request.
+    "봇 계정에 Pro 권한을 활성화할까요?", "이 계정의 Max 권한을 비활성화할까요?", "Pro 권한을 비교한 뒤 켜도 될까요?",
+    "Pro 권한을 구분해서 넣을까요?", "Max 권한으로 실행합니다.",
+    // Independent review r-20261114-142113-428be9: an action after the describing word.
+    "Pro 권한을 구분 없이 지급합니다.", "Pro 권한을 비교한 뒤 봇 계정으로 이양합니다.",
+    "봇 계정은 Pro 권한을 구분합니다. 그리고 Max 권한을 이양합니다.",
+  ]) {
+    assert.deepEqual(irreversibleTermCategories(text), ["access"], text);
+  }
+});
+
 test("the term check reads every card text field, including options and context", () => {
   for (const field of [
     { title: "Delete the cache?" },
-    { question: "배포 전에 확인할까요?" },
-    { unblocks: "The release" },
+    { question: "프로덕션 배포 전에 확인할까요?" },
+    { unblocks: "The production database" },
     { context: "This needs a refund" },
     { tags: ["production"] },
-    { type: "migration" },
-    { options: [option("a", "Drop the table")] },
+    { type: "payment" },
+    { options: [option("a", "Drop table users")] },
   ]) {
     const decision = routeDmQuestion(input({ card: card({ ...field, options: field.options ?? card().options }) }));
     assert.ok(decision.refusals.includes("irreversible_term"), JSON.stringify(field));
   }
 });
 
-test("throughput refuses at the twentieth hour and the hundredth day", () => {
-  assert.equal(routeDmQuestion(input({ throughput: { lastHour: DM_THROUGHPUT_PER_HOUR - 1, lastDay: 0 } })).route, "dm_proposal");
-  assert.deepEqual(routeDmQuestion(input({ throughput: { lastHour: DM_THROUGHPUT_PER_HOUR, lastDay: 0 } })).refusals, ["throughput_exceeded"]);
-  assert.deepEqual(routeDmQuestion(input({ throughput: { lastHour: 0, lastDay: DM_THROUGHPUT_PER_DAY } })).refusals, ["throughput_exceeded"]);
+test("there is no throughput cap: any count of recent questions still routes", () => {
+  // Owner decision 2026-11-15: the 20 an hour and 100 a day caps are gone.
+  // The counts stay in the input for the record and no refusal is made from them.
+  for (const throughput of [{ lastHour: 0, lastDay: 0 }, { lastHour: 20, lastDay: 100 }, { lastHour: 21, lastDay: 101 }, { lastHour: 1_000_000, lastDay: 1_000_000 }]) {
+    assert.deepEqual(routeDmQuestion(input({ throughput })), { route: "dm_proposal", instance: "decision-maker-openai", refusals: [] }, JSON.stringify(throughput));
+  }
 });
 
-test("input limits: card bytes, context path count and path grammar", () => {
+test("input limits: the card bytes are the one cap; the path count has none; path grammar still holds", () => {
   const big = "가".repeat(Math.ceil(DM_CARD_TEXT_MAX_BYTES / 3) + 1);
   assert.deepEqual(routeDmQuestion(input({ card: card({ context: big }) })).refusals, ["input_limit_exceeded"]);
-  const paths = Array.from({ length: DM_CONTEXT_PATHS_MAX + 1 }, (_, i) => `lib/f${i}.ts`);
-  assert.deepEqual(routeDmQuestion(input({ card: card({ contextPaths: paths }) })).refusals, ["input_limit_exceeded"]);
-  assert.equal(routeDmQuestion(input({ card: card({ contextPaths: paths.slice(1) }) })).route, "dm_proposal");
+  // No count cap on the context paths (it was 64): a few hundred route.
+  const paths = Array.from({ length: 500 }, (_, i) => `lib/f${i}.ts`);
+  assert.deepEqual(routeDmQuestion(input({ card: card({ contextPaths: paths }) })), { route: "dm_proposal", instance: "decision-maker-openai", refusals: [] });
   assert.deepEqual(routeDmQuestion(input({ card: card({ contextPaths: ["../etc/passwd"] }) })).refusals, ["input_limit_exceeded"]);
-  // Context paths count towards the 16 KiB card total.
-  const longPaths = Array.from({ length: DM_CONTEXT_PATHS_MAX }, (_, i) => `${"d".repeat(190)}/${i}`);
+  // Context paths count towards the one card total.
+  const longPaths = Array.from({ length: 64 }, (_, i) => `${"d".repeat(190)}/${i}`);
   const nearlyFull = "x".repeat(DM_CARD_TEXT_MAX_BYTES - 64 * 190);
   assert.deepEqual(routeDmQuestion(input({ card: card({ context: nearlyFull, contextPaths: longPaths }) })).refusals, ["input_limit_exceeded"]);
 });
@@ -209,7 +279,7 @@ test("a secret in the card is never sent", () => {
 // ---------------------------------------------------------------------------
 // The card text (added 2026-10-09): the one serialization the body store keeps
 // as `card_text` (docs/policy/amux-decision-maker.md §10), and the bytes §5's
-// 16 KiB is measured on.
+// card cap (256 KiB) is measured on.
 // ---------------------------------------------------------------------------
 
 test("the card text is one JSON object, format first and every card field in a fixed order", () => {
@@ -330,7 +400,7 @@ test("a stored card text reads back only as the exact text the serializer writes
   for (const value of [null, undefined, 1, {}, Buffer.from(text)]) assert.equal(parseDmCardText(value), null);
 });
 
-test("§5's 16 KiB is measured on the card text: a card exactly at it goes to a DM, one byte over does not", () => {
+test("§5's one card cap is measured on the card text: a card exactly at it goes to a DM, one byte over does not", () => {
   const padTo = (bytes) => {
     const base = card({ context: "" });
     return card({ context: "x".repeat(bytes - dmCardTextBytes(base)) });
@@ -351,8 +421,8 @@ test("§5's 16 KiB is measured on the card text: a card exactly at it goes to a 
   assert.deepEqual(routeDmQuestion(input({ card: korean(fits + 1) })).refusals, ["input_limit_exceeded"]);
   // The card text's own bytes count: fields whose plain sum is well under the cap, written as
   // text that escapes past it, are over it.
-  const escaped = card({ context: "\n".repeat(9_000) });
-  const plainSum = ["task", "needs:you", card().title, card().question, card().unblocks, "\n".repeat(9_000), "a", "Model id only", "choice_only", "b", "Model id and locale", "branch_code_change", "lib/cache.ts", "lib/cache.ts"]
+  const escaped = card({ context: "\n".repeat(140_000) });
+  const plainSum = ["task", "needs:you", card().title, card().question, card().unblocks, "\n".repeat(140_000), "a", "Model id only", "choice_only", "b", "Model id and locale", "branch_code_change", "lib/cache.ts", "lib/cache.ts"]
     .reduce((sum, value) => sum + Buffer.byteLength(value, "utf8"), 0);
   assert.ok(plainSum < DM_CARD_TEXT_MAX_BYTES);
   assert.ok(dmCardTextBytes(escaped) > DM_CARD_TEXT_MAX_BYTES);
@@ -383,7 +453,7 @@ test("the secret check reads the card text as the body store keeps it, and the f
 });
 
 test("resolution is a closed list on every ask type, not only the three §3-4 checks", () => {
-  for (const askType of DM_ALLOWED_ASK_TYPES) {
+  for (const askType of AMUX_ASK_TYPES) {
     const decision = routeDmQuestion(input({ card: card({ askType, resolution: "ask the team lead" }) }));
     assert.equal(decision.route, "operator", askType);
     assert.ok(decision.refusals.includes("input_limit_exceeded"), askType);
@@ -456,8 +526,8 @@ test("DM output validation failures: schema, unknown option, secret", () => {
     { kind: "select", optionId: "a", rationale: "r", irreversible: false, extra: 1 },
     { kind: "select", optionId: "a", rationale: "", irreversible: false },
     { kind: "select", optionId: "a", rationale: "r" },
-    { kind: "free_text", answer: "x".repeat(8 * 1024 + 1), rationale: "r", irreversible: false },
-    { kind: "escalate", reason: "x".repeat(1025) },
+    { kind: "free_text", answer: "x".repeat(DM_ANSWER_MAX_BYTES + 1), rationale: "r", irreversible: false },
+    { kind: "escalate", reason: "x".repeat(DM_ESCALATION_MAX_BYTES + 1) },
     { kind: "escalate", reason: "r", irreversible: true },
   ]) {
     assert.deepEqual(failure(raw), { outcome: "validation_failure", failure: "schema" }, JSON.stringify(raw)?.slice(0, 60));
@@ -466,6 +536,20 @@ test("DM output validation failures: schema, unknown option, secret", () => {
   const key = `sk-ant-${"a".repeat(30)}`;
   assert.deepEqual(failure({ kind: "escalate", reason: key }), { outcome: "validation_failure", failure: "secret_detected" });
   assert.deepEqual(failure({ kind: "free_text", answer: "ok", rationale: key, irreversible: false }), { outcome: "validation_failure", failure: "secret_detected" });
+});
+
+test("the DM's answer fields share one 256 KiB cap, and a long answer at it validates", () => {
+  assert.equal(DM_OUTPUT_TEXT_MAX_BYTES, 256 * 1024);
+  assert.equal(DM_ANSWER_MAX_BYTES, DM_OUTPUT_TEXT_MAX_BYTES);
+  assert.equal(DM_RATIONALE_MAX_BYTES, DM_OUTPUT_TEXT_MAX_BYTES);
+  assert.equal(DM_ESCALATION_MAX_BYTES, DM_OUTPUT_TEXT_MAX_BYTES);
+  // Far past the 8 KiB answer and 1 KiB reason the fields once had.
+  const answer = { kind: "free_text", answer: "x".repeat(100_000), rationale: "r".repeat(100_000), irreversible: false };
+  assert.deepEqual(validateDmOutput(answer, []), { outcome: "proposal", output: answer, irreversible: false });
+  const reason = { kind: "escalate", reason: "y".repeat(100_000) };
+  assert.deepEqual(validateDmOutput(reason, []), { outcome: "escalate", output: reason });
+  const atCap = { kind: "escalate", reason: "z".repeat(DM_ESCALATION_MAX_BYTES) };
+  assert.equal(validateDmOutput(atCap, []).outcome, "escalate");
 });
 
 // 2026-10-08, the S1d review: an option id is a short token, so the stored

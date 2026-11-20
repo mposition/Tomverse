@@ -1,5 +1,21 @@
+import { replayMemoryHistoryContext } from "@/lib/memoryHistorySnapshot";
+import { appendRouterSearchEvidence, prepareRouterSearch, withGroundedSourceGuidance } from "@/lib/chatRouterPresearch";
+import { createGroundedCitationStream } from "@/lib/groundedCitationLinks";
+import { createChatSearchObservation, type ChatSearchObservation } from "@/lib/chatSearchObservation";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
-import { stepCountIs, streamText, type FilePart, type ModelMessage } from "ai";
+import { copyGeneratedArtifactForRevision, generatedArtifactCopySchema, GeneratedArtifactRevisionError } from "@/lib/generatedArtifactRevision";
+import {
+    stepCountIs,
+    streamText,
+    type FilePart,
+    type ModelMessage,
+    type StepResult,
+    type ToolSet,
+} from "ai";
+import {
+    LongContextToolLoopLimitError,
+    longContextToolLoopStep,
+} from "@/lib/chatLongContextToolLoop";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { parseChatLocation } from "@tomverse/chat-core";
 import { appendChatLocationContext } from "@/lib/chatLocationPrompt";
@@ -34,6 +50,7 @@ import { authOptions } from "@/lib/auth";
 import {
     createR2UploadUrl,
     deleteR2Object,
+    probeR2Object,
     readR2Object,
     validateR2ObjectMetadata,
     writeR2Object,
@@ -48,6 +65,7 @@ import {
 } from "@/lib/pinnedDeploymentExecution";
 import {
     canUseModelWithPlan,
+    resolveRetiredModelSuccessor,
     modelSupportsImageInput,
     modelSupportsNativePdfInput,
     resolveReplacementModel,
@@ -60,7 +78,11 @@ import {
 } from "@/lib/routingShadow";
 import { applyLlmModelPick, selectAutoModel } from "@/lib/autoModelSelection";
 import { pickAutoModelWithLlm } from "@/lib/autoLlmRouter";
-import { combinedChatImageIntentEnabled, createChatTurnImageRouting } from "@/lib/chatImageIntent";
+import { chatRouterLocationFusionEnabled, existingChatRouterLocationFusionEnabled } from "@/lib/chatRouterLocationFusionEnabled";
+import { consumeChatLocationIntentLimit } from "@/lib/chatLocationIntentRateLimit";
+import { openRouterLocation, routerLocationDigest, sealRouterLocation, type RouterLocationContinuation } from "@/lib/chatRouterLocationContinuation";
+import { claimRouterLocation, consumeRouterLocation, routerLocationRefused, routerLocationResponse, type RouterLocationClaim } from "@/lib/chatRouterLocationPreparation";
+import { chatRouterImageHedgeMs, combinedChatImageIntentEnabled, createChatTurnImageRouting } from "@/lib/chatImageIntent";
 import {
     latestUserTurnHasAttachments,
     latestUserTurnHasImageAttachment,
@@ -95,7 +117,7 @@ import {
     profileTextFor,
     turnCarriesAttachments,
 } from "@/lib/autoDispatchPreflight";
-import { resolveModelPricing } from "@/lib/modelPricing";
+import { resolveModelPricing, type ProviderCallUsage } from "@/lib/modelPricing";
 import {
     authoriseDispatch,
     beginInstrumentedDispatch,
@@ -116,7 +138,7 @@ import type {
     RoutingFailureLayer,
 } from "@/lib/routingAttemptStore";
 import { getRuntimeModels } from "@/lib/modelRegistry";
-import { getActiveAiModel } from "@/lib/activeAiModel";
+import { getActiveAiModel, QWEN_GROUNDED_THINKING_BUDGET, qwenLookupStep } from "@/lib/activeAiModel";
 import { catalogueHostRefusalCode } from "@/lib/modelRegistryShared";
 import {
     getModelGenerationSettings,
@@ -141,6 +163,7 @@ import { resolveWebSearchBackendReadiness } from "@/lib/webSearchBackendRuntime"
 import {
     APP_MANAGED_WEB_SEARCH_TOOL_NAME,
     buildAppManagedWebSearchTool,
+    withGroundedSearchDescription,
 } from "@/lib/appManagedWebSearchTool";
 import { APP_MANAGED_SEARCH_MAX_STEPS } from "@/lib/chatAttemptExecution";
 import { refreshSearchQueryCeilingBreaches } from "@/lib/webSearchCeilingBreachStore";
@@ -153,6 +176,26 @@ import {
     getWebSearchSurchargeCredits,
 } from "@/lib/webSearchCredits";
 import { buildWebSearchToolConfig, WEB_SEARCH_TOOL_NAMES } from "@/lib/webSearchToolConfig";
+import {
+    decideResearchPreviewAdmission,
+    researchPreviewGate,
+    type ResearchPreviewAdmission,
+} from "@/lib/researchPreviewAdmission";
+import { createResearchPreviewBudget } from "@/lib/researchPreviewBudget";
+import {
+    createResearchPreviewExecution,
+    ResearchPreviewBudgetExhaustedError,
+    ResearchPreviewMissingReportError,
+    ResearchPreviewRunStoppedError,
+    ResearchPreviewUsageUnknownError,
+    researchPreviewInputEstimate,
+    researchPreviewInstructions,
+    researchPreviewLocale,
+    researchPreviewMessages,
+} from "@/lib/researchPreviewExecution";
+import { buildResearchPreviewMetadata } from "@/lib/researchPreviewMetadata";
+import { researchPreviewFeatures } from "@/lib/researchPreviewFeatures";
+import { getResearchPreviewAiModel } from "@/lib/researchPreviewModel";
 import { hasSearchPath, resolveAttemptSearchPath } from "@/lib/webSearchPath";
 import { getRouterRuntimeSignals } from "@/lib/routerRuntimeSignals";
 import { normalizeWebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
@@ -161,13 +204,22 @@ import {
     buildChatTurnPrelude,
     buildChatTurnSystemBlocks,
 } from "@/lib/chatTurnSystemBlocks";
-import { loadContinuationTurnSeed } from "@/lib/externalContinuationService";
+import { continuationReceipt, deliveryReceipt, CONTINUATION_RECEIPT_HEADER, type ContinuationReceipt } from "@/lib/continuationReceipt";
+import { PASSAGE_HEADER } from "@/lib/continuationPassages";
+import { serializeContinuationSourcePlan } from "@/lib/continuationSourceManifest";
+import { continuationAutoSourceEnabledFromValue } from "@/lib/externalContinuationAccess";
+import { loadContinuationTurnSeed, searchContinuationHistory, type ContinuationTurnSeedResult } from "@/lib/externalContinuationService";
+import { continuationHistorySearchEnabledFromValue, HISTORY_SOURCE_MAX_BYTES } from "@/lib/continuationHistorySearch";
+import { officeRenderingEnabled } from "@/lib/officeRenderer";
 import { recordContinuationSeedOutcome } from "@/lib/externalContinuationMetrics";
 import {
     buildGeneratedArtifactToolConfig,
     GeneratedArtifactCollector,
     GENERATED_ARTIFACT_MAX_STEPS,
+    type ArtifactRevisionSource,
 } from "@/lib/generatedArtifactTool";
+import { generatedArtifactRevisionEnabled } from "@/lib/generatedArtifactRevisionCore";
+import { parseCanonicalWorkbookSpec } from "@/lib/generatedArtifactWorkbookRevision";
 import { ArtifactToolCallTracker } from "@/lib/generatedArtifactTurnTracker";
 import { ArtifactToolRejectionLog } from "@/lib/generatedArtifactRejectionLog";
 import { persistArtifactRows } from "@/lib/generatedArtifactStorage";
@@ -177,6 +229,7 @@ import { splitProviderInstructions } from "@/lib/chatProviderPrompt";
 import { resolveChatCompletionOutcome } from "@tomverse/chat-core";
 import { ERROR_REPORT_TOKEN_HEADER } from "@/lib/errorReportContract";
 import { issueChatErrorReportGrant } from "@/lib/traceErrorEvidence";
+import { streamFailureGrantInput } from "@/lib/chatStreamErrorReport";
 import {
     consumePerplexityResponseCapture,
     consumePerplexityUsage,
@@ -191,7 +244,23 @@ import {
     submitDeepResearchJob,
 } from "@/lib/perplexityDeepResearch";
 import { assertModelRuntimeAvailable } from "@/lib/modelAvailability";
-import { parseOfficeSafely } from "@/lib/officeSecurity";
+import { CHAT_MAX_STORED_ANSWER_CHARACTERS } from "@/lib/chatRequestLimits";
+import { OfficeTextOverflowError, parseOfficeSafely } from "@/lib/officeSecurity";
+import {
+    CHAT_ATTACHMENT_PARSE_CHARACTERS,
+    CHAT_MAX_ATTACHMENTS_PER_MESSAGE,
+    CHAT_MAX_ATTACHMENT_BYTES,
+    CHAT_MAX_TOTAL_ATTACHMENT_BYTES,
+    PAST_ATTACHMENT_OMITTED_KIND,
+    PAST_ATTACHMENT_OMITTED_TEXT,
+    pastTurnAttachmentTokenBudget,
+} from "@/lib/chatAttachmentLimits";
+import {
+    ATTACHMENT_TEXT_CACHE_CATEGORIES,
+    attachmentTextCacheEnabled,
+    readAttachmentTextCache,
+    writeAttachmentTextCache,
+} from "@/lib/attachmentTextCache";
 import { extractLegacyOfficeText, type LegacyOfficeFormatId } from "@/lib/legacyOfficeText";
 import { legacyOfficeValidationCode } from "@/lib/chatAttachmentValidation";
 import {
@@ -220,6 +289,8 @@ import {
     assertModelAccess,
     assertChatRequestSize,
     ChatAccessError,
+    accountChatMaxInputTokens,
+    assertUserOperationalAccess,
     chatErrorResponse,
     createChatBudget,
     getChatBudgetReservedCostMicroUsd,
@@ -400,6 +471,8 @@ import {
     ACTIVE_ESTIMATOR_VERSION,
     createTokenEstimateAccumulator,
     getCalibration,
+    toReservedInputTokens,
+    TOOL_DEFINITION_INPUT_TOKEN_OVERHEAD,
 } from "@/lib/chatTokenEstimate";
 import { createShadowAccumulator } from "@/lib/tokenEstimateShadow";
 import {
@@ -408,6 +481,7 @@ import {
     SHADOW_CANDIDATE_ESTIMATOR_VERSION,
 } from "@/lib/tokenEstimateShadowRecorder";
 import { buildChatTurnContext } from "@/lib/chatTurnContext";
+import { verifyingSemanticModes } from "@/lib/semanticRetrievalCore";
 import { latestUserPromptText } from "@/lib/chatMemoryContextCore";
 import {
     consumeContextBundle,
@@ -447,21 +521,72 @@ import {
     ATTACHMENT_UNAVAILABLE_CODE,
 } from "@/lib/chatAttachmentErrorCopy";
 
-const MAX_ATTACHMENTS = 5;
-// Every request resends the full conversation history (including past
-// attachments, which get re-fetched from R2 and re-parsed on every turn), so
-// this is a generous safety ceiling on total reprocessing cost, not a
-// per-message limit — see MAX_ATTACHMENTS for the per-send cap.
-const MAX_CONVERSATION_ATTACHMENTS = 30;
+/**
+ * Each provider call of a multi-step turn (a tool loop, Research Preview), from
+ * the SDK's per-step usage: every call is its own prompt and is settled at the
+ * long-context tier that prompt fell in (lib/modelPricing.ts). Undefined for a
+ * one-call turn, or when the steps cannot be read -- settlement then keeps to
+ * its rule for a summed input.
+ */
+const providerCallUsage = async (stream: {
+    steps: PromiseLike<
+        ReadonlyArray<{
+            usage: {
+                inputTokens?: number;
+                outputTokens?: number;
+                inputTokenDetails?: {
+                    cacheReadTokens?: number;
+                    cacheWriteTokens?: number;
+                };
+            };
+        }>
+    >;
+}): Promise<ProviderCallUsage[] | undefined> => {
+    try {
+        const steps = await stream.steps;
+        if (steps.length < 2) return undefined;
+        // All or nothing: a step without its own counts would price as zero,
+        // so the turn then settles on its totals instead.
+        const counted = (value: number | undefined) =>
+            Number.isSafeInteger(value) && value! >= 0;
+        if (
+            !steps.every(
+                (step) => counted(step.usage.inputTokens) && counted(step.usage.outputTokens)
+            )
+        ) {
+            return undefined;
+        }
+        // Each call's own cache split too: calls differ in how much of their
+        // prompt was cached, and the turn's cost is the sum of each call's.
+        return steps.map((step) => ({
+            inputTokens: Math.max(0, step.usage.inputTokens ?? 0),
+            outputTokens: Math.max(0, step.usage.outputTokens ?? 0),
+            cachedInputTokens: Math.max(0, step.usage.inputTokenDetails?.cacheReadTokens ?? 0),
+            cacheWriteInputTokens: Math.max(
+                0,
+                step.usage.inputTokenDetails?.cacheWriteTokens ?? 0
+            ),
+        }));
+    } catch {
+        return undefined;
+    }
+};
+
+const MAX_ATTACHMENTS = CHAT_MAX_ATTACHMENTS_PER_MESSAGE;
+// Every request resends the full conversation history, so this bounds how many
+// earlier files one turn walks. Raised from 30 with the 10-file message limit
+// (2026-11-18): an earlier file whose text is cached (lib/attachmentTextCache.ts)
+// is one small read, not a fetch and re-parse, and the byte total still bounds
+// whatever is read whole. See MAX_ATTACHMENTS for the per-send cap.
+const MAX_CONVERSATION_ATTACHMENTS = 100;
 // Guests resend their whole local history on every turn too, so this bounds
 // how much ephemeral storage one guest chat can force the server to re-read.
 // Far below the account ceiling on purpose: a guest chat is a trial, not an
 // archive.
 const GUEST_MAX_CONVERSATION_ATTACHMENTS = 5;
-const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
-const MAX_TOTAL_ATTACHMENT_SIZE = 25 * 1024 * 1024;
-const MAX_EXTRACTED_ATTACHMENT_CHARACTERS = 300_000;
-const MAX_STORED_MESSAGE_CHARACTERS = 100_000;
+const MAX_ATTACHMENT_SIZE = CHAT_MAX_ATTACHMENT_BYTES;
+const MAX_TOTAL_ATTACHMENT_SIZE = CHAT_MAX_TOTAL_ATTACHMENT_BYTES;
+const MAX_STORED_MESSAGE_CHARACTERS = CHAT_MAX_STORED_ANSWER_CHARACTERS;
 type IncomingAttachment = {
     name?: unknown;
     mediaType?: unknown;
@@ -623,6 +748,7 @@ const GOOGLE_EXPORT_TYPES: Record<
     },
 };
 const uploadPreparationSchema = z.union([
+    generatedArtifactCopySchema,
     z
         .object({
             action: z.literal("google-drive-import"),
@@ -733,6 +859,17 @@ export async function PUT(req: Request) {
             16 * 1024,
             uploadPreparationSchema
         );
+        if (body.action === "generated-artifact-copy") {
+            const registered = await copyGeneratedArtifactForRevision({
+                ...body,
+                userId,
+                email: session.user.email,
+                request: req,
+                maxBytes: MAX_ATTACHMENT_SIZE,
+                reserveBytes: (bytes) => reserveDailyUploadBytes(userId, bytes),
+            });
+            return Response.json(registered, { headers: { "Cache-Control": "private, no-store" } });
+        }
         if (body.action === "google-drive-import") {
             const fileId = body.fileId;
             const name = body.name;
@@ -846,7 +983,15 @@ export async function PUT(req: Request) {
             filename: name,
             declaredMediaType: mediaType,
         });
-        if (!name || !preparedFormat || preparedFormat.mediaType !== mediaType) {
+        if (
+            !name ||
+            !preparedFormat ||
+            preparedFormat.mediaType !== mediaType ||
+            // An iWork file is only ever laid out by the renderer, so without
+            // it there is nothing to do with one: refused at upload rather
+            // than stored and found useless at send.
+            (preparedFormat.category === "iwork" && !officeRenderingEnabled())
+        ) {
             return Response.json(
                 { error: "Unsupported attachment.", code: "UNSUPPORTED_ATTACHMENT_TYPE" },
                 { status: 400 }
@@ -873,7 +1018,10 @@ export async function PUT(req: Request) {
     } catch (error) {
         const securityResponse = apiSecurityResponse(error);
         if (securityResponse) return securityResponse;
-        console.error("R2 upload URL creation failed:", error);
+        if (error instanceof GeneratedArtifactRevisionError || error instanceof ChatAttachmentValidationError) {
+            return Response.json({ error: "Failed to prepare attachment.", code: error.code }, { status: error.status });
+        }
+        console.error("R2 upload URL creation failed:", { name: error instanceof Error ? error.name : "UnknownError" });
         return Response.json(
             { error: "Failed to prepare attachment upload." },
             { status: 500 }
@@ -1037,7 +1185,9 @@ export async function PATCH(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-    const session = await getServerSession(authOptions);
+    const routeAuth = await resolveChatRouteSession(req);
+    if (routeAuth.response) return routeAuth.response;
+    const session = routeAuth.session;
     const userId = (session?.user as { id?: string } | undefined)?.id;
     if (!session?.user?.email || !userId) {
         return Response.json({ error: "Unauthorized" }, { status: 401 });
@@ -1100,7 +1250,9 @@ export async function POST(req: Request) {
     // still earns nothing.
     const verificationGrant: { setCookie?: string } = {};
     const rejectionLogFields: { read?: () => Record<string, unknown> } = {};
-    const response = await handleChatPost(req, traceId, verificationGrant, rejectionLogFields);
+    const continuation: { receipt?: ContinuationReceipt } = {};
+    const response = await handleChatPost(req, traceId, verificationGrant, rejectionLogFields, continuation);
+    if (continuation.receipt) response.headers.set(CONTINUATION_RECEIPT_HEADER, JSON.stringify(deliveryReceipt(continuation.receipt)));
     const rejection = rejectionsToLog.get(response);
     if (rejection) {
         // Every refusal, so a reported trace always has a line to find. Validation
@@ -1148,7 +1300,8 @@ async function handleChatPost(
     req: Request,
     traceId: string,
     verificationGrant: { setCookie?: string },
-    rejectionLogFields: { read?: () => Record<string, unknown> }
+    rejectionLogFields: { read?: () => Record<string, unknown> },
+    continuation: { receipt?: ContinuationReceipt }
 ): Promise<Response> {
     // CHAT-LATENCY-01. The start of every server-side duration this turn
     // reports (lib/chatTurnTiming.ts).
@@ -1293,16 +1446,15 @@ async function handleChatPost(
         }
         return response;
     };
-    let durableAttempt:
-        | {
-              userId: string;
-              assistantMessageId: string;
-              sourceUserMessageId: string;
-              ownerId: string;
-              revision: number;
-              partialContent: string;
-          }
-        | null = null;
+    type DurableAttempt = {
+        userId: string;
+        assistantMessageId: string;
+        sourceUserMessageId: string;
+        ownerId: string;
+        revision: number;
+        partialContent: string;
+    };
+    let durableAttempt: DurableAttempt | null = null;
     let durableCheckpointWriter: ChatResponseAttemptCheckpointWriter | null = null;
     let durableAttemptAdmissionConsumed = false;
     let persistenceSourceUserMessageId: string | undefined;
@@ -1336,6 +1488,9 @@ async function handleChatPost(
      * somebody remembered to set (lib/chatFailureLayer.ts).
      */
     let providerCall: ProviderCallRecord | null = null;
+    let presearchForSettlement: ReturnType<typeof buildAppManagedWebSearchTool> | null = null;
+    let providerBudgetNotice: Promise<void> | undefined;
+    let searchObservation: ChatSearchObservation | undefined;
     /**
      * Who this turn was for, hoisted for the catch.
      *
@@ -1344,11 +1499,12 @@ async function handleChatPost(
      * null until identity exists, so a request refused before that records as
      * unknown rather than as somebody.
      */
-    let refusalSubjectForLog: {
+    type RefusalSubject = {
         subjectKey: string;
         userId: string | null;
         plan: string | null;
-    } | null = null;
+    };
+    let refusalSubjectForLog: RefusalSubject | null = null;
     /**
      * The request's shape, for the one line every refusal leaves behind.
      * Counts only -- never text, file names or ids -- so the line says how
@@ -1395,7 +1551,40 @@ async function handleChatPost(
             promptRefinerDecision,
             guestAutoCapability,
             guestClientTurnId,
+            researchMode,
         } = validateChatPayload(body);
+        const isResearchPreview = researchMode === "preview";
+        const researchFeatures = researchPreviewFeatures();
+        if (isResearchPreview && req.headers.has("authorization") && !researchFeatures.nativeStart) {
+            throw new ChatAccessError(503, "RESEARCH_PREVIEW_NATIVE_UNAVAILABLE", "Research Preview is not enabled for this client.");
+        }
+        const researchPreviewQuestion = isResearchPreview
+            ? requestMessages[0]!.content.trim()
+            : null;
+        const researchPreviewLanguage = isResearchPreview
+            ? researchPreviewLocale(req.headers.get("accept-language"))
+            : "en";
+        const researchPreviewCurrentDate = new Date(requestReceivedAt)
+            .toISOString()
+            .slice(0, 10);
+        const fusionBody = body as Record<string, unknown>;
+        const wantsFusion = fusionBody.routerLocationFusion === true;
+        const existingFusion = wantsFusion && fusionBody.routerLocationScope === "existing";
+        if (!wantsFusion && new URL(req.url).pathname === "/api/chat/router-location") {
+            throw new ChatAccessError(400, "INVALID_ROUTER_LOCATION_REQUEST", "A router-location request is required.");
+        }
+        const resumeToken = fusionBody.routerLocationContinuation;
+        const refuseFusion = () => {
+            if (resumeToken !== undefined) throw routerLocationRefused();
+            return routerLocationResponse(null, traceId);
+        };
+        if (resumeToken !== undefined && !wantsFusion) throw routerLocationRefused();
+        if (wantsFusion && ((existingFusion ? !existingChatRouterLocationFusionEnabled() : !chatRouterLocationFusionEnabled()) ||
+            (fusionBody.routerLocationScope !== undefined && !existingFusion) || !process.env.NEXTAUTH_SECRET ||
+            !session?.user?.id || !conversationId || !assistantMessageId || !sourceUserMessageId ||
+            (!existingFusion && promptRefinerDecision) || deepResearchDepth || admissionToken || mcpConnectionId || turnstileToken || guestAutoCapability ||
+            (currentLocation && resumeToken === undefined) || (!existingFusion && requestMessages.length !== 1) ||
+            requestMessages.at(-1)?.role !== "user" || turnCarriesAttachments(requestMessages))) return refuseFusion();
         if (mcpConnectionId && (!mcpPreviewEnabled() || !session?.user?.id)) {
             throw new ChatAccessError(403, "MCP_CONNECTOR_UNAVAILABLE", "Sign in and enable the connector preview to use a selected plugin.");
         }
@@ -1433,7 +1622,13 @@ async function handleChatPost(
         }
         // The durable source remains authored. Only the server's atomic
         // consume may select a different current-turn execution view.
-        let executionMessages = messages;
+        let executionMessages = isResearchPreview
+            ? [{
+                  id: sourceUserMessageId,
+                  role: "user" as const,
+                  content: researchPreviewQuestion!,
+              }]
+            : messages;
         type RefinerExecution = { mode: "explicit" | "auto"; applied: boolean };
         let refinerExecution: RefinerExecution | null = null;
         let refinerPreview: Awaited<ReturnType<typeof previewPromptRefinerChatExecution>> | null = null;
@@ -1497,6 +1692,14 @@ async function handleChatPost(
             }),
             session?.user?.id ?? null,
         ) === "entered";
+        if (isResearchPreview && pinnedDeploymentEntered) {
+            throw new ChatAccessError(
+                409,
+                "RESEARCH_PREVIEW_UNAVAILABLE",
+                "Research Preview is unavailable for this execution path."
+            );
+        }
+        if (wantsFusion && pinnedDeploymentEntered) return refuseFusion();
         // The pinned experiment owns a separate placement/budget refusal
         // pipeline. It has no preview-before-reserve seam, so a Refiner
         // decision cannot enter it without risking a consumed decision on a
@@ -1562,7 +1765,13 @@ async function handleChatPost(
         const acknowledgedUnavailable = new Set(
             acknowledgedUnavailableAttachmentIds || []
         );
-        const requestedModelId = modelId || APP_DEFAULTS.defaultModelId;
+        // `let`, not `const`: a retired model with a live successor is
+        // answered by the successor (see the retirement branch below).
+        let requestedModelId = modelId || APP_DEFAULTS.defaultModelId;
+        // The retired id this request named, when it was answered by its
+        // successor instead. The conversation still lists the retired id until
+        // the reconciliation script moves it, so the selection check accepts it.
+        let retiredModelIdSubstituted: string | null = null;
         // Auto's inputs, gathered before the model is resolved because the
         // model is what Auto decides. The plan is carried forward to the
         // access check below so this is not a second query.
@@ -1592,7 +1801,54 @@ async function handleChatPost(
         // provider health about the one that was actually called.
         dispatchModelIdForLog = requestedModelId;
         const runtimeModelMap = new Map(runtimeModels.map((model) => [model.id, model]));
-        const catalogModel = runtimeModelMap.get(requestedModelId);
+        let catalogModel = runtimeModelMap.get(requestedModelId);
+        // An Auto conversation still sends the model id it was created with,
+        // but that id is nominal: Auto chooses the model further down. Refusing
+        // it here stopped every such conversation the moment that model was
+        // switched off (gpt-5-6-luna, 2026-11-11), before Auto could choose. So
+        // for an Auto conversation only, a retired nominal model stands aside
+        // for its successor -- the operator-named replacement chain first, then
+        // the app default -- and everything below (plan access, availability,
+        // Auto's own pick, credits) runs as usual. A model the user picked
+        // themselves is still refused with the replacement named, below. A
+        // Guest Auto turn counts too: its capability is verified further down,
+        // and a request that fails that check is refused there either way.
+        // One primary-key read, and only on this path.
+        const autoConversationWithRetiredModel =
+            catalogModel !== undefined &&
+            !catalogModel.enabled &&
+            (Boolean(guestAutoCapability) ||
+                (Boolean(conversationId) &&
+                    Boolean(session?.user?.id) &&
+                    (
+                        await prisma.conversation.findFirst({
+                            where: { id: conversationId!, userId: session!.user!.id },
+                            select: { selectionMode: true },
+                        })
+                    )?.selectionMode === "auto"));
+        if (catalogModel && autoConversationWithRetiredModel) {
+            const retired = catalogModel;
+            const standIn = resolveRetiredModelSuccessor(
+                retired,
+                (candidateId) => runtimeModelMap.get(candidateId),
+                APP_DEFAULTS.defaultModelId
+            );
+            if (standIn) {
+                console.info(JSON.stringify({
+                    event: "chat_retired_model_substituted",
+                    traceId,
+                    conversationId: conversationId ?? null,
+                    retiredModelId: retired.id,
+                    successorModelId: standIn.successor.id,
+                    via: standIn.via,
+                    timestamp: new Date().toISOString(),
+                }));
+                retiredModelIdSubstituted = retired.id;
+                requestedModelId = standIn.successor.id;
+                dispatchModelIdForLog = requestedModelId;
+                catalogModel = standIn.successor;
+            }
+        }
         if (catalogModel && !catalogModel.enabled) {
             // Only name a replacement the user could actually go and pick.
             // A retirement that points at a delisted or disabled model is a
@@ -1635,6 +1891,92 @@ async function handleChatPost(
                 400,
                 traceId
             );
+        }
+
+        let researchPreviewAdmission: ResearchPreviewAdmission | null = null;
+        if (isResearchPreview) {
+            if (!session?.user?.id || !conversationId) {
+                throw new ChatAccessError(
+                    401,
+                    "AUTHENTICATION_REQUIRED",
+                    "Authentication required."
+                );
+            }
+            await assertUserOperationalAccess(session.user.id);
+            const [researchConversation, featureFlags] = await Promise.all([
+                prisma.conversation.findFirst({
+                    where: { id: conversationId, userId: session.user.id },
+                    select: {
+                        id: true,
+                        password: true,
+                        passwordVersion: true,
+                        kind: true,
+                        productKey: true,
+                        selectionMode: true,
+                        selectedModels: true,
+                        assistantProfileVersionId: true,
+                    },
+                }),
+                getOperationalFeatureFlags(),
+            ]);
+            let profileTools: {
+                webSearch: boolean;
+                deepResearch: boolean;
+            } | null = null;
+            if (researchConversation?.assistantProfileVersionId) {
+                // The profile may narrow tools, but its instructions and
+                // knowledge never enter this one-shot execution.
+                const profile = await prisma.assistantProfileVersion.findFirst({
+                    where: {
+                        id: researchConversation.assistantProfileVersionId,
+                        userId: session.user.id,
+                    },
+                    select: { toolPolicy: true },
+                });
+                const policy = profile?.toolPolicy as
+                    | Record<string, unknown>
+                    | undefined;
+                profileTools = {
+                    webSearch: policy?.webSearch === true,
+                    deepResearch: policy?.deepResearch === true,
+                };
+            }
+            await refreshSearchQueryCeilingBreaches();
+            researchPreviewAdmission = decideResearchPreviewAdmission({
+                signedIn: true,
+                plan: accountPlan?.tier ?? null,
+                conversationAvailable: Boolean(researchConversation),
+                conversationLocked: Boolean(
+                    researchConversation &&
+                        !hasConversationUnlockGrant(
+                            req,
+                            session.user.id,
+                            researchConversation.id,
+                            researchConversation.password == null ? null : researchConversation.passwordVersion
+                        )
+                ),
+                productKey: researchConversation?.productKey ?? null,
+                kind: researchConversation?.kind ?? null,
+                selectionMode: researchConversation?.selectionMode ?? null,
+                selectedModelIds: parseStoredModelIds(
+                    researchConversation?.selectedModels
+                ),
+                model: requestedModelConfig,
+                backendReadiness: resolveWebSearchBackendReadiness(),
+                profileTools,
+                gateEnabled:
+                    featureFlags.aiChatEnabled &&
+                    researchPreviewGate(requestedModelConfig),
+                modelOutputTokenCap:
+                    resolveModelPricing(requestedModelConfig).maxOutputTokens,
+            });
+            if (!researchPreviewAdmission.offered) {
+                throw new ChatAccessError(
+                    409,
+                    "RESEARCH_PREVIEW_UNAVAILABLE",
+                    "Research Preview is unavailable for this conversation."
+                );
+            }
         }
 
         // ---- Auto routing (routing policy §5; delivery plan step 4) -------
@@ -1785,6 +2127,10 @@ async function handleChatPost(
         // A guest turn still reads nothing. The ownership check below reads
         // the same row again; merging the two is worth doing and is not this
         // change.
+        const fusionHead = { orderBy: [{ createdAt: "desc" as const }, { id: "desc" as const }], take: 2,
+            select: { id: true as const, role: true as const } };
+        const existingAttempt = { where: { OR: [{ assistantMessageId }, { sourceUserMessageId }] },
+            take: 1, select: { assistantMessageId: true as const } };
         const conversationRouting =
             conversationId && session?.user?.id
                 ? await prisma.conversation.findFirst({
@@ -1794,14 +2140,23 @@ async function handleChatPost(
                       // a miss here simply reads as "not an Auto conversation".
                       where: { id: conversationId, userId: session.user.id },
                       select: {
+                          ...(contextBundle || wantsFusion ? { password: true, passwordVersion: true, kind: true, memoryMode: true, assistantProfileVersionId: true } : {}),
+                          ...(wantsFusion ? {
+                              selectedModels: true, disabledPanels: true, chatRecoveryEpoch: true,
+                              messages: fusionHead,
+                              ...(existingFusion ? { responseAttempts: existingAttempt } : {}),
+                              routerLocationPreparations: { where: { sourceUserMessageId, assistantMessageId }, select: { requestDigest: true }, take: 1 },
+                          } as const : {}),
                           selectionMode: true,
                           routerModelId: true,
                           routerChallengerTurns: true,
                           productKey: true,
-                          continuationBridge: { select: { id: true } },
+                          continuationBridge: { select: { id: true, reviewHandoff: true } },
                       },
                   })
                 : null;
+        if (conversationRouting?.continuationBridge) continuation.receipt = continuationReceipt({
+            traceId, assistantMessageId: assistantMessageId ?? "", selected: req.headers.has(PASSAGE_HEADER), outcome: "not_prepared" });
         if (guestAutoCapability) {
             if (
                 session?.user?.id ||
@@ -2094,10 +2449,11 @@ async function handleChatPost(
             );
         }
         const deterministicAutoSelection = selectAutoModel({
-            explorationEnabled: await isAutoExplorationEnabled(),
+            explorationEnabled:
+                !isResearchPreview && (await isAutoExplorationEnabled()),
             conversationId: conversationId ?? null,
             requestedModelId,
-            conversation: conversationRouting,
+            conversation: isResearchPreview ? null : conversationRouting,
             // The stored product, never the surface the request came from:
             // §6 forbids a surfaceProductKey fallback at dispatch. Null when
             // there is no conversation, which is `no_conversation` further
@@ -2162,6 +2518,7 @@ async function handleChatPost(
                     })
                 )
                 .catch(() => null);
+            if (existingFusion && answered?.conversation.userId === session.user.id) throw routerLocationRefused();
             // Only the caller's own answer counts: whether another account's
             // id is an image answer is nobody else's to learn.
             if (
@@ -2177,7 +2534,8 @@ async function handleChatPost(
                 );
             }
         }
-        const autoImageTurnEligible =
+        const autoTextTurnEligible =
+            !isResearchPreview &&
             conversationRouting?.selectionMode === "auto" &&
             !guestAutoSelection?.routed &&
             Boolean(session?.user?.id && conversationId && assistantMessageId) &&
@@ -2186,24 +2544,17 @@ async function handleChatPost(
             // a bridged conversation, so an image decision here would leave
             // the question with no answer (docs/policy/external-conversation-continuation.md §5.1).
             !conversationRouting?.continuationBridge &&
-            !admissionToken &&
-            !deepResearchDepth &&
-            !promptRefinerDecision &&
+            !admissionToken && !deepResearchDepth;
+        // A held Refiner decision does not exclude the image turn: in an
+        // existing Auto Chat the product Refiner holds one on every send, so
+        // excluding it answered every follow-up image request ("make it
+        // night") as text. The image turn ends before the decision is
+        // consumed, and is judged on the authored message (below).
+        const autoImageTurnEligible = autoTextTurnEligible &&
             // This message's own attachments, not the conversation's. A photo
             // is the one attachment the image turn can use: it may be edited.
             (!latestUserTurnHasAttachments(autoRoutingMessages) ||
                 latestUserTurnHasImageAttachment(autoRoutingMessages));
-        const imageRouting = createChatTurnImageRouting(autoImageTurnEligible
-            ? {
-                  userId: session!.user!.id!,
-                  conversationId: conversationId!,
-                  text: profileTextFor(autoRoutingMessages),
-                  plan: accountPlan,
-                  traceId,
-                  request: req,
-                  attachedPhoto: latestUserTurnHasAttachments(autoRoutingMessages),
-              }
-            : null, deterministicAutoSelection.routed && combinedChatImageIntentEnabled());
         // Per prompt: a small model reads this message and reorders the
         // Router's eligible set. Off unless Admin › Routing names a router
         // model; a missing decision keeps the ordinary Auto choice and recovery.
@@ -2220,10 +2571,234 @@ async function handleChatPost(
                 fileRoutingContext
             ).filter(candidate => candidate.canCreateFiles).map(candidate => candidate.id)
             : [];
+        // The early and final checks both rebuild from the same authored query.
+        // A user can revoke memory or change the profile while the Router runs:
+        // only the later, freshly rebuilt context may reach the answer model.
+        const checkPricedContext = async (token: string, userId: string, profileVersionId: string | null, memoryMode: string | null) => {
+            const envelope = verifyChatContextBundle(token, {
+                subjectKey: userId, conversationId: conversationId ?? null, modelId: requestedModelId,
+            });
+            if (!envelope.ok) return { turnContext: null, verification: envelope };
+            const query = latestUserPromptText(messages);
+            let historyStale = false;
+            const memorySemanticContext = async () => {
+                const replay = conversationId ? await replayMemoryHistoryContext({
+                    request: req, userId, conversationId, query, payload: envelope.payload,
+                }) : { queryPolicy: envelope.payload.memoryQueryPolicy ?? "legacy", history: [] } as const;
+                historyStale = replay === null;
+                return replay ?? { queryPolicy: "full" as const, history: [] };
+            };
+            const turnContext = await buildChatTurnContext({
+                userId,
+                query,
+                memorySemanticContext,
+                profileVersionId,
+                plan: accountPlan?.tier ?? null,
+                conversationMode: memoryMode,
+                // This route verifies a bundle another route issued, and never
+                // asks the retrieval provider. The bundle says which semantic
+                // steps shaped its selection; those are rebuilt from what the
+                // issuing route stored and every other step is off.
+                semantic: verifyingSemanticModes(envelope.payload.semanticSteps),
+            });
+            if (historyStale) return { turnContext: null, verification: { ok: false as const, reason: "stale" as const } };
+            const verification = verifyChatContextBundle(token, {
+                subjectKey: userId, conversationId: conversationId ?? null, modelId: requestedModelId,
+                currentFingerprint: turnContext.fingerprint,
+            });
+            return { turnContext, verification };
+        };
+        const refuseContext = async (refusalReason: Extract<ReturnType<typeof verifyChatContextBundle>, { ok: false }>["reason"],
+            claimedInitialFusion = false) => {
+            const drifted =
+                refusalReason === "stale" ||
+                refusalReason === "expired";
+            contextRefusalReasonForLog = drifted ? refusalReason : null;
+            // Awaited rather than fired and forgotten: the response is
+            // about to be returned, and a refusal that is never counted
+            // is exactly the observation §22 wants. One upsert, on a path
+            // that is rare by construction.
+            await recordMemoryCounter(
+                drifted ? "context_bundle_stale" : "context_bundle_rejected"
+            );
+            return drifted
+                ? tracedJsonError(
+                      "The conversation context changed while this message was being sent.",
+                      "CHAT_CONTEXT_BUNDLE_STALE",
+                      409,
+                      traceId,
+                      { requiresPreflight: true, ...(claimedInitialFusion ? { routerLocationRecovery: "saved" } : {}) }
+                  )
+                : tracedJsonError(
+                      "Invalid chat context.",
+                      "INVALID_CONTEXT_BUNDLE",
+                      400,
+                      traceId
+                  );
+        };
+        let earlyContextRefusal: Response | undefined;
+        const ownerIdForContext = session?.user?.id;
+        const verifyPreparedContext = contextBundle && ownerIdForContext && conversationId && assistantMessageId && conversationRouting
+            ? async () => {
+                // The earlier routing row is owner-scoped. Do not inspect memory
+                // or profile knowledge for a locked or non-Chat conversation.
+                if (!hasConversationUnlockGrant(req, ownerIdForContext, conversationId, conversationRouting.password == null ? null : conversationRouting.passwordVersion)) {
+                    earlyContextRefusal = conversationLockedResponse();
+                    return false;
+                }
+                if (!isChatConversationKind(conversationRouting.kind)) {
+                    earlyContextRefusal = conversationKindNotSupportedResponse();
+                    return false;
+                }
+                const started = performance.now();
+                const { verification } = await checkPricedContext(contextBundle, ownerIdForContext,
+                    conversationRouting.assistantProfileVersionId ?? null, conversationRouting.memoryMode ?? null);
+                console.info(JSON.stringify({ event: "chat_router_context_precheck", traceId,
+                    durationMs: Math.round(performance.now() - started), outcome: verification.ok ? "valid" : verification.reason }));
+                if (verification.ok) return true;
+                // This rejected turn exits before the usual eligibility counters.
+                const [response] = await Promise.all([
+                    refuseContext(verification.reason),
+                    recordMemoryCounter("chat_memory_eligible"),
+                    recordMemoryCounter("context_bundle_presented"),
+                ]);
+                earlyContextRefusal = response;
+                return false;
+            } : undefined;
+        let fusion: { key: RouterLocationClaim; userId: string; requestDigest: string; expiresAt: number; searchUtcDate: string; resume: RouterLocationContinuation | null } | null = null;
+        if (wantsFusion && conversationId && sourceUserMessageId && assistantMessageId && session?.user?.id) {
+            const userId = session.user.id;
+            if (!conversationRouting) throw routerLocationRefused();
+            if (!hasConversationUnlockGrant(req, userId, conversationId, conversationRouting.password == null ? null : conversationRouting.passwordVersion)) return conversationLockedResponse();
+            if (resumeToken === undefined && conversationRouting.routerLocationPreparations?.length) throw routerLocationRefused();
+            if (!deterministicAutoSelection.routed || !(existingFusion ? autoTextTurnEligible : autoImageTurnEligible) ||
+                !isChatConversationKind(conversationRouting.kind)) return refuseFusion();
+            const head = conversationRouting.messages;
+            if (existingFusion) {
+                if (head?.length !== 2) return refuseFusion();
+                const disabledPanels = parseStoredModelIds(conversationRouting.disabledPanels);
+                const activeModels = parseStoredModelIds(conversationRouting.selectedModels).filter(id => !disabledPanels.includes(id));
+                if (activeModels.length !== 1 || activeModels[0] !== modelId) return refuseFusion();
+                if (head[0].id !== sourceUserMessageId || head[0].role !== "user" || conversationRouting.responseAttempts?.length) {
+                    throw routerLocationRefused();
+                }
+                const previous = messages.at(-2);
+                if (!previous?.id || previous.role !== head[1].role ||
+                    (previous.id !== head[1].id && scopedMessageId(conversationId, previous.id) !== head[1].id)) {
+                    return refuseFusion();
+                }
+            } else if (head?.length !== 1 || head[0].id !== sourceUserMessageId) return refuseFusion();
+            await assertUserOperationalAccess(userId);
+            await verifyDurableChatSourceMessage({ userId, conversationId, sourceUserMessageId, messages });
+            if (verifyPreparedContext && !(await verifyPreparedContext())) return earlyContextRefusal!;
+            const originalRequest = { ...fusionBody };
+            delete originalRequest.currentLocation;
+            delete originalRequest.routerLocationContinuation;
+            const key = { conversationId, sourceUserMessageId, assistantMessageId };
+            const requestDigest = routerLocationDigest({
+                ...(existingFusion ? { historyHead: head } : {}),
+                userId, key, originalRequest, tier: accountPlan?.tier, selectedModels: conversationRouting.selectedModels,
+                disabledPanels: conversationRouting.disabledPanels, recoveryEpoch: conversationRouting.chatRecoveryEpoch,
+                profile: conversationRouting.assistantProfileVersionId, memory: conversationRouting.memoryMode,
+                selection: deterministicAutoSelection.modelId, eligible: deterministicAutoSelection.record.eligibleModelIds,
+                prices: deterministicAutoSelection.candidateCreditsByModelId, versions: deterministicAutoSelection.versions,
+                cohort: deterministicAutoSelection.cohort, combinedImage: combinedChatImageIntentEnabled(),
+                presearch: process.env.CHAT_ROUTER_PRESEARCH_ENABLED === "true",
+            });
+            const resume = resumeToken === undefined ? null : openRouterLocation(resumeToken, requestDigest, process.env.NEXTAUTH_SECRET!);
+            if (resumeToken !== undefined && (!resume || conversationRouting.routerLocationPreparations?.[0]?.requestDigest !== requestDigest)) throw routerLocationRefused();
+            const expiresAt = resume?.expiresAt ?? await claimRouterLocation(key, requestDigest);
+            if (!resume) {
+                try {
+                    await consumeChatLocationIntentLimit(req, identifyChatCaller(req, userId).subjectKey);
+                } catch (error) {
+                    if (apiSecurityResponse(error)?.status !== 429) throw error;
+                    // Neither Router nor image classification has started. Keep
+                    // ordinary Chat available without another semantic lookup.
+                    return routerLocationResponse(null, traceId, { locationRateLimited: true });
+                }
+            }
+            // Consent can cross UTC midnight; reconstruct the dated search
+            // prompt the Router actually read when verifying its digest.
+            const searchUtcDate = resume?.searchUtcDate ?? new Date().toISOString().slice(0, 10);
+            fusion = { key, userId, requestDigest, expiresAt, searchUtcDate, resume };
+        }
+        const imageRouting = createChatTurnImageRouting(autoImageTurnEligible
+            ? { userId: session!.user!.id!, conversationId: conversationId!, text: profileTextFor(messages),
+                plan: accountPlan, traceId, request: req, attachedPhoto: latestUserTurnHasAttachments(autoRoutingMessages) }
+            : null, deterministicAutoSelection.routed && combinedChatImageIntentEnabled(), fusion?.resume?.image);
+        let fusionRouterDigest: string | null = null;
         const finishRoutingTiming = latency.stage("routingMs");
         latency.dimensions.mode = deterministicAutoSelection.routed ? "auto" : "manual";
-        const llmPick = deterministicAutoSelection.routed
+        const routerSearchPlanCandidate = deterministicAutoSelection.routed &&
+            Boolean(session?.user?.id) && webSearchMode === "always" && !currentLocation &&
+            !mcpConnectionId && !turnCarriesAttachments(autoRoutingMessages);
+        let historySearchActive = false;
+        let preparedContinuation: ContinuationTurnSeedResult = { seed: null, outcome: "no_bridge" };
+        const hasContinuation = Boolean(conversationRouting?.continuationBridge);
+        const hasReviewHandoff = conversationRouting?.continuationBridge?.reviewHandoff != null;
+        if (hasReviewHandoff && (isResearchPreview || deepResearchDepth || requestedModelConfig.usageClass === "deep-research" ||
+            turnCarriesAttachments(messages))) {
+            throw new ChatAccessError(400, "REVIEW_HANDOFF_TEXT_ONLY", "This comparison supports text questions and text models only.");
+        }
+        const readContinuation = async (): Promise<ContinuationTurnSeedResult> => {
+            if (!session?.user?.id || !conversationId || !hasContinuation) return { seed: null, outcome: "no_bridge" };
+            if (isResearchPreview || deepResearchDepth || requestedModelConfig.usageClass === "deep-research") return { seed: null, outcome: "no_bridge" };
+            try {
+                if (historySearchActive && !continuationHistorySearchEnabledFromValue(process.env.CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED))
+                    return { seed: null, outcome: "flag_off" };
+                if (!hasReviewHandoff && !(await isExternalContinuationEnabledCached())) return { seed: null, outcome: "flag_off" };
+                return await loadContinuationTurnSeed({ userId: session.user.id, conversationId, request: req, prepared: preparedContinuation.seed });
+            } catch (error) {
+                if (hasReviewHandoff) throw error;
+                logRequestError("chat_continuation_seed_failed", traceId, error);
+                return { seed: null, outcome: "read_failed" };
+            }
+        };
+        if (hasContinuation) {
+            preparedContinuation = await readContinuation();
+            continuation.receipt = continuationReceipt({ traceId, assistantMessageId: assistantMessageId ?? "",
+                selected: req.headers.has(PASSAGE_HEADER), outcome: isResearchPreview || deepResearchDepth || requestedModelConfig.usageClass === "deep-research"
+                    ? "unsupported" : preparedContinuation.outcome, plan: preparedContinuation.seed?.plan });
+        }
+        // Owner-approved default-on source input; explicit false remains the kill switch.
+        let importedSource = deterministicAutoSelection.routed &&
+            continuationAutoSourceEnabledFromValue(process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED) && !fusion
+            ? preparedContinuation.seed?.prompt.transcriptText ?? undefined : undefined;
+        historySearchActive = Boolean(importedSource && continuationHistorySearchEnabledFromValue(process.env.CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED) &&
+            new TextEncoder().encode(importedSource).length <= HISTORY_SOURCE_MAX_BYTES);
+        const verifyImportedSource = async () => {
+            const checked = await readContinuation();
+            return Boolean(importedSource && checked.seed?.prompt.transcriptText === importedSource &&
+                continuationAutoSourceEnabledFromValue(process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED));
+        };
+        const presearchFlagEnabled = process.env.CHAT_ROUTER_PRESEARCH_ENABLED === "true";
+        const allowRouterSearchPlan = !hasContinuation && routerSearchPlanCandidate && presearchFlagEnabled;
+        // Set only when the router model was actually asked.
+        let routerCallOutcome = null as string | null;
+        let routerOfferedModelIds: readonly string[] | undefined;
+        // A combined router call slower than this starts the separate image
+        // classification beside it (off unless CHAT_ROUTER_IMAGE_HEDGE_MS).
+        const imageHedgeMs = imageRouting.context ? chatRouterImageHedgeMs() : null;
+        const imageHedge = imageHedgeMs ? setTimeout(() => imageRouting.hedge(), imageHedgeMs) : null;
+        let llmPick = deterministicAutoSelection.routed
             ? await pickAutoModelWithLlm({
+                      importedSource,
+                      ...(importedSource ? { verifyImportedSource } : {}),
+                      ...(historySearchActive ? { historySearch: {
+                          source: () => importedSource,
+                          verify: verifyImportedSource,
+                          read: async (queries: string[]) => {
+                              if (!preparedContinuation.seed || !session?.user?.id || !conversationId) throw new Error("History access refused");
+                              const result = await searchContinuationHistory({ userId: session.user.id, conversationId, request: req,
+                                  prepared: preparedContinuation.seed, queries,
+                                  enabled: () => continuationHistorySearchEnabledFromValue(process.env.CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED) &&
+                                      continuationAutoSourceEnabledFromValue(process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED) });
+                              preparedContinuation = result;
+                              if (!result.seed) throw new Error("History access refused");
+                              importedSource = result.seed.prompt.transcriptText ?? undefined;
+                          },
+                      } } : {}),
                       prompt: profileTextFor(autoRoutingMessages),
                       previousAnswer: previousAnswerExcerpt(autoRoutingMessages),
                       eligibleModelIds:
@@ -2239,22 +2814,51 @@ async function handleChatPost(
                       // Atomic Refiner consume restores this exact preview
                       // before provider dispatch. A second rewrite would be
                       // discarded, including an explicit keep-original choice.
-                      rewriteAllowed: !refinerPreview && !turnCarriesAttachments(autoRoutingMessages),
+                      rewriteAllowed: !importedSource && !refinerPreview && !turnCarriesAttachments(autoRoutingMessages),
+                      verifyPreparedContext: fusion ? undefined : verifyPreparedContext,
+                      ...(fusion ? { locationFusion: { authoredText: latestUserPromptText(messages), scope: existingFusion ? "existing" : undefined,
+                          resume: fusion.resume, searchUtcDate: fusion.searchUtcDate,
+                          onRouterDigest: (value: string) => { fusionRouterDigest = value; } } } : {}),
                       fileContext: fileRoutingContext,
+                      searchPlan: fusion?.resume?.searchPlan ?? allowRouterSearchPlan,
                       imageIntent: imageRouting.context,
                       onImageDecision: imageRouting.accept,
+                      onCallOutcome: (outcome: string) => { routerCallOutcome = outcome; },
+                      onCandidatesResolved: (ids) => { routerOfferedModelIds = ids; },
                       // An image turn is not a routing decision a chat model
                       // answered; its row would teach the router the wrong thing.
-                      recordDecision: (pick) => pick?.requiresFileGeneration
+                      recordDecision: (pick) => importedSource ? Promise.resolve(false) : pick?.requiresFileGeneration
                           ? Promise.resolve(true)
                           : imageRouting.resolve().then((decision) => !decision.image),
                   })
             : null;
+        if (imageHedge) clearTimeout(imageHedge);
         finishRoutingTiming();
+        if (fusion?.resume && fusion.resume.routerDigest !== fusionRouterDigest) throw routerLocationRefused();
+        if (earlyContextRefusal) return earlyContextRefusal;
         const detectedImageDecision = await imageRouting.resolve();
         // A document about images is still a file request, not an image turn.
         const autoImageDecision = llmPick?.requiresFileGeneration
             ? { image: false as const } : detectedImageDecision;
+        // A request that started without an authorised plan cannot acquire a new
+        // source after the Router has already decided from the native view.
+        let afterRoutingContinuation = preparedContinuation.seed ? await readContinuation() : preparedContinuation;
+        if (importedSource && !continuationAutoSourceEnabledFromValue(process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED))
+            afterRoutingContinuation = { seed: null, outcome: "flag_off" };
+        const continuationRevoked = Boolean(importedSource && (!afterRoutingContinuation.seed ||
+            afterRoutingContinuation.seed.prompt.transcriptText !== importedSource));
+        if (continuationRevoked) {
+            llmPick = null;
+            routerCallOutcome = "source_revoked";
+        }
+        preparedContinuation = afterRoutingContinuation;
+        let continuationContextConsumed = false;
+        const executeTurn = async (
+            llmPick: Awaited<ReturnType<typeof pickAutoModelWithLlm>>,
+            routerCallOutcome: string | null,
+            preparedContinuation: ContinuationTurnSeedResult,
+            replanned = false,
+        ): Promise<Response> => {
         const autoSelection = applyLlmModelPick(
             deterministicAutoSelection,
             llmPick?.modelId ?? null,
@@ -2264,7 +2868,12 @@ async function handleChatPost(
                 // offering file tools to every turn would disable that recovery.
                 required: llmPick?.requiresFileGeneration === true,
                 capableModelIds: fileCapableModelIds,
-            }
+            },
+            // The router was asked and gave nothing usable: answer with the
+            // requested model (normally the default), not the rule's cheapest
+            // fit, which never saw whether this is a file request.
+            routerCallOutcome !== null && routerCallOutcome !== "picked" ? requestedModelId : null,
+            routerOfferedModelIds
         );
         const autoRouted = guestAutoSelection?.routed === true ||
             autoSelection.routed;
@@ -2356,7 +2965,7 @@ async function handleChatPost(
         };
         // A Refiner preview is tentative until the same view is atomically
         // revalidated and consumed after deterministic preflight refusals.
-        if (!refinerPreview) recordAutoSelection();
+        if (!hasContinuation && !refinerPreview && !fusion) recordAutoSelection();
         const routedCatalogModel = autoRouted
             ? runtimeModelMap.get(effectiveModelId)
             : requestedModelConfig;
@@ -2464,7 +3073,10 @@ async function handleChatPost(
         const promptCachePath: AnthropicPromptCachePath = nativeSearchEnabled
             ? "chat_turn_native_search"
             : "chat_turn";
-        const requestAttachments = messages.flatMap((message) =>
+        const requestAttachments = (isResearchPreview
+            ? executionMessages
+            : messages
+        ).flatMap((message) =>
             Array.isArray(message.attachments)
                 ? (message.attachments as IncomingAttachment[])
                 : []
@@ -2518,20 +3130,19 @@ async function handleChatPost(
             string,
             { name: string; mediaType: string; bytes: Uint8Array }
         >();
+        const revisionEnabled = generatedArtifactRevisionEnabled() && Boolean(session?.user?.id && conversationId && assistantMessageId);
+        const revisionSources = new Map<string, ArtifactRevisionSource>();
         if (latestMessageAttachmentCount > MAX_ATTACHMENTS) {
             throw new ChatAccessError(
                 413,
                 "TOO_MANY_ATTACHMENTS",
-                "A chat request can contain at most 5 attachments."
+                `A chat request can contain at most ${MAX_ATTACHMENTS} attachments.`
             );
         }
-        if (requestAttachments.length > MAX_CONVERSATION_ATTACHMENTS) {
-            throw new ChatAccessError(
-                413,
-                "TOO_MANY_CONVERSATION_ATTACHMENTS",
-                "This conversation has reached its attachment limit. Start a new chat to attach more files."
-            );
-        }
+        // No refusal for the conversation's file count: past
+        // MAX_CONVERSATION_ATTACHMENTS the oldest earlier files are named to
+        // the model and left out (see `olderAttachmentsToOmit`), so a long
+        // conversation can always be continued.
         /*
           One attachment is named once per turn, whichever handle names it.
 
@@ -2565,13 +3176,6 @@ async function handleChatPost(
                 }
                 attachmentIdentities.add(identity);
             }
-        }
-        if (attachmentIdentities.size > MAX_CONVERSATION_ATTACHMENTS) {
-            throw new ChatAccessError(
-                413,
-                "TOO_MANY_ATTACHMENT_OBJECTS",
-                "This conversation has reached its attachment limit. Start a new chat to attach more files."
-            );
         }
         // Resolved before the model, because Auto needs the plan to decide
         // whether this account is routed at all. Reused here rather than
@@ -2658,7 +3262,7 @@ async function handleChatPost(
                 where: { id: conversationId },
                 select: {
                     userId: true,
-                    password: true,
+                    password: true, passwordVersion: true,
                     selectedModels: true,
                     kind: true,
                     memoryMode: true,
@@ -2691,7 +3295,7 @@ async function handleChatPost(
                     req,
                     session.user.id,
                     conversationId,
-                    conversation.password
+                    conversation.password == null ? null : conversation.passwordVersion
                 )
             ) {
                 return conversationLockedResponse();
@@ -2729,7 +3333,15 @@ async function handleChatPost(
             if (
                 !autoRouted &&
                 selectedConversationModels.length > 0 &&
-                !selectedConversationModels.includes(requestedModelId)
+                !selectedConversationModels.includes(requestedModelId) &&
+                // The stored list, not the filtered one: the filter above keeps
+                // enabled models only, and the retired id is disabled.
+                !(
+                    retiredModelIdSubstituted !== null &&
+                    parseStoredModelIds(conversation.selectedModels).includes(
+                        retiredModelIdSubstituted
+                    )
+                )
             ) {
                 console.warn(JSON.stringify({
                     event: "chat_model_selection_denied",
@@ -2764,7 +3376,7 @@ async function handleChatPost(
 
         let activeModel;
         try {
-            activeModel = getActiveAiModel(modelConfig);
+            activeModel = isResearchPreview ? getResearchPreviewAiModel(modelConfig) : getActiveAiModel(modelConfig);
         } catch (error) {
             const code = catalogueHostRefusalCode(error);
             if (!code) throw error;
@@ -2777,7 +3389,80 @@ async function handleChatPost(
         }
         let estimatedInputTokens = 0;
         let totalAttachmentBytes = 0;
+        // Earlier messages' files read whole have a byte share of their own, the
+        // same size as the turn's: past it they are named to the model and left
+        // out, as past the token share, so a conversation's history can never
+        // stop a new message from being sent.
+        let pastAttachmentBytes = 0;
+        // How many of the oldest earlier files this turn walks past without
+        // reading: the conversation's count above MAX_CONVERSATION_ATTACHMENTS.
+        // The turn's own files (at most MAX_ATTACHMENTS) are never among them.
+        // Counted as the loop below reads them: an assistant message's
+        // attachments are never read, so they never take a place.
+        const readAttachmentCount = (message: (typeof executionMessages)[number]) =>
+            message.role !== "assistant" && Array.isArray(message.attachments)
+                ? message.attachments.length
+                : 0;
+        let olderAttachmentsToOmit = Math.max(
+            0,
+            executionMessages.reduce(
+                (count, message) => count + readAttachmentCount(message),
+                0
+            ) - MAX_CONVERSATION_ATTACHMENTS
+        );
+        /*
+          The files that count leaves out are still asked about: a lost file is
+          refused, never silently skipped (docs/policy/user-attachment-persistence.md
+          §11.4). Asked all at once, before the loop, so a long conversation
+          costs one round of HEADs rather than one per file in turn. A file
+          already recorded unavailable needs no question; one storage cannot
+          answer for is left out, as on the byte share.
+        */
+        const countOmittedMissingKeys = new Set<string>();
+        if (olderAttachmentsToOmit > 0) {
+            const keys: string[] = [];
+            let remaining = olderAttachmentsToOmit;
+            for (const [index, message] of executionMessages.entries()) {
+                if (remaining <= 0 || index === executionMessages.length - 1) break;
+                if (readAttachmentCount(message) === 0) continue;
+                for (const incoming of message.attachments as IncomingAttachment[]) {
+                    if (remaining <= 0) break;
+                    remaining -= 1;
+                    const referenceKey = attachmentReferenceKey(incoming);
+                    const resolved = referenceKey
+                        ? resolvedAttachments.get(referenceKey)
+                        : undefined;
+                    if (resolved?.unavailableAt) continue;
+                    // Only a key the caller owns is ever asked about, so this
+                    // probe can never tell anyone whether another account's
+                    // object exists. The loop below refuses any other key
+                    // before reading; a guest chat never reaches this count.
+                    const key =
+                        resolved?.objectKey ??
+                        (typeof incoming?.objectKey === "string" ? incoming.objectKey : null);
+                    if (key && userObjectPrefix && key.startsWith(userObjectPrefix)) {
+                        keys.push(key);
+                    }
+                }
+            }
+            for (let start = 0; start < keys.length; start += 16) {
+                const batch = keys.slice(start, start + 16);
+                const probes = await Promise.all(batch.map((key) => probeR2Object(key)));
+                probes.forEach((probe, offset) => {
+                    if (probe.state === "missing") countOmittedMissingKeys.add(batch[offset]);
+                });
+            }
+        }
         let totalExtractedCharacters = 0;
+        // Earlier messages' files share half the input allowance; past it they
+        // are left out of the turn rather than failing it. See
+        // lib/chatAttachmentLimits.ts.
+        const pastAttachmentTokenBudget = pastTurnAttachmentTokenBudget(
+            access.kind === "guest"
+                ? guestChatMaxInputTokens()
+                : accountChatMaxInputTokens(modelConfig)
+        );
+        let pastAttachmentTokens = 0;
         let totalImageCount = 0;
         let totalBase64ImagePayloadBytes = 0;
         // Paid OCR reached from inside an archive, and how much of it this
@@ -2822,6 +3507,7 @@ async function handleChatPost(
 
         const providerContextQueues = new Map<string, ModelMessage[][]>();
         if (
+            !isResearchPreview &&
             conversationId &&
             session?.user?.id &&
             modelConfig.reasoning !== undefined
@@ -2886,6 +3572,7 @@ async function handleChatPost(
         // because Release C put three things in it, and only one of them is
         // memory.
         let contextSystemPrompt: string | null = null;
+        let memoryData: string | null = null;
         let memoryUsedCount = 0;
         let knowledgeChunkCount = 0;
         // §22 attribution, written onto the answer rather than counted.
@@ -2913,7 +3600,7 @@ async function handleChatPost(
                   bundleId: string;
                   expiresAt: Date;
                   systemPrompt: string | null;
-                  memoryText: string;
+                  memoryData: string | null;
                   memoryUsedCount: number;
                   memoryTokens: number;
                   profileTokens: number;
@@ -2926,7 +3613,7 @@ async function handleChatPost(
                   };
               }
             | null = null;
-        if (session?.user?.id) {
+        if (session?.user?.id && !isResearchPreview) {
             // §22's injection denominator. Recorded before the bundle branch
             // so it counts every authenticated request, including the ones
             // that carry no bundle — the share of requests that had no memory
@@ -2942,71 +3629,15 @@ async function handleChatPost(
             // preparation step scored — not the attachment-augmented message
             // assembled below, which would retrieve differently.
             const finishContextTiming = latency.stage("contextMs");
-            const turnContext = await buildChatTurnContext({
-                userId: session.user.id,
-                query: latestUserPromptText(messages),
-                // Policy: docs/policy/external-conversation-import-and-memory.md.
-                // §10: bound into the fingerprint, so a profile republished or
-                // detached between preflight and send is a stale bundle rather
-                // than a turn that answers as a different assistant.
-                profileVersionId: conversationProfileVersionId,
-                plan: accountPlan?.tier ?? null,
-                // §8.1 invariant 1: this conversation's own mode decides, with
-                // `inherit` falling back to the account default. Read here
-                // rather than trusted from the client, and read on the chat
-                // side as well as the preflight side so a mode changed between
-                // the two is caught by the freshness check instead of being
-                // priced one way and sent the other.
-                conversationMode: conversationMemoryMode,
-            });
+            const { turnContext, verification } = await checkPricedContext(contextBundle, session.user.id,
+                conversationProfileVersionId, conversationMemoryMode);
             finishContextTiming();
-            const verification = verifyChatContextBundle(contextBundle, {
-                subjectKey: session.user.id,
-                conversationId: conversationId ?? null,
-                modelId: requestedModelId,
-                currentFingerprint: turnContext.fingerprint,
-            });
-            if (!verification.ok) {
-                // Two different failures with two different meanings. Drift is
-                // expected and recoverable — the user approved a memory while
-                // the send was in flight — so it names the recovery. Everything
-                // else is a token that never described this request: a bad
-                // signature, another subject, a model that was not priced. That
-                // is a client defect or tampering, and answering it with
-                // "re-preflight" would invite a retry loop against a token that
-                // can never pass.
-                const refusalReason = verification.reason;
-                const drifted =
-                    refusalReason === "stale" ||
-                    refusalReason === "expired";
-                contextRefusalReasonForLog = drifted ? refusalReason : null;
-                // Awaited rather than fired and forgotten: the response is
-                // about to be returned, and a refusal that is never counted
-                // is exactly the observation §22 wants. One upsert, on a path
-                // that is rare by construction.
-                await recordMemoryCounter(
-                    drifted ? "context_bundle_stale" : "context_bundle_rejected"
-                );
-                return drifted
-                    ? tracedJsonError(
-                          "The conversation context changed while this message was being sent.",
-                          "CHAT_CONTEXT_BUNDLE_STALE",
-                          409,
-                          traceId,
-                          { requiresPreflight: true }
-                      )
-                    : tracedJsonError(
-                          "Invalid chat context.",
-                          "INVALID_CONTEXT_BUNDLE",
-                          400,
-                          traceId
-                      );
-            }
+            if (!verification.ok || !turnContext) return await refuseContext(!verification.ok ? verification.reason : "stale", Boolean(fusion && !fusion.resume));
             verifiedContext = {
                 bundleId: verification.payload.bundleId,
                 expiresAt: new Date(verification.payload.expiresAtMs),
                 systemPrompt: turnContext.systemPrompt,
-                memoryText: turnContext.memory.prompt.text ?? "",
+                memoryData: turnContext.memory.prompt.data,
                 memoryUsedCount: turnContext.memory.prompt.usedCount,
                 memoryTokens: verification.payload.memoryTokens,
                 profileTokens: verification.payload.profileTokens,
@@ -3034,6 +3665,40 @@ async function handleChatPost(
           bundle use, no credit, lease or usage hold -- so there is nothing to
           return. The client makes the image under this turn's answer id.
         */
+        if (fusion) {
+            // A different tab may have committed a newer question or begun an
+            // ordinary answer while the Router was busy. Its result cannot be
+            // attached to the displaced source, even on the inline negative path.
+            if (existingFusion) {
+                const current = await prisma.conversation.findFirst({
+                    where: { id: fusion.key.conversationId, userId: fusion.userId, productKey: "chat", selectionMode: "auto",
+                        messages: { some: { id: fusion.key.sourceUserMessageId, role: "user", content: latestUserPromptText(messages) },
+                            none: { id: fusion.key.assistantMessageId } },
+                        continuationBridge: null, kind: conversationRouting?.kind, password: conversationRouting?.password,
+                        chatRecoveryEpoch: conversationRouting?.chatRecoveryEpoch, selectedModels: conversationRouting?.selectedModels,
+                        disabledPanels: conversationRouting?.disabledPanels, memoryMode: conversationRouting?.memoryMode,
+                        assistantProfileVersionId: conversationRouting?.assistantProfileVersionId },
+                    select: { messages: fusionHead, responseAttempts: existingAttempt },
+                });
+                if (!current || current.messages[0]?.id !== fusion.key.sourceUserMessageId ||
+                    current.messages[1]?.id !== conversationRouting?.messages?.[1]?.id ||
+                    current.responseAttempts.length) {
+                    throw routerLocationRefused();
+                }
+            }
+            if (fusion.resume) {
+                if (fusion.resume.image.image && !autoImageDecision.image) throw routerLocationRefused();
+                await consumeRouterLocation(fusion.key, fusion.requestDigest);
+            } else if (llmPick?.requiresLocation !== false) {
+                const continuation = sealRouterLocation({ requestDigest: fusion.requestDigest, routerDigest: fusionRouterDigest,
+                    traceId, searchPlan: allowRouterSearchPlan, searchUtcDate: fusion.searchUtcDate,
+                    pick: llmPick, image: autoImageDecision, expiresAt: fusion.expiresAt,
+                    ...(routerCallOutcome === "picked" || routerCallOutcome === "invalid" ||
+                        routerCallOutcome === "error" || routerCallOutcome === "timeout"
+                        ? { routerOutcome: routerCallOutcome } : {}) }, process.env.NEXTAUTH_SECRET!);
+                return routerLocationResponse(llmPick?.requiresLocation === true ? true : null, traceId, { continuation });
+            }
+        }
         if (autoImageDecision.image) {
             console.info(JSON.stringify({ event: "chat_auto_image_turn", traceId }));
             return new Response(
@@ -3057,7 +3722,7 @@ async function handleChatPost(
             );
         }
         await consumeRefinerPreview();
-        recordAutoSelection();
+        if (!hasContinuation) recordAutoSelection();
 
         if (modelConfig.usageClass === "deep-research" && session?.user?.id && conversationId && persistenceSourceUserMessageId) {
             await verifyDurableChatSourceMessage({ userId: session.user.id, conversationId,
@@ -3070,7 +3735,7 @@ async function handleChatPost(
                 conversationProductKey === "chat" &&
                 modelConfig.usageClass !== "deep-research"
         );
-        if (isDurableStoredChat) {
+        if (isDurableStoredChat && !durableAttempt) {
             if (!persistenceSourceUserMessageId) {
                 // A browser tab left open across the durable-recovery deploy
                 // still names its freshly saved user turn with the old
@@ -3114,6 +3779,7 @@ async function handleChatPost(
                 messages: executionMessages,
                 requestedModelId,
                 webSearchMode: webSearchMode ?? "off",
+                researchMode: researchMode ?? null,
                 context: verifiedContext?.requestIdentity ?? null,
                 acknowledgedUnavailableAttachmentIds:
                     acknowledgedUnavailableAttachmentIds ?? [],
@@ -3176,7 +3842,7 @@ async function handleChatPost(
         }
 
         if (verifiedContext && session?.user?.id) {
-            const consumption = await consumeContextBundle({
+            const consumption = continuationContextConsumed ? { consumed: true as const } : await consumeContextBundle({
                 bundleId: verifiedContext.bundleId,
                 modelId: requestedModelId,
                 userId: session.user.id,
@@ -3207,10 +3873,13 @@ async function handleChatPost(
                     {
                         requiresPreflight: true,
                         refusalReason: "already_consumed",
+                        ...(fusion && !fusion.resume ? { routerLocationRecovery: "saved" } : {}),
                     }
                 );
             }
+            continuationContextConsumed = true;
             contextSystemPrompt = verifiedContext.systemPrompt;
+            memoryData = verifiedContext.memoryData;
             memoryUsedCount = verifiedContext.memoryUsedCount;
             knowledgeChunkCount = verifiedContext.knowledgeChunkCount;
             contextAttribution = {
@@ -3218,7 +3887,7 @@ async function handleChatPost(
                 memoryTokens: verifiedContext.memoryTokens,
                 knowledgeChunkCount,
             };
-            if (verifiedContext.memoryText) {
+            if (verifiedContext.memoryData) {
                 void recordMemoryCounter("chat_memory_injected");
                 if (verifiedContext.memoryTruncatedByBudget) {
                     void recordMemoryCounter("injected_context_truncated");
@@ -3266,74 +3935,23 @@ async function handleChatPost(
         // Cached rather than a per-turn row read (isImageGenerationEnabledCached),
         // and skipped entirely on a deep-research turn, which carries no
         // capability blocks for it to decide.
-        const imageGenerationFlagEnabled = isDeepResearchTurn
+        const imageGenerationFlagEnabled = isDeepResearchTurn || isResearchPreview
             ? false
             : await isImageGenerationEnabledCached();
-        /*
-          The imported excerpt this turn carries, if this conversation was
-          started from one
-          (docs/policy/external-conversation-continuation.md §5).
-
-          Four gates, and every one of them answers `null` rather than an
-          error, because a turn that cannot read the source is an ordinary turn
-          with no seed -- the user's own messages are already in `messages` and
-          the answer must not be refused for want of context they did not ask
-          for:
-
-            * the rollout flag, read first so a rollback stops the injection
-              without touching anything else on this path;
-            * a bridge on this conversation, scoped by `userId` in the `where`;
-            * a source that still exists (a deleted one leaves the bridge's
-              foreign key NULL);
-            * an `external_conversation` unlock grant on *this request* when the
-              snapshot is locked -- the snapshot's own lock, never the
-              conversation's.
-
-          Skipped entirely on deep research, which carries no system blocks at
-          all and would price one it never sends.
-        */
-        let continuationSeed:
-            | { rulesText: string; transcriptText: string }
-            | undefined;
-        if (!isDeepResearchTurn && session?.user?.id && conversationId) {
-            try {
-                if (await isExternalContinuationEnabledCached()) {
-                    const { seed, outcome } = await loadContinuationTurnSeed({
-                        userId: session.user.id,
-                        conversationId,
-                        request: req,
-                    });
-                    continuationSeed =
-                        seed?.prompt.rulesText && seed.prompt.transcriptText
-                            ? {
-                                  rulesText: seed.prompt.rulesText,
-                                  transcriptText: seed.prompt.transcriptText,
-                              }
-                            : undefined;
-                    // docs/policy/external-conversation-continuation.md §12.
-                    // Fire and forget: an observation must not delay or fail a
-                    // turn that is answering normally.
-                    void recordContinuationSeedOutcome(outcome);
-                } else {
-                    // Counted from the chat route rather than from the loader,
-                    // because the loader is never called when the flag is off
-                    // -- and "the rollback is holding" is exactly the fact an
-                    // operator needs to be able to read.
-                    void recordContinuationSeedOutcome("flag_off");
-                }
-            } catch (error) {
-                // Fail open on the *answer* and closed on the *seed*: a
-                // database hiccup while reading imported context must not cost
-                // the user their turn, and the turn it produces is simply one
-                // without the excerpt. Logged so a seed that stops being
-                // carried is visible rather than silent.
-                logRequestError("chat_continuation_seed_failed", traceId, error);
-            }
+        const finalContinuation = preparedContinuation;
+        const continuationSeed = !isResearchPreview && !isDeepResearchTurn && finalContinuation.seed?.prompt.rulesText && finalContinuation.seed.prompt.transcriptText
+            ? { rulesText: finalContinuation.seed.prompt.rulesText, transcriptText: finalContinuation.seed.prompt.transcriptText } : undefined;
+        if (hasContinuation) {
+            continuation.receipt = continuationReceipt({ traceId, assistantMessageId: assistantMessageId ?? "",
+                selected: req.headers.has(PASSAGE_HEADER), outcome: isResearchPreview || isDeepResearchTurn ? "unsupported" : finalContinuation.outcome,
+                plan: continuationSeed ? finalContinuation.seed?.plan : null });
         }
         const turnSystemBlocks = buildChatTurnSystemBlocks({
             currentLocation,
             modelId: modelConfig.id,
             provider: modelConfig.provider,
+            usageClass: modelConfig.usageClass,
+            fileToolsOverride: modelConfig.fileToolsOverride ?? null,
             autoRouted,
             isDeepResearchTurn,
             isAuthenticated: Boolean(session?.user?.id),
@@ -3355,12 +3973,14 @@ async function handleChatPost(
             ),
             continuationSeed,
         });
-        const artifactToolPlan = turnSystemBlocks.artifactPlan;
+        const artifactToolPlan = isResearchPreview
+            ? null
+            : turnSystemBlocks.artifactPlan;
         if (mcpConnectionId) {
             if (conversationProductKey !== "chat" || isDeepResearchTurn) throw new ChatAccessError(400, "MCP_CHAT_REQUIRED", "Plugins are available in Chat with a model that supports tools.");
             try {
                 mcpConnector = await buildMcpChatTools({ userId: session!.user.id,
-                    connectionId: mcpConnectionId, modelId: modelConfig.id, nativeSearch: nativeSearchEnabled,
+                    connectionId: mcpConnectionId, model: modelConfig, nativeSearch: nativeSearchEnabled,
                     signal: req.signal, onState: state => {
                         try { streamController?.enqueue(buildMcpProgressChunk(state)); } catch { /* The client has closed its stream. */ }
                     } });
@@ -3374,6 +3994,7 @@ async function handleChatPost(
         // reading each part are stated inside it, before the part they govern.
         const formattedMessages: ModelMessage[] = buildChatTurnPrelude({
             contextSystemPrompt,
+            memoryData,
             blocks: turnSystemBlocks,
         });
         if (mcpConnector) {
@@ -3412,7 +4033,7 @@ async function handleChatPost(
             scope: "current_turn" | "past_turn";
         }> = [];
 
-        for (const msg of executionMessages) {
+        for (const [messageIndex, msg] of executionMessages.entries()) {
             if (msg.role === "assistant") {
                 const content = String(msg.content ?? "");
                 const preserved = providerContextQueues.get(content)?.shift();
@@ -3435,7 +4056,17 @@ async function handleChatPost(
             const fileParts: FilePart[] = [];
             // One entry per image in `fileParts`, from the bytes sent.
             const imageInputTokenEstimates: number[] = [];
-            const isLatestMessage = msg === latestMessage;
+            /*
+              By position, not by identity. `latestMessage` was taken before
+              `consumeRefinerPreview()` replaced `executionMessages` with the
+              consumed view, which is read back from the store as new objects.
+              An identity check therefore never matched on a turn carrying a
+              Prompt Refiner decision: the turn's own files were never handed
+              to the file tools, and every "make these images into a PDF"
+              answered SOURCE_UNREAD (traces 0daea561, d937b61b, 2026-11-15).
+            */
+            const isLatestMessage =
+                messageIndex === executionMessages.length - 1;
 
             /**
              * Reads one file into the turn -- attached directly, or lifted
@@ -3539,9 +4170,26 @@ async function handleChatPost(
                     return "ok";
                 }
 
+                // An earlier message's file past its share of the allowance is
+                // named to the model and left out; it never fails the turn.
+                const omitPastAttachment = () => {
+                    textAttachments.push({
+                        name,
+                        kind: PAST_ATTACHMENT_OMITTED_KIND,
+                        text: PAST_ATTACHMENT_OMITTED_TEXT,
+                    });
+                    return "ok" as const;
+                };
+                if (!isLatestMessage && pastAttachmentTokens >= pastAttachmentTokenBudget) {
+                    return omitPastAttachment();
+                }
+
                 const remainingCharacters =
-                    MAX_EXTRACTED_ATTACHMENT_CHARACTERS - totalExtractedCharacters;
-                if (remainingCharacters <= 64) {
+                    CHAT_ATTACHMENT_PARSE_CHARACTERS - totalExtractedCharacters;
+                const strictLatestText = isLatestMessage &&
+                    (format.category === "office" || format.category === "text");
+                if (remainingCharacters <= (strictLatestText ? 0 : 64)) {
+                    if (!isLatestMessage) return omitPastAttachment();
                     throw new ChatAccessError(
                         413,
                         "ATTACHMENT_TEXT_TOO_LARGE",
@@ -3550,9 +4198,17 @@ async function handleChatPost(
                 }
 
                 const addExtractedText = (kind: string, text: string) => {
+                    if (!isLatestMessage) {
+                        const tokens = estimatePromptTokens(text);
+                        if (pastAttachmentTokens + tokens > pastAttachmentTokenBudget) {
+                            omitPastAttachment();
+                            return;
+                        }
+                        pastAttachmentTokens += tokens;
+                    }
                     totalExtractedCharacters += text.length;
                     if (
-                        totalExtractedCharacters > MAX_EXTRACTED_ATTACHMENT_CHARACTERS
+                        totalExtractedCharacters > CHAT_ATTACHMENT_PARSE_CHARACTERS
                     ) {
                         throw new ChatAccessError(
                             413,
@@ -3705,6 +4361,26 @@ async function handleChatPost(
                     );
                 }
 
+                if (format.category === "iwork") {
+                    // Pages, Numbers and Keynote are never read here. The
+                    // model is told the file is attached and what it can do
+                    // with it, so it neither guesses at the contents nor says
+                    // the file is missing (generated-artifacts.md section 15).
+                    // Said as it is at send time: the renderer can be switched
+                    // off after the file was uploaded, and the model must not
+                    // be promised a tool this turn will not carry.
+                    addExtractedText(
+                        format.promptKind,
+                        officeRenderingEnabled()
+                            ? "[This Apple iWork file is attached, but its contents cannot be read here. " +
+                                  "It can be laid out as a PDF with convert_files (to_pdf).]"
+                            : "[This Apple iWork file is attached, but its contents cannot be read here, " +
+                                  "and it cannot be converted right now. Say so, and suggest exporting it " +
+                                  "from Pages or Numbers as a Word, Excel or PDF file.]"
+                    );
+                    return "ok";
+                }
+
                 if (format.category === "legacy-office") {
                     // Word/Excel/PowerPoint 97-2003 and RTF, read by this
                     // repository's own parsers. Bounded by the same remaining
@@ -3743,15 +4419,27 @@ async function handleChatPost(
                         extractedText = await parseOfficeSafely(
                             buffer,
                             format.mediaType,
-                            remainingCharacters - 64
+                            isLatestMessage ? remainingCharacters : remainingCharacters - 64,
+                            { strictOverflow: isLatestMessage }
                         );
                     } catch (error) {
+                        if (error instanceof OfficeTextOverflowError) {
+                            throw new ChatAccessError(
+                                413,
+                                "ATTACHMENT_TEXT_TOO_LARGE",
+                                "Extracted attachment text exceeds the request limit."
+                            );
+                        }
                         if (fromArchive) return "unreadable";
                         throw error;
                     }
                     if (!extractedText) {
                         if (fromArchive) return "no-text";
-                        throw new Error(`No readable text found in ${name}.`);
+                        throw new ChatAccessError(
+                            400,
+                            "ATTACHMENT_NO_TEXT",
+                            "The attached document has no readable text."
+                        );
                     }
                     addExtractedText(format.promptKind, extractedText);
                     return "ok";
@@ -3867,6 +4555,11 @@ async function handleChatPost(
                     throw new Error("Attachment access denied.");
                 }
 
+                // One of the oldest earlier files past the conversation's count:
+                // decided here, in the same order the probe above counted them.
+                const countOmitted = !isLatestMessage && olderAttachmentsToOmit > 0;
+                if (countOmitted) olderAttachmentsToOmit -= 1;
+
                 const attachmentScope: "current_turn" | "past_turn" =
                     isLatestMessage ? "current_turn" : "past_turn";
                 /*
@@ -3890,6 +4583,89 @@ async function handleChatPost(
                             scope: attachmentScope,
                         });
                     }
+                    continue;
+                }
+
+                // Named to the model and left out unread -- unless storage
+                // confirmed it gone, when it takes the ordinary path below,
+                // which marks it unavailable and answers 410 (§11.4).
+                if (countOmitted && !countOmittedMissingKeys.has(attachment.objectKey)) {
+                    textAttachments.push({
+                        name: attachment.name,
+                        kind: PAST_ATTACHMENT_OMITTED_KIND,
+                        text: PAST_ATTACHMENT_OMITTED_TEXT,
+                    });
+                    continue;
+                }
+
+                /*
+                  An earlier message's file whose text an earlier turn already
+                  extracted is not read or parsed again (lib/attachmentTextCache.ts).
+                  It answers to the same past-file share and parse budget as a
+                  freshly read one, and does not count towards the request's
+                  byte total, because no bytes are read.
+                */
+                const textCacheEligible =
+                    !isLatestMessage &&
+                    !isGuestObject &&
+                    Boolean(resolved?.attachmentId) &&
+                    ATTACHMENT_TEXT_CACHE_CATEGORIES.has(format.category) &&
+                    !(revisionEnabled && format.id === "xlsx" && resolved?.sourceLineageId) &&
+                    attachmentTextCacheEnabled();
+                if (textCacheEligible) {
+                    const cached = await readAttachmentTextCache(resolved!.attachmentId!);
+                    // The cache stands in for reading the file, not for
+                    // knowing it exists: storage is still asked, and a file it
+                    // confirms gone takes the ordinary path below, which marks
+                    // it unavailable and answers 410 exactly as before. An
+                    // unreachable answer is a fact about the connection, not
+                    // the file, so the cached text is used.
+                    const originalGone =
+                        cached !== null &&
+                        (await probeR2Object(attachment.objectKey)).state === "missing";
+                    if (cached && !originalGone) {
+                        for (const entry of cached) {
+                            const tokens = estimatePromptTokens(entry.text);
+                            if (
+                                pastAttachmentTokens + tokens > pastAttachmentTokenBudget ||
+                                totalExtractedCharacters + entry.text.length >
+                                    CHAT_ATTACHMENT_PARSE_CHARACTERS
+                            ) {
+                                textAttachments.push({
+                                    name: attachment.name,
+                                    kind: PAST_ATTACHMENT_OMITTED_KIND,
+                                    text: PAST_ATTACHMENT_OMITTED_TEXT,
+                                });
+                                continue;
+                            }
+                            pastAttachmentTokens += tokens;
+                            totalExtractedCharacters += entry.text.length;
+                            textAttachments.push({
+                                name: attachment.name,
+                                kind: entry.kind,
+                                text: entry.text,
+                            });
+                        }
+                        continue;
+                    }
+                }
+
+                // An earlier file the share cannot take is not even read --
+                // but storage is still asked whether it exists, so a file it
+                // confirms gone takes the ordinary path below, which marks it
+                // unavailable and answers 410, instead of reading as merely
+                // over budget.
+                if (
+                    !isLatestMessage &&
+                    typeof resolved?.size === "number" &&
+                    pastAttachmentBytes + resolved.size > MAX_TOTAL_ATTACHMENT_SIZE &&
+                    (await probeR2Object(attachment.objectKey)).state !== "missing"
+                ) {
+                    textAttachments.push({
+                        name: attachment.name,
+                        kind: PAST_ATTACHMENT_OMITTED_KIND,
+                        text: PAST_ATTACHMENT_OMITTED_TEXT,
+                    });
                     continue;
                 }
 
@@ -4022,6 +4798,13 @@ async function handleChatPost(
                   because the prompt needs them; nothing is read twice for this.
                 */
                 if (isLatestMessage) {
+                    if (revisionEnabled && resolved?.sourceLineageId && resolved.sourceConversationId === conversationId) {
+                        revisionSources.set(turnAttachmentHandle(attachmentIndex), {
+                            sourceArtifactId: resolved.sourceArtifactId ?? null,
+                            lineageId: resolved.sourceLineageId,
+                            canonicalSpec: resolved.sourceCanonicalSpec,
+                        });
+                    }
                     turnAttachmentBytes.set(
                         turnAttachmentHandle(attachmentIndex),
                         {
@@ -4031,22 +4814,102 @@ async function handleChatPost(
                         }
                     );
                 }
-                totalAttachmentBytes += attachmentBytes;
-                if (totalAttachmentBytes > MAX_TOTAL_ATTACHMENT_SIZE) {
-                    throw new ChatAccessError(
-                        413,
-                        "ATTACHMENT_TOTAL_TOO_LARGE",
-                        "Attachments exceed the total request size limit."
-                    );
+                if (isLatestMessage) {
+                    totalAttachmentBytes += attachmentBytes;
+                    if (totalAttachmentBytes > MAX_TOTAL_ATTACHMENT_SIZE) {
+                        throw new ChatAccessError(
+                            413,
+                            "ATTACHMENT_TOTAL_TOO_LARGE",
+                            "Attachments exceed the total request size limit."
+                        );
+                    }
+                } else {
+                    pastAttachmentBytes += attachmentBytes;
+                    if (pastAttachmentBytes > MAX_TOTAL_ATTACHMENT_SIZE) {
+                        textAttachments.push({
+                            name: attachment.name,
+                            kind: PAST_ATTACHMENT_OMITTED_KIND,
+                            text: PAST_ATTACHMENT_OMITTED_TEXT,
+                        });
+                        continue;
+                    }
                 }
 
                 if (format.category !== "archive") {
+                    if (revisionEnabled && format.id === "xlsx" && resolved?.sourceLineageId) {
+                        const workbook = parseCanonicalWorkbookSpec(resolved.sourceCanonicalSpec);
+                        if (!workbook) throw new ChatAccessError(400, "ATTACHMENT_UNREADABLE",
+                            "The attached workbook revision source cannot be read completely.");
+                        const structured = JSON.stringify(workbook.spec);
+                        if (!isLatestMessage) {
+                            const tokens = estimatePromptTokens(structured);
+                            if (pastAttachmentTokens + tokens > pastAttachmentTokenBudget) {
+                                textAttachments.push({ name: attachment.name,
+                                    kind: PAST_ATTACHMENT_OMITTED_KIND, text: PAST_ATTACHMENT_OMITTED_TEXT });
+                                continue;
+                            }
+                            pastAttachmentTokens += tokens;
+                        }
+                        totalExtractedCharacters += structured.length;
+                        if (totalExtractedCharacters > CHAT_ATTACHMENT_PARSE_CHARACTERS) {
+                            throw new ChatAccessError(413, "ATTACHMENT_TEXT_TOO_LARGE",
+                                "Extracted attachment text exceeds the request limit.");
+                        }
+                        textAttachments.push({ name: attachment.name,
+                            kind: workbook.fidelity === "values" ? "spreadsheet typed value grid (original layout unavailable)" : "spreadsheet specification",
+                            text: structured });
+                        continue;
+                    }
+                    const textEntriesBefore = textAttachments.length;
+                    const filePartsBefore = fileParts.length;
+                    const parseRoomBefore =
+                        CHAT_ATTACHMENT_PARSE_CHARACTERS - totalExtractedCharacters;
                     await ingestAttachmentFile({
                         format,
                         name: attachment.name,
                         buffer: attachmentBuffer,
                         fromArchive: false,
                     });
+                    if (textCacheEligible) {
+                        // Stored only when the extraction is whole: text and
+                        // nothing else, not omitted, and not stopped by the
+                        // parse budget (the extractors stop 64 short of it).
+                        const produced = textAttachments.slice(textEntriesBefore);
+                        const producedCharacters = produced.reduce(
+                            (sum, entry) => sum + entry.text.length,
+                            0
+                        );
+                        if (
+                            produced.length > 0 &&
+                            fileParts.length === filePartsBefore &&
+                            produced.every(
+                                (entry) => entry.kind !== PAST_ATTACHMENT_OMITTED_KIND
+                            ) &&
+                            producedCharacters + 64 < parseRoomBefore
+                        ) {
+                            // A row cascaded from the attachment: a deletion
+                            // removes it in the same transaction, and a write
+                            // for a row already gone fails and writes nothing.
+                            await writeAttachmentTextCache(
+                                resolved!.attachmentId!,
+                                produced
+                            ).catch((error) => {
+                                logRequestError(
+                                    "attachment_text_cache_write_failed",
+                                    traceId,
+                                    error,
+                                    requestedModelId,
+                                    {
+                                        phase: "attachment_text_cache",
+                                        failureLayer: "database",
+                                        ...(resolved?.attachmentId
+                                            ? { attachmentId: resolved.attachmentId }
+                                            : {}),
+                                    }
+                                );
+                            });
+                        }
+                    }
                     continue;
                 }
 
@@ -4172,6 +5035,23 @@ async function handleChatPost(
                 ],
             });
         }
+        if (isResearchPreview) {
+            // Replace every ordinary Chat prelude with the same one-shot
+            // payload the offer and reservation helpers measured.
+            formattedMessages.splice(
+                0,
+                formattedMessages.length,
+                {
+                    role: "system",
+                    content: researchPreviewInstructions({
+                        locale: researchPreviewLanguage,
+                        currentDate: researchPreviewCurrentDate,
+                        pageReadingEnabled: researchFeatures.pageReading,
+                    }),
+                },
+                ...researchPreviewMessages(researchPreviewQuestion!)
+            );
+        }
         const uncachedLocationMessages = [...formattedMessages];
         appendChatLocationContext(uncachedLocationMessages, currentLocation);
         const locationCacheBreakpoint = appendChatLocationContext(
@@ -4248,11 +5128,29 @@ async function handleChatPost(
         if (!nativeSearchReservation.ok) {
             throw webSearchCostRefusalError(nativeSearchReservation.reason);
         }
-        const budget = createChatBudget(
-            access.kind,
-            modelConfig,
-            inputEstimate.breakdown(),
-            {
+        const budget = isResearchPreview
+            ? createResearchPreviewBudget({
+                  accessKind: access.kind,
+                  model: modelConfig,
+                  input: researchPreviewInputEstimate({
+                      question: researchPreviewQuestion!,
+                      locale: researchPreviewLanguage,
+                      currentDate: researchPreviewCurrentDate,
+                      pageReadingEnabled: researchFeatures.pageReading,
+                  }),
+                  webSearchSurchargeCredits: getWebSearchSurchargeCredits(
+                      "always",
+                      webSearchCapability,
+                      searchBackendReadiness
+                  ),
+                  searchReservation: nativeSearchReservation,
+                  pageReadingEnabled: researchFeatures.pageReading,
+              })
+            : createChatBudget(
+                  access.kind,
+                  modelConfig,
+                  inputEstimate.breakdown(),
+                  {
                 webSearchSurchargeCredits: getWebSearchSurchargeCredits(
                     webSearchMode ?? "off",
                     webSearchCapability,
@@ -4272,8 +5170,33 @@ async function handleChatPost(
                 reservationOnlyInputTokens,
                 additionalToolInputTokens: mcpConnector ? mcpConnector.definitionTokens + mcpConnector.resultInputAllowance : 0,
                 toolInputPasses: mcpConnector ? MCP_CHAT_MAX_STEPS : 1,
-            }
-        );
+                // Reserved only above the flat limit; the loop is then stopped
+                // at what was reserved (`toolLoopStepCap` below).
+                longContextToolInputPasses: Math.max(
+                    artifactToolPlan?.registerTool ? GENERATED_ARTIFACT_MAX_STEPS : 1,
+                    appManagedSearchEnabled && webSearchCapability.searchBackend
+                        ? APP_MANAGED_SEARCH_MAX_STEPS
+                        : 1
+                ),
+                  }
+              );
+        // On a long-context turn the application tool loop runs no more calls
+        // than the reservation holds: each re-sends the whole prompt, and a
+        // call past the hold would be one the turn's credits do not cover.
+        const toolLoopStepCap =
+            budget.longContextSettlement && !isResearchPreview
+                ? (budget.providerCallPasses ?? 1)
+                : Number.POSITIVE_INFINITY;
+        if (
+            isResearchPreview &&
+            budget.maxOutputTokens !== researchPreviewAdmission?.limits?.totalOutputTokens
+        ) {
+            throw new ChatAccessError(
+                409,
+                "RESEARCH_PREVIEW_BUDGET_MISMATCH",
+                "Research Preview budget is unavailable."
+            );
+        }
         // `budget.inputTokens`, not the raw estimate: what this guard has to
         // bound is what the request really sends, and a provider-native search
         // adds 6,400 input tokens on top of the conversation (6,000 of
@@ -4293,7 +5216,9 @@ async function handleChatPost(
         // to hold one, so the guard reads the single-pass view of the budget.
         const outputBudget = fitChatOutputToContextWindow({
             contextWindowTokens: modelConfig.contextWindowTokens,
-            reservedInputTokens: contextInputTokens,
+            // What is sent: the image allowance is reserved, never sent, so
+            // it takes no room from the answer (lib/chatSecurity.ts windowRoom).
+            reservedInputTokens: Math.max(0, contextInputTokens - reservationOnlyInputTokens),
             requestOutputCapTokens: budget.maxOutputTokens,
             providerMaxOutputTokens: budget.providerMaxOutputTokens,
         });
@@ -4324,7 +5249,7 @@ async function handleChatPost(
         // left to record, and a row here would enter the same decision twice
         // -- once as a shadow prediction and once as the real run -- into
         // metrics that read the two as independent.
-        if (!autoRouted) scheduleRoutingShadowRun(() => {
+        if (!autoRouted && !isResearchPreview) scheduleRoutingShadowRun(() => {
             const lastUserTurn = [...formattedMessages]
                 .reverse()
                 .find((message) => message.role === "user");
@@ -4410,7 +5335,7 @@ async function handleChatPost(
                   // model by the aggregate preflight. Without it the three panels of
                   // one comparison would each race for a slot, and a run could be
                   // admitted in part.
-                  admissionToken,
+                  admissionToken: replanned ? undefined : admissionToken,
               });
         leaseOwnership = chatLeaseAcquired(accessGrant.leaseId);
         usageReservation = accessGrant.usageReservation;
@@ -4430,16 +5355,22 @@ async function handleChatPost(
                 ...shadowAccumulator.snapshot(),
             });
         }
-        try {
-            await notifyProviderBudgetIfNeeded(modelConfig.provider);
-        } catch (error) {
+        const searchSelectionEligible = access.kind !== "guest" && autoSelection.routed &&
+            llmPick?.modelId === modelConfig.id && llmPick.requiresFileGeneration === false;
+        const presearchQueries = allowRouterSearchPlan && searchSelectionEligible && !mcpConnector &&
+            modelConfig.usageClass !== "deep-research" && appManagedSearchEnabled && webSearchCapability.searchBackend
+            ? llmPick?.searchQueries : undefined;
+        // The budget has been reserved. Only the admitted presearch can run
+        // alongside this alert check; both finish before model dispatch.
+        providerBudgetNotice = notifyProviderBudgetIfNeeded(modelConfig.provider).catch((error) => {
             logRequestError(
                 "provider_budget_alert_failed",
                 traceId,
                 error,
                 requestedModelId
             );
-        }
+        });
+        if (!presearchQueries?.length) await providerBudgetNotice;
 
         // Perplexity's "sonar-deep-research" model doesn't stream like every
         // other model here -- it's a submit-then-poll async job that can run
@@ -4625,10 +5556,56 @@ async function handleChatPost(
           disconnects mid-answer does not leave a search running for a turn
           nobody is reading.
         */
+        const researchPreviewRunSignal = isResearchPreview
+            ? AbortSignal.any([req.signal, AbortSignal.timeout(120_000)])
+            : req.signal;
+        const recordAppManagedSearchOutcome = (event: {
+            status: string;
+            reason?: string;
+            queryLength: number;
+            resultCount: number;
+            durationMs: number;
+            reused: boolean;
+            toolCallIndex: number;
+            batchSize: number;
+        }) => {
+            // Content-free. The query text is deliberately absent.
+            console.info(
+                JSON.stringify({
+                    event: "app_managed_web_search",
+                    traceId,
+                    modelId: modelConfig.id,
+                    backend: webSearchCapability.searchBackend,
+                    status: event.status,
+                    reason: event.reason ?? null,
+                    queryLength: event.queryLength,
+                    resultCount: event.resultCount,
+                    durationMs: event.durationMs,
+                    reused: event.reused,
+                    toolCallIndex: event.toolCallIndex,
+                    batchSize: event.batchSize,
+                    timestamp: new Date().toISOString(),
+                })
+            );
+        };
+        const researchPreviewExecution =
+            isResearchPreview && webSearchCapability.searchBackend
+                ? createResearchPreviewExecution({
+                      backend: webSearchCapability.searchBackend,
+                      provider: modelConfig.provider,
+                      totalOutputTokens: budget.maxOutputTokens,
+                      locale: researchPreviewLanguage,
+                      signal: researchPreviewRunSignal,
+                      pageReadingEnabled: researchFeatures.pageReading,
+                      onSearchOutcome: recordAppManagedSearchOutcome,
+                  })
+                : null;
         const appManagedSearchTool =
-            appManagedSearchEnabled && webSearchCapability.searchBackend
+            researchPreviewExecution ??
+            (appManagedSearchEnabled && webSearchCapability.searchBackend
                 ? buildAppManagedWebSearchTool({
                       backend: webSearchCapability.searchBackend,
+                      extraSnippets: Boolean(presearchQueries?.length),
                       maxQueries:
                           appManagedSearchQueryCeiling({
                               capability: webSearchCapability,
@@ -4636,31 +5613,9 @@ async function handleChatPost(
                               webSearchEnabled: true,
                           }) ?? 0,
                       signal: req.signal,
-                      onOutcome: (event) => {
-                          // Content-free. The query text is deliberately absent:
-                          // it is the user's question, or a paraphrase of it,
-                          // and a log line is not a place for either. What is
-                          // here is enough to see a backend degrading.
-                          console.info(
-                              JSON.stringify({
-                                  event: "app_managed_web_search",
-                                  traceId,
-                                  modelId: modelConfig.id,
-                                  backend: webSearchCapability.searchBackend,
-                                  status: event.status,
-                                  reason: event.reason ?? null,
-                                  queryLength: event.queryLength,
-                                  resultCount: event.resultCount,
-                                  durationMs: event.durationMs,
-                                  reused: event.reused,
-                                  toolCallIndex: event.toolCallIndex,
-                                  batchSize: event.batchSize,
-                                  timestamp: new Date().toISOString(),
-                              })
-                          );
-                      },
+                      onOutcome: recordAppManagedSearchOutcome,
                   })
-                : null;
+                : null);
         // Whether this dispatch will actually be able to search, as opposed to
         // being allowed to. The Router's filter answers the second: it keeps a
         // native model for a turn that needs current information because the
@@ -4727,6 +5682,28 @@ async function handleChatPost(
         let streamController: ReadableStreamDefaultController<string> | null =
             null;
         let artifactToolRejectionLog: ArtifactToolRejectionLog | null = null;
+        /*
+          Files the system block listed whose bytes were not read above.
+
+          The handles were named to the model before the files were opened, so
+          a file that turned out to be gone is still on its list. The tools are
+          told which ones, so they answer "it could not be opened" rather than
+          "nothing is attached" -- which the model repeats to a user who did
+          attach it. Counts go to the log: a gap here is a server-side fault.
+        */
+        const unreadTurnAttachments = new Map(
+            turnAttachmentDescriptors
+                .filter((descriptor) => !turnAttachmentBytes.has(descriptor.handle))
+                .map((descriptor) => [descriptor.handle, descriptor.name] as const)
+        );
+        if (unreadTurnAttachments.size > 0) {
+            console.warn(JSON.stringify({
+                event: "chat_turn_attachments_unread",
+                traceId,
+                listedAttachments: turnAttachmentDescriptors.length,
+                readAttachments: turnAttachmentBytes.size,
+            }));
+        }
         const artifactCollector =
             artifactToolPlan && artifactToolPlan.registerTool
                 ? new GeneratedArtifactCollector({
@@ -4735,12 +5712,15 @@ async function handleChatPost(
                       conversationId: conversationId ?? null,
                       modelId: modelConfig.id,
                       traceId,
-                      noteRejection: (toolCallId, toolName, input, rejectionCode) =>
+                      revisionEnabled,
+                      revisionSources,
+                      noteRejection: (toolCallId, toolName, input, rejectionCode, diagnostics) =>
                           artifactToolRejectionLog?.record(
                               toolCallId,
                               toolName,
                               input,
-                              rejectionCode
+                              rejectionCode,
+                              diagnostics
                           ),
                       emitProgress: (format) => {
                           if (!streamController) return;
@@ -4751,8 +5731,10 @@ async function handleChatPost(
                       },
                       // This turn's own files, by the handles the system block
                       // named. Already read, already ownership-checked; the
-                      // batch tool is the only reader and it never sees a key.
+                      // batch and conversion tools are the only readers and
+                      // neither ever sees a key.
                       turnAttachments: turnAttachmentBytes,
+                      unreadTurnAttachments,
                   })
                 : null;
         /*
@@ -4774,6 +5756,9 @@ async function handleChatPost(
             ? buildGeneratedArtifactToolConfig(artifactCollector, {
                   registerDocumentBatch: Boolean(
                       artifactToolPlan?.registerDocumentBatch
+                  ),
+                  registerFileConversion: Boolean(
+                      artifactToolPlan?.registerFileConversion
                   ),
                   // Read at call time, which is after the assignment below:
                   // a tool cannot execute before the request that carries it
@@ -4807,7 +5792,7 @@ async function handleChatPost(
           other turn keeps the SDK's single-step default, so a request that
           registers no application tool behaves exactly as it does today.
         */
-        const combinedToolConfig =
+        let combinedToolConfig =
             webSearchToolConfig || appManagedSearchTool || artifactToolConfig || mcpConnector
                 ? {
                       ...(webSearchToolConfig ?? {}),
@@ -4834,19 +5819,22 @@ async function handleChatPost(
                       ...(appManagedSearchTool && !artifactToolConfig
                           ? {
                                 stopWhen: stepCountIs(
-                                    APP_MANAGED_SEARCH_MAX_STEPS
+                                    Math.min(APP_MANAGED_SEARCH_MAX_STEPS, toolLoopStepCap)
                                 ),
                             }
                           : {}),
                       ...(artifactToolConfig
                           ? {
                                 stopWhen: stepCountIs(
-                                    appManagedSearchTool
-                                        ? Math.max(
-                                              GENERATED_ARTIFACT_MAX_STEPS,
-                                              APP_MANAGED_SEARCH_MAX_STEPS
-                                          )
-                                        : GENERATED_ARTIFACT_MAX_STEPS
+                                    Math.min(
+                                        appManagedSearchTool
+                                            ? Math.max(
+                                                  GENERATED_ARTIFACT_MAX_STEPS,
+                                                  APP_MANAGED_SEARCH_MAX_STEPS
+                                              )
+                                            : GENERATED_ARTIFACT_MAX_STEPS,
+                                        toolLoopStepCap
+                                    )
                                 ),
                                 /*
                                   The two halves of "was this file begun, and
@@ -4928,11 +5916,66 @@ async function handleChatPost(
          * and in one place, because doing it per-source is what broke twice.
          * See lib/chatProviderPrompt.ts.
          */
+        // Fallback gets the original execution view and its own admitted tool.
+        // Primary presearch must not leak another attempt's sources or budget.
+        const fallbackSdkMessages = splitProviderInstructions(
+            locationCacheBreakpoint ? uncachedLocationMessages : formattedMessages
+        ).messages;
+        // File-capable models offer artifact tools on ordinary text turns too.
+        // Require an explicit non-file decision and retain those tools for the answer.
+        if (routerSearchPlanCandidate && appManagedSearchTool && !mcpConnector) {
+            searchObservation = createChatSearchObservation({
+                flagEnabled: presearchFlagEnabled, planOffered: allowRouterSearchPlan,
+                plannedQueries: allowRouterSearchPlan ? llmPick?.searchQueries?.length ?? 0 : 0,
+                selectionEligible: searchSelectionEligible, snapshot: appManagedSearchTool.session.snapshot,
+            });
+        }
+        let lookupStep: ReturnType<typeof qwenLookupStep>;
+        let groundedToolDescription: string | undefined;
+        let groundedThinkingBudget: number | undefined;
+        let citationUrls: readonly string[] = [];
+        if (presearchQueries?.length && appManagedSearchTool && llmPick) {
+            presearchForSettlement = appManagedSearchTool;
+            const finishPresearch = latency.stage("presearchMs");
+            try {
+                const prepared = await prepareRouterSearch({
+                    queries: presearchQueries,
+                    tool: appManagedSearchTool,
+                    signal: req.signal,
+                    compactEvidence: process.env.CHAT_COMPACT_SEARCH_EVIDENCE_ENABLED === "true",
+                    groundedAnswer: process.env.CHAT_CONCISE_GROUNDED_ANSWER_ENABLED === "true"
+                        ? (llmPick.simpleLookup === true ? "lookup" : "full") : undefined,
+                    inputHeadroomTokens: contextInputTokens - reservationOnlyInputTokens -
+                        toReservedInputTokens(inputEstimate.breakdown()) - TOOL_DEFINITION_INPUT_TOKEN_OVERHEAD,
+                });
+                const hasSources = prepared.length > 0 && appManagedSearchTool.session.snapshot().sources.length > 0;
+                const fastPath = process.env.CHAT_GROUNDED_ANSWER_FAST_PATH_ENABLED === "true" &&
+                    typeof llmPick.simpleLookup === "boolean";
+                const fidelity = hasSources && fastPath && process.env.CHAT_GROUNDED_SOURCE_FIDELITY_ENABLED === "true"
+                    ? withGroundedSourceGuidance(prepared, llmPick.simpleLookup === true, new Date(requestReceivedAt)) : undefined;
+                const evidence = fidelity?.evidence ?? prepared;
+                const injected = appendRouterSearchEvidence(formattedMessages, evidence);
+                if (injected && hasSources) {
+                    citationUrls = fidelity?.urls ?? [];
+                    if (fastPath && combinedToolConfig) {
+                        const tools = withGroundedSearchDescription(combinedToolConfig.tools, evidence[1].text);
+                        combinedToolConfig = { ...combinedToolConfig, tools };
+                        const description = tools[APP_MANAGED_WEB_SEARCH_TOOL_NAME]?.description;
+                        if (typeof description === "string") groundedToolDescription = description;
+                    }
+                    const legacyLookup = process.env.CHAT_QWEN_GROUNDED_LOOKUP_ENABLED === "true";
+                    const boundedThinking = fastPath && !legacyLookup && !modelConfig.reasoning;
+                    if (llmPick.simpleLookup && (boundedThinking || legacyLookup)) {
+                        lookupStep = qwenLookupStep(modelConfig, boundedThinking);
+                        if (lookupStep && boundedThinking) groundedThinkingBudget = QWEN_GROUNDED_THINKING_BUDGET;
+                    }
+                }
+                searchObservation?.presearch(injected, Boolean(lookupStep));
+            } finally { finishPresearch(); }
+            await providerBudgetNotice;
+        }
         const { messages: sdkMessages, instructions: sdkInstructions } =
             splitProviderInstructions(formattedMessages);
-        const fallbackSdkMessages = locationCacheBreakpoint
-            ? splitProviderInstructions(uncachedLocationMessages).messages
-            : sdkMessages;
         const manifestMessages = formattedMessages.map((message) => ({
             role: message.role,
             parts: Array.isArray(message.content)
@@ -5010,7 +6053,9 @@ async function handleChatPost(
             modelId: modelConfig.id,
             provider: modelConfig.provider,
             maxOutputTokens: requestMaxOutputTokens,
-            settings: { ...generationSettings, ...(locationCacheBreakpoint?.historyBreakpoint != null ? {
+            settings: { ...generationSettings, ...(groundedToolDescription ? {
+                groundedAnswer: { searchToolDescription: groundedToolDescription, qwenThinkingBudget: groundedThinkingBudget ?? null },
+            } : {}), ...(locationCacheBreakpoint?.historyBreakpoint != null ? {
                 locationCacheBreakpoint: { position: "stable_history", messageIndex: locationCacheBreakpoint.historyBreakpoint, ttl: ANTHROPIC_PROMPT_CACHE_TTL },
             } : {}) } as Record<string, unknown>,
             // Named rather than embedded when the artifact tool is present:
@@ -5044,9 +6089,98 @@ async function handleChatPost(
                 "AbortError"
             );
         }
+        if (continuationSeed && !replanned) {
+            let checked: ContinuationTurnSeedResult;
+            try {
+                checked = await readContinuation();
+            } catch (error) {
+                // A handoff cannot shed its references. This request has not crossed
+                // the provider boundary, so close its prepared dispatch as unused.
+                if (hasReviewHandoff && dispatchRecord) {
+                    await recordNotDispatched(dispatchRecord, "continuation_source_revoked", "application");
+                    dispatchRecord = null;
+                }
+                throw error;
+            }
+            if (importedSource && !continuationAutoSourceEnabledFromValue(process.env.CHAT_CONTINUATION_AUTO_SOURCE_ENABLED))
+                checked = { seed: null, outcome: "flag_off" };
+            if (!checked.seed || checked.seed.prompt.transcriptText !== continuationSeed.transcriptText) {
+                if (hasReviewHandoff) {
+                    if (dispatchRecord) {
+                        await recordNotDispatched(dispatchRecord, "continuation_source_revoked", "application");
+                        dispatchRecord = null;
+                    }
+                    throw new ChatAccessError(409, "REVIEW_HANDOFF_CONTEXT_UNAVAILABLE",
+                        "This comparison's references changed. Reopen it from the original Chat.");
+                }
+                // No answer provider has run. Close this unused plan and rerun the ordinary
+                // model/capability/token/price/admission path, without another Router call.
+                if (dispatchRecord) {
+                    await recordNotDispatched(dispatchRecord, "continuation_source_revoked", "application");
+                    dispatchRecord = null;
+                }
+                if (usageReservation) {
+                    await settleChatUsage(usageReservation, { inputTokens: 0, outputTokens: 0, outcome: "failed" });
+                    usageReservation = null;
+                }
+                stopLeaseHeartbeat?.();
+                const unusedLease = chatLeaseToReleaseOnUnwind(leaseOwnership);
+                if (unusedLease) {
+                    await releaseChatAccess(unusedLease.leaseId, { traceId, reason: "continuation_replan" });
+                    leaseOwnership = chatLeaseReleased();
+                }
+                mcpConnector?.cancel();
+                mcpConnector = null;
+                // A transient DB failure also closes the source path for this request.
+                return executeTurn(importedSource ? null : llmPick, importedSource ? "source_revoked" : routerCallOutcome,
+                    { seed: null, outcome: checked.outcome }, true);
+            }
+        }
+        if (hasContinuation) recordAutoSelection();
         const initialAttemptAbortController = new AbortController();
+        // The last error the active provider stream reported through `onError`.
+        // Read only by the in-stream error report: an empty answer settles as
+        // the SDK's "no output" error, and this is what caused it.
+        let observedStreamError: unknown = null;
+        const observeStreamError = (context: { traceId: string; modelId: string }) => {
+            const log = logStreamErrorWithoutContent(context);
+            return (event: { error: unknown }) => {
+                observedStreamError = event.error;
+                log(event);
+            };
+        };
+        // A long-context turn's application tool loop (not MCP or Research
+        // Preview, which keep their own step budgets) shares the reserved
+        // output and input across its calls (lib/chatLongContextToolLoop.ts).
+        // Only where this application runs a tool loop (artifacts, its own
+        // search): a turn whose only tool is a provider-native search makes
+        // one call, and is left exactly as it was (its tool choice included).
+        const longContextLoopStep =
+            combinedToolConfig &&
+            (artifactToolConfig || appManagedSearchTool) &&
+            !researchPreviewExecution &&
+            !mcpConnector &&
+            Number.isFinite(toolLoopStepCap) &&
+            toolLoopStepCap > 1 &&
+            Number.isSafeInteger(modelConfig.contextWindowTokens)
+                ? longContextToolLoopStep({
+                      maxOutputTokens: requestMaxOutputTokens,
+                      inputTokens: budget.inputTokens,
+                      // What the first call sends: the reservation-only image
+                      // allowance is reserved, never sent.
+                      firstPromptTokens: Math.max(
+                          0,
+                          (budget.contextInputTokens ?? budget.inputTokens) -
+                              reservationOnlyInputTokens
+                      ),
+                      callCap: toolLoopStepCap,
+                      contextWindowTokens: modelConfig.contextWindowTokens!,
+                  })
+                : null;
         await recordDispatchStarted(dispatchRecord);
+        if (hasContinuation) void recordContinuationSeedOutcome(finalContinuation.outcome);
         latency.provider();
+        if (continuation.receipt && continuationSeed) continuation.receipt.status = "unknown";
         const result = await beginProviderCall(
             modelConfig.provider,
             modelConfig.id,
@@ -5062,24 +6196,55 @@ async function handleChatPost(
                     // separately so replacing or timing out one attempt never
                     // aborts a later fallback attempt.
                     abortSignal: AbortSignal.any([
-                        req.signal,
+                        researchPreviewRunSignal,
                         initialAttemptAbortController.signal,
                     ]),
                     ...(sdkInstructions ? { instructions: sdkInstructions } : {}),
                     maxOutputTokens: requestMaxOutputTokens,
-                    maxRetries: modelConfig.provider === "zhipu" ? 0 : undefined,
+                    maxRetries:
+                        isResearchPreview || modelConfig.provider === "zhipu"
+                            ? 0
+                            : undefined,
                     headers:
                         modelConfig.provider === "perplexity"
                             ? perplexityUsageHeaders(traceId)
                             : undefined,
                     ...generationSettings,
-                    ...(combinedToolConfig ?? {}),
+                    ...(researchPreviewExecution
+                        ? {
+                              tools: researchPreviewExecution.tools,
+                              stopWhen: researchPreviewExecution.stopWhen,
+                              prepareStep: researchPreviewExecution.prepareStep,
+                          }
+                        : combinedToolConfig ?? {}),
+                    ...searchObservation?.sdk,
+                    ...(longContextLoopStep
+                        ? {
+                              // One output budget across the loop, and an
+                              // answer due on the last reserved call.
+                              prepareStep: (options: {
+                                  stepNumber: number;
+                                  steps: Array<StepResult<ToolSet>>;
+                                  messages: ModelMessage[];
+                              }) => ({
+                                  ...(lookupStep?.(options) ?? {}),
+                                  ...longContextLoopStep.prepareStep(options),
+                              }),
+                              // And no call once the reserved output is spent.
+                              stopWhen: [
+                                  ...[combinedToolConfig?.stopWhen ?? []].flat(),
+                                  longContextLoopStep.outputSpent,
+                              ],
+                          }
+                        : lookupStep
+                          ? { prepareStep: lookupStep }
+                          : {}),
                     ...(mcpConnector ? {
                         maxRetries: 0,
                         stopWhen: stepCountIs(MCP_CHAT_MAX_STEPS),
                         prepareStep: mcpConnector.prepareStep,
                     } : {}),
-                    onError: logStreamErrorWithoutContent({
+                    onError: observeStreamError({
                         traceId,
                         modelId: modelConfig.id,
                     }),
@@ -5125,12 +6290,25 @@ async function handleChatPost(
         // have made it two models wrong instead of one.
         const dispatched = {
             attemptIndex: 0,
+            // Carried by the execution that produced the saved answer, not by preflight.
+            continuationSource: finalContinuation.seed ?? finalContinuation.sourceEvidence,
             modelId: modelConfig.id,
             provider: modelConfig.provider,
             reasoning: modelConfig.reasoning,
             abortController: initialAttemptAbortController,
             stream: result,
-            reader: faultedReader(result.textStream.getReader(), injectedFault, 0),
+            reader: faultedReader(
+                (researchPreviewExecution
+                    ? researchPreviewExecution.finalTextStream(
+                          result.textStream,
+                          result.usage,
+                          result.steps
+                      )
+                    : result.textStream
+                ).getReader(),
+                injectedFault,
+                0
+            ),
             // Perplexity buffers response bodies under this key and consuming
             // the capture releases it, so it is per attempt rather than per
             // trace. The primary keeps the bare trace id, which is what the
@@ -5156,6 +6334,9 @@ async function handleChatPost(
                         ? ANTHROPIC_PROMPT_CACHE_TTL
                         : null,
                 pricingVersion: budget.pricingVersion ?? null,
+                providerCallPasses: budget.providerCallPasses ?? null,
+                longContextThresholdTokens: budget.longContextThresholdTokens,
+                costSource: budget.costSource ?? null,
             } satisfies AttemptPriceSnapshot,
         };
         durableCheckpointWriter?.setAttribution(
@@ -5181,7 +6362,8 @@ async function handleChatPost(
          * Empty on a manual turn, which the scope gate refuses on its own
          * grounds before this is ever read.
          */
-        const fallbackCandidates = !guestAutoRun && autoSelection.routed
+        // A revoked-source rebuild already used the second permitted build.
+        const fallbackCandidates = !replanned && !guestAutoRun && autoSelection.routed
             ? autoSelection.fallbackCandidateModelIds
             : [];
         /**
@@ -5227,6 +6409,7 @@ async function handleChatPost(
         // returned. Until then the failure path is still the owner of record.
         const activeLeaseId = accessGrant.leaseId;
         leaseOwnership = chatLeaseTakenByStream(leaseOwnership);
+        const citations = citationUrls.length ? createGroundedCitationStream(citationUrls) : null;
         let generatedText = "";
         let released = false;
         let sourceCancelled = false;
@@ -5272,13 +6455,11 @@ async function handleChatPost(
             );
             return perplexityCapture;
         };
-        const estimatedGeneratedOutputTokens = () =>
-            generatedText
-                ? Math.max(
-                      1,
-                      Math.ceil(Buffer.byteLength(generatedText, "utf8") / 4)
-                  )
-                : 0;
+        const estimatedGeneratedOutputTokens = () => {
+            const providerBytes = Buffer.byteLength(generatedText, "utf8") +
+                (dispatched.attemptIndex === 0 ? citations?.providerByteAdjustment ?? 0 : 0);
+            return Math.ceil(providerBytes / 4);
+        };
         // Used only by settleSafely("cancelled") call sites that fire before
         // the stream's tool-result content ever resolves (mid-stream abort,
         // client disconnect, transport error) -- a search cannot have been
@@ -5293,6 +6474,13 @@ async function handleChatPost(
         // says -- settlement records the frozen authorization as an upper
         // bound rather than pretending the count is zero.
         const earlyCancelSearchFields = {
+            ...(isResearchPreview
+                ? {
+                      inputTokens: budget.inputTokens,
+                      outputTokens: budget.reservedOutputTokens,
+                      usageFromProvider: false,
+                  }
+                : {}),
             searchSurchargeCredits: getWebSearchSurchargeCredits(
                 webSearchMode ?? "off",
                 webSearchCapability,
@@ -5319,6 +6507,7 @@ async function handleChatPost(
                 outputTokens?: number;
                 reasoningTokens?: number;
                 usageFromProvider?: boolean;
+                providerCalls?: ProviderCallUsage[];
                 searchSurchargeCredits?: number;
                 searchExecuted?: boolean;
                 // The provider's half of a native search, and whether anybody
@@ -5357,6 +6546,7 @@ async function handleChatPost(
                 turnTimingLogged = true;
                 latency.finish(outcome, dispatched.modelId, dispatched.provider);
                 logChatTurnTiming({
+                    search: searchObservation?.summary(outcome === "completed" ? generatedText : null),
                     traceId,
                     modelId: dispatched.modelId,
                     provider: dispatched.provider,
@@ -5416,20 +6606,58 @@ async function handleChatPost(
                     }
                     const providerUsageSnapshot =
                         (await takePerplexityCapture())?.usage ?? null;
+                    // Without provider usage (a cancel, a lost total) a
+                    // multi-call loop is settled on the input it already sent
+                    // -- its finished calls and the one in flight -- not on
+                    // every call the reservation held.
+                    // A long-context app loop rebuilds that input call by call,
+                    // cache split included, so its cache writes and each
+                    // call's tier are priced as on a completed turn.
+                    const loopUsage =
+                        usage?.inputTokens === undefined &&
+                        dispatched.attemptIndex === 0 &&
+                        longContextLoopStep &&
+                        longContextLoopStep.sentInputTokens() > 0
+                            ? longContextLoopStep.settlementUsage(
+                                  usage?.outputTokens ?? estimatedGeneratedOutputTokens()
+                              )
+                            : null;
+                    const sentMcpInput =
+                        !loopUsage && dispatched.attemptIndex === 0
+                            ? (mcpConnector?.observedInputTokens() ?? 0)
+                            : 0;
+                    const loopFits =
+                        loopUsage !== null && loopUsage.inputTokens <= reservation.inputTokens;
                     const settledInputTokens =
-                        usage?.inputTokens ?? reservation.inputTokens;
+                        usage?.inputTokens ??
+                        (loopUsage
+                            ? Math.min(loopUsage.inputTokens, reservation.inputTokens)
+                            : sentMcpInput > 0
+                              ? Math.min(sentMcpInput, reservation.inputTokens)
+                              : reservation.inputTokens);
                     const settledOutputTokens =
-                        usage?.outputTokens ?? estimatedGeneratedOutputTokens();
+                        usage?.outputTokens ??
+                        loopUsage?.outputTokens ??
+                        estimatedGeneratedOutputTokens();
+                    const settledCachedInputTokens =
+                        usage?.cachedInputTokens ??
+                        (loopFits ? loopUsage!.cachedInputTokens : undefined);
+                    const settledCacheWriteInputTokens =
+                        usage?.cacheWriteInputTokens ??
+                        (loopFits ? loopUsage!.cacheWriteInputTokens : undefined);
+                    const settledProviderCalls =
+                        usage?.providerCalls ?? (loopFits ? loopUsage!.providerCalls : undefined);
                     await settleChatUsage(reservation, {
                         inputTokens: settledInputTokens,
-                        cachedInputTokens: usage?.cachedInputTokens,
-                        cacheWriteInputTokens: usage?.cacheWriteInputTokens,
+                        cachedInputTokens: settledCachedInputTokens,
+                        cacheWriteInputTokens: settledCacheWriteInputTokens,
                         outputTokens: settledOutputTokens,
                         reasoningTokens: usage?.reasoningTokens,
                         // Absent provider usage metadata, the output figure
                         // above is the documented fallback estimate rather
                         // than a measured value -- recorded as such.
                         usageFromProvider: usage?.usageFromProvider === true,
+                        providerCalls: settledProviderCalls,
                         outcome,
                         searchSurchargeCredits: usage?.searchSurchargeCredits,
                         searchExecuted: usage?.searchExecuted,
@@ -5449,10 +6677,11 @@ async function handleChatPost(
                                       attemptIndex: dispatched.attemptIndex,
                                       price: dispatched.price,
                                       inputTokens: settledInputTokens,
+                                      providerCalls: settledProviderCalls,
                                       cachedInputTokens:
-                                          usage?.cachedInputTokens ?? 0,
+                                          settledCachedInputTokens ?? 0,
                                       cacheWriteInputTokens:
-                                          usage?.cacheWriteInputTokens ?? 0,
+                                          settledCacheWriteInputTokens ?? 0,
                                       outputTokens: settledOutputTokens,
                                       reasoningTokens: usage?.reasoningTokens,
                                       usageFromProvider:
@@ -5751,6 +6980,48 @@ async function handleChatPost(
                 return false;
             }
         };
+        /*
+          The error report for a turn the server judged failed after its 200
+          stream had started (docs/policy/trace-feedback-automation.md §3.3).
+
+          The JSON error builders put this grant in a response header. Here the
+          headers left with the first byte, so the token rides in the stream
+          trailer instead. Called only from the two settlement branches that
+          decide the turn failed -- never for an answer that completed, and
+          never for a turn the user stopped, which leave through
+          `cancelTurnSafely` and reach neither.
+        */
+        const issueStreamErrorReport = (
+            root: "AI_EMPTY_RESPONSE" | "AI_STREAM_FAILED",
+            diagnosticCode: string,
+            error: unknown,
+            localLayer: "storage" | "application" | null = null
+        ) => {
+            const grantInput = streamFailureGrantInput({
+                traceId,
+                root,
+                diagnosticCode,
+                provider: dispatched.provider,
+                modelId: dispatched.modelId,
+                error,
+                observedStreamError,
+                localLayer,
+            });
+            const grant = issueChatErrorReportGrant(grantInput);
+            return grant.errorReportToken
+                ? { token: grant.errorReportToken, code: grantInput.errorCode }
+                : null;
+        };
+        /*
+          A stream failure waiting to be raised on the next pull.
+
+          `controller.error()` discards whatever is still queued, so a trailer
+          enqueued in the same turn as the error would never be read. The
+          failure branch enqueues the trailer and returns; the stream asks for
+          more only once that chunk has been taken, and that pull raises the
+          error the client was always going to get.
+        */
+        let pendingStreamError: { error: unknown } | null = null;
         const closeSafely = (
             controller: ReadableStreamDefaultController<string>
         ) => {
@@ -5963,6 +7234,7 @@ async function handleChatPost(
             error: unknown,
             nextAttemptAbortController: AbortController
         ): Promise<boolean> => {
+            if (isResearchPreview) return false;
             const classified = classifyStreamFailure({
                 error,
                 phase: "read",
@@ -6018,6 +7290,15 @@ async function handleChatPost(
                 return false;
             }
 
+            if (continuationSeed) {
+                const checked = await readContinuation();
+                if (!checked.seed || checked.seed.prompt.transcriptText !== continuationSeed.transcriptText) {
+                    // The primary already ran. Never dispatch a retry with a revoked source
+                    // or let its source-derived routing decision grant another call.
+                    reportFallbackRefusal("continuation_source_revoked");
+                    return false;
+                }
+            }
             const candidate = runtimeModelMap.get(decision.modelId);
             if (!candidate?.enabled || candidate.catalogDeleted) {
                 reportFallbackRefusal("candidate_unavailable");
@@ -6208,7 +7489,16 @@ async function handleChatPost(
                     // race a second, failed settlement against it.
                     return true;
                 }
+                if (continuationSeed) {
+                    const checked = await readContinuation();
+                    if (!checked.seed || checked.seed.prompt.transcriptText !== continuationSeed.transcriptText)
+                        return abandonFallback("continuation_source_revoked");
+                }
                 await recordDispatchStarted(nextRecord);
+                if (continuation.receipt && continuationSeed) continuation.receipt = { ...continuation.receipt,
+                    attempt: dispatched.attemptIndex + 1, status: "unknown" };
+                // What the primary reported is not the fallback's failure.
+                observedStreamError = null;
                 nextStream = await streamText({
                     model: plan.activeModel,
                     messages: fallbackSdkMessages,
@@ -6218,7 +7508,7 @@ async function handleChatPost(
                         nextAttemptAbortController.signal,
                     ]),
                     ...attemptDispatchOptions(plan),
-                    onError: logStreamErrorWithoutContent({
+                    onError: observeStreamError({
                         traceId,
                         modelId: plan.modelId,
                     }),
@@ -6415,6 +7705,11 @@ async function handleChatPost(
                         ? ANTHROPIC_PROMPT_CACHE_TTL
                         : null,
                 pricingVersion: plan.budget.pricingVersion ?? null,
+                providerCallPasses: plan.budget.providerCallPasses ?? null,
+                // Same as the primary's snapshot: the long-context settlement
+                // rule needs both to decide whether a crossed tier is corrected.
+                longContextThresholdTokens: plan.budget.longContextThresholdTokens,
+                costSource: plan.budget.costSource ?? null,
             };
             durableCheckpointWriter?.setAttribution(
                 dispatched.modelId,
@@ -6520,6 +7815,14 @@ async function handleChatPost(
             },
             async pull(controller) {
                 if (streamState !== "open") return;
+                if (pendingStreamError) {
+                    // The turn is already settled and released; only the
+                    // error itself was held back. See `pendingStreamError`.
+                    const { error } = pendingStreamError;
+                    pendingStreamError = null;
+                    errorSafely(controller, error);
+                    return;
+                }
                 streamController = controller;
                 // Armed on the first pull rather than at construction: pull
                 // is only ever called once the Response has been published,
@@ -6529,11 +7832,20 @@ async function handleChatPost(
                 startFirstTokenWatch(controller);
 
                 try {
-                    const { done, value } = await dispatched.reader.read();
-                    if (streamState !== "open") {
-                        await releaseSafely();
-                        return;
-                    }
+                    let done: boolean, value: string;
+                    do {
+                        const read = await dispatched.reader.read();
+                        if (streamState !== "open") {
+                            await releaseSafely();
+                            return;
+                        }
+                        done = read.done;
+                        value = read.value ?? "";
+                        if (citations && dispatched.attemptIndex === 0) {
+                            value = done ? citations.finish() : citations.write(value);
+                            if (done && value) done = false; // Deliver a trailing literal before settlement.
+                        }
+                    } while (citations && dispatched.attemptIndex === 0 && !done && !value);
                     if (done) {
                         // The provider finished. Whatever it produced, it is
                         // no longer being waited for.
@@ -6661,11 +7973,31 @@ async function handleChatPost(
                                     : undefined,
                             providerCitations: perplexitySearchCitations,
                         });
+                        if (researchPreviewExecution) {
+                            const report = researchPreviewExecution.finalReport();
+                            if (!report) {
+                                throw new Error(
+                                    "Research Preview completed without an accepted report."
+                                );
+                            }
+                            webSearchExecution.citations = report.citations;
+                            webSearchExecution.research =
+                                buildResearchPreviewMetadata({
+                                    outcome: report.outcome,
+                                    startedAt: new Date(
+                                        requestReceivedAt
+                                    ).toISOString(),
+                                    completedAt: new Date().toISOString(),
+                                    stopReason: "report_submitted",
+                                    citedSources: report.citedSources,
+                                });
+                        }
                         if (mcpConnector) {
                             webSearchExecution.citations = sanitizeWebSearchCitations([
                                 ...webSearchExecution.citations, ...mcpConnector.sources(),
                             ]);
                         }
+                        searchObservation?.sourceCards(webSearchExecution.citations.length);
                         // A provider that hit its output ceiling returns HTTP
                         // 200 with real text and a `length` finish reason.
                         // Recorded so the answer is never presented as
@@ -6758,6 +8090,7 @@ async function handleChatPost(
 
                         if (usageResult.status === "fulfilled") {
                             const usage = usageResult.value;
+                            const providerCalls = await providerCallUsage(dispatched.stream);
                             await settleSafely(
                                 generatedText.trim() ? "completed" : "empty",
                                 {
@@ -6781,6 +8114,7 @@ async function handleChatPost(
                                         usage.outputTokenDetails
                                             .reasoningTokens,
                                     usageFromProvider: true,
+                                    providerCalls,
                                     ...searchSettlementFields,
                                 }
                             );
@@ -6959,6 +8293,23 @@ async function handleChatPost(
                                                 actualModelId: dispatched.modelId,
                                                 provider: dispatched.provider,
                                                 finishReason: normalizedFinishReason,
+                                                ...(completionOutcome.status === "normal" && dispatched.continuationSource?.sourceId &&
+                                                    dispatched.continuationSource.sourceConversationDigest &&
+                                                    dispatched.continuationSource.sourceDigestVersion !== undefined ? {
+                                                    continuationSourcePlan: serializeContinuationSourcePlan({
+                                                        plan: dispatched.continuationSource.plan,
+                                                        sourceId: dispatched.continuationSource.sourceId,
+                                                        sourceConversationDigest: dispatched.continuationSource.sourceConversationDigest,
+                                                        sourceDigestVersion: dispatched.continuationSource.sourceDigestVersion,
+                                                        attempt: {
+                                                            assistantMessageId: durableAttempt.assistantMessageId,
+                                                            sourceUserMessageId: durableAttempt.sourceUserMessageId,
+                                                            attemptIndex: dispatched.attemptIndex,
+                                                            actualModelId: dispatched.modelId,
+                                                            provider: dispatched.provider,
+                                                        },
+                                                    }),
+                                                } : {}),
                                             },
                                             tx
                                         );
@@ -6976,7 +8327,7 @@ async function handleChatPost(
                                     const persistedRows =
                                         await prisma.messageArtifact.findMany({
                                             where: { messageId: assistantMessageId },
-                                            select: { id: true, ordinal: true },
+                                            select: { id: true, ordinal: true, parentArtifactId: true, lineageId: true },
                                         });
                                     artifactsForTrailer =
                                         artifactCollector.withPersistedIds(persistedRows);
@@ -7061,6 +8412,9 @@ async function handleChatPost(
                             artifactsForTrailer = [];
                         }
                         const isEmptyResponse = !generatedText.trim();
+                        let streamErrorReport: ReturnType<
+                            typeof issueStreamErrorReport
+                        > = null;
                         if (
                             isEmptyResponse &&
                             durableAttempt &&
@@ -7100,6 +8454,14 @@ async function handleChatPost(
                                       completionError
                                   )
                                 : `AI_EMPTY_RESPONSE.${finishReasonCode}`;
+                            // The server has just judged this turn failed, so a
+                            // report of it can be verified like any other
+                            // server error (operator decision 2026-11-16).
+                            streamErrorReport = issueStreamErrorReport(
+                                "AI_EMPTY_RESPONSE",
+                                diagnosticCode,
+                                completionError
+                            );
                             try {
                                 await recordProviderFailure(
                                     dispatched.provider,
@@ -7158,12 +8520,16 @@ async function handleChatPost(
                             controller,
                             buildChatStreamTrailerChunk({
                                 searchMetadata: webSearchExecution,
+                                ...(continuation.receipt ? { continuationReceipt: deliveryReceipt({ ...continuation.receipt, attempt: dispatched.attemptIndex }) } : {}),
                                 completion: completionOutcome,
                                 // Absent, not empty, on a turn with no files:
                                 // an older client ignores the key and a turn
                                 // that made nothing says nothing.
                                 ...(artifactsForTrailer.length
                                     ? { artifacts: artifactsForTrailer }
+                                    : {}),
+                                ...(streamErrorReport
+                                    ? { errorReport: streamErrorReport }
                                     : {}),
                             })
                         );
@@ -7178,6 +8544,7 @@ async function handleChatPost(
                     // `pull` is called again for the next chunk.
                     if (value.length === 0) return;
                     generatedText += value;
+                    if (continuation.receipt?.status === "unknown") continuation.receipt.status = "dispatched";
                     // The user is about to see something, so the keepalive
                     // window is over -- for this attempt and for the turn:
                     // §7 forbids a fallback once a visible token has gone
@@ -7238,7 +8605,33 @@ async function handleChatPost(
                       one layer down. The typed error is what tells them apart.
                     */
                     const streamFailureIsLocal =
-                        isStorageError(error) || isChatLocalFailure(error);
+                        isStorageError(error) ||
+                        isChatLocalFailure(error) ||
+                        error instanceof ResearchPreviewBudgetExhaustedError ||
+                        error instanceof ResearchPreviewUsageUnknownError ||
+                        error instanceof ResearchPreviewMissingReportError ||
+                        error instanceof ResearchPreviewRunStoppedError;
+                    const researchStopReason =
+                        error instanceof ResearchPreviewBudgetExhaustedError
+                            ? "budget_exhausted"
+                            : error instanceof ResearchPreviewUsageUnknownError
+                              ? "usage_unknown"
+                              : error instanceof ResearchPreviewMissingReportError
+                                ? error.stopReason
+                                : error instanceof ResearchPreviewRunStoppedError
+                                  ? error.stopReason
+                                : null;
+                    if (researchStopReason) {
+                        console.info(
+                            JSON.stringify({
+                                event: "research_preview_stopped",
+                                traceId,
+                                modelId: dispatched.modelId,
+                                stopReason: researchStopReason,
+                                timestamp: new Date().toISOString(),
+                            })
+                        );
+                    }
                     if (streamFailureIsLocal) {
                         logRequestError(
                             "chat_local_failure",
@@ -7300,9 +8693,73 @@ async function handleChatPost(
                     // user-ledger fields are left alone -- only the provider
                     // ledger is told that the count is unknown rather than
                     // zero.
+                    let researchFailureUsage: NonNullable<
+                        Parameters<typeof settleSafely>[1]
+                    > = {};
+                    if (isResearchPreview) {
+                        if (error instanceof ResearchPreviewUsageUnknownError) {
+                            researchFailureUsage = {
+                                inputTokens: budget.inputTokens,
+                                outputTokens: budget.reservedOutputTokens,
+                                usageFromProvider: false,
+                            };
+                        } else {
+                            try {
+                                const usage = await dispatched.stream.usage;
+                                researchFailureUsage = {
+                                    providerCalls: await providerCallUsage(dispatched.stream),
+                                    inputTokens: usage.inputTokens,
+                                    cachedInputTokens:
+                                        usage.inputTokenDetails.cacheReadTokens,
+                                    cacheWriteInputTokens:
+                                        usage.inputTokenDetails.cacheWriteTokens,
+                                    outputTokens: usage.outputTokens,
+                                    reasoningTokens:
+                                        usage.outputTokenDetails.reasoningTokens,
+                                    usageFromProvider: true,
+                                };
+                            } catch {
+                                researchFailureUsage = {
+                                    inputTokens: budget.inputTokens,
+                                    outputTokens: budget.reservedOutputTokens,
+                                    usageFromProvider: false,
+                                };
+                            }
+                        }
+                    } else if (
+                        (error instanceof LongContextToolLoopLimitError ||
+                            (error as { cause?: unknown } | null)?.cause instanceof
+                                LongContextToolLoopLimitError) &&
+                        longContextLoopStep &&
+                        dispatched.attemptIndex === 0 &&
+                        longContextLoopStep.spent().steps > 0
+                    ) {
+                        // A long-context tool loop stopped before a call that
+                        // would not fit: that call was never sent, so the
+                        // finished calls are the provider's whole cost,
+                        // recorded as such. The failed turn's credits follow
+                        // the failure rule. Any other failure may have a call
+                        // in flight and takes the general path in settleSafely.
+                        const spent = longContextLoopStep.settlementUsage(
+                            longContextLoopStep.spent().outputTokens
+                        );
+                        researchFailureUsage = {
+                            inputTokens: spent.inputTokens,
+                            cachedInputTokens: spent.cachedInputTokens,
+                            cacheWriteInputTokens: spent.cacheWriteInputTokens,
+                            outputTokens: spent.outputTokens,
+                            providerCalls: spent.providerCalls,
+                            // An unreported call filled in at its allowance is
+                            // an estimate, recorded as one.
+                            usageFromProvider: spent.measured,
+                        };
+                    }
                     await settleSafely(
                         "failed",
-                        { searchQueriesObserved: false },
+                        {
+                            ...researchFailureUsage,
+                            searchQueriesObserved: false,
+                        },
                         // What was observed, not what was decided. See
                         // `lastStreamFailure`.
                         lastStreamFailure
@@ -7313,6 +8770,38 @@ async function handleChatPost(
                               }
                             : undefined
                     );
+                    // The failed turn's error report, on the same terms as the
+                    // empty answer's. A Research Preview stop is a limit doing
+                    // its job, not a failure to report.
+                    const streamErrorReport = researchStopReason
+                        ? null
+                        : issueStreamErrorReport(
+                              "AI_STREAM_FAILED",
+                              diagnosticCode,
+                              error,
+                              streamFailureIsLocal
+                                  ? isStorageError(error)
+                                      ? "storage"
+                                      : "application"
+                                  : null
+                          );
+                    if (
+                        streamErrorReport &&
+                        enqueueSafely(
+                            controller,
+                            buildChatStreamTrailerChunk({
+                                searchMetadata: null,
+                                errorReport: streamErrorReport,
+                            })
+                        )
+                    ) {
+                        // Nothing may write after the trailer, and the error
+                        // waits for the pull that follows it.
+                        stopFirstTokenWatch();
+                        pendingStreamError = { error };
+                        await releaseSafely();
+                        return;
+                    }
                     errorSafely(controller, error);
                     await releaseSafely();
                 }
@@ -7402,7 +8891,18 @@ async function handleChatPost(
         // stream's own release paths are the ones that free the slot.
         leaseOwnership = chatLeaseStreamPublished(leaseOwnership);
         return response;
+        };
+        return await executeTurn(llmPick, routerCallOutcome, preparedContinuation);
     } catch (error: unknown) {
+        // executeTurn owns these mutations; TypeScript does not propagate closure
+        // assignments into the caller's catch control-flow graph.
+        mcpConnector = mcpConnector as Awaited<ReturnType<typeof buildMcpChatTools>> | null;
+        stopLeaseHeartbeat = stopLeaseHeartbeat as (() => void) | null;
+        durableAttempt = durableAttempt as DurableAttempt | null;
+        presearchForSettlement = presearchForSettlement as ReturnType<typeof buildAppManagedWebSearchTool> | null;
+        refusalSubjectForLog = refusalSubjectForLog as RefusalSubject | null;
+        // A setup failure still drains the check before releasing its reservation.
+        if (providerBudgetNotice) await providerBudgetNotice;
         mcpConnector?.cancel();
         /*
           The last catch, and the one that used to get this wrong.
@@ -7532,6 +9032,7 @@ async function handleChatPost(
             turnTimingLogged = true;
             latency.finish("failed_before_stream", dispatchModelIdForLog ?? null, dispatchProviderForLog ?? null);
             logChatTurnTiming({
+                search: searchObservation?.summary(null),
                 traceId,
                 modelId: dispatchModelIdForLog ?? null,
                 provider: dispatchProviderForLog ?? null,
@@ -7569,10 +9070,17 @@ async function handleChatPost(
                     dispatchProviderForLog === "perplexity"
                         ? await consumePerplexityUsage(traceId)
                         : null;
+                const presearchSnapshot = presearchForSettlement?.session.snapshot();
                 await settleChatUsage(usageReservation, {
                     inputTokens: 0,
                     outputTokens: 0,
                     outcome: "failed",
+                    ...(presearchSnapshot && presearchSnapshot.backendRequestCount > 0 ? {
+                        searchBackendRequestCount: presearchSnapshot.succeededRequestCount,
+                        // Successful responses have exact cost. A thrown/aborted
+                        // backend response may have been served: retain its hold.
+                        searchQueriesObserved: presearchSnapshot.succeededRequestCount === presearchSnapshot.backendRequestCount,
+                    } : {}),
                 }, {
                     providerUsageSnapshot,
                 });
@@ -7760,7 +9268,15 @@ async function handleChatPost(
                                 storageStatus: 404,
                                 retryable: false,
                             }
-                          : {}),
+                          : error.code === "ATTACHMENT_TEXT_TOO_LARGE" ||
+                              error.code === "CHAT_INPUT_TOKEN_LIMIT"
+                            ? {
+                                  // Ours, and the same request is refused again.
+                                  phase: "request_size",
+                                  failureLayer: "application",
+                                  retryable: false,
+                              }
+                            : {}),
                 });
                 if (grant.errorReportToken) {
                     accessError.headers.set(

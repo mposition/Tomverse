@@ -24,8 +24,9 @@ test("transport error preserves the complete markdown body and separates its not
   assert.match(html, /First paragraph/);
   assert.match(html, /Second <strong>paragraph<\/strong>/);
   assert.match(html, /data-testid="chat-recovery-notice"[^>]*>Connection interrupted/);
-  assert.match(html, /data-testid="chat-error-auxiliary-info"/);
   assert.match(html, /Trace ID: local-trace/);
+  // The trace ID sits in a collapsed diagnostics disclosure, not on the card face.
+  assert.match(html, /<details(?![^>]*\bopen\b)[^>]*data-testid="chat-error-diagnostics"[^>]*><summary[^>]*>Show diagnostic info<\/summary>/);
   assert.equal((html.match(/data-testid="restore-chat-question"/g) ?? []).length, 1);
 });
 test("error before text renders the notice without a phantom generating indicator", () => {
@@ -41,12 +42,49 @@ test("cancelled and trailing pre-saved questions offer explicit restoration, not
   assert.doesNotMatch(render([question], true, true), /restore-chat-question/);
   assert.doesNotMatch(render([question], false), /restore-chat-question/);
 });
+test("Chat error cards offer a direct retry and a model picker beside restore", () => {
+  const renderChat = (messages: Message[]) => renderToStaticMarkup(
+    <SessionProvider session={null}>
+      <LanguageProvider initialLang="en">
+        <ChatMessageList messages={messages} currentChatId="c" onRestoreQuestion={() => {}}
+          onRetryQuestion={() => {}} onChooseAnotherModel={() => {}} />
+      </LanguageProvider>
+    </SessionProvider>
+  );
+  const failed: Message = { id: "a", role: "assistant", status: "error", content: "",
+    recoveryNotice: "Connection interrupted" };
+  const html = renderChat([question, failed]);
+  assert.match(html, /data-testid="retry-chat-question"/);
+  assert.match(html, /data-testid="chat-error-choose-model"[^>]*>.*Choose another model/);
+  assert.match(html, /restore-chat-question/);
+  assert.doesNotMatch(html, /Send separately to request a new answer/);
+  assert.ok(html.indexOf("retry-chat-question") < html.indexOf("restore-chat-question"));
+  // A resend carries no files: that question is only restored.
+  const withFile = renderChat([{ ...question, attachments: [{ id: "f", name: "f.pdf", mediaType: "application/pdf", size: 1, kind: "file" }] }, failed]);
+  assert.doesNotMatch(withFile, /retry-chat-question/);
+  assert.match(withFile, /restore-chat-question/);
+  // A trailing unanswered question and the legacy surface are unchanged.
+  assert.doesNotMatch(renderChat([question]), /retry-chat-question/);
+  assert.doesNotMatch(render([question, failed]), /retry-chat-question|chat-error-choose-model/);
+});
 test("legacy Review errors still split their existing title and auxiliary details", () => {
   const html = render([question, { id: "a", role: "assistant", status: "error",
     content: "Existing error\nTrace ID: review" }], false);
   assert.match(html, /Existing error/);
   assert.match(html, /Trace ID: review/);
   assert.doesNotMatch(html, /chat-recovery-notice|restore-chat-question/);
+});
+
+test("trace IDs sit behind a collapsed diagnostics disclosure; other details stay visible", () => {
+  const html = render([question, { id: "a", role: "assistant", status: "error",
+    content: "Request failed\nCost guard details\nTrace ID: 0000-trace" }], false);
+  const diagnostics = html.match(/<details data-testid="chat-error-diagnostics"[^>]*>.*?<\/details>/)?.[0];
+  assert.ok(diagnostics, "trace ID is wrapped in a diagnostics disclosure");
+  assert.doesNotMatch(diagnostics, /\sopen[\s=>]/);
+  assert.match(diagnostics, /<summary[^>]*>Show diagnostic info<\/summary>/);
+  assert.match(diagnostics, /Trace ID: 0000-trace/);
+  assert.doesNotMatch(diagnostics, /Cost guard details/);
+  assert.match(html, /Cost guard details/);
 });
 
 test("Chat attachment errors classify the recovery notice, not an empty or unrelated partial body", () => {
@@ -62,4 +100,56 @@ test("Chat attachment errors classify the recovery notice, not an empty or unrel
   const review = render([question, { id: "a", role: "assistant", status: "error",
     content: "Invalid PDF document", errorHadAttachments: true }], false);
   assert.match(review, /Attachment troubleshooting/);
+});
+
+test("Chat error cards offer the model picker beside question restoration; Review does not", () => {
+  const failed: Message = { id: "a", role: "assistant", status: "error", content: "",
+    recoveryNotice: "Connection interrupted" };
+  const withPicker = (recovering: boolean, retry?: () => void) => renderToStaticMarkup(
+    <SessionProvider session={null}>
+      <LanguageProvider initialLang="en">
+        <ChatMessageList messages={[question, failed]} currentChatId="c"
+          onRestoreQuestion={recovering ? () => {} : undefined}
+          onChooseAnotherModel={recovering ? () => {} : undefined}
+          onRetryLast={retry} onRequestCloseModel={() => {}} />
+      </LanguageProvider>
+    </SessionProvider>
+  );
+  const chat = withPicker(true);
+  assert.equal((chat.match(/data-testid="chat-error-choose-model"/g) ?? []).length, 1);
+  assert.match(chat, /restore-chat-question/);
+  assert.doesNotMatch(withPicker(false, () => {}), /chat-error-choose-model/);
+  assert.doesNotMatch(render([question, failed]), /chat-error-choose-model/);
+  // Chat wires both handlers to the same picker: the card shows it once.
+  const both = renderToStaticMarkup(
+    <SessionProvider session={null}>
+      <LanguageProvider initialLang="en">
+        <ChatMessageList messages={[question, failed]} currentChatId="c"
+          onRestoreQuestion={() => {}} onRetryQuestion={() => {}}
+          onRequestCloseModel={() => {}} onChooseAnotherModel={() => {}} />
+      </LanguageProvider>
+    </SessionProvider>
+  );
+  assert.equal((both.match(/Choose another model/g) ?? []).length, 1);
+  assert.match(both, /data-testid="retry-chat-question"/);
+});
+
+test("Chat error cards show one model picker, beside retry and before Report error", () => {
+  const failed: Message = { id: "a", role: "assistant", status: "error", content: "",
+    recoveryNotice: "Connection interrupted" };
+  const html = renderToStaticMarkup(
+    <SessionProvider session={null}>
+      <LanguageProvider initialLang="en">
+        <ChatMessageList messages={[question, failed]} currentChatId="c"
+          onRestoreQuestion={() => {}} onRetryQuestion={() => {}}
+          onRequestCloseModel={() => {}} onChooseAnotherModel={() => {}} />
+
+      </LanguageProvider>
+    </SessionProvider>
+  );
+  assert.equal((html.match(/data-testid="chat-error-choose-model"/g) ?? []).length, 1);
+  assert.ok(html.indexOf("chat-error-choose-model") < html.indexOf("report-error-button"));
+  assert.doesNotMatch(html, /You can also select another model/);
+  assert.equal((html.match(/Choose another model</g) ?? []).length, 1);
+  assert.match(html, /data-testid="retry-chat-question"/);
 });

@@ -7,7 +7,8 @@
 // shell, a write tool, MCP, the submission secret or the Higgsfield login.
 //
 //  1. concepts   one Claude call (JOB-higgsfield.md), Read on research notes;
-//                check-concepts rules; asked once more with the reason
+//                check-concepts rules; asked again with every reason, and a
+//                concept still refused is dropped while the others go on
 //  2. picture    the English picture per concept (gpt_image_2_6, 4:5, one)
 //  3. review 1   a separate Claude call, Read on its own review folder: the
 //                guide as a checklist, plus where marks and words sit
@@ -29,10 +30,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { bandLayout, BAND_ALT } from "./band-layout.mjs";
-import { checkConcepts, loadFeatures, pickFeature, recentDevices, TRANSLATED } from "./concepts-core.mjs";
+import { FEATURES_FILE_ENV, featuresFile, syncFeatures } from "./features-source.mjs";
+import { gatherConcepts, loadFeatures, pickFeature, recentDevices, recentFormats, sortConcepts, TRANSLATED, withNativeCopy } from "./concepts-core.mjs";
 import { bottomIsDark, ICON_DIR, setLogos, setTexts } from "./compose-core.mjs";
 import { brisbaneDay, ledgerPath, readLedger } from "./higgsfield-cap.mjs";
 import { makeImage } from "./hf-image-core.mjs";
+import { setScreen } from "./screen-core.mjs";
 import { checkReview, textsFor } from "./review-core.mjs";
 
 const toolDir = path.dirname(fileURLToPath(import.meta.url));
@@ -42,7 +45,7 @@ const date = `${day.slice(0, 4)}-${day.slice(4, 6)}-${day.slice(6, 8)}`;
 const dir = path.join("job", day);
 const genDir = path.join(dir, "generated");
 for (const sub of [genDir, path.join(dir, "review"), path.join(dir, "calls")]) mkdirSync(sub, { recursive: true });
-const report = { job: "marketing-media", path: "higgsfield", date, feature: null, concepts: [], submitted: [], refused: [], failed: [], dropped: [], halted: null, credits: 0 };
+const report = { job: "marketing-media", path: "higgsfield", date, features: null, feature: null, concepts: [], submitted: [], refused: [], failed: [], dropped: [], halted: null, credits: 0 };
 const finish = (code) => {
   try {
     report.credits = readLedger(ledgerPath("job", day)).entries.reduce((sum, entry) => sum + entry.cost, 0);
@@ -94,21 +97,28 @@ function claude(name, prompt, readGlob, maxTurns) {
   );
   writeFileSync(path.join(dir, "calls", `${name}.jsonl`), out.stdout ?? "");
   let answer = null;
+  let failure = out.error ? String(out.error.code ?? out.error.message) : null;
   for (const line of String(out.stdout ?? "").split(/\r?\n/u)) {
     try {
       const event = JSON.parse(line);
-      if (event.type === "result" && typeof event.result === "string") answer = event.result;
+      if (event.type !== "result") continue;
+      if (typeof event.result === "string") answer = event.result;
+      // The CLI says why it failed in its last event, not on stderr (a login that ran out, a usage limit, the turn limit).
+      if (event.is_error || (event.subtype && event.subtype !== "success")) failure = `${event.subtype ?? "error"}: ${String(event.result ?? "").slice(0, 200)}`;
     } catch {
       // not an event
     }
   }
+  if (failure || out.status !== 0) report.failed.push({ id: name, step: "claude-cli", status: out.status, error: failure ?? String(out.stderr ?? "").trim().slice(-200) });
   return answer;
 }
 
+/** The answer's JSON object that has `key`: one line of it, or the whole answer when the model spread it over lines or fenced it. */
 const firstJsonLine = (text, key) => {
-  for (const line of String(text ?? "").split(/\r?\n/u)) {
+  const whole = String(text ?? "");
+  for (const candidate of [...whole.split(/\r?\n/u), whole.slice(whole.indexOf("{"), whole.lastIndexOf("}") + 1)]) {
     try {
-      const value = JSON.parse(line.trim());
+      const value = JSON.parse(candidate.trim());
       if (value && typeof value === "object" && key in value) return value;
     } catch {
       // not it
@@ -125,6 +135,11 @@ if (listed.status !== 0) {
 }
 const historyPath = path.join("job", "history.json");
 const history = existsSync(historyPath) ? JSON.parse(readFileSync(historyPath, "utf8")) : [];
+// The facts an operator keeps in Admin (Marketing › Settings › Ad facts), or
+// features.json when the app cannot answer; every later read names this file.
+const synced = await syncFeatures({ toolDir, out: path.resolve(dir, "features.json") });
+process.env[FEATURES_FILE_ENV] = synced.file;
+report.features = synced.source === "app" ? "app" : `repo:${synced.reason}`;
 const features = loadFeatures(toolDir);
 const feature = pickFeature(history, features, day);
 report.feature = feature;
@@ -137,28 +152,52 @@ const conceptPrompt = [
   readFileSync("JOB-higgsfield.md", "utf8").replace("{{GUIDE}}", guide),
   `## Today\n\n- Date: ${date}\n- Feature: ${feature}\n- Newest research notes: ${newestNotes ? `job/research-notes/${newestNotes}` : "none"}`,
   `## Scene ideas used in the last 14 days\n\n${recentDevices(history, day).map((device) => `- ${device}`).join("\n") || "- none"}`,
+  `## Formats of the last 7 days, newest first\n\n${recentFormats(history, day).join(", ") || "none"}: choose others first.`,
   `## Logo files\n\n${readdirSync(ICON_DIR).filter((file) => file.endsWith(".png")).map((file) => file.replace(/\.png$/u, "")).join(", ")}`,
-  `## features.json\n\n\`\`\`json\n${readFileSync("features.json", "utf8")}\n\`\`\``,
+  `## features.json\n\n\`\`\`json\n${readFileSync(featuresFile(toolDir), "utf8")}\n\`\`\``,
 ].join("\n\n");
-let concepts = null;
-let refusal = null;
-for (let attempt = 1; attempt <= 2 && !concepts; attempt += 1) {
-  const prompt = refusal ? `${conceptPrompt}\n\n## Your last answer was refused\n\n${refusal}\nAnswer again, fixing that.` : conceptPrompt;
-  const answer = firstJsonLine(claude(`concepts-${attempt}`, prompt, "./job/research-notes/**", 20), "concepts");
-  refusal = answer ? checkConcepts(answer, { feature, history, day, toolDir }) : "the answer held no concepts line";
-  if (!refusal) concepts = answer.concepts;
+// A dry run on the box after a deployment (MARKETING_HIGGSFIELD_CONCEPTS_ONLY=1):
+// the concept step alone, with no picture, no credit, no submission and no
+// history, so a broken concept step shows the same day and not at 05:00. Its
+// files are named dry-*, beside the day's real ones.
+const dry = process.env.MARKETING_HIGGSFIELD_CONCEPTS_ONLY === "1" ? "dry-" : "";
+// These calls are on the box's Claude plan, not Higgsfield credits.
+const gathered = gatherConcepts({
+  ask: (again, attempt) => firstJsonLine(claude(`${dry}concepts-${attempt}`, `${conceptPrompt}${again}`, "./job/research-notes/**", 20), "concepts"),
+  sort: (answer) => sortConcepts(answer, { feature, history, day, toolDir }),
+});
+// 1b. The Korean and Chinese read as a native copywriter would write them
+// (owner 2026-11-13: the translations read as translations). The edit is
+// checked like the concepts; a concept it breaks keeps the writer's words.
+let concepts = gathered.concepts;
+if (concepts.length > 0) {
+  const nativePrompt = `${readFileSync("NATIVE-COPY.md", "utf8").replace("{{GUIDE}}", guide)}\n\n## The concepts\n\n\`\`\`json\n${JSON.stringify(concepts.map((concept) => ({ id: concept.id, format: concept.format, texts: concept.texts, translations: concept.translations, alt: concept.alt })))}\n\`\`\``;
+  const edited = firstJsonLine(claude(`${dry}native-copy`, nativePrompt, "./job/research-notes/**", 6), "concepts");
+  if (edited) {
+    const candidates = withNativeCopy(concepts, edited);
+    const checked = sortConcepts({ date, feature, concepts: candidates }, { feature, history, day, toolDir });
+    const kept = new Map((checked.kept ?? []).map((concept) => [concept.id, concept]));
+    report.nativeCopy = { edited: kept.size, kept: concepts.length - kept.size };
+    concepts = concepts.map((concept) => kept.get(concept.id) ?? concept);
+  }
 }
-if (!concepts) {
-  report.failed.push({ id: null, step: "concepts", error: refusal });
-  finish(1);
+for (const entry of gathered.dropped) report.dropped.push({ id: entry.id, reason: "concept_refused", problems: entry.problems.slice(0, 6) });
+let exitCode = 0;
+if (concepts.length === 0) {
+  report.failed.push({ id: null, step: "concepts", error: String(gathered.refusal).slice(0, 1200) });
+  exitCode = 1;
 }
-const conceptsPath = path.join(dir, "concepts.json");
-writeFileSync(conceptsPath, `${JSON.stringify({ feature, concepts }, null, 1)}\n`);
+writeFileSync(path.join(dir, `${dry}concepts.json`), `${JSON.stringify({ feature, concepts }, null, 1)}\n`);
 report.concepts = concepts.map((concept) => concept.id);
+if (dry) {
+  report.conceptsOnly = true;
+  finish(exitCode);
+}
 
 // Paid steps stop for the day at the first refusal by the cap; finished cards are still submitted.
 const HALTING = new Set(["no_daily_cap", "ledger_locked", "daily_cap_reached", "unknown_outcome_pending", "cost_unreadable", "cost_above_call_ceiling", "create_outcome_unknown", "wait_outcome_unknown", "more_than_one_job"]);
-const NO_LOGO = "Do not draw the Tomverse logo, any wordmark or any web address. Fill the frame edge to edge, and keep the bottom 10% of the picture calm, without text or important detail.";
+// It does not name the brand: a concept may not either (the image model draws what it reads).
+const NO_LOGO = "Draw no logo or wordmark other than the provider logos asked for or already shown, and no web address. Fill the frame edge to edge, and keep the bottom 10% of the picture calm, without text or important detail.";
 async function picture(label, prompt, references, out) {
   if (report.halted) return null;
   let made;
@@ -171,7 +210,7 @@ async function picture(label, prompt, references, out) {
   }
   if (made.ok) return out;
   if (HALTING.has(made.reason)) report.halted = { at: label, reason: made.reason };
-  report.failed.push({ id: label, step: "higgsfield", reason: made.reason });
+  report.failed.push({ id: label, step: "higgsfield", reason: made.reason, ...(made.detail ? { detail: made.detail } : {}) });
   return null;
 }
 
@@ -181,7 +220,7 @@ async function picture(label, prompt, references, out) {
 const FLAT_MARKS =
   "A provider mark on a flat surface facing the viewer (`flat: true`) is painted over with its real file afterwards: report it in `logoBoxes` with its true `shapeOk`, but its shape is never a reason for `fix` or `reject`; judge only that it is there, in a sensible place and size. Only a mark on a tilted or curved surface must match its file.";
 const STAGE_RULES = {
-  guide: `Judge rules 1-11 of the guide one by one. Look hard at hands and fingers (rule 5), at every logo against its real file, and at every word on the picture against \`texts\`. ${FLAT_MARKS} On \`fix\`, write each change so an image model can make it in one edit.`,
+  guide: `Judge rules 1-11 of the guide one by one. For rule 3, look at the picture as a stranger who has never heard of Tomverse and gives it two seconds: if they could not tell that it is an AI app and what it does for them, the verdict is \`reject\`. Look hard at hands, fingers and sizes (rule 5): a phone about as long as the hand holding it and clearly smaller than a head; a device or a hand out of scale is \`reject\`. Look at every logo against its real file, and at every word on the picture against \`texts\`. A display drawn flat chroma green #00ff00 is intended: code draws the app screen there afterwards, so the texts with \`ui\` are not on the picture yet; never ask to fill, change or remove the green, and give those texts no box. ${FLAT_MARKS} On \`fix\`, write each change so an image model can make it in one edit.`,
   content: `Read every piece of text in the picture exactly as it is written, character by character, and list it in \`readTexts\`, one string per text, in reading order, even where it is wrong. Do not correct what you read. Then check the facts, the logos and the hands again. ${FLAT_MARKS} A script compares your \`readTexts\` with \`texts\`.`,
 };
 const ANSWER_SHAPE = {
@@ -199,7 +238,7 @@ function review(stage, concept, locale, file, attempt) {
     JSON.stringify({ id: concept.id, feature: concept.feature, device: concept.device, texts: textsFor(concept, locale), logos: concept.logos, factRefs: concept.factRefs }, null, 1),
   );
   // The facts the reviewer judges against: the whole of features.json (what Tomverse does, its models and the recorded answers).
-  copyFileSync("features.json", path.join(folder, "features.json"));
+  copyFileSync(featuresFile(toolDir), path.join(folder, "features.json"));
   for (const logo of concept.logos) copyFileSync(path.join(ICON_DIR, `${logo}.png`), path.join(folder, "logos", `${logo}.png`));
   const rel = folder.split(path.sep).join("/");
   const prompt = readFileSync("REVIEW-higgsfield.md", "utf8")
@@ -209,31 +248,50 @@ function review(stage, concept, locale, file, attempt) {
     .replace("{{GUIDE}}", guide)
     .replace("{{STAGE_RULES}}", STAGE_RULES[stage])
     .replace("{{ANSWER_SHAPE}}", ANSWER_SHAPE[stage]);
-  const checked = checkReview(claude(`review-${name}`, prompt, `./${rel}/**`, 12) ?? "", { stage, concept, locale });
-  if (checked.problem) {
-    report.failed.push({ id: name, step: "check-review", error: checked.problem });
-    return null;
+  // The picture is already paid for: an answer of the wrong shape is asked for
+  // once more with the reason before the picture is given up (the 2026-11-10
+  // box run lost two pictures to one over-long fix each).
+  let problem = null;
+  for (let ask = 1; ask <= 2; ask += 1) {
+    const again = problem ? `\n\n## Your last answer was refused\n\n${problem}\n\nAnswer again with the whole line in the shape above, fixing that.` : "";
+    const checked = checkReview(claude(`review-${name}${ask > 1 ? "-again" : ""}`, `${prompt}${again}`, `./${rel}/**`, 12) ?? "", { stage, concept, locale });
+    if (!checked.problem) {
+      writeFileSync(path.join(folder, "review.json"), JSON.stringify(checked.review, null, 1));
+      return checked.review;
+    }
+    problem = checked.problem;
   }
-  writeFileSync(path.join(folder, "review.json"), JSON.stringify(checked.review, null, 1));
-  return checked.review;
+  report.failed.push({ id: name, step: "check-review", error: problem });
+  return null;
 }
 
-const editPrompt = (fixes) => `Edit the attached picture. Keep everything else exactly as it is: the people, the scene, the light, the composition and every word that is right. Make only these changes:\n${fixes.map((fix) => `- ${fix}`).join("\n")}`;
+/** The texts on the green display, as the app screen shows them; empty when the concept has none. */
+const screenItems = (concept, locale) => textsFor(concept, locale).filter((text) => text.ui).map((text) => ({ kind: text.ui, text: text.text }));
+/** The review with only the boxes of words that stand in the scene: the display's words are drawn by setScreen. */
+const sceneOnly = (concept, guide) => ({ ...guide, textBoxes: guide.textBoxes.filter((box) => !concept.texts[box.textIndex]?.ui) });
+const KEEP_GREEN = "Keep the flat green #00ff00 display exactly as it is: one even green, empty, with no words, light or reflection on it.";
+const editPrompt = (fixes, green = false) => `Edit the attached picture. Keep everything else exactly as it is: the people, the scene, the light, the composition and every word that is right. Make only these changes:\n${fixes.map((fix) => `- ${fix}`).join("\n")}${green ? `\n\n${KEEP_GREEN}` : ""}`;
 const SMOOTH =
-  "Edit the attached picture. Do not change a single character of any text. Make the whole photo look natural, as if the words were really shown on the screens: match each screen's light, focus, glare and perspective, and keep everything else as it is.";
-/** The language edit; on a second attempt it carries what the content review asked to fix. */
+  "Edit the attached picture. Do not change a single character of any text. Make the whole photo look natural, as if the words were really printed or shown where they stand: match each surface's light, focus, glare and perspective, and keep everything else as it is. Keep any flat green display exactly flat green and empty.";
+/** The language edit; it carries what the English content review (first attempt) or this language's review (second) asked to fix. */
 const localePrompt = (concept, locale, boxes, fixes = []) => {
   const texts = textsFor(concept, locale);
   const cleared = boxes.filter((box) => box.role !== "screen").map((box) => `"${concept.texts[box.textIndex].text}"`);
   const screens = boxes.filter((box) => box.role === "screen").map((box) => `- "${concept.texts[box.textIndex].text}" becomes "${texts[box.textIndex].text}"`);
-  return [
-    "Edit the attached picture. Keep the scene, the people, the light, the provider logos and the layout exactly as they are.",
-    cleared.length > 0 ? `Remove these words and leave their space clean, continuing the background, with no letters at all: ${cleared.join(", ")}.` : "",
-    screens.length > 0 ? `Replace the words on the screens, exactly, keeping model and company names as written:\n${screens.join("\n")}` : "",
-    fixes.length > 0 ? `A review of the last attempt also asked for these changes:\n${fixes.map((fix) => `- ${fix}`).join("\n")}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  const build = (kept) =>
+    [
+      "Edit the attached picture. Keep the scene, the people, the light, the provider logos and the layout exactly as they are.",
+      screenItems(concept, locale).length > 0 ? KEEP_GREEN : "",
+      cleared.length > 0 ? `Remove these words and leave their space clean, continuing the background, with no letters at all: ${cleared.join(", ")}.` : "",
+      screens.length > 0 ? `Replace the words on the screens, exactly, keeping model and company names as written:\n${screens.join("\n")}` : "",
+      kept.length > 0 ? `A review of this picture also asked for these changes:\n${kept.map((fix) => `- ${fix}`).join("\n")}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  // The cap refuses a prompt over 8000 characters (with the no-logo line): the least important fixes go first.
+  let kept = fixes;
+  while (kept.length > 0 && build(kept).length > 7600) kept = kept.slice(0, -1);
+  return build(kept);
 };
 
 const madeIds = new Set(history.map((entry) => entry.id).filter(Boolean));
@@ -258,7 +316,7 @@ async function deliver(concept, locale, file, verdicts) {
     path.join(dir, `${id}.spec.json`),
     JSON.stringify({ id, locale, layout: `${id}.layout.html`, alt: `${concept.alt[locale]} ${BAND_ALT[locale]}`, texts: textsFor(concept, locale).map((text) => text.text) }, null, 1),
   );
-  const entry = { date, id, locale, kind: "card", path: "higgsfield", feature, concept: concept.device, device: concept.device, pictures: [`generated:${name}`], headline: textsFor(concept, locale).find((text) => text.role === "headline")?.text ?? null, verdicts: verdicts.map((v) => `${v.stage}:${v.verdict}`), refused: null };
+  const entry = { date, id, locale, kind: "card", path: "higgsfield", feature, format: concept.format, concept: concept.device, device: concept.device, pictures: [`generated:${name}`], headline: textsFor(concept, locale).find((text) => text.role === "headline")?.text ?? null, verdicts: verdicts.map((v) => `${v.stage}:${v.verdict}`), refused: null };
   newHistory.push(entry);
   const card = node(["make-card.mjs", path.join(dir, `${id}.spec.json`), dir]);
   if (card.status !== 0) {
@@ -280,7 +338,7 @@ async function deliver(concept, locale, file, verdicts) {
 
 const drop = (concept, locale, reason) => {
   report.dropped.push({ id: `${concept.id}-${locale}`, reason });
-  newHistory.push({ date, id: null, locale, kind: "card", path: "higgsfield", feature, concept: concept.device, device: concept.device, dropped: reason });
+  newHistory.push({ date, id: null, locale, kind: "card", path: "higgsfield", feature, format: concept.format, concept: concept.device, device: concept.device, dropped: reason });
 };
 
 for (const concept of concepts) {
@@ -293,7 +351,7 @@ for (const concept of concepts) {
   }
   let guideReview = review("guide", concept, "en", en, 1);
   if (guideReview?.verdict === "fix") {
-    en = await picture(`${concept.id}/en/refine`, editPrompt(guideReview.fixes), [en, ...logos], path.join(genDir, `${concept.id}-en-2.png`));
+    en = await picture(`${concept.id}/en/refine`, editPrompt(guideReview.fixes, screenItems(concept, "en").length > 0), [en, ...logos], path.join(genDir, `${concept.id}-en-2.png`));
     guideReview = en ? review("guide", concept, "en", en, 2) : null;
   }
   if (!en || guideReview?.verdict !== "pass") {
@@ -301,23 +359,44 @@ for (const concept of concepts) {
     continue;
   }
   const base = en;
-  const boxes = guideReview.textBoxes;
+  // The display's words are drawn by setScreen, never by a box or a model edit.
+  const sceneReview = sceneOnly(concept, guideReview);
+  const boxes = sceneReview.textBoxes;
+  /** The picture with the app screen drawn on its green display (the picture itself when the concept has none). */
+  const withScreen = async (file, locale, out) => {
+    const items = screenItems(concept, locale);
+    if (items.length === 0) return file;
+    await setScreen({ input: file, items, locale, out });
+    return out;
+  };
 
   // 6-9 for English: the model's own words, read back and compared.
+  // What the English content review itself asked for (not the script's word
+  // list) holds for every language version too, since each starts from the
+  // same picture: on 2026-11-12 three languages each spent an edit on the
+  // lettering of a prop that the English review had already flagged.
+  let sceneFixes = [];
   {
-    let file = base;
-    let content = review("content", concept, "en", file, 1);
-    if (content && content.verdict === "fix") {
-      file = await picture(`${concept.id}/en/remake`, editPrompt(content.fixes), [file, ...logos], path.join(genDir, `${concept.id}-en-3.png`));
-      content = file ? review("content", concept, "en", file, 2) : null;
-    }
-    if (file && content?.verdict === "pass") {
-      try {
-        await deliver(concept, "en", file, [guideReview, content]);
-      } catch (caught) {
-        report.failed.push({ id: `${concept.id}-en`, step: "compose", error: String(caught instanceof Error ? caught.message : caught).slice(0, 300) });
+    let file = null;
+    let content = null;
+    let error = null;
+    try {
+      file = await withScreen(base, "en", path.join(genDir, `${concept.id}-en-1s.png`));
+      content = review("content", concept, "en", file, 1);
+      sceneFixes = (content?.fixes ?? []).filter((fix) => !/^(Show exactly|Remove text that is not approved): /u.test(fix));
+      if (content && content.verdict === "fix") {
+        // The remake starts from the green picture, so no model edit redraws the app screen.
+        const green = screenItems(concept, "en").length > 0;
+        const remade = await picture(`${concept.id}/en/remake`, editPrompt(content.fixes, green), [green ? base : file, ...logos], path.join(genDir, `${concept.id}-en-3.png`));
+        file = remade ? await withScreen(remade, "en", path.join(genDir, `${concept.id}-en-3s.png`)) : null;
+        content = file ? review("content", concept, "en", file, 2) : null;
       }
-    } else drop(concept, "en", content ? `content_${content.verdict}` : "content_not_passed");
+      if (file && content?.verdict === "pass") await deliver(concept, "en", file, [guideReview, content]);
+    } catch (caught) {
+      error = String(caught instanceof Error ? caught.message : caught).slice(0, 300);
+      report.failed.push({ id: `${concept.id}-en`, step: "compose", error });
+    }
+    if (!(file && content?.verdict === "pass") || error) drop(concept, "en", error ? (/green screen/u.test(error) ? "no_green_screen" : "compose_failed") : content ? `content_${content.verdict}` : "content_not_passed");
   }
 
   // 5-9 for the other languages.
@@ -328,16 +407,24 @@ for (const concept of concepts) {
     try {
       for (let attempt = 1; attempt <= 2 && !delivered && !report.halted; attempt += 1) {
         const stem = path.join(genDir, `${concept.id}-${locale.toLowerCase()}-${attempt}`);
-        const edited = await picture(`${concept.id}/${locale}/edit`, localePrompt(concept, locale, boxes, content?.fixes ?? []), [base, ...logos], `${stem}-a.png`);
+        const edited = await picture(`${concept.id}/${locale}/edit`, localePrompt(concept, locale, boxes, content?.fixes ?? sceneFixes), [base, ...logos], `${stem}-a.png`);
         if (!edited) break;
         let file = edited;
         if (boxes.some((box) => box.role === "screen")) {
-          await setTexts({ input: file, review: guideReview, concept, locale, roles: ["screen"], out: `${stem}-b.png` });
-          file = await picture(`${concept.id}/${locale}/smooth`, SMOOTH, [`${stem}-b.png`], `${stem}-c.png`);
-          if (!file) break;
+          await setTexts({ input: file, review: sceneReview, concept, locale, roles: ["screen"], out: `${stem}-b.png` });
+          const smoothed = await picture(`${concept.id}/${locale}/smooth`, SMOOTH, [`${stem}-b.png`], `${stem}-c.png`);
+          if (!smoothed) break;
+          // The smoothing edit settles the screens into the photo but redraws
+          // their letters: on 2026-11-13 it misspelt the long Korean and
+          // Chinese answers it was given exactly. So the exact words go on once
+          // more over the smoothed screens (each box has its own opaque ground).
+          await setTexts({ input: smoothed, review: sceneReview, concept, locale, roles: ["screen"], out: `${stem}-c2.png` });
+          file = `${stem}-c2.png`;
         }
+        // The app screen on the green display, after every model edit.
+        file = await withScreen(file, locale, `${stem}-s.png`);
         // The headline last, so no model edit ever redraws its letters.
-        await setTexts({ input: file, review: guideReview, concept, locale, roles: ["headline", "cta"], out: `${stem}-d.png` });
+        await setTexts({ input: file, review: sceneReview, concept, locale, roles: ["headline", "cta"], out: `${stem}-d.png` });
         content = review("content", concept, locale, `${stem}-d.png`, attempt);
         if (content?.verdict === "pass") {
           delivered = true;
@@ -348,7 +435,7 @@ for (const concept of concepts) {
       error = caught instanceof Error ? caught.message : String(caught);
       report.failed.push({ id: `${concept.id}-${locale}`, step: "compose", error: error.slice(0, 300) });
     }
-    if (!delivered) drop(concept, locale, error ? "compose_failed" : content ? `content_${content.verdict}` : report.halted ? "halted" : "not_made");
+    if (!delivered) drop(concept, locale, error ? (/green screen/u.test(error) ? "no_green_screen" : "compose_failed") : content ? `content_${content.verdict}` : report.halted ? "halted" : "not_made");
   }
 }
 
@@ -383,10 +470,13 @@ if (new Date().toLocaleDateString("en-US", { timeZone: "Australia/Brisbane", wee
   }
 }
 
+// A day with no concept still counts as the feature's day, so tomorrow's run
+// takes another feature instead of failing on the same one again.
+if (concepts.length === 0) newHistory.push({ date, id: null, locale: null, kind: "card", path: "higgsfield", feature, dropped: "concepts_refused" });
 // History: one entry per asset or dropped version, with the credits of its concept.
 for (const entry of newHistory) {
   const concept = concepts.find((candidate) => candidate.device === entry.device);
   entry.credits = concept ? creditsFor(`${concept.id}/${entry.locale}/`) : 0;
 }
 writeFileSync(historyPath, `${JSON.stringify([...history, ...newHistory], null, 1)}\n`);
-finish(0);
+finish(exitCode);

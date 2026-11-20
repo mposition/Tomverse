@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, ArrowLeft, Loader2, Trash2 } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
@@ -97,6 +97,9 @@ export function ExternalConversationViewer({
 }) {
     const { t } = useLanguage();
     const router = useRouter();
+    const query = useSearchParams();
+    const fromImport = query.get("fromImport");
+    const fromMemory = !!fromImport && query.get("memory") === "1";
     const [state, setState] = useState<ViewerState>({ kind: "loading" });
     /**
      * Which read of this snapshot the screen is currently showing.
@@ -294,12 +297,12 @@ export function ExternalConversationViewer({
         <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-8">
             <div>
                 <Link
-                    href="/settings/imports"
+                    href={fromMemory ? `/settings/memory?fromImport=${encodeURIComponent(fromImport!)}` : fromImport ? `/settings/imports/new?saved=${encodeURIComponent(fromImport)}` : "/settings/imports"}
                     className="inline-flex items-center gap-1.5 text-sm font-semibold text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
                     data-testid="external-viewer-back"
                 >
                     <ArrowLeft className="h-4 w-4" />
-                    {t("externalImport.backToImports")}
+                    {t(fromMemory ? "journey.memory" : fromImport ? "journey.backSaved" : "externalImport.backToImports")}
                 </Link>
             </div>
 
@@ -450,6 +453,7 @@ export function ExternalConversationViewer({
                     <ContinueInTomverseCard
                         externalConversationId={conversationId}
                         enabled={continuationEnabled}
+                        fromJourney={!!fromImport}
                     />
 
                     <SnapshotLockPanel

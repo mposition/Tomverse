@@ -26,6 +26,8 @@ type CatalogWorker = {
   paused: boolean;
   isolated: boolean;
   blocked: boolean;
+  /** The model its v22 profile runs; absent for a worker with none. */
+  model?: string | null;
 };
 
 type Runtime = {
@@ -110,6 +112,7 @@ export function agentOfficeAmuxState(input: {
         provider: worker?.provider ?? resident.provider,
         state,
         heartbeatAt: runtime?.heartbeatAt.toISOString() ?? null,
+        ...(worker?.model ? { model: worker.model } : {}),
       };
     }),
   };

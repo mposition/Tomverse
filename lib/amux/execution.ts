@@ -1,13 +1,13 @@
 import "server-only";
 
-import { amuxV22ExecutionRole, amuxV22TaskWritesPatch } from "@/lib/amux/v22WorkerClaimCore";
+import { amuxV22ExecutionRole, amuxV22ReviewAuthorVendor,
+  amuxV22TaskWritesPatch } from "@/lib/amux/v22WorkerClaimCore";
 import { AMUX_V22_CONCLUSION_ENV, amuxV22ConclusionMode,
   amuxV22ConclusionSettlement } from "@/lib/amux/v22ConclusionCore";
-import { amuxV22ResultReviewDmEnabled, amuxV22ResultReviewKind } from
-  "@/lib/amux/v22ResultReviewCore";
+import { amuxV22ResultReviewKind } from "@/lib/amux/v22ResultReviewCore";
 import { createHash, randomInt, randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
-import { writeSystemAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
 import { AMUX_MAX_EXPECTED_REVISION } from "@/lib/amux/claimContract";
@@ -23,6 +23,7 @@ import {
   type AmuxAttachment,
 } from "@/lib/amux/dbBoundary";
 import {
+  amuxApprovedCeilingOverrun,
   decideAmuxAttemptBudget,
   settlementDestinationForBudget,
 } from "@/lib/amux/executionBudgetCore";
@@ -45,13 +46,21 @@ import {
 import { AmuxV4TaskCatalogApprovalError,
   calculateCurrentApprovedAmuxV4TaskCost } from
   "@/lib/amux/v4TaskCostCatalogApprovalService";
-import { checkV4TaskApprovedCeiling, v4TaskCeilingDecision } from "@/lib/amux/v4TaskCostCeilingCore";
+import { checkV4TaskApprovedCeiling, v4TaskCeilingDecision,
+  v4TaskReceiptForApprovedRoutes } from "@/lib/amux/v4TaskCostCeilingCore";
+import { amuxV4NewModelRouteOptions } from "@/lib/amux/v4TaskNewModelRouteSwitch";
 import { AMUX_GRADE_ESCALATED_ACTION, readAmuxV52TaskReceipt } from
   "@/lib/amux/v52GradeReceipt";
-import { amuxV52ReviewRequired, classifyAmuxExecutionPath,
+import { amuxV52InPlaceEscalationAllowed, amuxV52ReviewRequired,
+  classifyAmuxExecutionPath,
   decideAmuxV52SettlementPaths } from "@/lib/amux/executionGradeCore";
+import { amuxV22LocalCliLeaseMs } from
+  "@/lib/amux/v22LocalCliFlowCore";
 import { decideAmuxV52ReviewDisposition, validAmuxV52ReviewEvidence,
   type AmuxV52ReviewEvidence } from "@/lib/amux/v52ReviewCore";
+import { createAmuxV52ReviewFindingsRow, sealAmuxV52ReviewFindings,
+  type AmuxV52PreparedFindings } from "@/lib/amux/v52ReviewFindingsStore";
+import { v22TaskResultIdeaId } from "@/lib/amux/v22TaskResultStore";
 import { amuxV52PriorReviewRejections } from "@/lib/amux/v52ReviewRejections";
 import { ENGINEERING_AGENT_POLICY_VERSION,
   v22RunOutcomeForProduct } from "@/lib/engineeringAgentCore";
@@ -67,8 +76,7 @@ import {
 } from "@/lib/engineeringAgentStore";
 import { AMUX_V22_SEALED_DELIVERY_MARKER,
   AMUX_V22_ENGINEERING_PUBLICATION_ENV,
-  AMUX_V22_TASK_EXECUTION_ENV, amuxV22EngineeringPublicationEnabled,
-  amuxV22TaskExecutionEnabled,
+  amuxV22EngineeringPublicationEnabled,
   v22ExecutionReceiptVerified,
   v22ExecutionSourceForProvider,
   v22KnownCliFailureReason,
@@ -99,6 +107,15 @@ import { amuxV22ReadOnlyApiUsageProjection,
 import { amuxV22WorkerSafeStopFenced } from "@/lib/amux/v22LegacySafeStopFence";
 import { amuxV22OwnerQuestionSettlementPlan } from "@/lib/amux/v22OwnerQuestionCore";
 import { amuxWorkerRuntimeUsesReadOnlyApi } from "@/lib/amux/workerRuntime";
+import { amuxInfraFailureReason,
+  amuxV22InfraFailureKind,
+  type AmuxSidecarFailureReport } from "@/lib/amux/infraFailureCore";
+import { countAmuxInfraAttemptsBefore, readAmuxAttemptBudgetFacts } from
+  "@/lib/amux/infraFailureStore";
+import { AMUX_V22_CLI_USAGE_UNREPORTED_REASON,
+  amuxExecutionLeaseMs,
+  amuxV22CliUsageRecordOnly } from
+  "@/lib/amux/v22ReadBackProceedCore";
 
 export const AMUX_EXECUTION_LEASE_MS = 90_000;
 
@@ -198,8 +215,11 @@ type TaskLockRow = {
   executionBriefDigest: string | null;
 };
 
+// 180 s (v22ReadBackProceedCore.ts, v22LocalCliFlowCore.ts). The lease is liveness,
+// renewed by every bridge heartbeat; it never bounds how long a run lasts.
 const executionLeaseExpiry = (now: Date) =>
-  new Date(now.getTime() + AMUX_EXECUTION_LEASE_MS);
+  new Date(now.getTime() + Math.max(AMUX_EXECUTION_LEASE_MS, amuxExecutionLeaseMs(),
+    amuxV22LocalCliLeaseMs()));
 
 const lockRuntime = async (
   tx: Prisma.TransactionClient,
@@ -252,6 +272,9 @@ const lockTask = async (
   tx: Prisma.TransactionClient,
   taskId: string,
 ): Promise<TaskLockRow | null> => {
+  // Every caller locks its runtime, attempt and resource rows first; the audit
+  // chain comes after them and before the Task (lib/adminAudit.ts).
+  await takeAuditChainLock(tx);
   const rows = await tx.$queryRaw<TaskLockRow[]>`
     SELECT
       "id",
@@ -304,6 +327,12 @@ const validSettlement = (
   (outcome === "failed" && toStatus === "todo") ||
   (outcome === "blocked" && toStatus === "blocked");
 
+/** Calls the v22 start adds to `executionStart` when it publishes (the
+ * publication reads) and always (three more reads); see the use below.
+ * tests/amuxClaimContractParity reads these values. */
+export const AMUX_V22_START_PUBLICATION_CALLS = 25;
+export const AMUX_V22_START_EXTRA_CALLS = 3;
+
 /** Consume exactly the A13 assignment, without reusing legacy ownership as
  * execution authority. No CLI call occurs here; the A14 usage receipt must
  * follow the delivery before settlement can be accepted. */
@@ -317,8 +346,6 @@ export async function startAmuxV22TaskExecution(input: {
   /** App-read develop head, supplied only after exact owner disclosure check. */
   publicationBaseSha?: string | null;
 }) {
-  if (!amuxV22TaskExecutionEnabled(process.env[AMUX_V22_TASK_EXECUTION_ENV]))
-    return { started: false as const, reason: "v22_execution_disabled" as const };
   const publicationBaseSha = amuxV22EngineeringPublicationEnabled(
     process.env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]) &&
     input.publicationBaseSha &&
@@ -327,7 +354,9 @@ export async function startAmuxV22TaskExecution(input: {
   return withAmuxDbBoundary({ ...AMUX_DB_BOUNDARIES.executionStart,
     // One more read is needed only after an audited frontier escalation.
     prismaCallCeiling: AMUX_DB_BOUNDARIES.executionStart.prismaCallCeiling +
-      (publicationBaseSha ? 24 : 0) + 3 },
+      // + 1: the card a card-scoped halt reads at admission (AMUXFLOW/B2).
+      (publicationBaseSha ? AMUX_V22_START_PUBLICATION_CALLS : 0) +
+      AMUX_V22_START_EXTRA_CALLS },
     async (tx, context) => {
       const now = context.dbNow;
       const incident = await lockAmuxAdmissionAndReadIncident(tx, now);
@@ -409,23 +438,28 @@ export async function startAmuxV22TaskExecution(input: {
       // a route outside its confirmed receipt still does.
       // Policy v48: the FIRST Task retry's added route is reconfirmed by the
       // owner's final consent; that is checked once the recovery is read.
+      // Only routes this Task's approval can run on, as the claim chose from
+      // (v4TaskReceiptForApprovedRoutes); a recovery keeps the whole receipt.
+      const routeOptions = amuxV4NewModelRouteOptions(process.env, !!assignment.recoveryApprovalId);
+      const runnable = assignment.recoveryApprovalId ? cost.receipt :
+        v4TaskReceiptForApprovedRoutes(approved, cost.receipt, routeOptions);
       const ceilingAllowed = v4TaskCeilingDecision(checkV4TaskApprovedCeiling(approved,
-        { ok: true, receipt: cost.receipt }), !!assignment.recoveryApprovalId) === "allow";
+        { ok: true, receipt: runnable }, routeOptions), !!assignment.recoveryApprovalId) === "allow";
       if (!ceilingAllowed && !assignment.recoveryApprovalId) {
         return { started: false as const,
           reason: "cost_reconfirmation_required" as const };
       }
-      const route = cost.receipt.routes.find((candidate) =>
+      const route = runnable.routes.find((candidate) =>
         candidate.routeId === assignment.routeId &&
         candidate.workerName === assignment.workerName &&
         candidate.provider === assignment.provider &&
         candidate.modelId === assignment.modelId &&
         candidate.routePolicyDigest === assignment.routePolicyDigest);
-      const prior = await tx.amuxExecutionAttempt.aggregate({
-        where: { taskId: input.taskId },
-        _count: { _all: true }, _max: { attemptNumber: true },
-        _sum: { reservedCostMicrousd: true },
-      });
+      // One statement: the rows, the greatest number, the reserved total and
+      // the infrastructure failures, which do not use the card's attempts
+      // (owner decision 2026-11-15, lib/amux/infraFailureCore.ts).
+      const prior = await readAmuxAttemptBudgetFacts(tx, input.taskId);
+      const priorReserved = prior.reservedMicrousd;
       const recovery = assignment.recoveryApprovalId ? await readAmuxV22RecoveryAuthority(tx,
         input.taskId, assignment.taskRevision, assignment.recoveryApprovalId, now) : null;
       if (assignment.recoveryApprovalId && !recovery) return { started: false as const,
@@ -445,10 +479,14 @@ export async function startAmuxV22TaskExecution(input: {
         return { started: false as const,
           reason: "recovery_approval_unbound" as const };
       }
-      const budget = recoveryAttemptBudget({
-        historicalAttempts: prior._count._all,
-        greatestAttemptNumber: prior._max.attemptNumber,
-      });
+      // A paid (risk-accepted) retry keeps its own exact count.
+      const budget = recovery?.riskAcceptanceId ? recoveryAttemptBudget({
+        historicalAttempts: prior.historicalRows,
+        greatestAttemptNumber: prior.greatestAttemptNumber,
+        infraRows: prior.infraRows,
+      }) : decideAmuxAttemptBudget({ historical_rows: prior.historicalRows,
+        greatest_attempt_number: prior.greatestAttemptNumber,
+        infra_rows: prior.infraRows });
       if (!budget.allowed) return { started: false as const,
         reason: "attempt_budget_exhausted" as const };
       // v47: the retry receipt is recomputed as of its launch check.
@@ -457,12 +495,12 @@ export async function startAmuxV22TaskExecution(input: {
           { asOf: recovery.costAsOf }) : cost;
       const recoveryCost = recovery?.riskAcceptanceId && route ?
         amuxV22ReadOnlyRetryRouteCost({
-          priorReservedMicroUsd: prior._sum.reservedCostMicrousd ?? BigInt(0),
+          priorReservedMicroUsd: priorReserved,
           catalogApprovalId: recoveryReceipt.approvalId, receipt: recoveryReceipt.receipt,
           routeId: route.routeId, workerName: route.workerName,
           provider: route.provider, modelId: route.modelId }) :
         recovery ? amuxV22RecoveryCost({
-          priorReservedMicroUsd: prior._sum.reservedCostMicrousd ?? BigInt(0),
+          priorReservedMicroUsd: priorReserved,
           catalogApprovalId: cost.approvalId, receipt: cost.receipt }) : null;
       const apiFrame = recovery?.readOnlyExecutorKind ===
         AMUX_V22_READ_ONLY_API_EXECUTOR_KIND ?
@@ -494,8 +532,8 @@ export async function startAmuxV22TaskExecution(input: {
              recovery.briefDigest !== card.v4BriefDigest)) ||
           !(recovery ? amuxV22RecoveryStartAllowed({ approval: recovery,
             taskId: input.taskId, assignmentRevision: assignment.taskRevision,
-            historicalAttempts: prior._count._all, nextAttemptNumber: budget.next_attempt_number,
-            priorReservedMicroUsd: prior._sum.reservedCostMicrousd ?? BigInt(0),
+            historicalAttempts: prior.historicalRows, nextAttemptNumber: budget.next_attempt_number,
+            priorReservedMicroUsd: priorReserved,
             assignedMicroUsd: assignment.perAttemptMicroUsd,
             catalogApprovalId: cost.approvalId,
             costDigest: recoveryCost!.costDigest,
@@ -510,7 +548,8 @@ export async function startAmuxV22TaskExecution(input: {
           // The engineering row is optional for Task execution. A full owner
           // queue or halted Publisher leaves the Task's result private.
           await requireEngineeringAgentRunAdmission(
-            engineeringAgentTransactionInAmux(context.attachedTransaction));
+            engineeringAgentTransactionInAmux(context.attachedTransaction),
+            { cardId: input.taskId });
           publicationRunId = String(randomInt(100_000_000_000,
             1_000_000_000_000));
         } catch (error) {
@@ -534,6 +573,15 @@ export async function startAmuxV22TaskExecution(input: {
       if (busy.count !== 1) throw new Error("v22 runtime changed during start");
       const attemptId = randomUUID();
       const leaseExpiresAt = executionLeaseExpiry(now);
+      // Recorded, never refused (owner decision 2026-11-14): the same
+      // calculation the claim recorded for this assignment.
+      const ceilingOverrun = amuxApprovedCeilingOverrun({ approvedReceipt: approved,
+        priorReservedMicroUsd: priorReserved,
+        nextAttemptMicroUsd: assignment.perAttemptMicroUsd });
+      if (ceilingOverrun) console.warn(JSON.stringify({ subsystem: "amux",
+        event: "v22_approved_ceiling_overrun", phase: "execution_start",
+        taskId: input.taskId, assignmentId: input.assignmentId,
+        attemptNumber: budget.next_attempt_number, ...ceilingOverrun }));
       await tx.amuxExecutionAttempt.create({ data: {
         id: attemptId, taskId: input.taskId, worker: input.worker,
         workerInstanceId: input.instanceId,
@@ -567,7 +615,8 @@ export async function startAmuxV22TaskExecution(input: {
         summary: "Started one assignment-bound AMUX v22 Task attempt.",
         metadata: { taskId: input.taskId, assignmentId: input.assignmentId,
           worker: input.worker, taskRevision: input.expectedRevision + 1,
-          reservedCostMicrousd: assignment.perAttemptMicroUsd.toString() },
+          reservedCostMicrousd: assignment.perAttemptMicroUsd.toString(),
+          ...(ceilingOverrun ? { ceilingOverrun } : {}) },
       });
       context.requireLeaseAt(runtime.leaseExpiresAt);
       context.requireLeaseAt(leaseExpiresAt);
@@ -812,48 +861,9 @@ export async function startAmuxExecution(
         historical_rows: attemptAggregate._count._all,
         greatest_attempt_number: attemptAggregate._max.attemptNumber,
       });
+      // This start names no bound, so an ordinary card is never refused here
+      // (owner direction 2026-11-18); the type still carries the refusal.
       if (!budget.allowed) {
-        const blocked = await tx.amuxWorkItem.updateMany({
-          where: {
-            id: input.taskId,
-            owner: input.worker,
-            status: "todo",
-            archivedAt: null,
-            revision: input.expectedRevision,
-          },
-          data: {
-            status: "blocked",
-            revision: { increment: 1 },
-          },
-        });
-        if (blocked.count !== 1) {
-          return {
-            started: false as const,
-            reason: "task_not_startable" as const,
-          };
-        }
-        await openAmuxHumanEscalation(tx, {
-          taskId: input.taskId,
-          specialty: "execution-recovery",
-          reason: "attempt_budget_exhausted",
-          openedBy: AMUX_SYSTEM_AUDIT_ACTOR,
-        });
-        await writeSystemAuditLog({
-          systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
-          action: "amux.execution.budget_exhausted",
-          targetType: "AmuxWorkItem",
-          targetId: input.taskId,
-          summary: `Blocked AMUX task ${input.taskId} after its execution attempt budget was exhausted.`,
-          metadata: {
-            worker: input.worker,
-            exhausted_limit: budget.exhausted_limit,
-            attempts_used: budget.attempts_used,
-            max_attempts: budget.max_attempts,
-            previous_revision: input.expectedRevision,
-            next_revision: input.expectedRevision + 1,
-          },
-          tx,
-        });
         return {
           started: false as const,
           reason: "attempt_budget_exhausted" as const,
@@ -1219,15 +1229,28 @@ export const heartbeatAmuxV22TaskExecution = (
   },
 }, true);
 
-/** The launcher records only the review server's binding, never findings.
- * A lost response is resolved by reading the attempt-keyed record, not by
- * submitting the same diff again. */
+/** The launcher records the review server's binding and, for a reject, its
+ * findings as a sealed body beside it (owner decision 2026-11-15). A lost
+ * response is resolved by reading the attempt-keyed record, not by submitting
+ * the same diff again. */
 export async function recordAmuxV52Review(input: {
   attemptId: string; worker: string; instanceId: string;
   generation: number; taskRevision: number;
   changedPaths: string[];
   evidence: AmuxV52ReviewEvidence;
+  /** A reject's findings, already normalised, with the attempt's key made
+   * before this call (prepareAmuxV52ReviewFindings). Display and prompt data
+   * only: never in the request digest, never a reason to change the verdict.
+   * The key is cleared when this call ends. */
+  findings?: AmuxV52PreparedFindings | null;
 }) {
+  try {
+    return await recordAmuxV52ReviewWithFindings(input);
+  } finally { input.findings?.keys.masterKey.fill(0); }
+}
+
+async function recordAmuxV52ReviewWithFindings(
+  input: Parameters<typeof recordAmuxV52Review>[0]) {
   if (!validAmuxV52ReviewEvidence(input.evidence))
     return { recorded: false as const, reason: "review_evidence_invalid" as const };
   if (!adminAuditIntegrityKeys(process.env)[0])
@@ -1271,7 +1294,7 @@ export async function recordAmuxV52Review(input: {
       const assignment = await tx.amuxV22WorkerAssignment.findUnique({
         where: { id: attempt.v22AssignmentId },
         select: { id: true, role: true, grade: true, provider: true,
-          authorizationAuditLogId: true },
+          modelId: true, authorizationAuditLogId: true },
       });
       const assignmentAudit = assignment ? await tx.adminAuditLog.findUnique({
         where: { id: assignment.authorizationAuditLogId },
@@ -1287,11 +1310,17 @@ export async function recordAmuxV52Review(input: {
           assignmentAudit.targetId !== assignment?.id ||
           !amuxV22TaskWritesPatch(assignment?.role) ||
           assignment!.grade !== task.executionGrade ||
-          assignment.provider !== evidence.authorVendor)
+          amuxV22ReviewAuthorVendor(assignment.provider, assignment.modelId) !==
+            evidence.authorVendor)
         return { recorded: false as const,
           reason: "review_assignment_unverified" as const };
-      if (decideAmuxV52SettlementPaths(assignment.grade,
-          input.changedPaths, candidate.files) !== "pass")
+      // The local CLI flow also reviews a lower grade's kept contract change,
+      // which its settlement then judges at frontier in place.
+      const recordDecision = decideAmuxV52SettlementPaths(assignment.grade,
+        input.changedPaths, candidate.paths);
+      if (recordDecision !== "pass" && !(
+          recordDecision === "escalate" &&
+          amuxV52InPlaceEscalationAllowed(input.changedPaths, candidate.paths)))
         return { recorded: false as const,
           reason: "review_patch_unverified" as const };
       const patch = await tx.amuxV22TaskPatch.findUnique({
@@ -1309,6 +1338,18 @@ export async function recordAmuxV52Review(input: {
       if (existing) return existing.requestDigest === requestDigest ?
         { recorded: true as const, duplicate: true as const } :
         { recorded: false as const, reason: "review_record_conflict" as const };
+      // A reject's findings are sealed here, in this transaction, only when the
+      // key made before it belongs to this very Task's idea.
+      let sealedFindings: ReturnType<typeof sealAmuxV52ReviewFindings> | null = null;
+      let findingsIdeaId: string | null = null;
+      if (input.findings && evidence.verdict === "reject") {
+        const owner = await tx.amuxWorkItem.findUnique({ where: { id: task.id },
+          select: { sourceSnapshot: true } });
+        findingsIdeaId = v22TaskResultIdeaId(owner?.sourceSnapshot);
+        if (findingsIdeaId && findingsIdeaId === input.findings.ideaId)
+          sealedFindings = sealAmuxV52ReviewFindings(input.findings.doc,
+            attempt.id, input.findings.keys);
+      }
       const auditLogId = await writeSystemAuditLog({
         tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
         action: "amux.review.recorded", targetType: "AmuxWorkItem",
@@ -1318,7 +1359,9 @@ export async function recordAmuxV52Review(input: {
           baseSha: evidence.baseSha, commitSha: evidence.commitSha,
           verdict: evidence.verdict, authorVendor: evidence.authorVendor,
           reviewerVendors: evidence.reviewerVendors,
-          touchesContract: evidence.touchesContract, requestDigest },
+          touchesContract: evidence.touchesContract, requestDigest,
+          ...(sealedFindings ? { findingsDigest: sealedFindings.digest,
+            findingCount: sealedFindings.findingCount } : {}) },
       });
       const recordedAudit = await tx.adminAuditLog.findUnique({
         where: { id: auditLogId },
@@ -1335,11 +1378,32 @@ export async function recordAmuxV52Review(input: {
         reviewerVendors: evidence.reviewerVendors,
         touchesContract: evidence.touchesContract, requestDigest, auditLogId,
       } });
+      if (sealedFindings && findingsIdeaId)
+        await createAmuxV52ReviewFindingsRow(tx, { attemptId: attempt.id,
+          taskId: task.id, ideaId: findingsIdeaId, sealed: sealedFindings,
+          repeatsPrior: input.findings!.repeatsPrior });
       context.requireLeaseAt(runtime.leaseExpiresAt);
       context.requireLeaseAt(attempt.leaseExpiresAt);
       return { recorded: true as const, duplicate: false as const };
     });
 }
+
+/**
+ * The 409 reason of a v22 settlement or v52 review record whose changed-path
+ * digest names no recorded list (docs/policy/amux-v22-result-transfer.md 1.6
+ * 5): the list is not the attempt's, does not match the digest or count, or
+ * its body is gone. The routes answer it before this module runs; the bridge
+ * commits the list again and sends the same request on its next tick, and
+ * never settles unverified for it.
+ */
+export const AMUX_V22_CHANGED_PATHS_UNRECORDED = "changed_paths_unrecorded" as const;
+
+/** Calls the v22 settlement adds to `executionSettle` (reasons at the use
+ * below). With them the planned worst case is larger than the v22 execution
+ * route, which runs it inside what the route has left
+ * (amuxDbTransactionBudgetWithinRouteMs); tests/amuxClaimContractParity reads
+ * this value instead of a copy of it. */
+export const AMUX_V22_SETTLE_EXTRA_CALLS = 44 + 6 + 1 + 2;
 
 /** A reported result is not a cost observation. Only exact, recorded A14
  * invocation receipts allow success or automatic requeue after a failure. */
@@ -1355,6 +1419,9 @@ export async function settleAmuxV22TaskExecution(input: {
     launcherConfigDigest?: string;
     apiExecutionFrameDigest?: string;
     apiExecutionReceipt?: unknown };
+  /** What the sidecar said about a run with no verified result (a bridge
+   * from 2026-11-15 on sends it with an unverified settlement). */
+  failure?: AmuxSidecarFailureReport;
 }) {
   const patch = input.outcome === "succeeded" ?
     await loadEngineeringAgentV22SettlementPatch(input.attemptId) : null;
@@ -1363,10 +1430,12 @@ export async function settleAmuxV22TaskExecution(input: {
   // GitHub outside any route budget (lib/engineeringAgentV22TierPromotion.ts).
   // + 6: an applied investigate conclusion writes its own system audit (4)
   // and a result put to Decision Maker review its row (1), with one spare.
+  // + 1: the local CLI flow's in-place escalation reads its review record.
+  // + 2: the Task's earlier infrastructure failures, and its latest result
+  // failures for the repeat check (owner decision 2026-11-15).
   const settleBoundary = { ...AMUX_DB_BOUNDARIES.executionSettle,
-    prismaCallCeiling: AMUX_DB_BOUNDARIES.executionSettle.prismaCallCeiling + 44 + 6 };
+    prismaCallCeiling: AMUX_DB_BOUNDARIES.executionSettle.prismaCallCeiling + AMUX_V22_SETTLE_EXTRA_CALLS };
   const conclusionMode = amuxV22ConclusionMode(process.env[AMUX_V22_CONCLUSION_ENV]);
-  const resultReviewDm = amuxV22ResultReviewDmEnabled();
   const publicationEligible = v22PublishPreflightEligible({
     policyVersion: ENGINEERING_AGENT_POLICY_VERSION,
     patchPresent: patch !== null,
@@ -1405,7 +1474,7 @@ export async function settleAmuxV22TaskExecution(input: {
       const settlementAssignment = await tx.amuxV22WorkerAssignment.findUnique({
         where: { id: attempt.v22AssignmentId },
         select: { id: true, role: true, provider: true, grade: true,
-          recoveryApprovalId: true,
+          modelId: true, recoveryApprovalId: true,
           taskRevision: true, authorizationAuditLogId: true } });
       const assignmentAudit = settlementAssignment ?
         await tx.adminAuditLog.findUnique({
@@ -1425,10 +1494,25 @@ export async function settleAmuxV22TaskExecution(input: {
       if (gradeGuard && (!settlementAssignment || !assignmentAuditVerified))
         return { settled: false as const,
           reason: "assignment_audit_unverified" as const };
-      const pathDecision = gradeGuard && settlementAssignment &&
+      const reportedPathDecision = gradeGuard && settlementAssignment &&
         input.outcome !== "blocked" && !ownerQuestion ?
         decideAmuxV52SettlementPaths(settlementAssignment.grade,
-          input.changedPaths, patch?.files ?? null) : "pass";
+          input.changedPaths, patch?.paths ?? null) : "pass";
+      // Local CLI flow (owner decision 2026-11-15): a lower grade's contract
+      // change whose patch was kept and independently reviewed is judged at
+      // frontier in place -- the grade rises with this settlement and the
+      // result goes on to the frontier review path -- instead of being
+      // discarded and re-run. Without a recorded review (a bridge that does
+      // not review it yet) the earlier escalation applies; the patch row
+      // stays either way.
+      const inPlaceCandidate = reportedPathDecision === "escalate" &&
+        input.outcome === "succeeded" && patch !== null && !!settlementAssignment &&
+        amuxV22TaskWritesPatch(settlementAssignment.role) &&
+        amuxV52InPlaceEscalationAllowed(input.changedPaths, patch.paths ?? null);
+      const inPlaceEscalation = inPlaceCandidate &&
+        await tx.amuxV52ReviewRecord.findUnique({ where: { attemptId: attempt.id },
+          select: { attemptId: true } }) !== null;
+      const pathDecision = inPlaceEscalation ? "pass" as const : reportedPathDecision;
       const reviewRequired = !ownerQuestion && amuxV52ReviewRequired({ gradeGuard,
         role: settlementAssignment ?
           amuxV22ExecutionRole(settlementAssignment.role) : null,
@@ -1440,11 +1524,14 @@ export async function settleAmuxV22TaskExecution(input: {
           where: { attemptId: attempt.id },
           select: { jobId: true, baseSha: true, verdict: true,
             authorVendor: true,
+            // Whether the rejection repeats the previous one (judged at record time).
+            findings: { select: { repeatsPrior: true } },
             auditLog: { select: { entryHash: true } } },
         }) : null;
       if (reviewRequired && (!reviewRecord?.auditLog.entryHash ||
           !patch || reviewRecord.baseSha !== patch.baseSha ||
-          reviewRecord.authorVendor !== settlementAssignment?.provider ||
+          !settlementAssignment || reviewRecord.authorVendor !==
+            amuxV22ReviewAuthorVendor(settlementAssignment.provider, settlementAssignment.modelId) ||
           !["accept", "reject", "unknown"].includes(reviewRecord.verdict)))
         return { settled: false as const, reason: "review_unverified" as const };
       // An owner retry of a twice-rejected run starts the count again
@@ -1454,7 +1541,8 @@ export async function settleAmuxV22TaskExecution(input: {
       const reviewDisposition = reviewRecord ?
         decideAmuxV52ReviewDisposition(
           reviewRecord.verdict as "accept" | "reject" | "unknown",
-          priorReviewRejections) : null;
+          priorReviewRejections,
+          reviewRecord.findings?.repeatsPrior === true) : null;
       const settlementRecovery = settlementAssignment?.recoveryApprovalId ?
         await readAmuxV22RecoveryAuthority(tx, attempt.taskId,
           settlementAssignment.taskRevision,
@@ -1561,7 +1649,16 @@ export async function settleAmuxV22TaskExecution(input: {
           (!storedResult || storedResult.taskId !== task.id ||
             storedResult.bodyPurgedAt !== null))
         return { settled: false as const, reason: "result_unverified" as const };
-      if (input.outcome !== "blocked" && !receiptsComplete)
+      // A subscription CLI's usage is recorded, never a gate (owner decision
+      // 2026-11-14, v22ReadBackProceedCore.ts): its run goes on through the
+      // judgement below, and one that ended with no receipt goes back to todo
+      // within the attempt budget. A paid route keeps the refusal.
+      const cliUsageRecordOnly = !receiptsComplete && !knownCliFailure &&
+        amuxV22CliUsageRecordOnly({
+          budgetBound: !!settlementRecovery?.riskAcceptanceId,
+          apiReceipt: !!apiExecutionReceipt });
+      const usageSettled = receiptsComplete || cliUsageRecordOnly;
+      if (input.outcome !== "blocked" && !usageSettled)
         return { settled: false as const, reason: "usage_unverified" as const };
       const storedPatch = await tx.amuxV22TaskPatch.findUnique({
         where: { attemptId: attempt.id },
@@ -1572,6 +1669,18 @@ export async function settleAmuxV22TaskExecution(input: {
         outcome: input.outcome, readPatch: patch, storedPatch }))
         return { settled: false as const,
           reason: "publication_state_changed" as const };
+      // Owner decision 2026-11-15 (lib/amux/infraFailureCore.ts): a run that
+      // never did the card's work -- no result, an exit right after start, a
+      // refused sign-in, the sidecar -- goes back to todo for another worker
+      // without using an attempt. Its usage stays unknown in the ledger. The
+      // Task's earlier infrastructure failures never count either.
+      const infraKind = amuxV22InfraFailureKind({
+        outcome: input.outcome, budgetBound: !!settlementRecovery?.riskAcceptanceId,
+        apiReceipt: !!apiExecutionReceipt, receiptsComplete,
+        knownCliFailure: knownCliFailure !== null,
+        resultStored: storedResult !== null, patchStored: storedPatch !== null,
+        usageEventCount: storedEvents.length, failure: input.failure ?? null });
+      const infraBefore = await countAmuxInfraAttemptsBefore(tx, task.id, attempt.id);
       let escalationReceipt: Awaited<ReturnType<
         typeof calculateCurrentApprovedAmuxV4TaskCost>>["receipt"] | null = null;
       let originalReceiptDigest: string | null = null;
@@ -1579,7 +1688,8 @@ export async function settleAmuxV22TaskExecution(input: {
         ["routine", "advanced"].includes(task.executionGrade ?? "") &&
         !!task.v4SourceApprovalId &&
         settlementAssignment?.grade === task.executionGrade;
-      if (pathDecision === "escalate" && escalationBindingValid) {
+      const escalating = pathDecision === "escalate" || inPlaceEscalation;
+      if (escalating && escalationBindingValid) {
         try {
           const source = await tx.amuxIdeaUnitDecision.findUnique({
             where: { id: task.v4SourceApprovalId! },
@@ -1601,7 +1711,7 @@ export async function settleAmuxV22TaskExecution(input: {
           if (!(error instanceof AmuxV4TaskCatalogApprovalError)) throw error;
         }
       }
-      const effectivePathDecision = pathDecision === "escalate" &&
+      const effectivePathDecision = escalating &&
         escalationReceipt === null ? "blocked" : pathDecision;
       const escalationBlockReason = escalationBindingValid ?
         "grade_receipt_unavailable" : "grade_binding_unverified";
@@ -1616,8 +1726,10 @@ export async function settleAmuxV22TaskExecution(input: {
       // consent: v22_publication_skipped) leaves the patch private. The Task
       // still settles and goes to a person's review with no publication
       // product; refusing here stopped the worker bridge on every accepted
-      // patch (2026-11-06). A run that exists but no longer matches is still
-      // a conflict.
+      // patch (2026-11-06). The stored patch is a kept result, published once
+      // publication can open (lib/amux/v22KeptResultPublication.ts, owner
+      // decision 2026-11-15). A run that exists but no longer matches is
+      // still a conflict.
       if (run && patch && !ownerQuestion && effectivePathDecision === "pass" &&
           (!reviewRequired || reviewDisposition?.status === "review")) {
         const assignment = await tx.amuxV22WorkerAssignment.findUnique({
@@ -1669,23 +1781,41 @@ export async function settleAmuxV22TaskExecution(input: {
         effectivePathDecision === "pass" && executionRole === "investigate" &&
         patch === null && storedPatch === null && task.sourceSystem === "admin-idea-v4" ?
         amuxV22ConclusionSettlement(storedResult?.conclusionVerdict ?? null) : null;
+      const requestedStatus = questionPlan ? questionPlan.toStatus :
+        effectivePathDecision === "escalate" ? "todo" :
+        reviewDisposition ? reviewDisposition.status :
+        conclusionPlan ? conclusionPlan.toStatus :
+        input.outcome === "succeeded" ? "review" :
+        input.outcome === "failed" ? "todo" :
+        infraKind || cliUsageRecordOnly ? "todo" : "blocked";
+      const unverifiedReason = infraKind ? amuxInfraFailureReason(infraKind) :
+        cliUsageRecordOnly ? AMUX_V22_CLI_USAGE_UNREPORTED_REASON :
+        knownCliFailure ?? "usage_outcome_unknown";
+      // Owner direction 2026-11-15 and 2026-11-18: no count and no repeat of
+      // the same failure stops a card. A failed result goes back to todo and
+      // the claim waits longer between tries while it keeps failing the same
+      // way (executionBudgetCore.ts amuxResultRetryDelayMs). Only a paid
+      // retry's own bound below stops one.
       const budget = settlementDestinationForBudget({
-        requested_status: questionPlan ? questionPlan.toStatus :
-          effectivePathDecision === "escalate" ? "todo" :
-          reviewDisposition ? reviewDisposition.status :
-          conclusionPlan ? conclusionPlan.toStatus :
-          input.outcome === "succeeded" ? "review" :
-          input.outcome === "failed" ? "todo" : "blocked",
+        requested_status: requestedStatus,
         attempt_number: attempt.attemptNumber,
+        infra_attempts_before: infraBefore.total,
+        infra_failure: infraKind !== null,
         ...(attempt.taskId === AMUX_V22_UNKNOWN_PRIOR_RISK_TASK_ID &&
           settlementAssignment?.recoveryApprovalId ? {
           max_attempts: AMUX_V22_READ_ONLY_RETRY_TASK_ATTEMPT_LIMIT,
         } : {}),
       });
+      const exhaustedReason = budget.exhausted_limit === "attempts" ?
+        "attempt_budget_exhausted" : null;
       const next = effectivePathDecision === "blocked" ? "blocked" :
         budget.to_status;
       const gradeEscalated = effectivePathDecision === "escalate" &&
         next === "todo";
+      // The in-place escalation raises the grade whatever the review decided
+      // (review, a retry at frontier, or a person); the DB guard allows those.
+      const gradeRaisedInPlace = inPlaceEscalation && escalationReceipt !== null &&
+        effectivePathDecision === "pass";
       const conclusionApplied = conclusionPlan !== null &&
         next === conclusionPlan.toStatus;
       const blockedReason = questionPlan ? questionPlan.reason :
@@ -1693,17 +1823,19 @@ export async function settleAmuxV22TaskExecution(input: {
         effectivePathDecision === "escalate" ?
         "attempt_budget_exhausted" :
         effectivePathDecision === "blocked" ?
-          (pathDecision === "escalate" ? escalationBlockReason :
+          (escalating ? escalationBlockReason :
             "changed_paths_unavailable") :
-        budget.exhausted_limit ?? reviewDisposition?.reason ??
+        exhaustedReason ?? reviewDisposition?.reason ??
           (receiptsComplete ?
             (input.outcome === "blocked" ? "reported_result" : "execution_blocked") :
-            knownCliFailure ?? "usage_outcome_unknown");
-      if (gradeEscalated && escalationReceipt) {
+            unverifiedReason);
+      if ((gradeEscalated || gradeRaisedInPlace) && escalationReceipt) {
         await writeSystemAuditLog({ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
           action: AMUX_GRADE_ESCALATED_ACTION,
           targetType: "AmuxWorkItem", targetId: task.id,
-          summary: "Escalated an AMUX Task after a contract path touch.",
+          summary: gradeRaisedInPlace ?
+            "Raised an AMUX Task to frontier in place after a contract path touch." :
+            "Escalated an AMUX Task after a contract path touch.",
           metadata: { attemptId: attempt.id,
             assignmentId: attempt.v22AssignmentId,
             fromRevision: task.revision,
@@ -1711,13 +1843,14 @@ export async function settleAmuxV22TaskExecution(input: {
             previousGrade: task.executionGrade, nextGrade: "frontier",
             originalReceiptDigest,
             newReceipt: escalationReceipt, classificationFailure: true,
+            ...(gradeRaisedInPlace ? { inPlace: true, toStatus: next } : {}),
           },
         });
       }
       await tx.amuxWorkItem.update({ where: { id: task.id }, data: {
         status: next, owner: null, claimedAt: null, v22AssignmentId: null,
         reviewPrNumber: null,
-        ...(gradeEscalated ?
+        ...(gradeEscalated || gradeRaisedInPlace ?
           { executionGrade: "frontier" } : {}),
         // A proceed conclusion is the completion judgement in place of a
         // person's approval: terminal once, on the DB clock, so dependents
@@ -1728,11 +1861,14 @@ export async function settleAmuxV22TaskExecution(input: {
       await tx.amuxExecutionAttempt.update({ where: { id: attempt.id },
         data: { endedAt: now, leaseExpiresAt: null, heartbeatAt: now,
           outcome: input.outcome, toStatus: next, endedBy: input.worker,
+          // An infrastructure failure keeps its own reason even when it is
+          // the one that reaches the bound (the escalation names the bound),
+          // so the budget and the worker quarantine still count it.
           reason: gradeEscalated ? "contract_path_touched" :
+            infraKind ? amuxInfraFailureReason(infraKind) :
             next === "blocked" ? blockedReason :
-            budget.exhausted_limit ?? reviewDisposition?.reason ??
-                (receiptsComplete ? "reported_result" :
-                  knownCliFailure ?? "usage_outcome_unknown") },
+            exhaustedReason ?? reviewDisposition?.reason ??
+                (receiptsComplete ? "reported_result" : unverifiedReason) },
       });
       await tx.amuxWorkerRuntime.updateMany({ where: {
         workerName: input.worker, instanceId: input.instanceId,
@@ -1753,7 +1889,7 @@ export async function settleAmuxV22TaskExecution(input: {
       // Owner decision 2026-11-07: a result with no patch that waits for a
       // person is also put to the Decision Maker. The escalation stays open
       // beside it; whichever answers first wins (v22ResultReviewService.ts).
-      const resultReviewKind = resultReviewDm && humanReview && !questionPlan &&
+      const resultReviewKind = humanReview && !questionPlan &&
         input.outcome === "succeeded" && task.sourceSystem === "admin-idea-v4" ?
         amuxV22ResultReviewKind({ executionRole,
           writesPatch: amuxV22TaskWritesPatch(settlementAssignment?.role),
@@ -1790,6 +1926,7 @@ export async function settleAmuxV22TaskExecution(input: {
         metadata: { attemptId: attempt.id, outcome: input.outcome,
           toStatus: next, invocationIds: expectedIds,
           receiptsComplete, cliFailureReason: knownCliFailure,
+          infraFailure: infraKind, sidecarFailure: input.failure?.code ?? null,
           reservedCostMicrousd:
             attempt.reservedCostMicrousd.toString(),
           apiExecutionReceiptDigest: apiExecutionReceipt?.digest ?? null,
@@ -1834,8 +1971,9 @@ export async function quarantineExpiredAmuxV22TaskExecutions(limit = 50) {
   for (const candidate of candidates) {
     const changed = await withAmuxDbBoundary(
       { ...AMUX_DB_BOUNDARIES.executionRecoveryWrite,
+        // + 1: the Task's earlier infrastructure failures (2026-11-15).
         prismaCallCeiling:
-          AMUX_DB_BOUNDARIES.executionRecoveryWrite.prismaCallCeiling + 11 },
+          AMUX_DB_BOUNDARIES.executionRecoveryWrite.prismaCallCeiling + 12 + 1 },
       async (tx, context) => {
         const now = context.dbNow;
         const runtime = await lockRuntime(tx, candidate.worker);
@@ -1849,15 +1987,34 @@ export async function quarantineExpiredAmuxV22TaskExecutions(limit = 50) {
             task.status !== "doing" || task.owner !== attempt.worker ||
             task.revision !== attempt.taskRevision)
           return false;
+        // A subscription CLI run whose lease expired goes back to todo within
+        // its attempt budget (owner decision 2026-11-14,
+        // v22ReadBackProceedCore.ts); a late settle of it is refused and the
+        // bridge reads that back. A budget-bound (paid) run stays quarantined.
+        // Since 2026-11-15 the expiry is an infrastructure failure that uses
+        // no attempt (lib/amux/infraFailureCore.ts).
+        const assignment = await tx.amuxV22WorkerAssignment.findUnique({
+          where: { id: attempt.v22AssignmentId },
+          select: { recoveryApproval: { select: { riskAcceptanceId: true } } } });
+        const cliRoute = !!assignment && !assignment.recoveryApproval?.riskAcceptanceId;
+        const infraBefore = cliRoute ?
+          await countAmuxInfraAttemptsBefore(tx, task.id, attempt.id) :
+          { total: 0, window: 0 };
+        const destination = cliRoute ? settlementDestinationForBudget({
+          requested_status: "todo", attempt_number: attempt.attemptNumber,
+          infra_attempts_before: infraBefore.total,
+          infra_failure: true }) : null;
+        const retry = destination?.to_status === "todo";
+        const toStatus = retry ? "todo" : "blocked";
         await tx.amuxWorkItem.update({ where: { id: task.id }, data: {
-          status: "blocked", owner: null, claimedAt: null,
+          status: toStatus, owner: null, claimedAt: null,
           v22AssignmentId: null, revision: { increment: 1 },
         } });
         await tx.amuxExecutionAttempt.update({ where: { id: attempt.id },
           data: { endedAt: now, leaseExpiresAt: null,
-            outcome: "expired", toStatus: "blocked",
+            outcome: "expired", toStatus,
             endedBy: "system:amux-v22-execution-reaper",
-            reason: "outcome_unknown" },
+            reason: retry ? amuxInfraFailureReason("lease_expired") : "outcome_unknown" },
         });
         // An owner question this run recorded is not parked by an unknown
         // outcome; it is closed so it never holds the Task's question slot.
@@ -1870,7 +2027,7 @@ export async function quarantineExpiredAmuxV22TaskExecutions(limit = 50) {
             workerName: attempt.worker, instanceId: attempt.workerInstanceId,
             generation: attempt.workerGeneration, status: "busy",
           }, data: { status: "error", dispatchReady: false } });
-        await openAmuxHumanEscalation(tx, { taskId: task.id,
+        if (!retry) await openAmuxHumanEscalation(tx, { taskId: task.id,
           specialty: "execution-recovery", reason: "execution_lease_expired",
           openedBy: "system:amux-v22-execution-reaper" });
         await cancelPendingAmuxWorkDelivery(tx, attempt.id, now);
@@ -1881,7 +2038,7 @@ export async function quarantineExpiredAmuxV22TaskExecutions(limit = 50) {
           metadata: { attemptId: attempt.id, assignmentId:
             attempt.v22AssignmentId, taskRevision: task.revision + 1,
             reservedCostMicrousd: attempt.reservedCostMicrousd.toString(),
-            outcome: "unknown" },
+            outcome: "unknown", toStatus },
         });
         const run = await tx.engineeringAgentRun.findUnique({
           where: { amuxAttemptId: attempt.id },

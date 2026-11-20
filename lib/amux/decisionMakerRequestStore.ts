@@ -5,9 +5,11 @@ import type { Prisma } from "@prisma/client";
 
 import { takeAuditChainLock } from "@/lib/adminAudit";
 import { dmKeyPeriodOf, dmOptionSetDigest, dmRequestDigestKey } from "@/lib/amux/decisionMakerBodyCore";
-import { dmInstanceForProvider, routeDmQuestion } from "@/lib/amux/decisionMakerCore";
+import { DM_TERMS_FIXED_TEXT_ONLY_ENV, dmInstanceForProvider, dmTermsFixedTextOnlyEnabled,
+  routeDmQuestion } from "@/lib/amux/decisionMakerCore";
 import { decisionMakerPeriodKey, type DmDigestKeyRing } from "@/lib/amux/decisionMakerDigestKeys";
 import {
+  DM_CLOSING_EVENT_KINDS,
   DM_ROUTING_BINDING_KEYS,
   DM_STALE_CLOSE_AFTER_MS,
   DM_VALIDATION_LATCH_WINDOW,
@@ -317,6 +319,17 @@ export async function readDecisionMakerInstanceLoad(
  * carries the request's one `cleanup_unknown` report (§5), with its database
  * clock; that report closes nothing.
  */
+/**
+ * A request's local card id, for its workspace evidence
+ * (lib/amux/decisionMakerWorkspaceService.ts). Null for a request that does
+ * not exist. One statement.
+ */
+export async function readDecisionMakerRequestCardId(tx: Prisma.TransactionClient, requestId: string):
+  Promise<string | null> {
+  const row = await tx.amuxDecisionMakerRequest.findUnique({ where: { id: requestId }, select: { cardId: true } });
+  return row?.cardId ?? null;
+}
+
 export async function readDecisionMakerRequestState(
   client: LedgerReader,
   requestId: string,
@@ -336,7 +349,7 @@ export async function readDecisionMakerRequestState(
       e."assigned", e."resultDeadlineAtEpochMs", e."transmitted", e."snapshotState",
       e."snapshotTargetSha", e."snapshotManifestDigest", e."inputPayloadDigest", e."transmitOutcome",
       e."terminalEventId", e."terminalResultKind", e."terminalResultDigest", e."resultUnknown",
-      e."cleanupUnknownEventId", e."cleanupUnknownAtEpochMs", e."closingKind", e."probedRejection"
+      e."resultUnknownDigest", e."cleanupUnknownEventId", e."cleanupUnknownAtEpochMs", e."closingKind", e."probedRejection"
     FROM "AmuxDecisionMakerRequest" r
     CROSS JOIN LATERAL (
       SELECT
@@ -352,6 +365,7 @@ export async function readDecisionMakerRequestState(
         max(ev."resultKind") FILTER (WHERE ev."kind" = 'result') AS "terminalResultKind",
         max(ev."resultDigest") FILTER (WHERE ev."kind" = 'result') AS "terminalResultDigest",
         coalesce(bool_or(ev."kind" = 'result_unknown'), false) AS "resultUnknown",
+        max(ev."resultDigest") FILTER (WHERE ev."kind" = 'result_unknown') AS "resultUnknownDigest",
         max(ev."id") FILTER (WHERE ev."kind" = 'cleanup_unknown') AS "cleanupUnknownEventId",
         floor(extract(epoch FROM max(ev."createdAt") FILTER (WHERE ev."kind" = 'cleanup_unknown')) * 1000)::bigint
           AS "cleanupUnknownAtEpochMs",
@@ -421,6 +435,28 @@ export async function countOpenDecisionMakerRequestsCreatedBetween(
   const row = rows[0];
   if (!row) throw new Error("AMUX Decision Maker open request count returned no row");
   return safeInteger(row.open, "count");
+}
+
+/**
+ * When the newest request created after `afterMs` (epoch milliseconds) was
+ * created, or null when there is none, in one statement. The relay heartbeat
+ * reads it to tell a relay that is asked from one that is silent.
+ */
+export async function readNewestDecisionMakerRequestCreatedAfter(
+  client: LedgerReader,
+  afterMs: number,
+): Promise<Date | null> {
+  if (!Number.isSafeInteger(afterMs) || afterMs < 0) {
+    throw new DecisionMakerRequestWriteError("invalid_input");
+  }
+  const rows = await client.$queryRaw<Array<{ createdAt: Date }>>`
+    SELECT r."createdAt" AS "createdAt"
+    FROM "AmuxDecisionMakerRequest" r
+    WHERE r."createdAt" > 'epoch'::timestamptz + ${afterMs} * INTERVAL '1 millisecond'
+    ORDER BY r."createdAt" DESC
+    LIMIT 1
+  `;
+  return rows[0]?.createdAt ?? null;
 }
 
 /**
@@ -702,7 +738,16 @@ export async function recordDecisionMakerRequest(
       r."askingProvider", r."optionSetDigest", r."termListVersion", r."classificationVersion", r."scannerVersion",
       r."route", r."instance", r."refusalCodes",
       floor(extract(epoch FROM r."createdAt") * 1000)::bigint AS "createdAtEpochMs",
-      floor(extract(epoch FROM r."assignmentDeadlineAt") * 1000)::bigint AS "assignmentDeadlineAtEpochMs"
+      floor(extract(epoch FROM r."assignmentDeadlineAt") * 1000)::bigint AS "assignmentDeadlineAtEpochMs",
+      -- AMUXFLOW/B2: a card the app filed itself, proven by the row that
+      -- recorded this local card (no extra statement): an owner settlement,
+      -- and since 2026-11-14 a T2 draft review, whose card now carries the
+      -- draft's patch as evidence. A worker's own question is never one: its
+      -- table is not read here.
+      (EXISTS (SELECT 1 FROM "AmuxDmOwnerSettlement" s
+        WHERE s."localCardId" = ${binding.cardId})
+      OR EXISTS (SELECT 1 FROM "EngineeringAgentDmReview" e
+        WHERE e."localCardId" = ${binding.cardId})) AS "appFiledCard"
     FROM (SELECT 1) AS "probe"
     LEFT JOIN "AmuxDecisionMakerRequest" r
       ON r."cardId" = ${binding.cardId} AND r."questionRevision" = ${binding.questionRevision}
@@ -752,11 +797,16 @@ export async function recordDecisionMakerRequest(
     // §5, §8: an owed latch is the instance off -- the question goes to the operator.
     routingSwitches = dmSwitchInputWithOwedLatch(routingSwitches, owedLatch(switches, instance, load) !== null);
   }
+  // AMUXFLOW/B2: the evidence markers count only on a card the app filed
+  // itself (the routing read above found its settlement row).
+  const evidenceTermsExempt = dmTermsFixedTextOnlyEnabled(process.env[DM_TERMS_FIXED_TEXT_ONLY_ENV]) &&
+    found.appFiledCard === true;
   const decision = routeDmQuestion({
     ...routingSwitches,
     card,
     askingProvider: binding.askingProvider,
     throughput,
+    evidenceTermsExempt,
   });
   const requestId = randomUUID();
   const optionSetDigest = dmOptionSetDigest(dmRequestDigestKey(periodKey, requestId), card.options);
@@ -1170,9 +1220,12 @@ export type DecisionMakerResultUnknownWrite =
 
 /**
  * §9: a submitter that lost the response to a result and could not confirm it
- * by the (request, digest) pair records the result as unknown; the request
- * then goes to the operator and no later result is accepted for it. A pair
- * the ledger already accepted or rejected is reported as such instead.
+ * by the (request, digest) pair records the result as unknown. Since
+ * 2026-11-16 (migration 20261116140000_amux_dm_request_windows) it then reads
+ * the pair back and submits the result again, and a later result of the digest
+ * the unknown names is accepted -- the same output -- while one of another
+ * digest is rejected as `result_unknown`. A pair the ledger already accepted
+ * or rejected is reported as such instead.
  * Statements: 2 when nothing is written; 6, or 7.
  */
 export async function recordDecisionMakerResultUnknown(
@@ -1282,6 +1335,30 @@ export async function readNextDecisionMakerOpenProposal(
   if (id === undefined) return null;
   if (!isDmRequestId(id)) throw new DecisionMakerRequestWriteError("state_unreadable");
   return id;
+}
+
+/**
+ * The owner queue's Decision Maker column: the newest request of each given
+ * card with its terminal result kind, and whether a person (or the router)
+ * has judged it. One statement.
+ */
+export async function readNewestDecisionMakerRequestPerCard(
+  client: LedgerReader,
+  cardIds: readonly string[],
+): Promise<Array<{ id: string; cardId: string; resultKind: string | null; judged: boolean }>> {
+  if (cardIds.length === 0) return [];
+  const ids = [...cardIds];
+  const closing = [...DM_CLOSING_EVENT_KINDS];
+  return client.$queryRaw<Array<{ id: string; cardId: string; resultKind: string | null; judged: boolean }>>`
+    SELECT DISTINCT ON (q."cardId") q."id", q."cardId",
+      (SELECT ev."resultKind" FROM "AmuxDecisionMakerRequestEvent" ev
+        WHERE ev."requestId" = q."id" AND ev."kind" = 'result' LIMIT 1) AS "resultKind",
+      (q."route" <> 'dm_proposal' OR EXISTS (SELECT 1 FROM "AmuxDecisionMakerRequestEvent" e
+        WHERE e."requestId" = q."id" AND e."kind" = ANY(${closing}::text[]))) AS "judged"
+    FROM "AmuxDecisionMakerRequest" q
+    WHERE q."cardId" = ANY(${ids}::text[])
+    ORDER BY q."cardId", q."questionRevision" DESC
+  `;
 }
 
 /**

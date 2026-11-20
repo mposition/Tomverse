@@ -26,18 +26,23 @@ mock.module(mod("lib/prisma.ts"), {
     } } },
   },
 });
-class ReadError extends Error {}
+class ReadError extends Error { constructor(code) { super(code); this.code = code; } }
 mock.module(mod("lib/engineeringAgentGitHubRead.ts"), {
   namedExports: { EngineeringAgentGitHubReadError: ReadError, readEngineeringAgentPullObservation: async () => { throw new Error("live read"); } },
 });
 mock.module(mod("lib/engineeringAgentStore.ts"), {
   namedExports: {
-    engineeringAgentBindingSnapshotSchema: { parse: (value) => value },
+    engineeringAgentBindingSnapshotSchema: { parse: (value) => value,
+      safeParse: (value) => typeof value?.diffDigest === "string" ? { success: true, data: value } : { success: false } },
     engineeringAgentTransactionInAmux: (lent) => lent,
     runEngineeringAgentTransaction: async (_prisma, work) => work("engineering-tx"),
     recordEngineeringAgentBindingObservation: async (tx, input) => { calls.push(["observe", tx, input]); return { recorded: true }; },
     openEngineeringAgentWorkItem: async (tx, input) => { calls.push(["mismatch", tx, input]); return { workItemId: "m" }; },
   },
+});
+// The live Decision Maker read is never reached here: every DM case passes its own port.
+mock.module(mod("lib/amux/dmT2MergeService.ts"), {
+  namedExports: { readAmuxDmT2MergeEvidence: async () => { throw new Error("live dm read"); } },
 });
 mock.module(mod("lib/amux/reviewMergeObserved.ts"), {
   namedExports: {
@@ -49,7 +54,8 @@ mock.module(mod("lib/amux/reviewMergeObserved.ts"), {
   },
 });
 
-const { observeEngineeringAgentPullRequests } = await import(mod("lib/engineeringAgentPrObserver.ts"));
+const { observeEngineeringAgentPullRequests, ENGINEERING_AGENT_PR_FILE_MISMATCH_CAUSE,
+  ENGINEERING_AGENT_UNAPPROVED_MERGE_CAUSE } = await import(mod("lib/engineeringAgentPrObserver.ts"));
 
 const binding = (overrides = {}) => ({
   id: "binding", runId: "700000001", prNumber: 42, verifiedHeadSha: HEAD, createdAt,
@@ -98,7 +104,7 @@ assert.deepEqual(recorded(), []);
 
 // A read that fails decides nothing.
 assert.deepEqual(await run([binding()], async () => { throw new ReadError("http_error"); }),
-  [{ bindingId: "binding", outcome: "unreadable" }]);
+  [{ bindingId: "binding", outcome: "unreadable", code: "http_error" }]);
 assert.deepEqual(recorded(), []);
 
 // Merged after an approval recorded before it: the card completes and the merge is recorded in the same transaction.
@@ -107,7 +113,7 @@ const merged = { state: "closed", merged: true, mergedAt: new Date("2026-10-15T0
 completeResult = { completed: true, taskRevision: 9 };
 assert.deepEqual(await run([binding({ approvalObservation: approved })], async () => pull(merged)),
   [{ bindingId: "binding", outcome: "completed" }]);
-assert.deepEqual(recorded()[0], ["complete", { taskId: "card", attemptId: "attempt", prNumber: 42, mergeCommitSha: MERGE, approvalReviewId: 9, changedFiles: null }]);
+assert.deepEqual(recorded()[0], ["complete", { taskId: "card", attemptId: "attempt", prNumber: 42, mergeCommitSha: MERGE, approvalReviewId: 9, changedFiles: null, bindingId: "binding" }]);
 assert.equal(recorded()[1][0], "observe");
 assert.equal(recorded()[1][1], "amux-tx");
 assert.equal(recorded()[1][2].kind, "merge");
@@ -140,6 +146,192 @@ for (const approval of [null, { verdict: "approved", reviewId: 9, observedAt: "2
     assert.deepEqual(recorded()[0][2].observation, { verdict: "not_approved", reason: "merged_without_approval",
       observedAt: "2026-10-15T05:40:00.000Z" });
   }
+}
+
+// Owner decision 2026-11-12: an authorised approver's own merge of the verified
+// head into develop is the approval. The card completes with no review id, the
+// merge observation says so, and no mismatch stops the agent.
+{
+  const ownMerge = { ...merged, mergedByApprover: true, reviews: [] };
+  completeResult = { completed: true, taskRevision: 9 };
+  assert.deepEqual(await run([binding()], async () => pull(ownMerge)), [{ bindingId: "binding", outcome: "completed" }]);
+  assert.deepEqual(recorded()[0], ["complete", { taskId: "card", attemptId: "attempt", prNumber: 42,
+    mergeCommitSha: MERGE, approvalReviewId: null, changedFiles: null, bindingId: "binding" }]);
+  assert.deepEqual(recorded()[1].slice(0, 2), ["observe", "amux-tx"]);
+  // The basis rides the audit entry; the stored observation's shape is fixed by its CHECK.
+  assert.equal(recorded()[1][2].approvedByMerge, true);
+  assert.equal("approvedByMerge" in recorded()[1][2].observation, false);
+  assert.equal(recorded().some(([kind]) => kind === "mismatch"), false);
+
+  // The owner already settled the card (or it is not in review): the merge is recorded, nothing stops.
+  completeResult = { completed: false, reason: "task_not_in_review" };
+  assert.deepEqual(await run([binding()], async () => pull(ownMerge)), [{ bindingId: "binding", outcome: "merge_recorded" }]);
+  assert.equal(recorded().at(-1)[2].approvedByMerge, true);
+  assert.equal(recorded().some(([kind]) => kind === "mismatch"), false);
+
+  // A review recorded before the merge still completes on that review, and the merge is not marked.
+  completeResult = { completed: true, taskRevision: 9 };
+  await run([binding({ approvalObservation: approved })], async () => pull({ ...ownMerge }));
+  assert.equal(recorded()[0][1].approvalReviewId, 9);
+  assert.equal("approvedByMerge" in recorded()[1][2].observation, false);
+
+  // Not the approver's own merge of the verified head into develop: still a
+  // mismatch, under a cause key the store admits (a prefix of at most 20
+  // characters; the reason codes themselves were longer and were refused).
+  for (const cause of [ENGINEERING_AGENT_UNAPPROVED_MERGE_CAUSE, ENGINEERING_AGENT_PR_FILE_MISMATCH_CAUSE])
+    assert.match(cause, /^[a-z0-9_]{1,20}$/);
+  const moved = "f".repeat(40);
+  const movedCases = [
+    // A moved head whose pull request diff changed, or could not be read.
+    { headSha: moved, diffDigest: "9".repeat(64) }, { headSha: moved, diffDigest: null }];
+  for (const overrides of [{ mergedByApprover: false }, { baseRef: "main" }]) {
+    assert.deepEqual(await run([binding()], async () => pull({ ...ownMerge, ...overrides })),
+      [{ bindingId: "binding", outcome: "merged_without_approval" }]);
+    assert.equal(recorded().at(-1)[2].reason, "merged_without_approval");
+    assert.equal(recorded().at(-1)[2].causeKey, "unapproved_merge:binding");
+    assert.equal(recorded().some(([kind]) => kind === "complete"), false);
+  }
+
+  // Owner decision 2026-11-15: the approver's develop merge approves the diff
+  // it merged, whatever moved the head (the CI auto-fix's develop merge on
+  // #3942 and #3944). The merged head and diff ride the merge's audit entry.
+  for (const overrides of movedCases) {
+    completeResult = { completed: true, taskRevision: 9 };
+    assert.deepEqual(await run([binding()], async () => pull({ ...ownMerge, ...overrides })),
+      [{ bindingId: "binding", outcome: "completed" }], JSON.stringify(overrides));
+    assert.equal(recorded()[0][1].approvalReviewId, null);
+    assert.deepEqual(recorded()[1][2].mergedChange, { headSha: moved, diffDigest: overrides.diffDigest, headVerified: false });
+    assert.equal(recorded()[1][2].approvedByMerge, true);
+    assert.equal(recorded().some(([kind]) => kind === "mismatch"), false);
+  }
+  // Without a readable bound diff the approver's merge still approves the moved head.
+  assert.deepEqual(await run([binding({ snapshot: { baseSha: BASE } })], async () => pull({ ...ownMerge, headSha: moved })),
+    [{ bindingId: "binding", outcome: "completed" }]);
+
+  // #3828 (2026-11-13): develop merged into the branch moved the head, but the
+  // pull request's diff is byte for byte the verified one, so the approver's
+  // merge is still the approval and the card completes.
+  completeResult = { completed: true, taskRevision: 9 };
+  assert.deepEqual(await run([binding()], async () => pull({ ...ownMerge, headSha: moved })),
+    [{ bindingId: "binding", outcome: "completed" }]);
+  assert.equal(recorded()[0][1].approvalReviewId, null);
+  assert.equal(recorded()[1][2].mergedChange.headVerified, true);
+  assert.equal(recorded().some(([kind]) => kind === "mismatch"), false);
+
+  // A review recorded before the merge no longer stands for someone else's
+  // merge of a head that moved after it: that diff was never approved.
+  assert.deepEqual(await run([binding({ approvalObservation: approved })],
+    async () => pull({ ...merged, mergedByKind: "bot", headSha: moved, diffDigest: "9".repeat(64) })),
+    [{ bindingId: "binding", outcome: "merged_without_approval" }]);
+}
+
+// Owner decision 2026-11-13: the merge lane's own merge into develop of a pull
+// request the Decision Maker approved before it, at exactly the merged head and
+// diff, is the approval (approval_basis dm_approval); nothing stops.
+{
+  const SETTLEMENT = "0123abcd-0000-8000-8000-000000000001";
+  const laneMerge = { ...merged, mergedByKind: "bot", mergedByApprover: false, reviews: [] };
+  const facts = (over = {}) => ({ settlementId: SETTLEMENT, approvedHeadSha: HEAD, approvedDiffDigest: DIFF,
+    decidedAt: new Date("2026-10-15T05:45:00Z"), laneMerge: "merged", ...over });
+  const dmRun = async (read, answer) => {
+    bindings = [binding()];
+    calls = [];
+    return observeEngineeringAgentPullRequests({ read, now: () => new Date("2026-10-15T05:40:00Z"),
+      dmMerge: async (input) => { calls.push(["dm", input]); return typeof answer === "function" ? answer() : answer; } });
+  };
+
+  completeResult = { completed: true, taskRevision: 9 };
+  assert.deepEqual(await dmRun(async () => pull(laneMerge), facts()), [{ bindingId: "binding", outcome: "completed" }]);
+  assert.deepEqual(calls.find(([kind]) => kind === "dm")[1],
+    { bindingId: "binding", prNumber: 42, headSha: HEAD, mergeCommitSha: MERGE });
+  const complete = calls.find(([kind]) => kind === "complete")[1];
+  assert.equal(complete.approvalReviewId, null);
+  assert.equal(complete.dmSettlementId, SETTLEMENT);
+  const observed = calls.find(([kind]) => kind === "observe");
+  assert.equal(observed[2].approvedByDm, true);
+  assert.equal("approvedByMerge" in observed[2], false);
+  assert.equal(calls.some(([kind]) => kind === "mismatch"), false);
+
+  // Not the approved change, not develop, not the lane's merge, or no approval: the agent stops as before.
+  for (const [pullOver, answer] of [
+    [{ headSha: "f".repeat(40) }, facts()],
+    [{ baseRef: "main" }, facts()],
+    [{ diffDigest: "9".repeat(64) }, facts()],
+    [{ mergedByKind: "user" }, facts()],
+    [{}, facts({ laneMerge: null })],
+    [{}, facts({ decidedAt: new Date("2026-10-15T06:00:00Z") })],
+    [{}, null],
+  ]) {
+    assert.deepEqual(await dmRun(async () => pull({ ...laneMerge, ...pullOver }), answer),
+      [{ bindingId: "binding", outcome: "merged_without_approval" }], JSON.stringify(pullOver));
+    assert.equal(calls.some(([kind]) => kind === "complete"), false);
+    assert.equal(calls.at(-1)[2].causeKey, "unapproved_merge:binding");
+  }
+
+  // The lane's report still to come, a diff not read, or an approval not read: nothing is decided this round.
+  for (const [pullOver, answer] of [[{}, facts({ laneMerge: "pending" })], [{ diffDigest: null }, facts()]]) {
+    assert.deepEqual(await dmRun(async () => pull({ ...laneMerge, ...pullOver }), answer),
+      [{ bindingId: "binding", outcome: "waiting" }]);
+    assert.deepEqual(calls.filter(([kind]) => kind !== "findMany" && kind !== "dm"), []);
+  }
+  assert.deepEqual(await dmRun(async () => pull(laneMerge), () => { throw new Error("db"); }),
+    [{ bindingId: "binding", outcome: "unreadable", code: "dm_approval_unreadable" }]);
+  assert.deepEqual(calls.filter(([kind]) => kind !== "findMany" && kind !== "dm"), []);
+
+  // An approver's own merge, or a review recorded first, never asks for the Decision Maker's approval.
+  await dmRun(async () => pull({ ...merged, mergedByApprover: true, reviews: [] }), facts());
+  assert.equal(calls.some(([kind]) => kind === "dm"), false);
+
+  // Without the port (the switch off) the same merge stops the agent, exactly as before.
+  assert.deepEqual(await run([binding()], async () => pull(laneMerge)),
+    [{ bindingId: "binding", outcome: "merged_without_approval" }]);
+}
+
+// Owner decision 2026-11-18: a binding made from now on holds the v2 change digest
+// (merge base, head and tree). It is compared in v2, a v1 binding in v1, and the v1
+// diff is read only for a v1 binding.
+{
+  const CHANGE = `v2:${"7".repeat(64)}`;
+  const v2Binding = (overrides = {}) => binding({ snapshot: { baseSha: BASE, diffDigest: CHANGE, treeId: "e".repeat(40),
+    invalidatedReviewIds: [] }, ...overrides });
+  const reads = [];
+  const reading = (answer) => async (prNumber, options) => { reads.push(options); return answer; };
+  completeResult = { completed: true, taskRevision: 9 };
+
+  assert.deepEqual(await run([v2Binding()], reading(pull({ changeDigest: CHANGE, diffDigest: null }))),
+    [{ bindingId: "binding", outcome: "approved" }]);
+  assert.deepEqual(reads.at(-1), { legacyDiff: false }, "no v1 diff read for a v2 binding");
+  await run([binding()], reading(pull()));
+  assert.deepEqual(reads.at(-1), { legacyDiff: true }, "a v1 binding reads its v1 diff");
+  // The v2 digest not read, or only v1 read, decides nothing; another change is no approval.
+  for (const digests of [{ changeDigest: null, diffDigest: DIFF }, { changeDigest: `v2:${"8".repeat(64)}` }]) {
+    assert.deepEqual(await run([v2Binding()], reading(pull(digests))), [{ bindingId: "binding", outcome: "waiting" }]);
+    assert.deepEqual(recorded(), []);
+  }
+
+  // A v2 binding names the head commit: someone else's merge of a moved head is never the
+  // verified change, though a v1 diff of it might have read the same.
+  const moved = "f".repeat(40);
+  assert.deepEqual(await run([v2Binding({ approvalObservation: approved })], reading(pull({ ...merged, mergedByKind: "bot",
+    headSha: moved, changeDigest: `v2:${"8".repeat(64)}`, diffDigest: DIFF }))),
+  [{ bindingId: "binding", outcome: "merged_without_approval" }]);
+  // At the verified head and change, it completes on the review recorded first.
+  assert.deepEqual(await run([v2Binding({ approvalObservation: approved })], reading(pull({ ...merged, mergedByKind: "bot",
+    changeDigest: CHANGE }))), [{ bindingId: "binding", outcome: "completed" }]);
+  assert.deepEqual(recorded()[1][2].mergedChange, { headSha: HEAD, diffDigest: CHANGE, headVerified: true });
+
+  // The Decision Maker's v2 approval: the lane's merge of exactly that change completes; any other does not.
+  const dm = (pullOver) => {
+    bindings = [v2Binding()];
+    calls = [];
+    return observeEngineeringAgentPullRequests({ read: reading(pull({ ...merged, mergedByKind: "bot", reviews: [],
+      ...pullOver })), now: () => new Date("2026-10-15T05:40:00Z"),
+    dmMerge: async () => ({ settlementId: "0123abcd-0000-8000-8000-000000000002", approvedHeadSha: HEAD,
+      approvedDiffDigest: CHANGE, decidedAt: new Date("2026-10-15T05:45:00Z"), laneMerge: "merged" }) });
+  };
+  assert.deepEqual(await dm({ changeDigest: CHANGE }), [{ bindingId: "binding", outcome: "completed" }]);
+  assert.deepEqual(await dm({ changeDigest: `v2:${"8".repeat(64)}` }), [{ bindingId: "binding", outcome: "merged_without_approval" }]);
+  assert.deepEqual(await dm({ changeDigest: null, diffDigest: DIFF }), [{ bindingId: "binding", outcome: "waiting" }]);
 }
 
 // A round reads every watched binding, page after page: none is crowded out by older ones that wait.

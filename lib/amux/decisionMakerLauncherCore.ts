@@ -50,15 +50,32 @@ export const DM_ARGV_SCHEMA_FILE = "<스키마 파일>";
 export const DM_ARGV_SCHEMA_JSON = "<스키마 JSON>";
 
 /**
+ * The codex permissions profile the DM's commands run under (owner decision
+ * 2026-11-15: the DM reads its workspace like a local CLI). Its commands may
+ * read the system's minimal paths, the request directory and the CLI's own
+ * directory (the sandbox re-executes the binary), and nothing else -- not
+ * the account's home with its login -- and may write nothing and reach no
+ * network. The process audit runner uses the same shape
+ * (scripts/amux-process-audit-runner.mjs), measured on the box 2026-11-14 with
+ * Codex 0.160. The profile replaces `-s`: the CLI refuses both at once.
+ */
+export const DM_CODEX_PERMISSIONS_PROFILE = "dm";
+const CODEX_RELEASE_DIRECTORY = "/opt/tomverse-amux-dm/codex-cli-0.162.1";
+
+/**
  * §5a "고정 argv", after the program name, in order. A token is a literal or
- * one of the four placeholders above. "Bytes other than the two paths must be
- * exactly these."
+ * one of the four placeholders above, or a literal holding the request
+ * directory's placeholder (the codex profile's readable root). "Bytes other
+ * than the two paths must be exactly these."
  */
 const CODEX_ARGV = Object.freeze([
   "-a", "never", "--no-daemon", "exec", "--ephemeral", "--ignore-user-config", "--ignore-rules", "--strict-config",
-  "--skip-git-repo-check", "-s", "read-only", "--json", "--output-schema", DM_ARGV_SCHEMA_FILE,
+  "--skip-git-repo-check",
+  "-c", `default_permissions="${DM_CODEX_PERMISSIONS_PROFILE}"`,
+  "-c", `permissions.${DM_CODEX_PERMISSIONS_PROFILE}.filesystem={":minimal"="read","${DM_ARGV_REQUEST_DIRECTORY}"="read","${CODEX_RELEASE_DIRECTORY}"="read"}`,
+  "--json", "--output-schema", DM_ARGV_SCHEMA_FILE,
   "-o", DM_ARGV_OUTPUT_FILE, "-m", "gpt-6-astra", "-C", DM_ARGV_REQUEST_DIRECTORY,
-  "--disable", "shell_tool", "--disable", "unified_exec", "--disable", "unified_exec_tty", "--disable", "shell_snapshot",
+  "--disable", "shell_snapshot",
   "--disable", "code_mode_host", "--disable", "write_stdin_approval", "--disable", "sleep_tool", "--disable", "browser_use",
   "--disable", "browser_use_external", "--disable", "browser_use_full_cdp_access", "--disable", "browser_annotation_api",
   "--disable", "computer_use", "--disable", "in_app_browser", "--disable", "apps", "--disable", "plugins",
@@ -71,8 +88,18 @@ const CODEX_ARGV = Object.freeze([
   "--disable", "realtime_conversation", "-",
 ] as const);
 
+/**
+ * claude's tools (owner decision 2026-11-15): reading and searching files.
+ * `--restricted` keeps them inside the working directory (the request
+ * directory) and removes every command and network tool `--tools` does not
+ * name; Bash is not named, because nothing here confines a command to the
+ * workspace the way codex's profile does (the account's home, with its login,
+ * is readable to its own commands).
+ */
+export const DM_CLAUDE_TOOLS = "Read,Grep,Glob";
+
 const CLAUDE_ARGV = Object.freeze([
-  "-p", "--tools", "", "--restricted", "--strict-mcp-config", "--setting-sources", "", "--disable-slash-commands",
+  "-p", "--tools", DM_CLAUDE_TOOLS, "--restricted", "--strict-mcp-config", "--setting-sources", "", "--disable-slash-commands",
   "--no-session-persistence", "--permission-prompts", "none", "--output-format", "json",
   "--json-schema", DM_ARGV_SCHEMA_JSON, "--model", "claude-fable-5-1",
 ] as const);
@@ -86,11 +113,11 @@ const CLAUDE_ARGV = Object.freeze([
 export const DM_CODEX_REFUSED_ARGV = Object.freeze([
   "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust", "--approve-for-me", "--add-dir",
   "-s workspace-write", "-s danger-full-access", "--worktree", "--enable", "-p", "--profile", "--oss",
-  "--local-provider", "--cyber-access-program", "-i", "--image", "-c", "--search", "--remote",
+  "--local-provider", "--cyber-access-program", "-i", "--image", "--search", "--remote",
   "--remote-auth-token-env", "resume", "fork", "review",
 ] as const);
 
-/** §5a: `--tools` is refused with any value other than `""`, `--permission-mode` with any value. */
+/** §5a: `--tools` is refused with any value other than `DM_CLAUDE_TOOLS`, `--permission-mode` with any value. */
 export const DM_CLAUDE_REFUSED_ARGV = Object.freeze([
   "--dangerously-skip-permissions", "--allow-dangerously-skip-permissions", "--permission-mode", "--add-dir",
   "--allowedTools", "--allowed-tools", "--tools", "-w", "--worktree", "--tmux", "--mcp-config", "--plugin-dir",
@@ -100,9 +127,24 @@ export const DM_CLAUDE_REFUSED_ARGV = Object.freeze([
   "-d", "--debug", "--debug-file", "--verbose",
 ] as const);
 
-/** §5a "고정 환경": these four and nothing else. HOME is the vendor account's home. */
+/** §5a "고정 환경": these eight and nothing else. HOME is the vendor account's home. */
 export const DM_FIXED_PATH = "/usr/bin:/bin";
 export const DM_FIXED_LOCALE = "C.UTF-8";
+/**
+ * git, for the DM's read-only commands in the workspace (owner decision
+ * 2026-11-15): no system or global config file, so nothing outside the
+ * workspace is read; the workspace's repositories are the broker's, so
+ * `safe.directory` must name them, and only the command-line scope may
+ * (`GIT_CONFIG_PARAMETERS` is that scope; its name passes codex's default
+ * filter, which drops variables named like KEY, SECRET or TOKEN); and no
+ * optional lock, since the workspace is read-only to the DM.
+ */
+export const DM_FIXED_GIT_ENVIRONMENT = Object.freeze([
+  ["GIT_CONFIG_NOSYSTEM", "1"],
+  ["GIT_CONFIG_GLOBAL", "/dev/null"],
+  ["GIT_CONFIG_PARAMETERS", "'safe.directory=*'"],
+  ["GIT_OPTIONAL_LOCKS", "0"],
+] as const);
 
 /**
  * §5a "공급사 계정 홈의 상태": what is deleted after every request, and the
@@ -288,6 +330,7 @@ export const dmFixedEnvironment = (instance: DmInstanceScope): ReadonlyArray<rea
     ["PATH", DM_FIXED_PATH],
     ["LANG", DM_FIXED_LOCALE],
     ["LC_ALL", DM_FIXED_LOCALE],
+    ...DM_FIXED_GIT_ENVIRONMENT,
   ] as const);
 
 // ---------------------------------------------------------------------------
@@ -331,8 +374,9 @@ export const dmExecutionDigest = (instance: DmInstanceScope): string =>
  * refuses when the computed digest differs.
  */
 export const DM_RECORDED_EXECUTION_DIGESTS: Readonly<Record<DmInstanceScope, string>> = Object.freeze({
-  "decision-maker-openai": "298a51e122f436d683baebd465179f8c8ffc216fadbb5b9223f8c4212ea4a82a",
-  "decision-maker-anthropic": "9c96b86efbac49a52903b4edcc1f4cc253a36b4678a9394a20ea01d91a3744f4",
+  // Owner decision 2026-11-15: the workspace's read tools and git environment.
+  "decision-maker-openai": "6c865e185fcabebf133d0c4907305c2e06f493b974f4354c140d37fc699f69c6",
+  "decision-maker-anthropic": "ada9a76ab70925b6eeac9848c3ebec804d3860312dc19a04225e00c1c6a4f88e",
 });
 
 // ---------------------------------------------------------------------------
@@ -422,8 +466,14 @@ export type DmCleanupOutcome = { status: "verified" } | { status: "cleanup_unkno
  * output could never be recorded.
  */
 export const DM_LAUNCH_OUTPUT_MAX_BYTES = 256 * 1024;
-/** stdout kept in memory; beyond it the stream is drained and the run is `output_too_large`. */
-export const DM_LAUNCH_STDOUT_MAX_BYTES = 16 * 1024 * 1024;
+/**
+ * stdout kept in memory; beyond it the stream is drained and the run is
+ * `output_too_large`. A memory backstop only (owner direction 2026-11-16; it
+ * was 16 MiB): codex's event stream carries every command it ran in its
+ * workspace, and a long run's stream must not lose the result the `-o` file
+ * holds.
+ */
+export const DM_LAUNCH_STDOUT_MAX_BYTES = 256 * 1024 * 1024;
 
 // ---------------------------------------------------------------------------
 // The execution plan
@@ -494,7 +544,8 @@ export const dmExecutionPlan = (
       case DM_ARGV_OUTPUT_FILE:
         return paths.outputFile as string;
       default:
-        return token;
+        // codex's permissions profile names the request directory inside one token.
+        return token.split(DM_ARGV_REQUEST_DIRECTORY).join(paths.requestDirectory);
     }
   };
   return {
@@ -552,8 +603,8 @@ const matchesFlag = (token: string, flag: string) => {
 
 /**
  * Which of §5a's refused entries appear in an argv (diagnostic only). The
- * program name is skipped. Claude's `--tools ""` and codex's `-s read-only`
- * are the fixed argv's own and are not reported.
+ * program name is skipped. Claude's `--tools Read,Grep,Glob` is the fixed
+ * argv's own and is not reported.
  */
 export const dmForbiddenArgv = (cli: DmLauncherCli, argv: readonly string[]): string[] => {
   const list: readonly string[] = cli === "codex" ? DM_CODEX_REFUSED_ARGV : DM_CLAUDE_REFUSED_ARGV;
@@ -570,7 +621,7 @@ export const dmForbiddenArgv = (cli: DmLauncherCli, argv: readonly string[]): st
         continue;
       }
       if (cli === "claude" && flag === "--tools") {
-        if ((token === "--tools" && next !== "") || (token.startsWith("--tools=") && token !== "--tools=")) {
+        if ((token === "--tools" && next !== DM_CLAUDE_TOOLS) || (token.startsWith("--tools=") && token !== `--tools=${DM_CLAUDE_TOOLS}`)) {
           found.add(entry);
         }
         continue;

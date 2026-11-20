@@ -114,6 +114,7 @@ test("the privacy date is exactly the effective date the page shows, in every lo
 test("the privacy content the date vouches for has not changed", { skip: !privacyDated }, () => {
     const digest = createHash("sha256");
     digest.update(readFileSync("components/legal/PrivacyPolicy.tsx", "utf8").replace(/\r\n/g, "\n"));
+    digest.update(readFileSync("components/legal/ProviderDestinationTable.tsx", "utf8").replace(/\r\n/g, "\n"));
     digest.update(readFileSync("lib/providerDataDestinations.ts", "utf8").replace(/\r\n/g, "\n"));
     digest.update(readFileSync("lib/privacyNoticeStatus.ts", "utf8").replace(/\r\n/g, "\n"));
     for (const copy of Object.values(PRIVACY_LOCALES)) digest.update(JSON.stringify(copy.privacyPolicy));

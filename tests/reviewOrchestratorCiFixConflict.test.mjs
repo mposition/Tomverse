@@ -17,7 +17,6 @@ import {
   CI_FIX_PUBLISH_WAIT_MS,
   ciFixReport,
   conflictHunks,
-  conflictPrompt,
   readLedger,
   runCiFix,
   settleSentFixes,
@@ -163,7 +162,7 @@ test("a sent fix is settled from the pull request's new head: its own commit, or
 });
 
 /** A base branch (develop unless named) and a branch that both changed one line of app.js after they parted. */
-function conflictFixture({ base = "develop", baseAdds = {} } = {}) {
+function conflictFixture({ base = "develop", baseAdds = {}, branchAdds = {} } = {}) {
   const root = mkdtempSync(join(tmpdir(), "ci-fix-conflict-"));
   const source = join(root, "source");
   mkdirSync(source);
@@ -182,7 +181,12 @@ function conflictFixture({ base = "develop", baseAdds = {} } = {}) {
     sh(source, "checkout", "-q", base);
   }
   sh(source, "checkout", "-q", "-b", "claude/to-develop/both");
+  for (const [path, text] of Object.entries(branchAdds)) {
+    mkdirSync(join(source, path, ".."), { recursive: true });
+    writeFileSync(join(source, path), text);
+  }
   writeFileSync(join(source, "lib", "app.js"), "const a = 1;\nconst b = 2 + branch;\nconst c = 3;\n");
+  sh(source, "add", "-A");
   sh(source, "commit", "-q", "-am", "branch change");
   const head = sh(source, "rev-parse", "HEAD");
   sh(source, "checkout", "-q", base);
@@ -217,6 +221,101 @@ const pass = (f, claude, extra = {}) => runCiFix({
   claude, clock: () => 7000, log: () => {}, conflicts: true, ...extra,
 });
 
+test("a superseded conflict with only unused copy left stops both repair kinds on that head", async () => {
+  const f = conflictFixture({ branchAdds: { "locales/en.js": "export const errorDetails = 'Unused';\n" } });
+  try {
+    let calls = 0;
+    const result = await pass(f, ({ cwd, logDir }) => {
+      calls++;
+      const context = JSON.parse(readFileSync(join(logDir, "work-context.json"), "utf8"));
+      assert.equal(context.base, f.develop);
+      assert.match(readFileSync(context.originalDiff, "utf8"), /errorDetails/);
+      assert.match(readFileSync(context.versusLatestBase, "utf8"), /develop/);
+      writeFileSync(join(cwd, "lib/app.js"), "const a = 1;\nconst b = 2 + develop;\nconst c = 3;\n");
+      return { ok: true, tail: "The base already covers the feature; only an unused locale key remains.\nRESULT: obsolete" };
+    });
+    assert.equal(result.outcome, "obsolete");
+    assert.equal(existsSync(join(f.outbox, `${f.head}.json`)), false);
+    assert.equal(readLedger(join(f.config.stateDir, "ci-fix", "ledger.json"))[`${f.head}:conflict`].reason, "obsolete");
+    assert.equal((await pass(f, () => assert.fail("must not repair the obsolete head"), { regenerate: true })).outcome, "nothing_to_fix");
+    assert.equal(calls, 1);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("a resolution identical to the latest base is held even if the model calls it fixed", async () => {
+  const f = conflictFixture();
+  try {
+    const result = await pass(f, ({ cwd }) => {
+      writeFileSync(join(cwd, "lib/app.js"), "const a = 1;\nconst b = 2 + develop;\nconst c = 3;\n");
+      return { ok: true, tail: "RESULT: fixed" };
+    });
+    assert.equal(result.outcome, "obsolete");
+    assert.equal(existsSync(join(f.outbox, `${f.head}.json`)), false);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("an explicit fresh owner label can re-assess an obsolete head once", async () => {
+  const f = conflictFixture();
+  try {
+    assert.equal((await pass(f, () => ({ ok: true, tail: "RESULT: obsolete" }))).outcome, "obsolete");
+    const original = f.github.json;
+    f.github.json = async path => {
+      if (path === "/issues/51/events?per_page=100&page=1") return [{ event: "labeled", label: { name: "ci:fix-again" }, created_at: new Date(8000).toISOString() }];
+      const value = await original(path);
+      return path.startsWith("/pulls?") ? value.map(pr => ({ ...pr, labels: [{ name: "ci:fix-again" }] })) : value;
+    };
+    const result = await pass(f, ({ cwd }) => {
+      writeFileSync(join(cwd, "lib/app.js"), "const a = 1;\nconst b = 2 + branch + develop;\nconst c = 3;\n");
+      return { ok: true, tail: "An unmet change remains.\nRESULT: fixed" };
+    }, { clock: () => 9000 });
+    assert.equal(result.outcome, "queued");
+    assert.equal(readLedger(join(f.config.stateDir, "ci-fix", "ledger.json"))[`${f.head}:conflict`].retried, true);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("the repair model can inspect another open PR's actual diff despite a different title", async () => {
+  const f = conflictFixture();
+  try {
+    sh(f.source, "checkout", "-q", "-b", "claude/to-develop/existing");
+    writeFileSync(join(f.source, "lib/app.js"), "export const existingDiagnosticDisclosure = true;\n");
+    sh(f.source, "commit", "-q", "-am", "existing disclosure");
+    const otherHead = sh(f.source, "rev-parse", "HEAD");
+    const original = f.github.json;
+    f.github.json = async path => {
+      const value = await original(path);
+      return path.startsWith("/pulls?") ? [...value, pull(52, "claude/to-develop/existing", otherHead, { title: "A different Scout ID" })] : value;
+    };
+    const result = await pass(f, ({ logDir }) => {
+      const context = JSON.parse(readFileSync(join(logDir, "work-context.json"), "utf8"));
+      assert.equal(context.openPrs[0].number, 52);
+      assert.match(readFileSync(context.openPrs[0].diff, "utf8"), /existingDiagnosticDisclosure/);
+      return { ok: true, tail: "PR 52 already covers the same requirement.\nRESULT: obsolete" };
+    });
+    assert.equal(result.outcome, "obsolete");
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("an unrelated open PR without a common ancestor does not abort a useful repair", async () => {
+  const f = conflictFixture();
+  try {
+    sh(f.source, "checkout", "-q", "--orphan", "unrelated");
+    sh(f.source, "commit", "-q", "-m", "unrelated history");
+    const otherHead = sh(f.source, "rev-parse", "HEAD");
+    const original = f.github.json;
+    f.github.json = async path => {
+      const value = await original(path);
+      return path.startsWith("/pulls?") ? [...value, pull(52, "unrelated", otherHead)] : value;
+    };
+    const result = await pass(f, ({ cwd, logDir }) => {
+      const context = JSON.parse(readFileSync(join(logDir, "work-context.json"), "utf8"));
+      assert.equal(context.openPrs[0].unavailable, true);
+      writeFileSync(join(cwd, "lib/app.js"), "const a = 1;\nconst b = 2 + branch + develop;\nconst c = 3;\n");
+      return { ok: true, tail: "The unrelated PR does not cover this useful change.\nRESULT: fixed" };
+    });
+    assert.equal(result.outcome, "queued");
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
 test("a conflicting draft is merged with develop, resolved by the model, and the guard commits that resolution", async () => {
   const f = conflictFixture();
   // The server's worktree as on its Linux host: a Windows git converting to
@@ -237,7 +336,8 @@ test("a conflicting draft is merged with develop, resolved by the model, and the
     assert.match(seen[0].app, /^<<<<<<< /m, "the model sees develop merged in, stopped on the conflict");
     assert.match(seen[0].prompt, /- lib\/app\.js/);
     assert.equal(seen[0].instructions, "develop instructions\n");
-    assert.equal(seen[0].prompt, conflictPrompt({ files: ["lib/app.js"] }));
+    assert.match(seen[0].prompt, /work-context\.json/);
+    assert.match(seen[0].prompt, /RESULT: obsolete/);
 
     const entry = readLedger(join(f.config.stateDir, "ci-fix", "ledger.json"))[`${f.head}:conflict`];
     assert.deepEqual({ kind: entry.kind, outcome: entry.outcome, reason: entry.reason }, { kind: "conflict", outcome: "queued", reason: "fixed" });
@@ -336,7 +436,7 @@ test("one head carries one request: a conflict waits while a CI fix for that hea
   }
 });
 
-test("the real sender sends a head's first request and, when it was not published, the operator's retry", async () => {
+test("the real sender sends a head's first request and, when it was not published, the automatic retry", async () => {
   const f = conflictFixture();
   const stateDir = mkdtempSync(join(tmpdir(), "ci-fix-sender-state-"));
   try {
@@ -373,17 +473,11 @@ test("the real sender sends a head's first request and, when it was not publishe
     assert.equal(posts.length, 1);
     assert.equal(posts[0].kind, "conflict");
 
-    // The workflow refused it: two hours on, the head has not moved.
+    // The workflow refused it: twelve hours on, the head has not moved. Nobody
+    // asks: the pass sees the fix was not published and tries the head again.
     clock += CI_FIX_PUBLISH_WAIT_MS + 60_000;
-    assert.equal((await proposerPass()).outcome, "nothing_to_fix", "no second try without the operator");
-    const ledger = readLedger(join(f.config.stateDir, "ci-fix", "ledger.json"));
-    assert.equal(ledger[`${f.head}:conflict`].outcome, "not_published");
-
-    // "Analyse again": the same head, a new request, and the sender sends it.
-    labels = [{ name: "ci:fix-again" }];
-    labelledAt = clock;
-    clock += 60_000;
-    assert.equal((await proposerPass()).outcome, "queued");
+    assert.equal((await proposerPass()).outcome, "queued", "a fix that was never published is tried again by itself");
+    assert.equal(readLedger(join(f.config.stateDir, "ci-fix", "ledger.json"))[`${f.head}:conflict`].attempts, 2);
     await sender.scanOnce();
     assert.equal(posts.length, 2, "a new request for the same head is sent");
     await sender.scanOnce();
@@ -427,7 +521,7 @@ test("every request the sender accepts keeps its key through the sent ledger", a
   }
 });
 
-test("the sender sends each request once, honours an older sender's record, and caps a head", async () => {
+test("the sender sends each request once, honours an older sender's record, and puts no cap on a head", async () => {
   const outbox = mkdtempSync(join(tmpdir(), "ci-fix-cap-outbox-"));
   const stateDir = mkdtempSync(join(tmpdir(), "ci-fix-cap-state-"));
   try {
@@ -448,11 +542,11 @@ test("the sender sends each request once, honours an older sender's record, and 
     request(now - 6000);
     await sender().scanOnce();
     assert.equal(posts, 0, "that request was sent already");
-    for (const createdAt of [now - 4000, now - 3000, now - 2000, now - 1000]) {
-      request(createdAt);
+    for (let index = 0; index < 24; index += 1) {
+      request(now - 4000 + index * 100);
       await sender().scanOnce();
     }
-    assert.equal(posts, 3, "with the older record, four requests in all for the head");
+    assert.equal(posts, 24, "every new request for the head goes out; only the older sender's record is honoured");
   } finally {
     rmSync(outbox, { recursive: true, force: true });
     rmSync(stateDir, { recursive: true, force: true });
@@ -527,14 +621,26 @@ function crissCrossFixture({ baseInBranch = false } = {}) {
 
 const mergeTreeStatus = (cwd, ...args) => spawnSync("git", ["merge-tree", "--write-tree", "--name-only", "--no-messages", ...args], { cwd, encoding: "utf8" }).status;
 
-test("a conflict only GitHub sees is published as git's own merge, with no model", async () => {
+test("a clean-merge relevance timeout retains its diagnostic cause without dispatch", async () => {
+  const f = crissCrossFixture();
+  try {
+    const result = await pass(f, () => ({ ok: false, timedOut: true, tail: "" }));
+    assert.equal(result.outcome, "model_failed");
+    assert.equal(readLedger(join(f.config.stateDir, "ci-fix", "ledger.json"))[`${f.head}:conflict`].outcome, "model_timeout");
+    assert.equal(existsSync(join(f.outbox, `${f.head}.json`)), false);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test("a conflict only GitHub sees retains git's merge after one relevance assessment", async () => {
   const f = crissCrossFixture();
   try {
     // Why GitHub and git disagree: each merge base alone conflicts, git's merge of them does not.
     assert.equal(mergeTreeStatus(f.source, `--merge-base=${f.developBefore}`, f.develop, f.head), 1);
     assert.equal(mergeTreeStatus(f.source, f.develop, f.head), 0);
 
-    const result = await pass(f, () => assert.fail("nothing here for the model"));
+    let assessments = 0;
+    const result = await pass(f, () => { assessments++; return { ok: true, tail: "The branch still adds s3.\nRESULT: fixed" }; });
+    assert.equal(assessments, 1);
     assert.deepEqual(result, { outcome: "queued", pr: 61 });
     const entry = readLedger(join(f.config.stateDir, "ci-fix", "ledger.json"))[`${f.head}:conflict`];
     assert.deepEqual({ kind: entry.kind, outcome: entry.outcome, detail: entry.detail }, { kind: "conflict", outcome: "queued", detail: "clean_merge" });
@@ -624,7 +730,7 @@ test("a pull request into main is merged with main, against develop's instructio
     assert.equal(seen[0].instructions, "develop instructions\n", "the base merges; only develop instructs");
     assert.equal(seen[0].settings, false, "the base's own settings file is gone before the model starts");
     assert.equal(seen[0].agents, false, "and so is an instruction file only the base has");
-    assert.equal(seen[0].prompt, conflictPrompt({ files: ["lib/app.js"], base: "main" }));
+    assert.match(seen[0].prompt, /work-context\.json/);
     assert.match(seen[0].prompt, /with main merged in/);
     const request = normaliseDispatchRequest(JSON.parse(readFileSync(join(f.outbox, `${f.head}.json`), "utf8")), `${f.head}.json`);
     assert.equal(request.baseSha, f.develop, "main's tip is the commit to merge");

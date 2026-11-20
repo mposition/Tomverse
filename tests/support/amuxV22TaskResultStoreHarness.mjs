@@ -7,11 +7,15 @@ import { pathToFileURL } from "node:url";
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path) => pathToFileURL(resolve(root, path)).href;
 mock.module(mod("lib/adminAudit.ts"), {
-  namedExports: { writeSystemAuditLog: async () => {} },
+  namedExports: {
+  takeAuditChainLock: async () => {}, writeSystemAuditLog: async () => {} },
 });
 
-const { recordAmuxV22TaskResult, v22TaskResultSha256 } =
-  await import(mod("lib/amux/v22TaskResultStore.ts"));
+const { prepareAmuxV22TaskResultRecord, recordAmuxV22TaskResult,
+  v22TaskResultSha256 } = await import(mod("lib/amux/v22TaskResultStore.ts"));
+// The sealing half runs outside the transaction; the record half in it.
+const recordAmuxV22TaskResultFrom = (tx, input) =>
+  recordAmuxV22TaskResult(tx, prepareAmuxV22TaskResultRecord(input));
 
 const attemptId = "00000000-0000-4000-8000-000000000001";
 const taskId = "00000000-0000-4000-8000-000000000002";
@@ -39,6 +43,7 @@ async function recordWith(run, assignmentRole = "implement") {
           v22AssignmentId: "assignment-1" }];
       throw new Error(`unexpected SQL: ${sql}`);
     },
+    amuxIdeaContentKeyRetirement: { findMany: async () => [] },
     amuxV22WorkerAssignment: { findUnique: async () =>
       ({ role: assignmentRole, workItemId: taskId }) },
     engineeringAgentRun: { findUnique: async () => { runReads += 1; return run; } },
@@ -58,7 +63,7 @@ async function recordWith(run, assignmentRole = "implement") {
     patch: { text: patchText, sha256: createHash("sha256")
       .update(patchText).digest("hex"), baseSha, keys },
   };
-  const result = await recordAmuxV22TaskResult(tx, payload);
+  const result = await recordAmuxV22TaskResultFrom(tx, payload);
   assert.ok(saved.result, "the private result is always recorded");
   return { result, saved, tx, payload, runReads: () => runReads };
 }
@@ -79,7 +84,7 @@ const endedAfterWrite = { status: "active", baseSha };
 const duplicate = await recordWith(endedAfterWrite);
 assert.ok(duplicate.saved.patch);
 endedAfterWrite.status = "finished";
-const replay = await recordAmuxV22TaskResult(duplicate.tx, duplicate.payload);
+const replay = await recordAmuxV22TaskResultFrom(duplicate.tx, duplicate.payload);
 assert.equal(replay.duplicate, true);
 assert.equal(replay.patchSha256, duplicate.result.patchSha256);
 assert.equal(duplicate.runReads(), 0,

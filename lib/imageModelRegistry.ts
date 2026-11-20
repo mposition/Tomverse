@@ -12,6 +12,7 @@
 
 import { falEndpointProfile, type FalThinkingTerms } from "@/lib/falImageRequest";
 import type { GoogleThinkingLevel } from "@/lib/googleImageRequest";
+import type { ImageUseCase } from "@/lib/runtimeImageProviders";
 import {
   IMAGE_COST_PER_CREDIT_CEILING_MICRO_USD,
   IMAGE_PROMPT_BUDGET_MICRO_USD,
@@ -28,7 +29,7 @@ import {
  * lookup, provider health and readiness. Keeping the name attached to that
  * meaning is what makes adding a gateway safe -- nothing has to be re-read.
  */
-export type ImageModelProvider = "openai" | "google" | "xai" | "fal" | "qwen";
+export type ImageModelProvider = "openai" | "google" | "xai" | "fal" | "qwen" | "bfl";
 
 /**
  * Who made the model, which is a different question and is about to stop having
@@ -45,7 +46,7 @@ export type ImageModelProvider = "openai" | "google" | "xai" | "fal" | "qwen";
  * current roster, not a relationship, and the two are separate aliases so the
  * next reader has to decide which one they mean.
  */
-export type ImageModelOwner = "openai" | "google" | "xai" | "fal" | "qwen";
+export type ImageModelOwner = "openai" | "google" | "xai" | "fal" | "qwen" | "bfl";
 
 export type ImageModelLifecycle = "stable" | "preview";
 
@@ -172,7 +173,74 @@ export type ImageModelProfile = {
   thinkingLevel?: GoogleThinkingLevel;
   /** Free-text note surfaced in the admin panel for a disabled model. */
   disabledNote?: string;
+  /**
+   * What this model is good and bad at, in one line for the image router
+   * ("Best for: ...; weaker at: ..."). The router picks the best fit for the
+   * request from these notes and uses price only between models that fit
+   * equally (lib/chatImageIntentCore.ts). Absent means the router knows the
+   * model by name alone. Never a cost or a capability gate.
+   */
+  routingNote?: string;
+  /** What the model is for, shown to users under its name; absent shows no line. */
+  useCase?: ImageUseCase;
+  /**
+   * The billing terms an operator confirmed for this provider model from a
+   * measurement in the admin console (policy section 12.1), attached when the
+   * catalogue resolves. Absent means the code tables alone answer. Read
+   * through the functions below, never as a bound on its own.
+   */
+  billingTerms?: ConfirmedImageBillingTerms;
 };
+
+/**
+ * Billing terms confirmed from a measurement, per provider model. Data the
+ * judge reads beside the code tables (GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS,
+ * IMAGE_PER_IMAGE_BILLED_MODELS); which provider each kind may describe is
+ * code (`billingTermsApplyTo`), so a stored row cannot open a provider whose
+ * request does not hold it.
+ *
+ *   - `per_image_no_thinking`: billed per delivered image with no thinking or
+ *     token charge; a Qwen model outside the `qwen-image-` family read so.
+ *   - `measured_output_limit`: a Google direct model whose billable text and
+ *     thinking the sent `max_output_tokens` was measured to hold, with the
+ *     same margin as the code rows.
+ *   - `tokens_per_image`: an OpenAI model billed per image output token whose
+ *     documentation gives the rate but not the count; the count per quality
+ *     and size is the measured one. Thinking stays the provider's answer.
+ */
+export type ConfirmedImageBillingTerms =
+  | { kind: "per_image_no_thinking"; confirmationId?: string }
+  | {
+      kind: "measured_output_limit";
+      maxOutputTokens: number;
+      textOutputUsdPerMTok: number;
+      imageTokensPerImage: number;
+      /** The documented image output rate the measurement priced its samples at; the judge holds prices to it. */
+      imageOutputUsdPerMTok: number;
+      confirmationId?: string;
+    }
+  | {
+      kind: "tokens_per_image";
+      imageOutputUsdPerMTok: number;
+      tokens: readonly { quality: ImageQuality; size: ImageSize; tokens: number }[];
+      confirmationId?: string;
+    };
+
+export type ConfirmedImageBillingKind = ConfirmedImageBillingTerms["kind"];
+
+/** The one provider each kind can describe: the request that provider's adapter sends is what holds it. */
+export const IMAGE_BILLING_TERMS_PROVIDER: Readonly<Record<ConfirmedImageBillingKind, ImageModelProvider>> = {
+  per_image_no_thinking: "qwen",
+  measured_output_limit: "google",
+  tokens_per_image: "openai",
+};
+
+/** Confirmed terms that this provider's request can hold, else null. */
+export const billingTermsApplyTo = (
+  provider: unknown,
+  terms: ConfirmedImageBillingTerms | null | undefined
+): ConfirmedImageBillingTerms | null =>
+  terms && IMAGE_BILLING_TERMS_PROVIDER[terms.kind] === provider ? terms : null;
 
 const OPENAI_GPT_IMAGE_2: ImageModelProfile = {
   id: "gpt-image-2",
@@ -228,24 +296,18 @@ const OPENAI_GPT_IMAGE_2: ImageModelProfile = {
 // disabled model carries none, precisely so a hold cannot decay into a launch
 // by leaving a table behind.
 //
-// Published prices would not be enough on their own in any case. Google's
-// thinking cannot be switched off and no official maximum for text/thinking
-// tokens has been established, so the worst-case cost of one request is not
-// provably finite and no fixed credit price can be derived from it
-// (section 12 condition 1). That is the blocking condition, and it survives
-// the price list being public.
+// Published prices are not enough on their own. Google's thinking cannot be
+// switched off and no official maximum for text/thinking tokens is documented,
+// so the worst case rests on measurement: see the reason below.
 const GOOGLE_GEMINI_31_FLASH_IMAGE: ImageModelProfile = {
   id: "gemini-3.1-flash-image",
   provider: "google",
   apiModelId: "gemini-3.1-flash-image",
   name: "Gemini 3.1 Flash Image",
   lifecycle: "stable",
-  // Per-image prices verified 2026-08-04; the thinking cap is not established,
-  // so the worst case is not provably finite and no fixed credit price can be
-  // derived. That is what this reason states.
-  //
-  // As of the 2026-08-05 documentation review this is a **checked absence**,
-  // not an unchecked gap. The Interactions API reference defines
+  // Per-image prices verified 2026-08-04. The thinking cap has no documented
+  // basis: the 2026-08-05 documentation review closed that as a **checked
+  // absence**, not an unchecked gap. The Interactions API reference defines
   // `generation_config.max_output_tokens` as the maximum tokens to include in
   // the response, and reports `usage.total_output_tokens` and
   // `usage.total_thought_tokens` as separate counters. The thinking guide
@@ -255,20 +317,17 @@ const GOOGLE_GEMINI_31_FLASH_IMAGE: ImageModelProfile = {
   // cannot supply the link either. A forum answer or a search summary does not
   // meet policy §12's official-body requirement and is not admissible here.
   //
-  // That run happened on 2026-08-14, and the billing signal answered no. A
-  // request to gemini-3.1-flash-lite-image with `max_output_tokens: 2048`
-  // reported 1,602 output plus 931 thinking -- 2,533 -- as billable usage and
-  // returned a finished image. The parameter does not bound the quantity we are
-  // charged for. Measurement is therefore no longer a route out of this state:
-  // it was taken, and it closed the question negatively
-  // (.github/audits/image-model-verification-worksheet.md §I).
+  // The 2026-08-14 run answered no for a strict ceiling: a request to
+  // gemini-3.1-flash-lite-image with `max_output_tokens: 2048` reported 1,602
+  // output plus 931 thinking -- 2,533 -- and returned a finished image.
   //
-  // Only one model was measured, so the other two are held for a weaker reason:
-  // the general case for treating this parameter as a cost ceiling is gone and
-  // no model-specific evidence replaces it. `worst_case_cost_unbounded` means
-  // the finite worst case policy §12 requires was not established -- not that
-  // no finite cost exists.
-  disabledReason: "worst_case_cost_unbounded",
+  // Re-measured 2026-11-12 on this model and Flash Lite (23 billed samples,
+  // .github/audits/image-model-verification-worksheet.md section J), and the
+  // owner decided on 2026-11-13 to price the measured bound with a margin
+  // (GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS, below). The cap is therefore known and
+  // what is missing is operational: approved sale credits, which arrive as a
+  // catalogue price revision, and the Google provider budget.
+  disabledReason: "operational_hold",
   // 512, 2K and 4K are advertised upstream but have no representation in
   // ImageSize yet, and Google's 1K landscape is not 1536x1024 -- a provider
   // resolution mapping is part of enabling this model, not of registering it.
@@ -276,16 +335,20 @@ const GOOGLE_GEMINI_31_FLASH_IMAGE: ImageModelProfile = {
   qualities: ["medium"],
   prices: [],
   latencyClass: "fast",
+  routingNote:
+    "Best for: general images, posters and diagrams with short text; weaker at: small or long text, left/right placement, consistency across characters.",
+  useCase: "general",
   provenance: ["synthid"],
   outputMimeTypes: ["image/png", "image/jpeg"],
   // The only value its API accepts for response_format.mime_type,
   // established by the API rejecting image/png on 2026-08-06.
   deliveryMimeType: "image/jpeg",
   pricingVersion: "google-gemini-3-1-flash-image-2026-08-04-v1",
-  // The model card's own output limit, sent on every request. It bounds
-  // what is asked for; whether it also bounds hidden thinking is the open
-  // question that keeps this model disabled -- see thinkingCapMicroUsd.
-  maxOutputTokens: 32_768,
+  // The limit the 2026-11-12 measurement sent, not the model card's 32,768:
+  // the thinking cap below holds only for a request that sends this number
+  // (GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS). A 1K image came back at 1,575-1,699
+  // output tokens under it in 12 of 12 samples.
+  maxOutputTokens: 2_048,
   priceVerification: {
     verifiedAt: "2026-08-04",
     sources: [
@@ -294,10 +357,11 @@ const GOOGLE_GEMINI_31_FLASH_IMAGE: ImageModelProfile = {
       "https://ai.google.dev/gemini-api/docs/generate-content/tokens",
       "https://ai.google.dev/gemini-api/docs/models/gemini-3.1-flash-image",
     ],
-    thinkingCapMicroUsd: null,
+    // 2 x 2,048 tokens at $3.00 per 1M text output (GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS).
+    thinkingCapMicroUsd: 12_288,
   },
   disabledNote:
-    "Per-image prices verified 2026-08-04: 0.5K $0.045 / 1K $0.067 / 2K $0.101 / 4K $0.151. GA id corrected from the preview retired 2026-06-25. BLOCKED ON THE CAP, NOT THE PRICE. The 2026-08-05 documentation review closed this as a checked absence rather than an unread page: the Interactions API reference defines max_output_tokens as the maximum tokens to include in the response and reports total_output_tokens and total_thought_tokens as separate counters, and the thinking guide describes the charge as their sum without stating that the limit covers it. The model card's 32,768 output limit bounds the same undefined quantity, so it cannot supply the link either. The conservative derivation (32,768 x $3.00/1M = 98,304 microUSD, floors 190 / 228 / 283 credits) therefore stays an inference. Unblocked by measurement, not by more prose: a staging run that sets max_output_tokens and shows total_output_tokens + total_thought_tokens staying under it, including at a limit low enough to bite. That run is billable and needs the section 15 budget approval. The Interactions adapter is implemented and unreachable while this hold stands.",
+    "Per-image price verified 2026-08-04: 1K $0.067. Thinking cap 12,288 microUSD: twice the 2,048 output limit the request sends, at $3.00 per 1M text output, from the 2026-11-12 measurement (owner decision 2026-11-13, measured bound with a margin). Policy floor 94 credits at 1K. Held until sale credits are approved as a catalogue price revision and the Google provider budget is set.",
 };
 
 // Price VERIFIED 2026-08-04, held on operational grounds.
@@ -352,6 +416,9 @@ const XAI_GROK_IMAGINE_IMAGE_QUALITY: ImageModelProfile = {
     },
   ],
   latencyClass: "balanced",
+  routingNote:
+    "Best for: general-purpose images; weaker at: long text blocks and non-English text.",
+  useCase: "general",
   // Verified absent, not merely unread: the 2026-08-04 verification found no
   // watermark, C2PA or metadata guarantee anywhere in xAI's documentation.
   // Claiming provenance a file does not carry would be worse than claiming
@@ -378,21 +445,23 @@ const XAI_GROK_IMAGINE_IMAGE_QUALITY: ImageModelProfile = {
 // headline slot -- two Google models would fill both comparison seats with one
 // provider's failure modes, which is the opposite of what a comparison is for.
 //
-// Blocked by the same condition as every Google image model here: thinking
-// cannot be switched off and no official token cap is established, so the
-// worst case is not provably finite. The reported ~US$0.0336 image output is
-// in the note, not in `prices`.
+// Thinking cannot be switched off. Its cap is the bound measured on
+// 2026-11-12 with a margin (GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS), so the hold is
+// operational: no sale credits are approved, hence no `prices`.
 const GOOGLE_GEMINI_31_FLASH_LITE_IMAGE: ImageModelProfile = {
   id: "gemini-3.1-flash-lite-image",
   provider: "google",
   apiModelId: "gemini-3.1-flash-lite-image",
   name: "Gemini 3.1 Flash Lite Image",
   lifecycle: "stable",
-  disabledReason: "worst_case_cost_unbounded",
+  disabledReason: "operational_hold",
   sizes: ["1024x1024"],
   qualities: ["low"],
   prices: [],
   latencyClass: "fast",
+  routingNote:
+    "Best for: the fastest drafts (a few seconds), simple scenes with short legible text, high-volume generation; weaker at: portrait realism and hands, small or long text, editing.",
+  useCase: "fast",
   // Verified 2026-08-04: this model carries C2PA in addition to SynthID, which
   // the other two do not.
   provenance: ["synthid", "c2pa"],
@@ -401,10 +470,10 @@ const GOOGLE_GEMINI_31_FLASH_LITE_IMAGE: ImageModelProfile = {
   // established by the API rejecting image/png on 2026-08-06.
   deliveryMimeType: "image/jpeg",
   pricingVersion: "google-gemini-3-1-flash-lite-image-2026-08-04-v1",
-  // The model card's own output limit, sent on every request. It bounds
-  // what is asked for; whether it also bounds hidden thinking is the open
-  // question that keeps this model disabled -- see thinkingCapMicroUsd.
-  maxOutputTokens: 4_096,
+  // The limit the 2026-11-12 measurement sent, not the model card's 4,096
+  // (GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS). At 1,536 the image itself (1,610
+  // tokens) passed the limit, so this is not lowered further.
+  maxOutputTokens: 2_048,
   priceVerification: {
     verifiedAt: "2026-08-04",
     sources: [
@@ -413,10 +482,11 @@ const GOOGLE_GEMINI_31_FLASH_LITE_IMAGE: ImageModelProfile = {
       "https://ai.google.dev/gemini-api/docs/generate-content/tokens",
       "https://ai.google.dev/gemini-api/docs/models/gemini-3.1-flash-lite-image",
     ],
-    thinkingCapMicroUsd: null,
+    // 2 x 2,048 tokens at $1.50 per 1M text output (GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS).
+    thinkingCapMicroUsd: 6_144,
   },
   disabledNote:
-    "Draft-tier candidate. Image output verified 2026-08-04 at $0.0336, 1K only (2K and 4K unsupported). Blocked on the same cap as every Google image model here, confirmed absent from the official documentation on 2026-08-05 rather than merely unread. The conservative derivation is 6,144 microUSD (4,096 output tokens x $1.50/1M), giving a floor of 50 credits -- an inference, not a documented cap. Its 4,096 limit makes it the most informative model to measure first: a low ceiling is the one likely to actually bite, and a run that never approaches the limit proves nothing about whether the limit is enforced. Even once unblocked, the review advises against filling a second comparison seat with a second Google model.",
+    "Draft-tier candidate. Image output verified 2026-08-04 at $0.0336, 1K only. Thinking cap 6,144 microUSD: twice the 2,048 output limit the request sends, at $1.50 per 1M text output, from the 2026-11-12 measurement (owner decision 2026-11-13, measured bound with a margin). Policy floor 50 credits. Held until sale credits are approved as a catalogue price revision and the Google provider budget is set.",
 };
 
 // Nano Banana 2 -- Google's model, bought through fal rather than called
@@ -551,7 +621,7 @@ const GOOGLE_GEMINI_3_PRO_IMAGE: ImageModelProfile = {
     thinkingCapMicroUsd: null,
   },
   disabledNote:
-    "Final-tier candidate. Per-image prices verified 2026-08-04: $0.134 (1K/2K) and $0.24 (4K). Blocked on the cap like the other Google models, confirmed absent from the official documentation on 2026-08-05. The derivation is 393,216 microUSD (32,768 x $12.00/1M), which would put floors at 592 and 710 credits, well past gpt-image-2 Final at 250. Held a second time by product judgement regardless of the cap: the band overlaps gpt-image-2 Final, so the review defers it until usage shows Flash is insufficient.",
+    "Final-tier candidate. Per-image prices verified 2026-08-04: $0.134 (1K/2K) and $0.24 (4K). Blocked on the cap: no documented one exists (confirmed 2026-08-05) and this model was not in the 2026-11-12 measurement that bounded Flash and Flash Lite. The derivation is 393,216 microUSD (32,768 x $12.00/1M), which would put floors at 592 and 710 credits, well past gpt-image-2 Final at 250. Held a second time by product judgement regardless of the cap: the band overlaps gpt-image-2 Final, so the review defers it until usage shows Flash is insufficient.",
 };
 
 /**
@@ -637,6 +707,81 @@ export const imageDeliveryMimeType = (model: ImageModelProfile): string =>
 export const imageModelChipLabel = (model: ImageModelProfile): string =>
   model.shortName ?? model.name;
 
+// FLUX 3 on the Black Forest Labs API, called directly (lib/bflImageRequest.ts).
+// Enabled by default: owner decision in chat 2026-11-16, with sale credits
+// approved the same day at 75 (FLUX 3 Image) and 20 (Klein).
+//
+// Price read from bfl.ai/pricing on 2026-11-16: per image by resolution tier,
+// 1K $0.048 (Image) and $0.009 (Klein); "Reference images ... and prompts are
+// included at no extra charge", and "Rejected requests, failed generations and
+// outputs withheld by moderation are not charged". So the thinking cap is 0
+// and the worst case is the image price plus the prompt budget:
+//   Image  48,000 + 5,000 = 53,000 microUSD, floor 59; 75 is 707 per credit.
+//   Klein   9,000 + 5,000 = 14,000 microUSD, floor 16; 20 is 700 per credit.
+// The same headroom as Grok Imagine (733) and Nano Banana 2 (725).
+//
+// Env first, code second: an enabled model makes its provider active, and
+// /api/ready refuses a flag-on production whose active provider has no
+// budget. IMAGE_PROVIDER_BFL_COST_MICROUSD_PER_DAY / _PER_MONTH and
+// BFL_API_KEY must be deployed before this reaches an environment.
+//
+// 1K square only: the request maps no other size. No provenance is claimed,
+// because BFL documents none for FLUX 3.
+const BFL_FLUX_3_IMAGE: ImageModelProfile = {
+  id: "flux-3-image",
+  provider: "bfl",
+  apiModelId: "flux-3-image",
+  name: "FLUX 3 Image",
+  shortName: "FLUX 3",
+  lifecycle: "stable",
+  disabledReason: null,
+  sizes: ["1024x1024"],
+  // The request has no quality setting; the shelf it sits on beside Grok
+  // Imagine and Nano Banana 2.
+  qualities: ["medium"],
+  prices: [{ quality: "medium", size: "1024x1024", credits: 75, outputCostMicroUsd: 48_000 }],
+  latencyClass: "balanced",
+  routingNote:
+    "Best for: photorealistic images and fine detail; non-English text inside the image is not yet verified.",
+  useCase: "detail",
+  provenance: [],
+  outputMimeTypes: ["image/jpeg", "image/png"],
+  pricingVersion: "bfl-flux-3-image-2026-11-16-v1",
+  priceVerification: {
+    verifiedAt: "2026-11-16",
+    sources: ["https://bfl.ai/pricing", "https://docs.bfl.ai/api_integration/integration_guidelines"],
+    // Billed per image; prompts included; no reasoning charge.
+    thinkingCapMicroUsd: 0,
+  },
+};
+
+const BFL_FLUX_3_IMAGE_KLEIN: ImageModelProfile = {
+  id: "flux-3-image-klein",
+  provider: "bfl",
+  apiModelId: "flux-3-image-klein",
+  name: "FLUX 3 Image Klein",
+  shortName: "FLUX 3 Klein",
+  lifecycle: "stable",
+  disabledReason: null,
+  sizes: ["1024x1024"],
+  // The draft shelf: the cheapest model in the comparison.
+  qualities: ["low"],
+  prices: [{ quality: "low", size: "1024x1024", credits: 20, outputCostMicroUsd: 9_000 }],
+  latencyClass: "fast",
+  routingNote: "Best for: fast, low-cost drafts and quick variations; weaker at: fine detail.",
+  useCase: "value",
+  provenance: [],
+  outputMimeTypes: ["image/png", "image/jpeg"],
+  // The request asks for PNG (`output_format: "png"`).
+  deliveryMimeType: "image/png",
+  pricingVersion: "bfl-flux-3-image-klein-2026-11-16-v1",
+  priceVerification: {
+    verifiedAt: "2026-11-16",
+    sources: ["https://bfl.ai/pricing", "https://docs.bfl.ai/api_integration/integration_guidelines"],
+    thinkingCapMicroUsd: 0,
+  },
+};
+
 export const IMAGE_MODEL_REGISTRY: readonly ImageModelProfile[] = [
   OPENAI_GPT_IMAGE_2,
   GOOGLE_GEMINI_31_FLASH_IMAGE,
@@ -644,6 +789,8 @@ export const IMAGE_MODEL_REGISTRY: readonly ImageModelProfile[] = [
   GOOGLE_GEMINI_31_FLASH_LITE_IMAGE,
   GOOGLE_GEMINI_3_PRO_IMAGE,
   FAL_NANO_BANANA_2,
+  BFL_FLUX_3_IMAGE,
+  BFL_FLUX_3_IMAGE_KLEIN,
 ];
 
 /** The default single selection and the v1 compatibility model. */
@@ -749,24 +896,110 @@ export const getImageModelPrice = (
  *     thinking guide updated 2026-10-14 now calls `max_output_tokens` a hard
  *     cutoff including thought tokens, which is the opposite of that
  *     measurement; until a new measurement settles it, it is not a bound.
+ *     This is what a Google model with no row in
+ *     GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS and no confirmed measured terms still is.
+ *   - `per_token_within_output_limit`: billed per token, and the output limit
+ *     the request sends holds the count. Only a Google direct model listed in
+ *     GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS, and only while its request sends that
+ *     row's limit and no thinking level.
  *
  * fal answers per endpoint, not per provider: its row in
- * FAL_ENDPOINT_PROFILES (lib/falImageRequest.ts) says which of the three it
- * is -- google/nano-banana-2.1 is `per_token_uncapped` like Google direct --
- * and an endpoint with no row has no answer.
+ * FAL_ENDPOINT_PROFILES (lib/falImageRequest.ts) says which of the first three
+ * it is -- google/nano-banana-2.1 is `per_token_uncapped` -- and an endpoint
+ * with no row has no answer.
  */
 export type ImageThinkingBilling =
   | "not_billed"
   | "flat_per_request"
-  | "per_token_uncapped";
+  | "per_token_uncapped"
+  | "per_token_within_output_limit";
+
+/**
+ * Google direct image models whose billable text and thinking the request's
+ * `max_output_tokens` was measured to hold, keyed by `apiModelId`.
+ *
+ * Owner decision 2026-11-13 (policy section 12.1): the worst case is the
+ * measured bound with a margin, not a documented strict ceiling.
+ *
+ *   - 2026-11-12, 23 billed samples on these two models at 1K square
+ *     (.github/audits/image-model-verification-worksheet.md section J): with
+ *     thinking forced to `high` and the limit at 2,048, output plus thinking
+ *     stayed at or under the limit in 10 of 10 and the request stopped without
+ *     an image; with the level omitted, 12 of 12 reported zero thinking and
+ *     1,575-1,699 output. The one sample over a limit (1,610 at 1,536) carried
+ *     its image: an image is emitted whole, so it can pass the limit, and its
+ *     price is the option's `outputCostMicroUsd`, not thinking.
+ *   - 2026-08-14 the same parameter held thinking alone under the limit and
+ *     counted output beside it (1,602 + 931 at 2,048).
+ *
+ * Both readings keep the tokens that are not the image at or under twice the
+ * limit, so the cap is that many tokens at the model's text output rate (the
+ * rate thinking is billed at). `maxOutputTokens` is the limit the measurement
+ * sent; a request that sends another, or pins a thinking level, is not the one
+ * that was measured (`imageThinkingCapEnforced`). gemini-3-pro-image has no
+ * row: it was not measured.
+ */
+export const GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS: Readonly<
+  Record<string, { maxOutputTokens: number; textOutputUsdPerMTok: number; imageTokensPerImage: number }>
+> = {
+  // imageTokensPerImage: what one 1K image is billed as, from the usage the
+  // measurement read (`output_tokens_by_modality` image: 1,120 on every
+  // delivered sample, worksheet sections I and J). Settlement prices billed
+  // image tokens in units of it, so a response that carried more than one image
+  // is not settled as one.
+  "gemini-3.1-flash-image": { maxOutputTokens: 2_048, textOutputUsdPerMTok: 3, imageTokensPerImage: 1_120 },
+  "gemini-3.1-flash-lite-image": { maxOutputTokens: 2_048, textOutputUsdPerMTok: 1.5, imageTokensPerImage: 1_120 },
+};
+
+/** Non-image billable tokens are held at this many times the limit sent. */
+export const GOOGLE_IMAGE_OUTPUT_LIMIT_MARGIN = 2;
+
+type MeasuredOutputLimitBound = { maxOutputTokens: number; textOutputUsdPerMTok: number; imageTokensPerImage: number };
+
+/**
+ * The measured bound for a Google direct model, or null (also for a prototype
+ * key). Terms an operator confirmed from a measurement come first; the code
+ * table is the default for a model with none.
+ */
+export const googleImageOutputLimitBound = (
+  provider: unknown,
+  apiModelId: unknown,
+  confirmed?: ConfirmedImageBillingTerms | null
+): MeasuredOutputLimitBound | null => {
+  const terms = billingTermsApplyTo(provider, confirmed);
+  if (terms?.kind === "measured_output_limit") {
+    return {
+      maxOutputTokens: terms.maxOutputTokens,
+      textOutputUsdPerMTok: terms.textOutputUsdPerMTok,
+      imageTokensPerImage: terms.imageTokensPerImage,
+    };
+  }
+  return provider === "google" && typeof apiModelId === "string" && Object.hasOwn(GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS, apiModelId)
+    ? GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS[apiModelId]
+    : null;
+};
+
+/** The measured bound a model's request is priced on, with its confirmed terms. */
+export const imageMeasuredOutputLimitBound = (model: Pick<ImageModelProfile, "provider" | "apiModelId" | "billingTerms">) =>
+  googleImageOutputLimitBound(model.provider, model.apiModelId, model.billingTerms);
+
+type ImageThinkingTerms =
+  | FalThinkingTerms
+  | { billing: "per_token_within_output_limit"; capMicroUsd: number };
 
 const IMAGE_PROVIDER_THINKING_BILLING: Readonly<
-  Record<Exclude<ImageModelProvider, "fal">, Exclude<ImageThinkingBilling, "flat_per_request">>
+  Record<
+    Exclude<ImageModelProvider, "fal">,
+    Exclude<ImageThinkingBilling, "flat_per_request" | "per_token_within_output_limit">
+  >
 > = {
   openai: "not_billed",
   xai: "not_billed",
   google: "per_token_uncapped",
   qwen: "not_billed",
+  // Black Forest Labs bills FLUX 3 per image by resolution tier, with prompts
+  // and references "included at no extra charge" (price page, 2026-11-16).
+  bfl: "not_billed",
 };
 
 /**
@@ -779,17 +1012,38 @@ const IMAGE_PROVIDER_THINKING_BILLING: Readonly<
  */
 const IMAGE_PER_IMAGE_BILLED_MODELS: Readonly<Partial<Record<ImageModelProvider, RegExp>>> = {
   qwen: /^qwen-image-/,
+  // Read for the FLUX 3 image endpoints only. FLUX.2 is billed per megapixel
+  // and its request is not pinned (lib/bflImageRequest.ts), so it has no bound.
+  bfl: /^flux-3-image(-klein)?$/,
 };
 
-/** The terms for this model's request: per endpoint on fal, per provider elsewhere. */
-const imageThinkingTerms = (provider: unknown, apiModelId: unknown): FalThinkingTerms | null => {
+/**
+ * The terms for this model's request: per endpoint on fal, per provider
+ * elsewhere, and the operator's confirmed terms (`confirmed`) where the code
+ * tables have no answer of their own.
+ */
+const imageThinkingTerms = (
+  provider: unknown,
+  apiModelId: unknown,
+  confirmed?: ConfirmedImageBillingTerms | null
+): ImageThinkingTerms | null => {
   if (provider === "fal") return falEndpointProfile(apiModelId)?.thinking ?? null;
-  // A family read as per-image is not a bound on the provider's other models.
+  const bound = googleImageOutputLimitBound(provider, apiModelId, confirmed);
+  if (bound) {
+    return {
+      billing: "per_token_within_output_limit",
+      // Tokens times USD per million tokens is micro-USD.
+      capMicroUsd: Math.ceil(GOOGLE_IMAGE_OUTPUT_LIMIT_MARGIN * bound.maxOutputTokens * bound.textOutputUsdPerMTok),
+    };
+  }
+  // A family read as per-image is not a bound on the provider's other models,
+  // unless an operator confirmed this model's per-image billing by measuring it.
   const family =
     typeof provider === "string" && Object.hasOwn(IMAGE_PER_IMAGE_BILLED_MODELS, provider)
       ? IMAGE_PER_IMAGE_BILLED_MODELS[provider as ImageModelProvider]
       : undefined;
-  if (family && typeof apiModelId === "string" && !family.test(apiModelId)) return null;
+  const confirmedPerImage = billingTermsApplyTo(provider, confirmed)?.kind === "per_image_no_thinking";
+  if (family && typeof apiModelId === "string" && !family.test(apiModelId) && !confirmedPerImage) return null;
   return typeof provider === "string" && Object.hasOwn(IMAGE_PROVIDER_THINKING_BILLING, provider)
     ? { billing: IMAGE_PROVIDER_THINKING_BILLING[provider as keyof typeof IMAGE_PROVIDER_THINKING_BILLING] }
     : null;
@@ -798,22 +1052,27 @@ const imageThinkingTerms = (provider: unknown, apiModelId: unknown): FalThinking
 /** Null for a provider this code has no adapter for, and for an unlisted fal endpoint. */
 export const imageThinkingBilling = (
   provider: unknown,
-  apiModelId?: unknown
-): ImageThinkingBilling | null => imageThinkingTerms(provider, apiModelId)?.billing ?? null;
+  apiModelId?: unknown,
+  confirmed?: ConfirmedImageBillingTerms | null
+): ImageThinkingBilling | null => imageThinkingTerms(provider, apiModelId, confirmed)?.billing ?? null;
 
 /**
  * The smallest stated cap that bounds what this model's request spends on
  * thinking: 0 where thinking is not billed, the pinned level's surcharge
- * where it is flat, and null where no stated cap can bound it -- including a
- * fal model whose endpoint has no row, or that names no endpoint at all.
+ * where it is flat, the measured token bound at the text rate for a Google
+ * model in GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS, and null where no stated cap can
+ * bound it -- including a fal model whose endpoint has no row, or that names
+ * no endpoint at all.
  */
 export const imageThinkingCapMinimumMicroUsd = (
   provider: unknown,
-  apiModelId?: unknown
+  apiModelId?: unknown,
+  confirmed?: ConfirmedImageBillingTerms | null
 ): number | null => {
-  const terms = imageThinkingTerms(provider, apiModelId);
+  const terms = imageThinkingTerms(provider, apiModelId, confirmed);
   if (terms?.billing === "not_billed") return 0;
   if (terms?.billing === "flat_per_request") return terms.surchargeMicroUsd;
+  if (terms?.billing === "per_token_within_output_limit") return terms.capMicroUsd;
   return null;
 };
 
@@ -821,16 +1080,38 @@ export const imageThinkingCapMinimumMicroUsd = (
  * Whether the request this model would be sent cannot spend more on thinking
  * than its stated cap. False for an unknown cap; false for a stated cap on a
  * provider whose thinking the request cannot bound -- an operator revision can
- * write a number for a Google model, and that number is not a bound; and false
- * for a cap below the flat surcharge the request incurs anyway.
+ * write a number for an unmeasured Google model, and that number is not a
+ * bound; false for a cap below the flat surcharge the request incurs anyway;
+ * and false for a measured Google model whose request is not the measured one
+ * (another output limit, or a pinned thinking level).
  */
 export const imageThinkingCapEnforced = (
-  model: Pick<ImageModelProfile, "provider" | "apiModelId" | "priceVerification">
+  model: Pick<
+    ImageModelProfile,
+    "provider" | "apiModelId" | "priceVerification" | "maxOutputTokens" | "thinkingLevel" | "billingTerms"
+  >
 ): boolean => {
   const cap = model.priceVerification.thinkingCapMicroUsd;
   if (cap === null) return false;
-  const minimum = imageThinkingCapMinimumMicroUsd(model.provider, model.apiModelId);
-  return minimum !== null && cap >= minimum;
+  const minimum = imageThinkingCapMinimumMicroUsd(model.provider, model.apiModelId, model.billingTerms);
+  if (minimum === null || cap < minimum) return false;
+  const bound = imageMeasuredOutputLimitBound(model);
+  return !bound || (model.maxOutputTokens === bound.maxOutputTokens && !model.thinkingLevel);
+};
+
+/**
+ * The image output tokens a confirmed `tokens_per_image` measurement found for
+ * one option, or null. What the draft multiplies by the documented rate.
+ */
+export const confirmedImageOutputTokens = (
+  provider: unknown,
+  confirmed: ConfirmedImageBillingTerms | null | undefined,
+  quality: string,
+  size: string
+): number | null => {
+  const terms = billingTermsApplyTo(provider, confirmed);
+  if (terms?.kind !== "tokens_per_image") return null;
+  return terms.tokens.find((entry) => entry.quality === quality && entry.size === size)?.tokens ?? null;
 };
 
 /**

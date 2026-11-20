@@ -48,7 +48,7 @@ const confirmed = (value) => {
 };
 
 test("a conversation that is not an explicit registration writes nothing", () => {
-  const preview = previewAmuxIntake(body(draft({ explicitRegistration: false })), secret, "enabled");
+  const preview = previewAmuxIntake(body(draft({ explicitRegistration: false })), secret);
   assert.equal(preview.outcome, "reject");
   assert.equal(preview.code, "implicit_registration");
   assert.equal(preview.unitCount, 0);
@@ -61,10 +61,9 @@ test("a conversation that is not an explicit registration writes nothing", () =>
 });
 
 test("preview shows one unit and asks again after the payload changes", () => {
-  const waiting = previewAmuxIntake(body(draft()), secret, "enabled");
+  const waiting = previewAmuxIntake(body(draft()), secret);
   assert.equal(waiting.outcome, "approval_required");
   assert.equal(waiting.unitCount, 1);
-  assert.equal(waiting.inactive, false);
   assert.equal(waiting.applyPermitted, false);
   assert.equal(waiting.writes, 0);
   assert.equal(waiting.reconfirmRequired, true);
@@ -81,7 +80,7 @@ test("preview shows one unit and asks again after the payload changes", () => {
   const stale = confirmed(draft());
   const changed = JSON.parse(stale);
   changed.proposal = { ...changed.proposal, title: "A different unit" };
-  const again = previewAmuxIntake(JSON.stringify(changed), secret, undefined);
+  const again = previewAmuxIntake(JSON.stringify(changed), secret);
   assert.equal(again.outcome, "reject");
   assert.equal(again.code, "digest_mismatch");
   assert.equal(again.reconfirmRequired, true);
@@ -89,17 +88,11 @@ test("preview shows one unit and asks again after the payload changes", () => {
   assert.equal(again.title, "A different unit");
   assert.notEqual(again.draftDigest, parsed.ok ? amuxIntakeDraftDigest(parsed.draft) : null);
 
-  const ready = previewAmuxIntake(confirmed(draft()), secret, "enabled");
+  const ready = previewAmuxIntake(confirmed(draft()), secret);
   assert.equal(ready.outcome, "allow");
   assert.equal(ready.applyPermitted, true);
-  assert.equal(ready.inactive, false);
   assert.equal(ready.writes, 0);
   assert.equal(ready.reconfirmRequired, false);
-  const closed = previewAmuxIntake(confirmed(draft()), secret, undefined);
-  assert.equal(closed.outcome, "allow");
-  assert.equal(closed.applyPermitted, false);
-  assert.equal(closed.inactive, true);
-  assert.equal(closed.writes, 0);
 });
 
 test("the registration plan is one backlog card and does not touch execution or credit", () => {
@@ -173,7 +166,7 @@ test("an unclear registration is classified without writing", () => {
   );
 });
 
-test("the public apply path checks the shipped latch before the commit", () => {
+test("the public apply path commits once and reads back an unclear outcome", () => {
   const service = read("lib/amux/intakeRegistration.ts");
   const route = read("app/api/admin/amux/intake/route.ts");
   const panel = read("components/admin/AmuxIntakePanel.tsx");
@@ -182,11 +175,11 @@ test("the public apply path checks the shipped latch before the commit", () => {
     service.indexOf("export async function applyAmuxIntakeRegistration"),
   );
   const apply = service.slice(service.indexOf("export async function applyAmuxIntakeRegistration"));
-  const permit = apply.indexOf("amuxIntakeApplyPermitted");
   const commit = apply.indexOf("commitAmuxIntakeRegistration");
   const ambiguous = apply.indexOf("boardImportFailureIsAmbiguous");
   const unclear = apply.slice(ambiguous);
-  assert.equal(permit >= 0 && commit > permit, true);
+  assert.equal(commit >= 0, true);
+  assert.equal(apply.includes("amuxIntakeApplyPermitted"), false);
   assert.equal(ambiguous > commit, true);
   assert.equal(readBack.includes("$transaction"), false);
   assert.equal(readBack.includes("INSERT"), false);

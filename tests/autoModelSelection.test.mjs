@@ -3,9 +3,10 @@ import test from "node:test";
 import { createRequire } from "node:module";
 
 import { AVAILABLE_MODELS } from "../lib/models.ts";
-import { autoLlmRouterCandidates, parseAutoLlmRouterOutput } from "../lib/autoLlmRouterCore.ts";
+import { autoLlmRouterCandidates, autoLlmRouterFileDiagnostics, parseAutoLlmRouterOutput } from "../lib/autoLlmRouterCore.ts";
 import {
   applyLlmModelPick,
+  fileGenerationRetryModelId,
   selectAutoModel,
   selectionDisclosure,
 } from "../lib/autoModelSelection.ts";
@@ -76,6 +77,90 @@ const initialReleaseAuthority = () =>
     runtimeDeploymentId: "11111111-1111-4111-8111-111111111111",
   });
 
+test("file generation retry declines in every no-retry branch", () => {
+  const candidates = autoLlmRouterCandidates(
+    ["gpt-5-6-luna", "deepseek-v4-flash"],
+    AVAILABLE_MODELS,
+    { "gpt-5-6-luna": 1, "deepseek-v4-flash": 2 },
+    { isAuthenticated: true, canPersist: true, webSearchRequested: false }
+  );
+  const capable = candidates.filter(candidate => candidate.canCreateFiles);
+  assert.equal(capable.some(candidate => candidate.id === "gpt-5-6-luna"), true);
+  assert.equal(candidates.find(candidate => candidate.id === "deepseek-v4-flash").canCreateFiles, false);
+
+  assert.equal(fileGenerationRetryModelId({
+    requiresFileGeneration: false,
+    answeredModelId: "deepseek-v4-flash",
+    fileCapableCandidates: capable,
+  }), null);
+  assert.equal(fileGenerationRetryModelId({
+    requiresFileGeneration: true,
+    answeredModelId: "gpt-5-6-luna",
+    fileCapableCandidates: capable,
+  }), null);
+  assert.equal(fileGenerationRetryModelId({
+    requiresFileGeneration: true,
+    answeredModelId: "deepseek-v4-flash",
+    fileCapableCandidates: [],
+  }), null);
+});
+
+test("file generation retry picks the first eligible candidate in input order", () => {
+  const candidates = autoLlmRouterCandidates(
+    ["deepseek-v4-flash", "gpt-5-6-luna", "claude-haiku-4-5"],
+    AVAILABLE_MODELS,
+    { "deepseek-v4-flash": 1, "gpt-5-6-luna": 2, "claude-haiku-4-5": 3 },
+    { isAuthenticated: true, canPersist: true, webSearchRequested: false }
+  );
+  const capable = candidates.filter(candidate => candidate.canCreateFiles);
+  const before = capable.map(candidate => candidate.canCreateFiles);
+  const retry = fileGenerationRetryModelId({
+    requiresFileGeneration: true,
+    answeredModelId: "deepseek-v4-flash",
+    fileCapableCandidates: capable,
+  });
+  assert.equal(retry, capable[0].id);
+  assert.equal(retry, "gpt-5-6-luna");
+  assert.deepEqual(capable.map(candidate => candidate.canCreateFiles), before);
+});
+
+test("file generation retry excludes deep research and unverified candidates", () => {
+  const candidates = autoLlmRouterCandidates(
+    ["perplexity/sonar-deep-research", "gpt-5-6-luna", "deepseek-v4-flash"],
+    AVAILABLE_MODELS,
+    { "perplexity/sonar-deep-research": 1, "gpt-5-6-luna": 2, "deepseek-v4-flash": 3 },
+    { isAuthenticated: true, canPersist: true, webSearchRequested: false }
+  );
+  const before = candidates.map(candidate => candidate.canCreateFiles);
+  assert.equal(candidates.find(candidate => candidate.id === "perplexity/sonar-deep-research").canCreateFiles, false);
+  assert.equal(candidates.find(candidate => candidate.id === "deepseek-v4-flash").canCreateFiles, false);
+  assert.equal(fileGenerationRetryModelId({
+    requiresFileGeneration: true,
+    answeredModelId: "another-model",
+    fileCapableCandidates: candidates,
+  }), "gpt-5-6-luna");
+  assert.deepEqual(candidates.map(candidate => candidate.canCreateFiles), before);
+});
+
+test("file diagnostics default missing intent to false and count only offered capable candidates", () => {
+  const candidates = [
+    { id: "capable", canCreateFiles: true },
+    { id: "unsupported", canCreateFiles: false },
+    { id: "excluded", canCreateFiles: true },
+  ].filter(candidate => candidate.id !== "excluded");
+  for (const pick of [null, undefined, {}, { requiresFileGeneration: false }]) {
+    assert.deepEqual(autoLlmRouterFileDiagnostics(pick, candidates), {
+      requiresFileGeneration: false, fileCapableCandidateCount: 1,
+    });
+  }
+  assert.deepEqual(autoLlmRouterFileDiagnostics({ requiresFileGeneration: true }, candidates), {
+    requiresFileGeneration: true, fileCapableCandidateCount: 1,
+  });
+  assert.deepEqual(autoLlmRouterFileDiagnostics({ requiresFileGeneration: true }, []), {
+    requiresFileGeneration: true, fileCapableCandidateCount: 0,
+  });
+});
+
 test("file routing keeps the primary and every failover inside the capable eligible set", () => {
   const original = selectAutoModel(input());
   assert.equal(original.routed, true);
@@ -87,6 +172,23 @@ test("file routing keeps the primary and every failover inside the capable eligi
   assert.deepEqual(routed.record.eligibleModelIds, capable);
   assert.ok(routed.record.rejections.some(r => r.reason === "file_generation_unsupported"));
   assert.equal(original.record.eligibleModelIds.length > capable.length, true);
+});
+
+test("the applied soft menu bounds normal picks and fallbacks, while router failure uses hard eligibility", () => {
+  const original = selectAutoModel(input());
+  const offered = original.record.eligibleModelIds.filter(id => id !== original.modelId).slice(0, 2);
+  assert.equal(offered.length, 2);
+  const routed = applyLlmModelPick(original, offered[0], undefined, null, offered);
+  assert.deepEqual(routed.record.eligibleModelIds, offered);
+  assert.ok(routed.fallbackCandidateModelIds.every(id => offered.includes(id)));
+  assert.ok(!routed.fallbackCandidateModelIds.includes(original.modelId));
+  const files = applyLlmModelPick(original, offered[0], { required: true, capableModelIds: [offered[0], original.modelId] }, null, offered);
+  assert.deepEqual(files.record.eligibleModelIds, [offered[0]]);
+  assert.deepEqual(files.fallbackCandidateModelIds, []);
+  const requested = original.record.eligibleModelIds.find(id => !offered.includes(id) && id !== original.modelId);
+  assert.ok(requested);
+  assert.equal(applyLlmModelPick(original, null, undefined, requested, offered).modelId, requested);
+  assert.equal(applyLlmModelPick(original, null, undefined, null, offered), original);
 });
 
 test("a known file request without a usable model pick uses a capable eligible fallback", () => {
@@ -101,6 +203,28 @@ test("a known file request without a usable model pick uses a capable eligible f
   assert.equal(applyLlmModelPick(original, "foreign", { required: true, capableModelIds: ["foreign"] }), original);
   const manual = selectAutoModel(input({ conversation: autoConversation({ selectionMode: "manual" }) }));
   assert.equal(applyLlmModelPick(manual, capable[0], { required: true, capableModelIds: capable }), manual);
+});
+
+test("a router that was asked and failed hands the turn to the requested model, not the rule's cheapest fit", () => {
+  // 2026-11-13: the router timed out on a two-photo PDF request and the rule's
+  // choice, a model with no file tools, answered it.
+  const original = selectAutoModel(input());
+  const requested = original.record.eligibleModelIds.find(id => id !== original.modelId);
+  assert.ok(requested, "the fixture needs a second eligible model");
+  const routed = applyLlmModelPick(original, null, { required: false, capableModelIds: [] }, requested);
+  assert.equal(routed.modelId, requested);
+  assert.equal(routed.record.selectedModelId, requested);
+  assert.equal(routed.record.selectionReason, "fallback_order");
+  assert.ok(routed.fallbackCandidateModelIds.includes(original.modelId));
+  assert.ok(!routed.fallbackCandidateModelIds.includes(requested));
+  // A model the filters refused is never chosen this way, and a real pick wins.
+  assert.equal(applyLlmModelPick(original, null, undefined, "not-eligible"), original);
+  assert.equal(applyLlmModelPick(original, null, undefined, null), original);
+  const picked = original.record.eligibleModelIds.find(id => id !== original.modelId && id !== requested) ?? original.modelId;
+  assert.equal(applyLlmModelPick(original, picked, undefined, requested).modelId, picked);
+  // Not Auto: nothing changes.
+  const manual = selectAutoModel(input({ conversation: autoConversation({ selectionMode: "manual" }) }));
+  assert.equal(applyLlmModelPick(manual, null, undefined, requested), manual);
 });
 
 test("file-capable fallback preserves an unchanged exploration choice and sticky telemetry", () => {
@@ -149,6 +273,24 @@ test("an unsupported raw file pick preserves a capable primary instead of fabric
     }
     assert.ok(routed.fallbackCandidateModelIds.every(id => capable.includes(id)));
   }
+});
+
+test("file intent parsing preserves explicit false and rejects non-boolean values", () => {
+  const candidates = autoLlmRouterCandidates(
+    ["gpt-5-6-luna"], AVAILABLE_MODELS, { "gpt-5-6-luna": 1 },
+    { isAuthenticated: true, canPersist: true, webSearchRequested: false }
+  );
+  const withoutIntent = parseAutoLlmRouterOutput({ modelId: "gpt-5-6-luna" }, candidates);
+  assert.equal("requiresFileGeneration" in withoutIntent, false);
+  assert.equal(parseAutoLlmRouterOutput({
+    modelId: "gpt-5-6-luna", requiresFileGeneration: false,
+  }, candidates).requiresFileGeneration, false);
+  assert.equal(parseAutoLlmRouterOutput({
+    modelId: "gpt-5-6-luna", requiresFileGeneration: true,
+  }, candidates).requiresFileGeneration, true);
+  assert.equal(parseAutoLlmRouterOutput({
+    modelId: "gpt-5-6-luna", requiresFileGeneration: "true",
+  }, candidates), null);
 });
 
 test("file enforcement considers all eligible candidates even when a capable model is absent from ranked fallbacks", () => {

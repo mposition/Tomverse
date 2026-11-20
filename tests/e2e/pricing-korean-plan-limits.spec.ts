@@ -1,9 +1,9 @@
 import { expect, test } from "@playwright/test";
-import { AVAILABLE_MODELS } from "../../lib/models";
 
 for (const scenario of [
-  { name: "default public limits", proDaily: 300, proAttachments: true, inputLimit: 128_000 },
-  { name: "changed public limits", proDaily: 180, proAttachments: false, inputLimit: 96_000 },
+  { name: "default public limits", proDaily: 300, proAttachments: true, inputLimit: 128_000, longContext: false },
+  { name: "changed public limits", proDaily: 180, proAttachments: false, inputLimit: 96_000, longContext: false },
+  { name: "long context", proDaily: 300, proAttachments: true, inputLimit: 128_000, longContext: true },
 ]) {
   test(`Korean plan comparison reflects ${scenario.name}`, async ({ page }, info) => {
     await page.setViewportSize({ width: info.project.name.includes("mobile") ? 320 : 1440, height: 900 });
@@ -13,25 +13,27 @@ for (const scenario of [
         { id: "pro", name: "Pro", monthlyPriceCents: 1_500, annualPriceCents: 14_400, currency: "USD", monthlyMessageLimit: 3_000, dailyMessageLimit: scenario.proDaily, allowAttachments: scenario.proAttachments },
         { id: "max", name: "Max", monthlyPriceCents: 2_500, annualPriceCents: 24_000, currency: "USD", monthlyMessageLimit: 10_000, dailyMessageLimit: 0, allowAttachments: true },
       ], creditPacks: [], featuredPromotion: null, appInputTokenLimit: scenario.inputLimit,
+      appLongContext: scenario.longContext,
     } }));
-    const models = ["gpt-6-luna", "claude-fable-5"].map((id) => AVAILABLE_MODELS.find((model) => model.id === id)!);
-    await page.route("**/api/models/catalog", (route) => route.fulfill({ json: { models } }));
     await page.goto("/pricing?lang=ko");
-    const pro = page.getByTestId("pricing-plan-limits-pro");
-    const max = page.getByTestId("pricing-plan-limits-max");
-    await expect(pro).toContainText(`${scenario.proDaily} 크레딧`);
-    await expect(max).toContainText("별도 일일 플랜 크레딧 한도 없음");
-    for (const block of [pro, max]) {
-      await expect(block).toContainText(`${scenario.inputLimit.toLocaleString("ko-KR")} 토큰 · 플랜 공통`);
-      await expect(block.getByRole("link", { name: "지원 모델과 이용 시작 플랜 보기" })).toHaveAttribute("href", "/ko/models");
-      await block.locator("summary").click();
-      await expect(block).toContainText("1,000,000 토큰");
-      await expect(block).toContainText("실제 입력은 위 앱 상한 안에서 처리되며");
-    }
+    // Daily limits come from the plan config: a number, or "없음" for a plan with none.
+    await expect(page.getByTestId("pricing-plan-daily-free")).toContainText("30 크레딧");
+    await expect(page.getByTestId("pricing-plan-daily-pro")).toContainText(`${scenario.proDaily} 크레딧`);
+    await expect(page.getByTestId("pricing-plan-daily-max")).toContainText("없음");
+    // The comparison table repeats the limits and the attachment rule of each plan.
+    const dailyRow = page.getByRole("row").filter({ hasText: "하루 사용 한도" });
+    await expect(dailyRow.getByRole("cell").nth(2)).toHaveText(`${scenario.proDaily} 크레딧`);
     const attachmentRow = page.getByRole("row").filter({ hasText: "파일 첨부 (허용 시)" });
-    await expect(attachmentRow.getByRole("cell").nth(2)).toHaveText(scenario.proAttachments ? "5개 · 각 10 MiB · 총 25 MiB" : "현재 제공하지 않음");
-    await expect(max).toContainText("메시지당 5개 · 파일당 10 MiB · 총 25 MiB");
-    await expect(pro).toContainText(scenario.proAttachments ? "메시지당 5개 · 파일당 10 MiB · 총 25 MiB" : "현재 플랜 설정에서 첨부 기능을 제공하지 않습니다.");
+    await expect(attachmentRow.getByRole("cell").nth(2)).toHaveText(scenario.proAttachments ? "10개 · 각 50 MiB · 총 100 MiB" : "현재 제공하지 않음");
+    // The input ceiling is stated as configured: the long-context rule, or the plain ceiling.
+    const limit = scenario.inputLimit.toLocaleString("ko-KR");
+    if (scenario.longContext) {
+      await expect(page.getByTestId("pricing-calc-long-context")).toContainText(`${limit}토큰을 넘으면 실제 공급사 비용으로 차감`);
+      await expect(page.getByTestId("pricing-calc-input-limit")).toHaveCount(0);
+    } else {
+      await expect(page.getByTestId("pricing-calc-input-limit")).toContainText(`${limit}토큰까지`);
+      await expect(page.getByTestId("pricing-calc-long-context")).toHaveCount(0);
+    }
     await expect(page.getByTestId("pricing-plan-card-max")).not.toContainText("더 높은 첨부파일 및 맥락 한도");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   });
@@ -43,4 +45,5 @@ test("public billing response exposes the configured app input ceiling", async (
   const config = await response.json();
   expect(Number.isSafeInteger(config.appInputTokenLimit)).toBe(true);
   expect(config.appInputTokenLimit).toBeGreaterThan(0);
+  expect(typeof config.appLongContext).toBe("boolean");
 });

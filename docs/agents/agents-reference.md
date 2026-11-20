@@ -802,6 +802,9 @@ default를 DB에 씁니다), 저장값 JSON 파싱 실패, schema 검증 실패.
   `GUEST_DEFAULT_MODEL_ID`와 `GUEST_BRAND_TRIO_MODEL_IDS`가 함께 움직입니다.
   한쪽만 바꾸지 않습니다. 같은 날 trio의 Anthropic 자리는
   `claude-haiku-5-5`로 옮겼습니다. `gpt-5-6-luna`는 은퇴하지 않았습니다.
+  Prompt Refiner 제품 가격 pin은 2026-11-11에 `gpt-6-luna`로 옮겼습니다
+  (`lib/promptRefinerProductPricePin.ts`). 코드가 고정해서 쓰는 모델은
+  `lib/codePinnedModels.ts`에 두고, Admin은 그 모델의 끄기·비공개·대체를 거부합니다.
 - **기본 모델을 가리키는 DB 컬럼 기본값은 없습니다**(2026-10-12). `UserSettings.defaultModel`과
   `Conversation.selectedModels`는 NOT NULL이지만 `@default`가 없어서, 기본 모델 변경에
   migration이 필요하지 않습니다. 대신 모든 쓰기 경로가 값을 직접 넣습니다 —
@@ -1083,8 +1086,10 @@ default를 DB에 씁니다), 저장값 JSON 파싱 실패, schema 검증 실패.
   없습니다. 아카이브 경로는 정규화하지 않고 **거절**합니다.
 - **조용한 퇴행이 없습니다.** 모든 turn이 artifact system block을 하나 싣고,
   tool을 못 쓰는 turn은 그 사실을 말하라고 지시받습니다. 가용성 판정은
-  `planGeneratedArtifactTool()` 한 곳이며, 검증되지 않은 모델은 fail-closed
-  입니다(`ARTIFACT_TOOL_CAPABILITIES`).
+  `planGeneratedArtifactTool()` 한 곳입니다. 모델별 판정은 카탈로그 행의 관리자 체크
+  (`fileToolsOverride`)가 먼저이고, 없으면 확인된 목록(`ARTIFACT_TOOL_CAPABILITIES`)과
+  제공사 규칙(OpenAI·Anthropic·Google)을 따릅니다. 그 밖의 제공사는 체크하기 전까지
+  꺼져 있습니다(`docs/policy/generated-artifacts.md`).
 - **게스트는 MVP에서 파일을 만들 수 없습니다.** tool은 등록되지만 즉시
   거절하고, UI는 `blocked` 카드와 로그인 CTA를 보여 줍니다. 표·코드로 대신하지
   않습니다.
@@ -1146,8 +1151,10 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   구분하고, 사용자 입력 Trace만으로 자동화 적격성을 인정하지 않습니다.
 - **token은 서버가 직접 생성한 Trace의 server-classified 오류에만 중앙
   발급합니다** (`issueChatErrorReportGrant` 한 곳). client/Edge Trace와
-  client-classified `EMPTY_RESPONSE`에는 발급하지 않고, 정상 stream에
-  선발급하지 않습니다. token 모듈은 Node 전용이며 `proxy.ts`/Edge bundle에
+  client가 분류한 오류 코드에는 발급하지 않고, 정상 stream에
+  선발급하지 않습니다. 200으로 시작된 뒤 서버가 stream 정산에서 실패로 판정한
+  턴(빈 응답, stream 실패)은 서버 코드로 발급해 stream trailer에 싣습니다
+  (운영자 결정 2026-11-16, `docs/policy/trace-feedback-automation.md §3.3`). token 모듈은 Node 전용이며 `proxy.ts`/Edge bundle에
   import하지 않습니다.
 - **원시 token은 저장·전송 금지.** feedback 제출 body 1회가 유일한 예외이고
   서버는 검증 후 즉시 버립니다. `Message.errorReport`는 runtime 전용이며
@@ -1594,7 +1601,7 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   계정은 LLM을 부르지 않고(`accountsWithoutMedia`; YouTube·TikTok은 영상만, 종류가 없는 파일 등록부 자산은 어디서도 세지 않음),
   자산 없는 답은 `draft_has_no_asset`으로 버리며, 초안 접수는 자산 없는 초안을 거절하고, 게시기는 미디어 없는 게시물을
   `media_required`(YouTube는 `youtube_needs_one_video`)로 실패시킵니다. 영상·이미지 비율은 `MARKETING_VIDEO_DAYS`(운영자
-  2026-11-04)로, 실행일(UTC)마다 계정의 종류를 `marketingA5MediaKindFor`가 고르고 그 종류의 자산만 제시합니다(없으면 다른 종류).
+  2026-11-04, RedNote 4일 중 2일은 2026-11-15)로, 실행일(UTC)마다 계정의 종류를 `marketingA5MediaKindFor`가 고르고 그 종류의 자산만 제시합니다(없으면 다른 종류).
   출처·AI 표시는 생성기에 주지 않습니다(Guard가 등록부로 판정).
 
 # 엔지니어링 Agent
@@ -1801,9 +1808,8 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   `lib/amux/dbBoundary.ts`의 `decisionMakerRouting`(상한 12),
   `tests/server-contract/amux-decision-maker-routing-route.test.ts`,
   `tests/server-contract/amux-decision-maker-routing-route-budget.test.ts`. bridge가 부를 판정 route이며
-  **`TOMVERSE_AMUX_DM_ROUTING=enabled`가 아니면 body를 읽기 전에 409 `dm_routing_disabled`입니다** — 이
-  route를 부르는 bridge 경로가 S2(docs/policy/amux-decision-maker.md §12)이므로, 그 승인 전에는 스위치와
-  상관없이 요청 원장에 아무것도 쓰지 않습니다. 판정은 body store의
+  인증 뒤 항상 열려 있습니다(2026-11-16에 `TOMVERSE_AMUX_DM_ROUTING` 스위치와 409 `dm_routing_disabled`를 없앴습니다;
+  DM 전체 kill switch는 DB switch입니다). 판정은 body store의
   `recordDecisionMakerRequestWithCardText()` 하나이고(route는 인증·body·key ring·예산·경계만), 같은 (카드,
   질문 revision)은 기존 요청을 돌려주므로 결과 불명 뒤 같은 질문을 다시 보내는 것은 조회입니다. key ring
   오류는 DB에 닿기 전에 503이며 로그에는 코드만 남깁니다. 응답과 로그에 카드 문구·digest·감사 id는
@@ -1891,8 +1897,7 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   `decisionMakerResultLookupRead`(3)·`decisionMakerResultUnknown`(9),
   `tests/server-contract/amux-decision-maker-broker-routes.test.ts`,
   `tests/server-contract/amux-decision-maker-broker-routes-budget.test.ts`. 라우팅 뒤에 bridge·broker가 부르는 원장 기록
-  route이며, S1f3과 같이 **`TOMVERSE_AMUX_DM_ROUTING=enabled`가 아니면 body를 읽기 전에 409 `dm_routing_disabled`**이고 key
-  ring도 DB도 건드리지 않습니다. route는 인증·body·key ring·예산·경계만 하고 판정은 동작마다 store 함수 하나입니다 — 배정과
+  route이며, 인증 뒤 항상 열려 있습니다(2026-11-16에 `TOMVERSE_AMUX_DM_ROUTING` 스위치를 없앴습니다). route는 인증·body·key ring·예산·경계만 하고 판정은 동작마다 store 함수 하나입니다 — 배정과
   결과 제출은 body store의 조합, 나머지는 request store이며, route에는 SQL도 스위치 읽기도 없습니다. store가 돌려준 거절은
   `unknown_request` 404, `digest_key_unavailable`·`settings_unreadable` 503, 그 밖은 409이고, 결과 제출은 원장의 확정
   답(accepted·existing·rejected·already_rejected)이 모두 200과 그 status입니다. **요청 키 K_R은 배정 응답에만 있습니다** —
@@ -2039,7 +2044,7 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   지웁니다(검토 3, 재검토). 표식을 포함해 이름이 둘 이상인(hard link) 항목이 있으면 `hard_link`로 거부하고, 빌드는 기존 항목을 먼저 unlink한
   뒤 모든 파일을 배타적 생성(`wx`, `COPYFILE_EXCL`)으로만 씁니다 — 기존 파일 안에 쓰지 않습니다(세 번째 검토 r-20261017-121031-9ff0a9).
   unit을 enable·start하지 않고, CLI는 `--version`만(nobody, 네트워크 없는 namespace, 빈
-  환경) 실행하며, 앱의 `TOMVERSE_AMUX_DM_ROUTING`은 그대로 꺼져 있습니다. bridge relay(S2-2b)와 cleanup_unknown 보고 route는
+  환경) 실행하며, 당시 앱의 라우팅 route는 아직 열리지 않았습니다. bridge relay(S2-2b)와 cleanup_unknown 보고 route는
   없습니다.
 - **S2-2b1(선택지별 효과 등급·경로와 정책 버전 2)**: `lib/amux/decisionMakerCore.ts`의 `DmCardOption`, 효과 등급 목록과 변경
   경로 상한, `dmOptionEffectWellFormed()`, 카드 텍스트 형식 `amux-dm-card-text-v2`, 정책 버전 상수, request core의 `parseDmCard()`,
@@ -2054,7 +2059,7 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   텍스트에 들어가며, 용어 목록의 입력은 아닙니다(맥락 경로도 아님). 테스트가 로컬 `dm_ask.rs`의 목록·상한과 정책의 효과 등급 표를
   직접 읽어 대조하므로 한쪽만 바꾸면 실패합니다. **결과 제출의 선택지는 계속 `{ id, label }`이고 선택지 집합 digest도 그 둘만
   묶습니다** — 등급·경로가 바뀌면 로컬 AMUX에서 새 질문 revision, 곧 새 요청입니다. 카드 텍스트 v1(선택지 `{ id, label }`)은 읽지
-  않습니다. 그것을 쓰는 경로는 처음부터 `TOMVERSE_AMUX_DM_ROUTING`으로 닫힌 라우팅 route 하나였고, 읽지 못한 텍스트는 Admin에
+  않습니다. 그것을 쓰는 경로는 처음부터 열린 적 없는 라우팅 route 하나였고, 읽지 못한 텍스트는 Admin에
   카드가 아니라 unreadable로 보입니다. **정책 버전 상수는 2입니다**(2026-10-17 승인) — 새 요청 행이 그 값을 결속 값으로 남기고,
   결과는 상수가 아니라 행에 저장된 값과 대조하므로 이전 행은 자기 버전으로 결속됩니다. bridge relay는 결과 결속에 저장된 값을
   보내야 합니다. 요청 행의 CHECK는 `>= 1`이라 migration이 없습니다. 용어 목록·비밀 경로 목록·경로 문법·출력 상한은 바뀌지

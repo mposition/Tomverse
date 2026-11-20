@@ -53,8 +53,7 @@ export function inspectAmuxV4NodeCreation(input: {
       snapshot.draftShape.level !== proposal.level ||
       node.level !== proposal.level ||
       node.parentId !== (snapshot.hierarchy.at(-1)?.id ?? null) ||
-      proposal.title.length < 1 || proposal.title.length > 200 ||
-      proposal.description.length > 4_000) {
+      proposal.title.length < 1) {
     return { ok: false, code: "proposal_mismatch" };
   }
   return { ok: true, plan: { id: node.id, parentId: node.parentId,

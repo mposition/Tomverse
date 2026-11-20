@@ -9,6 +9,10 @@ import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { prisma } from "@/lib/prisma";
 import {
+  NEW_PROVIDER_RESEARCH_LAST_SETTING_KEY,
+  parseNewProviderResearchRunRecord,
+} from "@/lib/modelDiscoveryNewProviderResearchCore";
+import {
   apiSecurityResponse,
   consumeApiRateLimit,
   readLimitedJson,
@@ -170,10 +174,18 @@ export async function GET(req: Request) {
 
     const view =
       new URL(req.url).searchParams.get("view") === "excluded" ? "excluded" : "open";
-    const queue = await listModelDiscoveryQueue({ limit: 1_000, view });
+    const [queue, lastResearch] = await Promise.all([
+      listModelDiscoveryQueue({ limit: 1_000, view }),
+      // Degradable: the queue is what the tab is for.
+      Promise.resolve()
+        .then(() => prisma.appSetting.findUnique({ where: { key: NEW_PROVIDER_RESEARCH_LAST_SETTING_KEY } }))
+        .then((row) => parseNewProviderResearchRunRecord(row?.value))
+        .catch(() => null),
+    ]);
     return NextResponse.json({
       ...queue,
       view,
+      lastResearch,
       items: queue.items.map((item) => ({
         ...item,
         dueAt: item.dueAt?.toISOString() ?? null,

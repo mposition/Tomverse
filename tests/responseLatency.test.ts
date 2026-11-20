@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createHmac, randomUUID } from "node:crypto";
-import { clientLatencyBodySchema, latencyDistribution, summarizeResponseLatency, type ResponseLatencySample } from "../lib/responseLatencyCore";
+import { clientLatencyBodySchema, latencyDistribution, summarizeResponseLatency, responseLatencyContext, storedResponseLatencyTimings, attributePairedClientLatency, type ResponseLatencySample } from "../lib/responseLatencyCore";
 import { createResponseLatencyToken, verifyResponseLatencyToken } from "../lib/responseLatencyToken";
 import { createClientLatency } from "../lib/responseLatencyClient";
 import { createLatencyStages } from "../lib/responseLatencyStages";
@@ -40,6 +40,15 @@ test("full send reports separate preparation, headers, first content, stream end
     for (const stages of [{ prompt: "private" }, { contextPrepareMs: -1 }, { modelSyncMs: 421 }, { routingMs: 4 }]) {
       assert.equal(clientLatencyBodySchema.safeParse({ ...body, stages }).success, false);
     }
+    // An intent lookup can finish before the panel asks for its result.
+    // Its overlap can exceed the remaining location wait, up to the full lookup.
+    for (const overlap of [0, 70, 100]) {
+      const stages = { locationIntentMs: 100, freshLocationOverlapMs: overlap, locationMs: 30 };
+      assert.ok(clientLatencyBodySchema.safeParse({ ...body, stages }).success);
+    }
+    for (const stages of [{ freshLocationOverlapMs: 1 }, { locationIntentMs: 100, freshLocationOverlapMs: 101 }]) {
+      assert.equal(clientLatencyBodySchema.safeParse({ ...body, stages }).success, false);
+    }
     const restored = createClientLatency(undefined, { contextPrepareMs: 5_000 }, () => time);
     restored.dispatched();
     restored.headers(new Response(null, { headers: { "X-Response-Latency-Token": "proof" } }));
@@ -47,6 +56,45 @@ test("full send reports separate preparation, headers, first content, stream end
     assert.ok(clientLatencyBodySchema.safeParse(body).success);
     assert.equal((body.stages as Record<string, number>).contextPrepareMs, undefined);
   } finally { globalThis.fetch = original; }
+});
+
+test("a rejected timing report leaves one content-free local observation with the same browser clock", () => {
+  const name = "tomverse.chat.turn";
+  const original = globalThis.fetch;
+  const reports: Array<{ firstContentMs: number | null; completionMs: number }> = [];
+  globalThis.fetch = async (_url, init) => {
+    reports.push(JSON.parse(String(init?.body)));
+    return new Response(null, { status: 429 });
+  };
+  let now = 100;
+  try {
+    performance.clearMeasures(name);
+    const turn = createClientLatency(now, {}, () => now);
+    turn.dispatched();
+    turn.headers(new Response(null, { headers: { "X-Response-Latency-Token": "test-only-proof" } }));
+    now += 700;
+    turn.content("private answer");
+    now += 130;
+    turn.finish("completed");
+    turn.finish("cancelled");
+    const [entry] = performance.getEntriesByName(name, "measure") as PerformanceMeasure[];
+    assert.equal(reports.length, 1);
+    assert.equal(entry.startTime, 100);
+    assert.equal(entry.duration, reports[0].completionMs);
+    assert.deepEqual(entry.detail, { clock: "submit", outcome: "completed", firstContentMs: reports[0].firstContentMs });
+
+    const restored = createClientLatency(undefined, {}, () => now);
+    restored.headers(new Response(null, { headers: { "X-Response-Latency-Token": "another-proof" } }));
+    now += 17;
+    restored.finish("cancelled");
+    const entries = performance.getEntriesByName(name, "measure") as PerformanceMeasure[];
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].duration, 17);
+    assert.deepEqual(entries[0].detail, { clock: "panel", outcome: "cancelled", firstContentMs: null });
+  } finally {
+    globalThis.fetch = original;
+    performance.clearMeasures(name);
+  }
 });
 
 test("distributions distinguish missing data from zero and separate product/source cohorts", () => {
@@ -68,6 +116,42 @@ test("client reports reject text, dimensions, negative, excessive and out-of-ord
   for (const extra of [{ prompt: "secret" }, { modelId: "forged" }, { prepareMs: -1 }, { completionMs: 3_600_001 }, { firstContentMs: 9 }, { firstContentMs: 31 }]) {
     assert.equal(clientLatencyBodySchema.safeParse({ ...valid, ...extra }).success, false);
   }
+});
+
+test("server cohorts separate deployments, configured flags and unknown history without recording environment values", () => {
+  const context = responseLatencyContext({ RAILWAY_GIT_COMMIT_SHA: "a".repeat(40), CHAT_ROUTER_PRESEARCH_ENABLED: "true", DATABASE_URL: "private", CHAT_ROUTER_COMPACT_SEARCH_MENU_ENABLED: "private" });
+  assert.deepEqual(context, { build: "a".repeat(40), routerPresearch: "true", parallelContextPrecheck: "unset", compactSearchMenu: "other" });
+  assert.doesNotMatch(JSON.stringify(context), /private|DATABASE_URL/);
+  assert.equal(responseLatencyContext({ RAILWAY_GIT_COMMIT_SHA: "invalid" }).build, null);
+  const sample: ResponseLatencySample = { product: "chat", mode: "auto", source: "server", modelId: "a", provider: "openai", outcome: "completed", timings: { firstContentMs: 100, settlementMs: 200 } };
+  const summary = summarizeResponseLatency([sample, { ...sample, context }, { ...sample, context },
+    { ...sample, context: { ...context, build: "b".repeat(40) } },
+    { ...sample, context: { ...context, parallelContextPrecheck: "true" } }]);
+  assert.deepEqual(summary.groups.map(group => group.count), [2, 1, 1, 1]);
+  assert.equal(summary.groups[0].context?.build, context.build);
+  assert.equal(summary.groups[1].context, undefined);
+  assert.equal(summary.groups[0].timings.firstContentMs.p50Ms, 100);
+  assert.ok(!("_context" in summary.groups[0].timings));
+  assert.deepEqual(storedResponseLatencyTimings({ firstContentMs: 0, _context: context }), { timings: { firstContentMs: 0 }, context });
+  assert.deepEqual(storedResponseLatencyTimings({ firstContentMs: 0 }), { timings: { firstContentMs: 0 }, context: undefined });
+  assert.equal(storedResponseLatencyTimings({ prompt: "private", _context: context }), null);
+  assert.equal(storedResponseLatencyTimings({ firstContentMs: 0, _context: { ...context, secret: "private" } })?.context, undefined);
+  assert.equal(clientLatencyBodySchema.safeParse({ token: "proof", outcome: "completed", prepareMs: 0, firstContentMs: 0, completionMs: 1, context }).success, false);
+});
+
+test("exact request pairs give browser timings their server deployment/model while missing or mismatched pairs stay unknown", () => {
+  const context = responseLatencyContext({ RAILWAY_GIT_COMMIT_SHA: "a".repeat(40) });
+  const base: ResponseLatencySample = { product: "chat", mode: "auto", source: "server", modelId: "actual-model", provider: "openai", outcome: "completed", context, timings: { firstContentMs: 100 } };
+  const rows = attributePairedClientLatency([{ ...base, id: "request:server" },
+    { ...base, id: "request:client", source: "client", modelId: null, context: undefined, timings: { firstContentMs: 150, completionMs: 900 } },
+    { ...base, id: "missing:client", source: "client", context: undefined },
+    { ...base, id: "request:client", source: "client", mode: "manual", context: undefined }]);
+  assert.equal(rows[1].context?.build, context.build);
+  assert.equal(rows[1].modelId, "actual-model");
+  assert.equal(rows[1].timings.completionMs, 900);
+  assert.equal(rows[2].context, undefined);
+  assert.equal(rows[3].context, undefined);
+  assert.ok(rows.every(row => !("id" in row)));
 });
 
 test("timing proof binds dimensions and purpose, expires and rejects tampering", () => {

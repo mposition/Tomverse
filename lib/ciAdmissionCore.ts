@@ -38,8 +38,9 @@
  * - A draft the slots reach that is behind its base has its branch brought up
  *   to date (GitHub's update-branch: develop merged into it), once per head,
  *   so an operator never has to (owner, 2026-10-25). The new head is checked
- *   and released like any other on a later round. CI_ADMISSION_UPDATE_BRANCH=off
- *   turns this off; it needs the App's Contents write permission.
+ *   and released like any other on a later round. It needs the App's Contents
+ *   write permission. (The CI_ADMISSION_UPDATE_BRANCH switch was removed, owner
+ *   decision 2026-11-16.)
  * - A draft with a run queued or in progress is a replayed event: cancelled.
  * - Stacked pull requests (base other than develop or main), forks, and pull
  *   requests labelled ci:hold are not handled: they are not in the line
@@ -48,6 +49,19 @@
  *   `agent/engineering/`, owner 2026-10-30): an owner review draft runs its
  *   code with the repository's secrets once ready, so only a person marks it
  *   ready, and a label would come too late -- the head is fixed on opening.
+ *   One exception (owner decision 2026-11-13: "develop 병합 권한은 DM에게
+ *   승인합니다. main은 안됩니다."): a draft into develop the Decision Maker
+ *   approved from the owner queue, at the approved head and diff, with every
+ *   change inside its merge scope and never from a fork, is marked
+ *   ready by the round's own step after the line
+ *   (lib/amux/dmT2MergeService.ts, TOMVERSE_AMUX_DM_T2_MERGE, default off).
+ *   A Decision Maker ready is a person's ready: the pull request stays out of
+ *   the line, nothing is reserved for it, and its CI counts as another
+ *   workflow's, which the line never sends back. It is done only when the
+ *   line leaves room now (no draft waits for runners, and its whole need
+ *   fits), and never while an earlier Decision Maker ready's CI has not shown
+ *   yet (up to ten minutes): what can overflow is one pull request's CI, as
+ *   when a person marks one ready by hand.
  *
  * Pure: no clock, network or database. lib/ciAdmissionRound.ts passes what it
  * read and carries out the actions.
@@ -76,10 +90,16 @@ export const CI_ADMISSION_UPDATE_RETRY_MS = 10 * 60 * 1000;
 export const CI_ADMISSION_HOLD_LABEL = "ci:hold";
 /** The engineering agent's branch namespace (lib/engineeringAgentCore.ts BRANCH_NAMESPACE): never in the line. */
 export const CI_ADMISSION_AGENT_HEAD_PREFIX = "agent/engineering/";
-/** How many drafts at the top of the line a round checks for conflicts and lag. */
-export const CI_ADMISSION_CHECK_LIMIT = 6;
-const MAX_EVENTS = 50;
-const MAX_QUEUE = 300;
+/**
+ * How many of admission's own events the state keeps, newest last: a history
+ * for the Admin screen, read and rewritten whole every round, so it has one
+ * generous bound (owner decision 2026-11-16; 50 until then). Nothing decides
+ * on an event. The line, the reservations and the pending statuses have no
+ * bound of their own: they hold open pull requests only (300 until 2026-11-16,
+ * past which a pull request was cut from the line), and a round checks every
+ * draft the free slots reach (the six at the top until then).
+ */
+export const CI_ADMISSION_MAX_EVENTS = 1_000;
 const SHA = /^[0-9a-f]{40}$/;
 
 export type CiAdmissionMode = "off" | "shadow" | "on";
@@ -262,24 +282,24 @@ const stateSchema = z
     capacity: z.number().int().min(1).max(CI_ADMISSION_MAX_CAPACITY),
     needs: needsSchema,
     /** Every handled open pull request, in priority order. */
-    queue: z.array(queueEntrySchema).max(MAX_QUEUE),
+    queue: z.array(queueEntrySchema),
     /** Released pull requests whose runs GitHub has not shown yet, within the grace period. */
     released: z
       .array(z.object({ number: z.number().int().positive(), headSha: z.string().max(40), atMs: z.number().int().nonnegative() }).strict())
-      .max(MAX_QUEUE),
+      ,
     /**
      * Commits whose `CI admission` status admission set to pending when it sent
      * their pull request back to draft. Each is set back to success once that
      * pull request is ready again, moved on to a new head, or closed, so none
      * is left holding a merge back.
      */
-    pendingStatus: z.array(z.object({ number: z.number().int().positive(), headSha: z.string().regex(SHA) }).strict()).max(MAX_QUEUE),
+    pendingStatus: z.array(z.object({ number: z.number().int().positive(), headSha: z.string().regex(SHA) }).strict()),
     /** Heads whose branch update was asked for, so one head is asked once per CI_ADMISSION_UPDATE_RETRY_MS. */
     updating: z
       .array(z.object({ number: z.number().int().positive(), headSha: z.string().max(40), atMs: z.number().int().nonnegative() }).strict())
-      .max(MAX_QUEUE)
+      
       .default([]),
-    events: z.array(eventSchema).max(MAX_EVENTS),
+    events: z.array(eventSchema).max(CI_ADMISSION_MAX_EVENTS),
     /** How full the runners were, hour by hour, oldest first (ciAdmissionSaturationAfter). */
     saturation: z.array(saturationHourSchema).max(CI_ADMISSION_SATURATION_HOURS).default([]),
     /** The latest round: when, how many runners were in use after it, and by whom. */
@@ -299,9 +319,9 @@ const stateSchema = z
               })
               .strict(),
           )
-          .max(MAX_QUEUE),
+          ,
         /** Push runs on develop and main (the deploy CI Railway waits for), one per commit. */
-        deploys: z.array(deploySchema).max(MAX_QUEUE).default([]),
+        deploys: z.array(deploySchema).default([]),
         /** Runners other workflows held. */
         others: z.number().int().nonnegative().default(0),
       })
@@ -385,7 +405,7 @@ export function parseCiAdmissionState(value: string | null | undefined): CiAdmis
     // Only the order survives (its budget counted slots); the next round reads the rest from GitHub.
     return {
       ...emptyCiAdmissionState(),
-      queue: legacy.data.queue.slice(0, MAX_QUEUE).map((entry) => {
+      queue: legacy.data.queue.map((entry) => {
         const text = (value: unknown, max: number) => (typeof value === "string" ? value.slice(0, max) : "");
         return {
           number: entry.number,
@@ -446,19 +466,18 @@ export function ciAdmissionOrder(stored: readonly Pick<CiAdmissionQueueEntry, "n
   const kept = stored.map((entry) => handled.get(entry.number)).filter((pull): pull is CiAdmissionPull => pull !== undefined);
   const seen = new Set(kept.map((pull) => pull.number));
   const added = [...handled.values()].filter((pull) => !seen.has(pull.number)).sort((a, b) => a.number - b.number);
-  return [...kept, ...added].slice(0, MAX_QUEUE);
+  return [...kept, ...added];
 }
 
 /**
  * The drafts a round asks GitHub about before judging: those the free slots
- * reach, judged without any check (so each says "checking"), at most
- * CI_ADMISSION_CHECK_LIMIT. With no free slot it asks about none.
+ * reach, judged without any check (so each says "checking"). With no free slot
+ * it asks about none.
  */
 export function ciAdmissionDraftsToCheck(input: Omit<Parameters<typeof evaluateCiAdmission>[0], "checks" | "shadow">): CiAdmissionPull[] {
   const open = new Map(input.openPulls.map((pull) => [pull.number, pull]));
   return evaluateCiAdmission({ ...input, checks: new Map(), shadow: true })
     .state.queue.filter((entry) => entry.status === "checking")
-    .slice(0, CI_ADMISSION_CHECK_LIMIT)
     .flatMap((entry) => {
       const pull = open.get(entry.number);
       return pull ? [pull] : [];
@@ -481,8 +500,6 @@ export function evaluateCiAdmission(input: {
   personReady?: ReadonlySet<number> | null;
   nowMs: number;
   shadow: boolean;
-  /** Whether a draft behind its base has its branch updated (CI_ADMISSION_UPDATE_BRANCH); on unless false. */
-  updateBranches?: boolean;
 }): CiAdmissionEvaluation {
   const { nowMs, shadow, state } = input;
   const at = new Date(nowMs).toISOString();
@@ -602,7 +619,7 @@ export function evaluateCiAdmission(input: {
     }
     if (check.behind === true && !ciAdmissionReleasesBehind(pull)) {
       const asked = updating.some((entry) => entry.number === pull.number && entry.headSha === pull.headSha);
-      const updates = input.updateBranches !== false && ciAdmissionUpdatesBranchOf(pull);
+      const updates = ciAdmissionUpdatesBranchOf(pull);
       if (updates && !asked) {
         actions.push({ kind: "update_branch", pull });
         updating.push({ number: pull.number, headSha: pull.headSha, atMs: nowMs });
@@ -668,11 +685,11 @@ export function evaluateCiAdmission(input: {
       capacity: state.capacity,
       needs,
       queue,
-      released: released.slice(-MAX_QUEUE),
+      released,
       // Cleared entries are taken off by the round once their status is written.
-      pendingStatus: pendingStatus.slice(-MAX_QUEUE),
-      updating: updating.slice(-MAX_QUEUE),
-      events: [...state.events, ...events].slice(-MAX_EVENTS),
+      pendingStatus,
+      updating,
+      events: [...state.events, ...events].slice(-CI_ADMISSION_MAX_EVENTS),
       saturation: ciAdmissionSaturationAfter(state.saturation, input.runners, state.capacity, nowMs),
       lastRound: {
         at,
@@ -686,7 +703,7 @@ export function evaluateCiAdmission(input: {
             runners: pullRunners.get(pull.number) ?? unitsOf(pull)!,
           }))
           .concat(closedRunning.map((closed) => ({ number: closed.number, title: closed.title, base: closed.base, runners: closed.runners }))),
-        deploys: deploys.slice(0, MAX_QUEUE).map((deploy) => ({ ...deploy, title: deploy.title.slice(0, 200) })),
+        deploys: deploys.map((deploy) => ({ ...deploy, title: deploy.title.slice(0, 200) })),
         others,
       },
     },

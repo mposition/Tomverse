@@ -98,7 +98,7 @@ test("the chat route hands the injected context block to the SDK as instructions
   }
   assert.match(
     source,
-    /splitProviderInstructions\(uncachedLocationMessages\)\.messages/,
+    /splitProviderInstructions\(\s*locationCacheBreakpoint \? uncachedLocationMessages : formattedMessages\s*\)\.messages/,
     "the location fallback also filters system messages through the shared splitter"
   );
 });

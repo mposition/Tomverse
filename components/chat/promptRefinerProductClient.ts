@@ -147,22 +147,6 @@ export function parsePromptRefinerProductAutoPrepare(
   return parsed.data;
 }
 
-export type PromptRefinerExecutionObservation = Readonly<{
-  execution: "applied" | "original";
-  mode: "explicit" | "auto";
-}>;
-
-/** Content-free response metadata for UI notice only, never authorization. */
-export function parsePromptRefinerExecutionHeaders(
-  headers: Pick<Headers, "get">
-): PromptRefinerExecutionObservation | null {
-  const execution = headers.get("X-Prompt-Refiner-Execution");
-  const mode = headers.get("X-Prompt-Refiner-Mode");
-  if ((execution !== "applied" && execution !== "original") ||
-      (mode !== "explicit" && mode !== "auto")) return null;
-  return { execution, mode };
-}
-
 /** A held decision is single-use, so no client recovery may replay it. */
 export function promptRefinerAllowsAutomaticChatRecovery(
   decision: PromptRefinerProductChatDecision | undefined

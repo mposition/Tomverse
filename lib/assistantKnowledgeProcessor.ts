@@ -9,13 +9,23 @@ import {
     ASSISTANT_KNOWLEDGE_UNSUPPORTED_FILE,
     knowledgeExtractedTextRefusal,
 } from "@/lib/assistantKnowledgeLimits";
-import { chunkKnowledgeText } from "@/lib/assistantKnowledgeChunking";
+import {
+    KNOWLEDGE_RETRIEVAL_VERSION,
+    chunkKnowledgeText,
+} from "@/lib/assistantKnowledgeChunking";
+import {
+    KNOWLEDGE_IMAGE_PAGE_KIND,
+    embedImagePages,
+    embedKnowledgeChunksQuietly,
+    imagePageChunkContent,
+} from "@/lib/assistantKnowledgeEmbedding";
 import { knowledgeUsage } from "@/lib/assistantKnowledgeService";
 import { lockAccountKnowledgeQuota } from "@/lib/assistantProfileImportLocks";
-import { extractPdfTextSafely } from "@/lib/mediaSecurity";
+import { extractPdfTextSafely, renderPdfImagePagesSafely } from "@/lib/mediaSecurity";
 import { parseOfficeSafely } from "@/lib/officeSecurity";
 import { prisma } from "@/lib/prisma";
 import { readOwnR2ObjectBytes } from "@/lib/r2";
+import { semanticFeatureReady, sweepSemanticRetrievalCache } from "@/lib/semanticRetrieval";
 
 /**
  * Turning a stored knowledge file into retrievable chunks (Release C, C2).
@@ -44,6 +54,15 @@ import { readOwnR2ObjectBytes } from "@/lib/r2";
  * its text budget is `failed` with a code — not deleted. The owner uploaded
  * it and is entitled to see what happened to it, and the bytes stay until they
  * delete the row, at which point the §14.2 tombstone takes them.
+ *
+ * ## Semantic indexing (§9a)
+ *
+ * Two optional steps, each behind an operator switch and off by default. A
+ * PDF's text-less pages are rendered and embedded as images, and become
+ * pointer chunks -- so a scanned document is "ready" with something to find
+ * rather than "failed" with NO_TEXT. And once a file is ready its text chunks
+ * are embedded, best effort: a chunk without a vector is still found
+ * lexically and the maintenance sweep embeds what is left.
  */
 
 /** The one place a processing failure reason is named. */
@@ -72,31 +91,79 @@ export type KnowledgeProcessResult = {
 const extractText = async (file: {
     mime: string;
     r2Key: string;
-}): Promise<string> => {
+}): Promise<{ text: string; /** The bytes, for a PDF only. */ pdf: Buffer | null }> => {
     const bytes = await readOwnR2ObjectBytes(file.r2Key, {
         maxBytes: ASSISTANT_KNOWLEDGE_LIMITS.maxFileBytes,
     });
 
     if (ASSISTANT_KNOWLEDGE_TEXT_TYPES.has(file.mime)) {
-        return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+        return { text: new TextDecoder("utf-8", { fatal: true }).decode(bytes), pdf: null };
     }
     if (file.mime === "application/pdf") {
-        return extractPdfTextSafely(
-            Buffer.from(bytes),
-            ASSISTANT_KNOWLEDGE_LIMITS.maxExtractedCodePoints
-        );
+        const pdf = Buffer.from(bytes);
+        return {
+            text: await extractPdfTextSafely(
+                pdf,
+                ASSISTANT_KNOWLEDGE_LIMITS.maxExtractedCodePoints
+            ),
+            pdf,
+        };
     }
     if (ASSISTANT_KNOWLEDGE_OFFICE_TYPES.has(file.mime)) {
-        return parseOfficeSafely(
-            Buffer.from(bytes),
-            file.mime,
-            ASSISTANT_KNOWLEDGE_LIMITS.maxExtractedCodePoints
-        );
+        return {
+            text: await parseOfficeSafely(
+                Buffer.from(bytes),
+                file.mime,
+                ASSISTANT_KNOWLEDGE_LIMITS.maxExtractedCodePoints
+            ),
+            pdf: null,
+        };
     }
     // Unreachable while the allowlist and this switch agree, which
     // `check:enum-constraints`-style vigilance does not cover -- so it throws
     // rather than returning "" and producing a file that is ready and empty.
     throw new Error(`no extractor for ${file.mime}`);
+};
+
+/** One row of AssistantKnowledgeChunk, before its file and owner are added. */
+type KnowledgeChunkRow = {
+    ordinal: number;
+    content: string;
+    searchTerms: string[];
+    retrievalVersion: number;
+    sourceMetadata: Prisma.InputJsonValue;
+    embedding?: Uint8Array<ArrayBuffer>;
+    embeddingModel?: string;
+};
+
+/**
+ * Pointer chunks for a PDF's scanned pages, numbered after the text chunks.
+ *
+ * Empty unless the operator's switch is on and the pages could be rendered
+ * and embedded. Every failure in here -- no canvas binary, a refused budget,
+ * a provider error -- means "no image pages", which is what the file had
+ * before this step existed.
+ */
+const scannedPageRows = async (
+    pdf: Buffer,
+    firstOrdinal: number
+): Promise<KnowledgeChunkRow[]> => {
+    try {
+        if (!(await semanticFeatureReady("knowledgeImagePages"))) return [];
+        const vectors = await embedImagePages(await renderPdfImagePagesSafely(pdf));
+        return vectors.map((page, index) => ({
+            ordinal: firstOrdinal + index,
+            content: imagePageChunkContent(page.pageNumber),
+            // No terms: a pointer must not match a question lexically.
+            searchTerms: [],
+            retrievalVersion: KNOWLEDGE_RETRIEVAL_VERSION,
+            sourceMetadata: { kind: KNOWLEDGE_IMAGE_PAGE_KIND, page: page.pageNumber },
+            embedding: page.embedding,
+            embeddingModel: page.embeddingModel,
+        }));
+    } catch {
+        return [];
+    }
 };
 
 const markFailed = async (fileId: string, failureCode: string) => {
@@ -127,8 +194,9 @@ const processClaimedFile = async (file: {
     r2Key: string;
 }): Promise<KnowledgeProcessResult> => {
     let text: string;
+    let pdf: Buffer | null;
     try {
-        text = await extractText(file);
+        ({ text, pdf } = await extractText(file));
     } catch {
         // Nothing about the file's contents is logged, and no parser message
         // reaches the owner -- a code and a sentence, as the guest attachment
@@ -141,7 +209,9 @@ const processClaimedFile = async (file: {
         };
     }
 
-    const chunks = chunkKnowledgeText(text);
+    const textChunks: KnowledgeChunkRow[] = chunkKnowledgeText(text);
+    const pageChunks = pdf ? await scannedPageRows(pdf, textChunks.length) : [];
+    const chunks = [...textChunks, ...pageChunks];
     if (chunks.length === 0) {
         await markFailed(file.id, KNOWLEDGE_FAILURE_CODES.noText);
         return {
@@ -151,8 +221,11 @@ const processClaimedFile = async (file: {
         };
     }
 
-    const extractedCharacters = [...text].length;
-    const extractedBytes = Buffer.byteLength(text, "utf8");
+    // The pointers are stored content too, so they count toward the budget.
+    const pointerText = pageChunks.map((chunk) => chunk.content).join("");
+    const extractedCharacters = [...text].length + [...pointerText].length;
+    const extractedBytes =
+        Buffer.byteLength(text, "utf8") + Buffer.byteLength(pointerText, "utf8");
 
     // The account ceiling is decided and consumed in one transaction, under
     // the account lock.
@@ -205,7 +278,7 @@ const writeChunks = async (
     tx: Prisma.TransactionClient,
     input: {
         file: { id: string; userId: string };
-        chunks: ReturnType<typeof chunkKnowledgeText>;
+        chunks: KnowledgeChunkRow[];
         extractedCharacters: number;
         extractedBytes: number;
     }
@@ -222,6 +295,9 @@ const writeChunks = async (
                 searchTerms: chunk.searchTerms,
                 retrievalVersion: chunk.retrievalVersion,
                 sourceMetadata: chunk.sourceMetadata,
+                ...(chunk.embedding && chunk.embeddingModel
+                    ? { embedding: chunk.embedding, embeddingModel: chunk.embeddingModel }
+                    : {}),
             })),
         });
         await tx.assistantKnowledgeFile.update({
@@ -242,6 +318,13 @@ const writeChunks = async (
         });
     }
 };
+
+/**
+ * How many of a new file's chunks are embedded straight away. The sweep takes
+ * the rest; this only decides how soon a large file is fully searchable by
+ * meaning, not whether it is.
+ */
+const KNOWLEDGE_EMBED_ON_PROCESS_LIMIT = 960;
 
 /**
  * Claims one file and processes it.
@@ -271,7 +354,16 @@ export const processKnowledgeFile = async (
         },
     });
     try {
-        return await processClaimedFile(file);
+        const result = await processClaimedFile(file);
+        if (result.outcome === "ready") {
+            // After the commit, never inside it: the file is usable now, and a
+            // slow or refused embedding call must not hold its status back.
+            await embedKnowledgeChunksQuietly({
+                fileId,
+                limit: KNOWLEDGE_EMBED_ON_PROCESS_LIMIT,
+            });
+        }
+        return result;
     } catch (error) {
         // A throw that escapes `processClaimedFile` is a bug rather than a bad
         // file, but the row must not be left claimed either way: `processing`
@@ -306,6 +398,8 @@ export type KnowledgeProcessingSweepResult = {
     processed: number;
     ready: number;
     failed: number;
+    /** Chunks given a semantic vector by this sweep; 0 while embedding is off. */
+    embedded: number;
 };
 
 /**
@@ -343,10 +437,20 @@ export const processPendingKnowledgeFiles = async (
         if (result.outcome === "failed") failed += 1;
     }
 
+    // Semantic housekeeping (§9a), here rather than as its own maintenance
+    // step because it is the same sweep's other half: chunks that are ready
+    // but not embedded yet -- files older than the switch, a large upload's
+    // tail, vectors from a model no longer configured -- and cache rows past
+    // their few minutes. Both are no-ops while the switches are off, and
+    // neither may fail the sweep that makes uploads finish.
+    const embedded = (await embedKnowledgeChunksQuietly({ limit: 192 })).embedded;
+    await sweepSemanticRetrievalCache().catch(() => 0);
+
     return {
         reclaimed: reclaimed.count,
         processed: pending.length,
         ready,
         failed,
+        embedded,
     };
 };

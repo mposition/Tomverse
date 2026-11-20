@@ -58,17 +58,6 @@ export const KNOWN_TOP_LEVEL_DIRECTORIES = [
 ] as const;
 
 /**
- * Framework conventions the push policy relies on -- which file names Next
- * turns into routes, which parser the slice analysis uses. When the installed
- * version differs from the one recorded here, nobody has re-checked the
- * conventions, and every change is tier two (rule (h)).
- */
-export const CONVENTION_VERSIONS = {
-  next: "16.4.5",
-  typescript: "6.0.3",
-} as const;
-
-/**
  * The name tokens of the safety net. A tracked path containing one of these
  * must be classified `control-plane`; the test fails otherwise. This is not a
  * judgement -- it is how a forgotten classification gets noticed.
@@ -129,6 +118,10 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   // bearer-secret check, the claim and result it may write, and its system
   // audit writer. An agent changing them could widen its own permission.
   "lib/autoRouterRecAgent*",
+  "lib/dailyProductAgent*",
+  "tests/dailyProductAgent*",
+  "tests/server-contract/daily-product-agent*",
+  "lib/productResearchScoutStore.ts",
   "tests/autoRouterRecAgent*",
   // §4-4: policy and contract documents.
   "docs/policy/**",
@@ -198,6 +191,9 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   "tests/client/marketingAgentScreensRender.test.tsx",
   // §4-4: the whole AMUX execution control plane, and its tests.
   "lib/amux/**",
+  // The AMUX process analysis agent (owner request 2026-11-14): its box runner's
+  // routes, claim and the prompt it builds.
+  "lib/amuxProcessAudit*",
   "lib/chatUnifiedOptimizerAmux*",
   "crates/**",
   "apps/**",

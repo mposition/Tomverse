@@ -63,14 +63,11 @@ test("a refused preview displays a bounded error instead of checked status", () 
   { kind: "error", code: "preview_disabled" });
 });
 
-test("the Admin form uses the route only after a saved idea and keeps the dark switch", () => {
+test("the Admin form uses the route only after a saved idea", () => {
   const panel = readFileSync(new URL("../components/admin/AmuxIdeaInputPanel.tsx", import.meta.url), "utf8");
-  const page = readFileSync(new URL("../app/(site)/(application)/admin/amux-backlog/page.tsx", import.meta.url), "utf8");
   // A session idea (amux-intake v19 item 1) and an idea sent to the idea lane have no v4 source scope step.
   assert.match(panel, /submission\.kind === "submitted"(?: && submission\.origin !== "session")?(?: && !lane(?:Queued|Taken))?(?: && !approvalClosed)? \? \([\s\S]*?sourceScopeTitle/);
   assert.match(panel, /\/api\/admin\/amux\/ideas\/source-scope-preview/);
-  assert.match(panel, /!sourceScopePreviewAvailable \|\| sourceScopePending/);
-  assert.match(page, /sourceScopePreviewPermitted\([\s\S]*?AMUX_V4_SOURCE_SCOPE_PREVIEW_ENV/);
   for (const field of ["sourceRepository", "sourceCommitSha", "sourcePath"]) {
     assert.match(panel, new RegExp(`<input value=\\{${field}\\}[\\s\\S]*?focus-visible:outline-2`));
   }

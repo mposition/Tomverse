@@ -21,22 +21,27 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  ENGINEERING_PUBLISHER_FEATURES,
   ENGINEERING_PUBLISHER_FEATURES_HEADER,
-  ENGINEERING_PUBLISHER_REVIEW_DRAFT_FEATURE,
   finalSignalIsSuccess,
   reportedHalt,
 } from "../lib/engineeringAgentCore.ts";
+import { detectSecrets } from "../lib/engineeringAgentSecretPatterns.ts";
+import { readPullChangeDigest } from "../lib/pullDiffDigestCore.ts";
 import { runPublisherCycle } from "./engineering-agent-publisher-core.mjs";
 import { isSupervisedWorker, superviseCycle } from "./engineering-agent-supervisor.mjs";
 
-/** The hard deadline of one cycle, inside the claim's ten-minute lease (§12). */
-export const PUBLISHER_HARD_DEADLINE_MS = 8 * 60 * 1000;
+/** The hard deadline of one cycle, inside the claim's 45-minute lease (§12).
+ * Railway skips a scheduled run while the last one still runs, so a long cycle
+ * delays the next rather than overlapping it. Eight minutes until 2026-11-15:
+ * a large change needs room to fetch, apply, push and be read back. */
+export const PUBLISHER_HARD_DEADLINE_MS = 40 * 60 * 1000;
 const TIMEOUT_MS = 20_000;
 const OWNER = "mposition";
 const REPOSITORY = "Tomverse";
 const REPOSITORY_URL = `https://github.com/${OWNER}/${REPOSITORY}.git`;
 const API = "https://api.github.com";
-/** AMUX's review diff limit (lib/amux/reviewGitHub.ts): a larger diff is not one it binds. */
+/** The v1 diff limit, for an app before the v2 change digest only: a larger diff is not one it binds. */
 const MAX_DIFF_BYTES = 1024 * 1024;
 /** Revoking the token must finish inside the supervisor's grace before SIGKILL. */
 const REVOKE_TIMEOUT_MS = 3_000;
@@ -143,6 +148,21 @@ async function workspaceAt(baseSha) {
       const applied = await git(["-C", repo, "apply", "--cached", patchFile], { home });
       if (applied.code !== 0) return null;
       const treeId = (await step(["write-tree"])).trim();
+      // Every blob the applied tree adds, read as the branch would publish
+      // it: a binary file's bytes are base85 text of deflated data in the
+      // patch, so the scan of the patch text never saw them (§11).
+      const raw = await git(["-C", repo, "diff-tree", "-r", "-z", "--no-renames", baseSha, treeId], { home });
+      if (raw.code !== 0) throw new Error("git_failed");
+      const fields = raw.stdout.toString("utf8").split("\0");
+      if (fields.pop() !== "" || fields.length % 2 !== 0) throw new Error("git_failed");
+      for (let i = 0; i < fields.length; i += 2) {
+        const meta = /^:\d{6} (\d{6}) [0-9a-f]{40} ([0-9a-f]{40}) [A-Z]$/.exec(fields[i]);
+        if (!meta) throw new Error("git_failed");
+        if (/^0+$/.test(meta[2]) || meta[1] === "160000") continue;
+        const blob = await git(["-C", repo, "cat-file", "blob", meta[2]], { home });
+        if (blob.code !== 0) throw new Error("git_failed");
+        if (detectSecrets(blob.stdout.toString("latin1")).length > 0) return { refused: "content_check_failed" };
+      }
       const env = {
         GIT_AUTHOR_NAME: identity.name,
         GIT_AUTHOR_EMAIL: identity.email,
@@ -197,9 +217,9 @@ const githubRequest = async (token, method, path, { body, accept, timeoutMs = TI
   });
 
 /**
- * The digest AMUX's review binds (lib/amux/reviewGitHub.ts): the diff's own
- * bytes, and only for a diff AMUX would take -- valid UTF-8, a git diff, no
- * binary patch, no control or bidirectional character that could hide or
+ * The v1 digest, for an app before the v2 change digest only: the diff's own
+ * bytes, and only for a diff that app would take -- valid UTF-8, a git diff,
+ * no binary patch, no control or bidirectional character that could hide or
  * reorder what a person reviews. Anything else is refused, never hashed.
  */
 export const bindableDiffDigest = (bytes) => {
@@ -253,6 +273,24 @@ const githubPorts = (token) => ({
     const body = await response.json();
     if (!Array.isArray(body)) throw new Error("github_read_failed");
     return body.map(pullOf);
+  },
+  // The v2 change digest, read the one way every reader reads it
+  // (lib/pullDiffDigestCore.ts); null when it is not read now.
+  pullChangeDigest: async ({ base, headSha }) => {
+    const getJson = async (path) => {
+      const response = await githubRequest(token, "GET", `/repos/${OWNER}/${REPOSITORY}${path}`);
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => undefined);
+        throw new Error("github_read_failed");
+      }
+      return response.json();
+    };
+    try {
+      const change = await readPullChangeDigest(getJson, { base, headSha });
+      return { digest: change.digest, headTreeSha: change.headTreeSha };
+    } catch {
+      return null;
+    }
   },
   pullDiffDigest: async (number) => {
     const response = await githubRequest(token, "GET", `/repos/${OWNER}/${REPOSITORY}/pulls/${number}`, {
@@ -379,8 +417,9 @@ async function main() {
       headers: {
         authorization: `Bearer ${secret}`,
         "content-type": "application/json",
-        // Owner review items are handed only to a publisher that opens them as drafts.
-        [ENGINEERING_PUBLISHER_FEATURES_HEADER]: ENGINEERING_PUBLISHER_REVIEW_DRAFT_FEATURE,
+        // Owner review items are handed only to a publisher that opens them as
+        // drafts, and an approved pull request resume only to one that opens it.
+        [ENGINEERING_PUBLISHER_FEATURES_HEADER]: ENGINEERING_PUBLISHER_FEATURES,
       },
       body: JSON.stringify(body),
     });

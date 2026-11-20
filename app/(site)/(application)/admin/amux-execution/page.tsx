@@ -11,6 +11,7 @@ import { AmuxCliUsagePanel } from "@/components/admin/AmuxCliUsagePanel";
 import { AmuxDiagnosticsPanel } from "@/components/admin/AmuxDiagnosticsPanel";
 import { AmuxExecutionWorkspace } from "@/components/admin/AmuxExecutionWorkspace";
 import { AmuxIncidentBand } from "@/components/admin/AmuxIncidentBand";
+import { AmuxProcessAuditPanel } from "@/components/admin/AmuxProcessAuditPanel";
 import { AmuxDecisionMakerRequestDrawer } from "@/components/admin/AmuxDecisionMakerRequestDrawer";
 import type { DmAdminRequestDetailView } from "@/components/admin/AmuxDecisionMakerRequestDetailPanel";
 import { amuxTabChips, type AmuxTabStatus } from "@/lib/adminAmuxTabStatus";
@@ -22,6 +23,7 @@ import { ADMIN_AMUX_EXECUTION_LEGACY_TABS, adminRedirectTarget, adminNavItemTabs
 import { EMPTY_ADMIN_NAVIGATION_COUNTS } from "@/lib/adminNavigationCounts";
 import { readBoardWorkerChannels } from "@/lib/amux/adminBoardWorkerChannels";
 import { readAmuxIncidentBandState } from "@/lib/amux/adminIncidentRead";
+import { amuxAdminCardListRequestedLimit } from "@/lib/amux/adminCardList";
 import { listAmuxCardsForExecutionList } from "@/lib/amux/adminExecutionCardList";
 import { countAmuxOwnerQueue, readAmuxOwnerQueue } from "@/lib/amux/adminOwnerQueueRead";
 import { amuxOwnerQueueGroupCounts } from "@/lib/amux/ownerQueueCore";
@@ -31,6 +33,7 @@ import { readDecisionMakerRequestDetailForAdmin } from "@/lib/amux/decisionMaker
 import { countDecisionMakerAttention, readDecisionMakerAttentionForAdmin } from "@/lib/amux/decisionMakerAttention";
 import { isDmRequestId } from "@/lib/amux/decisionMakerRequestCore";
 import { readAmuxIdeaLaneBoardForOwner } from "@/lib/amux/ideaLaneBoardRead";
+import { readProcessAuditForAdmin } from "@/lib/amuxProcessAuditStore";
 import { authOptions } from "@/lib/auth";
 
 const TABS = adminNavItemTabs("amux-execution");
@@ -126,7 +129,7 @@ export default async function AdminAmuxExecutionPage({
     if (!session?.user?.id || getAdminRole(session) !== "owner") notFound();
     const [cardList, decisionMaker, laneIdeas, workerChannels, ownerQueueRead] = await Promise.all([
       // The List view's rows. A failed read shows that view's error, never an empty table.
-      listAmuxCardsForExecutionList().catch(() => null),
+      listAmuxCardsForExecutionList(amuxAdminCardListRequestedLimit(query.cardLimit)).catch(() => null),
       readDecisionMakerAttentionForAdmin({ withBodies: canJudge }).catch(() => null),
       // Display rows beside the cards; a failed read shows none (the Ideas tab has them).
       readAmuxIdeaLaneBoardForOwner(session.user.id).catch(() => null),
@@ -151,8 +154,23 @@ export default async function AdminAmuxExecutionPage({
           </Link>
         ) : null}
         <AmuxExecutionWorkspace canMoveCards={isOwner} canReviewCards={isOwner} decisionMaker={decisionMaker} laneIdeas={laneIdeas}
-          workerChannels={workerChannels} cardList={cardList} ownerQueue={ownerQueue} initialTaskId={typeof query.taskId === "string" &&
+          workerChannels={workerChannels} cardList={cardList} ownerQueue={ownerQueue}
+          initialView={query.cardView === "list" ? "list" : "board"} initialTaskId={typeof query.taskId === "string" &&
           /^[A-Za-z0-9-]{1,128}$/.test(query.taskId) ? query.taskId : null} />
+      </div>
+    );
+  }
+
+  if (tab.id === "process-audit") {
+    // The owner's, as the route table says; decided here too, as the board is.
+    if (!isOwner) notFound();
+    const reportId = typeof query.report === "string" && /^[a-z0-9]{20,40}$/.test(query.report) ? query.report : null;
+    const view = await readProcessAuditForAdmin(reportId).catch(() => null);
+    return (
+      <div className="flex min-w-0 flex-col gap-5">
+        {tabs}
+        {drawer}
+        <AmuxProcessAuditPanel view={view} />
       </div>
     );
   }
@@ -183,7 +201,9 @@ export default async function AdminAmuxExecutionPage({
       <AmuxOwnerQueueScreen canInspectCards={isOwner} focusEscalationId={
         typeof query.focusEscalation === "string" &&
         /^c[a-z0-9]{20,}$/i.test(query.focusEscalation) ?
-          query.focusEscalation : null} />
+          query.focusEscalation : null}
+        canWriteEngineering={hasAdminPermission(session, "engineering-agent:write")}
+        canAskDecisionMaker={canJudge} />
     </div>
   );
 }

@@ -51,7 +51,7 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
       "Compare the assigned work with the submitted evidence before choosing any server-permitted decision.",
     assignedWork: "Original assigned work",
     recoveryNotInspectable:
-      "This card is not a v4 Task, so the app record inspection and the Ubuntu inspection do not apply to it. A legacy WORKBOARD card is remade as a new idea or closed on the Overview tab of its card detail on the execution board.",
+      "This card is not an idea Task, so the app record inspection and the Ubuntu inspection do not apply to it. A legacy WORKBOARD card is remade as a new idea or closed on the Overview tab of its card detail on the execution board.",
     assignmentNotConnected:
       "The original assignment is not connected to this review. This does not prove it never existed.",
     approvedBrief: "Approved execution brief",
@@ -151,8 +151,9 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
       "The server currently permits a retry from this bound review. Read the exact scope, prior evidence, attempt limit, cost status and effect before preparing the existing proposal.",
     retryScope: "Exact work scope",
     retryAttemptLimit: "Attempt limit",
-    retryAttemptLimitValue: (used: number, limit: number, remaining: number) =>
-      `${used} of ${limit} attempts used · ${remaining} remain before any new attempt`,
+    retryAttemptLimitValue: (used: number, limit: number | null, remaining: number | null) =>
+      limit === null || remaining === null ? `${used} attempts used · no limit` :
+        `${used} of ${limit} attempts used · ${remaining} remain before any new attempt`,
     retryCorrectionEvidence: "What changed",
     retryCorrectionUnavailable:
       "No separate structured correction record is connected. Verify the worker report and card history; this screen does not infer that dependencies are complete.",
@@ -178,6 +179,17 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     ownerQuestionRetry: "Has the reported blocker been corrected enough to requeue this same task?",
     ownerQuestionRetryNoPr: "This result has no pull request. Should this same task run again?",
     ownerQuestionBlock: "Should this task remain blocked with this recorded reason?",
+    // An implement Task that left no change (owner decision 2026-11-11).
+    noChange: {
+      question: "The worker made no change and says the work is already in place. Is there nothing left to change?",
+      outcome: "Complete: no change needed",
+      decisionWarning: "This marks the implement Task done with no pull request, as no change needed. Dependent work may become eligible; nothing is executed, deployed or published.",
+      confirmation: "I read the worker report and checked the current code: there is nothing to change.",
+      confirmationRequired: "Confirm that you checked the worker report and the current code before preparing a proposal.",
+      confirmHeading: "Confirm completion of this exact Task with no change",
+      confirmDecision: "Confirm: no change needed",
+      defaultResolution: "no change needed (owner verified)",
+    },
     blockWithoutResultNotice: (source: string, target: string) =>
       `No completion or retry evidence is connected. From the connected assignment and permitted decisions, this review shows the ${source} → ${target} block choice. This does not prove that a host process stopped, nor that no process ran, and does not delete, cancel, requeue, or run the Task.`,
     unknownNoRetry:
@@ -201,6 +213,7 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     attemptEndedAt: "Attempt ended",
     noAttempt: "No execution attempt",
     attemptBudget: "Attempt budget",
+    noAttemptLimit: "No limit",
     exhaustedRequiresNewTask:
       "This task has exhausted its five attempts. Blocking is terminal; continue only by issuing a new task.",
     remaining: "remaining",
@@ -226,10 +239,12 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     lastAttemptReason: "Last attempt reason",
     previousBlockReason: "Previous human block reason",
     reviewPrDiff: "PR diff (read-only review content)",
+    reviewDiffNotShown:
+      "The diff is not shown here: it is too large, binary, or has characters that could hide or reorder it. Review the pull request on GitHub; an approval binds its merge base, head and tree.",
     reviewPr: "GitHub review PR",
     reviewBaseSha: "Base SHA",
     reviewHeadSha: "Head SHA",
-    reviewDiffDigest: "Diff SHA-256",
+    reviewDiffDigest: "Change digest",
     reviewResultSha256: "Worker result SHA-256",
     reviewContentMissing:
       "No review subject with a verifiable digest is available. Decision proposals are unavailable.",
@@ -237,6 +252,11 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
       "The stored description exceeds the protected display limit. Only Block is available until the source is shortened and reviewed again.",
     reviewDisplayMismatch:
       "Approval is closed because the source contains hidden or normalized characters. Correct the source and run the Task again, or Block it; the displayed text cannot stand in for the original.",
+    unpublishedPatch: {
+      title: "This result has a patch that has not reached develop",
+      body: "The worker changed code, but no pull request carries the patch. It cannot be completed as no change needed. Run it again, or restore the publication path so the patch opens a pull request.",
+      runMissing: "No engineering agent run was created for this attempt, so nothing could publish it.",
+    },
     approveUnavailable:
       "Approval is unavailable until a verifiable result artifact and its source can be reviewed.",
     noAllowedOutcome: "No task-review decision is currently permitted.",
@@ -367,7 +387,7 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
       "서버가 허용한 결정을 선택하기 전에 배정된 작업과 제출된 근거를 대조하세요.",
     assignedWork: "원래 배정된 작업",
     recoveryNotInspectable:
-      "이 카드는 v4 Task가 아니어서 앱 기록 점검과 Ubuntu 검사 대상이 아닙니다. 옛 작업판(WORKBOARD) 카드는 실행 보드 카드 상세의 개요 탭에서 새 아이디어로 다시 만들거나 닫습니다.",
+      "이 카드는 아이디어 Task가 아니어서 앱 기록 점검과 Ubuntu 검사 대상이 아닙니다. 옛 작업판(WORKBOARD) 카드는 실행 보드 카드 상세의 개요 탭에서 새 아이디어로 다시 만들거나 닫습니다.",
     assignmentNotConnected:
       "원래 배정 내용이 이 검토에 연결돼 있지 않습니다. 애초에 존재하지 않았다는 뜻은 아닙니다.",
     approvedBrief: "승인된 실행 브리프",
@@ -467,8 +487,9 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
       "현재 기록에서는 이 작업을 다시 맡기는 선택이 허용되어 있습니다. 선택을 준비하기 전에 작업 내용·이전 실행 기록·시도 상한·비용 상태·효과를 읽으세요.",
     retryScope: "다시 맡길 작업과 완료 조건",
     retryAttemptLimit: "시도 상한",
-    retryAttemptLimitValue: (used: number, limit: number, remaining: number) =>
-      `${limit}회 중 ${used}회 사용 · 새 시도 전 잔여 ${remaining}회`,
+    retryAttemptLimitValue: (used: number, limit: number | null, remaining: number | null) =>
+      limit === null || remaining === null ? `${used}회 사용 · 상한 없음` :
+        `${limit}회 중 ${used}회 사용 · 새 시도 전 잔여 ${remaining}회`,
     retryCorrectionEvidence: "무엇이 달라졌나요?",
     retryCorrectionUnavailable:
       "무엇을 고쳤는지 보여 주는 별도 기록은 연결돼 있지 않습니다. 작업자 보고서와 카드 이력을 확인하세요. 이 화면은 선행 작업이 끝났다고 추정하지 않습니다.",
@@ -501,6 +522,16 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     ownerQuestionRetry: "보고된 차단 원인이 이 작업을 다시 대기열에 넣을 만큼 해결됐습니까?",
     ownerQuestionRetryNoPr: "이 결과에는 PR이 없습니다. 같은 작업을 다시 실행하시겠습니까?",
     ownerQuestionBlock: "기록된 사유로 이 작업을 차단 상태에 유지해야 합니까?",
+    noChange: {
+      question: "작업자가 아무것도 바꾸지 않았고 이미 반영돼 있다고 보고했습니다. 더 바꿀 것이 없습니까?",
+      outcome: "변경 불필요로 완료",
+      decisionWarning: "PR 없이 이 구현 Task를 '변경 불필요'로 완료합니다. 후속 작업이 실행 대상이 될 수 있지만, 이 결정 자체가 실행·배포·게시를 하지는 않습니다.",
+      confirmation: "작업자 보고와 현재 코드를 확인했고 바꿀 것이 없습니다.",
+      confirmationRequired: "제안을 준비하기 전에 작업자 보고와 현재 코드를 확인했다고 체크하세요.",
+      confirmHeading: "정확히 이 Task를 변경 없이 완료하는지 확인",
+      confirmDecision: "변경 불필요로 완료 확정",
+      defaultResolution: "no change needed (owner verified)",
+    },
     blockWithoutResultNotice: (source: string, target: string) => {
       const effect = source === "blocked" && target === "blocked"
         ? "차단 상태 유지 선택"
@@ -528,6 +559,7 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     attemptEndedAt: "시도 종료 시각",
     noAttempt: "실행 시도 없음",
     attemptBudget: "시도 한도",
+    noAttemptLimit: "상한 없음",
     exhaustedRequiresNewTask:
       "이 작업은 시도 5회를 소진했습니다. 차단하면 종결되며, 계속하려면 새 task를 발행해야 합니다.",
     remaining: "잔여",
@@ -552,10 +584,12 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     lastAttemptReason: "마지막 시도 사유",
     previousBlockReason: "이전 사람 차단 사유",
     reviewPrDiff: "PR diff(읽기 전용 검토 내용)",
+    reviewDiffNotShown:
+      "diff를 여기에 보이지 않습니다. 너무 크거나 binary이거나, 내용을 숨기거나 순서를 바꿀 수 있는 문자가 있습니다. GitHub에서 PR을 검토하세요. 승인은 merge base·head·tree에 묶입니다.",
     reviewPr: "GitHub 검토 PR",
     reviewBaseSha: "Base SHA",
     reviewHeadSha: "Head SHA",
-    reviewDiffDigest: "Diff SHA-256",
+    reviewDiffDigest: "변경 digest",
     reviewResultSha256: "Worker 결과 SHA-256",
     reviewContentMissing:
       "검증 가능한 digest를 가진 검토 대상이 없습니다. 결정 제안을 만들 수 없습니다.",
@@ -563,6 +597,11 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
       "저장된 설명이 보호 화면 표시 한도를 넘었습니다. 원천 내용을 줄여 다시 검토하기 전에는 차단만 가능합니다.",
     reviewDisplayMismatch:
       "원문에 화면에서 숨겨지거나 정규화되는 문자가 있어 완료 승인을 닫았습니다. 원문을 고쳐 Task를 다시 실행하거나 차단하세요. 표시 문구를 원문 동의로 간주하지 않습니다.",
+    unpublishedPatch: {
+      title: "이 결과에는 develop에 들어가지 않은 patch가 있습니다",
+      body: "작업자가 코드를 바꿨지만 그 patch를 실은 PR이 없습니다. '변경 불필요'로 완료할 수 없습니다. 다시 실행하거나, 게시 경로를 복구해 patch가 PR로 열리게 하세요.",
+      runMissing: "이 실행에는 엔지니어링 에이전트 run이 만들어지지 않아 게시할 경로가 없었습니다.",
+    },
     approveUnavailable:
       "검증 가능한 결과물과 출처를 검토할 수 있을 때까지 완료 승인은 사용할 수 없습니다.",
     noAllowedOutcome: "현재 허용된 작업 검토 결정이 없습니다.",

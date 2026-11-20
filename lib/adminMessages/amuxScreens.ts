@@ -41,9 +41,7 @@ export const adminAmuxScreensMessages = defineAdminMessages({
       columns: { kind: "Kind", priority: "Priority", status: "State" },
       status: { waiting: "Waiting", running: "Running", review: "In review", done: "Done", blocked: "Blocked", cancelled: "Cancelled" },
       notInNewest: "-",
-      notInNewestHint: "This card is older than the newest cards read for the counts, so its state is not shown here.",
-      bounded: (shown: number, total: number) =>
-        `The state counts and each card's kind, priority and state come from the ${shown} most recently changed of ${total} cards.`,
+      notInNewestHint: "This card's state could not be read just now.",
     },
     board: {
       channels: "Channels",
@@ -127,9 +125,7 @@ export const adminAmuxScreensMessages = defineAdminMessages({
       columns: { kind: "종류", priority: "우선순위", status: "상태" },
       status: { waiting: "대기", running: "실행 중", review: "검토 중", done: "완료", blocked: "막힘", cancelled: "취소" },
       notInNewest: "-",
-      notInNewestHint: "숫자를 읽은 최근 카드보다 오래된 카드라서 상태를 여기서 보여 드리지 않아요.",
-      bounded: (shown: number, total: number) =>
-        `상태별 숫자와 카드별 종류·우선순위·상태는 전체 ${total}장 중 최근에 바뀐 ${shown}장을 읽은 값이에요.`,
+      notInNewestHint: "이 카드의 상태를 지금 읽지 못했어요.",
     },
     board: {
       channels: "채널",

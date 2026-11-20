@@ -421,7 +421,7 @@ test("a Kanban card waiting on the owner opens on the same owner review", async 
   };
   const detail = {
     ...card, revision: review.task.revision, body: null, brief: null, feedback: null,
-    outcomeWriteEnabled: false, result: null, dependencies: [], dependents: [],
+    result: null, dependencies: [], dependents: [],
     attempts: [], score: null, usage: [], reviews: [], publications: [],
     escalations: [{ id: ESCALATION_ID, reason: "operator_review_required", status: "open",
       createdAt: "2026-10-12T00:00:00.000Z" }],

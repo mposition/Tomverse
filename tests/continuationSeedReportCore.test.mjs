@@ -50,13 +50,13 @@ test("the shipped rule is reproduced, not reimplemented", () => {
   }
 });
 
-test("the known Korean boundary: 2,000 Hangul syllables fit, 2,001 empty the shipped seed", () => {
+test("a Korean turn crossing the token boundary remains available as a shortened excerpt", () => {
   const fits = [message("assistant", 0, "가".repeat(2_000))];
   const over = [message("assistant", 0, "가".repeat(2_001))];
   assert.equal(evaluatePlan(planContinuationSeed({ messages: fits }), fits).empty, false);
-  const emptied = evaluatePlan(planContinuationSeed({ messages: over }), over);
-  assert.equal(emptied.empty, true);
-  assert.equal(emptied.newest, "missing");
+  const reduced = evaluatePlan(planContinuationSeed({ messages: over }), over);
+  assert.equal(reduced.empty, false);
+  assert.equal(reduced.newest, "shortened");
   const cut = planWithBoundaryExcerpt({ messages: over, keep: "tail" });
   assert.equal(cut.turns.length, 1);
   assert.equal(cut.turns[0].shortened, true);
@@ -118,14 +118,14 @@ test("blank turns are reported apart from budget stops, judged on the pre-cut te
   assert.equal(result.blankSkipped, 1);
   assert.equal(result.omittedByBudget, 0);
 
-  // Whitespace for the whole pre-cut window: the planner skips it as blank.
+  // The excerpt now reaches the visible word after the leading padding.
   const padded = [message("assistant", 0, `${" ".repeat(4_000)}visible answer`)];
   const judged = evaluatePlan(planContinuationSeed({ messages: padded }), padded);
-  assert.equal(judged.eligibleNonBlank, 0);
-  assert.equal(judged.newest, "none_eligible");
+  assert.equal(judged.eligibleNonBlank, 1);
+  assert.equal(judged.newest, "shortened");
   assert.equal(judged.omittedByBudget, 0);
-  assert.equal(judged.blankSkipped, 1);
-  assert.equal(judged.includedShare, null, "no denominator, so no inclusion share");
+  assert.equal(judged.blankSkipped, 0);
+  assert.equal(judged.includedShare, 1);
 });
 
 test("every candidate separates a blank turn from a budget stop the same way", () => {
@@ -194,12 +194,15 @@ const sample = (content, assistantTurns, script) => ({
   assistantTurns,
 });
 
-const emptyTurns = [message("user", 0, `${secret} 질문`), message("assistant", 1, "가".repeat(2_100))];
 const fineTurns = [message("user", 0, "질문입니다 오늘 회의 정리 부탁드립니다"), message("assistant", 1, "짧은 답변입니다 정리했습니다")];
-const repeated = (count, content, turns) => Array.from({ length: count }, () => sample(content, turns));
+// Aggregation accepts historical measurements too. Exercise empty and partially
+// included samples without depending on the current planner losing a long turn.
+const { empty, stopped } = JSON.parse(readFileSync(new URL("./fixtures/continuation-seed-v1-measurements.json", import.meta.url), "utf8"));
+const fine = sample(fineTurns, 0);
+const repeated = (count, measured, turns) => Array.from({ length: count }, () => ({...measured, assistantTurns: turns}));
 
 test("shares are weighted per snapshot and per assistant turn, and one heavy source is not hidden", () => {
-  const report = aggregateSeedSamples([...repeated(5, emptyTurns, 100), ...repeated(15, fineTurns, 1)]);
+  const report = aggregateSeedSamples([...repeated(5, empty, 100), ...repeated(15, fine, 1)]);
   assert.equal(report.hangul.byCandidate.current.emptySeed.snapshotShare, "20-29%");
   assert.equal(report.hangul.byCandidate.current.emptySeed.assistantTurnShare, "90-99%");
   assert.equal(report.hangul.byCandidate["C-tail"].emptySeed.assistantTurnShare, "0%");
@@ -208,16 +211,16 @@ test("shares are weighted per snapshot and per assistant turn, and one heavy sou
 });
 
 test("a share resting on fewer than five snapshots on either side says only that", () => {
-  const few = aggregateSeedSamples([...repeated(1, emptyTurns, 1), ...repeated(MIN_GROUP_SIZE - 1, fineTurns, 1)]);
+  const few = aggregateSeedSamples([...repeated(1, empty, 1), ...repeated(MIN_GROUP_SIZE - 1, fine, 1)]);
   assert.deepEqual(few.hangul.byCandidate.current.emptySeed, {
     snapshotShare: null,
     assistantTurnShare: null,
     smallCell: "fewer than " + MIN_PUBLISHED_CELL + " snapshots",
   });
-  const mostly = aggregateSeedSamples([...repeated(1, fineTurns, 1), ...repeated(MIN_GROUP_SIZE - 1, emptyTurns, 1)]);
+  const mostly = aggregateSeedSamples([...repeated(1, fine, 1), ...repeated(MIN_GROUP_SIZE - 1, empty, 1)]);
   assert.equal(mostly.hangul.byCandidate.current.emptySeed.snapshotShare, null);
   assert.match(mostly.hangul.byCandidate.current.emptySeed.smallCell, /^all but fewer than/);
-  const none = aggregateSeedSamples(repeated(MIN_GROUP_SIZE, fineTurns, 1));
+  const none = aggregateSeedSamples(repeated(MIN_GROUP_SIZE, fine, 1));
   assert.equal(none.hangul.byCandidate.current.emptySeed.snapshotShare, "0%");
 });
 
@@ -225,17 +228,11 @@ test("combined figures do not pin a group's size: neighbouring groups publish th
   // The confirmation review solved a 46-snapshot group from two exact percents
   // (5/46 = 11%, 16/46 = 35%). Stopped-by-budget without an empty seed needs a
   // turn that does not fit after one that does.
-  const stopped = [
-    message("user", 0, "질문입니다 오늘 회의 정리 부탁드립니다"),
-    message("assistant", 1, "가".repeat(2_100)),
-    message("user", 2, "짧은 후속 질문입니다 알려주세요"),
-    message("assistant", 3, "짧은 답변입니다 정리했습니다"),
-  ];
   const group = (size, empties, stops) =>
     aggregateSeedSamples([
-      ...repeated(empties, emptyTurns, 1),
+      ...repeated(empties, empty, 1),
       ...repeated(stops, stopped, 1),
-      ...repeated(size - empties - stops, fineTurns, 1),
+      ...repeated(size - empties - stops, fine, 1),
     ]);
   const published = group(46, 5, 11);
   for (const [size, empties, stops] of [[44, 5, 10], [47, 5, 11], [49, 5, 12]]) {
@@ -254,7 +251,7 @@ test("a source longer than the scan is published apart from every candidate's fi
       ...evaluateSeedCandidates(fineTurns, 400),
       assistantTurns: 1,
     }));
-  const report = aggregateSeedSamples([...beyond(10), ...repeated(10, fineTurns, 1)]);
+  const report = aggregateSeedSamples([...beyond(10), ...repeated(10, fine, 1)]);
   assert.equal(report.hangul.sourceLongerThanScan.snapshotShare, "50-59%");
   assert.equal(report.hangul.sourceLongerThanScan.assistantTurnShare, "50-59%");
   for (const figures of Object.values(report.hangul.byCandidate)) {
@@ -262,17 +259,17 @@ test("a source longer than the scan is published apart from every candidate's fi
   }
   // All within the scan: the share is 0%, not a missing key.
   assert.equal(
-    aggregateSeedSamples(repeated(MIN_GROUP_SIZE, fineTurns, 1)).hangul.sourceLongerThanScan.snapshotShare,
+    aggregateSeedSamples(repeated(MIN_GROUP_SIZE, fine, 1)).hangul.sourceLongerThanScan.snapshotShare,
     "0%"
   );
 });
 
 test("the median inclusion amount is published as a band, per candidate", () => {
-  const report = aggregateSeedSamples([...repeated(5, emptyTurns, 1), ...repeated(15, fineTurns, 1)]);
+  const report = aggregateSeedSamples([...repeated(5, empty, 1), ...repeated(15, fine, 1)]);
   // The median source carries both of its two eligible non-blank messages.
   assert.equal(report.hangul.byCandidate.current.includedShareP50, "100%");
   // The empty-seed sources carry none; weighted to the median they do.
-  const mostlyEmpty = aggregateSeedSamples([...repeated(15, emptyTurns, 1), ...repeated(5, fineTurns, 1)]);
+  const mostlyEmpty = aggregateSeedSamples([...repeated(15, empty, 1), ...repeated(5, fine, 1)]);
   assert.equal(mostlyEmpty.hangul.byCandidate.current.includedShareP50, "0%");
   assert.equal(mostlyEmpty.hangul.byCandidate["C-tail"].includedShareP50, "50-59%");
   assert.equal(fractionBand(0.996), "90-99%", "99.6% is not all of it");
@@ -291,7 +288,7 @@ test("shares and counts are bands", () => {
 
 test("aggregation carries no content or identifiers, and a suppressed group cannot be subtracted out", () => {
   const english = [message("user", 0, `${secret} english question here please`)];
-  const samples = [...repeated(MIN_GROUP_SIZE + 1, emptyTurns, 2), ...Array.from({ length: 2 }, () => sample(english, 1))];
+  const samples = [...repeated(MIN_GROUP_SIZE + 1, empty, 2), ...Array.from({ length: 2 }, () => sample(english, 1))];
   const report = aggregateSeedSamples(samples);
   assert.doesNotMatch(JSON.stringify(report), /SECRET|아무도|질문|english question/);
   assert.equal(report.latin.suppressed, true);
@@ -299,7 +296,7 @@ test("aggregation carries no content or identifiers, and a suppressed group cann
   // Published counts are bands, never an exact 21 next to an exact total of 23.
   assert.equal(report.hangul.snapshotsBand, "20-49");
   assert.doesNotMatch(JSON.stringify(report), /"snapshots":|"continuations":/);
-  assert.equal(aggregateSeedSamples(repeated(MIN_GROUP_SIZE - 1, emptyTurns, 1)).hangul.suppressed, true);
+  assert.equal(aggregateSeedSamples(repeated(MIN_GROUP_SIZE - 1, empty, 1)).hangul.suppressed, true);
 });
 
 /* ------------------------------------------------------------ stored data */

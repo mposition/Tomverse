@@ -11,8 +11,9 @@ import { inspectAmuxIdeaInput } from "./ideaInputCore.ts";
 import { loadAmuxContentKeyRing } from "./ideaKeyStore.ts";
 import {
   AMUX_IDEA_LANE_LEASE_MS,
-  AMUX_IDEA_LANE_MAX_ATTEMPTS,
   AMUX_IDEA_LANE_PUBLISH_FENCE_MS,
+  AMUX_IDEA_LANE_BACKOFF_BASE_MS,
+  AMUX_IDEA_LANE_BACKOFF_MAX_MS,
   AMUX_IDEA_LANE_SECRET_ENV,
   amuxIdeaLaneBranch,
   amuxIdeaLaneClaimable,
@@ -72,6 +73,7 @@ export async function claimAmuxIdeaLane(scope: { actorUserId?: string } = {}): P
             'claimedAtMs', (extract(epoch FROM a."claimedAt") * 1000)::double precision,
             'leaseUntilMs', (extract(epoch FROM a."leaseUntil") * 1000)::double precision,
             'outcome', a."outcome", 'prNumber', a."prNumber", 'continues', a."continues",
+            'finishedAtMs', (extract(epoch FROM a."finishedAt") * 1000)::double precision,
             'mergedAtMs', (extract(epoch FROM a."mergedAt") * 1000)::double precision,
             'prClosedAtMs', (extract(epoch FROM a."prClosedAt") * 1000)::double precision))
           FROM "AmuxIdeaLaneAttempt" a WHERE a."ideaId" = i."id") AS "attempts"
@@ -96,8 +98,18 @@ export async function claimAmuxIdeaLane(scope: { actorUserId?: string } = {}): P
           AND ((a."outcome" = 'pr_open' AND a."claimedAt" > p."partStart")
             OR (a."outcome" IS NULL
               AND a."leaseUntil" > (${now.toISOString()}::timestamptz AT TIME ZONE 'UTC'))))
-        AND (SELECT count(*) FROM "AmuxIdeaLaneAttempt" a WHERE a."ideaId" = i."id"
-          AND a."claimedAt" > p."partStart") < ${AMUX_IDEA_LANE_MAX_ATTEMPTS}
+        -- A part waiting out its backoff (amuxIdeaLaneState): every run left
+        -- here is a failure, the next claim waits until the newest one's end
+        -- (a run that never reported ends at its lease) plus 5 minutes
+        -- doubling per failure up to 24 hours; a part is never given up on.
+        AND NOT EXISTS (SELECT 1 FROM (SELECT count(*) AS "failures",
+              max(COALESCE(a."finishedAt", a."leaseUntil")) AS "lastEnd"
+            FROM "AmuxIdeaLaneAttempt" a WHERE a."ideaId" = i."id" AND a."claimedAt" > p."partStart") f
+          WHERE f."failures" > 0 AND f."lastEnd" + LEAST(
+              ${AMUX_IDEA_LANE_BACKOFF_MAX_MS}::double precision * interval '1 millisecond',
+              ${AMUX_IDEA_LANE_BACKOFF_BASE_MS}::double precision * interval '1 millisecond'
+                * power(2, LEAST(f."failures", 30) - 1))
+            > (${now.toISOString()}::timestamptz AT TIME ZONE 'UTC'))
       -- SEV1 first: an idea the develop CI repair pass handed over (its system
       -- audit entry is the mark; only that pass writes the action), then age.
       ORDER BY EXISTS (SELECT 1 FROM "AdminAuditLog" l
@@ -138,7 +150,7 @@ export async function claimAmuxIdeaLane(scope: { actorUserId?: string } = {}): P
   const { attemptId, idea, part, previousPrNumber } = claimed;
   const text = await openIdeaText(idea).catch(() => null);
   if (text === null) {
-    // Counted as a failed run, so an unreadable idea stops at the attempt limit.
+    // Counted as a failed run, so an unreadable idea stops once job_failed repeats.
     await recordAmuxIdeaLaneResult({ attemptId, outcome: "job_failed", prNumber: null });
     return null;
   }

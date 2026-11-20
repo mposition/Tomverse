@@ -34,6 +34,7 @@ import { commitAmuxDueSessionAnalysisResultPurge,
   "@/lib/amux/ideaSessionAnalysisResultRetention";
 import { purgeDueAmuxOrphanSessionResultKeys } from
   "@/lib/amux/ideaSessionAnalysisResultOrphanRetention";
+import { amuxSessionContentRetentionDays } from "@/lib/amux/ideaRetentionCore";
 import { readAmuxIdeaProgressForOwner } from "@/lib/amux/ideaProgressRead";
 import { commitAmuxIdeaSessionCancellation,
   readAmuxIdeaSessionCancellationReceipt,
@@ -76,6 +77,8 @@ import { commitAmuxSessionBudgetClaim, readAmuxSessionBudgetClaimReceipt,
   "@/lib/amux/ideaSessionAnalysisBudgetClaimService";
 import { GET as readMaxClaimRoute, POST as postMaxClaimRoute } from
   "@/app/api/internal/amux/v19/analysis-budget/claim/route";
+import { GET as listMaxInFlightRoute } from
+  "@/app/api/internal/amux/v19/analysis-budget/in-flight/route";
 import { POST as postMaxResultRoute } from
   "@/app/api/internal/amux/v19/analysis-budget/max-result/route";
 import { POST as postMaxUnknownRoute } from
@@ -311,8 +314,8 @@ test("session submission encrypts idea and provenance under the scope owner with
   assert.equal(row.sessionOperatingScopeSettingId, authority.settingId);
   assert.equal(row.submissionAuditLogId, audit.id);
   // The session path stores the same plaintext list title as the owner path.
-  assert.ok(row.title?.startsWith("Synthetic session idea " + committedIdeaId));
-  assert.ok(Array.from(row.title ?? "").length <= 80);
+  // Owner direction 2026-11-15: the whole first line, with no 80-character cut.
+  assert.equal(row.title, "Synthetic session idea " + committedIdeaId + oversizedIdeaTail);
   assert.equal(row.sourceProvenanceKeyId, row.rawKeyId);
   assert.equal(row.sourceProvenanceKeyVersion, row.rawKeyVersion);
   assert.notEqual(row.sourceProvenanceDigest, row.rawDigest);
@@ -453,14 +456,11 @@ test("session analysis queue lists the live reservation and advances past its DB
   assert.equal(after.candidates.some((candidate) =>
     candidate.reservationId === committedReservationId), false);
 
-  const switches = ["TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET",
-    "TOMVERSE_AMUX_V4_ANALYSIS_QUEUE_READ", "TOMVERSE_AMUX_SESSION_INTAKE",
-    "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_QUEUE_READ"];
+  const switches = ["TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET"];
   const previous = new Map(switches.map((key) => [key, process.env[key]]));
   const secret = "synthetic-amux-session-queue-secret-0123456789";
   try {
     process.env[switches[0]] = secret;
-    for (const key of switches.slice(1)) process.env[key] = "enabled";
     const { POST } = await import("@/app/api/internal/amux/v19/analysis-queue/route");
     const poll = (body: object) => POST(new Request(
       "https://tomverse.test/api/internal/amux/v19/analysis-queue", {
@@ -1089,14 +1089,10 @@ test("reservation store refuses duplicate and superseded-scope attempts", async 
   assert.equal(await prisma.amuxIdeaOperatingScopeSetting.count(), scopeCount);
 });
 
-test("a send from another Admin screen enters as a session idea while session intake is on", async () => {
-  const switches = ["TOMVERSE_AMUX_SESSION_INTAKE", "TOMVERSE_AMUX_SESSION_INTAKE_READBACK",
-    "TOMVERSE_AMUX_V4_IDEA_SUBMIT", "TOMVERSE_AMUX_V4_IDEA_READBACK"];
-  const saved = switches.map((name) => process.env[name]);
+test("a send from another Admin screen enters as a session idea", async () => {
   const send = (requestId: string) => ideaSendPath({ session, request, requestId,
     idea: "[Scout 제안] Synthetic suggestion", sessionDisplay: "Scout suggestion" });
-  try {
-    for (const name of switches) process.env[name] = "enabled";
+  {
     const path = await send(committedRequestId);
     assert.ok(path.ok);
     // A stored session idea reads back committed, so a second click makes no second idea.
@@ -1117,25 +1113,10 @@ test("a send from another Admin screen enters as a session idea while session in
     const refused = await ideaSendPath({ session, request, requestId: randomUUID(),
       idea: "Contact person@example.test", sessionDisplay: "Scout suggestion" });
     assert.deepEqual(refused, { ok: false, code: "content_refused", status: 400 });
-
-    // With session intake off the idea stays on the v4 path, and its read
-    // still finds the session idea rather than making another.
-    process.env.TOMVERSE_AMUX_SESSION_INTAKE = "disabled";
-    const off = await send(committedRequestId);
-    assert.ok(off.ok);
-    assert.equal((await off.readBack()).status, "committed");
-  } finally {
-    switches.forEach((name, index) => {
-      if (saved[index] === undefined) delete process.env[name];
-      else process.env[name] = saved[index];
-    });
   }
 });
 
 test("an auto-router recommendation sent again finds its session idea and makes no second one", async () => {
-  const switches = ["TOMVERSE_AMUX_SESSION_INTAKE", "TOMVERSE_AMUX_SESSION_INTAKE_READBACK",
-    "TOMVERSE_AMUX_V4_IDEA_SUBMIT", "TOMVERSE_AMUX_V4_IDEA_READBACK"];
-  const saved = switches.map((name) => process.env[name]);
   const cycle = await prisma.autoRouterOptimizerCycle.create({ data: {
     optimizerModelId: "optimizer-model", routerModelId: "router-model", incumbentGuidance: "guidance",
     reservedMicroUsd: 0, status: "passed",
@@ -1174,7 +1155,6 @@ test("an auto-router recommendation sent again finds its session idea and makes 
     return ideaId;
   };
   try {
-    for (const name of switches) process.env[name] = "enabled";
     const ideaId = await storeIdea(1);
     assert.deepEqual(await send(1), { kind: "sent", ideaId, closed: true });
     assert.equal(await statusOf(1), "sent_to_amux");
@@ -1185,17 +1165,11 @@ test("an auto-router recommendation sent again finds its session idea and makes 
     // Once sent, the recommendation is held: another send changes nothing.
     assert.equal(await reserveRecommendationForAmux(actor, { cycleId: cycle.id, index: 1 }), false);
 
-    // Session intake turned off between the idea and the retry: the v4 door
-    // still reads the session idea rather than making another.
-    process.env.TOMVERSE_AMUX_SESSION_INTAKE = "disabled";
+    // A second recommendation finds its own stored session idea the same way.
     const otherId = await storeIdea(2);
     assert.deepEqual(await send(2), { kind: "sent", ideaId: otherId, closed: true });
     assert.equal(await prisma.amuxIdeaSubmission.count({ where: { requestId: otherId } }), 1);
   } finally {
-    switches.forEach((name, index) => {
-      if (saved[index] === undefined) delete process.env[name];
-      else process.env[name] = saved[index];
-    });
     await prisma.autoRouterOptimizerCycle.delete({ where: { id: cycle.id } });
   }
 });
@@ -1600,7 +1574,7 @@ test("a verified first chunk remains eligible for a second budgeted invocation",
   }), (error: unknown) => error === rollback);
 });
 
-test("three session CLI failures stop the shared Agent-wide claim breaker", async () => {
+test("three session CLI failures do not stop the next session claim", async () => {
   const price = await prisma.amuxIdeaAnalysisPriceVersion.findFirstOrThrow({
     where: { modelId, mode: "subscription_cli", status: "approved" },
     select: { id: true },
@@ -1632,14 +1606,17 @@ test("three session CLI failures stop the shared Agent-wide claim breaker", asyn
       });
       assert.equal(outcome.status, "failed");
     }
-    assert.equal(await readAmuxIdeaAnalysisFailureStreak(tx), "stopped");
-    await assert.rejects(commitAmuxSessionBudgetClaim(tx, {
+    // Owner direction 2026-11-15: a failure streak stops only the paid path;
+    // the subscription session's next claim simply runs.
+    assert.equal(await readAmuxIdeaAnalysisFailureStreak(tx), "ready");
+    assert.equal(await readAmuxIdeaAnalysisFailureStreak(tx, "session"), "ready");
+    const next = await commitAmuxSessionBudgetClaim(tx, {
       claimId: randomUUID(), requestId: randomUUID(),
       reservationId: reservations[3]!, invocationOrdinal: 0,
       priceVersionId: price.id,
       runner: { tokenCapsEnforceable: true, billableToolsDisabled: true },
-    }), (error: unknown) => error instanceof AmuxSessionBudgetClaimError &&
-      error.code === "not_ready");
+    });
+    assert.ok(next.claimId);
     throw rollback;
   }), (error: unknown) => error === rollback);
 });
@@ -1802,10 +1779,8 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
   const priceVersionId = AMUX_V19_SUBSCRIPTION_NO_PRICE_ID;
   const priceReadSecret = "syntheticMaxLauncherSecret_0123456789abcdefgh";
   const oldPriceReadSecret = process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET;
-  const oldPriceReadSwitch = process.env.TOMVERSE_AMUX_V19_SESSION_MAX_PRICE_READ;
   try {
     process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = priceReadSecret;
-    process.env.TOMVERSE_AMUX_V19_SESSION_MAX_PRICE_READ = "enabled";
     const headers = { authorization: `Bearer ${priceReadSecret}`,
       "x-amux-agent-id": AMUX_V19_MAX_LAUNCHER_ID };
     const endpoint = `https://test.invalid/api/internal/amux/v19/analysis-price?reservationId=${reservation.reservationId}&ideaId=${ideaId}`;
@@ -1820,9 +1795,6 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
     if (oldPriceReadSecret === undefined)
       delete process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET;
     else process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = oldPriceReadSecret;
-    if (oldPriceReadSwitch === undefined)
-      delete process.env.TOMVERSE_AMUX_V19_SESSION_MAX_PRICE_READ;
-    else process.env.TOMVERSE_AMUX_V19_SESSION_MAX_PRICE_READ = oldPriceReadSwitch;
   }
   const maxLauncherIdentity = { ideaId, provider: "anthropic", modelId: maxModelId,
     reasoningEffort: "high",
@@ -1845,11 +1817,7 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
   })), (error: unknown) => error instanceof AmuxSessionBudgetClaimError &&
     error.code === "not_ready", "Max claim rejects a different idea");
   const launcherSecret = "syntheticMaxLauncherSecret_0123456789abcdefgh";
-  const envNames = ["TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET",
-    "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_WRITE",
-    "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ",
-    "TOMVERSE_AMUX_V19_SESSION_MAX_IDEA_READ",
-    "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_STOP_POLL_READ"] as const;
+  const envNames = ["TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET"] as const;
   const oldEnv = Object.fromEntries(envNames.map((name) =>
     [name, process.env[name]]));
   const claimRequestId = randomUUID();
@@ -1867,21 +1835,41 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
   let maxManifestId!: string;
   try {
     process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = launcherSecret;
-    process.env.TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_WRITE = "enabled";
-    process.env.TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ = "enabled";
-    process.env.TOMVERSE_AMUX_V19_SESSION_MAX_IDEA_READ = "enabled";
-    process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_STOP_POLL_READ = "enabled";
     const headers = { authorization: `Bearer ${launcherSecret}`,
       "x-amux-agent-id": AMUX_V19_MAX_LAUNCHER_ID };
     const response = await postMaxClaimRoute(new Request(
       "https://test.invalid/api/internal/amux/v19/analysis-budget/claim", {
         method: "POST", headers: { ...headers,
           "content-type": "application/json" },
+        // A current runner marks its claim (review r-20261116-193845-9932ef).
         body: JSON.stringify({ ...signedIdentity, authVerifiedAt,
-          authProof }),
+          authProof, runnerMarker: "claim_named" }),
       }));
     assert.equal(response.status, 200);
     claim = await response.json();
+    const markedRow = await prisma.amuxIdeaSessionAnalysisBudgetClaim
+      .findUniqueOrThrow({ where: { id: claimId },
+        include: { claimAudit: { select: { metadata: true } } } });
+    assert.equal(markedRow.status, "in_flight");
+    assert.equal((markedRow.claimAudit.metadata as Record<string, unknown>)
+      .runnerMarker, "claim_named", "the mark is recorded in the claim audit");
+    // The claim is in flight and was written before now, yet a marker an old
+    // runner left must not reach it: it belongs to a current runner.
+    const markedList = await listMaxInFlightRoute(new Request(
+      `https://test.invalid/api/internal/amux/v19/analysis-budget/in-flight?before=${
+        encodeURIComponent(new Date().toISOString())}`, { headers }));
+    assert.equal(markedList.status, 200);
+    assert.equal(((await markedList.json()) as { claims: Array<{ claimId: string }> })
+      .claims.some((listed) => listed.claimId === claimId), false,
+    "a marked in-flight claim is never listed");
+    // A wrong mark is refused by the route before anything is written.
+    const refusedMark = await postMaxClaimRoute(new Request(
+      "https://test.invalid/api/internal/amux/v19/analysis-budget/claim", {
+        method: "POST", headers: { ...headers,
+          "content-type": "application/json" },
+        body: JSON.stringify({ ...signedIdentity, authVerifiedAt, authProof,
+          runnerMarker: "other" }) }));
+    assert.equal(refusedMark.status, 400);
     const readback = await readMaxClaimRoute(new Request(
       `https://test.invalid/api/internal/amux/v19/analysis-budget/claim?requestId=${claimRequestId}&reservationId=${reservation.reservationId}&invocationOrdinal=0`,
       { headers }));
@@ -1919,18 +1907,7 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
       readAmuxSessionAnalysisStopState(tx, claimId,
         reservation.reservationId, ideaId, "max_shadow")),
     { claimId, reservationId: reservation.reservationId, stop: false });
-    const checkoutSwitches = [
-      "TOMVERSE_AMUX_V19_MAX_CHECKOUT_EVIDENCE_WRITE",
-      "TOMVERSE_AMUX_V19_MAX_CHECKOUT_EVIDENCE_READ",
-      "TOMVERSE_AMUX_V19_CHECKOUT_EVIDENCE_WRITE",
-      "TOMVERSE_AMUX_V19_CHECKOUT_EVIDENCE_READ",
-      "TOMVERSE_AMUX_V19_MAX_READ_MANIFEST_READ",
-      "TOMVERSE_AMUX_V19_READ_MANIFEST_READ",
-    ] as const;
-    const oldCheckoutSwitches = Object.fromEntries(checkoutSwitches.map(
-      (name) => [name, process.env[name]]));
-    try {
-      for (const name of checkoutSwitches) process.env[name] = "enabled";
+    {
       const identity = { claimId, requestId: claimRequestId,
         reservationId: reservation.reservationId, ideaId,
         invocationOrdinal: 0, referenceOrdinal: 0 };
@@ -2052,12 +2029,6 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
         secondKeys.masterKey.fill(0);
         secondKeys.digestKey.fill(0);
       }
-    } finally {
-      for (const name of checkoutSwitches) {
-        const old = oldCheckoutSwitches[name];
-        if (old === undefined) delete process.env[name];
-        else process.env[name] = old;
-      }
     }
     await assert.rejects(prisma.$transaction((tx) =>
       readAmuxSessionAnalysisStopState(tx, claimId,
@@ -2079,9 +2050,23 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
       else process.env[name] = oldEnv[name];
     }
   }
+  // Owner direction 2026-11-15: the result arrives eight days after intake. A
+  // new idea's hundred-year deadline keeps it open, so the result guard, which
+  // also refused a fixed seven days after submission, admits it now.
+  await prisma.$transaction(async (tx) => {
+    const row = await tx.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: ideaId },
+      select: { submittedAt: true, analysisDeadlineAt: true } });
+    const eightDaysAgo = new Date(row.submittedAt.getTime() - 8 * 24 * 60 * 60_000);
+    const shifted = new Date(row.analysisDeadlineAt.getTime() - 8 * 24 * 60 * 60_000);
+    assert.ok(shifted.getTime() - eightDaysAgo.getTime() > 365 * 24 * 60 * 60_000);
+    await tx.$executeRawUnsafe('ALTER TABLE "AmuxIdeaSubmission" DISABLE TRIGGER "AmuxIdeaSubmission_identity_guard"');
+    await tx.amuxIdeaSubmission.update({ where: { id: ideaId }, data: {
+      submittedAt: eightDaysAgo, analysisDeadlineAt: shifted, rawPurgeAfter: shifted } });
+    await tx.$executeRawUnsafe('ALTER TABLE "AmuxIdeaSubmission" ENABLE TRIGGER "AmuxIdeaSubmission_identity_guard"');
+  });
   const before = await prisma.$transaction((tx) => readAnalysisBudgetSnapshot(tx));
-  assert.equal(BigInt(before.spentMicroUsd) + BigInt(before.reservedMicroUsd),
-    BigInt(before.limitMicroUsd));
+  // Operator, 2026-11-16: a subscription claim reserves nothing of the month.
+  assert.equal(claim.reservedMicroUsd, "0");
   const resultIdentity = { claimId: claim.claimId,
     requestId: claim.requestId, reservationId: claim.reservationId,
     ideaId, invocationOrdinal: 0, referenceOrdinal: 0,
@@ -2147,18 +2132,12 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
       SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"`;
     return parkAmuxSessionIdeaInTx(tx, ideaId, clock[0]!.now);
   }), true);
-  const resultEnv = ["TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET",
-    "TOMVERSE_AMUX_V19_SESSION_BUDGET_MAX_RESULT_WRITE",
-    "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ",
-    "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_STOP_POLL_READ"] as const;
+  const resultEnv = ["TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET"] as const;
   const resultOldEnv = Object.fromEntries(resultEnv.map((name) =>
     [name, process.env[name]]));
   let outcome!: { status: string; settledMicroUsd: string };
   try {
     process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = launcherSecret;
-    process.env.TOMVERSE_AMUX_V19_SESSION_BUDGET_MAX_RESULT_WRITE = "enabled";
-    process.env.TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ = "enabled";
-    process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_STOP_POLL_READ = "enabled";
     const response = await postMaxResultRoute(new Request(
       "https://test.invalid/api/internal/amux/v19/analysis-budget/max-result", {
         method: "POST", headers: { authorization: `Bearer ${launcherSecret}`,
@@ -2212,10 +2191,11 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
   assert.equal(row.budgetMode, "max_shadow");
   assert.equal(row.settledMicroUsd, BigInt("1600020"));
   const after = await prisma.$transaction((tx) => readAnalysisBudgetSnapshot(tx));
-  assert.equal(after.reservedMicroUsd, "0");
+  assert.equal(after.reservedMicroUsd, before.reservedMicroUsd);
   assert.equal(after.remainingMicroUsd, "0");
+  // Nothing was reserved, so the whole measured usage is the shadow total.
   assert.equal(BigInt(after.shadowOverrunMicroUsd),
-    BigInt("1600020") - BigInt(claim.reservedMicroUsd));
+    BigInt(before.shadowOverrunMicroUsd) + BigInt("1600020"));
   assert.equal(BigInt(after.spentMicroUsd),
     BigInt(before.spentMicroUsd) + BigInt("1600020"));
   await assert.rejects(prisma.amuxIdeaAnalysisBudgetWindow.update({
@@ -2253,16 +2233,45 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
       runner: { tokenCapsEnforceable: false, billableToolsDisabled: true,
         maxSubscriptionAuthenticated: true },
     }));
-  const unknownEnv = ["TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET",
-    "TOMVERSE_AMUX_V19_SESSION_BUDGET_UNKNOWN_WRITE",
-    "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ"] as const;
+  const unknownEnv = ["TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET"] as const;
   const unknownOldEnv = Object.fromEntries(unknownEnv.map((name) =>
     [name, process.env[name]]));
   let unknown!: { status: string };
+  // The in-flight list a marker that names no claim is reconciled against: the
+  // open subscription claim is listed for any time after it was written, the
+  // settled one never, and the time bound is exclusive.
+  const listInFlight = async (before: Date) => {
+    const response = await listMaxInFlightRoute(new Request(
+      `https://test.invalid/api/internal/amux/v19/analysis-budget/in-flight?before=${
+        encodeURIComponent(before.toISOString())}`, { headers: {
+        authorization: `Bearer ${launcherSecret}`,
+        "x-amux-agent-id": AMUX_V19_MAX_LAUNCHER_ID } }));
+    assert.equal(response.status, 200);
+    // This file's other tests share the database; only this test's two claims
+    // (the settled one and the open one) are looked at.
+    return (await response.json() as { claims: Array<Record<string, unknown>> })
+      .claims.filter((listed) => listed.claimId === unknownClaim.claimId ||
+        listed.claimId === claim.claimId);
+  };
+  const unknownIdentity = { claimId: unknownClaim.claimId,
+    requestId: unknownClaim.requestId,
+    reservationId: unknownClaim.reservationId, ideaId: unknownIdeaId,
+    invocationOrdinal: 0 };
   try {
     process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = launcherSecret;
-    process.env.TOMVERSE_AMUX_V19_SESSION_BUDGET_UNKNOWN_WRITE = "enabled";
-    process.env.TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ = "enabled";
+    const openRow = await prisma.amuxIdeaSessionAnalysisBudgetClaim
+      .findUniqueOrThrow({ where: { id: unknownClaim.claimId },
+        include: { claimAudit: { select: { metadata: true } } } });
+    assert.equal(openRow.status, "in_flight");
+    // This claim came from a runner that sent no mark (the shape an older
+    // runner leaves), so the audit has none and the claim is listed.
+    assert.equal(Object.hasOwn(openRow.claimAudit.metadata as object,
+      "runnerMarker"), false);
+    assert.deepEqual(await listInFlight(new Date()), [unknownIdentity]);
+    assert.deepEqual(await listInFlight(openRow.createdAt), [],
+      "a claim written at the marker's own time is not before it");
+    assert.deepEqual(await listInFlight(new Date(openRow.createdAt.getTime() - 1)),
+      []);
     const response = await postMaxUnknownRoute(new Request(
       "https://test.invalid/api/internal/amux/v19/analysis-budget/unknown", {
         method: "POST", headers: { authorization: `Bearer ${launcherSecret}`,
@@ -2276,32 +2285,39 @@ test("Max shadow claim records measured overrun while the bounded ledger remains
       }));
     assert.equal(response.status, 200);
     unknown = await response.json();
+    assert.deepEqual(await listInFlight(new Date()), [],
+      "a claim reported unknown and closed at zero is no longer in flight");
   } finally {
     for (const name of unknownEnv) {
       if (unknownOldEnv[name] === undefined) delete process.env[name];
       else process.env[name] = unknownOldEnv[name];
     }
   }
-  assert.equal(unknown.status, "outcome_unknown");
+  // Operator, 2026-11-16: the system closes an unknown subscription outcome
+  // at zero in the same transaction; nothing waits for the owner.
+  assert.equal(unknown.status, "owner_consumed");
+  assert.equal((unknown as { settledMicroUsd?: string }).settledMicroUsd, "0");
   const unknownReadback = await prisma.$transaction((tx) =>
     readAmuxSessionBudgetResolution(tx, {
       claimId: unknownClaim.claimId, session }));
-  assert.equal(unknownReadback.status, "outcome_unknown");
-  const ownerResolution = await prisma.$transaction((tx) =>
+  assert.equal(unknownReadback.status, "owner_consumed");
+  assert.equal(unknownReadback.settledMicroUsd, "0");
+  await assert.rejects(prisma.$transaction((tx) =>
     commitAmuxSessionBudgetUnknownResolution(tx, {
       claimId: unknownClaim.claimId, session, request,
       verification: "proven_not_started",
       localEvidenceDigest: sha256("synthetic Max CLI not-started proof"),
       readbackDigest: unknownReadback.readbackDigest, ownerConfirmed: true,
-    }));
-  assert.equal(ownerResolution.status, "released");
-  assert.equal(ownerResolution.settledMicroUsd, "0");
+    })), "a closed claim has nothing left for the owner to resolve");
   assert.equal(await prisma.$transaction((tx) =>
     commitAmuxDueSessionAnalysisResultPurge(tx, claim.claimId)), "skipped");
   assert.deepEqual(await purgeDueAmuxOrphanSessionResultKeys(async () => {
     throw new Error("premature orphan retirement");
   }), { keysDeleted: 0, scanned: 0, batchLimit: 8 });
-  const oldSubmission = new Date(Date.now() - 8 * 24 * 60 * 60_000);
+  // Past the ninety-day content retention (owner direction 2026-11-15), with
+  // the seven-day deadline of a row written before it: the analysis has ended.
+  const oldSubmission = new Date(Date.now() -
+    (amuxSessionContentRetentionDays() + 1) * 24 * 60 * 60_000);
   const oldDeadline = new Date(oldSubmission.getTime() + 7 * 24 * 60 * 60_000);
   // Synthetic clock advancement only in this disposable test DB. The real
   // identity trigger is restored before exercising the retention guards.

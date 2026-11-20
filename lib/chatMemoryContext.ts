@@ -6,6 +6,7 @@ import type { AssistantMemoryPolicy } from "@/lib/assistantProfileVersioning";
 import {
     contextFingerprint,
     memoryStateFingerprint,
+    pricedMemoryRetrievalHash,
     type ContextBundleFingerprintInput,
 } from "@/lib/chatContextBundleCore";
 import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
@@ -22,10 +23,13 @@ import {
     type MemoryInjectionDecision,
 } from "@/lib/memoryInjectionGate";
 import { MEMORY_RETRIEVAL_ALGORITHM_VERSION } from "@/lib/memoryRetrievalScoring";
+import type { MemoryQueryPolicy, MemorySemanticContextInput } from "@/lib/memoryQueryPlan";
+import { memoryCurrentQueryDigest } from "@/lib/memoryHistorySnapshotCore";
 import { retrieveMemoryContext } from "@/lib/memoryRetrievalService";
 import { getMemorySettings } from "@/lib/memoryService";
 import { STYLE_MEMORY_KINDS } from "@/lib/memoryValidatorCore";
 import { prisma } from "@/lib/prisma";
+import type { SemanticCallMode } from "@/lib/semanticRetrievalCore";
 
 /**
  * Policy: docs/policy/external-conversation-import-and-memory.md.
@@ -50,7 +54,7 @@ import { prisma } from "@/lib/prisma";
 export type ChatMemoryContext = {
     /** Why memory is or is not part of this request. */
     decision: MemoryInjectionDecision;
-    /** The block to place in the system message, or null. */
+    /** App rules and separate user-role memory data. */
     prompt: MemoryContextPrompt;
     /**
      * Input tokens the memory block contributes. Priced by preflight, booked
@@ -73,6 +77,12 @@ export type ChatMemoryContext = {
      * was not.
      */
     truncatedByBudget: boolean;
+    /** Whether an external ranking shaped the selection (§9a), for the bundle. */
+    semanticRerank: boolean;
+    memoryQueryPolicy?: MemoryQueryPolicy;
+    /** Only sources that shaped a cache-confirmed semantic result. No source text. */
+    memoryHistorySources?: { id: string; digest: string }[];
+    memoryQueryDigest?: string;
 };
 
 /**
@@ -85,7 +95,8 @@ export type ChatMemoryContext = {
  */
 const EMPTY_PROMPT: MemoryContextPrompt = {
     promptVersion: MEMORY_CONTEXT_PROMPT_VERSION,
-    text: null,
+    rules: null,
+    data: null,
     usedCount: 0,
     factualCount: 0,
     styleCount: 0,
@@ -120,6 +131,7 @@ const buildEmpty = (decision: MemoryInjectionDecision): ChatMemoryContext => {
         fingerprint: contextFingerprint(fingerprintInput),
         consideredCount: 0,
         truncatedByBudget: false,
+        semanticRerank: false,
     };
 };
 
@@ -163,6 +175,9 @@ export async function buildChatMemoryContext(input: {
      * result is discarded.
      */
     profileMemoryPolicy?: AssistantMemoryPolicy | null;
+    /** See `buildChatTurnContext`. */
+    semantic?: SemanticCallMode;
+    memorySemanticContext?: MemorySemanticContextInput;
     now?: Date;
 }): Promise<ChatMemoryContext> {
     if (!input.userId) {
@@ -205,6 +220,9 @@ export async function buildChatMemoryContext(input: {
     // gate open, and this list — the query's actual filter — still admitted
     // the revoked pair's memories. §12.4 revokes a pair, not an account.
     const approvedPairs = injectableExtractionPairs(revokedPairs);
+    // Source reads happen only after account, conversation and profile gates.
+    const memorySemanticContext = typeof input.memorySemanticContext === "function"
+        ? await input.memorySemanticContext() : input.memorySemanticContext;
 
     const [retrieval, memoryVersion, styleVersion] = await Promise.all([
         retrieveMemoryContext({
@@ -212,6 +230,8 @@ export async function buildChatMemoryContext(input: {
             query: input.query,
             now: input.now,
             approvedPairs,
+            semantic: input.semantic,
+            memorySemanticContext,
         }),
         stateVersion(input.userId),
         stateVersion(input.userId, STYLE_MEMORY_KINDS),
@@ -227,7 +247,10 @@ export async function buildChatMemoryContext(input: {
         memoryVersion,
         styleVersion,
         profileVersion: null,
-        retrievalHash: retrieval.resultHash,
+        retrievalHash: pricedMemoryRetrievalHash(
+            retrieval.selected.map(({ memory }) => memory.id),
+            JSON.stringify({ rules: prompt.rules, data: prompt.data }),
+            JSON.stringify(retrieval.effectiveQueryPlan)),
         retrievalVersion: retrieval.algorithmVersion,
         promptVersion: prompt.promptVersion,
         knowledgeHash: "none",
@@ -238,11 +261,16 @@ export async function buildChatMemoryContext(input: {
         prompt,
         // The block is what is sent, so the block is what is counted --
         // including its rules preamble, which is not free.
-        memoryTokens: prompt.text ? estimatePromptTokens(prompt.text) : 0,
+        memoryTokens: (prompt.rules ? estimatePromptTokens(prompt.rules) : 0) +
+            (prompt.data ? estimatePromptTokens(prompt.data) : 0),
         fingerprintInput,
         fingerprint: contextFingerprint(fingerprintInput),
         consideredCount: retrieval.consideredCount,
         truncatedByBudget:
             retrieval.omitted.token_budget + retrieval.omitted.item_cap > 0,
+        semanticRerank: retrieval.semanticRerank,
+        memoryQueryPolicy: retrieval.memoryQueryPolicy,
+        memoryHistorySources: retrieval.memoryHistorySources,
+        memoryQueryDigest: retrieval.memoryQueryPolicy === "full" ? memoryCurrentQueryDigest(input.query) : undefined,
     };
 }

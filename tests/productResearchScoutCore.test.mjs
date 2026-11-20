@@ -153,6 +153,9 @@ test("the walker counts a day's cap as capped, not as a failure", () => {
   assert.equal(scoutSendOutcome({ judged: false, reason: "model_off" }), "modelOff");
   assert.equal(scoutSendOutcome({ judged: false, reason: "daily_cap_reached" }), "capped");
   assert.equal(scoutSendOutcome({ refused: "images" }), "refused");
+  assert.equal(scoutSendOutcome({ judged: false, reason: "nothing_to_triage" }), "skipped");
+  assert.equal(scoutSendOutcome({ judged: false, reason: "no_recent_observation" }), "skipped");
+  assert.equal(scoutSendOutcome({ judged: false, reason: "observation_unreadable" }), "failed");
   assert.equal(scoutSendOutcome({ judged: false, reason: "model_failed" }), "failed");
   assert.equal(scoutSendOutcome({}), "failed");
   assert.equal(scoutSendOutcome(null), "failed");

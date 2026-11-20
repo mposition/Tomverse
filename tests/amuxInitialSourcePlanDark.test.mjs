@@ -16,7 +16,7 @@ function sourceFiles(directory) {
   });
 }
 
-test("the v4 initial source-plan writer has only its gated Admin access caller", () => {
+test("the v4 initial source-plan writer has only its Admin access callers", () => {
   const rootFiles = readdirSync(root, { withFileTypes: true })
     .filter((entry) => entry.isFile() && /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/.test(entry.name))
     .map((entry) => resolve(root, entry.name));
@@ -34,21 +34,9 @@ test("the v4 initial source-plan writer has only its gated Admin access caller",
     "app/api/admin/amux/ideas/initial-source-plan/route.ts",
     "lib/amux/ideaInitialSourcePlanAccess.ts",
   ]);
-  const route = readFileSync(resolve(root, callSites[1]), "utf8");
-  const access = readFileSync(resolve(root, callSites[2]), "utf8");
   // The one-request preview builder (amux-intake.md v18 item 1) reaches the
-  // writer only through the gated access function, behind the same switches.
+  // writer only through the access function.
   const builder = readFileSync(resolve(root, callSites[0]), "utf8");
-  assert.ok(builder.includes("if (!buildPreviewPermitted(process.env))"));
   assert.ok(builder.includes("prepareInitialIdeaSourcePlan(session, request, ideaId)"));
   assert.ok(!builder.includes("createInitialIdeaOnlySourcePlan"));
-  const builderGate = readFileSync(resolve(root, "lib/amux/ideaBuildPreviewCore.ts"), "utf8");
-  assert.ok(builderGate.includes("initialPlanWritePermitted(env[AMUX_V4_INITIAL_PLAN_WRITE_ENV])"));
-  assert.ok(builderGate.includes("initialPlanReadbackPermitted(env[AMUX_V4_INITIAL_PLAN_READBACK_ENV])"));
-  const core = readFileSync(resolve(root, "lib/amux/ideaInitialSourcePlanCore.ts"), "utf8");
-  assert.match(route, /!initialPlanWritePermitted\(process\.env\[AMUX_V4_INITIAL_PLAN_WRITE_ENV\]\)/);
-  assert.match(route, /!initialPlanReadbackPermitted\(process\.env\[AMUX_V4_INITIAL_PLAN_READBACK_ENV\]\)/);
-  assert.match(access, /!initialPlanWritePermitted\(process\.env\[AMUX_V4_INITIAL_PLAN_WRITE_ENV\]\)/);
-  assert.match(core, /AMUX_V4_INITIAL_PLAN_WRITE_CODE_ENABLED = true/);
-  assert.match(core, /AMUX_V4_INITIAL_PLAN_READBACK_CODE_ENABLED = true/);
 });

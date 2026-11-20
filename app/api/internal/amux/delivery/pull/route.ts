@@ -18,8 +18,9 @@ import {
 } from "@/lib/amux/internalRoute";
 import { pullAmuxWorkDelivery,
   type AmuxV22ReadOnlyDeliveryBinding } from "@/lib/amux/delivery";
-import { isAmuxExecutionApiEnabled } from "@/lib/amux/executionGate";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
+import { AMUX_BRIDGE_CONTEXT_CHUNKS_FEATURE, AMUX_BRIDGE_FEATURES_HEADER,
+  amuxBridgeFeatureListed } from "@/lib/amux/v22ContextPartsCore";
 
 const requestSchema = z
   .object({
@@ -74,18 +75,6 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!isAmuxExecutionApiEnabled()) {
-    return Response.json(
-      {
-        available: false,
-        reason: "execution_api_disabled",
-      },
-      {
-        status: 409,
-        headers: { "Cache-Control": "no-store" },
-      },
-    );
-  }
 
   return withAmuxRouteBudget(async () => {
     try {
@@ -95,6 +84,10 @@ export async function POST(request: Request) {
         worker: body.worker,
         instanceId: body.instance_id,
         generation: body.generation,
+        // An earlier app ignores the header, so a new bridge on it gets inline files.
+        contextChunks: amuxBridgeFeatureListed(
+          request.headers.get(AMUX_BRIDGE_FEATURES_HEADER),
+          AMUX_BRIDGE_CONTEXT_CHUNKS_FEATURE),
       });
 
       if (!outcome.available) {
@@ -133,6 +126,10 @@ export async function POST(request: Request) {
                       review_feedback_job_id:
                         outcome.delivery.v22Execution.reviewFeedbackJobId,
                     } : {}),
+                    ...(outcome.delivery.v22Execution.reviewAvoidVendors ? {
+                      review_avoid_vendors:
+                        outcome.delivery.v22Execution.reviewAvoidVendors,
+                    } : {}),
                   } : {}),
                 } : {}),
               ...(outcome.delivery.v22Execution.readOnlyRetry ? {
@@ -140,6 +137,10 @@ export async function POST(request: Request) {
                   outcome.delivery.v22Execution.readOnlyRetry),
               } : {}),
             } } : {}),
+            ...(outcome.delivery.contextParts?.length ? {
+              context_parts: outcome.delivery.contextParts.map((part) => ({
+                name: part.name, bytes: part.bytes, sha256: part.sha256 })),
+            } : {}),
             task_id: outcome.delivery.taskId,
             worker: outcome.delivery.worker,
             task_revision: outcome.delivery.taskRevision,

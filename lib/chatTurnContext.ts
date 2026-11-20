@@ -21,6 +21,9 @@ import {
     type ChatProfileContext,
 } from "@/lib/chatProfileContext";
 import type { ModelTier } from "@/lib/models";
+import type { MemorySemanticContextInput } from "@/lib/memoryQueryPlan";
+import type { SemanticStepsUsed } from "@/lib/chatContextBundleCore";
+import type { SemanticCallMode, SemanticStepModes } from "@/lib/semanticRetrievalCore";
 
 /**
  * Policy: docs/policy/external-conversation-import-and-memory.md.
@@ -33,11 +36,11 @@ import type { ModelTier } from "@/lib/models";
  * against a prompt and chat sends one, so a block only one of them knows about
  * is a block the user is charged wrongly for.
  *
- * ## The order is §9.1's, and it is one message
+ * ## Instructions and data have separate roles
  *
- * Instructions, then memory, then knowledge, assembled by
- * `buildProfileSystemPrompt` into a single system message. Three messages
- * would leave their order to the provider, and not every provider keeps it.
+ * Profile instructions, app-authored memory rules and knowledge retain their
+ * system block. Memory statements go separately into the user-role prelude,
+ * before native history and the current request, including Deep Research.
  *
  * ## A profile narrows memory; it never widens it
  *
@@ -63,6 +66,11 @@ export type ChatTurnContext = {
     fingerprint: string;
     /** Completed once memory use is known. Null when no profile ran. */
     binding: ProfileRuntimeBinding | null;
+    /**
+     * Which semantic retrieval steps shaped this context (§9a). The issuing
+     * route signs it into the bundle; the verifying route rebuilds with it.
+     */
+    semanticSteps: SemanticStepsUsed;
 };
 
 export async function buildChatTurnContext(input: {
@@ -76,7 +84,29 @@ export async function buildChatTurnContext(input: {
     /** What the caller's plan already permits. A profile intersects with it. */
     entitledTools?: AssistantToolPolicy;
     now?: Date;
+    /**
+     * How semantic retrieval may run on this build
+     * (docs/policy/external-conversation-import-and-memory.md §9a).
+     *
+     * The routes that issue a context bundle leave this unset, and the steps
+     * that actually ran come back as `semanticSteps` to be signed. The route
+     * that verifies one and sends passes `verifyingSemanticModes(steps)`:
+     * every step the bundle used is reproduced from its stored outcome and
+     * every other step is off, so it rebuilds exactly the signed selection,
+     * and the send path never waits on or pays the retrieval provider.
+     */
+    semantic?: SemanticCallMode | SemanticStepModes;
+    /** Memory-only server context; profile knowledge continues to use `query`. */
+    memorySemanticContext?: MemorySemanticContextInput;
 }): Promise<ChatTurnContext> {
+    const semantic: SemanticStepModes =
+        typeof input.semantic === "object"
+            ? input.semantic
+            : {
+                  memoryRerank: input.semantic ?? "allow",
+                  knowledgeNeighbours: input.semantic ?? "allow",
+                  knowledgeRerank: input.semantic ?? "allow",
+              };
     const profile = input.profileVersionId
         ? await buildChatProfileContext({
               userId: input.userId,
@@ -85,6 +115,10 @@ export async function buildChatTurnContext(input: {
               plan: input.plan ?? null,
               entitledTools:
                   input.entitledTools ?? { webSearch: true, deepResearch: true },
+              semantic: {
+                  neighbours: semantic.knowledgeNeighbours,
+                  rerank: semantic.knowledgeRerank,
+              },
           })
         : NO_PROFILE_CONTEXT;
 
@@ -97,11 +131,13 @@ export async function buildChatTurnContext(input: {
         // memory off by absence.
         profileMemoryPolicy: profile.memoryPolicy,
         now: input.now,
+        semantic: semantic.memoryRerank,
+        memorySemanticContext: input.memorySemanticContext,
     });
 
     const systemPrompt = buildProfileSystemPrompt({
         instructions: profile.instructionsPrompt,
-        memory: memory.prompt.text,
+        memory: memory.prompt.rules,
         knowledge: profile.knowledgePrompt,
     });
 
@@ -114,6 +150,11 @@ export async function buildChatTurnContext(input: {
     return {
         memory,
         profile,
+        semanticSteps: {
+            memoryRerank: memory.semanticRerank,
+            knowledgeNeighbours: profile.knowledgeSemanticSteps.neighbours,
+            knowledgeRerank: profile.knowledgeSemanticSteps.rerank,
+        },
         systemPrompt,
         memoryTokens: memory.memoryTokens,
         profileTokens: profile.profileTokens,

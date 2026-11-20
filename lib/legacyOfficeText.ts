@@ -34,6 +34,7 @@ import {
 } from "@/lib/legacyOffice/budget";
 import { hasCompoundFileSignature } from "@/lib/legacyOffice/cfbf";
 import { extractDocText } from "@/lib/legacyOffice/doc";
+import { extractHwpText, extractHwpxText } from "@/lib/legacyOffice/hwp";
 import { extractPptText } from "@/lib/legacyOffice/ppt";
 import { extractRtfText } from "@/lib/legacyOffice/rtf";
 import { extractXlsText } from "@/lib/legacyOffice/xls";
@@ -44,7 +45,7 @@ export {
 } from "@/lib/legacyOffice/budget";
 
 /** The registry ids this module answers for. */
-export type LegacyOfficeFormatId = "doc" | "xls" | "ppt" | "rtf";
+export type LegacyOfficeFormatId = "doc" | "xls" | "ppt" | "rtf" | "hwp" | "hwpx";
 
 const RTF_PREFIX = "{\\rtf";
 
@@ -77,6 +78,12 @@ const resolveParser = (
     if (format === "rtf") {
         if (!startsWithRtf(bytes)) throw new LegacyOfficeError("LEGACY_OFFICE_CORRUPT");
         return "rtf";
+    }
+    // HWPX is the one format here that *is* a ZIP; HWP 5.x is a compound file
+    // like the rest. HWP 3.x (Hangul 97) is neither and is refused.
+    if (format === "hwpx") {
+        if (!startsWithZip(bytes)) throw new LegacyOfficeError("LEGACY_OFFICE_CORRUPT");
+        return "hwpx";
     }
     if (startsWithRtf(bytes)) {
         // Only Word ever did this; a spreadsheet or a deck that is really RTF
@@ -123,6 +130,12 @@ export function extractLegacyOfficeText(
             break;
         case "rtf":
             text = extractRtfText(bytes, budget);
+            break;
+        case "hwp":
+            text = extractHwpText(bytes, budget);
+            break;
+        case "hwpx":
+            text = extractHwpxText(bytes, budget);
             break;
     }
 

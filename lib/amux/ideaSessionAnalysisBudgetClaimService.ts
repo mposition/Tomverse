@@ -18,6 +18,12 @@ import { readApprovedAmuxIdeaAnalysisPriceVersion } from
   "./ideaAnalysisPriceVersionRead.ts";
 import { readAmuxIdeaAnalysisFailureStreak } from
   "./ideaAnalysisFailureStreakService.ts";
+import { closeOpenAmuxSessionShadowUnknownClaimsInTx } from
+  "./ideaSessionAnalysisBudgetSettlementService.ts";
+import { amuxSessionNextClaimDue } from "./ideaSessionAnalysisRetryCore.ts";
+import { AMUX_V19_MAX_CLAIM_RUNNER_MARKER } from
+  "./ideaSessionMaxLauncherAttestation.mjs";
+import { AMUX_V19_SESSION_ANALYSIS_STOP_ACTION } from "./ideaSessionLateResult.ts";
 
 type Tx = Prisma.TransactionClient;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -75,6 +81,47 @@ export async function readAmuxSessionBudgetClaimReceipt(tx: Tx, input: {
     claimStatus: claim.status };
 }
 
+/** Read-only: the subscription (max_shadow) claims still in flight that were
+ * written before `before` by a runner that did not mark its claim. A runner
+ * that finds a marker naming no claim (left by a runner from before
+ * 2026-11-16) asks for the claims its stopped runs may have left open, then
+ * reports each one's outcome unknown through the existing unknown route. A
+ * claim whose audit metadata carries the runner mark belongs to a current
+ * runner, which may be working on it right now, so it is never listed.
+ * Identity only: no prompt, result or token count. Every match is returned,
+ * oldest first, with no count limit. */
+export async function listAmuxSessionInFlightShadowClaims(tx: Tx, input: {
+  before: Date;
+}): Promise<Array<{ claimId: string; requestId: string; reservationId: string;
+  ideaId: string; invocationOrdinal: number }>> {
+  if (!(input.before instanceof Date) || !Number.isFinite(input.before.getTime())) {
+    throw new AmuxSessionBudgetClaimError("not_ready");
+  }
+  await tx.$queryRaw`
+    SELECT set_config('statement_timeout', '5000', true) AS statement_limit,
+           set_config('idle_in_transaction_session_timeout', '10000', true) AS idle_limit,
+           set_config('TimeZone', 'UTC', true) AS transaction_zone
+  `;
+  const rows = await tx.amuxIdeaSessionAnalysisBudgetClaim.findMany({
+    where: { namespace: AMUX_V4_ANALYSIS_NAMESPACE, budgetMode: "max_shadow",
+      status: "in_flight", closedAt: null, resolutionAuditLogId: null,
+      createdAt: { lt: input.before } },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    select: { id: true, requestId: true, reservationId: true,
+      invocationOrdinal: true, reservation: { select: { ideaId: true } },
+      claimAudit: { select: { metadata: true } } },
+  });
+  // Filtered here, not in SQL: a JSON "not equal" skips a row whose key is
+  // missing, and a missing mark is exactly the claim this lists.
+  const marked = (metadata: unknown) => metadata !== null &&
+    typeof metadata === "object" && !Array.isArray(metadata) &&
+    (metadata as Record<string, unknown>).runnerMarker ===
+      AMUX_V19_MAX_CLAIM_RUNNER_MARKER;
+  return rows.filter((row) => !marked(row.claimAudit.metadata)).map((row) => ({ claimId: row.id, requestId: row.requestId,
+    reservationId: row.reservationId, ideaId: row.reservation.ideaId,
+    invocationOrdinal: row.invocationOrdinal }));
+}
+
 /** One invocation of a session reservation becomes one priced claim. This is a dark transaction
  * body: only the eventual trusted app dispatch writer may supply measured
  * runner capabilities. It does not start the CLI or accept model output. A
@@ -90,7 +137,9 @@ export async function commitAmuxSessionBudgetClaim(tx: Tx, input: {
   /** The launcher that verified one channel's subscription sign-in. Its
    * provider must be the reservation's channel (owner decision 2026-10-20). */
   maxLauncherIdentity?: { ideaId: string; provider: string; modelId: string;
-    reasoningEffort: string; authEvidenceDigest: string };
+    reasoningEffort: string; authEvidenceDigest: string;
+    /** Recorded in the claim's audit metadata when the runner sent it. */
+    runnerMarker?: typeof AMUX_V19_MAX_CLAIM_RUNNER_MARKER };
 }): Promise<{ claimId: string; reservationId: string; requestId: string;
   invocationOrdinal: number; reservedMicroUsd: string; auditId: string }> {
   if (!UUID.test(input.claimId) || !UUID.test(input.requestId) ||
@@ -144,23 +193,36 @@ export async function commitAmuxSessionBudgetClaim(tx: Tx, input: {
         planRefusals: { none: { state: "open" } } },
       select: { id: true },
     }) : null;
-  const latestClaim = await tx.amuxIdeaSessionAnalysisBudgetClaim.findFirst({
+  // Each invocation follows the one before it: after a result, or (for a
+  // subscription claim, operator 2026-11-16) after a claim that ended without
+  // one once its retry wait has passed. The idea stays `submitted` until its
+  // first result. The migration repeats the order rule at the write fence.
+  const maxShadow = input.runner.maxSubscriptionAuthenticated === true &&
+    input.runner.tokenCapsEnforceable === false;
+  const priorClaims = await tx.amuxIdeaSessionAnalysisBudgetClaim.findMany({
     where: { reservationId: input.reservationId },
     orderBy: { invocationOrdinal: "desc" },
-    select: { invocationOrdinal: true, status: true },
+    select: { id: true, invocationOrdinal: true, status: true,
+      budgetMode: true, closedAt: true },
   });
+  const latestClaim = priorClaims[0] ?? null;
+  const latestStopped = latestClaim ? await tx.adminAuditLog.findFirst({
+    where: { action: AMUX_V19_SESSION_ANALYSIS_STOP_ACTION,
+      targetType: AMUX_V19_SESSION_BUDGET_TARGET, targetId: latestClaim.id },
+    select: { id: true } }) : null;
+  const next = amuxSessionNextClaimDue(priorClaims.map((claim, index) => ({
+    status: claim.status, budgetMode: claim.budgetMode, closedAt: claim.closedAt,
+    ownerStopped: index === 0 && latestStopped !== null })), now);
   if (!reservation || reservation.status !== "queued" ||
       reservation.idea.submissionOrigin !== "session" ||
-      reservation.idea.state !==
-        (input.invocationOrdinal === 0 ? "submitted" : "analyzing") ||
+      reservation.idea.state !== (priorClaims.some((claim) =>
+        claim.status === "succeeded") ? "analyzing" : "submitted") ||
       reservation.idea.cancelledAt !== null ||
       reservation.idea.analysisCompletedAt !== null ||
       rawAvailable === null ||
       now >= reservation.idea.analysisDeadlineAt ||
-      (input.invocationOrdinal === 0
-        ? latestClaim !== null
-        : !latestClaim || latestClaim.status !== "succeeded" ||
-          latestClaim.invocationOrdinal !== input.invocationOrdinal - 1)) {
+      input.invocationOrdinal !== (latestClaim ? latestClaim.invocationOrdinal + 1 : 0) ||
+      !next.due || (next.afterFailure && !maxShadow)) {
     throw new AmuxSessionBudgetClaimError("not_ready");
   }
   const latestScope = await tx.amuxIdeaOperatingScopeSetting.findFirst({
@@ -173,8 +235,6 @@ export async function commitAmuxSessionBudgetClaim(tx: Tx, input: {
   // subscription CLI call has no per-call price, so it needs no price approval
   // (owner decision 2026-11-04). The stored rates only convert observed tokens
   // into the shadow estimate.
-  const maxShadow = input.runner.maxSubscriptionAuthenticated === true &&
-    input.runner.tokenCapsEnforceable === false;
   const price = maxShadow ? null : await readApprovedAmuxIdeaAnalysisPriceVersion(tx, {
     priceVersionId: input.priceVersionId,
     provider: reservation.modelProvider,
@@ -187,6 +247,13 @@ export async function commitAmuxSessionBudgetClaim(tx: Tx, input: {
   }
   const bounded = price?.decision === "ready" ? price.price : null;
   const rates = bounded ?? AMUX_V4_CLAUDE_OPUS_55_COST_PROFILE;
+  // An unknown subscription outcome is closed by the system as it is
+  // recorded (operator, 2026-11-16). One still open was recorded before that
+  // and waited for the owner; it is closed the same way here.
+  if (maxShadow) {
+    try { await closeOpenAmuxSessionShadowUnknownClaimsInTx(tx); }
+    catch { throw new AmuxSessionBudgetClaimError("integrity_unavailable"); }
+  }
   const setting = await readAnalysisMonthlyBudgetSetting(tx);
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   await tx.amuxIdeaAnalysisBudgetWindow.createMany({
@@ -206,38 +273,41 @@ export async function commitAmuxSessionBudgetClaim(tx: Tx, input: {
   if (!window || window.limitMicroUsd !== BigInt(setting.limitMicroUsd)) {
     throw new AmuxSessionBudgetClaimError("budget_unavailable");
   }
-  const [v4Unknown, sessionUnknown] = await Promise.all([
-    tx.amuxIdeaAnalysisBudgetHold.findFirst({ where: {
-      namespace: AMUX_V4_ANALYSIS_NAMESPACE, status: "outcome_unknown",
-    }, select: { id: true } }),
-    tx.amuxIdeaSessionAnalysisBudgetClaim.findFirst({ where: {
-      namespace: AMUX_V4_ANALYSIS_NAMESPACE, status: "outcome_unknown",
-    }, select: { id: true } }),
-  ]);
-  const [v4Active, sessionActive] = await Promise.all([
-    tx.amuxIdeaAnalysisBudgetHold.findFirst({ where: {
-      namespace: AMUX_V4_ANALYSIS_NAMESPACE, status: "in_flight",
-    }, select: { id: true } }),
-    tx.amuxIdeaSessionAnalysisBudgetClaim.findFirst({ where: {
-      namespace: AMUX_V4_ANALYSIS_NAMESPACE, status: "in_flight",
-    }, select: { id: true } }),
-  ]);
-  if (v4Active || sessionActive) {
-    throw new AmuxSessionBudgetClaimError("not_ready");
+  // A paid (bounded) claim still waits for any running or unknown analysis
+  // and the monthly ceiling. A subscription claim spends no money: it runs
+  // beside every other claim, one per worker, and the month's shadow total is
+  // a record, not a stop (operator, 2026-11-16).
+  let usageState: "known" | "unknown" = "known";
+  if (!maxShadow) {
+    const [v4Unknown, sessionUnknown, v4Active, sessionActive] = await Promise.all([
+      tx.amuxIdeaAnalysisBudgetHold.findFirst({ where: {
+        namespace: AMUX_V4_ANALYSIS_NAMESPACE, status: "outcome_unknown",
+      }, select: { id: true } }),
+      tx.amuxIdeaSessionAnalysisBudgetClaim.findFirst({ where: {
+        namespace: AMUX_V4_ANALYSIS_NAMESPACE, status: "outcome_unknown",
+      }, select: { id: true } }),
+      tx.amuxIdeaAnalysisBudgetHold.findFirst({ where: {
+        namespace: AMUX_V4_ANALYSIS_NAMESPACE, status: "in_flight",
+      }, select: { id: true } }),
+      tx.amuxIdeaSessionAnalysisBudgetClaim.findFirst({ where: {
+        namespace: AMUX_V4_ANALYSIS_NAMESPACE, status: "in_flight",
+      }, select: { id: true } }),
+    ]);
+    if (v4Active || sessionActive) {
+      throw new AmuxSessionBudgetClaimError("not_ready");
+    }
+    usageState = v4Unknown || sessionUnknown ? "unknown" : "known";
   }
-  const failureStreak = await readAmuxIdeaAnalysisFailureStreak(tx);
+  // A subscription session is never stopped by a failure streak (owner
+  // direction 2026-11-15); only the paid path is.
+  const failureStreak = await readAmuxIdeaAnalysisFailureStreak(tx, "session");
   if (failureStreak !== "ready") {
     throw new AmuxSessionBudgetClaimError(failureStreak === "stopped"
       ? "not_ready" : "integrity_unavailable");
   }
-  const usageState = v4Unknown || sessionUnknown ? "unknown" as const : "known" as const;
   const decision = bounded === null ? assessSessionShadowBudget({
     mode: "subscription_cli", provider: reservation.modelProvider,
     billableToolsDisabled: input.runner.billableToolsDisabled,
-    consumedMicroUsd: window.spentMicroUsd.toString(),
-    reservedMicroUsd: window.reservedMicroUsd.toString(),
-    shadowOverrunMicroUsd: window.shadowOverrunMicroUsd.toString(),
-    monthlyLimitMicroUsd: window.limitMicroUsd.toString(), usageState,
   }) : assessAmuxIdeaAnalysisBudget({
     ...bounded, tokenCapsEnforceable: input.runner.tokenCapsEnforceable,
     billableToolsDisabled: input.runner.billableToolsDisabled,
@@ -251,7 +321,7 @@ export async function commitAmuxSessionBudgetClaim(tx: Tx, input: {
   if (decision.decision === "hold") {
     throw new AmuxSessionBudgetClaimError("budget_hold", decision.reason);
   }
-  const reservedMicroUsd = decision.decision === "occupy_headroom"
+  const reservedMicroUsd = decision.decision === "record_only"
     ? decision.reservedMicroUsd : decision.worstCaseMicroUsd;
   const budgetMode = maxShadow ? "max_shadow" : "bounded";
   const auditId = await writeSystemAuditLog({
@@ -259,7 +329,7 @@ export async function commitAmuxSessionBudgetClaim(tx: Tx, input: {
     action: AMUX_V19_SESSION_BUDGET_CLAIM_ACTION,
     targetType: AMUX_V19_SESSION_BUDGET_TARGET, targetId: input.claimId,
     summary: maxShadow
-      ? "Occupied monthly shadow headroom for one subscription CLI analysis."
+      ? "Claimed one subscription CLI analysis; its shadow usage is recorded, nothing reserved."
       : "Claimed one bounded v19 session analysis against the shared Agent monthly budget.",
     metadata: { reservationId: input.reservationId,
       invocationOrdinal: input.invocationOrdinal,
@@ -271,7 +341,10 @@ export async function commitAmuxSessionBudgetClaim(tx: Tx, input: {
       ...(maxShadow ? { ideaId: reservation.ideaId,
         reasoningEffort: reservation.reasoningEffort,
         maxAuthProfile: amuxSubscriptionAuthProfile(reservation.modelProvider),
-        maxAuthEvidenceDigest: input.maxLauncherIdentity!.authEvidenceDigest } : {}),
+        maxAuthEvidenceDigest: input.maxLauncherIdentity!.authEvidenceDigest,
+        ...(input.maxLauncherIdentity!.runnerMarker ===
+          AMUX_V19_MAX_CLAIM_RUNNER_MARKER
+          ? { runnerMarker: AMUX_V19_MAX_CLAIM_RUNNER_MARKER } : {}) } : {}),
       amountMeaning: decision.amountMeaning, modelCallStarted: false },
   });
   const incremented = await tx.amuxIdeaAnalysisBudgetWindow.updateMany({

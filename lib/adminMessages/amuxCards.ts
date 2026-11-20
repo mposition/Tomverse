@@ -8,6 +8,7 @@ export const adminAmuxCardsMessages = defineAdminMessages({
       "Read-only list of the AMUX cards stored in Tomverse, which is where their status lives. The local AMUX board does not show these cards. The only change this screen makes is answering a worker's question, which sends its Task back to that worker.",
     shown: (shown: number, total: number, limit: number) =>
       `Showing ${shown} of ${total} cards, the ${limit} most recently updated, ordered by status.`,
+    showMore: (count: number) => `Show ${count} more`,
     columnCard: "Card",
     sourceKey: "Source key",
     columnStatus: "Status",
@@ -66,7 +67,6 @@ export const adminAmuxCardsMessages = defineAdminMessages({
     dmState: (dm: AmuxV22QuestionDm, reason: (code: string) => string) => {
       switch (dm.state) {
         case "not_sent": return {
-          routing_off: "Not sent to the Decision Maker: DM routing is off (TOMVERSE_AMUX_DM_ROUTING).",
           kill_switch: "Not sent to the Decision Maker: the kill switch is on.",
           switches_unreadable: "Not sent to the Decision Maker: its switches could not be read.",
           no_provider: "Not sent to the Decision Maker: the asking run has no provider, so the relay passes this question over.",
@@ -99,6 +99,7 @@ export const adminAmuxCardsMessages = defineAdminMessages({
       "Tomverse에 저장된 AMUX 카드의 읽기 전용 목록입니다. 카드 상태의 정본은 여기입니다. 로컬 AMUX Board에는 이 카드가 보이지 않습니다. 이 화면이 바꾸는 것은 워커 질문에 답하는 것 하나이고, 답하면 그 Task가 같은 워커에게 돌아갑니다.",
     shown: (shown: number, total: number, limit: number) =>
       `카드 ${total}장 가운데 최근 갱신된 ${limit}장 한도에서 ${shown}장을 상태 순으로 보여 줍니다.`,
+    showMore: (count: number) => `${count}장 더 보기`,
     columnCard: "카드",
     sourceKey: "원본 키",
     columnStatus: "상태",
@@ -157,7 +158,6 @@ export const adminAmuxCardsMessages = defineAdminMessages({
     dmState: (dm: AmuxV22QuestionDm, reason: (code: string) => string) => {
       switch (dm.state) {
         case "not_sent": return {
-          routing_off: "DM에 전달되지 않았어요: DM 라우팅이 꺼져 있어요(TOMVERSE_AMUX_DM_ROUTING).",
           kill_switch: "DM에 전달되지 않았어요: Decision Maker kill switch가 켜져 있어요.",
           switches_unreadable: "DM에 전달되지 않았어요: Decision Maker 스위치를 읽지 못했어요.",
           no_provider: "DM에 전달되지 않았어요: 질문한 실행에 provider 기록이 없어 릴레이가 이 질문을 건너뜁니다.",

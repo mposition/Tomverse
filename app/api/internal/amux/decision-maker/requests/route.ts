@@ -16,6 +16,7 @@ import {
   DecisionMakerDigestKeyError,
   loadDecisionMakerDigestKeyRing,
 } from "@/lib/amux/decisionMakerDigestKeys";
+import { DM_CARD_TEXT_MAX_BYTES } from "@/lib/amux/decisionMakerCore";
 import { DecisionMakerRequestWriteError } from "@/lib/amux/decisionMakerRequestStore";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import {
@@ -39,16 +40,14 @@ import {
  * 남는다"). A request is one per (card, question revision) (§9), so sending
  * the same question again after an unknown outcome reads back the request
  * that committed instead of making a second one.
- *
- * Closed until the operator sets `TOMVERSE_AMUX_DM_ROUTING=enabled`: the
- * bridge path that calls this is stage S2 (§12), and until it is approved and
- * running no request row is written, whatever the switches say.
  */
 
-const AMUX_DM_ROUTING_ENV = "TOMVERSE_AMUX_DM_ROUTING";
-
-/** The card text is capped at 16 KiB (§5); the body carries it once, with the binding. */
-const MAX_BODY_BYTES = 64 * 1_024;
+/**
+ * The card text has one cap (§5, `DM_CARD_TEXT_MAX_BYTES`); the body carries it
+ * once, with the binding. A card over the cap still reaches the routing, which
+ * sends it to the operator (`input_limit_exceeded`), so the body may hold it.
+ */
+const MAX_BODY_BYTES = 2 * DM_CARD_TEXT_MAX_BYTES;
 
 const requestSchema = z
   .object({
@@ -65,9 +64,6 @@ const refused = (status: number, reason: string) =>
 export async function POST(request: Request) {
   if (!isAmuxSyncAuthorized(request)) {
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
-  }
-  if (process.env[AMUX_DM_ROUTING_ENV] !== "enabled") {
-    return refused(409, "dm_routing_disabled");
   }
 
   return withAmuxRouteBudget(async () => {

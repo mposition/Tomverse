@@ -41,6 +41,7 @@ import { localizedPath } from "@/lib/seo";
 export const PROVIDER_LABELS: Record<AiProvider, string> = {
   openai: "OpenAI",
   anthropic: "Anthropic",
+  cohere: "Cohere",
   google: "Google",
   groq: "Groq",
   xai: "xAI",

@@ -18,6 +18,7 @@
  * unknown outcome (see the run log).
  */
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { createConnection } from "node:net";
 import {
   appendFileSync,
@@ -37,6 +38,7 @@ import { fileURLToPath } from "node:url";
 import { release, tryAcquire } from "../../review-orchestrator/lib/fsutil.mjs";
 import { DEFAULTS, FAILURE_REASONS, GIT_IDENTITY, LIMITS, OUTCOME_FAILED, OUTCOME_PR_OPENED, REPO_URL } from "../lib/contract.mjs";
 import {
+  workAssessment,
   TEST_LANES,
   branchNameFor,
   buildInstruction,
@@ -49,6 +51,7 @@ import {
   leaseAllowsPublish,
   lintableFiles,
   parseRawDiff,
+  publicAgentSummary,
   selectRelatedTests,
 } from "../lib/core.mjs";
 
@@ -107,6 +110,7 @@ export function readRunnerConfig(env) {
     gatewaySocket: env.AUTOREC_GATEWAY_SOCKET || DEFAULTS.gatewaySocket,
     nodeBin: process.execPath,
     npmBin: env.AUTOREC_NPM_BIN || DEFAULTS.npmBin,
+    dailyProduct: env.AUTOREC_RUN_DAILY === "true",
     // Optional: a `claude setup-token` token from /etc/autorec/claude.env.
     claudeOauthToken: env.CLAUDE_CODE_OAUTH_TOKEN || null,
   };
@@ -153,6 +157,18 @@ function parseJsonObject(text) {
   }
 }
 
+/** Private operator log only; command output never enters a result or journal event. */
+function reviewDiagnostic(result) {
+  return `${result.stdout || ""}\n${result.stderr || ""}`
+    .replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/g, "[private key redacted]")
+    .replace(/\b(?:Bearer|Basic)\s+\S+/gi, "[authorization redacted]")
+    .replace(/\b(?:sk-|gh[pousr]_|github_pat_|xox[baprs]-)[A-Za-z0-9_-]+/g, "[credential redacted]")
+    .replace(/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, "[access key redacted]")
+    .replace(/((?:token|secret|password|authorization|api[_-]?key)\s*["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\S+)/gi, "$1[redacted]")
+    .replace(/(?:https?|postgres(?:ql)?):\/\/[^\s/@]+:[^\s/@]+@[^\s]+/gi, "[credential URL redacted]")
+    .slice(-12_000);
+}
+
 /** Make sure the mirror's node_modules matches develop's lockfile and Prisma schema. */
 async function ensureDependencies(deps, base) {
   const { config, exec, fs } = deps;
@@ -188,9 +204,11 @@ async function review(deps, ctx, claim, base, head) {
   // The base is the develop commit this run fetched itself. The client also
   // looks at the worktree's own refs, which the agent's code can move, so the
   // verdict counts only when the job reports this base and this head.
+  deps.log("review_requested", { base, head });
   const submitted = await client(["submit", "--author", "claude", "--base", base, "--scope", scope], 10 * 60_000);
   const jobId = parseJsonObject(submitted.stdout)?.jobId;
   if (submitted.code !== 3 || typeof jobId !== "string" || !REVIEW_JOB_ID.test(jobId)) {
+    deps.runLog("review_submit", reviewDiagnostic(submitted));
     deps.log("review_submit_failed", { code: submitted.code });
     return { verdict: "unknown", jobId: null };
   }
@@ -209,10 +227,12 @@ async function review(deps, ctx, claim, base, head) {
     if (verdict === "accept") {
       const job = parseJsonObject(waited.stdout);
       if (job?.head !== head || job?.base !== base || (job?.focus ?? null) !== null) {
+        deps.runLog("review_wait", reviewDiagnostic(waited));
         deps.log("review_range_mismatch", { jobId });
         return { verdict: "unknown", jobId };
       }
     }
+    if (verdict !== "accept") deps.runLog("review_wait", reviewDiagnostic(waited));
     return { verdict: verdict === "pending" ? "unknown" : verdict, jobId };
   }
 }
@@ -220,6 +240,7 @@ async function review(deps, ctx, claim, base, head) {
 /** Everything between the claim and the publish. Returns the outcome to report. */
 async function work(deps, claim, ctx) {
   const { config, exec, fs } = deps;
+  claim = { ...claim, dailyProduct: config.dailyProduct };
   const git = (cwd, args, timeoutMs = 120_000) => exec(config.gitBin, ["-C", cwd, ...args], { env: baseEnv(config), timeoutMs });
 
   ctx.stage = "setup";
@@ -239,6 +260,30 @@ async function work(deps, claim, ctx) {
   const baseResult = await git(config.mirror, ["rev-parse", "--verify", "refs/remotes/origin/develop^{commit}"]);
   if (baseResult.code !== 0) return failed("setup_failed", "develop_missing");
   const base = baseResult.stdout.trim();
+  if (config.dailyProduct) {
+    const context = await deps.gateway({ op: "work_context" }, null, 3 * 60_000);
+    if (context?.status !== "context" || !Array.isArray(context.pulls) || context.pulls.length > 200 ||
+        context.pulls.some(pr => !Number.isSafeInteger(pr.number) || pr.number < 1 || pr.number > 999999999 || !/^[0-9a-f]{40}$/.test(pr.head ?? ""))) {
+      return failed("setup_failed", "work_context");
+    }
+    if (context.pulls.length) {
+      const refs = context.pulls.map(pr => `+refs/pull/${pr.number}/head:refs/autorec/context/pr-${pr.number}`);
+      ctx.contextRefs = context.pulls.map(pr => `refs/autorec/context/pr-${pr.number}`);
+      if ((await git(config.mirror, ["fetch", "--no-tags", "--quiet", REPO_URL, ...refs], LIMITS.setupMs)).code !== 0) return failed("setup_failed", "work_context_fetch");
+      for (const pr of context.pulls) {
+        const actual = await git(config.mirror, ["rev-parse", `refs/autorec/context/pr-${pr.number}`]);
+        if (actual.code !== 0 || !/^[0-9a-f]{40}$/.test(actual.stdout.trim())) return failed("setup_failed", "work_context_invalid");
+        // A push after the API listing is normal. Inspect the fetched commit,
+        // instead of stopping the entire batch on an unrelated PR update.
+        pr.head = actual.stdout.trim();
+        const paths = await git(config.mirror, ["diff", "--name-only", `${base}...${pr.head}`]);
+        pr.pathsUnavailable = paths.code !== 0;
+        pr.paths = paths.code === 0 ? paths.stdout.slice(0, 1500) : "";
+        pr.pathsTruncated = paths.stdout.length > 1500;
+      }
+    }
+    claim = { ...claim, openPrs: context.pulls, previousWork: ctx.previousWork };
+  }
   // A previous run that died mid-way may have left both behind.
   await git(config.mirror, ["worktree", "prune"]);
   if (fs.exists(worktree)) await git(config.mirror, ["worktree", "remove", "--force", worktree]);
@@ -269,6 +314,18 @@ async function work(deps, claim, ctx) {
   deps.runLog("agent_result", typeof summary?.result === "string" ? summary.result.slice(-8_000) : agent.stderr.slice(-4_000));
   if (agent.timedOut) return failed("timeout");
   if (agent.code !== 0) return failed("agent_error");
+  if (config.dailyProduct) {
+    const assessment = workAssessment(summary?.result, claim.openPrs);
+    if (!assessment) return failed("no_change", "work_assessment_missing");
+    if (assessment.disposition === "already_satisfied") {
+      if ((await git(worktree, ["merge-base", "--is-ancestor", assessment.commit, base])).code !== 0) return failed("no_change", "work_assessment_unverified");
+      return failed("already_satisfied");
+    }
+    if (assessment.disposition === "covered_by_pr") return failed("covered_by_pr", `pr_${assessment.pr}`);
+    if (assessment.disposition === "blocked") return failed("no_change");
+  }
+  const publicSummary = publicAgentSummary(summary?.result);
+  if (publicSummary) claim = { ...claim, publicSummary };
 
   // Only committed work counts: drop anything the agent left uncommitted.
   await git(worktree, ["reset", "--quiet", "--hard", "HEAD"]);
@@ -295,6 +352,7 @@ async function work(deps, claim, ctx) {
     return failed(scope.reason);
   }
 
+  deps.log("change_prepared", { base, head });
   ctx.stage = "tests";
   const changed = changes.map((change) => change.path);
   const related = selectRelatedTests(changed, fs.listTestFiles(worktree), (path) => fs.readText(join(worktree, path)));
@@ -358,7 +416,7 @@ async function work(deps, claim, ctx) {
     deps.log("publish_no_answer", { message: error.message });
     return { unknown: "publish" };
   }
-  deps.log("publish_answer", { status: reply?.status ?? null, code: reply?.code ?? null, detail: reply?.detail ?? null });
+  deps.log("publish_answer", { status: reply?.status ?? null, code: reply?.code ?? null, detail: reply?.detail ?? null, step: reply?.step ?? null });
   if (reply?.status === "published") return { outcome: OUTCOME_PR_OPENED, prUrl: reply.prUrl };
   if (reply?.status === "refused") return failed(FAILURE_REASONS.includes(reply.code) ? reply.code : "runner_error");
   if (reply?.status === "failed" && reply.code === "pr_failed") return failed("pr_failed");
@@ -371,13 +429,14 @@ async function cleanup(deps, ctx) {
   try {
     if (ctx.worktree) await git(["worktree", "remove", "--force", ctx.worktree]);
     if (ctx.branch) await git(["branch", "-D", ctx.branch]);
+    for (const ref of ctx.contextRefs ?? []) await git(["update-ref", "-d", ref]);
     await git(["worktree", "prune"]);
   } catch (error) {
     deps.log("cleanup_failed", { message: error.message });
   }
 }
 
-async function report(deps, claim, outcome) {
+async function report(deps, claim, outcome, onReport) {
   const body =
     outcome.outcome === OUTCOME_PR_OPENED
       ? { op: "result", id: claim.id, claimId: claim.claimId, outcome: OUTCOME_PR_OPENED, prUrl: outcome.prUrl }
@@ -387,13 +446,15 @@ async function report(deps, claim, outcome) {
     reply = await deps.gateway(body, null, 3 * 60_000);
   } catch (error) {
     deps.log("result_no_answer", { message: error.message });
+    onReport("unknown");
     return 1;
   }
   deps.log("result_answer", { status: reply?.status ?? null, code: reply?.code ?? null });
+  onReport(reply?.status === "reported" ? "reported" : reply?.status === "error" || reply?.status === "refused" ? "failed" : "unknown");
   return reply?.status === "reported" ? 0 : 1;
 }
 
-export async function runLocked(deps) {
+export async function runLocked(deps, { onEmpty = () => {}, onClaim = () => {}, onOutcome = () => {}, onReport = () => {}, previousWork = [] } = {}) {
   let reply;
   try {
     reply = await deps.gateway({ op: "claim" }, null, 3 * 60_000);
@@ -402,6 +463,7 @@ export async function runLocked(deps) {
     return 1;
   }
   if (reply?.status === "empty") {
+    onEmpty();
     deps.log("no_recommendation");
     return 0;
   }
@@ -410,9 +472,10 @@ export async function runLocked(deps) {
     return 1;
   }
   const claim = reply.claim;
+  onClaim();
   deps.startRunLog(claim.id);
   deps.log("claimed", { id: claim.id, leaseUntil: claim.leaseUntil });
-  const ctx = { stage: "claimed", worktree: null, branch: null, reviewJobId: null };
+  const ctx = { stage: "claimed", worktree: null, branch: null, reviewJobId: null, previousWork };
   let outcome;
   try {
     outcome = await work(deps, claim, ctx);
@@ -422,12 +485,15 @@ export async function runLocked(deps) {
   } finally {
     await cleanup(deps, ctx);
   }
+  onOutcome(outcome);
+  previousWork.push({ id: claim.id, recommendation: claim.recommendation.slice(0, 1000),
+    outcome: outcome.outcome ?? "unknown", reason: outcome.reason ?? null, prUrl: outcome.prUrl ?? null });
   if (outcome.unknown) {
     deps.log("outcome_unknown", { step: outcome.unknown, id: claim.id });
     return 1;
   }
   deps.log("outcome", { outcome: outcome.outcome, reason: outcome.reason ?? null, detail: outcome.detail ?? null, prUrl: outcome.prUrl ?? null });
-  return report(deps, claim, outcome);
+  return report(deps, claim, outcome, onReport);
 }
 
 export async function runOnce(deps) {
@@ -439,10 +505,58 @@ export async function runOnce(deps) {
   }
   try {
     deps.pruneLogs();
-    return await runLocked(deps);
+    return deps.config.dailyProduct ? await runDailyBatch(deps) : await runLocked(deps);
   } finally {
     deps.lock.release(lockPath, token);
   }
+}
+
+/** Task failures advance; infrastructure failures and unknown outcomes stop the batch. */
+export async function runDailyBatch(deps) {
+  const started = deps.now();
+  const previousWork = [];
+  const notice = { runId: randomUUID(), attempted: 0, prOpened: 0, lastPrUrl: null };
+  const stopped = async (reason) => {
+    try {
+      // One attempt only. An unanswered notice may already have reached the app.
+      const answer = await deps.gateway({ op: "halt_notice", ...notice, reason }, null, 90_000);
+      deps.log("halt_notice_answer", { status: answer?.status ?? null, code: answer?.code ?? null });
+    } catch {
+      deps.log("halt_notice_unknown");
+    }
+    return 1;
+  };
+  try {
+    for (let count = 0; count < LIMITS.tasksPerDay && deps.now() - started < LIMITS.dailyRunMs; count += 1) {
+      let empty = false;
+      let outcome = null;
+      let reportState = null;
+      const code = await runLocked(deps, {
+        previousWork,
+        onEmpty: () => { empty = true; }, onClaim: () => { notice.attempted += 1; },
+        onReport: (value) => { reportState = value; },
+        onOutcome: (value) => {
+          outcome = value;
+          if (value.outcome === OUTCOME_PR_OPENED) { notice.prOpened += 1; notice.lastPrUrl = value.prUrl; }
+        },
+      });
+      if (code !== 0) {
+        let reason = "claim_failed";
+        if (outcome?.unknown === "publish") reason = "publish_unknown";
+        else if (outcome) reason = reportState === "failed" ? "result_failed" : "result_unknown";
+        return stopped(reason);
+      }
+      if (empty) return 0;
+      if (outcome?.outcome === OUTCOME_FAILED && !["no_change", "already_satisfied", "covered_by_pr", "out_of_scope", "tests", "review_reject"].includes(outcome.reason)) {
+        deps.log("daily_batch_paused", { reason: outcome.reason });
+        return stopped(outcome.reason);
+      }
+    }
+  } catch {
+    return stopped("runner_error");
+  }
+  deps.log("daily_batch_limit");
+  return 0;
 }
 
 // ---------------------------------------------------------------- real I/O

@@ -14,6 +14,9 @@ A span is clean when, in every still of it:
 - hands, faces, bodies and objects keep their shape (no extra fingers, melting
   or merging);
 - nothing looks like a real, identifiable person or a brand;
+- nothing can read as death, suicide, loss, illness or danger (empty shoes or
+  clothes left behind, an empty chair, a lone figure at an edge, a drop, stairs
+  vanishing into fog); when in doubt, drop the clip;
 - it shows what it was meant to show, and the motion does not jump.
 
 Keep the longest clean span of at least 1.0 s from 0.0 to 5.0 s. When none

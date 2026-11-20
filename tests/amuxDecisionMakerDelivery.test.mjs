@@ -519,7 +519,7 @@ test("the delivery read and route hold no SQL, no table name and no log of the m
     assert.doesNotMatch(source, /\$(queryRaw|executeRaw)(Unsafe)?\s*(<|`|\()|"AmuxDecisionMaker[A-Za-z]+"/, path);
     assert.doesNotMatch(source, /console\.(log|info|warn|error)\([^)]*message/, path);
   }
-  // Each route answers the disabled switch before it reads its body.
+  // Each route authenticates before it reads its body, and no route has a routing switch.
   for (const path of [
     "app/api/internal/amux/decision-maker/deliveries/next/route.ts",
     "app/api/internal/amux/decision-maker/deliveries/route.ts",
@@ -528,8 +528,8 @@ test("the delivery read and route hold no SQL, no table name and no log of the m
     "app/api/internal/amux/decision-maker/requests/direct-answer/route.ts",
   ]) {
     const source = read(path);
-    assert.ok(source.indexOf("dmInternalRoutesEnabled()") < source.indexOf("readLimitedJson("), path);
-    assert.ok(source.indexOf("isAmuxSyncAuthorized(request)") < source.indexOf("dmInternalRoutesEnabled()"), path);
+    assert.doesNotMatch(source, /dmInternalRoutesEnabled|dm_routing_disabled|TOMVERSE_AMUX_DM_ROUTING/, path);
+    assert.ok(source.indexOf("isAmuxSyncAuthorized(request)") < source.indexOf("readLimitedJson("), path);
   }
 });
 

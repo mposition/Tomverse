@@ -1,5 +1,8 @@
 "use client";
 
+import { beginConnectedJourney, journeyStep, targetImportJourney, type ConnectedJourney } from "@/lib/connectedJourneyAnalytics";
+import { onJourneyIdentityInvalidated } from "@/lib/connectedJourneyIdentity";
+import type { JourneyEntry } from "@/lib/connectedJourneyShared";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -49,6 +52,7 @@ import { discardResponseBody } from "@/lib/discardResponseBody";
 export type ContinuationLauncherStatus = "idle" | "creating" | "failed";
 
 export type ContinuationLauncher = {
+    begin: () => void;
     status: ContinuationLauncherStatus;
     /** Set only while `status` is "failed". */
     errorMessage: string | null;
@@ -60,7 +64,7 @@ export type ContinuationLauncher = {
      * from the render that started the attempt; the card uses it to collapse
      * its disclosure back to a retry button.
      */
-    start: () => Promise<boolean>;
+    start: (openPicker?: boolean) => Promise<boolean>;
     /** The one thing that drops the key: an explicit "no, start over". */
     cancel: () => void;
 };
@@ -83,6 +87,12 @@ export type ContinuationLaunchSource =
  * unmount: pressing again replays it rather than making a second conversation.
  */
 const openAttemptKeys = new Map<string, string>();
+const openJourneyAttempts = new Map<string, ConnectedJourney | null>();
+onJourneyIdentityInvalidated(() => {
+    // Keep a null sentinel: re-allowing analytics must not retroactively start
+    // an attempt whose CTA was already pressed under another identity/choice.
+    for (const key of openJourneyAttempts.keys()) openJourneyAttempts.set(key, null);
+});
 
 const launchEndpoint = (source: ContinuationLaunchSource): string =>
     "externalConversationId" in source
@@ -92,6 +102,7 @@ const launchEndpoint = (source: ContinuationLaunchSource): string =>
 export function useContinuationLauncher(
     source: ContinuationLaunchSource,
     options: {
+        journeyEntry?: JourneyEntry;
         /**
          * Whether the screen that pressed is still the one on show, read when
          * the answer lands. The Compare-in-Review caller moves its selection
@@ -148,14 +159,20 @@ export function useContinuationLauncher(
             generationRef.current += 1;
         };
     }, [endpoint]);
+    const begin = useCallback(() => {
+        if (!options.journeyEntry || openJourneyAttempts.has(endpoint)) return;
+        openJourneyAttempts.set(endpoint, beginConnectedJourney(options.journeyEntry, "new"));
+    }, [endpoint, options.journeyEntry]);
     const creating = status === "creating" && stateEndpoint === endpoint;
 
-    const start = useCallback(async (): Promise<boolean> => {
+    const start = useCallback(async (openPicker = false): Promise<boolean> => {
         // Guards the double click at the source: the second press finds the
         // launcher already creating and returns before it can send anything.
         // The button is disabled too, but a disabled attribute is a rendering
         // detail and this is the invariant.
         if (creating) return false;
+        begin();
+        const journey = openJourneyAttempts.get(endpoint);
 
         // `crypto.randomUUID` exists in every browser this application
         // supports; the fallback keeps a non-secure context (an http://
@@ -203,6 +220,7 @@ export function useContinuationLauncher(
                     settleStale();
                     return false;
                 }
+                journeyStep(journey, "issue", "create_failed");
                 setStatus("failed");
                 setErrorMessage(refusalMessage(response.status, t));
                 return false;
@@ -213,16 +231,20 @@ export function useContinuationLauncher(
                 return false;
             }
             if (!body.conversationId) {
+                journeyStep(journey, "issue", "create_failed");
                 setStatus("failed");
                 setErrorMessage(t("continuation.createFailed"));
                 return false;
             }
             if (beforeNavigateRef.current && !beforeNavigateRef.current()) {
+                journeyStep(journey, "issue", "navigation_blocked");
                 setStatus("idle");
                 return false;
             }
+            targetImportJourney(journey, body.conversationId);
             openAttemptKeys.delete(endpoint);
-            router.push(continuationPath(body.conversationId));
+            openJourneyAttempts.delete(endpoint);
+            router.push(continuationPath(body.conversationId) + (openPicker ? "?pickSource=1" : ""));
             return true;
         } catch {
             if (!isCurrent()) {
@@ -232,19 +254,22 @@ export function useContinuationLauncher(
             // The attempt keeps its key, so pressing again resolves to
             // whatever the first request created rather than making a second
             // conversation.
+            journeyStep(journey, "issue", "create_failed");
             setStatus("failed");
             setErrorMessage(t("continuation.createFailed"));
             return false;
         }
-    }, [creating, endpoint, router, t]);
+    }, [begin, creating, endpoint, router, t]);
 
     const cancel = useCallback(() => {
+        journeyStep(openJourneyAttempts.get(endpoint), "cancelled", "user_cancelled");
+        openJourneyAttempts.delete(endpoint);
         openAttemptKeys.delete(endpoint);
         setStatus("idle");
         setErrorMessage(null);
     }, [endpoint]);
 
-    return { status, errorMessage, start, cancel };
+    return { begin, status, errorMessage, start, cancel };
 }
 
 /**

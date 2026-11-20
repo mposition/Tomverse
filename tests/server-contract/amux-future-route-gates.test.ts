@@ -18,9 +18,6 @@ const noStore = (body: unknown, status = 200) =>
 mock.module(moduleUrl("lib/amux/guard.ts"), {
   namedExports: { isAmuxSyncAuthorized: () => authorized },
 });
-mock.module(moduleUrl("lib/amux/executionGate.ts"), {
-  namedExports: { isAmuxExecutionApiEnabled: () => false },
-});
 mock.module(moduleUrl("lib/amux/dbBoundary.ts"), {
   namedExports: {
     withAmuxRouteBudget: () => {
@@ -74,7 +71,6 @@ mock.module(moduleUrl("lib/amux/workerRuntime.ts"), {
 });
 mock.module(moduleUrl("lib/amux/store.ts"), {
   namedExports: {
-    AmuxQueueCapacityError: class extends Error {},
     listOwnedTodos: () => {
       serviceCalls += 1;
       throw new Error("unexpected owned queue read");
@@ -114,30 +110,6 @@ test("future-only routes reject unauthenticated requests without work", async ()
     );
     assert.equal(response.status, 401, path);
     assert.equal(response.headers.get("cache-control"), "no-store");
-  }
-  assert.equal(serviceCalls, 0);
-});
-
-test("execution-off worker and owned routes return 409 before DB mutation", async () => {
-  const routes = await routesPromise;
-  authorized = true;
-  serviceCalls = 0;
-  const expected = [
-    { registered: false, reason: "execution_api_disabled" },
-    { accepted: false, reason: "execution_api_disabled" },
-    { available: false, reason: "execution_api_disabled" },
-  ];
-  for (let index = 0; index < routes.length; index += 1) {
-    const { path, POST } = routes[index];
-    const response = await POST(
-      new Request(`https://tomverse.app/api/internal/amux/${path}`, {
-        method: "POST",
-        body: "{ deliberately malformed future body",
-      }),
-    );
-    assert.equal(response.status, 409, path);
-    assert.equal(response.headers.get("cache-control"), "no-store");
-    assert.deepEqual(await response.json(), expected[index]);
   }
   assert.equal(serviceCalls, 0);
 });

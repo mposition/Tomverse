@@ -10,6 +10,8 @@ import {
   RECOMMENDATION_FAILURE_REASONS,
 } from "@/lib/autoRouterRecommendationsCore";
 import { apiSecurityResponse, readLimitedJson } from "@/lib/apiSecurity";
+import { DAILY_PRODUCT_AGENT_HEADER, DAILY_PRODUCT_AGENT_MODE, dailyProductResultSchema, scoutIdFromAgentId } from "@/lib/dailyProductAgentCore";
+import { recordDailyProductResult } from "@/lib/dailyProductAgentStore";
 
 const NO_STORE = { "Cache-Control": "no-store" };
 
@@ -29,6 +31,16 @@ export async function POST(request: Request) {
   }
   try {
     const body = await readLimitedJson(request, 1024, bodySchema);
+    if (scoutIdFromAgentId(body.id)) {
+      if (request.headers.get(DAILY_PRODUCT_AGENT_HEADER) !== DAILY_PRODUCT_AGENT_MODE) {
+        return NextResponse.json({ error: "bad_id" }, { status: 400, headers: NO_STORE });
+      }
+      const parsed = dailyProductResultSchema.safeParse(body);
+      if (!parsed.success) return NextResponse.json({ error: "invalid_result" }, { status: 400, headers: NO_STORE });
+      const outcome = await recordDailyProductResult(parsed.data);
+      if ("refused" in outcome) return NextResponse.json({ error: outcome.refused }, { status: 409, headers: NO_STORE });
+      return NextResponse.json(outcome, { headers: NO_STORE });
+    }
     const id = parseRecommendationId(body.id);
     if (!id) return NextResponse.json({ error: "bad_id" }, { status: 400, headers: NO_STORE });
     let result: Parameters<typeof recordRecommendationResult>[0]["result"];

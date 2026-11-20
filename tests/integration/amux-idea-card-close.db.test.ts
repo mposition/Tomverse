@@ -4,7 +4,7 @@ import { after, afterEach, beforeEach, mock, test } from "node:test";
 import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
-import { AMUX_DB_BOUNDARIES, AmuxDbBoundaryError, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
+import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { dmBodyDigest, dmKeyPeriodOf, dmSnapshotManifestDigest } from "@/lib/amux/decisionMakerBodyCore";
 import {
   assignDecisionMakerRequestWithDigestKey,
@@ -42,6 +42,21 @@ import {
   runAmuxV22ResolveStep,
 } from "@/lib/amux/v22OwnerQuestionDmService";
 import { prisma } from "@/lib/prisma";
+
+// Shortens the step-up window around one refusal. Under the default it equals
+// the 8-hour console session, so a sign-in old enough to fail step-up would
+// also end console access; only an override leaves the step-up refusal alone
+// to test, as marketing-competitor-routes does.
+const withStepUpWindow = async <T>(minutes: string, run: () => Promise<T>) => {
+  const previous = process.env.ADMIN_RECENT_AUTH_MINUTES;
+  process.env.ADMIN_RECENT_AUTH_MINUTES = minutes;
+  try {
+    return await run();
+  } finally {
+    if (previous === undefined) delete process.env.ADMIN_RECENT_AUTH_MINUTES;
+    else process.env.ADMIN_RECENT_AUTH_MINUTES = previous;
+  }
+};
 
 // Closing a stalled idea's remaining cards (owner decision 2026-11-05,
 // docs/policy/amux-decision-maker.md §2-10) against PostgreSQL, through the real
@@ -92,6 +107,8 @@ const adminRequest = () => new Request("https://tomverse.test/api/admin/amux/ide
   method: "POST", headers: { "user-agent": "synthetic-card-close" } });
 
 const ON = { TOMVERSE_AMUX_CARD_CLOSE_DM: "enabled" };
+// On unless exactly `disabled` (owner decision 2026-11-15): the switch is a kill switch.
+const OFF = { TOMVERSE_AMUX_CARD_CLOSE_DM: "disabled" };
 const DAY_MS = 86_400_000;
 const digest = "a".repeat(64);
 const cipher = Buffer.from("synthetic-only", "utf8");
@@ -171,7 +188,7 @@ after(async () => {
 });
 
 type CardSeed ={ cardType?: "task" | "story"; status: string; ageDays?: number; displayKey?: string;
-  revision?: number; assigned?: boolean; receipt?: boolean };
+  revision?: number; assigned?: boolean; receipt?: boolean; archived?: boolean };
 
 // Oldest first in the scan, ahead of any idea another suite left in this database.
 let seedClock = Date.parse("2001-01-01T00:00:00.000Z");
@@ -240,7 +257,7 @@ async function seedIdea(cards: CardSeed[], input: { state?: string; actor?: stri
           "v4BodyCiphertext", "v4BodyKeyId", "v4BodyKeyVersion", "v4BodyDigest", "v4BodyDigestKeyId",
           "v4BriefCiphertext", "v4BriefKeyId", "v4BriefKeyVersion", "v4BriefDigest", "v4BriefDigestKeyId",
           "v4SourceApprovalId", "v4TerminalAt", "v22ReceiptId", "v22AssignmentId", "taskRole", "executionGrade",
-          "storyKind", "displayKey", "createdAt", "updatedAt")
+          "storyKind", "displayKey", "archivedAt", "createdAt", "updatedAt")
         VALUES (${cardId}, ${task ? "AMUX Task" : "AMUX Story"}, ${seed.status},
           ${seed.assigned ? "claude-impl" : null}::text, ${seed.assigned ? new Date() : null}::timestamp,
           ${seed.revision ?? 3}, 'admin-idea-v4', ${unitId.toUpperCase()}, '1', ${digest}, ${snapshot}::jsonb,
@@ -250,7 +267,8 @@ async function seedIdea(cards: CardSeed[], input: { state?: string; actor?: stri
           ${task ? digest : null}::text, ${task ? "synthetic" : null}::text,
           ${decisionId}, ${terminal}::timestamp, ${receipt}::uuid, ${assignment}::uuid,
           ${task ? "implement" : null}::text, ${task ? "advanced" : null}::text,
-          ${task ? null : "general"}::text, ${displayKey}, ${updatedAt}, ${updatedAt})`;
+          ${task ? null : "general"}::text, ${displayKey}, ${seed.archived ? new Date() : null}::timestamp,
+          ${updatedAt}, ${updatedAt})`;
       cardIds.push(cardId);
       displayKeys.push(displayKey);
     }
@@ -276,7 +294,8 @@ const questionOf = async (ideaId: string) => (await prisma.$queryRaw<QuestionRow
 const questionCount = async () => (await prisma.$queryRaw<Array<{ count: number }>>`
   SELECT count(*)::int AS "count" FROM "AmuxIdeaCardCloseQuestion"`)[0]!.count;
 const card = (id: string) => prisma.amuxWorkItem.findUniqueOrThrow({ where: { id }, select: {
-  status: true, owner: true, claimedAt: true, revision: true, v4TerminalAt: true, updatedAt: true } });
+  status: true, owner: true, claimedAt: true, revision: true, v4TerminalAt: true, updatedAt: true,
+  archivedAt: true } });
 
 /** Opens questions until the scan finds no more, so no other idea hides the one asked about. */
 const drain = async (env: Record<string, string> = { ...ON, AMUX_IDEA_CARD_CLOSE_MAX_PER_DAY: "50" }) => {
@@ -379,16 +398,14 @@ const stageOf = async (ideaId: string, actor = OWNER_ID) =>
 
 test("the switch off leaves no question and files none, whatever the ideas look like", async () => {
   const { ideaId } = await seedIdea([{ status: "blocked" }]);
-  assert.deepEqual(await openAmuxIdeaCardCloseQuestionIfDue({}), { opened: false });
-  assert.deepEqual(await openAmuxIdeaCardCloseQuestionIfDue({ TOMVERSE_AMUX_CARD_CLOSE_DM: "true" }),
-    { opened: false });
+  assert.deepEqual(await openAmuxIdeaCardCloseQuestionIfDue(OFF), { opened: false });
   assert.equal(await questionCount(), 0);
 
   await drain();
   const open = (await questionOf(ideaId))!;
   assert.equal(open.state, "open");
   // Turned off with a question not yet filed: filing it is what starts a paid turn.
-  const off = await readAmuxIdeaCardCloseSyncForRelay({});
+  const off = await readAmuxIdeaCardCloseSyncForRelay(OFF);
   assert.deepEqual(off.pending, []);
   const on = await readAmuxIdeaCardCloseSyncForRelay(ON);
   assert.ok(on.pending.some((entry) => entry.question_id === open.id));
@@ -731,6 +748,10 @@ const closeDirectly = async (ideaId: string, over: Record<string, unknown> = {})
   return closeAmuxIdeaCardsDirectlyForOwner({ session: owner(), request: adminRequest(), ideaId, cardIds: shown,
     reason: "Stalled for good, secret note.", ...over } as never);
 };
+/** The owner answers the idea's open question on its detail. */
+const answerDirectly = async (ideaId: string, decision: "close" | "keep") =>
+  answerAmuxIdeaCardCloseForOwner({ session: owner(), request: adminRequest(), ideaId,
+    questionId: (await questionOf(ideaId))!.id, decision, reason: "Stalled for good, secret note." });
 
 test("a direct close closes only the cards the owner was shown", async () => {
   const { ideaId, cardIds } = await seedIdea([{ status: "blocked" }, { status: "backlog" }]);
@@ -766,8 +787,8 @@ test("the owner closes a kept idea's cards directly, with no question open, thro
     { question: null, direct: null }, "another owner's idea reads as neither");
 
   await assert.rejects(closeDirectly(ideaId, { reason: "no" }), /invalid/);
-  await assert.rejects(closeDirectly(ideaId, { session: owner({
-    authenticatedAt: new Date(Date.now() - 3 * 3_600_000).toISOString() }) }), /Sign in again/);
+  await withStepUpWindow("5", () => assert.rejects(closeDirectly(ideaId, { session: owner({
+    authenticatedAt: new Date(Date.now() - 10 * 60_000).toISOString() }) }), /Sign in again/));
   assert.equal((await card(cardIds[0])).status, "blocked", "nothing moved by a refusal");
 
   const result = await closeDirectly(ideaId);
@@ -849,6 +870,61 @@ test("a direct close refuses what a question would not ask about, and leaves an 
   assert.equal(state.direct, null);
   assert.equal((await closeDirectly(asked.ideaId)).outcome, "not_closable");
   assert.equal((await questionOf(asked.ideaId))!.id, open.id, "no second row");
+});
+
+test("an archived review card ahead of the rest leaves the backlog Tasks closable, and stays as it was", async () => {
+  // An idea whose stopped cards were archived and remade elsewhere (2026-11-13):
+  // the archived review card once read as moving and refused the whole idea, and
+  // an archived blocked card would have been cancelled with the rest.
+  const { ideaId, cardIds } = await seedIdea([
+    { status: "review", receipt: true, archived: true },
+    { status: "blocked", archived: true },
+    { status: "backlog", ageDays: 9 }, { status: "backlog", ageDays: 9 }]);
+  const [archivedReview, archivedBlocked, ...waiting] = cardIds;
+  const foreign = await seedIdea([{ status: "backlog", archived: true }]);
+  await asReplica(async (tx) => {
+    for (const id of waiting) await tx.$executeRaw`
+      INSERT INTO "AmuxWorkDependency" ("taskId", "dependencyId") VALUES (${id}, ${archivedReview})`;
+    // An archived card of another idea waiting on this one's is no longer waiting.
+    await tx.$executeRaw`
+      INSERT INTO "AmuxWorkDependency" ("taskId", "dependencyId") VALUES (${foreign.cardIds[0]}, ${waiting[0]})`;
+  });
+  const before = await Promise.all([archivedReview, archivedBlocked].map(card));
+
+  const state = await readAmuxIdeaCardCloseOwnerState({ ideaId, actorUserId: OWNER_ID });
+  assert.equal(state.direct?.reasonCode, "stale_cards");
+  assert.deepEqual(state.direct?.cards.map((entry) => entry.id).sort(), [...waiting].sort(),
+    "only the cards still on the board are shown");
+  const result = await closeDirectly(ideaId);
+  assert.equal(result.outcome, "closed");
+  assert.equal(result.outcome === "closed" && result.closedCards, 2);
+  for (const id of waiting) assert.equal((await card(id)).status, "cancelled");
+  assert.deepEqual(await Promise.all([archivedReview, archivedBlocked].map(card)), before,
+    "the archived cards keep their status, revision and archive time");
+  assert.equal((await card(foreign.cardIds[0])).status, "backlog");
+  const audit = await auditOf((await questionOf(ideaId))!.id);
+  assert.deepEqual(((audit[0].metadata as Record<string, unknown>).cardIds as string[]).sort(), [...waiting].sort());
+});
+
+test("a card archived after the question leaves the rest to close; every card archived cancels it", async () => {
+  const some = await seedIdea([{ status: "blocked" }, { status: "backlog", ageDays: 9 }]);
+  await drain();
+  const archiveOne = async (id: string) => asReplica((tx) => tx.$executeRaw`
+    UPDATE "AmuxWorkItem" SET "archivedAt" = now() WHERE "id" = ${id}`);
+  await archiveOne(some.cardIds[0]);
+  // The asked set no longer matches what is on the board: the answer closes nothing.
+  assert.equal((await answerDirectly(some.ideaId, "close")).outcome, "cancelled");
+  assert.equal((await questionOf(some.ideaId))!.cancelReason, "cards_changed");
+  assert.equal((await card(some.cardIds[1])).status, "backlog");
+  assert.equal((await card(some.cardIds[0])).status, "blocked");
+
+  const all = await seedIdea([{ status: "blocked" }]);
+  await drain();
+  await archiveOne(all.cardIds[0]);
+  assert.equal((await answerDirectly(all.ideaId, "close")).outcome, "cancelled",
+    "the question still reads and is cancelled, not left open");
+  assert.equal((await questionOf(all.ideaId))!.state, "cancelled");
+  assert.equal((await card(all.cardIds[0])).status, "blocked");
 });
 
 test("work that started before the answer is applied closes nothing and cancels the question", async () => {
@@ -971,8 +1047,8 @@ test("the owner answers directly, with a person's audit, whatever the router or 
     session: owner(), request: adminRequest(), ideaId: routedAway.ideaId, questionId: question.id,
     decision: "close", reason: "No longer wanted, secret note.", ...over } as never);
   await assert.rejects(answer({ reason: "no" }), /invalid/, "a reason is required");
-  await assert.rejects(answer({ session: owner({ authenticatedAt: new Date(Date.now() - 3 * 3_600_000).toISOString() }) }),
-    /Sign in again/, "recent re-authentication");
+  await withStepUpWindow("5", () => assert.rejects(answer({ session: owner({ authenticatedAt: new Date(Date.now() - 10 * 60_000).toISOString() }) }),
+    /Sign in again/, "recent re-authentication"));
   await assert.rejects(answer({ session: { user: { id: "not-an-admin", email: "x@example.test" },
     expires: new Date(Date.now() + 60_000).toISOString() } }), /forbidden/);
   assert.equal((await questionOf(routedAway.ideaId))!.state, "open");
@@ -1071,7 +1147,7 @@ test("the table refuses what the lifecycle does not allow", async () => {
     /hands off only while open/);
 });
 
-test("an apply fits its ceiling exactly, in the case with the most statements, and a shorter one rolls back", async () => {
+test("an apply in the case with the most statements runs in its boundary", async () => {
   const { ideaId, cardIds } = await seedIdea([{ status: "blocked" }, { status: "backlog" }]);
   await prisma.amuxHumanEscalation.create({ data: { taskId: cardIds[0], specialty: "execution-recovery",
     reason: "execution_blocked", openedBy: "tomverse-amux-orchestrator", openedTaskRevision: 3 } });
@@ -1080,10 +1156,7 @@ test("an apply fits its ceiling exactly, in the case with the most statements, a
     { ...AMUX_DB_BOUNDARIES.decisionMakerIdeaCardCloseApply, prismaCallCeiling },
     (tx, context) => applyAmuxIdeaCardCloseDmAnswer(tx, { questionId: question.id, requestId,
       decision: "close", now: context.dbNow }));
-  assert.equal(AMUX_DB_BOUNDARIES.decisionMakerIdeaCardCloseApply.prismaCallCeiling, 12, "§9's limit");
-  await assert.rejects(apply(11), (error: unknown) => error instanceof AmuxDbBoundaryError &&
-    error.code === "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED");
-  assert.equal((await questionOf(ideaId))!.state, "open", "all of it rolled back");
+  assert.equal((await questionOf(ideaId))!.state, "open");
   assert.equal((await card(cardIds[0])).status, "blocked");
   assert.deepEqual(await apply(12), { applied: true, outcome: "closed" });
   // A second transaction takes the chain lock at once: nothing outlived the apply.
@@ -1208,7 +1281,7 @@ test("the DM approver applies an open proposal without a person, as dm, after cl
   const { ideaId } = await seedIdea([{ status: "blocked" }, { status: "backlog" }]);
   await drain();
   const proposal = await proposed(ideaId, select("close"));
-  assert.equal(await runAmuxDmAutoApplyStep({}), null, "off by default");
+  assert.equal(await runAmuxDmAutoApplyStep({ TOMVERSE_AMUX_DM_APPROVER: "disabled" }), null, "off when disabled");
   assert.equal((await questionOf(ideaId))!.state, "open");
   assert.deepEqual(await runAmuxDmAutoApplyStep(APPROVER),
     { requestId: proposal.requestId, kind: "card_close", applied: true });
@@ -1299,7 +1372,7 @@ async function proposedWorkerQuestion(output: Output) {
   return { task, question, requestId: routed.requestId };
 }
 
-test("the DM approver answers a worker question only with an option it offered; a free-text answer waits for a person", async () => {
+test("the DM approver answers a worker question with an option it offered or its own free-text answer (owner decision 2026-11-15)", async () => {
   const chosen = await proposedWorkerQuestion({ kind: "select", optionId: "a",
     rationale: "Shorter reads better.", irreversible: false });
   assert.deepEqual(await runAmuxDmAutoApplyStep(APPROVER),
@@ -1314,10 +1387,13 @@ test("the DM approver answers a worker question only with an option it offered; 
 
   const free = await proposedWorkerQuestion({ kind: "free_text", answer: "Use whichever reads better.",
     rationale: "Either works.", irreversible: false });
-  assert.equal(await runAmuxDmAutoApplyStep(APPROVER), null);
-  assert.equal((await prisma.amuxV22TaskQuestion.findUniqueOrThrow({ where: { id: free.question.id } })).state, "open");
-  assert.equal((await readDecisionMakerRequestState(prisma, free.requestId))!.closing, null,
-    "still open for the operator's confirmation");
+  assert.deepEqual(await runAmuxDmAutoApplyStep(APPROVER),
+    { requestId: free.requestId, kind: "question", applied: true });
+  const freeAnswered = await prisma.amuxV22TaskQuestion.findUniqueOrThrow({ where: { id: free.question.id } });
+  assert.equal(freeAnswered.state, "answered");
+  assert.equal(freeAnswered.answerSource, "dm");
+  assert.match(freeAnswered.answerText ?? "", /Use whichever reads better\.$/);
+  assert.equal((await readDecisionMakerRequestState(prisma, free.requestId))!.closing, "direct_answer_close");
 });
 
 test("the approver's claim and answer are one transaction: a refused answer rolls the claim back", async () => {

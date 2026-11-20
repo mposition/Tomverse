@@ -1,28 +1,27 @@
 import { expect, test } from "@playwright/test";
+import { modelsPageContent } from "@/components/marketing/v2/models/modelsPageContent";
 import { expectNoHorizontalOverflow, prepareGuestPage } from "./support/app-fixtures";
-import { setDeterministicTheme } from "./support/chat-state-fixtures";
+import { mockModelsCatalog } from "./support/models-catalog-fixture";
 
-for (const theme of ["light", "dark"] as const) {
-  test(`English mobile model facts are concise and readable in ${theme}`, async ({ page }) => {
-    test.setTimeout(90_000);
-    await page.setViewportSize({ width: 320, height: 900 });
-    await prepareGuestPage(page, "en");
-    await setDeterministicTheme(page, theme);
-    await page.goto("/en/models");
-    const card = page.getByRole("article").first();
-    const access = card.getByTestId("model-access-label");
-    const credits = card.getByTestId("model-base-charge-label");
-    await expect(access.locator("span:visible")).toHaveText("Access", { timeout: 30_000 });
-    await expect(credits.locator("span:visible")).toHaveText("Base credits");
-    for (const label of [access, credits, ...await card.locator("span.rounded-full").all()]) {
-      expect(await label.evaluate(element => parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(12);
-    }
-    await expect(card.getByTestId("model-page-credit-cost")).toHaveAccessibleName(/Base credits for a short request/);
-    await page.addStyleTag({ content: "html { font-size: 200%; }" });
-    await expectNoHorizontalOverflow(page);
-    await page.addStyleTag({ content: "html { font-size: 100%; }" });
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await expect(access.locator("span:visible")).toHaveText("Access starts with");
-    await expect(credits.locator("span:visible")).toHaveText("Base credits for a short request");
-  });
-}
+test("English mobile model facts are concise and readable", async ({ page }) => {
+  test.setTimeout(90_000);
+  const copy = modelsPageContent.en;
+  await page.setViewportSize({ width: 320, height: 900 });
+  await prepareGuestPage(page, "en");
+  await mockModelsCatalog(page);
+  await page.goto("/en/models");
+  const card = page.getByRole("article").first();
+  const credit = card.getByTestId("model-page-credit-cost");
+  await expect(credit).toHaveAccessibleName(new RegExp(copy.list.creditLabel), { timeout: 30_000 });
+  // The visible figure is the number and its unit, not the long label.
+  await expect(credit).toHaveText(/^\d+\s*credits?$/);
+  for (const label of [credit.locator("b"), credit.locator("small"), ...await card.locator(".chip").all()]) {
+    expect(await label.evaluate((element) => parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(11);
+  }
+  await page.addStyleTag({ content: "html { font-size: 200%; }" });
+  await expectNoHorizontalOverflow(page);
+  await page.addStyleTag({ content: "html { font-size: 100%; }" });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(credit).toHaveAccessibleName(new RegExp(copy.list.creditLabel));
+  await expectNoHorizontalOverflow(page);
+});

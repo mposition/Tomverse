@@ -18,7 +18,6 @@ import {
 } from "@/lib/amux/internalRoute";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import { settleAmuxExecution } from "@/lib/amux/execution";
-import { isAmuxExecutionApiEnabled } from "@/lib/amux/executionGate";
 import {
   AMUX_REVIEW_PR_NUMBER_MAX,
   amuxReviewPrNumberAccepted,
@@ -73,18 +72,6 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!isAmuxExecutionApiEnabled()) {
-    return Response.json(
-      {
-        settled: false,
-        reason: "execution_api_disabled",
-      },
-      {
-        status: 409,
-        headers: { "Cache-Control": "no-store" },
-      },
-    );
-  }
 
   return withAmuxRouteBudget(async () => {
     try {

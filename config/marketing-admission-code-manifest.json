@@ -6,13 +6,13 @@
     "lib/marketingFacts.ts",
     "lib/marketingStore.ts"
   ],
-  "digest": "bd3e419c721148be25644dd9a51a8aa28df74c947c78f5b41349dff2b2c06a75",
-  "totalSizeBytes": 665121,
+  "digest": "ab8e1673ed86c1ee2207fbf330d2e70698ffcaa297069be56ac6577fe342bb44",
+  "totalSizeBytes": 669882,
   "files": [
     {
       "path": "lib/adminAudit.ts",
-      "sizeBytes": 12899,
-      "sha256": "60b4bb88fe9a4e8e357afe78f375fd18e5a42cd233de92ab3ed83df331886180"
+      "sizeBytes": 13399,
+      "sha256": "480238f789b768c66828126db2e9c5af4ceb1654979145f42335b18c7da36c73"
     },
     {
       "path": "lib/adminAuditIntegrityCore.ts",
@@ -21,8 +21,8 @@
     },
     {
       "path": "lib/adminAuditSystemActors.ts",
-      "sizeBytes": 36703,
-      "sha256": "4a027b6f12769d9ad3f0a8e3d7963ed3a858880113545db1307dae597a9d4baf"
+      "sizeBytes": 38475,
+      "sha256": "5507ff5a7de2c69f73aa84d41db69b5ba17477f8dc26ebf86845d4a2d551c3fd"
     },
     {
       "path": "lib/clientIp.ts",
@@ -41,8 +41,8 @@
     },
     {
       "path": "lib/marketingAutomationAccess.ts",
-      "sizeBytes": 53727,
-      "sha256": "ad3dfb4e3e716dce5bf6caa95f871beb0b6379787cd06259fc93e7de9526922c"
+      "sizeBytes": 54058,
+      "sha256": "528e940256826a3f7c9339de41f18080e4aaef4ee40cad36dd10e81a11a6735b"
     },
     {
       "path": "lib/marketingAutomationSchema.ts",
@@ -71,8 +71,8 @@
     },
     {
       "path": "lib/marketingGuardNormalise.ts",
-      "sizeBytes": 26167,
-      "sha256": "7fb759b518bb350a663aabba8379900ebd8ba4baffbb68122e717813b46d15e7"
+      "sizeBytes": 26504,
+      "sha256": "246bbaf0a0b8da71d3a7eb067f939562d9a9fac66324cb96fc4f2554b1a91494"
     },
     {
       "path": "lib/marketingGuardRules.ts",
@@ -86,8 +86,8 @@
     },
     {
       "path": "lib/marketingMemoryClaims.ts",
-      "sizeBytes": 21038,
-      "sha256": "9c436437fcb2fbb0b54d0bae4e5406367e9bbc2f6c4be873f3af7ae5934259f9"
+      "sizeBytes": 22147,
+      "sha256": "99b0bf39b5f7382b2087635988a6739ca910448a41e4b0c4851f0fa6eec40b5c"
     },
     {
       "path": "lib/marketingMinorsClaims.ts",
@@ -101,8 +101,8 @@
     },
     {
       "path": "lib/marketingStore.ts",
-      "sizeBytes": 310632,
-      "sha256": "b74a817a27ac984c4709c80b229a88e3a0b8627668b4ab2e90848c9e412c53d1"
+      "sizeBytes": 311344,
+      "sha256": "d96d2ca07ef6f512004de8d0f7f8f42a893392a482216f3a6f112adbf82bfb6a"
     },
     {
       "path": "lib/postgresConnectionConfigCore.mjs",

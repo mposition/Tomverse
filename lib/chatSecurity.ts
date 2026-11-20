@@ -1,6 +1,16 @@
 import "server-only";
 
-import { chatUserMaxInputTokens } from "@/lib/chatInputLimits";
+import {
+    chatAccountMaxInputTokens,
+    chatLongContextCostCredits,
+    chatLongContextEnabled,
+    chatLongContextMicroUsdPerCredit,
+    chatLongContextSettledCredits,
+    chatMaxMessageCharacters,
+    chatRequestMaxBodyBytes,
+    chatUserMaxInputTokens,
+    type ChatLongContextSettlement,
+} from "@/lib/chatInputLimits";
 import { promptRefinerChatDecisionSchema, type PromptRefinerChatDecision } from "@/lib/promptRefinerSuggestion";
 
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
@@ -9,7 +19,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { usageBucketCount } from "@/lib/chatUsageBucketCount";
 import { hashChatSubject, userChatUsageKey } from "@/lib/chatUsageKey";
-import { findDeepResearchHandoff } from "@/lib/deepResearchSettlementHandoff";
+import { findDeepResearchHandoff, researchPreviewSettlementForExpiry } from "@/lib/deepResearchSettlementHandoff";
 import { isE2EDatabaseDisabled } from "@/lib/e2eTestMode";
 import {
     AVAILABLE_MODELS,
@@ -107,13 +117,18 @@ import {
     type AddOnCreditReservationEntry,
 } from "@/lib/creditLedger";
 import { lockCreditAccount, offsetCreditDebt } from "@/lib/creditDebt";
-import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
 import {
     anthropicPromptCacheApplies,
     ANTHROPIC_PROMPT_CACHE_TTL,
     type AnthropicPromptCachePath,
 } from "@/lib/anthropicPromptCaching";
-import type { ResolvedModelPricing } from "@/lib/modelPricing";
+import {
+    getModelPricingProfile,
+    type ProviderCallUsage,
+    type ResolvedModelPricing,
+} from "@/lib/modelPricing";
+import { longContextSettledUsageCost } from "@/lib/modelPricing";
+import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
 import type { PerplexityUsageCostSnapshot } from "@/lib/perplexityUsageCore";
 import { notifyProviderCreditIfNeeded } from "@/lib/providerMonitoring";
 import { getUserDayWindow } from "@/lib/userDailyUsage";
@@ -167,11 +182,15 @@ import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 const GUEST_COOKIE_NAME = "tomverse_guest";
 const GUEST_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 
+const CHAT_CONTEXT_WINDOWS = (AVAILABLE_MODELS as readonly AiModel[]).map(
+    (model) => model.contextWindowTokens
+);
+
 export const CHAT_REQUEST_LIMITS = {
-    maxBodyBytes: 2 * 1024 * 1024,
+    maxBodyBytes: chatRequestMaxBodyBytes(CHAT_CONTEXT_WINDOWS),
     maxMessages: 100,
-    maxMessageCharacters: 50_000,
-    maxTotalCharacters: 300_000,
+    // Sized from the largest model window, not a fixed 50,000 (2026-11-18).
+    maxMessageCharacters: chatMaxMessageCharacters(CHAT_CONTEXT_WINDOWS),
 } as const;
 
 export type AccessKind = "user" | "guest";
@@ -272,6 +291,10 @@ export type ChatBudget = {
     costSource: string;
     /** Prompt-size threshold that selected the applied price tier, if any. */
     longContextThresholdTokens: number | null;
+    /** Set on a turn above the flat input limit: settle by actual cost. */
+    longContextSettlement?: ChatLongContextSettlement | null;
+    /** Provider calls reserved for, when more than one (tool loops). */
+    providerCallPasses?: number;
 };
 
 type ReservationEntry = {
@@ -322,11 +345,18 @@ export type GuestAutoPreholdConversion = Readonly<{
     creditEntries: readonly GuestAutoHeldCreditEntry[];
 }>;
 
+/**
+ * Which product a reservation belongs to. `external_api` is a stateless
+ * /api/v1 inference request: no Conversation, no Message, and no productKey.
+ */
+export const CHAT_RESERVATION_SOURCES = ["chat", "comparison_review", "external_api"] as const;
+export type ChatReservationSource = (typeof CHAT_RESERVATION_SOURCES)[number];
+
 export type ChatUsageReservation = {
     reservationId: string;
     userId?: string;
     traceId: string;
-    source: "chat" | "comparison_review";
+    source: ChatReservationSource;
     modelId: string;
     provider: AiModel["provider"];
     entries: ReservationEntry[];
@@ -378,6 +408,8 @@ export type ChatUsageReservation = {
     pricingVersion?: string;
     costSource?: string;
     longContextThresholdTokens?: number | null;
+    longContextSettlement?: ChatLongContextSettlement | null;
+    providerCallPasses?: number;
     /**
      * The cache-write rate this turn was reserved at, carried so settlement
      * prices the write at the same figure rather than re-reading a registry
@@ -422,7 +454,7 @@ const durableReservationPayloadSchema = z
         reservationId: z.string().min(1).max(100),
         userId: z.string().min(1).max(100).optional(),
         traceId: z.string().min(1).max(120),
-        source: z.enum(["chat", "comparison_review"]),
+        source: z.enum(CHAT_RESERVATION_SOURCES),
         modelId: z.string().min(1).max(160),
         provider: z.string().min(1).max(80),
         entries: z.array(
@@ -561,6 +593,18 @@ const durableReservationPayloadSchema = z
         pricingVersion: z.string().min(1).max(120).optional(),
         costSource: z.string().min(1).max(60).optional(),
         longContextThresholdTokens: z.number().int().nonnegative().nullable().optional(),
+        // Absent on a one-call turn and on every reservation written before it.
+        providerCallPasses: z.number().int().min(2).max(4).optional(),
+        // Optional: absent on every reservation written before long context,
+        // which settles by the flat rule exactly as it did.
+        longContextSettlement: z
+            .object({
+                microUsdPerCredit: z.number().int().positive(),
+                floorCredits: z.number().int().nonnegative(),
+            })
+            .strict()
+            .nullable()
+            .optional(),
         planReservedCredits: z.number().int().nonnegative(),
         addOnReservedCredits: z.number().int().nonnegative(),
         addOnReservations: z.array(
@@ -865,6 +909,50 @@ const promptCacheWriteReservedPremiumMicroUsd = ({
     return microdollarsFor(reservedInputTokens, premiumRate);
 };
 
+/**
+ * Where a flat price over a tiered profile stops being the price.
+ *
+ * `resolveModelPricing` lets a model-registry row's flat rates, and the
+ * `CHAT_MODEL_<ID>_*_USD_PER_MILLION` environment rates, win over the profile's
+ * tiers, so a long prompt would be charged the short-context rate. Read from
+ * the resolved price itself rather than from the row, so every override is
+ * seen: a tiered profile priced past its boundary without an override reports
+ * `registry_long_context`, and anything else is a flat price. Long context
+ * holds such a model's input limit at the first tier boundary (Gemini 3.1
+ * Pro's 200K step). Null when the tiers are in force.
+ */
+const flatPriceMaxPromptTokens = (model: AiModel): number | null => {
+    const profile = getModelPricingProfile(model.id);
+    if (!profile) return null;
+    const bounds = [
+        ...profile.tiers,
+        ...(profile.priceSchedule ?? []).flatMap((revision) => revision.tiers ?? []),
+    ]
+        .map((tier) => tier.maxPromptTokens)
+        .filter((bound): bound is number => typeof bound === "number" && bound > 0);
+    if (bounds.length === 0) return null;
+    const past = resolveModelRequestPricing(model, {
+        estimatedPromptTokens: Math.max(...bounds) + 1,
+    });
+    return past.costSource === "registry_long_context" ? null : Math.min(...bounds);
+};
+
+/** A signed-in account's input limit on this model (long context included). */
+export const accountChatMaxInputTokens = (model: AiModel) =>
+    chatAccountMaxInputTokens({
+        contextWindowTokens: model.contextWindowTokens,
+        flatPriceMaxPromptTokens: flatPriceMaxPromptTokens(model),
+    });
+
+/**
+ * Above the flat limit the price tier is chosen from the estimate with this
+ * much room, because settlement keeps the reservation's tier for the credits
+ * it charges and the estimator carries no margin of its own. A turn the
+ * estimate puts within a quarter below a long-context boundary is priced past
+ * it. Turns at or below the flat limit are priced exactly as before.
+ */
+export const LONG_CONTEXT_TIER_ESTIMATE_MARGIN = 1.25;
+
 export const createChatBudget = (
     kind: AccessKind,
     model: AiModel,
@@ -947,12 +1035,33 @@ export const createChatBudget = (
         additionalToolInputTokens?: number;
         /** Server-selected model passes; used only for internal cost holds. */
         toolInputPasses?: number;
+        /**
+         * The provider calls this turn's application tool loop may make
+         * (generated artifacts, app-managed search). Reserved only on a
+         * long-context turn, where each step re-sends a prompt priced by its
+         * own cost (operator decision 2026-11-18: reserve every step); the
+         * route then stops the loop at the reserved count.
+         */
+        longContextToolInputPasses?: number;
+        /** Keep the deterministic tool envelope outside the authored-input
+         * clamp so a multi-step run cannot silently under-reserve it. */
+        toolInputAboveAuthoredLimit?: boolean;
+        /**
+         * One aggregate output allowance shared by every paid tool pass.
+         *
+         * Ordinary Chat omits this and keeps the model pricing profile's
+         * request/reservation values. Research Preview supplies its smaller
+         * run-wide ceiling: the provider may receive several sequential
+         * requests, but their combined output (reasoning included) may never
+         * reserve or consume more than this value.
+         */
+        totalOutputTokenCap?: number;
     }
 ): ChatBudget => {
     const maxInputTokens =
         kind === "guest"
             ? guestChatMaxInputTokens()
-            : chatUserMaxInputTokens();
+            : accountChatMaxInputTokens(model);
 
     // The limit is checked against the raw estimate, deliberately: it bounds
     // the conversation the user sent, not the margin and tool overhead the
@@ -1001,54 +1110,156 @@ export const createChatBudget = (
         0,
         Math.trunc(options?.reservationOnlyInputTokens ?? 0)
     );
-    const contextInputTokens =
-        Math.min(
-            maxInputTokens,
-            toReservedInputTokens(estimatedInput, {
-                toolOverheadTokens: estimateToolInputTokenOverhead({
-                    nativeSearchEnabled: options?.nativeSearchEnabled === true,
-                    appManagedSearchEnabled:
-                        options?.appManagedSearchEnabled === true,
-                }) + Math.max(0, Math.trunc(options?.additionalToolInputTokens ?? 0)),
-            })
-        ) + reservationOnlyInputTokens;
-    const passes = Math.max(1, Math.min(4, Math.trunc(options?.toolInputPasses ?? 1)));
+    const toolInputTokens =
+        estimateToolInputTokenOverhead({
+            nativeSearchEnabled: options?.nativeSearchEnabled === true,
+            appManagedSearchEnabled:
+                options?.appManagedSearchEnabled === true,
+        }) + Math.max(0, Math.trunc(options?.additionalToolInputTokens ?? 0));
+    // The authored-input limit applies to authored input. Tool definitions and
+    // bounded tool results are provider input too, so they stay outside that
+    // clamp; otherwise a large deterministic tool envelope would be silently
+    // under-reserved at exactly the point the limit was reached.
+    const contextInputTokens = options?.toolInputAboveAuthoredLimit
+        ? Math.min(maxInputTokens, toReservedInputTokens(estimatedInput)) +
+          toolInputTokens +
+          reservationOnlyInputTokens
+        : Math.min(
+              maxInputTokens,
+              toReservedInputTokens(estimatedInput, {
+                  toolOverheadTokens: toolInputTokens,
+              })
+          ) + reservationOnlyInputTokens;
+    const clampPasses = (value: number | undefined) =>
+        Math.max(1, Math.min(4, Math.trunc(value ?? 1) || 1));
+    const requestedPasses = clampPasses(options?.toolInputPasses);
+    /*
+      One decision for every long-context rule below: the switch is on and the
+      *measured* input -- the figure the input limit itself is checked against
+      -- is past the flat limit. Not the reservation-only image allowance,
+      which is neither part of that limit nor sent to the provider: a 115k
+      turn with one image is an ordinary turn and is priced as one.
+    */
+    const longContextTurn =
+        chatLongContextEnabled() && estimatedInputTokens > chatUserMaxInputTokens();
+    // A long-context turn reserves every call its application tool loop may
+    // make: each re-sends a prompt charged at its own cost, and settlement
+    // never charges past the reservation (review r-20261118-102103-16e00a).
+    const passes = longContextTurn
+        ? Math.max(requestedPasses, clampPasses(options?.longContextToolInputPasses))
+        : requestedPasses;
+    // On a long-context turn, choose the tier with room for the estimator's
+    // error (see LONG_CONTEXT_TIER_ESTIMATE_MARGIN). Tier choice only: the
+    // reserved token counts below are the estimate itself.
+    // The margin is applied to what is sent: the reservation-only image
+    // allowance is never sent, so it must not push a short-tier prompt onto
+    // the long rate and inflate what the reservation holds.
+    const tierPromptTokens = (tokens: number) =>
+        longContextTurn
+            ? Math.ceil(
+                  Math.max(0, tokens - reservationOnlyInputTokens) *
+                      LONG_CONTEXT_TIER_ESTIMATE_MARGIN
+              )
+            : tokens;
     let pricing = resolveModelRequestPricing(model, {
-        estimatedPromptTokens: contextInputTokens,
+        estimatedPromptTokens: tierPromptTokens(contextInputTokens),
     });
     if (passes > 1) pricing = resolveModelRequestPricing(model, {
-        estimatedPromptTokens: contextInputTokens + pricing.maxOutputTokens,
+        estimatedPromptTokens: tierPromptTokens(
+            contextInputTokens + pricing.maxOutputTokens
+        ),
     });
     // Every paid step re-sends its context. Earlier assistant output can also
     // be re-sent; reserve it without changing authored-input credit weight.
-    const reservedInputTokens = contextInputTokens * passes + pricing.maxOutputTokens * (passes - 1);
+    const requestedTotalOutputCap = options?.totalOutputTokenCap;
+    // On a long-context turn the answer can only use the room the window
+    // leaves after the input -- the same room the route later fits the request
+    // to -- so that is what is reserved, not the model's whole output ceiling.
+    // A caller that names its own output cap (Research Preview) keeps it: its
+    // admission is checked against that exact figure, and the window check
+    // after the budget still refuses a request that does not fit.
+    const windowRoom =
+        longContextTurn &&
+        requestedTotalOutputCap === undefined &&
+        Number.isSafeInteger(model.contextWindowTokens) &&
+        model.contextWindowTokens! > 0
+            ? Math.max(
+                  0,
+                  // What is sent: the image allowance is reserved, not sent,
+                  // so it takes no room from the answer.
+                  model.contextWindowTokens! -
+                      (contextInputTokens - reservationOnlyInputTokens)
+              )
+            : Infinity;
+    const totalOutputTokens = Math.min(
+        windowRoom,
+        Number.isSafeInteger(requestedTotalOutputCap) &&
+            requestedTotalOutputCap! > 0
+            ? Math.min(pricing.maxOutputTokens, requestedTotalOutputCap!)
+            : pricing.maxOutputTokens
+    );
+    const reservedInputTokens =
+        contextInputTokens * passes + totalOutputTokens * (passes - 1);
+    // On a long-context turn the provider-cost reservation holds the whole
+    // output ceiling too, the same worst case the credits hold, so the
+    // provider budget check sees what this turn may really spend. The unused
+    // part is released at settlement as it always is.
+    const reservedOutputTokens =
+        requestedTotalOutputCap === undefined && !longContextTurn
+            ? pricing.reservationOutputTokens
+            : totalOutputTokens;
+    const cacheWritePremiumMicroUsd = promptCacheWriteReservedPremiumMicroUsd({
+        model,
+        reservedInputTokens,
+        pricing,
+        promptCachePath: options?.promptCachePath,
+    });
+    // Above the flat input limit (long context) a turn is charged its own
+    // token cost. The reservation holds the worst case -- the whole output
+    // ceiling, since an answer may use all of it -- and settlement charges the
+    // actual cost and refunds the rest (`chatLongContextSettledCredits`). Two
+    // things are left out because they are not credits: native search has its
+    // own surcharge below, and the prompt-cache write premium is an
+    // operational reservation refunded at settlement, never part of
+    // `usageCredits` (docs/policy/anthropic-prompt-caching.md).
+    const flatCredits = getWeightedUsageCredits(
+        model,
+        estimatedInputTokens + reservationOnlyInputTokens
+    );
+    const longContextCredits = longContextTurn
+        ? chatLongContextCostCredits({
+              estimatedInputTokens,
+              reservedCostMicroUsd:
+                  microdollarsFor(reservedInputTokens, pricing.inputUsdPerMillionTokens) +
+                  microdollarsFor(totalOutputTokens, pricing.outputUsdPerMillionTokens),
+          })
+        : 0;
+    const longContextSettlement =
+        longContextCredits > 0
+            ? {
+                  microUsdPerCredit: chatLongContextMicroUsdPerCredit(),
+                  floorCredits: flatCredits,
+              }
+            : null;
 
     return {
         modelId: model.id,
         minimumPlan: model.minimumPlan,
         modelUsageClass: model.usageClass,
         usageCredits:
-            getWeightedUsageCredits(
-                model,
-                estimatedInputTokens + reservationOnlyInputTokens
-            ) +
+            Math.max(flatCredits, longContextCredits) +
             (options?.webSearchSurchargeCredits || 0),
+        longContextSettlement,
         inputTokens: reservedInputTokens,
         ...(passes > 1 ? { contextInputTokens } : {}),
-        maxOutputTokens: pricing.maxOutputTokens,
+        maxOutputTokens: totalOutputTokens,
         providerMaxOutputTokens: pricing.providerMaxOutputTokens,
-        reservedOutputTokens: pricing.reservationOutputTokens,
+        reservedOutputTokens,
         inputUsdPerMillionTokens: pricing.inputUsdPerMillionTokens,
         outputUsdPerMillionTokens: pricing.outputUsdPerMillionTokens,
         cachedInputPriceMultiplier: pricing.cachedInputPriceMultiplier,
         cacheWriteUsdPerMillionTokens: pricing.cacheWriteUsdPerMillionTokens,
-        promptCacheWriteReservedPremiumMicroUsd:
-            promptCacheWriteReservedPremiumMicroUsd({
-                model,
-                reservedInputTokens,
-                pricing,
-                promptCachePath: options?.promptCachePath,
-            }),
+        promptCacheWriteReservedPremiumMicroUsd: cacheWritePremiumMicroUsd,
         nativeSearchReservedCostMicroUsd:
             options?.nativeSearch?.reservedCostMicroUsd ?? 0,
         nativeSearchCostPerQueryMicroUsd:
@@ -1059,6 +1270,7 @@ export const createChatBudget = (
         pricingVersion: pricing.pricingVersion,
         costSource: pricing.costSource,
         longContextThresholdTokens: pricing.longContextThresholdTokens,
+        ...(passes > 1 ? { providerCallPasses: passes } : {}),
     };
 };
 
@@ -1383,6 +1595,20 @@ export const holdChatUsageBucket = async (
 };
 
 const incrementUsage = holdChatUsageBucket;
+
+/**
+ * Ceiling for a signed-in account's daily plan-credit bucket.
+ *
+ * That bucket is both the daily guardrail and the only "plan credits used
+ * today" counter: the Admin Console user list and detail, the CSV export and
+ * /api/user/usage all read it. A plan without a daily guardrail
+ * (`dailyMessageLimit` 0) used to skip the bucket entirely, so those screens
+ * showed only what the account spent while it was still on a plan that had
+ * one. Every plan-credit charge now records the day, uncapped when the plan
+ * has no daily limit, and the refund paths return it under the same flags.
+ */
+export const dailyPlanCreditBucketLimit = (dailyLimit: number) =>
+    dailyLimit > 0 ? dailyLimit : Number.MAX_SAFE_INTEGER;
 
 /** Counts into a bucket that has no ceiling. */
 const recordUsage = async (
@@ -2460,7 +2686,18 @@ export const acquireChatAccess = async (
     budget: ChatBudget,
     options?: {
         traceId?: string;
-        source?: "chat" | "comparison_review";
+        source?: ChatReservationSource;
+        /**
+         * Runs inside the reservation transaction, after the credit account
+         * lock and the reservation row. A throw refuses the request and rolls
+         * the hold back. The external API binds its key here and enforces the
+         * key's own credit cap (lib/externalApiAdmission.ts). It must not take
+         * a lock the credit account lock does not already order.
+         */
+        withinReservationTransaction?: (
+            tx: Prisma.TransactionClient,
+            reservation: { reservationId: string; usageCredits: number }
+        ) => Promise<void>;
         /** Tool names enabled for this turn, recorded on the limit decision. */
         enabledTools?: string[];
         /**
@@ -3153,32 +3390,30 @@ export const acquireChatAccess = async (
             addOnReservedCredits = creditAllocation.addOnCreditsRequired;
             decisionState.availableCredits = creditAllocation.planCreditsAvailableNow;
             if (planReservedCredits > 0) {
-                if (dailyRule) {
-                    const dailyAllowed = await incrementUsage(
-                        tx,
-                        access.subjectKey,
-                        "day",
-                        accessDayWindow.start,
-                        dailyRule.limit,
-                        planReservedCredits
+                const dailyAllowed = await incrementUsage(
+                    tx,
+                    access.subjectKey,
+                    "day",
+                    accessDayWindow.start,
+                    dailyPlanCreditBucketLimit(dailyRule?.limit ?? 0),
+                    planReservedCredits
+                );
+                if (!dailyAllowed) {
+                    throw new ChatAccessError(
+                        409,
+                        CONCURRENT_RESERVATION_CONFLICT,
+                        "Daily plan credit balance changed. Please retry.",
+                        undefined,
+                        { conflictScope: "daily_plan_credits" }
                     );
-                    if (!dailyAllowed) {
-                        throw new ChatAccessError(
-                            409,
-                            CONCURRENT_RESERVATION_CONFLICT,
-                            "Daily plan credit balance changed. Please retry.",
-                            undefined,
-                            { conflictScope: "daily_plan_credits" }
-                        );
-                    }
-                    reservationEntries.push({
-                        key: access.subjectKey,
-                        period: "day",
-                        periodStart: accessDayWindow.start,
-                        amount: planReservedCredits,
-                        metric: "plan-credits",
-                    });
                 }
+                reservationEntries.push({
+                    key: access.subjectKey,
+                    period: "day",
+                    periodStart: accessDayWindow.start,
+                    amount: planReservedCredits,
+                    metric: "plan-credits",
+                });
                 const allowed = await incrementUsage(
                     tx,
                     access.subjectKey,
@@ -3941,6 +4176,10 @@ export const acquireChatAccess = async (
             pricingVersion: budget.pricingVersion,
             costSource: budget.costSource,
             longContextThresholdTokens: budget.longContextThresholdTokens,
+            longContextSettlement: budget.longContextSettlement ?? null,
+            ...(budget.providerCallPasses
+                ? { providerCallPasses: budget.providerCallPasses }
+                : {}),
         };
         if (guestAutoPrehold) {
             const converted = await tx.chatCreditReservation.updateMany({
@@ -3994,6 +4233,17 @@ export const acquireChatAccess = async (
                 },
             });
         }
+        if (options?.withinReservationTransaction) {
+            // Last, so it sees the row it is binding to, and inside the same
+            // transaction, so a refusal here rolls the whole hold back. It runs
+            // with the credit account lock already held: every request of one
+            // account is serialised through that lock, which is what makes a
+            // per-key check here safe against concurrent requests.
+            await options.withinReservationTransaction(tx, {
+                reservationId,
+                usageCredits: budget.usageCredits,
+            });
+        }
     });
     } catch (error) {
         if (error instanceof ChatAccessError) {
@@ -4027,6 +4277,141 @@ export const acquireChatAccess = async (
     };
 };
 
+/**
+ * Re-enters only the concurrency boundary for a durable run whose financial
+ * reservation already exists. It deliberately does not consume another
+ * request quota, credit hold or provider/search hold: a resumed Research
+ * Preview generation is part of the original capped turn, not a new turn.
+ */
+export const acquireReservedChatAccess = async (
+    access: ChatAccess,
+    input: { reservationId: string; modelId: string }
+): Promise<{ leaseId: string; setCookie: string | undefined }> => {
+    try {
+        await assertOperationalFeatureEnabled("aiChatEnabled");
+    } catch (error) {
+        if (error instanceof OperationalFeatureDisabledError) {
+            throw new ChatAccessError(
+                503,
+                "AI_CHAT_DISABLED_BY_ADMIN",
+                "AI chat is temporarily paused for operational maintenance."
+            );
+        }
+        throw error;
+    }
+    if (access.kind !== "user" || !access.userId) {
+        throw new ChatAccessError(
+            401,
+            "AUTHENTICATION_REQUIRED",
+            "Authentication is required."
+        );
+    }
+    await assertUserOperationalAccess(access.userId);
+
+    const leaseId = randomUUID();
+    const now = new Date();
+    const plan = resolveChatConcurrencyPlan(access);
+    await prisma.$transaction(async (tx) => {
+        // The same lock order as acquireChatAccess: credit account, subject,
+        // concurrency scopes, then rows.
+        await lockCreditAccount(tx, access.userId!);
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${access.subjectKey}))`;
+        await lockConcurrencyScopes(tx, plan);
+        await sweepExpiredLeasesForScopes(tx, {
+            subjectKey: plan.subject.key,
+            ipKey: plan.ip?.key ?? null,
+        });
+        const reservation = await tx.chatCreditReservation.findUnique({
+            where: { id: input.reservationId },
+            select: {
+                userId: true,
+                subjectKey: true,
+                modelId: true,
+                source: true,
+                status: true,
+                expiresAt: true,
+            },
+        });
+        if (
+            !reservation ||
+            reservation.userId !== access.userId ||
+            reservation.subjectKey !== access.subjectKey ||
+            reservation.modelId !== input.modelId ||
+            reservation.source !== "chat" ||
+            reservation.status !== "reserved" ||
+            reservation.expiresAt <= now
+        ) {
+            throw new ChatAccessError(
+                409,
+                "CHAT_RESERVATION_NOT_OPEN",
+                "The Research reservation can no longer be resumed."
+            );
+        }
+        await assertConcurrencyCapacity(tx, plan, 1);
+        await insertLeases(tx, [
+            {
+                id: leaseId,
+                subjectKey: plan.subject.key,
+                ipKey: plan.ip?.key ?? null,
+                modelId: input.modelId,
+                admissionId: null,
+                claimedAt: now,
+                expiresAt: new Date(
+                    now.getTime() + resolveLeaseTtlSeconds() * 1_000
+                ),
+            },
+        ]);
+    });
+    return { leaseId, setCookie: access.setCookie };
+};
+
+/** Restores the frozen pricing/budget receipt from its canonical durable row. */
+const readReservedChatUsageReservation = async (
+    reservationId: string,
+    userId: string,
+    requireUnexpired: boolean
+): Promise<ChatUsageReservation> => {
+    const row = await prisma.chatCreditReservation.findUnique({
+        where: { id: reservationId },
+        select: {
+            userId: true,
+            source: true,
+            status: true,
+            expiresAt: true,
+            reservationPayload: true,
+        },
+    });
+    if (
+        !row ||
+        row.userId !== userId ||
+        row.source !== "chat" ||
+        row.status !== "reserved" ||
+        (requireUnexpired && row.expiresAt <= new Date())
+    ) {
+        throw new ChatAccessError(
+            409,
+            "CHAT_RESERVATION_NOT_OPEN",
+            "The Research reservation can no longer be resumed."
+        );
+    }
+    const reservation = deserializeReservation(row.reservationPayload);
+    if (
+        reservation.reservationId !== reservationId ||
+        reservation.userId !== userId ||
+        reservation.source !== "chat"
+    ) {
+        throw new Error("Durable chat credit reservation identity mismatch.");
+    }
+    return reservation;
+};
+
+export const readOpenChatUsageReservation = (reservationId: string, userId: string) =>
+    readReservedChatUsageReservation(reservationId, userId, true);
+
+/** Terminal accounting may consume an expired hold; paid resume still requires an open one. */
+export const readChatUsageReservationForSettlement = (reservationId: string, userId: string) =>
+    readReservedChatUsageReservation(reservationId, userId, false);
+
 export const settleChatUsage = async (
     reservation: ChatUsageReservation,
     callerTurnUsage: {
@@ -4050,6 +4435,8 @@ export const settleChatUsage = async (
         reasoningTokens?: number;
         /** True when the numbers came from provider usage metadata. */
         usageFromProvider?: boolean;
+        /** Per provider call, when the turn made more than one (tool loops). */
+        providerCalls?: ProviderCallUsage[];
         outcome: "completed" | "cancelled" | "failed" | "empty";
         /** Extra credits reserved on top of the base weight for a native web search attempt. */
         searchSurchargeCredits?: number;
@@ -4325,6 +4712,7 @@ export const settleChatUsage = async (
                   // charged for a search the user's answer never used.
                   searchCostMicroUsd: billedAttempt.searchCostMicroUsd,
                   searchQueryCount: billedAttempt.searchQueryCount,
+                  providerCalls: billedAttempt.providerCalls,
               }
             : turnUsage;
         const actualInput = Number.isSafeInteger(usage.inputTokens)
@@ -4350,7 +4738,7 @@ export const settleChatUsage = async (
                 : 0
         );
         const actualTokens = actualInput + actualOutput;
-        const actualCredits = getSettledUsageCredits({
+        const flatSettledCredits = getSettledUsageCredits({
             reservedCredits: canonical.usageCredits,
             reservedInputTokens: canonical.inputTokens,
             reservedOutputTokens: canonical.reservedOutputTokens,
@@ -4360,23 +4748,74 @@ export const settleChatUsage = async (
             searchSurchargeCredits: usage.searchSurchargeCredits,
             searchExecuted: usage.searchExecuted,
         });
-        const tokenCostBreakdown = calculateProviderUsageCost({
+        // A prompt that arrived in another long-context tier than its
+        // reservation priced is settled at that tier's rate, up or down --
+        // and a multi-step turn each call at its own (longContextSettledUsageCost).
+        // The reservation's own snapshot, not rates this rule already moved.
+        const snapshotRates = (
+            {
+                modelId: canonical.modelId,
+                inputUsdPerMillionTokens: canonical.inputUsdPerMillionTokens,
+                outputUsdPerMillionTokens: canonical.outputUsdPerMillionTokens,
+                cacheWriteUsdPerMillionTokens:
+                    canonical.cacheWriteUsdPerMillionTokens ?? null,
+                cachedInputPriceMultiplier: canonical.cachedInputPriceMultiplier,
+                longContextThresholdTokens:
+                    canonical.longContextThresholdTokens ?? null,
+                pricingVersion: canonical.pricingVersion ?? null,
+                costSource: canonical.costSource ?? null,
+                providerCallPasses: canonical.providerCallPasses ?? null,
+            }
+        );
+        const settledUsage = {
             inputTokens: actualInput,
             cachedInputTokens: actualCachedInput,
             cacheWriteInputTokens: actualCacheWriteInput,
             outputTokens: actualOutput,
-            inputUsdPerMillionTokens: canonical.inputUsdPerMillionTokens,
-            outputUsdPerMillionTokens: canonical.outputUsdPerMillionTokens,
-            cachedInputPriceMultiplier:
-                canonical.cachedInputPriceMultiplier,
-            // From the reservation's own snapshot, not from today's registry:
-            // this settles a request that was priced when it was reserved, and
-            // re-reading the rate here would apply a later price change
-            // retroactively. Null on a reservation taken before this column
-            // existed, which prices its writes at nothing -- correct, because
-            // such a turn sent no cache marker and wrote no cache entry.
-            cacheWriteUsdPerMillionTokens:
-                canonical.cacheWriteUsdPerMillionTokens ?? null,
+        };
+        // From the reservation's own snapshot, not from today's registry: this
+        // settles a request that was priced when it was reserved, and
+        // re-reading the rate here would apply a later price change
+        // retroactively. A null write rate (a reservation taken before that
+        // column existed) prices writes at nothing -- correct, because such a
+        // turn sent no cache marker and wrote no cache entry.
+        const tokenCostBreakdown = longContextSettledUsageCost(
+            calculateProviderUsageCost,
+            
+            snapshotRates,
+            settledUsage,
+            usage.providerCalls
+        );
+        /*
+          A long-context turn is charged its actual token cost, never above the
+          flat rule's result and never below its flat-weighted credits. Priced
+          at the billed attempt's own rates when a fallback answered, and
+          without the cache-write premium: written tokens count at the plain
+          input rate, as everywhere else credits are concerned.
+        */
+        const creditCost = canonical.longContextSettlement
+            ? longContextSettledUsageCost(
+            calculateProviderUsageCost,
+            
+                  billedAttempt ? billedAttempt.price : snapshotRates,
+                  settledUsage,
+                  usage.providerCalls,
+                  { pricedCacheWrites: false }
+              ).totalCostMicroUsd
+            : 0;
+        const actualCredits = chatLongContextSettledCredits({
+            settlement: canonical.longContextSettlement,
+            flatSettledCredits,
+            reservedCredits:
+                usage.searchExecuted === false
+                    ? Math.max(
+                          0,
+                          canonical.usageCredits - (usage.searchSurchargeCredits ?? 0)
+                      )
+                    : canonical.usageCredits,
+            tokenCostMicroUsd: creditCost,
+            searchSurchargeCredits:
+                usage.searchExecuted === false ? 0 : usage.searchSurchargeCredits ?? 0,
         });
         const providerUsageSnapshot =
             canonical.provider === "perplexity" &&
@@ -4638,8 +5077,13 @@ export const settleChatUsage = async (
                           promptCacheTtl:
                               canonical.promptCacheTtl ?? null,
                           pricingVersion: canonical.pricingVersion ?? null,
+                          longContextThresholdTokens:
+                              canonical.longContextThresholdTokens ?? null,
+                          costSource: canonical.costSource ?? null,
+                          providerCallPasses: canonical.providerCallPasses ?? null,
                       },
                       inputTokens: actualInput,
+                      providerCalls: usage.providerCalls,
                       cachedInputTokens: actualCachedInput,
                       cacheWriteInputTokens: actualCacheWriteInput,
                       outputTokens: actualOutput,
@@ -5575,9 +6019,10 @@ export const reconcileExpiredChatCreditReservations = async (
             // `startScheduledJob` records a run rather than holding a lock --
             // so the read moves to where nothing can settle around it.
             //
-            // Only deep research reservations pay for the lookup. Nothing else
-            // can have a PerplexityAsyncJob, and the sweep's page is up to a
-            // thousand rows of which almost none are this model.
+            // Research Preview owns its reservation through queued/running
+            // checkpoints. Resolve that ownership under the same lock before
+            // a generic expiry refund can discard paid work.
+            let researchHandoff = false;
             let handoff: Awaited<
                 ReturnType<typeof findDeepResearchHandoff>
             > = null;
@@ -5587,8 +6032,19 @@ export const reconcileExpiredChatCreditReservations = async (
                 {
                     reconciled: true,
                     reason: "reservation_expired",
-                    resolveTurnUsage: isDeepResearchReservation(row.modelId)
-                        ? async (tx) => {
+                    resolveTurnUsage: async (tx) => {
+                              // An expired external API reservation was admitted
+                              // and then lost its process: the provider may have
+                              // run. The user is refunded as for any failure, but
+                              // the provider side keeps the reservation's own
+                              // estimate rather than a cost of zero
+                              // (docs/policy/external-api.md section 4).
+                              if (reservation.source === "external_api") {
+                                  return { turnUsage: { outcome: "failed", usageFromProvider: false } };
+                              }
+                              const researchUsage = await researchPreviewSettlementForExpiry(tx, reservation.reservationId, now);
+                              if (researchUsage) { researchHandoff = true; return { turnUsage: researchUsage }; }
+                              if (!isDeepResearchReservation(row.modelId)) return null;
                               handoff = await findDeepResearchHandoff(
                                   reservation.reservationId,
                                   tx
@@ -5608,11 +6064,10 @@ export const reconcileExpiredChatCreditReservations = async (
                                           .providerUsageSnapshot as never) ??
                                       null,
                               };
-                          }
-                        : undefined,
+                          },
                 }
             );
-            if (result.applied && handoff) settledFromHandoff += 1;
+            if (result.applied && (handoff || researchHandoff)) settledFromHandoff += 1;
             else if (result.applied && result.status === "refunded") refunded += 1;
             else alreadyFinalized += 1;
         } catch (error) {
@@ -5744,6 +6199,7 @@ export const validateChatPayload = (body: unknown) => {
         promptRefinerDecision?: unknown;
         guestAutoCapability?: unknown;
         guestClientTurnId?: unknown;
+        researchMode?: unknown;
     };
     if (payload.mcpConnectionId !== undefined && (typeof payload.mcpConnectionId !== "string" || !/^[A-Za-z0-9_-]{1,100}$/.test(payload.mcpConnectionId))) {
         throw new ChatAccessError(400, "INVALID_CONNECTOR_SELECTION", "Invalid connector selection.");
@@ -5888,6 +6344,16 @@ export const validateChatPayload = (body: unknown) => {
         );
     }
     if (
+        payload.researchMode !== undefined &&
+        payload.researchMode !== "preview"
+    ) {
+        throw new ChatAccessError(
+            400,
+            "INVALID_RESEARCH_MODE",
+            "Invalid Research mode."
+        );
+    }
+    if (
         payload.webSearchMode !== undefined &&
         !isWebSearchMode(payload.webSearchMode)
     ) {
@@ -5896,6 +6362,45 @@ export const validateChatPayload = (body: unknown) => {
             "INVALID_WEB_SEARCH_MODE",
             "Invalid web search mode."
         );
+    }
+    if (payload.researchMode === "preview") {
+        const allowedKeys = new Set([
+            "messages",
+            "modelId",
+            "conversationId",
+            "assistantMessageId",
+            "sourceUserMessageId",
+            "webSearchMode",
+            "researchMode",
+        ]);
+        const unknownKey = Object.keys(body as Record<string, unknown>).find(
+            (key) => !allowedKeys.has(key)
+        );
+        const message = payload.messages[0] as {
+            role?: unknown;
+            content?: unknown;
+            attachments?: unknown;
+        } | undefined;
+        if (
+            unknownKey ||
+            payload.messages.length !== 1 ||
+            message?.role !== "user" ||
+            typeof message.content !== "string" ||
+            message.content.trim().length < 1 ||
+            message.content.length > 4_000 ||
+            (Array.isArray(message.attachments) && message.attachments.length > 0) ||
+            !payload.modelId ||
+            !payload.conversationId ||
+            !payload.assistantMessageId ||
+            !payload.sourceUserMessageId ||
+            payload.webSearchMode !== "always"
+        ) {
+            throw new ChatAccessError(
+                400,
+                "INVALID_RESEARCH_PREVIEW_REQUEST",
+                "Research Preview requires one saved, attachment-free question."
+            );
+        }
     }
     // Shape only. A token that is well-formed but forged, expired, issued to
     // another subject or already consumed is rejected where it is used, and
@@ -5943,7 +6448,9 @@ export const validateChatPayload = (body: unknown) => {
         const ids = payload.acknowledgedUnavailableAttachmentIds;
         if (
             !Array.isArray(ids) ||
-            ids.length > 50 ||
+            // Every file one request can carry (100 messages of 10), since one
+            // refusal names every lost file a long conversation holds.
+            ids.length > 1_000 ||
             ids.some(
                 (id) =>
                     typeof id !== "string" ||
@@ -5960,7 +6467,8 @@ export const validateChatPayload = (body: unknown) => {
         }
     }
 
-    let totalCharacters = 0;
+    // No total-character limit: the transcript is bounded by the body size and
+    // by the input token limit (operator decision 2026-11-18).
     for (const message of payload.messages) {
         if (!message || typeof message !== "object") {
             throw new ChatAccessError(400, "INVALID_CHAT_MESSAGE", "Invalid message.");
@@ -6000,14 +6508,6 @@ export const validateChatPayload = (body: unknown) => {
                 "Invalid message content."
             );
         }
-        totalCharacters += candidate.content.length;
-        if (totalCharacters > CHAT_REQUEST_LIMITS.maxTotalCharacters) {
-            throw new ChatAccessError(
-                413,
-                "CHAT_CONTENT_TOO_LARGE",
-                "Chat history is too large."
-            );
-        }
         if (
             candidate.attachments !== undefined &&
             !Array.isArray(candidate.attachments)
@@ -6041,6 +6541,7 @@ export const validateChatPayload = (body: unknown) => {
         promptRefinerDecision?: PromptRefinerChatDecision;
         guestAutoCapability?: string;
         guestClientTurnId?: string;
+        researchMode?: "preview";
     };
 };
 

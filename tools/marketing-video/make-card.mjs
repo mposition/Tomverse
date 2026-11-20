@@ -44,6 +44,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { chromium } from "playwright";
+import { featuresFile } from "./features-source.mjs";
 
 const [specPath, outDir] = process.argv.slice(2);
 if (!specPath || !outDir) {
@@ -105,7 +106,7 @@ if (typeof spec.alt !== "string" || spec.alt.trim().length < 20) fail("spec.alt 
 const toolDir = path.dirname(fileURLToPath(import.meta.url));
 const libraryDir = path.join(toolDir, "library");
 const library = JSON.parse(readFileSync(path.join(libraryDir, "library.json"), "utf8"));
-const KNOWN_MODELS = JSON.parse(readFileSync(path.join(toolDir, "features.json"), "utf8")).features.flatMap((feature) => feature.models ?? []);
+const KNOWN_MODELS = JSON.parse(readFileSync(featuresFile(toolDir), "utf8")).features.flatMap((feature) => feature.models ?? []);
 
 // The pack's captures, if the card uses a pack: `captures` ({name: {file,
 // text}}), or the first packs' fixed five pictures.

@@ -8,7 +8,7 @@ import { crc32, deflateSync } from "node:zlib";
 
 import { admit, dailyCap, ledgerPath, readLedger, requestProblem, spent } from "../tools/marketing-video/higgsfield-cap.mjs";
 import { makeImage } from "../tools/marketing-video/hf-image-core.mjs";
-import { checkConcepts, pickFeature } from "../tools/marketing-video/concepts-core.mjs";
+import { checkConcepts, gatherConcepts, pickFeature, sortConcepts } from "../tools/marketing-video/concepts-core.mjs";
 import { checkReview } from "../tools/marketing-video/review-core.mjs";
 
 /**
@@ -99,11 +99,12 @@ function fakeCli(script) {
   const cli = (args) => {
     calls.push(args);
     if (args[1] === "wait" && unknownWaitFlag(args)) return { status: 1, stdout: "", stderr: `unknown flag: ${unknownWaitFlag(args)}`, timedOut: false };
-    const answer = script[args[1]];
+    // `upload create` is its own command; every other one is `generate <sub>`.
+    const answer = args[0] === "upload" ? script.upload : script[args[1]];
     const value = typeof answer === "function" ? answer(args, calls) : answer;
     return value ?? { status: 1, stdout: "", stderr: "unexpected", timedOut: false };
   };
-  return { cli, calls, count: (sub) => calls.filter((args) => args[1] === sub).length };
+  return { cli, calls, count: (sub) => calls.filter((args) => (sub === "upload" ? args[0] === "upload" : args[0] !== "upload" && args[1] === sub)).length };
 }
 const ok = (value) => ({ status: 0, stdout: JSON.stringify(value), stderr: "", timedOut: false });
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0, 0, 0]);
@@ -141,6 +142,68 @@ test("a picture is priced, recorded, created, waited for and written", async () 
     const create = fake.calls.find((args) => args[1] === "create");
     assert.deepEqual(create.slice(0, 7), ["generate", "create", "gpt_image_2_6", "--prompt", create[4], "--aspect_ratio", "4:5"]);
     assert.ok(!create.includes("--wait"), "create returns the job id at once; waiting is a separate call");
+  } finally {
+    rmSync(jobDir, { recursive: true, force: true });
+  }
+});
+
+test("a reference picture is uploaded once a day and passed to cost and create by its upload id", async () => {
+  const jobDir = tempJob();
+  try {
+    const logo = join(jobDir, "claude.png");
+    const base = join(jobDir, "base.png");
+    writeFileSync(logo, Buffer.concat([PNG, Buffer.from("logo")]));
+    writeFileSync(base, Buffer.concat([PNG, Buffer.from("base")]));
+    const copy = join(jobDir, "claude-copy.png");
+    writeFileSync(copy, readFileSync(logo));
+    let next = 0;
+    const ids = ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", "33333333-3333-4333-8333-333333333333"];
+    let job = 0;
+    const fake = fakeCli({
+      // The shape `upload list --json` lists on the box (2026-11-13).
+      upload: () => ok({ id: ids[next++], type: "image", url: "https://cdn.example/u.png", created_at: "2026-11-13T00:00:00Z" }),
+      cost: ok({ credits: 0.25 }),
+      create: () => ok({ id: `job-${++job}` }),
+      wait: (args) => ok({ id: args[2], status: "completed", result_url: `https://cdn.example/${args[2]}.png` }),
+    });
+    const args = { prompt: "scene", jobDir, day: DAY, env: capEnv("5"), cli: fake.cli, fetchBytes: async () => PNG };
+    assert.equal((await makeImage({ ...args, references: [logo], out: join(jobDir, "a.png"), label: "c1/en/make" })).ok, true);
+    // The same logo again, a byte-identical copy of it, and a new picture.
+    assert.equal((await makeImage({ ...args, references: [base, copy], out: join(jobDir, "b.png"), label: "c1/ko/edit" })).ok, true);
+    assert.equal(fake.count("upload"), 2, "the logo once and the base once; the copy has the logo's bytes");
+    for (const sub of ["cost", "create"]) {
+      const sent = fake.calls.filter((call) => call[0] === "generate" && call[1] === sub).map((call) => call.filter((_, index) => call[index - 1] === "--image-references"));
+      assert.deepEqual(sent, [[ids[0]], [ids[1], ids[0]]], `${sub} gets upload ids, never a path the CLI would upload again`);
+    }
+    const entries = readLedger(ledgerPath(jobDir, DAY)).entries;
+    assert.deepEqual(entries.map((entry) => entry.status), ["done", "done"]);
+
+    // A job folder that does not exist yet is made before the day's uploads are recorded.
+    const fresh = join(jobDir, "new-job");
+    assert.equal((await makeImage({ ...args, jobDir: fresh, references: [ids[0]], out: join(jobDir, "n.png"), label: "c2/en/make" })).ok, true);
+    assert.equal((await makeImage({ ...args, jobDir: join(jobDir, "other-job"), references: [logo], out: join(jobDir, "o.png"), label: "c2/en/make" })).ok, true);
+    next = 2;
+
+    // Another day uploads again, so an upload deleted in Higgsfield's library is not reused.
+    await makeImage({ ...args, day: "20261109", references: [logo], out: join(jobDir, "c.png"), label: "c1/en/make" });
+    assert.equal(fake.count("upload"), 4);
+  } finally {
+    rmSync(jobDir, { recursive: true, force: true });
+  }
+});
+
+test("a reference that cannot be uploaded stops the picture before it is priced or recorded", async () => {
+  const jobDir = tempJob();
+  try {
+    const logo = join(jobDir, "logo.png");
+    writeFileSync(logo, PNG);
+    const fake = fakeCli({ upload: { status: 1, stdout: "", stderr: "unauthorized", timedOut: false }, cost: ok({ credits: 0.25 }) });
+    const made = await makeImage({ prompt: "scene", references: [logo], out: join(jobDir, "x.png"), label: "c1/en/make", jobDir, day: DAY, env: capEnv("5"), cli: fake.cli, fetchBytes: async () => PNG });
+    assert.equal(made.reason, "reference_upload_failed");
+    assert.equal(fake.count("cost"), 0);
+    assert.equal(readLedger(ledgerPath(jobDir, DAY)).entries.length, 0);
+    const missing = await makeImage({ prompt: "scene", references: [join(jobDir, "none.png")], out: join(jobDir, "y.png"), label: "c1/en/make", jobDir, day: DAY, env: capEnv("5"), cli: fake.cli, fetchBytes: async () => PNG });
+    assert.equal(missing.reason, "reference_unreadable");
   } finally {
     rmSync(jobDir, { recursive: true, force: true });
   }
@@ -285,24 +348,29 @@ test("a price that cannot be read or is above the call ceiling refuses before an
 const texts = [
   { role: "headline", text: "Ask GPT, Claude, Gemini and more" },
   { role: "screen", text: "Which model should answer this?" },
+  { role: "cta", text: "Start without an account" },
 ];
 const translations = {
   ko: [
     { role: "headline", text: "GPT, Claude, Gemini 등에 물어보세요" },
     { role: "screen", text: "어떤 모델이 답하면 좋을까요?" },
+    { role: "cta", text: "계정 없이도 바로 시작해 보세요" },
   ],
   "zh-Hant": [
     { role: "headline", text: "問 GPT、Claude、Gemini 等" },
     { role: "screen", text: "這個問題該讓哪個模型回答？" },
+    { role: "cta", text: "不用帳號也能直接開始" },
   ],
   "zh-Hans": [
     { role: "headline", text: "问 GPT、Claude、Gemini 等" },
     { role: "screen", text: "这个问题该让哪个模型回答？" },
+    { role: "cta", text: "不用账号也能直接开始" },
   ],
 };
 const concept = (id, extra = {}) => ({
   id,
   feature: "chat",
+  format: { c1: "person", c2: "laptop", c3: "object" }[id] ?? "diagram",
   device: `a commuter on a train picks a model on a phone ${id}`,
   prompt_en: `A candid photo of a commuter on a morning train holding a phone in a natural grip, the screen showing a chat app with model chips. ${"Soft window light, shallow depth of field, real people around. ".repeat(4)}`,
   texts,
@@ -319,21 +387,134 @@ test("well-formed concepts pass", () => {
   assert.equal(check(conceptsOf(concept("c1"), concept("c2"))), null);
 });
 
+test("one broken concept is dropped and the others go ahead; a broken answer is refused whole", () => {
+  const sort = (answer) => sortConcepts(answer, { feature: "chat", history: [], day: DAY, toolDir: tool });
+  const broken = concept("c2", { prompt_en: `${concept("c2").prompt_en}, accents in Tomverse blue` });
+  const sorted = sort(conceptsOf(concept("c1"), broken, concept("c3")));
+  assert.deepEqual(sorted.kept.map((entry) => entry.id), ["c1", "c3"]);
+  assert.equal(sorted.dropped.length, 1);
+  assert.equal(sorted.dropped[0].id, "c2");
+  assert.match(sorted.dropped[0].problems[0], /^concept c2: prompt_en must not contain the word "Tomverse"/u);
+  assert.deepEqual(sort(conceptsOf(concept("c1"), concept("c2"))).dropped, []);
+  assert.match(sort(conceptsOf(concept("c1"))).problem, /2-3 entries/u);
+  assert.match(sort(null).problem, /one JSON object/u);
+});
+
+test("a refused concept lists everything wrong with it, so one retry can mend it all", () => {
+  const sort = (answer) => sortConcepts(answer, { feature: "chat", history: [], day: DAY, toolDir: tool });
+  const broken = concept("c2", {
+    prompt_en: `${concept("c2").prompt_en} No purple anywhere, no lorem ipsum, and no Tomverse logo.`,
+    logos: ["chatgpt", "../secret"],
+    texts: [texts[0], { role: "screen", text: "Try it free at tomverse.app" }],
+    translations: { ...translations, ko: [translations.ko[0], { role: "screen", text: "지피티에게 무료로 물어보세요" }] },
+  });
+  const { problems } = sort(conceptsOf(concept("c1"), broken)).dropped[0];
+  for (const expected of [
+    /prompt_en must not contain the word "Tomverse".*Found in: ".*no Tomverse logo/u,
+    /prompt_en must not contain the words purple.*Found in: ".*No purple anywhere/u,
+    /prompt_en must not contain the words "lorem ipsum"/u,
+    /logo "\.\.\/secret" is not one of the logo files/u,
+    /texts\[1\]: no text in the picture contains "Tomverse"/u,
+    /texts\[1\]: no web address/u,
+    /texts\[1\]: the word "free" stands only/u,
+    /ko\[1\]: model and company names stay as written.*지피티/u,
+    /ko\[1\]: "무료" only/u,
+  ]) {
+    assert.ok(problems.some((problem) => expected.test(problem)), `${expected} in ${JSON.stringify(problems)}`);
+  }
+});
+
+test("concepts are asked for again with every reason; what passed in either answer is kept", () => {
+  const sort = (answer) => sortConcepts(answer, { feature: "chat", history: [], day: DAY, toolDir: tool });
+  const bad = (id) => concept(id, { prompt_en: `${concept(id).prompt_en} No purple, no Tomverse logo.` });
+  const gather = (answers) => {
+    const asked = [];
+    const result = gatherConcepts({
+      ask: (again) => {
+        asked.push(again);
+        return answers[asked.length - 1] ?? null;
+      },
+      sort,
+    });
+    return { ...result, asked };
+  };
+  // All pass at once: one call.
+  const clean = gather([conceptsOf(concept("c1"), concept("c2"))]);
+  assert.deepEqual([clean.concepts.map((entry) => entry.id), clean.dropped, clean.asked], [["c1", "c2"], [], [""]]);
+  // One broken: asked once more with both reasons and told what passed; the mended one joins the kept ones.
+  const mended = gather([conceptsOf(concept("c1"), bad("c2"), concept("c3")), conceptsOf(concept("c1"), concept("c2"), concept("c3"))]);
+  assert.deepEqual(mended.concepts.map((entry) => entry.id), ["c1", "c3", "c2"]);
+  assert.equal(mended.asked.length, 2);
+  assert.match(mended.asked[1], /the words purple[\s\S]*the word "Tomverse"|the word "Tomverse"[\s\S]*the words purple/u);
+  assert.match(mended.asked[1], /Repeat c1 and c3 exactly as they were/u);
+  // Still broken the second time: it is dropped, the others go ahead, and there is no third call.
+  const dropped = gather([conceptsOf(concept("c1"), bad("c2")), conceptsOf(concept("c1"), bad("c2")), conceptsOf(concept("c1"), concept("c2"))]);
+  assert.deepEqual([dropped.concepts.map((entry) => entry.id), dropped.dropped.map((entry) => entry.id), dropped.asked.length], [["c1"], ["c2"], 2]);
+  // The second answer breaks what passed before: the first version stays.
+  const kept = gather([conceptsOf(concept("c1"), bad("c2")), conceptsOf(bad("c1"), concept("c2"))]);
+  assert.deepEqual([kept.concepts.map((entry) => entry.id), kept.dropped], [["c1", "c2"], []]);
+  // Nothing passes twice (no JSON, then all broken): a third call, and its concepts are used.
+  const third = gather([null, conceptsOf(bad("c1"), bad("c2")), conceptsOf(concept("c1"), concept("c2"))]);
+  assert.deepEqual([third.concepts.map((entry) => entry.id), third.asked.length], [["c1", "c2"], 3]);
+  assert.match(third.asked[1], /exactly one line of JSON/u);
+  // Nothing ever passes: no concepts, and the last reasons are kept for the report.
+  const none = gather([null, null, conceptsOf(bad("c1"), bad("c2"))]);
+  assert.deepEqual([none.concepts, none.asked.length], [[], 3]);
+  assert.match(none.refusal, /must not contain/u);
+});
+
+test("counts after a model name, exact model lists on a screen and compound words are not refused", () => {
+  const analysis = (list) => {
+    const strip = (text) => Object.fromEntries(Object.entries(text).filter(([key]) => !["ko", "zhT", "zhS"].includes(key)));
+    const inLocale = (key) => list.map((text) => strip({ ...text, text: text[key] ?? text.text }));
+    return { ...concept("c2", { feature: "analysis", factRefs: ["analysis.what"] }), texts: list.map(strip), translations: { ko: inLocale("ko"), "zh-Hant": inLocale("zhT"), "zh-Hans": inLocale("zhS") } };
+  };
+  const first = { ...concept("c1"), feature: "analysis", factRefs: ["analysis.what"] };
+  const problemsOf = (...list) => sortConcepts({ date: "2026-11-12", feature: "analysis", concepts: [first, analysis([{ role: "headline", text: "See where AI answers differ", ko: "AI 답변이 어디서 갈리는지 보세요", zhT: "看看 AI 回答哪裡不同", zhS: "看看 AI 回答哪里不同" }, ...list, { role: "cta", text: "Start without an account", ko: "계정 없이도 바로 시작해 보세요", zhT: "不用帳號也能直接開始", zhS: "不用账号也能直接开始" }])] }, { feature: "analysis", history: [], day: DAY, toolDir: tool }).dropped[0]?.problems ?? [];
+  // A count that follows a model name is not a version (every analysis card has counts).
+  assert.deepEqual(problemsOf({ role: "screen", text: "GPT, Claude, Gemini and more agree on 7 points", ko: "GPT, Claude, Gemini 등 답변 7가지 공통점", zhT: "GPT、Claude、Gemini 等 7 個共同點", zhS: "GPT、Claude、Gemini 等 7 个共同点" }), []);
+  // The three models that answered the recorded example, on a screen or a tag.
+  assert.deepEqual(problemsOf({ role: "label", text: "GPT 6 Luna · Claude Haiku 5.5 · Gemini Flash" }), []);
+  // The same list as copy still ends "and more", and so does any list of bare names.
+  assert.match(problemsOf({ role: "subhead", text: "GPT 6 Luna, Claude Haiku 5.5 and Gemini Flash answered", ko: "GPT 6 Luna, Claude Haiku 5.5, Gemini Flash의 답변", zhT: "GPT 6 Luna、Claude Haiku 5.5、Gemini Flash 的回答", zhS: "GPT 6 Luna、Claude Haiku 5.5、Gemini Flash 的回答" })[0], /and more/u);
+  assert.match(problemsOf({ role: "label", text: "GPT · Claude · Gemini" })[0], /and more/u);
+  // A version that is not in features.json is still refused, in any language.
+  assert.match(problemsOf({ role: "screen", text: "Gemini Flash 2.0 answered", ko: "Gemini Flash 2.0의 답변", zhT: "Gemini Flash 2.0 的回答", zhS: "Gemini Flash 2.0 的回答" })[0], /"Gemini Flash 2\.0" is not a model name/u);
+  assert.match(problemsOf({ role: "screen", text: "Ask Claude Opus 4 and more" , ko: "Claude Opus 4 등에 물어보세요", zhT: "問 Claude Opus 4 等", zhS: "问 Claude Opus 4 等" })[0], /"Claude Opus 4" is not a model name/u);
+  // Also in lower case, joined to its number, or written unlike features.json (independent review, 2026-11-12).
+  const same = (text) => ({ role: "screen", text, ko: text, zhT: text, zhS: text });
+  assert.match(problemsOf(same("Claude opus 4 and more"))[0], /"Claude opus 4" is not a model name/u);
+  assert.match(problemsOf(same("claude haiku 5.5 answered"))[0], /"claude haiku 5\.5" is not a model name/u);
+  assert.match(problemsOf(same("GPT4 answered"))[0], /"GPT4" is not a model name/u);
+  assert.match(problemsOf(same("GPT-4o mini answered"))[0], /"GPT-4" is not a model name/u);
+  assert.deepEqual(problemsOf(same("Claude Haiku 5.5 found 7 gaps; Gemini Flash found 6")), []);
+  // One bare name in a list of exact names, and the list is copy again.
+  assert.match(problemsOf({ role: "label", text: "GPT 6 Luna · Claude" })[0], /and more/u);
+  assert.match(problemsOf({ role: "label", text: "GPT 6 Luna · Claude · Gemini Flash" })[0], /and more/u);
+  // Words around exact names are allowed on a screen or a tag (the real model wrote this label, 2026-11-12); as copy they are not.
+  assert.deepEqual(problemsOf({ role: "label", text: "Asked at once: GPT 6 Luna, Claude Haiku 5.5, Gemini Flash", ko: "한 번에 질문: GPT 6 Luna, Claude Haiku 5.5, Gemini Flash", zhT: "同時提問：GPT 6 Luna、Claude Haiku 5.5、Gemini Flash", zhS: "同时提问：GPT 6 Luna、Claude Haiku 5.5、Gemini Flash" }), []);
+  assert.match(problemsOf({ role: "cta", text: "Ask GPT 6 Luna and Claude Haiku 5.5 for every task", ko: "GPT 6 Luna와 Claude Haiku 5.5에 물어보세요", zhT: "問 GPT 6 Luna 和 Claude Haiku 5.5", zhS: "问 GPT 6 Luna 和 Claude Haiku 5.5" }).join(" "), /and more/u);
+  // "stress-free" is not an offer; "feel free" is reworded.
+  assert.deepEqual(problemsOf({ role: "screen", text: "A stress-free weekend plan", ko: "편안한 주말 계획", zhT: "輕鬆的週末行程", zhS: "轻松的周末行程" }), []);
+  assert.match(problemsOf({ role: "screen", text: "Feel free to ask again", ko: "언제든 다시 물어보세요", zhT: "隨時再問", zhS: "随时再问" })[0], /"free" stands only/u);
+});
+
 test("concepts with the wrong shape, feature or count are refused", () => {
   assert.match(check(conceptsOf(concept("c1"))), /2-3 entries/u);
   assert.match(check(conceptsOf(concept("c1"), concept("c2", { feature: "review" }))), /today's/u);
   const noAlt = concept("c2");
   delete noAlt.alt;
   assert.match(check(conceptsOf(concept("c1"), noAlt)), /keys must be exactly/u);
-  assert.match(check(conceptsOf(concept("c1"), concept("c2", { logos: ["../secret"] }))), /not a file in public\/model-icons/u);
-  assert.match(check(conceptsOf(concept("c1"), concept("c2", { factRefs: ["chat.price"] }))), /not in features\.json/u);
+  assert.match(check(conceptsOf(concept("c1"), concept("c2", { logos: ["../secret"] }))), /not one of the logo files/u);
+  assert.match(check(conceptsOf(concept("c1"), concept("c2", { factRefs: ["chat.price"] }))), /not a path in features\.json/u);
+  assert.match(check(conceptsOf(concept("c1"), concept("c2", { texts: Array.from({ length: 13 }, () => texts[0]) }))), /texts holds 1-12 entries \(it has 13/u);
   assert.match(check(conceptsOf(concept("c1"), concept("c2", { device: concept("c1").device }))), /share a device/u);
 });
 
 test("banned words, unconditioned free, untranslated names and unknown models are refused", () => {
   const withText = (text, locale = null) =>
-    concept("c2", locale ? { translations: { ...translations, [locale]: [translations[locale][0], { role: "screen", text }] } } : { texts: [texts[0], { role: "screen", text }] });
-  assert.match(check(conceptsOf(concept("c1"), withText("Visit tomverse.app today"))), /Tomverse name/u);
+    concept("c2", locale ? { translations: { ...translations, [locale]: [translations[locale][0], { role: "screen", text }, translations[locale][2]] } } : { texts: [texts[0], { role: "screen", text }, texts[2]] });
+  assert.match(check(conceptsOf(concept("c1"), withText("Visit tomverse.app today"))), /no text in the picture contains "Tomverse"/u);
   assert.match(check(conceptsOf(concept("c1"), withText("Try it free"))), /free/u);
   assert.equal(check(conceptsOf(concept("c1"), withText("Free to try within the included credits"))), null);
   assert.match(check(conceptsOf(concept("c1"), withText("Ask GPT and Claude at once"))), /and more/u);
@@ -342,16 +523,28 @@ test("banned words, unconditioned free, untranslated names and unknown models ar
   assert.match(check(conceptsOf(concept("c1"), withText("问克劳德", "zh-Hans"))), /stay as written/u);
   assert.match(check(conceptsOf(concept("c1"), withText("這個問題", "zh-Hans"))), /Simplified/u);
   assert.match(check(conceptsOf(concept("c1"), concept("c2", { prompt_en: `${concept("c2").prompt_en} with a purple glow` }))), /#155dfb/u);
-  assert.match(check(conceptsOf(concept("c1"), concept("c2", { prompt_en: `${concept("c2").prompt_en} and the Tomverse logo` }))), /never names Tomverse/u);
+  // The refusal says the word must go and quotes where it is, so the retry can drop it.
+  const named = check(conceptsOf(concept("c1"), concept("c2", { prompt_en: `${concept("c2").prompt_en}, accents in Tomverse blue` })));
+  assert.match(named, /must not contain the word "Tomverse"/u);
+  assert.match(named, /Found in: "\.\.\..*accents in Tomverse blue\.\.\."/u);
 });
 
 test("an answer under a real model name must be its recorded answer, untranslated", () => {
   const quoted = (text, translated = text) =>
     concept("c2", {
-      texts: [texts[0], { role: "answer", speaker: "Gemini Flash", text }],
-      translations: Object.fromEntries(Object.entries(translations).map(([locale, list]) => [locale, [list[0], { role: "answer", speaker: "Gemini Flash", text: translated }]])),
+      texts: [texts[0], { role: "answer", speaker: "Gemini Flash", text }, texts[2]],
+      translations: Object.fromEntries(Object.entries(translations).map(([locale, list]) => [locale, [list[0], { role: "answer", speaker: "Gemini Flash", text: translated }, list[2]]])),
     });
   assert.equal(check(conceptsOf(concept("c1"), quoted("Skip the Scenic Railway (which has steep steps)"))), null);
+  // Quote marks around it and a final stop are not a change of words.
+  assert.equal(check(conceptsOf(concept("c1"), quoted("“Skip the Scenic Railway (which has steep steps).”"))), null);
+  // Every recorded speaker is read, also one whose name holds a stop ("Claude Haiku 5.5" was read as "5").
+  const haiku = concept("c2", {
+    texts: [texts[0], { role: "answer", speaker: "Claude Haiku 5.5", text: "The Scenic Railway runs down a steep incline in a seated, enclosed carriage" }, texts[2]],
+    translations: Object.fromEntries(Object.entries(translations).map(([locale, list]) => [locale, [list[0], { role: "answer", speaker: "Claude Haiku 5.5", text: "The Scenic Railway runs down a steep incline in a seated, enclosed carriage" }, list[2]]])),
+  });
+  assert.equal(check(conceptsOf(concept("c1"), haiku)), null);
+  assert.match(check(conceptsOf(concept("c1"), quoted("The Scenic Railway is perfect for everyone"))), /recorded answers exist only for Gemini Flash and Claude Haiku 5\.5/u);
   assert.match(check(conceptsOf(concept("c1"), quoted("The Scenic Railway is perfect for everyone"))), /recorded answer/u);
   assert.match(check(conceptsOf(concept("c1"), quoted("Skip the Scenic Railway (which has steep steps)", "풍경 열차는 건너뛰세요"))), /not translated/u);
 });
@@ -360,6 +553,47 @@ test("a scene idea used in the last 14 days is refused, an older one is not", ()
   const used = concept("c2").device;
   assert.match(check(conceptsOf(concept("c1"), concept("c2")), [{ date: "2026-11-01", feature: "review", device: used }]), /last 14 days/u);
   assert.equal(check(conceptsOf(concept("c1"), concept("c2")), [{ date: "2026-10-01", feature: "review", device: used }]), null);
+});
+
+test("a feature on hold is never today's and no concept may rest on it", () => {
+  const features = [{ id: "chat" }, { id: "plugins", hold: "preview only" }, { id: "review" }];
+  assert.equal(pickFeature([{ date: "2026-11-07", feature: "chat" }], features, DAY), "review");
+  assert.equal(pickFeature([], [{ id: "plugins", hold: "x" }, { id: "chat" }], DAY), "chat");
+  const real = JSON.parse(readFileSync(join(tool, "features.json"), "utf8")).features;
+  // The run's list (the app's, else this file) with plugins put on hold.
+  const dir = mkdtempSync(join(tmpdir(), "hf-hold-"));
+  const held = join(dir, "features.json");
+  writeFileSync(held, JSON.stringify({ features: real.map((feature) => (feature.id === "plugins" ? { ...feature, hold: "preview only" } : feature)) }));
+  const before = process.env.MARKETING_FEATURES_FILE;
+  process.env.MARKETING_FEATURES_FILE = held;
+  try {
+    assert.match(check(conceptsOf(concept("c1"), concept("c2", { factRefs: ["chat.what", "plugins.what"] }))), /plugins.what" is a feature on hold/u);
+  } finally {
+    if (before === undefined) delete process.env.MARKETING_FEATURES_FILE;
+    else process.env.MARKETING_FEATURES_FILE = before;
+    rmSync(dir, { recursive: true, force: true });
+  }
+  assert.ok(real.filter((feature) => !feature.hold).length >= 8);
+  assert.ok(real.filter((feature) => feature.hold).every((feature) => typeof feature.hold === "string" && feature.hold.length > 20), "every hold says why");
+});
+
+test("a concept that rests on import or memory carries the disclosure as a label in every language, whatever today's feature", () => {
+  // Independent review 2026-11-12: a chat concept citing import-continue.what passed with no disclosure.
+  const real = JSON.parse(readFileSync(join(tool, "features.json"), "utf8")).features;
+  const disclosure = real.find((feature) => feature.id === "import-continue").disclosure;
+  const withLabel = (role) =>
+    concept("c2", {
+      factRefs: ["chat.what", "import-continue.what"],
+      texts: [...texts, { role, text: disclosure.en }],
+      translations: Object.fromEntries(Object.entries(translations).map(([locale, list]) => [locale, [...list, { role, text: disclosure[locale] }]])),
+    });
+  const bare = concept("c2", { factRefs: ["chat.what", "import-continue.what"] });
+  const refused = sortConcepts(conceptsOf(concept("c1"), bare), { feature: "chat", history: [], day: DAY, toolDir: tool }).dropped[0].problems.join(" | ");
+  assert.match(refused, /texts holds this disclosure word for word, as a label/u);
+  assert.match(refused, /translations.zh-Hans holds the disclosure/u);
+  assert.equal(check(conceptsOf(concept("c1"), withLabel("label"))), null);
+  assert.match(check(conceptsOf(concept("c1"), withLabel("screen"))), /as a label/u);
+  assert.throws(() => pickFeature([], [{ id: "plugins", hold: "preview only" }], DAY), /every feature in features.json is on hold/u);
 });
 
 test("today's feature is the oldest shown, never the last run's", () => {
@@ -381,6 +615,20 @@ const reviewOf = (extra = {}) => ({
   ...extra,
 });
 const line = (value) => `Here it is.\n${JSON.stringify(value)}\n`;
+
+test("a label, such as the import and memory disclosure, is boxed as a screen text, the role the language versions translate and set", () => {
+  // Independent review 2026-11-12 asked whether a label reaches the translated
+  // versions: the review boxes every text that is not a headline or cta as
+  // `screen` (REVIEW-higgsfield.md), and localePrompt and setTexts translate and
+  // set screen boxes. The 2026-11-12 box run set its labels in Korean this way.
+  const c = concept("c1", { texts: [...texts, { role: "label", text: "Answers come from the model you choose." }] });
+  const boxed = checkReview(line(reviewOf({ textBoxes: [{ textIndex: 3, role: "screen", x: 0.1, y: 0.8, w: 0.8, h: 0.05, rotate: 0, bg: "#ffffff" }] })), { stage: "guide", concept: c, locale: "en" });
+  assert.equal(boxed.review.textBoxes[0].role, "screen");
+  assert.match(checkReview(line(reviewOf({ textBoxes: [{ textIndex: 3, role: "label", x: 0.1, y: 0.8, w: 0.8, h: 0.05, rotate: 0, bg: "#ffffff" }] })), { stage: "guide", concept: c, locale: "en" }).problem, /role is one of headline, screen, cta/u);
+  const source = readFileSync(join(tool, "run-higgsfield.mjs"), "utf8");
+  assert.ok(source.includes('box.role === "screen"'), "localePrompt translates screen boxes");
+  assert.ok(source.includes('roles: ["screen"]'), "setTexts sets screen boxes in the real font");
+});
 
 test("a review may list up to 10 fixes of up to 500 characters; more is refused", () => {
   const c = concept("c1");
@@ -420,12 +668,67 @@ test("the content review passes only when the words read match the approved word
   const c = concept("c1");
   const read = (readTexts, locale = "ko") => checkReview(line(reviewOf({ readTexts })), { stage: "content", concept: c, locale }).review;
   assert.equal(read(translations.ko.map((text) => text.text)).verdict, "pass");
-  assert.equal(read(["GPT, Claude, Gemini 등에 물어보세요", "어떤 모델이 답하면 좋을까요?", "Claude"]).verdict, "pass", "a provider's own name on its mark may stand");
-  const wrong = read(["GPT, Claude, Gemini 등에 물어보세요", "어떤 모델이 담하면 좋을까요?"]);
+  assert.equal(read(["GPT, Claude, Gemini 등에 물어보세요", "어떤 모델이 답하면 좋을까요?", "계정 없이도 바로 시작해 보세요", "Claude"]).verdict, "pass", "a provider's own name on its mark may stand");
+  const wrong = read(["GPT, Claude, Gemini 등에 물어보세요", "어떤 모델이 담하면 좋을까요?", "계정 없이도 바로 시작해 보세요"]);
   assert.equal(wrong.verdict, "fix");
   assert.ok(wrong.fixes.some((fix) => fix.includes("어떤 모델이 답하면 좋을까요?")));
   assert.equal(read(["GPT, Claude, Gemini 등에 물어보세요"]).verdict, "fix", "a missing text is not a pass");
   assert.match(checkReview(line(reviewOf()), { stage: "content", concept: c, locale: "ko" }).problem, /keys must be exactly/u);
+});
+
+test("a quote drawn in quotation marks, a spaced list separator and the name an answer is shown under are the approved words", () => {
+  // The 2026-11-12 box run refused all three on pictures that were right.
+  const c = concept("c1", {
+    texts: [
+      { role: "headline", text: "Two AI answers, one contradiction" },
+      { role: "screen", text: "GPT 6 Luna · Claude Haiku 5.5 · Gemini Flash" },
+      { role: "answer", speaker: "Gemini Flash", text: "Skip the Scenic Railway (which has steep steps)" },
+      { role: "cta", text: "Start without an account" },
+    ],
+  });
+  const read = (readTexts) => checkReview(line(reviewOf({ readTexts })), { stage: "content", concept: c, locale: "en" }).review;
+  assert.equal(read(["Two AI answers, one contradiction", "GPT 6 Luna - Claude Haiku 5.5 - Gemini Flash", "Gemini Flash", "“Skip the Scenic Railway (which has steep steps)”", "Start without an account"]).verdict, "pass");
+  const stray = read(["Two AI answers, one contradiction", "GPT 6 Luna · Claude Haiku 5.5 · Gemini Flash", "Skip the Scenic Railway (which has steep steps),'", "Start without an account"]);
+  assert.equal(stray.verdict, "fix", "a stray mark after the quote is still a flaw");
+  assert.equal(read(["Two AI answers, one contradiction", "GPT6 Luna - Claude Haiku 5.5 - Gemini Flash", "Skip the Scenic Railway (which has steep steps)", "Start without an account"]).verdict, "fix", "a changed word is still a flaw");
+  assert.equal(read(["Two AI answers, one contradiction", "GPT 6 Luna · Claude Haiku 5.5 · Gemini Flash", "Skip the Scenic Railway (which has steep steps)", "Start without an account", "Morning: Scenic Railway"]).verdict, "fix", "words on a prop are not approved");
+});
+
+test("one closing full stop drawn after an approved text is the same text; a changed word is not", () => {
+  // The 2026-11-13 box run refused every English card for a drawn closing stop.
+  const c = concept("c1", { texts: [{ role: "headline", text: "Ask AI anything" }, { role: "screen", text: "Model picked for this message" }, { role: "cta", text: "Start without an account" }] });
+  const read = (readTexts, locale = "en") => checkReview(line(reviewOf({ readTexts })), { stage: "content", concept: c, locale }).review.verdict;
+  assert.equal(read(["Ask AI anything.", "Model picked for this message.", "Start without an account"]), "pass");
+  assert.equal(read(["Ask AI anything", "Model pickcd for this message.", "Start without an account"]), "fix");
+  assert.equal(read(["Ask AI anything", "Model picked for this message..", "Start without an account"]), "fix", "an ellipsis-like run is still read as written");
+});
+
+test("a concept needs exactly one call to action and says AI or a model in its headline or subhead", () => {
+  const vague = concept("c1", {
+    texts: [{ role: "headline", text: "Same ride. Contradicting advice." }, { role: "screen", text: "Which model should answer this?" }, { role: "cta", text: "Start without an account" }],
+  });
+  assert.match(check(conceptsOf(vague, concept("c2"))), /says "AI" or names a model/u);
+  const noCta = concept("c1", { texts: texts.filter((text) => text.role !== "cta"), translations: Object.fromEntries(Object.entries(translations).map(([key, list]) => [key, list.filter((text) => text.role !== "cta")])) });
+  assert.match(check(conceptsOf(noCta, concept("c2"))), /exactly one cta/u);
+  const plain = concept("c1", {
+    texts: [{ role: "headline", text: "Ask an AI if your lease clause is normal" }, { role: "screen", text: "Which model should answer this?" }, { role: "cta", text: "Start without an account" }],
+  });
+  assert.equal(check(conceptsOf(plain, concept("c2"))), null);
+});
+
+test("every feature claim of the FAQ has an entry in features.json, so a new feature reaches the ads", () => {
+  // Since 2026-11-12 the job reads the list kept in Admin (MarketingFeatureFact);
+  // features.json is its seed and the job's fallback, so it still covers every
+  // claim, and Admin's refresh is given every claim to propose what is missing.
+  assert.match(readFileSync("lib/marketingFeatureFacts.ts", "utf8"), /claims: MARKETING_CLAIMS\.map\(/u);
+  // features.json was written once by hand (2026-11-07) and missed every feature
+  // shipped after it until the owner asked on 2026-11-12. General claims about
+  // Tomverse as a whole are not a feature of their own.
+  const general = new Set(["claim.why-tomverse", "claim.about-tomverse", "claim.start-a-question"]);
+  const claims = [...readFileSync("lib/marketingClaims.ts", "utf8").matchAll(/pageClaim\(\s*"(claim\.[a-z-]+)",\s*"feature"/gu)].map((match) => match[1]).filter((id) => !general.has(id));
+  assert.ok(claims.length >= 8, "the FAQ feature claims are read");
+  const sources = JSON.parse(readFileSync(join(tool, "features.json"), "utf8")).features.map((feature) => feature.source).join(" ");
+  assert.deepEqual(claims.filter((id) => !sources.includes(id)), []);
 });
 
 // The picture steps run in Chromium (playwright), where the tool's packages and
@@ -633,4 +936,167 @@ test("Chinese words are spaced after a full stop and pass the Guard's hygiene ch
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+// --- the app screen on a green display (owner 2026-11-13) --------------------
+
+const withDisplay = (extra = {}) =>
+  concept("c2", {
+    prompt_en: `${concept("c2").prompt_en} The phone's screen is filled edge to edge with flat chroma green #00ff00, evenly lit, completely empty.`,
+    texts: [
+      { role: "headline", text: "Ask AI what to cook tonight" },
+      { role: "screen", ui: "question", text: "What can I cook with eggs and spinach?" },
+      { role: "answer", ui: "answer", text: "A spinach omelette: wilt the spinach, pour in beaten eggs, fold after 3 minutes." },
+      { role: "cta", text: "Start without an account" },
+    ],
+    translations: {
+      ko: [
+        { role: "headline", text: "오늘 저녁 메뉴, AI에게 물어보세요" },
+        { role: "screen", ui: "question", text: "달걀이랑 시금치로 뭘 만들까?" },
+        { role: "answer", ui: "answer", text: "시금치 오믈렛: 시금치를 숨 죽이고 달걀을 부어 3분 뒤 접으세요." },
+        { role: "cta", text: "계정 없이도 바로 시작해 보세요" },
+      ],
+      "zh-Hant": [
+        { role: "headline", text: "今晚吃什麼，問 AI" },
+        { role: "screen", ui: "question", text: "雞蛋和菠菜可以做什麼？" },
+        { role: "answer", ui: "answer", text: "菠菜蛋捲：菠菜炒軟，倒入蛋液，三分鐘後對折。" },
+        { role: "cta", text: "不用帳號也能直接開始" },
+      ],
+      "zh-Hans": [
+        { role: "headline", text: "今晚吃什么，问 AI" },
+        { role: "screen", ui: "question", text: "鸡蛋和菠菜可以做什么？" },
+        { role: "answer", ui: "answer", text: "菠菜蛋卷：菠菜炒软，倒入蛋液，三分钟后对折。" },
+        { role: "cta", text: "不用账号也能直接开始" },
+      ],
+    },
+    ...extra,
+  });
+
+test("words on the green display are few, marked with ui, and asked for as chroma green", () => {
+  const problemsOf = (c) => sortConcepts(conceptsOf(concept("c1"), c), { feature: "chat", history: [], day: DAY, toolDir: tool }).dropped[0]?.problems ?? [];
+  assert.deepEqual(problemsOf(withDisplay()), []);
+  // The display must be asked for as flat green, or code has nowhere to draw.
+  assert.match(problemsOf(withDisplay({ prompt_en: concept("c2").prompt_en })).join(" | "), /#00ff00/u);
+  // A long answer grows the phone (owner 2026-11-13): 120 characters in English, 80 in Korean or Chinese.
+  const long = withDisplay();
+  long.texts = long.texts.map((text) => (text.ui === "answer" ? { ...text, text: "x ".repeat(70).trim() } : text));
+  assert.match(problemsOf(long).join(" | "), /1-120 characters on the display/u);
+  const longKo = withDisplay();
+  longKo.translations = { ...longKo.translations, ko: longKo.translations.ko.map((text) => (text.ui === "answer" ? { ...text, text: "가".repeat(81) } : text)) };
+  assert.match(problemsOf(longKo).join(" | "), /1-80 characters on the display/u);
+  // ui only on a screen or an answer, and the same ui in every language.
+  const onLabel = withDisplay();
+  onLabel.texts = onLabel.texts.map((text, index) => (index === 1 ? { ...text, role: "label" } : text));
+  assert.match(problemsOf(onLabel).join(" | "), /ui is one of title, question, answer, caption, only on a screen or answer/u);
+  const lost = withDisplay();
+  lost.translations = { ...lost.translations, ko: lost.translations.ko.map((text, index) => (index === 1 ? { role: "screen", text: text.text } : text)) };
+  assert.match(problemsOf(lost).join(" | "), /same role, speaker and ui/u);
+});
+
+test("the quadrilateral around a rounded display has its sharp corners", async () => {
+  const { convexHull, enclosingQuad } = await import("../tools/marketing-video/screen-core.mjs");
+  // A 200 x 400 rectangle with 30 px rounded corners, tilted 8 degrees.
+  const points = [];
+  const corner = (cx, cy, from) => {
+    for (let a = from; a <= from + 90; a += 5) points.push([cx + 30 * Math.cos((a * Math.PI) / 180), cy + 30 * Math.sin((a * Math.PI) / 180)]);
+  };
+  corner(230, 430, 0);
+  corner(30, 430, 90);
+  corner(30, 30, 180);
+  corner(230, 30, 270);
+  const turn = (8 * Math.PI) / 180;
+  const tilted = points.map(([x, y]) => [x * Math.cos(turn) - y * Math.sin(turn) + 300, x * Math.sin(turn) + y * Math.cos(turn) + 100]);
+  const quad = enclosingQuad(convexHull(tilted));
+  const expected = [[0, 0], [260, 0], [260, 460], [0, 460]].map(([x, y]) => [x * Math.cos(turn) - y * Math.sin(turn) + 300, x * Math.sin(turn) + y * Math.cos(turn) + 100]);
+  for (const [index, [x, y]] of quad.entries()) {
+    assert.ok(Math.hypot(x - expected[index][0], y - expected[index][1]) < 2, `corner ${index}: ${x},${y} vs ${expected[index]}`);
+  }
+});
+
+test("the app screen is keyed onto the green display, and a finger over it stays in front", { skip }, async () => {
+  const { withPage } = await import("../tools/marketing-video/compose-core.mjs");
+  const { findGreenScreens, setScreen } = await import("../tools/marketing-video/screen-core.mjs");
+  const root = mkdtempSync(join(tmpdir(), "hf-screen-"));
+  try {
+    const input = join(root, "green.png");
+    // A grey room, a tilted green display, and a skin-coloured finger over its right edge.
+    const png = await withPage((page) =>
+      page.evaluate(() => {
+        const canvas = Object.assign(document.createElement("canvas"), { width: 400, height: 500 });
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#9a948c";
+        ctx.fillRect(0, 0, 400, 500);
+        ctx.fillStyle = "#1a1a1a";
+        ctx.beginPath();
+        ctx.moveTo(125, 85);
+        ctx.lineTo(285, 75);
+        ctx.lineTo(300, 395);
+        ctx.lineTo(135, 410);
+        ctx.fill();
+        ctx.fillStyle = "#00ff00";
+        ctx.beginPath();
+        ctx.moveTo(135, 95);
+        ctx.lineTo(275, 86);
+        ctx.lineTo(289, 384);
+        ctx.lineTo(144, 398);
+        ctx.fill();
+        ctx.fillStyle = "#e0a98c";
+        ctx.fillRect(265, 250, 45, 22);
+        return canvas.toDataURL("image/png");
+      }),
+    );
+    writeFileSync(input, Buffer.from(png.split(",")[1], "base64"));
+    const [display] = await findGreenScreens(input);
+    const expected = [[135, 95], [275, 86], [289, 384], [144, 398]];
+    for (const [index, [x, y]] of display.corners.entries()) {
+      assert.ok(Math.hypot(x * 400 - expected[index][0], y * 500 - expected[index][1]) < 4, `corner ${index}`);
+    }
+    const out = join(root, "screen.png");
+    await setScreen({ input, items: [{ kind: "question", text: "What can I cook?" }, { kind: "answer", text: "A spinach omelette, ready in ten minutes." }], locale: "en", out });
+    const finger = await pixelAt(out, 285, 260);
+    assert.deepEqual(finger, [224, 169, 140], "the finger over the display is untouched");
+    const left = await findGreenScreens(out);
+    assert.equal(left.length, 0, "no green display is left");
+    const middle = await pixelAt(out, 210, 330);
+    assert.ok(middle[1] - Math.max(middle[0], middle[2]) < 20, `no green inside the display: ${middle}`);
+    await assert.rejects(setScreen({ input: join(root, "screen.png"), items: [{ kind: "answer", text: "Hi" }], locale: "en", out: join(root, "again.png") }), /no green screen/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a day's concepts are each a different format, and the recent formats are listed newest first", async () => {
+  const { recentFormats } = await import("../tools/marketing-video/concepts-core.mjs");
+  // Owner 2026-11-13: variety, not a person in every ad.
+  assert.equal(check(conceptsOf(concept("c1"), concept("c2"), concept("c3"))), null);
+  assert.match(check(conceptsOf(concept("c1"), concept("c2", { format: "person" }))), /different format \(person is taken\)/u);
+  assert.match(check(conceptsOf(concept("c1"), concept("c2", { format: "poster" }))), /format is one of person, phone, laptop, diagram, object/u);
+  const history = [
+    { date: "2026-11-05", format: "object" },
+    { date: "2026-11-07", format: "person" },
+    { date: "2026-11-07", format: "laptop" },
+    { date: "2026-10-20", format: "diagram" },
+    { date: "2026-11-08", format: "person" },
+  ];
+  assert.deepEqual(recentFormats(history, DAY), ["person", "laptop", "object"]);
+});
+
+test("the native editor changes only the Korean and Chinese, and a concept it breaks keeps the writer's words", async () => {
+  const { withNativeCopy } = await import("../tools/marketing-video/concepts-core.mjs");
+  const original = [concept("c1"), concept("c2")];
+  const better = { ...translations, ko: translations.ko.map((text, index) => (index === 0 ? { ...text, text: "GPT, Claude, Gemini 등 AI에게 물어보세요" } : text)) };
+  const edited = withNativeCopy(original, {
+    concepts: [
+      { id: "c1", translations: better, alt: { ko: "출근길 기차에서 휴대폰으로 모델을 고르는 사람.", en: "ignored" } },
+      { id: "c2", translations: { ...translations, ko: translations.ko.map((text) => ({ ...text, text: "지피티에게 물어보세요" })) } },
+    ],
+  });
+  assert.equal(edited[0].translations.ko[0].text, "GPT, Claude, Gemini 등 AI에게 물어보세요");
+  assert.equal(edited[0].alt.ko, "출근길 기차에서 휴대폰으로 모델을 고르는 사람.");
+  assert.equal(edited[0].alt.en, original[0].alt.en, "English is never the editor's");
+  assert.deepEqual(edited[0].texts, original[0].texts);
+  // The caller checks the edit like any concept: the transliterated model name is refused, so c2 keeps its own words.
+  const checked = sortConcepts({ date: "2026-11-08", feature: "chat", concepts: edited }, { feature: "chat", history: [], day: DAY, toolDir: tool });
+  assert.deepEqual(checked.kept.map((c) => c.id), ["c1"]);
+  assert.deepEqual(withNativeCopy(original, null), original, "no edit, no change");
 });

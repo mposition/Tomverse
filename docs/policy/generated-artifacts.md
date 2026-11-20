@@ -38,10 +38,23 @@
 
 `off`의 이유는 이름이 있다.
 
-- `model_unverified` — 이 모델로 custom tool 호출을 **실제로 확인하지 않았다**.
-  `ARTIFACT_TOOL_CAPABILITIES`에 없는 모델은 전부 여기다. "아마 될 것이다"는
-  이 registry가 막으려는 상태이고, 모델은 changelog를 읽어서가 아니라 누군가
-  돌려 봐서 등록된다.
+- `model_unverified` — 이 모델은 파일 도구를 받지 않는다. 판정 순서는 다음과 같다
+  (운영자 결정 2026-11-13).
+  1. 카탈로그 행의 관리자 체크(`ModelRegistryEntry.fileToolsOverride`). Admin 모델
+     편집 화면의 "파일 생성·플러그인 도구" 체크박스다. 값이 있으면 그것이 답이다.
+  2. 없으면 자동 판정(`autoArtifactToolSupport`). 직접 돌려 확인한 모델 목록
+     `ARTIFACT_TOOL_CAPABILITIES`에 있으면 그 값을 쓰고, 목록에 없으면 제공사로
+     판단한다. 이 저장소의 adapter로 도구 호출을 확인한 OpenAI·Anthropic·Google의
+     채팅 모델은 켜진다. 다른 제공사는 꺼진다.
+  3. Deep research는 언제나 꺼진다.
+
+  그래서 새 모델은 추가되는 순간 자동 판정 값으로 체크된 채 나타나고, 관리자가
+  Tick/Untick할 수 있다. 자동 판정과 같은 값으로 클릭하면 NULL로 저장해 자동을
+  따르게 둔다. 고정 목록만 쓰던 때는 카탈로그가 바뀌면서 Auto 후보 27개 중
+  하나만 파일을 만들 수 있었다(2026-11-13).
+- 파일 도구를 받은 턴에는 §7의 자동 대체(다른 모델로 다시 시도)가 일어나지 않는다
+  (`tools_offered`). 도구가 이미 부작용을 냈을 수 있기 때문이다. 체크를 켜면 그
+  모델의 턴은 이 복구를 잃는다.
 - `native_search_conflict` — §9 참조.
 - `not_a_chat_conversation` — 이미지 대화. 생성 문서는 이미지 도메인과 별개다.
 - `no_conversation` — 첨부할 대화도 메시지 ID도 없는 요청.
@@ -141,7 +154,7 @@ module에는 "그 텍스트"가 아닌 명세가 없다. 그래서 그 형식에
 | 아카이브 전체 문자 수 | 2,000,000 |
 | cell·block 문자열 | 20,000자 |
 | 파일명 | 120자 |
-| 결과 파일 크기 | 5 MB |
+| 결과 파일 크기 | 5 MB (변환 결과는 25 MB — §14.4) |
 | 메시지당 artifact | 3 |
 
 각 상한은 서로 다른 자원을 막으므로 어느 하나도 잉여가 아니다. 특히 파일
@@ -162,6 +175,7 @@ module에는 "그 텍스트"가 아닌 명세가 없다. 그래서 그 형식에
 | presentation | `pptx` | `lib/generatedArtifactPptx.ts` |
 | text | `json`, `yaml`, `yml`, `xml`, `toml`, `ini`, `tsv`, `html`, `htm`, `svg`, `css`, `scss`, `less`, `sql`, `graphql`, `proto`, `ts`, `tsx`, `js`, `jsx`, `mjs`, `cjs`, `py`, `rb`, `go`, `rs`, `java`, `kt`, `swift`, `c`, `h`, `cpp`, `hpp`, `cs`, `php`, `sh`, `bash`, `ps1`, `r`, `scala`, `lua`, `pl`, `dart`, `ex`, `exs`, `hs`, `vue`, `svelte`, `dockerfile`, `env` | `lib/generatedArtifactText.ts` |
 | archive | `zip` | `lib/generatedArtifactText.ts` |
+| image | `png`, `jpg`, `webp` | `lib/fileConversion.ts` — 모델이 저작하지 않는다. 변환 결과로만 생긴다(§14) |
 
 **형식을 추가하는 일은 세 가지다** — `ARTIFACT_FORMAT_TABLE`의 행 하나,
 `lib/generatedArtifactRenderers.ts`의 분기 하나, migration의 `format` CHECK를
@@ -601,6 +615,15 @@ tool 호출 후의 두 번째 step은 출력 토큰이며, 둘 다 기존 reserv
   뒤에 만들어진다. 모델이 없는 handle을 대면 tool은 **실제로 붙어 있는 handle
   목록을 알려 주고 거절**한다 — 지어내지 말라고 말하는 것이 지어낸 파일을 만드는
   것보다 낫다.
+- 시스템 지시에 목록으로 알린 첨부인데 서버가 바이트를 읽지 못한 경우(저장본이 사라진
+  경우 등)는 "없는 handle"과 다르다. tool은 "첨부는 되어 있지만 열 수 없었다, 새로
+  올려 달라고 하라, 첨부하지 않았다고 말하지 말라"고 거절하고 카드는
+  `generation_failed`다. 2026-11-13 운영에서 사진 두 장이 목록에는 있고 바이트는 없어
+  "No files are attached"가 돌아갔고, 모델이 그 말을 사용자에게 그대로 전했다. 거절
+  로그(`generated_artifact_tool_rejected`)에는 고정 실패 코드(`SOURCE_UNREAD`·
+  `SOURCE_MISSING`·`ADMISSION_REJECTED` 등)와 "목록에 있던 첨부 수 / 읽은 첨부 수"만
+  남긴다. 파일 이름과 내용은 남기지 않는다. 둘이 다르면 route가
+  `chat_turn_attachments_unread`도 남긴다.
 
 ### 13.4 템플릿 보존 — 무엇을, 어디까지
 
@@ -705,3 +728,400 @@ Word에서 선택 영역 위에 타이핑했을 때와 같은 결과다.
 - 101번째 archive 항목 거절, 100번째 통과.
 - 네 번째 top-level artifact 거절 유지.
 - 기존 텍스트 ZIP과 단일 DOCX 생성 회귀 없음.
+
+## 14. 사용자가 올린 파일을 변환하기 (`convert_files`)
+
+운영자 결정: 2026-11-12. 사용자가 사진 두 장을 첨부하고 "하나의 PDF로 만들어
+달라"고 했을 때, 파일을 만들 수 있는 모델이 "첨부된 이미지를 불러와 PDF로
+변환할 수 없다"고 답했다. 모델을 바꿔도 결과는 같았다 — §3의 다섯 tool은 모두
+**모델이 쓴 내용**을 받고, 사진은 모델이 쓸 수 있는 내용이 아니기 때문이다.
+이 절은 그 공백을 메운다.
+
+### 14.1 규칙
+
+> 변환에서 모델은 바이트를 받지도, 만들지도 않는다.
+
+모델이 내는 것은 §13과 같은 handle(`att_1`, `att_2`)과 지시뿐이다. 읽기·변환·
+쓰기는 전부 서버가 한다(`lib/fileConversion.ts`). 명세와 한도, 페이지 선택
+문법은 `lib/fileConversionCore.ts`에 있고 파일 없이 테스트할 수 있다.
+
+### 14.2 무엇을 변환하는가
+
+tool은 하나(`convert_files`)이고 `operation`이 다섯 가지다.
+
+| operation | 입력 | 출력 |
+|---|---|---|
+| `to_pdf` | 이미지(png·jpg·webp·gif)와 PDF, 순서대로 | PDF 하나. 이미지는 한 장에 한 페이지. PDF 합치기, 페이지 추출·순서 변경(`pages: "3,1,2"`)·회전도 같은 호출이다 |
+| `split_pdf` | PDF 하나 | 구간별 PDF 묶음(zip). `splitEvery` 또는 source별 `pages` |
+| `pdf_to_images` | PDF | 페이지별 png·jpg·webp. 한 장이면 이미지 파일, 여러 장이면 zip |
+| `convert_images` | 이미지 | png·jpg·webp로 형식 변환, `maxDimension` 축소, `quality` 압축. 여러 장이면 zip |
+| `convert_spreadsheet` | xlsx·csv | xlsx·csv·PDF 표. 워크북은 지정한(없으면 첫) 시트 하나 |
+
+- 휴대폰 사진은 EXIF 방향대로 세운 뒤 페이지에 놓는다. PDF 페이지에는 방향
+  메모를 둘 곳이 없다.
+- 표 변환에서 **명백한 숫자만** 숫자로 쓴다. `007`, `1e5`, 16자리 번호는 글자로
+  남는다. 숫자로 바꿨다가 다시 적었을 때 원래 글자와 똑같지 않은 값
+  (`999999999999999.99`, `1.50`)도 글자로 남는다.
+- XLSX의 숫자 셀은 **스프레드시트가 화면에 보여 주는 글자 그대로** 쓴다(운영자
+  결정 2026-11-12). 0 채움(`000`→`007`)·통화·퍼센트·천 단위·날짜·시각·누적
+  시간(`[h]:mm`)·서식 구역의 해석은 직접 만든 해석기가 아니라 SheetJS의 SSF
+  (`ssf`, Apache-2.0)가 한다 — Excel의 "CSV로 저장"과 같은 결과다. 그러므로
+  `hh:mm` 서식의 초처럼 화면에 보이지 않는 자리는 결과에도 없다. 예외는 둘이다:
+  - 기본(General) 서식 숫자는 유효숫자 15자리를 유지한다. SSF의 General은 기본
+    열 너비에 맞춰 줄이기 때문이다.
+  - 지역 설정을 따르는 내장 짧은 날짜 서식 14·22번은 `yyyy-mm-dd`(·`hh:mm`)로
+    쓴다. SSF는 미국식(`11/12/26`)으로 쓰는데, 변환된 파일은 어느 지역에서나
+    읽힌다.
+- 계산된 값이 없는 수식 셀이 있으면 변환을 거절한다. 이 리더는 수식을 계산하지
+  않으므로 빈칸으로 쓰면 변환된 척하는 빈 셀이 된다.
+- 첫 행은 **읽은 그대로** 쓴다. 헤더인지 아닌지는 변환이 정하지 않으며, 빈 칸에
+  이름을 지어 넣거나 공백을 다듬지 않는다. 워크북이 파일에서 생략한 빈 행도
+  제자리에 되살린다.
+- 표 변환은 셀을 **자르지 않는다**. 20,000자를 넘는 셀이 있으면 변환을 거절한다
+  (템플릿 batch는 placeholder 값이라 4,000자에서 자르지만, 변환 대상은 사용자의
+  데이터다).
+- zip 안의 이름은 실제로 쓴 이름 전체와 대소문자 구분 없이 비교해 겹치지 않게
+  한다.
+- **내용을 다른 형식으로 다시 쓰는 일**(PDF 본문 → Word, Word → PDF)은 변환이
+  아니다. 모델이 추출된 내용을 읽고 `create_document`로 다시 쓰며, 레이아웃이
+  복사되지 않고 다시 만들어진다고 말한다.
+
+### 14.3 언제 등록되는가
+
+`planGeneratedArtifactTool()`의 `registerFileConversion`. `generate` mode이고,
+이 turn에 변환이 읽을 수 있는 파일(이미지·PDF·xlsx·csv)이 하나라도 첨부됐을
+때만 tool을 보낸다. batch tool과 같은 이유다 — 쓸 대상이 없는 tool은 과금되는
+입력이고, 모델은 결국 없는 handle을 지어낸다. schema 비용은
+`FILE_CONVERSION_TOOL_DEFINITION_TOKENS`로 예약에 더한다.
+
+변환 대상은 **그 메시지에 첨부한 파일**이다. 앞선 메시지의 파일을 변환해
+달라는 요청에는 tool이 없으므로, `generate` 프롬프트가 "파일을 첨부해 다시
+보내 달라고 말하라, 못 한다고 말하지 말라"고 지시한다.
+
+게스트(`sign_in_required`)와 모든 `off` mode에는 등록하지 않는다.
+
+운영 스위치: 환경 변수 `CHAT_FILE_CONVERSION=off`이면 tool과 그 안내 문구가
+모두 빠진다. preflight와 chat route가 함께 읽는 `buildChatTurnSystemBlocks`
+한 곳에서만 읽으므로 견적과 실제 요청이 어긋나지 않는다. 기본은 켜짐이다 —
+새 지출도, 외부 전송도 없고 배포 없이 끌 수 있다.
+
+### 14.4 한도 (`FILE_CONVERSION_LIMITS`)
+
+| 항목 | 값 |
+|---|---|
+| source 항목 | 20 |
+| 만들어지는 PDF의 페이지 | 500 |
+| 이미지로 그리는 PDF 페이지 | 30 |
+| split 결과 파일 | 100 |
+| 입력 이미지 픽셀 | 6,000만 |
+| `pdf_to_images` dpi | 50~300, 기본 150 |
+| 표 변환 행 · 열 | 10,000 · 64 (PDF 표는 500 · 20) |
+| 결과 파일 크기 | 25 MB (`ARTIFACT_LIMITS.maxConvertedOutputBytes`) |
+
+결과 크기 상한이 §3의 5 MB보다 큰 것은 의도다. 5 MB는 모델이 앱에게
+**쓰게 할 수 있는** 양의 상한이고, 변환 결과는 사용자가 이미 올린 바이트의
+재배열이다. 25 MB는 변환 결과 하나의 상한이며 요청 첨부 합계(100MiB)보다 작으므로,
+변환이 요청이 가져온 것보다 많이 저장할 수는 없다. 저장(`putArtifactObject`)과 다운로드
+route가 이 값을 함께 쓴다. 이미지를 PDF에 넣을 때는 A4 인쇄 품질(긴 변
+2,480px)에서 시작해, 상한을 넘으면 단계적으로 줄인다.
+
+존재하지 않는 페이지는 **거절한다**. 6쪽 파일에 대한 `1-9`를 조용히 6쪽으로
+줄이면 사용자가 말하지 않은 문서가 나간다.
+
+### 14.5 형식
+
+출력이 이미지일 수 있으므로 형식 표에 `png`·`jpg`·`webp`(kind `image`)가
+추가됐다. **모델이 저작하는 kind가 아니다** — `create_image`에 해당하는
+artifact tool은 없고, 이미지 artifact는 변환의 결과로만 생긴다(생성 이미지는
+`docs/policy/image-generation.md`의 별개 도메인). migration
+`20261112150000_message_artifact_image_formats`가 `format` CHECK를 넓힌다.
+
+### 14.6 보안과 실패
+
+- handle은 요청 계층이 이미 소유권을 확인해 읽어 둔 그 turn의 파일만
+  가리킨다(§13과 같은 map). 모델이 경로·URL·key를 보내면 schema에서 거절한다.
+- PDF 페이지는 PDFium의 WebAssembly 빌드(`@hyzyla/pdfium`)로 worker thread에서
+  그린다. CPU가 무거운 경로가 다른 요청을 멈추면 안 되기 때문이고, 90초 시간
+  제한이 있다. **pdf.js를 쓰지 않는다**: pdf.js는 네이티브 모듈
+  `@napi-rs/canvas`로 그리는데, 그 모듈을 불러온 worker를 종료하면 worker가 아니라
+  **프로세스 전체**가 접근 위반으로 죽었다(2026-11-12, 한 번에 worker 하나로도
+  재현). WebAssembly 엔진에는 죽을 네이티브 코드가 없어 시간 초과 때 worker를
+  멈춰도 안전하다. 자식 프로세스로 격리하는 방법은 쓰지 않는다 — 게이트가 닿는
+  코드에서 `node` 자식 프로세스 실행은 control-plane 분석(`lib/agentControlPlaneSlice.ts`)이
+  금지한다.
+- 암호가 걸린 PDF는 복사하지 않고 그렇게 말한다.
+- 실패는 §8·§9의 카드 규칙을 그대로 따른다: 덜 요청하면 되는 실패는
+  `limit_exceeded`, 다른 파일이나 다른 지시가 필요한 실패는 `spec_rejected`,
+  그 밖은 `generation_failed`. 실패 사유 문장에는 파일 내용이 들어가지 않는다.
+- 같은 지시와 같은 파일의 재호출은 `unchanged`다(hash에 각 handle이 가리킨
+  파일의 이름과 크기가 들어간다).
+
+### 14.7 아직 하지 않는 것
+
+- Word·Excel·PowerPoint를 **레이아웃 그대로** PDF로 바꾸는 일. 렌더링 엔진
+  (LibreOffice 등)이 서버에 필요하다.
+- HEIC 입력(첨부 형식에 없다), PDF 암호 설정·해제, PDF 압축.
+- 문서 본문 중간에 첨부 이미지를 넣는 block.
+- 앞선 메시지의 첨부를 handle로 가리키는 일.
+
+### 14.8 무엇을 테스트하는가
+
+- `tests/fileConversion.test.mjs`: 실제 바이트로 다섯 operation을 돌리고 결과를
+  parser로 다시 연다(페이지 수·크기·회전, zip 항목, 이미지 형식·픽셀, 표 값).
+  페이지 선택 문법, 없는 handle·틀린 형식·없는 페이지·읽을 수 없는 PDF 거절.
+- `tests/generatedArtifactToolPolicy.test.mjs`: 등록 조건, 프롬프트 문구,
+  운영 스위치.
+- `tests/server-contract/generated-artifact-collector.test.ts`: 저장·ordinal·
+  재호출·실패 카드·answer당 3개 상한·storage 실패.
+
+## 15. Office 문서를 레이아웃 그대로 PDF로 (렌더러 서비스)
+
+운영자 결정: 2026-11-12, 선택지 1(사내 렌더러 서비스). Word·PowerPoint·Excel
+파일을 **레이아웃 그대로** PDF로 만드는 일은 이 프로세스 안의 어떤 것도 할 수
+없다 — 오피스 제품군이 필요하다. 렌더러는 Gotenberg(LibreOffice를 HTTP API로
+감싼 것)이고, Railway의 private network에 **별도 서비스**로 돈다. 사용자의 파일이
+Tomverse 밖으로 나가지 않고, 신뢰할 수 없는 문서를 여는 큰 네이티브 프로그램이
+앱과 다른 컨테이너에서 돈다.
+
+### 15.1 무엇이 되는가
+
+`convert_files`의 `to_pdf`가 Office 원본을 받는다: `docx`·`pptx`·`xlsx`,
+OpenDocument(`odt`·`odp`·`ods`), Office 97-2003(`doc`·`ppt`·`xls`), `rtf`,
+한글(`hwp`·`hwpx`), Apple `pages`·`numbers`. 렌더러가 PDF로 그린 뒤 이미지·PDF와 섞어 순서대로 합치고,
+페이지 선택(`pages`)과 회전도 그대로 적용된다. 같은 파일을 여러 번 가리켜도 한
+번만 그린다.
+
+- `to_pdf`의 xlsx는 **인쇄 모양 그대로**다. 값만 표로 옮기는 것은 지금처럼
+  `convert_spreadsheet`(§14)가 한다.
+- iWork 변환은 Office보다 충실도가 낮다(Pages·Numbers는 복잡한 서식이 일부 다를 수
+  있다). Keynote는 첨부 단계에서 받지 않는다(`chat-attachment-formats.md` §2.4).
+- 한글(HWP 5.x·HWPX)은 기본 LibreOffice가 열지 못한다. 렌더러 이미지
+  (`apps/office-renderer/Dockerfile`)에 H2Orestart 필터와 한글 글꼴을 넣는다.
+  한글 파일의 **내용 읽기**는 렌더러와 무관하게 이 앱의 파서가 한다
+  (`docs/policy/chat-attachment-formats.md §4.6`).
+
+### 15.2 스위치와 주소
+
+두 값이 **모두** 있어야 켜진다: `CHAT_OFFICE_TO_PDF=on`, `OFFICE_RENDERER_URL`.
+꺼져 있으면 tool 안내에서도 빠지고, Office 원본을 `to_pdf`에 주면
+`create_document`로 다시 쓰는 대안을 안내하며 거절한다.
+
+- 주소는 **환경 변수에서만** 온다. 요청이나 모델이 주소를 정할 길은 없다.
+- `http:` 주소는 사설망(`*.railway.internal`, localhost)만 허용한다. 주소에 계정
+  정보를 넣을 수 없다. Basic 인증은 `OFFICE_RENDERER_USERNAME`·
+  `OFFICE_RENDERER_PASSWORD`로 선택한다.
+- 렌더러에는 **사용자 파일명을 보내지 않는다**. `document.<확장자>`를 보내며,
+  확장자는 서버가 저장한 media type에서 정한다.
+- 결과에 대한 검사는 하나다: PDF여야 한다(`%PDF-`). 25 MB를 넘으면 읽기를 멈춘다.
+  시간 제한 90초.
+
+### 15.3 보내기 전 측정과 실패
+
+렌더러는 **공용 서비스**다. 한 문서가 수 GB로 부풀면 모두의 변환이 멈춘다. 텍스트
+리더는 자기가 읽는 부분(HWPX의 본문 section 등)만 풀기 때문에, 그림 항목에 숨긴
+압축 폭탄은 그 검사를 지나 LibreOffice에 닿을 수 있다. 그래서 렌더러로 보내기 전에
+`lib/officeRenderInput.ts`가 **압축된 모든 부분을 실제로** 입력 4 KB씩 풀어 나온
+바이트를 세고 버린다: ZIP 기반 문서(OOXML·ODF·HWPX·iWork)는 모든 항목과 그 안에 다시
+압축된 것(문서에 넣은 통합 문서 같은 내부 ZIP, gzip, iWork의 Snappy `.iwa`;
+`lib/packageExpansion.ts`), HWP 5.x는 머리의 압축 플래그와 관계없이 모든 스트림(BinData 항목은 따로 압축될 수 있다, 독립 검토 7차). 풀어 나온 바이트의 합이 200 MB를 넘거나 항목이 2만 개를 넘으면 보내지
+않고 `spec_rejected`로 거절한다(독립 검토 2026-11-13). 압축을 풀기 전 원래 바이트는 이 합에
+넣지 않는다 — 업로드 상한(25 MB)이 그 크기를 묶는다. HWP 컨테이너 읽기는 따로 200 MB 예산을
+쓴다. 측정 경로는 나온 조각을 세기만 하고 보관하지 않는다.
+
+| 렌더러 응답 | 카드 |
+|---|---|
+| (보내기 전) 실제 팽창 200 MB 초과·읽을 수 없는 ZIP | `spec_rejected` |
+| 400 (LibreOffice가 문서를 거절) | `spec_rejected` — 손상·암호 파일일 수 있다 |
+| 503·시간 초과·연결 실패·그 밖의 응답·PDF가 아닌 응답 | `generation_failed` — 잠시 뒤 다시 |
+| 25 MB 초과 | `limit_exceeded` |
+
+### 15.4 배포
+
+`docs/ops/office-renderer.md`. 서비스 생성과 스위치 켜기는 상시 비용이 생기는
+배포라 운영자 승인 뒤에 한다.
+
+## 16. 문서에 그림 넣기 (PDF → Office)
+
+운영자 결정: 2026-11-13. 파일을 만들 수 있는 모델(GPT 6 Luna, Claude, Gemini)은
+PDF를 원본 그대로 받아 스캔 페이지까지 읽는다. 그래서 "이 PDF를 Word로"는 모델이
+읽고 `create_document`로 다시 쓰는 일이고, 빠져 있던 것은 **그림**이었다.
+
+### 16.1 image 블록
+
+`create_document`의 블록에 `image`가 추가됐다.
+
+| field | 뜻 |
+|---|---|
+| `attachment` | 이 메시지에 첨부된 이미지나 PDF의 handle |
+| `page` | PDF일 때 그림이 있는 쪽(1부터). 기본 1 |
+| `crop` | 그림 영역. 이미지나 페이지 왼쪽 위 기준 비율(0~1). 생략하면 전체 |
+| `caption` | 그림 아래 설명 |
+| `widthPercent` | 본문 폭 대비 너비(10~100). 원래 크기(96 dpi)보다 크게 그리지 않는다 |
+
+- **모델은 픽셀을 쓰지 않는다.** handle과 비율 네 개만 낸다. 영역은 모델이 페이지를
+  보고 읽어 낸 것이다(LLM 우선 원칙). 서버가 사용자의 바이트에서 그 영역을 잘라
+  JPEG(긴 변 1,600px, 품질 82)로 만든다. PDF 페이지는 §14와 같은 PDFium 엔진이
+  150 dpi로 그린다.
+- 문서당 30개. 그림이 든 문서는 변환 결과와 같은 25 MB 상한을 쓴다(그림이 사용자의
+  바이트이기 때문이다).
+- docx는 `word/media/`의 JPEG와 inline drawing으로, pdf는 DCTDecode image
+  object로 넣는다. md·txt에는 그림 자리를 글로 적는다(`[Image: 설명]`). 링크는
+  어느 형식에도 쓰지 않는다.
+- **압축파일(archive) 항목에는 쓸 수 없다.** 그 블록은 이 turn의 파일에 닿을 수
+  없다.
+- 없는 handle, 이미지·PDF가 아닌 파일, 없는 쪽은 §14와 같은 거절 카드가 된다.
+
+### 16.2 비용
+
+`create_document` schema가 커져(약 1,380자) `ARTIFACT_TOOL_DEFINITION_TOKENS`를
+2,600에서 3,100으로 올렸다. 그림 자체에 별도 과금은 없다.
+
+### 16.3 아직 하지 않는 것
+
+- 슬라이드(`create_presentation`)와 스프레드시트에 그림 넣기.
+- 원본 PDF의 레이아웃을 그대로 Word로 옮기는 일. 상용 엔진도 완벽하지 않은
+  "복원"이며, 여기서는 모델이 다시 쓴다.
+
+## 17. 선택한 생성 파일의 내용으로 새 파일 만들기 (P0)
+
+운영자 요청(2026-11-15)에 따라 `GENERATED_ARTIFACT_REVISION_ENABLED` 미설정 시
+웹 Chat의 ready 카드에서 수정 입력을 선택할 수 있다. `true`도 켜짐이며 명시적 `false`는
+연결을 끈다. 잘못된 값은 켜짐으로 해석하지 않는다. 이 코드 변경은 merge·deploy나
+운영 설정 변경을 수행하지 않는다.
+켜짐 상태에서 수정 필드를 포함한 파일 도구를 제공하는 인증·저장 가능 turn에는 기존
+`ARTIFACT_REVISION_TOOL_DEFINITION_TOKENS` 500토큰 추정 예산이 quote와 Send에 동일하게
+추가된다. 이는 실제 스키마 입력의 기존 요율 과금 효과이며 가격·크레딧 정책 변경이나
+별도 모델 호출은 아니다. 운영자의 기본 켜짐 지시와 이 효과를 검증 기록에 함께 남긴다.
+클릭한 artifact의 opaque ID가 선택 기준이다. 파일명·현재 모델·최신 카드로
+원본을 추정하지 않는다. 기존 다운로드와 Native 다운로드는 그대로 유지한다.
+
+서버는 기존 `PUT /api/chat` import 경로에서 계정과 동일 대화, 현재 unlock,
+ready 상태, 생성/첨부 형식 표의 교집합, 실제 bytes와 기존 첨부 권한·quota를
+확인한다. 원본을 비파괴 bounded read로 읽고 새 private 입력 객체에 복사한 뒤
+기존 opaque uploadId를 반환한다. 같은 준비 operation의 재시도는 원본이나 이미
+결속된 승자 사본을 삭제하지 않는다. 파일 선택만으로 Message나 모델 호출을
+만들지 않는다. 사본의 독립 수명과 미전송 보관 한계는
+`user-attachment-persistence.md` §8.1을 따른다.
+
+준비가 성공하면 원래 계정·대화의 최신 draft에 일반 첨부 chip과 짧고 편집 가능한
+새 파일 생성 요청문을 앞에 추가한다. 기존 글·첨부와 준비 중 작성문을 보존하고,
+동명 입력 충돌·첨부 상한·준비 실패 때 초안을 바꾸지 않는다. 선택은 자동 Send가
+아니다. 사용자가 보는 문장을 그대로 저장하고 Auto와 답변 provider에 전달하며
+Send 때 숨은 wrapper를 붙이지 않는다. reload는 기존 chip과 요청문으로 복원한다.
+
+지원 범위는 TXT/MD, 기존 생성·첨부 표 모두가 허용하는 text/code/config, 한도 내
+CSV와 DOCX/PPTX다. DOCX/PPTX는 기존 Office parser가 추출한 **텍스트 내용으로
+새 문서를 만드는 것**이다. 원본 서식·그림·슬라이드 구조 보존 편집이 아니다.
+준비 시 nonempty와 strict 추출 한도를 확인하고 Send 시 실제 남은 예산으로 다시
+확인한다. 최신 사용자 turn의 일반 Office 첨부에도 strict overflow를 적용한다.
+최신 text/CSV도 조용히 자른 채 실행하지 않는다.
+
+로그인 계정의 첨부 상한은 turn당 10개·파일 50MiB·요청 합계 100MiB다(운영자 결정
+2026-11-18, `lib/chatAttachmentLimits.ts`). 대화 전체 첨부가 100개를 넘으면 가장
+오래된 이전 파일을 이름만 남기고 빼며, 대화를 거부하지 않는다. 요청 전체의
+추출 텍스트 300,000자 상한은 없앴다(운영자 결정 2026-11-16). 과거 첨부까지 매 turn
+다시 세어, 첨부가 그만큼 쌓인 대화는 새 파일이 없는 메시지까지 모두 거부됐기
+때문이다. 지금 turn이 보낼 수 있는 양은 입력 토큰 한도(`CHAT_INPUT_TOKEN_LIMIT`)와
+모델 context window가 정한다. 과거 메시지의 첨부는 입력 한도의 절반까지만 다시
+싣고, 넘치는 과거 파일은 거부하지 않고 빠졌다는 한 줄을 모델에 남긴다
+(`lib/chatAttachmentLimits.ts`). 최신 turn의 파일은 통째로 싣거나, parser 상한
+(`CHAT_ATTACHMENT_PARSE_CHARACTERS`)이나 입력 토큰 한도를 넘으면 최종 답변 provider
+dispatch 전에 거부한다. 생성 한도와 재입력 한도는 다르므로 모든 생성물이 재입력되거나
+무제한 반복 수정된다고 약속하지 않는다. 현재 Auto는 추출보다 먼저 실행될 수 있으므로
+이 거부가 Auto 비용까지 0임을 뜻하지 않는다.
+
+실제 `create_*` 실행 결과가 새 파일 성공의 기준이다. text-only 답변은 수정 성공이
+아니지만 파일 행이 없다면 가짜 failed 카드를 만들지 않는다. 원본과 새 결과의
+카드·다운로드를 모두 유지하며 새 결과를 다시 선택할 수 있다. 기존 모델 capability,
+`requiresFileGeneration`, 도구 제공 turn의 fallback 제한과 token/reservation/settlement를
+그대로 사용하고 별도 classifier·평가 호출·가격 변경은 추가하지 않는다.
+
+canonical spec·버전 계보·XLSX 구조 보존·Native 수정 선택의 후속 구현은 §18을 따른다.
+PDF/ZIP 편집, WYSIWYG와 이미지 생성 workspace 변경은 여전히 이 흐름의 범위 밖이다.
+
+## 18. XLSX 구조 보존, 실제 버전 계보와 Native 수정 선택 (P1)
+
+### 18.1 검증된 WorkbookSpec과 값 수정
+
+`GENERATED_ARTIFACT_REVISION_ENABLED`의 기본 켜짐과 명시적 off를 따른다. 꺼진 상태에서는 새
+canonical 내용 보관과 수정 도구 확장을 활성화하지 않는다. XLSX를 성공적으로 만든
+경우에만 기존 admission을 통과한 WorkbookSpec을 `{version: 1, kind: "spreadsheet",
+spec: ...}` 형태로 저장한다. 전체 직렬화 명세는 기존 300,000자 입력 예산 안이어야
+한다. 명세가 너무 큰 생성 결과는 다운로드할 수 있지만 다시 수정할 수 있다고
+보장하지 않는다. 파일 생성 한도·입력 한도·업로드 quota를 늘리지 않는다.
+
+꺼진 상태에서는 새 canonical/parent/group을 저장하지 않고 기존 app DTO의 계보 필드도
+내보내지 않는다. 이미 보관한 내용과 원래 다운로드는 삭제하지 않는다. 같은 operation의
+등록 완료 재시도는 새 I/O나 byte quota 예약이 없지만, 등록 전 동시 시도는 각각 실제
+쓰기 bytes를 예약한다. 경합에서 진 사본을 정리해도 그 일일 upload quota를 되돌리지 않는다.
+
+수정 선택은 원본 bytes와 명세의 독립 사용자 입력 사본을 만든다. Send에서는 실제
+남은 공유 추출 예산으로 명세를 다시 검사한다. 모델은 기존 `create_spreadsheet`에
+요청 범위 `revisionOf: "att_1"`과 바꿀 데이터 셀의 `cellUpdates`를 준다. 행·열은
+제목/헤더를 제외한 1부터 시작하는 데이터 위치이며 정확한 sheet 이름을 사용한다.
+서버는 대상·타입·범위를 검사하고 기존 명세의 해당 셀 값만 바꾼 뒤 기존 admission과
+writer로 새 XLSX를 만든다. 수정하지 않은 sheet 순서·제목·열 정의·데이터 행/셀·
+width·명명된 표시 형식·header style·freeze 설정을 그대로 재사용한다.
+
+이는 기존 값 전용 생성 범위의 수정이다. 수식·매크로·차트·pivot·임의의 셀 서식이나
+범용 Office round-trip 편집을 추가하지 않는다. 행/열 추가·삭제와 구조 재편은 이 작은
+셀 수정 동작으로 자동 추측하지 않는다. 원본은 덮어쓰지 않는다.
+
+이전 XLSX에는 canonical 명세가 없다. 이 경우 기존 OfficeParser와 기존 spreadsheet
+grid reader를 재사용하여 지원되는 sheet·typed cell·행/열 위치를 읽는다. 원래 열 너비와
+표시 layout처럼 읽을 수 없는 정보는 보존을 약속하지 않는다. 입력 사본의 `fidelity:
+"values"`를 유지하고, 앱에는 안전한 `revisionMode: "workbook-values"`만 전달하여
+그 한계를 보이는 수정 요청문에 넣는다. 새 canonical 사본은 `revisionMode: "workbook"`
+이다. 재시도도 같은 mode를 유지한다. 지원 범위 밖 구조·불완전 추출·한도 초과는
+조용히 평탄화하거나 자르지 않고 거절한다.
+
+### 18.2 실제 source와 버전 그룹
+
+`MessageArtifact`는 nullable `canonicalSpec`, `parentArtifactId`, `lineageId`를 가진다.
+입력 upload와 attachment에는 별도의 `sourceArtifactId`, `sourceLineageId`,
+`sourceConversationId`, `sourceCanonicalSpec`을 둔다. Attachment→Attachment 용도인
+`sourceAttachmentId`와 혼용하지 않는다. 명세는 내부 사용자 내용이며 일반 app DTO,
+공개 공유·대화 TXT·모델 도구의 권한 필드·로그에 보내지 않는다.
+
+계보는 도구의 명시적 `revisionOf` handle을 서버가 이미 소유권·대화 범위 확인을 마친
+현재 입력에 해석한 경우에만 연결한다. 파일명·최신 카드·현재 모델·같은 turn의 존재만으로
+부모를 추정하지 않는다. 모델은 DB artifact ID나 lineage ID를 받지 않는다. 일반 새 파일,
+text-only 답변, 미실행/거절된 도구 호출에 가짜 수정 관계를 만들지 않는다.
+
+완료된 답변을 저장할 때 source/group을 다시 검증한다. 그 사이 source와 독립 입력
+증거가 모두 사라지거나 관계를 확인할 수 없으면 답변과 새 파일은 독립 root로 저장하고
+확인되지 않은 parent/group만 버린다. 외부 소유자나 다른 대화의 관계도 만들지 않는다.
+DB 자체의 실패를 성공으로 숨기지는 않는다.
+최종 stream 카드도 DB에서 읽은 parent/group으로 맞추며 reload와 다른 관계를 표시하지
+않는다. 검증되지 않은 관계를 제외한 경우 내용·파일명·ID 없는 사유와 건수만 기록한다.
+
+부모 FK는 `ON DELETE SET NULL`이다. source 삭제는 파생 파일이나 독립 사용자 입력을
+삭제하지 않는다. 독립 명세 사본은 기존 입력 첨부와 같은 수명을 따르며, source가 없어도
+자기 내용으로 재시도할 수 있다. 안정된 group 식별자는 남은 버전을 묶고, 앱은 사라진
+부모를 존재하는 것처럼 표시하지 않는다. 대화/계정 삭제의 기존 cleanup 계약은 유지한다.
+
+`GET /api/artifacts/{artifactId}/versions`는 현재 owner·대화·unlock을 검사하고 같은
+사용자·대화·실제 그룹의 ready 파일을 한 번에 최대 50개씩 반환한다. 같은 이름의
+다른 파일을 포함하지 않는다. cursor도 같은 범위에서 확인한다. 응답에는 기존 공개
+파일 정보와 parent/group/createdAt만 있고 canonical 내용·objectKey·storage URL은 없다.
+앱은 실제 부모로 이동하고 각 버전을 다운로드하거나 정확히 선택하여 다시 수정할 수 있다.
+
+### 18.3 Native와 export
+
+Native Chat은 서버의 `generatedFileRevisions` capability를 따라 같은 준비
+API·동일 artifact ID·보이는 수정 요청문을 사용한다. 선택은 자동 Send가 아니다. 작성 중인
+text·첨부, 준비 중 새 작성문과 원래 대화 scope를 보존하며 상한/동명 충돌 때 사본만 정리한다.
+다른 신원으로 전환된 뒤 완료한 준비는 새 신원 초안에 반영하지 않는다. 기존 다운로드는
+유지하고, Review나 이미지 workspace로 조용히 연결하지 않는다.
+
+Native 첨부 chip은 기존 device draft의 신원·대화 key 아래 opaque upload 메타데이터로
+복원한다. 기존 24시간 local draft TTL과 logout clear를 따른다. 이 TTL은 서버 upload
+객체의 만료가 아니다. 사라진 local draft의 unbound 사본 보관 한계는 §17과 입력 첨부
+정책을 그대로 따른다. 불명확한 Send 결과의 기존 saved-response 복구를 유지하고 자동으로
+재전송하지 않는다. native bearer의 새 versions GET/unbound cleanup DELETE 경로도 같은
+revision switch와 기존 Native Chat/Parity gate 아래 owner/unlock/opaque ID 검사로 제한한다.
+revision 기본값 변경은 기존 Native gate를 켜지 않는다. 새 device 권한이나 자격증명은 없다.
+
+소유자 계정 JSON export에는 새로 보관한 canonical/source 명세의 내용을 포함한다.
+파일 bytes는 여전히 포함하지 않으며, 일반 앱/공유 DTO에 이 내용을 노출하지 않는다.
+schema migration과 로컬 검증은 운영 migration·활성화·merge·deploy 승인과 별개다.

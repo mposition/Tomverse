@@ -454,3 +454,38 @@ test("the public provider and model counts are derived, not hard-coded", () => {
   assert.ok(PUBLIC_MODEL_PROVIDERS.length > 0);
   assert.ok(selectable.length > 0);
 });
+
+// 2026-11-11: switching gpt-5-6-luna off broke every Auto conversation that
+// still carried it as its nominal model. The stand-in is what lets Auto choose.
+test("a retired nominal model stands aside for its replacement, then the app default", async () => {
+  const { resolveRetiredModelSuccessor } = await import("../lib/models");
+  type Row = Pick<
+    AiModel,
+    "id" | "enabled" | "publiclyListed" | "status" | "catalogDeleted" | "replacementModelId"
+  >;
+  const row = (id: string, overrides: Partial<Row> = {}): Row => ({
+    id,
+    enabled: true,
+    publiclyListed: true,
+    status: "enabled",
+    catalogDeleted: false,
+    ...overrides,
+  });
+  const entries = new Map<string, Row>(
+    [
+      row("old-luna", { enabled: false, status: "disabled", replacementModelId: "new-luna" }),
+      row("new-luna"),
+      row("orphan", { enabled: false, status: "disabled" }),
+      row("app-default"),
+      row("off-default", { enabled: false, status: "disabled" }),
+    ].map((entry) => [entry.id, entry])
+  );
+  const lookup = (id: string) => entries.get(id);
+  const named = resolveRetiredModelSuccessor(entries.get("old-luna")!, lookup, "app-default");
+  assert.deepEqual([named?.successor.id, named?.via], ["new-luna", "replacement"]);
+  const fallback = resolveRetiredModelSuccessor(entries.get("orphan")!, lookup, "app-default");
+  assert.deepEqual([fallback?.successor.id, fallback?.via], ["app-default", "app_default"]);
+  // Neither a replacement nor a servable default: nobody stands in.
+  assert.equal(resolveRetiredModelSuccessor(entries.get("orphan")!, lookup, "off-default"), undefined);
+  assert.equal(resolveRetiredModelSuccessor(entries.get("off-default")!, lookup, "off-default"), undefined);
+});

@@ -1,6 +1,10 @@
 import type { Prisma } from "@prisma/client";
 
 import { AMUX_ESCALATION_AWAITING_STATUSES } from "./humanReviewCore.ts";
+import type { AmuxOwnerQueueDmSettlement } from "./ownerQueueDmCore.ts";
+import type { AmuxWorkerProviderClass } from "./workerRegistryCore.ts";
+import type { EngineeringAgentCardItemView } from "../engineeringAgentOwnerItemContextCore.ts";
+import type { AmuxDmRelayView, AmuxOwnerQueueDmView } from "./ownerQueueDmRequestCore.ts";
 
 /**
  * The owner queue ("Waiting on me"): every card that waits on the owner, from
@@ -12,8 +16,19 @@ import { AMUX_ESCALATION_AWAITING_STATUSES } from "./humanReviewCore.ts";
  * existing owner review (`useAmuxOwnerReview`) and its routes.
  */
 
-/** The cards the list holds at most; a longer queue says it is partial. */
+/** The cards one read lists; a longer queue says it is partial and offers the next page. */
 export const AMUX_OWNER_QUEUE_LIMIT = 100;
+/**
+ * The most cards one read can be asked for. Each card's title is opened one at
+ * a time, so this is the size one admin request still answers in a few seconds.
+ */
+export const AMUX_OWNER_QUEUE_MAX_LIMIT = 2_000;
+
+/** The `limit` a request asked for: a whole number from one page up to the maximum, else one page. */
+export const amuxOwnerQueueRequestedLimit = (raw: string | null): number => {
+  const value = raw !== null && /^[0-9]{1,5}$/.test(raw) ? Number(raw) : AMUX_OWNER_QUEUE_LIMIT;
+  return Math.min(AMUX_OWNER_QUEUE_MAX_LIMIT, Math.max(AMUX_OWNER_QUEUE_LIMIT, value));
+};
 
 export const AMUX_OWNER_QUEUE_GROUPS = ["decide", "question", "recover", "read"] as const;
 export type AmuxOwnerQueueGroup = (typeof AMUX_OWNER_QUEUE_GROUPS)[number];
@@ -49,7 +64,7 @@ export type AmuxOwnerQueueItem = {
   status: string;
   worker: string | null;
   /** Channel of the worker, from the class it was registered with. */
-  channel: "claude" | "codex" | "copilot" | "cursor" | null;
+  channel: AmuxWorkerProviderClass | null;
   /** Why a person is asked: the newest open escalation's reason code. */
   attentionReason: string | null;
   ownerQuestion: "open" | "answered" | null;
@@ -57,6 +72,26 @@ export type AmuxOwnerQueueItem = {
   escalationId: string | null;
   /** When the card started waiting (ISO). */
   waitingSince: string;
+  /**
+   * The newest attempt stored a patch but no engineering agent run was ever
+   * created for it, so nothing can publish the patch to develop (AMUX-FILEGEN2-002,
+   * 2026-11-13). Absent: not read.
+   */
+  publicationPathMissing?: boolean;
+  /**
+   * The engineering agent's open T2 drafts and state mismatches on this card,
+   * decided on the card through the engineering routes. Absent: not read.
+   */
+  engineeringItems?: EngineeringAgentCardItemView[];
+  /**
+   * The Decision Maker's settlement of this card and where its card stands
+   * (docs/policy/amux-decision-maker.md §0a-5). Null: the card's escalation has
+   * no settlement. `{ status: "unread" }`: it could not be read, which is this
+   * card only. Absent: not read.
+   */
+  dmSettlement?: AmuxOwnerQueueDmSettlement | null;
+  /** Which Decision Maker path holds this card, how far it got, and the owner's one action (ownerQueueDmRequestCore.ts). Absent: not read. */
+  dmStatus?: AmuxOwnerQueueDmView;
 };
 
 export type AmuxOwnerQueueRead = {
@@ -67,6 +102,51 @@ export type AmuxOwnerQueueRead = {
   processedToday: number | null;
   /** Server time of the read; the list's "N hours ago" is counted from it. */
   generatedAt: string;
+  /** When the host's DM relay last called. Absent or null: not read. */
+  dmRelay?: AmuxDmRelayView | null;
+};
+
+/**
+ * The queue with each card's open engineering items attached. A failed
+ * engineering read (null) leaves the cards as they were, so the owner queue
+ * still opens; a card with no open item gets an empty list.
+ */
+export const amuxOwnerQueueWithEngineeringItems = (
+  read: AmuxOwnerQueueRead,
+  byCard: ReadonlyMap<string, EngineeringAgentCardItemView[]> | null,
+): AmuxOwnerQueueRead => byCard === null ? read : {
+  ...read,
+  items: read.items.map((item) => ({ ...item, engineeringItems: byCard.get(item.taskId) ?? [] })),
+};
+
+/**
+ * The queue with each card's Decision Maker settlement attached. A card whose
+ * escalation has no entry has no settlement (null); a failed read is the
+ * caller's `unread` entry for each card, never a missing one.
+ */
+export const amuxOwnerQueueWithDmSettlements = (
+  read: AmuxOwnerQueueRead,
+  byTask: ReadonlyMap<string, AmuxOwnerQueueDmSettlement>,
+): AmuxOwnerQueueRead => ({
+  ...read,
+  items: read.items.map((item) => ({ ...item, dmSettlement: byTask.get(item.taskId) ?? null })),
+});
+
+/**
+ * The queue with the Decision Maker's standing on each card and the relay's
+ * last call. A failed read (null) leaves the cards as they were and says the
+ * relay is unknown, so the queue still opens.
+ */
+export const amuxOwnerQueueWithDmStatus = (
+  read: AmuxOwnerQueueRead,
+  dm: { relay: AmuxDmRelayView | null; byTask: ReadonlyMap<string, AmuxOwnerQueueDmView> } | null,
+): AmuxOwnerQueueRead => dm === null ? { ...read, dmRelay: null } : {
+  ...read,
+  dmRelay: dm.relay,
+  items: read.items.map((item) => {
+    const view = dm.byTask.get(item.taskId);
+    return view ? { ...item, dmStatus: view } : item;
+  }),
 };
 
 /** Reasons where the work itself stopped before it finished (a lost run, a limit, a failed tool). */
@@ -134,3 +214,14 @@ export const amuxOwnerQueueVisible = (
     .filter((group) => filter.group === null || filter.group === group)
     .flatMap((group) => items.filter((item) => amuxOwnerQueueGroup(item) === group && matches(item)));
 };
+
+/**
+ * A card whose newest attempt stored a patch with no engineering agent run and
+ * no pull request: the patch has no way to reach develop. Same newest-attempt
+ * order as the owner review (taskRevision, startedAt, id, all descending).
+ */
+export const amuxOwnerQueuePublicationPathMissing = (input: {
+  reviewPrNumber: number | null;
+  newestAttempt: { hasPatch: boolean; hasRun: boolean } | null;
+}) => input.reviewPrNumber === null && input.newestAttempt !== null &&
+  input.newestAttempt.hasPatch && !input.newestAttempt.hasRun;

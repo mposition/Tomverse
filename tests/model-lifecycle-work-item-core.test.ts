@@ -771,3 +771,97 @@ test("a half-written sighting is dropped rather than halved", () => {
     [{ provider: "groq", apiModel: "llama-4.2-70b" }]
   );
 });
+
+test("only a served add still open before rollout can be closed as rolled out", async () => {
+  const { isRolloutFinishable, ROLLOUT_FINISHABLE_STATUSES, ROLLOUT_WALK_TO_VALIDATION, workItemTransitionRefusal } =
+    await import("../lib/modelLifecycleWorkItemCore.ts");
+  assert.deepEqual([...ROLLOUT_FINISHABLE_STATUSES].sort(), [
+    "approved",
+    "awaiting_decision",
+    "deferred",
+    "discovered",
+    "implementation_pending",
+    "rollout_pending",
+    "validation_pending",
+  ]);
+  const base = { action: "add", status: "validation_pending", servedLive: true };
+  assert.equal(isRolloutFinishable(base), true);
+  assert.equal(isRolloutFinishable({ ...base, status: "rollout_pending" }), true);
+  // 2026-11-13: an image model turned on in the catalogue leaves its item
+  // `discovered`; it is finishable once the model serves.
+  assert.equal(isRolloutFinishable({ ...base, status: "discovered" }), true);
+  assert.equal(isRolloutFinishable({ ...base, status: "approved" }), true);
+  // Registered but not live (disabled, unlisted, or not yet enabled): the
+  // open item is real work, not a stale record.
+  assert.equal(isRolloutFinishable({ ...base, status: "discovered", servedLive: false }), false);
+  assert.equal(isRolloutFinishable({ ...base, servedLive: false }), false);
+  // Notice owed, closed, or a retirement: other paths own these.
+  for (const status of ["communication_pending", "completed", "closed_no_action", "rejected"]) {
+    assert.equal(isRolloutFinishable({ ...base, status }), false, status);
+  }
+  assert.equal(isRolloutFinishable({ ...base, action: "retire" }), false);
+
+  // The walk to validation is made only of transitions the state machine
+  // allows, approval with its decision, and reaches validation_pending from
+  // every open state before it.
+  const starts: WorkItemStatus[] = ["discovered", "awaiting_decision", "deferred", "approved", "implementation_pending"];
+  for (const start of starts) {
+    let status: WorkItemStatus = start;
+    for (const step of ROLLOUT_WALK_TO_VALIDATION) {
+      if (!step.from.includes(status)) continue;
+      const refusal = workItemTransitionRefusal({
+        from: status,
+        to: step.to,
+        hasDecision: step.to === "approved",
+        pendingValidations: [],
+        communicationRequired: false,
+        actorEmail: "ops@example.com",
+      });
+      assert.equal(refusal, null, `${status} -> ${step.to}`);
+      status = step.to;
+    }
+    assert.equal(status, "validation_pending", start);
+  }
+});
+
+test("vanished families are excluded whole, and only automatic exclusions reopen", async () => {
+  const { vanishedDiscoveryChanges, MODEL_DISCOVERY_AUTO_EXCLUDE_ACTOR } = await import(
+    "../lib/modelLifecycleWorkItemCore.ts"
+  );
+  const item = (
+    id: string,
+    familyKey: string,
+    availability: string,
+    actorEmail?: string | null,
+    action = "add"
+  ) => ({
+    id,
+    action,
+    familyKey,
+    availability,
+    exclusion: actorEmail === undefined ? null : { actorEmail },
+  });
+  const { exclude, reopen } = vanishedDiscoveryChanges({
+    undecided: [
+      item("a1", "alpha", "stale"),
+      item("a2", "alpha", "stale"),
+      // One member still listed keeps the whole family.
+      item("b1", "beta", "stale"),
+      item("b2", "beta", "current"),
+      // A failed or missing scan is not evidence of absence.
+      item("c1", "gamma", "unknown"),
+      // A retirement the reconciliation opened is never auto-excluded.
+      item("r1", "rho", "stale", undefined, "retire"),
+    ],
+    excluded: [
+      item("d1", "delta", "current", MODEL_DISCOVERY_AUTO_EXCLUDE_ACTOR),
+      item("d2", "delta", "stale", MODEL_DISCOVERY_AUTO_EXCLUDE_ACTOR),
+      // A person's exclusion is theirs, even when the model is listed again.
+      item("e1", "epsilon", "current", "admin@tomverse.app"),
+      item("f1", "phi", "stale", MODEL_DISCOVERY_AUTO_EXCLUDE_ACTOR),
+      item("g1", "gimel", "current", MODEL_DISCOVERY_AUTO_EXCLUDE_ACTOR, "retire"),
+    ],
+  });
+  assert.deepEqual(exclude.map((entry) => entry.id), ["a1", "a2"]);
+  assert.deepEqual(reopen.map((entry) => entry.id), ["d1", "d2"]);
+});

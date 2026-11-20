@@ -122,12 +122,11 @@ function expectDynamicNonces(html: string, headers: Record<string, string>, path
     checkedScripts++;
     expect(attrs.nonce, `${path}: ${attrs.src || attrs.type || "inline script"} misses the response nonce`).toBe(trustedNonce);
     if (!hasSource && content.startsWith("(function") && content.includes(".dataset.theme")) roles.add("theme");
-    if (!hasSource && content.startsWith("(function") && content.includes("data-consent-pending")) roles.add("consent");
     if (attrs.type === "application/ld+json" && content) roles.add("jsonld");
     if (!hasSource && /(?:self|window)\.__next_f\b/.test(content)) roles.add("rsc");
   }
   expect(checkedScripts, `${path}: check actual HTML scripts, not only a policy header`).toBeGreaterThanOrEqual(4);
-  expect([...roles].sort(), `${path}: all script surfaces must be present`).toEqual(["consent", "jsonld", "rsc", "theme"]);
+  expect([...roles].sort(), `${path}: all script surfaces must be present`).toEqual(["jsonld", "rsc", "theme"]);
 }
 
 function expectLocalizedLinks(hrefs: string[], language: Language) {
@@ -159,7 +158,7 @@ function expectLocalizedLinks(hrefs: string[], language: Language) {
 for (const language of SEO_LOCALES) {
   test(`${language}: public routes serve translated HTML, metadata, links and valid static CSP hashes`, async ({ request }) => {
     test.setTimeout(60_000);
-    expect(publicPaths).toHaveLength(11);
+    expect(publicPaths).toHaveLength(10);
     for (const base of publicPaths) {
       await test.step(`${language}${base}`, async () => {
         expect(LOCALIZED_MARKETING_BASE_PATHS as readonly string[]).toContain(base);
@@ -262,7 +261,7 @@ const representatives: Array<{ language: Language; next: Language; base: PublicM
   { language: "ko", next: "fr", base: "/about" },
   { language: "fr", next: "de", base: "/faq" },
   { language: "de", next: "pt", base: "/models" },
-  { language: "pt", next: "ko", base: "/support/help-centre/chat-workspace" },
+  { language: "pt", next: "ko", base: "/support/help-centre" },
 ];
 
 for (const { language, next, base } of representatives) {
@@ -291,7 +290,12 @@ test("FAQ explains both products and French Knowledge identifies its English med
   await page.setViewportSize({ width: 320, height: 900 });
   await page.goto("/ko/faq");
   const productQuestion = infoPages.faq.ko.sections[0];
-  await expect(page.getByRole("heading", { name: productQuestion.title, exact: true })).toBeVisible();
+  const productToggle = page.getByRole("button", { name: productQuestion.title, exact: true });
+  await expect(productToggle).toBeVisible({ timeout: 30_000 });
+  await expect(async () => {
+    if (await productToggle.getAttribute("aria-expanded") === "false") await productToggle.click();
+    await expect(productToggle).toHaveAttribute("aria-expanded", "true", { timeout: 1_000 });
+  }).toPass({ timeout: 30_000 });
   await expect(page.getByText(productQuestion.body, { exact: true })).toBeVisible();
   expect(productQuestion.body).toContain("Chat");
   expect(productQuestion.body).toContain("Review");

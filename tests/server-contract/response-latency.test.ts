@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
+import { responseLatencyContext } from "../../lib/responseLatencyCore";
 
 const root = resolve(import.meta.dirname, "../..");
 const url = (path: string) => pathToFileURL(resolve(root, path)).href;
@@ -118,5 +119,40 @@ test("server stages separate routing from admission and provider/tool waiting", 
   await new Promise<void>(resolve => setImmediate(resolve));
   assert.deepEqual((samples.get(`${id}:server`) as { timings: unknown }).timings,
     { beforeRoutingMs: 10, routingMs: 30, preProviderMs: 55, afterRoutingMs: 15,
-      firstContentMs: 100, providerToContentMs: 45, settlementMs: 120 });
+      firstContentMs: 100, providerToContentMs: 45, settlementMs: 120, _context: responseLatencyContext(process.env) });
+});
+
+test("the store attributes only server samples and reads legacy and deployment cohorts separately", async () => {
+  const store = await import(url("lib/responseLatencyStore.ts"));
+  const old = process.env.RAILWAY_GIT_COMMIT_SHA;
+  try {
+    process.env.RAILWAY_GIT_COMMIT_SHA = "a".repeat(40);
+    const sample = { product: "chat", mode: "auto", modelId: "cohort-model", provider: "openai", source: "server", outcome: "completed", timings: { firstContentMs: 100 } };
+    await store.recordResponseLatency(randomUUID(), sample);
+    process.env.RAILWAY_GIT_COMMIT_SHA = "b".repeat(40);
+    await store.recordResponseLatency(randomUUID(), sample);
+    await store.recordResponseLatency(randomUUID(), { ...sample, source: "client", context: responseLatencyContext(process.env) });
+    samples.set("legacy", { ...sample, timings: { firstContentMs: 200 } });
+    const evidence = await store.readResponseLatencyEvidence();
+    const groups = evidence.groups.filter((group: { modelId: string }) => group.modelId === "cohort-model");
+    assert.equal(groups.length, 4);
+    assert.deepEqual(groups.filter((group: { context?: unknown }) => group.context).map((group: { context: { build: string } }) => group.context.build), ["a".repeat(40), "b".repeat(40)]);
+    assert.equal(groups.find((group: { source: string }) => group.source === "client").context, undefined);
+  } finally {
+    if (old === undefined) delete process.env.RAILWAY_GIT_COMMIT_SHA; else process.env.RAILWAY_GIT_COMMIT_SHA = old;
+  }
+});
+
+test("the evidence reader pairs signed browser reports with server build/model without changing browser durations", async () => {
+  const store = await import(url("lib/responseLatencyStore.ts"));
+  const { POST, createToken } = await load();
+  const id = randomUUID();
+  await store.recordResponseLatency(`${id}:server`, { product: "chat", mode: "auto", source: "server", modelId: "paired-model", provider: "openai", outcome: "completed", timings: { firstContentMs: 100 } });
+  assert.equal((await POST(request({ token: createToken(id, "chat", "auto"), outcome: "completed", prepareMs: 5, firstContentMs: 110, completionMs: 200 }))).status, 204);
+  const evidence = await store.readResponseLatencyEvidence();
+  const client = evidence.groups.find((group: { source: string; modelId: string }) => group.source === "client" && group.modelId === "paired-model");
+  assert.ok(client.context);
+  assert.equal(client.timings.firstContentMs.p50Ms, 110);
+  assert.equal(client.timings.completionMs.p50Ms, 200);
+  assert.equal((samples.get(`${id}:client`) as { timings: { _context?: unknown } }).timings._context, undefined);
 });

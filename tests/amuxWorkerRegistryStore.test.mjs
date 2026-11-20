@@ -39,6 +39,7 @@ const root = process.cwd();
 const read = (path) => readFileSync(join(root, path), "utf8");
 const STORE = "lib/amux/workerRegistryStore.ts";
 const MIGRATION = "prisma/migrations/20261012100000_amux_worker_registry/migration.sql";
+const CLASS_MIGRATION = "prisma/migrations/20261110200000_amux_antigravity_worker_class/migration.sql";
 // The guard's current body: the operator's 2026-10-20 direct activation.
 const GUARD_MIGRATION = "prisma/migrations/20261020200000_amux_worker_registry_direct_activation/migration.sql";
 const GUARD_HEAD = 'CREATE OR REPLACE FUNCTION "amux_worker_registry_event_guard"()';
@@ -62,7 +63,12 @@ const checkList = (sql, name) => {
 
 test("the migration's CHECKs hold exactly the core's vocabularies", () => {
   const sql = withoutSqlComments(read(MIGRATION));
-  assert.deepEqual(checkList(sql, "AmuxWorkerRegistryEvent_provider_class_check"), [...AMUX_WORKER_PROVIDER_CLASSES]);
+  // The class CHECK's newest definition is the antigravity migration's (owner
+  // decision 2026-11-10); the first one held the four classes before it.
+  assert.deepEqual(checkList(sql, "AmuxWorkerRegistryEvent_provider_class_check"),
+    AMUX_WORKER_PROVIDER_CLASSES.filter((name) => name !== "antigravity"));
+  assert.deepEqual(checkList(withoutSqlComments(read(CLASS_MIGRATION)),
+    "AmuxWorkerRegistryEvent_provider_class_check"), [...AMUX_WORKER_PROVIDER_CLASSES]);
   assert.deepEqual(checkList(sql, "AmuxWorkerRegistryEvent_role_ceiling_check"), [...AMUX_WORKER_ROLE_CEILINGS]);
   assert.deepEqual(checkList(sql, "AmuxWorkerRegistryEvent_desired_state_check"), [...AMUX_WORKER_DESIRED_STATES]);
   assert.deepEqual(checkList(sql, "AmuxWorkerObservation_status_check"), [...AMUX_WORKER_OBSERVATION_STATUSES]);

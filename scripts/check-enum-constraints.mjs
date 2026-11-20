@@ -44,6 +44,10 @@ const REGISTRY = {
     owner: "database",
     reason: "The server owns pending, running and terminal one-use approval states. An uncertain dispatched write remains unknown until its owner records the verified outcome; API clients cannot assign arbitrary states.",
   },
+  McpCustomServer_auth_check: {
+    owner: "database",
+    reason: "The custom-server route maps a validated request enum to none, bearer or OAuth; the stored value is only ever written by that server code.",
+  },
   McpOAuthFlow_state_check: {
     owner: "database",
     reason: "The OAuth handler and maintenance own the authorization lifecycle. The callback's untrusted state parameter is an opaque lookup token, never the stored lifecycle state.",
@@ -109,7 +113,7 @@ const REGISTRY = {
     module: "lib/generatedArtifactCore.ts",
     list: "SUPPORTED_ARTIFACT_FORMATS",
     reason:
-      "The fifty-eight formats a generator actually exists for, built from the format table in lib/generatedArtifactFormats.ts (docs/policy/generated-artifacts.md). REFUSED_ARTIFACT_EXTENSIONS beside it is the opposite list -- extensions the product refuses outright -- and neither it nor any format without a generator may reach the constraint, because a row here claims a file the download route can serve.",
+      "The sixty-one formats a generator or a converter actually exists for, built from the format table in lib/generatedArtifactFormats.ts (docs/policy/generated-artifacts.md): fifty-eight a model can author and three raster image formats that only convert_files writes, from the user's own attachments. REFUSED_ARTIFACT_EXTENSIONS beside it is the opposite list -- extensions the product refuses outright -- and neither it nor any format without a generator may reach the constraint, because a row here claims a file the download route can serve.",
   },
   MessageArtifact_status_check: {
     owner: "list",
@@ -258,6 +262,27 @@ const REGISTRY = {
     list: "CHAT_RESPONSE_ATTEMPT_FAILURE_CODES",
     reason:
       "A deliberately coarse public-safe failure vocabulary. It prevents provider messages, exception text, credentials or request fragments from entering durable recovery state and later leaving through GET or account export.",
+  },
+  ResearchPreviewRun_status_check: {
+    owner: "list",
+    module: "lib/researchPreviewRunTypes.ts",
+    list: "RESEARCH_PREVIEW_RUN_STATUSES",
+    reason:
+      "The durable Research Preview lifecycle. Unknown dispatches are terminal attention states and only completed safe checkpoints may resume, so database and worker branches must share one list.",
+  },
+  ResearchPreviewRun_stop_reason_check: {
+    owner: "list",
+    module: "lib/researchPreviewRunTypes.ts",
+    list: "RESEARCH_PREVIEW_RUN_STOP_REASONS",
+    reason:
+      "Public-safe terminal classifications only. Raw provider or tool errors never enter the durable row or its account export.",
+  },
+  ResearchPreviewGeneration_status_check: {
+    owner: "list",
+    module: "lib/researchPreviewRunTypes.ts",
+    list: "RESEARCH_PREVIEW_GENERATION_STATUSES",
+    reason:
+      "The provider dispatch boundary depends on intent, dispatch_started and outcome_unknown remaining exact; drift could permit an unsafe retry or lose already-spent provider cost.",
   },
   PromptRefinerShadowRun_status_check: {
     owner: "list",
@@ -597,13 +622,17 @@ const REGISTRY = {
 
   // --- the constraint is the only closed list there is ---------------------
   ExternalImport_provider_check: {
-    owner: "database",
+    owner: "list",
+    module: "lib/externalImportProviders.ts",
+    list: "EXTERNAL_IMPORT_PROVIDERS",
     reason:
-      "The two importable providers. They appear as bare string literals across the import adapters and as a zod enum in the analytics payload schema, with no shared runtime list to compare against.",
+      "The importable providers. The adapters, the create route schema and the analytics payload all read the canonical list, so the constraint is compared against it.",
   },
   ExternalConversation_provider_check: {
-    owner: "database",
-    reason: "The same two providers, denormalised onto the conversation.",
+    owner: "list",
+    module: "lib/externalImportProviders.ts",
+    list: "EXTERNAL_IMPORT_PROVIDERS",
+    reason: "The same providers, denormalised onto the conversation.",
   },
   ConversationContinuationBridge_provider_check: {
     owner: "list",
@@ -825,6 +854,13 @@ const REGISTRY = {
     owner: "database",
     reason:
       "Only AMUX content purposes with an approved retention clock, including the seven-day CLI read manifest, can enter the external key-retirement ledger. Other content categories require their own deletion contract before admission.",
+  },
+  AmuxV22TransferPart_part_check: {
+    owner: "list",
+    module: "lib/amux/v22TransferCore.ts",
+    list: "AMUX_V22_TRANSFER_PARTS",
+    reason:
+      "The parts a v22 run's result travels to the app as (docs/policy/amux-v22-result-transfer.md). The upload route's schema is the same list, and each part maps to one sealed content purpose.",
   },
   AmuxIdeaRetentionHold_reason_check: {
     owner: "database",
@@ -1554,6 +1590,12 @@ const REGISTRY = {
     module: "lib/modelCatalogCore.ts",
     list: "STORED_CATALOG_CATEGORIES",
     reason: "Price revisions exist for the categories that have rows.",
+  },
+  CodingProviderTerms_draftSource_check: {
+    owner: "list",
+    module: "lib/modelCatalogCore.ts",
+    list: "CATALOG_DRAFT_SOURCES",
+    reason: "A provider-conditions re-check is drafted by one model call, like a catalogue row's draft; nothing else writes it.",
   },
   ModelCatalogSnapshot_category_check: {
     owner: "list",

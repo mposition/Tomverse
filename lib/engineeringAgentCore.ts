@@ -132,9 +132,9 @@ export type PublishState = WriteItemState<"publish">;
  * The three kinds of work item that wait on a person (policy §7, §12): a T2
  * draft waits for its decision, a decision item for acknowledgement, a state
  * mismatch for a person's fix. Each opens once and closes once; nothing
- * reopens it. A T2 draft and a decision item expire by the owner queue's TTL
- * (`QUEUE_TTL_DAYS.decision`); a state mismatch never does, because it halts
- * the agent until a person acts.
+ * reopens it. None of them expires for its age (owner decision 2026-11-15);
+ * a v22 item closes as `expired` only when its tier judgement replaces or
+ * refuses it (lib/engineeringAgentV22TierPromotion.ts).
  */
 export const OWNER_ITEM_KINDS = ["t2_draft", "decision", "state_mismatch"] as const;
 export type OwnerItemKind = (typeof OWNER_ITEM_KINDS)[number];
@@ -383,6 +383,25 @@ export const opensDecisionOnEntry = (to: string) => to === "outcome_unknown";
  * the same key in a deferred trigger and refuses the commit without it.
  */
 export const UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX = "unknown:";
+/**
+ * Read back, then proceed (owner decision 2026-11-14, AMUXFLOW/B1): an
+ * unknown outcome is looked up again by the publisher on its own once its
+ * decision has waited this long -- twice as long for each decision the item
+ * already opened, up to 2^MAX_DOUBLINGS times (16 hours) and then at that
+ * interval with no end (owner decisions 2026-11-15 and 2026-11-16; at most
+ * three decisions until 2026-11-15). A lookup only reads GitHub, and a lookup
+ * that settles the result closes the open decisions with it. Always on (the
+ * ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP switch was removed, owner decision
+ * 2026-11-16).
+ */
+export const ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_AFTER_MS = 30 * 60_000;
+/** Where the wait stops growing; the lookups go on at that interval. */
+export const ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_MAX_DOUBLINGS = 5;
+/** How long an item's open decision waits before the next lookup, given how
+ * many decisions the item has opened in all. */
+export const engineeringAgentUnknownAutoLookupWaitMs = (decisions: number) =>
+  ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_AFTER_MS *
+    2 ** Math.min(Math.max(decisions - 1, 0), ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP_MAX_DOUBLINGS);
 export const unknownOutcomeDecisionCauseKey = (workItemId: string, fencingToken: bigint | number) =>
   `${UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX}${workItemId}:${fencingToken}`;
 
@@ -444,10 +463,15 @@ export const ENGINEERING_AGENT_V22_PROMOTED_REASON = "publish_promoted";
  * lookup cannot turn it into an ordinary pull request.
  */
 export const ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX = "publish_review:";
-/** The app's switch for it: off unless exactly `on`. */
+/**
+ * The app's switch for it: on by default since owner decision 2026-11-15
+ * (a T2 patch that waited for a switch was a result nobody could review);
+ * exactly `off` turns it off. A publisher still opens one only when it names
+ * `review_draft` (ENGINEERING_PUBLISHER_FEATURES_HEADER).
+ */
 export const ENGINEERING_AGENT_V22_REVIEW_PR_ENV = "ENGINEERING_AGENT_V22_REVIEW_PR";
 export const engineeringAgentV22ReviewPrEnabled = (value: string | undefined) =>
-  value === "on";
+  value?.trim() !== "off";
 /**
  * The header a publisher names what it can do in. A review item is claimed
  * only by a publisher that names `review_draft`, so one deployed before this
@@ -455,9 +479,74 @@ export const engineeringAgentV22ReviewPrEnabled = (value: string | undefined) =>
  */
 export const ENGINEERING_PUBLISHER_FEATURES_HEADER = "x-engineering-publisher-features";
 export const ENGINEERING_PUBLISHER_REVIEW_DRAFT_FEATURE = "review_draft";
+const publisherNames = (header: string | null, feature: string) =>
+  (header ?? "").split(",").map((part) => part.trim()).includes(feature);
 export const publisherOpensReviewDrafts = (header: string | null) =>
-  (header ?? "").split(",").map((part) => part.trim())
-    .includes(ENGINEERING_PUBLISHER_REVIEW_DRAFT_FEATURE);
+  publisherNames(header, ENGINEERING_PUBLISHER_REVIEW_DRAFT_FEATURE);
+/**
+ * A publisher that can open the pull request a lost answer left unopened, for
+ * a branch a person approved it for (§10). One deployed before this feature
+ * would only look, and so is never handed that approval.
+ */
+export const ENGINEERING_PUBLISHER_PR_RESUME_FEATURE = "pull_request_resume";
+export const publisherResumesPullRequests = (header: string | null) =>
+  publisherNames(header, ENGINEERING_PUBLISHER_PR_RESUME_FEATURE);
+/**
+ * A publisher that reads a write claim's patch in chunks from
+ * `publish/patch` (docs/policy/amux-v22-result-transfer.md §4). Its claim
+ * carries the patch's size and chunk count instead of the patch, so no patch
+ * is too large for one answer. One deployed before this feature reads the
+ * patch inline, and is never handed one past the inline bound.
+ */
+export const ENGINEERING_PUBLISHER_PATCH_CHUNKS_FEATURE = "patch_chunks";
+export const publisherReadsPatchChunks = (header: string | null) =>
+  publisherNames(header, ENGINEERING_PUBLISHER_PATCH_CHUNKS_FEATURE);
+/**
+ * The v2 change digest (lib/pullDiffDigestCore.ts, owner decision
+ * 2026-11-18): named by a publisher that binds a pull request by it, and by
+ * the app's claim answer (`appFeatures`) when it takes one. A publisher binds
+ * v2 only for an app that names it; an app before it is given the v1 diff
+ * digest it knows.
+ */
+export const ENGINEERING_AGENT_CHANGE_DIGEST_V2_FEATURE = "change_digest_v2";
+/** Every feature this publisher names, in the header's form. */
+export const ENGINEERING_PUBLISHER_FEATURES = [
+  ENGINEERING_PUBLISHER_REVIEW_DRAFT_FEATURE,
+  ENGINEERING_PUBLISHER_PR_RESUME_FEATURE,
+  ENGINEERING_PUBLISHER_PATCH_CHUNKS_FEATURE,
+  ENGINEERING_AGENT_CHANGE_DIGEST_V2_FEATURE,
+].join(",");
+/**
+ * What the app can do for a publisher, named at the top of its claim answer
+ * (`appFeatures`). A publisher reads a patch in chunks only from an app that
+ * names `patch_chunks`, and binds the v2 change digest only for one that
+ * names `change_digest_v2`; an app deployed before a feature does not name it.
+ * A publisher before a feature ignores the key.
+ */
+export const ENGINEERING_AGENT_APP_FEATURES: readonly string[] = [
+  ENGINEERING_PUBLISHER_PATCH_CHUNKS_FEATURE,
+  ENGINEERING_AGENT_CHANGE_DIGEST_V2_FEATURE,
+];
+
+/**
+ * The reasons a lookup gives for a branch with no pull request (§10): the one
+ * a person may answer by approving that the publisher open the pull request.
+ * `pull_request_count` is how a publisher before `branch_without_pull_request`
+ * named the same reading; the publisher checks the commit again either way.
+ */
+export const ENGINEERING_AGENT_PR_RESUMABLE_REASONS = ["branch_without_pull_request", "pull_request_count"] as const;
+/** The publish item's reason while that approval waits for its one claim, and after the claim took it. */
+export const ENGINEERING_AGENT_PR_RESUME_APPROVED_REASON = "pull_request_resume_approved";
+export const ENGINEERING_AGENT_PR_RESUME_CLAIMED_REASON = "pull_request_resume_claimed";
+
+/** The publish item an `unknown:` decision item is about, or null for another kind of decision. */
+export const unknownOutcomeDecisionWorkItemId = (causeKey: string): string | null => {
+  if (!causeKey.startsWith(UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX)) return null;
+  const rest = causeKey.slice(UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX.length);
+  const colon = rest.lastIndexOf(":");
+  if (colon <= 0 || !/^[0-9]+$/.test(rest.slice(colon + 1))) return null;
+  return rest.slice(0, colon);
+};
 
 /** A v22 Task has at most one publication product. A private result is not
  * misreported as a draft, and an owner draft is not misreported as a PR. */
@@ -585,25 +674,43 @@ export const ENGINEERING_AGENT_KILL_SWITCH_ENV = "ENGINEERING_AGENT_KILL_SWITCH"
 
 /**
  * Instants the app keeps beside the switches, each written by one recorded
- * act: the Admin acknowledgement that clears a halt (§12), each
- * service's report that a cycle ran to its end, and the operator's record that
- * both dead-man monitors are active and alerting (the armed gate, §12). An
- * absent or unparseable value is no record at all.
+ * act: the Admin acknowledgement that clears a halt (§12), and each
+ * service's report that a cycle ran to its end (shown in Admin). An absent or
+ * unparseable value is no record at all. The armed gate -- a monitor
+ * confirmation within 7 days and both services finished within 26 hours
+ * before the mode could leave `off` -- is gone (owner decision 2026-11-16).
  */
 export const ENGINEERING_AGENT_HALT_ACKNOWLEDGED_SETTING_KEY = "engineeringAgent.haltAcknowledgedAt";
 export const ENGINEERING_AGENT_RUNNER_LAST_FINISH_SETTING_KEY = "engineeringAgent.runnerLastFinishAt";
 export const ENGINEERING_AGENT_PUBLISHER_LAST_FINISH_SETTING_KEY = "engineeringAgent.publisherLastFinishAt";
-export const ENGINEERING_AGENT_MONITORS_CONFIRMED_SETTING_KEY = "engineeringAgent.monitorsConfirmedAt";
 /**
  * The latest unbound pull request or ref the runner observed outside a run,
- * as `{"halt":"unbound_app_pr","at":"<ISO instant>"}`. It halts like a halt a
- * run recorded, until a person acknowledges it (§12).
+ * as `{"halt":"unbound_app_pr","at":"<ISO instant>","subject":{"prNumber":7}}`.
+ * It halts like a halt a run recorded, until a person acknowledges it or --
+ * owner decision 2026-11-15 -- a later clean reading explains it, which the
+ * store writes as `"clearedAt":"<ISO instant>"` on the same value (§12).
  */
 export const ENGINEERING_AGENT_OBSERVED_HALT_SETTING_KEY = "engineeringAgent.observedHalt";
 
 /** The halts an observation outside a run may record: what only GitHub shows. */
 export const OBSERVABLE_HALTS = ["unbound_app_pr", "unbound_app_ref"] as const;
 export type ObservableHalt = (typeof OBSERVABLE_HALTS)[number];
+
+/** What an unbound reading is about, so the halt names its pull request or branch. */
+export type ObservedHaltSubject = { prNumber: number } | { ref: string };
+const OBSERVED_REF = /^refs\/heads\/[A-Za-z0-9._/-]{1,200}$/;
+/** A subject as the runner reports it, or null when it names nothing this build reads. */
+export const parseObservedHaltSubject = (raw: unknown): ObservedHaltSubject | null => {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const value = raw as Record<string, unknown>;
+  const keys = Object.keys(value);
+  if (keys.length !== 1) return null;
+  if (keys[0] === "prNumber" && Number.isSafeInteger(value.prNumber) && (value.prNumber as number) > 0 &&
+      (value.prNumber as number) <= 2_147_483_647) return { prNumber: value.prNumber as number };
+  if (keys[0] === "ref" && typeof value.ref === "string" && OBSERVED_REF.test(value.ref) &&
+      !value.ref.includes("..")) return { ref: value.ref };
+  return null;
+};
 
 const SETTING_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
 
@@ -651,9 +758,14 @@ export type EffectiveSwitches = {
   maintenanceAllowed: boolean;
 };
 
-/** Anything set other than empty, `0` or `false` engages the kill switch. */
+/**
+ * `enabled` engages the kill switch (the documented value). Production values
+ * from before stay valid: anything set other than empty, `0`, `false` or
+ * `disabled` engages it.
+ */
 export const killSwitchEngaged = (raw: string | null | undefined): boolean =>
-  raw !== undefined && raw !== null && raw !== "" && raw !== "0" && raw.toLowerCase() !== "false";
+  raw !== undefined && raw !== null && raw !== "" && raw !== "0" &&
+  raw.toLowerCase() !== "false" && raw.toLowerCase() !== "disabled";
 
 export const resolveEngineeringAgentSwitches = (
   reading: SwitchReading,
@@ -681,18 +793,14 @@ export const resolveEngineeringAgentSwitches = (
 /* ------------------------------------------------------------------------- */
 
 /**
- * Owner decision 2026-11-09 (§12): 8 pull requests and 8 decisions, with no
- * first-T1 window. An active run counts in both, so 8 runs can be active at
- * once. The run and work item guards hold the same numbers.
+ * The owner queues are counted, never capped (owner decision 2026-11-15:
+ * "내부 개발용 Flow입니다. 제한을 줄 이유가 없습니다"). A full queue stopped
+ * every new claim, so one slow review held every other card; now the counts
+ * only show how much waits on the owner, and nothing in a queue expires. The
+ * run and work item guards no longer count them
+ * (migrations `engineering_agent_run_guard_uncapped`,
+ * `engineering_agent_work_item_guard_uncapped`).
  */
-export const OWNER_QUEUE_LIMITS = {
-  pr: 8,
-  decision: 8,
-} as const;
-export const OWNER_QUEUE_TOTAL = OWNER_QUEUE_LIMITS.pr + OWNER_QUEUE_LIMITS.decision;
-export const QUEUE_TTL_DAYS = { pr: 14, decision: 7 } as const;
-
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 export type QueueReading = {
   /** Bindings with an open PR or a remaining branch. */
@@ -705,18 +813,16 @@ export type QueueReading = {
   pendingDecisions: number;
 };
 
-export type QueueVerdict = {
+export type QueueVerdict = QueueReading & {
   prFull: boolean;
   decisionFull: boolean;
-  /** A card is claimed only when both queues have room (policy §2.1, §12). */
+  /** Always (policy §2.1, §12). */
   claimAllowed: boolean;
 };
 
-export const decideOwnerQueues = (reading: QueueReading): QueueVerdict => {
-  const prFull = reading.openPrBindings >= OWNER_QUEUE_LIMITS.pr;
-  const decisionFull = reading.pendingDecisions >= OWNER_QUEUE_LIMITS.decision;
-  return { prFull, decisionFull, claimAllowed: !prFull && !decisionFull };
-};
+/** The queues are counted, never capped: the counts are carried and a run is always admitted. */
+export const decideOwnerQueues = (reading: QueueReading): QueueVerdict =>
+  ({ ...reading, prFull: false, decisionFull: false, claimAllowed: true });
 
 /* ------------------------------------------------------------------------- */
 /* Halt and circuit                                                           */
@@ -735,7 +841,6 @@ export type HaltValue = (typeof HALT_VALUES)[number];
 export type HaltReading = {
   /** Publisher App bot login and registration time are both configured. */
   appIdentityConfigured: boolean;
-  circuitLatched: boolean;
   unboundAppPrs: number;
   unboundAppRefs: number;
   openStateMismatches: number;
@@ -761,7 +866,6 @@ export const higherHalt = (a: HaltValue, b: HaltValue): HaltValue =>
 
 export const decideHalt = (reading: HaltReading): HaltValue => {
   if (!reading.appIdentityConfigured) return "config_missing";
-  if (reading.circuitLatched) return "circuit_open";
   if (reading.unboundAppPrs > 0) return "unbound_app_pr";
   if (reading.unboundAppRefs > 0) return "unbound_app_ref";
   if (reading.openStateMismatches > 0) return "state_mismatch";
@@ -770,84 +874,103 @@ export const decideHalt = (reading: HaltReading): HaltValue => {
 
 /**
  * What a runner may report when its run ends: the readings only it can make
- * -- the publisher App's identity, unbound App pull requests and refs. A
- * latched circuit and an open state mismatch are the app's to read, never a
- * runner's to assert: one report of `circuit_open` would otherwise latch the
- * circuit without the repeated failures that are its definition (§12).
+ * -- the publisher App's identity, unbound App pull requests and refs. An
+ * open state mismatch is the app's to read, never a runner's to assert.
  */
 export const RUNNER_REPORTABLE_HALTS = ["none", "config_missing", "unbound_app_pr", "unbound_app_ref"] as const;
 export type RunnerReportableHalt = (typeof RUNNER_REPORTABLE_HALTS)[number];
+
+/**
+ * Owner decision 2026-11-15 ("이런 류의 시나리오를 다 커버하는 포괄적인 솔루션으로
+ * 개발하세요 ... AMUX 프로세스가 로컬 CLI를 돌리는 것과 같이 자연스럽게"): what
+ * happens to one agent pull request or one card's run is that card's record,
+ * never the whole agent's. By default
+ *
+ * - an open state mismatch or an orphaned run holds its own card only
+ *   (AMUXFLOW/B2, owner decision 2026-11-14, behind a switch until now);
+ * - a person or the CI auto-fix moving a bound pull request's head -- a push,
+ *   develop merged in, a rebase -- is not an unbound pull request or branch;
+ * - an observed unbound reading clears once a later reading explains it;
+ * - an approver's own merge into develop approves the diff it merged;
+ * - a successful result whose publication could not open is kept and
+ *   published once it can (lib/amux/v22KeptResultPublication.ts), and the
+ *   Decision Maker is never asked to run it again;
+ * - the owner queues are counted, never capped, and nothing in them expires
+ *   and the circuit no longer latches
+ *   (owner direction the same day: "내부 개발용 Flow입니다. 제한을 줄 이유가
+ *   없습니다. 이런 제한을 다 찾아 없애 주세요.").
+ *
+ * Only ENGINEERING_AGENT_GLOBAL_HALTS still halt everything. The
+ * ENGINEERING_AGENT_LEGACY_HALTS switch that restored the earlier behaviour was
+ * removed (owner decision 2026-11-16): a mismatch or an orphaned run holds
+ * only its card.
+ */
+
+/**
+ * The halts that still stop the whole agent (owner decision 2026-11-15): the
+ * security boundaries, where the app can no longer tell its own writes from
+ * anyone else's, and a mismatch with no card to hold. Credential exposure is
+ * the kill switch's and the incident's (§12): a secret found in a patch is
+ * refused before anything is stored, and a leaked key is revoked, not waited
+ * out. Everything not listed here holds one card at most.
+ *
+ * `circuit_open` is not one of them, and nothing writes it any more (owner
+ * decision 2026-11-16): the circuit that latched after three incidents in
+ * thirty days is gone. It stays a known value for the runs that recorded it.
+ */
+export const ENGINEERING_AGENT_GLOBAL_HALTS: Readonly<Record<Exclude<HaltValue, "none" | "circuit_open">, string>> =
+  Object.freeze({
+    config_missing: "the publisher App's identity is not configured, so the app cannot tell its own writes from anyone else's",
+    unbound_app_pr: "a pull request in the agent's namespace that no run, binding or capability accounts for -- a write the app never issued; it clears once a later reading explains it",
+    unbound_app_ref: "a branch in the agent's namespace that no run, binding or capability accounts for -- a write the app never issued; it clears once a later reading explains it",
+    state_mismatch: "only a mismatch bound to no card at all: there is no card to hold instead",
+  });
 
 /**
  * The halt a run ends with: the runner's report combined with what the app
  * holds, in the policy's priority, so a report of `none` can never lower a
  * halt the app can see.
  */
+
 export const combineRunHalt = (input: {
   reported: RunnerReportableHalt;
-  circuitLatched: boolean;
   openStateMismatches: number;
 }): HaltValue =>
   decideHalt({
     appIdentityConfigured: input.reported !== "config_missing",
-    circuitLatched: input.circuitLatched,
     unboundAppPrs: input.reported === "unbound_app_pr" ? 1 : 0,
     unboundAppRefs: input.reported === "unbound_app_ref" ? 1 : 0,
     openStateMismatches: input.openStateMismatches,
   });
 
-export const CIRCUIT_WINDOW_DAYS = 30;
-export const CIRCUIT_INCIDENT_LIMIT = 3;
-
-export type TerminatedRun = {
-  startedAt: Date;
-  endedAt: Date;
-  halt: HaltValue;
-};
+/**
+ * The halts a run's record holds until a person acknowledges it: the
+ * publisher App's identity missing, and a pull request or branch in its
+ * namespace that nothing the agent did accounts for -- the security signals
+ * (owner decision 2026-11-16). A recorded halt holds every new run, so no
+ * later run could clear one; that is why only these hold.
+ *
+ * Any other value a run recorded holds nothing by itself any more: a state
+ * mismatch halts while it is open (the app reads it live, and the next reading
+ * after it is resolved is clean), and `circuit_open` is not written since the
+ * circuit went. Until 2026-11-16 each of them held until acknowledged.
+ */
+export const ACKNOWLEDGEMENT_ONLY_HALTS: readonly HaltValue[] = ["config_missing", "unbound_app_pr", "unbound_app_ref"];
 
 /**
- * Whether the circuit is latched. Runs are counted from the app's own run rows,
- * which a trigger keeps from being edited or deleted.
- *
- * - Runs that started before the last acknowledgement are ignored.
- * - An incident starts at a terminated run whose halt is not `none` and whose
- *   previous terminated run was `none` or does not exist, so one long halt is
- *   one incident rather than one per run.
- * - Three incident starts that ever fell within thirty days of each other since
- *   the acknowledgement latch it, and so does the latest terminated run already
- *   being `circuit_open`.
- *
- * Only an acknowledgement in the Admin console clears it. The passage of time
- * does not: incidents that latched the circuit keep it latched however old they
- * become, which is why this takes no clock.
+ * The halt the recorded runs still hold: of the runs that ended after the
+ * last acknowledgement, the latest whose halt is one of
+ * ACKNOWLEDGEMENT_ONLY_HALTS, or null.
  */
-export const isCircuitLatched = (input: {
-  runs: readonly TerminatedRun[];
+export const heldRunHalt = (input: {
+  runs: ReadonlyArray<{ endedAt: Date; halt: HaltValue }>;
   acknowledgedAt: Date | null;
-}): boolean => {
-  const considered = input.runs
-    .filter(
-      (run) =>
-        input.acknowledgedAt === null ||
-        run.startedAt.getTime() >= input.acknowledgedAt.getTime(),
-    )
-    .slice()
+}): HaltValue | null => {
+  const held = [...input.runs]
+    .filter((run) => ACKNOWLEDGEMENT_ONLY_HALTS.includes(run.halt) &&
+      (input.acknowledgedAt === null || run.endedAt.getTime() > input.acknowledgedAt.getTime()))
     .sort((a, b) => a.endedAt.getTime() - b.endedAt.getTime());
-
-  if (considered.length === 0) return false;
-  if (considered[considered.length - 1].halt === "circuit_open") return true;
-
-  const starts: number[] = [];
-  considered.forEach((run, index) => {
-    if (run.halt === "none") return;
-    const previous = index === 0 ? null : considered[index - 1];
-    if (previous === null || previous.halt === "none") starts.push(run.endedAt.getTime());
-  });
-  const windowMs = CIRCUIT_WINDOW_DAYS * DAY_MS;
-  for (let i = CIRCUIT_INCIDENT_LIMIT - 1; i < starts.length; i += 1) {
-    if (starts[i] - starts[i - (CIRCUIT_INCIDENT_LIMIT - 1)] <= windowMs) return true;
-  }
-  return false;
+  return held.length === 0 ? null : held[held.length - 1].halt;
 };
 
 /**
@@ -878,48 +1001,6 @@ export const shouldSendSuccessHeartbeat = (input: {
   finishedNormally: boolean;
   halt: HaltValue;
 }) => input.finishedNormally && input.halt === "none";
-
-/* ------------------------------------------------------------------------- */
-/* Armed gate                                                                 */
-/* ------------------------------------------------------------------------- */
-
-export const ARMED_GATE_LAST_FINISH_HOURS = 26;
-export const ARMED_GATE_MONITOR_CONFIRMATION_DAYS = 7;
-
-export type ArmedGateReading = {
-  runnerLastFinishAt: Date | null;
-  publisherLastFinishAt: Date | null;
-  /** The operator's record that both monitors are active and alerting. */
-  monitorsConfirmedAt: Date | null;
-  now: Date;
-};
-
-export type ArmedGateVerdict =
-  | { armed: true }
-  | {
-      armed: false;
-      missing: Array<"runner_finish" | "publisher_finish" | "monitor_confirmation">;
-    };
-
-/** Turning the mode on from `off` passes this gate (policy §12). */
-export const decideArmedGate = (reading: ArmedGateReading): ArmedGateVerdict => {
-  const now = reading.now.getTime();
-  const recent = (at: Date | null, ms: number) =>
-    at !== null && now - at.getTime() <= ms && at.getTime() <= now;
-  const missing: Array<"runner_finish" | "publisher_finish" | "monitor_confirmation"> =
-    [];
-  const finishMs = ARMED_GATE_LAST_FINISH_HOURS * 60 * 60 * 1000;
-  if (!recent(reading.runnerLastFinishAt, finishMs)) missing.push("runner_finish");
-  if (!recent(reading.publisherLastFinishAt, finishMs)) {
-    missing.push("publisher_finish");
-  }
-  if (
-    !recent(reading.monitorsConfirmedAt, ARMED_GATE_MONITOR_CONFIRMATION_DAYS * DAY_MS)
-  ) {
-    missing.push("monitor_confirmation");
-  }
-  return missing.length === 0 ? { armed: true } : { armed: false, missing };
-};
 
 /* ------------------------------------------------------------------------- */
 /* What the publisher may write                                               */

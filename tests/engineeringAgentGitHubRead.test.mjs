@@ -12,6 +12,7 @@ import {
   readEngineeringAgentPinnedBaseTree,
   readEngineeringAgentPullObservation,
 } from "../lib/engineeringAgentGitHubRead.ts";
+import { pullChangeDigest } from "../lib/pullDiffDigestCore.ts";
 
 // The app's read-only GitHub view for registration (docs/policy/engineering-
 // agent.md §2.2, §8): one fixed repository, a pinned commit that must be on
@@ -30,6 +31,8 @@ const fakeFetch = (routes) => {
     const handler = routes[path.split("?")[0]];
     if (!handler) return new Response("{}", { status: 404 });
     const answer = handler(path);
+    // Bytes are a raw body (a blob read with `application/vnd.github.raw+json`).
+    if (answer instanceof Uint8Array) return new Response(answer, { status: 200 });
     const withLink = answer !== null && typeof answer === "object" && "link" in answer;
     return new Response(JSON.stringify(withLink ? answer.body : answer), {
       status: 200,
@@ -139,17 +142,34 @@ test("v22 base tree is complete, self-consistent and read from the fixed repo", 
     await assert.rejects(readEngineeringAgentPinnedBaseTree(PIN,
       { env, fetchImpl: movedRoutes(compare) }, { onDevelop: true }),
     /invalid_input/);
-  const blobFetch = fakeFetch({ [`/git/blobs/${blobId}`]: () => ({
-    sha: blobId, encoding: "base64", size: blob.length,
-    content: blob.toString("base64"),
-  }) }).fetchImpl;
+  // A blob is read raw, never as base64 JSON, and must hash to its id.
+  const blobFetch = fakeFetch({ [`/git/blobs/${blobId}`]: () =>
+    Buffer.from(blob) });
   assert.deepEqual(Buffer.from(await readEngineeringAgentGitBlob(blobId,
-    { env, fetchImpl: blobFetch })), blob);
+    { env, fetchImpl: blobFetch.fetchImpl })), blob);
+  assert.equal(blobFetch.seen[0].init.headers.Accept,
+    "application/vnd.github.raw+json");
+  assert.equal(blobFetch.seen[0].init.redirect, "error");
   await assert.rejects(readEngineeringAgentGitBlob(blobId, { env,
-    fetchImpl: fakeFetch({ [`/git/blobs/${blobId}`]: () => ({
-      sha: blobId, encoding: "base64", size: blob.length,
-      content: Buffer.from("wrong").toString("base64"),
-    }) }).fetchImpl }), /invalid_response/);
+    fetchImpl: fakeFetch({ [`/git/blobs/${blobId}`]: () =>
+      Buffer.from("wrong") }).fetchImpl }), /invalid_response/);
+  // A caller's bound is kept while streaming.
+  await assert.rejects(readEngineeringAgentGitBlob(blobId, { env,
+    fetchImpl: blobFetch.fetchImpl }, blob.length - 1), /oversized_response/);
+  await assert.rejects(readEngineeringAgentGitBlob(blobId, { env,
+    fetchImpl: fakeFetch({}).fetchImpl }), /http_error/);
+  // GitHub's own file limit is the ceiling (200 KiB / 2 MiB until 2026-11-15).
+  await assert.rejects(readEngineeringAgentGitBlob(blobId, { env,
+    fetchImpl: blobFetch.fetchImpl }, 100 * 1024 * 1024 + 1), /invalid_input/);
+});
+
+test("a blob larger than the old 200 KiB default is read whole", async () => {
+  const blob = Buffer.alloc(534 * 1024, "x");
+  const blobId = createHash("sha1").update(`blob ${blob.length}\0`)
+    .update(blob).digest("hex");
+  const read = await readEngineeringAgentGitBlob(blobId, { env,
+    fetchImpl: fakeFetch({ [`/git/blobs/${blobId}`]: () => blob }).fetchImpl });
+  assert.equal(read.length, blob.length);
 });
 
 test("develop's checks need the read-only token, and an error carries a code, never upstream text", async () => {
@@ -166,20 +186,26 @@ test("develop's checks need the read-only token, and an error carries a code, ne
   });
 });
 
-test("a page that is not the whole list is refused, not read as the whole", async () => {
+// Owner decision 2026-11-16: a listing longer than one page is read to its end.
+test("check runs are read over every page GitHub links, and a read that does not add up is refused", async () => {
   const head = "d".repeat(40);
-  const one = [{ id: 1, name: "unit", conclusion: "success" }];
-  const cases = [
-    { total_count: 101, check_runs: one },
-    { body: runs(one), link: NEXT },
-  ];
-  for (const answer of cases) {
-    const { fetchImpl } = fakeFetch({
-      "/commits/develop": () => ({ sha: head }),
-      [`/commits/${head}/check-runs`]: () => answer,
-    });
-    await assert.rejects(readEngineeringAgentDevelopChecks({ env, fetchImpl }), /invalid_response/);
-  }
+  const all = Array.from({ length: 230 }, (_, i) => ({ id: i + 1, name: `check-${i}`, conclusion: "success" }));
+  const paged = (list, total = list.length) => (path) => {
+    const page = Number(new URL(`https://x${path}`).searchParams.get("page"));
+    const slice = list.slice((page - 1) * 100, page * 100);
+    return page * 100 < list.length ? { body: { total_count: total, check_runs: slice }, link: NEXT } :
+      { total_count: total, check_runs: slice };
+  };
+  const read = (handler) => readEngineeringAgentDevelopChecks({ env, fetchImpl: fakeFetch({
+    "/commits/develop": () => ({ sha: head }), [`/commits/${head}/check-runs`]: handler }).fetchImpl });
+  const whole = await read(paged(all));
+  assert.equal(whole.checkRuns.length, 230);
+  assert.deepEqual(whole.checkRuns.at(-1), { id: 230, name: "check-229", conclusion: "success" });
+  // GitHub's count says more than the pages held: a run added between pages, say.
+  await assert.rejects(read(paged(all, 231)), /invalid_response/);
+  await assert.rejects(read(() => ({ total_count: 101, check_runs: all.slice(0, 1) })), /invalid_response/);
+  // A next page linked after an empty one is not a listing.
+  await assert.rejects(read(() => ({ body: { total_count: 0, check_runs: [] }, link: NEXT })), /invalid_response/);
 });
 
 /* The approval observer's read of one published pull request (engineering-agent.md §9-10). */
@@ -198,7 +224,7 @@ const pullFetch = (overrides = {}) => {
       typeof overrides.files === "function" ? overrides.files(url) :
         overrides.files ?? [{ filename: "components/chat/Ordinary.tsx",
           status: "modified" }],
-    "/pulls/42/reviews": () => overrides.reviews ?? [
+    "/pulls/42/reviews": (_accept, url) => typeof overrides.reviews === "function" ? overrides.reviews(url) : overrides.reviews ?? [
       { id: 9, user: { id: 60078951, login: "mposition" }, state: "APPROVED", commit_id: HEAD, submitted_at: "2026-10-15T05:30:00Z" },
       { id: 10, user: { id: 60078951, login: "mposition" }, state: "PENDING", commit_id: HEAD },
     ],
@@ -207,6 +233,12 @@ const pullFetch = (overrides = {}) => {
       { id: 1, name: "Fast Gate", conclusion: "failure" }, { id: 2, name: "Fast Gate", conclusion: "success" },
     ]),
     [`/commits/${HEAD}/status`]: () => overrides.status ?? { statuses: [{ context: "status-only", state: "success" }] },
+    // The v2 change digest's reads: the merge base against develop (or, merged, against the merge
+    // commit's first parent) and the head commit's tree.
+    [`/compare/develop...${HEAD}`]: () => overrides.compare ?? { status: "ahead", merge_base_commit: { sha: "2".repeat(40) } },
+    [`/compare/${"4".repeat(40)}...${HEAD}`]: () => ({ status: "diverged", merge_base_commit: { sha: "2".repeat(40) } }),
+    [`/git/commits/${HEAD}`]: () => ({ sha: HEAD, tree: { sha: "5".repeat(40) } }),
+    [`/git/commits/${"3".repeat(40)}`]: () => ({ sha: "3".repeat(40), parents: [{ sha: "4".repeat(40) }, { sha: HEAD }] }),
   };
   return {
     diff,
@@ -222,7 +254,7 @@ const pullFetch = (overrides = {}) => {
   };
 };
 
-test("a published pull request is read with its reviews, required checks and diff digest", async () => {
+test("a published pull request is read with its reviews, required checks and change digest", async () => {
   const { fetchImpl, diff } = pullFetch();
   const observed = await readEngineeringAgentPullObservation(42, { env, fetchImpl });
   assert.equal(observed.state, "open");
@@ -232,7 +264,39 @@ test("a published pull request is read with its reviews, required checks and dif
   assert.deepEqual(observed.requiredChecks, { allPassed: true });
   // A pending review is the reviewer's draft and is not read.
   assert.deepEqual(observed.reviews.map((review) => [review.id, review.login]), [[9, "mposition"]]);
-  assert.equal(observed.diffDigest, createHash("sha256").update(diff).digest("hex"));
+  // v2 (owner decision 2026-11-18): merge base, head and tree. The v1 diff is not read for it.
+  assert.equal(observed.changeDigest,
+    pullChangeDigest({ mergeBaseSha: "2".repeat(40), headSha: "1".repeat(40), headTreeSha: "5".repeat(40) }));
+  assert.equal(observed.diffDigest, null);
+  // A binding made before v2 reads its v1 diff digest too.
+  const legacy = await readEngineeringAgentPullObservation(42, { env, fetchImpl }, { legacyDiff: true });
+  assert.equal(legacy.diffDigest, createHash("sha256").update(diff).digest("hex"));
+  assert.equal(legacy.changeDigest, observed.changeDigest);
+  // develop absorbed part of the branch: a new merge base at the same head is a new digest.
+  const moved = await readEngineeringAgentPullObservation(42, { env, fetchImpl: pullFetch({
+    compare: { status: "diverged", merge_base_commit: { sha: "6".repeat(40) } } }).fetchImpl });
+  assert.notEqual(moved.changeDigest, observed.changeDigest);
+});
+
+test("a diff past the v1 limit, or one GitHub will not render, still has a change digest", async () => {
+  const big = { ...pullFetch() };
+  const fetchImpl = async (url, init) => init.headers.Accept === "application/vnd.github.diff"
+    ? new Response("x", { status: 406 }) : big.fetchImpl(url, init);
+  const observed = await readEngineeringAgentPullObservation(42, { env, fetchImpl }, { legacyDiff: true });
+  assert.equal(observed.diffDigest, null, "a v1 record of it could never have existed");
+  assert.match(observed.changeDigest, /^v2:[0-9a-f]{64}$/);
+});
+
+test("reviews are read over every page GitHub links", async () => {
+  const HEAD = "1".repeat(40);
+  const reviews = Array.from({ length: 150 }, (_, i) => ({ id: i + 1, user: { id: 7, login: "someone" },
+    state: "COMMENTED", commit_id: HEAD, submitted_at: "2026-10-15T05:30:00Z" }));
+  const { fetchImpl } = pullFetch({ reviews: (url) => {
+    const page = Number(new URL(url).searchParams.get("page"));
+    return page === 1 ? { body: reviews.slice(0, 100), link: NEXT } : reviews.slice(100);
+  } });
+  const observed = await readEngineeringAgentPullObservation(42, { env, fetchImpl });
+  assert.equal(observed.reviews.length, 150);
 });
 
 test("a check still running or missing decides nothing; a failed one is a failure", async () => {
@@ -255,11 +319,30 @@ test("a merge is read as its commit, time and merger kind; a merge without them 
   assert.equal(observed.mergedAt.toISOString(), "2026-10-15T06:00:00.000Z");
   assert.equal(observed.mergedByKind, "user");
   assert.deepEqual(observed.changedFiles, ["components/chat/Ordinary.tsx"]);
+  // Merged, develop contains the head: the merge base is read against the merge commit's first
+  // parent, so the digest is the one the open pull request had.
+  assert.equal(observed.changeDigest,
+    pullChangeDigest({ mergeBaseSha: "2".repeat(40), headSha: "1".repeat(40), headTreeSha: "5".repeat(40) }));
   await assert.rejects(
     readEngineeringAgentPullObservation(42, { env, fetchImpl: pullFetch({ pull: { ...merged, merge_commit_sha: null } }).fetchImpl }),
     (error) => error instanceof EngineeringAgentGitHubReadError && error.code === "invalid_response",
   );
   await assert.rejects(readEngineeringAgentPullObservation(0, { env, fetchImpl: pullFetch().fetchImpl }));
+});
+
+test("a merge is an approver's own only when that account merged it as a person", async () => {
+  // Owner decision 2026-11-12: the approver's own merge stands as the approval.
+  const merged = { state: "closed", merged: true, merge_commit_sha: "3".repeat(40), merged_at: "2026-10-15T06:00:00Z" };
+  const read = async (pull) => (await readEngineeringAgentPullObservation(42,
+    { env, fetchImpl: pullFetch({ pull: { ...merged, ...pull } }).fetchImpl })).mergedByApprover;
+  assert.equal(await read({ merged_by: { type: "User", id: 60078951 } }), true);
+  // Another account, no account id, a bot under that id, or a merge made through an app.
+  assert.equal(await read({ merged_by: { type: "User", id: 1 } }), false);
+  assert.equal(await read({ merged_by: { type: "User" } }), false);
+  assert.equal(await read({ merged_by: { type: "Bot", id: 60078951 } }), false);
+  assert.equal(await read({ merged_by: { type: "User", id: 60078951 }, performed_via_github_app: { id: 7 } }), false);
+  // Not merged: nobody merged it.
+  assert.equal((await readEngineeringAgentPullObservation(42, { env, fetchImpl: pullFetch().fetchImpl })).mergedByApprover, false);
 });
 
 test("merged PR file names are complete and include a rename source", async () => {

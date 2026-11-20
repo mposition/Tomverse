@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { mockAuthenticatedApi, openModelPickerCatalogue, prepareGuestPage, type QaConversationMessage } from "./support/app-fixtures";
 import { finishControlledStream, installChatModelStub, mockUserUsage, pushControlledChunk, restoreActiveConversation, setDeterministicTheme, suppressTransientUi, THREE_MODELS, waitForControlledStream } from "./support/chat-state-fixtures";
 import { expectAccessibleContrast, expectTappableInVisibleViewport, openOnScreenKeyboard } from "./support/ui-audit";
+import { renderedWordLineCount } from "./support/text-wrapping";
 
 test.setTimeout(120_000);
 test.beforeEach(async ({}, info) => { test.skip(info.project.name !== "desktop-chromium", "Explicit desktop and phone viewports use one browser engine."); });
@@ -102,6 +103,11 @@ for (const width of [320, 430]) test(`mobile provider selection keeps checkmarks
   const selected = page.locator('.review-participant-list>button[aria-pressed="true"]');
   await expect(selected).toHaveCount(3);
   for (const button of await selected.all()) {
+    const name = button.locator("strong");
+    expect(await renderedWordLineCount(name, (await name.innerText()).trim())).toBe(1);
+    const nameBox = (await name.boundingBox())!;
+    const checkBox = (await button.locator(":scope > svg").boundingBox())!;
+    expect(nameBox.x + nameBox.width).toBeLessThanOrEqual(checkBox.x);
     await expect(button.locator(":scope > svg")).toBeVisible();
     await expect(button).toHaveCSS("box-shadow", /inset/);
   }
@@ -577,6 +583,35 @@ for (const width of [1440, 390]) for (const theme of ["light", "dark"] as const)
     });
   }
 
+test("Easy marks the providers that can draw, from the active image catalogue", async ({ page }) => {
+  // Owner report 2026-11-13: every row read the same, so nothing said which
+  // provider could answer an image request. The badge follows the catalogue.
+  await prepare(page, 1440);
+  await page.locator(".review-participants-heading").click();
+  const row = (name: string) => page.locator(".review-participant-list>button").filter({ has: page.locator("strong", { hasText: new RegExp(`^${name}`) }) });
+  for (const name of ["OpenAI", "Google", "xAI"]) await expect(row(name).getByTestId("review-provider-image-badge")).toHaveText("이미지");
+  await expect(row("Anthropic").getByTestId("review-provider-image-badge")).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+});
+
+test("the Review image card arms image mode on an active model in both modes", async ({ page }) => {
+  // The card is v2's multi-model image entry. Easy sends the sentence to every
+  // selected provider; Professional starts on an active catalogue model, never
+  // a fixed default that may have been disabled.
+  await prepare(page, 1440);
+  await page.locator(".review-image-starter:visible").click();
+  await expect(page.getByTestId("review-image-mode")).toBeVisible();
+  await expect(page.getByTestId("chat-textarea")).not.toHaveValue("");
+  await expect(page.getByTestId("image-generation-prompt")).toHaveCount(0);
+  await page.getByTestId("review-image-mode").getByRole("button").click();
+  await page.getByTestId("chat-textarea").fill("");
+  await page.getByTestId("composer-review-mode").getByRole("button", { name: "전문가", exact: true }).click();
+  await page.locator(".review-image-starter:visible").click();
+  await expect(page.getByTestId("review-image-mode")).toContainText("GPT Image 2");
+  await expect(page.getByTestId("image-generation-prompt")).toHaveCount(0);
+  await expect(page).toHaveURL(/\/review/);
+});
+
 test("Professional image selection stages the composer, then answers inline without automatic routing", async ({ page }) => {
   const calls = await installInlineImageAnswers(page);
   await prepare(page, 1440);
@@ -705,15 +740,16 @@ for (const [width, theme] of [[1600, "light"], [430, "dark"]] as const) {
     };
     const history = await openHistory();
     await history.getByTestId("sidebar-conversation-item").filter({ hasText: "Other Studio task" }).click();
-    await expect(page.getByText("The other task's saved answer.", { exact: true })).toBeVisible();
-    await page.keyboard.press("Escape");
+    // Opening a conversation closes the history drawer by itself.
     await expect(history).toHaveCount(0);
+    await expect(page.getByText("The other task's saved answer.", { exact: true })).toBeVisible();
     await expect(page.getByTestId("chat-textarea")).toBeEnabled();
     await pushControlledChunk(page, "studio-history", "-TWO");
     await expect(page.getByText("STUDIO-PARTIAL-ONE-TWO", { exact: true })).toHaveCount(0);
     const returnHistory = await openHistory();
-    await returnHistory.locator('[data-testid="sidebar-conversation-item"][data-conversation-id="qa-conversation"]').click();
-    await page.keyboard.press("Escape");
+    await returnHistory.locator('[data-testid="sidebar-conversation-item"][data-conversation-id="qa-conversation"]').focus();
+    await page.keyboard.press("Enter");
+    await expect(returnHistory).toHaveCount(0);
     await expect(page.getByText("STUDIO-PARTIAL-ONE-TWO", { exact: true })).toBeVisible();
     await expect(page.getByTestId("chat-textarea")).toBeDisabled();
     await finishControlledStream(page, "studio-history");

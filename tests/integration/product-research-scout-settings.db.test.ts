@@ -52,6 +52,18 @@ test("lowering the cap stops the next reservation, though the caller read the ol
   assert.equal(await prisma.productResearchScoutLlmCall.count(), 1);
 });
 
+test("a reservation that must leave calls free is refused when only the last call is left", async () => {
+  await writeScoutSettings({ modelId: "fixture-model", dailyCallCap: 2, generationDailyCap: 0 }, noAudit);
+  assert.ok("id" in (await startScoutCall({ subject: "home.en", modelId: "fixture-model" })));
+  assert.deepEqual(
+    await startScoutCall({ subject: "scenario.explore", modelId: "fixture-model", keepFree: 1 }),
+    { refused: "daily_cap_reached" },
+    "the scenario would leave nothing to judge its turn",
+  );
+  assert.ok("id" in (await startScoutCall({ subject: "faq.en", modelId: "fixture-model" })), "the last call still serves a judgement");
+  assert.equal(await prisma.productResearchScoutLlmCall.count(), 2);
+});
+
 test("turning the model off, or choosing another, refuses a reservation for the old one", async () => {
   await writeScoutSettings({ modelId: "fixture-model", dailyCallCap: 10, generationDailyCap: 0 }, noAudit);
   await writeScoutSettings({ modelId: null, dailyCallCap: 10, generationDailyCap: 0 }, noAudit);
@@ -92,6 +104,27 @@ test("real generations come from their own cap, as many as it still allows, and 
   // An owner lowering the cap stops the next run; raising it opens only the difference.
   await writeScoutSettings({ modelId: "fixture-model", dailyCallCap: 1, generationDailyCap: 3 }, noAudit);
   assert.deepEqual(await reserveScoutGenerations(asked, noAudit), ["generated.pdf"]);
+});
+
+test("a build's deploy check is granted once, and the next build gets its own", async () => {
+  const previous = process.env.RAILWAY_GIT_COMMIT_SHA;
+  try {
+    await writeScoutSettings({ modelId: "fixture-model", dailyCallCap: 1, generationDailyCap: 5 }, noAudit);
+    process.env.RAILWAY_GIT_COMMIT_SHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    assert.deepEqual(await reserveScoutGenerations(["generated.deploy-check"], noAudit), ["generated.deploy-check"]);
+    assert.deepEqual(await reserveScoutGenerations(["generated.deploy-check"], noAudit), [], "the hourly run does not check the same build twice");
+    assert.deepEqual(await reserveScoutGenerations(["generated.deploy-check", "generated.pdf"], noAudit), ["generated.pdf"],
+      "the daily run skips a checked build and keeps its other permits");
+    process.env.RAILWAY_GIT_COMMIT_SHA = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    assert.deepEqual(await reserveScoutGenerations(["generated.deploy-check"], noAudit), ["generated.deploy-check"], "a new build is checked");
+    assert.equal((await scoutUsageToday()).generations, 3, "each check is a permit from the daily cap");
+    delete process.env.RAILWAY_GIT_COMMIT_SHA;
+    assert.deepEqual(await reserveScoutGenerations(["generated.deploy-check", "generated.pdf"], noAudit), ["generated.pdf"],
+      "with no build commit there is nothing to check once per build");
+  } finally {
+    if (previous === undefined) delete process.env.RAILWAY_GIT_COMMIT_SHA;
+    else process.env.RAILWAY_GIT_COMMIT_SHA = previous;
+  }
 });
 
 test("no permit is granted when nothing would judge the result", async () => {
@@ -178,4 +211,41 @@ test("the test account gets a short session a sign-in would honour; an administr
     }
     await prisma.user.delete({ where: { id: user.id } }).catch(() => {});
   }
+});
+
+test("a daily memory reservation cannot be double-spent or replayed after a failed call", async () => {
+  await writeScoutSettings({ modelId: "fixture-model", dailyCallCap: 2, generationDailyCap: 0 }, noAudit);
+  const day = new Date().toISOString().slice(0, 10);
+  const input = { subject: "memory.continuation.fr", modelId: "fixture-model", onceOnUtcDay: day };
+  const results = await Promise.all(Array.from({length: 6}, () => startScoutCall(input)));
+  const grants = results.filter(x => "id" in x);
+  assert.equal(grants.length, 1);
+  assert.equal(results.filter(x => "refused" in x && x.refused === "already_sampled").length, 5);
+  await prisma.productResearchScoutLlmCall.update({where: {id: grants[0]!.id}, data: {outcome: "failed"}});
+  assert.deepEqual(await startScoutCall(input), {refused: "already_sampled"});
+  assert.deepEqual(await startScoutCall({...input, subject: "memory.continuation.es", onceOnUtcDay: "2000-01-01"}), {refused: "day_changed"});
+  assert.ok("id" in await startScoutCall({...input, subject: "home.en", onceOnUtcDay: day}));
+  assert.deepEqual(await startScoutCall({...input, subject: "memory.continuation.ideas"}), {refused: "daily_cap_reached"});
+});
+
+test("the daily comparison meters Rerank against the selected model cap and publishes a completed trial atomically", async () => {
+  const { storeMemoryTrial, recentMemoryTrials } = await import("@/lib/scoutMemoryExperimentStore");
+  const { experimentCase, armProbe, scoreArm, EXPERIMENT_VERSION, RERANK_MODEL } = await import("@/lib/scoutMemoryExperiment");
+  const modelId="fixture-model",day=new Date().toISOString().slice(0,10);
+  await writeScoutSettings({modelId,dailyCallCap:2,generationDailyCap:0}, noAudit);
+  const reserve={modelId,subject:"memory.continuation.compare.fr.rank",onceOnUtcDay:day,keepFree:1,rerank:true} as const;
+  const results=await Promise.all([startScoutCall(reserve),startScoutCall(reserve)]);
+  assert.equal(results.filter(r=>"id" in r).length,1);
+  const record=await prisma.productResearchScoutLlmCall.findFirstOrThrow({where:{subject:reserve.subject}});
+  assert.equal(record.modelId,RERANK_MODEL);
+  const answer=await startScoutCall({modelId,subject:"memory.continuation.compare.fr.cohere",onceOnUtcDay:day});
+  assert.ok("id" in answer);
+  assert.deepEqual(await startScoutCall({modelId,subject:"other"}),{refused:"daily_cap_reached"});
+  const c=experimentCase(day,"fr","buried");
+  const trial={...scoreArm(c,armProbe(c,"cohere",c.goldOrdinals),JSON.stringify(c.source.gold)),version:EXPERIMENT_VERSION,day,
+    locale:"fr",arm:"cohere",scenario:"buried",sourceDigest:c.digest,model:modelId,measuredAt:new Date().toISOString(),elapsedMs:250,
+    answerMs:200,retrievalMs:50,inputTokens:55,outputTokens:21,rerankTokens:1000,answerMicroUsd:null,retrievalMicroUsd:20} as const;
+  await storeMemoryTrial(trial,answer.id);
+  assert.deepEqual((await recentMemoryTrials()).find(r=>r.sourceDigest===c.digest),trial);
+  assert.equal((await prisma.productResearchScoutLlmCall.findUniqueOrThrow({where:{id:answer.id}})).outcome,"ok");
 });

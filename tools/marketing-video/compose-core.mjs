@@ -12,13 +12,13 @@ import { textsFor } from "./review-core.mjs";
 const toolDir = path.dirname(fileURLToPath(import.meta.url));
 export const ICON_DIR = path.resolve(toolDir, "..", "..", "public", "model-icons");
 
-const dataUrl = (file) => {
+export const dataUrl = (file) => {
   const bytes = readFileSync(file);
   const type = bytes[0] === 0xff ? "image/jpeg" : bytes[0] === 0x52 ? "image/webp" : "image/png";
   return `data:${type};base64,${bytes.toString("base64")}`;
 };
 
-async function withPage(run) {
+export async function withPage(run) {
   const browser = await chromium.launch();
   try {
     const page = await browser.newPage({ deviceScaleFactor: 1 });
@@ -117,7 +117,7 @@ export async function bottomIsDark(input) {
   );
 }
 
-const FONT_FAMILY = {
+export const FONT_FAMILY = {
   en: "'Geist', sans-serif",
   ko: "'Geist', 'Noto Sans KR', sans-serif",
   "zh-Hant": "'Geist', 'Noto Sans TC', sans-serif",
@@ -129,7 +129,7 @@ const inkFor = (hex) => {
   const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
   return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.55 ? "#18181b" : "#ffffff";
 };
-const escapeHtml = (text) => text.replace(/[&<>"']/gu, (ch) => `&#${ch.charCodeAt(0)};`);
+export const escapeHtml = (text) => text.replace(/[&<>"']/gu, (ch) => `&#${ch.charCodeAt(0)};`);
 
 /** Sets the locale's approved words in the boxes of `roles`. Returns how many boxes were set. */
 /**

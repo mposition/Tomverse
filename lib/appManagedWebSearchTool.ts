@@ -45,11 +45,13 @@ import {
 import {
   createAppManagedSearchSession,
   type AppManagedSearchSession,
+  type AppManagedSearchSnapshot,
 } from "@/lib/appManagedWebSearchCore";
 import { utcDateString } from "@/lib/chatCurrentDatePrompt";
 import {
   runWebSearchBackendRequest,
   type WebSearchBackendRequest,
+  type WebSearchBackendResult,
 } from "@/lib/webSearchBackendAdapter";
 
 /**
@@ -78,6 +80,48 @@ const SEARCH_TOOL_DESCRIPTION =
   `At most ${APP_MANAGED_SEARCH_LIMITS.maxQueriesPerRequest} searches ` +
   "are available for this answer; when they run out, answer from what you " +
   "already found and say what you could not confirm.";
+
+// Only used after the answer model's messages actually contain search results.
+const GROUNDED_SEARCH_TOOL_DESCRIPTION =
+  "Web results for this question are already in the conversation. If they support the requested facts, " +
+  "give just those facts and cite their direct URLs. Leave out unrequested background. " +
+  "Use this tool for a specific missing fact, a conflicting or stale result, or a required official source " +
+  "the existing evidence does not supply. Batch independent queries with the same filters in one query array. " +
+  "Use separate calls for different filters or dependent questions. If the remaining searches cannot verify " +
+  "a fact, say what could not be confirmed.";
+
+export function withGroundedSearchDescription(tools: ToolSet, renderedEvidence: string): ToolSet {
+  const search = tools[APP_MANAGED_WEB_SEARCH_TOOL_NAME];
+  if (!search || search.type === "provider") return tools;
+  // A follow-up can also repeat an earlier follow-up, not only the presearch.
+  // Each source remembers the output that first carried it; projections are
+  // cached so re-projecting that output never counts it against itself.
+  const firstCarrier = new Map<string, object>();
+  const projected = new WeakMap<object, ReturnType<typeof describeRepeatedExcerpts>>();
+  return {
+    ...tools,
+    [APP_MANAGED_WEB_SEARCH_TOOL_NAME]: {
+      ...search,
+      description: GROUNDED_SEARCH_TOOL_DESCRIPTION,
+      toModelOutput: ({ output }: { output: AppManagedSearchToolResult | AppManagedSearchBatchResult }) => {
+        let value = projected.get(output);
+        if (!value) {
+          value = describeRepeatedExcerpts(output, source =>
+            renderedEvidence.includes(source) || (firstCarrier.get(source) ?? output) !== output);
+          for (const item of output.status === "batch" ? output.searches : [output]) {
+            if (item.status !== "ok") continue;
+            for (const source of item.results ?? []) {
+              const key = JSON.stringify(source);
+              if (!firstCarrier.has(key)) firstCarrier.set(key, output);
+            }
+          }
+          projected.set(output, value);
+        }
+        return { type: "json" as const, value };
+      },
+    },
+  };
+}
 
 /**
  * The tool's input.
@@ -165,17 +209,40 @@ const UNTRUSTED_NOTICE =
  * know today's date reads a page about last year's festival as this year's;
  * stated next to the results, the comparison is in front of it.
  */
-const resultNotice = (now: Date) =>
-  `Searched on ${utcDateString(now)} (UTC). Compare each result's ` +
+const DATE_GUIDANCE = "Compare each result's " +
   "publishedAt and the dates in its text with this date: a page about an " +
   "earlier year's event is not about this year, and a forecast for another " +
-  "day is not today's. " +
-  UNTRUSTED_NOTICE;
+  "day is not today's. ";
+const resultNotice = (now: Date) => `Searched on ${utcDateString(now)} (UTC). ${DATE_GUIDANCE}${UNTRUSTED_NOTICE}`;
+
+function describeRepeatedExcerpts(
+  result: AppManagedSearchToolResult | AppManagedSearchBatchResult,
+  alreadySupplied: (serializedSource: string) => boolean,
+) {
+  const searches = result.status === "batch" ? result.searches : [result];
+  // The presearch serializer embeds each whole source object as JSON, including
+  // in its compact form. Quoted snippets are escaped and cannot match an object.
+  if (!searches.length || !searches.every(search => search.status === "ok" && search.results?.length &&
+    search.results.every(source => alreadySupplied(JSON.stringify(source))))) return result;
+
+  const markRepeated = (search: AppManagedSearchToolResult) => ({
+    ...search,
+    notice: search.notice?.replace(DATE_GUIDANCE,
+      "Check dates. All excerpts already appeared unchanged. Cite only URLs in this turn's evidence. If a requested fact is unavailable, say so without guessing a link. "),
+  });
+  return result.status === "batch"
+    ? { ...result, searches: result.searches.map(markRepeated) }
+    : markRepeated(result);
+}
 
 export type AppManagedWebSearchToolConfig = {
   tools: ToolSet;
+  search: (input: z.infer<typeof searchToolInputSchema>) => Promise<AppManagedSearchToolResult | AppManagedSearchBatchResult>;
+  /** Returns an already-read projection only if some excerpts were enriched. */
+  serializeOriginalDescriptions?: (result: AppManagedSearchToolResult | AppManagedSearchBatchResult) => string | undefined;
   /** The counter and collected sources. Read after the turn settles. */
   session: AppManagedSearchSession;
+  successfulCacheSnapshot?: () => Promise<Array<{ key: string; result: AppManagedSearchToolResult }>>;
 };
 
 /**
@@ -189,6 +256,9 @@ export const buildAppManagedWebSearchTool = (input: {
   backend: WebSearchBackend;
   /** The ceiling from the capability the reservation was sized on. */
   maxQueries: number;
+  initialSnapshot?: AppManagedSearchSnapshot;
+  /** Successful, completed tool results only; pending calls are never replayed. */
+  initialSuccessfulCache?: readonly { key: string; result: AppManagedSearchToolResult }[];
   /** Aborts an in-flight backend request when the turn ends. */
   signal?: AbortSignal;
   /**
@@ -197,6 +267,14 @@ export const buildAppManagedWebSearchTool = (input: {
    */
   defaultCountry?: string;
   defaultSearchLang?: string;
+  /** Owned by the server; the model cannot change it for a tool call. */
+  extraSnippets?: boolean;
+  /** Refuse a new backend dispatch after a terminal Research report wins. */
+  canDispatch?: () => boolean;
+  /** Project the bounded result before it is returned to the model. */
+  transformResult?: (
+    result: AppManagedSearchToolResult | AppManagedSearchBatchResult
+  ) => AppManagedSearchToolResult | AppManagedSearchBatchResult;
   /** Structured observation. Never given the query text. */
   onOutcome?: (event: {
     status: AppManagedSearchToolResult["status"];
@@ -212,142 +290,182 @@ export const buildAppManagedWebSearchTool = (input: {
   const session = createAppManagedSearchSession({
     backend: input.backend,
     maxQueries: input.maxQueries,
+    initialSnapshot: input.initialSnapshot,
   });
   // Attempt-local single flight: identical concurrent calls share one backend
   // request and one settlement. Only successful results remain reusable.
   const requests = new Map<string, Promise<AppManagedSearchToolResult>>();
+  for (const entry of input.initialSuccessfulCache ?? []) {
+    if (entry.result.status !== "ok" || requests.size >= input.maxQueries) throw new Error("Invalid Research query cache");
+    requests.set(entry.key, Promise.resolve(entry.result));
+  }
+  const originalResults = input.extraSnippets === true
+    ? new WeakMap<WebSearchBackendResult[], WebSearchBackendResult[]>() : undefined;
   let toolCallIndex = 0;
 
-  return {
-    session,
-    tools: {
-      [APP_MANAGED_WEB_SEARCH_TOOL_NAME]: tool({
-        description: SEARCH_TOOL_DESCRIPTION,
-        inputSchema: searchToolInputSchema,
-        execute: async (raw): Promise<AppManagedSearchToolResult | AppManagedSearchBatchResult> => {
-          const startedAt = Date.now();
-          const callIndex = ++toolCallIndex;
-          const batchSize = Array.isArray(raw?.query) ? raw.query.length : 1;
-          const report = (
-            result: AppManagedSearchToolResult,
-            queryLength: number,
-            reused = false
-          ) => {
-            input.onOutcome?.({
-              status: result.status,
-              ...(result.reason ? { reason: result.reason } : {}),
-              queryLength,
-              resultCount: result.results?.length ?? 0,
-              durationMs: Date.now() - startedAt,
-              reused,
-              toolCallIndex: callIndex,
-              batchSize,
-            });
-            return result;
-          };
+  const search: AppManagedWebSearchToolConfig["search"] = async (raw) => {
+    const startedAt = Date.now();
+    const callIndex = ++toolCallIndex;
+    const batchSize = Array.isArray(raw?.query) ? raw.query.length : 1;
+    const report = (
+      result: AppManagedSearchToolResult,
+      queryLength: number,
+      reused = false
+    ) => {
+      input.onOutcome?.({
+        status: result.status,
+        ...(result.reason ? { reason: result.reason } : {}),
+        queryLength,
+        resultCount: result.results?.length ?? 0,
+        durationMs: Date.now() - startedAt,
+        reused,
+        toolCallIndex: callIndex,
+        batchSize,
+      });
+      return result;
+    };
 
-          if (Array.isArray(raw?.query) && (batchSize === 0 || batchSize > APP_MANAGED_SEARCH_LIMITS.maxQueriesPerRequest)) {
-            session.recordRefusal("invalid_query");
-            return report({ status: "invalid_query", reason: "invalid_batch_size", searchesRemaining: session.remaining() }, 0);
-          }
+    if (input.canDispatch && !input.canDispatch()) {
+      const refused: AppManagedSearchToolResult = {
+        status: "failed",
+        reason: "terminal_report_accepted",
+        searchesRemaining: session.remaining(),
+      };
+      return input.transformResult?.(refused) ?? refused;
+    }
+    if (Array.isArray(raw?.query) && (batchSize === 0 || batchSize > APP_MANAGED_SEARCH_LIMITS.maxQueriesPerRequest)) {
+      session.recordRefusal("invalid_query");
+      return report({ status: "invalid_query", reason: "invalid_batch_size", searchesRemaining: session.remaining() }, 0);
+    }
 
-          const runQuery = async (query: unknown): Promise<AppManagedSearchToolResult> => {
-            // Validation first, and deliberately before the claim: a query this
-            // application will not send costs nothing, so spending one of the
-            // turn's five on it would be charging for a request that never
-            // existed. The model can rewrite and try again at no cost.
-            const validated = validateSearchQuery(query);
-            if (!validated.ok) {
-              session.recordRefusal("invalid_query");
-              return report(
-                {
-                  status: "invalid_query",
-                  reason: validated.reason,
-                  searchesRemaining: session.remaining(),
-                },
-                typeof query === "string" ? query.length : 0
-              );
-            }
-
-            const request: WebSearchBackendRequest = {
-              query: validated.query,
-              ...(raw.country || input.defaultCountry
-                ? { country: raw.country ?? input.defaultCountry }
-                : {}),
-              ...(raw.searchLang || input.defaultSearchLang
-                ? { searchLang: raw.searchLang ?? input.defaultSearchLang }
-                : {}),
-              ...(raw.freshness ? { freshness: raw.freshness } : {}),
-              ...(input.signal ? { signal: input.signal } : {}),
-            };
-            const key = JSON.stringify([
-              request.query, request.country, request.searchLang, request.freshness,
-            ]);
-            const existing = requests.get(key);
-            if (existing) {
-              const result = await existing;
-              return report({ ...result, searchesRemaining: session.remaining() }, validated.query.length, true);
-            }
-
-            const claim = session.claim();
-            if (!claim.ok) {
-              session.recordRefusal("query_limit_reached");
-              // No socket is opened on this path. That is the property the whole
-              // reservation rests on, and `tests/appManagedWebSearchTool` asserts
-              // it by counting fetches rather than by reading this branch.
-              return report(
-                {
-                  status: "limit_reached",
-                  query: validated.query,
-                  reason: "query_limit_reached",
-                  searchesRemaining: 0,
-                },
-                validated.query.length
-              );
-            }
-
-            const pending = (async (): Promise<AppManagedSearchToolResult> => {
-              const outcome = await runWebSearchBackendRequest(input.backend, request);
-              if (!outcome.ok) {
-                session.recordFailure(outcome.failure);
-                return {
-                  status: "failed",
-                  query: validated.query,
-                  reason: outcome.failure,
-                  searchesRemaining: session.remaining(),
-                };
-              }
-              session.recordSuccess(outcome.results);
-              return {
-                status: "ok",
-                query: validated.query,
-                searchesRemaining: session.remaining(),
-                results: outcome.results,
-                notice: resultNotice(new Date()),
-                ...(outcome.truncated ? { truncated: true } : {}),
-              };
-            })();
-            requests.set(key, pending);
-            try {
-              const result = await pending;
-              if (result.status !== "ok") requests.delete(key);
-              return report({ ...result, searchesRemaining: session.remaining() }, validated.query.length);
-            } catch (error) {
-              requests.delete(key);
-              throw error;
-            }
-          };
-          if (!Array.isArray(raw?.query)) return runQuery(raw?.query);
-          // Claims happen synchronously before the first await, across this
-          // batch AND other concurrent calls. The existing attempt cap applies.
-          const searches = await Promise.all(raw.query.map(runQuery));
-          return {
-            status: "batch",
+    const runQuery = async (query: unknown): Promise<AppManagedSearchToolResult> => {
+      // Validation first, and deliberately before the claim: a query this
+      // application will not send costs nothing, so spending one of the
+      // turn's five on it would be charging for a request that never
+      // existed. The model can rewrite and try again at no cost.
+      const validated = validateSearchQuery(query);
+      if (!validated.ok) {
+        session.recordRefusal("invalid_query");
+        return report(
+          {
+            status: "invalid_query",
+            reason: validated.reason,
             searchesRemaining: session.remaining(),
-            searches: searches.map(result => ({ ...result, searchesRemaining: session.remaining() })),
+          },
+          typeof query === "string" ? query.length : 0
+        );
+      }
+
+      const request: WebSearchBackendRequest = {
+        query: validated.query,
+        ...(raw.country || input.defaultCountry
+          ? { country: raw.country ?? input.defaultCountry }
+          : {}),
+        ...(raw.searchLang || input.defaultSearchLang
+          ? { searchLang: raw.searchLang ?? input.defaultSearchLang }
+          : {}),
+        ...(raw.freshness ? { freshness: raw.freshness } : {}),
+        ...(input.extraSnippets === true ? { extraSnippets: true } : {}),
+        ...(input.signal ? { signal: input.signal } : {}),
+      };
+      const key = JSON.stringify([
+        request.query, request.country, request.searchLang, request.freshness,
+      ]);
+      const existing = requests.get(key);
+      if (existing) {
+        const result = await existing;
+        return report({ ...result, searchesRemaining: session.remaining() }, validated.query.length, true);
+      }
+
+      if (input.signal?.aborted) return report({
+        status: "failed", reason: "backend_timeout", searchesRemaining: session.remaining(),
+      }, validated.query.length);
+      const claim = session.claim();
+      if (!claim.ok) {
+        session.recordRefusal("query_limit_reached");
+        // No socket is opened on this path. That is the property the whole
+        // reservation rests on, and `tests/appManagedWebSearchTool` asserts
+        // it by counting fetches rather than by reading this branch.
+        return report(
+          {
+            status: "limit_reached",
+            query: validated.query,
+            reason: "query_limit_reached",
+            searchesRemaining: 0,
+          },
+          validated.query.length
+        );
+      }
+
+      const pending = (async (): Promise<AppManagedSearchToolResult> => {
+        const outcome = await runWebSearchBackendRequest(input.backend, request);
+        if (!outcome.ok) {
+          session.recordFailure(outcome.failure);
+          return {
+            status: "failed",
+            query: validated.query,
+            reason: outcome.failure,
+            searchesRemaining: session.remaining(),
           };
-        },
-      }),
-    },
+        }
+        session.recordSuccess(outcome.results);
+        if (outcome.descriptionOnlyResults) originalResults?.set(outcome.results, outcome.descriptionOnlyResults);
+        return {
+          status: "ok",
+          query: validated.query,
+          searchesRemaining: session.remaining(),
+          results: outcome.results,
+          notice: resultNotice(new Date()),
+          ...(outcome.truncated ? { truncated: true } : {}),
+        };
+      })();
+      requests.set(key, pending);
+      try {
+        const result = await pending;
+        if (result.status !== "ok") requests.delete(key);
+        return report({ ...result, searchesRemaining: session.remaining() }, validated.query.length);
+      } catch (error) {
+        requests.delete(key);
+        throw error;
+      }
+    };
+    if (!Array.isArray(raw?.query)) {
+      const result = await runQuery(raw?.query);
+      return input.transformResult?.(result) ?? result;
+    }
+    // Claims happen synchronously before the first await, across this
+    // batch AND other concurrent calls. The existing attempt cap applies.
+    const searches = await Promise.all(raw.query.map(runQuery));
+    const result: AppManagedSearchBatchResult = {
+      status: "batch",
+      searchesRemaining: session.remaining(),
+      searches: searches.map(result => ({ ...result, searchesRemaining: session.remaining() })),
+    };
+    return input.transformResult?.(result) ?? result;
   };
+  // Only the presearch sizer can ask for this view. SDK tool output and the
+  // request cache continue to carry the enriched results and no metadata.
+  const serializeOriginalDescriptions = originalResults ? (result: AppManagedSearchToolResult | AppManagedSearchBatchResult) => {
+    let changed = false;
+    const restore = (search: AppManagedSearchToolResult) => {
+      const original = search.results && originalResults.get(search.results);
+      if (!original) return search;
+      changed = true;
+      return { ...search, results: original };
+    };
+    const projection = result.status === "batch" ? { ...result, searches: result.searches.map(restore) } : restore(result);
+    return changed ? JSON.stringify(projection) : undefined;
+  } : undefined;
+  return { session, search,
+    successfulCacheSnapshot: async () => {
+      const entries = await Promise.all([...requests].map(async ([key, pending]) => ({ key, result: await pending })));
+      return entries.filter((entry) => entry.result.status === "ok");
+    },
+    ...(serializeOriginalDescriptions ? { serializeOriginalDescriptions } : {}), tools: {
+    [APP_MANAGED_WEB_SEARCH_TOOL_NAME]: tool({
+      description: SEARCH_TOOL_DESCRIPTION,
+      inputSchema: searchToolInputSchema,
+      execute: search,
+    }),
+  } };
 };

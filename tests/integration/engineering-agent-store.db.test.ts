@@ -2,24 +2,35 @@ import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
 
+import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
 import { SYSTEM_AUDIT_ACTOR_METADATA_KEY } from "@/lib/adminAuditSystemActors";
-import { OWNER_QUEUE_LIMITS, unknownOutcomeDecisionCauseKey } from "@/lib/engineeringAgentCore";
+import { unknownOutcomeDecisionCauseKey } from "@/lib/engineeringAgentCore";
+
+/** The size of the owner queue cap that existed before owner decision 2026-11-15. */
+const OWNER_QUEUE_LEGACY_LIMITS = { pr: 8, decision: 8 } as const;
 import {
   ENGINEERING_AGENT_AUDIT_ACTIONS,
+  ENGINEERING_AGENT_LEGACY_INLINE_PATCH_MAX_BYTES,
+  ENGINEERING_AGENT_PATCH_CHUNK_BYTES,
   EngineeringAgentStoreRefusedError,
   acceptEngineeringAgentRequest,
   acknowledgeEngineeringAgentDecision,
   acknowledgeEngineeringAgentHalt,
+  approveEngineeringAgentPullRequestResume,
   currentEngineeringAgentHalt,
+  clearEngineeringAgentObservedHalt,
   recordEngineeringAgentObservedHalt,
   readEngineeringAgentKnownPublishes,
   readEngineeringAgentHaltState,
+  readEngineeringAgentPublishPatchChunk,
   claimEngineeringAgentWorkItem,
   claimNextEngineeringAgentPublishWork,
   decideEngineeringAgentT2Draft,
   endEngineeringAgentRun,
+  rejudgeEngineeringAgentV22Draft,
+  rejudgeEngineeringAgentV22DraftsAfterDeploy,
   heartbeatEngineeringAgentRun,
   issueEngineeringAgentCapability,
   moveEngineeringAgentBinding,
@@ -28,7 +39,6 @@ import {
   recordEngineeringAgentBinding,
   recordEngineeringAgentBindingObservation,
   readEngineeringAgentOwnerQueues,
-  recordEngineeringAgentMonitorsConfirmed,
   recordEngineeringAgentRunStart,
   recordEngineeringAgentServiceFinish,
   removeEngineeringAgentReviewer,
@@ -105,8 +115,35 @@ const waitingWithoutCapability = (workItemId: string) =>
 const refusedWith = async (promise: Promise<unknown>, code: string) =>
   assert.rejects(promise, (error: unknown) => error instanceof EngineeringAgentStoreRefusedError && error.code === code, code);
 
-const amuxAttempt = async () => {
-  const task = await prisma.amuxWorkItem.create({
+/** A v4 idea Task (its run is a v22 run), seeded with triggers off as the
+ * v22 result-review suite seeds one; its sealed fields are synthetic. */
+const seedV4Task = async () => {
+  const id = randomUUID();
+  const digest = "a".repeat(64);
+  const cipher = Buffer.from("synthetic-only", "utf8");
+  const now = new Date();
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe("SET LOCAL session_replication_role = replica");
+    await tx.$executeRaw`
+      INSERT INTO "AmuxWorkItem" ("id", "title", "status", "revision", "sourceSystem", "sourceKey",
+        "sourceVersion", "sourceDigest", "sourceSnapshot", "cardType", "parentFeatureNodeId",
+        "v4TitleCiphertext", "v4TitleKeyId", "v4TitleKeyVersion", "v4TitleDigest", "v4TitleDigestKeyId",
+        "v4BodyCiphertext", "v4BodyKeyId", "v4BodyKeyVersion", "v4BodyDigest", "v4BodyDigestKeyId",
+        "v4BriefCiphertext", "v4BriefKeyId", "v4BriefKeyVersion", "v4BriefDigest", "v4BriefDigestKeyId",
+        "v4SourceApprovalId", "v22ReceiptId", "taskRole", "executionGrade", "displayKey", "createdAt", "updatedAt")
+      VALUES (${id}, 'AMUX Task', 'review', 2, 'admin-idea-v4', ${id.toUpperCase()}, '1', ${digest},
+        ${JSON.stringify({ schemaVersion: "amux-v4", ideaId: randomUUID(), approvalId: randomUUID() })}::jsonb,
+        'task', ${randomUUID()}, ${cipher}, 'synthetic', 1, ${digest}, 'synthetic', ${cipher},
+        'synthetic', 1, ${digest}, 'synthetic', ${cipher}, 'synthetic', 1, ${digest}, 'synthetic',
+        ${randomUUID()}, ${randomUUID()}::uuid, 'implement', 'routine',
+        ${`AMUX-EA${randomUUID().replaceAll("-", "").slice(0, 8).toUpperCase()}-001`}, ${now}, ${now})`;
+    await tx.$executeRawUnsafe("SET LOCAL session_replication_role = origin");
+  });
+  return prisma.amuxWorkItem.findUniqueOrThrow({ where: { id } });
+};
+
+const amuxAttempt = async (v4 = false) => {
+  const task = v4 ? await seedV4Task() : await prisma.amuxWorkItem.create({
     data: {
       id: `eng-agent-card-${randomUUID()}`,
       title: "Engineering agent store fixture",
@@ -119,12 +156,13 @@ const amuxAttempt = async () => {
       reviewPrNumber: 1706,
     },
   });
-  fixtureTaskIds.push(task.id);
+  // A v4 Task is left as seeded: archiving it would run the v22 triggers.
+  if (!v4) fixtureTaskIds.push(task.id);
   const now = new Date();
   // An attempt still running: a run on an attempt AMUX has already ended is
   // an orphaned run, and that halts the agent (§11) -- which is not what these
   // tests are about.
-  const attempt = await prisma.amuxExecutionAttempt.create({
+  const create = (tx: Prisma.TransactionClient) => tx.amuxExecutionAttempt.create({
     data: {
       id: `eng-agent-attempt-${randomUUID()}`,
       taskId: task.id,
@@ -138,11 +176,18 @@ const amuxAttempt = async () => {
       leaseExpiresAt: new Date(now.getTime() + 60 * 60_000),
     },
   });
+  // A v4 Task's attempt is bound to a worker assignment this suite has none of.
+  const attempt = v4 ? await prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe("SET LOCAL session_replication_role = replica");
+    const row = await create(tx);
+    await tx.$executeRawUnsafe("SET LOCAL session_replication_role = origin");
+    return row;
+  }) : await create(prisma);
   return { task, attempt };
 };
 
-const startRun = async () => {
-  const { task, attempt } = await amuxAttempt();
+const startRun = async (v4 = false) => {
+  const { task, attempt } = await amuxAttempt(v4);
   const runId = nextRunId();
   const started = await inTx((tx) =>
     recordEngineeringAgentRunStart(tx, {
@@ -268,8 +313,8 @@ const commitFields = (runId: string, cardRef: string) => ({
 });
 
 /** A run whose patch settled as a `tier_pending` draft, the run then ended as settlement ends it. */
-const pendingDraftFor = async (seed: string) => {
-  const run = await startRun();
+const pendingDraftFor = async (seed: string, v4 = false) => {
+  const run = await startRun(v4);
   const patch = { text: seed, sha256: sha256(seed), baseSha: sha1("base") };
   const draft = await inTx((tx) => openEngineeringAgentV22Product(tx, {
     runId: run.runId, patch, tierPending: true,
@@ -332,13 +377,11 @@ test("a v22 draft settled before its tier is promoted to its run's one publish i
     expectedTreeId: sha1("tree"),
   })), /a run has one product/);
 
-  // With the promoted publish item and active runs in every other place,
-  // the pull request queue is full: a second promotion waits.
+  // Owner decision 2026-11-15: with the promoted publish item and more active
+  // runs than the old cap of 8, the pull request queue is still never full.
   const fillers = [];
-  while (fillers.length < OWNER_QUEUE_LIMITS.pr - 1) fillers.push(await startRun());
-  await assert.rejects(inTx((tx) =>
-    resolveEngineeringAgentV22Product(tx, promotionInput(waiting))),
-  /the owner queue is full/);
+  while (fillers.length < OWNER_QUEUE_LEGACY_LIMITS.pr) fillers.push(await startRun());
+  assert.equal((await readEngineeringAgentOwnerQueues(prisma)).prFull, false);
   assert.equal((await prisma.engineeringAgentWorkItem.findUniqueOrThrow({
     where: { id: waiting.draft.id } })).reason, "tier_pending");
   for (const run of fillers) {
@@ -368,6 +411,107 @@ test("a v22 draft settled before its tier is promoted to its run's one publish i
   }));
 });
 
+test("a person sends a kept v22 draft back to the tier round, once, bound to what they saw", async () => {
+  const v22 = await pendingDraftFor("kept v22 patch", true);
+  const legacy = await pendingDraftFor("kept legacy patch");
+  for (const pending of [v22, legacy]) {
+    assert.deepEqual(await inTx((tx) => resolveEngineeringAgentV22Product(tx,
+      { ...promotionInput(pending), reason: "patch_unavailable", candidate: null })),
+    { kept: true });
+  }
+  const input = { session: owner, workItemId: v22.draft.id,
+    patchDigest: v22.patch.sha256, baseSha: v22.patch.baseSha };
+  await refusedWith(inTx((tx) => rejudgeEngineeringAgentV22Draft(tx,
+    { ...input, patchDigest: sha256("other") })), "draft_changed");
+  await refusedWith(inTx((tx) => rejudgeEngineeringAgentV22Draft(tx, {
+    session: owner, workItemId: legacy.draft.id,
+    patchDigest: legacy.patch.sha256, baseSha: legacy.patch.baseSha,
+  })), "draft_not_v22");
+
+  const { auditLogId } = await inTx((tx) => rejudgeEngineeringAgentV22Draft(tx, input));
+  const pending = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({
+    where: { id: v22.draft.id } });
+  assert.deepEqual([pending.state, pending.reason], ["open", "tier_pending"]);
+  const audit = await prisma.adminAuditLog.findUniqueOrThrow({ where: { id: auditLogId } });
+  assert.deepEqual([audit.action, audit.actorUserId, audit.targetId],
+    [ENGINEERING_AGENT_AUDIT_ACTIONS.v22DraftRejudged, owner.user.id, v22.draft.id]);
+  assert.equal((audit.metadata as Record<string, unknown>).previousReason,
+    "patch_unavailable");
+  // Pending again, it is the tier round's to judge, not the person's twice.
+  await refusedWith(inTx((tx) => rejudgeEngineeringAgentV22Draft(tx, input)),
+    "draft_already_pending");
+  assert.deepEqual(await inTx((tx) => resolveEngineeringAgentV22Product(tx,
+    { ...promotionInput(v22), candidate: null })), { kept: true });
+  for (const kept of [v22, legacy]) {
+    await inTx((tx) => decideEngineeringAgentT2Draft(tx, {
+      session: owner, workItemId: kept.draft.id, decision: "rejected",
+      patchDigest: kept.patch.sha256, baseSha: kept.patch.baseSha,
+    }));
+  }
+  await refusedWith(inTx((tx) => rejudgeEngineeringAgentV22Draft(tx, input)),
+    "draft_not_open");
+});
+
+// Owner decision 2026-11-15: a draft the tier round kept for a reason the next
+// build may answer is judged again after a deploy, without a person.
+test("after a deploy the drafts an earlier build kept go back to the tier round once, as the system", async () => {
+  const sweep = (before: Date) => inTx((tx) =>
+    rejudgeEngineeringAgentV22DraftsAfterDeploy(tx, { before, limit: 100 }));
+  const later = () => new Date(Date.now() + 60_000);
+  const close = async (pending: Awaited<ReturnType<typeof pendingDraftFor>>) =>
+    inTx((tx) => decideEngineeringAgentT2Draft(tx, {
+      session: owner, workItemId: pending.draft.id, decision: "rejected",
+      patchDigest: pending.patch.sha256, baseSha: pending.patch.baseSha,
+    }));
+  // Two at a time: the owner queue holds eight, runs included.
+  for (const [[first, firstReason, firstSent], [second, secondReason, secondSent]] of [
+    [["kept unbuilt patch", "base_blob_missing", true], ["kept judged patch", "tier_two", false]],
+    [["kept evidence patch", "tier_evidence_unavailable", true], ["kept secret patch", "secret_detected", false]],
+  ] as const) {
+    const one = await pendingDraftFor(first, true);
+    const two = await pendingDraftFor(second, true);
+    for (const [pending, reason] of [[one, firstReason], [two, secondReason]] as const) {
+      assert.deepEqual(await inTx((tx) => resolveEngineeringAgentV22Product(tx,
+        { ...promotionInput(pending), reason, candidate: null })), { kept: true });
+    }
+    const ours = [one.draft.id, two.draft.id];
+    // A process that started after these were kept leaves them as they are.
+    assert.deepEqual((await sweep(new Date(Date.now() - 60 * 60_000))).workItemIds
+      .filter((id) => ours.includes(id)), []);
+    // One that started before sends back only what the next build may answer:
+    // never a T2 verdict, never a secret.
+    const sent = (await sweep(later())).workItemIds.filter((id) => ours.includes(id));
+    assert.deepEqual(sent, [...(firstSent ? [one.draft.id] : []),
+      ...(secondSent ? [two.draft.id] : [])]);
+    for (const [pending, reason, wasSent] of [[one, firstReason, firstSent],
+      [two, secondReason, secondSent]] as const) {
+      const row = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({
+        where: { id: pending.draft.id } });
+      assert.deepEqual([row.state, row.reason], ["open", wasSent ? "tier_pending" : reason]);
+      if (!wasSent) continue;
+      const audit = await prisma.adminAuditLog.findFirstOrThrow({
+        where: { action: ENGINEERING_AGENT_AUDIT_ACTIONS.v22DraftRejudged,
+          targetId: pending.draft.id } });
+      assert.equal(audit.actorUserId, null);
+      const metadata = audit.metadata as Record<string, unknown>;
+      assert.equal(metadata[SYSTEM_AUDIT_ACTOR_METADATA_KEY], "engineering-agent-runner");
+      assert.equal(metadata.previousReason, reason);
+      assert.equal(metadata.trigger, "deploy");
+    }
+    // Pending, none is sent back again.
+    assert.deepEqual((await sweep(later())).workItemIds.filter((id) => ours.includes(id)), []);
+    await close(one);
+    await close(two);
+  }
+  // A legacy run's draft is not a v22 draft the button could send back.
+  const legacy = await pendingDraftFor("kept legacy patch");
+  assert.deepEqual(await inTx((tx) => resolveEngineeringAgentV22Product(tx,
+    { ...promotionInput(legacy), reason: "base_blob_missing", candidate: null })),
+  { kept: true });
+  assert.ok(!(await sweep(later())).workItemIds.includes(legacy.draft.id));
+  await close(legacy);
+});
+
 test("a T2 draft promoted for the owner's review opens a review item only a review-draft publisher writes", async () => {
   const pending = await pendingDraftFor("owner review patch");
   const resolved = await inTx((tx) => resolveEngineeringAgentV22Product(tx, {
@@ -392,7 +536,8 @@ test("a T2 draft promoted for the owner's review opens a review item only a revi
     process.env.ENGINEERING_AGENT_V22_REVIEW_PR = "on";
     assert.equal(await claimNext(), null, "a publisher that does not open drafts never writes it");
     assert.equal(await claimNext(false), null);
-    delete process.env.ENGINEERING_AGENT_V22_REVIEW_PR;
+    // On by default since owner decision 2026-11-15; exactly `off` turns it off.
+    process.env.ENGINEERING_AGENT_V22_REVIEW_PR = "off";
     assert.equal(await claimNext(true), null, "the switch off holds it");
     process.env.ENGINEERING_AGENT_V22_REVIEW_PR = "on";
     const work = await claimNext(true);
@@ -410,8 +555,10 @@ test("a T2 draft promoted for the owner's review opens a review item only a revi
       const look = (env: Record<string, string | undefined>) => readEngineeringAgentLastLook(prisma,
         { workItemId: publish.id, fencingToken: work.fencingToken, commitDigest: work.commitDigest },
         { ...process.env, ...env });
-      assert.deepEqual(await look({ ENGINEERING_AGENT_V22_REVIEW_PR: undefined }),
+      assert.deepEqual(await look({ ENGINEERING_AGENT_V22_REVIEW_PR: "off" }),
         { verdict: "refuse", reason: "review_pr_off" });
+      assert.notDeepEqual(await look({ ENGINEERING_AGENT_V22_REVIEW_PR: undefined }),
+        { verdict: "refuse", reason: "review_pr_off" }, "unset is on");
       assert.notDeepEqual(await look({ ENGINEERING_AGENT_V22_REVIEW_PR: "on" }),
         { verdict: "refuse", reason: "review_pr_off" });
     } finally {
@@ -654,7 +801,16 @@ test("a binding records its observations once, its reviewer as a pair, and a re-
     ),
     "snapshot_invalid",
   );
+  // A digest of neither version is no binding's (lib/pullDiffDigestCore.ts).
+  await refusedWith(
+    inTx((tx) =>
+      recordEngineeringAgentBinding(tx, { runId: run.runId, prNumber, headSha: sha1("head"), verifiedHeadSha: sha1("head"),
+        snapshot: { ...snapshot, diffDigest: `v3:${sha256("diff")}` } }),
+    ),
+    "snapshot_invalid",
+  );
 
+  // Owner decision 2026-11-18: a binding made before v2 is re-bound with the v2 change digest.
   const { bindingId: current } = await inTx((tx) =>
     replaceEngineeringAgentBinding(tx, {
       previousBindingId: bindingId,
@@ -663,10 +819,12 @@ test("a binding records its observations once, its reviewer as a pair, and a re-
         prNumber,
         headSha: sha1("head 2"),
         verifiedHeadSha: sha1("head 2"),
-        snapshot: { ...snapshot, diffDigest: sha256("diff 2"), invalidatedReviewIds: [41] },
+        snapshot: { ...snapshot, diffDigest: `v2:${sha256("change 2")}`, invalidatedReviewIds: [41] },
       },
     }),
   );
+  assert.equal(((await prisma.engineeringAgentBinding.findUniqueOrThrow({ where: { id: current } })).snapshot as
+    { diffDigest: string }).diffDigest, `v2:${sha256("change 2")}`);
   const superseded = await prisma.engineeringAgentBinding.findUniqueOrThrow({ where: { id: bindingId } });
   assert.ok(superseded.supersededAt && superseded.supersededAt.getFullYear() > 2000, "the database wrote the time");
 
@@ -871,6 +1029,7 @@ test("the publisher claims its next work, and the last look can only refuse", as
   const work = await inTx((tx) => claimNextEngineeringAgentPublishWork(tx, { leaseMs: 60_000 }));
   assert.ok(work && work.mode === "write", "a queued item with a live capability is claimed to write");
   assert.equal(work.workItemId, workItemId);
+  assert.ok("patchBody" in work, "a publisher that does not read chunks gets the patch inline");
   assert.equal(work.patchBody, "patch");
   assert.equal(work.commitDigest, issued.commitDigest);
   assert.equal(work.branch, `agent/engineering/${run.runId}`);
@@ -901,6 +1060,115 @@ test("the publisher claims its next work, and the last look can only refuse", as
     if (previous) await prisma.appSetting.create({ data: { key: incidentKey, value: previous.value } });
   }
   const bound = await settleAndBind(workItemId, work.fencingToken, run.runId);
+  await retireBinding(bound.bindingId);
+});
+
+// docs/policy/amux-v22-result-transfer.md §4: no size of ours bounds a patch;
+// a publisher that reads chunks is claimed without it and reads it in parts.
+test("a large patch goes only to a publisher that reads chunks, without the patch, and only its live claim reads them", async () => {
+  const run = await startRun();
+  const line = "+a line of a large patch, past the inline bound\n";
+  const patchBody = `diff --git a/big.txt b/big.txt\n${line.repeat(Math.ceil((ENGINEERING_AGENT_LEGACY_INLINE_PATCH_MAX_BYTES + 512 * 1024) / line.length))}+é\n`;
+  const patchDigest = sha256(patchBody);
+  const total = Buffer.byteLength(patchBody, "utf8");
+  assert.ok(total > ENGINEERING_AGENT_LEGACY_INLINE_PATCH_MAX_BYTES && total < 2 * ENGINEERING_AGENT_PATCH_CHUNK_BYTES);
+  const { workItemId } = await inTx((tx) =>
+    openEngineeringAgentWorkItem(tx, {
+      kind: "publish",
+      causeKey: `publish:${run.runId}:chunks`,
+      runId: run.runId,
+      patchBody,
+      patchDigest,
+      baseSha: sha1("base"),
+      expectedTreeId: sha1("tree"),
+    }),
+  );
+  const stored = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { id: workItemId }, select: { patchBytes: true } });
+  assert.ok(stored.patchBytes && Buffer.from(stored.patchBytes).equals(Buffer.from(patchBody, "utf8")), "the bytes are written with the item");
+  const issue = () => inTx((tx) => issueEngineeringAgentCapability(tx, {
+    workItemId,
+    capability: { baseSha: sha1("base"), patchDigest, expectedTreeId: sha1("tree"), commit: commitFields(run.runId, run.cardId) },
+  }));
+  await issue();
+  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, amuxAttemptId: run.amuxAttemptId, outcome: "t1_queued", halt: "none" }));
+
+  // A publisher that reads the patch inline is never handed one it could not read.
+  assert.equal(await inTx((tx) => claimNextEngineeringAgentPublishWork(tx, { leaseMs: 60_000 })), null);
+  assert.equal((await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { id: workItemId }, select: { state: true } })).state, "queued");
+
+  const work = await inTx((tx) => claimNextEngineeringAgentPublishWork(tx, { leaseMs: 60_000, patchChunks: true }));
+  assert.ok(work && work.mode === "write" && work.workItemId === workItemId);
+  assert.ok(!("patchBody" in work), "the claim carries no patch");
+  assert.ok("patchBytes" in work);
+  assert.deepEqual([work.patchBytes, work.patchChunkCount, work.patchDigest], [total, 2, patchDigest]);
+
+  const read = (index: number, fencingToken = work.fencingToken) =>
+    readEngineeringAgentPublishPatchChunk(prisma, { workItemId, fencingToken, index });
+  const parts: Buffer[] = [];
+  for (let index = 0; index < work.patchChunkCount; index += 1) {
+    const chunk = await read(index);
+    assert.ok(chunk.kind === "chunk", `chunk ${index}`);
+    assert.deepEqual([chunk.workItemId, chunk.index, chunk.totalBytes, chunk.chunkCount], [workItemId, index, total, 2]);
+    parts.push(Buffer.from(chunk.bytesBase64, "base64"));
+  }
+  assert.deepEqual(parts.map((part) => part.byteLength), [ENGINEERING_AGENT_PATCH_CHUNK_BYTES, total - ENGINEERING_AGENT_PATCH_CHUNK_BYTES],
+    "full chunks, the last one the rest");
+  assert.equal(createHash("sha256").update(Buffer.concat(parts)).digest("hex"), patchDigest);
+  assert.deepEqual(await read(2), { kind: "out_of_range" }, "past the last chunk");
+  assert.deepEqual(await read(10_000), { kind: "out_of_range" });
+  assert.deepEqual(await read(0, work.fencingToken + BigInt(1)), { kind: "claim_not_live" }, "another token reads nothing");
+
+  // Back to the queue: no claim, nothing read. A new claim whose lease passed reads nothing either.
+  await inTx((tx) => settleEngineeringAgentWorkItem(tx, { workItemId, fencingToken: work.fencingToken, outcome: "refused_before_write", reason: "patch_read_failed" }));
+  assert.deepEqual(await read(0), { kind: "claim_not_live" }, "a settled claim reads nothing");
+  await issue();
+  const short = await inTx((tx) => claimNextEngineeringAgentPublishWork(tx, { leaseMs: 1_000, patchChunks: true }));
+  assert.ok(short && short.mode === "write" && short.workItemId === workItemId);
+  assert.equal((await read(0, short.fencingToken)).kind, "chunk");
+  await new Promise((resolve) => setTimeout(resolve, 1_500));
+  assert.deepEqual(await read(0, short.fencingToken), { kind: "claim_not_live" }, "a lease that passed reads nothing");
+  const lookup = await inTx((tx) => claimNextEngineeringAgentPublishWork(tx, { leaseMs: 60_000, patchChunks: true }));
+  assert.ok(lookup && lookup.mode === "lookup" && lookup.workItemId === workItemId);
+  assert.ok(!("patchBody" in lookup) && !("patchBytes" in lookup), "a lookup carries no patch");
+  assert.deepEqual(await read(0, lookup.fencingToken), { kind: "claim_not_live" }, "a lookup claim reads nothing");
+  await inTx((tx) => settleEngineeringAgentWorkItem(tx, { workItemId, fencingToken: lookup.fencingToken, outcome: "lookup_no_prior_write" }));
+  await issue();
+  const again = await inTx((tx) => claimEngineeringAgentWorkItem(tx, { workItemId, mode: "write", leaseMs: 60_000 }));
+  const bound = await settleAndBind(workItemId, again.fencingToken, run.runId);
+  await retireBinding(bound.bindingId);
+});
+
+test("an item opened before its bytes existed is read in chunks from its text, and inline by any publisher", async () => {
+  const run = await startRun();
+  const patchBody = "diff --git a/x b/x\n+é\n";
+  const patchDigest = sha256(patchBody);
+  // As an app before migration 20261118120100 wrote it: the text alone.
+  const workItemId = randomUUID();
+  await prisma.engineeringAgentWorkItem.create({
+    data: { id: workItemId, kind: "publish", state: "queued", causeKey: `publish:${run.runId}:legacy`, runId: run.runId,
+      patchBody, patchDigest, baseSha: sha1("base"), expectedTreeId: sha1("tree") },
+    select: { id: true },
+  });
+  const issue = () => inTx((tx) => issueEngineeringAgentCapability(tx, {
+    workItemId,
+    capability: { baseSha: sha1("base"), patchDigest, expectedTreeId: sha1("tree"), commit: commitFields(run.runId, run.cardId) },
+  }));
+  await issue();
+  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, amuxAttemptId: run.amuxAttemptId, outcome: "t1_queued", halt: "none" }));
+  const work = await inTx((tx) => claimNextEngineeringAgentPublishWork(tx, { leaseMs: 60_000, patchChunks: true }));
+  assert.ok(work && work.mode === "write" && work.workItemId === workItemId && "patchBytes" in work);
+  assert.deepEqual([work.patchBytes, work.patchChunkCount], [Buffer.byteLength(patchBody, "utf8"), 1]);
+  const chunk = await readEngineeringAgentPublishPatchChunk(prisma, { workItemId, fencingToken: work.fencingToken, index: 0 });
+  assert.ok(chunk.kind === "chunk");
+  assert.equal(Buffer.from(chunk.bytesBase64, "base64").toString("utf8"), patchBody);
+  // A small patch still goes inline to a publisher that does not read chunks.
+  await inTx((tx) => settleEngineeringAgentWorkItem(tx, { workItemId, fencingToken: work.fencingToken, outcome: "refused_before_write", reason: "patch_read_failed" }));
+  await issue();
+  const inline = await inTx((tx) => claimNextEngineeringAgentPublishWork(tx, { leaseMs: 60_000 }));
+  assert.ok(inline && inline.mode === "write" && inline.workItemId === workItemId && "patchBody" in inline);
+  assert.equal(inline.patchBody, patchBody);
+  assert.ok(!("patchBytes" in inline));
+  const bound = await settleAndBind(workItemId, inline.fencingToken, run.runId);
   await retireBinding(bound.bindingId);
 });
 
@@ -1047,88 +1315,53 @@ test("a claim whose lease passed goes to a lookup, and a lost answer can be foun
   await retireBinding(bound.bindingId);
 });
 
-test("turning the mode on from off passes the armed gate; turning it off and freezing never do", async () => {
-  const keys = {
-    runner: "engineeringAgent.runnerLastFinishAt",
-    publisher: "engineeringAgent.publisherLastFinishAt",
-    monitors: "engineeringAgent.monitorsConfirmedAt",
-  };
+// Owner decision 2026-11-16: the armed gate is gone.
+test("the mode turns on from off with no record of the services' finishes or a monitor check", async () => {
+  const keys = ["engineeringAgent.runnerLastFinishAt", "engineeringAgent.publisherLastFinishAt", "engineeringAgent.monitorsConfirmedAt"];
   const setSwitch = (name: "mode" | "freeze", value: string) =>
     inTx((tx) => setEngineeringAgentSwitch(tx, { session: owner, name, value }));
-  const record = (key: string, at: Date) =>
-    prisma.appSetting.upsert({ where: { key }, create: { key, value: at.toISOString() }, update: { value: at.toISOString() } });
   try {
     await setSwitch("mode", "off");
-    await prisma.appSetting.deleteMany({ where: { key: { in: Object.values(keys) } } });
-    await refusedWith(setSwitch("mode", "shadow"), "armed_gate_runner_finish_publisher_finish_monitor_confirmation");
-
-    const now = new Date();
-    await record(keys.runner, now);
-    await record(keys.publisher, now);
-    // A monitor confirmation older than a week is no confirmation.
-    await record(keys.monitors, new Date(now.getTime() - 8 * 24 * 60 * 60 * 1000));
-    await refusedWith(setSwitch("mode", "shadow"), "armed_gate_monitor_confirmation");
-    await prisma.appSetting.update({ where: { key: keys.monitors }, data: { value: "not an instant" } });
-    await refusedWith(setSwitch("mode", "shadow"), "armed_gate_monitor_confirmation");
-
-    await record(keys.monitors, now);
+    await prisma.appSetting.deleteMany({ where: { key: { in: keys } } });
     await setSwitch("mode", "shadow");
-    await setSwitch("mode", "shadow");
-    // Stopping is always allowed, whatever the records say.
-    await prisma.appSetting.deleteMany({ where: { key: { in: Object.values(keys) } } });
     await setSwitch("freeze", "true");
     await setSwitch("freeze", "false");
     await setSwitch("mode", "off");
-    await refusedWith(setSwitch("mode", "shadow"), "armed_gate_runner_finish_publisher_finish_monitor_confirmation");
+    // Again from off, still with no record.
+    await setSwitch("mode", "shadow");
   } finally {
-    await prisma.appSetting.deleteMany({ where: { key: { in: Object.values(keys) } } });
     await prisma.appSetting.deleteMany({ where: { key: FREEZE_KEY } });
     await prisma.appSetting.upsert({ where: { key: MODE_KEY }, create: { key: MODE_KEY, value: "t1" }, update: { value: "t1" } });
   }
 });
 
-test("the owner-queue reading agrees with the run trigger", async () => {
-  // An active run counts in both queues; with every place taken by one, the
-  // reading and the trigger both say full.
+test("the owner queues are counted, never capped", async () => {
+  // Owner decision 2026-11-15: more active runs than the old cap of 8, and
+  // neither the reading nor the run trigger refuses another.
   const runs = [];
-  while (runs.length < OWNER_QUEUE_LIMITS.pr) {
+  while (runs.length < OWNER_QUEUE_LEGACY_LIMITS.pr) {
     assert.equal((await readEngineeringAgentOwnerQueues(prisma)).claimAllowed, true);
     runs.push(await startRun());
   }
-  const full = await readEngineeringAgentOwnerQueues(prisma);
-  assert.equal(full.claimAllowed, false, "the reading says full");
-  // The trigger refuses with its own message, not a store code.
-  await assert.rejects(startRun(), /owner queue is full/);
+  assert.equal((await readEngineeringAgentOwnerQueues(prisma)).claimAllowed, true, "never full");
+  runs.push(await startRun());
   for (const run of runs) {
     await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, amuxAttemptId: run.amuxAttemptId, outcome: "no_change", halt: "none" }));
   }
   assert.equal((await readEngineeringAgentOwnerQueues(prisma)).claimAllowed, true);
 });
 
-test("the armed gate opens on the services' own finishes and a person's monitor record, and a person clears a halt", async () => {
-  const keys = [
-    "engineeringAgent.runnerLastFinishAt",
-    "engineeringAgent.publisherLastFinishAt",
-    "engineeringAgent.monitorsConfirmedAt",
-  ];
+test("a service records its own finish, a person clears an App identity halt, and a recorded mismatch holds nothing by itself", async () => {
+  const keys = ["engineeringAgent.runnerLastFinishAt", "engineeringAgent.publisherLastFinishAt"];
   try {
-    await inTx((tx) => setEngineeringAgentSwitch(tx, { session: owner, name: "mode", value: "off" }));
-    await prisma.appSetting.deleteMany({ where: { key: { in: keys } } });
     await inTx((tx) => recordEngineeringAgentServiceFinish(tx, { service: "runner" }));
     await inTx((tx) => recordEngineeringAgentServiceFinish(tx, { service: "publisher" }));
-    await refusedWith(
-      inTx((tx) => setEngineeringAgentSwitch(tx, { session: owner, name: "mode", value: "shadow" })),
-      "armed_gate_monitor_confirmation",
-    );
-    await inTx((tx) => recordEngineeringAgentMonitorsConfirmed(tx, { session: owner }));
-    await inTx((tx) => setEngineeringAgentSwitch(tx, { session: owner, name: "mode", value: "shadow" }));
     const finish = await prisma.adminAuditLog.findFirst({
       where: { action: "engineering_agent.service_finished", targetId: "engineeringAgent.runnerLastFinishAt" },
     });
     assert.equal(systemActorOf(finish!), "engineering-agent-runner", "a service speaks under its own actor");
 
-    // A recorded halt holds until the acknowledgement, which a person makes.
-    await prisma.appSetting.update({ where: { key: MODE_KEY }, data: { value: "t1" } });
+    // The App's identity missing holds until the acknowledgement, which a person makes.
     const run = await startRun();
     await inTx((tx) =>
       endEngineeringAgentRun(tx, { runId: run.runId, amuxAttemptId: run.amuxAttemptId, outcome: "no_change", halt: "config_missing" }),
@@ -1138,6 +1371,15 @@ test("the armed gate opens on the services' own finishes and a person's monitor 
     const entry = await prisma.adminAuditLog.findUniqueOrThrow({ where: { id: acknowledged.auditLogId } });
     assert.equal(entry.actorUserId, owner.user!.id);
     assert.equal((entry.metadata as Record<string, unknown>).unacknowledgedHalt, "config_missing");
+    assert.equal("circuitLatched" in (entry.metadata as Record<string, unknown>), false);
+
+    // A mismatch a run recorded (as the kill switch's mode does) holds nothing
+    // once it is no longer open: no acknowledgement is needed.
+    const mismatched = await startRun();
+    await inTx((tx) =>
+      endEngineeringAgentRun(tx, { runId: mismatched.runId, amuxAttemptId: mismatched.amuxAttemptId, outcome: "no_change", halt: "state_mismatch" }),
+    );
+    assert.equal((await readEngineeringAgentHaltState(prisma)).unacknowledgedHalt, null);
     const next = await startRun();
     await inTx((tx) => endEngineeringAgentRun(tx, { runId: next.runId, amuxAttemptId: next.amuxAttemptId, outcome: "no_change", halt: "none" }));
   } finally {
@@ -1173,6 +1415,32 @@ test("an unbound branch the runner observed halts like a recorded halt, until a 
     );
     await inTx((tx) => acknowledgeEngineeringAgentHalt(tx, { session: owner }));
     assert.equal((await readEngineeringAgentHaltState(prisma)).unacknowledgedHalt, null, "acknowledged, it no longer holds");
+    assert.deepEqual(await inTx((tx) => clearEngineeringAgentObservedHalt(tx, { observedAt: new Date().toISOString() })),
+      { cleared: false }, "nothing to clear once acknowledged");
+
+    // Owner decision 2026-11-15: a later clean reading clears it, naming what it was about.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await inTx((tx) => recordEngineeringAgentObservedHalt(tx, { halt: "unbound_app_pr", subject: { prNumber: 3942 } }));
+    const named = await readEngineeringAgentHaltState(prisma);
+    assert.deepEqual(named.observedHalt, { halt: "unbound_app_pr", subject: { prNumber: 3942 } });
+    const seen = await readEngineeringAgentKnownPublishes(prisma);
+    assert.equal(seen.observedHalt, "unbound_app_pr");
+    assert.ok(seen.observedHaltAt);
+    // A clean reading clears only the halt it saw (review r-20261115-120115-261135).
+    assert.deepEqual(await inTx((tx) => clearEngineeringAgentObservedHalt(tx, { observedAt: "2000-01-01T00:00:00.000Z" })),
+      { cleared: false }, "a reading of an earlier halt clears nothing later");
+    assert.deepEqual(await inTx((tx) => clearEngineeringAgentObservedHalt(tx, { observedAt: seen.observedHaltAt! })), { cleared: true });
+    assert.equal((await readEngineeringAgentHaltState(prisma)).unacknowledgedHalt, null, "explained, it no longer holds");
+    assert.equal((await readEngineeringAgentKnownPublishes(prisma)).observedHalt, null);
+    const cleared = await prisma.adminAuditLog.findFirstOrThrow({
+      where: { action: "engineering_agent.halt_cleared", targetId: observedKey }, orderBy: { createdAt: "desc" } });
+    assert.equal(systemActorOf(cleared), "engineering-agent-runner");
+    assert.equal((cleared.metadata as Record<string, unknown>).subjectPrNumber, 3942);
+    assert.deepEqual(await inTx((tx) => clearEngineeringAgentObservedHalt(tx, { observedAt: seen.observedHaltAt! })),
+      { cleared: false }, "once");
+    await inTx((tx) => recordEngineeringAgentObservedHalt(tx, { halt: "unbound_app_ref" }));
+    const later = (await readEngineeringAgentKnownPublishes(prisma)).observedHaltAt!;
+    await inTx((tx) => clearEngineeringAgentObservedHalt(tx, { observedAt: later }));
     const known = await readEngineeringAgentKnownPublishes(prisma);
     assert.ok(Array.isArray(known.bindings) && Array.isArray(known.consumed));
     assert.ok(known.consumed.every((row) => /^[0-9]{1,12}$/.test(row.runId) && /^[0-9a-f]{64}$/.test(row.commitDigest)), "identifiers and digests only");
@@ -1181,4 +1449,100 @@ test("an unbound branch the runner observed halts like a recorded halt, until a 
     await prisma.appSetting.deleteMany({ where: { key: observedKey } });
     if (previous) await prisma.appSetting.create({ data: { key: observedKey, value: previous.value } });
   }
+});
+
+test("an unknown publish outcome keeps one open decision, and an approved resume is claimed once (AMUX-FILEGEN-003)", async () => {
+  const run = await startRun();
+  const { workItemId } = await inTx((tx) =>
+    openEngineeringAgentWorkItem(tx, {
+      kind: "publish",
+      causeKey: `publish:${run.runId}:resume`,
+      runId: run.runId,
+      patchBody: "patch",
+      patchDigest: sha256("patch"),
+      baseSha: sha1("base"),
+      expectedTreeId: sha1("tree"),
+    }),
+  );
+  await inTx((tx) =>
+    issueEngineeringAgentCapability(tx, {
+      workItemId,
+      capability: { baseSha: sha1("base"), patchDigest: sha256("patch"), expectedTreeId: sha1("tree"), commit: commitFields(run.runId, run.cardId) },
+    }),
+  );
+  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, amuxAttemptId: run.amuxAttemptId, outcome: "t1_queued", halt: "none" }));
+  const openDecisions = () =>
+    prisma.engineeringAgentWorkItem.findMany({
+      where: { kind: "decision", state: "open", causeKey: { startsWith: `unknown:${workItemId}:` } },
+      select: { id: true },
+    });
+  const next = (input: { resumePullRequests?: boolean } = {}) =>
+    inTx((tx) => claimNextEngineeringAgentPublishWork(tx, { leaseMs: 60_000, ...input }));
+  const reasonOf = async () => (await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { id: workItemId } })).reason;
+
+  // The write pushed and its answer was lost; the lookup that followed found a branch and no pull request.
+  const write = await next();
+  assert.ok(write && write.mode === "write" && write.workItemId === workItemId);
+  const first = await inTx((tx) =>
+    settleEngineeringAgentWorkItem(tx, { workItemId, fencingToken: write.fencingToken, outcome: "lookup_impossible", reason: "pull_request_not_ours" }),
+  );
+  assert.equal(first.state, "outcome_unknown");
+
+  // While its decision is open, no round looks again, so none opens another.
+  assert.equal(await next({ resumePullRequests: true }), null);
+  assert.equal(await next(), null);
+  assert.deepEqual((await openDecisions()).map((row) => row.id), [first.decisionItemId]);
+  // Only a branch without its pull request may be resumed.
+  await refusedWith(
+    inTx((tx) => approveEngineeringAgentPullRequestResume(tx, { session: owner, workItemId: first.decisionItemId! })),
+    "pull_request_not_resumable",
+  );
+  await inTx((tx) => acknowledgeEngineeringAgentDecision(tx, { session: owner, workItemId: first.decisionItemId! }));
+
+  // Seen, it is looked at again once, and that lookup opens the one new decision.
+  const looked = await next();
+  assert.ok(looked && looked.mode === "lookup" && looked.workItemId === workItemId);
+  assert.equal(looked.resumePullRequest, undefined, "a lookup carries no approval nobody gave");
+  const second = await inTx((tx) =>
+    settleEngineeringAgentWorkItem(tx, { workItemId, fencingToken: looked.fencingToken, outcome: "lookup_impossible", reason: "branch_without_pull_request" }),
+  );
+  // An earlier decision of the same outcome, as the rounds before this change left them.
+  const stale = await inTx((tx) =>
+    openEngineeringAgentWorkItem(tx, { kind: "decision", causeKey: `unknown:${workItemId}:0`, runId: run.runId, reason: "outcome_unknown" }),
+  );
+  assert.equal((await openDecisions()).length, 2);
+  assert.equal(await next(), null);
+
+  // The person approves: every open decision of this outcome closes as seen, and the item waits for one claim.
+  const approved = await inTx((tx) =>
+    approveEngineeringAgentPullRequestResume(tx, { session: owner, workItemId: second.decisionItemId! }),
+  );
+  assert.equal(approved.acknowledged, 2);
+  assert.deepEqual(await openDecisions(), []);
+  assert.equal(await reasonOf(), "pull_request_resume_approved");
+  const approval = await prisma.adminAuditLog.findUniqueOrThrow({ where: { id: approved.auditLogId } });
+  assert.equal(approval.action, ENGINEERING_AGENT_AUDIT_ACTIONS.pullRequestResumeApproved);
+  assert.equal(approval.actorUserId, owner.user!.id);
+  const seen = await prisma.adminAuditLog.findMany({
+    where: { action: ENGINEERING_AGENT_AUDIT_ACTIONS.decisionAcknowledged, targetId: second.decisionItemId! },
+  });
+  assert.deepEqual((seen[0]?.metadata as { sameOutcome?: string[] } | null)?.sameOutcome, [stale.workItemId]);
+
+  // A publisher that does not name the feature is never handed it; the approval waits.
+  assert.equal(await next(), null);
+  assert.equal(await reasonOf(), "pull_request_resume_approved");
+  const resume = await next({ resumePullRequests: true });
+  assert.ok(resume && resume.mode === "lookup" && resume.workItemId === workItemId);
+  assert.equal(resume.resumePullRequest, true);
+  assert.equal(resume.cardRef, run.cardId);
+  assert.ok(resume.consumed, "the commit the consumed capability allows, to check the branch against");
+  assert.equal(await reasonOf(), "pull_request_resume_claimed", "the claim took the approval");
+
+  // The pull request it opened is the result.
+  const bound = await inTx(async (tx) => {
+    const settled = await settleEngineeringAgentWorkItem(tx, { workItemId, fencingToken: resume.fencingToken, outcome: "lookup_found_result" });
+    assert.equal(settled.state, "published");
+    return recordEngineeringAgentBinding(tx, bindingInput(run.runId));
+  });
+  await retireBinding(bound.bindingId);
 });

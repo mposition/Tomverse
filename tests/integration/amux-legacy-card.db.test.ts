@@ -252,7 +252,7 @@ test("only a recently authenticated owner closes", async () => {
   assert.equal((await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id } })).archivedAt, null);
 });
 
-test("a pre-v22 Task with no recovery path closes the same way; a v22 Task does not", async () => {
+test("a pre-v22 Task with no recovery path closes the same way, and so does a stopped v22 Task", async () => {
   const body = JSON.stringify({ problem: "Can the PR check be reused? Look first.", scopeIn: ["Read"],
     scopeOut: ["Change code"], completionCriteria: ["A report"] });
   const preV22 = await seedV4Task({ receipt: false });
@@ -272,12 +272,19 @@ test("a pre-v22 Task with no recovery path closes the same way; a v22 Task does 
   assert.equal(audits.length, 1);
   assert.equal((audits[0]!.metadata as Record<string, unknown>).kind, "pre_v22_task");
 
-  // A Task the Ubuntu inspection takes keeps the v22 recovery path: no view, and the close refuses.
+  // A Task the Ubuntu inspection takes keeps the v22 recovery path, and the
+  // owner may also settle it directly (owner decision 2026-11-12).
   const v22 = await seedV4Task({ receipt: true });
-  assert.equal(await readAmuxLegacyCardView({ id: v22, revision: 4, displayKey: null,
-    sourceSystem: "admin-idea-v4", body, brief: null, title: null }), null);
-  assert.deepEqual(await closeAmuxLegacyCardForOwner({ session: owner(), request: request(), taskId: v22,
-    revision: 4, ideaId: null }), { outcome: "refused", reason: "not_legacy" });
+  const stopped = await readAmuxLegacyCardView({ id: v22, revision: 4, displayKey: null,
+    sourceSystem: "admin-idea-v4", body, brief: null, title: null });
+  assert.equal(stopped?.kind, "stopped_task");
+  assert.equal(stopped?.closeRefusal, null);
+  assert.equal(stopped?.completeRefusal, null);
+  // The pre-v22 Task above has no receipt, so it is never completed as done.
+  assert.equal(view?.completeRefusal, "not_completable");
+  assert.equal((await closeAmuxLegacyCardForOwner({ session: owner(), request: request(), taskId: v22,
+    revision: 4, ideaId: null })).outcome, "closed");
+  assert.equal(((await auditsOf(v22))[0]!.metadata as Record<string, unknown>).kind, "stopped_task");
 });
 
 test("a view built from a body whose card moved on refuses as changed, so nothing is saved from it", async () => {

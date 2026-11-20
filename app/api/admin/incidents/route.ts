@@ -1,6 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
+import { codePinnedModelRefusal } from "@/lib/codePinnedModels";
 import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
@@ -116,9 +117,26 @@ export async function POST(req: Request) {
     if ((body.fallbackModelIds || []).some((modelId) => !modelIds.has(modelId))) {
       return NextResponse.json({ error: "Unknown fallback model." }, { status: 400 });
     }
-    const targetModels = body.modelId
+    const scopedModels = body.modelId
       ? runtimeModels.filter((model) => model.id === body.modelId)
       : runtimeModels.filter((model) => model.provider === body.provider);
+    // A model the code calls by id is never switched by an incident: limited or
+    // disabled closes Chat for everyone (lib/codePinnedModels.ts). Named on its
+    // own, the incident is refused; inside a provider-wide incident it is left
+    // as it is and reported.
+    const pinnedLeftAsIs = scopedModels.filter((model) =>
+      codePinnedModelRefusal({ modelId: model.id, status: body.status }) !== null
+    );
+    if (body.modelId && pinnedLeftAsIs.length > 0) {
+      return NextResponse.json(
+        {
+          error: codePinnedModelRefusal({ modelId: body.modelId, status: body.status }),
+          code: "MODEL_PINNED_IN_CODE",
+        },
+        { status: 409 }
+      );
+    }
+    const targetModels = scopedModels.filter((model) => !pinnedLeftAsIs.includes(model));
 
     const incident = await prisma.$transaction(async (tx) => {
       const created = await tx.adminProviderIncident.create({
@@ -170,10 +188,15 @@ export async function POST(req: Request) {
         provider: body.provider || null,
         modelId: body.modelId || null,
         affectedModels: targetModels.map((model) => model.id),
+        pinnedModelsLeftAsIs: pinnedLeftAsIs.map((model) => model.id),
       },
     });
 
-    return NextResponse.json({ success: true, incident });
+    return NextResponse.json({
+      success: true,
+      incident,
+      pinnedModelsLeftAsIs: pinnedLeftAsIs.map((model) => model.id),
+    });
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;

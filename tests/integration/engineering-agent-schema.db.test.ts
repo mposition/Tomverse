@@ -6,7 +6,9 @@ import { setTimeout as sleep } from "node:timers/promises";
 import type { Session } from "next-auth";
 
 import { writeAdminAuditLog } from "@/lib/adminAudit";
-import { OWNER_QUEUE_LIMITS } from "@/lib/engineeringAgentCore";
+
+/** The size of the owner queue cap that existed before owner decision 2026-11-15. */
+const OWNER_QUEUE_LEGACY_LIMITS = { pr: 8, decision: 8 } as const;
 import { prisma } from "@/lib/prisma";
 
 // Real PostgreSQL evidence for the engineering agent's state tables
@@ -579,6 +581,80 @@ test("a T2 decision closes its draft in the same transaction, binds to what the 
   await setState(other.id, "expired");
 });
 
+// Owner decision 2026-11-18 (docs/policy/amux-v22-result-transfer.md §4,
+// migration 20261118120100_engineering_agent_patch_bytes).
+test("a publish item's patch bytes are its patch's UTF-8, written once, and no size of ours bounds the patch", async () => {
+  const [storage] = await prisma.$queryRaw<Array<{ attstorage: string }>>`
+    SELECT a."attstorage"::text AS "attstorage" FROM pg_catalog.pg_attribute a
+    WHERE a."attrelid" = '"EngineeringAgentWorkItem"'::regclass AND a."attname" = 'patchBytes'`;
+  assert.equal(storage?.attstorage, "e", "stored EXTERNAL, so a chunk read takes only its slice");
+
+  const withBytes = (runId: string, body: string, bytes: Uint8Array<ArrayBuffer> | null) => ({
+    ...productData("publish", runId, body),
+    patchDigest: sha256(body),
+    ...(bytes === null ? {} : { patchBytes: bytes }),
+  });
+  const text = "patch é";
+  const run = await newRun();
+  // Bytes of another length, or of the same length but other content, are not the patch's.
+  await refused(
+    prisma.engineeringAgentWorkItem.create({ data: withBytes(run.id, text, Buffer.from(`${text}!`, "utf8")) }),
+    "the bytes are as long as the text",
+  );
+  // The CHECK holds the length by itself, with the guard out of the way.
+  await assert.rejects(
+    prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe("SET LOCAL session_replication_role = replica");
+      await tx.engineeringAgentWorkItem.create({
+        data: withBytes(run.id, text, Buffer.from(`${text}!`, "utf8")), select: { id: true },
+      });
+    }),
+    (error: unknown) => /patchBytes_check|23514|check constraint/i.test(String(error)),
+    "the CHECK refuses bytes of another length",
+  );
+  const sameLength = Buffer.from(text, "utf8");
+  sameLength[0] = "q".charCodeAt(0);
+  await refused(
+    prisma.engineeringAgentWorkItem.create({ data: withBytes(run.id, text, sameLength) }),
+    "the bytes are the text's",
+  );
+  const item = await prisma.engineeringAgentWorkItem.create({
+    data: withBytes(run.id, text, Buffer.from(text, "utf8")),
+    select: { id: true, patchBytes: true },
+  });
+  assert.deepEqual(Buffer.from(item.patchBytes!), Buffer.from(text, "utf8"));
+  await endRun(run.id);
+  const changed = Buffer.from(text, "utf8");
+  changed[1] = "b".charCodeAt(0);
+  for (const patchBytes of [changed, null]) {
+    await refused(
+      prisma.engineeringAgentWorkItem.update({ where: { id: item.id }, data: { patchBytes }, select: { id: true } }),
+      "the bytes never change or leave",
+    );
+  }
+  await retirePublish(item.id);
+
+  // An item opened before the bytes existed keeps none, and none can be added.
+  const legacyRun = await newRun();
+  const legacy = await prisma.engineeringAgentWorkItem.create({ data: withBytes(legacyRun.id, "patch", null), select: { id: true } });
+  await endRun(legacyRun.id);
+  await refused(
+    prisma.engineeringAgentWorkItem.update({ where: { id: legacy.id }, data: { patchBytes: Buffer.from("patch") }, select: { id: true } }),
+    "bytes are written only with the item",
+  );
+  await retirePublish(legacy.id);
+
+  // The size-only CHECK is gone: a patch past the old 4 MiB is stored.
+  const bigRun = await newRun();
+  const big = `diff --git a/x b/x\n${"+a line of a large patch\n".repeat(Math.ceil((4 * 1024 * 1024 + 4096) / 25))}`;
+  assert.ok(Buffer.byteLength(big, "utf8") > 4 * 1024 * 1024);
+  const stored = await prisma.engineeringAgentWorkItem.create({
+    data: withBytes(bigRun.id, big, Buffer.from(big, "utf8")), select: { id: true },
+  });
+  await endRun(bigRun.id);
+  await retirePublish(stored.id);
+});
+
 test("a binding records its run's published item, keeps its snapshot, and records observations and its reviewer once", async () => {
   const bare = await newRun();
   await refused(
@@ -656,6 +732,25 @@ test("a binding's JSON holds digests, enums and review ids, never free text or a
   await snapshotRefused(replaceWith({ snapshot: snapshot({ baseSha: "main" }) }), "a snapshot's base is a commit id");
   await snapshotRefused(replaceWith({ snapshot: snapshot({ invalidatedReviewIds: ["mposition"] }) }), "invalidated reviews are ids");
   await snapshotRefused(replaceWith({ snapshot: snapshot({ invalidatedReviewIds: [1.5] }) }), "a review id is a whole number");
+  // Owner decision 2026-11-16: one 1 MiB bound for the record, and no review id count of its own.
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    await tx.engineeringAgentBinding.update({ where: { id: binding.id }, data: { supersededAt: new Date() } });
+    await tx.engineeringAgentBinding.create({ data: { ...bindingFor(run.id, prNumber),
+      snapshot: snapshot({ invalidatedReviewIds: Array.from({ length: 150 }, (_, i) => i + 1) }) } });
+    throw new Error("accepted_then_rolled_back");
+  }), /accepted_then_rolled_back/, "more than 100 invalidated reviews fit");
+  await snapshotRefused(replaceWith({ snapshot: snapshot({ invalidatedReviewIds: Array.from({ length: 140_000 }, (_, i) => 1_000_000 + i) }) }),
+    "a snapshot is at most 1 MiB");
+  // Owner decision 2026-11-18: a new binding holds the v2 change digest; a v1 one stays as it is.
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    await tx.engineeringAgentBinding.update({ where: { id: binding.id }, data: { supersededAt: new Date() } });
+    await tx.engineeringAgentBinding.create({ data: { ...bindingFor(run.id, prNumber),
+      snapshot: snapshot({ diffDigest: `v2:${"a".repeat(64)}` }) } });
+    throw new Error("accepted_then_rolled_back");
+  }), /accepted_then_rolled_back/, "a v2 change digest is a binding's digest");
+  for (const diffDigest of [`v3:${"a".repeat(64)}`, `V2:${"a".repeat(64)}`, `v2:${"a".repeat(63)}`, `v2:${"A".repeat(64)}`, "v2:"]) {
+    await snapshotRefused(replaceWith({ snapshot: snapshot({ diffDigest }) }), `not a digest: ${diffDigest}`);
+  }
 
   const observe = (data: Record<string, unknown>) =>
     prisma.engineeringAgentBinding.update({ where: { id: binding.id }, data });
@@ -800,29 +895,26 @@ test("a partial registration is an owner decision, resolved only after a person 
 });
 
 test("a temporary table of the same name does not stand in for the real one", async () => {
-  // A full decision queue, which an empty temporary table would hide.
-  const open = [];
-  while (open.length < OWNER_QUEUE_LIMITS.decision) open.push(await newItem("decision"));
+  // An empty temporary attempt table would make the guard refuse a run of a
+  // real attempt; the guard reads the trigger's own schema, so it starts.
   const { task, attempt } = await amuxAttempt();
-  await refused(
-    prisma.$transaction(async (tx) => {
-      await tx.$executeRawUnsafe(
-        'CREATE TEMP TABLE "EngineeringAgentWorkItem" ("kind" TEXT, "state" TEXT) ON COMMIT DROP',
-      );
-      await tx.engineeringAgentRun.create({
-        data: {
-          id: nextRunId(),
-          amuxAttemptId: attempt.id,
-          cardId: task.id,
-          cardKind: "code",
-          baseSha: sha1("base"),
-          leaseExpiresAt: inSeconds(60),
-        },
-      });
-    }),
-    "the queue is counted from the real table",
-  );
-  for (const item of open) await setState(item.id, "expired");
+  const id = nextRunId();
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(
+      'CREATE TEMP TABLE "AmuxExecutionAttempt" ("id" TEXT, "taskId" TEXT) ON COMMIT DROP',
+    );
+    await tx.engineeringAgentRun.create({
+      data: {
+        id,
+        amuxAttemptId: attempt.id,
+        cardId: task.id,
+        cardKind: "code",
+        baseSha: sha1("base"),
+        leaseExpiresAt: inSeconds(60),
+      },
+    });
+  });
+  await endRun(id);
 });
 
 test("a registration result is written once, and the round cap is the database's", async () => {
@@ -885,39 +977,30 @@ test("a request's end is kept, so a retry never starts over", async () => {
   await refused(prisma.engineeringAgentRequest.delete({ where: { key } }), "a request is never deleted");
 });
 
-test("no run starts while the owner queue is full, counting what running work may still produce", async () => {
-  // Open owner items fill the decision queue, one of them a draft, which is
-  // the product of its own run.
+test("owner decision 2026-11-15: a run starts whatever the owner queues hold", async () => {
+  // More open owner items than the old cap of 8 (one a draft, the product of its own run).
   const open = [await newItem("state_mismatch"), await newProduct("t2_draft")];
-  while (open.length < OWNER_QUEUE_LIMITS.decision) open.push(await newItem("decision"));
-  await refused(newRun(), "a full decision queue refuses a new run");
+  while (open.length < OWNER_QUEUE_LEGACY_LIMITS.decision + 1) open.push(await newItem("decision"));
+  await endRun((await newRun()).id);
   for (const item of open) await setState(item.id, item.kind === "state_mismatch" ? "resolved" : "expired");
 
-  // An active run takes a place in both queues, for the pull request or the
-  // decision it may still produce; so does an unsettled publish item.
+  // More active runs than the old cap, and an unsettled publish item beside them.
   const running = [];
-  while (running.length < OWNER_QUEUE_LIMITS.pr) running.push(await newRun());
-  await refused(newRun(), "active runs fill the queue");
-  await endRun(running.pop()!.id);
+  while (running.length < OWNER_QUEUE_LEGACY_LIMITS.pr + 1) running.push(await newRun());
   const pending = await newProduct("publish");
-  await refused(newRun(), "an unsettled publish item holds the place a run left");
-  await retirePublish(pending.id);
   running.push(await newRun());
+  await retirePublish(pending.id);
   for (const run of running) await endRun(run.id);
 });
 
-test("open pull requests fill the queue, and no first-T1 window holds it to one", async () => {
-  // Every run in this file starts under t1 within minutes of the first, so
-  // a window would refuse the second pull request.
+test("open pull requests never fill the queue, and no first-T1 window holds it to one", async () => {
   const bindings = [];
-  while (bindings.length < OWNER_QUEUE_LIMITS.pr) {
+  while (bindings.length < OWNER_QUEUE_LEGACY_LIMITS.pr + 1) {
     const { run, binding } = await publishedRun();
     assert.equal(run.modeAtStart, "t1");
     await endRun(run.id);
     bindings.push(binding);
   }
-  await refused(newRun(), "open pull requests fill the queue");
-  await retireBinding(bindings.pop()!.id);
   await endRun((await newRun()).id);
   for (const binding of bindings) await retireBinding(binding.id);
 });

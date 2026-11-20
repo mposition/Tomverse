@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -19,6 +20,7 @@ import {
   decideMismatchAction,
   expectedSettlement,
   followsCrossLockOrder,
+  mergedPrMismatchBindingId,
   resolveBOnAmuxTerminal,
 } from "../lib/engineeringAgentStateMismatch.ts";
 
@@ -230,7 +232,7 @@ const action = (overrides) =>
     workItemTerminal: false,
     lookupVerifiedNoWrite: false,
     mergeObserved: false,
-    recurrences: 0,
+    boundReviewPrRecorded: false,
     ...overrides,
   });
 
@@ -297,6 +299,28 @@ test("C closes on a merge GitHub reports, and only C, without turning the agent 
   }
 });
 
+test("C closes when AMUX recorded the bound number on the card, and only C", () => {
+  assert.deepEqual(action({ kind: "C", action: "record_bound_review_pr", ...terminalBoth }), {
+    allowed: false,
+    reason: "bound_review_pr_not_recorded",
+  });
+  assert.deepEqual(action({ kind: "C", action: "record_bound_review_pr", ...terminalBoth, boundReviewPrRecorded: true }), {
+    allowed: true,
+    resolves: true,
+  });
+  assert.equal(
+    action({ kind: "C", action: "record_bound_review_pr", ...terminalBoth, boundReviewPrRecorded: true, runTerminal: false }).allowed,
+    false,
+    "a C item still needs its run and work item terminal",
+  );
+  for (const kind of ["A", "B", "D"]) {
+    assert.deepEqual(action({ kind, action: "record_bound_review_pr", ...terminalBoth, boundReviewPrRecorded: true }), {
+      allowed: false,
+      reason: "action_not_allowed_for_kind",
+    });
+  }
+});
+
 test("leave_open, mode_off and a lookup never resolve anything", () => {
   assert.deepEqual(action({ action: "leave_open" }), { allowed: true, resolves: false });
   assert.deepEqual(action({ action: "mode_off" }), { allowed: true, resolves: false });
@@ -310,9 +334,10 @@ test("A and D preconditions hold", () => {
   assert.equal(action({ kind: "D", action: "escalate_incident", runActive: false, workItemState: "queued" }).allowed, false);
 });
 
-test("after two recurrences only escalation is left", () => {
-  assert.deepEqual(action({ recurrences: 2 }), { allowed: false, reason: "recurred_only_escalation_left" });
-  assert.deepEqual(action({ recurrences: 2, action: "escalate_incident" }), { allowed: true, resolves: true });
+test("no recurrence limit narrows a person's actions (owner decision 2026-11-15)", async () => {
+  const mismatch = await import("../lib/engineeringAgentStateMismatch.ts");
+  assert.equal("MISMATCH_RECURRENCE_LIMIT" in mismatch, false);
+  assert.deepEqual(action({ action: "escalate_incident" }), { allowed: true, resolves: true });
 });
 
 test("B resolves only when AMUX concludes the same way; otherwise C; never guessed", () => {
@@ -321,4 +346,22 @@ test("B resolves only when AMUX concludes the same way; otherwise C; never guess
   assert.equal(resolveBOnAmuxTerminal({ amuxSettlement: "blocked", domainOutcome: "t1_queued" }), "C");
   assert.equal(resolveBOnAmuxTerminal({ amuxSettlement: "recovered", domainOutcome: "abandoned" }), "resolved");
   assert.equal(resolveBOnAmuxTerminal({ amuxSettlement: "recovered", domainOutcome: "mystery" }), "unmapped");
+});
+
+test("a merged pull request mismatch names its binding; every other cause names none", () => {
+  // #3828 (2026-11-13): the store knew neither observer cause and refused every
+  // action on them, so the item held the agent halted with no way out.
+  assert.equal(mergedPrMismatchBindingId("unapproved_merge:5b009a4b-c596-4367-ac9e-aa0426547ba7"),
+    "5b009a4b-c596-4367-ac9e-aa0426547ba7");
+  assert.equal(mergedPrMismatchBindingId("pr_file_mismatch:binding"), "binding");
+  for (const causeKey of ["review_pr:item", "run_attempt:run", "unapproved_merge:", "unapproved_merge", "x_unapproved_merge:b"]) {
+    assert.equal(mergedPrMismatchBindingId(causeKey), null, causeKey);
+  }
+  // The console offers "closed: merged" on both causes, and the store takes
+  // them as C, bound to their own binding.
+  const panel = readFileSync("components/admin/AdminEngineeringAgentPanel.tsx", "utf8");
+  assert.ok(panel.includes("/^(review_pr|unapproved_merge|pr_file_mismatch):/.test(causeKey)"));
+  const store = readFileSync("lib/engineeringAgentStore.ts", "utf8");
+  assert.ok(store.includes('item.causeKey.startsWith("review_pr:") || mergedCauseBindingId !== null'));
+  assert.ok(store.includes("(mergedCauseBindingId === null || currentBindings[0]!.id === mergedCauseBindingId)"));
 });

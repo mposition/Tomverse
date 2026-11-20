@@ -589,7 +589,7 @@ test("ordinary chat keeps provider retry defaults, MCP forbids retries, and pinn
     const execution = readFileSync(new URL("../lib/pinnedDeploymentExecution.ts", import.meta.url), "utf8");
     const budget = readFileSync(new URL("../lib/pinnedDeploymentBudget.ts", import.meta.url), "utf8");
     const placement = readFileSync(new URL("../lib/pinnedDeploymentPlacement.ts", import.meta.url), "utf8");
-    assert.match(chat, /maxRetries: modelConfig\.provider === "zhipu" \? 0 : undefined/);
+    assert.match(chat, /maxRetries:\s*isResearchPreview \|\| modelConfig\.provider === "zhipu"\s*\? 0\s*: undefined/);
     assert.match(chat, /\.\.\.\(mcpConnector \? \{\s*maxRetries: 0,/);
     assert.match(chat, /authenticatedAccountId: session\?\.user\?\.id \?\? null/);
     const entrance = chat.indexOf("await enterPinnedDeploymentChat");

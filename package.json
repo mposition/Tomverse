@@ -10,11 +10,22 @@
     "node": "22.x"
   },
   "scripts": {
+    "test:continuation-fidelity": "node --import tsx --test tests/continuationFidelity.test.mjs tests/externalContinuationSeed.test.mjs tests/continuationPassages.test.mjs tests/continuationHistorySearch.test.mjs && node --conditions=react-server --experimental-test-module-mocks --no-warnings=ExperimentalWarning --import tsx --test --test-concurrency=1 tests/server-contract/continuation-source-loader.test.ts tests/server-contract/continuation-history-router.test.ts tests/server-contract/auto-llm-router-record-gate.test.ts tests/server-contract/chat-route-fallback-liveness.test.ts",
+    "report:continuation-fidelity": "node --import tsx scripts/report-continuation-fidelity.mjs",
+    "worker:research-preview": "node --conditions=react-server --import tsx scripts/research-preview-worker.ts",
+    "research:preview:evaluate": "node --conditions=react-server --import tsx scripts/research-preview-evaluate.mjs",
     "mcp:providers": "node --conditions=react-server --import tsx scripts/list-mcp-providers.ts",
     "setup:mcp-github": "node --conditions=react-server --import tsx scripts/mcp-github-app-setup.ts",
     "dev:mcp-github": "node --conditions=react-server --import tsx scripts/mcp-github-app-setup.ts --dev",
     "test:code-managed": "node --conditions=react-server --experimental-test-module-mocks --no-warnings=ExperimentalWarning --import tsx --test --test-concurrency=1 tests/codeManagedCore.test.mjs tests/server-contract/code-managed-provider.test.mjs tests/server-contract/code-managed-route.test.mjs tests/server-contract/code-managed-reconciliation-route.test.mjs",
     "test:code-managed-db": "node --conditions=react-server --experimental-test-module-mocks --no-warnings=ExperimentalWarning --import tsx --test --test-concurrency=1 tests/integration/code-managed-execution.db.test.mjs",
+    "test:external-api": "node --conditions=react-server --import tsx --test --test-concurrency=1 tests/externalApiProtocol.test.mjs tests/externalApiKeyCore.test.mjs tests/externalApiBoundary.test.mjs tests/externalApiNativeProtocol.test.mjs tests/externalApiCodingTools.test.mjs",
+    "test:external-api-db": "node --conditions=react-server --experimental-test-module-mocks --no-warnings=ExperimentalWarning --import tsx --test --test-concurrency=1 tests/integration/external-api.db.test.mjs tests/integration/external-api-native.db.test.mjs",
+    "cli:typecheck": "npm --workspace @tomverse/cli run typecheck",
+    "cli:build": "npm --workspace @tomverse/cli run build",
+    "cli:test": "npm --workspace @tomverse/cli run build && npm --workspace @tomverse/cli run test",
+    "cli:test:db": "npm --workspace @tomverse/cli run build && node --conditions=react-server --experimental-test-module-mocks --no-warnings=ExperimentalWarning --import tsx --test --test-concurrency=1 tests/integration/tomverse-cli.db.test.mjs",
+    "cli:pack:verify": "npm --workspace @tomverse/cli run build && npm --workspace @tomverse/cli run pack:verify",
     "test:chat-unified-optimizer": "node --conditions=react-server --experimental-test-module-mocks --no-warnings=ExperimentalWarning --import tsx --test --test-concurrency=1 tests/chatUnifiedOptimizerCandidate.test.mjs tests/chatUnifiedOptimizerLedgerCore.test.mjs tests/chatUnifiedOptimizerAmuxSourcePin.test.mjs tests/chatUnifiedOptimizerCandidateGeneration.test.mjs tests/chatUnifiedOptimizerPublicCollector.test.mjs tests/chatUnifiedOptimizerAmuxCandidateStore.test.mjs tests/amuxIntakeRegistrationCore.test.mjs tests/server-contract/chat-unified-optimizer-candidate-generation-store.test.mjs tests/server-contract/chat-unified-optimizer-amux-candidate-route.test.mjs tests/server-contract/chat-unified-optimizer-amux-test-card-page.test.mjs",
     "test:chat-unified-optimizer-db": "node --conditions=react-server --import tsx --test --test-concurrency=1 tests/integration/chat-unified-optimizer-ledger.db.test.ts",
     "test:chat-unified-optimizer-amux-db": "node --conditions=react-server --import tsx --test --test-concurrency=1 tests/integration/chat-unified-optimizer-amux-test-card.db.test.ts",
@@ -58,6 +69,7 @@
     "build:amux-v4-analysis-agent-once": "esbuild scripts/amux-v4-analysis-agent-once.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v4-analysis-agent-once.mjs",
     "build:amux-v19-session-queue-once": "esbuild scripts/amux-v19-session-queue-once.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v19-session-queue-once.mjs",
     "build:amux-v19-max-session-queue-once": "esbuild scripts/amux-v19-max-session-queue-once.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v19-max-session-queue-once.mjs",
+    "build:amux-process-audit-box": "esbuild scripts/amux-process-audit-runner.mjs --bundle --platform=node --format=esm --target=node22 --outdir=.next/amux-process-audit-box --out-extension:.js=.mjs",
     "build:marketing-generator-box": "esbuild scripts/marketing-generator-service.mjs scripts/marketing-generator-worker.mjs scripts/marketing-ai-visibility-worker.mjs --bundle --platform=node --format=esm --target=node22 --outdir=.next/marketing-generator-box --out-extension:.js=.mjs",
     "build:amux-v22-task-sidecar": "esbuild scripts/amux-v22-task-sidecar.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v22-task-sidecar.mjs",
     "build:amux-v22-read-only-api-sidecar": "esbuild scripts/amux-v22-read-only-api-sidecar.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v22-read-only-api-sidecar.mjs",
@@ -101,6 +113,7 @@
     "lint": "eslint",
     "check": "eslint . --max-warnings=0 && next build",
     "typecheck": "next typegen && tsc --noEmit --incremental false",
+    "typecheck:bounded": "next typegen && node scripts/typecheck-bounded.mjs",
     "check:package-json-duplicate-keys": "node scripts/check-package-json-duplicate-keys.mjs",
     "check:encoding": "node scripts/check-text-encoding.mjs",
     "check:encoding:strict": "node scripts/check-text-encoding.mjs --strict",
@@ -400,29 +413,33 @@
     "voice:watchdog": "node --conditions=react-server --import tsx scripts/voice-conversation-watchdog.mjs"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^4.0.96",
-    "@ai-sdk/google": "^4.0.111",
-    "@ai-sdk/moonshotai": "^3.0.84",
-    "@ai-sdk/openai": "^4.0.108",
+    "@ai-sdk/anthropic": "^4.0.102",
+    "@ai-sdk/google": "^4.0.117",
+    "@ai-sdk/mistral": "4.0.84",
+    "@ai-sdk/moonshotai": "^3.0.90",
+    "@ai-sdk/openai": "^4.0.114",
+    "@ai-sdk/cohere": "4.0.75",
     "@auth/prisma-adapter": "^2.11.3",
-    "@aws-sdk/client-s3": "^3.1162.0",
-    "@aws-sdk/s3-request-presigner": "^3.1162.0",
+    "@aws-sdk/client-s3": "^3.1167.0",
+    "@aws-sdk/s3-request-presigner": "^3.1167.0",
+    "@hyzyla/pdfium": "^3.0.0",
     "@modelcontextprotocol/sdk": "1.32.2",
     "@prisma/adapter-pg": "^7.10.1",
     "@prisma/client": "^7.10.1",
     "@prisma/config": "^7.10.1",
-    "@sentry/nextjs": "^11.10.0",
-    "ai": "^7.0.162",
+    "@sentry/nextjs": "^11.12.0",
+    "ai": "^7.0.169",
     "ajv": "^8.20.0",
     "ajv-mcp": "npm:ajv@8.20.0",
     "fflate": "^0.8.3",
     "highlight.js": "^11.12.0",
     "js-tiktoken": "1.0.21",
-    "lucide-react": "^1.68.0",
-    "next": "16.4.5",
+    "lucide-react": "^1.72.0",
+    "next": "16.4.6",
     "next-auth": "^4.24.15",
-    "officeparser": "^8.5.0",
-    "openai": "^7.50.0",
+    "officeparser": "^8.7.1",
+    "openai": "^7.55.0",
+    "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^6.2.108",
     "pg": "^8.23.1",
     "prisma": "^7.10.1",
@@ -435,14 +452,15 @@
     "remark-gfm": "^4.0.1",
     "server-only": "^0.0.1",
     "sharp": "^0.35.5",
+    "ssf": "^0.11.2",
     "stripe": "^23.1.0",
     "tsx": "^4.23.15",
-    "ws": "^8.22.1",
+    "ws": "^8.22.2",
     "yaml": "^2.9.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@playwright/test": "^1.64.1",
+    "@playwright/test": "^1.65.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^22.20.5",
     "@types/pg": "^8.23.1",
@@ -451,11 +469,11 @@
     "@types/ws": "^8.18.2",
     "esbuild": "0.28.2",
     "eslint": "^9",
-    "eslint-config-next": "16.4.5",
-    "parse5": "^8.1.0",
+    "eslint-config-next": "16.4.6",
+    "parse5": "^8.1.1",
     "tailwindcss": "^4",
     "typescript": "^6",
-    "vite": "^8.3.5"
+    "vite": "^8.3.8"
   },
   "overrides": {
     "@eslint/config-array": {
@@ -464,10 +482,11 @@
     "@eslint/eslintrc": {
       "brace-expansion": "^1.1.17"
     },
-    "@hono/node-server": "2.1.5",
+    "@hono/node-server": "2.1.8",
     "mdast-util-to-markdown-cjk-friendly": "1.0.2",
     "@prisma/config": {
-      "deepmerge-ts": "^8.0.1"
+      "deepmerge-ts": "^8.0.1",
+      "effect": "3.22.1"
     },
     "@sentry/nextjs": {
       "brace-expansion": "^5.0.9"
@@ -486,7 +505,7 @@
     "glob": {
       "minimatch": "^11.0.1"
     },
-    "pdfjs-dist": "^6.2.108",
+    "pdfjs-dist": "$pdfjs-dist",
     "postcss": {
       ".": "8.5.25",
       "nanoid": "^3.3.17"

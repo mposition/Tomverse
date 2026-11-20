@@ -35,17 +35,18 @@ export function ImportStepIndicator({
     currentStep: ExternalImportWizardStepId;
 }) {
     const { t } = useLanguage();
-    const currentIndex = EXTERNAL_IMPORT_WIZARD_STEPS.indexOf(currentStep);
-    const total = EXTERNAL_IMPORT_WIZARD_STEPS.length;
+    const steps = EXTERNAL_IMPORT_WIZARD_STEPS.filter(step => step !== "inspect_file");
+    const currentIndex = steps.indexOf(currentStep === "inspect_file" ? "prepare_export" : currentStep);
+    const total = steps.length;
 
     return (
-        <ol
+        <aside className="journey-rail"><strong>{t("journey.progress")}</strong><ol
             aria-label={t("externalImport.stepIndicatorLabel")}
-            className="flex flex-wrap items-center gap-x-2 gap-y-1"
+            className="journey-progress"
             data-testid="external-import-step-indicator"
         >
-            {EXTERNAL_IMPORT_WIZARD_STEPS.map((step, index) => {
-                const isCurrent = step === currentStep;
+            {steps.map((step, index) => {
+                const isCurrent = index === currentIndex;
                 const isDone = index < currentIndex;
                 const label = t(STEP_LABEL_KEYS[step]);
                 return (
@@ -76,12 +77,12 @@ export function ImportStepIndicator({
                                       : "bg-zinc-200 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
                             }`}
                         >
-                            {index + 1}
+                            {isDone ? "✓" : index + 1}
                         </span>
                         <span aria-hidden="true">{label}</span>
                     </li>
                 );
             })}
-        </ol>
+        </ol><small>{t("journey.private")}</small></aside>
     );
 }

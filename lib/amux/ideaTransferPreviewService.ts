@@ -32,11 +32,7 @@ import {
 } from "./ideaAnalysisPromptCore.ts";
 import { matchesInitialPlanSystemAudit } from "./ideaInitialPlanAuditCore.ts";
 import { buildAmuxSourcePlanManifest } from "./ideaSourcePlanManifestCore.ts";
-import {
-  AMUX_V4_TRANSFER_PREVIEW_WRITE_ENV,
-  transferPreviewWritePermitted,
-  type IdeaOnlyTransferPreviewRequest,
-} from "./ideaTransferPreviewInputCore.ts";
+import type { IdeaOnlyTransferPreviewRequest } from "./ideaTransferPreviewInputCore.ts";
 
 export class IdeaTransferPreviewError extends Error {
   constructor(readonly code: "not_found" | "not_ready" | "integrity_unavailable" |
@@ -183,7 +179,7 @@ export async function readPreviousOutputPage(tx: Prisma.TransactionClient, input
       throw new IdeaTransferPreviewError("integrity_unavailable");
     }
     const refs = dataRecord.permittedTargetRefs;
-    if (!Array.isArray(refs) || refs.length > 96) {
+    if (!Array.isArray(refs)) {
       throw new IdeaTransferPreviewError("integrity_unavailable");
     }
     inherited = refs.map((raw) => snapshotAmuxPermittedTarget(raw)).filter((ref):
@@ -235,9 +231,10 @@ export async function readPreviousOutputPage(tx: Prisma.TransactionClient, input
   const unique = new Map(combined.map((target) => [target.ref, target]));
   const nodes = [...unique.values()].filter((target) => target.kind === "node");
   const cards = [...unique.values()].filter((target) => target.kind === "card");
-  const permittedTargetRefs = [...nodes.slice(-64),
-    ...cards.slice(-(96 - Math.min(64, nodes.length)))];
-  if (permittedTargetRefs.length > 96 || permittedTargetRefs.some((target) =>
+  // Owner direction 2026-11-15: a later page keeps every earlier proposal as a
+  // target, so it can name any of them.
+  const permittedTargetRefs = [...nodes, ...cards];
+  if (permittedTargetRefs.some((target) =>
       !amuxPermittedTargetRefSafe(target, input.chunkIndex))) {
     throw new IdeaTransferPreviewError("integrity_unavailable");
   }
@@ -542,9 +539,6 @@ export async function prepareIdeaOnlyTransferPreview(
   if (!Number.isSafeInteger(chunkIndex) || chunkIndex < 0 ||
       chunkIndex >= 2_147_483_647) {
     throw new IdeaTransferPreviewError("not_ready");
-  }
-  if (!transferPreviewWritePermitted(process.env[AMUX_V4_TRANSFER_PREVIEW_WRITE_ENV])) {
-    throw new IdeaTransferPreviewError("preview_disabled");
   }
   if (adminAuditIntegrityKeys(process.env).length === 0) {
     throw new IdeaTransferPreviewError("integrity_unavailable");

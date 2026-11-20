@@ -19,13 +19,13 @@ import { QA_RELEASE_SECTION_IDS } from "@/components/admin/qaReleaseTabParts";
 import { readAgentDigestConsole } from "@/lib/agentDigestConsoleRead";
 import { readAmuxIdeaLaneDailyReport } from "@/lib/amux/ideaLaneDailyReportRead";
 import { readCiAdmissionAdminView } from "@/lib/ciAdmissionService";
-import { readQaReleaseCiAdvice } from "@/lib/qaReleaseCiAdviceStore";
+import { readQaReleaseCiAdviceConsole } from "@/lib/qaReleaseCiAdviceStore";
 import { readQaReleaseMainCandidates } from "@/lib/qaReleaseMainCandidatesRead";
 import { type QaReleaseLaneRounds, readQaReleaseLaneRounds } from "@/lib/qaReleaseMergeLaneRoundStore";
 import { readQaReleaseTrainBoard } from "@/lib/qaReleaseTrainBoardRead";
 import { qaReleaseTrainNextDepartureMs } from "@/lib/qaReleaseTrainCore";
 import { readQaReleaseTrainReports, readQaReleaseTrainSchedule, readQaReleaseTrainSelection } from "@/lib/qaReleaseTrainStore";
-import { hasAdminPermission } from "@/lib/adminAuth";
+import { getAdminRole, hasAdminPermission } from "@/lib/adminAuth";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
 import { adminNavItemTabs, resolveAdminTab, resolveAdminView } from "@/lib/adminNavigation";
 import { adminUiMessages } from "@/lib/adminMessages/ui";
@@ -120,7 +120,8 @@ export default async function AdminReleasePage({ searchParams }: PageProps<"/adm
                 failure: report.failure,
                 picks: report.picks,
               }))}
-              ciAdvice={await readQaReleaseCiAdvice()}
+              ciAdvice={await readQaReleaseCiAdviceConsole()}
+              canSendCiAdvice={getAdminRole(session) === "owner"}
               laneRounds={laneRounds}
               nowMs={now.getTime()}
             />

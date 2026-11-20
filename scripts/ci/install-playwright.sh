@@ -113,7 +113,24 @@ fi
 # package, with 225s reserved for a browser download that is a no-op on a cache
 # hit and a fast CDN fetch otherwise. Downloading first spends only what the
 # download actually takes.
-DOWNLOAD_RESERVE=$((DEADLINE / 4))
+#
+# A third, not the quarter it was, and with its own shorter attempt: on
+# 2026-11-13 (#3860) the CDN stalled the headless shell at 40% and the first
+# attempt, windowed to the whole 225s share, spent all of it, so the half
+# reported "out of budget after 1 attempt" with no retry ever made. A healthy
+# fetch of both builds takes seconds and a retry skips the build already on
+# disk, so attempts of DOWNLOAD_ATTEMPT_TIMEOUT leave room for two or three
+# inside the share. apt still gets whatever the download did not use. (Half
+# the deadline with the 300s apt window, the first fix proposed, still spent
+# 300s on one stalled fetch and clamped the second attempt to what was left.)
+DOWNLOAD_RESERVE=$((DEADLINE / 3))
+DOWNLOAD_ATTEMPT_TIMEOUT="${PLAYWRIGHT_DOWNLOAD_ATTEMPT_TIMEOUT:-90}"
+
+# The per-attempt window `retry` uses; set for each half below.
+RETRY_WINDOW="$ATTEMPT_TIMEOUT"
+
+# What the half running now may spend, for the out-of-budget report.
+HALF_BUDGET="$DEADLINE"
 
 # The absolute second the half currently running must stop by. Set before each
 # half rather than counted per attempt, so waiting counts against the budget too.
@@ -262,10 +279,10 @@ retry() {
           return 0
         fi
       fi
-      echo "::error::${label} ran out of the install budget (${DEADLINE}s for this run) after $((attempt - 1)) attempt(s)."
+      echo "::error::${label} ran out of the install budget (its share ${HALF_BUDGET}s of ${DEADLINE}s for this run) after $((attempt - 1)) attempt(s)."
       return 1
     fi
-    window="$ATTEMPT_TIMEOUT"
+    window="$RETRY_WINDOW"
     if [ "$window" -gt "$budget" ]; then
       window="$budget"
     fi
@@ -284,19 +301,48 @@ retry() {
   done
 }
 
+# The hosted runner's apt reads its Ubuntu mirrors through
+# mirror+file:/etc/apt/apt-mirrors.txt, which the image writes as
+#   http://azure.archive.ubuntu.com/ubuntu/<TAB>priority:1
+#   https://archive.ubuntu.com/ubuntu/<TAB>priority:2
+#   https://security.ubuntu.com/ubuntu/<TAB>priority:3
+# The Azure mirror is slow (2026-10-24), so archive.ubuntu.com goes ahead of it
+# -- as an added line, never a rewrite of the Azure one. The rewrite this
+# replaces left no mirror outside Canonical's DNS: on 2026-11-11 14:11-15:02 UTC
+# archive.ubuntu.com and security.ubuntu.com did not resolve on the runners and
+# every Playwright job spent its 900s budget on "Temporary failure resolving".
+#
+# apt's mirror method (apt-transport-mirror(1), methods/mirror.cc) orders the
+# list by priority, lowest first, and draws equal priorities in random order --
+# so line order alone decides nothing and the added line carries priority:0.
+# The other mirrors go to apt as Alternate-URIs; once Acquire::Retries is spent
+# on one mirror, any failure, a resolve failure included, moves the fetch to the
+# next (HandleFailure in apt-pkg/acquire-worker.cc). Azure stays the fallback.
 prefer_ubuntu_archive() {
-  local mirrors="$1"
+  local mirrors="$1" updated=""
   [ "${GITHUB_ACTIONS:-false}" = "true" ] || return 0
   [ -f "$mirrors" ] || return 0
-  if grep -Eq '^[[:blank:]]*https?://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$mirrors"; then
-    # Change only the hosted runner's slow Azure endpoint. Package lists,
-    # signing keys and third-party repositories keep their existing settings.
-    if sudo sed -b -Ei 's#^([[:blank:]]*)https?://azure[.]archive[.]ubuntu[.]com/ubuntu(/?)([[:space:]]|$)#\1https://archive.ubuntu.com/ubuntu\2\3#' "$mirrors"; then
-      echo "Using archive.ubuntu.com for Ubuntu CI dependencies."
-    else
-      echo "::warning::Could not select the Ubuntu archive mirror; keeping the existing retry budget."
-    fi
+  grep -Eq '^[[:blank:]]*https?://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$mirrors" || return 0
+  # Already added by an earlier run of this script in the same job.
+  if grep -Eq '^https://archive[.]ubuntu[.]com/ubuntu/[[:blank:]]+priority:0([[:space:]]|$)' "$mirrors"; then
+    return 0
   fi
+  # Insert one line before the first Azure entry and copy every line as it is,
+  # so package lists, signing keys and third-party repositories keep their
+  # settings. BINMODE=3 keeps gawk from dropping a CR on a CRLF line, as
+  # `sed -b` did here before; mawk has no such mode and ignores the variable.
+  if updated="$(mktemp)" &&
+      awk -v BINMODE=3 '!done { uri = $1; sub(/\r$/, "", uri) }
+        !done && uri ~ /^https?:\/\/azure[.]archive[.]ubuntu[.]com\/ubuntu\/?$/ {
+          print "https://archive.ubuntu.com/ubuntu/\tpriority:0"; done = 1
+        }
+        { print }' "$mirrors" >"$updated" &&
+      sudo tee "$mirrors" <"$updated" >/dev/null; then
+    echo "Using archive.ubuntu.com first for Ubuntu CI dependencies; the Azure mirror stays as the fallback."
+  else
+    echo "::warning::Could not put the Ubuntu archive mirror first; keeping the existing mirror list."
+  fi
+  if [ -n "$updated" ]; then rm -f "$updated"; fi
 }
 prefer_ubuntu_archive /etc/apt/apt-mirrors.txt
 
@@ -344,13 +390,17 @@ fi
 
 STARTED_AT="$(date +%s)"
 ENDS_AT=$((STARTED_AT + DEADLINE))
-echo "Installing ${BROWSERS[*]} with a ${DEADLINE}s budget (${ATTEMPTS} attempts of up to ${ATTEMPT_TIMEOUT}s per half)."
+echo "Installing ${BROWSERS[*]} with a ${DEADLINE}s budget (up to ${ATTEMPTS} attempts per half: browser download ${DOWNLOAD_ATTEMPT_TIMEOUT}s each within ${DOWNLOAD_RESERVE}s, apt ${ATTEMPT_TIMEOUT}s each)."
 
 # Browsers first, capped by DOWNLOAD_RESERVE: on a cache hit this is a no-op
 # that costs a second, which is the whole reason the two are not one command.
+RETRY_WINDOW="$DOWNLOAD_ATTEMPT_TIMEOUT"
+HALF_BUDGET="$DOWNLOAD_RESERVE"
 DEADLINE_AT=$((STARTED_AT + DOWNLOAD_RESERVE))
 retry "playwright install" "" npx playwright install "${BROWSERS[@]}" || exit 1
 # Then apt, with everything the download did not use.
+RETRY_WINDOW="$ATTEMPT_TIMEOUT"
+HALF_BUDGET=$((ENDS_AT - $(date +%s)))
 DEADLINE_AT="$ENDS_AT"
 retry "playwright install-deps" release_dpkg_lock npx playwright install-deps "${BROWSERS[@]}" || exit 1
 

@@ -22,6 +22,7 @@ import {
 import { ensureModelRegistrySeeded, registryRowToModel } from "@/lib/modelRegistry";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { readGuestLeadFacts } from "@/lib/guestLeadFacts";
+import { codePinnedModelRefusal } from "@/lib/codePinnedModels";
 
 type ModelRouteContext = { params: Promise<{ modelId: string }> };
 
@@ -94,6 +95,29 @@ export async function PATCH(
         );
       }
     }
+    // Checked against what this save writes: registryInputToData() is the
+    // exact conversion the update below stores, and it writes an omitted price,
+    // cap or replacement as null rather than keeping the stored value.
+    const saved = registryInputToData(body, actor(session));
+    const pinRefusal = codePinnedModelRefusal({
+      modelId,
+      status: body.status,
+      publiclyListed: body.publiclyListed,
+      replacementModelId: saved.replacementModelId ?? null,
+      provider: body.provider,
+      apiModel: body.apiModel,
+      maxOutputTokens: saved.maxOutputTokens ?? null,
+      reservationOutputTokens: saved.reservationOutputTokens ?? null,
+      inputUsdPerMillionTokens: saved.inputUsdPerMillionTokens ?? null,
+      outputUsdPerMillionTokens: saved.outputUsdPerMillionTokens ?? null,
+      cachedInputPriceMultiplier: saved.cachedInputPriceMultiplier ?? null,
+    });
+    if (pinRefusal) {
+      return NextResponse.json(
+        { error: pinRefusal, code: "MODEL_PINNED_IN_CODE" },
+        { status: 409 }
+      );
+    }
     if (
       modelId === APP_DEFAULTS.defaultModelId &&
       (body.status !== "enabled" || body.minimumPlan !== "Guest")
@@ -139,15 +163,19 @@ export async function PATCH(
     // A web search route change moves which budget a model's searches spend
     // and whether it searches at all, so "set to X" without "from Y" is not a
     // record anyone can act on.
+    // The file-tool tick is read for the same reason: it decides whether the
+    // model is offered tools at all.
+    const previous =
+      body.webSearchOverride === undefined && body.fileToolsOverride === undefined
+        ? null
+        : await prisma.modelRegistryEntry.findUnique({
+            where: { id: modelId },
+            select: { webSearchOverride: true, fileToolsOverride: true },
+          });
     const previousWebSearchOverride =
-      body.webSearchOverride === undefined
-        ? undefined
-        : (
-            await prisma.modelRegistryEntry.findUnique({
-              where: { id: modelId },
-              select: { webSearchOverride: true },
-            })
-          )?.webSearchOverride ?? null;
+      body.webSearchOverride === undefined ? undefined : previous?.webSearchOverride ?? null;
+    const previousFileToolsOverride =
+      body.fileToolsOverride === undefined ? undefined : previous?.fileToolsOverride ?? null;
     const updateModel = () =>
       prisma.modelRegistryEntry.update({
         where: { id: modelId },
@@ -186,6 +214,15 @@ export async function PATCH(
               webSearchOverride: {
                 from: previousWebSearchOverride ?? null,
                 to: body.webSearchOverride,
+              },
+            }
+          : {}),
+        ...(body.fileToolsOverride !== undefined &&
+        previousFileToolsOverride !== body.fileToolsOverride
+          ? {
+              fileToolsOverride: {
+                from: previousFileToolsOverride ?? null,
+                to: body.fileToolsOverride,
               },
             }
           : {}),
@@ -230,6 +267,13 @@ export async function DELETE(
     await consumeApiRateLimit(req, session.user.id, "admin-model-registry-delete", { minute: 10, day: 100 });
     const { modelId } = await context.params;
     await ensureModelRegistrySeeded();
+    const pinRefusal = codePinnedModelRefusal({ modelId, catalogDeleted: true });
+    if (pinRefusal) {
+      return NextResponse.json(
+        { error: pinRefusal, code: "MODEL_PINNED_IN_CODE" },
+        { status: 409 }
+      );
+    }
     if (modelId === APP_DEFAULTS.defaultModelId) {
       return NextResponse.json(
         { error: "The application fallback model cannot be removed from the catalogue." },

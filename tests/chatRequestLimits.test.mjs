@@ -6,6 +6,8 @@ import {
   fitChatRequestTranscript,
 } from "../lib/chatRequestLimits.ts";
 import { CHAT_REQUEST_LIMITS, validateChatPayload } from "../lib/chatSecurity.ts";
+import { CHAT_BODY_BYTES_PER_CONTEXT_TOKEN } from "../lib/chatInputLimits.ts";
+import { AVAILABLE_MODELS } from "../lib/models.ts";
 
 // Trace 0f3b722e-fdca-459d-8a33-5cc9e541a38f: the client sent a whole
 // transcript past the server's message limit, and the conversation could not
@@ -58,15 +60,43 @@ test("the chat surface, where each question carries every model's reply, reaches
   assert.equal(fitted[0].role, "user");
 });
 
-test("the character total is the second limit, and it is fitted the same way", () => {
-  // Few messages, each large: the count is nowhere near its limit.
-  const whole = conversation(10, { length: 20_000 });
+test("there is no total-character limit: 800,000 characters of history are accepted whole", () => {
+  // Operator decision 2026-11-18. The old limit was 300,000 characters.
+  const whole = conversation(10, { length: 40_000 });
+  const total = whole.reduce((sum, message) => sum + message.content.length, 0);
+  assert.ok(total > 300_000);
+  assert.equal(refusal(whole), null);
+  assert.equal(fitChatRequestTranscript(whole), whole);
+});
+
+test("the body limit covers the largest model context window and stays inside the proxy buffer", () => {
+  const largest = Math.max(...AVAILABLE_MODELS.map((model) => model.contextWindowTokens ?? 0));
+  assert.ok(largest >= 1_000_000);
+  assert.ok(
+    CHAT_REQUEST_LIMITS.maxBodyBytes >= largest * CHAT_BODY_BYTES_PER_CONTEXT_TOKEN,
+    "a request the largest model could hold is not refused for its size"
+  );
+  // Next.js's proxy buffers a body only to `proxyClientMaxBodySize`, 10 MB by
+  // default, and silently drops the rest. Past it, set that option first.
+  const config = readFileSync(new URL("../next.config.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(config, /proxyClientMaxBodySize/, "re-derive this bound from the configured value");
+  assert.ok(CHAT_REQUEST_LIMITS.maxBodyBytes <= 10 * 1024 * 1024);
+});
+
+test("the body size is what bounds the history, and the window fits under it", () => {
+  // Many large messages, three bytes a character: past the body limit.
+  const whole = conversation(45, { length: 40_000 }).map((message) =>
+    message.id === "current" ? message : { ...message, content: "한".repeat(40_000) }
+  );
   assert.ok(whole.length < CHAT_REQUEST_LIMITS.maxMessages);
-  assert.equal(refusal(whole), "CHAT_CONTENT_TOO_LARGE");
+  const bodyBytes = (messages) =>
+    Buffer.byteLength(JSON.stringify({ messages, modelId: "gpt-5-6-luna" }));
+  assert.ok(bodyBytes(whole) > CHAT_REQUEST_LIMITS.maxBodyBytes);
   const fitted = fitChatRequestTranscript(whole);
+  assert.ok(fitted.length < whole.length);
+  assert.ok(bodyBytes(fitted) <= CHAT_REQUEST_LIMITS.maxBodyBytes);
+  assert.equal(fitted[0].role, "user");
   assert.equal(refusal(fitted), null);
-  const total = fitted.reduce((sum, message) => sum + message.content.length, 0);
-  assert.ok(total <= CHAT_REQUEST_LIMITS.maxTotalCharacters);
 });
 
 test("a transcript that already fits is returned unchanged -- the same array", () => {
@@ -129,14 +159,14 @@ test("the client fits to exactly the limits the server applies", () => {
   // sends requests that are refused or drops context it did not need to.
   assert.deepEqual(CHAT_REQUEST_TRANSCRIPT_LIMITS, {
     maxMessages: CHAT_REQUEST_LIMITS.maxMessages,
-    maxTotalCharacters: CHAT_REQUEST_LIMITS.maxTotalCharacters,
+    maxBodyBytes: CHAT_REQUEST_LIMITS.maxBodyBytes,
   });
 });
 
 test("the client sends its transcript through the fit", () => {
   const source = readFileSync(new URL("../components/chat/ChatApp.tsx", import.meta.url), "utf8");
-  const send = source.indexOf('fetch("/api/chat", {\n          method: "POST"');
-  assert.ok(send > 0, "the chat request is sent from ChatApp");
+  const send = source.indexOf("const requestBody = {");
+  assert.ok(send > 0, "the chat request body is built in ChatApp");
   const body = source.slice(send, source.indexOf("modelId: modelId", send));
-  assert.match(body, /messages: fitChatRequestTranscript\(/);
+  assert.match(body, /messages: [^\n]*fitChatRequestTranscript\(/);
 });

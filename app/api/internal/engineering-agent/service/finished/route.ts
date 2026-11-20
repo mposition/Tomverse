@@ -19,8 +19,9 @@ import { prisma } from "@/lib/prisma";
 
 // A service reports that its cycle ran to the end (docs/policy/engineering-
 // agent.md §12). Which service is decided by the secret that authenticated,
-// never by the body; the report is an indicator for the armed gate, not
-// evidence, and is recorded whatever the switches say.
+// never by the body; the report is an indicator shown in Admin (the armed
+// gate that read it went on 2026-11-16), not evidence, and is recorded
+// whatever the switches say.
 
 const requestSchema = z.object({}).strict();
 

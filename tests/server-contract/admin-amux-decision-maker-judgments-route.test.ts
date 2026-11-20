@@ -171,7 +171,7 @@ const post = (body: unknown) =>
     body: typeof body === "string" ? body : JSON.stringify(body),
   });
 const stale = () => ({
-  session: { user: { id: "operator-1", authenticatedAt: new Date(Date.now() - 6 * 60 * 60_000).toISOString() } },
+  session: { user: { id: "operator-1", authenticatedAt: new Date(Date.now() - 9 * 60 * 60_000).toISOString() } },
 });
 
 const REQUEST_ID = "00000000-0000-4000-8000-000000000011";
@@ -254,7 +254,8 @@ test("a body outside the strict shape never reaches the store, and the store's i
     { ...CONFIRM, requestId: 1 },
     { ...CONFIRM, shown: { ...SHOWN, extra: true } },
     { ...CONFIRM, accuracy: { accuracy: "matched", mismatchedItems: ["a", "b", "c", "d"] } },
-    { requestId: REQUEST_ID, kind: "edit_confirm", operatorAnswer: "x".repeat(8193) },
+    // The one cap is the body store's (256 KiB of UTF-8, 2026-11-15); 8 KiB is no longer one.
+    { requestId: REQUEST_ID, kind: "edit_confirm", operatorAnswer: "x".repeat(256 * 1024 + 1) },
     "not json",
   ]) {
     reset();
@@ -262,6 +263,9 @@ test("a body outside the strict shape never reaches the store, and the store's i
     assert.equal(answer.status, 400, typeof body === "string" ? body : Object.keys(body).join(","));
     assert.deepEqual(world.boundaries, []);
   }
+  // An edited answer far past the old 8 KiB reaches the store.
+  reset();
+  assert.equal((await POST(post({ requestId: REQUEST_ID, kind: "edit_confirm", operatorAnswer: "x".repeat(100_000) }))).status, 200);
   reset({ storeError: new FakeWriteError("invalid_input") });
   const invalid = await POST(post({ requestId: REQUEST_ID, kind: "approve" }));
   assert.equal(invalid.status, 400);
@@ -290,7 +294,7 @@ test("an unknown outcome says so, and every other failure says it was not record
   const unknown = await POST(post(CONFIRM));
   assert.equal(unknown.status, 503);
   assert.deepEqual(await unknown.json(), { error: "outcome_unknown" });
-  for (const code of ["AMUX_DB_DEADLINE_EXCEEDED", "AMUX_DB_NOT_STARTED", "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED"]) {
+  for (const code of ["AMUX_DB_DEADLINE_EXCEEDED", "AMUX_DB_NOT_STARTED"]) {
     reset({ boundaryError: new FakeBoundaryError(code) });
     const failed = await POST(post(CONFIRM));
     assert.equal(failed.status, 503, code);

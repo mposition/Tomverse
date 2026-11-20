@@ -9,9 +9,25 @@ import { runMarketingAdminMutation } from "@/lib/marketingAdminMutations";
 import {
   MARKETING_S2B1_ACTIONS,
   editMarketingPost,
+  marketingEditAuditMetadata,
+  type MarketingTransaction,
 } from "@/lib/marketingStore";
 
 type RouteContext = { params: Promise<{ postId: string }> };
+
+/**
+ * The envelope this edit stores: the stored one with the new words, or null
+ * when the row is missing or unreadable (run() refuses those below). Read the
+ * same way for the audit entry and for the write, so both name one digest.
+ */
+async function editedEnvelope(tx: MarketingTransaction, postId: string, renderedText: string) {
+  const post = await tx.marketingPost.findUnique({
+    where: { id: postId },
+    select: { envelope: true },
+  });
+  const stored = post ? marketingEnvelopeSchema.safeParse(post.envelope) : null;
+  return stored?.success ? { ...stored.data, renderedText } : null;
+}
 
 const schema = z
   .object({
@@ -58,7 +74,14 @@ export async function POST(req: Request, context: RouteContext) {
     gate: "manual_approval",
     bucket: "admin-marketing-post-edit",
     schema,
-    metadata: (body) => ({ digest: body.expectedEnvelopeDigest }),
+    // The entry names the envelope the edit stores, not only the one it
+    // replaces: the store and the template loader both require that pair.
+    metadata: async (body, tx) => {
+      const envelope = await editedEnvelope(tx, postId, body.renderedText);
+      return envelope
+        ? marketingEditAuditMetadata({ expectedEnvelopeDigest: body.expectedEnvelopeDigest, envelope })
+        : { previousDigest: body.expectedEnvelopeDigest };
+    },
     run: async (tx, { body, auditLogId }) => {
       const post = await tx.marketingPost.findUnique({
         where: { id: postId },

@@ -24,6 +24,7 @@ export default async function AssistantProfilePage({
     return (
         <main>
             <AssistantProfileEditor
+                key={profileId}
                 profileId={profileId}
                 knowledgeEnabled={knowledgeEnabled}
                 assistantKnowledgeGuideActive={isAssistantKnowledgeGuideValue(

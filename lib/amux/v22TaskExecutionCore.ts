@@ -1,29 +1,10 @@
-/** V22 Tasks need their own environment gate, not the legacy execution switch. */
-export const AMUX_V22_TASK_EXECUTION_CODE_LATCH = true;
-export const AMUX_V22_TASK_EXECUTION_ENV = "TOMVERSE_AMUX_V22_TASK_EXECUTION";
-
-export function amuxV22TaskExecutionEnabled(value: string | undefined) {
-  return AMUX_V22_TASK_EXECUTION_CODE_LATCH && value === "enabled";
-}
-
-/** Orchestration policy v49 opens the code latch for the public PR path. The
- * path still needs its own runtime switch, engineering mode t1 and a verified
- * image proof; opening this latch alone publishes nothing. */
-export const AMUX_V22_ENGINEERING_PUBLICATION_CODE_LATCH = true;
+/** Orchestration policy v49 opens the public PR path. The path still needs
+ * its own runtime switch (an external post boundary), engineering mode t1 and a
+ * verified image proof; the switch is exactly `enabled`. */
 export const AMUX_V22_ENGINEERING_PUBLICATION_ENV =
   "TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION";
 
 export function amuxV22EngineeringPublicationEnabled(value: string | undefined) {
-  return AMUX_V22_ENGINEERING_PUBLICATION_CODE_LATCH && value === "enabled";
-}
-
-/** The box bridge refuses unknown delivery fields, so the publication base
- * is sent only once the operator has rolled out a bridge and sidecar that
- * read it. Default off. */
-export const AMUX_V22_DELIVERY_BASE_SHA_ENV =
-  "TOMVERSE_AMUX_V22_DELIVERY_BASE_SHA";
-
-export function amuxV22DeliveryBaseShaEnabled(value: string | undefined) {
   return value === "enabled";
 }
 
@@ -72,16 +53,21 @@ export function amuxV22DeliveryBudgetMicrousd(reservedMicrousd: number,
  * of receipts cannot turn an unobserved second call into a successful run. */
 /** The usage source each one-shot executor writes, by assignment provider. */
 export type V22ExecutionSource = "claude_result" | "anthropic_messages_api" |
-  "codex_jsonl" | "copilot_json" | "cursor_stream";
+  "codex_jsonl" | "copilot_json" | "cursor_stream" | "antigravity_stream";
 const V22_EXECUTOR_BY_SOURCE: Record<V22ExecutionSource, string> = {
   claude_result: "claude", anthropic_messages_api: "anthropic_api",
   codex_jsonl: "codex", copilot_json: "copilot", cursor_stream: "cursor",
+  antigravity_stream: "antigravity",
 };
-const V22_UNATTESTED_SOURCES = new Set<V22ExecutionSource>(["codex_jsonl", "cursor_stream"]);
+// Antigravity's `init` only echoes the requested model; nothing names the
+// model that answered.
+const V22_UNATTESTED_SOURCES = new Set<V22ExecutionSource>(["codex_jsonl", "cursor_stream",
+  "antigravity_stream"]);
 export const v22ExecutionSourceForProvider = (provider: string): V22ExecutionSource | null =>
   ({ anthropic: "claude_result", openai: "codex_jsonl",
-    "github-copilot": "copilot_json", cursor: "cursor_stream" } as const)[
-    provider as "anthropic" | "openai" | "github-copilot" | "cursor"] ?? null;
+    "github-copilot": "copilot_json", cursor: "cursor_stream",
+    antigravity: "antigravity_stream" } as const)[
+    provider as "anthropic" | "openai" | "github-copilot" | "cursor" | "antigravity"] ?? null;
 
 export function v22ExecutionReceiptVerified(input: {
   attemptId: string;

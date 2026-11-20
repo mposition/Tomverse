@@ -4,8 +4,12 @@ import { dirname, join, normalize } from "node:path";
 import test from "node:test";
 
 import {
+  GITHUB_LIST_MAX_PAGES,
   haltOf,
+  nextPageUrl,
   observeUnbound,
+  readGitHubList,
+  readNamespace,
   runRunnerCycle,
 } from "../scripts/engineering-agent-runner-core.mjs";
 import { superviseCycle, SUPERVISED_ENV } from "../scripts/engineering-agent-supervisor.mjs";
@@ -131,8 +135,15 @@ test("a branch or pull request passes only at a bound head or an allowed commit,
   const bound = { number: 7, headRef: "agent/engineering/111", headSha: A, body: prBodyMarker("111") };
 
   assert.equal(await observe([{ ref: "refs/heads/agent/engineering/111", sha: A }], [bound]), "none");
-  assert.equal(await observe([{ ref: "refs/heads/agent/engineering/111", sha: B }], []), "unbound_app_ref", "a bound run's branch moved");
-  assert.equal(await observe([], [{ ...bound, headSha: B }]), "unbound_app_pr", "a bound pull request's head moved");
+  // Owner decision 2026-11-15: a bound card's own pull request moved by a
+  // person or the CI auto-fix (#3942, #3944) is that card's, not unbound.
+  assert.equal(await observe([{ ref: "refs/heads/agent/engineering/111", sha: B }], []), "none", "a bound run's branch moved");
+  assert.equal(await observe([], [{ ...bound, headSha: B }]), "none", "a bound pull request's head moved");
+  const moved = await readNamespace({ refs: [{ ref: "refs/heads/agent/engineering/111", sha: B }], pulls: [{ ...bound, headSha: B }],
+    known, commitDigestAt });
+  assert.deepEqual(moved, { verdict: "none", subject: null, moved: 2 });
+  // Another run's branch name on a bound number is still unbound.
+  assert.equal(await observe([], [{ ...bound, headRef: "agent/engineering/222", headSha: C }]), "unbound_app_pr");
   assert.equal(
     await observe([{ ref: "refs/heads/agent/engineering/222", sha: C }], [{ number: 8, headRef: "agent/engineering/222", headSha: C, body: prBodyMarker("222") }]),
     "none",
@@ -152,10 +163,21 @@ test("a branch or pull request passes only at a bound head or an allowed commit,
   const { app, calls } = fakeApp();
   const result = await runRunnerCycle(ports(app, { refs: [{ ref: "refs/heads/agent/engineering/999", sha: A }], pulls: [] }));
   assert.deepEqual(result, { finishedNormally: true, halt: "unbound_app_ref", reason: "observed_unbound" });
-  assert.deepEqual(calls.find((call) => call.path === "observe/halt").body, { halt: "unbound_app_ref" });
+  // The halt names its branch, and the observer round still runs after it.
+  assert.deepEqual(calls.find((call) => call.path === "observe/halt").body,
+    { halt: "unbound_app_ref", subject: { ref: "refs/heads/agent/engineering/999" } });
+  assert.deepEqual(calls.map((call) => call.path),
+    ["worker/register", "observe/known", "observe/known", "observe/halt", "observe/pull-requests", "worker/heartbeat"]);
   assert.equal(calls.some((call) => call.path === "run/start"), false, "nothing starts after an unbound observation");
   assert.equal(shouldSendSuccessHeartbeat(result), false);
 
+  // A later clean reading clears the halt an earlier one recorded; with none holding, nothing is sent.
+  const at = "2026-11-15T01:02:03.004Z";
+  const explained = fakeApp({ "observe/known": { status: 200,
+    json: { bindings: [], consumed: [], observedHalt: "unbound_app_pr", observedHaltAt: at } } });
+  assert.deepEqual(await runRunnerCycle(ports(explained.app)), { finishedNormally: true, halt: "none", reason: "observed" });
+  // It names the halt it saw (review r-20261115-120115-261135): a later halt is not cleared by this reading.
+  assert.deepEqual(explained.calls.find((call) => call.path === "observe/halt").body, { halt: "none", observedAt: at });
   const unreadable = fakeApp({ "observe/known": { status: 500, json: null } });
   assert.equal((await runRunnerCycle(ports(unreadable.app))).finishedNormally, false);
 });
@@ -196,10 +218,11 @@ test("an unreadable commit leaves the observation undetermined, and a bound run 
     bindings: [{ runId: "222", prNumber: 7, headSha: A, verifiedHeadSha: A }],
     consumed: [{ runId: "222", commitDigest: allowed }],
   };
+  // A bound run's branch anywhere else is its card's moved pull request, and an
+  // earlier allowed commit is not the run's once bound.
   assert.equal(
     await observeUnbound({ refs: [{ ref: "refs/heads/agent/engineering/222", sha: C }], pulls: [], known: bound, commitDigestAt: async () => allowed }),
-    "unbound_app_ref",
-    "once bound, an earlier allowed commit is not the run's",
+    "none",
   );
 });
 
@@ -219,7 +242,8 @@ test("a list GitHub did not give whole leaves the round undetermined, and a defi
   const { app, calls } = fakeApp();
   const round = await runRunnerCycle(ports(app, { refs: [{ ref: "refs/heads/agent/engineering/5", sha: "a".repeat(40) }], pulls: null }));
   assert.equal(round.halt, "unbound_app_ref");
-  assert.deepEqual(calls.find((call) => call.path === "observe/halt").body, { halt: "unbound_app_ref" });
+  assert.deepEqual(calls.find((call) => call.path === "observe/halt").body,
+    { halt: "unbound_app_ref", subject: { ref: "refs/heads/agent/engineering/5" } });
   const quiet = fakeApp();
   const undetermined = await runRunnerCycle(ports(quiet.app, { refs: [], pulls: null }));
   assert.deepEqual(undetermined, { finishedNormally: false, halt: "unknown", reason: "observation_undetermined" });
@@ -239,7 +263,61 @@ test("a first page of more is judged for what it holds, and never read as the wh
   const { app, calls } = fakeApp();
   const round = await runRunnerCycle(ports(app, { refs: [], pulls: page, refsComplete: true, pullsComplete: false }));
   assert.equal(round.halt, "unbound_app_pr");
-  assert.deepEqual(calls.find((call) => call.path === "observe/halt").body, { halt: "unbound_app_pr" });
+  assert.deepEqual(calls.find((call) => call.path === "observe/halt").body, { halt: "unbound_app_pr", subject: { prNumber: 3 } });
+});
+
+test("a GitHub list is read page after page, so more than 100 open pull requests still decide the round", async () => {
+  const origin = "https://api.github.com";
+  const repo = `${origin}/repos/mposition/Tomverse`;
+  // GitHub names the next pages by the numeric repository path, not the one asked.
+  const byId = `${origin}/repositories/1023456789`;
+  const linkTo = (page) => `<${byId}/pulls?state=open&per_page=100&page=${page}>; rel="next", <${byId}/pulls?page=9>; rel="last"`;
+  const pages = {
+    [`${repo}/pulls?state=open&per_page=100`]: { status: 200, link: linkTo(2), body: [{ number: 1 }] },
+    [`${byId}/pulls?state=open&per_page=100&page=2`]: { status: 200, link: linkTo(3), body: [{ number: 2 }] },
+    [`${byId}/pulls?state=open&per_page=100&page=3`]: { status: 200, link: `<${byId}/pulls?page=1>; rel="first"`, body: [{ number: 3 }] },
+  };
+  const fetched = [];
+  const fetchPage = async (url) => {
+    fetched.push(url);
+    return pages[url] ?? null;
+  };
+  const first = `${repo}/pulls?state=open&per_page=100`;
+  assert.deepEqual(await readGitHubList(fetchPage, first, { origin }), {
+    items: [{ number: 1 }, { number: 2 }, { number: 3 }],
+    complete: true,
+  });
+  assert.equal(fetched.length, 3);
+
+  // The page limit keeps what was read and says it is not the whole list.
+  assert.deepEqual(await readGitHubList(fetchPage, first, { origin, maxPages: 2 }), {
+    items: [{ number: 1 }, { number: 2 }],
+    complete: false,
+  });
+  // A failed page makes the whole list unread, never a shorter whole list.
+  const failing = async (url) => (url === first ? pages[first] : null);
+  assert.equal(await readGitHubList(failing, first, { origin }), null);
+  const notAList = async (url) => (url === first ? pages[first] : { status: 200, link: null, body: { message: "x" } });
+  assert.equal(await readGitHubList(notAList, first, { origin }), null);
+  // The read token goes with every page, so a next link off the API origin is not followed.
+  for (const link of [
+    '<https://evil.example/pulls?page=2>; rel="next"',
+    '<https://api.github.com.evil.example/pulls?page=2>; rel="next"',
+    '<http://api.github.com/repositories/1/pulls?page=2>; rel="next"',
+    '<not a url>; rel="next"',
+  ]) {
+    const offOrigin = async () => ({ status: 200, link, body: [{ number: 1 }] });
+    assert.deepEqual(await readGitHubList(offOrigin, first, { origin }), { items: [{ number: 1 }], complete: false }, link);
+  }
+  // No ref under the prefix is a 404: the empty, whole list.
+  const notFound = async () => ({ status: 404, link: null, body: { message: "Not Found" } });
+  assert.deepEqual(await readGitHubList(notFound, first, { origin, notFoundIsEmpty: true }), { items: [], complete: true });
+  assert.equal(await readGitHubList(notFound, first, { origin }), null);
+
+  assert.equal(nextPageUrl(null), null);
+  assert.equal(nextPageUrl(`<${origin}/a?page=1>; rel="prev", <${origin}/a?page=3>; rel="next"`), `${origin}/a?page=3`);
+  assert.equal(nextPageUrl(`<${origin}/a?page=1>; rel="first"`), null);
+  assert.equal(GITHUB_LIST_MAX_PAGES >= 2, true);
 });
 
 test("the app's records must not move while GitHub is read, or nothing is judged", async () => {

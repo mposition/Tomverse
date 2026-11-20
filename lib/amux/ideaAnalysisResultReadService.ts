@@ -150,8 +150,7 @@ export async function readAmuxFirstIdeaAnalysisResultForDataOwner(
         meta.cardRegistrationStarted !== false ||
         !(needsOwnerInput ? meta.outcome === "needs_information" :
           partial ? meta.outcome === "propose" :
-          ["propose", "reject"].includes(String(meta.outcome))) ||
-        units.length > 40) {
+          ["propose", "reject"].includes(String(meta.outcome)))) {
       throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
     }
     if (partial) {

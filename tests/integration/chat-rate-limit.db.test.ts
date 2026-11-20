@@ -761,6 +761,8 @@ test("a rate rejection carries a usable wait, a future reset, and nothing intern
         })
     );
 
+    const after = new Date();
+
     assert.equal(error.status, 429);
     // The header a proxy reads and the field the UI counts down from are the
     // same number, so the two never disagree on screen.
@@ -768,9 +770,11 @@ test("a rate rejection carries a usable wait, a future reset, and nothing intern
     assert.equal(error.details?.retryAfterSeconds, error.retryAfter);
     const resetAt = new Date(String(error.details?.resetAt));
     assert.ok(resetAt.getTime() > before.getTime());
-    // The wait must actually reach the reset, not stop short of it.
+    // The wait must actually reach the reset, not stop short of it. The server
+    // read its clock between `before` and `after`, so measuring from `after`
+    // is the bound that always holds.
     assert.ok(
-        resetAt.getTime() - before.getTime() <= (error.retryAfter ?? 0) * 1000
+        resetAt.getTime() - after.getTime() <= (error.retryAfter ?? 0) * 1000
     );
 
     const publicDetails = publicChatErrorDetails(error.details) ?? {};

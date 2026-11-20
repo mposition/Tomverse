@@ -1,3 +1,5 @@
+import type { ResearchPreviewControls } from "../../../components/chat/useResearchPreview";
+import { researchPreviewCopy } from "../../../locales/researchPreview";
 import { useEffect, useState } from "react";
 import { ArrowUpRight, Camera, ChevronRight, File, Globe, UserRound } from "lucide-react";
 import { NativeLocationControl } from "./NativeLocationControl";
@@ -11,7 +13,8 @@ import "./composerTools.css";
 
 export type ComposerAction = { label: string; disabled?: boolean; onSelect: () => void };
 export type ToolChange = { webSearchMode?: "off" | "always"; assistantProfileId?: string | null };
-export function ComposerTools({ locationIdentity = null, transport, language, conversation, onChange, onFiles, onPhotos, onClose, extraTools }: {
+export function ComposerTools({ researchPreview, researchAttachments = false, locationIdentity = null, transport, language, conversation, onChange, onFiles, onPhotos, onClose, extraTools }: {
+  researchPreview?: ResearchPreviewControls; researchAttachments?: boolean;
   locationIdentity?: string | null;
   transport: ChatTransport; language: MobileLanguage; conversation?: Conversation | null;
   extraTools?: ComposerAction[];
@@ -49,7 +52,7 @@ export function ComposerTools({ locationIdentity = null, transport, language, co
           <span className="tool-copy">{tools.search}<small>{tools.searchHint}</small></span>
           <input className="tool-switch" type="checkbox" role="switch" aria-label={tools.search} checked={conversation ? conversation.webSearchMode === "always" : true} disabled={busy || !onChange} onChange={event => void change({ webSearchMode: event.target.checked ? "always" : "off" })} />
         </label>
-        {transport.location && <NativeLocationControl presentation="tools" session={transport.location} identity={locationIdentity} language={language} />}
+        {transport.location && !researchPreview?.selected && <NativeLocationControl presentation="tools" session={transport.location} identity={locationIdentity} language={language} />}
         <label className="tool-row tool-assistant">
           <UserRound className="tool-icon" size={22} aria-hidden="true" /><span className="tool-copy">{tools.assistant}</span>
           <select aria-label={tools.assistant} value={conversation?.assistantProfileId ?? ""} disabled={busy || !onChange || !profiles.length} onChange={event => void change({ assistantProfileId: event.target.value || null })}>
@@ -57,6 +60,11 @@ export function ComposerTools({ locationIdentity = null, transport, language, co
           </select>
           <span className="tool-selected" aria-hidden="true">{profiles.find(profile => profile.id === conversation?.assistantProfileId)?.name ?? tools.defaultAssistant}<ChevronRight size={18} /></span>
         </label>
+        {researchPreview?.offered && <button type="button" className="tool-row tool-action" data-testid="native-tools-research-preview"
+          aria-pressed={researchPreview.selected} disabled={busy || researchAttachments}
+          onClick={() => { researchPreview.onSelectedChange(!researchPreview.selected); onClose(); }}>
+          <span className="tool-copy">{researchPreviewCopy[language].researchPreviewTitle}<small>{researchAttachments ? researchPreviewCopy[language].researchPreviewAttachments : researchPreviewCopy[language].researchPreviewDescription}</small></span>
+        </button>}
         {extraTools?.map(action => <button type="button" className="tool-row tool-action" key={action.label} disabled={busy || action.disabled} onClick={() => { onClose(); action.onSelect(); }}>{action.label}<ArrowUpRight size={20} aria-hidden="true" /></button>)}
       </div>
       <p className="tool-scope">{tools.applies}</p>

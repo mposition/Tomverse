@@ -2,11 +2,6 @@ import type { AmuxAnalysisCard, AmuxAnalysisNode } from "./ideaAnalysisChunkCore
 import { inspectAmuxHierarchyChoices, type AmuxHierarchyChoice,
   type AmuxHierarchySnapshotNode } from "./ideaHierarchyDecisionCore.ts";
 
-export const AMUX_V4_RESOLUTION_PREVIEW_ENV = "TOMVERSE_AMUX_V4_RESOLUTION_PREVIEW";
-export const AMUX_V4_RESOLUTION_PREVIEW_CODE_ENABLED = true;
-export const amuxV4ResolutionPreviewEnabled = (value: string | undefined): boolean =>
-  AMUX_V4_RESOLUTION_PREVIEW_CODE_ENABLED && value === "enabled";
-
 /** A08 is a decision preview, not a registration or an approval receipt.
  * Stage 9 must re-read every referenced row and consume a separate owner
  * confirmation in the same transaction as its canonical writes. */
@@ -78,10 +73,7 @@ export function inspectAmuxResolutionChoices(input: {
 }): AmuxResolutionInspection {
   if (!input || !Array.isArray(input.nodes) || !Array.isArray(input.cards) ||
       !Array.isArray(input.nodeChoices) || !Array.isArray(input.cardChoices) ||
-      !Array.isArray(input.existingNodes) || !Array.isArray(input.existingCards) ||
-      input.nodes.length > 40 || input.cards.length > 40 ||
-      input.nodeChoices.length > 40 || input.cardChoices.length > 40 ||
-      input.existingNodes.length > 1_000 || input.existingCards.length > 1_000) {
+      !Array.isArray(input.existingNodes) || !Array.isArray(input.existingCards)) {
     return { ok: false, code: "invalid_input" };
   }
   const nodeIds = new Set<string>();
@@ -156,7 +148,7 @@ export function inspectAmuxResolutionChoices(input: {
     if (!choice || !validRef(choice.proposalLocalId) ||
         !cards.has(choice.proposalLocalId) || choices.has(choice.proposalLocalId) ||
         !["register", "link_existing", "split", "merge", "reject"].includes(choice.action) ||
-        !Array.isArray(choice.relatedLocalRefs) || choice.relatedLocalRefs.length > 40 ||
+        !Array.isArray(choice.relatedLocalRefs) ||
         choice.relatedLocalRefs.some((ref: unknown) => !validRef(ref)) ||
         new Set(choice.relatedLocalRefs).size !== choice.relatedLocalRefs.length ||
         (choice.reason !== null && !validReason(choice.reason)) ||

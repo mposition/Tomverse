@@ -129,9 +129,15 @@ export default defineConfig({
         "postgresql://e2e:e2e@127.0.0.1:1/e2e?connect_timeout=1",
       E2E_AUTH_BYPASS: "true",
       E2E_DISABLE_DATABASE: "true",
+      // Match the product default; a focused run exercises the explicit off switch.
+      GENERATED_ARTIFACT_REVISION_ENABLED: process.env.E2E_GENERATED_ARTIFACT_REVISION_ENABLED ?? "true",
       // Location specs mock intent decisions; exercise the enabled client path.
       // The isolated server blocks external network and has no router setting.
       TOMVERSE_CHAT_LOCATION_INTENT_ENABLED: process.env.E2E_CHAT_LOCATION_INTENT_ENABLED ?? "true",
+      CHAT_PARALLEL_PREPARATION_ENABLED: process.env.E2E_CHAT_PARALLEL_PREPARATION_ENABLED ?? "true",
+      CHAT_ROUTER_LOCATION_FUSION_ENABLED: process.env.E2E_CHAT_ROUTER_LOCATION_FUSION_ENABLED ?? "false",
+      CHAT_EXISTING_ROUTER_LOCATION_FUSION_ENABLED: process.env.E2E_CHAT_EXISTING_ROUTER_LOCATION_FUSION_ENABLED ?? "false",
+      CHAT_FRESH_LOCATION_PREPARATION_ENABLED: process.env.E2E_CHAT_FRESH_LOCATION_PREPARATION_ENABLED ?? "true",
       // The assistant knowledge flag lives in `AppSetting`, which the line
       // above removes -- so without this the panel never renders and the
       // specs that mock its endpoint assert against nothing. Safe only in

@@ -3,6 +3,13 @@ import test, { mock } from "node:test";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { renderDocumentDocx } from "../../lib/generatedArtifactDocx";
+import { renderPresentationPptx } from "../../lib/generatedArtifactPptx";
+import { renderWorkbook } from "../../lib/generatedArtifactXlsx";
+import { admitWorkbookSpecSafely } from "../../lib/generatedArtifactCore";
+import { canonicalWorkbookSpecFor } from "../../lib/generatedArtifactWorkbookRevision";
+import { CHAT_ATTACHMENT_PARSE_CHARACTERS } from "../../lib/chatAttachmentLimits";
 
 /*
   The real `ai`, imported statically rather than through `createRequire`.
@@ -93,6 +100,8 @@ type StreamScript = {
   finishReason: string;
   rawFinishReason: string;
   text: string;
+  /** The provider stream breaks with this after `text`, instead of closing. */
+  failAfterText?: unknown;
 };
 
 let script: StreamScript = {
@@ -114,12 +123,17 @@ type ArtifactRow = {
   objectKey: string | null;
   failureCode?: string;
   modelId: string | null;
+  parentArtifactId?: string | null;
+  lineageId?: string | null;
 };
 
 const world = {
   artifactRows: [] as ArtifactRow[],
   messages: [] as Array<{ id: string; status: string; modelId: string }>,
   providerContexts: [] as Array<{ messageId: string }>,
+  uploads: [] as Array<{ id: string; name: string; mediaType: string; size: number; kind: string; objectKey: string;
+    sourceArtifactId?: string | null; sourceLineageId?: string; sourceConversationId?: string; sourceCanonicalSpec?: unknown }>,
+  inputObjects: new Map<string, Buffer>(),
 };
 
 mock.module("next-auth/next", {
@@ -196,7 +210,13 @@ mock.module("ai", {
           async start(controller) {
             await driven;
             controller.enqueue(script.text);
+            // Erroring here would discard the text just queued. A provider
+            // stream that breaks does so after its last chunk was read.
+            if (script.failAfterText) return;
             controller.close();
+          },
+          pull(controller) {
+            if (script.failAfterText) controller.error(script.failAfterText);
           },
         }),
         response: Promise.resolve({
@@ -252,6 +272,7 @@ const DEFAULTS: Record<string, () => unknown> = {
 };
 
 const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
+  messageAttachmentUpload: { findMany: () => world.uploads },
   conversation: {
     findUnique: () => ({
       id: CONVERSATION_ID,
@@ -298,6 +319,8 @@ const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
       world.artifactRows.map((row, index) => ({
         id: `row_${index + 1}`,
         ordinal: row.ordinal,
+        parentArtifactId: row.parentArtifactId ?? null,
+        lineageId: row.lineageId ?? null,
       })),
   },
 };
@@ -412,6 +435,7 @@ let forcedAutoRoute: string | null = null;
 let forcedRouterOutput: Record<string, unknown> | null = null;
 let forcedImageIntent = false;
 let imageIntentCalls = 0;
+let imageIntentText: string | null = null;
 let routerDecisionKept: boolean | null = null;
 const routerCore = require(resolve(ROOT, "lib/autoLlmRouterCore.ts")) as typeof import("../../lib/autoLlmRouterCore");
 const realLlmRouter = require(resolve(ROOT, "lib/autoLlmRouter.ts")) as typeof import("../../lib/autoLlmRouter");
@@ -429,8 +453,9 @@ mock.module(mod("lib/autoLlmRouter.ts"), { namedExports: {
 const realImageIntent = require(resolve(ROOT, "lib/chatImageIntent.ts")) as typeof import("../../lib/chatImageIntent");
 mock.module(mod("lib/chatImageIntent.ts"), { namedExports: {
   ...realImageIntent,
-  createChatTurnImageRouting: (input: unknown) => {
+  createChatTurnImageRouting: (input: { text?: string } | null) => {
     if (input) imageIntentCalls += 1;
+    imageIntentText = input?.text ?? null;
     return {
       context: undefined,
       accept: () => {},
@@ -440,6 +465,42 @@ mock.module(mod("lib/chatImageIntent.ts"), { namedExports: {
     };
   },
 } });
+
+/*
+  A Prompt Refiner decision the browser held before the send. In an existing
+  Auto Chat conversation the product Refiner prepares every send, so a
+  follow-up such as "make it night" arrives carrying one (G4 recording,
+  2026-11-15, trace 72eeb69c). Inert unless a test sends a decision.
+*/
+const refinerEvents: string[] = [];
+mock.module(mod("lib/promptRefinerChatExecutionRelease.ts"), { namedExports: {
+  promptRefinerChatExecutionRelease: async () => ({ explicitEnabled: false, autoEnabled: true }),
+} });
+mock.module(mod("lib/promptRefinerChatExecutionStore.ts"), { namedExports: {
+  previewPromptRefinerChatExecution: async (input: { messages: Array<{ role: string; content: string }> }) => {
+    refinerEvents.push("preview");
+    return { executionMessages: input.messages.map((message, index) => index === input.messages.length - 1
+      ? { ...message, content: "Refined execution prompt" } : message),
+      mode: "auto" as const, provenance: { decision: "accepted" as const } };
+  },
+  consumePreviewedPromptRefinerChatExecution: async (_input: unknown, preview: unknown) => {
+    refinerEvents.push("consume");
+    return preview;
+  },
+} });
+mock.module(mod("lib/chatDurableRecoveryAccess.ts"), { namedExports: {
+  authorizeChatRecoveryScope: async () => ({ ok: true, conversationId: CONVERSATION_ID }),
+} });
+const realApiSecurity = require(resolve(ROOT, "lib/apiSecurity.ts")) as Record<string, unknown>;
+mock.module(mod("lib/apiSecurity.ts"), { namedExports: {
+  ...realApiSecurity,
+  consumeApiRateLimit: async (...args: unknown[]) => args[2] === "chat-durable-attempt"
+    ? undefined
+    : (realApiSecurity.consumeApiRateLimit as (...rest: unknown[]) => Promise<unknown>)(...args),
+} });
+const SOURCE_USER_MESSAGE_ID = "22222222-3333-4444-8555-666666666666";
+const REFINER_DECISION = { suggestionId: "33333333-4444-4555-8666-777777777777",
+  scopeId: "44444444-5555-4666-8777-888888888888", epoch: 1, decision: "accepted" };
 
 const routedSelection = (modelId: string) => ({
   routed: true,
@@ -475,10 +536,11 @@ const routedSelection = (modelId: string) => ({
 mock.module(mod("lib/autoModelSelection.ts"), {
   namedExports: {
     ...realAutoSelection,
-    selectAutoModel: (input: unknown) =>
-      forcedAutoRoute
+    selectAutoModel: (input: unknown) => {
+      return forcedAutoRoute
         ? routedSelection(forcedAutoRoute)
-        : realAutoSelection.selectAutoModel(input),
+        : realAutoSelection.selectAutoModel(input);
+    },
   },
 });
 
@@ -522,6 +584,16 @@ mock.module(mod("lib/generatedArtifactStorage.ts"), {
     discardStoredArtifacts: async () => undefined,
   },
 });
+
+const realR2 = require(resolve(ROOT, "lib/r2.ts")) as Record<string, unknown>;
+mock.module(mod("lib/r2.ts"), { namedExports: {
+  ...realR2,
+  readR2Object: async (key: string) => {
+    const bytes = world.inputObjects.get(key);
+    assert.ok(bytes, "only local input fixture objects may be read");
+    return Buffer.from(bytes);
+  },
+} });
 
 // Nothing here may reach a provider or any other network endpoint.
 let networkCalls = 0;
@@ -585,8 +657,15 @@ const ask = async (
     autoRoutedTo = null,
     routerOutput = null,
     imageIntent = false,
-  }: { modelId?: string; autoRoutedTo?: string | null; routerOutput?: Record<string, unknown> | null; imageIntent?: boolean } = {}
+    refinerDecision = false,
+    prompt = null,
+    messages = [{ role: "user", content: prompt ?? "이 PPT를 웹페이지로 만들어줘" }],
+    expectedStatus = 200,
+  }: { modelId?: string; autoRoutedTo?: string | null; routerOutput?: Record<string, unknown> | null; imageIntent?: boolean;
+    refinerDecision?: boolean; prompt?: string | null;
+    messages?: Array<{ role: string; content: string; attachments?: Array<{ uploadId: string }> }>; expectedStatus?: number } = {}
 ) => {
+  refinerEvents.length = 0;
   forcedAutoRoute = autoRoutedTo;
   forcedRouterOutput = routerOutput;
   forcedImageIntent = imageIntent;
@@ -612,18 +691,40 @@ const ask = async (
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        messages: [{ role: "user", content: "이 PPT를 웹페이지로 만들어줘" }],
+        // A held Refiner decision names its source message, so the last
+        // user turn carries that id.
+        messages: refinerDecision
+          ? messages.map((m, i) => (i === messages.length - 1 ? { ...m, id: SOURCE_USER_MESSAGE_ID } : m))
+          : messages,
         modelId,
         conversationId: CONVERSATION_ID,
         assistantMessageId: ASSISTANT_MESSAGE_ID,
+        ...(refinerDecision ? { sourceUserMessageId: SOURCE_USER_MESSAGE_ID, promptRefinerDecision: REFINER_DECISION } : {}),
       }),
     })
   );
-  if (response.status !== 200) {
+  if (response.status !== expectedStatus) {
     throw new Error(`status ${response.status}: ${await response.text()}`);
   }
-  const body = await response.text();
-  return { body, trailer: readTrailer(body) };
+  const mode = response.headers.get("X-Chat-Response-Mode");
+  // Read chunk by chunk rather than with `text()`: a stream the route fails
+  // part way still delivered what came before the break, and one test below
+  // is about exactly those bytes.
+  let body = "";
+  let streamError: unknown = null;
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      body += decoder.decode(value, { stream: true });
+    }
+  } catch (error) {
+    if (!script.failAfterText) throw error;
+    streamError = error;
+  }
+  return { body, mode, trailer: response.status === 200 ? readTrailer(body) : null, streamError };
 };
 
 /**
@@ -1027,10 +1128,11 @@ test("Auto routing to an unverified model registers no file tool and says Auto c
   ]) {
     assert.equal(tools[name], undefined, `${name} was registered for an unverified model`);
   }
-  // The remedy names what the user can actually change: Auto made this
-  // choice, so "choose a different model" alone would point at a picker the
-  // user did not use.
-  assert.match(promptText(), /instead of Auto/);
+  // Auto made this choice, so the remedy is to ask again -- Auto routes a file
+  // request to a model that can create files -- never "turn Auto off" or
+  // "choose a model yourself", which names a choice the user did not make.
+  assert.match(promptText(), /sending the same request again: Auto routes a file request/);
+  assert.match(promptText(), /do not tell them to turn Auto off/);
   assert.deepEqual(world.artifactRows, []);
 });
 
@@ -1042,8 +1144,35 @@ test("file intent with no capable candidate keeps the refusal in Chat despite a 
   assert.equal(routerDecisionKept, true, "a file request remains a Chat routing decision");
   assert.ok(lastStreamTextOptions, "the turn was incorrectly handed off to the image workspace");
   assert.equal((lastStreamTextOptions.tools as Record<string, unknown> | undefined)?.create_text_file, undefined);
-  assert.match(promptText(), /instead of Auto/);
+  assert.match(promptText(), /sending the same request again: Auto routes a file request/);
+  assert.match(promptText(), /do not tell them to turn Auto off/);
   assert.deepEqual(world.artifactRows, []);
+});
+
+/*
+  G4 recording, 2026-11-15 (trace 72eeb69c): in an existing Auto Chat the
+  product Refiner holds a decision on every send, and the route then skipped
+  the image classification entirely -- "Make it night, with snow falling."
+  after an image answer was answered as text.
+*/
+test("a follow-up that carries a held Refiner decision still gets the image classification", async () => {
+  const { mode } = await ask({}, { autoRoutedTo: MODEL_ID, imageIntent: true, refinerDecision: true,
+    prompt: "Make it night, with snow falling." });
+  assert.equal(imageIntentCalls, 1, "the Refiner decision must not switch the image classification off");
+  assert.equal(imageIntentText, "Make it night, with snow falling.",
+    "the image classification reads the authored message, not the Refiner's execution text");
+  assert.equal(mode, "image-turn");
+  assert.equal(lastStreamTextOptions, null, "an image turn calls no chat model");
+  assert.deepEqual(refinerEvents, ["preview"], "an image turn ends before the Refiner decision is consumed");
+});
+
+test("an ordinary follow-up with a held Refiner decision stays a text turn and consumes it once", async () => {
+  const { mode } = await ask({}, { autoRoutedTo: MODEL_ID, refinerDecision: true, prompt: "Why is snow white?" });
+  assert.equal(imageIntentCalls, 1);
+  assert.notEqual(mode, "image-turn");
+  assert.ok(lastStreamTextOptions, "the text turn reaches the chat model");
+  assert.match(promptText(), /Refined execution prompt/, "the text turn still runs the Refiner's execution view");
+  assert.deepEqual(refinerEvents, ["preview", "consume"]);
 });
 
 test("a manual turn on an unverified model keeps the plain remedy, with no mention of Auto", async () => {
@@ -1052,7 +1181,7 @@ test("a manual turn on an unverified model keeps the plain remedy, with no menti
   const tools = (lastStreamTextOptions!.tools ?? {}) as Record<string, unknown>;
   assert.equal(tools.create_text_file, undefined);
   assert.match(promptText(), /choosing a different model/);
-  assert.doesNotMatch(promptText(), /instead of Auto/);
+  assert.doesNotMatch(promptText(), /Auto routes a file request/);
 });
 
 /* -------------------------------------------------------------------------- */
@@ -1280,3 +1409,295 @@ test(
     );
   }
 );
+
+/* GF-13: latest-turn inputs reach the final answer provider whole or are refused. */
+const officeRevisionMime = {
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+};
+const addInputFixture = (id: string, extension: string, bytes: Buffer) => {
+  const prefix = `attachments/${createHash("sha256").update("artifact-qa@tomverse.app").digest("hex").slice(0, 20)}/`;
+  const row = { id, name: `${id}.${extension}`, mediaType: extension === "csv" ? "text/csv"
+    : extension === "txt" ? "text/plain" : officeRevisionMime[extension as keyof typeof officeRevisionMime],
+    size: bytes.length, kind: extension === "txt" || extension === "csv" ? "text" : "file", objectKey: `${prefix}${id}` };
+  world.uploads.push(row);
+  world.inputObjects.set(row.objectKey, bytes);
+  return { uploadId: id };
+};
+const clearInputFixtures = () => { world.uploads = []; world.inputObjects.clear(); };
+const revisionDocx = (text: string) => Buffer.from(renderDocumentDocx({ filename: "source.docx", format: "docx",
+  blocks: [{ type: "paragraph", text }] }));
+const revisionPptx = (text: string) => Buffer.from(renderPresentationPptx({ filename: "source.pptx", format: "pptx",
+  slides: [{ layout: "titleAndContent", title: "Plan", bullets: [text] }] }));
+
+for (const [extension, render] of [["docx", revisionDocx], ["pptx", revisionPptx]] as const) {
+  // Earlier files no longer share one 300,000-character budget with the turn's
+  // own file (operator decision 2026-11-16): a large earlier file cannot push
+  // the latest file out, and the latest file still arrives whole.
+  test(`GF-13 latest ${extension} is sent whole after a large earlier file`, async () => {
+    try {
+      const historical = addInputFixture("previous-text", "txt", Buffer.from("x".repeat(299_990)));
+      const current = addInputFixture("current-office", extension, render("Keep blue. Budget is 200. Tail confirmed."));
+      await ask({}, { autoRoutedTo: MODEL_ID, messages: [
+        { role: "user", content: "Earlier input", attachments: [historical] },
+        { role: "assistant", content: "Understood" },
+        { role: "user", content: "Create a revised file from the attachment", attachments: [current] },
+      ] });
+      assert.ok(lastStreamTextOptions, "final answer provider was not dispatched");
+      assert.match(JSON.stringify(lastStreamTextOptions!.messages), /Tail confirmed/);
+      assert.equal(world.artifactRows.length, 0);
+    } finally { clearInputFixtures(); }
+  });
+
+  test(`GF-13 latest ${extension} text fits the remaining budget without losing the tail`, async () => {
+    try {
+      const historical = addInputFixture("previous-small", "txt", Buffer.from("x".repeat(299_936)));
+      const current = addInputFixture("current-fitting", extension, render("Keep blue. Budget is 200. Tail confirmed."));
+      await ask({}, { messages: [
+        { role: "user", content: "Earlier input", attachments: [historical] },
+        { role: "assistant", content: "Understood" },
+        { role: "user", content: "Create a revised file from the attachment", attachments: [current] },
+      ] });
+      assert.ok(lastStreamTextOptions, "final answer provider was not dispatched");
+      assert.match(JSON.stringify(lastStreamTextOptions!.messages), /Tail confirmed/);
+      assert.equal(world.artifactRows.length, 0, "text-only answer is not a successful file and gets no fake failed card");
+    } finally { clearInputFixtures(); }
+  });
+}
+
+for (const extension of ["txt", "csv"]) {
+  // A latest file whose text alone passes the parser ceiling, which no turn
+  // could carry, is still refused whole rather than truncated.
+  test(`GF-13 latest ${extension} is refused rather than truncated at Send`, async () => {
+    try {
+      const current = addInputFixture("latest-plain", extension,
+        Buffer.from("keep,200\n".repeat(Math.ceil(CHAT_ATTACHMENT_PARSE_CHARACTERS / 9) + 1)));
+      const result = await ask({}, { expectedStatus: 413, messages: [
+        { role: "user", content: "Create a revised file", attachments: [current] },
+      ] });
+      assert.equal(JSON.parse(result.body).code, "ATTACHMENT_TEXT_TOO_LARGE");
+      assert.equal(lastStreamTextOptions, null);
+    } finally { clearInputFixtures(); }
+  });
+}
+
+test("GF-13 empty latest Office text stops final answer dispatch with a safe error code", async () => {
+  try {
+    const current = addInputFixture("empty-office", "docx", revisionDocx(""));
+    const result = await ask({}, { expectedStatus: 400, messages: [
+      { role: "user", content: "Create a revised file", attachments: [current] },
+    ] });
+    assert.equal(JSON.parse(result.body).code, "ATTACHMENT_NO_TEXT");
+    assert.equal(lastStreamTextOptions, null);
+    assert.doesNotMatch(result.body, /attachments\//);
+  } finally { clearInputFixtures(); }
+});
+
+const workbookRevisionFixture = () => {
+  const admitted = admitWorkbookSpecSafely({ filename: "source.xlsx", worksheets: [
+    { name: "Revenue", title: "Annual revenue", columns: [{ header: "Name", width: 26 },
+      { header: "Amount", type: "number", width: 14, format: "currency_usd" }], rows: [["Blue", 200], ["TAIL_MARKER", 300]] },
+    { name: "Notes", columns: [{ header: "Active" }], rows: [[false], [null], [""]] },
+  ] });
+  assert.ok(admitted.ok);
+  const canonical = canonicalWorkbookSpecFor(admitted.spec);
+  assert.ok(canonical);
+  const reference = addInputFixture("private-input-copy", "xlsx", Buffer.from(renderWorkbook(admitted.spec, "xlsx").bytes));
+  Object.assign(world.uploads.at(-1)!, { name: "source.xlsx", sourceArtifactId: "private-source-artifact", sourceLineageId: "private-source-lineage",
+    sourceConversationId: CONVERSATION_ID, sourceCanonicalSpec: canonical });
+  return { reference, canonical };
+};
+
+test("XLSX revision Send provides the complete canonical workbook through a request-scoped attachment", async () => {
+  const previous = process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
+  process.env.GENERATED_ARTIFACT_REVISION_ENABLED = "true";
+  try {
+    const { reference, canonical } = workbookRevisionFixture();
+    await ask({}, { messages: [{ role: "user", content: "Create a new workbook with the changed amount", attachments: [reference] }] });
+    assert.ok(lastStreamTextOptions);
+    const prompt = JSON.stringify(lastStreamTextOptions!.messages);
+    assert.match(prompt, /TAIL_MARKER/);
+    assert.match(prompt, /currency_usd/);
+    assert.match(JSON.stringify(lastStreamTextOptions!.instructions), /att_1/);
+    assert.doesNotMatch(prompt, /private-source-artifact|private-source-lineage|private-input-copy|attachments\//);
+    const expected = JSON.stringify(canonical.spec);
+    assert.ok(prompt.includes(JSON.stringify(expected).slice(1, -1)), "the full structured workbook must reach the existing attachment fence");
+    assert.equal(world.artifactRows.length, 0, "a text-only answer must not create a fake file card");
+  } finally {
+    clearInputFixtures();
+    if (previous === undefined) delete process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
+    else process.env.GENERATED_ARTIFACT_REVISION_ENABLED = previous;
+  }
+});
+
+test("XLSX revision Send keeps the whole workbook after a large earlier file", async () => {
+  const previous = process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
+  process.env.GENERATED_ARTIFACT_REVISION_ENABLED = "true";
+  try {
+    const historical = addInputFixture("historical-budget", "txt", Buffer.from("x".repeat(299_990)));
+    const { reference } = workbookRevisionFixture();
+    await ask({}, { autoRoutedTo: MODEL_ID, messages: [
+      { role: "user", content: "Earlier input", attachments: [historical] },
+      { role: "assistant", content: "Understood" },
+      { role: "user", content: "Create the revised workbook", attachments: [reference] },
+    ] });
+    assert.ok(lastStreamTextOptions, "final answer provider was not dispatched");
+    assert.match(JSON.stringify(lastStreamTextOptions!.messages), /TAIL_MARKER/);
+    assert.equal(world.artifactRows.length, 0);
+  } finally {
+    clearInputFixtures();
+    if (previous === undefined) delete process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
+    else process.env.GENERATED_ARTIFACT_REVISION_ENABLED = previous;
+  }
+});
+
+test("XLSX revision Send refuses missing canonical data and copies from another conversation", async () => {
+  const previous = process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
+  process.env.GENERATED_ARTIFACT_REVISION_ENABLED = "true";
+  try {
+    for (const invalid of ["snapshot", "conversation"]) {
+      clearInputFixtures();
+      const { reference } = workbookRevisionFixture();
+      if (invalid === "snapshot") world.uploads.at(-1)!.sourceCanonicalSpec = null;
+      else world.uploads.at(-1)!.sourceConversationId = "another-conversation";
+      const result = await ask({}, { expectedStatus: 400, messages: [
+        { role: "user", content: "Create the revised workbook", attachments: [reference] },
+      ] });
+      assert.equal(JSON.parse(result.body).code, invalid === "snapshot" ? "ATTACHMENT_UNREADABLE" : "ATTACHMENT_NOT_FOUND");
+      assert.equal(lastStreamTextOptions, null);
+      assert.doesNotMatch(result.body, /private-source|attachments\//);
+    }
+  } finally {
+    clearInputFixtures();
+    if (previous === undefined) delete process.env.GENERATED_ARTIFACT_REVISION_ENABLED;
+    else process.env.GENERATED_ARTIFACT_REVISION_ENABLED = previous;
+  }
+});
+
+/* -------------------------------------------------------------------------- */
+/* The error report for a turn that failed inside its 200 stream                */
+/* -------------------------------------------------------------------------- */
+
+/*
+  docs/policy/trace-feedback-automation.md §3.3 (operator decision 2026-11-16).
+
+  An empty answer is settled inside a stream whose headers left long ago, so
+  the signed error-report token cannot ride in one. It rides in the trailer.
+  Driven through the real route and read back with the real parser and the
+  real verifier: this is the token the feedback endpoint will be handed.
+*/
+const withErrorReportSigning = async <T,>(run: () => Promise<T>): Promise<T> => {
+  const previous = process.env.ERROR_REPORT_SIGNING_SECRET;
+  process.env.ERROR_REPORT_SIGNING_SECRET = "an-error-report-secret-of-32-chars!!";
+  try {
+    return await run();
+  } finally {
+    if (previous === undefined) delete process.env.ERROR_REPORT_SIGNING_SECRET;
+    else process.env.ERROR_REPORT_SIGNING_SECRET = previous;
+  }
+};
+
+type ErrorReportTrailer = { errorReport?: { token: string; code: string } } | null;
+
+test("an empty answer's trailer carries a signed error report for the turn's own trace", async () => {
+  const evidence: Array<Record<string, unknown>> = [];
+  OVERRIDES.traceErrorEvidence = {
+    create: ((args: { data: Record<string, unknown> }) => {
+      evidence.push(args.data);
+      return args.data;
+    }) as (args: never) => unknown,
+  };
+  try {
+    await withErrorReportSigning(async () => {
+      const { trailer } = await ask({ text: "" });
+      const report = (trailer as ErrorReportTrailer)?.errorReport;
+      assert.ok(report, "the empty answer's trailer carried no error report");
+      assert.equal(report.code, "AI_EMPTY_RESPONSE.END_TURN");
+
+      const { verifyErrorReportToken } = require(
+        resolve(ROOT, "lib/errorReportToken.ts")
+      ) as typeof import("../../lib/errorReportToken");
+      const outcome = verifyErrorReportToken(report.token);
+      assert.equal(outcome.status, "verified");
+      assert.equal(outcome.payload?.errorCode, report.code);
+      assert.equal(outcome.payload?.routeClass, "chat");
+      assert.match(outcome.payload?.traceId ?? "", /^[0-9a-f-]{36}$/);
+
+      // The evidence row the token points at: the server's facts, recorded
+      // against the same trace and occurrence, on a response that was a 200.
+      await new Promise((settle) => setImmediate(settle));
+      assert.equal(evidence.length, 1);
+      assert.equal(evidence[0].occurrenceId, outcome.payload?.occurrenceId);
+      assert.equal(evidence[0].traceId, outcome.payload?.traceId);
+      assert.equal(evidence[0].errorCode, report.code);
+      assert.equal(evidence[0].httpStatus, 200);
+      assert.equal(evidence[0].phase, "stream");
+      assert.equal(evidence[0].failureLayer, "provider_stream");
+      assert.equal(evidence[0].modelId, MODEL_ID);
+    });
+  } finally {
+    delete OVERRIDES.traceErrorEvidence;
+  }
+});
+
+test("an answer that completed gets no error report, signing configured or not", async () => {
+  await withErrorReportSigning(async () => {
+    const { trailer } = await ask({});
+    assert.equal((trailer as ErrorReportTrailer)?.errorReport, undefined);
+  });
+});
+
+test("without a signing secret an empty answer still closes normally, with no report", async () => {
+  const previous = process.env.ERROR_REPORT_SIGNING_SECRET;
+  delete process.env.ERROR_REPORT_SIGNING_SECRET;
+  try {
+    const { trailer } = await ask({ text: "" });
+    assert.ok(trailer, "the trailer itself still arrives");
+    assert.equal((trailer as ErrorReportTrailer)?.errorReport, undefined);
+  } finally {
+    if (previous !== undefined) process.env.ERROR_REPORT_SIGNING_SECRET = previous;
+  }
+});
+
+test("a stream that breaks mid-answer delivers its error report, then the error it always raised", async () => {
+  const providerFailure = Object.assign(new Error("upstream overloaded"), {
+    name: "AI_APICallError",
+    statusCode: 503,
+    isRetryable: true,
+  });
+  await withErrorReportSigning(async () => {
+    const { body, trailer, streamError } = await ask({
+      text: "Half an answer",
+      failAfterText: providerFailure,
+    });
+    // The client still sees a broken stream -- an older one behaves exactly
+    // as before -- but the trailer was read first.
+    assert.equal(streamError, providerFailure);
+    assert.ok(body.startsWith("Half an answer"));
+    const report = (trailer as ErrorReportTrailer)?.errorReport;
+    assert.ok(report, "the failed stream delivered no error report before breaking");
+    assert.equal(report.code, "AI_STREAM_FAILED.AI_APICallError.HTTP_503.RETRYABLE");
+
+    const { verifyErrorReportToken } = require(
+      resolve(ROOT, "lib/errorReportToken.ts")
+    ) as typeof import("../../lib/errorReportToken");
+    const outcome = verifyErrorReportToken(report.token);
+    assert.equal(outcome.status, "verified");
+    assert.equal(outcome.payload?.errorCode, report.code);
+  });
+});
+
+test("a broken stream with signing off raises the same error and sends no trailer", async () => {
+  const previous = process.env.ERROR_REPORT_SIGNING_SECRET;
+  delete process.env.ERROR_REPORT_SIGNING_SECRET;
+  try {
+    const failure = new Error("upstream closed");
+    const { body, trailer, streamError } = await ask({ text: "Half", failAfterText: failure });
+    assert.equal(streamError, failure);
+    assert.equal(trailer, null);
+    assert.equal(body, "Half");
+  } finally {
+    if (previous !== undefined) process.env.ERROR_REPORT_SIGNING_SECRET = previous;
+  }
+});

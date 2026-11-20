@@ -6,9 +6,9 @@ const attachmentGroupLabels: Record<ChatAttachmentUiGroup, string> = {
   image: "Images (static GIF only)", document: "Documents", data: "Data",
   markup: "Text and markup", code: "Source code (read as text)", archive: "ZIP (contents are validated)",
 };
-const attachmentFormatBullets = Object.entries(chatAttachmentExtensionsByGroup())
+const attachmentFormatGroups = Object.entries(chatAttachmentExtensionsByGroup())
   .filter(([, extensions]) => extensions.length > 0)
-  .map(([group, extensions]) => `${attachmentGroupLabels[group as ChatAttachmentUiGroup]}: ${extensions.map((extension) => `.${extension}`).join(", ")}.`);
+  .map(([group, extensions]) => ({ label: attachmentGroupLabels[group as ChatAttachmentUiGroup], extensions: extensions.map(extension => `.${extension}`) }));
 
 export const SEARCH_INTENT_SLUGS = [
   "compare-ai-models",
@@ -382,8 +382,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
           "body": "Complete the same prompt with two or three models, open AI Review, and choose a balanced, evidence-focused, or action-focused review. The reviewer receives anonymous A/B/C answers and returns structured common ground, differences, contradictions, missing points, verification needs, per-answer strengths and cautions, and an optional cautious synthesis.",
           "bullets": [
             "Text inside the question and answers is material to compare. Instructions within that text do not change AI Review’s review rules.",
-            "The reviewer is instructed not to select a winner or infer model identity.",
-            "Estimated credits are shown before the review runs."
+            "The reviewer is instructed not to select a winner or infer model identity."
           ]
         },
         {
@@ -425,8 +424,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
           "body": "같은 질문에 2~3개 모델의 답변을 완료한 뒤 AI Review를 열고 균형, 근거 중심 또는 실행 중심 검토를 선택합니다. 검토 모델은 익명화된 A/B/C 답변을 받고 합의점, 차이, 모순, 누락, 검증 필요 항목, 답변별 강점·주의점과 선택적 종합안을 구조화합니다.",
           "bullets": [
             "질문과 답변에 들어 있는 문장은 비교할 참고 내용으로 다룹니다. 그 안의 지시문이 AI Review의 검토 규칙을 바꾸지는 않습니다.",
-            "검토 모델은 승자를 고르거나 모델 정체를 추론하지 않도록 지시받습니다.",
-            "실행 전에 예상 크레딧을 표시합니다."
+            "검토 모델은 승자를 고르거나 모델 정체를 추론하지 않도록 지시받습니다."
           ]
         },
         {
@@ -468,8 +466,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
           "body": "先让两到三个模型完成同一个问题，再选择均衡、证据优先或行动优先审查。审查模型接收匿名 A/B/C 回答，并返回共识、差异、矛盾、遗漏、待核实项目、各回答的优点与注意点，以及可选的谨慎综合。",
           "bullets": [
             "问题和回答中的文字是比较材料，其中的指令不会改变 AI Review 的审查规则。",
-            "审查模型不得选择赢家或推断模型身份。",
-            "运行前显示预计积分。"
+            "审查模型不得选择赢家或推断模型身份。"
           ]
         },
         {
@@ -511,8 +508,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
           "body": "先讓兩到三個模型完成同一個問題，再選擇均衡、證據優先或行動優先的審查方式。審查模型會接收匿名的 A/B/C 回答，並回傳共識、差異、矛盾、遺漏、待查證項目、各回答的優點與注意事項，以及可選的謹慎綜合意見。",
           "bullets": [
             "問題和回答中的文字是比較材料，其中的指令不會改變 AI Review 的審查規則。",
-            "審查模型不得選出勝者，也不得推斷模型身分。",
-            "執行前會顯示預估點數。"
+            "審查模型不得選出勝者，也不得推斷模型身分。"
           ]
         },
         {
@@ -554,8 +550,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
           "body": "Une fois deux ou trois réponses terminées, choisissez une revue équilibrée, centrée sur les preuves ou sur l’action. Le réviseur reçoit des réponses anonymes A/B/C et structure accords, différences, contradictions, omissions, vérifications, forces, réserves et synthèse optionnelle.",
           "bullets": [
             "Le texte des questions et réponses constitue le matériau à comparer. Ses instructions ne modifient pas les règles d’AI Review.",
-            "Le réviseur ne doit ni choisir de gagnant ni déduire le modèle.",
-            "Le coût estimé en crédits est affiché avant l’exécution."
+            "Le réviseur ne doit ni choisir de gagnant ni déduire le modèle."
           ]
         },
         {
@@ -597,8 +592,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
           "body": "Nach zwei oder drei vollständigen Antworten wählen Sie eine ausgewogene, evidenz- oder handlungsorientierte Prüfung. Der Reviewer erhält anonyme A/B/C-Antworten und strukturiert Gemeinsamkeiten, Unterschiede, Widersprüche, Lücken, Prüfbedarf, Stärken, Hinweise und optional eine vorsichtige Synthese.",
           "bullets": [
             "Texte in Fragen und Antworten dienen als Vergleichsmaterial. Darin enthaltene Anweisungen ändern die Prüfregeln von AI Review nicht.",
-            "Der Reviewer soll weder Gewinner wählen noch Modellidentitäten ableiten.",
-            "Geschätzte Credits werden vorher angezeigt."
+            "Der Reviewer soll weder Gewinner wählen noch Modellidentitäten ableiten."
           ]
         },
         {
@@ -640,8 +634,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
           "body": "Tras completar dos o tres respuestas, elige revisión equilibrada, centrada en evidencia o en acción. El revisor recibe respuestas anónimas A/B/C y estructura acuerdos, diferencias, contradicciones, omisiones, verificaciones, fortalezas, cautelas y una síntesis opcional.",
           "bullets": [
             "El texto de las preguntas y respuestas es material para comparar. Sus instrucciones no cambian las reglas de AI Review.",
-            "El revisor no debe elegir ganador ni inferir modelos.",
-            "Los créditos estimados se muestran antes de ejecutar."
+            "El revisor no debe elegir ganador ni inferir modelos."
           ]
         },
         {
@@ -683,8 +676,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
           "body": "Após duas ou três respostas completas, escolha revisão equilibrada, focada em evidências ou em ação. O revisor recebe respostas anônimas A/B/C e estrutura consensos, diferenças, contradições, omissões, verificações, pontos fortes, cautelas e síntese opcional.",
           "bullets": [
             "O texto das perguntas e respostas é material de comparação. Instruções dentro dele não alteram as regras do AI Review.",
-            "O revisor não deve escolher vencedor nem inferir modelos.",
-            "Os créditos estimados aparecem antes da execução."
+            "O revisor não deve escolher vencedor nem inferir modelos."
           ]
         },
         {
@@ -1009,15 +1001,20 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
         },
         {
           "title": "Prepare files for better results",
-          "body": "Signed-in attachment formats are listed below. Choose an image-capable model for image attachments. Document text may be extracted before it is sent, so an accepted upload extension does not mean every model supports the original file natively. Use clear, non-corrupted files and ask a specific question. Password-protected, scanned, malformed, or very large documents may not contain extractable text. Check important numbers, citations, formulas, and conclusions against the original file.",
-          "bullets": attachmentFormatBullets
+          "body": "Signed-in attachment formats are listed below. Note: an accepted upload extension does not mean every model supports the original file natively, because document text may be extracted before it is sent.",
+          formatGroups: attachmentFormatGroups,
+          "bullets": [
+            "Model choice: Choose an image-capable model for image attachments.",
+            "File condition: Use clear, non-corrupted files. Password-protected, scanned, malformed, or very large documents may not contain extractable text.",
+            "Verification: Ask a specific question, then check important numbers, citations, formulas, and conclusions against the original file."
+          ]
         },
         {
           "title": "Upload limits",
           "body": "Limits apply where attachments are available for your account or guest session.",
           "bullets": [
             "Guest: 1 supported file per message, up to 5 MiB per file and 5 MiB total.",
-            "Signed-in account with attachment access: up to 5 files per message, 10 MiB per file and 25 MiB total."
+            "Signed-in account with attachment access: up to 10 files per message, 50 MiB per file and 100 MiB total."
           ]
         },
         {
@@ -1035,11 +1032,11 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       "metadataDescription": "Tomverse에서 여러 AI 모델을 이용해 지원되는 PDF, Office 문서, 텍스트 파일과 이미지를 요약하고 분석하세요.",
       "eyebrow": "AI 문서 워크플로",
       "title": "여러 AI 모델로 파일을 분석하세요",
-      "description": "동호회 공지에서 모임 날짜·준비물·회신 기한을 찾아보세요. 자료에 없는 장소는 미정이라고 표시하도록 요청하고, 각 항목의 근거 문장도 함께 받아 원문과 대조할 수 있습니다. 읽을 수 있는 PDF, Office 문서, 지원 텍스트와 이미지를 사용할 수 있으며 해석은 파일 내용과 모델에 따라 달라집니다.",
+      "description": "동호회 공지에서 모임 날짜·준비물·회신 기한을 찾아보세요. 자료에 없는 장소는 미정이라고 표시하도록 요청하고, 각 항목의 근거 문장도 함께 받아 원문과 대조할 수 있습니다.",
       "sections": [
         {
           "title": "지원되는 분석 작업",
-          "body": "동호회 공지에서 모임 날짜·준비물·회신 기한을 찾아보세요. 자료에 없는 장소는 미정이라고 표시하도록 요청하고, 각 항목의 근거 문장도 함께 받아 원문과 대조할 수 있습니다. 읽을 수 있는 PDF, Office 문서, 지원 텍스트와 이미지를 사용할 수 있으며 해석은 파일 내용과 모델에 따라 달라집니다.",
+          "body": "읽을 수 있는 PDF, Office 문서, 지원 텍스트와 이미지를 사용할 수 있으며 해석은 파일 내용과 모델에 따라 달라집니다.",
           "bullets": [
             "공지의 일정·준비물·회신 기한 추출",
             "요약에 원문 날짜와 조건이 남았는지 비교",
@@ -1052,7 +1049,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
         },
         {
           "title": "보안 경계",
-          "body": "첨부가 제공되는 게스트 체험에서는 지원 이미지·읽을 수 있는 문서 1개를 최대 5MiB까지 보낼 수 있습니다. 첨부 권한이 있는 로그인 계정은 메시지당 최대 5개, 각 10MiB, 합계 25MiB까지 사용할 수 있습니다. Google Drive 연결에는 로그인이 필요합니다. 필요한 파일 내용은 선택한 AI 제공자가 처리하므로 업로드 권한이 있는 자료만 사용하세요."
+          "body": "첨부가 제공되는 게스트 체험에서는 지원 이미지·읽을 수 있는 문서 1개를 최대 5MiB까지 보낼 수 있습니다. 첨부 권한이 있는 로그인 계정은 메시지당 최대 10개, 각 50MiB, 합계 100MiB까지 사용할 수 있습니다. Google Drive 연결에는 로그인이 필요합니다. 필요한 파일 내용은 선택한 AI 제공자가 처리하므로 업로드 권한이 있는 자료만 사용하세요."
         },
         {
           "title": "보관과 공급자 처리",
@@ -1069,11 +1066,11 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       "metadataDescription": "在 Tomverse 中使用多个 AI 模型总结和分析支持的 PDF、Office 文档、文本文件与图片。",
       "eyebrow": "AI 文档工作流",
       "title": "使用多个 AI 模型分析文件",
-      "description": "从社团通知中找出活动日期、准备物品和回复截止时间。要求把未确定的地点标为待定，并为每项附上依据句子。可使用可读 PDF、Office 文档、支持的文本和图片；解读取决于文件与模型。",
+      "description": "从社团通知中找出活动日期、准备物品和回复截止时间。要求把未确定的地点标为待定，并为每项附上依据句子。",
       "sections": [
         {
           "title": "支持的分析流程",
-          "body": "从社团通知中找出活动日期、准备物品和回复截止时间。要求把未确定的地点标为待定，并为每项附上依据句子。可使用可读 PDF、Office 文档、支持的文本和图片；解读取决于文件与模型。",
+          "body": "可使用可读 PDF、Office 文档、支持的文本和图片；解读取决于文件与模型。",
           "bullets": [
             "提取日期、准备物品与回复期限",
             "比较摘要是否保留原文日期与条件",
@@ -1086,7 +1083,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
         },
         {
           "title": "安全边界",
-          "body": "在提供访客附件的体验中，可发送一个不超过 5 MiB 的支持图片或可读文档。拥有附件权限的登录账户每条消息最多五个文件，每个 10 MiB，总计 25 MiB。连接 Google Drive 需要登录。所选 AI 提供商会处理必要文件内容，请只上传有权使用的资料。"
+          "body": "在提供访客附件的体验中，可发送一个不超过 5 MiB 的支持图片或可读文档。拥有附件权限的登录账户每条消息最多十个文件，每个 50 MiB，总计 100 MiB。连接 Google Drive 需要登录。所选 AI 提供商会处理必要文件内容，请只上传有权使用的资料。"
         },
         {
           "title": "保留与提供商处理",
@@ -1103,11 +1100,11 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       "metadataDescription": "在 Tomverse 中使用多個 AI 模型，總結與分析支援的 PDF、Office 文件、文字檔和圖片。",
       "eyebrow": "AI 文件工作流程",
       "title": "使用多個 AI 模型分析檔案",
-      "description": "從社團通知中找出活動日期、準備物品和回覆截止時間。要求把尚未確定的地點標示為待定，並為每一項附上依據的句子。可使用可讀取的 PDF、Office 文件、支援的文字檔和圖片；解讀結果取決於檔案與模型。",
+      "description": "從社團通知中找出活動日期、準備物品和回覆截止時間。要求把尚未確定的地點標示為待定，並為每一項附上依據的句子。",
       "sections": [
         {
           "title": "支援的分析流程",
-          "body": "從社團通知中找出活動日期、準備物品和回覆截止時間。要求把尚未確定的地點標示為待定，並為每一項附上依據的句子。可使用可讀取的 PDF、Office 文件、支援的文字檔和圖片；解讀結果取決於檔案與模型。",
+          "body": "可使用可讀取的 PDF、Office 文件、支援的文字檔和圖片；解讀結果取決於檔案與模型。",
           "bullets": [
             "擷取日期、準備物品與回覆期限",
             "比較摘要是否保留原文的日期與條件",
@@ -1120,7 +1117,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
         },
         {
           "title": "安全邊界",
-          "body": "在提供訪客附件的體驗中，可以傳送一個不超過 5 MiB 的支援圖片或可讀取的文件。擁有附件權限的登入帳戶每則訊息最多可附五個檔案，每個 10 MiB，總計 25 MiB。連接 Google Drive 需要登入。所選的 AI 供應商會處理必要的檔案內容，請只上傳您有權使用的資料。"
+          "body": "在提供訪客附件的體驗中，可以傳送一個不超過 5 MiB 的支援圖片或可讀取的文件。擁有附件權限的登入帳戶每則訊息最多可附十個檔案，每個 50 MiB，總計 100 MiB。連接 Google Drive 需要登入。所選的 AI 供應商會處理必要的檔案內容，請只上傳您有權使用的資料。"
         },
         {
           "title": "保留與供應商處理",
@@ -1137,11 +1134,11 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       "metadataDescription": "Utilisez plusieurs modèles d’IA pour résumer et analyser les PDF, documents Office, textes et images pris en charge dans Tomverse.",
       "eyebrow": "Flux documentaire IA",
       "title": "Analysez des fichiers avec plusieurs modèles d’IA",
-      "description": "Retrouvez la date, les objets à apporter et le délai de réponse dans une annonce de club. Demandez de laisser un lieu non fixé comme indéterminé et de citer une phrase pour chaque élément. Les PDF lisibles, documents Office, textes et images pris en charge conviennent ; l’interprétation dépend du fichier et du modèle.",
+      "description": "Retrouvez la date, les objets à apporter et le délai de réponse dans une annonce de club. Demandez de laisser un lieu non fixé comme indéterminé et de citer une phrase pour chaque élément.",
       "sections": [
         {
           "title": "Flux d’analyse pris en charge",
-          "body": "Retrouvez la date, les objets à apporter et le délai de réponse dans une annonce de club. Demandez de laisser un lieu non fixé comme indéterminé et de citer une phrase pour chaque élément. Les PDF lisibles, documents Office, textes et images pris en charge conviennent ; l’interprétation dépend du fichier et du modèle.",
+          "body": "Les PDF lisibles, documents Office, textes et images pris en charge conviennent ; l’interprétation dépend du fichier et du modèle.",
           "bullets": [
             "Extraire dates, objets à apporter et délais",
             "Vérifier les dates et conditions conservées",
@@ -1154,7 +1151,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
         },
         {
           "title": "Limites de sécurité",
-          "body": "Lorsque les pièces jointes sont proposées aux visiteurs, vous pouvez envoyer une image prise en charge ou un document lisible de 5 Mio maximum. Les comptes connectés autorisés peuvent envoyer cinq fichiers par message, 10 Mio chacun et 25 Mio au total. Google Drive nécessite une connexion. Les fournisseurs d’IA choisis traitent le contenu nécessaire ; utilisez uniquement des documents que vous êtes autorisé à transmettre."
+          "body": "Lorsque les pièces jointes sont proposées aux visiteurs, vous pouvez envoyer une image prise en charge ou un document lisible de 5 Mio maximum. Les comptes connectés autorisés peuvent envoyer dix fichiers par message, 50 Mio chacun et 100 Mio au total. Google Drive nécessite une connexion. Les fournisseurs d’IA choisis traitent le contenu nécessaire ; utilisez uniquement des documents que vous êtes autorisé à transmettre."
         },
         {
           "title": "Conservation",
@@ -1171,11 +1168,11 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       "metadataDescription": "Fassen Sie unterstützte PDFs, Office-Dokumente, Textdateien und Bilder mit mehreren KI-Modellen in Tomverse zusammen und analysieren Sie sie.",
       "eyebrow": "KI-Dokumentenworkflow",
       "title": "Dateien mit mehreren KI-Modellen analysieren",
-      "description": "Ermitteln Sie Termin, Mitbringsel und Antwortfrist aus einer Vereinsnachricht. Lassen Sie einen offenen Ort als offen markieren und zu jedem Punkt einen Belegsatz angeben. Lesbare PDFs, Office-Dokumente sowie unterstützte Texte und Bilder sind möglich; die Auswertung hängt von Datei und Modell ab.",
+      "description": "Ermitteln Sie Termin, Mitbringsel und Antwortfrist aus einer Vereinsnachricht. Lassen Sie einen offenen Ort als offen markieren und zu jedem Punkt einen Belegsatz angeben.",
       "sections": [
         {
           "title": "Unterstützte Abläufe",
-          "body": "Ermitteln Sie Termin, Mitbringsel und Antwortfrist aus einer Vereinsnachricht. Lassen Sie einen offenen Ort als offen markieren und zu jedem Punkt einen Belegsatz angeben. Lesbare PDFs, Office-Dokumente sowie unterstützte Texte und Bilder sind möglich; die Auswertung hängt von Datei und Modell ab.",
+          "body": "Lesbare PDFs, Office-Dokumente sowie unterstützte Texte und Bilder sind möglich; die Auswertung hängt von Datei und Modell ab.",
           "bullets": [
             "Termine, Mitbringsel und Fristen ermitteln",
             "Erhalt von Daten und Bedingungen vergleichen",
@@ -1188,7 +1185,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
         },
         {
           "title": "Sicherheitsgrenzen",
-          "body": "Wenn Gastanhänge angeboten werden, ist ein unterstütztes Bild oder lesbares Dokument bis 5 MiB möglich. Angemeldete Konten mit Anhangzugriff können fünf Dateien pro Nachricht senden, je 10 MiB und insgesamt 25 MiB. Google Drive erfordert eine Anmeldung. Die gewählten KI-Anbieter verarbeiten nötige Dateiinhalte; laden Sie nur erlaubte Materialien hoch."
+          "body": "Wenn Gastanhänge angeboten werden, ist ein unterstütztes Bild oder lesbares Dokument bis 5 MiB möglich. Angemeldete Konten mit Anhangzugriff können zehn Dateien pro Nachricht senden, je 50 MiB und insgesamt 100 MiB. Google Drive erfordert eine Anmeldung. Die gewählten KI-Anbieter verarbeiten nötige Dateiinhalte; laden Sie nur erlaubte Materialien hoch."
         },
         {
           "title": "Aufbewahrung",
@@ -1205,11 +1202,11 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       "metadataDescription": "Usa varios modelos de IA para resumir y analizar PDF, documentos Office, archivos de texto e imágenes compatibles en Tomverse.",
       "eyebrow": "Flujo documental con IA",
       "title": "Analiza archivos con varios modelos de IA",
-      "description": "Extrae la fecha, qué llevar y el plazo de respuesta de un aviso del club. Pide que un lugar pendiente siga marcado como pendiente y que cada punto incluya una frase de apoyo. Puedes usar PDF legibles, documentos Office, textos e imágenes compatibles; la interpretación depende del archivo y del modelo.",
+      "description": "Extrae la fecha, qué llevar y el plazo de respuesta de un aviso del club. Pide que un lugar pendiente siga marcado como pendiente y que cada punto incluya una frase de apoyo.",
       "sections": [
         {
           "title": "Flujos compatibles",
-          "body": "Extrae la fecha, qué llevar y el plazo de respuesta de un aviso del club. Pide que un lugar pendiente siga marcado como pendiente y que cada punto incluya una frase de apoyo. Puedes usar PDF legibles, documentos Office, textos e imágenes compatibles; la interpretación depende del archivo y del modelo.",
+          "body": "Puedes usar PDF legibles, documentos Office, textos e imágenes compatibles; la interpretación depende del archivo y del modelo.",
           "bullets": [
             "Extraer fechas, qué llevar y plazos",
             "Comprobar fechas y condiciones conservadas",
@@ -1222,7 +1219,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
         },
         {
           "title": "Límites de seguridad",
-          "body": "Cuando se ofrecen adjuntos a visitantes, puedes enviar una imagen compatible o un documento legible de hasta 5 MiB. Las cuentas con sesión y permiso para adjuntar pueden enviar cinco archivos por mensaje, de 10 MiB cada uno y 25 MiB en total. Google Drive requiere iniciar sesión. Los proveedores elegidos procesan el contenido necesario; sube solo material que tengas permiso para usar."
+          "body": "Cuando se ofrecen adjuntos a visitantes, puedes enviar una imagen compatible o un documento legible de hasta 5 MiB. Las cuentas con sesión y permiso para adjuntar pueden enviar diez archivos por mensaje, de 50 MiB cada uno y 100 MiB en total. Google Drive requiere iniciar sesión. Los proveedores elegidos procesan el contenido necesario; sube solo material que tengas permiso para usar."
         },
         {
           "title": "Retención",
@@ -1239,11 +1236,11 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
       "metadataDescription": "Use vários modelos de IA para resumir e analisar PDFs, documentos Office, textos e imagens compatíveis no Tomverse.",
       "eyebrow": "Fluxo de documentos com IA",
       "title": "Analise arquivos com vários modelos de IA",
-      "description": "Extraia a data, o que levar e o prazo de resposta de um aviso do clube. Peça para marcar um local indefinido como indefinido e citar uma frase para cada item. PDFs legíveis, documentos Office, textos e imagens compatíveis podem ser usados; a interpretação depende do arquivo e do modelo.",
+      "description": "Extraia a data, o que levar e o prazo de resposta de um aviso do clube. Peça para marcar um local indefinido como indefinido e citar uma frase para cada item.",
       "sections": [
         {
           "title": "Fluxos compatíveis",
-          "body": "Extraia a data, o que levar e o prazo de resposta de um aviso do clube. Peça para marcar um local indefinido como indefinido e citar uma frase para cada item. PDFs legíveis, documentos Office, textos e imagens compatíveis podem ser usados; a interpretação depende do arquivo e do modelo.",
+          "body": "PDFs legíveis, documentos Office, textos e imagens compatíveis podem ser usados; a interpretação depende do arquivo e do modelo.",
           "bullets": [
             "Extrair datas, o que levar e prazos",
             "Comparar datas e condições preservadas",
@@ -1256,7 +1253,7 @@ export const searchIntentPages: Record<SearchIntentSlug, Record<Language, Search
         },
         {
           "title": "Limites de segurança",
-          "body": "Quando anexos são oferecidos a visitantes, você pode enviar uma imagem compatível ou um documento legível de até 5 MiB. Contas conectadas com acesso a anexos podem enviar cinco arquivos por mensagem, 10 MiB por arquivo e 25 MiB no total. O Google Drive exige login. Os provedores de IA escolhidos processam o conteúdo necessário; envie apenas materiais que você tem permissão para usar."
+          "body": "Quando anexos são oferecidos a visitantes, você pode enviar uma imagem compatível ou um documento legível de até 5 MiB. Contas conectadas com acesso a anexos podem enviar dez arquivos por mensagem, 50 MiB por arquivo e 100 MiB no total. O Google Drive exige login. Os provedores de IA escolhidos processam o conteúdo necessário; envie apenas materiais que você tem permissão para usar."
         },
         {
           "title": "Retenção",

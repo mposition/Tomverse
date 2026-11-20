@@ -19,11 +19,13 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 
 import { finalSignalIsSuccess, reportedHalt } from "../lib/engineeringAgentCore.ts";
-import { runRunnerCycle } from "./engineering-agent-runner-core.mjs";
+import { readGitHubList, runRunnerCycle } from "./engineering-agent-runner-core.mjs";
 import { isSupervisedWorker, superviseCycle } from "./engineering-agent-supervisor.mjs";
 
-/** The hard deadline of one cycle (§12); the supervisor kills the process group there. */
-export const RUNNER_HARD_DEADLINE_MS = 20 * 60 * 1000;
+/** The hard deadline of one cycle (§12); the supervisor kills the process group
+ * there. Railway skips a scheduled run while the last one still runs. Twenty
+ * minutes until 2026-11-15. */
+export const RUNNER_HARD_DEADLINE_MS = 60 * 60 * 1000;
 const APP_TIMEOUT_MS = 25_000;
 const REPOSITORY_URL = "https://github.com/mposition/Tomverse.git";
 const API_REPO = "https://api.github.com/repos/mposition/Tomverse";
@@ -35,13 +37,6 @@ export const RUNNER_VARIABLES = [
   "ENGINEERING_AGENT_GITHUB_READ_TOKEN",
   "ENGINEERING_AGENT_RUNNER_DEADMAN_URL",
 ];
-
-/**
- * Read by the image before this one, which still drafted patches with a model.
- * The IaC keeps declaring it until the image that no longer reads it is the
- * pinned one; it goes in the same change as that digest.
- */
-export const RUNNER_RETIRED_VARIABLES = ["ENGINEERING_AGENT_ANTHROPIC_API_KEY"];
 
 const required = (name) => {
   const value = process.env[name]?.trim();
@@ -129,10 +124,9 @@ async function main() {
   // it is the whole list: a page with a next page is judged for what it holds
   // and marked incomplete; a list with no body at all is null. Neither is
   // ever taken for a complete, empty list.
-  const githubList = async (path, { notFoundIsEmpty = false } = {}) => {
-    let response;
+  const fetchPage = async (url) => {
     try {
-      response = await fetch(`${API_REPO}${path}`, {
+      const response = await fetch(url, {
         redirect: "error",
         signal: AbortSignal.timeout(APP_TIMEOUT_MS),
         headers: {
@@ -141,18 +135,14 @@ async function main() {
           ...(readToken ? { authorization: `Bearer ${readToken}` } : {}),
         },
       });
+      const body = await response.json().catch(() => null);
+      return { status: response.status, link: response.headers.get("link"), body };
     } catch {
       return null;
     }
-    // No ref under the prefix is answered 404: that is the list, empty.
-    if (notFoundIsEmpty && response.status === 404) return { items: [], complete: true };
-    const link = response.headers.get("link");
-    const body = await response.json().catch(() => null);
-    if (!response.ok || !Array.isArray(body)) return null;
-    // The same next-page reading as lib/engineeringAgentGitHubRead.ts.
-    const hasNext = link !== null && /<[^>]*>\s*;\s*rel="?next"?/i.test(link);
-    return { items: body, complete: !hasNext };
   };
+  const githubList = (path, { notFoundIsEmpty = false } = {}) =>
+    readGitHubList(fetchPage, `${API_REPO}${path}`, { origin: new URL(API_REPO).origin, notFoundIsEmpty });
 
   let result;
   try {

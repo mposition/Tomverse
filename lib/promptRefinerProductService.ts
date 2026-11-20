@@ -17,7 +17,6 @@ import {
   isPromptRefinerCapturedChatDraft,
   type PromptRefinerCapturedChatDraft,
 } from "@/lib/promptRefinerChatExecutionStore";
-import { getEnabledRuntimeModel } from "@/lib/modelRegistry";
 import { prisma } from "@/lib/prisma";
 import {
   createPromptRefinerProductAdapter,
@@ -44,11 +43,10 @@ import {
   type PromptRefinerFailureCode,
   type PromptRefinerFailureLayer,
 } from "@/lib/promptRefinerReceiptCore";
-import { readPromptRefinerVnextOneShotPrice } from
-  "@/lib/promptRefinerQualityEvaluationVnextOneShotPriceReadback";
-import {
-  PROMPT_REFINER_VNEXT_PRICE_PIN,
-} from "@/lib/promptRefinerQualityEvaluationVnextExecutionContract";
+import { readPromptRefinerProductModel } from
+  "@/lib/promptRefinerProductPriceReadback";
+import { PROMPT_REFINER_PRODUCT_PRICE_PIN } from
+  "@/lib/promptRefinerProductPricePin";
 import {
   PROMPT_REFINER_INPUT_SCOPE,
   PROMPT_REFINER_VERSION,
@@ -74,14 +72,8 @@ type ProductResult =
 const fallback = (reason: PromptRefinerProductFallbackReason): ProductResult =>
   Object.freeze({ outcome: "original_fallback", reason });
 
-const assertCurrentPrice = async () => {
-  await prisma.$transaction(async (tx) => {
-    const price = await readPromptRefinerVnextOneShotPrice(tx);
-    if (!price.pricePinMatchesRegistry || price.problems.length !== 0) {
-      throw new Error("prompt_refiner_product_price_drift");
-    }
-  }, { maxWait: 2_000, timeout: 5_000 });
-};
+const readCurrentPinnedModel = () => prisma.$transaction(
+  tx => readPromptRefinerProductModel(tx), { maxWait: 2_000, timeout: 5_000 });
 
 const refusalReceipt = (snapshot: PromptRefinerCapturedChatDraft,
   code: PromptRefinerFailureCode, layer: PromptRefinerFailureLayer,
@@ -109,8 +101,8 @@ const failedReceipt = (snapshot: PromptRefinerCapturedChatDraft,
   receiptVersion: PROMPT_REFINER_EXECUTION_RECEIPT_VERSION,
   receiptId: randomUUID(), requestId: snapshot.requestId, suggestionId: null,
   refinerVersion: PROMPT_REFINER_VERSION,
-  provider: PROMPT_REFINER_VNEXT_PRICE_PIN.provider,
-  modelId: PROMPT_REFINER_VNEXT_PRICE_PIN.modelId,
+  provider: PROMPT_REFINER_PRODUCT_PRICE_PIN.provider,
+  modelId: PROMPT_REFINER_PRODUCT_PRICE_PIN.modelId,
   adapterVersion: PROMPT_REFINER_PRODUCT_ADAPTER_VERSION,
   outcome: "failed" as const, failureLayer: layer, failureCode: code,
   requestedAt: outcome.requestedAt, dispatchedAt: outcome.dispatchedAt,
@@ -130,8 +122,8 @@ const successFacts = (outcome: Extract<PromptRefinerProductAdapterOutcome,
   { status: "suggested" }>) => ({
   receiptVersion: PROMPT_REFINER_EXECUTION_RECEIPT_VERSION,
   refinerVersion: PROMPT_REFINER_VERSION,
-  provider: PROMPT_REFINER_VNEXT_PRICE_PIN.provider,
-  modelId: PROMPT_REFINER_VNEXT_PRICE_PIN.modelId,
+  provider: PROMPT_REFINER_PRODUCT_PRICE_PIN.provider,
+  modelId: PROMPT_REFINER_PRODUCT_PRICE_PIN.modelId,
   adapterVersion: PROMPT_REFINER_PRODUCT_ADAPTER_VERSION,
   outcome: "suggested" as const, failureLayer: "none" as const,
   failureCode: null,
@@ -235,12 +227,7 @@ export async function preparePromptRefinerProductSuggestion(input: {
       ? fallback("timeout") : fallback("audit_unavailable");
   }
   try {
-    await assertCurrentPrice();
-    model = await getEnabledRuntimeModel(PROMPT_REFINER_VNEXT_PRICE_PIN.modelId);
-    if (!model || model.provider !== PROMPT_REFINER_VNEXT_PRICE_PIN.provider ||
-        model.apiModel !== PROMPT_REFINER_VNEXT_PRICE_PIN.apiModelId) {
-      throw new Error("prompt_refiner_product_model_drift");
-    }
+    model = await readCurrentPinnedModel();
   } catch {
     return await recordRefusal(input.snapshot, input.mode,
       "execution_contract_mismatch", "admission")
@@ -331,7 +318,7 @@ export async function preparePromptRefinerProductSuggestion(input: {
       authorizeDispatch: async (intent) => {
         // Recheck the live registry immediately before durable intent. The
         // adapter cannot call generateText until this promise succeeds.
-        await assertCurrentPrice();
+        await readCurrentPinnedModel();
         currentIntent = intent;
         recordedDispatch = await authority.recordDispatchIntent(intent);
       },

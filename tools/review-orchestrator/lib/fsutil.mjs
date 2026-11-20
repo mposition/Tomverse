@@ -117,14 +117,14 @@ export function release(path, token) {
 
 /**
  * The mirror lock shared by the short-lived `submit` processes and the
- * daemon, both of which touch the mirror.
+ * daemon, both of which touch the mirror. A waiter waits as long as the owner
+ * is alive (a slow clone is a live owner) and takes the lock over from a dead
+ * one (`tryAcquire`), so no wait limit is needed.
  */
-export async function withLock(path, fn, { timeoutMs = 10 * 60_000 } = {}) {
+export async function withLock(path, fn) {
   mkdirSync(dirname(path), { recursive: true });
-  const started = Date.now();
   let token = tryAcquire(path);
   while (token === null) {
-    if (Date.now() - started > timeoutMs) throw new Error(`lock_timeout: ${path}`);
     await sleep(100);
     token = tryAcquire(path);
   }

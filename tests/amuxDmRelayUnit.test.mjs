@@ -7,7 +7,9 @@
  * relay releases every local Decision Maker marker at the start of each tick,
  * so the relay runs as one process of its own (`--dm-relay`), never beside a
  * worker loop. Its switch and token are in a file only this unit reads. It
- * keeps the bridge account and hardening, and has no [Install].
+ * keeps the bridge account and hardening, and an enabled relay starts at boot
+ * like the worker bridges (owner decision 2026-11-14: the static unit stayed
+ * dead after a reboot on 2026-11-09).
  */
 
 import test from "node:test";
@@ -70,9 +72,10 @@ test("a configuration error waits for a person; a start failure is retried", () 
   assert.match(relay, /pub const DM_RELAY_MISCONFIGURED_EXIT: i32 = 2;/);
 });
 
-test("the unit has no [Install]: nothing starts at boot", () => {
-  assert.doesNotMatch(unit, /^\[Install\]/m);
-  assert.doesNotMatch(unit, /^WantedBy=/m);
+test("an enabled relay starts at boot, like the worker bridges", () => {
+  assert.match(unit, /^\[Install\]$/m);
+  assert.deepEqual(values("WantedBy"), ["multi-user.target"]);
+  assert.deepEqual(values("WantedBy"), valuesOf(template, "WantedBy"));
   assert.doesNotMatch(unit, /^Alias=/m);
 });
 
@@ -86,10 +89,30 @@ test("the unit waits for the local AMUX and keeps the bridge template's hardenin
   ]) {
     assert.deepEqual(values(name), valuesOf(template, name), name);
   }
-  for (const name of ["ReadWritePaths", "BindPaths", "BindReadOnlyPaths", "ReadOnlyPaths",
-    "DynamicUser"]) {
+  for (const name of ["BindReadOnlyPaths", "ReadOnlyPaths", "DynamicUser"]) {
     assert.deepEqual(values(name), [], name);
   }
+});
+
+test("the owed records have a state directory of their own, the only path of /var/lib the relay sees", () => {
+  // dm_relay/owed.rs reads STATE_DIRECTORY, which StateDirectory= sets. The
+  // template's TemporaryFileSystem=/var/lib:ro hides the directory, so it is
+  // bound back in and made writable under ProtectSystem=strict.
+  assert.deepEqual(values("StateDirectory"), ["tomverse-amux-dm-relay"]);
+  assert.deepEqual(values("StateDirectoryMode"), ["0700"]);
+  assert.deepEqual(values("BindPaths"), ["/var/lib/tomverse-amux-dm-relay"]);
+  assert.deepEqual(values("ReadWritePaths"), ["/var/lib/tomverse-amux-dm-relay"]);
+  assert.deepEqual(values("TemporaryFileSystem"), ["/var/lib:ro"]);
+  assert.deepEqual(values("ProtectSystem"), ["strict"]);
+  // The template's workers have no such path.
+  for (const name of ["StateDirectory", "BindPaths", "ReadWritePaths"]) {
+    assert.deepEqual(valuesOf(template, name), [], name);
+  }
+  const owed = readFileSync(
+    new URL("../apps/tomverse-orchestrator/src/dm_relay/owed.rs", import.meta.url),
+    "utf8"
+  );
+  assert.match(owed, /const SYSTEMD_STATE_DIR_ENV: &str = "STATE_DIRECTORY";/);
 });
 
 test("every directive in the unit is one this test names", () => {
@@ -101,7 +124,8 @@ test("every directive in the unit is one this test names", () => {
     "CapabilityBoundingSet", "AmbientCapabilities", "ProtectHome", "ProtectSystem",
     "PrivateTmp", "PrivateDevices", "ProtectKernelTunables", "ProtectKernelModules",
     "ProtectControlGroups", "RestrictSUIDSGID", "LockPersonality",
-    "RestrictAddressFamilies", "TemporaryFileSystem", "UMask",
+    "RestrictAddressFamilies", "TemporaryFileSystem", "StateDirectory", "StateDirectoryMode",
+    "BindPaths", "ReadWritePaths", "UMask", "WantedBy",
   ]);
   assert.deepEqual(directives.filter((name) => !known.has(name)), []);
   // EnvironmentFile is the one directive given twice.

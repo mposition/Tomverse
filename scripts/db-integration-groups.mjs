@@ -69,7 +69,7 @@ const LANE_RULES = [
   // generated artifacts. This lane was `import` until then.
   [
     "conversations",
-    /^(external-import|external-conversation-|context-manifest-retention|public-share-route|default-model-reconciliation|conversation-(lock-migration|pin|search|title)|continuation-source-export|chat-durable-recovery|message-attachment|generated-artifacts)/,
+    /^(external-import|external-conversation-|context-manifest-retention|public-share-route|default-model-reconciliation|conversation-(lock-migration|password-version|pin|search|title)|continuation-source-export|chat-durable-recovery|message-attachment|generated-artifacts)/,
   ],
   // Routing: the run, its attempts, the manifest boundary, and the product and
   // selection-mode attribution the ROUTE gates are written against.
@@ -101,7 +101,7 @@ const LANE_RULES = [
   // accounts held 49 suites.
   [
     "operations",
-    /^(qa-release-|billing-finance-ops-|agent-digest-|auto-router-optimizer|chat-refiner-initial-auto-release|response-latency)/,
+    /^(qa-release-|billing-finance-ops-|agent-digest-|auto-router-optimizer|smart-adaptive-daily|chat-refiner-initial-auto-release|response-latency)/,
   ],
   // The remaining agents and the review machinery around them: marketing,
   // Prompt Refiner shadow runs, and AI Review telemetry and feedback. Below
@@ -110,6 +110,17 @@ const LANE_RULES = [
   [
     "agents",
     /^(marketing-(automation|fact|templates|webhook|competitor|draft|generator|intel|llm|retention)|prompt-refiner-|comparison-review-|feedback-lifecycle)/,
+  ],
+  // What came to rest in `accounts` without being about accounts: the model
+  // catalogue and providers, MCP connectors, Scout, the AMUX v22 CLI ledgers
+  // (camelCase names the `amux-` rule does not take), the marketing console's
+  // stores and the migration checks. Split out on 2026-11-13, when accounts
+  // held 67 suites and ran ~14 minutes against at most 9 elsewhere, the last
+  // check Railway's Wait for CI held every dev deployment -- and so every
+  // merge lane round -- for. Last on purpose: every rule above keeps its suites.
+  [
+    "platform",
+    /^(mcp-|model-catalog|provider-|product-research-|trace-report-|voice-provider-|auto-router-tunables|chat-c16-lifecycle|chat-router-location-preparation|develop-ci-repair|migration-baseline-|image-billing-measurement|agent-office-|amuxV22|amuxCli|marketing-)/,
   ],
 ];
 

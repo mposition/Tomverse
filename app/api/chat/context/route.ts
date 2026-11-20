@@ -1,3 +1,5 @@
+import { CHAT_MAX_MESSAGE_BODY_BYTES, CHAT_MAX_MESSAGE_CHARACTERS } from "@/lib/chatRequestLimits";
+import { prepareMemoryHistoryContext } from "@/lib/memoryHistorySnapshot";
 import { randomUUID } from "node:crypto";
 import { getServerSession } from "next-auth/next";
 import { z } from "zod";
@@ -7,7 +9,7 @@ import {
     readLimitedJson,
 } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
-import { chatErrorResponse } from "@/lib/chatSecurity";
+import { ChatAccessError, chatErrorResponse } from "@/lib/chatSecurity";
 import { buildChatTurnContext } from "@/lib/chatTurnContext";
 import { issueChatContextBundle } from "@/lib/chatContextBundleService";
 import { getUserBillingPlan } from "@/lib/billingEntitlements";
@@ -54,7 +56,8 @@ const contextSchema = z
     .object({
         conversationId: z.string().min(1).max(64).nullable().optional(),
         modelIds: z.array(z.string().min(1).max(100)).min(1).max(3),
-        prompt: z.string().max(50_000),
+        prompt: z.string().max(CHAT_MAX_MESSAGE_CHARACTERS),
+        previousContextBundle: z.string().min(1).max(8_192).optional(),
     })
     .strict();
 
@@ -76,7 +79,10 @@ export async function POST(request: Request) {
             "chat-context-preparation",
             { minute: 60, day: 2_000 }
         );
-        const payload = await readLimitedJson(request, 64 * 1024, contextSchema);
+        const payload = await readLimitedJson(request, CHAT_MAX_MESSAGE_BODY_BYTES, contextSchema);
+        if (payload.previousContextBundle !== undefined && !userId) {
+            throw new ChatAccessError(400, "INVALID_CONTEXT_BUNDLE", "Invalid chat context.");
+        }
 
         const headers = new Headers({
             "Cache-Control": "no-store",
@@ -112,7 +118,7 @@ export async function POST(request: Request) {
                 where: { id: conversationId },
                 select: {
                     userId: true,
-                    password: true,
+                    password: true, passwordVersion: true,
                     kind: true,
                     memoryMode: true,
                     assistantProfileVersionId: true,
@@ -133,7 +139,7 @@ export async function POST(request: Request) {
                     request,
                     userId,
                     conversationId,
-                    conversation.password
+                    conversation.password == null ? null : conversation.passwordVersion
                 )
             ) {
                 return conversationLockedResponse();
@@ -148,9 +154,14 @@ export async function POST(request: Request) {
         const context = await buildChatTurnContext({
             userId,
             query: payload.prompt,
+            memorySemanticContext: prepareMemoryHistoryContext({
+                request, userId, conversationId, query: payload.prompt, modelIds: payload.modelIds,
+                previousContextBundle: payload.previousContextBundle,
+            }),
             conversationMode: conversationMemoryMode,
             profileVersionId,
-            plan: (await getUserBillingPlan(userId))?.tier ?? null,
+            // Only a bound profile uses the tier to check its model entitlement.
+            plan: profileVersionId ? (await getUserBillingPlan(userId))?.tier ?? null : null,
         });
 
         // Nothing to bind: issuing a bundle for an empty context would make

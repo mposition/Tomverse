@@ -47,6 +47,7 @@ import { enqueueRefused, enqueueStandardEmail } from "@/lib/standardEmailLane";
 const PROVIDER_REPORT_NAMES: Readonly<Record<AiProvider, string>> = {
   openai: "OpenAI",
   anthropic: "Anthropic",
+  cohere: "Cohere",
   google: "Google Gemini",
   groq: "Groq",
   xai: "xAI",

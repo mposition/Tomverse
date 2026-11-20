@@ -282,6 +282,79 @@ test("an idle run writes no batch audit entry", async () => {
   assert.deepEqual(await auditActions(), ["support_triage.run_started", "support_triage.run_finished"]);
 });
 
+test("a batch whose session is lost is asked again at the same window, and the run still succeeds", async () => {
+  await seedExpired(200);
+  // The first delete of the marked row ends its own session (57P01), as the
+  // 150 ms idle timeout does after an event-loop stall. A sequence, because a
+  // marker row would roll back with the session that wrote it.
+  await prisma.$executeRawUnsafe(`DROP SEQUENCE IF EXISTS test_session_loss`);
+  await prisma.$executeRawUnsafe(`CREATE SEQUENCE test_session_loss`);
+  await prisma.$executeRawUnsafe(`
+    CREATE FUNCTION test_slow_delete() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      IF OLD."id" = 'old-00001' AND nextval('test_session_loss') = 1 THEN
+        PERFORM pg_terminate_backend(pg_backend_pid());
+      END IF;
+      RETURN OLD;
+    END $$`);
+  await prisma.$executeRawUnsafe(`
+    CREATE TRIGGER "test_slow_delete" BEFORE DELETE ON "SupportTriageRun"
+      FOR EACH ROW EXECUTE FUNCTION test_slow_delete()`);
+  const warnings: string[] = [];
+  const warn = console.warn;
+  console.warn = (line: unknown) => void warnings.push(String(line));
+  try {
+    const result = await runSupportTriageRetention();
+    assert.equal(result.deleted, 200);
+    assert.equal(result.batchesCompleted, 1);
+    assert.equal(result.blocked, 0);
+    assert.equal(result.overdueRemaining, 0);
+    assert.equal(result.outcome, "success");
+  } finally {
+    console.warn = warn;
+    await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS "test_slow_delete" ON "SupportTriageRun"`);
+    await prisma.$executeRawUnsafe(`DROP SEQUENCE IF EXISTS test_session_loss`);
+  }
+  const lost = warnings.filter((line) => line.includes("support_triage_retention_connection_lost"));
+  assert.equal(lost.length, 1);
+  assert.match(lost[0], /"code":"(57P01|P1017|ConnectionClosed)"/);
+  // The lost batch committed nothing: one batch entry, from the retry.
+  assert.deepEqual(await auditActions(), [
+    "support_triage.run_started",
+    "support_triage.retention_batch",
+    "support_triage.run_finished",
+  ]);
+});
+
+test("a run whose every batch loses its session is not progressing and names the loss", async () => {
+  await seedExpired(10);
+  await prisma.$executeRawUnsafe(`
+    CREATE FUNCTION test_slow_delete() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      IF OLD."id" = 'old-00001' THEN PERFORM pg_terminate_backend(pg_backend_pid()); END IF;
+      RETURN OLD;
+    END $$`);
+  await prisma.$executeRawUnsafe(`
+    CREATE TRIGGER "test_slow_delete" BEFORE DELETE ON "SupportTriageRun"
+      FOR EACH ROW EXECUTE FUNCTION test_slow_delete()`);
+  const warn = console.warn;
+  console.warn = () => undefined;
+  let result: Awaited<ReturnType<typeof runSupportTriageRetention>>;
+  try {
+    result = await runSupportTriageRetention();
+  } finally {
+    console.warn = warn;
+    await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS "test_slow_delete" ON "SupportTriageRun"`);
+  }
+  assert.equal(result.batchesCompleted, 0);
+  assert.equal(result.deleted, 0);
+  assert.equal(result.blocked, 0);
+  assert.equal(result.overdueRemaining, 10);
+  assert.equal(result.outcome, "partial");
+  assert.equal(result.notProgressing, true);
+  assert.ok(result.lastConnectionLoss);
+});
+
 test("statement cancellation is read from the SQLSTATE wherever the client puts it, not from text", async () => {
   const { isStatementCancelled } = await import("@/lib/supportTriageRetention");
   assert.equal(isStatementCancelled({ code: "57014" }), true);

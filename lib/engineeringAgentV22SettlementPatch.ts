@@ -2,6 +2,7 @@ import "server-only";
 
 import { readAmuxV22TaskPatchEvidence } from
   "@/lib/amux/v22TaskResultStore";
+import { v22PatchNamedPaths } from "@/lib/engineeringAgentV22PatchApply";
 import { prisma } from "@/lib/prisma";
 
 /** Decrypt outside the short settlement transaction. The settlement writer
@@ -29,5 +30,6 @@ export async function loadEngineeringAgentV22SettlementPatch(
   const patch = await ports.readEvidence(attemptId, row.taskId);
   if (!patch || patch.baseSha !== row.baseSha)
     throw new Error("v22_patch_unavailable_before_settlement");
-  return { taskId: row.taskId, ...patch };
+  return { taskId: row.taskId, ...patch,
+    paths: v22PatchNamedPaths(patch.text, patch.files) };
 }

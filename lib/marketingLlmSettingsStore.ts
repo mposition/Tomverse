@@ -71,7 +71,7 @@ export async function writeMarketingLlmSettings(
   if (input.monthlyUsdCap !== null && parseMarketingLlmMonthlyCap(input.monthlyUsdCap) === null) {
     throw new MarketingLlmSettingsRefusedError(
       "cap_invalid",
-      "The monthly cap must be above zero and at most US$100, with up to six decimal places",
+      "The monthly cap must be above zero and at most US$500, with up to six decimal places",
     );
   }
   const next = marketingLlmSettingsValue({ model: input.model, monthlyUsdCap: input.monthlyUsdCap });

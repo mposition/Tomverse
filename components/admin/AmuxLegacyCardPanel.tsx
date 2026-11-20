@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { useAdminMessages } from "./AdminLocaleProvider";
 import { adminFetch } from "@/lib/adminFetch";
@@ -10,24 +10,31 @@ import type { AdminMessageShape } from "@/lib/adminLocale";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { amuxIdeaLaneBoardHref } from "@/lib/amux/ideaLaneBoardCore";
 
-/** What the card detail read returns for a legacy card (lib/amux/legacyCardOwnerService.ts). */
+/** What the card detail read returns for a stopped card (lib/amux/legacyCardOwnerService.ts). */
 export type AmuxLegacyCardView = {
-  kind: "workboard" | "pre_v22_task";
+  kind: "workboard" | "pre_v22_task" | "stopped_task";
   closeRefusal: string | null;
+  /** Null when the owner can complete it as done; only a stopped v22 Task ever can. */
+  completeRefusal?: string | null;
   /** Archived already with an escalation still open: a close only resolves that escalation. */
   alreadyArchived?: boolean;
   idea: { state: "ready"; title: string; text: string; truncated: boolean } |
     { state: "refused"; code: string };
 };
 
+/** The two kinds no review decision or recovery inspection ever opens on (lib/amux/legacyCardCore.ts). */
+export const isAmuxRemakeOnlyCardKind = (kind: string | null | undefined) =>
+  kind === "workboard" || kind === "pre_v22_task";
+
 const PREWRITE_REFUSALS: ReadonlySet<string> = new Set(["amux_submission_disabled", "submission_disabled",
   "audit_unavailable", "key_store_unavailable"]);
 
 type Messages = AdminMessageShape<(typeof adminAmuxLegacyCardMessages)["en"]>;
-type Action = "recreate" | "close";
+type Action = "recreate" | "close" | "complete";
 export type AmuxLegacyCardOutcome =
   | { kind: "recreated"; requestId: string; closed: boolean; reason: string | null }
   | { kind: "closed" }
+  | { kind: "completed" }
   | { kind: "refused"; error: string; reason: string | null }
   | { kind: "reauth" }
   | { kind: "unknown" };
@@ -35,13 +42,15 @@ export type AmuxLegacyCardOutcome =
 /** One POST to the legacy card route, read into what the panel says. Never resent on an unknown outcome. */
 export async function requestAmuxLegacyCardAction(input: {
   action: Action; taskId: string; revision: number; fetcher?: typeof adminFetch;
+  /** The owner's reason; sent with "complete" only. */
+  reason?: string;
 }): Promise<AmuxLegacyCardOutcome> {
   let response: Response;
   try {
     response = await (input.fetcher ?? adminFetch)("/api/admin/amux/legacy-card", {
       method: "POST", headers: { "content-type": "application/json" }, cache: "no-store",
       body: JSON.stringify({ action: input.action, taskId: input.taskId, revision: input.revision,
-        ownerConfirmed: true }),
+        ...(input.action === "complete" ? { reason: input.reason ?? "" } : {}), ownerConfirmed: true }),
     });
   } catch { return { kind: "unknown" }; }
   if (response.status === 428) return { kind: "reauth" };
@@ -52,6 +61,7 @@ export async function requestAmuxLegacyCardAction(input: {
     return { kind: "recreated", requestId: body.requestId, closed: body.closed === true, reason: text(body.reason) };
   }
   if (response.ok && body.status === "closed") return { kind: "closed" };
+  if (response.ok && body.status === "completed") return { kind: "completed" };
   const error = text(body.error);
   // A 4xx and the 503s that refuse before any write are known; anything else may have written.
   if (error && error !== "outcome_unknown" && (response.status < 500 || PREWRITE_REFUSALS.has(error))) {
@@ -62,7 +72,7 @@ export async function requestAmuxLegacyCardAction(input: {
 
 const reasonText = (m: Messages, code: string | null) => code ? m.reason[code] ?? code : null;
 
-const LEGACY_KINDS: ReadonlySet<string> = new Set(["workboard", "pre_v22_task"]);
+const LEGACY_KINDS: ReadonlySet<string> = new Set(["workboard", "pre_v22_task", "stopped_task"]);
 
 const isLegacyCardView = (value: unknown): value is AmuxLegacyCardView => {
   if (typeof value !== "object" || value === null) return false;
@@ -78,39 +88,17 @@ const isLegacyCardView = (value: unknown): value is AmuxLegacyCardView => {
 export type AmuxLegacyCardRead = { revision: number; view: AmuxLegacyCardView | null };
 
 /**
- * The legacy panel of one card, from the same owner-only card detail read the
- * execution board opens (`/api/admin/amux/execution-view?view=detail`). Null
- * when it could not be read: the caller then shows no panel. Read only.
+ * The legacy panel in one card detail answer
+ * (`/api/admin/amux/execution-view?view=detail`) and the revision it was read
+ * at. Null when the answer is not this card's: the caller then shows no panel.
+ * The owner review already reads that answer for the card on screen, so the
+ * panel takes it from there and adds no read of its own.
  */
-export async function readAmuxLegacyCardForTask(taskId: string,
-  fetcher: typeof adminFetch = adminFetch): Promise<AmuxLegacyCardRead | null> {
-  try {
-    const response = await fetcher(
-      `/api/admin/amux/execution-view?view=detail&taskId=${encodeURIComponent(taskId)}`, { cache: "no-store" });
-    if (!response.ok) return null;
-    const body = await response.json() as Record<string, unknown> | null;
-    if (!body || body.id !== taskId || !Number.isSafeInteger(body.revision)) return null;
-    return { revision: body.revision as number, view: isLegacyCardView(body.legacyCard) ? body.legacyCard : null };
-  } catch { return null; }
-}
-
-/**
- * Reads the legacy panel of the card on screen when `enabled` (the owner).
- * A read for an earlier card is dropped: only the answer for `taskId` is kept.
- * `initial` is what is shown before the read lands.
- */
-export function useAmuxLegacyCardRead(taskId: string, enabled: boolean,
-  initial: AmuxLegacyCardRead | null = null, fetcher?: typeof adminFetch): AmuxLegacyCardRead | null {
-  const [read, setRead] = useState<{ taskId: string; read: AmuxLegacyCardRead | null }>({ taskId, read: initial });
-  useEffect(() => {
-    if (!enabled) return;
-    let current = true;
-    void readAmuxLegacyCardForTask(taskId, fetcher).then((result) => {
-      if (current) setRead({ taskId, read: result });
-    });
-    return () => { current = false; };
-  }, [taskId, enabled, fetcher]);
-  return enabled && read.taskId === taskId ? read.read : null;
+export function amuxLegacyCardReadOf(taskId: string, body: unknown): AmuxLegacyCardRead | null {
+  if (typeof body !== "object" || body === null) return null;
+  const detail = body as Record<string, unknown>;
+  if (detail.id !== taskId || !Number.isSafeInteger(detail.revision)) return null;
+  return { revision: detail.revision as number, view: isLegacyCardView(detail.legacyCard) ? detail.legacyCard : null };
 }
 
 export function AmuxLegacyCardPanel({ taskId, revision, view, canAct, onChanged, fetcher, reauthReturnPath }: {
@@ -123,22 +111,26 @@ export function AmuxLegacyCardPanel({ taskId, revision, view, canAct, onChanged,
 }) {
   const m = useAdminMessages(adminAmuxLegacyCardMessages);
   const [confirming, setConfirming] = useState<Action | null>(null);
+  const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<AmuxLegacyCardOutcome | null>(null);
   const ready = view.idea.state === "ready" ? view.idea : null;
   // After a close the shown view is stale: the card is in the archive now.
-  const done = outcome?.kind === "closed" || (outcome?.kind === "recreated" && outcome.closed);
+  const done = outcome?.kind === "closed" || outcome?.kind === "completed" ||
+    (outcome?.kind === "recreated" && outcome.closed);
   const blocked = view.closeRefusal !== null;
+  const completable = view.kind === "stopped_task" && view.completeRefusal === null;
   const archived = view.alreadyArchived === true;
 
   const run = async (action: Action) => {
     setBusy(true);
     setConfirming(null);
-    const result = await requestAmuxLegacyCardAction({ action, taskId, revision, fetcher });
+    const result = await requestAmuxLegacyCardAction({ action, taskId, revision, fetcher,
+      reason: reason.trim() });
     setOutcome(result);
     setBusy(false);
-    if (result.kind === "recreated" || result.kind === "closed")
-      onChanged(result.kind === "closed" || result.closed);
+    if (result.kind === "recreated" || result.kind === "closed" || result.kind === "completed")
+      onChanged(result.kind !== "recreated" || result.closed);
   };
 
   return <section className="space-y-3 rounded-xl border border-amber-500/40 bg-amber-500/5 p-4"
@@ -156,6 +148,9 @@ export function AmuxLegacyCardPanel({ taskId, revision, view, canAct, onChanged,
       data-testid="amux-legacy-card-idea-refused">{m.ideaRefused} {reasonText(m, view.idea.code)}</p>}
     {canAct && !blocked && !done && <div className="flex flex-wrap gap-2">
       {confirming === null ? <>
+        {completable && <button type="button" className="min-h-11 rounded-lg border border-emerald-500/50 px-3 py-2 font-semibold"
+          disabled={busy} onClick={() => setConfirming("complete")}
+          data-testid="amux-legacy-card-complete">{m.complete}</button>}
         {ready && <button type="button" className="min-h-11 rounded-lg border border-blue-500/50 px-3 py-2 font-semibold"
           disabled={busy} onClick={() => setConfirming("recreate")}
           data-testid="amux-legacy-card-recreate">{m.recreate}</button>}
@@ -163,11 +158,19 @@ export function AmuxLegacyCardPanel({ taskId, revision, view, canAct, onChanged,
           disabled={busy} onClick={() => setConfirming("close")}
           data-testid="amux-legacy-card-close">{m.close}</button>
       </> : <div className="space-y-2" role="group" aria-label={m.title[view.kind]}>
-        <p className="text-sm font-semibold">{confirming === "recreate" ? (archived ? m.confirmRecreateArchived : m.confirmRecreate) :
+        <p className="text-sm font-semibold">{confirming === "complete" ? m.confirmComplete :
+          confirming === "recreate" ? (archived ? m.confirmRecreateArchived : m.confirmRecreate) :
           archived ? m.confirmCloseArchived : m.confirmClose}</p>
+        {confirming === "complete" && <label className="block text-sm">
+          <span className="block">{m.completeReason}</span>
+          <input type="text" value={reason} maxLength={500} onChange={(event) => setReason(event.target.value)}
+            className="mt-1 w-full rounded border border-zinc-600 bg-transparent px-2 py-2"
+            data-testid="amux-legacy-card-complete-reason" />
+        </label>}
         <div className="flex flex-wrap gap-2">
           <button type="button" className="min-h-11 rounded-lg border border-blue-500/50 px-3 py-2 font-semibold"
-            disabled={busy} onClick={() => void run(confirming)}
+            disabled={busy || (confirming === "complete" && reason.trim() === "")}
+            onClick={() => void run(confirming)}
             data-testid="amux-legacy-card-confirm">{m.confirm}</button>
           <button type="button" className="min-h-11 rounded-lg border border-zinc-600 px-3 py-2"
             disabled={busy} onClick={() => setConfirming(null)}>{m.cancel}</button>
@@ -180,7 +183,9 @@ export function AmuxLegacyCardPanel({ taskId, revision, view, canAct, onChanged,
         ` (${reasonText(m, outcome.reason)})` : ""} <Link className="underline"
         href={amuxIdeaLaneBoardHref(outcome.requestId)}>{m.openIdea}</Link></p>}
       {outcome.kind === "closed" && <p>{archived ? m.closedDoneArchived : m.closedDone}</p>}
-      {outcome.kind === "refused" && <p>{outcome.error === "idea_refused" ? m.ideaRefused : m.notClosable}{" "}
+      {outcome.kind === "completed" && <p>{m.completedDone}</p>}
+      {outcome.kind === "refused" && <p>{outcome.error === "idea_refused" ? m.ideaRefused :
+        outcome.error === "not_completable" ? m.notCompletable : m.notClosable}{" "}
         {reasonText(m, outcome.reason ?? outcome.error)}</p>}
       {outcome.kind === "reauth" && <Link className="underline" href={adminRecentAuthenticationHref(reauthReturnPath ??
         "/admin/amux-execution?tab=cards&taskId=" + encodeURIComponent(taskId))}>{m.reauth}</Link>}

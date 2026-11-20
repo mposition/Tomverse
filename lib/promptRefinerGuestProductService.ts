@@ -38,10 +38,10 @@ import {
   type PromptRefinerFailureCode,
   type PromptRefinerFailureLayer,
 } from "@/lib/promptRefinerReceiptCore";
-import { readPromptRefinerVnextOneShotPrice } from
-  "@/lib/promptRefinerQualityEvaluationVnextOneShotPriceReadback";
-import { PROMPT_REFINER_VNEXT_PRICE_PIN } from
-  "@/lib/promptRefinerQualityEvaluationVnextExecutionContract";
+import { readPromptRefinerProductPrice } from
+  "@/lib/promptRefinerProductPriceReadback";
+import { PROMPT_REFINER_PRODUCT_PRICE_PIN } from
+  "@/lib/promptRefinerProductPricePin";
 import { PROMPT_REFINER_VERSION } from "@/lib/promptRefinerSuggestion";
 
 export type GuestPromptRefinerResult = Readonly<
@@ -57,7 +57,7 @@ const fallback = (reason: PromptRefinerProductFallbackReason,
 
 const assertCurrentPrice = async () => {
   await prisma.$transaction(async (tx) => {
-    const price = await readPromptRefinerVnextOneShotPrice(tx);
+    const price = await readPromptRefinerProductPrice(tx);
     if (!price.pricePinMatchesRegistry || price.problems.length !== 0) {
       throw new Error("prompt_refiner_guest_product_price_drift");
     }
@@ -93,8 +93,8 @@ const refusalReceipt = (requestId: string, code: PromptRefinerFailureCode,
 const failedReceipt = (requestId: string,
   outcome: PromptRefinerProductAdapterOutcome,
   code: PromptRefinerFailureCode, layer: PromptRefinerFailureLayer) => ({
-  ...receiptBase(requestId), provider: PROMPT_REFINER_VNEXT_PRICE_PIN.provider,
-  modelId: PROMPT_REFINER_VNEXT_PRICE_PIN.modelId,
+  ...receiptBase(requestId), provider: PROMPT_REFINER_PRODUCT_PRICE_PIN.provider,
+  modelId: PROMPT_REFINER_PRODUCT_PRICE_PIN.modelId,
   adapterVersion: PROMPT_REFINER_PRODUCT_ADAPTER_VERSION,
   outcome: "failed" as const, failureLayer: layer, failureCode: code,
   requestedAt: outcome.requestedAt, dispatchedAt: outcome.dispatchedAt,
@@ -108,8 +108,8 @@ const successReceipt = (requestId: string,
   outcome: Extract<PromptRefinerProductAdapterOutcome,
     { status: "suggested" }>) => ({
   ...receiptBase(requestId), suggestionId: randomUUID(),
-  provider: PROMPT_REFINER_VNEXT_PRICE_PIN.provider,
-  modelId: PROMPT_REFINER_VNEXT_PRICE_PIN.modelId,
+  provider: PROMPT_REFINER_PRODUCT_PRICE_PIN.provider,
+  modelId: PROMPT_REFINER_PRODUCT_PRICE_PIN.modelId,
   adapterVersion: PROMPT_REFINER_PRODUCT_ADAPTER_VERSION,
   outcome: "suggested" as const, failureLayer: "none" as const,
   failureCode: null, requestedAt: outcome.requestedAt,
@@ -170,9 +170,9 @@ export async function refineGuestChatPrompt(input: Readonly<{
   let model;
   try {
     await assertCurrentPrice();
-    model = await getEnabledRuntimeModel(PROMPT_REFINER_VNEXT_PRICE_PIN.modelId);
-    if (!model || model.provider !== PROMPT_REFINER_VNEXT_PRICE_PIN.provider ||
-        model.apiModel !== PROMPT_REFINER_VNEXT_PRICE_PIN.apiModelId) {
+    model = await getEnabledRuntimeModel(PROMPT_REFINER_PRODUCT_PRICE_PIN.modelId);
+    if (!model || model.provider !== PROMPT_REFINER_PRODUCT_PRICE_PIN.provider ||
+        model.apiModel !== PROMPT_REFINER_PRODUCT_PRICE_PIN.apiModelId) {
       throw new Error("prompt_refiner_guest_product_model_drift");
     }
   } catch {

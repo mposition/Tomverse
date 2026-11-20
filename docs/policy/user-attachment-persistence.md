@@ -8,7 +8,7 @@
 
 **이 기능은 "AI 생성 파일"과 다른 기능이다.** `docs/policy/generated-artifacts.md`
 는 답변이 *만들어 낸* 파일을 다루고, 이 문서는 사람이 *보낸* 파일을 다룬다.
-방향도, 권한도, 수명주기도 공유하지 않는다 — 생성 파일은 다운로드 대상이고,
+권한과 수명주기는 독립적이다 — 생성 파일은 다운로드 대상이고,
 입력 첨부는 이후 turn의 prompt를 만들기 위해 서버가 다시 읽는 대상이다.
 
 ## 1. 문제
@@ -88,6 +88,7 @@ mediaType, size, kind, objectKey, uploadId, createdAt.
 | 초안에서 제거 | `DELETE /api/chat` `{ uploadId }` | 204, 또는 이미 전송된 파일이면 `{ kept: true }` |
 | 메시지 pre-save | `POST /api/conversations/{id}/messages` `{ messages:[{ id, content, attachmentUploadIds }] }` 또는 순서 있는 `attachmentReferences:[{uploadId}\|{attachmentId}]` | `{ success, created, attachments:[{messageId, id, ordinal, name, mediaType, size, kind}] }` |
 | 대화 조회 | `GET /api/conversations/{id}` | 각 메시지에 `attachments: [{id, attachmentId, ordinal, name, mediaType, size, kind}]`, 누락된 파일에는 `unavailableAt`·`unavailableReason`(§11) — 없으면 **키 자체가 없다** |
+| 이미지 썸네일 | `GET /api/attachments/{attachmentId}/preview` | 본인 소유의 래스터 이미지(png·jpeg·webp·gif) 바이트, `inline` — §5.1 |
 | 채팅 | `POST /api/chat` | 각 첨부는 `{attachmentId}` 또는 `{uploadId}`. 선택적으로 `acknowledgedUnavailableAttachmentIds`(§11.4) |
 
 - **`content`는 비어 있을 수 있다.** pre-save schema는
@@ -101,7 +102,7 @@ mediaType, size, kind, objectKey, uploadId, createdAt.
   그 지식은 누군가 옮기기 전까지만 한 곳에 있다.
 - **저장은 한 트랜잭션이다.** 메시지 행과 첨부 행이 함께 commit된다. 저장된 turn이
   나열할 수 없는 파일 수를 보여 주는 상태는 존재하지 않는다.
-- **복원된 질문의 새 전송**은 최대 5개의 순서 있는 opaque reference를 받는다.
+- **복원된 질문의 새 전송**은 최대 10개(`CHAT_MAX_ATTACHMENTS_PER_MESSAGE`)의 순서 있는 opaque reference를 받는다.
   한 항목은 `uploadId` 또는 `attachmentId` 하나만 가지며, 기존 `attachmentUploadIds`와
   동시에 쓰지 않는다. 한 메시지 안의 같은 handle 중복과 한 batch 안의 message ID
   중복은 복사 전에 거부한다. 이름·bytes·storage key를 클라이언트가 지정하지 않는다.
@@ -109,8 +110,9 @@ mediaType, size, kind, objectKey, uploadId, createdAt.
 
 ## 5. 무엇이 브라우저에 가지 않는가
 
-`objectKey`, 첨부 바이트, data URL, 추출된 본문, 업로드된 아카이브 내부 경로,
-서명 URL은 **어떤 경로로도** 클라이언트에 가지 않는다.
+`objectKey`, data URL, 추출된 본문, 업로드된 아카이브 내부 경로, 서명 URL은
+**어떤 경로로도** 클라이언트에 가지 않는다. 첨부 바이트는 §5.1의 썸네일 route
+하나로만, 소유자 본인에게, 래스터 이미지에 한해 간다.
 
 - 근거는 select이지 필터가 아니다. `PUBLIC_MESSAGE_ATTACHMENT_SELECT`는
   8개 필드(id, ordinal, name, mediaType, size, kind, unavailableAt,
@@ -119,9 +121,31 @@ mediaType, size, kind, objectKey, uploadId, createdAt.
   보낸다.
 - 타입 `PublicMessageAttachment`에 `objectKey`가 **없으므로** spread가 생겨도
   새 필드가 새 응답 필드가 되지 않는다. 변환은 필드별이고 spread가 아니다.
-- **입력 첨부에는 다운로드 route가 없다.** 생성 파일과 달리 사용자는 원본을 이미
-  갖고 있고, route가 없다는 것은 서명 URL도, 그것을 만들 코드도 없다는 뜻이다.
+- **입력 첨부에는 다운로드 route가 없다.** 로컬 파일 업로드 외에 생성 파일을
+  다운로드하지 않고 독립 입력 사본으로 준비할 수도 있다(§8.1). 따라서 사용자가
+  입력 원본을 이미 갖고 있다고 가정하지 않는다. 기존 생성 파일 다운로드는 유지하며,
+  입력 첨부 전용 다운로드나 공유는 제공하지 않는다. §5.1의 썸네일은 이미지 카드를
+  그리기 위한 `inline` 응답이며 문서·아카이브에는 열리지 않는다.
 - 서명 URL은 DB에 저장하지 않는다(애초에 만들지 않는다).
+
+### 5.1 보낸 이미지의 썸네일
+
+보낸 탭은 로컬 미리보기를 쓰지만, 다시 연 대화에는 카드 메타데이터만 있어 모든
+이미지가 아이콘으로 돌아왔다(운영자 요청 2026-11-15). `GET /api/attachments/{attachmentId}/preview`가
+그 이미지를 소유자에게만 돌려준다.
+
+- **조회가 소유권이다.** `findFirst({ where: { id, userId } })`로 찾고 대화 소유자도
+  다시 확인한다. 남의 행, 없는 행, `unavailableAt`이 찍힌 행, 래스터 이미지가 아닌 행은
+  모두 같은 404다. 잠긴 대화는 소유자에게만 `CONVERSATION_LOCKED`.
+- **래스터 이미지만.** png·jpeg·webp·gif(`lib/messageAttachmentPreview.ts`). SVG는
+  스크립트를 실을 수 있어 넣지 않는다.
+- **응답 헤더.** 행의 media type, `nosniff`, `Content-Disposition: inline`,
+  `Cache-Control: private, no-store`, `Content-Security-Policy: default-src 'none'; ... sandbox`.
+  URL에는 opaque id만 있고 key·서명 URL은 만들지 않는다.
+- **비파괴 읽기.** `readOwnR2ObjectBytes`를 쓴다. 읽기 실패는 404일 뿐이고
+  `unavailableAt`을 쓰지 않는다 — 그 판정은 §11대로 채팅 route만 한다. 카드는 썸네일
+  로드가 실패하면 아이콘 카드로 돌아간다.
+- 게스트 첨부는 행이 없으므로 대상이 아니다.
 
 ## 6. 모델이 보는 것 — turn handle
 
@@ -139,7 +163,8 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 `generated-ar
 같은 결정을 한다 — **객체 먼저, 행 나중. 삭제는 행 먼저, tombstone, 객체 나중.**
 
 - **삭제되는 것**: 대화 삭제, 대화 일괄 삭제, 계정 삭제. 셋 다 같은 트랜잭션에서
-  `MessageAttachmentCleanup`을 남긴다.
+  `MessageAttachmentCleanup`을 남긴다. 추출 텍스트 캐시(§7.1)는 첨부 행에서 cascade되는
+  행이라, 같은 트랜잭션에서 함께 지워진다.
 - **삭제되지 않는 것**: **한 모델의 assistant history 초기화.** 첨부는 비교의 세
   패널이 공유하는 *질문*에 속하고, 한 모델의 답변을 지우는 것은 질문을 지우는
   것이 아니다. `enqueueMessageAttachmentCleanupForMessages`는 기본 role을 갖지
@@ -157,6 +182,36 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 `generated-ar
   그만둔다.
 - sweep은 절대 throw하지 않는다. 저장소 장애가 유지보수 run 전체를 실패시키면
   안 된다.
+
+### 7.1 추출 텍스트 캐시 (운영자 결정 2026-11-18)
+
+- **왜:** 매 turn이 이전 메시지의 파일을 R2에서 다시 읽고 다시 파싱했다. 스캔 PDF는
+  매 turn 유료 OCR을 다시 탔다. 이 비용이 파일 크기에 비례해서 첨부 상한이 10MB에
+  묶여 있었다.
+- **무엇을:** 이전 메시지의 파일을 처음 다시 읽는 turn이, 추출한 텍스트를
+  `MessageAttachmentTextCache` 행(첨부 하나에 하나, `MessageAttachment`에서 cascade)에
+  저장한다. 다음 turn부터는 그 텍스트만 읽는다.
+  캐시를 읽은 파일은 원본 바이트를 읽지 않으므로 바이트 합계에 세지 않는다. 이전 파일 몫(입력
+  상한의 절반)과 파싱 예산은 그대로 적용한다.
+- **바이트 몫:** 요청 합계(`CHAT_MAX_TOTAL_ATTACHMENT_BYTES`)는 이번 메시지 파일에만 적용하고
+  넘으면 413이다. 원본을 통째로 읽는 이전 파일은 같은 크기의 자기 몫이 따로 있고, 넘으면
+  요청을 실패시키지 않고 "earlier attachment, not included"로 모델에 알리고 뺀다. 행에 크기가
+  있으면 읽기 전에 판단한다. 그래서 대화 기록이 새 메시지 전송을 막지 않는다.
+- **누구의 것만:** 메시지 행에 결속된 로그인 계정 파일만이다. 게스트 객체와 결속 전
+  업로드는 캐시하지 않는다(결속된 행이 없다).
+- **어떤 형식만:** 모델과 스위치에 따라 결과가 달라지지 않는 추출기만이다(PDF 텍스트·OCR,
+  Office, 옛 Office, 텍스트). 이미지, 모델에 파일로 넘긴 PDF, iWork 안내문, 압축파일은
+  예전처럼 읽는다. 파싱 예산에 잘린 추출과 생략 표시는 저장하지 않는다.
+- **무효화:** 추출기 출력이 바뀌면 버전(`ATTACHMENT_TEXT_CACHE_VERSION`)을 올린다. 다른
+  버전의 행은 읽지 않고, 다음 turn이 현재 버전으로 덮어쓴다. `CHAT_ATTACHMENT_TEXT_CACHE=0`이면 캐시를 읽지도 쓰지도 않는다.
+- **삭제와의 경합이 없다:** 캐시는 첨부 행의 foreign key가 `ON DELETE CASCADE`인 DB 행이다.
+  대화·일괄·계정 삭제가 첨부 행을 지우는 트랜잭션에서 캐시도 지워지고, 이미 지워진 행에
+  대한 쓰기는 foreign key에서 실패해 아무것도 남기지 않는다. 그래서 turn과 삭제가 어떤
+  순서로 돌아도 캐시가 첨부보다 오래 남지 않는다. 처음 설계(원본 옆 R2 객체)는 R2 쓰기를
+  삭제 트랜잭션과 순서 지을 수 없어 이 방식으로 바꿨다(운영자 결정 2026-11-18).
+- **원본 가용성:** 캐시를 읽을 때도 원본의 존재를 저장소에 묻는다(HEAD). 저장소가 없다고
+  확인하면 캐시를 쓰지 않고 원래 경로로 가서 §11처럼 unavailable로 기록하고 410을 돌려준다.
+  연결 오류는 파일에 대한 사실이 아니므로 캐시된 텍스트를 쓴다.
 
 ## 8. 재시도
 
@@ -189,6 +244,51 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 `generated-ar
 - **composer의 제거 버튼은 초안을 편집하는 것이다.** 이미 결속된 첨부는
   `discardUnboundUpload()`가 `kept: true`로 보고하고 객체를 지우지 않는다.
 
+### 8.1 생성 파일을 독립 입력 사본으로 준비하기
+
+기본 켜짐이며 `GENERATED_ARTIFACT_REVISION_ENABLED=false`로 끌 수 있는 생성 파일 수정 연결은 `PUT /api/chat`의
+`generated-artifact-copy` action을 사용한다. 정확한 artifact ID와 현재 대화,
+소유권·현재 잠금 해제·ready 상태·허용 형식·측정 크기를 서버에서 확인한다.
+기존 첨부 허용 권한과 rate/byte quota도 적용한다. 원본은 비파괴 bounded read로
+읽고 별도 private input 객체와 기존 upload 행을 만든다. 원본 key를 공유하거나
+`sourceAttachmentId`에 artifact ID를 넣지 않는다.
+
+선택은 전송이나 모델 호출이 아니다. 준비 성공 후 원래 계정·대화의 최신 초안에
+기존 첨부와 작성 중인 글을 보존하면서 사본 chip과 보이는 수정 요청문을 넣는다.
+사용자가 Send하면 그 문장과 기존 첨부 참조가 일반 질문으로 저장·전달된다.
+모델에는 요청 범위 attachment handle만 제공한다.
+
+이 사본은 독립된 사용자 입력이다. 원래 assistant/model history를 지워도 남을 수
+있으며, 원본 삭제가 모든 사본의 접근 철회는 아니다. 대화 삭제는 그 대화의
+메시지에 결속된 사본을 수거한다. 아직 보내지 않은 upload에는 conversation FK가
+없으므로 대화 삭제가 미전송 사본까지 일괄 수거한다고 보장하지 않는다.
+명시적 초안 첨부 제거는 기존 unbound cleanup을 사용하며, 계정 삭제는 bound와
+unbound를 함께 수거한다. 사라진 초안이나 실패한 cleanup의 잔여 객체에는 기존
+자동 만료 부재가 그대로 적용된다. 새 TTL이나 대화별 unbound 수거는 추가하지 않는다.
+계정 JSON export는 기존 첨부 메타데이터를 포함하고 파일 bytes는 포함하지 않는다.
+P1의 독립 workbook 명세와 source 관계는 §8.2를 따른다.
+
+### 8.2 독립 workbook 명세와 생성 파일 계보
+
+P1은 upload/attachment에 별도의 `sourceArtifactId`, `sourceLineageId`,
+`sourceConversationId`, `sourceCanonicalSpec`을 보관한다. 이 값은 서버가 생성 파일의
+owner·같은 conversation·unlock·ready와 bytes를 확인한 뒤만 쓴다. 요청자가 선언한
+source metadata는 받지 않으며 기존 `sourceAttachmentId`에 artifact ID를 넣지 않는다.
+bind·질문 복원/resend도 같은 소유자·대화 범위의 실제 사본 명세를 이어 받는다.
+
+`sourceCanonicalSpec`은 제한된 검증된 WorkbookSpec의 독립 내용 사본이다. 원래
+assistant 파일의 명세를 참조만 하는 구조가 아니므로, 원래 모델 이력을 삭제해도 입력
+사본의 내용을 잃지 않는다. source artifact FK는 삭제 시 null이 되고, 독립 사본의 기존
+보관/cleanup 계약은 바뀌지 않는다. unbound upload의 conversation FK 부재도 그대로다.
+
+일반 app attachment DTO는 이 내부 source 명세를 포함하지 않는다. 모델에는 기존
+request-scoped handle과 실제 읽은 입력 내용만 전달한다. 소유자 계정 JSON export에는
+보관 중인 canonical/source 명세 내용과 관계 metadata를 포함하며, 파일 bytes는 포함하지
+않는다. public 공유·대화 TXT·입력 전용 다운로드를 추가하지 않는다.
+
+XLSX의 새 canonical 명세와 기존 파일의 values-only 복원 한계, 실제 parent/group
+관계, Native의 기존 local draft TTL은 `generated-artifacts.md` §18을 따른다.
+
 ## 9. 게스트
 
 게스트 대화의 기존 동작은 바뀌지 않는다. localStorage snapshot, 서명된 key,
@@ -198,8 +298,8 @@ TTL sweep, `/api/chat/guest-attachment`의 `{ key }` 삭제 계약이 모두 그
 ## 10. 아직 하지 않은 것
 
 - 대화 밖에서 자기 첨부를 다시 찾는 목록 화면.
-- 첨부 원본 다운로드 route. 사용자는 원본을 갖고 있고, route가 없다는 것이
-  §5의 보증을 구조적으로 만든다.
+- 입력 첨부 전용 다운로드 route. 생성물에서 준비한 사본도 별도 다운로드는 없으며,
+  기존 생성 파일 카드의 다운로드만 유지한다.
 - 보내지 않은 업로드의 TTL sweep. 초안은 오래 살 수 있고, 임의의 기한을 정하면
   오래된 초안이 조용히 깨진다. 계정 삭제가 이 객체들을 수거하므로 영구 누수는
   아니지만, 활성 계정의 미사용 업로드는 현재 남는다 — 알려진 한계로 적어 둔다.

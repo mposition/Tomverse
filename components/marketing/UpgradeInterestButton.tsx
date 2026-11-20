@@ -150,8 +150,6 @@ type CheckoutCopy = {
   annualOff: string;
   monthlyDescription: string;
   annualDescription: string;
-  paymentMethods: string;
-  paymentHint: string;
   promoLabel: string;
   promoPlaceholder: string;
   apply: string;
@@ -169,6 +167,8 @@ type CheckoutCopy = {
   dueToday: string;
   localPriceNote: (amount: string) => string;
   renewalNote: (interval: BillingInterval, amount: string) => string;
+  promotionPeriod: (months: number) => string;
+  promotionRenewalNote: (months: number, discounted: string, regular: string) => string;
   continueToCheckout: string;
 };
 
@@ -252,9 +252,6 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     annualOff: "20% off",
     monthlyDescription: "Pay month to month.",
     annualDescription: "Save 20% with yearly billing.",
-    paymentMethods: "Payment methods",
-    paymentHint:
-      "The payment screen shows cards and supported options such as Google Pay and Apple Pay. The options shown depend on your device, browser and region.",
     promoLabel: "Promotion code",
     promoPlaceholder: "Optional promotion code",
     apply: "Apply",
@@ -278,6 +275,9 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
       interval === "annual"
         ? `Annual checkout renews every year at ${amount} per year.`
         : `Monthly checkout renews every month at ${amount} per month.`,
+    promotionPeriod: (months) => (months === 1 ? "for 1 month" : `for ${months} months`),
+    promotionRenewalNote: (months, discounted, regular) =>
+      `${discounted}/month for your first ${months === 1 ? "month" : `${months} months`}, then ${regular}/month until you cancel.`,
     continueToCheckout: "Continue to checkout",
   },
   ko: {
@@ -292,9 +292,6 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     annualOff: "20% 할인",
     monthlyDescription: "매월 결제됩니다.",
     annualDescription: "연간 결제로 20%를 절약하세요.",
-    paymentMethods: "결제 방법",
-    paymentHint:
-      "결제 화면에서 카드와 지원되는 Google Pay·Apple Pay 등의 결제 수단을 확인할 수 있습니다. 표시되는 수단은 기기, 브라우저와 지역에 따라 달라집니다.",
     promoLabel: "프로모션 코드",
     promoPlaceholder: "프로모션 코드 선택 입력",
     apply: "적용",
@@ -318,6 +315,9 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
       interval === "annual"
         ? `연간 결제는 연 ${amount}로 매년 갱신됩니다.`
         : `월간 결제는 월 ${amount}로 매월 갱신됩니다.`,
+    promotionPeriod: (months) => `${months}개월간`,
+    promotionRenewalNote: (months, discounted, regular) =>
+      `처음 ${months}개월은 월 ${discounted}, 이후에는 월 ${regular}로 매월 갱신됩니다.`,
     continueToCheckout: "결제 계속하기",
   },
   zh: {
@@ -331,9 +331,6 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     annualOff: "八折优惠",
     monthlyDescription: "按月付款。",
     annualDescription: "选择年付可节省 20%。",
-    paymentMethods: "付款方式",
-    paymentHint:
-      "付款页面会显示银行卡及支持的 Google Pay、Apple Pay 等方式。可用选项取决于设备、浏览器和地区。",
     promoLabel: "促销代码",
     promoPlaceholder: "可选促销代码",
     apply: "应用",
@@ -357,6 +354,9 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
       interval === "annual"
         ? `年付方案按每年 ${amount} 自动续订。`
         : `月付方案按每月 ${amount} 自动续订。`,
+    promotionPeriod: (months) => `${months} 个月`,
+    promotionRenewalNote: (months, discounted, regular) =>
+      `前 ${months} 个月每月 ${discounted}，之后每月 ${regular} 自动续费。`,
     continueToCheckout: "继续结账",
   },
   "zh-Hant": {
@@ -370,9 +370,6 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     annualOff: "八折優惠",
     monthlyDescription: "按月付款。",
     annualDescription: "選擇年付可節省 20%。",
-    paymentMethods: "付款方式",
-    paymentHint:
-      "付款頁面會顯示銀行卡及支援的 Google Pay、Apple Pay 等付款方式。可用選項取決於裝置、瀏覽器和地區。",
     promoLabel: "促銷代碼",
     promoPlaceholder: "選填的促銷代碼",
     apply: "套用",
@@ -396,6 +393,9 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
       interval === "annual"
         ? `年付方案將依每年 ${amount} 自動續訂。`
         : `月付方案將依每月 ${amount} 自動續訂。`,
+    promotionPeriod: (months) => `${months} 個月`,
+    promotionRenewalNote: (months, discounted, regular) =>
+      `前 ${months} 個月每月 ${discounted}，之後每月 ${regular} 自動續訂。`,
     continueToCheckout: "繼續結帳",
   },
   fr: {
@@ -410,9 +410,6 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     annualOff: "-20 %",
     monthlyDescription: "Payez mois par mois.",
     annualDescription: "Économisez 20 % avec la facturation annuelle.",
-    paymentMethods: "Moyens de paiement",
-    paymentHint:
-      "L’écran de paiement affiche les cartes et les options prises en charge, comme Google Pay et Apple Pay. Elles varient selon l’appareil, le navigateur et la région.",
     promoLabel: "Code promotionnel",
     promoPlaceholder: "Code promotionnel facultatif",
     apply: "Appliquer",
@@ -436,6 +433,9 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
       interval === "annual"
         ? `Le paiement annuel est renouvelé à ${amount} par an.`
         : `Le paiement mensuel est renouvelé à ${amount} par mois.`,
+    promotionPeriod: (months) => `pendant ${months} mois`,
+    promotionRenewalNote: (months, discounted, regular) =>
+      `${discounted}/mois ${months === 1 ? "le premier mois" : `les ${months} premiers mois`}, puis ${regular}/mois jusqu’à résiliation.`,
     continueToCheckout: "Continuer vers le paiement",
   },
   de: {
@@ -450,9 +450,6 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     annualOff: "20 % Rabatt",
     monthlyDescription: "Monatlich zahlen.",
     annualDescription: "Sparen Sie 20 % mit jährlicher Abrechnung.",
-    paymentMethods: "Zahlungsmethoden",
-    paymentHint:
-      "Die Zahlungsseite zeigt Karten und unterstützte Optionen wie Google Pay und Apple Pay. Die angezeigten Möglichkeiten hängen von Gerät, Browser und Region ab.",
     promoLabel: "Aktionscode",
     promoPlaceholder: "Optionaler Aktionscode",
     apply: "Anwenden",
@@ -476,6 +473,9 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
       interval === "annual"
         ? `Der Jahresplan verlängert sich zu ${amount} pro Jahr.`
         : `Der Monatsplan verlängert sich zu ${amount} pro Monat.`,
+    promotionPeriod: (months) => (months === 1 ? "für 1 Monat" : `für ${months} Monate`),
+    promotionRenewalNote: (months, discounted, regular) =>
+      `${discounted}/Monat ${months === 1 ? "im ersten Monat" : `in den ersten ${months} Monaten`}, danach ${regular}/Monat bis zur Kündigung.`,
     continueToCheckout: "Weiter zum Checkout",
   },
   es: {
@@ -490,9 +490,6 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     annualOff: "20 % desc.",
     monthlyDescription: "Paga mes a mes.",
     annualDescription: "Ahorra un 20 % con la facturación anual.",
-    paymentMethods: "Métodos de pago",
-    paymentHint:
-      "La pantalla de pago muestra tarjetas y opciones compatibles como Google Pay y Apple Pay. Las opciones dependen de tu dispositivo, navegador y región.",
     promoLabel: "Código promocional",
     promoPlaceholder: "Código promocional opcional",
     apply: "Aplicar",
@@ -516,6 +513,9 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
       interval === "annual"
         ? `El pago anual se renueva a ${amount} al año.`
         : `El pago mensual se renueva a ${amount} al mes.`,
+    promotionPeriod: (months) => (months === 1 ? "durante 1 mes" : `durante ${months} meses`),
+    promotionRenewalNote: (months, discounted, regular) =>
+      `${discounted}/mes ${months === 1 ? "el primer mes" : `los primeros ${months} meses`} y después ${regular}/mes hasta que canceles.`,
     continueToCheckout: "Continuar al pago",
   },
   pt: {
@@ -530,9 +530,6 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
     annualOff: "20% de desconto",
     monthlyDescription: "Pague mês a mês.",
     annualDescription: "Economize 20% com a cobrança anual.",
-    paymentMethods: "Métodos de pagamento",
-    paymentHint:
-      "A tela de pagamento mostra cartões e opções compatíveis, como Google Pay e Apple Pay. As opções dependem do dispositivo, navegador e região.",
     promoLabel: "Código promocional",
     promoPlaceholder: "Código promocional opcional",
     apply: "Aplicar",
@@ -556,6 +553,9 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
       interval === "annual"
         ? `O plano anual renova por ${amount} ao ano.`
         : `O plano mensal renova por ${amount} ao mês.`,
+    promotionPeriod: (months) => (months === 1 ? "durante 1 mês" : `durante ${months} meses`),
+    promotionRenewalNote: (months, discounted, regular) =>
+      `${discounted}/mês ${months === 1 ? "no primeiro mês" : `nos primeiros ${months} meses`} e depois ${regular}/mês até cancelar.`,
     continueToCheckout: "Continuar para o checkout",
   },
 };
@@ -760,12 +760,20 @@ export function UpgradeInterestButton({
   children,
   trigger,
   initialBillingInterval,
+  autoOpen = false,
 }: {
   plan: "Pro" | "Max";
   className: string;
   children: ReactNode;
   trigger?: PurchaseAnalyticsTrigger;
   initialBillingInterval?: BillingInterval;
+  /**
+   * Opens the checkout dialog once, without a click. Set by the pricing page
+   * when a visitor comes back from sign-in with a subscription intent for this
+   * plan. Nothing is charged and no promotion code is filled in: the visitor
+   * still enters any code and confirms the purchase themselves.
+   */
+  autoOpen?: boolean;
 }) {
   const { lang, t } = useLanguage();
   const router = useRouter();
@@ -841,6 +849,12 @@ export function UpgradeInterestButton({
         )
       : dueUsdLabel;
   const displayedDueLabel = isValidatingPromotion ? "…" : dueLabel;
+  // A discount without its period reads as a one-month offer (owner report
+  // 2026-11-16: "OZB50 -50%" next to "renews every month at A$20.00").
+  const promotionMonths =
+    chargeablePromotion && chargeablePromotion.durationMonths > 0
+      ? chargeablePromotion.durationMonths
+      : null;
   const foundingPass =
     appliedPromotion?.fulfillmentType === "internal_pass"
       ? appliedPromotion
@@ -936,6 +950,14 @@ export function UpgradeInterestButton({
       }
     }
   }, [copy, planId, requestPromotionValidation]);
+
+  const autoOpenedRef = useRef(false);
+  useEffect(() => {
+    if (!autoOpen || autoOpenedRef.current) return;
+    autoOpenedRef.current = true;
+    // Deferred so the effect body stays free of synchronous setState.
+    queueMicrotask(() => setIsOpen(true));
+  }, [autoOpen]);
 
   useEffect(() => {
     if (!isOpen || billingConfig) return;
@@ -1299,34 +1321,16 @@ export function UpgradeInterestButton({
                 </div>
               </div>
 
-              <div className={`mt-6 rounded-2xl border p-4 ${
-                foundingPass
-                  ? "border-blue-500/30 bg-blue-500/10"
-                  : "border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/60"
-              }`}>
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500 dark:text-zinc-400">
-                      {foundingPass ? passCopy.title : copy.paymentMethods}
-                    </p>
-                    <p className="mt-2 text-xs font-semibold leading-5 text-zinc-500 dark:text-zinc-400">
-                      {foundingPass
-                        ? passCopy.detail(foundingPass.accessDurationDays || 60)
-                        : copy.paymentHint}
-                    </p>
-                  </div>
-                  {!foundingPass ? <div className="flex flex-wrap gap-2 sm:justify-end">
-                    {["GPay", "Apple Pay", "Card"].map((method) => (
-                      <span
-                        key={method}
-                        className="rounded-full bg-zinc-200/70 px-3 py-1.5 text-[11px] font-bold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
-                      >
-                        {method}
-                      </span>
-                    ))}
-                  </div> : null}
+              {foundingPass ? (
+                <div className="mt-6 rounded-2xl border border-blue-500/30 bg-blue-500/10 p-4">
+                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500 dark:text-zinc-400">
+                    {passCopy.title}
+                  </p>
+                  <p className="mt-2 text-xs font-semibold leading-5 text-zinc-500 dark:text-zinc-400">
+                    {passCopy.detail(foundingPass.accessDurationDays || 60)}
+                  </p>
                 </div>
-              </div>
+              ) : null}
 
               <label
                 htmlFor={inputId}
@@ -1425,7 +1429,17 @@ export function UpgradeInterestButton({
                     data-testid="checkout-promotion-row"
                     className="flex justify-between gap-4 text-sm text-blue-600 dark:text-blue-300"
                   >
-                    <span className="font-semibold">{appliedPromoCode}</span>
+                    <span className="font-semibold">
+                      {appliedPromoCode}
+                      {promotionMonths ? (
+                        <span
+                          data-testid="checkout-promotion-period"
+                          className="block text-xs font-semibold"
+                        >
+                          {copy.promotionPeriod(promotionMonths)}
+                        </span>
+                      ) : null}
+                    </span>
                     <span className="font-bold">{discountLabel || copy.appliedAtCheckout}</span>
                   </div>
                 ) : null}
@@ -1451,10 +1465,15 @@ export function UpgradeInterestButton({
                 </div>
               </div>
 
-              <div className="mt-4 rounded-2xl border border-blue-500/20 bg-blue-500/10 p-4 text-xs font-semibold leading-5 text-blue-700 dark:text-blue-200">
+              <div
+                data-testid="checkout-renewal-note"
+                className="mt-4 rounded-2xl border border-blue-500/20 bg-blue-500/10 p-4 text-xs font-semibold leading-5 text-blue-700 dark:text-blue-200"
+              >
                 {foundingPass
                   ? passCopy.detail(foundingPass.accessDurationDays || 60)
-                  : copy.renewalNote(
+                  : promotionMonths && billingInterval === "monthly" && dueLabel && monthlyPriceLabel
+                    ? copy.promotionRenewalNote(promotionMonths, dueLabel, monthlyPriceLabel)
+                    : copy.renewalNote(
                       billingInterval,
                       billingInterval === "annual"
                         ? annualPriceLabel || "-"

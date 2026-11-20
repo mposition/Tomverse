@@ -24,6 +24,7 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
 
 1. DM이 다룰 수 있는 질문 유형은 `decision`, `judgment`, `budget`, `credential`, `access`,
    `external`이다. `customer_outbound`는 항상 운영자. 되돌릴 수 없는 행위는 유형과 무관하게 운영자.
+   (2026-11-16, §0c-5: 유형 허용 목록은 그대로이고, 용어 목록에서 migration 범주와 넓은 낱말만 뺐다.)
 2. 시작은 제안 모드. 자율 졸업 기준은 운영자가 결정한 제안 **50건**, 첫 제안 뒤 **30일**, 수정 없이
    확정한 비율 **95%** 이상.
 3. DM은 공급사를 교차한 두 개(GPT-6 Astra, Claude Fable 5.1).
@@ -45,23 +46,29 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
 운영자 결정 2026-11-07(채팅 원문: "승인은 사람만 할수 있다는 승인 정책들또한 없애주세요. Decision Maker가 대부분 운영자를 대체하는 자동화 시스템으로 진행됩니다."). 아래 §1의 "DM은 승인자가 아니다", "운영자가 확정하기 전에는 worker에게 가지 않는다",
 "완료 확정에서 DM은 사람으로 인정되지 않는다" 류의 문장은 되돌릴 수 있는 승인에 대해 이 결정으로 바뀐다.
 
-1. **DM 승인자(`TOMVERSE_AMUX_DM_APPROVER=enabled`, 기본 꺼짐).** 앱이 스스로 답을 적용하는 질문(§2-8의
+1. **DM 승인자(`TOMVERSE_AMUX_DM_APPROVER`, 2026-11-15부터 기본 켜짐, `disabled`로 끈다).** 앱이 스스로 답을 적용하는 질문(§2-8의
    v22 worker 질문, §2-9의 계획 거부, §2-10의 남은 카드 닫기, 아래 2의 결과 검토)에 DM 제안이 저장되면, 운영자
    확정 없이 앱이 그 제안을 적용한다. 답 출처는 `dm`이다. DM이 `irreversible`로 표시한 제안, 질문의 고정 답이
-   아닌 답(v22 worker 질문은 worker가 준 선택지를 고른 `select`만 적용하고 자유 텍스트 답은 다음 프롬프트에
-   검사 없이 들어가므로 확정을 기다린다), §3으로 `operator`에 라우팅된 질문은 지금처럼 사람에게 남는다. 여러 제안이
+   아닌 답, §3으로 `operator`에 라우팅된 질문은 지금처럼 사람에게 남는다. v22 worker 질문은 선택지를 고른 `select`도
+   DM의 자유 텍스트 답도 적용한다(§0b-4). 재개 prompt가 답을 통째로 담지 못하면 재개가 거절된다. 여러 제안이
    열려 있으면 tick마다 무작위로 하나를 골라, 적용할 수 없는 제안이 뒤의 제안을 막지 않는다. 요청 닫기(감사 체인 잠금
    아래의 선점)와 답 적용은 한 트랜잭션이다. 운영자 판정이 먼저 왔으면 닫기가 거부되어 적용하지 않고, 적용이 안 되면
    닫기도 되돌려 제안이 운영자에게 남는다. 이 트랜잭션만 §9의 12문장 대신 닫기와 적용을 합친 22문장 상한을 쓴다. 적용한 요청은 `direct_answer_close`로
    닫아 Admin이 더 확정을 묻지 않는다. kill switch는 이 경로도 멈춘다. relay tick마다 한 건이다.
-2. **결과 검토(`TOMVERSE_AMUX_V22_RESULT_REVIEW_DM=enabled`, 기본 꺼짐).** 패치 없이 review로 가는 v22 결과
+2. **결과 검토.** 패치 없이 review로 가는 v22 결과
    (investigate의 `needs_owner`·결론 형식 불일치, design·verify 결과, 패치 없는 implement 성공)는 사람
    escalation과 함께 `AmuxV22ResultReview` 행이 되고, relay가 §2-8과 같은 카드로 올린다. 세션 이름은
-   `amux-result-review`, provider는 `claude`다. 카드에는 Task의 승인된 완료 조건과 실행 결과(결론의 `findings`, 없으면 결과
-   전체)를 자르지 않고 싣는다. 읽을 수 없거나 카드 한 장(2,000자)에 다 들어가지 않으면 DM에 올리지 않고 사람에게 넘긴다
-   (`evidence_unavailable`). 선택지는 `approve`(done, `v4TerminalAt`), `retry`(시도
+   `amux-result-review`, provider는 `claude`다. 카드에는 Task의 승인된 완료 조건을 싣고, 실행 결과(결론의 `findings`, 없으면 결과
+   전체)는 작업 공간의 `evidence/FINDINGS.md`로 통째로 간다(§0b). 근거를 읽을 수 없을 때만 DM에 올리지 않고 사람에게 넘긴다
+   (`evidence_unavailable`). 카드 크기 때문에 넘기지 않는다. 선택지는 `approve`(done, `v4TerminalAt`), `retry`(시도
    예산 안에서 todo, 넘으면 blocked), `block`(blocked, 사람 escalation 유지)이다. 세 단어가 아닌 답은 사람에게
-   넘긴다. 사람이 먼저 답하면 검토 행은 취소된다. 카드를 올리는 것이 DM 호출을 부르므로 켜는 것은 운영자 몫이다.
+   넘긴다. 사람이 먼저 답하면 검토 행은 취소된다. 이 경로에는 스위치가 없다(`TOMVERSE_AMUX_V22_RESULT_REVIEW_DM`을 2026-11-16에 없앴다).
+   엔지니어링 에이전트의 T2 초안(운영자 결정 2026-11-11, 스위치 `TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW`는 2026-11-16에 없앴다)도
+   같은 tick 마지막에 `engineering-t2-review` 카드로 올라간다. 초안 id가 질문 id이고 `EngineeringAgentDmReview`가
+   카드를 기록한다. 카드에는 파일 목록 전체를 싣고, patch 전체는 작업 공간의 `evidence/PATCH.diff`로, 초안의 base commit은
+   `repo/`로, 그 위에 patch를 적용한 상태는 `repo-patched/`로 간다(§0b). 선택지는
+   `apply`(사람이 직접 적용)·`reject`이며 **조언일 뿐**이다. Admin 결정 대기 화면에 답과 근거를 보여 줄 뿐 초안을
+   승인·거절·적용하지 않고, 확정된 답은 세션에 전달되지 않으며 DM 승인자(§2-1)도 적용하지 않는다.
 3. **investigate 결론(`TOMVERSE_AMUX_V22_CONCLUSION`, 기본 `off`, `prompt`·`auto`).** investigate(verify 포함)
    실행은 마지막 줄에 `AMUX_CONCLUSION:` JSON(`verdict` `proceed`·`replan`·`stop`·`needs_owner`, `findings`,
    `handoff`, `evidence`)을 낸다. 앱은 결과 저장 때 형식만 검사해 verdict와 digest를 남긴다. `auto`에서
@@ -70,6 +77,154 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
    형식 불일치는 지금처럼 review(그리고 2의 결과 검토)로 간다. 적용은 해시 체인 시스템 감사로 남는다.
 4. **사람에게 남는 것.** 실제 돈이 나가는 새 유료 호출 승인과 한도 상향, 외부 게시와 발송, 사용자 데이터 삭제,
    자격증명과 보안 경계, production 병합과 배포. DM은 이것들의 승인자가 아니다.
+5. **운영자 확인 대기의 정리 (운영자 결정 2026-11-13).** 채팅 원문: "develop 병합 권한은 DM에게 승인합니다. main은
+   안됩니다.", "1~4까지 DM에게 자동으로 하도록 승인합니다." 운영자 확인 대기(Admin 운영자 확인 대기)의 카드도 DM에 올린다.
+   S1(이 절이 들어간 변경)은 다른 DM 경로가 맡지 않는 멈춘 v22 Task를 §2-11의 정리 카드로 올리고, DM이 고른 되돌릴 수
+   있는 정리(`retry`·`complete`·`close`·`remake`)를 DM 승인자(1)가 켜져 있을 때 앱이 적용한다. 검토 PR(`t2_pr`)의
+   `approve`는 적용하지 않고 승인 사실만 기록한다. 카드는 스위치 없이 늘 올린다
+   (`TOMVERSE_AMUX_DM_OWNER_SETTLEMENT`는 2026-11-16에 없앴다). 가격·크레딧·migration·삭제·인증·감사
+   체인 경로와 병합 레인 게이트 파일, main 병합과 배포는 사람에게 남는다. S2(`TOMVERSE_AMUX_DM_T2_MERGE=enabled`, 기본
+   꺼짐): 기록된 `approve`를 쓸 때마다 binding이 열려 있고 head·변경 digest가 승인 때와 같고 base가 develop이고 Task가
+   review인지 다시 읽는다. 변경 digest는 v2(merge base·head commit·head tree, `lib/pullDiffDigestCore.ts`, 운영자 결정
+   2026-11-18)이고, 그 전에 기록된 v1(diff 바이트의 SHA-256) 승인은 v1으로 비교한다. 크기와 binary로 승인을 사람에게 넘기지 않는다. 자동 병합은 **변경이 모두 병합 범위 안에 있을 때만** 한다(운영자 결정 2026-11-15, "내부 개발용
+   Flow입니다. 제한을 줄 이유가 없습니다. 로컬 CLI처럼 편리한 Flow였으면 합니다."; 전체 목록은 `docs/policy/qa-release-agent.md`
+   8절 3항). 앱 서비스의 `TOMVERSE_AMUX_DM_MERGE_SCOPE`가 정확히 `blocklist`일 때는 **차단 목록**이다(기본 꺼짐, 운영자 결정 2026-11-16): 엔지니어링 에이전트 권한 manifest의 product 경로이고 정책 테스트가 아니며 레인 게이트 파일,
+   되돌릴 수 없는 경로(`QA_RELEASE_DM_MERGE_BLOCK_PATTERNS`·`QA_RELEASE_DM_MERGE_BLOCKLIST_SCOPE_PATTERNS`), 차단 이름 조각
+   (`QA_RELEASE_DM_MERGE_BLOCK_NAME_TOKENS`: 실제 비용, 외부 발송, 사용자 데이터 삭제, 자격증명과 보안 경계, 감사 체인, 병합과
+   배포, 에이전트 권한, DB)에 걸리지 않으면 `lib/**`·`app/api/**`도 병합한다. 저장된 patch의 바뀐 줄과 hunk 문맥도 읽어 사람에게
+   예약된 값, 돈·환경 변수·저장된 스위치·삭제·raw SQL·인증·비밀·메일의 단어, 스스로 하는 외부 전송·다른 프로세스 실행·DB 질의·
+   파일 쓰기, binary·실행 비트가 있으면 사람에게 남긴다
+   (`AMUX_DM_T2_MERGE_CONTENT_ALARMS`), hunk 문맥 줄에 인가·소유권·접근 검사가 있어도 남긴다(`AMUX_DM_T2_MERGE_HUNK_ALARMS`).
+   ready와 레인 목록에서는 허용 목록 밖의 바뀐 파일 전체를 승인된 head에서 읽어, 어디에든 경보가 울리거나 Node 내장 모듈·허용
+   목록 밖 패키지·사람 몫 모듈을 import하거나 읽지 못하면 남긴다(`amuxDmT2MergeFileGate`, `amuxDmT2MergeImportAlarms`). control-plane 경로(AMUX와 에이전트 자신, admin, 실행 환경, 정책과 지시)는 어느 범위에서도
+   사람에게 남는다. 그 밖의 모든 값(값이 없거나 빈 값 포함, **기본**)에서는
+   2026-11-13의 **허용 목록**(`QA_RELEASE_DM_MERGE_ALLOW_PATTERNS`: `tests/**`, `docs/**`, `locales/**`, `components/**`,
+   `app/**`의 `page.tsx`·`layout.tsx`·`loading.tsx`·`error.tsx`; 그 가운데 `docs/policy/**`·`docs/ui-contracts/**`·
+   `docs/agents/**`·`app/api/**`, control-plane 경로, 정책 테스트, 레인 게이트 파일과 되돌릴 수 없는 경로는 제외)을 쓴다.
+   하나라도 밖이면 사람에게 남는다. 스위치가
+   켜져 있으면 승인을 기록하는 순간 patch를 판정해, 범위 밖의 경로나 줄이 있거나 경로를 읽지 못하면 승인 대신
+   handoff(`outside_dm_merge_allowlist`·`paths_unreadable`)를 남긴다. 앱은 CI 입장 round가
+   한 번 돌 때마다 승인된 검토 초안 하나를 GitHub에서 다시 읽어(CI 입장 App으로 단계·head, 엔지니어링 읽기 토큰으로 변경 digest와
+   파일 목록) 대기열의 draft가 runner를 기다리지 않고 그 CI가 통째로 들어갈 때만, 해시 체인 감사를 먼저 남기고 ready로
+   바꾼다. 쓰기 결과를 모르면 그 round에 다시 쓰지 않고 다음 round가 PR을 읽고 판단한다. **DM ready는
+   사람 ready와 같다**: PR은 CI 입장 대기열 밖에 있고 아무것도 예약하지 않으며, 그 CI는 다른 workflow로 계산된다. 대기열에
+   지금 여유가 있을 때만 하고, 앞선 DM ready의 CI가 GitHub에 아직 보이지 않으면(ready 감사 기록 뒤 10분까지) 다음 ready를
+   하지 않는다. **넘침은 PR 한 건으로 묶인다.**
+   **fork PR은 제외한다**: CI 입장 App과 엔지니어링 읽기 토큰이 보여 주는 head 저장소가 base 저장소와 다르면 ready로 바꾸지
+   않고 레인 목록에도 싣지 않는다. 사람이 `ci:hold`를 붙인 PR도 ready로 바꾸지 않는다(목록에서든 쓰기 직전의 다시 읽기에서든,
+   CI 입장 줄과 같은 규칙). 앱은 레인의 상태
+   읽기마다 가장 오래 확인하지 않은 승인 **한 건**만 골라 방문을 기록하고, 그 PR의 현재 변경 digest와 파일 목록을 GitHub에서 다시 읽어
+   digest가 `approvedDiffDigest`와 (그 승인의 버전으로) 같고 파일과 저장된 patch가 모두 병합 범위 안일 때만 싣는다(읽지 못하거나 다르면 싣지 않고, 그 승인은 차례를
+   쓴 것으로 본다). 레인은 승인된 head를 `sha`로 고정해 병합한다. 병합 레인은 앱이 넘긴 목록의 PR만
+   `agent` 브랜치 제외의 예외로 받고(`docs/policy/qa-release-agent.md` 8절 3항), observer는 그 레인의 병합을 두 번째 승인
+   근거(`dm_approval`, `docs/policy/engineering-agent.md` §9-10)로 판정한다. **대상은 develop뿐이고 main은 제외다.** S3(구현 완료):
+   사람에게 남는 카드(DM이 `irreversible`로 표시한 제안, 승인자 스위치가 꺼져 있을 때의 제안, handoff된 정리 행)에 DM의 상태를 붙인다.
+   `GET /api/admin/amux/owner-queue`는 카드마다 그 escalation의 `AmuxDmOwnerSettlement`(state, decision, handoffReason)와
+   DM 카드의 상태를 `readAmuxDmLocalCardState`로 읽어 싣는다(`ops:write`가 없으면 제안 본문은 `restricted`, 읽지 못한 카드는 그
+   카드만 `unread`·`unavailable`). 운영자 확인 대기 카드는 제안과 근거, 되돌릴 수 없다는 표시, §6 snapshot을 보이고, 정리 행이
+   열려 있고 handoff되지 않았고 답이 그 종류의 고정 단어일 때만 "이대로 확인"을 낸다. 이 버튼은 새 쓰기 route 없이 기존
+   `POST /api/admin/amux/decision-maker/judgments`(`ops:write`, 최근 재인증)를 쓰고, 적용은 S1의 `dm_confirmed` walk가 한다.
+   DM이 아직 답하지 않았으면 "검토 중", handoff된 행이면 사유를 문장으로 보인다. 기존 legacy-card 패널은 그대로다.
+   운영자 결정 2026-11-14("DM 의견이 없으면 'DM으로 의견 요청 보내기' 버튼을 제공합니다"): 스위치가 꺼져 있어도 운영자가
+   운영자 확인 대기의 'DM 의견 요청' 버튼으로 카드 하나를 고르면 그 정리만 올린다(누른 사람의 감사 기록
+   `amux.dm_owner_settlement.requested`). 근거를 한 번 읽지 못한(`evidence_unavailable`) 결과 검토·정리는 같은 칸의 'DM에 다시
+   보내기'로 다시 대기에 넣는다. 답은 그대로 제안이고 운영자가 확정한다.
+
+## 0b. 운영자 결정 (2026-11-15) — DM은 로컬 CLI처럼 저장소 전체를 보고 판단한다
+
+채팅 원문: "DM도 로컬 CLI들처럼 답을 할 수 있는 능력이 있었으면 합니다 ... 로컬 CLI처럼 모든 걸 다 분석하고 답할 수 있는
+권한을 주세요", "4000자 제한도 없애주세요", "내부 개발용 Flow입니다. 제한을 줄 이유가 없습니다". 자율 에이전트(DM)에 새 읽기
+권한을 주는 운영자 승인이다. 정책 버전은 올리지 않는다. 아래 절의 충돌하는 문장은 이 결정으로 바뀐다.
+
+1. **작업 공간(§5).** 요청마다 broker가 요청 디렉터리에 작업 공간을 만든다: 공개 저장소의 대상 commit을 자격증명 없이
+   얕게 받은 `repo/`(최근 100개 commit 이력), patch가 있으면 그것을 적용한 `repo-patched/`, 카드가 가리키는 근거 원문
+   전체(`evidence/PATCH.diff`·`FINDINGS.md`·`CRITERIA.md`·`CONTEXT.md`), 안내 `WORKSPACE.md`. 근거는 앱이 보낼 때마다 원래 행에서
+   다시 읽어 준다(`POST /api/internal/amux/decision-maker/workspace`). 카드는 요약과 안내만 담고, 근거를 카드에 맞춰 자르지 않는다.
+2. **도구(§5a).** codex는 읽기 전용 shell(권한 profile)로, claude는 `Read`·`Grep`·`Glob`으로 작업 공간을 읽는다. 쓰기와
+   네트워크는 없다. 테스트 실행은 켜지 않는다(§5a에 이유).
+3. **한도.** 카드 필드마다의 글자 수 한도, 경로 개수, 스냅샷 크기·개수·시간 한도, §3-6의 처리량, DM 답 필드의 8·4·1 KiB를
+   없앴다. 남은 것은 실제 한계에 맞춘 단일 상한뿐이다: 카드 텍스트 256 KiB(공급사 CLI의 prompt), DM 출력 256 KiB(results
+   route 본문), 근거 합계 16 MiB(세 프로세스의 메모리), 작업 공간 디스크 4 GiB, git fetch 10분, v22 답 30 KiB(v22 sidecar의
+   32 KiB prompt). v22 Task의 질문 3개 한도와 경로 32개 자르기도 없앴다.
+4. **기본 켜짐.** DM이 일하게 하는 스위치(`TOMVERSE_AMUX_DM_APPROVER`, `TOMVERSE_AMUX_CARD_CLOSE_DM`)는 코드 기본값이
+   켜짐이고, 정확히 `disabled`일 때만 꺼지는 kill switch다(결과 검토·운영자 대기 정리·T2 조언·라우팅 route의 스위치는 2026-11-16에 없앴다). 작업 공간 자체의 kill switch는 2026-11-16에 없앴다(§0c-6). DM 승인자는 worker가 준 선택지뿐 아니라 DM의 자유 텍스트
+   답도 적용한다(§0a-1).
+5. **그대로인 보호선.** DM 프로세스 환경에 앱·GitHub·bridge 자격증명이 없다. 네트워크는 공급사 API와, broker의 가져오기 단계의
+   공개 GitHub(`api.github.com`의 commit 조회, `github.com`의 git fetch)뿐이다. DM이 내릴 수 있는 결정의 종류와 결과 검증(§6
+   스키마, 허용 선택지, 앱의 재검증)은 바꾸지 않는다. 작업 공간의 근거 파일에도 §5의 비밀 경로 목록과 secret 검사를 앱과 broker가
+   각각 적용한다. 요청 디렉터리는 모든 종료 경로에서 지운다. 전송 의도(§10)의 payload digest와 manifest digest가 작업 공간의
+   commit과 근거 파일 바이트를 모두 묶는다.
+6. **근거 없이 판단하지 않는다.** 카드에 근거가 더 실리지 않으므로, bridge가 앱의 작업 공간 답을 읽지 못하거나, 앱이나 broker가
+   근거 파일을 하나라도 뺐거나(secret 검사 등), broker가 답하지 않으면 요청을 폐기하고 카드는 운영자에게 남는다. 카드만 보내는
+   경우는 앱의 kill switch(`workspace: null`)뿐이며, DM 지시문은 작업 공간 파일을 가리키는 카드를 그 파일 없이 받으면 이관하라고
+   한다. launch에서 작업 공간을 만들지 못하면 아무것도 보내지 않는다(`workspace_unavailable`). 작업 공간 build는 전체 5분 안에
+   끝나야 하고(`DM_WORKSPACE_BUILD_MAX_MS`), bridge의 broker 응답 기한이 그만큼 늘었다(39분). build 시간은 결과 창(배정 + 30분)에서
+   빠지므로, 아주 긴 DM 실행의 결과는 늦은 결과로 거절될 수 있다(안전한 쪽으로, 카드는 운영자에게 남는다). kill switch로
+   카드가 근거를 통째로 실어야 할 때 그럴 수 없으면(제어 문자, 카드 상한 초과) 카드를 만들지 않고 사람에게 넘긴다. 디스크 상한
+   4 GiB는 build 중 1초마다 재어 넘으면 git을 멈춘다(그 1초에 쓴 만큼 넘을 수 있으므로 box는 요청 root를 크기 제한 파일시스템에
+   두는 것을 권한다).
+
+## 0c. 운영자 지시 (2026-11-16) — 사람이 풀어야 하는 정지와 결과를 버리는 경로를 없앤다
+
+운영자 지시: AMUX 전수 점검(2026-11-16)의 DM 항목. "DM relay ... 키로 다시 읽고 이어 갑니다. 자동 재시작 제한도
+없앱니다", "일정 시간 뒤 자동으로 다시 켭니다", "다시 읽고 다시 보냅니다. 창은 넉넉하게 늘리고". 정책 버전은
+올리지 않는다. 아래 절의 충돌하는 문장은 이 절로 바뀐다.
+
+1. **relay는 멈추지 않는다.** 앱 쓰기의 응답을 잃거나, 요청과 무관한 이유(DB 바쁨, route 닫힘, bridge 거부)로
+   거절되면 그 기록을 owed로 두고 매 tick 요청 키로 다시 보낸다(`dm_relay/owed.rs`). 원장은 기록마다 한 번만
+   받고 이미 있는 것은 그렇다고 답하므로, 다시 보내는 것이 곧 readback이다. 결과는 (요청, digest) 쌍을
+   `results/lookup`으로 먼저 읽은 뒤에만 다시 제출한다. 배정·전송 의도·전달 결정은 같은 키로 한 번 더 물어 첫
+   쓰기가 기록됐는지 확인한 뒤에만 이어 간다. 기록된 전송 의도의 답을 읽지 못했으면 아무것도 보내지 않고
+   `transmit_unknown`·`unavailable` 결과·배정 폐기를 owed로 둔다. owed cleanup 보고는 그 인스턴스로의 새 전송을,
+   owed pause는 그 세션으로의 새 전달을 막는다. 이전 바이너리의 halt는 자동 재시작하지 않고 Admin에
+   남긴다(그 프로세스만 들고 있던 의무를 halt 줄이 다 적지 않아, 재시작하면 잃는다; 독립 검토 r-20261116-195913-289714). 자동
+   재시작은 부팅 뒤 꺼진 relay만 켠다. owed 기록(과 그것이 만드는 인스턴스·세션 차단)은 재시작을 넘어 남는다. relay는 기록이
+   생기는 즉시(그 기록을 위한 첫 네트워크 호출보다 먼저, 결과·cleanup 보고·영수증은 결과 제출 호출 전에 셋 다) 그리고 바뀔 때마다 상태 디렉터리(unit의 `StateDirectory=`, `STATE_DIRECTORY`)의 `owed-records.json` 하나를 원자적으로
+   바꿔 쓰고(0600, 디렉터리 0700, symlink·다른 소유자는 거절) 시작할 때 되읽는다. 읽을 수 없는 파일이거나 쓰기가
+   실패하면 새 전송·전달은 시작하지 않고(차단 상태를 모르거나 파일이 뒤처졌으므로) 이미 있는 기록의 재전송만 하면서
+   매 tick 다시 시도한다. halt는 아니다. 파일 크기 상한은 없고 비밀값은 기록에 없다.
+2. **늦은 결과를 받는다.** `result_unknown`이 이름 붙인 digest와 같은 결과는 그 뒤에도 같은 마감 안이면
+   받는다(같은 출력의 readback). 다른 digest는 여전히 `result_unknown`으로 거절한다(migration
+   `20261116140000_amux_dm_request_windows`).
+3. **창을 넉넉하게.** 배정 마감은 생성 + 24시간(2분이었다), 결과 마감은 배정 + 8시간(30분이었다). DM 실행
+   hard timeout은 2시간(30분이었다; relay가 질문 하나를 기다리는 동안 다른 일을 하지 않으므로 멈춘 CLI가 붙잡는 시간을
+   이만큼으로 둔다), launcher unit은 2시간 2분, 작업 공간 시간 한도는 하나로 1시간(build 5분·git
+   2분·조회 15초였다), relay의 작업 공간 대기도 1시간(90초였다), broker 응답 기한은 3시간 4분으로 결과 창 안이다. 앱의 relay 침묵 감시는
+   요청 뒤 250분까지를 질문 중으로 본다(launch 전 작업 공간 대기 1시간과 broker 응답 기한 3시간 4분).
+   생성 30일 뒤의 `stale` 종료는 §10 보존 규칙(본문이 길어야 120일, 열린 요청은 키 기간 파기를 막는다)이라
+   그대로 둔다.
+4. **latch는 system이 푼다.** 검증 latch와 cleanup latch는 한 시간 뒤 유지 sweep이 그 인스턴스의 system actor
+   `amux.decision.latch_release`로 푼다. 사람이 마지막으로 고른 값이 `proposal`일 때만 `proposal`로 되돌리며, 사람이
+   끈 인스턴스는 켜지 않는다. §8의 검증 횟수는 그 해제부터 다시 센다(migration `20261116140100_amux_dm_latch_release`).
+   사람의 `latch_release`도 그대로 쓸 수 있다.
+5. **라우팅.** §3-3 용어 목록은 §0a-4의 사람 경계만 남긴다: 돈(결제·환불·청구), 삭제, main 병합, production,
+   비밀값(token·토큰 포함), 외부 게시·발송·연락, 권한·접근 설정, 정책·workflow·branch protection. migration 범주와
+   경계처럼 보이기만 하던 넓은 낱말(ship, release, deploy, 배포, 단독 drop, 덮어쓰기, 초기화)은 뺐다. DM 승인자(§0a-1)가
+   운영자 확인 없이 제안을 적용하므로 이 목록과 `ask_type` 허용 목록(`customer_outbound`는 늘 운영자)이 그 경계를
+   지키는 결정적 검사이고, 그래서 둘 다 남긴다. 카드 secret 검사(§3-8)는 그대로다.
+6. **작업 공간은 늘 켜진다.** `TOMVERSE_AMUX_DM_WORKSPACE` kill switch와, 그때 근거를 카드에 싣던 경로(224 KiB 여유,
+   제어 문자 거절)를 없앴다. 카드는 늘 작업 공간의 근거 파일을 가리킨다. 작업 공간 history는 1000 commit(100이었다),
+   디스크는 16 GiB(4 GiB였다), launcher stdout 메모리 backstop은 256 MiB(16 MiB였다), broker 동시 연결 상한은 없다.
+7. **tick당 처리 개수.** 카드 서비스(v22 질문, 결과 검토, 운영자 확인 정리, 엔지니어링 T2 초안, 아이디어 카드 닫기)는
+   tick당 `AMUX_DM_TICK_LIMIT` = 25장(3장이었다), 대기 행은 그 8배를 읽는다. relay는 needsyou 카드를 한 번에 1000장까지
+   연다(100장이었다).
+8. **그대로 두는 것.** 카드 텍스트 256 KiB, DM 출력 256 KiB(본문 저장소의 필드 CHECK와 같다), 보존 90일과 30일 stale
+   종료, relay exit 2(토큰 설정 오류), 고정 형식 내부 route 본문 크기, 인스턴스당 launcher 동시 1건(공급사 계정 상태를
+   요청마다 지우는 §5a 격리), CLI 버전 경로 고정(§5a sha256 고정과 묶여 있다).
+9. **남은 것.** 전달 결과 불명·미전송 뒤에 다시 보내는 것은 전달 원장이 요청당 결정 한 번만 받으므로(유일 index와
+   guard) 별도 migration이 필요하다. 그때까지 `delivery_unknown`은 사람이 확인하고, `not_sent`는 운영자가 직접 답한다.
+
+## 0d. 운영자 결정 (2026-11-16, 대화) — 스위치 정리
+
+1. 항상 켜져 있던 DM 경로의 스위치를 없앴다: `TOMVERSE_AMUX_DM_ROUTING`(DM route는 인증 뒤 늘 열리고, DM 전체 kill switch는 DB 값 `on`/`off`/`proposal`이 그대로 맡는다), `TOMVERSE_AMUX_DM_OWNER_SETTLEMENT`, `TOMVERSE_AMUX_V22_RESULT_REVIEW_DM`, `TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW`.
+2. 남긴 것: DM 승인자(`TOMVERSE_AMUX_DM_APPROVER`), 병합 범위(`TOMVERSE_AMUX_DM_MERGE_SCOPE`), `TOMVERSE_AMUX_DM_T2_MERGE`(자율 에이전트의 병합 권한), box relay 시작 조건(`TOMVERSE_AMUX_DM_RELAY`), 그리고 사람 경계 용어 검사를 지키는 `TOMVERSE_AMUX_DM_TERMS_FIXED_TEXT_ONLY`. 값은 `enabled`/`disabled`로 적는다.
+
+## 0e. 운영자 지시 (2026-11-18, 대화) — transaction의 call 수 상한 없음
+
+"transaction마다 DB call 수에 상한이 있습니다"를 없애라는 지시에 따라, AMUX DB 경계는 선언한 call 수를 넘는
+호출을 더는 거절하지 않는다(`AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED`와 attachment의 24 call 상한을 없앴다).
+§9의 "12문장"과 각 경계의 선언 수는 시간 예산을 계산하는 값으로만 남는다. 트랜잭션은 여전히 DB 마감과 commit
+fence, route 마감 안에서 끝난다. 연산마다 실제 SQL 문장 수를 고정하는 테스트는 코드 구조를 보는 검사로 남긴다.
 
 ## 1. 목적과 경계
 
@@ -148,7 +303,51 @@ DM은 **제안을 쓰는 worker이지 승인자가 아니다.** (되돌릴 수 �
     열린 질문이 없어도 운영자는 같은 패널에서 남은 카드를 직접 닫을 수 있다(운영자 결정 2026-11-06). 대상 판정은 질문과
     같고 하루 한도와 유지·취소 뒤 다시 묻지 않는 기간만 적용하지 않는다. owner 출처 질문 행을 만들어 같은 트랜잭션에서
     `close`로 답하므로 카드·escalation 정리와 사람 감사(`direct: true`)가 위 적용 경로를 그대로 탄다. DM을 부르지 않으므로
-    스위치와 무관하게 보이며, 그 행은 하루 한도에 세지 않는다.
+    스위치와 무관하게 보이며, 그 행은 하루 한도에 세지 않는다. archive된 카드(`archivedAt`)는 보드를 떠난 카드라 판정(진행
+    중·배정·질문·다른 아이디어의 의존 카드)에도 닫는 대상에도 들지 않고 그대로 남는다(2026-11-14). 멈춘 앞 카드를 archive하고
+    다시 만든 아이디어의 남은 backlog 카드도 이 경로로 닫는다.
+11. **운영자 확인 대기의 멈춘 Task (운영자 결정 2026-11-13, §0a-5).** worker가 묻는 것이 아니라 relay의 sync가 찾는다.
+    대상은 archive되지 않은 `admin-idea-v4` v22 Task(receipt·역할·grade가 있는 것) 가운데 `review`·`blocked`이고 열린
+    human escalation이 있으며 실행 중인 것이 없는 Task다. 결과 검토(§0a-2)가 열려 있거나 그 실행에서 DM이 `block`한 Task,
+    v22 worker 질문(8)이 기다리는 Task, 그 아이디어에 계획 거부(9)나 남은 카드 닫기 질문(10)이 열린 Task는 제외한다. 엔지니어링
+    쪽 작업이 남은 Task(진행 중인 publish·정리 항목, 열린 T2 초안·결정·불일치)와 publisher가 draft로 연 검토 PR이 아닌 열린 PR이
+    있는 Task(merge observer 경로)도 제외한다. **검토를 통과한 성공 결과가 게시를 기다리는 Task(게시 대기, kept result:
+    가장 최근에 성공해 `review`로 간 시도의 patch가 남아 있고 그 시도의 게시 run이 없는 것)도 제외한다(운영자 결정
+    2026-11-15).** 그런 결과에 필요한 일은 다시 실행이 아니라 게시이고, 이 카드의 선택지에는 `retry`가 있다. 게시는 엔지니어링
+    관측 round가 맡는다(`docs/policy/engineering-agent.md` §11). 2026-11-14 AMUX-IMGOUT-003은 정지 중 검토를 통과한 결과 두 번이
+    비공개로 남은 뒤 DM이 매번 "다시 실행"을 골라 시도 5회를 모두 썼다. 사람은 운영자 확인 대기 화면에서 그대로 정리할 수 있고,
+    사람의 retry·block은 그 결과의 거절로 존중된다. v22 게시
+    (`TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION`)가 꺼져 있으면 게시할 곳이 없으므로 종전대로 올린다.
+    retry는 실패하거나 거절된 결과에만 남는다: patch 없이 끝난 실행의 결과 검토(§0a-2)는 DM이 검토자이므로 retry가 그 거절이다.
+    escalation 하나에 `AmuxDmOwnerSettlement` 행 하나이고(행 id는 escalation에서
+    유도한 version 8 UUID), tick마다 새 행 3건, 카드 3장까지다. 카드는 8과 같은 형식이며 세션 이름은 `amux-owner-settlement`,
+    provider는 `claude`다. 고정 영어 문장과 증거(표시 번호와 제목, 역할과 grade, 멈춘 사유의 고정 문장, 승인된 완료 조건,
+    실행 결과, 검토 서버 거절 횟수, 같은 부모의 형제 카드와 이 카드에 의존하는지)로 만든다. 검토 PR이면 PR 번호와 파일 목록
+    전체를 싣는다. 실행 결과, 검토 서버 거절의 findings, patch는 작업 공간의 `evidence/FINDINGS.md`·`evidence/PATCH.diff`로
+    통째로 간다(운영자 결정 2026-11-15, §0b. 그 전의 2,000자 질문·4,000자 context 한도와 "들어가는 만큼의 diff"는 없앴다).
+    findings는 앱이 attempt별 sealed content unit(`AmuxV52ReviewFindings`, `docs/policy/development-agent-orchestration.md`
+    v52)으로 저장한 것을 근거 route가 보낼 때마다 다시 열어, `FINDINGS.md`의 실행 결과 뒤에 그 Task의 모든 reject를 새것부터
+    통째로 붙인다(멈춘 Task와 검토 PR 모두. reject 수 상한도, 잘라내기도 없다). 읽을 수 없는 reject(보존 기간 만료, 키 저장소
+    불통, 저장 전 기록)는 그 수를 질문과 파일에 밝힌다. 작업 공간은 늘 켜져 있다(`TOMVERSE_AMUX_DM_WORKSPACE`는 2026-11-16에 없앴다).
+    증거를 읽을 수 없을 때만 DM에 올리지 않고 사람에게 넘긴다(`evidence_unavailable`).
+    v22 결과 검토는 patch가 없는 실행에서만 생기므로 (`amuxV22ResultReviewKind`) patch를 싣지 않는다. v22 implement
+    Task의 PR은 카드가 아니라 run의 binding에 있으므로, 운영자 확인 대기 화면은 그 PR(`publication_hold`)을 "PR 없음" 대신 보인다.
+    `tier_pending` 초안이 있는 동안 retry가 막히는 것은 이중 실행 방지이며, 화면은 초안을 거절하면 retry가 열린다고 알린다.
+    선택지는 멈춘 Task가 `retry`(시도 예산 안에서 `todo`, 넘으면 사람에게)·`complete`(done, `v4TerminalAt`)·`close`(archive)·
+    `remake`(자유 텍스트로 첫 줄 `remake`, 그다음 새 아이디어), 검토 PR이 `approve`·`retry`·`close`다. `remake`는 세 단계다.
+    먼저 요청을 붙잡은 트랜잭션(DM 승인자의 선점, 또는 운영자 확정 뒤) 안에서 감사 체인 잠금과 kill switch 아래 행을 `claimed`로
+    바꾸고 아이디어 요청 id를 적는다. 사람이 먼저 판정했거나 kill switch가 켜져 있으면 여기서 멈추고 아이디어는 접수되지 않는다.
+    다음으로 새 아이디어를 세션 접수(`submitAmuxIdeaFromSession`)로 접수한다(접수의 입력 검사와 분석 예산을 그대로 거친다).
+    접수의 커밋 트랜잭션 안에서 아이디어와 분석 예약을 쓰기 전에 guard가 감사 체인 잠금, kill switch, 선점 행과 카드의 잠금,
+    같은 판정 함수로 Task가 움직였는지를 다시 확인하고, 통과하면 같은 트랜잭션에서 선점 행에 아이디어 id를 적는다. Task가
+    움직였으면 선점을 취소하고, kill switch가 켜졌거나 카드를 다른 writer가 잡고 있으면 사람에게 넘긴다. 어느 쪽도 아이디어를
+    쓰지 않는다. 접수가 거절되면 사람에게 넘기고, 결과를 모르면 같은 요청 id로 한 번 다시 읽어 없으면 사람에게 넘긴다. 다시
+    접수하지 않는다. 끝으로 이 카드와 같은 부모 아래 이 카드에 (직간접으로) 의존하며 시작하지
+    않은 카드를 한 트랜잭션에서 archive한다. 끝나지 않은 선점은 다음 tick이 다시 읽기만으로 마치거나 사람에게 넘긴다. `approve`는 binding id와 그 binding의 `verifiedHeadSha`·`snapshot.diffDigest`, 요청 id,
+    결정 시각을 행에 기록할 뿐 Task와 escalation은 그대로 둔다. 적용은 시스템 주체로 해시 체인 감사 한 건을 남기고, 운영자의
+    unknown usage 수락은 하지 않는다. Task가 움직였거나(상태, 새 실행, archive) 사람이 escalation을 해결했으면 행은 취소된다.
+    그 밖의 답은 사람에게 넘긴다. 1~6은 위와 같고, 7은 8처럼 다르다. 확정 답(`dm_confirmed`)과 DM 승인자의 답(`dm`)을 같은
+    적용 함수가 쓴다. 꺼도 이미 열린 행의 취소와 카드 닫기, 답 적용은 그대로다.
 
 ## 3. 라우팅 — 앱 route의 결정적 판정
 
@@ -158,16 +357,25 @@ DM은 **제안을 쓰는 worker이지 승인자가 아니다.** (되돌릴 수 �
 1. 전체 kill switch가 켜짐, 배정될 인스턴스 스위치가 `off`, 설정을 읽지 못함.
 2. `ask_type`이 허용된 여섯(§0-1) 밖. `customer_outbound`도 여기다.
 3. 되돌릴 수 없는 행위 용어 목록에 걸림. 판정 입력은 카드의 type·tag·제목·질문·선택지·해제 조건·worker가
-   적은 맥락. 아래가 v1 목록이며 바꾸려면 운영자 승인(대화 한 줄, PR에 기록)이 필요하다: main 병합, ship·release·배포·production,
-   삭제·delete·drop·truncate·덮어쓰기, migration, 결제·환불·청구, 외부 게시·발송·연락, secret·token·
+   적은 맥락. 운영자 결정 2026-11-14(AMUXFLOW/B2): `TOMVERSE_AMUX_DM_TERMS_FIXED_TEXT_ONLY=enabled`이면 앱이 직접 만든
+   카드(그 local card를 기록한 `AmuxDmOwnerSettlement` 행, 2026-11-14부터는 `EngineeringAgentDmReview`
+   행도 있는 카드)가 `[evidence]`…`[/evidence]`로 감싼
+   증거(실행 결과, diff)는 용어 판정에서 뺀다. worker 카드의 표식은 보통 글자로 읽는다. 닫히지 않은 표식은 빼지 않고, secret 검사는
+   카드 전체에 그대로 적용한다. 기본은 꺼짐이다. 아래가 목록이며(2026-11-16 §0c-5로 좁힘) 바꾸려면 운영자 승인(대화 한 줄, PR에 기록)이 필요하다: main 병합, production·운영 환경,
+   삭제·delete·drop table·truncate, 결제·환불·청구, 외부 게시·발송·연락, secret·token·
    password·API key의 제공, 권한·접근 설정 변경, 정책·workflow·branch protection 변경. 정확한 대소문자·
-   어형 규칙과 검사 문자열은 S1의 테스트 고정값이 정한다.
+   어형 규칙과 검사 문자열은 S1의 테스트 고정값이 정한다. 운영자 결정 2026-11-14: 한국어 "권한"은 여전히 모두
+   걸린다. 예외는 플랜을 설명하는 완결된 절 두 형태뿐이다(AMUX-PRICINGCOPY-002): "(주어는) <플랜 이름> 권한을
+   구분·비교합니다"와 "<플랜 이름> 권한에 따라 ○○이 다릅니다". 그 절이 쉼표 뒤부터 문장 끝까지 정확히 그 형태여야 하고,
+   문장이 질문·요청이 아니며, 같은 문장 어디에도 변경 동사(주다·부여·변경·회수·활성화 등)가 없어야 한다. 더 느슨한 규칙은
+   독립 검토 다섯 번에서 매번 빈틈이 나와 쓰지 않는다.
 4. `credential`·`access`·`external` 질문의 `resolution`이 `decision_only`가 아님. worker는 이 세 유형에
    `resolution`(`needs_secret`·`needs_permission_change`·`needs_contact`·`decision_only`)을 적는다. 비밀값
    제공, 권한 변경, 제3자 연락은 DM이 도울 수 없는 일이다. DM은 비밀값을 받지도 주지도 않는다.
 5. 묻는 worker의 모델 공급사가 확인되지 않음(§7).
-6. 처리량 초과: 인스턴스마다 시간당 20건, 하루 100건.
-7. 입력 한도 초과(§5).
+6. (없앰, 2026-11-15) 처리량 상한(시간당 20건, 하루 100건)은 더 검사하지 않는다(§0b). 거절 코드 `throughput_exceeded`는
+   예전 행을 읽기 위해서만 남는다.
+7. 입력 한도 초과(§5): 카드 텍스트가 단일 상한(256 KiB)을 넘거나 경로·선택지가 문법을 어김.
 8. 카드 텍스트가 secret 검사에 걸림. route는 카드 전체를 기존 secret 검사 규칙으로 검사하고, 걸리면 전송하지
    않는다.
 
@@ -203,7 +411,19 @@ v1에서 이 선언은 **라우팅에 쓰지 않는다.** 운영자가 판단할
 ## 5. DM의 입력과 격리 — 공통 기반 r16 §3 예외
 
 - **카드:** 질문 카드의 구조화된 필드(유형·질문·선택지·효과 등급·경로·`resolution`·해제 조건·worker가 적은
-  맥락)만. 상위·의존 카드는 넣지 않는다. 카드 텍스트는 합계 16 KiB 이하. 카드의 URL을 가져오지 않는다.
+  맥락)만. 상위·의존 카드는 넣지 않는다. 카드의 URL을 가져오지 않는다. 카드 텍스트(`dmCardText`)의 단일 상한은 256 KiB다
+  (2026-11-15, §0b; 그 전에는 16 KiB). 카드는 공급사 CLI의 stdin prompt가 되므로 그 크기가 실제 한계이고, 256 KiB(약 64~90k
+  token)는 작은 쪽 공급사의 context에서 작업 공간을 읽을 자리를 절반 넘게 남긴다. 필드마다의 상한과 경로 개수 상한은 없다.
+- **작업 공간(2026-11-15, §0b) — 아래 스냅샷 세 항목을 대신한다.** broker가 전송 의도 전에 대상 commit을 공개 API로 확인하고
+  근거 파일을 검사해 payload에 붙일 manifest 줄(commit 한 줄, 근거 파일마다 경로·git blob id·크기 한 줄, 본문 없음)을 답한다.
+  대상은 앱이 정한 commit(T2 초안의 base commit, `worker_head`)이 공개 조회에서 확인되면 그것, 404·422면 `develop`의 공개 head,
+  그 밖이면 commit 없음(근거 파일만)이다. 전송 의도 뒤 launch에서 broker는 자기 manifest 줄이 payload의 끝과 바이트로 같을 때만
+  요청 디렉터리에 작업 공간을 만든다: `git`을 시스템·전역 설정 없이, 빈 credential helper·askpass, prompt 없음, https만,
+  redirect 없음, hook 없음, symlink를 일반 파일로(`core.symlinks=false`) 실행해 그 commit을 `--depth=100`으로 fetch하고, HEAD가 그
+  commit인지 확인한다(git이 객체 id를 내용의 hash로 검증한다). 남은 symlink가 하나라도 있으면 거부한다. 트리는 공급사 그룹 읽기
+  전용(디렉터리 `0750`, 파일 `0640`)으로 넘긴다. 만들지 못하면 `workspace_unavailable`로 아무것도 보내지 않는다. 근거 파일은 닫힌
+  이름 목록, 텍스트, 비밀 경로 목록, secret 검사를 앱과 broker가 각각 통과해야 한다. 디스크 상한 4 GiB, fetch 10분, 근거 합계
+  16 MiB가 단일 안전 상한이다(`lib/amux/decisionMakerWorkspaceCore.ts`).
 - **저장소 스냅샷 — 공개된 내용만:** 스냅샷은 GitHub의 공개 저장소 `github.com/mposition/Tomverse`에 이미
   있는 commit의 파일만이다. 대상 SHA는 다음 순서로 **한 번** 정하고 다시 해석하지 않는다. (1) 묻는 worker의
   HEAD가 소문자 16진수 40자이고, 공개 commit 조회가 200을 주며 응답의 commit id가 그 값과 같으면 그 SHA.
@@ -226,12 +446,13 @@ v1에서 이 선언은 **라우팅에 쓰지 않는다.** 운영자가 판단할
   `*credential*`, `.npmrc`, `.netrc`, `.pgpass`, 바꾸려면 운영자 승인이 필요하다)에 걸린 경로를 빼고, 남은 파일을
   기존 secret 검사 규칙으로 검사해 걸린 파일을 뺀다. 파일당 256 KiB·합계 2 MiB를 넘으면 §3-7로 운영자다.
   무엇을 뺐는지는 건수와 사유만 기록한다. manifest는 경로와 blob id다.
-- **S2b 구현(2026-10-19):** typed ask에는 worker HEAD가 없으므로 대상은 늘 `develop`의 공개 head이며(조회한
+- **S2b 구현(2026-10-19, 2026-11-15 작업 공간으로 대체):** typed ask에는 worker HEAD가 없으므로 대상은 늘 `develop`의 공개 head이며(조회한
   SHA를 commit 조회로 다시 대조하고, 실패하면 카드만), 스냅샷 상태는 `develop`이다. 스냅샷은 요청 디렉터리가
   아니라 stdin payload 안, 카드 줄 뒤의 JSON 줄(커밋 한 줄, 파일마다 한 줄)로 간다. 그래서 전송 의도의 payload
   digest가 스냅샷의 모든 바이트를 덮는다. broker가 가져온 줄을 bridge가 형식 검사하고 manifest digest를 직접
   계산한다. 합계는 2 MiB가 아니라 이스케이프된 줄 512 KiB까지만 보내며, 넘는 파일과 60초 안에 못 읽은 파일은
-  운영자로 보내지 않고 빼서 건수만 기록한다(`lib/amux/decisionMakerSnapshot.ts`).
+  운영자로 보내지 않고 빼서 건수만 기록한다(이 스냅샷 코드는 작업 공간으로 대체되어 지워졌다. 현재 구현은
+  `lib/amux/decisionMakerWorkspaceCore.ts`).
 - **r16 §3 승인 전에는 아무것도 보내지 않는다.** 카드는 공개되지 않은 텍스트이고, DM 공급사로 가는 회수할
   수 없는 새 전송이다(§11). 그 승인 전에는 DM 프로세스를 시작하지 않는다.
 - **실행 주체와 격리(양방향):** 네 주체를 서로 다른 UID로 둔다.
@@ -239,7 +460,7 @@ v1에서 이 선언은 **라우팅에 쓰지 않는다.** 운영자가 판단할
   | 주체 | 읽고 쓰는 것 | 네트워크 |
   |---|---|---|
   | worker | 자기 worktree와 홈. 요청 디렉터리·DM 프로세스·broker를 읽거나 ptrace할 수 없고 sudo 없음 | 기존 그대로 |
-  | DM broker | 요청 디렉터리를 만들고 지움, 스냅샷 가져오기, DM 프로세스 시작, DM stdout을 pipe로 받아 bridge의 로컬 소켓으로 넘김. 공급사 CLI 인증·bridge 자격증명 없음 | GitHub 공개 host와 bridge 로컬 소켓만 |
+  | DM broker | 요청 디렉터리를 만들고 지움, 작업 공간 가져오기(공개 commit 조회와 git fetch), DM 프로세스 시작, DM stdout을 pipe로 받아 bridge의 로컬 소켓으로 넘김. 공급사 CLI 인증·bridge 자격증명 없음 | GitHub 공개 host와 bridge 로컬 소켓만 |
   | DM 공급사 계정(공급사마다 하나) | 자기 공급사 CLI의 인증 하나, 요청 디렉터리 읽기만, 자기 임시 디렉터리 | 자기 공급사 API host만 |
   | bridge | 기존 bridge 자격증명. 요청 디렉터리 접근 없음 | 앱 route만 |
 
@@ -263,7 +484,7 @@ v1에서 이 선언은 **라우팅에 쓰지 않는다.** 운영자가 판단할
   실측, §5a). 인증 파일 밖의 CLI 상태는 질문 내용이 들어 있을 수 있는 것으로 보고 요청마다 지운다(§5a). broker는 시작 전에 실행 파일의 sha256과 실행 digest(§5a)를 정책 버전에 기록된 값과 대조한다. 명령
   실행을 끌 수 있는 모드가 있으면 그 모드를 쓴다. 실행 파일·argv·환경 가운데 하나라도 기록과 다르면 시작을 거부한다.
   값은 §5a에 있다.
-- **hard timeout:** 질문당 30분이 지나면 DM 프로세스를 강제 종료한다. 늦은 결과는 §9가 거절한다.
+- **hard timeout:** 질문당 2시간이 지나면 DM 프로세스를 강제 종료한다(2026-11-16, §0c-3; 30분이었다). 늦은 결과는 §9가 거절한다.
 - **외부 텍스트:** worker가 카드에 인용한 로그·이슈 발췌는 데이터다. DM 지시문은 그 안의 지시를 따르지
   말라고 명시한다(원칙 3의 둘째 문장).
 
@@ -295,8 +516,10 @@ sha256을 아래 값과 대조한다. 다르면 시작을 거부하고, 새 버�
 
 ```text
 codex -a never --no-daemon exec --ephemeral --ignore-user-config --ignore-rules --strict-config --skip-git-repo-check
-  -s read-only --json --output-schema <스키마 파일> -o <요청별 출력 파일> -m gpt-6-astra -C <요청 디렉터리>
-  --disable shell_tool --disable unified_exec --disable unified_exec_tty --disable shell_snapshot
+  -c default_permissions="dm"
+  -c permissions.dm.filesystem={":minimal"="read","<요청 디렉터리>"="read","/opt/tomverse-amux-dm/codex-cli-0.162.1"="read"}
+  --json --output-schema <스키마 파일> -o <요청별 출력 파일> -m gpt-6-astra -C <요청 디렉터리>
+  --disable shell_snapshot
   --disable code_mode_host --disable write_stdin_approval --disable sleep_tool --disable browser_use
   --disable browser_use_external --disable browser_use_full_cdp_access --disable browser_annotation_api
   --disable computer_use --disable in_app_browser --disable apps --disable plugins --disable plugin_sharing
@@ -306,12 +529,25 @@ codex -a never --no-daemon exec --ephemeral --ignore-user-config --ignore-rules 
   --disable image_generation --disable view_image --disable daemon_auto_start --disable in_app_updates
   --disable system_proxy_fallback --disable unbounded_connection_retries --disable realtime_conversation -
 
-claude -p --tools "" --restricted --strict-mcp-config --setting-sources "" --disable-slash-commands
+claude -p --tools Read,Grep,Glob --restricted --strict-mcp-config --setting-sources "" --disable-slash-commands
   --no-session-persistence --permission-prompts none --output-format json --json-schema <스키마 JSON>
   --model claude-fable-5-1
 ```
 
-(줄바꿈은 읽기 위한 것이다. argv는 공백으로 나뉜 위 토큰의 순서 그대로다.)
+(줄바꿈은 읽기 위한 것이다. argv는 공백으로 나뉜 위 토큰의 순서 그대로다. 요청마다 바뀌는 `<요청 디렉터리>`는 codex의
+권한 profile 토큰 안에도 들어간다.)
+
+- **도구(운영자 결정 2026-11-15, §0b).** DM은 작업 공간(§5)을 로컬 CLI처럼 읽는다. codex는 shell을 켜고(`shell_tool`·
+  `unified_exec`·`unified_exec_tty`를 더 끄지 않는다) 권한 profile `dm`으로 명령을 돌린다. 그 명령은 시스템 최소 경로
+  (`:minimal`), 요청 디렉터리, CLI 자신의 디렉터리(sandbox가 실행 파일을 다시 실행한다)만 **읽을** 수 있고, 아무것도 쓰지
+  못하며 네트워크가 없다. 계정 홈(인증 파일 포함)과 다른 프로세스의 환경은 명령에게 보이지 않는다. 같은 형태를 process
+  audit runner가 쓰며 2026-11-14 box에서 Codex 0.160으로 확인했다(`scripts/amux-process-audit-runner.mjs`). profile은 `-s`를
+  대신한다(CLI가 둘을 함께 받지 않는다). claude는 `Read`·`Grep`·`Glob`만 켠다. `--restricted`가 그 도구를 작업 디렉터리에
+  가두고 명령·WebFetch 도구를 없앤다. Bash는 켜지 않는다. claude의 명령을 작업 공간에 가두는 장치(codex의 profile에 해당)가
+  고정 argv에 없고, 그 명령은 계정 홈의 인증 파일을 읽을 수 있기 때문이다.
+- **테스트 실행은 켜지 않는다.** box의 공급사 계정에 의존성(`node_modules`)이 없고 설치는 registry 네트워크가 필요한데
+  공급사 계정의 egress는 공급사 API뿐이다. codex profile은 쓰기를 막으므로 테스트 산출물도 쓸 수 없다. 켜려면 별도 계정과
+  미리 설치한 의존성 cache, 쓰기 가능한 작업 공간 사본, 네트워크 없는 sandbox를 box에서 측정한 뒤 이 절을 바꾼다.
 
 - 설정 파일: codex는 `--ignore-user-config`·`--ignore-rules`로 `config.toml`과 execpolicy 규칙을 읽지 않는다. claude는
   `--setting-sources ""`와 `--restricted`로 user·project·local 설정을 읽지 않는다. 도움말에 따르면 `--restricted`도
@@ -321,20 +557,27 @@ claude -p --tools "" --restricted --strict-mcp-config --setting-sources "" --dis
   문자열은 결과로 쓰지 않는다(S0에서 codex는 한 turn에 `agent_message`를 둘 낸 적이 있다).
 - 실패 판정: codex는 종료 코드 `1`과 `turn.failed`, claude는 종료 코드 `1`과 `is_error:true`다. 둘 중 하나라도 실패면
   결과가 없는 것이고 §9의 "DM 불가"다. 강제 종료(hard timeout)는 시간 초과다.
+- 운영자 결정 2026-11-14: "DM 불가"는 판단이 아니라 실행 실패이므로, 원장이 처음 기록할 때 결과 route가 운영 장애
+  `AMUX_DM_RUN_UNAVAILABLE`(warning, 인스턴스와 요청 id만)을 한 번 알린다. 원인은 box broker journal에 있다. 같은 인스턴스로
+  자동 재전송하는 것은 원장의 요청당 전송 1회 제약 때문에 migration이 필요해 이번에 하지 않는다.
 
 **거부 argv.** 위와 바이트 단위로 같지 않으면 시작을 거부하므로 목록은 테스트의 기준이다. 전용 launcher의 테스트는
 적어도 다음이 섞이면 거부함을 고정한다. codex: `--dangerously-bypass-approvals-and-sandbox`,
 `--dangerously-bypass-hook-trust`, `--approve-for-me`, `--add-dir`, `-s workspace-write`, `-s danger-full-access`,
-`--worktree`, `--enable`, `-p`/`--profile`, `--oss`, `--local-provider`, `--cyber-access-program`, `-i`/`--image`, `-c`,
-최상위 `--search`·`--remote`·`--remote-auth-token-env`, 하위 명령 `resume`·`fork`·`review`. claude:
+`--worktree`, `--enable`, `-p`/`--profile`, `--oss`, `--local-provider`, `--cyber-access-program`, `-i`/`--image`,
+최상위 `--search`·`--remote`·`--remote-auth-token-env`, 하위 명령 `resume`·`fork`·`review`. 고정 argv 밖의 -c 값은 바이트 비교가
+거부한다. claude:
 `--dangerously-skip-permissions`, `--allow-dangerously-skip-permissions`, 값과 무관한 `--permission-mode`, `--add-dir`,
-`--allowedTools`/`--allowed-tools`, `""` 밖의 `--tools`, `-w`/`--worktree`, `--tmux`, `--mcp-config`, `--plugin-dir`,
+`--allowedTools`/`--allowed-tools`, `Read,Grep,Glob` 밖의 `--tools`, `-w`/`--worktree`, `--tmux`, `--mcp-config`, `--plugin-dir`,
 `--plugin-url`, `--agents`, `--agent`, `--file`, `--chrome`, `--cloud`, `--environment`, `--remote-control`, `--ide`,
 `--desktop`, `--brief`, `--bg`/`--background`, `-r`/`--resume`, `-c`/`--continue`, `--fork-session`, `--session-id`,
 `--teleport`, `--from-pr`, `--fallback-model`, `--betas`, `--system-prompt`, `--bare`, `--settings`, `-d`/`--debug`,
 `--debug-file`, `--verbose`.
 
-**고정 환경.** `HOME=<그 공급사 계정의 홈>`, `PATH=/usr/bin:/bin`, `LANG=C.UTF-8`, `LC_ALL=C.UTF-8` 넷만 둔다.
+**고정 환경.** `HOME=<그 공급사 계정의 홈>`, `PATH=/usr/bin:/bin`, `LANG=C.UTF-8`, `LC_ALL=C.UTF-8`, `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_PARAMETERS='safe.directory=*'`, `GIT_OPTIONAL_LOCKS=0` 여덟만 둔다.
+뒤의 넷은 DM의 git 읽기 명령을 위한 것이다(2026-11-15): 작업 공간 밖의 설정 파일을 읽지 않고, broker 소유 저장소를 명령줄 범위의
+`safe.directory`로 허용하며(codex는 이름에 KEY·SECRET·TOKEN이 든 변수를 명령에 넘기지 않으므로 `GIT_CONFIG_PARAMETERS`를 쓴다),
+읽기 전용 작업 공간에 잠금 파일을 쓰려 하지 않는다.
 
 **실행 digest.** broker는 다음 값의 canonical JSON(`amux-json-v1`)을 sha256으로 계산해 기록과 대조한다: 인스턴스, 실행
 파일 경로와 sha256, 스키마 파일의 sha256, 요청마다 바뀌는 두 경로를 자리표시자로 둔 argv 배열, 고정 환경, 아래 상태
@@ -380,8 +623,11 @@ DM 출력은 `.strict()` 스키마 값 하나이며 종류별로 검증한다.
 | 종류 | 내용 | 결과 |
 |---|---|---|
 | `select` | 선택지 id, 근거, `irreversible` | 제안 |
-| `free_text` | 답 본문(상한 있음), 근거, `irreversible` | 제안 |
+| `free_text` | 답 본문, 근거, `irreversible` | 제안 |
 | `escalate` | 이관 사유 | 제안 없이 운영자. 검증 실패가 아니다 |
+
+텍스트 필드의 상한은 DM 출력 전체의 상한(256 KiB, launcher와 results route의 본문)과 같다(2026-11-15, §0b; 그 전에는 답
+8 KiB·근거 4 KiB·사유 1 KiB). 그래서 launcher가 돌려준 출력은 필드 길이 때문에 검증 실패가 되지 않는다.
 
 - `select`: 선택지 id가 요청에 있어야 한다.
 - `irreversible`이 true면 제안을 저장하되 Admin에 그 표시를 먼저 보인다. 검증 실패로 세지 않는다.
@@ -429,7 +675,7 @@ DM 출력은 `.strict()` 스키마 값 하나이며 종류별로 검증한다.
 - 인스턴스별 스위치는 `off`·`proposal` 둘뿐이다. 기본 `off`, 읽기 실패 `off`. 저장소의 CHECK 제약이 다른
   값을 거부한다. 전체 kill switch의 동작별 허용·거부는 §6의 표가 정한다. 스위치 변경과 latch 해제는 `ops:write`와
   최근 step-up을 요구하고 사람 감사로 남는다.
-- 검증 실패(§6)가 연속 3건이면 그 인스턴스를 `off`로 latch한다. 해제는 운영자만.
+- 검증 실패(§6)가 연속 3건이면 그 인스턴스를 `off`로 latch한다. 해제는 운영자, 또는 한 시간 뒤 system(2026-11-16, §0c-4).
 - §4의 보고가 결정 2의 기준을 넘어도 이 정책 안에서는 아무것도 바뀌지 않는다.
 
 ## 9. 결과를 모를 때와 늦은 결과
@@ -453,15 +699,16 @@ DM 출력은 `.strict()` 스키마 값 하나이며 종류별로 검증한다.
   쌍으로 조회해서만 확정한다. 조회로도 확정하지 못하면 `result_unknown`으로 두고 그 요청은 운영자에게 간다.
 - **timeout 층:** route 트랜잭션은 기존 AMUX DB 경계(`lib/amux/dbBoundary.ts`)를 그대로 쓴다.
   `statement_timeout` 200 ms, 예산 계산의 호출당 유휴 간격 100 ms(설치되는
-  `idle_in_transaction_session_timeout`은 2026-11-05부터 300 ms), commit 예비시간 200 ms다. **문장 수는 코드
+  `idle_in_transaction_session_timeout`은 2026-11-15부터 1,000 ms), commit 예비시간 200 ms다. **문장 수는 코드
   구조로 정한다.** DM store의 각 연산은 반복 없는 문장열이고, 설정문·fence·`writeSystemAuditLog()`의 문장을
   **가장 많은 경우(무결성 키가 있어 잠금·시계·이전 hash·삽입을 모두 실행하는 경우)로 세어 12개 이하**다. 연산마다
   키가 있는 경우와 없는 경우의 실제 SQL 문장 수를 테스트가 고정하고, 숫자가 바뀌면 테스트가 실패한다. 런타임
   계수기는 두지 않는다. 그 셋에서 유도한 12 × (200 + 100) + 200 = 3,800 ms는 **timeout 설정문이 끝난 뒤의**
   트랜잭션 예산이며, 앱이 유도한 값이고 DB 상한이 아니다. `transaction_timeout`은 걸지 않는다. CI에 PostgreSQL
   16이 있고 16에는 그 설정이 없으며, 기존 경계도 같은 이유로 걸지 않는다. route 예산은 `AMUX_ROUTE_BUDGET_MS`
-  (15초)이고, 남은 route 시간이 3,800 ms보다 짧으면 트랜잭션을 시작하지 않는다(`amuxRouteHasBudgetForMs`).
-  연결 대기도 남은 시간에서 그 예산을 뺀 만큼으로 묶는다(`amuxDbConnectionWaitMs`). DB 상한 없이 남는 구간은
+  (15초)다. 남은 route 시간이 3,800 ms보다 짧으면 트랜잭션은 거절되지 않고 남은 시간에서 연결 대기를 뺀
+  만큼을 자기 마감으로 쓴다(`amuxDbTransactionBudgetWithinRouteMs`, 2026-11-18). 그만큼도 호출 하나를 담지
+  못할 때만 시작하지 않는다. 연결 대기도 남은 시간에서 그 예산을 뺀 만큼으로 묶는다(`amuxDbConnectionWaitMs`). DB 상한 없이 남는 구간은
   `BEGIN`부터 timeout 설정문이 끝날 때까지와 COMMIT 검사 뒤의 기록·flush다.
 - worker에게 확정된 답을 전달한 결과가 불명확하면 다시 보내지 않는다. 그 요청을 `delivery_unknown`으로
   두고, **그 worker 세션을 일시 정지**(AMUX pause)한 뒤 로컬 메시지 멱등 키로 전달 영수증을 조회한다. 확정되지
@@ -477,8 +724,8 @@ DM 출력은 `.strict()` 스키마 값 하나이며 종류별로 검증한다.
   행이 모두 지워지면 그 기간의 키를 파기해, 원장의 digest를 더는 본문과 대조할 수 없게 한다. legal hold가
   걸린 행이 남은 기간의 키는 hold가 풀릴 때까지 둔다. 키 교체·파기는 시스템 감사로 남긴다.
 - **본문 저장소(분리):** 운영자가 Admin에서 판단하려면 본문이 필요하다. 별도 표에 다음 다섯 필드만 둔다.
-  질문 카드 텍스트(16 KiB), DM 제안 답 본문(8 KiB), DM 근거(4 KiB), DM 이관 사유(1 KiB), 운영자가 고친
-  답(8 KiB). 요청당 합계는 40 KiB 이하다. 저장 전에 secret 검사를 통과해야 한다. 본문 행은 고칠 수 없다(UPDATE를
+  질문 카드 텍스트, DM 제안 답 본문, DM 근거, DM 이관 사유, 운영자가 고친 답. 필드마다 256 KiB, 요청당 합계는 그 다섯의 합
+  (1,280 KiB)이다(2026-11-15, migration `20261115140000_amux_dm_card_text_cap`; 그 전에는 16·8·4·1·8 KiB와 합계 40 KiB). 저장 전에 secret 검사를 통과해야 한다. 본문 행은 고칠 수 없다(UPDATE를
   trigger가 막는다).
 - **보존:** 보존 상태는 본문 표가 아니라 **별도의 append-only 보존 사건 표**에 둔다. 사건 종류는
   `retention_set`·`hold_set`·`hold_release` 셋뿐이다. `retention_set`은 요청이 닫힐 때 DB 시계로 계산한
@@ -500,6 +747,10 @@ DM 출력은 `.strict()` 스키마 값 하나이며 종류별로 검증한다.
   뒤(§2-4) DM 프로세스를 시작하기 전에 route에 전송 의도(인스턴스, 공급사, 입력 payload digest, 스냅샷
   manifest digest)를 기록하고 그 응답을 받은 뒤에만 시작한다. 프로세스가 끝나면 전송 영수증을 보낸다.
   의도만 있고 영수증이 없으면 `transmit_unknown`으로 두고 보낸 것으로 친다. 그 요청은 다시 보내지 않는다.
+  작업 공간(2026-11-15, §0b)이 있으면 의도의 payload digest가 카드와 manifest 줄(commit, 근거 파일마다 경로·blob id·크기)을
+  덮고, manifest digest가 `repo`와 그 commit, 근거 파일마다 경로와 blob id를 요청 키로 덮는다(`dmWorkspaceManifestDigest`).
+  broker는 payload의 끝이 자기 manifest 줄과 바이트로 같을 때만 그 작업 공간을 만든다. `repo-patched/`와 `WORKSPACE.md`는
+  그 commit과 patch에서 고정 코드로 만든 것이다. 공급사에 실제로 가는 것은 stdin과, DM이 도구로 읽은 작업 공간의 내용이다.
 - **감사 action**은 다음으로 닫는다. 시스템: `amux.decision.route`, `.assign`, `.assign_discarded`,
   `.transmit_intent`, `.transmit_receipt`, `.transmit_unknown`, `.result`, `.result_rejected`, `.deliver`,
   `.delivery_unknown`, `.result_unknown`, `.cleanup_unknown`, `.latch`, `.digest_key_rotate`, `.digest_key_destroy`,

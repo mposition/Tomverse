@@ -2,6 +2,7 @@
 # The creative short job on the AMUX box (owner 2026-11-09), run by hand:
 #   set -a; . ~/.config/tomverse/marketing-video.prod.env; set +a
 #   bash tools/marketing-video/run-creative-short.sh
+#   bash tools/marketing-video/run-creative-short.sh --rebuild <run>   (no paid call; see the .mjs)
 # Off unless MARKETING_CREATIVE_SHORT=on in that env file. It also needs
 # MARKETING_CREATIVE_SHORT_DAILY_CREDIT_CAP (Higgsfield credits a day),
 # MARKETING_CREATIVE_SHORT_DAILY_VOICE_CHARS (ElevenLabs characters a day) and
@@ -17,5 +18,5 @@ npm ci --no-audit --no-fund --silent
 npx --yes remotion browser ensure >/dev/null
 mkdir -p job
 export PATH="$HOME/.local/bin:$PATH"
-node run-creative-short.mjs 2>&1 | tee -a "job/creative-$(date -u +%Y%m%d).log"
+node run-creative-short.mjs "$@" 2>&1 | tee -a "job/creative-$(date -u +%Y%m%d).log"
 exit "${PIPESTATUS[0]}"

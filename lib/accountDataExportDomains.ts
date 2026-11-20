@@ -49,6 +49,8 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     withheldReason: "OAuth state hashes, PKCE verifiers, tokens, client credentials and callback URLs are withheld." },
   { domain: "mcpConnection", publicName: "plugin_connections", prismaModel: "McpConnection", state: "included_filtered",
     withheldReason: "Authentication credentials, remote schemas, policy digests and execution leases are withheld." },
+  { domain: "mcpCustomServer", publicName: "plugin_custom_servers", prismaModel: "McpCustomServer", state: "included_filtered",
+    withheldReason: "OAuth endpoints discovered from the server's public metadata at registration are withheld; the URL, name and authentication type are included." },
   { domain: "mcpInvocation", publicName: "plugin_actions", prismaModel: "McpInvocation", state: "included_filtered",
     withheldReason: "Encryption envelopes and internal version fences are withheld. Unexpired pending arguments are decrypted for their owner; terminal arguments are erased." },
   {domain:"codeTaskReservation",publicName:"code_credit_usage",prismaModel:"CodeTaskReservation",state:"included_filtered",
@@ -269,6 +271,24 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
+    domain: "imageModelBillingTerms",
+    publicName: "image_model_billing_terms",
+    prismaModel: "ImageModelBillingTerms",
+    state: "unverified",
+  },
+  {
+    domain: "imageBillingMeasurement",
+    publicName: "image_billing_measurement",
+    prismaModel: "ImageBillingMeasurement",
+    state: "unverified",
+  },
+  {
+    domain: "codingProviderTerms",
+    publicName: "coding_provider_terms",
+    prismaModel: "CodingProviderTerms",
+    state: "unverified",
+  },
+  {
     domain: "providerBillingConfig",
     publicName: "provider_billing_config",
     prismaModel: "ProviderBillingConfig",
@@ -429,6 +449,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "included_filtered",
     withheldReason:
       "The visible partial response, model and provider attribution, status, revision and terminal metadata are the user's recovery record. Held back: the request fingerprint and the worker owner and lease fields, which are concurrency and execution internals rather than user content.",
+  },
+  {
+    domain: "researchPreviewRun",
+    publicName: "research_preview_runs",
+    prismaModel: "ResearchPreviewRun",
+    state: "included_filtered",
+    withheldReason:
+      "The conversation and answer identities, selected model, lifecycle status, bounded step/search/read counts and timestamps are included. The private restart checkpoint, raw page content, provider/API binding, reservation, lease, digest, settlement usage and internal error fields are withheld.",
   },
   {
     domain: "promptRefinerChatScope", publicName: "prompt_refiner_scopes",
@@ -951,6 +979,18 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
+    domain: "amuxTaskChangedPaths",
+    publicName: "amux_v22_task_changed_paths",
+    prismaModel: "AmuxV22TaskChangedPaths",
+    state: "unverified",
+  },
+  {
+    domain: "amuxReviewFindings",
+    publicName: "amux_v52_review_findings",
+    prismaModel: "AmuxV52ReviewFindings",
+    state: "unverified",
+  },
+  {
     domain: "amuxIdeaRetentionHold",
     publicName: "amux_idea_retention_holds",
     prismaModel: "AmuxIdeaRetentionHold",
@@ -1116,6 +1156,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "A short-lived concurrency nonce with no user-meaningful content, deleted with the account.",
   },
   {
+    domain: "semanticRetrievalCache",
+    publicName: "semantic_retrieval_cache",
+    prismaModel: "SemanticRetrievalCache",
+    state: "excluded",
+    exclusionReason:
+      "A working record kept for ten minutes: ids of the user's own memories or knowledge chunks with a relevance score, the vector of one question, or a note that a retrieval call failed. It holds none of their text, the rows it points at are exported at their source, and it is swept on expiry and deleted with the account.",
+  },
+  {
     domain: "routingRun",
     publicName: "routing_observations",
     prismaModel: "RoutingRun",
@@ -1205,7 +1253,7 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     prismaModel: "MessageArtifact",
     state: "included_filtered",
     withheldReason:
-      "The files an assistant answer produced for the user: name, format, size, which answer and which model made each one. The file bytes themselves are not in this export -- they are binaries in object storage and a JSON file cannot carry them, which is a gap rather than a withholding, and they remain downloadable from the conversation while it exists. Also withheld: the object storage key, which is Tomverse's internal address for the object and grants nothing on its own.",
+      "The files an assistant answer produced for the user: name, format, size, which answer and model made each one, explicit revision edges and any retained validated workbook specification. The file bytes themselves are not in this export -- they are binaries in object storage, which is a gap rather than a withholding, and remain downloadable from the conversation while it exists. The private object storage key is withheld.",
   },
   {
     domain: "messageAttachment",
@@ -1213,7 +1261,7 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     prismaModel: "MessageAttachment",
     state: "included_filtered",
     withheldReason:
-      "The files the user attached to their own messages: name, type, size and which message each belongs to. The file bytes themselves are not in this export -- they are binaries in object storage and a JSON file cannot carry them, which is a gap rather than a withholding, and the person already holds the originals they uploaded. Also withheld: the object storage key, which is Tomverse's internal address for the object and grants nothing on its own.",
+      "The files the user attached to their messages: name, type, size, message, explicit generated-file source metadata and any independent retained workbook snapshot. Inputs may be copied from generated files without a prior download. File bytes remain in private object storage and are not included; the private storage key is withheld.",
   },
   {
     domain: "messageAttachmentUpload",
@@ -1221,7 +1269,7 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     prismaModel: "MessageAttachmentUpload",
     state: "included_filtered",
     withheldReason:
-      "Files the user uploaded in the composer and never sent: name, type, size and when. Withheld for the same reason as above: the bytes are in object storage and the storage key is an internal address. Rows here are usually transient -- an upload becomes a message attachment the moment the message is saved.",
+      "Finalized composer uploads, including generated-file copies: name, type, size, binding time, explicit source metadata and retained workbook snapshots. These rows remain after binding to support retries. File bytes are not included and the private storage key is withheld.",
   },
   {
     domain: "imageGeneration",
@@ -1308,6 +1356,23 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "excluded",
     exclusionReason:
       "A sixty-second handshake row that lets a signed-in browser hand the native app one exchange. It holds two digests -- of the grant secret and of the PKCE verifier -- an expiry and a consumed-at, and no content the user wrote. A completed sign-in consumes it and the sweep deletes it, so an export run at any ordinary moment would find nothing to include.",
+  },
+  // --- external inference API (docs/policy/external-api.md) ---------------
+  {
+    domain: "externalApiKey",
+    publicName: "api_keys",
+    prismaModel: "ExternalApiKey",
+    state: "included_filtered",
+    withheldReason:
+      "Each API key the person issued: its name, public prefix, optional credit limit, and when it was created, last used, expires and was revoked. Withheld: the SHA-256 digest of the secret, which is the value the server checks a key against. The secret itself is never stored, so it cannot be exported.",
+  },
+  {
+    domain: "externalApiRequest",
+    publicName: "api_requests",
+    prismaModel: "ExternalApiRequest",
+    state: "included_filtered",
+    withheldReason:
+      "One row per API request: which key and model, whether it streamed, the client's user agent, how it finished and when. Withheld: the digests of the request body and of the Idempotency-Key header, which are duplicate-detection values, and the internal reservation link. No prompt, output, tool argument or image is stored to export; credits are in the credit usage domains.",
   },
   {
     domain: "amuxBoardImportApproval",

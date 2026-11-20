@@ -6,6 +6,8 @@ approvedBy: mposition · approvedAt: 2026-10-15 · 정책 버전: 6
 | 버전 | 승인 | 변경 |
 |---|---|---|
 | (미부여) | (미승인) | 최초 초안 |
+| 6 (버전 유지) | 2026-11-16 mposition | 운영자 결정(대화, 버전 증가 없음): push 규칙의 경로·형태 판정을 없앰 — 분류 안 된 경로, 목록에 없는 최상위 디렉터리, 새 framework 진입 파일, 런타임 로더, 실행 비트, binary, 정책처럼 보이는 테스트 이름, framework 버전 재확인. 돈·비밀값·통제 평면 판정(결정값 경보, 자격증명 도달, 통제 평면 경로·slice, 정책 문서가 이름 댄 테스트)과 symlink·submodule은 남김. diff 편집 budget 1,000 → 5,000. run이 기록한 정지는 GitHub App 신원·namespace 신호(`config_missing`·`unbound_app_pr`·`unbound_app_ref`)만 사람 확인으로 남기고 나머지(`state_mismatch`, 옛 `circuit_open`)는 기록만으로 붙잡지 않음(불일치는 열려 있는 동안만 정지). circuit latch와 armed gate(7일 monitor 확인, 26시간 종료 기록)를 없앰. 결과 불명 자동 조회는 이미 끝나지 않았고(간격 최대 16시간) 그대로. GitHub check-runs·reviews 읽기는 페이지를 넘기고 binding 기록 CHECK는 1 MiB 하나로(migration `engineering_agent_binding_record_size`) |
+| 6 (버전 유지) | 2026-11-16 mposition | 운영자 결정(대화, 버전 증가 없음): 켜짐 동작을 되돌리기만 하던 스위치 `ENGINEERING_AGENT_LEGACY_HALTS`, `ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP`, `TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW`와 어댑터 코드 래치, 그리고 push 규칙이 쓰지 않는 `CONVENTION_VERSIONS`를 없앤다. 엔지니어링 에이전트 전체 정지(`ENGINEERING_AGENT_KILL_SWITCH`)와 게시 경계는 그대로이며(T2 review PR 게시의 `ENGINEERING_AGENT_V22_REVIEW_PR`는 외부 게시 경계라 남긴다, 독립 검토 r-20261116-202111-281f22), 남는 스위치는 `enabled`/`disabled`로 적고 기존 값도 같은 뜻으로 읽는다. |
 | 6 | 2026-10-15 mposition | 자동 개발: fork 게시, 게이트 파일 slice, develop 자동 병합 |
 | 5 | 2026-10-15 mposition | v22 `implement` 게시 경로만: AMUX 작업 검토 단계를 없애고 GitHub에서 관측한 사람의 승인·병합으로 `done`, PR 번호는 게시 capability가 발급된 attempt에 기록, 이미지 증명은 배포 파이프라인이 산출하고 앱이 대조, `t1` 진입은 shadow 기간·판정 건수·비율 대신 일회성 점검 기록과 이 승인(§13 약화, 독립 검토). 판정 과소 관측 시 `shadow` 복귀, push 금지 집합·T1/T2·승인·병합 금지는 그대로 |
 | 4 | 2026-10-07 mposition | 배포 이미지에 실제로 없는 비런타임 파일만 통제 평면 slice에서 제외할 수 있는 좁은 예외. 동일 base commit·tree·운영자가 확인한 이미지 digest와 전체 파일 목록, 앱의 목록 SHA 재계산, 런타임 source SHA·deployment ID 대조, 동적 파일 접근 분석과 배포 후 실측이 모두 필요하다. 앱이 OCI digest를 독립 조회한다고 주장하지 않는다. v22 게시 경로는 Task 실행·기존 Publisher 스위치와 별도인 기본 꺼짐 코드 latch를 둔다. 게시 산출물이 없는 성공에는 `private_result`를 기록한다. 하나라도 없으면 기존 T2 유지 |
@@ -105,9 +107,9 @@ staging 자동 배포도 이 예외에 포함하지 않는다. 새 경로의 코
 의존성이고, 비공개 상세 원문은 받지 않는다.
 
 - **선정 순서는 AMUX가 정한다.** 에이전트는 순서를 바꾸지 않는다.
-- **claim 전에 건너뛴다.** 같은 test·파일을 건드리는 다른 열린 PR이 있거나, 이
-  에이전트의 대기열이 가득 찼거나, 정지·동결·mode `off`면 카드를 claim하지 않고 사유만
-  기록한다. claim 뒤에 거절하면 AMUX의 시도 상한을 소비하므로 건너뜀은 claim 전이어야
+- **claim 전에 건너뛴다.** 같은 test·파일을 건드리는 다른 열린 PR이 있거나, 전체 정지(§12의
+  보안 경계)·그 카드의 보류·동결·mode `off`면 카드를 claim하지 않고 사유만 기록한다. 대기열은
+  상한이 없어 건너뛸 사유가 아니다(운영자 결정 2026-11-15). claim 뒤에 거절하면 AMUX의 시도 상한을 소비하므로 건너뜀은 claim 전이어야
   한다.
 - **GitHub issue는 작업 원천이 아니다.** 첫 초안의 issue 작업 승인, 승인 후보 대기열,
   issue digest 결속은 없어졌다.
@@ -168,16 +170,20 @@ branch 이름은 등급을 정하지 못한다.
 
 | 등급 | 에이전트가 하는 것 | 되돌릴 수 있는 근거 |
 |---|---|---|
-| **T2 초안** | branch를 push하지 않는다. patch와 제안을 **본 앱 테이블**에 제출하고 결정 항목 하나를 만든다 | 저장소 상태가 변하지 않는다. patch는 비공개 DB에만, 크기 상한과 두 번의 secret 검사 뒤에 저장된다 |
+| **T2 초안** | branch를 push하지 않는다. patch와 제안을 **본 앱 테이블**에 제출하고 결정 항목 하나를 만든다 | 저장소 상태가 변하지 않는다. patch는 비공개 DB에만, digest 확인과 두 번의 secret 검사 뒤에 저장된다(우리 쪽 크기 상한은 없다, §11 "게시 쪽 patch") |
 | **T1 PR** | 전용 branch를 push하고 `develop` 대상 PR을 연다. auto-merge 없음 | 병합은 사람이 한다. push와 PR은 공개되어 회수되지 않으므로, 공개 입력에서만 파생된 변경 또는 §2.1의 별도 공개 동의를 받은 v22 구현 Task의 검증된 패치에 한해 §13의 조건을 통과해야 한다. 동의가 있어도 아이디어 원문·실행 brief는 공개하지 않는다 |
 | 무인 병합 | **이 정책에서 부여하지 않는다** | — |
 
 **T2 검토 draft PR (운영자 결정 2026-10-30).** 완성된 작업은 PR로 끝나야 한다는 운영자 지시에 따라,
 v22 `implement` Task의 패치가 T2로 판정되어도 아래를 모두 만족하면 게시 서비스가 전용 branch를 push하고
 `develop` 대상 **draft** PR을 연다. 제목 끝에 `(owner review)`를, 본문에 "Owner review (T2)"와 ready로
-바꾸면 이 변경의 코드가 저장소 secret과 함께 CI에서 돈다는 경고를 단다.
+바꾸면 이 변경의 코드가 저장소 secret과 함께 CI에서 돈다는 경고를 단다. 모든 게시 PR의 제목은 카드의
+표시 코드(`AMUX-FILEREQ-005`)로 시작한다(운영자 요청 2026-11-13). 앱이 카드 행에서 읽어 형식을 검사한
+코드만 쓰고, 아이디어에서 나온 카드 제목은 쓰지 않는다.
 
-- 앱 변수 `ENGINEERING_AGENT_V22_REVIEW_PR`가 정확히 `on`이다(기본 꺼짐).
+- 이 경로는 기본으로 열려 있다(운영자 결정 2026-11-15 — 스위치를 기다리는 T2 patch는 아무도 검토할 수 없는
+  결과였다). 외부 게시 경계라 `ENGINEERING_AGENT_V22_REVIEW_PR`=`off`로 끌 수 있고, 끄면 claim과 push 직전의 마지막
+  확인 모두에서 멈춘다.
 - T1 후보와 같은 결속(run·카드·base·patch digest, `t1`로 시작한 run, 카드의 공개 PR 동의, 게시 스위치)이
   성립하고, base 증거로 결과 tree를 만들 수 있다. 게이트 증거를 읽지 못해 T2가 된 경우도 포함한다.
 - `.github/workflows/` 아래 파일을 바꾸지 않는다. 게시 서비스의 토큰에는 `workflows` 권한이 없어 GitHub이
@@ -185,13 +191,18 @@ v22 `implement` Task의 패치가 T2로 판정되어도 아래를 모두 만족�
 
 이 PR이 draft인 동안에는 어떤 workflow도 돌지 않는다. 모든 `pull_request` workflow는 draft를 건너뛰고,
 `push` workflow는 `main`·`develop`·`to-develop` branch에서만 돈다. 토큰은 workflow 파일을 바꿀 수 없으므로
-이 조건을 PR이 스스로 풀지 못한다. ready 전환은 사람만 한다. CI admission은 `agent/engineering/` branch를
-줄에 넣지 않고, 병합 레인과 PR CI 자동 수정도 이 branch를 다루지 않는다. 검토 항목은 cause key
+이 조건을 PR이 스스로 풀지 못한다. ready 전환은 사람이 하거나, DM이 운영자 확인 대기에서 승인한 PR에 한해 앱이 한다(운영자 결정
+2026-11-13·2026-11-15, §9-10의 두 번째 근거; `TOMVERSE_AMUX_DM_T2_MERGE=enabled`일 때만, 승인한 head·diff 그대로이고 병합 범위
+`TOMVERSE_AMUX_DM_MERGE_SCOPE` 안일 때만). 그 PR은 CI가 통과하면 병합 레인이 `develop`에 병합한다. 사람이 이어 받는 단계는 없고,
+`main`은 사람의 몫이다. CI admission은 `agent/engineering/` branch를 줄에 넣지 않고, PR CI 자동 수정도 이 branch를 다루지 않으며,
+병합 레인은 앱이 넘긴 DM 승인 PR만 다룬다. 검토 항목은 cause key
 `publish_review:<runId>`로 구별한다. DB가 cause key를 바꾸지 못하게 하므로, 재대기나 조회를 거쳐도 일반 PR이
 되지 않는다. 앱은 claim 요청 헤더 `x-engineering-publisher-features`에 `review_draft`를 적은 게시 서비스에만
 검토 항목의 쓰기 claim을 준다. 그래서 이 기능 이전에 배포된 게시 서비스는 이 항목을 ready PR로 열 수 없다.
 PR 대기열 상한(§12), 결과 불명 처리(§10), 병합은 사람이 한다는 규칙은 T1과 같다. 위 조건에 맞지 않는 T2는
-지금처럼 비공개 초안으로 남는다.
+지금처럼 비공개 초안으로 남는다. 열린 T2 초안은 항상(스위치 `TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW`는 2026-11-16에 없앴다)
+DM에 조언 카드로 올라가고(docs/policy/amux-decision-maker.md 결과 검토 항), 그 답은 결정 대기 화면에 참고로만 보인다.
+승인과 거절은 여전히 사람이 한다.
 
 ## 4. push 금지 집합
 
@@ -213,11 +224,15 @@ PR 대기열 상한(§12), 결과 불명 처리(§10), 병합은 사람이 한�
    전부**(`lib/amux/**`, `crates/**`, `apps/**`, `app/api/internal/**`,
    `docs/ops/amux/**`). 에이전트는 자기를 실행시키거나 자기 게이트를 정하는 코드를
    공개 저장소에 올리는 변경을 만들지 않는다.
-5. **텍스트가 아닌 것** — binary, symlink, submodule, 실행 비트 변경, `.git` 경로
-   조각, 절대경로나 상위 경로 참조, 저장소 밖으로의 rename.
+5. **Git의 일반 파일이 아닌 것** — symlink, submodule, 일반 파일·실행 파일이 아닌 mode,
+   `.git` 경로 조각, 절대경로나 상위 경로 참조, 저장소 밖으로의 rename. binary와 실행 비트는
+   그 자체로 T2가 아니다(운영자 결정 2026-11-16). symlink를 남기는 이유: 링크 대상은 빌드나
+   정적 서빙 때 읽히므로 제품 경로의 링크가 자격증명 파일이나 통제 평면 파일을 가리킬 수 있고
+   (`public/x -> /proc/self/environ`은 빌드 환경을 공개한다), 경로 규칙은 그 대상을 보지 못한다.
 
 4번 목록은 **소유권 manifest** 하나로 관리한다. 추적 파일 전부가 제품·통제 평면·
-미분류 중 하나로 분류되고, 미분류는 통제 평면으로 취급한다(= push 금지). 완전성
+미분류 중 하나로 분류된다. 미분류(어느 규칙에도 없는 경로)와 목록에 없는 최상위 디렉터리는
+2026-11-16 운영자 결정으로 T2 사유가 아니다 — 그 전에는 통제 평면으로 취급했다. 완전성
 테스트가 (a) 설계가 이름 댄 모든 구현 경로, (b) 경로에 `agent`·`engineeringAgent`·
 `engineering-agent`·`amux`·`orchestrator`가 든 모든 추적 파일, (c) AMUX 경로 전부가
 통제 평면으로 분류됐는지 확인한다. 이름 패턴만으로는 새 구현의 작명을 예측하지 못하므로
@@ -226,7 +241,12 @@ manifest가 판정 근거이고 이름 패턴은 보조다.
 **통제 평면에 닿는 제품 파일.** 제품 파일이라도 통제 평면이 읽는 설정·등록부·라우트·
 기본값 기호에 닿으면 그 파일 전체가 T2이며, 분석하지 못한 파일이 하나라도 있으면 patch
 전체가 T2다. 런타임 탐색, framework 관례에 따른 자동 등록, 환경변수·AppSetting·
-registry로 통제 평면의 동작을 바꾸는 경로도 같다.
+registry로 통제 평면의 동작을 바꾸는 경로도 같다. 이 판정은 slice 분석이 한다: 통제 평면
+모듈이 불러올 대상을 실행 중에 조립하면 patch 전체가 T2다. push 규칙이 파일 내용과 이름으로
+따로 보던 판정 — 새 framework 진입 파일(route·page·layout·config 등), 런타임 로더(`readdir`·glob·
+비 literal import·`eval`)를 담은 파일, 이름에 `Policy`·`Contract`·`Invariant`가 든 테스트,
+framework 버전 재확인(`CONVENTION_VERSIONS`와 설치 버전의 불일치) — 은 2026-11-16 운영자 결정으로
+없앴다. 새 route라도 `app/api/admin/**`·`app/api/internal/**`처럼 통제 평면 경로면 T2다.
 
 **승인된 좁은 예외 — 배포 이미지에 없는 비런타임 파일.** 2026-10-07 읽기 전용 실측에서
 staging과 production의 앱 이미지 모두 `/app/tests`, `/app/docs`, `/app/lib`와 대표 파일을
@@ -240,7 +260,7 @@ staging과 production의 앱 이미지 모두 `/app/tests`, `/app/docs`, `/app/l
 운영자가 배포마다 붙여 넣던 증명 JSON(배포 ID와 source commit 결속)은 없앴다. 변수를 넣는
 순간 새 배포가 생기고 production은 `main`을 실행하므로 일치할 수 없었다. base 소스는
 `develop` commit의 GitHub tree가 정하고, 이미지 파일이 그 blob OID와 다르면 같은 OID의
-blob을 GitHub에서 읽는다(최대 1000개, 넘으면 T2). 제외 digest는 `.dockerignore` blob OID를
+blob을 GitHub에서 읽는다(개수 상한 없음, 2026-11-15). 제외 digest는 `.dockerignore` blob OID를
 담는다. 제외 경로는 그 규칙과 게시 후보에 결속된 base SHA·patch에서 결정적으로 나온다. Task 실행과 공개 게시의 별도
 코드·운영 스위치는 이 정책 승인만으로 열리지 않는다. `docs/` 전체는 제외 대상이 아니다. 앱이 `docs/ops`의 웹훅 검증 기록을 런타임에
 읽으므로, 문서는 실제 접근을 파일 단위로 검증한 경우에만 별도 제안할 수 있다. 이미지에
@@ -444,7 +464,7 @@ snapshot과 같아야 한다) → 사람이 병합하고 본 앱이 병합을 �
 
 ## 8. 서비스와 자격증명
 
-> **2026-11-06: Runner는 더 이상 코드를 쓰지 않는다.** 모델 호출 모듈과 run 실행 단계를 지웠고, Runner는 묶이지 않은 PR·ref 관측(§12)과 공개 PR 승인·병합 관측 round(§9-10)의 trigger만 하며 AMUX에 `stopped`로만 보고해 아무 작업도 배정받지 않는다. 코딩은 AMUX v22 worker와 idea lane이 맡는다. 모델 key(`ENGINEERING_AGENT_ANTHROPIC_API_KEY`)는 이 변경 이후의 이미지가 읽지 않으며, 그 이미지의 digest를 pin하는 변경에서 IaC 선언과 함께 지운다. 아래 표의 Runner 모델 항목은 당시 계약의 기록이다.
+> **2026-11-06: Runner는 더 이상 코드를 쓰지 않는다.** 모델 호출 모듈과 run 실행 단계를 지웠고, Runner는 묶이지 않은 PR·ref 관측(§12)과 공개 PR 승인·병합 관측 round(§9-10)의 trigger만 하며 AMUX에 `stopped`로만 보고해 아무 작업도 배정받지 않는다. 코딩은 AMUX v22 worker와 idea lane이 맡는다. 모델 key(`ENGINEERING_AGENT_ANTHROPIC_API_KEY`)는 이 변경 이후의 이미지가 읽지 않으며, 2026-11-12 pin된 이미지(`sha256:995e2278…`)가 production에서 돈 것을 확인한 뒤 2026-11-14 IaC 선언에서 지웠다. 다음 apply가 Runner의 변수를 지우고, 그 뒤 공급자 콘솔에서 key를 폐기한다. 아래 표의 Runner 모델 항목은 당시 계약의 기록이다.
 
 에이전트는 GitHub Actions에서 실행되지 않는다. **초안과 게시는 서로 다른 서비스**이며
 자격증명이 겹치지 않는다.
@@ -499,8 +519,13 @@ snapshot과 같아야 한다) → 사람이 병합하고 본 앱이 병합을 �
    금지 집합에 속하면 T2다(**push 금지가 허용 목록을 이긴다**). 다음은 허용 목록에
    들어갈 수 없다 — `.github/**`, `scripts/**`, `AGENTS.md`, `CLAUDE.md`,
    `docs/policy/**`, `docs/release-gates/**`, `docs/ui-contracts/**`, 그리고 계약
-   문서가 경로로 이름 댄 test 파일과 이름에 `Policy`·`Contract`·`Invariant`가 든 test
-   파일. 파일 유형과 변경 크기에도 상한이 있다.
+   문서가 경로로 이름 댄 test 파일. 이름에 `Policy`·`Contract`·`Invariant`가 든 test 파일은
+   2026-11-16부터 이름만으로 T2가 아니다(DM 병합 범위의 이름 규칙은 그대로다,
+   `docs/policy/qa-release-agent.md` 8절 3항). 파일 유형·개수·변경 크기의 상한은 없다(2026-11-15 운영자 결정: 내부 개발 흐름이라
+   크기로 막을 이유가 없다. 그 전에는 파일 5개·300줄·파일당 200 KiB·확장자 7개였다).
+   symlink·submodule·`.gitattributes`가 적용되는 경로는 크기와 무관하게 T2다. binary와 실행
+   파일은 2026-11-16부터 그 자체로 T2가 아니다. 파일 하나의 diff는 5,000 편집까지 정확히 세고,
+   넘으면 새 파일 전체를 추가된 줄로 읽어 결정값 경보가 더 많이 읽는다(2026-11-16, 그 전에는 1,000).
 6. **ruleset**으로 게시 App의 push를 에이전트 branch namespace로 제한하고 force push를
    막는다. 삭제는 정리를 위해 허용한다.
 7. **허용 판정의 authority는 본 앱 하나다.** 게시 서비스는 새 clone에 patch를 실제로
@@ -530,9 +555,11 @@ snapshot과 같아야 한다) → 사람이 병합하고 본 앱이 병합을 �
     5. 그 review가 유효하다 — 보호 branch에 stale-approval dismissal이 **실제로 걸려
        있음을 확인**한 뒤에만 센다. 걸 수 없는 동안에는 결속 snapshot 기록 시각 이후
        제출된 review만 인정한다.
-    6. **현재 base SHA와 현재 diff digest를 관측 시각에 다시 계산해** snapshot과 같다.
+    6. **현재 base SHA와 현재 변경 digest를 관측 시각에 다시 계산해** snapshot과 같다.
        다르면 비승인이고 새 snapshot에 대한 재검증과 새 review가 필요하다.
-       `review.commit_id`도 dismissal도 base만 움직인 경우를 잡지 못한다.
+       `review.commit_id`도 dismissal도 base만 움직인 경우를 잡지 못한다. 변경 digest는 v2(merge
+       base·head commit·head tree, `lib/pullDiffDigestCore.ts`, 운영자 결정 2026-11-18)이고 크기와
+       binary를 가리지 않는다. v2 전에 기록된 snapshot은 v1(diff 바이트의 SHA-256)으로 비교한다.
     7. review 제출 시각이 snapshot 기록 시각보다 뒤다. snapshot을 다시 기록하는
        트랜잭션은 그 시점의 승인 review를 무효 목록에 넣고, 무효가 된 review는 다시
        세지 않는다.
@@ -547,9 +574,77 @@ snapshot과 같아야 한다) → 사람이 병합하고 본 앱이 병합을 �
     진입하지 않는다(§14).
 
     **승인 판정은 병합 전에 확정한다.** 병합 전에 승인이 기록되지 않은 PR의 병합과
-    review 없이 병합된 PR은 비승인이고 정지 대상이다. 관측은 PR 번호 기준 멱등이고
+    review 없이 병합된 PR은 비승인이고, 그 카드의 결정 항목이 된다(아래 예외 둘은 승인이다). 관측은 PR 번호 기준 멱등이고
     확정 뒤 불변이다. 초안 서비스의 자기 보고는 승인 증거가 아니다 — 초안을 만든 쪽이
     승인을 보고하는 것이고, 그 secret이 새면 위조된다.
+
+    **예외: PR 승인 권한자 본인의 병합은 그 자체가 승인이다(운영자 결정 2026-11-12).**
+    운영자 한 사람이 에이전트의 PR을 읽고 직접 병합하므로 별도의 GitHub review는 남지
+    않았고, 그런 병합이 모두 정지 대상이 됐다(2026-11-10 #3702, 2026-11-11 #3747). 다음을
+    모두 만족하는 병합은 승인으로 보고 카드를 완료하며 불일치를 열지 않는다.
+
+    - 병합한 계정이 위 PR 승인 권한자 목록에 있다(숫자 user id로 대조).
+    - 사람 계정의 직접 병합이다. bot 계정이나 GitHub App을 거친 병합은 해당하지 않는다.
+    - base가 `develop`이다. **병합된 head와 diff는 묻지 않는다(운영자 결정 2026-11-15).**
+      사람은 GitHub이 그때 보여 주는 diff를 보고 병합하므로, 검증 뒤 head가 움직였어도 —
+      develop을 branch에 병합해 넣었거나, PR CI 자동 수정이 충돌을 풀거나 CI를 고친 commit을
+      넣었거나, 운영자가 직접 push했어도 — 그 병합이 그 diff의 승인이다. 2026-11-14 #3942·
+      #3944는 자동 수정의 `auto-fix(conflict): merge develop into #N` 뒤 운영자가 병합했는데
+      diff가 검증 때와 달라 `merged_without_approval`이 되었고 에이전트 전체가 약 9시간
+      멈췄다. 앱은 병합 관측의 감사 기록에 실제로 병합된 head(`mergedHeadSha`), binding의 버전으로
+      읽은 변경 digest(`mergedDiffDigest`, 읽지 못했으면 null), 그것이 검증된 변경과 같은지
+      (`mergedHeadVerified`)를 남긴다. v2 binding은 head commit을 묶으므로 움직인 head는 검증된 변경이
+      아니다(v1 binding은 diff가 같으면 검증된 변경으로 본다). 그래서 자동 수정이 바꾼 내용도 승인된 diff로 기록된다.
+      종전 규칙(검증된 head이거나, 바이트 단위로 같은 diff — 운영자 결정 2026-11-13, #3828)으로
+      돌아가는 스위치(`ENGINEERING_AGENT_LEGACY_HALTS`)는 2026-11-16에 없앴다.
+
+    병합 전에 기록된 승인 review는 검증된 변경의 병합과 승인권자 본인의 병합에 그대로 승인이다.
+    **다른 주체(bot·App·다른 계정)가 승인 뒤 움직인 head를 병합했다면 승인이 아니다** — review가
+    승인한 diff와 병합된 diff가 다르다(운영자 결정 2026-11-15, 자동 수정과 승인 흐름의 정합).
+
+    위 조건에 맞지 않는 병합(`main` 병합, bot·App의 병합, 승인권자가 아닌 계정의 병합)이 여는
+    불일치(`unapproved_merge`, `pr_file_mismatch`)는 **그 카드의 결정 항목이다. 에이전트 전체를
+    멈추지 않는다**(§12, 운영자 결정 2026-11-15). 사람이 GitHub에서 그 PR의 병합을 지금 읽어
+    확인하면 닫을 수 있고, 카드는 운영자 정리(완료로 처리)로 끝낸다.
+
+    병합자 계정은 저장하지 않고, 병합 관측의 감사 기록에 이 근거로 승인됐다는 표시만 남긴다. 이
+    예외는 사람의 행위를 승인으로 인정하는 것이며, 에이전트나 게시 App에 새 권한을 주지 않는다 —
+    둘 다 `develop`에 병합할 수 없다는 조건은 그대로다.
+
+    **두 번째 근거: Decision Maker의 승인과 병합 레인의 `develop` 병합(운영자 결정
+    2026-11-13).** 채팅 원문: "develop 병합 권한은 DM에게 승인합니다. main은 안됩니다.",
+    "1~4까지 DM에게 자동으로 하도록 승인합니다." 대상은 **`develop`뿐이고 `main`은 제외**다.
+    운영자 확인 대기의 검토 PR을 DM이 승인하면(`docs/policy/amux-decision-maker.md` §0a-5,
+    §2-11) 앱이 그 PR을 ready로 바꾸고 CI가 통과하면 QA·릴리스 병합 레인이 `develop`에
+    병합한다(`TOMVERSE_AMUX_DM_T2_MERGE=enabled`, 기본 꺼짐). 이 병합은 다음을 모두 만족할
+    때 승인으로 보고 카드를 완료하며 불일치를 열지 않는다. 감사 기록의 `approval_basis`는
+    `dm_approval`이다.
+
+    - 병합 전에 기록된 DM 승인(`AmuxDmOwnerSettlement`의 `t2_pr`·`applied`·`approve` 행)이
+      이 binding과 그 run에 있다.
+    - 병합된 head가 그 행의 `approvedHeadSha`와 같고, 변경 digest가 `approvedDiffDigest`와 그
+      승인의 버전으로 같다(병합된 PR의 merge base는 merge commit의 첫 부모에 대해 읽는다). head가
+      움직였으면 해당하지 않는다(병합 레인은 head를 고정해 병합한다).
+    - base가 `develop`이다.
+    - 이 판정은 이미 일어난 병합의 증거를 읽을 뿐이라 `TOMVERSE_AMUX_DM_T2_MERGE`와 DM kill switch를 보지 않는다. 두 스위치는
+      새 ready와 병합 직전 소비만 막는다. 그래서 레인이 병합한 뒤 스위치를 꺼도 이 병합은 승인으로 판정된다.
+    - 병합이 병합 레인의 것이다: bot(또는 App)의 병합이고, 앱에 남은 병합 레인의 attempt
+      (`QaReleaseMergeAttempt`)가 이 PR·head에 대해 바로 그 병합 commit을 보고했다. 레인이
+      아직 보고하지 않은 attempt가 열려 있거나 diff를 읽지 못하면 그 회차에는 판정하지 않는다.
+
+    fork에서 온 PR은 이 경로를 타지 않는다(head 저장소가 base 저장소와 다르면 ready·레인 목록·레인 병합 모두에서 제외).
+    이 경로는 **변경이 모두 병합 범위 안에 있는 PR만** 탄다(운영자 결정 2026-11-15, `qaReleaseDmMergeAllowed`와
+    `amuxDmT2MergePatchGate`, 범위의 전체 목록은 `docs/policy/qa-release-agent.md` 8절 3항). 앱의 `TOMVERSE_AMUX_DM_MERGE_SCOPE`가 정확히 `blocklist`이면 차단 목록이다(기본 꺼짐, 운영자 결정 2026-11-16): 이 manifest의
+    product 경로 가운데 정책 테스트가 아니고 레인 게이트 파일·되돌릴 수 없는 경로 목록·차단 이름 조각에 걸리지 않는 경로는
+    `lib/**`·`app/api/**`도 받고, 저장된 patch의 바뀐 줄에 사람에게 예약된 값·돈·환경 변수와 스위치·삭제·raw SQL·인증·비밀·메일의
+    단어, 외부 전송·프로세스 실행·DB 질의·파일 쓰기, binary·실행 비트가 없어야 하며, hunk 문맥에 인가·소유권·접근 검사가 없고, 허용 목록 밖의 바뀐 파일 전체(승인된 head에서
+    읽음)에도 그런 단어가 없고 Node 내장 모듈·허용 목록 밖 패키지·사람 몫 모듈을 import하지 않아야 한다. control-plane 경로(§4-4의 에이전트 자신과 AMUX 전부)는 어느 범위에서도 사람에게
+    남는다. 그 밖의 값(값이 없을 때 포함, 기본)에서는 2026-11-13의 허용 목록(테스트, 정책·UI 계약·에이전트
+    지시가 아닌 문서, locale, 컴포넌트, app의 page·layout·loading·error 파일)을 쓴다. 하나라도 밖이면 DM 승인을 기록하지 않고
+    사람에게 넘긴다. 앱이 레인에 승인을 넘길 때마다 현재 PR
+    diff와 파일 목록을 다시 읽어 같을 때만 넘기고, 레인은 승인된 head를 고정해 병합한다. 위 조건에
+    하나라도 맞지 않는 병합은 비승인이고 그 카드의 결정 항목이 된다(에이전트는 멈추지 않는다).
+    `main` 병합과 배포는 사람의 몫이다. 게시 App과 에이전트에는 여전히 병합 권한이 없다 — 병합하는 것은 병합 레인 App이다.
 
 ## 10. 결과를 모를 때
 
@@ -567,6 +662,29 @@ snapshot과 같아야 한다) → 사람이 병합하고 본 앱이 병합을 �
   결정적 판정과 새 capability를 처음부터 다시 만든다(그 사이 base가 움직였을 수 있다).
 - branch를 지우는 경로는 **PR이 없음을 끝까지 읽은 목록으로 확인한 뒤**의 정리뿐이다.
   "PR은 생겼는데 head만 사라진" 상태를 만들지 않는다.
+- 자기 쓰기 직후의 **읽기**(push 뒤 branch ref, PR 생성 뒤 PR 목록)는 GitHub가 아직 그
+  쓰기를 보이지 않을 때 짧게 몇 번 다시 읽는다(최대 5회, 2초 간격). 다시 하는 것은 읽기뿐이고,
+  다른 commit을 가리키는 branch는 기다리지 않는다. 2026-11-11 AMUX-FILEGEN-003은 push 직후
+  ref 읽기가 404를 받아 PR 생성을 건너뛰었다.
+- 결정 항목이 열려 있는 결과 불명 게시 항목은 **다시 조회하지 않는다.** 사람이 그 결정을
+  확인하면 다음 회차가 한 번 조회하고, 그래도 모르면 결정 항목 하나를 새로 연다. 같은 게시
+  항목의 결정 항목을 확인하면 그 항목의 이전 결정 항목도 함께 확인 처리된다(감사 기록에 목록).
+  예외(운영자 결정 2026-11-14, AMUXFLOW/B1; 2026-11-15부터 늘 켜짐, 2026-11-16에
+  `ENGINEERING_AGENT_UNKNOWN_AUTO_LOOKUP` 스위치를 없앴다): 열린 결정 항목이 기다림을 채운
+  게시 항목은 사람 확인 없이 다시 조회한다. 조회는 읽기뿐이다.
+  기다림은 30분이고, 그 게시 항목이 연 결정 항목 하나마다 두 배가 된다(최대 32배, 16시간).
+  횟수 상한은 없다(2026-11-15 운영자 결정. 그 전에는 결정 항목 3개에서 멈추고 사람을 기다렸다). 조회가 결과를 확정하면
+  (`lookup_no_prior_write`, `lookup_found_result`) 그 항목의 열린 결정 항목은 함께 확인 처리되고
+  `work_item_settled` 감사 기록에 `closedDecisionIds`로 남는다.
+- **branch는 있고 PR이 없으며 branch head가 소비된 capability가 허락한 commit 그대로인 경우**
+  (`branch_without_pull_request`), 사람은 결정 항목에서 "이 브랜치로 PR 열기"를 승인할 수 있다.
+  승인은 그 게시 항목의 다음 claim 하나에만 실리고 claim이 가져간다. 게시 서비스는
+  `pull_request_resume` 기능을 밝힌 경우에만 그 claim을 받고, 쓰기와 같은 스위치(mode·freeze·
+  halt, v22 게시 latch, 검토 draft 기능)가 열려 있어야 한다. 게시 서비스는 branch와 PR 목록을
+  다시 읽고 commit digest가 같고 PR이 0개일 때만 run 표식을 넣은 PR을 **한 번** 연다(운영자 검토
+  항목은 draft). push는 하지 않는다. 결과를 모르면 다음 조회에 맡기고, 4xx면 새 결정 항목이
+  열린다. 사람이 branch를 지우면 다음 조회는 "이전 쓰기 없음"이 되어 대기로 돌아가지만, 소비된
+  capability는 돌아오지 않으므로 새 판정이 필요하다.
 - **본 앱 내부 route의 결과 불명은 GitHub 조회로 풀지 않는다.** 모든 내부 요청은
   idempotency key를 싣고, 상태는 `accepted → in_progress → committed | aborted`다. 결과를
   모르는 호출자는 재시도하지 않고 읽기 전용 상태 route로 묻는다. `in_progress`는
@@ -585,14 +703,88 @@ snapshot과 같아야 한다) → 사람이 병합하고 본 앱이 병합을 �
 로컬 worker는 변경 파일의 정규 경로·Git mode·새 blob의 원본 바이트(삭제에는 바이트 없음)만
 상한 안에서 제출한다. 앱은 고정된 `develop` base commit의 전체 tree를 GitHub에서 직접
 읽고 제출된 변경 파일을 그 tree에 대응시켜 결과 tree 목록과 hash를 계산한다. 앱은
-patch 본문을 파싱·적용·실행하지 않는다. 제출에 빠진 변경이나 거짓 내용이 있더라도
+patch 본문을 실행하지 않는다(파싱·적용의 유일한 예외는 아래 재구성이다). 제출에 빠진 변경이나 거짓 내용이 있더라도
 별도 Publisher가 실제 patch를 적용해 얻은 tree hash가 기대값과 다르면 원격 push 전에
 거절한다. 결과가 불완전하거나 바이트·mode·경로·base를 검증할 수 없으면 T1은 거절한다.
-**v4 구현 현황:** 현재 v22
-구현은 기존 `100644` 일반 파일의 본문 수정만 완전한 변경 바이트로
-제출한다. 추가·삭제·mode 변경은 전송 계약의 가능 형태라도 아직 구현되지 않았으므로
-게시 후보가 되지 않고 비공개 결과로만 남는다. 삭제의 무바이트 표현을 지원한다고
-간주하거나 T1로 분류하지 않는다.
+**v4 구현 현황(2026-11-15 운영자 결정 반영):** 앱은 게시 후보를 저장된 patch 본문
+하나로만 만든다(아래 재구성). 예전 sidecar가 본문 옆에 함께 보내는 파일 5개·48 KiB의 변경
+바이트는 저장은 하지만 후보에 쓰지 않는다. `git diff --binary`가 일반 파일·실행 파일·symlink에
+쓰는 모든 형태를 후보로 만든다: 수정, 새 파일·삭제(빈 파일 포함), mode 변경(`100755` 포함),
+이름 변경·복사(sidecar는 `--no-renames`라 이름 변경을 삭제와 새 파일로 쓴다), binary
+파일(literal·delta). 새로 생기는 경로는 결과 tree에서 비어 있어야 하고, 위의 디렉터리는
+기존 tree이거나 새로 생기며(앱이 그 tree 항목을 만든다), 삭제로 빈 디렉터리는 tree에서
+사라진다. 새로 생기는 이름이 결과의 다른 이름과 대소문자·Unicode 정규형만 다르면
+`path_conflict`로 거절한다. 거절하는 것은 다시 만들 수 없는 것뿐이다: submodule 변경,
+데이터 없이 쓴 binary(`Binary files … differ`), git 형식이 아닌 본문, 비정규 경로, 그리고
+바뀐 파일 내용에서 secret 패턴이 보이는 patch(binary는 바이트 그대로 검사한다). T2 초안도
+공개 draft PR이 될 수 있으므로 secret은 거절이다. binary 파일은 patch 안에서 압축된 base85
+글자라 본문 검사로는 보이지 않으므로, 저장 전 두 검사(sidecar의 로컬 검사, 앱의 증거 저장 검사)와
+Publisher의 push 전 검사가 모두 그 바이트를 풀어 검사한다(새 파일·교체는 전체 바이트, delta는
+삽입하는 바이트). 풀 수 없는 binary 구간이 있는 patch는 저장하지 않는다. `.gitattributes`가 적용되는 경로, 중첩
+`.gitattributes`, submodule처럼 tree 검증이 지원하지 않는다고 보고하는 변경은 거절하지 않고
+tier gate의 `unsupported_tree_change` finding으로 T2가 된다. binary·symlink·실행 파일·삭제도
+§4의 규칙대로 tier 판정을 받는다(symlink는 T2, binary와 실행 파일은 2026-11-16부터 그 자체로 T2가 아니다).
+
+**크기 상한(2026-11-15 운영자 결정, patch는 2026-11-18에 다시).** 우리 쪽 크기·개수 상한은 두지 않고, patch가 지나는
+시스템의 한계만 둔다(`lib/amux/v22PatchLimit.ts`). 파일 하나는 GitHub의 100 MiB다(push
+거부선이자 blob API 한도). patch 하나에는 2026-11-18부터 우리 쪽 상한이 없다(아래
+"게시 쪽 patch" 문단, `docs/policy/amux-v22-result-transfer.md`). 그 전에는 4 MiB였다: 정산 요청이 `proxy.ts`를 지나고, Next.js는
+proxy를 지나는 요청 본문을 10 MB까지 버퍼한다(`proxyClientMaxBodySize`, 기본값 유지: 올리면
+모든 공개 경로가 더 큰 본문을 메모리에 받는다). JSON escape로 두 배가 된 patch와 Task 결과가
+그 안에 들어가야 했다. 예전의 64 KiB patch 증거, 파일 20개·200 KiB·합계 2 MiB 후보 한도,
+blob 읽기 200 KiB 기본값·2 MiB 상한, tree 20,000 항목, 바뀐 blob 50개·2 MiB, tier 분석의
+파일당 2 MiB·합계 128 MiB·GitHub 추가 읽기 1,000개는 모두 없앴다(GitHub이 거절한 읽기는
+판정이 아니라 다음 회차의 재시도다). blob은 base64 JSON 대신 원본(raw media type)으로,
+상한 안에서 흘려 읽고 hash를 검증한다. tree는 GitHub이 잘리지 않았다고 답한 목록(최대
+100,000 항목)만 받는다. DB의 두 CHECK(`AmuxV22TaskPatch_digest_check`의 `byteLength`,
+`EngineeringAgentWorkItem_patchBody_check`)는 그날 4 MiB로 넓혔고, 뒤의 것은 2026-11-18에 지웠다. tier gate의 T1 한도(`PUSH_LIMITS`: 파일 5개·300줄·파일 200 KiB)는 patch 크기
+상한이 아니었다. 그 T1 한도와 확장자 목록도 같은 날 없앴다(§9-5). sidecar는 patch 본문 옆에
+파일 바이트를 더 보내지 않고, v52 정산은 저장된 파일 대신 patch 본문이 적는 모든 경로(이름
+변경의 양쪽 포함)를 실행 inventory와 대조한다. 게시 서비스의 cycle은 40분(claim lease 45분
+안), runner의 cycle은 60분까지 돈다(그 전 8분·10분·20분). Railway는 이전 실행이 끝나지 않으면
+다음 예약 실행을 건너뛰므로 cycle은 겹치지 않는다. 그대로 둔 것은 GitHub PR 파일 목록
+3,000개(GitHub API 자체의 한계)다. PR binding의 diff 1 MiB는 2026-11-18 운영자 결정으로 없앴다:
+binding은 v2 변경 digest(merge base·head commit·head tree, `lib/pullDiffDigestCore.ts`)이고 크기와
+binary를 가리지 않는다. `PULL_DIFF_DIGEST_MAX_BYTES`는 v2 전에 기록된 v1 binding을 비교할 때와 AMUX
+검토 화면의 diff 표시에만 남는다(표시하지 못한 diff는 GitHub에서 검토하고, 승인은 변경 digest에 묶인다).
+
+**게시 쪽 patch(2026-11-18 운영자 결정).** 규약은 `docs/policy/amux-v22-result-transfer.md` 4절이다.
+본 앱은 patch를 크기로 거절하지 않는다(`patch_too_large`와 후보 재구성의 `patch_over_limit`은
+없앴고, 옛 초안의 `patch_over_limit`은 배포 뒤 다시 판정할 사유로 읽기만 한다).
+publish 항목은 열 때 patch의 UTF-8 바이트를 `patchBytes`(BYTEA, STORAGE EXTERNAL)에 한 번
+쓰고, 텍스트(`patchBody`)는 다른 독자를 위해 그대로 둔다. CHECK
+`EngineeringAgentWorkItem_patchBytes_check`가 두 길이를 같게, work item guard가 insert 때 바이트를
+텍스트의 UTF-8과 같게 붙잡고 그 뒤로는 바꾸지 못하게 한다(migration
+`20261118120100_engineering_agent_patch_bytes`). 기능은 claim 요청 헤더
+`x-engineering-publisher-features`의 `patch_chunks`와 claim 답 최상위의 `"appFeatures":["patch_chunks"]`로
+맞춘다. `patch_chunks`를 밝힌 게시 서비스의 쓰기 claim은 patch 대신 `patchBytes`(바이트 수)와
+`patchChunkCount`를 싣고, 게시 서비스는 `POST /api/internal/engineering-agent/publish/patch`에서 4 MiB
+조각을 순서대로 받아 붙인 뒤 길이와 `sha256 == patchDigest`를 확인하고 UTF-8(fatal)로 푼다. 그
+route는 state `claimed`·claimMode `write`·같은 fencing token·lease가 남은 claim에만 답하고(아니면 409
+`claim_not_live`), `patchBytes`가 없는 옛 항목은 텍스트를 잘라 준다. 조각이 claim과 다르면
+`revalidation_refused`(`content_check_failed`), 조각을 받지 못하면 `refused_before_write`
+(`patch_read_failed`, 새 capability로 다시 판정)다. 그 뒤의 secret 검사·적용·tree 확인은 그대로다.
+`patch_chunks`를 밝히지 않은 게시 서비스는 patch를 inline으로 받고, 4 MiB
+(`ENGINEERING_AGENT_LEGACY_INLINE_PATCH_MAX_BYTES`)를 넘는 항목은 받지 않는다. runner의 `run/draft`
+요청 본문 상한은 proxy의 10 MiB(`AMUX_V22_PROXY_BODY_MAX_BYTES`)다.
+
+**저장된 patch에서 변경 바이트 재구성(2026-11-10 도입, 2026-11-15 확장).** 앱은 같은 고정
+base commit에서 GitHub로 읽은 기존 blob에 patch를 **메모리 안에서 정확히** 적용해 변경
+바이트를 만든다. hunk는 적힌 위치에서 문맥까지 그대로 맞아야 하고(offset·fuzz 없음), binary
+delta는 base blob에 git delta 형식 그대로 적용하며, base blob과 결과 blob의 id가 patch의
+`index` 줄과 같아야 한다(새 파일은 base blob을 읽지 않는다). 프로세스 실행·git 호출은 없다
+(§11: 앱은 patch를 실행하지 않는다). 같은 patch를 Publisher가 `git apply --cached`로 적용해
+얻은 tree hash가 앱의 기대값과 다르면 push하지 않는다. 테스트는 모든 형태에서 앱의 tree가
+git의 tree와 같은지 실제 git으로 대조한다. 이 결과는 T1 권한이 아니며 tier 판정(§4)과
+Publisher의 tree hash 대조는 그대로다.
+
+tier 라운드가 후보를 만들지 못했거나 증거를 읽지 못해 비공개로 남긴 v22 초안은, 배포 뒤
+처음 도는 라운드가 한 번 `tier_pending`으로 되돌린다(2026-11-15 운영자 결정). 대상은
+"다시 판정" 버튼과 같은 조건의 초안 가운데 그 프로세스가 시작되기 전에 마지막으로 바뀐 것뿐이라,
+같은 코드가 남긴 초안을 거듭 읽지 않는다. 이 시스템 동작도 감사 기록을 남긴다. 운영자는
+Admin › 엔지니어링 Agent 대기열의 "다시 판정"으로도 `tier_pending`에 되돌릴 수 있다(감사 기록,
+보여 준 digest·base에 결속). 어느 쪽도 게시하지 않으며, 다음 라운드가 스위치·v22 latch·카드
+공개 PR 동의·대기열·tier를 모두 다시 확인한다.
 
 - 제출된 blob의 hash가 목록의 object id와 같아야 하고, 바뀌지 않은 항목은 base 목록과
   같아야 한다. 변경 파일 집합은 blob만이 아니라 mode·type까지 비교해 얻으므로 mode 변경·
@@ -628,17 +820,70 @@ patch 본문을 파싱·적용·실행하지 않는다. 제출에 빠진 변경�
   `outcome`을 `private_result`로 끝낸다. 이는 비공개 Task 결과만 있고
   `EngineeringAgentWorkItem` 초안이나 공개 PR은 없다는 뜻이다. AMUX 쪽은 사람 검토
   상태로 이동하며, `t2_draft`나 T1 게시로 집계하지 않는다.
+- **성공한 결과는 버려지지 않는다(운영자 결정 2026-11-15).** 실행 시작 때 게시 run을 열 수
+  없으면(`v22_publication_skipped`: 정지, mode off, 게시 스위치, 공개 PR 동의 없음, develop
+  읽기 실패 등) Task는 그대로 실행되고, 검토를 통과한 patch는 `AmuxV22TaskPatch`에 남는다. 이것이
+  **게시 대기(kept result)**다: 그 카드에서 가장 최근에 `succeeded`로 `review`에 간 시도이고, patch
+  본문이 남아 있고, 그 시도의 engineering run이 없다. 사람이 그 결과를 retry·block으로 되돌렸으면
+  (시스템이 아닌 해결자) 게시 대기가 아니다. runner의 관측 round(`observe/pull-requests`)가 매번
+  최대 3개를 실행 시작과 정산이 했을 일 그대로 다음 경로에 태운다 — 그 시도의 run을 열고(같은
+  admission 판정: 전체 정지·그 카드의 보류), 정산이 여는 산출물을 열고, run을 그 결과로 끝낸다.
+  mode `t1`에서 카드의 공개 PR 동의가 있으면 tier 판정을 기다리는 초안 → PR 또는 T2 초안이고, 동의가
+  없으면 바로 소유자의 T2 초안(공개 쓰기가 없는 내부 결정 항목)이다. 사람은 동의가 생긴 뒤 그 초안을
+  tier round로 돌려보낼 수 있다(`t1` run의 초안이므로). mode `shadow`에서는 기다린다: 지금 run을 열면
+  shadow run으로 영구 기록되고, shadow run의 산출물은 DB가 게시 항목을, 재판정이 초안을 거절하므로
+  `t1`로 돌아와도 PR이 될 수 없다. 그 밖에 기다리는 것은 에이전트가 꺼졌거나(mode `off`) 동결됐거나
+  AMUX가 정지했거나 run admission이 거절할 때뿐이다. 기다리는 동안에도 사람은 운영자 확인 대기
+  화면에서 정리할 수 있다. 기다리거나 실패한 결과는 10분 동안 뒤로 미뤄 가장 오래된 것이 다른 결과의
+  차례를 막지 않게 한다. 게시할 때 그 카드에 아직 열린 DM 정리(settlement)가 있으면 취소한다
+  (`kept_result_published`) — 그 답에는 다시 실행이 있다. 시도를 다 써 `blocked`가 된 카드도 보존된 결과가 있으면 `review`로 돌아가
+  그 PR을 기다린다. 카드의 검토 대상 시도는 "가장 최근의 시도"가 아니라 "가장 최근에 성공해
+  `review`로 간 시도"다(뒤의 실패한 시도는 검토가 없다; `lib/amux/reviewPullRequest.ts`,
+  `lib/amux/reviewMergeObserved.ts`). 막힌 상태가 오래 갈 것이 분명해도 배정을 미루지 않는다:
+  막는 조건은 대개 한 시간 안에 풀리고, 미루면 worker가 놀고 이미 시작된 run의 결과는 어차피
+  보존해야 한다. 보존은 행 하나이고 시도를 쓰지 않는다. 이 시도들은 DM에게 다시 실행을
+  묻지 않는다(`docs/policy/amux-decision-maker.md`). v22 게시(`TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION`)가
+  꺼져 있으면 보존된 결과를 게시하지 않고
+  종전대로 사람·DM 검토에 남긴다.
 - engineering run은 AMUX 실행 시도 하나와 1:1이고 AMUX 실행 시작과 같은 트랜잭션에서
-  만들어진다. 두 쪽 상태가 어긋나면 한쪽을 다른 쪽에 맞춰 고치지 않고 **불일치 항목**을
-  만들어 사람에게 넘긴다. 사람의 조치는 양쪽을 한 트랜잭션에서 잠그고 다시 읽은 뒤에만
-  실행되며, 잠금 순서는 AMUX가 쓰는 순서(실행 시도 → 카드 → 전달)를 따르고 engineering
-  행을 그 뒤에 둔다. AMUX가 자기 잠금 순서를 바꾸면 이 순서도 함께 바뀌어야 한다.
+  만들어진다(게시 대기 결과를 나중에 게시하는 run은 이미 끝난 시도에 열리고 같은 트랜잭션에서
+  끝난다). 두 쪽 상태가 어긋나면 한쪽을 다른 쪽에 맞춰 고치지 않고 **불일치 항목**을
+  만들어 그 카드를 붙잡고 사람에게 넘긴다. 사람의 조치는 양쪽을 한 트랜잭션에서 잠그고 다시 읽은 뒤에만
+  실행되며, 잠금 순서는 AMUX가 쓰는 순서(실행 시도 → 감사 체인 → 카드 → 전달,
+  `lib/adminAudit.ts` `takeAuditChainLock`)를 따르고 engineering 행을 그 뒤에 둔다.
+  AMUX가 자기 잠금 순서를 바꾸면 이 순서도 함께 바뀌어야 한다.
 - 게시한 PR의 번호를 AMUX 카드가 받지 않아 생긴 불일치(C형, `review_pr:`)는 사고 격상
   외에, **GitHub가 그 항목 자신의 현재 PR을 병합으로 보고하면** 사람이 닫을 수 있다(운영자
   결정 2026-11-06). 이때 병합 관측을 바인딩에 기록해 승인 관측기가 같은 PR을 다시 올리지
   않게 하고, 에이전트 모드는 바꾸지 않는다. GitHub를 읽지 못하면 닫지 않는다.
-- patch 본문은 크기 상한과 **두 번의 secret 검사**(초안 측 1회, 본 앱 저장 전 1회)를
-  통과해야 저장된다. 탐지되면 저장하지 않는다. 본 앱은 patch를 텍스트로만 저장·표시한다.
+- v22 `implement` Task(v4 카드)의 행은 review PR 번호를 가질 수 없다. v4 평문 제외 CHECK가
+  `reviewSpecialty`를 null로 두고, 사람 검토 형태 CHECK가 그래서 `requiresHumanReview`를
+  false로 두며, review PR CHECK는 그것이 true여야 번호를 받는다. 그래서 publisher가 연 PR의
+  번호는 같은 트랜잭션에서 쓰는 **engineering 바인딩이 보유**하고, AMUX는 카드를 바꾸지 않고
+  감사 항목 하나(`held_by: engineering_binding`)만 남긴다(`lib/amux/reviewPullRequest.ts`).
+  병합 관측은 그 카드의 attempt에 묶인 현재 바인딩의 PR일 때만 카드를 끝낸다
+  (`lib/amux/reviewMergeObserved.ts`). 이전에는 `review_not_required`로 거절되어 게시한 PR마다
+  C형 불일치가 열리고 에이전트 전체가 멈췄다(2026-10-30 #3147, 2026-11-11 #3702). 다른
+  카드의 거절은 그대로다.
+- **카드가 이미 넘어간 뒤에 열린 PR은 정지 사유가 아니다(운영자 결정 2026-11-12).** PR을 여는
+  사이에 운영자가 카드를 직접 정리했거나 더 새로운 시도가 카드를 가져가면 AMUX는 번호를 받지
+  않는다(`task_not_in_review`, `not_the_workers_review`). 이때도 결과는 정산되고 바인딩에
+  묶이지만, C형 불일치 대신 그 run의 **결정 항목** 하나(`review_pr_moved:<게시 항목>`)를 열어
+  사람에게 알리고 에이전트는 계속 돈다. draft PR은 다른 에이전트 PR처럼 사람이 병합하거나 닫는다.
+  그 밖의 거절과 닫힌 adapter(`adapter_closed`)는 종전대로 C형 불일치다.
+- 같은 C형 불일치는 사람이 **"카드에 PR 번호 기록"**으로도 닫을 수 있다(운영자 결정
+  2026-11-11). 이 조치는 그 run의 현재 바인딩 하나의 PR 번호를 AMUX의 review 대상 PR 번호
+  writer(`recordAmuxReviewPullRequest`)로 카드에 기록하고, 같은 트랜잭션에서 불일치를 닫는다.
+  writer가 감사 체인과 카드를 잠그고 다시 확인한 뒤(review 상태, 이 run의 시도가 최신이고 같은
+  worker, 다른 번호 없음) 번호를 쓰며, 붙은 조치가 run·불일치 항목·바인딩을 잠그고 다시 읽는다.
+  어느 쪽이든 거절하면 아무것도 쓰지 않는다. AMUX writer를 부르는 adapter 호출이므로 adapter
+  게이트(mode 포함)가 열려 있어야 한다. 번호를 처음 기록하는 순간 카드에 사람 검토 표시가 없으면
+  켜고 검토 분야가 비어 있으면 기본값으로 채운다(시도 정산과 같은 규칙). 다만 v4 카드의 행은
+  어떤 쓰기로도 표시할 수 없으므로(위 문단), v22 `implement` Task에서는 이 조치도 번호를 바인딩이
+  보유한 것으로 기록하고 불일치를 닫으며, 바인딩이 보유하지 않는 v4 카드는 `review_not_required`로
+  거절한다.
+- patch 본문은 digest 확인과 **두 번의 secret 검사**(초안 측 1회, 본 앱 저장 전 1회)를
+  통과해야 저장된다(크기로는 거절하지 않는다, 2026-11-18). 탐지되면 저장하지 않는다. 본 앱은 patch를 텍스트로만 저장·표시한다.
   결정 후 보존 기간이 지나면 **본문만 지우고 digest와 결정 기록은 남긴다.** 등록 제안은
   본문을 저장하지 않고 digest만 둔다.
 - 에이전트의 외부 텍스트·patch 본문을 AMUX의 자유 텍스트 컬럼에 넣지 않는다. AMUX
@@ -677,20 +922,57 @@ patch 본문을 파싱·적용·실행하지 않는다. 제출에 빠진 변경�
 
 ## 12. 대기열·정지·알림·비용
 
-- **대기열에는 상한과 만료가 있다.** 열린 PR과 남은 branch가 있는 결속, 미결정 결정
-  항목(T2 초안·불일치·반복 실패·관측 실패·등록 결과 불명)이 셈 대상이다. 상한은 PR 대기열
-  **8**, 결정 대기열 **8**이고, 첫 T1 기간에 PR 대기열을 줄이는 제한은 없다(운영자 결정
-  2026-11-09). 진행 중인 run은 아직 만들 수 있는 PR이나 결정 때문에 두 대기열에 하나씩
-  셈하므로 동시에 진행할 수 있는 run은 8개다. 상한은 본 앱 DB의 run·work item trigger가
-  강제한다(에이전트의 판정에만 기대지 않는다). 상한에 닿으면 카드를 claim하지 않는다.
-  등록은 소유자 대기 항목이 아니지만 §2.2의 상한을 따른다. 결속은 관측 round가 PR이 닫히면
-  `closed`로, branch가 사라지면 `pruned`로 옮겨 셈에서 뺀다. 병합된 PR은 승인 관측기가
-  병합을 기록한 뒤에만 옮긴다(2026-11-09: 이 이동을 부르는 곳이 없어 병합된 PR 하나가
-  첫 T1 창의 PR 자리를 계속 차지했다).
-- **정지**는 세 가지다 — 결속과 맞지 않는 게시 App 명의의 열린 PR, 결속과 맞지 않는
-  에이전트 namespace의 원격 ref, 그리고 반복 실패로 열린 차단기. 정지 중에는 claim과
-  등록이 없고, 만료 정리와 관측만 계속한다. **해제는 Admin 화면의 확인 행위뿐이다**
-  (권한 + step-up + 감사).
+- **대기열은 세기만 하고 상한도 만료도 없다(운영자 결정 2026-11-15: "내부 개발용
+  Flow입니다. 제한을 줄 이유가 없습니다. 이런 제한을 다 찾아 없애 주세요.").** 열린 PR과
+  남은 branch가 있는 결속, 미결정 결정 항목(T2 초안·불일치·반복 실패·관측 실패·등록 결과
+  불명)을 세고, 진행 중인 run은 아직 만들 수 있는 PR이나 결정 때문에 두 대기열에 하나씩
+  센다. 그 수는 Admin 화면에 보일 뿐 claim을 막지 않는다 — PR 8·결정 8의 상한(운영자 결정
+  2026-11-09)은 한 사람의 느린 검토가 다른 모든 카드를 멈춰 세웠다. run·work item trigger도
+  더 이상 세지 않는다(migration `engineering_agent_run_guard_uncapped`,
+  `engineering_agent_work_item_guard_uncapped`). 대기 항목은 오래되어도 만료되지 않고 처리될
+  때까지 남는다(미claim 게시 14일·결정 7일 만료는 호출처 없이 남아 있던 코드와 함께 지웠다).
+  나이는 화면의 생성 시각으로 본다. 앱도 admission에서 상한을 걸지 않는다(8·8 상한을 되살리던
+  `ENGINEERING_AGENT_LEGACY_HALTS`는 2026-11-16에 없앴다). 등록은 소유자
+  대기 항목이 아니지만 §2.2의 상한을 따른다. 결속은 관측 round가 PR이 닫히면 `closed`로,
+  branch가 사라지면 `pruned`로 옮긴다. 병합된 PR은 승인 관측기가 병합을 기록한 뒤에만
+  옮긴다.
+- **에이전트 PR에 일어난 일은 그 카드 하나의 일이다(운영자 결정 2026-11-15).** 사람이나
+  자동화가 push·develop 병합·rebase·충돌 해결·병합·닫기·branch 삭제를 해도 에이전트 전체를
+  멈추지 않는다.
+  - 상태 불일치 항목과 attempt가 끝난 활성 run은 **그 카드만** 붙잡는다: 같은 카드의 새
+    run과 같은 run의 게시 쓰기만 거절된다(AMUXFLOW/B2를 기본 동작으로). `review_pr:` 불일치는
+    run이 없지만 원인 키가 가리키는 게시 항목의 카드를 붙잡는다.
+  - 결속된 run의 branch나 PR이 검증 head와 다른 head에 있으면 그 카드의 PR이 움직인
+    것이지 결속 없는 쓰기가 아니다. 병합은 §9-10의 관측기가 판정한다.
+  - 같은 실패가 반복되어 걸던 차단기(30일 안 3회)는 없앴다(2026-11-15 기본 꺼짐, 2026-11-16 코드
+    삭제 — kill switch도 되살리지 않는다). 그것이 세던 정지는 아래 목록의 것(각자 풀리는 조건이
+    있다)이거나 카드 하나의 보류이고, 계속 실패하는 카드는 자기 시도 상한이 붙잡는다. 불일치의
+    재발 한도(2회 뒤 사고 격상만)도 쓰이지 않던 채로 지웠다.
+- **전체 정지는 진짜 보안 경계에만 남는다**(코드: `ENGINEERING_AGENT_GLOBAL_HALTS`).
+  1. `config_missing` — 게시 App의 식별 정보가 설정되지 않아 앱이 자기 쓰기와 남의 쓰기를
+     구별할 수 없다.
+  2. `unbound_app_pr`·`unbound_app_ref` — 에이전트 namespace에 어느 run·결속·capability도
+     설명하지 못하는 PR이나 branch가 있다. 앱이 발급하지 않은 쓰기 권한의 사용이다. 정지는
+     그 PR 번호나 ref를 이름으로 남기고(`engineeringAgent.observedHalt`의 `subject`, 감사
+     기록의 `subjectPrNumber`·`subjectRef`), **원인이 설명되면 스스로 풀린다** — 다음 관측이
+     결속 없는 것을 하나도 보지 않으면(병합됨, 닫힘, branch 삭제, 결속됨) runner가 그렇게
+     보고하고 앱이 `engineering_agent.halt_cleared` 감사 기록과 함께 푼다. 사람의 확인으로도
+     풀린다. 관측기 round는 이 정지 중에도 돈다(읽고 기록할 뿐이고, 그 병합 기록이 정지를
+     설명할 수 있다).
+  3. 어느 카드에도 묶이지 않은 상태 불일치 — 대신 붙잡을 카드가 없다.
+
+  자격 증명 노출은 kill switch와 사고 처리의 몫이다: patch의 secret은 저장 전에 거절되고,
+  새어 나간 key는 기다리지 않고 폐기한다. 정지 중에는 claim과 등록이 없고 관측만 계속한다.
+  전체 정지 변수 `ENGINEERING_AGENT_KILL_SWITCH`는 `enabled`로 켜고 `disabled`이거나 비어 있으면 꺼진다
+  (이미 들어 있는 `1`·`true` 등 다른 값도 계속 켜짐이고, `0`·`false`는 계속 꺼짐이다).
+  run이 기록한 정지(§11)는 위 1·2의 신호(`config_missing`, `unbound_app_pr`, `unbound_app_ref`)만
+  Admin 화면의 확인으로 푼다(권한 + step-up + 감사). 기록된 정지는 새 run의 시작을 막으므로 "다음
+  정상 run"이 풀 수 없고, 그래서 사람 확인이 남는 것은 이 셋뿐이다(운영자 결정 2026-11-16). run이
+  기록한 `state_mismatch`와 옛 `circuit_open`은 기록만으로 붙잡지 않는다 — 불일치는 열려 있는 동안
+  실시간 판정으로 정지하고, 해소되면 다음 판정이 깨끗하다.
+  2026-11-15 결정(카드 단위 보류, 움직인 head, 스스로 풀리는 정지, 승인권자 병합의 diff, 대기열
+  상한, 결과 보존)을 종전 동작으로 돌리던 kill switch `ENGINEERING_AGENT_LEGACY_HALTS`는 2026-11-16에
+  없앴다. 같은 날 없앤 차단기, armed gate, 위 셋 밖의 사람 확인도 되살리지 않는다.
 - **정지 복구 도구**는 운영자가 로컬에서 돌린다. 읽기 전용 계획을 먼저 내고, 항목이
   소수를 넘으면 사고로 처리한다. 사고 종결은 게시 App key 폐기 또는 설치 해제, 모드
   `off`, 기록이며, 재진입은 새 전용성 기록과 **이 정책의 새 버전 승인** 뒤다.
@@ -698,9 +980,9 @@ patch 본문을 파싱·적용·실행하지 않는다. 제출에 빠진 변경�
   monitor는 본 앱·배포 플랫폼·GitHub와 일정·코드·자격증명·상태를 공유하지 않는다.
   **정지 중에는 성공 신호를 보내지 않는다.** 모드가 `off`·동결·킬 스위치여도 회차가
   끝까지 돌았다면 liveness 신호는 보낸다 — monitor는 서비스가 살아 있는지를 본다.
-- 모드를 `off`에서 켜는 action은 **armed gate**를 지난다. 두 서비스의 마지막 회차가
-  최근이어야 하고(서비스 자기 보고이므로 지표일 뿐이다), 운영자가 두 monitor가
-  활성이고 알림 채널이 연결됐음을 monitor 화면에서 확인한 기록이 최근이어야 한다.
+- 모드를 `off`에서 켤 때 거치던 **armed gate**(두 서비스의 마지막 회차가 26시간 안, 운영자의
+  monitor 확인 기록이 7일 안)는 없앴다(운영자 결정 2026-11-16). 서비스의 회차 종료 기록은 Admin
+  화면에 보이는 지표로만 남고, monitor 확인 기록 route와 버튼은 지웠다.
 - **알림에는 링크와 enum만 싣는다.** patch·로그·탐지된 문자열을 싣지 않는다.
 - **비용은 별개 namespace다.** LLM 비용은 사용자 크레딧·플랜·Chat 공급자 예산과
   섞이지 않고 전용 key의 공급자 측 지출 한도로 묶는다. 일일 회차 수는 본 앱이 DB에서
@@ -759,7 +1041,8 @@ patch 본문을 파싱·적용·실행하지 않는다. 제출에 빠진 변경�
 22. 모델 입력의 외부 텍스트는 상한으로 결정적으로 자르며 원문 전체를 저장하지 않는다.
 23. 실행 이미지는 배포 플랫폼에서 빌드하지 않고 digest로 고정해 배포한다. 게시 App
     key는 build 단계에 존재하지 않는다.
-24. **본 앱은 patch를 적용하거나 실행하지 않는다**(§11).
+24. **본 앱은 patch를 적용하거나 실행하지 않는다**(§11). 예외는 §11의 저장 patch 재구성
+    하나다 — 메모리 안의 정확 일치 적용이며 결과 blob id가 patch가 적은 id와 같아야 한다.
 25. 내부 route는 §8의 인증 규율을 따르고, 두 서비스의 secret은 서로의 route를
     통과하지 못한다.
 26. 에이전트의 외부 텍스트·patch 본문을 AMUX의 자유 텍스트 컬럼에 넣지 않는다(§11).
@@ -874,8 +1157,13 @@ Task의 게시 경로**(버전 2)뿐이다. engineering Agent 자신의 카드 �
    응답한 뒤 대기 초안 하나를 판정한다. T1이면 초안을 `publish_promoted` 사유로 닫고, 같은
    패치로 그 run의 publish 항목과 단회 capability를 연다. DB는 끝난 run의 publish 항목을
    이 경우에만, PR 대기열에 자리가 있을 때만 받는다. 자리가 없으면 판정하지 않고 초안은
-   다음 회차까지 대기로 남는다. T1이 아니거나 근거를 읽지 못하면 그 사유를 단 보통 T2
-   초안으로 둔다. 판정 뒤 쓰는 순간 스위치·동의·대기열이 바뀌어 거절되면 `publish_refused`
+   다음 회차까지 대기로 남는다. T1이 아니면 그 사유를 단 보통 T2 초안으로 둔다. 근거 읽기가
+   예외로 끝나면(GitHub·DB에 닿지 못함, GitHub rate limit 등) 판정이 아니므로 초안은 대기로
+   남아 다른 대기 초안 뒤로 가고, 5분부터 실패마다 두 배씩(최대 6시간) 기다린 뒤 다시 읽는다.
+   몇 번 실패해도 비공개로 굳히지 않는다(2026-11-15 운영자 결정. 그 전에는 3회째 예외에서
+   `tier_evidence_unavailable` 사유의 보통 T2 초안이 됐다). 각 회차의 `v22_tier_promotion` 로그는 예외의 class·code·단계(권한 확인,
+   patch 읽기, candidate 재구성, base 근거, 재확인)만 적고 메시지·patch·파일 내용은 적지 않는다.
+   판정 뒤 쓰는 순간 스위치·동의·대기열이 바뀌어 거절되면 `publish_refused`
    사유의 보통 T2 초안이 된다. 살아 있는 capability 없이 대기 중인 publish 항목(claim되기
    전에 capability가 만료됐거나, claim이 capability를 쓴 뒤 push 전 거절 또는 "이전 쓰기
    없음" 조회로 대기로 돌아온 항목)은 각 회차가 대기 초안보다 먼저 다시 판정해(§10), 같은

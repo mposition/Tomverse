@@ -345,7 +345,7 @@ export const ENGINEERING_AGENT_SERVICES: readonly AgentRunnerService[] = [
     service: "Engineering Agent Runner",
     image: {
       reference: ENGINEERING_AGENT_IMAGE,
-      digest: "sha256:465e6eb26f88abd08dde8294b51608b509a74c5ff60b48ec26ab01164a871a4d",
+      digest: "sha256:40af2b3b937ca9a12012dedeb299cd0b0a54ffdfa98f440d078e82a6b71344ca",
     },
     startCommand: "node --experimental-strip-types scripts/engineering-agent-runner.mjs",
     cronSchedule: "*/30 * * * *",
@@ -353,7 +353,6 @@ export const ENGINEERING_AGENT_SERVICES: readonly AgentRunnerService[] = [
       production: [
         "ENGINEERING_AGENT_APP_URL",
         "ENGINEERING_AGENT_RUNNER_SECRET",
-        "ENGINEERING_AGENT_ANTHROPIC_API_KEY",
         "ENGINEERING_AGENT_GITHUB_READ_TOKEN",
         "ENGINEERING_AGENT_RUNNER_DEADMAN_URL",
       ],
@@ -364,7 +363,7 @@ export const ENGINEERING_AGENT_SERVICES: readonly AgentRunnerService[] = [
     service: "Engineering Agent Publisher",
     image: {
       reference: ENGINEERING_AGENT_IMAGE,
-      digest: "sha256:465e6eb26f88abd08dde8294b51608b509a74c5ff60b48ec26ab01164a871a4d",
+      digest: "sha256:40af2b3b937ca9a12012dedeb299cd0b0a54ffdfa98f440d078e82a6b71344ca",
     },
     startCommand: "node --experimental-strip-types scripts/engineering-agent-publisher.mjs",
     cronSchedule: "*/10 * * * *",
@@ -633,8 +632,10 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     },
   },
   {
-    // The Scout walker (docs/policy/product-research-agent.md §10, §13): once a
-    // day at 18:00 UTC (04:00 Brisbane) it captures the public pages, generated
+    // The Scout walker (docs/policy/product-research-agent.md §10, §13): every
+    // hour it checks whether the app has a build it has not tried yet (one real
+    // turn, scoutRunMode in lib/productResearchScoutBrowserPolicy.mjs); once a
+    // day at 18:00 UTC (04:00 Brisbane) it also captures the public pages, generated
     // files and catalogue and posts each to its environment's app, which asks
     // the model. Its first run is also the check that Chromium keeps its
     // sandbox in a Railway container. dev first, where it sends to the dev
@@ -643,7 +644,7 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     key: "product_research_scout",
     service: "Product Research Scout",
     startCommand: "npm run agent:product-research-scout",
-    cronSchedule: "0 18 * * *",
+    cronSchedule: "0 * * * *",
     dockerfile: {
       path: "docker/product-research-scout.Dockerfile",
       watchPatterns: [

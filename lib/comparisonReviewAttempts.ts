@@ -27,3 +27,19 @@ export function createReviewAttemptQueue<Candidate extends { id: string }, Outco
     async drain() { await Promise.all(all); },
   };
 }
+
+/**
+ * Whether a failed reviewer generation is worth sending again. A request that
+ * hit its own deadline is not: the same reviewer on the same prompt timing out
+ * once is evidence it will time out again, and the retry doubled the wait
+ * before a run fell back to primary_only (two 45 s deadlines, ~90 s).
+ */
+export function shouldRetryReviewGeneration(error: unknown): boolean {
+  let current = error;
+  for (let depth = 0; current && depth < 4; depth += 1) {
+    const name = (current as { name?: unknown }).name;
+    if (name === "TimeoutError" || name === "AbortError") return false;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return true;
+}

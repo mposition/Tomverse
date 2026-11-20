@@ -1,7 +1,21 @@
 ﻿"use client";
 
+import { bindJourneyFirstSource, captureJourneyDraft, connectedDraftScope, invalidateJourneyDraft, observeJourneyWorkspace, type ConnectedJourney } from "@/lib/connectedJourneyAnalytics";
+import { ReviewChatHandoffProvider, ReviewChatAction } from "@/components/chat/ReviewChatHandoff";
+import { AvailableCreditsProvider } from "@/components/credits/UsageMeter";
+import { ReviewAnalysisActions } from "@/components/chat/ReviewAnalysisActions";
+import { ReviewChatDraftReceiver } from "@/components/chat/ReviewChatDraftReceiver";
+import { REVIEW_CHAT_PARAM, type ReviewChatSource } from "@/lib/reviewToChat";
+
+import { useResearchPreview } from "@/components/chat/useResearchPreview";
+
+import { requestChatLocationIntent } from "@tomverse/api-client";
+import { chatLocationSession, prepareFreshChatLocationIntent, type ChatPanelLocationIntent, type FreshChatLocationPreparation, type RouterLocationTurn } from "@/lib/chatLocationClient";
+import { selectedMcpConnection } from "@/lib/mcpConnectorSelection";
+
 import { ChatPwaControls } from "@/components/chat/ChatPwaControls";
 import type { PendingSendEcho } from "@/components/chat/ChatMessageList";
+import { GeneratedArtifactRevisionContext, useGeneratedArtifactRevision } from "@/components/chat/GeneratedArtifactRevisionContext";
 
 import { ReviewUnsupportedProviders } from "@/components/chat/ReviewStudioChrome";
 import { useReviewWorkspace, useWorkspaceAppearance } from "@/components/chat/useReviewWorkspace";
@@ -13,6 +27,7 @@ import { flushSync } from "react-dom";
 import React, {
   useState,
   useEffect,
+  useEffectEvent,
   useCallback,
   useLayoutEffect,
   useMemo,
@@ -26,11 +41,12 @@ import { MobileChatShell } from "@/components/chat/MobileChatShell";
 import { VoiceConversationControl } from "@/components/chat/VoiceConversationControl";
 import type { VoiceAnswerReceipt } from "@/components/chat/voiceConversationClient";
 import { TomverseWordmark } from "@/components/chat/TomverseWordmark";
-import { prepareChatContextBundle } from "@/lib/chatContextBundleClient";
+import { prepareChatContextBundle, type ChatContextPreparationInput } from "@/lib/chatContextBundleClient";
 import { prepareChatSendInputs } from "@/lib/chatSendPreparation";
 import { boundedLatencyMs, createLatencyStages } from "@/lib/responseLatencyStages";
 import type { ClientLatencyStages } from "@/lib/responseLatencyCore";
 import { consumePendingChatProfile } from "@/lib/assistantProfileReturn";
+import { useAccountMemorySettings } from "@/components/chat/useAccountMemorySettings";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { chatAttachmentErrorCopyKey } from "@/lib/chatAttachmentErrorCopy";
 import { saveResponseAsFile, saveVerifiedResponseAsFile } from "@/lib/browserDownload";
@@ -47,6 +63,10 @@ import {
   GUEST_MAX_ATTACHMENT_BYTES,
   type ChatAttachmentCapabilities,
 } from "@/lib/guestAttachmentPolicy";
+import {
+  CHAT_MAX_ATTACHMENTS_PER_MESSAGE,
+  CHAT_MAX_ATTACHMENT_BYTES,
+} from "@/lib/chatAttachmentLimits";
 import { SourceGroundingBadge } from "@/components/chat/SourceGroundingBadge";
 import { dispatchAppToast } from "@/lib/appToast";
 import { toSourceGrounding } from "@/lib/sourceGrounding";
@@ -110,10 +130,9 @@ import {
   type PromptRefinerProductChatDecision,
   type PromptRefinerProductScope,
 } from "@/lib/promptRefinerProductApiContract";
-import { promptRefinerCopy } from "@/lib/promptRefinerCopy";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { useSession } from "next-auth/react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import {
   CONVERSATION_HANDOFF_PARAM,
   conversationHandoffHref,
@@ -133,7 +152,12 @@ import {
   type ContinuationRowNaming,
 } from "@/lib/continuationTitleContext";
 import { continuationTitleCopy } from "@/components/chat/continuationTitleCopy";
+import { ContinuationPassageCard } from "@/components/continuations/ContinuationPassageCard";
+import { encodePassages, type Passage } from "@/lib/continuationPassages";
 import { useContinuationSource } from "@/components/continuations/useContinuationSource";
+import { useReviewContinuationDraftAccess, useReviewContinuationHandoff } from "@/components/continuations/useReviewContinuationHandoff";
+import { reviewHandoffReferencesAvailable } from "@/lib/reviewContinuationHandoffClient";
+import { reviewContinuationHandoffCopy } from "@/locales/reviewContinuationHandoff";
 import { useContinuationLauncher } from "@/components/imports/useContinuationLauncher";
 import { reviewPrefillHref } from "@/lib/chatReviewHandoff";
 import {
@@ -147,24 +171,32 @@ import { continuationTimelineMessages } from "@/lib/continuationTimelineMessages
 import { CHAT_WORKSPACE_PATH, REVIEW_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
 import { guestAutoClientExecutionState } from "@/lib/guestAutoClientExecution";
 import { chatRuntimeKey, getChatRuntimeSnapshot, isChatRuntimeStreaming } from "@/lib/chatStreamRuntime";
-import { chatCreateRefusalCopyKey, chatDraftMatchesSubmission, chatPreparedSendIsCurrent, newWorkspaceDraftModels } from "@/lib/chatWorkspaceEntry";
+import { CHAT_INITIAL_SELECTION_MODE_HEADER, chatCreateRefusalCopyKey, chatDraftMatchesSubmission, chatPreparedSendIsCurrent, newWorkspaceDraftModels } from "@/lib/chatWorkspaceEntry";
 import { ImageGenerationWorkspace } from "@/components/images/ImageGenerationWorkspace";
 import { IMAGE_GROUP_MAX_MODELS_BOUNDS } from "@/lib/imageGroupLimits";
 import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
 import { askChatImageTurn } from "@/lib/chatImageIntentClient";
 import { IMAGE_EDIT_SOURCE_MEDIA_TYPES } from "@/lib/imageGenerationPricing";
 import type { ChatImageTurnRequest } from "@/lib/chatImageTurnCore";
-import { reviewImageTurnPlan, type ReviewImageTurns } from "@/lib/reviewImageTurn";
+import {
+  reviewImageDraftModelId,
+  reviewImageProviders,
+  reviewImageTurnPlan,
+  type ReviewImageTurns,
+} from "@/lib/reviewImageTurn";
 import { useImageModelCatalog } from "@/components/images/ImageModelCatalogProvider";
-import { DEFAULT_IMAGE_MODEL_ID, imageModelOwner } from "@/lib/imageModelRegistry";
+import { imageModelOwner } from "@/lib/imageModelRegistry";
 import type { ImagePreset } from "@/lib/imageGenerationPricing";
 import { ChatStarterGallery } from "@/components/chat/ChatStarterGallery";
 import {
+  chatStarterCatalogFor,
   type ChatStarterEntry,
   type StarterCapability,
 } from "@/lib/chatStarterCatalog";
 import {
+  CHAT_STARTER_MAX_VISIBLE,
   selectVisibleStarterCards,
+  STARTER_ORDER_COOKIE,
   type StarterLockReason,
 } from "@/lib/chatStarterAvailability";
 import {
@@ -695,6 +727,8 @@ function ChatShellSkeleton({ label }: { label: string }) {
  * and persistence for itself.
  */
 type GlobalSubmitOptions = {
+  researchDurable?: boolean;
+  researchMode?: "preview";
   submittedAtMonotonicMs?: number;
   /** The image-intent call already answered for this exact draft. */
   imageIntentChecked?: boolean;
@@ -737,6 +771,7 @@ type GlobalSubmitOptions = {
     };
     preparedDraftSend?: PreparedDraftSend;
     draftSettlement?: { settled: boolean };
+    freshLocation?: FreshChatLocationPreparation;
   };
   /**
    * The models this one send is for, when that is not the whole selection.
@@ -764,6 +799,7 @@ type BlankChatAutoSendAuthority = {
   profileId: string | null;
   preparedDraftSend: PreparedDraftSend;
   draftSettlement: { settled: boolean };
+  freshLocation?: FreshChatLocationPreparation;
 };
 
 export function ChatPageClient({
@@ -772,8 +808,13 @@ export function ChatPageClient({
   guestDefaultModelId,
   guestBrandTrioModelIds = GUEST_BRAND_TRIO_MODEL_IDS,
   imageGenerationEnabled = false,
+  generatedArtifactRevisionEnabled = false,
   chatImageIntentEnabled = false,
   chatLocationIntentEnabled = true,
+  chatParallelPreparationEnabled = false,
+  chatRouterLocationFusion = false,
+  existingChatRouterLocationFusion = false,
+  chatFreshLocationPreparationEnabled = false,
   chatImageEditEnabled = false,
   reviewEasyAvailable = false,
   voiceInputEnabled = false,
@@ -787,6 +828,7 @@ export function ChatPageClient({
   chatStarterKnownFlagKeys = [],
   chatStarterEnabledFlagKeys = [],
   chatStarterCapabilities = [],
+  chatStarterOrderSeed = null,
   initialConversationId = null,
   mountedSurface: routeSurface = "workspace",
   continuationProduct,
@@ -799,6 +841,7 @@ export function ChatPageClient({
   guestBrandTrioModelIds?: readonly string[];
   /** The image generation opt-in flag, resolved server-side in page.tsx. */
   imageGenerationEnabled?: boolean;
+  generatedArtifactRevisionEnabled?: boolean;
   /**
    * Whether a chat send first asks the Auto router's model (POST
    * /api/chat/image-intent) and hands an image request to the image
@@ -808,6 +851,10 @@ export function ChatPageClient({
    */
   chatImageIntentEnabled?: boolean;
   chatLocationIntentEnabled?: boolean;
+  chatParallelPreparationEnabled?: boolean;
+  chatRouterLocationFusion?: boolean;
+  existingChatRouterLocationFusion?: boolean;
+  chatFreshLocationPreparationEnabled?: boolean;
   /** A send with a photo may be an edit of it (IMAGE_EDIT_ENABLED). */
   chatImageEditEnabled?: boolean;
   reviewEasyAvailable?: boolean;
@@ -882,6 +929,11 @@ export function ChatPageClient({
    */
   chatStarterCapabilities?: readonly StarterCapability[];
   /**
+   * Chat's starter order for this browser session, chosen by the server
+   * (`STARTER_ORDER_COOKIE`). Null keeps registry order.
+   */
+  chatStarterOrderSeed?: number | null;
+  /**
    * The conversation this mount opens with, when the URL named one.
    *
    * `/continuations/[conversationId]` is the only caller today: a continuation
@@ -944,6 +996,9 @@ export function ChatPageClient({
   // right one does not push it again (a repeated push of the current path is
   // a history entry that goes nowhere, and Back then appears broken).
   const pathname = usePathname();
+  const reviewChatMarker = useSearchParams().get(REVIEW_CHAT_PARAM);
+  const reviewChatFreshIntentRef = useRef(false);
+  useLayoutEffect(() => { if (reviewChatMarker && mountedSurface === "chat") reviewChatFreshIntentRef.current = true; }, [reviewChatMarker, mountedSurface]);
     const { t, setLang, lang } = useLanguage();
   const formatCopy = (key: string, values: Record<string, string>) =>
     Object.entries(values).reduce(
@@ -1167,12 +1222,26 @@ export function ChatPageClient({
     pendingCreatedDraftScope.identityKey === identityKey
       ? null
       : currentChatId;
+  const [confirmedReviewHandoff, setConfirmedReviewHandoff] = useState<{ identityKey: string | null; conversationId: string } | null>(null);
+  const hasReviewHandoffMarker = routeSurface === "continuation" && mountedSurface === "workspace" && (
+    (confirmedReviewHandoff?.identityKey === identityKey && confirmedReviewHandoff?.conversationId === currentChatId) ||
+    conversations.some(conversation => conversation.id === currentChatId && conversation.reviewHandoff === true));
+  const reviewHandoffAccess = useReviewContinuationDraftAccess(
+    identityKey,
+    hasReviewHandoffMarker ? currentChatId : null,
+    hasReviewHandoffMarker
+  );
+  const isReviewHandoff = Boolean(reviewHandoffAccess.preview) || hasReviewHandoffMarker;
+  const durableComposerEnabled = (mountedSurface === "chat" || isReviewHandoff) &&
+    identityKey?.startsWith("account:") === true;
   const {
     activeDraftKey,
     draftText: inputValue,
+    draftHydrated,
     draftAttachments: attachments,
     setDraftText: setInputValue,
     setDraftAttachments,
+    updateDraft,
     readDraft,
     hasDraft,
     discardDraft,
@@ -1190,9 +1259,14 @@ export function ChatPageClient({
   } = useConversationDrafts(
     composerDraftConversationId,
     identityKey,
-    mountedSurface === "chat" && identityKey?.startsWith("account:") === true,
-    mountedSurface === "chat" ? "chat" : "review"
+    durableComposerEnabled,
+    mountedSurface === "chat" ? "chat" : "review",
+    isReviewHandoff ? "review-handoff" : "chat"
   );
+  useEffect(() => {
+    observeJourneyWorkspace(connectedDraftScope(mountedSurface, activeDraftKey), currentChatId, identityKey,
+      isInitialConversationResolved && (mountedSurface !== "chat" || draftHydrated));
+  }, [mountedSurface, activeDraftKey, currentChatId, identityKey, isInitialConversationResolved, draftHydrated]);
   /*
     The first real ChatInput caller is deliberately fixture-only. It proves
     state ownership, exact-draft binding and decision focus in the complete
@@ -1218,8 +1292,6 @@ export function ChatPageClient({
     useState<PromptRefinerProductScope | null>(null);
   const [promptRefinerProductSelection, setPromptRefinerProductSelection] =
     useState<"none" | "accepted" | "kept_original">("none");
-  const [promptRefinerSkipAutoScope, setPromptRefinerSkipAutoScope] =
-    useState<string | null>(null);
   const [promptRefinerMountId] = useState(() => crypto.randomUUID());
   const promptRefinerScopeSequenceRef = useRef(0);
   const promptRefinerScopeAbortRef = useRef<AbortController | null>(null);
@@ -1713,6 +1785,13 @@ export function ChatPageClient({
   );
   const [showGuestSignInPrompt, setShowGuestSignInPrompt] = useState(false);
   /**
+   * The starter card whose lock opened the guest sign-in prompt, as its
+   * `labelKey`. Set only by a locked starter click and cleared when the prompt
+   * closes, so the prompt can name the outcome the person chose and say that
+   * sign-in is the requirement, instead of the generic catalogue pitch.
+   */
+  const [guestSignInStarterLabelKey, setGuestSignInStarterLabelKey] = useState<string | null>(null);
+  /**
    * A send that has been started but not yet handed to the panels, and the
    * conversation it started from. Read only by the shells' content-state
    * derivation; it changes nothing about credits, preflight, admission,
@@ -1722,6 +1801,7 @@ export function ChatPageClient({
     token: string;
     identityKey: string | null;
     identityEpoch: number;
+    selectionModeRequest: number;
     originConversationId: string | null;
     recovery?: "message-receipt-unknown";
   };
@@ -1738,6 +1818,11 @@ export function ChatPageClient({
   // The browser-realm fence is adopted in the layout effect below. Rendering
   // (including SSR) never reads or mutates module-global identity state.
   const [identityEpoch, setIdentityEpoch] = useState(0);
+  const workspaceMountedRef = useRef(false);
+  useLayoutEffect(() => {
+    workspaceMountedRef.current = true;
+    return () => { workspaceMountedRef.current = false; };
+  }, []);
   const submitIdentityFenceRef = useRef({ identityKey, epoch: identityEpoch });
   useLayoutEffect(() => {
     const adopted = adoptActiveChatIdentity(identityKey);
@@ -1768,6 +1853,9 @@ export function ChatPageClient({
     submittedAtMonotonicMs?: number;
     preparationTimings?: ClientLatencyStages;
     preparationReadyAtMonotonicMs?: number;
+    sourcePassages?: string;
+    preparedLocationIntent?: ChatPanelLocationIntent;
+    routerLocationTurn?: RouterLocationTurn;
     id: string;
     text: string;
     chatId: string;
@@ -1793,6 +1881,8 @@ export function ChatPageClient({
      */
     modelIds: string[];
     attachments: ChatAttachment[];
+    researchDurable?: boolean;
+    researchMode?: "preview";
     deepResearchDepth?: "quick" | "standard" | "deep";
     /**
      * Web search for this send only, when the web-search offer made it. Absent
@@ -1828,7 +1918,10 @@ export function ChatPageClient({
     panelRef: billingSuccessDialogRef,
     initialFocusRef: billingSuccessCloseRef,
   });
+  const [reviewResultRevision, setReviewResultRevision] = useState(0);
+  const [compareSummarySource, setCompareSummarySource] = useState<ReviewChatSource | null>(null);
   const [compareSummary, setCompareSummary] = useState<{
+    id: string;
     title: string;
     result: {
       commonConclusions: Array<{
@@ -2030,13 +2123,8 @@ export function ChatPageClient({
     promptRefinerFixtureOffered || promptRefinerProductExplicitOffered;
   const promptRefinerProductMode =
     !promptRefinerFixtureOffered && promptRefinerProductExplicitOffered;
-  // What `inherit` currently resolves to, so the menu can say which way that
-  // choice points rather than only that it follows something. Fetched once
-  // per signed-in session; "on" until it answers, matching the server's own
-  // default so the label cannot briefly claim memory is off when it is not.
-  const [accountMemoryDefault, setAccountMemoryDefault] = useState<"on" | "off">(
-    "on"
-  );
+  const { settings: accountMemorySettings, refresh: refreshAccountMemorySettings } =
+    useAccountMemorySettings(sessionUserId);
   // §14. Two pieces of state, because a profile can be chosen before the
   // conversation that will carry it exists: `assistantProfile` is what the
   // server says this conversation is bound to, and `pendingProfileId` is what
@@ -2083,6 +2171,8 @@ export function ChatPageClient({
   // on failure it stays visible until the user dismisses it (no failure
   // callback is threaded up from ChatApp today), which is disclosed in the
   // chip's own copy rather than silently claimed as a real cancel.
+  const [pickedSource, setPickedSource] = useState<{owner:string;chat:string;parts:Passage[]}|null>(null);
+  const pickedRef = useRef<typeof pickedSource>(null);
   const [isDeepResearchPending, setIsDeepResearchPending] = useState(false);
   // The model the cap dialog is open for, or null. Set only when a Deep
   // Research run needs a slot the selection has no room for.
@@ -2305,7 +2395,7 @@ export function ChatPageClient({
   const contextRepreflightInputsRef = useRef(
     new Map<
       string,
-      { conversationId: string | null; modelIds: string[]; prompt: string }
+      ChatContextPreparationInput
     >()
   );
   /**
@@ -2586,6 +2676,12 @@ export function ChatPageClient({
     mountedSurface: "workspace" | "continuation" | "chat";
   } | null>(null);
   useLayoutEffect(() => {
+    const owner = newChatAutoPreparationRef.current?.sendAuthority;
+    if (owner?.freshLocation && (
+      owner.selectionTicket !== conversationSelectionTicketRef.current ||
+      !sameStringList(owner.modelIds, latestModelSettingsRef.current.models) ||
+      !sameStringList(owner.disabledIds, latestModelSettingsRef.current.disabled)
+    )) owner.freshLocation.cancelUnlessHandedOff();
     committedAutoSendScopeRef.current = {
       identityKey,
       conversationId: currentChatId,
@@ -2624,6 +2720,7 @@ export function ChatPageClient({
     return () => {
       conversationNavigationAttemptRef.current = allocateConversationNavigationAttempt();
       pendingCreatedChatRef.current = null;
+      newChatAutoPreparationRef.current?.sendAuthority?.freshLocation?.cancelUnlessHandedOff();
       newChatAutoPreparationRef.current = null;
       newChatAutoDraftSendRef.current = null;
       newChatAutoUnknownRef.current = null;
@@ -2681,7 +2778,7 @@ export function ChatPageClient({
         // A blank Tomverse Chat defaults to Smart Adaptive when the server
         // confirms the current account is eligible. This is display intent,
         // not routing authority: first Send still has to create the owned Chat
-        // and read/PATCH its canonical selectionMode before any paid path.
+        // with its confirmed canonical selectionMode before routing an answer.
         const explicitOverride = blankChatDefaultModeOverrideRef.current;
         const preferredMode = explicitOverride?.identityKey === identityKey &&
           explicitOverride.selectionTicket === selectionTicket
@@ -3170,21 +3267,6 @@ export function ChatPageClient({
     },
     []
   );
-  const handlePromptRefinerExecution = useCallback((input: {
-    promptId: string | null;
-    execution: "applied" | "original";
-    mode: "explicit" | "auto";
-  }) => {
-    if (input.mode !== "auto" || input.execution !== "applied" ||
-        !input.promptId || promptPayload?.id !== input.promptId ||
-        promptPayload.chatId !== currentChatId || !promptRefinerProductScope) return;
-    const copy = promptRefinerCopy[lang] ?? promptRefinerCopy.en;
-    const skipScope = `${promptRefinerProductScope.scopeId}:${promptRefinerProductScope.epoch}`;
-    showToast(copy.autoApplied, "info", {
-      label: copy.useOriginalNext,
-      onClick: () => setPromptRefinerSkipAutoScope(skipScope),
-    });
-  }, [currentChatId, lang, promptPayload, promptRefinerProductScope, showToast]);
 
   useEffect(() => {
     showToastRef.current = showToast;
@@ -3859,6 +3941,7 @@ export function ChatPageClient({
   }, [openGuestImportPicker]);
 
     const applyConversationSettings = useCallback((data: {
+        reviewHandoff?: boolean;
         selectedModels?: unknown;
         storedSelectedModels?: unknown;
         disabledPanels?: unknown;
@@ -3876,7 +3959,15 @@ export function ChatPageClient({
         // confirmed read counts (`targetChatId` is what tells the two apart):
         // the optimistic seeding from the conversation list is this client's
         // own guess and must not invalidate a request made against it.
-        if (targetChatId) conversationSettingsRevisionRef.current += 1;
+        if (targetChatId) {
+          conversationSettingsRevisionRef.current += 1;
+          setConfirmedReviewHandoff(data.reviewHandoff === true
+            ? { identityKey: identityNamespaceKey(identityNamespaceRef.current), conversationId: targetChatId }
+            : null);
+          if (data.reviewHandoff === true) {
+            setConversations(rows => rows.map(row => row.id === targetChatId ? { ...row, reviewHandoff: true as const } : row));
+          }
+        }
         const storedModeUnknown = storedSelectionModeUnknownRef.current;
         if (
           targetChatId &&
@@ -4481,6 +4572,7 @@ export function ChatPageClient({
         conversationSelectionTicketRef.current = allocateConversationSelectionTicket();
         pendingCreatedChatRef.current = null;
         setPendingCreatedDraftScope(null);
+        newChatAutoPreparationRef.current?.sendAuthority?.freshLocation?.cancelUnlessHandedOff();
         newChatAutoPreparationRef.current = null;
         newChatAutoDraftSendRef.current = null;
         newChatAutoUnknownRef.current = null;
@@ -4516,11 +4608,13 @@ export function ChatPageClient({
         }
         localComparisonResponsesRef.current.clear();
         latestLocalComparisonPromptRef.current = null;
-    // Asking for a new chat is an explicit request for a blank composer, so
-    // the conversation this lands on gives its draft up. Every *other*
-    // conversation keeps its own -- coming back to one still restores what
-    // was being written there.
-    let blankedDraftScope: string | null = currentChatIdRef.current;
+    // Coming back to the new-chat screen from another conversation is a
+    // navigation, not a reset: the question (and attachments) left unsent
+    // there is restored, exactly like any other conversation's draft. Only
+    // pressing "new" while already on that blank screen asks for it to be
+    // emptied. `undefined` means nothing is blanked; `null` is the new-chat
+    // draft itself.
+    let blankedDraftScope: string | null | undefined = undefined;
     if (isGuestMode) {
       const existingCurrent = conversations.find((c) => c.id === currentChatIdRef.current);
       if (
@@ -4532,6 +4626,7 @@ export function ChatPageClient({
         // piling up another empty conversation (repeatedly clicking "New
         // Chat" used to create one every time, with no cap).
         removeGuestConversationStorage(existingCurrent.id);
+        blankedDraftScope = existingCurrent.id;
         const resetChat = {
           ...existingCurrent,
           title: t("sidebar.autoGeneratedNewRoom"),
@@ -4556,9 +4651,9 @@ export function ChatPageClient({
           setConversations((prev) => [newGuestChat, ...prev]);
         setCurrentChatId(newGuestChat.id);
         currentChatIdRef.current = newGuestChat.id;
-        blankedDraftScope = newGuestChat.id;
       }
     } else {
+        if (currentChatIdRef.current === null) blankedDraftScope = null;
         currentChatIdRef.current = null;
         setCurrentChatId(null);
         // A new chat starts from the saved new-conversation combination, not
@@ -4568,7 +4663,6 @@ export function ChatPageClient({
             models: clampSelectedModels(uniqueStrings(userDefaultModelIds)),
             fallbackModelId: APP_DEFAULTS.defaultModelId,
         }));
-        blankedDraftScope = null;
     }
 
     setDisabledPanels([]);
@@ -4577,7 +4671,7 @@ export function ChatPageClient({
     setIsDeepResearchPending(false);
     setIsImageDraftActive(false);
     setReviewImageModelId(null);
-    discardDraft(blankedDraftScope);
+    if (blankedDraftScope !== undefined) discardDraft(blankedDraftScope);
       setPromptPayload(null);
       setIsInitialConversationResolved(true);
 
@@ -4602,7 +4696,20 @@ export function ChatPageClient({
             // A Review continuation has no in-conversation image mode
             // (docs/policy/external-conversation-continuation.md §5.1).
             if (!inConversationImagesAllowed) return;
-            setReviewImageModelId(modelId ?? options?.modelIds?.[0] ?? DEFAULT_IMAGE_MODEL_ID);
+            // A fixed default model outlived its catalogue row: GPT Image 2
+            // was disabled and the image mode it armed could never send. The
+            // fallback is an active model, preferably of a provider already
+            // answering here.
+            const draftModelId = modelId ?? options?.modelIds?.[0] ??
+                reviewImageDraftModelId(imageCatalog.models, [...new Set(selectedModels.flatMap(id => {
+                    const model = getModel(id); return model ? [model.provider] : [];
+                }))]);
+            if (!draftModelId) {
+                setInputValue(draftText);
+                setFocusToken(value => value + 1);
+                return;
+            }
+            setReviewImageModelId(draftModelId);
             reviewWorkspace.setImagePromptMode(true);
             setInputValue(draftText);
             setFocusToken(value => value + 1);
@@ -5193,6 +5300,11 @@ export function ChatPageClient({
         // case (and its guest-import handoff).
         if (conversations.length === 0 || pendingGuestImportRef.current) return;
 
+        if (reviewChatFreshIntentRef.current || (mountedSurface === "chat" && new URLSearchParams(window.location.search).has(REVIEW_CHAT_PARAM))) {
+          isInitialSelectedRef.current = true;
+          setIsInitialConversationResolved(true);
+          return;
+        }
         const params = new URLSearchParams(window.location.search);
         const hasUrlSelectionPreset = params.has("models") || params.has("prompt");
         // A ?models=/?prompt= landing takes its selection from the URL rather
@@ -5801,6 +5913,13 @@ export function ChatPageClient({
     status,
   ]);
 
+  const researchPreview = useResearchPreview({
+    identityKey, conversationId: currentChatId, modelId: selectedModels[0], question: inputValue.trim(), locale: lang, assistantProfileId: currentChatId ? undefined : pendingProfileId,
+    revision: JSON.stringify([assistantProfile, assistantProfileRemovedAt, accountUsage?.plan]),
+    enabled: mountedSurface === "chat" && !isGuestMode && selectionMode === "manual" &&
+      selectedModels.length === 1 && activeModelCount === 1 && !isImageDraftActive,
+  });
+
   // STG-F003: nothing marks the composer busy until well after the submit
   // path has awaited a conversation create, the model-settings flush and the
   // preflight, so a second Enter -- or an Enter racing the send button --
@@ -5809,8 +5928,23 @@ export function ChatPageClient({
   // submit at a time, and the flag is released in `finally` so a rejected or
   // aborted attempt can never wedge the composer shut.
   const handleGlobalSubmit = async (
-    options?: GlobalSubmitOptions
+    options?: GlobalSubmitOptions,
+    inheritedJourney?: ConnectedJourney | null,
   ): Promise<void> => {
+    // Carry the original click through routing/preparation and recursive re-entry.
+    const submitJourney = inheritedJourney === undefined
+      ? !isGuestMode && typeof options?.overrideText !== "string"
+        ? captureJourneyDraft(connectedDraftScope(mountedSurface, activeDraftKey)) : null
+      : inheritedJourney;
+    if (reviewHandoffAccess.pending || reviewHandoffAccess.failed ||
+        (isReviewHandoff && (!draftHydrated || draftConflict || draftSyncFailed))) {
+      showToast(reviewContinuationHandoffCopy.draftFailed, "info");
+      return;
+    }
+    if (isReviewHandoff && (attachments.length > 0 || options?.researchMode || options?.deepResearchDepth || options?.imageTurnsByModel)) {
+      showToast(attachments.length > 0 ? reviewContinuationHandoffCopy.attachmentsUnsupported : reviewContinuationHandoffCopy.unsupported, "info");
+      return;
+    }
     const submittedAtMonotonicMs = options?.submittedAtMonotonicMs ?? performance.now();
     if (promptRefinerMode === "e2e_fixture") {
       // This mode only exercises a no-cost pre-send proposal. It cannot
@@ -5837,7 +5971,7 @@ export function ChatPageClient({
       flushSync(() => mutateModelSettings(currentChatIdRef.current, panels,
         disabledPanels.filter(id => id !== panelId)));
       return handleGlobalSubmitRef.current({ submittedAtMonotonicMs, reviewRouteChecked: true,
-        imageIntentChecked: true, imageTurnsByModel: plan.turns, overrideModelIds: plan.panelIds });
+        imageIntentChecked: true, imageTurnsByModel: plan.turns, overrideModelIds: plan.panelIds }, submitJourney);
     }
     const professionalImageRouting = mountedSurface === "workspace" &&
       inConversationImagesAllowed &&
@@ -5894,14 +6028,14 @@ export function ChatPageClient({
         reviewWorkspaceRef.current.imagePromptMode !== routeRequestedKind ||
         (liveProviders.length > 0 && !sameStringList(providers, liveProviders))) return;
       if (!decision) {
-        if (professionalImageRouting) return handleGlobalSubmitRef.current({ submittedAtMonotonicMs, reviewRouteChecked: true, imageIntentChecked: true });
+        if (professionalImageRouting) return handleGlobalSubmitRef.current({ submittedAtMonotonicMs, reviewRouteChecked: true, imageIntentChecked: true }, submitJourney);
         reviewWorkspace.setError(reviewWorkspaceCopy[lang].failed); return;
       }
       if (decision.kind === "blocked") {
         reviewWorkspace.setError(t(imageGenerationEnabled ? "chat.imageGenerationPlanGateBody" : "chat.imageGenerationDisabledNotice")); return;
       }
       if (professionalImageRouting && decision.kind === "text") {
-        return handleGlobalSubmitRef.current({ submittedAtMonotonicMs, reviewRouteChecked: true, imageIntentChecked: true });
+        return handleGlobalSubmitRef.current({ submittedAtMonotonicMs, reviewRouteChecked: true, imageIntentChecked: true }, submitJourney);
       }
       const chosen = decision.choices.flatMap(choice => choice.modelId ? [choice.modelId] : []);
       if (decision.kind === "image") {
@@ -5922,7 +6056,7 @@ export function ChatPageClient({
         reviewWorkspace.setUnsupportedProviders([]);
         flushSync(() => mutateModelSettings(currentChatIdRef.current, plan.panelIds, []));
         return handleGlobalSubmitRef.current({ ...options, submittedAtMonotonicMs, reviewRouteChecked: true,
-          imageIntentChecked: true, imageTurnsByModel: plan.turns });
+          imageIntentChecked: true, imageTurnsByModel: plan.turns }, submitJourney);
       }
       if (!chosen.length || decision.choices.some(choice => !choice.modelId)) {
         reviewWorkspace.setError(reviewWorkspaceCopy[lang].noText); return;
@@ -5941,7 +6075,7 @@ export function ChatPageClient({
       if (owner !== identityNamespaceKey(identityNamespaceRef.current) ||
         epoch !== submitIdentityFenceRef.current.epoch || ticket !== conversationSelectionTicketRef.current ||
         !sameStringList(chosen, latestModelSettingsRef.current.models)) return;
-      return handleGlobalSubmitRef.current({ ...options, submittedAtMonotonicMs, reviewRouteChecked: true, imageIntentChecked: true });
+      return handleGlobalSubmitRef.current({ ...options, submittedAtMonotonicMs, reviewRouteChecked: true, imageIntentChecked: true }, submitJourney);
     }
     // A restored Guest `auto` value is an intent, not routing authority. The
     // background capability read will either confirm it or return the UI to
@@ -6003,7 +6137,7 @@ export function ChatPageClient({
         imageIntentChecked: true,
         submittedAtMonotonicMs,
         imageTurnDecision,
-      });
+      }, submitJourney);
     }
     const waitForCommittedAutoScope = async (
       expectedConversationId: string,
@@ -6023,6 +6157,7 @@ export function ChatPageClient({
       return matches();
     };
     const abortBlankAutoSend = (authority: BlankChatAutoSendAuthority) => {
+      authority.freshLocation?.cancelUnlessHandedOff();
       if (authority.draftSettlement.settled) return;
       abortDraftSend(authority.preparedDraftSend);
       authority.draftSettlement.settled = true;
@@ -6090,6 +6225,15 @@ export function ChatPageClient({
             abortDraftSend(preparedDraftSend);
             return null;
           }
+          const freshLocation = chatFreshLocationPreparationEnabled && chatLocationIntentEnabled &&
+            status === "authenticated" && sessionUserId && identityKey === `account:${sessionUserId}` &&
+            options === undefined && selectionModeRef.current === "auto" &&
+            preparedDraftSend.draft.text && preparedDraftSend.draft.attachments.length === 0 &&
+            capturedModels.length === 1 && !capturedDisabled.includes(capturedModels[0]) &&
+            !(newChatAutoUnknownRef.current?.identityKey === identityKey && newChatAutoUnknownRef.current.selectionTicket === expectedSelectionTicket) &&
+            !pendingSubmissionOwnersRef.current.has(identityKey)
+            ? prepareFreshChatLocationIntent(identityKey, sessionUserId, preparedDraftSend.draft.text)
+            : undefined;
           return {
             identityKey,
             identityEpoch: capturedIdentityEpoch,
@@ -6100,6 +6244,7 @@ export function ChatPageClient({
             profileId: capturedProfileId,
             preparedDraftSend,
             draftSettlement: { settled: false },
+            freshLocation,
           };
         })();
         draftPreparation = {
@@ -6148,8 +6293,9 @@ export function ChatPageClient({
           draft: sendAuthority.preparedDraftSend.draft,
           preparedDraftSend: sendAuthority.preparedDraftSend,
           draftSettlement: sendAuthority.draftSettlement,
+          freshLocation: sendAuthority.freshLocation,
         },
-      });
+      }, submitJourney);
     }
     const blankAutoPreparation = newChatAutoPreparationRef.current;
     if (
@@ -6188,10 +6334,11 @@ export function ChatPageClient({
             ? {
                 preparedDraftSend: sendAuthority.preparedDraftSend,
                 draftSettlement: sendAuthority.draftSettlement,
+                freshLocation: sendAuthority.freshLocation,
               }
             : {}),
         },
-      });
+      }, submitJourney);
     }
     if (
       currentChatIdRef.current === null &&
@@ -6245,6 +6392,7 @@ export function ChatPageClient({
       token: crypto.randomUUID(),
       identityKey,
       identityEpoch: submitFence.epoch,
+      selectionModeRequest: selectionModeRequestSeqRef.current,
       // Preparing Smart Adaptive creates and selects the owned Chat before
       // this recursive submit starts, but the user's send still originated
       // from the blank workspace. Treating that just-created id as an
@@ -6281,9 +6429,10 @@ export function ChatPageClient({
         }
         resetPromptRefinerState();
       }
-      await runGlobalSubmit(options, owner, submittedAtMonotonicMs);
+      await runGlobalSubmit(options, owner, submittedAtMonotonicMs, submitJourney);
     } finally {
       const preparedBlank = options?.preparedBlankChat;
+      preparedBlank?.freshLocation?.cancelUnlessHandedOff();
       if (
         preparedBlank?.preparedDraftSend &&
         preparedBlank.draftSettlement &&
@@ -6319,6 +6468,7 @@ export function ChatPageClient({
     options: GlobalSubmitOptions | undefined,
     submitOwner: PendingSubmissionOwner,
     submittedAtMonotonicMs: number,
+    journeyDraft: ConnectedJourney | null,
   ) => {
     const preparation = createLatencyStages({ submitHandoffMs: boundedLatencyMs(performance.now() - submittedAtMonotonicMs) });
     const submitOwnerIsCurrent = () => {
@@ -6352,6 +6502,9 @@ export function ChatPageClient({
     */
     const preparedBlankDraft = options?.preparedBlankChat?.draft;
     const suppliedPreparedDraft = options?.preparedBlankChat?.preparedDraftSend ?? null;
+    const freshLocation = suppliedPreparedDraft && submitOwner.originConversationId === null &&
+      options?.preparedBlankChat?.conversationId === currentChatId
+      ? options?.preparedBlankChat?.freshLocation : undefined;
     const suppliedDraftSettlement = options?.preparedBlankChat?.draftSettlement ?? null;
     const markSuppliedDraftSettled = (prepared: PreparedDraftSend) => {
       if (prepared.token === suppliedPreparedDraft?.token && suppliedDraftSettlement) {
@@ -6419,16 +6572,16 @@ export function ChatPageClient({
         return;
       }
     }
-    const productResolution = !isOverrideSend
+    const productResolution = !isOverrideSend && !options?.researchMode
       ? promptRefinerResolutionRef.current
       : null;
-    const productProposal = !isOverrideSend
+    const productProposal = !isOverrideSend && !options?.researchMode
       ? promptRefinerProductProposalRef.current
       : null;
-    const productDecision = !isOverrideSend
+    const productDecision = !isOverrideSend && !options?.researchMode
       ? promptRefinerProductDecisionRef.current
       : null;
-    const explicitProductSend = promptRefinerProductSelection !== "none"
+    const explicitProductSend = !options?.researchMode && promptRefinerProductSelection !== "none"
       ? resolvePromptRefinerExplicitSend({
           proposal: productProposal,
           resolution: productResolution,
@@ -6450,18 +6603,11 @@ export function ChatPageClient({
     const explicitPromptRefinerClientRequestId = explicitProductDecisionIsCurrent
       ? explicitProductSend!.clientRequestId
       : null;
-    const autoProductConversationEligible = !isOverrideSend &&
+    const autoProductConversationEligible = !options?.researchMode && !isOverrideSend &&
       mountedSurface === "chat" && !isGuestMode && Boolean(currentChatId) &&
       selectionMode === "auto" && promptRefinerProductRelease.autoEnabled &&
       Boolean(promptRefinerProductScope) && !explicitPromptRefinerDecision;
-    const productScopeToken = promptRefinerProductScope
-      ? `${promptRefinerProductScope.scopeId}:${promptRefinerProductScope.epoch}`
-      : null;
-    const skipAutoForThisTurn =
-      autoProductConversationEligible &&
-      promptRefinerSkipAutoScope === productScopeToken;
-    const requestAutoPrepare =
-      autoProductConversationEligible && !skipAutoForThisTurn;
+    const requestAutoPrepare = autoProductConversationEligible;
     // Product turns retain exact authored bytes. The browser never substitutes
     // the proposed execution text into the Message or durable draft.
     //
@@ -6477,7 +6623,7 @@ export function ChatPageClient({
         : promptRefinerAuthoredPromptForSend({
             rawPrompt: sendInputValue,
             ordinaryPrompt: trimmed,
-            productTurn: requestAutoPrepare || skipAutoForThisTurn,
+            productTurn: requestAutoPrepare,
           });
     if (mountedSurface === "chat" && latestModelSettingsRef.current.models.length !== 1) {
       showToast(t("chat.singleModelRequired"), "info");
@@ -6499,7 +6645,7 @@ export function ChatPageClient({
     );
     const originDraftScopeId =
       preparedBlankDraft || continuesPendingCreatedDraft ? null : currentChatId;
-    const draftSendCapture = !isGuestMode && !isOverrideSend && mountedSurface === "chat"
+    const draftSendCapture = !isGuestMode && !isOverrideSend && durableComposerEnabled
       ? suppliedPreparedDraft ? null : captureDraftSend(
           { text: authoredPrompt, attachments: sendInputAttachments },
           originDraftScopeId
@@ -6543,6 +6689,21 @@ export function ChatPageClient({
     // string without re-deriving it from state that may not have committed
     // yet (setConversations is async).
     let justCreatedTitle: string | null = null;
+    // A conversation the Auto selection created for this draft is already the
+    // current one, so the branches below never set `justCreatedTitle`, and the
+    // pending record is cleared when the Message saves -- before the
+    // first-turn tracking reads it. Without this the generate-title request
+    // carried "New chat" and its compare-and-set never matched.
+    {
+      const preparedForThisSend = pendingCreatedChatRef.current;
+      if (
+        activeChatId &&
+        preparedForThisSend?.id === activeChatId &&
+        preparedForThisSend.identityKey === identityKey
+      ) {
+        justCreatedTitle = preparedForThisSend.title;
+      }
+    }
     // What this send will name. Ordinarily the screen's own selection, but a
     // create can come back with a different one (see the profile branch
     // below), and the rest of this function runs in the same closure -- a
@@ -6609,9 +6770,13 @@ export function ChatPageClient({
         migrateDraft(originDraftScopeId, activeChatId);
       } else {
       try {
-        const newConversationTitle = (
-          trimmed || sendInputAttachments[0]?.name || t("sidebar.newChat")
-        ).slice(0, 30);
+        // Trimmed after the cut: the server stores the title trimmed, and the
+        // generated-title swap only applies while the row still equals this
+        // exact string, so a cut that ends on a space would never be replaced.
+        const newConversationTitle =
+          (trimmed || sendInputAttachments[0]?.name || t("sidebar.newChat"))
+            .slice(0, 30)
+            .trim() || t("sidebar.newChat");
         const res = await fetch(mountedSurface === "chat" ? "/api/products/chat/conversations" : "/api/conversations", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -6754,6 +6919,9 @@ export function ChatPageClient({
         if (!modelSettingsReady) return;
       }
       const comparisonId = Date.now().toString();
+      const picked = pickedRef.current;
+      const sourcePassages = !options?.researchMode && mountedSurface === "chat" && picked && picked.owner === identityKey && picked.chat === activeChatId && picked.parts.length
+        ? encodePassages(picked.parts) : undefined;
       // Resolved before the preflight, not after it: the preflight prices this
       // set and hands back the admission slots for it, so it has to be asked
       // about the same models the send will name.
@@ -6846,8 +7014,16 @@ export function ChatPageClient({
       */
       const imageTurnSend = (Boolean(imageTurn) && activeModelIds.length === 1) ||
         (Boolean(options?.imageTurnsByModel) && activeModelIds.every(id => Object.hasOwn(options!.imageTurnsByModel!, id)));
+      if (isReviewHandoff && activeModelIds.length === 1) {
+        const referencesAvailable = await reviewHandoffReferencesAvailable(activeChatId);
+        if (!chatSendIsCurrent()) return;
+        if (!referencesAvailable) {
+          showToast(reviewContinuationHandoffCopy.unavailable, "error");
+          return;
+        }
+      }
       const finishPreflight = preparation.stage("preflightMs");
-      const preflight = imageTurnSend
+      const preflight = (imageTurnSend || options?.researchMode === "preview")
         ? { allowed: true as const, admissionToken: null, contextBundle: null }
         : await runComparisonPreflight({
             comparisonId,
@@ -6873,7 +7049,7 @@ export function ChatPageClient({
       // alongside that read; message consumption and paid Refiner/Chat work
       // remain behind both results and the unchanged identity/selection fence.
       const preparedInputs = await prepareChatSendInputs({
-        context: () => imageTurnSend ? Promise.resolve(null)
+        context: () => (imageTurnSend || options?.researchMode === "preview") ? Promise.resolve(null)
           : contextLayout === "comparison" ? Promise.resolve(preflight.contextBundle)
           : preparation.measure("contextPrepareMs", () => prepareChatContextBundle({
               conversationId: isGuestMode ? null : activeChatId,
@@ -6892,6 +7068,30 @@ export function ChatPageClient({
         showToast(t("chat.questionSaveFailed"), "info");
         return;
       }
+
+      // Only the semantic call overlaps Refiner. Device permission and GPS
+      // stay in ChatApp, after the question is durably saved. Guests retain
+      // their existing single-use verification sequence.
+      const canFuseLocation = !options?.researchMode && !freshLocation && chatLocationIntentEnabled && identityKey && status === "authenticated" &&
+        mountedSurface === "chat" && selectionMode === "auto" && !isOverrideSend && !imageTurnSend &&
+        promptAttachments.length === 0 && activeModelIds.length === 1;
+      const existingFusion = canFuseLocation && existingChatRouterLocationFusion && autoSelectionOffered && submitOwner.originConversationId === activeChatId &&
+        !preflight.admissionToken && !options?.deepResearchDepth && activeModelIds[0] !== DEEP_RESEARCH_MODEL_ID &&
+        !selectedMcpConnection(activeChatId) && chatLocationSession.canPrepareIntent(identityKey);
+      const historyForFusion = existingFusion && identityKey ? getChatRuntimeSnapshot(chatRuntimeKey({
+        identityKey, conversationId: activeChatId, modelId: activeModelIds[0], transcriptScope: "conversation",
+      })).messages : [];
+      // The held Refiner decision still controls the execution view. Location
+      // is decided on the saved authored message, once, in the ordinary Router.
+      const fuseExistingTurn = existingFusion && historyForFusion.some(message => message.role === "user") &&
+        !historyForFusion.some(message => message.attachments?.length);
+      const fusionScope = fuseExistingTurn ? "existing" : canFuseLocation && chatRouterLocationFusion &&
+        submitOwner.originConversationId === null && suppliedPreparedDraft && !requestAutoPrepare && !explicitPromptRefinerDecision ? "fresh" : null;
+      const locationPreparation = !freshLocation && !fuseExistingTurn && chatParallelPreparationEnabled && chatLocationIntentEnabled &&
+        requestAutoPrepare && preparedDraft && promptRefinerProductScope && !imageTurnSend
+        ? chatLocationSession.prepareIntent(identityKey, authoredPrompt,
+            () => preparation.measure("locationIntentMs", () => requestChatLocationIntent(authoredPrompt, fetch)))
+        : undefined;
 
       let promptRefinerDecisionForSend = explicitPromptRefinerDecision;
       let userRequestId = explicitPromptRefinerClientRequestId ??
@@ -6930,6 +7130,10 @@ export function ChatPageClient({
           abortPreparedDraft(preparedDraft);
           return;
         }
+      }
+      if (!chatSendIsCurrent()) {
+        if (preparedDraft) abortPreparedDraft(preparedDraft);
+        return;
       }
       let userMsgId = userRequestId;
 
@@ -7262,9 +7466,13 @@ export function ChatPageClient({
       }
 
       finishMessageSave();
+      // The Refiner can supply the ID required for saving. Only the answer
+      // panel needs the separate location decision, after the question is saved.
+      if (!sendCurrentAfterMessageSave) return;
+      const preparedLocationIntent = locationPreparation && await locationPreparation;
       // Last await boundary: an intervening model/account/conversation change
       // must not publish a payload to another panel or discard the draft.
-      if (!sendCurrentAfterMessageSave || !chatSendIsCurrent(!messageWasSaved)) return;
+      if (!chatSendIsCurrent(!messageWasSaved)) return;
       const conversation = conversations.find((item) => item.id === activeChatId);
       const previousCount = promptCountsRef.current.get(activeChatId) ??
         (conversation?.messageCount ? 1 : 0);
@@ -7295,6 +7503,7 @@ export function ChatPageClient({
         conversationId: isGuestMode ? null : activeChatId,
         modelIds: activeModelIds,
         prompt: authoredPrompt,
+        ...(contextBundle ? { previousContextBundle: contextBundle } : {}),
       });
       localComparisonQuestionsRef.current.set(comparisonId, authoredPrompt);
       /*
@@ -7308,7 +7517,7 @@ export function ChatPageClient({
         for the moment the model is later deselected.
       */
       setDeepResearchSuggestionTurn(
-        options?.deepResearchDepth ||
+        options?.researchMode || options?.deepResearchDepth ||
           activeModelIds.includes(DEEP_RESEARCH_MODEL_ID) ||
           !authoredPrompt.trim()
           ? null
@@ -7338,7 +7547,7 @@ export function ChatPageClient({
         it has never heard of is indistinguishable from no turn at all.
       */
       const sendWebSearchRequested =
-        options?.webSearchOverride === "always" ||
+        options?.researchMode === "preview" || options?.webSearchOverride === "always" ||
         isWebSearchEnabled(webSearchMode);
       setWebSearchSuggestionTurn(
         authoredPrompt.trim()
@@ -7389,11 +7598,30 @@ export function ChatPageClient({
       // The panels draw the real user turn from this payload, in this commit.
       sendEchoRef.current = null;
       setSendEcho(null);
+      if (sourcePassages && !imageTurnSend && pickedRef.current === picked) {
+        pickedRef.current = null;
+        setPickedSource(null);
+      }
+      if (messageWasSaved && !imageTurnSend && !options?.researchMode) bindJourneyFirstSource(journeyDraft, activeChatId, userMsgId);
       setPromptPayload({
+        ...(!imageTurnSend && sourcePassages ? {sourcePassages} : {}),
         id: comparisonId,
         submittedAtMonotonicMs,
         preparationTimings: { ...preparation.timings },
         preparationReadyAtMonotonicMs: performance.now(),
+        preparedLocationIntent: (messageWasSaved && freshLocation) ? freshLocation.handoff() : preparedLocationIntent,
+        ...(fusionScope && identityKey && messageWasSaved && savedAttachments.length === 0
+          ? { routerLocationTurn: { scope: fusionScope, isCurrent: () =>
+            workspaceMountedRef.current && activeChatIdentityIs(identityKey, submitOwner.identityEpoch) &&
+            committedAutoSendScopeRef.current?.selectionMode === "auto" &&
+            selectionModeRequestSeqRef.current === submitOwner.selectionModeRequest &&
+            chatPreparedSendIsCurrent({
+              identityKey, currentIdentityKey: identityNamespaceKey(identityNamespaceRef.current),
+              conversationId: activeChatId, currentConversationId: currentChatIdRef.current,
+              selectionTicket: preparedSelectionTicket, currentSelectionTicket: conversationSelectionTicketRef.current,
+              modelIds: activeModelIds, currentModelIds: latestModelSettingsRef.current.models,
+              currentDisabledIds: latestModelSettingsRef.current.disabled,
+            }) } } : {}),
         text: authoredPrompt,
         chatId: activeChatId,
         userMessageId: userMsgId,
@@ -7409,6 +7637,7 @@ export function ChatPageClient({
         ...(options?.webSearchOverride
           ? { webSearchMode: options.webSearchOverride }
           : {}),
+        ...(options?.researchMode ? { researchMode: options.researchMode, researchDurable: options.researchDurable === true } : {}),
         ...(options?.deepResearchDepth
           ? { deepResearchDepth: options.deepResearchDepth }
           : {}),
@@ -7438,7 +7667,7 @@ export function ChatPageClient({
           ? { imageTurnsByModel: options.imageTurnsByModel }
           : {}),
       });
-      if (skipAutoForThisTurn) setPromptRefinerSkipAutoScope(null);
+      if (options?.researchMode) researchPreview.onSelectedChange(false);
       if (explicitPromptRefinerDecision) resetPromptRefinerState();
       // The single point where a draft is cleared by sending: the prompt is
       // now on its way, so this conversation's draft is spent. Every earlier
@@ -7454,7 +7683,7 @@ export function ChatPageClient({
           submittedAttachmentIds: attachments.map((attachment) => attachment.id),
           currentText: currentDraft.text,
           currentAttachmentIds: currentDraft.attachments.map((attachment) => attachment.id),
-        })) discardDraft(activeChatId, promptAttachments);
+        })) discardDraft(activeChatId, promptAttachments, true);
       }
       setConversations((current) =>
         current.map((item) =>
@@ -7537,7 +7766,7 @@ export function ChatPageClient({
   const triggerTitleGeneration = useCallback(
     async (chatId: string, interimTitle: string, firstPromptText: string) => {
       try {
-        let result: { updated?: boolean; title?: string } | null = null;
+        let result: { updated?: boolean; title?: string; interimTitle?: string } | null = null;
         if (isGuestMode) {
           const sendRequest = (turnstileToken?: string) =>
             fetch("/api/chat/conversation-title", {
@@ -7577,11 +7806,16 @@ export function ChatPageClient({
         // (not just at request time) so a manual rename that lands while
         // this request was in flight is never clobbered -- mirrors the
         // server's own expectedTitle compare-and-set for the logged-in path.
+        // The server also accepts the interim title it derives from the first
+        // message, which is what the sidebar row holds when this send's own
+        // interim value was lost.
         if (result?.updated && typeof result.title === "string") {
           const finalTitle = result.title;
+          const serverInterimTitle = result.interimTitle;
           setConversations((prev) =>
             prev.map((item) =>
-              item.id === chatId && item.title === interimTitle
+              item.id === chatId &&
+              (item.title === interimTitle || item.title === serverInterimTitle)
                 ? { ...item, title: finalTitle }
                 : item
             )
@@ -7693,6 +7927,7 @@ export function ChatPageClient({
       responseText: string,
       searchMetadata?: WebSearchExecution | null
     ) => {
+      setReviewResultRevision(value => value + 1);
       if (promptId && voiceTurnRef.current?.promptId === promptId && voiceTurnRef.current.sourceUserMessageId && currentChatIdRef.current) {
         voiceTurnRef.current.resolve({ sourceUserMessageId: voiceTurnRef.current.sourceUserMessageId, conversationId: currentChatIdRef.current });
       }
@@ -8006,30 +8241,6 @@ export function ChatPageClient({
   // for models with confirmed support, instead of forcing a Perplexity
   // model into the selection -- selectedModels and their order are never
   // touched by a web-search-mode change.
-  useEffect(() => {
-    if (!sessionUserId) return;
-    let cancelled = false;
-    void fetch("/api/memories/settings", { cache: "no-store" })
-      .then((response) =>
-        response.ok
-          ? response.json()
-          : discardResponseBody(response).then(() => null)
-      )
-      .then((body: { defaultConversationMode?: unknown } | null) => {
-        if (cancelled) return;
-        // Only the explicit "off" moves it, the same direction the server
-        // resolver takes: an unreadable value must not make the menu say
-        // memory is off for conversations it is on for.
-        setAccountMemoryDefault(
-          body?.defaultConversationMode === "off" ? "off" : "on"
-        );
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [sessionUserId]);
-
   /**
    * §14. The account's published profiles, loaded once per signed-in session.
    *
@@ -8160,8 +8371,8 @@ export function ChatPageClient({
    *
    * A blank Chat has a read-only capability but deliberately has no row. An
    * an explicit Auto click or the first Send with the server-offered default
-   * creates that owned Chat, reads its canonical product and capability, then
-   * stores `auto` before adopting the id. Merely viewing the page therefore
+   * creates that owned Chat in its server-admitted Auto mode, then adopts
+   * the confirmed row. Merely viewing the page therefore
    * creates nothing, while the first Send can never run on a client-only Auto
    * choice.
    */
@@ -8406,11 +8617,12 @@ export function ChatPageClient({
     const promise = (async () => {
       setSelectionModePending(true);
       let createdId: string | null = null;
+      let createdAutoChat: (Parameters<typeof applyConversationSettings>[0] & { surface: "chat" }) | null = null;
       let createdTitle = (
         capturedDraft.text.trim() ||
         capturedDraft.attachments[0]?.name ||
         t("sidebar.newChat")
-      ).slice(0, 30);
+      ).slice(0, 30).trim() || t("sidebar.newChat");
       let createdModels = [...capturedModels];
       let createdDisabled = [...capturedDisabled];
       try {
@@ -8429,7 +8641,7 @@ export function ChatPageClient({
           try {
             response = await fetch("/api/products/chat/conversations", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: { "Content-Type": "application/json", [CHAT_INITIAL_SELECTION_MODE_HEADER]: "auto" },
               body: JSON.stringify({
                 title: createdTitle,
                 selectedModels: capturedModels,
@@ -8472,7 +8684,8 @@ export function ChatPageClient({
             return false;
           }
           const created = await response.json().catch(() => null);
-          if (typeof created?.id !== "string") {
+          if (typeof created?.id !== "string" || !created.id ||
+              (typeof created.userId === "string" && created.userId !== sessionUserId)) {
             if (originStillCurrent()) {
               newChatAutoUnknownRef.current = { identityKey, selectionTicket };
               setSelectionModeUnknown({ identityKey, conversationId: null });
@@ -8492,6 +8705,12 @@ export function ChatPageClient({
               ? created.disabledPanels
               : capturedDisabled
           ).filter((modelId) => createdModels.includes(modelId));
+          if (created.userId === sessionUserId && created.surface === "chat" && created.productKey === "chat" &&
+              created.kind === "chat" && created.isLocked === false && created.selectionMode === "auto" && created.autoSelection?.offered === true &&
+              createdModels.length === 1 && Array.isArray(created.selectedModels) && sameStringList(created.selectedModels, createdModels) &&
+              Array.isArray(created.disabledPanels) && sameStringList(created.disabledPanels, createdDisabled)) {
+            createdAutoChat = created;
+          }
           rememberKnownConversation(
             knownCreatedId,
             createdTitle,
@@ -8514,7 +8733,9 @@ export function ChatPageClient({
           }
           return response.json().catch(() => null);
         };
-        const canonical = await readCanonical().catch(() => null);
+        // Older servers ignore the header. Use the row already created for
+        // capability verification and the legacy mode write without replaying creation.
+        const canonical = createdAutoChat ?? await readCanonical().catch(() => null);
         if (!canonical) {
           if (originStillCurrent()) {
             showToast(t("chat.autoSelectionFailed"), "error");
@@ -8536,7 +8757,6 @@ export function ChatPageClient({
           return false;
         }
 
-        let stored = false;
         const verifyUnknownPatch = async () => {
           const verified = await readCanonical().catch(() => null);
           if (verified?.selectionMode === "auto" &&
@@ -8552,26 +8772,25 @@ export function ChatPageClient({
           }
           return false;
         };
-        try {
-          const response = await fetch(`/api/conversations/${createdId}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ selectionMode: "auto" }),
-          });
-          await discardResponseBody(response);
-          stored = response.ok;
-          if (!stored && response.status >= 500) {
-            stored = await verifyUnknownPatch();
-          } else if (response.status === 403 && originStillCurrent()) {
-            setAutoSelectionOffered(false);
+        const storeLegacyAuto = async () => {
+          try {
+            const response = await fetch(`/api/conversations/${createdId}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ selectionMode: "auto" }),
+            });
+            await discardResponseBody(response);
+            if (response.ok) return true;
+            if (response.status >= 500) return verifyUnknownPatch();
+            if (response.status === 403 && originStillCurrent()) setAutoSelectionOffered(false);
+            return false;
+          } catch {
+            // A lost response can still have committed. One read-only check
+            // resolves the outcome without issuing another PATCH.
+            return verifyUnknownPatch();
           }
-        } catch {
-          // A lost response can still have committed. One read-only check is
-          // the only safe way to distinguish success from an unknown write;
-          // never issue a second PATCH.
-          stored = await verifyUnknownPatch();
-        }
-        if (!stored) {
+        };
+        if (!createdAutoChat && !(await storeLegacyAuto())) {
           if (originStillCurrent()) {
             showToast(t("chat.autoSelectionFailed"), "error");
           }
@@ -8739,38 +8958,23 @@ export function ChatPageClient({
       });
   };
 
-  /**
-   * Applies a profile the user just created from this chat.
-   *
-   * The round trip is: the picker's CTA leaves for the create screen, that
-   * screen stashes the new profile's id and pushes `/chat`, and this consumes
-   * it once on the way back. No conversation id and no return URL travel — the
-   * conversation is the one this page restored for itself, and the id is read
-   * exactly once so a refresh cannot reapply it
-   * (`lib/assistantProfileReturn.ts`).
-   *
-   * Deliberately routed through `handleAssistantProfileChange` rather than
-   * through a PATCH of its own. That handler already owns the two cases this
-   * has — a conversation with a server row is PATCHed, one without is held in
-   * `pendingProfileId` and sent with the create — and it carries the four-way
-   * staleness guard that #632 was fixed with. A second implementation here
-   * would be a second place for that guard to be forgotten.
-   *
-   * Waits for the options list because the optimistic row is built from it,
-   * and because an empty list is how "the flag is off" arrives: with profiles
-   * disabled the fetch 403s, `assistantProfileOptions` stays null, and a
-   * stashed id is simply never applied.
-   */
-  const handleAssistantProfileChangeRef = useRef(handleAssistantProfileChange);
-  useEffect(() => {
-    handleAssistantProfileChangeRef.current = handleAssistantProfileChange;
+  /** Creation from the picker returns to its conversation. Settings and guide launches start a fresh one. */
+  const applyProfileHandoff = useEffectEvent((profileId: string, startNew: boolean) => {
+    if (!startNew) {
+      handleAssistantProfileChange(profileId);
+      return;
+    }
+    if (currentChatIdRef.current) handleNewChat();
+    setPendingProfileId(profileId);
+    pendingProfileIdRef.current = profileId;
   });
   useEffect(() => {
     if (isGuestMode || !assistantProfileOptions || !isInitialConversationResolved) {
       return;
     }
-    const profileId = consumePendingChatProfile();
-    if (!profileId) return;
+    const request = consumePendingChatProfile();
+    if (!request) return;
+    const { profileId, entry } = request;
     // A profile that is not in this account's own list is not applied. The
     // server would refuse it anyway; refusing here keeps a doomed request off
     // the wire and keeps the optimistic row from flashing a profile that was
@@ -8782,9 +8986,9 @@ export function ChatPageClient({
     // whether the round trip finished, and the create screen cannot know that
     // -- it has already navigated away by the time this runs.
     trackProductEvent("assistant_profile_applied_to_chat", 0, {
-        assistant_profile_entry: "chat",
+        assistant_profile_entry: entry,
     });
-    handleAssistantProfileChangeRef.current(profileId);
+    queueMicrotask(() => applyProfileHandoff(profileId, entry !== "chat"));
   }, [assistantProfileOptions, isGuestMode, isInitialConversationResolved]);
 
   // handleGlobalSubmit is redefined every render (not memoized); a ref
@@ -8796,6 +9000,20 @@ export function ChatPageClient({
   useLayoutEffect(() => {
     handleGlobalSubmitRef.current = handleGlobalSubmit;
   });
+  // A failed Chat reply's Retry: the same question through the ordinary send
+  // path, leaving the composer draft alone (see `overrideText`). A question
+  // with files is restored instead, since an override send carries none.
+  const retryChatPrompt = useCallback((prompt: {
+    text: string;
+    attachments: ChatAttachment[];
+    targetChatId: string;
+  }) => {
+    if (mountedSurface !== "chat" || !identityKey ||
+        identityKey !== identityNamespaceKey(identityNamespaceRef.current) ||
+        prompt.targetChatId !== currentChatIdRef.current ||
+        prompt.attachments.length > 0 || !prompt.text.trim()) return;
+    void handleGlobalSubmitRef.current({ overrideText: prompt.text });
+  }, [identityKey, mountedSurface]);
   /*
     The composer's send. Everything before the payload -- the image-intent and
     Review routing calls, creating the conversation, saving the question --
@@ -8805,6 +9023,19 @@ export function ChatPageClient({
     `handleGlobalSubmit` go through its ref and never come back here.
   */
   const handleComposerSubmit = async () => {
+    if (reviewHandoffAccess.pending || reviewHandoffAccess.failed ||
+        (isReviewHandoff && (!draftHydrated || draftConflict || draftSyncFailed))) {
+      showToast(reviewContinuationHandoffCopy.draftFailed, "info");
+      return;
+    }
+    if (isReviewHandoff && (attachments.length > 0 || researchPreview.selected)) {
+      showToast(attachments.length > 0 ? reviewContinuationHandoffCopy.attachmentsUnsupported : reviewContinuationHandoffCopy.unsupported, "info");
+      return;
+    }
+    if (researchPreview.selected && (!researchPreview.offered || attachments.length > 0 || !inputValue.trim() || inputValue.trim().length > 4000)) {
+      showToast(t(attachments.length > 0 ? "chat.researchPreviewAttachments" : !inputValue.trim() || inputValue.trim().length > 4000 ? "chat.researchPreviewQuestionLimit" : "chat.researchPreviewUnavailable"), "info");
+      return;
+    }
     const active = sendEchoRef.current;
     if (active && active.ticket === conversationSelectionTicketRef.current) return;
     const text = inputValue.trim();
@@ -8819,7 +9050,7 @@ export function ChatPageClient({
       setSendEcho(mine);
     }
     try {
-      await handleGlobalSubmit();
+      await handleGlobalSubmit(researchPreview.selected ? { researchMode: "preview", researchDurable: researchPreview.features?.durableRuns === true, imageIntentChecked: true } : undefined);
     } finally {
       if (mine && sendEchoRef.current === mine) {
         sendEchoRef.current = null;
@@ -8842,6 +9073,7 @@ export function ChatPageClient({
       voiceTurnRef.current = pending;
       // Use the normal draft and Send pipeline: Auto routing, tools, credits,
       // durable messages, and existing conversation context all stay canonical.
+      invalidateJourneyDraft(connectedDraftScope(mountedSurface, activeDraftKey), "draft_replaced");
       flushSync(() => setInputValue(text));
       void handleGlobalSubmitRef.current().then(() => {
         if (!pending.promptId) pending.reject(new Error("The voice request was not sent."));
@@ -9277,6 +9509,9 @@ export function ChatPageClient({
 
     const executeCompareSummary = async (conversationId: string) => {
       setIsCompareSummaryLoading(true);
+      setCompareSummarySource(null);
+      const ownerIdentity = identityKey;
+      const ownerTicket = conversationSelectionTicketRef.current;
       try {
         const response = await fetch(
           `/api/conversations/${conversationId}/compare-summary`,
@@ -9299,7 +9534,11 @@ export function ChatPageClient({
           showToast(message, "error");
           return;
         }
-        setCompareSummary(await response.json());
+        const summary = await response.json();
+        if (identityNamespaceKey(identityNamespaceRef.current) !== ownerIdentity || conversationSelectionTicketRef.current !== ownerTicket) return;
+        setCompareSummary(summary);
+        setCompareSummarySource(summary.source ? { kind: "quick", conversationId,
+          setup: { available: true, source: summary.source, promptMessageId: summary.promptMessageId }, review: summary, scope: reviewChatSourceScope } : null);
         setCachedCompareSummaryChatId(conversationId);
         maybeShowValueUpgradePrompt("comparison");
       } catch {
@@ -9536,8 +9775,8 @@ export function ChatPageClient({
     : {
         canAttachLocalFiles: true,
         canConnectGoogleDrive: true,
-        maxAttachmentsPerMessage: 5,
-        maxAttachmentBytes: 10 * 1024 * 1024,
+        maxAttachmentsPerMessage: CHAT_MAX_ATTACHMENTS_PER_MESSAGE,
+        maxAttachmentBytes: CHAT_MAX_ATTACHMENT_BYTES,
         attachmentPersistence: "account",
       };
 
@@ -9926,8 +10165,15 @@ export function ChatPageClient({
       enabledFlags: new Set(chatStarterEnabledFlagKeys),
       knownFlags: new Set(chatStarterKnownFlagKeys),
       modelCapabilities: new Set(chatStarterCapabilities),
-    });
+      // Chat is one model; cards that promise several answers side by side
+      // are Review's (docs/ui-contracts/chat-starter-catalog.md section 7).
+      // Only Chat draws from its pool in a per-session order: Review's chrome
+      // names fixed cards and keeps registry order.
+    }, chatStarterCatalogFor(mountedSurface === "chat" ? "chat" : "review"),
+    CHAT_STARTER_MAX_VISIBLE, mountedSurface === "chat" ? chatStarterOrderSeed : null);
   }, [
+    mountedSurface,
+    chatStarterOrderSeed,
     accountUsage?.plan,
     chatStarterCapabilities,
     chatStarterEnabled,
@@ -9988,7 +10234,11 @@ export function ChatPageClient({
     // it took over a composer holding typed work, and it never put back the
     // search a previous card had armed. That is the staging defect again, on
     // the one path the staging fix did not cover.
-    const handsToStudio = entry.seed.productKey === "studio";
+    // Only Review hands an image seed on, and only to its own composer's
+    // image mode. Chat never opens the image workspace from a card: its image
+    // card is an ordinary seed the send answers with an image in place.
+    const handsToStudio =
+      entry.seed.productKey === "studio" && mountedSurface === "workspace";
     const application = applyStarterSeed({
       scope: activeDraftKey,
       draft: inputValue,
@@ -10023,6 +10273,7 @@ export function ChatPageClient({
       });
       return;
     }
+    invalidateJourneyDraft(connectedDraftScope(mountedSurface, activeDraftKey), "draft_replaced");
     setInputValue(seedText);
     setFocusToken((value) => value + 1);
   };
@@ -10034,13 +10285,35 @@ export function ChatPageClient({
     reason: the requirement was stated on the card, so the click is the user
     acting on a fact they already had rather than discovering one.
   */
-  const handleStarterLocked = (reason: StarterLockReason) => {
+  const handleStarterLocked = (reason: StarterLockReason, entry: ChatStarterEntry) => {
     if (reason === "sign_in_required") {
+      // The prompt names the card's outcome and the requirement, so the person
+      // sees why this click led to sign-in rather than a generic pitch.
+      setGuestSignInStarterLabelKey(entry.labelKey);
       setShowGuestSignInPrompt(true);
       return;
     }
     router.push("/pricing");
   };
+
+  // Which "who answers" rows can draw, read from the active image catalogue
+  // (Admin model catalogue). Empty where this deployment or conversation
+  // cannot answer with an image, so no row promises one.
+  const reviewImageProviderIds = useMemo(
+    () => imageGenerationEnabled && inConversationImagesAllowed
+      ? reviewImageProviders(imageCatalog.models) : [],
+    [imageCatalog.models, imageGenerationEnabled, inConversationImagesAllowed]
+  );
+
+  // Keep the server's starter order for the rest of this browser session: a
+  // session cookie (no Max-Age), written only when it differs.
+  useEffect(() => {
+    if (!chatStarterEnabled || chatStarterOrderSeed === null) return;
+    const current = `${STARTER_ORDER_COOKIE}=${chatStarterOrderSeed}`;
+    if (document.cookie.split("; ").includes(current)) return;
+    document.cookie = `${current}; path=/; samesite=lax` +
+      (window.location.protocol === "https:" ? "; secure" : "");
+  }, [chatStarterEnabled, chatStarterOrderSeed]);
 
   const starterGalleryElement =
     starterCards.length > 0 ? (
@@ -10250,6 +10523,10 @@ export function ChatPageClient({
       continuationSource.timeline
         ? {
             compareInReview,
+            contextCard: mountedSurface === "chat" && identityKey && shellConversationId && continuationSource.timeline.source.status === "available" ?
+              <ContinuationPassageCard key={identityKey + ":" + shellConversationId} source={continuationSource}
+                chosen={pickedSource?.owner === identityKey && pickedSource.chat === shellConversationId ? pickedSource.parts : []}
+                onChoose={parts => { const next = {owner:identityKey,chat:shellConversationId,parts}; pickedRef.current = next; setPickedSource(next); }} /> : null,
             status: continuationSource.timeline.source.status,
             provider: continuationSource.timeline.provider,
             importedAt: continuationSource.timeline.importedAt,
@@ -10274,20 +10551,14 @@ export function ChatPageClient({
           }
         : undefined,
     [
-      continuationSource.timeline,
-      continuationSource.olderCount,
-      continuationSource.loadMore,
-      continuationSource.loadingMore,
-      continuationSource.newerCount,
-      continuationSource.loadNewer,
-      continuationSource.loadingNewer,
-      continuationSource.focusOutcome,
+      continuationSource, mountedSurface, identityKey, shellConversationId, pickedSource,
       continuationFocusRequest,
       consumeAppliedSearchHitFocus,
       compareInReview,
     ]
   );
 
+  const reviewChatSourceScope = JSON.stringify([identityKey, currentChatId, promptPayload?.id, reviewResultRevision]);
   const productSwitchHasUnknownWrite =
     selectionModeUnknown?.identityKey === identityKey &&
     selectionModeUnknown.conversationId === currentChatId;
@@ -10309,12 +10580,28 @@ export function ChatPageClient({
     selectionModePending ||
     Boolean(productSwitchHasUnknownWrite) ||
     draftConflict ||
-    draftSyncFailed;
+    draftSyncFailed ||
+    (isReviewHandoff && !draftHydrated) || reviewHandoffAccess.pending;
+  const reviewAnswerTicketRef = useRef<number | null>(null);
+  const reviewAnswerHandoff = useReviewContinuationHandoff({
+    identityKey,
+    conversationId: routeSurface === "continuation" && mountedSurface === "chat" ? shellConversationId : null,
+    isOwnerCurrent: () => reviewAnswerTicketRef.current === conversationSelectionTicketRef.current &&
+      currentChatIdRef.current === shellConversationId,
+    beforeNavigate: () => !productSwitchDisabled && preserveDraftsForProductSwitch(),
+  });
+  const compareContinuationAnswer = routeSurface === "continuation" && mountedSurface === "chat" && !isGuestMode
+    ? (assistantMessageId: string) => {
+        if (productSwitchDisabled) { showToast(t("chat.compareInReviewBlocked"), "info"); return; }
+        reviewAnswerTicketRef.current = conversationSelectionTicketRef.current;
+        void reviewAnswerHandoff.start(assistantMessageId);
+      }
+    : undefined;
   const handleProductSwitch = () => {
     const admitted = !productSwitchDisabled && preserveDraftsForProductSwitch();
     // Leaving for the other product: a Compare-in-Review answer still in
     // flight is no longer this screen's to navigate.
-    if (admitted) reviewForkTicketRef.current = null;
+    if (admitted) { reviewForkTicketRef.current = null; reviewAnswerTicketRef.current = null; }
     return admitted;
   };
   /*
@@ -10330,12 +10617,35 @@ export function ChatPageClient({
     }
     router.push(reviewPrefillHref(seed));
   };
+  const beginReviewChatDraft = useCallback(() => {
+    conversationSelectionTicketRef.current = allocateConversationSelectionTicket();
+    currentChatIdRef.current = null;
+    setCurrentChatId(null);
+    setPromptPayload(null);
+    isInitialSelectedRef.current = true;
+    setIsInitialConversationResolved(true);
+    return conversationSelectionTicketRef.current;
+  }, []);
   const compareChatInReview =
-    mountedSurface === "chat" && !isGuestMode ? handleCompareChatInReview : undefined;
+    mountedSurface === "chat" && routeSurface !== "continuation" && !isGuestMode ? handleCompareChatInReview : undefined;
   useLayoutEffect(() => {
     reviewForkAdmissionRef.current = () =>
       !productSwitchDisabled && preserveDraftsForProductSwitch();
   });
+  const reviewHandoffNotice = (reviewHandoffAccess.preview || reviewHandoffAccess.failed || reviewAnswerHandoff.pending || reviewAnswerHandoff.error) ? (
+    <div data-testid="review-context-handoff-notice" role="status" className="rounded-xl border border-zinc-200 px-3 py-2 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
+      {reviewAnswerHandoff.pending && <p>{reviewContinuationHandoffCopy.preparing}</p>}
+      {reviewAnswerHandoff.error && <p>{reviewAnswerHandoff.error}</p>}
+      {reviewHandoffAccess.failed && <p>{reviewContinuationHandoffCopy.unavailable} <button type="button" onClick={reviewHandoffAccess.retry} className="underline">{reviewContinuationHandoffCopy.retryDraft}</button></p>}
+      {reviewHandoffAccess.preview && <>
+        <p>{reviewContinuationHandoffCopy.scope(reviewHandoffAccess.preview.sourceTurnCount, reviewHandoffAccess.preview.nativeTurnCount)}</p>
+        {reviewHandoffAccess.preview.sourceOmittedCount > 0 && <p>{reviewContinuationHandoffCopy.sourceOmitted(reviewHandoffAccess.preview.sourceOmittedCount)}</p>}
+        {reviewHandoffAccess.preview.nativeOmittedCount > 0 && <p>{reviewContinuationHandoffCopy.omitted(reviewHandoffAccess.preview.nativeOmittedCount)}</p>}
+        {reviewHandoffAccess.preview.sourceMode === "legacy" && <p>{reviewContinuationHandoffCopy.legacy}</p>}
+        <p>{reviewContinuationHandoffCopy.multiModel}</p>
+      </>}
+    </div>
+  ) : null;
   const visibleReviewModels = mountedSurface === "workspace" && reviewWorkspace.mode === "easy"
     ? reviewProviderPanels(selectedModels, effectiveDisabledPanels, id => getModel(id)?.provider)
     : selectedModels;
@@ -10357,12 +10667,36 @@ export function ChatPageClient({
     reviewWorkspace.setMode(mode);
   };
 
+  const artifactRevisionAction = useGeneratedArtifactRevision({
+    enabled: generatedArtifactRevisionEnabled && mountedSurface === "chat" &&
+      !isGuestMode && identityKey?.startsWith("account:") === true &&
+      accountUsage?.limits.allowAttachments !== false,
+    scopeKey: activeDraftKey,
+    conversationId: currentChatId,
+    readDraft,
+    updateDraft,
+    t,
+  });
+
   return (
     // Every surface that decides whether a model searches reads this: the
     // composer's chip and credit estimate, the picker's badge and "Web search"
     // filter, and the per-message badge. One provider rather than a prop through
     // five intermediate components that do not use it.
+    // The model lists say how many uses the credits left would cover
+    // (components/credits/UsageMeter.tsx); the picker is several components
+    // below this one, none of which use the balance themselves.
+    <AvailableCreditsProvider value={comparisonAvailableCredits}>
+    <ReviewChatHandoffProvider identity={identityKey} entry={reviewWorkspace.appearance === "studio" ? "review_studio" : "review_classic"}
+      supported={routeSurface === "workspace" && !isGuestMode && Boolean(currentChatId)}
+      sourceScope={reviewChatSourceScope}
+      navigate={id => { if (!handleProductSwitch()) return false; router.push(`/chat?${REVIEW_CHAT_PARAM}=${encodeURIComponent(id)}`); return true; }}>
+    {mountedSurface === "chat" && <ReviewChatDraftReceiver marker={reviewChatMarker} identity={identityKey} conversationId={currentChatId}
+      hydrated={draftHydrated && isInitialConversationResolved} blocked={productSwitchDisabled} beginNew={beginReviewChatDraft}
+      selectionTicket={() => conversationSelectionTicketRef.current} readDraft={readDraft} setDraftText={setInputValue}
+      notify={text => showToast(text, "info")} />}
     <WebSearchBackendReadinessProvider readiness={webSearchBackendReadiness}>
+    <GeneratedArtifactRevisionContext.Provider value={artifactRevisionAction}>
       <ModelFinder
         enabled={Boolean(sessionUserId && isUserSettingsLoaded)}
         onComplete={handleModelFinderComplete}
@@ -10393,6 +10727,7 @@ export function ChatPageClient({
         <ChatShellSkeleton label={t("auth.loading")} />
       ) : isMobileViewport && !(mountedSurface === "workspace" && reviewWorkspace.appearance === "studio") ? (
         <MobileChatShell
+          continuationNotice={reviewHandoffNotice}
           workspaceNotice={mountedSurface === "chat" ? <ChatPwaControls ownerKey={identityKey} language={lang} onRestore={(text) => setInputValue((current) => current ? `${current}\n${text}` : text)} /> : undefined}
           chatWorkspace={mountedSurface === "chat" ? chatWorkspace : undefined}
           review={mountedSurface === "workspace" ? {
@@ -10402,13 +10737,16 @@ export function ChatPageClient({
             maxProviders: Math.min(3, maxSelectableModels),
             easyAvailable: reviewEasyAvailable && !isGuestMode,
             imageModelLabel: imageCatalog.getModel(reviewImageModelId ?? "")?.name,
+            imageProviders: reviewImageProviderIds,
           } : undefined}
           currentProduct={mountedSurface === "chat" ? "chat" : "review"}
           productSwitchDisabled={productSwitchDisabled}
           onProductSwitch={handleProductSwitch}
           onCompareInReview={compareChatInReview}
+          onCompareContinuationInReview={compareContinuationAnswer}
           transcriptScope={mountedSurface === "chat" ? "conversation" : "model"}
           onRestorePrompt={restoreChatPrompt}
+          onRetryPrompt={retryChatPrompt}
           conversations={blendedConversations}
           currentChatId={shellConversationId}
           selectedModels={visibleReviewModels}
@@ -10430,8 +10768,9 @@ export function ChatPageClient({
           isConversationSelectionResolved={isInitialConversationResolved}
           pendingSubmission={pendingSubmission}
           durableDraftLocked={
-            guestAutoCapabilityPending ||
-            mountedSurface === "chat" && !isGuestMode && Boolean(pendingSubmission)
+            guestAutoCapabilityPending || reviewHandoffAccess.pending ||
+            (isReviewHandoff && !draftHydrated) ||
+            durableComposerEnabled && Boolean(pendingSubmission)
           }
           blockSubmitWhileVoiceBusy={mountedSurface === "chat" && !isGuestMode}
           allowEditingWhileSending={mountedSurface === "chat" && !isGuestMode}
@@ -10441,6 +10780,7 @@ export function ChatPageClient({
           onLockedImageClick={handleLockedImageClick}
           onStartImageDraft={canOfferNewImage && (inConversationImagesAllowed || mountedSurface === "chat") ? (text, modelId, options) => {
             if (mountedSurface === "workspace" && reviewWorkspace.mode === "easy") {
+              invalidateJourneyDraft(connectedDraftScope(mountedSurface, activeDraftKey), "draft_replaced");
               reviewWorkspace.setImagePromptMode(true); setInputValue(text); setFocusToken(value => value + 1);
             } else handleStartImageDraft(text, modelId, options);
           } : undefined}
@@ -10492,15 +10832,18 @@ export function ChatPageClient({
           selectionMode={selectionMode}
           selectionModePending={selectionModePending}
           onSelectionModeChange={handleSelectionModeChange}
-          accountMemoryDefault={accountMemoryDefault}
+          accountMemoryDefault={accountMemorySettings?.defaultConversationMode ?? null}
+          accountMemoryMasterEnabled={accountMemorySettings?.masterEnabled ?? null}
+          onMemorySettingsRefresh={refreshAccountMemorySettings}
           assistantProfile={
-            assistantProfileOptions ? effectiveAssistantProfile : undefined
+            effectiveAssistantProfile ?? (assistantProfileOptions ? null : undefined)
           }
           assistantProfileRemovedAt={assistantProfileRemovedAt}
           assistantProfileOptions={assistantProfileOptions ?? []}
           onAssistantProfileChange={
             assistantProfileOptions ? handleAssistantProfileChange : undefined
           }
+          researchPreview={researchPreview}
           onOpenDeepResearchSetup={() => setIsDeepResearchSetupOpen(true)}
           isDeepResearchPending={isDeepResearchPending}
           onDismissDeepResearchChip={dismissDeepResearchChip}
@@ -10551,7 +10894,6 @@ export function ChatPageClient({
           onPromptRefinerRequest={handlePromptRefinerRequest}
           onPromptRefinerDecision={handlePromptRefinerDecision}
           onPromptRefinerDismiss={handlePromptRefinerDismiss}
-          onPromptRefinerExecution={handlePromptRefinerExecution}
           identityKey={identityKey}
           onComparisonReview={handleComparisonReview}
           onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}
@@ -10568,15 +10910,23 @@ export function ChatPageClient({
               refreshGuestUsage();
             }
           }}
+          continuationNotice={reviewHandoffNotice}
           workspaceNotice={mountedSurface === "chat" ? <ChatPwaControls ownerKey={identityKey} language={lang} onRestore={(text) => setInputValue((current) => current ? `${current}\n${text}` : text)} /> : undefined}
           chatWorkspace={mountedSurface === "chat" ? chatWorkspace : undefined}
           studioStarterCards={starterCards}
           onStudioStarter={id => {
             const card = starterCards.find(item => item.entry.id === id);
             if (!card) return;
-            if (card.availability.state === "locked") handleStarterLocked(card.availability.reason);
+            if (card.availability.state === "locked") handleStarterLocked(card.availability.reason, card.entry);
             else if (reviewWorkspace.mode === "easy" && card.entry.seed.productKey === "studio") {
-              if (!inputValue.trim()) setInputValue(t(card.entry.seed.promptSeedKey));
+              // Easy routes once per selected provider, so the sentence goes
+              // out as an image request to every provider that can draw.
+              if (inputValue.trim()) return;
+              setInputValue(t(card.entry.seed.promptSeedKey));
+              if (canOfferNewImage && inConversationImagesAllowed) {
+                setReviewImageModelId(null);
+                reviewWorkspace.setImagePromptMode(true);
+              }
             } else handleStarterSeed(card.entry);
           }}
           review={mountedSurface === "workspace" ? {
@@ -10586,13 +10936,16 @@ export function ChatPageClient({
             maxProviders: Math.min(3, maxSelectableModels),
             easyAvailable: reviewEasyAvailable && !isGuestMode,
             imageModelLabel: imageCatalog.getModel(reviewImageModelId ?? "")?.name,
+            imageProviders: reviewImageProviderIds,
           } : undefined}
           currentProduct={mountedSurface === "chat" ? "chat" : "review"}
           productSwitchDisabled={productSwitchDisabled}
           onProductSwitch={handleProductSwitch}
           onCompareInReview={compareChatInReview}
+          onCompareContinuationInReview={compareContinuationAnswer}
           transcriptScope={mountedSurface === "chat" ? "conversation" : "model"}
           onRestorePrompt={restoreChatPrompt}
+          onRetryPrompt={retryChatPrompt}
           conversations={blendedConversations}
           currentChatId={shellConversationId}
           selectedModels={visibleReviewModels}
@@ -10613,8 +10966,9 @@ export function ChatPageClient({
           isConversationSelectionResolved={isInitialConversationResolved}
           pendingSubmission={pendingSubmission}
           durableDraftLocked={
-            guestAutoCapabilityPending ||
-            mountedSurface === "chat" && !isGuestMode && Boolean(pendingSubmission)
+            guestAutoCapabilityPending || reviewHandoffAccess.pending ||
+            (isReviewHandoff && !draftHydrated) ||
+            durableComposerEnabled && Boolean(pendingSubmission)
           }
           blockSubmitWhileVoiceBusy={mountedSurface === "chat" && !isGuestMode}
           allowEditingWhileSending={mountedSurface === "chat" && !isGuestMode}
@@ -10624,6 +10978,7 @@ export function ChatPageClient({
           onLockedImageClick={handleLockedImageClick}
           onStartImageDraft={canOfferNewImage && (inConversationImagesAllowed || mountedSurface === "chat") ? (text, modelId, options) => {
             if (mountedSurface === "workspace" && reviewWorkspace.mode === "easy") {
+              invalidateJourneyDraft(connectedDraftScope(mountedSurface, activeDraftKey), "draft_replaced");
               reviewWorkspace.setImagePromptMode(true); setInputValue(text); setFocusToken(value => value + 1);
             } else handleStartImageDraft(text, modelId, options);
           } : undefined}
@@ -10675,15 +11030,18 @@ export function ChatPageClient({
           selectionMode={selectionMode}
           selectionModePending={selectionModePending}
           onSelectionModeChange={handleSelectionModeChange}
-          accountMemoryDefault={accountMemoryDefault}
+          accountMemoryDefault={accountMemorySettings?.defaultConversationMode ?? null}
+          accountMemoryMasterEnabled={accountMemorySettings?.masterEnabled ?? null}
+          onMemorySettingsRefresh={refreshAccountMemorySettings}
           assistantProfile={
-            assistantProfileOptions ? effectiveAssistantProfile : undefined
+            effectiveAssistantProfile ?? (assistantProfileOptions ? null : undefined)
           }
           assistantProfileRemovedAt={assistantProfileRemovedAt}
           assistantProfileOptions={assistantProfileOptions ?? []}
           onAssistantProfileChange={
             assistantProfileOptions ? handleAssistantProfileChange : undefined
           }
+          researchPreview={researchPreview}
           onOpenDeepResearchSetup={() => setIsDeepResearchSetupOpen(true)}
           isDeepResearchPending={isDeepResearchPending}
           onDismissDeepResearchChip={dismissDeepResearchChip}
@@ -10734,7 +11092,6 @@ export function ChatPageClient({
           onPromptRefinerRequest={handlePromptRefinerRequest}
           onPromptRefinerDecision={handlePromptRefinerDecision}
           onPromptRefinerDismiss={handlePromptRefinerDismiss}
-          onPromptRefinerExecution={handlePromptRefinerExecution}
           identityKey={identityKey}
           onComparisonReview={handleComparisonReview}
           onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}
@@ -10840,8 +11197,17 @@ export function ChatPageClient({
           <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-600 dark:text-blue-300">
             <Sparkles className="h-5 w-5" aria-hidden="true" />
           </span>
-          <h2 id="guest-compare-signin-title" className="mt-4 text-xl font-black">{trialCopy.title}</h2>
-          <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">{trialCopy.body}</p>
+          <h2 id="guest-compare-signin-title" className="mt-4 text-xl font-black">
+            {guestSignInStarterLabelKey ? t("chatStarter.lockedSignInTitle") : trialCopy.title}
+          </h2>
+          <p
+            className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300"
+            data-testid={guestSignInStarterLabelKey ? "guest-signin-starter-reason" : undefined}
+          >
+            {guestSignInStarterLabelKey
+              ? t("chatStarter.lockedSignInReason").replaceAll("{starter}", t(guestSignInStarterLabelKey))
+              : trialCopy.body}
+          </p>
           <div className="mt-5 grid gap-2 sm:grid-cols-2">
             <a
               href={guestCompareSignInHref}
@@ -10866,7 +11232,10 @@ export function ChatPageClient({
             </a>
             <button
               type="button"
-              onClick={() => setShowGuestSignInPrompt(false)}
+              onClick={() => {
+                setShowGuestSignInPrompt(false);
+                setGuestSignInStarterLabelKey(null);
+              }}
               className="min-h-11 rounded-xl border border-zinc-200 px-4 py-2 text-sm font-bold text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
             >
               {trialCopy.cancel}
@@ -11203,7 +11572,7 @@ export function ChatPageClient({
           aria-modal="true"
           aria-labelledby="model-comparison-title"
           aria-describedby="model-comparison-note"
-          className="flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-900"
+          className="review-quick-summary-panel flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-900"
         >
           <div className="flex shrink-0 items-start justify-between gap-4 border-b border-zinc-200 p-4 dark:border-zinc-800 sm:p-5">
             <div className="min-w-0">
@@ -11245,7 +11614,7 @@ export function ChatPageClient({
               {t("auth.cancel")}
             </button>
           </div>
-          <div className="grid min-h-0 flex-1 touch-pan-y gap-4 overflow-y-auto overscroll-contain p-4 [scrollbar-gutter:stable] sm:p-5">
+          <div className="review-quick-summary-body grid min-h-0 flex-1 touch-pan-y gap-4 overflow-y-auto overscroll-contain p-4 [scrollbar-gutter:stable] sm:p-5">
             <section data-testid="quick-summary-consensus" className="rounded-xl border border-blue-200 bg-blue-50/70 p-4 dark:border-blue-900/70 dark:bg-blue-950/30">
               <h3 className="text-sm font-bold text-blue-950 dark:text-blue-100">
                 {t("chat.quickSummaryCommonConclusions")}
@@ -11256,6 +11625,7 @@ export function ChatPageClient({
                     <span className="mt-1 font-bold text-blue-600" aria-hidden="true">•</span>
                     <div className="min-w-0 flex-1">
                       <span>{item.text}</span>
+                      <ReviewChatAction source={compareSummarySource} ready={!isCompareSummaryLoading && !isGuestMode && compareSummarySource?.scope === reviewChatSourceScope} selection={{ section: "commonConclusions", ordinal: index }} />
                       {item.citations.map((citation, citationIndex) => (
                         <QuoteBadge
                           key={`${citationIndex}:${citation.responseId}`}
@@ -11285,6 +11655,7 @@ export function ChatPageClient({
                       <span className="mt-1 font-bold text-zinc-400">{index + 1}.</span>
                       <div className="min-w-0 flex-1">
                         <span>{item.text}</span>
+                      <ReviewChatAction source={compareSummarySource} ready={!isCompareSummaryLoading && !isGuestMode && compareSummarySource?.scope === reviewChatSourceScope} selection={{ section: "importantDifferences", ordinal: index }} />
                         {item.citations.map((citation, citationIndex) => (
                           <QuoteBadge
                             key={`${citationIndex}:${citation.responseId}`}
@@ -11416,11 +11787,13 @@ export function ChatPageClient({
               </section>
             )}
           </div>
+          <ReviewAnalysisActions source={compareSummarySource} ready={!isCompareSummaryLoading && !isGuestMode && compareSummarySource?.scope === reviewChatSourceScope}
+            scope={reviewChatSourceScope} onClose={() => setCompareSummary(null)} />
         </section>
       </div>
     )}
     {showComparisonReview && (
-      <ComparisonReviewDialog
+      <ComparisonReviewDialog key={JSON.stringify([identityKey, currentChatId, reviewResultRevision])}
         conversationId={isGuestMode ? null : currentChatId ?? null}
         guestSource={guestReviewSource}
         open
@@ -11591,6 +11964,9 @@ export function ChatPageClient({
         </form>
       </div>
     )}
+    </GeneratedArtifactRevisionContext.Provider>
     </WebSearchBackendReadinessProvider>
+    </ReviewChatHandoffProvider>
+    </AvailableCreditsProvider>
   );
 }

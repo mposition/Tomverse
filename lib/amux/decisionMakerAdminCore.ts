@@ -252,8 +252,9 @@ export type DmAdminRequestStatus = (typeof DM_ADMIN_REQUEST_STATUSES)[number];
 export const dmAdminRequestStatus = (row: DmAdminRequestRow, dbNowMs: number): DmAdminRequestStatus => {
   if (row.route === "operator") return "routed_to_operator";
   if (row.closingKind !== null) return row.closingKind;
-  if (row.resultUnknown) return "result_unknown";
+  // A result accepted after its unknown (the same digest read back) is the result.
   if (row.resultKind !== null) return row.resultKind;
+  if (row.resultUnknown) return "result_unknown";
   if (row.transmitOutcome === "unknown") return "transmit_unknown";
   if (row.snapshotState !== null) return "running";
   if (row.assigned) return "assigned";
@@ -296,10 +297,11 @@ export const dmAdminDeliveryStatus = (row: DmAdminRequestRow): DmAdminDeliverySt
 export type DmAdminSwitchRow = { scope: unknown; value: unknown; actorKind: unknown; reasonCode: unknown };
 
 /**
- * Why an instance is off when the system turned it off and no person has
+ * Why an instance is off when the system turned it off and nothing has
  * released it since (§8, §5): the reason of its newest switch event when that
  * event is a system latch. A person's newest event is a release or an
- * ordinary change, so it is null; an instance with no event is null.
+ * ordinary change, and the system's own release (2026-11-16) is a release, so
+ * each is null; an instance with no event is null.
  */
 export type DmAdminSwitchLatches = Record<DmInstanceScope, DmSwitchLatchReason | null>;
 
@@ -322,6 +324,11 @@ export const dmAdminSwitchLatchesFromRows = (rows: unknown): DmAdminSwitchLatche
     seen.add(scope);
     if (actorKind === "human") {
       if (reasonCode !== "operator") return null;
+      continue;
+    }
+    // The system's release of a latch, back to proposal mode (migration 20261116140100).
+    if (actorKind === "system" && reasonCode === "latch_release") {
+      if (!isDmInstanceScope(scope) || value !== "proposal") return null;
       continue;
     }
     if (actorKind !== "system" || !isOneOf(DM_SWITCH_LATCH_REASONS, reasonCode)) return null;

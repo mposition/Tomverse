@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 
 import { AMUX_V22_CLI_FAILURE_REASON_CODES } from "./v22TaskExecutionCore.ts";
 import { AMUX_V52_REVIEW_REJECTED_TWICE_REASON } from "./v52ReviewCore.ts";
+import { AMUX_INFRA_FAILURE_REASONS } from "./infraFailureCore.ts";
 
 /**
  * Whether a worker has an ended v4 attempt whose CLI usage was never reported
@@ -47,10 +48,23 @@ import { AMUX_V52_REVIEW_REJECTED_TWICE_REASON } from "./v52ReviewCore.ts";
  * Admin archives only every card at once, so from 2026-11-09 19:54 AEST the
  * three implement workers stayed refused. The attempt's cap, cost and usage
  * rows are unchanged; only this gate stops counting it.
+ *
+ * Only a budget-bound attempt counts (owner decision 2026-11-14, made
+ * unconditional 2026-11-16; lib/amux/v22ReadBackProceedCore.ts): one whose
+ * assignment ran under a risk-accepted recovery approval, the read-only API
+ * route where money is spent. A subscription CLI's unknown usage is recorded
+ * and costs nothing more, so it holds no worker.
+ *
+ * An infrastructure failure (owner decision 2026-11-15,
+ * lib/amux/infraFailureCore.ts) holds no worker either, with no person's
+ * acceptance: the run never did the card's work, its usage stays unknown in
+ * the ledger, and only a route that spends no money is ever classified so.
  */
 export async function amuxV22WorkerUsageUnverified(tx: Prisma.TransactionClient,
-  workerName: string, priorAttemptId: string | null, taskId: string): Promise<boolean> {
+  workerName: string, priorAttemptId: string | null, taskId: string,
+  paidOnly: boolean = true): Promise<boolean> {
   const retryableReasons = [...AMUX_V22_CLI_FAILURE_REASON_CODES];
+  const infraReasons = [...AMUX_INFRA_FAILURE_REASONS];
   const rows = await tx.$queryRaw<Array<{ id: string }>>`
     SELECT a."id" FROM "AmuxExecutionAttempt" a
     JOIN "AmuxWorkItem" w ON w."id" = a."taskId"
@@ -86,6 +100,10 @@ export async function amuxV22WorkerUsageUnverified(tx: Prisma.TransactionClient,
             AND d."escalationId" = p."escalationId"
           WHERE p."attemptId" = a."id" AND p."taskId" = a."taskId"
             AND p."outcome" = 'retry' AND d."outcome" = 'retry'), FALSE)
+      AND (${!paidOnly} OR EXISTS (SELECT 1 FROM "AmuxV22WorkerAssignment" g
+        JOIN "AmuxV22TaskRecoveryApproval" ap ON ap."id" = g."recoveryApprovalId"
+        WHERE g."id" = a."v22AssignmentId" AND ap."riskAcceptanceId" IS NOT NULL))
+      AND COALESCE(a."reason", '') <> ALL(${infraReasons}::text[])
     LIMIT 1`;
   return rows.length > 0;
 }
@@ -99,11 +117,11 @@ export async function amuxV22WorkerUsageUnverified(tx: Prisma.TransactionClient,
  */
 export async function amuxV22RoutesWithSettledUsage<T extends { workerName: string }>(
   tx: Prisma.TransactionClient, routes: readonly T[], priorAttemptId: string | null,
-  taskId: string,
+  taskId: string, paidOnly = true,
 ): Promise<{ routes: T[]; unsettled: boolean }> {
   const unsettled = new Set<string>();
   for (const workerName of new Set(routes.map((route) => route.workerName))) {
-    if (await amuxV22WorkerUsageUnverified(tx, workerName, priorAttemptId, taskId)) {
+    if (await amuxV22WorkerUsageUnverified(tx, workerName, priorAttemptId, taskId, paidOnly)) {
       unsettled.add(workerName);
     }
   }

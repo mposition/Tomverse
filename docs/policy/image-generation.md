@@ -26,7 +26,8 @@ Google 모델 활성화는 공식 가격·thinking 상한의 수동 검증 통�
   (§12)에서만 관리한다. 등록 현황(2026-08-05): `gpt-image-2`·
   `grok-imagine-image-quality-20260403`(활성) 2개,
   `gemini-3.1-flash-image`·`gemini-3.1-flash-lite-image`·
-  `gemini-3-pro-image`(등록-비활성) 3개.
+  `gemini-3-pro-image`(등록-비활성) 3개 — 2026-11-13부터 앞의 둘은 thinking cap이
+  정해진 운영 보류다(§12.1).
   미등록 평가 후보는 §12.1에 있다. 비교 그룹의 모델 수 상한은
   `IMAGE_GROUP_MAX_MODELS`(출시 기본 2)이며 UI·데이터 모델에 상한값을
   하드코딩하지 않는다. **UI는 이 값을 서버에서 전달받는다**
@@ -212,7 +213,12 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   예약 snapshot의 `executionProfile.apiModelId`로 endpoint별로 정한다(§16.9):
   thinking을 과금하지 않는 endpoint(Qwen Image 3)는 0, 그 밖의 fal은 — endpoint를
   적지 않은 예전 snapshot 포함 — cap이다. fal은 thinking 수를 보고하지 않으므로
-  0이라는 보고가 아무것도 증명하지 않는다.
+  0이라는 보고가 아무것도 증명하지 않는다. 측정된 한도로 가격을 정한 Google 모델(§12.1)은
+  예약 snapshot의 `measuredNonImageBound`가 정한다: thinking 몫은 cap이고, 응답이 그보다
+  많이 과금했으면 그 실비다. 그 한도가 코드 표에서 왔든 운영자가 Admin에서 실측으로 확정한
+  과금 조건(§12.1 "Admin에서 실측으로 확정한 과금 조건")에서 왔든 예약 때 snapshot에
+  고정되고, 정산은 그 뒤에 바뀐 조건을 읽지 않는다. 예약을 넘은 금액은 성공·실패와 관계없이 provider budget에
+  더한다 — 이 경우만 "성공의 thinking 몫은 cap"의 예외다.
 - 사용자 응답에 원시 내부 USD를 노출하지 않고, 모든 limit 오류의
   `resetAt`은 생성 시점보다 미래여야 한다.
 
@@ -509,7 +515,10 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
      목표 잔여율·환불 위험·가격 drift 여유를 반영해 별도 승인한다.
   6. thinking 비용은 평균이 아니라 provider가 허용하는 상한·최악 조건으로
      계산한다. 공식 문서에서 상한을 확인할 수 없으면 **고정 가격 산정
-     불가 — 모델 활성화 보류**다.
+     불가 — 모델 활성화 보류**다. 예외는 하나다: 유료 실측으로 잰 과금 조건을
+     운영자가 모델별로 승인한 경우(§12.1 "측정된 한도 + 여유", 2026-11-13, 그리고
+     "Admin에서 실측으로 확정한 과금 조건"). 그 조건은 코드 표나 Admin의 실측 확정
+     기록(`ImageModelBillingTerms`)에 있고, 가격 개정에 숫자를 적는 것으로는 만들 수 없다.
   7. 성공 후 사용자에게 추가 청구하지 않는다. 실측 원가는 내부 정산·관측
      전용이다.
 - **공식 도메인 본문을 직접 읽고 기록한 가격만 `verified`다.** 검색
@@ -529,10 +538,11 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
 |---|---|---|---|
 | `gpt-image-2` | **활성** | 표 §3 | — |
 | `grok-imagine-image-quality-20260403` | **활성 (2026-08-05)** | 1K $0.05 · 판매가 75크레딧 | 1K 정사각만. 2K(승인 100크레딧)는 크기 체계 확장 후 |
-| `gemini-3.1-flash-image` | 등록-비활성 (`worst_case_cost_unbounded`) | 0.5K $0.045 / 1K $0.067 / 2K $0.101 / 4K $0.151 | **thinking 상한** — 아래 참조 |
-| `gemini-3.1-flash-lite-image` | 등록-비활성 (`worst_case_cost_unbounded`) | 1K $0.0336 (1K 전용) | 동일. Draft 후보이며 두 번째 비교 자리를 Google로 채우지 않는다 |
-| `gemini-3-pro-image` | 등록-비활성 (`worst_case_cost_unbounded`) | 1K·2K $0.134 / 4K $0.24 | 동일 + 제품 판단 보류(`gpt-image-2` Final과 중복) |
+| `gemini-3.1-flash-image` | 등록-보류 (`operational_hold`, 2026-11-13) | 0.5K $0.045 / 1K $0.067 / 2K $0.101 / 4K $0.151 | thinking cap 12,288µUSD(측정된 한도 + 여유, 아래). 남은 것: 판매 크레딧 승인(최소 94)·Google 예산 env |
+| `gemini-3.1-flash-lite-image` | 등록-보류 (`operational_hold`, 2026-11-13) | 1K $0.0336 (1K 전용) | thinking cap 6,144µUSD. 남은 것: 판매 크레딧 승인(최소 50)·Google 예산 env. Draft 후보이며 두 번째 비교 자리를 Google로 채우지 않는다 |
+| `gemini-3-pro-image` | 등록-비활성 (`worst_case_cost_unbounded`) | 1K·2K $0.134 / 4K $0.24 | **thinking 상한**(재실측 대상 아님) + 제품 판단 보류(`gpt-image-2` Final과 중복) |
 | Qwen Image (`qwen-image-2.0`·`-2.0-pro`·`-3.0`·`-3.0-pro`) | 미등록 · **직접 어댑터 구현(기본 꺼짐, 2026-11-07)** | 장당 2.0 $0.035 / 2.0-pro $0.075 / 3.0 1K $0.03 / 3.0-pro 1K $0.04 (운영자 조사, `verified` 아님) | 아래 "Qwen 직접 어댑터" — 결과 저장 리전, 예산 env, 판매 크레딧, 약관, 한국어 글자 정확도 |
+| FLUX 3 Image (`flux-3-image`·`flux-3-image-klein`, BFL 직접) | **활성 (기본 켜짐, 2026-11-17)** | 1K 장당 Image $0.048 · 판매가 75크레딧 / Klein $0.009 · 20크레딧 (bfl.ai/pricing 2026-11-16) | 아래 "BFL 직접 어댑터" — 데이터 보관·리전, 첫 실제 생성의 크기·MIME, 한국어 글자 정확도 |
 | `google/nano-banana-2.1` (fal) | 미등록 — endpoint 표 행만 (`per_token_uncapped`) | 토큰 과금: 1M당 입력 $1.764 · 출력 텍스트·thinking $8.823 · 출력 이미지 $35.294 (2026-11-07 읽음, `verified` 아님) | **thinking 상한** — §16.9 |
 | `alibaba/qwen-image-3/text-to-image` (fal) | 미등록 — endpoint 표 행만 (`not_billed`) | 1K $0.04 / 2K $0.075 (조사 전언, 원문 미확인) | 가격 원문 확인·smoke·판매 크레딧 승인 — §16.9 |
 | Ideogram 4.0 | 미등록 | Turbo $0.03 / Default $0.06 / Quality $0.10 (미검증) | 신규 공급자 전체 온보딩 |
@@ -609,19 +619,21 @@ candidate의 한도로 설명된다. 즉 hidden thinking이 32,768 안에 포함
 
 세 모델은 `worst_case_cost_unbounded`를 유지한다. 재검토 조건은 Google이 thinking
 토큰 상한을 거는 요청 파라미터를 제공하거나, 공식 문서가 과금 대상의 상한을
-명시하는 경우다.
+명시하는 경우다. (2026-11-13: Flash·Flash Lite는 아래 "측정된 한도 + 여유"로
+`operational_hold`가 됐다. Pro는 그대로다.)
 
 **상한인지 아닌지는 데이터가 아니라 코드가 정한다 (2026-10-21).** 동적 카탈로그의
 가격 개정은 `thinkingCapMicroUsd`에 숫자를 적을 수 있지만, 그 숫자가 상한이 되려면
 우리가 보내는 요청이 그것을 지킬 수 있어야 한다. `imageThinkingCapEnforced`
 (`lib/imageModelRegistry.ts`)가 provider별로 답한다 — OpenAI·xAI는 이미지 요청에
-thinking 과금이 없고, Google 직접 호출은 토큰 과금이고 묶을 파라미터가 없다. fal은
+thinking 과금이 없고, Google 직접 호출은 토큰 과금이고, 실측으로 한도를 잰 모델(아래 "측정된 한도 + 여유")만
+그 한도로 묶인다. fal은
 gateway라 **endpoint별로** 답한다(2026-11-07, `FAL_ENDPOINT_PROFILES`,
 `lib/falImageRequest.ts`, §16.9): Nano Banana 2는 요청이 고정한
 `thinking_level: "high"`에 대한 요청당 고정 할증(`FAL_HIGH_THINKING_SURCHARGE_MICRO_USD`
 = 2,000)이라 cap이 그 이상일 때만 상한이고, Qwen Image 3는 이미지당 과금이라 0이
 상한이며, Nano Banana 2.1은 토큰 과금에 상한 파라미터가 없어 Google 직접 호출과 같이
-상한이 없다. 표에 없는 fal endpoint도 상한이 없다. 그래서 cap을 적은 Google·Nano
+상한이 없다. 표에 없는 fal endpoint도 상한이 없다. 그래서 cap을 적은 미실측 Google·Nano
 Banana 2.1 개정, cap이 할증보다 작은 Nano Banana 2 개정, 표에 없는 endpoint의 fal
 개정은 판정·최악 원가·어댑터 dispatch에서 모두 거절된다. Google이나 Nano Banana 2.1을
 여는 것은 개정이 아니라 이 표를 바꾸는 코드 변경이다.
@@ -630,6 +642,95 @@ Banana 2.1 개정, cap이 할증보다 작은 Nano Banana 2 개정, 표에 없�
 `max_output_tokens`가 thought 토큰을 포함한 hard cutoff라고 적는다. 이미지 모델에 대한
 문장이 아니고 위 2026-08-14 실측과 반대다. 재검토 조건의 문서 쪽이 충족됐을 수 있지만,
 상한으로 쓰려면 새 실측(유료, §15 예산 승인 필요)이 먼저다.
+
+#### 측정된 한도 + 여유 (2026-11-12 재실측, 2026-11-13 운영자 결정)
+
+운영자 승인으로 2026-11-12에 Flash·Flash Lite를 23건 다시 쟀다
+(`.github/audits/image-model-verification-worksheet.md` §J).
+
+- thinking을 `high`로 강제하고 상한 2,048을 보낸 10건은 모두 output + thinking이
+  상한 이하였고 이미지 없이 멈췄다. 2026-08-14의 2,533(이미지 반환)과 다른 동작이다.
+- `thinking_level`을 생략한 12건은 thinking counter가 0이고 output이 1,575–1,699였다.
+- 상한 1,536에서는 1,610을 보고하고 이미지를 반환했다. **엄격한 상한은 아니다** —
+  이미지 한 장은 통째로 나오므로 상한을 넘을 수 있다.
+
+**결정: 엄격한 상한 대신 "측정된 한도 + 여유"로 최악 원가를 정한다.** 이미지가 아닌
+과금 토큰(텍스트·thinking)의 최악을 요청이 보내는 `max_output_tokens`의 2배로 잡고,
+모델의 텍스트 출력 단가를 곱한 값을 thinking cap으로 쓴다. 2배는 두 실측을 모두
+덮는다(8월: thinking과 output이 각각 상한 아래, 11월: 합계가 상한 아래). 이미지 자체의
+원가는 옵션의 장당 원가다.
+
+| 모델 | 보내는 상한 | 텍스트·thinking 단가 | thinking cap | 최소 크레딧(1K) |
+|---|---:|---:|---:|---:|
+| `gemini-3.1-flash-image` | 2,048 | $3.00/1M | 12,288µUSD | 94 |
+| `gemini-3.1-flash-lite-image` | 2,048 | $1.50/1M | 6,144µUSD | 50 |
+
+코드: `GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS`(`lib/imageModelRegistry.ts`). 조건은 셋이다.
+
+1. **잰 요청만 유효하다.** 모델이 그 표의 상한(2,048)을 보내고 `thinking_level`을
+   고정하지 않을 때만 cap이 성립한다(`imageThinkingCapEnforced`). 다른 상한이나
+   thinking level을 가진 런타임 행은 판정·어댑터에서 거절된다.
+2. **표에 없는 Google 모델은 그대로 `per_token_uncapped`다.** 한도를 정하는 길은 둘이다:
+   코드 표에 행을 더하는 코드 변경, 또는 Admin에서 그 모델을 실측하고 운영자가 조건을
+   확정하는 것(아래 "Admin에서 실측으로 확정한 과금 조건"). 어느 쪽이든 유료 실측과 운영자
+   승인이 먼저다.
+3. **정산은 cap 전액으로 한다.** thinking counter가 0이어도 사고 텍스트가 output에
+   들어 과금되므로 0으로 정산하지 않는다(`settledThinkingCostMicroUsd`). 응답이 cap보다
+   많이 과금했으면 그 실제 값으로 정산하고, 예약을 넘은 금액은 provider 예산에 더한다.
+   이미지 없이 끝난 실패 응답, 이미지를 받은 뒤 저장·정산이 실패한 경우도 같다. 이미지 원가는
+   응답이 보고한 이미지 토큰을 1K 한 장의 토큰 수(1,120)로 나눈 장수만큼 센다 — 이미지가 두 장
+   온 응답은 파서가 거절해도 두 장 값이 과금됐다.
+4. **과금됐을 수 있는 실패는 다시 보내지 않는다.** 예약은 요청 한 번의 최악만 잡는다.
+   Google 경로는 rate limit(429)만 재시도하고, 응답 유실·timeout·5xx·이미지 없는 응답은
+   재시도하지 않는다.
+
+이 결정은 문서화된 상한이 아니라 관측에 기대므로 두 장치를 둔다. 이미지 토큰을 뺀
+output + thinking이 상한의 2배를 넘는 응답은 이미지가 있든 없든
+`image_google_output_over_measured_bound`로 기록되고, 그 초과분까지 반영된 provider
+예산(§8, `IMAGE_PROVIDER_GOOGLE_COST_MICROUSD_PER_DAY`·`_PER_MONTH`)이 지출을 최종
+차단한다. 그 기록이 나오면 Google 모델을 보류하고 다시 잰다.
+
+켜는 절차는 다른 모델과 같다: 판매 크레딧을 담은 가격 개정(§3·§4 승인), Google 예산
+env, 그리고 Admin 카탈로그의 켜기. seed는 `operational_hold`·가격 없음으로 남는다.
+
+#### Admin에서 실측으로 확정한 과금 조건 (2026-11-13)
+
+공식 문서만으로 장당 원가를 정할 수 없는 모델은 Admin Console(모델 카탈로그 › 이미지)의
+"실측"으로 과금 조건을 재고, 운영자가 확정한다. 코드 변경도 로컬 스크립트도 필요 없다.
+기존 코드 표(`GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS`, `IMAGE_PER_IMAGE_BILLED_MODELS`)는
+기본값으로 남고, 같은 provider 모델에 확정 기록이 있으면 그 기록이 먼저다.
+
+| 조건 종류 | provider | 실측 방법 | 확정되면 |
+|---|---|---|---|
+| `per_image_no_thinking` | qwen | 어댑터가 보내는 요청 그대로 표본 생성, 모든 표본이 이미지 1장이고 생성 토큰 사용량 보고가 없음 | `qwen-image-` 밖의 모델(예: `wan2.7-image`)도 thinking cap 0 |
+| `measured_output_limit` | google | 정한 `max_output_tokens`, thinking level 없이 표본 생성, 모든 표본이 이미지를 반환하고 텍스트·thinking이 한도의 2배 이하 | 위 "측정된 한도 + 여유"와 같은 규칙. 런타임 모델은 그 한도를 보낸다. 코드 seed 모델과 다른 한도는 확정 거절 |
+| `tokens_per_image` | openai | 품질×크기 옵션별 표본, 응답의 `usage.output_tokens` | 초안이 "문서의 이미지 출력 토큰 단가 × 실측 토큰 수"로 장당 원가를 계산. 같은 옵션에서 값이 흔들리면 최댓값의 2배 |
+
+- **유료 호출이다.** env `IMAGE_BILLING_MEASUREMENT_ENABLED`가 켜져 있을 때만(기본 꺼짐,
+  켜는 것은 운영자 결정) 운영자가 화면에서 표본 수와 최대 비용을 보고 승인해야 시작된다.
+  표본은 한 번에 12건 이하, 최대 비용은 $10 이하이고, 최대 비용은 계획의 최악(표본 수 ×
+  표본당 상한) 이상이어야 한다. 진행 중인 실측은 2시간이 지나야 "끊김"으로 보고 다음 실측을
+  허용한다(가장 느린 실행 약 91분보다 길다). 끊긴 실측이 잡아 둔 최대 비용은 돌려놓지 않는다.
+- **provider 예산(§8)에서 최대 비용을 먼저 잡고** 끝나면 쓰지 않은 만큼 돌려놓는다. 표본은
+  "지금까지 쓴 비용 + 표본당 상한"이 최대 비용 안에 있을 때만 보내고, 한 표본이 상한을 넘게
+  과금되면 거기서 멈추며 넘은 금액은 예산에 더한다. 사용량을 읽지 못한 표본은 상한으로 센다.
+  0원으로 세는 것은 생성 요청을 provider가 바로 거절한 4xx뿐이다 — 생성된 이미지를 받아 오다
+  난 4xx(Qwen 결과 다운로드)는 과금된 것으로 센다. 표본 하나는 요청 하나다: rate limit을 포함해
+  어떤 실패도 재시도하지 않는다(OpenAI·Google·Qwen 모두). 한 번에 하나의 실측만 돈다.
+- 이미지는 저장하지 않고 사용자 크레딧·대화에 닿지 않는다. 표본마다 토큰·이미지 유무·보고된
+  사용량·비용만 `ImageBillingMeasurement`에 남는다. 시작과 종료는 감사 기록을 쓴다.
+- **측정 결과가 스스로 조건을 확정하지 않는다.** 판정(`measurementVerdict`)은 조건을 제안할
+  뿐이고, 운영자가 "이 조건으로 확정"을 눌러야 `ImageModelBillingTerms`(append-only, 최신 행이
+  유효)에 기록된다. append-only는 DB trigger가 강제한다(UPDATE·DELETE·TRUNCATE 거절). OpenAI
+  판정은 계획한 모든 표본이 이미지와 토큰 수를 보고해야 확정할 수 있다. 조건이 확정된 모델은
+  판정이 옵션별 원가가 "확정 이미지 출력 단가 × 확정 이미지 토큰 수" 이상인지도 본다
+  (`price_below_measured_cost`; OpenAI는 옵션별 토큰, Google은 장당 이미지 토큰). 다시 재서
+  토큰이 늘면 기존 가격 개정은 새 초안을 적용할 때까지 서비스되지 않는다. 조건이 확정된
+  코드 seed 모델도 행이나 가격 개정이 없어도 다시 판정한다. 확정 때 서버가 저장된 표본으로 판정을 다시 계산하고, 출처 URL은
+  `isOfficialSourceUrl`을 통과해야 하며, 감사 기록과 한 transaction으로 커밋된다.
+- 확정된 조건은 판정(`judgeImageModel`, `imageThinkingCapEnforced`), 어댑터, 예약 snapshot의
+  `measuredNonImageBound`, 초안(`imageDraftFromAnswer`)이 함께 읽는다. 켜는 절차는 그대로다:
+  새 가격 초안 → 판매 크레딧 확인과 적용 → 켜기.
 
 #### 남은 증거는 산문이 아니라 과금 신호다 — staging 실측 절차 (2026-08-14 실행 완료, 판정 부정)
 
@@ -727,6 +828,14 @@ dispatch 전에 거부하므로 실행 경로가 없고, 위 실측 자체가 �
 |---|---:|---:|---:|---:|---|
 | Grok Imagine 1K | 62 | **75** | 733µUSD | 18.5% | 2026-08-04 |
 | Grok Imagine 2K | 84 | **100** | 750µUSD | 16.7% | 2026-08-04 |
+| 첨부 사진 편집 가산 — GPT Image 2 | — | **+90** (편집 1회 105~340) | 최악 871µUSD | 3.2% | 2026-11-12 |
+| 첨부 사진 편집 가산 — Grok Imagine 1K | — | **+10** (편집 1회 85) | 최악 765µUSD | 15.0% | 2026-11-12 |
+| 첨부 사진 편집 가산 — Nano Banana 2 1K | — | **0** (편집 1회 120) | 생성가와 같음 | — | 2026-11-12 |
+
+첨부 사진 편집 가산은 운영자가 2026-11-12에 현재 값 그대로 승인하고
+production(`Tomverse` 서비스)에 `IMAGE_EDIT_ENABLED=true`를 켜도록 지시했다.
+GPT Image 2의 +90은 실측 원가(정사각 1,024토큰)의 약 10배라 운영 데이터가 쌓이면
+다시 본다.
 
 1K 75크레딧은 `gpt-image-2` Standard 정사각(70)보다 7%만 높아 비교 화면에서
 설명 가능한 차이다. 운영 데이터가 쌓인 뒤(예: 30일 또는 성공 500건) 실패·
@@ -795,14 +904,73 @@ Alibaba Cloud Model Studio International(싱가포르) 동기 endpoint
 ⑦ production 예산 env 선배포 후 같은 카탈로그 행 추가. smoke는 adapter를 거치므로 카탈로그
 행이 먼저 있어야 한다(fal처럼 별도 smoke 스크립트는 없다).
 
-#### 등록-비활성은 사용자에게 보인다
+#### BFL 직접 어댑터 (2026-11-16, 2026-11-17부터 기본 켜짐)
 
-카탈로그 이미지 탭은 등록된 모델을 전부 표시하므로(§13,
-`docs/ui-contracts/image-generation-workspace.md`), 현재 이미지 탭에는 활성
-1개와 "준비 중" 4개가 함께 보인다. 이는 의도된 노출이다 — 제품이 결정한
-모델은 부재가 아니라 명시된 보류로 읽히는 편이 낫다. 보류가 많아지는 상태가
-바람직하지 않다면 그것은 registry에서 후보를 빼는 결정이지 탭에서 숨기는
-결정이 아니다.
+Black Forest Labs API(`api.bfl.ai`, `x-key: $BFL_API_KEY`)의 FLUX 3 이미지 endpoint를
+부르는 `lib/bflImageRequest.ts`와 `generateWithBfl`이 있다. fal 경유가 아니라 직접
+호출이다(운영자 결정 2026-11-16: fal에 비교 모델 둘이 몰리지 않게, 외부 처리자를 늘리지
+않게). 신규 공급자 조사가 `black-forest-labs`로 올린 discovery 항목은
+`runtimeImageProviderFor`가 `bfl`로 이어 카탈로그 초안 링크를 준다.
+
+**기본 켜짐 (운영자 결정 2026-11-16).** 두 모델이 코드 seed에 활성으로 들어 있다.
+판매 크레딧은 같은 날 승인했다: FLUX 3 Image **75크레딧**(medium, 크레딧당 최악 707µUSD),
+Klein **20크레딧**(low, 700µUSD). Grok Imagine(733)·Nano Banana 2(725)와 같은 여유다.
+활성 모델이 생기면 `bfl`이 활성 provider가 되므로 `BFL_API_KEY`와
+`IMAGE_PROVIDER_BFL_COST_MICROUSD_PER_DAY`·`_PER_MONTH`가 코드보다 먼저 배포돼 있어야 한다
+(운영자가 2026-11-17 배포 완료를 알림). 활성 이미지 모델이 다섯이 되어 composer는 선택한
+모델만 줄에 두고 나머지를 "모델 더 보기" 뒤에 둔다(`IMAGE_INLINE_MODEL_DISCOVERY_LIMIT` 3).
+
+- 대상은 요청 스키마와 가격을 읽은 `flux-3-image`·`flux-3-image-klein`뿐이다
+  (`https://api.bfl.ai/openapi.json`, 2026-11-16). FLUX.2는 메가픽셀 과금이고 스키마가 달라
+  요청을 만들지 않으며 thinking 판정도 `null`(`worst_case_cost_unbounded`)이다.
+- 요청 고정: `resolution: "1k"`, `aspect_ratio: "1:1"`(기본 `auto`는 프롬프트가 모양을
+  고른다), `safety_tolerance: 2`. FLUX 3 Image는 `grounding: false`(기본 true는 프롬프트를
+  웹·이미지 검색에 보낸다)와 `version: "latest"`(현재 유일한 값), Klein은
+  `output_format: "png"`. `seed`·`images`·`user`는 보내지 않는다.
+- 가격표: 해상도 등급별 장당 과금이고 "prompts are included at no extra charge"이며 거절·
+  실패·moderation으로 보류된 출력은 과금하지 않는다. 그래서
+  `IMAGE_PROVIDER_THINKING_BILLING.bfl = "not_billed"`이고 최악 원가는 출력가 + 프롬프트
+  예산 5,000µUSD다. 바닥은 Image 53,000µUSD → **59크레딧**, Klein 14,000µUSD →
+  **16크레딧**이고, 판매가는 위의 75·20이다.
+- 비동기 흐름: submit 한 번(재시도 없음 — 응답을 잃은 submit도 과금 작업일 수 있다) →
+  응답의 `polling_url`을 1초마다 조회(조회는 무료라 실패·429·5xx는 다시 묻는다) →
+  `Ready`의 서명 URL(10분 유효)을 키 없이 받는다. 키를 보내는 polling URL과 이미지 URL은
+  모두 https `*.bfl.ai`여야 하고 redirect는 따르지 않는다. submit·조회·다운로드는 하나의
+  `IMAGE_PROVIDER_TIMEOUT_MS` 안에서 끝나야 한다.
+- `Request Moderated`·`Content Moderated`는 `provider_moderation_rejected`이고, 그 밖의
+  끝 상태는 실패다. 402(BFL 선불 잔액 부족)는 사용자 오류가 아니라 `provider_failed`다.
+- 파일은 프로필 저장 허용 MIME(기본 JPEG·PNG), 16 MiB 이하, 1024×1024여야 저장한다.
+  BFL이 응답에 주는 `cost`·`output_mp`는 `providerUsage`에 기록만 하고 가격 계산에 쓰지
+  않는다.
+- **생성만이다.** 편집은 승인된 할증이 없어 adapter가 거절한다.
+
+**개인정보 고지.** 켜는 diff에서 `lib/providerDataDestinations.ts`에 BFL 행을 넣었다
+(같은 이유로 그동안 빠져 있던 fal 행도). 행의 provider 타입이 채팅 공급자만 받던 것을
+이미지 공급자까지 넓혔고, 활성 이미지 공급자가 행 없이 남지 않게 테스트가 막는다. BFL 행은
+`unproven`이라 개인정보 처리방침 표에 "확인되지 않음"으로 보인다. 수신 법인만 적었다
+(Black Forest Labs Inc., 개인정보 처리방침 기준).
+
+**미확인 — 켠 채로 남은 질문.** ⓪ **학습 사용.** BFL 개인정보 처리방침은 입력과 출력을
+"train and improve our AI models"에 쓸 수 있고 이메일(privacy@blackforestlabs.ai, 제목
+"Training Opt Out")로 거부할 수 있다고 쓴다. 같은 문서는 계약에 따라 처리하는 business
+고객의 콘텐츠에는 적용되지 않는다고도 쓴다. Tomverse API 계정에 어느 쪽이 적용되는지
+확인되지 않았다. 확인 전까지는 학습에 쓰일 수 있다고 보고, 거부 요청을 보내는 것이
+운영자 결정으로 남아 있다. ① BFL 문서에 프롬프트·결과의 보관 기간과 처리 리전을 적은
+문장이 없다(전달 host는 리전별 `delivery.*.bfl.ai`). ② `1k`·`1:1`이 정확히 1024×1024를 내는지, FLUX 3 Image가 어떤 MIME으로
+주는지는 실제 생성으로만 안다 — 다르면 adapter가 저장하지 않고 실패하며 그 요청은
+환급된다. 첫 실제 생성 결과로 확인한다. ③ `version`이 `latest`뿐이라 같은 id가 다른
+release를 가리킬 수 있다. 날짜 태그가 생기면 고정한다.
+
+끄는 방법: Admin › Models 카탈로그에서 해당 행을 hold로 두면 새 요청을 받지 않는다(코드
+배포 없이 되돌릴 수 있다).
+
+#### 등록-비활성은 사용자에게 보이지 않는다 (2026-11-13 운영자 결정)
+
+사용자 화면의 이미지 탭은 지금 실행할 수 있는 모델만 표시한다
+(`docs/ui-contracts/image-generation-workspace.md`). 가격 미검증, 최악 원가 미확정,
+운영 보류는 운영 상태이므로 Admin 카탈로그에서만 보인다. 이전에는 "준비 중"으로
+함께 보였으나, 고를 수 없는 행이 선택 창을 채운다는 판단으로 바꿨다. 각 행은 채팅
+목록과 같은 공급자(모델 소유자) 아이콘을 쓴다.
 
 #### 크기 체계 — 단계적 확장 (2026-08-04 결정)
 
@@ -905,7 +1073,19 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
   `POST /api/chat/image-intent`(`lib/chatImageIntent.ts`)에서 그 router 모델에
   이미지 요청인지 묻고, 같은 호출에서 Auto처럼 triage한다: 활성 이미지 모델과
   정사각 크레딧 목록을 보고 요청에 적합한 모델을 고른다. 운영자 결정
-  (2026-10-29): 일반 요청은 `standard`를 기본으로 하며 포스터·문자·복잡한
+  (2026-11-15): 모델 선택은 **적합도 → 속도 → 가격** 순이다. 각 모델은 잘하는
+  것과 약한 것을 적은 한 줄 라우팅 노트(`routingNote`, Admin › 모델 카탈로그에서
+  편집, 사용자에게는 보이지 않음)를 가지며, router는 요청이 필요로 하는 것
+  (글자와 그 언어, 실사·인물, 일러스트, 로고, 조밀한 레이아웃, 편집)을 노트와
+  비교해 가장 맞는 모델을 고른다. 적합도가 비슷하면 뚜렷이 빠른 모델을 고르고
+  (채팅에서는 사용자가 기다리고 있으므로, 훨씬 느린 모델은 요청의 핵심 요구에
+  뚜렷이 더 맞을 때만 쓴다), 적합도와 소요 시간이 모두 비슷할 때만 크레딧이
+  적은 쪽을 고른다. 사용자가 빠른 결과를 요청하면 속도가 핵심 요구다. 속도는
+  최근 30일 완료된 생성의 모델별 중앙값(초, 3건 이상, `lib/imageModelSpeed.ts`)을
+  쓰고, 기록이 모자란 모델은 프로필의 속도 등급만 보인다. 가격만 보면 같은
+  preset에서 가장 싼 한 공급자로 몰리기 때문이다. 노트와 속도는 선택의 근거일
+  뿐 비용·가격·활성 여부를 바꾸지 않는다.
+  운영자 결정 (2026-10-29): 일반 요청은 `standard`를 기본으로 하며 포스터·문자·복잡한
   장면이라는 이유만으로 `final`을 고르지 않는다. 사용자가 고품질을 명시하면
   `final`, 초안·빠른 생성·낮은 비용을 요청하면 `draft`를 고른다. 완료 답변에는
   실제 생성 품질을 표시하고, 표준 결과에는 고품질 재생성을 요청하는 문장과
@@ -941,7 +1121,7 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
     권한이므로 경계를 넓히지 않는다. 이 재작성은 그림을 새로 만드는 것이며, 사진의
     일부만 바꾸는 편집은 아래 "첨부 사진 편집"이다.
   - **첨부 사진 편집**(운영자 요청 2026-10-29, `IMAGE_EDIT_ENABLED=true`일 때만, 기본
-    꺼짐). 보내는 메시지에 사진(png·jpeg·webp·gif)이 붙어 있으면 판정 호출에
+    꺼짐; production은 2026-11-12 운영자 승인으로 켬). 보내는 메시지에 사진(png·jpeg·webp·gif)이 붙어 있으면 판정 호출에
     "Attached photo" 절과 편집 가능한 모델(편집 가격이 검증된 모델, `imageModelSupportsEdit`)만
     보이고, 사진을 바꾸라는 요청이면 `edit=true`를 돌려준다. 사진이 붙은 메시지에서
     편집이 아닌 답은 채팅으로 간다(채팅 모델은 사진을 본다). 이미지 턴은 `edit: true`
@@ -995,7 +1175,10 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
     `detectChatTurnImage`를 실행하므로, 대기 시간은 두 호출의 합이 아니라 긴 쪽이다.
     대상은 저장된 대화가 Auto(`selectionMode = auto`)인 로그인 단일 패널 Chat 턴이다.
     router가 routed했는지와 관계없이 판정하고(fallback 턴 포함), 보내는 메시지 자체에
-    첨부(편집할 사진은 예외, 위 "첨부 사진 편집")·Refiner 제안·deep research가 없어야 한다. 앞선 메시지의 첨부는 판정을 막지 않는다. 관문은 `/api/chat/image-intent`와 같다(플랜, 이미지 flag, 운영 접근, Admin
+    첨부(편집할 사진은 예외, 위 "첨부 사진 편집")·deep research가 없어야 한다. 앞선 메시지의 첨부는 판정을 막지 않는다.
+    보류된 Refiner 결정은 판정을 막지 않는다(2026-11-15): 기존 Auto 대화는 전송마다 Refiner 결정을 싣기 때문에, 막으면
+    "밤으로 바꿔 줘" 같은 후속 이미지 요청이 모두 텍스트로 답해졌다. 판정은 Refiner 실행문이 아니라 작성 원문으로 하고,
+    이미지 턴은 Refiner 소비 전에 끝나므로 그 결정은 소비되지 않고 만료된다. 텍스트 턴은 전처럼 한 번 소비한다. 관문은 `/api/chat/image-intent`와 같다(플랜, 이미지 flag, 운영 접근, Admin
     스위치). 이미지면 소유권·잠금·kind·context 검사를 모두 통과한 뒤, Refiner 소비·durable
     attempt·context bundle 사용·크레딧/lease/usage hold가 일어나기 **전에**
     `X-Chat-Response-Mode: image-turn`으로 끝난다. 그래서 반납할 것이 없다. 클라이언트는 같은

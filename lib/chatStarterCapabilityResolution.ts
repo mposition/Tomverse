@@ -32,6 +32,13 @@ import type { WebSearchBackendReadiness } from "@/lib/webSearchBackends";
 
 export function resolveChatStarterCapabilities(input: {
   webSearchBackendReadiness: WebSearchBackendReadiness;
+  /**
+   * Whether a Chat send that asks for a picture is answered with an image in
+   * the conversation: image generation on and Admin image triage set
+   * (`chatImageTriageModelId`). The shell already resolves it for the
+   * composer, so the card reads the same answer rather than a second one.
+   */
+  chatImageAnswers?: boolean;
 }): StarterCapability[] {
   const enabledModels = AVAILABLE_MODELS.filter((model) => model.enabled);
 
@@ -52,6 +59,7 @@ export function resolveChatStarterCapabilities(input: {
     // promised it disappear instead of failing on click.
     "document-attachment": CHAT_ATTACHMENT_FORMATS.length > 0,
     "generated-artifact": ARTIFACT_FORMAT_TABLE.length > 0,
+    "chat-image-answer": input.chatImageAnswers === true,
   };
 
   return STARTER_CAPABILITY_IDS.filter((capability) => answers[capability]);

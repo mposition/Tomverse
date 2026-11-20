@@ -114,10 +114,8 @@ test("R2e: R2c's latch is gone and the reader always derives, one statement each
   const reader = code(read("lib/amux/workerAssignmentCatalog.ts"));
   assert.match(reader, /export async function readAmuxAssignmentCatalogs\(client: CatalogReader\): Promise<AmuxAssignmentCatalogs> \{/);
   assert.match(reader, /export async function amuxWorkerCatalogRefusal\(\s*client: CatalogReader,\s*workerName: string,\s*\): Promise/);
-  // The one variable it reads turns on non-Claude v22 profiles (owner decision
-  // 2026-10-26); none sends assignment back to a catalog variable.
-  assert.doesNotMatch(reader.replace(
-    "process.env[AMUX_V22_MULTI_PROVIDER_ENV]", ""), /process\.env|source:/);
+  // It reads no variable: nothing sends assignment back to a catalog variable.
+  assert.doesNotMatch(reader, /process.env|source:/);
   const client = fakeClient(statement());
   const catalogs = await readAmuxAssignmentCatalogs(client);
   assert.equal(client.sent.length, 1);
@@ -174,13 +172,13 @@ test("anything the stores would not accept makes the catalog absent, never short
   assert.equal(await readAmuxDerivedWorkerCatalog(fakeClient(undefined)), null);
 });
 
-test("an open stop latch takes the worker and its v22 profile out of both lists", async () => {
+test("a recorded stop latch no longer takes the worker out of either list (2026-11-16)", async () => {
   const catalogs = await readAmuxAssignmentCatalogs(
     fakeClient(statement(REGISTRY_ROWS, [{ workerName: "claude-impl", eventKind: "opened" }])),
   );
-  assert.equal(catalogs.workers.some((worker) => worker.worker_name === "claude-impl"), false);
-  assert.equal(catalogs.v22.some((worker) => worker.worker_name === "claude-impl"), false);
-  assert.equal(catalogs.workers.length, 7);
+  assert.equal(catalogs.workers.some((worker) => worker.worker_name === "claude-impl"), true);
+  assert.equal(catalogs.v22.some((worker) => worker.worker_name === "claude-impl"), true);
+  assert.equal(catalogs.workers.length, 8);
 });
 
 test("the configured shape keeps the conservative runtime defaults", () => {

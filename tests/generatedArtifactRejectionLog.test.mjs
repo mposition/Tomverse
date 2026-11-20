@@ -256,3 +256,35 @@ test("installed SDK rejects invalid input before execute and delivers one loggab
     rejectionCode: "input_schema_rejected",
   }]);
 });
+
+test("a rejection may add a fixed failure code and attachment counts, nothing else", () => {
+  const { lines, subject } = createLog();
+  subject.record("call_1", "create_document", { format: "pdf" }, "spec_rejected", {
+    failure: "SOURCE_UNREAD",
+    listedAttachments: 2,
+    readAttachments: 0,
+  });
+  // A code that is not a fixed code, and counts that are not counts, are dropped.
+  subject.record("call_2", "create_document", { format: "pdf" }, "spec_rejected", {
+    failure: "There is no file att_1 (passport.jpg)",
+    listedAttachments: -1,
+    readAttachments: 1.5,
+  });
+  assert.deepEqual(lines.map(JSON.parse), [
+    {
+      event: "generated_artifact_tool_rejected",
+      toolName: "create_document",
+      requestedFormat: "pdf",
+      rejectionCode: "spec_rejected",
+      failure: "SOURCE_UNREAD",
+      listedAttachments: 2,
+      readAttachments: 0,
+    },
+    {
+      event: "generated_artifact_tool_rejected",
+      toolName: "create_document",
+      requestedFormat: "pdf",
+      rejectionCode: "spec_rejected",
+    },
+  ]);
+});

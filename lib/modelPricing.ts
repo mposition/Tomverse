@@ -30,6 +30,10 @@
 //      existing UsageBucket is never recomputed when this table changes.
 
 import type { AiProvider, AiModel, ModelUsageClass } from "@/lib/models";
+import type {
+    ProviderUsageCostBreakdown,
+    ProviderUsageCostInput,
+} from "@/lib/providerUsageCost";
 
 export type ModelPricingRouting = "direct_provider_api" | "relay";
 
@@ -583,10 +587,10 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         // come out of the 0.1 cached multiplier. The cache-write rates are
         // recorded and not billed -- see ModelPriceTier.
         //
-        // Reachability: this application caps input at 128,000 tokens for a
-        // signed-in account and 16,000 for a guest (lib/chatSecurity.ts), so
-        // the long tier is priced correctly but has never been reached on the
-        // chat path.
+        // Reachability: since long context (2026-11-18) a signed-in account
+        // may send up to the model's window, so the long tier is reachable;
+        // a guest stays at 16,000 tokens (lib/chatInputLimits.ts). See
+        // longContextSettlementRates for how a crossed tier is settled.
         modelId: "gpt-5-6-luna",
         provider: "openai",
         apiModelId: "gpt-5.6-luna",
@@ -707,6 +711,27 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         priceSource: "openai_gpt_5_4_mini_model_page",
         pricingVersion: "openai-gpt-5.4-mini-2026-08-01",
         effectiveDate: "2026-08-01",
+    },
+    {
+        // Cohere documents Command A+ as free for both trial and production
+        // keys until the hosted API rate limit. This profile is intentionally
+        // exact to command-a-plus-05-2026 through api.cohere.com/v2; it does
+        // not price private/Vault deployments. Verified from:
+        // https://docs.cohere.com/docs/command-a-plus
+        modelId: "command-a-plus",
+        provider: "cohere",
+        apiModelId: "command-a-plus-05-2026",
+        ...DIRECT_STANDARD,
+        tiers: flatTier(0, 0),
+        reasoningTokenBilling: "billed_as_output",
+        maxOutputTokens: 64_000,
+        providerMaxOutputTokens: 64_000,
+        reservationOutputTokens: 4_096,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: false,
+        priceSource: "cohere_command_a_plus_hosted_api_free_until_rate_limit",
+        pricingVersion: "cohere-command-a-plus-hosted-free-2026-11-15",
+        effectiveDate: "2026-11-15",
     },
     {
         modelId: "gemini-3-7-flash",
@@ -1198,9 +1223,9 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         //   prompt  > 100,000 tokens: 0.50 in / 0.05 cache hit / 0.625 5m
         //                             cache write / 2.50 out
         // Anthropic counts cache reads and writes in the prompt length. Unlike
-        // the 272K tiers elsewhere in this file, this one is reachable: a
-        // signed-in account's input cap is 128,000 tokens
-        // (lib/chatSecurity.ts).
+        // the 272K tiers elsewhere in this file, this one is reachable even at
+        // the flat 128,000-token account limit; long context reaches the rest
+        // (lib/chatInputLimits.ts).
         //
         // 128,000 is the published synchronous output cap. The production
         // registry row was adopted first; a non-null registry price column
@@ -1371,7 +1396,7 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         // Was reserved at the US$15 / US$60 premium fallback -- six times the
         // real input rate. Leaves PENDING_VERIFIED_PRICE_REGISTER with this.
         // One tier: the published price does not step below the 991K input
-        // ceiling, which is already above CHAT_USER_MAX_INPUT_TOKENS.
+        // ceiling, so there is no tier boundary for long context to cross.
         tiers: flatTier(2.5, 7.5, 0.2),
         reasoningTokenBilling: "billed_as_output",
         maxOutputTokens: 131_072,
@@ -2157,4 +2182,339 @@ export const findPendingPriceRegisterProblems = ({
     }
 
     return problems;
+};
+
+/**
+ * The profile tier a settled prompt actually fell in, when that is another
+ * tier than the one its reservation priced.
+ *
+ * Settlement prices a turn with the rates its reservation snapshotted, chosen
+ * from a token estimate. With long context an account can reach a tier
+ * boundary (GPT-5.6 272K, Grok 4.5 200K, MiniMax M3 512K), and the actual
+ * prompt can land on either side of it. Above it, the provider charges the
+ * long rate while the short one would be recorded. Below it, the reservation
+ * may still have taken the long rate: the tier is chosen with an estimate
+ * margin (LONG_CONTEXT_TIER_ESTIMATE_MARGIN), and the provider then charges
+ * the short one (review r-20261118-080744-15bf85). Either way this answers
+ * with the tier the provider's own count selects, so the turn is settled --
+ * credits and provider cost alike -- at the rate the provider applied.
+ *
+ * Bounded so it never rewrites a price the reservation did not take from these
+ * tiers (review r-20261118-045351-43dc45):
+ * - `reservedPricingVersion` must be the version in force now. A revision that
+ *   took effect after the reservation answers null, so the snapshot is
+ *   settled exactly as before and a price change stays non-retroactive.
+ * - `reservedCostSource` must say the reservation was priced from the
+ *   profile's tiers (`registry` or `registry_long_context`). A registry-row or
+ *   environment flat price, or a class fallback, answers null.
+ *
+ * Also null when the profile has one tier, when there is no profile, or when
+ * the actual prompt is in the reserved tier.
+ */
+export const LONG_CONTEXT_SETTLEMENT_COST_SOURCES: ReadonlySet<string> = new Set([
+    "registry",
+    "registry_long_context",
+]);
+
+export const longContextSettlementTier = (input: {
+    modelId: string;
+    actualPromptTokens: number;
+    reservedLongContextThresholdTokens: number | null;
+    reservedPricingVersion: string | null | undefined;
+    reservedCostSource: string | null | undefined;
+    at?: Date | number;
+}) => {
+    if (!input.reservedCostSource || !LONG_CONTEXT_SETTLEMENT_COST_SOURCES.has(input.reservedCostSource)) {
+        return null;
+    }
+    const profile = pricingById.get(input.modelId);
+    if (!profile) return null;
+    const revision = selectPriceRevision(profile, input.at);
+    const version = revision?.pricingVersion ?? profile.pricingVersion;
+    if (!input.reservedPricingVersion || input.reservedPricingVersion !== version) {
+        return null;
+    }
+    const tiers = revision?.tiers ?? profile.tiers;
+    if (tiers.length < 2) return null;
+    const { tier } = selectTier(tiers, input.actualPromptTokens);
+    // The boundary below the selected tier, walked rather than indexed.
+    let threshold: number | null = null;
+    let below: number | null = null;
+    for (const candidate of tiers) {
+        if (candidate === tier) {
+            threshold = below;
+            break;
+        }
+        below = candidate.maxPromptTokens;
+    }
+    const reserved = input.reservedLongContextThresholdTokens ?? 0;
+    if ((threshold ?? 0) === reserved) return null;
+    return {
+        inputUsdPerMillionTokens: tier.inputUsdPerMillionTokens,
+        outputUsdPerMillionTokens: tier.outputUsdPerMillionTokens,
+        cacheWriteUsdPerMillionTokens: tier.cacheWriteUsdPerMillionTokens ?? null,
+        cachedInputPriceMultiplier: tier.cachedInputPriceMultiplier,
+        longContextThresholdTokens: threshold,
+        /** True when the prompt reached a higher tier than was reserved. */
+        raised: (threshold ?? 0) > reserved,
+    };
+};
+
+export type SettlementRates = {
+    modelId: string;
+    inputUsdPerMillionTokens: number;
+    outputUsdPerMillionTokens: number;
+    cacheWriteUsdPerMillionTokens?: number | null;
+    /** Moved with the tier too: some profiles change it at a boundary. */
+    cachedInputPriceMultiplier?: number;
+    longContextThresholdTokens?: number | null;
+    /** The reservation's `pricingVersion`; absent means "do not correct". */
+    pricingVersion?: string | null;
+    /** The reservation's `costSource`; absent means "do not correct". */
+    costSource?: string | null;
+    /**
+     * Provider calls the reservation allowed (tool loops, Research Preview).
+     * Above 1 the settled input is a sum of calls, not one prompt, so it can
+     * only ever lower the tier: a sum under a boundary puts every call under
+     * it, a sum over one says nothing about any single call
+     * (review r-20261118-083641-09ae82).
+     */
+    providerCallPasses?: number | null;
+};
+
+/**
+ * A snapshot's rates for settling `actualPromptTokens`, moved to the tier the
+ * prompt actually fell in (`longContextSettlementTier`): up to the higher of
+ * the two rates when it crossed a boundary, down to the lower when it stayed
+ * under the boundary its reservation priced.
+ * The one rule every settlement path applies, single-attempt and per-attempt,
+ * so the provider ledger and the reservation cannot disagree.
+ *
+ * With `calls` -- one entry per provider call of a tool loop or Research
+ * Preview, from the SDK's per-step usage -- each call is settled at the tier
+ * its own prompt fell in, and the rates returned are those, weighted by each
+ * call's tokens: priced on the turn's totals they give exactly the sum of the
+ * per-call costs (review r-20261118-090529-1f7c7f). Without them a multi-call
+ * turn (`providerCallPasses` > 1) can only be lowered, as its total is a sum
+ * of prompts and says nothing about any one call.
+ */
+export type ProviderCallUsage = {
+    inputTokens: number;
+    outputTokens: number;
+    cachedInputTokens?: number;
+    cacheWriteInputTokens?: number;
+};
+
+/** The usage a call list is checked against: the turn's (or attempt's) totals. */
+export type SettledUsageTotals = {
+    inputTokens: number;
+    outputTokens: number;
+    cachedInputTokens?: number;
+    cacheWriteInputTokens?: number;
+};
+
+/**
+ * True when the calls are two or more and add up to exactly the usage settled:
+ * input, output, cache reads and cache writes alike (review
+ * r-20261118-102103-16e00a). A step list that disagrees with the totals in any
+ * one of them is not used at all.
+ */
+export const providerCallsCover = (
+    calls: readonly ProviderCallUsage[],
+    usage: SettledUsageTotals
+) => {
+    if (calls.length < 2) return false;
+    const total = (pick: (call: ProviderCallUsage) => number | undefined) =>
+        calls.reduce((sum, call) => sum + (pick(call) ?? 0), 0);
+    return (
+        total((call) => call.inputTokens) === usage.inputTokens &&
+        total((call) => call.outputTokens) === usage.outputTokens &&
+        total((call) => call.cachedInputTokens) === (usage.cachedInputTokens ?? 0) &&
+        total((call) => call.cacheWriteInputTokens) === (usage.cacheWriteInputTokens ?? 0)
+    );
+};
+
+/**
+ * `calls` are used only with the `usage` they must account for, so the rates
+ * recorded beside a settlement are always the ones it was priced at.
+ */
+export const longContextSettlementRates = <T extends SettlementRates>(
+    rates: T,
+    actualPromptTokens: number,
+    calls?: readonly ProviderCallUsage[] | null,
+    usage?: SettledUsageTotals
+): T => {
+    if (calls && usage && providerCallsCover(calls, usage)) {
+        return perCallSettlementRates(rates, calls);
+    }
+    const crossed = longContextSettlementTier({
+        modelId: rates.modelId,
+        actualPromptTokens,
+        reservedLongContextThresholdTokens: rates.longContextThresholdTokens ?? null,
+        reservedPricingVersion: rates.pricingVersion,
+        reservedCostSource: rates.costSource,
+    });
+    if (!crossed) return rates;
+    if (crossed.raised && (rates.providerCallPasses ?? 1) > 1) return rates;
+    // Toward the tier the prompt fell in, and never past it: a raise keeps a
+    // dearer snapshot rate, a lowering never raises a cheaper one.
+    const pick = crossed.raised ? Math.max : Math.min;
+    const cacheWrite = rates.cacheWriteUsdPerMillionTokens;
+    return {
+        ...rates,
+        inputUsdPerMillionTokens: pick(
+            rates.inputUsdPerMillionTokens,
+            crossed.inputUsdPerMillionTokens
+        ),
+        outputUsdPerMillionTokens: pick(
+            rates.outputUsdPerMillionTokens,
+            crossed.outputUsdPerMillionTokens
+        ),
+        cacheWriteUsdPerMillionTokens:
+            typeof cacheWrite === "number" &&
+            typeof crossed.cacheWriteUsdPerMillionTokens === "number"
+                ? pick(cacheWrite, crossed.cacheWriteUsdPerMillionTokens)
+                : cacheWrite,
+        ...(typeof rates.cachedInputPriceMultiplier === "number"
+            ? {
+                  cachedInputPriceMultiplier: pick(
+                      rates.cachedInputPriceMultiplier,
+                      crossed.cachedInputPriceMultiplier
+                  ),
+              }
+            : {}),
+        longContextThresholdTokens: crossed.longContextThresholdTokens,
+    };
+};
+
+const perCallSettlementRates = <T extends SettlementRates>(
+    rates: T,
+    calls: readonly ProviderCallUsage[]
+): T => {
+    // Each call is one prompt, so the one-call rule applies to it in full.
+    const single: T = { ...rates, providerCallPasses: null };
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let inputCost = 0;
+    let outputCost = 0;
+    let cacheWriteCost = 0;
+    let cachedMultiplierWeight = 0;
+    let threshold: number | null = null;
+    for (const call of calls) {
+        const input = Math.max(0, Math.trunc(call.inputTokens) || 0);
+        const output = Math.max(0, Math.trunc(call.outputTokens) || 0);
+        const callRates = longContextSettlementRates(single, input);
+        inputTokens += input;
+        outputTokens += output;
+        inputCost += input * callRates.inputUsdPerMillionTokens;
+        outputCost += output * callRates.outputUsdPerMillionTokens;
+        cacheWriteCost += input * (callRates.cacheWriteUsdPerMillionTokens ?? 0);
+        cachedMultiplierWeight += input * (callRates.cachedInputPriceMultiplier ?? 0);
+        const callThreshold = callRates.longContextThresholdTokens ?? null;
+        if (callThreshold !== null && (threshold === null || callThreshold > threshold)) {
+            threshold = callThreshold;
+        }
+    }
+    if (inputTokens === 0 && outputTokens === 0) return rates;
+    const cacheWrite = rates.cacheWriteUsdPerMillionTokens;
+    return {
+        ...rates,
+        inputUsdPerMillionTokens:
+            inputTokens > 0 ? inputCost / inputTokens : rates.inputUsdPerMillionTokens,
+        outputUsdPerMillionTokens:
+            outputTokens > 0 ? outputCost / outputTokens : rates.outputUsdPerMillionTokens,
+        cacheWriteUsdPerMillionTokens:
+            typeof cacheWrite === "number" && inputTokens > 0
+                ? cacheWriteCost / inputTokens
+                : cacheWrite,
+        ...(typeof rates.cachedInputPriceMultiplier === "number" && inputTokens > 0
+            ? { cachedInputPriceMultiplier: cachedMultiplierWeight / inputTokens }
+            : {}),
+        longContextThresholdTokens: threshold,
+    };
+};
+
+/**
+ * The provider cost of a settled usage, priced at the long-context tier its
+ * prompt fell in -- and for a multi-step turn, each call at its own tier with
+ * its own cache split, summed (reviews r-20261118-090529-1f7c7f and
+ * r-20261118-092832-51f594). Rates averaged over a turn cannot give that sum:
+ * calls differ in how much of their input was cached, and a cached-input
+ * multiplier is capped at 1. `rates` is the reservation's own snapshot, not
+ * rates this rule already moved.
+ *
+ * `cost` is `calculateProviderUsageCost` (lib/providerUsageCost.ts), passed in
+ * so this file keeps no runtime import: scripts load it under plain Node and
+ * replay it from a fixed source list.
+ *
+ * `pricedCacheWrites: false` is the credit view: written tokens count as plain
+ * input, as everywhere else credits are concerned.
+ */
+export const longContextSettledUsageCost = (
+    cost: (input: ProviderUsageCostInput) => ProviderUsageCostBreakdown,
+    rates: SettlementRates & { cachedInputPriceMultiplier?: number },
+    usage: {
+        inputTokens: number;
+        cachedInputTokens?: number;
+        cacheWriteInputTokens?: number;
+        outputTokens: number;
+    },
+    calls?: readonly ProviderCallUsage[] | null,
+    options?: { pricedCacheWrites?: boolean }
+): ProviderUsageCostBreakdown => {
+    const priced = options?.pricedCacheWrites !== false;
+    const costAt = (
+        tokens: {
+            inputTokens: number;
+            cachedInputTokens?: number;
+            cacheWriteInputTokens?: number;
+            outputTokens: number;
+        },
+        callRates: SettlementRates & { cachedInputPriceMultiplier?: number }
+    ) =>
+        cost({
+            inputTokens: tokens.inputTokens,
+            cachedInputTokens: tokens.cachedInputTokens,
+            cacheWriteInputTokens: priced ? tokens.cacheWriteInputTokens : 0,
+            outputTokens: tokens.outputTokens,
+            inputUsdPerMillionTokens: callRates.inputUsdPerMillionTokens,
+            outputUsdPerMillionTokens: callRates.outputUsdPerMillionTokens,
+            cachedInputPriceMultiplier: callRates.cachedInputPriceMultiplier,
+            cacheWriteUsdPerMillionTokens: priced
+                ? callRates.cacheWriteUsdPerMillionTokens ?? null
+                : null,
+        });
+    // The calls are used only when they account for the whole settled usage.
+    // Any other usage -- a turn settled on its reservation estimate, or one
+    // whose steps were not all counted -- is priced on its totals by the
+    // summed-input rule (providerCallPasses), never on a partial list.
+    if (!calls || !providerCallsCover(calls, usage)) {
+        return costAt(usage, longContextSettlementRates(rates, usage.inputTokens));
+    }
+    const single = { ...rates, providerCallPasses: null };
+    const parts = calls.map((call) =>
+        costAt(call, longContextSettlementRates(single, call.inputTokens))
+    );
+    const sum = (pick: (part: ProviderUsageCostBreakdown) => number) =>
+        parts.reduce((total, part) => total + pick(part), 0);
+    // The rates reported beside the sum are the token-weighted ones, for the
+    // record only: the cost is the sum of the calls, not these times totals.
+    const shown = longContextSettlementRates(rates, usage.inputTokens, calls, usage);
+    return {
+        inputTokens: sum((part) => part.inputTokens),
+        uncachedInputTokens: sum((part) => part.uncachedInputTokens),
+        cachedInputTokens: sum((part) => part.cachedInputTokens),
+        cacheWriteInputTokens: sum((part) => part.cacheWriteInputTokens),
+        outputTokens: sum((part) => part.outputTokens),
+        inputUsdPerMillionTokens: shown.inputUsdPerMillionTokens,
+        outputUsdPerMillionTokens: shown.outputUsdPerMillionTokens,
+        cachedInputPriceMultiplier: Math.min(1, shown.cachedInputPriceMultiplier ?? 1),
+        cacheWriteUsdPerMillionTokens: priced ? shown.cacheWriteUsdPerMillionTokens ?? null : null,
+        uncachedInputCostMicroUsd: sum((part) => part.uncachedInputCostMicroUsd),
+        cachedInputCostMicroUsd: sum((part) => part.cachedInputCostMicroUsd),
+        cacheWriteInputCostMicroUsd: sum((part) => part.cacheWriteInputCostMicroUsd),
+        outputCostMicroUsd: sum((part) => part.outputCostMicroUsd),
+        unpricedCacheWriteTokens: sum((part) => part.unpricedCacheWriteTokens),
+        totalCostMicroUsd: sum((part) => part.totalCostMicroUsd),
+    };
 };

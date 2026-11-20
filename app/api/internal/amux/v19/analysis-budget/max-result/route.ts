@@ -13,9 +13,6 @@ import { AmuxSessionBudgetSettlementError,
   "@/lib/amux/ideaSessionAnalysisBudgetSettlementService";
 import { prisma } from "@/lib/prisma";
 
-const WRITE_ENV = "TOMVERSE_AMUX_V19_SESSION_BUDGET_MAX_RESULT_WRITE";
-const CLAIM_READ_ENV = "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ";
-const STOP_READ_ENV = "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_STOP_POLL_READ";
 const uuid = z.string().uuid();
 const bodySchema = z.object({ claimId: uuid, requestId: uuid,
   reservationId: uuid, ideaId: uuid,
@@ -23,7 +20,8 @@ const bodySchema = z.object({ claimId: uuid, requestId: uuid,
   outcome: z.enum(["verified_success", "invocation_failed"]),
   inputTokens: z.number().int().safe().nonnegative(),
   outputTokens: z.number().int().safe().nonnegative(),
-}).strict().refine((body) => body.inputTokens + body.outputTokens > 0 &&
+  // Zero tokens settles at zero instead of being refused (operator, 2026-11-16).
+}).strict().refine((body) =>
   Number.isSafeInteger(body.inputTokens + body.outputTokens));
 
 /** Only the fixed Max launcher records measured usage for its exact claim.
@@ -35,12 +33,6 @@ export async function POST(request: Request): Promise<Response> {
     process.env.TOMVERSE_AMUX_SYNC_SECRET)) {
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
   }
-  if (process.env[WRITE_ENV] !== "enabled" ||
-      process.env[CLAIM_READ_ENV] !== "enabled" ||
-      process.env[STOP_READ_ENV] !== "enabled") {
-    return amuxJsonNoStore({ available: false,
-      reason: "session_budget_max_result_write_disabled" }, 409);
-  }
   if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !==
       "application/json") {
     return amuxJsonNoStore({ error: "Invalid content type." }, 415);
@@ -49,8 +41,6 @@ export async function POST(request: Request): Promise<Response> {
   try { body = await readLimitedJson(request, 1_024, bodySchema); }
   catch { return amuxJsonNoStore({ error: "Invalid request." }, 400); }
   if (body.outcome === "verified_success" &&
-      process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_WRITE === "enabled" &&
-      process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_READ === "enabled" &&
       process.env.TOMVERSE_AMUX_V19_SESSION_ANALYSIS_RESULT_RETENTION === "enabled" &&
       process.env.TOMVERSE_AMUX_V19_READ_MANIFEST_RETENTION === "enabled") {
     return amuxJsonNoStore({ error: "session_result_required" }, 409);

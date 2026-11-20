@@ -11,7 +11,7 @@ export function createServerLatency(id: string, now = () => performance.now()) {
   const duration = (since: number) => Math.max(0, Math.min(3_600_000, Math.round(now() - since)));
   return {
     dimensions,
-    stage(key: "routingMs" | "contextMs") {
+    stage(key: "routingMs" | "contextMs" | "presearchMs") {
       const since = now();
       if (key === "routingMs") timings.beforeRoutingMs = duration(started);
       return () => {

@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 
 import { ADMIN_NAVIGATION, ADMIN_UNLISTED_PAGES } from "../lib/adminNavigation.ts";
 import { adminAgentOfficeMessages } from "../lib/adminMessages/agentOffice.ts";
+import { adminAutoRouterOptimizerMessages } from "../lib/adminMessages/autoRouterOptimizer.ts";
 import { adminAgentOfficeFloorMessages } from "../lib/adminMessages/agentOfficeFloor.ts";
 import {
   AGENT_OFFICE_BLOCKED_DEPTS,
@@ -43,6 +44,7 @@ import {
   reviewQuotaView,
   reviewRoomView,
   researchTone,
+  routingGateRejected,
   routingLiveDept,
   routingTone,
   marketingLiveDept,
@@ -90,6 +92,8 @@ import {
   TEAM_ROOM_DESKS,
   ZONES,
   agentOfficeChannel,
+  agentOfficeQuotaChannel,
+  AGENT_OFFICE_QUOTA_CHANNELS,
   agentOfficeFloorLayout,
   floorLightAt,
   islandDeskCount,
@@ -780,6 +784,13 @@ test("the AMUX room sits under the teams, with an island for each CLI channel th
     ["anthropic", "openai", "github-copilot", "cursor", "devin"].map(agentOfficeChannel),
     ["claude", "codex", "copilot", "cursor", null]
   );
+  // Antigravity has no island yet but its own quota-card row.
+  assert.equal(agentOfficeChannel("antigravity"), null);
+  assert.deepEqual(
+    ["anthropic", "cursor", "antigravity", "devin"].map(agentOfficeQuotaChannel),
+    ["claude", "cursor", "antigravity", null]
+  );
+  assert.deepEqual(AGENT_OFFICE_QUOTA_CHANNELS, ["claude", "codex", "copilot", "cursor", "antigravity"]);
 });
 
 test("a worker's record decides where it is drawn, and nobody disappears from the floor", () => {
@@ -1227,14 +1238,66 @@ test("the routing room's colour and lines follow the latest optimizer cycle and 
   assert.equal(running.badge, "Running");
   assert.equal(running.line, "Latest routing cycle running since 10-20 14:00 AEST");
 
-  // A failed or errored cycle needs a look and names its code.
-  const failed = room({ last: routingLast({ status: "failed", failure: "gate_regression" }) });
-  assert.equal(failed.status, "attention");
-  assert.equal(failed.badge, "Failed");
-  assert.equal(failed.line, "Latest routing cycle failed · 10-20 14:05 AEST · gate_regression");
+  // The gate turning a proposal down is the cycle working as designed: done,
+  // with the outcome in the line and the optimizer's reason in the detail.
+  // 2026-11-10 13:31 AEST: failed/evidence_below read "needs a look" though nothing was wrong.
+  const rejected = room({ last: routingLast({ status: "failed", failure: "evidence_below" }) });
+  assert.equal(rejected.status, "done");
+  assert.equal(rejected.badge, "Kept current");
+  assert.equal(
+    rejected.line,
+    "Latest routing proposal did not clear the bar, so the current guidance stays · 10-20 14:05 AEST"
+  );
+  assert.ok(
+    rejected.detail.startsWith(`${adminAutoRouterOptimizerMessages.en.reasons.evidence_below} · ${en.whereToLook} · $3.20`)
+  );
+  assert.doesNotMatch(rejected.line, /failed|evidence_below/);
+  for (const failure of [
+    "candidate_invalid",
+    "too_few_cases",
+    "too_many_unrouted",
+    "too_few_decided",
+    "evidence_below",
+    "win_share_below",
+    "credits_above",
+  ]) {
+    assert.equal(tone({ last: routingLast({ status: "failed", failure }) }), "done", failure);
+    assert.equal(routingGateRejected({ status: "failed", failure }), true, failure);
+  }
+  // A cycle that stopped at its budget before judging, or an unknown or missing
+  // failure code, still needs a look: nothing was judged.
+  const budget = room({ last: routingLast({ status: "failed", failure: "budget_exhausted" }) });
+  assert.equal(routingGateRejected({ status: "failed", failure: "cost_unknown" }), false);
+  assert.equal(budget.status, "attention");
+  assert.equal(budget.badge, "Failed");
+  assert.equal(budget.line, "Latest routing cycle failed · 10-20 14:05 AEST");
+  assert.ok(budget.detail.startsWith(`${adminAutoRouterOptimizerMessages.en.reasons.budget_exhausted} · ${en.whereToLook}`));
+  assert.equal(tone({ last: routingLast({ status: "failed", failure: "gate_regression" }) }), "attention");
+  assert.match(room({ last: routingLast({ status: "failed", failure: "gate_regression" }) }).detail, /^gate_regression · /);
+  assert.equal(tone({ last: routingLast({ status: "failed", failure: null }) }), "attention");
+  // An errored cycle needs a look whatever its code.
   const errored = room({ last: routingLast({ status: "error", failure: null }) });
   assert.equal(errored.status, "attention");
-  assert.equal(errored.line, "Latest routing cycle errored · 10-20 14:05 AEST · unknown");
+  assert.equal(errored.badge, "Error");
+  assert.equal(errored.line, "Latest routing cycle errored · 10-20 14:05 AEST");
+  assert.match(errored.detail, /^unknown · /);
+  for (const failure of ["run_error", "interrupted", "evidence_below"]) {
+    assert.equal(tone({ last: routingLast({ status: "error", failure }) }), "attention", failure);
+    assert.equal(routingGateRejected({ status: "error", failure }), false, failure);
+  }
+  assert.ok(
+    room({ last: routingLast({ status: "error", failure: "run_error" }) }).detail.startsWith(
+      adminAutoRouterOptimizerMessages.en.reasons.run_error
+    )
+  );
+  assert.equal(routingGateRejected({ status: "passed", failure: null }), false);
+  // A cap reached outranks a gate rejection.
+  const rejectedAtCap = room({
+    last: routingLast({ status: "failed", failure: "evidence_below" }),
+    monthCycles: [{ createdAt: routingAt("2026-10-20T01:00:00Z"), spentMicroUsd: 25_000_000 }],
+  });
+  assert.equal(rejectedAtCap.status, "attention");
+  assert.equal(rejectedAtCap.badge, "Cap reached");
 
   // A cap reached needs a look even after a pass, and the badge says so.
   const dayCap = room({ monthCycles: [{ createdAt: routingAt("2026-10-20T01:00:00Z"), spentMicroUsd: 25_000_000 }] });
@@ -1255,12 +1318,17 @@ test("the routing room's colour and lines follow the latest optimizer cycle and 
   const koPassed = room({}, ko);
   assert.equal(koPassed.badge, "합격");
   assert.equal(koPassed.line, "직전 라우팅 cycle 합격 · 10-20 14:05 AEST");
+  const koRejected = room({ last: routingLast({ status: "failed", failure: "evidence_below" }) }, ko);
+  assert.equal(koRejected.badge, "기존 유지");
+  assert.equal(koRejected.line, "직전 라우팅 개선안이 기준을 넘지 못해 기존 지침 유지 · 10-20 14:05 AEST");
+  assert.ok(koRejected.detail.startsWith(`${adminAutoRouterOptimizerMessages.ko.reasons.evidence_below} · ${ko.whereToLook}`));
+  assert.doesNotMatch(koRejected.line, /실패/);
   assert.match(koPassed.detail, /^오늘 \$3\.20 \/ \$25\.00 · 이번 달 \$15\.20 \/ \$150\.00 · 마지막 승격 /);
 
   // Both languages carry every badge.
   for (const locale of ["en", "ko"]) {
     const words = adminAgentOfficeMessages[locale].real.routing;
-    for (const key of ["running", "passed", "failed", "error", "none", "unread", "cap"]) {
+    for (const key of ["running", "passed", "rejected", "failed", "error", "none", "unread", "cap"]) {
       assert.ok(words.badges[key], `${locale}: ${key}`);
     }
   }
@@ -2323,6 +2391,22 @@ test("the quota card shows each reviewer's quota as the review server read it, a
   assert.ok(silent.rows.every((row) => row.status === "waiting"));
   assert.equal(silent.rows[0].amount, "62% 남음");
   assert.equal(silent.note, "10-09 10:58 AEST 기준 · 이후 보고 없음");
+  // One agy login, one lane per model: a spent Argon week is that lane's row
+  // only, never the reading for Antigravity as a whole (owner, 2026-11-19).
+  const agyLanes = [
+    { id: "antigravity-argon", vendor: "google", enabled: true, running: 0, maxConcurrent: 1, quota: { state: "exhausted", remaining: 0, unit: "percent" } },
+    { id: "antigravity-hydrogen", vendor: "google", enabled: true, running: 0, maxConcurrent: 1, quota: { state: "available", remaining: 98.4, unit: "percent" } },
+    { id: "antigravity-opus", vendor: "anthropic", enabled: true, running: 0, maxConcurrent: 1, quota: { state: "available", remaining: 100, unit: "percent" } },
+  ];
+  assert.equal(reviewStatusSnapshotSchema.safeParse(reviewSnapshot({ providers: [...quotaProviders, ...agyLanes] })).success, true);
+  assert.deepEqual(
+    reviewQuotaView(state(agyLanes), copy).rows.map((row) => [row.id, row.status, row.amount]),
+    [
+      ["antigravity-argon", "attention", "0% 남음"],
+      ["antigravity-hydrogen", "done", "98% 남음"],
+      ["antigravity-opus", "done", "100% 남음"],
+    ]
+  );
   // No quota field at all: the card says the server needs the update.
   assert.deepEqual(reviewQuotaView(state(reviewSnapshot().providers), copy), { rows: [], note: copy.notSent });
   assert.deepEqual(reviewQuotaView({ kind: "not_reporting" }, copy), { rows: [], note: copy.notReporting });

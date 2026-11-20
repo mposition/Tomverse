@@ -23,7 +23,7 @@ const pick = (markup: string) =>
     ? adminAmuxSessionBudgetResolutionMessages.ko
     : adminAmuxSessionBudgetResolutionMessages.en;
 
-test("the panel opens as an unread list with the halt-marker instruction", () => {
+test("the panel opens as an unread list and says the runner moves on by itself", () => {
   const markup = renderToStaticMarkup(createElement(AmuxSessionBudgetResolutionPanel));
   const m = pick(markup);
   assert.match(markup, /data-testid="amux-session-budget-resolution"/);
@@ -35,8 +35,11 @@ test("the panel opens as an unread list with the halt-marker instruction", () =>
   assert.ok(markup.includes(html(m.refresh)));
   for (const messages of [adminAmuxSessionBudgetResolutionMessages.en,
     adminAmuxSessionBudgetResolutionMessages.ko]) {
-    assert.match(messages.haltHint, /halt/);
+    // Operator, 2026-11-16: nothing waits for a person to remove a marker.
+    assert.doesNotMatch(messages.haltHint, /by hand|직접 지워/);
+    assert.doesNotMatch(messages.resolved, /halt/);
   }
+  assert.match(adminAmuxSessionBudgetResolutionMessages.en.hint, /subscription analysis never waits here/);
 });
 
 test("a row offers only its read-back until the exact claim is read", () => {
@@ -63,7 +66,7 @@ test("a subscription row says its headroom returns instead of being counted as u
   assert.match(en.consumeHintShadow, /instead of counting it as used/);
   assert.match(ko.consumeHintShadow, /사용으로 세지 않고/);
   assert.doesNotMatch(en.consumeHintShadow, /full reserved amount as used/);
-  for (const messages of [en, ko]) assert.match(messages.resolvedShadow, /halt/);
+  for (const messages of [en, ko]) assert.doesNotMatch(messages.resolvedShadow, /halt/);
 });
 
 test("the panel offers no proof-of-no-start path and resolves only as not_proven", () => {
@@ -76,12 +79,14 @@ test("the panel offers no proof-of-no-start path and resolves only as not_proven
 });
 
 test("list and read-back replies are read strictly", () => {
-  const list = { state: "unknown_list", rows: [row], total: 3, limit: 20,
+  // Every unresolved claim is listed (operator, 2026-11-16).
+  const list = { state: "unknown_list", rows: [row], total: 1,
     retryAutomatically: false };
-  assert.deepEqual(readSessionBudgetUnknownList(list), { rows: [row], total: 3, limit: 20 });
+  assert.deepEqual(readSessionBudgetUnknownList(list), { rows: [row], total: 1 });
   assert.deepEqual(readSessionBudgetUnknownList({ ...list, rows: [], total: 0 }),
-    { rows: [], total: 0, limit: 20 });
+    { rows: [], total: 0 });
   for (const broken of [null, { ...list, state: "readback" }, { ...list, total: 0 },
+    { ...list, total: 3 },
     { ...list, rows: [{ ...row, claimId: "not-a-uuid" }] },
     { ...list, rows: "none" }]) {
     assert.equal(readSessionBudgetUnknownList(broken), null);

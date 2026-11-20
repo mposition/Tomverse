@@ -1,10 +1,7 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
 
-import {
-    autoProductBoundary,
-    chatSurfaceAvailable,
-} from "../lib/autoProductBoundary.ts";
+import { autoProductBoundary } from "../lib/autoProductBoundary.ts";
 import { selectAutoModel } from "../lib/autoModelSelection.ts";
 import { autoUiAvailability } from "../lib/autoRoutingUi.ts";
 import { AVAILABLE_MODELS } from "../lib/models.ts";
@@ -226,11 +223,3 @@ test("a manual Chat conversation is still reported as manual, not as a product r
     assert.equal(selection.reason, "conversation_is_manual");
 });
 
-/* ------------------------------------------------------- surface entry */
-
-test("chatSurfaceAvailable reads the same availability the toggle does", () => {
-    // Two callers computing availability separately is exactly the drift that
-    // produces a control which saves and changes nothing.
-    assert.equal(chatSurfaceAvailable({ offered: true }), true);
-    assert.equal(chatSurfaceAvailable({ offered: false }), false);
-});

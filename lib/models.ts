@@ -3,6 +3,7 @@ import { resolveModelPricing } from "@/lib/modelPricing";
 export type AiProvider =
     | "openai"
     | "anthropic"
+    | "cohere"
     | "google"
     | "groq"
     | "xai"
@@ -165,7 +166,7 @@ export type AiModel = {
     inputUsdPerMillionTokens?: number;
     outputUsdPerMillionTokens?: number;
     cachedInputPriceMultiplier?: number;
-} & ModelWebSearchOverrideField;
+} & ModelWebSearchOverrideField & ModelFileToolsOverrideField;
 
 const FULL_BINARY_INPUT = {
     image: true,
@@ -233,6 +234,11 @@ export const AVAILABLE_MODELS = [
     // the app's own input ceiling is 128K (lib/chatSecurity.ts), so this only
     // ever guards the combined input+output check.
     { id: "gpt-5-4-mini", name: "GPT-5.4 mini", apiModel: "gpt-5.4-mini", provider: "openai", icon: "🤖", bestFor: "Fast everyday questions and concise document work", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", contextWindowTokens: 400_000, inputCapabilities: FULL_BINARY_INPUT },
+
+    // Cohere hosts Command A+ at its fixed public v2 endpoint without token
+    // charges for trial and production keys until the documented rate limit.
+    // This exact model/host contract does not apply to private deployments.
+    { id: "command-a-plus", name: "Command A+", apiModel: "command-a-plus-05-2026", provider: "cohere", icon: "C", bestFor: "Long-form enterprise analysis and tool-assisted work", minimumPlan: "Free", usageClass: "advanced", creditWeight: 1, publiclyListed: true, enabled: true, status: "enabled", reasoning: "none", contextWindowTokens: 128_000, inputCapabilities: { image: false, nativePdf: false }, webSearchOverride: "app-managed", maxOutputTokens: 64_000, reservationOutputTokens: 4_096 },
 
     { id: "claude-fable-5", name: "Claude Fable 5", apiModel: "claude-fable-5", provider: "anthropic", icon: "🧠", bestFor: "Polished writing, planning, and long-form analysis", minimumPlan: "Pro", usageClass: "premium-reasoning", creditWeight: 20, enabled: true, status: "enabled", reasoning: "high", contextWindowTokens: 1_000_000, inputCapabilities: FULL_BINARY_INPUT },
     // Stable Tomverse ID upgraded in place. Stored conversations and historic
@@ -722,6 +728,35 @@ export const resolveReplacementModel = <
     return undefined;
 };
 
+/**
+ * Who stands in for a retired model that was only nominal -- the id an Auto
+ * conversation carries but does not choose by. The operator-named replacement
+ * chain first, then the app default; undefined when neither can serve. Not for
+ * a model a user picked: that request is refused with the replacement named.
+ */
+export const resolveRetiredModelSuccessor = <
+    T extends Pick<
+        AiModel,
+        | "id"
+        | "enabled"
+        | "publiclyListed"
+        | "status"
+        | "catalogDeleted"
+        | "replacementModelId"
+    >,
+>(
+    model: Pick<AiModel, "id" | "replacementModelId">,
+    lookup: (candidateId: string) => T | undefined,
+    appDefaultModelId: string
+): { successor: T; via: "replacement" | "app_default" } | undefined => {
+    const named = resolveReplacementModel(model, lookup);
+    if (named) return { successor: named, via: "replacement" };
+    const appDefault = lookup(appDefaultModelId);
+    return appDefault && appDefault.id !== model.id && isPubliclySelectableModel(appDefault)
+        ? { successor: appDefault, via: "app_default" }
+        : undefined;
+};
+
 if (!isEnabledModelId(DEFAULT_MODEL_ID)) {
     throw new Error(`Default model "${DEFAULT_MODEL_ID}" must be enabled.`);
 }
@@ -757,4 +792,15 @@ export type ModelWebSearchOverrideField = {
     // module. It holds the closed list (`WEB_SEARCH_OVERRIDES`) and fails to
     // compile if the two ever name different values.
     webSearchOverride?: "off" | "app-managed";
+};
+
+/**
+ * An administrator's tick or untick of the file tools for one model, from the
+ * runtime registry (`ModelRegistryEntry.fileToolsOverride`). Joined on below
+ * the catalogue for the same reason as the web search override. Absent means
+ * "follow the code" -- see `autoArtifactToolSupport` in
+ * lib/generatedArtifactToolPolicy.ts.
+ */
+export type ModelFileToolsOverrideField = {
+    fileToolsOverride?: boolean;
 };

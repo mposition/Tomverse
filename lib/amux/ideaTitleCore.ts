@@ -2,16 +2,16 @@
  * The plaintext title an AMUX idea is listed under (owner decision 2026-11-04).
  * An idea's body is encrypted and a lane idea registers no card, so without it
  * the Ideas tab could only show a request id. The title is the body's first
- * non-blank line, trimmed and cut to AMUX_IDEA_TITLE_MAX characters; no model
- * call makes it. It lives only while the body does: the raw purge clears both
+ * non-blank line, whole and trimmed (owner direction 2026-11-15: no 80-character
+ * cut; the screens wrap a long one); no model call makes it. It lives only
+ * while the body does: the raw purge clears both
  * (lib/amux/ideaRawRetentionService.ts, CHECK AmuxIdeaSubmission_title_check).
+ * Nothing indexes the column, so it has no length limit of its own
+ * (prisma/migrations/20261116010700_amux_idea_title_no_length_cap).
  *
- * The backfill in prisma/migrations/20261104130000_amux_idea_title repeats this
- * rule in SQL for Scout suggestions already sent; keep the two in step.
+ * The backfill in prisma/migrations/20261104130000_amux_idea_title repeated the
+ * former 80-character rule in SQL for Scout suggestions already sent.
  */
-
-export const AMUX_IDEA_TITLE_MAX = 80;
-
 /** suggestionIdeaText (lib/productResearchScoutCore.ts) opens a Scout idea with it. */
 const SCOUT_PREFIX = "[Scout 제안]";
 
@@ -20,11 +20,6 @@ export function amuxIdeaTitleFromText(text: string): string | null {
   if (line === undefined) return null;
   let title = line.replace(/\p{Cc}/gu, " ").replace(/\s+/g, " ").trim();
   if (title.startsWith(SCOUT_PREFIX)) title = title.slice(SCOUT_PREFIX.length).trim();
-  // Code points, so a cut never splits a surrogate pair and matches SQL char_length.
-  const points = Array.from(title);
-  if (points.length > AMUX_IDEA_TITLE_MAX) {
-    title = `${points.slice(0, AMUX_IDEA_TITLE_MAX - 1).join("").trimEnd()}…`;
-  }
   return title === "" ? null : title;
 }
 

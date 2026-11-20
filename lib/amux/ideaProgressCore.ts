@@ -103,13 +103,13 @@ export function amuxIdeaProgress(facts: AmuxIdeaProgressFacts): AmuxIdeaProgress
 
   if (facts.cancelled || facts.state === "cancelled") return at("cancelled");
   // The lane skips analysis and approvals: its run is the execution, its
-  // draft PR the review, its observed merge done; a run out of attempts or a
-  // PR closed without a merge needs the owner's look.
+  // draft PR the review, its observed merge done; a PR closed without a merge
+  // needs the owner's look.
   if (facts.lane) {
     const { state } = facts.lane;
     return { stage: state === "merged" ? "done" : state === "pr_open" || state === "pr_closed" ? "review" : "execution",
-      waitingFor: null, activity: state === "running" ? "running" : state === "queued" ? "waiting" : state === "failed" ? "blocked" : null,
-      attention: state === "failed" || state === "pr_closed", tasks: counts };
+      waitingFor: null, activity: state === "running" ? "running" : state === "queued" ? "waiting" : null,
+      attention: state === "pr_closed", tasks: counts };
   }
   if (latest && (latest.state === "in_flight" ||
     (latest.previewState !== null && ACTIVE_PREVIEW.has(latest.previewState)) ||
@@ -162,7 +162,7 @@ export function amuxIdeaProgress(facts: AmuxIdeaProgressFacts): AmuxIdeaProgress
  * names what the owner can do, or that there is nothing to do. Null: another part
  * of the page already says it (a finished or cancelled idea, a session review).
  */
-export type AmuxIdeaStatusNoticeKind = "attention" | "lane_running" | "lane_waiting" | "lane_failed" | "lane_pr_closed" |
+export type AmuxIdeaStatusNoticeKind = "attention" | "lane_running" | "lane_waiting" | "lane_pr_closed" |
   "analysis_running" | "analysis_waiting" | "analysis_queued" | "execution_running" | "execution_waiting" |
   "execution_blocked" | "execution_approval" | "continuation" | "owner_input" | "plan_approval" | "plan_finished" | "review";
 
@@ -171,7 +171,7 @@ export function amuxIdeaStatusNotice(progress: Pick<AmuxIdeaProgress, "stage" | 
 }): AmuxIdeaStatusNoticeKind | null {
   if (progress.stage === "cancelled") return null;
   if (progress.lane) {
-    return ({ running: "lane_running", queued: "lane_waiting", failed: "lane_failed", pr_closed: "lane_pr_closed",
+    return ({ running: "lane_running", queued: "lane_waiting", pr_closed: "lane_pr_closed",
       pr_open: "review", merged: null } as const)[progress.lane.state];
   }
   if (progress.attention) return "attention";
@@ -202,6 +202,7 @@ export const AMUX_IDEA_BLOCK_REASONS = [
   "assignment_mismatch", "contract_path_touched", "incident_frozen", "orchestrator_halted",
   "cli_turn_limit", "cli_execution_error", "cli_budget_limit",
   "analysis_stop", "analysis_replan", "review_server_rejected_twice",
+  "dependency_closed",
 ] as const;
 export type AmuxIdeaBlockReason = typeof AMUX_IDEA_BLOCK_REASONS[number];
 const isBlockReason = (value: string | null | undefined): value is AmuxIdeaBlockReason =>

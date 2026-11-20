@@ -48,6 +48,19 @@ const EXEMPT_MUTATION_PATHS = [
   "/api/auth/mobile/logout",
   // App-owned email proof; default-off, no ambient session, existing OTP limits.
   "/api/auth/mobile/email",
+  // External inference API (docs/policy/external-api.md). Called by coding
+  // tools (Aside, VS Code), not browsers, so there is no Origin to send. The
+  // credential is a Bearer key the caller must hold -- not an ambient cookie
+  // a hostile page could make a browser attach. Same condition as the mobile
+  // paths: the handler never reads a session or cookie, and
+  // tests/externalApiBoundary.test.mjs fails if it starts to. Exact path only;
+  // key management under /api/user/api-keys keeps this check.
+  "/api/v1/chat/completions",
+  // The native protocols on the same Bearer-only condition: Claude Code
+  // (Anthropic Messages and its token count) and Codex (Responses).
+  "/api/v1/responses",
+  "/api/anthropic/v1/messages",
+  "/api/anthropic/v1/messages/count_tokens",
 ];
 
 const parseOrigin = (value: string | null) => {

@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { APP_DEFAULTS } from "../lib/appDefaults.ts";
-import { ENABLED_MODELS } from "../lib/models.ts";
+import { DEFAULT_MODEL_ID, ENABLED_MODELS } from "../lib/models.ts";
 import { getWebSearchCapability } from "../lib/webSearchCapability.ts";
 import {
   artifactUnavailableNotice,
   ARTIFACT_TOOL_CAPABILITIES,
+  autoArtifactToolSupport,
   getArtifactToolSupport,
   nativeSearchBlocksArtifactTool,
   planGeneratedArtifactTool,
@@ -16,8 +17,10 @@ import {
 
 const plan = (overrides = {}) =>
   planGeneratedArtifactTool({
-    modelId: "gpt-5-6-luna",
-    provider: "openai",
+    modelId: DEFAULT_MODEL_ID,
+    provider: defaultModel.provider,
+    usageClass: defaultModel.usageClass,
+    fileToolsOverride: defaultModel.fileToolsOverride,
     isAuthenticated: true,
     canPersist: true,
     nativeSearchEnabled: false,
@@ -25,6 +28,9 @@ const plan = (overrides = {}) =>
     conversationKind: "chat",
     ...overrides,
   });
+
+const defaultModel = ENABLED_MODELS.find((model) => model.id === DEFAULT_MODEL_ID);
+assert.ok(defaultModel, "the default model is enabled");
 
 /* -------------------------------------------------------------------------- */
 /* The decision                                                                 */
@@ -34,6 +40,13 @@ test("a signed-in account on a verified model gets the tool", () => {
   const result = plan();
   assert.equal(result.mode, "generate");
   assert.equal(result.registerTool, true);
+});
+
+test("the default model can create files", () => {
+  const result = plan();
+  assert.equal(result.mode, "generate");
+  assert.equal(result.registerTool, true);
+  assert.equal(getArtifactToolSupport(DEFAULT_MODEL_ID), "verified");
 });
 
 test("a guest gets the tool, and it refuses", () => {
@@ -278,6 +291,35 @@ test("an unknown model is unverified rather than assumed to work", () => {
   assert.equal(getArtifactToolSupport("a-model-nobody-added"), "unverified");
 });
 
+test("an unverified catalogue model prompt names verified active models (manual turns only), not itself", () => {
+  const unverifiedModel = ENABLED_MODELS.find(
+    (model) => getArtifactToolSupport(model) === "unverified"
+  );
+  assert.ok(unverifiedModel, "expected an unverified enabled catalogue model");
+
+  for (const autoRouted of [false, true]) {
+    const result = plan({
+      modelId: unverifiedModel.id,
+      provider: unverifiedModel.provider,
+      autoRouted,
+    });
+    const verifiedActiveModels = ENABLED_MODELS.filter(
+      (model) => model.enabled && getArtifactToolSupport(model) === "verified"
+    );
+    // A manual turn names models to choose; an Auto turn names none -- Auto
+    // made the choice, and asking again is the remedy.
+    assert.equal(
+      verifiedActiveModels.some((model) => result.systemPrompt.includes(model.name)),
+      !autoRouted,
+      `autoRouted=${autoRouted}: which models the prompt names`
+    );
+    assert.ok(
+      !result.systemPrompt.includes(unverifiedModel.name),
+      `autoRouted=${autoRouted}: prompt must not identify the unverified model as supported`
+    );
+  }
+});
+
 test("the default models can create files", () => {
   // Off the registry, a new account's file request is told to pick another
   // model. That went unnoticed from the default's change on 2026-10-12 until the
@@ -390,7 +432,6 @@ test("the prompt never states a bare per-answer file limit", () => {
   assert.equal(/\d+ files per answer/.test(prompt), false);
 });
 
-
 test("artifact unavailable notices require a file request and an actionable off reason", () => {
   const input = { requiresFileGeneration: true, fileCapableModelIds: ["first", "second"] };
   for (const mode of ["generate", "sign_in_required", "off"]) {
@@ -406,4 +447,163 @@ test("artifact unavailable notices require a file request and an actionable off 
   assert.deepEqual(artifactUnavailableNotice({ ...plan(), mode: "off", offReason: "model_unverified" }, {
     ...input, fileCapableModelIds: [],
   }), { reason: "model_unverified" });
+});
+
+/* -------------------------------------------------------------------------- */
+/* convert_files                                                                */
+/* -------------------------------------------------------------------------- */
+
+// docs/policy/generated-artifacts.md section 14.
+//
+// The refusal this exists to remove: Auto answered on a model that can create
+// files, the user attached two photographs and asked for one PDF, and the
+// model said it could not load the images -- every tool it had took content it
+// had to write, and a photograph is not content a model can write.
+
+test("an attached image registers the conversion tool and names its handle", () => {
+  const result = plan({ turnAttachments: attached("image/jpeg", "image/png") });
+  assert.equal(result.mode, "generate");
+  assert.equal(result.registerFileConversion, true);
+  assert.match(result.systemPrompt, /`convert_files` is available for this message/);
+  assert.match(result.systemPrompt, /operation: "to_pdf"/);
+  assert.match(result.systemPrompt, /The files it can read here: `att_1`, `att_2`\./);
+  assert.match(
+    result.systemPrompt,
+    /Never answer that attached images cannot be\s+made into a PDF/
+  );
+});
+
+test("a PDF or a spreadsheet registers it too; a file it cannot read does not", () => {
+  assert.equal(plan({ turnAttachments: attached("application/pdf") }).registerFileConversion, true);
+  assert.equal(plan({ turnAttachments: attached(XLSX) }).registerFileConversion, true);
+  assert.equal(plan({ turnAttachments: attached("text/csv") }).registerFileConversion, true);
+
+  const wordOnly = plan({ turnAttachments: attached(DOCX) });
+  assert.equal(wordOnly.registerFileConversion, false);
+  assert.equal(wordOnly.systemPrompt.includes("is available for this message. Use it when the user\nwants these files themselves"), false);
+
+  // Only the readable file is offered as a source.
+  const mixed = plan({ turnAttachments: attached(DOCX, "image/webp") });
+  assert.match(mixed.systemPrompt, /The files it can read here: `att_2`\./);
+});
+
+test("a turn with no attachments does not register it, and still says how to get one", () => {
+  const result = plan();
+  assert.equal(result.registerFileConversion, false);
+  assert.equal(result.systemPrompt.includes("is available for this message"), false);
+  // The request that arrives a message after the files: the model must ask
+  // for them rather than conclude the product cannot do it.
+  assert.match(result.systemPrompt, /send the\s+request again with the files attached/);
+  assert.match(result.systemPrompt, /never say it cannot be done/);
+});
+
+test("every turn that cannot make files leaves the conversion tool out", () => {
+  const images = attached("image/jpeg");
+  for (const overrides of [
+    { isAuthenticated: false },
+    { canPersist: false },
+    { modelId: "some-unverified-model", provider: "qwen" },
+    { conversationKind: "image" },
+    { provider: "openai", nativeSearchEnabled: true, nativeSearchForced: true },
+  ]) {
+    const result = plan({ ...overrides, turnAttachments: images });
+    assert.equal(result.registerFileConversion, false, JSON.stringify(overrides));
+    assert.equal(result.systemPrompt.includes("convert_files"), false, JSON.stringify(overrides));
+  }
+});
+
+test("the operator's switch removes the tool and every mention of it", () => {
+  const result = plan({
+    turnAttachments: attached("image/jpeg"),
+    fileConversionEnabled: false,
+  });
+  assert.equal(result.mode, "generate");
+  assert.equal(result.registerFileConversion, false);
+  assert.equal(result.systemPrompt.includes("convert_files"), false);
+});
+
+/* -------------------------------------------------------------------------- */
+/* Office to PDF through the renderer (policy section 15)                       */
+/* -------------------------------------------------------------------------- */
+
+const PPTX = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+
+test("a Word or PowerPoint file registers convert_files only while the renderer is on", () => {
+  const off = plan({ turnAttachments: attached(DOCX) });
+  assert.equal(off.registerFileConversion, false);
+  assert.match(off.systemPrompt, /layout is rebuilt rather than copied/);
+
+  const on = plan({ turnAttachments: attached(DOCX, PPTX), officeRenderingEnabled: true });
+  assert.equal(on.registerFileConversion, true);
+  assert.match(on.systemPrompt, /The files it can read here: `att_1`, `att_2`\./);
+  assert.match(on.systemPrompt, /a PDF that keeps its layout/);
+  assert.match(on.systemPrompt, /becomes a PDF \*with its\s+layout\*/);
+});
+
+test("the renderer switch follows the conversion switch", () => {
+  const result = plan({
+    turnAttachments: attached(DOCX),
+    officeRenderingEnabled: true,
+    fileConversionEnabled: false,
+  });
+  assert.equal(result.registerFileConversion, false);
+  assert.equal(result.systemPrompt.includes("keeps its layout"), false);
+});
+
+/* -------------------------------------------------------------------------- */
+/* Pictures in documents (policy section 16)                                    */
+/* -------------------------------------------------------------------------- */
+
+test("an attached image or PDF tells the model it can place pictures in a document", () => {
+  for (const type of ["image/png", "application/pdf"]) {
+    const result = plan({ turnAttachments: attached(type) });
+    assert.match(result.systemPrompt, /add an `image`\s+block to `create_document`/);
+    assert.match(result.systemPrompt, /place its figures this way rather than describing/);
+  }
+  assert.equal(plan({ turnAttachments: attached(DOCX) }).systemPrompt.includes("add an `image`"), false);
+  assert.equal(plan().systemPrompt.includes("add an `image`"), false);
+});
+
+/* ------------------------------------------------------------------------ */
+/* The catalogue's file-tool tick                                             */
+/* ------------------------------------------------------------------------ */
+
+test("a model the register does not list is recognised by its provider", () => {
+  // 2026-11-13: one Auto candidate in 27 could create files, because the
+  // register named only older ids. A new OpenAI, Anthropic or Google chat model
+  // is file-capable as soon as it is added.
+  for (const [id, provider] of [
+    ["claude-haiku-5-5", "anthropic"],
+    ["gpt-7-luna", "openai"],
+    ["gemini-4-flash", "google"],
+  ]) {
+    assert.equal(autoArtifactToolSupport({ id, provider, usageClass: "standard" }), "verified", id);
+    assert.equal(plan({ modelId: id, provider }).mode, "generate", id);
+  }
+  for (const [id, provider] of [["qwen3-8-flash", "qwen"], ["grok-4-5", "xai"], ["sonar-pro", "perplexity"]]) {
+    assert.equal(autoArtifactToolSupport({ id, provider }), "unverified", id);
+  }
+  // Deep research never gets the tools, whatever its provider.
+  assert.equal(autoArtifactToolSupport({ id: "o-deep", provider: "openai", usageClass: "deep-research" }), "unverified");
+});
+
+test("an administrator's tick or untick decides over the automatic answer", () => {
+  assert.equal(plan({ modelId: "qwen3-8-flash", provider: "qwen", fileToolsOverride: true }).mode, "generate");
+  assert.equal(plan({ modelId: "gpt-6-luna", provider: "openai", fileToolsOverride: false }).offReason, "model_unverified");
+  // Null follows the code.
+  assert.equal(plan({ modelId: "gpt-6-luna", provider: "openai", fileToolsOverride: null }).mode, "generate");
+  assert.equal(getArtifactToolSupport({ id: "qwen3-8-flash", provider: "qwen", fileToolsOverride: true }), "verified");
+  // A bare id still reads only the register (older recorded router samples).
+  assert.equal(getArtifactToolSupport("claude-haiku-5-5"), "unverified");
+  assert.equal(getArtifactToolSupport("gpt-6-luna"), "verified");
+});
+
+test("an Auto turn on a model without the tools is told to ask again, not to leave Auto", () => {
+  const auto = plan({ modelId: "qwen3-8-flash", provider: "qwen", autoRouted: true }).systemPrompt;
+  assert.match(auto, /sending the same request again: Auto routes a file request/);
+  assert.match(auto, /do not tell them to turn Auto off or to pick a model themselves/);
+  assert.match(auto, /Do not promise that a resend will work/);
+  assert.doesNotMatch(auto, /instead of Auto/);
+  const manual = plan({ modelId: "qwen3-8-flash", provider: "qwen" }).systemPrompt;
+  assert.match(manual, /choosing a different model/);
 });

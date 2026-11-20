@@ -64,7 +64,6 @@ const NO_WRITE_STATUSES: ReadonlySet<number> = new Set([400, 403, 404, 413, 428,
 
 /** The route's own 409s: the code latch and the change rule. Nothing was written. */
 export const AMUX_WORKER_REFUSAL_CODES: ReadonlySet<string> = new Set([
-  "registry_writes_off",
   ...AMUX_WORKER_REGISTRY_REFUSALS,
 ]);
 

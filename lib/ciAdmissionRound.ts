@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 
 import {
+  CI_ADMISSION_MAX_EVENTS,
   CI_ADMISSION_STATE_SETTING_KEY,
   ciAdmissionDraftsToCheck,
   evaluateCiAdmission,
@@ -15,6 +16,8 @@ import {
   type CiAdmissionState,
   type CiRunnerOwner,
 } from "@/lib/ciAdmissionCore";
+import { amuxDmT2MergeEnabled, amuxDmT2MergeRoomBesideLine } from "@/lib/amux/dmT2MergeCore";
+import type { AmuxDmT2MergeReadyPorts } from "@/lib/amux/dmT2MergeService";
 import { readCiFixView } from "@/lib/ciAdmissionFix";
 import { CI_FIX_AGAIN_LABEL, ciFixLabelsToClear, emptyCiFixView } from "@/lib/ciAdmissionFixCore";
 import { ciAdmissionGithubConfig, createCiAdmissionGithub, type CiAdmissionGithub } from "@/lib/ciAdmissionGithub";
@@ -34,7 +37,10 @@ import { prisma } from "@/lib/prisma";
  *      base;
  *   2. one short transaction under the admission lock: read the state (the
  *      order the operator set), judge the whole line, write it;
- *   3. outside any transaction, carry out the actions on GitHub;
+ *   3. outside any transaction, carry out the actions on GitHub, and then,
+ *      behind TOMVERSE_AMUX_DM_T2_MERGE (default off), mark at most one
+ *      review pull request the Decision Maker approved ready, only when the
+ *      line leaves room (lib/amux/dmT2MergeService.ts);
  *   4. one more short transaction records what failed and which pending
  *      statuses were cleared.
  *
@@ -63,10 +69,6 @@ const STATUS = {
 
 export const ciAdmissionMode = (env: NodeJS.ProcessEnv = process.env): CiAdmissionMode =>
   parseCiAdmissionMode(env.CI_ADMISSION_MODE) ?? "off";
-
-/** Whether a draft behind its base has its branch updated: on unless CI_ADMISSION_UPDATE_BRANCH is "off". */
-export const ciAdmissionUpdatesBranches = (env: NodeJS.ProcessEnv = process.env): boolean =>
-  (env.CI_ADMISSION_UPDATE_BRANCH ?? "").trim().toLowerCase() !== "off";
 
 export const readState = async (db: Pick<Prisma.TransactionClient, "appSetting">) =>
   parseCiAdmissionState(
@@ -137,7 +139,11 @@ export type CiAdmissionRoundOutcome =
       nextCheckInMs: number | null;
     };
 
-type RoundDeps = { mode?: CiAdmissionMode; github?: CiAdmissionGithub | null; now?: () => number };
+type RoundDeps = {
+  mode?: CiAdmissionMode; github?: CiAdmissionGithub | null; now?: () => number;
+  /** The Decision Maker ready step's GitHub ports; by default CI admission's App and the engineering read token. */
+  dmT2MergePorts?: AmuxDmT2MergeReadyPorts;
+};
 
 const numbersOf = (actions: CiAdmissionAction[], kind: "hold" | "release" | "cancel") =>
   actions.flatMap((action) => (action.kind === kind ? [action.pull.number] : []));
@@ -189,7 +195,7 @@ async function round(deps: RoundDeps): Promise<CiAdmissionRoundOutcome> {
     async (tx) => {
       await takeLock(tx);
       const state = await readState(tx);
-      const judged = evaluateCiAdmission({ state, openPulls, running, runningBases, deploys, checks, runners, personReady, nowMs: now(), shadow: mode === "shadow", updateBranches: ciAdmissionUpdatesBranches() });
+      const judged = evaluateCiAdmission({ state, openPulls, running, runningBases, deploys, checks, runners, personReady, nowMs: now(), shadow: mode === "shadow" });
       // Shadow keeps what it would have done out of the reservations and statuses.
       await writeState(
         tx,
@@ -243,6 +249,37 @@ async function round(deps: RoundDeps): Promise<CiAdmissionRoundOutcome> {
     }
   }
 
+  // One review pull request the Decision Maker approved (owner decision
+  // 2026-11-13: develop only). A Decision Maker ready is a person's ready
+  // (lib/ciAdmissionCore.ts): the pull request stays out of the line, nothing
+  // is reserved, and its CI counts as another workflow's once it shows. It is
+  // marked ready only after the line, when the line leaves room now, and not
+  // while an earlier one's CI has not shown yet -- so what can overflow is one
+  // pull request's CI, as by hand. The service is loaded only while the switch
+  // is on.
+  if (amuxDmT2MergeEnabled()) {
+    try {
+      const { amuxDmT2MergeReadyPorts, runAmuxDmT2MergeReadyStep } = await import("@/lib/amux/dmT2MergeService");
+      const step = await runAmuxDmT2MergeReadyStep({
+        drafts: openPulls,
+        room: amuxDmT2MergeRoomBesideLine({ queue: evaluation.state.queue, used: evaluation.used,
+          capacity: evaluation.state.capacity, need: evaluation.state.needs.develop }),
+        running,
+        nowMs: now(),
+        ports: deps.dmT2MergePorts ?? amuxDmT2MergeReadyPorts(github),
+      });
+      if (step.outcome === "marked_ready") {
+        extra.push({ at, kind: "released", number: step.prNumber, shadow: false, detail: "dm_approved" });
+      } else if (step.outcome === "write_unknown") {
+        // Not retried now: the next round reads the pull request before anything else.
+        failures.push(`dm_ready:${step.prNumber}:${step.code}`);
+        extra.push({ at, kind: "failed", number: step.prNumber, shadow: false, detail: `dm_ready:${step.code}`.slice(0, 120) });
+      }
+    } catch (error) {
+      failures.push(`dm_ready:${code(error)}`);
+    }
+  }
+
   // The auto-fix's "try again" labels whose retry the review server has
   // reported. Telemetry-driven housekeeping: a failure only leaves a label.
   if (github.setLabel) {
@@ -262,7 +299,7 @@ async function round(deps: RoundDeps): Promise<CiAdmissionRoundOutcome> {
           pendingStatus: current.pendingStatus.filter((entry) => !cleared.has(`${entry.number}@${entry.headSha}`)),
           // A release that did not happen reserves nothing.
           released: current.released.filter((entry) => !failedReleases.has(entry.number)),
-          events: [...current.events, ...extra].slice(-50),
+          events: [...current.events, ...extra].slice(-CI_ADMISSION_MAX_EVENTS),
         });
       },
       { timeout: TX_TIMEOUT_MS, maxWait: TX_TIMEOUT_MS },

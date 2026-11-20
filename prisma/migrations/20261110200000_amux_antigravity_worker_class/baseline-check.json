@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "migrationSqlSha256": "6f765745460be096ff79ca1d9002940092003e158c8657251c8737c9710db2d7",
+  "replacedChecks": [
+    {
+      "table": "AmuxWorkerRegistryEvent",
+      "constraint": "AmuxWorkerRegistryEvent_provider_class_check",
+      "previousDefinitionSha256": "425c59dd9047c3cf2f81f41071cd4da6ec328053e5bb12626453ae172d674e24"
+    },
+    {
+      "table": "AmuxCliModel",
+      "constraint": "AmuxCliModel_cli_check",
+      "previousDefinitionSha256": "cfe643d199494b5a6f91d752b6c242585d8f692ba08db35a5f3fd553c16ccf00"
+    },
+    {
+      "table": "AmuxCliModelLinkEvent",
+      "constraint": "AmuxCliModelLinkEvent_cli_check",
+      "previousDefinitionSha256": "cfe643d199494b5a6f91d752b6c242585d8f692ba08db35a5f3fd553c16ccf00"
+    },
+    {
+      "table": "AmuxCliUsageEvent",
+      "constraint": "AmuxCliUsageEvent_source_check",
+      "previousDefinitionSha256": "8235c744304208bb32a564e657d6148b62e2de925a0cdb26b3645c206a677858"
+    },
+    {
+      "table": "AmuxCliUsageEvent",
+      "constraint": "AmuxCliUsageEvent_shape_check",
+      "previousDefinitionSha256": "a67a900e32583df95d970fefe7842f37930b9e109f7667422483d44afd7b7691"
+    }
+  ]
+}

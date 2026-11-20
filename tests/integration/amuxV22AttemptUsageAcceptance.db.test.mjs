@@ -14,6 +14,9 @@ import { seedAmuxV4PortfolioRecoveryPrerequisites } from
 // claude-impl and no Task was assigned. An accepted attempt leaves the worker
 // usage gate; its cost is unchanged; any other unknown attempt still holds.
 
+// The usage gate is called here with the paid-only narrowing off, the older
+// rule this suite proves; at runtime only a paid route's unknown usage holds a
+// worker (the read-back switch was removed 2026-11-16).
 const raw = process.env.TEST_DATABASE_URL;
 const allowed = (() => {
   if (!raw || process.env.DATABASE_URL !== raw) return false;
@@ -81,7 +84,7 @@ function ownerAcceptAudit(db, taskId, attemptId, overrides = {}) {
 
 async function settledFor(tx, worker, taskId) {
   const { amuxV22RoutesWithSettledUsage } = await import("../../lib/amux/v22WorkerUsageGate.ts");
-  return (await amuxV22RoutesWithSettledUsage(tx, [{ workerName: worker }], null, taskId)).unsettled === false;
+  return (await amuxV22RoutesWithSettledUsage(tx, [{ workerName: worker }], null, taskId, false)).unsettled === false;
 }
 
 /** Fires the deferred guard now; returns its refusal, or null. */

@@ -10,6 +10,7 @@
  *                                          [--reviewers 2] [--scope "..."] [--author-vendor xai]
  *                                          [--focus <rev>]   review only <rev>..HEAD
  *                                          [--reviewer claude] [--reviewer copilot]
+ *                                          [--avoid-vendor openai,moonshot]  prefer another vendor
  *   node tools/review-orchestrator/client/review.mjs wait <jobId> [--timeout 540]
  *   node tools/review-orchestrator/client/review.mjs status [jobId]
  *   node tools/review-orchestrator/client/review.mjs report <jobId> [--slot 0]
@@ -232,6 +233,8 @@ async function submit(options) {
       authorVendor: options["author-vendor"],
       reviewers: options.reviewers ? Number(options.reviewers) : 1,
       reviewerProviders: options.reviewer,
+      // A preference. An older server ignores the field and picks as before.
+      avoidVendors: options["avoid-vendor"] ? options["avoid-vendor"].split(",") : undefined,
       scope: options.scope,
       focus,
       bundleRef: bundle.ref,

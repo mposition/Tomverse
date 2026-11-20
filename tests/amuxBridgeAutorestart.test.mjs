@@ -262,6 +262,12 @@ test("every harmless line the bridges print still allows a restart", { skip: noB
   assert.deepEqual(result.restarts, [WORKER_CLAUDE], result.output);
 });
 
+test("an informational line no longer holds an approved halt (AMUXFLOW/B1)", { skip: noBash }, () => {
+  const result = run({ units: [halted(WORKER_CLAUDE, 2)],
+    journals: { [invocation(2)]: HALT.quotaRefusedBeforeLeaseLost } });
+  assert.deepEqual(result.restarts, [WORKER_CLAUDE], result.output);
+});
+
 test("a per-worker bridge halted for an approved cause is restarted", { skip: noBash }, () => {
   const result = run({
     units: [active(WORKER_REVIEW), halted(WORKER_CODEX, 6), halted(WORKER_CLAUDE, 7)],
@@ -383,17 +389,16 @@ test("the unknown quota write warning above is the one the bridge prints", () =>
 });
 
 for (const [name, lines, reason] of [
-  ["a tick that had committed results", HALT.tickCommitted, /unrecognised line in the halted run: amux wsl bridge warn: tick failed \(http_500\) after 2 result/],
+  ["a tick that had committed results", HALT.tickCommitted, /a tick that had committed results: amux wsl bridge warn: tick failed \(http_500\) after 2 result/],
   ["dispatch_outcome_unknown", HALT.dispatchUnknown, /cause=dispatch_outcome_unknown was noted and is not restarted automatically/],
   ["settle_outcome_unknown", HALT.settleUnknown, /cause=settle_outcome_unknown was noted and is not restarted automatically/],
   ["an unknown read-only API outcome noted after an approved halt", HALT.leaseLostThenReadOnlyApiUnknown, /cause=read_only_api_outcome_unknown was noted and is not restarted automatically/],
   ["a halt from a binary that predates noted causes", HALT.oldBinaryLeaseLost, /no noted causes/],
   ["a halt line that does not name the first noted cause", HALT.haltDisagreesWithFirst, /names worker_runtime_lease_lost but the first noted cause is tick_failed_http_500/],
   ["a later tick_failed cause without a tick that committed nothing", HALT.leaseLostThenCommittedTick, /without a tick that committed nothing/],
-  ["a halt line without a cause", HALT.noCause, /unrecognised line in the halted run: amux wsl bridge halted: no new assignments; restart only/],
+  ["a halt line without a cause", HALT.noCause, /a halt line without a cause: amux wsl bridge halted: no new assignments; restart only/],
   ["a nothing-committed tick followed by a different halt", HALT.tickThenDispatch, /cause=dispatch_outcome_unknown/],
-  ["a settlement that turned unknown after an approved halt", HALT.leaseLostThenSettleUnknown, /unrecognised line in the halted run: amux wsl bridge halt: settle outcome unknown/],
-  ["a line this script does not know", HALT.quotaRefusedBeforeLeaseLost, /unrecognised line in the halted run: amux v22 quota observation refused/],
+  ["a settlement that turned unknown after an approved halt", HALT.leaseLostThenSettleUnknown, /cause=settle_outcome_unknown was noted and is not restarted automatically/],
   ["two halt lines in one run", HALT.twoHalts, /2 halt lines in the halted run/],
   ["an empty journal", [], /0 halt lines in the halted run/],
 ]) {

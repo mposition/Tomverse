@@ -1507,6 +1507,27 @@ export function AuthButton({
                                                 linkTestId="email-notifications-entry-link"
                                             />
                                         </section>
+                                        {process.env.NEXT_PUBLIC_EXTERNAL_API_SETTINGS_VISIBLE === "true" ? (
+                                            // Shown only where the API is offered; the server
+                                            // gates every key route regardless of this row.
+                                            <section
+                                                aria-label={t("externalApi.entryTitle")}
+                                                className="rounded-2xl border border-zinc-200 bg-zinc-50 p-1 dark:border-zinc-800 dark:bg-zinc-950/60"
+                                                data-testid="settings-account-api-keys"
+                                            >
+                                                <SettingsEntryRow
+                                                    section="api-keys"
+                                                    href="/settings/api"
+                                                    icon={KeyRound}
+                                                    title={t("externalApi.entryTitle")}
+                                                    description={t("externalApi.entryDescription")}
+                                                    actionLabel={t("externalApi.entryOpen")}
+                                                    onNavigate={closeSettingsModal}
+                                                    testId="api-keys-entry"
+                                                    linkTestId="api-keys-entry-link"
+                                                />
+                                            </section>
+                                        ) : null}
                                         <section className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
                                             <div className="flex items-start gap-3">
                                                 <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-status-success-500" />

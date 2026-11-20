@@ -1,37 +1,88 @@
-import { expect, test } from "@playwright/test";
-import { AVAILABLE_MODELS, DEFAULT_MODEL_ID, INPUT_CREDIT_MULTIPLIERS } from "../../lib/models";
-import { mockPublicBillingConfig } from "./support/app-fixtures";
+import { expect, test, type Page } from "@playwright/test";
+import { AVAILABLE_MODELS, DEFAULT_MODEL_ID, INPUT_CREDIT_MULTIPLIERS, MODEL_USAGE_CREDIT_WEIGHTS } from "../../lib/models";
+import { WEB_SEARCH_SURCHARGE_CREDITS } from "../../lib/webSearchCredits";
+import { prepareGuestPage } from "./support/app-fixtures";
 
-for (const weight of [2, 3]) {
-  test(`pricing examples use catalog base cost ${weight} beside plans and packs`, async ({ page }) => {
-    await mockPublicBillingConfig(page);
+// The V2 pricing page's credit calculator charges what a send is charged (tier weights and
+// input multipliers from lib/models.ts, the flat web search surcharge from
+// lib/webSearchCredits.ts), and the models dialog shows the catalogue's base credits.
+const PLANS = [
+  { id: "free", name: "Free", monthlyPriceCents: 0, annualPriceCents: 0, currency: "USD", monthlyMessageLimit: 300, dailyMessageLimit: 30 },
+  { id: "pro", name: "Pro", monthlyPriceCents: 1_500, annualPriceCents: 14_400, currency: "USD", monthlyMessageLimit: 3_000, dailyMessageLimit: 300 },
+  { id: "max", name: "Max", monthlyPriceCents: 2_500, annualPriceCents: 24_000, currency: "USD", monthlyMessageLimit: 10_000, dailyMessageLimit: 0 },
+];
+
+async function open(page: Page, lang: "en" | "ko") {
+  await prepareGuestPage(page, lang);
+  await page.route("**/api/billing/config**", (route) => route.fulfill({ json: { plans: PLANS, creditPacks: [], featuredPromotion: null } }));
+  await page.goto(`/pricing?lang=${lang}`);
+  await expect(page.getByTestId("pricing-calculator")).toBeVisible({ timeout: 30_000 });
+}
+
+const perSend = (page: Page) => page.getByTestId("pricing-calc-per");
+const result = (page: Page, plan: string) => page.getByTestId(`pricing-calc-result-${plan}`);
+
+test("the calculator starts at one Standard model and divides each plan's credits by it", async ({ page }) => {
+  await open(page, "en");
+  await expect(perSend(page)).toHaveText(String(MODEL_USAGE_CREDIT_WEIGHTS.standard));
+  for (const plan of PLANS) await expect(result(page, plan.id)).toContainText(`${plan.monthlyMessageLimit.toLocaleString("en-AU")} requests`);
+});
+
+test("model tiers, input length and web search add up as a send is charged", async ({ page }) => {
+  await open(page, "en");
+  await page.getByTestId("pricing-calc-tier-advanced").check();
+  await page.getByTestId("pricing-calc-tier-premium").check();
+  const weights = [MODEL_USAGE_CREDIT_WEIGHTS.standard, MODEL_USAGE_CREDIT_WEIGHTS.advanced, MODEL_USAGE_CREDIT_WEIGHTS.premium];
+  await expect(perSend(page)).toHaveText(String(weights.reduce((sum, weight) => sum + weight, 0)));
+  // The longest band: each model is multiplied and rounded up on its own.
+  const top = INPUT_CREDIT_MULTIPLIERS[INPUT_CREDIT_MULTIPLIERS.length - 1].multiplier;
+  await page.locator("#pricing-calc-ctx").fill(String(INPUT_CREDIT_MULTIPLIERS.length));
+  const long = weights.reduce((sum, weight) => sum + Math.ceil(weight * top), 0);
+  await expect(perSend(page)).toHaveText(String(long));
+  // Web search: a flat surcharge per model, never multiplied by the input length.
+  await page.getByTestId("pricing-calc-web").check();
+  const total = long + WEB_SEARCH_SURCHARGE_CREDITS * 3;
+  await expect(perSend(page)).toHaveText(String(total));
+  await expect(result(page, "max")).toContainText(`${Math.floor(10_000 / total).toLocaleString("en-AU")} requests`);
+  await expect(page.getByTestId("pricing-calc-breakdown")).toContainText("web search");
+});
+
+test("the last picked model tier cannot be unchecked", async ({ page }) => {
+  await open(page, "en");
+  const standard = page.getByTestId("pricing-calc-tier-standard");
+  await standard.click();
+  await expect(standard).toBeChecked();
+  await expect(perSend(page)).toHaveText(String(MODEL_USAGE_CREDIT_WEIGHTS.standard));
+});
+
+test("the Korean calculator uses Korean units", async ({ page }) => {
+  await open(page, "ko");
+  await expect(result(page, "pro")).toContainText("3,000회");
+  await expect(page.getByTestId("pricing-calculator")).toContainText("크레딧 계산기");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test("the models dialog shows the catalogue's base credits", async ({ page }) => {
+  await prepareGuestPage(page, "en");
+  await page.route("**/api/billing/config**", (route) => route.fulfill({ json: { plans: PLANS, creditPacks: [], featuredPromotion: null } }));
+  for (const weight of [2, 3]) {
     const model = { ...AVAILABLE_MODELS.find((item) => item.id === DEFAULT_MODEL_ID)!, creditWeight: weight };
     await page.route("**/api/models/catalog", (route) => route.fulfill({ json: { models: [model] } }));
     await page.goto("/pricing?lang=en");
-    for (const [id, credits] of [["plan-free", 300], ["plan-pro", 3_000], ["plan-max", 10_000], ["pack-starter_500", 500], ["pack-project_1500", 1_500], ["pack-power_4000", 4_000]] as const) {
-      const example = page.getByTestId(`pricing-credit-example-${id}`);
-      await expect(example).toContainText(`${credits.toLocaleString("en-US")} credits cover up to ${Math.floor(credits / weight).toLocaleString("en-US")} short text requests with ${model.name} at ${weight} base credits per request.`);
-      await expect(example).toContainText(`up to ${INPUT_CREDIT_MULTIPLIERS[0].aboveTokens.toLocaleString("en-US")} input tokens, no files, tools or long history`);
-      await expect(example).toContainText("Daily plan limits and service availability still apply.");
-      await expect(example.getByRole("link")).toHaveAttribute("href", "/models");
-    }
-    await expect(page.getByTestId("pricing-category-capacity-note")).toContainText("Current model-specific credit costs can differ");
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  });
-}
-
-test("an unavailable example model leaves the cost link without a capacity promise", async ({ page }) => {
-  await mockPublicBillingConfig(page);
-  await page.route("**/api/models/catalog", (route) => route.fulfill({ json: { models: [] } }));
-  await page.goto("/pricing?lang=en");
-  await expect(page.getByTestId("pricing-credit-example-plan-pro").getByRole("link")).toBeVisible();
-  await expect(page.getByTestId("pricing-credit-example-plan-pro").locator("p")).toHaveCount(0);
+    await expect(page.getByTestId("pricing-models-pro")).toContainText("1 of 1");
+    await page.getByTestId("pricing-models-pro").click();
+    const item = page.getByTestId("pricing-models-dialog").locator(`[data-model-id="${model.id}"]`);
+    await expect(item).toContainText(model.name);
+    await expect(item.locator("b")).toHaveText(String(weight));
+  }
 });
 
-test("English capacity illustrations stay hidden on Korean pricing", async ({ page }) => {
-  await mockPublicBillingConfig(page);
-  await page.goto("/ko/pricing");
-  await expect(page.locator("html")).toHaveAttribute("lang", "ko");
-  await expect(page.locator('[data-testid^="pricing-credit-example-"]')).toHaveCount(0);
-  await expect(page.getByTestId("pricing-category-capacity-note")).toHaveCount(0);
+test("an empty catalogue leaves the dialog without a model list or a capacity promise", async ({ page }) => {
+  await prepareGuestPage(page, "en");
+  await page.route("**/api/billing/config**", (route) => route.fulfill({ json: { plans: PLANS, creditPacks: [], featuredPromotion: null } }));
+  await page.route("**/api/models/catalog", (route) => route.fulfill({ json: { models: [] } }));
+  await page.goto("/pricing?lang=en");
+  await expect(page.getByTestId("pricing-models-pro")).toContainText("0 of 0");
+  await page.getByTestId("pricing-models-pro").click();
+  await expect(page.getByTestId("pricing-models-dialog").locator("[data-model-id]")).toHaveCount(0);
 });

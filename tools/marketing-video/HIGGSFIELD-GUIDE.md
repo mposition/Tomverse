@@ -2,19 +2,38 @@
 
 Every concept follows these rules, and every review judges against them.
 
-1. The one accent colour is Tomverse blue `#155dfb`. No purple, violet or
+1. The one accent colour is blue `#155dfb`. No purple, violet or
    magenta anywhere, except inside a provider's own logo.
 2. The image never shows the Tomverse logo, the wordmark or a web address. The
    band code always adds the logo ("tomverse.") and tomverse.app in the same
    place at the bottom.
 3. Balanced: neither busy nor an empty card with a few words. Nothing abstract
-   or meaningless; a stranger gets the message in two seconds.
-4. Prefer real people showing the product on a phone or a laptop. Physical
-   metaphors (a receipt, a name tag, a checklist) are good too.
-5. Hands, fingers and poses are anatomically possible. Rejected 2026-11-08: a
-   right hand holding a phone screen outwards with the thumb in an impossible
-   place.
-6. Chat copy names models as "GPT, Claude, Gemini and more": always "and more".
+   or meaningless. A stranger who has never heard of Tomverse gets, in two
+   seconds, that this is an AI app and what it does for them: one concrete
+   everyday task and its result, in words they would use themselves. Rejected
+   2026-11-12: a desk with two quote cards in English under "같은 열차, 엇갈린
+   조언", with no "AI", no model name and nothing to do (the owner: "뜬구름
+   잡는 광고").
+4. Variety (owner 2026-11-13): a person is one way to show the product, not
+   the rule. A concept is one of these formats, and a day's concepts are each a
+   different one: `person` (someone using it, the product clearly visible),
+   `phone` (a phone screen is the hero, filling much of the frame), `laptop`
+   (a laptop or desktop screen is the hero), `diagram` (a clean, flat diagram
+   that shows how the feature works, e.g. one question going to three model
+   marks and coming back as one answer), `object` (a physical metaphor: a
+   receipt, a ticket, a checklist, a name tag). Whatever the format, the
+   product, what Tomverse shows or does, gets more of the picture than any
+   person.
+5. Hands, fingers, poses and sizes are possible and true to scale. A phone is
+   about as long as the hand that holds it and clearly smaller than a head; a
+   laptop is about as wide as the shoulders. Rejected 2026-11-08: a right hand
+   holding a phone screen outwards with the thumb in an impossible place.
+   Rejected 2026-11-13: a phone as tall as the head of the man holding it, his
+   hand too small to wrap round it.
+6. Copy that names models says "GPT, Claude, Gemini and more": always "and
+   more". Only a screen or a tag whose every model is an exact name of
+   `features.json` needs none ("Asked at once: GPT 6 Luna, Claude Haiku 5.5,
+   Gemini Flash": the three that answered the recorded example).
 7. Chat and Review work without an account. "Free" always carries its
    condition, e.g. "Free to try within the included credits". A bare "free" is
    refused.
@@ -26,7 +45,11 @@ Every concept follows these rules, and every review judges against them.
 10. An answer shown under a real model name is that model's recorded answer:
     only the `realExample` quotes and counts in `features.json`. Rejected: a
     made-up GPT answer. An answer under no model name (a custom assistant,
-    "AI") may be written for the scene.
+    "AI") may be written for the scene. The same holds for anything written
+    for the scene that sits beside a model name ("Asked at once: GPT 6 Luna,
+    ..." over a made-up finding, "Continuing with Claude Sonnet 5.5" over a
+    made-up answer): that screen names no model, or only "GPT, Claude, Gemini
+    and more" as a choice the reader has.
 11. A drawn Tomverse screen shows only real features, model names and words
     (`docs/policy/marketing-automation.md §7.3`, 2026-11-08). It is submitted as not depicting the product
     interface; only real captures are.
@@ -34,22 +57,40 @@ Every concept follows these rules, and every review judges against them.
     Rejected 2026-11-08: name tags reading "지피티·클로드" and "克劳德·双子座".
     A recorded quote is not translated either: that screen stays in its own
     language and only the headline is translated.
-13. Languages: `en`, `ko`, `zh-Hant`, `zh-Hans` (Simplified characters).
+13. Languages and markets: `en` (Australia and other English-speaking
+    readers), `ko` (Korea), `zh-Hant` (Taiwan and Hong Kong), `zh-Hans`
+    (Simplified-script readers in Singapore and Malaysia; mainland China is out
+    of scope, 2026-09-16). Each version speaks to its own market (owner
+    2026-11-13): the question a person types, the answer's example, money,
+    units, places, seasons and everyday objects are that market's, not a
+    translation of the English example. Rejected 2026-11-13: "1970년대에 지은
+    우리 집, 히트펌프 놓을만할까?" (Korea heats with ondol and boilers; Taiwan
+    and Hong Kong do not need heat pumps). The picture is drawn once for all
+    four, so the scene shows nothing that belongs to one market only (a heat
+    pump outdoor unit, a local landmark); what differs by market lives in the
+    words.
 14. The image model never draws Korean or Chinese letters (owner: "an AI-looking
     font that feels foreign"). In those versions the headline and subhead go on
     the space the model cleared, set by code in the product fonts. The English
     headline may be drawn by the model.
-15. Screen words (phone, laptop) are translated too. Only model names and the
-    proper nouns of a recorded quote (e.g. Scenic Railway) stay as written. Code
-    sets the exact words in a real font and one edit makes them sit naturally on
-    the screen; the second review then compares them letter by letter.
+15. A display that shows words (a phone, a tablet, a laptop) is drawn flat
+    chroma green #00ff00, evenly lit and empty. Code draws the app screen there
+    in every language, in the product fonts and in perspective, and a finger the
+    image model draws over the display stays in front of it (owner 2026-11-13:
+    words set on a screen by a box or an edit looked pasted on). Its words are
+    translated; only model names and the proper nouns of a recorded quote (e.g.
+    Scenic Railway) stay as written. Words elsewhere in the scene (paper, a
+    sign) are set by code and one edit makes them sit naturally there.
 16. "+ more" is "+ 기타 AI" in ko and "+ 其他 AI" in zh-Hant and zh-Hans (never
     "+ 더 보기").
 17. A call to action never looks like a solid button. Outside English it is a
     pale guide band (`#eff6ff` ground, `#155dfb` words) with an inviting
     sentence: ko "계정 없이도 바로 시작해 보세요", zh-Hant "不用帳號也能直接開始",
     zh-Hans "不用账号也能直接开始".
-18. An AI answer on a screen is helpful in length (e.g. a three-step recipe),
-    not one short line, and fits inside its bubble.
+18. An AI answer on a display is short and concrete: two or three lines that
+    a reader takes in at a glance (at most 120 characters in English, 80 in
+    Korean or Chinese), such as the first step and the time it takes. A display
+    full of text forces the device to grow bigger than it is (owner
+    2026-11-13).
 19. Facts only from `features.json`. The owner allowed price, "free" and bold
     wording on 2026-11-08; the Guard still judges every word at submission.

@@ -23,15 +23,23 @@ function capture(rows: Array<{ id: string }>) {
   return { calls, tx };
 }
 
+const INFRA_REASONS = ["infra_no_result", "infra_early_exit", "infra_auth_refused",
+  "infra_quota_exhausted", "infra_network", "infra_lease_expired", "infra_sidecar_error",
+  "infra_usage_unreported"];
+
 test("the usage gate skips attempts on archived cards and keeps every other unknown", async () => {
   const { amuxV22WorkerUsageUnverified } = await import(mod("lib/amux/v22WorkerUsageGate.ts"));
   const { calls, tx } = capture([]);
-  assert.equal(await amuxV22WorkerUsageUnverified(tx, "codex-impl", null, "task-a"), false);
+  // The read-back switch passed off: the paid-only filter passes every attempt.
+  assert.equal(await amuxV22WorkerUsageUnverified(tx, "codex-impl", null, "task-a", false), false);
   assert.equal(calls.length, 1);
   const { sql, values } = calls[0];
+  // Last, an infrastructure failure holds no worker (owner decision
+  // 2026-11-15, lib/amux/infraFailureCore.ts).
   assert.deepEqual(values, ["codex-impl", null, "task-a",
     ["cli_turn_limit", "cli_execution_error", "cli_budget_limit"],
-    "review_server_rejected_twice"]);
+    "review_server_rejected_twice", true, INFRA_REASONS]);
+  assert.match(sql, /AND COALESCE\(a\."reason", ''\) <> ALL\(\?::text\[\]\) LIMIT 1$/);
   assert.match(sql, /w\."archivedAt" IS NULL/);
   // The unknown-usage conditions themselves are unchanged.
   assert.match(sql, /a\."endedAt" IS NOT NULL/);
@@ -69,7 +77,7 @@ test("an expired attempt is left out only when the Task's latest stored result i
   // Every branch still needs the owner's retry decision bound to that attempt.
   assert.ok(sql.indexOf("'expired'") < sql.indexOf('FROM "AmuxReviewProposal" p'));
   assert.ok(sql.indexOf("'succeeded'") < sql.indexOf('FROM "AmuxReviewProposal" p'));
-  assert.equal(values.length, 5);
+  assert.equal(values.length, 7);
 });
 
 test("an unsettled worker leaves the claim to the next settled route, checked once per worker", async () => {
@@ -124,9 +132,32 @@ test("the Task's unknown-usage list uses the gate's rule and skips accepted atte
   assert.deepEqual(await amuxV22TaskUnknownUsageAttemptIds(tx as never, "task-a"),
     ["attempt-1", "attempt-2"]);
   const { sql, values } = calls[0];
-  assert.deepEqual(values, ["task-a"]);
+  assert.deepEqual(values, ["task-a", INFRA_REASONS]);
   assert.match(sql, /WHERE a\."taskId" = \? AND a\."endedAt" IS NOT NULL AND w\."sourceSystem" = 'admin-idea-v4'/);
   assert.match(sql, /NOT EXISTS \(SELECT 1 FROM "AmuxCliUsageEvent" u WHERE u\."attemptId" = a\."id"\)/);
   assert.match(sql, /u\."completeness" <> 'reported_complete'/);
   assert.match(sql, /AND NOT EXISTS \(SELECT 1 FROM "AmuxV22AttemptUsageAcceptance" x WHERE x\."attemptId" = a\."id"\)/);
+});
+
+test("with read-back proceed on, only a budget-bound (paid) attempt holds a worker", async () => {
+  const { amuxV22WorkerUsageUnverified } = await import(mod("lib/amux/v22WorkerUsageGate.ts"));
+  const { calls, tx } = capture([]);
+  await amuxV22WorkerUsageUnverified(tx, "codex-impl", null, "task-a", true);
+  const { sql, values } = calls[0];
+  // The switch's value comes before the infrastructure reasons, which are last.
+  assert.equal(values.at(-2), false);
+  assert.deepEqual(values.at(-1), INFRA_REASONS);
+  assert.ok(sql.includes(`AND (? OR EXISTS (SELECT 1 FROM "AmuxV22WorkerAssignment" g JOIN "AmuxV22TaskRecoveryApproval" ap ON ap."id" = g."recoveryApprovalId" WHERE g."id" = a."v22AssignmentId" AND ap."riskAcceptanceId" IS NOT NULL))`), sql);
+});
+
+test("read back, then proceed has no switch: the lease is 180 s and only a paid route is more than a record", async () => {
+  // Owner direction 2026-11-15, switch removed 2026-11-16: only a paid API
+  // write whose outcome is unknown stays with a person.
+  const core = await import(mod("lib/amux/v22ReadBackProceedCore.ts"));
+  assert.equal(core.amuxV22ReadBackProceedEnabled, undefined);
+  assert.equal(core.AMUX_V22_READ_BACK_PROCEED_ENV, undefined);
+  assert.equal(core.amuxExecutionLeaseMs(), 180_000);
+  assert.equal(core.amuxV22CliUsageRecordOnly({ budgetBound: false, apiReceipt: false }), true);
+  assert.equal(core.amuxV22CliUsageRecordOnly({ budgetBound: true, apiReceipt: false }), false);
+  assert.equal(core.amuxV22CliUsageRecordOnly({ budgetBound: false, apiReceipt: true }), false);
 });

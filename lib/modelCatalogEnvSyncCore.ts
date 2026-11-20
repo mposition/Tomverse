@@ -66,7 +66,7 @@ export const MODEL_CATALOG_SYNC_TABLES: readonly SyncTableSpec[] = [
       "bestFor", "minimumPlan", "usageClass", "creditWeight", "publiclyListed",
       "enabled", "status", "operationalReason", "userVisibleNote",
       "replacementModelId", "catalogDeleted", "reasoning", "contextWindowTokens",
-      "supportsImage", "supportsNativePdf", "webSearchOverride", "maxImages",
+      "supportsImage", "supportsNativePdf", "webSearchOverride", "fileToolsOverride", "maxImages",
       "maxBase64ImagePayloadBytes", "maxOutputTokens", "reservationOutputTokens",
       "inputUsdPerMillionTokens", "outputUsdPerMillionTokens",
       "cachedInputPriceMultiplier", "sortOrder", "updatedByEmail",

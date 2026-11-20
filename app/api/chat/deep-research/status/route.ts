@@ -89,7 +89,7 @@ export async function POST(request: Request) {
 
     const conversation = await prisma.conversation.findUnique({
       where: { id: job.conversationId },
-      select: { userId: true, password: true },
+      select: { userId: true, password: true, passwordVersion: true },
     });
     if (!conversation || conversation.userId !== session.user.id) {
       return jsonError("Conversation not found.", "NOT_FOUND", 404, traceId);
@@ -99,7 +99,7 @@ export async function POST(request: Request) {
         request,
         session.user.id,
         job.conversationId,
-        conversation.password
+        conversation.password == null ? null : conversation.passwordVersion
       )
     ) {
       return conversationLockedResponse();

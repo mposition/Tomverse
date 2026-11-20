@@ -51,7 +51,13 @@ const canonicalRendering = {
 
 export default defineConfig({
   testDir: "./tests/e2e-admin",
-  fullyParallel: false,
+  // Lets `--shard` split by test rather than by file. With files as the unit,
+  // admin-shell-navigation.spec.ts alone (~250 s) put CI's shard 1/2 at ~11
+  // minutes of Playwright against ~2.5 for shard 2/2, and that shard was the
+  // last check every dev deployment waited for (2026-11-13). Nothing runs at
+  // the same time because of it -- `workers` stays 1 below -- and no spec
+  // shares state between tests: each one truncates and re-seeds the database.
+  fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 2 : 0,
   // One worker, always: every test truncates and re-seeds the single fixture

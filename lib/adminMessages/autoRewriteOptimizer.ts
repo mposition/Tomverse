@@ -58,6 +58,11 @@ export const adminAutoRewriteOptimizerMessages = defineAdminMessages({
       error: "error",
     },
     reasons: {
+      cost_unknown: "Costs became unknown; further calls stopped and in-flight results were collected.",
+      cost_unconfirmed: "Promotion refused: cost coverage is incomplete.",
+      legacy_unverified: "Legacy cycle: independent holdout and cost coverage are unverified.",
+      holdout_unverified: "Promotion refused: guidance was not verified frozen before evaluation.",
+      quality_not_passed: "Promotion refused: the existing quality/credit gate did not pass.",
       optimizer_off: "Choose an optimizer model in the guidance optimizer first.",
       router_off: "The Auto LLM router is off, so there is nothing to optimise.",
       pricing_unavailable: "A model's price cannot be resolved, so the cost cap cannot be enforced.",
@@ -137,6 +142,11 @@ export const adminAutoRewriteOptimizerMessages = defineAdminMessages({
       error: "오류",
     },
     reasons: {
+      cost_unknown: "비용 불명으로 후속 호출을 중단하고 진행 중 결과를 수집했습니다.",
+      cost_unconfirmed: "승격 거부: 비용 coverage가 불완전합니다.",
+      legacy_unverified: "구형 회차: 독립 holdout과 비용 coverage 미검증입니다.",
+      holdout_unverified: "승격 거부: 평가 전 지침 고정을 확인하지 못했습니다.",
+      quality_not_passed: "승격 거부: 기존 품질·credit 게이트를 통과하지 못했습니다.",
       optimizer_off: "먼저 안내문 자동 개선에서 optimizer 모델을 고르세요.",
       router_off: "Auto LLM 라우터가 꺼져 있어 개선할 대상이 없습니다.",
       pricing_unavailable: "모델 가격을 확인할 수 없어 비용 상한을 지킬 수 없습니다.",

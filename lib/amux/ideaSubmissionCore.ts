@@ -1,4 +1,5 @@
 import {
+  amuxIdeaInputEnvelopeMaxBytes,
   inspectAmuxIdeaInput,
   type IdeaInput,
   type IdeaInputInspection,
@@ -7,7 +8,10 @@ import { isAmuxIdeaRequestId } from "./ideaRequestIdCore.ts";
 
 export { isAmuxIdeaRequestId } from "./ideaRequestIdCore.ts";
 
-export const AMUX_IDEA_SUBMISSION_ENVELOPE_MAX_BYTES = 70_000;
+/** One submission request (owner and session intake share the route): the
+ * idea input plus its request id and source labels. */
+export const amuxIdeaSubmissionEnvelopeMaxBytes = (): number =>
+  amuxIdeaInputEnvelopeMaxBytes() + 8 * 1024;
 
 const exactKeys = (value: Record<string, unknown>, names: readonly string[]) =>
   Object.keys(value).sort().join("\0") === [...names].sort().join("\0");
@@ -19,7 +23,7 @@ export type IdeaSubmissionInspection =
 /** The caller creates one high-entropy request nonce and keeps it for
  * read-back after an uncertain response. The idea id itself is server-issued. */
 export function inspectAmuxIdeaSubmission(raw: string): IdeaSubmissionInspection {
-  if (Buffer.byteLength(raw, "utf8") > AMUX_IDEA_SUBMISSION_ENVELOPE_MAX_BYTES) {
+  if (Buffer.byteLength(raw, "utf8") > amuxIdeaSubmissionEnvelopeMaxBytes()) {
     return { ok: false, code: "too_large" };
   }
   let parsed: unknown;
@@ -50,19 +54,6 @@ export function inspectAmuxIdeaSubmission(raw: string): IdeaSubmissionInspection
     },
   };
 }
-
-/** v4 code is available; only its dedicated environment gate opens writes. */
-export const AMUX_V4_IDEA_SUBMISSION_CODE_LATCH = true;
-export const AMUX_V4_IDEA_SUBMISSION_ENV = "TOMVERSE_AMUX_V4_IDEA_SUBMIT";
-export const ideaSubmissionWritePermitted = (value: string | undefined) =>
-  AMUX_V4_IDEA_SUBMISSION_CODE_LATCH && value === "enabled";
-
-/** Read-back has an independent gate so stopping new writes cannot hide an
- * uncertain in-flight submission. The environment gate remains independent. */
-export const AMUX_V4_IDEA_READBACK_CODE_LATCH = true;
-export const AMUX_V4_IDEA_READBACK_ENV = "TOMVERSE_AMUX_V4_IDEA_READBACK";
-export const ideaSubmissionReadBackPermitted = (value: string | undefined) =>
-  AMUX_V4_IDEA_READBACK_CODE_LATCH && value === "enabled";
 
 /** Only the requestId unique index means "this request was already seen".
  * Other unique failures must not be relabeled as an idempotency hit. */

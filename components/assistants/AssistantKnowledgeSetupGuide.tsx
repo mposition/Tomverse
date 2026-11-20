@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import type { ReactNode } from "react";
 import { Check, Circle, FileText, MessageSquare, UserRoundPlus } from "lucide-react";
 
 import { useLanguage } from "@/components/LanguageProvider";
@@ -9,7 +9,6 @@ import {
   ASSISTANT_KNOWLEDGE_GUIDE_STEPS,
   type AssistantKnowledgeGuideStep,
 } from "@/lib/assistantKnowledgeGuide";
-import { ASSISTANT_PROFILE_REVIEW_PATH } from "@/lib/assistantProfileReturn";
 
 type SetupStage = AssistantKnowledgeGuideStep;
 
@@ -25,7 +24,7 @@ const copy = {
       },
       add_knowledge: {
         title: "Knowledge 추가하고 저장하기",
-        body: "아래에서 파일을 추가·선택하고 지시문과 모델을 저장하세요.",
+        body: "파일 처리가 끝나면 자동으로 선택됩니다. ‘지시문·모델·지식 파일 저장’을 누르세요.",
       },
       start_chat: {
         title: "대화에서 사용하기",
@@ -35,7 +34,6 @@ const copy = {
     unavailable:
       "이 계정에서는 Knowledge가 아직 활성화되지 않았습니다. 파일 단계는 기능이 활성화된 뒤 이어갈 수 있습니다.",
     goToKnowledge: "Knowledge 입력으로 이동",
-    startChat: "이 어시스턴트로 대화하기",
     current: "현재 단계",
     complete: "완료",
     upcoming: "다음",
@@ -51,7 +49,7 @@ const copy = {
       },
       add_knowledge: {
         title: "Add Knowledge and save",
-        body: "Add and select a file below, then save instructions and models.",
+        body: "Your file is selected when processing finishes. Choose “Save instructions, models and files” to connect it.",
       },
       start_chat: {
         title: "Use it in a conversation",
@@ -61,7 +59,6 @@ const copy = {
     unavailable:
       "Knowledge is not enabled for this account yet. You can resume the file step after it becomes available.",
     goToKnowledge: "Go to Knowledge input",
-    startChat: "Chat with this assistant",
     current: "Current step",
     complete: "Complete",
     upcoming: "Next",
@@ -77,7 +74,7 @@ const copy = {
       },
       add_knowledge: {
         title: "添加 Knowledge 并保存",
-        body: "在下方添加并选择文件，然后保存指令和模型。",
+        body: "处理完成后文件会自动选中。点击“保存指令、模型和知识文件”即可关联。",
       },
       start_chat: {
         title: "在对话中使用",
@@ -87,7 +84,6 @@ const copy = {
     unavailable:
       "此账户尚未启用 Knowledge。功能开放后可从文件步骤继续。",
     goToKnowledge: "前往 Knowledge 输入区",
-    startChat: "使用此助手开始对话",
     current: "当前步骤",
     complete: "已完成",
     upcoming: "下一步",
@@ -100,11 +96,11 @@ const icons = [UserRoundPlus, FileText, MessageSquare] as const;
 export function AssistantKnowledgeSetupGuide({
   stage,
   knowledgeEnabled,
-  onStartChat,
+  startChatAction,
 }: {
   stage: SetupStage;
   knowledgeEnabled: boolean;
-  onStartChat?: () => void;
+  startChatAction?: ReactNode;
 }) {
   const { lang } = useLanguage();
   const labels = copy[assistantKnowledgeGuideContentLanguage(lang)];
@@ -182,16 +178,7 @@ export function AssistantKnowledgeSetupGuide({
         </a>
       ) : null}
 
-      {stage === "start_chat" && onStartChat ? (
-        <Link
-          href={ASSISTANT_PROFILE_REVIEW_PATH}
-          onClick={onStartChat}
-          className="mt-4 inline-flex min-h-10 items-center rounded-xl bg-teal-700 px-4 text-sm font-bold text-white transition hover:bg-teal-600"
-          data-testid="assistant-knowledge-start-chat"
-        >
-          {labels.startChat}
-        </Link>
-      ) : null}
+      {stage === "start_chat" && <div className="mt-4">{startChatAction}</div>}
     </section>
   );
 }

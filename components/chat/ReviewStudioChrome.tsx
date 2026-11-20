@@ -7,7 +7,7 @@ import { useSession } from "next-auth/react";
 import { useUserUsage } from "./useUserUsage";
 import { usagePercent } from "./UsagePercentGauge";
 import { chatProductUiCopy, localizedProductHref, type ChatWorkspaceProduct } from "@/lib/chatProductUiCopy";
-import { ArrowRight, BarChart3, Check, ChevronDown, Moon, Puzzle, X } from "lucide-react";
+import { ArrowRight, BarChart3, Check, ChevronDown, ImagePlus, Moon, Puzzle, X } from "lucide-react";
 import { mcpConnectorCopy } from "@/lib/mcpConnectorCopy";
 import { helpCentreHref } from "@/lib/localizedHelpHref";
 import { useLanguage } from "@/components/LanguageProvider";
@@ -42,13 +42,23 @@ export function ReviewModeSwitcher({ review, locked = false, composer = false, c
   </div>;
 }
 
-export function ReviewCommandBar({ review, locked = false, view, setView, showModeSwitcher = true }: {
-  review: ReviewWorkspaceControls; locked?: boolean; view?: "write" | "results"; setView?: (view: "write" | "results") => void; showModeSwitcher?: boolean;
+// The breadcrumb after the product name. It used to read "New chat" / "New task" whatever was
+// open, so two conversations looked identical. An open conversation shows its own title, on
+// one line with the full text on hover; only an untitled (new) conversation keeps the label.
+function CommandBarConversationTitle({ title, fallback }: { title?: string | null; fallback: string }) {
+  const name = title?.trim();
+  return <span className="review-conversation-title" data-testid="command-bar-conversation-title" data-has-title={name ? "true" : "false"} title={name || undefined}>
+    <span aria-hidden="true">/ </span>{name ? <span className="review-conversation-name">{name}</span> : fallback}
+  </span>;
+}
+
+export function ReviewCommandBar({ review, locked = false, view, setView, showModeSwitcher = true, conversationTitle }: {
+  review: ReviewWorkspaceControls; locked?: boolean; view?: "write" | "results"; setView?: (view: "write" | "results") => void; showModeSwitcher?: boolean; conversationTitle?: string | null;
 }) {
   const { lang } = useLanguage();
   const c = reviewWorkspaceCopy[lang];
   return <header className="review-command-bar" data-testid="review-command-bar">
-    <div className="review-brand"><Image loading="eager" unoptimized src="/tomverse-logo.png" width={34} height={34} alt="Tomverse" /><strong title={chatProductUiCopy[lang].review.description}>Review{chatProductUiCopy[lang].review.shortDescription && <small className="review-product-caption" aria-hidden="true">{chatProductUiCopy[lang].review.shortDescription}</small>}</strong><span>/ {c.newTask}</span></div>
+    <div className="review-brand"><Image loading="eager" unoptimized src="/tomverse-logo.png" width={34} height={34} alt="Tomverse" /><strong title={chatProductUiCopy[lang].review.description}>Review{chatProductUiCopy[lang].review.shortDescription && <small className="review-product-caption" aria-hidden="true">{chatProductUiCopy[lang].review.shortDescription}</small>}</strong><CommandBarConversationTitle title={conversationTitle} fallback={c.newTask} /></div>
     {showModeSwitcher && <ReviewModeSwitcher review={review} locked={locked} />}
     {setView && <div className="review-view-switch" role="group" aria-label={c.results}>
       <button type="button" aria-pressed={view === "write"} onClick={() => setView("write")}>{c.write}</button>
@@ -82,20 +92,32 @@ function WorkspaceAppearanceActions({ workspace, disabled, testId }: { workspace
   </>;
 }
 
-export function ChatCommandBar({ workspace, locked = false }: { workspace: WorkspaceAppearanceControls; locked?: boolean }) {
+export function ChatCommandBar({ workspace, locked = false, conversationTitle }: { workspace: WorkspaceAppearanceControls; locked?: boolean; conversationTitle?: string | null }) {
   const { lang, t } = useLanguage();
   return <header className="review-command-bar chat-command-bar" data-testid="chat-command-bar">
-    <div className="review-brand"><Image loading="eager" unoptimized src="/tomverse-logo.png" width={34} height={34} alt="Tomverse" /><strong title={chatProductUiCopy[lang].chat.description}>Chat{chatProductUiCopy[lang].chat.shortDescription && <small className="review-product-caption" aria-hidden="true">{chatProductUiCopy[lang].chat.shortDescription}</small>}</strong><span>/ {t("sidebar.newChat")}</span></div>
-    <span className="chat-studio-description">{chatProductUiCopy[lang].chat.description}</span>
+    <div className="review-brand"><Image loading="eager" unoptimized src="/tomverse-logo.png" width={34} height={34} alt="Tomverse" /><strong title={chatProductUiCopy[lang].chat.description}>Chat{chatProductUiCopy[lang].chat.shortDescription && <small className="review-product-caption" aria-hidden="true">{chatProductUiCopy[lang].chat.shortDescription}</small>}</strong><CommandBarConversationTitle title={conversationTitle} fallback={t("sidebar.newChat")} /></div>
+    <span className="chat-studio-description" title={chatProductUiCopy[lang].chat.description}>{chatProductUiCopy[lang].chat.description}</span>
     <WorkspaceAppearanceActions workspace={workspace} disabled={locked} testId="chat-appearance" />
   </header>;
+}
+
+// The history drawer's sidebar opens a conversation from a row (role="button") or a message
+// search hit. Keyboard: only the row, since Enter on a real button also fires a click.
+function opensConversation(target: EventTarget, keyboard = false) {
+  if (!(target instanceof Element)) return false;
+  const action = target.closest("button, a, input, [role='button'], [role='menuitem']");
+  if (!action || (keyboard && action !== target)) return false;
+  const row = "[data-testid='sidebar-conversation-item']";
+  return action.matches(keyboard ? row : `${row}, [data-testid='message-search-result']`);
 }
 
 export function ReviewNavigation({ sidebar, onNewChat, onChat, onReview, product = "review", locked = false }: { sidebar: ReactNode; onNewChat: () => void; onChat?: () => boolean; onReview?: () => boolean; product?: ChatWorkspaceProduct | "plugins"; locked?: boolean }) {
   const { lang } = useLanguage(); const c = reviewWorkspaceCopy[lang];
   const productLabel = (key: ChatWorkspaceProduct) => {
     const item = chatProductUiCopy[lang][key];
-    return <span className={item.shortDescription ? "review-product-label" : undefined}>{item.shortLabel}{item.shortDescription && <small className="review-product-caption" aria-hidden="true">{item.shortDescription}</small>}</span>;
+    // A caption that repeats the label (Korean Chat: 채팅 / 채팅) says nothing.
+    const caption = item.shortDescription && item.shortDescription !== item.shortLabel ? item.shortDescription : null;
+    return <span className={caption ? "review-product-label" : undefined}>{item.shortLabel}{caption && <small className="review-product-caption" aria-hidden="true">{caption}</small>}</span>;
   };
   const [open, setOpen] = useState(false);
   const keyboardInset = useKeyboardInset();
@@ -140,7 +162,11 @@ export function ReviewNavigation({ sidebar, onNewChat, onChat, onReview, product
       <button type="button" className="review-avatar" onClick={() => settings("account")} aria-label={c.settings}>T</button>
     </nav>
     {open && <div className="review-drawer-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setOpen(false); }}>
-      <div ref={drawer} className="review-history-drawer" style={{ bottom: 16 + keyboardInset }} role="dialog" aria-modal="true" aria-label={c.history}>
+      {/* Opening a conversation closes the drawer, as the mobile drawer does, so the loaded
+          conversation is visible. Row actions (the "..." menu) are their own buttons and keep it open. */}
+      <div ref={drawer} className="review-history-drawer" style={{ bottom: 16 + keyboardInset }} role="dialog" aria-modal="true" aria-label={c.history}
+        onClick={event => { if (opensConversation(event.target)) setOpen(false); }}
+        onKeyDown={event => { if ((event.key === "Enter" || event.key === " ") && opensConversation(event.target, true)) setOpen(false); }}>
         <button type="button" className="review-drawer-close" aria-label={c.close} onClick={() => setOpen(false)}><X size={20} /></button>
         {sidebar}
       </div>
@@ -166,7 +192,7 @@ export function ReviewParticipants({ review, selectedModels, canSelectModel, ini
           if (review.mode === "professional") { openChatModelPicker(event.currentTarget); return; }
           if (selected && providers.length <= 1) return;
           review.setProviders(selected ? providers.filter(p => p !== id) : review.maxProviders === 1 ? [id] : [...providers, id]);
-        }}><ModelLogo model={model} size="md" /><span><strong>{review.mode === "easy" ? reviewProviderName(id) : model?.name ?? id}</strong><small>{review.mode === "easy" ? c.automatic : model ? reviewProviderName(model.provider) : ""}</small></span><Check size={14} className={!selected && review.mode === "easy" ? "invisible" : ""} /></button>;
+        }}><ModelLogo model={model} size="md" /><span><span className="flex min-w-0 items-center gap-1.5"><strong>{review.mode === "easy" ? reviewProviderName(id) : model?.name ?? id}</strong>{review.mode === "easy" && review.imageProviders?.includes(id) && <span data-testid="review-provider-image-badge" className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-accent-image-50 px-1.5 text-xs font-medium text-accent-image-700 dark:bg-accent-image-950 dark:text-accent-image-200"><ImagePlus size={12} aria-hidden="true" />{c.imageBadge}</span>}</span><small>{review.mode === "easy" ? c.automatic : model ? reviewProviderName(model.provider) : ""}</small></span><Check size={14} className={!selected && review.mode === "easy" ? "invisible" : ""} /></button>;
       })}
     </div>
     {review.mode === "easy" && !providers.length && <p role="status">{reviewProviderPreferencesCopy(lang).unavailable}</p>}

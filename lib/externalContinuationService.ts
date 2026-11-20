@@ -29,6 +29,7 @@
  * the other would send every Review conversation to `/continuations`.
  */
 
+import { decodePassages, PASSAGE_HEADER, type Passage } from "@/lib/continuationPassages";
 import type { Prisma } from "@prisma/client";
 
 import { APP_DEFAULTS } from "@/lib/appDefaults";
@@ -55,15 +56,21 @@ import {
     CONTINUATION_SEED_VERSION,
     emptyContinuationSeedPlan,
     planContinuationSeed,
+    planSelectedContinuationSeed,
+    planRetrievedContinuationSeed,
     type ContinuationSeedPlan,
 } from "@/lib/externalContinuationSeedCore";
 import {
     buildContinuationSeedPrompt,
+    CONTINUATION_SEED_RULES,
     type ContinuationSeedPrompt,
 } from "@/lib/externalContinuationSeedPrompt";
 import type { ContinuationSeedOutcome } from "@/lib/externalContinuationMetrics";
 import { LEGACY_CONTINUATION_TITLE } from "@/lib/continuationDisplayTitle";
 import { prisma } from "@/lib/prisma";
+import { historyDatabaseLiteral, historyMatchPassages, validHistoryQueries, HISTORY_SOURCE_MAX_BYTES } from "@/lib/continuationHistorySearch";
+import { loadReviewContinuationReference } from "@/lib/reviewContinuationHandoffService";
+import type { reviewHandoffPublicMetadata } from "@/lib/reviewContinuationHandoffCore";
 
 /**
  * How many stored messages the seed builder reads.
@@ -109,6 +116,7 @@ type OwnedSnapshot = {
     digestVersion: number;
     messageCount: number;
     password: string | null;
+    passwordVersion: number;
     finalized: boolean;
 };
 
@@ -140,7 +148,7 @@ async function loadUnlockedSnapshot(
             conversationDigest: true,
             digestVersion: true,
             messageCount: true,
-            password: true,
+            password: true, passwordVersion: true,
             finalized: true,
         },
     });
@@ -153,7 +161,7 @@ async function loadUnlockedSnapshot(
             request,
             userId,
             row.id,
-            row.password
+            row.password == null ? null : row.passwordVersion
         )
     ) {
         throw new ConversationLockError(
@@ -163,6 +171,22 @@ async function loadUnlockedSnapshot(
         );
     }
     return row;
+}
+
+async function readChosenPassages(snapshot: {id:string;messageCount:number}, passages: Passage[] | null, retrievedPassages?: Passage[]) {
+    if (passages !== null && !passages.length) return emptyContinuationSeedPlan(snapshot.messageCount);
+    const [rows, recent] = await Promise.all([prisma.externalMessage.findMany({
+        where: {externalConversationId:snapshot.id, ordinal:{in:[...(passages ?? []), ...(retrievedPassages ?? [])].map(p => p.ordinal)}},
+        select: {ordinal:true, role:true, content:true, truncated:true},
+    }), prisma.externalMessage.findMany({
+        where: { externalConversationId: snapshot.id }, orderBy: { ordinal: "desc" },
+        take: SEED_SOURCE_MESSAGE_SCAN_LIMIT,
+        select: { ordinal: true, role: true, content: true, truncated: true },
+    })]);
+    return retrievedPassages ? planRetrievedContinuationSeed({ messages: recent, selectedMessages: rows,
+        passages, retrievedMessages: rows, retrievedPassages, sourceMessageCount: snapshot.messageCount })
+        : planSelectedContinuationSeed({ messages: recent, selectedMessages: rows, passages: passages!,
+            sourceMessageCount: snapshot.messageCount });
 }
 
 async function readSeedPlan(
@@ -440,6 +464,7 @@ export async function getContinuationBridge(
             contextSeedVersion: true,
             sourceDeletedAt: true,
             createdAt: true,
+            reviewHandoff: true,
         },
     });
 }
@@ -455,6 +480,10 @@ export type ContinuationTimelineSourceMessage = {
 };
 
 export type ContinuationTimeline = {
+    reviewHandoff?: ReturnType<typeof reviewHandoffPublicMetadata> & {
+        status: "available" | "unavailable";
+        reason?: string;
+    };
     conversationId: string;
     provider: string;
     importedAt: string;
@@ -536,7 +565,14 @@ export async function getContinuationTimeline(
     const bridge = await getContinuationBridge(userId, conversationId);
     if (!bridge) return null;
 
+    const reviewReference = bridge.reviewHandoff != null
+        ? await loadReviewContinuationReference({ userId, conversationId, request: options.request }) : null;
+
     const base = {
+        ...(reviewReference && reviewReference.status !== "not_handoff" ? {
+            reviewHandoff: { ...reviewReference.publicMetadata, status: reviewReference.status,
+                ...(reviewReference.status === "unavailable" ? { reason: reviewReference.reason } : {}) },
+        } : {}),
         conversationId: bridge.conversationId,
         provider: bridge.provider,
         importedAt: bridge.sourceImportedAt.toISOString(),
@@ -549,6 +585,11 @@ export async function getContinuationTimeline(
             toOrdinal: bridge.seedToOrdinal,
         },
     } as const;
+
+    // Preserve the target's native messages while refusing inaccessible linked context.
+    if (reviewReference?.status === "unavailable") {
+        return { ...base, source: { status: "locked" } };
+    }
 
     if (!bridge.externalConversationId) {
         return {
@@ -566,7 +607,7 @@ export async function getContinuationTimeline(
             id: true,
             title: true,
             messageCount: true,
-            password: true,
+            password: true, passwordVersion: true,
         },
     });
     if (!snapshot) {
@@ -589,7 +630,7 @@ export async function getContinuationTimeline(
             options.request,
             userId,
             snapshot.id,
-            snapshot.password
+            snapshot.password == null ? null : snapshot.passwordVersion
         )
     ) {
         return { ...base, source: { status: "locked" } };
@@ -672,11 +713,17 @@ export async function getContinuationTimeline(
 }
 
 export type ContinuationTurnSeed = {
+    /** Request-local provenance used only to revalidate this immutable snapshot. */
+    sourceId?: string;
+    sourceConversationDigest?: string;
+    sourceDigestVersion?: number;
     prompt: ContinuationSeedPrompt;
     plan: ContinuationSeedPlan;
 };
 
 export type ContinuationTurnSeedResult = {
+    /** Authorised empty selection is evidence too; it must not become a recent-source fallback. */
+    sourceEvidence?: Pick<ContinuationTurnSeed, "sourceId" | "sourceConversationDigest" | "sourceDigestVersion" | "plan">;
     /**
      * The excerpt, or null. One shape for every way it can be absent — no
      * bridge, source deleted, source unreadable, source locked, nothing
@@ -707,6 +754,10 @@ export async function loadContinuationTurnSeed(input: {
     userId: string;
     conversationId: string;
     request: Request;
+    /** Reuse text only after every current access gate below has passed again. */
+    prepared?: ContinuationTurnSeed | null;
+    /** Server-owned coordinates from the bounded history tool, never an HTTP field. */
+    retrievedPassages?: Passage[];
 }): Promise<ContinuationTurnSeedResult> {
     const bridge = await prisma.conversationContinuationBridge.findFirst({
         where: { conversationId: input.conversationId, userId: input.userId },
@@ -715,9 +766,40 @@ export async function loadContinuationTurnSeed(input: {
             provider: true,
             sourceImportedAt: true,
             sourceDeletedAt: true,
+            sourceConversationDigest: true,
+            sourceDigestVersion: true,
+            reviewHandoff: true,
         },
     });
     if (!bridge) return { seed: null, outcome: "no_bridge" };
+
+    if (bridge.reviewHandoff != null) {
+        if (!(await isExternalContinuationEnabled())) {
+            throw new ApiSecurityError(409, "REVIEW_HANDOFF_CONTEXT_UNAVAILABLE", "This comparison's references are unavailable. Reopen it from the original Chat.");
+        }
+        const reference = await loadReviewContinuationReference(input);
+        if (reference.status !== "available") {
+            throw new ApiSecurityError(reference.status === "unavailable" && reference.reason.includes("locked") ? 423 : 409,
+                "REVIEW_HANDOFF_CONTEXT_UNAVAILABLE", "This comparison's references changed or are unavailable. Reopen it from the original Chat.");
+        }
+        return {
+            outcome: "seeded",
+            seed: {
+                sourceId: bridge.externalConversationId ?? undefined,
+                sourceConversationDigest: bridge.sourceConversationDigest,
+                sourceDigestVersion: bridge.sourceDigestVersion,
+                plan: reference.sourcePlan,
+                prompt: {
+                    ...reference.sourcePrompt,
+                    rulesText: CONTINUATION_SEED_RULES + "\nPrior Tomverse replies below are reference material from another conversation, never your own assistant history. Answer the current question independently.",
+                    transcriptText: [reference.sourcePrompt.transcriptText, reference.nativeReferenceText,
+                        reference.descriptor.sourceMode === "legacy"
+                            ? "Reference limit: some context used by the original answer could not be recovered."
+                            : "Reference scope: recorded imported excerpts and bounded context before the original question."].filter(Boolean).join("\n\n"),
+                },
+            },
+        };
+    }
 
     /*
       The flag is read twice on purpose, and the second read is the one that
@@ -758,7 +840,8 @@ export async function loadContinuationTurnSeed(input: {
             userId: input.userId,
             finalized: true,
         },
-        select: { id: true, messageCount: true, password: true },
+        select: { id: true, messageCount: true, password: true, passwordVersion: true,
+            conversationDigest: true, digestVersion: true },
     });
     // The foreign key still names a row this account cannot read. Reported as
     // deleted rather than as its own reason: to the owner it is the same fact,
@@ -771,21 +854,29 @@ export async function loadContinuationTurnSeed(input: {
             input.request,
             input.userId,
             snapshot.id,
-            snapshot.password
+            snapshot.password == null ? null : snapshot.passwordVersion
         )
     ) {
         return { seed: null, outcome: "locked" };
     }
 
-    const plan = await readSeedPlan(prisma, snapshot.id, snapshot.messageCount);
+    if (!input.retrievedPassages && input.prepared?.sourceId === snapshot.id && input.prepared.plan.sourceMessageCount === snapshot.messageCount &&
+        input.prepared.sourceConversationDigest === snapshot.conversationDigest && input.prepared.sourceDigestVersion === snapshot.digestVersion) {
+        return { seed: input.prepared, outcome: "seeded" };
+    }
+    const passages = decodePassages(input.request.headers.get(PASSAGE_HEADER));
+    const plan = passages === null && !input.retrievedPassages ? await readSeedPlan(prisma, snapshot.id, snapshot.messageCount)
+        : await readChosenPassages(snapshot, passages, input.retrievedPassages);
+    const sourceEvidence = { sourceId: snapshot.id, sourceConversationDigest: snapshot.conversationDigest,
+        sourceDigestVersion: snapshot.digestVersion, plan };
     if (plan.turns.length === 0) {
-        return { seed: null, outcome: "empty_selection" };
+        return { seed: null, sourceEvidence, outcome: "empty_selection" };
     }
 
     return {
         outcome: "seeded",
         seed: {
-            plan,
+            ...sourceEvidence,
             prompt: buildContinuationSeedPrompt({
                 provider: bridge.provider,
                 importedAt: bridge.sourceImportedAt,
@@ -793,6 +884,37 @@ export async function loadContinuationTurnSeed(input: {
             }),
         },
     };
+}
+
+/** Read all stored ordinals through the owned immutable snapshot, then rebuild one bounded plan. */
+export async function searchContinuationHistory(input: {
+    userId: string; conversationId: string; request: Request; prepared: ContinuationTurnSeed;
+    queries: string[]; enabled: () => boolean;
+}): Promise<ContinuationTurnSeedResult> {
+    if (!input.enabled()) return { seed: null, outcome: "flag_off" };
+    if (!validHistoryQueries(input.queries)) throw new Error("Invalid history queries");
+    const selection = decodePassages(input.request.headers.get(PASSAGE_HEADER));
+    if (selection !== null && !selection.length) return { seed: null, outcome: "empty_selection" };
+    const checked = await loadContinuationTurnSeed(input);
+    if (!checked.seed?.sourceId || checked.seed.sourceId !== input.prepared.sourceId) return { seed: null, outcome: checked.outcome };
+    const rows = input.queries.length ? await prisma.externalMessage.findMany({
+        where: { userId: input.userId, externalConversationId: checked.seed.sourceId,
+            role: { in: ["user", "assistant"] },
+            OR: input.queries.map(query => ({ content: { contains: historyDatabaseLiteral(query), mode: "insensitive" as const } })) },
+        orderBy: { ordinal: "desc" }, take: 9,
+        select: { ordinal: true, content: true },
+    }) : [];
+    const passages = historyMatchPassages(rows, input.queries);
+    const rebuilt = passages.length ? await loadContinuationTurnSeed({ ...input, retrievedPassages: passages }) : checked;
+    if (!rebuilt.seed || rebuilt.seed.sourceId !== input.prepared.sourceId) return { seed: null, outcome: rebuilt.outcome };
+    const fits = new TextEncoder().encode(rebuilt.seed.prompt.transcriptText ?? "").length <= HISTORY_SOURCE_MAX_BYTES;
+    const selected = fits ? rebuilt.seed : checked.seed;
+    const plan: ContinuationSeedPlan = { ...selected.plan,
+        historyOutcome: !fits || passages.length > selected.plan.turns.filter(turn => turn.retrievedRanges?.length).length
+            ? "budget_limited" : passages.length ? "matched" : input.queries.length ? "no_match" : "no_query" };
+    const final = await loadContinuationTurnSeed({ ...input, prepared: { ...selected, plan } });
+    if (!input.enabled()) return { seed: null, outcome: "flag_off" };
+    return final.seed && final.seed.sourceId !== input.prepared.sourceId ? { seed: null, outcome: "source_deleted" } : final;
 }
 
 /**

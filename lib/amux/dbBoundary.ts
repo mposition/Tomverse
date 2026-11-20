@@ -23,15 +23,27 @@ import {
   type AmuxOrchestratorReceipt,
 } from "@/lib/amux/orchestratorHaltStore";
 
+/**
+ * What PostgreSQL enforces for one statement of a boundary. Kept at 200 ms on
+ * purpose (owner review 2026-11-15): it is the bound the database shares with
+ * Chat traffic, and it is coupled to three other figures that the Rust client
+ * deadlines are sized on -- a statement must time out (a known rollback, 57014)
+ * before Prisma's interactive-transaction timeout (budget plus the slack
+ * below, which stays under the one-second transport reserve), or the answer
+ * becomes an unknown outcome. A failure of this kind loses nothing: it is
+ * answered 503 "nothing committed" and the caller asks again.
+ */
 export const AMUX_DB_STATEMENT_TIMEOUT_MS = 200;
 /**
  * What PostgreSQL enforces between two statements of a boundary. 100 ms (until
  * 2026-11-05) ended sessions about 13 times an hour in production, which halted
- * bridges and lost worker leases. A longer gap does not lengthen a transaction:
+ * bridges and lost worker leases; 300 ms (until 2026-11-15) still ended a
+ * session on one slow round trip. A longer gap does not lengthen a transaction:
  * it spends the transaction's budget, and Prisma still closes the transaction at
- * that budget plus the slack below.
+ * that budget plus the slack below. A session ended for idling is a rollback,
+ * answered as "nothing committed" (see `amuxRolledBackWriteCode`).
  */
-export const AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS = 300;
+export const AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS = 1_000;
 /** The per-call gap a transaction's budget plans for. Not a database setting. */
 export const AMUX_DB_IDLE_GAP_PLANNING_MS = 100;
 export const AMUX_DB_COMMIT_RESERVE_MS = 200;
@@ -106,9 +118,10 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 2,
     isolation: "read",
   },
+  // +1 (2026-11-15): a board past one read counts the rows it leaves for later.
   queueRead: {
     operation: "queue_read",
-    prismaCallCeiling: 6,
+    prismaCallCeiling: 7,
     isolation: "read",
   },
   // 7: the busy-owner read (one open card per worker) joined the snapshot.
@@ -145,7 +158,8 @@ export const AMUX_DB_BOUNDARIES = {
   },
   // 18: the one-open-card-per-worker count added a read to the success path.
   // 19: the permanent safe-stop fence read (orchestration policy version 37).
-  claim: { operation: "claim", prismaCallCeiling: 19, isolation: "mutation" },
+  // +1: the audit chain lock before the Task row (lib/adminAudit.ts takeAuditChainLock).
+  claim: { operation: "claim", prismaCallCeiling: 20, isolation: "mutation" },
   // A refusal audit changes no ownership or status, so an admitted claim's
   // refusal takes no admission lock and leaves no receipt (policy version 20).
   claimRefusal: {
@@ -161,8 +175,9 @@ export const AMUX_DB_BOUNDARIES = {
   },
   deliveryPull: {
     operation: "delivery_pull",
-    // setup + runtime fence + candidate + update + canonical audit + fence
-    prismaCallCeiling: 9,
+    // setup + runtime fence + audit chain lock + candidate + update +
+    // canonical audit + fence
+    prismaCallCeiling: 10,
     isolation: "mutation",
   },
   deliveryKeyRead: {
@@ -171,30 +186,44 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 4,
     isolation: "read",
   },
+  // A chunk of a resumed run's context file (docs/policy/amux-v22-result-transfer.md
+  // 10.1): setup + the attempt's binding + the file's rows (3 at most, the
+  // owner's answer with its two result rows or the prerequisites' results) + fence.
+  v22ContextRead: {
+    operation: "v22_context_read",
+    prismaCallCeiling: 6,
+    isolation: "read",
+  },
   deliveryAck: {
     operation: "delivery_ack",
-    prismaCallCeiling: 11,
+    // +1: the audit chain lock before the Task row (lib/adminAudit.ts takeAuditChainLock).
+    prismaCallCeiling: 12,
     isolation: "mutation",
   },
   executionStart: {
     operation: "execution_start",
-    prismaCallCeiling: 30,
+    // +1: the audit chain lock before the Task row (lib/adminAudit.ts takeAuditChainLock).
+    prismaCallCeiling: 31,
     isolation: "mutation",
   },
   executionHeartbeat: {
     operation: "execution_heartbeat",
-    // setup + three fenced reads + update + four canonical-audit calls + fence
-    prismaCallCeiling: 10,
+    // setup + three fenced reads + audit chain lock + update + four
+    // canonical-audit calls + fence
+    prismaCallCeiling: 11,
     isolation: "mutation",
   },
   executionSettle: {
     operation: "execution_settle",
-    prismaCallCeiling: 26,
+    // +1: the audit chain lock before the Task row (lib/adminAudit.ts takeAuditChainLock).
+    prismaCallCeiling: 27,
     isolation: "mutation",
   },
   v52ReviewRecord: {
     operation: "v52_review_record",
-    prismaCallCeiling: 20,
+    // +1: the audit chain lock before the Task row (lib/adminAudit.ts takeAuditChainLock).
+    // +2: a reject with findings reads its Task's idea and stores the sealed body.
+    prismaCallCeiling: 23,
     isolation: "mutation",
   },
   executionRecoveryRead: {
@@ -204,7 +233,8 @@ export const AMUX_DB_BOUNDARIES = {
   },
   executionRecoveryWrite: {
     operation: "execution_recovery_write",
-    prismaCallCeiling: 21,
+    // +1: the audit chain lock before the Task row (lib/adminAudit.ts takeAuditChainLock).
+    prismaCallCeiling: 22,
     isolation: "mutation",
   },
   quotaObservationSweep: {
@@ -233,13 +263,15 @@ export const AMUX_DB_BOUNDARIES = {
   },
   ownershipRecoveryWrite: {
     operation: "ownership_recovery_write",
-    prismaCallCeiling: 9,
+    // +1: the audit chain lock before the Task row (lib/adminAudit.ts takeAuditChainLock).
+    prismaCallCeiling: 10,
     isolation: "mutation",
   },
   reviewPullRequest: {
     operation: "review_pull_request",
-    // setup + task lock + latest attempt + update + canonical audit + fence
-    prismaCallCeiling: 10,
+    // setup + audit chain lock + task lock + latest attempt + update +
+    // canonical audit + fence
+    prismaCallCeiling: 11,
     isolation: "mutation",
   },
   // engineering-agent.md version 5, item 1. setup + audit chain lock + task
@@ -447,6 +479,13 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 10,
     isolation: "mutation",
   },
+  // The system's release of a latch an hour after it (owner direction
+  // 2026-11-16; lock, read, the instance's audit 4, the event: 7).
+  decisionMakerLatchRelease: {
+    operation: "decision_maker_latch_release",
+    prismaCallCeiling: 9,
+    isolation: "mutation",
+  },
   // §5's cleanup report of docs/policy/amux-decision-maker.md, stage S2-2a3
   // (lock, state, the instance's audit 4, the event: 7, pinned by
   // tests/amuxDecisionMakerRequest.test.mjs).
@@ -531,9 +570,10 @@ export const AMUX_DB_BOUNDARIES = {
   // the open question of its card + the open refusal of its card + the open
   // idea card close question of its card + result detail + bodies + fence.
   // + the open v22 result review of its card (owner decision 2026-11-07).
+  // + the open owner queue settlement of its card (owner decision 2026-11-13).
   decisionMakerV22QuestionResolve: {
     operation: "decision_maker_v22_question_resolve",
-    prismaCallCeiling: 11,
+    prismaCallCeiling: 12,
     isolation: "read",
   },
   // Answer: setup + audit chain lock + switches + the locked question, Task
@@ -564,10 +604,11 @@ export const AMUX_DB_BOUNDARIES = {
   // Card or close record: setup + update + read-back on the idea card close
   // question, then the same two on the v22 question, then on a refused session
   // answer's card, whichever it is + fence.
-  // + the same two on a v22 result review.
+  // + the same two on a v22 result review + the same two on a T2 draft's
+  // advice card (lib/engineeringAgentT2DmReviewService.ts).
   decisionMakerV22QuestionWrite: {
     operation: "decision_maker_v22_question_write",
-    prismaCallCeiling: 10,
+    prismaCallCeiling: 12,
     isolation: "mutation",
   },
   // A v22 result waiting for review (lib/amux/v22ResultReviewService.ts),
@@ -576,6 +617,30 @@ export const AMUX_DB_BOUNDARIES = {
   decisionMakerV22ResultReviewRead: {
     operation: "decision_maker_v22_result_review_read",
     prismaCallCeiling: 5,
+    isolation: "mutation",
+  },
+  // A T2 draft put to the Decision Maker for advice
+  // (lib/engineeringAgentT2DmReviewService.ts). Sync read: setup + pending +
+  // closing + fence.
+  engineeringAgentT2DmReviewRead: {
+    operation: "engineering_agent_t2_dm_review_read",
+    prismaCallCeiling: 4,
+    isolation: "read",
+  },
+  // A Decision Maker request's workspace evidence
+  // (lib/amux/decisionMakerWorkspaceService.ts): setup + the request's card +
+  // the one source row of that card + a pull request's patch + a settlement
+  // Task's rejected reviews + fence (the card text read went with the
+  // workspace's kill switch, 2026-11-16).
+  decisionMakerWorkspaceRead: {
+    operation: "decision_maker_workspace_read",
+    prismaCallCeiling: 7,
+    isolation: "read",
+  },
+  // Drafts no card could be written for, recorded once: setup + insert + fence.
+  engineeringAgentT2DmReviewUnfilable: {
+    operation: "engineering_agent_t2_dm_review_unfilable",
+    prismaCallCeiling: 3,
     isolation: "mutation",
   },
   // Apply: setup + audit chain lock + switches + the locked review, Task and
@@ -591,13 +656,86 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 8,
     isolation: "mutation",
   },
+  // A stopped v22 Task in the owner queue put to the Decision Maker (owner
+  // decision 2026-11-13, lib/amux/dmOwnerSettlementService.ts), each within
+  // the same 12 statements. Sync: setup + the facts of open and claimed
+  // settlements + the cancel of those whose Task moved + the candidate scan +
+  // the insert + pending + their sibling cards + their pull request evidence +
+  // every rejected review's findings + closing + fence.
+  decisionMakerOwnerSettlementSync: {
+    operation: "decision_maker_owner_settlement_sync",
+    prismaCallCeiling: 11,
+    isolation: "mutation",
+  },
+  // Hand off (unfilable evidence, or an answer that decides nothing): setup +
+  // audit chain lock + settlement + canonical audit 4 + fence.
+  decisionMakerOwnerSettlementHandoff: {
+    operation: "decision_maker_owner_settlement_handoff",
+    prismaCallCeiling: 8,
+    isolation: "mutation",
+  },
+  // Apply: setup + audit chain lock + switches + the locked settlement and card
+  // + the approval read, or the card write and the escalation write + the
+  // settlement + canonical audit 4 + fence. A remake's claim and its close of
+  // the cards once the idea is filed take the same. + 1 (2026-11-15): a retry
+  // reads the card's attempt budget facts, as the claim does.
+  decisionMakerOwnerSettlementApply: {
+    operation: "decision_maker_owner_settlement_apply",
+    prismaCallCeiling: 13,
+    isolation: "mutation",
+  },
+  // The settlements of the owner queue's cards, for each card's Decision Maker
+  // area (lib/amux/ownerQueueDmRead.ts): setup + ONE statement + fence, pinned
+  // by tests/server-contract/amux-owner-queue-dm-read.test.ts.
+  ownerQueueSettlementRead: {
+    operation: "owner_queue_settlement_read",
+    prismaCallCeiling: 3,
+    isolation: "read",
+  },
+  // The one remake claim an earlier tick left unfinished: setup + the claim +
+  // fence. A remake's idea is guarded inside the idea intake's own commit
+  // transaction, which is not an AMUX boundary (ideaSessionSubmissionService.ts).
+  decisionMakerOwnerSettlementRemakeRead: {
+    operation: "decision_maker_owner_settlement_remake_read",
+    prismaCallCeiling: 3,
+    isolation: "read",
+  },
+  // A Decision Maker approved review pull request merged into develop (owner
+  // decision 2026-11-13, lib/amux/dmT2MergeService.ts). The lane's list:
+  // setup + switches + the approvals + their visit + fence.
+  dmT2MergeLaneRead: {
+    operation: "dm_t2_merge_lane_read",
+    prismaCallCeiling: 5,
+    isolation: "mutation",
+  },
+  // The observer's read of a merged one: setup + the approval and lane facts + fence.
+  dmT2MergeObservedRead: {
+    operation: "dm_t2_merge_observed_read",
+    prismaCallCeiling: 3,
+    isolation: "read",
+  },
+  // The next one to mark ready: setup + the recent readies' audits + the
+  // switches + the approvals + its visit + fence.
+  dmT2MergeReadyPick: {
+    operation: "dm_t2_merge_ready_pick",
+    prismaCallCeiling: 6,
+    isolation: "mutation",
+  },
+  // Its audit before the write: setup + audit chain lock + switches + the
+  // approval read again + canonical audit 4 + fence.
+  dmT2MergeReadyRecord: {
+    operation: "dm_t2_merge_ready_record",
+    prismaCallCeiling: 9,
+    isolation: "mutation",
+  },
   // The Decision Maker as the approver (TOMVERSE_AMUX_DM_APPROVER), its read:
-  // setup + switches + the open app-answered cards + the next open proposal
-  // among them + request state + result detail + bodies + the open refusal of
-  // its card + fence. The apply then takes the question type's own boundary.
+  // setup + switches + the open app-answered cards + the settlements and
+  // result reviews among them the owner sent (owner decision 2026-11-14) + the next open
+  // proposal among them + request state + result detail + bodies + the open
+  // refusal of its card + fence. The apply then takes the question type's own boundary.
   decisionMakerAutoApplyRead: {
     operation: "decision_maker_auto_apply_read",
-    prismaCallCeiling: 9,
+    prismaCallCeiling: 10,
     isolation: "read",
   },
   // The approver's one transaction: setup + the request store's direct-answer
@@ -757,7 +895,6 @@ export const AMUX_DB_BOUNDARIES = {
 /**
  * - `AMUX_DB_DEADLINE_EXCEEDED`: refused before COMMIT, or at COMMIT by the
  *   commit deadline trigger (SQLSTATE AX001). Rolled back either way.
- * - `AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED`: refused before the call. Rolled back.
  * - `AMUX_DB_COMMIT_CHECK_MISSING`: the fence found no commit deadline trigger
  *   that will fire, so it refused rather than commit without the check. Rolled
  *   back.
@@ -781,7 +918,6 @@ export const AMUX_DB_BOUNDARIES = {
  */
 export type AmuxDbBoundaryErrorCode =
   | "AMUX_DB_DEADLINE_EXCEEDED"
-  | "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED"
   | "AMUX_DB_COMMIT_CHECK_MISSING"
   | "AMUX_DB_OUTCOME_UNKNOWN"
   | "AMUX_DB_READ_BUSY"
@@ -1006,6 +1142,33 @@ export const amuxDbTransactionBudgetMs = (boundary: AmuxDbBoundary) =>
   boundary.prismaCallCeiling * AMUX_DB_STATEMENT_TIMEOUT_MS +
   boundary.prismaCallCeiling * AMUX_DB_IDLE_GAP_PLANNING_MS +
   AMUX_DB_COMMIT_RESERVE_MS;
+
+/** One call and the commit reserve: less than this is no transaction at all. */
+export const AMUX_DB_MIN_TRANSACTION_MS =
+  AMUX_DB_STATEMENT_TIMEOUT_MS + AMUX_DB_IDLE_GAP_PLANNING_MS +
+  AMUX_DB_COMMIT_RESERVE_MS;
+
+/**
+ * The time one bounded transaction may take inside its route.
+ *
+ * The planned budget is a worst case: every declared call at its full
+ * statement timeout. A route that holds it keeps it unchanged. A route that
+ * cannot hold it no longer refuses the transaction before it starts (v22
+ * settlement, 80 declared calls, planned 24,200 ms in a 24,000 ms route, was
+ * refused on every attempt from 2026-11-16): the transaction runs inside what
+ * the route has left less the connection wait, and its database deadline,
+ * commit fence and Prisma timeout all use that time, so it still ends inside
+ * the route. Owner direction 2026-11-16: no refusal of ours for a count or a
+ * size. Null: not even one call fits, so nothing is started.
+ */
+export const amuxDbTransactionBudgetWithinRouteMs = (
+  plannedMs: number,
+  routeRemainingMs: number | null,
+): number | null => {
+  if (routeRemainingMs === null || plannedMs <= routeRemainingMs) return plannedMs;
+  const fitted = Math.floor(routeRemainingMs - AMUX_DB_MAX_WAIT_MS);
+  return fitted >= AMUX_DB_MIN_TRANSACTION_MS ? fitted : null;
+};
 
 /**
  * Prisma's `maxWait` for one transaction.
@@ -1351,86 +1514,6 @@ export const withAmuxRouteBudget = <T>(
     work,
   );
 
-const PRISMA_MODEL_CALL_METHODS = new Set([
-  "aggregate",
-  "count",
-  "create",
-  "createMany",
-  "createManyAndReturn",
-  "delete",
-  "deleteMany",
-  "findFirst",
-  "findFirstOrThrow",
-  "findMany",
-  "findUnique",
-  "findUniqueOrThrow",
-  "groupBy",
-  "update",
-  "updateMany",
-  "updateManyAndReturn",
-  "upsert",
-]);
-const PRISMA_RAW_CALL_METHODS = new Set([
-  "executeRaw",
-  "executeRawUnsafe",
-  "queryRaw",
-  "queryRawUnsafe",
-]);
-
-const boundedTransactionClient = (
-  tx: Prisma.TransactionClient,
-  boundary: AmuxDbBoundary,
-  initialPrismaCalls: number,
-): Prisma.TransactionClient => {
-  let prismaCallCount = initialPrismaCalls;
-  const proxies = new WeakMap<object, object>();
-
-  const wrap = (value: unknown): unknown => {
-    if (
-      (typeof value !== "object" && typeof value !== "function") ||
-      value === null
-    ) {
-      return value;
-    }
-
-    const objectValue = value as object;
-    const existing = proxies.get(objectValue);
-    if (existing) return existing;
-
-    const proxy = new Proxy(objectValue, {
-      get(target, property, receiver) {
-        const member = Reflect.get(target, property, receiver);
-
-        if (
-          typeof property === "string" &&
-          typeof member === "function" &&
-          (PRISMA_MODEL_CALL_METHODS.has(property) ||
-            (property.startsWith("$") &&
-              PRISMA_RAW_CALL_METHODS.has(property.slice(1))))
-        ) {
-          return (...args: unknown[]) => {
-            prismaCallCount += 1;
-            if (prismaCallCount > boundary.prismaCallCeiling) {
-              throw new AmuxDbBoundaryError(
-                "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED",
-                boundary.operation,
-              );
-            }
-            return Reflect.apply(member, target, args);
-          };
-        }
-
-        return wrap(member);
-      },
-    });
-
-    proxies.set(objectValue, proxy);
-    return proxy;
-  };
-
-  return wrap(tx) as Prisma.TransactionClient;
-};
-
 declare const AMUX_ATTACHED_TRANSACTION_BRAND: unique symbol;
 
 /**
@@ -1448,8 +1531,8 @@ export type AmuxAttachedTransaction = Prisma.TransactionClient & {
  * on the path where its own write succeeded, after every AMUX row it locks
  * and before the commit fence, so the adapter's rows come after AMUX's in the
  * lock order. A throw rolls the AMUX write back with it: the two are one fact
- * or neither happened. The attached calls go through the same bounded client
- * and count against the writer's ceiling, which `prismaCalls` widens.
+ * or neither happened. The attached calls run in the writer's transaction;
+ * `prismaCalls` widens the writer's planned time budget by that many calls.
  *
  * `beforeWrite`, where a writer offers it, runs after the writer's row locks
  * and before its first write, including a write on a refusal path (execution
@@ -1467,9 +1550,6 @@ export type AmuxAttachment<R> = {
   ) => Promise<void>;
 };
 
-/** Enough for an adapter's own checks, row and audit entry, and no more. */
-export const AMUX_ATTACHMENT_MAX_PRISMA_CALLS = 24;
-
 /** The writer's boundary, widened by exactly what its attachment declared. */
 export const amuxBoundaryWithAttachment = (
   boundary: AmuxDbBoundary,
@@ -1477,9 +1557,8 @@ export const amuxBoundaryWithAttachment = (
 ): AmuxDbBoundary => {
   if (attachment === undefined) return boundary;
   if (
-    !Number.isInteger(attachment.prismaCalls) ||
-    attachment.prismaCalls < 1 ||
-    attachment.prismaCalls > AMUX_ATTACHMENT_MAX_PRISMA_CALLS
+    !Number.isSafeInteger(attachment.prismaCalls) ||
+    attachment.prismaCalls < 1
   ) {
     throw new Error("AMUX attachment declares an invalid Prisma call budget");
   }
@@ -1554,12 +1633,15 @@ export async function withAmuxDbBoundary<T>(
           boundary.prismaCallCeiling + AMUX_ORCHESTRATOR_ADMISSION_LOCK_CALLS,
       }
     : boundary;
-  const transactionBudgetMs = amuxDbTransactionBudgetMs(effectiveBoundary);
   const routeRemainingMs =
     routeDeadline === undefined
       ? null
       : routeDeadline.localDeadlineMs - Date.now();
-  if (routeRemainingMs !== null && routeRemainingMs < transactionBudgetMs) {
+  const transactionBudgetMs = amuxDbTransactionBudgetWithinRouteMs(
+    amuxDbTransactionBudgetMs(effectiveBoundary),
+    routeRemainingMs,
+  );
+  if (transactionBudgetMs === null) {
     throw new AmuxDbBoundaryError(
       "AMUX_DB_DEADLINE_EXCEEDED",
       boundary.operation,
@@ -1658,7 +1740,11 @@ export async function withAmuxDbBoundary<T>(
         }
       }
 
-      const tx = boundedTransactionClient(rawTx, effectiveBoundary, 1);
+      // The declared calls size the time budget only; no count of ours
+      // refuses a call (owner direction 2026-11-18). The time budget, the
+      // database deadline and the commit fence still end the transaction
+      // inside its route.
+      const tx = rawTx;
       if (locksAdmission) {
         await lockAmuxRouteOrchestratorAdmission(tx, boundary.operation);
       }

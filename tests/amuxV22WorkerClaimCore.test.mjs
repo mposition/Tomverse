@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { amuxV22ClaimCapacity, amuxV22ExecutionRole, amuxV22RequiredTool,
-  amuxV22ResumeRoutes, amuxV22WorkerClaimEnabled, amuxV22OneShotRoleSupported, amuxV22OneShotRouteSupported,
+  amuxV22ResumeRoutes, amuxV22OneShotRoleSupported, amuxV22OneShotRouteSupported,
   amuxV22TaskRoleSupported, amuxV22TaskWritesPatch, chooseAmuxV22WorkerRoute } from
   "../lib/amux/v22WorkerClaimCore.ts";
 import { v22PromotionTickWire, v22WorkerClaimTickWire } from
@@ -12,31 +12,101 @@ import { autoTickHttpStatus } from "../lib/amux/autoPromotionCore.ts";
 import { parseAmuxV22OneShotRequest } from
   "../lib/amux/v22OneShotSidecar.mjs";
 
-test("v22 claim requires its own exact environment switch", () => {
-  assert.equal(amuxV22WorkerClaimEnabled("enabled"), true);
-  for (const flag of [undefined, "", "disabled", "true", "1", " enabled", "ENABLED"]) {
-    assert.equal(amuxV22WorkerClaimEnabled(flag), false);
+test("Tasks run in parallel on every verified worker and never past them", () => {
+  // Owner direction 2026-11-15: the global six is gone; the workers are the bound.
+  for (let assigned = 0; assigned < 9; assigned += 1) {
+    assert.equal(amuxV22ClaimCapacity({ verifiedWorkerCount: 9,
+      totalAssigned: assigned }).allowed, true, `assigned ${assigned}`);
   }
+  assert.equal(amuxV22ClaimCapacity({ verifiedWorkerCount: 9,
+    totalAssigned: 9 }).reason, "global_capacity_full");
+  // Fewer verified workers than the limit: one Task per worker.
+  assert.equal(amuxV22ClaimCapacity({ verifiedWorkerCount: 2,
+    totalAssigned: 1 }).allowed, true);
+  assert.equal(amuxV22ClaimCapacity({ verifiedWorkerCount: 2,
+    totalAssigned: 2 }).reason, "global_capacity_full");
+  assert.equal(amuxV22ClaimCapacity({ verifiedWorkerCount: 0,
+    totalAssigned: 0 }).reason, "capacity_unconfigured");
+  assert.equal(amuxV22ClaimCapacity({ verifiedWorkerCount: 3,
+    totalAssigned: -1 }).reason, "capacity_unconfigured");
 });
 
-test("global three, one per lane and the two reserved slots are separate", () => {
-  assert.equal(amuxV22ClaimCapacity({ lane: "normal",
-    verifiedWorkerCount: 3, totalAssigned: 0, laneAssigned: 0 }).allowed, true);
-  assert.equal(amuxV22ClaimCapacity({ lane: "normal",
-    verifiedWorkerCount: 3, totalAssigned: 1, laneAssigned: 1 }).allowed, false);
-  assert.equal(amuxV22ClaimCapacity({ lane: "parallel",
-    verifiedWorkerCount: 3, totalAssigned: 1, laneAssigned: 0 }).allowed, true);
-  assert.equal(amuxV22ClaimCapacity({ lane: "sev1",
-    verifiedWorkerCount: 3, totalAssigned: 2, laneAssigned: 0 }).allowed, true);
-  assert.equal(amuxV22ClaimCapacity({ lane: "sev1",
-    verifiedWorkerCount: 3, totalAssigned: 3, laneAssigned: 0 }).allowed, false);
-  assert.equal(amuxV22ClaimCapacity({ lane: "normal",
-    verifiedWorkerCount: 2, totalAssigned: 0, laneAssigned: 0 }).reason,
-  "reserved_capacity_unavailable");
-  assert.equal(amuxV22ClaimCapacity({ lane: "sev1",
-    verifiedWorkerCount: 1, totalAssigned: 0, laneAssigned: 0 }).allowed, true);
-  assert.equal(amuxV22ClaimCapacity({ lane: "sev1",
-    verifiedWorkerCount: 1, totalAssigned: 1, laneAssigned: 0 }).allowed, false);
+test("the provider running the fewest Tasks wins before price", () => {
+  const route = (workerName, provider, perAttemptMicroUsd) => ({
+    routeId: workerName, workerName, provider, modelId: "model",
+    routePolicyDigest: "a".repeat(64), perAttemptMicroUsd,
+  });
+  const routes = [route("codex-chore", "openai", "100"),
+    route("copilot-impl", "github-copilot", "400"),
+    route("claude-impl", "anthropic", "900")];
+  const choose = (active, last = {}) => chooseAmuxV22WorkerRoute({ routes,
+    priorAuthorWorkers: [], priorAuthorProviders: [], isReview: false,
+    activeByProvider: new Map(Object.entries(active)),
+    lastAssignedAtByWorker: new Map(Object.entries(last)) })?.workerName;
+  // Codex busy: the next Task goes to another provider.
+  assert.equal(choose({ openai: 1 }, { "claude-impl": 5 }), "copilot-impl");
+  assert.equal(choose({ openai: 1, "github-copilot": 1 }), "claude-impl");
+  // A review still avoids its author's provider before anything else.
+  assert.equal(chooseAmuxV22WorkerRoute({ routes, priorAuthorWorkers: ["codex-chore"],
+    priorAuthorProviders: ["openai"], isReview: true,
+    activeByProvider: new Map([["anthropic", 2]]) })?.workerName, "copilot-impl");
+});
+
+test("no price competition: at equal load the provider that waited longest takes the Task", () => {
+  // Owner decision 2026-11-13: the cheapest list price sent nearly every Task
+  // to OpenAI. Price no longer chooses between subscription workers.
+  const route = (workerName, provider, perAttemptMicroUsd) => ({
+    routeId: workerName, workerName, provider, modelId: "model",
+    routePolicyDigest: "a".repeat(64), perAttemptMicroUsd,
+  });
+  const routes = [route("codex-chore", "openai", "100"), route("codex-chore-2", "openai", "100"),
+    route("claude-impl", "anthropic", "900"), route("copilot-chore", "github-copilot", "400")];
+  const choose = (last) => chooseAmuxV22WorkerRoute({ routes, priorAuthorWorkers: [],
+    priorAuthorProviders: [], isReview: false,
+    lastAssignedAtByWorker: new Map(Object.entries(last)) })?.workerName;
+  // OpenAI just took one: the dearer Anthropic, which waited longest, is next.
+  assert.equal(choose({ "codex-chore": 300, "copilot-chore": 200, "claude-impl": 100 }), "claude-impl");
+  // Then Copilot, then OpenAI again.
+  assert.equal(choose({ "codex-chore": 300, "copilot-chore": 200, "claude-impl": 400 }), "copilot-chore");
+  // Within a provider, its worker that waited longest.
+  assert.equal(choose({ "codex-chore": 300, "codex-chore-2": 50, "copilot-chore": 500, "claude-impl": 400 }),
+    "codex-chore-2");
+  // A worker never assigned goes first.
+  assert.equal(choose({ "codex-chore": 300, "copilot-chore": 200 }), "claude-impl");
+  // A provider whose busy worker just took a Task has not waited, though that
+  // worker is no candidate now (review r-20261113-071016-e1734a).
+  assert.equal(chooseAmuxV22WorkerRoute({
+    routes: routes.filter((item) => item.workerName !== "codex-chore"),
+    priorAuthorWorkers: [], priorAuthorProviders: [], isReview: false,
+    lastAssignedAtByWorker: new Map([["codex-chore-2", 10], ["claude-impl", 100], ["copilot-chore", 200]]),
+    lastAssignedAtByProvider: new Map([["openai", 900], ["anthropic", 100], ["github-copilot", 200]]),
+  })?.workerName, "claude-impl");
+  // A paid API run still takes the cheapest route.
+  assert.equal(chooseAmuxV22WorkerRoute({ routes, priorAuthorWorkers: [], priorAuthorProviders: [],
+    isReview: false, preferLowerPrice: true,
+    lastAssignedAtByWorker: new Map([["codex-chore", 900]]) })?.workerName, "codex-chore-2");
+  // The claim reads every worker's last assignment, not only the candidates',
+  // and passes both turns on.
+  const claim = readFileSync("lib/amux/v22WorkerClaimService.ts", "utf8");
+  assert.match(claim, /tx\.amuxV22WorkerAssignment\.groupBy\(\{\s*by: \["workerName"\], _max: \{ assignedAt: true \} \}\)/);
+  assert.match(claim, /activeByProvider, lastAssignedAtByWorker, lastAssignedAtByProvider,\s+infraFailedWorkers: recentInfra,/);
+  const recovery = readFileSync("lib/amux/v22TaskRecoveryService.ts", "utf8");
+  assert.match(recovery, /isReview: false, preferLowerPrice: true \}\)/);
+});
+
+test("one tick assigns every ready Task, logs what it passed over, and stops at an unknown outcome", () => {
+  const claim = readFileSync("lib/amux/v22WorkerClaimService.ts", "utf8");
+  const tick = claim.slice(claim.indexOf("export async function tickV22WorkerClaim"));
+  // No early return on the first assignment.
+  assert.doesNotMatch(tick, /return await claimCandidate/);
+  assert.match(tick, /claims\.push\(claimed\)/);
+  assert.match(tick, /event: "amux_v22_claim_tick"/);
+  assert.match(tick, /stop = "outcome_unknown";\s+stopIndex = index;\s+break;/);
+  assert.match(claim, /isReview: card\.taskRole === "review", activeByProvider, lastAssignedAtByWorker, lastAssignedAtByProvider,/);
+  assert.doesNotMatch(claim, /laneAssigned|lane_capacity_full|reserved_capacity_unavailable/);
+  // Owner decision 2026-11-15: each card passed over keeps why.
+  assert.match(tick, /await recordAmuxCardWaitReasons\(waits\);/);
+  assert.match(tick, /await clearAmuxCardWaitReasons\(claims\.map/);
 });
 
 test("review prefers another provider and never selects its author", () => {
@@ -117,7 +187,10 @@ test("claim only selects routes the environment-gated one-shot sidecar can execu
   assert.match(claim, /amuxV22TaskRoleSupported\(card\.taskRole\)/);
   assert.match(claim, /worker\.routing_roles\.includes\(executionRole\)/);
   assert.match(claim, /amuxV22OneShotRouteSupported\(route\.provider, route\.modelId\)/);
-  assert.match(claim, /"one_shot_role_unavailable",[\s\S]*?\]\.includes\(error\.code\)\) continue/);
+  assert.match(claim, /const SKIPPED_CODES = new Set\(\[[^\]]*"one_shot_role_unavailable"/);
+  // A card waiting out its infrastructure backoff is passed over, not a stop
+  // for every candidate after it.
+  assert.match(claim, /const SKIPPED_CODES = new Set\(\[[^\]]*"infra_retry_backoff"/);
 });
 
 test("v22 tick wire never disguises a receipt as a v8 grant", () => {
@@ -130,10 +203,10 @@ test("v22 tick wire never disguises a receipt as a v8 grant", () => {
     task_id: "task-1", assignment_id: "assignment-1",
     worker_name: "worker-1" });
   const route = readFileSync("app/api/internal/amux/auto-promotion/tick/route.ts", "utf8");
-  assert.match(route, /Response\.json\(v22PromotionTickWire\(result\)/);
+  assert.match(route, /Response\.json\(v22PromotionTickWire\(last\)/);
   assert.match(route, /Response\.json\(v22WorkerClaimTickWire\(result\)/);
   assert.match(route, /status: result\.claimed \? 200 : autoTickHttpStatus\(result\.reason\)/);
-  assert.match(route, /status: result\.promoted \? 200 : autoTickHttpStatus\(result\.reason\)/);
+  assert.match(route, /status: last\.promoted \? 200 : autoTickHttpStatus\(last\.reason\)/);
   assert.match(route, /reason: "apply_disabled", expired: 0/);
   assert.doesNotMatch(route, /orchestrator_identity_required/);
   for (const [reason, status] of [
@@ -145,13 +218,13 @@ test("v22 tick wire never disguises a receipt as a v8 grant", () => {
   }
 });
 
-test("assigned v4 Todo stays out of the legacy owned queue and execution start", () => {
+test("the owned queue lists v4 Todo and execution start admits it", () => {
   const store = readFileSync("lib/amux/store.ts", "utf8");
   const execution = readFileSync("lib/amux/execution.ts", "utf8");
   const owned = store.slice(store.indexOf("export async function listOwnedTodos"),
     store.indexOf("export async function ",
       store.indexOf("export async function listOwnedTodos") + 1));
-  assert.match(owned, /legacyDispatchSourceFilter\(\)/);
+  assert.doesNotMatch(owned, /legacyDispatchSourceFilter\(\)/);
   assert.match(execution, /planning\.sourceSystem === "admin-idea-v4"/);
   assert.match(execution, /lockedTask\.sourceSystem === "admin-idea-v4"/);
 });
@@ -165,7 +238,9 @@ test("review independence traces implementation through intermediate Task edges"
   // A Task resumed after an owner question narrows the quota routes (those
   // whose worker has settled usage) through amuxV22ResumeRoutes, which only
   // holds the Task for a worker that still serves the Task's grade.
-  assert.match(claim, /amuxV22ResumeRoutes\(\{\s+resumeWorker: resume\?\.worker \?\? null,\s+approvedRoutes: approved\.receipt\.routes, routes: settled\.routes,/);
+  // Since 2026-11-15 those routes are also past the worker quarantine.
+  assert.match(claim, /const admittedRoutes = settled\.routes\.filter\(\(route\) =>\s+amuxWorkerCircuitAdmits\(circuits\.get\(route\.workerName\)\)\);/);
+  assert.match(claim, /amuxV22ResumeRoutes\(\{\s+resumeWorker: resume\?\.worker \?\? null,\s+approvedRoutes: approved\.receipt\.routes, routes: admittedRoutes,/);
   assert.match(claim, /amuxWorkerMatchesExecutionGrade\(card\.executionGrade, workerName,/);
   assert.match(claim, /chooseAmuxV22WorkerRoute\(\{ routes: resumeRoutes,/);
 });

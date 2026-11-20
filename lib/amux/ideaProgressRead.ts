@@ -72,8 +72,7 @@ export type AmuxIdeaProgressRow = AmuxIdeaProgress & {
  * written. Outside a route budget (the page has none) the boundary does not
  * classify a dropped session as busy: the pg client reports it as a plain Error
  * with no code, so the retry cannot wait for a "busy" answer. Only the
- * boundary's own deterministic refusals (call ceiling, commit check) are not
- * retried.
+ * boundary's own deterministic refusal (commit check) is not retried.
  */
 export async function readAmuxIdeaProgressForOwner(actorUserId: string,
   openedRequestId: string | null = null): Promise<AmuxIdeaProgressRow[]> {
@@ -82,8 +81,8 @@ export async function readAmuxIdeaProgressForOwner(actorUserId: string,
   try {
     return await attempt();
   } catch (error) {
-    if (error instanceof AmuxDbBoundaryError && (error.code === "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED" ||
-        error.code === "AMUX_DB_COMMIT_CHECK_MISSING")) throw error;
+    if (error instanceof AmuxDbBoundaryError &&
+        error.code === "AMUX_DB_COMMIT_CHECK_MISSING") throw error;
     return attempt();
   }
 }
@@ -262,8 +261,7 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
       closable: !idea.cancelled && amuxIdeaOwnerClosableState(idea.state, idea.submissionOrigin) &&
         (idea.state === "awaiting_owner" || (progress.waitingFor !== null &&
           WAITS_FOR_EXECUTION_APPROVAL.has(progress.waitingFor)) ||
-          lane?.state === "pr_open" || lane?.state === "pr_closed" || lane?.state === "queued" ||
-          lane?.state === "failed"),
+          lane?.state === "pr_open" || lane?.state === "pr_closed" || lane?.state === "queued"),
       requestId: idea.requestId,
       submittedAt: new Date(idea.submittedAtMs).toISOString(),
       displayKey: own.find((card) => card.displayKey)?.displayKey ?? null,

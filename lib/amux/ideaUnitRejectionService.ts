@@ -16,8 +16,7 @@ import { readVerifiedAmuxUnitProposal } from
   "./ideaUnitProposalReadService.ts";
 import { assembleAmuxV4UnitRejection } from
   "./ideaUnitRejectionSnapshotCore.ts";
-import { AmuxV4UnitDecisionError, AMUX_V4_UNIT_WRITE_ENV,
-  amuxV4UnitWriteEnabled, commitAmuxV4UnitPrepare,
+import { AmuxV4UnitDecisionError, commitAmuxV4UnitPrepare,
   commitAmuxV4UnitRejection,
   markAmuxV4UnitConsumeOutcomeUnknown } from "./ideaUnitDecisionStore.ts";
 
@@ -37,9 +36,6 @@ export async function prepareAmuxV4UnitRejection(input: {
     throw new AmuxV4UnitDecisionError("forbidden");
   }
   await assertRecentAdminAuthentication(input.session);
-  if (!amuxV4UnitWriteEnabled(process.env[AMUX_V4_UNIT_WRITE_ENV])) {
-    throw new AmuxV4UnitDecisionError("write_disabled");
-  }
   if (!ID.test(input.ideaId) || !ID.test(input.draftUnitId) ||
       !UUID.test(input.prepareRequestId) ||
       input.reason !== input.reason.trim() ||
@@ -130,9 +126,6 @@ export async function consumeAmuxV4UnitRejection(input: {
     throw new AmuxV4UnitDecisionError("forbidden");
   }
   await assertRecentAdminAuthentication(input.session);
-  if (!amuxV4UnitWriteEnabled(process.env[AMUX_V4_UNIT_WRITE_ENV])) {
-    throw new AmuxV4UnitDecisionError("write_disabled");
-  }
   if (!ID.test(input.decisionId) || !UUID.test(input.consumeRequestId) ||
       !DIGEST.test(input.confirmationDigest)) {
     throw new AmuxV4UnitDecisionError("not_ready");

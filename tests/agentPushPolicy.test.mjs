@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { CONVENTION_VERSIONS } from "../lib/agentAuthorityFiles.ts";
 import { decideTier, policyNamedTestPaths } from "../lib/agentPushPolicy.ts";
 
 const change = (overrides = {}) => ({
@@ -23,7 +22,6 @@ const change = (overrides = {}) => ({
 const clean = (changes, overrides = {}) => ({
   changes,
   policyNamedTests: new Set(),
-  installedVersions: { ...CONVENTION_VERSIONS },
   credential: { status: "analysed", forbidsAll: false, forbiddenPaths: new Set() },
   slice: { status: "analysed", slicePaths: new Set() },
   ...overrides,
@@ -39,7 +37,7 @@ test("an empty change set is not T1", () => {
   assert.deepEqual(reasons(decideTier(clean([]))), ["empty_change"]);
 });
 
-test("control-plane, unclassified and unknown top-level paths are T2", () => {
+test("control-plane paths are T2", () => {
   assert.ok(
     reasons(decideTier(clean([change({ path: "lib/amux/guard.ts" })]))).includes(
       "control_plane_path",
@@ -55,13 +53,18 @@ test("control-plane, unclassified and unknown top-level paths are T2", () => {
     assert.equal(verdict.tier, "T2", path);
     assert.ok(reasons(verdict).includes("control_plane_path"), path);
   }
-  assert.ok(
-    reasons(decideTier(clean([change({ path: "public/robots.txt" })]))).includes(
-      "unclassified_path",
-    ),
-  );
-  const unknown = reasons(decideTier(clean([change({ path: "newdir/x.ts", status: "added" })])));
-  assert.ok(unknown.includes("unknown_top_level_directory"));
+});
+
+// Owner decision 2026-11-16: path and file shape no longer move a change to
+// T2; money, secrets and the control plane do.
+test("an unclassified path or a new top-level directory is T1 when nothing else objects", () => {
+  for (const path of ["public/robots.txt", "newdir/x.ts", "pages/api/x.ts", "vendor/lib/x.js"]) {
+    assert.deepEqual(decideTier(clean([change({ path, status: "added", oldMode: null })])),
+      { tier: "T1", findings: [] }, path);
+  }
+  // A root-level file and a root dot-directory are still control plane.
+  assert.ok(reasons(decideTier(clean([change({ path: "next.config.ts" })]))).includes("control_plane_path"));
+  assert.ok(reasons(decideTier(clean([change({ path: ".husky/pre-push" })]))).includes("control_plane_path"));
 });
 
 test("a rename is judged on both of its paths", () => {
@@ -78,14 +81,11 @@ test("a rename is judged on both of its paths", () => {
   );
 });
 
-test("non-text, symlinks, submodules and executable bits are T2", () => {
+test("symlinks, submodules and non-blob objects are T2", () => {
   const cases = [
-    [{ isText: false }, "not_text"],
     [{ newMode: "120000" }, "symlink"],
     [{ oldMode: "120000", newMode: "100644" }, "symlink"],
     [{ newMode: "160000", newType: "commit" }, "gitlink"],
-    [{ newMode: "100755" }, "executable_bit"],
-    [{ oldMode: "100755", newMode: "100644" }, "executable_bit"],
     [{ newMode: "040000", newType: "tree" }, "not_a_blob"],
     [{ newMode: "100664" }, "not_a_blob"],
   ];
@@ -94,105 +94,73 @@ test("non-text, symlinks, submodules and executable bits are T2", () => {
   }
 });
 
-test("only the T1 file types, and JSON only as locale or fixture data", () => {
-  assert.ok(
-    reasons(decideTier(clean([change({ path: "lib/data.yaml" })]))).includes(
-      "extension_not_allowed",
-    ),
-  );
-  assert.ok(
-    reasons(decideTier(clean([change({ path: "lib/Makefile" })]))).includes(
-      "extension_not_allowed",
-    ),
-  );
-  assert.ok(
-    reasons(decideTier(clean([change({ path: "lib/data.json" })]))).includes(
-      "json_outside_data_paths",
-    ),
-  );
-  assert.equal(decideTier(clean([change({ path: "tests/fixtures/x.json" })])).tier, "T1");
+test("a binary file and an executable bit are T1 when nothing else objects", () => {
+  for (const overrides of [
+    { isText: false, addedText: "", newText: "" },
+    { newMode: "100755" },
+    { oldMode: "100755", newMode: "100644" },
+  ]) {
+    assert.deepEqual(decideTier(clean([change(overrides)])), { tier: "T1", findings: [] },
+      JSON.stringify(overrides));
+  }
 });
 
-test("the size limits hold at their edges", () => {
-  const five = Array.from({ length: 5 }, (_, i) => change({ path: `lib/a${i}.ts`, addedLines: 60, removedLines: 0 }));
-  assert.equal(decideTier(clean(five)).tier, "T1");
-  const six = [...five, change({ path: "lib/a5.ts", addedLines: 0, removedLines: 0 })];
-  assert.ok(reasons(decideTier(clean(six))).includes("too_many_files"));
-  const lines = [change({ addedLines: 301, removedLines: 0 })];
-  assert.ok(reasons(decideTier(clean(lines))).includes("too_many_lines"));
-  assert.ok(
-    reasons(decideTier(clean([change({ sizeBytes: 200 * 1024 + 1 })]))).includes(
-      "file_too_large",
-    ),
-  );
+// Owner decision 2026-11-15: an internal development flow carries no size,
+// count or extension rule; paths and content decide the tier.
+test("no file type, count or size moves a change to T2 by itself", () => {
+  for (const path of ["lib/data.yaml", "lib/Makefile", "lib/data.json",
+    "lib/amux/report.sql", "docs/notes.txt", "tests/fixtures/x.json"]) {
+    const verdict = decideTier(clean([change({ path })]));
+    assert.ok(!reasons(verdict).some((reason) =>
+      /extension|json_outside|too_many|too_large/.test(reason)), path);
+  }
+  assert.equal(decideTier(clean([change({ path: "lib/data.yaml" })])).tier, "T1");
+  const many = Array.from({ length: 300 }, (_, i) =>
+    change({ path: `lib/a${i}.ts`, addedLines: 400, removedLines: 400 }));
+  assert.deepEqual(decideTier(clean(many)), { tier: "T1", findings: [] });
+  assert.deepEqual(decideTier(clean([change({ sizeBytes: 534 * 1024 })])),
+    { tier: "T1", findings: [] });
+  // AMUX's own paths stay T2 for being control plane, not for their size.
+  const amux = decideTier(clean([change({ path: "lib/amux/big.ts", sizeBytes: 534 * 1024 })]));
+  assert.deepEqual(reasons(amux), ["control_plane_path"]);
 });
 
-test("a new file at a framework entry convention is T2; editing an existing one is judged by path", () => {
+test("what tree verification does not support is a T2 finding, never silence", () => {
+  const verdict = decideTier({ ...clean([change()]), unsupported: [
+    { reason: "gitattributes_applies", path: "lib/a.ts" }] });
+  assert.deepEqual(verdict, { tier: "T2", findings: [{
+    reason: "unsupported_tree_change", path: "lib/a.ts",
+    detail: "gitattributes_applies" }] });
+});
+
+test("a new framework entry file is judged by its path like any other", () => {
   for (const path of [
     "app/(site)/new/page.tsx",
-    "app/api/new/route.ts",
     "app/(site)/layout.tsx",
     "lib/tool.config.ts",
     "app/not-found.tsx",
     "app/robots.ts",
   ]) {
-    assert.ok(
-      reasons(decideTier(clean([change({ path, status: "added" })]))).includes("entry_convention"),
-      path,
-    );
+    assert.deepEqual(decideTier(clean([change({ path, status: "added", oldMode: null })])),
+      { tier: "T1", findings: [] }, path);
   }
-  assert.equal(
-    decideTier(clean([change({ path: "app/(site)/pricing/page.tsx", status: "modified" })])).tier,
-    "T1",
-  );
+  // A new route under the admin or internal API is control plane by its path.
+  for (const path of ["app/api/admin/new/route.ts", "app/api/internal/new/route.ts"]) {
+    assert.ok(reasons(decideTier(clean([change({ path, status: "added", oldMode: null })])))
+      .includes("control_plane_path"), path);
+  }
 });
 
-test("code that assembles what it loads is T2", () => {
-  const samples = [
+test("code that loads at run time is judged by the slice, not by its text", () => {
+  for (const newText of [
     "const m = await import(name);",
-    "const m = await import(`./${name}.ts`);",
     "const m = require(path);",
-    "require.resolve('x')",
-    "import.meta.glob('./*.ts')",
-    "const r = createRequire(import.meta.url);",
     "for (const f of readdirSync(dir)) {}",
-    "new Function('return 1')",
+    "import.meta.glob('./*.ts')",
     "eval(code)",
-  ];
-  for (const newText of samples) {
-    assert.ok(
-      reasons(decideTier(clean([change({ newText })]))).includes("runtime_discovery"),
-      newText,
-    );
+  ]) {
+    assert.deepEqual(decideTier(clean([change({ newText })])), { tier: "T1", findings: [] }, newText);
   }
-  for (const newText of ['const m = await import("./x.ts");', "const m = require('x');"]) {
-    assert.equal(decideTier(clean([change({ newText })])).tier, "T1", newText);
-  }
-});
-
-test("a loader completed by an added line whose other half was already there is still T2", () => {
-  // The base had `import(` on its own line; the patch adds only the argument.
-  const verdict = decideTier(
-    clean([
-      change({
-        addedText: "  moduleName\n);",
-        newText: "const module = await import(\n  moduleName\n);\n",
-      }),
-    ]),
-  );
-  assert.ok(reasons(verdict).includes("runtime_discovery"));
-  // A commented-out loader in the file is still counted; not parsing means
-  // erring towards T2.
-  assert.ok(
-    reasons(decideTier(clean([change({ newText: "// const m = require(path);\n" })]))).includes(
-      "runtime_discovery",
-    ),
-  );
-  // A literal import split across lines is not a loader.
-  assert.equal(
-    decideTier(clean([change({ newText: 'const m = await import(\n  "./x.ts"\n);\n' })])).tier,
-    "T1",
-  );
 });
 
 test("a reserved decision value outside the control-plane files still raises the alarm", () => {
@@ -203,7 +171,7 @@ test("a reserved decision value outside the control-plane files still raises the
   );
 });
 
-test("policy-named and policy-titled tests cannot be changed at T1", () => {
+test("tests the policy documents name cannot be changed at T1; a policy-sounding name alone can", () => {
   assert.ok(
     reasons(
       decideTier(
@@ -213,11 +181,8 @@ test("policy-named and policy-titled tests cannot be changed at T1", () => {
       ),
     ).includes("policy_named_test"),
   );
-  assert.ok(
-    reasons(decideTier(clean([change({ path: "tests/fooContract.test.mjs" })]))).includes(
-      "policy_test_name",
-    ),
-  );
+  assert.deepEqual(decideTier(clean([change({ path: "tests/fooContract.test.mjs" })])),
+    { tier: "T1", findings: [] });
 });
 
 test("the policy documents' named tests are found in the real tree", () => {
@@ -303,15 +268,4 @@ test("moving or copying a slice member to a fresh product path is still a slice 
       ),
     ).includes("control_plane_slice"),
   );
-});
-
-test("an installed version that differs from the recorded one is T2", () => {
-  const verdict = decideTier(
-    clean([change()], { installedVersions: { ...CONVENTION_VERSIONS, next: "17.0.0" } }),
-  );
-  assert.ok(reasons(verdict).includes("convention_version_mismatch"));
-  const missing = decideTier(
-    clean([change()], { installedVersions: { ...CONVENTION_VERSIONS, typescript: null } }),
-  );
-  assert.ok(reasons(missing).includes("convention_version_mismatch"));
 });

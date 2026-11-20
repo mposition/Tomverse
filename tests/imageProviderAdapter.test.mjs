@@ -4,6 +4,7 @@ import { test } from "node:test";
 
 import {
   classifyImageProviderFailure,
+  generateImageForMeasurement,
   generateImageWithProvider,
   ImageProviderError,
 } from "../lib/imageProviderAdapter.ts";
@@ -109,28 +110,37 @@ test("a held model whose thinking the request cannot bound is never dispatched",
   // dispatch lets through so admitted jobs can finish. A Google model with a
   // cap an operator wrote down must still not reach a provider that bills its
   // thinking per uncapped token -- and refusing happens before any key lookup
-  // or network call.
-  const google = IMAGE_MODEL_REGISTRY.find((model) => model.provider === "google");
-  const statedCap = {
-    ...google,
-    priceVerification: { ...google.priceVerification, thinkingCapMicroUsd: 2_000 },
+  // or network call. The same holds for a measured model whose cap is under
+  // its bound or whose request is not the measured one.
+  const price = [{ quality: "medium", size: "1024x1024", credits: 10_000, outputCostMicroUsd: 67_200 }];
+  const withCap = (modelId, cap, extra = {}) => {
+    const seed = IMAGE_MODEL_REGISTRY.find((model) => model.id === modelId);
+    return { ...seed, prices: price, priceVerification: { ...seed.priceVerification, thinkingCapMicroUsd: cap }, ...extra };
   };
+  const unheld = [
+    withCap("gemini-3-pro-image", 2_000),
+    withCap("gemini-3.1-flash-image", 12_287),
+    withCap("gemini-3.1-flash-image", 12_288, { maxOutputTokens: 32_768 }),
+    withCap("gemini-3.1-flash-image", 12_288, { thinkingLevel: "high" }),
+  ];
   try {
-    for (const disabledReason of ["operational_hold", null]) {
-      setActiveImageModelCatalog([{ ...statedCap, disabledReason }]);
-      await assert.rejects(
-        generateImageWithProvider({
-          prompt: "a red apple",
-          size: "1024x1024",
-          quality: "medium",
-          modelId: google.id,
-        }),
-        (error) =>
-          error.name === "ImageProviderError" &&
-          error.failurePhase === "provider_failed" &&
-          /no thinking cap its request can enforce/.test(error.message),
-        String(disabledReason)
-      );
+    for (const model of unheld) {
+      for (const disabledReason of ["operational_hold", null]) {
+        setActiveImageModelCatalog([{ ...model, disabledReason }]);
+        await assert.rejects(
+          generateImageWithProvider({
+            prompt: "a red apple",
+            size: "1024x1024",
+            quality: "medium",
+            modelId: model.id,
+          }),
+          (error) =>
+            error.name === "ImageProviderError" &&
+            error.failurePhase === "provider_failed" &&
+            /no thinking cap its request can enforce/.test(error.message),
+          `${model.id} ${String(disabledReason)}`
+        );
+      }
     }
   } finally {
     resetActiveImageModelCatalog();
@@ -247,4 +257,257 @@ test("an unknown model never reaches a provider", async () => {
     }),
     (error) => error.name === "ImageProviderError"
   );
+});
+
+test("a Google response past the measured bound is reported even when it carries no image", async () => {
+  // Review finding 2026-11-13: the report used to run only after an image was
+  // parsed, so a response that billed past the bound and stopped without one
+  // -- the case the strict parser refuses -- went unreported.
+  const flash = IMAGE_MODEL_REGISTRY.find((model) => model.id === "gemini-3.1-flash-image");
+  const priced = {
+    ...flash,
+    disabledReason: null,
+    prices: [{ quality: "medium", size: "1024x1024", credits: 94, outputCostMicroUsd: 67_200 }],
+  };
+  const run = async (usage) => {
+    const originalFetch = globalThis.fetch;
+    const originalError = console.error;
+    const key = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+    const logged = [];
+    const calls = [];
+    globalThis.fetch = async (url, init) => {
+      calls.push({ url: String(url), body: JSON.parse(init.body) });
+      return Response.json({ status: "incomplete", steps: [], usage });
+    };
+    console.error = (line) => logged.push(String(line));
+    process.env.GOOGLE_GENERATIVE_AI_API_KEY = "test-google-key";
+    try {
+      setActiveImageModelCatalog([priced]);
+      await assert.rejects(
+        generateImageWithProvider({ prompt: "a red apple", size: "1024x1024", quality: "medium", modelId: priced.id }),
+        (error) => /no usable image payload/.test(error.message)
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+      console.error = originalError;
+      if (key === undefined) delete process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+      else process.env.GOOGLE_GENERATIVE_AI_API_KEY = key;
+      resetActiveImageModelCatalog();
+    }
+    return { calls, events: logged.filter((line) => line.includes("image_google_output_over_measured_bound")) };
+  };
+
+  // The refusal carries what the imageless response billed, for settlement.
+  {
+    const originalFetch = globalThis.fetch;
+    const key = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+    globalThis.fetch = async () =>
+      Response.json({ status: "incomplete", steps: [], usage: { total_output_tokens: 553, total_thought_tokens: 1_262 } });
+    process.env.GOOGLE_GENERATIVE_AI_API_KEY = "test-google-key";
+    try {
+      setActiveImageModelCatalog([priced]);
+      await assert.rejects(
+        generateImageWithProvider({ prompt: "a red apple", size: "1024x1024", quality: "medium", modelId: priced.id }),
+        (error) => error.nonImageBillableTokens === 1_815 && error.billedImageTokens === null && error.billedImageCount === 0
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (key === undefined) delete process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+      else process.env.GOOGLE_GENERATIVE_AI_API_KEY = key;
+      resetActiveImageModelCatalog();
+    }
+  }
+
+  // 2 x 2,048 = 4,096 non-image tokens is the bound: one more is reported.
+  const over = await run({ total_output_tokens: 600, total_thought_tokens: 3_497 });
+  // Billed and imageless: sent once, never retried, with the measured request.
+  assert.equal(over.calls.length, 1);
+  assert.deepEqual(over.calls[0].body.generation_config, { max_output_tokens: 2_048 });
+  assert.equal(over.events.length, 1);
+  assert.equal(JSON.parse(over.events[0]).nonImageBillableTokens, 4_097);
+
+  const within = await run({ total_output_tokens: 553, total_thought_tokens: 1_262 });
+  assert.equal(within.events.length, 0);
+});
+
+test("a Google failure that may have been billed is never sent twice", async () => {
+  // Review finding 2026-11-13: the reservation holds one request's worst case.
+  // A lost response or a 5xx can follow a generation that was billed, so
+  // neither is retried; fal's path makes the same choice.
+  const flash = IMAGE_MODEL_REGISTRY.find((model) => model.id === "gemini-3.1-flash-image");
+  const priced = {
+    ...flash,
+    disabledReason: null,
+    prices: [{ quality: "medium", size: "1024x1024", credits: 94, outputCostMicroUsd: 67_200 }],
+  };
+  const attempt = async (respond) => {
+    const originalFetch = globalThis.fetch;
+    const key = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls += 1;
+      return respond();
+    };
+    process.env.GOOGLE_GENERATIVE_AI_API_KEY = "test-google-key";
+    try {
+      setActiveImageModelCatalog([priced]);
+      await assert.rejects(
+        generateImageWithProvider({ prompt: "a red apple", size: "1024x1024", quality: "medium", modelId: priced.id }),
+        (error) => error.name === "ImageProviderError" && error.failurePhase === "provider_failed"
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (key === undefined) delete process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+      else process.env.GOOGLE_GENERATIVE_AI_API_KEY = key;
+      resetActiveImageModelCatalog();
+    }
+    return calls;
+  };
+  assert.equal(
+    await attempt(() => {
+      throw new TypeError("fetch failed");
+    }),
+    1
+  );
+  assert.equal(await attempt(() => Response.json({ error: { message: "internal" } }, { status: 503 })), 1);
+});
+
+test("a refused Google response with two images carries both for settlement", async () => {
+  const flash = IMAGE_MODEL_REGISTRY.find((model) => model.id === "gemini-3.1-flash-image");
+  const priced = {
+    ...flash,
+    disabledReason: null,
+    prices: [{ quality: "medium", size: "1024x1024", credits: 94, outputCostMicroUsd: 67_200 }],
+  };
+  const image = { type: "image", data: "AAAA", mime_type: "image/jpeg" };
+  const originalFetch = globalThis.fetch;
+  const key = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+  globalThis.fetch = async () =>
+    Response.json({
+      status: "completed",
+      steps: [{ type: "model_output", content: [image, image] }],
+      usage: {
+        total_output_tokens: 2_440,
+        output_tokens_by_modality: [{ modality: "image", tokens: 2_240 }],
+        total_thought_tokens: 0,
+      },
+    });
+  process.env.GOOGLE_GENERATIVE_AI_API_KEY = "test-google-key";
+  try {
+    setActiveImageModelCatalog([priced]);
+    await assert.rejects(
+      generateImageWithProvider({ prompt: "a red apple", size: "1024x1024", quality: "medium", modelId: priced.id }),
+      (error) => error.billedImageTokens === 2_240 && error.billedImageCount === 2 && error.nonImageBillableTokens === 200
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (key === undefined) delete process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+    else process.env.GOOGLE_GENERATIVE_AI_API_KEY = key;
+    resetActiveImageModelCatalog();
+  }
+});
+
+// The admin billing measurement (lib/imageBillingMeasurement.ts) calls an
+// unpriced candidate profile; review findings 2026-11-13.
+const candidate = (provider, apiModelId, extra = {}) => ({
+  id: `measurement:${apiModelId}`,
+  provider,
+  apiModelId,
+  name: apiModelId,
+  lifecycle: "preview",
+  disabledReason: null,
+  sizes: ["1024x1024"],
+  qualities: ["medium"],
+  prices: [],
+  latencyClass: "balanced",
+  provenance: [],
+  outputMimeTypes: ["image/png"],
+  pricingVersion: "measurement",
+  priceVerification: { verifiedAt: null, sources: [], thinkingCapMicroUsd: null },
+  ...extra,
+});
+
+const withEnv = async (name, value, run) => {
+  const before = process.env[name];
+  process.env[name] = value;
+  try {
+    return await run();
+  } finally {
+    if (before === undefined) delete process.env[name];
+    else process.env[name] = before;
+  }
+};
+
+test("a measurement sample is one request: a 5xx is not retried into a second paid generation", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return Response.json({ error: { message: "upstream" } }, { status: 500 });
+  };
+  try {
+    await withEnv("OPENAI_IMAGE_API_KEY", "test-openai-key", () =>
+      assert.rejects(
+        generateImageForMeasurement(candidate("openai", "gpt-image-2.6-flare"), { prompt: "p", size: "1024x1024", quality: "medium" }),
+        (error) => error instanceof ImageProviderError && error.status === 500
+      )
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(calls, 1);
+});
+
+test("a Qwen result that was generated but could not be downloaded is marked as generated", async () => {
+  const originalFetch = globalThis.fetch;
+  const urls = [];
+  globalThis.fetch = async (url) => {
+    urls.push(String(url));
+    if (urls.length === 1) {
+      return Response.json({
+        request_id: "req-1",
+        output: { choices: [{ message: { content: [{ image: "https://dashscope-result-sgp.oss-ap-southeast-1.aliyuncs.com/a.png" }] } }] },
+        usage: { image_count: 1, width: 1024, height: 1024 },
+      });
+    }
+    return new Response(null, { status: 403 });
+  };
+  try {
+    await withEnv("DASHSCOPE_API_KEY", "test-qwen-key", () =>
+      assert.rejects(
+        generateImageForMeasurement(candidate("qwen", "wan2.7-image"), { prompt: "p", size: "1024x1024", quality: "medium" }),
+        (error) => error instanceof ImageProviderError && error.afterGeneration === true && error.status === 403
+      )
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(urls.length, 2);
+});
+
+test("a Google measurement sample is one request, a rate limit included; other providers are refused", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return Response.json({ error: { code: 429, message: "rate" } }, { status: 429 });
+  };
+  try {
+    await withEnv("GOOGLE_GENERATIVE_AI_API_KEY", "test-google-key", () =>
+      assert.rejects(
+        generateImageForMeasurement(
+          candidate("google", "gemini-nano-banana-2.1", { maxOutputTokens: 8_192, deliveryMimeType: "image/jpeg", outputMimeTypes: ["image/jpeg"] }),
+          { prompt: "p", size: "1024x1024", quality: "medium" }
+        ),
+        (error) => error instanceof ImageProviderError && error.status === 429
+      )
+    );
+    await assert.rejects(
+      generateImageForMeasurement(candidate("xai", "grok-x"), { prompt: "p", size: "1024x1024", quality: "medium" }),
+      /No billing measurement/
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(calls, 1);
 });

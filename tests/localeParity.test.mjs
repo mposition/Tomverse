@@ -181,11 +181,24 @@ const ENGLISH_STRING_CEILING = {
   // "China" and "Asia", Portuguese "China". The sentences around them are
   // translated. They are shorter than the translation check's minimum, so
   // the ceiling here is what records them.
-  zh: 10,
-  fr: 42,
-  de: 31,
-  es: 22,
-  pt: 18,
+  // Research Preview adds its unchanged feature name in two headings. French
+  // also uses "Sources" for the report's source list. The surrounding Research
+  // copy is translated; the headings are allowlisted with their brand reason.
+  // These ceilings reflect the measured totals after localized Research copy
+  // overrides the English fallback, rather than counting the fallback itself.
+  //
+  // +2 zh, fr, de, es and pt on 2026-11-18 from Settings > API keys: the two
+  // client headings are product names, "Aside" and "VS Code", which no locale
+  // translates and which the reader matches against the app itself. Korean's
+  // count did not move because its "Base URL" label became "기본 URL" in the
+  // same change. +1 fr for the key state "Active" (the French adjective for an
+  // active key) and +1 de for the "Name" field label, both the ordinary word.
+  // The rest of the page is translated in all six.
+  zh: 13,
+  fr: 47,
+  de: 35,
+  es: 25,
+  pt: 22,
 };
 
 test("every supported language is in the dictionary map", () => {

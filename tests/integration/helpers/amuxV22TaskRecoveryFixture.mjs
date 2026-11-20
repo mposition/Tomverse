@@ -674,7 +674,10 @@ export async function exerciseAmuxV22TaskRecoveryFixture(db, input) {
   }
   await reject(() => db.query(`DELETE FROM public."AdminAuditLog" WHERE "id"=$1`, [approvalAuditId]),
     null);
-  await reject(() => insert("AmuxV22TaskRecoveryApproval", { ...approvalRow, id: randomUUID(), nextAttemptNumber: 6 }),
+  // Owner decision 2026-11-16: the next attempt number has no upper bound of
+  // ours (20261116130400_amux_v22_recovery_approval_attempt_unbounded); the
+  // shape check still refuses one that is not past the historical attempts.
+  await reject(() => insert("AmuxV22TaskRecoveryApproval", { ...approvalRow, id: randomUUID(), nextAttemptNumber: 0 }),
     "AmuxV22RecoveryApproval_shape_check");
   const duplicateApprovalId = randomUUID(); const duplicateOwnerRequestId = randomUUID();
   const duplicateApprovalAuditId = await appendRecoveryFixtureAudit(db, { actorUserId: "synthetic-owner",

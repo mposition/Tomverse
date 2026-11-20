@@ -18,11 +18,13 @@
  * and the owner accepted the privacy-policy sentence as both the training
  * answer (no) and the ban on sale and advertising. A field the contract
  * does not pin stays `NOT_SPECIFIED`. The Privacy page lists every row,
- * and only while every enrolled row is disclosable. One unproven row
- * takes the whole table off the page.
+ * with reviewed facts only for disclosable rows. An unproven provider remains
+ * named with an explicit notice; its missing facts cannot hide other providers
+ * or be presented as reviewed guarantees. Cohere remains unproven until its
+ * account-specific destination, training and retention facts are verified.
  *
- * - **An unproven row still does not render.** A partial table would leave
- *   that provider out of the notice.
+ * - **Unproven facts do not render.** The provider's known identity and source
+ *   remain visible alongside the notice that its account terms are unverified.
  * - **Nothing here admits a request.** Proven is a disclosure fact. It does
  *   not cut traffic or change a host.
  * - **Nothing becomes `proven` without an `evidenceRef`.** A destination that
@@ -31,15 +33,23 @@
  *
  * ## Why this stays a report
  *
- * Every enrolled row is proven today. The report stays a report: a provider
- * added later without a reviewed row is an enrolment miss the test already
- * names, and refusing live traffic for it would be a separate decision.
+ * A newly enrolled provider may remain unproven. The report stays a report:
+ * missing enrollment fails a test, while refusing live traffic for missing
+ * disclosure evidence would be a separate decision.
  * `npm run report:provider-data-destinations` lists coverage without blocking.
  *
  * Pure: no database, no clock, no network.
  */
 
+import type { ImageModelProvider } from "@/lib/imageModelRegistry";
 import type { AiProvider } from "@/lib/models";
+
+/**
+ * Every provider a user's content can be sent to: the chat providers, and the
+ * image providers that serve no chat model (fal, bfl). An image prompt leaves
+ * Tomverse as surely as a chat message does, so it needs a row too.
+ */
+export type DestinationProvider = AiProvider | ImageModelProvider;
 
 /**
  * Whether we can name where this provider takes the data.
@@ -160,7 +170,7 @@ export type ZeroDataRetentionMode =
     | "CONTRACTUAL_NO_CONTENT_STORAGE";
 
 export type ProviderDataDestination = {
-    provider: AiProvider;
+    provider: DestinationProvider;
     /**
      * The legal entity that receives the data.
      *
@@ -246,7 +256,7 @@ const unknownRetention = (): RetentionFact => ({
     evidenceRef: null,
 });
 
-const unproven = (provider: AiProvider): ProviderDataDestination => ({
+const unproven = (provider: DestinationProvider): ProviderDataDestination => ({
     provider,
     recipientEntity: null,
     recipientCountryCodes: [],
@@ -304,7 +314,7 @@ const unspecified = (evidenceRef: string): RetentionFact =>
  * Named places stay as the owner recorded them.
  */
 const ready = (input: {
-    provider: AiProvider;
+    provider: DestinationProvider;
     recipientEntity: string;
     recipientCountryCodes: readonly string[];
     evidenceRef: string;
@@ -443,6 +453,36 @@ const deepseekDestination = (): ProviderDataDestination =>
  * when one is missing.
  */
 export const PROVIDER_DATA_DESTINATIONS: readonly ProviderDataDestination[] = [
+    {
+        ...unproven("cohere"),
+        recipientEntity: "Cohere Inc.",
+        // Public entity identity only. This is not evidence of this account's
+        // training opt-out, processing locations or retention arrangement.
+        evidenceRef: "https://cohere.com/privacy",
+    },
+    {
+        // Image generation only (Nano Banana 2). Public entity identity from the
+        // privacy page, which says only that fal "is based in the United
+        // States"; no country is recorded without a reviewed document saying
+        // where the recipient is. Retention, training and locations unreviewed.
+        ...unproven("fal"),
+        recipientEntity: "fal - Features & Labels Inc.",
+        evidenceRef: "https://fal.ai/privacy",
+    },
+    {
+        // Image generation only (FLUX 3 Image and Klein, enabled 2026-11-17).
+        // The privacy policy names Black Forest Labs Inc. as controller for
+        // users outside the EEA, Switzerland and the UK (BFL GmbH inside).
+        // Unproven on purpose: the same page says inputs and outputs may be used
+        // to train BFL's models unless the user opts out by email, and also
+        // that it does not apply to content processed for business customers
+        // under contract. Which of the two governs Tomverse's API account is
+        // not established, so no training, retention or location answer is
+        // recorded here; the privacy page shows this row as unverified.
+        ...unproven("bfl"),
+        recipientEntity: "Black Forest Labs Inc.",
+        evidenceRef: "https://bfl.ai/legal/privacy-policy",
+    },
     ready({
         provider: "openai",
         recipientEntity: "OpenAI OpCo, LLC",
@@ -730,7 +770,7 @@ export const PROVIDER_DATA_DESTINATIONS: readonly ProviderDataDestination[] = [
 ];
 
 export const providerDataDestination = (
-    provider: AiProvider
+    provider: DestinationProvider
 ): ProviderDataDestination | null =>
     PROVIDER_DATA_DESTINATIONS.find((entry) => entry.provider === provider) ??
     null;
@@ -754,17 +794,18 @@ export const providerDataDestination = (
  * same reason -- nobody can say where the data would go.
  */
 export const providerDestinationIsEstablished = (
-    provider: AiProvider
+    provider: DestinationProvider
 ): boolean => {
     const entry = providerDataDestination(provider);
     return entry !== null && destinationIsDisclosable(entry);
 };
 
 /**
- * The entries a user-facing notice may print.
+ * The entries whose reviewed facts a user-facing notice may print.
  *
- * The Privacy page prints this list only when its length equals the
- * enrolment. A shorter list would leave a live provider out of the notice.
+ * The Privacy page also names every other enrolled provider with an explicit
+ * unverified notice. This filtered list still serves callers that require
+ * reviewed destination facts; it does not authorize claims for omitted rows.
  */
 export const disclosableDataDestinations = (): readonly ProviderDataDestination[] =>
     PROVIDER_DATA_DESTINATIONS.filter(destinationIsDisclosable);

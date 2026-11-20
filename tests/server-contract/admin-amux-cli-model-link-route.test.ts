@@ -26,7 +26,6 @@ type World = {
   session: { user: { id: string; authenticatedAt?: string } } | null;
   admin: boolean;
   role: string | null;
-  latch: boolean;
   boundaries: string[];
   links: unknown[];
   boundaryError: Error | null;
@@ -36,7 +35,7 @@ let world: World;
 const reset = (changes: Partial<World> = {}) => {
   world = {
     session: { user: { id: "owner-1", authenticatedAt: new Date().toISOString() } },
-    admin: true, role: "owner", latch: true, boundaries: [], links: [], boundaryError: null, storeError: null,
+    admin: true, role: "owner", boundaries: [], links: [], boundaryError: null, storeError: null,
     ...changes,
   };
 };
@@ -67,9 +66,6 @@ async function loadRoute(): Promise<{ POST: (request: Request) => Promise<Respon
         },
       },
     });
-    mock.module(mod("lib/amux/workerCapabilityCore.ts"), {
-      namedExports: { amuxWorkerCapabilityWritesOpen: () => world.latch },
-    });
     mock.module(mod("lib/amux/cliModelCatalogStore.ts"), {
       namedExports: {
         AmuxCliModelLinkWriteError: FakeWriteError,
@@ -94,11 +90,11 @@ const post = (body: unknown) =>
   });
 const VALID = { cli: "cursor", cliModel: "claude-opus-5-5-high", pricedModelId: "claude-opus-5-5" };
 
-test("only the owner links, with the latch on and a recent step-up, before the body is read", async () => {
+test("only the owner links, with a recent step-up, before the body is read", async () => {
   const { POST } = await loadRoute();
   for (const [changes, status] of [
-    [{ session: null }, 404], [{ admin: false }, 404], [{ role: "admin" }, 403], [{ latch: false }, 409],
-    [{ session: { user: { id: "owner-1", authenticatedAt: new Date(Date.now() - 6 * 60 * 60_000).toISOString() } } }, 428],
+    [{ session: null }, 404], [{ admin: false }, 404], [{ role: "admin" }, 403],
+    [{ session: { user: { id: "owner-1", authenticatedAt: new Date(Date.now() - 9 * 60 * 60_000).toISOString() } } }, 428],
   ] as const) {
     reset(changes as Partial<World>);
     assert.equal((await POST(post(VALID))).status, status, JSON.stringify(changes));

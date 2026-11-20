@@ -3,9 +3,12 @@ import { after, before, test } from "node:test";
 import type { Session } from "next-auth";
 
 import { takeAuditChainLock } from "@/lib/adminAudit";
+import { applyProviderTermsDraft, linkChatModel, saveCodingSettings, storeProviderTermsDraft, unlinkCodingModel } from "@/lib/codingCatalogAdmin";
 import { getImageModel, IMAGE_MODEL_REGISTRY, resetActiveImageModelCatalog } from "@/lib/imageModelRegistry";
 import {
+  codingCreditFloor,
   latestCodingSnapshot,
+  loadCodingCatalog,
   publishCodingSnapshot,
   refreshImageModelCatalog,
   renewCodingSnapshotIfUnchanged,
@@ -54,6 +57,7 @@ const withTriggersOff = async (table: string, trigger: string, sql: string) => {
 
 const cleanup = async () => {
   await prisma.modelCatalogEntry.deleteMany({});
+  await prisma.codingProviderTerms.deleteMany({});
   await withTriggersOff(
     "ModelCatalogPriceRevision",
     "ModelCatalogPriceRevision_append_only_trigger",
@@ -356,6 +360,178 @@ test("a stored draft is audited, applied in one step, and cleared", async () => 
   );
 });
 
+test("an image draft carries its runtime profile and never prices another model", async () => {
+  const modelId = "catalog-draft-profile";
+  const profile = {
+    provider: "openai",
+    apiModelId: "gpt-image-draft-profile",
+    name: "gpt-image-draft-profile",
+    lifecycle: "preview",
+    sizes: ["1024x1024"],
+    qualities: ["low", "medium", "high"],
+    latencyClass: "balanced",
+    provenance: [],
+    outputMimeTypes: ["image/png"],
+  };
+  const draft = {
+    pricingVersion: "draft-profile-v1",
+    prices: [{ quality: "medium", size: "1024x1024", credits: 50, outputCostMicroUsd: 6_000 }],
+    verification,
+  };
+  const storedApiModel = async () =>
+    ((await prisma.modelCatalogEntry.findUnique({ where: { category_modelId: { category: "image", modelId } } }))
+      ?.profile as { apiModelId?: string } | null)?.apiModelId;
+  // Unpriced: a draft for model A saves A's profile; a redraft for B moves the
+  // profile to B with it, so the draft always prices what the row calls.
+  await storeCatalogDraft({ category: "image", modelId, draft, imageProfile: { ...profile, apiModelId: "gpt-image-draft-a" }, session });
+  assert.equal(await storedApiModel(), "gpt-image-draft-a");
+  await storeCatalogDraft({ category: "image", modelId, draft, imageProfile: profile, session });
+  assert.equal(await storedApiModel(), "gpt-image-draft-profile");
+  // Applying needs no separate profile save.
+  await applyCatalogDraft({ category: "image", modelId, session });
+  // Priced: a draft for another API model is refused and changes nothing.
+  await assert.rejects(
+    storeCatalogDraft({
+      category: "image",
+      modelId,
+      draft: { ...draft, pricingVersion: "draft-profile-v2" },
+      imageProfile: { ...profile, apiModelId: "gpt-image-draft-dearer" },
+      session,
+    }),
+    (error: unknown) => error instanceof CatalogRefusal && error.code === "draft_profile_mismatch"
+  );
+  assert.equal(await storedApiModel(), "gpt-image-draft-profile");
+  const row = await prisma.modelCatalogEntry.findUnique({ where: { category_modelId: { category: "image", modelId } } });
+  assert.equal(row?.draft, null);
+  // Priced, same model: a new draft is stored.
+  await storeCatalogDraft({ category: "image", modelId, draft: { ...draft, pricingVersion: "draft-profile-v2" }, imageProfile: profile, session });
+  assert.equal(await storedApiModel(), "gpt-image-draft-profile");
+});
+
+test("an applied image draft takes the operator's credits and a free version name, and its audit row says so", async () => {
+  const modelId = "catalog-draft-credits";
+  const profile = {
+    provider: "openai",
+    apiModelId: "gpt-image-draft-credits",
+    name: "Before",
+    lifecycle: "preview",
+    sizes: ["1024x1024"],
+    qualities: ["low", "medium"],
+    latencyClass: "slow",
+    provenance: [],
+    outputMimeTypes: ["image/png"],
+  };
+  await updateCatalogEntry({ category: "image", modelId, patch: { profile }, session });
+  const draft = {
+    pricingVersion: "draft-credits-v1",
+    prices: [
+      { quality: "low", size: "1024x1024", credits: 50, outputCostMicroUsd: 6_000 },
+      { quality: "medium", size: "1024x1024", credits: 50, outputCostMicroUsd: 6_000 },
+    ],
+    verification,
+  };
+  // Unpriced, same model: the add form's name, sizes and qualities replace the
+  // stored ones, and what only the stored profile says (latency) stays.
+  await storeCatalogDraft({
+    category: "image",
+    modelId,
+    draft,
+    imageProfile: { ...profile, name: "After", sizes: ["1024x1024", "1536x1024"], latencyClass: "balanced" },
+    session,
+  });
+  const stored = (await prisma.modelCatalogEntry.findUnique({ where: { category_modelId: { category: "image", modelId } } }))
+    ?.profile as { name: string; sizes: string[]; latencyClass: string };
+  assert.equal(stored.name, "After");
+  assert.deepEqual(stored.sizes, ["1024x1024", "1536x1024"]);
+  assert.equal(stored.latencyClass, "slow");
+
+  // An override for an option the draft did not price is refused and the draft stays.
+  await assert.rejects(
+    applyCatalogDraft({ category: "image", modelId, creditOverrides: [{ quality: "high", size: "1024x1024", credits: 90 }], session }),
+    (error: unknown) => error instanceof CatalogRefusal && error.code === "credit_override_unknown_option"
+  );
+  // Credits under the floor are refused by the judge, as for any revision.
+  await assert.rejects(
+    applyCatalogDraft({ category: "image", modelId, creditOverrides: [{ quality: "low", size: "1024x1024", credits: 1 }], session }),
+    (error: unknown) => error instanceof CatalogRefusal && error.code === "not_admitted" && error.reasons.includes("credits_below_floor:low/1024x1024")
+  );
+  assert.equal(await prisma.modelCatalogPriceRevision.count({ where: { category: "image", modelId } }), 0);
+
+  await applyCatalogDraft({ category: "image", modelId, creditOverrides: [{ quality: "medium", size: "1024x1024", credits: 60 }], session });
+  const first = await prisma.modelCatalogPriceRevision.findFirst({ where: { category: "image", modelId } });
+  assert.equal(first?.pricingVersion, "draft-credits-v1");
+  assert.deepEqual(
+    (first?.prices as { quality: string; credits: number; outputCostMicroUsd: number }[]).map((p) => [p.quality, p.credits, p.outputCostMicroUsd]),
+    [
+      ["low", 50, 6_000],
+      ["medium", 60, 6_000],
+    ]
+  );
+  const audit = await prisma.adminAuditLog.findFirst({
+    where: { action: "model_catalog.price_revision_created", targetId: first!.id },
+  });
+  assert.deepEqual((audit?.metadata as { provenance?: unknown }).provenance, {
+    fromDraft: true,
+    draftPricingVersion: "draft-credits-v1",
+    creditEdits: [{ quality: "medium", size: "1024x1024", from: 50, to: 60 }],
+  });
+
+  // The same day's draft again: the second apply takes the next free name instead of a 409.
+  await storeCatalogDraft({ category: "image", modelId, draft, imageProfile: profile, session });
+  await applyCatalogDraft({ category: "image", modelId, session });
+  const versions = (await prisma.modelCatalogPriceRevision.findMany({ where: { category: "image", modelId }, orderBy: { createdAt: "asc" } })).map(
+    (row) => row.pricingVersion
+  );
+  assert.deepEqual(versions, ["draft-credits-v1", "draft-credits-v1-2"]);
+});
+
+test("credit overrides are for image drafts only", async () => {
+  await assert.rejects(
+    applyCatalogDraft({ category: "coding", modelId: "gpt-draft-test", creditOverrides: [{ quality: "low", size: "1024x1024", credits: 5 }], session }),
+    (error: unknown) => error instanceof CatalogRefusal && error.code === "credit_overrides_image_only"
+  );
+});
+
+test("an applied coding draft takes the operator's name, plan and weight, never under the floor, and its audit row says so", async () => {
+  const modelId = "gpt-coding-edit-test";
+  const key = { category_modelId: { category: "coding", modelId } };
+  await storeCatalogDraft({ category: "coding", modelId, draft: codingProfile, session });
+  // Under the floor the judge uses: refused, and the draft is still there to fix.
+  await assert.rejects(
+    applyCatalogDraft({ category: "coding", modelId, codingEdit: { creditWeight: 1 }, session }),
+    (error: unknown) =>
+      error instanceof CatalogRefusal && error.code === "not_admitted" && /^credits_below_floor:\d+$/.test(error.reasons[0] ?? "")
+  );
+  assert.notEqual((await prisma.modelCatalogEntry.findUnique({ where: key }))?.draft, null);
+  await assert.rejects(
+    applyCatalogDraft({ category: "image", modelId: "gpt-image-2", codingEdit: { creditWeight: 9 }, session }),
+    (error: unknown) => error instanceof CatalogRefusal && error.code === "coding_edit_coding_only"
+  );
+
+  await applyCatalogDraft({ category: "coding", modelId, codingEdit: { name: "Edited Coder", minimumPlan: "Max", creditWeight: 9 }, session });
+  const row = await prisma.modelCatalogEntry.findUnique({ where: key });
+  const stored = row?.profile as typeof codingProfile;
+  assert.equal(row?.draft, null);
+  assert.equal(stored.name, "Edited Coder");
+  assert.equal(stored.minimumPlan, "Max");
+  assert.equal(stored.pricing.creditWeight, 9);
+  // Prices and evidence are the draft's.
+  assert.equal(stored.pricing.outputUsdPerMTok, codingProfile.pricing.outputUsdPerMTok);
+  assert.deepEqual(stored.terms, codingProfile.terms);
+  const audit = await prisma.adminAuditLog.findFirst({
+    where: { action: "model_catalog.entry_updated", targetId: `coding:${modelId}` },
+    orderBy: { createdAt: "desc" },
+  });
+  assert.deepEqual((audit?.metadata as { provenance?: unknown }).provenance, {
+    fromDraft: true,
+    edits: [
+      { field: "name", from: "Catalog Test Coder", to: "Edited Coder" },
+      { field: "minimumPlan", from: "Pro", to: "Max" },
+      { field: "creditWeight", from: 4, to: 9 },
+    ],
+  });
+});
+
 test("the database refuses a category it has no policy for", async () => {
   await assert.rejects(
     prisma.modelCatalogEntry.create({ data: { category: "video", modelId: "veo-x" } }),
@@ -403,6 +579,93 @@ test("a priced runtime image model cannot change what it calls", async () => {
   assert.equal((row?.profile as { apiModelId?: string } | null)?.apiModelId, "gpt-image-catalog-a");
 });
 
+test("an image model is renamed in place, code or runtime, priced or not", async () => {
+  // Owner request 2026-11-13: the guided screen had no way to change a name.
+  // A rename writes only the name into the stored profile.
+  await updateCatalogEntry({ category: "image", modelId: enabledSeed.id, patch: { name: "Seed Renamed" }, session });
+  const seedRow = await prisma.modelCatalogEntry.findUnique({ where: { category_modelId: { category: "image", modelId: enabledSeed.id } } });
+  assert.deepEqual(seedRow?.profile, { name: "Seed Renamed" });
+  assert.equal(seedRow?.enabled, null);
+  const models = await refreshImageModelCatalog({ force: true });
+  assert.equal(models.find((model) => model.id === enabledSeed.id)?.name, "Seed Renamed");
+
+  const modelId = "catalog-runtime-rename";
+  const profile = {
+    provider: "openai",
+    apiModelId: "gpt-image-catalog-rename",
+    name: "Runtime Before",
+    lifecycle: "preview",
+    sizes: ["1024x1024"],
+    qualities: ["low"],
+    latencyClass: "balanced",
+    provenance: [],
+    outputMimeTypes: ["image/png"],
+  };
+  // No saved profile yet: a name alone says nothing about what to call.
+  await assert.rejects(
+    updateCatalogEntry({ category: "image", modelId, patch: { name: "Nothing" }, session }),
+    (error: unknown) => error instanceof CatalogRefusal && error.code === "invalid_profile"
+  );
+  await updateCatalogEntry({ category: "image", modelId, patch: { profile }, session });
+  await createImagePriceRevision({
+    modelId,
+    revision: {
+      pricingVersion: "rename-v1",
+      prices: [{ quality: "low", size: "1024x1024", credits: 50, outputCostMicroUsd: 6_000 }],
+      verification,
+    },
+    session,
+  });
+  const audits = await auditCount("model_catalog.entry_updated");
+  await updateCatalogEntry({ category: "image", modelId, patch: { name: "Runtime After" }, session });
+  const row = await prisma.modelCatalogEntry.findUnique({ where: { category_modelId: { category: "image", modelId } } });
+  assert.deepEqual(row?.profile, { ...profile, name: "Runtime After" });
+  assert.equal(await auditCount("model_catalog.entry_updated"), audits + 1);
+
+  // A name is for image models, and never together with a profile.
+  await assert.rejects(
+    updateCatalogEntry({ category: "coding", modelId: "coding-x", patch: { name: "x" }, session }),
+    (error: unknown) => error instanceof CatalogRefusal && error.code === "invalid_patch"
+  );
+  await assert.rejects(
+    updateCatalogEntry({ category: "image", modelId, patch: { name: "x", profile }, session }),
+    (error: unknown) => error instanceof CatalogRefusal && error.code === "invalid_patch"
+  );
+  assert.equal(catalogPatchBodySchema.safeParse({ category: "image", modelId, name: "" }).success, false);
+  assert.equal(catalogPatchBodySchema.safeParse({ category: "image", modelId, name: "x".repeat(81) }).success, false);
+
+  // Owner request 2026-11-15: the image router picks by fit, so each model
+  // carries a note on what it is good and bad at. Like the name it is written
+  // into the stored profile, on a priced model too, and reaches the router.
+  const note = "Best for: posters with text; weaker at: speed.";
+  await updateCatalogEntry({ category: "image", modelId, patch: { routingNote: note }, session });
+  const noted = await prisma.modelCatalogEntry.findUnique({ where: { category_modelId: { category: "image", modelId } } });
+  assert.deepEqual(noted?.profile, { ...profile, name: "Runtime After", routingNote: note });
+  await updateCatalogEntry({ category: "image", modelId: enabledSeed.id, patch: { routingNote: note }, session });
+  const withNotes = await refreshImageModelCatalog({ force: true });
+  assert.equal(withNotes.find((model) => model.id === enabledSeed.id)?.routingNote, note);
+  assert.equal(withNotes.find((model) => model.id === enabledSeed.id)?.name, "Seed Renamed");
+  // A rename keeps the note; null removes it.
+  await updateCatalogEntry({ category: "image", modelId, patch: { name: "Runtime Last" }, session });
+  await updateCatalogEntry({ category: "image", modelId: enabledSeed.id, patch: { routingNote: null }, session });
+  const cleared = await prisma.modelCatalogEntry.findUnique({ where: { category_modelId: { category: "image", modelId: enabledSeed.id } } });
+  assert.deepEqual(cleared?.profile, { name: "Seed Renamed" });
+  const kept = await prisma.modelCatalogEntry.findUnique({ where: { category_modelId: { category: "image", modelId } } });
+  assert.deepEqual(kept?.profile, { ...profile, name: "Runtime Last", routingNote: note });
+  assert.equal(catalogPatchBodySchema.safeParse({ category: "image", modelId, routingNote: "two\nlines" }).success, false);
+  assert.equal(catalogPatchBodySchema.safeParse({ category: "image", modelId, routingNote: "x".repeat(401) }).success, false);
+
+  // The line users see under the model's name is written the same way.
+  await updateCatalogEntry({ category: "image", modelId, patch: { useCase: "text" }, session });
+  const described = await prisma.modelCatalogEntry.findUnique({ where: { category_modelId: { category: "image", modelId } } });
+  assert.deepEqual(described?.profile, { ...profile, name: "Runtime Last", routingNote: note, useCase: "text" });
+  assert.equal((await refreshImageModelCatalog({ force: true })).find((model) => model.id === modelId)?.useCase, "text");
+  await updateCatalogEntry({ category: "image", modelId, patch: { useCase: null }, session });
+  const undescribed = await prisma.modelCatalogEntry.findUnique({ where: { category_modelId: { category: "image", modelId } } });
+  assert.deepEqual(undescribed?.profile, { ...profile, name: "Runtime Last", routingNote: note });
+  assert.equal(catalogPatchBodySchema.safeParse({ category: "image", modelId, useCase: "cheap" }).success, false);
+});
+
 test("a priced runtime image model whose stored profile no longer parses cannot be given a new one", async () => {
   // Review nit 2026-10-21: the lock compared execution profiles only when the
   // stored one parsed, so an unreadable profile let any new request profile
@@ -445,4 +708,126 @@ test("a priced runtime image model whose stored profile no longer parses cannot 
   const row = await prisma.modelCatalogEntry.findUnique({ where: { category_modelId: { category: "image", modelId } } });
   assert.deepEqual(row?.profile, stored);
   assert.equal(await auditCount("model_catalog.entry_updated"), auditsBefore);
+});
+
+// --- chat links and provider conditions (owner decision 2026-11-20) ---------------
+
+const LINKED = "gpt-6-luna";
+const OPENAI_TERMS = "https://openai.com/policies/services-agreement";
+const OPENAI_RETENTION = "https://platform.openai.com/docs/guides/your-data";
+const today = () => new Date().toISOString().slice(0, 10);
+
+const linkedEntry = async () => (await loadCodingCatalog()).find((entry) => entry.modelId === LINKED)!;
+
+test("a chat link is created off with its audit row, reads chat's values, and needs its provider's conditions to turn on", async () => {
+  await cleanup();
+  const linkedBefore = await auditCount("model_catalog.coding_linked");
+  await linkChatModel({
+    registryModelId: LINKED,
+    draft: { toolCalling: "parallel", structuredOutput: "strict_schema", note: "", sources: ["https://developers.openai.com/api/docs/pricing"], draftedAt: today() },
+    session,
+  });
+  assert.equal(await auditCount("model_catalog.coding_linked"), linkedBefore + 1);
+  const row = await prisma.modelCatalogEntry.findUniqueOrThrow({ where: { category_modelId: { category: "coding", modelId: LINKED } } });
+  assert.equal(row.enabled, null);
+  assert.equal((row.profile as { source: string }).source, "chat");
+  // Only the link's own values are stored.
+  assert.equal((row.profile as { name?: string }).name, undefined);
+
+  await assert.rejects(
+    linkChatModel({
+      registryModelId: LINKED,
+      draft: { toolCalling: "parallel", structuredOutput: "strict_schema", note: "", sources: [], draftedAt: today() },
+      session,
+    }),
+    (error: unknown) => error instanceof CatalogRefusal && error.code === "already_in_catalog"
+  );
+
+  const entry = await linkedEntry();
+  assert.equal(entry.source, "chat");
+  assert.equal(entry.profile?.apiModelId, "gpt-6-luna");
+  assert.ok((entry.profile?.capabilities.maxContextTokens ?? 0) > 0);
+  assert.ok(entry.admission?.admitted === false && entry.admission.reasons.includes("provider_terms_missing"));
+  await assert.rejects(
+    updateCatalogEntry({ category: "coding", modelId: LINKED, patch: { enabled: true }, session }),
+    (error: unknown) => error instanceof CatalogRefusal && error.code === "not_admitted" && error.reasons.includes("provider_terms_missing")
+  );
+});
+
+test("applied provider conditions and a weight at the floor let the link turn on, and the snapshot carries the resolved row", async () => {
+  const draftsBefore = await auditCount("model_catalog.provider_terms_draft_stored");
+  const appliedBefore = await auditCount("model_catalog.provider_terms_applied");
+  await storeProviderTermsDraft({
+    provider: "openai",
+    draft: {
+      allowsResaleAndCodingAgent: true,
+      termsUrl: OPENAI_TERMS,
+      retentionUrl: OPENAI_RETENTION,
+      processingRegion: "US",
+      checkedAt: today(),
+      sources: [OPENAI_TERMS, OPENAI_RETENTION],
+    },
+    session,
+  });
+  assert.equal(await auditCount("model_catalog.provider_terms_draft_stored"), draftsBefore + 1);
+  // A stored draft is not applied: the link is still refused.
+  assert.ok((await linkedEntry()).admission?.admitted === false);
+  await applyProviderTermsDraft({ provider: "openai", session });
+  assert.equal(await auditCount("model_catalog.provider_terms_applied"), appliedBefore + 1);
+  const terms = await prisma.codingProviderTerms.findUniqueOrThrow({ where: { provider: "openai" } });
+  assert.equal(terms.draft, null);
+
+  const floor = codingCreditFloor((await linkedEntry()).profile!);
+  assert.ok(floor !== null);
+  await saveCodingSettings({ modelId: LINKED, settings: { creditWeight: floor, channels: ["api", "code"] }, session });
+  const entry = await linkedEntry();
+  assert.deepEqual(entry.admission, { admitted: true });
+  await updateCatalogEntry({ category: "coding", modelId: LINKED, patch: { enabled: true }, session });
+
+  const published = await publishCodingSnapshot({ session });
+  const snapshotRow = published.snapshot.models.find((model) => model.modelId === LINKED)!;
+  assert.equal(snapshotRow.source, "chat");
+  assert.deepEqual(snapshotRow.channels, ["code", "api"]);
+  assert.equal(snapshotRow.pricing.creditWeight, floor);
+  assert.equal(snapshotRow.terms.url, OPENAI_TERMS);
+  assert.ok(snapshotRow.pricing.pricingVersion);
+});
+
+test("provider conditions past 90 days keep a serving link on and refuse a new activation", async () => {
+  await prisma.codingProviderTerms.update({
+    where: { provider: "openai" },
+    data: {
+      terms: {
+        allowsResaleAndCodingAgent: true,
+        termsUrl: OPENAI_TERMS,
+        retentionUrl: OPENAI_RETENTION,
+        processingRegion: "US",
+        checkedAt: "2026-01-01",
+        sources: [OPENAI_TERMS],
+      },
+    },
+  });
+  const entry = await linkedEntry();
+  assert.deepEqual(entry.warnings, ["provider_terms_expired"]);
+  assert.deepEqual(entry.admission, { admitted: true });
+  // Already on: a settings change is judged and kept.
+  await saveCodingSettings({ modelId: LINKED, settings: { channels: ["code"] }, session });
+  // Held and turned on again is a new activation.
+  await updateCatalogEntry({ category: "coding", modelId: LINKED, patch: { holdReason: "check" }, session });
+  await assert.rejects(
+    updateCatalogEntry({ category: "coding", modelId: LINKED, patch: { holdReason: null, enabled: true }, session }),
+    (error: unknown) => error instanceof CatalogRefusal && error.reasons.includes("provider_terms_expired")
+  );
+});
+
+test("a link is taken out of the catalogue only once it is off, with its audit row", async () => {
+  await assert.rejects(
+    unlinkCodingModel({ modelId: LINKED, session }),
+    (error: unknown) => error instanceof CatalogRefusal && error.code === "unlink_turn_off_first"
+  );
+  await updateCatalogEntry({ category: "coding", modelId: LINKED, patch: { enabled: false, holdReason: null }, session });
+  const before = await auditCount("model_catalog.coding_unlinked");
+  await unlinkCodingModel({ modelId: LINKED, session });
+  assert.equal(await auditCount("model_catalog.coding_unlinked"), before + 1);
+  assert.equal(await prisma.modelCatalogEntry.count({ where: { category: "coding", modelId: LINKED } }), 0);
 });

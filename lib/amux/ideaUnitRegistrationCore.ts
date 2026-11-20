@@ -1,5 +1,4 @@
-import { AMUX_TASK_EXPECTED_PATHS_MAX,
-  type AmuxAnalysisCard } from "./ideaAnalysisChunkCore.ts";
+import type { AmuxAnalysisCard } from "./ideaAnalysisChunkCore.ts";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
 import { amuxV22TaskRoleSupported, amuxV22TaskWritesPatch } from "./v22WorkerClaimCore.ts";
 import { classifyAmuxExecutionPath, deriveAmuxExecutionGrade,
@@ -97,7 +96,10 @@ export function inspectAmuxV20TaskRegistration(
       return { ok: false, code: "task_expected_path_invalid" };
     }
     const expectedPaths = descriptor.value as unknown[];
-    if (expectedPaths.length < 1 || expectedPaths.length > AMUX_TASK_EXPECTED_PATHS_MAX) {
+    // Owner direction 2026-11-15: no upper bound, and a path repeated after
+    // normalisation counts once. Grade derivation still settles a Task with
+    // more than 40 paths to frontier.
+    if (expectedPaths.length < 1) {
       return { ok: false, code: "task_expected_paths_out_of_range" };
     }
     let contract = false;
@@ -110,9 +112,7 @@ export function inspectAmuxV20TaskRegistration(
       if (normalizedPath === null) {
         return { ok: false, code: "task_expected_path_invalid" };
       }
-      if (normalizedPaths.has(normalizedPath)) {
-        return { ok: false, code: "task_expected_paths_duplicate" };
-      }
+      if (normalizedPaths.has(normalizedPath)) continue;
       normalizedPaths.add(normalizedPath);
       const pathClass = classifyAmuxExecutionPath(path);
       contract ||= pathClass === "contract";
@@ -190,7 +190,7 @@ export function inspectAmuxV4CardRegistration(input: {
       snapshot.draftShape.cardType !== proposal.cardType ||
       snapshot.draftShape.storyKind !== proposal.storyKind ||
       !id.test(prepared.draftUnitId) || !digest.test(prepared.unitDigest) ||
-      proposal.title.length < 1 || proposal.title.length > 200 ||
+      proposal.title.length < 1 ||
       proposal.featureRef.length < 1 ||
       (proposal.cardType === "story" &&
         (proposal.executionBrief !== null || proposal.taskRole !== null ||

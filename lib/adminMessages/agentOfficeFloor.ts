@@ -202,6 +202,7 @@ export const adminAgentOfficeFloorMessages = defineAdminMessages({
       down: (name: string) => `${name} needs a look`,
     },
     channels: { claude: "Claude", codex: "Codex", copilot: "Copilot", cursor: "Cursor" },
+    quotaChannels: { claude: "Claude", codex: "Codex", copilot: "Copilot", cursor: "Cursor", antigravity: "Antigravity" },
   },
   ko: {
     kpi: {
@@ -403,6 +404,7 @@ export const adminAgentOfficeFloorMessages = defineAdminMessages({
       down: (name: string) => `${name}를 확인해 주세요`,
     },
     channels: { claude: "Claude", codex: "Codex", copilot: "Copilot", cursor: "Cursor" },
+    quotaChannels: { claude: "Claude", codex: "Codex", copilot: "Copilot", cursor: "Cursor", antigravity: "Antigravity" },
   },
 });
 

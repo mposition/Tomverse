@@ -30,7 +30,10 @@
 import {
   ARTIFACT_LIMITS,
   type ArtifactDocumentBlock,
+  type ArtifactImageBlock,
   type DocumentSpec,
+  type ResolvedDocumentImage,
+  type ResolvedDocumentImages,
 } from "@/lib/generatedArtifactCore";
 import {
   CORE_PROPERTIES_OVERRIDE,
@@ -41,11 +44,14 @@ import {
   escapeXml,
   relationship,
   zipOoxmlPackage,
+  type OoxmlMediaPart,
   type OoxmlPart,
 } from "@/lib/generatedArtifactXml";
 
 const W_NS =
-  'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
+  'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" ' +
+  'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ' +
+  'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"';
 
 /** Twips: Word's unit, 1/1440 inch. A4 with 1-inch margins. */
 const PAGE_WIDTH = 11906;
@@ -245,6 +251,60 @@ const HEADING_STYLES: Record<number, ParagraphStyle> = {
   4: "Heading4",
 };
 
+/** EMU per twip, and per pixel at 96 dpi: Word sizes drawings in EMU. */
+const EMU_PER_TWIP = 635;
+const EMU_PER_PIXEL = 9525;
+const CONTENT_WIDTH_EMU = CONTENT_WIDTH * EMU_PER_TWIP;
+/** The tallest a picture may be: the page's text height, less a caption. */
+const MAX_IMAGE_HEIGHT_EMU = (PAGE_HEIGHT - MARGIN * 2 - 720) * EMU_PER_TWIP;
+
+/**
+ * A picture, inline and centred, then its caption.
+ *
+ * Inline rather than floating: an inline drawing flows with the text the way
+ * every other block does, so a document reads in the order it was written.
+ * Never wider than the text, never larger than the picture's own size at
+ * 96 dpi, never taller than a page.
+ */
+const imageBlock = (
+  block: ArtifactImageBlock,
+  image: ResolvedDocumentImage,
+  relationshipId: string,
+  drawingId: number
+): string => {
+  const natural = image.width * EMU_PER_PIXEL;
+  let width = Math.min(
+    natural,
+    Math.round((CONTENT_WIDTH_EMU * (block.widthPercent ?? 100)) / 100)
+  );
+  let height = Math.round((width * image.height) / image.width);
+  if (height > MAX_IMAGE_HEIGHT_EMU) {
+    width = Math.round((width * MAX_IMAGE_HEIGHT_EMU) / height);
+    height = MAX_IMAGE_HEIGHT_EMU;
+  }
+  const description = escapeXml(block.caption ?? "");
+  const drawing =
+    `<w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">` +
+    `<wp:extent cx="${width}" cy="${height}"/>` +
+    `<wp:docPr id="${drawingId}" name="Picture ${drawingId}" descr="${description}"/>` +
+    `<wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" noChangeAspect="1"/></wp:cNvGraphicFramePr>` +
+    `<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">` +
+    `<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">` +
+    `<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">` +
+    `<pic:nvPicPr><pic:cNvPr id="${drawingId}" name="image${drawingId}.jpeg"/><pic:cNvPicPr/></pic:nvPicPr>` +
+    `<pic:blipFill><a:blip r:embed="${relationshipId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>` +
+    `<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${width}" cy="${height}"/></a:xfrm>` +
+    `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>` +
+    `</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing>`;
+  return (
+    `<w:p><w:pPr><w:pStyle w:val="BodyText"/><w:jc w:val="center"/></w:pPr>` +
+    `<w:r>${drawing}</w:r></w:p>` +
+    (block.caption
+      ? `<w:p><w:pPr><w:pStyle w:val="Subtitle"/><w:jc w:val="center"/></w:pPr>${run(block.caption)}</w:p>`
+      : "")
+  );
+};
+
 const renderBlock = (block: ArtifactDocumentBlock): string => {
   switch (block.type) {
     case "heading":
@@ -275,6 +335,10 @@ const renderBlock = (block: ArtifactDocumentBlock): string => {
       );
     case "pageBreak":
       return `<w:p><w:r><w:br w:type="page"/></w:r></w:p>`;
+    case "image":
+      // Reached only for a picture nothing resolved, which the collector never
+      // lets through; the caption keeps the document honest about the gap.
+      return block.caption ? paragraph("BodyText", `[Image: ${block.caption}]`) : "";
   }
 };
 
@@ -283,6 +347,7 @@ const CONTENT_TYPES_XML =
   `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
   `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>` +
   `<Default Extension="xml" ContentType="application/xml"/>` +
+  `<Default Extension="jpeg" ContentType="image/jpeg"/>` +
   `<Override PartName="/word/document.xml" ` +
   `ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>` +
   `<Override PartName="/word/styles.xml" ` +
@@ -302,7 +367,10 @@ const ROOT_RELS_XML =
   CORE_PROPERTIES_RELATIONSHIP +
   `</Relationships>`;
 
-const DOCUMENT_RELS_XML =
+const IMAGE_RELATIONSHIP =
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
+
+const documentRelationshipsXml = (images: readonly { id: string; target: string }[]) =>
   `${XML_DECLARATION}${RELATIONSHIPS_OPEN}` +
   relationship(
     "rId1",
@@ -314,14 +382,30 @@ const DOCUMENT_RELS_XML =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering",
     "numbering.xml"
   ) +
+  images.map((image) => relationship(image.id, IMAGE_RELATIONSHIP, image.target)).join("") +
   `</Relationships>`;
 
 /** The WordprocessingML package for an admitted document specification. */
-export const renderDocumentDocx = (spec: DocumentSpec): Uint8Array => {
+export const renderDocumentDocx = (
+  spec: DocumentSpec,
+  images: ResolvedDocumentImages = new Map()
+): Uint8Array => {
+  const media: OoxmlMediaPart[] = [];
+  const imageRelationships: { id: string; target: string }[] = [];
   const body =
     (spec.title ? paragraph("Title", spec.title) : "") +
     (spec.subtitle ? paragraph("Subtitle", spec.subtitle) : "") +
-    spec.blocks.map(renderBlock).join("");
+    spec.blocks
+      .map((block, index) => {
+        const image = block.type === "image" ? images.get(index) : undefined;
+        if (block.type !== "image" || !image) return renderBlock(block);
+        const number = media.length + 1;
+        const id = `rIdImage${number}`;
+        media.push({ path: `word/media/image${number}.jpeg`, bytes: image.jpeg });
+        imageRelationships.push({ id, target: `media/image${number}.jpeg` });
+        return imageBlock(block, image, id, number);
+      })
+      .join("");
 
   const sectionProperties =
     `<w:sectPr>` +
@@ -339,12 +423,12 @@ export const renderDocumentDocx = (spec: DocumentSpec): Uint8Array => {
     { path: "_rels/.rels", xml: ROOT_RELS_XML },
     CORE_PROPERTIES_PART,
     { path: "word/document.xml", xml: documentXml },
-    { path: "word/_rels/document.xml.rels", xml: DOCUMENT_RELS_XML },
+    { path: "word/_rels/document.xml.rels", xml: documentRelationshipsXml(imageRelationships) },
     { path: "word/styles.xml", xml: STYLES_XML },
     { path: "word/numbering.xml", xml: NUMBERING_XML },
   ];
 
-  return zipOoxmlPackage(parts);
+  return zipOoxmlPackage(parts, media);
 };
 
 /** Exported for the test that asserts the closed style set stays closed. */

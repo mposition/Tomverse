@@ -53,6 +53,10 @@ CHAT_GUEST_MAX_TIER=Free
 CHAT_USER_MAX_TIER=Max
 CHAT_GUEST_MAX_INPUT_TOKENS=16000
 CHAT_USER_MAX_INPUT_TOKENS=128000
+# Accounts may send up to the model's context window; above the flat limit a
+# turn is charged its token cost at this many micro-USD a credit. 0 disables.
+CHAT_LONG_CONTEXT_ENABLED=1
+CHAT_LONG_CONTEXT_MICRO_USD_PER_CREDIT=2500
 CHAT_GUEST_TOKENS_PER_DAY=40000
 CHAT_GUEST_TOKENS_PER_MONTH=200000
 CHAT_GUEST_COST_MICROUSD_PER_DAY=20000
@@ -972,9 +976,9 @@ variable is present but malformed, administrator access fails closed:
 ```text
 ADMIN_ACCESS_EXPIRY_JSON={"operator@example.com":"2026-12-31T23:59:59.000Z"}
 ADMIN_SESSION_MAX_HOURS=8
-# Leave unset for the admin (120-minute) and account (30-minute) defaults.
+# Leave unset for the admin (480-minute) and account (30-minute) defaults.
 # Optional shared override for both step-up windows:
-# ADMIN_RECENT_AUTH_MINUTES=120
+# ADMIN_RECENT_AUTH_MINUTES=480
 ADMIN_APPROVAL_TTL_MINUTES=30
 ADMIN_REFUND_APPROVAL_THRESHOLD_CENTS=10000
 ```
@@ -995,12 +999,13 @@ the code that tried to read one failed closed for every caller.
   ordinary application session can remain valid for seven days, an expired
   administrator window sends an allow-listed administrator to the dedicated
   reauthentication screen instead of the console.
-- `ADMIN_RECENT_AUTH_MINUTES` defaults to 120 minutes for administrator
-  step-up (`assertRecentAdminAuthentication`). While it is spent, the console
+- `ADMIN_RECENT_AUTH_MINUTES` defaults to 480 minutes (the same 8 hours as
+  the console session) for administrator step-up (`assertRecentAdminAuthentication`). While it is spent, the console
   keeps working and those endpoints answer HTTP 428.
 - Sensitive account operations use `assertRecentAccountAuthentication` and
   retain their 30-minute default. An explicit `ADMIN_RECENT_AUTH_MINUTES`
-  overrides both defaults, with the existing 5–240-minute bounds.
+  overrides both defaults, bounded to 5–480 minutes for administrators and
+  5–240 minutes for account operations.
 
 Because the two windows differ, a step-up refusal is its own recovery path:
 `/auth/admin-reauthenticate?mode=recent` shows the reauthentication card for a

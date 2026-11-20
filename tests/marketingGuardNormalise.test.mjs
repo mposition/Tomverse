@@ -175,8 +175,21 @@ test("anything that reads as an address is refused", () => {
     "visit example(dot)com",
     "hxxps://example.com",
     "visit xn--80ak6aa92e.com",
+    "visit example dot com",
+    "방문 example 점 com",
+    "访问 example 点 com",
+    "visit example 점 COM now",
   ]) {
     assert.deepEqual(marketingTextHygiene(text), ["url_like"], text);
+  }
+  // 점 ("point") and 点 are everyday words: only a Latin suffix after them reads as a host.
+  for (const text of [
+    "인사, 추억, 느낀 점 순서로 구성하세요",
+    "좋은 점 많아요",
+    "주의할 점 정리",
+    "我想 一点 时间",
+  ]) {
+    assert.deepEqual(marketingTextHygiene(text), [], text);
   }
 
   assert.deepEqual(marketingTextHygiene("[label](https://x.co)"), [

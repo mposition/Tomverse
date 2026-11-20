@@ -133,7 +133,8 @@ const INSTRUCTION_NAMES = new Set([
   // Project MCP server configuration: a server it names is a program to run.
   ".mcp.json",
 ]);
-const INSTRUCTION_DIRS = new Set([".claude", ".codex", ".cursor", ".agents", ".devin", ".copilot"]);
+// `.gemini`: Antigravity (agy) and Gemini CLI read settings, agents and hooks there.
+const INSTRUCTION_DIRS = new Set([".claude", ".codex", ".cursor", ".agents", ".devin", ".copilot", ".gemini"]);
 
 /**
  * GitHub Copilot also reads instruction, prompt, agent and chat-mode files,

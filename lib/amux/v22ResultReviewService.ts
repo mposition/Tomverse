@@ -4,11 +4,11 @@ import type { Prisma } from "@prisma/client";
 
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
+import { AMUX_DM_PENDING_SCAN, AMUX_DM_TICK_LIMIT } from "@/lib/amux/decisionMakerCore";
 import { BoardImportError } from "@/lib/amux/boardImportCore";
 import { openAmuxContent, verifyAmuxContentDigest } from "@/lib/amux/ideaCrypto";
 import { loadAmuxContentKeyRing } from "@/lib/amux/ideaKeyStore";
 import { readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitchStore";
-import { settlementDestinationForBudget } from "@/lib/amux/executionBudgetCore";
 import { parseAmuxV22Conclusion } from "@/lib/amux/v22ConclusionCore";
 import { amuxV22ResultReviewRelayCard, amuxV22ResultReviewTarget,
   type AmuxV22ResultReviewDecision, type AmuxV22ResultReviewKind } from
@@ -27,8 +27,8 @@ import { openAmuxV22TaskResultRow, type AmuxV22SealedRow } from
 
 const CARD_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const REVIEW_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-export const AMUX_V22_RESULT_REVIEW_SYNC_LIMIT = 3;
-export const AMUX_V22_RESULT_REVIEW_PENDING_SCAN = 24;
+export const AMUX_V22_RESULT_REVIEW_SYNC_LIMIT = AMUX_DM_TICK_LIMIT;
+export const AMUX_V22_RESULT_REVIEW_PENDING_SCAN = AMUX_DM_PENDING_SCAN;
 export const AMUX_V22_RESULT_REVIEW_APPLIED_ACTION = "amux.v22.result_review.applied";
 /** Who resolves the person's escalation when the Decision Maker decided, as
  * the card close and the merge observer name themselves: never a person's id. */
@@ -57,7 +57,7 @@ export async function readAmuxV22ResultReviewSyncRows(tx: Prisma.TransactionClie
       w."v4BodyCiphertext" AS "bodyCiphertext", w."v4BodyKeyId" AS "bodyKeyId",
       w."v4BodyKeyVersion" AS "bodyKeyVersion", w."v4BodyDigest" AS "bodyDigest",
       w."v4BodyDigestKeyId" AS "bodyDigestKeyId",
-      r."ideaId", r."ciphertext", r."keyId", r."keyVersion", r."digest",
+      r."ideaId", r."keyId", r."keyVersion", r."digest",
       r."digestKeyId", r."sourceSha256", r."bodyPurgedAt"
     FROM "AmuxV22ResultReview" v
     JOIN "AmuxWorkItem" w ON w."id" = v."taskId"
@@ -77,8 +77,11 @@ export async function readAmuxV22ResultReviewSyncRows(tx: Prisma.TransactionClie
 }
 
 /** The Task's approved completion criteria, opened from its sealed body, or
- * null when they cannot be read. */
-async function openCompletionCriteria(row: PendingReview): Promise<string[] | null> {
+ * null when they cannot be read. The owner queue settlement reads them too
+ * (dmOwnerSettlementService.ts). */
+export async function openCompletionCriteria(row: Pick<PendingReview, "ideaId" | "taskId" |
+  "bodyCiphertext" | "bodyKeyId" | "bodyKeyVersion" | "bodyDigest" | "bodyDigestKeyId">):
+  Promise<string[] | null> {
   if (!row.bodyCiphertext || !row.bodyKeyId || !row.bodyKeyVersion ||
       !row.bodyDigest || !row.bodyDigestKeyId) return null;
   const keys = await loadAmuxContentKeyRing([
@@ -265,9 +268,8 @@ export async function applyAmuxV22ResultReviewDecision(tx: Prisma.TransactionCli
           decision: input.decision, source: input.source } });
     return { applied: false as const, outcome: "handed_off" as const };
   }
-  let target = amuxV22ResultReviewTarget(input.decision);
-  if (target === "todo" && settlementDestinationForBudget({ requested_status: "todo",
-    attempt_number: row.attemptNumber }).to_status !== "todo") target = "blocked";
+  // No count of attempts turns a retry into a block (owner direction 2026-11-18).
+  const target = amuxV22ResultReviewTarget(input.decision);
   await tx.amuxWorkItem.update({ where: { id: row.taskId }, data: {
     status: target, revision: { increment: 1 },
     ...(target === "done" ? { v4TerminalAt: input.now } : {}),

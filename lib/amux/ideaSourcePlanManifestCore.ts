@@ -1,10 +1,7 @@
 import { createHmac, timingSafeEqual, type Hmac } from "node:crypto";
 
 import type { AmuxDigestKey } from "./ideaCrypto.ts";
-
-/** Per-unit ceiling only. The transfer preview must separately enforce its
- * 8 KiB total excerpt cap, including every unit selected for that turn. */
-export const AMUX_SOURCE_PLAN_UNIT_MAX_BYTES = 8_192;
+import { AMUX_INTAKE_SAFETY_MAX_BYTES } from "./intakeLimitsCore.ts";
 
 export type AmuxSourcePlanUnit = {
   sourceKind: "operator_idea" | "approved_excerpt" | "owner_answer";
@@ -180,7 +177,9 @@ export function buildAmuxSourcePlanManifest(
         return { decision: "hold", reason: "invalid_units" };
       }
       // Copy a potentially mutable caller-owned Buffer before hashing this unit.
-      const exactBytes = copyPlainBuffer(unit.bytes, AMUX_SOURCE_PLAN_UNIT_MAX_BYTES);
+      // Owner direction 2026-11-15: a unit, a session idea above all, is not
+      // refused for its size; it may be up to AMUX_INTAKE_SAFETY_MAX_BYTES.
+      const exactBytes = copyPlainBuffer(unit.bytes, AMUX_INTAKE_SAFETY_MAX_BYTES);
       if (!exactBytes) return { decision: "hold", reason: "invalid_units" };
       try {
         const hmac = createHmac("sha256", sourceKey);

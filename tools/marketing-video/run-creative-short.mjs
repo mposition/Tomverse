@@ -1,8 +1,16 @@
 // The creative short job (owner 2026-11-09: "a different, creative ad every
 // time", made with Higgsfield and ElevenLabs, not a reused template):
 //   node run-creative-short.mjs
+//   node run-creative-short.mjs --rebuild <run>
+//   node run-creative-short.mjs --replan <run>    (a fresh run whose plan was refused: from the plan on, no new recording)
 // Off unless MARKETING_CREATIVE_SHORT=on. Run by hand for now (phase 1): no
 // cron starts it.
+//
+// --rebuild (owner 2026-11-11) takes a run that stopped at the review and
+// builds its film again from the reviewer's last notes, with that run's plan,
+// shots, music and voice: steps 1-5 do not run, so nothing is paid for. It
+// gives REBUILD_ROUNDS more build-and-review rounds; a run its reviewer
+// rejected is not rebuilt.
 //
 // Deterministic: it runs each model call with only the tools that call needs,
 // checks every answer before acting on it, spends only through hf-media-core.mjs
@@ -31,9 +39,10 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync,
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { checkFilmSource, checkFinal, checkPlan, creativeAsset, fileRule, jsonLine, normalizePack, reviewPassed, usablePacks } from "./creative-core.mjs";
+import { answerOf, checkFilmSource, checkFinal, checkPlan, creativeAsset, fileRule, jsonLine, lastBuild, LIMITS, packOfRun, stillsIn, normalizePack, reviewPassed, usablePacks } from "./creative-core.mjs";
 import { speakLine, VOICE_CAP_ENV, voiceLedgerPath } from "./el-voice-core.mjs";
 import { levelVoice, probe, seconds as lengthOf, stills } from "./ffmpeg-tools.mjs";
+import { FRESH_LOCALES, FRESH_REVIEW_ENV, pickSubject, SUBJECTS } from "./fresh-review.mjs";
 import { brisbaneDay, dailyCap, readLedger, spent } from "./higgsfield-cap.mjs";
 import { CREATIVE_CAP_ENV, creativeLedgerPath, makeMedia, MUSIC_SECONDS } from "./hf-media-core.mjs";
 
@@ -81,9 +90,18 @@ const modelEnv = () => {
 };
 
 const creativeDir = path.join("job", "creative");
+const REBUILD_ROUNDS = 3;
+const rebuildAt = process.argv.indexOf("--rebuild");
+const rebuild = rebuildAt === -1 ? null : String(process.argv[rebuildAt + 1] ?? "");
+if (rebuild !== null && !(/^\d{8}(?:-\d+)?$/u.test(rebuild) && existsSync(path.join(creativeDir, rebuild, "plan.json")))) halt("no_such_run");
+// --replan (owner 2026-11-13): a run whose fresh recording finished but whose plan was refused goes
+// on from the plan with the captures it already recorded, so the demo account is not asked again.
+const replanAt = process.argv.indexOf("--replan");
+const replan = replanAt === -1 ? null : String(process.argv[replanAt + 1] ?? "");
+if (replan !== null && !(rebuild === null && /^\d{8}(?:-\d+)?$/u.test(replan) && existsSync(path.join(creativeDir, replan, "sources")) && !existsSync(path.join(creativeDir, replan, "plan.json")))) halt("no_run_to_replan");
 mkdirSync(creativeDir, { recursive: true });
-let run = day;
-for (let n = 2; existsSync(path.join(creativeDir, run)); n += 1) run = `${day}-${n}`;
+let run = rebuild ?? replan ?? day;
+if (rebuild === null && replan === null) for (let n = 2; existsSync(path.join(creativeDir, run)); n += 1) run = `${day}-${n}`;
 report.run = run;
 const runDir = path.join(creativeDir, run);
 const pub = path.join(runDir, "public");
@@ -113,16 +131,7 @@ function claude(name, prompt, { tools, allowed, maxTurns, timeoutMinutes = 30 })
     { encoding: "utf8", env: modelEnv(), timeout: timeoutMinutes * 60_000, maxBuffer: 128 * 1024 * 1024 },
   );
   writeFileSync(path.join(runDir, "calls", `${name}.jsonl`), out.stdout ?? "");
-  let answer = null;
-  for (const line of String(out.stdout ?? "").split(/\r?\n/u)) {
-    try {
-      const event = JSON.parse(line);
-      if (event.type === "result" && typeof event.result === "string") answer = event.result;
-    } catch {
-      // not an event
-    }
-  }
-  return answer;
+  return answerOf(out.stdout);
 }
 
 // The approved list first, as the daily job: captures come only from packs of approved shorts.
@@ -166,14 +175,121 @@ for (const id of existsSync(sourcesDir) ? readdirSync(sourcesDir) : []) {
   }
   onBox.push({ ...pack, captures: Object.fromEntries(present), file, dir, claimIds });
 }
-const packs = usablePacks(onBox, JSON.parse(readFileSync(path.join("job", "approved.json"), "utf8")), date);
+let packs = usablePacks(onBox, JSON.parse(readFileSync(path.join("job", "approved.json"), "utf8")), date);
 for (const pack of onBox) if (!packs.includes(pack)) report.dropped.push({ step: "packs", reason: `${pack.assetId}: not approved now` });
-if (packs.length === 0) halt("no_capture_packs");
+// Fresh captures (owner 2026-11-12, a different subject every film): recorded for this run below,
+// so a new run does not need an approved pack. Off by default: each recording spends the demo
+// account's credits.
+const fresh = rebuild === null && replan === null && env[FRESH_REVIEW_ENV] === "on";
+/** A fresh run's topic from its subject: `fresh-` and the subject's words. */
+const freshTopic = (text) => `fresh-${text.toLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(/^-|-$/gu, "").slice(0, 50)}`;
+
+/** The packs a run recorded for itself (<run>/sources/<locale>/pack.json): real screens of today, no short's claims. */
+function freshPacksIn(dir) {
+  const root = path.join(dir, "sources");
+  return (existsSync(root) ? readdirSync(root) : []).flatMap((locale) => {
+    const file = path.join(root, locale, "pack.json");
+    if (!existsSync(file)) return [];
+    const pack = normalizePack(JSON.parse(readFileSync(file, "utf8")));
+    if (!pack) return [];
+    const present = Object.entries(pack.captures).filter(([, capture]) => existsSync(path.join(root, locale, capture.file)));
+    return present.length > 0 ? [{ ...pack, captures: Object.fromEntries(present), file, dir: path.dirname(file), claimIds: [] }] : [];
+  });
+}
+// A rebuild or a replan has its own recordings: the approved packs on the box may well be none.
+if (rebuild !== null || replan !== null) packs = [...packs, ...freshPacksIn(runDir)];
+if (packs.length === 0 && !fresh) halt("no_capture_packs");
 
 const historyPath = path.join(creativeDir, "history.json");
 const history = existsSync(historyPath) ? JSON.parse(readFileSync(historyPath, "utf8")) : [];
 const sheetsDir = path.join(creativeDir, "sheets");
 mkdirSync(sheetsDir, { recursive: true });
+const earlierStills = (entry) => stillsIn(path.join(sheetsDir, entry.run), 4).join(", ") || "none kept";
+/** What the builder is told after a review: a "pass" without every gate true is not a pass. */
+const notesFrom = (review) => {
+  const low = review?.verdict === "pass" && !reviewPassed(review);
+  return `${low ? `Every gate (truth, tone, disclosure) must be true; it was ${JSON.stringify(review.gates ?? null)}. ` : ""}${String(review?.notes ?? "")}`.slice(0, 4000);
+};
+
+// A rebuild: the run's plan, captures, shots, music and voice as they are; only build and review
+// again, from the last review's notes. Nothing below step 5 is paid for, and this never reaches step 1.
+if (rebuild !== null) {
+  const plan = JSON.parse(readFileSync(path.join(runDir, "plan.json"), "utf8"));
+  report.concept = plan.concept;
+  report.topic = plan.topic;
+  // A run that reached the end is in history and its files went to Admin under their ids: never again.
+  if (history.some((entry) => entry.run === run)) halt("already_finished");
+  const before = lastBuild(path.join(runDir, "calls"));
+  if (before.review?.verdict === "reject") {
+    report.dropped.push({ step: "rebuild", reason: `its reviewer rejected it: ${String(before.review.notes ?? "").slice(0, 300)}` });
+    halt("rejected_before");
+  }
+  const captureWords = {};
+  const sourceClaims = {};
+  const locales = Object.keys(plan.locales ?? {}).filter((locale) => {
+    // The pack whose files the run copied, approved now; never another pack of the same topic.
+    const source = packOfRun(path.join(pub, "capture", locale), packs, plan.topic, locale);
+    if (!source || !existsSync(path.join(pub, `props-${locale}.json`))) {
+      report.dropped.push({ step: `rebuild ${locale}`, reason: source ? "the run made no props for it" : "no pack approved now holds the run's captures" });
+      return false;
+    }
+    captureWords[locale] = source.words;
+    sourceClaims[locale] = source.pack.claimIds;
+    return true;
+  });
+  report.locales = locales;
+  if (locales.length === 0) halt("no_locale_left");
+  const notes = before.review && !reviewPassed(before.review) ? notesFrom(before.review) : null;
+  await finishFilm({ plan, locales, captureWords, sourceClaims, firstRound: before.rounds + 1, rounds: REBUILD_ROUNDS, notes });
+}
+
+// 0b. Fresh captures: a subject at random (never one of the last films'), one question about it per
+// locale written by a model, each asked ONCE in Review and its answer analysis run ONCE
+// (fresh-review.mjs). A recording that stopped after a paid step is never repeated, and stops the rest.
+let subject = null;
+if (replan !== null) {
+  // Only the run's own recordings, and the subject they were made for.
+  packs = freshPacksIn(runDir);
+  if (packs.length === 0) halt("no_fresh_capture");
+  report.topic = packs[0].topic;
+  subject = SUBJECTS.find((entry) => freshTopic(entry) === packs[0].topic) ?? null;
+}
+if (fresh) {
+  subject = pickSubject(history);
+  const topic = freshTopic(subject);
+  report.topic = topic;
+  const questionPrompt = [
+    "Write the question a real person would type into an AI assistant about this everyday subject, once in each language: en, ko, zh-Hant (Traditional Chinese, Taiwan usage).",
+    `Subject: ${subject}.`,
+    "Rules: one concrete request with a detail or two that makes the answers differ (a budget, a number of people, a constraint); the same numbers in every language, so one set of shots fits all three; ask for practical help (a plan, a list, steps, a choice between options), never for novels, films, songs or other works to recommend, since the answers would name works whose themes nobody checked; 40-120 characters; natural for that language, not a translation; no brand or product names; nothing about death, illness, medicine, loss or danger; never about Tomverse or AI.",
+    'Answer with one line of JSON only: {"questions": {"en": "...", "ko": "...", "zh-Hant": "..."}}',
+  ].join("\n");
+  const questions = jsonLine(claude("questions", questionPrompt, { tools: "Read", allowed: [fileRule("Read", "features.json")], maxTurns: 3, timeoutMinutes: 5 }), "questions");
+  const asked = FRESH_LOCALES.filter((locale) => typeof questions?.[locale] === "string" && questions[locale].trim().length >= 8 && questions[locale].trim().length <= 200);
+  if (asked.length === 0) halt("no_questions");
+  for (const locale of asked) {
+    const into = path.join(runDir, "sources", locale);
+    mkdirSync(path.dirname(into), { recursive: true });
+    const questionFile = path.join(runDir, "sources", `question-${locale}.txt`);
+    writeFileSync(questionFile, questions[locale].trim());
+    const recorded = node(["fresh-review.mjs", locale, into, questionFile, topic]);
+    let line = null;
+    try {
+      line = JSON.parse(String(recorded.stdout ?? "").trim().split("\n").at(-1));
+    } catch {
+      // no report line
+    }
+    if (recorded.status === 0) continue;
+    report.failed.push({ step: `fresh ${locale}`, reason: `exit ${recorded.status}: ${String(line?.error ?? recorded.stderr ?? "").slice(0, 300)}` });
+    // Only a recording known to have stopped before any paid step (1, or 2 usage) lets the next
+    // locale go on. After a paid step went wrong, a failed settings restore, a claim already taken
+    // or a killed recorder (status null), the whole run stops before anything else is paid for:
+    // the account is looked at first, by a person.
+    if (recorded.status !== 1 && recorded.status !== 2) halt("fresh_review_stopped");
+  }
+  packs = freshPacksIn(runDir);
+  if (packs.length === 0) halt("no_fresh_capture");
+}
 
 // 1. Plan.
 const notesDir = path.join("job", "research-notes");
@@ -182,15 +298,24 @@ const packLines = packs.map((pack) => `- topic ${pack.topic}, locale ${pack.loca
 const planPrompt = [
   readFileSync("CREATIVE-PLAN.md", "utf8"),
   `## Today\n\n- Date: ${date}\n- Newest research notes: ${newestNotes ? `job/research-notes/${newestNotes}` : "none"}\n- Facts you may state: features.json`,
+  ...(subject ? [`## Today's subject (picked at random)\n\n${subject}. The capture packs below were recorded for this film just now: a real question about it, asked once in Review. The film is about this subject and these screens.`] : []),
   `## Capture packs\n\n${packLines.join("\n")}`,
-  `## Earlier creative shorts (never repeat one)\n\n${history.map((entry) => `- ${entry.date}: ${entry.concept} -- ${entry.logline} (stills: job/creative/sheets/${entry.run}/)`).join("\n") || "- none yet"}`,
+  `## Earlier creative shorts (never repeat one)\n\n${history.map((entry) => `- ${entry.date}: ${entry.concept} -- ${entry.logline} (stills: ${earlierStills(entry)})`).join("\n") || "- none yet"}`,
 ].join("\n\n");
-const planRead = ["job/research-notes/**", "features.json", "job/sources/**", "job/creative/sheets/**"].map((file) => fileRule("Read", file));
+const planRead = ["job/research-notes/**", "features.json", "job/sources/**", `job/creative/${run}/sources/**`, "job/creative/sheets/**"].map((file) => fileRule("Read", file));
 let checked = null;
 let refusal = null;
-for (let attempt = 1; attempt <= 2 && !checked?.plan; attempt += 1) {
-  const prompt = refusal ? `${planPrompt}\n\n## Your last plan was refused\n\n${refusal}\nWrite a new plan line that meets it.` : planPrompt;
-  const answer = claude(`plan-${attempt}`, prompt, { tools: "Read", allowed: planRead, maxTurns: 40 });
+let lastPlan = null;
+// A refused plan goes back with the reason to be mended, not rewritten: a rewrite fixed one rule and
+// broke another (run 20261113-3: too many shots, then a 76-character line).
+const planCalls = readdirSync(path.join(runDir, "calls")).filter((file) => /^plan-\d+\.jsonl$/u.test(file)).length;
+for (let attempt = 1; attempt <= 3 && !checked?.plan; attempt += 1) {
+  const prompt = refusal
+    ? `${planPrompt}\n\n## Your last plan was refused\n\n${refusal}\n\nYour last plan:\n\n${lastPlan ?? "(no plan line)"}\n\nChange only what the refusal names and keep everything else as it is; answer with the whole mended plan line.`
+    : planPrompt;
+  const answer = claude(`plan-${planCalls + attempt}`, prompt, { tools: "Read", allowed: planRead, maxTurns: 40 });
+  const line = jsonLine(answer, "creative");
+  lastPlan = line ? JSON.stringify({ creative: line }) : lastPlan;
   checked = answer ? checkPlan(answer, { packs, history }) : { refusal: "the answer held no {\"creative\": ...} line" };
   refusal = checked.refusal ?? null;
 }
@@ -202,6 +327,7 @@ const { plan, locales } = checked;
 report.concept = plan.concept;
 report.topic = plan.topic;
 report.locales = locales;
+if (subject) plan.subject = subject;
 writeFileSync(path.join(runDir, "plan.json"), JSON.stringify(plan, null, 2));
 
 // Real captures of the topic, per locale, and the logo.
@@ -278,7 +404,7 @@ const music = await paid({ model: "elevenlabs_music_v2_5", force_instrumental: t
 if (!music.ok) report.failed.push({ step: "music", reason: music.reason });
 
 // 5. Voice, line by line, each levelled to the same loudness.
-const MAX_SECONDS = 40;
+const MAX_SECONDS = LIMITS.filmSeconds;
 const props = {};
 for (const locale of [...locales]) {
   const words = plan.locales[locale];
@@ -323,83 +449,96 @@ for (const locale of [...locales]) {
 report.locales = locales;
 if (locales.length === 0) halt("no_locale_left");
 
-// 6-7. Build, then review; one more build on "fix".
-const renderAll = () => {
+// 6-8. Build, then review (one more build on "fix"), then render, check and submit. A new run
+// comes here after step 5; a rebuild comes here straight away. Every way out ends the process.
+await finishFilm({ plan, locales, captureWords, sourceClaims, firstRound: 1, rounds: 2, notes: null });
+
+async function finishFilm({ plan, locales, captureWords, sourceClaims, firstRound, rounds, notes: firstNotes }) {
+  const renderAll = () => {
+    for (const locale of locales) {
+      const rendered = node(["render-creative.mjs", runDir, locale, "--stills", "12"], modelEnv());
+      if (rendered.status !== 0) return `${locale}: ${rendered.stdout.trim().split("\n").at(-1)}`;
+    }
+    return null;
+  };
+  const buildPrompt = (notes) => [
+    readFileSync("CREATIVE-BUILD.md", "utf8").replaceAll("{{RUN}}", posix(runDir)),
+    `## The plan\n\n\`\`\`json\n${JSON.stringify(plan, null, 2)}\n\`\`\``,
+    `## The props per locale\n\n${locales.map((locale) => `- ${locale}: job/creative/${run}/public/props-${locale}.json`).join("\n")}`,
+    notes ? `## The reviewer asked for these changes\n\n${notes}` : "",
+  ].join("\n\n");
+  // The run's real captures of a locale, each a file the reviewer may open (Read takes files, not folders).
+  const capturesIn = (locale) => {
+    const dir = path.join(runDir, "public", "capture", locale);
+    return existsSync(dir) ? readdirSync(dir).filter((file) => file.endsWith(".png")).sort().map((file) => posix(path.join(dir, file))) : [];
+  };
+  const reviewPrompt = () => [
+    readFileSync("CREATIVE-REVIEW.md", "utf8"),
+    `## This film\n\n${plan.concept}: ${plan.logline}\n\n${locales.map((locale) => `- ${locale}: stills ${stillsIn(path.join(runDir, "review", locale)).join(", ")}; words ${JSON.stringify(plan.locales[locale].screen)}; real captures ${capturesIn(locale).join(", ")}`).join("\n")}`,
+    `## Earlier films\n\n${history.map((entry) => `- ${entry.concept}: ${earlierStills(entry)}`).join("\n") || "- none yet"}`,
+  ].join("\n\n");
+  const buildAllowed = [
+    fileRule("Read", `job/creative/${run}/**`),
+    fileRule("Edit", `job/creative/${run}/film/**`),
+    `Bash(node render-creative.mjs ${posix(runDir)} *)`,
+  ];
+  let verdict = null;
+  let notes = firstNotes;
+  for (let round = firstRound; round < firstRound + rounds; round += 1) {
+    claude(`build-${round}`, buildPrompt(notes), { tools: "Read,Write,Edit,Bash", allowed: buildAllowed, maxTurns: 150, timeoutMinutes: 90 });
+    const problems = await checkFilmSource(path.join(runDir, "film"));
+    if (problems.length > 0) {
+      report.dropped.push({ step: `build ${round}`, reason: problems.join("; ") });
+      halt("film_refused");
+    }
+    const renderProblem = renderAll();
+    if (renderProblem) {
+      report.dropped.push({ step: `build ${round}`, reason: renderProblem });
+      halt("film_did_not_render");
+    }
+    const answer = claude(`review-${round}`, reviewPrompt(), { tools: "Read", allowed: [fileRule("Read", `job/creative/${run}/review/**`), fileRule("Read", `job/creative/${run}/public/capture/**`), fileRule("Read", "job/creative/sheets/**")], maxTurns: 60 });
+    verdict = jsonLine(answer, "review");
+    // A "pass" with a gate not true (or missing) is not a pass: it goes back as a fix.
+    const low = verdict?.verdict === "pass" && !reviewPassed(verdict);
+    if (verdict?.verdict !== "fix" && !low) break;
+    notes = notesFrom(verdict);
+  }
+  if (!reviewPassed(verdict)) {
+    report.dropped.push({ step: "review", reason: verdict ? `${verdict.verdict} ${JSON.stringify(verdict.gates ?? null)} ${JSON.stringify(verdict.scores ?? null)}: ${String(verdict.notes ?? "").slice(0, 300)}` : "no verdict" });
+    halt("review_did_not_pass");
+  }
+  // The reviewer's craft scores and notes go with the films, for the person who judges them in Admin.
+  report.review = { scores: verdict.scores ?? null, notes: String(verdict.notes ?? "").slice(0, 2000) };
+  writeFileSync(path.join(runDir, "out", "review.json"), JSON.stringify(verdict, null, 2));
+
+  // 8. Render, check, submit.
   for (const locale of locales) {
-    const rendered = node(["render-creative.mjs", runDir, locale, "--stills", "12"], modelEnv());
-    if (rendered.status !== 0) return `${locale}: ${rendered.stdout.trim().split("\n").at(-1)}`;
+    const id = `media-${run}-creative-${locale.toLowerCase()}-short`;
+    const out = path.join(runDir, "out", `${id}.mp4`);
+    const rendered = node(["render-creative.mjs", runDir, locale, "--out", out], modelEnv());
+    if (rendered.status !== 0) {
+      report.failed.push({ id, step: "render", status: rendered.status });
+      continue;
+    }
+    const problems = checkFinal(probe(out));
+    if (problems.length > 0) {
+      report.failed.push({ id, step: "check", problems });
+      continue;
+    }
+    writeFileSync(path.join(runDir, "out", `${id}.asset.json`), JSON.stringify(creativeAsset({ id, locale, words: plan.locales[locale], captureWords: captureWords[locale], claimIds: sourceClaims[locale] }), null, 2));
+    const submitted = node(["submit-asset.mjs", out, path.join(runDir, "out", `${id}.asset.json`)]);
+    if (submitted.status === 0) report.submitted.push(id);
+    else if (submitted.status === 3) report.refused.push({ id, guard: jsonLine(submitted.stdout, "guardCodes") ?? submitted.stdout.trim().slice(0, 300) });
+    else report.failed.push({ id, step: "submit", status: submitted.status, detail: submitted.stderr.trim().slice(0, 300) });
   }
-  return null;
-};
-const buildPrompt = (notes) => [
-  readFileSync("CREATIVE-BUILD.md", "utf8").replaceAll("{{RUN}}", posix(runDir)),
-  `## The plan\n\n\`\`\`json\n${JSON.stringify(plan, null, 2)}\n\`\`\``,
-  `## The props per locale\n\n${locales.map((locale) => `- ${locale}: job/creative/${run}/public/props-${locale}.json`).join("\n")}`,
-  notes ? `## The reviewer asked for these changes\n\n${notes}` : "",
-].join("\n\n");
-const reviewPrompt = () => [
-  readFileSync("CREATIVE-REVIEW.md", "utf8"),
-  `## This film\n\n${plan.concept}: ${plan.logline}\n\n${locales.map((locale) => `- ${locale}: stills in job/creative/${run}/review/${locale}/; words ${JSON.stringify(plan.locales[locale].screen)}`).join("\n")}`,
-  `## Earlier films\n\n${history.map((entry) => `- ${entry.concept}: job/creative/sheets/${entry.run}/`).join("\n") || "- none yet"}`,
-].join("\n\n");
-const buildAllowed = [
-  fileRule("Read", `job/creative/${run}/**`),
-  fileRule("Edit", `job/creative/${run}/film/**`),
-  `Bash(node render-creative.mjs ${posix(runDir)} *)`,
-];
-let verdict = null;
-let notes = null;
-for (let round = 1; round <= 2; round += 1) {
-  claude(`build-${round}`, buildPrompt(notes), { tools: "Read,Write,Edit,Bash", allowed: buildAllowed, maxTurns: 150, timeoutMinutes: 90 });
-  const problems = await checkFilmSource(path.join(runDir, "film"));
-  if (problems.length > 0) {
-    report.dropped.push({ step: `build ${round}`, reason: problems.join("; ") });
-    halt("film_refused");
-  }
-  const renderProblem = renderAll();
-  if (renderProblem) {
-    report.dropped.push({ step: `build ${round}`, reason: renderProblem });
-    halt("film_did_not_render");
-  }
-  const answer = claude(`review-${round}`, reviewPrompt(), { tools: "Read", allowed: [fileRule("Read", `job/creative/${run}/review/**`), fileRule("Read", "job/creative/sheets/**")], maxTurns: 60 });
-  verdict = jsonLine(answer, "review");
-  // A "pass" with a score under 8 (or a missing one) is not a pass: it goes back as a fix.
-  const low = verdict?.verdict === "pass" && !reviewPassed(verdict);
-  if (verdict?.verdict !== "fix" && !low) break;
-  notes = `${low ? `Every score must be 8 or more; it was ${JSON.stringify(verdict.scores ?? null)}. ` : ""}${String(verdict.notes ?? "")}`.slice(0, 4000);
-}
-if (!reviewPassed(verdict)) {
-  report.dropped.push({ step: "review", reason: verdict ? `${verdict.verdict} ${JSON.stringify(verdict.scores ?? null)}: ${String(verdict.notes ?? "").slice(0, 300)}` : "no verdict" });
-  halt("review_did_not_pass");
-}
 
-// 8. Render, check, submit.
-for (const locale of locales) {
-  const id = `media-${run}-creative-${locale.toLowerCase()}-short`;
-  const out = path.join(runDir, "out", `${id}.mp4`);
-  const rendered = node(["render-creative.mjs", runDir, locale, "--out", out], modelEnv());
-  if (rendered.status !== 0) {
-    report.failed.push({ id, step: "render", status: rendered.status });
-    continue;
-  }
-  const problems = checkFinal(probe(out));
-  if (problems.length > 0) {
-    report.failed.push({ id, step: "check", problems });
-    continue;
-  }
-  writeFileSync(path.join(runDir, "out", `${id}.asset.json`), JSON.stringify(creativeAsset({ id, locale, words: plan.locales[locale], captureWords: captureWords[locale], claimIds: sourceClaims[locale] }), null, 2));
-  const submitted = node(["submit-asset.mjs", out, path.join(runDir, "out", `${id}.asset.json`)]);
-  if (submitted.status === 0) report.submitted.push(id);
-  else if (submitted.status === 3) report.refused.push({ id, guard: jsonLine(submitted.stdout, "guardCodes") ?? submitted.stdout.trim().slice(0, 300) });
-  else report.failed.push({ id, step: "submit", status: submitted.status, detail: submitted.stderr.trim().slice(0, 300) });
+  // What the next plan and review see of this one: its stills and its concept.
+  const sheet = path.join(sheetsDir, run);
+  mkdirSync(sheet, { recursive: true });
+  const firstLocale = locales.includes("en") ? "en" : locales[0];
+  for (const file of readdirSync(path.join(runDir, "review", firstLocale))) copyFileSync(path.join(runDir, "review", firstLocale, file), path.join(sheet, file));
+  history.push({ date, run, concept: plan.concept, logline: plan.logline, topic: plan.topic, ...(plan.subject ? { subject: plan.subject } : {}), locales, submitted: report.submitted });
+  writeFileSync(historyPath, JSON.stringify(history, null, 2));
+  rmSync(path.join(runDir, "raw"), { recursive: true, force: true });
+  finish(report.submitted.length > 0 ? 0 : 1);
 }
-
-// What the next plan and review see of this one: its stills and its concept.
-const sheet = path.join(sheetsDir, run);
-mkdirSync(sheet, { recursive: true });
-const firstLocale = locales.includes("en") ? "en" : locales[0];
-for (const file of readdirSync(path.join(runDir, "review", firstLocale))) copyFileSync(path.join(runDir, "review", firstLocale, file), path.join(sheet, file));
-history.push({ date, run, concept: plan.concept, logline: plan.logline, topic: plan.topic, locales, submitted: report.submitted });
-writeFileSync(historyPath, JSON.stringify(history, null, 2));
-rmSync(path.join(runDir, "raw"), { recursive: true, force: true });
-finish(report.submitted.length > 0 ? 0 : 1);

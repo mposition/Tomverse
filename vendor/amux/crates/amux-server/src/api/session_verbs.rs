@@ -3466,8 +3466,9 @@ fn render_transcript_records(records: Vec<Value>, max_chars: usize) -> String {
 // contract).
 // ---------------------------------------------------------------------------
 
-pub const SESSION_PROVIDERS: [&str; 8] =
-    ["claude", "codex", "gemini", "devin", "iterm2", "ollama", "cursor", "copilot"];
+pub const SESSION_PROVIDERS: [&str; 9] = [
+    "claude", "codex", "gemini", "devin", "iterm2", "ollama", "cursor", "copilot", "antigravity",
+];
 
 /// Resolve a stored provider for AMUX-server's own launcher. Unknown values
 /// fall back to Claude. Externally managed sessions retain their raw provider
@@ -3728,6 +3729,9 @@ fn provider_yolo_flag(provider: &str) -> &'static str {
         "codex" | "ollama" => "--dangerously-bypass-approvals-and-sandbox",
         "gemini" | "cursor" | "copilot" => "--yolo",
         "devin" => "--permission-mode=bypass",
+        // `agy --help`: "--dangerously-skip-permissions  Auto-approve all tool
+        // permission requests without prompting" (Antigravity CLI 1.5.4).
+        "antigravity" => "--dangerously-skip-permissions",
         _ => "--dangerously-skip-permissions",
     }
 }
@@ -3854,6 +3858,9 @@ fn default_model_for_provider(provider: &str) -> String {
         "cursor" => "auto".into(),
         // `--model auto` lets the Copilot service pick (CLI reference).
         "copilot" => "auto".into(),
+        // No `--model`: agy starts on the account's own default (the TUI footer
+        // read "Gemini 4 Argon · medium" on the server, 2026-11-11).
+        "antigravity" => String::new(),
         // Ollama runs via `codex --oss --local-provider ollama --model <model>`.
         // Read from the ONE source rather than repeating the literal: this arm
         // and `OllamaAdapter::default` were two spellings of the same fact, and
@@ -4002,6 +4009,8 @@ pub fn launch_base_binary(provider: &str) -> &'static str {
         "cursor" => "cursor-agent",
         // AMUX_COPILOT_CMD may override it the same way.
         "copilot" => "copilot",
+        // Google Antigravity CLI; AMUX_ANTIGRAVITY_CMD may override it the same way.
+        "antigravity" => "agy",
         // claude, iterm2, and anything unknown launch via build_claude_cmd,
         // whose default binary is `claude` (overridable by AMUX_CLAUDE_CMD).
         _ => "claude",
@@ -4023,6 +4032,12 @@ fn copilot_cmd_bin() -> String {
     if custom.is_empty() { launch_base_binary("copilot").to_string() } else { custom }
 }
 
+/// `antigravity`'s launch binary, overridable exactly like `cursor_cmd_bin`.
+fn antigravity_cmd_bin() -> String {
+    let custom = std::env::var("AMUX_ANTIGRAVITY_CMD").unwrap_or_default().trim().to_string();
+    if custom.is_empty() { launch_base_binary("antigravity").to_string() } else { custom }
+}
+
 /// An overridable binary followed by already-quoted options. The binary is
 /// one shell word whatever the override contains.
 fn override_shell_command(bin: &str, opts: &str) -> String {
@@ -4039,6 +4054,7 @@ fn provider_label(provider: &str) -> &str {
         "ollama" => "Ollama",
         "cursor" => "Cursor",
         "copilot" => "GitHub Copilot",
+        "antigravity" => "Antigravity",
         other => {
             if other.is_empty() {
                 "Claude Code"
@@ -9068,6 +9084,26 @@ fn copilot_launch_opts(flags: &str, extra_flags: &str, logs: &str) -> String {
     opts
 }
 
+/// Antigravity CLI options, checked against `agy --help` of 1.5.4 on the server
+/// (2026-11-11). Any provider's yolo spelling becomes agy's own
+/// `--dangerously-skip-permissions`, once. No `--model` is added: agy keeps the
+/// account's default unless the worker names one.
+fn antigravity_launch_opts(flags: &str, extra_flags: &str) -> String {
+    let yolo = PROVIDER_YOLO_FLAGS.iter().any(|f| flags.contains(f));
+    let own_flags = if yolo { strip_provider_yolo_flags(flags) } else { flags.to_string() };
+    let mut opts = String::new();
+    if !own_flags.is_empty() {
+        opts += &format!(" {}", shell_quote_flags(&own_flags));
+    }
+    if !extra_flags.is_empty() {
+        opts += &format!(" {}", shell_quote_flags(extra_flags));
+    }
+    if yolo && !opts.contains("--dangerously-skip-permissions") {
+        opts += " --dangerously-skip-permissions";
+    }
+    opts
+}
+
 /// The CHEAP, synchronous reasons a session cannot start — the ones knowable
 /// without the op-lock or a tmux query. Returns the human reason, or None if
 /// nothing cheap blocks the launch.
@@ -9651,6 +9687,18 @@ pub(crate) async fn start_session(state: &AppState, name: &str, extra_flags: &st
             let opts = copilot_launch_opts(&flags, extra_flags, &logs_path.to_string_lossy());
             override_shell_command(&copilot_cmd_bin(), &opts)
         }
+        "antigravity" => {
+            // Google Antigravity CLI (`agy`). The options come from the pure
+            // `antigravity_launch_opts`. AGY_CLI_DISABLE_AUTO_UPDATE keeps the
+            // CLI from replacing itself: on the server `agy` is a root-owned
+            // pinned copy. No resume wiring, the same documented gap as cursor.
+            //
+            // The first interactive launch under an account shows Google's
+            // terms and data-use screen; a person answers it once, nothing here
+            // does (see `backend::adapter::scan_antigravity`).
+            let opts = antigravity_launch_opts(&flags, extra_flags);
+            format!("AGY_CLI_DISABLE_AUTO_UPDATE=true {}", override_shell_command(&antigravity_cmd_bin(), &opts))
+        }
         _ => build_claude_cmd(&cfg, &flags, &default_flags, &session_flag, extra_flags),
     };
 
@@ -9658,7 +9706,7 @@ pub(crate) async fn start_session(state: &AppState, name: &str, extra_flags: &st
     // cd, source the global agent credentials.
     let mut has_oauth = false;
     let mut shell_rc = String::new();
-    if provider != "codex" && provider != "gemini" && provider != "devin" && provider != "ollama" && provider != "cursor" && provider != "copilot" {
+    if provider != "codex" && provider != "gemini" && provider != "devin" && provider != "ollama" && provider != "cursor" && provider != "copilot" && provider != "antigravity" {
         shell_rc.push_str("unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT; ");
         if let Ok(t) = std::fs::read_to_string(PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".claude.json")) {
             if let Ok(v) = serde_json::from_str::<Value>(&t) {
@@ -9726,7 +9774,7 @@ pub(crate) async fn start_session(state: &AppState, name: &str, extra_flags: &st
             sh_quote(&f.to_string_lossy())
         ));
     }
-    if provider != "codex" && provider != "gemini" && provider != "ollama" && provider != "cursor" && provider != "copilot" && has_oauth {
+    if provider != "codex" && provider != "gemini" && provider != "ollama" && provider != "cursor" && provider != "copilot" && provider != "antigravity" && has_oauth {
         shell_rc.push_str("unset ANTHROPIC_API_KEY; ");
     }
     // Settings writes provider keys to server.env at runtime. Reading that file
@@ -28441,6 +28489,36 @@ Press enter to continue\n\nWorked for 7s\n\n\
         assert_eq!(
             adapter.build_command(crate::provider::PromptMode::Interactive).first().map(String::as_str),
             Some(launch_base_binary("copilot"))
+        );
+    }
+
+    #[test]
+    fn antigravity_is_a_first_class_session_provider() {
+        assert!(SESSION_PROVIDERS.contains(&"antigravity"));
+        assert_eq!(resolve_session_provider("Antigravity"), "antigravity");
+        assert_eq!(launch_base_binary("antigravity"), "agy");
+        assert_eq!(provider_label("antigravity"), "Antigravity");
+        assert_eq!(provider_yolo_flag("antigravity"), "--dangerously-skip-permissions");
+        assert_eq!(default_model_for_provider("antigravity"), "");
+        let adapter = crate::provider::default_registry().resolve("antigravity").expect("antigravity adapter");
+        assert_eq!(
+            adapter.build_command(crate::provider::PromptMode::Interactive).first().map(String::as_str),
+            Some(launch_base_binary("antigravity"))
+        );
+    }
+
+    #[test]
+    fn antigravity_launch_opts_pin_the_argv() {
+        // No flags: agy keeps the account's model, no permissions widened.
+        assert_eq!(antigravity_launch_opts("", ""), "");
+        // Any provider's yolo spelling becomes agy's own flag, once.
+        for yolo in ["--dangerously-skip-permissions", "--yolo", "--permission-mode=bypass"] {
+            assert_eq!(antigravity_launch_opts(yolo, ""), " --dangerously-skip-permissions", "from {yolo}");
+        }
+        // The worker's own model is kept as given, and extra flags follow it.
+        assert_eq!(
+            antigravity_launch_opts("--model gemini-4-argon", "--effort high"),
+            " --model gemini-4-argon --effort high"
         );
     }
 

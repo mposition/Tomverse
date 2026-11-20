@@ -11,10 +11,13 @@
 //! machine, `wire` its pure values, `io` the sockets and the loop.
 //!
 //! Off by default: nothing here runs unless `TOMVERSE_AMUX_DM_RELAY` is
-//! exactly `enabled` (and the app's own `TOMVERSE_AMUX_DM_ROUTING` is a
-//! separate switch, off on develop). The relay runs in the bridge process
+//! exactly `enabled`. The relay runs in the bridge process
 //! (the `tomverse-bridge` service) as one task beside the worker loop and
-//! never halts that loop; its own halt stops only new questions.
+//! never halts that loop. Nothing stops the relay itself: a write whose
+//! answer was lost or refused for now is owed and sent again by its key on
+//! every tick (`owed`, owner direction 2026-11-16), and the owed records are
+//! kept in a local file so a restart does not forget them or the instance and
+//! session holds they carry (`owed::OwedStore`).
 //!
 //! Stage S2-2b3 (`delivery`, §2-7, §7, §9): each tick, before its question
 //! scan, the relay carries at most one operator-confirmed answer to the
@@ -33,16 +36,22 @@
 //! tick it reports the operator's direct answer records so the app closes
 //! their questions' requests (`direct`, §2-7).
 //!
-//! The repository snapshot (stage S2b) is the broker's to fetch; the relay
-//! checks it and records it (dm_relay::snapshot). Not here: any Admin screen.
+//! The workspace (a checkout and the card's whole evidence) is the broker's to build; the relay
+//! checks its manifest and records it (dm_relay::workspace). Not here: any Admin screen.
 
 pub mod delivery;
 pub mod direct;
 pub mod flow;
 pub mod io;
-pub mod snapshot;
+pub mod owed;
 pub mod v22_question;
 pub mod wire;
+pub mod workspace;
+
+/// The relay's one generous per-tick count (owner direction 2026-11-16: no
+/// artificial caps): the needsyou cards one scan opens, and the v22 question
+/// cards filed or closed in one tick.
+pub const DM_RELAY_TICK_LIMIT: usize = 1000;
 
 /// Exit status when the relay is enabled but its token is missing or
 /// malformed. The unit does not restart on it (`RestartPreventExitStatus=`):
@@ -82,6 +91,15 @@ pub async fn run_from_env(
                 io::UnixBroker::system(),
                 wire::DM_SEND_OPTION_EFFECTS,
             );
+            // The owed records survive a restart in the unit's state directory
+            // (`StateDirectory=` sets `STATE_DIRECTORY`, else the unit's own
+            // path). A unit that cannot write it starts nothing new until it can.
+            let store = owed::OwedStore::from_env();
+            println!(
+                "amux dm relay: owed records are kept in {}",
+                store.path().display()
+            );
+            let relay = relay.with_store(store);
             io::run(relay).await;
             0
         }

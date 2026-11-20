@@ -5,12 +5,13 @@ import { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
 import { writeAdminAuditLog, writeSystemAuditLog } from "@/lib/adminAudit";
-import { AMUX_DB_BOUNDARIES, AmuxDbBoundaryError, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
+import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import {
   latchDecisionMakerInstanceOff,
   readDecisionMakerSwitches,
   readDecisionMakerSwitchesOrThrow,
   recordDecisionMakerSwitchByOperator,
+  releaseDecisionMakerLatchBySystem,
 } from "@/lib/amux/decisionMakerSwitchStore";
 import { prisma } from "@/lib/prisma";
 
@@ -549,7 +550,7 @@ test("two people changing one scope at once commit one after the other, and the 
   }
 });
 
-test("the Admin route's boundary holds a person's change at its largest, and one call fewer refuses it", async () => {
+test("the Admin route's boundary holds a person's change at its largest", async () => {
   // §9: a DM store operation runs inside the AMUX DB boundary, at READ
   // COMMITTED for a mutation, which the switch guard requires. The change is
   // largest with an integrity key (the administrator audit's fourth
@@ -561,14 +562,6 @@ test("the Admin route's boundary holds a person's change at its largest, and one
   delete process.env.ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS;
   try {
     const session = operator();
-    const short = { ...AMUX_DB_BOUNDARIES.decisionMakerSwitchChange, prismaCallCeiling: 8 };
-    await assert.rejects(
-      withAmuxDbBoundary(short, (tx) =>
-        recordDecisionMakerSwitchByOperator(tx, { session, scope: "decision-maker-anthropic", value: "proposal" }),
-      ),
-      (error: unknown) =>
-        error instanceof AmuxDbBoundaryError && error.code === "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED",
-    );
     assert.equal((await rowsOf()).length, 0);
     assert.equal(await prisma.adminAuditLog.count({ where: { actorUserId: session.user!.id } }), 0);
 
@@ -592,5 +585,73 @@ test("the Admin route's boundary holds a person's change at its largest, and one
       if (previous[name] === undefined) delete process.env[name];
       else process.env[name] = previous[name];
     }
+  }
+});
+
+// Owner direction 2026-11-16 (migration 20261116140100_amux_dm_latch_release):
+// the system releases a latch an hour after it, back to proposal mode only when
+// a person's newest choice is proposal. The guard holds each half.
+const ageNewestEvent = async (scope: string, ageMs: number) =>
+  prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(`ALTER TABLE "AmuxDecisionMakerSwitchEvent" DISABLE TRIGGER "amux_decision_maker_switch_event_guard"`);
+    await tx.$executeRaw`
+      UPDATE "AmuxDecisionMakerSwitchEvent" SET "createdAt" = "createdAt" - ${ageMs} * INTERVAL '1 millisecond'
+      WHERE "sequence" = (SELECT max("sequence") FROM "AmuxDecisionMakerSwitchEvent" WHERE "scope" = ${scope})
+    `;
+    await tx.$executeRawUnsafe(`ALTER TABLE "AmuxDecisionMakerSwitchEvent" ENABLE TRIGGER "amux_decision_maker_switch_event_guard"`);
+  });
+
+test("the system releases a latch an hour after it, only back to a person's proposal mode", async () => {
+  const instance = "decision-maker-openai";
+  const release = () => prisma.$transaction((tx) => releaseDecisionMakerLatchBySystem(tx, { instance }));
+  await prisma.$transaction((tx) => recordDecisionMakerSwitchByOperator(tx, { session: operator(), scope: instance, value: "proposal" }));
+  // Nothing to release without a latch.
+  assert.deepEqual(await release(), { released: false });
+  await prisma.$transaction((tx) => latchDecisionMakerInstanceOff(tx, { instance, reason: "validation_latch" }));
+  // Too soon: the store writes nothing, and the guard refuses a release written directly.
+  assert.deepEqual(await release(), { released: false });
+  await rejectsWith(
+    append(
+      { scope: instance, value: "proposal", reasonCode: "latch_release", actorKind: "system", actorUserId: null },
+      { kind: "system", actor: "amux-decision-maker-openai", action: "amux.decision.latch_release" },
+    ),
+    /AMUX_DM_SWITCH_RELEASE/,
+  );
+  // An hour on: released, under the instance's own actor, back to proposal.
+  await ageNewestEvent(instance, 61 * 60 * 1000);
+  const released = await release();
+  assert.equal(released.released, true);
+  assert.equal((await readDecisionMakerSwitchesOrThrow(prisma)).instances[instance], "proposal");
+  const audit = await prisma.adminAuditLog.findFirstOrThrow({ where: { targetId: (released as { eventId: string }).eventId } });
+  assert.equal(audit.action, "amux.decision.latch_release");
+  assert.equal((audit.metadata as { systemActor?: string }).systemActor, "amux-decision-maker-openai");
+  // A person's change after the system's release is a mode change, not a release.
+  await prisma.$transaction((tx) => recordDecisionMakerSwitchByOperator(tx, { session: operator(), scope: instance, value: "off" }));
+  // A person turned it off: a later latch is never released by the system, by the store or by a direct write.
+  await prisma.$transaction((tx) => latchDecisionMakerInstanceOff(tx, { instance, reason: "validation_latch" }));
+  await ageNewestEvent(instance, 61 * 60 * 1000);
+  assert.deepEqual(await release(), { released: false });
+  await rejectsWith(
+    append(
+      { scope: instance, value: "proposal", reasonCode: "latch_release", actorKind: "system", actorUserId: null },
+      { kind: "system", actor: "amux-decision-maker-openai", action: "amux.decision.latch_release" },
+    ),
+    /AMUX_DM_SWITCH_RELEASE/,
+  );
+  assert.equal((await readDecisionMakerSwitchesOrThrow(prisma)).instances[instance], "off");
+});
+
+test("a system release is only an instance back to proposal, under latch_release, by its own actor", async () => {
+  for (const [row, audit] of [
+    // The kill switch, or off, is never a system release (the CHECK).
+    [{ scope: "kill_switch", value: "off", reasonCode: "latch_release", actorKind: "system", actorUserId: null },
+      { kind: "system", actor: "amux-decision-maker-openai", action: "amux.decision.latch_release" }],
+    [{ scope: "decision-maker-openai", value: "off", reasonCode: "latch_release", actorKind: "system", actorUserId: null },
+      { kind: "system", actor: "amux-decision-maker-openai", action: "amux.decision.latch_release" }],
+    // A person never writes the system's reason.
+    [{ scope: "decision-maker-openai", value: "proposal", reasonCode: "latch_release", actorKind: "human", actorUserId: "dm-operator-x" },
+      { kind: "person", userId: "dm-operator-x", action: "amux.decision.latch_release" }],
+  ] as Array<[Row, Audit]>) {
+    await rejectsWith(append(row, audit));
   }
 });

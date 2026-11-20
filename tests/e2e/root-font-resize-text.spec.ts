@@ -212,7 +212,12 @@ test.describe("WCAG 1.4.4 resize text: 200% root font size", () => {
     await expect(heading).toBeVisible();
   });
 
-  test("the consent notice does not cross the hero heading or CTA at 200%", async ({ page }) => {
+  // The consent notice is a bar fixed to the bottom of the screen (owner
+  // decision 2026-11-16), so on first paint it sits over page content by
+  // design. What 200% text must not do is let it swallow the screen or hide
+  // content for good: the bar caps itself at half the viewport, and the page
+  // reserves its height, so the heading and the CTA scroll clear of it.
+  test("the consent bar stays within half the screen and the hero scrolls clear of it at 200%", async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 568 });
     await page.goto("/");
     await applyRootFont200(page);
@@ -223,16 +228,22 @@ test.describe("WCAG 1.4.4 resize text: 200% root font size", () => {
     const notice = page.getByTestId("chat-consent-notice");
     if (await notice.count()) {
       const noticeBox = await notice.first().boundingBox();
-      const headingBox = await heading.boundingBox();
-      if (noticeBox && headingBox) {
-        const overlaps =
-          noticeBox.x < headingBox.x + headingBox.width &&
-          noticeBox.x + noticeBox.width > headingBox.x &&
-          noticeBox.y < headingBox.y + headingBox.height &&
-          noticeBox.y + noticeBox.height > headingBox.y;
-        expect(overlaps, "consent notice must not overlap the hero heading").toBe(false);
+      if (noticeBox) expect(noticeBox.height, "bar height at 200%").toBeLessThanOrEqual(568 / 2 + 1);
+      for (const target of [heading, page.locator("#landing-hero-primary")]) {
+        await target.evaluate((el) => el.scrollIntoView({ block: "start", behavior: "instant" }));
+        const reachable = await target.evaluate((el) => {
+          const rect = el.getBoundingClientRect();
+          const y = rect.top + Math.min(rect.height, 24) / 2;
+          // Horizontal centre, near the top: the V2 hero CTA is a pill whose rounded
+          // corner is not part of it for hit-testing, so a point near its left edge
+          // lands on the page behind it even when nothing covers the button.
+          const hit = document.elementFromPoint(rect.left + rect.width / 2, y);
+          return hit !== null && el.contains(hit);
+        });
+        expect(reachable, "hero content scrolls clear of the consent bar").toBe(true);
       }
     }
+    expect(await documentOverflow(page)).toBeLessThanOrEqual(1);
   });
 
   test("Korean copy also stays inside the viewport at 200%", async ({ page }) => {

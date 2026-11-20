@@ -59,6 +59,7 @@ const providers: readonly AiProvider[] = AI_PROVIDERS;
 const providerLabel: Record<AiProvider, string> = {
   openai: "OpenAI",
   anthropic: "Anthropic",
+  cohere: "Cohere",
   google: "Google",
   groq: "Groq",
   xai: "xAI",

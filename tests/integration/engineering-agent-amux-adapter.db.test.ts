@@ -3,7 +3,6 @@ import { createHash, randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
 
 import {
-  AMUX_ATTACHMENT_MAX_PRISMA_CALLS,
   withAmuxRouteBudget,
 } from "@/lib/amux/dbBoundary";
 import {
@@ -26,6 +25,7 @@ import {
   ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
   ENGINEERING_AGENT_AMUX_WORKER,
   engineeringAgentAmuxAdapterPermittedNow,
+  recordEngineeringAgentMismatchReviewPullRequest,
   recordEngineeringAgentPublisherResult,
   registerEngineeringAgentWorker,
   engineeringPublishResultAttachment,
@@ -37,6 +37,7 @@ import type { Session } from "next-auth";
 
 import {
   EngineeringAgentStoreRefusedError,
+  acknowledgeEngineeringAgentDecision,
   claimEngineeringAgentWorkItem,
   currentEngineeringAgentHalt,
   endEngineeringAgentRun,
@@ -303,7 +304,7 @@ const settleWithRun = (
     ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
   );
 
-test("an attachment declares a bounded call budget", async () => {
+test("an attachment declares a positive whole number of calls", async () => {
   await assert.rejects(() =>
     startAmuxExecution(
       {
@@ -314,7 +315,7 @@ test("an attachment declares a bounded call budget", async () => {
         expectedRevision: 0,
       },
       {
-        prismaCalls: AMUX_ATTACHMENT_MAX_PRISMA_CALLS + 1,
+        prismaCalls: 0,
         work: async () => undefined,
       },
     ),
@@ -628,7 +629,7 @@ test("a published result is bound in the transaction that records the card's rev
   // A publish needs a run that started under t1.
   await setMode("t1");
   try {
-    // A review pull request belongs to a card a person reviews.
+    // A card that already asks for review keeps its own specialty.
     const fixture = await readyWorkerWithCard({ requiresHumanReview: true });
     const runId = nextRunId();
     const started = await startWithRun(fixture, runId);
@@ -728,6 +729,12 @@ test("a published result is bound in the transaction that records the card's rev
     const card = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: fixture.taskId } });
     assert.equal(card.reviewPrNumber, prNumber);
     assert.equal(card.status, "review");
+    assert.equal(card.requiresHumanReview, true);
+    assert.equal(card.reviewSpecialty, "code-review");
+    const audit = await prisma.adminAuditLog.findFirstOrThrow({
+      where: { action: "amux.review.pull_request_recorded", targetId: fixture.taskId },
+    });
+    assert.equal((audit.metadata as Record<string, unknown>).marked_human_review, false);
     const item = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { id: workItemId } });
     assert.equal(item.state, "published");
     const binding = await prisma.engineeringAgentBinding.findFirstOrThrow({ where: { runId, prNumber } });
@@ -743,28 +750,124 @@ test("a published result is bound in the transaction that records the card's rev
   }
 });
 
-test("a run that may not start leaves no AMUX trace, even on a card AMUX would block", async () => {
-  const fixture = await readyWorkerWithCard();
-  // Five ended attempts spend the card's attempt budget: a start would block it.
-  for (let attemptNumber = 1; attemptNumber <= 5; attemptNumber += 1) {
-    await prisma.amuxExecutionAttempt.create({
-      data: {
-        id: randomUUID(),
-        taskId: fixture.taskId,
-        worker: fixture.worker,
-        workerInstanceId: fixture.instanceId,
-        workerGeneration: fixture.generation,
-        taskRevision: 0,
-        attemptNumber,
-        heartbeatAt: new Date(),
-        startedAt: new Date(),
-        endedAt: new Date(),
-        outcome: "failed",
-        toStatus: "todo",
-        endedBy: fixture.worker,
-      },
+test("a card that reached review without asking for one is marked for review by its first pull request", async () => {
+  const sha256 = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
+  const inTx = <T>(work: Parameters<typeof runEngineeringAgentTransaction<T>>[1]) =>
+    runEngineeringAgentTransaction(prisma, work);
+  await setMode("t1");
+  try {
+    // As a v22 card is: in review, with neither the flag nor a specialty.
+    const fixture = await readyWorkerWithCard();
+    const runId = nextRunId();
+    const started = await startWithRun(fixture, runId);
+    const { workItemId } = await inTx((tx) =>
+      openEngineeringAgentWorkItem(tx, {
+        kind: "publish",
+        causeKey: `publish:${runId}:adapter`,
+        runId,
+        patchBody: "patch",
+        patchDigest: sha256("patch"),
+        baseSha: sha1(runId),
+        expectedTreeId: sha1("tree"),
+      }),
+    );
+    await inTx((tx) =>
+      issueEngineeringAgentCapability(tx, {
+        workItemId,
+        capability: {
+          baseSha: sha1(runId),
+          patchDigest: sha256("patch"),
+          expectedTreeId: sha1("tree"),
+          commit: {
+            identity: { name: "Tomverse Engineering Agent", email: "engineering-agent@users.noreply.github.com" },
+            baseCommitterDate: "1759000000 +1000",
+            runId,
+            cardRef: fixture.taskId,
+          },
+        },
+      }),
+    );
+    const settled = await withAmuxRouteBudget(
+      () =>
+        settleAmuxExecution(
+          {
+            attemptId: started.attemptId,
+            worker: fixture.worker,
+            instanceId: fixture.instanceId,
+            generation: fixture.generation,
+            taskRevision: started.taskRevision,
+            outcome: "succeeded",
+            toStatus: "review",
+            actualCostMicrousd: null,
+          },
+          engineeringRunEndAttachment({ runId, outcome: "t1_queued", halt: "none" }),
+        ),
+      ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
+    );
+    assert.equal(settled.settled, true);
+    const before = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: fixture.taskId } });
+    assert.deepEqual(
+      [before.status, before.requiresHumanReview, before.reviewSpecialty, before.reviewPrNumber],
+      ["review", false, null, null],
+    );
+    const claim = await inTx((tx) => claimEngineeringAgentWorkItem(tx, { workItemId, mode: "write", leaseMs: 60_000 }));
+
+    const prNumber = 900_000 + Math.floor(Math.random() * 90_000);
+    const pullRequest = {
+      prNumber,
+      headSha: sha1("head"),
+      verifiedHeadSha: sha1("head"),
+      snapshot: { baseSha: sha1(runId), diffDigest: sha256("diff"), treeId: sha1("tree"), invalidatedReviewIds: [] },
+    };
+    const record = (worker: string, number = prNumber) =>
+      withAmuxRouteBudget(
+        () =>
+          recordAmuxReviewPullRequest(
+            { taskId: fixture.taskId, attemptId: started.attemptId, worker, prNumber: number },
+            engineeringPublishResultAttachment({
+              workItemId,
+              fencingToken: claim.fencingToken,
+              outcome: "confirmed",
+              pullRequest: { ...pullRequest, prNumber: number },
+            }),
+          ),
+        ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
+      );
+
+    // Another worker's review still takes no number, and the card stays unmarked.
+    assert.deepEqual(await record("someone-else"), { recorded: false, reason: "not_the_workers_review" });
+    const untouched = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: fixture.taskId } });
+    assert.deepEqual(
+      [untouched.requiresHumanReview, untouched.reviewSpecialty, untouched.revision],
+      [false, null, before.revision],
+    );
+
+    const done = await record(fixture.worker);
+    assert.deepEqual(done, { recorded: true, taskRevision: before.revision + 1, changed: true });
+    const card = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: fixture.taskId } });
+    assert.deepEqual(
+      [card.status, card.reviewPrNumber, card.requiresHumanReview, card.reviewSpecialty, card.revision],
+      ["review", prNumber, true, "code-review", before.revision + 1],
+    );
+    const audit = await prisma.adminAuditLog.findFirstOrThrow({
+      where: { action: "amux.review.pull_request_recorded", targetId: fixture.taskId },
     });
+    assert.equal((audit.metadata as Record<string, unknown>).marked_human_review, true);
+    assert.equal((await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { id: workItemId } })).state, "published");
+
+    // A different number for the same review is a conflict, and nothing moves.
+    assert.deepEqual(await record(fixture.worker, prNumber + 1), { recorded: false, reason: "review_pr_conflict" });
+
+    const binding = await prisma.engineeringAgentBinding.findFirstOrThrow({ where: { runId, prNumber } });
+    await inTx((tx) => moveEngineeringAgentBinding(tx, { bindingId: binding.id, to: "closed" }));
+    await inTx((tx) => moveEngineeringAgentBinding(tx, { bindingId: binding.id, to: "pruned" }));
+  } finally {
+    await setMode("shadow");
   }
+});
+
+test("a run that may not start leaves no AMUX trace on its card", async () => {
+  const fixture = await readyWorkerWithCard();
   const { workItemId: mismatchId } = await runEngineeringAgentTransaction(prisma, (tx) =>
     openEngineeringAgentWorkItem(tx, {
       kind: "state_mismatch",
@@ -784,23 +887,6 @@ test("a run that may not start leaves no AMUX trace, even on a card AMUX would b
   } finally {
     await prisma.engineeringAgentWorkItem.update({ where: { id: mismatchId }, data: { state: "resolved" } });
   }
-  // With nothing halting, AMUX's own refusal is AMUX's to record.
-  const started = await withAmuxRouteBudget(
-    () =>
-      startAmuxExecution(
-        {
-          taskId: fixture.taskId,
-          worker: fixture.worker,
-          instanceId: fixture.instanceId,
-          generation: fixture.generation,
-          expectedRevision: 1,
-        },
-        engineeringRunStartAttachment({ runId: nextRunId(), baseSha: sha1("base") }),
-      ),
-    ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
-  );
-  assert.deepEqual(started, { started: false, reason: "attempt_budget_exhausted" });
-  assert.equal((await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: fixture.taskId } })).status, "blocked");
 });
 
 test("an active run whose attempt ended halts runs before anyone reports it", async () => {
@@ -811,14 +897,13 @@ test("an active run whose attempt ended halts runs before anyone reports it", as
   await reclaimExpiredAmuxExecutions({ now: new Date(Date.now() + 10 * 60_000), limit: 200 });
   const ended = await prisma.amuxExecutionAttempt.findUniqueOrThrow({ where: { id: started.attemptId } });
   assert.ok(ended.endedAt, "recovery ended the attempt");
-  const other = await readyWorkerWithCard();
-  await assert.rejects(
-    startWithRun(other, nextRunId()),
-    (error: unknown) => error instanceof EngineeringAgentStoreRefusedError && error.code === "halted",
-  );
+  // Owner decision 2026-11-15: the orphaned run holds its own card only, so
+  // the agent as a whole reports no halt for it.
+  assert.equal(currentEngineeringAgentHalt(await readEngineeringAgentHaltState(prisma)), "none");
+  // The mismatch it opens is the card's, so another card still starts.
   assert.equal(await runEngineeringAgentTransaction(prisma, (tx) => openEngineeringAgentRunMismatches(tx)), 1);
   const mismatch = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { causeKey: `run_attempt:${runId}` } });
-  assert.equal(currentEngineeringAgentHalt(await readEngineeringAgentHaltState(prisma)), "state_mismatch");
+  assert.equal(currentEngineeringAgentHalt(await readEngineeringAgentHaltState(prisma)), "none");
 
   // A person's action: AMUX's rows locked first, both sides read again.
   const person = {
@@ -941,18 +1026,8 @@ test("a settlement records the agent's own spend under the agent scope, apart fr
   );
 });
 
-// The whole gate (orchestration policy version 25): with the code latch and
-// the execution API both open, the engineering mode alone decides.
-const withExecutionApi = async <T>(work: () => Promise<T>): Promise<T> => {
-  const previous = process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
-  process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = "1";
-  try {
-    return await work();
-  } finally {
-    if (previous === undefined) delete process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
-    else process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = previous;
-  }
-};
+// The whole gate: the engineering mode alone decides.
+const withExecutionApi = async <T>(work: () => Promise<T>): Promise<T> => work();
 
 test("mode off closes a public adapter call before it writes anything to AMUX", async () => {
   await withExecutionApi(async () => {
@@ -1149,6 +1224,147 @@ test("a closed adapter records a publisher's pull request on the engineering sid
   }
 });
 
+test("a person records a bound pull request's number on its card, which closes the review_pr mismatch", async () => {
+  const sha256 = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
+  const inTx = <T>(work: Parameters<typeof runEngineeringAgentTransaction<T>>[1]) =>
+    runEngineeringAgentTransaction(prisma, work);
+  await setMode("t1");
+  try {
+    // A card that did not ask for review, as a v22 card is.
+    const fixture = await readyWorkerWithCard();
+    const runId = nextRunId();
+    const started = await startWithRun(fixture, runId);
+    const { workItemId } = await inTx((tx) =>
+      openEngineeringAgentWorkItem(tx, {
+        kind: "publish",
+        causeKey: `publish:${runId}:record-bound`,
+        runId,
+        patchBody: "patch",
+        patchDigest: sha256("patch"),
+        baseSha: sha1(runId),
+        expectedTreeId: sha1("tree"),
+      }),
+    );
+    closedAdapterFixtures.push({ runId, workItemId });
+    await inTx((tx) =>
+      issueEngineeringAgentCapability(tx, {
+        workItemId,
+        capability: {
+          baseSha: sha1(runId),
+          patchDigest: sha256("patch"),
+          expectedTreeId: sha1("tree"),
+          commit: {
+            identity: { name: "Tomverse Engineering Agent", email: "engineering-agent@users.noreply.github.com" },
+            baseCommitterDate: "1759000000 +1000",
+            runId,
+            cardRef: fixture.taskId,
+          },
+        },
+      }),
+    );
+    const settled = await withAmuxRouteBudget(
+      () =>
+        settleAmuxExecution(
+          {
+            attemptId: started.attemptId,
+            worker: fixture.worker,
+            instanceId: fixture.instanceId,
+            generation: fixture.generation,
+            taskRevision: started.taskRevision,
+            outcome: "succeeded",
+            toStatus: "review",
+            actualCostMicrousd: null,
+          },
+          engineeringRunEndAttachment({ runId, outcome: "t1_queued", halt: "none" }),
+        ),
+      ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
+    );
+    assert.equal(settled.settled, true);
+    const claim = await inTx((tx) => claimEngineeringAgentWorkItem(tx, { workItemId, mode: "write", leaseMs: 60_000 }));
+
+    // The number never reached the card: the result arrived while the adapter was closed.
+    await setMode("off");
+    const prNumber = 900_000 + Math.floor(Math.random() * 90_000);
+    const result = await withExecutionApi(() =>
+      recordEngineeringAgentPublisherResult({
+        workItemId,
+        fencingToken: claim.fencingToken,
+        outcome: "confirmed",
+        pullRequest: {
+          prNumber,
+          headSha: sha1("head"),
+          verifiedHeadSha: sha1("head"),
+          snapshot: { baseSha: sha1(runId), diffDigest: sha256("diff"), treeId: sha1("tree"), invalidatedReviewIds: [] },
+        },
+      }),
+    );
+    assert.equal(result.recorded === false ? result.reason : null, "adapter_closed");
+    const mismatch = await prisma.engineeringAgentWorkItem.findFirstOrThrow({
+      where: { kind: "state_mismatch", causeKey: `review_pr:${workItemId}` },
+    });
+    const before = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: fixture.taskId } });
+    assert.deepEqual(
+      [before.status, before.reviewPrNumber, before.requiresHumanReview, before.reviewSpecialty],
+      ["review", null, false, null],
+    );
+
+    const person = {
+      user: { id: `eng-adapter-owner-${randomUUID()}`, email: "owner@example.test" },
+      expires: new Date(Date.now() + 3_600_000).toISOString(),
+    } as Session;
+    const refusedWith = (code: string) => (error: unknown) =>
+      error instanceof EngineeringAgentStoreRefusedError && error.code === code;
+    const recordBound = () =>
+      withExecutionApi(() => recordEngineeringAgentMismatchReviewPullRequest({ session: person, workItemId: mismatch.id }));
+
+    // An adapter call: refused while the agent is off, with nothing written.
+    await assert.rejects(recordBound(), refusedWith("adapter_closed"));
+    // The engineering side alone cannot take this action: it needs AMUX's write.
+    await assert.rejects(
+      runEngineeringAgentTransaction(
+        prisma,
+        (tx) => resolveEngineeringAgentStateMismatch(tx, { session: person, workItemId: mismatch.id, action: "record_bound_review_pr" }),
+        { beforeAuditLock: (tx) => lockEngineeringAgentMismatchAmuxRows(tx, mismatch.id) },
+      ),
+      refusedWith("bound_review_pr_not_recorded"),
+    );
+    assert.equal((await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { id: mismatch.id } })).state, "open");
+    assert.equal((await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: fixture.taskId } })).reviewPrNumber, null);
+
+    await setMode("t1");
+    const acted = await recordBound();
+    assert.equal(acted.resolved, true);
+    assert.equal(acted.reviewPrRecorded, true);
+    const card = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: fixture.taskId } });
+    assert.deepEqual(
+      [card.status, card.reviewPrNumber, card.requiresHumanReview, card.reviewSpecialty, card.revision],
+      ["review", prNumber, true, "code-review", before.revision + 1],
+    );
+    assert.equal((await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { id: mismatch.id } })).state, "resolved");
+    const personAudit = await prisma.adminAuditLog.findUniqueOrThrow({ where: { id: acted.auditLogId } });
+    assert.equal(personAudit.action, "engineering_agent.mismatch_acted");
+    assert.deepEqual(
+      [
+        (personAudit.metadata as Record<string, unknown>).action,
+        (personAudit.metadata as Record<string, unknown>).prNumber,
+        (personAudit.metadata as Record<string, unknown>).cardId,
+      ],
+      ["record_bound_review_pr", prNumber, fixture.taskId],
+    );
+    const amuxAudit = await prisma.adminAuditLog.findFirstOrThrow({
+      where: { action: "amux.review.pull_request_recorded", targetId: fixture.taskId },
+    });
+    assert.equal((amuxAudit.metadata as Record<string, unknown>).marked_human_review, true);
+
+    // Once closed it stays closed, and the card keeps its one number.
+    await assert.rejects(recordBound(), refusedWith("mismatch_not_open"));
+    assert.equal((await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: fixture.taskId } })).revision, card.revision);
+  } finally {
+    for (const fixture of closedAdapterFixtures) await closeClosedAdapterFixture(fixture);
+    await setMode("shadow");
+  }
+});
+
 /** Closes a closed-adapter fixture's mismatch and binding; safe to call twice. */
 async function closeClosedAdapterFixture(fixture: { runId: string; workItemId: string }) {
   const open = await prisma.engineeringAgentWorkItem.findFirst({
@@ -1264,6 +1480,67 @@ test("an open adapter puts the publisher's pull request on the review of the wor
       0,
     );
     const binding = await prisma.engineeringAgentBinding.findFirstOrThrow({ where: { runId, prNumber } });
+    await inTx((tx) => moveEngineeringAgentBinding(tx, { bindingId: binding.id, to: "closed" }));
+    await inTx((tx) => moveEngineeringAgentBinding(tx, { bindingId: binding.id, to: "pruned" }));
+  } finally {
+    await setMode("shadow");
+  }
+});
+
+test("a pull request opened after its card moved on leaves a decision for the run, not a mismatch that stops the agent", async () => {
+  // Owner decision 2026-11-12: the owner may settle a card while its pull
+  // request is still being opened. The pull request is bound all the same; a
+  // person is told through a decision item, and the agent keeps running.
+  const sha256 = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
+  const inTx = <T>(work: Parameters<typeof runEngineeringAgentTransaction<T>>[1]) =>
+    runEngineeringAgentTransaction(prisma, work);
+  await setMode("t1");
+  try {
+    const fixture = await readyWorkerWithCard({ requiresHumanReview: true });
+    const runId = nextRunId();
+    const started = await startWithRun(fixture, runId);
+    const { workItemId } = await inTx((tx) =>
+      openEngineeringAgentWorkItem(tx, { kind: "publish", causeKey: `publish:${runId}:moved-on`, runId,
+        patchBody: "patch", patchDigest: sha256("patch"), baseSha: sha1(runId), expectedTreeId: sha1("tree") }));
+    await inTx((tx) =>
+      issueEngineeringAgentCapability(tx, { workItemId, capability: {
+        baseSha: sha1(runId), patchDigest: sha256("patch"), expectedTreeId: sha1("tree"),
+        commit: { identity: { name: "Tomverse Engineering Agent", email: "engineering-agent@users.noreply.github.com" },
+          baseCommitterDate: "1759000000 +1000", runId, cardRef: fixture.taskId } } }));
+    const settled = await withAmuxRouteBudget(
+      () => settleAmuxExecution({ attemptId: started.attemptId, worker: fixture.worker, instanceId: fixture.instanceId,
+        generation: fixture.generation, taskRevision: started.taskRevision, outcome: "succeeded", toStatus: "review",
+        actualCostMicrousd: null }, engineeringRunEndAttachment({ runId, outcome: "t1_queued", halt: "none" })),
+      ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS);
+    assert.equal(settled.settled, true);
+    const claim = await inTx((tx) => claimEngineeringAgentWorkItem(tx, { workItemId, mode: "write", leaseMs: 60_000 }));
+
+    // The owner closes the card (an archive) before the publisher's result arrives.
+    await prisma.amuxWorkItem.update({ where: { id: fixture.taskId },
+      data: { archivedAt: new Date(), revision: { increment: 1 } } });
+
+    const prNumber = 900_000 + Math.floor(Math.random() * 90_000);
+    const result = await withExecutionApi(() =>
+      recordEngineeringAgentPublisherResult({ workItemId, fencingToken: claim.fencingToken, outcome: "confirmed",
+        pullRequest: { prNumber, headSha: sha1("head"), verifiedHeadSha: sha1("head"),
+          snapshot: { baseSha: sha1(runId), diffDigest: sha256("diff"), treeId: sha1("tree"), invalidatedReviewIds: [] } } }));
+    assert.equal(result.recorded, false);
+    assert.equal(result.recorded === false ? result.reason : null, "task_not_in_review");
+
+    // Settled and bound on the engineering side, as any published result is.
+    assert.equal((await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { id: workItemId } })).state, "published");
+    const binding = await prisma.engineeringAgentBinding.findFirstOrThrow({ where: { runId, prNumber } });
+    // No mismatch, so nothing stops; one decision for the run says what happened.
+    assert.equal(await prisma.engineeringAgentWorkItem.count({
+      where: { kind: "state_mismatch", causeKey: `review_pr:${workItemId}` } }), 0);
+    const decision = await prisma.engineeringAgentWorkItem.findFirstOrThrow({
+      where: { kind: "decision", causeKey: `review_pr_moved:${workItemId}` } });
+    assert.deepEqual([decision.state, decision.reason, decision.runId], ["open", "task_not_in_review", runId]);
+    assert.equal(currentEngineeringAgentHalt(await readEngineeringAgentHaltState(prisma)), "none");
+
+    const person = { user: { id: `eng-adapter-owner-${randomUUID()}`, email: "owner@example.test" },
+      expires: new Date(Date.now() + 3_600_000).toISOString() } as Session;
+    await inTx((tx) => acknowledgeEngineeringAgentDecision(tx, { session: person, workItemId: decision.id }));
     await inTx((tx) => moveEngineeringAgentBinding(tx, { bindingId: binding.id, to: "closed" }));
     await inTx((tx) => moveEngineeringAgentBinding(tx, { bindingId: binding.id, to: "pruned" }));
   } finally {

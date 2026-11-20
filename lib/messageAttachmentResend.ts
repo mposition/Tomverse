@@ -1,4 +1,5 @@
 import "server-only";
+import { CHAT_MAX_ATTACHMENTS_PER_MESSAGE } from "@/lib/chatAttachmentLimits";
 
 import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
@@ -14,7 +15,7 @@ export const savedMessageAttachmentReferenceSchema = z.union([
   z.object({ uploadId: opaqueId }).strict(),
   z.object({ attachmentId: opaqueId }).strict(),
 ]);
-export const savedMessageAttachmentReferencesSchema = z.array(savedMessageAttachmentReferenceSchema).max(5)
+export const savedMessageAttachmentReferencesSchema = z.array(savedMessageAttachmentReferenceSchema).max(CHAT_MAX_ATTACHMENTS_PER_MESSAGE)
   .refine((refs) => new Set(refs.map((ref) => "attachmentId" in ref ? `attachment:${ref.attachmentId}` : `upload:${ref.uploadId}`)).size === refs.length,
     "Each attachment handle may occur only once per saved message.");
 export type SavedMessageAttachmentReference = z.infer<typeof savedMessageAttachmentReferenceSchema>;
@@ -36,10 +37,13 @@ type Message = {
 const metadataSelect = {
   id: true, userId: true, objectKey: true, name: true,
   mediaType: true, size: true, kind: true,
+  sourceArtifactId: true, sourceLineageId: true, sourceConversationId: true, sourceCanonicalSpec: true,
 } as const;
 type Metadata = {
   id: string; userId: string; objectKey: string; name: string;
   mediaType: string; size: number; kind: string;
+  sourceArtifactId?: string | null; sourceLineageId?: string | null;
+  sourceConversationId?: string | null; sourceCanonicalSpec?: Prisma.JsonValue | null;
 };
 type PreparedRef = { uploadId: string } | { sourceId: string; source: Metadata; copyKey?: string };
 type Db = Pick<Prisma.TransactionClient, "message" | "messageAttachment" | "messageAttachmentUpload">;
@@ -99,13 +103,13 @@ async function readSources(db: Db, refs: SavedMessageAttachmentReference[], inpu
         where: { id: ref.attachmentId, userId: input.userId, conversationId: input.conversationId },
         select: { ...metadataSelect, unavailableAt: true },
       });
-      if (!row || row.unavailableAt || !row.objectKey.startsWith(input.ownPrefix) || !Number.isSafeInteger(row.size) || row.size <= 0) throw unavailable();
+      if (!row || row.unavailableAt || !row.objectKey.startsWith(input.ownPrefix) || !Number.isSafeInteger(row.size) || row.size <= 0 || row.sourceLineageId && row.sourceConversationId !== input.conversationId) throw unavailable();
       result.push({ sourceId: row.id, source: row });
     } else {
       const row = await db.messageAttachmentUpload.findFirst({
         where: { id: ref.uploadId, userId: input.userId }, select: metadataSelect,
       });
-      if (!row || !row.objectKey.startsWith(input.ownPrefix)) throw unavailable();
+      if (!row || !row.objectKey.startsWith(input.ownPrefix) || row.sourceLineageId && row.sourceConversationId !== input.conversationId) throw unavailable();
       const bound = await db.messageAttachment.findFirst({
         where: { objectKey: row.objectKey, userId: input.userId },
         select: { id: true },
@@ -247,9 +251,19 @@ export async function saveMessagesWithAttachmentReferences(input: {
             if ("uploadId" in ref) { uploadIds.push(ref.uploadId); continue; }
             const [current] = await readSources(tx, [{ attachmentId: ref.sourceId }], input);
             if (!("sourceId" in current) || current.source.objectKey !== ref.source.objectKey || !ref.copyKey) throw unavailable();
+            let sourceArtifactId: string | null = null;
+            if (current.source.sourceArtifactId) {
+              const live = await tx.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "MessageArtifact" WHERE "id" = ${current.source.sourceArtifactId} AND "userId" = ${input.userId} AND "conversationId" = ${input.conversationId} FOR KEY SHARE`;
+              sourceArtifactId = live[0]?.id ?? null;
+            }
             const upload = await tx.messageAttachmentUpload.create({ data: {
               userId: input.userId, objectKey: ref.copyKey, name: ref.source.name,
               mediaType: ref.source.mediaType, size: ref.source.size, kind: ref.source.kind,
+              ...(current.source.sourceLineageId ? {
+                sourceArtifactId, sourceLineageId: current.source.sourceLineageId,
+                sourceConversationId: current.source.sourceConversationId,
+                ...(current.source.sourceCanonicalSpec ? { sourceCanonicalSpec: current.source.sourceCanonicalSpec as Prisma.InputJsonValue } : {}),
+              } : {}),
             }, select: { id: true } });
             uploadIds.push(upload.id);
           }

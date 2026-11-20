@@ -3,6 +3,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
+import { amuxDmT2MergeConsumeAllowed } from "@/lib/amux/dmT2MergeService";
 import { NOTIFICATION_KIND, enqueueNotificationDeliveryOnce } from "@/lib/notificationDeliveries";
 import { prisma } from "@/lib/prisma";
 import {
@@ -11,7 +12,11 @@ import {
   judgeQaReleaseInstructionConsume,
   judgeQaReleaseInstructionIssue,
 } from "@/lib/qaReleaseMergeLaneInstructionCore";
-import type { QaReleaseMergeLaneLatchReason } from "@/lib/qaReleaseMergeLaneLatchCore";
+import {
+  type QaReleaseMergeLaneLatchReason,
+  type QaReleaseMergeLaneSetSinceRelease,
+  qaReleaseMergeLaneSystemReleasable,
+} from "@/lib/qaReleaseMergeLaneLatchCore";
 import {
   type QaReleaseMergeReport,
   qaReleaseReportEffect,
@@ -20,7 +25,8 @@ import {
 
 /**
  * The merge lane service's writer of QaReleaseMergeAttempt and
- * QaReleaseMergeLaneLatch -- the other is a person's latch release,
+ * QaReleaseMergeLaneLatch, its own latch release included (owner decision
+ * 2026-11-16) -- the other is a person's latch release,
  * lib/qaReleaseMergeLaneRelease.ts, kept apart so no module writes both a
  * system and an administrator audit row
  * (docs/policy/qa-release-agent.md version 4, sections 3, 8 and 10;
@@ -152,17 +158,20 @@ export async function issueQaReleaseMergeInstruction(input: {
 export const QA_RELEASE_MERGE_ATTEMPT_CONSUMED_ACTION = "qa_release.merge_attempt_consumed";
 
 /**
- * Instruction consume (policy section 10): nine statements -- the limits,
+ * Instruction consume (policy section 10): twelve statements -- the limits,
  * the audit chain lock, one read of the attempt (locked) with the newest
- * operator control revision, switch and latch event, the four of the audit
- * append, the conditional update and the deadline check -- so 3A + 5 = 32 s.
+ * operator control revision, switch and latch event, the Decision Maker
+ * re-check of an engineering agent pull request (whether it is one, the
+ * Decision Maker's switches, its approvals that still hold), the four of the
+ * audit append, the conditional update and the deadline check -- so
+ * 3A + 5 = 41 s.
  */
 export const QA_RELEASE_CONSUME_LIMITS = Object.freeze({
   statementMs: 2_000,
   idleMs: 1_000,
-  statements: 9,
-  transactionMs: (3 * 9 + 5) * 1_000,
-  prismaMs: (3 * 9 + 5) * 1_000 + 5_000,
+  statements: 12,
+  transactionMs: (3 * 12 + 5) * 1_000,
+  prismaMs: (3 * 12 + 5) * 1_000 + 5_000,
 });
 const CONSUME = QA_RELEASE_CONSUME_LIMITS;
 
@@ -191,8 +200,11 @@ type ConsumeRead = {
  */
 export async function consumeQaReleaseMergeInstruction(input: {
   callerRevision: number | null;
-  request: { attemptId: string; pullRequestNumber: number; headSha: string; base: string };
+  request: { attemptId: string; pullRequestNumber: number; headSha: string; base: string; diffDigest?: string;
+    changeDigest?: string };
   budget: QaReleaseRoundBudget;
+  /** The environment the Decision Maker's develop merge switch is read from; the process's by default. */
+  env?: Readonly<Record<string, string | undefined>>;
 }): Promise<QaReleaseConsumeResult> {
   return prisma.$transaction(
     async (tx) => {
@@ -246,6 +258,17 @@ export async function consumeQaReleaseMergeInstruction(input: {
         dbNowMs: Number(read.dbNowMs),
       });
       if (!judgement.consume) return { consumed: false as const, reason: judgement.reason };
+      // An engineering agent pull request is merged only on a Decision Maker
+      // approval that still holds now, at exactly this head, into develop, and
+      // only at the approved change digest the lane read right before (owner
+      // decision 2026-11-13; reviews r-20261114-020758-a98fec,
+      // r-20261114-021949-8dbd49): its list entry was read a while ago, and a
+      // kill switch, a moved Task, a superseded binding, a new head or a diff
+      // changed by develop since then refuses the merge here.
+      const dm = await amuxDmT2MergeConsumeAllowed(tx, { prNumber: input.request.pullRequestNumber,
+        headSha: input.request.headSha, base: input.request.base, diffDigest: input.request.diffDigest ?? null,
+        changeDigest: input.request.changeDigest ?? null, env: input.env });
+      if (dm !== "allowed" && dm !== "not_engineering") return { consumed: false as const, reason: dm };
 
       const auditLogId = await writeSystemAuditLog({
         tx,
@@ -416,6 +439,102 @@ export async function reportQaReleaseMergeResult(input: {
     if (error instanceof ReportRefused) return { recorded: false, reason: error.reason };
     throw error;
   }
+}
+
+export const QA_RELEASE_MERGE_LANE_SYSTEM_RELEASED_ACTION = "qa_release.merge_lane_system_released";
+
+/**
+ * The lane's own latch release (policy section 10, as the issue): nine
+ * statements -- the limits, the audit chain lock, one read of the latch, the
+ * open attempt, the operator control and every set event since the last
+ * release with its attempt, the four of the audit append, the release event
+ * and the deadline check -- so 3A + 5 = 32 s.
+ */
+export const QA_RELEASE_SYSTEM_RELEASE_LIMITS = QA_RELEASE_ISSUE_LIMITS;
+const SYSTEM_RELEASE = QA_RELEASE_SYSTEM_RELEASE_LIMITS;
+
+export type QaReleaseSystemReleaseRefusal = "control_unavailable" | "revision_mismatch" | "not_latched" | "not_releasable";
+
+export type QaReleaseSystemReleaseResult =
+  | { released: true; sequence: number }
+  | { released: false; reason: QaReleaseSystemReleaseRefusal };
+
+type SystemReleaseRead = {
+  dbNowMs: bigint;
+  revision: number | null;
+  sequence: number | null;
+  latched: boolean | null;
+  attemptOpen: boolean;
+  sets: QaReleaseMergeLaneSetSinceRelease[] | null;
+};
+
+/**
+ * The lane releases its own latch on develop (owner decision 2026-11-16,
+ * section 8 item 5): it read dev as deploying nothing broken this round
+ * (`devHealthy`, which the service checked before calling), no attempt is
+ * open, and every cause since the last release is one it read again and
+ * closed (qaReleaseMergeLaneSystemReleasable). The migration
+ * `qa_release_merge_lane_latch_system_release` refuses any other system
+ * release. Only the newest operator control revision may release, as only it
+ * may issue. A refusal writes nothing. main and production stay a person's:
+ * the lane merges only into develop.
+ */
+export async function releaseQaReleaseMergeLaneLatchBySystem(input: {
+  callerRevision: number | null;
+  budget: QaReleaseRoundBudget;
+}): Promise<QaReleaseSystemReleaseResult> {
+  return prisma.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`SELECT
+        set_config('statement_timeout', ${String(SYSTEM_RELEASE.statementMs)}, true),
+        set_config('idle_in_transaction_session_timeout', ${String(SYSTEM_RELEASE.idleMs)}, true),
+        CASE WHEN current_setting('server_version_num')::int >= 170000
+          THEN set_config('transaction_timeout', ${String(SYSTEM_RELEASE.transactionMs)}, true)
+        END`;
+      await takeAuditChainLock(tx);
+      const [read] = await tx.$queryRaw<SystemReleaseRead[]>`WITH newest AS (
+          SELECT "sequence", "latched" FROM "QaReleaseMergeLaneLatch" ORDER BY "sequence" DESC LIMIT 1
+        ), released AS (
+          SELECT coalesce(max("sequence"), 0) AS "sequence" FROM "QaReleaseMergeLaneLatch" WHERE NOT "latched"
+        )
+        SELECT floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint AS "dbNowMs",
+               (SELECT "revision" FROM "QaReleaseOperatorControl" ORDER BY "revision" DESC LIMIT 1) AS "revision",
+               (SELECT "sequence" FROM newest) AS "sequence",
+               (SELECT "latched" FROM newest) AS "latched",
+               EXISTS (SELECT 1 FROM "QaReleaseMergeAttempt" WHERE "state" <> 'closed') AS "attemptOpen",
+               (SELECT jsonb_agg(jsonb_build_object('reason', l."reason",
+                         'attempt', CASE WHEN a."id" IS NULL THEN NULL
+                                    ELSE jsonb_build_object('state', a."state", 'outcome', a."outcome") END)
+                       ORDER BY l."sequence")
+                  FROM "QaReleaseMergeLaneLatch" l
+                  LEFT JOIN "QaReleaseMergeAttempt" a ON a."id" = l."attemptId"
+                 WHERE l."latched" AND l."sequence" > (SELECT "sequence" FROM released)) AS "sets"`;
+      const deadline = new Date(Number(read.dbNowMs) + input.budget.budgetMs - (input.budget.clock() - input.budget.startedAt));
+      if (read.revision === null) return { released: false as const, reason: "control_unavailable" as const };
+      if (read.revision !== input.callerRevision) return { released: false as const, reason: "revision_mismatch" as const };
+      if (read.latched !== true || read.sequence === null) return { released: false as const, reason: "not_latched" as const };
+      if (!qaReleaseMergeLaneSystemReleasable({ latched: true, attemptOpen: read.attemptOpen, setsSinceRelease: read.sets ?? [],
+        devHealthy: true })) {
+        return { released: false as const, reason: "not_releasable" as const };
+      }
+      const sequence = read.sequence + 1;
+      const auditLogId = await writeSystemAuditLog({
+        tx,
+        systemActor: "qa-release-merge-lane",
+        action: QA_RELEASE_MERGE_LANE_SYSTEM_RELEASED_ACTION,
+        targetType: "QaReleaseMergeLaneLatch",
+        targetId: String(sequence),
+        summary: "Released the merge lane latch after reading again what latched it.",
+        metadata: { sequence, reasons: (read.sets ?? []).map((event) => event.reason), controlRevision: read.revision },
+      });
+      await tx.$executeRaw`INSERT INTO "QaReleaseMergeLaneLatch" ("sequence", "latched", "reason", "attemptId", "auditLogId")
+        VALUES (${sequence}, false, NULL, NULL, ${auditLogId})`;
+      const [clock] = await tx.$queryRaw<{ late: boolean }[]>`SELECT clock_timestamp() >= ${deadline}::timestamptz AS late`;
+      if (clock?.late !== false) throw new QaReleaseMergeLaneLate();
+      return { released: true as const, sequence };
+    },
+    { maxWait: 5_000, timeout: SYSTEM_RELEASE.prismaMs },
+  );
 }
 
 /** The lane as the service sees it at the start of a round: one statement, no write, on the database clock. */

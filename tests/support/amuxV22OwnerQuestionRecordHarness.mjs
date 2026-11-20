@@ -7,11 +7,12 @@ const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path) => pathToFileURL(resolve(root, path)).href;
 const audits = [];
 mock.module(mod("lib/adminAudit.ts"), {
-  namedExports: { writeSystemAuditLog: async (entry) => { audits.push(entry); } },
+  namedExports: {
+  takeAuditChainLock: async () => {}, writeSystemAuditLog: async (entry) => { audits.push(entry); } },
 });
 
-const { recordAmuxV22TaskResult, v22TaskResultSha256 } =
-  await import(mod("lib/amux/v22TaskResultStore.ts"));
+const { prepareAmuxV22TaskResultRecord, recordAmuxV22TaskResult,
+  v22TaskResultSha256 } = await import(mod("lib/amux/v22TaskResultStore.ts"));
 const { AMUX_V22_OWNER_QUESTION_MARKER, amuxV22OwnerQuestionSha256 } =
   await import(mod("lib/amux/v22OwnerQuestionCore.ts"));
 
@@ -41,6 +42,7 @@ async function record(text, asked) {
           v22AssignmentId: "assignment-1" }];
       throw new Error(`unexpected SQL: ${sql}`);
     },
+    amuxIdeaContentKeyRetirement: { findMany: async () => [] },
     amuxV22TaskResult: { findUnique: async () => null, create: async () => {} },
     amuxV22TaskPatch: { findUnique: async () => null, create: async () => {} },
     amuxV22TaskQuestion: {
@@ -58,8 +60,8 @@ async function record(text, asked) {
     },
   };
   audits.length = 0;
-  await recordAmuxV22TaskResult(tx, { attemptId, worker: "worker-1", ideaId,
-    text, sourceSha256: v22TaskResultSha256(text), keys });
+  await recordAmuxV22TaskResult(tx, prepareAmuxV22TaskResultRecord({ attemptId,
+    worker: "worker-1", ideaId, text, sourceSha256: v22TaskResultSha256(text), keys }));
   return { created, cancelled, metadata: audits[0]?.metadata };
 }
 
@@ -78,11 +80,11 @@ assert.equal(run.metadata.ownerQuestionSequence, 1);
 // A question left open by an earlier, lost attempt is closed first.
 assert.equal(run.cancelled.length, 1);
 
-// The fourth is recorded as over the limit.
+// There is no question limit: the fourth opens like the first.
 run = await record(asking, [1, 2, 3].map((sequence) =>
   ({ sequence, state: "resumed" })));
 assert.equal(run.created[0].sequence, 4);
-assert.equal(run.created[0].state, "cancelled");
+assert.equal(run.created[0].state, "open");
 
 // A question while another still waits is not recorded.
 for (const state of ["open", "answered"]) {

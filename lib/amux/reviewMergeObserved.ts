@@ -4,7 +4,9 @@ import { amuxV22TaskWritesPatch } from "@/lib/amux/v22WorkerClaimCore";
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
 import { AMUX_MAX_EXPECTED_REVISION } from "@/lib/amux/claimContract";
+import { isAmuxDmOwnerSettlementId } from "@/lib/amux/dmOwnerSettlementCore";
 import { decideAmuxV52ChangedPaths } from "@/lib/amux/executionGradeCore";
+import { amuxV22ReviewAttempt } from "@/lib/amux/v22KeptResultCore";
 import {
   AMUX_DB_BOUNDARIES,
   amuxBoundaryWithAttachment,
@@ -53,13 +55,18 @@ type AttemptRow = {
 /**
  * Completes a v22 `implement` Task whose review pull request the app observed
  * approved by an authorised person and then merged (engineering-agent.md
- * version 5, item 1; orchestration policy version 49). The caller has already
- * judged the approval with decideEngineeringAgentPrApproval() before the merge
+ * version 5, item 1; orchestration policy version 49), or merged by an
+ * authorised approver themselves (owner decision 2026-11-12:
+ * decideEngineeringAgentMergedPr). The caller has already judged the approval
  * and observed the merge; this writer only moves the card it names: `review`
  * to `done`, `v4TerminalAt` on the DB clock, and the open review escalation
  * resolved as approved, with one system audit entry. The number must be the
  * one recorded on the card for its latest attempt, so a merge of some other
- * pull request never completes it.
+ * pull request never completes it. A v22 implement Task's row cannot hold the
+ * number (lib/amux/reviewPullRequest.ts amuxV22ImplementTask); for it the
+ * caller names the engineering binding whose approval and merge it observed,
+ * and that binding must still be the current one for this PR on a run of the
+ * card's latest attempt, read under its row lock.
  */
 export async function completeAmuxV22ReviewOnObservedMerge(
   input: {
@@ -67,8 +74,17 @@ export async function completeAmuxV22ReviewOnObservedMerge(
     attemptId: string;
     prNumber: number;
     mergeCommitSha: string;
-    approvalReviewId: number;
+    /** The approval review observed before the merge; null when the approver's own merge, or the Decision Maker's approval, is the approval. */
+    approvalReviewId: number | null;
     changedFiles?: string[] | null;
+    /** The engineering binding whose approval and merge the caller observed. */
+    bindingId?: string | null;
+    /**
+     * The owner queue settlement whose Decision Maker approval, recorded
+     * before the merge lane's own merge into develop, is the approval (owner
+     * decision 2026-11-13). Only with no approval review.
+     */
+    dmSettlementId?: string | null;
   },
   attachment?: AmuxAttachment<AmuxReviewMergeObservedFact>,
 ): Promise<
@@ -79,13 +95,25 @@ export async function completeAmuxV22ReviewOnObservedMerge(
     throw new Error("AMUX review pull request number is invalid");
   }
   if (!/^[0-9a-f]{40}$/.test(input.mergeCommitSha)) throw new Error("AMUX merge commit SHA is invalid");
-  if (!Number.isSafeInteger(input.approvalReviewId) || input.approvalReviewId <= 0) {
+  if (input.approvalReviewId !== null &&
+      (!Number.isSafeInteger(input.approvalReviewId) || input.approvalReviewId <= 0)) {
     throw new Error("AMUX approval review id is invalid");
   }
+  const dmSettlementId = input.dmSettlementId ?? null;
+  if (dmSettlementId !== null &&
+      (input.approvalReviewId !== null || !isAmuxDmOwnerSettlementId(dmSettlementId))) {
+    throw new Error("AMUX Decision Maker settlement id is invalid");
+  }
+  const approvedBy = dmSettlementId !== null ?
+    `The Decision Maker approved it (owner queue settlement ${dmSettlementId}) and the QA-release lane merged it into develop` :
+    input.approvalReviewId === null ?
+    "The authorised approver merged it themselves" : `GitHub approval review ${input.approvalReviewId}`;
   const boundary = amuxBoundaryWithAttachment(
     AMUX_DB_BOUNDARIES.reviewMergeObserved, attachment);
   return withAmuxDbBoundary(
-    { ...boundary, prismaCallCeiling: boundary.prismaCallCeiling + 2 },
+    // +2 the assignment and its audit entry; +1 the binding that holds a v22
+    // implement Task's review pull request number.
+    { ...boundary, prismaCallCeiling: boundary.prismaCallCeiling + 3 },
     async (tx, context) => {
       // The audit chain's lock comes before the card's row lock, as in the
       // writers that read the card after taking it; the other order can wait
@@ -106,17 +134,44 @@ export async function completeAmuxV22ReviewOnObservedMerge(
       if (task.sourceSystem !== "admin-idea-v4" || task.cardType !== "task" || !amuxV22TaskWritesPatch(task.taskRole)) {
         return { completed: false as const, reason: "not_a_v22_implement_task" as const };
       }
+      // A v22 implement Task's row cannot hold its review pull request number
+      // (lib/amux/reviewPullRequest.ts amuxV22ImplementTask), so the number
+      // is the one the engineering binding of this card's attempt holds:
+      // written with the publisher's result, in the same transaction as the
+      // review record. It must be the very binding whose approval the caller
+      // observed, still current, locked here after the card (engineering rows
+      // come after every AMUX row): a re-bind under a new snapshot supersedes
+      // it and voids that approval (engineering-agent.md §9-10). A merge of
+      // any other pull request still completes nothing.
+      let heldByBinding: string | null = null;
       if (task.reviewPrNumber !== input.prNumber) {
-        return { completed: false as const, reason: "review_pr_mismatch" as const };
+        const bound = task.reviewPrNumber === null && typeof input.bindingId === "string"
+          ? await tx.$queryRaw<Array<{ id: string }>>`
+              SELECT b."id" FROM "EngineeringAgentBinding" b
+              JOIN "EngineeringAgentRun" r ON r."id" = b."runId"
+              WHERE b."id" = ${input.bindingId} AND b."prNumber" = ${input.prNumber}
+                AND b."supersededAt" IS NULL AND b."currentPrNumber" = ${input.prNumber}
+                AND r."cardId" = ${input.taskId} AND r."amuxAttemptId" = ${input.attemptId}
+              FOR UPDATE OF b
+            `
+          : [];
+        heldByBinding = bound[0]?.id ?? null;
+        if (heldByBinding === null) {
+          return { completed: false as const, reason: "review_pr_mismatch" as const };
+        }
       }
+      // The attempt the card's review is for, as the pull request's record
+      // judged it (lib/amux/reviewPullRequest.ts): the newest that ended
+      // succeeded into review, so a kept result published after the card's
+      // budget ran out completes it (owner decision 2026-11-15); only the
+      // newest.
       const attempts = await tx.$queryRaw<AttemptRow[]>`
         SELECT "id", "outcome", "toStatus", "endedAt", "v22AssignmentId"
         FROM "AmuxExecutionAttempt"
         WHERE "taskId" = ${input.taskId}
         ORDER BY "attemptNumber" DESC NULLS LAST, "startedAt" DESC, "id" DESC
-        LIMIT 1
       `;
-      const last = attempts[0];
+      const last = amuxV22ReviewAttempt(attempts);
       if (!last || last.id !== input.attemptId || last.endedAt === null || last.outcome !== "succeeded" ||
           last.toStatus !== "review" || last.v22AssignmentId === null) {
         return { completed: false as const, reason: "not_the_latest_attempt" as const };
@@ -149,7 +204,7 @@ export async function completeAmuxV22ReviewOnObservedMerge(
 
       const moved = await tx.amuxWorkItem.updateMany({
         where: { id: task.id, status: "review", owner: null, archivedAt: null, revision: task.revision,
-          reviewPrNumber: input.prNumber },
+          reviewPrNumber: task.reviewPrNumber },
         // The card becomes terminal here, once, on the DB clock; dependents,
         // result retention and content purge all wait on this timestamp.
         data: { status: "done", revision: { increment: 1 }, v4TerminalAt: context.dbNow },
@@ -161,7 +216,7 @@ export async function completeAmuxV22ReviewOnObservedMerge(
         data: {
           status: "resolved",
           resolutionOutcome: "approve",
-          resolution: `GitHub approval review ${input.approvalReviewId} and merge ${input.mergeCommitSha} observed.`,
+          resolution: `${approvedBy} and merge ${input.mergeCommitSha} observed.`,
           resolvedById: AMUX_MERGE_OBSERVER_RESOLVER,
           resolvedByEmail: null,
           resolvedAt: context.dbNow,
@@ -177,7 +232,10 @@ export async function completeAmuxV22ReviewOnObservedMerge(
           attempt_id: input.attemptId,
           pr_number: input.prNumber,
           merge_commit_sha: input.mergeCommitSha,
-          approval_review_id: input.approvalReviewId,
+          ...(dmSettlementId !== null ? { approval_basis: "dm_approval", dm_settlement_id: dmSettlementId } :
+            input.approvalReviewId === null ? { approval_basis: "approver_merge" } :
+            { approval_review_id: input.approvalReviewId }),
+          ...(heldByBinding === null ? {} : { binding_id: heldByBinding }),
           previous_revision: task.revision,
           next_revision: taskRevision,
         },

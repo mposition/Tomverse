@@ -17,8 +17,6 @@ import {
 import {
   parseAmuxExecutionLane, parseAmuxExecutionPage,
 } from "@/lib/amux/adminExecutionViewCore";
-import { readAmuxV22ActivationStatus } from
-  "@/lib/amux/v22ActivationReadiness";
 import { readAmuxOwnerRecoveryInspection } from
   "@/lib/amux/ownerRecoveryInspectionRead";
 import { AMUX_V22_RECOVERY_ID_PATTERN, AMUX_V22_RECOVERY_MAX_REVISION } from
@@ -50,7 +48,6 @@ export async function GET(request: Request) {
     const params = new URL(request.url).searchParams;
     const view = params.get("view");
     const allowed = view === "board_snapshot" ? ["view"] :
-      view === "activation" ? ["view"] :
       view === "board" ? ["view", "lane", "page"] :
       view === "hierarchy" ? ["view", "parentKind", "parentId", "page"] :
       view === "feedback" ? ["view", "parentKind", "parentId"] :
@@ -60,7 +57,6 @@ export async function GET(request: Request) {
         params.getAll(key).length !== 1)) return json({ error: "invalid_request" }, 400);
 
     if (view === "board_snapshot") return json(await readAmuxExecutionBoardSnapshot());
-    if (view === "activation") return json(readAmuxV22ActivationStatus());
     if (view === "board") {
       const lane = parseAmuxExecutionLane(params.get("lane"));
       const page = parseAmuxExecutionPage(params.get("page"));

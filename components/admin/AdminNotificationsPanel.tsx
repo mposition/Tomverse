@@ -21,6 +21,7 @@ import { AdminWriteButton } from "@/components/admin/ui/AdminWriteButton";
 import { adminNotificationsMessages } from "@/lib/adminMessages/notifications";
 import { dispatchAppToast } from "@/lib/appToast";
 import { adminFetch } from "@/lib/adminFetch";
+import { adminNotificationNeedsAcknowledgement } from "@/lib/adminNotificationAttention";
 
 export type AdminNotificationRow = {
   id: string;
@@ -257,6 +258,7 @@ export function AdminNotificationsPanel() {
         unacknowledged: Math.max(0, current.unacknowledged - 1),
       }));
       dispatchAppToast(m.acknowledged, "success");
+      router.refresh();
     } catch (error) {
       dispatchAppToast(
         error instanceof Error ? error.message : m.acknowledgeFailed,
@@ -442,7 +444,7 @@ export function AdminNotificationsPanel() {
                         {m.ack}
                         {dateLabel(row.acknowledgedAt)} / {row.acknowledgedByEmail || m.adminFallback}
                       </span>
-                    ) : row.status === "failed" ? (
+                    ) : adminNotificationNeedsAcknowledgement(row) ? (
                       <AdminWriteButton
                         variant="secondary"
                         size="sm"

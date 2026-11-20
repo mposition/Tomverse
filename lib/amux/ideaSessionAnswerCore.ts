@@ -78,6 +78,7 @@ export function amuxSessionAnswerUnitCount(raw: string): number {
     const parsed = amuxAnalysisAnswerJson(raw);
     const units = parsed && typeof parsed === "object" && !Array.isArray(parsed)
       ? (parsed as Record<string, unknown>).units : null;
-    return Array.isArray(units) && units.length <= 40 ? units.length : 0;
+    // Owner direction 2026-11-15: a page has as many units as it proposes.
+    return Array.isArray(units) ? units.length : 0;
   } catch { return 0; } // A non-JSON answer is a refused plan, not a failed write.
 }

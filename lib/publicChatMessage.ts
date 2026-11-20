@@ -6,6 +6,8 @@ import {
   toPublicMessageAttachment,
 } from "@/lib/messageAttachmentCore";
 import type { ChatResponseAttemptRecord } from "@/lib/chatResponseAttemptCore";
+import { generatedArtifactRevisionEnabled } from "@/lib/generatedArtifactRevisionCore";
+import { projectResearchSearchMetadata } from "@/lib/researchPreviewMetadata";
 
 /**
  * The one allowlist used whenever an authenticated Chat message crosses the
@@ -23,6 +25,7 @@ export const PUBLIC_CHAT_MESSAGE_SELECT = {
   status: true,
   modelId: true,
   pendingJobId: true,
+  researchRunId: true,
   searchMetadata: true,
   createdAt: true,
   memoryUsedCount: true,
@@ -39,6 +42,8 @@ export const PUBLIC_CHAT_MESSAGE_SELECT = {
       status: true,
       failureCode: true,
       modelId: true,
+      parentArtifactId: true,
+      lineageId: true,
     },
   },
   attachments: {
@@ -54,6 +59,7 @@ type PublicChatMessageRow = {
   status: string;
   modelId: string | null;
   pendingJobId: string | null;
+  researchRunId: string | null;
   searchMetadata: unknown;
   createdAt: Date | string;
   memoryUsedCount: number | null;
@@ -68,6 +74,8 @@ type PublicChatMessageRow = {
     status: string;
     failureCode: string | null;
     modelId: string | null;
+    parentArtifactId?: string | null;
+    lineageId?: string | null;
   }>;
   attachments: Array<Parameters<typeof toPublicMessageAttachment>[0]>;
 };
@@ -89,7 +97,8 @@ export const toPublicChatMessage = (row: PublicChatMessageRow) => ({
   status: row.status,
   modelId: row.modelId,
   pendingJobId: row.pendingJobId,
-  searchMetadata: row.searchMetadata,
+  researchRunId: row.researchRunId,
+  searchMetadata: projectResearchSearchMetadata(row.searchMetadata),
   createdAt: row.createdAt,
   ...(row.attachments.length
     ? {
@@ -115,6 +124,7 @@ export const toPublicChatMessage = (row: PublicChatMessageRow) => ({
           status: artifact.status,
           failureCode: artifact.failureCode,
           modelId: artifact.modelId,
+          ...(generatedArtifactRevisionEnabled() && artifact.lineageId ? { lineageId: artifact.lineageId, parentArtifactId: artifact.parentArtifactId ?? null } : {}),
         })),
       }
     : {}),

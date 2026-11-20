@@ -28,6 +28,8 @@ export type QaReleaseLanePullRequest = {
   headRefName: string;
   headRefOid: string;
   isDraft: boolean;
+  /** The head is in another repository (a fork); absent when GitHub did not say. */
+  isCrossRepository?: boolean;
   mergeable: string;
   state?: string;
   statusCheckRollup: unknown[];

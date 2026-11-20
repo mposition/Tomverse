@@ -9,17 +9,14 @@ import { AMUX_V4_ANALYSIS_AGENT_SECRET_ENV,
 import { AMUX_V19_MAX_LAUNCHER_SECRET_ENV,
   isAmuxV19MaxLauncherAuthorized } from
   "@/lib/amux/ideaSessionMaxLauncherAuth";
-import { verifyAmuxV19MaxClaimAttestation } from
+import { AMUX_V19_MAX_CLAIM_RUNNER_MARKER,
+  verifyAmuxV19MaxClaimAttestation } from
   "@/lib/amux/ideaSessionMaxLauncherAttestation.mjs";
 import { AmuxSessionBudgetClaimError, commitAmuxSessionBudgetClaim,
   readAmuxSessionBudgetClaimReceipt } from
   "@/lib/amux/ideaSessionAnalysisBudgetClaimService";
 import { prisma } from "@/lib/prisma";
 
-const CLAIM_CODE_LATCH = true;
-const WRITE_ENV = "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_WRITE";
-const READ_ENV = "TOMVERSE_AMUX_V19_SESSION_BUDGET_CLAIM_READ";
-const STOP_READ_ENV = "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_STOP_POLL_READ";
 const uuid = z.string().uuid();
 const identity = z.object({ requestId: uuid, reservationId: uuid,
   invocationOrdinal: z.number().int().min(0).max(2_147_483_647) }).strict();
@@ -32,7 +29,10 @@ const claimBody = identity.extend({ claimId: uuid, ideaId: uuid,
   modelId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/),
   reasoningEffort: z.string().regex(/^[A-Za-z0-9_-]{1,32}$/),
   authVerifiedAt: z.string().datetime(),
-  authProof: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
+  authProof: z.string().regex(/^[a-f0-9]{64}$/),
+  // A runner from 2026-11-17 on marks its claim; one from before sends none
+  // and is still accepted. Any other value is refused.
+  runnerMarker: z.literal(AMUX_V19_MAX_CLAIM_RUNNER_MARKER).optional() }).strict();
 
 /** Only the dedicated Ubuntu Max launcher can create a shadow claim. The
  * request cannot assert its own authentication or runner capabilities. A
@@ -44,12 +44,6 @@ export async function POST(request: Request): Promise<Response> {
     process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV],
     process.env.TOMVERSE_AMUX_SYNC_SECRET)) {
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
-  }
-  if (!CLAIM_CODE_LATCH || process.env[WRITE_ENV] !== "enabled" ||
-      process.env[READ_ENV] !== "enabled" ||
-      process.env[STOP_READ_ENV] !== "enabled") {
-    return amuxJsonNoStore({ available: false,
-      reason: "session_budget_claim_disabled" }, 409);
   }
   if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !==
       "application/json") {
@@ -73,7 +67,8 @@ export async function POST(request: Request): Promise<Response> {
         priceVersionId: body.priceVersionId,
         maxLauncherIdentity: { ideaId: body.ideaId, provider: body.provider,
           modelId: body.modelId,
-          reasoningEffort: body.reasoningEffort, authEvidenceDigest },
+          reasoningEffort: body.reasoningEffort, authEvidenceDigest,
+          ...(body.runnerMarker ? { runnerMarker: body.runnerMarker } : {}) },
         runner: { tokenCapsEnforceable: false, billableToolsDisabled: true,
           maxSubscriptionAuthenticated: true },
       });
@@ -90,8 +85,7 @@ export async function POST(request: Request): Promise<Response> {
 }
 
 /** An unknown claim is checked once by exact request/reservation/ordinal.
- * Even an absent receipt never authorizes replay of its POST. Readback stays
- * available when claim writes are disabled for operator reconciliation. */
+ * Even an absent receipt never authorizes replay of its POST. */
 export async function GET(request: Request): Promise<Response> {
   if (!isAmuxV4AnalysisAgentAuthorized(request,
     process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV],
@@ -101,10 +95,6 @@ export async function GET(request: Request): Promise<Response> {
         process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV],
         process.env.TOMVERSE_AMUX_SYNC_SECRET)) {
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
-  }
-  if (process.env[READ_ENV] !== "enabled") {
-    return amuxJsonNoStore({ available: false,
-      reason: "session_budget_claim_read_disabled" }, 409);
   }
   const url = new URL(request.url);
   if ([...url.searchParams.keys()].length !== 3 ||

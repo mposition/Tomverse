@@ -5,8 +5,10 @@ import { Prisma } from "@prisma/client";
 import {
     bundleConsumptionKey,
     issueContextBundle,
+    readContextBundleSemanticSteps,
     verifyContextBundle,
     type ContextBundleVerification,
+    type SemanticStepsUsed,
 } from "@/lib/chatContextBundleCore";
 import type { ChatTurnContext } from "@/lib/chatTurnContext";
 import { ChatAccessError } from "@/lib/chatSecurity";
@@ -102,6 +104,13 @@ export function issueChatContextBundle(input: {
             memoryTokens: input.context.memoryTokens,
             profileTokens: input.context.profileTokens,
             expiresAtMs,
+            semanticSteps: input.context.semanticSteps,
+            memoryQueryPolicy: input.context.memory.memoryQueryPolicy,
+            memoryHistory: input.context.memory.memoryHistorySources?.length ? {
+                version: 1,
+                queryDigest: input.context.memory.memoryQueryDigest!,
+                sources: input.context.memory.memoryHistorySources,
+            } : undefined,
             ...input.context.fingerprintInput,
         },
         bundleSecret()
@@ -127,7 +136,7 @@ export function verifyChatContextBundle(
         subjectKey: string;
         conversationId: string | null;
         modelId: string;
-        currentFingerprint: string;
+        currentFingerprint?: string;
         now?: Date;
     }
 ): ContextBundleVerification {
@@ -139,6 +148,15 @@ export function verifyChatContextBundle(
         currentFingerprint: options.currentFingerprint,
         now: options.now,
     });
+}
+
+/**
+ * The semantic steps a bundle was issued with (docs/policy/external-conversation-import-and-memory.md §9a), for the route that
+ * rebuilds its context before verifying it. Null for a token that does not
+ * verify; see `readContextBundleSemanticSteps`.
+ */
+export function readChatContextBundleSemanticSteps(token: string): SemanticStepsUsed | null {
+    return readContextBundleSemanticSteps(token, bundleSecret());
 }
 
 export type ContextBundleConsumption =

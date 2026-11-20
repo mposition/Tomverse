@@ -110,7 +110,10 @@ test("a fenced answer is normalized and keeps one storage key per unit", () => {
   assert.equal(amuxSessionAnswerUnitCount(fenced), 1);
   assert.equal(amuxSessionAnswerUnitCount(JSON.stringify(answer(0))), 1);
   assert.equal(amuxSessionAnswerUnitCount("not json"), 0);
-  assert.equal(amuxSessionAnswerUnitCount(JSON.stringify({ units: Array(41).fill({}) })), 0);
+  // Owner direction 2026-11-15: a page keeps one key per unit however many it
+  // proposes.
+  assert.equal(amuxSessionAnswerUnitCount(JSON.stringify({ units: Array(41).fill({}) })), 41);
+  assert.equal(amuxSessionAnswerUnitCount(JSON.stringify({ units: Array(300).fill({}) })), 300);
 });
 
 test("a real question still ends the analysis and shows on the review screen", () => {

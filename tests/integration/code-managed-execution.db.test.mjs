@@ -9,7 +9,7 @@ import {AVAILABLE_MODELS} from '../../lib/models.ts';
 import {getModelPricingProfile,resolveModelPricing} from '../../lib/modelPricing.ts';
 import {validCodeUsage} from '../../lib/codeManagedCore.ts';
 import {getSingleAccountCostCeiling,providerBudgetEnvName} from '../../lib/providerCostBudget.ts';
-import {catalogContentHash} from '../../lib/modelCatalogCore.ts';
+import {catalogContentHash,codingCatalogRowSchema} from '../../lib/modelCatalogCore.ts';
 
 const databaseUrl=process.env.TEST_DATABASE_URL;
 test('Code managed inference with migrated local schema and real shared credit ledger',{skip:!databaseUrl},async t=>{
@@ -44,7 +44,11 @@ test('Code managed inference with migrated local schema and real shared credit l
   });
   const originalRows=structuredClone(rows);let keyReady=true,dispatches=0,mode='success',pending=[],lastPrepared,dynamicDbMode=false;
   const realCatalog=await import(mod('lib/modelCatalog.ts'));
-  mock.module(mod('lib/modelCatalog.ts'),{namedExports:{loadCodingCatalog:async()=>dynamicDbMode?realCatalog.servableCodingRows(await realCatalog.loadCodingCatalog()):rows,servableCodingRows:x=>x}});
+  mock.module(mod('lib/modelCatalog.ts'),{namedExports:{loadCodingCatalog:async()=>dynamicDbMode?realCatalog.servableCodingRows(await realCatalog.loadCodingCatalog()):rows,
+    // The real servableCodingRows resolves every row into the snapshot row
+    // shape (source, channels); the fixture rows are the pre-link shape, which
+    // the published snapshot keeps so legacy snapshots stay covered.
+    servableCodingRows:x=>x.map(row=>codingCatalogRowSchema.parse(row))}});
   mock.module(mod('lib/codeManagedProvider.ts'),{namedExports:{codeProviderCredentialReady:()=>keyReady,prepareCodeProvider:model=>{lastPrepared=model;return async()=>{
     dispatches++;
     if(mode==='pending')await new Promise(resolve=>pending.push(resolve));
@@ -256,11 +260,12 @@ test('Code managed inference with migrated local schema and real shared credit l
       const resolved=await reconcile({callId:req.callId,resolutionId:randomUUID(),evidenceRef:'ticket/late-fixture',mode:'no_provider_usage'});mode='success';pending.splice(0).forEach(r=>r());await late;
       const row=await db.codeManagedCall.findUnique({where:{id:req.callId}});assert.equal(row.status,'failed');assert.equal(row.resolutionAuditId,resolved.auditLogId);assert.equal(row.settledCostMicroUsd,0n);assert.equal((await service.handleCodeManaged(user,{action:'status',reservationId:held.reservationId})).billing.heldCredits,0);
     });
-    await t.test('a plan with no daily ceiling never refunds somebody else’s existing day usage',async()=>{
+    await t.test('a plan with no daily ceiling still counts the day and refunds only its own hold',async()=>{
       const user=await newUser('Max');const {getUserChatUsageKey,usagePeriodStart}=await import(mod('lib/chatSecurity.ts'));
       const key=getUserChatUsageKey(user),periodStart=usagePeriodStart('day',new Date());
       await db.chatUsageBucket.create({data:{key,period:'day',periodStart,count:7n}});
-      const held=await reserve(user);assert.equal((await db.codeTaskReservation.findUnique({where:{id:held.reservationId}})).planDayHeld,false);
+      const held=await reserve(user);const reservation=await db.codeTaskReservation.findUnique({where:{id:held.reservationId}});assert.equal(reservation.planDayHeld,true);
+      const during=await db.chatUsageBucket.findUnique({where:{key_period_periodStart:{key,period:'day',periodStart}}});assert.equal(during.count,7n+BigInt(reservation.planHeldCredits));assert.ok(reservation.planHeldCredits>0);
       await release(user,held.reservationId);const bucket=await db.chatUsageBucket.findUnique({where:{key_period_periodStart:{key,period:'day',periodStart}}});assert.equal(bucket.count,7n);
     });
     await t.test('expired task slots recover immediately and one failed refund does not poison the rest of the sweep',async()=>{

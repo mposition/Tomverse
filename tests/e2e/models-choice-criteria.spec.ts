@@ -1,25 +1,33 @@
 import { expect, test } from "@playwright/test";
-import { AVAILABLE_MODELS } from "../../lib/models";
+import { modelsPageContent } from "@/components/marketing/v2/models/modelsPageContent";
+import { mockModelsCatalog } from "./support/models-catalog-fixture";
 
-test("Korean model descriptions use per-model facts instead of shared performance claims", async ({ page }, info) => {
+// Korean model cards show each model's own catalogue facts (plan, image input,
+// reasoning, base credits) instead of shared performance claims.
+test("Korean model cards use per-model facts instead of shared performance claims", async ({ page }, info) => {
+  const copy = modelsPageContent.ko;
   await page.setViewportSize({ width: info.project.name.includes("mobile") ? 320 : 1440, height: 900 });
-  const ids = ["claude-fable-5", "claude-haiku-5-5", "claude-opus-4-8", "claude-sonnet-5"];
-  const weights = [80, 1, 32, 16];
-  const models = ids.map((id, index) => ({ ...AVAILABLE_MODELS.find((model) => model.id === id)!, creditWeight: weights[index], inputCapabilities: { image: index !== 0 } }));
-  await page.route("**/api/models/catalog", (route) => route.fulfill({ json: { models } }));
+  const base = { apiModel: "x", icon: "", bestFor: "", enabled: true, status: "enabled", publiclyListed: true, catalogDeleted: false };
+  const models = [
+    { ...base, id: "claude-fable-5-2", name: "Claude Fable 5.2", provider: "anthropic", minimumPlan: "Pro", usageClass: "apex", creditWeight: 80, reasoning: "high", inputCapabilities: { image: false, nativePdf: false } },
+    { ...base, id: "claude-haiku-5-5", name: "Claude Haiku 5.5", provider: "anthropic", minimumPlan: "Guest", usageClass: "standard", creditWeight: 1, reasoning: "none", inputCapabilities: { image: true, nativePdf: false } },
+    { ...base, id: "claude-opus-5-5", name: "Claude Opus 5.5", provider: "anthropic", minimumPlan: "Pro", usageClass: "frontier", creditWeight: 32, reasoning: "high", inputCapabilities: { image: true, nativePdf: false } },
+    { ...base, id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", provider: "anthropic", minimumPlan: "Free", usageClass: "premium-reasoning", creditWeight: 16, reasoning: "none", inputCapabilities: { image: true, nativePdf: false } },
+  ];
+  await mockModelsCatalog(page, models);
   await page.goto("/models?lang=ko");
-  await expect(page.getByTestId("model-selection-criteria")).toHaveCount(4);
-  for (const [index, model] of models.entries()) {
-    const card = page.getByRole("article").filter({ has: page.getByRole("heading", { name: model.name, exact: true }) });
-    const criteria = card.getByTestId("model-selection-criteria");
-    await expect(criteria).toContainText(`이용 시작: ${model.minimumPlan === "Guest" ? "게스트" : model.minimumPlan === "Free" ? "무료" : model.minimumPlan}`);
-    await expect(criteria).toContainText(`짧은 요청: ${model.creditWeight} 크레딧`);
-    await expect(criteria).toContainText(`이미지 입력: ${index === 0 ? "미지원" : "지원"}`);
+  const cards = page.getByRole("article");
+  await expect(cards).toHaveCount(4);
+  for (const model of models) {
+    const card = cards.filter({ has: page.getByRole("heading", { name: model.name, exact: true }) });
+    await expect(card.getByText(copy.list.plans[model.minimumPlan as "Guest" | "Free" | "Pro"], { exact: true })).toHaveCount(1);
+    await expect(card.getByText(copy.list.tags.image, { exact: true })).toHaveCount(model.inputCapabilities.image ? 1 : 0);
+    await expect(card.getByText(copy.list.tags.reasoning, { exact: true })).toHaveCount(model.reasoning === "high" ? 1 : 0);
+    await expect(card.getByTestId("model-page-credit-cost")).toHaveAttribute("aria-label", `${copy.list.creditLabel}: ${model.creditWeight} ${copy.list.creditUnit[1]}`);
     await expect(card.getByText("글쓰기", { exact: true })).toHaveCount(0);
     await expect(card.getByText("분석", { exact: true })).toHaveCount(0);
   }
-  // The note is part of the full introduction, which phones collapse (#3546).
-  if (info.project.name.includes("mobile")) await expect(page.getByText(/비용 차이가 성능 우열을 뜻하지는 않습니다/)).toBeAttached();
-  else await expect(page.getByText(/비용 차이가 성능 우열을 뜻하지는 않습니다/)).toBeVisible();
+  // The page says a bigger number is a bigger base cost, not a stronger answer.
+  await expect(page.getByText(/성능 순위는 아닙니다/)).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

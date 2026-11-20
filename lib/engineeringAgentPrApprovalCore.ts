@@ -1,4 +1,5 @@
 import { ENGINEERING_AGENT_NOT_APPROVED_REASONS } from "./engineeringAgentCore.ts";
+import { type PullDigestReading, pullDigestCurrent, pullDigestVersion } from "./pullDiffDigestCore.ts";
 
 /**
  * The approval judgement of engineering-agent.md §9-10: a published pull
@@ -28,9 +29,10 @@ export type EngineeringAgentPrApprovalInput = {
   /** The head commit's required checks, or null when the list could not be read whole. */
   requiredChecks: { allPassed: boolean } | null;
   reviews: readonly EngineeringAgentObservedReview[];
+  /** `diffDigest`: the bound digest, v1 or v2 as it was bound (lib/pullDiffDigestCore.ts). */
   snapshot: { baseSha: string; diffDigest: string; recordedAt: Date; invalidatedReviewIds: readonly number[] };
-  /** Base SHA and diff digest recomputed at observation, or null when they could not be. */
-  current: { baseSha: string; diffDigest: string } | null;
+  /** Base SHA and the digests read at observation; a digest of the bound one's version not read decides nothing. */
+  current: ({ baseSha: string } & PullDigestReading) | null;
   approverIds?: readonly number[];
 };
 
@@ -64,8 +66,9 @@ export function decideEngineeringAgentPrApproval(input: EngineeringAgentPrApprov
   if (!input.requiredChecks.allPassed) return { verdict: "not_approved", reason: "required_check_failed" };
   // 6 is read before 4 and 5: a moved base or diff voids every review, and
   // an unreadable one decides nothing.
-  if (input.current === null) return { verdict: "undetermined", reason: "snapshot_unreadable" };
-  if (input.current.baseSha !== input.snapshot.baseSha || input.current.diffDigest !== input.snapshot.diffDigest) {
+  const digestNow = input.current === null ? null : pullDigestCurrent(input.snapshot.diffDigest, input.current);
+  if (input.current === null || digestNow === null) return { verdict: "undetermined", reason: "snapshot_unreadable" };
+  if (input.current.baseSha !== input.snapshot.baseSha || digestNow !== input.snapshot.diffDigest) {
     return { verdict: "not_approved", reason: "snapshot_changed" };
   }
   // 4. An authorised account, matched by numeric id, approved.
@@ -92,14 +95,79 @@ export function decideEngineeringAgentPrApproval(input: EngineeringAgentPrApprov
 }
 
 /**
- * Approval is settled before the merge (engineering-agent.md §9-10). A pull request seen merged
- * with no approval recorded first is not approved, whatever its reviews say
- * now, and stops the agent.
+ * Approval is settled before the merge (engineering-agent.md §9-10), or by
+ * the merge itself when an account on the approver list merged into develop
+ * (owner decision 2026-11-12: one person reviews and merges their own agent's
+ * pull request, so a separate GitHub review was never written and every such
+ * merge stopped the agent).
+ *
+ * Owner decision 2026-11-15:
+ * the approver's merge approves whatever head and diff it merged. A person
+ * who merges on GitHub merges the diff GitHub shows them then, so a head that
+ * moved after verification -- develop merged in, a conflict the CI auto-fix
+ * resolved, the owner's own push -- is still that person's approval; the
+ * observer records the merged head and diff with it. Before it the approver's
+ * merge counted only at the verified head or the verified diff.
+ *
+ * An approval recorded before the merge still stands for a merge of the
+ * verified head or diff, and for the approver's own merge. It no longer
+ * stands for someone else's merge of a head that moved after it: the review
+ * approved a diff that is not the one merged.
+ *
+ * Any other merge -- a bot's, an app's, another account's, into main -- is
+ * not approved, whatever its reviews say now. It opens a decision for that
+ * card; it no longer stops the agent (the hold is the card's).
  */
 export function decideEngineeringAgentMergedPr(input: {
   merged: boolean;
   approvalRecordedBeforeMerge: boolean;
+  /** The merger is a person on the approver list (lib/engineeringAgentGitHubRead.ts). */
+  mergedByApprover?: boolean;
+  baseRef?: string;
+  /** The merged head is the commit the app recorded as verified, or its diff is the verified one. */
+  headVerified?: boolean;
 }): "done" | "merged_without_approval" | "open" {
   if (!input.merged) return "open";
-  return input.approvalRecordedBeforeMerge ? "done" : "merged_without_approval";
+  const approverMerge = input.mergedByApprover === true && input.baseRef === "develop";
+  const sameChange = input.headVerified === true;
+  if (input.approvalRecordedBeforeMerge && (sameChange || approverMerge)) return "done";
+  // Owner decision 2026-11-15: the approver's develop merge approves the diff it merged.
+  return approverMerge ? "done" : "merged_without_approval";
+}
+
+/**
+ * The second basis of approval (owner decision 2026-11-13: "develop 병합 권한은
+ * DM에게 승인합니다. main은 안됩니다."): a merge the approver list did not make
+ * is approved when the Decision Maker approved this pull request from the
+ * owner queue before the merge, of exactly the merged head and diff, the base
+ * is develop, and the merge is the QA-release merge lane's own -- a bot's
+ * merge whose commit the lane reported for this pull request and head. While
+ * the lane has an attempt open for it and has not reported yet, or the diff
+ * cannot be read, nothing is decided: the observer reads it again next round.
+ * Anything else is not this basis, and the merge stays unapproved.
+ */
+export function decideEngineeringAgentDmApprovedMerge(input: {
+  baseRef: string;
+  headSha: string;
+  /** The merged pull request's change digest (and v1 diff digest for a v1 approval); null when not read. */
+  changeDigest?: string | null;
+  diffDigest: string | null;
+  mergedAt: Date;
+  mergedByKind: "user" | "bot" | "app" | "unknown";
+  /** The Decision Maker's approval of this binding's pull request, or null when there is none. */
+  approval: { approvedHeadSha: string; approvedDiffDigest: string; decidedAt: Date } | null;
+  /** The merge lane's record of this pull request and head: it reported this merge commit, or an attempt is still open. */
+  laneMerge: "merged" | "pending" | null;
+}): "done" | "waiting" | "not_approved" {
+  const { approval } = input;
+  if (approval === null || input.baseRef !== "develop" || input.headSha !== approval.approvedHeadSha ||
+      approval.decidedAt.getTime() > input.mergedAt.getTime() ||
+      (input.mergedByKind !== "bot" && input.mergedByKind !== "app")) return "not_approved";
+  // Compared in the approval's own version: v1 against v1, v2 against v2.
+  if (pullDigestVersion(approval.approvedDiffDigest) === null) return "not_approved";
+  const digestNow = pullDigestCurrent(approval.approvedDiffDigest, input);
+  if (digestNow === null) return "waiting";
+  if (digestNow !== approval.approvedDiffDigest) return "not_approved";
+  if (input.laneMerge === "merged") return "done";
+  return input.laneMerge === "pending" ? "waiting" : "not_approved";
 }

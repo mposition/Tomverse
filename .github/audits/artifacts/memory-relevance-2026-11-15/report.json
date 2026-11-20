@@ -1,0 +1,1934 @@
+{
+  "sourceCommit": "5421afe17733bbd70b4ac23c0de4456aec7a241f",
+  "corpus": "relevance",
+  "provider": "cohere",
+  "model": "rerank-v5.0-fast",
+  "startedAt": "2026-11-15T10:43:53.271Z",
+  "finishedAt": "2026-11-15T10:47:25.511Z",
+  "approvedMaxUsd": 1,
+  "approvedMaxCalls": 30,
+  "attemptedCalls": 30,
+  "successfulCalls": 30,
+  "actualUserData": false,
+  "productConfigOrBudgetModified": false,
+  "credentialIncluded": false,
+  "decisionGrade": false,
+  "answerQuality": {
+    "status": "not_run",
+    "reason": "no_answer_model_executed"
+  },
+  "pricing": {
+    "basis": "Published price; not negotiated account terms or a settled invoice",
+    "source": "https://cohere.com/pricing",
+    "usdPerMillionInputTokens": 0.02,
+    "reservedMicroUsd": 481,
+    "billedInputTokens": 4470,
+    "estimatedUsd": 0.0000894,
+    "perCallRoundedEstimateMicroUsd": 99,
+    "dashboardReadback": {
+      "usageLabel": "TRIAL",
+      "displayedSubtotalUsd": "0.00",
+      "usageDeltaInputTokens": 4470,
+      "matchesResponseUsage": true,
+      "settledInvoiceVerified": false
+    }
+  },
+  "latencyScope": "Per-case harness elapsed time includes the provider request and local persistence/comparison; excludes inter-call pacing. One serial run, not a production benchmark.",
+  "costs": [
+    {
+      "mode": "current-query",
+      "calls": 10,
+      "billedInputTokens": 1110,
+      "publishedRateEstimateUsd": 0.0000222,
+      "roundedReservationAccountingMicroUsd": 25,
+      "elapsedMs": {
+        "mean": 508,
+        "median": 480.5,
+        "p95": 669
+      }
+    },
+    {
+      "mode": "full-query",
+      "calls": 10,
+      "billedInputTokens": 1347,
+      "publishedRateEstimateUsd": 0.00002694,
+      "roundedReservationAccountingMicroUsd": 30,
+      "elapsedMs": {
+        "mean": 710,
+        "median": 692.5,
+        "p95": 1097
+      }
+    },
+    {
+      "mode": "full-query+history",
+      "calls": 10,
+      "billedInputTokens": 2013,
+      "publishedRateEstimateUsd": 0.00004026,
+      "roundedReservationAccountingMicroUsd": 44,
+      "elapsedMs": {
+        "mean": 638,
+        "median": 641.5,
+        "p95": 819
+      }
+    }
+  ],
+  "comparisons": [
+    {
+      "path": "product:selectMemoryContext+externalRelevance",
+      "corpus": "relevance",
+      "k": 5,
+      "cases": 10,
+      "queryMode": "current-query",
+      "queryVersion": "memory-query-v2",
+      "requests": {
+        "project_omission": {
+          "queryHash": "75abb5040601910aac61a5115fbf318723e5fc83705d57632986606e8199a0d6",
+          "candidateIds": [
+            "atlas",
+            "vega",
+            "coffee"
+          ],
+          "candidatesHash": "3e84335c8fb5fe319a44dfbc70364653a8b673d1d70caf0fc40c5d1cc751a6f5",
+          "queryBytes": 64,
+          "historyCount": 0,
+          "candidateProvenance": "same_product_lexical_and_extra_pool"
+        },
+        "project_switch": {
+          "queryHash": "c4378c068d8e3ef25b5ffbf570de98eb8d70dde5eb47868330f3bf428d7c95bc",
+          "candidateIds": [
+            "atlas",
+            "vega",
+            "coffee"
+          ],
+          "candidatesHash": "3e84335c8fb5fe319a44dfbc70364653a8b673d1d70caf0fc40c5d1cc751a6f5",
+          "queryBytes": 37,
+          "historyCount": 0,
+          "candidateProvenance": "same_product_lexical_and_extra_pool"
+        },
+        "latest_correction": {
+          "queryHash": "272dd8f0cfb8546a3116c78972a32723a3dc5365b6020b543c4b3717abbb5472",
+          "candidateIds": [
+            "atlas",
+            "vega",
+            "coffee"
+          ],
+          "candidatesHash": "3e84335c8fb5fe319a44dfbc70364653a8b673d1d70caf0fc40c5d1cc751a6f5",
+          "queryBytes": 50,
+          "historyCount": 0,
+          "candidateProvenance": "same_product_lexical_and_extra_pool"
+        },
+        "long_middle_ko": {
+          "queryHash": "e89197b942a1f7ffa7956be8c47e1d915989308565c7016a67312623b834f8af",
+          "candidateIds": [
+            "atlas",
+            "vega",
+            "coffee"
+          ],
+          "candidatesHash": "3e84335c8fb5fe319a44dfbc70364653a8b673d1d70caf0fc40c5d1cc751a6f5",
+          "queryBytes": 399,
+          "historyCount": 0,
+          "candidateProvenance": "same_product_lexical_and_extra_pool"
+        },
+        "mixed_script": {
+          "queryHash": "ca15a49d1db881b5ffce997cebcc3b0d05d04751f91a3f3cc68b8655064c3dae",
+          "candidateIds": [
+            "atlas",
+            "coffee",
+            "vega"
+          ],
+          "candidatesHash": "d3ef4aa1a4cbcf6ac477a51787f05264a2a10230eb546babd561ea5a7b93611a",
+          "queryBytes": 48,
+          "historyCount": 0,
+          "candidateProvenance": "same_product_lexical_and_extra_pool"
+        },
+        "irrelevant_history": {
+          "queryHash": "bcb203e7adf7c5448060dde2359477bce9a01417df87972f9252138d6450a5a4",
+          "candidateIds": [
+            "coffee",
+            "atlas",
+            "vega"
+          ],
+          "candidatesHash": "2306b3aca4a5f27aeef24d2e5c7a7bb3e707222a6fdce218472117fd440853bb",
+          "queryBytes": 31,
+          "historyCount": 0,
+          "candidateProvenance": "same_product_lexical_and_extra_pool"
+        },
+        "no_relevant_memory": {
+          "queryHash": "16cb54a03e351b7d04578e551421b1023ebd20e959f967b0d1c8b93c9379c62c",
+          "candidateIds": [
+            "atlas",
+            "coffee",
+            "vega"
+          ],
+          "candidatesHash": "d3ef4aa1a4cbcf6ac477a51787f05264a2a10230eb546babd561ea5a7b93611a",
+          "queryBytes": 34,
+          "historyCount": 0,
+          "candidateProvenance": "same_product_lexical_and_extra_pool"
+        },
+        "candidate_absent": {
+          "queryHash": "858280bb1ab292f7997808dd6cd3a3106a1e4563d3ef18af79101504f214984b",
+          "candidateIds": [
+            "atlas",
+            "coffee",
+            "vega"
+          ],
+          "candidatesHash": "d3ef4aa1a4cbcf6ac477a51787f05264a2a10230eb546babd561ea5a7b93611a",
+          "queryBytes": 33,
+          "historyCount": 0,
+          "candidateProvenance": "same_product_lexical_and_extra_pool"
+        },
+        "assistant_reference": {
+          "queryHash": "ed1e351fd5753ebcac65c23e09dced31453257df13da47314564232262b6084e",
+          "candidateIds": [
+            "atlas",
+            "vega",
+            "coffee"
+          ],
+          "candidatesHash": "3e84335c8fb5fe319a44dfbc70364653a8b673d1d70caf0fc40c5d1cc751a6f5",
+          "queryBytes": 52,
+          "historyCount": 0,
+          "candidateProvenance": "same_product_lexical_and_extra_pool"
+        },
+        "copied_user_material": {
+          "queryHash": "dc5ea7e2c63c880e4f3e388f1f86534689bc7761c75c11629a7c43769a4bb733",
+          "candidateIds": [
+            "atlas",
+            "coffee",
+            "vega"
+          ],
+          "candidatesHash": "d3ef4aa1a4cbcf6ac477a51787f05264a2a10230eb546babd561ea5a7b93611a",
+          "queryBytes": 34,
+          "historyCount": 0,
+          "candidateProvenance": "same_product_lexical_and_extra_pool"
+        }
+      },
+      "lexical": {
+        "koreanRecallAt5": 0.8571428571428571,
+        "koreanRecallInjected": 0.8571428571428571,
+        "relevant": 7,
+        "recalled": 6,
+        "irrelevantInjectionRate": 0.6,
+        "gatedIrrelevantRate": 0.6,
+        "forbidden": 0,
+        "top5": {
+          "koreanRecallAt5": 0.8571428571428571,
+          "irrelevantInjectionRate": 0.6,
+          "selected": 15,
+          "relevant": 7,
+          "recalled": 6,
+          "irrelevant": 9,
+          "forbidden": 0,
+          "inactive": 0,
+          "gatedSelected": 15,
+          "gatedIrrelevant": 9,
+          "gatedIrrelevantRate": 0.6
+        },
+        "fullSelectedSet": {
+          "selected": 15,
+          "relevant": 7,
+          "recalled": 6,
+          "recall": 0.8571428571428571,
+          "koreanRecall": 0.8571428571428571,
+          "irrelevant": 9,
+          "forbidden": 0,
+          "inactive": 0,
+          "gatedSelected": 15,
+          "gatedIrrelevant": 9,
+          "gatedIrrelevantRate": 0.6,
+          "alwaysOnSelected": 0
+        }
+      },
+      "semantic": {
+        "koreanRecallAt5": 0.5714285714285714,
+        "koreanRecallInjected": 0.5714285714285714,
+        "relevant": 7,
+        "recalled": 4,
+        "irrelevantInjectionRate": 0.6,
+        "gatedIrrelevantRate": 0.6,
+        "forbidden": 0,
+        "top5": {
+          "koreanRecallAt5": 0.5714285714285714,
+          "irrelevantInjectionRate": 0.6,
+          "selected": 10,
+          "relevant": 7,
+          "recalled": 4,
+          "irrelevant": 6,
+          "forbidden": 0,
+          "inactive": 0,
+          "gatedSelected": 10,
+          "gatedIrrelevant": 6,
+          "gatedIrrelevantRate": 0.6
+        },
+        "fullSelectedSet": {
+          "selected": 10,
+          "relevant": 7,
+          "recalled": 4,
+          "recall": 0.5714285714285714,
+          "koreanRecall": 0.5714285714285714,
+          "irrelevant": 6,
+          "forbidden": 0,
+          "inactive": 0,
+          "gatedSelected": 10,
+          "gatedIrrelevant": 6,
+          "gatedIrrelevantRate": 0.6,
+          "alwaysOnSelected": 0
+        }
+      },
+      "scoreEvidence": {
+        "kind": "provider",
+        "identityVerified": true,
+        "provider": "cohere",
+        "model": "rerank-v5.0-fast",
+        "collectedAt": "2026-11-15T10:43:53.338Z",
+        "settings": {
+          "maxCalls": 10,
+          "queryVersion": "memory-query-v2",
+          "queryMode": "current-query",
+          "retrievalVersion": 5,
+          "minRerankScore": 0.1,
+          "maxRerankCandidates": 100,
+          "maxRecentExtraCandidates": 50
+        },
+        "semanticRetrievalMeasured": true
+      },
+      "answerQuality": {
+        "status": "not_run",
+        "reason": "no_answer_model_executed"
+      },
+      "delta": {
+        "koreanRecallAt5": -0.2857,
+        "irrelevantInjectionRate": 0,
+        "gatedIrrelevantRate": 0
+      },
+      "byTag": {
+        "project_omission": {
+          "relevant": 1,
+          "lexical": {
+            "recalled": 1,
+            "recallAt5": 1
+          },
+          "semantic": {
+            "recalled": 1,
+            "recallAt5": 1
+          },
+          "delta": 0
+        },
+        "project_switch": {
+          "relevant": 1,
+          "lexical": {
+            "recalled": 1,
+            "recallAt5": 1
+          },
+          "semantic": {
+            "recalled": 1,
+            "recallAt5": 1
+          },
+          "delta": 0
+        },
+        "latest_correction": {
+          "relevant": 1,
+          "lexical": {
+            "recalled": 1,
+            "recallAt5": 1
+          },
+          "semantic": {
+            "recalled": 1,
+            "recallAt5": 1
+          },
+          "delta": 0
+        },
+        "long_middle": {
+          "relevant": 1,
+          "lexical": {
+            "recalled": 1,
+            "recallAt5": 1
+          },
+          "semantic": {
+            "recalled": 0,
+            "recallAt5": 0
+          },
+          "delta": -1
+        },
+        "mixed_script": {
+          "relevant": 1,
+          "lexical": {
+            "recalled": 1,
+            "recallAt5": 1
+          },
+          "semantic": {
+            "recalled": 1,
+            "recallAt5": 1
+          },
+          "delta": 0
+        },
+        "irrelevant_history": {
+          "relevant": 1,
+          "lexical": {
+            "recalled": 1,
+            "recallAt5": 1
+          },
+          "semantic": {
+            "recalled": 0,
+            "recallAt5": 0
+          },
+          "delta": -1
+        },
+        "no_relevant": {
+          "relevant": 0,
+          "lexical": {
+            "recalled": 0,
+            "recallAt5": null
+          },
+          "semantic": {
+            "recalled": 0,
+            "recallAt5": null
+          },
+          "delta": null
+        },
+        "candidate_absent": {
+          "relevant": 0,
+          "lexical": {
+            "recalled": 0,
+            "recallAt5": null
+          },
+          "semantic": {
+            "recalled": 0,
+            "recallAt5": null
+          },
+          "delta": null
+        },
+        "assistant_reference": {
+          "relevant": 0,
+          "lexical": {
+            "recalled": 0,
+            "recallAt5": null
+          },
+          "semantic": {
+            "recalled": 0,
+            "recallAt5": null
+          },
+          "delta": null
+        },
+        "copied_user_material": {
+          "relevant": 1,
+          "lexical": {
+            "recalled": 0,
+            "recallAt5": 0
+          },
+          "semantic": {
+            "recalled": 0,
+            "recallAt5": 0
+          },
+          "delta": 0
+        }
+      },
+      "differences": {
+        "gainedCases": 0,
+        "lostCases": 2,
+        "cases": [
+          {
+            "caseId": "long_middle_ko",
+            "tag": "long_middle",
+            "gained": [],
+            "lost": [
+              "atlas"
+            ],
+            "lexicalTop": [
+              "atlas",
+              "vega"
+            ],
+            "semanticTop": []
+          },
+          {
+            "caseId": "irrelevant_history",
+            "tag": "irrelevant_history",
+            "gained": [],
+            "lost": [
+              "coffee"
+            ],
+            "lexicalTop": [
+              "coffee"
+            ],
+            "semanticTop": []
+          }
+        ]
+      },
+      "coverage": {
+        "casesWithRerankRequest": 10,
+        "casesScored": 10,
+        "casesFallingBackToLexical": [],
+        "casesWithIncompleteScores": [],
+        "documentsWithoutScore": 0,
+        "scoreDocumentsNotInRequest": [],
+        "scoreCasesNotInCorpus": []
+      }
+    },
+    {
+      "path": "product:selectMemoryContext+externalRelevance",
+      "corpus": "relevance",
+      "k": 5,
+      "cases": 10,
+      "queryMode": "full-query",
+      "queryVersion": "memory-query-v3",
+      "requests": {
+        "project_omission": {
+          "queryHash": "75abb5040601910aac61a5115fbf318723e5fc83705d57632986606e8199a0d6",
+          "candidateIds": [
+            "atlas",
+            "vega",
+            "coffee"
+          ],
+          "candidatesHash": "3e84335c8fb5fe319a44dfbc70364653a8b673d1d70caf0fc40c5d1cc751a6f5",
+          "currentQueryHash": "75abb5040601910aac61a5115fbf318723e5fc83705d57632986606e8199a0d6",
+          "historyHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "queryMode": "full-query",
+          "queryBytes": 64,
+          "historyCount": 0,
+          "candidateProvenance": "same_product_lexical_and_extra_pool"
+        },
+        "project_switch": {
+          "queryHash": "c4378c068d8e3ef25b5ffbf570de98eb8d70dde5eb47868330f3bf428d7c95bc",
+          "candidateIds": [
+            "atlas",
+            "vega",
+            "coffee"
+          ],
+          "candidatesHash": "3e84335c8fb5fe319a44dfbc70364653a8b673d1d70caf0fc40c5d1cc751a6f5",
+          "currentQueryHash": "c4378c068d8e3ef25b5ffbf570de98eb8d70dde5eb47868330f3bf428d7c95bc",
+          "historyHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "queryMode": "full-query",
+          "queryBytes": 37,
+          "historyCount": 0,
+          "candidateProvenance": "same_product_lexical_and_extra_pool"
+        },
+        "latest_correction": {
+          "queryHash": "272dd8f0cfb8546a3116c78972a32723a3dc5365b6020b543c4b3717abbb5472",
+          "candidateIds": [
+            "atlas",
+            "vega",
+            "coffee"
+          ],
+          "candidatesHash": "3e84335c8fb5fe319a44dfbc70364653a8b673d1d70caf0fc40c5d1cc751a6f5",
+          "currentQueryHash": "272dd8f0cfb8546a3116c78972a32723a3dc5365b6020b543c4b3717abbb5472",
+          "historyHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "queryMode": "full-query",
+          "queryBytes": 50,
+          "historyCount": 0,
+          "candidateProvenance": "same_product_lexical_and_extra_pool"
+        },
+        "long_middle_ko": {
+          "queryHash": "da3bab6775427979e68e2b5003c960438c32f77d2518239f9a6ff9b5201d1edb",
+          "candidateIds": [
+            "atlas",
+            "vega",
+            "coffee"
+          ],
+          "candidatesHash": "3e84335c8fb5fe319a44dfbc70364653a8b673d1d70caf0fc40c5d1cc751a6f5",
+          "currentQueryHash": "da3bab6775427979e68e2b5003c960438c32f77d2518239f9a6ff9b5201d1edb",
+          "historyHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "queryMode": "full-query",
+          "queryBytes": 799,
+          "historyCount": 0,
+          "candidateProvenance": "same_product_lexical_and_extra_pool"
+        },
+        "mixed_script": {
+          "queryHash": "ca15a49d1db881b5ffce997cebcc3b0d05d04751f91a3f3cc68b8655064c3dae",
+          "candidateIds": [
+            "atlas",
+            "coffee",
+            "vega"
+          ],
+          "candidatesHash": "d3ef4aa1a4cbcf6ac477a51787f05264a2a10230eb546babd561ea5a7b93611a",
+          "currentQueryHash": "ca15a49d1db881b5ffce997cebcc3b0d05d04751f91a3f3cc68b8655064c3dae",
+          "historyHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "queryMode": "full-query",
+          "queryBytes": 48,
+          "historyCount": 0,
+          "candidateProvenance": "same_product_lexical_and_extra_pool"
+        },
+        "irrelevant_history": {
+          "queryHash": "bcb203e7adf7c5448060dde2359477bce9a01417df87972f9252138d6450a5a4",
+          "candidateIds": [
+            "coffee",
+            "atlas",
+            "vega"
+          ],
+          "candidatesHash": "2306b3aca4a5f27aeef24d2e5c7a7bb3e707222a6fdce218472117fd440853bb",
+          "currentQueryHash": "bcb203e7adf7c5448060dde2359477bce9a01417df87972f9252138d6450a5a4",
+          "historyHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "queryMode": "full-query",
+          "queryBytes": 31,
+          "historyCount": 0,
+          "candidateProvenance": "same_product_lexical_and_extra_pool"
+        },
+        "no_relevant_memory": {
+          "queryHash": "16cb54a03e351b7d04578e551421b1023ebd20e959f967b0d1c8b93c9379c62c",
+          "candidateIds": [
+            "atlas",
+            "coffee",
+            "vega"
+          ],
+          "candidatesHash": "d3ef4aa1a4cbcf6ac477a51787f05264a2a10230eb546babd561ea5a7b93611a",
+          "currentQueryHash": "16cb54a03e351b7d04578e551421b1023ebd20e959f967b0d1c8b93c9379c62c",
+          "historyHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "queryMode": "full-query",
+          "queryBytes": 34,
+          "historyCount": 0,
+          "candidateProvenance": "same_product_lexical_and_extra_pool"
+        },
+        "candidate_absent": {
+          "queryHash": "858280bb1ab292f7997808dd6cd3a3106a1e4563d3ef18af79101504f214984b",
+          "candidateIds": [
+            "atlas",
+            "coffee",
+            "vega"
+          ],
+          "candidatesHash": "d3ef4aa1a4cbcf6ac477a51787f05264a2a10230eb546babd561ea5a7b93611a",
+          "currentQueryHash": "858280bb1ab292f7997808dd6cd3a3106a1e4563d3ef18af79101504f214984b",
+          "historyHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "queryMode": "full-query",
+          "queryBytes": 33,
+          "historyCount": 0,
+          "candidateProvenance": "same_product_lexical_and_extra_pool"
+        },
+        "assistant_reference": {
+          "queryHash": "ed1e351fd5753ebcac65c23e09dced31453257df13da47314564232262b6084e",
+          "candidateIds": [
+            "atlas",
+            "vega",
+            "coffee"
+          ],
+          "candidatesHash": "3e84335c8fb5fe319a44dfbc70364653a8b673d1d70caf0fc40c5d1cc751a6f5",
+          "currentQueryHash": "ed1e351fd5753ebcac65c23e09dced31453257df13da47314564232262b6084e",
+          "historyHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "queryMode": "full-query",
+          "queryBytes": 52,
+          "historyCount": 0,
+          "candidateProvenance": "same_product_lexical_and_extra_pool"
+        },
+        "copied_user_material": {
+          "queryHash": "dc5ea7e2c63c880e4f3e388f1f86534689bc7761c75c11629a7c43769a4bb733",
+          "candidateIds": [
+            "atlas",
+            "coffee",
+            "vega"
+          ],
+          "candidatesHash": "d3ef4aa1a4cbcf6ac477a51787f05264a2a10230eb546babd561ea5a7b93611a",
+          "currentQueryHash": "dc5ea7e2c63c880e4f3e388f1f86534689bc7761c75c11629a7c43769a4bb733",
+          "historyHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "queryMode": "full-query",
+          "queryBytes": 34,
+          "historyCount": 0,
+          "candidateProvenance": "same_product_lexical_and_extra_pool"
+        }
+      },
+      "lexical": {
+        "koreanRecallAt5": 0.8571428571428571,
+        "koreanRecallInjected": 0.8571428571428571,
+        "relevant": 7,
+        "recalled": 6,
+        "irrelevantInjectionRate": 0.6,
+        "gatedIrrelevantRate": 0.6,
+        "forbidden": 0,
+        "top5": {
+          "koreanRecallAt5": 0.8571428571428571,
+          "irrelevantInjectionRate": 0.6,
+          "selected": 15,
+          "relevant": 7,
+          "recalled": 6,
+          "irrelevant": 9,
+          "forbidden": 0,
+          "inactive": 0,
+          "gatedSelected": 15,
+          "gatedIrrelevant": 9,
+          "gatedIrrelevantRate": 0.6
+        },
+        "fullSelectedSet": {
+          "selected": 15,
+          "relevant": 7,
+          "recalled": 6,
+          "recall": 0.8571428571428571,
+          "koreanRecall": 0.8571428571428571,
+          "irrelevant": 9,
+          "forbidden": 0,
+          "inactive": 0,
+          "gatedSelected": 15,
+          "gatedIrrelevant": 9,
+          "gatedIrrelevantRate": 0.6,
+          "alwaysOnSelected": 0
+        }
+      },
+      "semantic": {
+        "koreanRecallAt5": 0.7142857142857143,
+        "koreanRecallInjected": 0.7142857142857143,
+        "relevant": 7,
+        "recalled": 5,
+        "irrelevantInjectionRate": 0.5454545454545454,
+        "gatedIrrelevantRate": 0.5454545454545454,
+        "forbidden": 0,
+        "top5": {
+          "koreanRecallAt5": 0.7142857142857143,
+          "irrelevantInjectionRate": 0.5454545454545454,
+          "selected": 11,
+          "relevant": 7,
+          "recalled": 5,
+          "irrelevant": 6,
+          "forbidden": 0,
+          "inactive": 0,
+          "gatedSelected": 11,
+          "gatedIrrelevant": 6,
+          "gatedIrrelevantRate": 0.5454545454545454
+        },
+        "fullSelectedSet": {
+          "selected": 11,
+          "relevant": 7,
+          "recalled": 5,
+          "recall": 0.7142857142857143,
+          "koreanRecall": 0.7142857142857143,
+          "irrelevant": 6,
+          "forbidden": 0,
+          "inactive": 0,
+          "gatedSelected": 11,
+          "gatedIrrelevant": 6,
+          "gatedIrrelevantRate": 0.5454545454545454,
+          "alwaysOnSelected": 0
+        }
+      },
+      "scoreEvidence": {
+        "kind": "provider",
+        "identityVerified": true,
+        "provider": "cohere",
+        "model": "rerank-v5.0-fast",
+        "collectedAt": "2026-11-15T10:45:03.947Z",
+        "settings": {
+          "maxCalls": 10,
+          "queryVersion": "memory-query-v3",
+          "queryMode": "full-query",
+          "billingUnit": "token",
+          "retrievalVersion": 5,
+          "minRerankScore": 0.1,
+          "maxRerankCandidates": 100,
+          "maxRecentExtraCandidates": 50
+        },
+        "semanticRetrievalMeasured": true
+      },
+      "answerQuality": {
+        "status": "not_run",
+        "reason": "no_answer_model_executed"
+      },
+      "delta": {
+        "koreanRecallAt5": -0.1429,
+        "irrelevantInjectionRate": -0.0545,
+        "gatedIrrelevantRate": -0.0545
+      },
+      "byTag": {
+        "project_omission": {
+          "relevant": 1,
+          "lexical": {
+            "recalled": 1,
+            "recallAt5": 1
+          },
+          "semantic": {
+            "recalled": 1,
+            "recallAt5": 1
+          },
+          "delta": 0
+        },
+        "project_switch": {
+          "relevant": 1,
+          "lexical": {
+            "recalled": 1,
+            "recallAt5": 1
+          },
+          "semantic": {
+            "recalled": 1,
+            "recallAt5": 1
+          },
+          "delta": 0
+        },
+        "latest_correction": {
+          "relevant": 1,
+          "lexical": {
+            "recalled": 1,
+            "recallAt5": 1
+          },
+          "semantic": {
+            "recalled": 1,
+            "recallAt5": 1
+          },
+          "delta": 0
+        },
+        "long_middle": {
+          "relevant": 1,
+          "lexical": {
+            "recalled": 1,
+            "recallAt5": 1
+          },
+          "semantic": {
+            "recalled": 1,
+            "recallAt5": 1
+          },
+          "delta": 0
+        },
+        "mixed_script": {
+          "relevant": 1,
+          "lexical": {
+            "recalled": 1,
+            "recallAt5": 1
+          },
+          "semantic": {
+            "recalled": 1,
+            "recallAt5": 1
+          },
+          "delta": 0
+        },
+        "irrelevant_history": {
+          "relevant": 1,
+          "lexical": {
+            "recalled": 1,
+            "recallAt5": 1
+          },
+          "semantic": {
+            "recalled": 0,
+            "recallAt5": 0
+          },
+          "delta": -1
+        },
+        "no_relevant": {
+          "relevant": 0,
+          "lexical": {
+            "recalled": 0,
+            "recallAt5": null
+          },
+          "semantic": {
+            "recalled": 0,
+            "recallAt5": null
+          },
+          "delta": null
+        },
+        "candidate_absent": {
+          "relevant": 0,
+          "lexical": {
+            "recalled": 0,
+            "recallAt5": null
+          },
+          "semantic": {
+            "recalled": 0,
+            "recallAt5": null
+          },
+          "delta": null
+        },
+        "assistant_reference": {
+          "relevant": 0,
+          "lexical": {
+            "recalled": 0,
+            "recallAt5": null
+          },
+          "semantic": {
+            "recalled": 0,
+            "recallAt5": null
+          },
+          "delta": null
+        },
+        "copied_user_material": {
+          "relevant": 1,
+          "lexical": {
+            "recalled": 0,
+            "recallAt5": 0
+          },
+          "semantic": {
+            "recalled": 0,
+            "recallAt5": 0
+          },
+          "delta": 0
+        }
+      },
+      "differences": {
+        "gainedCases": 0,
+        "lostCases": 1,
+        "cases": [
+          {
+            "caseId": "irrelevant_history",
+            "tag": "irrelevant_history",
+            "gained": [],
+            "lost": [
+              "coffee"
+            ],
+            "lexicalTop": [
+              "coffee"
+            ],
+            "semanticTop": []
+          }
+        ]
+      },
+      "coverage": {
+        "casesWithRerankRequest": 10,
+        "casesScored": 10,
+        "casesFallingBackToLexical": [],
+        "casesWithIncompleteScores": [],
+        "documentsWithoutScore": 0,
+        "scoreDocumentsNotInRequest": [],
+        "scoreCasesNotInCorpus": []
+      }
+    },
+    {
+      "path": "product:selectMemoryContext+externalRelevance",
+      "corpus": "relevance",
+      "k": 5,
+      "cases": 10,
+      "queryMode": "full-query+history",
+      "queryVersion": "memory-query-v3",
+      "requests": {
+        "project_omission": {
+          "queryHash": "85f094b22845820c944f1355ade7ac097d4c10180dd9a43f1dbb468c7b9b5458",
+          "candidateIds": [
+            "atlas",
+            "vega",
+            "coffee"
+          ],
+          "candidatesHash": "3e84335c8fb5fe319a44dfbc70364653a8b673d1d70caf0fc40c5d1cc751a6f5",
+          "currentQueryHash": "75abb5040601910aac61a5115fbf318723e5fc83705d57632986606e8199a0d6",
+          "historyHash": "31fd1a0004cbebc00e2f0b426f72f595cc38ff2673deb0c0d06d059d5123f622",
+          "queryMode": "full-query+history",
+          "queryBytes": 173,
+          "historyCount": 1,
+          "candidateProvenance": "same_product_lexical_and_extra_pool"
+        },
+        "project_switch": {
+          "queryHash": "c615d7b83886c82df0398394ad0071b3679fcb6b7febfa7c35c64e5fff743e6c",
+          "candidateIds": [
+            "atlas",
+            "vega",
+            "coffee"
+          ],
+          "candidatesHash": "3e84335c8fb5fe319a44dfbc70364653a8b673d1d70caf0fc40c5d1cc751a6f5",
+          "currentQueryHash": "c4378c068d8e3ef25b5ffbf570de98eb8d70dde5eb47868330f3bf428d7c95bc",
+          "historyHash": "d5aa716a57a0514c01ad1ad5b8a8b167df502c711d51323bfaddfa6b1a1e2238",
+          "queryMode": "full-query+history",
+          "queryBytes": 166,
+          "historyCount": 2,
+          "candidateProvenance": "same_product_lexical_and_extra_pool"
+        },
+        "latest_correction": {
+          "queryHash": "69d8f2d1425f1637702f4deee567e6683a97c5ddb6022389353381c9c9917b6c",
+          "candidateIds": [
+            "atlas",
+            "vega",
+            "coffee"
+          ],
+          "candidatesHash": "3e84335c8fb5fe319a44dfbc70364653a8b673d1d70caf0fc40c5d1cc751a6f5",
+          "currentQueryHash": "272dd8f0cfb8546a3116c78972a32723a3dc5365b6020b543c4b3717abbb5472",
+          "historyHash": "b5635bba9ef6a4c2277e27ec8d671bcf7c0fc564c7028a5b8915653abf537ada",
+          "queryMode": "full-query+history",
+          "queryBytes": 193,
+          "historyCount": 2,
+          "candidateProvenance": "same_product_lexical_and_extra_pool"
+        },
+        "long_middle_ko": {
+          "queryHash": "da3bab6775427979e68e2b5003c960438c32f77d2518239f9a6ff9b5201d1edb",
+          "candidateIds": [
+            "atlas",
+            "vega",
+            "coffee"
+          ],
+          "candidatesHash": "3e84335c8fb5fe319a44dfbc70364653a8b673d1d70caf0fc40c5d1cc751a6f5",
+          "currentQueryHash": "da3bab6775427979e68e2b5003c960438c32f77d2518239f9a6ff9b5201d1edb",
+          "historyHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "queryMode": "full-query+history",
+          "queryBytes": 799,
+          "historyCount": 0,
+          "candidateProvenance": "same_product_lexical_and_extra_pool"
+        },
+        "mixed_script": {
+          "queryHash": "438063c7175babcc3b8e7494c14185fa40c54fefea4fbe406fcc6451a8f90a0b",
+          "candidateIds": [
+            "atlas",
+            "coffee",
+            "vega"
+          ],
+          "candidatesHash": "d3ef4aa1a4cbcf6ac477a51787f05264a2a10230eb546babd561ea5a7b93611a",
+          "currentQueryHash": "ca15a49d1db881b5ffce997cebcc3b0d05d04751f91a3f3cc68b8655064c3dae",
+          "historyHash": "1304f95cf4944dd1d742000664ae4104f27195941dbf7271165cca71bff4c1c0",
+          "queryMode": "full-query+history",
+          "queryBytes": 143,
+          "historyCount": 1,
+          "candidateProvenance": "same_product_lexical_and_extra_pool"
+        },
+        "irrelevant_history": {
+          "queryHash": "8de2e2192cbbecc7a5e542df6a4aea9f6b5e1ce79747ebc71f6d9e2935429d6a",
+          "candidateIds": [
+            "coffee",
+            "atlas",
+            "vega"
+          ],
+          "candidatesHash": "2306b3aca4a5f27aeef24d2e5c7a7bb3e707222a6fdce218472117fd440853bb",
+          "currentQueryHash": "bcb203e7adf7c5448060dde2359477bce9a01417df87972f9252138d6450a5a4",
+          "historyHash": "9a8d246511cd428da7ea1d125ad29d0dad5ead4ef8aa8bd1d0f6e25a1a10f59d",
+          "queryMode": "full-query+history",
+          "queryBytes": 124,
+          "historyCount": 1,
+          "candidateProvenance": "same_product_lexical_and_extra_pool"
+        },
+        "no_relevant_memory": {
+          "queryHash": "297f2c1dffbb49b058d082f2f49eb22d269fcae71085629e291a0b01cb3ae19d",
+          "candidateIds": [
+            "atlas",
+            "coffee",
+            "vega"
+          ],
+          "candidatesHash": "d3ef4aa1a4cbcf6ac477a51787f05264a2a10230eb546babd561ea5a7b93611a",
+          "currentQueryHash": "16cb54a03e351b7d04578e551421b1023ebd20e959f967b0d1c8b93c9379c62c",
+          "historyHash": "752ffc9ebd054bbc371cc5eb742a34e6f18a369685e5e421acf39254f4a17625",
+          "queryMode": "full-query+history",
+          "queryBytes": 114,
+          "historyCount": 1,
+          "candidateProvenance": "same_product_lexical_and_extra_pool"
+        },
+        "candidate_absent": {
+          "queryHash": "6623bd14855d0e25d90d1b1cb5797039286a5287fc6deb36e99a2516b9f7e868",
+          "candidateIds": [
+            "atlas",
+            "coffee",
+            "vega"
+          ],
+          "candidatesHash": "d3ef4aa1a4cbcf6ac477a51787f05264a2a10230eb546babd561ea5a7b93611a",
+          "currentQueryHash": "858280bb1ab292f7997808dd6cd3a3106a1e4563d3ef18af79101504f214984b",
+          "historyHash": "6dc5dddd28bbe6f3042c469b78c73b52d8f0c0a768a85dddfa44617ec546eff5",
+          "queryMode": "full-query+history",
+          "queryBytes": 133,
+          "historyCount": 1,
+          "candidateProvenance": "same_product_lexical_and_extra_pool"
+        },
+        "assistant_reference": {
+          "queryHash": "824c66aaa67fa2b9b7134f2da1e03d3943ed200b9f815666ba5bdbe41077a802",
+          "candidateIds": [
+            "atlas",
+            "vega",
+            "coffee"
+          ],
+          "candidatesHash": "3e84335c8fb5fe319a44dfbc70364653a8b673d1d70caf0fc40c5d1cc751a6f5",
+          "currentQueryHash": "ed1e351fd5753ebcac65c23e09dced31453257df13da47314564232262b6084e",
+          "historyHash": "840d5747067387fcf66aea5f0cc2e5203b0590508f4c85ac4c84e4a24084a2d1",
+          "queryMode": "full-query+history",
+          "queryBytes": 142,
+          "historyCount": 1,
+          "candidateProvenance": "same_product_lexical_and_extra_pool"
+        },
+        "copied_user_material": {
+          "queryHash": "c736df94f10adf479a6ad4c052fc622a80cd26f86aaf0b2130cc7ce4720caacf",
+          "candidateIds": [
+            "atlas",
+            "coffee",
+            "vega"
+          ],
+          "candidatesHash": "d3ef4aa1a4cbcf6ac477a51787f05264a2a10230eb546babd561ea5a7b93611a",
+          "currentQueryHash": "dc5ea7e2c63c880e4f3e388f1f86534689bc7761c75c11629a7c43769a4bb733",
+          "historyHash": "8446b25be5e20d7ab99a005d8f72b07fd8e61974a95b4fd22752fd6f1c6698a3",
+          "queryMode": "full-query+history",
+          "queryBytes": 189,
+          "historyCount": 1,
+          "candidateProvenance": "same_product_lexical_and_extra_pool"
+        }
+      },
+      "lexical": {
+        "koreanRecallAt5": 0.8571428571428571,
+        "koreanRecallInjected": 0.8571428571428571,
+        "relevant": 7,
+        "recalled": 6,
+        "irrelevantInjectionRate": 0.6,
+        "gatedIrrelevantRate": 0.6,
+        "forbidden": 0,
+        "top5": {
+          "koreanRecallAt5": 0.8571428571428571,
+          "irrelevantInjectionRate": 0.6,
+          "selected": 15,
+          "relevant": 7,
+          "recalled": 6,
+          "irrelevant": 9,
+          "forbidden": 0,
+          "inactive": 0,
+          "gatedSelected": 15,
+          "gatedIrrelevant": 9,
+          "gatedIrrelevantRate": 0.6
+        },
+        "fullSelectedSet": {
+          "selected": 15,
+          "relevant": 7,
+          "recalled": 6,
+          "recall": 0.8571428571428571,
+          "koreanRecall": 0.8571428571428571,
+          "irrelevant": 9,
+          "forbidden": 0,
+          "inactive": 0,
+          "gatedSelected": 15,
+          "gatedIrrelevant": 9,
+          "gatedIrrelevantRate": 0.6,
+          "alwaysOnSelected": 0
+        }
+      },
+      "semantic": {
+        "koreanRecallAt5": 0.8571428571428571,
+        "koreanRecallInjected": 0.8571428571428571,
+        "relevant": 7,
+        "recalled": 6,
+        "irrelevantInjectionRate": 0.5384615384615384,
+        "gatedIrrelevantRate": 0.5384615384615384,
+        "forbidden": 0,
+        "top5": {
+          "koreanRecallAt5": 0.8571428571428571,
+          "irrelevantInjectionRate": 0.5384615384615384,
+          "selected": 13,
+          "relevant": 7,
+          "recalled": 6,
+          "irrelevant": 7,
+          "forbidden": 0,
+          "inactive": 0,
+          "gatedSelected": 13,
+          "gatedIrrelevant": 7,
+          "gatedIrrelevantRate": 0.5384615384615384
+        },
+        "fullSelectedSet": {
+          "selected": 13,
+          "relevant": 7,
+          "recalled": 6,
+          "recall": 0.8571428571428571,
+          "koreanRecall": 0.8571428571428571,
+          "irrelevant": 7,
+          "forbidden": 0,
+          "inactive": 0,
+          "gatedSelected": 13,
+          "gatedIrrelevant": 7,
+          "gatedIrrelevantRate": 0.5384615384615384,
+          "alwaysOnSelected": 0
+        }
+      },
+      "scoreEvidence": {
+        "kind": "provider",
+        "identityVerified": true,
+        "provider": "cohere",
+        "model": "rerank-v5.0-fast",
+        "collectedAt": "2026-11-15T10:46:18.410Z",
+        "settings": {
+          "maxCalls": 10,
+          "queryVersion": "memory-query-v3",
+          "queryMode": "full-query+history",
+          "billingUnit": "token",
+          "retrievalVersion": 5,
+          "minRerankScore": 0.1,
+          "maxRerankCandidates": 100,
+          "maxRecentExtraCandidates": 50
+        },
+        "semanticRetrievalMeasured": true
+      },
+      "answerQuality": {
+        "status": "not_run",
+        "reason": "no_answer_model_executed"
+      },
+      "delta": {
+        "koreanRecallAt5": 0,
+        "irrelevantInjectionRate": -0.0615,
+        "gatedIrrelevantRate": -0.0615
+      },
+      "byTag": {
+        "project_omission": {
+          "relevant": 1,
+          "lexical": {
+            "recalled": 1,
+            "recallAt5": 1
+          },
+          "semantic": {
+            "recalled": 1,
+            "recallAt5": 1
+          },
+          "delta": 0
+        },
+        "project_switch": {
+          "relevant": 1,
+          "lexical": {
+            "recalled": 1,
+            "recallAt5": 1
+          },
+          "semantic": {
+            "recalled": 1,
+            "recallAt5": 1
+          },
+          "delta": 0
+        },
+        "latest_correction": {
+          "relevant": 1,
+          "lexical": {
+            "recalled": 1,
+            "recallAt5": 1
+          },
+          "semantic": {
+            "recalled": 1,
+            "recallAt5": 1
+          },
+          "delta": 0
+        },
+        "long_middle": {
+          "relevant": 1,
+          "lexical": {
+            "recalled": 1,
+            "recallAt5": 1
+          },
+          "semantic": {
+            "recalled": 1,
+            "recallAt5": 1
+          },
+          "delta": 0
+        },
+        "mixed_script": {
+          "relevant": 1,
+          "lexical": {
+            "recalled": 1,
+            "recallAt5": 1
+          },
+          "semantic": {
+            "recalled": 1,
+            "recallAt5": 1
+          },
+          "delta": 0
+        },
+        "irrelevant_history": {
+          "relevant": 1,
+          "lexical": {
+            "recalled": 1,
+            "recallAt5": 1
+          },
+          "semantic": {
+            "recalled": 0,
+            "recallAt5": 0
+          },
+          "delta": -1
+        },
+        "no_relevant": {
+          "relevant": 0,
+          "lexical": {
+            "recalled": 0,
+            "recallAt5": null
+          },
+          "semantic": {
+            "recalled": 0,
+            "recallAt5": null
+          },
+          "delta": null
+        },
+        "candidate_absent": {
+          "relevant": 0,
+          "lexical": {
+            "recalled": 0,
+            "recallAt5": null
+          },
+          "semantic": {
+            "recalled": 0,
+            "recallAt5": null
+          },
+          "delta": null
+        },
+        "assistant_reference": {
+          "relevant": 0,
+          "lexical": {
+            "recalled": 0,
+            "recallAt5": null
+          },
+          "semantic": {
+            "recalled": 0,
+            "recallAt5": null
+          },
+          "delta": null
+        },
+        "copied_user_material": {
+          "relevant": 1,
+          "lexical": {
+            "recalled": 0,
+            "recallAt5": 0
+          },
+          "semantic": {
+            "recalled": 1,
+            "recallAt5": 1
+          },
+          "delta": 1
+        }
+      },
+      "differences": {
+        "gainedCases": 1,
+        "lostCases": 1,
+        "cases": [
+          {
+            "caseId": "irrelevant_history",
+            "tag": "irrelevant_history",
+            "gained": [],
+            "lost": [
+              "coffee"
+            ],
+            "lexicalTop": [
+              "coffee"
+            ],
+            "semanticTop": [
+              "atlas"
+            ]
+          },
+          {
+            "caseId": "copied_user_material",
+            "tag": "copied_user_material",
+            "gained": [
+              "atlas"
+            ],
+            "lost": [],
+            "lexicalTop": [],
+            "semanticTop": [
+              "atlas"
+            ]
+          }
+        ]
+      },
+      "coverage": {
+        "casesWithRerankRequest": 10,
+        "casesScored": 10,
+        "casesFallingBackToLexical": [],
+        "casesWithIncompleteScores": [],
+        "documentsWithoutScore": 0,
+        "scoreDocumentsNotInRequest": [],
+        "scoreCasesNotInCorpus": []
+      }
+    }
+  ],
+  "caseResults": [
+    {
+      "mode": "current-query",
+      "caseId": "project_omission",
+      "relevantIds": [
+        "atlas"
+      ],
+      "selected": [
+        {
+          "id": "atlas",
+          "tier": "relevant"
+        },
+        {
+          "id": "vega",
+          "tier": "relevant"
+        }
+      ]
+    },
+    {
+      "mode": "current-query",
+      "caseId": "project_switch",
+      "relevantIds": [
+        "vega"
+      ],
+      "selected": [
+        {
+          "id": "atlas",
+          "tier": "relevant"
+        },
+        {
+          "id": "vega",
+          "tier": "relevant"
+        }
+      ]
+    },
+    {
+      "mode": "current-query",
+      "caseId": "latest_correction",
+      "relevantIds": [
+        "atlas"
+      ],
+      "selected": [
+        {
+          "id": "atlas",
+          "tier": "relevant"
+        },
+        {
+          "id": "vega",
+          "tier": "relevant"
+        }
+      ]
+    },
+    {
+      "mode": "current-query",
+      "caseId": "long_middle_ko",
+      "relevantIds": [
+        "atlas"
+      ],
+      "selected": []
+    },
+    {
+      "mode": "current-query",
+      "caseId": "mixed_script",
+      "relevantIds": [
+        "atlas"
+      ],
+      "selected": [
+        {
+          "id": "atlas",
+          "tier": "relevant"
+        },
+        {
+          "id": "vega",
+          "tier": "relevant"
+        }
+      ]
+    },
+    {
+      "mode": "current-query",
+      "caseId": "irrelevant_history",
+      "relevantIds": [
+        "coffee"
+      ],
+      "selected": []
+    },
+    {
+      "mode": "current-query",
+      "caseId": "no_relevant_memory",
+      "relevantIds": [],
+      "selected": []
+    },
+    {
+      "mode": "current-query",
+      "caseId": "candidate_absent",
+      "relevantIds": [],
+      "selected": [
+        {
+          "id": "atlas",
+          "tier": "relevant"
+        },
+        {
+          "id": "vega",
+          "tier": "relevant"
+        }
+      ],
+      "limitation": "The relevant memory is absent from the candidate pool."
+    },
+    {
+      "mode": "current-query",
+      "caseId": "assistant_reference",
+      "relevantIds": [],
+      "selected": [],
+      "limitation": "Assistant messages are outside this history scope."
+    },
+    {
+      "mode": "current-query",
+      "caseId": "copied_user_material",
+      "relevantIds": [
+        "atlas"
+      ],
+      "selected": [],
+      "limitation": "User bodies can contain copied external text; they are data, without an origin classifier."
+    },
+    {
+      "mode": "full-query",
+      "caseId": "project_omission",
+      "relevantIds": [
+        "atlas"
+      ],
+      "selected": [
+        {
+          "id": "atlas",
+          "tier": "relevant"
+        },
+        {
+          "id": "vega",
+          "tier": "relevant"
+        }
+      ]
+    },
+    {
+      "mode": "full-query",
+      "caseId": "project_switch",
+      "relevantIds": [
+        "vega"
+      ],
+      "selected": [
+        {
+          "id": "atlas",
+          "tier": "relevant"
+        },
+        {
+          "id": "vega",
+          "tier": "relevant"
+        }
+      ]
+    },
+    {
+      "mode": "full-query",
+      "caseId": "latest_correction",
+      "relevantIds": [
+        "atlas"
+      ],
+      "selected": [
+        {
+          "id": "atlas",
+          "tier": "relevant"
+        },
+        {
+          "id": "vega",
+          "tier": "relevant"
+        }
+      ]
+    },
+    {
+      "mode": "full-query",
+      "caseId": "long_middle_ko",
+      "relevantIds": [
+        "atlas"
+      ],
+      "selected": [
+        {
+          "id": "atlas",
+          "tier": "relevant"
+        }
+      ]
+    },
+    {
+      "mode": "full-query",
+      "caseId": "mixed_script",
+      "relevantIds": [
+        "atlas"
+      ],
+      "selected": [
+        {
+          "id": "atlas",
+          "tier": "relevant"
+        },
+        {
+          "id": "vega",
+          "tier": "relevant"
+        }
+      ]
+    },
+    {
+      "mode": "full-query",
+      "caseId": "irrelevant_history",
+      "relevantIds": [
+        "coffee"
+      ],
+      "selected": []
+    },
+    {
+      "mode": "full-query",
+      "caseId": "no_relevant_memory",
+      "relevantIds": [],
+      "selected": []
+    },
+    {
+      "mode": "full-query",
+      "caseId": "candidate_absent",
+      "relevantIds": [],
+      "selected": [
+        {
+          "id": "atlas",
+          "tier": "relevant"
+        },
+        {
+          "id": "vega",
+          "tier": "relevant"
+        }
+      ],
+      "limitation": "The relevant memory is absent from the candidate pool."
+    },
+    {
+      "mode": "full-query",
+      "caseId": "assistant_reference",
+      "relevantIds": [],
+      "selected": [],
+      "limitation": "Assistant messages are outside this history scope."
+    },
+    {
+      "mode": "full-query",
+      "caseId": "copied_user_material",
+      "relevantIds": [
+        "atlas"
+      ],
+      "selected": [],
+      "limitation": "User bodies can contain copied external text; they are data, without an origin classifier."
+    },
+    {
+      "mode": "full-query+history",
+      "caseId": "project_omission",
+      "relevantIds": [
+        "atlas"
+      ],
+      "selected": [
+        {
+          "id": "atlas",
+          "tier": "relevant"
+        },
+        {
+          "id": "vega",
+          "tier": "relevant"
+        }
+      ]
+    },
+    {
+      "mode": "full-query+history",
+      "caseId": "project_switch",
+      "relevantIds": [
+        "vega"
+      ],
+      "selected": [
+        {
+          "id": "atlas",
+          "tier": "relevant"
+        },
+        {
+          "id": "vega",
+          "tier": "relevant"
+        }
+      ]
+    },
+    {
+      "mode": "full-query+history",
+      "caseId": "latest_correction",
+      "relevantIds": [
+        "atlas"
+      ],
+      "selected": [
+        {
+          "id": "atlas",
+          "tier": "relevant"
+        },
+        {
+          "id": "vega",
+          "tier": "relevant"
+        }
+      ]
+    },
+    {
+      "mode": "full-query+history",
+      "caseId": "long_middle_ko",
+      "relevantIds": [
+        "atlas"
+      ],
+      "selected": [
+        {
+          "id": "atlas",
+          "tier": "relevant"
+        }
+      ]
+    },
+    {
+      "mode": "full-query+history",
+      "caseId": "mixed_script",
+      "relevantIds": [
+        "atlas"
+      ],
+      "selected": [
+        {
+          "id": "atlas",
+          "tier": "relevant"
+        },
+        {
+          "id": "vega",
+          "tier": "relevant"
+        }
+      ]
+    },
+    {
+      "mode": "full-query+history",
+      "caseId": "irrelevant_history",
+      "relevantIds": [
+        "coffee"
+      ],
+      "selected": [
+        {
+          "id": "atlas",
+          "tier": "relevant"
+        }
+      ]
+    },
+    {
+      "mode": "full-query+history",
+      "caseId": "no_relevant_memory",
+      "relevantIds": [],
+      "selected": []
+    },
+    {
+      "mode": "full-query+history",
+      "caseId": "candidate_absent",
+      "relevantIds": [],
+      "selected": [],
+      "limitation": "The relevant memory is absent from the candidate pool."
+    },
+    {
+      "mode": "full-query+history",
+      "caseId": "assistant_reference",
+      "relevantIds": [],
+      "selected": [
+        {
+          "id": "vega",
+          "tier": "relevant"
+        },
+        {
+          "id": "atlas",
+          "tier": "relevant"
+        }
+      ],
+      "limitation": "Assistant messages are outside this history scope."
+    },
+    {
+      "mode": "full-query+history",
+      "caseId": "copied_user_material",
+      "relevantIds": [
+        "atlas"
+      ],
+      "selected": [
+        {
+          "id": "atlas",
+          "tier": "relevant"
+        }
+      ],
+      "limitation": "User bodies can contain copied external text; they are data, without an origin classifier."
+    }
+  ],
+  "requests": [
+    {
+      "mode": "current-query",
+      "caseId": "project_omission",
+      "elapsedMs": 420,
+      "billedInputTokens": 108,
+      "estimateMicroUsd": 3,
+      "reservedMicroUsd": 10
+    },
+    {
+      "mode": "current-query",
+      "caseId": "project_switch",
+      "elapsedMs": 553,
+      "billedInputTokens": 90,
+      "estimateMicroUsd": 2,
+      "reservedMicroUsd": 8
+    },
+    {
+      "mode": "current-query",
+      "caseId": "latest_correction",
+      "elapsedMs": 392,
+      "billedInputTokens": 93,
+      "estimateMicroUsd": 2,
+      "reservedMicroUsd": 9
+    },
+    {
+      "mode": "current-query",
+      "caseId": "long_middle_ko",
+      "elapsedMs": 669,
+      "billedInputTokens": 297,
+      "estimateMicroUsd": 6,
+      "reservedMicroUsd": 37
+    },
+    {
+      "mode": "current-query",
+      "caseId": "mixed_script",
+      "elapsedMs": 620,
+      "billedInputTokens": 96,
+      "estimateMicroUsd": 2,
+      "reservedMicroUsd": 9
+    },
+    {
+      "mode": "current-query",
+      "caseId": "irrelevant_history",
+      "elapsedMs": 490,
+      "billedInputTokens": 81,
+      "estimateMicroUsd": 2,
+      "reservedMicroUsd": 7
+    },
+    {
+      "mode": "current-query",
+      "caseId": "no_relevant_memory",
+      "elapsedMs": 453,
+      "billedInputTokens": 87,
+      "estimateMicroUsd": 2,
+      "reservedMicroUsd": 8
+    },
+    {
+      "mode": "current-query",
+      "caseId": "candidate_absent",
+      "elapsedMs": 569,
+      "billedInputTokens": 78,
+      "estimateMicroUsd": 2,
+      "reservedMicroUsd": 8
+    },
+    {
+      "mode": "current-query",
+      "caseId": "assistant_reference",
+      "elapsedMs": 447,
+      "billedInputTokens": 93,
+      "estimateMicroUsd": 2,
+      "reservedMicroUsd": 9
+    },
+    {
+      "mode": "current-query",
+      "caseId": "copied_user_material",
+      "elapsedMs": 471,
+      "billedInputTokens": 87,
+      "estimateMicroUsd": 2,
+      "reservedMicroUsd": 8
+    },
+    {
+      "mode": "full-query",
+      "caseId": "project_omission",
+      "elapsedMs": 478,
+      "billedInputTokens": 108,
+      "estimateMicroUsd": 3,
+      "reservedMicroUsd": 10
+    },
+    {
+      "mode": "full-query",
+      "caseId": "project_switch",
+      "elapsedMs": 705,
+      "billedInputTokens": 90,
+      "estimateMicroUsd": 2,
+      "reservedMicroUsd": 8
+    },
+    {
+      "mode": "full-query",
+      "caseId": "latest_correction",
+      "elapsedMs": 499,
+      "billedInputTokens": 93,
+      "estimateMicroUsd": 2,
+      "reservedMicroUsd": 9
+    },
+    {
+      "mode": "full-query",
+      "caseId": "long_middle_ko",
+      "elapsedMs": 680,
+      "billedInputTokens": 534,
+      "estimateMicroUsd": 11,
+      "reservedMicroUsd": 69
+    },
+    {
+      "mode": "full-query",
+      "caseId": "mixed_script",
+      "elapsedMs": 581,
+      "billedInputTokens": 96,
+      "estimateMicroUsd": 2,
+      "reservedMicroUsd": 9
+    },
+    {
+      "mode": "full-query",
+      "caseId": "irrelevant_history",
+      "elapsedMs": 1097,
+      "billedInputTokens": 81,
+      "estimateMicroUsd": 2,
+      "reservedMicroUsd": 7
+    },
+    {
+      "mode": "full-query",
+      "caseId": "no_relevant_memory",
+      "elapsedMs": 824,
+      "billedInputTokens": 87,
+      "estimateMicroUsd": 2,
+      "reservedMicroUsd": 8
+    },
+    {
+      "mode": "full-query",
+      "caseId": "candidate_absent",
+      "elapsedMs": 942,
+      "billedInputTokens": 78,
+      "estimateMicroUsd": 2,
+      "reservedMicroUsd": 8
+    },
+    {
+      "mode": "full-query",
+      "caseId": "assistant_reference",
+      "elapsedMs": 818,
+      "billedInputTokens": 93,
+      "estimateMicroUsd": 2,
+      "reservedMicroUsd": 9
+    },
+    {
+      "mode": "full-query",
+      "caseId": "copied_user_material",
+      "elapsedMs": 472,
+      "billedInputTokens": 87,
+      "estimateMicroUsd": 2,
+      "reservedMicroUsd": 8
+    },
+    {
+      "mode": "full-query+history",
+      "caseId": "project_omission",
+      "elapsedMs": 532,
+      "billedInputTokens": 174,
+      "estimateMicroUsd": 4,
+      "reservedMicroUsd": 19
+    },
+    {
+      "mode": "full-query+history",
+      "caseId": "project_switch",
+      "elapsedMs": 648,
+      "billedInputTokens": 174,
+      "estimateMicroUsd": 4,
+      "reservedMicroUsd": 18
+    },
+    {
+      "mode": "full-query+history",
+      "caseId": "latest_correction",
+      "elapsedMs": 661,
+      "billedInputTokens": 195,
+      "estimateMicroUsd": 4,
+      "reservedMicroUsd": 20
+    },
+    {
+      "mode": "full-query+history",
+      "caseId": "long_middle_ko",
+      "elapsedMs": 703,
+      "billedInputTokens": 534,
+      "estimateMicroUsd": 11,
+      "reservedMicroUsd": 69
+    },
+    {
+      "mode": "full-query+history",
+      "caseId": "mixed_script",
+      "elapsedMs": 672,
+      "billedInputTokens": 165,
+      "estimateMicroUsd": 4,
+      "reservedMicroUsd": 16
+    },
+    {
+      "mode": "full-query+history",
+      "caseId": "irrelevant_history",
+      "elapsedMs": 819,
+      "billedInputTokens": 144,
+      "estimateMicroUsd": 3,
+      "reservedMicroUsd": 15
+    },
+    {
+      "mode": "full-query+history",
+      "caseId": "no_relevant_memory",
+      "elapsedMs": 635,
+      "billedInputTokens": 138,
+      "estimateMicroUsd": 3,
+      "reservedMicroUsd": 14
+    },
+    {
+      "mode": "full-query+history",
+      "caseId": "candidate_absent",
+      "elapsedMs": 519,
+      "billedInputTokens": 141,
+      "estimateMicroUsd": 3,
+      "reservedMicroUsd": 16
+    },
+    {
+      "mode": "full-query+history",
+      "caseId": "assistant_reference",
+      "elapsedMs": 595,
+      "billedInputTokens": 159,
+      "estimateMicroUsd": 4,
+      "reservedMicroUsd": 16
+    },
+    {
+      "mode": "full-query+history",
+      "caseId": "copied_user_material",
+      "elapsedMs": 599,
+      "billedInputTokens": 189,
+      "estimateMicroUsd": 4,
+      "reservedMicroUsd": 20
+    }
+  ],
+  "limitations": [
+    "Authored synthetic 10-case corpus; three candidate memories per request; not an independent holdout.",
+    "No new candidate recall, assistant-message interpretation, final-answer generation or end-to-end production retrieval was evaluated.",
+    "Always-on memory tiers are reported separately from relevance-gated injection.",
+    "Account training opt-out was verified; account-specific retention exceptions and processing countries remain unverified.",
+    "No operational rerank model, unit price, daily/monthly retrieval budget or relevance-context enablement was configured; evaluation values existed only in the local harness."
+  ]
+}

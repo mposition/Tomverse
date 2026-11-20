@@ -8,23 +8,42 @@ import type { Session } from "next-auth";
 import { z } from "zod";
 
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
-import { IMAGE_MODEL_REGISTRY, minimumCreditsForImageOption } from "@/lib/imageModelRegistry";
-import { invalidateImageModelCatalog, judgeCoding, judgeImage } from "@/lib/modelCatalog";
+import { IMAGE_MODEL_REGISTRY, type ImageModelProfile, minimumCreditsForImageOption } from "@/lib/imageModelRegistry";
 import {
+  codingCreditFloor,
+  codingLookups,
+  invalidateImageModelCatalog,
+  judgeImage,
+  loadChatModelFacts,
+  loadCodingProviderTerms,
+  loadImageBillingTermRows,
+  resolveCodingRow,
+} from "@/lib/modelCatalog";
+import {
+  applyCodingDraftEdits,
+  applyImageCreditOverrides,
   canonicalJson,
+  type CodingDraftEdit,
   codingProfileSchema,
+  codingStoredProfileSchema,
+  freePricingVersion,
+  type ImageCreditOverride,
   imageExecutionProfile,
   imageFullProfileSchema,
   imagePriceListSchema,
   imageProfileOverrideSchema,
+  imageRoutingNoteSchema,
   imageVerificationSchema,
   isOfficialSourceUrl,
   judgeImageModel,
+  latestBillingTerms,
   MODEL_ID_PATTERN,
   resolveImageCatalog,
+  withImageBillingTerms,
   STORED_CATALOG_CATEGORIES,
   type StoredCatalogCategory,
 } from "@/lib/modelCatalogCore";
+import { IMAGE_USE_CASES, type ImageUseCase } from "@/lib/runtimeImageProviders";
 import { prisma } from "@/lib/prisma";
 
 export class CatalogRefusal extends Error {
@@ -43,6 +62,20 @@ export const catalogEntryPatchSchema = z
     holdReason: z.string().trim().min(1).max(500).nullable().optional(),
     sortOrder: z.number().int().min(0).max(10_000).nullable().optional(),
     profile: z.unknown().optional(),
+    /**
+     * An image model's display name, written into whatever profile the row
+     * already has: the override of a code model, or a runtime model's full
+     * profile. The name is not part of the request, so a priced model takes it.
+     */
+    name: z.string().trim().min(1).max(80).optional(),
+    /**
+     * An image model's router note (what it is good and bad at), written into
+     * the stored profile the same way as the name. Null removes it. It is not
+     * part of the request either, so a priced model takes it.
+     */
+    routingNote: imageRoutingNoteSchema.nullable().optional(),
+    /** What the model is for, shown to users under its name. Written like the name; null removes it. */
+    useCase: z.enum(IMAGE_USE_CASES).nullable().optional(),
   })
   .strict();
 export type CatalogEntryPatch = z.infer<typeof catalogEntryPatchSchema>;
@@ -56,14 +89,55 @@ export const catalogPatchBodySchema = catalogEntryPatchSchema.extend({
 const validateProfile = (category: StoredCatalogCategory, modelId: string, profile: unknown) => {
   if (profile === null || profile === undefined) return profile;
   if (category === "coding") {
-    const parsed = codingProfileSchema.safeParse(profile);
+    const parsed = codingStoredProfileSchema.safeParse(profile);
     if (!parsed.success) throw new CatalogRefusal("invalid_profile", parsed.error.issues.map((i) => i.path.join(".")), 400);
+    // A chat link keeps the registry id as its own: the managed path and the
+    // external channels look the model up by it.
+    if (parsed.data.source === "chat" && parsed.data.registryModelId !== modelId) {
+      throw new CatalogRefusal("invalid_profile", ["registryModelId_must_equal_modelId"], 400);
+    }
+    // The external API runs chat registry models only.
+    if (parsed.data.source !== "chat" && (parsed.data.channels ?? ["code"]).some((channel) => channel !== "code")) {
+      throw new CatalogRefusal("invalid_profile", ["dedicated_code_only"], 400);
+    }
     return parsed.data;
   }
   const hasSeed = IMAGE_MODEL_REGISTRY.some((model) => model.id === modelId);
   const parsed = (hasSeed ? imageProfileOverrideSchema : imageFullProfileSchema).safeParse(profile);
   if (!parsed.success) throw new CatalogRefusal("invalid_profile", parsed.error.issues.map((i) => i.path.join(".")), 400);
   return parsed.data;
+};
+
+/**
+ * The stored image profile with only its name or router note changed. A code
+ * model's row holds an override (an empty one is fine); a runtime model's must
+ * already be a whole profile, since a label alone does not say what to call.
+ */
+const relabelledImageProfile = (
+  modelId: string,
+  stored: unknown,
+  labels: { name?: string; routingNote?: string | null; useCase?: ImageUseCase | null }
+) => {
+  const apply = <T extends { name?: string; routingNote?: string; useCase?: ImageUseCase }>(profile: T) => {
+    const { routingNote: storedNote, useCase: storedUseCase, ...rest } = profile;
+    const routingNote = labels.routingNote === undefined ? storedNote : labels.routingNote;
+    const useCase = labels.useCase === undefined ? storedUseCase : labels.useCase;
+    return {
+      ...rest,
+      ...(labels.name === undefined ? {} : { name: labels.name }),
+      ...(routingNote === null || routingNote === undefined ? {} : { routingNote }),
+      ...(useCase === null || useCase === undefined ? {} : { useCase }),
+    };
+  };
+  if (IMAGE_MODEL_REGISTRY.some((model) => model.id === modelId)) {
+    const current = stored === null || stored === undefined ? {} : stored;
+    const parsed = imageProfileOverrideSchema.safeParse(current);
+    if (!parsed.success) throw new CatalogRefusal("invalid_profile", ["stored_override"], 409);
+    return validateProfile("image", modelId, apply(parsed.data));
+  }
+  const parsed = imageFullProfileSchema.safeParse(stored);
+  if (!parsed.success) throw new CatalogRefusal("invalid_profile", ["no_saved_profile"], 409);
+  return validateProfile("image", modelId, apply(parsed.data));
 };
 
 /** Would this image model serve if `enabled: true` were written? */
@@ -73,9 +147,10 @@ const imageAdmissionAfter = async (
   next: { holdReason: string | null; sortOrder: number | null; profile: unknown }
 ) => {
   const now = new Date();
-  const [rows, revisions] = await Promise.all([
+  const [rows, revisions, billingTerms] = await Promise.all([
     tx.modelCatalogEntry.findMany({ where: { category: "image" } }),
     tx.modelCatalogPriceRevision.findMany({ where: { category: "image", effectiveFrom: { lte: now } } }),
+    loadImageBillingTermRows(tx),
   ]);
   const others = rows.filter((row) => row.modelId !== modelId);
   let admission: { admitted: boolean; reasons?: readonly string[] } = { admitted: false, reasons: ["unknown_model"] };
@@ -83,6 +158,7 @@ const imageAdmissionAfter = async (
     seed: IMAGE_MODEL_REGISTRY,
     rows: [...others, { modelId, enabled: true, holdReason: next.holdReason, sortOrder: next.sortOrder, profile: next.profile }],
     revisions,
+    billingTerms,
     now,
     judge: (model) => {
       const result = judgeImage(model);
@@ -103,10 +179,18 @@ export const updateCatalogEntry = async (input: {
   session: Session;
   request?: Request;
   tx?: Prisma.TransactionClient;
+  /** Where a new profile came from, for the audit row (an applied coding draft and the operator's edits to it). */
+  provenance?:
+    | { fromDraft: true; edits: { field: string; from: string | number; to: string | number }[] }
+    | { codingSettings: { field: string; from: unknown; to: unknown }[] };
 }) => {
   const { category, modelId, patch, session } = input;
   if (!MODEL_ID_PATTERN.test(modelId)) throw new CatalogRefusal("invalid_model_id", [], 400);
-  const profile = "profile" in patch ? validateProfile(category, modelId, patch.profile) : undefined;
+  const relabels = patch.name !== undefined || patch.routingNote !== undefined || patch.useCase !== undefined;
+  if (relabels && (category !== "image" || "profile" in patch)) {
+    throw new CatalogRefusal("invalid_patch", [category !== "image" ? "name_is_image_only" : "name_with_profile"], 400);
+  }
+  const profileInput = "profile" in patch ? validateProfile(category, modelId, patch.profile) : undefined;
 
   const run = (body: (tx: Prisma.TransactionClient) => Promise<Awaited<ReturnType<typeof prisma.modelCatalogEntry.upsert>>>) =>
     input.tx ? body(input.tx) : prisma.$transaction(body);
@@ -119,6 +203,10 @@ export const updateCatalogEntry = async (input: {
     const before = await tx.modelCatalogEntry.findUnique({
       where: { category_modelId: { category, modelId } },
     });
+    // A rename or a new router note keeps every other field of the stored profile.
+    const profile = relabels
+      ? relabelledImageProfile(modelId, before?.profile, { name: patch.name, routingNote: patch.routingNote, useCase: patch.useCase })
+      : profileInput;
     const next = {
       enabled: patch.enabled === undefined ? (before?.enabled ?? null) : patch.enabled,
       holdReason: patch.holdReason === undefined ? (before?.holdReason ?? null) : patch.holdReason,
@@ -151,10 +239,25 @@ export const updateCatalogEntry = async (input: {
         const admission = await imageAdmissionAfter(tx, modelId, next);
         if (!admission.admitted) throw new CatalogRefusal("not_admitted", admission.reasons ?? []);
       } else {
-        const parsed = codingProfileSchema.safeParse(next.profile);
-        if (!parsed.success) throw new CatalogRefusal("not_admitted", ["no_valid_profile"]);
-        const admission = judgeCoding({ modelId, ...parsed.data });
-        if (!admission.admitted) throw new CatalogRefusal("not_admitted", admission.reasons);
+        // Resolved as the catalogue resolves it: a chat link reads the chat
+        // registry now, and every row its provider's conditions (in this
+        // transaction, after the lock, so a re-check applied meanwhile is seen).
+        const [chat, providerTerms] = await Promise.all([loadChatModelFacts(), loadCodingProviderTerms(tx)]);
+        const entry = resolveCodingRow(
+          { modelId, enabled: true, holdReason: null, profile: next.profile, draft: null, draftCreatedAt: null },
+          codingLookups({ chat, providerTerms }),
+          new Date()
+        );
+        if (!entry.profile && (entry.problem === "no_profile" || entry.problem === "invalid_profile")) {
+          throw new CatalogRefusal("not_admitted", ["no_valid_profile"]);
+        }
+        if (!entry.admission?.admitted) {
+          throw new CatalogRefusal("not_admitted", entry.admission?.reasons ?? [entry.problem ?? "no_valid_profile"]);
+        }
+        // Provider conditions past their 90 days stop a new activation only:
+        // a model already on keeps serving with the warning.
+        const wasServing = before?.enabled === true && !before.holdReason;
+        if (!wasServing && entry.activationBlockers.length > 0) throw new CatalogRefusal("not_admitted", entry.activationBlockers);
       }
     }
 
@@ -184,6 +287,9 @@ export const updateCatalogEntry = async (input: {
         before: before ? { enabled: before.enabled, holdReason: before.holdReason, sortOrder: before.sortOrder } : null,
         after: { enabled: next.enabled, holdReason: next.holdReason, sortOrder: next.sortOrder },
         profileChanged: profile !== undefined,
+        ...(patch.name !== undefined ? { renamedTo: patch.name } : {}),
+        // Plain JSON: names, numbers, plans and channel lists.
+        ...(input.provenance ? { provenance: input.provenance as Prisma.InputJsonValue } : {}),
       },
       tx,
     });
@@ -213,6 +319,12 @@ export const createImagePriceRevision = async (input: {
   request?: Request;
   now?: Date;
   tx?: Prisma.TransactionClient;
+  /** Where the revision came from, for the audit row (an applied draft and the operator's edits to it). */
+  provenance?: {
+    fromDraft: true;
+    draftPricingVersion: string;
+    creditEdits: { quality: string; size: string; from: number; to: number }[];
+  };
 }) => {
   const now = input.now ?? new Date();
   const { modelId, revision, session } = input;
@@ -252,14 +364,19 @@ export const createImagePriceRevision = async (input: {
     // A runtime model is judged from its stored profile, like a seed one.
     const base = seed ?? (fullProfile?.success ? { id: modelId, ...fullProfile.data } : null);
     if (!base) throw new CatalogRefusal("unknown_model", [], 404);
-    const candidate = {
-      ...base,
-      disabledReason: null,
-      prices: revision.prices,
-      pricingVersion: revision.pricingVersion,
-      priceVerification: revision.verification,
-    };
-    const admission = judgeImageModel(candidate as never, {
+    // With the operator's confirmed billing terms, as the catalogue will resolve it.
+    const candidate = withImageBillingTerms(
+      {
+        ...base,
+        disabledReason: null,
+        prices: revision.prices,
+        pricingVersion: revision.pricingVersion,
+        priceVerification: revision.verification,
+      } as unknown as ImageModelProfile,
+      latestBillingTerms(await loadImageBillingTermRows(tx)),
+      { runtime: !seed }
+    );
+    const admission = judgeImageModel(candidate, {
       minimumCredits: minimumCreditsForImageOption,
       // Budget is an enable-time question; a price is judged on its own.
       providerBudgetReady: () => true,
@@ -292,6 +409,7 @@ export const createImagePriceRevision = async (input: {
         previousPricingVersion: seed?.pricingVersion ?? null,
         prices: revision.prices,
         verification: revision.verification,
+        ...(input.provenance ? { provenance: input.provenance } : {}),
       },
       tx,
     });
@@ -323,9 +441,19 @@ const runRevision = async <T>(
 export const applyCatalogDraft = async (input: {
   category: StoredCatalogCategory;
   modelId: string;
+  /** Image only: the operator's credits for options the draft priced. */
+  creditOverrides?: readonly ImageCreditOverride[];
+  /** Coding only: the operator's name, minimum plan and credit weight. */
+  codingEdit?: CodingDraftEdit;
   session: Session;
   request?: Request;
 }) => {
+  if (input.category !== "image" && input.creditOverrides?.length) {
+    throw new CatalogRefusal("credit_overrides_image_only", [], 400);
+  }
+  if (input.category !== "coding" && input.codingEdit && Object.keys(input.codingEdit).length > 0) {
+    throw new CatalogRefusal("coding_edit_coding_only", [], 400);
+  }
   // One transaction: the draft read, its application and its removal commit
   // together, so a draft written in between is neither applied nor lost.
   await prisma.$transaction(async (tx) => {
@@ -341,23 +469,50 @@ export const applyCatalogDraft = async (input: {
     if (input.category === "coding") {
       const parsed = codingProfileSchema.safeParse(draft);
       if (!parsed.success) throw new CatalogRefusal("invalid_draft", parsed.error.issues.map((i) => i.path.join(".")), 400);
+      const edited = applyCodingDraftEdits(parsed.data, input.codingEdit ?? {});
+      // The credit weight is the operator's, but never under the floor the
+      // judge uses: a weight below it would only be refused at turn-on, or
+      // would reprice a serving model below its worst turn.
+      const floor = codingCreditFloor(edited.profile);
+      if (floor === null) throw new CatalogRefusal("not_admitted", ["credit_floor_unbounded"]);
+      if (edited.profile.pricing.creditWeight < floor) throw new CatalogRefusal("not_admitted", [`credits_below_floor:${floor}`]);
       await updateCatalogEntry({
         category: "coding",
         modelId: input.modelId,
-        patch: { profile: parsed.data },
+        patch: { profile: edited.profile },
         session: input.session,
         request: input.request,
         tx,
+        provenance: { fromDraft: true, edits: edited.edits },
       });
     } else {
       const parsed = priceRevisionSchema.safeParse(draft);
       if (!parsed.success) throw new CatalogRefusal("invalid_draft", parsed.error.issues.map((i) => i.path.join(".")), 400);
+      const overridden = applyImageCreditOverrides(parsed.data.prices, input.creditOverrides ?? []);
+      if (!overridden.ok) throw new CatalogRefusal("credit_override_unknown_option", overridden.unknown, 400);
+      // A draft redone the same day carries the same version name; the next
+      // free suffix keeps the second apply from hitting pricing_version_reused.
+      const taken = new Set(
+        (
+          await tx.modelCatalogPriceRevision.findMany({
+            where: { category: "image", modelId: input.modelId },
+            select: { pricingVersion: true },
+          })
+        ).map((row) => row.pricingVersion)
+      );
+      const seedVersion = IMAGE_MODEL_REGISTRY.find((model) => model.id === input.modelId)?.pricingVersion;
+      if (seedVersion) taken.add(seedVersion);
       await createImagePriceRevision({
         modelId: input.modelId,
-        revision: parsed.data,
+        revision: {
+          ...parsed.data,
+          pricingVersion: freePricingVersion(parsed.data.pricingVersion, taken),
+          prices: overridden.prices,
+        },
         session: input.session,
         request: input.request,
         tx,
+        provenance: { fromDraft: true, draftPricingVersion: parsed.data.pricingVersion, creditEdits: overridden.edits },
       });
     }
     await tx.modelCatalogEntry.update({
@@ -373,15 +528,60 @@ export const storeCatalogDraft = async (input: {
   category: StoredCatalogCategory;
   modelId: string;
   draft: unknown;
+  /**
+   * The runtime image model's request profile the draft was read for, so the
+   * operator does not have to save a profile before applying the draft. A
+   * draft must price what the row calls: when the stored profile calls another
+   * provider or API model, an unpriced row takes this profile with the draft
+   * and a priced one refuses the draft.
+   */
+  imageProfile?: unknown;
   session: Session;
   request?: Request;
 }) =>
   prisma.$transaction(async (tx) => {
     await takeAuditChainLock(tx);
+    // A chat link's profile is the chat registry's: a whole-profile draft for
+    // it would turn the link into a copy. Its own values have their own draft.
+    if (input.category === "coding") {
+      const existing = await tx.modelCatalogEntry.findUnique({
+        where: { category_modelId: { category: "coding", modelId: input.modelId } },
+        select: { profile: true },
+      });
+      if ((existing?.profile as { source?: unknown } | null)?.source === "chat") {
+        throw new CatalogRefusal("linked_row_profile_draft", [], 409);
+      }
+    }
+    let profile: Prisma.InputJsonValue | undefined;
+    if (input.category === "image" && input.imageProfile !== undefined) {
+      const wanted = imageFullProfileSchema.safeParse(input.imageProfile);
+      if (!wanted.success) throw new CatalogRefusal("invalid_profile", wanted.error.issues.map((i) => i.path.join(".")), 400);
+      const before = await tx.modelCatalogEntry.findUnique({
+        where: { category_modelId: { category: "image", modelId: input.modelId } },
+      });
+      const stored = imageFullProfileSchema.safeParse(before?.profile);
+      const sameModel =
+        stored.success && stored.data.provider === wanted.data.provider && stored.data.apiModelId === wanted.data.apiModelId;
+      const priced = (await tx.modelCatalogPriceRevision.count({ where: { category: "image", modelId: input.modelId } })) > 0;
+      if (!sameModel && priced) throw new CatalogRefusal("draft_profile_mismatch", ["use_a_new_model_id"]);
+      // Unpriced, the add form's latest answer (name, sizes, qualities) is the
+      // profile. Priced, the stored profile stays: it is what the price was
+      // verified for, and updateCatalogEntry is the way to change its name.
+      // A redraft of the same model keeps what only the stored profile says
+      // (latency, provenance, output types) and takes the form's three fields.
+      if (!priced) {
+        profile = (
+          sameModel && stored.success
+            ? { ...stored.data, name: wanted.data.name, sizes: wanted.data.sizes, qualities: wanted.data.qualities }
+            : wanted.data
+        ) as Prisma.InputJsonValue;
+      }
+    }
     const data = {
       draft: input.draft as Prisma.InputJsonValue,
       draftSource: "llm",
       draftCreatedAt: new Date(),
+      ...(profile === undefined ? {} : { profile }),
     };
     await tx.modelCatalogEntry.upsert({
       where: { category_modelId: { category: input.category, modelId: input.modelId } },
@@ -395,7 +595,7 @@ export const storeCatalogDraft = async (input: {
       targetType: "ModelCatalogEntry",
       targetId: `${input.category}:${input.modelId}`,
       summary: `Stored an LLM draft for ${input.category} model ${input.modelId}.`,
-      metadata: { category: input.category, modelId: input.modelId },
+      metadata: { category: input.category, modelId: input.modelId, profileSaved: profile !== undefined },
       tx,
     });
   });

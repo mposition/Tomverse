@@ -6,6 +6,7 @@ import { useLanguage } from "@/components/LanguageProvider";
 import { startLandingChatCapabilityRead } from "@/lib/landingChatCapabilityClient";
 import { marketingProductEntryHref } from "@/lib/marketingProductEntry";
 import { localizedPath } from "@/lib/seo";
+import { CHAT_PRODUCT_PATH } from "@/lib/marketingRoutes";
 
 type MarketingChatAvailability = {
   chatAvailable: boolean;
@@ -52,7 +53,8 @@ export function MarketingChatAvailabilityProvider({ guestTrialAvailable, childre
 export function useMarketingChatEntry() {
   const availability = useContext(AvailabilityContext);
   const { lang } = useLanguage();
-  const chatInfoHref = `${localizedPath(lang, "/")}#chat`;
+  // When Chat is not offered, Chat links go to its introduction page (homepage V2).
+  const chatInfoHref = localizedPath(lang, CHAT_PRODUCT_PATH);
   const chatHref = availability.chatAvailable
     ? marketingProductEntryHref("chat", lang)
     : chatInfoHref;

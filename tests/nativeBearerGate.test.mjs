@@ -6,6 +6,8 @@ import {
   MOBILE_IDENTITY_HEADERS,
   applyMobileIdentityHeaders,
   nativeBearerVerdict,
+  nativeArtifactRevisionBearerRoute,
+  nativeParityBearerRoute,
   stripInternalAuthHeaders,
 } from "../lib/nativeBearerGate.ts";
 import { N1B_BEARER_ROUTES } from "../lib/mobileAuthContract.ts";
@@ -20,6 +22,19 @@ import { N1B_BEARER_ROUTES } from "../lib/mobileAuthContract.ts";
  */
 
 const REGISTERED = "/api/conversations";
+
+test("generated-file Native enrollment fails closed without a resolved switch and permits only versions and input cleanup", () => {
+  for (const [path, method] of [["/api/chat", "DELETE"], ["/api/artifacts/file-1/versions", "GET"]]) {
+    assert.equal(nativeArtifactRevisionBearerRoute(path, method), false);
+    assert.equal(nativeArtifactRevisionBearerRoute(path, method, false), false);
+    assert.equal(nativeArtifactRevisionBearerRoute(path, method, true), true);
+  }
+  for (const [path, method] of [["/api/chat", "GET"], ["/api/chat/other", "DELETE"],
+    ["/api/artifacts/file-1/versions", "POST"], ["/api/artifacts/file-1/versions/more", "GET"],
+    ["/api/artifacts/%2Fadmin/versions", "GET"], ["/api/admin/versions", "GET"]]) {
+    assert.equal(nativeArtifactRevisionBearerRoute(path, method, true), false);
+  }
+});
 const identity = { subject: "user_1", device: "device_1", family: "family_1" };
 
 const verdict = (options = {}) =>
@@ -193,4 +208,37 @@ test("the verifier is not consulted for a route nobody registered", () => {
     },
   });
   assert.equal(calls, 0);
+});
+
+
+test("Research Preview native enrollment is default-off and names exact methods only", () => {
+  const previous = process.env.RESEARCH_PREVIEW_NATIVE_ENABLED;
+  const paths = [["/api/chat/research-preview/offer", "POST"], ["/api/chat/research-preview/runs", "POST"], ["/api/chat/research-preview/runs", "GET"], ["/api/chat/research-preview/runs/run_1", "GET"], ["/api/chat/research-preview/runs/run_1/resume", "POST"], ["/api/chat/research-preview/runs/run_1/cancel", "POST"]];
+  try {
+    delete process.env.RESEARCH_PREVIEW_NATIVE_ENABLED;
+    for (const [path, method] of paths) assert.equal(nativeParityBearerRoute(path, method, true), false);
+    process.env.RESEARCH_PREVIEW_NATIVE_ENABLED = "true";
+    for (const [path, method] of paths) {
+      assert.equal(nativeParityBearerRoute(path, method, false), false);
+      assert.equal(nativeParityBearerRoute(path, method, true), true);
+    }
+    for (const [path, method] of [["/api/chat/research-preview/offer", "GET"], ["/api/chat/research-preview/runs/run_1", "POST"], ["/api/chat/research-preview/runs/run_1/resume", "GET"], ["/api/chat/research-preview/runs/run_1/admin", "POST"], ["/api/chat/research-preview/runs/run_1/cancel/extra", "POST"]]) assert.equal(nativeParityBearerRoute(path, method, true), false);
+  } finally { if (previous === undefined) delete process.env.RESEARCH_PREVIEW_NATIVE_ENABLED; else process.env.RESEARCH_PREVIEW_NATIVE_ENABLED = previous; }
+});
+
+test("Review handoff enrollment refuses disabled flags and every unregistered method or suffix", () => {
+  const paths = [
+    ["/api/conversations/target/continuation/review-handoff", ["POST"]],
+    ["/api/conversations/target/continuation/review-handoff/draft", ["GET", "PUT", "DELETE"]],
+    ["/api/conversations/target/messages/receipt", ["POST"]],
+  ];
+  for (const [path, allowed] of paths) {
+    for (const method of ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]) {
+      assert.equal(nativeParityBearerRoute(path, method), false);
+      assert.equal(nativeParityBearerRoute(path, method, false, true), false);
+      assert.equal(nativeParityBearerRoute(path, method, true), allowed.includes(method));
+      assert.equal(nativeParityBearerRoute(`${path}/extra`, method, true), false);
+      assert.equal(nativeParityBearerRoute(path.replace("target", "%2Fadmin"), method, true), false);
+    }
+  }
 });

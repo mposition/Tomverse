@@ -14,7 +14,7 @@ import { after, mock, test } from "node:test";
 //   request id is 409 `duplicate_request`; an admission that cannot commit is
 //   503 `amux_database_busy`, with nothing after it run.
 // - Once a receipt of the request may have committed, the route never answers
-//   one of the three "nothing committed" 503 reasons; it answers
+//   one of the "nothing committed" 503 reasons; it answers
 //   `amux_outcome_unknown` (section 1).
 //
 // The database is faked at the store (the admission insert) and at the
@@ -32,7 +32,6 @@ type World = {
   log: string[];
   admissions: Array<{ requestId: string; instanceId: string; callKind: string; budgetMs: number }>;
   admission: "admitted" | "duplicate" | "fails";
-  executionApiEnabled: boolean;
   sweepMarksReceipt: boolean;
   reclaimError: Error | null;
   tick: () => Promise<unknown>;
@@ -42,7 +41,6 @@ const freshWorld = (): World => ({
   log: [],
   admissions: [],
   admission: "admitted",
-  executionApiEnabled: false,
   sweepMarksReceipt: false,
   reclaimError: null,
   tick: async () => ({ promoted: false, reason: "no_grant", expired: 0 }),
@@ -81,9 +79,6 @@ mock.module(mod("lib/amux/orchestratorHaltStore.ts"), {
 });
 mock.module(mod("lib/amux/guard.ts"), {
   namedExports: { isAmuxSyncAuthorized: () => true },
-});
-mock.module(mod("lib/amux/executionGate.ts"), {
-  namedExports: { isAmuxExecutionApiEnabled: () => world.executionApiEnabled },
 });
 mock.module(mod("lib/amux/claimDeadline.ts"), {
   namedExports: {
@@ -132,6 +127,8 @@ mock.module(mod("lib/amux/execution.ts"), {
       world.log.push("reclaim_claims");
       return 0;
     },
+    quarantineExpiredAmuxV22TaskExecutions: async () => 0,
+    releaseUnstartedAmuxV22Assignments: async () => 0,
   },
 });
 mock.module(mod("lib/amux/autoPromotionService.ts"), {
@@ -214,19 +211,15 @@ test("without identity headers every write route is served as before and admits 
 
   reset();
   const claimed = await claim(post("/api/internal/amux/claim", {}, claimBody));
-  assert.equal(claimed.status, 409);
-  assert.deepEqual(await claimed.json(), { claimed: false, reason: "execution_api_disabled" });
-  assert.deepEqual(world.log, ["anchor", "refusal:execution_api_disabled"]);
+  assert.equal(claimed.status, 400);
+  assert.deepEqual(await claimed.json(), { error: "Invalid request." });
+  assert.deepEqual(world.log, ["anchor", "refusal:invalid_request"]);
 
   reset();
   const recovered = await recover(post("/api/internal/amux/execution/recover"));
-  assert.equal(recovered.status, 409);
-  assert.deepEqual(await recovered.json(), {
-    recovered: false,
-    reason: "execution_api_disabled",
-    quota_observations_deleted: 3,
-  });
-  assert.deepEqual(world.log, ["sweep"]);
+  assert.equal(recovered.status, 200);
+  assert.equal((await recovered.json()).recovered, true);
+  assert.deepEqual(world.log.slice(0, 2), ["sweep", "reclaim_executions"]);
 
   reset();
   const ticked = await tick(post("/api/internal/amux/auto-promotion/tick"));
@@ -236,7 +229,7 @@ test("without identity headers every write route is served as before and admits 
 
   // And a receipt mark outside an admitted request records nothing: the
   // same failure keeps its old answer.
-  reset({ executionApiEnabled: true, sweepMarksReceipt: true });
+  reset({ sweepMarksReceipt: true });
   world.reclaimError = new boundary!.AmuxDbBoundaryError("AMUX_DB_DEADLINE_EXCEEDED", "execution_recovery_read");
   const late = await recover(post("/api/internal/amux/execution/recover"));
   assert.equal(late.status, 503);
@@ -256,7 +249,7 @@ test("with identity headers the admission is the route's first transaction, with
   ] as const) {
     reset();
     const response = await route(post(path, identity, body));
-    assert.ok(response.status === 200 || response.status === 409, `${callKind}: ${response.status}`);
+    assert.ok(response.status === 200 || response.status === 400, `${callKind}: ${response.status}`);
     assert.deepEqual(world.admissions, [
       { requestId: REQUEST, instanceId: INSTANCE, callKind, budgetMs },
     ]);
@@ -322,7 +315,7 @@ test("a malformed or partial identity is refused before any transaction", async 
 test("after a receipt may have committed, a deadline after the sweep is an unknown outcome, not a deadline", async () => {
   const { recover } = await routes();
   // Section 1 and the completion list: "recover의 sweep 뒤 기한 초과".
-  reset({ executionApiEnabled: true, sweepMarksReceipt: true });
+  reset({ sweepMarksReceipt: true });
   world.reclaimError = new boundary!.AmuxDbBoundaryError("AMUX_DB_DEADLINE_EXCEEDED", "execution_recovery_read");
   const response = await recover(post("/api/internal/amux/execution/recover", identity));
   assert.equal(response.status, 503);
@@ -332,7 +325,7 @@ test("after a receipt may have committed, a deadline after the sweep is an unkno
 
   // The same failure with no receipt committed is still the deadline: nothing
   // was committed, and the orchestrator may acknowledge it as such.
-  reset({ executionApiEnabled: true, sweepMarksReceipt: false });
+  reset({ sweepMarksReceipt: false });
   world.reclaimError = new boundary!.AmuxDbBoundaryError("AMUX_DB_DEADLINE_EXCEEDED", "execution_recovery_read");
   const plain = await recover(post("/api/internal/amux/execution/recover", identity));
   assert.equal(plain.status, 503);
@@ -340,7 +333,7 @@ test("after a receipt may have committed, a deadline after the sweep is an unkno
 
   // A prior sweep receipt wins over a nested raw-query timeout in the next
   // recovery step: this route may already have committed a state change.
-  reset({ executionApiEnabled: true, sweepMarksReceipt: true });
+  reset({ sweepMarksReceipt: true });
   world.reclaimError = Object.assign(new Error("query canceled"), {
     code: "P2010",
     meta: { driverAdapterError: { kind: "postgres", code: "57014" } },
@@ -350,13 +343,12 @@ test("after a receipt may have committed, a deadline after the sweep is an unkno
   assert.equal((await afterReceipt.json()).reason, "amux_outcome_unknown");
 });
 
-test("after a receipt may have committed, none of the three nothing-committed answers is sent by the tick", async () => {
+test("after a receipt may have committed, none of the nothing-committed answers is sent by the tick", async () => {
   const { tick } = await routes();
   // "tick의 grant 만료 뒤 기한 초과": a grant expiry committed its receipt,
-  // then the tick failed with each of the three.
+  // then the tick failed with each of them.
   for (const code of [
     "AMUX_DB_DEADLINE_EXCEEDED",
-    "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED",
     "AMUX_DB_READ_BUSY",
   ] as const) {
     reset({

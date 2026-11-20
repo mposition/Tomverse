@@ -25,7 +25,6 @@ const CONTROL_PATH = "/api/admin/amux/v22-auto-promotion";
 const buttonClass = "relative inline-flex min-h-11 items-center justify-center rounded-lg border px-4 py-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 enabled:cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 border-zinc-600 bg-zinc-800 text-zinc-100 hover:bg-zinc-700";
 const helpClass = "text-xs leading-5 text-zinc-400";
 const chipClass = "inline-flex rounded-md px-2.5 py-1.5 text-xs font-semibold bg-zinc-800";
-const positiveClass = "text-status-success-300";
 const switchOnClass = "text-status-switch-on-300";
 
 /** Only returned control fields are state. Claim and execution remain scope text. */
@@ -46,13 +45,13 @@ export function AmuxAutoAdmissionControlView({
   const busy = pending !== null;
   const approvalNeeded = control !== null && amuxAutoAdmissionNeedsApproval(control);
   const canActivate = control !== null && amuxAutoAdmissionCanActivate(control);
-  const serverOpen = control?.codeLatch && control.environmentEnabled;
   const stateChip = control ? control.active ? m.ownerOn : m.ownerOff : m.unreadable;
   const stateSummary = control
     ? control.active ? m.activeSummary : m.inactiveSummary
     : pending === "reading" ? m.loading : m.unknownSummary;
-  const graduationState = control ? control.graduation.ok ? m.graduationMet
-    : m.graduationUnmet : m.unreadable;
+  // No count or span gates the automatic path (2026-11-16); the measurement
+  // is shown for what it is, never as a threshold met.
+  const graduationState = control ? m.graduationNoGate : m.unreadable;
   return (
     <section className="mx-auto w-full min-w-0 max-w-6xl p-4"
       data-testid="amux-v22-promotion-control" aria-busy={busy}>
@@ -74,17 +73,6 @@ export function AmuxAutoAdmissionControlView({
         <div>
           <h3 className="mb-2 font-semibold">{m.gates}</h3>
           <dl className="divide-y divide-zinc-700">
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 py-3" data-testid="amux-auto-admission-server-gate">
-              <dt className="font-semibold">{m.serverGate}</dt>
-              <dd className={`${chipClass} ${serverOpen ? switchOnClass : "text-zinc-400"}`}>
-                {control ? serverOpen ? m.gateOpen : m.gateClosed : m.unreadable}
-              </dd>
-              <dd className={`${helpClass} w-full`}>{m.serverHelp}</dd>
-              <dd className={`${helpClass} w-full`}>
-                {m.codeGate}: {control ? control.codeLatch ? m.gateOpen : m.gateClosed : m.unreadable}
-                {" · "}{m.environmentGate}: {control ? control.environmentEnabled ? m.gateOpen : m.gateClosed : m.unreadable}
-              </dd>
-            </div>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 py-3" data-testid="amux-auto-admission-owner-gate">
               <dt className="font-semibold">{m.ownerGate}</dt>
               <dd className={`${chipClass} ${control?.active ? switchOnClass : "text-zinc-400"}`}>
@@ -94,20 +82,13 @@ export function AmuxAutoAdmissionControlView({
             </div>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 py-3" data-testid="amux-auto-admission-graduation-gate">
               <dt className="font-semibold">{m.graduationGate}</dt>
-              <dd className={`${chipClass} ${control?.graduation.ok ? positiveClass : "text-zinc-400"}`}>
+              <dd className={`${chipClass} text-zinc-400`}>
                 {graduationState}
               </dd>
-              {control?.graduationExceptionAvailable ? (
-                <dd className={`${chipClass} text-amber-300`}
-                  data-testid="amux-auto-admission-exception">
-                  {control.graduationExceptionApplied ? m.exceptionApplied : m.exceptionAvailable}
-                </dd>
-              ) : null}
               <dd className={`${helpClass} w-full`} data-testid="amux-auto-admission-measurement">
                 {control ? m.graduationMeasurement(control.graduation.count,
                   Math.floor(control.graduation.spanMs / 86_400_000)) : m.unreadable}
               </dd>
-              {control?.graduationExceptionAvailable ? <dd className={`${helpClass} w-full`}>{m.exceptionHelp}</dd> : null}
             </div>
           </dl>
         </div>
@@ -126,7 +107,7 @@ export function AmuxAutoAdmissionControlView({
                   onChange={(event) => onConfirmChange(event.target.checked)}
                   className="mt-1 h-4 w-4 shrink-0 accent-blue-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 enabled:cursor-pointer disabled:cursor-not-allowed" />
                 <span className="min-w-0 break-words">
-                  {control.graduationExceptionAvailable ? m.confirmException : m.confirmPromotion}
+                  {m.confirmPromotion}
                 </span>
               </label>
               <p id="amux-auto-admission-confirmation-help" className={helpClass}>{m.confirmationHelp}</p>

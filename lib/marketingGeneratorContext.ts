@@ -12,7 +12,7 @@
 
 import "server-only";
 
-import { launchHomepageContent } from "@/components/marketing/launchHomepageContent";
+import { homeV2Content } from "@/components/marketing/home/homeV2Content";
 import { infoPages } from "@/components/marketing/marketingInfoContent";
 import { getBillingPlansWithFieldSources } from "@/lib/billingConfig";
 import {
@@ -67,8 +67,14 @@ export const marketingGeneratorContextAllowed = (killSwitchValue: {
   killSwitchValue.ok &&
   !(typeof killSwitchValue.value === "string" && killSwitchValue.value.trim().length > 0);
 
-/** The largest answer, so a report that grew cannot grow the prompt with it. */
-export const MARKETING_GENERATOR_CONTEXT_MAX_BYTES = 128 * 1024;
+/**
+ * The largest answer, so a report that grew cannot grow the prompt with it.
+ * 256 KiB since 2026-11-14: the production context reached 136,138 bytes
+ * (assets with their published copies 41 KB, market intel 32 KB, market prices
+ * 16 KB) and the 07:00 AEST run got a 500. The generator runs on the box's
+ * flat-rate Codex subscription, so the larger prompt spends no money.
+ */
+export const MARKETING_GENERATOR_CONTEXT_MAX_BYTES = 256 * 1024;
 
 export type MarketingGeneratorContext = {
   readonly channels: ReadonlyArray<{
@@ -215,9 +221,13 @@ export function generatorClaimContext(
 
 /** The homepage, About and FAQ copy in English: what Tomverse says about itself. */
 const ownPages = (): Record<string, unknown> => {
-  const home = launchHomepageContent.en;
+  // The console and terminal samples are code, not claims about Tomverse, and
+  // the API facts are endpoint URLs: the approved tracked pages are the
+  // context's only URLs (tests/integration/marketing-generator-context.db.test.ts).
+  const { api: { console: _console, facts: _facts, ...api }, cli: { term: _term, ...cli }, ...home } = homeV2Content.en;
+  void _console; void _term; void _facts;
   return {
-    home: { hero: home.hero, adaptive: home.adaptive, review: home.review, tools: home.tools, plans: home.plans, guest: home.guest },
+    home: { ...home, api, cli },
     about: infoPages.about.en,
     faq: infoPages.faq.en,
   };
@@ -338,6 +348,39 @@ export function generatorAssetProjection(
       alt: { ...asset.alt },
     }))
     .sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
+}
+
+/**
+ * Only the assets some account could still post: one on a platform the asset
+ * allows, in a locale it has alt text for, that has not used it, with a stored
+ * file behind it. The rest can never be offered (`marketingA5AssetsFor`
+ * refuses them), yet every approved card stayed in the answer, so the context
+ * grew with each day's cards until it passed `MARKETING_GENERATOR_CONTEXT_MAX_BYTES`
+ * and the 2026-11-14 run stopped on it. What stays is bounded by unused stock.
+ */
+export function marketingAssetsSomeAccountCanUse(
+  assets: readonly MarketingGeneratorAsset[],
+  accounts: ReadonlyArray<{
+    readonly channel: string;
+    readonly allowedLocales: readonly string[];
+    readonly usedAssetIds: readonly string[];
+  }>,
+): MarketingGeneratorAsset[] {
+  const usable = accounts.map((account) => ({
+    channel: account.channel,
+    locales: new Set(account.allowedLocales),
+    used: new Set(account.usedAssetIds),
+  }));
+  return assets.filter(
+    (asset) =>
+      asset.kind !== null &&
+      usable.some(
+        (account) =>
+          asset.allowedChannels.includes(account.channel) &&
+          asset.altLocales.some((locale) => account.locales.has(locale)) &&
+          !account.used.has(asset.id),
+      ),
+  );
 }
 
 export type MarketingGeneratorReport = {
@@ -580,6 +623,13 @@ export async function readMarketingGeneratorContext(
   // The registry (FOR SHARE) and then the stored assets' kinds, as before.
   const assetRegistry = await readMarketingAssetRegistry(db);
   const assetMedia = await readApprovedMarketingAssetMedia(db);
+  const assets = marketingAssetsSomeAccountCanUse(
+    generatorAssetProjection(assetRegistry, channels.map((row) => row.channel), assetMedia.kinds, assetMedia.longForm),
+    channels.map((row) => ({ ...row, usedAssetIds: usedAssets.get(row.id) ?? [] })),
+  );
+  // An account's used ids matter only for the assets still listed; the intake
+  // refuses a reused asset on its own, so the rest would only grow the answer.
+  const listed = new Set(assets.map((asset) => asset.id));
   return {
     channels: channels.map((row) => ({
       id: row.id,
@@ -588,7 +638,7 @@ export async function readMarketingGeneratorContext(
       defaultLocale: row.defaultLocale,
       allowedLocales: [...row.allowedLocales],
       recentClaimIds: [...(recentClaims.get(row.id) ?? [])],
-      usedAssetIds: [...(usedAssets.get(row.id) ?? [])],
+      usedAssetIds: (usedAssets.get(row.id) ?? []).filter((id) => listed.has(id)),
     })),
     claims: generatorClaimContext(
       marketingClaimsWithOpenGates(MARKETING_CLAIMS, gates),
@@ -602,12 +652,7 @@ export async function readMarketingGeneratorContext(
         ]),
       ),
     ),
-    assets: generatorAssetProjection(
-      assetRegistry,
-      channels.map((row) => row.channel),
-      assetMedia.kinds,
-      assetMedia.longForm,
-    ).map((asset) => {
+    assets: assets.map((asset) => {
       const copies = publishedCopies.get(asset.id);
       return copies ? { ...asset, publishedCopies: copies } : asset;
     }),

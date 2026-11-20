@@ -5,8 +5,116 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
   en: {
     readOnlyNote:
       "You can read this record but not change it. Deciding, acknowledging and changing the mode take engineering agent write access.",
+    contextCard: "Card",
+    contextUntitled: "(title unavailable)",
+    contextCardStatus: "status {status}",
+    contextRole: "role {role}",
+    contextRun: "Run",
+    contextRunLine: "{status} · worker {worker} · attempt {attempt}",
+    contextPullRequests: "Pull request",
+    contextNoPullRequest: "None opened",
+    contextPrMerged: "merged",
+    contextPrOpen: "not merged",
+    contextPrApproved: "approved on GitHub",
+    contextWhy: "Why it is here",
+    contextActions: "What each button does",
+    contextFiles: "Changed files ({count})",
+    contextFilesMore: "…and {count} more",
+    contextReview: "Reviews",
+    contextCrossReview: "Cross-vendor review",
+    contextCrossReviewLine: "{verdict} · author {author} → {reviewers}",
+    contextTouchesContract: "touches a contract area",
+    contextNoCrossReview: "Not recorded for this run.",
+    contextDm: "Decision Maker",
+    contextDmNotFiled:
+      "Not reviewed. The Decision Maker reviews results without a patch; a T2 draft is put to it for advice on the relay's next tick.",
+    contextDmFiled: "Filed as {kind} · {state} · decision {decision}",
+    contextDmAdviceFiled: "Asked for advice on this patch · card {state}",
+    contextDmAdviceOpen: "open",
+    contextDmAdviceClosed: "closed",
+    contextDmAdviceAnswer: "It advises: {answer}",
+    contextDmAdviceOptions: { apply: "a person should apply it by hand", reject: "reject it" } as Record<string, string>,
+    contextDmAdviceNote: "Advice only: it approves, rejects and applies nothing. You decide with the buttons below.",
+    contextDmUnfilable: "Not sent: the patch's file list does not fit a Decision Maker card. Decide from the patch below.",
+    contextDmPending: "pending",
+    contextDmRationale: "Its reasoning",
+    contextNoRun: "The run this item concerns could not be read.",
+    contextTechnical: "Technical identifiers",
+    dmStates: {
+      filed: "Filed as a card; no Decision Maker request yet.",
+      not_sent: "Not sent to the Decision Maker.",
+      with_operator: "Routed to the operator without a Decision Maker answer.",
+      working: "The Decision Maker is working on it.",
+      proposal: "The Decision Maker proposed an answer.",
+      cannot_answer: "The Decision Maker said it cannot answer.",
+      failed: "The Decision Maker gave no usable answer.",
+      confirmed: "A person confirmed the Decision Maker's answer.",
+      rejected: "A person rejected the Decision Maker's answer.",
+      closed: "The Decision Maker request closed.",
+      restricted: "Decision Maker details need ops:write.",
+      unavailable: "The Decision Maker state could not be read now.",
+    } as Record<string, string>,
+    reasonText: {
+      tier_pending: "The publisher's next round has not judged this draft's tier yet.",
+      tier_two:
+        "The tier round judged the change T2: it touches files the deployed app runs or the control plane, so it is not published automatically.",
+      tier_evidence_unavailable:
+        "The tier round could not read the evidence it needs (the base tree, the gate analysis), so the draft stayed private as T2.",
+      patch_unavailable:
+        "The tier round could not read the run's patch evidence in AMUX again, or that evidence names another base. The tier was never judged. The patch below is this app's own stored copy.",
+      publication_not_authorized:
+        "Not judged: the publish switch or the card's public PR consent is off.",
+      publication_state_changed: "Not judged: the run, a switch or the consent changed while it was being read.",
+      publish_refused: "Promotion was refused: a switch, the consent or the PR queue changed just before it.",
+      patch_unreadable:
+        "Not judged: the patch is not a git diff the app can rebuild (a submodule, a binary file written without its data, or text git did not write).",
+      path_invalid: "Not judged: the patch names a path no repository file may have.",
+      path_conflict:
+        "Not judged: the patch creates a path that already exists, sits under a file, or differs from another path only by letter case or Unicode form.",
+      base_mismatch: "Not judged: the base commit does not have the files the patch changes, as the patch names them.",
+      patch_mismatch: "Not judged: the patch does not apply exactly to the base, or does not yield the files it names.",
+      secret_detected: "Not judged: a changed file contains what looks like a secret, so it is never published.",
+      patch_over_limit: "Not judged yet: an earlier size limit held this patch back. It is judged again.",
+      tree_invalid: "Not judged: the resulting tree could not be verified.",
+      base_blob_missing:
+        "An earlier version could not read this patch (for example a new file). The first tier round after a deploy judges it again.",
+      files_invalid: "An earlier version refused this patch's files. The first tier round after a deploy judges it again.",
+      patch_unsupported:
+        "An earlier version could not read this kind of change. The first tier round after a deploy judges it again.",
+      patch_does_not_apply:
+        "An earlier version could not rebuild this patch. The first tier round after a deploy judges it again.",
+      unsupported_tree_change:
+        "An earlier version refused this tree change. The first tier round after a deploy judges it again (it is now T2 at most).",
+      tree_verification_failed:
+        "An earlier version could not verify this patch's tree. The first tier round after a deploy judges it again.",
+      review_not_required:
+        "The publisher opened a pull request, but the AMUX card does not require human review, so its number could not be recorded on the card. The pull request exists on GitHub.",
+      task_not_in_review:
+        "The publisher opened a pull request, but the AMUX card was not in review, so its number could not be recorded on the card.",
+      not_the_workers_review:
+        "The publisher opened a pull request, but the card's latest attempt is not this run's, so its number could not be recorded.",
+      review_pr_conflict: "The card already names a different review pull request.",
+      adapter_closed:
+        "The pull request was opened while the AMUX adapter was closed (the mode was off), so its number never reached the card.",
+      attempt_ended_run_active: "The AMUX attempt ended, but the engineering run is still active.",
+      pr_file_state_mismatch: "The merged pull request's files do not match the run's patch.",
+      merged_without_approval: "The pull request merged without an observed human approval.",
+    } as Record<string, string>,
+    actionsT2: [
+      "Approve: records that a person will apply this patch by hand. It opens no pull request and applies nothing (policy §7).",
+      "Reject: closes the draft. Nothing changes in the repository.",
+    ],
+    actionRejudge:
+      "Judge again: the publisher's next round (every 10 minutes) judges the tier again with the code it runs now. T1 opens a pull request; T2 opens an owner-review draft PR when that switch is on.",
+    actionsMismatch: [
+      "Close the run (nothing was written): refused when the run ever wrote to GitHub, for example opened a pull request.",
+      "Close: the pull request merged: reads GitHub now and closes only when this item's own pull request merged.",
+      "Leave open: records that you looked; the agent stays halted.",
+      "Turn the agent off / Escalate: sets the mode to off; escalation is also recorded as an incident in the audit log.",
+    ],
     showingOldest: "Showing the oldest {count} waiting items.",
     showingNewest: "Showing the newest {count}.",
+    showMore: "Show {count} more",
     totals: "Waiting: {t2} T2 drafts, {decision} decisions, {mismatch} state mismatches.",
     emptyQueue: "Nothing is waiting on a person.",
     emptyRuns: "No run has started.",
@@ -22,11 +130,18 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
     patch: "Patch (text only; nothing here is applied or run)",
     approve: "Approve",
     reject: "Reject",
+    rejudge: "Judge again",
     acknowledge: "Acknowledge",
+    resumePullRequest: "Open the pull request for this branch",
+    resumePullRequestNote:
+      "The branch was pushed but its pull request was never opened. Acknowledging closes this outcome's earlier decisions too. Do not delete the branch or open the pull request by hand.",
+    confirmResumePullRequest:
+      "Approve that the publisher open the pull request for this run's branch? Its next round reads the branch again and opens the pull request once, only if the branch is at the exact commit this run was allowed and has no pull request. Nothing is pushed, and an owner review item opens as a draft. This outcome's earlier decisions are closed as seen.",
     mismatchNote:
       "A state mismatch halts the agent until a person acts. Both sides are locked and read again before any action; neither is corrected to match the other.",
     mismatchClose: "Close the run (nothing was written)",
     mismatchCloseMerged: "Close: the pull request merged",
+    mismatchRecordReviewPr: "Record the pull request number on the card",
     mismatchLeaveOpen: "Leave open",
     mismatchModeOff: "Turn the agent off",
     mismatchEscalate: "Escalate as an incident",
@@ -35,6 +150,8 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
     confirmMismatchEscalate: "Escalate this mismatch as an incident? The agent's mode is set to off.",
     confirmMismatchCloseMerged:
       "Close this mismatch because its pull request merged? GitHub is read now; the merge is recorded on the binding and the agent stays on. Refused unless GitHub reports this item's own pull request merged.",
+    confirmMismatchRecordReviewPr:
+      "Record this run's published pull request number on its AMUX card and close the mismatch? AMUX takes it only while the card waits in review on this run's attempt with no other number; the card is then marked for human review. Refused while the agent is off.",
     status: "Status",
     outcome: "Outcome",
     halt: "Halt",
@@ -62,27 +179,133 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
     freezeOn: "Freeze",
     freezeOff: "Unfreeze",
     acknowledgeHalt: "Acknowledge the halt",
-    confirmMonitors: "Record that both monitors alert",
     haltNote:
-      "Acknowledging clears a halt a run recorded and a latched circuit from now on. An open state mismatch stays until it is resolved. Record the monitors only after checking both on their own screen.",
+      "Acknowledging clears what a run recorded about the publisher App -- its identity missing, or an unbound pull request or branch in its namespace -- from now on. An observed one also clears once a later reading explains it. An open state mismatch halts only until it is resolved.",
     t1Note:
       "T1 publishing is not set from here. The policy requires person-only approval evidence before T1, and the switch waits for it.",
-    prQueue: "Pull request queue: {occupied} of {limit}",
-    decisionQueue: "Decision queue: {occupied} of {limit}",
-    queueNote: "Active runs count in both, for what they may still produce. A full queue claims nothing new.",
+    prQueue: "Pull request queue: {occupied}{limit}",
+    decisionQueue: "Decision queue: {occupied}{limit}",
+    queueNote: "Active runs count in both, for what they may still produce. The queues have no cap and nothing in them expires; they show what waits on you.",
     done: "Done.",
     failed: "That did not go through.",
     refused: "Refused: {code}. The row may have changed; reload and look again.",
     signInAgain: "Sign in again to continue",
     reauthenticationRequired: "This needs a recent sign-in.",
     confirmApprove: "Approve this draft? It binds to the digest and base shown.",
+    confirmRejudge:
+      "Have the next publisher round read this draft again? Nothing is published here; every switch, the card consent and the tier are checked again.",
     confirmReject: "Reject this draft?",
   },
   ko: {
     readOnlyNote:
       "이 기록은 읽을 수만 있습니다. 결정·확인·모드 변경에는 engineering agent 쓰기 권한이 필요합니다.",
+    contextCard: "카드",
+    contextUntitled: "(제목을 읽지 못함)",
+    contextCardStatus: "상태 {status}",
+    contextRole: "역할 {role}",
+    contextRun: "Run",
+    contextRunLine: "{status} · 워커 {worker} · 시도 결과 {attempt}",
+    contextPullRequests: "Pull request",
+    contextNoPullRequest: "열린 PR 없음",
+    contextPrMerged: "병합됨",
+    contextPrOpen: "병합 전",
+    contextPrApproved: "GitHub 승인 관측",
+    contextWhy: "왜 여기 왔나",
+    contextActions: "버튼이 하는 일",
+    contextFiles: "바뀐 파일 ({count}개)",
+    contextFilesMore: "…외 {count}개",
+    contextReview: "검토",
+    contextCrossReview: "교차 검토",
+    contextCrossReviewLine: "{verdict} · 작성 {author} → 검토 {reviewers}",
+    contextTouchesContract: "계약 영역을 건드림",
+    contextNoCrossReview: "이 run에는 기록이 없습니다.",
+    contextDm: "DM(Decision Maker)",
+    contextDmNotFiled:
+      "검토하지 않았습니다. DM은 patch가 없는 결과를 검토하고, T2 초안은 relay의 다음 차례에 조언을 구합니다.",
+    contextDmFiled: "{kind}로 보냄 · {state} · 결정 {decision}",
+    contextDmAdviceFiled: "이 patch에 대해 DM 조언을 구함 · 카드 {state}",
+    contextDmAdviceOpen: "열림",
+    contextDmAdviceClosed: "닫힘",
+    contextDmAdviceAnswer: "DM 의견: {answer}",
+    contextDmAdviceOptions: { apply: "사람이 직접 적용하는 것이 좋음", reject: "거절하는 것이 좋음" } as Record<string, string>,
+    contextDmAdviceNote: "조언일 뿐입니다. 승인·거절·적용 어느 것도 하지 않으며, 결정은 아래 버튼으로 운영자가 합니다.",
+    contextDmUnfilable: "DM에 보내지 않았습니다. patch의 파일 목록이 DM 카드 한 장에 들어가지 않습니다. 아래 patch를 보고 결정해 주세요.",
+    contextDmPending: "대기",
+    contextDmRationale: "DM 근거",
+    contextNoRun: "이 항목의 run을 읽지 못했습니다.",
+    contextTechnical: "기술 식별자",
+    dmStates: {
+      filed: "카드로 보냈고 DM 요청은 아직 없습니다.",
+      not_sent: "DM에 보내지 않았습니다.",
+      with_operator: "DM 답 없이 운영자에게 왔습니다.",
+      working: "DM이 검토 중입니다.",
+      proposal: "DM이 답을 제안했습니다.",
+      cannot_answer: "DM이 답할 수 없다고 했습니다.",
+      failed: "DM이 쓸 수 있는 답을 내지 못했습니다.",
+      confirmed: "DM 답을 사람이 확인했습니다.",
+      rejected: "DM 답을 사람이 거절했습니다.",
+      closed: "DM 요청이 닫혔습니다.",
+      restricted: "DM 상세는 ops:write 권한이 있어야 볼 수 있습니다.",
+      unavailable: "지금은 DM 상태를 읽지 못했습니다.",
+    } as Record<string, string>,
+    reasonText: {
+      tier_pending: "게시 라운드가 아직 이 초안의 tier를 판정하지 않았습니다.",
+      tier_two:
+        "tier 판정 결과 T2입니다. 배포된 앱이 실행하는 파일이나 통제 평면을 건드려 자동 게시 대상이 아닙니다.",
+      tier_evidence_unavailable:
+        "tier 판정에 필요한 증거(base tree, 게이트 분석)를 읽지 못해 비공개 T2 초안으로 남았습니다.",
+      patch_unavailable:
+        "tier 판정 라운드가 AMUX에 저장된 이 run의 patch 증거를 다시 읽지 못했거나, 그 증거의 base가 이 초안과 다릅니다. tier 판정 자체를 하지 못했습니다. 아래 patch는 이 앱이 따로 저장한 사본입니다.",
+      publication_not_authorized:
+        "판정하지 않음: 게시 스위치나 카드의 공개 PR 동의가 꺼져 있습니다.",
+      publication_state_changed: "판정하지 않음: 읽는 도중 run·스위치·동의가 바뀌었습니다.",
+      publish_refused: "승격 거절: 직전에 스위치·동의·PR 대기열이 바뀌었습니다.",
+      patch_unreadable:
+        "판정하지 않음: 앱이 다시 만들 수 없는 diff입니다(submodule, 데이터 없이 쓴 binary 파일, git이 쓰지 않은 형식).",
+      path_invalid: "판정하지 않음: 저장소 파일이 가질 수 없는 경로가 있습니다.",
+      path_conflict:
+        "판정하지 않음: 이미 있는 경로나 파일 아래에 새 경로를 만들거나, 다른 경로와 대소문자·Unicode 정규형만 다른 경로를 만듭니다.",
+      base_mismatch: "판정하지 않음: base commit에 patch가 바꾸는 파일이 patch가 적은 그대로 없습니다.",
+      patch_mismatch: "판정하지 않음: patch가 base에 정확히 적용되지 않거나, 적은 결과 파일과 다릅니다.",
+      secret_detected: "판정하지 않음: 바뀐 파일에 비밀값으로 보이는 내용이 있어 게시하지 않습니다.",
+      patch_over_limit: "아직 판정하지 않음: 예전 크기 상한에 걸렸던 patch입니다. 다시 판정합니다.",
+      tree_invalid: "판정하지 않음: 결과 tree를 검증하지 못했습니다.",
+      base_blob_missing:
+        "이전 버전이 이 patch를 읽지 못했습니다(새 파일 등). 배포 뒤 첫 tier 라운드가 다시 판정합니다.",
+      files_invalid: "이전 버전이 이 patch의 파일을 거절했습니다. 배포 뒤 첫 tier 라운드가 다시 판정합니다.",
+      patch_unsupported: "이전 버전이 읽지 못하는 종류의 변경이었습니다. 배포 뒤 첫 tier 라운드가 다시 판정합니다.",
+      patch_does_not_apply: "이전 버전이 이 patch를 다시 만들지 못했습니다. 배포 뒤 첫 tier 라운드가 다시 판정합니다.",
+      unsupported_tree_change:
+        "이전 버전이 이 tree 변경을 거절했습니다. 배포 뒤 첫 tier 라운드가 다시 판정합니다(이제는 최대 T2).",
+      tree_verification_failed:
+        "이전 버전이 이 patch의 tree를 검증하지 못했습니다. 배포 뒤 첫 tier 라운드가 다시 판정합니다.",
+      review_not_required:
+        "게시 서비스가 PR을 열었지만 AMUX 카드가 사람 검토 대상(requiresHumanReview)이 아니어서 PR 번호를 카드에 기록하지 못했습니다. PR은 GitHub에 그대로 있습니다.",
+      task_not_in_review:
+        "게시 서비스가 PR을 열었지만 AMUX 카드가 review 상태가 아니어서 PR 번호를 카드에 기록하지 못했습니다.",
+      not_the_workers_review:
+        "게시 서비스가 PR을 열었지만 카드의 마지막 시도가 이 run의 것이 아니어서 PR 번호를 기록하지 못했습니다.",
+      review_pr_conflict: "카드에 이미 다른 검토 PR 번호가 기록되어 있습니다.",
+      adapter_closed: "AMUX 어댑터가 닫혀 있을 때(모드 off) PR이 열려 PR 번호가 카드에 전달되지 않았습니다.",
+      attempt_ended_run_active: "AMUX 시도는 끝났는데 엔지니어링 run은 아직 active입니다.",
+      pr_file_state_mismatch: "병합된 PR의 파일이 run의 patch와 다릅니다.",
+      merged_without_approval: "사람의 승인이 관측되지 않은 채 PR이 병합됐습니다.",
+    } as Record<string, string>,
+    actionsT2: [
+      "승인: 이 patch를 사람이 직접 적용하겠다는 기록만 남깁니다. PR을 열거나 코드를 적용하지 않습니다(정책 §7).",
+      "거절: 초안을 닫습니다. 저장소는 바뀌지 않습니다.",
+    ],
+    actionRejudge:
+      "다시 판정: 다음 게시 라운드(10분 주기)가 지금 코드로 tier를 다시 판정합니다. T1이면 PR을 열고, T2이면 검토 PR 스위치가 켜져 있을 때 owner review draft PR을 엽니다.",
+    actionsMismatch: [
+      "run 종료(쓰기 없음 확인됨): 이 run이 GitHub에 한 번이라도 썼다면(PR을 열었다면) 거절됩니다.",
+      "닫기: PR 병합됨: 지금 GitHub을 읽어 이 항목의 PR이 병합됐을 때만 닫습니다. 에이전트는 켜진 채로 둡니다.",
+      "열어 두기: 확인했다는 기록만 남기며 에이전트는 계속 정지합니다.",
+      "에이전트 끄기 / 사고로 격상: 모드를 off로 바꿉니다. 격상은 감사 기록에 사고로도 남깁니다.",
+    ],
     showingOldest: "대기 중인 항목 중 가장 오래된 {count}건을 표시합니다.",
     showingNewest: "최근 {count}건을 표시합니다.",
+    showMore: "{count}건 더 보기",
     totals: "대기 중: T2 초안 {t2}건, 결정 {decision}건, 상태 불일치 {mismatch}건.",
     emptyQueue: "사람을 기다리는 항목이 없습니다.",
     emptyRuns: "시작된 run이 없습니다.",
@@ -98,11 +321,18 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
     patch: "Patch (텍스트만 표시하며, 여기서 적용하거나 실행하지 않습니다)",
     approve: "승인",
     reject: "거절",
+    rejudge: "다시 판정",
     acknowledge: "확인",
+    resumePullRequest: "이 브랜치로 PR 열기",
+    resumePullRequestNote:
+      "브랜치는 push됐지만 PR이 열리지 않았습니다. 확인을 누르면 같은 결과의 이전 결정 항목도 함께 닫힙니다. 브랜치를 지우거나 PR을 직접 열지 마세요.",
+    confirmResumePullRequest:
+      "게시 서비스가 이 run의 브랜치로 PR을 열도록 승인할까요? 다음 회차가 브랜치를 다시 읽고, 브랜치가 이 run에 허락된 커밋 그대로이고 PR이 없을 때만 PR을 한 번 엽니다. push는 하지 않으며, 운영자 검토 항목은 draft로 열립니다. 같은 결과의 이전 결정 항목은 확인 처리됩니다.",
     mismatchNote:
       "상태 불일치는 사람이 조치할 때까지 에이전트를 정지시킵니다. 어떤 조치든 양쪽을 잠그고 다시 읽은 뒤에만 실행되며, 한쪽을 다른 쪽에 맞춰 고치지 않습니다.",
     mismatchClose: "run 종료(쓰기 없음 확인됨)",
     mismatchCloseMerged: "닫기: PR 병합됨",
+    mismatchRecordReviewPr: "카드에 PR 번호 기록",
     mismatchLeaveOpen: "열어 두기",
     mismatchModeOff: "에이전트 끄기",
     mismatchEscalate: "사고로 격상",
@@ -111,6 +341,8 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
     confirmMismatchEscalate: "이 불일치를 사고로 격상할까요? 에이전트 모드가 off로 바뀝니다.",
     confirmMismatchCloseMerged:
       "PR이 병합되었으므로 이 불일치를 닫을까요? 지금 GitHub를 읽어 병합을 바인딩에 기록하고, 에이전트는 켜진 채로 둡니다. GitHub가 이 항목의 PR을 병합으로 보고하지 않으면 거절됩니다.",
+    confirmMismatchRecordReviewPr:
+      "이 run이 게시한 PR 번호를 AMUX 카드에 기록하고 불일치를 닫을까요? 카드가 이 run의 시도로 review에서 기다리고 다른 번호가 없을 때만 AMUX가 받으며, 그러면 카드는 사람 검토 대상으로 표시됩니다. 에이전트가 꺼져 있으면 거절됩니다.",
     status: "상태",
     outcome: "결과",
     halt: "정지",
@@ -138,20 +370,21 @@ export const adminEngineeringAgentMessages = defineAdminMessages({
     freezeOn: "동결",
     freezeOff: "동결 해제",
     acknowledgeHalt: "정지 확인(해제)",
-    confirmMonitors: "두 모니터 알림 확인 기록",
     haltNote:
-      "정지 확인은 run이 기록한 정지와 잠긴 차단기를 지금부터 해제합니다. 열린 상태 불일치는 해소될 때까지 남습니다. 모니터 기록은 두 모니터를 각자의 화면에서 확인한 뒤에만 남깁니다.",
+      "정지 확인은 run이 기록한 publisher App 신호(신원 미설정, namespace의 출처 없는 PR·branch)를 지금부터 해제합니다. 관측으로 기록된 것은 이후 관측이 설명하면 저절로 풀립니다. 열린 상태 불일치는 해소될 때까지만 정지합니다.",
     t1Note:
       "T1 게시는 여기서 켜지 않습니다. 정책이 T1 전에 사람 전용 승인 증거를 요구하며, 이 스위치는 그것을 기다립니다.",
-    prQueue: "Pull request 대기열: {occupied}/{limit}",
-    decisionQueue: "결정 대기열: {occupied}/{limit}",
-    queueNote: "활성 run은 아직 만들 수 있는 산출물 때문에 두 대기열 모두에 셉니다. 대기열이 차면 새 작업을 claim하지 않습니다.",
+    prQueue: "Pull request 대기열: {occupied}{limit}",
+    decisionQueue: "결정 대기열: {occupied}{limit}",
+    queueNote: "활성 run은 아직 만들 수 있는 산출물 때문에 두 대기열 모두에 셉니다. 대기열에는 상한도 만료도 없고, 기다리는 양만 보여 줍니다.",
     done: "처리했습니다.",
     failed: "처리되지 않았습니다.",
     refused: "거절됨: {code}. 행이 바뀌었을 수 있으니 새로 고쳐 다시 확인하세요.",
     signInAgain: "다시 로그인하고 계속하기",
     reauthenticationRequired: "최근 로그인이 필요합니다.",
     confirmApprove: "이 초안을 승인할까요? 표시된 digest와 base에 결속됩니다.",
+    confirmRejudge:
+      "다음 게시 라운드가 이 초안을 다시 판정하게 할까요? 여기서는 아무것도 게시하지 않으며, 스위치·카드 공개 동의·tier를 모두 다시 확인합니다.",
     confirmReject: "이 초안을 거절할까요?",
   },
 });

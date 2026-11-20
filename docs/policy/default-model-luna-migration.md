@@ -152,7 +152,10 @@ Anthropic 자리는 fallback 목록으로 채워졌습니다. 기본값 이전�
 범위입니다 — `DEFAULT_MODEL_ID` · `GUEST_DEFAULT_MODEL_ID` · trio · Prisma 컬럼
 기본값이 함께 움직였고(`prisma/migrations/20261012090000_default_model_gpt_6_luna`),
 기존 사용자의 저장값과 기존 대화의 선택은 다시 쓰지 않으며 reconciliation도 돌리지
-않습니다. `gpt-5-6-luna`는 은퇴하지 않았습니다.
+않습니다. `gpt-5-6-luna`는 은퇴하지 않았습니다. 2026-11-11에 이 모델을
+Admin에서 끄자 Prompt Refiner 제품 가격 pin이 이 모델을 가리키고 있어 Chat이
+닫혔고, 같은 날 그 pin을 `gpt-6-luna`로 옮겼습니다(`lib/promptRefinerProductPricePin.ts`).
+그 배포와 Chat 활성화 재기록 뒤에는 `gpt-5-6-luna`를 은퇴시킬 수 있습니다.
 
 - 컴파일된 가격: `gpt-6-luna`는 OpenAI 공개 Standard 요율(272K 이하 입력
   US$0.10 · 캐시 US$0.01 · 캐시 쓰기 US$0.125 · 출력 US$0.50, 초과 시 입력 x2 ·
@@ -742,9 +745,14 @@ mini로 생성된 것이라면, 둘 중 하나만 허용됩니다.
 - **272K 장문 tier 미도달.** 3절 참고. 계산은 검증됐으나 실제 과금 경로에서
   발동한 적이 없습니다.
 - **marketing 페이지.** `components/marketing/ChatGptVsClaudeGuide.tsx`는
-  "GPT-5.4 mini vs Claude Haiku 4.5"를 en/ko 본문으로 다룹니다. mini가 공개
-  상태인 동안은 정확하므로 그대로 두었습니다. 은퇴 시 이 페이지의 본문과
-  `comparisonModelIds`를 함께 갱신해야 합니다.
+  2026-11-20부터 "GPT 6 Luna vs Claude Haiku 5.5"를 7개 언어 본문으로 다룹니다.
+  운영 카탈로그에서 GPT-5.4 mini와 Claude Haiku 4.5가 모두 꺼진 뒤에도 페이지와
+  준비된 비교 링크가 두 모델을 가리키고 있었기 때문입니다. 코드의 `lib/models.ts`는
+  두 모델을 아직 켜 둔 상태라 `tests/marketingModelReferences.test.mjs`가 이를
+  잡지 못했습니다. 이 테스트는 코드 카탈로그만 보므로, 운영 DB에서 모델을 끌 때는
+  `lib/marketingModelReferences.ts`를 직접 확인해야 합니다. 페이지의 예시 출력은
+  "특정 모델의 실제 답변이 아닌 편집용 가상 예제"로 표시돼 있어 라벨 교체가 위
+  금지 사항(다른 모델의 답을 새 모델의 것으로 제시)에 해당하지 않습니다.
 
 ## 7. 운영 DB 반영
 

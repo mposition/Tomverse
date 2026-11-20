@@ -9,7 +9,7 @@ approvalTicket: N/A
 
 # 외부 대화 이어가기 (Tomverse에서 이어가기)
 
-가져온 외부 대화(ChatGPT · Claude · Gemini)를 **읽기 전용 원본으로 보존한 채**,
+가져온 외부 대화(ChatGPT · Claude · Gemini · Perplexity)를 **읽기 전용 원본으로 보존한 채**,
 사용자의 명시적 선택으로 새 Tomverse Conversation을 만들어 같은 화면에서 대화를
 이어가는 기능의 계약입니다.
 
@@ -108,7 +108,7 @@ docs/policy/conversation-product-key.md §5.2. 요청 본문은 idempotency key�
 
 | endpoint | productKey | selectionMode | 모델 |
 |---|---|---|---|
-| `POST /api/external-conversations/[id]/continuations` | Chat 진입이 제공되면(`chatSurfaceAvailable`) `chat`, 아니거나 읽지 못하면 `review` | chat이면 `auto`, review면 `manual` | chat은 계정 새 대화 조합의 첫 모델 하나, review는 조합 전체 |
+| `POST /api/external-conversations/[id]/continuations` | 항상 `chat`(운영자 결정 2026-11-12: Auto 상태가 Chat을 닫지 않음) | chat이면 `auto`, review면 `manual` | chat은 계정 새 대화 조합의 첫 모델 하나, review는 조합 전체 |
 | `POST /api/conversations/[id]/continuation/review` | `review` | `manual` | 조합 전체 |
 
 두 번째 endpoint는 Chat 이어가기 화면의 "Review에서 여러 모델로 비교" 버튼입니다.
@@ -147,9 +147,8 @@ Chat 대화의 `productKey`를 바꾸지 않습니다. bridge 없음·남의 대
 - **user·assistant 텍스트 turn만.** `system`·`developer`·`tool`·알 수 없는 role은
   버립니다. import 정책 §5.6이 애초에 저장을 막지만 여기서 한 번 더 거절합니다.
 - source의 **ordinal과 role을 보존**합니다. 다시 번호를 매기지 않습니다.
-- **최신 쪽에서부터** 창을 넓히고, 다음 turn이 통째로 들어가지 않으면 멈춥니다.
-  turn을 반으로 자르지 않습니다 — 문장 중간에서 끊긴 답변은 없는 것보다 나쁜
-  context이고, "N개 사용" 고지를 거짓으로 만듭니다.
+- 최신 메시지부터 원문 순서를 유지해 선택합니다. `ext-seed-v2`는 메시지당 4,000개 Unicode 코드 포인트와 전체 발췌 본문 3,000 추정 토큰 안에서 긴 메시지의 끝을 보존합니다. 끝 문단이 온전히 들어갈 때는 그 문단을 먼저 확보하고, 자리가 있으면 시작 부분 최대 500자도 함께 싣습니다. 중간을 건너뛴 자리에는 `[…]`를 표시하고 그 길이도 예산에 포함합니다.
+- 후속 메시지가 자리를 차지해 앞의 긴 메시지 발췌가 들어가지 않으면 남은 예산에 온전히 들어가는 마지막 문단들까지 싣고 멈춥니다. 일반 길이 메시지는 통째로 선택합니다.
 - **hard cap이 항상 걸립니다**(`CONTINUATION_SEED_TOKEN_BUDGET`). 중앙 상수
   하나이며, 두 번째 상한을 만들지 않습니다. 토큰 추정은 기존
   `lib/chatTokenEstimate.ts`의 `estimateTextTokens`를 씁니다 — 별도 계산기를
@@ -223,6 +222,106 @@ seed는 입력 토큰이며 **기존 규칙대로 사용자 크레딧에 반영�
 
 내부 USD는 사용자 응답에 노출하지 않습니다
 (`docs/policy/credit-and-cost-limits.md`).
+
+### 답변별 Review handoff (2026-11-15 로컬 구현)
+
+Chat continuation의 저장 완료된 텍스트 답변을 비교하면
+`POST /api/conversations/[id]/continuation/review-handoff`가 새 Review/manual
+대화·bridge·질문 초안을 한 transaction으로 만듭니다. 원문 단위
+`continuation/review` fork와 별개이며 기존 Chat 행은 변경하지 않습니다.
+요청에는 assistant ID와 idempotency key만 받습니다. key는 계정·부모·답변에
+결속되며 다른 anchor에 재사용하면 conflict입니다. 준비에는 Message·provider
+실행·크레딧 예약이 없고, 사용자가 모델을 선택하고 Send해야 실행됩니다.
+
+완료 답변의 `ChatResponseAttempt.continuationSourcePlan`은 실제 저장된 답변을
+생성한 provider attempt와 snapshot, ordinal, UTF-16 ranges, selected/recent/
+retrieved 구분을 담습니다. 본문은 저장하지 않습니다. 완료 Message와 같은
+transaction의 owner/revision CAS로 기록하며 실패·unknown·불완전 답변에는 성공
+evidence를 쓰지 않습니다. 과거 null manifest는 recent source로 재구성하고 당시
+선택·검색 문맥의 복원 한계를 표시합니다. 현재 미전송 picker는 읽지 않습니다.
+
+`bridge.reviewHandoff`는 질문 이전 native 메시지 ID·순서·내용 digest를 참조합니다.
+native 후보는 최근 100행, 본문과 출처 라벨은 3,000 추정 토큰 이내이며 누락을
+고지합니다. imported source의 기존 상한도 유지합니다. 두 출처 모두 user-role
+참고자료로 조립하고 부모 assistant를 새 모델의 assistant history로 넣지 않습니다.
+모든 모델·후속 질문·retry에 같은 참조를 적용하며 공통 조립 결과를 preflight와
+실제 send의 기존 입력 비용에 포함합니다. 과거 provider prompt byte replay는
+약속하지 않습니다.
+
+bootstrap·preflight·send는 부모와 source 각각의 소유권·passwordVersion 잠금·삭제,
+native membership/digest와 source 범위를 검증합니다. 이 handoff에서 검증 실패는
+참조 없는 실행으로 우회하지 않습니다. target의 기존 native 메시지는 읽을 수 있습니다.
+질문 초안은 target 전용 draft endpoint에서 기존 CAS를 사용하고, user Message 저장과
+동시에 소비합니다. 일반 Review에는 Chat recovery 접근을 열지 않습니다.
+첨부가 필요한 질문/prefix, Research·image·voice·Guest·public share는 지원하지 않습니다.
+참조 본문은 URL·localStorage·target Message·일반 export에 복제하지 않으며 기존
+bridge share 거절과 source opt-in export 계약을 유지합니다.
+
+Chat에서는 다음 일반 텍스트 질문에 한해 원문 메시지에서 직접 고른 구간과 최근 자동 발췌를 함께(최대 3개, 각각 UTF-16 단위 500자)을 쓸 수 있다. 브라우저는 원문 문자열을 채팅 본문으로 복사하지 않고 위치만 보낸다. 서버는 동일 소유권·잠금·삭제·기능 플래그 판단 뒤 해당 원본 안에서만 구간을 읽고 기존 역할·토큰 제한과 비활성 원문 형식을 적용한다. 잘못된 지정은 다른 원문으로 대체하지 않는다. 선택 이력이나 원문 사본을 계정 기억으로 새로 저장하지 않는다. 선택이 없으면 기존 `ext-seed-v2` 결과를 유지한다. 선택이 있으면 `ext-seed-v3-selected-recent`가 선택 구간을 먼저 보존하고 같은 본문 3,000 추정 토큰·메시지당 4,000 코드 포인트 안에서 최근 원문을 합성한다. ordinal과 UTF-16 문자 범위로 겹침을 제거하며 선택/최근/고유 메시지 개수는 각각 계산한다.
+
+### 4.5 요청 단위 Auto 맥락과 전달 결과 (로컬 구현)
+
+`CHAT_CONTINUATION_AUTO_SOURCE_ENABLED`는 **기본 켜짐**이다(운영자 명시 승인, 2026-11-14).
+승인 범위는 기존 Router 공급사에 동일한 제한 원문을 별도 user 데이터로 전송하고,
+decision sample·optimizer 재전송에서 제외하는 경로다. 명시적 `false` 또는 유효하지 않은
+설정은 이 Router 입력만 끈다. 기존 continuation 기능 flag·소유권·현재 잠금 판정은 그대로이며,
+수동 모델의 원문 전달에는 이 Auto 스위치를 적용하지 않는다. 새 공급사·호출·지출 상한·사용자
+크레딧 규칙은 추가하지 않는다. 이 소스 기본값 변경은 merge·deploy·운영 설정 변경 승인이 아니다.
+
+활성화된 일반 이어가기 Chat에서는 기존 Router request builder가 별도 user payload의
+`importedSource`에 원문을 넣은 뒤 UTF-8 byte 기반 worst-case hold를 계산한다.
+`message`, `previousAnswer`, `session`에는 원문을 섞지 않는다. 원문을 참고하는 호출은
+rewrite·presearch·decision sample 저장을 끄고 모델·파일 capability 판단만 사용한다.
+원문으로 만든 reason/topic은 이후 routing session으로 저장하지 않는다. 이미지 판정 제외를
+유지하며, 원문을 참고하는 location fusion은 이번에 활성화하지 않는다.
+
+Router 전송 전과 최종 답변 전송 전에 접근을 다시 확인한다. 철회되면 원문과 이를 참고한
+Router 결과를 폐기하고 추가 유료 Router 없이 기존 capability·입력 토큰·가격·admission
+경로를 다시 실행한다. 미사용 hold는 정산으로 반환하고 동일한 durable 응답 identity를
+유지한다. 이미 답변 provider가 실패한 뒤의 철회는 추가 source-bearing fallback 전송을
+막는다. 첫 provider에 이미 전달된 입력을 회수한다는 뜻은 아니다.
+
+`X-Chat-Continuation-Receipt`와 기존 stream trailer는 현재 request/attempt의 내용 없는
+전달 metadata만 보낸다. bridge 생성 시 seed 수치는 현재 적용량이 아니다. `not_sent`는
+전달 메시지 0개, `unknown`은 provider 경계 진입 후 전달 확인 불가, `dispatched`는 실제
+답변 진행이 확인된 입력 포함을 뜻한다. 모델 이해나 답변 성공을 보장하지 않으며 timeout
+요청의 provider 수신을 확정하지 않는다. 클라이언트는 trace·assistant 응답·attempt를
+묶고 늦은 이벤트를 버린다. receipt를 DB/localStorage에 저장하지 않으며 새로고침 후 과거
+receipt를 만들어내지 않는다. Deep Research 원문 미전달 제약은 그대로다.
+
+### 4.6 전체 저장 원문 자동 검색과 Native 선택 (로컬 후속 구현)
+
+운영자 후속 범위(2026-11-14)는 연결된 snapshot의 전체 저장 ordinal 검색과 Native 선택·receipt parity다.
+`CHAT_CONTINUATION_HISTORY_SEARCH_ENABLED`가 활성화된 Auto Chat에 한해 기존 Router의 read-only
+`read_imported_source` 도구를 한 번 쓴다. LLM이 원문 언어의 짧은 literal query를 최대 3개 고르고,
+서버는 현재 소유·finalized·잠금·continuation flag를 확인한 snapshot 안에서만 검색한다.
+최근 200개 제한을 검색 대상에 적용하지 않는다. DB 결과는 최대 9개, 추가 발췌는 최대 3×500
+UTF-16 단위다. 직접 선택과 가장 최근 v2 turn을 먼저 보존한 뒤 검색 원문과 나머지 v2 tail을 같은 3,000 body-token /
+메시지당 4,000 code-point 예산에 합성한다. 범위 중복을 제거하며, 검색 활성 시 planner는
+`ext-seed-v4-retrieved`다. 일치 없음·예산 제한을 receipt로 구분한다. 전체 원문을 보냈거나
+모든 사실을 찾았다는 뜻은 아니다. 검색은 literal match이며 원문 언어/표현이 다르면 놓칠 수 있다.
+
+최종 Router 단계는 preview·tool transcript를 교체하여 답변 provider와 동일한 최종 원문만
+별도 user 데이터로 읽는다. 호출 단계는 최대 2개이며 새 selector·summary 서비스는 없다.
+추가 도구 정의와 최악의 JSON escaping을 포함한 두 단계 입력·출력 전체를 기존 provider
+hold에 먼저 넣고 `totalUsage`로 누적 정산한다. 실패·불명 비용은 기존 hold 유지 규칙을 따른다.
+권한은 도구 실행 전후·최종 Router 전·답변 dispatch 전에 다시 확인한다. 중간 flag off는
+그 요청에서 source 경로를 닫고 원문과 source-aware 결과를 모두 버려 기존 fallback으로 간다.
+
+이 검색 스위치는 **기본 켜짐**이다(운영자 명시 승인, 2026-11-14 후속 요청).
+환경값이 없거나 `true`이면 켜지고, 명시적 `false`와 유효하지 않은 값은 끈다. 승인 범위는
+기존 Router 공급사·예산 안의 최대 두 모델 단계와 요청 단위 제한 원문 검색이다. 새 지출 상한·
+공급사·크레딧 규칙을 추가하지 않는다. 기존 continuation flag와 Auto 원문 입력 스위치가 모두
+허용해야 하며, 매 단계의 현재 접근·예산 hold·최종 fallback 판정은 그대로다. 운영 설정 변경·
+merge·deploy 또는 이 개발 세션의 실제 모델 평가 실행을 뜻하지 않는다. Source-aware
+rewrite/presearch/sample 금지는 유지한다.
+
+Native는 기존 원문 열람 위에 같은 좌표 선택을 제공한다. 읽어 온 이전 페이지의 메시지도
+실제 ordinal로 선택하며, 다음 텍스트 질문에만 소비한다. voice·Review에는 선택을 보내지
+않는다. 기존 bearer/lock/continuation 게이트를 우회하지 않는다. 허용된 Native origin의
+CORS는 좌표 헤더와 receipt 응답 헤더만 추가하며 인증 주체·credential/origin 범위는 같다.
+Native receipt도 trace·응답 ID·attempt에 결속하고 retry·abort·늦은 이벤트를 처리한다.
+선택과 receipt는 runtime에만 두고 DB·localStorage·Memory·공유·원문 export에 쓰지 않는다.
 
 ## 5. Turn 동작
 

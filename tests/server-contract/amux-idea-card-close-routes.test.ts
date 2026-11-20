@@ -25,7 +25,7 @@ const OTHER = "22222222-3333-4444-8555-666666666666";
 const IDEA = "33333333-4444-4555-8666-777777777777";
 
 type World = {
-  authorized: boolean; routing: string | undefined;
+  authorized: boolean;
   session: unknown; role: string; admin: boolean; reauthRequired: boolean; originValid: boolean;
   v22Pending: unknown[]; v22Closing: unknown[];
   closePending: unknown[]; closeClosing: unknown[];
@@ -33,21 +33,25 @@ type World = {
   direct: unknown; directInput: unknown;
   calls: string[]; boundaries: string[]; ownerInput: unknown; recordedInput: unknown;
   reviewPending: unknown[]; reviewClosing: unknown[]; autoApplied: unknown; autoCalls: number;
+  t2Pending: unknown[]; t2Closing: unknown[]; t2Unfilable: string[]; t2Recorded: unknown;
+  settlementPending: unknown[]; settlementClosing: unknown[];
+  heartbeats: number;
 };
 let world: World;
 const reset = (changes: Partial<World> = {}) => {
   world = {
-    authorized: true, routing: "enabled",
+    authorized: true,
     session: { user: { id: "owner-1", email: "owner@example.test" } }, role: "owner", admin: true,
     reauthRequired: false, originValid: true,
     v22Pending: [], v22Closing: [], closePending: [], closeClosing: [],
     openError: null, resolved: null, ownerResult: { outcome: "closed", closedCards: 2, auditId: "a" },
     ownerError: null, question: null, direct: null, directInput: null, calls: [], boundaries: [], ownerInput: null, recordedInput: null,
     reviewPending: [], reviewClosing: [], autoApplied: null, autoCalls: 0,
+    t2Pending: [], t2Closing: [], t2Unfilable: [], t2Recorded: null,
+    settlementPending: [], settlementClosing: [],
+    heartbeats: 0,
     ...changes,
   };
-  if (world.routing === undefined) delete process.env.TOMVERSE_AMUX_DM_ROUTING;
-  else process.env.TOMVERSE_AMUX_DM_ROUTING = world.routing;
 };
 reset();
 
@@ -72,7 +76,6 @@ mock.module(mod("lib/amux/internalRoute.ts"), { namedExports: {
   isAmuxInputError: () => false,
 } });
 mock.module(mod("lib/amux/decisionMakerInternalRoute.ts"), { namedExports: {
-  dmInternalRoutesEnabled: () => process.env.TOMVERSE_AMUX_DM_ROUTING === "enabled",
   dmRouteErrorResponse: () => Response.json({ error: "internal" }, { status: 500 }),
   dmRouteRefusal: (envelope: string) => (status: number, reason: string) =>
     Response.json({ [envelope]: false, reason }, { status }),
@@ -85,6 +88,9 @@ mock.module(mod("lib/amux/dbBoundary.ts"), { namedExports: {
     return work({ fake: "tx" }, { dbNow: new Date("2026-11-05T00:00:00.000Z") });
   },
   withAmuxRouteBudget: async (work: () => Promise<unknown>) => work(),
+} });
+mock.module(mod("lib/amux/dmRelayHeartbeat.ts"), { namedExports: {
+  recordAmuxDmRelaySync: async () => { world.heartbeats += 1; },
 } });
 mock.module(mod("lib/amux/decisionMakerDeliveryCore.ts"), { namedExports: {
   parseDmDeliveryCursor: (value: unknown) => value === "bad" ? undefined : value ?? null,
@@ -109,6 +115,22 @@ mock.module(mod("lib/amux/v22ResultReviewService.ts"), { namedExports: {
   readAmuxV22ResultReviewSyncRows: async () => ({ pending: world.reviewPending, closing: world.reviewClosing }),
   openAmuxV22ResultReviewCards: async (pending: unknown[]) => ({ cards: pending, unfilable: [] }),
   recordAmuxV22ResultReviewsUnfilable: async () => ({ recorded: 0 }),
+} });
+mock.module(mod("lib/amux/dmOwnerSettlementService.ts"), { namedExports: {
+  readAmuxDmOwnerSettlementSyncRows: async () => ({ pending: world.settlementPending, siblings: [], pulls: [],
+    reviews: [], closing: world.settlementClosing }),
+  openAmuxDmOwnerSettlementCards: async (rows: { pending: unknown[] }) => ({ cards: rows.pending, unfilable: [] }),
+  recordAmuxDmOwnerSettlementsUnfilable: async () => ({ recorded: 0 }),
+} });
+mock.module(mod("lib/amux/dmOwnerSettlementRemake.ts"), { namedExports: {
+  resumeAmuxDmOwnerSettlementRemake: async () => { world.calls.push("remake-resume"); return null; },
+} });
+mock.module(mod("lib/engineeringAgentT2DmReviewService.ts"), { namedExports: {
+  readEngineeringAgentT2DmSyncRows: async () => ({ pending: world.t2Pending, closing: world.t2Closing }),
+  engineeringAgentT2DmCards: (pending: unknown[]) => ({ cards: pending, unfilable: world.t2Unfilable }),
+  recordEngineeringAgentT2DmUnfilable: async (_tx: unknown, input: unknown) => {
+    world.t2Recorded = input; return { recorded: 1 };
+  },
 } });
 mock.module(mod("lib/amux/ideaCardCloseService.ts"), { namedExports: {
   openAmuxIdeaCardCloseQuestionIfDue: async () => {
@@ -170,7 +192,7 @@ test("the sync lists a card close question beside the v22 ones, three at most, i
   const body = await response.json();
   assert.deepEqual(body, { synced: true, resolved: "closed", cursor: { move: "keep" },
     pending: [closeEntry(QUESTION)], closing: [{ question_id: OTHER, card_id: "CC-1" }] });
-  assert.deepEqual(world.calls, ["walk", "open", "close-read"], "the walk first, as before");
+  assert.deepEqual(world.calls, ["walk", "open", "close-read", "remake-resume"], "the walk first, as before");
 
   reset({ v22Pending: [v22Entry("a"), v22Entry("b"), v22Entry("c")], closePending: [closeEntry(QUESTION)],
     v22Closing: [{ questionId: "a", cardId: "1" }, { questionId: "b", cardId: "2" }, { questionId: "c", cardId: "3" }],
@@ -181,23 +203,54 @@ test("the sync lists a card close question beside the v22 ones, three at most, i
   assert.deepEqual(full.closing.map((entry: { question_id: string }) => entry.question_id), ["a", "b", "c"]);
 });
 
-test("a v22 result review rides the same tick after the others, filed only while its switch is on", async () => {
+test("a v22 result review rides the same tick after the others", async () => {
   const reviewEntry = { question_id: OTHER, worker: "amux-result-review" };
-  delete process.env.TOMVERSE_AMUX_V22_RESULT_REVIEW_DM;
   reset({ reviewPending: [reviewEntry], reviewClosing: [{ questionId: QUESTION, cardId: "RR-1" }] });
-  const off = await (await syncRoute.POST(post({}))).json();
-  assert.deepEqual(off.pending, [], "no new review card while the switch is off");
-  assert.deepEqual(off.closing, [{ question_id: QUESTION, card_id: "RR-1" }], "its cards still close");
+  const first = await (await syncRoute.POST(post({}))).json();
+  assert.deepEqual(first.pending, [reviewEntry]);
+  assert.deepEqual(first.closing, [{ question_id: QUESTION, card_id: "RR-1" }], "its cards close");
   assert.equal(world.autoCalls, 1, "the DM approver step runs once per tick (it checks its own switch)");
   assert.ok(world.boundaries.includes("decisionMakerV22ResultReviewRead"));
-  process.env.TOMVERSE_AMUX_V22_RESULT_REVIEW_DM = "enabled";
-  try {
-    reset({ v22Pending: [v22Entry("a")], closePending: [closeEntry(QUESTION)], reviewPending: [reviewEntry],
-      autoApplied: { requestId: "r", kind: "result_review", applied: true } });
-    const on = await (await syncRoute.POST(post({}))).json();
-    assert.deepEqual(on.pending, [v22Entry("a"), closeEntry(QUESTION), reviewEntry], "after the v22 and card close ones");
-    assert.equal(on.auto_applied, "result_review");
-  } finally { delete process.env.TOMVERSE_AMUX_V22_RESULT_REVIEW_DM; }
+  reset({ v22Pending: [v22Entry("a")], closePending: [closeEntry(QUESTION)], reviewPending: [reviewEntry],
+    autoApplied: { requestId: "r", kind: "result_review", applied: true } });
+  const on = await (await syncRoute.POST(post({}))).json();
+  assert.deepEqual(on.pending, [v22Entry("a"), closeEntry(QUESTION), reviewEntry], "after the v22 and card close ones");
+  assert.equal(on.auto_applied, "result_review");
+});
+
+test("a T2 draft's advice card rides the tick last", async () => {
+  const t2Entry = { question_id: IDEA, worker: "engineering-t2-review" };
+  reset({ t2Pending: [t2Entry], t2Closing: [{ questionId: IDEA, cardId: "T2-1" }] });
+  const first = await (await syncRoute.POST(post({}))).json();
+  assert.deepEqual(first.pending, [t2Entry]);
+  assert.deepEqual(first.closing, [{ question_id: IDEA, card_id: "T2-1" }], "its cards close");
+  assert.ok(world.boundaries.includes("engineeringAgentT2DmReviewRead"));
+  const reviewEntry = { question_id: OTHER, worker: "amux-result-review" };
+  reset({ v22Pending: [v22Entry("a")], reviewPending: [reviewEntry], t2Pending: [t2Entry] });
+  const on = await (await syncRoute.POST(post({}))).json();
+  assert.deepEqual(on.pending, [v22Entry("a"), reviewEntry, t2Entry], "after every app-answered question");
+  assert.equal(world.t2Recorded, null, "nothing to record when every card could be written");
+
+  reset({ t2Pending: [], t2Unfilable: [IDEA] });
+  const unfilable = await (await syncRoute.POST(post({}))).json();
+  assert.deepEqual(unfilable.pending, []);
+  assert.ok(world.boundaries.includes("engineeringAgentT2DmReviewUnfilable"));
+  assert.deepEqual(world.t2Recorded, { workItemIds: [IDEA], now: new Date("2026-11-05T00:00:00.000Z") },
+    "a draft no card fits is recorded once, so it never holds back the drafts behind it");
+});
+
+test("an owner queue settlement rides the tick before the T2 drafts", async () => {
+  const SETTLEMENT = "44444444-5555-8666-8777-888888888888";
+  const settlementEntry = { question_id: SETTLEMENT, worker: "amux-owner-settlement" };
+  const t2Entry = { question_id: IDEA, worker: "engineering-t2-review" };
+  reset({ settlementPending: [settlementEntry], settlementClosing: [{ questionId: SETTLEMENT, cardId: "OS-1" }] });
+  const first = await (await syncRoute.POST(post({}))).json();
+  assert.deepEqual(first.pending, [settlementEntry]);
+  assert.deepEqual(first.closing, [{ question_id: SETTLEMENT, card_id: "OS-1" }], "its cards close");
+  assert.ok(world.boundaries.includes("decisionMakerOwnerSettlementSync"));
+  reset({ v22Pending: [v22Entry("a")], settlementPending: [settlementEntry], t2Pending: [t2Entry] });
+  const on = await (await syncRoute.POST(post({}))).json();
+  assert.deepEqual(on.pending, [v22Entry("a"), settlementEntry, t2Entry], "after the app-answered ones, before the advice");
 });
 
 test("a fault in opening a question costs nothing of the v22 path", async () => {
@@ -211,18 +264,12 @@ test("a fault in opening a question costs nothing of the v22 path", async () => 
   warn.mock.restore();
 });
 
-test("the routes stay closed behind the token and the routing switch", async () => {
+test("the routes stay closed behind the token", async () => {
   reset({ authorized: false });
   assert.equal((await syncRoute.POST(post({}))).status, 401);
   assert.deepEqual(world.calls, []);
-  reset({ routing: undefined });
-  const closed = await syncRoute.POST(post({}));
-  assert.equal(closed.status, 409);
-  assert.deepEqual(await closed.json(), { synced: false, reason: "dm_routing_disabled" });
-  assert.deepEqual(world.calls, [], "nothing runs while routing is off");
-  reset({ routing: undefined });
-  assert.equal((await cardRoute.POST(post({ question_id: QUESTION, card_id: "CC-1" }))).status, 409);
-  assert.equal((await closedRoute.POST(post({ question_id: QUESTION, card_id: "CC-1" }))).status, 409);
+  assert.equal((await cardRoute.POST(post({ question_id: QUESTION, card_id: "CC-1" }))).status, 401);
+  assert.equal((await closedRoute.POST(post({ question_id: QUESTION, card_id: "CC-1" }))).status, 401);
 });
 
 test("the card and closed routes record through the dispatch that tries both tables", async () => {
@@ -349,4 +396,13 @@ test("the owner's direct close takes the same gates, closes only, and names no q
   }
   reset({ ownerError: new FakeOwnerError("busy") });
   assert.equal((await closeDirectly()).status, 409);
+});
+
+test("the sync records the relay's call after the token", async () => {
+  reset({ authorized: false });
+  await syncRoute.POST(post({}));
+  assert.equal(world.heartbeats, 0, "an unauthorised caller is not the relay");
+  reset();
+  assert.equal((await syncRoute.POST(post({}))).status, 200);
+  assert.equal(world.heartbeats, 1);
 });

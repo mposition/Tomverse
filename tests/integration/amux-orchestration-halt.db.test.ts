@@ -256,12 +256,12 @@ const readState = async (haltKeys: string[] = []) => {
 test("an admission commits on its own before the write, with deadlineAt on the database clock plus the route budget", async () => {
   // 완료 조건: 접수가 쓰기보다 먼저 별도 트랜잭션으로 커밋된다; deadlineAt은 접수
   // 트랜잭션의 clock_timestamp() 기준.
-  await withEnv({ TOMVERSE_AMUX_SYNC_SECRET: secret, TOMVERSE_AMUX_EXECUTION_API_ENABLED: undefined }, async () => {
+  await withEnv({ TOMVERSE_AMUX_SYNC_SECRET: secret }, async () => {
     const requestId = randomUUID();
     const before = await dbNow();
     const response = await recoverPost(post("/api/internal/amux/execution/recover", identityHeaders(requestId)));
     const after_ = await dbNow();
-    assert.equal(response.status, 409);
+    assert.equal(response.status, 200);
     const row = await writeRow(requestId);
     assert.equal(row.callKind, "recover");
     assert.ok(row.admittedAt.getTime() >= before.getTime() - 1 && row.admittedAt.getTime() <= after_.getTime() + 1);
@@ -290,12 +290,12 @@ test("an admission commits on its own before the write, with deadlineAt on the d
 
 test("a request without identity headers is served as before and admits nothing", async () => {
   // Backward compatibility: the web deploys first while the old orchestrator runs.
-  await withEnv({ TOMVERSE_AMUX_SYNC_SECRET: secret, TOMVERSE_AMUX_EXECUTION_API_ENABLED: undefined }, async () => {
+  await withEnv({ TOMVERSE_AMUX_SYNC_SECRET: secret }, async () => {
     const admissionsBefore = await prisma.amuxOrchestratorWrite.count();
     const receiptsBefore = await prisma.amuxOrchestratorWriteReceipt.count();
     const response = await recoverPost(post("/api/internal/amux/execution/recover", {}));
-    assert.equal(response.status, 409);
-    assert.equal((await response.json()).reason, "execution_api_disabled");
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).recovered, true);
     assert.equal(await prisma.amuxOrchestratorWrite.count(), admissionsBefore);
     assert.equal(await prisma.amuxOrchestratorWriteReceipt.count(), receiptsBefore);
   });
@@ -307,7 +307,6 @@ test("a second admission of the same request id is refused and writes nothing", 
   await withEnv(
     {
       TOMVERSE_AMUX_SYNC_SECRET: secret,
-      TOMVERSE_AMUX_EXECUTION_API_ENABLED: "1",
     },
     async () => {
       const { requestId } = await admit(12_000);
@@ -329,7 +328,6 @@ test("an admitted claim writes its receipts in the claim's own transaction", asy
   await withEnv(
     {
       TOMVERSE_AMUX_SYNC_SECRET: secret,
-      TOMVERSE_AMUX_EXECUTION_API_ENABLED: "1",
     },
     async () => {
       const requestId = randomUUID();
@@ -371,7 +369,7 @@ test("an admitted claim writes its receipts in the claim's own transaction", asy
 test("a refusal-only claim and a rolled-back write leave no receipt", async () => {
   // 완료 조건: 거절 감사만 있는 트랜잭션은 영수증을 남기지 않는다; 롤백된 쓰기에는
   // 영수증이 없다.
-  await withEnv({ TOMVERSE_AMUX_SYNC_SECRET: secret, TOMVERSE_AMUX_EXECUTION_API_ENABLED: undefined }, async () => {
+  await withEnv({ TOMVERSE_AMUX_SYNC_SECRET: secret }, async () => {
     const requestId = randomUUID();
     const refusalAuditsBefore = await prisma.adminAuditLog.count({
       where: { action: "amux.claim.refused" },
@@ -379,8 +377,8 @@ test("a refusal-only claim and a rolled-back write leave no receipt", async () =
     const response = await claimPost(
       post("/api/internal/amux/claim", identityHeaders(requestId), { task_id: "x" }),
     );
-    assert.equal(response.status, 409);
-    assert.deepEqual(await response.json(), { claimed: false, reason: "execution_api_disabled" });
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), { error: "Invalid request." });
     assert.equal((await receiptsOf(requestId)).length, 0);
     // The refusal audit itself was written.
     assert.equal(await prisma.adminAuditLog.count({

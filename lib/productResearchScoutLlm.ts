@@ -25,6 +25,34 @@ import {
   type ScoutSubmission,
   type ScoutSuggestion,
 } from "@/lib/productResearchScoutCore";
+import {
+  ISSUE_TRIAGE_MAX_OUTPUT_TOKENS,
+  ISSUE_TRIAGE_SUBJECT,
+  ISSUE_TRIAGE_SYSTEM_PROMPT,
+  issueTriageOutputSchema,
+  issueTriagePromptText,
+  parseIssueTriageAnswer,
+  type IssueSuggestion,
+  type TriageIssue,
+} from "@/lib/productResearchScoutIssuesCore";
+import {
+  JOURNEY_MAX_OUTPUT_TOKENS,
+  JOURNEY_OUTPUT_SCHEMA,
+  JOURNEY_SUBJECT,
+  JOURNEY_SYSTEM_PROMPT,
+  journeyPromptText,
+  parseJourneyAnswer,
+  type ScoutJourney,
+} from "@/lib/productResearchScoutJourneyCore";
+import {
+  SCENARIO_MAX_OUTPUT_TOKENS,
+  SCENARIO_OUTPUT_SCHEMA,
+  SCENARIO_SUBJECT,
+  SCENARIO_SYSTEM_PROMPT,
+  parseScenarioAnswer,
+  scenarioPromptText,
+  type ScoutScenario,
+} from "@/lib/productResearchScoutScenarioCore";
 
 export const SCOUT_LLM_MAX_OUTPUT_TOKENS = 2_000;
 export const SCOUT_LLM_TIMEOUT_MS = 90_000;
@@ -45,9 +73,36 @@ export type ScoutJudgement = {
   readonly outputTokens: number | null;
 };
 
+export type IssueTriageJudgement = {
+  /** Null when the call failed or its answer could not be read. */
+  readonly suggestions: IssueSuggestion[] | null;
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
+};
+
 export type ScoutLlm = {
   readonly modelId: string;
   readonly judge: (submission: ScoutSubmission, existingTitles: readonly string[]) => Promise<ScoutJudgement>;
+  /** The issue-backlog subject: one text-only call over the newest observation's issues. */
+  readonly triageIssues: (issues: readonly TriageIssue[], observedAt: Date) => Promise<IssueTriageJudgement>;
+  /** The model-written task (docs/policy/product-research-agent.md §14): one text-only call for today's request. */
+  readonly planScenario: (recentTitles: readonly string[], today: Date) => Promise<ScenarioPlan>;
+  /** The journey planner (§14): one text-only call for today's steps across Chat. */
+  readonly planJourney: (recentTitles: readonly string[], today: Date, productionFailures?: readonly string[]) => Promise<JourneyPlan>;
+};
+
+export type JourneyPlan = {
+  /** Null when the call failed or its answer is not a journey the walker can follow. */
+  readonly journey: ScoutJourney | null;
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
+};
+
+export type ScenarioPlan = {
+  /** Null when the call failed or its answer is not a scenario the walker can run. */
+  readonly scenario: ScoutScenario | null;
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
 };
 
 /** The chosen model, or null when none is chosen or it can no longer read images. */
@@ -58,6 +113,48 @@ export async function scoutLlmFor(modelId: string | null): Promise<ScoutLlm | nu
     console.warn(JSON.stringify({ event: "product_research_scout_llm_model_unavailable" }));
     return null;
   }
+  /** One text-only planning call: the planner prompt, its schema, and the one check on its answer. */
+  const plan = async <T>(
+    subject: string,
+    request: { system: string; prompt: string; schema: unknown; name: string; maxOutputTokens: number; parse: (value: unknown) => T | null },
+  ): Promise<{ value: T | null; inputTokens: number | null; outputTokens: number | null }> => {
+    try {
+      const generated = await generateText({
+        model: getActiveAiModel(model),
+        system: request.system,
+        prompt: request.prompt,
+        maxOutputTokens: request.maxOutputTokens,
+        maxRetries: 0,
+        abortSignal: AbortSignal.timeout(SCOUT_LLM_TIMEOUT_MS),
+        output: Output.object({ schema: jsonSchema(request.schema as JSONSchema7), name: request.name }),
+        providerOptions: { openai: { strictJsonSchema: true } },
+      });
+      const usage = generated.usage as { inputTokens?: number; outputTokens?: number } | undefined;
+      const value = request.parse(generated.output);
+      const result = { value, inputTokens: usage?.inputTokens ?? null, outputTokens: usage?.outputTokens ?? null };
+      console.info(
+        JSON.stringify({
+          event: "product_research_scout_llm_call",
+          modelId: model.id,
+          subject,
+          inputTokens: result.inputTokens,
+          outputTokens: result.outputTokens,
+          kept: value ? 1 : 0,
+        }),
+      );
+      return result;
+    } catch (error) {
+      console.warn(
+        JSON.stringify({
+          event: "product_research_scout_llm_call_failed",
+          modelId: model.id,
+          subject,
+          error: error instanceof Error ? error.name : "unknown",
+        }),
+      );
+      return { value: null, inputTokens: null, outputTokens: null };
+    }
+  };
   return {
     modelId: model.id,
     judge: async (submission, existingTitles) => {
@@ -116,6 +213,70 @@ export async function scoutLlmFor(modelId: string | null): Promise<ScoutLlm | nu
         );
         return { suggestions: null, inputTokens: null, outputTokens: null };
       }
+    },
+    triageIssues: async (issues, observedAt) => {
+      try {
+        const generated = await generateText({
+          model: getActiveAiModel(model),
+          system: ISSUE_TRIAGE_SYSTEM_PROMPT,
+          prompt: issueTriagePromptText(issues, observedAt),
+          maxOutputTokens: ISSUE_TRIAGE_MAX_OUTPUT_TOKENS,
+          maxRetries: 0,
+          abortSignal: AbortSignal.timeout(SCOUT_LLM_TIMEOUT_MS),
+          output: Output.object({
+            schema: jsonSchema(issueTriageOutputSchema(issues.length) as unknown as JSONSchema7),
+            name: "product_research_scout_issues",
+          }),
+          providerOptions: { openai: { strictJsonSchema: true } },
+        });
+        const usage = generated.usage as { inputTokens?: number; outputTokens?: number } | undefined;
+        const suggestions = parseIssueTriageAnswer(generated.output, issues);
+        const judgement = { suggestions, inputTokens: usage?.inputTokens ?? null, outputTokens: usage?.outputTokens ?? null };
+        console.info(
+          JSON.stringify({
+            event: "product_research_scout_llm_call",
+            modelId: model.id,
+            subject: ISSUE_TRIAGE_SUBJECT,
+            issues: issues.length,
+            inputTokens: judgement.inputTokens,
+            outputTokens: judgement.outputTokens,
+            kept: suggestions.length,
+          }),
+        );
+        return judgement;
+      } catch (error) {
+        console.warn(
+          JSON.stringify({
+            event: "product_research_scout_llm_call_failed",
+            modelId: model.id,
+            subject: ISSUE_TRIAGE_SUBJECT,
+            error: error instanceof Error ? error.name : "unknown",
+          }),
+        );
+        return { suggestions: null, inputTokens: null, outputTokens: null };
+      }
+    },
+    planScenario: async (recentTitles, today) => {
+      const { value, inputTokens, outputTokens } = await plan(SCENARIO_SUBJECT, {
+        system: SCENARIO_SYSTEM_PROMPT,
+        prompt: scenarioPromptText(recentTitles, today),
+        schema: SCENARIO_OUTPUT_SCHEMA,
+        name: "product_research_scout_scenario",
+        maxOutputTokens: SCENARIO_MAX_OUTPUT_TOKENS,
+        parse: parseScenarioAnswer,
+      });
+      return { scenario: value, inputTokens, outputTokens };
+    },
+    planJourney: async (recentTitles, today, productionFailures = []) => {
+      const { value, inputTokens, outputTokens } = await plan(JOURNEY_SUBJECT, {
+        system: JOURNEY_SYSTEM_PROMPT,
+        prompt: journeyPromptText(recentTitles, today, productionFailures),
+        schema: JOURNEY_OUTPUT_SCHEMA,
+        name: "product_research_scout_journey",
+        maxOutputTokens: JOURNEY_MAX_OUTPUT_TOKENS,
+        parse: parseJourneyAnswer,
+      });
+      return { journey: value, inputTokens, outputTokens };
     },
   };
 }

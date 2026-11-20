@@ -81,7 +81,24 @@ node make-feed-video.mjs <pack.json> <id> <out-dir>     # 4:5 feed version of th
   shape, with brands from `research-brands.json` and no run of five words from
   an ad. The raw ads are then deleted, so the call that writes copy sees only
   checked notes (docs/policy/marketing-automation.md §2).
-- The job writes words from `features.json` and pictures from
+- The Higgsfield image path reads its facts from the list an operator keeps in
+  Admin › Marketing › Settings › Ad facts (`MarketingFeatureFact`), fetched at
+  the start of a run from `/api/internal/marketing-features` with
+  `MARKETING_APP_URL` and `MARKETING_MEDIA_SUBMIT_SECRET` and kept as
+  `job/<day>/features.json`; the run report's `features` says `app` or
+  `repo:<reason>`. Admin's "Refresh from the site" asks one model call for
+  proposals from the FAQ, help centre, claims and switches; only a saved
+  proposal changes the list. When the app cannot answer, the job reads
+  `features.json` here, the list's seed.
+- The job writes words from `features.json`, which restates the FAQ's feature
+  answers by hand. When a feature claim is added to `lib/marketingClaims.ts`,
+  `tests/marketingHiggsfieldImagePath.test.mjs` fails until it has an entry
+  there, so a new feature reaches the ads (until 2026-11-12 it missed
+  conversation import, a registered claim, and save and share). A feature the
+  FAQ explains without a claim id, such as Smart Adaptive, is still added by
+  hand. An entry with `hold` (a preview, a switch that is off by default, or
+  copy the cards cannot keep yet) is never today's feature and no card may
+  rest on it; the owner removes `hold` once it is live. Pictures come from
   `library/library.json`: the logo, model marks (owner 2026-11-07) and AI-made
   photos. It can also use real captures from a source pack
   (`job/sources/<asset-id>/pack.json`, on the box only). `examples/` holds the
@@ -139,6 +156,45 @@ The design guide every call follows is `HIGGSFIELD-GUIDE.md`.
   a call whose outcome is unknown blocks the next until its job id shows it.
 - `HIGGSFIELD_BIN` and `CLAUDE_BIN` name other binaries (a `.mjs` is run with
   node), for a dry run with stand-ins.
+- Variety (owner 2026-11-13: not a person in every ad). Each concept has a
+  `format` -- person, phone, laptop, diagram or object -- a day's concepts are
+  each a different one, and the formats of the last 7 days are listed for the
+  concept call to use last.
+- Local markets (owner 2026-11-13): ko is Korea, zh-Hant Taiwan and Hong Kong,
+  zh-Hans Singapore and Malaysia (never mainland China). Each version asks
+  its own market's question with its own money, places and seasons (guide 13);
+  the picture, drawn once for all four, shows nothing that belongs to one
+  market only.
+- Native copy (owner 2026-11-13: the Korean and Chinese read as
+  translations). After the concepts, one more Claude call (`NATIVE-COPY.md`)
+  rewrites only their Korean and Chinese and alt texts as a native copywriter
+  would; the edit is checked like any concept, and a concept it breaks keeps
+  the concept writer's words.
+- The app screen (owner 2026-11-13: words set on a screen looked pasted on).
+  The concept asks Higgsfield for the one display that shows words as flat
+  chroma green `#00ff00`, empty, and marks the texts on it with `ui` (title,
+  question, answer, caption; few words, so the phone stays phone-sized).
+  `screen-core.mjs` finds the green in the pixels, draws the app screen in the
+  product fonts at the display's proportions, maps it onto the display's
+  corners in perspective and keys it in only where the picture is green, so a
+  finger over the display stays in front. Every language gets its screen this
+  way, after every model edit; no model edit or smoothing redraws its words,
+  and the language versions spend one edit each (two only when words also
+  stand in the scene, on paper or a sign). A picture with no green display
+  drops that version as `no_green_screen`.
+- The concept call is asked again with every reason a concept was refused
+  (`concepts-core.mjs`); a concept still refused is dropped and the others are
+  drawn. A day with no concept counts as the feature's day, so the next run
+  takes another feature. A full day of three concepts in four languages is
+  about 12 pictures (3 credits at 0.25 each) before any refine or retry, and
+  21 when every concept also has words on paper or a sign.
+- After a deployment, the concept step can be run alone on the box, with the
+  cron's own PATH and env file. It draws nothing, spends no credit, submits
+  nothing and leaves `history.json` alone; its files are `job/<day>/dry-*`:
+
+  ```
+  cd ~/marketing-video-job && git pull --ff-only -q && cd tools/marketing-video && set -a && . $HOME/.config/tomverse/marketing-video.prod.env && set +a && PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin MARKETING_HIGGSFIELD_CONCEPTS_ONLY=1 node run-higgsfield.mjs
+  ```
 
 ## The creative short job (off by default, run by hand)
 
@@ -187,9 +243,21 @@ its topic, and submits each for approval in Admin:
    asset file in code (`capture_with_ai_media`, showing the product interface, a disclosure on every channel, zh-Hans to
    RedNote only) and submit with `submit-asset.mjs`.
 
-Phase 1 limits: the real screens come from the approved shorts' capture packs
-(`job/sources/`), so a film is about a topic one of them shows; recording new
-screens per film is the next step. The report is one JSON line;
+Real screens: by default they come from the approved shorts' capture packs
+(`job/sources/`), so a film is about a topic one of them shows (so far one
+travel question). With `MARKETING_CREATIVE_FRESH_REVIEW=on` (off by default,
+owner 2026-11-12) each run records its own: `fresh-review.mjs` picks a subject
+at random from `SUBJECTS` (never one of the last six films'), a model writes
+one question about it per locale, and each is asked ONCE in Review with the
+demo account and its answer analysis run ONCE (both spend that account's
+credits; a recording that stopped after a paid step is never repeated). The
+packs land in `job/creative/<run>/sources/<locale>/`, each capture's text being
+the words visible in its picture. One recording at a time holds
+`~/.local/state/tomverse/demo-account.lock`; after a kill or a failed settings
+restore it stays and every recording refuses until a person has checked the
+account's language and theme and removed it. `node fresh-review.mjs <locale>
+<dir> <question-file> <topic> --dry` stops before the send and costs nothing. The
+report is one JSON line;
 `job/creative/history.json` and `job/creative/sheets/<run>/` let the next run
 avoid repeating it. For a dry run, `CLAUDE_BIN` and `HIGGSFIELD_BIN` name
 stand-ins.

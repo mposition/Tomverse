@@ -247,6 +247,14 @@ export const adminModelRegistryMessages = defineAdminMessages({
         "Automatic follows the code. A provider's own search tool is enabled in code only, because its per-query cost and ceiling are verified per model.",
       webSearchRefused:
         "Perplexity models search inside every answer, so this cannot be changed.",
+      fileTools: "File creation and plugin tools",
+      fileToolsAuto: (on: boolean): string =>
+        on
+          ? "Automatic: on (an OpenAI, Anthropic or Google chat model is recognised as able to call tools)."
+          : "Automatic: off (tick only after checking the model calls tools reliably).",
+      fileToolsOverridden: (autoOn: boolean) =>
+        `Set by an administrator (automatic would be ${autoOn ? "on" : "off"}).`,
+      fileToolsReset: "Back to automatic",
     },
     tokens: {
       legend: "Token limits and cost snapshot (USD per 1M tokens)",
@@ -513,6 +521,14 @@ export const adminModelRegistryMessages = defineAdminMessages({
         "자동은 코드 규칙을 따릅니다. 제공사 자체 검색은 모델별로 질의당 비용과 상한을 확인해야 해서 코드에서만 켤 수 있습니다.",
       webSearchRefused:
         "Perplexity 모델은 모든 답변에서 자체 검색을 하므로 바꿀 수 없습니다.",
+      fileTools: "파일 생성·플러그인 도구",
+      fileToolsAuto: (on: boolean): string =>
+        on
+          ? "자동: 켜짐 (OpenAI·Anthropic·Google 채팅 모델은 도구를 호출할 수 있는 모델로 인식합니다)."
+          : "자동: 꺼짐 (모델이 도구를 안정적으로 호출하는지 확인한 뒤에 체크하세요).",
+      fileToolsOverridden: (autoOn: boolean) =>
+        `관리자가 정한 값입니다 (자동이라면 ${autoOn ? "켜짐" : "꺼짐"}).`,
+      fileToolsReset: "자동으로 되돌리기",
     },
     tokens: {
       legend: "토큰 한도와 비용 snapshot (1M 토큰당 USD)",

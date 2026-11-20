@@ -1,11 +1,22 @@
 export const dynamic = "force-dynamic";
 
+import { getServerSession } from "next-auth/next";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
+import { AdminSemanticRetrievalPanel } from "@/components/admin/AdminSemanticRetrievalPanel";
 import { PlatformSettingsPanel } from "@/components/admin/PlatformSettingsPanel";
-import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
+import { getAdminRole } from "@/lib/adminAuth";
+import {
+  ADMIN_NAVIGATION,
+  adminItemIsWritable,
+  adminNavItemTabs,
+  resolveAdminTab,
+} from "@/lib/adminNavigation";
 import { readPlatformSettingsPanelProps } from "@/lib/adminPlatformSettingsRead";
+import { authOptions } from "@/lib/auth";
 
 const TABS = adminNavItemTabs("platform");
+// Fail closed: if the entry is ever renamed, nothing on the page draws as writable.
+const PLATFORM_ITEM = ADMIN_NAVIGATION.find((item) => item.id === "platform");
 
 /**
  * Feature flags: emergency stops, feature switches and account defaults, one
@@ -21,6 +32,10 @@ export default async function AdminPlatformSettingsPage({
   const query = await searchParams;
   const tab = resolveAdminTab(TABS, query.tab);
   const props = await readPlatformSettingsPanelProps();
+  const role = getAdminRole(await getServerSession(authOptions));
+  // Only draws the controls locked; the route refuses a write from another role itself.
+  const canWrite =
+    role !== null && PLATFORM_ITEM !== undefined && adminItemIsWritable(role, PLATFORM_ITEM);
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
@@ -36,6 +51,7 @@ export default async function AdminPlatformSettingsPage({
         view={tab.id as "emergency" | "features" | "account-defaults"}
         {...props}
       />
+      {tab.id === "features" ? <AdminSemanticRetrievalPanel canWrite={canWrite} /> : null}
     </div>
   );
 }

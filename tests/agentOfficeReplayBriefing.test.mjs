@@ -325,7 +325,11 @@ test("the office says old and not-collected quota in words, in AEST, with no em 
   // Every quota place reads through the one freshness rule.
   assert.match(live, /const quota = agentOfficeQuotaReading\(d\?\.quota, now\);/);
   assert.match(live, /quotaPercent: quota\.kind === "fresh" \? quota\.percent : null/);
-  assert.match(live, /agentOfficeChannelQuota\(workers\.filter\(\(w\) => w\.channel === ch\)\.map\(\(w\) => w\.quota\)\)/);
+  // The card has a row per quota channel, Antigravity too though it has no
+  // island, and Antigravity a row per model (tests/amuxAntigravityModelWorkers.test.mjs).
+  assert.match(live, /agentOfficeChannelQuotaRows\(AGENT_OFFICE_QUOTA_CHANNELS, workers\)/);
+  for (const locale of ["en", "ko"])
+    assert.equal(adminAgentOfficeFloorMessages[locale].quotaChannels.antigravity, "Antigravity");
   assert.match(live, /data-testid="agent-office-worker-quota" data-quota=\{quota\.kind\}/);
   assert.match(live, /<td data-quota=\{w\.quota\.kind\}>/);
   assert.doesNotMatch(live, /quotaExhaustedNow\(/);

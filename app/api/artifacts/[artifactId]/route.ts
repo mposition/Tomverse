@@ -78,7 +78,7 @@ export async function GET(
         byteSize: true,
         status: true,
         objectKey: true,
-        conversation: { select: { password: true, userId: true } },
+        conversation: { select: { password: true, passwordVersion: true, userId: true } },
       },
     });
 
@@ -101,7 +101,7 @@ export async function GET(
         req,
         userId,
         artifact.conversationId,
-        artifact.conversation.password
+        artifact.conversation.password == null ? null : artifact.conversation.passwordVersion
       )
     ) {
       return conversationLockedResponse();
@@ -112,7 +112,13 @@ export async function GET(
     // untrusted upload, catastrophic for a file this application generated and
     // the user cannot regenerate without paying for the answer again.
     const bytes = await readOwnR2ObjectBytes(artifact.objectKey, {
-      maxBytes: ARTIFACT_LIMITS.maxOutputBytes,
+      // No more than this row says it stored, and never more than the larger
+      // of the two ceilings (a converted file may be as large as the
+      // attachments it was made from, generated-artifacts.md section 14).
+      maxBytes: Math.max(
+        1,
+        Math.min(artifact.byteSize, ARTIFACT_LIMITS.maxConvertedOutputBytes)
+      ),
     });
 
     return new Response(new Uint8Array(bytes), {

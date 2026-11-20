@@ -18,6 +18,9 @@ allowlistGenesisCommit: 8e3dbf64452ab75e3c6f080c8f5f531c02ace387
 | 7 (버전 유지) | 2026-10-19 mposition | 운영자 결정(AGENTS.md Frontier 절, 버전 증가 없음): develop의 배포 환경은 2026-10-13부터 Railway `dev`이므로 8절이 dev를 가리킴, S-M2에 필요한 S-M1 기간 7일 → 3일, 8절 3항의 복구 runbook은 `docs/ops/qa-release-merge-lane-dev-recovery.md`, 머리말의 개정 규칙을 AGENTS.md에 맞춤 |
 | 7 (버전 유지) | 2026-10-20 mposition | 운영자 결정(AGENTS.md Frontier 절, 버전 증가 없음): 릴리스 열차(1절 5항, 8절 12항) — `main:next` 라벨, AEST 출발 시각, `release/train-*` push와 main PR 생성, 기본 꺼진 `QA_RELEASE_TRAIN_ENABLED` |
 | 7 (버전 유지) | 2026-11-03 mposition | 운영자 결정(AGENTS.md Frontier 절, 버전 증가 없음): CI 자동 수정은 예외 없이 모든 열린 PR을 고침 — workflow·action 파일도, PR당 시도 상한도 없음(8절 3항). 레인의 제외 목록은 그대로 |
+| 7 (버전 유지) | 2026-11-16 mposition | 운영자 결정(대화, 버전 증가 없음): 병합 레인이 develop의 latch를 스스로 풂(8절 5항) — 결과 불명, dev 배포 실패·불명·대기 초과·읽기 실패, 결과 보고 침묵으로 걸린 latch를 다시 읽어 그 시도가 레인이 읽은 결과로 닫혔고 열린 시도가 없으며 dev 배포가 정상일 때만. 다른 base 병합, develop 밖 merge commit, revision 불일치와 main 병합·production 배포는 그대로 사람만. 레인의 제외 목록과 DM 병합 범위는 그대로 |
+| 7 (버전 유지) | 2026-11-16 mposition | 운영자 결정(대화, 버전 증가 없음): main 병합·production 배포와 유료 호출에 닿는 서비스 스위치(`QA_RELEASE_*_ENABLED`, `MERGE_LANE_KILL_SWITCH`, `TRAIN_MODEL_RESOLVE`, `MODEL_VERDICT`, `CI_ADVICE_ENABLED`, `CI_ADMISSION_MODE`)는 그대로 둔다. 값은 `enabled`/`disabled`로 적고 기존 `true`·`false` 값도 같은 뜻으로 읽는다. CI 입장의 브랜치 갱신 끄개(`CI_ADMISSION_UPDATE_BRANCH`)는 없앴다. |
+| 7 (버전 유지) | 2026-11-15 mposition | 운영자 결정(AGENTS.md Frontier 절, 버전 증가 없음): DM 승인 PR의 병합 범위에 차단 목록을 추가(8절 3항 예외 하나) — 앱의 `TOMVERSE_AMUX_DM_MERGE_SCOPE`가 정확히 `blocklist`일 때만 켜지고, 기본은 2026-11-13의 허용 목록(운영자 결정 2026-11-16: 기본 꺼짐으로 배포). 레인의 다른 제외와 main 제외는 그대로 |
 
 **규범은 이 파일의 `develop` 현재 내용 하나입니다.** 이전 버전의 본문은 그 버전을 병합한 PR(버전 1 #1946, 버전 2 #1950,
 버전 3 #1986, 버전 4 #2042, 버전 5 #2093, 버전 6 #2102)의 git 기록에 있으며, 효력이 없습니다. 이 버전의 승인 기록이 `develop`에 병합되는 순간 이 파일 전체가
@@ -198,6 +201,70 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
      `prisma/migrations/**/migration.sql` 본문에 그 테이블 이름이 나오는지로 하고, 본문을 읽지 못하면 제외합니다.
    - head 브랜치 `agent/**`, `marketing-agent/**`, `feedback-autofix/**`, `feedback-autofix-main/**`, `autofix/**`,
      `visual-baseline/**`, `dependabot/**`.
+     **예외 하나(운영자 결정 2026-11-13, "develop 병합 권한은 DM에게 승인합니다. main은 안됩니다."):** 엔지니어링 에이전트의
+     `agent/engineering/<run>` PR 가운데 앱이 "Decision Maker가 승인했고 조건을 지금 다시 확인했다"고 넘겨준 것만 후보가 될 수
+     있습니다. 레인은 제품 DB가 없으므로 앱이 상태 읽기(`lib/qaReleaseMergeLaneRoutes.ts`)의 `dmApproved`로 PR 번호·head·브랜치를
+     넘겨 줍니다. 앱은 상태 읽기마다 가장 오래 확인하지 않은 승인 한 건만 골라 그 PR의 현재 변경 digest와 파일 목록을 GitHub에서 다시
+     읽어, digest가 승인 때와 같고 파일이 모두 아래 병합 범위 안일 때만 싣습니다(읽지 못하거나 다르면 싣지 않고, 그 승인은 다음
+     차례로 넘어갑니다). 변경 digest는 v2(merge base·head commit·head tree, 운영자 결정 2026-11-18)이며 크기와 binary를 가리지
+     않습니다. 그 전에 기록된 승인은 v1(diff 바이트의 SHA-256)으로 비교합니다. 앱이 DM 승인 PR을 ready로 바꾸는 것은 사람이 ready로 바꾸는 것과 같습니다(CI 입장 예약 없음, 앞선 DM
+     ready의 CI가 보이기 전에는 다음 ready를 하지 않으므로 넘침은 PR 한 건으로 묶입니다). 사람이 `ci:hold`를 붙인 PR은 ready로
+     바꾸지 않습니다. **fork PR은 제외합니다**: 앱은 head 저장소가 base 저장소와 다르면 싣지 않고, 레인도 GitHub의
+     `isCrossRepository`가 `false`일 때만 이 예외를 씁니다. 레인은 지금 GitHub가 보여 주는 번호·head commit·브랜치가
+     셋 다 같고 base가 develop일 때만 이 예외를 쓰고, 4항대로 그 head를 `sha`로 고정해 병합합니다. 앱은 병합 직전의 지시 소비에서
+     엔지니어링 PR이면 DM 승인을 같은 트랜잭션에서 다시 판정해(T2 스위치, DM kill switch, applied·approve 행, binding, Task, 그 head와 base,
+     저장된 patch가 앱의 병합 범위를 통과하는지) 하나라도 맞지 않으면 소비를 거절하고(`dm_approval_not_holding`), 레인은 소비 없이는 병합하지 않습니다. 레인은 소비 직전에
+     그 PR의 현재 변경 digest를 GitHub에서 엔지니어링 에이전트와 같은 함수(`lib/pullDiffDigestCore.ts`의 `readPullChangeDigest`)로
+     읽어 소비 요청의 `changeDigest`에 싣고, diff를 읽을 수 있으면 v1 `diffDigest`도 함께 싣습니다. 앱은 승인 digest의 버전으로
+     비교해 같을 때만 소비를 허락합니다(없거나 다르면 `dm_diff_changed`). 변경 digest를 읽지 못하면 그 PR은
+     건너뜁니다
+     (`TOMVERSE_AMUX_DM_T2_MERGE=enabled`, 기본 꺼짐; 꺼져 있으면 목록 자체가 없습니다). 그런 PR도 이 3항의 다른 제외(게이트
+     파일, 정책 테스트, 부록 A, 보호 테이블 migration, 목록 미완)와 2항의 CI 판정을 그대로 받습니다. 그리고 **변경 파일이 모두
+     병합 범위 안에 있어야 합니다**(운영자 결정 2026-11-15, "내부 개발용 Flow입니다. 제한을 줄 이유가 없습니다. 로컬 CLI처럼
+     편리한 Flow였으면 합니다."). 범위는 앱 서비스의 `TOMVERSE_AMUX_DM_MERGE_SCOPE`가 정합니다(`lib/qaReleaseMergeLaneExclusionCore.ts`):
+     - **차단 목록(정확히 `blocklist`일 때만. 기본 꺼짐, 운영자 결정 2026-11-16).** 엔지니어링 에이전트 권한 manifest의 product 경로이고
+       정책 테스트가 아니며 아래 어느 목록에도 걸리지 않으면 `lib/**`·`app/api/**`·`app/**`의 다른 파일·`packages/**`·`types/**`도
+       병합합니다. 허용 목록이 받던 경로는 그대로 받습니다. 사람에게 남는 것: control-plane 전부(AMUX `lib/amux/**`·`app/api/internal/**`·
+       `crates/**`·`apps/**`, 에이전트 자신 `lib/agent*`·`lib/engineeringAgent*`, `app/api/admin/**`·`components/admin/**`,
+       `scripts/**`·`bin/**`·`config/**`·`docker/**`·`tools/**`·`.github/**`, 루트 파일과 루트 dot-directory, `docs/policy/**`·
+       `docs/ui-contracts/**`·`docs/agents/**`, `prisma/**`, 가격·모델·앱 기본값·제품 식별자 파일), 게이트 파일
+       (`QA_RELEASE_MERGE_LANE_GATE_PATTERNS`), `QA_RELEASE_DM_MERGE_BLOCK_PATTERNS`, 어느 디렉터리든 raw SQL·키 파일·패키지
+       manifest·lockfile·`tsconfig*.json`·`*.config.*`, 공개 읽기·공유 route, 객체 저장소, 계정 route, Code managed route
+       (`QA_RELEASE_DM_MERGE_BLOCKLIST_SCOPE_PATTERNS`), 그리고 경로 어디에든 차단 이름 조각(`QA_RELEASE_DM_MERGE_BLOCK_NAME_TOKENS`,
+       대소문자 무시: 실제 비용·외부 발송·사용자 데이터 삭제·자격증명과 보안 경계·감사 체인·병합과 배포·에이전트 권한·DB의
+       단어)이 든 허용 목록 밖 경로입니다. 레인은 patch 본문을 보지 못하므로, 앱이 승인을 기록할 때와 ready·레인 목록·소비마다
+       저장된 patch의 바뀐 줄과 hunk 문맥에 사람에게 예약된 값(`creditWeight`·`maxOutputTokens`·`reservationOutputTokens` 등),
+       돈·환경 변수·저장된 스위치·삭제·raw SQL·인증·비밀·메일의 단어, 스스로 하는 외부 전송(`fetch(`·URL·WebSocket 등)·다른
+       프로세스 실행·실행 중 조립한 코드, DB 질의와 파일 쓰기, binary·실행 비트·symlink·submodule이 있는지 봅니다
+       (`AMUX_DM_T2_MERGE_CONTENT_ALARMS`; 있으면 사람에게 남깁니다). hunk의 바뀌지 않은 문맥 줄과 함수 이름에 인가·소유권·접근 검사가 있어도 사람에게
+       남깁니다(`AMUX_DM_T2_MERGE_HUNK_ALARMS`). 그리고 ready와 레인 목록에서는 허용 목록 밖의 바뀐 파일 **전체**를 승인된 head에서
+       엔지니어링 읽기 토큰으로 읽어(`lib/amux/dmT2MergeFileRead.ts`), 파일 어디에든 위 경보가 하나라도 울리거나, Node 내장 모듈·
+       허용된 소수 패키지(`AMUX_DM_T2_MERGE_SAFE_IMPORTS`) 밖의 npm 패키지·이 범위가 경로로 받지 않는 저장소 모듈을 import하거나,
+       읽지 못하면 사람에게 남깁니다(`amuxDmT2MergeFileGate`, `amuxDmT2MergeImportAlarms`). 앱에는 실행 중 쓸 수 있는 파서가
+       없으므로 import는 원문과 주석을 지운 본문에서 두 번 읽고, 키워드 바로 뒤의 주석이나 `+`로 이은 specifier처럼 읽을 수 없게
+       쓴 import는 그 자체로 사람에게 남깁니다. 그래서 이 범위가 새로 병합하는 코드는 돈·환경 변수·삭제·인증·비밀·메일·소유권·
+       접근을 전혀 말하지 않고, 네트워크·다른 프로세스·DB·파일 시스템에 스스로 닿지 않는 파일뿐입니다. 레인은 앱이 넘긴 PR을 늘 차단 목록 범위로 다시
+       판정합니다(`QA_RELEASE_LANE_DM_MERGE_SCOPE`).
+     - **허용 목록(기본: 값이 없거나 빈 값이거나 다른 모든 값).** 2026-11-13의 규칙 그대로입니다(`QA_RELEASE_DM_MERGE_ALLOW_PATTERNS`: `tests/**`,
+       `docs/**`, `locales/**`, `components/**`, `app/**`의 `page.tsx`·`layout.tsx`·`loading.tsx`·`error.tsx`. 그 가운데
+       `docs/policy/**`·`docs/ui-contracts/**`·`docs/agents/**`·`app/api/**`, control-plane 경로, 정책 테스트, 게이트 파일과
+       `QA_RELEASE_DM_MERGE_BLOCK_PATTERNS`는 제외). 앱만 읽으면 됩니다: 앱의 승인 기록·ready·레인 목록·소비가 모두 이 범위로
+       판정하므로 레인에 변수를 둘 필요가 없습니다(레인의 시작 검사는 새 이름을 받지 않습니다).
+
+     하나라도 밖이면 `dm_outside_allowlist`로 사람에게 남깁니다. **대상은 develop뿐이고 main은 제외입니다** — main 병합과 배포는 1항대로
+     사람이 합니다.
+     **예외 둘(운영자 결정 2026-11-15, "dependabot이 생성한 PR들 모두 자체 병합 가능하게 권한 주세요"):** head가
+     `dependabot/npm_and_yarn/develop/`로 시작하는 Dependabot npm 업데이트 PR도 후보가 됩니다. 레인이 GitHub에서 읽어
+     다음이 모두 맞을 때만입니다(`QA_RELEASE_DEPENDABOT_HEAD`, `lib/qaReleaseMergeLaneGithub.ts`):
+     - 작성자가 `dependabot[bot]`입니다.
+     - head 저장소가 base 저장소와 같습니다(fork가 아님).
+     - 판정한 head까지의 모든 커밋이 `dependabot[bot]`의 것이고, GitHub가 서명했습니다(committer `web-flow`, verified).
+     - 변경 파일이 모두 `package.json`·`package-lock.json`(어느 디렉터리든)입니다. 이때 루트 `package.json`의 게이트를 이
+       PR에 한해 풉니다.
+
+     사람이 그 브랜치에 커밋을 얹었거나, 다른 경로를 바꾸면 사람에게 남깁니다. 다른 경로의 사유는
+     `dependabot_outside_manifests`입니다. workflow를 바꾸는 `github_actions` 업데이트도 사람에게 남습니다. 나머지 3항의
+     제외와 2항의 CI 판정은 그대로 받습니다.
    - 변경 파일 목록(전체 페이지, rename은 이전·이후 경로 둘 다)을 끝까지 읽지 못한 PR.
    **migration을 포함한 PR도 무인 병합 대상입니다**(dev의 preDeploy가 적용합니다). git revert는 적용된 migration과 실패한
    migration 기록을 되돌리지 않습니다. 그래서 dev 배포가 실패하면 레인은 latch하고, 운영자가 dev DB를 복구한 뒤에만
@@ -218,7 +285,15 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
    판정은 develop을 배포하는 서비스 **전부**(`servicesDeployingBranch`)가 merge commit이나 그것을 담은 뒤의 commit을 CI 이후 단계로
    배포 중이어야 하며, 아직 그 commit의 배포가 없는 서비스가 있으면 기다립니다(독립 검토 반영).
 5. **결과 불명.** 병합 전에 "시도 중"을 기록하고, 결과를 모르거나 배포가 실패하면 레인을 latch합니다. latch는 사람이 Admin에서
-   풉니다(10절의 "사람의 latch 해제" 트랜잭션, Admin 행위로 같은 트랜잭션에 사람 감사). **레인당 시도는 하나입니다** — "시도 중" 행은 레인당 하나만 존재할 수 있게 DB가 강제하고(조건부 단일 점유), 두 회차가
+   풀거나(10절의 "사람의 latch 해제" 트랜잭션, Admin 행위로 같은 트랜잭션에 사람 감사), **레인이 스스로 풉니다(운영자 결정
+   2026-11-16, develop만)**. 레인은 열린 시도가 없는 latch 회차에서 dev 배포 목록을 읽어 develop을 배포하는 서비스의 최신 배포가
+   실패가 아니고 배포 중인 것도 없을 때만 본 앱에 해제를 요청하고, 본 앱은 마지막 해제 뒤의 latch 사유가 **모두** 레인이 다시 읽는
+   것(`merge_result_unknown`, `deploy_failed`, `deploy_unknown`, `deploy_wait_exceeded`, `deploy_unreadable`,
+   `result_not_reported`)이고 각 사유가 이름 댄 시도가 레인이 읽은 결과(`deployed`, `deploy_failed`, `merge_refused`,
+   `not_merged`)로 닫혔으며 최신 운영자 제어 revision의 호출일 때만 풉니다(10절의 "레인의 latch 해제", 같은 트랜잭션에 레인의
+   system 감사, migration `qa_release_merge_lane_latch_system_release`가 같은 조건을 강제). `merged_off_develop`,
+   `merge_commit_off_develop`, `revision_mismatch`와 사람이 끝낸 시도가 있는 latch는 그대로 사람이 풉니다. 해제한 회차는
+   병합하지 않고, 다음 회차가 평소대로 고릅니다. **레인당 시도는 하나입니다** — "시도 중" 행은 레인당 하나만 존재할 수 있게 DB가 강제하고(조건부 단일 점유), 두 회차가
    겹쳐 둘 다 유휴를 읽어도 두 번째는 점유에 실패해 병합하지 않습니다. **(버전 4) 시도는 배포 결과가 나올 때까지 열려 있습니다** — 2026-10-23부터 "결과"는 4항의 CI 통과(`ci_passed`)를 포함합니다.
    "레인당 하나"는 닫히지 않은 시도 전체(지시 발급됨, 소비됨, 병합됨·배포 대기)에 대한 DB 제약입니다. 시도는 다음처럼만 닫히거나 옮깁니다.
    - **병합 결과 성공**이면 GitHub가 돌려준 **merge commit SHA를 시도에 기록하고** "병합됨, 배포 대기"로 옮깁니다. 레인은 다음 PR을
@@ -249,10 +324,14 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
      attempt id와 상태가 그대로일 때만** 한 행을 바꿉니다. **0행이면 트랜잭션 전체를 되돌리고**(latch도 풀리지 않음) 화면을 다시
      읽게 합니다. 고른 사실과 입력한 SHA는 같은 트랜잭션의 사람 감사에 남습니다. 확인은 사람의 판정이고 이 Agent는 그것을
      검증하지 않습니다. 그래서 배포가 남아 있는 동안 다음 병합이 쌓이지 않습니다. 위 규칙들은 latch가 걸린 동안에도 시도를
-     판정하고 기록하며(병합 호출은 하지 않음), 다시 latch가 필요하면 알립니다.
-   **시도를 닫거나 옮긴 회차는 다른 일을 하지 않습니다** — 다음 PR은 그다음 회차가 고릅니다.
+     판정하고 기록하며(병합 호출은 하지 않음), 다시 latch가 필요하면 알립니다. 그렇게 시도가 레인이 읽은 결과로 닫히면 위의
+     레인의 latch 해제가 사람 없이 이어집니다.
+   **시도를 닫거나 옮긴 회차는 다른 일을 하지 않습니다** — 다음 PR은 그다음 회차가 고릅니다. **예외 하나(운영자 결정
+   2026-11-13):** 배포 판정이 시도를 배포됨으로 닫았고(`succeeded`, 또는 CI 통과를 뜻하는 `ci_passed`), 회차 시작부터 그
+   보고까지 90초 이내였고, 본 앱을 다시 읽어 열린 시도도 latch도 없으면, 같은 회차가 처음부터와 같은 순서(dev 배포 확인,
+   후보 선택, 지시 발급·소비, 병합)로 다음 PR을 진행합니다. 배포 실패·불명·대기 초과로 닫거나 latch한 회차는 이어 가지 않습니다.
 6. **스위치.** 병합은 다음이 **모두** 성립할 때만 합니다. 각 스위치는 **그것을 읽을 수 있는 쪽이 판정**합니다.
-   - 서비스 활성화 변수가 `true` — 병합 레인 서비스가 판정합니다.
+   - 서비스 활성화 변수가 `enabled`(이미 들어 있는 `true`도 같은 뜻) — 병합 레인 서비스가 판정합니다.
    - kill switch 변수가 **선언되어 있고 비어 있음** — 병합 레인 서비스가 판정합니다. 공백을 포함해 어떤 문자든 들어 있으면
      정지이고, 선언되지 않은 것은 읽지 못한 것으로 보아 정지입니다.
    - develop 레인 스위치(운영자 제어 기록)가 켜져 있음 — 본 앱이 판정합니다.
@@ -319,12 +398,12 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
       develop의 지금 파일과 같거나, PR의 hunk마다 문맥을 포함한 결과 블록이 main에 통째로 있을 때입니다. 그러면 "내용 대조로 main에
       있음"이 되어 목록에서 빠집니다. 나머지는 "확인되지 않은 변경"으로 남고, 모델이 PR 본문, 그 변경, 그 파일을 나중에 건드린 main
       PR 본문을 보고 "릴리스 필요·불필요·운영자 판단"과 이유를 답하며, 근거로는 보여 준 PR만 인정합니다. 모델은 열차
-      전용 키로 돌며 한 회차 10건까지, 같은 차이는 한 번만 묻습니다(실패는 6시간 뒤 다시). `QA_RELEASE_TRAIN_MODEL_VERDICT=false`로
+      전용 키로 돌며 한 회차 10건까지, 같은 차이는 한 번만 묻습니다(실패는 6시간 뒤 다시). `QA_RELEASE_TRAIN_MODEL_VERDICT=disabled`(이미 쓰던 `false`도 같은 뜻)로
       끕니다. 결과는 표시 전용 AppSetting 하나이고 열차는 읽지 않습니다. Admin은 판정과 근거를 후보마다 보여 주고, 모델이 불필요로 본
       후보를 한 번에 숨기는 버튼을 둡니다(숨김은 위의 감사 기록 그대로).
     - **조립**은 서비스가 공개 저장소를 임시 디렉터리에 새로 clone한 main 위에서 develop 병합 순서대로 `cherry-pick -m 1`을
       합니다. main에 이미 있는 PR(main에서 도달 가능하거나, 적용할 변경이 없음)은 건너뜁니다. 충돌한 PR은
-      `QA_RELEASE_TRAIN_MODEL_RESOLVE=true`이고 열차 전용 키 `QA_RELEASE_TRAIN_ANTHROPIC_API_KEY`가 있을 때 모델에 넘깁니다(운영자
+      `QA_RELEASE_TRAIN_MODEL_RESOLVE=enabled`(`true`도 같은 뜻)이고 열차 전용 키 `QA_RELEASE_TRAIN_ANTHROPIC_API_KEY`가 있을 때 모델에 넘깁니다(운영자
       2026-10-28, `lib/qaReleaseTrainResolve.ts`, 기본 꺼짐, 호출마다 과금). 모델은 PR의 diff와 충돌 구간(diff3, 앞뒤 20줄)을 보고
       각 구간이 main에서 될 줄만 씁니다. main의 줄에 이 PR의 변경만 더하고, main에 없는 다른 PR의 줄은 들이지 않습니다. 모든
       구간에 답하지 않았거나 충돌 표시가 남은 답은 쓰지 않습니다. 텍스트가 아닌 파일, 한쪽에서 지운 파일은 넘기지 않습니다. 한 열차에서
@@ -364,8 +443,8 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
     - **GitHub 쓰기는 둘뿐**입니다: `release/train-*` 브랜치 push와 그 브랜치의 main PR 생성(ready). PR 본문은 탑승·제외 목록과
       7.9.1 기록 칸(RC SHA, Rollback SHA = 출발 시점의 main head, Verified·Back-merge 칸)입니다. **main 병합은 하지 않습니다**
       — 운영자가 GitHub나 `npm run merge-train -- --include-main`으로 합니다. label·comment·status는 쓰지 않습니다.
-    - **스위치**: 별도 Railway 서비스 "QA Release Train"(production, 30분마다, `.railway/agent-runners.ts`)에서 `QA_RELEASE_TRAIN_ENABLED`가 정확히
-      `true`일 때만 돕니다(기본 꺼짐). 2026-10-22 운영자 결정으로 병합 레인 서비스에서 분리했습니다 — train 실패가 develop
+    - **스위치**: 별도 Railway 서비스 "QA Release Train"(production, 30분마다, `.railway/agent-runners.ts`)에서 `QA_RELEASE_TRAIN_ENABLED`가 `enabled`(또는
+      `true`)일 때만 돕니다(기본 꺼짐). 2026-10-22 운영자 결정으로 병합 레인 서비스에서 분리했습니다 — train 실패가 develop
       레인을 함께 멈추지 않게 하기 위해서입니다. 레인의 App과 앱 secret을 같이 쓰므로 앱 쪽에 새로 둘 것은 없습니다. 출발마다 본 앱이 먼저 승인합니다: 서비스가 든
       revision이 최신 운영자 제어 revision과 같고 같은 출발을 전에 승인하지 않았을 때만이며(레인 latch는 보지 않습니다 —
       운영자 결정 2026-10-23, train은 레인과 독립), 승인과 결과를 병합 레인 actor의 시스템 감사
@@ -401,7 +480,7 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
 | digest | cron `0 21 * * *` UTC, hard timeout 15분, 침묵 기준 28시간, 본문 보존 90일, 재실행 권고 상한 2건·7일, issues 배열 40 / 30 / 30, CI 행은 job마다 창 안의 최신 실행 하나(상한 16) | 승인 |
 | CI | PostgreSQL 17 전용 job 하나(17 경로의 시험용) | 승인 |
 | Monitor | cron `*/30 * * * *`, 호출자 timeout 120초(route의 한 회차 예산 110초보다 김) | 승인(2026-10-03) |
-| 병합 레인 | cron `*/10 * * * *` UTC, 서비스 hard timeout 10분, S-M2 진입에 필요한 S-M1 기간 3일(운영자 결정 2026-10-19, 이전 7일). **서비스가 부르는** 본 앱 트랜잭션은 셋이며 위 timeout 행의 식을 따릅니다. **지시 발급** A = 9 → 32초: timeout 설정, 감사 체인 잠금, 최신 revision·스위치·latch·열린 시도를 한 문장으로 읽기, 시도 행 삽입(레인당 하나는 DB 제약), 감사 네 문장, 마감 검사. **지시 소비** A = 9 → 32초: timeout 설정, 감사 체인 잠금, 지시 행을 잠그고 최신 revision·스위치·latch와 함께 한 문장으로 읽기, 소비하지 않은 행만 바꾸는 조건부 갱신, 감사 네 문장, 마감 검사. **결과 보고** A = 10 → 35초: timeout 설정, 감사 체인 잠금, 열린 시도만 바꾸는 조건부 갱신(최신 revision을 같은 문장에서 읽음), latch 기록, latch 알림 큐 행(한 문장), 감사 네 문장, 마감 검사. latch가 없는 경로는 문장이 더 적지만 **한도는 항상 A = 10으로 겁니다** — 같은 호출이 revision 불일치로 latch 경로가 될 수 있기 때문입니다. 결과 보고는 병합 결과, 배포 판정, 불명·미보고 시도의 PR 재조회 판정 세 종류이고 구성이 같습니다(8절 5항). merge commit SHA는 시도를 바꾸는 같은 조건부 갱신에서 기록합니다. **사람의 latch 해제**(Admin 행위) A = 9 → 32초: timeout 설정, 감사 체인 잠금, latch 행과 열린 시도를 한 문장으로 읽기, 사람이 고른 경우 보여 준 attempt id와 상태에 묶인 조건부 갱신으로 시도를 닫거나 옮기기(0행이면 트랜잭션을 되돌림), 사람 감사 네 문장, 그 감사 행을 가리키는 latch 해제 갱신(8절 5항). 시도를 건드리지 않는 경로는 문장이 하나 적지만 한도는 A = 9로 겁니다. 마감 검사는 없습니다(3절). 서비스 한 회차의 본 앱 호출은 **발급·소비·병합 결과 보고 셋(최악 99초 = 32 + 32 + 35)이거나, 열린 시도에 대한 결과 보고 하나(35초)**이고, 둘을 한 회차에서 함께 하지 않습니다(8절 5항). 어느 쪽도 hard timeout 안에 있습니다 | 승인(버전 4) |
+| 병합 레인 | cron `*/10 * * * *` UTC, 서비스 hard timeout 10분, S-M2 진입에 필요한 S-M1 기간 3일(운영자 결정 2026-10-19, 이전 7일). **서비스가 부르는** 본 앱 트랜잭션은 셋이며 위 timeout 행의 식을 따릅니다. **지시 발급** A = 9 → 32초: timeout 설정, 감사 체인 잠금, 최신 revision·스위치·latch·열린 시도를 한 문장으로 읽기, 시도 행 삽입(레인당 하나는 DB 제약), 감사 네 문장, 마감 검사. **지시 소비** A = 12 → 41초: timeout 설정, 감사 체인 잠금, 지시 행을 잠그고 최신 revision·스위치·latch와 함께 한 문장으로 읽기, 엔지니어링 PR이면 DM 승인 재판정(엔지니어링 PR인지, DM 스위치, 아직 유효한 승인 — 세 문장), 소비하지 않은 행만 바꾸는 조건부 갱신, 감사 네 문장, 마감 검사. **결과 보고** A = 10 → 35초: timeout 설정, 감사 체인 잠금, 열린 시도만 바꾸는 조건부 갱신(최신 revision을 같은 문장에서 읽음), latch 기록, latch 알림 큐 행(한 문장), 감사 네 문장, 마감 검사. latch가 없는 경로는 문장이 더 적지만 **한도는 항상 A = 10으로 겁니다** — 같은 호출이 revision 불일치로 latch 경로가 될 수 있기 때문입니다. 결과 보고는 병합 결과, 배포 판정, 불명·미보고 시도의 PR 재조회 판정 세 종류이고 구성이 같습니다(8절 5항). merge commit SHA는 시도를 바꾸는 같은 조건부 갱신에서 기록합니다. **사람의 latch 해제**(Admin 행위) A = 9 → 32초: timeout 설정, 감사 체인 잠금, latch 행과 열린 시도를 한 문장으로 읽기, 사람이 고른 경우 보여 준 attempt id와 상태에 묶인 조건부 갱신으로 시도를 닫거나 옮기기(0행이면 트랜잭션을 되돌림), 사람 감사 네 문장, 그 감사 행을 가리키는 latch 해제 갱신(8절 5항). 시도를 건드리지 않는 경로는 문장이 하나 적지만 한도는 A = 9로 겁니다. 마감 검사는 없습니다(3절). **레인의 latch 해제**(서비스가 부름, 운영자 결정 2026-11-16) A = 9 → 32초: timeout 설정, 감사 체인 잠금, 최신 revision·latch·열린 시도·마지막 해제 뒤의 latch 사유와 그 시도를 한 문장으로 읽기, system 감사 네 문장, latch 해제 행 삽입, 마감 검사. 열린 시도가 없는 latch 회차에서만 부르므로 다른 호출과 한 회차에 겹치지 않습니다. 서비스 한 회차의 본 앱 호출은 **발급·소비·병합 결과 보고 셋(최악 108초 = 32 + 41 + 35)이거나, 열린 시도에 대한 결과 보고 하나(35초)**입니다. 둘을 한 회차에서 함께 하는 것은 8절 5항의 예외(배포됨으로 닫은 보고가 회차 시작 90초 안에 끝난 경우)뿐이고, 그때도 앞의 90초에 병합 경로의 최악을 더한 값이 hard timeout 안에 있습니다 | 승인(버전 4) |
 
 ## 11. 사람에게 남는 일
 
@@ -412,9 +491,15 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
 ## 부록 B. CI 개선안 (LLM 제안)
 
 열차 서비스가 하루 한 번, develop 커밋의 check별 소요 시간과 CI 입장의 러너 부하 기록(이름과 숫자뿐, 로그와 diff는 보내지 않음)을
-모델에 보내 대기 시간을 줄일 방안을 받아 Admin 개요에 보여 줍니다(`lib/qaReleaseCiAdvice.ts`). 표시 전용이고 아무것도 자동으로
-바꾸지 않으며 감사 이벤트가 아닙니다. 유료 호출이라 `QA_RELEASE_CI_ADVICE_ENABLED`가 정확히 `true`일 때만 돌고(기본 꺼짐), 열차의
+모델에 보내 대기 시간을 줄일 방안을 받아 Admin 개요에 보여 줍니다(`lib/qaReleaseCiAdvice.ts`). 제안 생성은 아무것도 자동으로
+바꾸지 않으며 감사 이벤트가 아닙니다. 유료 호출이라 `QA_RELEASE_CI_ADVICE_ENABLED`가 `enabled`(또는 `true`)일 때만 돌고(기본 꺼짐), 열차의
 Anthropic 키로 24시간에 최대 1회입니다. 호출 전에 시각을 먼저 기록하고 기록에 성공한 회차만 호출하므로, 어떤 실패도 호출을 되풀이하지 않습니다.
+
+2026-11-13 운영자 요청: 개선안 목록에 완료·거절·AMUX 전송·작업문 복사를 제공합니다. 항목은 내용별 고정 ID와 처리 이력을
+앱 DB에 보존하며, 새 회차가 이전 열린 항목이나 처리 결과를 덮어쓰지 않습니다. owner·ops가 최근 재인증 후 완료·거절할 수
+있고, AMUX 전송은 owner만 기존 intake·전송/조회 스위치·고정 요청 ID를 거칩니다. 전송 예약과 상태 변경은 동일 트랜잭션의
+사람 감사 기록으로 남습니다. 전송 결과가 불명이면 예약을 보존하고 동일 요청 ID로 조회합니다. 복사는 상태를 바꾸거나 외부로
+전송하지 않습니다. CI 개선안은 Daily Agent의 작업 원천에 포함하지 않습니다.
 
 ## 부록 A. 이 Agent의 파일 (병합 레인의 제외 판정에 쓰는 경로 목록)
 

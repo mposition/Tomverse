@@ -183,3 +183,42 @@ test("an unread room keeps its team's cost as unavailable, never as 'no record',
   );
   assert.equal(scoutOn.research.nextAt, "2026-11-07T23:00:00.000Z");
 });
+
+test("the router card reads a gate rejection as the cycle working, and errors and caps as needing a look", () => {
+  const observed = (last, spentTodayMicroUsd = 0) => ({
+    ...allUnread,
+    routing: {
+      kind: "observed",
+      last: last && { target: "routing", createdAt: "2026-11-10T03:30:00.000Z", finishedAt: "2026-11-10T03:31:00.000Z", ...last },
+      spentTodayMicroUsd,
+      spentMonthMicroUsd: spentTodayMicroUsd,
+      dayCapMicroUsd: 1_000_000,
+      monthCapMicroUsd: 10_000_000,
+      lastPromotedAt: null,
+    },
+  });
+  const card = (last, spent, copy = en) => cardsOf(observed(last, spent), noExtras, copy).routing;
+
+  // 2026-11-10 13:31 AEST: failed/evidence_below is the gate's normal "no", not a fault.
+  const kept = card({ status: "failed", failure: "evidence_below" });
+  assert.equal(kept.tone, "ok");
+  assert.equal(kept.statusLabel, en.status.watching);
+  assert.equal(kept.activity, en.board.activity.routingKept);
+  assert.equal(card({ status: "failed", failure: "evidence_below" }, 0, ko).activity, "마지막 개선안이 기준을 넘지 못해 기존 지침을 유지했어요.");
+
+  const budget = card({ status: "failed", failure: "budget_exhausted" });
+  assert.equal(budget.tone, "warn");
+  assert.equal(budget.statusLabel, en.status.needsLook);
+  assert.equal(budget.activity, en.board.activity.routingFailed);
+
+  for (const failure of ["run_error", "interrupted", null]) {
+    const errored = card({ status: "error", failure });
+    assert.equal(errored.tone, "warn", String(failure));
+    assert.equal(errored.activity, en.board.activity.routingError);
+  }
+
+  const capped = card({ status: "failed", failure: "evidence_below" }, 1_000_000);
+  assert.equal(capped.tone, "warn");
+  assert.equal(capped.activity, en.board.activity.routingCap);
+  assert.equal(card({ status: "passed", failure: null }).tone, "ok");
+});

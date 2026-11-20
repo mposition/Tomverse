@@ -163,12 +163,13 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
   models: {
     label: "모델",
     description: "모델 레지스트리, 발견된 모델, 기본 모델",
-    aliases: ["레지스트리", "카탈로그", "발견", "후보", "수명주기", "백로그", "기본 모델", "게스트 라인업", "대체 모델"],
+    aliases: ["레지스트리", "카탈로그", "발견", "후보", "수명주기", "백로그", "기본 모델", "게스트 라인업", "대체 모델", "코딩 카탈로그", "공급자 조건"],
     tabs: {
       registry: { label: "레지스트리", description: "가용성, 가격 override, API 구성" },
       discovery: { label: "발견", description: "공급자가 공개했지만 아직 결정되지 않은 모델" },
       defaults: { label: "기본 모델", description: "대체 모델, 게스트 라인업, 계정 기본값" },
-      catalog: { label: "이미지·코딩 카탈로그", description: "이미지·코딩 모델의 켜기·보류, 가격 이력, LLM 초안, Code용 스냅샷" },
+      catalog: { label: "이미지 카탈로그", description: "이미지 모델의 켜기·보류, 가격 이력, LLM 초안" },
+      coding: { label: "코딩 카탈로그", description: "Code·API·CLI용 코딩 모델, 채팅 모델 연결, 공급자 조건, Code 스냅샷" },
     },
   },
   routing: {
@@ -270,11 +271,12 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
   "amux-execution": {
     label: "실행 보드",
     description: "AMUX 카드와 실행 상태, 내 확인 대기, 진단",
-    aliases: ["실행", "보드", "카드", "시도", "배정", "에스컬레이션", "사람 검토", "검토", "검토 큐", "내 확인 대기", "워커 질문", "진단", "워커 성과", "결정 로그", "사고"],
+    aliases: ["실행", "보드", "카드", "시도", "배정", "에스컬레이션", "사람 검토", "검토", "검토 큐", "내 확인 대기", "워커 질문", "진단", "워커 성과", "결정 로그", "사고", "프로세스 분석"],
     tabs: {
       cards: { label: "보드", description: "Tomverse에 저장된 모든 AMUX 카드와 실행 상태" },
       review: { label: "내 확인 대기", description: "사람이 결정해야 멈춰 있는 카드를 한곳에서 차례로 처리해요" },
       diagnostics: { label: "진단", description: "워커 성과와 결정 로그" },
+      "process-audit": { label: "프로세스 분석", description: "AMUX가 멈추는 지점, 과한 제약, 불필요한 단계를 정기적으로 분석한 보고서" },
     },
   },
   release: {

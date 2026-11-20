@@ -23,6 +23,8 @@ import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
 import { PricingKoreanPlanLimits } from "./PricingKoreanPlanLimits";
 import { PricingCreditExample } from "./PricingCreditExample";
 import { PricingPlanCapabilities } from "./PricingPlanCapabilities";
+import { pricingMobilePlanSummaryCopy } from "./pricingMobilePlanSummary";
+import { getPricingStarterLabelKey } from "@/lib/pricingStarterNotice";
 import { UpgradeInterestButton } from "@/components/marketing/UpgradeInterestButton";
 import { usePublicBilling } from "@/components/marketing/usePublicBilling";
 import { usePricingAccount } from "@/components/marketing/usePricingAccount";
@@ -72,6 +74,17 @@ const annualLabelByLanguage: Partial<Record<Language, { annual: string; save: st
   de: { annual: "Jährlich", save: "20 % sparen", checkout: "Beim Checkout wird der angezeigte lokale Festpreis berechnet." },
   es: { annual: "Anual", save: "20 % de descuento", checkout: "Se cobra el precio local fijo mostrado." },
   pt: { annual: "Anual", save: "20% de desconto", checkout: "O preço local fixo exibido é cobrado no checkout." },
+};
+
+const starterNoticePrefix: Record<Language, string> = {
+  en: "You came from ",
+  ko: "다음 기능에서 오셨습니다: ",
+  zh: "您来自此功能：",
+  "zh-Hant": "您來自此功能：",
+  fr: "Vous venez de ",
+  de: "Sie kommen von ",
+  es: "Vienes de ",
+  pt: "Você veio de ",
 };
 
 // The public catalogue always offers exactly these three packs, so the
@@ -146,6 +159,8 @@ type CreditValueCopy = {
   comparisonUnit: string;
   longContextTitle: string;
   longContextBody: string;
+  /** Shown only while long context is on, with the configured threshold. */
+  longContextChargeNote: (tokens: string) => string;
   tokenUnit: string;
   preflightTitle: string;
   preflightBody: string;
@@ -170,6 +185,7 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     comparisonUnit: "comparisons",
     longContextTitle: "Long conversations and files use more context",
     longContextBody: "Input context includes the current prompt, previous conversation, and extracted file content. As that context grows, the base model charge is multiplied by the bands below.",
+    longContextChargeNote: (tokens) => `Above ${tokens} input tokens (signed-in accounts), a request is charged its actual provider cost, never less than the multiplier charge above: the most it can use is held before sending, and the unused part is returned.`,
     tokenUnit: "input tokens",
     preflightTitle: "Check the base estimate before sending",
     preflightBody: "In the app’s model selector, check each model’s credit category and base credits. Before sending, the estimate adds the selected models’ base costs. Final usage may change when file content and long conversation history are processed and input-size multipliers apply.",
@@ -192,6 +208,7 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     comparisonUnit: "비교",
     longContextTitle: "긴 대화와 파일은 더 많은 문맥을 사용합니다",
     longContextBody: "입력 문맥에는 현재 질문, 이전 대화와 추출된 파일 내용이 포함됩니다. 문맥이 길어지면 아래 구간에 따라 모델 기본 차감량에 배율이 적용됩니다.",
+    longContextChargeNote: (tokens) => `로그인 계정의 입력이 ${tokens}토큰을 넘으면 실제 공급사 비용으로 차감하며, 위 배율로 계산한 차감량보다 적게 차감하지는 않습니다. 보내기 전에 최대 사용량을 잡아 두고, 쓰지 않은 만큼은 돌려드립니다.`,
     tokenUnit: "입력 토큰",
     preflightTitle: "전송 전에 기본 예상량을 확인하세요",
     preflightBody: "앱의 모델 선택기에서 각 모델의 크레딧 사용 등급과 기본 크레딧을 확인하세요. 전송 전에는 선택한 모델의 기본값을 합산한 예상량이 표시됩니다. 파일 내용과 긴 대화 기록을 처리한 뒤 적용되는 배율에 따라 최종 사용량은 달라질 수 있습니다.",
@@ -214,6 +231,7 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     comparisonUnit: "次比较",
     longContextTitle: "长对话和文件会使用更多上下文",
     longContextBody: "输入上下文包括当前问题、先前对话和提取的文件内容。上下文增长时，模型基础消耗会按以下区间乘以相应倍数。",
+    longContextChargeNote: (tokens) => `登录账户的输入超过 ${tokens} 个 token 时，按实际供应商成本扣除积分，但不少于上述倍数计算的消耗：发送前会先预留最大用量，未使用的部分会退还。`,
     tokenUnit: "输入 token",
     preflightTitle: "发送前查看基础预估",
     preflightBody: "在应用的模型选择器中查看各模型的积分等级与基础积分。发送前的预估为所选模型基础消耗之和；处理文件内容和长对话记录并应用输入倍数后，最终用量可能变化。",
@@ -236,6 +254,7 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     comparisonUnit: "次比較",
     longContextTitle: "長對話與檔案會使用更多上下文",
     longContextBody: "輸入上下文包括目前的問題、先前的對話和擷取的檔案內容。上下文增加時，模型的基本消耗會依以下區間乘以相應的倍數。",
+    longContextChargeNote: (tokens) => `登入帳戶的輸入超過 ${tokens} 個 token 時，改按實際供應商成本扣除點數，但不少於上述倍數計算的消耗：傳送前會先預留最大用量，未使用的部分會退還。`,
     tokenUnit: "輸入 token",
     preflightTitle: "傳送前查看基本預估",
     preflightBody: "在應用程式的模型選擇器中，可以查看各模型的點數等級與基本點數。傳送前的預估為所選模型基本消耗的總和；處理檔案內容和長對話紀錄並套用輸入倍數後，最終用量可能會有所變化。",
@@ -258,6 +277,7 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     comparisonUnit: "comparaisons",
     longContextTitle: "Les longues conversations et les fichiers utilisent plus de contexte",
     longContextBody: "Le contexte comprend la demande actuelle, la conversation précédente et le contenu extrait des fichiers. Le coût de base est multiplié selon les paliers ci-dessous.",
+    longContextChargeNote: (tokens) => `Au-delà de ${tokens} jetons en entrée (comptes connectés), une demande est facturée à son coût fournisseur réel, jamais moins que le palier ci-dessus : le maximum est réservé avant l’envoi et la part non utilisée est restituée.`,
     tokenUnit: "tokens d'entrée",
     preflightTitle: "Vérifiez l'estimation de base avant l'envoi",
     preflightBody: "Dans le sélecteur de l’application, consultez la catégorie de consommation et les crédits de base de chaque modèle. L’estimation avant l’envoi additionne ces coûts. Le total final peut varier après traitement des fichiers et d’un long historique, selon les multiplicateurs d’entrée.",
@@ -280,6 +300,7 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     comparisonUnit: "Vergleiche",
     longContextTitle: "Lange Gespräche und Dateien verwenden mehr Kontext",
     longContextBody: "Der Eingabekontext umfasst die aktuelle Anfrage, den bisherigen Verlauf und extrahierte Dateiinhalte. Mit wachsendem Kontext wird der Basisverbrauch nach den folgenden Stufen multipliziert.",
+    longContextChargeNote: (tokens) => `Ab ${tokens} Eingabe-Token (angemeldete Konten) wird eine Anfrage nach den tatsächlichen Anbieterkosten berechnet, nie weniger als nach den Stufen oben: Das Maximum wird vor dem Senden reserviert, der ungenutzte Teil wird erstattet.`,
     tokenUnit: "Eingabe-Token",
     preflightTitle: "Basisprognose vor dem Senden prüfen",
     preflightBody: "In der Modellauswahl der App sehen Sie die Credit-Kategorie und die Basis-Credits je Modell. Die Schätzung vor dem Senden addiert diese Basiswerte. Nach Verarbeitung von Dateien und langem Verlauf können Eingabefaktoren den endgültigen Verbrauch verändern.",
@@ -302,6 +323,7 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     comparisonUnit: "comparaciones",
     longContextTitle: "Las conversaciones largas y los archivos usan más contexto",
     longContextBody: "El contexto incluye la solicitud actual, la conversación previa y el contenido extraído de archivos. Al crecer, el coste base se multiplica según los tramos siguientes.",
+    longContextChargeNote: (tokens) => `Por encima de ${tokens} tokens de entrada (cuentas con sesión), la solicitud se cobra por su coste real del proveedor, nunca menos que según los tramos anteriores: se reserva el máximo antes de enviar y se devuelve la parte no usada.`,
     tokenUnit: "tokens de entrada",
     preflightTitle: "Comprueba la estimación base antes de enviar",
     preflightBody: "En el selector de la aplicación, consulta la categoría de consumo y los créditos base de cada modelo. La estimación previa suma esos costes. El uso final puede variar al procesar archivos e historiales largos y aplicar multiplicadores de entrada.",
@@ -324,6 +346,7 @@ const creditValueCopy: Record<Language, CreditValueCopy> = {
     comparisonUnit: "comparações",
     longContextTitle: "Conversas longas e arquivos usam mais contexto",
     longContextBody: "O contexto inclui o pedido atual, a conversa anterior e o conteúdo extraído dos arquivos. À medida que cresce, o custo-base é multiplicado pelas faixas abaixo.",
+    longContextChargeNote: (tokens) => `Acima de ${tokens} tokens de entrada (contas conectadas), o pedido é cobrado pelo custo real do provedor, nunca menos do que pelas faixas acima: o máximo é reservado antes do envio e a parte não usada é devolvida.`,
     tokenUnit: "tokens de entrada",
     preflightTitle: "Confira a estimativa-base antes de enviar",
     preflightBody: "No seletor de modelos do aplicativo, confira a categoria de consumo e os créditos-base de cada modelo. A estimativa antes do envio soma esses valores. O uso final pode mudar após o processamento de arquivos e históricos longos e a aplicação dos multiplicadores de entrada.",
@@ -610,7 +633,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       rows: [
         { label: "Model access", free: "Selected models", pro: "All available models · Pro usage limits", max: "All available models · largest monthly allowance" },
         { label: "Multi-model comparison", free: "Up to 3 models", pro: "Up to 3 models", max: "Up to 3 models" },
-        { label: "File attachments (where enabled)", free: "5 files · 10 MiB each · 25 MiB total", pro: "5 files · 10 MiB each · 25 MiB total", max: "5 files · 10 MiB each · 25 MiB total" },
+        { label: "File attachments (where enabled)", free: "10 files · 50 MiB each · 100 MiB total", pro: "10 files · 50 MiB each · 100 MiB total", max: "10 files · 50 MiB each · 100 MiB total" },
         { label: "Conversation sharing", free: "Share and download", pro: "Share and download", max: "Share and download" },
         { label: "AI credits", free: "300/month", pro: "3,000/month", max: "10,000/month" },
       ],
@@ -643,7 +666,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
         cta: "Start free",
         href: REVIEW_SIGN_IN_HREF,
         usage: "300 monthly AI credits",
-        features: ["Access to selected models","Up to 30 selected higher-cost model responses per month","Compare up to 3 models","Saved conversation history","File attachments, sharing and downloads after sign-in","Start with light everyday questions"],
+        features: ["Access to selected models","Up to 30 selected higher-cost model responses per month","Compare up to 3 models","Saved conversation history","File attachments, sharing and downloads after sign-in","Start with light everyday questions","Where available, create AI images"],
       },
       {
         name: "Pro",
@@ -656,7 +679,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
         highlighted: true,
         badge: "Recommended",
         usage: "3,000 monthly AI credits",
-        features: ["Access to all available models","Monthly credits cover each model’s credit cost","Compare up to 3 models side by side","File attachments and Google Drive files","Share and download conversations"],
+        features: ["Access to all available models","Monthly credits cover each model’s credit cost","Compare up to 3 models side by side","File attachments and Google Drive files","Share and download conversations","Where available, create AI images"],
       },
       {
         name: "Max",
@@ -667,7 +690,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
         cta: "Upgrade to Max",
         href: REVIEW_WORKSPACE_PATH,
         usage: "10,000 monthly AI credits",
-        features: ["Access to all available models","No daily limit on Standard models","Premium usage follows monthly credits and the Fair Use Policy","Where attachments are enabled: 5 files per message · 10 MiB each · 25 MiB combined","For frequent advanced-model and long-document work"],
+        features: ["Access to all available models","No daily limit on Standard models","Premium usage follows monthly credits and the Fair Use Policy","Where attachments are enabled: 10 files per message · 50 MiB each · 100 MiB combined","For frequent advanced-model and long-document work","Where available, create AI images"],
       },
     ],
   },
@@ -688,7 +711,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       rows: [
         { label: "모델 접근", free: "선별된 모델", pro: "모든 사용 가능 모델 · Pro 사용량 적용", max: "모든 사용 가능 모델 · 가장 큰 월 제공량" },
         { label: "다중 모델 비교", free: "최대 3개 모델", pro: "최대 3개 모델", max: "최대 3개 모델" },
-        { label: "파일 첨부 (허용 시)", free: "5개 · 각 10 MiB · 총 25 MiB", pro: "5개 · 각 10 MiB · 총 25 MiB", max: "5개 · 각 10 MiB · 총 25 MiB" },
+        { label: "파일 첨부 (허용 시)", free: "10개 · 각 50 MiB · 총 100 MiB", pro: "10개 · 각 50 MiB · 총 100 MiB", max: "10개 · 각 50 MiB · 총 100 MiB" },
         { label: "대화 공유", free: "공유 및 다운로드", pro: "공유 및 다운로드", max: "공유 및 다운로드" },
         { label: "AI 크레딧", free: "월 300", pro: "월 3,000", max: "월 10,000" },
       ],
@@ -701,9 +724,9 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     ],
     note: "가격은 함께 표시된 통화의 세금 전 고정 금액입니다. 플랜별 일일 크레딧 한도와 모델별 운영 안전장치는 현재 사용량 안내를 확인하세요.",
     plans: [
-      { name: "Free", eyebrow: "처음 시작하는 사용자", price: "$0", period: "월", description: "가벼운 일상 사용과 고급 모델 체험을 위한 월 300 AI 크레딧", cta: "무료로 시작", href: REVIEW_SIGN_IN_HREF, usage: "월 300 AI 크레딧", features: ["선별된 모델 이용","선별된 고비용 모델 월 최대 30응답","최대 3개 모델 비교","저장한 대화 기록","로그인 후 파일 첨부, 공유 및 다운로드","가벼운 일상 질문부터 시작하기"] },
-      { name: "Pro", eyebrow: "일상 생산성", price: "$15", period: "월", description: "일상적인 멀티모델 비교를 위한 월 3,000 AI 크레딧", cta: "Pro로 업그레이드", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "추천", usage: "월 3,000 AI 크레딧", features: ["모든 사용 가능 모델 이용","모델별 크레딧 차감량에 따라 월 제공량 사용","최대 3개 모델 나란히 비교","파일 첨부 및 Google Drive 파일","대화 공유 및 다운로드"] },
-      { name: "Max", eyebrow: "고강도 AI 워크플로", price: "$25", period: "월", description: "집중적인 고급 모델·긴 문서 작업을 위한 월 10,000 AI 크레딧", cta: "Max로 업그레이드", href: REVIEW_WORKSPACE_PATH, usage: "월 10,000 AI 크레딧", features: ["모든 사용 가능 모델 이용","월 10,000 AI 크레딧 제공","Premium 사용량은 월 크레딧 및 공정사용 정책 적용","첨부 허용 시 5개 · 각 10 MiB · 총 25 MiB","고급 모델과 긴 문서를 자주 쓰는 경우에 적합"] },
+      { name: "Free", eyebrow: "처음 시작하는 사용자", price: "$0", period: "월", description: "가벼운 일상 사용과 고급 모델 체험을 위한 월 300 AI 크레딧", cta: "무료로 시작", href: REVIEW_SIGN_IN_HREF, usage: "월 300 AI 크레딧", features: ["선별된 모델 이용","선별된 고비용 모델 월 최대 30응답","최대 3개 모델 비교","저장한 대화 기록","로그인 후 파일 첨부, 공유 및 다운로드","가벼운 일상 질문부터 시작하기","사용 가능한 경우 AI 이미지 만들기"] },
+      { name: "Pro", eyebrow: "일상 생산성", price: "$15", period: "월", description: "일상적인 멀티모델 비교를 위한 월 3,000 AI 크레딧", cta: "Pro로 업그레이드", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "추천", usage: "월 3,000 AI 크레딧", features: ["모든 사용 가능 모델 이용","모델별 크레딧 차감량에 따라 월 제공량 사용","최대 3개 모델 나란히 비교","파일 첨부 및 Google Drive 파일","대화 공유 및 다운로드","사용 가능한 경우 AI 이미지 만들기"] },
+      { name: "Max", eyebrow: "고강도 AI 워크플로", price: "$25", period: "월", description: "집중적인 고급 모델·긴 문서 작업을 위한 월 10,000 AI 크레딧", cta: "Max로 업그레이드", href: REVIEW_WORKSPACE_PATH, usage: "월 10,000 AI 크레딧", features: ["모든 사용 가능 모델 이용","월 10,000 AI 크레딧 제공","Premium 등급 모델 사용에는 월 크레딧 및 공정 사용 정책 적용","첨부 허용 시 10개 · 각 50 MiB · 총 100 MiB","고급 모델과 긴 문서를 자주 쓰는 경우에 적합","사용 가능한 경우 AI 이미지 만들기"] },
     ],
   },
   zh: {
@@ -723,7 +746,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       rows: [
         { label: "模型访问", free: "精选模型", pro: "所有可用模型 · 适用 Pro 用量限制", max: "所有可用模型 · 最高月额度" },
         { label: "多模型比较", free: "最多 3 个模型", pro: "最多 3 个模型", max: "最多 3 个模型" },
-        { label: "文件附件", free: "图片、PDF、Office、Drive", pro: "图片、PDF、Office、Drive", max: "更高的文件和上下文限制" },
+        { label: "文件附件", free: "图片、PDF、Office、Drive", pro: "图片、PDF、Office、Drive", max: "图片、PDF、Office、Drive" },
         { label: "对话分享", free: "分享和下载", pro: "分享和下载", max: "分享和下载" },
         { label: "AI 积分", free: "每月 300", pro: "每月 3,000", max: "每月 10,000" },
       ],
@@ -736,9 +759,9 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     ],
     note: "价格为所选结算货币的税前固定金额。Max 的 Standard 模型无每日限制；Premium 用量受月度积分和公平使用政策约束。",
     plans: [
-      { name: "Free", eyebrow: "适合开始使用", price: "$0", period: "每月", description: "每月 300 AI 积分，适合轻量日常使用和体验高级模型。", cta: "免费开始", href: REVIEW_SIGN_IN_HREF, usage: "每月 300 AI 积分", features: ["使用精选模型","精选高费用模型每月最多 30 次响应","比较最多 3 个模型","已保存的对话记录","登录后可附加文件、分享和下载","从轻量日常提问开始"] },
-      { name: "Pro", eyebrow: "日常生产力", price: "$15", period: "每月", description: "每月 3,000 AI 积分，适合日常多模型比较。", cta: "升级到 Pro", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "推荐", usage: "每月 3,000 AI 积分", features: ["使用所有可用模型","每月积分按各模型的积分消耗扣除","并排比较最多 3 个模型","附加文件和 Google Drive 文件","分享和下载对话"] },
-      { name: "Max", eyebrow: "高强度 AI 工作流", price: "$25", period: "每月", description: "每月 10,000 AI 积分，适合高强度高级模型和长文档工作。", cta: "升级到 Max", href: REVIEW_WORKSPACE_PATH, usage: "每月 10,000 AI 积分", features: ["使用所有可用模型","Standard 模型无每日限制","Premium 用量受每月积分及公平使用政策约束","更高的附件和上下文限制","适合经常使用高级模型和处理长文档"] },
+      { name: "Free", eyebrow: "适合开始使用", price: "$0", period: "每月", description: "每月 300 AI 积分，适合轻量日常使用和体验高级模型。", cta: "免费开始", href: REVIEW_SIGN_IN_HREF, usage: "每月 300 AI 积分", features: ["使用精选模型","精选高费用模型每月最多 30 次响应","比较最多 3 个模型","已保存的对话记录","登录后可附加文件、分享和下载","从轻量日常提问开始","在开放使用时创建 AI 图像"] },
+      { name: "Pro", eyebrow: "日常生产力", price: "$15", period: "每月", description: "每月 3,000 AI 积分，适合日常多模型比较。", cta: "升级到 Pro", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "推荐", usage: "每月 3,000 AI 积分", features: ["使用所有可用模型","每月积分按各模型的积分消耗扣除","并排比较最多 3 个模型","附加文件和 Google Drive 文件","分享和下载对话","在开放使用时创建 AI 图像"] },
+      { name: "Max", eyebrow: "高强度 AI 工作流", price: "$25", period: "每月", description: "每月 10,000 AI 积分，适合高强度高级模型和长文档工作。", cta: "升级到 Max", href: REVIEW_WORKSPACE_PATH, usage: "每月 10,000 AI 积分", features: ["使用所有可用模型","Standard 模型无每日限制","Premium 用量受每月积分及公平使用政策约束","附件开启时：每条消息 10 个文件 · 每个 50 MiB · 合计 100 MiB","适合经常使用高级模型和处理长文档","在开放使用时创建 AI 图像"] },
     ],
   },
   "zh-Hant": {
@@ -758,7 +781,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       rows: [
         { label: "模型存取", free: "精選模型", pro: "所有可用模型 · 適用 Pro 用量限制", max: "所有可用模型 · 最高月額度" },
         { label: "多模型比較", free: "最多 3 個模型", pro: "最多 3 個模型", max: "最多 3 個模型" },
-        { label: "檔案附件", free: "圖片、PDF、Office、Drive", pro: "圖片、PDF、Office、Drive", max: "更高的檔案和上下文限制" },
+        { label: "檔案附件", free: "圖片、PDF、Office、Drive", pro: "圖片、PDF、Office、Drive", max: "圖片、PDF、Office、Drive" },
         { label: "對話分享", free: "分享和下載", pro: "分享和下載", max: "分享和下載" },
         { label: "AI 點數", free: "每月 300", pro: "每月 3,000", max: "每月 10,000" },
       ],
@@ -771,9 +794,9 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     ],
     note: "價格為所選結帳幣別的未稅固定金額。Max 的 Standard 模型沒有每日限制；Premium 用量受每月點數和公平使用政策約束。",
     plans: [
-      { name: "Free", eyebrow: "適合開始使用", price: "$0", period: "每月", description: "每月 300 AI 點數，適合輕量的日常使用與體驗進階模型。", cta: "免費開始", href: REVIEW_SIGN_IN_HREF, usage: "每月 300 AI 點數", features: ["使用精選模型","精選高費用模型每月最多 30 次回應","比較最多 3 個模型","已保存的對話紀錄","登入後可附加檔案、分享和下載","從輕量的日常提問開始"] },
-      { name: "Pro", eyebrow: "日常生產力", price: "$15", period: "每月", description: "每月 3,000 AI 點數，適合日常的多模型比較。", cta: "升級到 Pro", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "推薦", usage: "每月 3,000 AI 點數", features: ["使用所有可用模型","每月點數依各模型的點數消耗扣除","並排比較最多 3 個模型","附加檔案和 Google Drive 檔案","分享和下載對話"] },
-      { name: "Max", eyebrow: "高強度 AI 工作流程", price: "$25", period: "每月", description: "每月 10,000 AI 點數，適合高強度的進階模型和長文件工作。", cta: "升級到 Max", href: REVIEW_WORKSPACE_PATH, usage: "每月 10,000 AI 點數", features: ["使用所有可用模型","Standard 模型沒有每日限制","Premium 用量受每月點數及公平使用政策約束","更高的附件和上下文限制","適合經常使用進階模型和處理長文件"] },
+      { name: "Free", eyebrow: "適合開始使用", price: "$0", period: "每月", description: "每月 300 AI 點數，適合輕量的日常使用與體驗進階模型。", cta: "免費開始", href: REVIEW_SIGN_IN_HREF, usage: "每月 300 AI 點數", features: ["使用精選模型","精選高費用模型每月最多 30 次回應","比較最多 3 個模型","已保存的對話紀錄","登入後可附加檔案、分享和下載","從輕量的日常提問開始","開放使用時建立 AI 圖像"] },
+      { name: "Pro", eyebrow: "日常生產力", price: "$15", period: "每月", description: "每月 3,000 AI 點數，適合日常的多模型比較。", cta: "升級到 Pro", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "推薦", usage: "每月 3,000 AI 點數", features: ["使用所有可用模型","每月點數依各模型的點數消耗扣除","並排比較最多 3 個模型","附加檔案和 Google Drive 檔案","分享和下載對話","開放使用時建立 AI 圖像"] },
+      { name: "Max", eyebrow: "高強度 AI 工作流程", price: "$25", period: "每月", description: "每月 10,000 AI 點數，適合高強度的進階模型和長文件工作。", cta: "升級到 Max", href: REVIEW_WORKSPACE_PATH, usage: "每月 10,000 AI 點數", features: ["使用所有可用模型","Standard 模型沒有每日限制","Premium 用量受每月點數及公平使用政策約束","附件開啟時：每則訊息 10 個檔案 · 每個 50 MiB · 合計 100 MiB","適合經常使用進階模型和處理長文件","開放使用時建立 AI 圖像"] },
     ],
   },
   fr: {
@@ -793,7 +816,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       rows: [
         { label: "Accès aux modèles", free: "Sélection de modèles", pro: "Tous les modèles disponibles · limites Pro", max: "Tous les modèles disponibles · enveloppe mensuelle la plus élevée" },
         { label: "Comparaison multi-modèles", free: "Jusqu'à 3 modèles", pro: "Jusqu'à 3 modèles", max: "Jusqu'à 3 modèles" },
-        { label: "Pièces jointes", free: "Images, PDF, Office, Drive", pro: "Images, PDF, Office, Drive", max: "Limites de fichiers et de contexte plus élevées" },
+        { label: "Pièces jointes", free: "Images, PDF, Office, Drive", pro: "Images, PDF, Office, Drive", max: "Images, PDF, Office, Drive" },
         { label: "Partage de conversations", free: "Partage et téléchargement", pro: "Partage et téléchargement", max: "Partage et téléchargement" },
         { label: "Crédits IA", free: "300/mois", pro: "3 000/mois", max: "10 000/mois" },
       ],
@@ -806,9 +829,9 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     ],
     note: "Les prix sont des montants fixes hors taxes dans la devise de facturation sélectionnée. Avec Max, les modèles Standard n'ont pas de limite quotidienne ; l'usage Premium reste soumis aux crédits mensuels et à la politique d'utilisation équitable.",
     plans: [
-      { name: "Free", eyebrow: "Pour commencer", price: "$0", period: "par mois", description: "300 crédits IA mensuels pour un usage quotidien léger et l'essai de modèles avancés.", cta: "Commencer gratuitement", href: REVIEW_SIGN_IN_HREF, usage: "300 crédits IA par mois", features: ["Accès à une sélection de modèles","Jusqu’à 30 réponses par mois avec certains modèles à coût élevé","Comparez jusqu’à 3 modèles","Historique des conversations enregistrées","Fichiers, partage et téléchargements après connexion","Pour commencer avec des questions du quotidien"] },
-      { name: "Pro", eyebrow: "Productivité quotidienne", price: "$15", period: "par mois", description: "3 000 crédits IA mensuels pour les comparaisons multi-modèles quotidiennes.", cta: "Passer à Pro", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "Recommandé", usage: "3 000 crédits IA par mois", features: ["Accès à tous les modèles disponibles","Crédits mensuels consommés selon le coût de chaque modèle","Comparez jusqu’à 3 modèles côte à côte","Pièces jointes et fichiers Google Drive","Partage et téléchargement des conversations"] },
-      { name: "Max", eyebrow: "Workflows IA intensifs", price: "$25", period: "par mois", description: "10 000 crédits IA mensuels pour les modèles avancés et les longs documents.", cta: "Passer à Max", href: REVIEW_WORKSPACE_PATH, usage: "10 000 crédits IA par mois", features: ["Accès à tous les modèles disponibles","Pas de limite quotidienne pour les modèles Standard","Usage Premium soumis aux crédits mensuels et à la politique d’usage équitable","Limites de pièces jointes et de contexte plus élevées","Pour l’usage fréquent de modèles avancés et de longs documents"] },
+      { name: "Free", eyebrow: "Pour commencer", price: "$0", period: "par mois", description: "300 crédits IA mensuels pour un usage quotidien léger et l'essai de modèles avancés.", cta: "Commencer gratuitement", href: REVIEW_SIGN_IN_HREF, usage: "300 crédits IA par mois", features: ["Accès à une sélection de modèles","Jusqu’à 30 réponses par mois avec certains modèles à coût élevé","Comparez jusqu’à 3 modèles","Historique des conversations enregistrées","Fichiers, partage et téléchargements après connexion","Pour commencer avec des questions du quotidien","Créer des images IA lorsque la fonction est disponible"] },
+      { name: "Pro", eyebrow: "Productivité quotidienne", price: "$15", period: "par mois", description: "3 000 crédits IA mensuels pour les comparaisons multi-modèles quotidiennes.", cta: "Passer à Pro", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "Recommandé", usage: "3 000 crédits IA par mois", features: ["Accès à tous les modèles disponibles","Crédits mensuels consommés selon le coût de chaque modèle","Comparez jusqu’à 3 modèles côte à côte","Pièces jointes et fichiers Google Drive","Partage et téléchargement des conversations","Créer des images IA lorsque la fonction est disponible"] },
+      { name: "Max", eyebrow: "Workflows IA intensifs", price: "$25", period: "par mois", description: "10 000 crédits IA mensuels pour les modèles avancés et les longs documents.", cta: "Passer à Max", href: REVIEW_WORKSPACE_PATH, usage: "10 000 crédits IA par mois", features: ["Accès à tous les modèles disponibles","Pas de limite quotidienne pour les modèles Standard","Usage Premium soumis aux crédits mensuels et à la politique d’usage équitable","Si les pièces jointes sont activées : 10 fichiers par message · 50 Mio chacun · 100 Mio au total","Pour l’usage fréquent de modèles avancés et de longs documents","Créer des images IA lorsque la fonction est disponible"] },
     ],
   },
   de: {
@@ -828,7 +851,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       rows: [
         { label: "Modellzugriff", free: "Ausgewählte Modelle", pro: "Alle verfügbaren Modelle · Pro-Nutzungslimits", max: "Alle verfügbaren Modelle · größtes Monatskontingent" },
         { label: "Multi-Modell-Vergleich", free: "Bis zu 3 Modelle", pro: "Bis zu 3 Modelle", max: "Bis zu 3 Modelle" },
-        { label: "Dateianhänge", free: "Bilder, PDFs, Office, Drive", pro: "Bilder, PDFs, Office, Drive", max: "Höhere Datei- und Kontextlimits" },
+        { label: "Dateianhänge", free: "Bilder, PDFs, Office, Drive", pro: "Bilder, PDFs, Office, Drive", max: "Bilder, PDFs, Office, Drive" },
         { label: "Unterhaltungen teilen", free: "Teilen und herunterladen", pro: "Teilen und herunterladen", max: "Teilen und Herunterladen" },
         { label: "KI-Credits", free: "300/Monat", pro: "3.000/Monat", max: "10.000/Monat" },
       ],
@@ -841,9 +864,9 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     ],
     note: "Preise sind feste Beträge vor Steuern in der ausgewählten Abrechnungswährung. Bei Max haben Standard-Modelle kein Tageslimit; Premium-Nutzung unterliegt den monatlichen Credits und der Fair-Use-Richtlinie.",
     plans: [
-      { name: "Free", eyebrow: "Für den Einstieg", price: "$0", period: "pro Monat", description: "300 monatliche KI-Credits für leichte Alltagsnutzung und zum Testen fortgeschrittener Modelle.", cta: "Kostenlos starten", href: REVIEW_SIGN_IN_HREF, usage: "300 KI-Credits pro Monat", features: ["Zugriff auf ausgewählte Modelle","Bis zu 30 Antworten ausgewählter kostenintensiver Modelle pro Monat","Bis zu 3 Modelle vergleichen","Gespeicherter Gesprächsverlauf","Dateianhänge, Teilen und Downloads nach Anmeldung","Einstieg mit einfachen Alltagsfragen"] },
-      { name: "Pro", eyebrow: "Tägliche Produktivität", price: "$15", period: "pro Monat", description: "3.000 monatliche KI-Credits für alltägliche Multi-Modell-Vergleiche.", cta: "Auf Pro upgraden", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "Empfohlen", usage: "3.000 KI-Credits pro Monat", features: ["Zugriff auf alle verfügbaren Modelle","Monatliche Credits nach dem Verbrauch des jeweiligen Modells","Bis zu 3 Modelle nebeneinander vergleichen","Dateianhänge und Google-Drive-Dateien","Gespräche teilen und herunterladen"] },
-      { name: "Max", eyebrow: "Intensive KI-Workflows", price: "$25", period: "pro Monat", description: "10.000 monatliche KI-Credits für intensive Arbeit mit fortgeschrittenen Modellen und langen Dokumenten.", cta: "Auf Max upgraden", href: REVIEW_WORKSPACE_PATH, usage: "10.000 KI-Credits pro Monat", features: ["Zugriff auf alle verfügbaren Modelle","Kein Tageslimit für Standard-Modelle","Premium-Nutzung unterliegt Monats-Credits und der Fair-Use-Richtlinie","Höhere Anhang- und Kontextlimits","Für häufige Arbeit mit fortgeschrittenen Modellen und langen Dokumenten"] },
+      { name: "Free", eyebrow: "Für den Einstieg", price: "$0", period: "pro Monat", description: "300 monatliche KI-Credits für leichte Alltagsnutzung und zum Testen fortgeschrittener Modelle.", cta: "Kostenlos starten", href: REVIEW_SIGN_IN_HREF, usage: "300 KI-Credits pro Monat", features: ["Zugriff auf ausgewählte Modelle","Bis zu 30 Antworten ausgewählter kostenintensiver Modelle pro Monat","Bis zu 3 Modelle vergleichen","Gespeicherter Gesprächsverlauf","Dateianhänge, Teilen und Downloads nach Anmeldung","Einstieg mit einfachen Alltagsfragen","KI-Bilder erstellen, sofern verfügbar"] },
+      { name: "Pro", eyebrow: "Tägliche Produktivität", price: "$15", period: "pro Monat", description: "3.000 monatliche KI-Credits für alltägliche Multi-Modell-Vergleiche.", cta: "Auf Pro upgraden", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "Empfohlen", usage: "3.000 KI-Credits pro Monat", features: ["Zugriff auf alle verfügbaren Modelle","Monatliche Credits nach dem Verbrauch des jeweiligen Modells","Bis zu 3 Modelle nebeneinander vergleichen","Dateianhänge und Google-Drive-Dateien","Gespräche teilen und herunterladen","KI-Bilder erstellen, sofern verfügbar"] },
+      { name: "Max", eyebrow: "Intensive KI-Workflows", price: "$25", period: "pro Monat", description: "10.000 monatliche KI-Credits für intensive Arbeit mit fortgeschrittenen Modellen und langen Dokumenten.", cta: "Auf Max upgraden", href: REVIEW_WORKSPACE_PATH, usage: "10.000 KI-Credits pro Monat", features: ["Zugriff auf alle verfügbaren Modelle","Kein Tageslimit für Standard-Modelle","Premium-Nutzung unterliegt Monats-Credits und der Fair-Use-Richtlinie","Wenn Anhänge aktiviert sind: 10 Dateien pro Nachricht · je 50 MiB · insgesamt 100 MiB","Für häufige Arbeit mit fortgeschrittenen Modellen und langen Dokumenten","KI-Bilder erstellen, sofern verfügbar"] },
     ],
   },
   es: {
@@ -863,7 +886,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       rows: [
         { label: "Acceso a modelos", free: "Modelos seleccionados", pro: "Todos los modelos disponibles · límites de Pro", max: "Todos los modelos disponibles · mayor asignación mensual" },
         { label: "Comparación multi-modelo", free: "Hasta 3 modelos", pro: "Hasta 3 modelos", max: "Hasta 3 modelos" },
-        { label: "Archivos adjuntos", free: "Imágenes, PDF, Office, Drive", pro: "Imágenes, PDF, Office, Drive", max: "Límites superiores de archivos y contexto" },
+        { label: "Archivos adjuntos", free: "Imágenes, PDF, Office, Drive", pro: "Imágenes, PDF, Office, Drive", max: "Imágenes, PDF, Office, Drive" },
         { label: "Compartir conversaciones", free: "Compartir y descargar", pro: "Compartir y descargar", max: "Compartir y descargar" },
         { label: "Créditos de IA", free: "300/mes", pro: "3.000/mes", max: "10.000/mes" },
       ],
@@ -876,9 +899,9 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     ],
     note: "Los precios son importes fijos antes de impuestos en la moneda de facturación seleccionada. En Max, los modelos Standard no tienen límite diario; el uso Premium está sujeto a los créditos mensuales y a la política de uso justo.",
     plans: [
-      { name: "Free", eyebrow: "Para empezar", price: "$0", period: "al mes", description: "300 créditos de IA al mes para uso diario ligero y probar modelos avanzados.", cta: "Empezar gratis", href: REVIEW_SIGN_IN_HREF, usage: "300 créditos de IA al mes", features: ["Acceso a modelos seleccionados","Hasta 30 respuestas mensuales de determinados modelos de mayor coste","Compara hasta 3 modelos","Historial de conversaciones guardadas","Archivos, compartir y descargas tras iniciar sesión","Empieza con preguntas cotidianas sencillas"] },
-      { name: "Pro", eyebrow: "Productividad diaria", price: "$15", period: "al mes", description: "3.000 créditos de IA al mes para comparaciones multimodelo cotidianas.", cta: "Actualizar a Pro", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "Recomendado", usage: "3.000 créditos de IA al mes", features: ["Acceso a todos los modelos disponibles","Créditos mensuales según el consumo de cada modelo","Compara hasta 3 modelos lado a lado","Archivos adjuntos y archivos de Google Drive","Comparte y descarga conversaciones"] },
-      { name: "Max", eyebrow: "Flujos intensivos de IA", price: "$25", period: "al mes", description: "10.000 créditos de IA al mes para trabajo intensivo con modelos avanzados y documentos largos.", cta: "Actualizar a Max", href: REVIEW_WORKSPACE_PATH, usage: "10.000 créditos de IA al mes", features: ["Acceso a todos los modelos disponibles","Sin límite diario en modelos Standard","Uso Premium sujeto a créditos mensuales y a la política de uso justo","Límites superiores de adjuntos y contexto","Para el uso frecuente de modelos avanzados y documentos largos"] },
+      { name: "Free", eyebrow: "Para empezar", price: "$0", period: "al mes", description: "300 créditos de IA al mes para uso diario ligero y probar modelos avanzados.", cta: "Empezar gratis", href: REVIEW_SIGN_IN_HREF, usage: "300 créditos de IA al mes", features: ["Acceso a modelos seleccionados","Hasta 30 respuestas mensuales de determinados modelos de mayor coste","Compara hasta 3 modelos","Historial de conversaciones guardadas","Archivos, compartir y descargas tras iniciar sesión","Empieza con preguntas cotidianas sencillas","Crear imágenes con IA cuando esté disponible"] },
+      { name: "Pro", eyebrow: "Productividad diaria", price: "$15", period: "al mes", description: "3.000 créditos de IA al mes para comparaciones multimodelo cotidianas.", cta: "Actualizar a Pro", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "Recomendado", usage: "3.000 créditos de IA al mes", features: ["Acceso a todos los modelos disponibles","Créditos mensuales según el consumo de cada modelo","Compara hasta 3 modelos lado a lado","Archivos adjuntos y archivos de Google Drive","Comparte y descarga conversaciones","Crear imágenes con IA cuando esté disponible"] },
+      { name: "Max", eyebrow: "Flujos intensivos de IA", price: "$25", period: "al mes", description: "10.000 créditos de IA al mes para trabajo intensivo con modelos avanzados y documentos largos.", cta: "Actualizar a Max", href: REVIEW_WORKSPACE_PATH, usage: "10.000 créditos de IA al mes", features: ["Acceso a todos los modelos disponibles","Sin límite diario en modelos Standard","Uso Premium sujeto a créditos mensuales y a la política de uso justo","Con adjuntos habilitados: 10 archivos por mensaje · 50 MiB cada uno · 100 MiB en total","Para el uso frecuente de modelos avanzados y documentos largos","Crear imágenes con IA cuando esté disponible"] },
     ],
   },
   pt: {
@@ -898,7 +921,7 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
       rows: [
         { label: "Acesso a modelos", free: "Modelos selecionados", pro: "Todos os modelos disponíveis · limites do Pro", max: "Todos os modelos disponíveis · maior franquia mensal" },
         { label: "Comparação multi-modelo", free: "Até 3 modelos", pro: "Até 3 modelos", max: "Até 3 modelos" },
-        { label: "Anexos", free: "Imagens, PDFs, Office, Drive", pro: "Imagens, PDFs, Office, Drive", max: "Limites maiores de arquivos e contexto" },
+        { label: "Anexos", free: "Imagens, PDFs, Office, Drive", pro: "Imagens, PDFs, Office, Drive", max: "Imagens, PDFs, Office, Drive" },
         { label: "Compartilhar conversas", free: "Compartilhar e baixar", pro: "Compartilhar e baixar", max: "Compartilhar e baixar" },
         { label: "Créditos de IA", free: "300/mês", pro: "3.000/mês", max: "10.000/mês" },
       ],
@@ -911,9 +934,9 @@ const copy: { en: PricingCopy } & Partial<Record<Language, PricingCopy>> = {
     ],
     note: "Os preços são valores fixos antes de impostos na moeda de cobrança selecionada. No Max, modelos Standard não têm limite diário; o uso Premium está sujeito aos créditos mensais e à política de uso justo.",
     plans: [
-      { name: "Free", eyebrow: "Para começar", price: "$0", period: "por mês", description: "300 créditos de IA por mês para uso diário leve e para testar modelos avançados.", cta: "Começar grátis", href: REVIEW_SIGN_IN_HREF, usage: "300 créditos de IA por mês", features: ["Acesso a modelos selecionados","Até 30 respostas mensais de modelos selecionados de maior custo","Compare até 3 modelos","Histórico de conversas salvas","Anexos, compartilhamento e downloads após o login","Comece com perguntas simples do dia a dia"] },
-      { name: "Pro", eyebrow: "Produtividade diária", price: "$15", period: "por mês", description: "3.000 créditos de IA por mês para comparações multimodelo cotidianas.", cta: "Atualizar para Pro", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "Recomendado", usage: "3.000 créditos de IA por mês", features: ["Acesso a todos os modelos disponíveis","Créditos mensais conforme o consumo de cada modelo","Compare até 3 modelos lado a lado","Anexos e arquivos do Google Drive","Compartilhe e baixe conversas"] },
-      { name: "Max", eyebrow: "Fluxos intensivos de IA", price: "$25", period: "por mês", description: "10.000 créditos de IA por mês para trabalho intensivo com modelos avançados e documentos longos.", cta: "Atualizar para Max", href: REVIEW_WORKSPACE_PATH, usage: "10.000 créditos de IA por mês", features: ["Acesso a todos os modelos disponíveis","Sem limite diário em modelos Standard","Uso Premium sujeito aos créditos mensais e à Política de Uso Justo","Limites maiores de anexos e contexto","Para uso frequente de modelos avançados e documentos longos"] },
+      { name: "Free", eyebrow: "Para começar", price: "$0", period: "por mês", description: "300 créditos de IA por mês para uso diário leve e para testar modelos avançados.", cta: "Começar grátis", href: REVIEW_SIGN_IN_HREF, usage: "300 créditos de IA por mês", features: ["Acesso a modelos selecionados","Até 30 respostas mensais de modelos selecionados de maior custo","Compare até 3 modelos","Histórico de conversas salvas","Anexos, compartilhamento e downloads após o login","Comece com perguntas simples do dia a dia","Criar imagens com IA quando estiver disponível"] },
+      { name: "Pro", eyebrow: "Produtividade diária", price: "$15", period: "por mês", description: "3.000 créditos de IA por mês para comparações multimodelo cotidianas.", cta: "Atualizar para Pro", href: REVIEW_WORKSPACE_PATH, highlighted: true, badge: "Recomendado", usage: "3.000 créditos de IA por mês", features: ["Acesso a todos os modelos disponíveis","Créditos mensais conforme o consumo de cada modelo","Compare até 3 modelos lado a lado","Anexos e arquivos do Google Drive","Compartilhe e baixe conversas","Criar imagens com IA quando estiver disponível"] },
+      { name: "Max", eyebrow: "Fluxos intensivos de IA", price: "$25", period: "por mês", description: "10.000 créditos de IA por mês para trabalho intensivo com modelos avançados e documentos longos.", cta: "Atualizar para Max", href: REVIEW_WORKSPACE_PATH, usage: "10.000 créditos de IA por mês", features: ["Acesso a todos os modelos disponíveis","Sem limite diário em modelos Standard","Uso Premium sujeito aos créditos mensais e à Política de Uso Justo","Com anexos ativados: 10 arquivos por mensagem · 50 MiB cada · 100 MiB no total","Para uso frequente de modelos avançados e documentos longos","Criar imagens com IA quando estiver disponível"] },
     ],
   },
 };
@@ -925,7 +948,7 @@ type BillingOutcome = {
 };
 
 export function PricingPageContent() {
-  const { lang } = useLanguage();
+  const { lang, t } = useLanguage();
   const content = copy[lang] ?? copy.en;
   const billing = usePublicBilling();
   const account = usePricingAccount();
@@ -940,6 +963,7 @@ export function PricingPageContent() {
   // static HTML intact and cannot produce a hydration mismatch, and it is the
   // pattern UpgradeCtaLink already uses for the same reason.
   const [pageIntent, setPageIntent] = useState<PurchaseIntent | null>(null);
+  const [starterLabelKey, setStarterLabelKey] = useState<string | null>(null);
   const [subscriptionInterval, setSubscriptionInterval] = useState<"monthly" | "annual">("monthly");
   const [billingOutcome, setBillingOutcome] = useState<BillingOutcome | null>(
     null
@@ -957,6 +981,10 @@ export function PricingPageContent() {
   );
   const planChangeTriggerRef = useRef<HTMLButtonElement | null>(null);
   const purchaseResumedRef = useRef(false);
+  // The plan whose checkout dialog opens on its own after sign-in.
+  const [resumedSubscriptionPlan, setResumedSubscriptionPlan] = useState<
+    "pro" | "max" | null
+  >(null);
   const creditPackCtaRef = useRef<HTMLDivElement | null>(null);
   const annualCopy = annualLabelByLanguage[lang] ?? annualLabelByLanguage.en!;
   const saleCopy = saleLabelByLanguage[lang] ?? saleLabelByLanguage.en!;
@@ -1016,6 +1044,7 @@ export function PricingPageContent() {
     const search = window.location.search;
     const intent = parsePurchaseIntent(search);
     const params = new URLSearchParams(search);
+    const starterLabelKeyFromUrl = getPricingStarterLabelKey(params.get("starter"));
     const billingParam = params.get("billing");
     const planParam = params.get("plan");
     const outcome: BillingOutcome | null =
@@ -1032,6 +1061,7 @@ export function PricingPageContent() {
     // the shape the repo's React Compiler lint rejects.
     queueMicrotask(() => {
       setPageIntent(intent);
+      setStarterLabelKey(starterLabelKeyFromUrl);
       if (intent.billingInterval) setSubscriptionInterval(intent.billingInterval);
       if (outcome) setBillingOutcome(outcome);
     });
@@ -1112,6 +1142,62 @@ export function PricingPageContent() {
     );
   }, [
     account.addonCreditsRemaining,
+    account.plan,
+    account.planCreditsRemaining,
+    account.status,
+    pageIntent,
+  ]);
+
+  // The same round trip for a subscription: "Sign in or join to start Pro"
+  // comes back here with `intent=subscription&target=pro`, and the visitor
+  // goes straight to that plan's checkout dialog instead of having to find and
+  // press "Upgrade" again. Only when the card would offer a fresh upgrade -- a
+  // Pro subscriber returning with a Pro intent gets the page as it is. The
+  // dialog opens empty: a promotion code is never carried in the link.
+  useEffect(() => {
+    if (purchaseResumedRef.current) return;
+    if (!pageIntent || pageIntent.intent !== "subscription") return;
+    const targetPlan = pageIntent.targetPlan;
+    if (!targetPlan) return;
+    if (account.status !== "authenticated" || !account.plan) return;
+    const ctaState = resolvePlanCtaState({
+      sessionStatus: account.status,
+      currentPlan: account.plan,
+      cardPlan: targetPlan === "max" ? "Max" : "Pro",
+      hasActiveSubscription: account.hasActiveSubscription,
+      currentBillingInterval: account.billingInterval,
+    });
+    if (ctaState !== "upgrade") return;
+    purchaseResumedRef.current = true;
+    trackProductEvent("purchase_intent_resumed", 0, {
+      cta_location: pageIntent.ctaLocation || `pricing_plan_card_${targetPlan}`,
+      purchase_type: "subscription",
+      target_plan: targetPlan,
+      authentication_state: "authenticated",
+      current_plan: account.plan.toLowerCase() as "free" | "pro" | "max",
+      ...(pageIntent.trigger ? { trigger: pageIntent.trigger } : {}),
+      plan_credits_remaining: account.planCreditsRemaining,
+      addon_credits_remaining: account.addonCreditsRemaining,
+    });
+    queueMicrotask(() => setResumedSubscriptionPlan(targetPlan));
+
+    if (typeof window === "undefined") return;
+    // A reload after closing the dialog must not reopen it.
+    const params = new URLSearchParams(window.location.search);
+    params.delete("intent");
+    params.delete("target");
+    const nextSearch = params.toString();
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${
+        window.location.hash
+      }`
+    );
+  }, [
+    account.addonCreditsRemaining,
+    account.billingInterval,
+    account.hasActiveSubscription,
     account.plan,
     account.planCreditsRemaining,
     account.status,
@@ -1348,6 +1434,8 @@ export function PricingPageContent() {
   const packDisplayName = (packId: PurchaseCreditPackId | null) =>
     packId ? creditPackGuide.packNames[packId] : creditPackGuide.title;
 
+  const mobileSummary = pricingMobilePlanSummaryCopy[lang];
+
   return (
     <main className="min-h-screen bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
       <MarketingHeader />
@@ -1356,20 +1444,21 @@ export function PricingPageContent() {
         <div className="mx-auto max-w-4xl text-center">
           <p className="text-sm font-bold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{content.eyebrow}</p>
           <h1 className={`mt-4 text-4xl font-bold leading-tight sm:text-6xl ${displayHeadingClass(lang)}`}>{content.title}</h1>
-          <p className={`mx-auto mt-5 max-w-2xl text-lg leading-8 text-zinc-600 dark:text-zinc-300 ${lang === "en" ? "hidden sm:block" : ""}`}>{content.description}</p>
-          {lang === "en" && <p className="mt-4 text-base leading-7 text-zinc-600 dark:text-zinc-300 sm:hidden">Compare monthly prices and AI credits, then open a plan’s purchase options.</p>}
-          {lang === "en" && <section aria-label="Quick plan comparison" data-testid="pricing-mobile-plan-summary" className="mt-7 rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-left dark:border-zinc-800 dark:bg-zinc-900/40 sm:hidden">
-            <h2 className="px-1 text-lg font-bold">Compare plans at a glance</h2>
-            <p className="mt-2 px-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">Regular monthly prices. Annual billing and offers are in plan options.</p>
+          {starterLabelKey && <p data-testid="pricing-starter-notice" className="mt-3 text-sm text-zinc-600 dark:text-zinc-300">{starterNoticePrefix[lang]}{t(starterLabelKey)}</p>}
+          <p className={`mx-auto mt-5 max-w-2xl text-lg leading-8 text-zinc-600 dark:text-zinc-300 ${mobileSummary ? "hidden sm:block" : ""}`}>{content.description}</p>
+          {mobileSummary && <p className="mt-4 text-base leading-7 text-zinc-600 dark:text-zinc-300 sm:hidden">{mobileSummary.lead}</p>}
+          {mobileSummary && <section aria-label={mobileSummary.label} data-testid="pricing-mobile-plan-summary" className="mt-7 rounded-2xl border border-zinc-200 bg-zinc-50 p-3 text-left dark:border-zinc-800 dark:bg-zinc-900/40 sm:hidden">
+            <h2 className="px-1 text-lg font-bold">{mobileSummary.title}</h2>
+            <p className="mt-2 px-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">{mobileSummary.priceNote}</p>
             <ul className="mt-3 divide-y divide-zinc-200 dark:divide-zinc-800">
               {content.plans.map(plan => {
                 const planId = plan.name.toLowerCase() as "free" | "pro" | "max";
                 return <li key={planId} className="flex min-w-0 flex-wrap items-center justify-between gap-2 py-3">
                   <div className="min-w-0 flex-1 basis-32">
                     <h3 className="text-base font-bold">{plan.name} <span className="ml-1 text-sm">{billing.formatPlanPrice(planId) || plan.price}</span></h3>
-                    <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">{billing.planLimits(planId).monthlyCredits.toLocaleString("en-US")} monthly credits</p>
+                    <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">{mobileSummary.monthlyCredits(billing.planLimits(planId).monthlyCredits)}</p>
                   </div>
-                  <a href={`#pricing-plan-name-${planId}`} aria-label={`View ${plan.name} plan options`} className="inline-flex min-h-11 shrink-0 items-center rounded-lg bg-blue-600 px-3 text-sm font-bold text-white hover:bg-blue-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">View options</a>
+                  <a href={`#pricing-plan-name-${planId}`} aria-label={mobileSummary.viewOptionsLabel(plan.name)} className="inline-flex min-h-11 shrink-0 items-center rounded-lg bg-blue-600 px-3 text-sm font-bold text-white hover:bg-blue-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">{mobileSummary.viewOptions}</a>
                 </li>;
               })}
             </ul>
@@ -1708,7 +1797,7 @@ export function PricingPageContent() {
               <p data-testid="pricing-plan-usage" className={`mt-3 text-sm font-bold ${plan.highlighted ? "text-blue-50" : "text-zinc-700 dark:text-zinc-200"}`}>
                 {plan.usage}
               </p>
-              {lang === "ko" ? <PricingKoreanPlanLimits plan={cardPlan} dailyCredits={publicPlan?.dailyMessageLimit ?? null} allowAttachments={publicPlan?.allowAttachments} appInputTokenLimit={billing.config?.appInputTokenLimit ?? null} /> : null}
+              {lang === "ko" ? <PricingKoreanPlanLimits plan={cardPlan} dailyCredits={publicPlan?.dailyMessageLimit ?? null} allowAttachments={publicPlan?.allowAttachments} appInputTokenLimit={billing.config?.appInputTokenLimit ?? null} appLongContext={billing.config?.appLongContext === true} /> : null}
               {lang === "en" ? <PricingCreditExample credits={billing.planLimits(planId).monthlyCredits} testId={`pricing-credit-example-plan-${planId}`} /> : null}
               {/*
                 The plan CTA is chosen by resolvePlanCtaState(), not by the
@@ -1852,6 +1941,7 @@ export function PricingPageContent() {
                     plan={plan.name === "Max" ? "Max" : "Pro"}
                     initialBillingInterval={lang === "ko" ? subscriptionInterval : undefined}
                     trigger={pageIntent?.trigger || undefined}
+                    autoOpen={resumedSubscriptionPlan === planId}
                     className={`inline-flex min-h-12 w-full items-center justify-center rounded-xl px-4 py-3 text-center text-sm font-bold transition ${planCtaSurface(plan.highlighted)}`}
                   >
                     {plan.cta}
@@ -2247,6 +2337,9 @@ export function PricingPageContent() {
               </div>
               <p className="mt-3 min-w-0 break-words text-xs leading-6 text-zinc-600 dark:text-zinc-300">
                 {creditGuide.longContextBody}
+                {billing.config?.appLongContext === true && billing.config.appInputTokenLimit
+                  ? ` ${creditGuide.longContextChargeNote(numberFormatter.format(billing.config.appInputTokenLimit))}`
+                  : null}
               </p>
               <div className="mt-4 flex flex-wrap gap-2">
                 {inputMultiplierBands.map((band) => (

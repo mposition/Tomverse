@@ -4,6 +4,7 @@ import { createAmuxV22SidecarServer, createAmuxV22SidecarHandler,
   AMUX_V22_SIDECAR_ENV, runAmuxV22OneShot, probeAmuxV22ClaudeQuota } from
   "../lib/amux/v22OneShotSidecar.mjs";
 import { probeAmuxV22ChannelQuota } from "../lib/amux/v22ChannelQuota.mjs";
+import { readAmuxV22WorkerHealth } from "../lib/amux/v22WorkerHealthFile.mjs";
 import { inspectAmuxV22RecoveryUnit } from "../lib/amux/v22RecoveryHost.mjs";
 import { captureAmuxV22PatchBaseline } from "../lib/amux/v22PatchCapture.mjs";
 import { amuxV22SidecarLaunchConfigFromEnvironment } from
@@ -23,22 +24,40 @@ for (const name of ["DATABASE_URL", "DIRECT_URL", "TOMVERSE_AMUX_SYNC_SECRET",
 // The CLI this sidecar runs (a v19 channel name); Claude when unset. Another
 // provider reuses the binary and config-directory variables for its own CLI.
 const provider = process.env.TOMVERSE_AMUX_V22_PROVIDER ?? "anthropic";
-if (!["anthropic", "openai", "github-copilot", "cursor"].includes(provider))
+if (!["anthropic", "openai", "github-copilot", "cursor", "antigravity"].includes(provider))
   throw new Error("invalid sidecar provider");
 const config = { ...amuxV22SidecarLaunchConfigFromEnvironment(process.env), provider };
+// The agy /usage group that bounds the worker's model (default "Gemini 4
+// Argon"; Hydrogen is "Gemini Models", Claude Opus "Claude and GPT
+// models"). Read only for the quota.
+const quotaGroup = process.env.TOMVERSE_AMUX_V22_ANTIGRAVITY_QUOTA_GROUP || undefined;
 const socketPath = process.env.TOMVERSE_AMUX_V22_SIDECAR_SOCKET;
 const stateDir = process.env.TOMVERSE_AMUX_V22_SIDECAR_STATE_DIR;
 const invocationId = process.env.INVOCATION_ID ?? null;
 await checkAmuxV22SidecarStateDir(stateDir);
 await checkAmuxV22SidecarSocketDir(socketPath);
-const sidecar = createAmuxV22SidecarServer(socketPath,
-  createAmuxV22SidecarHandler({ worker: config.worker, stateDir, provider,
+const handler = createAmuxV22SidecarHandler({ worker: config.worker, stateDir, provider,
     invocationId,
     recoveryUnit: () => inspectAmuxV22RecoveryUnit({ worker: config.worker, invocationId }),
     recoveryWorkspace: () => captureAmuxV22PatchBaseline(config.worktreePath),
     // Each provider reads its own sign-in's subscription quota; what the
-    // app does with a non-Claude reading is TOMVERSE_AMUX_V22_NON_CLAUDE_QUOTA_GATE.
+    // app does with a non-Claude reading is to count it like Claude's.
     quota: () => provider === "anthropic" ? probeAmuxV22ClaudeQuota(config) :
-      probeAmuxV22ChannelQuota(provider, config),
-    run: (request) => runAmuxV22OneShot(request, config) }));
+      probeAmuxV22ChannelQuota(provider, { ...config, quotaGroup }),
+    // What the sign-in stage and the login keepalive wrote next to this
+    // worker's sign-in copy (owner decision 2026-11-15).
+    health: () => readAmuxV22WorkerHealth(config.claudeConfigDir),
+    // The handler adds the local CLI flow's transcript and preserved-patch
+    // paths and the operator's stop signal (v22LocalCliFlowCore.ts).
+    run: (request, extra) => runAmuxV22OneShot(request, config, extra) });
+const sidecar = createAmuxV22SidecarServer(socketPath, handler);
 await sidecar.listen();
+// systemctl stop: every live run is stopped as an operator stop, its change
+// and transcript kept and its terminal written, before the process exits.
+let stopping = false;
+process.on("SIGTERM", () => {
+  if (stopping) return;
+  stopping = true;
+  void handler.stopAll().catch(() => {})
+    .finally(() => sidecar.close().catch(() => {}).finally(() => process.exit(0)));
+});

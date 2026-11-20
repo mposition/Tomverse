@@ -8,9 +8,13 @@ import { ADMIN_NAVIGATION } from "../lib/adminNavigation.ts";
 import { localizeAdminTabs } from "../lib/adminNavigationLocale.ts";
 import {
   AMUX_OWNER_QUEUE_GROUPS,
+  AMUX_OWNER_QUEUE_LIMIT,
+  AMUX_OWNER_QUEUE_MAX_LIMIT,
   amuxAestDayStartMs,
   amuxOwnerQueueGroup,
   amuxOwnerQueueGroupCounts,
+  amuxOwnerQueuePublicationPathMissing,
+  amuxOwnerQueueRequestedLimit,
   amuxOwnerQueueVisible,
   amuxOwnerQueueWhere,
 } from "../lib/amux/ownerQueueCore.ts";
@@ -107,7 +111,7 @@ test("the read is read only and says when it could not count today's work", () =
   // Today's number is null (unknown) when either read fails, never 0.
   assert.match(source, /catch \{\s*return null;/);
   // The list is bounded.
-  assert.match(source, /take: AMUX_OWNER_QUEUE_LIMIT/);
+  assert.match(source, /take: limit/);
 });
 
 test("the route is a read for any admin role, rate limited, with no write verb", () => {
@@ -135,12 +139,15 @@ test("the screen decides nothing itself: every write is the existing review and 
   assert.match(decision, /<AmuxPendingDecisionNotice /);
   // The only read it adds.
   assert.match(screen, /adminFetch\("\/api\/admin\/amux\/owner-queue"/);
-  // A legacy card is remade or closed through the existing legacy card panel,
-  // read from the card detail the execution board uses, for the owner only.
+  // A card is settled through the existing legacy card panel, for the owner
+  // only, from the card detail the review already reads: the panel adds no
+  // read of its own, so a card costs one detail read, not two.
   assert.match(decision, /<AmuxLegacyCardPanel /);
-  assert.match(decision, /useAmuxLegacyCardRead\(item\.taskId,\s*canInspectCards && /);
-  assert.match(read("components/admin/AmuxLegacyCardPanel.tsx"),
-    /\/api\/admin\/amux\/execution-view\?view=detail&taskId=/);
+  assert.match(decision, /canInspectCards && group !== "question" && reviewMatches &&[\s\S]{0,120}ownerExecution\.legacyCard/);
+  assert.doesNotMatch(decision, /adminFetch|execution-view/);
+  assert.doesNotMatch(read("components/admin/AmuxLegacyCardPanel.tsx"), /\/api\/admin\/amux\/execution-view\?view=detail&taskId=/);
+  assert.match(read("components/admin/AdminAmuxRoutingPanel.tsx"),
+    /amuxLegacyCardReadOf\(review\.task\.id, body\)/);
 });
 
 test("a key never skips a confirmation: numbers pick, Enter is not bound, typing is left alone", () => {
@@ -174,4 +181,42 @@ test("the tab keeps its address and takes the new name in both languages", () =>
   const ko = localizeAdminTabs("amux-execution", execution.tabs, "ko").find((candidate) => candidate.id === "review");
   assert.equal(ko.label, "내 확인 대기");
   assert.match(ko.description, /한곳에서 차례로/);
+});
+
+test("each card carries its open engineering items, and a failed engineering read leaves the queue as it was", async () => {
+  const { amuxOwnerQueueWithEngineeringItems } = await import("../lib/amux/ownerQueueCore.ts");
+  const queue = { items: [card("a"), card("b")], total: 2, processedToday: 0, generatedAt: "2026-11-11T00:00:00.000Z" };
+  const item = { id: "item-1", kind: "t2_draft" };
+  const attached = amuxOwnerQueueWithEngineeringItems(queue, new Map([["a", [item]]]));
+  assert.deepEqual(attached.items.map((row) => row.engineeringItems), [[item], []]);
+  assert.equal(attached.total, 2);
+  assert.equal(amuxOwnerQueueWithEngineeringItems(queue, null), queue);
+  const route = read("app/api/admin/amux/owner-queue/route.ts");
+  assert.match(route, /readEngineeringAgentCardItems\(read\.items\.map\(\(item\) => item\.taskId\)\)\.catch\(/);
+  assert.match(route, /amuxOwnerQueueWithEngineeringItems\(read, engineering\)/);
+  // The buttons follow the engineering write permission, decided on the server.
+  const page = read("app/(site)/(application)/admin/amux-execution/page.tsx");
+  assert.match(page, /canWriteEngineering=\{hasAdminPermission\(session, "engineering-agent:write"\)\}/);
+});
+
+test("a card whose newest attempt stored a patch with no engineering run has no publication path", () => {
+  // AMUX-FILEGEN2-002 (2026-11-13): the publisher was halted, no run was made.
+  const missing = { reviewPrNumber: null, newestAttempt: { hasPatch: true, hasRun: false } };
+  assert.equal(amuxOwnerQueuePublicationPathMissing(missing), true);
+  for (const change of [
+    { reviewPrNumber: 3501 },
+    { newestAttempt: null },
+    { newestAttempt: { hasPatch: false, hasRun: false } },
+    { newestAttempt: { hasPatch: true, hasRun: true } },
+  ]) assert.equal(amuxOwnerQueuePublicationPathMissing({ ...missing, ...change }), false);
+});
+
+test("a longer queue is read a page at a time: the limit asked for is a whole number between one page and the maximum", () => {
+  assert.equal(amuxOwnerQueueRequestedLimit(null), AMUX_OWNER_QUEUE_LIMIT);
+  assert.equal(amuxOwnerQueueRequestedLimit("300"), 300);
+  assert.equal(amuxOwnerQueueRequestedLimit("1"), AMUX_OWNER_QUEUE_LIMIT);
+  assert.equal(amuxOwnerQueueRequestedLimit("99999"), AMUX_OWNER_QUEUE_MAX_LIMIT);
+  for (const raw of ["", "-5", "1.5", "abc", "1e3", "300 "]) {
+    assert.equal(amuxOwnerQueueRequestedLimit(raw), AMUX_OWNER_QUEUE_LIMIT, raw);
+  }
 });

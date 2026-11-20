@@ -14,7 +14,7 @@ dirty source identity는 deploy SHA가 아니며 staging 배포 증거를 대신
 
 - `TOMVERSE_AMUX_ENABLED`: 코드 기본값 off, 실제 runtime 값 미관측
 - `TOMVERSE_AMUX_EXECUTE`: 코드 기본값 off, 실제 runtime 값 미관측
-- `TOMVERSE_AMUX_EXECUTION_API_ENABLED`: 코드 기본값 off, 실제 runtime 값 미관측
+- `TOMVERSE_AMUX_EXECUTION_API_ENABLED`: 2026-11-16에 없앴다(실행 API는 늘 열려 있다)
 - worker 배정 카탈로그: 등록부에서 유도(정책 버전 35 3항). `TOMVERSE_AMUX_WORKER_CATALOG_JSON`은
   R2e부터 앱이 읽지 않으므로 runtime 값이 배정에 영향을 주지 않음
 - local executor: production hard-disabled (`cfg(test)` process fixture only)
@@ -44,11 +44,11 @@ dirty source identity는 deploy SHA가 아니며 staging 배포 증거를 대신
   canonical audit 대상이다. worker runtime의 단순 telemetry 예외와 다르다
 - execute-off path precedes executor configuration
 - internal service has no product DB credentials; app route DB work uses
-  PostgreSQL-enforced statement/idle-in-transaction timeouts, an application
-  Prisma-call ceiling and a DB-clock commit fence, not a claimed HTTP hard
-  timeout or proven SQL statement-count cap. Prisma 한 호출이 복수 SQL을 만들 수
-  있으므로 현재 call ceiling에서 유도한 transaction maximum은 앱 추정치이며
-  DB 보증이 아니다. 현재 코드는 `transaction_timeout`을 설정하지 않으므로
+  PostgreSQL-enforced statement/idle-in-transaction timeouts, a planned
+  time budget from each boundary's declared calls (no call is refused for the
+  count, owner direction 2026-11-18) and a DB-clock commit fence, not a claimed
+  HTTP hard timeout or proven SQL statement-count cap. 선언한 call 수에서 유도한
+  transaction maximum은 앱 추정치이며 DB 보증이 아니다. 현재 코드는 `transaction_timeout`을 설정하지 않으므로
   transaction 전체 점유 시간에 DB ceiling이 없다. PostgreSQL 17에서는 transaction
   내부에서 설정한 순간부터 점유 시간을 제한할 수 있지만 PostgreSQL 16에는
   그 설정이 없다. 설정하더라도 BEGIN→SET 구간과 COMMIT의 durable 단계는 제한 밖이다.
@@ -150,8 +150,7 @@ PR 확인·병합 전에는 `Credit Finance DB Integration`의 `routing` matrix 
 
 현재 가장 강한 rollback은 feature-OFF다.
 
-- `TOMVERSE_AMUX_EXECUTE` 제거 또는 `1` 이외 값
-- `TOMVERSE_AMUX_EXECUTION_API_ENABLED` 제거 또는 `1` 이외 값
+- `TOMVERSE_AMUX_EXECUTE` 제거 또는 `enabled`(이전 값 `1`) 이외 값
 - 필요 시 `TOMVERSE_AMUX_ENABLED` 제거
 
 `execution_ready=false`가 유지되는 동안 server-side claim lifecycle은 fail-closed 상태다.

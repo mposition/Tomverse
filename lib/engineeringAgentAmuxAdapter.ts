@@ -32,7 +32,6 @@ import {
   type AmuxExecutionStartedFact,
   type AmuxExecutionToStatus,
 } from "@/lib/amux/execution";
-import { isAmuxExecutionApiEnabled } from "@/lib/amux/executionGate";
 import { recordAmuxReviewPullRequest, type AmuxReviewPullRequestFact } from "@/lib/amux/reviewPullRequest";
 import { amuxWorkerCatalogRefusal } from "@/lib/amux/workerAssignmentCatalog";
 import { listOwnedTodos } from "@/lib/amux/store";
@@ -62,40 +61,27 @@ import {
   readEngineeringAgentOwnerQueues,
   readEngineeringAgentSwitches,
   recordEngineeringAgentRunStart,
+  resolveEngineeringAgentStateMismatch,
   requireEngineeringAgentRunAdmission,
   runEngineeringAgentTransaction,
   type EngineeringAgentTransaction,
 } from "@/lib/engineeringAgentStore";
 import type { EngineeringAgentMode, WriteResultOutcome } from "@/lib/engineeringAgentCore";
 import { prisma } from "@/lib/prisma";
-
-/**
- * Version 12 of the orchestration policy shipped this false; version 25 turns
- * it on. A call still reaches AMUX only while the execution API gate is open
- * and the engineering operating mode is not off.
- */
-export const ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH = true;
+import type { Session } from "next-auth";
 
 /** The one AMUX worker this adapter speaks for (policy §8). */
 export const ENGINEERING_AGENT_AMUX_WORKER = "engineering-runner";
 
 /**
- * Whether the adapter may call an AMUX writer at all. The orchestration
- * policy's Authority section opens that path only when the code latch and the
- * engineering operating mode are both open, and version 18's execution API
- * gate sits under every AMUX writer. The mode is the effective one, so a kill
- * switch or an unreadable setting reads as off and closes every call --
+ * Whether the adapter may call an AMUX writer at all: only while the
+ * engineering operating mode is not off. The mode is the effective one, so a
+ * kill switch or an unreadable setting reads as off and closes every call --
  * registration, heartbeats, delivery, settlement and the cost ledger alike.
  */
 export const engineeringAgentAmuxAdapterPermitted = (input: {
-  codeLatch: boolean;
-  executionApiEnabled: boolean;
   mode: EngineeringAgentMode;
-}): boolean => input.codeLatch === true && input.executionApiEnabled === true && input.mode !== "off";
-
-/** The half of that gate that needs no database read. */
-export const isEngineeringAgentAmuxAdapterOpen = (): boolean =>
-  ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH && isAmuxExecutionApiEnabled();
+}): boolean => input.mode !== "off";
 
 /**
  * The budget of an adapter route. An AMUX writer's transaction budget grows
@@ -149,7 +135,8 @@ const lockedCardKind = async (tx: AmuxAttachedTransaction, taskId: string): Prom
 // halt lock, halt state, clock, the run's INSERT, its audit entry (four), the
 // card's kind and the request's move -- fifteen. The heartbeat: clock and
 // update. The end: halt state, halt lock, update, audit entry and the
-// request's move -- twelve.
+// request's move -- twelve. A card-scoped halt (AMUXFLOW/B2) adds no read
+// here: the start names no card, so the agent-wide halt stands.
 const RUN_START_PRISMA_CALLS = 24;
 const RUN_HEARTBEAT_PRISMA_CALLS = 2;
 // Twelve, and one for the agent usage row the settlement writes beside it.
@@ -161,11 +148,18 @@ const WORKER_REGISTER_PRISMA_CALLS = 2;
 // binding and its audit entry (five) and the request's move -- fifteen, and
 // two to spare.
 const PUBLISH_RESULT_PRISMA_CALLS = 17;
+// A person's record of the bound number: the writer's audit-chain lock, then
+// the mismatch action (item and publish reads, run lock, item lock, run, run
+// items, capability count, bindings, binding lock, resolution and the
+// person's audit entry; a C action does not read the attempt) -- about
+// seventeen, and five to spare.
+const MISMATCH_REVIEW_PR_PRISMA_CALLS = 22;
 
 /** A run is created in the transaction that starts its AMUX attempt (§11). */
 export const engineeringRunStartAttachment = (input: {
   runId: string;
   baseSha: string;
+
   markCommitted?: MarkCommitted;
 }): AmuxAttachment<AmuxExecutionStartedFact> => ({
   prismaCalls: RUN_START_PRISMA_CALLS,
@@ -219,15 +213,14 @@ export const engineeringRunEndAttachment = (input: {
   prismaCalls: RUN_END_PRISMA_CALLS,
   work: async (lent, fact) => {
     const tx = engineeringAgentTransactionInAmux(lent);
-    const held = await readEngineeringAgentHaltState(tx);
     await endEngineeringAgentRun(tx, {
       runId: input.runId,
       amuxAttemptId: fact.attemptId,
       outcome: input.outcome,
       halt: combineRunHalt({
         reported: input.halt,
-        circuitLatched: held.circuitLatched,
-        openStateMismatches: held.openStateMismatches,
+        // A card-scoped mismatch is not recorded on another run as a halt.
+        openStateMismatches: 0,
       }),
     });
     await input.markCommitted?.(tx);
@@ -268,18 +261,13 @@ export const engineeringPublishResultAttachment = (input: {
 export type EngineeringAgentWorkerLease = { instanceId: string; generation: number };
 
 /**
- * Whether a call may reach AMUX now: the latch, the execution API and the
- * effective mode. Routes ask this before they record anything, so a closed
- * gate leaves no request row behind; every adapter operation asks it again.
+ * Whether a call may reach AMUX now: the effective mode is not off. Routes ask
+ * this before they record anything, so a closed gate leaves no request row
+ * behind; every adapter operation asks it again.
  */
 export const engineeringAgentAmuxAdapterPermittedNow = async (): Promise<boolean> => {
-  if (!isEngineeringAgentAmuxAdapterOpen()) return false;
   const { mode } = await readEngineeringAgentSwitches(prisma);
-  return engineeringAgentAmuxAdapterPermitted({
-    codeLatch: ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH,
-    executionApiEnabled: isAmuxExecutionApiEnabled(),
-    mode,
-  });
+  return engineeringAgentAmuxAdapterPermitted({ mode });
 };
 
 const requireOpen = async () => {
@@ -528,13 +516,24 @@ export async function finishEngineeringAgentRun(input: {
  * the item in the same AMUX transaction; any other result touches no AMUX row
  * and settles in an engineering transaction of its own.
  *
- * If AMUX will not take the number -- the card is not waiting on this
- * worker's review -- the pull request still exists: the item is settled and
- * bound all the same, and a state mismatch goes to a person (§11). A fact the
- * publisher reports is never dropped because the other side disagrees. The
- * same holds when the adapter is closed, the mode turned off included: the
- * number then never reaches AMUX, and the mismatch says `adapter_closed`.
+ * If AMUX will not take the number, the pull request still exists: the item
+ * is settled and bound all the same, and a person is told. A fact the
+ * publisher reports is never dropped because the other side disagrees.
+ *
+ * - The card moved on while the pull request was being opened -- the owner
+ *   settled it, or a newer attempt took it (`task_not_in_review`,
+ *   `not_the_workers_review`): a decision item for the run, which does not
+ *   stop the agent (owner decision 2026-11-12). Nothing is inconsistent: the
+ *   draft pull request waits for a person to merge or close it, as every
+ *   agent pull request does.
+ * - Anything else, and a closed adapter (the mode turned off included, where
+ *   the number never reaches AMUX and the reason is `adapter_closed`): a
+ *   state mismatch (engineering-agent.md §11). It has no run of its own; its
+ *   cause key names the publish item, so it holds that item's card until a
+ *   person resolves it, not the whole agent (owner decision 2026-11-15).
  */
+const CARD_MOVED_ON: ReadonlySet<string> = new Set(["task_not_in_review", "not_the_workers_review"]);
+
 export async function recordEngineeringAgentPublisherResult(input: {
   workItemId: string;
   fencingToken: bigint;
@@ -551,22 +550,20 @@ export async function recordEngineeringAgentPublisherResult(input: {
     });
   }
   const pullRequest = input.pullRequest;
-  const settleWithoutCard = (refusal: string) =>
+  const settleWithoutCard = (refusal: string, runId: string | null = null) =>
     runEngineeringAgentTransaction(prisma, async (tx) => {
       const settled = await recordEngineeringAgentPublishResult(tx, { ...input, pullRequest });
-      await openEngineeringAgentWorkItem(tx, {
-        kind: "state_mismatch",
-        causeKey: `review_pr:${input.workItemId}`,
-        runId: null,
-        reason: refusal,
-      });
+      await openEngineeringAgentWorkItem(tx, CARD_MOVED_ON.has(refusal) && runId !== null ?
+        { kind: "decision", causeKey: `review_pr_moved:${input.workItemId}`, runId, reason: refusal } :
+        { kind: "state_mismatch", causeKey: `review_pr:${input.workItemId}`, runId: null, reason: refusal });
       await input.markCommitted?.(tx, input.workItemId);
       return { recorded: false as const, reason: refusal, ...settled };
     });
   if (!(await engineeringAgentAmuxAdapterPermittedNow())) return settleWithoutCard("adapter_closed");
   const item = await prisma.engineeringAgentWorkItem.findUnique({
     where: { id: input.workItemId },
-    select: { run: { select: { cardId: true, amuxAttemptId: true, attempt: { select: { worker: true } } } } },
+    select: { runId: true,
+      run: { select: { cardId: true, amuxAttemptId: true, attempt: { select: { worker: true } } } } },
   });
   const cardId = item?.run?.cardId ?? null;
   const attemptId = item?.run?.amuxAttemptId ?? null;
@@ -591,5 +588,62 @@ export async function recordEngineeringAgentPublisherResult(input: {
     }),
   );
   if (recorded.recorded) return recorded;
-  return settleWithoutCard(recorded.reason);
+  return settleWithoutCard(recorded.reason, item?.runId ?? null);
+}
+
+/**
+ * A person's action on an open `review_pr` state mismatch
+ * (docs/policy/engineering-agent.md §11, owner decision 2026-11-11): AMUX's review pull request writer puts the
+ * run's one current binding's number on the card, and the mismatch is
+ * resolved in that same transaction. The writer locks the audit chain and the
+ * card and re-checks it (in review, this run's attempt still the latest and
+ * the same worker's, no other number); the attached action then locks the run,
+ * the mismatch and the binding and reads them again. If either side refuses,
+ * nothing is written. This is an adapter call, so the whole gate must be open.
+ */
+export async function recordEngineeringAgentMismatchReviewPullRequest(input: {
+  session: Session;
+  request?: Request;
+  workItemId: string;
+}): Promise<{ auditLogId: string; resolved: boolean; reviewPrRecorded: boolean }> {
+  await requireOpen();
+  // These reads only choose what to ask AMUX; both sides are read again under their locks.
+  const item = await prisma.engineeringAgentWorkItem.findUnique({
+    where: { id: input.workItemId },
+    select: { kind: true, state: true, causeKey: true },
+  });
+  if (!item || item.kind !== "state_mismatch" || !item.causeKey.startsWith("review_pr:")) {
+    throw new EngineeringAgentStoreRefusedError("mismatch_cause_unknown");
+  }
+  if (item.state !== "open") throw new EngineeringAgentStoreRefusedError("mismatch_not_open");
+  const publish = await prisma.engineeringAgentWorkItem.findUnique({
+    where: { id: item.causeKey.slice("review_pr:".length) },
+    select: { run: { select: { id: true, cardId: true, amuxAttemptId: true, attempt: { select: { worker: true } } } } },
+  });
+  const run = publish?.run ?? null;
+  if (run === null) throw new EngineeringAgentStoreRefusedError("mismatch_without_run");
+  const bindings = await prisma.engineeringAgentBinding.findMany({
+    where: { runId: run.id, supersededAt: null },
+    select: { prNumber: true },
+  });
+  if (bindings.length !== 1) throw new EngineeringAgentStoreRefusedError("bound_review_pr_not_recorded");
+  let resolution: { auditLogId: string; resolved: boolean } | null = null;
+  const recorded = await recordAmuxReviewPullRequest(
+    { taskId: run.cardId, attemptId: run.amuxAttemptId, worker: run.attempt.worker, prNumber: bindings[0]!.prNumber },
+    {
+      prismaCalls: MISMATCH_REVIEW_PR_PRISMA_CALLS,
+      work: async (lent, fact) => {
+        resolution = await resolveEngineeringAgentStateMismatch(engineeringAgentTransactionInAmux(lent), {
+          session: input.session,
+          request: input.request,
+          workItemId: input.workItemId,
+          action: "record_bound_review_pr",
+          boundReviewPr: { taskId: fact.taskId, attemptId: fact.attemptId, prNumber: fact.prNumber },
+        });
+      },
+    },
+  );
+  if (!recorded.recorded) throw new EngineeringAgentStoreRefusedError(recorded.reason);
+  if (resolution === null) throw new Error("engineering agent mismatch action did not run with the AMUX write");
+  return { ...(resolution as { auditLogId: string; resolved: boolean }), reviewPrRecorded: recorded.changed };
 }

@@ -46,7 +46,7 @@ export const chatModelSummaryCopy: Record<Language, ChatModelSummaryCopy> = {
     compactLabel: (activeCount) => `${activeCount}개 모델`,
   },
   en: {
-    openPicker: "Open model picker",
+    openPicker: "Choose model",
     accessibleName: ({ primaryModelName, extraActiveCount, activeCount, pausedCount }) => {
       if (!primaryModelName) return "No models selected. Open model picker.";
       const selection =

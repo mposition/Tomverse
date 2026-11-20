@@ -3,7 +3,7 @@
 import Script from "next/script";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { createContext, Suspense, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { createContext, Suspense, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { useSession } from "next-auth/react";
@@ -15,6 +15,8 @@ import {
 import {
   analyticsConsent,
   configureAnalyticsClient,
+  syncAnalyticsJourneyIdentity,
+  flushConnectedJourneyEvents,
   consumeSignupStarted,
   disableAnalyticsClient,
   observeMarketingTouch,
@@ -25,13 +27,14 @@ import {
 } from "@/lib/productAnalyticsClient";
 import {
   normalizeAnalyticsCountry,
+  isProductAnalyticsAllowed,
   type AnalyticsConsentMode,
   type ResolvedAnalyticsConsentPolicy,
 } from "@/lib/analyticsConsentPolicy";
 import { ANALYTICS_PREFERENCES_OPEN_EVENT } from "@/lib/analyticsPreferencesEvents";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { CHAT_WORKSPACE_PATH, REVIEW_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
-import { marketingLocaleFor } from "@/lib/marketingLocale";
+import { X } from "lucide-react";
 
 const isChatWorkspacePath = (pathname: string | null) =>
   pathname === CHAT_WORKSPACE_PATH || pathname === REVIEW_WORKSPACE_PATH;
@@ -75,12 +78,12 @@ function ConsentAction({
       // The accessible name is always the full label; only the visible text
       // shortens in a narrow container, and it is a substring of that name.
       aria-label={label}
-      className={`${consentButtonClass} ${readable ? "text-sm" : "text-[11px] @md/notice:text-xs"}`}
+      data-short-label={shortLabel}
+      className={`${consentButtonClass} ${readable ? "text-sm" : "text-[11px] @md/notice:text-xs @max-md/notice:before:content-[attr(data-short-label)]"}`}
     >
-      {readable ? label : <>
-        <span className="@md/notice:hidden">{shortLabel}</span>
-        <span className="hidden @md/notice:inline">{label}</span>
-      </>}
+      {/* One text node, so the DOM text is the full label; in a narrow
+          container it is swapped for the short label via a pseudo-element. */}
+      {readable ? label : <span className="@max-md/notice:hidden">{label}</span>}
     </button>
   );
 }
@@ -88,6 +91,7 @@ function ConsentAction({
 
 const GUEST_QUICK_START_ACTIVE_KEY = "tomverse_guest_quick_start_active_v2";
 const GUEST_QUICK_START_EVENT = "tomverse:guest-quick-start";
+const CONSENT_BAR_DISMISSED_KEY = "tomverse_analytics_consent_bar_dismissed_v1";
 
 // The chat shells register a flex-flow slot rendered directly above the
 // composer. When present, the consent notice portals into it instead of
@@ -123,16 +127,11 @@ export function SettingsConsentSlot() {
   return <div ref={register} data-testid="settings-consent-slot" className="px-4 py-2 empty:hidden" />;
 }
 
-// Marketing pages register a slot directly under the sticky header. Before
-// FINAL-F001 the notice stayed a bottom-anchored viewport-fixed card there,
-// which at <=360px wide viewports landed exactly on the hero's primary CTA:
-// document.elementFromPoint() at the CTA's centre returned the notice's own
-// body copy, so the CTA could not be tapped at all while consent was
-// pending. A bottom overlay cannot avoid that by shrinking -- at 360x640 the
-// hero CTA ends 16px above the fold, so any bottom-anchored card taller than
-// 16px covers it. Putting the notice in normal document flow (the same fix
-// STG-F001 used for the chat composer) removes the overlap by construction
-// at every viewport and scroll offset.
+// The plugin workspace registers this slot under its header for the consent
+// notice and the analytics settings pill: on a phone its own tab bar is fixed
+// to the bottom of the screen. Everywhere else outside chat and sign-in the
+// notice is a slim bar fixed to the bottom of the viewport (owner decision
+// 2026-11-16), and the page reserves the bar's height as bottom padding.
 type MarketingConsentSlotSetter = (node: HTMLDivElement | null) => void;
 const MarketingConsentSlotContext =
   createContext<MarketingConsentSlotSetter | null>(null);
@@ -142,9 +141,7 @@ export function useMarketingConsentSlotRef(): MarketingConsentSlotSetter {
   return register || (() => {});
 }
 
-// Rendered by MarketingChrome's header for every marketing route. It stays
-// `empty:hidden` so a resolved (accepted/declined) consent state costs no
-// layout box and no CLS.
+// `empty:hidden`, so it costs no layout box while it holds nothing.
 export function MarketingConsentSlot({
   maxWidth = "max-w-7xl",
 }: {
@@ -173,7 +170,7 @@ export function MarketingConsentSlot({
 // stays on the button as its aria-label: the accessible name never shrinks
 // (WCAG 2.5.3 Label in Name holds, and every existing role/name query keeps
 // matching), while the layout gets labels that fit next to 44x44 targets.
-const consentCopy: Record<
+export const consentCopy: Record<
   Language,
   {
     title: string;
@@ -192,6 +189,7 @@ const consentCopy: Record<
     keepOnShort: string;
     turnOff: string;
     turnOffShort: string;
+    dismiss: string;
   }
 > = {
   en: {
@@ -211,11 +209,12 @@ const consentCopy: Record<
     keepOnShort: "Keep",
     turnOff: "Turn off analytics",
     turnOffShort: "Turn off",
+    dismiss: "Close",
   },
   ko: {
     title: "개인정보를 보호하는 제품 분석",
     body: "동의하면 기능 사용·유입 경로 통계를 수집해 Tomverse를 개선합니다. 프롬프트, 응답, 파일명 및 파일 내용은 포함하지 않습니다.",
-    mobileBody: "기능 사용·유입 경로 통계를 수집해 제품을 개선합니다. 질문·파일 내용은 제외합니다.",
+    mobileBody: "기능 사용·유입 경로 통계를 수집해 제품을 개선합니다. 프롬프트·응답·파일명·파일 내용은 제외합니다.",
     accept: "사용 통계 허용",
     acceptShort: "통계 허용",
     decline: "거부",
@@ -224,11 +223,12 @@ const consentCopy: Record<
     settings: "분석 설정",
     noticeTitle: "개인정보 보호 분석이 활성화되어 있습니다",
     noticeBody: "이 지역에서는 명확한 거부 기능과 함께 개인정보를 최소화한 제품 분석을 시작합니다. 프롬프트, 응답, 파일명 및 파일 내용은 포함하지 않으며 광고 저장 기능은 계속 꺼져 있습니다.",
-    noticeMobileBody: "분석이 켜져 있습니다. 질문과 파일은 수집하지 않습니다.",
+    noticeMobileBody: "분석이 켜져 있습니다. 프롬프트·응답·파일명·파일 내용은 수집하지 않습니다.",
     keepOn: "분석 유지",
     keepOnShort: "유지",
     turnOff: "분석 끄기",
     turnOffShort: "끄기",
+    dismiss: "닫기",
   },
   zh: {
     title: "保护隐私的产品分析",
@@ -247,6 +247,7 @@ const consentCopy: Record<
     keepOnShort: "开启",
     turnOff: "关闭分析",
     turnOffShort: "关闭",
+    dismiss: "关闭提示",
   },
   "zh-Hant": {
     title: "保護隱私的產品分析",
@@ -265,6 +266,7 @@ const consentCopy: Record<
     keepOnShort: "開啟",
     turnOff: "關閉分析",
     turnOffShort: "關閉",
+    dismiss: "關閉提示",
   },
   fr: {
     title: "Analyse produit respectueuse de la vie privée",
@@ -283,6 +285,7 @@ const consentCopy: Record<
     keepOnShort: "Garder",
     turnOff: "Désactiver",
     turnOffShort: "Désactiver",
+    dismiss: "Fermer",
   },
   de: {
     title: "Datenschutzfreundliche Produktanalyse",
@@ -301,6 +304,7 @@ const consentCopy: Record<
     keepOnShort: "Aktiv",
     turnOff: "Deaktivieren",
     turnOffShort: "Deaktivieren",
+    dismiss: "Schließen",
   },
   es: {
     title: "Analítica de producto con privacidad",
@@ -319,6 +323,7 @@ const consentCopy: Record<
     keepOnShort: "Mantener",
     turnOff: "Desactivar",
     turnOffShort: "Desactivar",
+    dismiss: "Cerrar",
   },
   pt: {
     title: "Análise de produto com privacidade",
@@ -337,6 +342,7 @@ const consentCopy: Record<
     keepOnShort: "Manter",
     turnOff: "Desativar",
     turnOffShort: "Desativar",
+    dismiss: "Fechar",
   },
 };
 
@@ -408,6 +414,8 @@ export function AnalyticsProvider({
   const [settingsConsentSlot, setSettingsConsentSlot] = useState<HTMLDivElement | null>(null);
   const [marketingConsentSlot, setMarketingConsentSlot] =
     useState<HTMLDivElement | null>(null);
+  const [consentBar, setConsentBar] = useState<HTMLElement | null>(null);
+  const [consentBarDismissed, setConsentBarDismissed] = useState(false);
   const lifecycleCheckedRef = useRef(false);
   const copy = consentCopy[lang];
 
@@ -475,30 +483,33 @@ export function AnalyticsProvider({
     };
   }, [disabled]);
 
-  // R-05-A. Releases the pre-paint reservation set by
-  // `MarketingConsentReservation`. Once the decision is known the slot must cost
-  // no layout box -- `empty:hidden` handles that on its own, but only if the
-  // reserved `min-height` is gone. Keeping it would trade one shift for a
-  // permanent gap under the header, which
-  // `tests/e2e/marketing-consent-hero.spec.ts` asserts against.
-  //
-  // `showPreferences` re-opens the notice after a decision, so the attribute
-  // goes back on: the slot is about to be occupied again.
-  //
-  // `loading` deliberately does nothing. The pre-paint script read the same
-  // stored value this state is resolving from, so during `loading` its answer is
-  // already the right one -- and *adding* the attribute here would put a
-  // reservation in front of a returning accepted visitor, whose CLS is 0 today,
-  // only to drop it a microtask later. That is a shift this exists to prevent.
+  // The bottom bar's X hides the notice for the rest of this browser session
+  // without recording a choice: an opt-in region stays off, a notice region
+  // stays on, exactly as if the bar had been ignored.
   useEffect(() => {
-    if (consent === "loading") return;
-    const pending = consent === "unset" || showPreferences;
-    if (pending) {
-      document.documentElement.setAttribute("data-consent-pending", "");
-    } else {
-      document.documentElement.removeAttribute("data-consent-pending");
-    }
-  }, [consent, showPreferences]);
+    let dismissed = false;
+    try {
+      dismissed = window.sessionStorage.getItem(CONSENT_BAR_DISMISSED_KEY) === "1";
+    } catch {}
+    if (dismissed) queueMicrotask(() => setConsentBarDismissed(true));
+  }, []);
+
+  // The bar is fixed over the page, so the page keeps its own last content
+  // reachable by growing a matching bottom padding for as long as it shows.
+  useEffect(() => {
+    if (!consentBar) return;
+    const body = document.body;
+    const sync = () => {
+      body.style.paddingBottom = `${consentBar.offsetHeight}px`;
+    };
+    sync();
+    const observer = new ResizeObserver(sync);
+    observer.observe(consentBar);
+    return () => {
+      observer.disconnect();
+      body.style.paddingBottom = "";
+    };
+  }, [consentBar]);
 
   useEffect(() => {
     let cancelled = false;
@@ -638,11 +649,29 @@ export function AnalyticsProvider({
     };
   }, [disabled, openPreferencesFrom]);
 
-  const analyticsEnabled = Boolean(
-    resolvedPolicy &&
-      (consent === "accepted" ||
-        (consent === "unset" && resolvedPolicy.mode === "notice_opt_out"))
-  );
+  const analyticsEnabled = isProductAnalyticsAllowed(consent, resolvedPolicy);
+  const { data: sessionData, status: sessionStatus } = useSession();
+  const sessionUserId = sessionStatus === "authenticated" ? sessionData?.user?.id ?? null : null;
+  // Layout synchronization precedes every configure/queue flush, including an
+  // account change in the same commit. Unresolved auth suspends only journeys.
+  useLayoutEffect(() => {
+    syncAnalyticsJourneyIdentity(
+      sessionStatus === "loading" ? undefined : sessionUserId ? `account:${sessionUserId}` : null,
+      disabled ? false : consent === "loading" || !resolvedPolicy ? null : analyticsEnabled,
+    );
+  }, [sessionStatus, sessionUserId, disabled, consent, resolvedPolicy, analyticsEnabled]);
+  useEffect(() => {
+    const changed = (event: StorageEvent) => {
+      if (event.key !== "tomverse_analytics_consent_v1" && event.key !== null) return;
+      const stored = analyticsConsent();
+      const next = stored === "accepted" || stored === "declined" ? stored : "unset";
+      syncAnalyticsJourneyIdentity(sessionStatus === "loading" ? undefined : sessionUserId ? `account:${sessionUserId}` : null,
+        disabled ? false : resolvedPolicy ? isProductAnalyticsAllowed(next, resolvedPolicy) : null);
+      setConsent(next);
+    };
+    window.addEventListener("storage", changed);
+    return () => window.removeEventListener("storage", changed);
+  }, [sessionStatus, sessionUserId, disabled, resolvedPolicy]);
 
   useEffect(() => {
     if (disabled || !analyticsEnabled || !resolvedPolicy) return;
@@ -697,13 +726,14 @@ export function AnalyticsProvider({
     };
   }, [analyticsEnabled, disabled, initialPlan, lang, measurementId, resolvedPolicy, userCreatedAt]);
 
+  useEffect(() => {
+    if (!disabled && analyticsEnabled && analyticsClientReady) flushConnectedJourneyEvents();
+  }, [sessionStatus, sessionUserId, disabled, analyticsEnabled, analyticsClientReady]);
+
   // GA4 User-ID (docs/policy/marketing-automation.md §10.2): asked for only
   // when the notice is published, the switch is on, the visitor explicitly
   // accepted analytics and is signed in. Any of those going away -- signing
   // out included -- clears it on the tag.
-  const { data: sessionData, status: sessionStatus } = useSession();
-  const sessionUserId =
-    sessionStatus === "authenticated" ? sessionData?.user?.id ?? null : null;
   const ga4UserIdAllowed =
     !disabled &&
     analyticsClientReady &&
@@ -749,12 +779,23 @@ export function AnalyticsProvider({
     closePreferences();
   }, [closePreferences, sessionUserId]);
 
+  const dismissNotice = useCallback(() => {
+    if (showPreferences) {
+      closePreferences();
+      return;
+    }
+    try {
+      window.sessionStorage.setItem(CONSENT_BAR_DISMISSED_KEY, "1");
+    } catch {}
+    setConsentBarDismissed(true);
+  }, [closePreferences, showPreferences]);
+
   const consentPromptReady = !isChatWorkspacePath(pathname) || chatConsentReady;
   const defaultEnabledNotice =
     consent === "unset" &&
     resolvedPolicy?.mode === "notice_opt_out" &&
     !showPreferences;
-  const promptCopy = defaultEnabledNotice
+  const regionalPromptCopy = defaultEnabledNotice
     ? {
         title: copy.noticeTitle,
         body: copy.noticeBody,
@@ -765,39 +806,34 @@ export function AnalyticsProvider({
         declineShort: copy.turnOffShort,
       }
     : copy;
+  const promptCopy = regionalPromptCopy;
 
   // On /chat, once a shell has registered a slot above the composer, the
   // notice portals there instead of floating fixed over the viewport --
   // that slot reserves real layout space, so it can never cover composer
   // controls at any width. On /auth/signin the sign-in page registers a
-  // similar slot right after the login card, settings reserves a footer slot,
-  // and marketing routes register one under the sticky header (FINAL-F001).
-  // Everywhere else (and before a
-  // route's slot exists, e.g. the initial shell-loading skeleton) the
-  // original fixed corner overlay is used instead.
-  const noticePath = pathname?.split("/").filter(Boolean) ?? [];
-
+  // similar slot right after the login card. Everywhere else (marketing,
+  // settings, plugins, and before a route's slot exists) the notice is a slim
+  // bar fixed to the bottom of the viewport (owner decision 2026-11-16): the
+  // header band it replaced pushed every first-visit hero ~180px down.
   const isSettingsRoute = pathname === "/settings" || Boolean(pathname?.startsWith("/settings/"));
-
-
   const isPluginRoute = pathname === "/plugins";
-  const readableNotice = (((((noticePath.at(-1) === "ai-for-file-analysis" || noticePath.at(-1) === "faq" || noticePath.at(-1) === "support" || noticePath.at(-1) === "safety" || noticePath.at(-1) === "pricing") &&
-    (noticePath.length === 1 || (noticePath.length === 2 && marketingLocaleFor(noticePath[0]) !== null))) ||
-    (pathname === CHAT_WORKSPACE_PATH) || (isSettingsRoute || isPluginRoute)) || (noticePath.length === 0 || (noticePath.length === 1 && marketingLocaleFor(noticePath[0]) !== null))) || ((noticePath.length > 0 && marketingLocaleFor(noticePath[0]) !== null ? noticePath.slice(1) : noticePath).join("/") === "privacy")) || ((noticePath.length > 0 && marketingLocaleFor(noticePath[0]) !== null ? noticePath.slice(1) : noticePath).join("/") === "about") || ((noticePath.length > 0 && marketingLocaleFor(noticePath[0]) !== null ? noticePath.slice(1) : noticePath).join("/") === "terms") || ((noticePath.length > 0 && marketingLocaleFor(noticePath[0]) !== null ? noticePath.slice(1) : noticePath).join("/") === "chatgpt-vs-claude") || ((noticePath.length > 0 && marketingLocaleFor(noticePath[0]) !== null ? noticePath.slice(1) : noticePath).join("/") === "models") || ((noticePath.length > 0 && marketingLocaleFor(noticePath[0]) !== null ? noticePath.slice(1) : noticePath).join("/") === "faq") || ((noticePath.length > 0 && marketingLocaleFor(noticePath[0]) !== null ? noticePath.slice(1) : noticePath).join("/") === "support") || ((noticePath.length > 0 && marketingLocaleFor(noticePath[0]) !== null ? noticePath.slice(1) : noticePath).join("/") === "support/help-centre");
-  const inlineSlot =
-    isChatWorkspacePath(pathname)
-      ? chatConsentSlot
-      : pathname === "/auth/signin"
-        ? authConsentSlot
-        : isSettingsRoute
-          ? settingsConsentSlot
-          : marketingConsentSlot;
+  const readableNotice = pathname === CHAT_WORKSPACE_PATH;
+  // /plugins keeps its slot under the header: on a phone its own tab bar is
+  // fixed to the bottom of the screen and would sit on top of the bar.
+  const inlineSlot = isChatWorkspacePath(pathname)
+    ? chatConsentSlot
+    : pathname === "/auth/signin"
+      ? authConsentSlot
+      : isPluginRoute
+        ? marketingConsentSlot
+        : null;
 
   const showConsentPrompt =
     !disabled &&
     resolvedPolicy &&
     consentPromptReady &&
-    (consent === "unset" || showPreferences);
+    (showPreferences || (consent === "unset" && !consentBarDismissed));
 
   const showSettingsButton =
     !disabled &&
@@ -876,10 +912,10 @@ export function AnalyticsProvider({
         */}
         <div className="min-w-[6rem] flex-1">
           <p className={`${readableNotice ? "text-sm leading-6 [overflow-wrap:anywhere]" : "text-[11px] leading-4"} text-zinc-600 dark:text-zinc-300 @md/notice:hidden`}>
-            {(noticePath.length === 0 || (noticePath.length === 1 && marketingLocaleFor(noticePath[0]) !== null) || ["faq", "models", "support", "support/help-centre", "privacy", "about", "pricing", "terms"].includes((noticePath.length > 0 && marketingLocaleFor(noticePath[0]) !== null ? noticePath.slice(1) : noticePath).join("/"))) ? promptCopy.body : (promptCopy.mobileBody)}{" "}
+            {promptCopy.mobileBody}{" "}
             <Link
               href="/privacy"
-              className={`${((["about", "faq"].includes((noticePath.length > 0 && marketingLocaleFor(noticePath[0]) !== null ? noticePath.slice(1) : noticePath).join("/"))) || (pathname === "/privacy" && lang === "en")) ? "mt-1 block w-fit max-w-full whitespace-nowrap" : (readableNotice ? "inline-block whitespace-nowrap" : "")} font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200`}
+              className={`${readableNotice ? "inline-block whitespace-nowrap" : ""} font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200`}
             >
               {copy.privacy}
             </Link>
@@ -941,9 +977,8 @@ export function AnalyticsProvider({
                 aria-label={promptCopy.title}
                 data-testid="chat-consent-notice"
                 className={
-                  inlineSlot === marketingConsentSlot || inlineSlot === settingsConsentSlot
-                    ? // These slots already supply the page gutter, so
-                      // the card spans it and never needs its own max-width.
+                  inlineSlot === marketingConsentSlot
+                    ? // The plugin slot already supplies the page gutter.
                       "rounded-xl border border-zinc-200 bg-white/95 px-1.5 py-0.5 text-zinc-700 shadow-md shadow-zinc-900/5 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-black/20 sm:p-3"
                     : "mx-2 mb-2 rounded-xl border border-zinc-200 bg-white/95 px-1.5 py-1.5 text-zinc-700 shadow-md shadow-zinc-900/5 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-black/20 sm:mx-4 sm:ml-auto sm:max-w-sm sm:p-3"
                 }
@@ -955,12 +990,70 @@ export function AnalyticsProvider({
           : null}
         {showConsentPrompt && !inlineSlot ? (
           <aside
+            ref={setConsentBar}
             role="region"
             aria-label={promptCopy.title}
             data-testid="chat-consent-notice"
-            className="fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] right-[max(0.75rem,env(safe-area-inset-right))] z-[100] w-[min(26rem,calc(100vw-1.5rem))] rounded-xl border border-zinc-200 bg-white/95 px-1.5 py-1.5 text-zinc-700 shadow-lg shadow-zinc-900/10 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-black/30 sm:p-3"
+            data-variant="bottom-bar"
+            // max-h-[50vh]: at 200% text on a short phone the bar scrolls
+            // inside itself instead of covering most of the page.
+            // z-30 keeps the bar above page content but under the sticky
+            // header and its menu (z-40) and every dialog (checkout is z-90):
+            // at z-100 it sat on top of the checkout modal on phones and took
+            // the taps meant for Apply and Continue.
+            className="fixed inset-x-0 bottom-0 z-30 max-h-[50vh] overflow-y-auto border-t border-zinc-200 bg-white/95 pb-[env(safe-area-inset-bottom)] text-zinc-700 shadow-[0_-4px_16px_rgba(24,24,27,0.08)] backdrop-blur dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200 dark:shadow-[0_-4px_16px_rgba(0,0,0,0.35)]"
           >
-            {noticeInner}
+            <div className="@container/notice mx-auto max-w-7xl py-1.5 pl-3 pr-1 sm:px-6">
+              {/*
+                Narrow: the sentence across the full width, then one row with
+                the policy link and the actions (X last). A single row would
+                crush the sentence to five lines at 320px. From @md everything
+                sits on one row. From @5xl (a desktop-width bar) the copy is the
+                full body: the regional opt-in prompt has to say what is
+                measured and why; a phone gets that from the short sentence plus
+                the policy link.
+              */}
+              <div className="flex flex-col gap-1 @md/notice:flex-row @md/notice:items-center @md/notice:gap-3 @2xl/notice:gap-4">
+                <p className="min-w-0 pr-2 pt-1 text-sm leading-5 text-zinc-600 dark:text-zinc-300 @md/notice:flex-1 @md/notice:pr-0 @md/notice:pt-0 @2xl/notice:text-[13px]">
+                  <span className="hidden font-bold text-zinc-900 dark:text-zinc-50 @2xl/notice:inline">
+                    {promptCopy.title}.{" "}
+                  </span>
+                  <span className="@5xl/notice:hidden">{promptCopy.mobileBody}</span>
+                  <span className="hidden @5xl/notice:inline">{promptCopy.body}</span>{" "}
+                  <Link href="/privacy" className="hidden @md/notice:inline whitespace-nowrap font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200">
+                    {copy.privacy}
+                  </Link>
+                </p>
+                <div className="flex shrink-0 items-center justify-between gap-1.5 @2xl/notice:gap-2">
+                  <Link href="/privacy" className="text-sm @md/notice:hidden whitespace-nowrap font-bold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200">
+                    {copy.privacy}
+                  </Link>
+                  <div className="flex items-center gap-1.5 @2xl/notice:gap-2">
+                    <ConsentAction
+                      kind="decline"
+                      onClick={decline}
+                      label={promptCopy.decline}
+                      shortLabel={promptCopy.declineShort}
+                    />
+                    <ConsentAction
+                      kind="accept"
+                      onClick={accept}
+                      label={promptCopy.accept}
+                      shortLabel={promptCopy.acceptShort}
+                    />
+                    <button
+                      type="button"
+                      data-testid="analytics-consent-dismiss"
+                      onClick={dismissNotice}
+                      aria-label={copy.dismiss}
+                      className="inline-flex size-11 shrink-0 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                    >
+                      <X aria-hidden="true" className="size-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
           </aside>
         ) : null}
         {showSettingsButton && settingsInlineSlot

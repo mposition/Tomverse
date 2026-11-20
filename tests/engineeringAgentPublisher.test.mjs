@@ -5,6 +5,9 @@ import { dirname, join, normalize } from "node:path";
 import test from "node:test";
 
 import {
+  BRANCH_WITHOUT_PULL_REQUEST_REASON,
+  PUBLISHER_CARD_KEY,
+  READ_AFTER_WRITE_ATTEMPTS,
   decideLookup,
   expectedPublishCommit,
   publisherPrBody,
@@ -22,10 +25,16 @@ import {
   tokenPermissionsAllowed,
 } from "../scripts/engineering-agent-publisher.mjs";
 import {
+  ENGINEERING_AGENT_APP_FEATURES,
+  ENGINEERING_PUBLISHER_FEATURES,
   ENGINEERING_PUBLISHER_FEATURES_HEADER,
   prBodyCarriesMarker,
   publisherOpensReviewDrafts,
+  publisherReadsPatchChunks,
+  publisherResumesPullRequests,
   shouldSendSuccessHeartbeat,
+  unknownOutcomeDecisionCauseKey,
+  unknownOutcomeDecisionWorkItemId,
 } from "../lib/engineeringAgentCore.ts";
 
 // The publisher service's cycle (docs/policy/engineering-agent.md §7-2,
@@ -59,14 +68,21 @@ const writeWork = (overrides = {}) => {
   return { ...work, commitDigest: overrides.commitDigest ?? sha256(expectedPublishCommit(work, DATE)) };
 };
 
-const fakeWorld = ({ work, halt = "none", diff = { digest: "d".repeat(64) }, headAfterPull, moveDuringDiff = false, lastLook = { verdict: "no_objection" }, build, pushOk = true, remoteAfterPush, createPull, pulls, branchBefore = null, commitAt = {} } = {}) => {
+const fakeWorld = ({ work, halt = "none", appFeatures, patchChunk, diff = { digest: "d".repeat(64) }, change, headAfterPull, moveDuringDiff = false, lastLook = { verdict: "no_objection" }, build, pushOk = true, remoteAfterPush, createPull, pulls, branchBefore = null, commitAt = {}, refHiddenReads = 0, pullHiddenReads = 0 } = {}) => {
   const calls = [];
+  // Which digest read the cycle took: v2 for an app that names change_digest_v2, v1 otherwise.
+  const digestReads = [];
   const tokens = { minted: 0, revoked: 0 };
   let branch = branchBefore;
-  const openPulls = pulls ?? [];
+  const openPulls = [...(pulls ?? [])];
+  // GitHub showing our own write late: a ref read answers 404, a list leaves the new pull request out.
+  let hiddenRef = 0;
+  let hiddenPull = 0;
+  const pauses = [];
   const app = async (path, body) => {
     calls.push({ path, body });
-    if (path === "publish/claim") return { status: 200, json: { work, halt } };
+    if (path === "publish/claim") return { status: 200, json: { work, halt, ...(appFeatures ? { appFeatures } : {}) } };
+    if (path === "publish/patch" && patchChunk) return patchChunk(body);
     if (path === "publish/last-look") return { status: 200, json: lastLook };
     if (path === "publish/result") return { status: 200, json: { state: "done" } };
     return { status: 404, json: null };
@@ -76,10 +92,26 @@ const fakeWorld = ({ work, halt = "none", diff = { digest: "d".repeat(64) }, hea
     return {
       branchOid: async (name) => {
         calls.push({ path: "github:branchOid", name });
+        if (hiddenRef > 0) {
+          hiddenRef -= 1;
+          return null;
+        }
         return branch;
       },
-      pullsForHead: async () => openPulls,
+      pullsForHead: async () => {
+        if (hiddenPull > 0) {
+          hiddenPull -= 1;
+          return openPulls.filter((pull) => pull.number !== 42);
+        }
+        return [...openPulls];
+      },
+      pullChangeDigest: async (input) => {
+        digestReads.push({ v2: input });
+        if (moveDuringDiff) branch = "8".repeat(40);
+        return change === undefined ? { digest: CHANGE, headTreeSha: TREE } : change;
+      },
       pullDiffDigest: async () => {
+        digestReads.push("v1");
         if (moveDuringDiff) branch = "8".repeat(40);
         return diff;
       },
@@ -87,6 +119,7 @@ const fakeWorld = ({ work, halt = "none", diff = { digest: "d".repeat(64) }, hea
         calls.push({ path: "github:createPull", input });
         const answer = createPull ?? { status: "created", number: 42 };
         if (answer.status === "created") {
+          hiddenPull = pullHiddenReads;
           openPulls.push({ number: 42, state: "open", baseRef: "develop", baseSha: "f".repeat(40), headRef: BRANCH, headSha: headAfterPull ?? COMMIT, body: input.body });
         }
         return answer;
@@ -103,6 +136,7 @@ const fakeWorld = ({ work, halt = "none", diff = { digest: "d".repeat(64) }, hea
     push: async (sha, name, token) => {
       calls.push({ path: "git:push", sha, name, token });
       branch = remoteAfterPush === undefined ? sha : remoteAfterPush;
+      hiddenRef = refHiddenReads;
       return pushOk;
     },
     commitObjectAt: async (sha) => commitAt[sha] ?? null,
@@ -117,11 +151,47 @@ const fakeWorld = ({ work, halt = "none", diff = { digest: "d".repeat(64) }, hea
     },
     github,
     workspace,
+    pause: async (ms) => void pauses.push(ms),
   };
-  return { ports, calls, tokens };
+  return { ports, calls, tokens, pauses, digestReads };
 };
 
 const paths = (calls) => calls.map((call) => call.path);
+/** The v2 change digest (lib/pullDiffDigestCore.ts) of the published commit. */
+const CHANGE = `v2:${"a".repeat(64)}`;
+const V2 = { appFeatures: ["change_digest_v2"] };
+
+test("an app that names change_digest_v2 is given the v2 change digest; one before it the v1 diff digest", async () => {
+  const world = fakeWorld({ work: writeWork(), ...V2 });
+  assert.deepEqual(await runPublisherCycle(world.ports), { finishedNormally: true, halt: "none", reason: "confirmed" });
+  assert.deepEqual(world.digestReads, [{ v2: { base: "develop", headSha: COMMIT } }], "the v1 diff is not read");
+  assert.deepEqual(result(world.calls).pullRequest.snapshot,
+    { baseSha: "f".repeat(40), diffDigest: CHANGE, treeId: TREE, invalidatedReviewIds: [] });
+  // An app before the feature (no appFeatures, or other names only) is given what it knows.
+  for (const appFeatures of [undefined, [], ["patch_chunks"], "change_digest_v2"]) {
+    const old = fakeWorld({ work: writeWork(), appFeatures });
+    await runPublisherCycle(old.ports);
+    assert.deepEqual(old.digestReads, ["v1"], JSON.stringify(appFeatures));
+    assert.equal(result(old.calls).pullRequest.snapshot.diffDigest, "d".repeat(64));
+  }
+  // The publisher names the feature in its header.
+  assert.ok(ENGINEERING_PUBLISHER_FEATURES.split(",").includes("change_digest_v2"));
+});
+
+test("a v2 binding has no size or binary refusal; one not read, or of another tree, is left for a lookup", async () => {
+  // A v1 refusal ("not a diff AMUX would bind") is never consulted for a v2 app.
+  const big = fakeWorld({ work: writeWork(), ...V2, diff: { refused: true } });
+  assert.equal((await runPublisherCycle(big.ports)).reason, "confirmed");
+  assert.equal(result(big.calls).pullRequest.snapshot.diffDigest, CHANGE);
+  const unread = fakeWorld({ work: writeWork(), ...V2, change: null });
+  assert.deepEqual([(await runPublisherCycle(unread.ports)).reason, result(unread.calls)], ["snapshot_unreadable", undefined]);
+  const otherTree = fakeWorld({ work: writeWork(), ...V2, change: { digest: CHANGE, headTreeSha: "9".repeat(40) } });
+  assert.deepEqual([(await runPublisherCycle(otherTree.ports)).reason, result(otherTree.calls)],
+    ["pull_request_head_changed", undefined]);
+  // A head that moved while the digest was read is not bound either.
+  const moved = fakeWorld({ work: writeWork(), ...V2, moveDuringDiff: true });
+  assert.deepEqual([(await runPublisherCycle(moved.ports)).reason, result(moved.calls)], ["pull_request_head_changed", undefined]);
+});
 const result = (calls) => calls.find((call) => call.path === "publish/result")?.body;
 
 test("a write claim is rebuilt, looked at last, pushed once to a new branch, and reported with its binding", async () => {
@@ -182,6 +252,28 @@ test("an owner review item opens a draft pull request that says what marking it 
   }
 });
 
+test("the title leads with the card's code the app sends, and leaves off anything that is not one", async () => {
+  assert.equal(publisherPrTitle(RUN, "AMUX-FILEREQ-005"), `AMUX-FILEREQ-005 engineering-agent: run ${RUN}`);
+  assert.equal(publisherReviewPrTitle(RUN, "AMUX-MODELTIER-002"),
+    `AMUX-MODELTIER-002 engineering-agent: run ${RUN} (owner review)`);
+  // An older app sends no code, and a value that is not a card code (a
+  // card's title, an unpadded number, lowercase) is never written to the title.
+  for (const cardKey of [undefined, null, "", "Add Guest vs Free copy", "AMUX-FILEREQ-5",
+    "amux-filereq-005", "AMUX-FILEREQ-005 extra", 5]) {
+    assert.equal(publisherPrTitle(RUN, cardKey), `engineering-agent: run ${RUN}`, String(cardKey));
+  }
+  const world = fakeWorld({ work: writeWork({ ownerReview: true, cardKey: "AMUX-FILEREQ-005" }) });
+  assert.deepEqual(await runPublisherCycle(world.ports), { finishedNormally: true, halt: "none", reason: "confirmed" });
+  const pr = world.calls.find((call) => call.path === "github:createPull").input;
+  assert.equal(pr.title, `AMUX-FILEREQ-005 engineering-agent: run ${RUN} (owner review)`);
+  // The publisher's copy of the grammar is the app's display key grammar, so
+  // a valid code is never dropped from a title (the core imports nothing).
+  const app = readFileSync(new URL("../lib/amux/cardDisplayKeyCore.ts", import.meta.url), "utf8");
+  const grammar = app.match(/export const AMUX_CARD_DISPLAY_KEY_PATTERN =\s*"([^"]+)";/)?.[1];
+  assert.ok(grammar, "the app's display key grammar is found");
+  assert.equal(PUBLISHER_CARD_KEY.source, grammar);
+});
+
 test("a publisher names review drafts in a header the app reads; nothing else counts as naming them", () => {
   assert.equal(publisherOpensReviewDrafts("review_draft"), true);
   assert.equal(publisherOpensReviewDrafts("other, review_draft"), true);
@@ -189,8 +281,18 @@ test("a publisher names review drafts in a header the app reads; nothing else co
     assert.equal(publisherOpensReviewDrafts(header), false);
   }
   const source = readFileSync(new URL("../scripts/engineering-agent-publisher.mjs", import.meta.url), "utf8");
-  assert.match(source, /\[ENGINEERING_PUBLISHER_FEATURES_HEADER\]: ENGINEERING_PUBLISHER_REVIEW_DRAFT_FEATURE/,
-    "every call to the app names the feature");
+  assert.match(source, /\[ENGINEERING_PUBLISHER_FEATURES_HEADER\]: ENGINEERING_PUBLISHER_FEATURES,/,
+    "every call to the app names the features");
+  assert.equal(publisherOpensReviewDrafts(ENGINEERING_PUBLISHER_FEATURES), true);
+  assert.equal(publisherResumesPullRequests(ENGINEERING_PUBLISHER_FEATURES), true);
+  assert.equal(publisherReadsPatchChunks(ENGINEERING_PUBLISHER_FEATURES), true);
+  for (const header of [null, "", "patch_chunk", "review_draft,pull_request_resume", "x patch_chunks"]) {
+    assert.equal(publisherReadsPatchChunks(header), false, String(header));
+  }
+  assert.deepEqual([...ENGINEERING_AGENT_APP_FEATURES], ["patch_chunks", "change_digest_v2"]);
+  for (const header of [null, "", "review_draft", "pull_request_resumes", "x pull_request_resume"]) {
+    assert.equal(publisherResumesPullRequests(header), false, String(header));
+  }
   assert.equal(ENGINEERING_PUBLISHER_FEATURES_HEADER, ENGINEERING_PUBLISHER_FEATURES_HEADER.toLowerCase());
 });
 
@@ -209,6 +311,9 @@ test("every difference before the push refuses, and nothing is pushed", async ()
     [{ work: writeWork({ commitDigest: "0".repeat(64) }) }, "revalidation_refused", "commit_digest_mismatch"],
     [{ work: writeWork({ patchDigest: "0".repeat(64) }) }, "revalidation_refused", "content_check_failed"],
     [{ work: writeWork(), build: () => null }, "revalidation_refused", "patch_does_not_apply"],
+    // A blob the applied tree adds carries a secret the patch text hid (a
+    // binary file's bytes): refused before the push.
+    [{ work: writeWork(), build: () => ({ refused: "content_check_failed" }) }, "revalidation_refused", "content_check_failed"],
     [{ work: writeWork(), build: (input) => ({ treeId: "9".repeat(40), commitSha: COMMIT, commitObject: input.message }) }, "revalidation_refused", "tree_mismatch"],
     [{ work: writeWork(), build: () => ({ treeId: TREE, commitSha: COMMIT, commitObject: "tree x\n" }) }, "revalidation_refused", "commit_mismatch"],
     [{ work: writeWork(), branchBefore: "a".repeat(40) }, "lookup_impossible", "branch_exists"],
@@ -230,11 +335,94 @@ test("every difference before the push refuses, and nothing is pushed", async ()
   assert.equal(result(secretWorld.calls)?.reason, "content_check_failed");
 });
 
+// docs/policy/amux-v22-result-transfer.md §4: a claim from an app that serves
+// chunks carries the patch's size and chunk count, never the patch.
+const chunkedWork = (bytes, chunkCount, overrides = {}) => {
+  const work = writeWork({ patchDigest: createHash("sha256").update(bytes).digest("hex"), ...overrides });
+  delete work.patchBody;
+  return { ...work, patchBytes: overrides.patchBytes ?? bytes.byteLength, patchChunkCount: chunkCount };
+};
+/** The app's publish/patch over `bytes`, split into `size`-byte chunks. */
+const servesChunks = (bytes, size, { totalBytes = bytes.byteLength, chunkCount } = {}) => (body) => {
+  const count = chunkCount ?? Math.ceil(bytes.byteLength / size);
+  const slice = bytes.subarray(body.index * size, (body.index + 1) * size);
+  return { status: 200, json: { workItemId: body.workItemId, index: body.index, totalBytes, chunkCount: count,
+    bytesBase64: Buffer.from(slice).toString("base64") } };
+};
+
+test("a chunked claim's patch is read in order, checked whole, and applied as the one text", async () => {
+  const text = `${patch}+${"é".repeat(5)}\n`;
+  const bytes = Buffer.from(text, "utf8");
+  const work = chunkedWork(bytes, 3);
+  const world = fakeWorld({ work, appFeatures: ["patch_chunks"], patchChunk: servesChunks(bytes, Math.ceil(bytes.byteLength / 3)) });
+  assert.deepEqual(await runPublisherCycle(world.ports), { finishedNormally: true, halt: "none", reason: "confirmed" });
+  const reads = world.calls.filter((call) => call.path === "publish/patch").map((call) => call.body);
+  assert.deepEqual(reads, [0, 1, 2].map((index) => ({ workItemId: work.workItemId, fencingToken: "7", index })));
+  assert.equal(world.calls.find((call) => call.path === "git:build").input.patch, text, "the joined bytes, decoded once");
+  assert.ok(paths(world.calls).indexOf("publish/patch") < paths(world.calls).indexOf("git:build"));
+  assert.ok(paths(world.calls).includes("git:push"));
+});
+
+test("an inline patch is used as it is, whatever the app names", async () => {
+  const world = fakeWorld({ work: writeWork(), appFeatures: ["patch_chunks"], patchChunk: () => assert.fail("no chunk read") });
+  assert.deepEqual(await runPublisherCycle(world.ports), { finishedNormally: true, halt: "none", reason: "confirmed" });
+  assert.equal(world.calls.find((call) => call.path === "git:build").input.patch, patch);
+});
+
+test("chunks that are not the claimed patch refuse, and a patch the app could not hand over goes back to the queue", async () => {
+  const bytes = Buffer.from(patch, "utf8");
+  const half = Math.ceil(bytes.byteLength / 2);
+  const notUtf8 = Buffer.concat([bytes, Buffer.from([0xff])]);
+  const cases = [
+    // Bytes whose digest is not the claim's.
+    [{ work: chunkedWork(bytes, 2, { patchDigest: "0".repeat(64) }), patchChunk: servesChunks(bytes, half) },
+      "revalidation_refused", "content_check_failed", "digest"],
+    // More bytes than the claim names, or fewer.
+    [{ work: chunkedWork(bytes, 2, { patchBytes: half }), patchChunk: servesChunks(bytes, half, { totalBytes: half }) },
+      "revalidation_refused", "content_check_failed", "more bytes"],
+    [{ work: chunkedWork(bytes, 1, { patchBytes: bytes.byteLength + 1 }),
+      patchChunk: servesChunks(bytes, bytes.byteLength, { totalBytes: bytes.byteLength + 1 }) },
+    "revalidation_refused", "content_check_failed", "fewer bytes"],
+    // The digest matches, but the bytes are not UTF-8.
+    [{ work: chunkedWork(notUtf8, 1), patchChunk: servesChunks(notUtf8, notUtf8.byteLength) },
+      "revalidation_refused", "content_check_failed", "not UTF-8"],
+    // The claim is no longer live, or the answer is not this chunk's.
+    [{ work: chunkedWork(bytes, 2), patchChunk: () => ({ status: 409, json: { refused: "claim_not_live" } }) },
+      "refused_before_write", "patch_read_failed", "claim not live"],
+    [{ work: chunkedWork(bytes, 2), patchChunk: (body) => servesChunks(bytes, half)({ ...body, index: 0 }) },
+      "refused_before_write", "patch_read_failed", "another index"],
+    [{ work: chunkedWork(bytes, 2), patchChunk: servesChunks(bytes, half, { totalBytes: 1 }) },
+      "refused_before_write", "patch_read_failed", "another size"],
+    [{ work: chunkedWork(bytes, 1), patchChunk: () => ({ status: 200, json: { workItemId: "11111111-1111-4111-8111-111111111111",
+      index: 0, totalBytes: bytes.byteLength, chunkCount: 1, bytesBase64: `${bytes.toString("base64")}\n` } }) },
+    "refused_before_write", "patch_read_failed", "not canonical base64"],
+  ];
+  for (const [setup, outcome, reason, label] of cases) {
+    const world = fakeWorld({ appFeatures: ["patch_chunks"], ...setup });
+    await runPublisherCycle(world.ports);
+    const reported = result(world.calls);
+    assert.equal(reported.outcome, outcome, label);
+    assert.equal(reported.reason, reason, label);
+    assert.equal(paths(world.calls).includes("git:build"), false, `${label}: nothing is applied`);
+    assert.equal(paths(world.calls).includes("git:push"), false, `${label}: nothing is pushed`);
+    assert.equal(world.tokens.revoked, world.tokens.minted);
+  }
+  // An app that names no chunks sends the patch inline; a claim without it is not one to apply.
+  for (const appFeatures of [undefined, [], ["review_draft"]]) {
+    const world = fakeWorld({ work: chunkedWork(bytes, 1), appFeatures, patchChunk: servesChunks(bytes, bytes.byteLength) });
+    await runPublisherCycle(world.ports);
+    assert.deepEqual([result(world.calls).outcome, result(world.calls).reason], ["refused_before_write", "patch_read_failed"]);
+    assert.equal(paths(world.calls).includes("publish/patch"), false, "no chunk is read from an app that serves none");
+  }
+});
+
 test("an answer the publisher does not know is left for a lookup, never guessed or retried", async () => {
   for (const setup of [
     { pushOk: false, remoteAfterPush: null },
     { pushOk: true, remoteAfterPush: "9".repeat(40) },
+    { pushOk: true, refHiddenReads: READ_AFTER_WRITE_ATTEMPTS },
     { createPull: { status: "unknown" } },
+    { pullHiddenReads: READ_AFTER_WRITE_ATTEMPTS },
   ]) {
     const world = fakeWorld({ work: writeWork(), ...setup });
     const outcome = await runPublisherCycle(world.ports);
@@ -295,7 +483,9 @@ test("the App token carries the three permissions the policy names and never wor
 });
 
 test("the publisher imports node builtins and the dependency-free core, and nothing else", () => {
-  const allowedLib = new Set(["lib/engineeringAgentCore.ts", "lib/engineeringAgentSecretPatterns.ts"]);
+  // lib/pullDiffDigestCore.ts: the one v2 change digest read every reader shares (owner decision 2026-11-18).
+  const allowedLib = new Set(["lib/engineeringAgentCore.ts", "lib/engineeringAgentSecretPatterns.ts",
+    "lib/pullDiffDigestCore.ts"]);
   const seen = new Set();
   const visit = (file) => {
     if (seen.has(file)) return;
@@ -399,4 +589,103 @@ test("once stopping, the workspace refuses a push that was already on its way", 
   assert.deepEqual(pushed, []);
   assert.equal(await workspace.dispose(), "disposed", "cleaning up still works");
   await assert.rejects(open("b".repeat(40)), /stopping/);
+});
+
+test("a write GitHub shows late is read again, never written again (AMUX-FILEGEN-003)", async () => {
+  // The ref read right after the push answers 404 twice, the new pull request is
+  // missing from the first list: the round still confirms, with one push and one create.
+  const world = fakeWorld({ work: writeWork({ ownerReview: true }), refHiddenReads: 2, pullHiddenReads: 1 });
+  assert.deepEqual(await runPublisherCycle(world.ports), { finishedNormally: true, halt: "none", reason: "confirmed" });
+  assert.equal(world.calls.filter((call) => call.path === "git:push").length, 1);
+  assert.equal(world.calls.filter((call) => call.path === "github:createPull").length, 1);
+  assert.equal(world.pauses.length, 3, "a pause before each read taken again");
+  assert.equal(result(world.calls).outcome, "confirmed");
+
+  // Never shown: left for a lookup, named apart from a branch that moved.
+  const unseen = fakeWorld({ work: writeWork(), refHiddenReads: READ_AFTER_WRITE_ATTEMPTS });
+  assert.equal((await runPublisherCycle(unseen.ports)).reason, "push_not_shown");
+  assert.equal(unseen.calls.some((call) => call.path === "github:createPull"), false, "no pull request for a branch not seen");
+  assert.equal(unseen.pauses.length, READ_AFTER_WRITE_ATTEMPTS - 1);
+  // A branch at another commit is not waited for.
+  const moved = fakeWorld({ work: writeWork(), remoteAfterPush: "9".repeat(40) });
+  assert.equal((await runPublisherCycle(moved.ports)).reason, "branch_changed_after_push");
+  assert.equal(moved.pauses.length, 0);
+});
+
+const resumeSetup = () => {
+  const consumedWork = writeWork({ ownerReview: true });
+  const object = expectedPublishCommit(consumedWork, DATE);
+  const consumed = { commitDigest: sha256(object), expectedTreeId: TREE };
+  const lookup = (overrides = {}) => ({
+    mode: "lookup", workItemId: consumedWork.workItemId, runId: RUN, branch: BRANCH, fencingToken: "32",
+    ownerReview: true, consumed, ...overrides,
+  });
+  return { object, lookup };
+};
+
+test("a lookup tells a branch at the allowed commit with no pull request apart, and opens nothing on its own", async () => {
+  const { object, lookup } = resumeSetup();
+  const at = fakeWorld({ work: lookup(), branchBefore: COMMIT, pulls: [], commitAt: { [COMMIT]: object } });
+  await runPublisherCycle(at.ports);
+  assert.deepEqual([result(at.calls).outcome, result(at.calls).reason], ["lookup_impossible", BRANCH_WITHOUT_PULL_REQUEST_REASON]);
+  assert.equal(at.calls.some((call) => call.path === "github:createPull"), false, "no approval, no pull request");
+  // Only `true` carries the approval.
+  for (const resumePullRequest of ["true", 1, undefined]) {
+    const odd = fakeWorld({ work: lookup({ resumePullRequest, cardRef: "card_1" }), branchBefore: COMMIT, pulls: [], commitAt: { [COMMIT]: object } });
+    await runPublisherCycle(odd.ports);
+    assert.equal(odd.calls.some((call) => call.path === "github:createPull"), false, String(resumePullRequest));
+  }
+  const foreign = fakeWorld({ work: lookup(), branchBefore: COMMIT, pulls: [], commitAt: { [COMMIT]: `${object}x` } });
+  await runPublisherCycle(foreign.ports);
+  assert.equal(result(foreign.calls).reason, "commit_not_allowed");
+});
+
+test("an approved resume opens the one pull request for the allowed commit and binds it, without a push", async () => {
+  const { object, lookup } = resumeSetup();
+  const world = fakeWorld({
+    work: lookup({ resumePullRequest: true, cardRef: "card_1" }), branchBefore: COMMIT, pulls: [], commitAt: { [COMMIT]: object }, pullHiddenReads: 1,
+  });
+  assert.deepEqual(await runPublisherCycle(world.ports), { finishedNormally: true, halt: "none", reason: "lookup_found_result" });
+  assert.equal(world.calls.some((call) => call.path === "git:push"), false, "nothing is pushed");
+  const creates = world.calls.filter((call) => call.path === "github:createPull");
+  assert.equal(creates.length, 1);
+  const pr = creates[0].input;
+  assert.deepEqual([pr.head, pr.draft, pr.title, pr.body], [BRANCH, true, publisherReviewPrTitle(RUN), publisherReviewPrBody(RUN, "card_1")]);
+  assert.ok(prBodyCarriesMarker(pr.body, RUN), "the run's marker, so any later lookup finds it");
+  const reported = result(world.calls);
+  assert.equal(reported.outcome, "lookup_found_result");
+  assert.deepEqual([reported.pullRequest.prNumber, reported.pullRequest.headSha, reported.pullRequest.verifiedHeadSha], [42, COMMIT, COMMIT]);
+  assert.equal(reported.pullRequest.snapshot.treeId, TREE);
+  assert.deepEqual(world.tokens, { minted: 1, revoked: 1 });
+});
+
+test("an approved resume refuses anything but the allowed commit, and never guesses a lost answer", async () => {
+  const { object, lookup } = resumeSetup();
+  const resume = lookup({ resumePullRequest: true, cardRef: "card_1" });
+  const ours = { number: 42, state: "open", baseRef: "develop", baseSha: "f".repeat(40), headRef: BRANCH, headSha: COMMIT, body: publisherReviewPrBody(RUN, "card_1") };
+  for (const [setup, outcome, reason] of [
+    [{ commitAt: { [COMMIT]: `${object}x` } }, "lookup_impossible", "commit_not_allowed"],
+    [{ commitAt: {} }, "lookup_impossible", "pull_request_count"],
+    [{ commitAt: { [COMMIT]: object }, createPull: { status: "rejected" } }, "lookup_impossible", "pull_request_create_rejected"],
+    [{ commitAt: { [COMMIT]: object }, pulls: [ours] }, "lookup_found_result", undefined],
+    [{ commitAt: { [COMMIT]: object }, work: lookup({ resumePullRequest: true }) }, "lookup_impossible", "content_check_failed"],
+  ]) {
+    const world = fakeWorld({ work: resume, branchBefore: COMMIT, pulls: [], ...setup });
+    await runPublisherCycle(world.ports);
+    assert.deepEqual([result(world.calls).outcome, result(world.calls).reason], [outcome, reason], reason ?? outcome);
+    const creates = world.calls.filter((call) => call.path === "github:createPull").length;
+    assert.equal(creates, reason === "pull_request_create_rejected" ? 1 : 0, `${reason}: at most the one create`);
+    assert.equal(world.calls.some((call) => call.path === "git:push"), false);
+  }
+  const lost = fakeWorld({ work: resume, branchBefore: COMMIT, pulls: [], commitAt: { [COMMIT]: object }, createPull: { status: "unknown" } });
+  assert.deepEqual([(await runPublisherCycle(lost.ports)).reason, result(lost.calls)], ["pull_request_outcome_unknown", undefined]);
+  assert.equal(lost.calls.filter((call) => call.path === "github:createPull").length, 1, "never a second create");
+});
+
+test("an unknown outcome's decision names the publish item it is about", () => {
+  const id = "3614692c-f817-40d9-ab83-889384cddbf5";
+  assert.equal(unknownOutcomeDecisionWorkItemId(unknownOutcomeDecisionCauseKey(id, 31n)), id);
+  for (const key of ["registration:x", `unknown:${id}`, `unknown:${id}:`, "unknown::3", `unknown:${id}:x`]) {
+    assert.equal(unknownOutcomeDecisionWorkItemId(key), null, key);
+  }
 });

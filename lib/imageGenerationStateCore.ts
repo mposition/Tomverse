@@ -18,6 +18,8 @@ export const IMAGE_GENERATION_FAILURE_PHASES = [
   "provider_user_error",
   "provider_rate_limited",
   "provider_failed",
+  // The provider responded, but its bytes were not an allowed image format.
+  "provider_output_invalid",
   "original_storage_failed",
   "stale_job_reconciled",
   // The model's request profile changed after the reservation; the provider

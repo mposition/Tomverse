@@ -23,6 +23,8 @@ export const reviewModels = [
 export async function mockComparisonReview(
   page: Page,
   options: {
+    recoverStored?: boolean;
+    withoutSynthesis?: boolean;
     deferSetup?: boolean;
     deferRun?: boolean;
     withSecondary?: boolean;
@@ -36,6 +38,7 @@ export async function mockComparisonReview(
     failRun?: boolean | "first";
   } = {}
 ) {
+  let storedReview: Record<string, unknown> | undefined;
   let requestBody: Record<string, unknown> | null = null;
   let runCount = 0;
   let releaseSetup = () => {};
@@ -55,6 +58,7 @@ export async function mockComparisonReview(
           status: 200,
           contentType: "application/json",
           body: JSON.stringify({
+            storedReview: options.recoverStored && new URL(route.request().url()).searchParams.has("reviewMode") ? storedReview : undefined,
             available: true,
             source: {
               question: "Compare these approaches",
@@ -219,10 +223,11 @@ export async function mockComparisonReview(
                 }
               : null,
       };
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
+      if (options.withoutSynthesis) {
+        result.primary.result.synthesis = "";
+        if (result.secondary) result.secondary.result.synthesis = "";
+      }
+      const payload = {
           id: "review-1",
           result,
           // Derived by the same function the route uses, so the fixture cannot
@@ -269,11 +274,13 @@ export async function mockComparisonReview(
           usageCredits: 4,
           cached: false,
           disclaimer: "This review is not external fact verification.",
-        }),
-      });
+      };
+      storedReview = payload;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(payload) });
     }
   );
   return {
+    getStoredReview: () => storedReview,
     getRequestBody: () => requestBody,
     releaseSetup,
     releaseRun,

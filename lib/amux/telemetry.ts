@@ -8,10 +8,6 @@ import {
   type AmuxObservedMetric,
 } from "@/lib/amux/planningCore";
 import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
-import {
-  AMUX_V22_NON_CLAUDE_QUOTA_GATE_ENV,
-  amuxQuotaObservationFeedsDispatch,
-} from "@/lib/amux/v22WorkerClaimCore";
 import { prisma } from "@/lib/prisma";
 
 type WorkerIdentity = { worker_name: string; provider: string };
@@ -114,15 +110,10 @@ export async function getAmuxWorkerTelemetry(
         : [],
     ),
   );
-  // A Codex, Copilot or Cursor reading counts only behind its switch
-  // (amuxQuotaObservationFeedsDispatch); the Agent office reads every one.
-  const quotaGate = process.env[AMUX_V22_NON_CLAUDE_QUOTA_GATE_ENV];
+  // Every provider's newest reading feeds dispatch and the Agent office.
   const latestQuota = new Map<string, (typeof quotaRows)[number]>();
   for (const row of quotaRows) {
     if (!latestQuota.has(row.worker)) latestQuota.set(row.worker, row);
-  }
-  for (const [worker, row] of latestQuota) {
-    if (!amuxQuotaObservationFeedsDispatch(row.provider, quotaGate)) latestQuota.delete(worker);
   }
   const costMeans = new Map<
     string,

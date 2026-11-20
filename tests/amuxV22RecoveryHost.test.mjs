@@ -58,10 +58,13 @@ test("only current live invocation terminal and exact local binding prove stoppe
   const stateDir = await mkdtemp(join(tmpdir(), "amux-recovery-host-"));
   try {
     let runs = 0;
+    // Every role has a shell, so stopped needs the checkout proof as well.
     const handler = createAmuxV22SidecarHandler({ worker: execute.worker, stateDir,
       invocationId, recoveryUnit: async () => unitProof, recoveryJournal: syntheticJournal,
+      recoveryWorkspace: async () => ({ ok: true, baseSha: "c".repeat(40) }),
       run: async () => { runs += 1; return { kind: "failed", attemptId,
-        resultText: "Private output", cliStarted: true }; } });
+        resultText: "Private output", cliStarted: true,
+        recoveryBaseSha: "c".repeat(40) }; } });
     await handler(execute); await finished(handler);
     const evidence = await handler({ op: "inspect_recovery", ...request });
     assert.equal(evidence.reason, "stopped_proven");
@@ -285,6 +288,14 @@ test("checker is off by default, pulls once, uses a fixed socket and never retri
       usage: { status: "unknown", projectedCostMicroUsd: null }, reason: "legacy_invocation_unbound" };
   } };
   assert.deepEqual(await runAmuxV22RecoveryCheckerOnce(config, dependencies), { state: "disabled" });
+  assert.equal(calls, 0);
+  for (const value of ["true", "disabled", "0", " enabled"])
+    assert.deepEqual(await runAmuxV22RecoveryCheckerOnce({ ...config, enabled: value }, dependencies),
+      { state: "disabled" }, value);
+  assert.equal(calls, 0);
+  // `enabled` passes the gate like the earlier `1` (a bad worker name then stops it).
+  assert.deepEqual(await runAmuxV22RecoveryCheckerOnce({ ...config, enabled: "enabled",
+    workerName: "Not A Worker" }, dependencies), { state: "unavailable" });
   assert.equal(calls, 0);
   assert.deepEqual(await runAmuxV22RecoveryCheckerOnce({ ...config, enabled: "1" }, dependencies),
     { state: "outcome_unknown" });

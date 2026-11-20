@@ -12,9 +12,7 @@ import { matchesIdeaTransferBrowserDigest } from "./ideaTransferBrowserCore.ts";
 import { type AmuxContentKeys, openAmuxContent,
   verifyAmuxContentDigest } from "./ideaCrypto.ts";
 import { loadAmuxContentKeyRing } from "./ideaKeyStore.ts";
-import { type IdeaTransferConfirmationRequest,
-  AMUX_V4_TRANSFER_CONFIRM_WRITE_ENV,
-  transferConfirmWritePermitted } from "./ideaTransferConfirmationCore.ts";
+import type { IdeaTransferConfirmationRequest } from "./ideaTransferConfirmationCore.ts";
 
 export class IdeaTransferConfirmationError extends Error {
   constructor(readonly code: "not_found" | "not_ready" | "expired" |
@@ -194,9 +192,6 @@ export async function commitIdeaTransferConfirmation(tx: Prisma.TransactionClien
 export async function confirmIdeaTransferPreview(session: Session, request: Request,
   choice: IdeaTransferConfirmationRequest, browserNonce: string) {
   const actorUserId = ownerId(session);
-  if (!transferConfirmWritePermitted(process.env[AMUX_V4_TRANSFER_CONFIRM_WRITE_ENV])) {
-    throw new IdeaTransferConfirmationError("confirmation_disabled");
-  }
   if (adminAuditIntegrityKeys(process.env).length === 0) {
     throw new IdeaTransferConfirmationError("integrity_unavailable");
   }

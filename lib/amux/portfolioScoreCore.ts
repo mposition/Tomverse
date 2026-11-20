@@ -1,3 +1,5 @@
+import { AMUX_PORTFOLIO_SCORE_REFRESH_ACTION } from "../adminAuditSystemActors.ts";
+
 /** V4 portfolio scoring is distinct from the legacy scheduler's p0-p3 score.
  * A model may suggest these observations, but only confirmed evidence enters
  * this deterministic calculation. It never changes card status or SEV1. */
@@ -86,3 +88,44 @@ export function scoreAmuxPortfolio(input: PortfolioScoreInput,
     baselineStaleAt: baselineStaleAt.toISOString(),
     activeFresh, baselineFresh };
 }
+
+/** Owner decision 2026-11-14: a Task whose confirmed evidence is unchanged
+ * keeps its active window without a weekly owner action. The system extends
+ * `activeStaleAt` to seven days past the refresh and never rewrites
+ * `evidenceAsOf`: the age of the evidence stays what an owner or the
+ * registration last confirmed.
+ *
+ * Owner direction 2026-11-15 (intakeLimitsCore.ts): the refresh is always on
+ * (2026-11-16: its off switch is gone), and an unchanged score no longer stops
+ * at its 28-day baseline for an owner to confirm again: the refresh moves the
+ * baseline forward with the active window (amuxRefreshedScoreWindows). Only a
+ * changed input -- a revised Task or subject, a newer assessment, another
+ * source approval or calculation -- sends the score back to the owner. */
+/** Refresh a day before the window closes, so a five-minute tick never lets
+ * a ready Task drop out of the candidate list. */
+export const AMUX_SCORE_REFRESH_LEAD_MS = 86_400_000;
+
+/** The windows one refresh of an unchanged score writes, or null when it is
+ * not yet due. The active window moves to seven days past now; the baseline
+ * moves to 28 days past now, never back. A score whose windows both lapsed is
+ * due like any other: its inputs are checked again before it is written. */
+export function amuxRefreshedScoreWindows(input: { now: Date;
+  activeStaleAt: Date; baselineStaleAt: Date }):
+  { activeStaleAt: Date; baselineStaleAt: Date } | null {
+  const now = input.now.getTime();
+  const active = input.activeStaleAt.getTime();
+  const baseline = input.baselineStaleAt.getTime();
+  if (![now, active, baseline].every(Number.isFinite)) return null;
+  if (active - now > AMUX_SCORE_REFRESH_LEAD_MS) return null;
+  const nextActive = now + AMUX_ACTIVE_SCORE_MAX_AGE_MS;
+  if (nextActive <= active) return null;
+  return { activeStaleAt: new Date(nextActive),
+    baselineStaleAt: new Date(Math.max(baseline, now + AMUX_BASELINE_SCORE_MAX_AGE_MS)) };
+}
+
+export const AMUX_SCORE_CONFIRM_ACTION = "amux.v4.portfolio.score.confirm";
+/** The audit actions that bind a score snapshot. A refresh is never a
+ * confirmation: it only repeats one under the same assessments. */
+export const amuxScoreAuditActionBinds = (action: string | null | undefined) =>
+  action === AMUX_SCORE_CONFIRM_ACTION ||
+  action === AMUX_PORTFOLIO_SCORE_REFRESH_ACTION;

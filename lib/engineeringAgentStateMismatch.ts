@@ -19,6 +19,29 @@ import {
 type Settlement = "review" | "retry" | "blocked" | "recovered";
 
 /**
+ * The approval observer's two causes about a pull request already merged
+ * (lib/engineeringAgentPrObserver.ts), each keyed `<cause>:<binding id>`:
+ * merged without an approval it could see, and merged with files the card
+ * did not expect. Both are C -- a finished run and a finished publish whose
+ * conclusions disagree -- so a person closes them as C closes: once GitHub
+ * reports the pull request merged, read just now. Until 2026-11-13 the store
+ * knew neither cause and refused every action on them, so one such item held
+ * the agent halted with no way out (#3828).
+ */
+export const ENGINEERING_AGENT_MERGED_PR_MISMATCH_CAUSES = ["unapproved_merge", "pr_file_mismatch"] as const;
+
+/** The binding a merged pull request mismatch names, or null for any other cause. */
+export const mergedPrMismatchBindingId = (causeKey: string): string | null => {
+  for (const cause of ENGINEERING_AGENT_MERGED_PR_MISMATCH_CAUSES) {
+    if (causeKey.startsWith(`${cause}:`)) {
+      const id = causeKey.slice(cause.length + 1);
+      return id.length > 0 ? id : null;
+    }
+  }
+  return null;
+};
+
+/**
  * The AMUX settlement a domain outcome should have produced. An abandoned run
  * is AMUX's to recover. An outcome this does not know -- a new enum value, an
  * unvalidated string -- maps to nothing, and the caller treats that as
@@ -120,6 +143,7 @@ export const MISMATCH_ACTIONS = [
   "retry_lookup",
   "close_domain_after_verified_no_write",
   "close_after_observed_merge",
+  "record_bound_review_pr",
   "leave_open",
   "mode_off",
   "escalate_incident",
@@ -131,12 +155,17 @@ const ALLOWED_ACTIONS: Readonly<Record<MismatchKind, readonly MismatchAction[]>>
   B: ["leave_open", "escalate_incident"],
   // Owner decision 2026-11-06: a C item whose pull request a person sees
   // merged on GitHub may close without turning the agent off.
-  C: ["leave_open", "close_after_observed_merge", "escalate_incident"],
+  // Owner decision 2026-11-11: a person may also put the run's bound pull
+  // request number on the card through AMUX's own writer, which closes it.
+  C: ["leave_open", "close_after_observed_merge", "record_bound_review_pr", "escalate_incident"],
   D: ["retry_lookup", "close_domain_after_verified_no_write", "escalate_incident"],
 };
 
-/** Recurrences of the same target and combination before only escalation is left (proposed). */
-export const MISMATCH_RECURRENCE_LIMIT = 2;
+// There is no recurrence limit (owner decision 2026-11-15: "내부 개발용 Flow
+// 입니다. 제한을 줄 이유가 없습니다"). The proposed limit of two, after which
+// only an incident escalation was left, was never counted -- the store passed
+// zero -- and a mismatch now holds only its own card, so a recurring one
+// costs that card, not the agent.
 
 export type ActionInput = {
   kind: MismatchKind;
@@ -157,7 +186,11 @@ export type ActionInput = {
   lookupVerifiedNoWrite: boolean;
   /** GitHub reports the item's own bound pull request merged, read just now. */
   mergeObserved: boolean;
-  recurrences: number;
+  /**
+   * AMUX's review pull request writer, in this same transaction, took the
+   * number of the item's own current binding for the card's latest attempt.
+   */
+  boundReviewPrRecorded: boolean;
 };
 
 export type ActionVerdict =
@@ -173,9 +206,6 @@ const deny = (reason: string): ActionVerdict => ({ allowed: false, reason });
  */
 export const decideMismatchAction = (input: ActionInput): ActionVerdict => {
   if (!input.reReadMatchesDetection) return deny("state_changed_since_detection");
-  if (input.recurrences >= MISMATCH_RECURRENCE_LIMIT && input.action !== "escalate_incident") {
-    return deny("recurred_only_escalation_left");
-  }
   if (!ALLOWED_ACTIONS[input.kind].includes(input.action)) return deny("action_not_allowed_for_kind");
 
   switch (input.kind) {
@@ -202,22 +232,28 @@ export const decideMismatchAction = (input: ActionInput): ActionVerdict => {
   if (input.action === "close_after_observed_merge" && !input.mergeObserved) {
     return deny("merge_not_observed");
   }
+  if (input.action === "record_bound_review_pr" && !input.boundReviewPrRecorded) {
+    return deny("bound_review_pr_not_recorded");
+  }
   // Closing the domain side is a normal transition, which resolves A and D; so
-  // does escalation, and for C a merge GitHub reports. A lookup resolves only
+  // does escalation, and for C a merge GitHub reports or the bound number
+  // recorded on the card. A lookup resolves only
   // through the transition its result leads to, never by itself.
   return {
     allowed: true,
     resolves:
       input.action === "escalate_incident" ||
       input.action === "close_domain_after_verified_no_write" ||
-      input.action === "close_after_observed_merge",
+      input.action === "close_after_observed_merge" ||
+      input.action === "record_bound_review_pr",
   };
 };
 
 /**
  * How a B item ends once AMUX reaches a terminal state: equal conclusions close
- * it, different ones turn it into C. C closes only by escalation, or by a
- * person once GitHub reports its pull request merged.
+ * it, different ones turn it into C. C closes only by escalation, by a person
+ * once GitHub reports its pull request merged, or by a person who has AMUX
+ * record the bound number on the card.
  */
 export const resolveBOnAmuxTerminal = (input: {
   amuxSettlement: Settlement;

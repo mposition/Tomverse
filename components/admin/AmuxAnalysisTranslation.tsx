@@ -10,7 +10,7 @@ import { amuxAnalysisTranslationViewKey,
   amuxAnalysisViewReadable } from "@/lib/amux/ideaAnalysisTranslationCore";
 
 type Messages = AdminMessageShape<(typeof adminAmuxIdeaInputMessages)["en"]>;
-export type AmuxTranslationRequestState = "loading" | "too_large" | "unavailable" | null;
+export type AmuxTranslationRequestState = "loading" | "unavailable" | null;
 
 /** A model's Korean reading of the English text right above it; never the text that counts. */
 export function AmuxKoText({ m, text }: { m: Messages; text: string | undefined }) {
@@ -31,7 +31,6 @@ export function AmuxTranslationToggle({ m, shown, state, stale, onToggle }: {
       {state === "loading" ? m.translationLoading : shown ? m.translationHide : m.translationShow}
     </button>
     <p className="text-xs text-zinc-400">{m.translationHint}</p>
-    {state === "too_large" ? <p role="status">{m.translationTooLarge}</p> : null}
     {state === "unavailable" ? <p role="alert">{m.translationUnavailable}</p> : null}
     {stale && state === null ? <p role="status">{m.translationStale}</p> : null}
   </div>;
@@ -68,7 +67,7 @@ export function useAmuxAnalysisTranslation(ideaId: string, chunkIndex: number,
           typeof translations === "object" && !Array.isArray(translations)) {
         setResult({ viewKey: key, translations: translations as Record<string, string> });
         setState(null);
-      } else setState(response.status === 413 ? "too_large" : "unavailable");
+      } else setState("unavailable");
     } catch { setState("unavailable"); }
   };
 

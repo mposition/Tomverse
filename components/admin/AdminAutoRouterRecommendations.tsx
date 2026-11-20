@@ -4,23 +4,32 @@ import { formatAestDateTime } from "@/lib/adminUiCore";
 import { Check, Copy, Loader2, RotateCcw, Send, X } from "lucide-react";
 import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
 import { AdminCopyWorkBriefButton } from "@/components/admin/AdminCopyWorkBriefButton";
+import { DailyImplementationEvidence } from "@/components/admin/DailyImplementationEvidence";
+import { implementationCoversTask, type DailyTaskImplementation } from "@/lib/dailyProductImplementationCore";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import type { AdminApiFailure } from "@/lib/adminApiOutcome";
 import { adminAutoRouterOptimizerMessages } from "@/lib/adminMessages/autoRouterOptimizer";
 import { recommendationIdeaText } from "@/lib/autoRouterRecommendationIdeaText";
 import {
+  dailyRecommendationEvidence,
   isRecommendationSendable,
   openRecommendations,
+  optimizerCycleAnchor,
   RECOMMENDATION_SENT_STATUS,
-  reportFindings,
+  recommendationFindings,
   type ActionableRecommendation,
   type RecommendationStatus,
 } from "@/lib/autoRouterRecommendationsCore";
 
 /** The part of an optimizer cycle these controls read. */
-export type RecommendationCycle = { id: string; createdAt: string; summary: unknown };
+export type RecommendationCycle = { id: string; createdAt: string; summary: unknown;
+  implementations?: Record<number, DailyTaskImplementation>; implementationLookupUnavailable?: boolean };
 
-export const optimizerCycleAnchor = (cycleId: string) => `optimizer-cycle-${cycleId}`;
+export type DailyRoutingObservation = {
+  asOf: string;
+  outcome: "added" | "already_listed" | "awaiting_cycle" | "observed";
+  current: { windows: readonly { hours: number; serverAttempts: number; completed: number }[] };
+};
 
 /** Names one recommendation, for the send in progress and the send that was refused. */
 export const recommendationKey = (cycleId: string, index: number) => `${cycleId}:${index}`;
@@ -38,7 +47,7 @@ export type RecommendationSendState = {
 export const recommendationBrief = (cycle: RecommendationCycle, item: ActionableRecommendation, origin: string) =>
   recommendationIdeaText({
     recommendation: { kind: item.kind, text: item.text },
-    findings: reportFindings(cycle.summary),
+    findings: recommendationFindings(cycle.summary, item.index),
     cycle: { id: cycle.id, createdAt: cycle.createdAt },
     origin,
   });
@@ -76,9 +85,20 @@ export function RecommendationControls({
   const key = recommendationKey(cycle.id, item.index);
   const sending = sendState?.sendingKey === key;
   const refused = sendState?.failure?.key === key ? sendState.failure.failure : null;
+  const daily = dailyRecommendationEvidence(cycle.summary, item.index);
+  const implementation = cycle.implementations?.[item.index];
+  const covered = implementationCoversTask(implementation);
 
   return (
     <div className="mt-1" data-testid="admin-auto-router-recommendation-controls">
+      <DailyImplementationEvidence implementation={implementation} unavailable={cycle.implementationLookupUnavailable} />
+      {daily ? (
+        <details className="mb-2 text-xs text-zinc-300" data-testid="admin-auto-router-daily-evidence">
+          <summary className="w-fit cursor-pointer font-medium text-blue-300">{m.dailyEvidence}</summary>
+          {daily.day && <p className="mt-1 text-zinc-400">{m.dailyRecorded(daily.day)}</p>}
+          <p className="mt-1 whitespace-pre-wrap">{daily.evidence}</p>
+        </details>
+      ) : null}
       <div className="flex flex-wrap items-center gap-2">
         <span
           data-testid="admin-auto-router-recommendation-status"
@@ -129,11 +149,11 @@ export function RecommendationControls({
             </button>
           </>
         ) : null}
-        {item.status === "done" ||
+        {!covered && (item.status === "done" ||
         item.status === "dismissed" ||
         item.status === "failed" ||
         item.status === "sending_to_amux" ||
-        item.status === "needs_lookup" ? (
+        item.status === "needs_lookup") ? (
           <button
             type="button"
             onClick={() => onSetStatus(cycle.id, item.index, "open")}
@@ -178,6 +198,7 @@ export function RecommendationControls({
  */
 export function OpenRecommendationsInbox({
   cycles,
+  dailyObservation,
   busy,
   canSend,
   sendState,
@@ -185,6 +206,7 @@ export function OpenRecommendationsInbox({
   onSend,
 }: {
   cycles: readonly RecommendationCycle[];
+  dailyObservation?: DailyRoutingObservation | null;
   busy: boolean;
   canSend: boolean;
   sendState?: RecommendationSendState;
@@ -194,10 +216,18 @@ export function OpenRecommendationsInbox({
   const m = useAdminMessages(adminAutoRouterOptimizerMessages);
   const items = openRecommendations(cycles);
   const byId = new Map(cycles.map((cycle) => [cycle.id, cycle]));
+  const dailyWindow = dailyObservation?.current?.windows?.find((window) => window.hours === 24);
+  const observedAt = formatAestDateTime(dailyObservation?.asOf);
+  const outcome = dailyObservation && m.dailyOutcomes[dailyObservation.outcome];
   return (
     <div className="mt-5 rounded-2xl border border-zinc-800 p-4" data-testid="admin-auto-router-recommendation-inbox">
       <h3 className="text-sm font-bold text-zinc-200">{m.inboxTitle}</h3>
       <p className="mt-1 text-xs leading-5 text-zinc-400">{m.inboxDescription}</p>
+      {dailyWindow && observedAt && outcome ? (
+        <p className="mt-1 text-xs text-zinc-400" data-testid="admin-auto-router-daily-status">
+          {m.dailyObservation(observedAt, outcome, dailyWindow.serverAttempts, dailyWindow.completed)}
+        </p>
+      ) : null}
       <p className="mt-1 text-xs text-zinc-500" data-testid="admin-auto-router-recommendation-inbox-count">
         {m.inboxShowing(items.length, cycles.length)}
       </p>

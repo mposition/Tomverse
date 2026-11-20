@@ -42,6 +42,8 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
+import { longContextSettlementRates } from "@/lib/modelPricing";
+import { longContextSettledUsageCost } from "@/lib/modelPricing";
 import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
 import { recordInternalProviderUsage } from "@/lib/providerUsageAccounting";
 import type { PricedAttempt } from "@/lib/chatMultiAttemptSettlement";
@@ -251,8 +253,13 @@ export const recordAttemptCost = async (
                 usageSource: attemptUsageSource(attempt),
                 costSource: attempt.costSource,
                 rollupDate: day,
+                // The rates this attempt was settled at -- a crossed
+                // long-context tier included -- with the price's own source
+                // kept beside the usage source it would otherwise overwrite,
+                // as the reservation snapshot keeps reservationCostSource.
                 pricingSnapshot: {
-                    ...attempt.price,
+                    ...longContextSettlementRates(attempt.price, attempt.inputTokens, attempt.providerCalls, attempt),
+                    reservationCostSource: attempt.price.costSource ?? null,
                     costSource: attempt.costSource,
                     ...(snapshot ?? {}),
                 } as Prisma.InputJsonValue,
@@ -283,17 +290,11 @@ export const recordAttemptCost = async (
                   outputCostMicroUsd: 0,
               }
             : null) ??
-        calculateProviderUsageCost({
-            inputTokens: attempt.inputTokens,
-            cachedInputTokens: attempt.cachedInputTokens,
-            cacheWriteInputTokens: attempt.cacheWriteInputTokens,
-            outputTokens: attempt.outputTokens,
-            inputUsdPerMillionTokens: attempt.price.inputUsdPerMillionTokens,
-            outputUsdPerMillionTokens: attempt.price.outputUsdPerMillionTokens,
-            cachedInputPriceMultiplier: attempt.price.cachedInputPriceMultiplier,
-            cacheWriteUsdPerMillionTokens:
-                attempt.price.cacheWriteUsdPerMillionTokens,
-        });
+        // The rule `priceAttempt` applied to `costMicroUsd`, so the
+        // rollup's split adds up to the same total.
+        longContextSettledUsageCost(
+            calculateProviderUsageCost,
+            attempt.price, attempt, attempt.providerCalls);
     await recordInternalProviderUsage({
         client: tx,
         date: day,

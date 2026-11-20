@@ -57,6 +57,13 @@ export type ChatAttachmentCategory =
      * `officeparser`.
      */
     | "legacy-office"
+    /**
+     * Apple Pages and Numbers. Stored, never read: nothing here
+     * parses Apple's records, so the model is told the file is there and
+     * the renderer service lays it out as a PDF (generated-artifacts.md
+     * section 15). Accepted only while that renderer is on.
+     */
+    | "iwork"
     | "text"
     | "archive";
 
@@ -71,7 +78,9 @@ export type ChatAttachmentParser =
     | "office-extractor"
     | "legacy-office-extractor"
     | "utf-text-decoder"
-    | "archive-expander";
+    | "archive-expander"
+    /** Checked as a package and passed through unread (`lib/iworkPackage.ts`). */
+    | "iwork-passthrough";
 
 /**
  * How the first bytes are proven to match the claim. `utf-text` has no magic
@@ -202,6 +211,28 @@ const legacyOffice = (
     promptKind: "office file",
 });
 
+const iwork = (
+    id: string,
+    extension: string,
+    mediaType: string,
+    mediaTypeAliases: readonly string[]
+): ChatAttachmentFormat => ({
+    id,
+    extensions: [extension],
+    mediaType,
+    mediaTypeAliases,
+    category: "iwork",
+    parser: "iwork-passthrough",
+    signature: "zip",
+    // Unread, so an archive entry of this kind would be an unread file the
+    // model cannot even be told the name of; a guest has no renderer turn.
+    allowedInArchive: false,
+    guestAllowed: false,
+    requiresImageInput: false,
+    uiGroup: "document",
+    promptKind: "Apple iWork file",
+});
+
 const text = (
     id: string,
     extensions: readonly string[],
@@ -286,6 +317,25 @@ export const CHAT_ATTACHMENT_FORMATS: readonly ChatAttachmentFormat[] = [
         "application/powerpoint",
         "application/x-mspowerpoint",
     ]),
+    // Hangul (Hancom Office): HWP 5.x is a compound file, HWPX a ZIP of XML.
+    // Read by this repository's own parsers like the formats above
+    // (lib/legacyOffice/hwp.ts), so a Korean document is readable without
+    // the renderer; the renderer is only for laying one out as a PDF.
+    legacyOffice("hwp", ["hwp"], "application/x-hwp", "cfbf", [
+        "application/haansofthwp",
+        "application/vnd.hancom.hwp",
+        "application/hwp",
+    ]),
+    {
+        ...legacyOffice("hwpx", ["hwpx"], "application/hwp+zip", "zip", [
+            "application/haansofthwpx",
+            "application/vnd.hancom.hwpx",
+            "application/x-hwpx",
+        ]),
+        // A ZIP itself: inside an uploaded archive it would be an archive in
+        // an archive, which the expander refuses by design.
+        allowedInArchive: false,
+    },
     legacyOffice("rtf", ["rtf"], "application/rtf", "rtf", [
         "text/rtf",
         "text/richtext",
@@ -295,6 +345,21 @@ export const CHAT_ATTACHMENT_FORMATS: readonly ChatAttachmentFormat[] = [
         // arrive as `application/msword`. See ASSOCIATION_OWNER_MEDIA_TYPES.
         "application/msword",
     ]),
+
+    // -- Apple iWork --------------------------------------------------------
+    // Media types first as iOS and macOS report them, so the file picker
+    // offers these from iCloud Drive; the legacy x-iwork types are what
+    // older Safari sends.
+    iwork("pages", "pages", "application/vnd.apple.pages", [
+        "application/x-iwork-pages-sffpages",
+    ]),
+    iwork("numbers", "numbers", "application/vnd.apple.numbers", [
+        "application/x-iwork-numbers-sffnumbers",
+    ]),
+    // Keynote is deliberately absent. Its extension, .key, is also a private
+    // key's, and it stays on the refusal list below so a key file is never
+    // uploaded at all; letting .key through would store one before the
+    // package check could refuse it. Changing that is a credentials decision.
 
     // -- Archive ------------------------------------------------------------
     {

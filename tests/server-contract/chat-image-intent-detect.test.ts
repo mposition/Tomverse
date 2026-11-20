@@ -218,7 +218,7 @@ test("a follow-up sees the previous image and comes back with its rewrite", asyn
     edit: false,
   });
   // Room to write the whole new prompt, and the budget hold sized to it.
-  assert.equal(calls[0].maxOutputTokens, 2_500);
+  assert.equal(calls[0].maxOutputTokens, 8_192, "the shared routing-call ceiling (lib/routingCallLimits.ts)");
   assert.match(calls[0].prompt, /Previous image:\n간단한 고양이 아이콘 그려줘\n\nMessage:\n더 파랗게 해줘$/);
 });
 
@@ -236,7 +236,7 @@ test("without a recent image answer, no rewrite is taken", async () => {
   });
   assert.equal(decision.image && decision.prompt, null);
   assert.doesNotMatch(calls[0].prompt, /Previous image/);
-  assert.equal(calls[0].maxOutputTokens, 400);
+  assert.equal(calls[0].maxOutputTokens, 8_192, "the shared routing-call ceiling (lib/routingCallLimits.ts)");
 });
 
 const turnImage = async (plan: { tier: string } | null) => {
@@ -283,6 +283,65 @@ test("a skipped or failed combined router falls back to one standalone image cal
   assert.deepEqual(second, first);
   assert.equal(calls.length, 1);
   assert.equal(reserved.length, 1);
+});
+
+test("a hedge starts the standalone call early, once, and a later router decision still wins", async () => {
+  // 2026-11-13: a router that timed out at 8 s was followed by a 4.7 s
+  // standalone classification. Started at the hedge, the failure path waits
+  // for one call, not two in a row.
+  reset();
+  const failed = await combinedTurn();
+  await failed.context;
+  failed.hedge();
+  failed.hedge();
+  await new Promise((settle) => setTimeout(settle, 0));
+  assert.equal(calls.length, 1, "the hedge started the standalone call");
+  assert.equal((await failed.resolve()).image, true);
+  assert.equal(calls.length, 1, "resolve reused the hedged call");
+
+  // After a decision, a hedge does nothing.
+  const decision = { image: false as const };
+  reset();
+  const late = await combinedTurn();
+  await late.context;
+  late.accept(decision);
+  late.hedge();
+  await new Promise((settle) => setTimeout(settle, 0));
+  assert.equal(calls.length, 0);
+
+  // A decision that arrives after the hedge still wins (the early call's
+  // answer is unused).
+  reset();
+  const decided = await combinedTurn();
+  await decided.context;
+  decided.hedge();
+  decided.accept(decision);
+  assert.deepEqual(await decided.resolve(), decision, "the router's own decision is used");
+  await new Promise((settle) => setTimeout(settle, 20));
+});
+
+test("the hedge is off unless its delay is set within bounds", async () => {
+  const { chatRouterImageHedgeMs } = await load();
+  assert.equal(chatRouterImageHedgeMs(undefined), null);
+  assert.equal(chatRouterImageHedgeMs(""), null);
+  assert.equal(chatRouterImageHedgeMs("5000"), 5_000);
+  for (const raw of ["999", "20001", "4.5", "soon"]) assert.equal(chatRouterImageHedgeMs(raw), null, raw);
+});
+
+test("a location continuation reuses an image decision only while its catalogue and gates still admit it", async () => {
+  reset();
+  const { createChatTurnImageRouting } = await load();
+  const input = { userId: "user-1", conversationId: "conv-1", text: "Draw the area near me",
+    plan: { tier: "Pro" } as never, traceId: "resume", request: new Request("https://tomverse.test/api/chat") };
+  const decision = { image: true as const, modelId: "gpt-image-2", preset: "draft" as const, prompt: null, edit: false };
+  for (const combined of [true, false]) {
+    assert.deepEqual(await createChatTurnImageRouting(input, combined, decision).resolve(), decision);
+    assert.deepEqual(await createChatTurnImageRouting(input, combined, { ...decision, modelId: "retired" }).resolve(), { image: false });
+    imageFlagOn = false;
+    assert.deepEqual(await createChatTurnImageRouting(input, combined, decision).resolve(), { image: false });
+    imageFlagOn = true;
+  }
+  assert.equal(calls.length + reserved.length, 0);
 });
 
 test("combined routing keeps image access and previous-image lock gates", async () => {

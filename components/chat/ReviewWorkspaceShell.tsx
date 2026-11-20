@@ -18,6 +18,7 @@
  */
 
 import { refreshImageModelCatalog } from "@/lib/modelCatalog";
+import { chatRouterLocationFusionEnabled, existingChatRouterLocationFusionEnabled } from "@/lib/chatRouterLocationFusionEnabled";
 import { cookies } from "next/headers";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
@@ -40,6 +41,12 @@ import {
 } from "@/lib/voiceInputAccess";
 import { chatStarterEnabledWithFixtureOverride } from "@/lib/chatStarterAccess";
 import { CHAT_STARTER_FLAG_KEYS } from "@/lib/chatStarterCatalog";
+import {
+  parseStarterOrderSeed,
+  STARTER_ORDER_COOKIE,
+  STARTER_ORDER_SEED_LIMIT,
+} from "@/lib/chatStarterAvailability";
+import { randomInt } from "node:crypto";
 import { resolveChatStarterCapabilities } from "@/lib/chatStarterCapabilityResolution";
 import {
   promptRefinerAvailable,
@@ -62,6 +69,7 @@ import { HELP_FLAG_KEYS } from "@/lib/helpNavigationIntents";
 import { reviewEasyEnabled } from "@/lib/reviewRouting";
 import { chatImageTriageModelId } from "@/lib/chatImageIntent";
 import { imageEditEnabled } from "@/lib/imageEditSource";
+import { generatedArtifactRevisionEnabled } from "@/lib/generatedArtifactRevisionCore";
 import { voiceConversationConfig } from "@tomverse/chat-core";
 
 // The chat UI itself is a Client Component (state, storage, streaming), so
@@ -230,8 +238,10 @@ export async function ReviewWorkspaceShell({
   const fixtureMode = isE2EFixtureMode();
   let reviewEasyFixtureOffered = false;
   let imageTriageFixtureOffered = false;
+  let artifactRevisionFixtureOffered = false;
   if (fixtureMode) {
     const jar = await cookies();
+    artifactRevisionFixtureOffered = jar.get("__tomverse_e2e_artifact_revision")?.value === "1";
     if (!process.env.VOICE_CONVERSATION_KILL_SWITCH) {
       voiceConversationEnabled ||= jar.get("__tomverse_e2e_voice_conversation")?.value === "1";
     }
@@ -302,6 +312,13 @@ export async function ReviewWorkspaceShell({
     });
   }
 
+  // Loopback-only browser fixture. All scope/prepare responses are mocked;
+  // this capability hint cannot authorize the server's Refiner endpoint.
+  if (fixtureMode && productSurface === "chat" &&
+      (await cookies()).get("__tomverse_e2e_parallel_preparation")?.value === "1") {
+    promptRefinerProductRelease = { explicitEnabled: false, autoEnabled: true };
+  }
+
   if (productSurface === "chat" && !fixtureMode) {
     try {
       const session = await getServerSession(authOptions);
@@ -350,7 +367,16 @@ export async function ReviewWorkspaceShell({
   // Capabilities cross as ids only -- never a key, a backend name or a budget.
   const starterCapabilities = resolveChatStarterCapabilities({
     webSearchBackendReadiness,
+    chatImageAnswers: chatImageIntentEnabled || imageTriageFixtureOffered,
   });
+  // Chat's starter order for this browser session (owner decision
+  // 2026-11-13). Read here and handed down, so the server render and the
+  // hydrating client order the cards alike; the client stores a new seed in
+  // the session cookie. The E2E fixture keeps registry order unless a spec
+  // sets the cookie, so card assertions stay deterministic.
+  const starterOrderSeed =
+    parseStarterOrderSeed((await cookies()).get(STARTER_ORDER_COOKIE)?.value) ??
+    (fixtureMode ? null : randomInt(STARTER_ORDER_SEED_LIMIT));
 
   // The verification coordinator wraps the page rather than living inside it,
   // so ChatPageClient itself can ask for a token for a user-initiated action
@@ -370,8 +396,13 @@ export async function ReviewWorkspaceShell({
         guestDefaultModelId={guestDefaultModelId}
         guestBrandTrioModelIds={guestBrandTrioModelIds}
         imageGenerationEnabled={imageGenerationEnabled}
+        generatedArtifactRevisionEnabled={generatedArtifactRevisionEnabled() || artifactRevisionFixtureOffered}
         chatImageIntentEnabled={chatImageIntentEnabled || imageTriageFixtureOffered}
         chatLocationIntentEnabled={process.env.TOMVERSE_CHAT_LOCATION_INTENT_ENABLED === "true"}
+        chatParallelPreparationEnabled={process.env.CHAT_PARALLEL_PREPARATION_ENABLED === "true"}
+        chatRouterLocationFusion={chatRouterLocationFusionEnabled()}
+        existingChatRouterLocationFusion={existingChatRouterLocationFusionEnabled()}
+        chatFreshLocationPreparationEnabled={process.env.CHAT_FRESH_LOCATION_PREPARATION_ENABLED === "true"}
         chatImageEditEnabled={chatImageEditEnabled}
         voiceInputEnabled={voiceInputEnabled}
         voiceConversationEnabled={voiceConversationEnabled}
@@ -388,6 +419,7 @@ export async function ReviewWorkspaceShell({
         chatStarterKnownFlagKeys={starterKnownFlagKeys}
         chatStarterEnabledFlagKeys={starterEnabledFlagKeys}
         chatStarterCapabilities={starterCapabilities}
+        chatStarterOrderSeed={starterOrderSeed}
         initialConversationId={initialConversationId}
         mountedSurface={mountedSurface}
         continuationProduct={continuationProduct}

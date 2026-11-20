@@ -3,7 +3,7 @@
  * digest the ledger stores or compares, the reservation a pin implies, the
  * monthly cap read from the environment, and the outcome a settle report maps
  * to. No I/O. docs/policy/marketing-automation.md §5 (policy v4) approved the
- * table, the dedicated OpenAI key and the US$100 monthly cap.
+ * table, the dedicated OpenAI key and the monthly cap (US$100 then, US$500 since 2026-11-14).
  *
  * The app cannot see what the generator actually sent, so the ledger admits
  * a call only when its reservation -- the most a pinned model can cost for one
@@ -31,11 +31,12 @@ export const MARKETING_LLM_ADAPTER_VERSION = "1";
 
 /**
  * What a call is for. The ledger's shape CHECK holds the same list
- * (prisma/migrations/20261102110000_marketing_llm_seo_purpose);
+ * (prisma/migrations/20261112120000_marketing_feature_facts);
  * `comment_triage` is the comment monitor's classifier (S4d), `seo` the SEO code
- * agent (S5), which must not wait on the analysis switch that gates `brief`.
+ * agent (S5), which must not wait on the analysis switch that gates `brief`,
+ * `feature_refresh` Admin's ad facts refresh (owner 2026-11-12).
  */
-export const MARKETING_LLM_PURPOSES = ["draft", "market_intel", "brief", "comment_triage", "seo"] as const;
+export const MARKETING_LLM_PURPOSES = ["draft", "market_intel", "brief", "comment_triage", "seo", "feature_refresh"] as const;
 export type MarketingLlmPurpose = (typeof MARKETING_LLM_PURPOSES)[number];
 
 export const MARKETING_LLM_CALL_STATES = [
@@ -82,14 +83,19 @@ export type MarketingLlmCloseAction = (typeof MARKETING_LLM_CLOSE_ACTIONS)[numbe
 export const MARKETING_LLM_RESERVATION_TTL_MS = 15 * 60 * 1000;
 export const MARKETING_LLM_DISPATCH_TTL_MS = 60 * 60 * 1000;
 
-/** The most the operator may set the cap to: US$100, policy v4 (D2). */
-export const MARKETING_LLM_MONTHLY_CAP_CEILING_MICRO_USD = 100_000_000;
+/**
+ * The most the operator may set the monthly cap to: US$500 (owner 2026-11-14;
+ * US$100 under policy v4 D2 before).
+ */
+export const MARKETING_LLM_MONTHLY_CAP_CEILING_MICRO_USD = 500_000_000;
 
 /** Row bounds the migration's CHECKs repeat; a pin outside them is unusable. */
 export const MARKETING_LLM_ROW_LIMITS = {
   reservedInputTokensMax: 10_000_000,
   reservedOutputTokensMax: 100_000,
-  reservedMicroUsdMax: MARKETING_LLM_MONTHLY_CAP_CEILING_MICRO_USD,
+  // One call's reservation, which the migrations' CHECKs bound at US$100. Not
+  // the monthly ceiling: raising that left this row bound where it was.
+  reservedMicroUsdMax: 100_000_000,
 } as const;
 
 export type MarketingLlmPricePin = {

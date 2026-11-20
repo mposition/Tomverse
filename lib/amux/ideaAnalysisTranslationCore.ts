@@ -15,7 +15,9 @@ export const AMUX_ANALYSIS_TRANSLATION_ENV = "TOMVERSE_AMUX_ADMIN_KO_TRANSLATION
 export const amuxAnalysisTranslationEnabled = (value: string | undefined): boolean =>
   value === "enabled";
 
-/** Total source characters one call translates; a larger page is refused, not cut. */
+/** Total source characters and items ONE call translates. A larger page is
+ * translated in more calls of this size (planAmuxTranslation, owner direction
+ * 2026-11-15). */
 export const AMUX_ANALYSIS_TRANSLATION_MAX_SOURCE_CHARS = 24_000;
 export const AMUX_ANALYSIS_TRANSLATION_MAX_ITEMS = 400;
 /** Korean output of 24,000 English characters, with room for low-effort reasoning. */
@@ -83,16 +85,97 @@ export function amuxAnalysisTranslationItems(view: ReadableView): AmuxTranslatio
   return items;
 }
 
-export type AmuxTranslationSourceCheck =
-  | { ok: true; items: AmuxTranslationItem[] }
-  | { ok: false; code: "empty" | "too_large" };
+/** One piece of an asked item: translated under `id`, or kept as written
+ * (white space only). `joiner` is the text between it and the piece before. */
+type AmuxTranslationPiece = { joiner: string; id: string | null; text: string };
 
-export function checkAmuxTranslationSource(items: AmuxTranslationItem[]): AmuxTranslationSourceCheck {
+/** The calls one translation makes, and how each asked item is put back
+ * together from what they return. */
+export type AmuxTranslationPlan = {
+  batches: AmuxTranslationItem[][];
+  items: Array<{ id: string; pieces: AmuxTranslationPiece[] }>;
+};
+
+/** Slices of at most `max` UTF-16 units that never split a surrogate pair. */
+const slicesOf = (value: string, max: number): string[] => {
+  const out: string[] = [];
+  for (let at = 0; at < value.length;) {
+    let end = Math.min(at + max, value.length);
+    if (end < value.length && end - at > 1 && /[\uD800-\uDBFF]/.test(value[end - 1]!)) end -= 1;
+    out.push(value.slice(at, end));
+    at = end;
+  }
+  return out;
+};
+
+/** A text longer than one call's source, cut at line breaks into pieces that
+ * each fit; a single longer line is sliced. The joiners rebuild it exactly. */
+function piecesOf(item: AmuxTranslationItem, max: number): AmuxTranslationPiece[] {
+  if (item.text.length <= max) return [{ joiner: "", id: item.id, text: item.text }];
+  const parts: Array<{ joiner: string; text: string }> = [];
+  let current: { joiner: string; text: string } | null = null;
+  for (const [index, line] of item.text.split("\n").entries()) {
+    const joiner = index === 0 ? "" : "\n";
+    if (current && current.text.length + 1 + line.length <= max) {
+      current.text += `\n${line}`;
+      continue;
+    }
+    if (current) parts.push(current);
+    current = null;
+    if (line.length <= max) {
+      current = { joiner, text: line };
+      continue;
+    }
+    slicesOf(line, max).forEach((slice, sliceIndex) =>
+      parts.push({ joiner: sliceIndex === 0 ? joiner : "", text: slice }));
+  }
+  if (current) parts.push(current);
+  let next = 0;
+  return parts.map((part) => ({ ...part,
+    id: part.text.trim() ? `${item.id}#${next++}` : null }));
+}
+
+/**
+ * The page's items in calls that each stay within one call's source size and
+ * item count, in screen order. An item that alone is larger is translated in
+ * pieces cut at line breaks and joined again (mergeAmuxTranslation).
+ */
+export function planAmuxTranslation(items: AmuxTranslationItem[]):
+  { ok: true; plan: AmuxTranslationPlan } | { ok: false; code: "empty" } {
   if (items.length === 0) return { ok: false, code: "empty" };
-  const chars = items.reduce((total, item) => total + item.text.length, 0);
-  if (items.length > AMUX_ANALYSIS_TRANSLATION_MAX_ITEMS ||
-      chars > AMUX_ANALYSIS_TRANSLATION_MAX_SOURCE_CHARS) return { ok: false, code: "too_large" };
-  return { ok: true, items };
+  const planned = items.map((item) => ({ id: item.id,
+    pieces: piecesOf(item, AMUX_ANALYSIS_TRANSLATION_MAX_SOURCE_CHARS) }));
+  const batches: AmuxTranslationItem[][] = [];
+  let batch: AmuxTranslationItem[] = [];
+  let chars = 0;
+  for (const piece of planned.flatMap((item) => item.pieces)) {
+    if (piece.id === null) continue;
+    if (batch.length > 0 && (batch.length >= AMUX_ANALYSIS_TRANSLATION_MAX_ITEMS ||
+        chars + piece.text.length > AMUX_ANALYSIS_TRANSLATION_MAX_SOURCE_CHARS)) {
+      batches.push(batch);
+      batch = [];
+      chars = 0;
+    }
+    batch.push({ id: piece.id, text: piece.text });
+    chars += piece.text.length;
+  }
+  if (batch.length > 0) batches.push(batch);
+  return { ok: true, plan: { batches, items: planned } };
+}
+
+/** Every asked item rebuilt from the calls' translations, or null when one is missing. */
+export function mergeAmuxTranslation(plan: AmuxTranslationPlan,
+  translated: Readonly<Record<string, string>>): Record<string, string> | null {
+  const result: Record<string, string> = {};
+  for (const item of plan.items) {
+    let text = "";
+    for (const piece of item.pieces) {
+      if (piece.id !== null && !Object.hasOwn(translated, piece.id)) return null;
+      text += piece.joiner + (piece.id === null ? piece.text : translated[piece.id]!);
+    }
+    result[item.id] = text;
+  }
+  return result;
 }
 
 export const AMUX_ANALYSIS_TRANSLATION_SYSTEM = [

@@ -1849,3 +1849,22 @@ test("the Haiku line exception is the Anthropic Haiku line at standard and one c
     "needs_acknowledgement"
   );
 });
+
+test("replacing a model the code calls by id is refused with the reason", () => {
+  const refusal = adoptionReplacementRefusal({
+    adoptedModelId: "gpt-6-1-luna",
+    adoptedProvider: "openai",
+    replacesModelId: "gpt-6-luna",
+    predecessor: {
+      catalogDeleted: false,
+      replacementModelId: null,
+      provider: "openai",
+      isApplicationDefault: false,
+      isGuestDefault: false,
+      codePinnedRefusal: "gpt-6-luna is fixed in code by the Prompt Refiner price pin.",
+    },
+  });
+  assert.equal(refusal?.status, 409);
+  assert.equal(refusal?.code, "MODEL_PINNED_IN_CODE");
+  assert.match(refusal?.message ?? "", /price pin/);
+});

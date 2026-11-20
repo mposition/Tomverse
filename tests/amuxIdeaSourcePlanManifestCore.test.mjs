@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  AMUX_SOURCE_PLAN_UNIT_MAX_BYTES,
   buildAmuxSourcePlanManifest,
   verifyAmuxSourcePlanManifest,
 } from "../lib/amux/ideaSourcePlanManifestCore.ts";
@@ -76,12 +75,18 @@ test("malformed identities, units and key configuration hold without raw echo", 
   assert.deepEqual(buildAmuxSourcePlanManifest(plan(),
     { digestKeyId: "synthetic", digestKey: Buffer.alloc(3) }),
   { decision: "hold", reason: "invalid_key" });
-  for (const orderedUnits of [[], [unit("")], [unit("x".repeat(AMUX_SOURCE_PLAN_UNIT_MAX_BYTES + 1))],
+  for (const orderedUnits of [[], [unit("")], [unit("x".repeat(4 * 1024 * 1024 + 1))],
     [unit("x", "unknown")], [unit("x", "operator_idea", "not-a-digest")],
     [unit("x"), , unit("z")]]) {
     assert.deepEqual(buildAmuxSourcePlanManifest(plan({ orderedUnits }), key),
       { decision: "hold", reason: "invalid_units" });
   }
+});
+
+test("a session idea past the former 8 KiB unit limit still gets a source plan", () => {
+  // Owner direction 2026-11-15.
+  const large = [unit("x".repeat(8_193))];
+  assert.equal(buildAmuxSourcePlanManifest(plan({ orderedUnits: large }), key).decision, "ready");
 });
 
 test("accessor-bearing unit arrays and records are refused", () => {
@@ -105,7 +110,7 @@ test("Buffer valueOf and length overrides cannot change the hashed bytes or cap"
   assert.deepEqual(buildAmuxSourcePlanManifest(plan({ orderedUnits: [visible] }), key),
     { decision: "hold", reason: "invalid_units" });
 
-  const hiddenLength = unit("x".repeat(AMUX_SOURCE_PLAN_UNIT_MAX_BYTES + 1));
+  const hiddenLength = unit("x".repeat(8_193));
   Object.defineProperty(hiddenLength.bytes, "length", { value: 1 });
   assert.deepEqual(buildAmuxSourcePlanManifest(plan({ orderedUnits: [hiddenLength] }), key),
     { decision: "hold", reason: "invalid_units" });

@@ -231,12 +231,12 @@ test("a future-dated authentication claim cannot buy an unlimited step-up window
 });
 
 test("the step-up window is clamped to a sane range", () => {
-  assert.equal(resolveRecentAuthMinutes(undefined), 120);
-  assert.equal(resolveRecentAuthMinutes(""), 120);
-  assert.equal(resolveRecentAuthMinutes("not-a-number"), 120);
+  assert.equal(resolveRecentAuthMinutes(undefined), 480);
+  assert.equal(resolveRecentAuthMinutes(""), 480);
+  assert.equal(resolveRecentAuthMinutes("not-a-number"), 480);
   assert.equal(resolveRecentAuthMinutes(" "), 5);
   assert.equal(resolveRecentAuthMinutes("1"), 5);
-  assert.equal(resolveRecentAuthMinutes("100000"), 240);
+  assert.equal(resolveRecentAuthMinutes("100000"), 480);
   assert.equal(resolveRecentAuthMinutes("45"), 45);
 
   assert.equal(resolveAccountRecentAuthMinutes(undefined), 30);

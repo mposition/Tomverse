@@ -134,15 +134,24 @@ test("an owner retries a PR-less v22 review result back to todo", {
   });
 });
 
-test("a PR-less review retry is still refused once the attempt budget is spent", {
+test("a PR-less review retry past thirty attempts is issued by the proposal guard", {
   skip: allowed ? undefined : "requires a dedicated loopback test database",
 }, async () => {
   await inRollback(async (tx, db) => {
     const { taskId, priorAttemptId } =
       await seedAmuxV4PortfolioRecoveryPrerequisites(db, { attemptNumber: 5 });
+    // Owner direction 2026-11-18: neither the app nor the review proposal
+    // guard (20261118100000_amux_review_retry_no_attempt_bound) bounds the attempts. The run's number placed at the old
+    // bound, past its insert triggers.
+    await tx.$executeRawUnsafe("SET LOCAL session_replication_role = replica");
+    await tx.$executeRaw`UPDATE "AmuxExecutionAttempt" SET "attemptNumber" = 30
+      WHERE "id" = ${priorAttemptId}`;
+    await tx.$executeRawUnsafe("SET LOCAL session_replication_role = origin");
     const escalationId = await openEscalation(db, taskId);
-    await refused(tx, db, () => insertProposal(db, { taskId,
-      attemptId: priorAttemptId, escalationId, outcome: "retry",
-      targetStatus: "todo" }));
+    await insertProposal(db, { taskId, attemptId: priorAttemptId,
+      escalationId, outcome: "retry", targetStatus: "todo" });
+    const [row] = await tx.$queryRaw`SELECT count(*)::int AS "n"
+      FROM "AmuxReviewProposal" WHERE "taskId" = ${taskId} AND "outcome" = 'retry'`;
+    assert.equal(row.n, 1);
   });
 });

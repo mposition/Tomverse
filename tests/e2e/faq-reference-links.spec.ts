@@ -6,8 +6,19 @@ test("Korean FAQ answers expose working credit safety and privacy references", a
   await page.setViewportSize({ width: isMobile ? 320 : 1280, height: 900 });
   await prepareGuestPage(page, "ko");
   await page.goto("/faq?lang=ko");
+  // Phones collapse FAQ answers behind toggles (#3602, #3608); open them all.
+  await expect(page.getByRole("article").first()).toBeVisible({ timeout: 30_000 });
+  for (const article of await page.getByRole("article").all()) {
+    const toggle = article.getByRole("button");
+    if (!(await toggle.isVisible())) continue;
+    // A click before hydration is lost, so retry until the answer opens.
+    await expect(async () => {
+      if (await toggle.getAttribute("aria-expanded") === "false") await toggle.click();
+      await expect(toggle).toHaveAttribute("aria-expanded", "true", { timeout: 1_000 });
+    }).toPass({ timeout: 30_000 });
+  }
   const answers = page.getByRole("article");
-  for (const [label, path] of [["모델별 크레딧 확인", "/models"], ["안전한 데이터 처리", "/safety/security-privacy"], ["개인정보 처리방침", "/privacy"]]) {
+  for (const [label, path] of [["요금제의 크레딧 안내 보기", "/pricing"], ["안전한 데이터 처리", "/safety/security-privacy"], ["개인정보 처리방침", "/privacy"]]) {
     const link = answers.getByRole("link", { name: label, exact: true });
     await link.scrollIntoViewIfNeeded();
     await expect(link).toBeVisible();

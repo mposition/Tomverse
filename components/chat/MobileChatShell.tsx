@@ -1,8 +1,13 @@
 "use client";
 
+import type { ResearchPreviewControls } from "@/components/chat/useResearchPreview";
+
+import type { ChatPanelLocationIntent, RouterLocationTurn } from "@/lib/chatLocationClient";
+
 import type { PendingSendEcho } from "@/components/chat/ChatMessageList";
 import type { ReviewWorkspaceControls, WorkspaceAppearanceControls } from "./useReviewWorkspace";
 import { ChatCommandBar, ReviewCommandBar } from "./ReviewStudioChrome";
+import { useConversationDocumentTitle } from "./useConversationDocumentTitle";
 import "./review-studio.css";
 import type { ConversationSurface } from "@/lib/continuationRoutes";
 import {
@@ -116,6 +121,9 @@ type PromptPayload = {
   submittedAtMonotonicMs?: number;
   preparationTimings?: import("@/lib/responseLatencyCore").ClientLatencyStages;
   preparationReadyAtMonotonicMs?: number;
+  sourcePassages?: string;
+  preparedLocationIntent?: ChatPanelLocationIntent;
+  routerLocationTurn?: RouterLocationTurn;
   id: string;
   text: string;
   chatId: string;
@@ -126,6 +134,8 @@ type PromptPayload = {
   /** The models this send was made for; other panels must not consume it. */
   modelIds: string[];
   attachments: ChatAttachment[];
+  researchDurable?: boolean;
+    researchMode?: "preview";
   deepResearchDepth?: "quick" | "standard" | "deep";
   admissionToken?: string | null;
   contextBundle?: string | null;
@@ -159,6 +169,7 @@ const MIN_CONVERSATION_AREA_REM = 4;
 
 type MobileChatShellProps = {
   workspaceNotice?: import("react").ReactNode;
+  continuationNotice?: import("react").ReactNode;
   review?: ReviewWorkspaceControls;
   chatWorkspace?: WorkspaceAppearanceControls;
   /** Current product chrome; switching routes never rewrites this conversation. */
@@ -167,7 +178,9 @@ type MobileChatShellProps = {
   onProductSwitch?: (nextProduct: ChatWorkspaceProduct) => boolean;
   transcriptScope?: "model" | "conversation";
   onRestorePrompt?: (prompt: { text: string; attachments: ChatAttachment[]; targetChatId: string }) => void;
+  onRetryPrompt?: (prompt: { text: string; attachments: ChatAttachment[]; targetChatId: string }) => void;
   onCompareInReview?: (seed: string) => void;
+  onCompareContinuationInReview?: (assistantMessageId: string) => void;
   conversations: Conversation[];
   currentChatId: string | null;
   selectedModels: string[];
@@ -197,11 +210,6 @@ type MobileChatShellProps = {
   onPromptRefinerRequest?: (sourcePrompt: string) => void;
   onPromptRefinerDecision?: (resolution: PromptRefinerResolution) => void;
   onPromptRefinerDismiss?: (requestId: string) => boolean;
-  onPromptRefinerExecution?: (input: {
-    promptId: string | null;
-    execution: "applied" | "original";
-    mode: "explicit" | "auto";
-  }) => void;
   /** Passed straight through to the composer; see ChatInput's own prop. */
   onVoiceTranscript?: (transcript: string, scopeId: string | null) => void;
   /** Passed straight through to the composer; see ChatInput's own prop. */
@@ -271,6 +279,7 @@ type MobileChatShellProps = {
   importedMessages?: Message[];
   /** Provenance and paging for that transcript (`ChatMessageList`). */
   importedTranscript?: {
+    contextCard?: React.ReactNode;
     status: "available" | "deleted" | "locked";
     provider: string;
     importedAt: string;
@@ -342,7 +351,10 @@ type MobileChatShellProps = {
   assistantProfileOptions?: ChatAssistantProfileOption[];
   onAssistantProfileChange?: (profileId: string | null) => void;
   onMemoryModeChange?: (mode: ConversationMemoryMode) => void;
-  accountMemoryDefault?: "on" | "off";
+  accountMemoryDefault?: "on" | "off" | null;
+  accountMemoryMasterEnabled?: boolean | null;
+  onMemorySettingsRefresh?: () => void;
+  researchPreview?: ResearchPreviewControls;
   onOpenDeepResearchSetup: () => void;
   isDeepResearchPending: boolean;
   onDismissDeepResearchChip: () => void;
@@ -471,6 +483,7 @@ const mobileModelTabPanelId = (modelId: string) =>
 
 export function MobileChatShell({
   workspaceNotice,
+  continuationNotice,
   review,
   chatWorkspace,
   currentProduct,
@@ -478,7 +491,9 @@ export function MobileChatShell({
   onProductSwitch,
   transcriptScope = "model",
   onRestorePrompt,
+  onRetryPrompt,
   onCompareInReview,
+  onCompareContinuationInReview,
   conversations,
   currentChatId,
   selectedModels,
@@ -503,7 +518,6 @@ export function MobileChatShell({
   onPromptRefinerRequest,
   onPromptRefinerDecision,
   onPromptRefinerDismiss,
-  onPromptRefinerExecution,
   onVoiceTranscript,
   identityKey,
   guestPreviewMode = false,
@@ -553,6 +567,9 @@ export function MobileChatShell({
   onAssistantProfileChange,
   onMemoryModeChange,
   accountMemoryDefault,
+  accountMemoryMasterEnabled,
+  onMemorySettingsRefresh,
+  researchPreview,
   onOpenDeepResearchSetup,
   isDeepResearchPending,
   onDismissDeepResearchChip,
@@ -994,6 +1011,7 @@ export function MobileChatShell({
   const currentConversation = conversations.find(
     (conversation) => conversation.id === currentChatId
   );
+  useConversationDocumentTitle(currentConversation?.title);
   // The answer canvas, handed to the composer as a drop target. State rather
   // than a ref so the composer re-registers its listeners when the section
   // mounts, and loses them when an image conversation replaces it
@@ -1382,7 +1400,7 @@ export function MobileChatShell({
                   data-testid="mobile-header-auto-mode"
                   className="min-w-0 truncate"
                 >
-                  {lang === "ko" ? summaryCopy.openPicker : t("chat.modelSelect")}
+                  {lang === "ko" || lang === "en" ? summaryCopy.openPicker : t("chat.modelSelect")}
                 </span>
               </>
             ) : isMultiModelConversation ? (
@@ -1491,6 +1509,7 @@ export function MobileChatShell({
         </div>
         )}
         {workspaceNotice}
+        {continuationNotice}
       </header>
 
       {/*
@@ -1700,7 +1719,7 @@ export function MobileChatShell({
           // Normal flow inside the section, never an absolute overlay
           // (REAUDIT-P1-04): the section is the one region that scrolls this
           // content, and the composer is not in it.
-          <ChatWelcomeScreen
+          <ChatWelcomeScreen product={currentProduct === "chat" ? "chat" : "review"}
             recentConversations={recentConversations}
             starterGallery={starterGallery}
             recentDisclosureRef={(node) => {
@@ -1747,7 +1766,9 @@ export function MobileChatShell({
                   transcriptScope={transcriptScope}
                   otherPanelModelIds={selectedModels}
                   onRestorePrompt={onRestorePrompt}
+                  onRetryPrompt={onRetryPrompt}
                   onCompareInReview={onCompareInReview}
+                  onCompareContinuationInReview={onCompareContinuationInReview}
                   hasImportedTranscript={hasImportedTranscript}
                   importedMessages={importedMessages}
                   importedTranscript={importedTranscript}
@@ -1770,7 +1791,6 @@ export function MobileChatShell({
                   onContentStateChange={handleContentStateChange}
                   onStatusChange={handleModelStatusChange}
                   onResponseComplete={onResponseComplete}
-                  onPromptRefinerExecution={onPromptRefinerExecution}
                   onTurnError={onTurnError}
                   onFollowupSent={onFollowupSent}
                   onContextBundleStale={onContextBundleStale}
@@ -1956,6 +1976,9 @@ export function MobileChatShell({
             onAssistantProfileChange={onAssistantProfileChange}
             onMemoryModeChange={onMemoryModeChange}
             accountMemoryDefault={accountMemoryDefault}
+            accountMemoryMasterEnabled={accountMemoryMasterEnabled}
+            onMemorySettingsRefresh={onMemorySettingsRefresh}
+            researchPreview={researchPreview}
             onOpenDeepResearchSetup={onOpenDeepResearchSetup}
             isDeepResearchPending={isDeepResearchPending}
             onDismissDeepResearchChip={onDismissDeepResearchChip}
@@ -2083,8 +2106,8 @@ export function MobileChatShell({
                     disabled={productSwitchDisabled || isAnyModelResponding || durableDraftLocked}
                     onProductSwitch={onProductSwitch}
                   />
-                  {review && <ReviewCommandBar review={review} locked={productSwitchDisabled || isAnyModelResponding || durableDraftLocked} />}
-                  {chatWorkspace && <ChatCommandBar workspace={chatWorkspace} locked={productSwitchDisabled || isAnyModelResponding || durableDraftLocked} />}
+                  {review && <ReviewCommandBar review={review} conversationTitle={currentConversation?.title} locked={productSwitchDisabled || isAnyModelResponding || durableDraftLocked} />}
+                  {chatWorkspace && <ChatCommandBar workspace={chatWorkspace} conversationTitle={currentConversation?.title} locked={productSwitchDisabled || isAnyModelResponding || durableDraftLocked} />}
                 </>
               ) : undefined}
             />

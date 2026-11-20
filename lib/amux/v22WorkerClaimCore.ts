@@ -1,8 +1,12 @@
 /** Assignment is deliberately distinct from execution start. The role/grade
  * and route facts come from owner-approved receipts, never model prose. */
-export const AMUX_V22_WORKER_CLAIM_CODE_LATCH = true;
-export const AMUX_V22_WORKER_CLAIM_ENV = "TOMVERSE_AMUX_V22_WORKER_CLAIM";
-export const AMUX_V22_GLOBAL_ACTIVE_LIMIT = 3;
+/**
+ * Tasks held by workers at once, across every lane: one per verified worker
+ * and no other bound (owner direction 2026-11-15, "제한을 줄 이유가
+ * 없습니다"; it was at most six from 2026-11-13). The lane only orders the
+ * candidates (SEV1 first). Each attempt still reserves its own approved cost
+ * and the daily caps still apply.
+ */
 export const AMUX_V22_PER_WORKER_ACTIVE_LIMIT = 1;
 export const AMUX_V22_CLAIM_LANES = ["normal", "parallel", "sev1"] as const;
 export type AmuxV22ClaimLane = (typeof AMUX_V22_CLAIM_LANES)[number];
@@ -39,11 +43,13 @@ export const amuxV22TaskWritesPatch = (taskRole: string | null | undefined) =>
 /**
  * The one-shot providers, keyed by the v19 CLI channel names (owner decision
  * 2026-10-26: every registered provider class may run v22 Tasks). Claude is
- * always on; the others enter the catalog only while
- * TOMVERSE_AMUX_V22_MULTI_PROVIDER is `enabled`. Every route is priced from
+ * always on, and so are the others (the multi-provider switch is gone,
+ * 2026-11-16). Every route is priced from
  * Admin › Models by its model ID, so a model missing there holds the route.
  * Cursor's print mode cannot be kept from its shell once it may write, so a
- * Cursor worker takes the read roles only (`implement: false`).
+ * Cursor worker takes the read roles only (`implement: false`): Cursor
+ * 2026.11.05 also runs `miniSweAgentBashArgs` execs as a fixed `/bin/sh -c`
+ * with the CLI's own environment, which no PATH jail reaches.
  */
 // The CLI usage receipt's model grammar has no colon, so neither does a route.
 const ANY_MODEL = /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/;
@@ -56,22 +62,12 @@ export const AMUX_V22_PROVIDERS = Object.freeze({
     model: ANY_MODEL, implement: true }),
   cursor: Object.freeze({ providerClass: "cursor", cli: "cursor",
     model: ANY_MODEL, implement: false }),
+  // Owner decision 2026-11-10: Antigravity implements. Its shell is found on
+  // PATH (agy 1.5.4, measured on the box), so the sidecar's jail holds it.
+  antigravity: Object.freeze({ providerClass: "antigravity", cli: "antigravity",
+    model: ANY_MODEL, implement: true }),
 });
 export type AmuxV22Provider = keyof typeof AMUX_V22_PROVIDERS;
-export const AMUX_V22_MULTI_PROVIDER_ENV = "TOMVERSE_AMUX_V22_MULTI_PROVIDER";
-export const amuxV22MultiProviderEnabled = (value: string | undefined) =>
-  value === "enabled";
-/**
- * Since 2026-11-08 the Codex, Copilot and Cursor sidecars record their own
- * sign-in's subscription quota as Claude's does, for the Agent office.
- * Whether such a reading also feeds dispatch -- the routing score and both
- * exhausted checks (the native router's and the v22 claim's) -- is this
- * switch, off unless exactly `enabled`; off, dispatch treats those workers
- * as before, with no reading. Claude's readings always count.
- */
-export const AMUX_V22_NON_CLAUDE_QUOTA_GATE_ENV = "TOMVERSE_AMUX_V22_NON_CLAUDE_QUOTA_GATE";
-export const amuxQuotaObservationFeedsDispatch = (provider: string, gate: string | undefined) =>
-  provider.trim().toLowerCase() === "anthropic" || gate === "enabled";
 export const amuxV22Provider = (provider: string): AmuxV22Provider | null => {
   const key = provider.toLowerCase();
   return Object.hasOwn(AMUX_V22_PROVIDERS, key) ? key as AmuxV22Provider : null;
@@ -85,36 +81,45 @@ export const amuxV22ProviderRoleSupported = (provider: string, role: string) => 
   return known !== null && amuxV22OneShotRoleSupported(role) &&
     (role !== "implement" || AMUX_V22_PROVIDERS[known].implement);
 };
+/**
+ * The vendor the review server keeps away from a v22 change: the vendor of
+ * the model that wrote it, not the CLI it ran in. Antigravity runs Google's,
+ * Anthropic's and OpenAI's models through one CLI (agy 1.5.4 lists Gemini 4,
+ * Claude Opus/Sonnet 5.5 and GPT-OSS), so its model ID decides; a model ID
+ * that names no known vendor is "unknown", which the review server refuses
+ * rather than pair with a reviewer it cannot show to differ (owner decision
+ * 2026-11-20: Antigravity workers on Hydrogen and Opus as well as Argon).
+ * Every other provider keeps its provider name, as before.
+ */
+export function amuxV22ReviewAuthorVendor(provider: string, modelId: string): string {
+  if (amuxV22Provider(provider) !== "antigravity") return provider;
+  if (modelId.startsWith("gemini-")) return "google";
+  if (modelId.startsWith("claude-")) return "anthropic";
+  if (modelId.startsWith("gpt-")) return "openai";
+  return "unknown";
+}
 export const amuxV22OneShotRouteSupported = (provider: string, modelId: string) => {
   const known = amuxV22Provider(provider);
   return known !== null && AMUX_V22_PROVIDERS[known].model.test(modelId);
 };
 
-export const amuxV22WorkerClaimEnabled = (value: string | undefined) =>
-  AMUX_V22_WORKER_CLAIM_CODE_LATCH && value === "enabled";
-
+/**
+ * Whether one more Task may be assigned now. Until 2026-11-13 each lane
+ * (normal, parallel, SEV1) held one Task, so nearly every Task, being normal,
+ * waited for the one before it and the other workers stayed idle. Since
+ * 2026-11-15 the only limit is the verified workers themselves.
+ */
 export function amuxV22ClaimCapacity(input: {
-  lane: AmuxV22ClaimLane;
   verifiedWorkerCount: number;
   totalAssigned: number;
-  laneAssigned: number;
 }) {
-  const { lane, verifiedWorkerCount, totalAssigned, laneAssigned } = input;
-  if (![verifiedWorkerCount, totalAssigned, laneAssigned].every(
+  const { verifiedWorkerCount, totalAssigned } = input;
+  if (![verifiedWorkerCount, totalAssigned].every(
     (value) => Number.isSafeInteger(value) && value >= 0) ||
     verifiedWorkerCount === 0) return { allowed: false as const,
       reason: "capacity_unconfigured" as const };
-  if (totalAssigned >= Math.min(AMUX_V22_GLOBAL_ACTIVE_LIMIT,
-      verifiedWorkerCount)) return { allowed: false as const,
+  if (totalAssigned >= verifiedWorkerCount) return { allowed: false as const,
     reason: "global_capacity_full" as const };
-  // One normal, one parallel, one owner-declared SEV1. In particular a normal
-  // job never borrows a reserved slot from a lane that has no ready card.
-  if (laneAssigned >= 1) return { allowed: false as const,
-    reason: "lane_capacity_full" as const };
-  if (lane === "normal" && verifiedWorkerCount < 3) {
-    return { allowed: false as const,
-      reason: "reserved_capacity_unavailable" as const };
-  }
   return { allowed: true as const, reason: null };
 }
 
@@ -128,24 +133,77 @@ export type AmuxV22EligibleRoute = {
 };
 
 /** Review cannot use the implementing worker. A distinct provider wins when
- * one is actually available; price then identity break ties deterministically. */
+ * one is actually available. Then the provider running the fewest Tasks now
+ * wins (owner decision 2026-11-13: the workers are flat-rate CLI
+ * subscriptions, so the cheapest list price alone sent every Task to one
+ * provider while the others sat idle); price then identity break ties
+ * deterministically. */
 export function chooseAmuxV22WorkerRoute(input: {
   routes: readonly AmuxV22EligibleRoute[];
   priorAuthorWorkers: readonly string[];
   priorAuthorProviders: readonly string[];
   isReview: boolean;
+  /** Tasks each provider's workers hold now, keyed by lowercase provider. */
+  activeByProvider?: ReadonlyMap<string, number>;
+  /** When each worker was last assigned a Task, in ms; a worker never assigned is absent. */
+  lastAssignedAtByWorker?: ReadonlyMap<string, number>;
+  /**
+   * When each provider (lowercase) was last assigned a Task by ANY of its
+   * workers, candidates or not: a provider whose worker is busy on the Task it
+   * just took has not waited. Absent, it is read from the candidates alone.
+   */
+  lastAssignedAtByProvider?: ReadonlyMap<string, number>;
+  /** A paid API run (the read-only recovery retry): the cheapest route first. */
+  preferLowerPrice?: boolean;
+  /**
+   * The workers, and their providers, that just failed this Task on the
+   * platform (lib/amux/infraFailureCore.ts, owner decision 2026-11-15): they
+   * go last, so the retry reaches another worker and provider first. They are
+   * never excluded; the worker quarantine does that.
+   */
+  infraFailedWorkers?: readonly string[];
+  infraFailedProviders?: readonly string[];
 }) {
   const candidates = input.routes.filter((route) =>
     !input.isReview || !input.priorAuthorWorkers.includes(route.workerName));
+  const infraWorkers = new Set(input.infraFailedWorkers ?? []);
+  const infraProviders = new Set((input.infraFailedProviders ?? []).map((value) => value.toLowerCase()));
+  const infraPenalty = (route: AmuxV22EligibleRoute) =>
+    infraWorkers.has(route.workerName) ? 2 : infraProviders.has(route.provider.toLowerCase()) ? 1 : 0;
+  const active = (provider: string) =>
+    input.activeByProvider?.get(provider.toLowerCase()) ?? 0;
+  const lastAssigned = (worker: string) => input.lastAssignedAtByWorker?.get(worker) ?? 0;
+  // A provider's last assignment is its most recent worker's.
+  const providerLast = new Map<string, number>(input.lastAssignedAtByProvider ?? []);
+  for (const route of candidates) {
+    const key = route.provider.toLowerCase();
+    providerLast.set(key, Math.max(providerLast.get(key) ?? 0, lastAssigned(route.workerName)));
+  }
   candidates.sort((left, right) => {
     const leftPrior = input.isReview &&
       input.priorAuthorProviders.includes(left.provider) ? 1 : 0;
     const rightPrior = input.isReview &&
       input.priorAuthorProviders.includes(right.provider) ? 1 : 0;
     if (leftPrior !== rightPrior) return leftPrior - rightPrior;
-    const price = BigInt(left.perAttemptMicroUsd) -
-      BigInt(right.perAttemptMicroUsd);
-    if (price !== BigInt(0)) return price < 0 ? -1 : 1;
+    const infra = infraPenalty(left) - infraPenalty(right);
+    if (infra !== 0) return infra;
+    const load = active(left.provider) - active(right.provider);
+    if (load !== 0) return load;
+    if (input.preferLowerPrice === true) {
+      const price = BigInt(left.perAttemptMicroUsd) - BigInt(right.perAttemptMicroUsd);
+      if (price !== BigInt(0)) return price < 0 ? -1 : 1;
+    }
+    // Owner decision 2026-11-13: no price competition between the workers.
+    // They are flat-rate CLI subscriptions, and the cheapest list price sent
+    // nearly every Task to OpenAI although Anthropic and the others serve
+    // the same grade. The provider that waited longest takes the next Task,
+    // then its worker that waited longest. Price stays the cost ceiling and
+    // ledger's measure, never the choice.
+    const providerTurn = (providerLast.get(left.provider.toLowerCase()) ?? 0) -
+      (providerLast.get(right.provider.toLowerCase()) ?? 0);
+    if (providerTurn !== 0) return providerTurn;
+    const workerTurn = lastAssigned(left.workerName) - lastAssigned(right.workerName);
+    if (workerTurn !== 0) return workerTurn;
     const worker = left.workerName.localeCompare(right.workerName);
     return worker || left.routeId.localeCompare(right.routeId);
   });

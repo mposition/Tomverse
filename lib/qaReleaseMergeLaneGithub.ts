@@ -18,9 +18,15 @@
  * (2026-10-29: one 502 held an emergency train for ten minutes).
  */
 import { createSign } from "node:crypto";
+import { PULL_DIFF_DIGEST_MAX_BYTES, pullDiffDigest, readPullChangeDigest } from "./pullDiffDigestCore.ts";
 
 import type { QaReleaseLanePullRequest } from "./qaReleaseMergeLaneCandidateCore.ts";
-import { type QaReleaseChangedFile, type QaReleaseExclusionInput, QA_RELEASE_MIGRATION_SQL_PATH } from "./qaReleaseMergeLaneExclusionCore.ts";
+import {
+  type QaReleaseChangedFile,
+  type QaReleaseExclusionInput,
+  QA_RELEASE_DEPENDABOT_HEAD,
+  QA_RELEASE_MIGRATION_SQL_PATH,
+} from "./qaReleaseMergeLaneExclusionCore.ts";
 import { isQaReleasePolicyDocument, qaReleaseAgentOwnPatterns, qaReleasePolicyTestPaths } from "./qaReleaseMergeLanePolicyInputsCore.ts";
 import type { QaReleaseMergeCall, QaReleaseMergeLanePorts, QaReleasePullRead } from "./qaReleaseMergeLaneServiceCore.ts";
 
@@ -44,12 +50,19 @@ export type QaReleaseHttpRequest = {
   headers: Record<string, string>;
   body?: string;
 };
-export type QaReleaseHttp = (request: QaReleaseHttpRequest) => Promise<{ status: number; text: string }>;
+/**
+ * `bytes`: the body as it came, beside its text, for what must be digested
+ * over the raw bytes (a pull request's diff for a v1 digest, lib/pullDiffDigestCore.ts).
+ */
+export type QaReleaseHttp = (request: QaReleaseHttpRequest) => Promise<{ status: number; text: string; bytes?: Uint8Array }>;
 
 const SHA = /^[0-9a-f]{40}$/;
 /** GitHub lists at most 3,000 files for a pull request; a larger one is never complete. */
 const MAX_FILE_PAGES = 30;
 const MAX_PULL_PAGES = 4;
+/** Dependabot's login, and the committer GitHub names on a commit it signs for Dependabot. */
+const DEPENDABOT_LOGIN = "dependabot[bot]";
+const GITHUB_SIGNED_COMMITTER = "web-flow";
 
 const base64url = (value: string | Buffer) => Buffer.from(value).toString("base64url");
 
@@ -129,7 +142,7 @@ export function qaReleaseInstallationToken(
 }
 
 const PULL_FIELDS = `
-  number title createdAt baseRefName headRefName headRefOid isDraft mergeable state
+  number title createdAt baseRefName headRefName headRefOid isDraft isCrossRepository mergeable state
   commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) {
     pageInfo { hasNextPage }
     nodes {
@@ -215,6 +228,7 @@ function pullOf(raw: unknown): QaReleaseLanePullRequest {
     headRefName: str(pull.headRefName),
     headRefOid: str(pull.headRefOid).toLowerCase(),
     isDraft: pull.isDraft,
+    ...(typeof pull.isCrossRepository === "boolean" ? { isCrossRepository: pull.isCrossRepository } : {}),
     mergeable: str(pull.mergeable),
     state: str(pull.state),
     statusCheckRollup: rollupOf(pull),
@@ -313,9 +327,33 @@ export function createQaReleaseGithubPorts(input: {
     // Complete only when every page was read, the count is the one GitHub
     // states, and the head did not move between the list and this read.
     return {
+      rest,
       files,
       complete: complete && typeof expected === "number" && files.length === expected && headSha === pull.headRefOid,
     };
+  };
+
+  // Whether this is Dependabot's own pull request (owner 2026-11-15): its
+  // head prefix, opened by dependabot[bot] from this repository, and every
+  // commit up to the judged head dependabot[bot]'s and signed by GitHub. A
+  // person's commit on the branch is not signed for Dependabot, so it leaves
+  // the pull request to a person. Anything unread is not Dependabot's.
+  const dependabotOwned = async (pull: QaReleaseLanePullRequest, rest: Record<string, unknown>): Promise<boolean> => {
+    if (!QA_RELEASE_DEPENDABOT_HEAD.test(pull.headRefName)) return false;
+    try {
+      if (str(record(rest.user).login) !== DEPENDABOT_LOGIN) return false;
+      const headRepo = str(record(record(rest.head).repo).full_name);
+      if (headRepo === "" || headRepo !== str(record(record(rest.base).repo).full_name)) return false;
+      const commits = await getJson(`${REPO_PATH}/pulls/${pull.number}/commits?per_page=100`);
+      if (!Array.isArray(commits) || commits.length === 0 || commits.length >= 100) return false;
+      const signed = commits.map(record).every((entry) =>
+        str(record(entry.author).login) === DEPENDABOT_LOGIN &&
+        str(record(entry.committer).login) === GITHUB_SIGNED_COMMITTER &&
+        record(record(entry.commit).verification).verified === true);
+      return signed && str(record(commits[commits.length - 1]).sha).toLowerCase() === pull.headRefOid;
+    } catch {
+      return false;
+    }
   };
 
   const compareStatus = async (from: string, to: string) =>
@@ -349,13 +387,35 @@ export function createQaReleaseGithubPorts(input: {
     async exclusionInputs(pull): Promise<QaReleaseExclusionInput> {
       policyInputs ??= readPolicyInputs();
       const [inputs, changed] = await Promise.all([policyInputs, changedFilesOf(pull)]);
+      const dependabot = await dependabotOwned(pull, changed.rest);
       return {
         headBranch: pull.headRefName,
         changedFiles: changed.files,
         changedFilesComplete: changed.complete,
         policyTestPaths: inputs.tests,
         agentOwnPatterns: inputs.own,
+        ...(dependabot ? { dependabot: true } : {}),
       };
+    },
+
+    // The v2 change digest of this head against develop as it stands now, read the one way every
+    // reader reads it (lib/pullDiffDigestCore.ts). Any size, binary files included.
+    async changeDigest(number, headSha): Promise<string | null> {
+      if (!Number.isSafeInteger(number) || number <= 0) return null;
+      return (await readPullChangeDigest((path) => getJson(`${REPO_PATH}${path}`), { base: "develop", headSha })).digest;
+    },
+
+    // v1, for an approval recorded before v2 only. Over the response's own bytes, as the
+    // engineering agent's read digests them: a diff whose removed lines hold bytes that are not
+    // UTF-8 must digest the same on both sides (review r-20261114-023008-48bc7e). No raw bytes,
+    // no digest.
+    async diffDigest(number): Promise<string | null> {
+      const response = await http({ method: "GET", url: `${QA_RELEASE_GITHUB_API}${REPO_PATH}/pulls/${number}`,
+        headers: await headers("application/vnd.github.diff") });
+      if (response.status !== 200) throw new Error(`github_${response.status}`);
+      const bytes = response.bytes;
+      if (!(bytes instanceof Uint8Array) || bytes.byteLength > PULL_DIFF_DIGEST_MAX_BYTES) return null;
+      return pullDiffDigest(bytes);
     },
 
     async readPull(number): Promise<QaReleasePullRead | null> {

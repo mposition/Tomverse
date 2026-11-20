@@ -18,11 +18,9 @@ import {
 } from "@/lib/amux/autoAdmissionControlCore";
 
 const CONTROL: AmuxAutoAdmissionControl = {
-  codeLatch: true, environmentEnabled: true, active: false,
+  active: false,
   authorizationAuditLogId: "audit-before",
-  graduation: { ok: false, count: 0, spanMs: 0 },
-  graduationExceptionId: "owner-bootstrap-2026-10-11",
-  graduationExceptionAvailable: true, graduationExceptionApplied: false,
+  graduation: { ok: true, count: 0, spanMs: 0 },
 };
 const m = adminAmuxAutoAdmissionMessages.en;
 const json = (status: number, body: unknown) => Response.json(body, { status });
@@ -79,30 +77,23 @@ test("control reads reject missing, malformed and unrecognised evidence without 
     { ...CONTROL, authorizationAuditLogId: "" },
     { ...CONTROL, graduation: { ok: false, count: -1, spanMs: 0 } },
     { ...CONTROL, graduation: { ok: false, count: 0, spanMs: Infinity } },
-    { ...CONTROL, graduation: { ok: false, count: 0 } },
-    { ...CONTROL, graduationExceptionId: "enabled" },
-    { ...CONTROL, graduationExceptionApplied: undefined }]) {
+    { ...CONTROL, graduation: { ok: false, count: 0 } }]) {
     assert.equal(parseAmuxAutoAdmissionControl(value), null);
   }
 });
 
-test("CAS and the exact bootstrap exception travel only under the existing activation condition", () => {
+test("the change body carries the policy version and the CAS audit id", () => {
   assert.deepEqual(amuxAutoAdmissionChangeBody(true, CONTROL), {
     policyVersion: 22, active: true, expectedAuditLogId: "audit-before",
-    graduationExceptionId: "owner-bootstrap-2026-10-11",
   });
   assert.deepEqual(amuxAutoAdmissionChangeBody(false, CONTROL), {
     policyVersion: 22, active: false, expectedAuditLogId: "audit-before",
   });
-  assert.equal("graduationExceptionId" in amuxAutoAdmissionChangeBody(true,
-    { ...CONTROL, graduationExceptionAvailable: false }), false);
 });
 
-test("activation requires explicit confirmation and reported local gates; a stop remains available while they close", async () => {
+test("activation requires explicit confirmation and graduation or its exception; a stop remains available", async () => {
   for (const input of [{ ...change(), confirmed: false }, { ...change(), control: null },
-    { ...change(), control: { ...CONTROL, codeLatch: false } },
-    { ...change(), control: { ...CONTROL, environmentEnabled: false } },
-    { ...change(), control: { ...CONTROL, graduationExceptionAvailable: false } },
+    { ...change(), control: { ...CONTROL, graduation: { ok: false, count: 0, spanMs: 0 } } },
     { ...change(), pending: "reading" as const }, change("outcome_unknown")]) {
     const h = harness();
     await runAmuxAutoAdmissionChange(input, h.io, h.update);
@@ -110,7 +101,7 @@ test("activation requires explicit confirmation and reported local gates; a stop
   }
   const h = harness();
   await runAmuxAutoAdmissionChange({ ...change(), active: false, confirmed: false,
-    control: { ...CONTROL, active: true, codeLatch: false, environmentEnabled: false } }, h.io, h.update);
+    control: { ...CONTROL, active: true } }, h.io, h.update);
   assert.equal(h.bodies.length, 1);
   assert.equal(h.bodies[0]!.active, false);
 });
@@ -199,17 +190,15 @@ test("an initial failed read has no activation action and no fabricated graduati
   assert.equal(textOf(byId(tree, "amux-auto-admission-measurement")!.children as ReactNode), m.unreadable);
 });
 
-test("English and Korean distinguish measured graduation from available and applied exceptions", () => {
+test("English and Korean report the measured graduation evidence", () => {
   for (const catalog of [adminAmuxAutoAdmissionMessages.en, adminAmuxAutoAdmissionMessages.ko]) {
-    const available = textOf(render({ m: catalog }));
-    assert.ok(available.includes(catalog.graduationUnmet));
-    assert.ok(available.includes(catalog.exceptionAvailable));
+    const available = textOf(render({ m: catalog, control: { ...CONTROL,
+      graduation: { ok: false, count: 0, spanMs: 0 } } }));
+    // No threshold gates the path (2026-11-16): the screen says so and shows
+    // the measurement, never "met" (review r-20261116-215204-1beb6b).
+    assert.ok(available.includes(catalog.graduationNoGate));
     assert.ok(available.includes(catalog.graduationMeasurement(0, 0)));
-    assert.equal(available.includes(catalog.graduationMet), false);
-    const applied = render({ m: catalog, control: { ...CONTROL,
-      active: true, graduationExceptionApplied: true } });
-    assert.ok(textOf(applied).includes(catalog.exceptionApplied));
-    assert.ok(textOf(applied).includes(catalog.graduationUnmet));
+    const applied = render({ m: catalog, control: { ...CONTROL, active: true } });
     assert.equal(byId(applied, "amux-auto-admission-confirmation"), undefined);
     assert.equal(byId(applied, "amux-auto-admission-stop")!.disabled, false);
   }
@@ -223,14 +212,12 @@ test("checkbox approval and local gates control activation while the label owns 
   const label = propsOf(tree).find((props) => props.htmlFor === input.id)!;
   assert.match(label.className as string, /min-h-11/);
   assert.equal(input["aria-describedby"], "amux-auto-admission-confirmation-help");
-  for (const control of [{ ...CONTROL, codeLatch: false }, { ...CONTROL, environmentEnabled: false }]) {
-    assert.equal(byId(render({ control, confirmed: true }), "amux-auto-admission-activate")!.disabled, true);
-  }
+  const unmet = { ...CONTROL, graduation: { ok: false, count: 0, spanMs: 0 } };
+  assert.equal(byId(render({ control: unmet, confirmed: true }), "amux-auto-admission-activate")!.disabled, true);
 });
 
 test("busy and unknown writes disable mutation; unknown keeps safe reads available", () => {
-  const active = { ...CONTROL, active: true, graduationExceptionApplied: true,
-    environmentEnabled: false, codeLatch: false };
+  const active = { ...CONTROL, active: true };
   assert.equal(byId(render({ control: active }), "amux-auto-admission-stop")!.disabled, false);
   for (const pending of ["reading", "activating", "stopping"] as const) {
     const tree = render({ control: active, pending });

@@ -1,0 +1,146 @@
+#!/bin/bash
+# Starts the AMUX Decision Maker relay when a reboot left it stopped. A relay
+# that halted (only one built before 2026-11-16 can) is left for Admin.
+#
+# docs/ops/amux/bridge-monitoring.md §6 is the runbook. Off until the operator
+# installs it (install.sh beside this file); a systemd timer then runs it every
+# two minutes.
+#
+# Since 2026-11-16 the relay (tomverse-amux-dm-relay.service,
+# apps/tomverse-orchestrator/src/dm_relay/) never halts: a write whose answer
+# it lost, or that was refused for now, is kept owed and sent again by its key
+# on every tick (dm_relay/owed.rs). A relay built before that does not exit
+# when it halts. It prints one line,
+#
+#   amux dm relay halt: <cause>; ... until the bridge restarts. Read the request in Admin first.
+#
+# and stays active doing nothing but releasing local markers, so systemd's own
+# Restart=on-failure never sees it. Such a run is left halted and logged once
+# per check: that relay kept its duties (a session to pause, an instance whose
+# cleanup is unknown, a result to record) in its process alone, and its halt
+# line names only the first cause, so a restart could lose a duty and let the
+# next answer reach that session or instance (review r-20261116-195913-289714).
+# A person settles it in Admin and restarts the relay, which is then the new
+# binary that never halts.
+#
+# The one case started is a relay that is inactive and has not been active
+# once since this boot (ActiveEnterTimestampMonotonic=0), the state a reboot
+# left the static unit in on 2026-11-09. The unit now has an [Install] section,
+# so an enabled relay starts at boot and this covers a host where it is not
+# enabled. The same health checks and re-read apply.
+#
+# Any other relay that exited is systemd's: Restart=on-failure restarts a
+# crash, exit 2 (enabled without a usable token) waits for a person, and one a
+# person stopped has been active this boot and is left alone.
+#
+# Runs as its own system account. A polkit rule installed with it lets that
+# account restart this one unit and nothing else; it reads the journal through
+# the systemd-journal group the unit grants it.
+set -euo pipefail
+
+unit=tomverse-amux-dm-relay.service
+amux_health=https://127.0.0.1:8824/health
+app_health=https://tomverse.app/api/health
+
+log() { echo "tomverse-dm-relay-autorestart: $*"; }
+
+# As a relay built before 2026-11-16 printed it (dm_relay/io.rs).
+halt_line='^amux dm relay halt: ([a-z0-9_]+); .* until the bridge restarts\. Read the request in Admin first\.$'
+
+# Prints "hold <cause>" for a run that halted, "running" for one that did not.
+# A halt line comes only from a relay built before 2026-11-16, and that relay
+# kept its duties in its process alone: a session still to pause, an instance
+# whose cleanup is unknown, a result still to record -- and its halt line names
+# only the first cause, not the duties a later step added (review
+# r-20261116-195913-289714). A restart would lose them, so such a run is left
+# halted for a person to settle in Admin. The new relay never halts: it keeps
+# every duty in its owed-record file across a restart.
+decide() {
+  local lines=$1 line
+  while IFS= read -r line; do
+    if [[ "$line" =~ $halt_line ]]; then
+      echo "hold ${BASH_REMATCH[1]}"
+      return
+    fi
+  done <<<"$lines"
+  echo running
+}
+
+answers() {
+  curl --silent --show-error --fail --max-time 5 --output /dev/null "$@" 2>/dev/null
+}
+
+# "<ActiveState> <SubState> <ActiveEnterTimestampMonotonic> <InvocationID>" of
+# the relay's current run. The id is last: an inactive unit may have none.
+current_run() {
+  printf '%s %s %s %s' \
+    "$(systemctl show -p ActiveState --value "$unit" 2>/dev/null || true)" \
+    "$(systemctl show -p SubState --value "$unit" 2>/dev/null || true)" \
+    "$(systemctl show -p ActiveEnterTimestampMonotonic --value "$unit" 2>/dev/null || true)" \
+    "$(systemctl show -p InvocationID --value "$unit" 2>/dev/null || true)"
+}
+
+judged=$(current_run)
+read -r state sub entered invocation <<<"$judged"
+if [[ "$state" == inactive && "$sub" == dead && "$entered" == 0 ]]; then
+  # Possibly never active since this boot. 2026-11-09: a reboot left the
+  # then-static unit dead for five days. The timestamp alone is not proof: a
+  # stopped unit that is not enabled and that nothing refers to is collected
+  # by systemd, and reads back as dead with a zero timestamp. So the relay's
+  # own journal for this boot decides: any line at all -- its own output, or
+  # systemd's "Started"/"Stopped" lines for the unit -- means it ran this boot,
+  # and a relay a person stopped stays stopped. One whose switch is off exits
+  # 0 at once, leaves lines, and is never started again.
+  if [[ "$(systemctl show -p LoadState --value "$unit" 2>/dev/null || true)" != loaded ]]; then
+    exit 0
+  fi
+  if ! booted=$(journalctl -u "$unit" -b 0 -n 1 --no-pager -q -o cat 2>/dev/null); then
+    log "$unit is inactive and its journal for this boot is unreadable; left alone"
+    exit 0
+  fi
+  [[ -z "$booted" ]] || exit 0
+  what="was not started since boot"
+  cause=not_started_since_boot
+elif [[ "$state" == active && "$sub" == running ]]; then
+  if [[ ! "$invocation" =~ ^[0-9a-f]{32}$ ]]; then
+    log "$unit is running but its run is unreadable (no invocation id); left alone"
+    exit 0
+  fi
+  if ! lines=$(journalctl "_SYSTEMD_INVOCATION_ID=$invocation" --no-pager -q -o cat 2>/dev/null); then
+    log "$unit's journal is unreadable; left alone"
+    exit 0
+  fi
+  read -r verdict reason <<<"$(decide "$lines")"
+  if [[ "$verdict" == hold ]]; then
+    log "$unit halted with cause=$reason; a relay from before 2026-11-16 holds duties a restart would lose; left halted for Admin"
+  fi
+  exit 0
+else
+  # Stopped by a person, off, failed (left to systemd and, for exit 2, to a
+  # person) or on its way somewhere.
+  exit 0
+fi
+
+# The local AMUX server's certificate is self-signed; the relay unit's start
+# check reads it the same way.
+if ! answers --insecure "$amux_health"; then
+  log "$unit $what; the local AMUX server does not answer, no restart this run"
+  exit 0
+fi
+if ! answers --proto '=https' "$app_health"; then
+  log "$unit $what; the Tomverse app does not answer, no restart this run"
+  exit 0
+fi
+
+# Read again right before the restart: a person may have started, restarted
+# or stopped the unit while this run was checking, and the new state is not
+# the one judged. `restart` starts a unit that is not running.
+if [[ "$(current_run)" != "$judged" ]]; then
+  log "$unit changed while it was being checked; left alone"
+  exit 0
+fi
+if systemctl restart --no-block "$unit"; then
+  log "$unit $what with cause=$cause; restarted"
+else
+  log "$unit $what with cause=$cause; the restart was refused" >&2
+fi

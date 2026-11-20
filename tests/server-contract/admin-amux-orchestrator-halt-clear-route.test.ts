@@ -102,7 +102,7 @@ test("only an owner with a recent step-up reaches the clear", async () => {
   // A stale step-up is 428 with the code the panel turns into the way back.
   reset({
     session: {
-      user: { id: "owner-1", authenticatedAt: new Date(Date.now() - 6 * 60 * 60_000).toISOString() },
+      user: { id: "owner-1", authenticatedAt: new Date(Date.now() - 9 * 60 * 60_000).toISOString() },
     },
   });
   const stale = await POST(request(valid));

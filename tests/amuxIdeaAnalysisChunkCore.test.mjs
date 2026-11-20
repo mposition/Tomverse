@@ -2,8 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  AMUX_ANALYSIS_CHUNK_CARD_CAP,
-  AMUX_ANALYSIS_CHUNK_MAX_BYTES,
   inspectAmuxAnalysisChunk,
   inspectAmuxStoredAnalysisUnit,
 } from "../lib/amux/ideaAnalysisChunkCore.ts";
@@ -26,6 +24,8 @@ const inspect = (value, overrides = {}) => verdict(inspectAmuxAnalysisChunk({
   requiredSchemaVersion: null,
   ...overrides,
 }));
+
+// Owner direction 2026-11-15: no length or count limit.
 
 const node = (localId = "c0:node-1") => ({
   kind: "node",
@@ -135,8 +135,8 @@ test("a retained unit is still readable after another unit's body is purged", ()
   }), { ok: false });
 });
 
-test("eight cards cap a chunk, not an entire project idea", () => {
-  const first = chunk(Array.from({ length: AMUX_ANALYSIS_CHUNK_CARD_CAP }, (_, index) =>
+test("a chunk has no card cap", () => {
+  const first = chunk(Array.from({ length: 8 }, (_, index) =>
     story(`c0:card-${index + 1}`)));
   first.coverageStatus = "more";
   first.continuationKind = "output";
@@ -144,7 +144,12 @@ test("eight cards cap a chunk, not an entire project idea", () => {
   assert.equal(inspect(first).ok, true);
   const second = { ...chunk([story("c1:card-1")]), previewId: "preview-02", chunkIndex: 1 };
   assert.equal(inspect(second, { expectedChunkIndex: 1, expectedPreviewId: "preview-02" }).ok, true);
-  assert.deepEqual(inspect(chunk([...first.units, story("c0:card-9")])), { ok: false, code: "too_large" });
+  const nine = chunk([...first.units, story("c0:card-9")]);
+  assert.equal(inspect(nine).ok, true);
+  const many = chunk(Array.from({ length: 60 }, (_, index) => story(`c0:card-${index + 1}`)));
+  const admitted = inspect(many);
+  assert.equal(admitted.ok, true);
+  if (admitted.ok) assert.equal(admitted.counts.cards, 60);
 });
 
 test("a new source-plan revision may begin at a later global chunk identity", () => {
@@ -363,9 +368,16 @@ test("extra fields, unexpected chunk identity, duplicate IDs, and duplicate refs
   assert.deepEqual(inspect({ ...chunk(), chunkIndex: 1 }), { ok: false, code: "schema_rejected" });
   assert.deepEqual(inspect({ ...chunk(), previewId: "preview-other" }), { ok: false, code: "schema_rejected" });
   assert.deepEqual(inspect(chunk([story(), story()])), { ok: false, code: "schema_rejected" });
+  // A repeated ref is kept once.
   const repeated = story();
   repeated.sourceRefIds = [sourceRef, sourceRef];
-  assert.deepEqual(inspect(chunk([repeated])), { ok: false, code: "schema_rejected" });
+  const kept = inspectAmuxAnalysisChunk({ raw: JSON.stringify(chunk([repeated])),
+    expectedPreviewId: "preview-01", expectedChunkIndex: 0, expectedRevisionChunkIndex: 0,
+    previousContinuationKind: null, permittedSourceRefIds: [sourceRef],
+    permittedTargetRefs: [{ ref: "feature_existing_01", kind: "node", level: "feature" }],
+    requiredSchemaVersion: 2 });
+  assert.equal(kept.ok, true);
+  if (kept.ok) assert.deepEqual(kept.chunk.units[0].sourceRefIds, [sourceRef]);
   assert.deepEqual(inspect(chunk([{ ...story(), unreviewed: "secret" }])), {
     ok: false, code: "schema_rejected",
   });
@@ -452,34 +464,75 @@ test("private paths, personal data and credentials cannot enter proposal text", 
     value.executionBrief = `Review ${hidden} this task`;
     assert.deepEqual(inspect(chunk([value])), { ok: false, code: "content_refused" });
   }
+  // A line break in a title becomes one space.
   const multilineTitle = story();
+  multilineTitle.title = "First line\r\n  Second line";
+  const joined = inspect(chunk([multilineTitle]));
+  assert.equal(joined.ok, true);
+  if (joined.ok) assert.equal(joined.chunk.units[0].title, "First line Second line");
   multilineTitle.title = "First line\nSecond line";
-  assert.deepEqual(inspect(chunk([multilineTitle])), { ok: false, code: "content_refused" });
   const korean = story();
   korean.title = "한국어 작업 분석";
   assert.equal(inspect(chunk([korean])).ok, true);
 });
 
-test("raw and normalized output are bounded without silent truncation", () => {
-  const oversized = "x".repeat(AMUX_ANALYSIS_CHUNK_MAX_BYTES + 1);
-  assert.deepEqual(inspectAmuxAnalysisChunk({
-    raw: oversized,
+test("only the 4 MiB safety ceiling bounds an answer", () => {
+  const raw = (bytes, requiredSchemaVersion = 2) => inspectAmuxAnalysisChunk({
+    raw: "x".repeat(bytes),
     expectedPreviewId: "preview-01",
     expectedChunkIndex: 0,
     expectedRevisionChunkIndex: 0,
     previousContinuationKind: null,
     permittedSourceRefIds: [sourceRef],
     permittedTargetRefs: [],
-    requiredSchemaVersion: null,
-  }), { ok: false, code: "too_large" });
+    requiredSchemaVersion,
+  });
+  // Past the former 64 KiB the answer is read (and refused here only as non-JSON).
+  assert.equal(raw(65_536 + 1).code, "schema_rejected");
+  assert.deepEqual(raw(4 * 1024 * 1024 + 1), { ok: false, code: "too_large" });
   const huge = story();
   huge.title = "x".repeat(201);
-  assert.deepEqual(inspect(chunk([huge])), { ok: false, code: "too_large" });
-  assert.deepEqual(inspect(chunk(Array.from({ length: 17 }, (_, index) =>
-    node(`c0:node-${index + 1}`)))), { ok: false, code: "too_large" });
-  assert.deepEqual(inspect(chunk(Array.from({ length: 17 }, (_, index) => ({
-    ...evidence(), localId: `c0:evidence-${index + 1}`,
-  })))), { ok: false, code: "too_large" });
+  const nodes = chunk(Array.from({ length: 17 }, (_, index) => node(`c0:node-${index + 1}`)));
+  assert.equal(inspect(chunk([huge])).ok, true);
+  assert.equal(inspect(nodes).ok, true);
+});
+
+test("a long brief, problem and scope list pass; a page is not refused for a field's length", () => {
+  const long = (label, bytes) => `${label} `.repeat(Math.ceil(bytes / (label.length + 1))).trim();
+  const value = task();
+  value.parentStoryRef = null;
+  // Past the former 2,000-byte field limit and past the former 8 KiB content scan.
+  value.executionBrief = long("Read the module, then change it and test it.", 12_000);
+  value.problem = long("The workflow loses work when a page is refused.", 5_000);
+  value.scopeIn = Array.from({ length: 30 }, (_, index) => `${long("Scope item", 600)} ${index}`);
+  value.completionCriteria = Array.from({ length: 20 }, (_, index) => `Criterion ${index} holds.`);
+  value.dependencyRefs = [];
+  const admitted = inspect(chunk([story(), value]), { requiredSchemaVersion: 2 });
+  assert.equal(admitted.ok, true, JSON.stringify(admitted));
+  if (admitted.ok) {
+    assert.equal(admitted.chunk.units[1].executionBrief, value.executionBrief);
+    assert.equal(admitted.chunk.units[1].scopeIn.length, 30);
+  }
+});
+
+test("untrimmed text and CRLF are normalised instead of refusing the page", () => {
+  const value = story();
+  value.problem = "  Operators cannot see why.\r\nThe reason is lost.  ";
+  value.scopeIn = [" Show a bounded reason code\t"];
+  const admitted = inspect(chunk([value]), { requiredSchemaVersion: 2 });
+  assert.equal(admitted.ok, true, JSON.stringify(admitted));
+  if (admitted.ok) {
+    assert.equal(admitted.chunk.units[0].problem, "Operators cannot see why.\nThe reason is lost.");
+    assert.deepEqual(admitted.chunk.units[0].scopeIn, ["Show a bounded reason code"]);
+  }
+});
+
+test("a stored unit is re-read without any length limit", () => {
+  const value = story();
+  value.title = "x".repeat(300);
+  const stored = inspectAmuxStoredAnalysisUnit({
+    raw: JSON.stringify(value), chunkIndex: 0, permittedSourceRefIds: [sourceRef] });
+  assert.equal(stored.ok, true);
 });
 
 test("model text is parsed as data, never an instruction or approval", () => {
@@ -550,18 +603,20 @@ test("v5 Tasks name their expected paths and never propose a review Task", () =>
     assert.equal(Object.hasOwn(accepted.chunk.units[0], "expectedPaths"), false);
   }
 
-  // A v5 Task without paths, with none, with too many or with a duplicate is refused.
+  // A v5 Task without paths or with none is refused. Any number of paths is
+  // admitted and a repeated or untrimmed one is normalised.
   const withoutPaths = v5Task();
   delete withoutPaths.expectedPaths;
   assert.deepEqual(inspect(v5([v5Story(), withoutPaths])), rejected);
   assert.deepEqual(inspect(v5([v5Story(), v5Task({ expectedPaths: [] })])),
     { ok: false, code: "metadata_incomplete" });
   const fortyOne = Array.from({ length: 41 }, (_, index) => `lib/example/file${index}.ts`);
-  assert.deepEqual(inspect(v5([v5Story(), v5Task({ expectedPaths: fortyOne })])),
-    { ok: false, code: "too_large" });
+  assert.equal(inspect(v5([v5Story(), v5Task({ expectedPaths: fortyOne })])).ok, true);
   assert.equal(inspect(v5([v5Story(), v5Task({ expectedPaths: fortyOne.slice(0, 40) })])).ok, true);
-  assert.deepEqual(inspect(v5([v5Story(), v5Task({ expectedPaths: ["lib/a.ts", "lib/a.ts"] })])), rejected);
-  for (const bad of [7, null, "", " lib/a.ts", "lib/a.ts\nlib/b.ts"]) {
+  const repeated = inspect(v5([v5Story(), v5Task({ expectedPaths: ["lib/a.ts", "lib/a.ts", " lib/b.ts"] })]));
+  assert.equal(repeated.ok, true);
+  if (repeated.ok) assert.deepEqual(repeated.chunk.units[1].expectedPaths, ["lib/a.ts", "lib/b.ts"]);
+  for (const bad of [7, null, "", "lib/a.ts\nlib/b.ts"]) {
     assert.equal(inspect(v5([v5Story(), v5Task({ expectedPaths: [bad] })])).ok, false, String(bad));
   }
   // A Story never carries paths.

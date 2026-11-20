@@ -20,7 +20,11 @@ const receipt = (routes, caps = {}) => {
   return result.receipt;
 };
 const chore = route("v22-chore-investigate", "claude-chore");
-const contract = route("v22-contract-investigate", "claude-contract");
+// An added route on another model: the case v48's consent is for. Since
+// 2026-11-13 a route added on the same provider and model as a registered one
+// is itself approved (lib/amux/v4TaskCostCeilingCore.ts), so it needs none.
+const contract = route("v22-contract-investigate", "claude-contract",
+  { modelId: "claude-fable-5-2" });
 
 test("v48: the owner's consent covers only a route the catalog added after registration", () => {
   const registered = receipt([chore]);
@@ -28,6 +32,10 @@ test("v48: the owner's consent covers only a route the catalog added after regis
   assert.equal(amuxV22RecoveryAddedRouteConsented(registered, current, contract.routeId), true);
   // Unchanged routes need no consent at all.
   assert.equal(amuxV22RecoveryAddedRouteConsented(current, current, contract.routeId), true);
+  // One more worker on the registered model needs none either, whichever is selected.
+  const sameModel = route("v22-chore2-investigate", "claude-chore-2");
+  assert.equal(amuxV22RecoveryAddedRouteConsented(registered, receipt([chore, sameModel]),
+    chore.routeId), true);
 });
 
 test("v48: a changed existing route, raised bounds or ceiling, or a wrong selection still refuse", () => {

@@ -11,15 +11,10 @@ import { apiSecurityResponse, consumeApiRateLimit, readLimitedText } from "@/lib
 import { ideaSendPath } from "@/lib/amux/ideaSendPath";
 import { amuxIdeaSessionPrewriteStatus } from "@/lib/amux/ideaSessionSubmissionCore";
 import { AmuxIdeaSessionSubmissionError } from "@/lib/amux/ideaSessionSubmissionService";
-import {
-  AMUX_V4_IDEA_READBACK_ENV,
-  AMUX_V4_IDEA_SUBMISSION_ENV,
-  ideaSubmissionReadBackPermitted,
-  ideaSubmissionWritePermitted,
-  isAmuxIdeaRequestId,
-} from "@/lib/amux/ideaSubmissionCore";
+import { isAmuxIdeaRequestId } from "@/lib/amux/ideaSubmissionCore";
 import { IdeaSubmissionError } from "@/lib/amux/ideaSubmissionService";
 import { authOptions } from "@/lib/auth";
+import { retryDailyProductTask } from "@/lib/dailyProductAgentStore";
 import { suggestionIdeaText, suggestionSendRequestId } from "@/lib/productResearchScoutCore";
 import { sendScoutSuggestion } from "@/lib/productResearchScoutSend";
 import { closeSuggestion, readSuggestion } from "@/lib/productResearchScoutStore";
@@ -30,6 +25,7 @@ import { closeSuggestion, readSuggestion } from "@/lib/productResearchScoutStore
 //   { "action": "dismiss" }   owner or ops
 //   { "action": "complete" }  owner or ops, after implementation and verification
 //   { "action": "send" }      owner
+//   { "action": "retry_agent" } owner, known pre-publication failures only
 //
 // Sending makes an AMUX idea from the suggestion through the same intake the
 // idea form uses (lib/amux/ideaSendPath.ts) -- its gates, its content scan, its
@@ -83,15 +79,21 @@ export async function POST(request: Request, { params }: { params: Promise<{ sug
     } catch {
       return json({ error: "invalid_request" }, 400);
     }
-    if (body.action !== "dismiss" && body.action !== "send" && body.action !== "complete") return json({ error: "invalid_action" }, 400);
+    if (body.action !== "dismiss" && body.action !== "send" && body.action !== "complete" && body.action !== "retry_agent") return json({ error: "invalid_action" }, 400);
 
-    const session = await admin(body.action === "send" ? ["owner"] : ["owner", "ops"]);
+    const session = await admin(body.action === "send" || body.action === "retry_agent" ? ["owner"] : ["owner", "ops"]);
     if (session instanceof NextResponse) return session;
 
     const suggestion = await readSuggestion(suggestionId);
     if (!suggestion) return json({ error: "not_found" }, 404);
     if (suggestion.status !== "open") {
       return json({ status: suggestion.status, amuxIdeaId: suggestion.amuxIdeaId });
+    }
+
+    if (body.action === "retry_agent") {
+      await consumeApiRateLimit(request, session.user!.id!, "admin-product-research-agent-retry", { minute: 5, day: 50 });
+      return await retryDailyProductTask({ id: suggestionId, session, request })
+        ? json({ status: "retry_queued" }) : json({ error: "agent_retry_unavailable" }, 409);
     }
 
     if (body.action === "dismiss") {
@@ -107,10 +109,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ sug
 
     const requestId = suggestionSendRequestId(suggestion.id);
     if (!isAmuxIdeaRequestId(requestId)) return json({ error: "invalid_request_id" }, 500);
-    if (!ideaSubmissionWritePermitted(process.env[AMUX_V4_IDEA_SUBMISSION_ENV]) ||
-        !ideaSubmissionReadBackPermitted(process.env[AMUX_V4_IDEA_READBACK_ENV])) {
-      return json({ error: "amux_submission_disabled" }, 503);
-    }
     await consumeApiRateLimit(request, session.user!.id!, "admin-product-research-suggestion-send", { minute: 5, day: 50 });
 
     const path = await ideaSendPath({
@@ -121,6 +119,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ sug
       sessionDisplay: "Scout suggestion",
     });
     if (!path.ok) return json({ error: path.code }, path.status);
+    const { reserveScoutSend } = await import("@/lib/productResearchScoutStore");
+    if (!(await reserveScoutSend({ session, request, id: suggestionId }))) {
+      return json({ error: "coding_agent_owns_suggestion" }, 409);
+    }
     const result = await sendScoutSuggestion({
       readBack: path.readBack,
       submit: path.submit,

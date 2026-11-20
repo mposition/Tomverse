@@ -20,7 +20,13 @@ mock.module(mod("lib/chatSecurity.ts"), { namedExports: { ...security,
   identifyChatCaller: security.identifyChatCaller,
 } });
 mock.module(mod("lib/apiSecurity.ts"), { namedExports: { ...apiSecurity, consumeApiRateLimit: async (_request: Request, subject: string) => { subjects.push(subject); if (limited) throw Error("rate limited"); } } });
-mock.module(mod("lib/chatLocationIntent.ts"), { namedExports: { detectChatLocationIntent: async () => { analysed++; return true; } } });
+mock.module(mod("lib/chatLocationIntent.ts"), { namedExports: {
+  detectChatLocationIntent: async (_text: string, options?: { onOutcome: (value: "classified") => void }) => {
+    analysed++;
+    options?.onOutcome("classified");
+    return true;
+  },
+} });
 mock.module(mod("lib/turnstile.ts"), { namedExports: { ensureGuestVerified: async (request: Request, token: string | undefined, action: string) => {
   assert.equal(action, "guest_chat");
   if ((request.headers.get("cookie") ?? "").split(";").some(cookie => cookie.trim() === "synthetic-grant=1")) return undefined;
@@ -41,6 +47,30 @@ test("authenticated intent replies are private and contain no coordinates", asyn
   reset(); const response = await ask(); assert.equal(response.status, 200);
   assert.equal(response.headers.get("cache-control"), "private, no-store");
   assert.deepEqual(await response.json(), { requiresLocation: true }); assert.equal(analysed, 1);
+});
+test("early analysis requires the submitted account and the enabled fresh-chat switch", async () => {
+  reset();
+  const priorFlag = process.env.CHAT_FRESH_LOCATION_PREPARATION_ENABLED;
+  const body = { text: "Where am I?", freshAccountId: "owner" };
+  try {
+    delete process.env.CHAT_FRESH_LOCATION_PREPARATION_ENABLED;
+    assert.deepEqual(await (await ask(body)).json(), { requiresLocation: false, preparationOutcome: "not_dispatched" });
+    process.env.CHAT_FRESH_LOCATION_PREPARATION_ENABLED = "true";
+    assert.equal((await ask({ ...body, freshAccountId: "other" })).status, 403);
+    assert.equal((await ask({ ...body, turnstileToken: "valid-challenge" })).status, 403);
+    user = null;
+    assert.equal((await ask(body, "synthetic-grant=1")).status, 403);
+    assert.equal(analysed, 0);
+    user = "owner";
+    const classified = await ask(body);
+    assert.equal(classified.headers.get("cache-control"), "private, no-store");
+    assert.deepEqual(await classified.json(), { requiresLocation: true, preparationOutcome: "classified" });
+    assert.equal(analysed, 1);
+  } finally {
+    if (priorFlag === undefined) delete process.env.CHAT_FRESH_LOCATION_PREPARATION_ENABLED;
+    else process.env.CHAT_FRESH_LOCATION_PREPARATION_ENABLED = priorFlag;
+    reset();
+  }
 });
 test("guests use the existing challenge before analysis, then reuse its grant", async () => {
   reset(); user = null;

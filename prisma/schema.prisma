@@ -13,6 +13,7 @@ model User {
   mcpConnections McpConnection[]
   mcpInvocations McpInvocation[]
   mcpOAuthFlows McpOAuthFlow[]
+  mcpCustomServers McpCustomServer[]
   codeTaskReservations CodeTaskReservation[]
   id                            String        @id @default(cuid())
   name                          String?
@@ -87,6 +88,7 @@ model User {
   mobileStoreTransactions              MobileStoreTransaction[]
   mobileStorePurchaseAuthorizations    MobileStorePurchaseAuthorization[]
   chatCreditReservations               ChatCreditReservation[]
+  researchPreviewRuns                  ResearchPreviewRun[]
   imageGenerations                     ImageGeneration[]
   messageArtifacts                     MessageArtifact[]
   messageAttachments                   MessageAttachment[]
@@ -119,6 +121,7 @@ model User {
   assistantProfileVersions             AssistantProfileVersion[]
   assistantKnowledgeFiles              AssistantKnowledgeFile[]
   assistantKnowledgeChunks             AssistantKnowledgeChunk[]
+  semanticRetrievalCache               SemanticRetrievalCache[]
   assistantProfileImports              AssistantProfileImport[]
   assistantKnowledgeUploadReservations AssistantKnowledgeUploadReservation[]
   emailPreferences                     EmailPreference[]
@@ -132,6 +135,7 @@ model User {
   modelMigrationRecords                ModelMigrationRecord[]
   mobileDevices                        MobileDevice[]
   mobileTokenFamilies                  MobileTokenFamily[]
+  externalApiKeys                      ExternalApiKey[]
   mobileLoginGrants                    MobileLoginGrant[]
   mobileAuthEvents                     MobileAuthEvent[]
   quotaScopes                          QuotaScope[]
@@ -187,6 +191,20 @@ model McpOAuthFlow {
   createdAt DateTime @default(now())
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   @@index([userId, expiresAt])
+}
+
+// A remote MCP server URL one user entered; its id is McpConnection.serverId.
+// The policy (URL, auth, discovered OAuth endpoints) is fixed at registration.
+model McpCustomServer {
+  id String @id
+  userId String
+  name String
+  url String
+  auth String
+  oauth Json?
+  createdAt DateTime @default(now())
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([userId, url, auth])
 }
 
 model McpInvocation {
@@ -473,11 +491,13 @@ model Conversation {
   promptRefinerSuggestions PromptRefinerChatSuggestion[]
   promptRefinerProductAttempts PromptRefinerProductAttempt[]
   responseAttempts      ChatResponseAttempt[]
+  routerLocationPreparations ChatRouterLocationPreparation[]
   comparisonReviews     ComparisonReview[]
   imageGenerations      ImageGeneration[]
   imageGenerationGroups ImageGenerationGroup[]
   cacheAffinities       DeploymentCacheAffinity[]
   continuationBridge    ConversationContinuationBridge?
+  researchPreviewRuns   ResearchPreviewRun[]
   user                  User?                           @relation(fields: [userId], references: [id], onDelete: Cascade)
   project               ConversationProject?            @relation(fields: [projectId], references: [id], onDelete: SetNull)
   createdAt             DateTime                        @default(now())
@@ -531,6 +551,7 @@ model Conversation {
   /// no more than that column does.
   pinSeq           Float     @default(0)
   password         String?
+  passwordVersion  Int     @default(0)
   importedGuestKey String?
 
   @@unique([userId, importedGuestKey])
@@ -559,8 +580,11 @@ model Message {
   status          String                  @default("normal")
   modelId         String?
   pendingJobId    String?
+  researchRunId   String?                 @unique
   searchMetadata  Json?
   providerContext MessageProviderContext?
+  researchRun     ResearchPreviewRun?     @relation(fields: [researchRunId], references: [id], onDelete: SetNull)
+  researchSourceRuns ResearchPreviewRun[] @relation("ResearchPreviewSourceMessage")
 
   /// How much account memory this answer's prompt carried. §8.1 invariant 4
   /// forbids storing the injected context as a Message row and explicitly
@@ -688,9 +712,22 @@ model MessageArtifact {
   /// and the card has to name the right model for each without a second read.
   modelId String?
 
+  /// Versioned, validated spreadsheet input. Never part of an app/model DTO.
+  canonicalSpec Json?
+  /// A real source edge, written only from an owned input attachment handle.
+  parentArtifactId String?
+  parentArtifact MessageArtifact? @relation("GeneratedArtifactRevisions", fields: [parentArtifactId], references: [id], onDelete: SetNull)
+  revisions MessageArtifact[] @relation("GeneratedArtifactRevisions")
+  /// Stable group identity remains when a parent is deleted.
+  lineageId String?
+  copiedAttachments MessageAttachment[] @relation("GeneratedArtifactAttachmentSource")
+  copiedUploads MessageAttachmentUpload[] @relation("GeneratedArtifactUploadSource")
+
   createdAt DateTime @default(now())
 
   @@unique([messageId, ordinal])
+  @@index([userId, conversationId, lineageId, createdAt])
+  @@index([parentArtifactId])
   @@index([conversationId, createdAt])
   @@index([userId, createdAt])
 }
@@ -773,6 +810,15 @@ model MessageAttachment {
   /// receipt for the saved message.
   sourceAttachmentId String?
 
+  /// Explicit output-to-input provenance, distinct from attachment resends.
+  sourceArtifactId String?
+  sourceArtifact MessageArtifact? @relation("GeneratedArtifactAttachmentSource", fields: [sourceArtifactId], references: [id], onDelete: SetNull)
+  sourceLineageId String?
+  /// Non-FK receipt: an independent input can outlive its source conversation.
+  sourceConversationId String?
+  /// Independent validated snapshot; survives deletion of the original output.
+  sourceCanonicalSpec Json?
+
   /// When storage confirmed, with a 404, that this object is gone.
   ///
   /// Nullable, and set only from a confirmed 404 -- never from a read that
@@ -800,12 +846,40 @@ model MessageAttachment {
   /// tool needs the second one to know what it has covered.
   availabilityCheckedAt DateTime?
 
+  /// The text an earlier turn extracted from this file, reused by later turns
+  /// (lib/attachmentTextCache.ts). Deleted with this row, in the same
+  /// transaction, by the cascade.
+  textCache MessageAttachmentTextCache?
+
   createdAt DateTime @default(now())
 
   @@unique([messageId, ordinal])
   @@index([conversationId, createdAt])
   @@index([userId, createdAt])
   @@index([unavailableAt])
+  @@index([sourceArtifactId])
+}
+
+/// The text a model-independent extractor read out of one bound account
+/// attachment (PDF text or OCR, Office, legacy Office, plain text), kept so a
+/// later turn does not read and parse the file again
+/// (docs/policy/user-attachment-persistence.md section 7.1).
+///
+/// A row of its own, cascaded from MessageAttachment, rather than an object
+/// next to the file: deleting the attachment -- a conversation, a bulk or an
+/// account deletion -- removes this text in the same transaction, so it can
+/// never outlive the file whatever order a turn and a deletion run in.
+model MessageAttachmentTextCache {
+  attachmentId String            @id
+  attachment   MessageAttachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+
+  /// ATTACHMENT_TEXT_CACHE_VERSION when written; a row of another version is
+  /// never read.
+  version Int
+  /// [{ kind, text }], what the extractor produced, in order.
+  entries Json
+
+  createdAt DateTime @default(now())
 }
 
 /// A finalised upload that has not been bound to a message yet.
@@ -831,12 +905,19 @@ model MessageAttachmentUpload {
 
   objectKey String @unique
 
+  sourceArtifactId String?
+  sourceArtifact MessageArtifact? @relation("GeneratedArtifactUploadSource", fields: [sourceArtifactId], references: [id], onDelete: SetNull)
+  sourceLineageId String?
+  sourceConversationId String?
+  sourceCanonicalSpec Json?
+
   /// When this upload was first bound to a message. Informational: a second
   /// send of the same draft is legitimate and is not refused here.
   boundAt   DateTime?
   createdAt DateTime  @default(now())
 
   @@index([userId, createdAt])
+  @@index([sourceArtifactId])
 }
 
 /// DB-first deletion tombstone for user-supplied attachments, mirroring
@@ -1538,6 +1619,9 @@ model ChatResponseAttempt {
   finishReason        String?
   failureCode         String?
   terminalAt          DateTime?
+  /// Reference-only description of the imported source ranges used by the
+  /// provider attempt that produced a completed saved answer. Never source text.
+  continuationSourcePlan Json?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
@@ -1549,6 +1633,22 @@ model ChatResponseAttempt {
   @@index([conversationId, updatedAt])
   @@index([status, leaseExpiresAt])
   @@index([sourceUserMessageId])
+}
+
+/// One Router call per fresh saved question while its location decision can be resumed.
+/// The browser holds the sealed decision. This row contains only its binding and expiry.
+model ChatRouterLocationPreparation {
+  conversationId      String
+  sourceUserMessageId String
+  assistantMessageId  String
+  requestDigest       String
+  expiresAt           DateTime
+  consumedAt          DateTime?
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, sourceUserMessageId])
+  @@index([expiresAt])
 }
 
 // One in-flight chat response. Counted to enforce concurrency, never to bill.
@@ -1949,6 +2049,8 @@ model ChatCreditReservation {
   settlementAttemptIndex Int?
   settlementAttempt      ChatAttemptUsage?  @relation("ReservationSettlementAttempt", fields: [id, settlementAttemptIndex], references: [reservationId, attemptIndex], onDelete: NoAction, onUpdate: NoAction, map: "ChatCreditReservation_settlementAttempt_fkey")
   attemptUsage           ChatAttemptUsage[]
+  researchPreviewRun     ResearchPreviewRun?
+  externalApiRequest     ExternalApiRequest?
 
   @@index([status, expiresAt])
   @@index([userId, createdAt])
@@ -1956,6 +2058,147 @@ model ChatCreditReservation {
   @@unique([subjectKey, clientTurnId])
   @@index([providerRequestId])
   @@index([providerResponseId])
+}
+
+/// A key the account holder issued for the external inference API (/api/v1).
+/// The secret is shown once, at creation; only its SHA-256 digest is stored.
+/// It authorises inference, the account's own runnable model list and this
+/// key's own usage -- nothing else (docs/policy/external-api.md).
+model ExternalApiKey {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name         String
+  /// Public, non-secret identifier shown in lists and receipts.
+  keyPrefix    String    @unique
+  secretDigest String    @unique
+  /// Optional lifetime credit ceiling the account holder chose for this key.
+  /// Counted from the shared reservations: settled, held and unresolved.
+  creditCap    Int?
+  expiresAt    DateTime?
+  revokedAt    DateTime?
+  lastUsedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  requests     ExternalApiRequest[]
+
+  @@index([userId, createdAt])
+}
+
+/// One external inference request: the content-free link between a key and
+/// the shared ChatCreditReservation that holds and settles its credits. Every
+/// amount lives on the reservation; this row stores no prompt, output, tool
+/// argument, image or key material.
+model ExternalApiRequest {
+  id                   String                @id
+  keyId                String
+  key                  ExternalApiKey        @relation(fields: [keyId], references: [id], onDelete: Cascade)
+  userId               String
+  reservationId        String                @unique
+  reservation          ChatCreditReservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  /// SHA-256 of the client's Idempotency-Key header, when it sent one.
+  idempotencyKeyDigest String?
+  /// SHA-256 of the raw request body bytes, to tell a retry from a reuse; a
+  /// re-serialised body with reordered keys counts as a different request.
+  requestDigest        String
+  clientName           String?
+  modelId              String
+  stream               Boolean
+  /// Wire protocol: chat_completions, anthropic_messages or responses. Rows
+  /// written before the column existed are Chat Completions.
+  protocol             String                @default("chat_completions")
+  finishReason         String?
+  errorCode            String?
+  createdAt            DateTime              @default(now())
+  completedAt          DateTime?
+
+  @@unique([keyId, idempotencyKeyDigest])
+  @@index([userId, createdAt])
+  @@index([keyId, createdAt])
+}
+
+/// A default-off, owner-scoped Research Preview execution that can survive a
+/// request or worker restart without repeating a model dispatch. The prompt is
+/// not copied here: sourceUserMessage is the owned canonical input. Checkpoint
+/// content is private, bounded and erased at every terminal transition.
+model ResearchPreviewRun {
+  id                     String    @id @default(cuid())
+  userId                 String
+  conversationId         String
+  sourceUserMessageId    String
+  assistantMessageId     String    @unique
+  modelId                String
+  provider               String
+  apiModel               String
+  locale                 String
+  currentDate            String
+  questionDigest         String
+  pageReadingEnabled     Boolean   @default(false)
+  totalOutputTokens      Int
+  inputTokenCeiling      Int
+  searchSurchargeCredits Int
+  status                 String    @default("preparing")
+  stopReason             String?
+  reservationId          String?   @unique
+  checkpoint             Json?
+  checkpointVersion      Int       @default(0)
+  checkpointExpiresAt    DateTime?
+  stepCount              Int       @default(0)
+  searchCount            Int       @default(0)
+  readCount              Int       @default(0)
+  settlementUsage        Json?
+  cancelRequestedAt      DateTime?
+  leaseOwner             String?
+  leaseEpoch             Int       @default(0)
+  leaseExpiresAt         DateTime?
+  activeDeadlineAt       DateTime?
+  startedAt              DateTime?
+  completedAt            DateTime?
+  lastErrorCode          String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  user              User                         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation      Conversation                 @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sourceUserMessage Message                      @relation("ResearchPreviewSourceMessage", fields: [sourceUserMessageId], references: [id], onDelete: Cascade)
+  message           Message?
+  reservation       ChatCreditReservation?       @relation(fields: [reservationId], references: [id], onDelete: SetNull)
+  generations       ResearchPreviewGeneration[]
+
+  @@index([userId, createdAt])
+  @@index([conversationId, createdAt])
+  @@index([status, leaseExpiresAt, createdAt])
+  @@index([checkpointExpiresAt])
+}
+
+/// One immutable dispatch boundary within a durable Research Preview run.
+/// `intent` is persisted before the SDK is entered; `dispatch_started` is set
+/// by the model middleware immediately before the provider call. A stale
+/// dispatch_started row is therefore unknown and is never retried.
+model ResearchPreviewGeneration {
+  id                      String    @id @default(cuid())
+  runId                   String
+  generationIndex         Int
+  status                  String    @default("intent")
+  leaseEpoch              Int
+  checkpointVersionBefore Int
+  inputTokens             Int?
+  cachedInputTokens       Int?
+  cacheWriteInputTokens   Int?
+  outputTokens            Int?
+  reasoningTokens         Int?
+  searchCount             Int?
+  readCount               Int?
+  stopReason              String?
+  dispatchStartedAt       DateTime?
+  completedAt             DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  run ResearchPreviewRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, generationIndex])
+  @@index([status, dispatchStartedAt])
 }
 
 // What one dispatched attempt cost, at its own provider's rates.
@@ -2895,6 +3138,10 @@ model ModelRegistryEntry {
   // NULL follows the code (lib/webSearchCapability.ts); 'off' | 'app-managed'
   // is an administrator's override (lib/webSearchOverride.ts).
   webSearchOverride          String?
+  // NULL follows the code (autoArtifactToolSupport in
+  // lib/generatedArtifactToolPolicy.ts); true/false is an administrator's tick
+  // or untick of the file tools for this model.
+  fileToolsOverride          Boolean?
   maxImages                  Int?
   maxBase64ImagePayloadBytes Int?
   maxOutputTokens            Int?
@@ -3596,6 +3843,7 @@ model ExternalConversation {
   /// the same `lib/conversationLock.ts` helpers. Locking a snapshot suspends
   /// the memories it is the last reachable evidence for (§7.1).
   password String?
+  passwordVersion Int @default(0)
 
   messages            ExternalMessage[]
   continuationBridges ConversationContinuationBridge[]
@@ -3676,6 +3924,16 @@ model MemoryItem {
   /// `npm run maintenance:memory-search-terms`.
   searchTerms      String[] @default([])
   retrievalVersion Int      @default(1)
+
+  /// Semantic vector of `statement` (docs/policy/external-conversation-import-and-memory.md §9a): int8 values, one byte each, written
+  /// only while the operator's duplicate-detection switch is on. Null for a
+  /// row that was never embedded -- which is every row until then.
+  /// `embeddingModel` names the provider, model and dimension that produced
+  /// it, followed by a digest of the statement it was computed from. A vector
+  /// under another label -- another model, or wording that has since been
+  /// edited -- is not comparable and is skipped.
+  embedding      Bytes?
+  embeddingModel String?
 
   revision   Int     @default(1)
   userEdited Boolean @default(false)
@@ -4229,6 +4487,15 @@ model AssistantKnowledgeChunk {
   searchTerms      String[] @default([])
   retrievalVersion Int      @default(1)
 
+  /// Semantic vector of this chunk (docs/policy/external-conversation-import-and-memory.md §9a): int8 values, one byte each. Null
+  /// until the operator turns knowledge embedding on and the chunk is
+  /// embedded; a null row is still found by lexical retrieval. For a scanned
+  /// page (`sourceMetadata.kind = "image_page"`) the vector is of the page
+  /// image, since the page has no text to embed. `embeddingModel` names the
+  /// provider, model and dimension; a vector under another label is skipped.
+  embedding      Bytes?
+  embeddingModel String?
+
   /// Where in the document this chunk came from -- character offsets, and the
   /// page for a PDF. Metadata for a citation, never content.
   sourceMetadata Json?
@@ -4238,6 +4505,30 @@ model AssistantKnowledgeChunk {
   @@unique([fileId, ordinal])
   @@index([userId])
   @@index([searchTerms(ops: ArrayOps)], type: Gin, map: "AssistantKnowledgeChunk_searchTerms_gin_idx")
+}
+
+/// Policy: docs/policy/external-conversation-import-and-memory.md §9a.
+/// The outcome of one semantic retrieval call, kept for the minutes a context
+/// bundle lives.
+///
+/// A turn's context is rebuilt on up to three routes and refused when the
+/// rebuilt fingerprint differs from the signed one, so the first outcome for
+/// a (question, candidates) pair has to be the outcome for all of them. `key`
+/// is a SHA-256 over the model, the question and the candidate texts; `value`
+/// holds candidate ids with scores, a query vector, or a recorded failure --
+/// never memory or knowledge text. Rows are swept after `expiresAt` and go
+/// with the account.
+model SemanticRetrievalCache {
+  key    String @id
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  value     Json
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+  @@index([userId])
 }
 
 /// Policy: docs/policy/assistant-package-import.md §5, §6.
@@ -6305,6 +6596,12 @@ model ConversationContinuationBridge {
   /// deliberate fork carries a new key and is a new conversation.
   idempotencyKey String
 
+  /// Reference-only binding for an answer-level Chat -> Review handoff.
+  /// NULL is every ordinary continuation and every source-level Review fork.
+  /// The JSON contains parent/message ids, content digests and omission counts;
+  /// it never contains parent or imported transcript text.
+  reviewHandoff Json?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -7770,6 +8067,30 @@ model MarketingAsset {
   @@index([status])
 }
 
+/// What a marketing ad may say about one Tomverse feature (owner request
+/// 2026-11-12): the facts the box's Higgsfield image job reads instead of
+/// tools/marketing-video/features.json, which stays as its fallback and the
+/// seed. Edited in Admin › Marketing › Settings › Ad facts, each change through
+/// the audit chain. `hold` set means no card is made about it or mentions it.
+/// `disclosure` is not editable there (docs/policy/external-conversation-import-and-memory.md §17.1 short disclosure). Who changed a
+/// row is in its audit entry: no user column, no relation to AdminAuditLog, so
+/// the watched webhook schema does not move.
+model MarketingFeatureFact {
+  id              String   @id
+  position        Int
+  what            String
+  models          String[] @default([])
+  realExample     Json?
+  copy            String?
+  disclosure      Json?
+  source          String
+  hold            String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([position])
+}
+
 /// The analysis behind one marketing brief report (operator decision
 /// 2026-11-01): written in the brief's transaction, read by a person in the
 /// Reports tab, never given to A5. `briefReportId` is a plain column rather
@@ -7943,9 +8264,13 @@ model AmuxWorkItem {
   executionAttempts AmuxExecutionAttempt[]
   v22TaskResults    AmuxV22TaskResult[]
   v22TaskPatches    AmuxV22TaskPatch[]
+  v22TaskChangedPaths AmuxV22TaskChangedPaths[]
   v22OwnerQuestions AmuxV22TaskQuestion[]
   v22ResultReviews  AmuxV22ResultReview[]
+  dmOwnerSettlements AmuxDmOwnerSettlement[]
+  waitReason        AmuxCardWaitReason?
   v52ReviewRecords  AmuxV52ReviewRecord[]
+  v52ReviewFindings AmuxV52ReviewFindings[]
   humanEscalations  AmuxHumanEscalation[]
   costLedgerEntries AmuxCostLedgerEntry[]
   reviewProposals   AmuxReviewProposal[]
@@ -8062,9 +8387,13 @@ model AmuxExecutionAttempt {
   cliUsageEvents    AmuxCliUsageEvent[]
   v22TaskResult     AmuxV22TaskResult?
   v22TaskPatch      AmuxV22TaskPatch?
+  v22TaskChangedPaths AmuxV22TaskChangedPaths?
+  v22TransferParts  AmuxV22TransferPart[]
   v22OwnerQuestion  AmuxV22TaskQuestion?
   v22ResultReview   AmuxV22ResultReview?
+  dmOwnerSettlements AmuxDmOwnerSettlement[]
   v52ReviewRecord   AmuxV52ReviewRecord?
+  v52ReviewFindings AmuxV52ReviewFindings?
   v22AssignmentId   String? @unique @db.Uuid
   v22Assignment     AmuxV22WorkerAssignment? @relation("AmuxV22ExecutionAssignment", fields: [v22AssignmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
@@ -8210,6 +8539,114 @@ model AmuxV22ResultReview {
   @@index([taskId, createdAt])
 }
 
+/// Why one card is not running (owner decision 2026-11-15,
+/// lib/amux/cardWaitReasonStore.ts): the reason the automatic promotion or
+/// the claim passed it over, as a code with structured detail (codes and card
+/// keys only, never worker text). Replaced on every pass, removed when the
+/// card is claimed. `firstSeenAt` is when the same stage and code began;
+/// `reportedAt` when a long wait was raised as an operational incident.
+model AmuxCardWaitReason {
+  taskId      String       @id
+  /// promotion | claim
+  stage       String
+  code        String
+  detail      Json
+  firstSeenAt DateTime
+  lastSeenAt  DateTime
+  seenCount   Int          @default(1)
+  reportedAt  DateTime?
+  task        AmuxWorkItem @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([lastSeenAt])
+}
+
+/// The latest box health signal per worker and source, forwarded by the
+/// worker's bridge (owner decision 2026-11-15,
+/// lib/amux/workerHealthSignalStore.ts): the Claude login keepalive, the
+/// sign-in stage and the sidecar. Non-secret facts only. `firstSeenAt` is
+/// when the current signal began; `reportedAt` when it was raised.
+model AmuxWorkerHealthSignal {
+  workerName  String
+  /// login_keepalive | auth_stage | sidecar
+  source      String
+  signal      String
+  detail      Json
+  observedAt  DateTime
+  firstSeenAt DateTime
+  receivedAt  DateTime
+  reportedAt  DateTime?
+
+  @@id([workerName, source])
+}
+
+/// One AMUX process analysis report (owner request 2026-11-14,
+/// lib/amuxProcessAuditStore.ts): the app's deterministic figures for the
+/// window, the box Codex CLI's structured reading and the Markdown shown in
+/// Admin. Kept 26 weeks.
+model AmuxProcessAuditReport {
+  id          String   @id @default(cuid())
+  windowStart DateTime
+  windowEnd   DateTime
+  /// The develop commit the run read.
+  developSha  String
+  /// codex-subscription
+  channel     String
+  model       String?
+  /// schedule | run_now
+  trigger     String
+  metrics     Json
+  analysis    Json
+  markdown    String
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+/// A stopped v22 Task in the owner queue put to the Decision Maker (owner
+/// decision 2026-11-13, lib/amux/dmOwnerSettlementService.ts). One row per
+/// human escalation; the relay files it as a typed-ask card and the app applies
+/// the answer. The id is a version 8 UUID derived from the escalation.
+model AmuxDmOwnerSettlement {
+  id                 String    @id
+  taskId             String
+  escalationId       String    @unique
+  attemptId          String?
+  /// t2_pr | stopped
+  kind               String
+  /// review | blocked, as the Task stood when it was filed
+  taskStatus         String
+  /// The engineering binding of the pull request (t2_pr), named, not referenced.
+  bindingId          String?
+  /// open | claimed (a remake decided, its idea not filed yet) | applied | cancelled
+  state              String    @default("open")
+  /// stopped: retry | complete | close | remake; t2_pr: approve | retry | close
+  decision           String?
+  /// dm | dm_confirmed
+  answerSource       String?
+  requestId          String?
+  /// An approval: the verified head and diff digest it approved, for the next stage.
+  approvedHeadSha    String?
+  approvedDiffDigest String?
+  /// A remake's idea request id, recorded by its claim before the idea is filed.
+  remakeRequestId    String?
+  remakeIdeaId       String?
+  cancelReason       String?
+  handoffReason      String?
+  handoffAt          DateTime?
+  decidedAt          DateTime?
+  localCardId        String?   @unique
+  localCardClosedAt  DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  task       AmuxWorkItem          @relation(fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  escalation AmuxHumanEscalation   @relation(fields: [escalationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  attempt    AmuxExecutionAttempt? @relation(fields: [attemptId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([state, createdAt])
+  @@index([taskId, createdAt])
+}
+
 /// A bounded patch candidate, not a publication grant. The Publisher may
 /// consume it only after independent app-side T1 verification.
 model AmuxV22TaskPatch {
@@ -8237,8 +8674,83 @@ model AmuxV22TaskPatch {
   @@index([ideaId, bodyPurgedAt])
 }
 
-/// One immutable review-server verdict for a v52 implement attempt. Findings
-/// stay on the review server; only the content-free binding is stored here.
+/// One part of a v22 run's result (result | patch | changed_paths) while it
+/// arrives from the box in chunks (docs/policy/amux-v22-result-transfer.md,
+/// owner decision 2026-11-18). Staging only: the commit that records the part
+/// deletes it, and the content retention tick sweeps what no commit took.
+/// Not export data: every chunk is sealed under the part's own unit key.
+model AmuxV22TransferPart {
+  attemptId  String
+  /// result | patch | changed_paths (AMUX_V22_TRANSFER_PARTS, lib/amux/v22TransferCore.ts).
+  part       String
+  taskId     String
+  ideaId     String
+  worker     String
+  totalBytes Int
+  sha256     String
+  /// The patch's base commit; patch only.
+  baseSha    String?
+  /// How many paths the list holds; changed_paths only.
+  pathCount  Int?
+  createdAt  DateTime @default(now())
+  chunks     AmuxV22TransferChunk[]
+  attempt    AmuxExecutionAttempt @relation(fields: [attemptId, taskId], references: [id, taskId], onDelete: Restrict, onUpdate: Restrict)
+
+  @@id([attemptId, part])
+  @@index([createdAt])
+}
+
+/// One sealed chunk of an AmuxV22TransferPart: at most what one request
+/// carries (AMUX_V22_TRANSFER_CHUNK_BYTES), never a bound on the content.
+model AmuxV22TransferChunk {
+  attemptId   String
+  part        String
+  index       Int
+  byteLength  Int
+  ciphertext  Bytes
+  keyId       String
+  keyVersion  Int
+  /// HMAC of the chunk's plain bytes under the part's digest key.
+  digest      String
+  digestKeyId String
+  createdAt   DateTime @default(now())
+  transfer    AmuxV22TransferPart @relation(fields: [attemptId, part], references: [attemptId, part], onDelete: Cascade, onUpdate: Restrict)
+
+  @@id([attemptId, part, index])
+}
+
+/// One encrypted changed-path list per v22 attempt (purpose
+/// `task_changed_paths`), recorded apart from the result because a failed run
+/// with no result still settles with its paths. Settlement and the v52 review
+/// record name it by digest. Like the result, its body is not purged: the v22
+/// task result retention was removed on 2026-11-18.
+model AmuxV22TaskChangedPaths {
+  attemptId    String    @id
+  taskId       String
+  ideaId       String
+  ciphertext   Bytes?
+  keyId        String?
+  keyVersion   Int?
+  digest       String
+  digestKeyId  String
+  /// sha256 of the encodeAmuxV22ChangedPaths bytes.
+  pathsSha256  String
+  pathCount    Int
+  byteLength   Int
+  createdAt    DateTime  @default(now())
+  bodyPurgedAt DateTime?
+
+  attempt AmuxExecutionAttempt @relation(fields: [attemptId, taskId], references: [id, taskId], onDelete: Restrict, onUpdate: Restrict)
+  task    AmuxWorkItem         @relation(fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  idea    AmuxIdeaSubmission   @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([attemptId, taskId])
+  @@index([ideaId, bodyPurgedAt])
+}
+
+/// One immutable review-server verdict for a v52 implement attempt. The row is
+/// the content-free binding; a reject's findings are the attempt's sealed
+/// AmuxV52ReviewFindings body (owner decision 2026-11-15).
 model AmuxV52ReviewRecord {
   attemptId       String   @id
   taskId          String
@@ -8251,14 +8763,56 @@ model AmuxV52ReviewRecord {
   touchesContract Boolean
   requestDigest   String
   auditLogId      String   @unique
+  /// Legacy (owner decision 2026-11-14): a reject's bounded, redacted reasons
+  /// kept in the clear. New records leave it null; their findings are sealed in
+  /// AmuxV52ReviewFindings. Display only.
+  findingsSummary String?
   createdAt       DateTime @default(now())
 
   attempt  AmuxExecutionAttempt @relation(fields: [attemptId, taskId], references: [id, taskId], onDelete: Restrict, onUpdate: Restrict)
   task     AmuxWorkItem         @relation(fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   auditLog AdminAuditLog        @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  findings AmuxV52ReviewFindings?
 
   @@unique([attemptId, taskId])
   @@index([taskId, createdAt])
+}
+
+/// A rejected v52 review's findings, sealed as one AMUX content unit (purpose
+/// `review_findings`, its own external key per attempt) in the same
+/// transaction as the review record (owner decision 2026-11-15): the
+/// reviewers, each one's reason, and per finding its severity, summary, file
+/// and line. Untrusted text for people, the Decision Maker and the next
+/// attempt's prompt, never authority. No retention purge runs on it (the v22
+/// task result retention code was removed on 2026-11-18); `bodyPurgedAt` marks
+/// a body that was cleared.
+model AmuxV52ReviewFindings {
+  attemptId    String    @id
+  taskId       String
+  ideaId       String
+  ciphertext   Bytes?
+  keyId        String?
+  keyVersion   Int?
+  digest       String
+  digestKeyId  String
+  byteLength   Int
+  findingCount Int
+  /// The same reviewer vendor rejected the Task's previous review for a similar
+  /// blocking finding (lib/amux/v52ReviewFindingsCore.ts amuxV52FindingsRepeat),
+  /// judged when the review was recorded. Settlement reads it to hand a repeated
+  /// rejection to a person instead of running the Task again.
+  repeatsPrior Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  bodyPurgedAt DateTime?
+
+  record  AmuxV52ReviewRecord  @relation(fields: [attemptId, taskId], references: [attemptId, taskId], onDelete: Restrict, onUpdate: Restrict)
+  attempt AmuxExecutionAttempt @relation(fields: [attemptId, taskId], references: [id, taskId], onDelete: Restrict, onUpdate: Restrict, map: "AmuxV52ReviewFindings_attempt_fkey")
+  task    AmuxWorkItem         @relation(fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  idea    AmuxIdeaSubmission   @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([attemptId, taskId])
+  @@index([taskId, createdAt])
+  @@index([ideaId, bodyPurgedAt])
 }
 
 model AmuxCostLedgerEntry {
@@ -8389,6 +8943,7 @@ model AmuxHumanEscalation {
 
   task            AmuxWorkItem         @relation(fields: [taskId], references: [id], onDelete: Restrict)
   reviewProposals AmuxReviewProposal[]
+  dmOwnerSettlement AmuxDmOwnerSettlement?
 
   @@unique([id, taskId])
   @@index([status, createdAt])
@@ -9811,6 +10366,10 @@ model EngineeringAgentWorkItem {
   causeKey       String    @unique
   runId          String?
   patchBody      String?
+  /// A publish item's patch as UTF-8 bytes, written once with the item
+  /// (migration 20261118120100: STORAGE EXTERNAL, so the publisher's chunk
+  /// reads take only their slice). Null on items opened before it.
+  patchBytes     Bytes?
   patchDigest    String?
   baseSha        String?
   expectedTreeId String?
@@ -9825,10 +10384,26 @@ model EngineeringAgentWorkItem {
   run        EngineeringAgentRun?        @relation(fields: [runId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   approval   EngineeringAgentApproval?
   capabilities EngineeringAgentCapability[]
+  dmReview     EngineeringAgentDmReview?
 
   @@index([kind, state])
   @@index([runId])
   @@index([state, leaseExpiresAt])
+}
+
+/// The Decision Maker card a T2 draft was put to for advice
+/// (lib/engineeringAgentT2DmReviewService.ts). The answer is read from the
+/// Decision Maker's own records beside the draft; nothing here decides it.
+/// A draft whose card cannot be written is recorded once with `unfilableAt`
+/// instead, so it never holds back the drafts behind it.
+model EngineeringAgentDmReview {
+  workItemId        String    @id
+  localCardId       String?   @unique
+  unfilableAt       DateTime?
+  localCardClosedAt DateTime?
+  createdAt         DateTime  @default(now())
+
+  workItem EngineeringAgentWorkItem @relation(fields: [workItemId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 }
 
 /// A T2 decision and nothing else: written once, before the draft closes.
@@ -10359,6 +10934,8 @@ model AmuxIdeaSubmission {
   updatedAt           DateTime  @updatedAt
   v22TaskResults      AmuxV22TaskResult[]
   v22TaskPatches      AmuxV22TaskPatch[]
+  v22TaskChangedPaths AmuxV22TaskChangedPaths[]
+  v52ReviewFindings   AmuxV52ReviewFindings[]
   laneAttempts        AmuxIdeaLaneAttempt[]
   cardCloseQuestions  AmuxIdeaCardCloseQuestion[]
 
@@ -11980,6 +12557,47 @@ model ModelCatalogPriceRevision {
   @@index([category, modelId, effectiveFrom])
 }
 
+/// Image billing terms an operator confirmed from a measurement (image policy
+/// section 12.1), per provider model. Append-only: the latest row per provider
+/// and apiModelId is in force; nothing updates or deletes a row.
+model ImageModelBillingTerms {
+  id            String   @id @default(cuid())
+  provider      String
+  apiModelId    String
+  kind          String
+  terms         Json
+  sources       Json
+  measurementId String?
+  actorId       String?
+  actorEmail    String?
+  createdAt     DateTime @default(now())
+
+  @@index([provider, apiModelId, createdAt])
+}
+
+/// One paid billing measurement an operator approved in the admin console:
+/// the plan, each sample's reported usage (never the image), and what it spent
+/// against the provider budget. No user credits are involved.
+model ImageBillingMeasurement {
+  id              String    @id @default(cuid())
+  provider        String
+  apiModelId      String
+  status          String
+  plan            Json
+  maxCostMicroUsd Int
+  spentMicroUsd   Int       @default(0)
+  samples         Json
+  verdict         Json?
+  stopReason      String?
+  actorId         String?
+  actorEmail      String?
+  createdAt       DateTime  @default(now())
+  completedAt     DateTime?
+
+  @@index([provider, apiModelId, createdAt])
+  @@index([status])
+}
+
 /// Immutable published catalogue the Code client reads (managed mode).
 model ModelCatalogSnapshot {
   version       Int      @id @default(autoincrement())
@@ -11992,6 +12610,23 @@ model ModelCatalogSnapshot {
 
   @@index([category, contentHash])
   @@index([category, version])
+}
+
+/// Provider conditions every coding model of one provider is judged against:
+/// terms (resale and coding-agent use), data retention and processing region.
+/// `terms` is what an operator applied, `draft` an LLM re-check waiting for one
+/// (lib/codingCatalogAdmin.ts). Checked more than 90 days ago, it must be
+/// checked again before a new model of that provider turns on.
+model CodingProviderTerms {
+  provider       String    @id
+  terms          Json?
+  draft          Json?
+  draftSource    String?
+  draftCreatedAt DateTime?
+  updatedById    String?
+  updatedByEmail String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 }
 
 /// Code financial metadata only. Generated text and prompts are never stored.

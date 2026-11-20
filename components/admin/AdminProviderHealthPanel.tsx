@@ -52,6 +52,7 @@ const REFRESH_INTERVAL_MS = 120_000;
 const providerConsoleHref: Record<AiProvider, string> = {
   openai: "https://platform.openai.com/settings/organization/billing/overview",
   anthropic: "https://platform.claude.com/dashboard",
+  cohere: "https://dashboard.cohere.com",
   google:
     "https://aistudio.google.com/billing?billing=0126EA-F8BC8E-ED63F7&project=gen-lang-client-0902272053",
   groq: "https://console.groq.com/settings/organization/usage",

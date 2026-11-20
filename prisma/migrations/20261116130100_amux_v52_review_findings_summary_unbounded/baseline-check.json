@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "migrationSqlSha256": "9e96520dc4644dcd9c54c2feace54bfebc82e1c7567219d395d6a1158eeb3d26",
+  "replacedChecks": [
+    {
+      "table": "AmuxV52ReviewRecord",
+      "constraint": "AmuxV52ReviewRecord_findings_summary_check",
+      "previousDefinitionSha256": "bbee1ad484f930f46fd970f0fdd294f802270896d9008c10b0d80e6db3b5f82a"
+    }
+  ]
+}

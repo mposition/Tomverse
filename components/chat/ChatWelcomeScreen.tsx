@@ -4,7 +4,11 @@ import type { ReactNode } from "react";
 import { useSession } from "next-auth/react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { displayHeadingClass } from "@/lib/displayHeading";
-import { History } from "lucide-react";
+import Link from "next/link";
+import { useHelpGuideEnabledFlagKeys } from "@/components/chat/HelpGuideAccess";
+import { rememberSettingsReturnProduct } from "@/components/settings/useSettingsReturnProduct";
+import { HELP_FLAG_KEYS } from "@/lib/helpNavigationIntents";
+import { ArrowRight, FolderInput, History } from "lucide-react";
 
 type ChatWelcomeScreenProps = {
   /**
@@ -43,6 +47,7 @@ type ChatWelcomeScreenProps = {
    * section 2), and it is why this is a slot rather than a boolean.
    */
   starterGallery?: ReactNode;
+  product?: "chat" | "review";
 };
 
 /**
@@ -60,10 +65,12 @@ export function ChatWelcomeScreen({
   onOpenRecentConversations,
   recentDisclosureRef,
   starterGallery,
+  product,
 }: ChatWelcomeScreenProps) {
   const { data: session } = useSession();
   const { t, lang } = useLanguage();
   const welcomeGreeting = session?.user ? t("chat.welcomeBack") : t("chat.welcome");
+  const canImport = useHelpGuideEnabledFlagKeys().has(HELP_FLAG_KEYS.externalImport);
   const recentCount = recentConversations.length;
   const disclosureLabel = t("chat.recentConversationsDisclosure");
 
@@ -87,6 +94,13 @@ export function ChatWelcomeScreen({
         >
           {welcomeGreeting}
         </p>
+        {/*
+          The recent-chats row sits above the import card. Below it, a 320px
+          phone put the area's bottom edge across this 44px row, cutting off
+          the icon and label; above it, the edge crosses a card instead, which
+          reads as "more below" (the same rule as the starter preview line,
+          docs/ui-contracts/chat-starter-catalog.md section 6).
+        */}
         {recentCount > 0 && onOpenRecentConversations && (
           <button
             ref={recentDisclosureRef}
@@ -95,11 +109,31 @@ export function ChatWelcomeScreen({
             data-recent-count={recentCount}
             onClick={() => onOpenRecentConversations()}
             aria-label={disclosureLabel}
-            className="mt-2 flex min-h-11 max-w-full items-center justify-center gap-2 rounded-xl px-3 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-zinc-300 dark:hover:bg-zinc-900"
+            className="mt-2 flex min-h-11 max-w-full shrink-0 items-center justify-center gap-2 rounded-xl px-3 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-zinc-300 dark:hover:bg-zinc-900"
           >
             <History className="h-4 w-4 shrink-0 text-zinc-500 dark:text-zinc-400" aria-hidden="true" />
             <span className="min-w-0 truncate">{disclosureLabel}</span>
           </button>
+        )}
+        {/*
+          `min-h-16` replaces the flex item's automatic minimum height, so
+          without `shrink-0` a short phone squeezed the card below its content
+          and the wrapped second line of the hint fell past the bottom edge.
+        */}
+        {session?.user && canImport && product === "chat" && (
+          <Link
+            onClick={() => rememberSettingsReturnProduct(product)}
+            href="/settings/imports/new"
+            data-testid="chat-import-entry"
+            className="mt-4 flex min-h-16 w-full shrink-0 items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-4 text-left text-zinc-900 transition hover:border-blue-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+          >
+            <FolderInput size={20} className="shrink-0 text-blue-600 dark:text-blue-400" aria-hidden="true" />
+            <span className="min-w-0 flex-1">
+              <strong className="block text-sm">{t("journey.entry")}</strong>
+              <span className="block text-xs text-zinc-600 dark:text-zinc-300">{t("journey.entryHint")}</span>
+            </span>
+            <ArrowRight size={17} className="shrink-0" aria-hidden="true" />
+          </Link>
         )}
         {starterGallery}
       </div>

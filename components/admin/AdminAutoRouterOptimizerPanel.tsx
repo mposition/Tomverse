@@ -1,8 +1,10 @@
 "use client";
 
+import { OptimizerEvidenceView, type OptimizerEvidenceSummary } from "@/components/admin/OptimizerEvidenceView";
 import { formatAestDateTime } from "@/lib/adminUiCore";
 import { ResponseLatencyEvidenceView } from "@/components/admin/ResponseLatencyEvidenceView";
 import type { ResponseLatencyEvidence } from "@/lib/responseLatencyCore";
+import type { DailyTaskImplementation } from "@/lib/dailyProductImplementationCore";
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, Sparkles } from "lucide-react";
 import { AdminConfirmDialog } from "@/components/admin/ui/AdminConfirmDialog";
@@ -19,21 +21,23 @@ import {
 import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
 import { AutoRouterTunables, type TunableAction, type TunableSettingsState } from "@/components/admin/AdminAutoRouterTunables";
 import { adminAutoRouterOptimizerMessages } from "@/lib/adminMessages/autoRouterOptimizer";
+import { OptimizerAnswerComparisons, type OptimizerAnswerComparison } from "@/components/admin/OptimizerAnswerComparisons";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminFetch } from "@/lib/adminFetch";
 import {
   OpenRecommendationsInbox,
   RecommendationControls,
-  optimizerCycleAnchor,
   recommendationKey,
+  type DailyRoutingObservation,
   type RecommendationSendState,
 } from "@/components/admin/AdminAutoRouterRecommendations";
 import {
   actionableRecommendations,
+  optimizerCycleAnchor,
   type RecommendationStatus,
 } from "@/lib/autoRouterRecommendationsCore";
 
-type Summary = {
+type Summary = OptimizerEvidenceSummary & {
   responseLatency?: ResponseLatencyEvidence;
   evaluated: number;
   unchanged: number;
@@ -51,11 +55,13 @@ type Summary = {
     findings: string[];
     recommendations: { kind: string; text: string }[];
   } | null;
-  comparisons?: { kind: string | null; a: string | null; b: string | null; verdict: string }[];
+  comparisons?: OptimizerAnswerComparison[];
   gate?: { basis: "judged" | "direct"; towardWinner: number; towardLoser: number } | null;
 };
 
 type Cycle = {
+  implementations?: Record<number, DailyTaskImplementation>;
+  implementationLookupUnavailable?: boolean;
   id: string;
   createdAt: string;
   status: string;
@@ -65,6 +71,7 @@ type Cycle = {
   summary: Summary | null;
   spentMicroUsd: number;
   promotedAt: string | null;
+  promotionEligibility?: { eligible: boolean; refusal: string | null };
   syntheticCases?: {
     message: string;
     kind: "easy" | "hard" | null;
@@ -75,6 +82,7 @@ type Cycle = {
 };
 
 type OptimizerState = {
+  smartAdaptiveDaily?: DailyRoutingObservation | null;
   responseLatency?: ResponseLatencyEvidence;
   optimizerModelId: string | null;
   automation: { daily: boolean; autoPromote: boolean };
@@ -82,6 +90,7 @@ type OptimizerState = {
   active: { cycleId: string | null; guidance: string; canRollBack: boolean };
   cycles: Cycle[];
   spend: {
+    unconfirmedCycles?: number;
     todayMicroUsd: number;
     monthMicroUsd: number;
     runCapMicroUsd: number;
@@ -169,6 +178,15 @@ export function AdminAutoRouterOptimizerPanel({
     queueMicrotask(() => void load());
   }, [load]);
 
+  // A link from a copied brief may arrive before its cycle has been fetched.
+  const hasCycles = Boolean(state?.cycles.length);
+  useEffect(() => {
+    const anchor = window.location.hash.slice(1);
+    if (hasCycles && anchor.startsWith("optimizer-cycle-")) {
+      document.getElementById(anchor)?.scrollIntoView({ block: "start" });
+    }
+  }, [hasCycles]);
+
   const running = state?.cycles.some((cycle) => cycle.status === "running") ?? false;
   useEffect(() => {
     if (!running) return;
@@ -239,8 +257,6 @@ export function AdminAutoRouterOptimizerPanel({
 
   const status = (value: string) => (m.statuses as Record<string, string>)[value] ?? value;
   const verdict = (value: string) => (m.verdicts as Record<string, string>)[value] ?? value;
-  const comparisonVerdict = (value: string) =>
-    (m.comparisonVerdicts as Record<string, string>)[value] ?? value;
   const recommendationKind = (value: string) =>
     (m.recommendationKinds as Record<string, string>)[value] ?? value;
 
@@ -344,6 +360,7 @@ export function AdminAutoRouterOptimizerPanel({
         <p className="text-xs text-zinc-400" data-testid="admin-auto-router-optimizer-spend">
           {m.spend}: {usd(state.spend.todayMicroUsd)} {m.today} · {usd(state.spend.monthMicroUsd)} {m.month} ·{" "}
           {m.caps} {usd(state.spend.runCapMicroUsd)} / {usd(state.spend.dayCapMicroUsd)} / {usd(state.spend.monthCapMicroUsd)}
+          {state.spend.unconfirmedCycles !== undefined ? ` · ${m.unconfirmedCycles(state.spend.unconfirmedCycles)}` : ` · ${m.totalUnconfirmed}`}
         </p>
       ) : null}
 
@@ -405,6 +422,7 @@ export function AdminAutoRouterOptimizerPanel({
       {state ? (
         <OpenRecommendationsInbox
           cycles={state.cycles}
+          dailyObservation={state.smartAdaptiveDaily}
           busy={busy}
           canSend={canSendToAmux}
           sendState={sendState}
@@ -429,7 +447,7 @@ export function AdminAutoRouterOptimizerPanel({
                 <AdminStatusChip tone={optimizerCycleTone(cycle.status)}>{status(cycle.status)}</AdminStatusChip>
                 {cycle.promotedAt ? <AdminStatusChip tone="info">{m.promoted}</AdminStatusChip> : null}
               </span>
-              {cycle.status === "passed" && !cycle.promotedAt ? (
+              {cycle.status === "passed" && cycle.promotionEligibility?.eligible === true && !cycle.promotedAt ? (
                 <AdminWriteButton
                   {...writeProps}
                   onClick={() => setConfirming({ kind: "promote", cycleId: cycle.id })}
@@ -440,6 +458,8 @@ export function AdminAutoRouterOptimizerPanel({
                 </AdminWriteButton>
               ) : null}
             </div>
+            {cycle.status !== "running" && cycle.promotionEligibility?.refusal && !cycle.promotedAt ? <p className="mt-1 text-xs text-amber-300">{reason(cycle.promotionEligibility.refusal)}</p> : null}
+            <OptimizerEvidenceView summary={cycle.summary} spentMicroUsd={cycle.spentMicroUsd} />
             {cycle.failure ? <p className="mt-1 text-xs text-amber-300">{reason(cycle.failure)}</p> : null}
             {cycle.summary ? (
               <p className="mt-1 text-xs text-zinc-400">
@@ -502,21 +522,7 @@ export function AdminAutoRouterOptimizerPanel({
                 ) : null}
               </div>
             ) : null}
-            {cycle.summary?.comparisons && cycle.summary.comparisons.length > 0 ? (
-              <details className="mt-2" data-testid="admin-auto-router-optimizer-comparisons">
-                <summary className="cursor-pointer text-xs font-bold text-zinc-400">
-                  {m.comparisonsTitle} ({cycle.summary.comparisons.length})
-                </summary>
-                <ul className="mt-2 space-y-1 text-xs text-zinc-300">
-                  {cycle.summary.comparisons.map((item, index) => (
-                    <li key={index}>
-                      {item.kind ? `${(m.kinds as Record<string, string>)[item.kind] ?? item.kind} · ` : ""}
-                      {item.a ?? "-"} vs {item.b ?? "-"} · {comparisonVerdict(item.verdict)}
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            ) : null}
+            <OptimizerAnswerComparisons comparisons={cycle.summary?.comparisons ?? []} />
             {cycle.syntheticCases && cycle.syntheticCases.length > 0 ? (
               <details className="mt-2" data-testid="admin-auto-router-optimizer-synthetic">
                 <summary className="cursor-pointer text-xs font-bold text-zinc-400">
@@ -536,7 +542,7 @@ export function AdminAutoRouterOptimizerPanel({
               </details>
             ) : null}
             <p className="mt-1 text-xs text-zinc-500">
-              {cycle.optimizerModelId} · {m.spent} {usd(cycle.spentMicroUsd)}
+              {cycle.optimizerModelId}
             </p>
             {cycle.candidateGuidance ? (
               <details className="mt-2">

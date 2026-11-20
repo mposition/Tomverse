@@ -11,6 +11,7 @@
 @import "@tomverse/ui-tokens/tokens.css";
 @import "@tomverse/ui-tokens/wordmark.css";
 @import "@tomverse/chat-ui/voice.css";
+@import "../components/chat/researchPreviewRun.css";
 
 /* UI-001. `dark:` used to mean one thing only: an ancestor carries `.dark`.
    That is correct for an explicit choice and wrong for everyone who has not
@@ -310,6 +311,26 @@
   --color-status-switch-on-700: var(--color-emerald-700);
 }
 
+/*
+ * Public-site palette (homepage V2, owner decision 2026-11-20). Marketing,
+ * help, legal and status pages draw their dark surfaces from Tailwind's zinc
+ * utilities; inside [data-tv-site] those resolve to the V2 values instead:
+ * page #111318, card #1c1e25, hover #272a33, hairline #31343f. Accent colours
+ * (blue, the help-centre gradient) are untouched.
+ */
+[data-tv-site] {
+  --color-zinc-950: #111318;
+  --color-zinc-900: #1c1e25;
+  --color-zinc-800: #272a33;
+  --color-zinc-700: #31343f;
+}
+
+/* The public header is sticky from 1024px up; keep anchored and scrolled-to
+   headings clear of it. */
+@media (min-width: 1024px) {
+  html:has([data-tv-site]) { scroll-padding-top: 88px; }
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
@@ -401,61 +422,6 @@ input[type="reset"]:disabled,
   cursor: not-allowed;
 }
 
-/*
- * R-05-A. The consent slot's reserved height while the decision is unresolved.
- * `components/analytics/MarketingConsentReservation.tsx` sets
- * `data-consent-pending` before the first paint; `AnalyticsProvider` removes it
- * as soon as the decision resolves, so the band collapses and an
- * accepted/declined visitor still costs no layout box.
- *
- * `display: block` is needed because the slot is `empty:hidden` -- it has no
- * children until the notice mounts. These rules are deliberately unlayered so
- * they win over that utility.
- *
- * The values are the measured maxima of the rendered notice, taken across
- * en/ko and both consent policy modes (`opt_in` shows a prompt,
- * `notice_opt_out` shows a longer notice), because the script cannot know which
- * mode a visitor's region resolves to. `min-height` is a floor, so a value at
- * or above the real height produces no shift at all, and a value below it still
- * shrinks the shift rather than adding one -- an under-reservation degrades, it
- * does not regress.
- *
- * The breakpoints look like Tailwind's but are not: the notice sizes itself
- * with container queries (`@container/notice`), so its height steps when the
- * slot's content box crosses them. Measured step: 500px of viewport width, not
- * 640px. Values above are the 100%-text-scale maxima; at a 200% root font the
- * notice grows roughly 2.4x, which no static value tracks, so those visitors
- * get a partial reduction rather than zero.
- */
-html[data-consent-pending] [data-testid="marketing-consent-slot"] {
-  display: block;
-  min-height: 94px;
-}
-
-@media (min-width: 500px) {
-  html[data-consent-pending] [data-testid="marketing-consent-slot"] {
-    min-height: 184px;
-  }
-}
-
-@media (min-width: 640px) {
-  html[data-consent-pending] [data-testid="marketing-consent-slot"] {
-    min-height: 148px;
-  }
-}
-
-@media (min-width: 768px) {
-  html[data-consent-pending] [data-testid="marketing-consent-slot"] {
-    min-height: 132px;
-  }
-}
-
-@media (min-width: 1280px) {
-  html[data-consent-pending] [data-testid="marketing-consent-slot"] {
-    min-height: 116px;
-  }
-}
-
 /* Baseline visible focus indicator (WCAG 2.4.7).
    Several controls - including the main chat composer - set `outline-none`
    without supplying a replacement ring, which left keyboard users with no
@@ -508,6 +474,43 @@ html[data-consent-pending] [data-testid="marketing-consent-slot"] {
 
 @utility animate-fadeIn {
   animation: tomverse-fade-in 120ms ease-out;
+}
+
+/* Jump-to-latest pill while a response is still generating: three dots rise
+   in turn (stagger them with animation-delay) and the pill border breathes
+   blue, so a reader who scrolled up can see the answer is still being
+   written. Both stop under the reduced-motion block below. */
+@keyframes tomverse-typing-wave {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.55;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
+@utility animate-typing-wave {
+  animation: tomverse-typing-wave 1.2s ease-in-out infinite;
+}
+
+@keyframes tomverse-generating-glow {
+  0%,
+  100% {
+    border-color: rgb(63 63 70);
+    box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.3), 0 0 0 0 rgb(59 130 246 / 0);
+  }
+  50% {
+    border-color: rgb(59 130 246);
+    box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.3), 0 0 14px 1px rgb(59 130 246 / 0.45);
+  }
+}
+
+@utility animate-generating-glow {
+  animation: tomverse-generating-glow 2s ease-in-out infinite;
 }
 
 /* Respect the OS reduced-motion preference. The typing indicator and status

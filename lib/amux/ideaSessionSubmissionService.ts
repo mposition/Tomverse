@@ -39,14 +39,11 @@ import {
 import { commitAmuxSessionAnalysisReservation } from
   "./ideaSessionAnalysisReservationStore.ts";
 import {
-  AMUX_SESSION_INTAKE_ENV,
-  amuxSessionIntakeWritePermitted,
   sameAmuxOperatingScopeAuthority,
   type AmuxIdeaSessionSubmissionInspection,
 } from "./ideaSessionSubmissionCore.ts";
 import { prepareIdeaSubmissionStorage } from "./ideaSubmissionService.ts";
-import { AMUX_V4_IDEA_SUBMISSION_ENV,
-  submissionFailureKind } from "./ideaSubmissionCore.ts";
+import { submissionFailureKind } from "./ideaSubmissionCore.ts";
 
 const STATEMENT_TIMEOUT = "5000";
 const POLICY_VERSION = 19;
@@ -54,7 +51,6 @@ const POLICY_VERSION = 19;
 export class AmuxIdeaSessionSubmissionError extends Error {
   constructor(
     readonly code:
-      | "submission_disabled"
       | "audit_unavailable"
       | "scope_unavailable"
       | "outside_scope"
@@ -102,7 +98,7 @@ const analysisModel = (authority: AmuxOperatingScopeAuthority,
   chosen ?? amuxOperatingScopeSelection(authority.scope);
 
 /** A chosen model the runner's CLI channel cannot launch at that effort would
- * wait in the queue until the seven-day deadline; refuse it before writing. */
+ * wait in the queue until its analysis deadline; refuse it before writing. */
 const requireLaunchableChoice = (chosen: AmuxIdeaModelSelection | null | undefined) => {
   if (chosen && !amuxV19ChannelAdmits(chosen)) {
     throw new AmuxIdeaSessionSubmissionError("model_not_launchable");
@@ -330,18 +326,71 @@ export async function readAmuxIdeaSessionSubmissionRequest(requestId: string): P
     hasExternalSources: (repositoryCount as number) + (pullRequestCount as number) > 0 };
 }
 
-/** Default-off write service. It atomically stores the encrypted submission
+/**
+ * A caller's own condition on an intake, checked inside the commit
+ * transaction before the idea or its reservation is written (the asynchronous
+ * preparation -- pinning, keys -- has finished outside it). `check` reads and
+ * locks only: `true` lets the commit write, a reason refuses it and nothing
+ * is written. `committed` runs in the same transaction once both are written.
+ * No caller but one that names it has one.
+ */
+export type AmuxIdeaSessionSubmissionGuard = {
+  check: (tx: Prisma.TransactionClient) => Promise<true | string>;
+  committed?: (tx: Prisma.TransactionClient, ideaId: string) => Promise<void>;
+};
+
+/** The guard refused the commit; its transaction wrote nothing. */
+export class AmuxIdeaSessionGuardRefused extends Error {
+  constructor(readonly reason: string) {
+    super("idea_session_guard_refused");
+    this.name = "AmuxIdeaSessionGuardRefused";
+  }
+}
+
+/**
+ * The commit transaction's body: the guard first, when there is one, then the
+ * encrypted submission and its analysis reservation, then the guard's own
+ * record of the idea -- all or nothing.
+ */
+export async function commitAmuxIdeaSessionIntake(tx: Prisma.TransactionClient, input: {
+  inspected: Extract<AmuxIdeaSessionSubmissionInspection, { ok: true }>;
+  model?: AmuxIdeaModelSelection | null;
+  expectedAuthority: AmuxOperatingScopeAuthority;
+  ideaId: string;
+  keys: AmuxContentKeys;
+  pinnedCommitShas: readonly string[];
+  guard?: AmuxIdeaSessionSubmissionGuard;
+}): Promise<CommittedAmuxIdeaSessionIntake> {
+  if (input.guard) {
+    const verdict = await input.guard.check(tx);
+    if (verdict !== true) throw new AmuxIdeaSessionGuardRefused(verdict);
+  }
+  const committed = await commitAmuxIdeaSessionSubmission(tx, {
+    inspected: input.inspected, model: input.model, expectedAuthority: input.expectedAuthority,
+    ideaId: input.ideaId, keys: input.keys, pinnedCommitShas: input.pinnedCommitShas,
+  });
+  const reservation = await commitAmuxSessionAnalysisReservation(tx, {
+    ideaId: committed.ideaId,
+    requestId: committed.requestId,
+    submissionAuditId: committed.auditId,
+    authority: input.expectedAuthority,
+    model: analysisModel(input.expectedAuthority, input.model),
+  });
+  await input.guard?.committed?.(tx, committed.ideaId);
+  return { ...committed, reservationId: reservation.reservationId,
+    reservationAuditId: reservation.reservationAuditId };
+}
+
+/** Write service. It atomically stores the encrypted submission
  * and its append-only queue identity. The intake route may call only this
  * complete boundary; this queue receipt reserves no money. */
 export async function submitAmuxIdeaFromSession(input: {
   inspected: Extract<AmuxIdeaSessionSubmissionInspection, { ok: true }>;
   /** The owner's per-idea choice from the Admin input; absent for coding sessions. */
   model?: AmuxIdeaModelSelection | null;
+  /** A condition checked inside the commit transaction (AmuxIdeaSessionSubmissionGuard). */
+  guard?: AmuxIdeaSessionSubmissionGuard;
 }): Promise<CommittedAmuxIdeaSessionIntake> {
-  if (!amuxSessionIntakeWritePermitted(
-    process.env[AMUX_SESSION_INTAKE_ENV],
-    process.env[AMUX_V4_IDEA_SUBMISSION_ENV],
-  )) throw new AmuxIdeaSessionSubmissionError("submission_disabled");
   if (adminAuditIntegrityKeys(process.env).length === 0) {
     throw new AmuxIdeaSessionSubmissionError("audit_unavailable");
   }
@@ -379,21 +428,16 @@ export async function submitAmuxIdeaFromSession(input: {
   try {
     return await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('statement_timeout', ${STATEMENT_TIMEOUT}, true)`;
-      const committed = await commitAmuxIdeaSessionSubmission(tx, {
-        ...input, expectedAuthority, ideaId, keys, pinnedCommitShas,
-      });
-      const reservation = await commitAmuxSessionAnalysisReservation(tx, {
-        ideaId: committed.ideaId,
-        requestId: committed.requestId,
-        submissionAuditId: committed.auditId,
-        authority: expectedAuthority,
-        model: analysisModel(expectedAuthority, input.model),
+      const committed = await commitAmuxIdeaSessionIntake(tx, {
+        inspected: input.inspected, model: input.model, guard: input.guard,
+        expectedAuthority, ideaId, keys, pinnedCommitShas,
       });
       callbackReturned = true;
-      return { ...committed, reservationId: reservation.reservationId,
-        reservationAuditId: reservation.reservationAuditId };
+      return committed;
     }, { ...AMUX_IDEA_STANDARD_TRANSACTION });
   } catch (error) {
+    // Refused inside the commit transaction, before it wrote anything.
+    if (error instanceof AmuxIdeaSessionGuardRefused) throw error;
     if (error instanceof AmuxIdeaSessionSubmissionError &&
         error.code === "request_already_seen") {
       const seen = await readAmuxIdeaSessionSubmissionRequest(input.inspected.requestId);

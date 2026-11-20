@@ -247,6 +247,7 @@ test.describe("assistant knowledge files", () => {
             // 4. and it goes, rather than staying and disabling its controls.
             await expect(page.getByTestId("knowledge-panel")).toHaveCount(0);
             await expect(page.getByTestId("knowledge-add-input")).toHaveCount(0);
+            await expect(page.getByRole("link", { name: "내 자료 추가" })).toHaveCount(0);
         }
     );
 
@@ -271,8 +272,42 @@ test.describe("assistant knowledge files", () => {
 
         await chooseFile(page);
 
-        await expect(page.getByTestId("assistant-knowledge-f-new")).toBeVisible();
+        await expect(page.getByTestId("assistant-knowledge-f-new")).toBeChecked();
+        await expect(page.getByTestId("knowledge-status-f-new")).toHaveText("저장하면 연결됨");
+        await expect(page.getByTestId("assistant-start-chat")).toBeDisabled();
         await expect(page.getByTestId("knowledge-upload-error")).toHaveCount(0);
+    });
+
+    test("the settings shortcut leads from a ready file through saving to a chat with that assistant", async ({ page }) => {
+        await prepareGuestPage(page);
+        await mockEditor(page);
+        let saved = false;
+        await page.route("**/api/assistant-profiles/p-1", route => {
+            const response = detail([READY], saved ? [{ fileId: READY.id, name: READY.name, digest: "fixture" }] : []);
+            if (saved) response.profile.currentVersion.revision = 2;
+            return route.fulfill(json(response));
+        });
+        await page.route("**/api/assistant-profiles/p-1/versions", route => {
+            expect(route.request().postDataJSON().knowledgeFileIds).toEqual([READY.id]);
+            saved = true;
+            return route.fulfill(json({ outcome: "published", version: { revision: 2 } }));
+        });
+        await page.route("**/api/assistant-profiles", route => route.fulfill(json({
+            profiles: [{ id: "p-1", name: "Scheduling helper", published: true, currentRevision: 2 }],
+            limits: { maxProfilesPerAccount: 20 },
+        })));
+        await page.goto("/settings/assistants/p-1?lang=ko");
+        await expect(page.getByTestId("assistant-start-chat")).toHaveText("파일 없이 대화하기");
+        await page.getByRole("link", { name: "내 자료 추가" }).click();
+        await expect(page).toHaveURL(/#assistant-knowledge-panel$/);
+        await page.getByTestId("assistant-knowledge-f-ready").check();
+        await expect(page.getByTestId("assistant-start-chat")).toBeDisabled();
+        await page.getByTestId("assistant-publish").click();
+        await expect(page.getByTestId("knowledge-status-f-ready")).toHaveText("대화에 연결됨");
+        await page.getByTestId("assistant-chat-after-save").click();
+        await expect(page).toHaveURL(/\/review(?:\?|$)/);
+        await page.getByTestId("composer-tools-button").click();
+        await expect(page.getByTestId("tools-assistant-row")).toContainText("Scheduling helper");
     });
 
     test("a quota refusal says so, and is not the generic failure", async ({

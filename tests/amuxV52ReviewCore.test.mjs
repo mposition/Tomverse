@@ -18,10 +18,13 @@ test("review scope preserves the largest valid Task title and completion criteri
     `${index}:` + "C".repeat(496));
   const scope = formatAmuxV52ReviewScope(title, criteria);
   assert.ok(scope.length > 4_000);
-  assert.ok(scope.length <= 8_192);
+  assert.ok(scope.length <= 20_000);
   assert.match(scope, /Title: T{500}/);
   assert.ok(scope.endsWith(`- ${criteria.at(-1)}`));
-  assert.throws(() => formatAmuxV52ReviewScope("T", ["C".repeat(8_193)]),
+  // Owner decision 2026-11-15: the 8,192-character cap is lifted to the transport's bound
+  // (the scope rides one SSH command argument): 20,000 characters.
+  assert.doesNotThrow(() => formatAmuxV52ReviewScope("T", ["C".repeat(8_193)]));
+  assert.throws(() => formatAmuxV52ReviewScope("T", ["C".repeat(20_001)]),
     /exceeds server limit/);
 });
 
@@ -43,15 +46,22 @@ test("unknown outcomes may lack a job but cannot be resubmitted as accepted", ()
   assert.equal(validAmuxV52ReviewEvidence(evidence({
     verdict: "unknown", jobId: null, reviewerVendors: [],
   })), true);
+  // An unknown review runs the Task again (a fresh review).
   assert.deepEqual(decideAmuxV52ReviewDisposition("unknown", 0),
-    { status: "blocked", reason: "review_server_unknown" });
+    { status: "todo", reason: "review_server_unknown" });
 });
 
-test("the first rejection retries in the same grade and the second blocks", () => {
+test("a rejection runs the Task again; only the same finding rejected again blocks it", () => {
   assert.deepEqual(decideAmuxV52ReviewDisposition("reject", 0),
     { status: "todo", reason: "review_server_rejected" });
   assert.deepEqual(decideAmuxV52ReviewDisposition("reject", 1),
+    { status: "todo", reason: "review_server_rejected" });
+  assert.deepEqual(decideAmuxV52ReviewDisposition("reject", 6),
+    { status: "todo", reason: "review_server_rejected" }, "no fixed count blocks");
+  assert.deepEqual(decideAmuxV52ReviewDisposition("reject", 1, true),
     { status: "blocked", reason: "review_server_rejected_twice" });
+  assert.deepEqual(decideAmuxV52ReviewDisposition("reject", 0, true),
+    { status: "todo", reason: "review_server_rejected" }, "nothing earlier to repeat since an owner retry");
   assert.deepEqual(decideAmuxV52ReviewDisposition("accept", 1),
     { status: "review", reason: "review_server_accepted" });
   assert.deepEqual(decideAmuxV52ReviewDisposition("accept", -1),

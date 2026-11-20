@@ -94,7 +94,7 @@ export function ComparisonReviewWorkspace({
           <summary className="cursor-pointer text-sm font-semibold">
             {t("chat.aiReviewComparedQuestion")}
           </summary>
-          <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+          <p className="mt-2 whitespace-pre-wrap break-words [&:lang(ko)]:break-keep text-sm leading-6 text-zinc-600 dark:text-zinc-300">
             {source.question}
           </p>
         </details>
@@ -155,7 +155,7 @@ export function ComparisonReviewWorkspace({
                         )}
                       </span>
                     </div>
-                    <blockquote className="my-2 whitespace-pre-wrap break-words text-sm leading-6">
+                    <blockquote className="my-2 whitespace-pre-wrap break-words [&:lang(ko)]:break-keep text-sm leading-6">
                       “{item.quote}”
                     </blockquote>
                     <button
@@ -242,7 +242,7 @@ export function ComparisonReviewWorkspace({
                     </p>
                   )}
                   <div
-                    className="mt-4 max-h-[36rem] overflow-y-auto whitespace-pre-wrap break-words text-sm leading-7"
+                    className="mt-4 max-h-[36rem] overflow-y-auto whitespace-pre-wrap break-words [&:lang(ko)]:break-keep text-sm leading-7"
                     data-testid="ai-review-source-content"
                   >
                     {range ? (

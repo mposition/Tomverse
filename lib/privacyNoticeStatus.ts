@@ -18,3 +18,27 @@
  * is false (`lib/marketingCommentsMonitor.ts`).
  */
 export const COMMENTS_PRIVACY_NOTICE_CONFIRMED = true as boolean;
+
+/**
+ * Whether the semantic-search section of the privacy policy
+ * (`privacyPolicy.semanticSearch*`) is complete enough to show, and therefore
+ * whether the semantic calls to Cohere may run
+ * (docs/policy/external-conversation-import-and-memory.md sections 9a and 16).
+ *
+ * The section carries three operator-confirmation placeholders for facts the
+ * code cannot know: the country where Cohere processes the requests, that
+ * Tomverse has opted out of training on them, and how long Cohere keeps them.
+ * Until the operator confirms them and writes the facts into every locale this
+ * stays false, the page does not render the section, and no semantic call is
+ * made (`lib/semanticRetrievalCore.ts` reads this same value). A public notice
+ * must not show an unfinished sentence, so
+ * `tests/semanticSearchPrivacyNotice.test.mjs` requires the placeholders to be
+ * present while this is false and absent once it is true.
+ *
+ * This file is part of the /privacy page digest
+ * (tests/support/amendedDocumentVerifiers.mjs), so setting this to true is the
+ * operator's approval of a new /privacy version, not a side effect of a code
+ * change. Display and permission are one value on purpose: the page can never
+ * say less than what is sent.
+ */
+export const SEMANTIC_SEARCH_PRIVACY_NOTICE_CONFIRMED = false as boolean;

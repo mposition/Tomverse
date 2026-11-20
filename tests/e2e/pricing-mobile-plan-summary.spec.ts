@@ -1,8 +1,10 @@
 import { expect, test } from "@playwright/test";
 import { prepareGuestPage } from "./support/app-fixtures";
 
+// V2 has no separate phone summary: the three plan cards stack, each with its own price,
+// credits and button, so a phone reads the same data a desktop does.
 for (const currency of ["USD", "AUD"] as const) {
-  test(`mobile plan summary uses current ${currency} prices and credits`, async ({ page, baseURL }) => {
+  test(`mobile plan cards use current ${currency} prices and credits`, async ({ page, baseURL }) => {
     await page.setViewportSize({ width: 320, height: 900 });
     await prepareGuestPage(page, "en");
     await page.context().addCookies([{ name: "__tomverse_e2e_analytics", value: "1", url: baseURL! }]);
@@ -16,43 +18,32 @@ for (const currency of ["USD", "AUD"] as const) {
     let checkouts = 0;
     page.on("request", request => { if (request.method() === "POST" && request.url().includes("/api/billing/checkout")) checkouts++; });
     await page.goto("/pricing?lang=en");
-    const summary = page.getByTestId("pricing-mobile-plan-summary");
-    await expect(summary).toBeVisible();
-    await expect(summary.getByRole("listitem")).toHaveCount(3);
-    const consentHeight = await page.getByTestId("marketing-consent-slot").evaluate(node => node.getBoundingClientRect().height).catch(() => 0);
-    for (const [index, plan] of plans.entries()) {
-      const row = summary.getByRole("listitem").nth(index);
-      await expect(row).toContainText(`${plan.monthlyMessageLimit.toLocaleString("en-US")} monthly credits`);
-      await expect(row.getByRole("heading")).toContainText(`${currency === "AUD" ? "A$" : "$"}${plan.displayMonthlyPriceAmount.toFixed(2)}`);
-      // Measured below the one-time analytics notice, whose copy is explicit by design (#3571, #3592).
-      const box = (await row.getByRole("link").boundingBox())!;
-      expect(box.y + box.height - consentHeight).toBeLessThanOrEqual(900);
+    for (const plan of plans) {
+      const card = page.getByTestId(`pricing-plan-card-${plan.id}`);
+      await expect(card.getByTestId("pricing-plan-usage")).toContainText(plan.monthlyMessageLimit.toLocaleString("en-AU"));
+      await expect(card.getByTestId("pricing-plan-price")).toContainText(`${currency === "AUD" ? "A$" : "$"}${plan.displayMonthlyPriceAmount.toFixed(2)}`);
+      await expect(card.locator("h3")).toHaveText(plan.name);
     }
-    const max = summary.getByRole("link", { name: "View Max plan options" });
-    await max.focus(); await page.keyboard.press("Enter");
-    const heading = page.locator("#pricing-plan-name-max");
-    await expect(heading).toBeFocused(); await expect(heading).toBeInViewport();
-    await expect(page.getByTestId("pricing-cta-max")).toBeVisible();
-    // The card's credit-cost link (#3550) may come before its checkout action.
+    // Cards stack on a phone, in the order Free, Pro, Max, and each action is reachable.
+    const tops = await Promise.all(["free", "pro", "max"].map(async id => (await page.getByTestId(`pricing-plan-card-${id}`).boundingBox())!.y));
+    expect(tops[0]).toBeLessThan(tops[1]);
+    expect(tops[1]).toBeLessThan(tops[2]);
     const cta = page.getByTestId("pricing-cta-max");
-    for (let step = 0; step < 3 && !(await cta.evaluate(node => node.contains(document.activeElement))); step++) await page.keyboard.press("Tab");
-    expect(await cta.evaluate(node => node.contains(document.activeElement))).toBe(true);
+    await cta.scrollIntoViewIfNeeded();
+    await expect(cta).toBeVisible();
+    await expect(page.locator("#pricing-plan-name-max")).toHaveCount(1);
     expect(checkouts).toBe(0);
     await page.evaluate(() => { document.documentElement.style.fontSize = "32px"; });
-    expect(await summary.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
-    for (const row of await summary.getByRole("listitem").all()) {
-      const name = (await row.getByRole("heading").boundingBox())!;
-      const action = (await row.getByRole("link").boundingBox())!;
-      expect(name.y + name.height <= action.y + 1 || name.x + name.width <= action.x + 1).toBe(true);
-    }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   });
 }
 
-test("desktop keeps its existing full plan comparison without the phone summary", async ({ page }) => {
+test("desktop shows the three plan cards side by side", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await prepareGuestPage(page, "en");
   await page.goto("/pricing?lang=en");
-  await expect(page.getByTestId("pricing-mobile-plan-summary")).toBeHidden();
-  await expect(page.getByTestId("pricing-plan-card-pro")).toBeVisible();
+  const boxes = await Promise.all(["free", "pro", "max"].map(async id => (await page.getByTestId(`pricing-plan-card-${id}`).boundingBox())!));
+  expect(Math.abs(boxes[0].y - boxes[2].y)).toBeLessThanOrEqual(1);
+  expect(boxes[0].x).toBeLessThan(boxes[1].x);
+  expect(boxes[1].x).toBeLessThan(boxes[2].x);
 });

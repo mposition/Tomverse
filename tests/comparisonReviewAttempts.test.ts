@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createReviewAttemptQueue } from "../lib/comparisonReviewAttempts";
+import { createReviewAttemptQueue, shouldRetryReviewGeneration } from "../lib/comparisonReviewAttempts";
 
 const candidates = [{ id: "a" }, { id: "b" }, { id: "c" }];
 const complete = { record: { status: "completed" } };
@@ -64,6 +64,16 @@ test("default sequential mode does not prefetch or add retries", async () => {
   await queue.run(candidates[0]);
   assert.equal(calls, 1);
   await queue.drain();
+});
+
+test("a reviewer that hit its deadline is not sent again; other failures still retry once", () => {
+  const named = (name: string) => Object.assign(new Error(name), { name });
+  assert.equal(shouldRetryReviewGeneration(named("TimeoutError")), false);
+  assert.equal(shouldRetryReviewGeneration(named("AbortError")), false);
+  assert.equal(shouldRetryReviewGeneration(new Error("wrapped", { cause: named("TimeoutError") })), false);
+  assert.equal(shouldRetryReviewGeneration(named("AI_NoObjectGeneratedError")), true);
+  assert.equal(shouldRetryReviewGeneration(new Error("503")), true);
+  assert.equal(shouldRetryReviewGeneration(undefined), true);
 });
 
 test("a rejected secondary is drained and propagated without an unhandled rejection", async () => {

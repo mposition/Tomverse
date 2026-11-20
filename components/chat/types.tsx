@@ -1,4 +1,5 @@
-﻿import type { WebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
+import type { ContinuationReceipt } from "@/lib/continuationReceipt";
+import type { WebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
 import type { MessageErrorReportContext } from "@/lib/errorReportContract";
 import type { ChatImageTurnRef } from "@/lib/chatImageTurnCore";
 import type { ChatStreamArtifact } from "@/lib/generatedArtifactCore";
@@ -78,6 +79,9 @@ export type ChatAttachment = {
 };
 
 export type Message = {
+  /** Request/attempt-scoped metadata; excluded by all message serializers. */
+  continuationReceipt?: ContinuationReceipt;
+  researchRunId?: string | null;
   id: string;
   role: "user" | "assistant";
   content: string;
@@ -264,6 +268,8 @@ export type Conversation = {
      * continuations existed.
      */
     surface?: ConversationSurface;
+    /** Opaque server marker; references remain in the continuation bridge. */
+    reviewHandoff?: true;
     /**
      * Which service this conversation's imported half came from, so the
      * sidebar row can carry that service's icon.

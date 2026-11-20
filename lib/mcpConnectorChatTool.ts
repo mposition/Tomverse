@@ -1,22 +1,24 @@
 import "server-only";
 import { jsonSchema, tool, type ToolSet, type ModelMessage } from "ai";
 import { estimatePromptTokens, estimateTokenBreakdown, toReservedInputTokens } from "@/lib/chatTokenEstimate";
-import { getArtifactToolSupport } from "@/lib/generatedArtifactToolPolicy";
+import { getArtifactToolSupport, type ArtifactToolModel } from "@/lib/generatedArtifactToolPolicy";
 import { MCP_LIMITS, MCP_UNTRUSTED_NOTICE, McpConnectorError } from "@/lib/mcpConnectorPolicy";
 import { invokeMcpTool } from "@/lib/mcpConnectorExecution";
 import { mcpModelSchema, mcpToolName, type McpReadSource } from "@/lib/mcpConnectorSchema";
 import { ownMcpConnection, parseMcpGrants } from "@/lib/mcpConnectorStore";
-import { mcpServer } from "@/lib/mcpConnectorPolicy";
+import { mcpServerFor } from "@/lib/mcpCustomServers";
 import { githubScopedModelSchema } from "@/lib/mcpConnectorGitHub";
 
 export type McpProgress = "searching" | "reading" | "approval_required" | "no_results" | "reauth_required" | "server_error" | "done";
 export const MCP_CHAT_MAX_STEPS = 4;
 export async function buildMcpChatTools(input: {
-  userId: string; connectionId: string; modelId: string; nativeSearch: boolean;
+  userId: string; connectionId: string; model: ArtifactToolModel; nativeSearch: boolean;
   signal: AbortSignal; onState?: (state: McpProgress) => void;
 }) {
-  if (getArtifactToolSupport(input.modelId) !== "verified" || input.nativeSearch) throw new McpConnectorError("model_tools_unavailable");
+  // The same tick that gives a model the file tools: both are application-defined tools.
+  if (getArtifactToolSupport(input.model) !== "verified" || input.nativeSearch) throw new McpConnectorError("model_tools_unavailable");
   const connection = await ownMcpConnection(input.userId, input.connectionId);
+  const server = await mcpServerFor(input.userId, connection.serverId);
   const grants = parseMcpGrants(connection.grants);
   if (!grants.length) throw new McpConnectorError("no_tools_selected");
   const controller = new AbortController();
@@ -26,8 +28,8 @@ export async function buildMcpChatTools(input: {
   const tools: ToolSet = {};
   for (const grant of grants) {
     tools[mcpToolName(connection.id, grant.name)] = tool({
-      description: `User-selected connector tool ${JSON.stringify(grant.name)}. ${grant.mode === "read" ? "Read access." : "Propose an action for exact human approval; this does not execute it."} ${mcpServer(connection.serverId).githubRepository && grant.name === "search_issues" ? "Use plain search terms without qualifiers, parentheses, quotes or boolean operators; the repository is fixed by the host." : ""} ${MCP_UNTRUSTED_NOTICE}`,
-      inputSchema: jsonSchema<Record<string, unknown>>(githubScopedModelSchema(mcpServer(connection.serverId), grant.name, mcpModelSchema(grant.inputSchema))),
+      description: `User-selected connector tool ${JSON.stringify(grant.name)}. ${grant.mode === "read" ? "Read access." : "Propose an action for exact human approval; this does not execute it."} ${server.githubRepository && grant.name === "search_issues" ? "Use plain search terms without qualifiers, parentheses, quotes or boolean operators; the repository is fixed by the host." : ""} ${MCP_UNTRUSTED_NOTICE}`,
+      inputSchema: jsonSchema<Record<string, unknown>>(githubScopedModelSchema(server, grant.name, mcpModelSchema(grant.inputSchema))),
       execute: args => {
         const run = async () => {
         startedAt ??= Date.now();
@@ -62,6 +64,8 @@ export async function buildMcpChatTools(input: {
     resultInputAllowance: MCP_LIMITS.turnCharacters,
     sources: () => [...sources.values()],
     cancel: () => controller.abort(),
+    /** Input every model call already sent, the one in flight included. */
+    observedInputTokens: () => cumulativeInput,
     setBudget: (input: { inputTokens: number; outputTokens: number; instructions: string }) => {
       inputCeiling = input.inputTokens; outputCeiling = input.outputTokens; instructions = input.instructions;
     },
@@ -69,11 +73,19 @@ export async function buildMcpChatTools(input: {
       input.signal.throwIfAborted(); controller.signal.throwIfAborted();
       if (steps.length >= MCP_CHAT_MAX_STEPS) throw new McpConnectorError("model_step_limit");
       if (Buffer.byteLength(JSON.stringify(messages)) > 256_000) throw new McpConnectorError("model_input_limit");
-      cumulativeInput = Math.max(cumulativeInput, steps.reduce((sum, step) => sum + (step.usage.inputTokens || 0), 0)) +
+      // Counted as sent only once the call passes both limits below: a call
+      // refused here is never sent (review r-20261118-122423-d82874).
+      const nextInput = Math.max(cumulativeInput, steps.reduce((sum, step) => sum + (step.usage.inputTokens || 0), 0)) +
         toReservedInputTokens(estimateTokenBreakdown(JSON.stringify(messages) + instructions)) + definitionTokens;
-      if (cumulativeInput > inputCeiling) throw new McpConnectorError("model_input_budget");
-      const used = steps.reduce((sum, step) => sum + (step.usage.outputTokens || 0), 0);
+      if (nextInput > inputCeiling) throw new McpConnectorError("model_input_budget");
+      // A step whose output the provider did not report is taken to have spent
+      // the budget: counting it as zero would reopen the whole output cap on
+      // every later step (review r-20261118-113741-eaa398).
+      const used = steps.some((step) => !Number.isSafeInteger(step.usage.outputTokens))
+        ? outputCeiling
+        : steps.reduce((sum, step) => sum + step.usage.outputTokens!, 0);
       if (used >= outputCeiling) throw new McpConnectorError("model_output_limit");
+      cumulativeInput = nextInput;
       return { maxOutputTokens: outputCeiling - used, ...(steps.length === MCP_CHAT_MAX_STEPS - 1 ? { toolChoice: "none" as const } : {}) };
     },
   };

@@ -15,7 +15,6 @@ import {
 } from "@/lib/autoLlmRouterSettings";
 import { callCostMicroUsd } from "@/lib/autoRouterOptimizerCore";
 import {
-    CHAT_IMAGE_INTENT_FOLLOW_UP_MAX_OUTPUT_TOKENS,
     CHAT_IMAGE_INTENT_FOLLOW_UP_TIMEOUT_MS,
     CHAT_IMAGE_INTENT_MAX_OUTPUT_TOKENS,
     CHAT_IMAGE_INTENT_SYSTEM,
@@ -38,6 +37,7 @@ import type { BillingPlanConfig } from "@/lib/billingPlanDefaults";
 import { assertUserOperationalAccess } from "@/lib/chatSecurity";
 import { CHAT_IMAGE_TURN_CONTENT_PREFIX, chatImageTurnGroupKey } from "@/lib/chatImageTurnCore";
 import { hasConversationUnlockGrant } from "@/lib/conversationLock";
+import { readImageModelTypicalSeconds } from "@/lib/imageModelSpeed";
 import { refreshImageModelCatalog } from "@/lib/modelCatalog";
 import { prisma } from "@/lib/prisma";
 import { getRuntimeModels } from "@/lib/modelRegistry";
@@ -91,11 +91,11 @@ export async function readPreviousImagePrompt(
     try {
         const conversation = await prisma.conversation.findFirst({
             where: { id: conversationId, userId },
-            select: { password: true },
+            select: { password: true, passwordVersion: true },
         });
         if (
             !conversation ||
-            !hasConversationUnlockGrant(request, userId, conversationId, conversation.password)
+            !hasConversationUnlockGrant(request, userId, conversationId, conversation.password == null ? null : conversation.passwordVersion)
         ) {
             return null;
         }
@@ -157,15 +157,16 @@ async function prepareChatImageRequest(input: ChatImageRequestInput): Promise<Pr
     let model;
     let candidates;
     try {
-        const [runtimeModels, imageModels] = await Promise.all([
+        const [runtimeModels, imageModels, typicalSeconds] = await Promise.all([
             getRuntimeModels(),
             refreshImageModelCatalog(),
+            readImageModelTypicalSeconds(),
         ]);
         model = resolveAutoLlmRouterModel(
             runtimeModels.filter((entry) => entry.enabled && !entry.catalogDeleted),
             configured
         );
-        candidates = chatImageModelCandidates(imageModels);
+        candidates = chatImageModelCandidates(imageModels, typicalSeconds);
         if (attachedPhoto) {
             // Only models that can edit, at the square price an edit charges --
             // the check the reservation makes, applied to the 1024x1024 option
@@ -207,10 +208,7 @@ async function prepareChatImageRequest(input: ChatImageRequestInput): Promise<Pr
             ? await readPreviousImagePrompt(input.userId, input.conversationId, input.request)
             : null;
     const prompt = chatImageIntentUserMessage(input.text, candidates, previous, attachedPhoto);
-    // A follow-up writes a whole prompt, not just a decision.
-    const maxOutputTokens = previous
-        ? CHAT_IMAGE_INTENT_FOLLOW_UP_MAX_OUTPUT_TOKENS
-        : CHAT_IMAGE_INTENT_MAX_OUTPUT_TOKENS;
+    const maxOutputTokens = CHAT_IMAGE_INTENT_MAX_OUTPUT_TOKENS;
     const timeoutMs = previous
         ? CHAT_IMAGE_INTENT_FOLLOW_UP_TIMEOUT_MS
         : CHAT_IMAGE_INTENT_TIMEOUT_MS;
@@ -358,22 +356,55 @@ export async function detectChatTurnImage(input: ChatTurnImageInput): Promise<Ch
 export const combinedChatImageIntentEnabled = () => process.env.CHAT_AUTO_COMBINED_INTENT_ENABLED === "true";
 
 /**
+ * How long a combined router call may run before the separate image
+ * classification is started beside it (`hedge` above). Off unless
+ * `CHAT_ROUTER_IMAGE_HEDGE_MS` is set (1,000-20,000): the early call is a
+ * second paid classification on every slow turn, used only when the router
+ * then fails.
+ */
+export const chatRouterImageHedgeMs = (raw = process.env.CHAT_ROUTER_IMAGE_HEDGE_MS): number | null => {
+    const value = Number(raw?.trim());
+    return raw && Number.isInteger(value) && value >= 1_000 && value <= 20_000 ? value : null;
+};
+
+/**
  * Legacy starts immediately beside routing. Combined prepares the same gated
  * context, then runs the standalone classifier only if routing did not return
  * an image decision (disabled router, budget refusal, invalid output or error).
  */
-export function createChatTurnImageRouting(input: ChatTurnImageInput | null, combined: boolean) {
-    const prepared = input && combined ? prepareChatTurnImage(input) : undefined;
+export function createChatTurnImageRouting(input: ChatTurnImageInput | null, combined: boolean, savedDecision?: ChatImageDecision) {
+    const prepared = input && (combined || savedDecision?.image) ? prepareChatTurnImage(input) : undefined;
     let decision: ChatImageDecision | undefined;
-    let fallback = !input ? Promise.resolve(NOT_IMAGE)
+    let fallback = !input || savedDecision ? Promise.resolve(NOT_IMAGE)
         : !combined ? detectChatTurnImage(input) : undefined;
+    const startFallback = () => fallback ??= prepared!.then(value => value
+        ? runPreparedChatImageRequest(value, input!.traceId) : NOT_IMAGE).catch(() => NOT_IMAGE);
     return {
-        context: prepared,
+        context: combined ? prepared : undefined,
         accept: (value: ChatImageDecision) => { decision = value; },
+        /**
+         * Starts the separate image classification now, while the combined
+         * router call is still running, so a router that then times out does
+         * not add a second serial wait (2026-11-13: 8 s, then 4.7 s more).
+         * Only on a combined turn whose router has not decided yet; a decision
+         * that arrives later still wins, and the early call's answer is unused.
+         */
+        hedge: () => {
+            if (!combined || savedDecision || decision || !prepared) return;
+            void startFallback();
+        },
         resolve: (): Promise<ChatImageDecision> => {
+            if (savedDecision?.image) {
+                return prepared ? prepared.then(context => {
+                    if (!context || !context.candidates.some(candidate =>
+                        (!savedDecision.modelId || candidate.id === savedDecision.modelId) &&
+                        (!savedDecision.preset || candidate.credits[savedDecision.preset] !== undefined))) return NOT_IMAGE;
+                    return savedDecision;
+                }) : Promise.resolve(NOT_IMAGE);
+            }
+            if (savedDecision) return Promise.resolve(savedDecision);
             if (decision) return Promise.resolve(decision);
-            return fallback ??= prepared!.then(value => value
-                ? runPreparedChatImageRequest(value, input!.traceId) : NOT_IMAGE).catch(() => NOT_IMAGE);
+            return startFallback();
         },
     };
 }

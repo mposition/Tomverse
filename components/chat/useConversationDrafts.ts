@@ -1,5 +1,6 @@
 "use client";
 
+import { connectedDraftScope, invalidateJourneyDraft, moveJourneyDraft } from "@/lib/connectedJourneyAnalytics";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type { ChatAttachment } from "./types";
@@ -29,6 +30,7 @@ import {
   type PublicChatDraft,
 } from "@/components/chat/chatDurableRecoveryClient";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { reviewHandoffDraftEndpoint } from "@/lib/reviewContinuationHandoffClient";
 import {
   consumeConversationDraftSession,
   openConversationDraftSession,
@@ -49,6 +51,8 @@ export type ConversationDraftsApi = {
   activeDraftKey: string;
   draftText: string;
   draftAttachments: ChatAttachment[];
+  /** True only after the current account/scope GET succeeds. Failures stay unready. */
+  draftHydrated: boolean;
   /**
    * Writes text into a draft. `scopeId` is optional and defaults to whatever
    * conversation is open at call time (read through a ref, so a response that
@@ -59,6 +63,8 @@ export type ConversationDraftsApi = {
     update: DraftUpdate<ChatAttachment[]>,
     scopeId?: string | null
   ) => void;
+  /** Atomically edits text and attachments against the latest scoped snapshot. */
+  updateDraft: (update: DraftUpdate<ConversationDraft>, scopeId?: string | null) => void;
   /** The draft as it stands right now, without waiting for a re-render. */
   readDraft: (scopeId?: string | null) => ConversationDraft;
   hasDraft: (scopeId?: string | null) => boolean;
@@ -68,7 +74,7 @@ export type ConversationDraftsApi = {
    * conversation was deleted, or the user explicitly asked for a blank new
    * chat -- never on a plain conversation switch.
    */
-  discardDraft: (scopeId?: string | null, keep?: ChatAttachment[]) => void;
+  discardDraft: (scopeId?: string | null, keep?: ChatAttachment[], consumedBySend?: boolean) => void;
   /**
    * Hands the pending-conversation draft over to the real id the server just
    * issued, so a send that fails after the conversation was created still
@@ -145,6 +151,7 @@ export type DraftSendCapture = Omit<PreparedDraftSend, "revision">;
 
 type DraftSyncMeta = {
   scopeKey: string;
+  endpoint: string | null;
   revision: number;
   generation: number;
   persistedGeneration: number;
@@ -212,9 +219,9 @@ const releasePreviews = (items: ChatAttachment[], keep: ChatAttachment[]) => {
 };
 
 /**
- * Composer drafts, one per conversation. Guest/Review/continuation callers
- * keep the original tab-memory behavior; authenticated stored Chat callers
- * additionally synchronize through the revision-CAS draft endpoint.
+ * Composer drafts, one per conversation. Authenticated Chat callers and
+ * server-identified Review handoff targets synchronize through their separate
+ * revision-CAS draft endpoints. Other Review and Guest drafts stay in tab memory.
  *
  * The composer used to be a single `inputValue` shared by every conversation,
  * so opening another conversation from the sidebar carried the half-written
@@ -240,7 +247,8 @@ export function useConversationDrafts(
   currentConversationId: string | null,
   identityKey: string | null,
   durableSyncEnabled = false,
-  sessionProduct: DraftSessionProduct | null = null
+  sessionProduct: DraftSessionProduct | null = null,
+  durableDraftKind: "chat" | "review-handoff" = "chat"
 ): ConversationDraftsApi {
   const [drafts, setDrafts] = useState<ConversationDraftStore>({});
   const [, setSyncRevision] = useState(0);
@@ -250,6 +258,7 @@ export function useConversationDrafts(
   const [syncFailureKeys, setSyncFailureKeys] = useState<ReadonlySet<string>>(
     () => new Set()
   );
+  const [hydratedDraftKey, setHydratedDraftKey] = useState<string | null>(null);
   const [hydrateRetryRevision, setHydrateRetryRevision] = useState(0);
   const activeDraftKey = draftKeyFor(currentConversationId, identityKey);
   const activeScopeKey = serverScopeKey(currentConversationId);
@@ -318,6 +327,7 @@ export function useConversationDrafts(
     const current = identityFenceRef.current;
     identityKeyRef.current = identityKey;
     if (current.identityKey === identityKey) return;
+    setHydratedDraftKey(null);
     identityFenceRef.current = {
       identityKey,
       epoch: current.epoch + 1,
@@ -368,6 +378,12 @@ export function useConversationDrafts(
     if (current && current.identityKey === fence.identityKey &&
         current.identityEpoch === fence.epoch) {
       current.scopeKey = scopeKey;
+      // A freshly opened Review scope can acquire its server handoff marker
+      // after local metadata was allocated. No generic Chat draft request may
+      // escape while that scope is being activated.
+      if (durableDraftKind === "review-handoff" && scopeKey === activeScopeKey) {
+        current.endpoint = reviewHandoffDraftEndpoint(scopeKey);
+      }
       return current;
     }
     current?.requestAbort?.abort();
@@ -377,6 +393,9 @@ export function useConversationDrafts(
     );
     const created: DraftSyncMeta = {
       scopeKey,
+      endpoint: durableDraftKind === "review-handoff" && scopeKey === activeScopeKey
+        ? reviewHandoffDraftEndpoint(scopeKey)
+        : sessionProduct === "review" ? null : `/api/products/chat/drafts/${encodeURIComponent(scopeKey)}`,
       revision: 0,
       generation: hasLocalDraft ? 1 : 0,
       persistedGeneration: 0,
@@ -394,7 +413,7 @@ export function useConversationDrafts(
     };
     syncMetaRef.current.set(key, created);
     return created;
-  }, []);
+  }, [activeScopeKey, durableDraftKind, sessionProduct]);
 
   const replaceDrafts = useCallback((next: ConversationDraftStore) => {
     draftsRef.current = next;
@@ -564,7 +583,8 @@ export function useConversationDrafts(
   ) => {
     if (!durableSyncEnabled) return true;
     const meta = syncMetaRef.current.get(key);
-    if (!meta) return true;
+    if (!meta?.endpoint) return true;
+    const endpoint = meta.endpoint;
     const expectedIdentityKey = meta.identityKey;
     const expectedIdentityEpoch = meta.identityEpoch;
     const operationIsCurrent = () =>
@@ -608,7 +628,7 @@ export function useConversationDrafts(
             return;
           }
           const response = await fetch(
-            `/api/products/chat/drafts/${encodeURIComponent(meta.scopeKey)}`,
+            endpoint,
             {
               method: "DELETE",
               headers: { "Content-Type": "application/json" },
@@ -654,7 +674,7 @@ export function useConversationDrafts(
         const generation = exactGeneration ?? meta.generation;
         const expectedRevision = meta.revision;
         const response = await fetch(
-          `/api/products/chat/drafts/${encodeURIComponent(meta.scopeKey)}`,
+          endpoint,
           {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
@@ -793,7 +813,15 @@ export function useConversationDrafts(
     }
     const key = activeDraftKey;
     const meta = metaFor(key, activeScopeKey);
-    if (meta.hydrated) return;
+    if (!meta.endpoint) return;
+    const endpoint = meta.endpoint;
+    if (meta.hydrated) {
+      queueMicrotask(() => {
+        if (activeDraftKeyRef.current === key && syncMetaRef.current.get(key) === meta &&
+            identityFenceIsCurrent(meta.identityKey, meta.identityEpoch)) setHydratedDraftKey(key);
+      });
+      return;
+    }
     const expectedIdentityKey = identityKey;
     const expectedIdentityEpoch = identityFenceRef.current.epoch;
     if (!identityFenceIsCurrent(expectedIdentityKey, expectedIdentityEpoch)) return;
@@ -808,7 +836,7 @@ export function useConversationDrafts(
     void (async () => {
       try {
         const response = await fetch(
-          `/api/products/chat/drafts/${encodeURIComponent(activeScopeKey)}`,
+          endpoint,
           { cache: "no-store", signal: controller.signal }
         );
         if (response.status === 409) {
@@ -846,6 +874,7 @@ export function useConversationDrafts(
         // information. In particular, never let a late GET erase its 409.
         if (meta.writeEpoch !== writeEpochAtStart || meta.conflict) return;
         meta.hydrated = true;
+        setHydratedDraftKey(key);
         meta.failureCount = 0;
         setSyncFailure(key, false);
         if (pendingConsumesRef.current.has(key)) {
@@ -992,6 +1021,7 @@ export function useConversationDrafts(
           text: resolveDraftUpdate(update, existing.text),
         }));
       if (next === current) return;
+      if (!readDraftEntry(next, key).text && readDraftEntry(current, key).text) invalidateJourneyDraft(connectedDraftScope(sessionProduct, key), "draft_cleared");
       replaceDrafts(next);
       const meta = metaFor(key, scopeKey);
       meta.generation += 1;
@@ -1001,7 +1031,7 @@ export function useConversationDrafts(
       scheduleSave(key);
       bumpSyncRevision();
     },
-    [bumpSyncRevision, currentConversationId, metaFor, replaceDrafts, resolveKey, scheduleSave]
+    [bumpSyncRevision, currentConversationId, metaFor, replaceDrafts, resolveKey, scheduleSave, sessionProduct]
   );
 
   const setDraftAttachments = useCallback(
@@ -1030,14 +1060,30 @@ export function useConversationDrafts(
     [resolveKey]
   );
 
+  const updateDraft = useCallback(
+    (update: DraftUpdate<ConversationDraft>, scopeId?: string | null) => {
+      const key = resolveKey(scopeId);
+      const current = draftsRef.current;
+      const next = writeDraftEntry(current, key, (existing) => resolveDraftUpdate(update, existing));
+      if (next === current) return;
+      replaceDrafts(next);
+      const meta = metaFor(key, serverScopeKeyForDraft(scopeId, currentConversationId));
+      meta.generation += 1;
+      scheduleSave(key);
+      bumpSyncRevision();
+    },
+    [bumpSyncRevision, currentConversationId, metaFor, replaceDrafts, resolveKey, scheduleSave]
+  );
+
   const hasDraft = useCallback(
     (scopeId?: string | null) => !isDraftEmpty(readDraft(scopeId)),
     [readDraft]
   );
 
   const discardDraft = useCallback(
-    (scopeId?: string | null, keep: ChatAttachment[] = []) => {
+    (scopeId?: string | null, keep: ChatAttachment[] = [], consumedBySend = false) => {
       const key = resolveKey(scopeId);
+      if (!consumedBySend) invalidateJourneyDraft(connectedDraftScope(sessionProduct, key), "draft_cleared");
       const existing = draftsRef.current[key];
       if (existing) releasePreviews(existing.attachments, keep);
       replaceDrafts(removeDraftEntry(draftsRef.current, key));
@@ -1049,7 +1095,7 @@ export function useConversationDrafts(
       meta.frozen = false;
       scheduleSave(key);
     },
-    [currentConversationId, metaFor, replaceDrafts, resolveKey, scheduleSave]
+    [currentConversationId, metaFor, replaceDrafts, resolveKey, scheduleSave, sessionProduct]
   );
 
   const migrateDraft = useCallback(
@@ -1064,6 +1110,8 @@ export function useConversationDrafts(
       const fromKey = draftKeyFor(fromScopeId, expectedIdentityKey);
       const toKey = draftKeyFor(toScopeId, expectedIdentityKey);
       if (fromKey === toKey) return;
+      if (draftsRef.current[toKey] && !owner) invalidateJourneyDraft(connectedDraftScope(sessionProduct, fromKey), "draft_replaced");
+      else moveJourneyDraft(connectedDraftScope(sessionProduct, fromKey), connectedDraftScope(sessionProduct, toKey));
       const moving = draftsRef.current[fromKey];
       if (!moving) return;
       // moveDraftEntry lets an existing target draft win, which means the
@@ -1110,6 +1158,7 @@ export function useConversationDrafts(
       replaceDrafts,
       scheduleSave,
       setConflict,
+      sessionProduct,
     ]
   );
 
@@ -1149,8 +1198,18 @@ export function useConversationDrafts(
       }
       const key = capture.key;
       const releasePendingConsume = () => {
-        if (pendingConsumesRef.current.get(key)?.token === capture.token) {
-          pendingConsumesRef.current.delete(key);
+        if (pendingConsumesRef.current.get(key)?.token !== capture.token) return;
+        pendingConsumesRef.current.delete(key);
+        // A returning epoch's hydration froze its fresh metadata only because
+        // this detached capture owned the draft. Now that the owner is gone,
+        // hand the draft back to the current epoch without writing for it.
+        const fence = identityFenceRef.current;
+        const fresh = syncMetaRef.current.get(key);
+        if (fresh && fresh !== meta && fresh.frozen &&
+            fresh.identityKey === fence.identityKey &&
+            fresh.identityEpoch === fence.epoch) {
+          fresh.frozen = false;
+          bumpSyncRevision();
         }
       };
       const meta = syncMetaRef.current.get(key);
@@ -1228,6 +1287,7 @@ export function useConversationDrafts(
       };
     },
     [
+      bumpSyncRevision,
       cancelPersistRetry,
       durableSyncEnabled,
       identityFenceIsCurrent,
@@ -1340,13 +1400,32 @@ export function useConversationDrafts(
   );
 
   const abortDraftSend = useCallback((prepared: PreparedDraftSend) => {
-    if (pendingConsumesRef.current.get(prepared.key)?.token === prepared.token) {
+    const ownedPendingConsume =
+      pendingConsumesRef.current.get(prepared.key)?.token === prepared.token;
+    if (ownedPendingConsume) {
       pendingConsumesRef.current.delete(prepared.key);
     }
     const meta = syncMetaRef.current.get(prepared.key);
+    if (!identityFenceIsCurrent(prepared.identityKey, prepared.identityEpoch)) {
+      // A returned under a fresh epoch while this send was still being
+      // prepared (the draft is now flushed alongside the context read), and
+      // that epoch's hydration froze its own metadata because this consume
+      // was pending. The send was refused before any Message transaction, so
+      // nothing will consume the row: release only the fresh object, never
+      // the detached one the old continuation captured.
+      const fence = identityFenceRef.current;
+      if (ownedPendingConsume && meta?.frozen &&
+          fence.identityKey === prepared.identityKey &&
+          meta.identityKey === fence.identityKey &&
+          meta.identityEpoch === fence.epoch) {
+        meta.frozen = false;
+        if (meta.persistedGeneration !== meta.generation) scheduleSave(prepared.key);
+        bumpSyncRevision();
+      }
+      return;
+    }
     if (!meta || meta.scopeKey !== prepared.scopeKey ||
         meta.revision !== prepared.revision ||
-        !identityFenceIsCurrent(prepared.identityKey, prepared.identityEpoch) ||
         meta.identityKey !== prepared.identityKey ||
         meta.identityEpoch !== prepared.identityEpoch) return;
     meta.frozen = false;
@@ -1407,6 +1486,7 @@ export function useConversationDrafts(
       const meta = syncMetaRef.current.get(key);
       if (!meta?.conflict) return;
       const repairAttachments = meta.repairAttachmentsOnResolution;
+      invalidateJourneyDraft(connectedDraftScope(sessionProduct, key), "draft_replaced");
       if (choice === "use-server") {
         const current = readDraftEntry(draftsRef.current, key);
         const remote = meta.conflictDraft;
@@ -1434,7 +1514,7 @@ export function useConversationDrafts(
       if (choice === "overwrite-local" || repairAttachments) scheduleSave(key);
       bumpSyncRevision();
     },
-    [bumpSyncRevision, replaceDrafts, scheduleSave, setConflict]
+    [bumpSyncRevision, replaceDrafts, scheduleSave, setConflict, sessionProduct]
   );
 
   const retryDraftSync = useCallback(() => {
@@ -1462,8 +1542,10 @@ export function useConversationDrafts(
     activeDraftKey,
     draftText: activeDraft.text,
     draftAttachments: activeDraft.attachments,
+    draftHydrated: !durableSyncEnabled || hydratedDraftKey === activeDraftKey,
     setDraftText,
     setDraftAttachments,
+    updateDraft,
     readDraft,
     hasDraft,
     discardDraft,

@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { Session } from "next-auth";
 import type { Prisma } from "@prisma/client";
 
-import { writeAdminAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
 import {
   AMUX_AUTO_PROMOTER_AUDIT_ACTOR,
@@ -44,7 +44,6 @@ import {
   AUTO_PROMOTION_CODE_LATCH,
   AUTO_PROMOTION_POLICY_VERSION,
   AUTO_SYSTEM_ACTOR_ROW_ID,
-  AUTO_UNKNOWN_BURST_MS,
   type AutoBoundConsumeRequest,
   type AutoConsumeRequest,
   type AutoGrantRequest,
@@ -53,7 +52,6 @@ import {
   autoConsumeBindingAccepted,
   autoConsumeRequestIsBound,
   autoCostAccepted,
-  autoGlobalWipAccepted,
   autoGraduationAccepted,
   autoGrantExpiresAt,
   autoGrantUsable,
@@ -61,7 +59,6 @@ import {
   autoPromotionApplyPermitted,
   autoReadbackCritical,
   autoSystemConsumeDigest,
-  autoUnknownEvents,
   autoWorkerAdmitted,
   parseAutoConsumeRequest,
   parseAutoGrantRequest,
@@ -387,24 +384,16 @@ const writeAutoAudit = async (
   return auditId;
 };
 
-const humanDecisions = async (tx: Prisma.TransactionClient) =>
-  tx.amuxRecommendationDecision.findMany({
-    where: { decision: "approve", status: "consumed" },
-    select: { createdAt: true },
-  });
-
 const costEntries = async (tx: Prisma.TransactionClient) =>
   tx.amuxRecommendationAutoCostEntry.findMany({ select: { amountCents: true, recordedAt: true } });
 
 const openHalt = async (tx: Prisma.TransactionClient) =>
   tx.amuxRecommendationAutoHalt.findFirst({ where: { clearedAt: null }, select: { id: true } });
 
-/** Halt first, then graduation: the two refusals that apply to every card. */
+/** The one refusal that applies to every card: an open halt (no graduation gate since 2026-11-16). */
 const requireAutoOpen = async (tx: Prisma.TransactionClient, targetId: string) => {
   const halted = await openHalt(tx);
   if (halted) throw new BoardImportError("auto_halted", 409, targetId);
-  const graduation = autoGraduationAccepted(await humanDecisions(tx));
-  if (!graduation.ok) throw new BoardImportError(graduation.code, 409, targetId);
 };
 
 type GrantRow = {
@@ -559,11 +548,6 @@ const consumeGrantLocked = async (tx: Prisma.TransactionClient, now: Date, input
   const entries = await costEntries(tx);
   const cost = autoCostAccepted({ proposedCents: input.amountCents, entries, now });
   if (!cost.ok) throw new BoardImportError(cost.code, 409, consumptionId);
-  const active = await tx.amuxRecommendationAutoConsumption.count({
-    where: { status: "consumed", workItem: { archivedAt: null, status: { in: ["todo", "doing"] } } },
-  });
-  const wip = autoGlobalWipAccepted(active);
-  if (!wip.ok) throw new BoardImportError(wip.code, 409, consumptionId);
 
   const write = boardPromotionCardWrite(item);
   const updated = await tx.amuxWorkItem.updateMany({ where: write.where, data: write.data });
@@ -661,7 +645,7 @@ export async function previewAutoPromotion() {
   const open = applyOpen();
   return {
     applyPermitted: open,
-    refusal: !open ? "apply_disabled" : halt ? "auto_halted" : graduation.ok ? null : graduation.code,
+    refusal: !open ? "apply_disabled" : halt ? "auto_halted" : null,
     humanDecisions: graduation.count,
     spanMs: graduation.spanMs,
     graduated: graduation.ok,
@@ -710,6 +694,7 @@ export async function commitAutoGrant(
 ) {
   const itemBindingsDigest = boardPromotionItemBindingsDigest([grant.item]);
   return withAutoTransaction(grant.grantId, OWNER_TRANSACTION_LIMITS, async (tx, now) => {
+    await takeAuditChainLock(tx);
     const existing = await tx.amuxRecommendationAutoGrant.findUnique({ where: { id: grant.grantId } });
     if (existing) {
       if (existing.workItemId !== grant.item.cardId || existing.requestDigest !== requestDigest) {
@@ -790,6 +775,7 @@ export async function commitAutoPromotion(
   if (!worker.ok) throw new BoardImportError(worker.code, 409, body.consumptionId);
   const actor = autoHumanActor(session, request);
   const outcome = await withAutoTransaction(body.consumptionId, OWNER_TRANSACTION_LIMITS, async (tx, now) => {
+    await takeAuditChainLock(tx);
     const existing = await tx.amuxRecommendationAutoConsumption.findUnique({ where: { id: body.consumptionId } });
     if (existing) {
       if (
@@ -866,6 +852,7 @@ export async function commitSystemAutoPromotion(input: {
   | { promoted: false; reason: "no_grant" }
 > {
   return withAutoTransaction(input.consumptionId, TICK_TRANSACTION_LIMITS, async (tx, now, recordReceipt) => {
+    await takeAuditChainLock(tx);
     await requireAutoOpen(tx, input.consumptionId);
     const grant = await tx.amuxRecommendationAutoGrant.findFirst({
       where: {
@@ -935,6 +922,7 @@ const expireDueGrantsOneByOne = async (
   for (let index = 0; index < AUTO_EXPIRE_BATCH; index += 1) {
     if (!hasRoom()) return;
     const moved = await withAutoTransaction(null, limitsFor(actor), async (tx, now, recordReceipt) => {
+      await takeAuditChainLock(tx);
       const due = await tx.amuxRecommendationAutoGrant.findFirst({
         where: { status: "active", expiresAt: { lte: now } },
         orderBy: [{ expiresAt: "asc" }, { id: "asc" }],
@@ -1124,18 +1112,14 @@ type AutoHaltDecision =
   | { kind: "halt"; reason: AutoHaltOpening["reason"]; violationCode: AutoHaltOpening["violationCode"] };
 
 /**
- * The version 8 halt rule, read back. One stored critical violation, or two
- * lost outcomes within 15 minutes of the transaction clock, opens one halt.
- * Writes nothing: every scan here happens before the transaction's first
- * audit entry, so the audit chain's lock is never held across them.
- *
- * `pendingUnknown` is a lost outcome this transaction is about to record. It
- * counts as it will once written, so reading first changes no decision.
+ * The halt rule, read back. One stored critical violation opens one halt; lost
+ * outcomes never do (owner decision 2026-11-16). Writes nothing: every scan
+ * here happens before the transaction's first audit entry, so the audit
+ * chain's lock is never held across them.
  */
 const readAutoHaltLocked = async (
   tx: Prisma.TransactionClient,
   now: Date,
-  pendingUnknown: { id: string; recordedAt: Date } | null,
 ): Promise<AutoHaltDecision> => {
   const existing = await openHalt(tx);
   if (existing) return { kind: "already_open", haltId: existing.id };
@@ -1146,24 +1130,6 @@ const readAutoHaltLocked = async (
       return time >= now.getTime() - windowMs && time <= now.getTime();
     });
   const sum = (rows: typeof entries) => rows.reduce((total, row) => total + row.amountCents, 0);
-  const consumptions = await tx.amuxRecommendationAutoConsumption.findMany({
-    select: {
-      id: true,
-      workItemId: true,
-      status: true,
-      workItem: { select: { status: true, archivedAt: true, owner: true } },
-      outcomeUnknownAt: true,
-    },
-  });
-  const consumed = consumptions.filter((row) => row.status === "consumed");
-  const activeCards = consumed.filter(
-    (row) => row.workItem.archivedAt === null && (row.workItem.status === "todo" || row.workItem.status === "doing"),
-  );
-  const ownerCounts = new Map<string, number>();
-  for (const row of activeCards) {
-    if (!row.workItem.owner) continue;
-    ownerCounts.set(row.workItem.owner, (ownerCounts.get(row.workItem.owner) ?? 0) + 1);
-  }
   // Policy version 15. The automatic path writes todo only in the consume
   // transaction, together with a consumed row. A card it touched that is
   // todo or doing without one is the violation. A card a person promoted
@@ -1195,25 +1161,12 @@ const readAutoHaltLocked = async (
   `;
   const lifecycleWrites = Number(lifecycleCounts[0]?.writes ?? BigInt(0));
   const readback = autoReadbackCritical({
-    activeCount: activeCards.length,
-    ownerCounts: [...ownerCounts.values()],
     costCents24h: sum(inWindow(AUTO_COST_24H_MS)),
     costCents30d: sum(inWindow(AUTO_COST_30D_MS)),
     unapprovedTodo,
     lifecycleWrites,
   });
-  const unknowns = await tx.amuxRecommendationAutoUnknown.findMany({
-    where: { recordedAt: { gte: new Date(now.getTime() - AUTO_UNKNOWN_BURST_MS) } },
-    select: { id: true, recordedAt: true },
-  });
-  const decision = autoHaltRequired({
-    criticalCodes: readback,
-    unknownAt: autoUnknownEvents({
-      consumptions,
-      unknowns: pendingUnknown ? [...unknowns, pendingUnknown] : unknowns,
-    }),
-    now,
-  });
+  const decision = autoHaltRequired({ criticalCodes: readback });
   if (!decision.halt) return { kind: "clear" };
   return { kind: "halt", reason: decision.reason, violationCode: decision.violationCode };
 };
@@ -1253,7 +1206,8 @@ const writeAutoHaltLocked = async (
 
 export async function commitAutoHaltFromReadback(input: { actor: AutoActor; haltId: string }) {
   return withAutoTransaction(input.haltId, limitsFor(input.actor), async (tx, now) => {
-    const decision = await readAutoHaltLocked(tx, now, null);
+    await takeAuditChainLock(tx);
+    const decision = await readAutoHaltLocked(tx, now);
     return writeAutoHaltLocked(tx, now, input.actor, input.haltId, decision);
   });
 }
@@ -1271,12 +1225,9 @@ export async function recordAutoOutcomeUnknown(input: {
 }) {
   const haltId = input.haltId ?? randomUUID();
   return withAutoTransaction(input.consumptionId, limitsFor(input.actor), async (tx, now, recordReceipt) => {
+    await takeAuditChainLock(tx);
     const mark = await readAutoOutcomeUnknownLocked(tx, input);
-    const halt = await readAutoHaltLocked(
-      tx,
-      now,
-      mark.kind === "record" ? { id: input.consumptionId, recordedAt: now } : null,
-    );
+    const halt = await readAutoHaltLocked(tx, now);
     const marked = await writeAutoOutcomeUnknownLocked(tx, now, input.actor, input.consumptionId, mark);
     const opened = await writeAutoHaltLocked(tx, now, input.actor, haltId, halt);
     // Policy version 20, section 4: the record of a lost consume (and a
@@ -1322,6 +1273,7 @@ export async function resumeAutoPromotion(input: { session: Session; request: Re
 
 export async function commitAutoResume(session: Session, request: Request, haltId: string) {
   return withAutoTransaction(haltId, OWNER_TRANSACTION_LIMITS, async (tx, now) => {
+    await takeAuditChainLock(tx);
     const halt = await tx.amuxRecommendationAutoHalt.findUnique({
       where: { id: haltId },
       select: { id: true, clearedAt: true, violationCode: true },

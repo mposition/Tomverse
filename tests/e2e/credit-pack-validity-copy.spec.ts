@@ -8,7 +8,8 @@ for (const [locale, validity] of [["en", "Valid for 365 days"], ["ko", "365Ïùº Ï
     const cards = page.locator("article[data-pack-id]");
     await expect(cards).toHaveCount(3);
     for (const card of await cards.all()) {
-      await expect(card.getByText(validity, { exact: true })).toBeVisible();
+      // V2 states it on the card's foot line with the one-time-purchase note.
+      await expect(card.locator("p.foot-note")).toContainText(validity);
     }
   });
 }

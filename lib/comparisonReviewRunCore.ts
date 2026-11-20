@@ -363,6 +363,43 @@ export const comparisonReviewRunOutcome = (input: {
     return input.reachedProvider ? "failed" : "refused_before_provider";
 };
 
+/**
+ * Why a run ended `completed_primary_only`, from its secondary attempts.
+ *
+ * Content-free: a closed cause, counts and the last closed error code. It
+ * separates a pool with no second reviewer from one whose second reviewers
+ * refused locally or failed at the provider, which the run outcome alone
+ * cannot.
+ */
+export const comparisonReviewPrimaryOnlyCause = (
+    secondaryAttempts: readonly ComparisonReviewAttemptRecord[]
+) => {
+    const last = secondaryAttempts.at(-1);
+    const failed = secondaryAttempts.filter((attempt) => attempt.status === "failed").length;
+    return {
+        cause: !last
+            ? ("no_secondary_candidate" as const)
+            : failed > 0
+              ? ("secondary_failed" as const)
+              : ("secondary_refused" as const),
+        secondaryAttempts: secondaryAttempts.length,
+        secondaryFailed: failed,
+        // How many second reviewers hit their own deadline, and how long the
+        // run waited on all of them: together they say whether a slow
+        // primary-only run was a timeout or a fast provider failure.
+        secondaryTimedOut: secondaryAttempts.filter(
+            (attempt) =>
+                attempt.errorCategory === "TimeoutError" ||
+                attempt.errorCategory === "AbortError"
+        ).length,
+        secondaryMs: secondaryAttempts.reduce(
+            (total, attempt) => total + (attempt.durationMs ?? 0),
+            0
+        ),
+        lastErrorCode: last?.errorCode ?? null,
+    };
+};
+
 /** Whether a run reached a provider at all, for the failure-rate denominator. */
 export const reachedProvider = (record: ComparisonReviewRunRecord) =>
     record.primary.status === "completed" ||

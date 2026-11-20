@@ -77,20 +77,16 @@ impl Timing {
 
 /// Policy version 15. Claim-only mode claims ownerless Todo for a runtime the
 /// server reports execution-ready and starts no runtime or executor here; the
-/// WSL runner executes. Opened only by this latch and `TOMVERSE_AMUX_CLAIM`
-/// exactly `1`.
-pub const CLAIM_ONLY_CODE_LATCH: bool = true;
+/// WSL runner executes. Opened only by `TOMVERSE_AMUX_CLAIM` exactly
+/// `enabled` (or the earlier exact `1`).
 pub const CLAIM_ONLY_ENV_NAME: &str = "TOMVERSE_AMUX_CLAIM";
 
-pub fn claim_only_permitted(latch: bool, env_value: Option<&str>) -> bool {
-    latch && env_value == Some("1")
+pub fn claim_only_permitted(env_value: Option<&str>) -> bool {
+    matches!(env_value, Some("enabled" | "1"))
 }
 
 pub fn claim_only_enabled() -> bool {
-    claim_only_permitted(
-        CLAIM_ONLY_CODE_LATCH,
-        std::env::var(CLAIM_ONLY_ENV_NAME).ok().as_deref(),
-    )
+    claim_only_permitted(std::env::var(CLAIM_ONLY_ENV_NAME).ok().as_deref())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -149,10 +145,11 @@ fn claim_follow_up(outcome: &ClaimResponse) -> ClaimFollowUp {
     }
 }
 
+/// `TOMVERSE_AMUX_EXECUTE` is `enabled`, or the earlier `1` (trimmed).
 pub fn execution_enabled() -> bool {
     std::env::var("TOMVERSE_AMUX_EXECUTE")
         .ok()
-        .is_some_and(|value| value.trim() == "1")
+        .is_some_and(|value| matches!(value.trim(), "enabled" | "1"))
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -1421,12 +1418,12 @@ mod tests {
     }
 
     #[test]
-    fn claim_only_opens_only_on_the_latch_and_exactly_one() {
-        assert!(claim_only_permitted(true, Some("1")));
-        for value in [None, Some(""), Some("0"), Some(" 1"), Some("1 "), Some("true"), Some("enabled")] {
-            assert!(!claim_only_permitted(true, value), "{value:?}");
+    fn claim_only_opens_only_on_exactly_enabled_or_the_earlier_one() {
+        assert!(claim_only_permitted(Some("enabled")));
+        assert!(claim_only_permitted(Some("1")));
+        for value in [None, Some(""), Some("0"), Some(" 1"), Some("1 "), Some("true"), Some("disabled"), Some(" enabled")] {
+            assert!(!claim_only_permitted(value), "{value:?}");
         }
-        assert!(!claim_only_permitted(false, Some("1")));
     }
 
     #[test]

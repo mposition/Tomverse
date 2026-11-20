@@ -13,11 +13,13 @@ import {
   amuxBoardColumn,
   amuxElapsed,
   amuxIdeaFlowSteps,
+  AMUX_WORKER_CHANNELS,
   amuxWorkerChannels,
   qaTrainNext,
   qaTrainRoute,
   qaTrainSlotHourToday,
 } from "../lib/adminAmuxFlow.ts";
+import { AMUX_WORKER_PROVIDER_CLASSES } from "../lib/amux/workerRegistryCore.ts";
 
 const states = (stage, options) => amuxIdeaFlowSteps(stage, options)?.map((step) => step.state);
 
@@ -48,6 +50,12 @@ test("a worker's channel comes from the class it was registered with, never from
   assert.deepEqual(channels, { "claude-1": "claude", "reviewer-a": "codex", "codex-impl": "copilot" });
   // An unregistered worker has no channel, however it is named.
   assert.equal(channels["cursor-1"], undefined);
+});
+
+test("every class a worker can be registered with is a channel", () => {
+  assert.deepEqual([...AMUX_WORKER_CHANNELS].sort(), [...AMUX_WORKER_PROVIDER_CLASSES].sort());
+  assert.deepEqual(amuxWorkerChannels([{ workerName: "antigravity-impl", providerClass: "antigravity" }]),
+    { "antigravity-impl": "antigravity" });
 });
 
 test("the six server lanes group into five columns, and the attention lane stays whole", () => {

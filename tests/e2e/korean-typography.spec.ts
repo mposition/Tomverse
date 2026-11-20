@@ -3,9 +3,11 @@ import { LOCALIZED_SEO_PATHS } from "@/lib/seo";
 import {
   expectNoHorizontalOverflow,
   mockAuthenticatedApi,
+  mockChatStream,
   mockPublicBillingConfig,
   mockPublicProofMetrics,
   prepareGuestPage,
+  sendChatMessage,
 } from "./support/app-fixtures";
 
 function boxesOverlap(
@@ -211,19 +213,19 @@ test.describe("Korean typography: landing hero", () => {
     await mockPublicProofMetrics(page);
   });
 
-  test("keeps 고민은 intact and wraps within 4 lines at 320x568", async ({ page }) => {
+  test("keeps 믿어도 intact and wraps within 4 lines at 320x568", async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 568 });
     await page.goto("/");
     await selectLanguage(page, "ko");
 
     const title = page.getByTestId("landing-hero-title");
     await expect(title).toBeVisible();
-    await expect(title).toContainText("고민은");
+    await expect(title).toContainText("믿어도");
 
     const lineCount = await countRenderedLines(page, "[data-testid='landing-hero-title']");
     expect(lineCount).toBeLessThanOrEqual(4);
 
-    const wordLines = await countLinesForWord(page, "[data-testid='landing-hero-title']", "고민은");
+    const wordLines = await countLinesForWord(page, "[data-testid='landing-hero-title']", "믿어도");
     expect(wordLines).toBe(1);
 
     const box = await title.boundingBox();
@@ -240,8 +242,8 @@ test.describe("Korean typography: landing hero", () => {
     await selectLanguage(page, "ko");
 
     const title = page.getByTestId("landing-hero-title");
-    await expect(title).toContainText("고민은");
-    const wordLines = await countLinesForWord(page, "[data-testid='landing-hero-title']", "고민은");
+    await expect(title).toContainText("믿어도");
+    const wordLines = await countLinesForWord(page, "[data-testid='landing-hero-title']", "믿어도");
     expect(wordLines).toBe(1);
 
     await expect(page.getByTestId("landing-primary-cta")).toBeVisible();
@@ -269,8 +271,8 @@ test.describe("Korean typography: landing hero", () => {
     await page.goto("/");
 
     const title = page.getByTestId("landing-hero-title");
-    await expect(title).toContainText("Let Tomverse help you choose.");
-    const wordLines = await countLinesForWord(page, "[data-testid='landing-hero-title']", "Tomverse");
+    await expect(title).toContainText("Ask three AIs at once.");
+    const wordLines = await countLinesForWord(page, "[data-testid='landing-hero-title']", "trust");
     expect(wordLines).toBe(1);
 
     await expectNoHorizontalOverflow(page);
@@ -282,7 +284,7 @@ test.describe("Korean typography: landing hero", () => {
     await selectLanguage(page, "zh");
 
     const title = page.getByTestId("landing-hero-title");
-    await expect(title).toContainText("让 Tomverse 帮你选。");
+    await expect(title).toContainText("一次问三个 AI。");
     await expectNoHorizontalOverflow(page);
 
     const box = await title.boundingBox();
@@ -300,7 +302,7 @@ test.describe("Korean typography: landing hero", () => {
     await page.waitForTimeout(100);
 
     await expectNoHorizontalOverflow(page);
-    const wordLines = await countLinesForWord(page, "[data-testid='landing-hero-title']", "고민은");
+    const wordLines = await countLinesForWord(page, "[data-testid='landing-hero-title']", "믿어도");
     expect(wordLines).toBe(1);
   });
 
@@ -310,7 +312,7 @@ test.describe("Korean typography: landing hero", () => {
     await page.goto("/");
     await selectLanguage(page, "ko");
 
-    const wordLines = await countLinesForWord(page, "[data-testid='landing-hero-title']", "고민은");
+    const wordLines = await countLinesForWord(page, "[data-testid='landing-hero-title']", "믿어도");
     expect(wordLines).toBe(1);
     await expectNoHorizontalOverflow(page);
   });
@@ -329,10 +331,10 @@ test.describe("Korean typography: landing hero", () => {
 // measures the test runner's font stack rather than the layout.
 // ---------------------------------------------------------------------------
 const KO_DISPLAY_HEADINGS = [
-  { route: "/products/review", selector: "[data-testid='landing-hero-title']", word: "비교하세요", label: "Review H1" },
-  { route: "/products/review", selector: "h2:has-text('업그레이드하세요')", word: "업그레이드하세요", label: "Review pricing H2" },
-  { route: "/products/review", selector: "h2:has-text('시작됩니다')", word: "시작됩니다", label: "Review CTA H2" },
-  { route: "/pricing", selector: "h1:has-text('선택하세요')", word: "선택하세요", label: "pricing H1" },
+  { route: "/products/review", selector: "[data-testid='review-product-title']", word: "고르세요", label: "Review H1" },
+  { route: "/products/review", selector: "#review-trust-title", word: "확인할", label: "Review trust H2" },
+  { route: "/products/review", selector: "#review-cta-title", word: "물어보세요", label: "Review CTA H2" },
+  { route: "/pricing", selector: "[data-testid='pricing-title']", word: "올리세요", label: "pricing H1" },
   { route: "/pricing", selector: "h2:has-text('플랜별 제공 기능 비교')", word: "제공", label: "pricing compare H2" },
 ] as const;
 
@@ -384,9 +386,9 @@ test.describe("Korean typography: display headings keep 어절 intact", () => {
     await page.goto("/pricing");
     await selectLanguage(page, "ko");
 
-    const heading = page.locator("h1:has-text('선택하세요')").first();
+    const heading = page.locator("[data-testid='pricing-title']").first();
     await expect(heading).toBeVisible();
-    expect(await countLinesForWordIn(heading, "선택하세요")).toBe(1);
+    expect(await countLinesForWordIn(heading, "올리세요")).toBe(1);
   });
 
   test("English and Chinese headings keep their existing wrapping", async ({ page }) => {
@@ -552,6 +554,124 @@ test.describe("Korean typography: chat welcome screen", () => {
 
     const wordLines = await countLinesForWord(page, "[data-testid='chat-welcome-greeting']", "도와드릴까요");
     expect(wordLines).toBe(1);
+    await expectNoHorizontalOverflow(page);
+  });
+});
+
+/*
+ * Answer bodies in Chat and in each Review comparison panel. A production
+ * capture of the guest-default three-panel Review at 1440x900 printed
+ * "6주 이사 준비 체크 / 리스트" and split "도시/로" across lines: Hangul may break
+ * after any syllable under `word-break: normal`, and a third of 1440px is
+ * narrow enough to hit it on every paragraph.
+ */
+const KOREAN_ANSWER_URL =
+  "https://example.com/moving/checklist/a-very-long-path-segment-without-any-spaces-0123456789abcdef";
+const KOREAN_ANSWER = [
+  "## 6주 이사 준비 체크리스트 (예산 $3,000)",
+  "",
+  "새로운 도시로 이사할 때는 체크리스트를 미리 만들어 두면 예산과 일정을 한눈에 관리할 수 있습니다. 이삿짐센터 견적은 최소 세 곳에서 받아 비교하고, 전입신고와 공과금 이전은 이사 당일 전후로 처리하세요.",
+  "",
+  `참고: ${KOREAN_ANSWER_URL}`,
+].join("\n");
+const CHINESE_ANSWER =
+  "搬家前六周就应该开始准备清单，把预算和日程放在一起管理会更轻松。至少比较三家搬家公司的报价，并在搬家当天前后办理地址变更和水电燃气的转移手续。";
+
+/**
+ * Every whitespace-delimited token of `el` that contains Hangul but whose
+ * characters landed on more than one rendered line, plus how far any
+ * character sticks out past the element's right edge.
+ */
+async function measureAnswerWrapping(el: Locator) {
+  return el.evaluate((root) => {
+    const chars: { ch: string; top: number; right: number }[] = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let node: Node | null;
+    while ((node = walker.nextNode())) {
+      const text = node.textContent ?? "";
+      for (let i = 0; i < text.length; i++) {
+        if (/\s/.test(text[i])) {
+          chars.push({ ch: " ", top: -1, right: 0 });
+          continue;
+        }
+        const range = document.createRange();
+        range.setStart(node, i);
+        range.setEnd(node, i + 1);
+        const rect = range.getBoundingClientRect();
+        chars.push({ ch: text[i], top: Math.round(rect.top), right: rect.right });
+      }
+      // Separate text nodes are separate tokens (heading vs paragraph).
+      chars.push({ ch: " ", top: -1, right: 0 });
+    }
+    const split: string[] = [];
+    let token: typeof chars = [];
+    const flush = () => {
+      const word = token.map((c) => c.ch).join("");
+      // A line-height of half a glyph is enough to tell two lines apart.
+      const tops = token.map((c) => c.top);
+      if (/[가-힣]/.test(word) && Math.max(...tops) - Math.min(...tops) > 4) split.push(word);
+      token = [];
+    };
+    for (const c of chars) {
+      if (c.ch === " ") flush();
+      else token.push(c);
+    }
+    flush();
+    const edge = root.getBoundingClientRect().right;
+    const overflow = Math.max(0, ...chars.filter((c) => c.top >= 0).map((c) => c.right - edge));
+    return { split, overflow };
+  });
+}
+
+async function sendGuestAnswer(page: Page, testInfo: Parameters<typeof sendChatMessage>[1], answer: string, lang: "ko" | "zh") {
+  await prepareGuestPage(page, lang);
+  await page.addInitScript(() => {
+    window.localStorage.setItem("tomverse_guest_quick_start_seen_v2", "1");
+  });
+  await mockChatStream(page, answer);
+  await page.goto("/review?entry=guest-preview");
+  await expect(page.getByTestId("chat-textarea")).toBeVisible();
+  await sendChatMessage(page, testInfo, lang === "ko" ? "이사 준비 체크리스트" : "搬家清单");
+}
+
+test.describe("Korean typography: answer bodies wrap between 어절", () => {
+  for (const viewport of [
+    { width: 1440, height: 900 },
+    { width: 390, height: 844 },
+    { width: 320, height: 568 },
+  ]) {
+    test(`no mid-word break in answers at ${viewport.width}x${viewport.height}`, { tag: "@ui-risk" }, async ({ page }, testInfo) => {
+      await page.setViewportSize(viewport);
+      await sendGuestAnswer(page, testInfo, KOREAN_ANSWER, "ko");
+
+      const answers = page.locator('[data-testid="chat-message"]').filter({ hasText: "체크리스트를" });
+      await expect(answers.first()).toBeVisible();
+      await page.evaluate(() => document.fonts.ready);
+
+      const visible = await answers.evaluateAll((els) =>
+        els.map((el, i) => (el.getBoundingClientRect().width > 0 ? i : -1)).filter((i) => i >= 0)
+      );
+      expect(visible.length).toBeGreaterThan(0);
+      for (const i of visible) {
+        const answer = answers.nth(i);
+        const { split, overflow } = await measureAnswerWrapping(answer);
+        expect(split, "Korean words split across lines").toEqual([]);
+        // The URL has no break opportunity, so it must still break rather
+        // than push past the answer's edge.
+        expect(overflow).toBeLessThanOrEqual(1);
+      }
+      await expectNoHorizontalOverflow(page);
+    });
+  }
+
+  test("Chinese answers keep breaking between characters", async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await sendGuestAnswer(page, testInfo, CHINESE_ANSWER, "zh");
+
+    const answer = page.locator('[data-testid="chat-message"]').filter({ hasText: "搬家公司" }).first();
+    await expect(answer).toBeVisible();
+    const wordBreak = await answer.locator("p").first().evaluate((el) => getComputedStyle(el).wordBreak);
+    expect(wordBreak).not.toBe("keep-all");
     await expectNoHorizontalOverflow(page);
   });
 });

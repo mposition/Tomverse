@@ -38,6 +38,7 @@ mock.module(mod("lib/amux/reviewApprovalCore.ts"), { namedExports: {
   isAmuxAgentApprovalEnabled: () => true,
 } });
 mock.module(mod("lib/adminAudit.ts"), { namedExports: {
+  takeAuditChainLock: async () => {},
   writeAdminAuditLog: async () => "audit",
 } });
 mock.module(mod("lib/prisma.ts"), { namedExports: {

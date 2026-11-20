@@ -1,3 +1,5 @@
+import { CHAT_MAX_ATTACHMENT_BYTES } from "@/lib/chatAttachmentLimits";
+
 /**
  * The budget every legacy-Office parser is held to, and the errors it raises.
  *
@@ -92,7 +94,8 @@ export type LegacyParseLimits = {
  */
 export const DEFAULT_LEGACY_PARSE_LIMITS: LegacyParseLimits = {
     timeoutMs: 12_000,
-    maxBytes: 20 * 1024 * 1024,
+    // 2 x CHAT_MAX_ATTACHMENT_BYTES (operator decision 2026-11-18; was 2 x 10 MB).
+    maxBytes: 2 * CHAT_MAX_ATTACHMENT_BYTES,
     maxCharacters: 300_000,
     maxIterations: 5_000_000,
 };

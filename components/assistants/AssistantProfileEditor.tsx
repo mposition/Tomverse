@@ -26,10 +26,14 @@ import {
     ASSISTANT_PROFILE_LIST_PATH,
     assistantProfileHierarchy,
 } from "@/lib/settingsNavigation";
+import { useSettingsReturnProduct } from "@/components/settings/useSettingsReturnProduct";
 import {
-    ASSISTANT_PROFILE_REVIEW_PATH,
+    assistantProfileCreateModelLimit,
+    assistantProfileProductPath,
+    assistantProfileStartPath,
     stashPendingChatProfile,
 } from "@/lib/assistantProfileReturn";
+import type { ConversationProductKey } from "@/lib/conversationProduct";
 import { assistantProfileErrorCopyKey } from "@/lib/assistantProfileErrorCopy";
 import { ASSISTANT_PROFILE_LIMITS } from "@/lib/assistantProfileVersioning";
 import { discardResponseBody } from "@/lib/discardResponseBody";
@@ -127,6 +131,9 @@ const fieldClass =
     "mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-base text-zinc-900 focus:border-blue-500 focus:outline-none dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100";
 const labelClass = "block text-sm font-semibold";
 
+const sameList = (left: readonly string[], right: readonly string[]) =>
+    left.length === right.length && left.every((value, index) => value === right[index]);
+
 type KnowledgeFile = {
     id: string;
     name: string;
@@ -176,6 +183,7 @@ type ImportProvenance = {
 };
 
 type Notice =
+    | { kind: "chatFailed" }
     | { kind: "saved" }
     | { kind: "published"; revision: number }
     | { kind: "unchanged" }
@@ -198,6 +206,7 @@ export function AssistantProfileEditor({
     onCreated,
     knowledgeEnabled = false,
     creationEntry,
+    returnProduct,
     assistantKnowledgeGuideActive = false,
 }: {
     profileId?: string;
@@ -219,12 +228,23 @@ export function AssistantProfileEditor({
      *
      * Supplied by the chat entry point, which wants the user back in the
      * conversation they left. Absent everywhere else, and the fallback is the
-     * edit page — the same destination as before.
+     * edit page — the same destination as before. `modelCount` is how many
+     * models the created profile names, so the caller can keep a multi-model
+     * profile out of single-model Chat.
      */
-    onCreated?: (profileId: string) => void;
+    onCreated?: (profileId: string, modelCount: number) => void;
+    /**
+     * The product whose composer opened this create (owner decision
+     * 2026-11-14: an assistant starts where it was added). Absent on the
+     * settings routes, which use the product whose settings panel is open.
+     */
+    returnProduct?: ConversationProductKey;
 }) {
     const { t } = useLanguage();
     const router = useRouter();
+    // Where "back" and "start" go. Review when neither is known, as before.
+    const settingsReturnProduct = useSettingsReturnProduct();
+    const launchProduct = returnProduct ?? settingsReturnProduct;
     const isNew = !profileId;
     const guideActive =
         creationEntry === "guide" || assistantKnowledgeGuideActive;
@@ -233,6 +253,9 @@ export function AssistantProfileEditor({
     const [disabled, setDisabled] = useState(false);
     const [notice, setNotice] = useState<Notice | null>(null);
     const [busy, setBusy] = useState(false);
+    const [knowledgeUnavailable, setKnowledgeUnavailable] = useState(false);
+    const knowledgeAvailable = knowledgeEnabled && !knowledgeUnavailable;
+    const handleKnowledgeDisabled = useCallback(() => setKnowledgeUnavailable(true), []);
 
     const [name, setName] = useState("");
     const [icon, setIcon] = useState("");
@@ -322,9 +345,9 @@ export function AssistantProfileEditor({
     /** The revision this editor loaded, sent back so a stale save is caught. */
     const [loadedRevision, setLoadedRevision] = useState<number | null>(null);
 
-    const load = useCallback(async () => {
+    const load = useCallback(async (afterSave?: { revision: number; modelIds: string[] }) => {
         if (!profileId) return;
-        setLoading(true);
+        if (!afterSave) setLoading(true);
         try {
             const response = await fetch(`/api/assistant-profiles/${profileId}`, {
                 cache: "no-store",
@@ -340,12 +363,23 @@ export function AssistantProfileEditor({
             }
             const data = (await response.json()) as { profile: LoadedProfile };
             const loaded = data.profile;
+            const version = loaded.currentVersion;
+            if (afterSave && version?.revision !== afterSave.revision) {
+                setNotice({ kind: "stale" });
+                return;
+            }
             setProfile(loaded);
+            setLoadedRevision(version?.revision ?? null);
+            if (afterSave) {
+                // The server can replace retired model IDs. Keep any newer local edit.
+                setSelectedModelIds((current) =>
+                    sameList(current, afterSave.modelIds) ? version?.models ?? [] : current
+                );
+                return;
+            }
             setName(loaded.name);
             setIcon(loaded.icon ?? "");
             setDescription(loaded.description ?? "");
-            const version = loaded.currentVersion;
-            setLoadedRevision(version?.revision ?? null);
             setInstructions(version?.instructions ?? "");
             const storedModels = version?.models ?? [];
             setSelectedModelIds(storedModels);
@@ -410,7 +444,10 @@ export function AssistantProfileEditor({
                         profile: LoadedProfile;
                     };
                     if (!mounted.current) return;
-                    setProfile(data.profile);
+                    setProfile((current) => current && ({
+                        ...current,
+                        knowledgeFiles: data.profile.knowledgeFiles,
+                    }));
                     const { ready, stillAwaiting } = settleAwaitedKnowledgeFiles(
                         awaitingFileIds.current,
                         data.profile.knowledgeFiles
@@ -518,7 +555,7 @@ export function AssistantProfileEditor({
                     { assistant_knowledge_guide_step: "create_assistant" }
                 );
             }
-            onCreated?.(data.profile.id);
+            onCreated?.(data.profile.id, modelIdsForSave().length);
             if (!onCreated) router.replace(`/settings/assistants/${data.profile.id}`);
         } catch {
             setNotice({ kind: "failed" });
@@ -554,9 +591,19 @@ export function AssistantProfileEditor({
                 setNotice(await failureNotice(response));
                 return;
             }
-            await discardResponseBody(response);
+            const { profile: saved } = await response.json() as {
+                profile: Pick<LoadedProfile, "name" | "icon" | "description">;
+            };
+            setProfile((current) => current && ({
+                ...current,
+                name: saved.name,
+                icon: saved.icon,
+                description: saved.description,
+            }));
+            setName((current) => current === name ? saved.name : current);
+            setIcon((current) => current === icon ? saved.icon ?? "" : current);
+            setDescription((current) => current === description ? saved.description ?? "" : current);
             setNotice({ kind: "saved" });
-            await load();
         } catch {
             setNotice({ kind: "failed" });
         } finally {
@@ -564,6 +611,7 @@ export function AssistantProfileEditor({
         }
     };
 
+    const draftStarters = starters.split("\n").map((line) => line.trim().replace(/\s+/gu, " ")).filter(Boolean);
     const publish = async () => {
         if (!profileId) return;
         setBusy(true);
@@ -590,10 +638,7 @@ export function AssistantProfileEditor({
                         modelIds: modelIdsForSave(),
                         toolPolicy: { webSearch, deepResearch },
                         memoryPolicy: { useAccountMemory },
-                        starters: starters
-                            .split("\n")
-                            .map((line) => line.trim())
-                            .filter(Boolean),
+                        starters: draftStarters,
                         knowledgeFileIds,
                     }),
                 }
@@ -628,7 +673,10 @@ export function AssistantProfileEditor({
                     { assistant_knowledge_guide_step: "add_knowledge" }
                 );
             }
-            await load();
+            await load({
+                revision: data.outcome === "published" ? data.version.revision : data.revision,
+                modelIds: modelIdsForSave(),
+            });
         } catch {
             setNotice({ kind: "failed" });
         } finally {
@@ -666,9 +714,9 @@ export function AssistantProfileEditor({
      * Opened from a conversation, the way out is the conversation rather than
      * a list the visitor never saw -- and it is a plain link rather than a
      * trail, because the chat is not a settings ancestor and putting it in the
-     * breadcrumb would claim settings sits underneath it. The destination is a
-     * constant either way; the query parameter that got the visitor here is
-     * compared to a literal and never read as a place to go
+     * breadcrumb would claim settings sits underneath it. The destination is
+     * one of two product routes; the query parameter that got the visitor here
+     * is compared to literals and never read as a place to go
      * (lib/assistantProfileReturn.ts).
      */
     const upwardNav = analyticsEntry === "chat" ? (
@@ -677,7 +725,7 @@ export function AssistantProfileEditor({
                     data-testid="settings-detail-nav"
                 >
                     <Link
-                        href={ASSISTANT_PROFILE_REVIEW_PATH}
+                        href={assistantProfileProductPath(launchProduct)}
                         data-testid="assistant-create-back"
                         className="inline-flex items-center gap-1.5 rounded-lg text-sm font-semibold text-zinc-500 transition-colors hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-50 dark:hover:text-zinc-100 dark:focus-visible:ring-offset-zinc-950"
                     >
@@ -707,6 +755,48 @@ export function AssistantProfileEditor({
         );
     }
 
+    const version = profile?.currentVersion;
+    const savedFileIds = new Set(version?.knowledgeManifest.map((entry) => entry.fileId));
+    const usableFiles = profile?.knowledgeFiles.filter((file) => file.processingStatus === "ready") ?? [];
+    const hasConnectedFiles = knowledgeAvailable && usableFiles.some((file) => savedFileIds.has(file.id));
+    const hasUnsavedEdits = profile && version && (
+        name !== profile.name ||
+        icon !== (profile.icon ?? "") ||
+        description !== (profile.description ?? "") ||
+        instructions.trim() !== (version.instructions ?? "") ||
+        !sameList(modelIdsForSave(), version.models ?? []) ||
+        webSearch !== (version.toolPolicy.webSearch ?? false) ||
+        deepResearch !== (version.toolPolicy.deepResearch ?? false) ||
+        useAccountMemory !== (version.memoryPolicy.useAccountMemory ?? false) ||
+        !sameList(draftStarters, version.starters ?? []) ||
+        (knowledgeAvailable && usableFiles.some((file) => selectedFileIds.includes(file.id) !== savedFileIds.has(file.id)))
+    );
+    const startChat = () => {
+        if (!profileId || !version || hasUnsavedEdits || busy) return;
+        if (!stashPendingChatProfile(profileId, guideActive ? "guide" : "settings")) {
+            setNotice({ kind: "chatFailed" });
+            return;
+        }
+        if (guideActive) {
+            trackProductEvent("assistant_knowledge_guide_step_completed", 0, {
+                assistant_knowledge_guide_step: "start_chat",
+            });
+        }
+        router.push(assistantProfileStartPath(launchProduct, version.models?.length ?? 0));
+    };
+    const chatAction = (testId: string) => version && (
+        <button
+            type="button"
+            className={secondaryButtonClass}
+            onClick={startChat}
+            disabled={busy || Boolean(hasUnsavedEdits) || notice?.kind === "stale"}
+            aria-describedby={hasUnsavedEdits ? "assistant-save-before-chat" : undefined}
+            data-testid={testId}
+        >
+            {t(knowledgeAvailable && !hasConnectedFiles ? "assistantProfiles.chatWithoutFiles" : "assistantProfiles.startChat")}
+        </button>
+    );
+
     return (
         <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
             {upwardNav}
@@ -724,24 +814,25 @@ export function AssistantProfileEditor({
                         savedKnowledgeCount:
                             profile?.currentVersion?.knowledgeManifest.length,
                     })}
-                    knowledgeEnabled={knowledgeEnabled}
-                    onStartChat={
-                        profileId
-                            ? () => {
-                                  stashPendingChatProfile(profileId);
-                                  trackProductEvent(
-                                      "assistant_knowledge_guide_step_completed",
-                                      0,
-                                      {
-                                          assistant_knowledge_guide_step:
-                                              "start_chat",
-                                      }
-                                  );
-                              }
-                            : undefined
-                    }
+                    knowledgeEnabled={knowledgeAvailable}
+                    startChatAction={chatAction("assistant-knowledge-start-chat")}
                 />
             ) : null}
+            {!guideActive && profile && (
+                <div className="mt-4 flex flex-wrap gap-2">
+                    {knowledgeAvailable && (
+                        <a href="#assistant-knowledge-panel" className={secondaryButtonClass}>
+                            {t("assistantProfiles.addMyFiles")}
+                        </a>
+                    )}
+                    {chatAction("assistant-start-chat")}
+                </div>
+            )}
+            {hasUnsavedEdits && (
+                <p id="assistant-save-before-chat" className="mt-2 text-sm text-zinc-600 dark:text-zinc-400" role="status">
+                    {t("assistantProfiles.saveBeforeChat")}
+                </p>
+            )}
 
             {loading ? (
                 <p className="mt-6 flex items-center gap-2 text-sm text-zinc-500">
@@ -767,6 +858,7 @@ export function AssistantProfileEditor({
                                 />
                             )}
                             {notice.kind === "saved" && t("assistantProfiles.noticeSaved")}
+                            {notice.kind === "chatFailed" && t("chat.assistantProfileFailed")}
                             {/* The revision is still recorded and still
                                 shown in the history below; what changed is
                                 that a user saving an edit is told their
@@ -965,6 +1057,12 @@ export function AssistantProfileEditor({
                                         selected={selectedModelIds}
                                         onChange={setSelectedModelIds}
                                         t={t}
+                                        // Added in Chat, it answers in Chat,
+                                        // which takes exactly one model.
+                                        maxModels={assistantProfileCreateModelLimit(
+                                            launchProduct,
+                                            ASSISTANT_PROFILE_LIMITS.maxModels
+                                        )}
                                     />
                                 </div>
                             </details>
@@ -1089,7 +1187,8 @@ export function AssistantProfileEditor({
                                     {profileId && profile && (
                                         <KnowledgeFilesPanel
                                             profileId={profileId}
-                                            knowledgeEnabled={knowledgeEnabled}
+                                            knowledgeEnabled={knowledgeAvailable}
+                                            onKnowledgeDisabled={handleKnowledgeDisabled}
                                             files={profile.knowledgeFiles}
                                             publishedManifest={
                                                 profile.currentVersion
@@ -1149,7 +1248,7 @@ export function AssistantProfileEditor({
                                             aria-hidden="true"
                                         />
                                     )}
-                                    {t("assistantProfiles.saveChanges")}
+                                    {t(knowledgeAvailable ? "assistantProfiles.saveWithFiles" : "assistantProfiles.saveChanges")}
                                 </button>
                                 <p
                                     id="assistant-publish-consequence"
@@ -1158,6 +1257,9 @@ export function AssistantProfileEditor({
                                 >
                                     {t("assistantProfiles.publishConsequence")}
                                 </p>
+                                {(notice?.kind === "published" || notice?.kind === "unchanged") && (
+                                    <div className="mt-3">{chatAction("assistant-chat-after-save")}</div>
+                                )}
                             </section>
 
                             <section className={`mt-4 ${sectionClass}`}>

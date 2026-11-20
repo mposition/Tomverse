@@ -1,6 +1,7 @@
 import { adminAutoRouterOptimizerMessages } from "@/lib/adminMessages/autoRouterOptimizer";
 import {
     buildRecommendationInstruction,
+    optimizerCyclePath,
     type ActionableRecommendationKind,
 } from "@/lib/autoRouterRecommendationsCore";
 
@@ -20,5 +21,5 @@ export const recommendationIdeaText = (input: {
         recommendation: input.recommendation,
         findings: input.findings,
         cycle: input.cycle,
-        link: `${input.origin}/admin/routing#optimizer-cycle-${input.cycle.id}`,
+        link: `${input.origin}${optimizerCyclePath(input.cycle.id)}`,
     });

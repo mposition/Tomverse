@@ -1,4 +1,3 @@
-import { CONVENTION_VERSIONS } from "@/lib/agentAuthorityFiles";
 import { cacheIsolationRecordSignature } from "@/lib/agentCacheIsolationRecord";
 import { analyseCredentialReachability, credentialForbiddenPaths } from
   "@/lib/agentCredentialReachability";
@@ -21,9 +20,8 @@ export function decideEngineeringAgentV22Tier(input: {
   changes: Changes;
   baseFiles: BaseFiles;
   workflows: Workflows;
-  installedVersions: Readonly<Record<keyof typeof CONVENTION_VERSIONS,
-    string | null>>;
   policyDocuments: readonly string[];
+  unsupported?: TierInput["unsupported"];
 }): TierVerdict {
   const blind = analyseCredentialReachability({
     workflows: input.workflows,
@@ -45,7 +43,6 @@ export function decideEngineeringAgentV22Tier(input: {
   return decideTier({
     changes: input.changes,
     policyNamedTests: policyNamedTestPaths(input.policyDocuments),
-    installedVersions: input.installedVersions,
     credential: credential.status === "analysed" ? {
       status: "analysed", forbidsAll: credential.forbidsAll,
       forbiddenPaths: credentialForbiddenPaths(credential,
@@ -54,5 +51,6 @@ export function decideEngineeringAgentV22Tier(input: {
     slice: slice.status === "analysed" ? {
       status: "analysed", slicePaths: slice.slicePaths,
     } : { status: "failed" },
+    unsupported: input.unsupported,
   });
 }

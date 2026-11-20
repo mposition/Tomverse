@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { IMPORTED_MESSAGE_ID_PREFIX } from "@/lib/continuationTimelineMessages";
 import { discardResponseBody } from "@/lib/discardResponseBody";
@@ -393,7 +393,7 @@ export function useContinuationSource(
     const hasMore =
         timeline?.source.status === "available" && timeline.source.offset > 0;
 
-    return {
+    return useMemo(() => ({
         timeline,
         loadingMore,
         hasMore: Boolean(hasMore),
@@ -412,5 +412,5 @@ export function useContinuationSource(
                   )
                 : 0,
         focusOutcome,
-    };
+    }), [timeline,loadingMore,hasMore,loadMore,loadingNewer,loadNewer,focusOutcome]);
 }

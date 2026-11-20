@@ -5,7 +5,17 @@ type ProviderEnvironment = Record<string, string | undefined>;
 export const MCP_PROVIDER_PRESETS = presets.profiles;
 export const providerEnvironmentPrefix = (id: string) => `MCP_PROVIDER_${id.replaceAll("-", "_").toUpperCase()}`;
 
-/** Only operator-selected, fixed profiles become callable. Catalog browsing grants nothing. */
+/**
+ * Scopes a user may choose from when connecting. An operator-set scope is the
+ * upper bound; otherwise the preset's published scope list is. A fixed token
+ * scope bound (request without scope) leaves nothing to choose.
+ */
+function userSelectableScopes(allowedScopes: readonly string[], envScope: string | undefined, tokenScope: string | undefined) {
+  if (tokenScope !== undefined) return [];
+  return [...new Set(envScope === undefined ? allowedScopes : envScope.split(/\s+/).filter(Boolean))].slice(0, 512);
+}
+
+/** Only operator-selected profiles become callable; users choose scopes within the bound. Catalog browsing grants nothing. */
 export function selectedMcpProviderPolicies(env: ProviderEnvironment = process.env) {
   const ids = (env.MCP_CONNECTOR_PROVIDERS || "").split(",").map(id => id.trim()).filter(Boolean);
   if (ids.length > 256 || new Set(ids).size !== ids.length) throw new Error("invalid_mcp_provider_selection");
@@ -20,12 +30,14 @@ export function selectedMcpProviderPolicies(env: ProviderEnvironment = process.e
     const prefix = providerEnvironmentPrefix(id);
     const clientId = env[`${prefix}_CLIENT_ID`];
     const clientSecretEnv = `${prefix}_CLIENT_SECRET`;
-    const scope = env[`${prefix}_SCOPE`] ?? oauth.scope;
+    const envScope = env[`${prefix}_SCOPE`];
+    const scope = envScope ?? oauth.scope;
     // Default grants must have an operator-declared bound even when the provider
     // requires the authorization request to omit scope entirely.
     const tokenScope = env[`${prefix}_TOKEN_SCOPE`];
-    if (!scope && tokenScope === undefined) return [];
-    if (oauth.scopeRequired && !env[`${prefix}_SCOPE`] && tokenScope === undefined) return [];
+    const selectableScopes = userSelectableScopes(oauth.allowedScopes, envScope, tokenScope);
+    if (!scope && tokenScope === undefined && !selectableScopes.length) return [];
+    if (oauth.scopeRequired && !envScope && tokenScope === undefined && !selectableScopes.length) return [];
     if (tokenScope !== undefined && scope !== "") return [];
     const requestedScopes = [scope, tokenScope || ""].flatMap(value => value.split(/\s+/).filter(Boolean));
     if (scope.length > 500 || (tokenScope?.length || 0) > 500 || (oauth.allowedScopes.length && requestedScopes.some(value => !oauth.allowedScopes.includes(value)))) return [];
@@ -35,7 +47,7 @@ export function selectedMcpProviderPolicies(env: ProviderEnvironment = process.e
     if (!clientId && env[clientSecretEnv]) return [];
     return [{ ...base, oauth: { issuer: oauth.issuer, authorizationUrl: oauth.authorizationUrl,
       tokenUrl: oauth.tokenUrl, tokenAuthMethod: oauth.tokenAuthMethod, scope,
-      ...(tokenScope === undefined ? {} : { tokenScope }),
+      ...(tokenScope === undefined ? {} : { tokenScope }), ...(selectableScopes.length ? { selectableScopes } : {}),
       ...(clientId ? { clientId, ...(oauth.tokenAuthMethod === "none" ? {} : { clientSecretEnv }) } : { registrationUrl }) } }];
   });
 }

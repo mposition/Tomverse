@@ -11,8 +11,9 @@ import { AmuxBoardAttentionLane, AMUX_ATTENTION_LANE_ROWS, type AmuxBoardOwnerQu
 import { AmuxBoardPastWork } from "./AmuxBoardPastWork";
 import { AmuxCardListPanel } from "./AmuxCardListPanel";
 import { AmuxTaskQuestionSection } from "./AmuxWorkerQuestion";
-import { AmuxLegacyCardPanel, type AmuxLegacyCardView } from "./AmuxLegacyCardPanel";
+import { AmuxLegacyCardPanel, type AmuxLegacyCardView, isAmuxRemakeOnlyCardKind } from "./AmuxLegacyCardPanel";
 import { AmuxSettledCardEscalationPanel } from "./AmuxSettledCardEscalationPanel";
+import { AmuxTaskCeilingPanel, type AmuxTaskCeilingView } from "./AmuxTaskCeilingPanel";
 import { isAmuxSettledCardWithOpenEscalation } from "@/lib/amux/settledCardEscalationCore";
 import { AmuxCardIdentity, AmuxSourceKeySuffix, amuxCardLabel, amuxDistinctSourceKey } from "./AmuxCardIdentity";
 import styles from "./AmuxExecutionWorkspace.module.css";
@@ -35,9 +36,12 @@ import { adminAmuxBoardViewsMessages } from "@/lib/adminMessages/amuxBoardViews"
 import type { AmuxExecutionListRow } from "@/lib/amux/adminExecutionCardList";
 import { adminAmuxDecisionMakerAttentionMessages } from "@/lib/adminMessages/amuxDecisionMaker";
 import type { DmAttention, DmAttentionItem } from "@/lib/amux/decisionMakerAttention";
-import { AmuxOutcomeObservationForm } from "./AmuxOutcomeObservationForm";
 import { requestArchiveAllActiveCards } from "./amuxExecutionArchiveRequest";
 import { AmuxAttemptUsageAcceptance } from "./AmuxAttemptUsageAcceptance";
+import { AmuxCardWaitReasonLine, AmuxCardWaitReasonPanel,
+  type AmuxCardWaitReasonView } from "./AmuxCardWaitReason";
+import { AmuxReviewRejectionReason } from "./AmuxReviewRejection";
+import type { AmuxV52AttemptReviewView } from "@/lib/amux/v52ReviewFindingsCore";
 import {
   AMUX_EXECUTION_VISIBLE_LANES,
   amuxVisibleInspectionText,
@@ -62,6 +66,8 @@ type Card = {
   attentionReason: string | null;
   /** A v22 worker question still waiting on the owner; null when none. */
   ownerQuestion: "open" | "answered" | null;
+  /** Why the card is not running (2026-11-15); null when nothing holds it. */
+  waitReason?: AmuxCardWaitReasonView | null;
   /** In the archive drawer (the archive lane also holds finished cards that were never archived). */
   archived?: boolean;
   updatedAt: string;
@@ -69,10 +75,6 @@ type Card = {
 type BoardSnapshot = { pageSize: number;
   counts: Record<AmuxExecutionLane, number>;
   lanes: Array<{ lane: AmuxExecutionLane; cards: Card[] }> };
-type ActivationSnapshot = { asOf: string; activationAuthorized: false;
-  stages: Array<{ id: string; status: "closed" | "unverified" |
-    "owner_evidence_required"; gates: Array<{ id: string;
-      codeLatch: boolean | null; environmentEnabled: boolean | null }> }> };
 type HierarchyItem = ({ type: "node"; id: string; title: string | null;
   level: string; parentId: string | null; state: string;
   assessment: unknown; progress: { done: number; total: number } } |
@@ -90,9 +92,10 @@ type FeedbackRollup = { complete: boolean; reason: string | null;
 type Detail = Omit<Card, "score"> & { revision: number; body: string | null;
   brief: string | null;
   feedback: AmuxTaskFeedbackProjection | null;
-  outcomeWriteEnabled: boolean;
   /** A legacy WORKBOARD card's recreate and close; null or absent for any other card. */
   legacyCard?: AmuxLegacyCardView | null;
+  /** The owner's re-approval of a waiting Task's cost ceiling; null or absent when none is read. */
+  ceilingReapproval?: AmuxTaskCeilingView | null;
   result: { attemptId: string; state: "available" | "purged";
     createdAt: string; text: string | null; sha256: string | null;
     patch: { state: "available"; baseSha: string; sha256: string } |
@@ -104,7 +107,10 @@ type Detail = Omit<Card, "score"> & { revision: number; body: string | null;
     toStatus: string | null; reason: string | null;
     reservedCostMicrousd: string; settledCostMicrousd: string | null;
     costConfirmed: boolean; usageUnknown: boolean;
-    usageAcceptance: { source: string; acceptedAt: string } | null }>;
+    /** The infrastructure failure this run ended in; it used no attempt. */
+    infraFailure?: string | null;
+    usageAcceptance: { source: string; acceptedAt: string } | null;
+    v52Review?: AmuxV52AttemptReviewView | null }>;
   escalations: Array<{ id: string; reason: string; status: string;
     createdAt: string }>;
   score: { scoreTotal: number; components: unknown; activeFresh: boolean;
@@ -234,9 +240,11 @@ function IdeaLaneCard({ card }: { card: AmuxIdeaLaneBoardCard }) {
   </li>;
 }
 
-export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = false,
+export function AmuxExecutionWorkspace({ initialTaskId = null, initialView = "board", canMoveCards = false,
   canReviewCards = false, decisionMaker, laneIdeas, workerChannels, cardList, ownerQueue }: {
   initialTaskId?: string | null; canMoveCards?: boolean;
+  /** The view the board opens in: the List view after its "show more" (`?cardView=list`). */
+  initialView?: "board" | "list" | "hierarchy";
   /** The "Waiting on me" queue's count and groups, read by the page; null: not read. */
   ownerQueue?: AmuxBoardOwnerQueue | null;
   /**
@@ -262,7 +270,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
    * The List view's rows, read by the page (lib/amux/adminExecutionCardList.ts).
    * Absent: the view is not offered; null: the read failed, which the view says.
    */
-  cardList?: { rows: AmuxExecutionListRow[]; total: number; limit: number } | null;
+  cardList?: { rows: AmuxExecutionListRow[]; total: number; limit: number; nextLimit?: number | null } | null;
 }) {
   const m = useAdminMessages(adminAmuxExecutionMessages);
   const d = useAdminMessages(adminAmuxDecisionMakerAttentionMessages);
@@ -272,11 +280,10 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
   // The clock the card ages are counted against: read when the board was read, not on every render.
   const [nowMs, setNowMs] = useState<number | null>(null);
   const dmTotal = decisionMaker?.total ?? 0;
-  const [view, setView] = useState<"board" | "list" | "hierarchy">("board");
+  const [view, setView] = useState<"board" | "list" | "hierarchy">(initialView);
   // A lane the board pages on its own (the attention lane's rest, the past-work list) stops after a failed read instead of retrying in a loop.
   const [autoStopped, setAutoStopped] = useState<Partial<Record<AmuxExecutionLane, true>>>({});
   const [board, setBoard] = useState<BoardSnapshot | null>(null);
-  const [activation, setActivation] = useState<ActivationSnapshot | null>(null);
   const [boardPages, setBoardPages] = useState<Partial<Record<AmuxExecutionLane, number>>>({});
   const [boardBusy, setBoardBusy] = useState<AmuxExecutionLane | null>(null);
   const [archive, setArchive] = useState<Card[]>([]);
@@ -338,14 +345,6 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
     } catch (reason) { showError(reason); setBoardLoading(false); return; }
     await refreshBoard();
   };
-  useEffect(() => {
-    let cancelled = false;
-    void getJson<ActivationSnapshot>("/api/admin/amux/execution-view?view=activation")
-      .then((result) => { if (!cancelled) setActivation(result); })
-      .catch((reason) => { if (!cancelled) showError(reason); });
-    return () => { cancelled = true; };
-  }, [showError]);
-
   const loadHierarchy = useCallback(async (parent: Parent, page = 0) => {
     const key = keyOf(parent);
     setTreeBusy(key); setError(null);
@@ -456,7 +455,8 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
         // A worker question is answered on the overview, where it is shown.
         // A legacy WORKBOARD card has no review decision; it opens on its recreate and close.
         // A done or todo card left with an escalation has no decision either; it opens on its close.
-        if (canReviewCards && result.escalations.length > 0 && !preferOverview && !result.legacyCard &&
+        if (canReviewCards && result.escalations.length > 0 && !preferOverview &&
+            !isAmuxRemakeOnlyCardKind(result.legacyCard?.kind) &&
             !isAmuxSettledCardWithOpenEscalation({ status: result.status, escalationId: result.escalations[0]?.id ?? null }))
           setDetailTab("ownerReview");
       }
@@ -727,6 +727,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
         <span>{card.priority.toUpperCase()}</span>
         {since && <span className={styles.elapsed} title={screens.sinceChange}>{since}</span>}
       </p>
+      <AmuxCardWaitReasonLine wait={card.waitReason} />
     </li>;
   };
   /** The "waiting on you" column: counts by reason, the first cards as one line each, and the way to the tab that handles them. */
@@ -823,19 +824,6 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
       </div>
     </div>}
     <p className={styles.hint}>{m.searchScope}</p>
-    {activation && <details data-testid="amux-v22-activation-diagnostic"
-      className="rounded border p-3 text-sm border-zinc-700">
-      <summary className="cursor-pointer font-semibold">{m.activationReadout}</summary>
-      <p className="text-xs text-zinc-500">{m.activationCaveat}</p>
-      <ul className="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-        {activation.stages.map((stage) => <li key={stage.id} className="rounded border p-2">
-          <strong>{stage.id}</strong> · {m.activationStatus[stage.status]}
-          <ul className="text-xs text-zinc-500">{stage.gates.map((gate) =>
-            <li key={gate.id}>{gate.id}: {gate.codeLatch === false ? m.codeClosed :
-              gate.environmentEnabled === false ? m.environmentClosed : m.unknown}</li>)}</ul>
-        </li>)}
-      </ul>
-    </details>}
     {laneIdeas === null && <p role="status" className={styles.hint}>{m.ideaLane.unavailable}</p>}
     {error && <p role="alert" className="rounded border border-red-500 p-2 text-sm">
       {error === "reauth" ? <Link className="underline"
@@ -902,7 +890,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
     </>}
     {view === "list" && cardList !== undefined && (cardList === null ?
       <AdminReadFailed title={views.list.unavailableTitle} detail={views.list.unavailableDetail} /> :
-      <AmuxCardListPanel rows={cardList.rows} total={cardList.total} limit={cardList.limit} nowMs={nowMs}
+      <AmuxCardListPanel rows={cardList.rows} total={cardList.total} limit={cardList.limit} nextLimit={cardList.nextLimit} nowMs={nowMs}
         workerChannels={workerChannels}
         onOpen={(taskId, opener) => { returnFocusRef.current = opener; void openCard(taskId); }} />)}
     {view === "hierarchy" && <section className="rounded-lg border p-4 border-zinc-700">
@@ -1006,6 +994,13 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
         taskId={selected.id} revision={selected.revision} view={selected.legacyCard} canAct={canReviewCards}
         // The board moves the card to the archive; the panel keeps its answer and the idea link.
         onChanged={() => void refreshBoard()} />}
+      {selected.ceilingReapproval && <AmuxTaskCeilingPanel key={selected.id + ":" + selected.revision}
+        taskId={selected.id} revision={selected.revision} view={selected.ceilingReapproval} canAct={canReviewCards}
+        onChanged={() => {
+          void refreshBoard();
+          if (new URL(window.location.href).searchParams.get("taskId") === selected.id)
+            void openCard(selected.id, false, true);
+        }} />}
       {ownerEscalation && isAmuxSettledCardWithOpenEscalation({ status: selected.status,
         escalationId: ownerEscalation.id }) && <AmuxSettledCardEscalationPanel
         key={selected.id + ":" + ownerEscalation.id} taskId={selected.id} escalationId={ownerEscalation.id}
@@ -1014,6 +1009,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
           if (new URL(window.location.href).searchParams.get("taskId") === selected.id)
             void openCard(selected.id, false, true);
         }} />}
+      <AmuxCardWaitReasonPanel wait={selected.waitReason} date={date} />
       {selected.ownerQuestion && <AmuxTaskQuestionSection key={selected.id + ":" + selected.revision}
         taskId={selected.id} canAnswer={canReviewCards} onAnswered={() => {
           void refreshBoard();
@@ -1083,6 +1079,9 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
           <p>{m.internalCost}: {item.costConfirmed && item.settledCostMicrousd !== null ?
             `$${USD(item.settledCostMicrousd)}` : m.unconfirmed}</p>
           {item.reason && <p>{item.reason}</p>}
+          {item.infraFailure && <p className="text-xs text-zinc-400" data-testid="amux-attempt-infra-failure">
+            {m.infraAttempt.kind[item.infraFailure] ?? item.infraFailure} · {m.infraAttempt.notCounted}</p>}
+          <AmuxReviewRejectionReason review={item.v52Review} attemptNumber={item.attemptNumber} />
           <AmuxAttemptUsageAcceptance taskId={selected.id} attempt={item}
             canAccept={canReviewCards} date={date}
             onAccepted={() => void openCard(selected.id, false)} />
@@ -1169,10 +1168,6 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
         <p className="text-sm">{m.userOutcome}: {selected.feedback.observed.userOutcome?.outcome ?? m.unknown}</p>
         <p className="text-sm">{m.checkFindings}: {selected.feedback.observed.checks?.findingCount ?? m.unknown}</p>
         <p className="text-sm">{m.reviewFindings}: {selected.feedback.observed.independentReview?.findingCount ?? m.unknown}</p>
-        {selected.outcomeWriteEnabled && <AmuxOutcomeObservationForm
-          key={selected.id} taskId={selected.id} revision={selected.revision}
-          writeEnabled={selected.outcomeWriteEnabled}
-          onSaved={() => void openCard(selected.id)} />}
       </section>}
       {selected.escalations.length > 0 && <section><h4 className="font-semibold">{m.attention}</h4>
         <ul className="text-sm">{selected.escalations.map((item) => <li key={item.id}>

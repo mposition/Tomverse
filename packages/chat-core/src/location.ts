@@ -44,6 +44,10 @@ export type ChatLocationIntent = {
   turnId: string;
   requiresLocation: () => Promise<boolean>;
 };
+/** A semantic decision only. It cannot request permission or carry coordinates. */
+export type PreparedChatLocationIntent = {
+  read: (scope: string | null, sourceText: string) => boolean | null;
+};
 /** Minimal cancellation port, independent of browser/Node AbortSignal types. */
 export type ChatLocationReadSignal = {
   readonly aborted: boolean;
@@ -84,6 +88,8 @@ export const createChatLocationSession = (readPosition: ChatLocationReader) => {
   };
   const isEnabled = (scope: string | null) =>
     scope !== null && scope === identity && state.enabled;
+  const canPrepareIntent = (scope: string | null) =>
+    Boolean(scope && scope === identity && !state.enabled && !state.pending && !automaticSuppressed);
   const read = (requestPermission: boolean): Promise<ChatLocation | null> => {
     if (inFlight) return inFlight;
     const capturedGeneration = generation;
@@ -117,6 +123,16 @@ export const createChatLocationSession = (readPosition: ChatLocationReader) => {
     },
     setIdentity,
     isEnabled,
+    canPrepareIntent,
+    prepareIntent: async (scope: string | null, sourceText: string, requiresLocation: () => Promise<boolean>): Promise<PreparedChatLocationIntent | undefined> => {
+      if (!scope || scope !== identity || state.enabled || automaticSuppressed) return undefined;
+      const capturedGeneration = generation;
+      // Preparation may be abandoned before a durable message exists. Errors
+      // are consumed here; the normal saved-turn path retains its own retry.
+      const required = await Promise.resolve().then(requiresLocation).catch(() => null);
+      return { read: (currentScope, currentText) => currentText === sourceText && currentScope === scope && identity === scope &&
+        generation === capturedGeneration && !automaticSuppressed ? required : null };
+    },
     canShare: (fix: ChatLocation, scope: string | null) =>
       isEnabled(scope) && grants.get(fix) === generation && parseChatLocation(fix) !== null,
     disable,

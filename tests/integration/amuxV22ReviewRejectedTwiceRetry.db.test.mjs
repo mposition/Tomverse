@@ -15,6 +15,9 @@ import { seedAmuxV4PortfolioRecoveryPrerequisites } from
 // reaches the same worker, the next run carries the latest findings, and its
 // first rejection returns to the same grade once more.
 
+// The usage gate is called here with the paid-only narrowing off, the older
+// rule this suite proves; at runtime only a paid route's unknown usage holds a
+// worker (the read-back switch was removed 2026-11-16).
 const raw = process.env.TEST_DATABASE_URL;
 const allowed = (() => {
   if (!raw || process.env.DATABASE_URL !== raw) return false;
@@ -149,7 +152,7 @@ test("a twice-rejected run reaches an owner retry, the claim and a fresh first r
     assert.equal(amuxV22ReviewRetryHasVerifiedOutcome({
       sourceSystem: "admin-idea-v4", attempt, rejectedReviewAttemptId }), true);
     // Its usage is unreported, so the worker is held for every Task until then.
-    assert.deepEqual(await amuxV22RoutesWithSettledUsage(tx, routes, null, taskId),
+    assert.deepEqual(await amuxV22RoutesWithSettledUsage(tx, routes, null, taskId, false),
       { routes: [], unsettled: true });
     // Without an owner retry, a further rejection would still be the second.
     assert.equal(await amuxV52PriorReviewRejections(tx, taskId, "next-attempt"), 1);
@@ -161,10 +164,10 @@ test("a twice-rejected run reaches an owner retry, the claim and a fresh first r
     assert.deepEqual(task, { status: "todo", revision: 5 });
 
     // 3. The claim may give the retried Task the same worker; no other Task.
-    assert.deepEqual(await amuxV22RoutesWithSettledUsage(tx, routes, null, taskId),
+    assert.deepEqual(await amuxV22RoutesWithSettledUsage(tx, routes, null, taskId, false),
       { routes, unsettled: false });
     assert.deepEqual(await amuxV22RoutesWithSettledUsage(tx, routes, null,
-      `other-${randomUUID()}`), { routes: [], unsettled: true });
+      `other-${randomUUID()}`, false), { routes: [], unsettled: true });
 
     // 4. The next run's prompt carries the latest rejection's findings.
     assert.equal(await amuxV52ReviewFeedbackJobId(tx, taskId), JOB_ID);
@@ -194,7 +197,7 @@ test("an unknown review result keeps retry closed even with a retry decision", {
     assert.equal(amuxV22ReviewRetryHasVerifiedOutcome({
       sourceSystem: "admin-idea-v4", attempt, rejectedReviewAttemptId }), false);
     await ownerRetries(db, taskId, priorAttemptId);
-    assert.deepEqual(await amuxV22RoutesWithSettledUsage(tx, routes, null, taskId),
+    assert.deepEqual(await amuxV22RoutesWithSettledUsage(tx, routes, null, taskId, false),
       { routes: [], unsettled: true });
   });
 });
@@ -217,18 +220,27 @@ test("a twice-rejected reason without its reject record is not retryable", {
   });
 });
 
-test("a used-up attempt budget refuses the retry at the DB edge", {
+test("thirty attempts no longer refuse an owner's retry at the DB edge", {
   skip: allowed ? undefined : "requires a dedicated loopback test database",
 }, async () => {
   await inRollback(async (tx, db) => {
-    // The same budget the review snapshot reads (decideAmuxAttemptBudget):
-    // the greatest attempt number counts as attempts used.
+    // Owner direction 2026-11-18: neither the app (decideAmuxAttemptBudget)
+    // nor the review proposal guard (20261118100000_amux_review_retry_no_attempt_bound) bounds an ordinary card.
     const { taskId, priorAttemptId } = await seedRejected(db, { attemptNumber: 5 });
     const { decideAmuxAttemptBudget } =
       await import("../../lib/amux/executionBudgetCore.ts");
     assert.equal(decideAmuxAttemptBudget({ historical_rows: 1,
-      greatest_attempt_number: 5 }).allowed, false);
-    await assert.rejects(ownerRetries(db, taskId, priorAttemptId),
-      /AMUX review retry attempt budget exhausted/);
+      greatest_attempt_number: 30 }).allowed, true);
+    assert.equal(decideAmuxAttemptBudget({ historical_rows: 1,
+      greatest_attempt_number: 5 }).allowed, true);
+    // The settled run's number placed at the guard, past its insert triggers.
+    await tx.$executeRawUnsafe("SET LOCAL session_replication_role = replica");
+    await tx.$executeRaw`UPDATE "AmuxExecutionAttempt" SET "attemptNumber" = 30
+      WHERE "id" = ${priorAttemptId}`;
+    await tx.$executeRawUnsafe("SET LOCAL session_replication_role = origin");
+    await ownerRetries(db, taskId, priorAttemptId);
+    const [after] = await tx.$queryRaw`SELECT "status" FROM "AmuxWorkItem"
+      WHERE "id" = ${taskId}`;
+    assert.equal(after.status, "todo");
   });
 });

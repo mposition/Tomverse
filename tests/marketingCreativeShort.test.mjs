@@ -1,15 +1,16 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import test from "node:test";
 
 import { marketingAssetSchema } from "../lib/marketingAssets.ts";
-import { AI_LINE, checkFilmSource, checkFinal, checkPlan, creativeAsset, fileRule, normalizePack, reviewPassed, usablePacks } from "../tools/marketing-video/creative-core.mjs";
-import { speakLine, VOICES, voiceLedgerPath } from "../tools/marketing-video/el-voice-core.mjs";
+import { AI_LINE, answerOf, checkFilmSource, checkFinal, checkPlan, creativeAsset, fileRule, lastBuild, normalizePack, packOfRun, reviewPassed, stillsIn, usablePacks } from "../tools/marketing-video/creative-core.mjs";
+import { speakLine, VOICE_CAP_ENV, VOICES, voiceLedgerPath } from "../tools/marketing-video/el-voice-core.mjs";
 import { admit, downloadResult, ledgerPath, readLedger } from "../tools/marketing-video/higgsfield-cap.mjs";
-import { creativeLedgerPath, creativeRequestProblem, makeMedia } from "../tools/marketing-video/hf-media-core.mjs";
+import { CREATIVE_CAP_ENV, creativeLedgerPath, creativeRequestProblem, makeMedia } from "../tools/marketing-video/hf-media-core.mjs";
+import { FRESH_REVIEW_ENV, pickSubject, SUBJECTS } from "../tools/marketing-video/fresh-review.mjs";
 
 /**
  * The creative short job (owner 2026-11-09: a different, creative ad every
@@ -257,6 +258,38 @@ test("a plan is made only for locales with a capture pack, and must show the AI 
   url.locales.en = { ...words("en"), lines: ["Visit www.example.com", "Two.", "Three."] };
   assert.match(checkPlan(answer(url), { packs: PACKS }).refusal, /web address/u);
   assert.match(checkPlan("no json here", { packs: PACKS }).refusal, /no \{"creative"/u);
+  // A screen line too long is named, so the retry mends that line and nothing else (run 20261113-3).
+  const long = plan();
+  const quoted = "Hosting 6 friends for dinner, one is vegetarian, and I have 2 hours to cook.";
+  long.locales.en = { ...words("en"), screen: [...words("en").screen, quoted] };
+  assert.match(checkPlan(answer(long), { packs: PACKS }).refusal, /en: screen is at most 16 lines of at most 60 characters; shorten or split "Hosting 6 friends/u);
+});
+
+test("a refused plan is mended, not rewritten, and a run whose plan was refused can go on without recording again", () => {
+  const runner = readFileSync(resolve("tools/marketing-video/run-creative-short.mjs"), "utf8");
+  assert.ok(runner.includes("attempt <= 3"));
+  assert.ok(runner.includes("Change only what the refusal names and keep everything else as it is"));
+  assert.ok(runner.includes("Your last plan:"));
+  // --replan: only a run with recordings and no accepted plan; it never records, and its plan calls get new names.
+  assert.ok(runner.includes('existsSync(path.join(creativeDir, replan, "sources")) && !existsSync(path.join(creativeDir, replan, "plan.json"))'));
+  assert.match(runner, /const fresh = rebuild === null && replan === null && env\[FRESH_REVIEW_ENV\] === "on";/u);
+  assert.ok(runner.includes("`plan-${planCalls + attempt}`"));
+  // Its recordings count before the "no capture packs" stop (a replan of 20261113-3 halted there).
+  const packsIn = runner.indexOf("if (rebuild !== null || replan !== null) packs = [...packs, ...freshPacksIn(runDir)];");
+  assert.ok(packsIn > 0 && packsIn < runner.indexOf('halt("no_capture_packs")'));
+});
+
+test("a plan whose narration would run past the film is refused before anything is paid for", async () => {
+  const { narrationSeconds } = await import("../tools/marketing-video/creative-core.mjs");
+  // Run 20261113-3's ko lines: the voice step later measured 47 s and dropped the locale after paying for it.
+  const { ko } = JSON.parse(readFileSync(resolve("tests/fixtures/creative-20261113-3-ko-lines.json"), "utf8"));
+  const seconds = narrationSeconds(ko, "ko");
+  assert.ok(seconds > 45 && seconds < 50, String(seconds));
+  const long = plan();
+  long.locales.ko = { ...words("ko"), lines: ko };
+  assert.match(checkPlan(answer(long), { packs: PACKS }).refusal, /ko: the narration would run about 4\d s with the end card, more than 38\.5; cut about \d+ characters/u);
+  // The short plan of every other test fits.
+  assert.ok(narrationSeconds(words("en").lines, "en") < 10);
 });
 
 test("a concept or logline used before is refused", () => {
@@ -287,9 +320,79 @@ test("the film may import only react, remotion and its own files, and stay a pur
     write(source);
     assert.match((await checkFilmSource(film)).join("\n"), pattern, source);
   }
+  // The kit is the one import from outside the folder; screens, clips and files come only through it.
+  write(`import React from "react";\nimport { Stack, Caption } from "../kit";\nexport const Film = () => <Stack><Caption text="x" /></Stack>;`);
+  assert.deepEqual(await checkFilmSource(film), []);
+  for (const source of [
+    `import { Img, staticFile } from "remotion";\nexport const Film = () => <Img src={staticFile("capture/en/a.png")} />;`,
+    `import { OffthreadVideo } from "remotion";\nexport const Film = () => null;`,
+    `export const Film = () => <img src="a.png" />;`,
+    `import { Video } from "remotion";\nexport const Film = () => <Video src="a.mp4" />;`,
+  ]) {
+    write(source);
+    assert.match((await checkFilmSource(film)).join("\n"), /Img, a video or staticFile/u, source);
+  }
+  write(`import { Kit } from "../kit/geometry";\nexport const Film = () => null;`);
+  assert.match((await checkFilmSource(film)).join("\n"), /imports \.\.\/kit\/geometry/u);
   write(`export const Film = () => null;`);
   writeFileSync(join(film, "run.sh"), "rm -rf /");
   assert.match((await checkFilmSource(film)).join("\n"), /only \.tsx and \.ts/u);
+});
+
+test("the kit keeps a screen's crop in the gaps between lines and words, and readable", async () => {
+  const { gridOf } = await import("../tools/marketing-video/creative-layout.mjs");
+  const { blocksOf, lineTimes, readGrid, screenScale, screenWord, snapCrop } = await import("../tools/marketing-video/creative-kit/geometry.js");
+  // A 640x480 white picture with two columns of "text": dark bars 24 px tall, 40 px apart.
+  const width = 640;
+  const height = 480;
+  const gray = new Uint8Array(width * height).fill(250);
+  const bar = (x0, x1, y0, y1) => {
+    for (let y = y0; y < y1; y += 1) for (let x = x0; x < x1; x += 1) gray[y * width + x] = (x + y) % 6 < 3 ? 30 : 250;
+  };
+  for (let line = 0; line < 6; line += 1) {
+    bar(40, 280, 40 + line * 64, 64 + line * 64);
+    bar(360, 600, 40 + line * 64, 64 + line * 64);
+  }
+  const grid = readGrid(gridOf(gray, width, height));
+  // An edge through a line of words moves to the gap above or below it; the sides move off the words.
+  const cut = snapCrop(grid, { x: 300, y: 50, w: 330, h: 140 }, "a");
+  assert.ok([[24, 64], [64, 104], [88, 128]].some(([from, to]) => cut.y >= from && cut.y <= to), `top ${cut.y} in a gap`);
+  const bottom = cut.y + cut.h;
+  assert.ok(bottom % 64 >= 0 && (bottom - 40) % 64 >= 24, `bottom ${bottom} in a gap, not inside a 24 px line`);
+  assert.ok(cut.x >= 280 && cut.x <= 360 && cut.x + cut.w >= 600, `sides ${cut.x}-${cut.x + cut.w} clear of the words`);
+  // No gap within reach: the render stops, naming the edge.
+  const solid = new Uint8Array(width * height).map((_, index) => ((index % width) + Math.floor(index / width)) % 6 < 3 ? 30 : 250);
+  assert.throws(() => snapCrop(readGrid(gridOf(solid, width, height)), { x: 100, y: 100, w: 200, h: 200 }, "s"), /top edge .* cuts through words/u);
+  assert.throws(() => snapCrop(grid, { x: 600, y: 0, w: 100, h: 10 }, "a"), /not inside/u);
+  // Drawn below 80% of its pixels, a screen's words stop reading.
+  assert.equal(screenScale({ x: 0, y: 0, w: 900, h: 10 }, 900), 1);
+  assert.throws(() => screenScale({ x: 0, y: 0, w: 1400, h: 10 }, 900, "wide"), /at least 1120 px wide/u);
+  // The blocks: the two columns, each one block of its lines (40 px gaps are under the 48 px row gutter).
+  const blocks = blocksOf(grid);
+  assert.equal(blocks.length, 2);
+  assert.ok(blocks[0].x < 40 && blocks[0].x + blocks[0].w > 280 && blocks[0].x + blocks[0].w < 360);
+  for (const block of blocks) assert.deepEqual(snapCrop(grid, block, "block"), block, "a block is a crop Screen takes as it is");
+  // Captions show only the plan's words; the narration plays line after line with a breath.
+  assert.equal(screenWord(["Hello there.", "AI"], " Hello there. "), "Hello there.");
+  assert.throws(() => screenWord(["Hello there."], "Hello"), /not one of the props' screen lines/u);
+  assert.deepEqual(lineTimes([{ seconds: 2 }, { seconds: 1 }], 30), [{ from: 6, frames: 60 }, { from: 74, frames: 30 }]);
+  // The reviewer gets each locale's real captures and may open them: a screen's own words are not "unlisted" (run 20261113-2).
+  const runner = readFileSync(resolve("tools/marketing-video/run-creative-short.mjs"), "utf8");
+  assert.ok(runner.includes("real captures ${capturesIn(locale)"));
+  assert.ok(runner.includes('fileRule("Read", `job/creative/${run}/public/capture/**`)'));
+  assert.match(readFileSync(resolve("tools/marketing-video/CREATIVE-REVIEW.md"), "utf8"), /The words inside a screen are the\s+screen's own/u);
+  // Each locale tells its own story from its own Review (owner 2026-11-13), in plan, build and review alike.
+  for (const name of ["CREATIVE-PLAN.md", "CREATIVE-BUILD.md", "CREATIVE-REVIEW.md"]) {
+    const doc = readFileSync(resolve("tools/marketing-video", name), "utf8");
+    assert.doesNotMatch(doc, /the same difference/u, name);
+    assert.match(doc, /own story|its own screens/u, name);
+  }
+  // A caption line breaks between words only: never inside "week-by-week", never inside 哪裡.
+  const { captionUnits } = await import("../tools/marketing-video/creative-kit/geometry.js");
+  assert.ok(captionUnits("Can you give me a week-by-week checklist?", "en").includes("week-by-week"));
+  const zh = captionUnits("要從哪裡開始？", "zh-Hant");
+  assert.ok(zh.includes("哪裡") && zh.at(-1).endsWith("？") && zh.at(-1).length > 1, JSON.stringify(zh));
+  assert.deepEqual(captionUnits("할 일 체크리스트", "ko"), ["할", " ", "일", " ", "체크리스트"]);
 });
 
 test("the film's imports are read by a parser: comments, webpack loaders, re-exports and unused imports do not slip past", async () => {
@@ -326,15 +429,23 @@ test("both pack shapes are read the same way, and a pack's topic comes from its 
   assert.equal(normalizePack({ assetId: "media-x-short", locale: "en", captures: {} }), null);
 });
 
-test("a review passes only with the verdict pass and every score 8 or more", () => {
-  const scores = { creative: 9, craft: 8, readability: 8, truth: 10, disclosure: 9 };
-  assert.equal(reviewPassed({ verdict: "pass", scores }), true);
-  assert.equal(reviewPassed({ verdict: "pass", scores: { ...scores, craft: 7 } }), false);
-  assert.equal(reviewPassed({ verdict: "pass", scores: { creative: 9 } }), false);
-  assert.equal(reviewPassed({ verdict: "pass", scores: { ...scores, truth: "10" } }), false);
-  assert.equal(reviewPassed({ verdict: "pass" }), false);
-  assert.equal(reviewPassed({ verdict: "fix", scores }), false);
+test("a film reaches Admin on its gates (truth, tone, disclosure); craft scores are notes, not a gate", () => {
+  const gates = { truth: true, tone: true, disclosure: true };
+  // Owner 2026-11-13: low craft never holds a film back; the person in Admin judges it.
+  assert.equal(reviewPassed({ verdict: "pass", gates, scores: { creative: 5, craft: 5, readability: 6, truth: 7, disclosure: 9 } }), true);
+  assert.equal(reviewPassed({ verdict: "pass", gates }), true);
+  for (const gate of ["truth", "tone", "disclosure"]) {
+    assert.equal(reviewPassed({ verdict: "pass", gates: { ...gates, [gate]: false } }), false, gate);
+    assert.equal(reviewPassed({ verdict: "pass", gates: { ...gates, [gate]: "true" } }), false, `${gate} as text`);
+  }
+  assert.equal(reviewPassed({ verdict: "pass", gates: { truth: true, tone: true } }), false);
+  assert.equal(reviewPassed({ verdict: "pass", scores: { creative: 10, craft: 10, readability: 10, truth: 10, disclosure: 10 } }), false, "no gates, no pass");
+  assert.equal(reviewPassed({ verdict: "fix", gates }), false);
+  assert.equal(reviewPassed({ verdict: "reject", gates }), false);
   assert.equal(reviewPassed(null), false);
+  const review = readFileSync(resolve("tools/marketing-video/CREATIVE-REVIEW.md"), "utf8");
+  assert.match(review, /"gates":\{"truth":true,"tone":true,"disclosure":true\}/u);
+  assert.match(review, /craft alone never holds a film\s+back/u);
 });
 
 test("the asset carries the words inside the captures it shows and its source short's claims", () => {
@@ -342,6 +453,12 @@ test("the asset carries the words inside the captures it shows and its source sh
   assert.equal(marketingAssetSchema.safeParse(asset).success, true);
   assert.deepEqual(asset.claimIds, ["claim-a"]);
   assert.ok(transcript.en.endsWith("GPT 6 Luna says hello\nAGREE 7"));
+  // "分析。AI" reads to the Guard as the host 析.ai: a space goes after the stop (run 20261113-2).
+  const zh = { ...words("zh-Hant"), alt: "然後是回答分析。AI 生成：三個計時器。" };
+  const spaced = creativeAsset({ id: "media-20261113-creative-zh-hant-short", locale: "zh-Hant", words: zh, captureWords: ["比較。AI Review"] });
+  assert.equal(spaced.asset.alt["zh-Hant"], "然後是回答分析。 AI 生成：三個計時器。");
+  assert.ok(spaced.transcript["zh-Hant"].endsWith("比較。 AI Review"));
+  assert.doesNotMatch(JSON.stringify(spaced), /。[A-Za-z]/u);
 });
 
 test("captures come only from shorts approved now and still valid", () => {
@@ -362,6 +479,18 @@ test("off the Linux box, the renderer refuses to run the film without its sandbo
   const ran = spawnSync(process.execPath, [join(tool, "render-creative.mjs"), tmpdir(), "en", "--stills"], { encoding: "utf8", env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot ?? "" } });
   assert.equal(ran.status, 1);
   assert.match(JSON.parse(ran.stdout.trim().split("\n").at(-1)).error, /no sandbox here/u);
+});
+
+test("both renderers delete the bundle folder, and render-creative checks --out before bundling", () => {
+  const creative = readFileSync("tools/marketing-video/render-creative.mjs", "utf8");
+  const plain = readFileSync("tools/marketing-video/render.mjs", "utf8");
+  for (const source of [creative, plain]) {
+    assert.match(source, /\} finally \{\n\s+(?:if \(serveUrl\) )?rmSync\(serveUrl, \{ recursive: true, force: true \}\);/u);
+  }
+  const bundleAt = creative.indexOf("await bundle(");
+  assert.ok(creative.indexOf('!out.endsWith(".mp4")') < bundleAt, "the --out usage check (which exits) must run before bundle()");
+  assert.equal(creative.slice(bundleAt).includes("usage()"), false);
+  assert.equal(creative.slice(bundleAt).includes("process.exit(1)"), false, "a failed render cleans up before it exits");
 });
 
 test("a finished file is 1080x1920, 10-60 s, with sound", () => {
@@ -404,4 +533,239 @@ test("model file rules are absolute, so a cd in the model's shell cannot move th
   const source = await readFile(new URL("../tools/marketing-video/run-creative-short.mjs", import.meta.url), "utf8");
   assert.doesNotMatch(source, /(?:Read|Edit|Write)\(\.\//u, "no relative file rule is left");
   assert.doesNotMatch(source, /`Write\(/u, "Write rules match nothing; Edit covers Write");
+});
+
+test("a Read-only call is handed every still by name, since Read cannot list a folder", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "creative-stills-"));
+  for (const name of ["f-02-3.8s.png", "f-01-1.3s.png", "notes.txt", "f-03-6.3s.jpg", "f-04-8.8s.png"]) writeFileSync(join(dir, name), "x");
+  const posixDir = dir.split(/[\\/]/u).join("/");
+  assert.deepEqual(stillsIn(dir), ["f-01-1.3s.png", "f-02-3.8s.png", "f-03-6.3s.jpg", "f-04-8.8s.png"].map((name) => `${posixDir}/${name}`));
+  assert.deepEqual(stillsIn(dir, 2), [`${posixDir}/f-01-1.3s.png`, `${posixDir}/f-03-6.3s.jpg`]);
+  assert.deepEqual(stillsIn(join(dir, "missing")), []);
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("../tools/marketing-video/run-creative-short.mjs", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /stills in job\/creative\/\$\{run\}\/review\/\$\{locale\}\/;/u, "the review prompt names files, not a folder");
+  assert.doesNotMatch(source, /job\/creative\/sheets\/\$\{entry\.run\}\//u, "earlier films are named by file too");
+});
+
+test("a run's last build round and review verdict are read from its call transcripts", () => {
+  const dir = mkdtempSync(join(tmpdir(), "creative-calls-"));
+  assert.deepEqual(lastBuild(join(dir, "missing")), { rounds: 0, review: null });
+  const stream = (result) => [JSON.stringify({ type: "system" }), JSON.stringify({ type: "result", result }), ""].join("\n");
+  writeFileSync(join(dir, "build-1.jsonl"), stream("built"));
+  writeFileSync(join(dir, "build-2.jsonl"), stream("built"));
+  writeFileSync(join(dir, "review-1.jsonl"), stream(JSON.stringify({ review: { verdict: "reject", notes: "old" } })));
+  writeFileSync(join(dir, "review-2.jsonl"), stream(JSON.stringify({ review: { verdict: "fix", notes: "make the screens readable" } })));
+  writeFileSync(join(dir, "plan-1.jsonl"), stream("{}"));
+  assert.deepEqual(lastBuild(dir), { rounds: 2, review: { verdict: "fix", notes: "make the screens readable" } });
+  writeFileSync(join(dir, "review-3.jsonl"), "not a stream");
+  assert.deepEqual(lastBuild(dir), { rounds: 2, review: null }, "the newest review decides, even when it gave no answer");
+  assert.equal(answerOf(`${stream("first")}${stream("second")}`), "second");
+  assert.equal(answerOf(""), null);
+});
+
+test("a rebuild reuses the run's paid media: it never reaches a paid step, and a missing run stops it", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("../tools/marketing-video/run-creative-short.mjs", import.meta.url), "utf8");
+  const start = source.indexOf("if (rebuild !== null) {");
+  const end = source.indexOf("// 1. Plan.");
+  assert.ok(start > 0 && end > start, "the rebuild branch sits before the plan");
+  assert.ok(start < source.indexOf("await paid("), "and before every paid call");
+  const branch = source.slice(start, end);
+  assert.doesNotMatch(branch, /paid\(|speakLine\(|makeMedia\(/u);
+  assert.match(branch, /halt\("rejected_before"\)/u);
+  assert.ok(branch.includes('history.some((entry) => entry.run === run)) halt("already_finished")'), "a finished run is never rebuilt");
+  assert.match(branch, /await finishFilm\(/u);
+  const shell = await readFile(new URL("../tools/marketing-video/run-creative-short.sh", import.meta.url), "utf8");
+  assert.match(shell, /node run-creative-short\.mjs "\$@"/u, "the shell passes --rebuild on");
+  const tool = resolve("tools/marketing-video");
+  const env = { PATH: process.env.PATH, MARKETING_CREATIVE_SHORT: "on", [CREATIVE_CAP_ENV]: "1", [VOICE_CAP_ENV]: "1", ELEVENLABS_API_KEY: "test", MARKETING_APP_URL: "http://localhost:1", MARKETING_MEDIA_SUBMIT_SECRET: "test" };
+  for (const name of ["../../etc", "20991231-9", ""]) {
+    const out = spawnSync(process.execPath, [join(tool, "run-creative-short.mjs"), "--rebuild", name], { encoding: "utf8", env });
+    assert.equal(out.status, 1);
+    assert.equal(JSON.parse(out.stdout.trim().split("\n").at(-1)).halted, "no_such_run");
+  }
+});
+
+test("a rebuild takes words and claims only from the approved pack whose files the run copied", () => {
+  const root = mkdtempSync(join(tmpdir(), "creative-packof-"));
+  const packDir = (name, bytes) => {
+    const dir = join(root, name);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "answer.png"), bytes);
+    return { topic: "review-compare", locale: "ko", dir, claimIds: [`claim-${name}`], captures: { answer: { file: "answer.png", text: `words ${name}` } } };
+  };
+  const a = packDir("a", "picture A");
+  const b = packDir("b", "picture B");
+  const copied = join(root, "run", "capture", "ko");
+  mkdirSync(copied, { recursive: true });
+  writeFileSync(join(copied, "answer.png"), "picture A");
+  assert.deepEqual(packOfRun(copied, [b, a], "review-compare", "ko"), { pack: a, words: ["words a"] });
+  assert.equal(packOfRun(copied, [b], "review-compare", "ko"), null, "A no longer approved: B's words are never put on A's pictures");
+  assert.equal(packOfRun(copied, [a], "review-compare", "en"), null);
+  assert.equal(packOfRun(join(root, "none"), [a], "review-compare", "ko"), null);
+  writeFileSync(join(copied, "extra.png"), "x");
+  assert.equal(packOfRun(copied, [a], "review-compare", "ko"), null, "the copied set must be the pack's set exactly");
+});
+
+test("a fresh film's subject is random, never one of the last six, and never about illness or danger", () => {
+  assert.ok(SUBJECTS.length >= 12);
+  for (const subject of SUBJECTS) assert.doesNotMatch(subject, /death|die|ill|sick|medic|hospital|doctor|funeral|grief|accident|danger|injur|health|cancer/iu);
+  // Nor a request for works to recommend: their themes are the answers', not ours (run 20261112).
+  for (const subject of SUBJECTS) assert.doesNotMatch(subject, /novel|book|movie|song|playlist|series to watch/iu);
+  assert.match(readFileSync(resolve("tools/marketing-video/run-creative-short.mjs"), "utf8"), /never for novels, films, songs or other works to recommend/u);
+  assert.equal(pickSubject([], () => 0), SUBJECTS[0]);
+  assert.equal(pickSubject([], () => 0.9999), SUBJECTS.at(-1));
+  const recent = SUBJECTS.slice(0, 6).map((subject) => ({ subject }));
+  for (let k = 0; k < 50; k += 1) assert.ok(!SUBJECTS.slice(0, 6).includes(pickSubject(recent, Math.random)));
+  // Only the last six count: a subject from seven films ago may come back.
+  const older = [{ subject: SUBJECTS[0] }, ...SUBJECTS.slice(1, 7).map((subject) => ({ subject }))];
+  assert.equal(pickSubject(older, () => 0), SUBJECTS[0]);
+  // Every subject used lately: any one, never nothing.
+  assert.ok(SUBJECTS.includes(pickSubject(SUBJECTS.map((subject) => ({ subject })), () => 0.5, SUBJECTS.length)));
+});
+
+test("fresh captures run only behind their switch, before the plan and every paid media call, and never twice after a paid step", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("../tools/marketing-video/run-creative-short.mjs", import.meta.url), "utf8");
+  assert.equal(FRESH_REVIEW_ENV, "MARKETING_CREATIVE_FRESH_REVIEW");
+  assert.ok(source.includes('const fresh = rebuild === null && replan === null && env[FRESH_REVIEW_ENV] === "on";'));
+  const start = source.indexOf("if (fresh) {");
+  const plan = source.indexOf("// 1. Plan.");
+  assert.ok(start > 0 && start < plan && plan < source.indexOf("await paid("));
+  const block = source.slice(start, plan);
+  assert.match(block, /node\(\["fresh-review\.mjs", locale, into, questionFile, topic\]\)/u);
+  assert.match(block, /if \(recorded\.status === 0\) continue;/u);
+  assert.match(block, /if \(recorded\.status !== 1 && recorded\.status !== 2\) halt\("fresh_review_stopped"\);/u);
+  const recorder = await readFile(new URL("../tools/marketing-video/fresh-review.mjs", import.meta.url), "utf8");
+  assert.ok(recorder.indexOf("paid = 1;") < recorder.indexOf('chat-send-button"]\').click()'), "marked paid before the send click");
+  assert.ok(recorder.indexOf("paid = 2;") < recorder.indexOf('await entry.locator("button").first().click()'), "marked paid before the analysis click");
+  assert.doesNotMatch(block, /paid\(|speakLine\(|makeMedia\(/u);
+  assert.ok(source.includes("`job/creative/${run}/sources/**`"), "the plan call may read the run's own packs");
+});
+
+test("the recorder refuses bad arguments and a folder that already holds a recording, before opening a browser", () => {
+  const tool = resolve("tools/marketing-video");
+  const dir = mkdtempSync(join(tmpdir(), "fresh-review-"));
+  const question = join(dir, "q.txt");
+  writeFileSync(question, "What should I cook for six friends on Friday?");
+  // A home of its own: the account lock lives under it.
+  const home = join(dir, "home");
+  const lock = join(home, ".local", "state", "tomverse", "demo-account.lock");
+  const run = (...args) => spawnSync(process.execPath, [join(tool, "fresh-review.mjs"), ...args], { encoding: "utf8", env: { PATH: process.env.PATH, HOME: home, USERPROFILE: home, [FRESH_REVIEW_ENV]: "on" } });
+  // Switch off: a paid recording refuses before anything, even run by hand.
+  const off = spawnSync(process.execPath, [join(tool, "fresh-review.mjs"), "en", join(dir, "off"), question, "fresh-cooking"], { encoding: "utf8", env: { PATH: process.env.PATH, HOME: home, USERPROFILE: home } });
+  assert.equal(off.status, 1);
+  assert.match(JSON.parse(off.stdout.trim()).refused, /MARKETING_CREATIVE_FRESH_REVIEW is not on/u);
+  assert.equal(existsSync(join(dir, "off")), false);
+  assert.equal(existsSync(lock), false);
+  assert.equal(run("fr", join(dir, "a"), question, "fresh-cooking").status, 2);
+  assert.equal(run("en", join(dir, "a"), question, "Bad Topic!").status, 2);
+  // The capture's text is the question, so it must be one line the box shows whole.
+  const twoLines = join(dir, "q2.txt");
+  writeFileSync(twoLines, "What should I cook tonight?\nFor six friends, one vegetarian.");
+  assert.equal(run("en", join(dir, "a"), twoLines, "fresh-cooking").status, 2);
+  assert.match(readFileSync(join(tool, "fresh-review.mjs"), "utf8"), /area\.scrollHeight <= area\.clientHeight \+ 1/u);
+  mkdirSync(join(dir, "done"));
+  writeFileSync(join(dir, "done", "started.json"), "{}");
+  const refused = run("en", join(dir, "done"), question, "fresh-cooking");
+  assert.equal(refused.status, 3);
+  assert.match(JSON.parse(refused.stdout.trim()).refused, /never sent twice/u);
+  assert.equal(existsSync(lock), false, "a refused folder gives the account lock back");
+  // A dry run never writes into a recording's folder (it would replace question.png under its pack).
+  const dryInto = run("en", join(dir, "done"), question, "fresh-cooking", "--dry");
+  assert.equal(dryInto.status, 3);
+  assert.match(JSON.parse(dryInto.stdout.trim()).refused, /holds a recording/u);
+  assert.equal(existsSync(lock), false);
+  // The demo account in use (or left locked): refused before anything, the folder not claimed, the lock kept.
+  mkdirSync(dirname(lock), { recursive: true });
+  writeFileSync(lock, "{}");
+  const busy = run("en", join(dir, "b"), question, "fresh-cooking");
+  assert.equal(busy.status, 1);
+  assert.match(JSON.parse(busy.stdout.trim()).refused, /demo account is in use/u);
+  assert.equal(existsSync(join(dir, "b", "started.json")), false);
+  assert.equal(existsSync(lock), true);
+  assert.equal(run("en", join(dir, "c"), question, "fresh-cooking", "--dry").status, 1, "a dry run switches the settings too, so it waits for the lock");
+  // The claim is taken exclusively before the browser opens; the settings restore is checked by reading back.
+  const recorder = readFileSync(join(tool, "fresh-review.mjs"), "utf8");
+  const claim = recorder.indexOf('"started.json"), "wx")');
+  assert.ok(claim > 0 && claim < recorder.indexOf("const result = await record("));
+  assert.match(recorder, /now\.language === restore\.language/u);
+  // A scrolled-up column's "jump to latest" button would cover the answer in the picture.
+  assert.match(recorder, /chat-consent-notice"\],\[data-testid="scroll-to-latest-button"\]/u);
+  assert.match(recorder, /code: 5/u);
+});
+
+test("a capture's text holds only the words a viewer can see, not the lines its panel cuts off", async (t) => {
+  const { visibleTextInPage } = await import("../tools/marketing-video/fresh-review.mjs");
+  let chromium;
+  try {
+    ({ chromium } = await import("../tools/marketing-video/node_modules/playwright/index.mjs"));
+  } catch {
+    t.skip("no playwright here");
+    return;
+  }
+  let browser;
+  try {
+    browser = await chromium.launch();
+  } catch {
+    t.skip("no Chromium here");
+    return;
+  }
+  try {
+    const page = await browser.newPage({ viewport: { width: 600, height: 400 } });
+    const lines = (word) => Array.from({ length: 40 }, (_, n) => `${word}${n}-longerword`).join(" ");
+    await page.setContent(`<body style="margin:0;font:16px/20px sans-serif">
+      <div id="panel" style="height:100px;width:300px;overflow:hidden"><p style="margin:0">alpha ${lines("w")} omega</p></div>
+      <div id="ko" style="height:20px;width:300px;overflow:auto"><p style="margin:0">처음 보이는 문장입니다 그리고 아래로 잘린 다음 줄의 마지막문장끝</p></div>
+      <p style="visibility:hidden">hiddenword</p>
+      <p style="position:absolute;top:900px">belowfold</p>
+      <div id="half" style="height:10px;width:300px;overflow:hidden"><p style="margin:0">halfcut</p></div>
+      <div id="edge" style="height:20px;width:60px;overflow:hidden;white-space:nowrap"><p style="margin:0">in widewordcutattheedge</p></div></body>`);
+    // Half a line, or a word running past the panel's side: not quotable.
+    assert.equal(await page.evaluate(visibleTextInPage, "#half"), "");
+    const edge = await page.evaluate(visibleTextInPage, "#edge");
+    assert.match(edge, /^in/u);
+    assert.doesNotMatch(edge, /wideword/u);
+    const panel = await page.evaluate(visibleTextInPage, "#panel");
+    assert.match(panel, /^alpha w0-longerword w1-longerword /u);
+    assert.doesNotMatch(panel, /omega|w39/u);
+    const ko = await page.evaluate(visibleTextInPage, "#ko");
+    assert.match(ko, /처음/u);
+    assert.doesNotMatch(ko, /마지막문장끝/u);
+    const body = await page.evaluate(visibleTextInPage, null);
+    assert.doesNotMatch(body, /hiddenword|belowfold|omega/u);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("the answer columns are set to their top, then further down, whatever streaming left them at", async (t) => {
+  const { scrollAnswerColumns } = await import("../tools/marketing-video/fresh-review.mjs");
+  let chromium;
+  try {
+    ({ chromium } = await import("../tools/marketing-video/node_modules/playwright/index.mjs"));
+  } catch {
+    t.skip("no playwright here");
+    return;
+  }
+  let browser;
+  try {
+    browser = await chromium.launch();
+  } catch {
+    t.skip("no Chromium here");
+    return;
+  }
+  try {
+    const page = await browser.newPage({ viewport: { width: 900, height: 600 } });
+    const column = (left) => `<div class="col" style="position:absolute;top:50px;left:${left}px;width:200px;height:400px;overflow-y:auto"><div style="height:3000px">answer</div></div>`;
+    // The composer panel on the left scrolls too, but is not an answer column.
+    await page.setContent(`<body style="margin:0"><div id="composer" style="position:absolute;top:50px;left:0;width:250px;height:400px;overflow-y:auto"><div style="height:3000px"></div></div>${column(300)}${column(520)}${column(700)}</body>`);
+    await page.evaluate(() => document.querySelectorAll(".col, #composer").forEach((node) => { node.scrollTop = node.scrollHeight; }));
+    assert.deepEqual(await page.evaluate(scrollAnswerColumns, 0), [0, 0, 0]);
+    assert.deepEqual(await page.evaluate(scrollAnswerColumns, 0.75), [300, 300, 300]);
+    assert.ok((await page.evaluate(() => document.querySelector("#composer").scrollTop)) > 2000);
+  } finally {
+    await browser.close();
+  }
 });

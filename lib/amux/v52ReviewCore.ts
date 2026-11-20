@@ -2,7 +2,11 @@
 export const AMUX_V52_REVIEW_VERDICTS = ["accept", "reject", "unknown"] as const;
 export type AmuxV52ReviewVerdict = (typeof AMUX_V52_REVIEW_VERDICTS)[number];
 
-export const AMUX_V52_REVIEW_SCOPE_MAX_CHARS = 8_192;
+// The scope travels inside one SSH command argument to the review server (131,072 bytes
+// per argument on Linux, base64url-expanded by a third), so its bound is the transport's,
+// not a policy one: 20,000 characters are at most 60,000 bytes (owner decision 2026-11-15
+// lifted the old 8,192; the review server's own cut is gone).
+export const AMUX_V52_REVIEW_SCOPE_MAX_CHARS = 20_000;
 
 export function formatAmuxV52ReviewScope(title: string,
   completionCriteria: string[]): string {
@@ -27,7 +31,9 @@ const SHA = /^[0-9a-f]{40}$/;
 const JOB_ID = /^r-[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$/;
 const VENDOR = /^[a-z][a-z0-9-]{0,63}$/;
 
-/** A request failure has no reliable job id and must be blocked, never resent. */
+/** An accept or reject names its job; an unknown verdict may have none (the
+ * launcher sends a request that returned no job again, see
+ * scripts/amux-v52-review-runner.mjs). */
 export function validAmuxV52ReviewEvidence(value: AmuxV52ReviewEvidence) {
   if (!SHA.test(value.baseSha) || !SHA.test(value.commitSha) ||
       value.baseSha === value.commitSha ||
@@ -48,21 +54,48 @@ export function validAmuxV52ReviewEvidence(value: AmuxV52ReviewEvidence) {
 export const AMUX_V52_REVIEW_REJECTED_TWICE_REASON =
   "review_server_rejected_twice";
 
-/** A first rejection returns to the same grade; a second needs a person.
+/**
+ * Owner decision 2026-11-14 (AMUX process audit bundle 2, AMUXFLOW/B2): a
+ * review is an internal signal and merging has its own gate, so a rejection
+ * returns the Task to `todo` with the findings attached to the next run; the
+ * attempt budget (lib/amux/executionBudgetCore.ts) bounds the runs and a spent
+ * budget blocks the Task for the owner queue and the Decision Maker.
+ *
+ * Owner decision 2026-11-15 (an internal development flow has no reason for a
+ * fixed limit): every rejection returns the Task to `todo`; the old rule (a
+ * second rejection blocks) and its switch are gone (2026-11-16).
+ * Neither a second rejection nor an `unknown` review blocks a Task by count: an
+ * unknown review runs again (the next run is reviewed anew), and a rejection
+ * goes to a person or the Decision Maker, with the reason, only when the same
+ * reviewer rejects for the same blocking finding again.
+ *
+ * Owner decision 2026-11-15: when the same reviewer vendor rejected a Task's
+ * two newest reviews, the next review prefers another vendor. The delivery
+ * names the vendors to avoid in `review_avoid_vendors` (always sent; the box
+ * bridge and review launcher must read it, its profile refuses unknown fields).
+ *
+ * A rejection returns to the same grade; the same finding rejected again needs a person.
  * `priorRejections` counts the Task's other rejected attempts since the
  * owner last retried a twice-rejected run (lib/amux/execution.ts), so an
  * owner retry gets one automatic return again rather than blocking on its
  * first rejection. */
 export function decideAmuxV52ReviewDisposition(
   verdict: AmuxV52ReviewVerdict, priorRejections: number,
+  /** The rejection repeats the previous one (same reviewer, same blocking finding). */
+  repeatedFinding: boolean = false,
 ): { status: "review" | "todo" | "blocked"; reason: string } {
   if (!Number.isSafeInteger(priorRejections) || priorRejections < 0)
     return { status: "blocked", reason: "review_history_unavailable" };
   if (verdict === "accept")
     return { status: "review", reason: "review_server_accepted" };
-  if (verdict === "reject" && priorRejections === 0)
-    return { status: "todo", reason: "review_server_rejected" };
-  if (verdict === "reject")
+  // The same finding rejected again: running the Task again would repeat it, so a
+  // person or the Decision Maker decides (the count since an owner retry decides
+  // whether there is an earlier rejection at all).
+  if (verdict === "reject" && repeatedFinding && priorRejections > 0)
     return { status: "blocked", reason: AMUX_V52_REVIEW_REJECTED_TWICE_REASON };
-  return { status: "blocked", reason: "review_server_unknown" };
+  if (verdict === "reject")
+    return { status: "todo", reason: "review_server_rejected" };
+  // An unknown review is asked for again by running the Task again: the next
+  // run is submitted to the review server anew.
+  return { status: "todo", reason: "review_server_unknown" };
 }

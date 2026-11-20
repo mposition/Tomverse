@@ -6,6 +6,7 @@ import {
   openRecentConversation,
   prepareGuestPage,
   qaPersistedMessageId,
+  type QaConversationMessage,
 } from "./support/app-fixtures";
 
 async function fulfillMessageSave(
@@ -41,6 +42,56 @@ async function fulfillMessageSave(
 
 const modelMenuTrigger = (page: Page) =>
   page.getByTestId("composer-model-select");
+
+const seededTurn: QaConversationMessage[] = [
+  { id: "seed-user", role: "user", content: "seeded question" },
+  {
+    id: "seed-assistant",
+    role: "assistant",
+    content: "seeded answer",
+    modelId: "gpt-5-4-mini",
+  },
+];
+
+/**
+ * Reopens qa-conversation with history in it, so its desktop panels are live.
+ *
+ * A conversation with no turns renders the welcome surface over the panels and
+ * makes them `inert` (UI-EMPTY-001, components/chat/DesktopChatShell.tsx):
+ * their `<select>`s cannot be operated, by a person or by Playwright. Specs
+ * that change a model through a panel's own select need a conversation that
+ * has already started. Waiting for a seeded message on screen is positive
+ * evidence that the panel has the conversation, not just the shell.
+ */
+async function openConversationWithHistory(
+  page: Page,
+  options: {
+    selectedModels?: string[];
+    messages?: QaConversationMessage[];
+  } = {}
+) {
+  const messages = options.messages ?? seededTurn;
+  await mockAuthenticatedApi(page, {
+    selectedModels: options.selectedModels ?? ["gpt-5-4-mini", "claude-haiku-4-5"],
+    messages,
+  });
+  await page.reload();
+  await expect(page.getByTestId("chat-input")).toBeVisible();
+  await expectHistoryOnScreen(page, messages);
+}
+
+async function expectHistoryOnScreen(
+  page: Page,
+  messages: QaConversationMessage[] = seededTurn
+) {
+  const firstAnswer = messages.find((message) => message.role === "assistant");
+  await expect(
+    page
+      .getByTestId("desktop-model-panel")
+      .first()
+      .getByText(firstAnswer?.content ?? messages[0]!.content)
+  ).toBeVisible();
+}
 
 async function prepareAuthenticatedChat(
   page: Page,
@@ -453,41 +504,12 @@ test.describe("value-moment upgrade prompt", () => {
   test("panel-only send waits for a changed model selection to persist", async ({
     page,
   }) => {
-    // The history below is seeded so the panel is in the state its follow-up
-    // input is meant for: a conversation that already has an answer to follow
-    // up on. That is what this test is about -- the ordering between the model
-    // PATCH and the message POST -- not the empty state.
-    //
-    // The comment that used to sit here said the panels are `inert` while the
-    // conversation is empty. They are not: that was tried and reverted, and
-    // the empty state still leaves the panels' own controls reachable. The
-    // open defect and the decision it is waiting on are tracked in
-    // .github/audits/ui-empty-001-keyboard-exposure-2026-08-01.md, which also
-    // records that no test currently covers a panel-only send on an empty
-    // conversation -- this one stopped doing so when it started seeding.
-    await mockAuthenticatedApi(page, {
-      selectedModels: ["gpt-5-4-mini", "claude-haiku-4-5"],
-      messages: [
-        { id: "seed-user", role: "user", content: "seeded question" },
-        {
-          id: "seed-assistant",
-          role: "assistant",
-          content: "seeded answer",
-          modelId: "gpt-5-4-mini",
-        },
-      ],
-    });
-    await page.reload();
-    await expect(page.getByTestId("chat-input")).toBeVisible();
-    // Wait for the seeded history to actually be on screen before driving the
-    // panel. This replaces a `not.toHaveAttribute("inert", "")` check that
-    // could not fail: no panel is ever `inert` today, so it passed on the
-    // first evaluation whether or not the conversation had loaded, and the
-    // readiness it claimed to establish was never established. The rendered
-    // answer is positive evidence that this panel has the conversation.
-    await expect(
-      page.getByTestId("desktop-model-panel").first().getByText("seeded answer")
-    ).toBeVisible();
+    // The history is seeded so the panel is in the state its follow-up input
+    // is meant for: a conversation that already has an answer to follow up
+    // on. That is what this test is about -- the ordering between the model
+    // PATCH and the message POST -- not the empty state, where the panels are
+    // `inert` behind the welcome surface (UI-EMPTY-001).
+    await openConversationWithHistory(page);
 
     let modelPatchCompleted = false;
     let messageSavedAfterPatch = false;
@@ -539,6 +561,9 @@ test.describe("value-moment upgrade prompt", () => {
   test("overlapping model changes are serialized and the final PATCH carries the newest selection", async ({
     page,
   }) => {
+    // A panel's own select only works once the conversation has a turn; with
+    // none the panels are `inert` behind the welcome surface (UI-EMPTY-001).
+    await openConversationWithHistory(page);
     let patchCount = 0;
     let inFlightPatches = 0;
     let sawOverlappingPatch = false;
@@ -599,6 +624,9 @@ test.describe("value-moment upgrade prompt", () => {
   test("a send issued while a model PATCH is already in flight waits for that save", async ({
     page,
   }) => {
+    // A panel's own select only works once the conversation has a turn; with
+    // none the panels are `inert` behind the welcome surface (UI-EMPTY-001).
+    await openConversationWithHistory(page);
     let patchCount = 0;
     let patchCompleted = false;
     let preflightCount = 0;
@@ -667,9 +695,8 @@ test.describe("value-moment upgrade prompt", () => {
   test("a single-model send right after a model swap reaches /api/chat only after the swap is saved", async ({
     page,
   }) => {
-    await mockAuthenticatedApi(page, { selectedModels: ["gpt-5-4-mini"] });
-    await page.reload();
-    await expect(page.getByTestId("chat-input")).toBeVisible();
+    // History, so the panel's own select is live (UI-EMPTY-001).
+    await openConversationWithHistory(page, { selectedModels: ["gpt-5-4-mini"] });
 
     let patchCompleted = false;
     let preflightCount = 0;
@@ -822,6 +849,9 @@ test.describe("value-moment upgrade prompt", () => {
   test("one conversation's hanging model save does not block another conversation's send", async ({
     page,
   }) => {
+    // Conversation A needs a turn for its panel select to be live
+    // (UI-EMPTY-001); B stays empty -- it is only sent to from the composer.
+    await openConversationWithHistory(page);
     // A second conversation beside the seeded qa-conversation.
     await page.unroute("**/api/conversations");
     await page.route("**/api/conversations", async (route) => {
@@ -925,6 +955,7 @@ test.describe("value-moment upgrade prompt", () => {
     // Refresh the sidebar list so conversation B exists to switch to.
     await page.reload();
     await expect(page.getByTestId("chat-input")).toBeVisible();
+    await expectHistoryOnScreen(page);
 
     // A model change in conversation A whose save never completes.
     const firstPanel = page.getByTestId("desktop-model-panel").first();
@@ -949,6 +980,9 @@ test.describe("value-moment upgrade prompt", () => {
   test("a late conversation detail response does not revert a newer local model change", async ({
     page,
   }) => {
+    // A panel's own select only works once the conversation has a turn; with
+    // none the panels are `inert` behind the welcome surface (UI-EMPTY-001).
+    await openConversationWithHistory(page);
     let releaseDetailGet: (() => void) | null = null;
     const detailGate = new Promise<void>((resolve) => {
       releaseDetailGet = resolve;
@@ -1033,6 +1067,30 @@ test.describe("value-moment upgrade prompt", () => {
   test("changing a panel model keeps the shared questions and the answers only the old model gave", async ({
     page,
   }) => {
+    // The transcript the conversation already holds, so the panel select is
+    // live (UI-EMPTY-001) and the swap below starts from the old model's answer.
+    const carriedTranscript: QaConversationMessage[] = [
+      {
+        id: "shared-user-message",
+        role: "user",
+        content: "Shared conversation question",
+      },
+      {
+        id: "old-model-answer",
+        role: "assistant",
+        content: "Answer from the previous model",
+        modelId: "gpt-5-4-mini",
+        status: "normal",
+      },
+      {
+        id: "other-panel-answer",
+        role: "assistant",
+        content: "Answer from the other panel",
+        modelId: "claude-haiku-4-5",
+        status: "normal",
+      },
+    ];
+    await openConversationWithHistory(page, { messages: carriedTranscript });
     await page.route(
       /.*\/api\/conversations\/qa-conversation\?.*modelId=.*/,
       async (route) => {
@@ -1043,28 +1101,7 @@ test.describe("value-moment upgrade prompt", () => {
             id: "qa-conversation",
             selectedModels: ["gemini-3-6-flash", "claude-haiku-4-5"],
             disabledPanels: [],
-            messages: [
-              {
-                id: "shared-user-message",
-                role: "user",
-                content: "Shared conversation question",
-                modelId: null,
-              },
-              {
-                id: "old-model-answer",
-                role: "assistant",
-                content: "Answer from the previous model",
-                modelId: "gpt-5-4-mini",
-                status: "normal",
-              },
-              {
-                id: "other-panel-answer",
-                role: "assistant",
-                content: "Answer from the other panel",
-                modelId: "claude-haiku-4-5",
-                status: "normal",
-              },
-            ],
+            messages: carriedTranscript,
             messagePage: { hasMore: false, nextCursor: null },
           }),
         });

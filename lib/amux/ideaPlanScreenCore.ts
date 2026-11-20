@@ -1,6 +1,7 @@
 import { amuxV22TaskWritesPatch } from "./v22WorkerClaimCore.ts";
 import type { AmuxVisibleAnalysisUnit } from "./ideaAnalysisResultReadCore.ts";
 import { amuxV4CardPlanRound, orderAmuxV4CardPlan } from "./ideaCardPlanCore.ts";
+import { amuxV4NodePlanRound, sortAmuxV4NodePlan } from "./ideaNodePlanCore.ts";
 
 /** Pure assembly of the plan approval request from the analysis result the
  * screen shows (amux-intake.md v18 item 3). No I/O. */
@@ -63,17 +64,23 @@ export function amuxV4PlanScreenUnits(units: readonly AmuxVisibleAnalysisUnit[])
 }
 
 /**
- * What one approval registers, computed exactly as the server does: every
- * proposed node, and the first round of the ordered cards. The rest wait for
- * the next approval. Throws the server's own error on a dependency cycle.
+ * What one approval registers, computed exactly as the server does: the first
+ * round of the proposed nodes, parents first, and once no node waits, the
+ * first round of the ordered cards (owner direction 2026-11-15: a large plan
+ * takes more rounds instead of being refused). The rest wait for the next
+ * approval. Throws the server's own error on a dependency cycle.
  */
 export function amuxV4PlanRound(units: readonly AmuxV4PlanScreenUnit[]) {
+  const nodes = units.filter((unit): unit is AmuxV4PlanScreenUnit & {
+    kind: "initiative" | "epic" | "feature" } => unit.kind !== "story" && unit.kind !== "task");
+  const nodeRound = amuxV4NodePlanRound(sortAmuxV4NodePlan(nodes.map((unit) =>
+    ({ ...unit, draftUnitId: unit.unitId, level: unit.kind }))));
   const cards = units.filter((unit) => unit.kind === "story" || unit.kind === "task");
-  const ordered = orderAmuxV4CardPlan(cards.map((unit) => ({ ...unit, draftUnitId: unit.unitId,
-    cardType: unit.kind as "story" | "task" })));
-  const { round } = amuxV4CardPlanRound(ordered);
-  const inRound = new Set([...units.filter((unit) => unit.kind !== "story" && unit.kind !== "task")
-    .map((unit) => unit.unitId), ...round.map((unit) => unit.unitId)]);
+  const round = nodeRound.remaining > 0 ? [] : amuxV4CardPlanRound(orderAmuxV4CardPlan(
+    cards.map((unit) => ({ ...unit, draftUnitId: unit.unitId,
+      cardType: unit.kind as "story" | "task" })))).round;
+  const inRound = new Set([...nodeRound.round.map((unit) => unit.unitId),
+    ...round.map((unit) => unit.unitId)]);
   return { inRound, deferred: units.filter((unit) => !inRound.has(unit.unitId)).map((unit) => unit.unitId) };
 }
 

@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { Session } from "next-auth";
 import { Prisma } from "@prisma/client";
 
-import { writeAdminAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import {
   BOARD_IMPORT_EXPIRY_MS,
   BOARD_IMPORT_STATEMENT_TIMEOUT,
@@ -12,11 +12,9 @@ import {
   boardImportFailureIsAmbiguous,
 } from "@/lib/amux/boardImportCore";
 import {
-  AMUX_RECONCILIATION_APPLY_ENV,
   AMUX_RECONCILIATION_PRESERVED_CARD,
   AMUX_RECONCILIATION_SOURCE_SYSTEM,
   type AmuxReconciliationPlan,
-  amuxReconciliationApplyPermitted,
 } from "@/lib/amux/boardReconciliationCore";
 import { prisma } from "@/lib/prisma";
 
@@ -251,14 +249,13 @@ export async function applyAmuxReconciliation(input: {
   request: Request;
   plan: AmuxReconciliationPlan;
 }): Promise<AmuxReconciliationCommitResult> {
-  if (!amuxReconciliationApplyPermitted(process.env[AMUX_RECONCILIATION_APPLY_ENV])) {
-    throw new BoardImportError("apply_disabled", 409);
-  }
   const runId = randomUUID();
   try {
     return await prisma.$transaction(
       async (tx) => {
         await tx.$executeRaw`SELECT set_config('statement_timeout', ${BOARD_IMPORT_STATEMENT_TIMEOUT}, true)`;
+        // Audit chain before any card row (lib/adminAudit.ts takeAuditChainLock).
+        await takeAuditChainLock(tx);
         return commitAmuxReconciliation(tx, { ...input, runId });
       },
       { maxWait: 5_000, timeout: 20_000 },

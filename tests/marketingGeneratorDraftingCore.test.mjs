@@ -11,6 +11,7 @@ import {
   MARKETING_VIDEO_DAYS,
   marketingA5AssetsFor,
   marketingA5MediaKindFor,
+  marketingVideoDaysFor,
   marketingA5Messages,
   marketingDraftSubmissionBody,
   marketingGeneratorContextSchema,
@@ -272,6 +273,7 @@ test("each platform's video days follow the owner's ratio, spread evenly, with t
     ["threads", 2, 7],
     ["youtube", 1, 1],
     ["tiktok", 1, 1],
+    ["rednote", 2, 4],
   ]) {
     assert.deepEqual(MARKETING_VIDEO_DAYS[channel], { video, of }, channel);
     // Any run of `of` consecutive days holds exactly `video` video days.
@@ -283,6 +285,48 @@ test("each platform's video days follow the owner's ratio, spread evenly, with t
   // Instagram alternates rather than bunching its video days.
   const instagram = Array.from({ length: 4 }, (_, index) => marketingA5MediaKindFor(both("instagram"), "instagram", "en", index));
   assert.deepEqual(instagram, ["image", "video", "image", "video"]);
+
+  // Korean Instagram carries a video three days in four (owner decision 2026-11-14); other locales keep two.
+  const bothKo = (channel) => marketingGeneratorContextSchema.parse({
+    ...context,
+    assets: [
+      { id: "media-card", allowedChannels: [channel], altLocales: ["ko"], claimIds: [], validUntil: "2099-12-31", kind: "image" },
+      { id: "media-short", allowedChannels: [channel], altLocales: ["ko"], claimIds: [], validUntil: "2099-12-31", kind: "video" },
+    ],
+  });
+  for (const start of [0, 20_400, 20_761]) {
+    const ko = Array.from({ length: 4 }, (_, index) => marketingA5MediaKindFor(bothKo("instagram"), "instagram", "ko", start + index));
+    assert.equal(ko.filter((kind) => kind === "video").length, 3, `instagram ko from day ${start}`);
+  }
+  assert.deepEqual(marketingVideoDaysFor("instagram", "ko"), { video: 3, of: 4 });
+  assert.deepEqual(marketingVideoDaysFor("instagram", "en"), MARKETING_VIDEO_DAYS.instagram);
+  assert.deepEqual(marketingVideoDaysFor("facebook", "ko"), MARKETING_VIDEO_DAYS.facebook);
+  // With no Korean video left, every Korean Instagram day still carries an image.
+  const koImagesOnly = marketingGeneratorContextSchema.parse({
+    ...context,
+    assets: [{ id: "media-card", allowedChannels: ["instagram"], altLocales: ["ko"], claimIds: [], validUntil: "2099-12-31", kind: "image" }],
+  });
+  for (let day = 0; day < 4; day += 1) assert.equal(marketingA5MediaKindFor(koImagesOnly, "instagram", "ko", day), "image");
+
+  // RedNote in Simplified Chinese carries a video two days in four (owner decision 2026-11-15).
+  const bothZhHans = marketingGeneratorContextSchema.parse({
+    ...context,
+    assets: [
+      { id: "media-card", allowedChannels: ["rednote"], altLocales: ["zh-Hans"], claimIds: [], validUntil: "2099-12-31", kind: "image" },
+      { id: "media-short", allowedChannels: ["rednote"], altLocales: ["zh-Hans"], claimIds: [], validUntil: "2099-12-31", kind: "video" },
+    ],
+  });
+  for (const start of [0, 20_400, 20_761]) {
+    const zhHans = Array.from({ length: 4 }, (_, index) => marketingA5MediaKindFor(bothZhHans, "rednote", "zh-Hans", start + index));
+    assert.equal(zhHans.filter((kind) => kind === "video").length, 2, `rednote zh-Hans from day ${start}`);
+  }
+  assert.deepEqual(marketingVideoDaysFor("rednote", "zh-Hans"), { video: 2, of: 4 });
+  // With no Simplified Chinese video approved, every RedNote day still carries an image.
+  const zhHansImagesOnly = marketingGeneratorContextSchema.parse({
+    ...context,
+    assets: [{ id: "media-card", allowedChannels: ["rednote"], altLocales: ["zh-Hans"], claimIds: [], validUntil: "2099-12-31", kind: "image" }],
+  });
+  for (let day = 0; day < 4; day += 1) assert.equal(marketingA5MediaKindFor(zhHansImagesOnly, "rednote", "zh-Hans", day), "image");
 
   // No approved video for Facebook: its video days carry an image instead.
   const imagesOnly = marketingGeneratorContextSchema.parse({
@@ -445,7 +489,7 @@ test("an asset an account has already used is not offered to it again, and an ac
 test("the instruction tells the model to write from the assets it was given when none fits the brief", () => {
   const [system] = marketingA5Messages(context, SCOPE);
   assert.match(system.content, /When no asset fits the brief's topic, do not skip the post/);
-  assert.match(system.content, /write it about what an asset you were given shows, using only its description/);
+  assert.match(system.content, /write it about the Tomverse feature an asset you were given is about, using only what its description supports and never describing the asset/);
   assert.match(system.content, /Whenever the assets list holds at least one asset, write at least one post/);
   assert.match(system.content, /return no draft only when the list is empty/);
   assert.match(system.content, /Never write what an asset's description does not support/);
@@ -453,12 +497,27 @@ test("the instruction tells the model to write from the assets it was given when
   assert.match(system.content, /Give each post a different asset/);
   // The old rule that skipped a post is gone, and the version says the instruction changed.
   assert.doesNotMatch(system.content, /return no draft: a post without/);
-  assert.equal(MARKETING_A5_PROMPT_VERSION, "a5-social-v9");
+  assert.equal(MARKETING_A5_PROMPT_VERSION, "a5-social-v11");
+});
+
+test("A5 states a claim only where it fits the post, never as an appended condition or mission line", () => {
+  const [system] = marketingA5Messages(context, SCOPE);
+  assert.equal(MARKETING_A5_PROMPT_VERSION, "a5-social-v11");
+  // The statement stays word for word: the Guard's fact boundary is unchanged.
+  assert.match(system.content, /contains the statement exactly as given, character for character/);
+  assert.match(system.content, /A claim is optional: a post with no claim/);
+  assert.match(system.content, /Never append a claim as a separate fact/);
+  assert.match(system.content, /usage being counted, model availability or other conditions, or about Tomverse's aims and focus/);
+  assert.match(system.content, /read like terms of service or a mission statement in the post, leave it out and list no claim id/);
+  assert.match(system.content, /never as its own stiff paragraph/);
+  // The old wording that pushed a claim into every post is gone.
+  assert.doesNotMatch(system.content, /Build each post on a claim not in it/);
+  assert.doesNotMatch(system.content, /built on its claims where they are/);
 });
 
 test("A5 is told when hashtags help, how many each platform takes, and which tags never to write", () => {
   const [system, user] = marketingA5Messages(context, SCOPE);
-  assert.equal(MARKETING_A5_PROMPT_VERSION, "a5-social-v9");
+  assert.equal(MARKETING_A5_PROMPT_VERSION, "a5-social-v11");
   assert.match(system.content, /task\.hashtags gives this platform's range/);
   assert.match(system.content, /fewer or none when a tag would not help/);
   assert.match(system.content, /#Tomverse once is recommended/);
@@ -652,4 +711,89 @@ test("a draft that names two carousels is dropped", () => {
   );
   assert.equal(drafts.length, 0);
   assert.deepEqual(dropped, { draft_mixes_carousel: 1 });
+});
+
+// ---- a post is written to the reader, not about the picture (owner 2026-11-11) ----
+
+const ALT_EN = "The phone on this desk shows a three-step spinach and egg fried rice recipe reply, with a blue label marking the contradiction between two answers.";
+const ALT_ZH = "画面里的女士在火车上举着手机，这句请求下方展开了模型菜单，旁边的三个浏览器标签页逐渐消失。";
+
+function sceneContext(channel, locale, alt) {
+  return marketingGeneratorContextSchema.parse({
+    channels: [{ id: "chn_x", channel, accountSlug: "tomverse", defaultLocale: locale, allowedLocales: [locale] }],
+    claims: [],
+    assets: [{ id: "asset_scene", allowedChannels: [channel], altLocales: [locale], claimIds: [], validUntil: "2099-12-31", kind: "image", alt: { [locale]: alt } }],
+    brief: null,
+    marketIntel: null,
+  });
+}
+const readScene = (channel, locale, alt, renderedText) =>
+  readMarketingA5Answer(answer([proposal({ renderedText, claimIds: [], assetIds: ["asset_scene"] })]), sceneContext(channel, locale, alt), {
+    channelId: "chn_x",
+    locale,
+    count: 1,
+    callIndex: 0,
+  });
+
+test("the instruction keeps the description out of the post's subject and forbids describing the picture", () => {
+  const [system] = marketingA5Messages(context, SCOPE);
+  assert.match(system.content, /accessibility text/);
+  assert.match(system.content, /it is never the subject of the post/);
+  assert.match(system.content, /Never describe the image or the video/);
+  for (const phrase of ["the image shows", "on the phone", "画面里", "图中", "這張", "이미지 속", "사진 속"]) {
+    assert.ok(system.content.includes(phrase), phrase);
+  }
+  assert.match(system.content, /open with the reader's situation or a question/);
+  assert.match(system.content, /name Tomverse Chat or Tomverse Review/);
+  assert.match(system.content, /Claim nothing about a feature the description does not support/);
+});
+
+test("on rednote the first line is a title of at most 20 characters and the AI line precedes the hashtags", () => {
+  const [system] = marketingA5Messages(context, SCOPE);
+  assert.match(system.content, /On rednote the post's first line is its title, at most 20 characters, with no hashtag in it/);
+  assert.ok(system.content.includes("（图片由 AI 生成）"));
+});
+
+test("a post that opens by describing the picture is dropped, in each language the operator saw", () => {
+  const koAlt = "기차에서 휴대폰을 든 여성 옆으로 탭이 사라지는 장면";
+  const cases = [
+    ["rednote", "zh-Hans", ALT_ZH, "火车上刷手机？\n画面里的女士在火车上举着手机，旁边三个标签页逐渐消失。\n#AI"],
+    ["rednote", "zh-Hans", ALT_ZH, "图中的手机对话，问的就是这三样食材。想试试吗？"],
+    ["rednote", "zh-Hans", ALT_ZH, "答案核对\n这张“答案核对”收据列出了三个模型的结论。"],
+    ["x", "en", ALT_EN, "The image shows AI answers to one trip question side by side."],
+    ["x", "en", ALT_EN, "A phone, a model menu and a train ride: the image puts an everyday writing request in focus."],
+    ["x", "en", ALT_EN, "On the phone: a three-step recipe reply, checked against a second model."],
+    ["linkedin", "en", ALT_EN, "The phone on this desk shows that dinner question answered twice."],
+    ["threads", "zh-Hant", "木桌上的手機畫面，用三步驟的菠菜雞蛋炒飯食譜回覆這個問題。", "這張圖裡的手機畫面是菠菜雞蛋炒飯食譜。"],
+    ["instagram", "ko", koAlt, "이미지 속 여성이 기차에서 휴대폰을 듭니다."],
+    ["instagram", "ko", koAlt, "사진 속 휴대폰에는 세 모델의 답이 나란히 보입니다."],
+  ];
+  for (const [channel, locale, alt, text] of cases) {
+    const { drafts, dropped } = readScene(channel, locale, alt, text);
+    assert.equal(drafts.length, 0, text);
+    assert.deepEqual(dropped, { draft_describes_image: 1 }, text);
+  }
+});
+
+test("a post that copies the description's own wording is dropped", () => {
+  const copied = readScene("x", "en", ALT_EN, "A three-step spinach and egg fried rice recipe reply, with a blue label marking the contradiction between two answers.");
+  assert.equal(copied.drafts.length, 0);
+  assert.deepEqual(copied.dropped, { draft_copies_description: 1 });
+  const copiedZh = readScene("rednote", "zh-Hans", ALT_ZH, "火车上\n女士在火车上举着手机，这句请求下方展开了模型菜单，旁边的三个浏览器标签页逐渐消失。\n#AI");
+  assert.equal(copiedZh.drafts.length, 0);
+  assert.deepEqual(copiedZh.dropped, { draft_copies_description: 1 });
+});
+
+test("a post written to the reader about the feature is kept, hashtags and the rednote AI line included", () => {
+  const kept = readScene("x", "en", ALT_EN, "Dinner question, two models, two answers? Tomverse Review lines them up so you can spot where they disagree. Try your next recipe question there. #Tomverse #AI");
+  assert.equal(kept.drafts.length, 1);
+  assert.deepEqual(kept.dropped, {});
+  const rednote = readScene(
+    "rednote",
+    "zh-Hans",
+    ALT_ZH,
+    "通勤路上想比较答案？\n在路上遇到拿不准的问题，用 Tomverse Review 把几个模型的回答放在一起看，分歧一目了然。今晚就拿一道菜谱问题试试，评论区告诉我你的结果？\n（图片由 AI 生成）\n#Tomverse #AI #AI助手",
+  );
+  assert.equal(rednote.drafts.length, 1);
+  assert.deepEqual(rednote.dropped, {});
 });

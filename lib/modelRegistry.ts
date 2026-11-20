@@ -493,7 +493,11 @@ import { isWebSearchOverride } from "@/lib/webSearchCapability";
  */
 export const registryRowToModel = (row: ModelRegistryEntry): AiModel => {
   const model = registryRowToBaseModel(row);
-  return isWebSearchOverride(row.webSearchOverride)
+  const withSearch = isWebSearchOverride(row.webSearchOverride)
     ? { ...model, webSearchOverride: row.webSearchOverride }
     : model;
+  // The file-tool tick, joined on the same way (lib/generatedArtifactToolPolicy.ts).
+  return typeof row.fileToolsOverride === "boolean"
+    ? { ...withSearch, fileToolsOverride: row.fileToolsOverride }
+    : withSearch;
 };

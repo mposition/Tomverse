@@ -344,6 +344,124 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // its deferred guard on its own new table; no commit-deadline marker or
   // classifier changes.
   "20261110100000_amux_v22_attempt_usage_acceptance",
+  // Owner decision 2026-11-10: the antigravity worker class widens five CHECK
+  // constraints; no commit-deadline marker, classifier or deferred trigger
+  // changes.
+  "20261110200000_amux_antigravity_worker_class",
+  // The review no-change completion migration does not touch the commit-deadline
+  // marker, classifier or deferred trigger.
+  "20261111120000_amux_review_no_change_completion",
+  // Owner decision 2026-11-13: the owner queue settlement adds one table with
+  // CHECK constraints only; no commit-deadline marker, classifier or deferred
+  // trigger changes.
+  "20261113200000_amux_dm_owner_settlement",
+  // The portfolio score active-window CHECK and refresh guard act on the score
+  // table only; no commit-deadline marker, classifier or deferred trigger
+  // changes.
+  "20261114100000_amux_portfolio_score_active_window_check",
+  "20261114100100_amux_portfolio_score_refresh_guard",
+  // The no-change guard's unpublished-patch refusal replaces one function body;
+  // no commit-deadline marker, classifier or deferred trigger changes.
+  "20261114120000_amux_review_no_change_unpublished_patch",
+  // The v52 review findings summary does not touch the commit-deadline marker,
+  // classifier or deferred trigger.
+  "20261114140000_amux_v52_review_findings_summary",
+  // Owner request 2026-11-14: the process analysis report table, CHECK
+  // constraints only; no commit-deadline marker, classifier or deferred
+  // trigger changes.
+  "20261114160000_amux_process_audit_report",
+  // Owner decision 2026-11-15: the card wait reason and worker health signal
+  // tables (CHECK constraints only), and the attempt-number bounds of the
+  // review proposal, v22 attempt and recovery guards and the recovery
+  // approval CHECK; no commit-deadline marker, classifier or deferred
+  // trigger changes.
+  "20261116011300_amux_wait_reasons_worker_health",
+  "20261116011400_amux_review_retry_no_fixed_count",
+  "20261116011500_amux_v22_attempt_number_bound",
+  "20261116011600_amux_v22_recovery_attempt_bound",
+  "20261116011700_amux_v22_recovery_approval_attempt_bound",
+  // Owner direction 2026-11-18: the review proposal guard drops its bound of
+  // thirty attempts; no commit-deadline marker, classifier or deferred trigger
+  // changes.
+  "20261118100000_amux_review_retry_no_attempt_bound",
+  // Owner decision 2026-11-18 (docs/policy/amux-v22-result-transfer.md): the
+  // v22 result and patch CHECKs keep only a lower bound, and three transfer
+  // tables with their own no-update and immutability triggers are added; no
+  // commit-deadline marker, classifier or deferred trigger changes.
+  "20261118120000_amux_v22_result_transfer",
+  // Owner decision 2026-11-15: the Decision Maker body store's caps grow, a CHECK
+  // and one number of the body guard; no commit-deadline marker, classifier or
+  // deferred trigger changes.
+  "20261115140000_amux_dm_card_text_cap",
+  // Owner decision 2026-11-15: the sealed review findings table with its own
+  // row trigger, and one more content-key purpose; no commit-deadline marker,
+  // classifier or deferred trigger changes.
+  "20261116010000_amux_v52_review_findings_body",
+  // Owner decision 2026-11-15: a lower grade's contract change is judged at
+  // frontier in place; one guard body (the task approval binding) accepts that
+  // escalation into review or blocked. No commit-deadline marker, classifier or
+  // deferred trigger changes.
+  "20261116010100_amux_v52_in_place_grade_escalation",
+  // Owner direction 2026-11-15: one session analysis answer may be up to
+  // 4 MiB; one CHECK on the result table, no commit-deadline marker,
+  // classifier or deferred trigger changes.
+  "20261116010400_amux_session_result_answer_size",
+  // Owner direction 2026-11-15: the rolling score baseline relaxes one CHECK
+  // and replaces the score guard body on the score table only; no
+  // commit-deadline marker, classifier or deferred trigger changes.
+  "20261116010500_amux_portfolio_score_rolling_baseline_check",
+  "20261116010600_amux_portfolio_score_rolling_baseline_guard",
+  // Owner direction 2026-11-15: the idea title CHECK loses its 80-character
+  // cap; one CHECK on the submission table, no commit-deadline marker,
+  // classifier or deferred trigger changes.
+  "20261116010700_amux_idea_title_no_length_cap",
+  // Owner direction 2026-11-15: a new idea's analysis has a 36,500-day
+  // deadline; one CHECK on the submission table and two guard bodies that
+  // compare the stored deadline instead of submittedAt + 7 days. No
+  // commit-deadline marker, classifier or deferred trigger changes.
+  "20261116010800_amux_idea_analysis_open_deadline",
+  "20261116010900_amux_v19_session_result_open_deadline",
+  "20261116011000_amux_v19_read_manifest_intent_open_deadline",
+  // Owner decision 2026-11-15: a v22 report up to the transport backstop and an
+  // answer up to its one cap; one CHECK each on the result and question
+  // tables, no commit-deadline marker, classifier or deferred trigger changes.
+  "20261116011100_amux_v22_task_result_report_size",
+  "20261116011200_amux_v22_owner_answer_size",
+  // Owner decision 2026-11-16: card execution report, detail and scope bounds
+  // go to 1 MiB, and the legacy review findings summary loses its 2,000
+  // character bound; CHECK-only changes, no commit-deadline marker,
+  // classifier or deferred trigger changes.
+  "20261116130000_amux_card_exec_report_sizes",
+  "20261116130100_amux_v52_review_findings_summary_unbounded",
+  // Owner decision 2026-11-16: a card's attempt number has no bound of ours;
+  // two guard bodies and one CHECK, no commit-deadline marker, classifier or
+  // deferred trigger changes.
+  "20261116130200_amux_v22_attempt_number_unbounded",
+  "20261116130300_amux_v22_recovery_attempt_unbounded",
+  "20261116130400_amux_v22_recovery_approval_attempt_unbounded",
+  // Owner direction 2026-11-16: the Decision Maker request ledger's windows and
+  // a late result read back by its digest (two guard bodies), and a system
+  // release of an instance latch (two CHECKs and the switch guard body); no
+  // commit-deadline marker, classifier or deferred trigger changes.
+  "20261116140000_amux_dm_request_windows",
+  "20261116140100_amux_dm_latch_release",
+  // Operator, 2026-11-16: idea analysis has no artificial stops. Three CHECKs
+  // (session claim, session result, retention hold) and the bodies of the
+  // session claim, claim mode, shadow window, session result and two draft
+  // unit guards: the system closes an unknown subscription claim at zero,
+  // takes its late result and claims a failed analysis again; an undecided
+  // draft keeps the open clock. No commit-deadline marker, classifier or
+  // deferred trigger changes.
+  "20261116120000_amux_session_claim_record_only_checks",
+  "20261116120100_amux_v19_session_claim_mode_record_only",
+  "20261116120200_amux_v19_session_claim_system_close",
+  "20261116120300_amux_v19_shadow_usage_late_result",
+  "20261116120400_amux_v19_session_result_late_guard",
+  "20261116120500_amux_draft_first_open_expiry",
+  "20261116120600_amux_draft_unit_open_expiry",
+  // The retention hold insert guard's 90-day bound goes with its CHECK's; one
+  // guard body, no commit-deadline marker, classifier or deferred trigger change.
+  "20261116120700_amux_v4_retention_hold_long_guard",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
@@ -599,6 +717,7 @@ test("only the named AMUX receipt and admission routes open direct transactions"
     "app/api/internal/amux/cli-usage/route.ts",
     "app/api/internal/amux/tasks/route.ts",
     "app/api/internal/amux/v19/analysis-budget/claim/route.ts",
+    "app/api/internal/amux/v19/analysis-budget/in-flight/route.ts",
     "app/api/internal/amux/v19/analysis-budget/max-result/route.ts",
     "app/api/internal/amux/v19/analysis-budget/unknown/route.ts",
     "app/api/internal/amux/v19/analysis-price/route.ts",
@@ -616,6 +735,7 @@ test("only the named AMUX receipt and admission routes open direct transactions"
   // The v19 Max launcher routes own bounded receipt transactions too; each
   // authenticates the dedicated launcher before any transaction opens.
   for (const path of [
+    "app/api/internal/amux/v19/analysis-budget/in-flight/route.ts",
     "app/api/internal/amux/v19/analysis-budget/max-result/route.ts",
     "app/api/internal/amux/v19/analysis-price/route.ts",
     "app/api/internal/amux/v19/max-checkout-evidence/route.ts",
@@ -626,22 +746,20 @@ test("only the named AMUX receipt and admission routes open direct transactions"
     assertBefore(source, "isAmuxV19MaxLauncherAuthorized(request");
     assert.match(source, /\{ maxWait: [35]_000, timeout: 1[025]_000 \}/, path);
   }
+  // The v19 routes below have no runtime switch: each authenticates before a
+  // transaction opens and keeps its own bounded transaction.
   const stopPoll = withoutComments(read(
     "app/api/internal/amux/v19/analysis-stop/route.ts"));
   assertBefore(stopPoll, "isAmuxV4AnalysisAgentAuthorized(request");
-  assertBefore(stopPoll, 'process.env[READ_ENV] !== "enabled"');
-  assert.match(stopPoll, /\{ maxWait: 5_000, timeout: 10_000 \}/);
+  assert.match(stopPoll, /{ maxWait: 5_000, timeout: 10_000 }/);
   const sessionStopPoll = withoutComments(read(
     "app/api/internal/amux/v19/session-analysis-stop/route.ts"));
   assertBefore(sessionStopPoll, "isAmuxV4AnalysisAgentAuthorized(request");
-  assertBefore(sessionStopPoll, 'process.env[READ_ENV] !== "enabled"');
-  assert.match(sessionStopPoll, /\{ maxWait: 5_000, timeout: 10_000 \}/);
+  assert.match(sessionStopPoll, /{ maxWait: 5_000, timeout: 10_000 }/);
   const sessionUnknown = withoutComments(read(
     "app/api/internal/amux/v19/analysis-budget/unknown/route.ts"));
   assertBefore(sessionUnknown, "isAmuxV4AnalysisAgentAuthorized(request");
-  assertBefore(sessionUnknown, 'process.env[WRITE_ENV] !== "enabled"');
-  assertBefore(sessionUnknown, 'process.env[READ_ENV] !== "enabled"');
-  assert.match(sessionUnknown, /\{ maxWait: 5_000, timeout: 15_000 \}/);
+  assert.match(sessionUnknown, /{ maxWait: 5_000, timeout: 15_000 }/);
   const evidenceRoute = withoutComments(read(
     "app/api/internal/amux/v19/checkout-evidence/route.ts"));
   const evidencePost = between(evidenceRoute, "export async function POST",
@@ -650,14 +768,7 @@ test("only the named AMUX receipt and admission routes open direct transactions"
     "export async function GET"));
   assert.ok(evidencePost.indexOf("authorized(request)") <
     evidencePost.indexOf("prisma.$transaction"));
-  assert.ok(evidencePost.indexOf("process.env[WRITE_ENV]") <
-    evidencePost.indexOf("prisma.$transaction"));
-  assert.ok(evidencePost.indexOf("process.env[READ_ENV]") <
-    evidencePost.indexOf("prisma.$transaction"));
-  assert.ok(evidenceGet.indexOf("process.env[READ_ENV]") <
-    evidenceGet.indexOf("prisma.$transaction"));
   assertBefore(evidenceGet, "authorized(request)");
-  assert.ok(!evidenceGet.includes("process.env[WRITE_ENV]"));
   assert.match(evidencePost, /maxWait: 3_000, timeout: 12_000/);
   assert.match(evidenceGet, /maxWait: 3_000, timeout: 10_000/);
   const manifestRoute = withoutComments(read(
@@ -668,12 +779,6 @@ test("only the named AMUX receipt and admission routes open direct transactions"
     "export async function GET"));
   assert.ok(manifestPost.indexOf("authorized(request)") <
     manifestPost.indexOf("prisma.$transaction"));
-  assert.ok(manifestPost.indexOf("process.env[WRITE_ENV]") <
-    manifestPost.indexOf("prisma.$transaction"));
-  assert.ok(manifestPost.indexOf("process.env[READ_ENV]") <
-    manifestPost.indexOf("prisma.$transaction"));
-  assert.ok(manifestGet.indexOf("process.env[READ_ENV]") <
-    manifestGet.indexOf("prisma.$transaction"));
   assert.match(manifestPost, /maxWait: 3_000, timeout: 12_000/);
   assert.match(manifestGet, /maxWait: 3_000, timeout: 10_000/);
   const budgetReceipt = withoutComments(read(
@@ -684,34 +789,29 @@ test("only the named AMUX receipt and admission routes open direct transactions"
   const budgetClaimGet = budgetReceipt.slice(budgetReceipt.indexOf(
     "export async function GET"));
   assertBefore(budgetClaimPost, "isAmuxV19MaxLauncherAuthorized(request");
-  assertBefore(budgetClaimPost, 'process.env[WRITE_ENV] !== "enabled"');
-  assertBefore(budgetClaimPost, 'process.env[READ_ENV] !== "enabled"');
-  assert.match(budgetClaimPost, /\{ maxWait: 5_000, timeout: 15_000 \}/);
+  assert.match(budgetClaimPost, /{ maxWait: 5_000, timeout: 15_000 }/);
   assertBefore(budgetClaimGet, "isAmuxV4AnalysisAgentAuthorized(request");
-  assertBefore(budgetClaimGet, 'process.env[READ_ENV] !== "enabled"');
-  assert.ok(!budgetClaimGet.includes("process.env[WRITE_ENV]"));
-  assert.match(budgetClaimGet, /\{ maxWait: 5_000, timeout: 10_000 \}/);
-  // Intake v15 opens only the code latches. The independent runtime write
-  // and receipt-read switches still fail closed before a transaction opens.
-  // Both transaction bounds remain independent of execution commit deadlines.
+  assert.match(budgetClaimGet, /{ maxWait: 5_000, timeout: 10_000 }/);
+  // The claim route keeps its runtime write switch (it starts the spend) and
+  // fails closed on it before a transaction opens; the result route and both
+  // receipt reads have no switch. Both transaction bounds remain independent
+  // of execution commit deadlines.
   const claim = "app/api/internal/amux/v4/analysis-claim/route.ts";
   const result = "app/api/internal/amux/v4/analysis-result/route.ts";
   for (const [path, latch] of [[claim, "CLAIM"], [result, "RESULT"]]) {
     const source = withoutComments(read(path));
-    assert.match(source, new RegExp(`const ${latch}_CODE_LATCH = true;`));
-    assert.match(source, new RegExp(`const ${latch}_WRITE_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_${latch}_WRITE";`));
-    assert.match(source, new RegExp(`const ${latch}_RECEIPT_READ_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_${latch}_READ";`));
+    assert.doesNotMatch(source, /CODE_LATCH|_RECEIPT_READ_ENV/);
     const post = between(source, "export async function POST", "export async function GET");
-    const writeGate = `process.env[${latch}_WRITE_ENV] !== "enabled"`;
-    const readGate = `process.env[${latch}_RECEIPT_READ_ENV] !== "enabled"`;
-    assert.ok(post.includes(`!${latch}_CODE_LATCH || ${writeGate}`));
-    assert.ok(post.includes(`!${latch}_RECEIPT_READ_CODE_LATCH ||`));
-    assert.ok(post.includes(readGate));
-    assert.ok(post.indexOf(writeGate) < post.indexOf("prisma.$transaction"));
-    assert.ok(post.indexOf(readGate) < post.indexOf("prisma.$transaction"));
     const receiptRead = source.slice(source.indexOf("export async function GET"));
-    assert.ok(receiptRead.includes(readGate));
-    assert.ok(!receiptRead.includes(`process.env[${latch}_WRITE_ENV]`));
+    if (latch === "CLAIM") {
+      assert.match(source, /const CLAIM_WRITE_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_WRITE";/);
+      const writeGate = 'process.env[CLAIM_WRITE_ENV] !== "enabled"';
+      assert.ok(post.indexOf(writeGate) >= 0);
+      assert.ok(post.indexOf(writeGate) < post.indexOf("prisma.$transaction"));
+      assert.ok(!receiptRead.includes("process.env[CLAIM_WRITE_ENV]"));
+    } else {
+      assert.doesNotMatch(source, /TOMVERSE_AMUX_V4_ANALYSIS_RESULT_(WRITE|READ)/);
+    }
     assert.match(source, /isAmuxV4AnalysisAgentAuthorized/);
     assert.match(source, /AMUX_V4_ANALYSIS_AGENT_SECRET_ENV/);
     assert.match(source, /maxWait: 5_000, timeout: 15_000/);

@@ -18,6 +18,7 @@ import {
 import {
   applyGeneratedTitle,
   generateConversationTitle,
+  interimTitleFromFirstMessage,
   recordTitleGenerationUsage,
 } from "@/lib/conversationTitle";
 import { safeErrorMetadata } from "@/lib/providerErrorClassification";
@@ -76,7 +77,7 @@ export async function POST(
       where: { id: conversationId },
       select: {
         userId: true,
-        password: true,
+        password: true, passwordVersion: true,
         kind: true,
         // D1 applies to every title writer, not only rename
         // (lib/continuationTitlePreservation.ts).
@@ -97,7 +98,7 @@ export async function POST(
     }
     if (
       existingConv.password &&
-      !hasConversationUnlockGrant(req, userId, conversationId, existingConv.password)
+      !hasConversationUnlockGrant(req, userId, conversationId, existingConv.password == null ? null : existingConv.passwordVersion)
     ) {
       return conversationLockedResponse();
     }
@@ -149,12 +150,31 @@ export async function POST(
       return NextResponse.json({ updated: false, reason: "reserved_title" });
     }
 
+    // The client's expectedTitle is not the only interim title accepted: the
+    // Auto first send lost the created title and sent "New chat", so every
+    // generated title missed the compare-and-set. A continuation keeps only
+    // the caller's value (lib/continuationTitlePreservation.ts).
+    const interimTitle =
+      existingConv.continuationBridge === null
+        ? interimTitleFromFirstMessage(firstMessage.content)
+        : null;
     const { updated } = await applyGeneratedTitle({
       conversationId,
       userId,
       expectedTitle: body.expectedTitle,
+      interimTitle,
       newTitle: generation.title,
     });
+    if (!updated) {
+      console.info(
+        JSON.stringify({
+          event: "conversation_title_not_applied",
+          traceId,
+          conversationId,
+          reason: "title_changed",
+        })
+      );
+    }
 
     try {
       await recordTitleGenerationUsage(generation);
@@ -162,7 +182,11 @@ export async function POST(
       logRouteError("conversation_title_usage_record_failed", traceId, error);
     }
 
-    return NextResponse.json({ updated, title: generation.title });
+    return NextResponse.json({
+      updated,
+      title: generation.title,
+      ...(interimTitle ? { interimTitle } : {}),
+    });
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;

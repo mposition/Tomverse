@@ -42,6 +42,9 @@ import { fileURLToPath } from "node:url";
 import {
   APP_CLAIM_PATH,
   APP_RESULT_PATH,
+  DAILY_APP_CLAIM_PATH,
+  DAILY_APP_RESULT_PATH,
+  DAILY_APP_HALT_PATH,
   GITHUB_API,
   LIMITS,
   REPO_OWNER,
@@ -55,6 +58,7 @@ import {
   boundPrText,
   branchNameFor,
   buildResultBody,
+  buildHaltBody,
   checkChangeScope,
   isAutoRecBranch,
   isPrUrl,
@@ -82,6 +86,7 @@ export function readGatewayConfig(env) {
     missing,
     appOrigin: origin,
     appSecret: env.AUTOREC_APP_SECRET ?? "",
+    dailyProduct: env.AUTOREC_WORK_MODE === "daily-product",
     githubToken: env.AUTOREC_GITHUB_TOKEN ?? "",
     // systemd sets STATE_DIRECTORY for StateDirectory=.
     stateDir: env.STATE_DIRECTORY?.split(":")[0] || "/var/lib/autorec-gw",
@@ -150,7 +155,8 @@ async function appPost(deps, path, body) {
   try {
     response = await deps.fetch(`${config.appOrigin}${path}`, {
       method: "POST",
-      headers: appRequestHeaders(config.appSecret),
+      headers: { ...appRequestHeaders(config.appSecret),
+        ...(config.dailyProduct ? { "x-autorec-work-mode": "daily-product" } : {}) },
       body: JSON.stringify(body),
       redirect: "error",
       signal: AbortSignal.timeout(60_000),
@@ -172,7 +178,7 @@ async function appPost(deps, path, body) {
 }
 
 async function claim(deps) {
-  const answer = await appPost(deps, APP_CLAIM_PATH, {});
+  const answer = await appPost(deps, deps.config.dailyProduct ? DAILY_APP_CLAIM_PATH : APP_CLAIM_PATH, {});
   if (answer.kind === "unknown") return { status: "unknown", code: answer.status ? `http_${answer.status}` : "network" };
   if (answer.status === 204) return { status: "empty" };
   if (answer.status !== 200) return { status: "error", code: `http_${answer.status}` };
@@ -188,9 +194,19 @@ async function result(deps, header) {
   } catch (error) {
     return { status: "error", code: error.message };
   }
-  const answer = await appPost(deps, APP_RESULT_PATH, body);
+  const answer = await appPost(deps, deps.config.dailyProduct ? DAILY_APP_RESULT_PATH : APP_RESULT_PATH, body);
   if (answer.kind === "unknown") return { status: "unknown", code: answer.status ? `http_${answer.status}` : "network" };
   if (answer.status >= 200 && answer.status < 300) return { status: "reported" };
+  return { status: "error", code: `http_${answer.status}` };
+}
+
+async function haltNotice(deps, header) {
+  if (!deps.config.dailyProduct) return { status: "error", code: "daily_mode_required" };
+  let body;
+  try { body = buildHaltBody(header); } catch { return { status: "error", code: "halt_notice_invalid" }; }
+  const answer = await appPost(deps, DAILY_APP_HALT_PATH, body);
+  if (answer.kind === "unknown") return { status: "unknown", code: "halt_notice_unknown" };
+  if (answer.status === 200 && answer.json?.recorded === true) return { status: "recorded" };
   return { status: "error", code: `http_${answer.status}` };
 }
 
@@ -282,18 +298,35 @@ async function findOpenPr(deps, branch) {
   return { known: true, pr: answer.json[0] ?? null };
 }
 
-/**
- * Auto PR to Develop opens a draft for the pushed branch; wait for it, and
- * open the draft here only when it has not appeared, so the two never race
- * into two pull requests.
- */
-async function ensurePullRequest(deps, branch, text) {
-  const deadline = deps.now() + LIMITS.autoPrWaitMs;
-  let found = await findOpenPr(deps, branch);
-  while (!found.pr && deps.now() < deadline) {
-    await deps.sleep(LIMITS.autoPrPollMs);
-    found = await findOpenPr(deps, branch);
+/** Fixed-repository read only. Never accepts a caller URL, query, token or write. */
+async function workContext(deps) {
+  if (!deps.config.dailyProduct) return { status: "error", code: "daily_mode_required" };
+  const pulls = [];
+  for (let page = 1; page <= 3; page += 1) {
+    const answer = await githubRequest(deps, "GET", `/repos/${REPO_SLUG}/pulls?base=develop&state=open&per_page=100&page=${page}`);
+    if (!answer.ok || answer.status !== 200 || !Array.isArray(answer.json)) return { status: "error", code: "work_context_unavailable" };
+    for (const pr of answer.json) {
+      // Match the repair agent's same-repository scope. Outsider PR metadata
+      // does not become evidence for suppressing an operator's task.
+      if (pr.head?.repo?.full_name !== REPO_SLUG) continue;
+      if (!Number.isSafeInteger(pr.number) || pr.number < 1 || pr.number > 999999999 ||
+          !SHA.test(pr.head?.sha ?? "") || pr.base?.ref !== "develop") return { status: "error", code: "work_context_invalid" };
+      pulls.push({ number: pr.number, head: pr.head.sha, title: String(pr.title ?? "").slice(0, 120), body: String(pr.body ?? "").slice(0, 200) });
+    }
+    if (pulls.length > 200) return { status: "error", code: "work_context_incomplete" };
+    if (answer.json.length < 100) return { status: "context", pulls };
   }
+  return { status: "error", code: "work_context_incomplete" };
+}
+
+/**
+ * Open the held draft immediately after push. Waiting for Auto PR left its
+ * unlabelled draft in the CI admission queue until our next poll. If that
+ * workflow gets there first, adopt its draft; a create race is looked up once.
+ */
+async function ensurePullRequest(deps, branch, text, expectedHead) {
+  let found = await findOpenPr(deps, branch);
+  if (!found.known) return { status: "unknown", step: "pr_lookup", branch };
   let created = false;
   if (!found.pr) {
     const answer = await githubRequest(deps, "POST", `/repos/${REPO_SLUG}/pulls`, {
@@ -311,13 +344,32 @@ async function ensurePullRequest(deps, branch, text) {
       found = await findOpenPr(deps, branch);
     }
   }
+  if (!found.known) return { status: "unknown", step: "pr_lookup", branch };
   const prUrl = found.pr?.html_url;
   if (!isPrUrl(prUrl)) return { status: "failed", code: "pr_failed", pushed: true, branch };
+  // Never adopt an already-ready PR or report success without the owner's CI hold.
+  if (found.pr.draft !== true) return { status: "unknown", step: "pr_not_draft", branch };
+  const labelsPath = `/repos/${REPO_SLUG}/issues/${found.pr.number}/labels`;
+  await githubRequest(deps, "POST", labelsPath, { labels: ["ci:hold"] });
+  // Even an unanswered label write is read back once; never blindly replay it.
+  const labels = await githubRequest(deps, "GET", labelsPath);
+  if (!labels.ok || labels.status !== 200 || !Array.isArray(labels.json) || !labels.json.some((label) => label?.name === "ci:hold")) {
+    return { status: "unknown", step: "ci_hold_unverified", prUrl, branch };
+  }
   let bodyUpdated = created;
   if (!created) {
     const patch = await githubRequest(deps, "PATCH", `/repos/${REPO_SLUG}/pulls/${found.pr.number}`, text);
     bodyUpdated = patch.ok && patch.status === 200;
   }
+  // Admission or an operator may have changed draft state during the label
+  // write. Observe draft, hold and reviewed head together before success.
+  const snapshot = await githubRequest(deps, "GET", `/repos/${REPO_SLUG}/pulls/${found.pr.number}`);
+  if (!snapshot.ok || snapshot.status !== 200) return { status: "unknown", step: "pr_state_unverified", prUrl, branch };
+  if (snapshot.json?.draft !== true) return { status: "unknown", step: "pr_not_draft", prUrl, branch };
+  if (!Array.isArray(snapshot.json.labels) || !snapshot.json.labels.some((label) => label?.name === "ci:hold")) {
+    return { status: "unknown", step: "ci_hold_unverified", prUrl, branch };
+  }
+  if (snapshot.json.head?.sha !== expectedHead) return { status: "unknown", step: "pr_head_unverified", prUrl, branch };
   return { status: "published", prUrl, number: found.pr.number, bodyUpdated };
 }
 
@@ -392,7 +444,7 @@ async function publish(deps, header, payload) {
     if (remote !== head) return refused("push_rejected");
   }
   deps.log("pushed", { branch, head });
-  return ensurePullRequest(deps, branch, boundPrText(header));
+  return ensurePullRequest(deps, branch, boundPrText(header), head);
 }
 
 // ---------------------------------------------------------------- dispatch
@@ -404,6 +456,8 @@ export async function handleRequest(deps, header, payload) {
   if (header.op === "claim") return claim(deps);
   if (header.op === "result") return result(deps, header);
   if (header.op === "publish") return publish(deps, header, payload);
+  if (header.op === "halt_notice") return haltNotice(deps, header);
+  if (header.op === "work_context") return workContext(deps);
   return { status: "error", code: "op_invalid" };
 }
 
@@ -494,7 +548,7 @@ async function main() {
   } catch (error) {
     answer = { status: "error", code: error.message === "request_too_large" ? "request_too_large" : "request_invalid" };
   }
-  deps.log("gateway_answer", { op, status: answer.status, code: answer.code ?? null, detail: answer.detail ?? null });
+  deps.log("gateway_answer", { op, status: answer.status, code: answer.code ?? null, detail: answer.detail ?? null, step: answer.step ?? null });
   // stdout is the connection: exit only once the answer has been handed to it.
   await new Promise((resolve) => process.stdout.write(`${JSON.stringify(answer)}\n`, resolve));
 }

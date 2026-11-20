@@ -3904,6 +3904,21 @@ export async function rejectMarketingPost(
   requireOne(updated.count, "rejection_conflict", "Another decision won this post");
 }
 
+/**
+ * The audit metadata an edit must carry, built once for the route that writes
+ * the entry and the store that checks it (marketingTemplates.ts checks the
+ * same two digests). `envelope` is the envelope the edit stores: the stored one
+ * with the new words. The route used to write only the previous digest, under
+ * the name `digest`, so every edit was refused as `metadata_mismatch`.
+ */
+export const marketingEditAuditMetadata = (input: {
+  readonly expectedEnvelopeDigest: string;
+  readonly envelope: MarketingEnvelope;
+}) => ({
+  digest: marketingEnvelopeDigest(marketingEnvelopeSchema.parse(input.envelope)),
+  previousDigest: input.expectedEnvelopeDigest,
+});
+
 export async function editMarketingPost(
   database: MarketingDatabase,
   rawInput: {
@@ -4015,10 +4030,10 @@ export async function editMarketingPost(
     auditLogId: input.auditLogId,
     action: MARKETING_S2B1_ACTIONS.postEdit,
     targetId: input.id,
-    metadata: {
-      digest,
-      previousDigest: input.expectedEnvelopeDigest,
-    },
+    metadata: marketingEditAuditMetadata({
+      expectedEnvelopeDigest: input.expectedEnvelopeDigest,
+      envelope,
+    }),
   });
   const codes = "codes" in decision ? [...decision.codes] : [];
   const entries: MarketingHistoryEntry[] = [

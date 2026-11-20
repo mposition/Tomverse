@@ -11,9 +11,11 @@ Review lets the user choose models directly and compare answers side by side.
 The product switcher must keep that distinction visible without presenting
 Smart Adaptive as a third product.
 
-Korean controls keep the Chat and Review product names and add short visible
+Korean controls show the short labels `채팅` / `비교` and add short visible
 explanations (chat and model comparison). The same captions appear in the
-switcher, Studio title and navigation. Existing accessible product names and
+switcher, Studio title and navigation, except where a caption would repeat its
+label: the Korean Chat link shows `채팅` once, while the Studio title keeps
+`Chat` with its `채팅` caption. Existing accessible product names and
 localized feature descriptions remain available; captions do not change routes
 or selection behavior.
 
@@ -40,14 +42,37 @@ conversation from the same imported original and opens it, and the Chat
 conversation keeps its product (`docs/policy/external-conversation-continuation.md`
 §3.1).
 
-Every finished Tomverse answer in Chat also offers "Compare in Review" (owner
-decision 2026-10-26). It is not the switcher either: it opens a new Review draft
-through the existing `/review?prompt=` prefill with that answer's question and up
-to two earlier questions (`lib/chatReviewHandoff.ts`, deterministic, no model
-call), leaves through the switcher's own admission (drafts preserved, blocked
-while a send or draft conflict is open), and sends nothing. The Chat
-conversation, its `productKey` and its models are unchanged; Review never
-converts back into Chat.
+Finished Tomverse answers in ordinary Chat offer "Compare in Review" through
+the existing `/review?prompt=` prefill (`lib/chatReviewHandoff.ts`). In an
+authenticated Chat continuation, the answer action instead sends only its saved
+assistant ID and an anchor-bound idempotency key to the dedicated handoff API.
+The server opens a new Review continuation with an editable, target-scoped
+durable question draft. It references the same imported snapshot and bounded
+native messages before the question, excluding the clicked answer and later
+turns. The original-source fork above remains a separate action.
+
+The question is not truncated to the URL prefill limit. The notice distinguishes
+recorded source excerpts from legacy reconstruction and explains that every
+selected model receives the same bounded references after Send. Attachment
+dependent handoffs are explicitly unsupported, with no URL fallback. No source
+body enters the handoff URL, draft or browser storage. Creation and reload do
+not execute a model, reserve credits or create a Message. Existing Chat and
+ordinary Review drafts remain separate; the new draft uses the existing CAS
+and successful Message-consume lifecycle through a handoff-only endpoint.
+
+Both answer actions leave through product-switch admission (drafts preserved,
+blocked while a send, unknown write or draft conflict is open). Account,
+conversation and answer generations fence late responses; changing the answer
+starts a new key, while retrying the same failed attempt reuses its key. The
+original Chat's `productKey`, messages and models remain unchanged.
+
+Saved normal Review analyses also offer an explicit "Continue in Chat" action
+through the same product-switch admission. It projects one reviewer or finding
+into a new editable Chat draft, rather than rewriting the source conversation.
+Only an opaque marker travels in the URL; an account-bound memory packet carries
+the reference. Existing durable Chat text or attachments require an explicit
+append or cancellation after successful hydration. No execution occurs until
+the ordinary Chat Send action. See `review-studio.md` for scope and lifecycle.
 
 The navigation callback may stage one idle in-memory draft snapshot immediately
 before following a product link. It does not persist, publish or copy that draft

@@ -29,6 +29,17 @@ Owner approved Concept B on 2026-10-20: Figma file
 - Easy history follows the provider across model changes. Professional retains
   the existing direct model picker and transcript behavior. Neither changes a
   conversation's stored product or grants a new plan entitlement.
+- Easy's provider rows mark each provider with an active image model with an
+  image badge (`review-provider-image-badge`), read from the image catalogue
+  the page was served with (Admin model catalogue), never a fixed list. No
+  badge is shown where image generation is off for the deployment or the
+  conversation.
+- The new-review image card ("one sentence, several images") is v2's
+  multi-model image comparison entry (`docs/policy/image-generation.md` §1, §11).
+  It seeds the composer and arms image mode: Easy routes the sentence once per
+  selected provider; Professional starts on an active catalogue model of a
+  provider already answering, else the first active one, and never on a fixed
+  default model.
 - Unsupported image providers have a local notice and no execution. Other
   supported providers retain the existing image execution/consent flow. An
   all-unsupported image request never substitutes a provider or calls text.
@@ -55,6 +66,58 @@ Verification: `npm run verify:studio-answer-analysis` mounts the real component
 against loopback responses (no provider/DB). It covers one execution across
 reopens, background completion, tabs and evidence, saved reload, changed input,
 identity scope, guest reuse, dark mode and mobile exclusion.
+
+## Continue a saved analysis in Chat (2026-11-14)
+
+Signed-in owners can preview a completed normal Review's current reviewer or
+one finding, then open it as an editable new Chat draft. Studio's balanced
+result needs no synthesis. Classic, mobile web and Quick Summary use the same
+handoff. Quote-match status, original question, model provenance, unresolved
+matters and limitations stay in the reference; separate web checks do not.
+The preview explains that the text is an independent copy of the source.
+
+The handoff makes no model call, reservation, Conversation or Message. It
+rechecks the captured result through the existing owner/unlock GET and passes
+a five-minute, one-use, account/epoch-bound packet in tab memory. Only its
+opaque marker enters the URL. Chat suppresses recent-conversation restoration,
+waits for successful durable `new` draft hydration, and uses the normal draft
+writer. Existing text or attachments require explicit Add or Cancel; CAS and
+sync recovery remain unchanged. Identity changes, expiry and cancellation
+discard the pending packet. Guest, imported continuations, public sharing,
+native analysis entries and Deep Research execution are outside this slice.
+
+Coverage: `tests/reviewToChat.test.mjs` and
+`tests/e2e/review-to-chat.spec.ts` (real route navigation and draft hydration).
+
+## Analysis progress and report actions (2026-11-15)
+
+Studio consumes the existing review progress stream and displays the first
+validated review while the additional reviewer and durable save finish. This
+does not add model calls or change execution budgets. An interrupted stream
+recovers through the saved-result GET; only a terminal server failure permits
+an explicit retry after another cache lookup.
+
+Studio, Classic, mobile web and Quick Summary put Continue in Chat immediately
+before Close in their result footer, alongside Share and Export. Transfer
+actions require a completed saved result. The report preview preserves the
+selected reviewer's full analysis, question, model mapping, quoted excerpts,
+quote-match status, source-grounding counts and unresolved matters. Export
+uses the existing deterministic PDF, DOCX, TXT and Markdown writers, with no
+model call or generated-artifact persistence. Unsupported PDF glyphs offer
+the other formats instead of silently dropping text.
+
+Sharing requires explicit publication after a public-content preview and
+explains replacement of the conversation's existing share link. It reuses the
+existing owner/unlock, plan, operational, expiry, revocation and atomic snapshot
+checks, adding an exact saved-review version check. The snapshot contains only
+the selected report, including its quotes; full model answers, attachments and
+separate web checks stay out. Unknown publication outcomes require revocation
+before another attempt. Existing transcript sharing is unchanged.
+
+Coverage: `tests/reviewAnalysisReport.test.mjs`,
+`tests/server-contract/review-analysis-actions.test.mjs`,
+`tests/e2e/review-analysis-actions.spec.ts` and the existing Studio/handoff
+regressions. These local checks use no paid provider execution.
 
 ## In-conversation image answers (owner direction, 2026-10-23)
 

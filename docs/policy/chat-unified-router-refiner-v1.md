@@ -10,8 +10,8 @@ approvalTimezone: Australia/Brisbane
 scope: CHAT_UNIFIED_ROUTER_REFINER_AND_OPTIMIZER
 implementationAuthority: provider_free_implementation_within_approved_scope
 initialRuntimeActivationAuthority: owner_action_after_exact_release_readback
-productModelId: gpt-5-6-luna
-productApiModelId: gpt-5.6-luna
+productModelId: gpt-6-luna
+productApiModelId: gpt-6-luna
 productInputTokenCap: 100000
 productOutputTokenCap: 4096
 productDeadlineMs: 13000
@@ -136,8 +136,8 @@ The initial unified stage retains the current product pin:
 
 | Field | Required value |
 |---|---|
-| Registry model | `gpt-5-6-luna` |
-| Provider API model | `gpt-5.6-luna` |
+| Registry model | `gpt-6-luna` |
+| Provider API model | `gpt-6-luna` |
 | Route | direct OpenAI Responses API |
 | Processing tier | Standard |
 | Reasoning effort | `medium` |
@@ -147,6 +147,13 @@ The initial unified stage retains the current product pin:
 | Deadline | 13,000 ms from authenticated route entry through held publication |
 | Retry count | 0 |
 | Per-request ceiling | 29,918 microUSD |
+
+Owner decision and numeric approval, 2026-11-11: the product pin moved from
+`gpt-5-6-luna` to `gpt-6-luna` (`lib/promptRefinerProductPricePin.ts`) so
+`gpt-5-6-luna` can retire; the vNext evaluation pin stays as the record of what
+was evaluated. The ceiling stays 29,918 microUSD, above `gpt-6-luna`'s
+recomputed worst case of 14,550. The move changes the product price-pin digest,
+so both Chat activation pairs are recorded again after the deploy.
 
 The effective current registry row, transport, rates and price-pin digest must
 be verified immediately before reservation. A price, model, tier, transport,

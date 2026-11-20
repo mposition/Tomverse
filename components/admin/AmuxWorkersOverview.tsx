@@ -10,8 +10,15 @@ import { AdminPixelAvatar } from "@/components/admin/ui/AdminPixelAvatar";
 import { AMUX_WORKER_CHANNELS } from "@/lib/adminAmuxFlow";
 import {
   AmuxCliModelIssueChips,
+  AmuxCliModelLinkForm,
   AmuxWorkerCapabilityEditor,
+  amuxCliModelLinkOffered,
+  runAmuxCliModelLink,
   runAmuxWorkerCapabilityEdit,
+  type AmuxCliModelLinkChange,
+  type AmuxCliModelLinkIo,
+  type AmuxCliModelLinkState,
+  type AmuxCliModelLinkUpdate,
   type AmuxWorkerCapabilityIo,
   type AmuxWorkerCapabilityNotice,
   type AmuxWorkerCapabilityRefusalNotice,
@@ -36,6 +43,8 @@ import {
   type AdminApiFailure,
 } from "@/lib/adminApiOutcome";
 import { adminFetch } from "@/lib/adminFetch";
+import { formatAestDateTime } from "@/lib/adminUiCore";
+import type { AmuxWorkerHealthView } from "@/lib/amux/workerHealthCore";
 import { adminAmuxWorkerCapabilityMessages } from "@/lib/adminMessages/amuxWorkerCapability";
 import { adminAmuxWorkersMessages } from "@/lib/adminMessages/amuxWorkers";
 import type { AmuxCliModelCatalogAdminView } from "@/lib/amux/cliModelCatalogCore";
@@ -79,6 +88,8 @@ import {
 
 const REGISTRY_PATH = "/api/admin/amux/workers";
 const AMUX_WORKER_CAPABILITY_PATH = "/api/admin/amux/workers/capabilities";
+const AMUX_CLI_MODEL_LINK_PATH = "/api/admin/amux/cli-models";
+const NO_LINK: AmuxCliModelLinkState = { choice: null, busy: false, notice: null, refusal: null, failure: null };
 
 type Messages = (typeof adminAmuxWorkersMessages)["en"];
 type CapabilityMessages = (typeof adminAmuxWorkerCapabilityMessages)["en"];
@@ -119,9 +130,29 @@ export function amuxWorkerAgeText(m: Messages, seconds: number | null): string |
 }
 
 /** The one sentence under a worker's status: what is true and what to do about it. */
-export function amuxWorkerReasonText(m: Messages, row: Pick<AmuxWorkerOverviewRow, "status" | "heartbeatAgeSeconds">): string {
+export function amuxWorkerReasonText(m: Messages, row: Pick<AmuxWorkerOverviewRow, "status" | "heartbeatAgeSeconds"> &
+  Partial<Pick<AmuxWorkerOverviewRow, "health" | "healthNotice">>): string {
   const reason = m.reason[row.status] as (age: string | null) => string;
-  return reason(amuxWorkerAgeText(m, row.heartbeatAgeSeconds));
+  const parts = [reason(amuxWorkerAgeText(m, row.heartbeatAgeSeconds))];
+  // The claim's own view of the worker (owner decision 2026-11-15): why it is
+  // held, and a warning beside one that still takes work.
+  const health = row.health ?? null;
+  if (health && row.status === "infra_quarantined" && health.circuit.lastKind) {
+    parts.push(m.health.failures(health.circuit.consecutive,
+      m.health.kind[health.circuit.lastKind] ?? health.circuit.lastKind) +
+      (health.circuit.retryAt ? ` · ${m.health.retryAt(formatAestDateTime(health.circuit.retryAt) ?? health.circuit.retryAt)}` : ""));
+  }
+  if (row.healthNotice === "probing") parts.push(m.health.probing);
+  if (row.healthNotice === "login_attention") parts.push(m.health.loginAttention);
+  if (row.healthNotice === "relogin_soon") {
+    const expiry = health?.signals.find((signal) => signal.signal === "relogin_soon")?.expiresAt ?? null;
+    parts.push(m.health.reloginSoon(expiry ? formatAestDateTime(expiry) ?? expiry : null));
+  }
+  if (health && (row.healthNotice === "login_attention" || row.healthNotice === "relogin_soon")) {
+    for (const signal of health.signals) parts.push(m.health.signal(m.health.source[signal.source] ?? signal.source,
+      m.health.signalText[signal.signal] ?? signal.signal, formatAestDateTime(signal.observedAt) ?? signal.observedAt));
+  }
+  return parts.join(" ");
 }
 
 const providerCounts = (counts: readonly AmuxWorkerProviderCount[]) =>
@@ -231,7 +262,6 @@ export function AmuxWorkersOverviewView({
   cm,
   overview,
   isOwner,
-  writesLatch,
   filter,
   query,
   openWorker,
@@ -261,13 +291,15 @@ export function AmuxWorkersOverviewView({
   onCopy,
   cliModels,
   onFix,
+  cliModelLink,
+  onLinkChoose,
+  onLinkSave,
   onRegister,
 }: {
   m: Messages;
   cm: CapabilityMessages;
   overview: AmuxWorkerOverview | null;
   isOwner: boolean;
-  writesLatch: boolean;
   filter: AmuxWorkerOverviewFilter;
   query: string;
   openWorker: string | null;
@@ -301,11 +333,15 @@ export function AmuxWorkersOverviewView({
   cliModels?: AmuxCliModelCatalogAdminView | null;
   /** Opens a worker's details with its editor, from a model chip. */
   onFix?: (row: AmuxWorkerOverviewRow) => void;
+  /** The open drawer's model-price link form; absent where it is not offered. */
+  cliModelLink?: AmuxCliModelLinkState;
+  onLinkChoose?: (value: string) => void;
+  onLinkSave?: (change: AmuxCliModelLinkChange) => void;
   /** Registers a new worker the owner named, with the CLI it runs. */
   onRegister?: (request: AmuxWorkerRegistrationRequest) => void;
 }) {
   const busy = pending !== null;
-  const canChange = isOwner && writesLatch;
+  const canChange = isOwner;
   const models = cliModels ?? null;
   // The model a worker runs: its one-shot model when it takes Tasks.
   const usedModel = (row: AmuxWorkerOverviewRow) => row.capability?.current?.capability.v22?.model || row.model;
@@ -426,6 +462,10 @@ export function AmuxWorkersOverviewView({
     const command = amuxWorkerEnableCommand(row.workerName);
     const form = editing !== null && editing.workerName === row.workerName ? editing : null;
     const canEdit = canChange && overview.capabilitiesReadable && row.capability !== null && row.desiredState !== "retired";
+    // The price link is the owner's, for a model that shows an issue or is linked already.
+    const link = cliModelLink ?? NO_LINK;
+    const linkModel = canChange && models !== null && onLinkChoose !== undefined && onLinkSave !== undefined &&
+      amuxCliModelLinkOffered(models, row.providerClass, usedModel(row)) ? usedModel(row)! : null;
     return (
       <div className="fixed inset-0 z-50 flex justify-end" data-testid="amux-worker-drawer-layer">
         <button
@@ -498,13 +538,36 @@ export function AmuxWorkersOverviewView({
                 </dd>
               </dl>
               <p className="text-sm text-zinc-300">{row.mode === "v22" ? m.drawer.v22On : m.drawer.v22Off}</p>
+              {linkModel !== null ? (
+                <AmuxCliModelLinkForm
+                  m={cm}
+                  cliModels={models!}
+                  cli={row.providerClass}
+                  cliModel={linkModel}
+                  choice={link.choice}
+                  busy={link.busy || capabilityBusy || busy}
+                  onChoose={onLinkChoose!}
+                  onSave={onLinkSave!}
+                />
+              ) : null}
+              {link.notice === "done" ? <p role="status" className="text-sm" data-testid="amux-cli-model-link-done">{cm.link.done}</p> : null}
+              {link.notice === "stopped" ? <p role="status" className="text-sm" data-testid="amux-cli-model-link-stopped">{cm.link.stopped}</p> : null}
+              {link.notice === "outcome_unknown" ? (
+                <p role="alert" className="text-sm text-amber-300" data-testid="amux-cli-model-link-outcome-unknown">{cm.link.outcomeUnknown}</p>
+              ) : null}
+              {link.notice === "unread" ? (
+                <p role="alert" className="text-sm text-amber-300" data-testid="amux-cli-model-link-unread">{cm.link.unread}</p>
+              ) : null}
+              {link.refusal ? (
+                <p role="alert" className="text-sm text-red-300" data-testid="amux-cli-model-link-refused">{cm.link.refused[link.refusal]}</p>
+              ) : null}
+              {link.failure ? <AdminApiFailureNotice failure={link.failure} /> : null}
               {form !== null && row.capability !== null ? (
                 <AmuxWorkerCapabilityEditor
                   m={cm}
                   row={row.capability}
                   form={form}
                   busy={capabilityBusy}
-                  writesLatch={writesLatch}
                   cliModels={models}
                   onChange={onEditChange}
                   onCancel={onEditCancel}
@@ -543,7 +606,7 @@ export function AmuxWorkersOverviewView({
                 <div className="flex flex-wrap gap-2">{changeButtons(row)}</div>
               ) : (
                 <p className="text-sm text-zinc-300" data-testid="amux-worker-drawer-read-only">
-                  {!isOwner ? m.drawer.readOnlyNote : !writesLatch ? m.writesOff : m.drawer.none}
+                  {!isOwner ? m.drawer.readOnlyNote : m.drawer.none}
                 </p>
               )}
               <p className="text-sm text-zinc-400">{m.drawer.switchHelp}</p>
@@ -578,7 +641,7 @@ export function AmuxWorkersOverviewView({
         <h2 className="text-lg font-semibold text-zinc-100">{m.title}</h2>
         <p className="mt-1 text-sm text-zinc-300">{m.description}</p>
       </div>
-      {isOwner ? (writesLatch ? null : <p className="text-sm text-amber-300" data-testid="amux-workers-writes-off">{m.writesOff}</p>) : (
+      {isOwner ? null : (
         <p className="text-sm text-zinc-300" data-testid="amux-workers-read-only">{m.readOnly}</p>
       )}
       {overview.liveReadable ? null : <p role="alert" className="text-sm text-amber-300" data-testid="amux-workers-live-unread">{m.liveUnread}</p>}
@@ -727,7 +790,7 @@ export function AmuxWorkersOverviewView({
             <button
               type="button"
               className={`${buttonClass} w-fit`}
-              disabled={busy || !writesLatch}
+              disabled={busy}
               onClick={() => onSeed(seedEntries)}
               data-testid="amux-workers-seed-register"
             >
@@ -774,6 +837,7 @@ export function AmuxWorkersOverviewPanel({
   live,
   readAtMs,
   isOwner,
+  health = null,
 }: {
   registry: AmuxWorkerRegistryAdminView | null;
   capabilities: AmuxWorkerCapabilityAdminView | null;
@@ -781,6 +845,8 @@ export function AmuxWorkersOverviewPanel({
   /** When the server read the three sources; ages are counted from here. */
   readAtMs: number;
   isOwner: boolean;
+  /** Each worker's quarantine, usage reading and box signals; null when unread. */
+  health?: Readonly<Record<string, AmuxWorkerHealthView>> | null;
 }) {
   const m = useAdminMessages(adminAmuxWorkersMessages) as Messages;
   const cm = useAdminMessages(adminAmuxWorkerCapabilityMessages) as CapabilityMessages;
@@ -807,11 +873,13 @@ export function AmuxWorkersOverviewPanel({
   const [capabilityRefusal, setCapabilityRefusal] = useState<AmuxWorkerCapabilityRefusalNotice>(null);
   const [capabilityFailure, setCapabilityFailure] = useState<AdminApiFailure | null>(null);
   const [copied, setCopied] = useState(false);
+  const [link, setLink] = useState<AmuxCliModelLinkState>(NO_LINK);
   const returnFocus = useRef<HTMLElement | null>(null);
 
   const overview = useMemo(
-    () => buildAmuxWorkerOverview({ registry: registryView, capabilities: capabilityView, live, nowMs: readAtMs }),
-    [registryView, capabilityView, live, readAtMs],
+    () => buildAmuxWorkerOverview({ registry: registryView, capabilities: capabilityView, live,
+      nowMs: readAtMs, health }),
+    [registryView, capabilityView, live, readAtMs, health],
   );
 
   const applyRegistry = (changes: AmuxWorkerRegistryUpdate) => {
@@ -876,9 +944,33 @@ export function AmuxWorkersOverviewPanel({
     networkFailure: () => adminNetworkFailure(locale),
   };
 
+  const applyLink = (changes: AmuxCliModelLinkUpdate) => {
+    if ("view" in changes) applyCapability({ view: changes.view ?? null });
+    setLink((state) => ({
+      ...state,
+      ...("pending" in changes ? { busy: changes.pending === true } : {}),
+      ...("notice" in changes ? { notice: changes.notice ?? null } : {}),
+      ...("refusal" in changes ? { refusal: changes.refusal ?? null } : {}),
+      ...("failure" in changes ? { failure: changes.failure ?? null } : {}),
+    }));
+  };
+
+  const linkIo: AmuxCliModelLinkIo = {
+    post: (change) =>
+      adminFetch(AMUX_CLI_MODEL_LINK_PATH, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(change),
+      }),
+    read: capabilityIo.read,
+    failureOf: (response) => readAdminApiFailure(response, { fallback: cm.link.failed, locale }),
+    networkFailure: () => adminNetworkFailure(locale),
+  };
+
   const closeDrawer = () => {
     setOpenWorker(null);
     setEditing(null);
+    setLink(NO_LINK);
     setCapabilityNotice(null);
     setCapabilityRefusal(null);
     setCapabilityFailure(null);
@@ -903,7 +995,6 @@ export function AmuxWorkersOverviewPanel({
       cm={cm}
       overview={overview}
       isOwner={isOwner}
-      writesLatch={registryView?.writesLatch ?? false}
       filter={filter}
       query={query}
       openWorker={openWorker}
@@ -932,6 +1023,7 @@ export function AmuxWorkersOverviewPanel({
         }
         setOpenWorker(workerName);
         setEditing(null);
+        setLink(NO_LINK);
         setCapabilityNotice(null);
         setCapabilityRefusal(null);
         setCapabilityFailure(null);
@@ -978,10 +1070,22 @@ export function AmuxWorkersOverviewPanel({
           returnFocus.current = document.activeElement;
         }
         setOpenWorker(row.workerName);
+        setLink(NO_LINK);
         setCapabilityNotice(null);
         setCapabilityRefusal(null);
         setCapabilityFailure(null);
         setEditing(row.capability === null ? null : amuxWorkerCapabilityFormFromRow(row.capability));
+      }}
+      cliModelLink={link}
+      onLinkChoose={(value) => setLink((state) => ({ ...state, choice: value }))}
+      onLinkSave={(change) => {
+        if (link.busy) return;
+        void runAmuxCliModelLink(change, linkIo, applyLink).then((saved) => {
+          if (saved) {
+            setLink((state) => ({ ...state, choice: null }));
+            router.refresh();
+          }
+        });
       }}
       onRegister={(request) => {
         setLastRun("change");

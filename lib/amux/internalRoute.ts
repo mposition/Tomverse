@@ -16,6 +16,7 @@ import { reportAmuxOperationalIncident } from "@/lib/amux/operationalError";
 import {
   AMUX_DATABASE_BUSY_REASON,
   AMUX_DATABASE_BUSY_RETRY_AFTER_SECONDS,
+  amuxRolledBackWriteCode,
   amuxTransactionNotStartedCode,
   amuxTransientDatabaseCode,
   isAmuxDbBusyCode,
@@ -121,9 +122,9 @@ const amuxOutcomeUnknownResponse = (
 
 /**
  * Whether `amuxInternalErrorResponse` would answer this error with one of the
- * three 503 reasons that say "this request committed nothing" (orchestration
- * policy version 20, section 1): busy, deadline exceeded, call ceiling
- * exceeded. Mirrors the branch order below.
+ * 503 reasons that say "this request committed nothing" (orchestration
+ * policy version 20, section 1): busy and deadline exceeded. Mirrors the
+ * branch order below.
  */
 const isKnownDeadlineFailure = (
   error: unknown,
@@ -138,10 +139,15 @@ const isKnownDeadlineFailure = (
   if (error && typeof error === "object" && "code" in error && error.code === "P2028") {
     return false;
   }
+  // A deadlock, a serialization failure and an idle-in-transaction session end
+  // are rollbacks too (readFailureCore.ts): the same "nothing committed" answer
+  // the Rust client already retries on, instead of a 500 incident that drops
+  // the call.
   return (
     databaseCode === "57014" ||
     databaseError.includes("57014") ||
-    amuxTransientDatabaseCode(error) === "57014"
+    amuxTransientDatabaseCode(error) === "57014" ||
+    amuxRolledBackWriteCode(error) !== null
   );
 };
 
@@ -163,14 +169,7 @@ const answersNothingCommitted = (error: unknown): boolean => {
     typeof candidate?.meta?.database_error === "string"
       ? candidate.meta.database_error
       : "";
-  if (isKnownDeadlineFailure(error, databaseCode, databaseError)) {
-    return true;
-  }
-  return (
-    databaseCode !== "P2028" &&
-    error instanceof AmuxDbBoundaryError &&
-    error.code === "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED"
-  );
+  return isKnownDeadlineFailure(error, databaseCode, databaseError);
 };
 
 export const amuxInternalErrorResponse = (
@@ -270,7 +269,9 @@ export const amuxInternalErrorResponse = (
         event: "internal_route_deadline_exceeded",
         operation,
         error_code:
-          error instanceof AmuxDbBoundaryError ? error.code : "57014",
+          error instanceof AmuxDbBoundaryError
+            ? error.code
+            : (amuxRolledBackWriteCode(error) ?? "57014"),
       }),
     );
     return amuxJsonNoStore(
@@ -309,19 +310,6 @@ export const amuxInternalErrorResponse = (
           "X-AMUX-Incident-ID": incident.incidentId,
         },
       },
-    );
-  }
-
-  if (
-    error instanceof AmuxDbBoundaryError &&
-    error.code === "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED"
-  ) {
-    return amuxJsonNoStore(
-      {
-        error: "AMUX database call ceiling exceeded.",
-        reason: "amux_database_call_ceiling_exceeded",
-      },
-      503,
     );
   }
 

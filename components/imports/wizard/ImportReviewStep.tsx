@@ -48,7 +48,7 @@ export function ImportReviewStep({
         return (
             <div data-testid="external-import-review">
                 <h2 className="text-base font-bold">
-                    {t("externalImport.reviewTitle")}
+                    {t("journey.confirm")}
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-zinc-500">
                     {t("externalImport.allDuplicates")}
@@ -67,7 +67,7 @@ export function ImportReviewStep({
     return (
         <div data-testid="external-import-review">
             <h2 className="text-base font-bold">
-                {t("externalImport.reviewTitle")}
+                {t("journey.confirm")}
             </h2>
             <p
                 className="mt-1 text-sm leading-6 text-zinc-500"
@@ -152,6 +152,7 @@ export function ImportReviewStep({
                 </p>
             )}
 
+            <section className="journey-card mt-4"><h3>{t("journey.savedContent")}</h3><p>{t("externalImport.guideStaysLocal")} {t("externalImport.guideMediaExcluded")}</p></section>
             <ImportMemoryNotice />
 
             <div className="mt-4 flex flex-wrap gap-2">

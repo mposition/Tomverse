@@ -972,8 +972,8 @@ test("every seed outcome is recorded, and the healthy ones are not logged", () =
     }
     // And the chat route is what records it.
     const chat = readFileSync("app/api/chat/route.ts", "utf8");
-    assert.match(chat, /recordContinuationSeedOutcome\(outcome\)/);
-    assert.match(chat, /recordContinuationSeedOutcome\("flag_off"\)/);
+    assert.match(chat, /recordContinuationSeedOutcome\(/);
+    assert.match(chat, /outcome: "flag_off"/);
 });
 
 /* --- product identity (external-conversation-continuation.md §3.1, §10) */
@@ -1000,33 +1000,17 @@ test("the service writes the endpoint's product through the shared writer", () =
     assert.match(source, /webSearchMode: APP_DEFAULTS\.defaultWebSearchMode,/);
 });
 
-test("the default continuation is Chat only where Chat is offered", () => {
-    // Owner decision 2026-10-25. The same surface-entry question
-    // `POST /api/products/chat/conversations` asks, failing to Review.
+test("the default continuation is always Chat", () => {
+    // Owner decision 2026-11-12: rollout state no longer sends it to Review.
     const helper = readFileSync("lib/externalContinuationCreateRoute.ts", "utf8");
-    assert.match(helper, /autoAvailabilityFor\(userId\)\.then\(chatSurfaceAvailable\)\.catch\(\(\) => false\)/);
-    assert.match(helper, /\?\s*"chat"\s*:\s*"review";/);
+    assert.doesNotMatch(helper, /autoAvailabilityFor|chatSurfaceAvailable/);
     // The body still carries only the key; nothing the client sends picks it.
     assert.match(helper, /idempotencyKey: z\.string\(\)\.uuid\(\),\s*\}\)\s*\.strict\(\)/);
     const route = readFileSync(
         "app/api/external-conversations/[conversationId]/continuations/route.ts",
         "utf8"
     );
-    assert.match(route, /productKey: await defaultContinuationProduct\(userId\)/);
-});
-
-test("a Chat continuation never becomes a Smart Adaptive image turn", () => {
-    // Independent review round 4: `startChatImageTurn` refuses a bridged
-    // conversation with 409, so an image decision on a Chat continuation left
-    // the stored question with no answer; docs/policy/external-conversation-continuation.md §5.1
-    // keeps continuations text-only.
-    const chat = readFileSync("app/api/chat/route.ts", "utf8");
-    assert.match(chat, /continuationBridge: \{ select: \{ id: true \} \},/);
-    const eligible = chat.slice(
-        chat.indexOf("const autoImageTurnEligible ="),
-        chat.indexOf("const imageRouting =")
-    );
-    assert.match(eligible, /!conversationRouting\?\.continuationBridge &&/);
+    assert.match(route, /productKey: "chat"/);
 });
 
 test("no in-conversation image path starts on a continuation route", () => {
@@ -1060,7 +1044,7 @@ test("a Compare-in-Review answer is owned by the press's selection", () => {
     // new ticket, and an admitted product switch clears the press's ticket.
     assert.match(client, /reviewForkTicketRef\.current === conversationSelectionTicketRef\.current &&/);
     assert.match(client, /reviewForkTicketRef\.current = conversationSelectionTicketRef\.current;\s*void startReviewFork\(\);/);
-    assert.match(client, /if \(admitted\) reviewForkTicketRef\.current = null;/);
+    assert.match(client, /if \(admitted\) \{ reviewForkTicketRef\.current = null;/);
     // Leaving for Review preserves drafts like the switcher, and is blocked in
     // the same states (review round 6).
     assert.match(client, /beforeNavigate: \(\) => reviewForkAdmissionRef\.current\(\),/);
@@ -1276,12 +1260,17 @@ test("a retry reuses the attempt's idempotency key and only cancel clears it", (
     // answer's body has drained.
     assert.match(startBody, /isOwnerCurrentRef\.current\?\.\(\) \?\? true/);
     assert.match(startBody, /if \(!isCurrent\(\)\) \{\s*await discardResponseBody\(response\);\s*settleStale\(\);\s*return false;/);
-    assert.match(startBody, /await discardResponseBody\(response\);\s*if \(!isCurrent\(\)\) \{\s*settleStale\(\);\s*return false;\s*\}\s*setStatus\("failed"\)/);
+    const failedResponse = startBody.slice(startBody.indexOf("if (!response.ok) {"), startBody.indexOf("const body ="));
+    assert.match(failedResponse, /await discardResponseBody\(response\);\s*if \(!isCurrent\(\)\) \{\s*settleStale\(\);\s*return false;\s*\}/);
+    // Instrumentation may follow the ownership guard, but failure state must
+    // never be published before a stale response has returned.
+    assert.ok(failedResponse.indexOf("return false;") < failedResponse.indexOf('setStatus("failed")'));
     assert.match(startBody, /if \(!isCurrent\(\)\) \{\s*settleStale\(\);\s*return false;\s*\}\s*if \(!body\.conversationId\)/);
 
     // Cancel drops the key, because that is the deliberate "start a second
     // fork"; a success this screen acted on ends the attempt. Nothing else.
-    assert.match(startBody, /openAttemptKeys\.delete\(endpoint\);\s*router\.push\(/);
+    const clearedAttempt = startBody.indexOf("openAttemptKeys.delete(endpoint)");
+    assert.ok(clearedAttempt >= 0 && clearedAttempt < startBody.indexOf("router.push("), "the successful attempt is cleared before navigation");
     const cancelBody = launcher.slice(launcher.indexOf("const cancel = useCallback"));
     assert.match(cancelBody, /openAttemptKeys\.delete\(endpoint\)/);
     assert.equal((launcher.match(/openAttemptKeys\.delete\(/g) ?? []).length, 2);

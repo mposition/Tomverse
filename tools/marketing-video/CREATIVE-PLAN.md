@@ -19,7 +19,10 @@ competitor's ad (docs/policy/marketing-automation.md §2).
   are written there.
 - The capture packs: real recordings of Tomverse, per topic and locale. Read
   `pack.json` and look at its pictures. These real screens are the only way
-  the film shows the product.
+  the film shows the product. When "Today's subject" is given, the packs were
+  recorded for this film just now: the story is about that subject, and each
+  capture's `text` is exactly the words visible in its picture, so quote only
+  those words over that picture.
 - The newest research notes in `job/research-notes/`: ideas about what the
   market's ads do. Take a device, never a competitor's words, characters or
   layout.
@@ -39,6 +42,13 @@ competitor's ad (docs/policy/marketing-automation.md §2).
 - An AI shot never shows a screen, a user interface, text, a logo or a real,
   identifiable person; the code adds the words. Never ask for purple, violet
   or magenta.
+- The mood stays warm and alive (owner 2026-11-11). Never a picture that can
+  read as death, suicide, loss, illness or danger: empty shoes or clothes left
+  behind, an empty chair or bed, a lone figure at an edge, a cliff, a drop or
+  stairs vanishing into fog, a grave, a hospital, a funeral colour. When the
+  story is about people (parents, a family, a friend), show those people,
+  generated and not identifiable, present and doing something together, faces
+  allowed. A metaphor is fine only when nobody could take it the wrong way.
 - The product appears only as the pack's real screens, which the film may
   crop, frame, move and mask, never redraw.
 - `music`: a prompt for an instrumental bed (genre, tempo, instruments, mood,
@@ -54,10 +64,24 @@ competitor's ad (docs/policy/marketing-automation.md §2).
     characters), and it must include the AI line exactly: en "Video: partly
     AI-generated", ko "영상: 일부 AI 생성", zh-Hant "影片：部分由 AI 生成", zh-Hans
     "视频：部分由 AI 生成". No web address: the end card adds tomverse.app.
+    Each locale tells its own story (owner 2026-11-13): every locale asked
+    Review separately, so its answers and its analysis differ. The concept,
+    the world, the AI shots and the music are shared; each locale's lines and
+    payoff come from its own pack (read every locale's `pack.json` and look at
+    its pictures) and name the difference that locale's analysis really found,
+    which model said what, in the screen's own terms, so it can sit next to the
+    screen that proves it. Never paraphrase a screen into a claim it does not
+    make, and never promise in one locale what only another locale's screens
+    show. Count the models a locale's screens actually show answering before
+    the lines set up "three".
   - `alt`: what the video shows, for a reader who cannot see it (at most 400
     characters), naming which parts are AI-made.
 - `seconds`: 15-38. The narration sets the real length; leave room for a
-  2-second end card.
+  2-second end card. Each locale's narration, end card included, must fit
+  38 s: about 11 characters a second in en, 6 in ko and 5 in zh (spaces not
+  counted), so at most about 380 en, 200 ko or 170 zh characters in all its
+  lines together. A plan whose narration would run longer is refused before
+  anything is paid for.
 - `topic`: the capture pack topic the film uses.
 
 ## Answer

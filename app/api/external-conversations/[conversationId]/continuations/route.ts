@@ -1,15 +1,12 @@
 export const dynamic = "force-dynamic";
 
-import {
-    defaultContinuationProduct,
-    respondToContinuationCreate,
-} from "@/lib/externalContinuationCreateRoute";
+import { respondToContinuationCreate } from "@/lib/externalContinuationCreateRoute";
 
 /**
  * Start a Tomverse conversation from one imported snapshot.
  *
- * Chat (Smart Adaptive) for an account Chat is offered to, otherwise Review
- * (owner decision 2026-10-25). The product is the server's decision; the
+ * Always Chat (owner decisions 2026-10-25 and 2026-11-12: Chat no longer
+ * closes for rollout state). The product is the server's decision; the
  * body carries only the idempotency key. Comparing models on the same
  * original is `POST /api/conversations/[id]/continuation/review`.
  *
@@ -38,8 +35,8 @@ export async function POST(
     req: Request,
     context: RouteContext<"/api/external-conversations/[conversationId]/continuations">
 ) {
-    return respondToContinuationCreate(req, async (userId) => ({
+    return respondToContinuationCreate(req, async () => ({
         externalConversationId: (await context.params).conversationId,
-        productKey: await defaultContinuationProduct(userId),
+        productKey: "chat",
     }));
 }

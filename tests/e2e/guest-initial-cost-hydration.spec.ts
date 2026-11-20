@@ -869,7 +869,9 @@ test.describe("guest initial cost hydration", () => {
     const header = page.getByTestId("mobile-header-model-summary");
     const mode = page.getByTestId("composer-auto-routing-toggle");
     await expect(mode).toHaveAttribute("aria-checked", "true");
-    await expect(header).toContainText("Choose AI models");
+    // The visible label is the short "Choose model" (#3729); the accessible
+    // name keeps the full wording.
+    await expect(header).toContainText("Choose model");
     await expect(header).toHaveAccessibleName(/Choose AI models.*Smart Adaptive/);
     await expect(mode).toHaveAccessibleName("Smart Adaptive");
     await header.click();

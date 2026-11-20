@@ -90,7 +90,8 @@ const UNAUDITED = new Map([
   ["readEngineeringAgentHaltState", "reads only"],
   ["readEngineeringAgentOwnerQueues", "reads only"],
   ["readEngineeringAgentKnownPublishes", "reads only"],
-  ["lockEngineeringAgentMismatchAmuxRows", "takes AMUX row locks before the audit chain; writes nothing"],
+  ["readEngineeringAgentPublishPatchChunk", "reads only: a chunk of the patch its live write claim applies"],
+  ["lockEngineeringAgentMismatchAmuxRows", "takes the AMUX attempt, audit chain, card and delivery locks in order; writes nothing"],
   ["lockEngineeringAgentV22Run", "takes a run row lock after AMUX locks; writes nothing"],
   ["requireEngineeringAgentRunAdmission", "reads only; the run it admits is audited"],
   ["acceptEngineeringAgentRequest", "idempotency bookkeeping for a request whose own change is audited"],
@@ -129,7 +130,6 @@ const SWITCHED = [
   "openEngineeringAgentWorkItem",
   "claimEngineeringAgentWorkItem",
   "markEngineeringAgentWorkItemLeaseExpired",
-  "expireEngineeringAgentWorkItem",
   "issueEngineeringAgentCapability",
   "resolveEngineeringAgentV22TierPendingDraft",
   "expireEngineeringAgentV22LapsedPublish",
@@ -144,14 +144,17 @@ const RECORDS_WHAT_HAPPENED = [
   "readEngineeringAgentHaltState",
   "readEngineeringAgentOwnerQueues",
   "readEngineeringAgentKnownPublishes",
+  // A read for the holder of a live write claim; the claim read the switches,
+  // and the last look reads them again before the push.
+  "readEngineeringAgentPublishPatchChunk",
   "lockEngineeringAgentMismatchAmuxRows",
   "lockEngineeringAgentV22Run",
   "resolveEngineeringAgentStateMismatch",
   "recordEngineeringAgentObservedHalt",
+  "clearEngineeringAgentObservedHalt",
   "openEngineeringAgentRunMismatches",
   "recordEngineeringAgentPublishResult",
   "acknowledgeEngineeringAgentHalt",
-  "recordEngineeringAgentMonitorsConfirmed",
   "recordEngineeringAgentServiceFinish",
   "acceptEngineeringAgentRequest",
   "moveEngineeringAgentRequest",
@@ -159,7 +162,12 @@ const RECORDS_WHAT_HAPPENED = [
   "endEngineeringAgentRun",
   "settleEngineeringAgentWorkItem",
   "decideEngineeringAgentT2Draft",
+  "rejudgeEngineeringAgentV22Draft",
+  // The same, by the system once after a deploy; the next round reads the switches.
+  "rejudgeEngineeringAgentV22DraftsAfterDeploy",
   "acknowledgeEngineeringAgentDecision",
+  // A person's approval; the claim that carries it reads the switches.
+  "approveEngineeringAgentPullRequestResume",
   "setEngineeringAgentSwitch",
   "recordEngineeringAgentBinding",
   "replaceEngineeringAgentBinding",
@@ -177,6 +185,19 @@ test("every claim, capability, publish and maintenance write reads the switches 
       assert.doesNotMatch(body, /requireSwitch\(/, `${name} records what happened and is not refused by a switch`);
     }
   }
+});
+
+test("a publish claim names the card by its code only, never by its title", () => {
+  const claim = exportedFunctions().find((fn) => fn.name.getText(tree) === "claimNextEngineeringAgentPublishWork");
+  assert.ok(claim);
+  const body = claim.body.getText(tree);
+  // The pull request title goes on the public repository: the card's code,
+  // checked against the display key grammar, and nothing drawn from the idea.
+  assert.match(body, /tx\.amuxWorkItem\.findUnique\(\{\s*where: \{ id: item\.run\.cardId \}, select: \{ displayKey: true \},/);
+  assert.match(body, /cardKey: isAmuxCardDisplayKey\(cardKey\) \? cardKey : null,/);
+  const cardRead = body.slice(body.indexOf("tx.amuxWorkItem.findUnique"),
+    body.indexOf("const common = {"));
+  assert.doesNotMatch(cardRead, /title/);
 });
 
 test("the store names no target state for a result; the core decides it", () => {

@@ -1,7 +1,7 @@
 // Renders one video: node render.mjs <props.json> <Short|Long|Feed> <out.mp4>
 // Media named in the props are files beside props.json (served as static
 // files) or https URLs. The props are validated by the composition metadata.
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -19,6 +19,11 @@ const serveUrl = await bundle({
   entryPoint: path.join(here, "src", "index.ts"),
   publicDir: path.dirname(path.resolve(propsPath)),
 });
-const composition = await selectComposition({ serveUrl, id: compositionId, inputProps });
-await renderMedia({ composition, serveUrl, codec: "h264", outputLocation: outPath, inputProps });
-console.log(JSON.stringify({ rendered: outPath, composition: compositionId, frames: composition.durationInFrames }));
+// bundle() leaves its temp folder (with a copy of the public media) behind.
+try {
+  const composition = await selectComposition({ serveUrl, id: compositionId, inputProps });
+  await renderMedia({ composition, serveUrl, codec: "h264", outputLocation: outPath, inputProps });
+  console.log(JSON.stringify({ rendered: outPath, composition: compositionId, frames: composition.durationInFrames }));
+} finally {
+  rmSync(serveUrl, { recursive: true, force: true });
+}

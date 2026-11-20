@@ -334,8 +334,9 @@ export async function listExternalConversations(
     {
         offset = 0,
         limit = 50,
-        timeZone = "UTC",
+        timeZone = "UTC", importId,
     }: {
+        importId?: string;
         offset?: number;
         limit?: number;
         /**
@@ -347,10 +348,10 @@ export async function listExternalConversations(
 ) {
     const [total, rows] = await Promise.all([
         prisma.externalConversation.count({
-            where: { userId, finalized: true },
+            where: { userId, finalized: true, ...(importId !== undefined ? {importId} : {}) },
         }),
         prisma.externalConversation.findMany({
-            where: { userId, finalized: true },
+            where: { userId, finalized: true, ...(importId !== undefined ? {importId} : {}) },
             orderBy: [{ importedAt: "desc" }, { id: "desc" }],
             skip: offset,
             take: limit,
@@ -365,7 +366,7 @@ export async function listExternalConversations(
                 sourceCreatedAt: true,
                 sourceUpdatedAt: true,
                 importedAt: true,
-                password: true,
+                password: true, passwordVersion: true,
             },
         }),
     ]);
@@ -536,7 +537,7 @@ export async function listContinuationsBySource(
 const assertExternalConversationUnlocked = (
     request: Request,
     userId: string,
-    row: { id: string; password: string | null }
+    row: { id: string; password: string | null; passwordVersion: number }
 ) => {
     if (
         hasResourceUnlockGrant(
@@ -544,7 +545,7 @@ const assertExternalConversationUnlocked = (
             request,
             userId,
             row.id,
-            row.password
+            row.password == null ? null : row.passwordVersion
         )
     ) {
         return;
@@ -895,8 +896,8 @@ async function loadTitlePreservationTargets(
         },
         select: {
             conversationId: true,
-            conversation: { select: { title: true, password: true } },
-            externalConversation: { select: { title: true, password: true } },
+            conversation: { select: { title: true, password: true, passwordVersion: true } },
+            externalConversation: { select: { title: true, password: true, passwordVersion: true } },
         },
     });
     return bridges.map((bridge) => ({
@@ -1033,7 +1034,7 @@ export async function getExternalImportStatus(userId: string, importId: string) 
             select: {
                 id: true,
                 title: true,
-                password: true,
+                password: true, passwordVersion: true,
                 conversationDigest: true,
                 externalStableId: true,
                 messageCount: true,
@@ -1900,7 +1901,7 @@ async function readExportEntry(userId: string, id: string) {
                     // Read to decide, never emitted: it is a scrypt hash of
                     // the owner's lock password, and a copy in a downloadable
                     // file would be an offline cracking target.
-                    password: true,
+                    password: true, passwordVersion: true,
                     provider: true,
                     title: true,
                     externalStableId: true,

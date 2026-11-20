@@ -1,5 +1,6 @@
 ﻿"use client";
 
+import { ContinuationReceipt } from "@/components/continuations/ContinuationReceipt";
 import {
   Fragment,
   useCallback,
@@ -10,6 +11,8 @@ import {
   useState,
 } from "react";
 import Link from "next/link";
+import { ResearchPreviewRunCard } from "@/components/chat/ResearchPreviewRunCard";
+import { webResearchPreviewRuns, researchRunMessage } from "@/lib/researchPreviewRunClient";
 import { McpProgressNotice } from "@/components/plugins/McpProgressNotice";
 import ReactMarkdown from "react-markdown";
 import type { ExtraProps } from "react-markdown";
@@ -44,6 +47,7 @@ import { ModelLogo } from "@/components/chat/ModelLogo";
 import { useLanguage } from "@/components/LanguageProvider";
 import { helpCentreHref } from "@/lib/localizedHelpHref";
 import { ChatImageTurnCard } from "@/components/chat/ChatImageTurnCard";
+import { SearchCitationList } from "@/components/chat/SearchCitationList";
 import { imageModelOwner } from "@/lib/imageModelRegistry";
 import { useImageModelCatalog } from "@/components/images/ImageModelCatalogProvider";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
@@ -68,18 +72,31 @@ import {
   localizedProductHref,
   type ChatWorkspaceProduct,
 } from "@/lib/chatProductUiCopy";
+import {
+  isPreviewableAttachmentMediaType,
+  messageAttachmentPreviewUrl,
+} from "@/lib/messageAttachmentPreview";
 
 type ChatMessageListProps = {
+  onResearchMessage?: (message: Message) => void;
   transcriptFooter?: ReactNode;
   messages: Message[];
   onRetryLast?: () => void;
   /** Chat restores this message's question to the composer; never dispatches. */
   onRestoreQuestion?: (messageId: string) => void;
   /**
+   * Chat: send this failed reply's question again as it was. Offered only for
+   * a question without files; restoring stays the way to edit it first.
+   */
+  onRetryQuestion?: (messageId: string) => void;
+  /** Chat: open the model picker from a failed reply. */
+  onChooseAnotherModel?: MouseEventHandler<HTMLButtonElement>;
+  /**
    * Chat: open this answer's question as a new Review draft
    * (lib/chatReviewHandoff.ts). Never sends, never changes this conversation.
    */
   onCompareInReview?: (messageId: string) => void;
+  compareRequiresCompleted?: boolean;
   onRetryWithoutAttachments?: () => void;
   /**
    * Re-sends the last prompt with a set of already-missing stored files
@@ -131,6 +148,7 @@ type ChatMessageListProps = {
    * above the top, and the separator that marks where Tomverse takes over.
    */
   importedTranscript?: {
+    contextCard?: React.ReactNode;
     /** What the snapshot is: readable, deleted, or behind its own lock. */
     status: "available" | "deleted" | "locked";
     /** One of `EXTERNAL_IMPORT_PROVIDERS`, from the bridge. */
@@ -231,6 +249,112 @@ const hasImagePreview = (attachment: ChatAttachment) =>
   attachment.mediaType.startsWith("image/") &&
   typeof attachment.data === "string" &&
   (attachment.data.startsWith("data:image/") || attachment.data.startsWith("blob:"));
+
+/**
+ * Where a sent picture's thumbnail comes from.
+ *
+ * The tab that sent it still holds a local preview and uses it. A reloaded
+ * conversation, or one opened again from the sidebar, has only the saved row,
+ * so a raster image is asked for by its opaque id from the owner-only preview
+ * route (docs/policy/user-attachment-persistence.md section 5.1). Anything else
+ * -- a document, a guest file, a file storage lost -- keeps its icon.
+ */
+const sentAttachmentPreviewSource = (attachment: ChatAttachment): string | null => {
+  if (attachment.unavailableAt) return null;
+  if (hasImagePreview(attachment)) return attachment.data ?? null;
+  if (attachment.attachmentId && isPreviewableAttachmentMediaType(attachment.mediaType)) {
+    return messageAttachmentPreviewUrl(attachment.attachmentId);
+  }
+  return null;
+};
+
+/**
+ * One file card in a sent message.
+ *
+ * A file whose bytes object storage no longer holds keeps its card. The name
+ * stays, the type stays, the message stays -- what the person sent is part of
+ * this conversation whether or not the bytes survived, and a card that quietly
+ * vanished would leave them asking about a document neither side can name
+ * (docs/policy/user-attachment-persistence.md §11). What changes is that it
+ * stops pretending: no thumbnail, a stated reason, and an accessible name that
+ * carries the state rather than only the colour.
+ *
+ * A thumbnail that fails to load falls back to the same icon card, so a
+ * storage hiccup costs the picture and nothing else.
+ */
+function SentAttachmentCard({ attachment }: { attachment: ChatAttachment }) {
+  const { t } = useLanguage();
+  const previewSource = sentAttachmentPreviewSource(attachment);
+  const [failedSource, setFailedSource] = useState<string | null>(null);
+  const isUnavailable = Boolean(attachment.unavailableAt);
+  const showImagePreview = Boolean(previewSource) && previewSource !== failedSource;
+  return (
+    <div
+      data-testid={
+        isUnavailable ? "chat-attachment-card-unavailable" : "chat-attachment-card"
+      }
+      data-attachment-unavailable={isUnavailable ? "true" : undefined}
+      className={
+        showImagePreview
+          ? "relative h-20 w-20 overflow-hidden rounded-xl border border-white/20 bg-white/10 shadow-sm"
+          : `flex h-16 min-w-52 max-w-64 items-center gap-3 rounded-xl border py-2 pl-2 pr-3 shadow-sm backdrop-blur ${
+              isUnavailable
+                ? "border-dashed border-amber-200/60 bg-white/5"
+                : "border-white/15 bg-white/10"
+            }`
+      }
+      title={
+        isUnavailable
+          ? `${attachment.name} — ${t("chat.attachmentUnavailableBadge")}`
+          : attachment.name
+      }
+    >
+      {showImagePreview && previewSource ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          data-testid="chat-attachment-thumbnail"
+          src={previewSource}
+          alt={attachment.name}
+          loading="lazy"
+          decoding="async"
+          className="h-full w-full object-cover"
+          onError={() => setFailedSource(previewSource)}
+        />
+      ) : (
+        <>
+          <span
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ring-1 ring-white/10 ${
+              isUnavailable ? "bg-white/10 text-amber-100" : "bg-white/15 text-white"
+            }`}
+            aria-hidden="true"
+          >
+            {isUnavailable ? (
+              <FileWarning className="h-5 w-5" />
+            ) : (
+              getAttachmentIcon(attachment)
+            )}
+          </span>
+          <span className="flex min-w-0 flex-col text-left">
+            <span className="truncate text-sm font-semibold text-white">
+              {attachment.name}
+            </span>
+            <span
+              className={
+                isUnavailable
+                  ? "truncate text-[11px] font-semibold text-amber-100"
+                  : "text-[11px] font-semibold text-blue-100/80"
+              }
+            >
+              {isUnavailable
+                ? t("chat.attachmentUnavailableBadge")
+                : getAttachmentLabel(attachment)}
+            </span>
+          </span>
+        </>
+      )}
+    </div>
+  );
+}
 
 const isFileParsingError = (content: string) => {
   const normalized = content.toLowerCase();
@@ -441,7 +565,7 @@ export function SendEchoTurn({ echo }: { echo: SendEcho }) {
     <div data-testid="chat-send-echo" className="flex w-full flex-col gap-2">
       <div className="flex w-full flex-col items-end">
         <span className="sr-only">{t("chat.you")}</span>
-        <div className="relative max-w-[94%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-blue-600 px-3 py-2 text-[13px] leading-[1.55] text-white shadow-sm md:max-w-[88%] md:px-4 md:py-3 md:text-[15px] md:leading-relaxed">
+        <div className="relative max-w-[94%] whitespace-pre-wrap break-words [&:lang(ko)]:break-keep rounded-2xl rounded-br-md bg-blue-600 px-3 py-2 text-[13px] leading-[1.55] text-white shadow-sm md:max-w-[88%] md:px-4 md:py-3 md:text-[15px] md:leading-relaxed">
           {echo.text}
           {echo.attachmentCount > 0 && (
             <span className="mt-1 block text-xs text-white/80">
@@ -463,11 +587,15 @@ export function SendEchoTurn({ echo }: { echo: SendEcho }) {
 }
 
 export function ChatMessageList({
+  onResearchMessage,
   transcriptFooter,
   messages,
   onRetryLast,
   onRestoreQuestion,
+  onRetryQuestion,
+  onChooseAnotherModel,
   onCompareInReview,
+  compareRequiresCompleted = false,
   onRetryWithoutAttachments,
   onContinueWithoutUnavailableAttachments,
   onRetryConcurrency,
@@ -533,6 +661,7 @@ export function ChatMessageList({
   const liveStatusMessage = (() => {
     if (!lastMessage || lastMessage.role !== "assistant") return "";
     if (lastMessage.id === "welcome") return "";
+    if (lastMessage.researchRunId) return "";
     if (lastMessage.status === "error") return t("chat.responseFailed");
     if (lastMessage.status === "cancelled") return t("chat.responseCancelled");
     if (lastMessage.status === "incomplete") return t("chat.responseIncomplete");
@@ -565,6 +694,14 @@ export function ChatMessageList({
     scrollModeRef.current = mode;
     setScrollModeState(mode);
   }, []);
+
+  // A response that streamed (or finished) while the reader was scrolled up
+  // keeps the jump button saying "new response" until they come back down.
+  // Adjusted during render rather than in an effect, so the label never
+  // flashes "Jump to latest" for a frame when generation ends.
+  const [unseenResponse, setUnseenResponse] = useState(false);
+  if (scrollMode !== "paused" && unseenResponse) setUnseenResponse(false);
+  if (scrollMode === "paused" && isSending && !unseenResponse) setUnseenResponse(true);
 
   // Scrolls the container and marks the scroll that results as "ours" for
   // exactly as long as it actually takes -- via the `scrollend` event where
@@ -922,7 +1059,7 @@ export function ChatMessageList({
             // msg.status alone can't tell "still streaming" apart from
             // "finished normally", both are "normal".
             const isActivelyGenerating =
-              !isUser && isSending && idx === messages.length - 1 && msg.role === "assistant";
+              !isUser && !msg.researchRunId && isSending && idx === messages.length - 1 && msg.role === "assistant";
 
             // Only shown before the first token arrives (msg.content is
             // still empty) -- once real text starts streaming in, the
@@ -951,10 +1088,18 @@ export function ChatMessageList({
               !isUser && msg.status === "error"
                 ? errorText.split("\n").slice(1).filter(Boolean)
                 : [];
+            const isTraceLine = (line: string) =>
+              line.startsWith(`${t("chat.traceId")}:`) || line.startsWith("Trace ID:");
+            const errorTraceLines = errorAuxiliaryLines.filter(isTraceLine);
+            const errorDetailLines = errorAuxiliaryLines.filter((line) => !isTraceLine(line));
             // A turn that can be retried in place does not also offer to put
             // the question back in the composer: retrying is that, done for you.
             const canRestoreQuestion = recoveryEnabled && !isSending &&
               recoveryPrompts.has(msg.id) && msg.id !== concurrencyRetryMessageId;
+            // A resend carries no files, so a question with files is only restored.
+            const canRetryQuestion = canRestoreQuestion && Boolean(onRetryQuestion) &&
+              !isUser && msg.status === "error" &&
+              (recoveryPrompts.get(msg.id)?.attachments.length ?? 0) === 0;
 
             // UI-ERR-001. A failed turn is a state of one answer, not of the
             // conversation: three failed panels used to paint the whole
@@ -978,6 +1123,8 @@ export function ChatMessageList({
                 data-message-id={msg.id || undefined}
                 data-message-role={msg.role}
                 data-model-id={msg.modelId || ""}
+                data-message-status={msg.status || undefined}
+                data-error-code={msg.status === "error" ? msg.errorCode || undefined : undefined}
                 data-carried-answer={msg.carriedAnswer ? "true" : undefined}
                 data-message-source={imported ? "imported" : "native"}
                 data-search-focused={highlightedMessageId === msg.id ? "true" : undefined}
@@ -1163,7 +1310,15 @@ export function ChatMessageList({
                         )
                       : undefined
                   }
-                  className={`relative max-w-[94%] break-words rounded-2xl px-3 py-2 text-[13px] leading-[1.55] shadow-sm md:max-w-[88%] md:px-4 md:py-3 md:text-[15px] md:leading-relaxed ${
+                  /*
+                    Korean wraps between 어절, not inside them: the default
+                    `word-break: normal` lets Hangul break after any syllable,
+                    so a narrow Review panel printed "체크/리스트". `keep-all`
+                    is scoped to `:lang(ko)` because Chinese has no spaces and
+                    must keep breaking between characters; `break-words` still
+                    breaks a URL or any run too long for the line.
+                  */
+                  className={`relative max-w-[94%] break-words [&:lang(ko)]:break-keep rounded-2xl px-3 py-2 text-[13px] leading-[1.55] shadow-sm md:max-w-[88%] md:px-4 md:py-3 md:text-[15px] md:leading-relaxed ${
                     isUser ? `${userBoxClass} rounded-br-md` : `${assistantBoxClass} rounded-bl-md`
                   } ${
                     /*
@@ -1223,98 +1378,15 @@ export function ChatMessageList({
                   {isUser && msg.attachments && msg.attachments.length > 0 && (
                     <div className={`flex flex-wrap gap-2 ${msg.content ? "mb-3" : ""}`}>
                       {msg.attachments.map((attachment) => (
-                        (() => {
-                          /*
-                            A file whose bytes object storage no longer holds.
-
-                            The card stays. The name stays, the type stays, the
-                            message stays -- what the person sent is part of
-                            this conversation whether or not the bytes survived,
-                            and a card that quietly vanished would leave them
-                            asking about a document neither side can name
-                            (docs/policy/user-attachment-persistence.md §11).
-
-                            What changes is that it stops pretending: no
-                            thumbnail, a stated reason, and an accessible name
-                            that carries the state rather than only the colour.
-                          */
-                          const isUnavailable = Boolean(attachment.unavailableAt);
-                          const showImagePreview =
-                            !isUnavailable && hasImagePreview(attachment);
-                          return (
-                        <div
-                          key={attachment.id}
-                          data-testid={
-                            isUnavailable
-                              ? "chat-attachment-card-unavailable"
-                              : "chat-attachment-card"
-                          }
-                          data-attachment-unavailable={
-                            isUnavailable ? "true" : undefined
-                          }
-                          className={
-                            showImagePreview
-                              ? "relative h-20 w-20 overflow-hidden rounded-xl border border-white/20 bg-white/10 shadow-sm"
-                              : `flex h-16 min-w-52 max-w-64 items-center gap-3 rounded-xl border py-2 pl-2 pr-3 shadow-sm backdrop-blur ${
-                                  isUnavailable
-                                    ? "border-dashed border-amber-200/60 bg-white/5"
-                                    : "border-white/15 bg-white/10"
-                                }`
-                          }
-                          title={
-                            isUnavailable
-                              ? `${attachment.name} — ${t("chat.attachmentUnavailableBadge")}`
-                              : attachment.name
-                          }
-                        >
-                          {showImagePreview ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={attachment.data}
-                              alt={attachment.name}
-                              className="h-full w-full object-cover"
-                            />
-                          ) : (
-                            <>
-                              <span
-                                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ring-1 ring-white/10 ${
-                                  isUnavailable
-                                    ? "bg-white/10 text-amber-100"
-                                    : "bg-white/15 text-white"
-                                }`}
-                                aria-hidden="true"
-                              >
-                                {isUnavailable ? (
-                                  <FileWarning className="h-5 w-5" />
-                                ) : (
-                                  getAttachmentIcon(attachment)
-                                )}
-                              </span>
-                              <span className="flex min-w-0 flex-col text-left">
-                                <span className="truncate text-sm font-semibold text-white">
-                                  {attachment.name}
-                                </span>
-                                <span
-                                  className={
-                                    isUnavailable
-                                      ? "truncate text-[11px] font-semibold text-amber-100"
-                                      : "text-[11px] font-semibold text-blue-100/80"
-                                  }
-                                >
-                                  {isUnavailable
-                                    ? t("chat.attachmentUnavailableBadge")
-                                    : getAttachmentLabel(attachment)}
-                                </span>
-                              </span>
-                            </>
-                          )}
-                        </div>
-                          );
-                        })()
+                        <SentAttachmentCard key={attachment.id} attachment={attachment} />
                       ))}
                     </div>
                   )}
-                  {msg.role === "assistant" && msg.imageTurn && msg.status !== "error" ? (
+                  {!isUser && msg.researchRunId && currentChatId && <ResearchPreviewRunCard
+                    runId={msg.researchRunId} conversationId={currentChatId} assistantMessageId={msg.id}
+                    language={lang} transport={webResearchPreviewRuns}
+                    onMessage={run => onResearchMessage?.(researchRunMessage(run))} />}
+                  {msg.role === "assistant" && msg.researchRunId && !msg.content ? null : msg.role === "assistant" && msg.imageTurn && msg.status !== "error" ? (
                     // An image turn's answer is the picture; its text is only
                     // the record kept for later turns and exports.
                     <ChatImageTurnCard groupId={msg.imageTurn.groupId} modelIds={msg.imageTurn.modelIds} />
@@ -1538,53 +1610,27 @@ export function ChatMessageList({
                           format={msg.generatingArtifactFormat}
                         />
                       )}
-                    {msg.searchMetadata && msg.searchMetadata.citations.length > 0 && (
-                      <div
-                        data-testid="search-citation-list"
-                        className="mt-3 border-t border-zinc-200 pt-2 dark:border-zinc-700/60"
-                      >
-                        <p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
-                          {t("chat.searchCitationsLabel")}
-                        </p>
-                        <ul className="space-y-1">
-                          {msg.searchMetadata.citations.map((citation, citationIndex) => (
-                            <li
-                              key={`${citation.url}-${citationIndex}`}
-                              data-testid="search-citation-item"
-                              data-reference-number={citation.referenceNumber ?? ""}
-                              className="flex items-baseline gap-1.5"
-                            >
-                              {/*
-                                The number the answer text already used, shown
-                                as the provider numbered it. Providers that
-                                publish no citation order (OpenAI, Anthropic,
-                                Google inline annotations) leave it undefined
-                                and the row renders without one -- a made-up
-                                sequence would point at the wrong source.
-                              */}
-                              {citation.referenceNumber !== undefined && (
-                                <span className="shrink-0 text-[11px] font-bold tabular-nums text-zinc-400 dark:text-zinc-500">
-                                  [{citation.referenceNumber}]
-                                </span>
-                              )}
-                              <a
-                                href={citation.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                title={citation.url}
-                                className="truncate text-[11px] font-medium text-blue-600 underline underline-offset-2 dark:text-blue-400"
-                              >
-                                {citation.title || citation.url}
-                              </a>
-                            </li>
-                          ))}
-                        </ul>
+                    {!isUser && msg.searchMetadata?.research && (
+                      <div data-testid="research-preview-result" data-outcome={msg.searchMetadata.research.outcome}
+                        className="mt-3 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                        <p className="font-semibold">{t({
+                          complete: "chat.researchPreviewOutcomeComplete",
+                          partial: "chat.researchPreviewOutcomePartial",
+                          insufficient_evidence: "chat.researchPreviewOutcomeInsufficient",
+                          failed: "chat.researchPreviewOutcomeFailed",
+                          cancelled: "chat.researchPreviewOutcomeCancelled",
+                        }[msg.searchMetadata.research.outcome])}</p>
+                        <p>{t(msg.searchMetadata.research.evidenceLevel === "search_snippets_and_pages" ? "chat.researchPreviewPageEvidence" : "chat.researchPreviewEvidence")}</p>
                       </div>
+                    )}
+                    {msg.searchMetadata && (
+                      <SearchCitationList citations={msg.searchMetadata.citations} label={t("chat.searchCitationsLabel")} />
                     )}
                     </>
                   ) : (
                     <UserMessageContent content={msg.content} />
                   )}
+                  {!isUser && msg.continuationReceipt && <ContinuationReceipt receipt={msg.continuationReceipt} t={t} />}
                   {!isUser && msg.status === "error" && msg.recoveryNotice !== undefined && (
                     <p data-testid="chat-recovery-notice" className="mt-3 whitespace-pre-wrap text-sm font-medium">
                       {msg.recoveryNotice.split("\n")[0]}
@@ -1592,6 +1638,11 @@ export function ChatMessageList({
                   )}
                   {!isUser && msg.status === "error" && (() => {
                     const errorCategory = classifyError(msg);
+                    // One "choose another model" action per card: Chat passes
+                    // its picker directly; a restore-only transcript falls
+                    // back to the close-model handler.
+                    const chooseModelOnError = onChooseAnotherModel ??
+                      (!onRetryLast && onRestoreQuestion ? onRequestCloseModel : undefined);
                     // UI-ERR-001. These actions move the conversation
                     // forward -- retry, pick another model, sign in and
                     // continue -- so they wear the app's ordinary primary,
@@ -1684,6 +1735,28 @@ export function ChatMessageList({
                                 {t("chat.retry")}
                               </button>
                             )}
+                          {/*
+                            Chat (the single transcript, which restores the
+                            question instead of resending it) opens its model
+                            picker here, so the "try another model" hint below
+                            is an action rather than only advice. Nothing is
+                            sent: the next turn stays the user's submission.
+                            When onChooseAnotherModel is wired, the picker
+                            button after "Report error" is the only one.
+                          */}
+                          {(errorCategory === "generic" || errorCategory === "attachment") &&
+                            chooseModelOnError && (
+                              <button
+                                type="button"
+                                data-testid="chat-error-choose-model"
+                                onClick={chooseModelOnError}
+                                disabled={isSending || isSendPreparing}
+                                className={secondaryButtonClass}
+                              >
+                                <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+                                {t("chat.chooseAnotherModel")}
+                              </button>
+                            )}
                           {errorCategory === "concurrency" &&
                             msg.id === concurrencyRetryMessageId &&
                             onRetryConcurrency && (
@@ -1752,11 +1825,16 @@ export function ChatMessageList({
                             triggerTestId="report-error-button"
                           />
                           )}
-                          {(errorCategory === "generic" || errorCategory === "attachment") && (
-                            <span className="flex items-center text-xs font-semibold text-zinc-600 dark:text-zinc-400">
-                              {t("chat.tryAnotherModelHint")}
-                            </span>
-                          )}
+                          {/*
+                            Chat opens its model picker here, once per card;
+                            nothing is sent, the next turn stays the user's.
+                          */}
+                          {(errorCategory === "generic" || errorCategory === "attachment") &&
+                            !chooseModelOnError && (
+                              <span className="flex items-center text-xs font-semibold text-zinc-600 dark:text-zinc-400">
+                                {t("chat.tryAnotherModelHint")}
+                              </span>
+                            )}
                           {errorCategory === "concurrency" && msg.id === concurrencyRetryMessageId && (
                             <span
                               data-testid="concurrency-retry-hint"
@@ -1776,25 +1854,36 @@ export function ChatMessageList({
                               : chatProductUiCopy[lang].guestChatSignInDescription}
                           </p>
                         )}
-                        {errorAuxiliaryLines.length > 0 && (
-                          <div data-testid="chat-error-auxiliary-info" className="mt-2 space-y-0.5">
-                            {errorAuxiliaryLines.map((line, lineIndex) => (
+                        {errorDetailLines.map((line, lineIndex) => (
+                          <p
+                            key={lineIndex}
+                            // UI-003/UI-007. Supporting detail, not the error
+                            // itself: zinc at the readable floor -- 7.0:1 on
+                            // zinc-50, 6.1:1 on zinc-900.
+                            className="mt-2 text-[11px] leading-4 text-zinc-600 dark:text-zinc-400"
+                          >
+                            {line}
+                          </p>
+                        ))}
+                        {errorTraceLines.length > 0 && (
+                          // The trace ID already travels with "Report error"
+                          // (msg.errorReport), so it stays folded away until
+                          // someone asks for the diagnostic info.
+                          <details data-testid="chat-error-diagnostics" className="mt-2 space-y-0.5">
+                            <summary
+                              className="cursor-pointer text-[11px] leading-4 text-zinc-600 dark:text-zinc-400"
+                            >
+                              {t("chat.showDiagnostics")}
+                            </summary>
+                            {errorTraceLines.map((line, lineIndex) => (
                               <p
-                                key={lineIndex}
-                                // UI-003/UI-007. The trace ID is what a user
-                                // has to read back to support, and at
-                                // 10px/red-500-at-70% it measured 2.63:1 on
-                                // light and 3.84:1 on dark against the card it
-                                // sits on. It is supporting detail, not the
-                                // error itself, so on the neutral card it is
-                                // zinc at the readable floor -- 7.0:1 on
-                                // zinc-50, 6.1:1 on zinc-900.
-                                className="text-[11px] leading-4 text-zinc-600 dark:text-zinc-400"
+                                key={`trace-${lineIndex}`}
+                                className="select-all break-all text-[11px] leading-4 text-zinc-600 dark:text-zinc-400"
                               >
                                 {line}
                               </p>
                             ))}
-                          </div>
+                          </details>
                         )}
                       </div>
                     );
@@ -1833,7 +1922,8 @@ export function ChatMessageList({
                     </div>
                   )}
                   {onCompareInReview && !isUser && !imported && !isActivelyGenerating &&
-                    msg.content.trim() && (msg.status === undefined || msg.status === "normal" || msg.status === "incomplete") && (
+                    (!compareRequiresCompleted || (!msg.imageTurn && !msg.researchRunId && !msg.pendingJobId)) &&
+                    msg.content.trim() && (msg.status === undefined || msg.status === "normal" || (!compareRequiresCompleted && msg.status === "incomplete")) && (
                     /*
                       A second opinion on this answer: its question opens as a
                       new Review draft. Light, in the answer's own flow, and
@@ -1854,18 +1944,37 @@ export function ChatMessageList({
                   )}
                   {canRestoreQuestion && (
                     <div className="mt-3 space-y-2 border-t border-zinc-200 pt-3 dark:border-zinc-700">
-                      <button
-                        type="button"
-                        data-testid="restore-chat-question"
-                        onClick={() => onRestoreQuestion?.(msg.id)}
-                        className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-500"
-                      >
-                        <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
-                        {t("chat.restoreQuestion")}
-                      </button>
-                      <p className={`text-xs ${isUser ? "text-white" : "text-zinc-600 dark:text-zinc-400"}`}>
-                        {t("chat.restoreQuestionHint")}
-                      </p>
+                      {/* Retry is the main action; restoring is for editing the question first. */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        {canRetryQuestion && (
+                          <button
+                            type="button"
+                            data-testid="retry-chat-question"
+                            onClick={() => onRetryQuestion?.(msg.id)}
+                            disabled={isSendPreparing}
+                            className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-500"
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+                            {t("chat.retry")}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          data-testid="restore-chat-question"
+                          onClick={() => onRestoreQuestion?.(msg.id)}
+                          className={canRetryQuestion
+                            ? "inline-flex items-center gap-2 rounded-full border border-zinc-300 bg-white px-3 py-1.5 text-xs font-bold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700"
+                            : "inline-flex items-center gap-2 rounded-full bg-blue-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-500"}
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+                          {t("chat.restoreQuestion")}
+                        </button>
+                      </div>
+                      {!canRetryQuestion && (
+                        <p className={`text-xs ${isUser ? "text-white" : "text-zinc-600 dark:text-zinc-400"}`}>
+                          {t("chat.restoreQuestionHint")}
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1934,6 +2043,7 @@ export function ChatMessageList({
                   />
                 </div>
               )}
+              {isLastImported && importedTranscript?.contextCard}
               </Fragment>
             );
           })}
@@ -1946,6 +2056,7 @@ export function ChatMessageList({
         <button
           type="button"
           data-testid="scroll-to-latest-button"
+          data-state={isSending ? "generating" : unseenResponse ? "new-response" : "idle"}
           onClick={() => {
             const prefersReducedMotion =
               typeof window !== "undefined" &&
@@ -1953,13 +2064,37 @@ export function ChatMessageList({
             setMode("following");
             scrollToBottomNow(prefersReducedMotion ? "auto" : "smooth");
           }}
-          aria-label={isSending ? t("chat.newResponseAvailable") : t("chat.scrollToLatest")}
-          className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm text-zinc-100 shadow-lg hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          aria-label={
+            isSending
+              ? t("chat.generatingScrollToLatest")
+              : unseenResponse
+                ? t("chat.newResponseAvailable")
+                : t("chat.scrollToLatest")
+          }
+          className={`absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm text-zinc-100 shadow-lg hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+            isSending ? "animate-generating-glow motion-reduce:animate-none" : ""
+          }`}
         >
-          <span className="flex items-center gap-2">
-            <ArrowDown className="h-4 w-4" />
-            {isSending ? t("chat.newResponseAvailable") : t("chat.scrollToLatest")}
-          </span>
+          {isSending ? (
+            <span className="flex items-center gap-2">
+              <span
+                aria-hidden="true"
+                data-testid="scroll-to-latest-generating-dots"
+                className="flex items-center gap-1"
+              >
+                <span className="h-1.5 w-1.5 animate-typing-wave rounded-full bg-blue-400 motion-reduce:animate-none" />
+                <span className="h-1.5 w-1.5 animate-typing-wave rounded-full bg-blue-400 motion-reduce:animate-none [animation-delay:150ms]" />
+                <span className="h-1.5 w-1.5 animate-typing-wave rounded-full bg-blue-400 motion-reduce:animate-none [animation-delay:300ms]" />
+              </span>
+              <span className="font-medium">{t("chat.generatingPill")}</span>
+              <ArrowDown aria-hidden="true" className="h-4 w-4 text-zinc-400" />
+            </span>
+          ) : (
+            <span className="flex items-center gap-2">
+              <ArrowDown aria-hidden="true" className="h-4 w-4" />
+              {unseenResponse ? t("chat.newResponseAvailable") : t("chat.scrollToLatest")}
+            </span>
+          )}
         </button>
       )}
     </div>

@@ -30,9 +30,11 @@ export function StatusPageChrome({ language, guestTrialAvailable, children }: {
   return <LanguageProvider key={language} initialLang={language}>
     <StatusLanguageNavigation servedLanguage={language} />
     <MarketingChatAvailabilityProvider guestTrialAvailable={guestTrialAvailable}>
-      <MarketingHeader />
-      {children}
-      <MarketingFooter />
+      <div data-tv-site="" className="contents">
+        <MarketingHeader />
+        {children}
+        <MarketingFooter />
+      </div>
     </MarketingChatAvailabilityProvider>
   </LanguageProvider>;
 }

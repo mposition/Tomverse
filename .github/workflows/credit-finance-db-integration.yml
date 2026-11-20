@@ -196,6 +196,9 @@ jobs:
     # ~3, and on every develop and main push Railway's Wait for CI held the
     # deployment for the slowest lane. On 2026-10-02 `consent`, `agents` and
     # `conversations` took the overflow; the largest lane is now 24 suites.
+    # On 2026-11-13 accounts was back at 67 suites and ~14 minutes, the last
+    # check every dev deployment waited for, and `platform` took the half that
+    # is not about accounts.
     #
     # The lanes are named in scripts/db-integration-groups.mjs and a test
     # asserts this matrix runs all of them -- a lane defined and not listed
@@ -215,6 +218,7 @@ jobs:
           - ops-triage
           - operations
           - agents
+          - platform
           - accounts
 
     # Bounds a hang, not the runtime. The largest lane holds under a third of

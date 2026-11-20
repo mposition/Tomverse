@@ -18,6 +18,54 @@ use crate::worker::{CandidateRoutingSignals, RoutingTaskProfile};
 /// exactly what they were (tests/fixtures and main_wire_compat.rs pin them).
 pub const REQUEST_ID_HEADER: &str = "x-amux-request-id";
 pub const INSTANCE_ID_HEADER: &str = "x-amux-instance-id";
+/// What a delivery pull says this bridge can receive
+/// (lib/amux/v22ContextPartsCore.ts `AMUX_BRIDGE_FEATURES_HEADER`).
+pub const BRIDGE_FEATURES_HEADER: &str = "x-amux-bridge-features";
+/// The bridge fetches chunked context files (`AMUX_BRIDGE_CONTEXT_CHUNKS_FEATURE`).
+pub const BRIDGE_FEATURE_CONTEXT_CHUNKS: &str = "context_chunks";
+/// The most an old inline patch can be (lib/amux/v22PatchLimit.ts
+/// `AMUX_V22_LEGACY_INLINE_PATCH_MAX_BYTES`): what fits, JSON-escaped with its
+/// Task result, in the 10 MB request body Next.js buffers through the app's
+/// proxy. Only the old sidecar's inline `readback` and the old inline result
+/// POST still carry a patch this way; the chunked transfer has no such bound.
+pub const V22_LEGACY_INLINE_PATCH_MAX_BYTES: usize = 4 * 1024 * 1024;
+/// A JSON body or sidecar answer carrying one such patch with its result.
+pub const V22_LEGACY_PATCH_ENVELOPE_MAX_BYTES: usize =
+    2 * V22_LEGACY_INLINE_PATCH_MAX_BYTES + 1024 * 1024;
+
+/// The bytes of one transfer chunk (lib/amux/v22TransferCore.ts
+/// `AMUX_V22_TRANSFER_CHUNK_BYTES`). What one request carries, never a bound
+/// on the content; the last chunk of a part is shorter.
+pub const V22_TRANSFER_CHUNK_BYTES: usize = 4 * 1024 * 1024;
+/// One chunk request body: base64 of a full chunk plus its envelope
+/// (`AMUX_V22_TRANSFER_BODY_MAX_BYTES`).
+pub const V22_TRANSFER_BODY_MAX_BYTES: usize = 6 * 1024 * 1024;
+/// The sha256 of no bytes: the digest of an empty changed-path list
+/// (`AMUX_V22_EMPTY_SHA256`).
+pub const V22_EMPTY_SHA256: &str =
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+/// Time in proportion to size (`amuxV22SizeAllowanceMs`): one second per
+/// chunk's worth of bytes, none for no bytes. Every size-dependent timeout of
+/// the transfer adds this and nothing else.
+pub fn v22_size_allowance(bytes: u64) -> Duration {
+    Duration::from_secs(bytes.div_ceil(V22_TRANSFER_CHUNK_BYTES as u64))
+}
+
+/// How many chunks a part of `total` bytes travels as (`amuxV22TransferChunkCount`).
+pub fn v22_transfer_chunk_count(total: u64) -> u64 {
+    total.div_ceil(V22_TRANSFER_CHUNK_BYTES as u64)
+}
+
+/// The byte range [start, end) of chunk `index` of a part of `total` bytes
+/// (`amuxV22TransferChunkRange`); `None` outside the part.
+pub fn v22_transfer_chunk_range(total: u64, index: u64) -> Option<(u64, u64)> {
+    if index >= v22_transfer_chunk_count(total) {
+        return None;
+    }
+    let start = index * V22_TRANSFER_CHUNK_BYTES as u64;
+    Some((start, total.min(start + V22_TRANSFER_CHUNK_BYTES as u64)))
+}
 
 /// A new request id for every write call, the process's instance id on each.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -221,6 +269,167 @@ pub enum V22UsageRecord {
     Rejected,
 }
 
+/// One chunk of a part, as the upload route takes it (the exact keys of
+/// docs/policy/amux-v22-result-transfer.md 1.6: `baseSha` only for a patch,
+/// `count` only for the changed-path list).
+#[derive(Debug, Clone, Copy)]
+pub struct V22UploadChunk<'a> {
+    pub part: &'a str,
+    pub total_bytes: u64,
+    /// The sha256 of the whole part.
+    pub sha256: &'a str,
+    pub base_sha: Option<&'a str>,
+    pub count: Option<u64>,
+    pub index: u64,
+    /// The sha256 of this chunk's bytes.
+    pub chunk_sha256: &'a str,
+    pub bytes_base64: &'a str,
+}
+
+/// What a result commit says of its patch.
+#[derive(Debug, Clone, Copy)]
+pub struct V22PatchDescription<'a> {
+    pub sha256: &'a str,
+    pub base_sha: &'a str,
+    pub bytes: u64,
+}
+
+/// The upload route's answer, as the bridge acts on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum V22UploadAnswer {
+    /// Stored, or already there (a duplicate).
+    Stored,
+    /// The app already holds the final row: go on to commit and read back.
+    AlreadyRecorded,
+    /// The part is larger than one database value holds (an external limit).
+    ExceedsStorage,
+    /// A refusal that no retry changes (binding, conflict, malformed).
+    Reject,
+    /// 404: an app from before the transfer. Nothing was written.
+    AppTooOld,
+    /// A lost, late or unreadable answer: the same chunk is sent again.
+    Unknown,
+}
+
+/// The chunk indexes a commit found missing, part by part.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct V22Missing {
+    pub result: Vec<u64>,
+    pub patch: Vec<u64>,
+    pub changed_paths: Vec<u64>,
+}
+
+/// A commit route's answer, as the bridge acts on it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum V22CommitAnswer {
+    /// Recorded. `private_only`: the app recorded the result and refused the
+    /// patch (it failed the app's own checks), as the inline route reports.
+    Recorded { private_only: bool },
+    /// Chunks are still missing: not a refusal.
+    Incomplete(V22Missing),
+    /// The app's whole-part digest differs from ours; it cleared that part.
+    DigestMismatch(String),
+    /// The app cannot build the part in memory (an external limit).
+    ExceedsProcessing,
+    /// A refusal that no retry changes.
+    Reject,
+    AppTooOld,
+    /// No verdict: read back before anything else.
+    Unknown,
+}
+
+/// How a settlement or a review record names the files the run changed: the
+/// old inline list, or the digest of the list the app already holds (the
+/// chunked transfer; an empty list is `V22_EMPTY_SHA256` and 0).
+#[derive(Debug, Clone, Copy)]
+pub enum V22ChangedPathsRef<'a> {
+    List(&'a [String]),
+    Digest { sha256: &'a str, count: u64 },
+}
+
+impl<'a> V22ChangedPathsRef<'a> {
+    fn fields(self) -> (Option<&'a [String]>, Option<&'a str>, Option<u64>) {
+        match self {
+            Self::List(list) => (Some(list), None, None),
+            Self::Digest { sha256, count } => (None, Some(sha256), Some(count)),
+        }
+    }
+}
+
+/// Every answer of a transfer route is small: a status, a name, and at most
+/// the missing chunk indexes of a part.
+const V22_TRANSFER_ANSWER_MAX_BYTES: usize = 64 * 1024;
+
+/// The context files a delivery may name as chunks instead of embedding them
+/// (lib/amux/v22ContextPartsCore.ts `AMUX_V22_CONTEXT_PART_NAMES`).
+pub const V22_CONTEXT_PART_NAMES: [&str; 2] = ["prior.patch", "prior-conclusions.md"];
+
+/// One context chunk answer: a chunk's base64 and a short envelope. Not a
+/// bound on the file: the app sends the file one chunk per request.
+pub const V22_CONTEXT_ANSWER_MAX_BYTES: usize =
+    V22_TRANSFER_CHUNK_BYTES.div_ceil(3) * 4 + 64 * 1024;
+
+/// A context file a delivery pull names (docs/policy/amux-v22-result-transfer.md
+/// 10.1): its UTF-8 byte count and the sha256 of those bytes.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PulledContextPart {
+    pub name: String,
+    pub bytes: u64,
+    pub sha256: String,
+}
+
+/// What one context chunk request came to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum V22ContextAnswer {
+    /// The chunk, checked against the part the pull named.
+    Chunk(Vec<u8>),
+    /// 404: the app holds no such file now (`context_absent`).
+    Absent,
+    /// A refusal no retry changes: binding, a range or digest that is not the
+    /// pull's (the file changed since the pull).
+    Reject,
+    /// A lost, late, 503 or unreadable answer: the same chunk is asked again.
+    Unknown,
+}
+
+/// A delivery's context parts as the pull may name them: a known name once,
+/// at least one byte, a lowercase sha256.
+fn v22_context_parts_valid(parts: &[PulledContextPart]) -> bool {
+    parts.iter().enumerate().all(|(index, part)| {
+        V22_CONTEXT_PART_NAMES.contains(&part.name.as_str()) && part.bytes >= 1 &&
+            part.sha256.len() == 64 && part.sha256.bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()) &&
+            !parts[..index].iter().any(|earlier| earlier.name == part.name)
+    })
+}
+
+fn v22_commit_conflict(body: &Value) -> V22CommitAnswer {
+    let indexes = |part: &str| -> Option<Vec<u64>> {
+        match body.pointer(&format!("/missing/{part}")) {
+            None => Some(Vec::new()),
+            Some(list) => list.as_array()?.iter().map(Value::as_u64).collect(),
+        }
+    };
+    match body.get("error").and_then(Value::as_str) {
+        Some("upload_incomplete") => match (indexes("result"), indexes("patch"),
+            indexes("changed_paths")) {
+            (Some(result), Some(patch), Some(changed_paths))
+                if !(result.is_empty() && patch.is_empty() && changed_paths.is_empty()) =>
+                V22CommitAnswer::Incomplete(V22Missing { result, patch, changed_paths }),
+            // A refusal that names nothing missing is not one we can act on.
+            _ => V22CommitAnswer::Unknown,
+        },
+        Some("upload_digest_mismatch") => match body.get("part").and_then(Value::as_str) {
+            Some(part @ ("result" | "patch" | "changed_paths")) =>
+                V22CommitAnswer::DigestMismatch(part.to_owned()),
+            _ => V22CommitAnswer::Reject,
+        },
+        Some("exceeds_processing") => V22CommitAnswer::ExceedsProcessing,
+        _ => V22CommitAnswer::Reject,
+    }
+}
+
 const PRISMA_INT_MAX: i64 = 2_147_483_647;
 const MAX_QUEUE_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_OWNED_QUEUE_RESPONSE_BYTES: usize = 1024 * 1024;
@@ -228,6 +437,34 @@ const MAX_OWNED_QUEUE_RESPONSE_BYTES: usize = 1024 * 1024;
 const MAX_ROUTING_RESPONSE_BYTES: usize = 512 * 1024;
 const MAX_LIFECYCLE_RESPONSE_BYTES: usize = 128 * 1024;
 const MAX_QUEUE_ITEMS: usize = 512;
+
+/// A memory backstop for one prompt, context set or report crossing the
+/// bridge (AMUX_V22_TRANSPORT_MAX_BYTES), not a work limit. A delivery whose
+/// pull named `context_parts` no longer carries the two files with no source
+/// bound (`prior.patch`, `prior-conclusions.md`) inside its prompt; this
+/// backstop still bounds what an old app embeds, and the old sidecar's path.
+pub const V22_TRANSPORT_MAX_BYTES: usize = 32 * 1024 * 1024;
+
+/// A report's bound: the transport backstop (the v22 local CLI flow, owner
+/// decision 2026-11-15, lib/amux/v22LocalCliFlowCore.ts).
+pub fn v22_result_max_bytes() -> usize {
+    V22_TRANSPORT_MAX_BYTES
+}
+
+/// A delivered prompt with its context-file block, which may hold the brief,
+/// the previous patch and prior conclusions whole when the app embeds them
+/// (an app or a bridge from before `context_chunks`). With `context_parts` the
+/// two unbounded files travel in chunks and never reach this check.
+pub fn v22_delivery_prompt_max_bytes() -> usize {
+    2 * V22_TRANSPORT_MAX_BYTES
+}
+
+/// A delivery pull answer carries the prompt and its context files (the
+/// brief and, for an old app, the previous patch and prior conclusions).
+fn v22_delivery_response_max_bytes() -> usize {
+    // JSON escaping can at most double the prompt.
+    2 * v22_delivery_prompt_max_bytes() + MAX_LIFECYCLE_RESPONSE_BYTES
+}
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -483,9 +720,30 @@ async fn database_busy_or(mut response: reqwest::Response, otherwise: &'static s
     }
     if is_database_busy_body(&body) {
         anyhow::Error::new(DatabaseBusy)
+    } else if let Some(reason) = other_nothing_committed_reason(&body) {
+        // The other two "nothing committed" answers (policy version 20,
+        // section 1): the route rolled back. Marked so a caller that asks
+        // `is_nothing_committed` may send the request again; every other
+        // caller still sees an error and stops as before.
+        anyhow::Error::new(NothingCommittedAnswer { reason }).context(otherwise)
     } else {
         transient_status_or(status, otherwise)
     }
+}
+
+/// Whether this error is, anywhere in its chain, one of the three answers that
+/// say the request committed nothing: the database-busy body, or a deadline
+/// or call-ceiling refusal, each of which the app sends only after its
+/// transaction rolled back (lib/amux/dbBoundary.ts; policy version 20,
+/// section 1). Such a write may be sent again. Until 2026-11-13 the WSL bridge
+/// asked only `is_database_busy`, so a settlement refused at its commit
+/// deadline halted the bridge as an unknown outcome: codex-chore stopped twice
+/// that day, both times on `amux_database_deadline_exceeded`.
+pub fn is_nothing_committed(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause.downcast_ref::<DatabaseBusy>().is_some()
+            || cause.downcast_ref::<NothingCommittedAnswer>().is_some()
+    })
 }
 
 /// `otherwise`, tagged with `SelectionReadTransientStatus` when `status` is a
@@ -1168,6 +1426,27 @@ impl TomverseApi {
 
     /// One write, then exact lookup on a lost response. Never repost a quota
     /// observation or treat an unknown outcome as a completed report.
+    /// Forwards a worker's box health signals (owner decision 2026-11-15).
+    /// A diagnostic write the app upserts by worker and source, so a repeat
+    /// is harmless; `Ok(false)` is a known refusal, `Err` no answer.
+    pub async fn worker_health_record(&self, worker: &str, signals: &[Value]) -> Result<bool> {
+        let response = self.client
+            .post(format!("{}/api/internal/amux/v22/worker-health", self.base_url))
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT).bearer_auth(&self.secret)
+            .json(&serde_json::json!({ "worker": worker, "signals": signals }))
+            .send().await?;
+        let status = response.status();
+        let answer = read_raw_answer(response, 4096).await?;
+        if status == StatusCode::OK {
+            let body: Value = serde_json::from_slice(&answer.body)?;
+            return Ok(body.get("recorded").and_then(Value::as_u64).is_some());
+        }
+        if [StatusCode::BAD_REQUEST, StatusCode::UNAUTHORIZED, StatusCode::CONFLICT].contains(&status) {
+            return Ok(false);
+        }
+        bail!("health signal write answered {status}")
+    }
+
     pub async fn worker_quota_record_once(&self, observation: &AmuxWorkerQuota) -> Result<bool> {
         let payload = serde_json::to_value(observation)?;
         let response = self.client
@@ -1214,6 +1493,21 @@ impl TomverseApi {
         expected_patch: Option<(&str, &str)>,
         expected_files_digest: Option<&str>,
     ) -> Result<V22UsageRecord> {
+        self.v22_task_result_readback_sized(attempt_id, expected_digest,
+            expected_patch, expected_files_digest, None, None).await
+    }
+
+    /// The same read-back, also holding the app's `resultBytes` and
+    /// `patch.bytes` (the chunked transfer) to the sizes the sidecar named.
+    /// An app that does not report a size is not held to one; a size it does
+    /// report must be the same.
+    pub async fn v22_task_result_readback_sized(
+        &self, attempt_id: &str, expected_digest: &str,
+        expected_patch: Option<(&str, &str)>,
+        expected_files_digest: Option<&str>,
+        expected_result_bytes: Option<u64>,
+        expected_patch_bytes: Option<u64>,
+    ) -> Result<V22UsageRecord> {
         let response = self.client
             .get(format!("{}/api/internal/amux/v22/execution/result", self.base_url))
             .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
@@ -1225,17 +1519,27 @@ impl TomverseApi {
             bail!("v22 result read-back failed");
         }
         let body: Value = serde_json::from_slice(&answer.body)?;
+        // A reported size is held to the sidecar's; an unreported one is not.
+        let size_matches = |pointer: &str, expected: Option<u64>| {
+            match (body.pointer(pointer), expected) {
+                (Some(reported), Some(expected)) if !reported.is_null() =>
+                    reported.as_u64() == Some(expected),
+                _ => true,
+            }
+        };
         if body.get("status").and_then(Value::as_str) == Some("recorded") &&
             body.get("attemptId").and_then(Value::as_str) == Some(attempt_id) &&
             body.get("sourceSha256").and_then(Value::as_str) == Some(expected_digest) &&
             body.get("bodyAvailable").and_then(Value::as_bool) == Some(true) &&
+            size_matches("/resultBytes", expected_result_bytes) &&
             match expected_patch {
                 Some((digest, base)) =>
                     body.pointer("/patch/sha256").and_then(Value::as_str) == Some(digest) &&
                     body.pointer("/patch/baseSha").and_then(Value::as_str) == Some(base) &&
                     body.pointer("/patch/bodyAvailable").and_then(Value::as_bool) == Some(true) &&
                     body.pointer("/patch/filesDigest").and_then(Value::as_str) ==
-                        expected_files_digest,
+                        expected_files_digest &&
+                    size_matches("/patch/bytes", expected_patch_bytes),
                 None => body.get("patch").is_some_and(Value::is_null),
             } {
             return Ok(V22UsageRecord::Recorded);
@@ -1391,13 +1695,13 @@ impl TomverseApi {
         publish_files: Option<&Value>,
         publish_files_digest: Option<&str>,
     ) -> Result<V22UsageRecord> {
-        if result_text.is_empty() || result_text.len() > 65_536 ||
+        if result_text.is_empty() || result_text.len() > v22_result_max_bytes() ||
             result_text.contains('\0') || expected_digest.len() != 64 ||
             !expected_digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             bail!("invalid v22 result envelope");
         }
         if let Some((body, digest, base)) = patch {
-            if body.is_empty() || body.len() > 65_536 ||
+            if body.is_empty() || body.len() > V22_LEGACY_INLINE_PATCH_MAX_BYTES ||
                 !body.starts_with("diff --git ") || body.contains('\0') ||
                 digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit()) ||
                 base.len() != 40 || !base.bytes().all(|byte| byte.is_ascii_hexdigit()) {
@@ -1425,8 +1729,12 @@ impl TomverseApi {
                     serde_json::json!(publish_files_digest);
             }
         }
+        // A large patch takes longer to send: one more second per 512 KiB
+        // (about 23 seconds at the bound, inside the 90-second lease).
+        let upload = Duration::from_secs(
+            (patch.map_or(0, |(text, _, _)| text.len()) / (512 * 1024)) as u64);
         let response = self.client.post(&path)
-            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT + upload)
             .bearer_auth(&self.secret)
             .json(&payload).send().await;
         let mut definitely_rejected = false;
@@ -1463,6 +1771,318 @@ impl TomverseApi {
             V22UsageRecord::Rejected =>
                 bail!("v22 result write outcome unknown; read-back absent"),
         }
+    }
+
+    /// One chunk of a part (`POST /api/internal/amux/v22/execution/upload`,
+    /// docs/policy/amux-v22-result-transfer.md 1.6). A chunk is idempotent: the
+    /// same index with the same bytes is a duplicate, so a lost answer is
+    /// answered by sending the same chunk again. An `Err` is a malformed
+    /// request of ours; anything the app or the network did is an answer.
+    pub async fn v22_transfer_upload(
+        &self,
+        attempt_id: &str,
+        worker: &str,
+        chunk: &V22UploadChunk<'_>,
+    ) -> Result<V22UploadAnswer> {
+        let lower_hex = |value: &str, len: usize| value.len() == len &&
+            value.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase());
+        let chunk_count = v22_transfer_chunk_count(chunk.total_bytes);
+        if !matches!(chunk.part, "result" | "patch" | "changed_paths") ||
+            chunk.total_bytes == 0 || !lower_hex(chunk.sha256, 64) ||
+            !lower_hex(chunk.chunk_sha256, 64) || chunk.index >= chunk_count ||
+            chunk.bytes_base64.is_empty() ||
+            chunk.bytes_base64.len() > V22_TRANSFER_BODY_MAX_BYTES ||
+            (chunk.part == "patch") != chunk.base_sha.is_some() ||
+            chunk.base_sha.is_some_and(|sha| !lower_hex(sha, 40)) ||
+            (chunk.part == "changed_paths") != chunk.count.is_some() ||
+            chunk.count == Some(0) {
+            bail!("invalid v22 transfer chunk");
+        }
+        let mut payload = serde_json::json!({
+            "attemptId": attempt_id, "worker": worker, "part": chunk.part,
+            "totalBytes": chunk.total_bytes, "sha256": chunk.sha256,
+            "index": chunk.index, "chunkSha256": chunk.chunk_sha256,
+            "bytesBase64": chunk.bytes_base64,
+        });
+        if let Some(base_sha) = chunk.base_sha {
+            payload["baseSha"] = serde_json::json!(base_sha);
+        }
+        if let Some(count) = chunk.count {
+            payload["count"] = serde_json::json!(count);
+        }
+        let response = self.client
+            .post(format!("{}/api/internal/amux/v22/execution/upload", self.base_url))
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT +
+                v22_size_allowance(chunk.bytes_base64.len() as u64))
+            .bearer_auth(&self.secret)
+            .json(&payload).send().await;
+        let Ok(response) = response else { return Ok(V22UploadAnswer::Unknown); };
+        let Ok(answer) = read_raw_answer(response, V22_TRANSFER_ANSWER_MAX_BYTES).await else {
+            return Ok(V22UploadAnswer::Unknown);
+        };
+        let body: Value = serde_json::from_slice(&answer.body).unwrap_or(Value::Null);
+        Ok(match answer.status {
+            StatusCode::OK => if body.get("attemptId").and_then(Value::as_str) == Some(attempt_id) &&
+                body.get("part").and_then(Value::as_str) == Some(chunk.part) &&
+                body.get("index").and_then(Value::as_u64) == Some(chunk.index) &&
+                body.get("chunkCount").and_then(Value::as_u64) == Some(chunk_count) &&
+                body.get("duplicate").is_some_and(Value::is_boolean) {
+                V22UploadAnswer::Stored
+            } else {
+                // The chunk may be stored; sending it again settles that.
+                V22UploadAnswer::Unknown
+            },
+            StatusCode::NOT_FOUND => V22UploadAnswer::AppTooOld,
+            StatusCode::BAD_REQUEST => V22UploadAnswer::Reject,
+            StatusCode::CONFLICT => match body.get("error").and_then(Value::as_str) {
+                Some("already_recorded") => V22UploadAnswer::AlreadyRecorded,
+                Some("exceeds_storage") => V22UploadAnswer::ExceedsStorage,
+                _ => V22UploadAnswer::Reject,
+            },
+            _ => V22UploadAnswer::Unknown,
+        })
+    }
+
+    /// One chunk of a context file a delivery named
+    /// (`POST /api/internal/amux/v22/execution/context`,
+    /// docs/policy/amux-v22-result-transfer.md 10.1). Reading is idempotent:
+    /// the app rebuilds the file for every request, so a lost answer or a 503
+    /// is answered by asking for the same chunk again. The answer is checked
+    /// against the part the pull named (range length, total, whole-file
+    /// sha256); a file that changed since the pull is a `Reject`. An `Err` is a
+    /// malformed request of ours; anything the app or the network did is an
+    /// answer.
+    pub async fn v22_context_chunk(
+        &self,
+        attempt_id: &str,
+        worker: &str,
+        part: &PulledContextPart,
+        index: u64,
+    ) -> Result<V22ContextAnswer> {
+        use base64::Engine;
+        let Some((start, end)) = v22_transfer_chunk_range(part.bytes, index) else {
+            bail!("invalid v22 context chunk index");
+        };
+        if !V22_CONTEXT_PART_NAMES.contains(&part.name.as_str()) {
+            bail!("invalid v22 context part name");
+        }
+        let chunk_count = v22_transfer_chunk_count(part.bytes);
+        let response = self.client
+            .post(format!("{}/api/internal/amux/v22/execution/context", self.base_url))
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT +
+                v22_size_allowance((end - start).div_ceil(3) * 4))
+            .bearer_auth(&self.secret)
+            .json(&serde_json::json!({
+                "attemptId": attempt_id, "worker": worker, "name": part.name, "index": index,
+            })).send().await;
+        let Ok(response) = response else { return Ok(V22ContextAnswer::Unknown); };
+        let Ok(answer) = read_raw_answer(response, V22_CONTEXT_ANSWER_MAX_BYTES).await else {
+            return Ok(V22ContextAnswer::Unknown);
+        };
+        Ok(match answer.status {
+            StatusCode::OK => {
+                // A body that is not JSON is a lost answer (a proxy's page), not a verdict.
+                let Ok(body) = serde_json::from_slice::<Value>(&answer.body) else {
+                    return Ok(V22ContextAnswer::Unknown);
+                };
+                let envelope = body.get("attemptId").and_then(Value::as_str) == Some(attempt_id) &&
+                    body.get("name").and_then(Value::as_str) == Some(part.name.as_str()) &&
+                    body.get("index").and_then(Value::as_u64) == Some(index) &&
+                    body.get("totalBytes").and_then(Value::as_u64) == Some(part.bytes) &&
+                    body.get("chunkCount").and_then(Value::as_u64) == Some(chunk_count) &&
+                    body.get("sha256").and_then(Value::as_str) == Some(part.sha256.as_str());
+                if !envelope {
+                    // Another file, another range or another digest than the
+                    // pull named: asking again would not change it.
+                    return Ok(V22ContextAnswer::Reject);
+                }
+                let decoded = body.get("bytesBase64").and_then(Value::as_str).and_then(|encoded|
+                    base64::engine::general_purpose::STANDARD.decode(encoded).ok());
+                match decoded {
+                    Some(bytes) if bytes.len() as u64 == end - start => V22ContextAnswer::Chunk(bytes),
+                    _ => V22ContextAnswer::Unknown,
+                }
+            },
+            StatusCode::NOT_FOUND => V22ContextAnswer::Absent,
+            StatusCode::BAD_REQUEST | StatusCode::CONFLICT | StatusCode::UNAUTHORIZED |
+                StatusCode::FORBIDDEN => V22ContextAnswer::Reject,
+            _ => V22ContextAnswer::Unknown,
+        })
+    }
+
+    /// The result (and its patch) commit of the chunked transfer: one POST of
+    /// `transfer: "chunked_v1"`. A lost answer is the caller's to read back
+    /// (`v22_result_commit_once`); a committed duplicate answers 200 again.
+    pub async fn v22_result_commit(
+        &self,
+        attempt_id: &str,
+        worker: &str,
+        source_sha256: &str,
+        result_bytes: u64,
+        patch: Option<V22PatchDescription<'_>>,
+    ) -> Result<V22CommitAnswer> {
+        let lower_hex = |value: &str, len: usize| value.len() == len &&
+            value.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase());
+        if !lower_hex(source_sha256, 64) || result_bytes == 0 ||
+            patch.is_some_and(|patch| !lower_hex(patch.sha256, 64) ||
+                !lower_hex(patch.base_sha, 40) || patch.bytes == 0) {
+            bail!("invalid v22 chunked result commit");
+        }
+        let mut payload = serde_json::json!({
+            "attemptId": attempt_id, "worker": worker, "transfer": "chunked_v1",
+            "sourceSha256": source_sha256, "resultBytes": result_bytes,
+        });
+        if let Some(patch) = patch {
+            payload["patch"] = serde_json::json!({
+                "sha256": patch.sha256, "baseSha": patch.base_sha, "bytes": patch.bytes,
+            });
+        }
+        let allowance = v22_size_allowance(result_bytes + patch.map_or(0, |patch| patch.bytes));
+        let response = self.client
+            .post(format!("{}/api/internal/amux/v22/execution/result", self.base_url))
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT + allowance)
+            .bearer_auth(&self.secret)
+            .json(&payload).send().await;
+        let Ok(response) = response else { return Ok(V22CommitAnswer::Unknown); };
+        let Ok(answer) = read_raw_answer(response, V22_TRANSFER_ANSWER_MAX_BYTES).await else {
+            return Ok(V22CommitAnswer::Unknown);
+        };
+        let body: Value = serde_json::from_slice(&answer.body).unwrap_or(Value::Null);
+        Ok(match answer.status {
+            StatusCode::OK => {
+                let patch_digest = patch.map(|patch| patch.sha256);
+                let accepted = body.get("patchSha256").and_then(Value::as_str) == patch_digest &&
+                    body.get("filesDigest").and_then(Value::as_str).is_none();
+                let private_only = patch.is_some() &&
+                    body.get("patchRejected").and_then(Value::as_bool) == Some(true) &&
+                    body.get("patchSha256").is_some_and(Value::is_null) &&
+                    body.get("filesDigest").is_none_or(Value::is_null);
+                if body.get("attemptId").and_then(Value::as_str) == Some(attempt_id) &&
+                    body.get("sourceSha256").and_then(Value::as_str) == Some(source_sha256) &&
+                    (accepted || private_only) {
+                    V22CommitAnswer::Recorded { private_only }
+                } else {
+                    V22CommitAnswer::Unknown
+                }
+            },
+            StatusCode::NOT_FOUND => V22CommitAnswer::AppTooOld,
+            StatusCode::CONFLICT => v22_commit_conflict(&body),
+            // A 400 is this request the app could not read, which an app
+            // answers when it predates the transfer or when we have a bug:
+            // neither is a verdict on the result. Read back, then try again.
+            _ => V22CommitAnswer::Unknown,
+        })
+    }
+
+    /// The result commit, once, with the lost-answer rule: an answer that is
+    /// not a verdict is resolved by the exact GET read-back (never trusted
+    /// from the answer alone), and an absent read-back is `Unknown` -- the
+    /// commit is idempotent, so the next round sends it again.
+    pub async fn v22_result_commit_once(
+        &self,
+        attempt_id: &str,
+        worker: &str,
+        source_sha256: &str,
+        result_bytes: u64,
+        patch: Option<V22PatchDescription<'_>>,
+    ) -> Result<V22CommitAnswer> {
+        let answer = self.v22_result_commit(attempt_id, worker, source_sha256,
+            result_bytes, patch).await?;
+        if answer != V22CommitAnswer::Unknown {
+            return Ok(answer);
+        }
+        Ok(match self.v22_task_result_readback_sized(attempt_id, source_sha256,
+            patch.map(|patch| (patch.sha256, patch.base_sha)), None,
+            Some(result_bytes), patch.map(|patch| patch.bytes)).await {
+            Ok(V22UsageRecord::Recorded) => V22CommitAnswer::Recorded { private_only: false },
+            Ok(V22UsageRecord::PrivateOnly) if patch.is_some() =>
+                V22CommitAnswer::Recorded { private_only: true },
+            _ => V22CommitAnswer::Unknown,
+        })
+    }
+
+    /// The changed-path list commit (`POST .../changed-paths`), kept apart from
+    /// the result so a run that failed still settles with its paths.
+    pub async fn v22_changed_paths_commit(
+        &self,
+        attempt_id: &str,
+        worker: &str,
+        sha256: &str,
+        count: u64,
+        bytes: u64,
+    ) -> Result<V22CommitAnswer> {
+        if sha256.len() != 64 || !sha256.bytes().all(|byte| byte.is_ascii_hexdigit() &&
+            !byte.is_ascii_uppercase()) || count == 0 || bytes == 0 {
+            bail!("invalid v22 changed-path commit");
+        }
+        let response = self.client
+            .post(format!("{}/api/internal/amux/v22/execution/changed-paths", self.base_url))
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT + v22_size_allowance(bytes))
+            .bearer_auth(&self.secret)
+            .json(&serde_json::json!({
+                "attemptId": attempt_id, "worker": worker, "transfer": "chunked_v1",
+                "sha256": sha256, "count": count, "bytes": bytes,
+            })).send().await;
+        let Ok(response) = response else { return Ok(V22CommitAnswer::Unknown); };
+        let Ok(answer) = read_raw_answer(response, V22_TRANSFER_ANSWER_MAX_BYTES).await else {
+            return Ok(V22CommitAnswer::Unknown);
+        };
+        let body: Value = serde_json::from_slice(&answer.body).unwrap_or(Value::Null);
+        Ok(match answer.status {
+            StatusCode::OK => if body.get("attemptId").and_then(Value::as_str) == Some(attempt_id) &&
+                body.get("sha256").and_then(Value::as_str) == Some(sha256) &&
+                body.get("count").and_then(Value::as_u64) == Some(count) {
+                V22CommitAnswer::Recorded { private_only: false }
+            } else {
+                V22CommitAnswer::Unknown
+            },
+            StatusCode::NOT_FOUND => V22CommitAnswer::AppTooOld,
+            StatusCode::CONFLICT => v22_commit_conflict(&body),
+            _ => V22CommitAnswer::Unknown,
+        })
+    }
+
+    /// `GET .../changed-paths?attemptId=`: is exactly this list recorded?
+    /// `Ok(true)` recorded and readable, `Ok(false)` absent; a record of
+    /// another list is a conflict (`Err`).
+    pub async fn v22_changed_paths_readback(
+        &self, attempt_id: &str, sha256: &str, count: u64, bytes: u64,
+    ) -> Result<bool> {
+        let response = self.client
+            .get(format!("{}/api/internal/amux/v22/execution/changed-paths", self.base_url))
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
+            .bearer_auth(&self.secret)
+            .query(&[("attemptId", attempt_id)])
+            .send().await.context("v22 changed-path read-back unavailable")?;
+        let answer = read_raw_answer(response, 4096).await?;
+        if answer.status != StatusCode::OK {
+            bail!("v22 changed-path read-back failed");
+        }
+        let body: Value = serde_json::from_slice(&answer.body)?;
+        match body.get("status").and_then(Value::as_str) {
+            Some("absent") => Ok(false),
+            Some("recorded") if body.get("attemptId").and_then(Value::as_str) == Some(attempt_id) &&
+                body.get("sha256").and_then(Value::as_str) == Some(sha256) &&
+                body.get("count").and_then(Value::as_u64) == Some(count) &&
+                body.get("bytes").and_then(Value::as_u64) == Some(bytes) &&
+                body.get("bodyAvailable").and_then(Value::as_bool) == Some(true) => Ok(true),
+            _ => bail!("v22 changed-path read-back conflict"),
+        }
+    }
+
+    /// The changed-path commit, once: a lost answer is read back, and an
+    /// absent read-back is `Unknown` (the commit is idempotent).
+    pub async fn v22_changed_paths_commit_once(
+        &self, attempt_id: &str, worker: &str, sha256: &str, count: u64, bytes: u64,
+    ) -> Result<V22CommitAnswer> {
+        let answer = self.v22_changed_paths_commit(attempt_id, worker, sha256, count, bytes).await?;
+        if answer != V22CommitAnswer::Unknown {
+            return Ok(answer);
+        }
+        Ok(match self.v22_changed_paths_readback(attempt_id, sha256, count, bytes).await {
+            Ok(true) => V22CommitAnswer::Recorded { private_only: false },
+            _ => V22CommitAnswer::Unknown,
+        })
     }
 
     /// Submit the exact content-free A14 receipt once. An ambiguous write is
@@ -1716,6 +2336,32 @@ mod tests {
         thread,
     };
 
+    /// A record without reasons keeps the exact body an app without the
+    /// field accepts; a reject's reasons are a top-level field, outside the
+    /// evidence the app digests.
+    #[test]
+    fn v52_review_record_request_adds_reasons_only_when_present() {
+        let evidence = V52ReviewEvidence {
+            job_id: Some("r-20261114-100000-abcdef".into()),
+            base_sha: "a".repeat(40), commit_sha: "b".repeat(40),
+            verdict: "reject".into(), author_vendor: "anthropic".into(),
+            reviewer_vendors: vec!["openai".into()], touches_contract: false,
+        };
+        let paths = vec!["lib/a.ts".to_owned()];
+        let request = |findings_summary| serde_json::to_value(V52ReviewRecordRequest {
+            attempt_id: "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e6f", worker: "codex-impl",
+            instance_id: "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e70", generation: 1,
+            task_revision: 2, changed_paths: Some(&paths), changed_paths_digest: None,
+            changed_paths_count: None, evidence: &evidence, findings_summary,
+        }).unwrap();
+        let without = request(None);
+        assert!(without.get("findings_summary").is_none());
+        assert!(without["evidence"].get("findings_summary").is_none());
+        let with = request(Some("- [major] lib/a.ts:1 broken"));
+        assert_eq!(with["findings_summary"], "- [major] lib/a.ts:1 broken");
+        assert_eq!(with["evidence"], without["evidence"]);
+    }
+
     fn answer_once(status: &'static str, body: String) -> (TomverseApi, thread::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
@@ -1794,11 +2440,24 @@ mod tests {
             outcome: "blocked",
             invocation_ids: &[],
             read_only_retry: None,
-            changed_paths: None,
+            changed_paths: None, changed_paths_digest: None, changed_paths_count: None,
+            failure: None,
         }).unwrap();
         assert_eq!(body["outcome"], "blocked");
         assert_eq!(body["invocation_ids"], serde_json::json!([]));
         assert!(body.get("to_status").is_none());
+        assert!(body.get("failure").is_none());
+        // 2026-11-15: an unverified settlement names what the sidecar said.
+        let failure = V22FailureReport { code: "invalid_result".into(), cli_started: Some(true),
+            exit_code: Some(1), elapsed_ms: Some(4200) };
+        let body = serde_json::to_value(V22ExecutionSettleRequest {
+            attempt_id: "attempt", worker: "worker", instance_id: "instance",
+            generation: 1, task_revision: 3, outcome: "blocked", invocation_ids: &[],
+            read_only_retry: None, changed_paths: None, changed_paths_digest: None,
+            changed_paths_count: None, failure: Some(&failure),
+        }).unwrap();
+        assert_eq!(body["failure"], serde_json::json!({"code": "invalid_result",
+            "cli_started": true, "exit_code": 1, "elapsed_ms": 4200}));
         let response: ExecutionSettleResponse = serde_json::from_value(
             serde_json::json!({"settled":true,"taskRevision":4})
         ).unwrap();
@@ -1813,7 +2472,8 @@ mod tests {
                 attempt_id: "attempt", worker: "worker", instance_id: "instance",
                 generation: 1, task_revision: 3, outcome: "succeeded",
                 invocation_ids: &["attempt"], read_only_retry: None,
-                changed_paths: inventory,
+                changed_paths: inventory, changed_paths_digest: None,
+                changed_paths_count: None, failure: None,
             }).unwrap();
             match inventory {
                 Some(names) => assert_eq!(body["changed_paths"], serde_json::json!(names)),
@@ -1833,7 +2493,8 @@ mod tests {
             attempt_id: "attempt", worker: "worker", instance_id: "instance",
             generation: 1, task_revision: 3, outcome: "succeeded",
             invocation_ids: &["attempt"], read_only_retry: Some(&echo),
-            changed_paths: None,
+            changed_paths: None, changed_paths_digest: None, changed_paths_count: None,
+            failure: None,
         }).unwrap();
         assert_eq!(body["read_only_retry"], serde_json::json!({
             "version": 1,
@@ -1866,7 +2527,8 @@ mod tests {
             attempt_id: "attempt", worker: "worker", instance_id: "instance",
             generation: 1, task_revision: 3, outcome: "succeeded",
             invocation_ids: &["attempt"], read_only_retry: Some(&echo),
-            changed_paths: None,
+            changed_paths: None, changed_paths_digest: None, changed_paths_count: None,
+            failure: None,
         }).unwrap();
         assert_eq!(body["read_only_retry"]["executor_kind"],
             "read_only_api_retry_v1");
@@ -2197,7 +2859,8 @@ mod tests {
                 assignment_id: None, recovery_approval_id: None, v22_execution: None,
                 task_id: "task-1".into(), worker: "codex-impl".into(),
                 task_revision: 1, prompt: String::new(), receipt_id: "r".into(),
-                lease_expires_at: "2026-11-01T00:00:00Z".into() };
+                lease_expires_at: "2026-11-01T00:00:00Z".into(),
+                context_parts: Vec::new() };
             assert_eq!(api.chat_optimizer_candidate_record_once(&delivery, "instance", 1,
                 &serde_json::json!({}), "{}", &result_digest).await.unwrap(),
                 V22UsageRecord::Recorded);
@@ -2276,14 +2939,15 @@ mod tests {
             prompt: String::new(),
             receipt_id: "receipt-1".to_owned(),
             lease_expires_at: String::new(),
+            context_parts: Vec::new(),
         };
         let api = TomverseApi::for_test_with_timeouts(
             format!("http://{address}"),
             Duration::from_secs(1),
             Duration::from_secs(3),
         );
-        assert!(api.v22_execution_settle_verified(&delivery, "instance-1", 1, "blocked", None).await.is_err());
-        let result = api.v22_execution_settle_verified(&delivery, "instance-1", 1, "succeeded", None).await.unwrap();
+        assert!(api.v22_execution_settle_verified(&delivery, "instance-1", 1, "blocked", None, 0).await.is_err());
+        let result = api.v22_execution_settle_verified(&delivery, "instance-1", 1, "succeeded", None, 0).await.unwrap();
         assert!(result.settled);
         let body = server.join().unwrap();
         assert_eq!(body["outcome"], "succeeded");
@@ -3297,6 +3961,49 @@ pub struct V22ReadOnlyRetryProfile {
     pub role: String,
 }
 
+/// What the sidecar said about a run that produced no verified result: its
+/// failure code (lib/amux/v22OneShotSidecar.mjs) and, for an unreadable
+/// result, the CLI's exit code and run time. The app classifies it as an
+/// infrastructure failure that uses no card attempt, or as the card's own
+/// (owner decision 2026-11-15, lib/amux/infraFailureCore.ts). Codes only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct V22FailureReport {
+    pub code: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cli_started: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub elapsed_ms: Option<i64>,
+}
+
+impl V22FailureReport {
+    /// A code the app accepts: lowercase letters, digits and `_`, 1 to 64.
+    pub fn valid_code(code: &str) -> bool {
+        !code.is_empty() && code.len() <= 64 &&
+            code.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+    }
+
+    /// The report a sidecar answer carries; None when it names no valid code.
+    pub fn from_sidecar(value: &Value) -> Option<Self> {
+        let code = value.get("failure").and_then(|v| v.as_str())?;
+        if !Self::valid_code(code) { return None; }
+        Some(Self {
+            code: code.to_owned(),
+            cli_started: value.get("cliStarted").and_then(|v| v.as_bool()),
+            exit_code: value.get("exitCode").and_then(|v| v.as_i64())
+                .filter(|code| (-1_000..=1_000).contains(code)),
+            elapsed_ms: value.get("elapsedMs").and_then(|v| v.as_i64())
+                .filter(|ms| (0..=86_400_000).contains(ms)),
+        })
+    }
+
+    /// A bridge-side cause with no sidecar answer behind it.
+    pub fn bridge(code: &str) -> Self {
+        Self { code: code.to_owned(), cli_started: None, exit_code: None, elapsed_ms: None }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct V22ReadOnlyRetryEcho {
@@ -3337,6 +4044,12 @@ pub struct V22ExecutionProfile {
     pub review_scope: Option<String>,
     #[serde(default)]
     pub review_feedback_job_id: Option<String>,
+    /// Reviewer vendors the next review prefers not to use, because the same
+    /// vendor rejected the Task's last two reviews (owner decision
+    /// 2026-11-15). The app sends it whenever that holds; the review
+    /// server treats it as a preference.
+    #[serde(default)]
+    pub review_avoid_vendors: Option<Vec<String>>,
     #[serde(default)]
     pub read_only_retry: Option<V22ReadOnlyRetryProfile>,
 }
@@ -3359,8 +4072,17 @@ struct V52ReviewRecordRequest<'a> {
     instance_id: &'a str,
     generation: i64,
     task_revision: i64,
-    changed_paths: &'a [String],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    changed_paths: Option<&'a [String]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    changed_paths_digest: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    changed_paths_count: Option<u64>,
     evidence: &'a V52ReviewEvidence,
+    /// Display-only reasons of a reject; omitted otherwise so an app without
+    /// the field still takes the record.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    findings_summary: Option<&'a str>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -3411,6 +4133,11 @@ pub struct PulledDelivery {
     pub prompt: String,
     pub receipt_id: String,
     pub lease_expires_at: String,
+    /// The context files the app keeps out of the prompt and gives in chunks
+    /// (the pull's `x-amux-bridge-features: context_chunks`); absent for an
+    /// old app, which embeds them.
+    #[serde(default)]
+    pub context_parts: Vec<PulledContextPart>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -3524,8 +4251,17 @@ struct V22ExecutionSettleRequest<'a> {
     invocation_ids: &'a [&'a str],
     #[serde(skip_serializing_if = "Option::is_none")]
     read_only_retry: Option<&'a V22ReadOnlyRetryEcho>,
+    /// An old bridge's inline list. Never together with the digest below.
     #[serde(skip_serializing_if = "Option::is_none")]
     changed_paths: Option<&'a [String]>,
+    /// The chunked transfer's reference to the list the app already holds:
+    /// both or neither, and never with `changed_paths`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    changed_paths_digest: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    changed_paths_count: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    failure: Option<&'a V22FailureReport>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -3742,6 +4478,10 @@ impl TomverseApi {
             .post(format!("{}/api/internal/amux/delivery/pull", self.base_url))
             .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
             .bearer_auth(&self.secret)
+            // This bridge fetches the chunked context files and hands them to
+            // the sidecar (docs/policy/amux-v22-result-transfer.md 10.1); an
+            // old app ignores the header and embeds them.
+            .header(BRIDGE_FEATURES_HEADER, BRIDGE_FEATURE_CONTEXT_CHUNKS)
             .json(&DeliveryPullRequest {
                 worker,
                 instance_id,
@@ -3753,7 +4493,7 @@ impl TomverseApi {
         let (status, body): (_, DeliveryPullResponse) = read_bounded_json(
             response,
             &[StatusCode::OK, StatusCode::CONFLICT],
-            MAX_LIFECYCLE_RESPONSE_BYTES,
+            v22_delivery_response_max_bytes(),
         )
         .await?;
         let valid = match status {
@@ -3784,7 +4524,10 @@ impl TomverseApi {
                 || !is_canonical_machine_id(&delivery.task_id)
                 || !is_canonical_machine_id(&delivery.worker)
                 || !(0..=PRISMA_INT_MAX).contains(&delivery.task_revision)
-                || delivery.prompt.len() > 96 * 1024
+                || delivery.prompt.len() > v22_delivery_prompt_max_bytes()
+                || !v22_context_parts_valid(&delivery.context_parts)
+                // Chunked context belongs to a v22 execution the sidecar runs.
+                || (!delivery.context_parts.is_empty() && delivery.v22_execution.is_none())
             {
                 bail!("invalid Tomverse AMUX delivery response fields");
             }
@@ -4123,14 +4866,20 @@ impl TomverseApi {
         outcome: &str,
         invocation_ids: &[&str],
         read_only_retry: Option<&V22ReadOnlyRetryEcho>,
-        changed_paths: Option<&[String]>,
+        changed_paths: Option<V22ChangedPathsRef<'_>>,
+        allowance_bytes: u64,
+        failure: Option<&V22FailureReport>,
     ) -> Result<ExecutionSettleResponse> {
         if delivery.assignment_id.is_none() {
             bail!("v22 settlement requires an assignment-bound delivery");
         }
+        let (changed_paths, changed_paths_digest, changed_paths_count) =
+            changed_paths.map_or((None, None, None), V22ChangedPathsRef::fields);
         let response = self.client
             .post(format!("{}/api/internal/amux/v22/execution/settle", self.base_url))
-            .timeout(TOMVERSE_INTERNAL_V22_EXECUTION_TIMEOUT)
+            // The app opens the patch and the path list to settle: it adds the
+            // same time for their size, and so does this wait.
+            .timeout(TOMVERSE_INTERNAL_V22_EXECUTION_TIMEOUT + v22_size_allowance(allowance_bytes))
             .bearer_auth(&self.secret)
             .json(&V22ExecutionSettleRequest {
                 attempt_id: &delivery.attempt_id,
@@ -4142,6 +4891,10 @@ impl TomverseApi {
                 invocation_ids,
                 read_only_retry,
                 changed_paths,
+                changed_paths_digest,
+                changed_paths_count,
+                // Only an unverified settlement names a failure.
+                failure: if outcome == "blocked" { failure } else { None },
             })
             .send().await?;
         let (status, body): (_, ExecutionSettleResponse) = read_bounded_json(
@@ -4170,12 +4923,14 @@ impl TomverseApi {
         generation: i64,
         outcome: &str,
         read_only_retry: Option<&V22ReadOnlyRetryEcho>,
+        allowance_bytes: u64,
     ) -> Result<ExecutionSettleResponse> {
         if !matches!(outcome, "succeeded" | "failed") {
             bail!("verified v22 settlement requires a terminal CLI result");
         }
         self.v22_execution_settle_with_receipt(delivery, instance_id, generation,
-            outcome, &[&delivery.attempt_id], read_only_retry, None).await
+            outcome, &[&delivery.attempt_id], read_only_retry, None,
+            allowance_bytes, None).await
     }
 
     pub async fn v22_execution_settle_v52(
@@ -4185,13 +4940,15 @@ impl TomverseApi {
         generation: i64,
         outcome: &str,
         read_only_retry: Option<&V22ReadOnlyRetryEcho>,
-        changed_paths: Option<&[String]>,
+        changed_paths: Option<V22ChangedPathsRef<'_>>,
+        allowance_bytes: u64,
     ) -> Result<ExecutionSettleResponse> {
         if !matches!(outcome, "succeeded" | "failed") {
             bail!("v52 settlement requires a terminal CLI result");
         }
         self.v22_execution_settle_with_receipt(delivery, instance_id, generation,
-            outcome, &[&delivery.attempt_id], read_only_retry, changed_paths).await
+            outcome, &[&delivery.attempt_id], read_only_retry, changed_paths,
+            allowance_bytes, None).await
     }
 
     pub async fn v52_review_readback(&self, attempt_id: &str) -> Result<V52ReviewReadback> {
@@ -4214,16 +4971,21 @@ impl TomverseApi {
 
     pub async fn v52_review_record(&self, delivery: &PulledDelivery,
         instance_id: &str, generation: i64,
-        changed_paths: &[String],
-        evidence: &V52ReviewEvidence) -> Result<V52ReviewRecordResponse> {
+        changed_paths: V22ChangedPathsRef<'_>,
+        allowance_bytes: u64,
+        evidence: &V52ReviewEvidence,
+        findings_summary: Option<&str>) -> Result<V52ReviewRecordResponse> {
+        let (changed_paths, changed_paths_digest, changed_paths_count) = changed_paths.fields();
         let response = self.client
             .post(format!("{}/api/internal/amux/v22/review/record", self.base_url))
-            .timeout(TOMVERSE_INTERNAL_V22_EXECUTION_TIMEOUT)
+            .timeout(TOMVERSE_INTERNAL_V22_EXECUTION_TIMEOUT + v22_size_allowance(allowance_bytes))
             .bearer_auth(&self.secret)
             .json(&V52ReviewRecordRequest {
                 attempt_id: &delivery.attempt_id,
                 worker: &delivery.worker, instance_id, generation,
-                task_revision: delivery.task_revision, changed_paths, evidence,
+                task_revision: delivery.task_revision, changed_paths,
+                changed_paths_digest, changed_paths_count, evidence,
+                findings_summary,
             }).send().await?;
         let (status, body): (_, V52ReviewRecordResponse) = read_bounded_json(response,
             &[StatusCode::OK, StatusCode::CONFLICT],
@@ -4248,8 +5010,23 @@ impl TomverseApi {
         generation: i64,
         read_only_retry: Option<&V22ReadOnlyRetryEcho>,
     ) -> Result<ExecutionSettleResponse> {
+        self.v22_execution_settle_unverified_with_failure(delivery, instance_id,
+            generation, read_only_retry, None).await
+    }
+
+    /// The same unverified settlement, naming what the sidecar said about the
+    /// run (owner decision 2026-11-15): the app tells an infrastructure
+    /// failure, which uses no card attempt, from the card's own.
+    pub async fn v22_execution_settle_unverified_with_failure(
+        &self,
+        delivery: &PulledDelivery,
+        instance_id: &str,
+        generation: i64,
+        read_only_retry: Option<&V22ReadOnlyRetryEcho>,
+        failure: Option<&V22FailureReport>,
+    ) -> Result<ExecutionSettleResponse> {
         self.v22_execution_settle_with_receipt(delivery, instance_id, generation,
-            "blocked", &[], read_only_retry, None).await
+            "blocked", &[], read_only_retry, None, 0, failure).await
     }
 
     /// Policy version 15: the system consumer of pre-approved automatic

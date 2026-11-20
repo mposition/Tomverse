@@ -2,8 +2,8 @@
  * CI improvement suggestions (owner request 2026-10-20, approved as a paid
  * call; off unless QA_RELEASE_CI_ADVICE_ENABLED is "true"): once a day the model
  * reads how long develop's push CI took, job by job, and how full the runners
- * were, and suggests what would shorten the wait. Admin shows the suggestions;
- * nothing acts on them.
+ * were, and suggests what would shorten the wait. Admin shows the suggestions
+ * with explicit operator actions; their generation does not apply a change.
  *
  * The model sees check names and numbers only, never a log or a diff.
  * Pure: lib/qaReleaseCiAdvice.ts does the reading and the call.

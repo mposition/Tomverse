@@ -1,4 +1,3 @@
-import { MarketingConsentReservation } from "@/components/analytics/MarketingConsentReservation";
 import { AppToastViewport } from "@/components/AppToastViewport";
 import { MarketingProviders } from "@/components/marketing/MarketingProviders";
 import { MarketingChatAvailabilityProvider } from "@/components/marketing/MarketingChatAvailability";
@@ -38,9 +37,6 @@ export function MarketingShell({
 }>) {
   return (
     <>
-      {/* First thing in the marketing subtree, so it runs before the header --
-          and therefore the consent slot -- is parsed. */}
-      <MarketingConsentReservation nonce={nonce} />
       <StructuredData
         nonce={nonce}
         data={{
@@ -76,7 +72,8 @@ export function MarketingShell({
       />
       <MarketingProviders measurementId={measurementId} initialLang={initialLang} forceInitialLang={forceInitialLang} nonce={nonce}>
         <MarketingChatAvailabilityProvider guestTrialAvailable={PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE}>
-        {children}
+        {/* V2 public-site palette scope; see [data-tv-site] in app/globals.css. */}
+        <div data-tv-site="" className="contents">{children}</div>
         {/*
           UX-006. Inside the providers, because the viewport reads its dismiss
           label from LanguageProvider. Marketing, the admin console and the chat

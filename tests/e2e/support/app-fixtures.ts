@@ -486,6 +486,7 @@ export type AuthenticatedQaState = {
     revision: number;
     latestRevision: number;
     status: "current" | "superseded";
+    useAccountMemory?: boolean;
   } | null;
   theme: "dark" | "light" | "system";
   language: Language;
@@ -600,6 +601,8 @@ export type QaConversationMessage = {
 export async function mockAuthenticatedApi(
   page: Page,
   options: {
+    /** Reuse the same server-backed draft and message store on a continued Chat. */
+    messageConversationId?: string;
     /**
      * The seeded conversation's model selection. Note this only takes effect
      * once that conversation is actually opened (see openRecentConversation) --
@@ -668,6 +671,7 @@ export async function mockAuthenticatedApi(
       revision: number;
       latestRevision: number;
       status: "current" | "superseded";
+      useAccountMemory?: boolean;
     } | null;
     /** What `inherit` resolves to, served by /api/memories/settings. */
     accountMemoryDefault?: "on" | "off";
@@ -686,12 +690,16 @@ export async function mockAuthenticatedApi(
     extraConversations?: Array<{
       id: string;
       title?: string;
+      productKey?: "chat" | "review";
       selectedModels?: string[];
       messages?: QaConversationMessage[];
     }>;
   } = {}
 ): Promise<AuthenticatedQaState> {
-  await page.route("**/api/chat/location-intent", route => route.fulfill(json({ requiresLocation: false })));
+  await page.route("**/api/chat/location-intent", route => route.fulfill(json({
+    requiresLocation: false,
+    ...(route.request().postDataJSON()?.freshAccountId ? { preparationOutcome: "classified" } : {}),
+  })));
   await page.addInitScript((showSidebarTour) => {
     // Existing shell contracts exercise Classic; Studio suites explicitly seed
     // their appearance. Preserve that seed regardless of init-script order.
@@ -1013,6 +1021,7 @@ export async function mockAuthenticatedApi(
   const extras = (options.extraConversations || []).map((extra) => ({
     id: extra.id,
     title: extra.title || extra.id,
+    productKey: extra.productKey ?? options.productKey,
     selectedModels: extra.selectedModels ||
       options.selectedModels || ["gpt-5-6-luna"],
     savedMessages: [...(extra.messages || [])],
@@ -1026,8 +1035,8 @@ export async function mockAuthenticatedApi(
     isLocked: false,
     shareEnabled: false,
     shareExpiresAt: null,
-    productKey: options.productKey ?? null,
-    surface: options.productKey === "chat" ? "chat" : "workspace",
+    productKey: extra.productKey ?? null,
+    surface: extra.productKey === "chat" ? "chat" : "workspace",
   });
 
   const handleConversationCollection = async (route: Route) => {
@@ -1163,7 +1172,8 @@ export async function mockAuthenticatedApi(
   // not from whatever the composer happened to be holding.
   const uploadRegistry = finalizedUploadRegistry(page);
 
-  await page.route("**/api/conversations/qa-conversation/messages**", async (route) => {
+  const messageConversationId = options.messageConversationId ?? "qa-conversation";
+  await page.route(`**/api/conversations/${messageConversationId}/messages**`, async (route) => {
     if (route.request().method() === "POST") {
       const body = route.request().postDataJSON() as {
         draftConsume?: { scopeKey: string; expectedRevision: number; requestId: string };
@@ -1202,7 +1212,7 @@ export async function mockAuthenticatedApi(
         if (!requestMessage?.clientRequestId) continue;
         const message = {
           ...requestMessage,
-          id: qaPersistedMessageId("qa-conversation", requestMessage.clientRequestId),
+          id: qaPersistedMessageId(messageConversationId, requestMessage.clientRequestId),
         };
         messageMappings.push({
           requestId: requestMessage.clientRequestId,
@@ -1494,7 +1504,7 @@ const FINALIZED_UPLOADS = new WeakMap<
   Map<string, { name: string; mediaType: string; size: number; kind: "text" | "file" }>
 >();
 
-const finalizedUploadRegistry = (page: Page) => {
+export const finalizedUploadRegistry = (page: Page) => {
   const existing = FINALIZED_UPLOADS.get(page);
   if (existing) return existing;
   const created = new Map<string, { name: string; mediaType: string; size: number; kind: "text" | "file" }>();
@@ -1704,6 +1714,52 @@ export async function openModelPickerCatalogue(page: Page) {
   await modelMenuTrigger(page).click();
   await expect(page.locator("#chat-input-popover")).toBeVisible();
   return openModelCatalogue(page);
+}
+
+/**
+ * Sets the active model set to exactly `models` through the composer's model
+ * picker -- the control a person uses on the start screen, where the desktop
+ * panels behind the welcome surface are `inert` (UI-EMPTY-001) and their own
+ * `<select>`s cannot be operated.
+ *
+ * The starting selection depends on the URL and fixture, so it is read from
+ * the picker rather than named. toggleModel() refuses to drop the last
+ * remaining model, so a starting model can only be removed once at least one
+ * target is selected: add the first target, drop everything that is not a
+ * target, then add the rest. Panels follow selection order, so `models[0]`
+ * is not necessarily the first panel when other targets were already on.
+ */
+export async function selectModelsViaPicker(page: Page, models: string[]) {
+  // STG-F008: specific models are picked from the full catalogue, which is the
+  // picker's second step.
+  await openModelPickerCatalogue(page);
+  const optionFor = (modelId: string) =>
+    page.locator(`[data-testid="model-option"][data-model-id="${modelId}"]`);
+  const select = async (modelId: string) => {
+    if ((await optionFor(modelId).getAttribute("aria-pressed")) !== "true") {
+      await optionFor(modelId).click();
+    }
+    // Settled before the starting selection is read below.
+    await expect(optionFor(modelId)).toHaveAttribute("aria-pressed", "true");
+  };
+  await select(models[0]);
+  const startedOn = await page
+    .locator('[data-testid="model-option"][aria-pressed="true"]')
+    .evaluateAll((options) => options.map((option) => option.getAttribute("data-model-id")));
+  for (const modelId of startedOn) {
+    if (modelId && !models.includes(modelId)) {
+      await optionFor(modelId).click();
+      await expect(optionFor(modelId)).toHaveAttribute("aria-pressed", "false");
+    }
+  }
+  for (const modelId of models.slice(1)) {
+    await select(modelId);
+  }
+  // Escape only steps back one level in the two-step picker, so close via the
+  // completion control -- the dialog's backdrop blocks the tools menu until it
+  // is actually dismissed.
+  await page.getByTestId("model-picker-done").click();
+  await expect(page.locator("#chat-input-popover")).toBeHidden();
 }
 
 /**

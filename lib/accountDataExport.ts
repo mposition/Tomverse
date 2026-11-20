@@ -16,6 +16,18 @@ import {
 } from "@/lib/accountDataExportDomains";
 import { prisma } from "@/lib/prisma";
 import { decryptOAuthToken } from "@/lib/oauthTokenCrypto";
+import { researchPreviewExportFields } from "@/lib/researchPreviewMetadata";
+
+export function toAccountExportMessage(message: {
+  role: string; content: string; modelId: string | null; createdAt: Date;
+  searchMetadata?: unknown;
+}) {
+  return {
+    role: message.role, content: message.content, modelId: message.modelId,
+    createdAt: message.createdAt,
+    ...researchPreviewExportFields(message.searchMetadata),
+  };
+}
 
 /**
  * Bumped whenever the shape of the file changes in a way a reader has to know
@@ -45,6 +57,8 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       createdAt: row.createdAt, updatedAt: row.updatedAt,
       grants: Array.isArray(row.grants) ? row.grants.map(g => ({
       name: (g as Record<string, unknown>)?.name, mode: (g as Record<string, unknown>)?.mode })) : [] })),
+  mcpCustomServer: userId => prisma.mcpCustomServer.findMany({ where: { userId },
+    select: { id: true, name: true, url: true, auth: true, createdAt: true }, take: EXPORT_ROW_CAP }),
   mcpInvocation: async userId => (await prisma.mcpInvocation.findMany({ where: { userId },
     select: { id: true, connectionId: true, toolName: true, state: true, argumentsCiphertext: true, expiresAt: true, createdAt: true }, take: EXPORT_ROW_CAP }))
     .map(row => ({ id: row.id, connectionId: row.connectionId, toolName: row.toolName,
@@ -88,8 +102,8 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       select: { analyticsUserId: true, createdAt: true },
     }),
 
-  conversation: (userId) =>
-    prisma.conversation.findMany({
+  conversation: async (userId) =>
+    (await prisma.conversation.findMany({
       where: { userId },
       select: {
         id: true,
@@ -107,13 +121,18 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         createdAt: true,
         updatedAt: true,
         messages: {
-          select: { role: true, content: true, modelId: true, createdAt: true },
+          select: { role: true, content: true, modelId: true, createdAt: true, searchMetadata: true },
           orderBy: { createdAt: "asc" },
         },
       },
       orderBy: { createdAt: "asc" },
       take: EXPORT_ROW_CAP,
-    }),
+    })).map((conversation) => ({
+      id: conversation.id, title: conversation.title, kind: conversation.kind,
+      productKey: conversation.productKey, pinnedAt: conversation.pinnedAt,
+      createdAt: conversation.createdAt, updatedAt: conversation.updatedAt,
+      messages: conversation.messages.map(toAccountExportMessage),
+    })),
 
   conversationProject: (userId) =>
     prisma.conversationProject.findMany({
@@ -298,6 +317,28 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         updatedAt: true,
       },
       orderBy: { updatedAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  researchPreviewRun: (userId) =>
+    prisma.researchPreviewRun.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        conversationId: true,
+        assistantMessageId: true,
+        modelId: true,
+        status: true,
+        stopReason: true,
+        stepCount: true,
+        searchCount: true,
+        readCount: true,
+        startedAt: true,
+        completedAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+      orderBy: { createdAt: "asc" },
       take: EXPORT_ROW_CAP,
     }),
 
@@ -971,6 +1012,9 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         status: true,
         failureCode: true,
         modelId: true,
+        canonicalSpec: true,
+        parentArtifactId: true,
+        lineageId: true,
         createdAt: true,
       },
       orderBy: { createdAt: "asc" },
@@ -994,6 +1038,10 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         mediaType: true,
         size: true,
         kind: true,
+        sourceArtifactId: true,
+        sourceLineageId: true,
+        sourceConversationId: true,
+        sourceCanonicalSpec: true,
         createdAt: true,
       },
       orderBy: { createdAt: "asc" },
@@ -1011,6 +1059,10 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         mediaType: true,
         size: true,
         kind: true,
+        sourceArtifactId: true,
+        sourceLineageId: true,
+        sourceConversationId: true,
+        sourceCanonicalSpec: true,
         boundAt: true,
         createdAt: true,
       },
@@ -1215,6 +1267,41 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         lastSeenAt: true,
         revokedAt: true,
         revokedReason: true,
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  externalApiKey: (userId) =>
+    prisma.externalApiKey.findMany({
+      where: { userId },
+      select: {
+        name: true,
+        keyPrefix: true,
+        creditCap: true,
+        createdAt: true,
+        lastUsedAt: true,
+        expiresAt: true,
+        revokedAt: true,
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  externalApiRequest: (userId) =>
+    prisma.externalApiRequest.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        modelId: true,
+        stream: true,
+        protocol: true,
+        clientName: true,
+        finishReason: true,
+        errorCode: true,
+        createdAt: true,
+        completedAt: true,
+        key: { select: { keyPrefix: true } },
       },
       orderBy: { createdAt: "asc" },
       take: EXPORT_ROW_CAP,

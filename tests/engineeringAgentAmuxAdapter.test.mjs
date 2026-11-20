@@ -4,16 +4,13 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
-  AMUX_ATTACHMENT_MAX_PRISMA_CALLS,
   AMUX_DB_BOUNDARIES,
   AMUX_DB_COMMIT_RESERVE_MS,
   AMUX_DB_IDLE_GAP_PLANNING_MS,
   AMUX_DB_MAX_WAIT_MS,
   AMUX_DB_STATEMENT_TIMEOUT_MS,
 } from "../lib/amux/dbBoundary.ts";
-import { isAmuxExecutionApiEnabled } from "../lib/amux/executionGate.ts";
 import {
-  ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH,
   ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
   ENGINEERING_AGENT_AMUX_WORKER,
   amuxSettlementForRunOutcome,
@@ -22,7 +19,6 @@ import {
   engineeringRunEndAttachment,
   engineeringRunHeartbeatAttachment,
   engineeringRunStartAttachment,
-  isEngineeringAgentAmuxAdapterOpen,
   mintEngineeringAgentRunId,
 } from "../lib/engineeringAgentAmuxAdapter.ts";
 import {
@@ -35,7 +31,8 @@ import {
   isRunId,
   parseSettingInstant,
 } from "../lib/engineeringAgentCore.ts";
-import { ENGINEERING_AGENT_PATCH_BODY_MAX_BYTES } from "../lib/engineeringAgentStore.ts";
+import { ENGINEERING_AGENT_LEGACY_INLINE_PATCH_MAX_BYTES,
+  ENGINEERING_AGENT_PATCH_CHUNK_BYTES } from "../lib/engineeringAgentStore.ts";
 import {
   ENGINEERING_AGENT_RESPONSE_MAX_BYTES,
   requireSendableResult,
@@ -45,18 +42,12 @@ import {
 // docs/policy/development-agent-orchestration.md, Authority, version 12) and
 // the round-5 review fixes that sit beside it.
 
-test("the latch ships on, and the adapter opens only with it, the execution API and a mode that is not off", () => {
-  assert.equal(ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH, true, "version 25 turns the latch on");
-  // With the latch on, the fast check is exactly the execution API gate.
-  assert.equal(isEngineeringAgentAmuxAdapterOpen(), isAmuxExecutionApiEnabled());
+test("the adapter opens for every mode except off", () => {
   for (const mode of ["shadow", "t1"]) {
-    assert.equal(engineeringAgentAmuxAdapterPermitted({ codeLatch: true, executionApiEnabled: true, mode }), true, mode);
-    assert.equal(engineeringAgentAmuxAdapterPermitted({ codeLatch: true, executionApiEnabled: false, mode }), false, mode);
-    assert.equal(engineeringAgentAmuxAdapterPermitted({ codeLatch: false, executionApiEnabled: true, mode }), false, mode);
+    assert.equal(engineeringAgentAmuxAdapterPermitted({ mode }), true, mode);
   }
-  // Authority: the writer path runs only when the latch and the operating mode
-  // are both open. Mode off closes every adapter call, not only a new run.
-  assert.equal(engineeringAgentAmuxAdapterPermitted({ codeLatch: true, executionApiEnabled: true, mode: "off" }), false);
+  // Mode off closes every adapter call, not only a new run.
+  assert.equal(engineeringAgentAmuxAdapterPermitted({ mode: "off" }), false);
 });
 
 test("every adapter operation checks the whole gate, mode included, before it touches AMUX", () => {
@@ -171,7 +162,7 @@ test("each attached writer fits the adapter routes' budget, as the AMUX routes' 
     engineeringRunEndAttachment({ runId: "1", outcome: "t2_draft", halt: "none" }),
     engineeringPublishResultAttachment({ workItemId: "x", fencingToken: 1n, outcome: "confirmed", pullRequest: null }),
   ]) {
-    assert.ok(attachment.prismaCalls <= AMUX_ATTACHMENT_MAX_PRISMA_CALLS);
+    assert.ok(Number.isSafeInteger(attachment.prismaCalls) && attachment.prismaCalls >= 1);
   }
 });
 
@@ -182,7 +173,6 @@ test("the adapter reaches only the AMUX writers version 12 allows it", () => {
     "dbBoundary",
     "delivery",
     "execution",
-    "executionGate",
     "reviewPullRequest",
     "store",
     // Orchestration policy version 35, section 3 names the adapter among the
@@ -199,27 +189,25 @@ test("the adapter reaches only the AMUX writers version 12 allows it", () => {
 });
 
 test("a run's halt is the runner's report combined with the app's, and a report of none lowers nothing", () => {
-  assert.equal(combineRunHalt({ reported: "none", circuitLatched: true, openStateMismatches: 0 }), "circuit_open");
-  assert.equal(combineRunHalt({ reported: "none", circuitLatched: false, openStateMismatches: 2 }), "state_mismatch");
-  assert.equal(combineRunHalt({ reported: "none", circuitLatched: false, openStateMismatches: 0 }), "none");
-  // The circuit and a mismatch are the app's readings, never a runner's report.
+  assert.equal(combineRunHalt({ reported: "none", openStateMismatches: 2 }), "state_mismatch");
+  assert.equal(combineRunHalt({ reported: "none", openStateMismatches: 0 }), "none");
+  // A mismatch is the app's reading, never a runner's report; nothing writes circuit_open.
   assert.deepEqual([...RUNNER_REPORTABLE_HALTS].sort(), ["config_missing", "none", "unbound_app_pr", "unbound_app_ref"]);
   const finish = readFileSync("app/api/internal/engineering-agent/run/finish/route.ts", "utf8");
   assert.match(finish, /halt: z\.enum\(RUNNER_REPORTABLE_HALTS\)/);
   for (const reported of RUNNER_REPORTABLE_HALTS) {
-    for (const circuitLatched of [false, true]) {
-      for (const openStateMismatches of [0, 1]) {
-        const halt = combineRunHalt({ reported, circuitLatched, openStateMismatches });
-        if (reported !== "none") assert.notEqual(halt, "none", `${reported} is never lowered`);
-        if (circuitLatched || openStateMismatches > 0) assert.notEqual(halt, "none");
-        // The result is a value decideHalt can give.
-        assert.ok(HALT_VALUES.includes(halt));
-      }
+    for (const openStateMismatches of [0, 1]) {
+      const halt = combineRunHalt({ reported, openStateMismatches });
+      if (reported !== "none") assert.notEqual(halt, "none", `${reported} is never lowered`);
+      if (openStateMismatches > 0) assert.notEqual(halt, "none");
+      assert.notEqual(halt, "circuit_open");
+      // The result is a value decideHalt can give.
+      assert.ok(HALT_VALUES.includes(halt));
     }
   }
   assert.equal(
-    combineRunHalt({ reported: "config_missing", circuitLatched: true, openStateMismatches: 1 }),
-    decideHalt({ appIdentityConfigured: false, circuitLatched: true, unboundAppPrs: 0, unboundAppRefs: 0, openStateMismatches: 1 }),
+    combineRunHalt({ reported: "config_missing", openStateMismatches: 1 }),
+    decideHalt({ appIdentityConfigured: false, unboundAppPrs: 0, unboundAppRefs: 0, openStateMismatches: 1 }),
   );
 });
 
@@ -232,10 +220,15 @@ test("a stored instant is exactly what toISOString writes, or no record", () => 
 });
 
 test("the response ceiling holds the widest claim, and a result that cannot be sent is refused before commit", () => {
-  // JSON writes each control character as six bytes.
-  const worstPatch = "\u0001".repeat(ENGINEERING_AGENT_PATCH_BODY_MAX_BYTES);
-  assert.equal(JSON.stringify(worstPatch).length, ENGINEERING_AGENT_PATCH_BODY_MAX_BYTES * 6 + 2);
-  assert.ok(ENGINEERING_AGENT_RESPONSE_MAX_BYTES >= ENGINEERING_AGENT_PATCH_BODY_MAX_BYTES * 6 + 16 * 1024);
+  // JSON writes each control character as six bytes. A claim carries a patch
+  // inline only up to the inline bound; a larger one is read in chunks.
+  const worstPatch = "\u0001".repeat(ENGINEERING_AGENT_LEGACY_INLINE_PATCH_MAX_BYTES);
+  assert.equal(JSON.stringify(worstPatch).length, ENGINEERING_AGENT_LEGACY_INLINE_PATCH_MAX_BYTES * 6 + 2);
+  assert.ok(ENGINEERING_AGENT_RESPONSE_MAX_BYTES >= ENGINEERING_AGENT_LEGACY_INLINE_PATCH_MAX_BYTES * 6 + 16 * 1024);
+  // One chunk answer: a full chunk in base64 and its envelope.
+  const chunk = { workItemId: "00000000-0000-4000-8000-000000000000", index: 0, totalBytes: 2 ** 30, chunkCount: 256,
+    bytesBase64: Buffer.alloc(ENGINEERING_AGENT_PATCH_CHUNK_BYTES).toString("base64") };
+  assert.doesNotThrow(() => requireSendableResult(chunk));
   const claim = {
     mode: "write",
     workItemId: "00000000-0000-4000-8000-000000000000",

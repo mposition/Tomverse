@@ -9,8 +9,7 @@ const secret = "v19_checkout_agent_secret_01234567890123456789";
 const ideaId = "ea86a25b-919f-4714-a3d8-45ef5a18b175";
 const evidenceId = "dc86a25b-919f-4714-a3d8-45ef5a18b175";
 const envNames = ["TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET",
-  "TOMVERSE_AMUX_SYNC_SECRET", "TOMVERSE_AMUX_V19_CHECKOUT_EVIDENCE_WRITE",
-  "TOMVERSE_AMUX_V19_CHECKOUT_EVIDENCE_READ"] as const;
+  "TOMVERSE_AMUX_SYNC_SECRET"] as const;
 const previousEnv = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
 let writes = 0;
 let reads = 0;
@@ -65,8 +64,6 @@ const reset = () => {
   unknownCommit = false; readFails = false;
   process.env.TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET = secret;
   delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
-  process.env.TOMVERSE_AMUX_V19_CHECKOUT_EVIDENCE_WRITE = "enabled";
-  process.env.TOMVERSE_AMUX_V19_CHECKOUT_EVIDENCE_READ = "enabled";
 };
 const body = { ideaId, referenceOrdinal: 0, pinnedCommitSha: "a".repeat(40),
   excludedCount: 2, excludedPathDigest: "b".repeat(64),
@@ -91,17 +88,7 @@ test("only the dedicated analysis agent can use the closed proof route", async (
   assert.equal((await route.GET(get(undefined, { "x-amux-agent-id": "other" }))).status, 401);
   process.env.TOMVERSE_AMUX_SYNC_SECRET = secret;
   assert.equal((await route.POST(post())).status, 401);
-  reset();
-  delete process.env.TOMVERSE_AMUX_V19_CHECKOUT_EVIDENCE_WRITE;
-  assert.equal((await route.POST(post())).status, 409);
   assert.equal(writes, 0);
-  assert.equal((await route.GET(get())).status, 404,
-    "readback remains available when writes stop");
-  delete process.env.TOMVERSE_AMUX_V19_CHECKOUT_EVIDENCE_READ;
-  process.env.TOMVERSE_AMUX_V19_CHECKOUT_EVIDENCE_WRITE = "enabled";
-  assert.equal((await route.POST(post())).status, 409,
-    "a write needs its readback gate too");
-  assert.equal((await route.GET(get())).status, 409);
 });
 
 test("malformed proof or lookup never touches the writer or readback", async () => {

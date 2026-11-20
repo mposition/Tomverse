@@ -29,7 +29,7 @@
  * would report that as tampering.
  */
 
-import { memoryRetrievalTerms } from "@/lib/memoryRetrievalTerms";
+import { buildMemoryQueryPlan } from "@/lib/memoryQueryPlan";
 import { FACTUAL_MEMORY_KINDS, STYLE_MEMORY_KINDS, memoryStatementKey } from "@/lib/memoryValidatorCore";
 
 /**
@@ -39,7 +39,24 @@ import { FACTUAL_MEMORY_KINDS, STYLE_MEMORY_KINDS, memoryStatementKey } from "@/
  * invalidate a context bundle, but it does not change a single stored term,
  * so folding the two together would force a pointless re-index of every row.
  */
-export const MEMORY_RETRIEVAL_ALGORITHM_VERSION = 2;
+export const MEMORY_RETRIEVAL_ALGORITHM_VERSION = 4;
+
+/**
+ * The version of a selection whose relevance came from an external reranker
+ * (docs/policy/external-conversation-import-and-memory.md §9a). A different number because the same memories are ordered
+ * differently, and the number is in the signature a context bundle binds.
+ */
+export const MEMORY_SEMANTIC_RETRIEVAL_ALGORITHM_VERSION = 5;
+
+/** Starting values, to be tuned against the retrieval eval. */
+export const MEMORY_SEMANTIC_DEFAULTS = {
+    /** A reranked memory below this relevance is not in the running. */
+    minRerankScore: 0.1,
+    /** One search unit's worth of statements. */
+    maxRerankCandidates: 100,
+    /** Reserve half a search unit for recent rows outside the lexical DB result. */
+    maxRecentExtraCandidates: 50,
+} as const;
 
 /**
  * Kinds that describe who the user is rather than what they were doing.
@@ -142,6 +159,16 @@ export type MemoryContextSelection = {
     signature: string;
 };
 
+/** Reject wholesale replacement of current-query matches by zero-overlap history hits. */
+export function contextualRankingDisplacesCurrentQuery(
+    lexical: MemoryContextSelection,
+    contextual: MemoryContextSelection
+): boolean {
+    const ranked = contextual.selected.filter(candidate => candidate.tier === "relevant");
+    return lexical.selected.some(candidate => candidate.tier === "relevant" && candidate.termHits > 0) &&
+        ranked.length > 0 && ranked.every(candidate => candidate.termHits === 0);
+}
+
 const utf8Bytes = (text: string) => new TextEncoder().encode(text).length;
 
 export function estimateMemoryTokens(statement: string): number {
@@ -192,6 +219,34 @@ const tierFor = (memory: RetrievableMemory): ScoredMemory["tier"] => {
     if (memory.pinned || CORE_KIND_SET.has(memory.kind)) return "core";
     return "relevant";
 };
+
+/**
+ * Which tier a memory is selected in. Exported so the service that asks an
+ * external model for relevance sends it exactly the memories this selector
+ * relevance-gates, and no core or style memory that it never would.
+ */
+export const memoryTier = tierFor;
+
+/** Preserve both pools inside one search unit; unused slots go to the other pool. */
+export function memoryRerankCandidates(input: {
+    lexical: readonly RetrievableMemory[];
+    extras: readonly RetrievableMemory[];
+    now: Date;
+}): RetrievableMemory[] {
+    const seen = new Set<string>();
+    const eligible = (rows: readonly RetrievableMemory[]) => rows.filter(memory => {
+        if (seen.has(memory.id)) return false;
+        seen.add(memory.id);
+        return memoryTier(memory) === "relevant" &&
+            !(memory.expiresAt && memory.expiresAt.getTime() <= input.now.getTime());
+    });
+    const lexical = eligible(input.lexical);
+    const extras = eligible(input.extras);
+    const max = MEMORY_SEMANTIC_DEFAULTS.maxRerankCandidates;
+    const extraSlots = Math.min(extras.length, MEMORY_SEMANTIC_DEFAULTS.maxRecentExtraCandidates);
+    const lexicalSlots = Math.min(lexical.length, max - extraSlots);
+    return [...lexical.slice(0, lexicalSlots), ...extras.slice(0, max - lexicalSlots)];
+}
 
 /** Compared at fixed precision so float noise cannot reorder two memories. */
 const rank = (score: number) => Math.round(score * 1e6);
@@ -256,11 +311,22 @@ export function selectMemoryContext(input: {
     /** False drops the style tier entirely (§8.1 style toggle). */
     styleEnabled?: boolean;
     budget?: Partial<MemoryContextBudget>;
+    /**
+     * Relevance in [0, 1] from an external reranker, by memory id (docs/policy/external-conversation-import-and-memory.md §9a).
+     *
+     * Only the "relevant" tier reads it: core and style memories are never
+     * relevance-gated, so nothing an outside model says can remove one. For a
+     * memory it covers, the score replaces term overlap both as the gate and
+     * as the relevance term; a memory it does not cover is judged lexically,
+     * as before. Passing a map at all moves the signature to the semantic
+     * version, even when the map is empty.
+     */
+    externalRelevance?: ReadonlyMap<string, number>;
 }): MemoryContextSelection {
     const budget = { ...MEMORY_CONTEXT_DEFAULTS, ...(input.budget ?? {}) };
     const queryTerms =
         typeof input.query === "string"
-            ? memoryRetrievalTerms(input.query)
+            ? buildMemoryQueryPlan(input.query).terms
             : input.query;
     const omitted: Record<OmissionReason, number> = {
         expired: 0,
@@ -279,6 +345,24 @@ export function selectMemoryContext(input: {
         }
         const candidate = scoreMemory(memory, queryTerms, input.now, budget);
         if (candidate.tier === "style" && input.styleEnabled === false) continue;
+        const external =
+            candidate.tier === "relevant"
+                ? input.externalRelevance?.get(memory.id)
+                : undefined;
+        if (external !== undefined) {
+            if (external < MEMORY_SEMANTIC_DEFAULTS.minRerankScore) {
+                omitted.below_relevance += 1;
+                continue;
+            }
+            scored.push({
+                ...candidate,
+                relevance: external,
+                // The same weights, with the reranker's relevance in place of
+                // term overlap.
+                score: candidate.score + 0.45 * (external - candidate.relevance),
+            });
+            continue;
+        }
         if (
             candidate.tier === "relevant" &&
             candidate.termHits < budget.minRelevantTermHits
@@ -361,7 +445,7 @@ export function selectMemoryContext(input: {
         tokens,
         omitted,
         signature: [
-            `v${MEMORY_RETRIEVAL_ALGORITHM_VERSION}`,
+            `v${input.externalRelevance ? MEMORY_SEMANTIC_RETRIEVAL_ALGORITHM_VERSION : MEMORY_RETRIEVAL_ALGORITHM_VERSION}`,
             ...selected.map(
                 (candidate) => `${candidate.memory.id}:${rank(candidate.score)}`
             ),

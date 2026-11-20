@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "migrationSqlSha256": "9daf8e6241b1e9bea2b7fb180aa1b3889b297877803745e4530a6d75ab1a2a53",
+  "replacedChecks": [
+    {
+      "table": "ModelRegistryEntry",
+      "constraint": "ModelRegistryEntry_provider_connection_allowlist_check",
+      "previousDefinitionSha256": "a2137ecd89c4e2d3c5d454463f081b8b8fa5afc18aefd343c845a9829cb8dc24"
+    }
+  ]
+}

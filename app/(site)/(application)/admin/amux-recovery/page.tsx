@@ -6,7 +6,6 @@ import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AmuxAnalysisClaimResolutionPanel } from "@/components/admin/AmuxAnalysisClaimResolutionPanel";
 import { AmuxBacklogMetadataPanel } from "@/components/admin/AmuxBacklogMetadataPanel";
 import { AmuxBoardAutoPromotionPanel } from "@/components/admin/AmuxBoardAutoPromotionPanel";
-import { AmuxBoardImportPanel } from "@/components/admin/AmuxBoardImportPanel";
 import { AmuxBoardPromotionPanel } from "@/components/admin/AmuxBoardPromotionPanel";
 import { AmuxBoardRecommendationPanel } from "@/components/admin/AmuxBoardRecommendationPanel";
 import { AmuxCardDisplayKeyBackfillPanel } from "@/components/admin/AmuxCardDisplayKeyBackfillPanel";
@@ -36,7 +35,6 @@ const TABS = adminNavItemTabs("amux-recovery");
 
 /** The retired tools, in the order their old pages listed them. */
 const LEGACY_SECTIONS = [
-  "import",
   "reconciliation",
   "metadata",
   "recommendation",
@@ -44,14 +42,17 @@ const LEGACY_SECTIONS = [
   "auto-promotion",
 ] as const;
 
+/** The retired tools that still have an environment switch (and so carry a chip). */
+const SWITCHED_LEGACY_SECTIONS = ["auto-promotion"] as const;
+
 /**
  * Safety & recovery: execution halts, unused reservations and claims, and the
  * AMUX tools the idea flow retired.
  *
  * Execution safety was a section of Operations settings and keeps its panel,
  * its role rules and its step-up return exactly as they were: every admin role
- * reads it, the owner alone clears a halt. Legacy tools gathers the Catalog
- * import, Source reconciliation and Card metadata screens (once Backlog tabs)
+ * reads it, the owner alone clears a halt. Legacy tools gathers the
+ * Source reconciliation and Card metadata screens (once Backlog tabs)
  * and the three Promotion screens (once their own page); each is the panel it
  * was, behind the same switch and the same owner check, so retiring
  * them from the menu neither deletes data nor grants execution.
@@ -78,7 +79,7 @@ export default async function AdminAmuxRecoveryPage({
     countOpenAmuxOrchestratorHalts().catch(() => null),
   ]);
   const isOwner = role === "owner";
-  const legacyStatuses = amuxSwitchedTabStatuses(LEGACY_SECTIONS);
+  const legacyStatuses = amuxSwitchedTabStatuses(SWITCHED_LEGACY_SECTIONS);
   const tabs = (
     <AdminPageTabs
       basePath="/admin/amux-recovery"
@@ -97,7 +98,6 @@ export default async function AdminAmuxRecoveryPage({
     if (!isOwner) notFound();
     const chips = amuxTabChips(legacyStatuses, m.status);
     const panels = {
-      import: <AmuxBoardImportPanel />,
       reconciliation: <AmuxReconciliationPanel />,
       metadata: <AmuxBacklogMetadataPanel />,
       recommendation: <AmuxBoardRecommendationPanel />,
@@ -134,10 +134,7 @@ export default async function AdminAmuxRecoveryPage({
     // Expiration of a transfer preview must not hide recovery of its paid
     // claim: the exact-ID GET/owner decision panel mounts on its own link. It
     // does not reconstruct a preview, reserve a budget or dispatch an analysis.
-    const holdId = amuxAnalysisClaimRecoveryHoldId(
-      query.analysisHoldId,
-      process.env.TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_RESOLUTION_READ
-    );
+    const holdId = amuxAnalysisClaimRecoveryHoldId(query.analysisHoldId);
     return (
       <div className="flex min-w-0 flex-col gap-5">
         {tabs}

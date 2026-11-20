@@ -6,7 +6,21 @@ import type { Session } from "next-auth";
 import { prisma } from "@/lib/prisma";
 import { commitAnalysisBudgetSetting, readAnalysisBudgetSnapshot } from "@/lib/amux/ideaAnalysisBudgetSettingStore";
 import { assessAmuxIdeaAnalysisBudget } from "@/lib/amux/ideaAnalysisBudgetCore";
-import { resolveRecentAuthMinutes } from "@/lib/adminReauthenticationCore";
+
+// Shortens the step-up window around one refusal. Under the default it equals
+// the 8-hour console session, so a sign-in old enough to fail step-up would
+// also end console access; only an override leaves the step-up refusal alone
+// to test, as marketing-competitor-routes does.
+const withStepUpWindow = async <T>(minutes: string, run: () => Promise<T>) => {
+  const previous = process.env.ADMIN_RECENT_AUTH_MINUTES;
+  process.env.ADMIN_RECENT_AUTH_MINUTES = minutes;
+  try {
+    return await run();
+  } finally {
+    if (previous === undefined) delete process.env.ADMIN_RECENT_AUTH_MINUTES;
+    else process.env.ADMIN_RECENT_AUTH_MINUTES = previous;
+  }
+};
 
 const testUrl = process.env.TEST_DATABASE_URL?.trim();
 const target = testUrl ? new URL(testUrl) : null;
@@ -84,13 +98,10 @@ test("a ceiling below committed costs, stale version, and malformed money produc
 test("non-owner and stale authentication cannot save the setting", async () => {
   const other = { ...session, user: { ...session.user, id: "synthetic-other", email: "other@example.test" } };
   await assert.rejects(prisma.$transaction((tx) => commitAnalysisBudgetSetting(tx, input({ session: other }))), /forbidden/);
-  // One minute past the step-up window this run uses, as in the v4 analysis
-  // budget suite (01f96228a). Exactly two hours sat on the boundary once #2362
-  // made two hours the default, so whether it read as stale depended on the
-  // millisecond -- and a save it let through broke the four tests after it.
-  const staleAgeMs = (resolveRecentAuthMinutes(process.env.ADMIN_RECENT_AUTH_MINUTES) + 1) * 60_000;
-  const stale = { ...session, user: { ...session.user, authenticatedAt: new Date(Date.now() - staleAgeMs).toISOString() } };
-  await assert.rejects(prisma.$transaction((tx) => commitAnalysisBudgetSetting(tx, input({ session: stale }))), /recent|authentication|reauth/i);
+  // Ten minutes old against a five-minute step-up window, well clear of the
+  // boundary: a save let through here would break the four tests after it.
+  const stale = { ...session, user: { ...session.user, authenticatedAt: new Date(Date.now() - 10 * 60_000).toISOString() } };
+  await withStepUpWindow("5", () => assert.rejects(prisma.$transaction((tx) => commitAnalysisBudgetSetting(tx, input({ session: stale }))), /recent|authentication|reauth/i));
 });
 
 test("the same request ID cannot append a duplicate and a stale second save cannot overwrite the first", async () => {

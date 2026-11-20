@@ -1,3 +1,4 @@
+import { parseContinuationReceipt, type ContinuationReceipt } from "./continuationReceipt";
 import {
   isChatCompletionStatus,
   type ChatCompletionStatus,
@@ -8,6 +9,7 @@ import {
   type ChatStreamArtifact,
 } from "@/lib/generatedArtifactCore";
 import type { ArtifactUnavailableNotice } from "@/lib/generatedArtifactToolPolicy";
+import { projectResearchSearchMetadata } from "@/lib/researchPreviewMetadata";
 
 // A provider-executed search tool call only resolves once the whole
 // streamText() turn settles (tool-result/source parts only exist in the
@@ -25,7 +27,10 @@ const NUL = String.fromCharCode(0);
 export const SEARCH_METADATA_TRAILER_MARKER = `${NUL}TOMVERSE_SEARCH_METADATA`;
 
 export function buildSearchMetadataTrailerChunk(execution: unknown): string {
-  return `${SEARCH_METADATA_TRAILER_MARKER}${JSON.stringify(execution)}`;
+  const projected = execution && typeof execution === "object" && "searchMetadata" in execution
+    ? { ...execution, searchMetadata: projectResearchSearchMetadata(execution.searchMetadata) }
+    : projectResearchSearchMetadata(execution);
+  return `${SEARCH_METADATA_TRAILER_MARKER}${JSON.stringify(projected)}`;
 }
 
 /**
@@ -35,6 +40,7 @@ export function buildSearchMetadataTrailerChunk(execution: unknown): string {
  */
 export type ChatStreamTrailer = {
   searchMetadata: unknown;
+  continuationReceipt?: ContinuationReceipt;
   completion?: {
     status: ChatCompletionStatus;
     incompleteReason?: ChatIncompleteReason;
@@ -53,7 +59,23 @@ export type ChatStreamTrailer = {
    */
   artifacts?: ChatStreamArtifact[];
   artifactUnavailable?: ArtifactUnavailableNotice;
+  fileGenerationRetry?: { modelId: string };
+  /**
+   * The signed error report token for a turn the server itself judged failed
+   * after the 200 stream had started (an empty answer, a stream that broke),
+   * and the server's own code for it
+   * (docs/policy/trace-feedback-automation.md section 3.3).
+   *
+   * Here because the response headers were sent before the failure existed.
+   * The client keeps it in memory for the one feedback submission it
+   * authenticates and nowhere else; it is never part of a stored message.
+   * Absent on every turn that completed or that the user stopped.
+   */
+  errorReport?: { token: string; code: string };
 };
+
+const ERROR_REPORT_TOKEN_MAX_LENGTH = 2_048;
+const ERROR_REPORT_CODE_PATTERN = /^[A-Za-z0-9_.-]{1,160}$/;
 
 export function buildChatStreamTrailerChunk(trailer: ChatStreamTrailer): string {
   return buildSearchMetadataTrailerChunk(trailer);
@@ -81,12 +103,15 @@ export function parseChatStreamTrailer(
   if (!parsed || typeof parsed !== "object") return null;
   const record = parsed as Record<string, unknown>;
   if (
+    !("continuationReceipt" in record) &&
     !("searchMetadata" in record) &&
     !("completion" in record) &&
     !("artifacts" in record) &&
-    !("artifactUnavailable" in record)
+    !("artifactUnavailable" in record) &&
+    !("fileGenerationRetry" in record) &&
+    !("errorReport" in record)
   ) {
-    return { searchMetadata: parsed };
+    return { searchMetadata: projectResearchSearchMetadata(parsed) };
   }
   const completion = record.completion;
   const completionRecord =
@@ -111,8 +136,32 @@ export function parseChatStreamTrailer(
             : {}),
         }
       : null;
+  const fileGenerationRetry = record.fileGenerationRetry;
+  const retryRecord =
+    fileGenerationRetry && typeof fileGenerationRetry === "object"
+      ? (fileGenerationRetry as Record<string, unknown>)
+      : null;
+  const errorReport = record.errorReport;
+  const errorReportRecord =
+    errorReport && typeof errorReport === "object"
+      ? (errorReport as Record<string, unknown>)
+      : null;
   return {
-    searchMetadata: record.searchMetadata ?? null,
+    ...(errorReportRecord &&
+    typeof errorReportRecord.token === "string" &&
+    errorReportRecord.token.length > 0 &&
+    errorReportRecord.token.length <= ERROR_REPORT_TOKEN_MAX_LENGTH &&
+    typeof errorReportRecord.code === "string" &&
+    ERROR_REPORT_CODE_PATTERN.test(errorReportRecord.code)
+      ? {
+          errorReport: {
+            token: errorReportRecord.token,
+            code: errorReportRecord.code,
+          },
+        }
+      : {}),
+    searchMetadata: projectResearchSearchMetadata(record.searchMetadata ?? null),
+    ...(parseContinuationReceipt(record.continuationReceipt) ? { continuationReceipt: parseContinuationReceipt(record.continuationReceipt) } : {}),
     ...(completionRecord && isChatCompletionStatus(completionRecord.status)
       ? {
           completion: {
@@ -125,6 +174,11 @@ export function parseChatStreamTrailer(
       : {}),
     ...(artifacts ? { artifacts } : {}),
     ...(artifactUnavailable ? { artifactUnavailable } : {}),
+    ...(retryRecord &&
+    typeof retryRecord.modelId === "string" &&
+    retryRecord.modelId.length > 0
+      ? { fileGenerationRetry: { modelId: retryRecord.modelId } }
+      : {}),
   };
 }
 

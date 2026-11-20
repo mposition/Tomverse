@@ -10,9 +10,12 @@
 
 import "server-only";
 
-import { createHash } from "node:crypto";
+import { ENGINEERING_AGENT_PR_APPROVER_IDS } from "./engineeringAgentPrApprovalCore.ts";
+import { PULL_DIFF_DIGEST_MAX_BYTES, pullDiffDigest, readMergedPullChangeDigest, readPullChangeDigest } from
+  "./pullDiffDigestCore.ts";
 
-import { checkListing, gitObjectId, type TreeEntry } from
+import { AMUX_V22_FILE_MAX_BYTES } from "@/lib/amux/v22PatchLimit";
+import { TREE_LIMITS, checkListing, gitObjectId, type TreeEntry } from
   "@/lib/engineeringAgentTreeVerify";
 
 /** One fixed repository. A caller supplies a commit id or a PR number, never a URL. */
@@ -20,9 +23,14 @@ const REPOSITORY = "mposition/Tomverse";
 const API_ORIGIN = "https://api.github.com";
 const API_VERSION = "2022-11-28";
 const TIMEOUT_MS = 8_000;
+/** A blob up to GitHub's file limit streams in about a minute even slowly. */
+const BLOB_TIMEOUT_MS = 90_000;
 const MAX_JSON_BYTES = 1024 * 1024;
-const MAX_TREE_JSON_BYTES = 5 * 1024 * 1024;
-const MAX_CHECK_RUNS = 100;
+/** GitHub lists at most 100,000 entries for one recursive tree (then says
+ * `truncated`); a listing that size is well under GitHub's file limit. */
+const MAX_TREE_JSON_BYTES = AMUX_V22_FILE_MAX_BYTES;
+/** GitHub's page size for a listing: the most it returns at once, not a limit on the whole. */
+const PER_PAGE = 100;
 const SHA = /^[0-9a-f]{40}$/;
 
 export const ENGINEERING_AGENT_GITHUB_READ_TOKEN_ENV = "ENGINEERING_AGENT_GITHUB_READ_TOKEN";
@@ -138,21 +146,40 @@ async function githubPage(
 const record = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 
+/**
+ * Every page of a listing, page 1, 2, ... until GitHub links no next page
+ * (owner decision 2026-11-16: until then a listing longer than one page of
+ * 100 was refused as `invalid_response`, so a commit with more check runs or a
+ * pull request with more reviews could never be judged). A linked next page
+ * after an empty one is not a listing.
+ */
+async function githubAllPages<T>(
+  path: string,
+  deps: { env: Readonly<Record<string, string | undefined>>; fetchImpl: FetchLike },
+  itemsOf: (body: unknown) => T[],
+): Promise<T[]> {
+  const all: T[] = [];
+  for (let page = 1; ; page += 1) {
+    const read = await githubPage(`${path}${path.includes("?") ? "&" : "?"}per_page=${PER_PAGE}&page=${page}`, deps);
+    const items = itemsOf(read.body);
+    if (items.length > PER_PAGE) throw new EngineeringAgentGitHubReadError("invalid_response");
+    all.push(...items);
+    if (!read.hasNext) return all;
+    if (items.length === 0) throw new EngineeringAgentGitHubReadError("invalid_response");
+  }
+}
+
 type Deps = { env?: Readonly<Record<string, string | undefined>>; fetchImpl?: FetchLike };
 const withDefaults = (deps: Deps) => ({ env: deps.env ?? process.env, fetchImpl: deps.fetchImpl ?? fetch });
 
 export type EngineeringAgentCheckRun = { id: number; name: string; conclusion: string | null };
 
-/**
- * Every check run of a commit, or a refusal: a page that is not the whole
- * list -- GitHub's own count says more, or a next page is linked -- is never
- * read as the whole.
- */
-const checkRunsOf = (page: { body: unknown; hasNext: boolean }): EngineeringAgentCheckRun[] => {
-  const body = record(page.body);
+/** One page of a commit's check runs, with GitHub's count of the whole list. */
+const checkRunsPage = (pageBody: unknown): Array<EngineeringAgentCheckRun & { totalCount: number }> => {
+  const body = record(pageBody);
   const runs = body?.check_runs;
-  if (!Array.isArray(runs) || runs.length > MAX_CHECK_RUNS) throw new EngineeringAgentGitHubReadError("invalid_response");
-  if (page.hasNext || body?.total_count !== runs.length) throw new EngineeringAgentGitHubReadError("invalid_response");
+  const totalCount = body?.total_count;
+  if (!Array.isArray(runs) || typeof totalCount !== "number") throw new EngineeringAgentGitHubReadError("invalid_response");
   return runs.map((run) => {
     const value = record(run);
     if (
@@ -163,12 +190,20 @@ const checkRunsOf = (page: { body: unknown; hasNext: boolean }): EngineeringAgen
     ) {
       throw new EngineeringAgentGitHubReadError("invalid_response");
     }
-    return { id: value.id, name: value.name, conclusion: value.conclusion as string | null };
+    return { id: value.id, name: value.name, conclusion: value.conclusion as string | null, totalCount };
   });
 };
 
-const checkRunsAt = (sha: string, resolved: { env: Readonly<Record<string, string | undefined>>; fetchImpl: FetchLike }) =>
-  githubPage(`/commits/${sha}/check-runs?per_page=${MAX_CHECK_RUNS}`, resolved).then(checkRunsOf);
+/**
+ * Every check run of a commit, over as many pages as GitHub links, or a
+ * refusal: a read whose runs do not add up to GitHub's own count -- a run
+ * added between pages, say -- is never read as the whole.
+ */
+const checkRunsAt = async (sha: string, resolved: { env: Readonly<Record<string, string | undefined>>; fetchImpl: FetchLike }) => {
+  const runs = await githubAllPages(`/commits/${sha}/check-runs`, resolved, checkRunsPage);
+  if (runs.some((run) => run.totalCount !== runs.length)) throw new EngineeringAgentGitHubReadError("invalid_response");
+  return runs.map(({ id, name, conclusion }): EngineeringAgentCheckRun => ({ id, name, conclusion }));
+};
 
 /** develop's head and its check runs (§2.2 S2). */
 export async function readEngineeringAgentDevelopChecks(
@@ -191,24 +226,44 @@ export async function readEngineeringAgentDevelopHead(deps: Deps = {}): Promise<
   return sha;
 }
 
-/** One content-addressed Git blob, never an arbitrary URL or branch path. */
+/**
+ * One content-addressed Git blob, never an arbitrary URL or branch path. It
+ * is read raw (`application/vnd.github.raw+json`) and streamed with its
+ * bound, so a large file costs its own size once rather than a base64 copy
+ * in JSON (until 2026-11-15 a 200 KiB default and a 2 MiB ceiling kept any
+ * larger file out of a candidate). GitHub serves blobs up to 100 MiB, its
+ * own file limit. The bytes must hash to the id asked for.
+ */
 export async function readEngineeringAgentGitBlob(oid: string,
-  deps: Deps = {}, maxBytes = 200 * 1024): Promise<Uint8Array> {
+  deps: Deps = {}, maxBytes = AMUX_V22_FILE_MAX_BYTES): Promise<Uint8Array> {
   if (!SHA.test(oid) || !Number.isSafeInteger(maxBytes) ||
-      maxBytes < 1 || maxBytes > 2 * 1024 * 1024)
+      maxBytes < 0 || maxBytes > AMUX_V22_FILE_MAX_BYTES)
     throw new EngineeringAgentGitHubReadError("invalid_input");
-  const blob = record(await githubJson(`/git/blobs/${oid}`,
-    withDefaults(deps), Math.min(MAX_TREE_JSON_BYTES,
-      4 * Math.ceil(maxBytes / 3) + 4_096)));
-  if (!blob || blob.sha !== oid || blob.encoding !== "base64" ||
-      typeof blob.content !== "string" ||
-      typeof blob.size !== "number" || blob.size > maxBytes ||
-      blob.size < 0)
-    throw new EngineeringAgentGitHubReadError("invalid_response");
-  const compact = blob.content.replace(/\n/g, "");
-  const bytes = Buffer.from(compact, "base64");
-  if (bytes.length !== blob.size || bytes.toString("base64") !== compact ||
-      gitObjectId("blob", bytes) !== oid) {
+  const resolved = withDefaults(deps);
+  const token = tokenFrom(resolved.env);
+  let response: Response;
+  try {
+    response = await resolved.fetchImpl(
+      `${API_ORIGIN}/repos/${REPOSITORY}/git/blobs/${oid}`, {
+        method: "GET",
+        redirect: "error",
+        cache: "no-store",
+        signal: AbortSignal.timeout(BLOB_TIMEOUT_MS),
+        headers: {
+          Accept: "application/vnd.github.raw+json",
+          Authorization: `Bearer ${token}`,
+          "X-GitHub-Api-Version": API_VERSION,
+        },
+      });
+  } catch {
+    throw new EngineeringAgentGitHubReadError("transport_error");
+  }
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new EngineeringAgentGitHubReadError("http_error");
+  }
+  const bytes = Buffer.from(await readBounded(response, maxBytes));
+  if (gitObjectId("blob", bytes) !== oid) {
     bytes.fill(0);
     throw new EngineeringAgentGitHubReadError("invalid_response");
   }
@@ -263,7 +318,7 @@ export async function readEngineeringAgentPinnedBaseTree(baseSha: string,
   const tree = record(await githubJson(`/git/trees/${rootTreeId}?recursive=1`,
     resolved, MAX_TREE_JSON_BYTES));
   if (!tree || tree.sha !== rootTreeId || tree.truncated !== false ||
-      !Array.isArray(tree.tree) || tree.tree.length > 20_000)
+      !Array.isArray(tree.tree) || tree.tree.length > TREE_LIMITS.maxEntries)
     throw new EngineeringAgentGitHubReadError("invalid_response");
   const base: TreeEntry[] = tree.tree.map((item: unknown) => {
     const entry = record(item);
@@ -298,9 +353,10 @@ export async function readEngineeringAgentPinnedBaseTree(baseSha: string,
 /* A published pull request, as the approval observer reads it (§9-10)        */
 /* ------------------------------------------------------------------------- */
 
-const MAX_REVIEWS = 100;
+// GitHub's own limit: a pull request lists at most 3,000 files.
 const MAX_PR_FILES = 3_000;
-const MAX_DIFF_BYTES = 1024 * 1024;
+/** A v1 digest was only ever taken of a diff this size; a larger one cannot match a v1 record. */
+const MAX_LEGACY_DIFF_BYTES = PULL_DIFF_DIGEST_MAX_BYTES;
 const PASSING_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
 const FAILING_CONCLUSIONS = new Set(["failure", "cancelled", "timed_out", "action_required", "stale", "startup_failure"]);
 
@@ -311,13 +367,21 @@ export type EngineeringAgentPullObservation = {
   mergeCommitSha: string | null;
   /** Who merged, as a kind only (§9-10: the merger is an observation, never an identity). */
   mergedByKind: "user" | "bot" | "app" | "unknown";
+  /**
+   * The merge was a person's own, by an account on the PR approver list
+   * (owner decision 2026-11-12: that merge stands as the approval). A yes or
+   * no only; the account is not kept.
+   */
+  mergedByApprover: boolean;
   baseRef: string;
   baseSha: string;
   headSha: string;
   reviews: Array<{ id: number; userId: number; login: string; state: string; commitId: string; submittedAt: Date }>;
   /** Every required check of the head, or null while one is pending or the list cannot be read whole. */
   requiredChecks: { allPassed: boolean } | null;
-  /** sha256 of the diff's own bytes, as the publisher binds it; null when it could not be read. */
+  /** The v2 change digest (lib/pullDiffDigestCore.ts), as the publisher binds it; null when it could not be read. */
+  changeDigest: string | null;
+  /** The v1 diff digest, read only for a v1 record (`legacyDiff`); null otherwise or when it could not be read. */
   diffDigest: string | null;
   /** Complete GitHub PR file names at the observed base/head, or unknown. */
   changedFiles?: string[] | null;
@@ -365,7 +429,30 @@ const instant = (value: unknown): Date | null => {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
-async function readPullDiffDigest(
+/** Which digests a read takes: the v1 diff only for a record bound before v2 (lib/pullDiffDigestCore.ts). */
+export type EngineeringAgentPullDigestOptions = { legacyDiff?: boolean };
+
+/**
+ * The v2 change digest of an open pull request against its base branch, or of
+ * a merged one against its merge commit's first parent; null when not read
+ * now. The compare answer lists the changed files with their patches, so it
+ * is read up to GitHub's own file limit, as developContains does.
+ */
+async function readChangeDigest(
+  input: { base: string; headSha: string } | { mergeCommitSha: string; headSha: string },
+  resolved: { env: Readonly<Record<string, string | undefined>>; fetchImpl: FetchLike },
+): Promise<string | null> {
+  const getJson = (path: string) => githubJson(path, resolved, MAX_TREE_JSON_BYTES);
+  try {
+    return ("mergeCommitSha" in input ? await readMergedPullChangeDigest(getJson, input) :
+      await readPullChangeDigest(getJson, input)).digest;
+  } catch {
+    return null;
+  }
+}
+
+/** The v1 diff digest, for comparing a record bound before v2 only. */
+async function readLegacyPullDiffDigest(
   prNumber: number,
   resolved: { env: Readonly<Record<string, string | undefined>>; fetchImpl: FetchLike },
 ): Promise<string | null> {
@@ -391,7 +478,7 @@ async function readPullDiffDigest(
     return null;
   }
   try {
-    return createHash("sha256").update(await readBounded(response, MAX_DIFF_BYTES)).digest("hex");
+    return pullDiffDigest(await readBounded(response, MAX_LEGACY_DIFF_BYTES));
   } catch {
     return null;
   }
@@ -457,6 +544,13 @@ function mergedByKindOf(
   return mergedBy?.type === "Bot" ? "bot" : mergedBy?.type === "User" ? "user" : "unknown";
 }
 
+/** A person on the PR approver list merged it themselves: not a bot, not through an app. */
+function mergedByApproverOf(pull: Record<string, unknown> | null, merged: boolean): boolean {
+  if (mergedByKindOf(pull, merged) !== "user") return false;
+  const id = record(pull?.merged_by)?.id;
+  return typeof id === "number" && ENGINEERING_AGENT_PR_APPROVER_IDS.includes(id);
+}
+
 /**
  * Whether the agent's own branch still exists. Read by prefix, so a deleted
  * branch is an empty list rather than a 404 that a transport fault could
@@ -494,14 +588,55 @@ export async function readEngineeringAgentPullMerge(
 }
 
 /**
+ * A pull request's change as it stands now: its base and head, its change
+ * digest as the publisher binds it (and the v1 diff digest for a record bound
+ * before v2), and its whole file list at that base and head (both sides of a
+ * rename). What a Decision Maker approval is checked against before the app
+ * marks the pull request ready (owner decision 2026-11-13). A digest or list
+ * that cannot be read whole is null.
+ */
+export async function readEngineeringAgentPullChange(
+  prNumber: number,
+  deps: Deps = {},
+  options: EngineeringAgentPullDigestOptions = {},
+): Promise<{ state: "open" | "closed"; baseRef: string; headRef: string; headSha: string;
+  changeDigest: string | null; diffDigest: string | null; changedFiles: string[] | null; crossRepository: boolean }> {
+  if (!Number.isSafeInteger(prNumber) || prNumber <= 0) throw new EngineeringAgentGitHubReadError("invalid_input");
+  const resolved = withDefaults(deps);
+  const pull = record(await githubJson(`/pulls/${prNumber}`, resolved));
+  const base = record(pull?.base);
+  const head = record(pull?.head);
+  const baseSha = typeof base?.sha === "string" ? base.sha.toLowerCase() : null;
+  const headSha = typeof head?.sha === "string" ? head.sha.toLowerCase() : null;
+  const state = pull?.state;
+  if (pull?.number !== prNumber || (state !== "open" && state !== "closed") ||
+      typeof base?.ref !== "string" || typeof head?.ref !== "string" ||
+      baseSha === null || !SHA.test(baseSha) || headSha === null || !SHA.test(headSha)) {
+    throw new EngineeringAgentGitHubReadError("invalid_response");
+  }
+  // A head in another repository -- a fork, or a repository that cannot be read -- is cross-repository.
+  const headRepo = record(head.repo)?.full_name;
+  const baseRepo = record(base.repo)?.full_name;
+  const crossRepository = typeof headRepo !== "string" || headRepo !== baseRepo;
+  return {
+    state, baseRef: base.ref, headRef: head.ref, headSha, crossRepository,
+    changeDigest: await readChangeDigest({ base: base.ref, headSha }, resolved),
+    diffDigest: options.legacyDiff === true ? await readLegacyPullDiffDigest(prNumber, resolved) : null,
+    changedFiles: await readPullFileNames(prNumber, { baseSha, headSha, changedFiles: pull.changed_files as number }, resolved),
+  };
+}
+
+/**
  * One published pull request with what the approval judgement needs: its
- * state and merge, its reviews, its head's required checks and its diff
- * digest. Reads only; a list that is not whole is a refusal, not a shorter
- * list, and a check still running leaves the checks undecided.
+ * state and merge, its reviews, its head's required checks and its change
+ * digest (merged: against the merge commit's first parent). Reads only; a
+ * list that is not whole is a refusal, not a shorter list, and a check still
+ * running leaves the checks undecided.
  */
 export async function readEngineeringAgentPullObservation(
   prNumber: number,
   deps: Deps = {},
+  options: EngineeringAgentPullDigestOptions = {},
 ): Promise<EngineeringAgentPullObservation> {
   if (!Number.isSafeInteger(prNumber) || prNumber <= 0) throw new EngineeringAgentGitHubReadError("invalid_input");
   const resolved = withDefaults(deps);
@@ -524,12 +659,12 @@ export async function readEngineeringAgentPullObservation(
   }
   const mergedByKind = mergedByKindOf(pull, merged);
 
-  const page = await githubPage(`/pulls/${prNumber}/reviews?per_page=${MAX_REVIEWS}`, resolved);
-  if (!Array.isArray(page.body) || page.hasNext || page.body.length > MAX_REVIEWS) {
-    throw new EngineeringAgentGitHubReadError("invalid_response");
-  }
+  const listed = await githubAllPages(`/pulls/${prNumber}/reviews`, resolved, (body) => {
+    if (!Array.isArray(body)) throw new EngineeringAgentGitHubReadError("invalid_response");
+    return body as unknown[];
+  });
   const reviews: EngineeringAgentPullObservation["reviews"] = [];
-  for (const entry of page.body) {
+  for (const entry of listed) {
     const review = record(entry);
     const user = record(review?.user);
     const submittedAt = instant(review?.submitted_at);
@@ -549,12 +684,15 @@ export async function readEngineeringAgentPullObservation(
     mergedAt,
     mergeCommitSha,
     mergedByKind,
+    mergedByApprover: mergedByApproverOf(pull, merged),
     baseRef: base.ref,
     baseSha,
     headSha,
     reviews,
     requiredChecks: await readRequiredChecks(headSha, resolved),
-    diffDigest: await readPullDiffDigest(prNumber, resolved),
+    changeDigest: await readChangeDigest(merged ? { mergeCommitSha: mergeCommitSha!, headSha } :
+      { base: base.ref, headSha }, resolved),
+    diffDigest: options.legacyDiff === true ? await readLegacyPullDiffDigest(prNumber, resolved) : null,
     changedFiles: merged ? await readPullFileNames(prNumber, {
       baseSha, headSha, changedFiles: pull.changed_files as number,
     }, resolved) : null,

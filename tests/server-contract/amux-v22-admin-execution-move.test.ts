@@ -4,9 +4,6 @@ import { pathToFileURL } from "node:url";
 import { mock, test } from "node:test";
 
 import { BoardImportError } from "../../lib/amux/boardImportCore.ts";
-import { AMUX_V22_GRADUATION_EXCEPTION_ENV,
-  AMUX_V22_GRADUATION_EXCEPTION_ID } from
-  "../../lib/amux/v22AutoPromotionCore.ts";
 
 const root = resolve(import.meta.dirname, "../..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
@@ -46,10 +43,7 @@ const reset = () => {
   world.costExceeded = false; world.lifecycleWrite = false; world.halts = [];
   audits.set("activation-audit", { action: "amux.v22.auto_promotion.activated",
     actorUserId: "owner-1", targetType: "AmuxV22PromotionControl",
-    targetId: "queue", entryHash: "activation-hash", metadata: {
-      graduationExceptionId: AMUX_V22_GRADUATION_EXCEPTION_ID,
-      graduationExceptionPolicyVersion: 30,
-    } });
+    targetId: "queue", entryHash: "activation-hash", metadata: {} });
   audits.set("score-audit", { action: "amux.v4.portfolio.score.confirm",
     targetId: scoreA, entryHash: "score-hash" });
   audits.set("score-b-audit", { action: "amux.v4.portfolio.score.confirm",
@@ -321,15 +315,4 @@ test("a lost success is read back and an unknown request is never rerun", async 
     "outcome_unknown");
 });
 
-const previousException = process.env[AMUX_V22_GRADUATION_EXCEPTION_ENV];
-process.env[AMUX_V22_GRADUATION_EXCEPTION_ENV] =
-  AMUX_V22_GRADUATION_EXCEPTION_ID;
-process.env.TOMVERSE_AMUX_V22_AUTO_PROMOTE = "enabled";
 process.env.TOMVERSE_AMUX_BOARD_AUTO_PROMOTE = "disabled";
-process.on("exit", () => {
-  if (previousException === undefined) {
-    delete process.env[AMUX_V22_GRADUATION_EXCEPTION_ENV];
-  } else {
-    process.env[AMUX_V22_GRADUATION_EXCEPTION_ENV] = previousException;
-  }
-});

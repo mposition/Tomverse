@@ -156,7 +156,7 @@ const post = (body: unknown) =>
 
 const stale = () => ({
   session: {
-    user: { id: "operator-1", authenticatedAt: new Date(Date.now() - 6 * 60 * 60_000).toISOString() },
+    user: { id: "operator-1", authenticatedAt: new Date(Date.now() - 9 * 60 * 60_000).toISOString() },
   },
 });
 
@@ -255,7 +255,7 @@ test("an unknown outcome says so, and every other failure says it was not record
   assert.equal(unknown.status, 503);
   assert.deepEqual(await unknown.json(), { error: "outcome_unknown" });
 
-  for (const code of ["AMUX_DB_DEADLINE_EXCEEDED", "AMUX_DB_NOT_STARTED", "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED"]) {
+  for (const code of ["AMUX_DB_DEADLINE_EXCEEDED", "AMUX_DB_NOT_STARTED"]) {
     reset({ boundaryError: new FakeBoundaryError(code) });
     const failed = await POST(post(valid));
     assert.equal(failed.status, 503, code);

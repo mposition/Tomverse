@@ -246,9 +246,9 @@ from `isGuestMode` at the point of render:
 
 | Capability | Guest | Signed-in |
 | --- | --- | --- |
-| `canAttachLocalFiles` | yes — one file per message | yes — up to 5 |
+| `canAttachLocalFiles` | yes — one file per message | yes — up to 10 (`CHAT_MAX_ATTACHMENTS_PER_MESSAGE`) |
 | `canConnectGoogleDrive` | no; the row states the reason and offers sign-in | yes |
-| `maxAttachmentBytes` | 5 MB | 10 MB |
+| `maxAttachmentBytes` | 5 MB | 50 MB (`CHAT_MAX_ATTACHMENT_BYTES`) |
 | `attachmentPersistence` | `ephemeral` | `account` |
 
 Requirements:
@@ -298,6 +298,12 @@ Requirements:
 | 195px (200% page zoom) | Contract still holds; the actions row wraps and the model button truncates rather than pushing Send outside the composer. |
 
 Landscape and keyboard-open viewports may compact the comparison rail, but not the composer's input row.
+
+The footer model button states the model count once. From 241px up to `md` its
+visible label ("3 AIs") carries the count, so the numeric badge is hidden there;
+at 240px and below the label is screen-reader-only and the badge is the count.
+At 320px and 390px with three models the whole label is visible inside a 44px
+button on the actions row (pinned in `tests/e2e/mobile-composer-contract.spec.ts`).
 
 ## Page zoom and short screens (COMPOSER-REFLOW-01)
 

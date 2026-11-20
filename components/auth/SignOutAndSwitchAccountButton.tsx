@@ -18,9 +18,18 @@ import { useState } from "react";
  * renders above the application layout that mounts one, and `signOut()` from
  * `next-auth/react` needs no context -- it fetches its own CSRF token.
  */
+const DEFAULT_LABELS = {
+  idle: "Sign out and use another account",
+  submitting: "Signing out…",
+  failed: "Could not end the current session. Please try again.",
+};
+
 export function SignOutAndSwitchAccountButton({
   signInHref,
+  labels = DEFAULT_LABELS,
 }: {
+  /** Localized by the caller, which knows the document language. */
+  labels?: { idle: string; submitting: string; failed: string };
   /**
    * Already normalized by `accountSwitchSignInHref`. It is an internal,
    * relative path, so this component never composes a URL from request input
@@ -47,7 +56,7 @@ export function SignOutAndSwitchAccountButton({
       window.location.assign(signInHref);
     } catch {
       setSubmitting(false);
-      setError("Could not end the current session. Please try again.");
+      setError(labels.failed);
     }
   };
 
@@ -67,7 +76,7 @@ export function SignOutAndSwitchAccountButton({
         ) : (
           <LogOut className="h-4 w-4" aria-hidden="true" />
         )}
-        {submitting ? "Signing out…" : "Sign out and use another account"}
+        {submitting ? labels.submitting : labels.idle}
       </button>
       {error ? (
         <p

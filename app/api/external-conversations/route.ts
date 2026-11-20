@@ -3,7 +3,7 @@ import {
     DISPLAY_TIME_ZONE_HEADER,
     effectiveDisplayTimeZone,
 } from "@/lib/continuationTitleContext";
-import { getServerSession } from "next-auth";
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import {
     apiSecurityResponse,
     consumeApiRateLimit,
@@ -13,7 +13,6 @@ import {
     ExternalImportDisabledError,
     isExternalContinuationEnabledCached,
 } from "@/lib/appSettings";
-import { authOptions } from "@/lib/auth";
 import { listExternalConversations } from "@/lib/externalImportService";
 
 const clampListParam = (
@@ -28,7 +27,9 @@ const clampListParam = (
 /** Finalized conversations for the account-private viewer (policy §21). */
 export async function GET(req: Request) {
     try {
-        const session = await getServerSession(authOptions);
+        const authentication = await resolveChatRouteSession(req);
+        if (authentication.response) return authentication.response;
+        const session = authentication.session;
         if (!session?.user) {
             return NextResponse.json({ error: "권한 없음" }, { status: 401 });
         }
@@ -52,6 +53,7 @@ export async function GET(req: Request) {
         // never a continuation created after a rollback.
         const continuationEnabled = await isExternalContinuationEnabledCached();
         const result = await listExternalConversations(session.user.id, {
+            importId: url.searchParams.get("importId") ?? undefined,
             offset: clampListParam(url.searchParams.get("offset"), {
                 fallback: 0,
                 max: 100_000,

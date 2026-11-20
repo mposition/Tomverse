@@ -13,7 +13,6 @@ import {
   AMUX_CATALOG_WORKER_NAME_PATTERN,
   AMUX_WORKER_CATALOG_EXEMPT,
   AMUX_WORKER_DESIRED_STATES,
-  AMUX_WORKER_LATCH_CONSECUTIVE_FAILURES,
   AMUX_WORKER_PROVIDER_CLASSES,
   AMUX_WORKER_PROVIDER_CLASS_TABLE,
   AMUX_WORKER_REGISTRY_AUDIT_ACTIONS,
@@ -22,12 +21,9 @@ import {
   AMUX_WORKER_ROLE_CEILINGS,
   AMUX_WORKER_TRIAL_CARD_COUNT,
   AMUX_WORKER_TRIAL_COST_CAP_MICRO_USD,
-  AMUX_WORKER_REGISTRY_WRITES_LATCH,
-  amuxWorkerRegistryWritesOpen,
   amuxWorkerSeedEntriesToRegister,
   buildAmuxWorkerRegistryAdminView,
   amuxWorkerEffectiveState,
-  amuxWorkerLatchOpen,
   amuxWorkerRegistrationFromRow,
   amuxWorkerRegistryAuditAction,
   amuxWorkerRegistryAuditMetadata,
@@ -56,8 +52,9 @@ const change = (workerName, desiredState, roleCeiling, expectedRevision, provide
   return parsed;
 };
 
-test("the class table is section 2's: two verified classes, two unverified at implementation", () => {
-  assert.deepEqual([...AMUX_WORKER_PROVIDER_CLASSES], ["claude", "codex", "cursor", "copilot"]);
+test("the class table is section 2's: two verified classes, three unverified at implementation", () => {
+  // Owner decision 2026-11-10 added antigravity.
+  assert.deepEqual([...AMUX_WORKER_PROVIDER_CLASSES], ["claude", "codex", "cursor", "copilot", "antigravity"]);
   assert.deepEqual([...AMUX_WORKER_ROLE_CEILINGS], ["chore", "implementation", "contract"]);
   assert.deepEqual(
     Object.fromEntries(Object.entries(AMUX_WORKER_PROVIDER_CLASS_TABLE).map(([name, row]) => [name, [row.verified, row.maxRole]])),
@@ -66,16 +63,17 @@ test("the class table is section 2's: two verified classes, two unverified at im
       codex: [true, "contract"],
       cursor: [false, "implementation"],
       copilot: [false, "implementation"],
+      antigravity: [false, "implementation"],
     },
   );
   assert.ok(Object.isFrozen(AMUX_WORKER_PROVIDER_CLASS_TABLE));
   assert.ok(Object.isFrozen(AMUX_WORKER_PROVIDER_CLASS_TABLE.cursor));
 });
 
-test("activation gate 2's values are the ones the operator approved", () => {
+test("activation gate 2's table bounds stay; its counted latch is the worker quarantine now", () => {
+  // Owner direction 2026-11-15: the counted latch is lib/amux/workerCircuitCore.ts.
   assert.equal(AMUX_WORKER_TRIAL_CARD_COUNT, 3);
   assert.equal(AMUX_WORKER_TRIAL_COST_CAP_MICRO_USD, 5_000_000);
-  assert.equal(AMUX_WORKER_LATCH_CONSECUTIVE_FAILURES, 3);
 });
 
 test("the name grammar is 1-40 lower-case letters, digits and hyphens, and says nothing of the CLI", () => {
@@ -248,10 +246,11 @@ test("a stored row maps back only when it is one the guard would have accepted",
   assert.deepEqual(amuxWorkerRegistrationFromRow({ ...row, providerClass: "codex" }), { ...row, providerClass: "codex", revision: 2 });
 });
 
-test("a latch is open when its newest event is an opening", () => {
-  assert.equal(amuxWorkerLatchOpen("opened"), true);
-  assert.equal(amuxWorkerLatchOpen("released"), false);
-  assert.equal(amuxWorkerLatchOpen(null), false);
+test("a recorded latch opening holds no worker", () => {
+  const active = registration("claude-impl", "active", "implementation");
+  for (const latchNewestKind of ["opened", "released", null])
+    assert.deepEqual(amuxWorkerEffectiveState({ registration: active, latchNewestKind,
+      latestObservationStatus: "ok" }), { assignable: true, reasons: [] });
 });
 
 test("a worker is assigned only when active, unlatched and last observed ok -- every failure is named", () => {
@@ -274,26 +273,13 @@ test("a worker is assigned only when active, unlatched and last observed ok -- e
       latchNewestKind: "opened",
       latestObservationStatus: "halted",
     }).reasons,
-    ["not_active", "latch_open", "observation_not_ok"],
+    ["not_active", "observation_not_ok"],
   );
   // Before R4 nothing records an observation, so nothing is assignable by the registry yet.
   assert.equal(
     amuxWorkerEffectiveState({ registration: active, latchNewestKind: null, latestObservationStatus: null }).assignable,
     false,
   );
-});
-
-test("version 32 turns R1's registry writes on, and the policy records it", () => {
-  // Version 31 section 8: R1 shipped latched off; version 32 is the operator's
-  // activation record. The latch and its record move together.
-  assert.equal(AMUX_WORKER_REGISTRY_WRITES_LATCH, true);
-  assert.equal(amuxWorkerRegistryWritesOpen(), true);
-  const policy = readFileSync(new URL("../docs/policy/development-agent-orchestration.md", import.meta.url), "utf8");
-  const normalized = policy.split(String.fromCharCode(13)).join("");
-  const heading = "## 버전 32 — worker 등록부 R1 코드 래치";
-  const record = "승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-12`";
-  assert.ok(normalized.includes([heading, "", record].join(String.fromCharCode(10))));
-  assert.ok(normalized.includes("`AMUX_WORKER_REGISTRY_WRITES_LATCH`(`lib/amux/workerRegistryCore.ts`)를 false로 둔 채 출고됐고, 이 버전이 그 래치를 true로 바꾼다"));
 });
 
 test("the Admin view shows desired and effective state apart, and offers only unregistered seed entries", () => {
@@ -305,8 +291,6 @@ test("the Admin view shows desired and effective state apart, and offers only un
     latches: new Map([["claude-impl", "opened"]]),
     observations: new Map([["claude-impl", "ok"]]),
   });
-  // Defaults to the code latch (true since version 32).
-  assert.equal(view.writesLatch, AMUX_WORKER_REGISTRY_WRITES_LATCH);
   assert.equal(view.registryReadable, true);
   assert.deepEqual(view.rows.map((row) => row.workerName), ["claude-impl", "cursor-impl"]);
   const claude = view.rows[0];
@@ -314,7 +298,7 @@ test("the Admin view shows desired and effective state apart, and offers only un
   assert.equal(claude.classMaxRole, "contract");
   assert.equal(claude.latch, "opened");
   assert.equal(claude.observation, "ok");
-  assert.deepEqual(claude.reasons, ["latch_open"]);
+  assert.deepEqual(claude.reasons, []);
   assert.equal(view.rows[1].verified, false);
   assert.deepEqual(view.rows[1].reasons, ["not_active", "no_observation"]);
   assert.equal("comparison" in view, false, "R1's comparison went with the catalog variable at R2e");
@@ -327,10 +311,8 @@ test("an unreadable registry offers nothing to register", () => {
     registrations: null,
     latches: new Map(),
     observations: new Map(),
-    writesLatch: true,
   });
   assert.deepEqual(view, {
-    writesLatch: true,
     registryReadable: false,
     rows: [],
     seed: null,

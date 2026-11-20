@@ -1,17 +1,6 @@
 /** Strict owner observations. No free text or user content enters the audit. */
 export const AMUX_V22_OUTCOME_ACTION = "amux.v22.task.outcome_observed";
 export const AMUX_V22_OUTCOME_TARGET = "AmuxWorkItem";
-export const AMUX_V22_OUTCOME_WRITE_CODE_LATCH = false;
-export const AMUX_V22_OUTCOME_WRITE_ENV = "TOMVERSE_AMUX_V22_OUTCOME_WRITE";
-export const amuxV22OutcomeWriteEnabled = (value: string | undefined) =>
-  AMUX_V22_OUTCOME_WRITE_CODE_LATCH && value === "enabled";
-
-export function classifyAmuxV22OutcomeError(code: string | undefined) {
-  if (code === "task_state_changed" || code === "owner_decision_missing")
-    return "stale" as const;
-  if (code === "request_id_conflict") return "conflict" as const;
-  return "unavailable" as const;
-}
 
 export type AmuxV22ObservationKind = "checks" | "independent_review" |
   "post_deploy_regression" | "user_outcome" | "estimate_revision";

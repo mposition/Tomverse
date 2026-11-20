@@ -52,6 +52,9 @@ const tx = {
     if (sql.includes("ORDER BY CASE WHEN lane")) return [{ id: taskId }];
     if (sql.includes("FROM \"AmuxWorkItem\" WHERE \"id\"") &&
         sql.includes("FOR UPDATE")) return [{ id: taskId }];
+    // readAmuxAttemptBudgetFacts (2026-11-15): the aggregate below, in one statement.
+    if (sql.includes('COUNT(*)::int AS "rows"'))
+      return [{ rows: 1, greatest: 1, infra: 0, reserved: BigInt("3400000") }];
     if (sql.includes("FROM \"AmuxExecutionAttempt\" a")) return [];
     if (sql.includes("FROM \"AmuxWorkerRuntime\"") && sql.includes("FOR UPDATE"))
       return [runtime(workerName, pinnedCapabilities)];
@@ -74,12 +77,15 @@ const tx = {
     runtime(worker.worker_name)) },
   amuxV22WorkerAssignment: {
     findMany: async () => [],
+    groupBy: async () => [],
     create: async () => { assignmentWrites += 1; },
   },
+  // No owner ceiling re-approval stands for this Task.
+  adminAuditLog: { findMany: async () => [] },
   amuxIdeaUnitDecision: { findUnique: async () => ({
     confirmationSnapshot: { card: { task: { costReceipt: receipt } } },
   }) },
-  amuxExecutionAttempt: { aggregate: async () => ({
+  amuxExecutionAttempt: { findMany: async () => [], aggregate: async () => ({
     _count: { _all: 1 }, _max: { attemptNumber: 1 },
     _sum: { reservedCostMicrousd: BigInt("3400000") },
   }) },
@@ -89,6 +95,7 @@ mock.module(mod("lib/prisma.ts"), { namedExports: {
   prisma: { $transaction: async (work: (client: unknown) => unknown) => work(tx) },
 } });
 mock.module(mod("lib/adminAudit.ts"), { namedExports: {
+  takeAuditChainLock: async () => {},
   writeSystemAuditLog: async (input: { metadata?: Record<string, unknown> }) => {
     assignedRoutePrice = input.metadata?.routePrice;
     return "assignment-audit";
@@ -127,6 +134,7 @@ mock.module(mod("lib/amux/v4TaskCostCatalogApprovalService.ts"), { namedExports:
 mock.module(mod("lib/amux/v4TaskCostCeilingCore.ts"), { namedExports: {
   checkV4TaskApprovedCeiling: () => ({ decision: "allow" }),
   v4TaskCeilingDecision: (check: { decision: string }) => check.decision,
+  v4TaskReceiptForApprovedRoutes: (_approved: unknown, current: unknown) => current,
 } });
 mock.module(mod("lib/amux/v22TaskRecoveryService.ts"), { namedExports: {
   readAmuxV22RecoveryAuthority: async () => recovery,
@@ -195,7 +203,6 @@ test("API gate and current frame fence claim before assignment mutation", async 
     routeId: "read-only-route", routePolicyDigest: "d".repeat(64),
     briefDigest: "b".repeat(64) };
   const env = {
-    TOMVERSE_AMUX_V22_WORKER_CLAIM: process.env.TOMVERSE_AMUX_V22_WORKER_CLAIM,
     TOMVERSE_AMUX_V22_READ_ONLY_API_EXECUTOR_ENABLED:
       process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_EXECUTOR_ENABLED,
     TOMVERSE_AMUX_V22_READ_ONLY_API_CREDENTIAL_PROFILE_ID:
@@ -207,7 +214,6 @@ test("API gate and current frame fence claim before assignment mutation", async 
     TOMVERSE_AMUX_V22_READ_ONLY_API_REPOSITORY_SCOPE_DIGEST:
       process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_REPOSITORY_SCOPE_DIGEST,
   };
-  process.env.TOMVERSE_AMUX_V22_WORKER_CLAIM = "enabled";
   process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_CREDENTIAL_PROFILE_ID =
     frame.credentialProfileId;
   process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_CREDENTIAL_METADATA_DIGEST =

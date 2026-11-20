@@ -187,6 +187,8 @@ export const ROUTER_SCORE_SNAPSHOT: readonly RouterScoreSnapshotEntry[] = [
 
     { modelId: "glm-5.2", providerId: "zhipu" },
 
+    { modelId: "command-a-plus", providerId: "cohere" },
+
     { modelId: "perplexity/sonar", providerId: "perplexity" },
     { modelId: "perplexity/sonar-pro", providerId: "perplexity" },
     { modelId: "perplexity/sonar-reasoning-pro", providerId: "perplexity" },

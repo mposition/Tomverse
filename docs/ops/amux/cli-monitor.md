@@ -77,7 +77,7 @@ node --import tsx scripts/amux-cli-monitor.mjs --check-source
 The default switch is off. Production merge/deployment remains a separate
 operator action; review must cover the finished security boundary before
 activation. For the single-worker pilot, configure the app and collector with
-`TOMVERSE_AMUX_CLI_MONITOR=1` and the same dedicated random secret (at least 32
+`TOMVERSE_AMUX_CLI_MONITOR=enabled` (the earlier `1` is read the same way) and the same dedicated random secret (at least 32
 characters) in `TOMVERSE_AMUX_CLI_MONITOR_SECRET`. On the collector only, set
 `TOMVERSE_INTERNAL_URL` to the app's HTTPS origin. Never paste secrets into chat.
 

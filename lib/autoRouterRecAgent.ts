@@ -15,14 +15,16 @@ import {
     actionableRecommendations,
     buildRecommendationInstruction,
     nextClaimableRecommendation,
+    optimizerCyclePath,
     recommendationResultDecision,
     recommendationStatusEntries,
-    reportFindings,
+    recommendationFindings,
     REC_AGENT_LEASE_MS,
     withRecommendationStatus,
     type RecommendationResultInput,
 } from "@/lib/autoRouterRecommendationsCore";
 import { prisma } from "@/lib/prisma";
+import { automaticDailyRetry, dailyRetryInstruction } from "@/lib/dailyProductAgentRetryCore";
 
 /**
  * The app side of the coding agent on the Ubuntu runner (tools/auto-rec-agent).
@@ -84,6 +86,14 @@ export async function claimNextRecommendation(input: {
     return prisma.$transaction(async (tx) => {
         await takeAuditChainLock(tx);
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${OPTIMIZER_LOCK}))`;
+        return claimRecommendationInTransaction(tx, input.origin, now);
+    });
+}
+
+/** Caller holds the audit and optimizer locks, also shared with the daily agent. */
+export async function claimRecommendationInTransaction(
+    tx: Prisma.TransactionClient, origin: string, now: Date, options: { automaticRetries?: boolean; coveredTaskIds?: ReadonlySet<string> } = {}
+): Promise<ClaimedRecommendation | null> {
         if (!(await readRecAgentEnabled(tx))) return null;
         const cycles = await tx.autoRouterOptimizerCycle.findMany({
             where: { status: { not: "running" } },
@@ -93,14 +103,22 @@ export async function claimNextRecommendation(input: {
         });
         const next = nextClaimableRecommendation(
             cycles.map((cycle) => ({ ...cycle, createdAt: cycle.createdAt.toISOString() })),
-            now.getTime()
-        );
+            now.getTime(), options.coveredTaskIds
+        ) ?? (options.automaticRetries ? [...cycles].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()).flatMap((cycle) => {
+            const entries = recommendationStatusEntries(cycle.summary);
+            return actionableRecommendations(cycle.summary, now.getTime()).filter((item) => item.kind === "code" &&
+                !options.coveredTaskIds?.has(recommendationId(cycle.id, item.index)) &&
+                automaticDailyRetry(entries.get(item.index), now.getTime(), true))
+                .map((item) => ({ ...item, cycleId: cycle.id, createdAt: cycle.createdAt.toISOString() }));
+        })[0] : null);
         if (!next) return null;
         const cycle = cycles.find((item) => item.id === next.cycleId);
         if (!cycle) return null;
 
         const leaseUntil = new Date(now.getTime() + REC_AGENT_LEASE_MS).toISOString();
         const claimId = randomUUID();
+        const prior = recommendationStatusEntries(cycle.summary).get(next.index);
+        const attempts = (prior?.attempts ?? (prior?.claimId ? 1 : 0)) + 1;
         await tx.autoRouterOptimizerCycle.update({
             where: { id: next.cycleId },
             data: {
@@ -110,6 +128,7 @@ export async function claimNextRecommendation(input: {
                     by: AGENT_BY,
                     leaseUntil,
                     claimId,
+                    attempts,
                 }) as Prisma.InputJsonObject,
             },
         });
@@ -118,26 +137,26 @@ export async function claimNextRecommendation(input: {
             targetId: next.cycleId,
             summary: "The coding agent took an Auto router optimizer code recommendation.",
             // Its place identifies it in the cycle; its text stays out of the chain.
-            metadata: { index: next.index, leaseUntil, claimId },
+            metadata: { index: next.index, leaseUntil, claimId, attempts,
+                ...(prior?.claimId ? { priorClaimId: prior.claimId, priorReason: prior.reason ?? "owner_retry" } : {}) },
         });
-        const findings = reportFindings(cycle.summary);
+        const findings = recommendationFindings(cycle.summary, next.index);
         return {
             id: recommendationId(next.cycleId, next.index),
             cycleId: next.cycleId,
             index: next.index,
             recommendation: next.text,
             findings,
-            instruction: buildRecommendationInstruction({
+            instruction: dailyRetryInstruction(attempts, prior?.reason) + buildRecommendationInstruction({
                 labels: adminAutoRouterOptimizerMessages.en.instruction,
                 recommendation: { kind: next.kind, text: next.text },
                 findings,
                 cycle: { id: next.cycleId, createdAt: next.createdAt },
-                link: `${input.origin}/admin/routing#optimizer-cycle-${next.cycleId}`,
+                link: `${origin}${optimizerCyclePath(next.cycleId)}`,
             }),
             leaseUntil,
             claimId,
         };
-    });
 }
 
 /**
@@ -179,6 +198,7 @@ export async function recordRecommendationResult(input: {
                     at: now.toISOString(),
                     by: AGENT_BY,
                     claimId: input.result.claimId,
+                    attempts: recommendationStatusEntries(cycle.summary).get(input.index)?.attempts ?? 1,
                     ...(input.result.outcome === "pr_opened"
                         ? { prUrl: input.result.prUrl }
                         : { reason: input.result.reason }),

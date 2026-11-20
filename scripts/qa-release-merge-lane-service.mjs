@@ -40,7 +40,9 @@ const httpWith = (timeoutMs) => async (request) => {
     redirect: "error",
     signal: AbortSignal.timeout(timeoutMs),
   });
-  return { status: response.status, text: await response.text() };
+  // The body's own bytes beside its text: a pull request's diff is digested over them.
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  return { status: response.status, text: new TextDecoder().decode(bytes), bytes };
 };
 
 const env = process.env;
@@ -58,6 +60,7 @@ const result = await runQaReleaseMergeLaneRound(
     app: createQaReleaseMergeLaneAppPorts({ http: httpWith(APP_TIMEOUT_MS), env }),
     github: createQaReleaseGithubPorts({ http: readHttp, token }),
     railway: createQaReleaseRailwayPorts({ http: readHttp, token: env.QA_RELEASE_MERGE_LANE_RAILWAY_TOKEN ?? "" }),
+    clock: Date.now,
   },
   { verdicts: (list) => { verdicts = list; } },
 );

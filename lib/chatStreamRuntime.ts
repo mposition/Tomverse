@@ -119,6 +119,8 @@ export type ChatRuntimeLastPrompt = {
    * claim credit or contact a provider.
    */
   sourceUserMessageId: string;
+  /** Coordinates only, so an in-tab retry re-reads the authorised original. */
+  sourcePassages?: string;
   /**
    * The one-shot web-search mode this send carried, when it carried one.
    *

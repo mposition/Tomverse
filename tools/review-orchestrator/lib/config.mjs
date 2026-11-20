@@ -5,19 +5,27 @@ import { STATUS_REPORT_SECRET_ENV } from "./status-report.mjs";
 
 const DEFAULT_CONFIG_PATH = "/etc/review-orchestrator/config.json";
 
+// Internal development flow (owner decisions 2026-11-15 and 2026-11-16): generous
+// bounds, no queue length cap, and a review that fails or times out is tried
+// again by another reviewer, not ended as unknown. The only size bounds left
+// protect this host: disk for a pushed change, memory for a reviewer's answer.
+const GIB = 1024 * 1024 * 1024;
+
 const DEFAULTS = {
-  timeoutSeconds: 2400,
+  timeoutSeconds: 7200,
   waitMaxSeconds: 540,
-  maxBundleBytes: 50 * 1024 * 1024,
-  maxPromptDiffBytes: 300 * 1024,
+  // One generous value for what a change may weigh on disk (the bundle on the
+  // wire, then its objects after decompression: a small bundle can carry a blob
+  // that inflates to gigabytes in the worktree). Not a model limit: the
+  // reviewer reads the diff from its checkout, not from the prompt.
+  maxBundleBytes: GIB,
+  maxChangeBytes: GIB,
+  // A reviewer's answer is held in memory. No model writes this much (output
+  // token caps are well under 1 MiB of text), so past it the CLI is running
+  // away and the review goes to another vendor.
   maxOutputBytes: 8 * 1024 * 1024,
   maxStderrBytes: 1024 * 1024,
-  // Bytes of objects the change introduces, after decompression: a small
-  // bundle can carry a blob that inflates to gigabytes in the worktree.
-  maxChangeBytes: 200 * 1024 * 1024,
-  // Jobs with any review not yet done. A forced-command key cannot queue more.
-  maxPendingJobs: 20,
-  retentionDays: 30,
+  retentionDays: 365,
   // A base must be in the history of one of these protected branches: the
   // reviewer's instruction files come from the base, so a base the submitter
   // pushed to any other branch could carry instructions of its own.
@@ -85,7 +93,7 @@ export function validateConfig(raw) {
   ) {
     errors.push("trustedBaseRefs: one or more refs/heads/<branch>");
   }
-  for (const key of ["maxChangeBytes", "maxPendingJobs", "maxStderrBytes", "retentionDays"]) {
+  for (const key of ["maxChangeBytes", "maxStderrBytes", "retentionDays"]) {
     if (!(Number.isInteger(config[key]) && config[key] > 0)) errors.push(`${key}: positive integer`);
   }
   if (config.statusSnapshot !== undefined) {
@@ -126,8 +134,26 @@ export function validateConfig(raw) {
     if (provider.priority !== undefined && !(Number.isInteger(provider.priority) && provider.priority >= 0)) {
       errors.push(`${label}: priority must be a non-negative integer`);
     }
-    if (provider.quotaProbe !== undefined && !["amux", "claude", "codex", "cursor", "copilot", "manual"].includes(provider.quotaProbe)) {
-      errors.push(`${label}: quotaProbe must be amux, claude, codex, cursor, copilot or manual`);
+    if (provider.quotaProbe !== undefined && !["amux", "claude", "codex", "cursor", "copilot", "antigravity", "manual"].includes(provider.quotaProbe)) {
+      errors.push(`${label}: quotaProbe must be amux, claude, codex, cursor, copilot, antigravity or manual`);
+    }
+    // Spending prepaid credit is the operator's switch, and only Codex reports it.
+    if (provider.useCredits !== undefined && (provider.useCredits !== true && provider.useCredits !== false ||
+        !["amux", "codex"].includes(provider.quotaProbe))) {
+      errors.push(`${label}: useCredits is true or false, with quotaProbe amux or codex`);
+    }
+    if (provider.quotaGroups !== undefined && (provider.quotaProbe !== "antigravity" ||
+        !Array.isArray(provider.quotaGroups) || provider.quotaGroups.length === 0 || provider.quotaGroups.length > 8 ||
+        provider.quotaGroups.some((name) => typeof name !== "string" || name.trim() === "" || name.length > 100))) {
+      errors.push(`${label}: quotaGroups names 1-8 agy usage groups, with quotaProbe antigravity`);
+    }
+    if (provider.io !== undefined && provider.io !== "antigravity-stream-json") {
+      errors.push(`${label}: io must be antigravity-stream-json`);
+    }
+    // agy reads the prompt as an event on stdin; a prompt file would go unread.
+    if (provider.io !== undefined && Array.isArray(provider.args) &&
+        provider.args.some((arg) => arg.includes("{promptFile}") || arg.includes("{promptDir}"))) {
+      errors.push(`${label}: io providers take the prompt on stdin, not {promptFile}`);
     }
     if (provider.quotaProbe === "amux" && !amuxUsageEndpoint(config.amuxUsageUrl)) {
       errors.push(`${label}: quotaProbe amux needs amuxUsageUrl, an http(s) URL on this machine`);

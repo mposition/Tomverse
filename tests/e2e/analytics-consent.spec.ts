@@ -69,9 +69,8 @@ test("English consent scopes excluded content to product analytics", async ({ pa
     await expect(notice).toContainText("Prompts, responses, filenames, and file contents are never included.", { useInnerText: true });
   }
   const accept = notice.getByRole("button", { name: "Allow analytics", exact: true });
-  // The comparison guide uses the readable notice on phones too
-  // (b34166509), which shows the full label.
-  await expect(accept).toHaveText("Allow analytics", { useInnerText: true });
+  // The bottom bar shows the full label wherever it has the width for it.
+  if (!isMobile) await expect(accept).toHaveText("Allow analytics", { useInnerText: true });
   expect(events).toBe(0);
   await accept.click();
   await expect(notice).toBeHidden();
@@ -97,8 +96,7 @@ test("Korean consent identifies the collected statistics and their purpose", asy
   await expect(notice).toContainText("개선합니다");
   const accept = notice.getByRole("button", { name: "사용 통계 허용", exact: true });
   await expect(accept).toBeVisible();
-  // /plugins renders the readable (full-label) notice at every width.
-  await expect(accept).toHaveText("사용 통계 허용", { useInnerText: true });
+  if (!isMobile) await expect(accept).toHaveText("사용 통계 허용", { useInnerText: true });
   expect(events).toBe(0);
   await accept.click();
   await expect(notice).toBeHidden();
@@ -133,15 +131,15 @@ test("mobile analytics consent stays compact with one-row actions", async ({
     name: "Privacy-safe product analytics",
   });
   await expect(banner).toBeVisible();
-  // Home shows the full consent body (2b85de037).
+  // A phone gets the short sentence plus the privacy-policy link; the full
+  // body is for a desktop-width bar.
   await expect(banner).toContainText(
-    "Prompts, responses, filenames, and file contents are never included."
+    "Usage analytics excludes prompts and file content.",
+    { useInnerText: true }
   );
 
   const decline = banner.getByRole("button", { name: "Decline" });
   const accept = banner.getByRole("button", { name: "Allow analytics" });
-  // Home uses the readable notice (#3558), which shows the full label.
-  await expect(accept).toHaveText("Allow analytics", { useInnerText: true });
   const [bannerBox, declineBox, acceptBox] = await Promise.all([
     banner.boundingBox(),
     decline.boundingBox(),
@@ -151,9 +149,8 @@ test("mobile analytics consent stays compact with one-row actions", async ({
   expect(bannerBox).not.toBeNull();
   expect(declineBox).not.toBeNull();
   expect(acceptBox).not.toBeNull();
-  // Home's readable notice (#3558, #3597) puts the actions on their own row,
-  // and shows the full body (2b85de037): about 177px at 320px.
-  expect(bannerBox!.height).toBeLessThanOrEqual(200);
+  // The bottom bar puts the actions on their own row under the sentence.
+  expect(bannerBox!.height).toBeLessThanOrEqual(96);
   expect(Math.abs(declineBox!.y - acceptBox!.y)).toBeLessThanOrEqual(1);
   expect(declineBox!.x + declineBox!.width).toBeLessThan(acceptBox!.x);
 

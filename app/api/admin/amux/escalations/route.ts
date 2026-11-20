@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
-import { writeAdminAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { assertRecentAdminAuthentication, isAdminReauthenticationError } from "@/lib/adminReauthentication";
 import {
   apiSecurityResponse,
@@ -126,6 +126,8 @@ export async function PATCH(request: Request) {
       // to acknowledge an escalation. The enabled path uses the canonical
       // internal review boundary instead.
       const updated = await prisma.$transaction(async (tx) => {
+        // Audit chain before the escalation row (lib/adminAudit.ts).
+        await takeAuditChainLock(tx);
         const changed = await tx.amuxHumanEscalation.updateMany({
           where: { id: body.escalation_id, status: "open" },
           data: {

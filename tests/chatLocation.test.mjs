@@ -257,3 +257,51 @@ test("stopping a turn cancels its location wait immediately without cancelling a
   assert.equal((await otherPanel).latitude, -27.47);
   assert.equal(session.isEnabled("account:a"), true);
 });
+
+
+test("preparing location overlaps other work without requesting permission and is reusable only in its generation", async () => {
+  for (const invalidation of ["none", "identity", "disable"]) {
+    let resolveDecision; let reads = 0; let decisions = 0;
+    const session = createChatLocationSession(async () => { reads++; return fix(); });
+    session.setIdentity("account:a");
+    const preparing = session.prepareIntent("account:a", "question", () => {
+      decisions++;
+      return new Promise(resolve => { resolveDecision = resolve; });
+    });
+    await Promise.resolve();
+    assert.equal(decisions, 1);
+    assert.equal(reads, 0, "semantic preparation cannot acquire a location");
+    if (invalidation === "identity") {
+      session.setIdentity("account:b"); session.setIdentity("account:a");
+    } else if (invalidation === "disable") session.disable();
+    resolveDecision(true);
+    const prepared = await preparing;
+    assert.equal(reads, 0);
+    assert.equal(prepared.read("account:b", "question"), null);
+    assert.equal(prepared.read("account:a", "different question"), null);
+    assert.equal(prepared.read("account:a", "question"), invalidation === "none" ? true : null);
+    if (invalidation === "none") {
+      const location = await session.readForTurn("account:a", undefined, {
+        turnId: "saved-message", requiresLocation: async () => prepared.read("account:a", "question"),
+      });
+      assert.ok(session.canShare(location, "account:a"));
+      assert.equal(reads, 1);
+      assert.equal(decisions, 1);
+    }
+  }
+});
+
+test("location preparation skips granted, suppressed and mismatched scopes and consumes errors", async () => {
+  const session = createChatLocationSession(async () => fix());
+  session.setIdentity("account:a");
+  let calls = 0;
+  const decide = async () => { calls++; throw Error("transport"); };
+  const failed = await session.prepareIntent("account:a", "question", decide);
+  assert.equal(failed.read("account:a", "question"), null);
+  assert.equal(await session.prepareIntent("account:b", "question", decide), undefined);
+  session.disable();
+  assert.equal(await session.prepareIntent("account:a", "question", decide), undefined);
+  await session.enable("account:a");
+  assert.equal(await session.prepareIntent("account:a", "question", decide), undefined);
+  assert.equal(calls, 1);
+});

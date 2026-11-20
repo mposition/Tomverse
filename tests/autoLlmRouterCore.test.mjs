@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { autoQualityCostCases } from "./fixtures/autoQualityCostCases.mjs";
 
-import { AVAILABLE_MODELS } from "../lib/models.ts";
+import { AVAILABLE_MODELS, DEFAULT_MODEL_ID, getModelUsageCredits } from "../lib/models.ts";
 import {
+  AUTO_LLM_ROUTER_CREDITS_RULE,
+  AUTO_LLM_ROUTER_SYSTEM,
   AUTO_LLM_ROUTER_MAX_CONTEXT_CHARS,
   AUTO_LLM_ROUTER_MAX_PROMPT_CHARS,
   AUTO_LLM_ROUTER_MAX_REASON_CHARS,
@@ -12,6 +15,8 @@ import {
   autoLlmRouterOutputSchema,
   autoLlmRouterSession,
   autoLlmRouterUserMessage,
+  boundedRouterInput,
+  boundedRouterText,
   parseAutoLlmRouterOutput,
   previousAnswerExcerpt,
   resolveAutoLlmRouterModel,
@@ -23,6 +28,40 @@ const candidates = autoLlmRouterCandidates(ids, AVAILABLE_MODELS, {
   "gpt-5-6-luna": 1,
   "deepseek-v4-flash": 1,
 }, { isAuthenticated: true, canPersist: true, webSearchRequested: false });
+
+for (const item of autoQualityCostCases) {
+  test(`bounded input preserves constraints: ${item.id} (input contract only)`, () => {
+    const bounded = boundedRouterInput(item.prompt, item.previousAnswer);
+    const message = JSON.parse(autoLlmRouterUserMessage(item.prompt, item.previousAnswer, candidates));
+    assert.equal(message.message, bounded.message);
+    assert.ok(message.message.includes(item.constraint));
+    assert.ok(message.message.length <= AUTO_LLM_ROUTER_MAX_PROMPT_CHARS);
+    if (item.prompt.length <= AUTO_LLM_ROUTER_MAX_PROMPT_CHARS) assert.equal(message.message, item.prompt);
+    else {
+      assert.ok(message.message.startsWith(item.prompt.slice(0, 20)));
+      assert.ok(message.message.endsWith(item.prompt.slice(-50)));
+      assert.ok(message.message.includes("[... middle omitted ...]"));
+    }
+    if (item.previousAnswer) {
+      assert.equal(message.previousAnswer, bounded.previousAnswer);
+      assert.ok(message.previousAnswer.length <= 600);
+      assert.ok(message.previousAnswer.endsWith(item.previousAnswer.slice(-20)));
+      assert.equal(previousAnswerExcerpt([{ role: "assistant", content: item.previousAnswer }, { role: "user", content: item.prompt }]), bounded.previousAnswer);
+    }
+    assert.equal(autoLlmRouterUserMessage(bounded.message, bounded.previousAnswer, candidates),
+      autoLlmRouterUserMessage(item.prompt, item.previousAnswer, candidates));
+  });
+}
+
+test("bounded excerpts never split surrogate pairs and remain idempotent", () => {
+  for (const cap of [600, 4000]) for (const offset of [0, 1, 2]) {
+    const value = "x".repeat(offset) + "😀".repeat(3000);
+    const bounded = boundedRouterText(value, cap);
+    assert.ok(bounded.length <= cap);
+    assert.ok(bounded.isWellFormed());
+    assert.equal(boundedRouterText(bounded, cap), bounded);
+  }
+});
 
 test("router diagnostics keep only bounded metadata, never provider or model content", () => {
   const secret = "private prompt, response body and credential";
@@ -63,6 +102,13 @@ test("candidates carry what the choice needs, in the eligible order", () => {
   assert.equal(candidates[0].contextWindowTokens, luna.contextWindowTokens ?? null);
   // An unknown credit price is null, not zero: zero would read as free.
   assert.equal(candidates[2].credits, null);
+  // The fixed price level does not move with this turn's estimate.
+  const searching = autoLlmRouterCandidates(["gpt-5-6-luna"], AVAILABLE_MODELS, { "gpt-5-6-luna": 9 });
+  assert.equal(searching[0].credits, 9);
+  assert.equal(searching[0].baseCredits, candidates[0].baseCredits);
+  assert.equal(candidates[0].baseCredits, getModelUsageCredits(luna));
+  assert.equal(typeof candidates[2].baseCredits, "number");
+  assert.ok(AUTO_LLM_ROUTER_SYSTEM.includes(AUTO_LLM_ROUTER_CREDITS_RULE));
   assert.deepEqual(
     autoLlmRouterCandidates(["no-such-model"], AVAILABLE_MODELS, {}),
     []
@@ -152,6 +198,29 @@ test("the previous answer is the assistant reply the latest prompt follows", () 
   assert.equal(long.length, AUTO_LLM_ROUTER_MAX_CONTEXT_CHARS);
 });
 
+test("the compact search menu preserves each model, capability, price and turn field", () => {
+  const menu = candidates.map((row, i) => ({ ...row, bestFor: i === 0 ? '"columns":[],한글' : row.bestFor,
+    credits: i === 0 ? 0 : null, futureCapability: i !== 0 }));
+  // A differently ordered object must still be read by column name.
+  menu[1] = Object.fromEntries(Object.entries(menu[1]).reverse());
+  const session = { topic: "saved topic", recentPicks: [{ modelId: menu[0].id, taskKind: "research" }] };
+  const inputs = ["today's Brisbane weather", "Voyager 1 and 2 UTC launch dates"];
+  for (const prompt of inputs) {
+    const full = autoLlmRouterUserMessage(prompt, "prior answer", menu, session);
+    const compact = autoLlmRouterUserMessage(prompt, "prior answer", menu, session, true);
+    const decoded = JSON.parse(compact);
+    const { columns, rows } = decoded.candidates;
+    decoded.candidates = rows.map(row => Object.fromEntries(columns.map((key, i) => [key, row[i]])));
+    assert.deepEqual(decoded, JSON.parse(full));
+    assert.ok(Buffer.byteLength(compact) < Buffer.byteLength(full));
+  }
+  for (const last of [{ ...menu[1], futureCapability: undefined }, { ...menu[1], extra: "turn-specific" }]) {
+    const heterogeneous = [menu[0], last];
+    assert.equal(autoLlmRouterUserMessage(inputs[0], null, heterogeneous, null, true),
+      autoLlmRouterUserMessage(inputs[0], null, heterogeneous));
+  }
+});
+
 test("session memory is the latest topic and recent picks of this conversation", () => {
   assert.equal(autoLlmRouterSession([]), null);
   // Newest first, as the reader orders them.
@@ -209,7 +278,8 @@ test("file intent preserves the actual router pick for capability enforcement an
 test("ordinary inline answers can still select a model without file tools", () => {
   const result = parseAutoLlmRouterOutput({ modelId: "deepseek-v4-flash", requiresFileGeneration: false }, candidates);
   assert.equal(result.modelId, "deepseek-v4-flash");
-  assert.equal(result.requiresFileGeneration, undefined);
+  assert.equal(result.requiresFileGeneration, false);
+  assert.equal(parseAutoLlmRouterOutput({ modelId: "deepseek-v4-flash" }, candidates).requiresFileGeneration, undefined);
 });
 
 test("optimizer replay recovers legacy capabilities but preserves a recorded refusal", () => {
@@ -240,6 +310,12 @@ test("candidate file capability follows authentication, persistence and the actu
   assert.equal(searching[0].canCreateFiles, true);
   const research = AVAILABLE_MODELS.find(m => m.usageClass === "deep-research");
   assert.equal(autoLlmRouterCandidates([research.id], AVAILABLE_MODELS, {}, context)[0].canCreateFiles, false);
+});
+
+test("the default model can create files", () => {
+  const context = { isAuthenticated: true, canPersist: true, webSearchRequested: false };
+  const candidate = autoLlmRouterCandidates([DEFAULT_MODEL_ID], AVAILABLE_MODELS, {}, context)[0];
+  assert.equal(candidate.canCreateFiles, true);
 });
 
 test("a rewrite is kept only when asked for, bounded and different", async () => {
@@ -303,6 +379,24 @@ test("the router asks an OpenAI model for low reasoning effort and leaves others
   assert.ok(AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS > AUTO_LLM_ROUTER_TIMEOUT_MS);
 });
 
+test("the router's reasoning effort is low unless the operator lowers it to a listed value", async () => {
+  const { autoLlmRouterReasoningEffort, autoLlmRouterProviderOptions } = await import("../lib/autoLlmRouterCore.ts");
+  assert.equal(autoLlmRouterReasoningEffort(undefined), "low");
+  assert.equal(autoLlmRouterReasoningEffort("none"), "none");
+  assert.equal(autoLlmRouterReasoningEffort(" Minimal "), "minimal");
+  // Never raised, and nothing outside the list is sent.
+  for (const raw of ["high", "medium", "xhigh", "fast"]) assert.equal(autoLlmRouterReasoningEffort(raw), "low", raw);
+  const saved = process.env.AUTO_LLM_ROUTER_REASONING_EFFORT;
+  process.env.AUTO_LLM_ROUTER_REASONING_EFFORT = "none";
+  try {
+    assert.deepEqual(autoLlmRouterProviderOptions("openai"), { openai: { strictJsonSchema: true, reasoningEffort: "none" } });
+    assert.deepEqual(autoLlmRouterProviderOptions("anthropic"), { openai: { strictJsonSchema: true } });
+  } finally {
+    if (saved === undefined) delete process.env.AUTO_LLM_ROUTER_REASONING_EFFORT;
+    else process.env.AUTO_LLM_ROUTER_REASONING_EFFORT = saved;
+  }
+});
+
 test("a router call's worst case bounds input by bytes and output by its token cap", async () => {
   const { autoLlmRouterWorstCaseMicroUsd } = await import("../lib/autoLlmRouterCore.ts");
   // 3 + 6 UTF-8 bytes ("abc" + two Hangul syllables), 200 output tokens.
@@ -333,4 +427,18 @@ test("a model billed per request beyond tokens is never the router", async () =>
   assert.equal(resolveAutoLlmRouterModel([{ ...sonar, enabled: true }], sonar.id), null);
   const tokenOnly = AVAILABLE_MODELS.find((model) => model.provider === "openai");
   assert.equal(autoLlmRouterModelAllowed(tokenOnly), true);
+});
+
+test("the router output cap leaves room for the kept reason and topic in any script plus reasoning", async () => {
+  const core = await import("../lib/autoLlmRouterCore.ts");
+  // 200 cut the router off mid-reason on follow-up turns; the cap now covers
+  // the kept reason and topic at a token per character, with room to spare.
+  assert.ok(core.AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS >= core.AUTO_LLM_ROUTER_MAX_REASON_CHARS + core.AUTO_LLM_ROUTER_MAX_TOPIC_CHARS + 128);
+  assert.equal(core.AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS, 8_192, "the shared routing-call ceiling");
+  // The worst-case hold grows with it, so the provider budget still bounds the call.
+  const hold = core.autoLlmRouterWorstCaseMicroUsd({
+    system: "", prompt: "", maxOutputTokens: core.AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS,
+    inputUsdPerMillionTokens: 0.1, outputUsdPerMillionTokens: 0.5,
+  });
+  assert.equal(hold, Math.ceil(8_192 * 0.5));
 });

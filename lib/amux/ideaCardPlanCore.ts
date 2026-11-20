@@ -6,11 +6,9 @@ import { amuxV22TaskWritesPatch } from "./v22WorkerClaimCore.ts";
 /** One approval commits at most this many cards; a larger plan takes more
  * rounds, each a dependency-closed prefix of the ordered plan. */
 export const AMUX_V4_CARD_PLAN_MAX_UNITS = 24;
-/** The most proposed cards one idea may hold for a plan approval at all. */
-export const AMUX_V4_CARD_PLAN_MAX_PROPOSED = 200;
 
 export class AmuxV4CardPlanError extends Error {
-  constructor(readonly code: "nothing_to_approve" | "too_many_units" | "feature_unresolved" |
+  constructor(readonly code: "nothing_to_approve" | "feature_unresolved" |
     "dependency_cycle" | "reason_invalid", readonly draftUnitIds: string[] = []) {
     super(code);
     this.name = "AmuxV4CardPlanError";

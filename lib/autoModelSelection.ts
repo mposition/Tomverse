@@ -403,16 +403,58 @@ export const selectAutoModel = (input: AutoSelectionInput): AutoSelection => {
 export const applyLlmModelPick = (
   selection: AutoSelection,
   pickedModelId: string | null,
-  files?: { required: boolean; capableModelIds: readonly string[] }
+  files?: { required: boolean; capableModelIds: readonly string[] },
+  /**
+   * The model to answer with when the router was asked and failed (timed out,
+   * errored, answered nothing usable): the turn's requested model, normally
+   * the default. The rule's own choice is the cheapest fit for what the rule
+   * can see, which is not a file request or an attached image -- a failed
+   * router is exactly the turn where nobody looked (2026-11-13: a two-photo
+   * PDF request answered by a model with no file tools). Only an eligible
+   * model; the reason stays `fallback_order`.
+   */
+  routerFailedModelId?: string | null,
+  offeredModelIds?: readonly string[]
 ): AutoSelection => {
   if (!selection.routed) return selection;
+  if (
+    !pickedModelId &&
+    routerFailedModelId &&
+    routerFailedModelId !== selection.modelId &&
+    selection.record.eligibleModelIds.includes(routerFailedModelId)
+  ) {
+    return {
+      ...selection,
+      modelId: routerFailedModelId,
+      sticky: { modelId: routerFailedModelId, turnsFavouringChallenger: 0 },
+      stickyMemoryModelId: undefined,
+      fallbackCandidateModelIds: [
+        selection.modelId,
+        ...selection.fallbackCandidateModelIds,
+      ].filter((id) => id !== routerFailedModelId),
+      record: {
+        ...selection.record,
+        selectedModelId: routerFailedModelId,
+        selectionReason: "fallback_order",
+        selectionDecidedBy: null,
+        allocationMode: "deterministic",
+        allocationSeedGrain: null,
+      },
+    };
+  }
   const ranked = [...new Set([
     selection.modelId, ...selection.fallbackCandidateModelIds,
     ...(files?.required ? selection.record.eligibleModelIds : []),
   ])];
-  const eligible = files?.required
-    ? selection.record.eligibleModelIds.filter(id => files.capableModelIds.includes(id))
-    : selection.record.eligibleModelIds;
+  const offered = selection.record.eligibleModelIds.filter(id => !offeredModelIds || offeredModelIds.includes(id));
+  const capable = files?.required
+    ? offered.filter(id => files.capableModelIds.includes(id))
+    : offered;
+  // The current router preserves file intent even when tools are unavailable.
+  // Keep its offered model for the existing refusal, with no file failover.
+  const fileUnavailable = files?.required && capable.length === 0 && offeredModelIds !== undefined &&
+    pickedModelId !== null && offered.includes(pickedModelId);
+  const eligible = fileUnavailable ? offered : capable;
   const chosen = pickedModelId && eligible.includes(pickedModelId)
     ? pickedModelId
     : files?.required ? ranked.find(id => eligible.includes(id)) : null;
@@ -423,12 +465,12 @@ export const applyLlmModelPick = (
     modelId: chosen,
     sticky: keepDecision ? selection.sticky : { modelId: chosen, turnsFavouringChallenger: 0 },
     stickyMemoryModelId: keepDecision ? selection.stickyMemoryModelId : undefined,
-    fallbackCandidateModelIds: ranked.filter(id => id !== chosen && eligible.includes(id)),
+    fallbackCandidateModelIds: fileUnavailable ? [] : ranked.filter(id => id !== chosen && eligible.includes(id)),
     record: {
       ...selection.record,
       selectedModelId: chosen,
       eligibleModelIds: eligible,
-      rejections: files?.required ? [
+      rejections: files?.required && !fileUnavailable ? [
         ...selection.record.rejections,
         ...selection.record.eligibleModelIds.filter(id => !eligible.includes(id))
           .map(modelId => ({ modelId, reason: "file_generation_unsupported" as const })),
@@ -440,6 +482,31 @@ export const applyLlmModelPick = (
       allocationSeedGrain: keepDecision ? selection.record.allocationSeedGrain : null,
     },
   };
+};
+
+/**
+ * Find the first distinct, verified file generation candidate after an
+ * answer that was classified as requiring file generation.
+ *
+ * This is only a routing recommendation. The send path remains responsible
+ * for deciding permission and credits.
+ */
+export const fileGenerationRetryModelId = ({
+  requiresFileGeneration,
+  answeredModelId,
+  fileCapableCandidates,
+}: {
+  requiresFileGeneration: boolean;
+  answeredModelId: string;
+  fileCapableCandidates: readonly { id: string; tier: string }[];
+}): string | null => {
+  if (!requiresFileGeneration) return null;
+  // Already the candidates the catalogue marks file-capable (the route filters
+  // on `canCreateFiles`, which reads each row's tick); only deep research is
+  // dropped again here.
+  const candidates = fileCapableCandidates.filter(candidate => candidate.tier !== "deep-research");
+  if (candidates.some(candidate => candidate.id === answeredModelId)) return null;
+  return candidates.find(candidate => candidate.id !== answeredModelId)?.id ?? null;
 };
 
 /**

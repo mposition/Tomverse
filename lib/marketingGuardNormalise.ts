@@ -120,7 +120,11 @@ const URL_LIKE = new RegExp(
     `\\b\\d{1,3}(?:[.${codePoint(0xff0e)}${codePoint(0x3002)}]\\d{1,3}){3}\\b`,
     "\\[\\s*\\.\\s*\\]",
     "\\(\\s*(?:dot|점|点)\\s*\\)",
-    "\\s(?:dot|점|点)\\s\\p{L}{2,}",
+    // A spelled-out dot before a Latin suffix: "example dot com", "example 점 com".
+    // Latin only after it: 점 ("point") and 点 are everyday words, and "느낀 점
+    // 순서로" or "좋은 점 많아요" is a sentence, not a host (a Korean film's own
+    // screen text was refused on it, run 20261113-2).
+    "\\s(?:dot|점|点)\\s[a-z]{2,24}(?![\\p{L}\\p{N}])",
   ].join("|"),
   "iu",
 );

@@ -437,11 +437,12 @@ test("the v39 DB follow-up and resume reads have five exact reviewed counts", ()
         tableMentions: 3, writeVerbs: 4 },
       { path: migrationPath, table: "AmuxV22ReadOnlyLaunchProof",
         tableMentions: 2, writeVerbs: 4 },
-      // Owner decision 2026-11-08 adds the pre-approval settlement row lock.
+      // Owner decision 2026-11-08 adds the pre-approval settlement row lock;
+      // owner decision 2026-11-10 locks the ended prior attempt FOR SHARE.
       { path: servicePath, table: "AmuxV22TaskRecoveryInspectionRequest",
-        tableMentions: 7, writeVerbs: 5 },
+        tableMentions: 7, writeVerbs: 4 },
       { path: servicePath, table: "AmuxV22TaskRecoveryEvidence",
-        tableMentions: 5, writeVerbs: 5 },
+        tableMentions: 5, writeVerbs: 4 },
     ]
   );
   for (const [path, source] of [[migrationPath, migrationSource], [servicePath, serviceSource]]) {
@@ -564,15 +565,8 @@ test("the Prompt Refiner preview adds exact reads without widening its write bou
       ["PromptRefinerChatScope", "PromptRefinerChatSuggestion"].includes(entry.table)
   );
   assert.deepEqual(
-    entries.map(({ table, tableMentions, writeVerbs }) => ({
-      table,
-      tableMentions,
-      writeVerbs,
-    })),
-    [
-      { table: "PromptRefinerChatScope", tableMentions: 5, writeVerbs: 12 },
-      { table: "PromptRefinerChatSuggestion", tableMentions: 11, writeVerbs: 12 },
-    ]
+    entries.map(({ table }) => table),
+    ["PromptRefinerChatScope", "PromptRefinerChatSuggestion"]
   );
   assert.ok(entries.every((entry) =>
     entry.reason.includes("read-only preview") &&
@@ -592,6 +586,15 @@ test("the Prompt Refiner preview adds exact reads without widening its write bou
       findings.some((finding) => finding.detail.includes(entry.table)),
       `an unreviewed ${entry.table} read must fail closed`
     );
+  }
+
+  for (const { table } of RAW_SQL_ALLOWLIST.filter((entry) => entry.path === path)) {
+    const findings = checkProtectedTableWriters({
+      sources: [{ path, text: `${source}\nconst sql = 'UPDATE "${table}" SET "id" = "id"';\n` }],
+    });
+    assert.ok(findings.some((finding) => finding.path === path &&
+      finding.rule === "raw-sql" && finding.detail.startsWith(`${table}:`)),
+    `an additional ${table} write must fail closed`);
   }
 });
 

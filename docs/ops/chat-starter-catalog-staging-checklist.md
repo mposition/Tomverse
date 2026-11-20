@@ -88,8 +88,12 @@ AGENTS.md의 "사람에게 남기는 것은 사람만 할 수 있는 것뿐입�
 추론하지 않습니다:
 
 ```
-npm run report:starter-catalog-expectations -- --image=<on|off> --voice=<on|off> --brave=<on|off>
+npm run report:starter-catalog-expectations -- --surface=<chat|review> --image=<on|off> --voice=<on|off> --image-triage=<on|off> --brave=<on|off>
 ```
+
+`/chat`과 `/review`는 서로 다른 카드를 보이므로 화면마다 따로 실행합니다(기본값
+`chat`). `--image-triage`는 Admin › Routing의 이미지 Triage 상태이며 Chat의
+`make-an-image` 카드만 이 값에 달려 있습니다.
 
 앱과 같은 순수 함수를 부르므로 이 표와 화면이 어긋나면 둘 중 하나가 결함이고,
 그것이 이 검증이 찾는 것입니다.
@@ -107,7 +111,8 @@ npm run report:starter-catalog-expectations -- --image=<on|off> --voice=<on|off>
       가리키는 release candidate를 배포합니다(`npm run promote:test`).
 - [ ] 그 SHA가 `4f300e21`(PR #1433 merge) 이후임
 - [ ] Admin → 플랫폼 설정에서 **이미지 생성**과 **음성 입력** flag의 현재
-      값을 읽어 적음. 이 둘이 정답지의 입력입니다.
+      값, Admin › Routing의 **이미지 Triage** 상태를 읽어 적음. 이 셋이 정답지의
+      입력입니다.
 - [ ] 위 값으로 `report:starter-catalog-expectations`를 실행해 정답지를 손에 쥠
 - [ ] 로그인 계정 1개(플랜을 적음) + 비로그인 세션 1개
 - [ ] 실기기 1대 이상(E 구획을 할 경우)
@@ -134,9 +139,12 @@ flag와 kill switch는 서로 다른 스위치입니다.
 - [ ] **B-1** 화면의 카드 집합이 정답지의 "on screen" 목록과 **정확히** 일치
       (개수·순서·id).
 - [ ] **B-2** 정답지의 "Must NOT appear"에 있는 카드가 화면에 **하나도 없음**.
-- [ ] **B-3** 특히: 이미지 생성 flag가 꺼져 있다면 `compare-image-models` 카드가
-      **부재**(잠김 아님). 음성 입력 flag가 꺼져 있다면 `speak-a-question`이
-      **부재**.
+- [ ] **B-3** 특히: 이미지 생성 flag가 꺼져 있다면 Review의 `compare-image-models`와
+      Chat의 `make-an-image` 카드가 **부재**(잠김 아님). Chat의 `make-an-image`는
+      Admin 이미지 Triage가 꺼져 있어도 **부재**. 음성 입력 flag가 꺼져 있다면
+      `speak-a-question`이 **부재**.
+- [ ] **B-4** `/chat`에는 `compare-answers` · `translate-and-compare` ·
+      `compare-image-models`가 **없음**(여러 모델 비교는 Review 카드).
 
 어긋나는 것이 하나라도 있으면 **그 자리에서 추론해 화해시키지 않습니다.** 무엇이
 보였고 무엇이 없었는지를 그대로 적는 것이 관측입니다.
@@ -158,8 +166,9 @@ flag와 kill switch는 서로 다른 스위치입니다.
 - [ ] **D-1** 비로그인 상태에서 잠긴 카드가 **보이고**, 요구사항이 카드 위에
       적혀 있음(클릭 후가 아님).
 - [ ] **D-2** 그 카드를 클릭하면 로그인으로 감. 초안은 채워지지 않음.
-- [ ] **D-3** (이미지 flag가 켜져 있고 Free 계정일 때) `compare-image-models`가
-      **잠김으로 보이고** 요금제를 말하며, 클릭하면 `/pricing`으로 감.
+- [ ] **D-3** (이미지 flag가 켜져 있을 때) 비로그인 `/review`에서
+      `compare-image-models`가 **잠김으로 보이고** 로그인을 말함. Free 계정도
+      이미지를 만들 수 있으므로(`planAllowsImageGeneration`) Free 계정에는 잠기지 않음.
 
 ## E. 실기기 기하 — 비차단, 무료
 

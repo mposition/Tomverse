@@ -68,6 +68,10 @@ const tx = {
       reviewSpecialty: null, executionBrief: "sealed",
       executionBriefDigest: "b".repeat(64),
     }];
+    // readAmuxAttemptBudgetFacts (2026-11-15): the aggregate below, in one statement.
+    if (sql.includes('COUNT(*)::int AS "rows"')) return recoveryAuthority ?
+      [{ rows: 1, greatest: 1, infra: 0, reserved: BigInt("3400000") }] :
+      [{ rows: 0, greatest: null, infra: 0, reserved: null }];
     throw new Error(`unexpected SQL: ${sql}`);
   },
   amuxWorkItem: {
@@ -92,6 +96,8 @@ const tx = {
     updateMany: async () => { taskWrites += 1; return { count: 1 }; },
   },
   amuxV22TaskQuestion: { findFirst: async () => null },
+  // A retried run reads its Task's earlier review rejections (none here).
+  amuxV52ReviewRecord: { findMany: async () => [] },
   amuxV22WorkerAssignment: { findUnique: async () => ({
     id: assignmentId, authorizationAuditLogId: "assignment-audit",
     workItemId: taskId, taskRevision: 5, workerName: worker,
@@ -103,7 +109,8 @@ const tx = {
     recoveryApprovalId: assignmentRecoveryApprovalId,
     perAttemptMicroUsd: BigInt("3400000"),
   }) },
-  adminAuditLog: { findUnique: async () => ({
+  // No owner ceiling re-approval stands for this Task.
+  adminAuditLog: { findMany: async () => [], findUnique: async () => ({
     action: "amux.v22.worker.assigned", targetId: assignmentId,
     metadata: { v52GradeRouting: false },
   }) },
@@ -145,6 +152,7 @@ mock.module(mod("lib/amux/dbBoundary.ts"), { namedExports: {
     }),
 } });
 mock.module(mod("lib/adminAudit.ts"), { namedExports: {
+  takeAuditChainLock: async () => {},
   writeSystemAuditLog: async () => { auditWrites += 1; return "audit-one"; },
 } });
 mock.module(mod("lib/amux/incident.ts"), { namedExports: {
@@ -178,6 +186,7 @@ mock.module(mod("lib/amux/v4TaskCostCatalogApprovalService.ts"), { namedExports:
 mock.module(mod("lib/amux/v4TaskCostCeilingCore.ts"), { namedExports: {
   checkV4TaskApprovedCeiling: () => ({ decision: "allow" }),
   v4TaskCeilingDecision: (check: { decision: string }) => check.decision,
+  v4TaskReceiptForApprovedRoutes: (_approved: unknown, current: unknown) => current,
 } });
 mock.module(mod("lib/amux/ideaKeyStore.ts"), { namedExports: {
   loadAmuxContentKeyRing: async (identities: Array<{ purpose: string }>) => {
@@ -216,8 +225,6 @@ const resetWrites = () => {
 test("an API-only runtime cannot start an ordinary assignment", async () => {
   scenario = "start"; runtimeCapabilities = apiCapability;
   recoveryAuthority = null; assignmentRecoveryApprovalId = null; resetWrites();
-  const previous = process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION;
-  process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION = "enabled";
   try {
     const result = await (await execution).startAmuxV22TaskExecution({
       taskId, assignmentId, worker, instanceId, generation: 1,
@@ -228,8 +235,7 @@ test("an API-only runtime cannot start an ordinary assignment", async () => {
     assert.deepEqual([taskWrites, runtimeWrites, attemptWrites,
       deliveryWrites, auditWrites], [0, 0, 0, 0, 0]);
   } finally {
-    if (previous === undefined) delete process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION;
-    else process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION = previous;
+    // nothing to restore
   }
 });
 
@@ -277,7 +283,6 @@ test("the exact API recovery starts only while model-access evidence is current"
     taskId, assignmentRevision: 5, historicalAttempts: 1, nextAttemptNumber: 2,
     priorReservedMicroUsd: BigInt("3400000"), assignedMicroUsd: BigInt("3400000"),
     catalogApprovalId: "catalog-one", costDigest: quote.costDigest }), true);
-  const previous = process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION;
   const apiEnv = {
     enabled: process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_EXECUTOR_ENABLED,
     profile: process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_CREDENTIAL_PROFILE_ID,
@@ -285,7 +290,6 @@ test("the exact API recovery starts only while model-access evidence is current"
     artifact: process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_EXECUTOR_ARTIFACT_DIGEST,
     scope: process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_REPOSITORY_SCOPE_DIGEST,
   };
-  process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION = "enabled";
   process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_EXECUTOR_ENABLED = "true";
   process.env.TOMVERSE_AMUX_V22_READ_ONLY_API_CREDENTIAL_PROFILE_ID =
     frame.credentialProfileId;
@@ -316,8 +320,6 @@ test("the exact API recovery starts only while model-access evidence is current"
   } finally {
     recoveryAuthority = null; assignmentRecoveryApprovalId = null;
     apiModelAccessCurrent = true;
-    if (previous === undefined) delete process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION;
-    else process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION = previous;
     for (const [key, value] of [
       ["TOMVERSE_AMUX_V22_READ_ONLY_API_EXECUTOR_ENABLED", apiEnv.enabled],
       ["TOMVERSE_AMUX_V22_READ_ONLY_API_CREDENTIAL_PROFILE_ID", apiEnv.profile],
@@ -373,8 +375,6 @@ test("generic ordinary delivery preserves empty and CLI capabilities", async () 
 test("an API-only runtime is refused before ordinary delivery decrypt or lease", async () => {
   scenario = "delivery"; runtimeCapabilities = apiCapability;
   recoveryAuthority = null; assignmentRecoveryApprovalId = null; resetWrites();
-  const previous = process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION;
-  process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION = "enabled";
   try {
     await assert.rejects((await delivery).pullAmuxWorkDelivery({
       worker, instanceId, generation: 1, now,
@@ -384,8 +384,7 @@ test("an API-only runtime is refused before ordinary delivery decrypt or lease",
     assert.equal(deliveryWrites, 0);
     assert.equal(auditWrites, 0);
   } finally {
-    if (previous === undefined) delete process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION;
-    else process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION = previous;
+    // nothing to restore
   }
 });
 
@@ -395,8 +394,6 @@ test("recovery delivery requires the approved executor capability", async () => 
   recoveryAuthority = { id: "approval-one", riskAcceptanceId: "risk-one",
     readOnlyExecutorKind: "read_only_api_retry_v1" };
   resetWrites();
-  const previous = process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION;
-  process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION = "enabled";
   try {
     await assert.rejects((await delivery).pullAmuxWorkDelivery({
       worker, instanceId, generation: 1, now,
@@ -405,8 +402,7 @@ test("recovery delivery requires the approved executor capability", async () => 
     assert.equal(deliveryWrites, 0);
     assert.equal(auditWrites, 0);
   } finally {
-    if (previous === undefined) delete process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION;
-    else process.env.TOMVERSE_AMUX_V22_TASK_EXECUTION = previous;
+    // nothing to restore
   }
 });
 

@@ -34,7 +34,11 @@ export const AMUX_ASK_TYPES = [
   "judgment",
 ] as const;
 
-/** Section 0-1: the six types a DM may draft for. `customer_outbound` is never one. */
+/**
+ * Section 0-1: the types a DM may draft for. `customer_outbound` is never one:
+ * a message to a customer leaves Tomverse, and the DM approver (§0a-1) would
+ * otherwise apply it without a person.
+ */
 export const DM_ALLOWED_ASK_TYPES = [
   "decision",
   "judgment",
@@ -53,6 +57,19 @@ export const DM_RESOLUTIONS = [
   "decision_only",
 ] as const;
 
+/**
+ * The one generous per-tick count of the Decision Maker's card services
+ * (owner direction 2026-11-16: "넉넉한 값 하나로"): the cards each service hands
+ * the relay per tick -- a v22 worker's questions, result reviews, owner
+ * settlements, engineering T2 drafts, idea card closes -- each was 3. A
+ * service's scan of pending rows reads `AMUX_DM_PENDING_SCAN`, so rows that
+ * cannot be filed never hide the rest. The relay reads the sync answer up to
+ * its cap (dm_relay/flow.rs, `V22QuestionSync`), which holds this many cards
+ * at the card's one cap, six bytes a byte as JSON.
+ */
+export const AMUX_DM_TICK_LIMIT = 25;
+export const AMUX_DM_PENDING_SCAN = AMUX_DM_TICK_LIMIT * 8;
+
 /** Section 7: the DM serves the vendor that is not the asking worker's. */
 export const DM_INSTANCE_FOR_PROVIDER: Readonly<Record<string, string>> = Object.freeze({
   claude: "decision-maker-openai",
@@ -63,15 +80,21 @@ export const DM_INSTANCE_FOR_PROVIDER: Readonly<Record<string, string>> = Object
 export const dmInstanceForProvider = (provider: string): string | null =>
   Object.hasOwn(DM_INSTANCE_FOR_PROVIDER, provider) ? DM_INSTANCE_FOR_PROVIDER[provider] : null;
 
-/** Section 3-6. */
-export const DM_THROUGHPUT_PER_HOUR = 20;
-export const DM_THROUGHPUT_PER_DAY = 100;
 
-/** Section 5. */
-export const DM_CARD_TEXT_MAX_BYTES = 16 * 1024;
-export const DM_CONTEXT_PATHS_MAX = 64;
-export const DM_SNAPSHOT_FILE_MAX_BYTES = 256 * 1024;
-export const DM_SNAPSHOT_TOTAL_MAX_BYTES = 2 * 1024 * 1024;
+/**
+ * Section 5: a card's one size cap, on its whole card text (`dmCardText`), in
+ * UTF-8 bytes. Owner decision 2026-11-15 ("4000자 제한도 없애주세요"): no card
+ * field has a length cap of its own any more -- the question, the context, the
+ * labels, the number of context paths -- and the evidence a card is about goes
+ * to the DM's workspace whole (lib/amux/decisionMakerWorkspaceCore.ts), not
+ * into the card. What remains is the real limit behind it: the card is the
+ * vendor CLI's prompt, read whole on stdin, and 256 KiB (64-90k tokens) leaves
+ * most of the smaller vendor context window for what the DM reads in its
+ * workspace. The body store's `card_text` row has the same cap (migration
+ * 20261115140000_amux_dm_card_text_cap). It replaces 16 KiB, which §5 set when
+ * the card was all a DM could read.
+ */
+export const DM_CARD_TEXT_MAX_BYTES = 256 * 1024;
 export const DM_REPOSITORY_PATH_MAX_BYTES = 200;
 
 /**
@@ -142,45 +165,134 @@ export const dmOptionEffectWellFormed = (option: { effect: string; paths: readon
   );
 };
 
-/** Section 10: body field caps, which also bound the DM output (section 6). */
-export const DM_ANSWER_MAX_BYTES = 8 * 1024;
-export const DM_RATIONALE_MAX_BYTES = 4 * 1024;
-export const DM_ESCALATION_MAX_BYTES = 1024;
+/**
+ * Section 10: body field caps, which also bound the DM output (section 6).
+ * Owner decision 2026-11-15: a DM's answer is never refused for its length.
+ * Each text field's cap is the whole output's (DM_LAUNCH_OUTPUT_MAX_BYTES in
+ * lib/amux/decisionMakerLauncherCore.ts, the results route's body), so an
+ * output the launcher returns can never fail validation on a field's size.
+ * They were 8 KiB, 4 KiB and 1 KiB.
+ */
+export const DM_OUTPUT_TEXT_MAX_BYTES = 256 * 1024;
+export const DM_ANSWER_MAX_BYTES = DM_OUTPUT_TEXT_MAX_BYTES;
+export const DM_RATIONALE_MAX_BYTES = DM_OUTPUT_TEXT_MAX_BYTES;
+export const DM_ESCALATION_MAX_BYTES = DM_OUTPUT_TEXT_MAX_BYTES;
 
 /**
- * Section 3-3, the v1 term list. A hit sends the question to the operator
- * without a DM. Korean terms match as substrings; English terms match whole
- * words, case-insensitively. A false positive only costs the operator a draft,
- * so the list errs wide. Changing it is a policy version change.
+ * Section 3-3's term list. A hit sends the question to the operator without a
+ * DM. Korean terms match as substrings; English terms match whole words,
+ * case-insensitively.
+ *
+ * The DM approver applies a DM proposal without the operator (§0a-1), so this
+ * list is the deterministic check that keeps §0a-4's human boundaries with a
+ * person: money, deletion, a main merge, production, a secret, an external
+ * post or send, an access grant and a gate change. Owner direction 2026-11-16
+ * dropped the migration category and the broad words that only looked like a
+ * boundary ("ship", "release", "deploy", "배포", "덮어쓰", "초기화",
+ * "overwrite", a bare "drop"). The secret check of the card's text
+ * (`card_secret_detected`) is a separate check and stays.
  */
+/**
+ * The only clauses the exception admits, whole from the clause's start (after
+ * the last comma) to the sentence's end: "(목록은) Free·Pro·Max 권한을
+ * 구분합니다" and "(플랜) 권한에 따라 문구가 다릅니다". Anything else after the
+ * describing word -- "구분 없이 지급합니다" -- is not one.
+ */
+const PLAN_DESCRIPTION_CLAUSE = new RegExp(
+  "^\\s*(?:(?:[가-힣A-Za-z]+\\s+){0,2}[가-힣A-Za-z]+(?:은|는)\\s+)?" +
+  "(?:(?:(?:free|pro|max|guest|plus|team)\\s*[·,/]?\\s*)+(?:플랜\\s*)?|(?:플랜|요금제)\\s*)(?:별\\s*)?권한" +
+  "(?:(?:을|를)\\s*(?:구분|비교)(?:합니다|해요|한다|됩니다)|에\\s*따라\\s*[가-힣]+(?:이|가)\\s*(?:다릅니다|달라집니다))\\s*$",
+  "i",
+);
+/** A request or question, whatever its verb. */
+const REQUEST_FORM = /까요|까\s|할지|될지|해도|하면|하시겠|주세요|해\s*주|합시다|하자|드릴/;
+/** Stems of granting, changing, switching or taking away; wide on purpose ("줄" also hits "줄이다"). */
+const ACCESS_CHANGE_STEM =
+  /주|줘|줄|준|부여|변경|바꾸|바꿔|바꿀|바뀌|수정|설정|추가|삭제|제거|회수|열|올리|올려|올릴|높|낮|상승|승격|격상|허용|받|얻|요청|필요|빼|넓|확대|축소|위임|할당|박탈|해제|풀|없애|활성|비활성|켜|켤|끄|꺼|끌|적용|전환|승인|부활|복구|차단|제한/;
+
+/**
+ * Whether a text's Korean "권한" names access. Every one does, except a
+ * clause that is exactly a plan description (`PLAN_DESCRIPTION_CLAUSE`) in a
+ * sentence that is not a request or question and has no changing verb
+ * ("플랜별 목록은 Free·Pro·Max 권한을 구분합니다."). The exception is narrow on
+ * purpose: five independent review rounds each found an access change that a
+ * looser rule let through.
+ */
+export function koreanAccessTermHit(text: string): boolean {
+  for (let at = text.indexOf("권한"); at !== -1; at = text.indexOf("권한", at + 2)) {
+    const head = text.slice(0, at);
+    const start = Math.max(...[".", "?", "!", "\n", "。"].map((mark) => head.lastIndexOf(mark))) + 1;
+    const rest = text.slice(at + 2);
+    const end = rest.search(/[.?!\n。]/);
+    const after = end === -1 ? rest : rest.slice(0, end);
+    const sentence = text.slice(start, at) + after;
+    const question = end !== -1 && rest[end] === "?";
+    const clauseStart = Math.max(start, head.lastIndexOf(",") + 1);
+    const clause = text.slice(clauseStart, at) + "권한" + after;
+    const planDescription = PLAN_DESCRIPTION_CLAUSE.test(clause) &&
+      !question && !REQUEST_FORM.test(sentence) && !ACCESS_CHANGE_STEM.test(sentence);
+    if (!planDescription) return true;
+  }
+  return false;
+}
+
 export const DM_IRREVERSIBLE_TERMS: ReadonlyArray<{
   category: string;
   korean: readonly string[];
+  /** A Korean hit a substring cannot say (the access entry's "권한" rule). */
+  koreanTest?: (text: string) => boolean;
   english: readonly string[];
 }> = [
   { category: "main_merge", korean: ["main 병합", "main에 병합", "main으로 병합"], english: ["merge to main", "merge into main", "merge main"] },
-  { category: "release", korean: ["배포", "릴리스", "프로덕션", "운영 환경"], english: ["ship", "release", "deploy", "deployment", "production", "prod"] },
-  { category: "destroy", korean: ["삭제", "덮어쓰", "초기화"], english: ["delete", "drop", "truncate", "overwrite", "force push", "force-push", "wipe", "purge"] },
-  { category: "migration", korean: ["마이그레이션"], english: ["migration", "migrate"] },
+  { category: "release", korean: ["프로덕션", "운영 환경", "운영 배포"], english: ["production", "prod"] },
+  { category: "destroy", korean: ["삭제"], english: ["delete", "drop table", "drop database", "truncate", "wipe", "purge", "force push", "force-push"] },
   { category: "money", korean: ["결제", "환불", "청구"], english: ["payment", "refund", "charge", "invoice"] },
   { category: "outbound", korean: ["게시", "발송", "연락"], english: ["publish", "post to", "send to", "send email", "send an email", "email the", "tweet", "notify", "contact"] },
   { category: "secret", korean: ["비밀번호", "비밀값", "토큰", "API 키"], english: ["secret", "token", "password", "api key", "apikey", "credential"] },
-  { category: "access", korean: ["권한", "접근 설정"], english: ["permission", "permissions", "access control"] },
+  // Every Korean "권한" is still a hit, with one exception (owner decision
+  // 2026-11-14, AMUX-PRICINGCOPY-002): a plan's entitlement -- "권한" right after
+  // a plan name ("Free·Pro·Max 권한을 구분합니다") -- whose sentence has no
+  // verb that grants, changes or takes it away. Two independent reviews showed
+  // that listing the access-change forms instead always misses one.
+  { category: "access", korean: ["접근 설정"], koreanTest: (text) => koreanAccessTermHit(text), english: ["permission", "permissions", "access control"] },
   { category: "gate", korean: ["정책 변경", "정책 개정", "정책을 바꾸", "정책을 고치", "워크플로"], english: ["policy change", "change the policy", "amend the policy", "workflow", "workflows", "branch protection"] },
 ];
 
 const englishTermPatterns = DM_IRREVERSIBLE_TERMS.map((entry) => ({
   category: entry.category,
   korean: entry.korean,
+  koreanTest: entry.koreanTest ?? (() => false),
   english: entry.english.map(
     (term) => new RegExp(`(?<![A-Za-z0-9_])${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/[ -]/g, "[ -]")}(?![A-Za-z0-9_])`, "i"),
   ),
 }));
 
+/**
+ * The operational incident for a DM run that ended `unavailable` (owner
+ * decision 2026-11-14). That result is a failed process -- a CLI that could not
+ * start, sign in or write its output -- not a judgment, yet the question still
+ * goes to the operator as if the DM had looked at it. On 2026-11-14 the
+ * anthropic instance's first run in six days exited 1 within two seconds, and
+ * every codex worker's question routes to that instance (§7). The incident
+ * names the instance and request only; the reason is in the box's broker
+ * journal (`amux_dm_broker_request`).
+ */
+export const dmRunUnavailableIncident = (instance: unknown, requestId: unknown) => ({
+  code: "AMUX_DM_RUN_UNAVAILABLE",
+  title: "AMUX Decision Maker run failed before judging",
+  error: "The Decision Maker process ended without a result; its question went to the operator. Check the instance's CLI sign-in on the AMUX box.",
+  severity: "warning" as const,
+  context: {
+    instance: typeof instance === "string" ? instance.slice(0, 64) : null,
+    requestId: typeof requestId === "string" ? requestId.slice(0, 64) : null,
+  },
+});
+
 /** The categories of the term list that a text hits, in list order. Never the text. */
 export const irreversibleTermCategories = (text: string): string[] =>
   englishTermPatterns
-    .filter((entry) => entry.korean.some((term) => text.includes(term)) || entry.english.some((pattern) => pattern.test(text)))
+    .filter((entry) => entry.korean.some((term) => text.includes(term)) ||
+      entry.koreanTest(text) || entry.english.some((pattern) => pattern.test(text)))
     .map((entry) => entry.category);
 
 /**
@@ -222,7 +334,7 @@ const utf8Bytes = (value: string) => Buffer.byteLength(value, "utf8");
 /**
  * The card text: the one serialization of a card that the body store keeps
  * as its `card_text` (docs/policy/amux-decision-maker.md §10: "질문 카드
- * 텍스트(16 KiB)"), so Admin can show the operator the question and the
+ * 텍스트"), so Admin can show the operator the question and the
  * option wording the request was routed with. Added 2026-10-09; before it no
  * writer stored the card at all.
  *
@@ -238,15 +350,14 @@ const utf8Bytes = (value: string) => Buffer.byteLength(value, "utf8");
  * lone surrogates leaves well-formed text without NUL, which PostgreSQL TEXT
  * can hold. Changing the layout is a new `format` value.
  *
- * §5's 16 KiB is measured on these bytes (`dmCardTextBytes`), never on the
+ * §5's cap (`DM_CARD_TEXT_MAX_BYTES`) is measured on these bytes (`dmCardTextBytes`), never on the
  * sum of the fields: the stored text is what the cap is about, and a card the
  * body store could not hold is never routed to a DM. The effect classes and
  * paths count towards it, as section 5 lists them among the card's fields.
  *
  * Format `amux-dm-card-text-v2` (2026-10-18, stage S2-2b1) added each option's
  * `effect` and `paths`. The v1 layout, whose options were `{ id, label }`, is
- * not read back: its only writer was the routing route, closed by
- * `TOMVERSE_AMUX_DM_ROUTING` since it was added, and a stored text this module
+ * not read back: its only writer was a routing route that never wrote it, and a stored text this module
  * cannot read is shown as unreadable, never as a card.
  */
 export const DM_CARD_TEXT_FORMAT = "amux-dm-card-text-v2";
@@ -286,7 +397,7 @@ export const dmCardText = (card: DmCard): string =>
     contextPaths: [...card.contextPaths],
   });
 
-/** The UTF-8 bytes of the card text, which §5's 16 KiB caps. */
+/** The UTF-8 bytes of the card text, which §5's one cap holds. */
 export const dmCardTextBytes = (card: DmCard): number => utf8Bytes(dmCardText(card));
 
 const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
@@ -380,6 +491,36 @@ const cardTextFields = (card: DmCard): Record<string, string> => {
   return fields;
 };
 
+/**
+ * Owner decision 2026-11-14 (AMUX process audit bundle 2, AMUXFLOW/B2): the
+ * section 3-3 terms judge what the card asks -- its fixed question, options
+ * and context -- not the evidence a system card carries for the DM to read (a
+ * run's findings, a diff), where words such as "delete" or "token" are code,
+ * not a request. A system card wraps that evidence in these markers; with
+ * TOMVERSE_AMUX_DM_TERMS_FIXED_TEXT_ONLY=enabled the term check skips it. The
+ * secret check still reads the whole card. Off by default.
+ */
+export const DM_EVIDENCE_OPEN = "[evidence]";
+export const DM_EVIDENCE_CLOSE = "[/evidence]";
+export const DM_TERMS_FIXED_TEXT_ONLY_ENV = "TOMVERSE_AMUX_DM_TERMS_FIXED_TEXT_ONLY";
+export const dmTermsFixedTextOnlyEnabled = (value: string | undefined) => value?.trim() === "enabled";
+
+/** The text the term check reads: every evidence block left out, when exempt. */
+export const dmTermCheckText = (text: string, evidenceExempt: boolean) => {
+  if (!evidenceExempt) return text;
+  let out = "";
+  let at = 0;
+  for (;;) {
+    const open = text.indexOf(DM_EVIDENCE_OPEN, at);
+    if (open < 0) return out + text.slice(at);
+    const close = text.indexOf(DM_EVIDENCE_CLOSE, open + DM_EVIDENCE_OPEN.length);
+    // An unclosed block is read whole: nothing hides behind a lone marker.
+    if (close < 0) return out + text.slice(at);
+    out += text.slice(at, open);
+    at = close + DM_EVIDENCE_CLOSE.length;
+  }
+};
+
 export type DmRoutingInput = {
   /** `null` when the setting could not be read. */
   killSwitch: boolean | null;
@@ -390,6 +531,12 @@ export type DmRoutingInput = {
   askingProvider: string;
   /** Requests already routed to the instance in the trailing hour and day. */
   throughput: { lastHour: number; lastDay: number };
+  /**
+   * Skip evidence blocks in the term check (AMUXFLOW/B2): true only for a
+   * card the app filed itself (an owner settlement card, by its recorded
+   * local card) while its switch is on. Absent: every word is read.
+   */
+  evidenceTermsExempt?: boolean;
 };
 
 export type DmRoutingRefusal =
@@ -431,8 +578,13 @@ export const routeDmQuestion = (input: DmRoutingInput): DmRoutingDecision => {
   // Section 3-3's inputs. An option's effect class and paths are not among
   // them: they are section 4's declaration, which the router does not route on,
   // and a path is no more prose than a context path, which is not read either.
+  // Only a card the app itself filed earns the exemption (the caller proves
+  // it); a worker's markers are plain text here.
+  const evidenceExempt = input.evidenceTermsExempt === true;
   const termCategories = irreversibleTermCategories(
-    [card.type, ...card.tags, card.title, card.question, ...card.options.map((option) => option.label), card.unblocks, card.context].join("\n"),
+    [card.type, ...card.tags, card.title, dmTermCheckText(card.question, evidenceExempt),
+      ...card.options.map((option) => option.label), card.unblocks,
+      dmTermCheckText(card.context, evidenceExempt)].join("\n"),
   );
   if (termCategories.length > 0) refusals.push("irreversible_term");
 
@@ -442,11 +594,11 @@ export const routeDmQuestion = (input: DmRoutingInput): DmRoutingDecision => {
 
   if (instance === null) refusals.push("provider_unverified");
 
-  if (input.throughput.lastHour >= DM_THROUGHPUT_PER_HOUR || input.throughput.lastDay >= DM_THROUGHPUT_PER_DAY) {
-    refusals.push("throughput_exceeded");
-  }
+  // §3-6's throughput cap (20 an hour, 100 a day) is gone (owner decision
+  // 2026-11-15: "내부 개발용 Flow입니다. 제한을 줄 이유가 없습니다"). The counts
+  // stay in the input for the record; `throughput_exceeded` is no longer made.
 
-  // §5's 16 KiB on the card text the body store keeps (`dmCardText()`), so a
+  // §5's one cap on the card text the body store keeps (`dmCardText()`), so a
   // card routed to a DM always fits its `card_text` row (§10).
   // `resolution` is a closed list for every ask type, so a free-form value can
   // never ride into the stored card text on a type that skips the §3-4 check.
@@ -457,7 +609,6 @@ export const routeDmQuestion = (input: DmRoutingInput): DmRoutingDecision => {
   if (
     (card.resolution !== null && !(DM_RESOLUTIONS as readonly string[]).includes(card.resolution)) ||
     utf8Bytes(cardText) > DM_CARD_TEXT_MAX_BYTES ||
-    card.contextPaths.length > DM_CONTEXT_PATHS_MAX ||
     card.contextPaths.some((path) => repositoryPathRefusal(path) !== null) ||
     !dmCardOptionsWellFormed(card.options) ||
     !card.options.every(dmOptionEffectWellFormed)

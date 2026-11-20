@@ -234,7 +234,8 @@ const declaresAcquirableRequirement = (entry: ChatStarterEntry): boolean =>
 export function selectVisibleStarterCards(
   viewer: StarterViewer,
   catalog: readonly ChatStarterEntry[] = CHAT_STARTER_CATALOG,
-  limit: number = CHAT_STARTER_MAX_VISIBLE
+  limit: number = CHAT_STARTER_MAX_VISIBLE,
+  orderSeed: number | null = null
 ): VisibleStarterCard[] {
   const ceiling = Math.max(0, limit);
   const resolved: VisibleStarterCard[] = [];
@@ -243,10 +244,14 @@ export function selectVisibleStarterCards(
     if (availability.state === "hidden") continue;
     resolved.push({ entry, availability });
   }
-  const runnable = resolved.filter(
+  // A seed reorders each group on its own, so runnable cards still come
+  // first and the reserved slot below still goes to a requirement.
+  const order = <T,>(cards: T[]) =>
+    orderSeed === null ? cards : seededStarterOrder(cards, orderSeed);
+  const runnable = order(resolved.filter(
     (card) => card.availability.state === "available"
-  );
-  const locked = resolved.filter((card) => card.availability.state === "locked");
+  ));
+  const locked = order(resolved.filter((card) => card.availability.state === "locked"));
 
   // The reservation only applies where both can fit. At a ceiling of one there
   // is nothing to balance, and holding the single slot for a requirement would
@@ -274,4 +279,45 @@ export function selectVisibleStarterCards(
     ...runnable.filter((card) => card !== promoted).slice(0, ceiling - 1),
     promoted,
   ];
+}
+
+/**
+ * The session cookie that holds Chat's starter order.
+ *
+ * Owner decision 2026-11-13: Chat's new-conversation screen shows a different
+ * selection from a larger pool, fixed for the browser session so the cards do
+ * not move between new conversations in one sitting. The server reads the
+ * cookie (or draws a seed when it is missing) and hands the number to the
+ * client as a prop, so the server render and hydration order the cards the
+ * same way. A 16-bit number: it orders cards and identifies nobody.
+ */
+export const STARTER_ORDER_COOKIE = "tomverse_starter_order";
+export const STARTER_ORDER_SEED_LIMIT = 65_536;
+
+export const parseStarterOrderSeed = (value: string | undefined | null): number | null => {
+  if (!value || !/^\d{1,5}$/.test(value)) return null;
+  const seed = Number(value);
+  return seed < STARTER_ORDER_SEED_LIMIT ? seed : null;
+};
+
+/**
+ * The same seed always gives the same order (mulberry32 driving a
+ * Fisher-Yates shuffle). Pure, so a server render and the hydrating client
+ * agree, and a test can pin an order.
+ */
+export function seededStarterOrder<T>(items: readonly T[], seed: number): T[] {
+  let state = (seed >>> 0) || 1;
+  const next = () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const out = [...items];
+  for (let index = out.length - 1; index > 0; index -= 1) {
+    const pick = Math.floor(next() * (index + 1));
+    [out[index], out[pick]] = [out[pick], out[index]];
+  }
+  return out;
 }

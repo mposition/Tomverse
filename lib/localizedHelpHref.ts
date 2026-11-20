@@ -2,20 +2,15 @@ import type { Language } from "@/components/LanguageProvider";
 
 /** Where the guides live. `/help` is redirected here by next.config.ts. */
 export const HELP_CENTRE_PATH = "/support/help-centre";
-const CHAT_WORKSPACE_GUIDE_PATH = `${HELP_CENTRE_PATH}/chat-workspace`;
 
-const withLanguage = (path: string, lang: Language, section?: string) => {
-  const url = new URL(path, "https://tomverse.app");
+/**
+ * The help centre hub in the reader's language. The old Chat workspace guide
+ * (`/support/help-centre/chat-workspace`) was folded into the hub and now
+ * redirects there, so every "learn more" link points at the hub directly.
+ */
+export const helpCentreHref = (lang: Language) => {
+  const url = new URL(HELP_CENTRE_PATH, "https://tomverse.app");
   url.searchParams.set("lang", lang);
-  url.hash = section ? `#${section.replace(/^#/, "")}` : url.hash;
-  return `${url.pathname}${url.search}${url.hash}`;
+  return `${url.pathname}${url.search}`;
 };
-
-export const helpCentreHref = (lang: Language) =>
-  withLanguage(HELP_CENTRE_PATH, lang);
-
-export const chatWorkspaceGuideHref = (
-  lang: Language,
-  section?: string
-) => withLanguage(CHAT_WORKSPACE_GUIDE_PATH, lang, section);
 

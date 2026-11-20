@@ -4,7 +4,6 @@ import { performance } from "node:perf_hooks";
 import test from "node:test";
 
 import {
-  amuxSessionIntakeWritePermitted,
   inspectAmuxIdeaSessionInput,
   inspectAmuxIdeaSessionSource,
   inspectAmuxIdeaSessionSubmission,
@@ -30,14 +29,6 @@ const idea = (overrides: Record<string, unknown> = {}) => ({
   repositories: ["mposition/Tomverse"],
   pullRequests: [],
   ...overrides,
-});
-
-test("session intake needs both exact enabled switches and defaults off", () => {
-  assert.equal(amuxSessionIntakeWritePermitted(undefined, undefined), false);
-  assert.equal(amuxSessionIntakeWritePermitted("enabled", undefined), false);
-  assert.equal(amuxSessionIntakeWritePermitted(undefined, "enabled"), false);
-  assert.equal(amuxSessionIntakeWritePermitted("ENABLED", "enabled"), false);
-  assert.equal(amuxSessionIntakeWritePermitted("enabled", "enabled"), true);
 });
 
 test("session source keeps the three encrypted provenance labels exactly", () => {

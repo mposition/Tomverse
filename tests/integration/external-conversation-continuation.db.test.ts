@@ -105,7 +105,7 @@ const seedSnapshot = async (
  * this file invented.
  */
 const requestWithGrant = (
-    grant?: { userId: string; resourceId: string; password: string }
+    grant?: { userId: string; resourceId: string; password: string; passwordVersion?: number }
 ) =>
     new Request("https://tomverse.test/api/chat", {
         headers: grant
@@ -114,7 +114,7 @@ const requestWithGrant = (
                       "external_conversation",
                       grant.userId,
                       grant.resourceId,
-                      grant.password
+                      grant.passwordVersion ?? 0
                   ).split(";")[0]!,
               }
             : {},

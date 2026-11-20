@@ -1,8 +1,16 @@
 "use client";
+
+import { hasJourneySource, journeyObservationEpoch, observeJourneyDispatch, observeJourneyReply } from "@/lib/connectedJourneyAnalytics";
+
+import { CONTINUATION_RECEIPT_HEADER, receiptForAttempt, type ContinuationReceipt } from "@/lib/continuationReceipt";
+
+import { PASSAGE_HEADER } from "@/lib/continuationPassages";
+import type { ChatPanelLocationIntent, RouterLocationTurn } from "@/lib/chatLocationClient";
 import { selectedMcpConnection } from "@/lib/mcpConnectorSelection";
 
 import { reviewProviderTranscript } from "@/lib/reviewProviderTranscript";
-import { chatLocationSession } from "@/lib/chatLocationClient";
+import { chatLocationSession, readRouterLocationRequest, requireRouterLocationVersion } from "@/lib/chatLocationClient";
+import { ROUTER_LOCATION_ROUTE } from "@/lib/chatRouterLocationProtocol";
 import { requestChatLocationIntent } from "@tomverse/api-client";
 import {
   memo,
@@ -60,6 +68,8 @@ import {
   TRACE_PROVENANCE,
   type MessageErrorReportContext,
 } from "@/lib/errorReportContract";
+import { researchRunMessage } from "@/lib/researchPreviewRunClient";
+import type { ResearchPreviewRunDto } from "@/lib/researchPreviewRunTypes";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { fitChatRequestTranscript } from "@/lib/chatRequestLimits";
 import type { ChatContentState } from "@/lib/chatContentState";
@@ -129,7 +139,6 @@ import {
 import type { PromptRefinerProductChatDecision } from
   "@/lib/promptRefinerProductApiContract";
 import {
-  parsePromptRefinerExecutionHeaders,
   promptRefinerAllowsAutomaticChatRecovery,
 } from
   "@/components/chat/promptRefinerProductClient";
@@ -237,8 +246,11 @@ type ChatAppProps = {
    */
   otherPanelModelIds?: readonly string[];
   onRestorePrompt?: (prompt: ChatRecoveryPrompt) => void;
+  /** Chat: send a failed reply's question again without touching the draft. */
+  onRetryPrompt?: (prompt: ChatRecoveryPrompt) => void;
   /** Chat: open a Review draft prefilled from one answer's question. */
   onCompareInReview?: (seed: string) => void;
+  onCompareContinuationInReview?: (assistantMessageId: string) => void;
   initialConversationId?: string | null;
   /**
    * The question a composer send is still preparing, drawn at the bottom of
@@ -249,6 +261,9 @@ type ChatAppProps = {
     submittedAtMonotonicMs?: number;
     preparationTimings?: ClientLatencyStages;
     preparationReadyAtMonotonicMs?: number;
+    sourcePassages?: string;
+    preparedLocationIntent?: ChatPanelLocationIntent;
+    routerLocationTurn?: RouterLocationTurn;
     id: string;
     text: string;
     chatId: string;
@@ -269,6 +284,8 @@ type ChatAppProps = {
      */
     modelIds: string[];
     attachments: ChatAttachment[];
+    researchDurable?: boolean;
+    researchMode?: "preview";
     deepResearchDepth?: "quick" | "standard" | "deep";
     /**
      * Web search for this send only, when the send was made by the web-search
@@ -353,6 +370,7 @@ type ChatAppProps = {
   importedMessages?: Message[];
   /** Provenance and paging for that transcript (`ChatMessageList`). */
   importedTranscript?: {
+    contextCard?: React.ReactNode;
     status: "available" | "deleted" | "locked";
     provider: string;
     importedAt: string;
@@ -398,12 +416,6 @@ type ChatAppProps = {
     responseText: string,
     searchMetadata?: WebSearchExecution | null
   ) => void;
-  /** Content-free observation from a successful Chat response header. */
-  onPromptRefinerExecution?: (input: {
-    promptId: string | null;
-    execution: "applied" | "original";
-    mode: "explicit" | "auto";
-  }) => void;
   /**
    * This panel's turn ended as an error, with the code it ended on.
    *
@@ -482,7 +494,9 @@ function ChatAppComponent({
   reviewProvider,
   otherPanelModelIds,
   onRestorePrompt,
+  onRetryPrompt,
   onCompareInReview,
+  onCompareContinuationInReview,
   initialConversationId = null,
   sendEcho = null,
   promptPayload,
@@ -498,7 +512,6 @@ function ChatAppComponent({
   onContentStateChange,
   onStatusChange,
   onResponseComplete,
-  onPromptRefinerExecution,
   onTurnError,
   onFollowupSent,
   onBeforeSend,
@@ -1032,6 +1045,7 @@ function ChatAppComponent({
           const modelQuery = transcriptScope === "conversation" || reviewProvider
             ? "answers=all"
             : `modelId=${encodeURIComponent(modelId)}&answers=all`;
+          const hydrationJourneyEpoch = journeyObservationEpoch();
           const response = await fetch(`/api/conversations/${initialConversationId}?${modelQuery}`, {
             cache: "no-store",
             headers: { 'Cache-Control': 'no-cache' }
@@ -1069,6 +1083,20 @@ function ChatAppComponent({
               data.messagePage = pageData.messagePage;
               nextCursor = pageData.messagePage?.nextCursor;
             }
+            if (transcriptScope === "conversation" && !isGuestMode) {
+              try {
+              const runsResponse = await fetch(`/api/chat/research-preview/runs?conversationId=${encodeURIComponent(initialConversationId)}`, { cache: "no-store" });
+              const runsValue = await runsResponse.json().catch(() => null);
+              if (runsResponse.ok && Array.isArray(runsValue?.runs)) {
+                for (const run of runsValue.runs as ResearchPreviewRunDto[]) {
+                  if (run.conversationId !== initialConversationId || typeof run.id !== "string" || typeof run.assistantMessageId !== "string") continue;
+                  const index = data.messages.findIndex((message: Message) => message.id === run.assistantMessageId);
+                  if (index >= 0) data.messages[index] = { ...data.messages[index], researchRunId: run.id };
+                  else data.messages.push(researchRunMessage(run));
+                }
+              }
+              } catch { /* Optional run discovery never hides the stored transcript or starts work. */ }
+            }
             if (!isCurrentLoad()) return;
             // This key sent something while the history request was in
             // flight, so the response describes the conversation as it was
@@ -1098,6 +1126,16 @@ function ChatAppComponent({
                   .map(parsePublicChatResponseAttempt)
                   .filter((attempt: PublicChatResponseAttempt | null): attempt is PublicChatResponseAttempt => Boolean(attempt))
               : [];
+            // Only a canonical completed Message for this exact first source.
+            // No nearest-turn inference and no additional history scan.
+            for (const attempt of parsedAttempts) {
+              if (attempt.conversationId !== initialConversationId || !hasJourneySource(panelIdentityKey, initialConversationId, attempt.sourceUserMessageId) ||
+                !data.messages.some((message: Message) => message.role === "user" && message.id === attempt.sourceUserMessageId)) continue;
+              const completed = parseCompletedChatResponseMessage(data.messages.find((message: Message) => message.id === attempt.assistantMessageId), attempt);
+              if (completed) observeJourneyReply({ owner: panelIdentityKey, epoch: hydrationJourneyEpoch,
+                conversationId: initialConversationId, sourceUserMessageId: attempt.sourceUserMessageId,
+                status: completed.status === "incomplete" ? "incomplete" : "normal", nonempty: Boolean(completed.content.trim()) });
+            }
             const merged = mergeChatResponseAttempts(
               filteredMessages,
               parsedAttempts,
@@ -1196,6 +1234,7 @@ function ChatAppComponent({
     runtimeKey,
     transcriptScope,
     historyLoadRetry,
+    panelIdentityKey,
     reviewProvider,
     getModel,
   ]);
@@ -1273,6 +1312,7 @@ function ChatAppComponent({
         return;
       }
       try {
+        const pollingJourneyEpoch = journeyObservationEpoch();
         const response = await fetch(
           `/api/products/chat/attempts/${encodeURIComponent(assistantMessageId)}`,
           { cache: "no-store", signal: controller.signal }
@@ -1350,6 +1390,9 @@ function ChatAppComponent({
               message.id === assistantMessageId ? completedMessage : message
             );
           });
+          if (!controller.signal.aborted) observeJourneyReply({ owner: panelIdentityKey, epoch: pollingJourneyEpoch,
+            conversationId: attempt.conversationId, sourceUserMessageId: attempt.sourceUserMessageId,
+            status: completedMessage.status === "incomplete" ? "incomplete" : "normal", nonempty: Boolean(completedMessage.content.trim()) });
           onResponseCompleteRef.current?.(
             expectedIdentity.analyticsPromptId,
             attempt.actualModelId ?? attempt.requestedModelId,
@@ -1411,7 +1454,7 @@ function ChatAppComponent({
     };
     void loop();
     return () => controller.abort();
-  }, [durableAttemptIds, isGuestMode, runtimeKey, t, transcriptScope]);
+  }, [durableAttemptIds, isGuestMode, runtimeKey, t, transcriptScope, panelIdentityKey]);
   
   /**
    * Writes a guest's transcript back to localStorage.
@@ -1508,11 +1551,17 @@ function ChatAppComponent({
     submittedAtMonotonicMs?: number,
     preparationTimings?: ClientLatencyStages,
     preparationReadyAtMonotonicMs?: number,
+    preparedLocationIntent?: ChatPanelLocationIntent,
+    routerLocationTurn?: RouterLocationTurn,
+    sourcePassages?: string,
+    researchMode?: "preview",
+    researchDurable = false,
   ) => {
     // The key this run owns for its whole life. `targetChatId` is the
     // conversation the send was made in, and every write below names this key
     // rather than the panel's current view: the user may open another
     // conversation a chunk later, and the answer still belongs here.
+    const observedJourneyEpoch = journeyObservationEpoch();
     const runKey = chatRuntimeKey({
       identityKey: chatRuntimeIdentityKey(
         isGuestMode ? { kind: "guest" } : { kind: "account", userId: sessionUserId }
@@ -1541,6 +1590,7 @@ function ChatAppComponent({
       is not a failure of the run, and offering to retry it would be arguing
       with them.
     */
+    let sourceReceipt: ContinuationReceipt | undefined;
     const writeAssistantMessage = assistantMessageWriter(runKey);
     const setAssistantMessage: typeof writeAssistantMessage = (
       id,
@@ -1565,6 +1615,7 @@ function ChatAppComponent({
         errorMeta,
         {
           ...extraFields,
+          continuationReceipt: sourceReceipt,
           ...(status === "error" && transcriptScope === "conversation"
             ? { recoveryNotice: content, isGeneratingArtifact: false }
             : {}),
@@ -1577,9 +1628,12 @@ function ChatAppComponent({
       send is identical to what it was before the override existed.
     */
     const effectiveWebSearchMode: WebSearchMode | undefined =
-      webSearchModeOverride ?? webSearchMode;
-    const mcpConnectionId = currentProduct === "chat" ? selectedMcpConnection(initialConversationId) : undefined;
+      researchMode ? "always" : webSearchModeOverride ?? webSearchMode;
+    const mcpConnectionId = !researchMode && currentProduct === "chat" ? selectedMcpConnection(initialConversationId) : undefined;
+    const previous = getChatRuntimeLastPrompt(runKey);
+    const turnPassages = researchMode ? undefined : sourcePassages ?? (previous?.sourceUserMessageId === sourceUserMessageId ? previous.sourcePassages : undefined);
     setChatRuntimeLastPrompt(runKey, {
+      ...(turnPassages ? {sourcePassages: turnPassages} : {}),
       text,
       targetChatId,
       attachments,
@@ -1681,6 +1735,18 @@ function ChatAppComponent({
     // server issued one. Lives only in this closure and in the error
     // message's runtime `errorReport` context -- never persisted.
     let requestErrorReportToken: string | null = null;
+    // The server's own code for a turn it judged failed after the 200 stream
+    // had started. Arrives with the token in the stream trailer, and the
+    // token signs it -- so a report carrying both is a server classification
+    // (docs/policy/trace-feedback-automation.md section 3.3).
+    let streamErrorReportCode: string | null = null;
+    const adoptStreamErrorReport = (
+      trailer: ReturnType<typeof parseChatStreamTrailer>
+    ) => {
+      if (!trailer?.errorReport) return;
+      requestErrorReportToken = trailer.errorReport.token;
+      streamErrorReportCode = trailer.errorReport.code;
+    };
     // Declared here (not inside the try block below) so a stop mid-stream
     // can still show whatever was generated before the abort, instead of
     // discarding it -- the catch block needs to read it too.
@@ -1700,8 +1766,13 @@ function ChatAppComponent({
             ...(requestErrorReportToken
               ? { errorReportToken: requestErrorReportToken }
               : {}),
-            errorCode,
-            errorClassificationSource: classificationSource,
+            // What the panel calls the failure (`EMPTY_RESPONSE`) is this
+            // client's word for it. When the server signed its own code for
+            // the same turn, the report says that one.
+            errorCode: streamErrorReportCode ?? errorCode,
+            errorClassificationSource: streamErrorReportCode
+              ? ERROR_CLASSIFICATION_SOURCE.server
+              : classificationSource,
             occurredAt: new Date().toISOString(),
           }
         : undefined;
@@ -1761,7 +1832,7 @@ function ChatAppComponent({
     // The bundle actually presented, which a stale-recovery retry replaces.
     // `contextBundle` is what this send was prepared with; after one refusal
     // for drift the request is re-prepared and this becomes the new one.
-    let activeContextBundle = contextBundle ?? null;
+    let activeContextBundle = researchMode ? null : contextBundle ?? null;
     let contextBundleRetries = 0;
     let contextBundleCollisionRetries = 0;
     let memoryUsedCount = 0;
@@ -1899,86 +1970,152 @@ function ChatAppComponent({
       return;
     }
 
+    let hasRouterLocationContinuation = false;
     try {
-      const sendChatRequest = async (turnstileToken?: string) => {
+      if (researchMode === "preview" && researchDurable && !isGuestMode) {
+        try {
+        onDispatchStarted?.();
+        const response = await fetch("/api/chat/research-preview/runs", {
+          method: "POST", headers: { "Content-Type": "application/json", "Accept-Language": lang },
+          body: JSON.stringify({ conversationId: targetChatId, sourceUserMessageId, assistantMessageId, modelId, locale: lang }),
+          signal: controller.signal,
+        });
+        const value = await response.json().catch(() => null) as { run?: ResearchPreviewRunDto } | null;
+        const run = value?.run;
+        if (!response.ok || !run || run.conversationId !== targetChatId || run.assistantMessageId !== assistantMessageId) throw new Error("RESEARCH_RUN_OUTCOME_UNCONFIRMED");
+        writeChatRuntimeMessages(runKey, current => current.map(message => message.id === assistantMessageId ? researchRunMessage(run) : message));
+        } catch {
+          // An interrupted create may already have queued a run. Only saved
+          // status discovery can confirm it; never claim that a worker stopped.
+          setAssistantMessage(assistantMessageId, t("chat.researchRunReadError"), "error", { errorCode: "RESEARCH_RUN_OUTCOME_UNCONFIRMED" });
+        }
+        return;
+      }
+      const sendChatRequest = async (turnstileToken?: string, recoverWithSavedLocation = false) => {
         // Human permission and guest verification happen before provider wait
         // time starts. The same source turn is continued after either prompt.
         liveness.stop();
-        const finishLocation = latency.stage("locationMs");
-        const turnLocation = await chatLocationSession.readForTurn(panelIdentityKey, controller.signal, chatLocationIntentEnabled ? {
-          turnId: sourceUserMessageId,
-          requiresLocation: async () => {
-            const finishIntent = latency.stage("locationIntentMs");
-            try { return await requestChatLocationIntent(String(userMessage.content ?? ""), fetch, { turnstileToken }); }
-            finally { finishIntent(); }
-          },
-        } : undefined).finally(finishLocation);
-        controller.signal.throwIfAborted();
+        const fuseLocation = !researchMode && !turnPassages && !recoverWithSavedLocation && routerLocationTurn && !preparedLocationIntent && !mcpConnectionId && !admissionToken &&
+          !deepResearchDepth && !reviewProvider && !isGuestMode && chatLocationIntentEnabled &&
+          chatLocationSession.canPrepareIntent(panelIdentityKey);
+        const checkLocationTurn = () => {
+          if ((fuseLocation || recoverWithSavedLocation) && routerLocationTurn && !routerLocationTurn.isCurrent()) controller.abort();
+          controller.signal.throwIfAborted();
+        };
+        checkLocationTurn();
+        const readLocation = (routerDecision: boolean | null = null) => {
+          const finishLocation = latency.stage("locationMs");
+          return chatLocationSession.readForTurn(panelIdentityKey, controller.signal, chatLocationIntentEnabled && routerDecision !== false ? {
+            turnId: sourceUserMessageId,
+            requiresLocation: async () => {
+              if (routerDecision === true) return true;
+              const source = String(userMessage.content ?? "");
+              const prepared = preparedLocationIntent && "readForSavedTurn" in preparedLocationIntent
+                ? await preparedLocationIntent.readForSavedTurn(panelIdentityKey, source, controller.signal, latency.freshLocation)
+                : preparedLocationIntent?.read(panelIdentityKey, source);
+              if (typeof prepared === "boolean") return prepared;
+              controller.signal.throwIfAborted();
+              const finishIntent = latency.stage("locationIntentMs");
+              try { return await requestChatLocationIntent(source, fetch, { turnstileToken }); }
+              finally { finishIntent(); }
+            },
+          } : undefined).finally(finishLocation);
+        };
+        const locationFields = (fix: Awaited<ReturnType<typeof readLocation>>) =>
+          fix && chatLocationSession.canShare(fix, panelIdentityKey) ? { currentLocation: fix } : {};
+        const turnLocation = researchMode || fuseLocation ? null : await readLocation();
+        checkLocationTurn();
         liveness = createChatLivenessWatchdog({ onExpire: onLivenessExpiry });
         onDispatchStarted?.();
         if (isGuestMode && guestAutoCapability) {
           guestAutoRequestStarted = true;
         }
         latency.dispatched();
-        const res = await fetch("/api/chat", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            // UI-only turns never go to a provider, and this turn's own user
-            // message is appended exactly once -- `messages` is the pre-send
-            // snapshot, and the id filter keeps a re-render or a resend from
-            // duplicating it.
-            // The newest part that fits the request limits: a conversation
-            // has no length limit, and one sent whole could not be continued
-            // past them (lib/chatRequestLimits.ts).
-            messages: fitChatRequestTranscript(
-              requestTranscriptForScope(
-                messages,
-                userMessage,
-                transcriptScope
-              )
-                // A retry is a new visible turn but is still verified against
-                // the original durable question. Preserve the earlier
-                // user/error ordering, and change only the newly appended
-                // request copy to the persisted source identity.
-                .map((message) => message === userMessage
-                  ? { ...message, id: sourceUserMessageId }
-                  : message)
-                .map(toChatRequestMessage)
-            ),
-            ...(turnLocation && chatLocationSession.canShare(turnLocation, panelIdentityKey)
-              ? { currentLocation: turnLocation } : {}),
-            modelId: modelId,
-            ...(turnstileToken ? { turnstileToken } : {}),
-            ...(!isGuestMode
-              ? {
-                  conversationId: targetChatId,
-                  assistantMessageId,
-                  // The saved user turn this response attempt is bound to.
-                  // The server fingerprints the attempt with it, so a reused
-                  // assistant id cannot be attached to a different question.
-                  sourceUserMessageId,
-                }
-              : {}),
-            ...(deepResearchDepth ? { deepResearchDepth } : {}),
-            ...(mcpConnectionId ? { mcpConnectionId } : {}),
-            ...(admissionToken ? { admissionToken } : {}),
-            ...(activeContextBundle ? { contextBundle: activeContextBundle } : {}),
-            ...(effectiveWebSearchMode && effectiveWebSearchMode !== "off"
-              ? { webSearchMode: effectiveWebSearchMode }
-              : {}),
-            ...(acknowledgedUnavailableAttachmentIds.length > 0
-              ? { acknowledgedUnavailableAttachmentIds }
-              : {}),
-            ...(promptRefinerDecision ? { promptRefinerDecision } : {}),
-            ...(isGuestMode && guestAutoCapability
-              ? { guestAutoCapability, guestClientTurnId: sourceUserMessageId }
-              : {}),
-          }),
+        const requestBody = {
+          // UI-only turns never go to a provider, and this turn's own user
+          // message is appended exactly once -- `messages` is the pre-send
+          // snapshot, and the id filter keeps a re-render or a resend from
+          // duplicating it.
+          // The newest part that fits the request limits: a conversation
+          // has no length limit, and one sent whole could not be continued
+          // past them (lib/chatRequestLimits.ts).
+          messages: researchMode ? [{ ...toChatRequestMessage(userMessage), id: sourceUserMessageId }] : fitChatRequestTranscript(
+            requestTranscriptForScope(
+              messages,
+              userMessage,
+              transcriptScope
+            )
+              // A retry is a new visible turn but is still verified against
+              // the original durable question. Preserve the earlier
+              // user/error ordering, and change only the newly appended
+              // request copy to the persisted source identity.
+              .map((message) => message === userMessage
+                ? { ...message, id: sourceUserMessageId }
+                : message)
+              .map(toChatRequestMessage)
+          ),
+          modelId: modelId,
+          ...(turnstileToken ? { turnstileToken } : {}),
+          ...(!isGuestMode
+            ? {
+                conversationId: targetChatId,
+                assistantMessageId,
+                // The saved user turn this response attempt is bound to.
+                // The server fingerprints the attempt with it, so a reused
+                // assistant id cannot be attached to a different question.
+                sourceUserMessageId,
+              }
+            : {}),
+          ...(researchMode ? { researchMode } : {}),
+          ...(deepResearchDepth ? { deepResearchDepth } : {}),
+          ...(mcpConnectionId ? { mcpConnectionId } : {}),
+          ...(admissionToken ? { admissionToken } : {}),
+          ...(activeContextBundle ? { contextBundle: activeContextBundle } : {}),
+          ...(effectiveWebSearchMode && effectiveWebSearchMode !== "off"
+            ? { webSearchMode: effectiveWebSearchMode }
+            : {}),
+          ...(acknowledgedUnavailableAttachmentIds.length > 0
+            ? { acknowledgedUnavailableAttachmentIds }
+            : {}),
+          ...(promptRefinerDecision ? { promptRefinerDecision } : {}),
+          ...(isGuestMode && guestAutoCapability
+            ? { guestAutoCapability, guestClientTurnId: sourceUserMessageId }
+            : {}),
+        };
+        const post = (path: string, fields: Record<string, unknown>) => {
+          const body = JSON.stringify({ ...requestBody, ...fields });
+          controller.signal.throwIfAborted();
+          if (!isGuestMode && !researchMode) observeJourneyDispatch(panelIdentityKey, targetChatId, sourceUserMessageId);
+          return fetch(path, {
+          method: "POST", headers: { "Content-Type": "application/json", ...(researchMode ? { "Accept-Language": lang } : {}), ...(turnPassages ? {[PASSAGE_HEADER]:turnPassages} : {}) },
+          body,
           signal: controller.signal,
         });
+        };
+        const fusionFields = { routerLocationFusion: true, ...(routerLocationTurn?.scope === "existing" ? { routerLocationScope: "existing" } : {}) };
+        let res = fuseLocation
+          ? await post(ROUTER_LOCATION_ROUTE, fusionFields)
+          : await post("/api/chat", locationFields(turnLocation));
+        const locationRequest = fuseLocation ? await readRouterLocationRequest(res) : null;
+        if (locationRequest) {
+          hasRouterLocationContinuation = Boolean(locationRequest.continuation);
+          checkLocationTurn();
+          liveness.stop();
+          const fix = await readLocation(locationRequest.requiresLocation);
+          checkLocationTurn();
+          liveness = createChatLivenessWatchdog({ onExpire: onLivenessExpiry });
+          if (locationRequest.continuation) {
+            res = await post(ROUTER_LOCATION_ROUTE, { ...locationFields(fix),
+              ...fusionFields, routerLocationContinuation: locationRequest.continuation });
+            await requireRouterLocationVersion(res);
+          } else {
+            res = await post("/api/chat", locationFields(fix));
+          }
+          if (res.headers.get("X-Chat-Response-Mode") === "router-location") {
+            await res.body?.cancel();
+            throw new Error("Unexpected second router location request");
+          }
+        }
         // Headers move the phase and deliberately do not extend the deadline:
         // the first-response budget is absolute from the moment the request
         // was issued, so server-side attachment extraction and the provider's
@@ -1986,6 +2123,8 @@ function ChatAppComponent({
         latency.headers(res);
         liveness.noteHeaders();
         requestTraceId = res.headers.get("X-Request-ID");
+        sourceReceipt = receiptForAttempt(res.headers.get(CONTINUATION_RECEIPT_HEADER), requestTraceId, assistantMessageId);
+        if (sourceReceipt) setAssistantMessage(assistantMessageId, assistantText, "pending");
         // §13.4: the server's own count, taken from the response rather than
         // derived here. Absent means memory played no part -- which is not
         // the same as zero, and must not be shown as one.
@@ -2019,6 +2158,7 @@ function ChatAppComponent({
         routedReason = res.headers.get("X-Chat-Routed-Reason");
         autoRewrite = decodeAutoRewriteHeader(res.headers.get("X-Chat-Auto-Rewrite"));
         requestErrorReportToken = res.headers.get(ERROR_REPORT_TOKEN_HEADER);
+        streamErrorReportCode = null;
 
         if (!res.ok) {
           const errorBody = await res.json().catch(() => null);
@@ -2054,12 +2194,14 @@ function ChatAppComponent({
           error && typeof error === "object"
             ? (error as { code?: string }).code
             : undefined;
-        const refusalReason =
+        const refusalDetails =
           error && typeof error === "object" &&
           (error as { details?: unknown }).details &&
           typeof (error as { details?: unknown }).details === "object"
-            ? ((error as { details: Record<string, unknown> }).details.refusalReason)
+            ? (error as { details: Record<string, unknown> }).details
             : undefined;
+        const refusalReason = refusalDetails?.refusalReason;
+        const recoverWithSavedLocation = refusalDetails?.routerLocationRecovery === "saved";
         if (isGuestMode && code === "TURNSTILE_REQUIRED") {
           // The coordinator guarantees only one panel actually runs the
           // challenge; the rest wait for that panel's verified retry to finish
@@ -2070,7 +2212,7 @@ function ChatAppComponent({
             sendAfterGrant: () => sendChatRequest(),
           });
         } else if (
-          promptRefinerAllowsAutomaticChatRecovery(promptRefinerDecision) &&
+          !researchMode && !hasRouterLocationContinuation && promptRefinerAllowsAutomaticChatRecovery(promptRefinerDecision) &&
           code === "CHAT_CONTEXT_BUNDLE_STALE" &&
           refusalReason !== "already_consumed"
         ) {
@@ -2106,6 +2248,7 @@ function ChatAppComponent({
                   conversationId: isGuestMode ? null : targetChatId,
                   modelIds: [modelId],
                   prompt: text,
+                  ...(activeContextBundle ? { previousContextBundle: activeContextBundle } : {}),
                 })
               : null;
           // Nothing to retry with. Re-sending the bundle that was just
@@ -2119,9 +2262,9 @@ function ChatAppComponent({
           // second turn or taking a second concurrency slot. The refused
           // request never reached `acquireChatAccess`, so its slot is still
           // this panel's to spend.
-          response = await sendChatRequest();
+          response = await sendChatRequest(undefined, recoverWithSavedLocation);
         } else if (
-          promptRefinerAllowsAutomaticChatRecovery(promptRefinerDecision) &&
+          !researchMode && !hasRouterLocationContinuation && promptRefinerAllowsAutomaticChatRecovery(promptRefinerDecision) &&
           code === "CHAT_CONTEXT_BUNDLE_STALE" &&
           refusalReason === "already_consumed" &&
           !isGuestMode &&
@@ -2141,6 +2284,7 @@ function ChatAppComponent({
                   conversationId: targetChatId,
                   modelIds: [modelId],
                   prompt: text,
+                  ...(activeContextBundle ? { previousContextBundle: activeContextBundle } : {}),
                 })
               : null;
           if (!refreshed) throw error;
@@ -2167,22 +2311,10 @@ function ChatAppComponent({
           assistantMessageId = freshAssistantMessageId;
           activeContextBundle = refreshed;
           contextBundleCollisionRetries += 1;
-          response = await sendChatRequest();
+          response = await sendChatRequest(undefined, recoverWithSavedLocation);
         } else {
           throw error;
         }
-      }
-
-      const promptRefinerObservation = parsePromptRefinerExecutionHeaders(
-        response.headers
-      );
-      if (promptRefinerObservation) {
-        // Display telemetry only. Authorization was already decided and the
-        // held row consumed on the server; these headers cannot cause a send.
-        onPromptRefinerExecution?.({
-          promptId: analyticsPromptId,
-          ...promptRefinerObservation,
-        });
       }
 
       // Capture the successful dispatch's attribution before a first chunk:
@@ -2273,6 +2405,8 @@ function ChatAppComponent({
           );
         }
         if (completedMessage) {
+          observeJourneyReply({ owner: panelIdentityKey, epoch: observedJourneyEpoch, conversationId: attempt.conversationId,
+            sourceUserMessageId: attempt.sourceUserMessageId, status: completedMessage.status === "incomplete" ? "incomplete" : "normal", nonempty: Boolean(completedMessage.content.trim()) });
           onResponseComplete?.(
             analyticsPromptId,
             attempt.actualModelId ?? attempt.requestedModelId,
@@ -2299,7 +2433,14 @@ function ChatAppComponent({
       const streamed = await consumeChatStream({
         reader: response.body.getReader(),
         liveness,
+        // A stream the server failed part way carries its error report in a
+        // trailer written just before the break. A connection that simply
+        // dropped has none, and that report stays unverified.
+        onInterrupted: (json) =>
+          adoptStreamErrorReport(parseChatStreamTrailer(json)),
         onProgress: (progress) => {
+          if (progress.displayText.trim() && sourceReceipt?.status === "unknown") sourceReceipt = { ...sourceReceipt, status: "dispatched" };
+          if (progress.retryingWithModelId && sourceReceipt?.attempt === 0) sourceReceipt = { ...sourceReceipt, attempt: 1, status: "unknown" };
           latency.content(progress.displayText);
           assistantText = progress.displayText;
           setAssistantMessage(
@@ -2338,6 +2479,8 @@ function ChatAppComponent({
       latencyCompleted = !serverStallCode && Boolean(assistantText.trim());
       const searchMetadataJson = streamed.searchMetadataJson;
       const trailer = parseChatStreamTrailer(searchMetadataJson);
+      adoptStreamErrorReport(trailer);
+      sourceReceipt = receiptForAttempt(trailer?.continuationReceipt, requestTraceId, assistantMessageId, sourceReceipt) ?? sourceReceipt;
       const searchMetadata =
         (trailer?.searchMetadata as WebSearchExecution | null | undefined) ??
         null;
@@ -2363,12 +2506,16 @@ function ChatAppComponent({
       // two are different events with different copy, different codes and
       // different counters.
       if (serverStallCode) {
+        if (targetChatId) observeJourneyReply({ owner: panelIdentityKey, epoch: observedJourneyEpoch,
+          conversationId: targetChatId, sourceUserMessageId, status: "timeout", nonempty: false });
         endAsTimeout(
           serverStallCode,
           ERROR_CLASSIFICATION_SOURCE.server,
           assistantText
         );
       } else if (!assistantText.trim()) {
+        if (targetChatId) observeJourneyReply({ owner: panelIdentityKey, epoch: observedJourneyEpoch,
+          conversationId: targetChatId, sourceUserMessageId, status: "normal", nonempty: false });
         if (requestTraceId && typeof window !== "undefined") {
           window.localStorage.setItem(
             "tomverse_last_error_trace_id",
@@ -2386,10 +2533,13 @@ function ChatAppComponent({
           {
             errorCode: "EMPTY_RESPONSE",
             errorHadAttachments: attachments.length > 0,
-            // EMPTY_RESPONSE is a *client* classification: the stream ended
-            // normally (HTTP 200) with no text, so no server error was
-            // emitted and no token exists. The report stays unverified by
-            // design -- see docs/policy/trace-feedback-automation.md.
+            // EMPTY_RESPONSE is this client's name for a 200 stream that
+            // ended with no text. The server judges the same turn itself and
+            // signs its own code into the trailer (operator decision
+            // 2026-11-16), which `buildErrorReport` then reports in place of
+            // this one. Without that trailer -- an older server, signing not
+            // configured -- the report is client-classified and unverified.
+            // See docs/policy/trace-feedback-automation.md section 3.3.
             errorReport: buildErrorReport(
               requestTraceId,
               "EMPTY_RESPONSE",
@@ -2426,6 +2576,8 @@ function ChatAppComponent({
             modelId: answeringModelId({ requestedModelId: modelId, routedModelId, retryingWithModelId }),
           }
         );
+        if (targetChatId) observeJourneyReply({ owner: panelIdentityKey, epoch: observedJourneyEpoch,
+          conversationId: targetChatId, sourceUserMessageId, status: completionStatus, nonempty: Boolean(assistantText.trim()) });
         onResponseComplete?.(
           analyticsPromptId,
           answeringModelId({ requestedModelId: modelId, routedModelId, retryingWithModelId }),
@@ -2444,6 +2596,9 @@ function ChatAppComponent({
               details?: unknown;
             })
           : {};
+      if (targetChatId) observeJourneyReply({ owner: panelIdentityKey, epoch: observedJourneyEpoch,
+        conversationId: targetChatId, sourceUserMessageId,
+        status: requestError.name === "AbortError" ? "cancelled" : "error", nonempty: false });
       const reportedErrorCode =
         typeof requestError.code === "string" ? requestError.code : "";
       const guestAutoTransportOutcomeUnknown =
@@ -2718,7 +2873,6 @@ function ChatAppComponent({
     messages,
     modelId,
     onResponseComplete,
-    onPromptRefinerExecution,
     persistGuestTranscript,
     chatLocationIntentEnabled,
     pollDeepResearchJob,
@@ -2743,6 +2897,17 @@ function ChatAppComponent({
     );
     if (prompt) onRestorePrompt(prompt);
   }, [initialConversationId, onRestorePrompt, transcriptScope]);
+
+  const handleRetryQuestion = useCallback((assistantMessageId: string) => {
+    if (transcriptScope !== "conversation" || !onRetryPrompt ||
+        isChatRuntimeStreaming(runtimeKeyRef.current)) return;
+    const prompt = recoveryPromptForMessage(
+      getChatRuntimeSnapshot(runtimeKeyRef.current).messages,
+      assistantMessageId,
+      initialConversationId
+    );
+    if (prompt && prompt.attachments.length === 0) onRetryPrompt(prompt);
+  }, [initialConversationId, onRetryPrompt, transcriptScope]);
 
   /**
    * Sends a concurrency-refused question again, in place of the refused turn.
@@ -3080,6 +3245,11 @@ function ChatAppComponent({
           promptPayload.submittedAtMonotonicMs,
           promptPayload.preparationTimings,
           promptPayload.preparationReadyAtMonotonicMs,
+          promptPayload.preparedLocationIntent,
+          promptPayload.routerLocationTurn,
+          promptPayload.sourcePassages,
+          promptPayload.researchMode,
+          promptPayload.researchDurable,
         ).then(() => {
           if (!providerStarted) reportDisposition("terminal");
         });
@@ -3250,6 +3420,7 @@ function ChatAppComponent({
         // A continuation is not an empty conversation: the imported half is
         // its earlier turns, and they render inside this list.
         !hasImportedTranscript ? null : <ChatMessageList
+        onResearchMessage={(message) => writeChatRuntimeMessages(runtimeKey, current => current.map(existing => existing.id === message.id ? { ...existing, ...message } : existing))}
         transcriptFooter={voiceHistoryRevision !== undefined && initialConversationId && !isGuestMode ? <VoiceConversationHistory conversationId={initialConversationId} revision={voiceHistoryRevision} /> : undefined}
         messages={
           // The imported half first, always: it is what this conversation
@@ -3275,13 +3446,19 @@ function ChatAppComponent({
         }
         onRestoreQuestion={transcriptScope === "conversation" && onRestorePrompt
           ? handleRestoreQuestion : undefined}
+        onRetryQuestion={transcriptScope === "conversation" && onRetryPrompt
+          ? handleRetryQuestion : undefined}
+        // In Chat the shell's close-model handler opens the model picker.
+        onChooseAnotherModel={transcriptScope === "conversation" ? onRequestCloseModel : undefined}
         // Built from this transcript, which is the one on screen.
-        onCompareInReview={transcriptScope === "conversation" && onCompareInReview
+        onCompareInReview={transcriptScope === "conversation" && (onCompareContinuationInReview || onCompareInReview)
           ? (messageId) => {
+              if (onCompareContinuationInReview) { onCompareContinuationInReview(messageId); return; }
               const seed = reviewSeedFromChat(messages, messageId, t("chat.compareInReviewContext"));
-              if (seed) onCompareInReview(seed);
+              if (seed) onCompareInReview?.(seed);
             }
           : undefined}
+        compareRequiresCompleted={Boolean(onCompareContinuationInReview)}
         // Both scopes: a concurrency refusal is the one failure Chat may
         // resend, since nothing of the refused turn ever ran (see the handler).
         // Without a held retry prompt (after a reload) Chat falls back to

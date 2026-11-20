@@ -1450,6 +1450,12 @@ export const assessModelLifecycleItem = (input: {
    * as a set, and the row cannot be judged well without them.
    */
   siblingApiModels?: readonly string[];
+  /**
+   * Adopted, already served, and stalled before rollout was recorded
+   * (`isRolloutFinishable`). Asked before anything about the candidate itself:
+   * the line check would otherwise name the item's own model as its successor.
+   */
+  rolloutFinishable?: boolean;
 }): ModelTriageAssessment => {
   const provider = providerLabel(input.providers);
   const product = modelProductSurface(input.apiModel);
@@ -1465,6 +1471,15 @@ export const assessModelLifecycleItem = (input: {
       verdictKo: `${provider} 카탈로그에서 더 이상 확인되지 않는 Tomverse 제공 모델입니다.`,
       nextStepKo:
         "대체 모델을 먼저 정하고, 이 모델을 기본값이나 대화에 저장해 둔 사용자가 있는지 확인해야 합니다.",
+    });
+  }
+  if (input.rolloutFinishable) {
+    return triaged({
+      priority: "review",
+      kind: product === "image_generation" ? "image_generation" : "general_chat",
+      product,
+      verdictKo: "채택되어 Tomverse가 이미 서비스하는 모델입니다. 롤아웃 기록만 남아 있습니다.",
+      nextStepKo: "'롤아웃 완료'로 닫으면 이 대기열에서 빠집니다.",
     });
   }
   if (input.lifecycle) {

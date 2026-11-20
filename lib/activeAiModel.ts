@@ -1,9 +1,12 @@
 import "server-only";
 
 import { createAnthropic } from "@ai-sdk/anthropic";
+import { createCohere } from "@ai-sdk/cohere";
 import { createGoogle } from "@ai-sdk/google";
+import { createMistral } from "@ai-sdk/mistral";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createMoonshotAI } from "@ai-sdk/moonshotai";
+import { defaultSettingsMiddleware, wrapLanguageModel, type StepResult, type ToolSet } from "ai";
 import type { AiModel } from "@/lib/models";
 import {
   decideOpenRouterDispatch,
@@ -33,16 +36,64 @@ const runtimeConfiguration = (model: AiModel) => {
   };
 };
 
+function searchReturnedSources(output: unknown): boolean {
+  if (!output || typeof output !== "object" || !("status" in output)) return false;
+  if (output.status === "batch") {
+    return "searches" in output && Array.isArray(output.searches) && output.searches.length > 0 &&
+      output.searches.every(searchReturnedSources);
+  }
+  return output.status === "ok" && "results" in output && Array.isArray(output.results) &&
+    output.results.length > 0 && output.results.every(source => typeof source?.url === "string" && source.url.length > 0);
+}
+
+// Experiment allowance for checking supplied sources before answering or requesting another search.
+export const QWEN_GROUNDED_THINKING_BUDGET = 128;
+
+/** DashScope accepts enable_thinking and thinking_budget at the top level of Chat Completions. */
+export function qwenLookupStep(model: AiModel, boundedThinking = false) {
+  if (model.provider !== "qwen" || model.apiModel !== "qwen3.8-flash" ||
+      (model.reasoning && (boundedThinking || model.reasoning !== "none"))) return undefined;
+  const thinking = boundedThinking
+    ? { enable_thinking: true, thinking_budget: QWEN_GROUNDED_THINKING_BUDGET }
+    : { enable_thinking: false };
+  const lookup = createOpenAI({ ...runtimeConfiguration(model), fetch: (url, init) => {
+    // The SDK serializes the body; leave an unfamiliar request untouched.
+    if (typeof init?.body !== "string") return fetch(url, init);
+    let body;
+    try { body = JSON.parse(init.body); } catch { return fetch(url, init); }
+    if (!body || typeof body !== "object" || Array.isArray(body)) return fetch(url, init);
+    return fetch(url, { ...init, body: JSON.stringify({ ...body, ...thinking }) });
+  } }).chat(model.apiModel);
+  return ({ stepNumber, steps }: { stepNumber: number; steps?: Pick<StepResult<ToolSet>, "toolCalls" | "toolResults">[] }) => {
+    if (stepNumber === 0) return { model: lookup };
+    if (!boundedThinking) return;
+    const last = steps?.at(-1);
+    if (!last?.toolCalls.length || last.toolCalls.length !== last.toolResults.length) return;
+    const onlyCompletedSearches = last.toolCalls.every(call => call.toolName === "web_search" && !call.providerExecuted &&
+      last.toolResults.some(result => result.toolName === call.toolName && result.toolCallId === call.toolCallId &&
+        !result.providerExecuted && !result.preliminary && searchReturnedSources(result.output)));
+    if (onlyCompletedSearches) return { model: lookup };
+  };
+}
+
 export const getActiveAiModel = (
   model: AiModel,
   openRouterRequest?: OpenRouterRequest
 ) => {
+  if (model.provider === "cohere" && process.env.COHERE_CHAT_ENABLED === "false") {
+    throw new Error("COHERE_CHAT_DISABLED");
+  }
+  if (model.provider === "cohere" && model.apiModel !== "command-a-plus-05-2026") {
+    throw new Error("COHERE_CHAT_MODEL_UNSUPPORTED");
+  }
   const configuration = runtimeConfiguration(model);
   switch (model.provider) {
     case "openai":
       return createOpenAI(configuration)(model.apiModel);
     case "anthropic":
       return createAnthropic(configuration)(model.apiModel);
+    case "cohere":
+      return createCohere({ ...configuration, fetch: createCohereResearchFetch() })(model.apiModel);
     case "google":
       return createGoogle(configuration)(model.apiModel);
     case "groq":
@@ -52,7 +103,16 @@ export const getActiveAiModel = (
         model.apiModel
       );
     case "mistral":
-      return createOpenAI(configuration).chat(model.apiModel);
+      // Mistral returns thinking/text chunks in message.content. The OpenAI
+      // adapter accepts only a string there and rejects successful responses.
+      // Keep its pinned SDK version on the AI core's provider protocol.
+      return wrapLanguageModel({
+        model: createMistral(configuration)(model.apiModel),
+        // Preserve the OpenAI adapter's strict structured-output default.
+        middleware: defaultSettingsMiddleware({
+          settings: { providerOptions: { mistral: { strictJsonSchema: true } } },
+        }),
+      });
     case "xai":
       return createOpenAI(configuration).chat(model.apiModel);
     case "moonshot":
@@ -94,3 +154,21 @@ export const getActiveAiModel = (
     }
   }
 };
+
+/** Cohere's SDK does not yet expose strict_tools. Keep it scoped to Research's report phase. */
+export function createCohereResearchFetch(fetchImpl: typeof fetch = fetch): typeof fetch {
+  return (url, init) => {
+    if (typeof init?.body !== "string") return fetchImpl(url, init);
+    let body: unknown;
+    try { body = JSON.parse(init.body); } catch { return fetchImpl(url, init); }
+    if (!body || typeof body !== "object" || Array.isArray(body)) return fetchImpl(url, init);
+    const request = body as Record<string, unknown>;
+    const reportPhase = Array.isArray(request.tools) && request.tools.some((tool) =>
+      tool?.type === "function" && tool.function?.name === "submit_research_report");
+    if (!reportPhase) return fetchImpl(url, init);
+    if (request.response_format !== undefined) {
+      throw new Error("COHERE_RESEARCH_RESPONSE_FORMAT_WITH_TOOLS");
+    }
+    return fetchImpl(url, { ...init, body: JSON.stringify({ ...request, strict_tools: true }) });
+  };
+}

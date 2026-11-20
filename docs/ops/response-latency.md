@@ -15,6 +15,34 @@ measurements**, even when there are no cycles or automation is off. It uses the
 existing admin read permission and rate limit, makes no model call, and does not
 start an optimizer cycle. Per-cycle evidence remains a historical snapshot.
 
+The daily Maintenance Cron records `chatPresearchLatency` in the existing
+`retention_cleanup` job result and emits the `chat_presearch_latency_daily`
+log event. Each snapshot covers the last 24 hours and seven days of auto Chat
+server attempts with a recorded `presearchMs` stage, including searches that
+returned no evidence. The counts can include QA traffic. Other search paths
+and failures before server timing was recorded are outside this cohort.
+
+Browser first-content and completion p50/p95 use nearest rank on paired
+successful attempts with each timing present. The 10-second rate divides
+successful completions with recorded first content and completion at or below
+10,000 ms by all observed server attempts. Missing browser reports, failures
+and cancellations stay visible. A failed server or client outcome takes
+precedence over cancellation. A server failure can also lack a browser report.
+Empty windows have null percentiles and rate. `status: unavailable` indicates
+the measurement could not be read.
+
+For completions over ten seconds with all three timings in order,
+`timedSlowCompleted` gives the shared sample count for three stage medians.
+The first approximates submit to provider start (browser first content minus
+server provider-to-content, including client/server boundary time). The second
+measures provider start to first content, including tool round trips. The third
+is browser first content to completion. Each duration is calculated per attempt
+before taking its median. Do not add the stage medians to infer a total.
+
+When an enabled routing optimizer cycle runs, its existing generator reads
+the same aggregate for its report. The cycle summary retains the snapshot
+used for that report. This uses the cycle's existing approval and model call.
+
 ## Smart Adaptive first response
 
 Application-managed search accepts a single query or an array of up to five
@@ -41,7 +69,7 @@ usage retaining the hold. No budget or user credit price changes.
 The standalone fallback can add latency after a failed combined call; include
 these failures in p95 comparisons before enabling the switch.
 
-Combined decisions now carry `+image-intent-v2` in their version. Ordinary chat
+Combined decisions now carry `+image-intent-v3` in their version. Ordinary chat
 returns `imageIntent: null` instead of generating unused image fields. An exact
 shared message is sent once; distinct bounded image text is retained. Follow-up
 and photo-edit instructions are included when their prepared context is present;
@@ -50,6 +78,30 @@ effort, output limits, validators and fallback remain the same.
 Their image context is not stored in router decisions, so both routing and
 rewrite optimizers exclude all `+image-intent-` versions from text-only
 replay; normal session memory and aggregate routing diagnostics remain available.
+
+### Router latency (2026-11-13)
+
+Live router calls took 2.9-5.5 s against a 7 s deadline (8 s with combined image
+intent), up from 1.9-2.3 s when there were 17 candidates; one combined call
+timed out at 8 s and its standalone image fallback added 4.7 s more. What
+changed, and what stays a switch:
+
+- A router that was asked and failed now hands the turn to the requested model
+  (docs/ui-contracts/auto-model-selection.md), so a timeout no longer drops a
+  file request onto a model without file tools.
+- `chat_auto_llm_router` logs `requestChars`, `reasoningEffort` and
+  `reasoningTokens` (sizes only, never text), so a slow call can be told apart
+  from a slow provider.
+- `AUTO_LLM_ROUTER_REASONING_EFFORT` (`none` | `minimal` | `low`, default
+  `low`) sets the OpenAI router's effort. It is never raised and an unknown value
+  is ignored. Lowering it is the operator's trial: a model that does not
+  implement an effort rejects every router call (each then falls back to the
+  requested model), so watch `auto_llm_router_call_failed` after setting it.
+- `CHAT_ROUTER_IMAGE_HEDGE_MS` (1,000-20,000; unset = off) starts the standalone
+  image classification beside a combined router call that is still running at
+  that point, so a router failure costs one wait rather than two. It is a second
+  paid classification on every slow combined turn, used only when the router
+  then fails, so it is off until the owner turns it on.
 Before enabling this switch, compare routing/image accuracy and latency against
 the legacy path using approved evaluation traffic, including text, files, image
 generation, photo analysis/editing and image follow-ups. Local mocked tests check

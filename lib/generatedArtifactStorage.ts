@@ -32,6 +32,8 @@ import {
 } from "@/lib/generatedArtifactCore";
 import { prisma } from "@/lib/prisma";
 import { deleteR2Object, listExpiredR2Objects, writeR2Object } from "@/lib/r2";
+import { parseCanonicalWorkbookSpec, type CanonicalWorkbookSpec } from "@/lib/generatedArtifactWorkbookRevision";
+import { generatedArtifactRevisionEnabled } from "@/lib/generatedArtifactRevisionCore";
 
 /**
  * The storage prefix. Enumerable, because the orphan sweep depends on being
@@ -93,6 +95,9 @@ export type StoredArtifact = {
   byteSize: number;
   objectKey: string;
   modelId: string | null;
+  canonicalSpec?: CanonicalWorkbookSpec;
+  parentArtifactId?: string | null;
+  lineageId?: string;
 };
 
 /**
@@ -113,11 +118,26 @@ export const putArtifactObject = async (input: {
   mediaType: string;
   bytes: Uint8Array;
   modelId: string | null;
+  /**
+   * The ceiling for this object. Authored files keep the default; only a
+   * conversion of the user's own attachments passes the larger
+   * `maxConvertedOutputBytes`.
+   */
+  maxBytes?: number;
+  canonicalSpec?: CanonicalWorkbookSpec;
+  parentArtifactId?: string | null;
+  lineageId?: string;
 }): Promise<StoredArtifact> => {
   if (input.bytes.byteLength <= 0) {
     throw new Error("Refusing to store an empty artifact.");
   }
-  if (input.bytes.byteLength > ARTIFACT_LIMITS.maxOutputBytes) {
+  if (
+    input.bytes.byteLength >
+    Math.min(
+      input.maxBytes ?? ARTIFACT_LIMITS.maxOutputBytes,
+      ARTIFACT_LIMITS.maxConvertedOutputBytes
+    )
+  ) {
     throw new Error("Refusing to store an artifact over the size limit.");
   }
 
@@ -128,6 +148,10 @@ export const putArtifactObject = async (input: {
     artifactId: id,
     format: input.format,
   });
+
+  const revisionEnabled = generatedArtifactRevisionEnabled();
+  const canonicalSpec = revisionEnabled && input.format === "xlsx"
+    ? parseCanonicalWorkbookSpec(input.canonicalSpec) : null;
 
   await writeR2Object(objectKey, Buffer.from(input.bytes), input.mediaType);
 
@@ -140,6 +164,11 @@ export const putArtifactObject = async (input: {
     byteSize: input.bytes.byteLength,
     objectKey,
     modelId: input.modelId,
+    ...(canonicalSpec ? { canonicalSpec } : {}),
+    ...(revisionEnabled ? {
+      ...(input.parentArtifactId ? { parentArtifactId: input.parentArtifactId } : {}),
+      lineageId: input.lineageId ?? id,
+    } : {}),
   };
 };
 
@@ -161,6 +190,54 @@ export const persistArtifactRows = async (
     failed: Array<{ ordinal: number; format: SupportedArtifactFormat; filename: string; mediaType: string; failureCode: string; modelId: string | null }>;
   }
 ): Promise<number> => {
+  // Metadata never grants access: every source edge is verified again inside
+  // the message transaction. If its evidence has disappeared, keep the answer
+  // and the new file as an independent root without claiming an unverified edge.
+  const revisionEnabled = generatedArtifactRevisionEnabled();
+  const lineage = new Map<string, { parentArtifactId: string | null; lineageId: string }>();
+  const noteDroppedLineage = (reason: "parent_mismatch" | "source_evidence_missing") => {
+    console.warn(JSON.stringify({ event: "generated_artifact_lineage_dropped", reason, count: 1 }));
+  };
+  for (const artifact of revisionEnabled ? input.stored : []) {
+    lineage.set(artifact.id, { parentArtifactId: null, lineageId: artifact.id });
+    const lineageId = artifact.lineageId ?? artifact.id;
+    if (!artifact.parentArtifactId && lineageId === artifact.id) {
+      lineage.set(artifact.id, { parentArtifactId: null, lineageId });
+      continue;
+    }
+    if (artifact.parentArtifactId) {
+      await tx.$queryRaw`SELECT "id" FROM "MessageArtifact" WHERE "id" = ${artifact.parentArtifactId} AND "userId" = ${input.userId} AND "conversationId" = ${input.conversationId} FOR KEY SHARE`;
+      const parent = await tx.messageArtifact.findFirst({
+        where: { id: artifact.parentArtifactId, userId: input.userId,
+          conversationId: input.conversationId, status: "ready" },
+        select: { id: true, lineageId: true },
+      });
+      if (parent) {
+        const actualLineageId = parent.lineageId ?? parent.id;
+        if (actualLineageId !== lineageId || parent.id === artifact.id) {
+          noteDroppedLineage("parent_mismatch");
+          continue;
+        }
+        lineage.set(artifact.id, { parentArtifactId: parent.id, lineageId });
+        continue;
+      }
+    }
+    const [boundReceipt, uploadReceipt] = await Promise.all([
+      tx.messageAttachment.findFirst({ where: {
+        userId: input.userId, conversationId: input.conversationId,
+        sourceConversationId: input.conversationId, sourceLineageId: lineageId,
+      }, select: { id: true } }),
+      tx.messageAttachmentUpload.findFirst({ where: {
+        userId: input.userId, sourceConversationId: input.conversationId,
+        sourceLineageId: lineageId,
+      }, select: { id: true } }),
+    ]);
+    if (!boundReceipt && !uploadReceipt) {
+      noteDroppedLineage("source_evidence_missing");
+      continue;
+    }
+    lineage.set(artifact.id, { parentArtifactId: null, lineageId });
+  }
   const rows = [
     ...input.stored.map((artifact) => ({
       id: artifact.id,
@@ -175,6 +252,8 @@ export const persistArtifactRows = async (
       status: "ready",
       objectKey: artifact.objectKey,
       modelId: artifact.modelId,
+      ...(revisionEnabled && artifact.canonicalSpec ? { canonicalSpec: artifact.canonicalSpec as unknown as Prisma.InputJsonValue } : {}),
+      ...lineage.get(artifact.id),
     })),
     // A failed generation is recorded too, so reopening the conversation still
     // shows what was attempted rather than silently dropping the request. It

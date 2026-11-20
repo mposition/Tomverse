@@ -1,8 +1,10 @@
 ﻿"use client";
 
 import type { ReviewWorkspaceControls } from "./useReviewWorkspace";
+import type { ResearchPreviewControls } from "./useResearchPreview";
 import { McpChatPicker } from "@/components/plugins/McpChatPicker";
 import { ChatLocationControl } from "./ChatLocationControl";
+import { composerModelCountLabel } from "./composerModelCountLabel";
 import { ReviewModeSwitcher, ReviewParticipants } from "./ReviewStudioChrome";
 import { reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
 import { reviewProviderPreferencesCopy } from "@/lib/reviewProviderPreferencesCopy";
@@ -82,6 +84,11 @@ import {
   resolveChatAttachmentFormat,
 } from "@/lib/chatAttachmentFormats";
 import { chatAttachmentErrorCopyKey } from "@/lib/chatAttachmentErrorCopy";
+import {
+  CHAT_MAX_ATTACHMENTS_PER_MESSAGE,
+  CHAT_MAX_ATTACHMENT_BYTES,
+  CHAT_MAX_TOTAL_ATTACHMENT_BYTES,
+} from "@/lib/chatAttachmentLimits";
 import {
   APP_DEFAULTS,
   isWebSearchEnabled,
@@ -172,8 +179,10 @@ type PublicModelStatusRecord = {
   fallbackModelIds: string[];
 };
 
-const MAX_ATTACHMENTS = 5;
-const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
+const MAX_ATTACHMENTS = CHAT_MAX_ATTACHMENTS_PER_MESSAGE;
+const MAX_ATTACHMENT_SIZE = CHAT_MAX_ATTACHMENT_BYTES;
+const attachmentBytesTotal = (list: readonly ChatAttachment[]) =>
+  list.reduce((sum, item) => sum + (Number.isFinite(item.size) ? item.size : 0), 0);
 const GOOGLE_DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const GOOGLE_WORKSPACE_TYPES = [
   "application/vnd.google-apps.document",
@@ -260,7 +269,7 @@ export function ChatInputWebSearchChipView({
       data-tone={tone}
       data-supported-count={isAutoMode ? undefined : state.supportedCount}
       data-unsupported-count={isAutoMode ? undefined : state.unsupportedCount}
-      className={`flex min-w-0 max-w-full items-center gap-1.5 rounded-full border pl-3 pr-1.5 text-xs font-bold max-[360px]:gap-1 max-[360px]:pl-2 max-[360px]:pr-0.5 ${isMobileShell ? "h-8" : "h-9"} ${
+      className={`flex min-w-0 max-w-full items-center gap-1.5 rounded-full border pl-3 pr-1.5 text-xs font-bold max-[360px]:gap-1 max-[360px]:pl-2 max-[360px]:pr-0.5 ${isMobileShell ? "h-8 shrink-0" : "h-9"} ${
         tone === "blocked"
           ? "border-red-200 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
           : tone === "warning"
@@ -858,9 +867,12 @@ type ChatInputProps = {
   /** `null` detaches. Re-sending the bound id moves it to the newest revision. */
   onAssistantProfileChange?: (profileId: string | null) => void;
   /** The account default `inherit` resolves to, for describing that choice. */
-  accountMemoryDefault?: "on" | "off";
+  accountMemoryDefault?: "on" | "off" | null;
+  accountMemoryMasterEnabled?: boolean | null;
+  onMemorySettingsRefresh?: () => void;
   onWebSearchModeChange?: (mode: WebSearchMode) => void;
   onOpenDeepResearchSetup?: () => void;
+  researchPreview?: ResearchPreviewControls;
   /**
    * Switches to the image draft, carrying the composer's current text as the
    * starting prompt. Absent when the image feature flag is off. `modelId` is
@@ -1060,9 +1072,12 @@ export function ChatInput({
   assistantProfileRemovedAt,
   assistantProfileOptions = [],
   onAssistantProfileChange,
-  accountMemoryDefault = "on",
+  accountMemoryDefault = null,
+  accountMemoryMasterEnabled = null,
+  onMemorySettingsRefresh,
   onWebSearchModeChange,
   onOpenDeepResearchSetup,
+  researchPreview,
   onStartImageDraft,
   voiceInputEnabled = false,
   voiceConversationControl,
@@ -1159,7 +1174,7 @@ export function ChatInput({
     const isAutoCapabilityPending =
       isAutoMode && draftLocked && !autoSelectionOffered;
     const modelsSelectedLabel = (count: number) =>
-      `${count} ${count === 1 ? t("chat.modelsSelectedOne") : t("chat.modelsSelectedOther")}`;
+      composerModelCountLabel(count, t("chat.modelsSelectedOne"), t("chat.modelsSelectedOther"));
     const signInCallbackUrl = withChatLanguage(
       currentProduct === "review" ? "/review" : "/chat",
       lang
@@ -1485,6 +1500,10 @@ export function ChatInput({
     isUsageLimitReached ||
     (isSending && !allowEditingWhileSending);
   const isDraftMutationDisabled = isDisabled || draftLocked;
+  const hasResearchPreviewAttachments = attachments.length > 0 ||
+    scopedPendingAttachments.length > 0 || scopedFailedAttachments.length > 0;
+  const isResearchPreviewBlocked = Boolean(researchPreview?.selected &&
+    (!researchPreview?.offered || hasResearchPreviewAttachments || !value.trim() || value.trim().length > 4000));
 
   const handlePromptRefinerDecision = useCallback(
     (
@@ -2367,7 +2386,7 @@ export function ChatInput({
     // The successor draft remains editable in durable Chat, but Enter cannot
     // consume it while either a live response or a read-only recovery poll is
     // still active. The visible branch below presents Stop instead of Send.
-    if (!isDraftMutationDisabled && !isVoiceSubmissionBlocked && !isSending) {
+    if (!isDraftMutationDisabled && !isVoiceSubmissionBlocked && !isSending && !isResearchPreviewBlocked) {
       dismissGuestQuickStart();
       onSubmit();
     }
@@ -2598,7 +2617,40 @@ export function ChatInput({
         // copy silently drops whichever one landed first. `scopeId` sends it
         // to the conversation the file was picked in, which may no longer be
         // the one on screen.
-        onAttachmentsChange((current) => [...current, attachment], scopeId);
+        let capacityRejected = false;
+        let totalRejected = false;
+        onAttachmentsChange((current) => {
+          if (current.length >= maxAttachments) {
+            capacityRejected = true;
+            return current;
+          }
+          // The server refuses a message whose files total more than this
+          // (ATTACHMENT_TOTAL_TOO_LARGE); say so here, before it is sent.
+          if (
+            !isEphemeralAttachment &&
+            attachmentBytesTotal(current) + attachment.size >
+              CHAT_MAX_TOTAL_ATTACHMENT_BYTES
+          ) {
+            totalRejected = true;
+            return current;
+          }
+          return [...current, attachment];
+        }, scopeId);
+        if (capacityRejected || totalRejected) {
+          // A prepared revision may have occupied a slot while this upload ran.
+          // Remove only this unused upload; a bound upload is kept by the API.
+          try {
+            const response = await fetch("/api/chat", { method: "DELETE",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ uploadId: attachment.uploadId }) });
+            await discardResponseBody(response);
+          } catch { /* An unbound upload retains the existing account-cleanup lifetime. */ }
+          dispatchAppToast(
+            t(totalRejected ? "chat.attachmentTotalSizeError" : "chat.attachmentCountError"),
+            "error"
+          );
+          return;
+        }
         noticeArchiveExclusions(finalized.archive);
       } catch (error) {
         console.error("Attachment upload failed:", error);
@@ -2610,6 +2662,7 @@ export function ChatInput({
       guestAttachmentErrorMessage,
       isEphemeralAttachment,
       maxAttachmentBytes,
+      maxAttachments,
       noticeArchiveExclusions,
       onAttachmentsChange,
       requestGuestVerificationToken,
@@ -2652,9 +2705,27 @@ export function ChatInput({
       return;
     }
 
+    // An account's message holds CHAT_MAX_TOTAL_ATTACHMENT_BYTES in all: a
+    // file that would take it past that is not uploaded at all.
+    let remainingBytes = isEphemeralAttachment
+      ? Infinity
+      : CHAT_MAX_TOTAL_ATTACHMENT_BYTES - attachmentBytesTotal(attachments);
+    let overTotal = false;
     const entries = Array.from(files)
       .slice(0, availableSlots)
+      .filter((file) => {
+        // An oversized file is left to the per-file check, which names it.
+        if (file.size > maxAttachmentBytes) return true;
+        if (file.size > remainingBytes) {
+          overTotal = true;
+          return false;
+        }
+        remainingBytes -= file.size;
+        return true;
+      })
       .map((file) => ({ file, trackingId: crypto.randomUUID() }));
+    if (overTotal) dispatchAppToast(t("chat.attachmentTotalSizeError"), "error");
+    if (entries.length === 0) return;
     await runUploadBatch(entries);
   };
 
@@ -2877,6 +2948,9 @@ export function ChatInput({
       });
 
       const importedAttachments: ChatAttachment[] = [];
+      // Drive files are sized by the import, so the message total is checked
+      // as each one lands; one that would pass it is discarded unbound.
+      let importedBytes = attachmentBytesTotal(attachments);
       for (const file of selectedFiles.slice(0, availableSlots)) {
         const response = await fetch("/api/chat", {
           method: "PUT",
@@ -2895,6 +2969,18 @@ export function ChatInput({
         }
 
         const imported = await response.json();
+        const importedSize = Number.isFinite(imported.size) ? imported.size : 0;
+        if (importedBytes + importedSize > CHAT_MAX_TOTAL_ATTACHMENT_BYTES) {
+          try {
+            const discard = await fetch("/api/chat", { method: "DELETE",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ uploadId: imported.uploadId }) });
+            await discardResponseBody(discard);
+          } catch { /* An unbound upload retains the existing account-cleanup lifetime. */ }
+          dispatchAppToast(t("chat.attachmentTotalSizeError"), "error");
+          break;
+        }
+        importedBytes += importedSize;
         importedAttachments.push({
           id: crypto.randomUUID(),
           name: imported.name,
@@ -3052,9 +3138,9 @@ export function ChatInput({
               ref={modelMenuButtonRef}
               type="button"
               onClick={(event) => toggleModelPicker(event.currentTarget)}
-              className="flex h-11 min-w-0 max-w-[4rem] touch-manipulation items-center gap-1 overflow-hidden rounded-xl px-2 text-xs font-medium text-zinc-800 transition hover:bg-zinc-100 max-[240px]:w-11 max-[240px]:max-w-11 max-[240px]:shrink-0 max-[240px]:justify-center max-[240px]:px-0 dark:text-zinc-100 dark:hover:bg-zinc-800 md:max-w-[8.5rem] md:[@media(pointer:fine)]:h-9"
+              className="flex h-11 min-w-0 max-w-[6.5rem] touch-manipulation items-center gap-1 overflow-hidden rounded-xl px-2 text-xs font-medium text-zinc-800 transition hover:bg-zinc-100 max-[240px]:w-11 max-[240px]:max-w-11 max-[240px]:shrink-0 max-[240px]:justify-center max-[240px]:px-0 dark:text-zinc-100 dark:hover:bg-zinc-800 md:max-w-[8.5rem] md:[@media(pointer:fine)]:h-9"
               data-testid="composer-model-select"
-              title={isAutoMode ? autoCopy.activeSummary : activeModelNames.join(", ")}
+              title={isAutoMode ? `${autoCopy.activeSummary}. ${autoCopy.modeHint}` : activeModelNames.join(", ")}
               aria-label={
                 isAutoMode
                   ? `${autoCopy.compactLabel}. ${autoCopy.activeSummary}. ${t("chat.modelSelect")}`
@@ -3075,9 +3161,14 @@ export function ChatInput({
                     />
                   </span>
                 ) : (
+                  // Between the 240px icon-only rule and md the label below
+                  // already reads "3 AIs", and the 6.5rem button cannot hold both
+                  // a count badge and that label: the badge left the label 6px
+                  // and clipped it to "3 A". The badge returns where the label
+                  // is hidden (240px and below) and where the button is wider.
                   <span
                     aria-hidden="true"
-                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[11px] font-bold text-white"
+                    className="hidden h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[11px] font-bold text-white max-[240px]:flex md:flex"
                   >
                     {activeSelectedModels.length}
                   </span>
@@ -3093,7 +3184,7 @@ export function ChatInput({
               )}
               <span
                 data-testid="composer-active-model-count"
-                className={`min-w-0 line-clamp-2 break-keep ${
+                className={`min-w-0 truncate ${
                   isAutoMode ? "" : "max-[240px]:sr-only"
                 }`}
               >
@@ -3389,7 +3480,28 @@ export function ChatInput({
             row below them. Only the label length is shell-specific, which
             `data-label-variant` states so tests read it from the DOM.
           */}
-          <ChatLocationControl identityKey={identityKey} compact />
+          {!researchPreview?.selected && <ChatLocationControl identityKey={identityKey} compact />}
+          {researchPreview?.selected && (
+            <div
+              data-testid="research-preview-notice"
+              role="status"
+              className="mb-2 rounded-xl border border-accent-deep-research-200 bg-accent-deep-research-50 px-3 py-2 text-xs leading-5 text-zinc-700 dark:border-accent-deep-research-900/60 dark:bg-accent-deep-research-950/30 dark:text-zinc-200"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold">{t("chat.researchPreviewTitle")} · {activeModelNames[0]}</span>
+                <button type="button" onClick={() => researchPreview.onSelectedChange(false)}
+                  data-testid="research-preview-clear" aria-label={t("chat.researchPreviewClear")}
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg hover:bg-zinc-200/60 dark:hover:bg-zinc-800">
+                  <X className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </div>
+              <p className="line-clamp-2 break-words whitespace-pre-wrap" data-testid="research-preview-question">{value.trim() || t("chat.researchPreviewQuestion")}</p>
+              <details><summary className="min-h-11 cursor-pointer py-2">{t("chat.researchPreviewDescription")}</summary><p>{t(researchPreview.features?.pageReading ? "chat.researchPreviewScopeWithPages" : "chat.researchPreviewScope")}</p>{researchPreview.features?.pageReading && <p>{t("chat.researchPreviewPageLimits")}</p>}{researchPreview.features?.durableRuns && <p>{t("chat.researchPreviewRunLimits")}</p>}</details>
+              {researchPreview.features?.durableRuns && <p>{t("chat.researchPreviewDurableHint")}</p>}
+              {researchPreview.estimatedCredits !== undefined && <p data-testid="research-preview-estimate">{t("chat.researchPreviewEstimate").replace("{credits}", String(researchPreview.estimatedCredits))}</p>}
+              {isResearchPreviewBlocked && <p className="font-semibold" data-testid="research-preview-blocked">{t(hasResearchPreviewAttachments ? "chat.researchPreviewAttachments" : !value.trim() || value.trim().length > 4000 ? "chat.researchPreviewQuestionLimit" : researchPreview.pending ? "chat.researchPreviewChecking" : "chat.researchPreviewUnavailable")}</p>}
+            </div>
+          )}
           {hasToolStatusChips && (
             <div
               data-testid="tool-status-chip-row"
@@ -3666,7 +3778,7 @@ export function ChatInput({
             </button>
           </div>
         )}
-        {promptRefinerOffered &&
+        {promptRefinerOffered && !researchPreview?.selected &&
         promptRefinerState &&
         onPromptRefinerRequest &&
         onPromptRefinerDecision &&
@@ -3780,7 +3892,7 @@ export function ChatInput({
             useCompactMobileReviewSpacing ? "gap-x-1.5 gap-y-1" : "gap-1.5"
           } max-[360px]:gap-x-0.5 max-[240px]:contents`}
         >
-          {currentProduct === "chat" && !isGuestMode && <McpChatPicker conversationId={currentChatId} disabled={draftLocked || isSending} />}
+          {currentProduct === "chat" && !isGuestMode && !researchPreview?.selected && <McpChatPicker conversationId={currentChatId} disabled={draftLocked || isSending} />}
           <button
             ref={actionMenuButtonRef}
             type="button"
@@ -3792,6 +3904,7 @@ export function ChatInput({
                 return;
               }
               setMenuView("actions");
+              onMemorySettingsRefresh?.();
               setIsMenuOpen(true);
               trackProductEvent("chat_tool_menu_opened", selectedModels.length, {});
             }}
@@ -3891,7 +4004,7 @@ export function ChatInput({
               type="button"
               data-testid="chat-send-button"
               onClick={() => {
-                if (isVoiceSubmissionBlocked) return;
+                if (isVoiceSubmissionBlocked || isResearchPreviewBlocked) return;
                 dismissGuestQuickStart();
                 onSubmit();
               }}
@@ -3901,6 +4014,7 @@ export function ChatInput({
                 Boolean(review?.mode === "easy" && !review.easyAvailable) ||
                 Boolean(noReviewProviders) ||
                 isVoiceSubmissionBlocked ||
+                isResearchPreviewBlocked ||
                 (singleModelSelection && selectedModels.length !== 1) ||
                 activeSelectedModels.length === 0 ||
                 (!value.trim() && attachments.length === 0)
@@ -4189,14 +4303,43 @@ export function ChatInput({
                             ? t("chat.toolsMemoryOn")
                             : memoryMode === "off"
                               ? t("chat.toolsMemoryOff")
-                              : accountMemoryDefault === "off"
+                              : accountMemoryDefault === null
+                                ? t("chat.toolsMemoryInherit")
+                                : accountMemoryDefault === "off"
                                 ? t("chat.toolsMemoryInheritOff")
                                 : t("chat.toolsMemoryInheritOn")}
+                        </span>
+                        <span className="text-xs text-zinc-500" data-testid="memory-account-status">
+                          {t(accountMemoryMasterEnabled === null
+                            ? "chat.toolsMemoryStatusUnknown"
+                            : !accountMemoryMasterEnabled
+                              ? "chat.toolsMemoryAccountOff"
+                              : assistantProfile?.useAccountMemory === false
+                                ? "chat.toolsMemoryProfileOff"
+                                : "chat.toolsMemoryAccountAllowed")}
                         </span>
                       </span>
                     </button>
                   )}
                   <div className="my-1 border-t border-zinc-200 dark:border-zinc-700" />
+                  {researchPreview?.offered && (
+                    <button
+                      type="button" data-testid="tools-research-preview-row"
+                      aria-pressed={researchPreview.selected}
+                      disabled={hasResearchPreviewAttachments || isDraftMutationDisabled || isSending}
+                      onClick={() => {
+                        researchPreview.onSelectedChange(!researchPreview.selected);
+                        closeMenu(false);
+                      }}
+                      className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-zinc-800"
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-deep-research-500/10 text-accent-deep-research-500"><Microscope className="h-5 w-5" aria-hidden="true" /></span>
+                      <span className="flex min-w-0 flex-col">
+                        <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t("chat.researchPreviewTitle")}</span>
+                        <span className="text-xs text-zinc-500">{t(hasResearchPreviewAttachments ? "chat.researchPreviewAttachments" : "chat.researchPreviewDescription")}</span>
+                      </span>
+                    </button>
+                  )}
                   {review?.mode !== "easy" && (
                       <button
                         type="button"
@@ -4259,7 +4402,9 @@ export function ChatInput({
                             ? t("chat.toolsMemoryOnDescription")
                             : mode === "off"
                               ? t("chat.toolsMemoryOffDescription")
-                              : accountMemoryDefault === "off"
+                              : accountMemoryDefault === null
+                                ? t("chat.toolsMemoryStatusUnknown")
+                                : accountMemoryDefault === "off"
                                 ? t("chat.toolsMemoryInheritOffDescription")
                                 : t("chat.toolsMemoryInheritOnDescription")}
                         </span>
@@ -4272,6 +4417,18 @@ export function ChatInput({
                       )}
                     </button>
                   ))}
+                  <p className="px-3 py-2 text-xs text-zinc-500">
+                    {t(accountMemoryMasterEnabled === null
+                      ? "chat.toolsMemoryStatusUnknown"
+                      : !accountMemoryMasterEnabled
+                        ? "chat.toolsMemoryAccountOff"
+                        : assistantProfile?.useAccountMemory === false
+                          ? "chat.toolsMemoryProfileOff"
+                          : "chat.toolsMemoryAccountAllowed")}
+                  </p>
+                  <Link href="/settings/memory" className="block rounded-xl px-3 py-2 text-sm text-accent-account-memory-500">
+                    {t("helpGuide.destinations.settingsSection.memory")}
+                  </Link>
                 </div>
               ) : menuView === "attachSource" ? (
                 /*
@@ -4583,7 +4740,7 @@ export function ChatInput({
                   */}
                   <div className="mt-1 flex flex-col gap-1 border-t border-zinc-200 pt-2 dark:border-zinc-800">
                     <Link
-                      href={assistantProfileCreateHref({ fromChat: true })}
+                      href={assistantProfileCreateHref({ from: currentProduct ?? "review" })}
                       data-testid="assistant-create-cta"
                       onClick={() => closeMenu(false)}
                       className={`flex w-full items-center gap-3 rounded-xl px-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-assistant-profile-500 ${

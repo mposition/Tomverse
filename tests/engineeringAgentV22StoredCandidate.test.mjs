@@ -32,8 +32,11 @@ test("stored v22 patch reaches the pinned candidate loader only with consent", a
   const value = await loadEngineeringAgentV22StoredCandidate(attemptId,
     ports({ loadCandidate: async (input) => {
       called++;
+      // File bytes stored beside the text are not read: the candidate is
+      // rebuilt from the text alone (owner decision 2026-11-15).
+      assert.ok(patch.files);
       assert.deepEqual(input, { baseSha: snapshot.baseSha,
-        files: patch.files });
+        patchText: patch.text });
       return candidate;
     } }));
   assert.equal(called, 1);
@@ -83,9 +86,10 @@ test("stored v22 patch refuses while the separate publication latch is closed", 
   assert.equal(patchReads, 0);
 });
 
-test("stored v22 patch refuses missing files, base drift and candidate errors", async () => {
-  for (const wrong of [null, { ...patch, files: null },
-    { ...patch, baseSha: "e".repeat(40) }]) {
+test("stored v22 patch refuses a missing patch, base drift and candidate errors", async () => {
+  // A patch with no file bytes goes to the loader as text instead
+  // (engineeringAgentV22PatchRebuild.test.mjs).
+  for (const wrong of [null, { ...patch, baseSha: "e".repeat(40) }]) {
     assert.deepEqual(await loadEngineeringAgentV22StoredCandidate(attemptId,
       ports({ readPatch: async () => wrong,
         loadCandidate: async () => { throw new Error("must not load"); } })),
@@ -97,3 +101,16 @@ test("stored v22 patch refuses missing files, base drift and candidate errors", 
   { ok: false, reason: "tree_verification_failed" });
 });
 
+
+test("stored v22 patch names each read step before it starts", async () => {
+  const stages = [];
+  await loadEngineeringAgentV22StoredCandidate(attemptId,
+    ports({ onStage: (stage) => stages.push(stage) }));
+  assert.deepEqual(stages, ["authorization", "patch_read",
+    "candidate_rebuild", "base_evidence", "recheck"]);
+  const failed = [];
+  await assert.rejects(loadEngineeringAgentV22StoredCandidate(attemptId,
+    ports({ onStage: (stage) => failed.push(stage),
+      readTier: async () => { throw new Error("github"); } })), /github/);
+  assert.equal(failed.at(-1), "base_evidence");
+});

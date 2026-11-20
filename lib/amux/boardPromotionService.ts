@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { Session } from "next-auth";
 import type { Prisma } from "@prisma/client";
 
-import { writeAdminAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
 import { SYSTEM_AUDIT_ACTOR_METADATA_KEY } from "@/lib/adminAuditSystemActors";
 import {
@@ -19,15 +19,12 @@ import {
   boardImportTransitionAllowed,
 } from "@/lib/amux/boardImportCore";
 import {
-  BOARD_PROMOTION_APPLY_CODE_LATCH,
-  BOARD_PROMOTION_APPLY_ENV,
   BOARD_PROMOTION_POLICY_VERSION,
   BOARD_PROMOTION_SCANNER_RULESET_DIGEST,
   BOARD_PROMOTION_SCANNER_VERSION,
   type BoardPromotionCardFact,
   type BoardPromotionItem,
   type BoardPromotionRequest,
-  boardPromotionApplyPermitted,
   boardPromotionCardWrite,
   boardPromotionItemBindingsDigest,
   classifyBoardPromotion,
@@ -113,6 +110,8 @@ const withPromotionTransaction = async <T>(
     return await prisma.$transaction(
       async (tx) => {
         await tx.$executeRaw`SELECT set_config('statement_timeout', ${BOARD_IMPORT_STATEMENT_TIMEOUT}, true)`;
+        // Audit chain before any card row (lib/adminAudit.ts takeAuditChainLock).
+        await takeAuditChainLock(tx);
         return run(tx, await databaseNow(tx));
       },
       { maxWait: 5_000, timeout: 20_000 },
@@ -295,10 +294,6 @@ export async function previewBoardPromotion(raw: string) {
     cardCount: parsed.request.items.length,
     cardIds: parsed.request.items.map((item) => item.cardId),
     refusal: classification.refusal,
-    applyPermitted: boardPromotionApplyPermitted({
-      envValue: process.env[BOARD_PROMOTION_APPLY_ENV],
-      codeLatch: BOARD_PROMOTION_APPLY_CODE_LATCH,
-    }),
   };
 }
 
@@ -472,14 +467,6 @@ const rejectApproved = async (
 };
 
 export async function applyBoardPromotion(input: { session: Session; request: Request; approvalId: string }) {
-  if (
-    !boardPromotionApplyPermitted({
-      envValue: process.env[BOARD_PROMOTION_APPLY_ENV],
-      codeLatch: BOARD_PROMOTION_APPLY_CODE_LATCH,
-    })
-  ) {
-    throw new BoardImportError("apply_disabled", 409, input.approvalId);
-  }
   return withPromotionTransaction(input.approvalId, async (tx, now) => {
     const row = await loadOwned(tx, input.approvalId, input.session);
     if (!boardImportTransitionAllowed(row.status, "consumed")) throw new BoardImportError("conflict", 409, row.id);

@@ -255,6 +255,16 @@ test("ingest fails closed when disabled or unauthenticated", async (t) => {
   assert.equal((await recordAgentOfficeCliMonitor(request(snapshot()))).status, 401);
 });
 
+test("the monitor switch reads enabled and the earlier 1, and nothing else", async (t) => {
+  enable(t);
+  for (const [value, on] of [["enabled", true], ["1", true], ["0", false], ["disabled", false],
+    ["true", false], ["", false], [undefined, false]]) {
+    if (value === undefined) delete process.env.TOMVERSE_AMUX_CLI_MONITOR;
+    else process.env.TOMVERSE_AMUX_CLI_MONITOR = value;
+    assert.equal(agentOfficeCliMonitorCredential() !== null, on, String(value));
+  }
+});
+
 test("ingest refuses command fields, unknown workers, oversized bodies and expired captures", async (t) => {
   enable(t);
   for (const value of [

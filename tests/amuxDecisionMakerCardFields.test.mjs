@@ -21,7 +21,6 @@ import {
   DM_CHANGE_EFFECT_CLASSES,
   DM_CHANGE_PATHS_MAX,
   DM_CHANGE_PATHS_MIN,
-  DM_CONTEXT_PATHS_MAX,
   DM_EFFECT_CLASSES,
   DM_REPOSITORY_PATH_MAX_BYTES,
   DM_RESOLUTIONS,
@@ -36,6 +35,7 @@ import { parseDmCard } from "../lib/amux/decisionMakerRequestCore.ts";
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8").replace(/\r\n/g, "\n");
 const localDmAsk = read("../vendor/amux/crates/amux-server/src/db/dm_ask.rs");
+const localRelay = read("../vendor/amux/crates/amux-server/src/api/dm_relay_v22.rs");
 const policy = read("../docs/policy/amux-decision-maker.md");
 
 const rustStrings = (name) => {
@@ -45,11 +45,13 @@ const rustStrings = (name) => {
   assert.equal(values.length, Number(match[1]), name);
   return values;
 };
-const rustUsize = (name) => {
-  const match = localDmAsk.match(new RegExp(`pub const ${name}: usize = (\\d+);`));
-  assert.ok(match, `${name} is in dm_ask.rs`);
-  return Number(match[1]);
+// A `pub const NAME: usize = 256 * 1024;` or `= 50;` of the given Rust source.
+const rustUsizeOf = (source, name) => {
+  const match = source.match(new RegExp(`pub const ${name}: usize = (\\d+(?: \\* \\d+)*);`));
+  assert.ok(match, `${name} is in its Rust source`);
+  return match[1].split("*").reduce((product, factor) => product * Number(factor), 1);
 };
+const rustUsize = (name) => rustUsizeOf(localDmAsk, name);
 const policySection = (number) => {
   const start = policy.indexOf(`\n## ${number}. `);
   const end = policy.indexOf(`\n## ${number + 1}. `, start);
@@ -107,7 +109,12 @@ test("the lists and limits are local AMUX's, read from its source", () => {
   assert.match(localDmAsk, /pub const EFFECT_OTHER: &str = "other";/);
   assert.equal(rustUsize("CHANGE_PATHS_MIN"), DM_CHANGE_PATHS_MIN);
   assert.equal(rustUsize("CHANGE_PATHS_MAX"), DM_CHANGE_PATHS_MAX);
-  assert.equal(rustUsize("CONTEXT_PATHS_MAX"), DM_CONTEXT_PATHS_MAX);
+  // The one size cap: local AMUX's stored extension and the v22 relay's filed
+  // card are both the app's card text cap; there is no context path count cap.
+  assert.equal(rustUsize("TYPED_ASK_MAX_BYTES"), DM_CARD_TEXT_MAX_BYTES);
+  assert.equal(rustUsizeOf(localRelay, "CARD_MAX_BYTES"), DM_CARD_TEXT_MAX_BYTES);
+  assert.equal(DM_CARD_TEXT_MAX_BYTES, 256 * 1024);
+  assert.doesNotMatch(localDmAsk, /CONTEXT_PATHS_MAX/);
   assert.equal(rustUsize("REPOSITORY_PATH_MAX_BYTES"), DM_REPOSITORY_PATH_MAX_BYTES);
   assert.deepEqual(rustStrings("RESOLUTIONS"), [...DM_RESOLUTIONS]);
 });
@@ -150,7 +157,8 @@ test("an option's class and paths are not term-list input; its label still is", 
   const paths = [".github/workflows/ci.yml", "prisma/migrations/20261018000000_x/migration.sql"];
   assert.deepEqual(route(card({ options: [option("a", "Edit the files", "branch_code_change", paths)] })), PROPOSAL);
   assert.deepEqual(route(card({ contextPaths: paths })), PROPOSAL);
-  const labelled = route(card({ options: [option("a", "Edit .github/workflows/ci.yml", "branch_code_change", paths)] }));
+  // A label is read: a real boundary word (owner direction 2026-11-16: money, deletion, main, production, secrets).
+  const labelled = route(card({ options: [option("a", "Delete the workflow file", "branch_code_change", paths)] }));
   assert.equal(labelled.route, "operator");
   assert.deepEqual(labelled.refusals, ["irreversible_term"]);
 });
@@ -189,7 +197,14 @@ test("an option outside the form local AMUX records goes to the operator, never 
   assert.deepEqual(route(card({ options: [option("a", "x", "docs_change", [atLimit])] })), PROPOSAL);
 });
 
-test("the paths count towards section 5's 16 KiB on the card text", () => {
+test("context paths have no count cap of their own; only the card text's one cap bounds them", () => {
+  const many = Array.from({ length: 500 }, (_, index) => `docs/${index}.md`);
+  assert.deepEqual(route(card({ contextPaths: many })), PROPOSAL);
+  assert.deepEqual(parseDmCardText(dmCardText(card({ contextPaths: many }))).contextPaths, many);
+  assert.deepEqual(parseDmCard(card({ contextPaths: many })).contextPaths, many);
+});
+
+test("the paths count towards the card text's one cap", () => {
   const longPaths = Array.from({ length: DM_CHANGE_PATHS_MAX }, (_, index) => `${"d".repeat(190)}/${index}`);
   const withPaths = (context) => card({ context, options: [option("a", "Edit", "docs_change", longPaths)] });
   const base = dmCardTextBytes(withPaths(""));

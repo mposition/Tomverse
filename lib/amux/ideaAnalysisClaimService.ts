@@ -8,6 +8,7 @@ import { auditRowActorKind, AMUX_V4_ANALYSIS_CLAIM_ACTION,
   AMUX_V4_IDEA_SYSTEM_ACTOR } from
   "@/lib/adminAuditSystemActors";
 import { AMUX_V4_ANALYSIS_NAMESPACE } from "./ideaAnalysisBudgetCore.ts";
+import { amuxAnalysisPromptDataMaxBytes } from "./ideaAnalysisPromptCore.ts";
 import { readApprovedAmuxIdeaAnalysisPriceVersion } from
   "./ideaAnalysisPriceVersionRead.ts";
 import { readAmuxIdeaAnalysisFailureStreak } from
@@ -277,7 +278,9 @@ export async function commitAmuxIdeaOnlyAnalysisClaim(
         payload.previewId !== preview.id ||
         payload.ideaId !== idea.id || payload.templateVersion !== preview.templateVersion ||
         typeof payload.prompt !== "string" ||
-        Buffer.byteLength(payload.prompt, "utf8") > 32_768 ||
+        // A prompt carries up to the data ceiling plus the fixed template.
+        Buffer.byteLength(payload.prompt, "utf8") >
+          amuxAnalysisPromptDataMaxBytes() + 64 * 1024 ||
         !payload.prompt.includes(`"previewId":"${preview.id}"`) ||
         !selection || typeof selection !== "object" || Array.isArray(selection)) {
       throw new AmuxIdeaAnalysisClaimError("integrity_unavailable");

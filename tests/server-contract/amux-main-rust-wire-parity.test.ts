@@ -58,9 +58,6 @@ class TestBoundaryError extends Error {
 mock.module(mod("lib/amux/guard.ts"), {
   namedExports: { isAmuxSyncAuthorized: () => true },
 });
-mock.module(mod("lib/amux/executionGate.ts"), {
-  namedExports: { isAmuxExecutionApiEnabled: () => true },
-});
 mock.module(mod("lib/amux/dbBoundary.ts"), {
   namedExports: {
     AMUX_LIFECYCLE_ROUTE_BUDGET_MS: 12_000,
@@ -177,7 +174,6 @@ mock.module(mod("lib/amux/store.ts"), {
     // lib/amux/wireContract.ts reads its item bounds from the store module.
     AMUX_QUEUE_MAX_ITEMS: 512,
     AMUX_OWNED_QUEUE_MAX_ITEMS: 512,
-    AmuxQueueCapacityError: class extends Error {},
     listDispatchable: async () => [queueWire.queue_server],
     listOwnedTodos: async () => [queueWire.owned_server],
   },

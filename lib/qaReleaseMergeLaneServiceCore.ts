@@ -4,10 +4,16 @@
  * Railway read token and its own secret; it merges nothing it picked by
  * itself -- every merge rides on an instruction the app issued and consumed.
  *
- * A round does one of two things, never both (section 8 item 5):
- * - with an attempt open, it finishes or advances that attempt only -- the
+ * A round works in this order (section 8 item 5):
+ * - with an attempt open, it finishes or advances that attempt -- the
  *   deployment outcome of a merge awaiting deploy, or the ordered re-read of
- *   an attempt whose result never arrived -- and ends;
+ *   an attempt whose result never arrived. It ends there, except that a
+ *   deploy it closed as succeeded, on a lane the app then reads as free and
+ *   unlatched, goes on to the next step in the same round;
+ * - with none open and the lane latched, it reads dev's deployments and, when
+ *   dev deploys nothing broken, asks the app to release the latch: the app
+ *   releases it only when every cause was read again and closed (owner
+ *   decision 2026-11-16; a person releases the rest);
  * - with none open and the lane free, it picks the oldest candidate, asks the
  *   app for an instruction, re-reads the pull request and its own switches,
  *   consumes the instruction, merges with the head pinned, checks where the
@@ -26,6 +32,7 @@ import {
   skippedCommits,
 } from "../scripts/merge-train-core.mjs";
 import {
+  type QaReleaseDmMergeScope,
   type QaReleaseExclusion,
   judgeQaReleaseMergeLaneExclusion,
   type QaReleaseExclusionInput,
@@ -58,6 +65,13 @@ export type QaReleaseLaneState = {
   latched: boolean;
   /** The operator's priority from CI admission; absent, the lane takes the oldest first. */
   priority?: readonly number[];
+  /**
+   * Engineering agent pull requests the app reports approved by the Decision
+   * Maker, their conditions re-checked (owner decision 2026-11-13), each at
+   * the one head and branch approved. Absent: none, and every `agent` branch
+   * is a person's as before.
+   */
+  dmApproved?: readonly QaReleaseDmApprovedPull[];
   openAttempt: {
     id: string;
     state: "issued" | "consumed" | "awaiting_deploy";
@@ -69,6 +83,30 @@ export type QaReleaseLaneState = {
     mergeNotBeforeMs: number;
   } | null;
 };
+
+export type QaReleaseDmApprovedPull = { number: number; headSha: string; headRef: string };
+
+/**
+ * The scope the lane judges a reported Decision Maker approval in (owner
+ * decision 2026-11-15): always the block list. The app reads the scope switch
+ * (TOMVERSE_AMUX_DM_MERGE_SCOPE on the app service, default the allow list) and reports only the
+ * pull requests its own scope lets through -- with the stored patch's lines,
+ * which the lane cannot see -- so the app's reading is the one that narrows,
+ * and the lane needs no variable of its own (its start check admits none).
+ * The lane's judgement is a second look at the paths, never a wider one.
+ */
+export const QA_RELEASE_LANE_DM_MERGE_SCOPE: QaReleaseDmMergeScope = "blocklist";
+
+/**
+ * Whether the app's report covers this pull request as GitHub lists it now:
+ * the same number, head commit and branch, into develop, from this repository.
+ * Anything else -- a moved head, another base, a fork, or a pull request
+ * GitHub did not say is not one -- is a person's, as every `agent` branch was.
+ */
+export const qaReleaseDmApprovedPull = (state: Pick<QaReleaseLaneState, "dmApproved">,
+  pull: Pick<QaReleaseLanePullRequest, "number" | "headRefOid" | "headRefName" | "baseRefName" | "isCrossRepository">): boolean =>
+  pull.baseRefName === "develop" && pull.isCrossRepository === false && (state.dmApproved ?? []).some((entry) =>
+    entry.number === pull.number && entry.headSha === pull.headRefOid && entry.headRef === pull.headRefName);
 
 /** What GitHub says about one pull request, read fresh. */
 export type QaReleasePullRead = QaReleaseLanePullRequest & {
@@ -83,14 +121,26 @@ export type QaReleaseMergeLanePorts = {
   app: {
     readState: () => Promise<QaReleaseLaneState>;
     issue: (pullRequest: { pullRequestNumber: number; headSha: string }) => Promise<{ issued: true; attemptId: string } | { issued: false; reason: string }>;
-    consume: (request: { attemptId: string; pullRequestNumber: number; headSha: string; base: string }) => Promise<{ consumed: boolean; reason?: string }>;
+    /**
+     * For a Decision Maker approved pull request, the digests read right before
+     * (lib/pullDiffDigestCore.ts): `changeDigest` (v2), and `diffDigest` (v1)
+     * when the diff could be read, for an approval recorded before v2.
+     */
+    consume: (request: { attemptId: string; pullRequestNumber: number; headSha: string; base: string; diffDigest?: string;
+      changeDigest?: string }) => Promise<{ consumed: boolean; reason?: string }>;
     report: (attemptId: string, report: QaReleaseMergeReport) => Promise<{ recorded: boolean; reason?: string }>;
+    /** The lane's own latch release; the app decides whether every cause was read again and closed. */
+    release: () => Promise<{ released: boolean; reason?: string }>;
   };
   github: {
     listOpenDevelopPulls: () => Promise<QaReleaseLanePullRequest[]>;
     /** The item 3 inputs for one pull request; the changed-file list is read to its last page. */
     exclusionInputs: (pull: QaReleaseLanePullRequest) => Promise<QaReleaseExclusionInput>;
     readPull: (number: number) => Promise<QaReleasePullRead | null>;
+    /** The v2 change digest of the pull request at this head against develop now (lib/pullDiffDigestCore.ts). */
+    changeDigest: (number: number, headSha: string) => Promise<string | null>;
+    /** The v1 digest of its diff as GitHub serves it now, for an approval recorded before v2; null when not read whole. */
+    diffDigest: (number: number) => Promise<string | null>;
     /** The merge API with `sha` pinned to the head; never a merge without it. */
     merge: (number: number, headSha: string) => Promise<QaReleaseMergeCall>;
     /** compare/{sha}...develop: true when ahead or identical, false when not, null when unanswered. */
@@ -104,10 +154,24 @@ export type QaReleaseMergeLanePorts = {
     /** Every recent deployment in the environment that deploys develop (dev); null when unread. */
     developDeployments: () => Promise<QaReleaseDeployment[] | null>;
   };
+  /**
+   * Milliseconds on the service's own clock, for the round's time budget only
+   * (never a judgement about the lane, which reads the database clock).
+   * Without it a round never goes on past a deploy it closed.
+   */
+  clock?: () => number;
 };
 
-export type QaReleaseMergeLaneRoundOutcome =
-  | { exitCode: 0; outcome: "disabled" | "latched" | "hold" | "idle" | "waiting" | "attempt_in_flight" | "abandoned" }
+/**
+ * What a round did. `afterDeploy` is set when the round first closed the
+ * previous attempt's deploy as deployed (every service serving it, or its CI
+ * passed) and then went on to the next pull request; the rest of the outcome
+ * is that second step's.
+ */
+export type QaReleaseMergeLaneRoundOutcome = QaReleaseMergeLaneStepOutcome & { afterDeploy?: "succeeded" | "ci_passed" };
+
+type QaReleaseMergeLaneStepOutcome =
+  | { exitCode: 0; outcome: "disabled" | "latched" | "released" | "hold" | "idle" | "waiting" | "attempt_in_flight" | "abandoned" }
   /** The pick the app declined: in S-M1 (lane switch off) this is the shadow judgement, compared with what people merged. */
   | { exitCode: 0; outcome: "instruction_refused"; pullRequestNumber: number; headSha: string; reason: string }
   | { exitCode: 0; outcome: "reported"; report: QaReleaseMergeReport["kind"]; detail: string }
@@ -297,13 +361,16 @@ async function observeVerdicts(
   excludingFiles: Map<number, ReturnType<typeof qaReleaseMergeLaneExcludingFiles>>,
   pickNumber: number | null,
   priority?: readonly number[],
+  state: Pick<QaReleaseLaneState, "dmApproved"> = {},
+  dmMergeScope: QaReleaseDmMergeScope = "allowlist",
 ): Promise<void> {
   const shown = new Map(exclusions);
   for (const pull of ordered) {
     if (shown.has(pull.number) || pull.number === pickNumber) continue;
     if (pull.baseRefName !== "develop" || refusalReason(pull, "develop") !== null) continue;
-    const inputs = await ports.github.exclusionInputs(pull).catch(() => null);
-    if (inputs === null) continue;
+    const read = await ports.github.exclusionInputs(pull).catch(() => null);
+    if (read === null) continue;
+    const inputs = { ...read, dmApproved: qaReleaseDmApprovedPull(state, pull), dmMergeScope };
     const judged = judgeQaReleaseMergeLaneExclusion(inputs);
     shown.set(pull.number, judged);
     if (judged.excluded) excludingFiles.set(pull.number, qaReleaseMergeLaneExcludingFiles(inputs));
@@ -341,7 +408,7 @@ export async function runQaReleaseMergeLaneRound(
     try {
       const pulls = await ports.github.listOpenDevelopPulls();
       const ordered = [...pulls].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.number - b.number);
-      await observeVerdicts(ports, observer, ordered, new Map(), new Map(), null);
+      await observeVerdicts(ports, observer, ordered, new Map(), new Map(), null, undefined, {}, QA_RELEASE_LANE_DM_MERGE_SCOPE);
     } catch {
       // The screen keeps the last verdicts.
     }
@@ -357,6 +424,7 @@ async function laneRound(
   const start = decideQaReleaseServiceStart("mergeLane", env);
   if (start === "refuse") return { exitCode: 1, outcome: "refused_to_start" };
   if (start === "disabled") return { exitCode: 0, outcome: "disabled" };
+  const roundStartMs = ports.clock?.() ?? 0;
 
   let state: QaReleaseLaneState;
   try {
@@ -365,11 +433,32 @@ async function laneRound(
     return { exitCode: 1, outcome: "state_unknown" };
   }
 
-  // An open attempt is this round's whole business; a latch does not stop
-  // its judgement (section 8 item 5), only new merges.
+  // An open attempt comes first; a latch does not stop its judgement
+  // (section 8 item 5), only new merges.
   const attempt = state.openAttempt;
   if (attempt) {
-    if (attempt.state === "awaiting_deploy") return judgeAwaitingDeploy(ports, attempt, state.dbNowMs, state.latched);
+    if (attempt.state === "awaiting_deploy") {
+      const judged = await judgeAwaitingDeploy(ports, attempt, state.dbNowMs, state.latched);
+      // Closed as deployed (CI passed or every service serving it) frees the
+      // lane, and the same round goes on to the next pull request (section 8
+      // item 5, version 5) instead of leaving it to the next cron, ten
+      // minutes on. Any other result ends the round. The lane is read again
+      // first: the close is the app's, and only its answer says the lane is
+      // free and unlatched.
+      if (judged.outcome !== "reported" || !CLOSED_AS_DEPLOYED.has(judged.detail)) return judged;
+      // The merge path's own worst case already fits the hard timeout; going
+      // on is only for a round whose judgement was quick, so the two together
+      // still do (policy section 10).
+      if (!ports.clock || ports.clock() - roundStartMs > QA_RELEASE_CONTINUE_AFTER_DEPLOY_WITHIN_MS) return judged;
+      let after: QaReleaseLaneState;
+      try {
+        after = await ports.app.readState();
+      } catch {
+        return judged;
+      }
+      if (after.openAttempt !== null || after.latched) return judged;
+      return { ...(await startNextAttempt(env, ports, after, observer)), afterDeploy: judged.detail as "succeeded" | "ci_passed" };
+    }
     // A latched lane issues nothing, so an issued or consumed attempt under a
     // latch is one whose merge result was unknown or never reported: re-read
     // it now. Unlatched, it may still be in another round's hands for twelve
@@ -378,8 +467,44 @@ async function laneRound(
     if (state.dbNowMs - attempt.issuedAtMs <= QA_RELEASE_RESULT_SILENCE_MS) return { exitCode: 0, outcome: "attempt_in_flight" };
     return sendReport(ports, attempt.id, { kind: "unreported" }, "unreported");
   }
-  if (state.latched) return { exitCode: 0, outcome: "latched" };
+  if (state.latched) return releaseIfReadAgain(ports);
+  return startNextAttempt(env, ports, state, observer);
+}
 
+/**
+ * A latched lane with no attempt open (owner decision 2026-11-16): the round
+ * reads dev's deployments, as it does before every merge, and asks the app to
+ * release the latch only when dev deploys nothing broken and nothing is
+ * deploying. Unread, broken, busy or refused, the lane stays latched and the
+ * next round asks again. The release itself merges nothing; the next round
+ * picks as usual.
+ */
+async function releaseIfReadAgain(ports: QaReleaseMergeLanePorts): Promise<QaReleaseMergeLaneRoundOutcome> {
+  const deployments = await ports.railway.developDeployments().catch(() => null);
+  if (deployments === null || developBroken(deployments) || qaReleaseHoldingDeployments(deployments).length > 0) {
+    return { exitCode: 0, outcome: "latched" };
+  }
+  const answer = await ports.app.release().catch(() => null);
+  return answer?.released === true ? { exitCode: 0, outcome: "released" } : { exitCode: 0, outcome: "latched" };
+}
+
+/** The deploy reports that close an attempt as deployed, by their round detail. */
+const CLOSED_AS_DEPLOYED = new Set(["succeeded", "ci_passed"]);
+
+/**
+ * A round goes on from a deploy it closed to the next merge only when it got
+ * there within this long: the rest of the round may take the merge path's
+ * whole worst case, and both must fit the service's ten-minute hard timeout.
+ */
+export const QA_RELEASE_CONTINUE_AFTER_DEPLOY_WITHIN_MS = 90 * 1000;
+
+/** With no attempt open and the lane unlatched: hold, idle, or pick, issue, merge and report. */
+async function startNextAttempt(
+  env: Readonly<Record<string, string | undefined>>,
+  ports: QaReleaseMergeLanePorts,
+  state: QaReleaseLaneState,
+  observer?: QaReleaseMergeLaneObserver,
+): Promise<QaReleaseMergeLaneRoundOutcome> {
   let deployments: QaReleaseDeployment[] | null;
   try {
     deployments = await ports.railway.developDeployments();
@@ -394,6 +519,7 @@ async function laneRound(
   let ordered: QaReleaseLanePullRequest[];
   const exclusions = new Map<number, QaReleaseExclusion>();
   const excludingFiles = new Map<number, ReturnType<typeof qaReleaseMergeLaneExcludingFiles>>();
+  const dmMergeScope = QA_RELEASE_LANE_DM_MERGE_SCOPE;
   try {
     pulls = await ports.github.listOpenDevelopPulls();
     ordered = qaReleaseLaneOrder(pulls, state.priority);
@@ -402,7 +528,9 @@ async function laneRound(
     // a pull request that cannot be merged anyway.
     for (const pull of ordered) {
       if (pull.baseRefName !== "develop" || refusalReason(pull, "develop") !== null) continue;
-      const inputs = await ports.github.exclusionInputs(pull);
+      // The one exception to the `agent` branch rule is the app's report, at this very head.
+      const inputs = { ...(await ports.github.exclusionInputs(pull)), dmApproved: qaReleaseDmApprovedPull(state, pull),
+        dmMergeScope };
       const judged = judgeQaReleaseMergeLaneExclusion(inputs);
       exclusions.set(pull.number, judged);
       if (judged.excluded) excludingFiles.set(pull.number, qaReleaseMergeLaneExcludingFiles(inputs));
@@ -412,7 +540,8 @@ async function laneRound(
     return { exitCode: 1, outcome: "candidates_unknown" };
   }
   const { pick } = pickQaReleaseLaneCandidate(pulls, exclusions, state.priority);
-  if (observer) await observeVerdicts(ports, observer, ordered, exclusions, excludingFiles, pick?.number ?? null, state.priority);
+  if (observer) await observeVerdicts(ports, observer, ordered, exclusions, excludingFiles, pick?.number ?? null, state.priority, state,
+    dmMergeScope);
   if (pick === null) return { exitCode: 0, outcome: "idle" };
 
   const issued = await ports.app.issue({ pullRequestNumber: pick.number, headSha: pick.headRefOid }).catch(() => null);
@@ -449,8 +578,23 @@ async function laneRound(
   if (freshDeployments === null || developBroken(freshDeployments) || qaReleaseHoldingDeployments(freshDeployments).length > 0) return abandon();
   if (decideQaReleaseServiceStart("mergeLane", env) !== "run") return abandon();
 
+  // A Decision Maker approved pull request: its change digest (merge base,
+  // head and tree) as GitHub has it now, read right before the consume, which
+  // lets it merge only at the approved digest (review r-20261114-021949-8dbd49:
+  // a merge base that moved with develop changes it at the same head). Unread,
+  // it is not merged. The v1 diff digest rides along when the diff can be
+  // read, for an approval recorded before v2; the app compares the one the
+  // approval names.
+  let changeDigest: string | null = null;
+  let diffDigest: string | null = null;
+  if (qaReleaseDmApprovedPull(state, pick)) {
+    changeDigest = await ports.github.changeDigest(pick.number, pick.headRefOid).catch(() => null);
+    if (changeDigest === null) return abandon();
+    diffDigest = await ports.github.diffDigest(pick.number).catch(() => null);
+  }
   const consumed = await ports.app
-    .consume({ attemptId, pullRequestNumber: pick.number, headSha: pick.headRefOid, base: "develop" })
+    .consume({ attemptId, pullRequestNumber: pick.number, headSha: pick.headRefOid, base: "develop",
+      ...(changeDigest !== null ? { changeDigest } : {}), ...(diffDigest !== null ? { diffDigest } : {}) })
     .catch(() => null);
   if (consumed === null) return { exitCode: 1, outcome: "state_unknown" };
   if (!consumed.consumed) return abandon();

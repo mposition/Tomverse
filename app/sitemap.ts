@@ -5,7 +5,11 @@ import {
   SITE_ORIGIN,
   localizedLanguageAlternates,
   localizedPath,
+  localizedQueryPath,
+  queryLanguageAlternates,
 } from "@/lib/seo";
+import { HELP_GUIDE_IDS } from "@/lib/helpCentre/catalog";
+import { helpGuidePath } from "@/lib/helpCentre/links";
 import { SITEMAP_CONTENT_EVIDENCE } from "@/lib/sitemapContentDates";
 
 /**
@@ -22,12 +26,14 @@ const publicPages: Array<{
   priority: number;
 }> = [
   { path: "/about", changeFrequency: "monthly", priority: 0.7 },
+  { path: "/products/chat", changeFrequency: "weekly", priority: 0.9 },
+  { path: "/developers", changeFrequency: "weekly", priority: 0.8 },
+  { path: "/developers/cli", changeFrequency: "weekly", priority: 0.7 },
   { path: "/models", changeFrequency: "weekly", priority: 0.8 },
   { path: "/pricing", changeFrequency: "weekly", priority: 0.8 },
   { path: "/faq", changeFrequency: "monthly", priority: 0.6 },
   { path: "/support", changeFrequency: "monthly", priority: 0.5 },
   { path: "/support/help-centre", changeFrequency: "monthly", priority: 0.5 },
-  { path: "/support/help-centre/chat-workspace", changeFrequency: "monthly", priority: 0.6 },
   { path: "/safety", changeFrequency: "monthly", priority: 0.6 },
   { path: "/safety/approach", changeFrequency: "monthly", priority: 0.5 },
   { path: "/safety/security-privacy", changeFrequency: "monthly", priority: 0.5 },
@@ -70,5 +76,18 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: page.changeFrequency,
       priority: page.priority,
     })),
+    // Help Centre guides are request-time pages that take the language as
+    // `?lang=` (lib/helpCentre/links.ts), so each language is its own URL and
+    // they share one query-based hreflang set, like the page metadata says.
+    ...HELP_GUIDE_IDS.flatMap((guideId) => {
+      const basePath = helpGuidePath(guideId);
+      const alternates = { languages: queryLanguageAlternates(basePath) };
+      return SEO_LOCALES.map((locale) => ({
+        url: `${SITE_ORIGIN}${localizedQueryPath(locale, basePath)}`,
+        changeFrequency: "monthly" as const,
+        priority: 0.5,
+        alternates,
+      }));
+    }),
   ];
 }

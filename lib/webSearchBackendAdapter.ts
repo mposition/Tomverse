@@ -1,4 +1,5 @@
 import "server-only";
+import { readResponseToBuffer } from "@/lib/boundedBuffer";
 
 /**
  * The one place an application-managed web search leaves this process.
@@ -50,6 +51,8 @@ import {
 } from "@/lib/webSearchBackendRuntime";
 
 const BRAVE_WEB_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search";
+/** Raw decompressed JSON is bounded before parsing, independently of snippets. */
+export const WEB_SEARCH_MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 
 export type { WebSearchBackendResult };
 
@@ -72,6 +75,8 @@ export type WebSearchBackendOutcome =
   | {
       ok: true;
       results: WebSearchBackendResult[];
+      /** Server-only fallback for presearch input sizing. */
+      descriptionOnlyResults?: WebSearchBackendResult[];
       /** True when results were dropped to stay inside the payload ceiling. */
       truncated: boolean;
     }
@@ -91,6 +96,8 @@ export type WebSearchBackendRequest = {
   searchLang?: string;
   /** How recent a result must be. Restricted to the vendor's own vocabulary. */
   freshness?: "day" | "week" | "month" | "year";
+  /** Server-selected Brave excerpts within the existing result budget. */
+  extraSnippets?: boolean;
   /** Aborts the request when the turn ends. */
   signal?: AbortSignal;
 };
@@ -183,7 +190,8 @@ const isoDate = (value: unknown): string | undefined => {
  * snippet, which is a different claim from one that was cut.
  */
 export const boundSearchResults = (
-  results: readonly WebSearchBackendResult[]
+  results: readonly WebSearchBackendResult[],
+  extraSnippets?: ReadonlyMap<WebSearchBackendResult, unknown[]>
 ): { results: WebSearchBackendResult[]; truncated: boolean } => {
   const kept: WebSearchBackendResult[] = [];
   let size = 0;
@@ -210,12 +218,37 @@ export const boundSearchResults = (
   if (results.length > APP_MANAGED_SEARCH_LIMITS.maxResultsPerQuery) {
     truncated = true;
   }
+  // Reserve every original result first. Extra text in a high-ranked result
+  // must never displace a lower-ranked URL or its original description.
+  if (extraSnippets?.size) {
+    let spare = APP_MANAGED_SEARCH_LIMITS.maxResultPayloadCharacters - size;
+    for (const [index, result] of kept.entries()) {
+      const description = result.snippet ?? "";
+      let snippet = description;
+      for (const raw of extraSnippets.get(result) ?? []) {
+        const separator = snippet ? " " : "";
+        const room = Math.min(APP_MANAGED_SEARCH_LIMITS.maxSnippetCharacters - snippet.length, spare) - separator.length;
+        if (room < 2) break;
+        let extra = plainTextFromBackend(raw, APP_MANAGED_SEARCH_LIMITS.maxSnippetCharacters);
+        if (!extra) continue;
+        if (description && extra.slice(0, description.length).toLowerCase() === description.toLowerCase()) {
+          extra = extra.slice(description.length).trimStart();
+        }
+        if (!extra || snippet.toLowerCase().includes(extra.toLowerCase())) continue;
+        const excerpt = extra.length > room ? extra.slice(0, room - 1).trimEnd() + "…" : extra;
+        snippet += separator + excerpt;
+        spare -= separator.length + excerpt.length;
+      }
+      if (snippet !== description) kept[index] = { ...result, snippet };
+    }
+  }
   return { results: kept, truncated };
 };
 
 /** Brave's `web.results[]`, reduced to the four fields that survive. */
 export const parseBraveWebSearchBody = (
-  body: unknown
+  body: unknown,
+  extraSnippets?: Map<WebSearchBackendResult, unknown[]>
 ): WebSearchBackendResult[] | null => {
   if (!body || typeof body !== "object") return null;
   const web = (body as Record<string, unknown>).web;
@@ -244,12 +277,17 @@ export const parseBraveWebSearchBody = (
     const publishedAt =
       isoDate(record.page_age) ??
       isoDate((record.article as Record<string, unknown> | undefined)?.date);
-    results.push({
+    const result = {
       title,
       url,
       ...(snippet ? { snippet } : {}),
       ...(publishedAt ? { publishedAt } : {}),
-    });
+    };
+    results.push(result);
+    if (extraSnippets && results.length <= APP_MANAGED_SEARCH_LIMITS.maxResultsPerQuery && Array.isArray(record.extra_snippets)) {
+      // Brave documents up to five alternative excerpts per result.
+      extraSnippets.set(result, record.extra_snippets.slice(0, 5));
+    }
   }
   return results;
 };
@@ -292,6 +330,7 @@ export const runWebSearchBackendRequest = async (
   request: WebSearchBackendRequest,
   env: NodeJS.ProcessEnv = process.env
 ): Promise<WebSearchBackendOutcome> => {
+  if (request.signal?.aborted) return { ok: false, failure: "backend_timeout" };
   if (webSearchFakeBackendEnabled(env)) {
     const bounded = boundSearchResults(fakeWebSearchResults(request.query));
     return { ok: true, results: bounded.results, truncated: bounded.truncated };
@@ -313,6 +352,7 @@ export const runWebSearchBackendRequest = async (
   // is still applied, because "in the common case" is not a guarantee.
   url.searchParams.set("text_decorations", "0");
   url.searchParams.set("safesearch", "moderate");
+  if (request.extraSnippets === true) url.searchParams.set("extra_snippets", "true");
   const country = normalizeCountry(request.country);
   if (country) url.searchParams.set("country", country);
   const searchLang = normalizeSearchLang(request.searchLang);
@@ -329,9 +369,8 @@ export const runWebSearchBackendRequest = async (
   const abortFromCaller = () => controller.abort();
   request.signal?.addEventListener("abort", abortFromCaller, { once: true });
 
-  let response: Response;
   try {
-    response = await fetch(url, {
+    const response = await fetch(url, {
       method: "GET",
       headers: {
         Accept: "application/json",
@@ -341,6 +380,27 @@ export const runWebSearchBackendRequest = async (
       signal: controller.signal,
       cache: "no-store",
     });
+    let bytes: Buffer;
+    try {
+      bytes = await readResponseToBuffer(response, WEB_SEARCH_MAX_RESPONSE_BYTES, controller.signal);
+    } catch {
+      return { ok: false, failure: controller.signal.aborted
+        ? "backend_timeout"
+        : !response.ok ? failureForStatus(response.status) : "backend_invalid_response" };
+    }
+    if (!response.ok) return { ok: false, failure: failureForStatus(response.status) };
+    let body: unknown;
+    try { body = JSON.parse(bytes.toString("utf8")); }
+    catch { return { ok: false, failure: "backend_invalid_response" }; }
+
+    const extraSnippets = request.extraSnippets === true ? new Map<WebSearchBackendResult, unknown[]>() : undefined;
+    const parsed = parseBraveWebSearchBody(body, extraSnippets);
+    if (parsed === null) return { ok: false, failure: "backend_invalid_response" };
+    const bounded = boundSearchResults(parsed, extraSnippets);
+    const enriched = extraSnippets && bounded.results.some((result, i) => result !== parsed[i]);
+    return { ok: true, ...bounded,
+      ...(enriched ? { descriptionOnlyResults: parsed.slice(0, bounded.results.length) } : {}),
+    };
   } catch {
     // Deliberately not the caught error. A fetch rejection can carry the
     // request headers on some runtimes, and this value goes into a tool result
@@ -351,22 +411,4 @@ export const runWebSearchBackendRequest = async (
     request.signal?.removeEventListener("abort", abortFromCaller);
   }
 
-  if (!response.ok) {
-    // Drained and dropped. The vendor's error prose must not reach the model
-    // or the user; the status is enough to act on.
-    await response.text().catch(() => "");
-    return { ok: false, failure: failureForStatus(response.status) };
-  }
-
-  let body: unknown;
-  try {
-    body = await response.json();
-  } catch {
-    return { ok: false, failure: "backend_invalid_response" };
-  }
-
-  const parsed = parseBraveWebSearchBody(body);
-  if (parsed === null) return { ok: false, failure: "backend_invalid_response" };
-  const bounded = boundSearchResults(parsed);
-  return { ok: true, results: bounded.results, truncated: bounded.truncated };
 };

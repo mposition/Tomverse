@@ -1,15 +1,27 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import type {
-  AmuxOwnerReviewController,
-  AmuxReviewDetail,
+import {
+  readAmuxOwnerExecutionMetadata,
+  type AmuxOwnerReviewController,
+  type AmuxReviewDetail,
 } from "@/components/admin/AdminAmuxRoutingPanel";
-import { readAmuxLegacyCardForTask, type AmuxLegacyCardRead } from "@/components/admin/AmuxLegacyCardPanel";
+import { amuxLegacyCardReadOf, type AmuxLegacyCardRead } from "@/components/admin/AmuxLegacyCardPanel";
 import { AmuxOwnerQueueDecision } from "@/components/admin/AmuxOwnerQueueDecision";
+import { AmuxReviewRejectionReason, amuxRejectedAttemptsOf } from "@/components/admin/AmuxReviewRejection";
+import { amuxOwnerQueueDmFrom } from "@/components/admin/AmuxOwnerQueueDm";
+import { adminAmuxOwnerQueueMessages } from "@/lib/adminMessages/amuxOwnerQueue";
 import { AmuxOwnerQueueView, isAmuxOwnerQueueRead } from "@/components/admin/AmuxOwnerQueueScreen";
 import type { AmuxOwnerQueueItem, AmuxOwnerQueueRead } from "@/lib/amux/ownerQueueCore";
+import { amuxOwnerQueueEngineeringButtons } from "@/components/admin/AmuxOwnerQueueEngineeringItems";
+import {
+  engineeringAgentDecisionRequest,
+  engineeringAgentMismatchRequest,
+  engineeringAgentRejudgeRequest,
+} from "@/lib/engineeringAgentAdminAction";
+import type { EngineeringAgentCardItemView } from "@/lib/engineeringAgentOwnerItemContextCore";
 
 const item = (overrides: Partial<AmuxOwnerQueueItem>): AmuxOwnerQueueItem => ({
   taskId: "task-1",
@@ -44,7 +56,7 @@ const view = (props: Partial<Parameters<typeof AmuxOwnerQueueView>[0]> = {}) =>
   renderToStaticMarkup(
     <AmuxOwnerQueueView status="ready" read={read()} selectedId="task-1" onSelect={() => {}} navLocked={false}
       query="" onQuery={() => {}} groupFilter={null} onGroupFilter={() => {}} focusMode={false}
-      onToggleFocus={() => {}} onRetry={() => {}} detail={<p>decision pane</p>} {...props} />);
+      onToggleFocus={() => {}} onRetry={() => {}} onShowMore={() => {}} detail={<p>decision pane</p>} {...props} />);
 
 test("the list groups every card by why it waits and shows one count per group", () => {
   const html = view();
@@ -81,6 +93,8 @@ test("a list that holds only part of the queue says so and counts the whole of i
   const html = view({ read: read({ total: 14 }) });
   assert.match(html, /data-testid="amux-owner-queue-partial"/);
   assert.match(html, /Showing the newest 4 of 14 cards/);
+  // The rest is one press away, not only after these are finished.
+  assert.match(html, /data-testid="amux-owner-queue-show-more"[^>]*>Show 10 more</);
   assert.match(html, /data-testid="amux-owner-queue-remaining">14</);
   assert.doesNotMatch(view(), /amux-owner-queue-partial/);
 });
@@ -129,7 +143,8 @@ const controller = (overrides: Partial<AmuxOwnerReviewController> = {}): AmuxOwn
   canInspectCards: true, selectedEscalationId: null, review: null, ownerExecution: { state: "idle" },
   reviewLoading: false, reviewBusy: false, reviewError: null, setReviewError: () => {},
   reviewUnavailable: false, reauthenticationRequired: false, selectedOutcome: null,
-  setSelectedOutcome: () => {}, retryReadConfirmed: false, setRetryReadConfirmed: () => {}, resolution: "",
+  setSelectedOutcome: () => {}, retryReadConfirmed: false, setRetryReadConfirmed: () => {},
+  noChangeConfirmed: false, setNoChangeConfirmed: () => {}, resolution: "",
   setResolution: () => {}, proposal: null, setProposal: () => {}, setIdempotencyKey: () => {},
   decisionStatusUnknown: false, setDecisionStatusUnknown: () => {}, decisionStatusChecking: false,
   pendingDecision: null, pendingDecisionChecked: true, closeReview: () => {}, openReview: async () => {},
@@ -160,10 +175,13 @@ const reviewFor = (escalationId: string, overrides: Partial<AmuxReviewDetail> = 
 
 const decision = (card: AmuxOwnerQueueItem, ctl: AmuxOwnerReviewController, canInspectCards = true,
   legacy: AmuxLegacyCardRead | null = null) =>
+  // The panel rides the review's own card detail read, bound or not.
   renderToStaticMarkup(
-    <AmuxOwnerQueueDecision item={card} controller={ctl} canInspectCards={canInspectCards} index={1} total={4}
+    <AmuxOwnerQueueDecision item={card}
+      controller={legacy === null ? ctl : { ...ctl, ownerExecution: { state: "unavailable", legacyCard: legacy } }}
+      canInspectCards={canInspectCards} index={1} total={4}
       generatedAt="2026-11-08T03:00:00.000Z" navLocked={false} advance onAdvanceChange={() => {}}
-      onPrevious={null} onNext={() => {}} onAnswered={() => {}} initialLegacyCard={legacy} />);
+      onPrevious={null} onNext={() => {}} onAnswered={() => {}} />);
 
 test("a decision card explains why it stopped, offers the next-card checkbox on and links to the full card", () => {
   const html = decision(items[0], controller());
@@ -335,6 +353,48 @@ test("the no-PR words follow the choices shown: approvable, retryable or block o
   assert.doesNotMatch(blockOnly, /You can run it again/);
 });
 
+test("an implement card that left no change offers 'no change needed', not a plain approve", () => {
+  // AMUX-ARTFMT-002 (owner decision 2026-11-11).
+  const card = item({ status: "review" });
+  const escalationId = card.escalationId!;
+  const html = decision(card, controller({ selectedEscalationId: escalationId,
+    review: reviewFor(escalationId, {
+      task: { id: "task-1", title: "Tidy", status: "review", revision: 8,
+        due_parse_state: "valid", review_pr_number: null },
+      allowed_outcomes: ["approve", "block", "retry"], approval_basis: "no_change",
+      proposed_transitions: { approve: "done", block: "blocked", retry: "todo" },
+    }) }));
+  assert.match(html, /reports the work is already in place/);
+  assert.match(html, /data-testid="amux-owner-queue-choices"[\s\S]*Complete: no change needed/);
+  assert.match(html, /data-testid="admin-amux-select-approve"[^>]*>[\s\S]*?Complete: no change needed/);
+  assert.match(html, /Is there nothing left to change\?/);
+  assert.doesNotMatch(html, /this kind of task is approved on its verified result/);
+  // The same card on evidence keeps the plain approve words.
+  const evidence = decision(card, controller({ selectedEscalationId: escalationId,
+    review: reviewFor(escalationId, { approval_basis: "evidence" }) }));
+  assert.doesNotMatch(evidence, /no change needed/);
+});
+
+test("choosing 'no change needed' asks once more that the report and code were checked", () => {
+  const card = item({ status: "review" });
+  const escalationId = card.escalationId!;
+  const review = reviewFor(escalationId, {
+    task: { id: "task-1", title: "Tidy", status: "review", revision: 8,
+      due_parse_state: "valid", review_pr_number: null },
+    allowed_outcomes: ["approve", "block"], approval_basis: "no_change",
+  });
+  const html = decision(card, controller({ selectedEscalationId: escalationId, review,
+      selectedOutcome: "approve", resolution: "no change needed (owner verified)" }));
+  assert.match(html, /data-testid="admin-amux-no-change-confirmation"/);
+  assert.match(html, /I read the worker report and checked the current code: there is nothing to change\./);
+  // Preparing waits for that confirmation.
+  assert.match(html, /disabled=""[^>]*data-testid="admin-amux-prepare-proposal"/);
+  const confirmed = decision(card, controller({ selectedEscalationId: escalationId, review,
+      selectedOutcome: "approve", noChangeConfirmed: true,
+      resolution: "no change needed (owner verified)" }));
+  assert.doesNotMatch(confirmed, /disabled=""[^>]*data-testid="admin-amux-prepare-proposal"/);
+});
+
 test("a blocked card says what its own attempt reason was, not only 'blocked before it finished'", () => {
   // AMUX-FILEREQ-003: the worker ended the run and reported it blocked
   // (reported_result); the escalation stores only execution_blocked.
@@ -446,7 +506,7 @@ test("a legacy card with no decision is remade or closed right under the why box
       allowed_outcomes: [], proposed_transitions: {},
     }) }), true, preV22Legacy);
   assert.match(html, /data-testid="amux-legacy-card"/);
-  assert.match(html, /Task made before v22/);
+  assert.match(html, /Task made before card execution/);
   assert.match(html, /data-testid="amux-legacy-card-recreate"/);
   assert.match(html, /data-testid="amux-legacy-card-close"/);
   // The panel sits right below the why box, before the review parts.
@@ -461,7 +521,7 @@ test("a legacy card with no decision is remade or closed right under the why box
   assert.doesNotMatch(html, /No choice is open for this card yet/);
   assert.doesNotMatch(html, /amux-owner-queue-recovery-steps/);
   // Its Ubuntu inspection is not offered; the note points at the panel.
-  assert.match(html, /data-testid="admin-amux-host-recovery-not-applicable">This Task is archived, or has no v22 receipt/);
+  assert.match(html, /data-testid="admin-amux-host-recovery-not-applicable">This Task is archived, or has no execution receipt/);
   assert.match(html, /in the legacy card panel on this screen/);
   assert.doesNotMatch(html, /Request Ubuntu inspection/);
   assert.doesNotMatch(html, /admin-amux-one-click-recovery/);
@@ -473,8 +533,8 @@ test("a legacy panel is the owner's only, and a card with an open choice keeps i
   const ctl = controller({ selectedEscalationId: escalationId, review: reviewFor(escalationId, {
     task: { id: "task-1", title: "Tidy", status: "review", revision: 8, due_parse_state: "valid",
       host_recovery_available: false } }) });
-  // A card the Ubuntu inspection can take is a v22 Task, so its detail is never read for the panel.
-  assert.doesNotMatch(decision(card, controller({ selectedEscalationId: escalationId,
+  // A v22 Task the Ubuntu inspection can take has its panel read too (owner decision 2026-11-12).
+  assert.match(decision(card, controller({ selectedEscalationId: escalationId,
     review: reviewFor(escalationId) }), true, preV22Legacy), /data-testid="amux-legacy-card"/);
   // Nor before this card's own review is read.
   assert.doesNotMatch(decision(card, controller(), true, preV22Legacy), /data-testid="amux-legacy-card"/);
@@ -487,6 +547,37 @@ test("a legacy panel is the owner's only, and a card with an open choice keeps i
   assert.match(open, /data-testid="amux-legacy-card"/);
   assert.match(open, /<kbd[^>]*>1<\/kbd>Approve/);
   assert.doesNotMatch(open, /No review decision can open on this card/);
+});
+
+test("a stopped v22 Task is settled by the owner beside whatever the server offers", () => {
+  const stopped: AmuxLegacyCardRead = { revision: 8, view: { kind: "stopped_task", closeRefusal: null,
+    completeRefusal: null, alreadyArchived: false, idea: { state: "ready", title: "Tidy the paths",
+      truncated: false, text: "Tidy the paths\n\n원래 카드: AMUX-AUTOFILE-004" } } };
+  const card = item({ status: "review" });
+  const escalationId = card.escalationId!;
+  // The server offers nothing for this card: the owner still completes, remakes or closes it.
+  const none = decision(card, controller({ selectedEscalationId: escalationId,
+    review: reviewFor(escalationId, { allowed_outcomes: [], proposed_transitions: {} }) }), true, stopped);
+  assert.match(none, /data-testid="amux-legacy-card"/);
+  assert.match(none, /Settle this card yourself/);
+  assert.match(none, /data-testid="amux-legacy-card-complete"[^>]*>Complete as done</);
+  assert.match(none, /data-testid="amux-legacy-card-recreate"/);
+  assert.match(none, /data-testid="amux-legacy-card-close"/);
+  // It is not a card no decision can ever open on, so it never says so.
+  assert.doesNotMatch(none, /No review decision can open on this card/);
+  // With a choice offered, both stay.
+  const open = decision(card, controller({ selectedEscalationId: escalationId,
+    review: reviewFor(escalationId) }), true, stopped);
+  assert.match(open, /<kbd[^>]*>1<\/kbd>Approve/);
+  assert.match(open, /data-testid="amux-legacy-card-complete"/);
+  // A Task the server says cannot be done (archived, or no v22 receipt) has no completion button.
+  const refused = decision(card, controller({ selectedEscalationId: escalationId,
+    review: reviewFor(escalationId) }), true,
+    { revision: 8, view: { ...stopped.view!, completeRefusal: "not_completable" } });
+  assert.doesNotMatch(refused, /data-testid="amux-legacy-card-complete"/);
+  // A legacy kind never completes.
+  assert.doesNotMatch(decision(card, controller({ selectedEscalationId: escalationId,
+    review: reviewFor(escalationId) }), true, preV22Legacy), /data-testid="amux-legacy-card-complete"/);
 });
 
 test("a no-PR card with no choice at all does not say it can be blocked", () => {
@@ -504,26 +595,140 @@ test("a no-PR card with no choice at all does not say it can be blocked", () => 
   assert.doesNotMatch(html, /data-testid="amux-legacy-card"/);
 });
 
-test("the legacy panel reads the execution board's card detail and keeps only a legacy view", async () => {
-  const sent: string[] = [];
-  const answer = (body: unknown, status = 200) => (async (url: RequestInfo | URL) => {
-    sent.push(String(url));
-    return Response.json(body, { status });
-  }) as unknown as typeof fetch;
-  assert.deepEqual(await readAmuxLegacyCardForTask("task 1", answer({ id: "task 1", revision: 9,
-    legacyCard: preV22Legacy.view })), preV22Legacy);
-  assert.deepEqual(sent, ["/api/admin/amux/execution-view?view=detail&taskId=task%201"]);
-  // Another card's answer, a malformed view or a failure: no panel.
-  assert.equal(await readAmuxLegacyCardForTask("task-1", answer({ id: "task-2", revision: 9,
-    legacyCard: preV22Legacy.view })), null);
-  assert.deepEqual(await readAmuxLegacyCardForTask("task-1", answer({ id: "task-1", revision: 9,
-    legacyCard: null })), { revision: 9, view: null });
-  assert.deepEqual(await readAmuxLegacyCardForTask("task-1", answer({ id: "task-1", revision: 9,
-    legacyCard: { kind: "something_else", closeRefusal: null, idea: { state: "refused", code: "x" } } })),
+test("the legacy panel comes out of the card detail the review reads and keeps only a legacy view", async () => {
+  assert.deepEqual(amuxLegacyCardReadOf("task 1", { id: "task 1", revision: 9, legacyCard: preV22Legacy.view }),
+    preV22Legacy);
+  // Another card's answer, a malformed view or no answer: no panel.
+  assert.equal(amuxLegacyCardReadOf("task-1", { id: "task-2", revision: 9, legacyCard: preV22Legacy.view }), null);
+  assert.deepEqual(amuxLegacyCardReadOf("task-1", { id: "task-1", revision: 9, legacyCard: null }),
+    { revision: 9, view: null });
+  assert.deepEqual(amuxLegacyCardReadOf("task-1", { id: "task-1", revision: 9,
+    legacyCard: { kind: "something_else", closeRefusal: null, idea: { state: "refused", code: "x" } } }),
   { revision: 9, view: null });
-  assert.equal(await readAmuxLegacyCardForTask("task-1", answer({ error: "not_found" }, 404)), null);
-  assert.equal(await readAmuxLegacyCardForTask("task-1",
-    (async () => { throw new Error("offline"); }) as unknown as typeof fetch), null);
+  assert.equal(amuxLegacyCardReadOf("task-1", { error: "not_found" }), null);
+  assert.equal(amuxLegacyCardReadOf("task-1", null), null);
+
+  // One read serves both: the review's attempt metadata read hands the panel
+  // on, whether or not the metadata itself could be bound to the review.
+  const sent: string[] = [];
+  const read = await readAmuxOwnerExecutionMetadata({
+    review: reviewFor("esc-1"), controller: new AbortController(), isCurrent: () => true,
+    fetcher: async (url) => {
+      sent.push(String(url));
+      return Response.json({ id: "task-1", revision: 8, attempts: [], legacyCard: preV22Legacy.view });
+    },
+  });
+  assert.deepEqual(sent, ["/api/admin/amux/execution-view?view=detail&taskId=task-1"]);
+  assert.deepEqual(read, { state: "unavailable", legacyCard: { revision: 8, view: preV22Legacy.view },
+    rejections: [] });
+});
+
+// Owner decision 2026-11-14: each run the code review rejected shows its
+// reasons beside the retry, recover and close choices; a record from before
+// the reasons were kept says which review job holds them.
+const REJECT_JOB = "r-20261113-111120-93735a";
+const OLD_JOB = "r-20261113-111543-cca3be";
+const rejectedDetail = {
+  id: "task-1", revision: 8, legacyCard: null,
+  attempts: [
+    { id: "attempt-2", attemptNumber: 2, v52Review: { verdict: "reject", jobId: REJECT_JOB,
+      reviewerVendors: ["openai"],
+      findingsSummary: "- [major · openai] lib/chat/stream.ts:42 artifactUnavailable is never set\n- [minor · openai] tests miss the trailer" } },
+    { id: "attempt-1", attemptNumber: 1, v52Review: { verdict: "reject", jobId: OLD_JOB,
+      reviewerVendors: ["moonshot"], findingsSummary: null } },
+    { id: "attempt-0", attemptNumber: 0, v52Review: { verdict: "accept", jobId: "r-20261113-101543-cca3be",
+      reviewerVendors: ["openai"], findingsSummary: null } },
+    { id: "attempt-x", attemptNumber: 3, v52Review: null },
+  ],
+};
+
+test("the owner execution read hands on each rejected run with its reasons", async () => {
+  const read = await readAmuxOwnerExecutionMetadata({
+    review: reviewFor("esc-1"), controller: new AbortController(), isCurrent: () => true,
+    fetcher: async () => Response.json(rejectedDetail),
+  });
+  assert.equal(read?.state, "unavailable");
+  const rejections = read && "rejections" in read ? read.rejections ?? [] : [];
+  assert.deepEqual(rejections.map((attempt) => [attempt.id, attempt.attemptNumber]),
+    [["attempt-2", 2], ["attempt-1", 1]]);
+  assert.deepEqual(amuxRejectedAttemptsOf("task-2", rejectedDetail), []);
+});
+
+test("a rejected run's reasons sit in the why box; an older record names its review job", () => {
+  const escalationId = items[0].escalationId!;
+  const ctl = controller({ selectedEscalationId: escalationId, review: reviewFor(escalationId),
+    ownerExecution: { state: "unavailable", legacyCard: null,
+      rejections: amuxRejectedAttemptsOf("task-1", rejectedDetail) } });
+  const html = decision(items[0], ctl);
+  const why = html.slice(html.indexOf('data-testid="amux-owner-queue-why"'),
+    html.indexOf('data-testid="amux-owner-queue-choices"'));
+  assert.match(why, /data-testid="amux-review-rejection-list"/);
+  assert.match(why, /Run 2 · Why the code review rejected this run/);
+  assert.match(why, /lib\/chat\/stream\.ts:42 artifactUnavailable is never set/);
+  assert.match(why, /tests miss the trailer/);
+  assert.match(why, /data-kind="job"/);
+  assert.match(why, new RegExp(`review server, job ${OLD_JOB}`));
+  assert.match(why, new RegExp(`npm run -s review -- report ${OLD_JOB} --slot 0`));
+  assert.doesNotMatch(why, /r-20261113-101543-cca3be/);
+  // Only the owner reads the card detail, so nobody else sees the reasons.
+  assert.doesNotMatch(decision(items[0], ctl, false), /amux-review-rejection/);
+});
+
+test("the card detail's attempt shows a reject's reasons and nothing for other verdicts", () => {
+  const summary = renderToStaticMarkup(<AmuxReviewRejectionReason attemptNumber={2}
+    review={rejectedDetail.attempts[0].v52Review} />);
+  assert.match(summary, /data-kind="summary"/);
+  assert.match(summary, /reviewed by openai/);
+  assert.match(summary, /shown as data/);
+  assert.equal(renderToStaticMarkup(<AmuxReviewRejectionReason attemptNumber={0}
+    review={rejectedDetail.attempts[2].v52Review} />), "");
+  assert.equal(renderToStaticMarkup(<AmuxReviewRejectionReason attemptNumber={3} review={null} />), "");
+  // Two reviewers (a contract change): either slot may hold the reject.
+  const twoSlots = renderToStaticMarkup(<AmuxReviewRejectionReason attemptNumber={1}
+    review={{ verdict: "reject", jobId: OLD_JOB, reviewerVendors: ["openai", "google"], findingsSummary: null }} />);
+  assert.match(twoSlots, new RegExp(`report ${OLD_JOB} --slot 0`));
+  assert.match(twoSlots, new RegExp(`report ${OLD_JOB} --slot 1`));
+  const none = renderToStaticMarkup(<AmuxReviewRejectionReason attemptNumber={1}
+    review={{ verdict: "reject", jobId: null, reviewerVendors: [], findingsSummary: null }} />);
+  assert.match(none, /data-kind="none"/);
+});
+
+// Owner decision 2026-11-15: a rejected run's findings are read from the card,
+// not from the review server: reviewer, severity, file and line, and the
+// reason of a reviewer that listed none.
+test("a rejected run shows each finding with its reviewer, severity, file and line, and says what is missing", () => {
+  const doc = { version: 1 as const, reviewers: [
+    { vendor: "moonshot", verdict: "reject" as const, reason: null, note: null, omitted: 3, findings: [
+      { severity: "minor" as const, summary: "The test misses the empty trailer.", file: null, line: null },
+      { severity: "major" as const, summary: "The retry path loses the original error.",
+        file: "lib/chat/stream.ts", line: 42 }] },
+    { vendor: "openai", verdict: "reject" as const, reason: "blocking_finding_overrides_accept",
+      note: "The change drops the retry cap.", findings: [], omitted: 0 },
+    { vendor: "google", verdict: "unknown" as const, reason: "timeout", note: null, findings: [], omitted: 0 }] };
+  const html = renderToStaticMarkup(<AmuxReviewRejectionReason attemptNumber={2}
+    review={{ verdict: "reject", jobId: OLD_JOB, reviewerVendors: ["moonshot", "openai"],
+      findingsSummary: null, findings: doc, findingsState: "available" }} />);
+  assert.match(html, /data-kind="findings"/);
+  assert.match(html, /reviewed by moonshot, openai/);
+  // Most severe first, each with its reviewer and place.
+  assert.ok(html.indexOf("The retry path loses the original error.") < html.indexOf("The test misses the empty trailer."));
+  assert.match(html, /data-severity="major"[^>]*>[\s\S]*?major[\s\S]*?moonshot[\s\S]*?lib\/chat\/stream\.ts:42[\s\S]*?The retry path/);
+  assert.match(html, /openai rejected without listing a finding \(blocking_finding_overrides_accept\)\./);
+  assert.match(html, /The change drops the retry cap\./);
+  assert.match(html, /google gave no usable verdict \(timeout\)\./, "a reviewer with no verdict is not said to have rejected");
+  assert.match(html, /3 more findings were not kept\./);
+  assert.match(html, /shown as data/);
+  assert.doesNotMatch(html, /npm run -s review/, "the CLI hint only appears when there is no content");
+  // A body past its retention clock, or one that cannot be opened right now, says so instead.
+  const purged = renderToStaticMarkup(<AmuxReviewRejectionReason attemptNumber={1}
+    review={{ verdict: "reject", jobId: OLD_JOB, reviewerVendors: ["openai"], findingsSummary: null,
+      findings: null, findingsState: "purged" }} />);
+  assert.match(purged, /passed their retention period and were deleted/);
+  const unreadable = renderToStaticMarkup(<AmuxReviewRejectionReason attemptNumber={1}
+    review={{ verdict: "reject", jobId: OLD_JOB, reviewerVendors: ["openai"], findingsSummary: null,
+      findings: null, findingsState: "unavailable" }} />);
+  assert.match(unreadable, /could not be opened just now/);
+  assert.match(unreadable, new RegExp(`job ${OLD_JOB}`));
 });
 
 // Owner decision 2026-11-10: a run whose CLI usage was never fully reported
@@ -552,4 +757,290 @@ test("a run with unknown usage shows that it holds its worker, and only the owne
   const settled = decision(card, controller({ selectedEscalationId: escalationId,
     review: reviewFor(escalationId, { unknown_usage_attempts: [] }) }));
   assert.doesNotMatch(settled, /data-testid="amux-owner-queue-unknown-usage"/);
+});
+
+// Operator, 2026-11-11: AMUX-FILEGEN-003 waited in review with an open T2 draft
+// the owner could only judge again from Admin › Engineering › Decisions.
+const engineeringDraft = (overrides: Partial<EngineeringAgentCardItemView> = {}): EngineeringAgentCardItemView => ({
+  id: "item-draft", kind: "t2_draft", reason: "patch_unavailable", causeKey: "run:1",
+  createdAt: "2026-11-11T01:00:00.000Z", patchBody: "diff --git a/lib/a.ts b/lib/a.ts\n",
+  patchDigest: "d".repeat(64), baseSha: "b".repeat(40), rejudgeable: true,
+  files: [{ path: "lib/a.ts", added: 1, removed: 1 }], fileCount: 1, ...overrides,
+});
+const reviewPrMismatch = engineeringDraft({
+  id: "item-mismatch", kind: "state_mismatch", reason: "bound_review_pr_not_recorded", causeKey: "review_pr:publish-1",
+  patchBody: null, patchDigest: null, baseSha: null, rejudgeable: false, files: [], fileCount: 0,
+});
+
+const withEngineering = (engineeringItems: EngineeringAgentCardItemView[], canWriteEngineering: boolean) =>
+  renderToStaticMarkup(
+    <AmuxOwnerQueueDecision item={item({ status: "review", engineeringItems })} controller={controller()}
+      canInspectCards index={1} total={1} generatedAt="2026-11-08T03:00:00.000Z" navLocked={false} advance
+      onAdvanceChange={() => {}} onPrevious={null} onNext={null} onAnswered={() => {}}
+      canWriteEngineering={canWriteEngineering} onEngineeringChanged={() => {}} />);
+
+test("a card's open T2 draft is decided on the card: approve, reject and judge again", () => {
+  const html = withEngineering([engineeringDraft()], true);
+  assert.match(html, /data-testid="amux-owner-queue-engineering"/);
+  assert.match(html, /Engineering agent items on this card/);
+  assert.match(html, /data-testid="amux-owner-queue-engineering-item" data-kind="t2_draft"/);
+  assert.match(html, /data-testid="amux-owner-queue-engineering-approve"/);
+  assert.match(html, /data-testid="amux-owner-queue-engineering-reject"/);
+  assert.match(html, /data-testid="amux-owner-queue-engineering-rejudge"/);
+  assert.match(html, /lib\/a\.ts/);
+  assert.match(html, /href="\/admin\/engineering-agent\?tab=queue"/);
+  // A draft the tier round cannot take again offers no rejudge.
+  const kept = withEngineering([engineeringDraft({ rejudgeable: false })], true);
+  assert.match(kept, /amux-owner-queue-engineering-approve/);
+  assert.doesNotMatch(kept, /amux-owner-queue-engineering-rejudge/);
+});
+
+test("a review_pr mismatch records the pull request number on the card; other mismatches go to the console", () => {
+  const html = withEngineering([reviewPrMismatch], true);
+  assert.match(html, /data-kind="state_mismatch"/);
+  assert.match(html, /data-testid="amux-owner-queue-engineering-record-pr"/);
+  assert.match(html, /Record the pull request number on the card/);
+  assert.doesNotMatch(html, /amux-owner-queue-engineering-approve/);
+  const other = withEngineering([{ ...reviewPrMismatch, causeKey: "run:2" }], true);
+  assert.doesNotMatch(other, /amux-owner-queue-engineering-record-pr/);
+});
+
+test("without engineering write access the items are read only, and a card without items shows none", () => {
+  const html = withEngineering([engineeringDraft(), reviewPrMismatch], false);
+  assert.match(html, /data-testid="amux-owner-queue-engineering"/);
+  assert.match(html, /takes engineering agent write access/);
+  assert.doesNotMatch(html, /<button[^>]*amux-owner-queue-engineering-/);
+  assert.doesNotMatch(withEngineering([], true), /amux-owner-queue-engineering/);
+  assert.deepEqual(amuxOwnerQueueEngineeringButtons(engineeringDraft(), false), []);
+  assert.deepEqual(amuxOwnerQueueEngineeringButtons(engineeringDraft({ patchDigest: null }), true), []);
+  assert.deepEqual(amuxOwnerQueueEngineeringButtons(engineeringDraft(), true), ["approve", "reject", "rejudge"]);
+  assert.deepEqual(amuxOwnerQueueEngineeringButtons(reviewPrMismatch, true), ["record_pr"]);
+});
+
+test("the card's requests are the console's own, bound to the digest and base shown", () => {
+  const draft = engineeringDraft();
+  assert.deepEqual(engineeringAgentDecisionRequest(draft, "approved"), {
+    url: "/api/admin/engineering-agent/decisions",
+    body: { workItemId: "item-draft", decision: "approved", patchDigest: draft.patchDigest, baseSha: draft.baseSha },
+  });
+  assert.deepEqual(engineeringAgentRejudgeRequest(draft), {
+    url: "/api/admin/engineering-agent/rejudge",
+    body: { workItemId: "item-draft", patchDigest: draft.patchDigest, baseSha: draft.baseSha },
+  });
+  assert.equal(engineeringAgentRejudgeRequest({ ...draft, baseSha: null }), null);
+  assert.deepEqual(engineeringAgentMismatchRequest("item-mismatch", "record_bound_review_pr"), {
+    url: "/api/admin/engineering-agent/mismatches",
+    body: { workItemId: "item-mismatch", action: "record_bound_review_pr" },
+  });
+});
+
+test("a result whose patch never reached develop says so and offers no 'no change needed'", () => {
+  // AMUX-FILEGEN2-002 (2026-11-13): the run was never created, so the patch
+  // had no publication path, and the card was closed as no change needed.
+  const card = item({ status: "review", publicationPathMissing: true });
+  const escalationId = card.escalationId!;
+  const html = decision(card, controller({ selectedEscalationId: escalationId,
+    review: reviewFor(escalationId, {
+      task: { id: "task-1", title: "Tidy", status: "review", revision: 8,
+        due_parse_state: "valid", review_pr_number: null },
+      allowed_outcomes: ["block", "retry"], approval_basis: null,
+      unpublished_patch: { publication_run_missing: true },
+      proposed_transitions: { block: "blocked", retry: "todo" },
+    }) }));
+  assert.match(html, /data-testid="amux-owner-queue-publication-path-missing"[\s\S]*No publication path/);
+  assert.match(html, /no pull request carries the patch, so it has not reached develop/);
+  assert.doesNotMatch(html, /Complete: no change needed/);
+  assert.doesNotMatch(html, /reports the work is already in place/);
+});
+
+test("a change the engineering agent holds is named, never reported as no pull request", () => {
+  // AMUX-IMGOUT-004 / AMUX-MODELTIER-003 (2026-11-14): the pull request lives on
+  // the run's binding, so the card records none; Retry waits for publication.
+  const card = item({ status: "review" });
+  const escalationId = card.escalationId!;
+  const html = (hold: AmuxReviewDetail["publication_hold"]) => decision(card, controller({
+    selectedEscalationId: escalationId, review: reviewFor(escalationId, {
+      task: { id: "task-1", title: "Tidy", status: "review", revision: 8,
+        due_parse_state: "valid", review_pr_number: null },
+      allowed_outcomes: ["block"], approval_basis: null, publication_hold: hold,
+      proposed_transitions: { block: "blocked" },
+    }) }));
+  const open = html({ state: "pr_open", pr_number: 3931 });
+  assert.match(open, /engineering agent opened pull request #3931/);
+  assert.match(open, /cannot be run again while the pull request is open/);
+  assert.doesNotMatch(open, /there is no pull request/);
+  const pending = html({ state: "pending", pr_number: null });
+  assert.match(pending, /not finished judging or opening its pull request/);
+  assert.match(pending, /rejecting it frees the retry/);
+  assert.doesNotMatch(pending, /there is no pull request/);
+  assert.match(html(null), /there is no pull request/, "with nothing held, the old words stand");
+});
+
+test("the list marks a card whose patch has no publication path", () => {
+  const marked = view({ read: read({ items: [item({ publicationPathMissing: true })], total: 1 }) });
+  assert.match(marked, /data-testid="amux-owner-queue-publication-path-missing"[^>]*>No publication path/);
+  assert.doesNotMatch(view(), /amux-owner-queue-publication-path-missing/);
+});
+
+const DM_REQUEST = "0b6f2a3e-5d1c-4e8f-9a7b-2c3d4e5f6a7b";
+const dmProposal = (optionId: string, irreversible = false) => ({
+  state: "proposal" as const, requestId: DM_REQUEST, answer: null, optionId,
+  rationale: "The Task's work is already in the repository.", irreversible,
+  snapshot: { state: "none" as const, targetSha: null, paths: [] },
+  shown: { answerDigest: null, rationaleDigest: "3".repeat(64), optionId, irreversible,
+    snapshotState: "none" as const, snapshotTargetSha: null, snapshotManifestDigest: null },
+});
+const settlementOf = (overrides: Record<string, unknown> = {}) => ({
+  status: "read" as const, settlementId: "set-1", kind: "stopped" as const, state: "open" as const,
+  decision: null, handoffReason: null, dm: dmProposal("complete"), confirmable: true, ...overrides,
+}) as NonNullable<AmuxOwnerQueueItem["dmSettlement"]>;
+const withDm = (dmSettlement: AmuxOwnerQueueItem["dmSettlement"]) =>
+  decision(item({ dmSettlement }), controller());
+
+test("a Decision Maker proposal shows its choice, why and the confirmation through the existing judgment route", () => {
+  const html = withDm(settlementOf());
+  assert.match(html, /data-testid="amux-owner-queue-dm"[^>]*data-dm-state="proposal"/);
+  assert.match(html, /complete: Mark the Task done; its work is in/);
+  assert.match(html, /The Task&#x27;s work is already in the repository\./);
+  assert.match(html, /data-testid="amux-worker-question-dm-confirm"[^>]*>Confirm as proposed</);
+  assert.match(html, /Card only: no repository snapshot was sent\./);
+  assert.doesNotMatch(html, /amux-worker-question-dm-irreversible/);
+  // The owner's own decision below it is untouched.
+  assert.match(html, /data-testid="amux-owner-queue-why"/);
+  assert.equal(readFileSync("components/admin/AmuxOwnerQueueDm.tsx", "utf8").includes("/api/admin"), false,
+    "no route of its own: the button is the worker question's, on the judgment route");
+});
+
+test("an irreversible proposal says so before it can be confirmed", () => {
+  const html = withDm(settlementOf({ dm: dmProposal("close", true) }));
+  assert.match(html, /data-testid="amux-worker-question-dm-irreversible"/);
+  assert.match(html, /data-testid="amux-worker-question-dm-confirm"/);
+});
+
+test("a card the Decision Maker has not answered says it is reviewing, with no confirmation", () => {
+  for (const dm of [{ state: "filed" }, { state: "working", requestId: DM_REQUEST },
+    { state: "not_sent", reason: "waiting_relay" }] as const) {
+    const html = withDm(settlementOf({ dm, confirmable: false }));
+    assert.match(html, /data-dm-state="reviewing"/);
+    assert.match(html, /The Decision Maker is reviewing this card/);
+    assert.doesNotMatch(html, /amux-worker-question-dm-confirm/);
+  }
+});
+
+test("a handed-off card says why in a sentence, shows the proposal read only, and offers no confirmation", () => {
+  const handed = withDm(settlementOf({ kind: "t2_pr", dm: dmProposal("approve"), confirmable: false,
+    handoffReason: "outside_dm_merge_allowlist" }));
+  assert.match(handed, /data-dm-state="handed_off"/);
+  assert.match(handed, /outside what the Decision Maker may approve for an automatic merge into develop/);
+  assert.match(handed, /approve: Approve the pull request/);
+  assert.doesNotMatch(handed, /amux-worker-question-dm-confirm/);
+  assert.doesNotMatch(handed, /outside_dm_merge_allowlist/, "the stored code is never shown");
+  const noProposal = withDm(settlementOf({ dm: { state: "unavailable" }, confirmable: false,
+    handoffReason: "evidence_unavailable" }));
+  assert.match(noProposal, /never put to the Decision Maker/);
+  assert.match(withDm(settlementOf({ dm: { state: "unavailable" }, confirmable: false,
+    handoffReason: "a_future_reason" })), /could not apply its answer, so this card is left to you/);
+});
+
+test("an answer outside the card's fixed words is shown but not offered for confirmation", () => {
+  const html = withDm(settlementOf({ dm: { ...dmProposal("retry"), optionId: null, answer: "do something else" },
+    confirmable: false }));
+  assert.match(html, /cannot be confirmed as it stands/);
+  assert.doesNotMatch(html, /amux-worker-question-dm-confirm/);
+});
+
+test("a settlement that could not be read says so for this card only; a settled one says how it ended", () => {
+  assert.match(withDm({ status: "unread" }), /data-dm-state="unread"[^>]*>[\s\S]*could not be read/);
+  assert.match(withDm(settlementOf({ state: "applied", decision: "retry" })),
+    /data-dm-state="applied"[\s\S]*answer was applied: Run the Task again/);
+  assert.match(withDm(settlementOf({ state: "claimed" })), /remake this card as a new idea/);
+  assert.match(withDm(settlementOf({ state: "cancelled" })), /was cancelled/);
+  // A card with no settlement, and one the response did not carry, draw no Decision Maker area.
+  assert.doesNotMatch(withDm(null), /amux-owner-queue-dm/);
+  assert.doesNotMatch(withDm(undefined), /amux-owner-queue-dm/);
+});
+
+test("the Decision Maker area is Korean when the console is, and handoff reasons are sentences in both languages", () => {
+  const { en, ko } = adminAmuxOwnerQueueMessages;
+  assert.deepEqual(Object.keys(ko.dm.handoff).sort(), Object.keys(en.dm.handoff).sort());
+  assert.deepEqual(Object.keys(ko.dm.options).sort(), Object.keys(en.dm.options).sort());
+  for (const reason of Object.keys(en.dm.handoff)) {
+    assert.ok(ko.dm.handoff[reason].length > 10 && /[가-힣]/.test(ko.dm.handoff[reason]), reason);
+  }
+  assert.match(ko.dm.reviewing, /검토 중/);
+});
+
+test("the screen draws only a settlement it can check", () => {
+  const good = settlementOf();
+  assert.deepEqual(amuxOwnerQueueDmFrom(good), good);
+  assert.equal(amuxOwnerQueueDmFrom(null), null);
+  assert.equal(amuxOwnerQueueDmFrom(undefined), null);
+  assert.deepEqual(amuxOwnerQueueDmFrom({ status: "unread" }), { status: "unread" });
+  assert.deepEqual(amuxOwnerQueueDmFrom("nonsense"), { status: "unread" });
+  assert.deepEqual(amuxOwnerQueueDmFrom({ ...good, kind: "other" }), { status: "unread" });
+  assert.deepEqual(amuxOwnerQueueDmFrom({ ...good, confirmable: "yes" }), { status: "unread" });
+  // A proposal the shared reader refuses is never confirmable.
+  const broken = amuxOwnerQueueDmFrom({ ...good, dm: { state: "proposal", requestId: DM_REQUEST } });
+  assert.equal(broken?.status === "read" && broken.dm.state, "unavailable");
+  assert.equal(broken?.status === "read" && broken.confirmable, false);
+});
+
+test("the strip says when the DM relay last called, and points to the check when it stopped", async () => {
+  const { AmuxOwnerQueueDmRelayChip } = await import("@/components/admin/AmuxOwnerQueueDmRequest");
+  const live = renderToStaticMarkup(<AmuxOwnerQueueDmRelayChip relay={{ state: "live", lastSeenAt: "2026-11-14T02:59:30.000Z" }} />);
+  assert.match(live, /data-state="live"/);
+  assert.match(live, /Last call 2026-11-14 12:59 AEST/);
+  assert.doesNotMatch(live, /amux-owner-queue-dm-relay-check/);
+  const stale = renderToStaticMarkup(<AmuxOwnerQueueDmRelayChip relay={{ state: "stale", lastSeenAt: "2026-11-09T00:30:00.000Z" }} />);
+  assert.match(stale, /No call since 2026-11-09 10:30 AEST/);
+  assert.match(stale, /amux-owner-queue-dm-relay-check/);
+  assert.match(stale, /bridge-monitoring\.md#6-decision-maker-relay/);
+  const asking = renderToStaticMarkup(<AmuxOwnerQueueDmRelayChip relay={{ state: "asking", lastSeenAt: null }} />);
+  assert.match(asking, /Waiting on a question/);
+  assert.doesNotMatch(asking, /amux-owner-queue-dm-relay-check/);
+  assert.match(renderToStaticMarkup(<AmuxOwnerQueueDmRelayChip relay={null} />), /Unavailable/);
+  assert.equal(renderToStaticMarkup(<AmuxOwnerQueueDmRelayChip relay={undefined} />), "");
+});
+
+test("a card with no DM word offers the one button, or the relay check while the relay is down", async () => {
+  const { AmuxOwnerQueueDmRequestPanel } = await import("@/components/admin/AmuxOwnerQueueDmRequest");
+  const ask = { source: "settlement" as const, state: "switch_off" as const, reason: "settlement", requestId: null,
+    action: "request" as const, sourceId: "clescalation1234567890123" };
+  const live = { state: "live" as const, lastSeenAt: "2026-11-14T02:59:30.000Z" };
+  const panel = (props: Partial<Parameters<typeof AmuxOwnerQueueDmRequestPanel>[0]>) => renderToStaticMarkup(
+    <AmuxOwnerQueueDmRequestPanel taskId="task-1" dm={ask} relay={live} canAsk onChanged={() => {}} {...props} />);
+  const offered = panel({});
+  assert.match(offered, /data-action="request"/);
+  assert.match(offered, />Ask the DM</);
+  assert.match(offered, /Owner queue settlement/);
+  assert.match(offered, /only a proposal/);
+  assert.doesNotMatch(panel({ canAsk: false }), /amux-owner-queue-dm-request-button/);
+  const down = panel({ relay: { state: "stale", lastSeenAt: "2026-11-09T00:30:00.000Z" } });
+  assert.doesNotMatch(down, /amux-owner-queue-dm-request-button/);
+  assert.match(down, /amux-owner-queue-dm-request-relay-needed/);
+  assert.match(down, /Check the DM relay/);
+  const resend = panel({ dm: { ...ask, source: "result_review", state: "unfilable", reason: "evidence_unavailable",
+    action: "resend", sourceId: "review-1" } });
+  assert.match(resend, />Send to the DM again</);
+  const proposed = panel({ dm: { ...ask, state: "proposed", action: null, requestId: "dmreq-1" } });
+  assert.match(proposed, /dmRequest=dmreq-1/);
+  assert.doesNotMatch(proposed, /amux-owner-queue-dm-request-button/);
+  assert.equal(panel({ dm: undefined }), "");
+});
+
+test("a settlement the panel above already draws keeps only the button or the relay check here", async () => {
+  const { AmuxOwnerQueueDmRequestPanel } = await import("@/components/admin/AmuxOwnerQueueDmRequest");
+  const live = { state: "live" as const, lastSeenAt: "2026-11-14T02:59:30.000Z" };
+  const asked = { source: "settlement" as const, state: "asked" as const, reason: null, requestId: "dmreq-2",
+    action: null, sourceId: "s-1" };
+  const panel = (dm: typeof asked | Record<string, unknown>, relay: unknown = live) => renderToStaticMarkup(
+    <AmuxOwnerQueueDmRequestPanel taskId="task-1" dm={dm as typeof asked} relay={relay as typeof live} canAsk
+      onChanged={() => {}} settlementShown />);
+  assert.equal(panel(asked), "", "the settlement panel says it already");
+  assert.match(panel({ ...asked, state: "unfilable", reason: "evidence_unavailable", action: "resend" }),
+    /amux-owner-queue-dm-request-button/);
+  assert.match(panel({ ...asked, state: "card_filed", requestId: null }, { state: "stale", lastSeenAt: "2026-11-09T00:30:00.000Z" }),
+    /amux-owner-queue-dm-request-relay-needed/);
+  // A worker question is not the settlement panel's: it is drawn in full.
+  assert.match(panel({ ...asked, source: "question" }), /amux-owner-queue-dm-request"/);
 });

@@ -1,3 +1,5 @@
+import { CHAT_MAX_MESSAGE_CHARACTERS } from "@/lib/chatRequestLimits";
+import { CHAT_MAX_ATTACHMENTS_PER_MESSAGE } from "@/lib/chatAttachmentLimits";
 import { z } from "zod";
 
 export const CHAT_DRAFT_NEW_SCOPE = "new" as const;
@@ -25,7 +27,7 @@ export type ChatDraftAttachmentReference = z.infer<
 
 export const chatDraftAttachmentReferencesSchema = z
   .array(chatDraftAttachmentReferenceSchema)
-  .max(5)
+  .max(CHAT_MAX_ATTACHMENTS_PER_MESSAGE)
   .superRefine((references, context) => {
     const seen = new Set<string>();
     for (const [index, reference] of references.entries()) {
@@ -47,7 +49,7 @@ export const chatDraftAttachmentReferencesSchema = z
 export const chatComposerDraftPutSchema = z
   .object({
     expectedRevision: z.number().int().min(0).max(2_147_483_646),
-    text: z.string().max(50_000),
+    text: z.string().max(CHAT_MAX_MESSAGE_CHARACTERS),
     attachmentReferences: chatDraftAttachmentReferencesSchema,
   })
   .strict();

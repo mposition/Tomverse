@@ -1,0 +1,11 @@
+// Lets the Decision Maker relay auto-restart account restart the relay unit,
+// and nothing else: no start, stop, enable or edit, no bridge unit, no other
+// unit, no other account. docs/ops/amux/bridge-monitoring.md §6.
+polkit.addRule(function (action, subject) {
+  if (action.id !== "org.freedesktop.systemd1.manage-units") return;
+  if (subject.user !== "tomverse-dm-relay-autorestart") return;
+  if (action.lookup("verb") !== "restart") return;
+  if (action.lookup("unit") === "tomverse-amux-dm-relay.service") {
+    return polkit.Result.YES;
+  }
+});

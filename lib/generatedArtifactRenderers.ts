@@ -21,6 +21,7 @@ import {
   type DocumentBatchSpec,
   type DocumentSpec,
   type PresentationSpec,
+  type ResolvedDocumentImages,
   type SupportedArtifactFormat,
   type TextFileSpec,
   type WorkbookSpec,
@@ -68,7 +69,12 @@ const encoder = new TextEncoder();
  */
 const bounded = (
   format: SupportedArtifactFormat,
-  bytes: Uint8Array
+  bytes: Uint8Array,
+  /**
+   * The ceiling, when it is not the authoring one: a document holding the
+   * user's own pictures may be as large as a converted file (section 16).
+   */
+  maxBytes: number = ARTIFACT_LIMITS.maxOutputBytes
 ): RenderedArtifact => {
   if (bytes.byteLength <= 0) {
     throw new ArtifactRenderError(
@@ -76,11 +82,11 @@ const bounded = (
       "The generator produced an empty file."
     );
   }
-  if (bytes.byteLength > ARTIFACT_LIMITS.maxOutputBytes) {
+  if (bytes.byteLength > maxBytes) {
     throw new ArtifactRenderError(
       "OUTPUT_TOO_LARGE",
       `Generated ${bytes.byteLength} bytes, over the ` +
-        `${ARTIFACT_LIMITS.maxOutputBytes} byte limit.`
+        `${maxBytes} byte limit.`
     );
   }
   return { format, mediaType: requireArtifactFormat(format).mediaType, bytes };
@@ -89,12 +95,18 @@ const bounded = (
 export const renderSpreadsheetArtifact = (spec: WorkbookSpec): RenderedArtifact =>
   bounded(spec.format, renderWorkbook(spec, spec.format).bytes);
 
-export const renderDocumentArtifact = (spec: DocumentSpec): RenderedArtifact => {
+export const renderDocumentArtifact = (
+  spec: DocumentSpec,
+  images?: ResolvedDocumentImages
+): RenderedArtifact => {
+  const ceiling = images && images.size > 0
+    ? ARTIFACT_LIMITS.maxConvertedOutputBytes
+    : ARTIFACT_LIMITS.maxOutputBytes;
   switch (spec.format) {
     case "docx":
-      return bounded(spec.format, renderDocumentDocx(spec));
+      return bounded(spec.format, renderDocumentDocx(spec, images), ceiling);
     case "pdf":
-      return bounded(spec.format, renderDocumentPdf(spec));
+      return bounded(spec.format, renderDocumentPdf(spec, images), ceiling);
     case "md":
       return bounded(spec.format, encoder.encode(renderDocumentMarkdown(spec)));
     case "txt":

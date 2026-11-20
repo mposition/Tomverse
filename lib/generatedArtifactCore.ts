@@ -51,6 +51,7 @@ export {
   requireArtifactFormat,
   type ArtifactFormatDescriptor,
   type ArtifactKind,
+  type AuthoredArtifactKind,
   type ArtifactLabelGroup,
   type ArtifactTextValidation,
 } from "@/lib/generatedArtifactFormats";
@@ -94,6 +95,8 @@ export const ARTIFACT_LIMITS = {
   // Documents
   /** Blocks in one document. */
   maxDocumentBlocks: 2_000,
+  /** Image blocks in one document, each a picture from the user's own files. */
+  maxDocumentImages: 30,
   /** Items in one list block. */
   maxListItems: 200,
   /** Rows in a document's table block, excluding the header. */
@@ -128,6 +131,17 @@ export const ARTIFACT_LIMITS = {
   maxFilenameLength: 120,
   /** Bytes in the generated file. Checked after generation, not guessed. */
   maxOutputBytes: 5 * 1024 * 1024,
+  /**
+   * Bytes in a file *converted* from the user's own attachments
+   * (lib/fileConversionCore.ts), and therefore the largest object the store
+   * and the download route will ever handle.
+   *
+   * Larger than `maxOutputBytes` on purpose: that one bounds what a model can
+   * make the application author, and a merged PDF is as large as the PDFs the
+   * user uploaded however it is written. Equal to the request's attachment
+   * ceiling, so a conversion cannot store more than the request carried in.
+   */
+  maxConvertedOutputBytes: 25 * 1024 * 1024,
   /** Artifacts one assistant turn may produce. */
   maxArtifactsPerMessage: 3,
 } as const;
@@ -386,6 +400,22 @@ export const workbookSpecSchema = z
 
 export type WorkbookSpec = z.infer<typeof workbookSpecSchema>;
 
+/** A model names only this request's already-authorised input handle. */
+export const artifactRevisionOfSchema = z.string().regex(/^att_[1-9][0-9]{0,2}$/)
+  .describe("The attached source being revised, by its att_1, att_2, ... handle. Omit for an unrelated new file.");
+
+/** Reuses the spreadsheet tool with a narrow existing-cell edit operation. */
+export const workbookRevisionToolSchema = workbookSpecSchema.partial({ worksheets: true }).extend({
+  revisionOf: artifactRevisionOfSchema.optional(),
+  cellUpdates: z.array(z.object({
+    sheet: z.string().min(1).max(120),
+    row: z.number().int().min(1).max(ARTIFACT_LIMITS.maxRowsPerSheet),
+    column: z.number().int().min(1).max(ARTIFACT_LIMITS.maxColumnsPerSheet),
+    value: cellValueSchema,
+  }).strict()).min(1).max(ARTIFACT_LIMITS.maxCells).optional()
+    .describe("For an attached XLSX revision, supply revisionOf and changed data cells only; omit worksheets. Exact sheet name; row and column are 1-based DATA row/column indices (exclude title/header). All other cells and structure are retained."),
+}).strict();
+
 /* ------------------------------------------------------------------------ */
 /* Document specification (docx, pdf, md, txt)                                */
 /* ------------------------------------------------------------------------ */
@@ -467,7 +497,69 @@ const blockSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("pageBreak") }).strict(),
 ]);
 
-export type ArtifactDocumentBlock = z.infer<typeof blockSchema>;
+/**
+ * A picture from a file the user attached to this turn, placed in a document.
+ *
+ * Policy: docs/policy/generated-artifacts.md section 16. The model names the
+ * file by its handle and, for a figure on a page, the region that holds it --
+ * it reads that off the page it can see. The application cuts the region out
+ * of the user's own bytes and places it; the model writes no pixels.
+ *
+ * Top-level documents only. An archive entry has no turn files to draw from,
+ * so its blocks are the text-only set above.
+ */
+export const imageBlockSchema = z
+  .object({
+    type: z.literal("image"),
+    attachment: z
+      .string()
+      .regex(/^att_[1-9][0-9]{0,2}$/, "Reference an attached file as att_1, att_2, ...")
+      .describe("The attached image or PDF, by handle: att_1, att_2, ..."),
+    page: z
+      .number()
+      .int()
+      .min(1)
+      .max(500)
+      .optional()
+      .describe("PDF attachments only: the 1-based page the picture is on. Default 1."),
+    crop: z
+      .object({
+        x: z.number().min(0).max(1),
+        y: z.number().min(0).max(1),
+        width: z.number().min(0.01).max(1),
+        height: z.number().min(0.01).max(1),
+      })
+      .strict()
+      .optional()
+      .describe(
+        "The region holding the picture, as fractions of the image or page measured from its top-left corner. Omit to use all of it."
+      ),
+    caption: z.string().max(ARTIFACT_LIMITS.maxTitleLength).optional(),
+    widthPercent: z
+      .number()
+      .int()
+      .min(10)
+      .max(100)
+      .optional()
+      .describe("How wide to place it, as a percentage of the text width. Default 100, never wider than the picture's own size."),
+  })
+  .strict();
+
+export type ArtifactImageBlock = z.infer<typeof imageBlockSchema>;
+
+const documentBlockSchema = z.union([blockSchema, imageBlockSchema]);
+
+export type ArtifactDocumentBlock = z.infer<typeof documentBlockSchema>;
+
+/** A picture an image block resolved to: baseline JPEG, sRGB, its own size. */
+export type ResolvedDocumentImage = {
+  jpeg: Uint8Array;
+  width: number;
+  height: number;
+};
+
+/** Resolved pictures, by the index of the block that names them. */
+export type ResolvedDocumentImages = ReadonlyMap<number, ResolvedDocumentImage>;
 
 export const documentSpecSchema = z
   .object({
@@ -476,7 +568,7 @@ export const documentSpecSchema = z
     title: z.string().max(ARTIFACT_LIMITS.maxTitleLength).optional(),
     subtitle: z.string().max(ARTIFACT_LIMITS.maxTitleLength).optional(),
     blocks: z
-      .array(blockSchema)
+      .array(documentBlockSchema)
       .min(1)
       .max(ARTIFACT_LIMITS.maxDocumentBlocks),
   })
@@ -714,7 +806,11 @@ const schemaFailure = (error: z.ZodError): ArtifactAdmission<never> => ({
  * was paid for and downloaded first.
  */
 const normalizeSheetName = (name: string, index: number): string => {
-  const cleaned = name
+  // Match the XML writer's text representation before comparing identities.
+  const xmlName = new TextDecoder("utf-8", { ignoreBOM: true }).decode(new TextEncoder().encode(
+    name.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/g, "")
+  ));
+  const cleaned = xmlName
     .replace(/[\\/?*[\]:]/g, " ")
     .replace(/\s+/g, " ")
     .trim()
@@ -820,7 +916,26 @@ export const admitDocumentSpec = (
   if (!parsed.success) return schemaFailure(parsed.error);
   const spec = parsed.data;
 
+  let images = 0;
   for (const block of spec.blocks) {
+    if (block.type === "image") {
+      images += 1;
+      if (images > ARTIFACT_LIMITS.maxDocumentImages) {
+        return {
+          ok: false,
+          code: "SCHEMA_INVALID",
+          detail: `A document may hold at most ${ARTIFACT_LIMITS.maxDocumentImages} images.`,
+        };
+      }
+      if (block.crop && (block.crop.x + block.crop.width > 1.001 || block.crop.y + block.crop.height > 1.001)) {
+        return {
+          ok: false,
+          code: "SCHEMA_INVALID",
+          detail: "An image crop must lie inside the picture: x + width and y + height are at most 1.",
+        };
+      }
+      continue;
+    }
     if (block.type !== "table") continue;
     for (const row of block.rows) {
       if (row.length > block.columns.length) {
@@ -933,6 +1048,9 @@ const documentSpecCharacterCount = (spec: {
               ),
             0
           );
+        break;
+      case "image":
+        characters += block.caption?.length ?? 0;
         break;
       default:
         break;
@@ -1073,6 +1191,9 @@ export type ChatStreamArtifact = {
   failureCode?: ArtifactFailureCode;
   /** Which model's answer produced it, for multi-model attribution. */
   modelId?: string;
+  /** Explicit persisted revision metadata. It never contains source content. */
+  parentArtifactId?: string | null;
+  lineageId?: string;
 };
 
 /**
@@ -1126,6 +1247,12 @@ export const parseChatStreamArtifact = (
     ...(failureCode ? { failureCode } : {}),
     ...(typeof record.modelId === "string" && record.modelId
       ? { modelId: record.modelId }
+      : {}),
+    ...(typeof record.lineageId === "string" && record.lineageId.length > 0 && record.lineageId.length <= 64
+      ? { lineageId: record.lineageId,
+          ...(record.parentArtifactId === null ? { parentArtifactId: null }
+            : typeof record.parentArtifactId === "string" && record.parentArtifactId.length > 0 && record.parentArtifactId.length <= 64
+              ? { parentArtifactId: record.parentArtifactId } : {}) }
       : {}),
   };
 };

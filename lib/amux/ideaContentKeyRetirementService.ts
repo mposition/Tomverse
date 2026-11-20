@@ -13,8 +13,8 @@ import { deleteAmuxContentUnitKey,
 
 export type AmuxRetirableContent = AmuxContentKeyIdentity & {
   purpose: "transfer_payload" | "analysis_freeform" | "analysis_draft" |
-    "task_result" | "task_patch" | "repository_read_manifest" |
-    "analysis_result";
+    "task_result" | "task_patch" | "task_changed_paths" | "review_findings" |
+    "repository_read_manifest" | "analysis_result";
 };
 
 export class AmuxContentRetirementError extends Error {
@@ -65,8 +65,51 @@ export async function recordAmuxContentBodyPurge(tx: Prisma.TransactionClient,
   } });
 }
 
+const V22_SEALED_PARTS = {
+  task_result: "result", task_patch: "patch", task_changed_paths: "changed_paths",
+} as const;
+type V22SealedState = Array<{ ideaId: string; cleared: boolean;
+  bodyPurgedAt: Date | null }>;
+
+// One fixed statement per table: no identifier is ever composed.
+const v22SealedState = (tx: Prisma.TransactionClient,
+  purpose: keyof typeof V22_SEALED_PARTS, attemptId: string) =>
+  purpose === "task_result" ? tx.$queryRaw<V22SealedState>`
+    SELECT "ideaId", ("ciphertext" IS NULL AND "keyId" IS NULL AND
+      "keyVersion" IS NULL) AS "cleared", "bodyPurgedAt"
+    FROM "AmuxV22TaskResult" WHERE "attemptId" = ${attemptId}` :
+  purpose === "task_patch" ? tx.$queryRaw<V22SealedState>`
+    SELECT "ideaId", ("ciphertext" IS NULL AND "keyId" IS NULL AND
+      "keyVersion" IS NULL) AS "cleared", "bodyPurgedAt"
+    FROM "AmuxV22TaskPatch" WHERE "attemptId" = ${attemptId}` :
+  tx.$queryRaw<V22SealedState>`
+    SELECT "ideaId", ("ciphertext" IS NULL AND "keyId" IS NULL AND
+      "keyVersion" IS NULL) AS "cleared", "bodyPurgedAt"
+    FROM "AmuxV22TaskChangedPaths" WHERE "attemptId" = ${attemptId}`;
+
+/**
+ * A v22 row's purge state, read without its body: a large result cannot be
+ * read whole (lib/amux/sealedByteaRead.ts), and only whether it is gone
+ * matters here. With no final row, the unit key sealed only transfer chunks
+ * (docs/policy/amux-v22-result-transfer.md 2.6): its body is purged once that
+ * staging is gone, at the time its ledger row recorded.
+ */
+async function v22SealedPurgedAt(tx: Prisma.TransactionClient,
+  target: AmuxRetirableContent & { purpose: keyof typeof V22_SEALED_PARTS },
+  ledgerPurgedAt: Date | undefined): Promise<Date | null> {
+  const rows = await v22SealedState(tx, target.purpose, target.subjectId);
+  const row = rows[0];
+  if (row) return row.ideaId === target.ideaId && row.cleared ? row.bodyPurgedAt : null;
+  if (!ledgerPurgedAt) return null;
+  const staged = await tx.amuxV22TransferPart.findUnique({
+    where: { attemptId_part: { attemptId: target.subjectId,
+      part: V22_SEALED_PARTS[target.purpose] } },
+    select: { attemptId: true } });
+  return staged ? null : ledgerPurgedAt;
+}
+
 async function sourcePurgedAt(tx: Prisma.TransactionClient,
-  target: AmuxRetirableContent): Promise<Date | null> {
+  target: AmuxRetirableContent, ledgerPurgedAt?: Date): Promise<Date | null> {
   if (target.purpose === "analysis_result") {
     const row = await tx.amuxIdeaSessionAnalysisResult.findUnique({
       where: { claimId: target.subjectId },
@@ -85,17 +128,11 @@ async function sourcePurgedAt(tx: Prisma.TransactionClient,
     return row?.ideaId === target.ideaId && row.ciphertext === null &&
       row.keyId === null && row.keyVersion === null ? row.bodyPurgedAt : null;
   }
-  if (target.purpose === "task_result") {
-    const row = await tx.amuxV22TaskResult.findUnique({
-      where: { attemptId: target.subjectId },
-      select: { ideaId: true, ciphertext: true, keyId: true,
-        keyVersion: true, bodyPurgedAt: true },
-    });
-    return row?.ideaId === target.ideaId && row.ciphertext === null &&
-      row.keyId === null && row.keyVersion === null ? row.bodyPurgedAt : null;
-  }
-  if (target.purpose === "task_patch") {
-    const row = await tx.amuxV22TaskPatch.findUnique({
+  if (target.purpose === "task_result" || target.purpose === "task_patch" ||
+      target.purpose === "task_changed_paths")
+    return v22SealedPurgedAt(tx, { ...target, purpose: target.purpose }, ledgerPurgedAt);
+  if (target.purpose === "review_findings") {
+    const row = await tx.amuxV52ReviewFindings.findUnique({
       where: { attemptId: target.subjectId },
       select: { ideaId: true, ciphertext: true, keyId: true,
         keyVersion: true, bodyPurgedAt: true },
@@ -144,7 +181,8 @@ export async function readAmuxContentPurgeOutcome(target: AmuxRetirableContent):
     where: { ideaId_purpose_subjectId: target },
     select: { bodyPurgedAt: true, purgeAuditLogId: true },
   });
-  const purgedAt = await prisma.$transaction((tx) => sourcePurgedAt(tx, target));
+  const purgedAt = await prisma.$transaction((tx) =>
+    sourcePurgedAt(tx, target, row?.bodyPurgedAt));
   if (!row) return purgedAt ? "partial" : "not_purged";
   if (!purgedAt || row.bodyPurgedAt.getTime() !== purgedAt.getTime()) {
     return "partial";
@@ -193,7 +231,7 @@ export async function retireVerifiedAmuxContentKey(target: AmuxRetirableContent,
       const row = await tx.amuxIdeaContentKeyRetirement.findUnique({
         where: { ideaId_purpose_subjectId: target },
       });
-      const purgedAt = await sourcePurgedAt(tx, target);
+      const purgedAt = await sourcePurgedAt(tx, target, row?.bodyPurgedAt);
       if (!row || !purgedAt || row.bodyPurgedAt.getTime() !== purgedAt.getTime()) {
         throw new AmuxContentRetirementError("integrity_unavailable", target);
       }

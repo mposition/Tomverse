@@ -287,14 +287,15 @@ test("a mutation of an admitted write locks the admission before its work and wr
   assert.match(body, /\)\$\{receiptSql\}\s*SELECT/);
   // A refusal audit takes no lock and records no receipt.
   assert.match(boundary, /claimRefusal: \{[\s\S]*?admissionLock: "none",/);
-  // The internal route never sends one of the three "nothing committed"
-  // answers once a receipt may have committed.
+  // The internal route never sends one of the "nothing committed" answers
+  // once a receipt may have committed. The call ceiling answer is gone: no
+  // count of ours refuses a call (owner direction 2026-11-18).
   const internal = withoutComments(read("lib/amux/internalRoute.ts"));
   const first = internal.indexOf("amuxRouteOrchestratorReceiptsMayHaveCommitted()");
   assert.ok(first > 0);
   assert.ok(first < internal.indexOf('reason: AMUX_DATABASE_BUSY_REASON'));
   assert.ok(first < internal.indexOf('reason: "amux_database_deadline_exceeded"'));
-  assert.ok(first < internal.indexOf('reason: "amux_database_call_ceiling_exceeded"'));
+  assert.equal(internal.includes("amux_database_call_ceiling_exceeded"), false);
 });
 
 test("every state-changing path of the three write routes records its receipts", () => {

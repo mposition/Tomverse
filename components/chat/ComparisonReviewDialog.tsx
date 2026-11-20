@@ -1,5 +1,7 @@
 "use client";
 
+import { ReviewChatAction } from "./ReviewChatHandoff";
+import { ReviewAnalysisActions } from "./ReviewAnalysisActions";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
@@ -514,6 +516,7 @@ export function ComparisonReviewDialog({
     if (!open) return;
     if (!conversationId && !guestSource) return;
     const controller = new AbortController();
+    queueMicrotask(() => { if (!controller.signal.aborted) { setSetup(null); setReview(null); setLoading(true); setError(""); } });
     // The guest preview is a POST because the thing being previewed is the
     // payload: there is no saved conversation to name in a URL. It spends
     // nothing and reserves nothing -- it exists so the price, the reviewer
@@ -530,7 +533,7 @@ export function ComparisonReviewDialog({
             language: guestSource.language,
           }),
         })
-      : fetch(`/api/conversations/${conversationId}/comparison-reviews`, {
+      : fetch(`/api/conversations/${conversationId}/comparison-reviews?${new URLSearchParams({ reviewMode: mode, includeSynthesis: String(includeSynthesis) })}`, {
           cache: "no-store",
           signal: controller.signal,
         });
@@ -541,7 +544,9 @@ export function ComparisonReviewDialog({
           error?: string;
         };
         if (!response.ok) throw new Error(data.error || t("chat.aiReviewPrepareFailed"));
+        if (controller.signal.aborted) return;
         setSetup(data);
+        if (data.storedReview) setReview(data.storedReview);
         trackProductEvent(
           "comparison_review_viewed",
           data.responses?.length || 0
@@ -559,7 +564,7 @@ export function ComparisonReviewDialog({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [conversationId, guestSource, open, t]);
+  }, [conversationId, guestSource, open, t, mode, includeSynthesis]);
 
   useEffect(() => {
     if (open && !idempotencyKeyRef.current) {
@@ -618,6 +623,9 @@ export function ComparisonReviewDialog({
       `chat.aiReviewSourceGroundingLevel${level.charAt(0).toUpperCase()}${level.slice(1)}`
     );
 
+  const handoffSource = review && setup && conversationId ? {
+    kind: "review" as const, conversationId, setup, review, mode, includeSynthesis, reviewer: activeReviewer,
+  } : null;
   if (!open || (!conversationId && !guestSource)) return null;
 
   const runReview = async () => {
@@ -951,6 +959,8 @@ export function ComparisonReviewDialog({
                               <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">{t("chat.aiReviewWebSeparate")}</p>
                             </div>
                           )}
+                          <ReviewChatAction source={handoffSource ? { ...handoffSource, reviewer } : null} ready={!running && !loading && !isGuestReview}
+                            selection={{ section: item.section, ordinal: item.ordinal, itemId: reviewItemIds.get(`${reviewer}:${item.section}:${item.ordinal}`) }} />
                           <ReviewItemFeedback
                             conversationId={conversationId}
                             reviewId={review.id}
@@ -1096,7 +1106,7 @@ export function ComparisonReviewDialog({
                         />
                         {t("chat.aiReviewSynthesis")}
                       </h3>
-                      <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-zinc-700 dark:text-zinc-300">
+                      <p className="mt-2 whitespace-pre-wrap break-words [&:lang(ko)]:break-keep text-sm leading-6 text-zinc-700 dark:text-zinc-300">
                         {activeResult.synthesis}
                       </p>
                     </section>
@@ -1253,6 +1263,8 @@ export function ComparisonReviewDialog({
           )}
         </div>
 
+        {review && <ReviewAnalysisActions source={handoffSource} ready={!running && !loading && review.persisted !== false && !isGuestReview} scope={activeReviewer}
+          onClose={requestClose} closeDisabled={running} disclaimer={t("chat.aiReviewDisclaimer")} />}
         {!loading && !review && setup?.available && (
           <footer className="shrink-0 border-t border-zinc-200 bg-white px-5 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 dark:border-zinc-800 dark:bg-zinc-900 sm:px-6 sm:pb-4">
             <p className="mb-3 text-xs leading-5 text-zinc-500">

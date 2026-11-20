@@ -56,7 +56,7 @@ page and never the table. A tab with no screen draws `AdminTabPlaceholder`
 | Customers & Revenue | Refunds | `/admin/refunds` | — |
 | Customers & Revenue | Credit ledger | `/admin/credit-ledger` | — |
 | AI Platform | Providers | `/admin/providers` | `health`, `usage-cost`, `incidents` |
-| AI Platform | Models | `/admin/models` | `registry`, `discovery`, `defaults`, `catalog` |
+| AI Platform | Models | `/admin/models` | `registry`, `discovery`, `defaults`, `catalog` (image), `coding` |
 | AI Platform | Routing | `/admin/routing` | `auto`, `optimizer`, `shadow`, `stats` (owner only) |
 | AI Agents | Agents home | `/admin/office` | `dashboard` (Team board, opens first), `live` |
 | AI Agents | Marketing | `/admin/marketing` | `overview`, `queue`, `published`, `accounts`, `reports`, `settings` |
@@ -65,7 +65,7 @@ page and never the table. A tab with no screen draws `AdminTabPlaceholder`
 | AI Agents | SRE | `/admin/sre-ops` | `overview`, `daily`, `settings` |
 | AI Agents | Billing & finance | `/admin/finance-agent` | `overview`, `report`, `settings` |
 | Development | Ideas (owner only) | `/admin/amux-backlog` | `ideas`, `list`, `portfolio` |
-| Development | Execution board | `/admin/amux-execution` | `cards` (owner only), `review`, `diagnostics` |
+| Development | Execution board | `/admin/amux-execution` | `cards` (owner only), `review`, `diagnostics`, `process-audit` (owner only) |
 | Development | Release | `/admin/release` | `qa`, `ci` |
 | Development | AMUX settings | `/admin/amux-settings` | `automatic-admission` (owner only), `workers`, `decision-maker`, `analysis` (owner only) |
 | Development | Safety & recovery | `/admin/amux-recovery` | `safety`, `reservations` (owner only), `legacy` (owner only) |
@@ -85,6 +85,8 @@ Korean labels are in `lib/adminNavigationLocale.ts` (Today = 오늘, Decisions =
 Release = 릴리스, Safety & recovery = 안전·복구, Feature flags = 기능 플래그,
 Messaging = 메시징). `tests/adminNavigation.test.mjs` writes the whole table out
 and fails when the code and this list disagree.
+
+The Models `discovery` tab also lists the weekly new-provider research proposals (Chat, Image and Code providers Tomverse is not connected to, with cited sources; off unless `MODEL_DISCOVERY_RESEARCH_LLM_MODEL_ID` is set) in the same queue, marked "새 공급자 리서치" and excludable but never adoptable there; it is not a new tab. Image models of already-connected providers found by the same research (their model-list APIs do not return image models) appear there too, marked "이미지 모델 리서치 (연결 공급자)". Above the queue, a "지난 모델 리서치" tile shows the last run that called the model: per call what was proposed and filed, and each dropped proposal with its reason (and, for a missing official citation, the URLs it did cite), so a run that rejected everything does not look like a run that found nothing.
 
 ### The 2026-11-07 restructuring
 
@@ -111,7 +113,7 @@ they were written under):
   recovery** (`/admin/amux-recovery`) holds the halts (`safety`, readable by
   every role, cleared by the owner, carrying the `amuxOrchestratorHalts`
   badge), unused reservations and claims (`reservations`, owner only) and the
-  retired AMUX tools (`legacy`, owner only: Catalog import, Source
+  retired AMUX tools (`legacy`, owner only: Source
   reconciliation, Card metadata and the three Promotion screens, each a
   closed section behind its own switch and owner check). The Promotion page is
   gone as a menu and redirects there.
@@ -181,6 +183,14 @@ the tab's chip. Its `train` tab (2026-10-25) is the release train: the next
 train's cargo, an emergency departure request, and a departure board of
 past trains that stays dark in both console themes (the one Admin file
 `tests/adminTheme.test.mjs` lets use literal colours).
+
+The QA overview's CI suggestions keep item-level completion, dismissal and
+AMUX-send history across model rounds. Owner and ops can complete or dismiss
+after recent authentication; sending uses the existing owner-only AMUX intake.
+Every item offers the same stored implementation brief for copying. These
+controls do not add CI suggestions to the Daily Agent's sources.
+Closed suggestions stay behind an expandable history control showing at most
+the newest 20; earlier decisions remain stored.
 
 **Agent digests** is the common area where agent teams' daily digests are
 read (`docs/policy/qa-release-agent.md` section 4), one section per agent
@@ -411,20 +421,21 @@ switch state. It carries no badge: a switch is a setting, not work waiting for
 a person. Operations settings carries the halt
 count; a failed halt read is shown as unknown, never as zero. Legacy Execution
 `?tab=halts` and `?tab=decision-maker` links redirect to their corresponding
-settings sections and preserve the remaining query fields. Each gated section's tab carries a chip
--- "Preview · apply off" or "Apply on", and "Behind server switch" or "Server
-switch on" for auto-promotion -- computed by `lib/adminAmuxTabStatus.ts` from
+settings sections and preserve the remaining query fields. Each section that still has an environment switch (auto-promotion; the catalog import and its chip were removed on 2026-11-18) carries a chip
+-- "Behind server switch" or "Server
+switch on" -- computed by `lib/adminAmuxTabStatus.ts` from
 the environment variable and shipped code latch that section's own route
-reads (rule 8). Cards reads "Read only" because the card list issues no
+reads (rule 8). Intake, reconciliation, backlog metadata, recommendation and
+promotion lost their switches on 2026-11-16 and carry no chip. Cards reads "Read only" because the card list issues no
 request and writes nothing; Assignment reads "Read only" to a role without
 `ops:write`, the permission every decision route checks.
 
 Promotion's **Auto-promotion** section remains the legacy v8 grant, halt and
 resume surface. The separate owner-only v22 control lives in **Operations
-settings › Automatic admission**. Its chip reads only the v22 server switch;
-the legacy chip reads only the v8 switch, so enabling either path never labels
-the other as open. The v22 control reads actual graduation counts separately
-from the approved bootstrap exception, requires explicit confirmation and
+settings › Automatic admission**. It carries no chip (its server switch was
+removed 2026-11-16; the owner's activation row is the only setting) and the
+legacy chip reads only the v8 switch. The v22 control reads the measured
+graduation counts, requires explicit confirmation and
 recent authentication for writes, and preserves the read-only Cards surface.
 Unknown writes are not retried. The first-tab placement means the canonical
 step-up callback `/admin/amux-settings` returns an owner to this control, while
@@ -477,6 +488,14 @@ are unchanged.
   person approves it. Left out because no record exists: a "next run" time (the
   generator runs on the Ubuntu box), an AI "ask for a rewrite" action (no
   route), and check lines that are not recorded.
+  Settings holds two views (`?view=`): `switches` (the switch and webhook rail,
+  the default) and `features`, the ad facts the box's Higgsfield job reads
+  (`MarketingFeatureFact`, owner 2026-11-12). Each save there is an audited
+  `runMarketingAdminMutation`; "Refresh from the site" is one model call that
+  only proposes (`/api/admin/marketing-feature-refresh`), reserved and settled
+  in the marketing LLM cost ledger under its `feature_refresh` purpose on the
+  chosen marketing model; on by default, `MARKETING_FEATURE_REFRESH=off` turns
+  it off.
 - **Product research (Scout)**: a head on every tab, the Suggestions tab keeps
   its list and bulk actions with a weekly bar and call ring beside it, Runs
   holds the model and cap controls. Suggestions carry no screenshot and the
@@ -787,6 +806,18 @@ admin write. A figure the loaders do not provide (per-provider p95, 7-day
 request trend per model, post-change reaction numbers) is left off the screen
 rather than stored or invented.
 
+**Image and coding catalogues are two tabs (owner decision 2026-11-20).**
+`?tab=catalog` is the **Image catalog** (image models and the video note); its
+id did not change, so a bookmark or runbook that names it still lands, and the
+tab links to the coding one for a reader who came for coding models.
+`?tab=coding` is the **Coding catalog**, with two sections in the tab --
+**Models** (both kinds of coding row, the chat candidates and the Code
+snapshot) and **Provider conditions** (`&view=providers` opens it). The chat
+registry's read-only list that sat in the old combined tab was dropped: the
+Registry tab is the chat list, and the coding tab's candidates show chat models
+where they matter. Turning a coding model on or holding it stays on
+`/api/admin/model-catalog`; the tab reads `/api/admin/model-catalog/coding`.
+
 ## Language
 
 The console is written in **English and Korean**, and in nothing else. It is an
@@ -870,6 +901,16 @@ console has no copy for (French, German, …) reads English.
 | `ALL_ITEMS.slice(0, 9)` in the empty palette | Pinned, Recent, and every page grouped exactly as the sidebar groups them |
 | `AdminMemoryImportPanel` stacked under the product funnel, so opening either fetched both | its own `?tab=imports` section |
 
+
+### Execution board process analysis (2026-11-14)
+
+The Execution board has an owner-only `process-audit` tab ("프로세스 분석"):
+the scheduled AMUX process analysis reports (`lib/amuxProcessAuditStore.ts`,
+runbook `docs/ops/amux/process-audit-agent.md`) and their schedule controls
+(on/off, cadence, run now; `POST /api/admin/amux/process-audit/settings`,
+owner after a recent sign-in, audited). The page refuses a non-owner in the
+tab's own branch, as it does the board. It is a new tab, not a moved one, so
+it retires no URL and adds no redirect.
 
 ### AMUX operations settings (2026-10-12)
 

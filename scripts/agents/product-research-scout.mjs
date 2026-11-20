@@ -8,8 +8,12 @@
 // PDF, the text of generated Office files, and the catalogue mismatches the
 // 0-step report finds. When the app has a test account (§14) it also sees the
 // signed-in screens and makes real files and an image, within the cap an owner
-// set. Each subject goes to the app's scout route on its own; the app calls the
-// model and stores the suggestions.
+// set; with the app's own switches on, also a turn with attached example files,
+// an image in Chat followed by a change to it, a journey of several steps the
+// app's planner model wrote, and a turn whose request the app's scenario model wrote. Each subject goes to the app's scout route on its own; the app calls the
+// model and stores the suggestions. Last, it asks the app's issues route to
+// triage the newest issue-backlog observation, which the app reads itself (the
+// route is 404 unless the app's PRODUCT_RESEARCH_SCOUT_ISSUE_TRIAGE_ENABLED is set).
 //
 // Variables: PRODUCT_RESEARCH_SCOUT_ENABLED (unset or empty: nothing runs),
 // PRODUCT_RESEARCH_SCOUT_INGEST_URL and PRODUCT_RESEARCH_SCOUT_INGEST_SECRET;
@@ -23,7 +27,12 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { installCdpRules, launch, resolverRules, ruledContext, sandboxHost } from "../../lib/productResearchScoutBrowser.mjs";
 import {
+  SCOUT_EXPLORE_GENERATION,
+  SCOUT_DEPLOY_CHECK_GENERATION,
   SCOUT_GENERATIONS,
+  scoutRunMode,
+  SCOUT_IMAGE_FOLLOW_UP_GENERATION,
+  SCOUT_JOURNEY_GENERATION,
   SCOUT_LOCALES,
   SCOUT_PAGES,
   SCOUT_SANDBOX_FALLBACK_ENV,
@@ -31,14 +40,20 @@ import {
   errorCode,
   isScoutCausedConsoleError,
   isSignedOutPath,
+  admitJourney,
+  journeyTask,
   launchFailure,
   originOf,
   retriesWithoutSandbox,
+  scenarioTask,
   scoutWalkTarget,
   scoutPageLanguageMatches,
   signedInAccess,
 } from "../../lib/productResearchScoutBrowserPolicy.mjs";
-import { SCOUT_PAGE_TIMEOUT_MS, generateFile, generateImage, officePackage, pdfFirstPage, screenshot } from "../../lib/productResearchScoutGeneration.mjs";
+import { SCOUT_PAGE_TIMEOUT_MS, generateFile, generateImage, generateImageFollowUp, officePackage, pdfFirstPage, screenshot } from "../../lib/productResearchScoutGeneration.mjs";
+import { walkJourney } from "../../lib/productResearchScoutJourney.mjs";
+import { createTurnReporter } from "../../lib/productResearchScoutTurnHealth.mjs";
+import { walkMemoryProbes, walkMemoryComparison } from "../../lib/productResearchScoutMemoryWalk.mjs";
 import { scoutSendOutcome } from "../../lib/productResearchScoutCore.ts";
 
 const args = process.argv.slice(2);
@@ -81,7 +96,11 @@ setTimeout(() => {
   process.exit(1);
 }, RUN_DEADLINE_MS).unref();
 
-const outcomes = { sent: 0, stored: 0, modelOff: 0, capped: 0, refused: 0, failed: 0, stopped: 0, skipped: 0, signedInPages: 0, generated: 0 };
+const outcomes = { sent: 0, stored: 0, modelOff: 0, capped: 0, refused: 0, failed: 0, stopped: 0, skipped: 0, signedInPages: 0, generated: 0, deployChecked: 0, deployCheckFailed: 0 };
+/** The hourly walker's job this run: the full look once a day, otherwise only a new build's check. */
+const runMode = outDir ? "daily" : scoutRunMode();
+/** Turns the product did not answer, and how many the Scout reported (lib/productResearchScoutTurnHealth.mjs). */
+const turnReporter = createTurnReporter();
 /** Set by the route's first daily_cap_reached; nothing more is captured or sent today. */
 let capReached = false;
 
@@ -203,6 +222,10 @@ async function walkPages() {
   }
   try {
     const rules = await installCdpRules(browser, [walk.origin]);
+    if (runMode === "deploy_check") {
+      await walkSignedIn(browser, rules, { deployCheckOnly: true });
+      return;
+    }
     for (const target of SCOUT_PAGES) {
       if (capReached) {
         outcomes.capped += 1;
@@ -233,11 +256,11 @@ async function walkPages() {
  * session and today's generation permits, or null when there is no test account
  * (the route is 404) or the app refused.
  */
-async function askSignedIn() {
+async function askSignedIn(generations = SCOUT_GENERATIONS.map((generation) => generation.id)) {
   const response = await fetch(`${ingestUrl}/signed-in`, {
     method: "POST",
     headers: { authorization: `Bearer ${ingestSecret}`, "content-type": "application/json" },
-    body: JSON.stringify({ generations: SCOUT_GENERATIONS.map((generation) => generation.id) }),
+    body: JSON.stringify({ generations }),
     signal: AbortSignal.timeout(30_000),
   });
   if (response.status === 404) return null;
@@ -250,12 +273,49 @@ async function askSignedIn() {
   return access;
 }
 
-async function walkSignedIn(browser, rules) {
+/**
+ * The request the scenario model wrote for today (§14): a prompt, the fixtures to
+ * attach and what a user would expect, or null when the app's switch is off (404),
+ * the model is off or capped, or the answer is unusable. One model call from the
+ * Scout's daily cap; an unknown outcome is not repeated.
+ */
+async function askScenario() {
+  return askPlan("scenario", SCOUT_EXPLORE_GENERATION, scenarioTask);
+}
+
+/** Today's journey from the app's planner (§14), or null; the same terms as the scenario. */
+async function askJourney() {
+  return askPlan("journey", SCOUT_JOURNEY_GENERATION, journeyTask);
+}
+
+async function askPlan(route, subject, read) {
+  try {
+    const response = await fetch(`${ingestUrl}/${route}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${ingestSecret}` },
+      signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+    });
+    if (response.status === 404) return null;
+    const answer = await response.json().catch(() => ({}));
+    const outcome = scoutSendOutcome(answer);
+    if (outcome === "capped") capReached = true;
+    if (outcome === "modelOff") outcomes.modelOff += 1;
+    const task = read(answer);
+    if (!task) console.warn(JSON.stringify({ event: `product_research_scout_${route}_unavailable`, reason: String(answer.reason ?? response.status).slice(0, 40) }));
+    return task;
+  } catch (error) {
+    outcomes.failed += 1;
+    console.warn(JSON.stringify({ event: "product_research_scout_send_unknown", subject, error: errorCode(error) }));
+    return null;
+  }
+}
+
+async function walkSignedIn(browser, rules, { deployCheckOnly = false } = {}) {
   // Nothing signed in is worth paying for when the model will not judge it.
   if (outDir || capReached || outcomes.modelOff > 0) return;
-  const access = await askSignedIn();
+  const access = await askSignedIn(deployCheckOnly ? [SCOUT_DEPLOY_CHECK_GENERATION] : undefined);
   if (!access) return;
-  for (const target of SCOUT_SIGNED_IN_PAGES) {
+  for (const target of deployCheckOnly ? [] : SCOUT_SIGNED_IN_PAGES) {
     if (capReached) {
       outcomes.capped += 1;
       continue;
@@ -277,11 +337,63 @@ async function walkSignedIn(browser, rules) {
       outcomes.capped += 1;
       continue;
     }
-    const generation = SCOUT_GENERATIONS.find((entry) => entry.id === id);
-    const place = { walk, cookie: access.cookie };
+    let generation = SCOUT_GENERATIONS.find((entry) => entry.id === id);
+    if (id === SCOUT_DEPLOY_CHECK_GENERATION) {
+      // A new build's one turn. A healthy build costs no judge call; a broken one is
+      // judged, and the reporter has already filed it as a customer would.
+      const failuresBefore = turnReporter.counts.turnFailures;
+      const subject = await generateFile(browser, rules, generation, { walk, cookie: access.cookie, reporter: turnReporter });
+      if (!subject) {
+        // Signed out or stopped by a challenge: nothing was checked (the permit stays spent, as every permit does).
+        outcomes.skipped += 1;
+        console.warn(JSON.stringify({ event: "product_research_scout_deploy_check_skipped" }));
+        continue;
+      }
+      outcomes.deployChecked += 1;
+      // A turn that failed, or a walk that stopped before the answer (the upload or the draft broke), goes to the judge.
+      const broken = turnReporter.counts.turnFailures > failuresBefore || subject.stoppedAt !== null;
+      if (broken) {
+        outcomes.deployCheckFailed += 1;
+        console.warn(JSON.stringify({ event: "product_research_scout_deploy_check_failed", stoppedAt: subject.stoppedAt }));
+        await deliver(subject);
+      }
+      continue;
+    }
+    if (id === SCOUT_JOURNEY_GENERATION) {
+      // The planner's steps; the permit stays spent if none come.
+      const journey = await askJourney();
+      const subject = journey ? await walkJourney(browser, rules, journey, { walk, cookie: access.cookie, reporter: turnReporter }) : null;
+      if (subject) {
+        outcomes.generated += 1;
+        await deliver(subject);
+      } else {
+        outcomes.skipped += 1;
+      }
+      continue;
+    }
+    if (generation?.journey) {
+      // A fixed journey (a regression check): the same walker, the steps from SCOUT_GENERATIONS.
+      const journey = admitJourney(generation.journey);
+      const subject = journey ? await walkJourney(browser, rules, journey, { walk, cookie: access.cookie, subject: id, author: "a fixed regression check", reporter: turnReporter }) : null;
+      outcomes[subject ? "generated" : "skipped"] += 1;
+      if (subject) await deliver(subject);
+      continue;
+    }
+    if (id === SCOUT_EXPLORE_GENERATION) {
+      // Today's request comes from the app's scenario model; the permit stays spent if none comes.
+      const task = await askScenario();
+      if (!task) {
+        outcomes.skipped += 1;
+        continue;
+      }
+      generation = { ...generation, ...task };
+    }
+    const place = { walk, cookie: access.cookie, reporter: turnReporter };
     const subject = id === "generated.image"
       ? await generateImage(browser, generation, place)
-      : await generateFile(browser, rules, generation, place);
+      : id === SCOUT_IMAGE_FOLLOW_UP_GENERATION
+        ? await generateImageFollowUp(browser, rules, generation, place)
+        : await generateFile(browser, rules, generation, place);
     if (subject) {
       outcomes.generated += 1;
       await deliver(subject);
@@ -364,8 +476,64 @@ async function walkCatalogue() {
   });
 }
 
+// ---------------------------------------------------------------- issue backlog
+
+/** No body: the app reads the newest observation itself. 404 means the app has the subject off. */
+async function walkIssues() {
+  if (outDir || capReached) return;
+  try {
+    const response = await fetch(`${ingestUrl}/issues`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${ingestSecret}` },
+      signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+    });
+    if (response.status === 404) return;
+    const answer = await response.json().catch(() => ({}));
+    outcomes.sent += 1;
+    const outcome = scoutSendOutcome(answer);
+    if (outcome === "judged") outcomes.stored += Number(answer.stored) || 0;
+    else outcomes[outcome] += 1;
+  } catch (error) {
+    // Unknown outcome: the app may have stored it. Not repeated.
+    outcomes.failed += 1;
+    console.warn(JSON.stringify({ event: "product_research_scout_send_unknown", subject: "issue-backlog", error: errorCode(error) }));
+  }
+}
+
+async function walkMemory() {
+  if (outDir || capReached) return;
+  const day = new Date().toISOString().slice(0, 10);
+  const post = async (target) => {
+    const response = await fetch(`${ingestUrl}/memory/${target}`, {
+      method: "POST",
+      redirect: "error",
+      headers: { authorization: `Bearer ${ingestSecret}` },
+      signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+    });
+    if (!response.ok) {
+      await response.body?.cancel();
+      return response.status === 404 ? { disabled: true } : { judged: false, reason: "http_" + response.status };
+    }
+    return response.json();
+  };
+  const answers = await walkMemoryProbes(day, post);
+  if (!answers.some(a => a.disabled || ["daily_cap_reached", "model_off", "day_changed"].includes(a.reason))) {
+    answers.push(...await walkMemoryComparison(day, post));
+  }
+  for (const answer of answers) {
+    if (answer.disabled) continue;
+    const result = scoutSendOutcome(answer);
+    outcomes.sent++;
+    if (result === "judged") outcomes.stored += Number(answer.stored) || 0;
+    else outcomes[result]++;
+    if (result === "capped") capReached = true;
+  }
+}
 const startedAt = Date.now();
-for (const [name, step] of [["pages", walkPages], ["files", walkFiles], ["catalogue", walkCatalogue]]) {
+const steps = runMode === "deploy_check"
+  ? [["pages", walkPages]]
+  : [["memory", walkMemory], ["pages", walkPages], ["files", walkFiles], ["catalogue", walkCatalogue], ["issues", walkIssues]];
+for (const [name, step] of steps) {
   try {
     await step();
   } catch (error) {
@@ -373,4 +541,4 @@ for (const [name, step] of [["pages", walkPages], ["files", walkFiles], ["catalo
     console.warn(JSON.stringify({ event: "product_research_scout_step_failed", step: name, error: errorCode(error) }));
   }
 }
-console.log(JSON.stringify({ event: "product_research_scout_run", elapsedMs: Date.now() - startedAt, ...outcomes, sandbox, mode: outDir ? "local" : "send" }));
+console.log(JSON.stringify({ event: "product_research_scout_run", elapsedMs: Date.now() - startedAt, ...outcomes, ...turnReporter.counts, sandbox, mode: outDir ? "local" : "send", runMode }));

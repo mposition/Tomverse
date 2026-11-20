@@ -2,7 +2,7 @@ import "server-only";
 
 import type { Session } from "next-auth";
 
-import { writeAdminAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { prisma } from "@/lib/prisma";
 
 /** Owner board clean-up: archive every card still on the board in one step.
@@ -17,6 +17,8 @@ export async function archiveAllAdminExecutionCards(input: {
 }) {
   const archivedAt = new Date();
   return prisma.$transaction(async (tx) => {
+    // Audit chain before the Task rows (lib/adminAudit.ts takeAuditChainLock).
+    await takeAuditChainLock(tx);
     const { count } = await tx.amuxWorkItem.updateMany({
       where: { archivedAt: null },
       data: { archivedAt, revision: { increment: 1 } },

@@ -6,13 +6,12 @@ import {
   PROMPT_REFINER_VNEXT_CANDIDATE_VERSION,
 } from "@/lib/promptRefinerQualityEvaluationVnextCandidate";
 import {
-  PROMPT_REFINER_VNEXT_MAX_INPUT_TOKENS,
-  PROMPT_REFINER_VNEXT_MAX_OUTPUT_TOKENS,
-  PROMPT_REFINER_VNEXT_PRICE_PIN,
-  PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD,
-} from "@/lib/promptRefinerQualityEvaluationVnextExecutionContract";
-import { PROMPT_REFINER_VNEXT_ONE_SHOT_PRICE_PIN_DIGEST } from
-  "@/lib/promptRefinerVnextOneShotPriceBinding";
+  PROMPT_REFINER_PRODUCT_MAX_INPUT_TOKENS,
+  PROMPT_REFINER_PRODUCT_MAX_OUTPUT_TOKENS,
+  PROMPT_REFINER_PRODUCT_PRICE_PIN,
+  PROMPT_REFINER_PRODUCT_PRICE_PIN_DIGEST,
+  PROMPT_REFINER_PRODUCT_REQUEST_CEILING_MICRO_USD,
+} from "@/lib/promptRefinerProductPricePin";
 export {
   PROMPT_REFINER_PRODUCT_FALLBACK_REASONS,
   promptRefinerProductProposalRequestSchema,
@@ -27,16 +26,20 @@ export const PROMPT_REFINER_PRODUCT_ADAPTER_VERSION =
   "prompt-refiner-product-adapter-v1" as const;
 export const PROMPT_REFINER_PRODUCT_TIMEOUT_MS = 13_000 as const;
 export const PROMPT_REFINER_PRODUCT_RETRY_COUNT = 0 as const;
-export const PROMPT_REFINER_PRODUCT_REQUEST_CEILING_MICRO_USD =
-  PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD;
+export {
+  PROMPT_REFINER_PRODUCT_PRICE_PIN,
+  PROMPT_REFINER_PRODUCT_PRICE_PIN_DIGEST,
+  PROMPT_REFINER_PRODUCT_REQUEST_CEILING_MICRO_USD,
+};
 
 const sha256 = (value: unknown) => createHash("sha256")
   .update(canonicalBenchmarkJson(value), "utf8")
   .digest("hex");
 
 /**
- * Product identity reuses the evaluated prompt/parser/model/price pins but has
- * its own 13 second deadline. It does not edit the frozen 15 second one-shot
+ * Product identity reuses the evaluated prompt and parser, runs on its own
+ * model/price pin (gpt-6-luna since 2026-11-11, lib/promptRefinerProductPricePin.ts)
+ * and has its own 13 second deadline. It does not edit the frozen 15 second one-shot
  * evaluation contract or borrow that run's slot/cost authority.
  */
 export const PROMPT_REFINER_PRODUCT_CANDIDATE_IDENTITY = Object.freeze({
@@ -45,13 +48,13 @@ export const PROMPT_REFINER_PRODUCT_CANDIDATE_IDENTITY = Object.freeze({
   systemPrompt: PROMPT_REFINER_VNEXT_CANDIDATE_SYSTEM_PROMPT,
   parser: "parsePromptRefinerVnextModelOutput",
   inputScope: "current_user_turn_text_only",
-  model: PROMPT_REFINER_VNEXT_PRICE_PIN,
-  maxInputTokens: PROMPT_REFINER_VNEXT_MAX_INPUT_TOKENS,
-  maxOutputTokens: PROMPT_REFINER_VNEXT_MAX_OUTPUT_TOKENS,
+  model: PROMPT_REFINER_PRODUCT_PRICE_PIN,
+  maxInputTokens: PROMPT_REFINER_PRODUCT_MAX_INPUT_TOKENS,
+  maxOutputTokens: PROMPT_REFINER_PRODUCT_MAX_OUTPUT_TOKENS,
   timeoutMs: PROMPT_REFINER_PRODUCT_TIMEOUT_MS,
   retryCount: PROMPT_REFINER_PRODUCT_RETRY_COUNT,
   requestCeilingMicroUsd: PROMPT_REFINER_PRODUCT_REQUEST_CEILING_MICRO_USD,
-  pricePinDigest: PROMPT_REFINER_VNEXT_ONE_SHOT_PRICE_PIN_DIGEST,
+  pricePinDigest: PROMPT_REFINER_PRODUCT_PRICE_PIN_DIGEST,
 });
 
 export const PROMPT_REFINER_PRODUCT_CANDIDATE_DIGEST =
@@ -67,6 +70,4 @@ export const PROMPT_REFINER_PRODUCT_ADAPTER_CONFIG_DIGEST = sha256({
   cacheWriteTokensRequired: 0,
 });
 
-export const PROMPT_REFINER_PRODUCT_PRICE_PIN_DIGEST =
-  PROMPT_REFINER_VNEXT_ONE_SHOT_PRICE_PIN_DIGEST;
 

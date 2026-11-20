@@ -2,9 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { AMUX_V4_ANALYSIS_AGENT_SECRET_ENV,
-  AMUX_V4_ANALYSIS_QUEUE_READ_ENV } from "../lib/amux/ideaAnalysisQueueCore.ts";
-import { AMUX_SESSION_INTAKE_ENV } from "../lib/amux/ideaSessionSubmissionCore.ts";
+import { AMUX_V4_ANALYSIS_AGENT_SECRET_ENV } from "../lib/amux/ideaAnalysisQueueCore.ts";
 import { encodeAmuxSessionAnalysisQueueCursor,
   parseAmuxSessionAnalysisQueueCursor } from
   "../lib/amux/ideaSessionAnalysisQueueCursorCore.ts";
@@ -26,11 +24,14 @@ test("v19 session queue filters expired, cancelled, purged and owner ideas", () 
     reservationId: "00000000-0000-4000-8000-000000000001" };
   assert.deepEqual(buildAmuxSessionAnalysisQueueWhere(now, cursor), {
     status: "queued",
-    AND: [{ OR: [
-      { budgetClaims: { none: {} }, idea: { state: "submitted" } },
-      { budgetClaims: { some: { status: "succeeded" },
-        every: { status: "succeeded" } }, idea: { state: "analyzing" } },
-    ] }],
+    // A running claim, or a paid claim's unknown outcome, excludes its idea;
+    // which other idea is due -- after a result, after its retry wait, or
+    // with a subscription claim left open unknown -- is
+    // amuxSessionNextClaimDue's call.
+    AND: [{ budgetClaims: { none: { OR: [
+      { status: "in_flight" },
+      { status: "outcome_unknown", budgetMode: { not: "max_shadow" } },
+    ] } } }],
     idea: { submissionOrigin: "session", state: { in: ["submitted", "analyzing"] },
       cancelledAt: null, analysisCompletedAt: null, analysisDeadlineAt: { gt: now },
       rawCiphertext: { not: null }, rawPurgedAt: null,
@@ -56,23 +57,19 @@ test("v19 session queue cursor has a strict, stable position", () => {
   }
 });
 
-test("v19 session queue refuses unauthorized or disabled requests before DB", async () => {
+test("v19 session queue refuses unauthorized and malformed requests before DB", async () => {
   const imported = await import("../app/api/internal/amux/v19/analysis-queue/route.ts");
   const POST = imported.POST ?? imported.default.POST;
-  const keys = [AMUX_V4_ANALYSIS_AGENT_SECRET_ENV, AMUX_V4_ANALYSIS_QUEUE_READ_ENV,
-    AMUX_SESSION_INTAKE_ENV, "TOMVERSE_AMUX_V19_SESSION_ANALYSIS_QUEUE_READ",
-    "TOMVERSE_AMUX_SYNC_SECRET", "TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET",
-    "TOMVERSE_AMUX_V19_MAX_ANALYSIS_QUEUE_READ"];
+  const keys = [AMUX_V4_ANALYSIS_AGENT_SECRET_ENV,
+    "TOMVERSE_AMUX_SYNC_SECRET", "TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET"];
   const previous = new Map(keys.map((key) => [key, process.env[key]]));
   try {
     process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV] = secret;
     delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
-    for (const key of keys.slice(1, 4)) delete process.env[key];
-    assert.equal((await POST(request({}, "wrong_".repeat(8)))).status, 401);
-    const dark = await POST(request({}));
-    assert.equal(dark.status, 409);
-    assert.match(dark.headers.get("cache-control") ?? "", /no-store/);
-    for (const key of keys.slice(1, 4)) process.env[key] = "enabled";
+    delete process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET;
+    const unauthorized = await POST(request({}, "wrong_".repeat(8)));
+    assert.equal(unauthorized.status, 401);
+    assert.match(unauthorized.headers.get("cache-control") ?? "", /no-store/);
     assert.equal((await POST(request())).status, 415);
     assert.equal((await POST(request({ after: "!" }))).status, 400);
     assert.equal((await POST(request({ unexpected: true }))).status, 400);
@@ -83,8 +80,6 @@ test("v19 session queue refuses unauthorized or disabled requests before DB", as
         "x-amux-agent-id": "amux-intake-max",
         "content-type": "application/json" },
       body: JSON.stringify(body) });
-    assert.equal((await POST(maxRequest({ after: "!" }))).status, 409);
-    process.env.TOMVERSE_AMUX_V19_MAX_ANALYSIS_QUEUE_READ = "enabled";
     assert.equal((await POST(maxRequest({ after: "!" }))).status, 400);
     process.env.TOMVERSE_AMUX_V19_MAX_LAUNCHER_SECRET = secret;
     assert.equal((await POST(new Request(endpoint, { method: "POST",

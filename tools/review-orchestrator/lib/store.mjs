@@ -112,6 +112,7 @@ export function summarise({ job, slots }) {
     authorVendor: job.authorVendor,
     touchesContract: job.touchesContract,
     reviewerProviders: job.reviewerProviders ?? [],
+    avoidVendors: job.avoidVendors ?? [],
     reviews: slots.map((slot) => ({
       slot: slot.index,
       requestedProvider: job.reviewerProviders?.[slot.index] ?? null,

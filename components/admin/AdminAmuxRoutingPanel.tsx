@@ -22,6 +22,8 @@ import { adminFetch } from "@/lib/adminFetch";
 import { amuxOwnerRecoveryPreparation, amuxReviewUsageOutcomeUnknown } from "@/lib/amux/ownerRecoveryCore";
 import { amuxReviewReadError } from "@/lib/amux/reviewReadErrorCore";
 import { AmuxOwnerRecoveryInspectionPanel } from "./AmuxOwnerRecoveryInspectionPanel";
+import { amuxLegacyCardReadOf, type AmuxLegacyCardRead } from "./AmuxLegacyCardPanel";
+import { amuxRejectedAttemptsOf, type AmuxRejectedAttempt } from "./AmuxReviewRejection";
 
 // The server-side review proxy waits up to 40s. The browser must not abort
 // first; an unknown outcome freezes writes until decision ID/digest lookup.
@@ -96,14 +98,27 @@ export type AmuxReviewDetail = {
     pr_number: number;
     base_sha: string;
     head_sha: string;
+    /** The change digest the approval binds: v2 (`v2:` + hex) since 2026-11-18. */
     diff_digest: string;
-    diff_text: string;
+    /** Null when the diff is not shown here (too large, binary or unsafe to display). */
+    diff_text: string | null;
+    diff_hidden?: "oversized" | "binary" | "unsafe_display" | null;
     html_url: string;
   } | null;
   allowed_outcomes: ReviewOutcome[];
+  /** What an offered approve rests on; "no_change" completes an implement
+   * Task that left no change, as no change needed (owner decision 2026-11-11). */
+  approval_basis?: "evidence" | "no_change" | null;
+  /** The attempt stored a patch no pull request carries; "no change needed"
+   * is refused for it. */
+  unpublished_patch?: { publication_run_missing: boolean } | null;
+  /** The engineering agent has a pull request open for this run's change
+   * ("pr_open", numbered) or may still open one ("pending"); the card itself
+   * records none. A retry waits for it. */
+  publication_hold?: { state: "pr_open" | "pending"; pr_number: number | null } | null;
   /** Why the server offers no decision at all; null while it offers one. */
   decision_hold?: string | null;
-  retry: { used: number; limit: number; remaining: number };
+  retry: { used: number; limit: number | null; remaining: number | null };
   proposed_transitions: Partial<Record<ReviewOutcome, string>>;
 };
 type ReviewDetail = AmuxReviewDetail;
@@ -116,9 +131,14 @@ export type AmuxOwnerExecutionMetadata = {
   actualCostConfirmed: boolean;
 };
 
+// `legacyCard` is the card's owner settlement panel from the same answer, kept
+// whether or not the attempt metadata could be bound to the review; so are
+// `rejections`, the card's runs its code review rejected, with their reasons.
 type OwnerExecutionState =
-  | { state: "idle" | "loading" | "unavailable" }
-  | { state: "ready"; metadata: AmuxOwnerExecutionMetadata };
+  | { state: "idle" | "loading" }
+  | { state: "unavailable"; legacyCard?: AmuxLegacyCardRead | null; rejections?: AmuxRejectedAttempt[] }
+  | { state: "ready"; metadata: AmuxOwnerExecutionMetadata; legacyCard?: AmuxLegacyCardRead | null;
+      rejections?: AmuxRejectedAttempt[] };
 
 export type AmuxOwnerExecutionReadFetcher = (
   input: RequestInfo | URL,
@@ -210,7 +230,8 @@ export const isValidAmuxReviewArtifact = (value: unknown): value is NonNullable<
   (value.pr_number as number) > 0 &&
   typeof value.base_sha === "string" && /^[0-9a-f]{40}$/i.test(value.base_sha) &&
   typeof value.head_sha === "string" && /^[0-9a-f]{40}$/i.test(value.head_sha) &&
-  typeof value.diff_digest === "string" && /^[0-9a-f]{64}$/i.test(value.diff_digest);
+  typeof value.diff_digest === "string" && /^(v2:)?[0-9a-f]{64}$/i.test(value.diff_digest) &&
+  (value.diff_text === null || typeof value.diff_text === "string");
 
 const isMicrousd = (value: unknown): value is string =>
   typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value);
@@ -293,7 +314,10 @@ export async function readAmuxOwnerExecutionMetadata({
     if (!isCurrent()) return null;
     if (controller.signal.aborted) return { state: "unavailable" };
     const metadata = bindAmuxOwnerExecutionMetadata(review, body);
-    return metadata ? { state: "ready", metadata } : { state: "unavailable" };
+    const legacyCard = amuxLegacyCardReadOf(review.task.id, body);
+    const rejections = amuxRejectedAttemptsOf(review.task.id, body);
+    return metadata ? { state: "ready", metadata, legacyCard, rejections }
+      : { state: "unavailable", legacyCard, rejections };
   } catch {
     if (!isCurrent()) return null;
     return { state: "unavailable" };
@@ -362,6 +386,15 @@ export const visibleAmuxOwnerReviewOutcomes = (review: ReviewDetail) => {
     .filter((outcome) => outcome !== "retry" ||
       (!unknown && recovery.retryPreviewReady));
 };
+
+/** The server's approve is the owner's "no change needed" completion. */
+export const amuxReviewApprovesNoChange = (review: ReviewDetail) =>
+  review.approval_basis === "no_change" && review.allowed_outcomes.includes("approve");
+
+/** The words of one decision; approve reads as "no change needed" on that basis. */
+export const amuxReviewOutcomeLabel = (m: RoutingMessages, review: ReviewDetail,
+  outcome: ReviewOutcome) =>
+  outcome === "approve" && amuxReviewApprovesNoChange(review) ? m.noChange.outcome : m.outcome[outcome];
 
 export type AmuxOwnerQueueClassification =
   | "needs_read"
@@ -443,8 +476,9 @@ export function AmuxOwnerReviewView({
     : null;
   const hasWorkerEvidence = Boolean(report?.worker_report || validArtifact);
   const technicalOnly = !recovery.decisionContextReady;
+  const noChange = amuxReviewApprovesNoChange(review);
   const decisionQuestion = outcomes.includes("approve")
-    ? m.ownerQuestionApprove
+    ? noChange ? m.noChange.question : m.ownerQuestionApprove
     : outcomes.includes("retry")
       // From review, retry is offered only for a result with no pull request.
       ? review.task.status === "review" && review.task.review_pr_number === null
@@ -506,6 +540,18 @@ export function AmuxOwnerReviewView({
           <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm font-bold text-amber-100">
             {m.reviewDisplayMismatch}
           </p>
+        )}
+        {review.unpublished_patch && (
+          <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100"
+            data-testid="admin-amux-unpublished-patch">
+            <p className="font-bold">{m.unpublishedPatch.title}</p>
+            <p className="mt-1 leading-6">{m.unpublishedPatch.body}</p>
+            {review.unpublished_patch.publication_run_missing && (
+              <p className="mt-1 leading-6" data-testid="admin-amux-unpublished-patch-run-missing">
+                {m.unpublishedPatch.runMissing}
+              </p>
+            )}
+          </div>
         )}
       </header>
 
@@ -782,7 +828,7 @@ export function AmuxOwnerReviewView({
           <dt className="text-zinc-500">{m.dueParseState}</dt><dd className="break-words font-mono text-zinc-300">{review.task.due_parse_state}</dd>
           <dt className="text-zinc-500">{m.lastAttempt}</dt><dd className="break-all font-mono text-zinc-300">{review.last_attempt?.id ?? m.noAttempt}</dd>
           <dt className="text-zinc-500">{m.lastAttemptState}</dt><dd className="break-words font-mono text-zinc-300">{review.last_attempt ? `${review.last_attempt.outcome} → ${review.last_attempt.to_status}` : "—"}</dd>
-          <dt className="text-zinc-500">{m.attemptBudget}</dt><dd className="text-zinc-300">{number(review.retry.used)} / {number(review.retry.limit)} · {m.remaining} {number(review.retry.remaining)}</dd>
+          <dt className="text-zinc-500">{m.attemptBudget}</dt><dd className="text-zinc-300">{number(review.retry.used)} / {review.retry.limit === null ? m.noAttemptLimit : number(review.retry.limit)}{review.retry.remaining !== null && <> · {m.remaining} {number(review.retry.remaining)}</>}</dd>
           <dt className="text-zinc-500">{m.serverAllowedOutcomes}</dt><dd className="break-words font-mono text-zinc-300">{review.allowed_outcomes.join(", ") || "—"}</dd>
           {review.review_content && <><dt className="text-zinc-500">{m.subjectDigest}</dt><dd className="break-all font-mono text-zinc-300">{review.review_content.digest}</dd></>}
           {review.review_context.result_sha256 && <><dt className="text-zinc-500">{m.reviewResultSha256}</dt><dd className="break-all font-mono text-zinc-300">{review.review_context.result_sha256}</dd></>}
@@ -805,9 +851,19 @@ export function AmuxOwnerReviewView({
             <p className="mt-2 break-all font-mono text-xs text-zinc-300">{m.reviewHeadSha}: {validArtifact.head_sha}</p>
             <p className="mt-2 break-all font-mono text-xs text-zinc-300">{m.reviewDiffDigest}: {validArtifact.diff_digest}</p>
             <p className="mt-3 text-xs font-bold text-zinc-500">{m.reviewPrDiff}</p>
-            <pre dir="ltr" className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-zinc-300 [overflow-wrap:anywhere]">
-              {validArtifact.diff_text}
-            </pre>
+            {validArtifact.diff_text !== null ? (
+              <pre dir="ltr" className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-zinc-300 [overflow-wrap:anywhere]">
+                {validArtifact.diff_text}
+              </pre>
+            ) : (
+              <p className="mt-2 text-xs text-amber-200" data-testid="admin-amux-review-diff-not-shown">
+                {m.reviewDiffNotShown}{" "}
+                <a href={`https://github.com/mposition/Tomverse/pull/${validArtifact.pr_number}`} target="_blank"
+                  rel="noopener noreferrer" className="underline">
+                  #{validArtifact.pr_number}
+                </a>
+              </p>
+            )}
           </div>
         )}
       </details>
@@ -840,9 +896,11 @@ export function AmuxOwnerReviewView({
                 aria-pressed={selectedOutcome === outcome}
                 className="min-h-11 rounded-lg border border-zinc-600 px-4 py-3 text-left font-bold text-zinc-100 transition-colors hover:bg-zinc-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400 aria-pressed:border-blue-400 aria-pressed:bg-blue-500/10 disabled:opacity-50"
                 data-testid={`admin-amux-select-${outcome}`}>
-                <span className="block">{m.outcome[outcome]} · {review.proposed_transitions[outcome] ?? "—"}</span>
+                <span className="block">{amuxReviewOutcomeLabel(m, review, outcome)} · {review.proposed_transitions[outcome] ?? "—"}</span>
                 <span className="mt-1 block text-xs font-normal leading-5 text-zinc-400">
-                  {outcome === "block" ? blockEffect : m.decisionWarning[outcome]}
+                  {outcome === "block" ? blockEffect
+                    : outcome === "approve" && noChange ? m.noChange.decisionWarning
+                    : m.decisionWarning[outcome]}
                 </span>
               </button>
             ))}
@@ -1018,6 +1076,8 @@ export function useAmuxOwnerReview({ canInspectCards, onDecisionCommitted: commi
   const [reauthenticationRequired, setReauthenticationRequired] = useState(false);
   const [selectedOutcome, setSelectedOutcome] = useState<ReviewOutcome | null>(null);
   const [retryReadConfirmed, setRetryReadConfirmed] = useState(false);
+  // "I read the worker report and checked the code": a no-change completion only.
+  const [noChangeConfirmed, setNoChangeConfirmed] = useState(false);
   const [resolution, setResolution] = useState("");
   const [proposal, setProposal] = useState<ReviewProposal | null>(null);
   const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
@@ -1045,6 +1105,7 @@ export function useAmuxOwnerReview({ canInspectCards, onDecisionCommitted: commi
     setReauthenticationRequired(false);
     setSelectedOutcome(null);
     setRetryReadConfirmed(false);
+    setNoChangeConfirmed(false);
     setResolution("");
     setProposal(null);
     setIdempotencyKey(null);
@@ -1097,6 +1158,7 @@ export function useAmuxOwnerReview({ canInspectCards, onDecisionCommitted: commi
     setReauthenticationRequired(false);
     setSelectedOutcome(null);
     setRetryReadConfirmed(false);
+    setNoChangeConfirmed(false);
     setResolution("");
     setProposal(null);
     setIdempotencyKey(null);
@@ -1165,6 +1227,10 @@ export function useAmuxOwnerReview({ canInspectCards, onDecisionCommitted: commi
       setReviewError(m.retryConfirmationRequired);
       return;
     }
+    if (selectedOutcome === "approve" && amuxReviewApprovesNoChange(review) && !noChangeConfirmed) {
+      setReviewError(m.noChange.confirmationRequired);
+      return;
+    }
     if (resolution.trim().length < 3 || resolution.trim().length > 1_000) {
       setReviewError(m.resolutionLength);
       return;
@@ -1222,6 +1288,10 @@ export function useAmuxOwnerReview({ canInspectCards, onDecisionCommitted: commi
       !selectedOutcome || selectedOutcome !== proposal.outcome) return;
     if (selectedOutcome === "retry" && !retryReadConfirmed) {
       setReviewError(m.retryConfirmationRequired);
+      return;
+    }
+    if (selectedOutcome === "approve" && amuxReviewApprovesNoChange(review) && !noChangeConfirmed) {
+      setReviewError(m.noChange.confirmationRequired);
       return;
     }
     if (!Number.isFinite(Date.parse(proposal.expires_at)) ||
@@ -1362,7 +1432,8 @@ export function useAmuxOwnerReview({ canInspectCards, onDecisionCommitted: commi
   return {
     canInspectCards, selectedEscalationId, review, ownerExecution, reviewLoading, reviewBusy,
     reviewError, setReviewError, reviewUnavailable, reauthenticationRequired, selectedOutcome,
-    setSelectedOutcome, retryReadConfirmed, setRetryReadConfirmed, resolution, setResolution,
+    setSelectedOutcome, retryReadConfirmed, setRetryReadConfirmed, noChangeConfirmed,
+    setNoChangeConfirmed, resolution, setResolution,
     proposal, setProposal, setIdempotencyKey, decisionStatusUnknown, setDecisionStatusUnknown,
     decisionStatusChecking, pendingDecision, pendingDecisionChecked, closeReview, openReview,
     prepareProposal, confirmDecision, checkDecisionStatus,
@@ -1466,11 +1537,14 @@ export function AmuxOwnerReviewDetail({ controller, reviewReturnPath, showClose 
   const { canInspectCards, selectedEscalationId, review, ownerExecution, reviewLoading,
     reviewBusy, reviewError, setReviewError, reviewUnavailable, reauthenticationRequired,
     selectedOutcome, setSelectedOutcome, retryReadConfirmed, setRetryReadConfirmed,
+    noChangeConfirmed, setNoChangeConfirmed,
     resolution, setResolution, proposal, setProposal, setIdempotencyKey,
     decisionStatusUnknown, setDecisionStatusUnknown, decisionStatusChecking,
     pendingDecision, closeReview, openReview, prepareProposal, confirmDecision,
     checkDecisionStatus } = controller;
   const reviewOutcomes = review ? visibleAmuxOwnerReviewOutcomes(review) : [];
+  const selectedNoChange = review !== null && selectedOutcome === "approve" &&
+    amuxReviewApprovesNoChange(review);
   const returnPath = reviewReturnPath ?? amuxAssignmentReviewReturnPath(selectedEscalationId);
   return (
     <>
@@ -1568,6 +1642,10 @@ export function AmuxOwnerReviewDetail({ controller, reviewReturnPath, showClose 
                 onSelectOutcome={(outcome) => {
                   setSelectedOutcome(outcome);
                   if (outcome !== "retry") setRetryReadConfirmed(false);
+                  setNoChangeConfirmed(false);
+                  // The audit entry names the basis; the owner may reword the reason.
+                  if (outcome === "approve" && amuxReviewApprovesNoChange(review) &&
+                      resolution.trim() === "") setResolution(m.noChange.defaultResolution);
                   setProposal(null);
                   setIdempotencyKey(null);
                   setDecisionStatusUnknown(false);
@@ -1577,9 +1655,25 @@ export function AmuxOwnerReviewDetail({ controller, reviewReturnPath, showClose 
               {selectedOutcome && reviewOutcomes.includes(selectedOutcome) && (
                 <div className="mt-3 border-t border-zinc-700 pt-3">
                   <p className="font-bold text-zinc-100">
-                    {m.outcome[selectedOutcome]} · {review.task.status} → {review.proposed_transitions[selectedOutcome] ?? "—"}
+                    {amuxReviewOutcomeLabel(m, review, selectedOutcome)} · {review.task.status} → {review.proposed_transitions[selectedOutcome] ?? "—"}
                   </p>
-                  <p className="mt-1 text-amber-200">{m.decisionWarning[selectedOutcome]}</p>
+                  <p className="mt-1 text-amber-200">{selectedNoChange
+                    ? m.noChange.decisionWarning : m.decisionWarning[selectedOutcome]}</p>
+                  {selectedNoChange && (
+                    <label className="mt-3 flex min-h-11 cursor-pointer items-start gap-3 rounded-lg border border-blue-500/30 bg-blue-500/10 p-3 text-sm font-semibold leading-6 text-blue-100">
+                      <input type="checkbox" checked={noChangeConfirmed}
+                        onChange={(event) => {
+                          setNoChangeConfirmed(event.target.checked);
+                          setProposal(null);
+                          setIdempotencyKey(null);
+                          setReviewError(null);
+                        }}
+                        disabled={reviewBusy || decisionStatusUnknown}
+                        className="mt-1 h-4 w-4 shrink-0 accent-blue-500"
+                        data-testid="admin-amux-no-change-confirmation" />
+                      <span>{m.noChange.confirmation}</span>
+                    </label>
+                  )}
                   <label htmlFor="admin-amux-resolution" className="mt-3 block font-semibold text-zinc-200">
                     {m.resolutionLabel}
                   </label>
@@ -1598,7 +1692,8 @@ export function AmuxOwnerReviewDetail({ controller, reviewReturnPath, showClose 
                       type="button"
                       onClick={() => void prepareProposal()}
                       disabled={reviewBusy || resolution.trim().length < 3 ||
-                        (selectedOutcome === "retry" && !retryReadConfirmed)}
+                        (selectedOutcome === "retry" && !retryReadConfirmed) ||
+                        (selectedNoChange && !noChangeConfirmed)}
                       className="mt-2 rounded-lg border border-blue-500/40 bg-blue-500/10 px-3 py-2 font-bold text-blue-100 disabled:opacity-50"
                       data-testid="admin-amux-prepare-proposal"
                     >
@@ -1606,7 +1701,8 @@ export function AmuxOwnerReviewDetail({ controller, reviewReturnPath, showClose 
                     </button>
                   ) : (
                     <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3" data-testid="admin-amux-proposal-confirmation">
-                      <p className="font-bold text-amber-100">{m.confirmHeading[selectedOutcome]}</p>
+                      <p className="font-bold text-amber-100">{selectedNoChange
+                        ? m.noChange.confirmHeading : m.confirmHeading[selectedOutcome]}</p>
                       <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-amber-100/90">
                         <dt>{m.proposalId}</dt><dd className="break-all font-mono">{proposal.id}</dd>
                         <dt>{m.decisionId}</dt><dd className="break-all font-mono">{proposal.decision_id}</dd>
@@ -1614,17 +1710,19 @@ export function AmuxOwnerReviewDetail({ controller, reviewReturnPath, showClose 
                         <dt>{m.transition}</dt><dd>{proposal.source_status} → {proposal.target_status}</dd>
                         <dt>{m.expiry}</dt><dd>{date(proposal.expires_at)}</dd>
                         <dt>{m.subjectDigest}</dt><dd className="break-all font-mono">{proposal.subject_digest}</dd>
-                        <dt>{m.attemptBudget}</dt><dd>{number(review.retry.remaining)} {m.remaining}</dd>
+                        <dt>{m.attemptBudget}</dt><dd>{review.retry.remaining === null ? m.noAttemptLimit : `${number(review.retry.remaining)} ${m.remaining}`}</dd>
                       </dl>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <button
                           type="button"
                           onClick={() => void confirmDecision()}
-                          disabled={reviewBusy || reauthenticationRequired || decisionStatusUnknown}
+                          disabled={reviewBusy || reauthenticationRequired || decisionStatusUnknown ||
+                            (selectedNoChange && !noChangeConfirmed)}
                           className="rounded-lg border border-amber-400 bg-amber-400/20 px-3 py-2 font-bold text-amber-100 disabled:opacity-50"
                           data-testid={`admin-amux-confirm-${selectedOutcome}`}
                         >
-                          {reviewBusy ? m.working : m.confirmDecision[selectedOutcome]}
+                          {reviewBusy ? m.working : selectedNoChange
+                            ? m.noChange.confirmDecision : m.confirmDecision[selectedOutcome]}
                         </button>
                         <button
                           type="button"

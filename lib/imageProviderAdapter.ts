@@ -8,11 +8,24 @@ import {
 } from "@/lib/imageGenerationPricing";
 import {
   getImageModel,
+  GOOGLE_IMAGE_OUTPUT_LIMIT_MARGIN,
   imageDeliveryMimeType,
+  imageMeasuredOutputLimitBound,
   imageThinkingCapEnforced,
   type ImageModelProfile,
 } from "@/lib/imageModelRegistry";
+import {
+  BFL_API_KEY_HEADER,
+  BFL_POLL_INTERVAL_MS,
+  bflSubmitUrl,
+  buildBflImageRequest,
+  isBflFlux3ImageModel,
+  isBflUrl,
+  parseBflPollResponse,
+  parseBflSubmitResponse,
+} from "@/lib/bflImageRequest";
 import { BoundedBufferError, readResponseToBuffer } from "@/lib/boundedBuffer";
+import { numericUsage } from "@/lib/imageBillingMeasurementCore";
 import { readImageDimensions } from "@/lib/imageDimensions";
 import {
   buildFalImageEditRequest,
@@ -35,7 +48,10 @@ import {
   buildGoogleImageRequest,
   GOOGLE_API_KEY_HEADER,
   GOOGLE_INTERACTIONS_URL,
+  googleBilledImageTokens,
+  googleNonImageBillableTokens,
   parseGoogleImageResponse,
+  readGoogleImageInteraction,
 } from "@/lib/googleImageRequest";
 import {
   buildQwenImageRequest,
@@ -115,6 +131,30 @@ export class ImageProviderError extends Error {
     super(message);
     this.name = "ImageProviderError";
   }
+
+  /**
+   * Billable output and thinking tokens of a response that was billed and
+   * still refused (a Google response that stopped without its image). Null
+   * everywhere else. Lets the failure settle what was spent past the reservation.
+   */
+  nonImageBillableTokens: number | null = null;
+
+  /**
+   * What the refused response billed as images: its image tokens, or null when
+   * it reported none, and the images its model output carried (0 or several).
+   */
+  billedImageTokens: number | null = null;
+  billedImageCount = 0;
+
+  /** The response's numeric usage fields, where a refused response reported any (billing measurement). */
+  providerUsage: Record<string, number> | null = null;
+
+  /**
+   * The provider generated (and billed) the image and only fetching or
+   * checking it failed, so `status` is the download's, not a refusal of the
+   * request. Set on the Qwen asset path; read by the billing measurement.
+   */
+  afterGeneration = false;
 }
 
 /**
@@ -203,6 +243,18 @@ export type ImageProviderResult = {
    * compare the fixed price against the real cost.
    */
   thinkingTokens: number;
+  /**
+   * Billable output and thinking tokens that are not the image, for a model
+   * priced on a measured token bound (Google direct). Absent elsewhere.
+   */
+  nonImageBillableTokens?: number | null;
+  /** Image tokens the response billed, for the same models; null when not reported. */
+  billedImageTokens?: number | null;
+  /**
+   * The response's numeric usage fields, flattened. Read by the admin billing
+   * measurement (lib/imageBillingMeasurement.ts); settlement does not use it.
+   */
+  providerUsage?: Record<string, number> | null;
   /** Provider-reported output/image tokens; 0 when the response omits usage. */
   outputTokens: number;
   providerRequestId: string | null;
@@ -255,6 +307,22 @@ const getGoogleApiKey = () => {
  */
 const getFalApiKey = () => {
   const key = process.env.FAL_KEY?.trim();
+  if (!key) {
+    throw new ImageProviderError(
+      "provider_failed",
+      "Image provider is not configured."
+    );
+  }
+  return key;
+};
+
+/**
+ * Black Forest Labs' key, kept out of PROVIDER_API_KEY_ENV_NAMES for the same
+ * reason as fal's: BFL serves no chat model. `BFL_API_KEY` is the name BFL's
+ * own documentation uses.
+ */
+const getBflApiKey = () => {
+  const key = process.env.BFL_API_KEY?.trim();
   if (!key) {
     throw new ImageProviderError(
       "provider_failed",
@@ -365,8 +433,14 @@ export const generateImageWithProvider = async (input: {
   const model = getImageModel(modelId);
   // An operator hold stops new admissions (the service refuses them); a job
   // already admitted and charged against the provider budget finishes rather
-  // than failing after its budget was spent. Price or cost refusals still stop.
-  if (!model || (model.disabledReason !== null && model.disabledReason !== "operational_hold")) {
+  // than failing after its budget was spent. Price or cost refusals still stop,
+  // and so does a model with no price at all: nothing was admitted against it,
+  // so there is no job to finish (a seed held before its sale credits exist).
+  if (
+    !model ||
+    model.prices.length === 0 ||
+    (model.disabledReason !== null && model.disabledReason !== "operational_hold")
+  ) {
     throw new ImageProviderError(
       "provider_failed",
       `Image model ${modelId} is not available for requests.`
@@ -393,6 +467,45 @@ export const generateImageWithProvider = async (input: {
       `Image model ${modelId} cannot edit an image.`
     );
   }
+  return dispatchImageRequest(model, input);
+};
+
+type ImageRequestInput = {
+  prompt: string;
+  size: ImageSize;
+  quality: ImageQuality;
+  editImage?: ImageEditInput;
+  /**
+   * False sends one attempt only. A retried timeout, transport failure or 5xx
+   * may follow an attempt that was billed, and a measurement counts each
+   * request it sends against the operator's approved maximum.
+   */
+  retry?: boolean;
+};
+
+/**
+ * Generation for a candidate profile that is not in the catalogue, for the
+ * admin billing measurement only (lib/imageBillingMeasurement.ts). It skips
+ * the catalogue checks above on purpose -- the model is unpriced because its
+ * billing is what is being measured -- so the caller holds the provider
+ * budget and the operator's approved maximum instead. Never an edit, never
+ * retried: one sample is one request.
+ */
+export const generateImageForMeasurement = async (
+  model: ImageModelProfile,
+  input: { prompt: string; size: ImageSize; quality: ImageQuality }
+): Promise<ImageProviderResult> => {
+  // The providers whose adapters honour `retry: false` (Qwen never retries).
+  if (!["openai", "google", "qwen"].includes(model.provider)) {
+    throw new ImageProviderError("provider_failed", `No billing measurement for provider ${model.provider}.`);
+  }
+  return dispatchImageRequest(model, { ...input, retry: false });
+};
+
+const dispatchImageRequest = async (
+  model: ImageModelProfile,
+  input: ImageRequestInput
+): Promise<ImageProviderResult> => {
   if (model.provider === "xai") {
     return generateWithXai(model, input);
   }
@@ -405,12 +518,22 @@ export const generateImageWithProvider = async (input: {
   if (model.provider === "qwen") {
     return generateWithQwen(model, input);
   }
+  if (model.provider === "bfl") {
+    return generateWithBfl(model, input);
+  }
   if (model.provider !== "openai") {
     throw new ImageProviderError(
       "provider_failed",
       `No adapter is implemented for provider ${model.provider}.`
     );
   }
+  return generateWithOpenAi(model, input);
+};
+
+const generateWithOpenAi = async (
+  model: ImageModelProfile,
+  input: ImageRequestInput
+): Promise<ImageProviderResult> => {
   const openAiBody = {
     model: model.apiModelId,
     prompt: input.prompt,
@@ -445,8 +568,9 @@ export const generateImageWithProvider = async (input: {
   };
   const apiKey = getImageApiKey();
   let lastError: ImageProviderError | null = null;
+  const retries = input.retry === false ? 0 : RETRY_DELAYS_MS.length;
 
-  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
     if (attempt > 0) {
       const base = RETRY_DELAYS_MS[attempt - 1];
       await wait(base + Math.floor(Math.random() * 500));
@@ -538,6 +662,7 @@ export const generateImageWithProvider = async (input: {
       outputTokens: Number.isSafeInteger(payload?.usage?.output_tokens)
         ? Number(payload?.usage?.output_tokens)
         : 0,
+      providerUsage: numericUsage(payload?.usage),
       providerRequestId,
       provenance: ["c2pa"],
       outputWidth: dimensions?.width ?? null,
@@ -555,16 +680,20 @@ export const generateImageWithProvider = async (input: {
 /**
  * Google, over the Interactions API.
  *
- * Unreachable today and deliberately so: generateImageWithProvider refuses any
- * model carrying a disabledReason before it dispatches, and all three Google
- * image models are `worst_case_cost_unbounded` because `max_output_tokens` was
- * measured not to bound hidden thinking. It also refuses any model whose
- * provider bills thinking per uncapped token (`imageThinkingCapEnforced`), so
- * a cap an operator writes into a price revision does not open this path
- * either -- only a code change to that table can. The adapter exists
- * ahead of that answer because implementing it is not the same decision as
- * shipping it, and because the staging measurement that would settle the
- * question needs this code to make the call.
+ * Reachable only for a model in GOOGLE_IMAGE_OUTPUT_LIMIT_BOUNDS (or with confirmed
+ * measured terms) whose request
+ * is the measured one (that row's output limit, no thinking level), once an
+ * operator has priced and enabled it: generateImageWithProvider refuses any
+ * model carrying a disabledReason before it dispatches, and any whose thinking
+ * cap its request cannot hold (`imageThinkingCapEnforced`). A cap written into
+ * a price revision for an unmeasured Google model opens nothing -- only a row
+ * in that table (a code change backed by a measurement) or terms an operator
+ * confirmed from an admin measurement (ImageModelBillingTerms) can.
+ *
+ * Only a rate limit is retried. A response that stops without an image
+ * (`incomplete`, which the limit causes when reasoning uses the room), a
+ * transport failure and a 5xx are not: each may have been billed, and the
+ * reservation holds one request's worst case.
  *
  * Differences from the other two adapters, each of which is a way to get it
  * wrong:
@@ -577,7 +706,7 @@ export const generateImageWithProvider = async (input: {
  */
 const generateWithGoogle = async (
   model: ImageModelProfile,
-  input: { prompt: string; size: ImageSize }
+  input: { prompt: string; size: ImageSize; retry?: boolean }
 ): Promise<ImageProviderResult> => {
   const body = buildGoogleImageRequest({
     apiModelId: model.apiModelId,
@@ -596,8 +725,10 @@ const generateWithGoogle = async (
   const requestParams = auditableRequestParams(body);
   const apiKey = getGoogleApiKey();
   let lastError: ImageProviderError | null = null;
+  // A measurement sends one request per sample, a rate limit included.
+  const retries = input.retry === false ? 0 : RETRY_DELAYS_MS.length;
 
-  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
     if (attempt > 0) {
       const base = RETRY_DELAYS_MS[attempt - 1];
       await wait(base + Math.floor(Math.random() * 500));
@@ -614,7 +745,10 @@ const generateWithGoogle = async (
         signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
       });
     } catch (error) {
-      lastError = new ImageProviderError(
+      // Not retried: a generation that finished and whose response was lost
+      // looks exactly like this, and a second attempt would be billed again
+      // against a reservation that holds one.
+      throw new ImageProviderError(
         "provider_failed",
         error instanceof Error && error.name === "TimeoutError"
           ? "Image provider request timed out."
@@ -623,7 +757,6 @@ const generateWithGoogle = async (
         null,
         requestParams
       );
-      continue;
     }
 
     const providerRequestId =
@@ -639,27 +772,52 @@ const generateWithGoogle = async (
         providerRequestId,
         requestParams
       );
-      if (
-        failurePhase === "provider_rate_limited" ||
-        failurePhase === "provider_failed"
-      ) {
+      // Only a rate limit is retried: it is refused before any work is done.
+      // A 5xx may follow a generation that was billed, like a lost response.
+      if (failurePhase === "provider_rate_limited") {
         lastError = error;
         continue;
       }
       throw error;
     }
 
-    const parsed = parseGoogleImageResponse(
-      await response.json().catch(() => null)
-    );
+    const payload = await response.json().catch(() => null);
+    // The thinking cap rests on a measured bound, not a documented one, so a
+    // response that bills past it is reported the first time it happens --
+    // before the image is looked for, because a response that stopped without
+    // one was billed as well.
+    const bound = imageMeasuredOutputLimitBound(model);
+    const nonImageBillableTokens = googleNonImageBillableTokens(payload);
+    if (
+      bound &&
+      nonImageBillableTokens !== null &&
+      nonImageBillableTokens > GOOGLE_IMAGE_OUTPUT_LIMIT_MARGIN * bound.maxOutputTokens
+    ) {
+      console.error(
+        JSON.stringify({
+          event: "image_google_output_over_measured_bound",
+          modelId: model.id,
+          maxOutputTokens: bound.maxOutputTokens,
+          nonImageBillableTokens,
+          providerRequestId,
+          timestamp: new Date().toISOString(),
+        })
+      );
+    }
+    const parsed = parseGoogleImageResponse(payload);
     if (!parsed) {
-      throw new ImageProviderError(
+      const refused = new ImageProviderError(
         "provider_failed",
         "Image provider returned no usable image payload.",
         response.status,
         providerRequestId,
         requestParams
       );
+      refused.nonImageBillableTokens = nonImageBillableTokens;
+      refused.billedImageTokens = googleBilledImageTokens(payload);
+      refused.billedImageCount = readGoogleImageInteraction(payload)?.modelOutputImageCount ?? 0;
+      refused.providerUsage = numericUsage((payload as { usage?: unknown } | null)?.usage);
+      throw refused;
     }
     const imageBytes = Buffer.from(parsed.imageBase64, "base64");
     const dimensions = readImageDimensions(imageBytes, parsed.mimeType);
@@ -668,6 +826,9 @@ const generateWithGoogle = async (
       mimeType: parsed.mimeType,
       inputTokens: parsed.usage.inputTokens,
       thinkingTokens: parsed.usage.thinkingTokens,
+      nonImageBillableTokens,
+      billedImageTokens: googleBilledImageTokens(payload),
+      providerUsage: numericUsage((payload as { usage?: unknown } | null)?.usage),
       outputTokens: parsed.usage.outputTokens,
       providerRequestId,
       // Google embeds SynthID. C2PA is claimed only where the model card says
@@ -897,12 +1058,13 @@ const generateWithFal = async (
  */
 const generateWithXai = async (
   model: ImageModelProfile,
-  input: { prompt: string; size: ImageSize; editImage?: ImageEditInput }
+  input: { prompt: string; size: ImageSize; quality: ImageQuality; editImage?: ImageEditInput }
 ): Promise<ImageProviderResult> => {
   const request = {
     apiModelId: model.apiModelId,
     prompt: input.prompt,
     size: input.size,
+    quality: input.quality,
   };
   const generationBody = buildXaiImageRequest(request);
   const body = input.editImage
@@ -911,7 +1073,7 @@ const generateWithXai = async (
   if (!body || !generationBody) {
     throw new ImageProviderError(
       "provider_failed",
-      `Image size ${input.size} has no xAI resolution mapping.`
+      `Image size ${input.size} at quality ${input.quality} has no xAI resolution mapping.`
     );
   }
   // From the body without the photo: its data URL is the user's bytes.
@@ -1093,97 +1255,324 @@ const generateWithQwen = async (
     );
   }
 
-  let asset: Response;
+  // From here the image was generated and billed: a failure to fetch or check
+  // it is not a refusal, whatever HTTP status the download answered
+  // (`afterGeneration`, read by the billing measurement).
+  const deliver = async (): Promise<ImageProviderResult> => {
+    let asset: Response;
+    try {
+      asset = await fetch(parsed.url, {
+        redirect: "manual",
+        signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+      });
+    } catch {
+      throw new ImageProviderError(
+        "provider_failed",
+        "Image provider asset could not be downloaded.",
+        null,
+        providerRequestId,
+        requestParams
+      );
+    }
+    // Cancelled, not drained, as on the fal path: an unread image body pins its
+    // connection, and reading it would spend the memory the limit refuses.
+    const releaseAsset = () => asset.body?.cancel().catch(() => undefined);
+    if (!asset.ok || !isQwenAssetUrl(asset.url)) {
+      await releaseAsset();
+      throw new ImageProviderError(
+        "provider_failed",
+        "Image provider asset was not served from the expected location.",
+        asset.status,
+        providerRequestId,
+        requestParams
+      );
+    }
+    // The response names no type, so the file's own Content-Type does, and it
+    // has to be one this profile may store.
+    const mimeType = (asset.headers.get("content-type") ?? "").split(";", 1)[0]!.trim().toLowerCase();
+    if (!model.outputMimeTypes.includes(mimeType)) {
+      await releaseAsset();
+      throw new ImageProviderError(
+        "provider_failed",
+        "Image provider asset is not a type this model may store.",
+        null,
+        providerRequestId,
+        requestParams
+      );
+    }
+    // A declared length over the limit is refused unread, and the stream itself
+    // is capped while it is read: a chunked or compressed body declares nothing
+    // useful up front, and reading it whole first would spend the memory the
+    // limit exists to refuse.
+    let imageBytes: Buffer;
+    try {
+      imageBytes = await readResponseToBuffer(asset, FAL_MAX_ASSET_BYTES);
+    } catch (error) {
+      throw new ImageProviderError(
+        "provider_failed",
+        error instanceof BoundedBufferError
+          ? "Image provider asset was larger than the accepted limit."
+          : "Image provider asset could not be read.",
+        null,
+        providerRequestId,
+        requestParams
+      );
+    }
+    if (imageBytes.byteLength === 0) {
+      throw new ImageProviderError(
+        "provider_failed",
+        "Image provider asset was empty.",
+        null,
+        providerRequestId,
+        requestParams
+      );
+    }
+    const dimensions = readImageDimensions(imageBytes, mimeType);
+    const [expectedWidth, expectedHeight] = input.size.split("x").map(Number);
+    if (!dimensions || dimensions.width !== expectedWidth || dimensions.height !== expectedHeight) {
+      throw new ImageProviderError(
+        "provider_failed",
+        "Image provider returned a different size than the one that was priced.",
+        null,
+        providerRequestId,
+        requestParams
+      );
+    }
+
+    return {
+      imageBytes,
+      mimeType,
+      // Billed per image; no token usage to record.
+      inputTokens: 0,
+      thinkingTokens: 0,
+      outputTokens: 0,
+      providerUsage: numericUsage((payload as { usage?: unknown } | null)?.usage),
+      providerRequestId,
+      provenance: [...model.provenance],
+      outputWidth: dimensions.width,
+      outputHeight: dimensions.height,
+      requestParams,
+    };
+  };
   try {
-    asset = await fetch(parsed.url, {
+    return await deliver();
+  } catch (error) {
+    if (error instanceof ImageProviderError) error.afterGeneration = true;
+    throw error;
+  }
+};
+
+/**
+ * FLUX 3 on the Black Forest Labs API: submit a task, poll the URL it returns
+ * until it is ready, then fetch the signed image (valid ten minutes).
+ *
+ * Reached only through a runtime catalogue row the judge admitted -- no BFL
+ * model is seeded -- and generation only: the edit check above refuses this
+ * provider.
+ *
+ *   * **one submit.** Billing is per image, and a submit whose answer was lost
+ *     may still have started a billed task; a second submit would buy a second
+ *     image the user does not pay for. Polls are free reads, so a lost or
+ *     throttled poll is simply asked again until the shared deadline.
+ *   * **the key goes only to bfl.ai.** The polling URL comes out of the
+ *     response and is sent the key, so it is checked first (`isBflUrl`), and
+ *     no request follows a redirect.
+ *   * **moderation is not a failure of ours.** BFL withholds moderated output
+ *     and does not charge for it; it surfaces as a moderation rejection, which
+ *     is never retried.
+ *   * **the file is measured against what was priced**: a type the profile may
+ *     store, read under fal's 16 MiB limit (the same 1K image), 1024x1024.
+ */
+const generateWithBfl = async (
+  model: ImageModelProfile,
+  input: { prompt: string; size: ImageSize }
+): Promise<ImageProviderResult> => {
+  const apiModelId = model.apiModelId;
+  const body = buildBflImageRequest({ apiModelId, prompt: input.prompt, size: input.size });
+  if (!body || !isBflFlux3ImageModel(apiModelId)) {
+    throw new ImageProviderError(
+      "provider_failed",
+      `Image size ${input.size} has no BFL request mapping for ${model.id}.`
+    );
+  }
+  const requestParams = auditableRequestParams(body);
+  const apiKey = getBflApiKey();
+  // One budget for submit, polls and download together, so a slow queue
+  // cannot stretch the job past the lease the executor planned for.
+  const deadline = Date.now() + PROVIDER_TIMEOUT_MS;
+  const remainingMs = () => Math.max(1, deadline - Date.now());
+  const keyHeaders = { [BFL_API_KEY_HEADER]: apiKey, accept: "application/json" };
+
+  let response: Response;
+  try {
+    response = await fetch(bflSubmitUrl(apiModelId), {
+      method: "POST",
+      headers: { ...keyHeaders, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
       redirect: "manual",
-      signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+      signal: AbortSignal.timeout(remainingMs()),
     });
-  } catch {
-    throw new ImageProviderError(
-      "provider_failed",
-      "Image provider asset could not be downloaded.",
-      null,
-      providerRequestId,
-      requestParams
-    );
-  }
-  // Cancelled, not drained, as on the fal path: an unread image body pins its
-  // connection, and reading it would spend the memory the limit refuses.
-  const releaseAsset = () => asset.body?.cancel().catch(() => undefined);
-  if (!asset.ok || !isQwenAssetUrl(asset.url)) {
-    await releaseAsset();
-    throw new ImageProviderError(
-      "provider_failed",
-      "Image provider asset was not served from the expected location.",
-      asset.status,
-      providerRequestId,
-      requestParams
-    );
-  }
-  // The response names no type, so the file's own Content-Type does, and it
-  // has to be one this profile may store.
-  const mimeType = (asset.headers.get("content-type") ?? "").split(";", 1)[0]!.trim().toLowerCase();
-  if (!model.outputMimeTypes.includes(mimeType)) {
-    await releaseAsset();
-    throw new ImageProviderError(
-      "provider_failed",
-      "Image provider asset is not a type this model may store.",
-      null,
-      providerRequestId,
-      requestParams
-    );
-  }
-  // A declared length over the limit is refused unread, and the stream itself
-  // is capped while it is read: a chunked or compressed body declares nothing
-  // useful up front, and reading it whole first would spend the memory the
-  // limit exists to refuse.
-  let imageBytes: Buffer;
-  try {
-    imageBytes = await readResponseToBuffer(asset, FAL_MAX_ASSET_BYTES);
   } catch (error) {
     throw new ImageProviderError(
       "provider_failed",
-      error instanceof BoundedBufferError
-        ? "Image provider asset was larger than the accepted limit."
-        : "Image provider asset could not be read.",
+      error instanceof Error && error.name === "TimeoutError"
+        ? "Image provider request timed out."
+        : "Image provider request failed.",
       null,
-      providerRequestId,
-      requestParams
-    );
-  }
-  if (imageBytes.byteLength === 0) {
-    throw new ImageProviderError(
-      "provider_failed",
-      "Image provider asset was empty.",
       null,
-      providerRequestId,
-      requestParams
-    );
-  }
-  const dimensions = readImageDimensions(imageBytes, mimeType);
-  const [expectedWidth, expectedHeight] = input.size.split("x").map(Number);
-  if (!dimensions || dimensions.width !== expectedWidth || dimensions.height !== expectedHeight) {
-    throw new ImageProviderError(
-      "provider_failed",
-      "Image provider returned a different size than the one that was priced.",
-      null,
-      providerRequestId,
       requestParams
     );
   }
 
-  return {
-    imageBytes,
-    mimeType,
-    // Billed per image; no token usage to record.
-    inputTokens: 0,
-    thinkingTokens: 0,
-    outputTokens: 0,
-    providerRequestId,
-    provenance: [...model.provenance],
-    outputWidth: dimensions.width,
-    outputHeight: dimensions.height,
-    requestParams,
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new ImageProviderError(
+      // 402 is BFL's "insufficient credits": Tomverse's prepaid balance, not
+      // anything the user did.
+      response.status === 402
+        ? "provider_failed"
+        : classifyImageProviderFailure(response.status, payload),
+      `Image provider rejected the request (HTTP ${response.status}).`,
+      response.status,
+      null,
+      requestParams
+    );
+  }
+  const submitted = parseBflSubmitResponse(payload);
+  if (!submitted) {
+    throw new ImageProviderError(
+      "provider_failed",
+      "Image provider returned no task it can be polled for.",
+      response.status,
+      null,
+      requestParams
+    );
+  }
+  const providerRequestId = submitted.id;
+  const failAfterSubmit = (message: string, status: number | null = null) =>
+    new ImageProviderError("provider_failed", message, status, providerRequestId, requestParams);
+
+  const poll = async () => {
+    for (;;) {
+      if (Date.now() + BFL_POLL_INTERVAL_MS >= deadline) {
+        throw failAfterSubmit("Image provider did not finish before the deadline.");
+      }
+      await wait(BFL_POLL_INTERVAL_MS);
+      let pollResponse: Response;
+      try {
+        pollResponse = await fetch(submitted.pollingUrl, {
+          headers: keyHeaders,
+          redirect: "manual",
+          signal: AbortSignal.timeout(remainingMs()),
+        });
+      } catch {
+        continue;
+      }
+      if (pollResponse.status === 429 || pollResponse.status >= 500) {
+        await pollResponse.body?.cancel().catch(() => undefined);
+        continue;
+      }
+      if (!pollResponse.ok) {
+        await pollResponse.body?.cancel().catch(() => undefined);
+        throw failAfterSubmit(
+          `Image provider task could not be read (HTTP ${pollResponse.status}).`,
+          pollResponse.status
+        );
+      }
+      // A body cut off mid-read is a lost poll, not an answer: ask again rather
+      // than give up on a task that may already be billed.
+      let pollPayload: unknown;
+      try {
+        pollPayload = await pollResponse.json();
+      } catch {
+        continue;
+      }
+      const state = parseBflPollResponse(pollPayload);
+      if (state.state === "pending") continue;
+      if (state.state === "moderated") {
+        throw new ImageProviderError(
+          "provider_moderation_rejected",
+          `Image provider withheld the result (${state.status}).`,
+          null,
+          providerRequestId,
+          requestParams
+        );
+      }
+      if (state.state === "failed") {
+        throw failAfterSubmit(`Image provider task ended without an image (${state.status}).`);
+      }
+      return state;
+    }
   };
+
+  // From an accepted submit on, the task may have been billed: anything but a
+  // moderation refusal is a failure after generation (`afterGeneration`).
+  const deliver = async (): Promise<ImageProviderResult> => {
+    const ready = await poll();
+    let asset: Response;
+    try {
+      // No key: the signed link carries its own authority.
+      asset = await fetch(ready.sampleUrl, {
+        redirect: "manual",
+        signal: AbortSignal.timeout(remainingMs()),
+      });
+    } catch {
+      throw failAfterSubmit("Image provider asset could not be downloaded.");
+    }
+    const releaseAsset = () => asset.body?.cancel().catch(() => undefined);
+    if (!asset.ok || !isBflUrl(asset.url)) {
+      await releaseAsset();
+      throw failAfterSubmit("Image provider asset was not served from the expected location.", asset.status);
+    }
+    // FLUX 3 Image takes no output format, so the file's own type decides,
+    // and it has to be one this profile may store.
+    const mimeType = (asset.headers.get("content-type") ?? "").split(";", 1)[0]!.trim().toLowerCase();
+    if (!model.outputMimeTypes.includes(mimeType)) {
+      await releaseAsset();
+      throw failAfterSubmit("Image provider asset is not a type this model may store.");
+    }
+    let imageBytes: Buffer;
+    try {
+      imageBytes = await readResponseToBuffer(asset, FAL_MAX_ASSET_BYTES);
+    } catch (error) {
+      throw failAfterSubmit(
+        error instanceof BoundedBufferError
+          ? "Image provider asset was larger than the accepted limit."
+          : "Image provider asset could not be read."
+      );
+    }
+    if (imageBytes.byteLength === 0) {
+      throw failAfterSubmit("Image provider asset was empty.");
+    }
+    const dimensions = readImageDimensions(imageBytes, mimeType);
+    const [expectedWidth, expectedHeight] = input.size.split("x").map(Number);
+    if (!dimensions || dimensions.width !== expectedWidth || dimensions.height !== expectedHeight) {
+      throw failAfterSubmit("Image provider returned a different size than the one that was priced.");
+    }
+    const usage = { ...(submitted.usage ?? {}), ...(ready.usage ?? {}) };
+    return {
+      imageBytes,
+      mimeType,
+      // Billed per image by resolution tier; no token usage to record.
+      inputTokens: 0,
+      thinkingTokens: 0,
+      outputTokens: 0,
+      // BFL's own figures (credits of $0.01, megapixels), kept for comparison
+      // against the fixed price, never used to compute it.
+      providerUsage: Object.keys(usage).length ? usage : null,
+      providerRequestId,
+      provenance: [...model.provenance],
+      outputWidth: dimensions.width,
+      outputHeight: dimensions.height,
+      requestParams,
+    };
+  };
+  try {
+    return await deliver();
+  } catch (error) {
+    if (error instanceof ImageProviderError && error.failurePhase !== "provider_moderation_rejected") {
+      error.afterGeneration = true;
+    }
+    throw error;
+  }
 };

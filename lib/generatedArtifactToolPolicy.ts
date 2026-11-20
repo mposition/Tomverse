@@ -21,10 +21,16 @@ import {
   formatIdsOfKind,
 } from "@/lib/generatedArtifactCore";
 import {
+  conversionSourceKind,
+  isOfficeRenderable,
+  turnHasConvertibleAttachment,
+} from "@/lib/fileConversionCore";
+import {
   DOCX_MEDIA_TYPE,
   XLSX_MEDIA_TYPE,
   type TurnAttachmentDescriptor,
 } from "@/lib/messageAttachmentCore";
+import { AVAILABLE_MODELS } from "@/lib/models";
 
 /* ------------------------------------------------------------------------ */
 /* Model capability                                                           */
@@ -79,8 +85,51 @@ export const ARTIFACT_TOOL_CAPABILITIES: Readonly<
   // deep-research model never reaches this code path at all.
 };
 
-export const getArtifactToolSupport = (modelId: string): ArtifactToolSupport =>
-  ARTIFACT_TOOL_CAPABILITIES[modelId] ?? "unverified";
+/**
+ * Providers whose adapter in this repository sends application-defined tools
+ * and has been run against them -- every model in the register above is one
+ * of theirs. A chat model the register does not list is recognised by its
+ * provider, so a new OpenAI, Anthropic or Google model is file-capable from
+ * the moment it is added, and any other provider's is not until someone ticks
+ * it. Either way an administrator can tick or untick a model in the Admin
+ * Console (`ModelRegistryEntry.fileToolsOverride`).
+ */
+export const ARTIFACT_TOOL_PROVIDERS: ReadonlySet<string> = new Set([
+  "openai",
+  "anthropic",
+  "google",
+]);
+
+/** What the decision reads about a model: the catalogue row's own fields. */
+export type ArtifactToolModel = {
+  id: string;
+  provider?: string;
+  usageClass?: string;
+  /** An administrator's tick (true) or untick (false); null follows the code. */
+  fileToolsOverride?: boolean | null;
+};
+
+/** The automatic answer, before any administrator's tick or untick. */
+export const autoArtifactToolSupport = (model: ArtifactToolModel): ArtifactToolSupport => {
+  // Deep research answers from a retrieval loop this app does not drive.
+  if (model.usageClass === "deep-research") return "unverified";
+  return (
+    ARTIFACT_TOOL_CAPABILITIES[model.id] ??
+    (model.provider && ARTIFACT_TOOL_PROVIDERS.has(model.provider) ? "verified" : "unverified")
+  );
+};
+
+/**
+ * Whether this model gets the file tools. A bare id reads only the register,
+ * for callers that hold nothing else (older recorded router samples).
+ */
+export const getArtifactToolSupport = (model: string | ArtifactToolModel): ArtifactToolSupport => {
+  if (typeof model === "string") return ARTIFACT_TOOL_CAPABILITIES[model] ?? "unverified";
+  if (typeof model.fileToolsOverride === "boolean") {
+    return model.fileToolsOverride ? "verified" : "unverified";
+  }
+  return autoArtifactToolSupport(model);
+};
 
 /* ------------------------------------------------------------------------ */
 /* The decision                                                               */
@@ -112,12 +161,26 @@ export type ArtifactToolPlan = {
    * offered it anyway would eventually reach for it with an invented handle.
    */
   registerDocumentBatch: boolean;
+  /**
+   * Whether `convert_files` is sent as well.
+   *
+   * Only on a turn that carries a file a conversion could read -- an image, a
+   * PDF, an .xlsx or a .csv -- for the same reason the batch tool is
+   * conditional: a tool with nothing to act on is priced input, and a model
+   * offered it anyway reaches for it with an invented handle.
+   */
+  registerFileConversion: boolean;
   /** The system block this turn carries. Never empty. */
   systemPrompt: string;
 };
 
+export const ARTIFACT_UNAVAILABLE_REASONS = [
+  "model_unverified",
+  "native_search_conflict",
+] as const;
+
 export type ArtifactUnavailableNotice = {
-  reason: "model_unverified" | "native_search_conflict";
+  reason: (typeof ARTIFACT_UNAVAILABLE_REASONS)[number];
   suggestedModelId?: string;
 };
 
@@ -148,6 +211,10 @@ export const artifactUnavailableNotice = (
 export type ArtifactToolPlanInput = {
   modelId: string;
   provider: string;
+  /** The catalogue's usage class; deep research never gets the tools. */
+  usageClass?: string;
+  /** The catalogue row's tick or untick (ModelRegistryEntry.fileToolsOverride). */
+  fileToolsOverride?: boolean | null;
   /** false for a guest session. */
   isAuthenticated: boolean;
   /**
@@ -181,6 +248,19 @@ export type ArtifactToolPlanInput = {
    * for, and nothing that addresses a route.
    */
   turnAttachments?: readonly TurnAttachmentDescriptor[];
+  /**
+   * The operator's switch for `convert_files`. On unless it is passed false.
+   *
+   * A switch rather than a deploy because the tool reads user files with
+   * libraries the rest of this domain does not use, and turning it off must
+   * not need a release (policy section 14).
+   */
+  fileConversionEnabled?: boolean;
+  /**
+   * Whether office documents can be laid out as PDF by the renderer service
+   * (lib/officeRenderer.ts, policy section 15). Off unless passed true.
+   */
+  officeRenderingEnabled?: boolean;
 };
 
 /**
@@ -234,6 +314,17 @@ export const nativeSearchBlocksArtifactTool = (input: {
 const formatList = (kind: Parameters<typeof formatIdsOfKind>[0]) =>
   formatIdsOfKind(kind).join(", ");
 
+// Only recommend models available to every signed-in and guest user. This
+// notice has no plan context, so suggesting a paid-tier model could be useless.
+const FILE_CAPABLE_MODEL_NAMES = AVAILABLE_MODELS.filter(
+  (model) =>
+    model.enabled &&
+    model.minimumPlan === "Guest" &&
+    getArtifactToolSupport(model) === "verified",
+)
+  .slice(0, 3)
+  .map((model) => model.name);
+
 /**
  * The instructions that go with the tools.
  *
@@ -249,7 +340,7 @@ const formatList = (kind: Parameters<typeof formatIdsOfKind>[0]) =>
  *      is attached by the application and any URL the model invents is a lie
  *      with a plausible shape.
  */
-const GENERATE_PROMPT = [
+const GENERATE_PROMPT_LINES = [
   "# File generation",
   "",
   "You can create real, downloadable files for this user. When the user asks",
@@ -298,6 +389,13 @@ const GENERATE_PROMPT = [
   "  do not announce a file you are not about to produce.",
   "- Put real values in. Never invent data the conversation does not contain;",
   "  if something is unknown, leave it empty and say so.",
+  "  When the user requests a fictional example or permits assumptions, supply",
+  "  clearly labeled illustrative inputs and worked figures instead of deferring",
+  "  every number. Keep assumptions distinct from actual or sourced data.",
+  "- Preserve the user's requested document outline, section names and exact",
+  "  heading count. Put a table caption in a paragraph block inside an existing",
+  "  section, not an extra heading. Before calling create_document, check the",
+  "  heading blocks against that outline; describe only the structure actually created.",
   "- Spreadsheets hold plain values only. There is no formula field, and a",
   "  string that looks like a formula is stored as text.",
   `- Limits: ${ARTIFACT_LIMITS.maxWorksheets} worksheets, ` +
@@ -317,7 +415,56 @@ const GENERATE_PROMPT = [
     "be wrong.",
   "- If the tool reports a failure, tell the user what failed. Do not describe",
   "  a file that does not exist.",
-].join("\n");
+];
+
+/**
+ * What the model is told about converting the user's own files.
+ *
+ * On every `generate` turn, attachments or not, because the request that
+ * matters most arrives without them: "make those two photos a PDF", sent a
+ * message after the photos. The tool is not on that turn; what must not happen
+ * is the model concluding the product cannot do it.
+ */
+const CONVERSION_RULES = [
+  "- **Converting the user's own files.** Putting attached images into a PDF,",
+  "  merging or splitting PDFs, taking or rotating PDF pages, drawing PDF pages",
+  "  as images, changing an image's format or size, and re-saving an .xlsx or",
+  "  .csv are done by `convert_files`. It is offered only on a message that has",
+  "  those files attached to it. If the user asks for one of these and",
+  "  `convert_files` is not available on this message, ask them to send the",
+  "  request again with the files attached -- never say it cannot be done, and",
+  "  never retype a file's content as a substitute for converting it.",
+];
+
+/** Office to PDF when the renderer can keep the layout, and when it cannot. */
+const officeToPdfRule = (officeRendering: boolean): string[] =>
+  officeRendering
+    ? [
+        "- An attached office document -- Word, PowerPoint, Excel, Hangul (HWP,",
+        "  HWPX), OpenDocument, Pages or Numbers -- becomes a PDF *with its",
+        "  layout* through `convert_files` (`to_pdf`, the file as a source). Use",
+        "  that, not `create_document`, whenever the user wants the file itself as",
+        "  a PDF.",
+        "- A PDF's content as a Word, Excel or PowerPoint file is written again",
+        "  with `create_document`, `create_spreadsheet` or `create_presentation`;",
+        "  say that the layout is rebuilt rather than copied.",
+      ]
+    : [
+        "- To turn an attached document's *content* into another format (a PDF's",
+        "  text as a Word file, a Word file as a PDF), write it again with",
+        "  `create_document` and say that the layout is rebuilt rather than copied.",
+      ];
+
+const generatePrompt = (
+  fileConversionEnabled: boolean,
+  officeRendering: boolean
+): string =>
+  [
+    ...GENERATE_PROMPT_LINES,
+    ...(fileConversionEnabled
+      ? [...CONVERSION_RULES, ...officeToPdfRule(officeRendering)]
+      : []),
+  ].join("\n");
 
 const SIGN_IN_PROMPT = [
   "# File generation",
@@ -352,8 +499,11 @@ const offPrompt = (reason: ArtifactToolOffReason, autoRouted = false): string =>
       ? "(turning web search off for this question)."
       : reason === "model_unverified"
         ? autoRouted
-          ? "(choosing a model for this request themselves instead of Auto, one that can create files)."
-          : "(choosing a different model)."
+          ? // Auto chose this model; the user did not. Telling them to leave
+            // Auto names a choice they never made: a file request sent again
+            // is routed to a model that can create files.
+            "(sending the same request again: Auto routes a file request to a model that can create files when one is available to them; if none is, files cannot be made for them right now). Do not promise that a resend will work, and do not tell them to turn Auto off or to pick a model themselves."
+          : `(choosing a different model, such as ${FILE_CAPABLE_MODEL_NAMES.join(", ")}).`
         : "(starting the request again from a saved conversation).",
     "",
     "Do not write a file path, a download link, base64, or code that claims to",
@@ -389,7 +539,9 @@ export const turnSupportsDocumentBatch = (
  * this request and nothing else.
  */
 const attachmentSection = (
-  attachments: readonly TurnAttachmentDescriptor[]
+  attachments: readonly TurnAttachmentDescriptor[],
+  registerFileConversion: boolean,
+  officeRendering = false
 ): string => {
   const lines = [
     "",
@@ -430,6 +582,62 @@ const attachmentSection = (
     );
   }
 
+  // Pictures from this turn's images and PDFs can go into a document. Said
+  // whenever such a file is attached, because "make this PDF a Word file"
+  // is a rebuild with create_document, and the figures are the part a
+  // rebuild otherwise drops.
+  if (attachments.some((attachment) => {
+    const kind = conversionSourceKind(attachment.mediaType);
+    return kind === "image" || kind === "pdf";
+  })) {
+    lines.push(
+      "",
+      "Pictures from these files can be placed in a document: add an `image`",
+      "block to `create_document` (.docx or .pdf) with `attachment` (the",
+      "handle), for a PDF the `page` (1-based), and `crop` -- the region",
+      "holding the picture as fractions of the page from its top-left corner,",
+      "read off the page you see -- plus an optional `caption`. When rebuilding",
+      "a PDF as a Word file, place its figures this way rather than describing",
+      "them in words."
+    );
+  }
+
+  if (registerFileConversion) {
+    const convertible = attachments.filter(
+      (attachment) =>
+        conversionSourceKind(attachment.mediaType) !== null ||
+        (officeRendering && isOfficeRenderable(attachment.mediaType))
+    );
+    lines.push(
+      "",
+      "`convert_files` is available for this message. Use it when the user",
+      "wants these files themselves converted, combined or split. You pass",
+      "handles; the application works from the files' own bytes:",
+      '- images and PDFs -> ONE PDF: `operation: "to_pdf"`, `sources` in page',
+      "  order. One image per page. The same call merges PDFs, and takes,",
+      '  reorders (`pages: "3,1,2"`) or rotates pages.',
+      "- one PDF -> several PDFs in a .zip: `split_pdf`.",
+      "- PDF pages -> PNG/JPG/WebP images: `pdf_to_images`.",
+      "- an image -> another format, smaller or more compressed: `convert_images`.",
+      "- an .xlsx or .csv -> xlsx, csv or a PDF table: `convert_spreadsheet`.",
+      ...(officeRendering
+        ? [
+            "- an office document (Word, PowerPoint, Excel, HWP, HWPX, ODF, Pages,",
+            "  Numbers) -> a PDF that keeps its layout:",
+            '  `operation: "to_pdf"` with the file as a source. Several files, or',
+            "  office files with images and PDFs, merge into one PDF in order.",
+          ]
+        : []),
+      `The files it can read here: ${convertible
+        .map((attachment) => `\`${attachment.handle}\``)
+        .join(", ")}.`,
+      "An attached image is a file you can pass by handle even though you",
+      "cannot write its bytes. Never answer that attached images cannot be",
+      "made into a PDF, and do not describe the images instead of converting",
+      "them."
+    );
+  }
+
   return lines.join("\n");
 };
 
@@ -450,16 +658,25 @@ export const planGeneratedArtifactTool = (
       offReason: "not_a_chat_conversation",
       registerTool: false,
       registerDocumentBatch: false,
+      registerFileConversion: false,
       systemPrompt: offPrompt("not_a_chat_conversation"),
     };
   }
 
-  if (getArtifactToolSupport(input.modelId) !== "verified") {
+  if (
+    getArtifactToolSupport({
+      id: input.modelId,
+      provider: input.provider,
+      usageClass: input.usageClass,
+      fileToolsOverride: input.fileToolsOverride,
+    }) !== "verified"
+  ) {
     return {
       mode: "off",
       offReason: "model_unverified",
       registerTool: false,
       registerDocumentBatch: false,
+      registerFileConversion: false,
       systemPrompt: offPrompt("model_unverified", input.autoRouted === true),
     };
   }
@@ -476,6 +693,7 @@ export const planGeneratedArtifactTool = (
       offReason: "native_search_conflict",
       registerTool: false,
       registerDocumentBatch: false,
+      registerFileConversion: false,
       systemPrompt: offPrompt("native_search_conflict"),
     };
   }
@@ -485,6 +703,7 @@ export const planGeneratedArtifactTool = (
       mode: "sign_in_required",
       registerTool: true,
       registerDocumentBatch: false,
+      registerFileConversion: false,
       systemPrompt: SIGN_IN_PROMPT,
     };
   }
@@ -495,19 +714,27 @@ export const planGeneratedArtifactTool = (
       offReason: "no_conversation",
       registerTool: false,
       registerDocumentBatch: false,
+      registerFileConversion: false,
       systemPrompt: offPrompt("no_conversation"),
     };
   }
 
   const attachments = input.turnAttachments ?? [];
   const registerDocumentBatch = turnSupportsDocumentBatch(attachments);
+  const fileConversionEnabled = input.fileConversionEnabled !== false;
+  const officeRendering = fileConversionEnabled && input.officeRenderingEnabled === true;
+  const registerFileConversion =
+    fileConversionEnabled &&
+    turnHasConvertibleAttachment(attachments, { officeRendering });
+  const prompt = generatePrompt(fileConversionEnabled, officeRendering);
   return {
     mode: "generate",
     registerTool: true,
     registerDocumentBatch,
+    registerFileConversion,
     systemPrompt: attachments.length
-      ? `${GENERATE_PROMPT}\n${attachmentSection(attachments)}`
-      : GENERATE_PROMPT,
+      ? `${prompt}\n${attachmentSection(attachments, registerFileConversion, officeRendering)}`
+      : prompt,
   };
 };
 
@@ -521,9 +748,15 @@ export const planGeneratedArtifactTool = (
  * spend real time on a number that cannot change between requests.
  *
  * Measured against the rendered schema and rounded up, so the reservation is
- * never short.
+ * never short. Raised from 2,600 when `create_document` gained the image
+ * block (about 1,150 characters of schema and 230 of description, rounded up
+ * to 500 tokens; policy section 16).
  */
-export const ARTIFACT_TOOL_DEFINITION_TOKENS = 2600;
+export const ARTIFACT_TOOL_DEFINITION_TOKENS = 3100;
+
+/** Enabled revision fields add 1,587 rendered JSON-schema characters (397
+   * estimated tokens), rounded up. Separate so an explicitly disabled turn is unchanged. */
+export const ARTIFACT_REVISION_TOOL_DEFINITION_TOKENS = 500;
 
 /**
  * The extra allowance for `create_document_batch`'s own schema.

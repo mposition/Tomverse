@@ -1,5 +1,11 @@
 import "server-only";
+import { observeOptimizerCost, optimizerCostFields } from "@/lib/autoOptimizerCost";
 import { readResponseLatencyEvidence } from "@/lib/responseLatencyStore";
+import { readChatPresearchLatency } from "@/lib/chatPresearchLatency";
+import { readSmartAdaptiveDaily } from "@/lib/dailyProductAgentSmartAdaptive";
+import { readDailyImplementations } from "@/lib/dailyProductImplementation";
+import { taskImplementation, type DailyTaskImplementation } from "@/lib/dailyProductImplementationCore";
+import { actionableRecommendations, recommendationStatusEntries } from "@/lib/autoRouterRecommendationsCore";
 
 import { generateText, jsonSchema, Output } from "ai";
 import type { JSONSchema7 } from "@ai-sdk/provider";
@@ -11,6 +17,7 @@ import { writeAutoRouterOptimizerSystemAudit } from "@/lib/autoRouterOptimizerSy
 import { callAutoLlmRouter } from "@/lib/autoLlmRouter";
 import {
     AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS,
+    AUTO_LLM_ROUTER_UNREPLAYABLE_CONTEXT,
     autoLlmRouterCandidates,
     resolveAutoLlmRouterModel,
     type AutoLlmRouterCandidate,
@@ -43,7 +50,9 @@ import {
     autoRouterGeneratorSchema,
     autoRouterJudgeSchema,
     autoRouterSynthesizerSchema,
-    callCostMicroUsd,
+    optimizerPromotionEligibility,
+    optimizerVerificationSummary,
+    type OptimizerPromotionRefusal,
     parseJudgeWinner,
     promotedRouterGuidance,
     rolledBackRouterGuidance,
@@ -51,6 +60,7 @@ import {
     guidanceRejection,
     optimizerAnswerOptions,
     optimizerCallFailureDetail,
+    traceOptimizerCall,
     summarizeRouterDecisions,
     unreliableAnswerModels,
     syntheticCaseViews,
@@ -258,13 +268,14 @@ export const asSession = (value: unknown): AutoLlmRouterSession | null => {
 
 async function loadDecisions(): Promise<OptimizerDecision[]> {
     const rows = await prisma.autoRouterDecision.findMany({
-        // Combined routing carries image context which is deliberately not
-        // stored in decision rows. Do not replay those rows as text-only calls.
-        where: { outcome: "picked", NOT: { version: { contains: "+image-intent-" } } },
+        // Combined calls include image, location or search inputs that decision
+        // rows do not retain. Do not claim to replay their full request.
+        where: { outcome: "picked", NOT: AUTO_LLM_ROUTER_UNREPLAYABLE_CONTEXT.map(marker => ({ version: { contains: marker } })) },
         orderBy: { createdAt: "desc" },
         take: AUTO_ROUTER_OPTIMIZER_SAMPLE_MAX,
         select: {
             id: true,
+            version: true,
             routerInput: true,
             routerContext: true,
             routerSession: true,
@@ -280,6 +291,7 @@ async function loadDecisions(): Promise<OptimizerDecision[]> {
         return [{
             id: row.id,
             taskKind: row.taskKind,
+            inputVersion: row.version,
             routerInput: row.routerInput,
             routerContext: row.routerContext,
             routerSession: asSession(row.routerSession),
@@ -331,13 +343,14 @@ export async function readUnreliableAnswerModels(): Promise<string[]> {
 
 async function readRouterStats(now: Date): Promise<RouterStats | null> {
     try {
+        const since = new Date(now.getTime() - ROUTER_STATS_DAYS * 24 * 60 * 60_000);
         const rows = await prisma.autoRouterDecision.findMany({
-            where: { createdAt: { gte: new Date(now.getTime() - ROUTER_STATS_DAYS * 24 * 60 * 60_000) } },
+            where: { createdAt: { gte: since, lte: now } },
             orderBy: { createdAt: "desc" },
             take: ROUTER_STATS_MAX_ROWS,
             select: { outcome: true, pickedModelId: true, ruleModelId: true, latencyMs: true },
         });
-        return summarizeRouterDecisions(rows);
+        return { ...summarizeRouterDecisions(rows), window: { source: "AutoRouterDecision", since: since.toISOString(), until: now.toISOString() } };
     } catch {
         return null;
     }
@@ -631,19 +644,8 @@ async function runInBackground(input: {
     // A failed call costs nothing in the cycle's count and otherwise leaves no
     // trace; its shape is logged so a failed cycle names its cause. Never the
     // content: synthetic messages and answers appear in logs by length only.
-    const traced = async <T>(kind: OptimizerCallKind, run: () => Promise<T>) => {
-        try {
-            return await run();
-        } catch (error) {
-            console.warn(JSON.stringify({
-                event: "auto_router_optimizer_call_failed",
-                cycleId: input.cycleId,
-                kind,
-                ...optimizerCallFailureDetail(error),
-            }));
-            throw error;
-        }
-    };
+    const traced = <T>(kind: OptimizerCallKind, run: () => Promise<T>, model = kind === "route" ? input.routerModel : input.optimizerModel) =>
+        traceOptimizerCall({ event: "auto_router_optimizer_call_failed", cycleId: input.cycleId, kind, modelId: model.id, provider: model.provider }, run);
     // `generated.output` throws when the text does not parse as the schema --
     // after the call was paid. Read here, outside `traced`, it used to make
     // the call count as failed with no log and no cost; now the cost stays
@@ -667,11 +669,7 @@ async function runInBackground(input: {
         }
     };
     const cost = (prices: Prices, usage: { inputTokens?: number; outputTokens?: number } | undefined) =>
-        callCostMicroUsd({
-            inputTokens: usage?.inputTokens,
-            outputTokens: usage?.outputTokens,
-            ...prices,
-        });
+        optimizerCostFields(observeOptimizerCost(usage, prices));
     // Answering models are looked up among the enabled ones only.
     const answerModels = new Map(
         input.models
@@ -690,13 +688,16 @@ async function runInBackground(input: {
     // cycle is recorded and only when it passes its range and evidence.
     let proposedSettingChanges: unknown[] = [];
     try {
-        const [candidatesFor, routerStats, catalogueIds, unreliableModels, responseLatency] = await Promise.all([
+        const measuredAt = new Date();
+        const [candidatesFor, routerStats, catalogueIds, unreliableModels, latency, chatPresearchLatency] = await Promise.all([
             autoCandidateMenu(input.models),
-            readRouterStats(new Date()),
+            readRouterStats(measuredAt),
             optimizerCatalogueIds(),
             readUnreliableAnswerModels(),
-            readResponseLatencyEvidence(),
+            readResponseLatencyEvidence(measuredAt),
+            readChatPresearchLatency(measuredAt).catch(() => ({ status: "unavailable" as const })),
         ]);
+        const responseLatency = { ...latency, chatPresearchLatency };
         const result = await runOptimizerCycle(
             {
                 decisions: input.decisions,
@@ -743,7 +744,7 @@ async function runInBackground(input: {
                     }));
                     return {
                         value: output,
-                        costMicroUsd: cost(input.optimizerPrices, generated.usage),
+                        ...cost(input.optimizerPrices, generated.usage),
                         provider: input.optimizerModel.provider,
                     };
                 },
@@ -777,7 +778,7 @@ async function runInBackground(input: {
                     }
                     return {
                         value: output,
-                        costMicroUsd: cost(input.optimizerPrices, generated.usage),
+                        ...cost(input.optimizerPrices, generated.usage),
                         provider: input.optimizerModel.provider,
                     };
                 },
@@ -807,7 +808,7 @@ async function runInBackground(input: {
                     }
                     return {
                         value: routed.pick?.modelId ?? null,
-                        costMicroUsd: cost(input.routerPrices, routed.usage),
+                        ...cost(input.routerPrices, routed.usage),
                         provider: input.routerModel.provider,
                     };
                 },
@@ -822,7 +823,7 @@ async function runInBackground(input: {
                     const prices = model ? pricesOf(model) : null;
                     // No call without a price: its spend could not be recorded.
                     if (!model || !prices) {
-                        return { value: null, costMicroUsd: 0, provider: model?.provider ?? "unknown" };
+                        return { value: null, ...optimizerCostFields({ state: "no_dispatch", reason: !model ? "model_unavailable" : "unpriced" }), provider: model?.provider ?? "unknown" };
                     }
                     // Shared with the rewrite cycle (lib/autoRewriteOptimizer.ts).
                     const { timeoutMs, ...options } = optimizerAnswerOptions(model, turn);
@@ -830,7 +831,7 @@ async function runInBackground(input: {
                         model: getActiveAiModel(model),
                         abortSignal: AbortSignal.timeout(timeoutMs),
                         ...options,
-                    }));
+                    }), model);
                     if (!generated.text.trim()) {
                         console.warn(JSON.stringify({
                             event: "auto_router_optimizer_answer_empty",
@@ -842,7 +843,7 @@ async function runInBackground(input: {
                     }
                     return {
                         value: generated.text,
-                        costMicroUsd: cost(prices, generated.usage),
+                        ...cost(prices, generated.usage),
                         provider: model.provider,
                     };
                 },
@@ -855,7 +856,7 @@ async function runInBackground(input: {
                     }));
                     return {
                         value: parseJudgeWinner(outputOf("judge", generated)),
-                        costMicroUsd: cost(input.optimizerPrices, generated.usage),
+                        ...cost(input.optimizerPrices, generated.usage),
                         provider: input.optimizerModel.provider,
                     };
                 },
@@ -875,6 +876,7 @@ async function runInBackground(input: {
                 // gate's basis ride in the summary JSON.
                 summary: {
                     ...result.summary,
+                    ...optimizerVerificationSummary(result),
                     failedCalls: result.failedCalls,
                     failedByKind: result.failedByKind,
                     report: result.report,
@@ -1003,19 +1005,20 @@ const writeOptimizerAudit = (
 export async function promoteAutoRouterOptimizerCycle(
     cycleId: string,
     actor: OptimizerActor
-): Promise<{ ok: true } | { refused: "not_found" | "not_passed" | "already_promoted" | "stale" }> {
+): Promise<{ ok: true } | { refused: "not_found" | "not_passed" | "already_promoted" | "stale" | OptimizerPromotionRefusal }> {
     return prisma.$transaction(async (tx) => {
         await takeAuditChainLock(tx);
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${OPTIMIZER_LOCK}))`;
         const cycle = await tx.autoRouterOptimizerCycle.findUnique({
             where: { id: cycleId },
-            select: { status: true, candidateGuidance: true, incumbentGuidance: true, promotedAt: true, target: true },
+            select: { status: true, candidateGuidance: true, incumbentGuidance: true, promotedAt: true, target: true, summary: true },
         });
         // A rewrite cycle's proposal is rewrite guidance: lib/autoRewriteOptimizer.ts
         // promotes it, and never into the routing guidance.
         if (!cycle || cycle.target !== "routing") return { refused: "not_found" as const };
         if (cycle.promotedAt) return { refused: "already_promoted" as const };
-        if (cycle.status !== "passed" || !cycle.candidateGuidance) return { refused: "not_passed" as const };
+        const eligibility = optimizerPromotionEligibility(cycle);
+        if (!eligibility.eligible) return { refused: eligibility.refusal };
         const active = await readActiveRouterGuidance(tx);
         // The cycle measured its proposal against the guidance in force when
         // it ran. If that has changed since, the measurement is not about the
@@ -1023,7 +1026,7 @@ export async function promoteAutoRouterOptimizerCycle(
         if (active.guidance !== cycle.incumbentGuidance) return { refused: "stale" as const };
         await writeActiveRouterGuidance(
             tx,
-            promotedRouterGuidance(active, { guidance: cycle.candidateGuidance, cycleId })
+            promotedRouterGuidance(active, { guidance: cycle.candidateGuidance!, cycleId })
         );
         await tx.autoRouterOptimizerCycle.update({ where: { id: cycleId }, data: { promotedAt: new Date() } });
         await writeOptimizerAudit(tx, actor, {
@@ -1063,6 +1066,8 @@ export async function rollBackAutoRouterGuidance(
 }
 
 export type OptimizerCycleView = {
+    implementations?: Record<number, DailyTaskImplementation>;
+    implementationLookupUnavailable?: boolean;
     id: string;
     createdAt: string;
     finishedAt: string | null;
@@ -1072,6 +1077,7 @@ export type OptimizerCycleView = {
     routerModelId: string;
     candidateGuidance: string | null;
     summary: unknown;
+    promotionEligibility: ReturnType<typeof optimizerPromotionEligibility>;
     spentMicroUsd: number;
     promotedAt: string | null;
     /** Messages the optimizer model wrote, with their picks and verdicts. */
@@ -1085,7 +1091,7 @@ export type OptimizerCycleView = {
  */
 export async function readAutoRouterOptimizerState() {
     const now = new Date();
-    const [optimizerModelId, automation, active, cycles, monthCycles] = await Promise.all([
+    const [optimizerModelId, automation, active, cycles, monthCycles, smartAdaptiveDaily] = await Promise.all([
         readOptimizerModelId(),
         readOptimizerAutomation(),
         readActiveRouterGuidance(),
@@ -1103,11 +1109,14 @@ export async function readAutoRouterOptimizerState() {
         }),
         prisma.autoRouterOptimizerCycle.findMany({
             where: { createdAt: { gte: utcMonthStart(now) } },
-            select: { createdAt: true, spentMicroUsd: true },
+            select: { createdAt: true, spentMicroUsd: true, summary: true },
         }),
+        readSmartAdaptiveDaily().catch(() => null),
     ]);
+    const implementations = await readDailyImplementations();
     return {
         optimizerModelId,
+        smartAdaptiveDaily,
         automation,
         active: {
             cycleId: active.cycleId,
@@ -1116,13 +1125,20 @@ export async function readAutoRouterOptimizerState() {
         },
         cycles: cycles.map(({ cases, ...cycle }): OptimizerCycleView => ({
             ...cycle,
+            implementations: Object.fromEntries(actionableRecommendations(cycle.summary).flatMap((item) => {
+                const evidence = taskImplementation(implementations, `${cycle.id}:${item.index}`, recommendationStatusEntries(cycle.summary).get(item.index)?.prUrl);
+                return evidence ? [[item.index, evidence]] : [];
+            })),
+            implementationLookupUnavailable: implementations.status === "unavailable",
             ...optimizerCycleView(cycle, now),
+            promotionEligibility: optimizerPromotionEligibility(cycle),
             syntheticCases: syntheticCaseViews(cases),
             createdAt: cycle.createdAt.toISOString(),
             finishedAt: cycle.finishedAt?.toISOString() ?? null,
             promotedAt: cycle.promotedAt?.toISOString() ?? null,
         })),
         spend: {
+            unconfirmedCycles: monthCycles.filter(cycle => (cycle.summary as { costCoverage?: { complete?: boolean } } | null)?.costCoverage?.complete !== true).length,
             todayMicroUsd: spentSince(monthCycles, utcDayStart(now)),
             monthMicroUsd: spentSince(monthCycles, utcMonthStart(now)),
             runCapMicroUsd: AUTO_ROUTER_OPTIMIZER_RUN_CAP_MICRO_USD,

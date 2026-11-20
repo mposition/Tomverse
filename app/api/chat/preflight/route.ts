@@ -1,3 +1,9 @@
+import { CHAT_MAX_MESSAGE_BODY_BYTES, CHAT_MAX_MESSAGE_CHARACTERS } from "@/lib/chatRequestLimits";
+import {
+    CHAT_MAX_ATTACHMENTS_PER_MESSAGE,
+    CHAT_MAX_ATTACHMENT_BYTES,
+} from "@/lib/chatAttachmentLimits";
+import { prepareMemoryHistoryContext } from "@/lib/memoryHistorySnapshot";
 import { randomUUID } from "node:crypto";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { z } from "zod";
@@ -68,17 +74,18 @@ const preflightSchema = z
         comparisonId: z.string().regex(/^\d{10,20}$/),
         conversationId: z.string().min(1).max(64),
         modelIds: z.array(z.string().min(1).max(100)).min(2).max(3),
-        prompt: z.string().max(50_000),
+        prompt: z.string().max(CHAT_MAX_MESSAGE_CHARACTERS),
+        previousContextBundle: z.string().min(1).max(8_192).optional(),
         attachments: z
             .array(
                 z
                     .object({
                         mediaType: z.string().min(1).max(160),
-                        size: z.number().int().min(0).max(10 * 1024 * 1024),
+                        size: z.number().int().min(0).max(CHAT_MAX_ATTACHMENT_BYTES),
                     })
                     .strict()
             )
-            .max(5),
+            .max(CHAT_MAX_ATTACHMENTS_PER_MESSAGE),
         webSearchMode: z.enum(WEB_SEARCH_MODES).optional(),
     })
     .strict();
@@ -155,10 +162,13 @@ export async function POST(request: Request) {
         );
         const payload = await readLimitedJson(
             request,
-            64 * 1024,
+            CHAT_MAX_MESSAGE_BODY_BYTES,
             preflightSchema
         );
         const uniqueModelIds = Array.from(new Set(payload.modelIds));
+        if (payload.previousContextBundle !== undefined && !session?.user?.id) {
+            throw new ChatAccessError(400, "INVALID_CONTEXT_BUNDLE", "Invalid chat context.");
+        }
         if (uniqueModelIds.length !== payload.modelIds.length) {
             return Response.json(
                 {
@@ -241,6 +251,7 @@ export async function POST(request: Request) {
         // step earlier and has the pair the client always sends with it -- a
         // signed-in caller and a real conversation row.
         let canPersistTurn = false;
+        let hasReviewHandoff = false;
         // A guest's transcript lives in their browser, so there is no server
         // conversation to read history from -- and no ownership question to
         // answer. Signed-in callers keep the full check below unchanged.
@@ -249,11 +260,12 @@ export async function POST(request: Request) {
                 where: { id: payload.conversationId },
                 select: {
                     userId: true,
-                    password: true,
+                    password: true, passwordVersion: true,
                     selectedModels: true,
                     kind: true,
                     memoryMode: true,
                     assistantProfileVersionId: true,
+                    continuationBridge: { select: { reviewHandoff: true } },
                     messages: {
                         orderBy: { createdAt: "desc" },
                         take: 100,
@@ -280,7 +292,7 @@ export async function POST(request: Request) {
                     request,
                     session.user.id,
                     payload.conversationId,
-                    conversation.password
+                    conversation.password == null ? null : conversation.passwordVersion
                 )
             ) {
                 return conversationLockedResponse();
@@ -307,6 +319,10 @@ export async function POST(request: Request) {
             conversationMemoryMode = conversation.memoryMode;
             profileVersionId = conversation.assistantProfileVersionId;
             canPersistTurn = true;
+            hasReviewHandoff = conversation.continuationBridge?.reviewHandoff != null;
+            if (hasReviewHandoff && (payload.attachments.length > 0 || models.some(model => model.usageClass === "deep-research"))) {
+                throw new ChatAccessError(400, "REVIEW_HANDOFF_TEXT_ONLY", "This comparison supports text questions and text models only.");
+            }
         }
 
         // §10: the priced context and the sent context must be the same one,
@@ -317,6 +333,10 @@ export async function POST(request: Request) {
         const turnContext = await buildChatTurnContext({
             userId: session?.user?.id ?? null,
             query: payload.prompt,
+            memorySemanticContext: session?.user?.id ? prepareMemoryHistoryContext({
+                request, userId: session.user.id, conversationId: canPersistTurn ? payload.conversationId : null,
+                query: payload.prompt, modelIds: uniqueModelIds, previousContextBundle: payload.previousContextBundle,
+            }) : undefined,
             profileVersionId,
             plan: access.plan ?? null,
             // Priced under the same mode the chat route will send under. If
@@ -362,7 +382,7 @@ export async function POST(request: Request) {
             | undefined;
         if (session?.user?.id && payload.conversationId !== "private-chat") {
             try {
-                if (await isExternalContinuationEnabledCached()) {
+                if (hasReviewHandoff || await isExternalContinuationEnabledCached()) {
                     const { seed } = await loadContinuationTurnSeed({
                         userId: session.user.id,
                         conversationId: payload.conversationId,
@@ -381,7 +401,8 @@ export async function POST(request: Request) {
                               }
                             : undefined;
                 }
-            } catch {
+            } catch (error) {
+                if (hasReviewHandoff) throw error;
                 // Quote without it rather than refuse the preparation. The
                 // chat route's own read fails the same way and sends the same
                 // prompt, so the two stay in agreement.
@@ -445,6 +466,8 @@ export async function POST(request: Request) {
                 reserveLocationInput: true,
                 modelId: model.id,
                 provider: model.provider,
+                usageClass: model.usageClass,
+                fileToolsOverride: model.fileToolsOverride ?? null,
                 isDeepResearchTurn: model.usageClass === "deep-research",
                 isAuthenticated: Boolean(session?.user?.id),
                 canPersist: canPersistTurn,

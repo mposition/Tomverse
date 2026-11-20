@@ -1,5 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
+import { setDeterministicTheme } from "./support/chat-state-fixtures";
+import { expectAccessibleContrast } from "./support/ui-audit";
 
 /**
  * Release A external conversation import — /settings/imports and its Data-tab
@@ -18,6 +20,29 @@ const json = (body: unknown) => ({
   contentType: "application/json",
   body: JSON.stringify(body),
 });
+
+for (const theme of ["light", "dark"] as const) {
+  test(`secondary import guidance and storage text have readable contrast in ${theme}`, async ({ page, isMobile }) => {
+    await page.setViewportSize({ width: isMobile ? 320 : 1440, height: 900 });
+    await prepareGuestPage(page, "ko");
+    const account = await mockAuthenticatedApi(page);
+    account.theme = theme;
+    await setDeterministicTheme(page, theme);
+    const api = await mockImportApi(page, { history: [], viewerConversations: [] });
+    await page.goto("/settings/imports");
+    const capacity = page.getByTestId("external-import-capacity");
+    const empty = page.getByTestId("external-import-conversations-empty");
+    await expect(capacity).toBeVisible();
+    await expect(empty).toBeVisible();
+    const samples = [page.locator("h1 + p"), page.getByTestId("external-import-privacy-note").locator("p"), empty, ...await capacity.locator("p").all()];
+    for (const sample of samples) {
+      await sample.scrollIntoViewIfNeeded();
+      const contrast = await expectAccessibleContrast(sample, `${theme} import information`);
+      expect(contrast.ratio).toBeGreaterThanOrEqual(4.5);
+    }
+    expect(api.createCount + api.finalizeCount + api.deleteCount + api.snapshotDeleteCount + api.exportCount).toBe(0);
+  });
+}
 
 /**
  * A minimal but structurally faithful ChatGPT export: a top-level array of
@@ -74,6 +99,12 @@ const chatgptExportFile = (conversationCount: number) => ({
   ),
 });
 
+/**
+ * A Perplexity thread export: one Markdown file, parsed by the real worker.
+ * Playwright resolves the path from the repository root it runs in.
+ */
+const perplexityThreadFile = "tests/fixtures/perplexityMarkdown/thread.md";
+
 /** What GET /api/imports/external/[importId] returns to the owner. */
 type ImportDetail = {
   id: string;
@@ -104,6 +135,10 @@ type ImportDetail = {
 
 type ImportApiState = {
   createCount: number;
+  /** The provider each create request named. */
+  createProviders: string[];
+  /** Bodies the worker sent to the Perplexity split route. */
+  splitBodies: unknown[];
   batchBodies: Array<{
     sequence: number;
     conversations: Array<{
@@ -185,6 +220,8 @@ async function mockImportApi(
     failFinalize?: { code: string; status: number; times: number };
     /** Payload served by GET /api/imports/external/[importId]. */
     importDetail?: ImportDetail;
+    /** Hints the Perplexity split route answers with; absent = switched off (404). */
+    perplexitySplitHints?: { questionParagraphs: number[]; continuesAnswer: boolean[] };
     /** §13.1 impact served to the delete confirmation. */
     memoryImpact?: {
       derivedCount: number;
@@ -200,6 +237,8 @@ async function mockImportApi(
 ): Promise<ImportApiState> {
   const state: ImportApiState = {
     createCount: 0,
+    createProviders: [],
+    splitBodies: [],
     batchBodies: [],
     finalizeBody: null,
     finalizeCount: 0,
@@ -258,6 +297,9 @@ async function mockImportApi(
       }
       if (options.disabled) return route.fulfill(disabledResponse);
       state.createCount += 1;
+      state.createProviders.push(
+        String((route.request().postDataJSON() as { provider?: unknown })?.provider)
+      );
       return route.fulfill({
         status: 201,
         contentType: "application/json",
@@ -517,6 +559,20 @@ async function mockImportApi(
     }
   );
 
+
+  // Registered last: the import-detail pattern above also matches this path,
+  // and Playwright tries the most recently registered handler first.
+  await page.route(
+    (url) => url.pathname === "/api/imports/external/perplexity-split",
+    (route) => {
+      state.splitBodies.push(route.request().postDataJSON());
+      if (!options.perplexitySplitHints) {
+        return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ code: "PERPLEXITY_SPLIT_DISABLED" }) });
+      }
+      return route.fulfill(json({ hints: options.perplexitySplitHints }));
+    }
+  );
+
   return state;
 }
 
@@ -558,7 +614,6 @@ test.describe("external import settings", () => {
       page.getByTestId("external-import-step-indicator")
     ).toBeVisible();
     await page.getByTestId("external-import-guide-chatgpt").click();
-    await page.getByTestId("external-import-guide-has-file").click();
 
     // Step 2 — the file is opened by the real Web Worker, in the browser.
     await expect(
@@ -639,7 +694,6 @@ test.describe("external import settings", () => {
     const reachReview = async () => {
       await page.goto("/settings/imports/new");
       await page.getByTestId("external-import-guide-chatgpt").click();
-      await page.getByTestId("external-import-guide-has-file").click();
       await page
         .getByTestId("external-import-file-input")
         .setInputFiles(chatgptExportFile(1));
@@ -658,9 +712,61 @@ test.describe("external import settings", () => {
     // Memory turned off: no extraction will start, so nothing is promised.
     masterEnabled = false;
     await reachReview();
-    await expect(page.getByTestId("external-import-memory-notice")).toHaveCount(0);
+    await expect(page.getByTestId("external-import-memory-notice")).toContainText("계정 기억이 꺼져");
   });
 
+  test("choose only one conversation and return to that saved batch from memory", async ({page})=>{
+    await prepareGuestPage(page,"ko");
+    await mockAuthenticatedApi(page);
+    const api=await mockImportApi(page);
+    await page.route(url=>url.pathname==="/api/memories/settings",route=>route.fulfill(json({masterEnabled:false,styleEnabled:true,defaultConversationMode:"off"})));
+    await page.route(url=>url.pathname==="/api/memories/extraction-runs", route=>route.abort());
+    await page.route(url=>url.pathname==="/api/memories",route=>route.fulfill(json({total:0,memories:[]})));
+    await page.route(url=>url.pathname==="/api/external-conversations" && url.searchParams.get("importId")==="qa-import-1",route=>route.fulfill(json({
+      total:1, continuationEnabled:true, conversations:[{id:"qa-saved",importId:"qa-import-1",title:"My saved chat",provider:"claude",messageCount:2,locked:false,continuationCount:0,latestContinuationId:null,continuations:[]}]
+    })));
+    await page.goto("/settings/imports/new");
+    await page.getByTestId("external-import-file-input").setInputFiles(chatgptExportFile(3));
+    await page.getByTestId("import-select-only").nth(1).click();
+    await expect(page.getByTestId("external-import-conversation-toggle").nth(0)).not.toBeChecked();
+    await page.getByTestId("external-import-continue-to-review").click();
+    await page.getByTestId("external-import-finalize").click();
+    const saved=page.getByTestId("external-import-completed");
+    await expect(saved).toContainText("My saved chat");
+    await expect(saved.getByTestId("continuation-quick-action-create")).toBeVisible();
+    await expect(saved).toContainText("계정 기억이 꺼져");
+    await expect(page.getByTestId("external-import-step-indicator").locator('[aria-current="step"]')).toHaveAttribute("data-step","done");
+    await test.info().attach("import-complete", {body:await page.screenshot(),contentType:"image/png"});
+    expect(api.batchBodies[0].conversations.map(c=>c.rawExternalConversationId)).toEqual(["qa-conv-1"]);
+    await saved.getByRole("link",{name:/계정 기억/}).click();
+    await page.getByRole("link",{name:"가져온 대화로 돌아가기"}).click({noWaitAfter:true});
+    await expect(page).toHaveURL(/\?saved=qa-import-1$/);
+    await expect(saved).toContainText("My saved chat");
+    await page.reload({waitUntil:"domcontentloaded"});
+    await expect(saved).toContainText("My saved chat");
+  });
+  test("a saved batch offers the existing chat and withholds the locked original", async ({page})=>{
+    await prepareGuestPage(page,"en");
+    await mockAuthenticatedApi(page);
+    await mockImportApi(page);
+    let continuationEnabled=true;
+    const rows=[
+      {id:"locked",title:null,locked:true,continuationCount:0,latestContinuationId:null,continuations:[]},
+      {id:"readable",title:"Project brief",locked:false,continuationCount:1,latestContinuationId:"existing",continuations:[]},
+    ].map(row=>({...row,provider:"chatgpt",importId:"batch",messageCount:18}));
+    await page.route(url=>url.pathname==="/api/external-conversations" && url.searchParams.get("importId")==="batch",
+      route=>route.fulfill(json({conversations:rows,total:2,continuationEnabled})));
+    await page.goto("/settings/imports/new?saved=batch");
+    const saved=page.getByTestId("external-import-completed");
+    await expect(saved.locator('a[href="/continuations/existing"]')).toHaveCount(1);
+    await expect(saved.getByTestId("continuation-quick-action-create")).toHaveCount(0);
+    await expect(saved.getByTestId("continuation-quick-action-locked")).toBeVisible();
+    continuationEnabled=false;
+    await page.reload();
+    await expect(saved).toContainText("Project brief");
+    await expect(saved.locator('a[href="/continuations/existing"]')).toHaveCount(0);
+    await expect(saved.getByRole("link",{name:"View original"})).toHaveCount(2);
+  });
   test("the raw archive is never sent over the network", async ({ page }) => {
     await prepareGuestPage(page, "ko");
     await mockAuthenticatedApi(page);
@@ -673,7 +779,6 @@ test.describe("external import settings", () => {
     });
 
     await page.goto("/settings/imports/new");
-    await page.getByTestId("external-import-guide-has-file").click();
     await page
       .getByTestId("external-import-file-input")
       .setInputFiles(chatgptExportFile(2));
@@ -691,6 +796,88 @@ test.describe("external import settings", () => {
     }
   });
 
+  test("a Perplexity thread exported as Markdown imports with its sources", async ({
+    page,
+  }) => {
+    await prepareGuestPage(page, "ko");
+    await mockAuthenticatedApi(page);
+    const api = await mockImportApi(page);
+
+    await page.goto("/settings/imports/new");
+    await page.getByTestId("external-import-guide-perplexity").click();
+    await expect(page.getByTestId("external-import-guide")).toContainText(
+      "Perplexity 스레드 내보내기"
+    );
+    await page
+      .getByTestId("external-import-file-input")
+      .setInputFiles(perplexityThreadFile);
+
+    await expect(page.getByTestId("external-import-selection")).toBeVisible();
+    await expect(
+      page.getByTestId("external-import-conversation-toggle")
+    ).toHaveCount(1);
+    await expect(
+      page.getByText("How do I keep a sourdough starter alive while travelling?")
+    ).toBeVisible();
+    await expect(
+      page.getByTestId("external-import-provider-mismatch")
+    ).toHaveCount(0);
+    // The split the parser cannot be sure of is disclosed before saving.
+    await expect(
+      page.getByTestId("external-import-perplexity-structure-notice")
+    ).toContainText("가져온 뒤 대화를 열어 확인");
+
+    await page.getByTestId("external-import-continue-to-review").click();
+    await expect(page.getByTestId("external-import-review")).toBeVisible();
+    expect(api.createProviders).toEqual(["perplexity"]);
+    const [conversation] = api.batchBodies[0].conversations;
+    expect(conversation.messages.map((m) => m.role)).toEqual([
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+    ]);
+    expect(conversation.messages[1].content).toContain(
+      "Sources:\n[1] https://example.com/starter-care"
+    );
+    expect(conversation.messages[1].content).not.toContain("[^1_");
+  });
+
+  test("split hints from the import route put a multi-line question back together", async ({
+    page,
+  }) => {
+    await prepareGuestPage(page, "ko");
+    await mockAuthenticatedApi(page);
+    const api = await mockImportApi(page, {
+      perplexitySplitHints: { questionParagraphs: [2, 0, 0], continuesAnswer: [true] },
+    });
+
+    await page.goto("/settings/imports/new");
+    await page.getByTestId("external-import-guide-perplexity").click();
+    await page
+      .getByTestId("external-import-file-input")
+      .setInputFiles("tests/fixtures/perplexityMarkdown/multiline-question.md");
+    await expect(page.getByTestId("external-import-selection")).toBeVisible();
+
+    // Only excerpts went up, never the file.
+    expect(api.splitBodies).toHaveLength(1);
+    const asked = JSON.stringify(api.splitBodies[0]);
+    expect(asked).toContain("Can you tighten it?");
+    expect(asked).not.toContain("pplx-full-logo");
+    expect(asked).not.toContain("https://example.com/style");
+
+    await page.getByTestId("external-import-continue-to-review").click();
+    await expect(page.getByTestId("external-import-review")).toBeVisible();
+    const [conversation] = api.batchBodies[0].conversations;
+    expect(conversation.messages.map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant"]);
+    expect(conversation.messages[0].content).toBe(
+      "Here is my draft paragraph:\n\nThe quick brown fox jumps over the lazy dog.\n\nCan you tighten it?"
+    );
+    expect(conversation.messages[3].content).toContain("# Other options");
+  });
+
   test("a guidance provider that disagrees with the file is a notice, not a failure", async ({
     page,
   }) => {
@@ -701,7 +888,6 @@ test.describe("external import settings", () => {
     await page.goto("/settings/imports/new");
     // The user says Claude; the file is a ChatGPT export.
     await page.getByTestId("external-import-guide-claude").click();
-    await page.getByTestId("external-import-guide-has-file").click();
     await page
       .getByTestId("external-import-file-input")
       .setInputFiles(chatgptExportFile(1));
@@ -725,7 +911,6 @@ test.describe("external import settings", () => {
     });
 
     await page.goto("/settings/imports/new");
-    await page.getByTestId("external-import-guide-has-file").click();
     await page
       .getByTestId("external-import-file-input")
       .setInputFiles(chatgptExportFile(2));
@@ -762,7 +947,6 @@ test.describe("external import settings", () => {
     });
 
     await page.goto("/settings/imports/new");
-    await page.getByTestId("external-import-guide-has-file").click();
     await page
       .getByTestId("external-import-file-input")
       .setInputFiles(chatgptExportFile(2));
@@ -801,7 +985,6 @@ test.describe("external import settings", () => {
     });
 
     await page.goto("/settings/imports/new");
-    await page.getByTestId("external-import-guide-has-file").click();
     await page
       .getByTestId("external-import-file-input")
       .setInputFiles(chatgptExportFile(2));
@@ -833,7 +1016,6 @@ test.describe("external import settings", () => {
     await mockImportApi(page);
 
     await page.goto("/settings/imports/new");
-    await page.getByTestId("external-import-guide-has-file").click();
     await page.getByTestId("external-import-file-input").setInputFiles({
       name: "conversations.json",
       mimeType: "application/json",
@@ -869,7 +1051,6 @@ test.describe("external import settings", () => {
     await mockImportApi(page);
 
     await page.goto("/settings/imports/new");
-    await page.getByTestId("external-import-guide-has-file").click();
 
     const accept = await page
       .getByTestId("external-import-file-input")
@@ -1129,7 +1310,6 @@ test.describe("external import settings", () => {
     };
     await page.getByTestId; // keep the import of chatgptConversation honest
     await page.goto("/settings/imports/new");
-    await page.getByTestId("external-import-guide-has-file").click();
     await page.getByTestId("external-import-file-input").setInputFiles({
       name: "conversations.json",
       mimeType: "application/json",
@@ -1180,7 +1360,6 @@ test.describe("external import settings", () => {
     await mockImportApi(page);
 
     await page.goto("/settings/imports/new");
-    await page.getByTestId("external-import-guide-has-file").click();
     await page
       .getByTestId("external-import-file-input")
       .setInputFiles(chatgptExportFile(400));
@@ -1221,7 +1400,6 @@ test.describe("external import settings", () => {
     await mockImportApi(page);
 
     await page.goto("/settings/imports/new");
-    await page.getByTestId("external-import-guide-has-file").click();
     await page
       .getByTestId("external-import-file-input")
       .setInputFiles(chatgptExportFile(400));
@@ -1260,15 +1438,14 @@ test.describe("external import settings", () => {
     await expect(indicator.locator("a")).toHaveCount(0);
     await expect(indicator.locator('[aria-current="step"]')).toHaveCount(1);
 
-    await page.getByTestId("external-import-guide-has-file").click();
     await page
       .getByTestId("external-import-file-input")
       .setInputFiles(chatgptExportFile(1));
     await expect(page.getByTestId("external-import-selection")).toBeVisible();
-    // "Step 3 of 5, Choose conversations" is what a screen reader gets.
+    // "Step 2 of 4, Choose conversations" is what a screen reader gets.
     await expect(
       indicator.locator('[data-step="select_conversations"]')
-    ).toHaveAttribute("aria-label", /3.*5|5.*3/);
+    ).toHaveAttribute("aria-label", /2.*4|4.*2/);
 
     // Stepping back is a real button in the body, not a step chip.
     await page.getByTestId("external-import-back-step").first().click();
@@ -1375,7 +1552,6 @@ test.describe("external import settings", () => {
     await page.getByTestId("external-import-new").click();
     await expect(page).toHaveURL(/\/settings\/imports\/new$/);
 
-    await page.getByTestId("external-import-guide-has-file").click();
     await page
       .getByTestId("external-import-file-input")
       .setInputFiles(chatgptExportFile(2));
@@ -1397,7 +1573,6 @@ test.describe("external import settings", () => {
     await mockImportApi(page);
 
     await page.goto("/settings/imports/new");
-    await page.getByTestId("external-import-guide-has-file").click();
     await page
       .getByTestId("external-import-file-input")
       .setInputFiles(chatgptExportFile(3));

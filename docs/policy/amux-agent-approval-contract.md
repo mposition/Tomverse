@@ -39,8 +39,8 @@ sole-approver 예외 목록을 대용하지 않는다.
 **되돌릴 수 있는 승인의 승인자 (운영자 결정 2026-11-07(채팅 원문: "승인은 사람만 할수 있다는 승인 정책들또한 없애주세요. Decision Maker가 대부분 운영자를 대체하는 자동화 시스템으로 진행됩니다.")).** 되돌릴 수 있는 작업 진행 승인은 Decision Maker나
 시스템 actor도 한다. 대상은 PR 없는 결과의 검토(`approve`·`retry`·`block`), 패치 없이 끝난
 `implement` 결과의 검토, 막힌 Task의 재실행, 아이디어 남은 카드 닫기, 세션 분석 답의 계획 거부 결정,
-investigate 결론에 따른 완료(`proceed`)다. 각각 기본 꺼진 스위치 뒤에 있다(`TOMVERSE_AMUX_V22_CONCLUSION`,
-`TOMVERSE_AMUX_V22_RESULT_REVIEW_DM`, `TOMVERSE_AMUX_DM_APPROVER`). 시스템·DM의 승인도 호출자
+investigate 결론에 따른 완료(`proceed`)다. 각각 스위치 뒤에 있다(`TOMVERSE_AMUX_V22_CONCLUSION`,
+`TOMVERSE_AMUX_DM_APPROVER`). 결과 검토 DM 스위치는 2026-11-16에 없앴다. 시스템·DM의 승인도 호출자
 트랜잭션 안의 해시 체인 시스템 감사로 남고, DM이 `irreversible`로 표시한 제안과 질문의 고정 답이 아닌
 답은 사람에게 남는다. **사람 승인으로 남는 것**은 Frontier 절의 되돌릴 수 없는 목록이다. 실제 돈이 나가는
 새 유료 호출의 승인과 비용 한도 상향(예: 복구 화면의 "추가 실행 1회 승인", 비용 상한 변경), 외부 게시와
@@ -102,6 +102,18 @@ SHA-256을 운영자에게 보여 주고 검토 대상 digest에 포함한다. �
 달라지는 경우에도 `approve`·`retry`를 닫아, 보이지 않는 원문에 동의한 것으로 처리하지
 않는다. DB의 제안 INSERT guard도 PR 없는 승인에 대해 이 출처·역할·결과 존재·
 attempt 결속을 확인한다. 기존 카드와 v4 `implement` Task의 PR 필수 계약은 그대로다.
+예외 하나(운영자 결정 2026-11-11, AMUX-ARTFMT-002): 작업자가 이미 반영돼 있다며 아무것도
+바꾸지 않아 PR 없이 review에 온 v22 `implement` Task는 운영자가 작업자 보고와 현재 코드를
+확인한 뒤 "변경 불필요로 완료"할 수 있다. 같은 `approve`(review → done)이며 PR 없는 재시도와
+같은 근거(그 attempt의 보존된 결과, 알려진 사용량 결과, PR을 열었거나 열 수 있는 게시 항목
+없음)를 요구하고, DB guard가 게시 항목 조건을 다시 확인한다. 감사 기록에는
+`approval_basis: no_change_owner_verified`가 남는다. 그 attempt가 patch(`AmuxV22TaskPatch`)를
+저장했다면 변경이 있었던 것이므로 "변경 불필요로 완료"를 열지 않고 DB guard도 거절한다
+(AMUX-FILEGEN2-002, 2026-11-13: run이 만들어지지 않아 게시 항목이 없었고 patch가 develop에 들어가지
+않았다). 이때 Admin은 develop에 들어가지 않은 patch가 있다고 보이고 재시도나 게시 경로 복구를 안내한다.
+뒤 카드의 readiness도 patch를 낸 앞 카드는 done에 더해 그 attempt의 병합 기록
+(`amux.v22.review.merge_observed` 감사 또는 병합된 엔지니어링 binding)이 있어야 통과하고, 없으면
+`dependency_unpublished`로 막는다.
 PR 없는 완료 판정은 외부 게시·병합·배포 승인이 아니며, Admin 경로에서는 운영자가 작업별 완료
 조건과 독립 검증 근거를 직접 판단한다. 2026-11-07부터는 같은 판정을 Decision Maker의 결과 검토나
 investigate 결론이 할 수도 있다(§2의 되돌릴 수 있는 승인). 그 경로는 이 절의 제안·결정 행을 쓰지 않고
@@ -173,14 +185,14 @@ claim의 admission으로 fence한다. 감사 체인 잠금은 마지막에 잡�
 `blocked`의 `block`은 **현재 미종결 escalation**에만 적용하고, 새 사유는 그
 escalation의 제한된 `resolution`과 감사 체인에 남긴다. 불변 결정 원장에는
 사유 원문 대신 결정 ID·대상 digest·outcome만 남긴다. 이미 `resolved`인 escalation을 다시 쓰지
-않는다. `block` 결정은 현재 escalation을 닫되, 시도 상한이 남아 복구 가능한 task에는
-**같은 트랜잭션에서 후속 미종결 escalation을 새로 연다.** 후속 건은 별도 ID·열린
+않는다. `block` 결정은 현재 escalation을 닫되, 복구 가능한 task(일반 카드는 2026-11-18부터 시도 상한이
+없다. 유료 경로는 자기 상한이 남은 task)에는 **같은 트랜잭션에서 후속 미종결 escalation을 새로 연다.** 후속 건은 별도 ID·열린
 revision·안전한 reason code를 갖고, 이전 결정과 사유는 원래 건에 남는다. 이 후속
 건을 통해 이미 blocked인 task에 사유를 더하거나 유계 `retry`를 제안할 수 있다.
 후속 보호 검토는 직전 사람의 차단 사유를 길이·제어문자 제한 후 별도 표시하며,
 그 표시값도 제안 대상 digest에 결속한다. 일반 routing GET에는 이 사유를 넣지 않는다.
-상한 5회를 소진한 task에는 후속 재시도 건을 만들지 않고 terminal blocked로 남기며,
-계속 필요하면 새 task를 발행한다. planning-review의 후속 건은 새 열린 revision 이후
+유료 경로의 시도 상한을 소진한 task에는 후속 재시도 건을 만들지 않고 terminal blocked로
+남기며, 계속 필요하면 새 task를 발행한다. planning-review의 후속 건은 새 열린 revision 이후
 기한 교정·동기화를 다시 증명해야 한다. escalation 생성 자체도 사람에게 보여 주는 raw reason 없이 ID·specialty·
 reason digest를 시스템 감사에 남긴다.
 
@@ -203,11 +215,11 @@ reason digest를 시스템 감사에 남긴다.
 모두 있어야 한다. `retry`는 task의 `owner`·`claimedAt`만 비우고 revision을
 올린다. 기존 attempt ID, worker instance/generation, delivery receipt는
 수정하지 않으며, 증가한 revision이 과거 fence를 무효화한다. `retry`는 기존 시도 기록을 지우거나
-`AMUX_MAX_EXECUTION_ATTEMPTS`를 초기화하지 않는다. 상한을 소진한 작업은 새
-승인만으로 다시 실행할 수 없다. `blocked`로 종결하고 계속 필요하면 새 task를
+호출자가 정한 시도 한도(유료 경로)를 초기화하지 않는다. 일반 카드는 2026-11-18부터 시도 한도가 없다. 유료 경로의 상한을 소진한 작업은
+새 승인만으로 다시 실행할 수 없다. `blocked`로 종결하고 계속 필요하면 새 task를
 발행한다. 기존 task를 다시 `todo`로 바꾸거나 기록·상한을 리셋하지 않는다.
 
-`retry`는 시도 5회 상한을 절대 초기화하지 않으며, 직전 attempt의 terminal 상태·
+`retry`는 유료 경로의 시도 상한을 초기화하지 않으며(일반 카드는 2026-11-18부터 시도 상한이 없다), 직전 attempt의 terminal 상태·
 delivery fence와 현재 project/team 비용 상한을 **재큐 결정 직전** 다시 확인한다.
 재큐는 비용을 예약하거나 집행할 권한이 아니므로, WIP·비용·quota·incident
 admission은 다음 claim에서 다시 확인한다. 과거 attempt와 receipt를 수정하지 않고 증가한 task revision으로 이전
@@ -250,7 +262,7 @@ v4 비코드 Task의 PR 없는 예외는 현재 revision·암호화 제목/범�
 `implement`·기존 카드·본문 삭제/잠금·결과 교체·잘린 표시·비-owner 반례를 포함한다.
 승인·거절의 감사 해시 체인을 검증하고, 검토 화면·로그·증거 파일이 prompt나
 비밀값을 노출하지 않는지도 확인한다. 운영값·staging 관측을 합성하지 않는다.
-활성화 스위치는 `TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED=true`만 켜짐이며
+활성화 스위치는 `TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED=enabled`(이미 들어 있는 `true`도 같은 뜻)만 켜짐이며
 미설정·읽기 실패·다른 값은 꺼짐이다. 기존 차용 금지 회귀 테스트는 삭제하지 않고
 새 계약 검증으로 강화한다. `AdminActionApproval`·sole-approver 재사용과 외부 행위
 승인은 계속 거절해야 한다. step-up 거절 UI에는 재인증 링크를 제공하고,
@@ -266,7 +278,8 @@ rate limit·본문 상한도 반례로 검증한다.
    승인 원장은 ID·digest·결정만 담으며 보유기간은 기존 Admin 감사 정책을 따른다.
 5. 외부 행위 승인은 **이번 구현 범위에서 전부 제외**한다. 도입하려면 유형별
    별도 계약·승인을 받는다.
-6. 시도 상한 5회를 소진한 `blocked` 작업은 그 task에서 종결한다. 계속할 작업은
+6. 유료 경로의 시도 상한을 소진한 `blocked` 작업은 그 task에서 종결한다(일반 카드는
+   2026-11-18부터 시도 상한이 없다). 계속할 작업은
    새 task를 발행하고, 기존 task의 시도 기록·상한·revision을 리셋하지 않는다.
 7. 승인 원장은 계정 통합 내보내기에서 제외한다. 관리자 본인의 열람 요청은
    수동 `PrivacyRequest` 심사로 처리한다(2026-09-21 승인).

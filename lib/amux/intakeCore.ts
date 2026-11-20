@@ -4,8 +4,8 @@ import {
   AMUX_MANIFEST_CANONICALIZATION_VERSION,
   amuxCanonicalJson,
   amuxCatalogTextRefused,
-  boardImportApplyPermitted,
 } from "./boardImportCore.ts";
+import { AMUX_INTAKE_SAFETY_MAX_BYTES } from "./intakeLimitsCore.ts";
 
 /**
  * Manual intake of one explicit Codex registration.
@@ -13,28 +13,20 @@ import {
  * docs/policy/amux-intake.md (policy version 1).
  *
  * Parsing and the guard are pure. This module does not open a transaction,
- * write an audit row, or create a card. Production apply needs both latches.
- * Stage 8 arms the code latch. The environment value must still be exactly
- * enabled. Nothing here calls a provider or spends credits.
+ * write an audit row, or create a card. Apply is gated by the Admin approval
+ * flow, not by a switch (owner direction 2026-11-16). Nothing here calls a
+ * provider or spends credits.
  */
 
 export const AMUX_INTAKE_POLICY_VERSION = 1;
 export const AMUX_INTAKE_AGENT_ID = "amux-intake";
 export const AMUX_INTAKE_SOURCE_SYSTEM = "codex-conversation";
 export const AMUX_INTAKE_CANONICALIZATION_VERSION = AMUX_MANIFEST_CANONICALIZATION_VERSION;
-export const AMUX_INTAKE_APPLY_ENV = "TOMVERSE_AMUX_INTAKE_APPLY";
 export const AMUX_INTAKE_DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
 export const AMUX_INTAKE_APPROVAL_TTL_MS = 15 * 60 * 1000;
-export const AMUX_INTAKE_RAW_BODY_MAX_BYTES = 16_384;
-export const AMUX_INTAKE_TITLE_MAX_BYTES = 200;
-export const AMUX_INTAKE_TEXT_MAX_BYTES = 2_000;
-
-/**
- * Second apply latch. One environment variable must not be enough to create
- * a card. Stage 8 sets this constant true. Apply still requires the
- * environment value to be exactly enabled.
- */
-export const AMUX_INTAKE_APPLY_CODE_LATCH = true;
+/** The one request-body safety value of the idea flow; no title or text
+ * length limit remains (owner direction 2026-11-16). */
+export const AMUX_INTAKE_RAW_BODY_MAX_BYTES = AMUX_INTAKE_SAFETY_MAX_BYTES;
 
 export const AMUX_INTAKE_PRIORITIES = ["p0", "p1", "p2", "p3"] as const;
 
@@ -118,17 +110,9 @@ const taskIdRefused = (value: string): boolean => {
   return /[\u0000-\u001f\\/]/.test(value);
 };
 
-const scannedText = (value: string, maxBytes: number): boolean =>
+const scannedText = (value: string): boolean =>
   bytes(value) >= 1 &&
-  bytes(value) <= maxBytes &&
   !amuxCatalogTextRefused(value);
-
-/** Uses the shipped latch constant. A caller cannot supply the latch. */
-export const amuxIntakeApplyPermitted = (envValue: string | undefined): boolean =>
-  boardImportApplyPermitted({
-    envValue,
-    codeLatch: AMUX_INTAKE_APPLY_CODE_LATCH,
-  });
 
 export const amuxIntakeNormalizedDraft = (draft: AmuxIntakeDraft): AmuxIntakeNormalizedDraft => ({
   policyVersion: draft.policyVersion,
@@ -185,9 +169,9 @@ const proposalRefused = (value: unknown, sourceTaskId: string): string | null =>
   ) {
     return "metadata_incomplete";
   }
-  if (!scannedText(record.title, AMUX_INTAKE_TITLE_MAX_BYTES)) return "content_refused";
-  if (!scannedText(record.scope, AMUX_INTAKE_TEXT_MAX_BYTES)) return "content_refused";
-  if (!scannedText(record.completion, AMUX_INTAKE_TEXT_MAX_BYTES)) return "content_refused";
+  if (!scannedText(record.title)) return "content_refused";
+  if (!scannedText(record.scope)) return "content_refused";
+  if (!scannedText(record.completion)) return "content_refused";
   if (
     record.title.includes(sourceTaskId) ||
     record.scope.includes(sourceTaskId) ||

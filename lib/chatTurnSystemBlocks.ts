@@ -37,9 +37,12 @@ import {
   resolveImageHandoffState,
   type ImageArtifactState,
 } from "@/lib/imageCapabilityPrompt";
+import { FILE_CONVERSION_TOOL_DEFINITION_TOKENS } from "@/lib/fileConversionCore";
+import { officeRenderingEnabled } from "@/lib/officeRenderer";
 import {
   ARTIFACT_BATCH_TOOL_DEFINITION_TOKENS,
   ARTIFACT_TOOL_DEFINITION_TOKENS,
+  ARTIFACT_REVISION_TOOL_DEFINITION_TOKENS,
   planGeneratedArtifactTool,
   type ArtifactToolPlan,
 } from "@/lib/generatedArtifactToolPolicy";
@@ -56,6 +59,7 @@ import type { TurnAttachmentDescriptor } from "@/lib/messageAttachmentCore";
 import { buildChatLocationContext, buildChatLocationPrompt, CHAT_LOCATION_INPUT_TOKEN_RESERVE } from "@/lib/chatLocationPrompt";
 import { buildChatCurrentDatePrompt } from "@/lib/chatCurrentDatePrompt";
 import type { ChatLocation } from "@tomverse/chat-core";
+import { generatedArtifactRevisionEnabled } from "@/lib/generatedArtifactRevisionCore";
 
 export type ChatTurnSystemBlocksInput = {
   /** The turn's clock, for the date block. Defaults to now; tests pin it. */
@@ -64,6 +68,9 @@ export type ChatTurnSystemBlocksInput = {
   reserveLocationInput?: boolean;
   modelId: string;
   provider: string;
+  /** The catalogue row's usage class and file-tool tick (ArtifactToolPlanInput). */
+  usageClass?: string;
+  fileToolsOverride?: boolean | null;
   /**
    * Deep research carries location context but no file/image tool blocks.
    */
@@ -193,12 +200,22 @@ export const buildChatTurnSystemBlocks = (
     modelId: input.modelId,
     autoRouted: input.autoRouted === true,
     provider: input.provider,
+    usageClass: input.usageClass,
+    fileToolsOverride: input.fileToolsOverride,
     isAuthenticated: input.isAuthenticated,
     canPersist: input.canPersist,
     nativeSearchEnabled: input.nativeSearchEnabled,
     nativeSearchForced: input.nativeSearchForced,
     conversationKind: "chat",
     turnAttachments: input.turnAttachments,
+    // Read here, the one place preflight and the chat route share, so the
+    // quote and the request cannot disagree about whether `convert_files` is
+    // sent. `CHAT_FILE_CONVERSION=off` is the operator's switch
+    // (docs/policy/generated-artifacts.md section 14).
+    fileConversionEnabled: process.env.CHAT_FILE_CONVERSION !== "off",
+    // Read from the same place the conversion itself reads it, so the tool is
+    // never offered for office files the renderer is not there to lay out.
+    officeRenderingEnabled: officeRenderingEnabled(),
   });
 
   const imageCapabilityPrompt = buildImageCapabilitySystemPrompt({
@@ -269,8 +286,13 @@ export const buildChatTurnSystemBlocks = (
         APP_MANAGED_WEB_SEARCH_TOOL_DEFINITION_TOKENS
       : 0) +
     (artifactPlan.registerTool ? ARTIFACT_TOOL_DEFINITION_TOKENS : 0) +
+    (artifactPlan.registerTool && input.isAuthenticated && input.canPersist && generatedArtifactRevisionEnabled()
+      ? ARTIFACT_REVISION_TOOL_DEFINITION_TOKENS : 0) +
     (artifactPlan.registerDocumentBatch
       ? ARTIFACT_BATCH_TOOL_DEFINITION_TOKENS
+      : 0) +
+    (artifactPlan.registerFileConversion
+      ? FILE_CONVERSION_TOOL_DEFINITION_TOKENS
       : 0) +
     // Both halves. Splitting the seed by role changed where the text is sent,
     // not what it costs, and pricing only the rules would under-quote every
@@ -315,11 +337,14 @@ export type ChatTurnPreludeMessage =
 
 export const buildChatTurnPrelude = (input: {
   contextSystemPrompt: string | null;
+  /** Account memory is independent of continuation, including Deep Research. */
+  memoryData?: string | null;
   blocks: Pick<ChatTurnSystemBlocks, "systemMessages" | "untrustedDataMessages">;
 }): ChatTurnPreludeMessage[] => [
   ...(input.contextSystemPrompt
     ? [{ role: "system" as const, content: input.contextSystemPrompt }]
     : []),
   ...input.blocks.systemMessages,
+  ...(input.memoryData ? [{ role: "user" as const, content: input.memoryData }] : []),
   ...input.blocks.untrustedDataMessages,
 ];

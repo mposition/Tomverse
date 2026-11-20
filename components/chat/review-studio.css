@@ -1,6 +1,6 @@
 /* Studio is presentation only. Classic keeps the original shell and tokens. */
-[data-review-appearance="classic"] { --review-raised:#f4f4f5; --review-surface:#fff; --review-muted:#71717a; --review-selected:#e9edff; --review-selected-text:#344ac4; }
-.dark [data-review-appearance="classic"] { --review-raised:#27272a; --review-surface:#18181b; --review-muted:#a1a1aa; --review-selected:#25345e; --review-selected-text:#c0ccff; }
+[data-review-appearance="classic"] { --review-text:#18181b; --review-raised:#f4f4f5; --review-surface:#fff; --review-muted:#71717a; --review-selected:#e9edff; --review-selected-text:#344ac4; }
+.dark [data-review-appearance="classic"] { --review-text:#f4f4f5; --review-raised:#27272a; --review-surface:#18181b; --review-muted:#a1a1aa; --review-selected:#25345e; --review-selected-text:#c0ccff; }
 [data-review-appearance="studio"] {
   --review-page: #e9edf5;
   --review-canvas: #f3f5fb;
@@ -56,6 +56,10 @@
 .review-brand strong { font-size:1.688rem; font-weight:650; letter-spacing:-.04em; }
 .review-brand img { display:none; object-fit:contain; background:white; border-radius:10px; }
 .review-brand>span { font-size:0.8125rem; color:var(--review-muted, #71717a); }
+.review-brand>.review-conversation-title { min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.review-brand>.review-conversation-title[data-has-title="true"] { max-width:32rem; }
+.review-conversation-name { font-size:0.9375rem; font-weight:700; color:var(--review-text, #27272a); }
+.review-brand strong { flex-shrink:0; }
 .review-product-caption { display:block; font-size:0.75rem; line-height:1; font-weight:400; }
 .review-navigation .review-product-label { line-height:1.2; }
 .review-mode,.review-view-switch { display:flex; align-items:center; border-radius:24px; padding:3px; background:var(--review-raised, #f4f4f5); }
@@ -219,7 +223,9 @@
 @media(prefers-reduced-motion:reduce) { .review-starter-grid>button { transition:none; }.review-starter-grid>button:hover { transform:none; } }
 
 .review-brand img { padding:3px; }
-.chat-studio-description { max-width:32rem; font-size:0.8125rem; color:var(--review-muted); margin-right:auto; }
+.chat-studio-description { max-width:32rem; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:0.8125rem; color:var(--review-muted); margin-right:auto; }
+/* A long conversation title must not fold the usage label onto two lines. */
+.review-credit-button { white-space:nowrap; flex-shrink:0; }
 .review-navigation img:not(.review-nav-logo) { filter:brightness(0) invert(.78); }
 [data-studio-product="chat"] .review-studio-results [data-testid="chat-starter-preview"] { margin:0; justify-content:flex-start; text-align:left; color:var(--review-muted); }
 [data-studio-product="chat"] .review-studio-results [data-testid="chat-starter-gallery"]>ul { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-top:16px; }
@@ -238,6 +244,8 @@
 [data-focus-drop-target="true"],[data-model-reorder-target="true"] { outline:3px dashed var(--review-action); outline-offset:-4px; }
 [data-studio-product="chat"] .review-studio-results [data-testid="desktop-conversation-surface"] { display:flex; }
 [data-studio-product="chat"] .review-studio-results [data-testid="chat-welcome-group"] { align-items:flex-start; text-align:left; padding:32px; }
+[data-studio-product="chat"] .review-studio-results [data-testid="chat-import-entry"] { border-color:var(--review-shell); background:var(--review-surface); color:var(--review-text); }
+[data-studio-product="chat"] .review-studio-results [data-testid="chat-import-entry"]:hover { border-color:var(--review-action); background:var(--review-selected); }
 [data-studio-product="chat"] .review-studio-results [data-testid="chat-welcome-greeting"] { max-width:16ch; font-size:clamp(1.5rem,2.6vw,2.5rem); line-height:1.5; letter-spacing:-.04em; color:var(--review-text); margin-bottom:20px; }
 [data-studio-product="chat"] .review-studio-results [data-testid="desktop-conversation-surface"]>div:has([data-testid="chat-empty-state"]) { background:var(--review-canvas); }
 .review-studio-composer-slot>[data-chat-composer="studio"] { display:flex; flex:1; flex-direction:column; }
@@ -259,6 +267,7 @@
 [data-testid="mobile-chat-shell"][data-studio-product="chat"] .chat-command-bar button,
 [data-testid="mobile-chat-shell"][data-studio-product="chat"] .chat-command-bar select { min-width:44px; min-height:44px; }
 @media(max-width:900px) { .chat-studio-description { display:none; } }
+@media(min-width:769px) { .review-brand>.review-conversation-title[data-has-title="true"] { display:block; } }
 .review-mode { min-width:0; flex-wrap:wrap; }
 .review-mode button { min-width:0; overflow-wrap:anywhere; }
 @media(max-width:360px) {
@@ -267,4 +276,8 @@
   .review-mode button { white-space:normal; }
   .review-participant-list>button { flex-basis:calc(50% - 6px); }
   .review-participant-list strong { overflow-wrap:anywhere; }
+}
+@media(max-width:767px) {
+  .review-participant-list>button[aria-pressed] { flex:1 1 130px; min-width:max-content; }
+  .review-participant-list>button[aria-pressed] strong { white-space:nowrap; }
 }

@@ -9,9 +9,9 @@ import {
   withAmuxRouteBudget,
 } from "@/lib/amux/dbBoundary";
 import { submitDecisionMakerOutput } from "@/lib/amux/decisionMakerBodyStore";
+import { dmRunUnavailableIncident } from "@/lib/amux/decisionMakerCore";
 import { loadDecisionMakerDigestKeyRing } from "@/lib/amux/decisionMakerDigestKeys";
 import {
-  dmInternalRoutesEnabled,
   dmReturnedRefusalStatus,
   dmRouteErrorResponse,
   dmRouteRefusal,
@@ -19,6 +19,7 @@ import {
 } from "@/lib/amux/decisionMakerInternalRoute";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
+import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 
 /**
  * AMUX Decision Maker result submission (docs/policy/amux-decision-maker.md
@@ -48,20 +49,21 @@ import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
  * (`settleDmValidationLatch()`), which can only turn the instance off. The
  * answer is the result's whatever that check does; one that could not be
  * written stays owed to the next check.
- *
- * Closed until the operator sets `TOMVERSE_AMUX_DM_ROUTING=enabled`.
  */
 
 /**
- * The largest valid output is an 8 KiB answer and a 4 KiB rationale (§6); as
- * JSON text a byte takes at most 6 characters, and carried here as a JSON
- * string at most 7, so under 84 KiB. The options are the routed card's, whose
- * serialized text is at most 16 KiB (§5), and the binding is a few hundred
- * bytes: under 102 KiB in all. 256 KiB holds every output the store could
- * accept with room to record an oversized one as a validation failure; a
- * larger body is refused before the store and records nothing.
+ * The raw output is at most 256 KiB (DM_LAUNCH_OUTPUT_MAX_BYTES, the
+ * launcher's). Carried here as a JSON string a byte takes at most six (a
+ * control character's escape), 1.5 MiB; the options are the routed card's,
+ * whose card text is at most 256 KiB (§5), at most twice that here; the
+ * binding is a few hundred bytes. 4 MiB holds the worst case of all of it, so
+ * a body the relay can build is never refused unread: the relay submits every
+ * result and keeps one whose answer it lost owed (owner direction 2026-11-16),
+ * and a body this route always refused would stay owed. It was 1,152 KiB,
+ * under that worst case, and the relay recorded a larger output as unknown
+ * without submitting it.
  */
-const MAX_BODY_BYTES = 256 * 1_024;
+const MAX_BODY_BYTES = 4 * 1_024 * 1_024;
 
 const requestSchema = z
   .object({
@@ -80,7 +82,6 @@ export async function POST(request: Request) {
   if (!isAmuxSyncAuthorized(request)) {
     return amuxJsonNoStore({ error: "Unauthorized" }, 401);
   }
-  if (!dmInternalRoutesEnabled()) return refused(409, "dm_routing_disabled");
 
   return withAmuxRouteBudget(async () => {
     try {
@@ -110,6 +111,11 @@ export async function POST(request: Request) {
         case "already_rejected":
           if ((result.status === "accepted" || result.status === "existing") && result.resultKind === "validation_failure") {
             await settleDmValidationLatch(body.instance);
+          }
+          // A failed run is not a judgment: tell the operator once, when the ledger
+          // first records it. Not awaited: the broker's answer never waits on a notice.
+          if (result.status === "accepted" && submission.resultKind === "unavailable") {
+            void reportOperationalIncident(dmRunUnavailableIncident(body.instance, body.request_id)).catch(() => undefined);
           }
           return amuxJsonNoStore({
             submitted: true,

@@ -617,6 +617,9 @@ const checks = [
     // instead of here, for free. MCP reserves repeated paid steps separately;
     // the window bounds one request, including its tool overhead, rather than
     // that aggregate cost reservation (docs/ops/mcp-connector-preview.md).
+    // The reservation-only image allowance may be taken off: it is reserved
+    // and charged but never sent (lib/chatImageInputTokens.ts), so it takes no
+    // room in the window. Tools stay in.
     name: "The context-window guard measures reserved per-request input including tools",
     file: "app/api/chat/route.ts",
     test: (source) => {
@@ -626,7 +629,10 @@ const checks = [
       );
       return (
         guard.includes("const contextInputTokens = budget.contextInputTokens ?? budget.inputTokens;") &&
-        guard.includes("reservedInputTokens: contextInputTokens") &&
+        (guard.includes("reservedInputTokens: contextInputTokens,") ||
+          guard.includes(
+            "reservedInputTokens: Math.max(0, contextInputTokens - reservationOnlyInputTokens),"
+          )) &&
         !guard.includes("estimatedInputTokens")
       );
     },
@@ -755,7 +761,8 @@ const checks = [
       // would be the same skip this check exists to catch -- it would silently
       // fall back to the largest margin for every request.
       source.includes("toReservedInputTokens(estimatedInput,") &&
-      source.includes("toolOverheadTokens: estimateToolInputTokenOverhead"),
+      source.includes("toolOverheadTokens: toolInputTokens") &&
+      /const toolInputTokens =\s*estimateToolInputTokenOverhead\(/.test(source),
   },
   {
     // Class identity belongs to the module instance. A second evaluation of
@@ -982,13 +989,13 @@ const checks = [
       // Both lock columns are read, inside the one snapshot the candidates are
       // read from...
       /readOnlySnapshotTransaction\(/.test(source) &&
-      /where:\s*\{\s*userId,\s*password:\s*\{\s*not:\s*null\s*\}\s*\},\s*select:\s*\{\s*id:\s*true,\s*password:\s*true\s*\}/.test(
+      /where:\s*\{\s*userId,\s*password:\s*\{\s*not:\s*null\s*\}\s*\},\s*select:\s*\{(?=[^}]*\bpassword:\s*true)(?=[^}]*\bpasswordVersion:\s*true)[^}]*\}/.test(
         source
       ) &&
-      /externalConversation:\s*\{\s*select:\s*\{\s*password:\s*true\s*\}\s*\}/.test(source) &&
+      /externalConversation:\s*\{\s*select:\s*\{(?=[^}]*\bpassword:\s*true)(?=[^}]*\bpasswordVersion:\s*true)[^}]*\}\s*\}/.test(source) &&
       // ...each is passed to its own grant check...
-      /resourceUnlockAccess\(\s*"conversation"[^)]*row\.password[^)]*\)/.test(source) &&
-      /resourceUnlockAccess\(\s*"external_conversation"[^)]*bridge\.externalConversation\.password[^)]*\)/.test(
+      /resourceUnlockAccess\(\s*"conversation"[^)]*row\.passwordVersion[^)]*\)/.test(source) &&
+      /resourceUnlockAccess\(\s*"external_conversation"[^)]*bridge\.externalConversation\.passwordVersion[^)]*\)/.test(
         source
       ) &&
       // ...and the decision is inside the candidate queries, before any cap:
@@ -1555,14 +1562,26 @@ const checks = [
         "admitTextFileSpec",
         "admitArchiveSpec",
       ];
+      // A revision may rewrite the input (an XLSX source plus cell updates
+      // becomes a whole workbook spec) or refuse it, but it never admits it:
+      // whatever it produces still goes through the same `handler.admit`.
+      // Each tool's schema may be extended with `revisionOf`, so the check is
+      // that the tool's own base schema is what `inputSchema` is built from.
+      const toolSchemas = [
+        "workbookSpecSchema",
+        "documentSpecSchema",
+        "presentationSpecSchema",
+        "textFileSpecSchema",
+        "archiveSpecSchema",
+      ];
       return (
         admissions.every((admission) => code.includes(`admit: ${admission},`)) &&
-        code.includes("const admission = handler.admit(rawInput);") &&
-        code.includes("inputSchema: workbookSpecSchema") &&
-        code.includes("inputSchema: documentSpecSchema") &&
-        code.includes("inputSchema: presentationSpecSchema") &&
-        code.includes("inputSchema: textFileSpecSchema") &&
-        code.includes("inputSchema: archiveSpecSchema") &&
+        code.includes("let admittedInput = rawInput;") &&
+        code.includes(": handler.admit(admittedInput);") &&
+        code.includes('{ ok: false, code: "SCHEMA_INVALID", detail: revisionRejection }') &&
+        toolSchemas.every((schema) =>
+          new RegExp(`inputSchema:[^\\n]*\\b${schema}\\b`).test(code)
+        ) &&
         // Nothing the model is handed back may address the stored object.
         !code.includes("objectKey:") &&
         !code.includes("createR2ReadUrl")
@@ -1671,6 +1690,30 @@ const checks = [
         code.includes("readOwnR2ObjectBytes(") &&
         !code.includes("readR2Object(") &&
         !code.includes("createR2ReadUrl") &&
+        code.includes('"X-Content-Type-Options": "nosniff"') &&
+        code.includes('"Cache-Control": "private, no-store"')
+      );
+    },
+  },
+  {
+    name: "A sent-image thumbnail is owner-scoped, raster-only and non-destructive",
+    file: "app/api/attachments/[attachmentId]/preview/route.ts",
+    test: (source) => {
+      const code = source
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "");
+      // The owner's own image back to the owner: ownership is the lookup, only
+      // raster formats are served, the read cannot delete the object and no
+      // signed URL is minted (user-attachment-persistence.md section 5.1).
+      return (
+        code.includes("where: { id: attachmentId, userId }") &&
+        code.includes("hasConversationUnlockGrant(") &&
+        code.includes("isPreviewableAttachmentMediaType(") &&
+        code.includes("attachment.unavailableAt") &&
+        code.includes("readOwnR2ObjectBytes(") &&
+        !code.includes("readR2Object(") &&
+        !code.includes("createR2ReadUrl") &&
+        !code.includes("markMessageAttachmentUnavailable") &&
         code.includes('"X-Content-Type-Options": "nosniff"') &&
         code.includes('"Cache-Control": "private, no-store"')
       );
@@ -1810,7 +1853,7 @@ const checks = [
     name: "Chat sidebar exposes accessible new-tab workspace help",
     file: "components/chat/ChatSidebar.tsx",
     test: (source) =>
-      source.includes("chatWorkspaceGuideHref(lang)") &&
+      source.includes("helpCentreHref(lang)") &&
       source.includes('target="_blank"') &&
       source.includes('rel="noopener noreferrer"') &&
       source.includes('trackProductEvent("help_opened"') &&
@@ -1846,8 +1889,7 @@ const checks = [
     name: "GA4 loads only after consent or a resolved notice-and-opt-out policy",
     file: "components/analytics/AnalyticsProvider.tsx",
     test: (source) =>
-      source.includes('consent === "accepted" ||') &&
-      source.includes('resolvedPolicy.mode === "notice_opt_out"') &&
+      /const\s+analyticsEnabled\s*=\s*isProductAnalyticsAllowed\(\s*consent,\s*resolvedPolicy\s*\)\s*;/.test(source) &&
       source.includes("analyticsEnabled && analyticsClientReady && measurementId") &&
       source.includes("googletagmanager.com/gtag/js") &&
       source.includes("disableAnalyticsClient"),
@@ -2410,12 +2452,15 @@ const checks = [
       const searchIndex = panel.indexOf('data-testid="model-search-input"');
       const catalogueBranchIndex = panel.indexOf("showCatalogue ? (");
       return (
+        // Owner decision 2026-11-15: a model row shows how heavy the model is
+        // on credits as a five-step meter and a count of remaining uses, not a
+        // credit number. The picker's estimated-usage summary keeps the number.
         catalogue.includes('testId="model-credit-badge"') &&
-        catalogue.includes("CreditCostBadge") &&
+        catalogue.includes("UsageMeter") &&
+        !catalogue.includes("CreditCostBadge") &&
+        panel.includes('testId="recommended-model-credit-badge"') &&
         panel.includes("CreditCostBadge") &&
-        read("components/credits/CreditCostBadge.tsx").includes(
-          'data-testid="credit-coin-icon"'
-        ) &&
+        read("components/credits/UsageMeter.tsx").includes("data-usage-level") &&
         catalogue.includes("getModelPickerDescription") &&
         catalogue.includes("getModelPickerFeatures") &&
         // Recommendation reasons come from the task-language label table, never
@@ -2526,10 +2571,12 @@ const checks = [
         source.includes('tomverse:guest-quick-start') &&
         source.includes("consentPromptReady") &&
         source.includes("GUEST_QUICK_START_ACTIVE_KEY") &&
-        // UI-P1-02 also moved the fixed-fallback notice from a bottom-center
-        // full-width bar to a bottom-right corner toast, narrowing its
-        // viewport-relative width cap accordingly.
-        source.includes("calc(100vw-1.5rem)") &&
+        // Owner decision 2026-11-16: outside chat and sign-in the notice is a
+        // slim full-width bar fixed to the bottom, with an X that hides it for
+        // the session, and the page reserves its height as bottom padding.
+        source.includes("fixed inset-x-0 bottom-0") &&
+        source.includes('data-testid="analytics-consent-dismiss"') &&
+        source.includes("body.style.paddingBottom") &&
         // STG-F001 replaced the rigid grid-cols layout with flex-wrap (so long
         // translated labels wrap instead of overflowing). UI-P2-01 additionally
         // dropped the viewport-keyed `sm:flex-nowrap`, which re-introduced
@@ -2548,7 +2595,8 @@ const checks = [
         buttonClass.includes("min-h-11") &&
         buttonClass.includes("rounded-lg") &&
         buttonClassUsages === 1 &&
-        consentDecisions === 2 &&
+        // Two decisions in the in-flow card (chat, sign-in) and two in the bar.
+        consentDecisions === 4 &&
         // The component has to stay at module scope: defined inside the
         // provider it would be a new type on every render, remounting both
         // buttons (and dropping focus) whenever the notice re-renders.
@@ -2571,7 +2619,9 @@ const checks = [
         source.includes('"DE"') &&
         source.includes('country === "ZZ"') &&
         provider.includes('fetch("/api/analytics/consent-policy"') &&
-        provider.includes('resolvedPolicy.mode === "notice_opt_out"') &&
+        source.includes('consent === "accepted" ||') &&
+        source.includes('consent === "unset" && policy.mode === "notice_opt_out"') &&
+        provider.includes("isProductAnalyticsAllowed(consent, resolvedPolicy)") &&
         provider.includes("analyticsEnabled && analyticsClientReady && measurementId") &&
         client.includes('analytics_storage: analyticsStorage') &&
         client.includes('ad_storage: "denied"') &&
@@ -2689,7 +2739,7 @@ const checks = [
       source.includes('/model-icons/chatgpt.png') &&
       source.includes('/model-icons/claude.png') &&
       read("app/(site)/(marketing)/chatgpt-vs-claude/page.tsx").includes(
-        'template="chatgpt-vs-claude"'
+        'slug="chatgpt-vs-claude"'
       ),
   },
   {
@@ -3064,7 +3114,18 @@ const checks = [
       const xls = read("lib/legacyOffice/xls.ts");
       const ppt = read("lib/legacyOffice/ppt.ts");
       const rtf = read("lib/legacyOffice/rtf.ts");
-      const parsers = [cfbf, doc, xls, ppt, rtf];
+      const hwp = read("lib/legacyOffice/hwp.ts");
+      const bounded = read("lib/boundedInflate.ts");
+      // Every reader of untrusted packages: none may inflate in one call.
+      const inflaters = [
+        "lib/legacyOffice/hwp.ts",
+        "lib/boundedInflate.ts",
+        "lib/packageExpansion.ts",
+        "lib/iworkPackage.ts",
+        "lib/officeRenderInput.ts",
+        "lib/legacyOfficeText.ts",
+      ].map(read);
+      const parsers = [cfbf, doc, xls, ppt, rtf, hwp];
       return (
         // A protected document is refused by name. Nothing attempts a key.
         doc.includes("FIB_FLAG_ENCRYPTED") &&
@@ -3073,6 +3134,22 @@ const checks = [
         xls.includes('LEGACY_OFFICE_ENCRYPTED') &&
         ppt.includes("CURRENT_USER_ENCRYPTED") &&
         ppt.includes("RECORD_CRYPT_SESSION_10") &&
+        // HWP: a password, a distribution copy and DRM are all refused.
+        hwp.includes("FLAG_PASSWORD") &&
+        hwp.includes("FLAG_DISTRIBUTION") &&
+        hwp.includes("FLAG_DRM") &&
+        hwp.includes('LEGACY_OFFICE_ENCRYPTED') &&
+        // Compressed sections and HWPX parts inflate a step at a time with the
+        // output charged as it comes, never in one call whose whole output is
+        // allocated before the budget sees it.
+        hwp.includes("inflateRawBounded") &&
+        hwp.includes("visitZipEntries") &&
+        !/\b(inflateSync|unzipSync|gunzipSync|unzlibSync)\s*\(/.test(hwp) &&
+        bounded.includes("INFLATE_INPUT_CHUNK") &&
+        inflaters.every(
+          (code) => !/\b(inflateSync|unzipSync|gunzipSync|unzlibSync)\s*\(/.test(code)
+        ) &&
+        !/\b(inflateSync|unzipSync|gunzipSync|unzlibSync)\s*\(/.test(bounded) &&
         !/\b(createDecipheriv|createHash|rc4|crypto)\b/i.test(
             parsers.join("\n")
         ) &&
@@ -3980,7 +4057,6 @@ const checks = [
       const block = source.slice(start, stop);
       const declared = [...block.matchAll(/"([A-Z][A-Z0-9_]+)"/g)].map((match) => match[1]).sort();
       const allowed = [
-        "ENGINEERING_AGENT_ANTHROPIC_API_KEY",
         "ENGINEERING_AGENT_APP_URL",
         "ENGINEERING_AGENT_APP_URL",
         "ENGINEERING_AGENT_GITHUB_READ_TOKEN",

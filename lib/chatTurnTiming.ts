@@ -26,6 +26,8 @@
  * request that failed before a response stream existed.
  */
 
+import type { ChatSearchSummary } from "./chatSearchObservation";
+
 export type ChatTurnTimingOutcome =
     | "completed"
     | "cancelled"
@@ -41,6 +43,7 @@ export type ChatTurnTimingInput = {
     requestReceivedAt: number;
     firstVisibleChunkAt: number | null;
     endedAt: number;
+    search?: ChatSearchSummary;
 };
 
 export const CHAT_TURN_TIMING_EVENT = "chat_turn_timing";
@@ -53,6 +56,7 @@ export const chatTurnTimingEvent = (input: ChatTurnTimingInput) => ({
     modelId: input.modelId,
     provider: input.provider,
     outcome: input.outcome,
+    ...(input.search ? { search: input.search } : {}),
     firstVisibleChunkSent: input.firstVisibleChunkAt !== null,
     serverMsToFirstVisibleChunk:
         input.firstVisibleChunkAt === null

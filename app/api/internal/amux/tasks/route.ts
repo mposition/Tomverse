@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 
 import { apiSecurityResponse, readLimitedJson } from "@/lib/apiSecurity";
-import { writeSystemAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { allocateAmuxCardDisplayKey } from "@/lib/amux/cardDisplayKeyAllocator";
 import { AMUX_CARD_DISPLAY_PATH_PREFIX } from "@/lib/amux/cardDisplayKeyCore";
 import { openAmuxHumanEscalation } from "@/lib/amux/escalation";
@@ -36,8 +36,8 @@ const classification = z
     risk: z.number().int().min(1).max(3),
     files_expected: z
       .union([
-        z.array(z.string().trim().min(1).max(500)).max(1_000),
-        z.number().int().min(0).max(1_000),
+        z.array(z.string().trim().min(1)),
+        z.number().int().min(0),
         z.null(),
       ])
       .optional(),
@@ -47,8 +47,8 @@ const classification = z
 const taskSchema = z
   .object({
     id: z.string().trim().min(1).max(120),
-    title: z.string().trim().min(1).max(500),
-    description: z.string().max(50_000).nullable().optional(),
+    title: z.string().trim().min(1),
+    description: z.string().nullable().optional(),
     kind: z.enum([
       "blocker",
       "escalation",
@@ -82,7 +82,6 @@ const taskSchema = z
     review_pr_number: z.number().int().min(1).max(1_000_000_000).nullable().optional(),
     dependencies: z
       .array(z.string().trim().min(1).max(120))
-      .max(1_000)
       .default([]),
   })
   .strict()
@@ -111,7 +110,7 @@ const taskSchema = z
   });
 
 const requestSchema = z
-  .object({ tasks: z.array(taskSchema).min(1).max(500) })
+  .object({ tasks: z.array(taskSchema).min(1) })
   .strict();
 
 class AmuxTaskSnapshotConflictError extends Error {
@@ -126,9 +125,12 @@ export async function PUT(request: Request) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
   try {
+    // No task-count, title or description limit (owner direction 2026-11-16);
+    // the one body ceiling sits under the Next proxy's 10 MB so a request
+    // cannot hold unbounded memory.
     const body = await readLimitedJson(
       request,
-      2 * 1_024 * 1_024,
+      9 * 1_024 * 1_024,
       requestSchema,
     );
     if (new Set(body.tasks.map((task) => task.id)).size !== body.tasks.length) {
@@ -155,6 +157,8 @@ export async function PUT(request: Request) {
     }
 
     const result = await prisma.$transaction(async (tx) => {
+      // Audit chain before the Task rows (lib/adminAudit.ts takeAuditChainLock).
+      await takeAuditChainLock(tx);
       let created = 0;
       let updated = 0;
       const busy: string[] = [];

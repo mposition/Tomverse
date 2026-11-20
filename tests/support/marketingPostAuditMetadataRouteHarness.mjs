@@ -1,4 +1,4 @@
-// Calls the schedule, unpublish, withdraw and record-manual routes with the shared mutation
+// Calls the schedule, unpublish, withdraw, record-manual and edit routes with the shared mutation
 // wrapper and the store's writers stood in for, and prints, for each, the metadata the
 // route hands the wrapper next to the metadata the store will require of that
 // audit entry. Needs --experimental-test-module-mocks
@@ -28,6 +28,10 @@ mock.module(mod("lib/marketingStore.ts"), {
   namedExports: {
     MARKETING_S2B1_ACTIONS: real.MARKETING_S2B1_ACTIONS,
     marketingScheduleAuditMetadata: real.marketingScheduleAuditMetadata,
+    marketingEditAuditMetadata: real.marketingEditAuditMetadata,
+    editMarketingPost: async (_tx, input) => {
+      storeCalls.push(input);
+    },
     marketingUnpublishAuditMetadata: real.marketingUnpublishAuditMetadata,
     MARKETING_POST_WITHDRAW_APPROVAL_ACTION: real.MARKETING_POST_WITHDRAW_APPROVAL_ACTION,
     MARKETING_POST_RECORD_MANUAL_ACTION: real.MARKETING_POST_RECORD_MANUAL_ACTION,
@@ -69,6 +73,42 @@ const call = async (leaf, body, required) => {
 };
 
 const digest = "a".repeat(64);
+
+// The edit route's entry is built from the stored row, read in the transaction.
+const storedEnvelope = {
+  channel: "linkedin",
+  accountSlug: "linkedin-1",
+  locale: "en",
+  renderedText: "The words the generator wrote.",
+  claimIds: ["claim.models-compared"],
+  assets: [{ assetId: "asset.hero", altKey: "alt.hero" }],
+  finalUrl: "https://tomverse.app/",
+  scheduledAt: "2026-09-18T01:00:00.000Z",
+  disclosureFlags: ["advertising"],
+};
+const editTx = {
+  marketingPost: {
+    findUnique: async ({ where }) => (where.id === "post-1" ? { envelope: storedEnvelope } : null),
+  },
+};
+const edit = async () => {
+  captured = null;
+  const { POST } = await import(mod("app/api/admin/marketing/posts/[postId]/edit/route.ts"));
+  await POST(new Request("https://tomverse.app/api/admin/marketing/posts/post-1/edit", { method: "POST" }), {
+    params: Promise.resolve({ postId: "post-1" }),
+  });
+  const body = { expectedEnvelopeDigest: digest, expectedHistoryVersion: 1, renderedText: "The words a person corrected." };
+  return {
+    action: captured.action,
+    written: await captured.metadata(body, editTx),
+    // What editMarketingPost requires: the stored envelope with the new words.
+    required: real.marketingEditAuditMetadata({
+      expectedEnvelopeDigest: digest,
+      envelope: { ...storedEnvelope, renderedText: body.renderedText },
+    }),
+    storedDigest: real.marketingEnvelopeDigest(storedEnvelope),
+  };
+};
 const results = {
   schedule: await call(
     "schedule",
@@ -92,6 +132,7 @@ const results = {
     { expectedEnvelopeDigest: digest, expectedHistoryVersion: 2 },
     real.marketingWithdrawApprovalAuditMetadata,
   ),
+  edit: await edit(),
   recordManual: await call(
     "record-manual",
     {

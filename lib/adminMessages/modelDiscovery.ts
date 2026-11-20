@@ -42,6 +42,11 @@ export const adminModelDiscoveryMessages = defineAdminMessages({
         `'${validation}' complete. ${remaining} validations remaining.`,
       validationNoneRemaining: (validation: string) =>
         `'${validation}' complete. No validations remaining.`,
+      rolloutFailed: "Could not close the rollout.",
+      rolloutFinished: (completed: number, awaitingNotice: number) =>
+        awaitingNotice
+          ? `Closed ${completed} as rolled out. ${awaitingNotice} still owe users a notice.`
+          : `Closed ${completed} as rolled out.`,
     },
     header: {
       title: "Awaiting review",
@@ -79,6 +84,11 @@ export const adminModelDiscoveryMessages = defineAdminMessages({
       other: "Other",
     },
     dialog: {
+      rolloutTitle: "Close as rolled out",
+      rolloutDescription: (items: number) =>
+        `${items} adopted items whose model Tomverse already serves. Any validations still listed are recorded as done with this note.`,
+      rolloutConfirm: "Rollout complete",
+      rolloutNote: "What did you confirm?",
       excludeTitle: (families: number, items: number) =>
         `Exclude ${families} model families (${items} items)`,
       reopenTitle: (families: number, items: number) =>
@@ -111,6 +121,7 @@ export const adminModelDiscoveryMessages = defineAdminMessages({
     bulk: {
       selected: (count: number) => `${count} families selected`,
       excludeSelected: "Exclude selected",
+      finishRolloutSelected: (items: number) => `Rollout complete (${items})`,
       reopenSelected: "Review selected again",
     },
     table: {
@@ -124,14 +135,18 @@ export const adminModelDiscoveryMessages = defineAdminMessages({
       selectFamily: (key: string) => `Select ${key}`,
       relatedIds: (count: number) => `+${count} related IDs`,
       braveReview: "Brave web search review",
+      researchChip: (product: string) => `New provider research · ${product}`,
+      connectedImageResearchChip: "Image model research (connected provider)",
+      researchSources: "Sources",
       supersededBy: (model: string) => `Later version in service: ${model}`,
       days: (days: number) => `${days}d`,
       recordValidationTitle: "Record this validation as complete",
+      finishRollout: "Rollout complete",
       adopt: "Adopt",
       imageDraft: "Catalog draft",
       noImageAdapter: (provider: string) => `No image adapter (${provider})`,
       noImageAdapterTitle:
-        "Image models can be added at runtime only for providers the code can already call (openai, google, xai, fal, qwen). This one needs an adapter first.",
+        "Image models can be added at runtime only for providers the code can already call (openai, google, xai, fal, qwen, bfl). This one needs an adapter first.",
       nextStep: "Next:",
       exclude: "Exclude",
       reopen: "Review again",
@@ -142,6 +157,30 @@ export const adminModelDiscoveryMessages = defineAdminMessages({
         `${families} families · page ${page} / ${pageCount}`,
       previous: "Previous",
       next: "Next",
+    },
+    research: {
+      title: "Last model research",
+      none: "The weekly research has not recorded a run yet.",
+      ranAt: (when: string, week: string, model: string) => `${when} · week ${week} · ${model}`,
+      call: {
+        chat: "Chat (new providers)",
+        image: "Image (new providers)",
+        code: "Code (new providers)",
+        connected_image: "Image models (connected providers)",
+      } as Record<string, string>,
+      failed: "Call failed",
+      counts: (proposed: number, accepted: number) => `${proposed} proposed · ${accepted} filed`,
+      rejectedHeading: "Not filed",
+      citedUrls: "Cited:",
+      reason: {
+        invalid_shape: "Answer incomplete",
+        no_public_citation: "No public citation",
+        connected_provider: "Provider already connected",
+        known_model: "Already known",
+        duplicate: "Duplicate",
+        not_connected_provider: "Provider not connected",
+        no_official_citation: "No citation on the provider's official docs",
+      } as Record<string, string>,
     },
   },
   ko: {
@@ -184,6 +223,11 @@ export const adminModelDiscoveryMessages = defineAdminMessages({
         `'${validation}' 완료. 남은 검증 ${remaining}건.`,
       validationNoneRemaining: (validation: string) =>
         `'${validation}' 완료. 남은 검증이 없습니다.`,
+      rolloutFailed: "롤아웃을 완료로 닫지 못했습니다.",
+      rolloutFinished: (completed: number, awaitingNotice: number) =>
+        awaitingNotice
+          ? `${completed}건을 롤아웃 완료로 닫았습니다. ${awaitingNotice}건은 사용자 공지가 남아 있습니다.`
+          : `${completed}건을 롤아웃 완료로 닫았습니다.`,
     },
     header: {
       title: "검토 대기",
@@ -220,6 +264,11 @@ export const adminModelDiscoveryMessages = defineAdminMessages({
       other: "기타",
     },
     dialog: {
+      rolloutTitle: "롤아웃 완료로 닫기",
+      rolloutDescription: (items: number) =>
+        `Tomverse가 이미 서비스하는 채택 항목 ${items}건입니다. 남은 검증은 이 메모와 함께 완료로 기록됩니다.`,
+      rolloutConfirm: "롤아웃 완료",
+      rolloutNote: "무엇을 확인했나요?",
       excludeTitle: (families: number, items: number) =>
         `모델 패밀리 ${families}개 제외 (항목 ${items}건)`,
       reopenTitle: (families: number, items: number) =>
@@ -252,6 +301,7 @@ export const adminModelDiscoveryMessages = defineAdminMessages({
     bulk: {
       selected: (count: number) => `패밀리 ${count}개 선택됨`,
       excludeSelected: "선택 항목 제외",
+      finishRolloutSelected: (items: number) => `롤아웃 완료 (${items})`,
       reopenSelected: "선택 항목 재검토",
     },
     table: {
@@ -265,14 +315,18 @@ export const adminModelDiscoveryMessages = defineAdminMessages({
       selectFamily: (key: string) => `${key} 선택`,
       relatedIds: (count: number) => `관련 ID +${count}개`,
       braveReview: "Brave 웹검색 검토",
+      researchChip: (product: string) => `새 공급자 리서치 · ${product}`,
+      connectedImageResearchChip: "이미지 모델 리서치 (연결 공급자)",
+      researchSources: "근거",
       supersededBy: (model: string) => `상위 버전 서비스 중: ${model}`,
       days: (days: number) => `${days}일`,
       recordValidationTitle: "이 검증을 완료로 기록합니다",
+      finishRollout: "롤아웃 완료",
       adopt: "채택",
       imageDraft: "카탈로그 초안",
       noImageAdapter: (provider: string) => `이미지 어댑터 없음 (${provider})`,
       noImageAdapterTitle:
-        "런타임 이미지 모델은 코드가 이미 호출할 수 있는 공급자(openai, google, xai, fal, qwen)만 추가할 수 있습니다. 이 공급자는 어댑터부터 필요합니다.",
+        "런타임 이미지 모델은 코드가 이미 호출할 수 있는 공급자(openai, google, xai, fal, qwen, bfl)만 추가할 수 있습니다. 이 공급자는 어댑터부터 필요합니다.",
       nextStep: "다음 →",
       exclude: "제외",
       reopen: "재검토",
@@ -283,6 +337,30 @@ export const adminModelDiscoveryMessages = defineAdminMessages({
         `패밀리 ${families}개 · ${page} / ${pageCount} 페이지`,
       previous: "이전",
       next: "다음",
+    },
+    research: {
+      title: "지난 모델 리서치",
+      none: "주간 리서치 실행 기록이 아직 없습니다.",
+      ranAt: (when: string, week: string, model: string) => `${when} · ${week} 주 · ${model}`,
+      call: {
+        chat: "채팅 (새 공급자)",
+        image: "이미지 (새 공급자)",
+        code: "코딩 (새 공급자)",
+        connected_image: "이미지 모델 (연결 공급자)",
+      } as Record<string, string>,
+      failed: "호출 실패",
+      counts: (proposed: number, accepted: number) => `제안 ${proposed}개 · 등록 ${accepted}개`,
+      rejectedHeading: "등록되지 않은 제안",
+      citedUrls: "인용:",
+      reason: {
+        invalid_shape: "답변 형식 불완전",
+        no_public_citation: "공개 인용 없음",
+        connected_provider: "이미 연결된 공급자",
+        known_model: "이미 아는 모델",
+        duplicate: "중복",
+        not_connected_provider: "연결되지 않은 공급자",
+        no_official_citation: "공급자 공식 문서 인용 없음",
+      } as Record<string, string>,
     },
   },
 });

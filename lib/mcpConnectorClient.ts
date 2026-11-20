@@ -5,7 +5,7 @@ import { request as httpsRequest } from "node:https";
 import { request as httpRequest } from "node:http";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { MCP_LIMITS, McpConnectorError, type McpServerPolicy } from "@/lib/mcpConnectorPolicy";
+import { MCP_LIMITS, McpConnectorError, isCustomMcpServerId, type McpServerPolicy } from "@/lib/mcpConnectorPolicy";
 import { boundedMcpOutputValidator } from "@/lib/mcpConnectorSchema";
 
 const blocked = new BlockList();
@@ -26,7 +26,8 @@ export function publicMcpAddress(ip: string) {
 }
 export function validateMcpEndpoint(server: McpServerPolicy, oauthEndpoint = false) {
   const url = new URL(server.url);
-  const synthetic = server.id === "synthetic" && process.env.NODE_ENV !== "production" &&
+  // Local tests may point the synthetic or a custom entry at the loopback fixture.
+  const synthetic = (server.id === "synthetic" || isCustomMcpServerId(server.id)) && process.env.NODE_ENV !== "production" &&
     url.origin === `http://127.0.0.1:${process.env.MCP_CONNECTOR_SYNTHETIC_PORT}` &&
     (oauthEndpoint ? ["/register", "/token", "/authorize", "/"].includes(url.pathname) : url.pathname === "/mcp");
   if (url.username || url.password || url.hash || url.search ||
@@ -60,8 +61,9 @@ export function guardedMcpFetch(server: McpServerPolicy, token: string | null, s
     if (String(input instanceof Request ? input.url : input) !== url.href) throw new McpConnectorError("unexpected_endpoint");
     const method = init?.method || "GET";
     // Standalone notification streams are unnecessary for bounded foreground calls.
-    if (method === "GET") return new Response(null, { status: 405 });
-    if (!["POST", "DELETE"].includes(method) || ++requests > 8) throw new McpConnectorError("request_limit");
+    // An OAuth endpoint GET is only a fixed, credential-free metadata read.
+    if (method === "GET" && !oauthEndpoint) return new Response(null, { status: 405 });
+    if (!["POST", "DELETE", ...(oauthEndpoint ? ["GET"] : [])].includes(method) || ++requests > 8) throw new McpConnectorError("request_limit");
     const combined = AbortSignal.any([signal, ...(init?.signal ? [init.signal] : [])]);
     combined.throwIfAborted();
     const { addresses } = await resolvePublicMcpEndpoint(server, combined, oauthEndpoint);

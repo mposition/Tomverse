@@ -14,7 +14,7 @@ const source = (path) => readFileSync(resolve(root, path), "utf8");
 test("route source places durable claim before context consumption, credit reservation and provider dispatch", () => {
   const route = source("app/api/chat/route.ts");
   const claim = route.indexOf("const claim = await claimChatResponseAttempt");
-  const consume = route.indexOf("const consumption = await consumeContextBundle", claim);
+  const consume = route.indexOf("await consumeContextBundle(", claim);
   const accessBranch = route.indexOf("const accessGrant = guestAutoRun", claim);
   const reserve = route.indexOf(": await acquireChatAccess(access, budget", accessBranch);
   const dispatch = route.indexOf("const result = await beginProviderCall", claim);

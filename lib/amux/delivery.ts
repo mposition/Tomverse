@@ -1,28 +1,31 @@
 import "server-only";
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 
-import { writeSystemAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
 import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { lockAmuxAdmissionAndReadIncident } from "@/lib/amux/incident";
 import { loadAmuxContentKeyRing } from "@/lib/amux/ideaKeyStore";
 import { openAmuxContent, verifyAmuxContentDigest,
   type AmuxContentKeys } from "@/lib/amux/ideaCrypto";
-import { AMUX_V22_DELIVERY_BASE_SHA_ENV, AMUX_V22_TASK_EXECUTION_ENV,
-  AMUX_V22_SEALED_DELIVERY_MARKER,
-  amuxV22DeliveryBaseShaEnabled,
-  amuxV22DeliveryBudgetMicrousd,
-  amuxV22TaskExecutionEnabled } from
+import { AMUX_V22_SEALED_DELIVERY_MARKER,
+  amuxV22DeliveryBudgetMicrousd } from
   "@/lib/amux/v22TaskExecutionCore";
-import { AMUX_V22_WORKER_AUTHORITY_NOTICE } from
+import { AMUX_V22_WORKER_AUTHORITY_NOTICE, amuxV22WorkspaceNotice } from
   "@/lib/amux/v22ExternalAuthorityCore";
 import { AMUX_V22_OWNER_QUESTION_RULES, AMUX_V22_RESUME_PROMPT_MAX_BYTES,
-  buildAmuxV22ResumeSection } from "@/lib/amux/v22OwnerQuestionCore";
+  buildAmuxV22ResumeContextFile, buildAmuxV22ResumeSection } from
+  "@/lib/amux/v22OwnerQuestionCore";
 import { AMUX_V22_CONCLUSION_ENV, AMUX_V22_CONCLUSION_RULES,
   amuxV22ConclusionMode, buildAmuxV22PriorConclusionSection } from
   "@/lib/amux/v22ConclusionCore";
+import { AMUX_V22_CONTEXT_DIR, AMUX_V22_CONTEXT_FILES,
+  amuxV22ContextPromptSection, amuxV22EmbedContextFiles,
+  type AmuxV22ContextFile } from "@/lib/amux/v22LocalCliFlowCore";
+import { splitAmuxV22ContextFiles, type AmuxV22ContextPart } from
+  "@/lib/amux/v22ContextPartsCore";
 import { AMUX_V22_PRIOR_CONCLUSION_ROWS_PRISMA_CALLS,
   openAmuxV22PriorConclusions, readAmuxV22PriorConclusionRows } from
   "@/lib/amux/v22PriorConclusionService";
@@ -46,10 +49,15 @@ import { AMUX_V22_READ_ONLY_API_EXECUTOR_KIND,
   "@/lib/amux/v22ReadOnlyApiProtocol.mjs";
 import { amuxWorkerRuntimeHasExactCapability,
   amuxWorkerRuntimeUsesReadOnlyApi } from "@/lib/amux/workerRuntime";
-import { formatAmuxV52ReviewScope } from "@/lib/amux/v52ReviewCore";
-import { amuxV52ReviewFeedbackJobId } from "@/lib/amux/v52ReviewRejections";
+import { formatAmuxV52ReviewScope } from
+  "@/lib/amux/v52ReviewCore";
+import { AMUX_V52_REVIEW_HISTORY_PRISMA_CALLS, openAmuxV52ReviewHistory,
+  readAmuxV52ReviewHistory } from "@/lib/amux/v52ReviewFindingsStore";
+import { amuxV52VendorsToAvoid, buildAmuxV52PriorReviewFile, buildAmuxV52PriorReviewSection,
+  formatAmuxV52ReviewEntries } from
+  "@/lib/amux/v52ReviewFindingsCore";
 import { AMUX_V22_PROVIDERS, amuxV22ExecutionRole, amuxV22Provider,
-  amuxV22TaskWritesPatch } from "@/lib/amux/v22WorkerClaimCore";
+  amuxV22ReviewAuthorVendor, amuxV22TaskWritesPatch } from "@/lib/amux/v22WorkerClaimCore";
 
 export const AMUX_DELIVERY_RECEIPT_LEASE_MS = 30_000;
 
@@ -177,6 +185,9 @@ const lockTask = async (
   tx: Prisma.TransactionClient,
   taskId: string,
 ): Promise<TaskLockRow | null> => {
+  // The runtime and attempt rows come first; then the audit chain, then the
+  // Task and its delivery (lib/adminAudit.ts takeAuditChainLock).
+  await takeAuditChainLock(tx);
   const rows = await tx.$queryRaw<TaskLockRow[]>`
     SELECT
       "id",
@@ -286,8 +297,12 @@ export type AmuxPulledDelivery =
           reviewAuthorVendor?: string;
           reviewScope?: string;
           reviewFeedbackJobId?: string;
+          reviewAvoidVendors?: string[];
           readOnlyRetry?: AmuxV22ReadOnlyDeliveryBinding;
         } | null;
+        /** Context files the bridge fetches in chunks (v22ContextPartsCore.ts);
+         * present only when the pull asked for them and some file went this way. */
+        contextParts?: AmuxV22ContextPart[];
         receiptId: string;
         leaseExpiresAt: Date;
       };
@@ -301,18 +316,21 @@ export async function pullAmuxWorkDelivery(input: {
   worker: string;
   instanceId: string;
   generation: number;
+  /** The bridge can fetch `prior.patch` and `prior-conclusions.md` in chunks
+   * (header `x-amux-bridge-features: context_chunks`); without it they ride in
+   * the prompt as before. */
+  contextChunks?: boolean;
   now?: Date;
 }): Promise<AmuxPulledDelivery> {
   // Key-store I/O is outside the DB transaction. The locked row below must
   // still match this candidate; a race refuses delivery rather than opening
   // another Task's sealed brief with stale keys.
-  const v22Enabled = amuxV22TaskExecutionEnabled(
-    process.env[AMUX_V22_TASK_EXECUTION_ENV]);
   const conclusionMode = amuxV22ConclusionMode(process.env[AMUX_V22_CONCLUSION_ENV]);
-  const { sealedCandidate, candidateCard, resumeRows, priorRows } = v22Enabled ?
+  const { sealedCandidate, candidateCard, resumeRows, priorRows, reviewHistory } =
     await withAmuxDbBoundary({ ...AMUX_DB_BOUNDARIES.deliveryKeyRead,
       prismaCallCeiling: AMUX_DB_BOUNDARIES.deliveryKeyRead.prismaCallCeiling +
-        AMUX_V22_RESUME_ROWS_PRISMA_CALLS + AMUX_V22_PRIOR_CONCLUSION_ROWS_PRISMA_CALLS },
+        AMUX_V22_RESUME_ROWS_PRISMA_CALLS + AMUX_V22_PRIOR_CONCLUSION_ROWS_PRISMA_CALLS +
+        AMUX_V52_REVIEW_HISTORY_PRISMA_CALLS },
     async (tx) => {
       const sealedCandidate = await tx.amuxWorkDelivery.findFirst({
         where: { worker: input.worker, prompt: AMUX_V22_SEALED_DELIVERY_MARKER,
@@ -336,9 +354,12 @@ export async function pullAmuxWorkDelivery(input: {
       // one depends on go into its prompt as reference material.
       const priorRows = sealedCandidate && conclusionMode !== "off" ?
         await readAmuxV22PriorConclusionRows(tx, sealedCandidate.taskId) : null;
-      return { sealedCandidate, candidateCard, resumeRows, priorRows };
-    }) : { sealedCandidate: null, candidateCard: null, resumeRows: null,
-      priorRows: null };
+      // Owner decision 2026-11-15: a retried run reads why the review rejected
+      // the Task's earlier runs, the way a local session reads the review.
+      const reviewHistory = sealedCandidate ?
+        await readAmuxV52ReviewHistory(tx, sealedCandidate.taskId) : null;
+      return { sealedCandidate, candidateCard, resumeRows, priorRows, reviewHistory };
+    });
   const snapshot = candidateCard?.sourceSnapshot;
   const ideaId = snapshot && typeof snapshot === "object" &&
     !Array.isArray(snapshot) && typeof snapshot.ideaId === "string" ?
@@ -366,6 +387,16 @@ export async function pullAmuxWorkDelivery(input: {
   // A body purged at 90 days, or one that cannot be opened, leaves its entry out.
   const priorEntries = priorRows ? await openAmuxV22PriorConclusions(priorRows)
     .catch(() => []) : [];
+  // The rejected runs' findings, opened outside the transaction. An entry that
+  // cannot be opened is left out and the box reads the review server instead.
+  const reviewOpened = reviewHistory && needReviewKeys ?
+    await openAmuxV52ReviewHistory(reviewHistory).catch(() => []) : [];
+  // The review of the next change is told what the earlier ones found, so the
+  // reviewer itself can say which of its findings repeat them (v52ReviewFindingsCore.ts).
+  const earlierForReview = formatAmuxV52ReviewEntries(reviewOpened.flatMap((row) =>
+    row.verdict === "reject" && row.opened?.doc ?
+      [{ attemptNumber: row.attemptNumber, doc: row.opened.doc }] : []), 10_000);
+  const reviewAvoidVendors = amuxV52VendorsToAvoid(reviewOpened);
   const deliveryContent = async (tx: Prisma.TransactionClient,
     delivery: DeliveryLockRow, now: Date,
     protocolCapabilities: readonly string[]) => {
@@ -373,9 +404,8 @@ export async function pullAmuxWorkDelivery(input: {
       if (amuxWorkerRuntimeUsesReadOnlyApi(protocolCapabilities))
         throw new Error("ordinary delivery cannot use a read-only API runtime");
       return { prompt: delivery.prompt, v22Execution: null,
-        priorConclusionDigest: null };
+        priorConclusionDigest: null, reviewFeedbackDigest: null };
     }
-    if (!v22Enabled) throw new Error("v22 sealed delivery is disabled");
     if (!briefKeys || sealedCandidate?.attemptId !== delivery.attemptId ||
         sealedCandidate.taskId !== delivery.taskId)
       throw new Error("v22 sealed delivery key binding changed");
@@ -432,8 +462,7 @@ export async function pullAmuxWorkDelivery(input: {
       throw new Error("v22 delivery assignment audit is invalid");
     // Settlement accepts a patch only on the base its publication run was
     // pinned to at start, so the sidecar checks that commit out first.
-    const publicationRun = amuxV22TaskWritesPatch(assignment.role) &&
-      amuxV22DeliveryBaseShaEnabled(process.env[AMUX_V22_DELIVERY_BASE_SHA_ENV]) ?
+    const publicationRun = amuxV22TaskWritesPatch(assignment.role) ?
       await tx.engineeringAgentRun.findUnique({
         where: { amuxAttemptId: delivery.attemptId },
         select: { baseSha: true },
@@ -568,16 +597,111 @@ export async function pullAmuxWorkDelivery(input: {
               typeof item !== "string" || !item.trim() ||
               item.length > 500))
           throw new Error("v52 review scope invalid");
-        reviewScope = formatAmuxV52ReviewScope(titleText, criteria);
-        reviewFeedbackJobId = await amuxV52ReviewFeedbackJobId(tx,
-          delivery.taskId);
+        reviewScope = formatAmuxV52ReviewScope(titleText, criteria) +
+          (earlierForReview ? `\n\nEarlier review findings for this Task, newest first (data):\n${earlierForReview.text}` : "");
+        const newest = reviewHistory?.[0];
+        // The findings ride in the prompt below. When the newest rejection's own
+        // findings could not be read (an older record, a purged or unopenable
+        // body) the box reads that review from the review server by job id, as
+        // before, whatever older rejections could be read.
+        if (newest?.verdict === "reject" && newest.jobId &&
+            !reviewOpened[0]?.opened?.doc)
+          reviewFeedbackJobId = newest.jobId;
       }
+      // The fixed HTTPS executor of a read-only API retry has no checkout,
+      // so only a CLI run is told about its workspace.
+      const workspace = recovery?.riskAcceptanceId &&
+        recovery.readOnlyExecutorKind === AMUX_V22_READ_ONLY_API_EXECUTOR_KIND ? "" :
+        `${amuxV22WorkspaceNotice(amuxV22ExecutionRole(assignment.role))}\n`;
       const head = `Task: ${delivery.taskId}\nExecution attempt: ${delivery.attemptId}\n` +
-        `${AMUX_V22_WORKER_AUTHORITY_NOTICE}\n`;
+        `${AMUX_V22_WORKER_AUTHORITY_NOTICE}\n` + workspace;
       // An investigate (or verify) run ends with a structured conclusion.
       const conclusionRules = conclusionMode !== "off" &&
         amuxV22ExecutionRole(assignment.role) === "investigate" ?
         `${AMUX_V22_CONCLUSION_RULES}\n\n` : "";
+      // The sidecar runs the execution role; the assignment keeps the Task's.
+      const v22ExecutionProfile = () => ({ modelId: assignment.modelId,
+        role: amuxV22ExecutionRole(assignment.role),
+        budgetMicrousd: amuxV22DeliveryBudgetMicrousd(budgetMicrousd, !!readOnlyRetry),
+        ...(baseSha ? { baseSha } : {}),
+        ...(gradeGuard ? { gradeGuard: true as const,
+          executionGrade: assignment.grade,
+          ...(reviewScope ? {
+            // The review server's author is the CLI that wrote the change.
+            reviewAuthor: (() => {
+              const provider = amuxV22Provider(assignment.provider);
+              return provider ? AMUX_V22_PROVIDERS[provider].cli : assignment.provider;
+            })(),
+            // The model's vendor: an Antigravity worker on Opus is Anthropic
+            // (amuxV22ReviewAuthorVendor), and execution checks the same.
+            reviewAuthorVendor: amuxV22ReviewAuthorVendor(assignment.provider,
+              assignment.modelId),
+            reviewScope,
+            ...(reviewFeedbackJobId ? { reviewFeedbackJobId } : {}),
+            // Preference only: the review server falls back when no other
+            // vendor is free (tools/review-orchestrator/lib/assign.mjs).
+            ...(reviewAvoidVendors.length > 0 ? { reviewAvoidVendors } : {}) } : {}),
+        } : {}),
+        ...(readOnlyRetry ? { readOnlyRetry } : {}) });
+      // The Task's earlier rejections, newest first, every one whose findings
+      // could be opened (owner decision 2026-11-15).
+      const rejected = reviewScope ? reviewOpened.flatMap((row) =>
+        row.verdict === "reject" && row.opened?.doc ?
+          [{ attemptNumber: row.attemptNumber, doc: row.opened.doc }] : []) : [];
+      const sha256 = (text: string) => createHash("sha256").update(text, "utf8").digest("hex");
+      // The local CLI flow (v22LocalCliFlowCore.ts): a CLI run with a checkout
+      // gets its brief, resume answer, previous change and prior conclusions
+      // as whole files in that checkout, and a prompt that points at them. No
+      // byte budget leaves anything out. A risk-accepted read-only retry (CLI
+      // or API) keeps its exact earlier launch and inline prompt.
+      if (workspace !== "" && !readOnlyRetry) {
+        const contextFiles: AmuxV22ContextFile[] = [
+          { name: AMUX_V22_CONTEXT_FILES.brief, text: plain.toString("utf8") }];
+        if (resume) {
+          contextFiles.push({ name: AMUX_V22_CONTEXT_FILES.ownerAnswer,
+            text: buildAmuxV22ResumeContextFile({ question: resume.question,
+              answer: resume.answer, answerSource: resume.answerSource,
+              previousPatchFile: resume.previousPatch ?
+                `${AMUX_V22_CONTEXT_DIR}/${AMUX_V22_CONTEXT_FILES.priorPatch}` : null }) });
+          if (resume.previousPatch)
+            contextFiles.push({ name: AMUX_V22_CONTEXT_FILES.priorPatch,
+              text: resume.previousPatch });
+        }
+        const priorWhole = priorRows?.taskId === delivery.taskId && priorEntries.length > 0 ?
+          buildAmuxV22PriorConclusionSection({ entries: priorEntries, budgetBytes: null }) : null;
+        if (priorWhole) contextFiles.push({ name: AMUX_V22_CONTEXT_FILES.priorConclusions,
+          text: priorWhole.section });
+        // Every rejection's findings, whole, as the review findings file; the
+        // receipt audit names its digest as it named the inline section's.
+        const reviewFile = buildAmuxV52PriorReviewFile(rejected);
+        if (reviewFile) contextFiles.push({ name: AMUX_V22_CONTEXT_FILES.reviewFindings, text: reviewFile });
+        if (resumeRows?.question.state === "answered") {
+          const marked = await tx.amuxV22TaskQuestion.updateMany({ where: {
+            id: resumeRows.question.id, taskId: delivery.taskId,
+            state: "answered" }, data: { state: "resumed",
+            resumedAttemptId: delivery.attemptId } });
+          if (marked.count !== 1) throw new Error("v22 resume question changed");
+        }
+        // The files ride at the end of the prompt in one block that only the
+        // sidecar's exact boundary opens: a bridge passes the prompt through
+        // unchanged, and an earlier sidecar shows the same text inline. A
+        // bridge that asked for chunks (owner decision 2026-11-19) fetches the
+        // two files with no size set by their source from the context route
+        // instead; the list above still names them.
+        const { embedded, parts } = splitAmuxV22ContextFiles(contextFiles,
+          input.contextChunks === true);
+        return {
+          prompt: head + `${amuxV22ContextPromptSection(contextFiles)}\n\n` +
+            `${AMUX_V22_OWNER_QUESTION_RULES}\n\n` + conclusionRules +
+            AMUX_V22_WORKER_AUTHORITY_NOTICE + "\n\n" +
+            amuxV22EmbedContextFiles(embedded),
+          contextParts: parts,
+          priorConclusionDigest: priorWhole?.digest ?? null,
+          reviewFeedbackDigest: reviewFile ? sha256(reviewFile) : null,
+          v22Execution: v22ExecutionProfile(),
+          recoveryApprovalId,
+        };
+      }
       const tail = `Approved execution brief:\n${plain.toString("utf8")}\n\n` +
         `${AMUX_V22_OWNER_QUESTION_RULES}\n\n` + conclusionRules +
         AMUX_V22_WORKER_AUTHORITY_NOTICE;
@@ -597,6 +721,12 @@ export async function pullAmuxWorkDelivery(input: {
           budgetBytes: AMUX_V22_RESUME_PROMPT_MAX_BYTES - 2 -
             Buffer.byteLength(head + resumeSection + tail, "utf8") }) : null;
       const priorSection = prior ? `${prior.section}\n` : "";
+      // A risk-accepted read-only retry or a run with no checkout: the
+      // rejections inline, newest first, in the room the 30 KiB prompt has left.
+      const review = rejected.length > 0 ? buildAmuxV52PriorReviewSection({
+        entries: rejected, budgetBytes: AMUX_V22_RESUME_PROMPT_MAX_BYTES - 2 -
+          Buffer.byteLength(head + resumeSection + priorSection + tail, "utf8") }) : null;
+      const reviewSection = review ? `${review.section}\n` : "";
       // The question this delivery resumes is marked once, by the pull that
       // first carries it; a pull of the same attempt again finds it resumed.
       if (resumeRows?.question.state === "answered") {
@@ -607,26 +737,10 @@ export async function pullAmuxWorkDelivery(input: {
         if (marked.count !== 1) throw new Error("v22 resume question changed");
       }
       return {
-        prompt: head + resumeSection + priorSection + tail,
+        prompt: head + resumeSection + priorSection + reviewSection + tail,
         priorConclusionDigest: prior?.digest ?? null,
-        // The sidecar runs the execution role; the assignment keeps the Task's.
-        v22Execution: { modelId: assignment.modelId,
-          role: amuxV22ExecutionRole(assignment.role),
-          budgetMicrousd: amuxV22DeliveryBudgetMicrousd(budgetMicrousd, !!readOnlyRetry),
-          ...(baseSha ? { baseSha } : {}),
-          ...(gradeGuard ? { gradeGuard: true as const,
-            executionGrade: assignment.grade,
-            ...(reviewScope ? {
-              // The review server's author is the CLI that wrote the change.
-              reviewAuthor: (() => {
-                const provider = amuxV22Provider(assignment.provider);
-                return provider ? AMUX_V22_PROVIDERS[provider].cli : assignment.provider;
-              })(),
-              reviewAuthorVendor: assignment.provider,
-              reviewScope,
-              ...(reviewFeedbackJobId ? { reviewFeedbackJobId } : {}) } : {}),
-          } : {}),
-          ...(readOnlyRetry ? { readOnlyRetry } : {}) },
+        reviewFeedbackDigest: review ? sha256(review.section) : null,
+        v22Execution: v22ExecutionProfile(),
         recoveryApprovalId,
       };
     } finally { plain?.fill(0); title?.fill(0); body?.fill(0); }
@@ -661,6 +775,9 @@ export async function pullAmuxWorkDelivery(input: {
         };
       }
 
+      // The audit chain before the Task this statement locks (SKIP LOCKED never
+      // waits for the attempt row; lib/adminAudit.ts takeAuditChainLock).
+      await takeAuditChainLock(tx);
       const rows = await tx.$queryRaw<DeliveryLockRow[]>`
       SELECT
         r."leaseExpiresAt" AS "runtimeLeaseExpiresAt",
@@ -753,6 +870,7 @@ export async function pullAmuxWorkDelivery(input: {
             taskRevision: delivery.taskRevision,
             prompt: content.prompt,
             v22Execution: content.v22Execution,
+            ...(content.contextParts?.length ? { contextParts: content.contextParts } : {}),
             receiptId,
             leaseExpiresAt,
           },
@@ -806,6 +924,9 @@ export async function pullAmuxWorkDelivery(input: {
           // The digest of the prior-conclusion section this prompt carries.
           ...(content.priorConclusionDigest ?
             { prior_conclusion_digest: content.priorConclusionDigest } : {}),
+          // The same for the earlier review rejections the prompt carries.
+          ...(content.reviewFeedbackDigest ?
+            { review_feedback_digest: content.reviewFeedbackDigest } : {}),
         },
         tx,
       });
@@ -824,6 +945,7 @@ export async function pullAmuxWorkDelivery(input: {
           taskRevision: delivery.taskRevision,
           prompt: content.prompt,
           v22Execution: content.v22Execution,
+          ...(content.contextParts?.length ? { contextParts: content.contextParts } : {}),
           receiptId,
           leaseExpiresAt: deliveryLeaseExpiresAt,
         },

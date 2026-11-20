@@ -6,6 +6,8 @@ import { ArrowLeft, ArrowRight, Check, CircleHelp, Eye, Wrench } from "lucide-re
 import {
   AmuxOwnerReviewDetail,
   AmuxPendingDecisionNotice,
+  amuxReviewApprovesNoChange,
+  amuxReviewOutcomeLabel,
   classifyAmuxOwnerQueueItem,
   visibleAmuxOwnerReviewOutcomes,
   type AmuxEscalationSummary,
@@ -14,9 +16,11 @@ import {
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import {
   AmuxLegacyCardPanel,
-  useAmuxLegacyCardRead,
-  type AmuxLegacyCardRead,
-} from "@/components/admin/AmuxLegacyCardPanel";
+  isAmuxRemakeOnlyCardKind } from "@/components/admin/AmuxLegacyCardPanel";
+import { AmuxOwnerQueueDm } from "@/components/admin/AmuxOwnerQueueDm";
+import { AmuxOwnerQueueDmRequestPanel } from "@/components/admin/AmuxOwnerQueueDmRequest";
+import { AmuxOwnerQueueEngineeringItems } from "@/components/admin/AmuxOwnerQueueEngineeringItems";
+import { AmuxReviewRejectionList } from "@/components/admin/AmuxReviewRejection";
 import { AmuxSettledCardEscalationPanel } from "@/components/admin/AmuxSettledCardEscalationPanel";
 import { AmuxTaskUnknownUsageList } from "@/components/admin/AmuxAttemptUsageAcceptance";
 import { AmuxTaskQuestionSection } from "@/components/admin/AmuxWorkerQuestion";
@@ -31,6 +35,7 @@ import { adminAmuxOwnerQueueMessages } from "@/lib/adminMessages/amuxOwnerQueue"
 import { adminAmuxRoutingMessages } from "@/lib/adminMessages/amuxRouting";
 import { amuxElapsed } from "@/lib/adminAmuxFlow";
 import { amuxVisibleInspectionText } from "@/lib/amux/adminExecutionViewCore";
+import type { AmuxDmRelayView } from "@/lib/amux/ownerQueueDmRequestCore";
 import { amuxReviewUsageOutcomeUnknown } from "@/lib/amux/ownerRecoveryCore";
 import { isAmuxSettledCardWithOpenEscalation } from "@/lib/amux/settledCardEscalationCore";
 import {
@@ -102,7 +107,8 @@ export const useAmuxOwnerQueueElapsed = (generatedAt: string) => {
  */
 export function AmuxOwnerQueueDecision({
   item, controller, canInspectCards, index, total, generatedAt, navLocked, advance,
-  onAdvanceChange, onPrevious, onNext, onAnswered, initialLegacyCard = null,
+  onAdvanceChange, onPrevious, onNext, onAnswered,
+  canWriteEngineering = false, onEngineeringChanged, dmRelay, canAskDecisionMaker = false,
 }: {
   item: AmuxOwnerQueueItem;
   controller: AmuxOwnerReviewController;
@@ -118,8 +124,14 @@ export function AmuxOwnerQueueDecision({
   onPrevious: (() => void) | null;
   onNext: (() => void) | null;
   onAnswered: () => void;
-  /** The legacy panel shown before this card's own read lands (tests). */
-  initialLegacyCard?: AmuxLegacyCardRead | null;
+  /** `engineering-agent:write`: the card's engineering items show their buttons. */
+  canWriteEngineering?: boolean;
+  /** An engineering action was recorded: read this card again without leaving it. */
+  onEngineeringChanged?: () => void;
+  /** When the host's DM relay last called (null: unknown; absent: not read). */
+  dmRelay?: AmuxDmRelayView | null;
+  /** `ops:write`: the Decision Maker box offers its button. */
+  canAskDecisionMaker?: boolean;
 }) {
   const copy = useAdminMessages(adminAmuxOwnerQueueMessages);
   const execution = useAdminMessages(adminAmuxExecutionMessages);
@@ -147,19 +159,36 @@ export function AmuxOwnerQueueDecision({
   // A card no review decision opens on (a legacy WORKBOARD card or a pre-v22
   // Task) is remade or closed here, from the card detail read the execution
   // board uses, so the owner does not open the full card first. Owner only.
-  // The card detail is read only once this card's review says the card is not
-  // a v22 Task the Ubuntu inspection can take (an archived card is no longer
-  // in this queue), so an ordinary v22 card costs no second detail read.
-  const legacyRead = useAmuxLegacyCardRead(item.taskId,
-    canInspectCards && group !== "question" && reviewMatches &&
-      review.task.host_recovery_available === false, initialLegacyCard);
+  // Any stopped v22 Task has the same panel (owner decision 2026-11-12): the
+  // owner completes, remakes or closes it whatever stopped it. The panel comes
+  // from the card detail the review already reads for its attempt metadata, so
+  // no card costs a second detail read.
+  const ownerExecution = controller.ownerExecution;
+  const legacyRead = canInspectCards && group !== "question" && reviewMatches &&
+    (ownerExecution.state === "ready" || ownerExecution.state === "unavailable") ?
+    ownerExecution.legacyCard ?? null : null;
   const legacyCard = legacyRead?.view ? { revision: legacyRead.revision, view: legacyRead.view } : null;
-  // Once the review is read, the legacy panel stands in for a decision only when none is open.
-  const legacyOnly = legacyCard !== null && outcomes.length === 0;
+  // The same owner-only detail answer carries the runs the code review rejected.
+  const reviewRejections = canInspectCards && group !== "question" && reviewMatches &&
+    (ownerExecution.state === "ready" || ownerExecution.state === "unavailable") ?
+    ownerExecution.rejections ?? [] : [];
+  // Once the review is read, the legacy panel stands in for a decision only
+  // when none is open and the card is one no decision ever opens on.
+  const legacyOnly = legacyCard !== null && outcomes.length === 0 &&
+    isAmuxRemakeOnlyCardKind(legacyCard.view.kind);
   // The words follow the choices actually shown, not the PR alone: a verified
   // non-code Task is approved without one, and a spent budget, an unverified
   // result or pending publication leaves no retry.
-  const noPrWhy = outcomes.includes("approve") ? copy.why.reviewNoPrApprovable
+  // A patch no pull request carries is never "no change"; it is retried or
+  // its publication restored (AMUX-FILEGEN2-002).
+  const hold = reviewMatches ? review.publication_hold ?? null : null;
+  const noPrWhy = hold?.state === "pr_open" && hold.pr_number !== null ?
+    copy.why.reviewDraftPrOpen(hold.pr_number)
+    : hold?.state === "pending" ? copy.why.reviewPublicationPending
+    : reviewMatches && review.unpublished_patch ? copy.why.reviewNoPrUnpublishedPatch
+    : outcomes.includes("approve") ?
+    reviewMatches && amuxReviewApprovesNoChange(review) ? copy.why.reviewNoPrNoChange
+      : copy.why.reviewNoPrApprovable
     : outcomes.includes("retry") ? copy.why.reviewNoPr
     : outcomes.includes("block") ? copy.why.reviewNoPrBlockOnly : copy.why.reviewNoPrNone;
   // A blocked card's escalation keeps only execution_blocked; the attempt's
@@ -198,6 +227,11 @@ export function AmuxOwnerQueueDecision({
         <AdminStatusChip tone={AMUX_OWNER_QUEUE_GROUP_TONE[group]}>
           {reasonLabel ?? copy.group[group]}
         </AdminStatusChip>
+        {item.publicationPathMissing || (reviewMatches && review.unpublished_patch?.publication_run_missing) ? (
+          <span data-testid="amux-owner-queue-publication-path-missing">
+            <AdminStatusChip tone="warn">{copy.list.publicationPathMissing}</AdminStatusChip>
+          </span>
+        ) : null}
         {waiting ? <span className="text-xs text-zinc-400">{waiting}</span> : null}
         {index > 0 ? (
           <span className="text-xs text-zinc-500" data-testid="amux-owner-queue-position">
@@ -254,7 +288,35 @@ export function AmuxOwnerQueueDecision({
             </pre>
           </div>
         ) : null}
+        {/* Each rejected run's reasons, beside the retry, recover and close
+            choices below (owner decision 2026-11-14). */}
+        {reviewRejections.length > 0 ? <AmuxReviewRejectionList attempts={reviewRejections} /> : null}
       </div>
+
+      {/* The Decision Maker's proposal for this card (or why it has none, or why the card
+          was left to a person). Confirming it posts to the existing judgment route; the
+          decision below stays the owner's to make either way. */}
+      {group !== "question" && item.dmSettlement ? (
+        <AmuxOwnerQueueDm key={item.taskId + ":" + (item.dmSettlement.status === "read" ? item.dmSettlement.settlementId : "unread")}
+          settlement={item.dmSettlement} />
+      ) : null}
+
+      {/* Which Decision Maker path holds this card and why it has no word yet, with the
+          owner's one button (owner decision 2026-11-14). A settlement the panel above
+          already shows keeps only the button or the relay check here. */}
+      <AmuxOwnerQueueDmRequestPanel taskId={item.taskId} dm={item.dmStatus} relay={dmRelay}
+        canAsk={canAskDecisionMaker} onChanged={onEngineeringChanged ?? onAnswered}
+        settlementShown={group !== "question" && item.dmSettlement?.status === "read"} />
+
+      {/* The engineering agent's open items on this card, decided here through
+          the engineering routes (the same as Admin › Engineering › Decisions). */}
+      {item.engineeringItems?.length ? (
+        <AmuxOwnerQueueEngineeringItems key={item.taskId} items={item.engineeringItems}
+          canWrite={canWriteEngineering}
+          reauthReturnPath={item.escalationId === null ? "/admin/amux-execution?tab=review"
+            : `/admin/amux-execution?tab=review&focusEscalation=${encodeURIComponent(item.escalationId)}`}
+          onChanged={onEngineeringChanged ?? onAnswered} />
+      ) : null}
 
       {/* Straight under "why", like the legacy panel: the owner closes the
           leftover escalation here; the review below is reading only. */}
@@ -336,7 +398,7 @@ export function AmuxOwnerQueueDecision({
                     {outcomes.map((outcome, position) => (
                       <li key={outcome} className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 px-3 py-1.5 text-sm text-zinc-200">
                         <kbd className="rounded bg-zinc-800 px-1.5 text-xs text-zinc-300">{position + 1}</kbd>
-                        {routing.outcome[outcome]}
+                        {amuxReviewOutcomeLabel(routing, review, outcome)}
                       </li>
                     ))}
                   </ul>

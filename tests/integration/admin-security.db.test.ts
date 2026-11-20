@@ -76,7 +76,7 @@ const createAdminSession = async (
   };
 };
 
-// recentAuthMinutes() clamps ADMIN_RECENT_AUTH_MINUTES to at most 240, so a
+// recentAuthMinutes() clamps ADMIN_RECENT_AUTH_MINUTES to at most 480, so a
 // timestamp this old is stale under every reachable configuration and the
 // expiry test cannot drift with the environment.
 const staleAuthenticatedAt = () =>

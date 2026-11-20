@@ -14,10 +14,6 @@ import { AmuxTrackedCheckoutEvidenceError,
   "@/lib/amux/ideaTrackedCheckoutEvidenceStore";
 import { prisma } from "@/lib/prisma";
 
-const WRITE_ENV = "TOMVERSE_AMUX_V19_MAX_CHECKOUT_EVIDENCE_WRITE";
-const READ_ENV = "TOMVERSE_AMUX_V19_MAX_CHECKOUT_EVIDENCE_READ";
-const SHARED_WRITE_ENV = "TOMVERSE_AMUX_V19_CHECKOUT_EVIDENCE_WRITE";
-const SHARED_READ_ENV = "TOMVERSE_AMUX_V19_CHECKOUT_EVIDENCE_READ";
 const uuid = z.string().uuid();
 const ordinal = z.number().int().safe().min(0).max(2_147_483_647);
 const identity = z.object({ claimId: uuid, requestId: uuid,
@@ -43,11 +39,6 @@ function authorized(request: Request): boolean {
 /** Only the exact active Max claim may record this content-free proof. */
 export async function POST(request: Request): Promise<Response> {
   if (!authorized(request)) return amuxJsonNoStore({ error: "Unauthorized" }, 401);
-  if ([WRITE_ENV, READ_ENV, SHARED_WRITE_ENV, SHARED_READ_ENV].some(
-    (name) => process.env[name] !== "enabled")) {
-    return amuxJsonNoStore({ available: false,
-      reason: "max_checkout_evidence_write_disabled" }, 409);
-  }
   if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !==
       "application/json") {
     return amuxJsonNoStore({ error: "Invalid content type." }, 415);
@@ -81,11 +72,6 @@ export async function POST(request: Request): Promise<Response> {
 /** Exact-claim readback remains available after the claim closes. */
 export async function GET(request: Request): Promise<Response> {
   if (!authorized(request)) return amuxJsonNoStore({ error: "Unauthorized" }, 401);
-  if (process.env[READ_ENV] !== "enabled" ||
-      process.env[SHARED_READ_ENV] !== "enabled") {
-    return amuxJsonNoStore({ available: false,
-      reason: "max_checkout_evidence_read_disabled" }, 409);
-  }
   const params = new URL(request.url).searchParams;
   const keys = ["claimId", "requestId", "reservationId", "ideaId",
     "invocationOrdinal", "referenceOrdinal"];

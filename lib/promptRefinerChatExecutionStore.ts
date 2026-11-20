@@ -119,22 +119,22 @@ export async function capturePromptRefinerChatDraft(input: {
 }) {
   return prisma.$transaction(async tx => {
     await lockChatRecoveryConversation(tx, input.userId, input.conversationId);
-    const scope = await readScope(tx, input.scopeId, input.userId);
-    if (!scope || scope.conversationId !== input.conversationId || scope.epoch !== input.epoch) return unavailable();
-    const conversation = await tx.conversation.findFirst({
-      where: { id: input.conversationId, userId: input.userId,
-        kind: "chat", productKey: "chat" },
-      select: { chatRecoveryEpoch: true },
-    });
-    const draft = await tx.chatComposerDraft.findUnique({
-      where: { userId_scopeKey: { userId: input.userId, scopeKey: input.conversationId } },
-      select: { id: true, revision: true, text: true },
-    });
-    if (!conversation || !draft || (input.expectedDraftRevision !== undefined &&
-      draft.revision !== input.expectedDraftRevision)) return unavailable();
+    const [draft] = await tx.$queryRaw<(Scope & {
+      recoveryEpoch: number; draftId: string; draftRevision: number; sourcePrompt: string;
+    })[]>`SELECT s."id", s."userId", s."conversationId", s."surface", s."epoch",
+        c."chatRecoveryEpoch" AS "recoveryEpoch", d."id" AS "draftId",
+        d."revision" AS "draftRevision", d."text" AS "sourcePrompt"
+      FROM "PromptRefinerChatScope" s
+      JOIN "Conversation" c ON c."id" = s."conversationId" AND c."userId" = s."userId"
+      JOIN "ChatComposerDraft" d ON d."userId" = s."userId" AND d."scopeKey" = c."id"
+      WHERE s."id" = ${input.scopeId} AND s."userId" = ${input.userId}
+        AND s."conversationId" = ${input.conversationId} AND s."epoch" = ${input.epoch}
+        AND c."kind" = 'chat' AND c."productKey" = 'chat'
+      FOR UPDATE OF s`;
+    if (!draft || (input.expectedDraftRevision !== undefined &&
+      draft.draftRevision !== input.expectedDraftRevision)) return unavailable();
     const clientRequestId = randomUUID();
-    const snapshot = Object.freeze({ ...scope, draftId: draft.id, draftRevision: draft.revision,
-      sourcePrompt: draft.text, recoveryEpoch: conversation.chatRecoveryEpoch,
+    const snapshot = Object.freeze({ ...draft,
       clientRequestId, sourceMessageId: scopedMessageId(input.conversationId, clientRequestId),
       requestId: randomUUID() });
     capturedSnapshots.add(snapshot);

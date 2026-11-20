@@ -101,7 +101,7 @@ test("the operator reorders the line by dragging and from the keyboard, and each
   expect(await shownOrder(page)).toEqual([901, 902, 903]);
   // The CI auto-fix: the server's state, and each try under its pull request.
   await expect(section.getByTestId("ci-admission-fix-summary")).toContainText("Claude 64% left");
-  await expect(section.getByTestId("ci-admission-fix-summary")).toContainText("2 / 6 fixes this hour");
+  await expect(section.getByTestId("ci-admission-fix-summary")).toContainText("2 fixes this hour");
   await expect(section.getByTestId("ci-admission-fix-state-901")).toHaveText("CI failed · not fixed");
   await expect(section.getByTestId("ci-admission-fix-901")).toContainText("An infrastructure failure with no code cause.");
   await expect(section.getByTestId("ci-admission-fix-state-903")).toHaveText("CI failed · analysing");

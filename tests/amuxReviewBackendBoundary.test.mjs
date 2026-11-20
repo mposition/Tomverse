@@ -42,7 +42,16 @@ test("retry is bounded, planning correction is revision-proven, and approval nee
   // amuxReviewAllowedOutcomes, tested in amuxReviewApprovalCore.test.mjs.
   assert.match(service, /blockedRetryVerified: amuxV22ReviewRetryHasVerifiedOutcome\(/);
   assert.match(service, /budgetAllowed: budget\.allowed,\s*dueCorrected,\s*displayTruncated,\s*displayExact,\s*\}\);/);
-  assert.match(service, /prlessRetryAllowed: publication !== null && amuxV22PrlessReviewRetryAllowed\(/);
+  assert.match(service, /const prlessEvidence = publication === null \? null : \{/);
+  assert.match(service, /prlessRetryAllowed: prlessEvidence !== null &&\s*amuxV22PrlessReviewRetryAllowed\(prlessEvidence\)/);
+  // An implement Task that left no change is approved on the same evidence,
+  // as no change needed (owner decision 2026-11-11), and the audit says so.
+  assert.match(service, /const noChangeCompletion = prlessEvidence !== null &&\s*amuxV22NoChangeCompletionAllowed\(prlessEvidence\)/);
+  assert.match(service, /displayExact, noChangeCompletionAllowed: noChangeCompletion \}\)/);
+  assert.match(service, /approval_basis: approvalBasis/);
+  assert.match(service, /proposal\.outcome === "approve" &&\s*state\.approvalBasis === "no_change"/);
+  assert.match(service, /approval_basis: AMUX_REVIEW_NO_CHANGE_BASIS/);
+  assert.match(service, /no change needed \(owner verified\)/);
   // The stored-result exception reads the Task's own latest v22 result row,
   // fetched in the same snapshot transaction the decision writer re-runs.
   assert.match(service, /attempt: lastAttempt,\s*storedResultAttemptId: latestV4Result\?\.attemptId \?\? null,/);
@@ -57,11 +66,13 @@ test("retry is bounded, planning correction is revision-proven, and approval nee
   assert.match(service, /review_pr_number: artifact\?\.prNumber \?\? null/);
   assert.match(service, /review_base_sha: artifact\?\.baseSha \?\? null/);
   assert.match(service, /review_head_sha: artifact\?\.headSha \?\? null/);
-  assert.match(service, /review_diff_digest: artifact\?\.diffDigest \?\? null/);
-  assert.match(service, /input\.outcome === "approve" \? state\.artifact\?\.diffDigest \?\? null : null/);
+  // The approval binds the v2 change digest (owner decision 2026-11-18); a proposal prepared
+  // before it is compared in its own version, v1 against the diff shown.
+  assert.match(service, /review_diff_digest: artifact\?\.changeDigest \?\? null/);
+  assert.match(service, /input\.outcome === "approve" \? state\.artifact\?\.changeDigest \?\? null : null/);
   assert.match(service, /proposal\.reviewHeadSha !== \(state\.artifact\?\.headSha \?\? null\)/);
   assert.match(service, /proposal\.reviewBaseSha !== \(state\.artifact\?\.baseSha \?\? null\)/);
-  assert.match(service, /proposal\.reviewDiffDigest !== \(state\.artifact\?\.diffDigest \?\? null\)/);
+  assert.match(service, /\(proposal\.reviewDiffDigest === null \? state\.artifact !== null :\s*state\.artifact === null \|\| !pullDigestHolds\(proposal\.reviewDiffDigest, state\.artifact\)\)/);
 });
 
 test("proposal preallocates decision identity and status lookup never reports an uncommitted failure", () => {
@@ -79,14 +90,17 @@ test("proposal preallocates decision identity and status lookup never reports an
   assert.doesNotMatch(service, /status: "failed"/);
 });
 
-test("recoverable block opens a successor, but exhausted 5-attempt task stays terminal", () => {
+test("recoverable block opens a successor, and no count of attempts makes it terminal", () => {
   const resolve = service.split("export async function resolveAmuxReview(")[1]
     ?.split("export async function acknowledgeAmuxReview(")[0];
   assert.ok(resolve);
   assert.match(resolve, /proposal\.outcome === "block" && state\.budget\.allowed/);
   assert.match(resolve, /openAmuxHumanEscalation\(tx, \{/);
-  assert.equal(decideAmuxAttemptBudget({ historical_rows: 4, greatest_attempt_number: 4 }).allowed, true);
-  assert.equal(decideAmuxAttemptBudget({ historical_rows: 5, greatest_attempt_number: 5 }).allowed, false);
+  // Owner direction 2026-11-18: no count of attempts makes a block terminal; only
+  // a caller that names a bound (a paid retry) can.
+  assert.equal(decideAmuxAttemptBudget({ historical_rows: 5, greatest_attempt_number: 5 }).allowed, true);
+  assert.equal(decideAmuxAttemptBudget({ historical_rows: 30, greatest_attempt_number: 30 }).allowed, true);
+  assert.equal(decideAmuxAttemptBudget({ historical_rows: 30, greatest_attempt_number: 30, max_attempts: 30 }).allowed, false);
 });
 
 test("retry requeue checks the current cost cap in resource-before-task lock order", () => {
@@ -98,6 +112,9 @@ test("retry requeue checks the current cost cap in resource-before-task lock ord
   const costCheck = resolve.indexOf("evaluateLockedAmuxCostAdmission(");
   const taskCas = resolve.indexOf("tx.amuxWorkItem.updateMany(");
   assert.ok(resourceLock >= 0 && resourceLock < taskLock && taskLock < costCheck && costCheck < taskCas);
+  // The audit chain lock comes after the resource locks and before the Task
+  // row (lib/adminAudit.ts takeAuditChainLock).
+  assert.match(service, /async function lockTaskAndEscalation\(tx: Client, escalationId: string\) \{\s+await takeAuditChainLock\(tx\);/);
   assert.match(resolve, /state\.task\.projectKey !== retryPlanning\.task\.projectKey/);
   assert.match(resolve, /state\.task\.estimatedCostMicrousd !== retryPlanning\.task\.estimatedCostMicrousd/);
   assert.match(resolve, /AMUX_REVIEW_COST_GUARD_BLOCKED/);

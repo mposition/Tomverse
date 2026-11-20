@@ -402,6 +402,8 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       "default model",
       "guest lineup",
       "fallback model",
+      "coding catalog",
+      "provider conditions",
     ],
     tabs: [
       {
@@ -420,9 +422,15 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         description: "The fallback model, the guest lineup and the account default",
       },
       {
+        // The id stays "catalog": bookmarks and runbooks name ?tab=catalog.
         id: "catalog",
-        label: "Image & coding catalog",
-        description: "Enable or hold image and coding models, price history, LLM drafts, the Code snapshot",
+        label: "Image catalog",
+        description: "Enable or hold image models, price history, LLM drafts",
+      },
+      {
+        id: "coding",
+        label: "Coding catalog",
+        description: "Coding models for Code, the API and the CLI, chat links, provider conditions, the Code snapshot",
       },
     ],
   },
@@ -762,6 +770,7 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       "worker performance",
       "decision log",
       "incident",
+      "process analysis",
     ],
     tabs: [
       {
@@ -781,6 +790,14 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         id: "diagnostics",
         label: "Diagnostics",
         description: "Worker performance and the decision log",
+      },
+      {
+        // The scheduled AMUX process analysis reports (owner request
+        // 2026-11-14, lib/amuxProcessAuditStore.ts) and their schedule.
+        id: "process-audit",
+        label: "Process analysis",
+        description: "Scheduled reports on where AMUX stops, over-tight constraints and needless steps",
+        viewRoles: ["owner"],
       },
     ],
   },
@@ -892,8 +909,6 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       "claim",
       "claim resolution",
       "legacy",
-      "catalog import",
-      "board import",
       "reconciliation",
       "source revision",
       "metadata",
@@ -918,7 +933,7 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       {
         id: "legacy",
         label: "Legacy tools",
-        description: "Catalog import, source reconciliation, card metadata and card promotion",
+        description: "Source reconciliation, card metadata and card promotion",
         viewRoles: ["owner"],
       },
     ],

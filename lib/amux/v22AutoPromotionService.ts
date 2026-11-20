@@ -8,33 +8,82 @@ import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { prisma } from "@/lib/prisma";
 import { BoardImportError } from "./boardImportCore.ts";
-import type { AmuxOrchestratorReceiptRecorder } from "./dbBoundary.ts";
+import { type AmuxOrchestratorReceiptRecorder, amuxRouteHasBudgetForMs } from "./dbBoundary.ts";
 import { findOpenAmuxOrchestratorHalt } from "./orchestratorHaltStore.ts";
 import { AMUX_INCIDENT_SETTING_KEY, parseAmuxIncidentSetting } from
   "./incidentCore.ts";
 import { readAmuxAssignmentCatalogs } from "./workerAssignmentCatalog.ts";
+import { amuxDependencyUnpublishedPatchSql } from "./v4DependencyPublication.ts";
 import { AUTO_PROMOTION_APPLY_ENV, AUTO_PROMOTION_CODE_LATCH,
-  AUTO_UNKNOWN_BURST_COUNT, AUTO_UNKNOWN_BURST_MS,
-  autoCostAccepted, autoGraduationAccepted, autoUnknownEvents,
+  autoCostAccepted, autoGraduationAccepted,
   autoPromotionApplyPermitted } from
   "./autoPromotionCore.ts";
 import { OWNER_TRANSACTION_LIMITS, TICK_TRANSACTION_LIMITS,
   withAutoTransaction } from
   "./autoPromotionService.ts";
-import { AMUX_PORTFOLIO_SCORE_VERSION } from "./portfolioScoreCore.ts";
+import { AMUX_PORTFOLIO_SCORE_VERSION, amuxScoreAuditActionBinds } from
+  "./portfolioScoreCore.ts";
 import { evaluateAmuxV4TaskReadyInTransaction,
   loadAmuxV4TaskReadyContext } from "./v4TaskReadyService.ts";
-import { AMUX_V22_AUTO_PROMOTION_CODE_LATCH,
-  AMUX_V22_AUTO_PROMOTION_ENV, AMUX_V22_AUTO_PROMOTION_POLICY_VERSION,
-  AMUX_V22_GRADUATION_EXCEPTION_ENV, AMUX_V22_GRADUATION_EXCEPTION_ID,
-  AMUX_V22_GRADUATION_EXCEPTION_POLICY_VERSION,
+import { AMUX_V22_AUTO_PROMOTION_POLICY_VERSION,
   AMUX_V22_PARALLEL_RESERVED, AMUX_V22_SEV1_RESERVED,
-  amuxV22AssessmentIdsCurrent, amuxV22AutoPromotionEnabled, amuxV22Capacity,
-  amuxV22ScoreCurrent, amuxV22GraduationExceptionEnabled,
-  amuxV22GraduationPermitted } from "./v22AutoPromotionCore.ts";
+  amuxV22Capacity, amuxV22ScoreCurrent } from "./v22AutoPromotionCore.ts";
 import { writeV22AutoPromotionAudit } from "./v22AutoPromotionAudit.ts";
+import { reportOperationalIncident } from "@/lib/operationalMonitoring";
+import { sanitizeOperationalText } from "@/lib/operationalMonitoringCore";
+import { type AmuxCardWaitEntry, recordAmuxCardWaitReasons } from "./cardWaitReasonStore.ts";
+import { AUTO_TICK_TRANSACTION_MAX_MS } from "./autoPromotionCore.ts";
+import { amuxV22PromotionBlockedNotice,
+  type AmuxV22PromotionNotReady } from "./v22PromotionBlockedCore.ts";
 
 type Candidate = { id: string; taskId: string; scoreTotal: number };
+
+/** A refusal that keeps the readiness reasons, so the tick can say why. */
+class AmuxV22TaskNotReadyError extends BoardImportError {
+  readonly reasons: readonly string[];
+  constructor(reasons: readonly string[]) {
+    super("task_not_ready", 409);
+    this.reasons = reasons;
+  }
+}
+
+/**
+ * Tells the operator which backlog Tasks wait on them, and why (owner
+ * direction 2026-11-14). Best effort: a failed read or report never changes
+ * the tick's answer.
+ */
+async function reportPromotionBlocked(notReady: AmuxV22PromotionNotReady[]) {
+  if (notReady.length === 0) return;
+  try {
+    const keys = await prisma.amuxWorkItem.findMany({
+      where: { id: { in: notReady.map((task) => task.taskId) } },
+      select: { id: true, displayKey: true },
+    });
+    const keyOf = new Map(keys.map((row) => [row.id, row.displayKey]));
+    const named = notReady.map((task) => ({ ...task, displayKey: keyOf.get(task.taskId) ?? null }));
+    const notice = amuxV22PromotionBlockedNotice(named);
+    console.info(JSON.stringify({ event: "amux_v22_promotion_not_ready",
+      notReady: named.length, blockedByOperator: notice?.count ?? 0,
+      reasons: notice?.reasons ?? {} }));
+    if (!notice) return;
+    await reportOperationalIncident({
+      code: "AMUX_V22_PROMOTION_BLOCKED",
+      title: "AMUX backlog Tasks are held by a reason the operator must clear",
+      error: new Error(`${notice.count} Task(s): ${notice.tasks}`),
+      severity: "warning",
+      cooldownMs: 6 * 60 * 60 * 1_000,
+      context: { component: "amux-v22-auto-promotion", count: notice.count,
+        reasons: Object.entries(notice.reasons).map(([reason, n]) => `${reason}=${n}`).join(","),
+        // Every Task is named; the shared incident report bounds what leaves
+        // for its notification, and each card's own reason is on the board.
+        tasks: notice.tasks, admin: "/admin/amux-execution?tab=cards" },
+    });
+  } catch (error) {
+    console.error(JSON.stringify({ event: "amux_v22_promotion_blocked_report_failed",
+      // Whole, with credential-shaped text hidden (it was cut to 200 characters).
+      message: error instanceof Error ? sanitizeOperationalText(error, Number.MAX_SAFE_INTEGER) : "unknown" }));
+  }
+}
 type OwnerMoveCommand = {
   session: Session;
   request: Request;
@@ -48,7 +97,9 @@ type OwnerMoveAuditBinding = {
   requestId: string;
   humanIntentAuditId: string;
 };
-const MAX_CANDIDATES_PER_TICK = 8;
+/** Candidates one tick reads (owner direction 2026-11-15: widened from 8).
+ * The tick stops early when its route budget no longer fits another one. */
+const MAX_CANDIDATES_PER_TICK = 100;
 const V22_AUDIT_ACTION = "amux.v22.auto_promotion.consumed";
 const V22_OWNER_MOVE_DESTINATION = "amux_unassigned_todo";
 
@@ -154,24 +205,9 @@ async function openV22CriticalHalt(tx: Prisma.TransactionClient, now: Date,
 export async function configureV22AutoPromotion(input: {
   session: Session; request: Request; active: boolean;
   expectedAuditLogId: string | null;
-  graduationExceptionId?: typeof AMUX_V22_GRADUATION_EXCEPTION_ID;
 }) {
   const actorUserId = input.session.user?.id;
   if (!actorUserId) throw new BoardImportError("forbidden", 403);
-  const exceptionRequested = input.graduationExceptionId ===
-    AMUX_V22_GRADUATION_EXCEPTION_ID;
-  if (input.graduationExceptionId !== undefined && (!input.active ||
-      !exceptionRequested || !amuxV22GraduationExceptionEnabled(
-        process.env[AMUX_V22_GRADUATION_EXCEPTION_ENV]))) {
-    throw new BoardImportError("graduation_exception_unavailable", 409);
-  }
-  const exceptionMetadata = exceptionRequested ? {
-    graduationExceptionId: AMUX_V22_GRADUATION_EXCEPTION_ID,
-    graduationExceptionPolicyVersion: AMUX_V22_GRADUATION_EXCEPTION_POLICY_VERSION,
-  } : {};
-  if (input.active && !AMUX_V22_AUTO_PROMOTION_CODE_LATCH) {
-    throw new BoardImportError("apply_disabled", 409);
-  }
   return withAutoTransaction(null, OWNER_TRANSACTION_LIMITS,
     async (tx, now) => {
       const current = await tx.amuxV22PromotionControl.findUnique({
@@ -181,7 +217,7 @@ export async function configureV22AutoPromotion(input: {
           input.expectedAuditLogId) {
         throw new BoardImportError("conflict", 409);
       }
-      if ((current?.active ?? false) === input.active && !exceptionRequested) {
+      if ((current?.active ?? false) === input.active) {
         return { active: input.active, changed: false as const,
           authorizationAuditLogId: current?.authorizationAuditLogId ?? null };
       }
@@ -190,17 +226,6 @@ export async function configureV22AutoPromotion(input: {
           envValue: process.env[AUTO_PROMOTION_APPLY_ENV],
           codeLatch: AUTO_PROMOTION_CODE_LATCH,
         })) throw new BoardImportError("legacy_auto_promotion_enabled", 409);
-        const decisions = await tx.amuxRecommendationDecision.findMany({
-          where: { decision: "approve", status: "consumed" },
-          select: { createdAt: true },
-        });
-        if (!amuxV22GraduationPermitted({
-          graduated: autoGraduationAccepted(decisions).ok,
-          environmentValue: process.env[AMUX_V22_GRADUATION_EXCEPTION_ENV],
-          authorization: exceptionMetadata,
-        })) {
-          throw new BoardImportError("graduation_unmet", 409);
-        }
         const [halt, orchestratorHalt, capacity] = await Promise.all([
           tx.amuxRecommendationAutoHalt.findFirst({
             where: { clearedAt: null }, select: { id: true },
@@ -224,7 +249,7 @@ export async function configureV22AutoPromotion(input: {
         summary: input.active ? "Activated v22 Task auto-promotion." :
           "Deactivated v22 Task auto-promotion.",
         metadata: { policyVersion: AMUX_V22_AUTO_PROMOTION_POLICY_VERSION,
-          active: input.active, ...exceptionMetadata },
+          active: input.active },
       });
       await tx.amuxV22PromotionControl.upsert({
         where: { id: "queue" },
@@ -245,38 +270,19 @@ export async function readV22AutoPromotionControl() {
     where: { id: "queue" }, select: { active: true, activatedAt: true,
       authorizationAuditLogId: true, approvedByUserId: true },
   });
-  const [decisions, audit] = await Promise.all([
-    prisma.amuxRecommendationDecision.findMany({
-      where: { decision: "approve", status: "consumed" },
-      select: { createdAt: true },
-    }),
-    row ? prisma.adminAuditLog.findUnique({
-      where: { id: row.authorizationAuditLogId },
-      select: { action: true, targetType: true, targetId: true,
-        entryHash: true, metadata: true, actorUserId: true },
-    }) : null,
-  ]);
+  const decisions = await prisma.amuxRecommendationDecision.findMany({
+    where: { decision: "approve", status: "consumed" },
+    select: { createdAt: true },
+  });
   const graduation = autoGraduationAccepted(decisions);
-  return { codeLatch: AMUX_V22_AUTO_PROMOTION_CODE_LATCH,
-    environmentEnabled: process.env[AMUX_V22_AUTO_PROMOTION_ENV] === "enabled",
-    active: row?.active ?? false,
+  return { active: row?.active ?? false,
     activatedAt: row?.activatedAt ?? null,
     authorizationAuditLogId: row?.authorizationAuditLogId ?? null,
     graduation,
-    graduationExceptionId: AMUX_V22_GRADUATION_EXCEPTION_ID,
-    graduationExceptionAvailable: amuxV22GraduationExceptionEnabled(
-      process.env[AMUX_V22_GRADUATION_EXCEPTION_ENV]),
-    graduationExceptionApplied: Boolean(row?.active && audit?.entryHash &&
-      audit.actorUserId === row.approvedByUserId &&
-      audit.action === "amux.v22.auto_promotion.activated" &&
-      audit.targetType === "AmuxV22PromotionControl" && audit.targetId === "queue" &&
-      amuxV22GraduationPermitted({ graduated: false,
-        environmentValue: process.env[AMUX_V22_GRADUATION_EXCEPTION_ENV],
-        authorization: audit.metadata })),
   };
 }
 
-async function latestCandidates(tx: Prisma.TransactionClient, now: Date):
+async function latestCandidates(tx: Prisma.TransactionClient):
   Promise<Candidate[]> {
   return tx.$queryRaw<Candidate[]>`
     WITH newest AS (
@@ -290,16 +296,21 @@ async function latestCandidates(tx: Prisma.TransactionClient, now: Date):
     WHERE w."sourceSystem" = 'admin-idea-v4' AND w."cardType" = 'task'
       AND w."status" = 'backlog' AND w."archivedAt" IS NULL
       AND w."owner" IS NULL AND w."claimedAt" IS NULL
-      AND n."activeStaleAt" > ${now} AND n."baselineStaleAt" > ${now}
+      -- An unknown whose read-back found no receipt at all never committed
+      -- (owner direction 2026-11-15): that card is a candidate again.
       AND NOT EXISTS (SELECT 1 FROM "AmuxV22PromotionUnknown" u
-        WHERE u."workItemId" = w."id")
+        WHERE u."workItemId" = w."id"
+          AND u."receiptFound")
       -- A Task waiting on an unfinished dependency can never pass readiness
       -- (dependency_incomplete). Left in, eight such Tasks with higher scores
       -- filled every tick's window and a ready Task below them was never read.
+      -- A done dependency whose patch never reached develop holds it the same
+      -- way (dependency_unpublished).
       AND NOT EXISTS (SELECT 1 FROM "AmuxWorkDependency" d
         JOIN "AmuxWorkItem" dep ON dep."id" = d."dependencyId"
         WHERE d."taskId" = w."id"
-          AND (dep."status" <> 'done' OR dep."v4TerminalAt" IS NULL))
+          AND (dep."status" <> 'done' OR dep."v4TerminalAt" IS NULL
+            OR ${amuxDependencyUnpublishedPatchSql()}))
     ORDER BY n."scoreTotal" DESC, n."taskId" ASC
     LIMIT ${MAX_CANDIDATES_PER_TICK}
   `;
@@ -344,16 +355,12 @@ async function requireV22GlobalGate(tx: Prisma.TransactionClient, now: Date) {
       activationAudit.targetId !== "queue") {
     throw new BoardImportError("v22_not_activated", 409);
   }
-  const [halt, orchestratorHalt, incident, decisions, entries] = await Promise.all([
+  const [halt, orchestratorHalt, incident, entries] = await Promise.all([
     tx.amuxRecommendationAutoHalt.findFirst({
       where: { clearedAt: null }, select: { id: true } }),
     findOpenAmuxOrchestratorHalt(tx),
     tx.appSetting.findUnique({ where: { key: AMUX_INCIDENT_SETTING_KEY },
       select: { value: true } }),
-    tx.amuxRecommendationDecision.findMany({
-      where: { decision: "approve", status: "consumed" },
-      select: { createdAt: true },
-    }),
     tx.amuxRecommendationAutoCostEntry.findMany({
       select: { amountCents: true, recordedAt: true },
     }),
@@ -362,11 +369,6 @@ async function requireV22GlobalGate(tx: Prisma.TransactionClient, now: Date) {
   if (parseAmuxIncidentSetting(incident?.value).blocks_admission) {
     throw new BoardImportError("incident_blocked", 409);
   }
-  const graduation = autoGraduationAccepted(decisions);
-  if (!amuxV22GraduationPermitted({ graduated: graduation.ok,
-    environmentValue: process.env[AMUX_V22_GRADUATION_EXCEPTION_ENV],
-    authorization: activationAudit.metadata,
-  })) throw new BoardImportError("graduation_unmet", 409);
   const cost = autoCostAccepted({ proposedCents: 0, entries, now });
   return cost.ok ? null : cost.code;
 }
@@ -422,7 +424,7 @@ async function commitCandidate(input: { candidate: Candidate; receiptId: string;
       // subject row. Keep the same order and read the latest evidence only
       // after the lock, so a superseded score cannot promote a Task.
       await takeAuditChainLock(tx);
-      const top = await latestCandidates(tx, now);
+      const top = await latestCandidates(tx);
       const current = top.find((row) => row.taskId === input.candidate.taskId);
       if (!current || current.id !== input.candidate.id) {
         throw new BoardImportError("score_changed", 409);
@@ -439,7 +441,7 @@ async function commitCandidate(input: { candidate: Candidate; receiptId: string;
       if (!ready.ready || !ready.sourceApprovalId ||
           !ready.sourceApprovalDigest || !ready.briefDigest ||
           !ready.parentFeatureNodeId) {
-        throw new BoardImportError("task_not_ready", 409);
+        throw new AmuxV22TaskNotReadyError(ready.reasons);
       }
       if (input.ownerMove &&
           ready.taskRevision !== input.ownerMove.expectedRevision) {
@@ -466,9 +468,7 @@ async function commitCandidate(input: { candidate: Candidate; receiptId: string;
             taskRevision: score.taskRevision,
             currentRevision: ready.taskRevision,
             sourceApprovalId: score.sourceApprovalId,
-            currentSourceApprovalId: ready.sourceApprovalId,
-            activeStaleAt: score.activeStaleAt,
-            baselineStaleAt: score.baselineStaleAt, now })) {
+            currentSourceApprovalId: ready.sourceApprovalId })) {
         throw new BoardImportError("score_changed", 409);
       }
       const initiativeNodeId = score.initiativeAssessment.nodeId;
@@ -483,31 +483,12 @@ async function commitCandidate(input: { candidate: Candidate; receiptId: string;
             (ready.parentStoryCardId === null)) {
         throw new BoardImportError("score_changed", 409);
       }
-      const assessmentBindings = [
-        { id: score.initiativeAssessmentId, where: { nodeId: initiativeNodeId } },
-        { id: score.epicAssessmentId, where: { nodeId: epicNodeId } },
-        { id: score.featureAssessmentId, where: { nodeId: featureNodeId } },
-        ...(storyCardId && score.storyAssessmentId ? [{
-          id: score.storyAssessmentId, where: { cardId: storyCardId },
-        }] : []),
-        { id: score.taskAssessmentId, where: { cardId: current.taskId } },
-      ];
-      const latestAssessments = await Promise.all(assessmentBindings.map(
-        (binding) => tx.amuxPortfolioAssessment.findFirst({
-          where: binding.where,
-          orderBy: { assessmentVersion: "desc" }, select: { id: true },
-        })));
-      if (!amuxV22AssessmentIdsCurrent(
-        assessmentBindings.map((binding) => binding.id),
-        latestAssessments.map((assessment) => assessment?.id ?? null))) {
-        throw new BoardImportError("score_changed", 409);
-      }
       const scoreAudit = await tx.adminAuditLog.findUnique({
         where: { id: score.approvalAuditLogId },
         select: { action: true, targetId: true, entryHash: true },
       });
       if (!scoreAudit?.entryHash ||
-          scoreAudit.action !== "amux.v4.portfolio.score.confirm" ||
+          !amuxScoreAuditActionBinds(scoreAudit.action) ||
           scoreAudit.targetId !== score.id) {
         throw new BoardImportError("score_unbound", 409);
       }
@@ -603,6 +584,15 @@ async function readBackLostPromotion(receiptId: string, taskId: string,
         return { promoted: true as const, receiptId, taskId,
           recoveredByReadback: true as const };
       }
+      // Owner direction 2026-11-15: under the queue lock this read-back is
+      // final, so no receipt at all means the promotion never committed. It
+      // is a known "not promoted", tried again next tick, never an unknown
+      // that parks the card and counts toward halting every promotion. A
+      // receipt that exists but does not match stays unknown, and so does an
+      // owner's move (expectedRevision), whose request is never run again.
+      if (receipt === null && expectedRevision === null)
+        return { promoted: false as const, reason: "readback_not_committed",
+          receiptId, taskId };
       const auditId = await writeV22AutoPromotionAudit(tx, {
         action: "amux.v22.auto_promotion.outcome_unknown",
         targetType: "AmuxV22PromotionUnknown", targetId: receiptId,
@@ -616,40 +606,8 @@ async function readBackLostPromotion(receiptId: string, taskId: string,
         workItemId: taskId, receiptFound: receipt !== null,
         authorizationAuditLogId: auditId, recordedAt: now } });
       recordReceipt("v22_promotion_unknown", receiptId, 1);
-      const since = new Date(now.getTime() - AUTO_UNKNOWN_BURST_MS);
-      const [v22Unknowns, oldUnknowns, oldConsumptions, openHalt] = await Promise.all([
-        tx.amuxV22PromotionUnknown.count({ where: {
-          recordedAt: { gte: since, lte: now },
-        } }),
-        tx.amuxRecommendationAutoUnknown.findMany({
-          where: { recordedAt: { gte: since, lte: now } },
-          select: { id: true, recordedAt: true },
-        }),
-        tx.amuxRecommendationAutoConsumption.findMany({
-          where: { outcomeUnknownAt: { gte: since, lte: now } },
-          select: { id: true, outcomeUnknownAt: true },
-        }),
-        tx.amuxRecommendationAutoHalt.findFirst({
-          where: { clearedAt: null }, select: { id: true },
-        }),
-      ]);
-      if (v22Unknowns + autoUnknownEvents({ unknowns: oldUnknowns,
-        consumptions: oldConsumptions }).length >= AUTO_UNKNOWN_BURST_COUNT &&
-          !openHalt) {
-        const haltId = randomUUID();
-        const haltAuditId = await writeV22AutoPromotionAudit(tx, {
-          action: "amux.auto_promotion.halted",
-          targetType: "AmuxRecommendationAutoHalt", targetId: haltId,
-          summary: "Halted AMUX promotion after two unknown outcomes.",
-          metadata: { violationCode: null },
-        });
-        await tx.amuxRecommendationAutoHalt.create({ data: { id: haltId,
-          reason: "outcome_unknown_burst",
-          violationCode: null,
-          actorUserId: "system:amux-v22-auto-admit",
-          authorizationAuditLogId: haltAuditId, openedAt: now } });
-        recordReceipt("v22_promotion_halt", haltId, 1);
-      }
+      // Unknown outcomes park their own card and never halt promotion (owner
+      // decision 2026-11-16: two in fifteen minutes used to).
       return { promoted: false as const, reason: "outcome_unknown",
         receiptId, taskId };
     });
@@ -694,10 +652,6 @@ export async function requestV22ExecutionMove(input: OwnerMoveCommand) {
     readMoveRequestBinding(tx, input.requestId));
   const replay = resolveMoveReplay(prior, input);
   if (replay) return replay;
-  if (!amuxV22AutoPromotionEnabled(
-    process.env[AMUX_V22_AUTO_PROMOTION_ENV])) {
-    throw new BoardImportError("apply_disabled", 409);
-  }
   const card = await prisma.amuxWorkItem.findUnique({
     where: { id: input.taskId },
     select: { sourceSystem: true, cardType: true, status: true,
@@ -712,11 +666,7 @@ export async function requestV22ExecutionMove(input: OwnerMoveCommand) {
   if (card.revision !== input.expectedRevision) {
     throw new BoardImportError("stale_revision", 409);
   }
-  const candidates = await prisma.$transaction(async (tx) => {
-    const rows = await tx.$queryRaw<Array<{ now: Date }>>`
-      SELECT clock_timestamp() AS now`;
-    return latestCandidates(tx, rows[0]?.now ?? new Date());
-  });
+  const candidates = await prisma.$transaction((tx) => latestCandidates(tx));
   const candidate = candidates.find((row) => row.taskId === input.taskId);
   if (!candidate || candidates[0]?.taskId !== input.taskId) {
     throw new BoardImportError("scheduler_priority", 409);
@@ -752,27 +702,60 @@ export async function requestV22ExecutionMove(input: OwnerMoveCommand) {
   }
 }
 
+/**
+ * Clears an open promotion halt that unknown outcomes opened. Unknown outcomes
+ * no longer halt promotion (owner decision 2026-11-16), so a halt of that
+ * reason, whether opened by this path or the older recommendation path, is
+ * cleared by the system, once, with one system audit. A halt for a critical
+ * violation stays for the owner.
+ */
+async function clearReadBackPromotionHalt() {
+  try {
+    await withAutoTransaction(null, TICK_TRANSACTION_LIMITS, async (tx, now) => {
+      const halt = await tx.amuxRecommendationAutoHalt.findFirst({
+        where: { clearedAt: null, reason: "outcome_unknown_burst" },
+        orderBy: { openedAt: "desc" }, select: { id: true } });
+      if (!halt) return;
+      await takeAuditChainLock(tx);
+      const cleared = await tx.amuxRecommendationAutoHalt.updateMany({
+        where: { id: halt.id, clearedAt: null }, data: { clearedAt: now } });
+      if (cleared.count !== 1) return;
+      await writeV22AutoPromotionAudit(tx, {
+        action: "amux.auto_promotion.resumed_by_readback",
+        targetType: "AmuxRecommendationAutoHalt", targetId: halt.id,
+        summary: "Cleared an AMUX promotion halt that unknown outcomes had opened.",
+        metadata: { policyVersion: AMUX_V22_AUTO_PROMOTION_POLICY_VERSION },
+      });
+    });
+  } catch (error) {
+    console.warn(JSON.stringify({ subsystem: "amux", event: "amux_v22_promotion_halt_clear_failed",
+      code: error instanceof BoardImportError ? error.code : "unexpected" }));
+  }
+}
+
 /** One tick moves at most one card. A cryptographically invalid high-score
  * candidate is skipped for this tick; no lower card borrows its approval. */
 export async function tickV22AutoPromotion() {
-  if (!amuxV22AutoPromotionEnabled(
-    process.env[AMUX_V22_AUTO_PROMOTION_ENV])) {
-    return { promoted: false as const, reason: "apply_disabled" };
-  }
-  const candidates = await prisma.$transaction(async (tx) => {
-    const rows = await tx.$queryRaw<Array<{ now: Date }>>`
-      SELECT clock_timestamp() AS now`;
-    return latestCandidates(tx, rows[0]?.now ?? new Date());
-  });
+  await clearReadBackPromotionHalt();
+  const candidates = await prisma.$transaction((tx) => latestCandidates(tx));
   if (!candidates.length) return { promoted: false as const,
     reason: "no_candidate" };
   let unavailable = 0;
+  const notReady: AmuxV22PromotionNotReady[] = [];
+  const waits: AmuxCardWaitEntry[] = [];
   for (const candidate of candidates) {
+    // The rest wait for the next tick once another transaction no longer fits.
+    if (!amuxRouteHasBudgetForMs(2 * AUTO_TICK_TRANSACTION_MAX_MS)) break;
     let context: Awaited<ReturnType<typeof loadAmuxV4TaskReadyContext>>;
     try { context = await loadAmuxV4TaskReadyContext(candidate.taskId); }
     catch { unavailable += 1; continue; }
     const receiptId = randomUUID();
-    try { return await commitCandidate({ candidate, receiptId, context }); }
+    try {
+      const promoted = await commitCandidate({ candidate, receiptId, context });
+      // The cards passed over before this one still say why they wait.
+      await recordAmuxCardWaitReasons(waits);
+      return promoted;
+    }
     catch (error) {
       if (!(error instanceof BoardImportError)) throw error;
       if (error.code === "outcome_unknown") {
@@ -790,13 +773,24 @@ export async function tickV22AutoPromotion() {
             receiptId, taskId: candidate.taskId };
         }
       }
+      if (error instanceof AmuxV22TaskNotReadyError) {
+        notReady.push({ taskId: candidate.taskId, displayKey: null, reasons: error.reasons });
+      }
+      // Why the card stays in backlog, for its Admin card (owner decision
+      // 2026-11-15, lib/amux/cardWaitReasonStore.ts).
+      waits.push({ taskId: candidate.taskId, stage: "promotion", code: error.code,
+        detail: error instanceof AmuxV22TaskNotReadyError ? { reasons: [...(error.reasons ?? [])] } : {} });
       if (["task_not_ready", "score_changed", "score_unbound",
         "lifecycle_present", "not_backlog", "conflict"].includes(error.code)) {
         continue;
       }
+      await recordAmuxCardWaitReasons(waits);
       return { promoted: false as const, reason: error.code };
     }
   }
+  // Only once nothing could move: a promoting tick stops at its first card.
+  await recordAmuxCardWaitReasons(waits);
+  await reportPromotionBlocked(notReady);
   return { promoted: false as const,
     reason: unavailable > 0 ? "candidate_unavailable" : "no_ready_candidate" };
 }

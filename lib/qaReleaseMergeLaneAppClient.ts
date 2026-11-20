@@ -1,8 +1,8 @@
 /**
  * The merge lane service's port to the app (docs/policy/qa-release-agent.md
- * version 4, section 3): the state read and the three calls that write --
- * instruction, consume, report -- each to its one fixed URL, with the lane's
- * secret and the operator control revision.
+ * version 4, section 3): the state read and the calls that write --
+ * instruction, consume, report, and the lane's own latch release -- each to
+ * its one fixed URL, with the lane's secret and the operator control revision.
  *
  * Only an answer the route can give is an answer: 200 with the expected body,
  * or 409 with a refusal. Anything else -- a 5xx, `deadline_passed`, a body of
@@ -10,6 +10,7 @@
  * unknown and does not retry (section 3).
  */
 import { assertQaReleaseMergeLaneEndpoint, qaReleaseMergeLaneEndpoint, type QaReleaseMergeLaneCall } from "./qaReleaseDigestEndpointCore.ts";
+import { QA_RELEASE_DM_APPROVED_HEAD } from "./qaReleaseMergeLaneExclusionCore.ts";
 import type { QaReleaseHttp } from "./qaReleaseMergeLaneGithub.ts";
 import type { QaReleaseMergeLanePorts, QaReleaseLaneState } from "./qaReleaseMergeLaneServiceCore.ts";
 import type { QaReleaseLaneVerdict } from "./qaReleaseMergeLaneVerdictCore.ts";
@@ -18,6 +19,7 @@ import { QA_RELEASE_CONTROL_REVISION_HEADER } from "./qaReleaseRouteAuthCore.ts"
 type Json = Record<string, unknown>;
 const SHA = /^[0-9a-f]{40}$/;
 const OPEN_STATES = new Set(["issued", "consumed", "awaiting_deploy"]);
+const MAX_DM_APPROVED = 50;
 
 const record = (value: unknown): Json => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("app_shape");
@@ -33,7 +35,17 @@ function stateOf(body: Json): QaReleaseLaneState {
   const open = body.openAttempt;
   // The operator's priority is a preference: a body without a usable one means oldest first.
   const priority = Array.isArray(body.priority) ? body.priority.filter((n): n is number => typeof n === "number" && Number.isSafeInteger(n) && n > 0) : [];
-  const ordering = priority.length > 0 ? { priority } : {};
+  // Decision Maker approved engineering pull requests (owner decision 2026-11-13):
+  // an entry of any other shape is dropped, so its pull request stays a person's.
+  const dmApproved = (Array.isArray(body.dmApproved) ? body.dmApproved : []).slice(0, MAX_DM_APPROVED).flatMap((raw) => {
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return [];
+    const entry = raw as Json;
+    return typeof entry.number === "number" && Number.isSafeInteger(entry.number) && entry.number > 0 &&
+      typeof entry.headSha === "string" && SHA.test(entry.headSha) &&
+      typeof entry.headRef === "string" && QA_RELEASE_DM_APPROVED_HEAD.test(entry.headRef)
+      ? [{ number: entry.number, headSha: entry.headSha, headRef: entry.headRef }] : [];
+  });
+  const ordering = { ...(priority.length > 0 ? { priority } : {}), ...(dmApproved.length > 0 ? { dmApproved } : {}) };
   if (open === null) return { dbNowMs: finite(body.dbNowMs), latched: body.latched, openAttempt: null, ...ordering };
   const attempt = record(open);
   const state = attempt.state;
@@ -113,6 +125,12 @@ export function createQaReleaseMergeLaneAppPorts(input: {
       const answer = await call("report", { attemptId, report });
       if (answer.status === 200 && answer.body.recorded === true) return { recorded: true };
       if (answer.status === 409 && answer.body.recorded === false) return { recorded: false, reason: reason(answer.body) };
+      throw new Error("app_shape");
+    },
+    async release() {
+      const answer = await call("release", {});
+      if (answer.status === 200 && answer.body.released === true) return { released: true };
+      if (answer.status === 409 && answer.body.released === false) return { released: false, reason: reason(answer.body) };
       throw new Error("app_shape");
     },
   };

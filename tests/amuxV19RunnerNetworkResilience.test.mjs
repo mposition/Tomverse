@@ -1,10 +1,8 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 
-import { AMUX_V19_APP_READBACK_BUDGET_MS, AMUX_V19_APP_RETRY_BUDGET_MS,
-  AMUX_V19_STOP_RETRY_INTERVAL_MS, AMUX_V19_STOP_UNREACHABLE,
-  AMUX_V19_STOP_UNREACHABLE_LIMIT_MS, amuxV19AppRequest,
-  amuxV19RequestUnsent, confirmAmuxV19Continue, createAmuxV19StopContact,
+import { AMUX_V19_APP_RETRY_DELAYS_MS, AMUX_V19_STOP_UNREACHABLE,
+  amuxV19AppRequest, amuxV19RequestUnsent, confirmAmuxV19Continue, createAmuxV19StopContact,
   pollAmuxV19Stop } from "../lib/amux/ideaLocalAppRequest.mjs";
 import { checkAmuxV19MaxSessionAnalysisStop,
   shouldStopAmuxV19MaxSessionAnalysis } from
@@ -102,16 +100,39 @@ test("a gateway answer to a write goes to the readback, not a resend", async () 
   assert.equal(writes, 1);
 });
 
-test("an unsent write gives up within its budget and names why", async () => {
-  const start = clock.now;
-  let writes = 0;
-  assert.deepEqual(await request("write", async () => {
-    writes += 1;
-    throw unsent("ENOTFOUND");
-  }), { kind: "failed", reason: "network_unsent_retry_exhausted" });
-  assert.ok(writes > 1);
-  assert.ok(clock.now - start <= AMUX_V19_APP_RETRY_BUDGET_MS);
-});
+// A retry has no deadline: only the caller's signal ends the asking. The
+// fetch below aborts the caller's signal after `attempts` tries.
+const unreachableUntilAborted = (attempts) => {
+  const controller = new AbortController();
+  let calls = 0;
+  return { signal: controller.signal, calls: () => calls,
+    fetchImpl: async () => {
+      calls += 1;
+      if (calls >= attempts) controller.abort();
+      throw timeout();
+    } };
+};
+
+test("an unsent write is sent again with no deadline until the caller stops",
+  async () => clock.withLongOutage(async () => {
+    const start = clock.now;
+    const controller = new AbortController();
+    let writes = 0;
+    assert.deepEqual(await request("write", async () => {
+      writes += 1;
+      if (writes >= 40) controller.abort();
+      throw unsent("ENOTFOUND");
+    }, { signal: controller.signal }),
+    { kind: "failed", reason: "network_unsent_retry_exhausted" });
+    assert.equal(writes, 40);
+    // Far past the old 30 s budget; the last delay repeats.
+    assert.ok(clock.now - start > 200_000, `waited ${clock.now - start} ms`);
+    const delays = clock.sleeps.slice(-39);
+    assert.deepEqual(delays.slice(0, AMUX_V19_APP_RETRY_DELAYS_MS.length),
+      [...AMUX_V19_APP_RETRY_DELAYS_MS]);
+    assert.ok(delays.slice(AMUX_V19_APP_RETRY_DELAYS_MS.length).every(
+      (ms) => ms === AMUX_V19_APP_RETRY_DELAYS_MS.at(-1)));
+  }));
 
 test("a read is asked again after any lost answer or gateway reply", async () => {
   for (const failure of [() => { throw sentLost(); }, () => { throw timeout(); },
@@ -159,34 +180,31 @@ test("a body lost mid-stream is a lost answer: read again, never rewritten",
     assert.equal(writes, 1);
   });
 
-test("read and readback budgets bound the retry schedule", async () => {
-  const run = async (purpose) => {
+test("a read and a readback keep asking past any old budget", async () => clock.withLongOutage(async () => {
+  const run = async (purpose, attempts) => {
     const start = clock.now;
-    let calls = 0;
-    const reply = await request(purpose, async () => {
-      calls += 1;
-      throw timeout();
-    });
-    return { reply, calls, waited: clock.now - start };
+    const gone = unreachableUntilAborted(attempts);
+    const reply = await request(purpose, gone.fetchImpl,
+      { signal: gone.signal });
+    return { reply, calls: gone.calls(), waited: clock.now - start };
   };
-  const read = await run("read");
-  const readback = await run("readback");
+  const read = await run("read", 30);
+  const readback = await run("readback", 30);
   assert.deepEqual(read.reply, { kind: "failed", reason: "read_unreachable" });
   assert.deepEqual(readback.reply, { kind: "failed",
     reason: "readback_unreachable" });
-  assert.ok(read.waited <= AMUX_V19_APP_RETRY_BUDGET_MS);
-  assert.ok(readback.waited <= AMUX_V19_APP_READBACK_BUDGET_MS);
-  assert.ok(readback.calls > read.calls);
-  // The budget, not the six listed delays, ends a readback: it keeps the last
-  // delay until the 60 s budget is nearly spent (review r-20261020-074454-231544).
-  assert.ok(readback.calls > 7, `readback made ${readback.calls} calls`);
-  assert.ok(readback.waited > AMUX_V19_APP_READBACK_BUDGET_MS - 8_000,
-    `readback waited ${readback.waited} ms`);
+  // The former 30 s read and 60 s readback budgets no longer end the asking.
+  for (const asked of [read, readback]) {
+    assert.equal(asked.calls, 30);
+    assert.ok(asked.waited > 120_000, `waited ${asked.waited} ms`);
+  }
   // A single stop poll never retries: the stop rule re-asks on its own clock.
-  const poll = await run("poll");
-  assert.equal(poll.calls, 1);
-  assert.equal(poll.waited, 0);
-});
+  const start = clock.now;
+  let calls = 0;
+  await request("poll", async () => { calls += 1; throw timeout(); });
+  assert.equal(calls, 1);
+  assert.equal(clock.now - start, 0);
+}));
 
 test("a redirect is an invalid answer, not a network drop", async () => {
   const moved = Response.json({ ok: true });
@@ -202,23 +220,18 @@ test("an explicit stop answer always stops at once, even inside a drop", () => {
   assert.equal(contact.observe("stop"), "stop_requested");
   const dropped = createAmuxV19StopContact();
   assert.equal(dropped.observe("unreachable"), null);
-  clock.now += AMUX_V19_STOP_UNREACHABLE_LIMIT_MS / 2;
   assert.equal(dropped.observe("unreachable"), null);
   assert.equal(dropped.observe("stop"), "stop_requested");
+  assert.equal(createAmuxV19StopContact().observe("aborted"), "stop_aborted");
 });
 
-test("short stop-read failures keep going; the contact limit stops", () => {
+test("stop reads that go unanswered never stop an attempt, however long", () => {
   const contact = createAmuxV19StopContact();
-  assert.equal(contact.observe("unreachable"), null);
-  clock.now += AMUX_V19_STOP_UNREACHABLE_LIMIT_MS - 1;
-  assert.equal(contact.observe("unreachable"), null);
-  // Any explicit answer restarts the contact clock.
+  for (let reads = 0; reads < 10_000; reads += 1) {
+    assert.equal(contact.observe("unreachable"), null);
+  }
   assert.equal(contact.observe("continue"), null);
   assert.equal(contact.observe("unreachable"), null);
-  clock.now += AMUX_V19_STOP_UNREACHABLE_LIMIT_MS - 1;
-  assert.equal(contact.observe("unreachable"), null);
-  clock.now += 1;
-  assert.equal(contact.observe("unreachable"), "stop_unreachable");
 });
 
 test("while the CLI runs a dropped poll keeps it running and a stop ends it",
@@ -246,18 +259,26 @@ test("before a gated step only an explicit continue passes", async () => {
     return reads < 4 ? AMUX_V19_STOP_UNREACHABLE : false;
   }, createAmuxV19StopContact()), null);
   assert.equal(reads, 4);
-  assert.equal(clock.now - start, 3 * AMUX_V19_STOP_RETRY_INTERVAL_MS);
+  // Unanswered reads are asked again on the request delays.
+  assert.equal(clock.now - start,
+    AMUX_V19_APP_RETRY_DELAYS_MS.slice(0, 3).reduce((a, b) => a + b, 0));
   reads = 0;
   assert.equal(await confirmAmuxV19Continue(async () => {
     reads += 1;
     return reads < 3 ? AMUX_V19_STOP_UNREACHABLE : true;
   }, createAmuxV19StopContact()), "stop_requested");
   assert.equal(reads, 3);
-  const limitStart = clock.now;
-  assert.equal(await confirmAmuxV19Continue(
-    async () => AMUX_V19_STOP_UNREACHABLE, createAmuxV19StopContact()),
-  "stop_unreachable");
-  assert.ok(clock.now - limitStart >= AMUX_V19_STOP_UNREACHABLE_LIMIT_MS);
+  // No contact limit: a finished answer waits for the link, however long,
+  // until the caller's own signal ends it.
+  const waitStart = clock.now;
+  const waiting = new AbortController();
+  let unanswered = 0;
+  assert.equal(await clock.withLongOutage(() => confirmAmuxV19Continue(async () => {
+    unanswered += 1;
+    if (unanswered >= 60) waiting.abort();
+    return AMUX_V19_STOP_UNREACHABLE;
+  }, createAmuxV19StopContact(), waiting.signal)), "stop_aborted");
+  assert.ok(clock.now - waitStart > 120_000);
   const aborted = new AbortController();
   aborted.abort();
   assert.equal(await confirmAmuxV19Continue(async () => false,
@@ -322,7 +343,10 @@ test("every stop prints its fixed reason on the cycle status line", async () => 
   const run = (steps) => runAmuxV19MaxSessionCycleOnce({ origin,
     stateDirectory: "/state" }, { claim: claimed,
     readIdea: async () => ({ kind: "unavailable" }),
-    haltFile: () => ({ release: async () => {} }), ...steps });
+    marker: () => ({ read: async () => null, release: async () => {} }),
+    // Every stop after the claim reports it unknown (operator, 2026-11-16).
+    reportUnknown: async () => ({ kind: "recorded", status: "owner_consumed",
+      settledMicroUsd: "0", recovered: false, retryWrite: false }), ...steps });
 
   const unreachableQueue = await runAmuxV19MaxSessionCycleOnce({ origin }, {
     claim: async () => ({ kind: "unavailable", reason: "read_unreachable" }) });
@@ -340,21 +364,22 @@ test("every stop prints its fixed reason on the cycle status line", async () => 
     reason: "read_unreachable" }) });
   assert.equal(amuxV19MaxSessionCycleStatus(idea).line,
     "AMUX_V19_MAX_SESSION_CYCLE_outcome_unknown stage=idea_read " +
-    "reason=read_unreachable\n");
+    "reason=read_unreachable unknownReport=recorded haltReleased=true\n");
 
   // The staging failure of 2026-10-20, now with its reasons: the stop read
   // and the unknown report both lost the link.
   const analysis = await run({
     readIdea: async () => ({ kind: "ready", prompt: "unused" }),
     analyse: async () => ({ kind: "outcome_unknown", cliStarted: false,
-      reason: "stop_unreachable" }),
+      reason: "stop_aborted" }),
     reportUnknown: async () => ({ kind: "outcome_unknown",
       receiptStatus: null, retryWrite: false,
       reason: "readback_unreachable" }) });
   assert.equal(amuxV19MaxSessionCycleStatus(analysis).line,
     "AMUX_V19_MAX_SESSION_CYCLE_outcome_unknown stage=analysis " +
-    "reason=stop_unreachable cliStarted=false beforeCli=false " +
-    "unknownReport=unconfirmed reportReason=readback_unreachable\n");
+    "reason=stop_aborted cliStarted=false beforeCli=false " +
+    "unknownReport=unconfirmed reportReason=readback_unreachable " +
+    "haltReleased=false\n");
 
   const result = await run({
     readIdea: async () => ({ kind: "ready", prompt: "unused" }),
@@ -364,7 +389,7 @@ test("every stop prints its fixed reason on the cycle status line", async () => 
       reason: "stop_requested" }) });
   assert.equal(amuxV19MaxSessionCycleStatus(result).line,
     "AMUX_V19_MAX_SESSION_CYCLE_outcome_unknown stage=result " +
-    "reason=stop_requested\n");
+    "reason=stop_requested unknownReport=recorded haltReleased=true\n");
 
   // A step without its own reason still names where it stopped.
   const bare = await run({});

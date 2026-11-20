@@ -85,6 +85,7 @@ const prismaStub = {
   // tests that read `failedSteps` are the ones that notice.
   comparisonReviewRun: { deleteMany: async () => ({ count: 31 }) },
   responseLatencySample: { deleteMany: async () => ({ count: 35 }) },
+  chatRouterLocationPreparation: { deleteMany: async () => ({ count: 0 }) },
   providerErrorEvent: { deleteMany: async () => ({ count: 6 }) },
   productAnalyticsEvent: { deleteMany: async () => ({ count: 7 }) },
   notificationDelivery: { deleteMany: async () => ({ count: 8 }) },

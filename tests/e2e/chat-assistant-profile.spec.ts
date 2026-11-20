@@ -295,13 +295,28 @@ test("the empty picker offers creating one instead of describing it", async ({
 
     const create = page.getByTestId("assistant-create-cta");
     await expect(create).toBeVisible();
+    // Review's composer names Review, so the finished create returns there.
     await expect(create).toHaveAttribute(
         "href",
-        "/settings/assistants/new?from=chat"
+        "/settings/assistants/new?from=review"
     );
     // Managing is offered too, but creating is the one carrying the emphasis
     // when there is nothing to manage.
     await expect(page.getByTestId("assistant-manage-cta")).toBeVisible();
+});
+
+test("Chat's create CTA names Chat, so the assistant starts where it was added", async ({
+    page,
+}) => {
+    await mockAuthenticatedApi(page, { assistantProfiles: [] });
+    await page.goto("/chat?lang=en");
+    await expect(page.getByTestId("chat-input")).toBeVisible();
+    await openAssistantMenu(page);
+
+    await expect(page.getByTestId("assistant-create-cta")).toHaveAttribute(
+        "href",
+        "/settings/assistants/new?from=chat"
+    );
 });
 
 test("the CTAs stay available once profiles exist", async ({ page }) => {
@@ -381,7 +396,7 @@ test("the create CTA is reachable and activatable from the keyboard", async ({
     await create.focus();
     await expect(create).toBeFocused();
     await page.keyboard.press("Enter");
-    await expect(page).toHaveURL(/\/settings\/assistants\/new\?from=chat$/);
+    await expect(page).toHaveURL(/\/settings\/assistants\/new\?from=review$/);
 });
 
 test("following a CTA closes the tools menu behind it", async ({ page }) => {

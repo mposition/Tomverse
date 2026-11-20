@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { LanguageProvider } from "@/components/LanguageProvider";
 import { MARKETING_LOCALE_ALIASES, marketingLocaleFor } from "@/lib/marketingLocale";
-import { LandingPageContent } from "@/components/marketing/LandingPageContent";
+import { ReviewProductPage } from "@/components/marketing/v2/review/ReviewProductPage";
 import { REVIEW_PRODUCT_PATH } from "@/lib/marketingRoutes";
 import { SEO_LOCALES, createPageMetadata, localizedPath, reviewOgCopy, reviewSeoCopy } from "@/lib/seo";
 
@@ -39,7 +39,7 @@ export default async function LocalizedReviewProductPage({ params }: LocalizedRe
   return (
     <div lang={normalizedLocale}>
       <LanguageProvider initialLang={normalizedLocale} forceInitialLang>
-        <LandingPageContent />
+        <ReviewProductPage />
       </LanguageProvider>
     </div>
   );
