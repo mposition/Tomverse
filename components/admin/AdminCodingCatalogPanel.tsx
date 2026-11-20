@@ -104,7 +104,7 @@ export function AdminCodingCatalogPanel() {
   const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [adding, setAdding] = useState<{ id: string; startedAt: number } | null>(null);
-  const [urlPrompt, setUrlPrompt] = useState<{ candidate: CodingCandidateView; url: string } | null>(null);
+  const [urlPrompt, setUrlPrompt] = useState<{ candidate: CodingCandidateView; toolUrl: string; structuredUrl: string } | null>(null);
   const [providerDrafting, setProviderDrafting] = useState<{ provider: string; startedAt: number } | null>(null);
   const [openProviderDraft, setOpenProviderDraft] = useState<string | null>(null);
   const [providerStart, setProviderStart] = useState<ProviderStartForm | null>(null);
@@ -225,12 +225,11 @@ export function AdminCodingCatalogPanel() {
   };
 
   const onAdd = (candidate: CodingCandidateView) => {
-    const defaults = report?.draftProviders.find((entry) => entry.provider === candidate.provider)?.defaultSources ?? [];
-    if (defaults.length === 0) {
-      setUrlPrompt({ candidate, url: "" });
-      return;
-    }
-    void addCandidate(candidate);
+    // The draft reads one tool calling page and one structured output page;
+    // the dialog shows the provider's defaults so the operator sees and can
+    // replace what is read before the draft call.
+    const defaults = report?.draftProviders.find((entry) => entry.provider === candidate.provider)?.capabilitySources ?? null;
+    setUrlPrompt({ candidate, toolUrl: defaults?.toolCalling ?? "", structuredUrl: defaults?.structuredOutput ?? "" });
   };
 
   const saveSettings = async (item: CodingCatalogItem) => {
@@ -687,22 +686,45 @@ export function AdminCodingCatalogPanel() {
       <AdminReasonDialog
         open={urlPrompt !== null}
         title={urlPrompt ? c.candidates.urlTitle(urlPrompt.candidate.name) : ""}
-        description={c.candidates.urlDescription}
+        description={
+          report?.draftProviders.find((entry) => entry.provider === urlPrompt?.candidate.provider)?.capabilitySources
+            ? c.candidates.urlDescription
+            : c.candidates.urlDescriptionNoDefault
+        }
         confirmLabel={c.candidates.urlConfirm}
-        confirmDisabled={!urlPrompt?.url.trim()}
-        onConfirm={() => urlPrompt && void addCandidate(urlPrompt.candidate, [urlPrompt.url.trim()])}
+        confirmDisabled={!urlPrompt?.toolUrl.trim()}
+        onConfirm={() =>
+          urlPrompt &&
+          void addCandidate(
+            urlPrompt.candidate,
+            [...new Set([urlPrompt.toolUrl.trim(), urlPrompt.structuredUrl.trim()].filter(Boolean))]
+          )
+        }
         onClose={() => setUrlPrompt(null)}
       >
         {urlPrompt ? (
-          <label className="block text-xs font-bold text-zinc-300">
-            {c.candidates.urlLabel}
-            <input
-              type="url"
-              value={urlPrompt.url}
-              onChange={(event) => setUrlPrompt({ ...urlPrompt, url: event.target.value })}
-              className="mt-1 w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 font-mono text-sm text-zinc-100 outline-none focus:border-blue-500"
-            />
-          </label>
+          <div className="space-y-3">
+            <label className="block text-xs font-bold text-zinc-300">
+              {c.candidates.toolUrlLabel}
+              <input
+                type="url"
+                value={urlPrompt.toolUrl}
+                onChange={(event) => setUrlPrompt({ ...urlPrompt, toolUrl: event.target.value })}
+                data-testid="coding-candidate-tool-url"
+                className="mt-1 w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 font-mono text-sm text-zinc-100 outline-none focus:border-blue-500"
+              />
+            </label>
+            <label className="block text-xs font-bold text-zinc-300">
+              {c.candidates.structuredUrlLabel}
+              <input
+                type="url"
+                value={urlPrompt.structuredUrl}
+                onChange={(event) => setUrlPrompt({ ...urlPrompt, structuredUrl: event.target.value })}
+                data-testid="coding-candidate-structured-url"
+                className="mt-1 w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 font-mono text-sm text-zinc-100 outline-none focus:border-blue-500"
+              />
+            </label>
+          </div>
         ) : null}
       </AdminReasonDialog>
 
