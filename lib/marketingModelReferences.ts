@@ -26,8 +26,8 @@ import { getModel, isPubliclySelectableModel, type AiModel } from "@/lib/models"
  * Consumed by components/marketing/ChatGptVsClaudeGuide.tsx.
  */
 export const CHATGPT_VS_CLAUDE_MODEL_IDS = [
-    "gpt-5-4-mini",
-    "claude-haiku-4-5",
+    "gpt-6-luna",
+    "claude-haiku-5-5",
 ] as const;
 
 /**
