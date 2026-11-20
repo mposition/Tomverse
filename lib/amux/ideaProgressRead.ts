@@ -138,13 +138,13 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
         -- The plaintext title is the one exception, cleared with the body.
         ("rawPurgedAt" IS NULL AND "rawKeyId" IS NOT NULL) AS "rawReadable", "title"
       FROM "AmuxIdeaSubmission"
-      -- A closed or cancelled idea leaves the list, so the bound is spent on
-      -- ideas still in progress. The opened idea takes the first place even
-      -- when older than the newest ones, so its detail (and the release of
-      -- its unused reservation) opens at any age; the bound is unchanged.
+      -- A closed or cancelled idea leaves the list here. Every other idea is
+      -- read: whether one is finished (done, or its cards all closed or
+      -- archived) is the progress below, so the list bound is applied after it
+      -- (amuxIdeaProgressListRows) and is never spent on finished ideas. The
+      -- opened idea comes first, so its detail opens at any age.
       WHERE "actorUserId" = ${actorUserId} AND "cancelledAt" IS NULL
       ORDER BY ("requestId"::text = ${openedRequestId}::text) DESC NULLS LAST, "submittedAt" DESC, "id" ASC
-      LIMIT ${AMUX_IDEA_PROGRESS_LIMIT}
     )
     SELECT
       n."id" AS "id",
@@ -236,7 +236,7 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
     ORDER BY n."submittedAt" DESC, n."id" ASC
   `;
 
-  return ideas.map((idea) => {
+  return amuxIdeaProgressListRows(ideas.map((idea) => {
     const own = idea.cards ?? [];
     const pins = idea.referencePins;
     const lane = amuxIdeaLaneView(idea.laneAttempts ?? [], now.getTime(), {
@@ -298,5 +298,24 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
         readManifests: evidence.readManifests ?? [],
       })),
     };
-  });
+  }), openedRequestId);
+}
+
+/**
+ * The Ideas list is the ideas still in progress: a finished idea (stage done,
+ * or cancelled because its Tasks were all closed or archived) leaves it, so the
+ * newest finished ideas never push an older idea that still waits for the
+ * owner out of the list (2026-11-20: thirty finished session ideas hid seven
+ * waiting ones). The opened idea always stays, finished or not, so its detail
+ * opens; the bound counts it. Order is the read's: newest first.
+ */
+export function amuxIdeaProgressListRows<T extends { stage: string; requestId: string }>(
+  rows: T[], openedRequestId: string | null,
+): T[] {
+  const opened = openedRequestId === null ? undefined : rows.find((row) => row.requestId === openedRequestId);
+  const inProgress = rows.filter((row) => row !== opened && row.stage !== "done" && row.stage !== "cancelled")
+    .slice(0, opened ? AMUX_IDEA_PROGRESS_LIMIT - 1 : AMUX_IDEA_PROGRESS_LIMIT);
+  const kept = new Set<T>(inProgress);
+  if (opened) kept.add(opened);
+  return rows.filter((row) => kept.has(row));
 }

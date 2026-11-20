@@ -6,7 +6,7 @@ import test from "node:test";
 import { AMUX_DB_BOUNDARIES } from "../lib/amux/dbBoundary.ts";
 import { amuxIdeaBlockReason, amuxIdeaProgress, amuxIdeaProgressFailureLog, amuxIdeaProgressStep,
   amuxIdeaStatusNotice } from "../lib/amux/ideaProgressCore.ts";
-import { AMUX_IDEA_PROGRESS_LIMIT, readAmuxIdeaProgressInTx } from "../lib/amux/ideaProgressRead.ts";
+import { AMUX_IDEA_PROGRESS_LIMIT, amuxIdeaProgressListRows, readAmuxIdeaProgressInTx } from "../lib/amux/ideaProgressRead.ts";
 
 const root = process.cwd();
 const read = (path) => readFileSync(join(root, path), "utf8");
@@ -96,6 +96,23 @@ test("an archived card has left the board, so an idea whose cards were all archi
   const sql = read("lib/amux/ideaProgressRead.ts");
   assert.match(sql, /'archived', \(w\."archivedAt" IS NOT NULL\)/, "the read carries each card's archived flag");
   assert.match(sql, /archived: card\.archived === true/, "and passes it to the progress");
+});
+
+test("the Ideas list shows ideas still in progress, so finished ones never push a waiting idea out", () => {
+  // 2026-11-20: thirty finished session ideas filled the newest twenty and hid seven waiting ones.
+  const row = (index, stage) => ({ requestId: `r-${index}`, stage });
+  const finished = Array.from({ length: 30 }, (_, index) => row(index, index % 2 ? "done" : "cancelled"));
+  const waiting = Array.from({ length: 7 }, (_, index) => row(100 + index, "execution_approval"));
+  const keys = (rows) => rows.map((value) => value.requestId);
+  assert.deepEqual(keys(amuxIdeaProgressListRows([...finished, ...waiting], null)), keys(waiting));
+  const many = Array.from({ length: AMUX_IDEA_PROGRESS_LIMIT + 5 }, (_, index) => row(200 + index, "execution"));
+  assert.equal(amuxIdeaProgressListRows(many, null).length, AMUX_IDEA_PROGRESS_LIMIT, "the list keeps its bound");
+  const opened = amuxIdeaProgressListRows([...many, finished[1]], "r-1");
+  assert.equal(opened.length, AMUX_IDEA_PROGRESS_LIMIT, "the opened idea counts toward the bound");
+  assert.ok(keys(opened).includes("r-1"), "an opened finished idea still opens");
+  assert.deepEqual(keys(opened).slice(0, 2), ["r-200", "r-201"], "newest first, the read's order");
+  assert.equal(read("lib/amux/ideaProgressRead.ts").includes("LIMIT ${AMUX_IDEA_PROGRESS_LIMIT}"), false,
+    "the read itself is not cut at the list bound");
 });
 
 test("an unknown outcome is flagged, never a decision to retry", () => {
@@ -224,7 +241,9 @@ test("the list is one statement in one bounded snapshot that never reads idea te
   assert.deepEqual(sql.match(/\w+\."title"/g), ['n."title"']);
   assert.ok(sql.includes(`AS "rawReadable", "title"`) && sql.includes(`n."title" AS "title"`));
   assert.equal(row.title, "Synthetic first line");
-  assert.ok(values.includes("owner-1") && values.includes(AMUX_IDEA_PROGRESS_LIMIT), "owner scoped and bounded");
+  assert.ok(values.includes("owner-1"), "owner scoped");
+  assert.equal(values.includes(AMUX_IDEA_PROGRESS_LIMIT), false,
+    "the list bound is applied after the progress, not to the read (amuxIdeaProgressListRows)");
   assert.ok(sql.includes(`AND "cancelledAt" IS NULL`), "a closed or cancelled idea leaves the list");
   // An opened idea older than the newest ones still takes a place inside the same bound.
   assert.ok(sql.includes(`ORDER BY ("requestId"::text = ?::text) DESC NULLS LAST, "submittedAt" DESC`));
