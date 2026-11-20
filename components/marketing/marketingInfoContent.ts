@@ -81,7 +81,7 @@ export const infoPages = {
       },
       {
         "title": "다른 AI 서비스의 대화를 가져올 수 있나요?",
-        "body": "제공되는 환경에서는 로그인하면 ChatGPT, Claude, Gemini(Google Takeout)의 공식 데이터 내보내기 파일로 과거 대화를 가져오고, Tomverse에서 대화를 이어갈 수 있습니다. 과거 대화의 맥락과 사용자가 승인한 기억·답변 스타일을 참고합니다. 새 답변은 현재 선택한 Tomverse 모델이 생성하므로 원래 AI 서비스와 동일하지 않을 수 있습니다."
+        "body": "제공되는 환경에서는 로그인하면 ChatGPT, Claude, Gemini의 데이터 내보내기 파일(Gemini는 Google Takeout)로 과거 대화를 가져오고, Tomverse에서 대화를 이어갈 수 있습니다. 과거 대화의 맥락과 사용자가 승인한 기억·답변 스타일을 참고합니다. 새 답변은 현재 선택한 Tomverse 모델이 생성하므로 원래 AI 서비스와 동일하지 않을 수 있습니다."
       },
       {
         "title": "이미지도 만들 수 있나요?",
