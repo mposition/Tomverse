@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   canonicalJson,
   catalogContentHash,
+  normalizedSnapshotContentHash,
   codingActivationBlockers,
   codingCandidateExclusion,
   codingCatalogExternalChannelsEnabled,
@@ -247,8 +248,13 @@ test("a snapshot row published before links parses to the same row a dedicated e
   const current = codingCatalogRowOf(resolve(profile, { modelId: "qwen3.7-coder-plus", terms: {} }).row);
   // The managed path's comparison (lib/codeManagedService.ts modelPair).
   assert.equal(canonicalJson(current), canonicalJson(parsed));
-  // Its hash does differ from the legacy one: the scheduled renewal waits for one publish.
+  // Its stored hash differs from the legacy one, but the legacy rows read
+  // through today's schema hash the same, so the scheduled renewal still
+  // extends that snapshot without a manual publish.
   assert.notEqual(catalogContentHash([current]), catalogContentHash([legacyRow]));
+  assert.equal(normalizedSnapshotContentHash({ models: [legacyRow] }), catalogContentHash([current]));
+  assert.equal(normalizedSnapshotContentHash({ models: [{ ...legacyRow, modelId: "not a model id" }] }), null);
+  assert.equal(normalizedSnapshotContentHash(null), null);
   assert.deepEqual(snapshotPendingChanges([parsed], [current]), []);
   // A linked row round-trips through the snapshot schema unchanged.
   const linked = codingCatalogRowOf(resolve(link({ channels: ["code", "api"] })).row);
