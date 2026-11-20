@@ -41,6 +41,16 @@ const PLAN_NAMES: Record<(typeof PLAN_ORDER)[number], string> = { free: "Free", 
 
 type PromotionTargets = Pick<FeaturedBillingPromotion, "appliesToPlanIds" | "billingIntervals">;
 
+/**
+ * The featured promotion the page may show, or null. The page's copy and sale price are
+ * percentages; a fixed-amount promotion (a USD amount, which new promotions cannot be) would
+ * read as "0% off" at full price while checkout charged less, so it is not shown at all.
+ */
+export const displayablePromotion = <T extends { discountPercent: number }>(promotion: T | null | undefined): T | null =>
+  promotion && Number.isFinite(promotion.discountPercent) && promotion.discountPercent > 0 && promotion.discountPercent < 100
+    ? promotion
+    : null;
+
 /** Whether the promotion's monthly discount is shown on this plan's card. */
 export const promotionAppliesToPlan = (promotion: PromotionTargets | null | undefined, planId: (typeof PLAN_ORDER)[number]) =>
   Boolean(promotion && promotion.appliesToPlanIds.includes(planId) && promotion.billingIntervals.includes("monthly"));
