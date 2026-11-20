@@ -2739,7 +2739,7 @@ const checks = [
       source.includes('/model-icons/chatgpt.png') &&
       source.includes('/model-icons/claude.png') &&
       read("app/(site)/(marketing)/chatgpt-vs-claude/page.tsx").includes(
-        'template="chatgpt-vs-claude"'
+        'slug="chatgpt-vs-claude"'
       ),
   },
   {
