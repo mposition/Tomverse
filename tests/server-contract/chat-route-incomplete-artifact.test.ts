@@ -459,6 +459,8 @@ mock.module(mod("lib/chatImageIntent.ts"), { namedExports: {
     return {
       context: undefined,
       accept: () => {},
+      // Not a combined turn: nothing for the route to record here.
+      combinedOutcome: () => null,
       resolve: async () => input && forcedImageIntent
         ? { image: true, prompt: "Synthetic image request.", preset: "standard", modelId: null, edit: false }
         : { image: false },
