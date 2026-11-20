@@ -170,7 +170,11 @@ model accepts a temperature, including models registered with reasoning `none`;
 for a model that takes none of them they are left out of the call and named in
 the `x-tomverse-ignored-parameters` response header, because coding clients send
 them on every request -- VS Code always sends a temperature), `stop` (up to 4), `n: 1`, `store: false`,
-`user` (accepted, no effect), `reasoning_effort` (OpenAI reasoning models only).
+`user` (accepted, no effect), `reasoning_effort` (OpenAI reasoning models only), and its
+Responses-API spelling `reasoning: { effort, summary }`, which Cursor sends for a model name it
+recognises (seen with `gpt-6-luna` on production, 2026-11-20): `effort` is read as `reasoning_effort`
+(both sent and different is refused), and `summary`, which has no place in a Chat Completions answer, is
+left out and named in `x-tomverse-ignored-parameters`.
 The request body may be up to 12 MB.
 
 **Refused with a typed 400:** any other field (`unsupported_parameter`, naming

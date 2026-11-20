@@ -332,11 +332,14 @@ export async function handleChatCompletions(request: Request): Promise<Response>
         // them. What was left out is named in a response header.
         const samplingAllowed =
             getModelGenerationSettings(model, { temperature: 1 }).temperature !== undefined;
-        const ignoredParameters = samplingAllowed
-            ? []
-            : (["temperature", "top_p", "frequency_penalty", "presence_penalty"] as const).filter(
-                  (param) => parsed[param] != null
-              );
+        const ignoredParameters: string[] = [
+            ...(samplingAllowed
+                ? []
+                : (["temperature", "top_p", "frequency_penalty", "presence_penalty"] as const).filter(
+                      (param) => parsed[param] != null
+                  )),
+            ...(parsed.reasoning?.summary != null ? ["reasoning.summary"] : []),
+        ];
         const infoHeaders: Record<string, string> = {
             ...routedHeaders,
             ...(ignoredParameters.length ? { "x-tomverse-ignored-parameters": ignoredParameters.join(", ") } : {}),
