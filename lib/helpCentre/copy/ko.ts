@@ -605,7 +605,7 @@ export const ko: HelpLocaleCopy = {
       faq: [
         { q: "HTML로 내보냈어요.", a: "Gemini 내보내기는 JSON 형식이어야 합니다. HTML은 읽을 수 없으니 Takeout에서 형식을 JSON으로 바꿔 다시 내보내세요." },
         { q: "원본 파일이 서버로 올라가나요?", a: "원본 파일은 기기를 벗어나지 않습니다. 고른 대화의 텍스트만 계정에 저장되고, 이미지·음성·첨부파일은 가져오지 않습니다." },
-        { q: "Perplexity 대화도 가져올 수 있나요?", a: "아직 지원하지 않습니다. 곧 지원할 예정입니다." },
+        { q: "Perplexity 대화도 가져올 수 있나요?", a: "네. Perplexity에서 답변 아래 내보내기 버튼을 눌러 Markdown(.md)으로 받은 뒤, 가져오기 화면에서 Perplexity를 고르고 그 파일을 올리세요. 파일 하나가 스레드 하나입니다. Perplexity 내보내기에는 질문이 끝나는 표시가 없어 질문과 답변이 잘못 나뉠 수 있으니, 가져온 뒤 대화를 열어 확인하세요." },
       ],
     },
     "import-guest-conversations": {

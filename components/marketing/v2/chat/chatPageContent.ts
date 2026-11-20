@@ -60,7 +60,6 @@ export type ChatPageCopy = {
     eyebrow: string;
     title: [string, string];
     body: string;
-    soon: string;
     steps: Array<[string, string]>;
     note: string;
   };
@@ -197,7 +196,6 @@ const ko: ChatPageCopy = {
     eyebrow: "대화 이어가기",
     title: ["다른 AI와 나눈 대화,", "처음부터 다시 설명하지 마세요."],
     body: "각 서비스에서 내보낸 대화 파일을 올리면 질문과 답, 출처가 그대로 Tomverse로 옵니다. 거기서부터 이어서 묻고, 다른 모델의 의견도 들어 보세요.",
-    soon: "곧 지원",
     steps: [
       ["내보내기", "쓰던 서비스의 설정에서 대화 데이터를 내려받습니다."],
       ["올리기", "설정 › 데이터 › 대화 가져오기에 파일을 올리면 대화 목록이 정리됩니다."],
@@ -320,7 +318,6 @@ const en: ChatPageCopy = {
     eyebrow: "Continue conversations",
     title: ["A conversation you had with another AI?", "Don’t explain it all again."],
     body: "Upload the conversation file exported from each service, and your questions, answers and sources come over to Tomverse as they were. Carry on asking from there, and hear what other models think.",
-    soon: "Coming soon",
     steps: [
       ["Export", "Download your conversation data from the service’s settings."],
       ["Upload", "Upload the file under Settings › Data › Import conversations, and your conversation list is organised."],

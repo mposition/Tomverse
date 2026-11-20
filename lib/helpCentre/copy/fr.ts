@@ -606,7 +606,7 @@ export const fr: HelpLocaleCopy = {
       faq: [
         { q: "J’ai exporté en HTML.", a: "L’export Gemini doit être au format JSON. Le HTML ne peut pas être lu : dans Takeout, réglez le format sur JSON et exportez de nouveau." },
         { q: "Le fichier d’origine est-il envoyé au serveur ?", a: "Le fichier d’origine ne quitte pas votre appareil. Seul le texte des conversations choisies est enregistré dans votre compte ; les images, l’audio et les pièces jointes ne sont pas importés." },
-        { q: "Peut-on aussi importer des conversations Perplexity ?", a: "Pas encore. Ce sera bientôt pris en charge." },
+        { q: "Peut-on aussi importer des conversations Perplexity ?", a: "Oui. Dans Perplexity, appuyez sur le bouton d’export sous une réponse et choisissez Markdown (.md), puis sélectionnez Perplexity sur l’écran d’import et importez le fichier. Un fichier correspond à un fil. L’export Perplexity n’indique pas où se termine une question ; une question et sa réponse peuvent donc être mal découpées. Ouvrez la conversation après l’import pour vérifier." },
       ],
     },
     "import-guest-conversations": {

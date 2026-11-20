@@ -604,7 +604,7 @@ export const zh: HelpLocaleCopy = {
       faq: [
         { q: "我导出成了 HTML。", a: "Gemini 的导出必须是 JSON 格式。HTML 无法读取，请在 Takeout 中把格式改为 JSON 后重新导出。" },
         { q: "原始文件会上传到服务器吗？", a: "原始文件不会离开你的设备。只有你选择的对话文本会保存到账号，图像、语音和附件不会导入。" },
-        { q: "可以导入 Perplexity 的对话吗？", a: "暂时还不支持。我们计划很快支持。" },
+        { q: "可以导入 Perplexity 的对话吗？", a: "可以。在 Perplexity 中点击回答下方的导出按钮并选择 Markdown（.md），然后在导入界面选择 Perplexity 并上传该文件。一个文件对应一个线程。Perplexity 的导出不会标明问题在哪里结束，因此问题和回答可能被错误拆分，导入后请打开对话确认。" },
       ],
     },
     "import-guest-conversations": {

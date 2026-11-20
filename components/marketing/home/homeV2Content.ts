@@ -57,7 +57,6 @@ export type HomeV2Copy = {
     title: [string, string];
     body: string;
     sources: Array<{ name: string; small: string; file: string }>;
-    soon: string;
     threadLabel: string;
     threadTitle: string;
     badge: string;
@@ -169,7 +168,7 @@ const ko: HomeV2Copy = {
     body: "질문하고, 비교하고, 이어가고, 연결하고, 들고 다니고, 코드까지 맡기세요. 지금 Tomverse에서 쓸 수 있는 기능을 한 화면에 모았습니다.",
     cards: [
       { k: "채팅 · Smart Adaptive", h: "질문에 맞는 모델", p: "질문을 자동으로 다듬고, 기능·품질·비용을 보고 모델을 고릅니다. 직접 골라도 됩니다." },
-      { k: "채팅 · 대화 이어가기", h: "하던 대화 그대로", p: "ChatGPT · Claude · Gemini에서 내보낸 대화를 이어갑니다. Perplexity는 곧 지원합니다." },
+      { k: "채팅 · 대화 이어가기", h: "하던 대화 그대로", p: "ChatGPT · Claude · Gemini에서 내보낸 대화를 이어갑니다. Perplexity는 스레드 Markdown 파일로 가져옵니다." },
       { k: "채팅 · 플러그인 · MCP", h: "업무 도구와 연결", p: "GitHub, Notion, Slack, Google Drive부터 직접 등록한 MCP 서버까지." },
       { k: "답변 비교", h: "세 답변, 한 화면", p: "최대 3개 모델의 답을 나란히 읽고 AI Review로 정리합니다." },
       { k: "모바일 · 곧 출시", h: "Android · iOS 앱", p: "같은 대화와 같은 계정을 주머니 속에서." },
@@ -213,9 +212,8 @@ const ko: HomeV2Copy = {
       { name: "ChatGPT", small: "데이터 내보내기 파일", file: "conversations.json" },
       { name: "Claude", small: "계정 데이터 내보내기", file: "claude-export.zip" },
       { name: "Gemini", small: "Google 테이크아웃", file: "takeout.zip" },
-      { name: "Perplexity", small: "스레드 Markdown 내보내기", file: "" },
+      { name: "Perplexity", small: "스레드 Markdown 내보내기", file: "thread.md" },
     ],
-    soon: "곧 지원",
     threadLabel: "이어간 대화 예시",
     threadTitle: "제주 3박 4일 일정",
     badge: "ChatGPT에서 가져옴 · 24개 메시지",
@@ -391,7 +389,7 @@ const en: HomeV2Copy = {
     body: "Ask, compare, continue, connect, take it with you, and hand it code. Everything you can do in Tomverse today, on one screen.",
     cards: [
       { k: "Chat · Smart Adaptive", h: "The right model for the question", p: "Refines your question, then picks a model by capability, quality and cost. Or pick one yourself." },
-      { k: "Chat · Continue a conversation", h: "Pick up where you left off", p: "Continue conversations exported from ChatGPT, Claude and Gemini. Perplexity is coming soon." },
+      { k: "Chat · Continue a conversation", h: "Pick up where you left off", p: "Continue conversations exported from ChatGPT, Claude and Gemini. Perplexity threads come in as Markdown files." },
       { k: "Chat · Plugins · MCP", h: "Connect your work tools", p: "From GitHub, Notion, Slack and Google Drive to MCP servers you register yourself." },
       { k: "Answer comparison", h: "Three answers, one screen", p: "Read up to three models' answers side by side and sum them up with AI Review." },
       { k: "Mobile · Coming soon", h: "Android and iOS apps", p: "The same conversations and the same account, in your pocket." },
@@ -435,9 +433,8 @@ const en: HomeV2Copy = {
       { name: "ChatGPT", small: "Data export file", file: "conversations.json" },
       { name: "Claude", small: "Account data export", file: "claude-export.zip" },
       { name: "Gemini", small: "Google Takeout", file: "takeout.zip" },
-      { name: "Perplexity", small: "Thread Markdown export", file: "" },
+      { name: "Perplexity", small: "Thread Markdown export", file: "thread.md" },
     ],
-    soon: "Coming soon",
     threadLabel: "Example of a continued conversation",
     threadTitle: "Four days in Jeju",
     badge: "Imported from ChatGPT · 24 messages",
