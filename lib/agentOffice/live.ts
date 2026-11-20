@@ -163,7 +163,14 @@ export type AgentOfficeAmuxState =
       kind: "observed";
       /** Absent on older responses; false means admission cannot be determined. */
       catalogConfigured?: boolean;
-      workers: { name: string; provider: string; state: AgentOfficeAmuxWorkerState; heartbeatAt: string | null }[];
+      workers: {
+        name: string;
+        provider: string;
+        state: AgentOfficeAmuxWorkerState;
+        heartbeatAt: string | null;
+        /** The model its v22 profile runs, when the catalog names one. */
+        model?: string;
+      }[];
     };
 
 /** The billing-finance-ops agent's own silence verdict (lib/billingFinanceOpsSilence.ts). */

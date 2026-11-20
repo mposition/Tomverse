@@ -118,9 +118,69 @@ migration 적용은 별도입니다. 구현한 A1 범위와 확정 값은 10절�
   같은 판정이 `providerDataDestinations`의 해당 provider 행이 established(proven)인지도 봅니다.
 - **Code에 내려주는 카탈로그는 불변 스냅샷**(`version`·`contentHash`·`coverageUntil`)이며,
   **목록은 허가가 아닙니다** — 권한은 호출마다 서버가 다시 판정합니다.
-  발행은 Admin `/admin/models?tab=catalog`, 조회는 `GET /api/code/model-catalog`
+  발행은 Admin `/admin/models?tab=coding`(코딩 카탈로그 탭, 2026-11-20에 이미지 카탈로그
+  `?tab=catalog`에서 분리), 조회는 `GET /api/code/model-catalog`
   (`?version=N`이면 바뀌지 않았을 때 `unchanged`), coverage가 지난 스냅샷은 503입니다.
   태스크 예약 행은 그 태스크가 견적받은 스냅샷 `version`을 기록하고, 정산은 그 버전의 가격으로 합니다.
+
+### 6.1 코딩 카탈로그의 두 가지 행 (운영자 결정 2026-11-20)
+
+- **코딩 전용 행**(`profile.source`가 없거나 `dedicated`): 채팅에 없는 모델입니다. 위 6절대로
+  행이 이름·공급자·단가·능력·출처를 모두 갖고, LLM 초안(`draft`)으로 채웁니다.
+- **채팅 모델 연결 행**(`profile.source: "chat"`, `registryModelId` = 행의 `modelId`):
+  이름·공급자·API 모델 id·단가·컨텍스트·최대 출력·이미지 입력을 **복사하지 않고 읽을 때마다**
+  채팅 레지스트리(`ModelRegistryEntry`)에서 가져옵니다. 단가는 채팅 가격 해석
+  (`resolveModelPricing`)이 컨텍스트 전체 크기에서 내는 값(장문 구간)이고, 확인 근거는 채팅
+  가격표의 `pricingVersion`입니다. 대체 가격(conservative fallback)이면 판정이 거절합니다.
+  행에는 코딩 전용 값만 저장합니다: `toolCalling`·`structuredOutput`(LLM 초안, 운영자가 수정
+  가능), `minimumPlan` 덮어쓰기(없으면 채팅 플랜, Guest는 Free), `creditWeight`(없으면 채팅
+  가중치, 하한 미만이면 켤 수 없음), 노출 채널 `channels`.
+- 연결한 채팅 모델이 비활성·삭제되면 판정이 거절합니다(`chat_model_disabled`·`chat_model_deleted`).
+  채널에 `code`가 있으면 추론 토큰 별도 과금 모델과 관리형 경로가 부르지 않는 공급자도 판정에서
+  거절합니다(관리형 경로의 같은 거절을 활성화 전에 보입니다).
+- 스냅샷 행은 해석된 값(상속 값 포함)과 `source`·`channels`를 담습니다. 이전에 발행한 행에는
+  둘이 없고, 읽을 때 `dedicated`·`["code"]`로 읽습니다. `POST /api/code/managed`는 스냅샷 행과
+  지금 해석한 행을 canonicalJson으로 비교하므로, 채팅에서 단가·상한이 바뀐 연결 행은 다시 발행할
+  때까지 `CODE_MODEL_UNAVAILABLE`입니다. `channels`에 `code`가 없는 행도 같은 거절입니다.
+  `GET /api/code/model-catalog`는 스냅샷을 그대로 내려주며(목록은 허가가 아님), 클라이언트는
+  `channels`에 `code`가 있는 행만 보여야 합니다.
+- 이 변경 뒤 처음 계산한 해시는 `source`·`channels`가 들어가 이전 스냅샷과 다르므로, 정기 갱신
+  (`renewCodingSnapshotIfUnchanged`)은 사람이 한 번 발행할 때까지 갱신하지 않습니다. 이전 스냅샷은
+  coverage가 끝날 때까지 관리형 경로에서 그대로 쓰입니다.
+
+### 6.2 공급자 조건 (공급자 단위)
+
+- 약관(재판매·코딩 에이전트 허용, URL), 보존(URL), 처리 리전, 확인일, 출처는 공급자마다 한 행
+  (`CodingProviderTerms`)입니다. 판정은 연결 행과 전용 행 모두 이 행을 읽습니다.
+- 공급자 행이 없는 **전용 행은 자기 행의 terms·retention·processingRegion을 대체 값으로 씁니다.**
+  배포만으로 지금 활성인 행이 거절되지 않게 하려는 것입니다(데이터 이전 없음). 공급자 행을
+  적용하면 그때부터 그 공급자의 모든 행이 공급자 행을 씁니다. 연결 행에는 대체 값이 없어 공급자
+  행이 없으면 거절합니다(`provider_terms_missing`).
+- **유효기간 90일**: 확인일부터 90일이 지나면 "다시 확인 필요"입니다. 그 공급자의 모델은 **새로
+  활성화할 수 없고**(`provider_terms_expired`), **이미 활성인 모델은 경고만 띄우고 계속 씁니다.**
+  90일은 재확인 주기이지 약관이 바뀌었다는 근거가 아니며, 거절로 두면 다음 발행·정기 갱신에서
+  활성 모델이 빠져 Code 관리형 작업이 끊기기 때문입니다. 약관이 실제로 바뀌었으면 다시 확인
+  초안을 적용하는 순간 판정이 바뀌어 다음 발행에서 빠집니다.
+- "다시 확인"은 공급자 공식 문서를 읽는 LLM 초안(`MODEL_CATALOG_DRAFT_LLM_MODEL_ID`, 호출 1회)이며
+  가져오는 URL과 답의 URL 모두 `isOfficialSourceUrl`로 검사합니다. 초안은 운영자가 지금 값과
+  비교한 뒤 적용하고, 저장·적용·버리기는 각각 감사 기록과 함께 씁니다.
+
+### 6.3 외부 채널 (기본 꺼짐)
+
+- `CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED`가 `true`가 아니면 `/api/v1`·Smart Adaptive·코딩 앱
+  연동 설정·tomverse CLI는 지금처럼 채팅 레지스트리를 씁니다(코딩 카탈로그를 읽지 않음).
+- 켜면 최신 코딩 스냅샷에서 노출 채널에 `api`가 있는 채팅 연결 행만 `/api/v1/models`, Smart
+  Adaptive 후보, 코딩 앱 설정, 네이티브 프로토콜(Anthropic Messages·Responses)에 남습니다.
+  tomverse CLI 요청(User-Agent `tomverse-cli/…`, 모델 목록·네이티브 프로토콜 포함)은 `cli`
+  채널을 따릅니다. 스냅샷에 있는 것만으로는 부족하고 **지금도 판정을 통과해야** 합니다(켜짐·보류
+  아님·지금 행에도 그 채널이 있음·공급자 조건 허용). 보류나 거절로 바뀐 다시 확인은 다음 발행을
+  기다리지 않고 바로 빠집니다. 발행된 행이나 지금 행의 `minimumPlan`이 계정 플랜보다 높아도
+  빠집니다(좁히기만 함).
+- 스냅샷은 허용 목록일 뿐입니다. 요청의 실행·가격·크레딧은 채팅 레지스트리 경로 그대로이고,
+  플랜 검사(Free는 API·CLI 불가)도 그대로입니다. 연결 행의 `creditWeight` 덮어쓰기는 Code 관리형
+  경로에만 쓰입니다.
+- 스냅샷이 없거나 coverage가 지났으면 외부 채널은 아무 모델도 내놓지 않습니다(채팅 레지스트리
+  전체로 되돌아가지 않음). 로그 `coding_catalog_external_channels_no_snapshot`을 남깁니다.
 
 ## 7. 제품 귀속
 

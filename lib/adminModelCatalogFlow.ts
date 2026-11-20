@@ -152,6 +152,23 @@ export type ReasonMessage =
   | { key: "noToolCalling" }
   | { key: "noProfile" }
   | { key: "draftIncomplete"; detail: string }
+  | { key: "chatModelMissing" }
+  | { key: "chatContextUnknown" }
+  | { key: "chatModelDeleted" }
+  | { key: "chatModelDisabled" }
+  | { key: "chatPriceUnverified" }
+  | { key: "reasoningCostUnbounded" }
+  | { key: "providerCostUnbounded" }
+  | { key: "dedicatedCodeOnly" }
+  | { key: "providerTermsMissing" }
+  | { key: "providerTermsExpired" }
+  | { key: "alreadyInCatalog" }
+  | { key: "notACandidate" }
+  | { key: "linkedRowProfileDraft" }
+  | { key: "settingsLinkedOnly" }
+  | { key: "unlinkTurnOffFirst" }
+  | { key: "noTermsSource" }
+  | { key: "unknownModel" }
   | { key: "unknown"; code: string };
 
 const hostOf = (url: string) => {
@@ -252,6 +269,41 @@ export const reasonMessage = (code: string, detail = ""): ReasonMessage => {
       return { key: "network" };
     case "session_expired":
       return { key: "sessionExpired" };
+    case "chat_model_missing":
+      return { key: "chatModelMissing" };
+    case "chat_context_unknown":
+      return { key: "chatContextUnknown" };
+    case "chat_model_deleted":
+      return { key: "chatModelDeleted" };
+    case "chat_model_disabled":
+      return { key: "chatModelDisabled" };
+    case "chat_price_unverified":
+      return { key: "chatPriceUnverified" };
+    case "reasoning_cost_unbounded":
+      return { key: "reasoningCostUnbounded" };
+    case "provider_cost_unbounded":
+      return { key: "providerCostUnbounded" };
+    case "dedicated_code_only":
+      return { key: "dedicatedCodeOnly" };
+    case "provider_terms_missing":
+      return { key: "providerTermsMissing" };
+    case "provider_terms_expired":
+      return { key: "providerTermsExpired" };
+    case "already_in_catalog":
+      return { key: "alreadyInCatalog" };
+    case "not_a_candidate":
+      return { key: "notACandidate" };
+    case "linked_row_profile_draft":
+      return { key: "linkedRowProfileDraft" };
+    case "settings_linked_only":
+    case "unlink_linked_only":
+      return { key: "settingsLinkedOnly" };
+    case "unlink_turn_off_first":
+      return { key: "unlinkTurnOffFirst" };
+    case "no_terms_source":
+      return { key: "noTermsSource" };
+    case "unknown_model":
+      return { key: "unknownModel" };
     default:
       return { key: "unknown", code };
   }
@@ -450,13 +502,52 @@ export type CodingProfileView = {
     maxContextTokens: number;
     maxOutputTokens: number;
   };
-  pricing: { inputUsdPerMTok: number; outputUsdPerMTok: number; creditWeight: number; verifiedAt: string; sources: string[] };
+  pricing: { inputUsdPerMTok: number; outputUsdPerMTok: number; creditWeight: number; verifiedAt: string; sources: string[]; pricingVersion?: string };
   terms: { allowsResaleAndCodingAgent: boolean; url: string; checkedAt: string };
   retention: { url: string; checkedAt: string };
   processingRegion: string;
 };
 
+/** A resolved row: a chat link's provider conditions can still be missing. */
+export type CodingResolvedView = Omit<CodingProfileView, "terms" | "retention" | "processingRegion"> & {
+  terms: CodingProfileView["terms"] | null;
+  retention: CodingProfileView["retention"] | null;
+  processingRegion: string | null;
+};
+
+/** A chat registry model as the server reported it (lib/modelCatalogCore.ts ChatModelFacts). */
+export type ChatFactsView = {
+  id: string;
+  name: string;
+  provider: string;
+  apiModelId: string;
+  minimumPlan: "Free" | "Pro";
+  usageClass: string;
+  creditWeight: number;
+  enabled: boolean;
+  status: string;
+  publiclyListed: boolean;
+  catalogDeleted: boolean;
+  contextWindowTokens: number | null;
+  maxOutputTokens: number;
+  imageInput: boolean;
+  price: { inputUsdPerMTok: number; outputUsdPerMTok: number; pricingVersion: string; effectiveDate: string; verified: boolean };
+};
+
+/** A chat link's own stored values. */
+export type CodingLinkView = {
+  registryModelId: string;
+  capabilities: { toolCalling: string; structuredOutput: string };
+  minimumPlan?: "Free" | "Pro" | "Max";
+  creditWeight?: number;
+  channels: string[];
+  evidence?: { sources: string[]; draftedAt: string; toolCalling: string; structuredOutput: string; note?: string };
+};
+
 export const CODING_PLANS = ["Free", "Pro", "Max"] as const;
+export const CODING_CHANNEL_ORDER = ["code", "api", "cli"] as const;
+export const CODING_TOOL_CALLING_VALUES = ["none", "basic", "parallel"] as const;
+export const CODING_STRUCTURED_OUTPUT_VALUES = ["none", "json_mode", "strict_schema", "forced_tool_use", "response_schema"] as const;
 
 export type CodingCatalogItem = {
   id: string;
@@ -465,8 +556,21 @@ export type CodingCatalogItem = {
   apiModelId: string;
   enabled: boolean | null;
   holdReason: string | null;
-  /** The stored profile, when it parses. */
-  profile: CodingProfileView | null;
+  /** Dedicated (a whole profile here) or a chat link; null when the row cannot be read. */
+  source: "dedicated" | "chat" | null;
+  /** Where it is offered once on. */
+  channels: string[];
+  /** Not refusals: a serving model keeps serving (provider conditions past 90 days). */
+  warnings: string[];
+  /** What stops turning it on now besides the judge. */
+  activationBlockers: string[];
+  termsSource: "provider" | "model" | null;
+  termsCheckedAt: string | null;
+  /** A chat link's stored values, and the chat model it reads. */
+  link: CodingLinkView | null;
+  chat: ChatFactsView | null;
+  /** The resolved model (a dedicated profile, or a link with chat's values read in). */
+  profile: CodingResolvedView | null;
   /** The credit weight's floor at the stored profile's prices. */
   floor: number | null;
   problem: string | null;
@@ -486,12 +590,29 @@ const looksLikeCodingProfile = (value: unknown): value is CodingProfileView => {
   return Boolean(v && typeof v.name === "string" && v.pricing && v.capabilities && v.terms && v.retention);
 };
 
+const looksLikeResolvedRow = (value: unknown): value is CodingResolvedView => {
+  const v = value as Partial<CodingResolvedView> | null;
+  return Boolean(v && typeof v.name === "string" && v.pricing && v.capabilities);
+};
+
+const looksLikeLink = (value: unknown): value is CodingLinkView => {
+  const v = value as (Partial<CodingLinkView> & { source?: unknown }) | null;
+  return Boolean(v && v.source === "chat" && typeof v.registryModelId === "string" && v.capabilities && Array.isArray(v.channels));
+};
+
 export const codingCatalogItems = (report: {
   models: Array<{
     modelId: string;
     enabled: boolean | null;
     holdReason: string | null;
+    source?: "dedicated" | "chat" | null;
     profile: unknown;
+    stored?: unknown;
+    chat?: ChatFactsView | null;
+    warnings?: string[];
+    activationBlockers?: string[];
+    termsSource?: "provider" | "model" | null;
+    termsCheckedAt?: string | null;
     problem: string | null;
     admission: Admission | null;
     draft: unknown;
@@ -501,16 +622,26 @@ export const codingCatalogItems = (report: {
   }>;
 }): CodingCatalogItem[] =>
   report.models.map((row) => {
-    const profile = looksLikeCodingProfile(row.profile) ? row.profile : null;
+    const profile = looksLikeResolvedRow(row.profile) ? row.profile : null;
     const draft = looksLikeCodingProfile(row.draft) ? row.draft : null;
+    const link = looksLikeLink(row.stored) ? row.stored : null;
     const shown = draft ?? profile;
+    const channels = (profile as { channels?: string[] } | null)?.channels ?? link?.channels ?? ["code"];
     return {
       id: row.modelId,
-      name: profile?.name ?? draft?.name ?? row.modelId,
-      provider: shown?.provider ?? "",
-      apiModelId: shown?.apiModelId ?? row.modelId,
+      name: profile?.name ?? row.chat?.name ?? draft?.name ?? row.modelId,
+      provider: shown?.provider ?? row.chat?.provider ?? "",
+      apiModelId: shown?.apiModelId ?? row.chat?.apiModelId ?? row.modelId,
       enabled: row.enabled,
       holdReason: row.holdReason,
+      source: row.source ?? (link ? "chat" : profile || draft ? "dedicated" : null),
+      channels,
+      warnings: row.warnings ?? [],
+      activationBlockers: row.activationBlockers ?? [],
+      termsSource: row.termsSource ?? null,
+      termsCheckedAt: row.termsCheckedAt ?? null,
+      link,
+      chat: row.chat ?? null,
       profile,
       floor: row.floor ?? null,
       problem: row.problem,
@@ -524,10 +655,112 @@ export const codingCatalogItems = (report: {
 
 export const codingStage = (item: CodingCatalogItem): CodingStage => {
   if (item.draft) return "draft_ready";
-  if (!item.profile) return item.problem === "invalid_profile" ? "profile_invalid" : "needs_draft";
+  if (!item.profile) {
+    if (item.problem === "invalid_profile") return "profile_invalid";
+    // A link whose chat model cannot be read is refused, not waiting for a draft.
+    return item.source === "chat" || (item.problem !== null && item.problem !== "no_profile") ? "blocked" : "needs_draft";
+  }
   if (item.holdReason || item.enabled === false) return "held";
-  if (item.admission?.admitted) return item.enabled === true ? "serving" : "ready_to_enable";
+  if (item.admission?.admitted) {
+    if (item.enabled === true) return "serving";
+    return item.activationBlockers.length > 0 ? "blocked" : "ready_to_enable";
+  }
   return "blocked";
+};
+
+/** Every reason this model cannot be turned on now: the judge's, then the activation blockers. */
+export const codingRefusals = (item: CodingCatalogItem): string[] => [
+  ...new Set([
+    ...(item.admission?.admitted ? [] : (item.admission?.reasons ?? (item.problem ? [item.problem] : []))),
+    ...item.activationBlockers,
+  ]),
+];
+
+/** The list's three words: on, needs a check, off. */
+export type CodingListState = "active" | "attention" | "inactive";
+export const codingListState = (item: CodingCatalogItem): CodingListState => {
+  const stage = codingStage(item);
+  if (stage === "serving") return "active";
+  if (stage === "held") return "inactive";
+  return "attention";
+};
+
+export type CodingListFilter = { query: string; provider: string; source: "all" | "dedicated" | "chat"; state: "all" | CodingListState };
+
+/** Rows matching the list's filters. */
+export const filterCodingItems = (items: readonly CodingCatalogItem[], filter: CodingListFilter): CodingCatalogItem[] => {
+  const query = filter.query.trim().toLowerCase();
+  return items.filter(
+    (item) =>
+      (filter.provider === "all" || item.provider === filter.provider) &&
+      (filter.source === "all" || item.source === filter.source) &&
+      (filter.state === "all" || codingListState(item) === filter.state) &&
+      (!query || [item.name, item.provider, item.apiModelId, item.id].some((value) => value.toLowerCase().includes(query)))
+  );
+};
+
+export type CodingSettingsValue = {
+  toolCalling: string;
+  structuredOutput: string;
+  /** "" follows the chat model. */
+  minimumPlan: string;
+  /** "" follows the chat model's weight. */
+  creditWeight: string;
+  channels: string[];
+};
+
+/** The settings form's starting values from a link's stored ones. */
+export const codingSettingsFrom = (link: CodingLinkView): CodingSettingsValue => ({
+  toolCalling: link.capabilities.toolCalling,
+  structuredOutput: link.capabilities.structuredOutput,
+  minimumPlan: link.minimumPlan ?? "",
+  creditWeight: link.creditWeight === undefined ? "" : String(link.creditWeight),
+  channels: CODING_CHANNEL_ORDER.filter((channel) => link.channels.includes(channel)),
+});
+
+/** The weight a link would charge with these settings: its own, or chat's. */
+export const effectiveCreditWeight = (value: CodingSettingsValue, chatWeight: number | null): number | null =>
+  value.creditWeight.trim() === "" ? chatWeight : Number(value.creditWeight);
+
+export type CodingSettingsProblem = "not_a_number" | "below_floor" | "none_selected";
+
+/**
+ * What the settings would be refused or held back for. A malformed weight or
+ * no channel is an input error; a weight below the floor is saved but cannot
+ * be turned on (the server refuses it for a serving model).
+ */
+export const codingSettingsProblems = (
+  value: CodingSettingsValue,
+  input: { floor: number | null; chatWeight: number | null }
+): Partial<Record<"creditWeight" | "channels", CodingSettingsProblem>> => {
+  const problems: Partial<Record<"creditWeight" | "channels", CodingSettingsProblem>> = {};
+  if (value.channels.length === 0) problems.channels = "none_selected";
+  if (value.creditWeight.trim() !== "") {
+    const weight = Number(value.creditWeight);
+    if (!Number.isInteger(weight) || weight <= 0 || weight > 1_000) problems.creditWeight = "not_a_number";
+  }
+  const weight = effectiveCreditWeight(value, input.chatWeight);
+  if (!problems.creditWeight && weight !== null && input.floor !== null && weight < input.floor) problems.creditWeight = "below_floor";
+  return problems;
+};
+
+/** The settings request: only the fields that differ from the stored link. */
+export const codingSettingsRequest = (link: CodingLinkView, value: CodingSettingsValue) => {
+  const out: {
+    toolCalling?: string;
+    structuredOutput?: string;
+    minimumPlan?: string | null;
+    creditWeight?: number | null;
+    channels?: string[];
+  } = {};
+  const before = codingSettingsFrom(link);
+  if (value.toolCalling !== before.toolCalling) out.toolCalling = value.toolCalling;
+  if (value.structuredOutput !== before.structuredOutput) out.structuredOutput = value.structuredOutput;
+  if (value.minimumPlan !== before.minimumPlan) out.minimumPlan = value.minimumPlan === "" ? null : value.minimumPlan;
+  if (value.creditWeight.trim() !== before.creditWeight) out.creditWeight = value.creditWeight.trim() === "" ? null : Number(value.creditWeight);
+  const channels = CODING_CHANNEL_ORDER.filter((channel) => value.channels.includes(channel));
+  if (channels.join(",") !== before.channels.join(",")) out.channels = channels;
+  return out;
 };
 
 /** Whether the stored profile is what the Code client is served now. */
@@ -588,3 +821,86 @@ export const codingDraftSources = (
   return [...new Set([price, input.termsUrl.trim(), input.retentionUrl.trim()].filter(Boolean))].slice(0, 3);
 };
 
+
+// --- the coding tab's report (GET /api/admin/model-catalog/coding) -----------
+
+export type ProviderTermsState = "confirmed" | "expired" | "missing" | "invalid";
+
+export type ProviderTermsView = {
+  allowsResaleAndCodingAgent: boolean;
+  termsUrl: string;
+  retentionUrl: string;
+  processingRegion: string;
+  checkedAt: string;
+  sources: string[];
+  evidence?: string;
+};
+
+export type CodingProviderRow = {
+  provider: string;
+  terms: ProviderTermsView | null;
+  state: ProviderTermsState;
+  checkedAt: string | null;
+  dueOn: string | null;
+  draft: ProviderTermsView | null;
+  draftCreatedAt: string | null;
+  updatedByEmail: string | null;
+  modelCount: number;
+  candidateCount: number;
+  legacyTermsCount: number;
+  draftable: boolean;
+  hosts: string[];
+};
+
+export type CodingCandidateView = ChatFactsView & {
+  terms: { state: ProviderTermsState; checkedAt: string | null; dueOn: string | null };
+};
+
+export type CodingSnapshotView = {
+  version: number;
+  contentHash: string;
+  coverageUntil: string;
+  publishedAt: string;
+  modelCount: number;
+  current: boolean;
+  pendingChanges: { modelId: string; kind: "added" | "removed" | "changed" }[];
+  /** False when the next publish would change the hash even with no row changed (the scheduled renewal waits for it). */
+  contentHashMatches: boolean;
+};
+
+export type CodingCatalogReport = Parameters<typeof codingCatalogItems>[0] & {
+  candidates: { eligible: CodingCandidateView[]; excluded: { id: string; name: string; provider: string; reason: string }[] };
+  providers: CodingProviderRow[];
+  snapshot: CodingSnapshotView | null;
+  servableCount: number;
+  externalChannels: { enabled: boolean; env: string };
+  draftLlm: { configured: boolean; env: string };
+  draftProviders: { provider: string; defaultSources: string[]; hosts: string[] }[];
+};
+
+/** How many models wait on each kind of check, for the summary tile. */
+export const codingAttentionCounts = (items: readonly CodingCatalogItem[]) => {
+  let floor = 0;
+  let terms = 0;
+  let other = 0;
+  for (const item of items) {
+    if (codingListState(item) !== "attention") continue;
+    const reasons = codingRefusals(item);
+    if (reasons.some((reason) => reason.startsWith("credits_below_floor"))) floor += 1;
+    else if (reasons.some((reason) => reason.startsWith("provider_terms") || reason.startsWith("terms_") || reason.startsWith("retention_")))
+      terms += 1;
+    else other += 1;
+  }
+  return { floor, terms, other };
+};
+
+/** One field of a provider re-check draft against the applied record. */
+export const providerTermsComparison = (current: ProviderTermsView | null, draft: ProviderTermsView) =>
+  (
+    [
+      ["resale", current?.allowsResaleAndCodingAgent ?? null, draft.allowsResaleAndCodingAgent],
+      ["terms", current?.termsUrl ?? null, draft.termsUrl],
+      ["retention", current?.retentionUrl ?? null, draft.retentionUrl],
+      ["region", current?.processingRegion ?? null, draft.processingRegion],
+    ] as const
+  ).map(([key, before, after]) => ({ key, before, after, changed: before !== after }));

@@ -48,6 +48,16 @@ const EXPOSABLE_USAGE_CLASSES = new Set<AiModel["usageClass"]>([
     "premium-reasoning",
 ]);
 
+/**
+ * Which coding-catalogue channel a request belongs to: the tomverse CLI names
+ * itself in its User-Agent (apps/tomverse-cli/src/gateway.ts); everything else
+ * is the API. Only read while CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED is on,
+ * and it only narrows a list: a spoofed header gets the CLI's models, on the
+ * same plan check and billing.
+ */
+export const externalApiChannelFor = (userAgent: string | null | undefined): "api" | "cli" =>
+    typeof userAgent === "string" && userAgent.startsWith("tomverse-cli/") ? "cli" : "api";
+
 export const isExternalApiServableModel = (model: AiModel, plan: ModelTier) =>
     model.enabled &&
     !model.catalogDeleted &&

@@ -1,6 +1,7 @@
 import "server-only";
 
-import { amuxV22ExecutionRole, amuxV22TaskWritesPatch } from "@/lib/amux/v22WorkerClaimCore";
+import { amuxV22ExecutionRole, amuxV22ReviewAuthorVendor,
+  amuxV22TaskWritesPatch } from "@/lib/amux/v22WorkerClaimCore";
 import { AMUX_V22_CONCLUSION_ENV, amuxV22ConclusionMode,
   amuxV22ConclusionSettlement } from "@/lib/amux/v22ConclusionCore";
 import { amuxV22ResultReviewKind } from "@/lib/amux/v22ResultReviewCore";
@@ -1293,7 +1294,7 @@ async function recordAmuxV52ReviewWithFindings(
       const assignment = await tx.amuxV22WorkerAssignment.findUnique({
         where: { id: attempt.v22AssignmentId },
         select: { id: true, role: true, grade: true, provider: true,
-          authorizationAuditLogId: true },
+          modelId: true, authorizationAuditLogId: true },
       });
       const assignmentAudit = assignment ? await tx.adminAuditLog.findUnique({
         where: { id: assignment.authorizationAuditLogId },
@@ -1309,7 +1310,8 @@ async function recordAmuxV52ReviewWithFindings(
           assignmentAudit.targetId !== assignment?.id ||
           !amuxV22TaskWritesPatch(assignment?.role) ||
           assignment!.grade !== task.executionGrade ||
-          assignment.provider !== evidence.authorVendor)
+          amuxV22ReviewAuthorVendor(assignment.provider, assignment.modelId) !==
+            evidence.authorVendor)
         return { recorded: false as const,
           reason: "review_assignment_unverified" as const };
       // The local CLI flow also reviews a lower grade's kept contract change,
@@ -1472,7 +1474,7 @@ export async function settleAmuxV22TaskExecution(input: {
       const settlementAssignment = await tx.amuxV22WorkerAssignment.findUnique({
         where: { id: attempt.v22AssignmentId },
         select: { id: true, role: true, provider: true, grade: true,
-          recoveryApprovalId: true,
+          modelId: true, recoveryApprovalId: true,
           taskRevision: true, authorizationAuditLogId: true } });
       const assignmentAudit = settlementAssignment ?
         await tx.adminAuditLog.findUnique({
@@ -1528,7 +1530,8 @@ export async function settleAmuxV22TaskExecution(input: {
         }) : null;
       if (reviewRequired && (!reviewRecord?.auditLog.entryHash ||
           !patch || reviewRecord.baseSha !== patch.baseSha ||
-          reviewRecord.authorVendor !== settlementAssignment?.provider ||
+          !settlementAssignment || reviewRecord.authorVendor !==
+            amuxV22ReviewAuthorVendor(settlementAssignment.provider, settlementAssignment.modelId) ||
           !["accept", "reject", "unknown"].includes(reviewRecord.verdict)))
         return { settled: false as const, reason: "review_unverified" as const };
       // An owner retry of a twice-rejected run starts the count again

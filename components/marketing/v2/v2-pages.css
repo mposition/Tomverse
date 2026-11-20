@@ -42,11 +42,13 @@
   --font-mono: var(--font-code);
 }
 .tv-page .dark-zone { color: var(--ink); background-color: var(--stage); }
-.tv-page { background: var(--stage); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.6; overflow-x: clip; word-break: keep-all; -webkit-font-smoothing: antialiased; }
+.tv-page { background: var(--stage); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.6; overflow-x: clip; overflow-wrap: break-word; -webkit-font-smoothing: antialiased; }
+/* Keep Korean 어절 whole. Chinese has no spaces, so keep-all there would stop every line break. */
+.tv-page:lang(ko) { word-break: keep-all; }
 .tv-page h1, .tv-page h2, .tv-page h3, .tv-page h4, .tv-page p { margin: 0; }
 .tv-page h1, .tv-page h2, .tv-page h3 { text-wrap: balance; font-family: var(--font-display); }
 .tv-page .wrap { width: 100%; max-width: 1320px; margin-inline: auto; padding-left: max(24px, env(safe-area-inset-left, 0px)); padding-right: max(24px, env(safe-area-inset-right, 0px)); }
-.tv-page .eyebrow { display: inline-flex; align-items: center; gap: 10px; font: 600 .8125rem/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--brand-hi); }
+.tv-page .eyebrow { display: inline-flex; max-width: 100%; align-items: center; gap: 10px; font: 600 .8125rem/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--brand-hi); }
 .tv-page .eyebrow::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--brand); box-shadow: 0 0 0 4px rgb(21 93 251 / .25); }
 .tv-page .chapter { padding-block: 96px; position: relative; scroll-margin-top: 72px; }
 .tv-page .chapter-head { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 48px; align-items: end; margin-bottom: 44px; }
@@ -383,7 +385,8 @@
 .tv-page .demo-frame { margin: 0; border-radius: 22px; overflow: hidden; background: #0b0d14; box-shadow: inset 0 0 0 1px var(--thread-line), 0 60px 140px -60px rgb(21 93 251 / .7); }
 .tv-page .demo-bar { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid #262a38; font: 500 .75rem/1 var(--font-mono); color: var(--ink-3); }
 .tv-page .demo-bar i { width: 10px; height: 10px; border-radius: 50%; background: #2a2f3e; }
-.tv-page .demo-bar span { margin-left: 10px; padding: 5px 12px; border-radius: 8px; background: #161922; }
+.tv-page .demo-bar i { flex: none; }
+.tv-page .demo-bar span { margin-left: 10px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 5px 12px; border-radius: 8px; background: #161922; }
 .tv-page .demo-frame video { display: block; width: 100%; height: auto; aspect-ratio: 1440 / 900; background: #0b0d14; }
 .tv-page .demo-frame figcaption { padding: 12px 16px; font-size: .75rem; color: var(--ink-3); border-top: 1px solid #262a38; }
 
@@ -402,7 +405,7 @@
 .tv-page .page-hero h1 { font-size: clamp(2.75rem, 6vw, 5.25rem); font-weight: 900; line-height: 1.06; letter-spacing: -.05em; max-width: 17em; text-shadow: 0 2px 36px rgb(17 19 24 / .65); }
 .tv-page .page-hero h1 em { font-style: normal; color: #8fb2ff; }
 .tv-page .page-hero .hero-lede { max-width: 560px; }
-.tv-page .crumb { display: inline-flex; gap: 8px; align-items: center; font: 600 .75rem/1 var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 22px; }
+.tv-page .crumb { display: inline-flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; font: 600 .75rem/1 var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 22px; }
 .tv-page .crumb a { color: var(--ink-3); text-decoration: none; }
 .tv-page .crumb a:hover { color: var(--ink); }
 .tv-page .crumb b { color: var(--brand-hi); font-weight: 600; }
@@ -443,6 +446,8 @@
 .tv-page .faq details p { padding-bottom: 20px; color: var(--ink-3); font-size: .9375rem; }
 .tv-page .cta-band { border-radius: 32px; padding: 56px; background: radial-gradient(80% 120% at 100% 0%, rgb(21 93 251 / .55), transparent 60%), var(--panel); box-shadow: inset 0 0 0 1px var(--thread-line); display: flex; justify-content: space-between; align-items: center; gap: 32px; flex-wrap: wrap; }
 .tv-page .cta-band h2 { font-size: clamp(1.75rem, 3.4vw, 2.75rem); font-weight: 900; letter-spacing: -.04em; line-height: 1.15; }
+.tv-page .cta-band > * { min-width: 0; }
+.tv-page .cta-band h2 { -webkit-hyphens: auto; hyphens: auto; }
 .tv-page .cta-band p { color: var(--ink-2); margin-top: 10px; }
 .tv-page .tbl-wrap { overflow-x: auto; border-radius: 20px; box-shadow: inset 0 0 0 1px var(--line); }
 .tv-page .tbl { width: 100%; border-collapse: collapse; font-size: .9rem; min-width: 640px; }

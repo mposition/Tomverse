@@ -11,10 +11,13 @@ import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { IMAGE_MODEL_REGISTRY, type ImageModelProfile, minimumCreditsForImageOption } from "@/lib/imageModelRegistry";
 import {
   codingCreditFloor,
+  codingLookups,
   invalidateImageModelCatalog,
-  judgeCoding,
   judgeImage,
+  loadChatModelFacts,
+  loadCodingProviderTerms,
   loadImageBillingTermRows,
+  resolveCodingRow,
 } from "@/lib/modelCatalog";
 import {
   applyCodingDraftEdits,
@@ -22,6 +25,7 @@ import {
   canonicalJson,
   type CodingDraftEdit,
   codingProfileSchema,
+  codingStoredProfileSchema,
   freePricingVersion,
   type ImageCreditOverride,
   imageExecutionProfile,
@@ -85,8 +89,17 @@ export const catalogPatchBodySchema = catalogEntryPatchSchema.extend({
 const validateProfile = (category: StoredCatalogCategory, modelId: string, profile: unknown) => {
   if (profile === null || profile === undefined) return profile;
   if (category === "coding") {
-    const parsed = codingProfileSchema.safeParse(profile);
+    const parsed = codingStoredProfileSchema.safeParse(profile);
     if (!parsed.success) throw new CatalogRefusal("invalid_profile", parsed.error.issues.map((i) => i.path.join(".")), 400);
+    // A chat link keeps the registry id as its own: the managed path and the
+    // external channels look the model up by it.
+    if (parsed.data.source === "chat" && parsed.data.registryModelId !== modelId) {
+      throw new CatalogRefusal("invalid_profile", ["registryModelId_must_equal_modelId"], 400);
+    }
+    // The external API runs chat registry models only.
+    if (parsed.data.source !== "chat" && (parsed.data.channels ?? ["code"]).some((channel) => channel !== "code")) {
+      throw new CatalogRefusal("invalid_profile", ["dedicated_code_only"], 400);
+    }
     return parsed.data;
   }
   const hasSeed = IMAGE_MODEL_REGISTRY.some((model) => model.id === modelId);
@@ -167,7 +180,9 @@ export const updateCatalogEntry = async (input: {
   request?: Request;
   tx?: Prisma.TransactionClient;
   /** Where a new profile came from, for the audit row (an applied coding draft and the operator's edits to it). */
-  provenance?: { fromDraft: true; edits: { field: string; from: string | number; to: string | number }[] };
+  provenance?:
+    | { fromDraft: true; edits: { field: string; from: string | number; to: string | number }[] }
+    | { codingSettings: { field: string; from: unknown; to: unknown }[] };
 }) => {
   const { category, modelId, patch, session } = input;
   if (!MODEL_ID_PATTERN.test(modelId)) throw new CatalogRefusal("invalid_model_id", [], 400);
@@ -224,10 +239,25 @@ export const updateCatalogEntry = async (input: {
         const admission = await imageAdmissionAfter(tx, modelId, next);
         if (!admission.admitted) throw new CatalogRefusal("not_admitted", admission.reasons ?? []);
       } else {
-        const parsed = codingProfileSchema.safeParse(next.profile);
-        if (!parsed.success) throw new CatalogRefusal("not_admitted", ["no_valid_profile"]);
-        const admission = judgeCoding({ modelId, ...parsed.data });
-        if (!admission.admitted) throw new CatalogRefusal("not_admitted", admission.reasons);
+        // Resolved as the catalogue resolves it: a chat link reads the chat
+        // registry now, and every row its provider's conditions (in this
+        // transaction, after the lock, so a re-check applied meanwhile is seen).
+        const [chat, providerTerms] = await Promise.all([loadChatModelFacts(), loadCodingProviderTerms(tx)]);
+        const entry = resolveCodingRow(
+          { modelId, enabled: true, holdReason: null, profile: next.profile, draft: null, draftCreatedAt: null },
+          codingLookups({ chat, providerTerms }),
+          new Date()
+        );
+        if (!entry.profile && (entry.problem === "no_profile" || entry.problem === "invalid_profile")) {
+          throw new CatalogRefusal("not_admitted", ["no_valid_profile"]);
+        }
+        if (!entry.admission?.admitted) {
+          throw new CatalogRefusal("not_admitted", entry.admission?.reasons ?? [entry.problem ?? "no_valid_profile"]);
+        }
+        // Provider conditions past their 90 days stop a new activation only:
+        // a model already on keeps serving with the warning.
+        const wasServing = before?.enabled === true && !before.holdReason;
+        if (!wasServing && entry.activationBlockers.length > 0) throw new CatalogRefusal("not_admitted", entry.activationBlockers);
       }
     }
 
@@ -258,7 +288,8 @@ export const updateCatalogEntry = async (input: {
         after: { enabled: next.enabled, holdReason: next.holdReason, sortOrder: next.sortOrder },
         profileChanged: profile !== undefined,
         ...(patch.name !== undefined ? { renamedTo: patch.name } : {}),
-        ...(input.provenance ? { provenance: input.provenance } : {}),
+        // Plain JSON: names, numbers, plans and channel lists.
+        ...(input.provenance ? { provenance: input.provenance as Prisma.InputJsonValue } : {}),
       },
       tx,
     });
@@ -510,6 +541,17 @@ export const storeCatalogDraft = async (input: {
 }) =>
   prisma.$transaction(async (tx) => {
     await takeAuditChainLock(tx);
+    // A chat link's profile is the chat registry's: a whole-profile draft for
+    // it would turn the link into a copy. Its own values have their own draft.
+    if (input.category === "coding") {
+      const existing = await tx.modelCatalogEntry.findUnique({
+        where: { category_modelId: { category: "coding", modelId: input.modelId } },
+        select: { profile: true },
+      });
+      if ((existing?.profile as { source?: unknown } | null)?.source === "chat") {
+        throw new CatalogRefusal("linked_row_profile_draft", [], 409);
+      }
+    }
     let profile: Prisma.InputJsonValue | undefined;
     if (input.category === "image" && input.imageProfile !== undefined) {
       const wanted = imageFullProfileSchema.safeParse(input.imageProfile);

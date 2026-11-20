@@ -119,7 +119,7 @@ test("pricing page supports Chinese copy", async ({ page }) => {
   await page.getByTestId("marketing-language-switcher").selectOption("zh");
   await expect(page).toHaveURL(/\/zh\/pricing$/);
   await expect(page.locator("html")).toHaveAttribute("lang", "zh");
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("先体验，再选择适合的套餐。");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("先免费试用，用得越多再升级。");
   await expect(page.getByTestId("pricing-credit-packs")).toBeVisible();
   await expect(page.locator('[data-pack-id="starter_500"]')).toContainText("500");
   await expect(page.locator('[data-pack-id="project_1500"]')).toContainText("1,500");

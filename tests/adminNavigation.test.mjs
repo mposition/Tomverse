@@ -106,7 +106,7 @@ test("the approved sitemap is the table: every group, entry and tab, in order", 
     ],
     "AI Platform": [
       ["providers", "/admin/providers", ["health", "usage-cost", "incidents"]],
-      ["models", "/admin/models", ["registry", "discovery", "defaults", "catalog"]],
+      ["models", "/admin/models", ["registry", "discovery", "defaults", "catalog", "coding"]],
       ["routing", "/admin/routing", ["auto", "optimizer", "shadow", "stats"]],
     ],
     "AI Agents": [
@@ -574,7 +574,7 @@ test("the discovery backlog keeps a way in", () => {
   assert.equal(models.badge, "modelLifecycle");
   assert.deepEqual(
     models.tabs?.map((tab) => tab.id),
-    ["registry", "discovery", "defaults", "catalog"]
+    ["registry", "discovery", "defaults", "catalog", "coding"]
   );
   // The registry stays the default: an operator opening /admin/models is far
   // more often there for the catalogue than for the backlog.
@@ -582,6 +582,7 @@ test("the discovery backlog keeps a way in", () => {
   assert.equal(resolveAdminTab(adminNavItemTabs("models"), "discovery").id, "discovery");
   assert.equal(resolveAdminTab(adminNavItemTabs("models"), "defaults").id, "defaults");
   assert.equal(resolveAdminTab(adminNavItemTabs("models"), "catalog").id, "catalog");
+  assert.equal(resolveAdminTab(adminNavItemTabs("models"), "coding").id, "coding");
 });
 
 // ---------------------------------------------------------------------------

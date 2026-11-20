@@ -1,11 +1,15 @@
 import { defineAdminMessages } from "@/lib/adminLocale";
 
-/** Copy for the image & coding catalogue panel (AdminModelCatalogPanel and components/admin/modelCatalog). */
+/**
+ * Copy for the image catalogue panel (AdminModelCatalogPanel and
+ * components/admin/modelCatalog), and the dedicated coding model's draft flow
+ * (`codingFlow`) and the refusal sentences the coding tab shares.
+ */
 export const adminModelCatalogMessages = defineAdminMessages({
   en: {
-    title: "Image & coding model catalog",
+    title: "Image model catalog",
     description:
-      "Add image and coding models without a deploy, check their prices and turn them on. Before a model turns on, the judge checks its prices, sources and budget again.",
+      "Add image models without a deploy, check their prices and turn them on. Before a model turns on, the judge checks its prices, sources and budget again.",
     refresh: "Refresh",
     dismiss: "Close",
     image: "Image",
@@ -351,6 +355,23 @@ export const adminModelCatalogMessages = defineAdminMessages({
       noToolCalling: "The model has no tool calling, which Code needs.",
       noProfile: "There is no valid profile yet. Make a draft.",
       draftIncomplete: (detail: string) => `The documentation did not give every field the profile needs (${detail}).`,
+      chatModelMissing: "The linked chat model is no longer in the chat registry.",
+      chatContextUnknown: "The linked chat model has no context window in the registry.",
+      chatModelDeleted: "The linked chat model was deleted from the chat catalogue.",
+      chatModelDisabled: "The linked chat model is turned off in the chat registry.",
+      chatPriceUnverified: "The linked chat model has no verified price (it is on the fallback price).",
+      reasoningCostUnbounded: "Its reasoning tokens are billed separately, so Code cannot bound a turn's cost.",
+      providerCostUnbounded: "Code's managed path does not call this provider (no bound on its cost).",
+      dedicatedCodeOnly: "A model chat does not have can only be offered in Code.",
+      providerTermsMissing: "This provider's conditions have not been checked yet. Check them under Provider conditions.",
+      providerTermsExpired: "This provider's conditions were checked more than 90 days ago. Check them again to turn on a new model.",
+      alreadyInCatalog: "This model is already in the coding catalog.",
+      notACandidate: "This chat model is not a coding candidate now.",
+      linkedRowProfileDraft: "A linked model takes its profile from chat; change its coding settings instead.",
+      settingsLinkedOnly: "Only a linked chat model has coding settings here.",
+      unlinkTurnOffFirst: "Turn the model off before taking it out of the catalog.",
+      noTermsSource: "Enter the provider's terms and data retention pages to start the check.",
+      unknownModel: "This model is not in the catalog.",
       unknown: (code: string) => `Refused (${code}).`,
     },
     measure: {
@@ -450,9 +471,9 @@ export const adminModelCatalogMessages = defineAdminMessages({
     },
   },
   ko: {
-    title: "이미지·코딩 모델 카탈로그",
+    title: "이미지 모델 카탈로그",
     description:
-      "배포 없이 이미지·코딩 모델을 추가하고, 가격을 확인해 활성화합니다. 활성화 전에는 판정 함수가 가격·출처·예산을 다시 확인합니다.",
+      "배포 없이 이미지 모델을 추가하고, 가격을 확인해 활성화합니다. 활성화 전에는 판정 함수가 가격·출처·예산을 다시 확인합니다.",
     refresh: "새로고침",
     dismiss: "닫기",
     image: "이미지",
@@ -790,6 +811,23 @@ export const adminModelCatalogMessages = defineAdminMessages({
       noToolCalling: "도구 호출을 지원하지 않아 Code에서 쓸 수 없습니다.",
       noProfile: "올바른 프로필이 아직 없습니다. 초안을 만들어 주세요.",
       draftIncomplete: (detail: string) => `문서에서 프로필에 필요한 값을 모두 찾지 못했습니다 (${detail}).`,
+      chatModelMissing: "연결한 채팅 모델이 채팅 레지스트리에 더 이상 없습니다.",
+      chatContextUnknown: "연결한 채팅 모델의 컨텍스트 크기가 레지스트리에 없습니다.",
+      chatModelDeleted: "연결한 채팅 모델이 채팅 카탈로그에서 삭제되었습니다.",
+      chatModelDisabled: "연결한 채팅 모델이 채팅 레지스트리에서 비활성입니다.",
+      chatPriceUnverified: "연결한 채팅 모델의 가격이 확인되지 않았습니다(대체 가격 사용 중).",
+      reasoningCostUnbounded: "추론 토큰이 따로 과금되어 Code 한 턴의 비용을 한정할 수 없습니다.",
+      providerCostUnbounded: "Code 관리형 경로는 이 공급자를 호출하지 않습니다(비용 상한 없음).",
+      dedicatedCodeOnly: "채팅에 없는 모델은 Code에만 노출할 수 있습니다.",
+      providerTermsMissing: "이 공급자의 조건을 아직 확인하지 않았습니다. 공급자 조건에서 확인해 주세요.",
+      providerTermsExpired: "이 공급자의 조건을 확인한 지 90일이 지났습니다. 새 모델을 활성화하려면 다시 확인해 주세요.",
+      alreadyInCatalog: "이미 코딩 카탈로그에 있는 모델입니다.",
+      notACandidate: "이 채팅 모델은 지금 코딩 후보가 아닙니다.",
+      linkedRowProfileDraft: "연결 모델은 프로필을 채팅에서 가져옵니다. 코딩 전용 설정을 바꿔 주세요.",
+      settingsLinkedOnly: "코딩 전용 설정은 채팅 모델 연결 행에만 있습니다.",
+      unlinkTurnOffFirst: "카탈로그에서 빼기 전에 먼저 비활성화해 주세요.",
+      noTermsSource: "확인을 시작하려면 공급자의 약관과 데이터 보존 문서 주소를 넣어 주세요.",
+      unknownModel: "카탈로그에 없는 모델입니다.",
       unknown: (code: string) => `거절됨 (${code}).`,
     },
     measure: {

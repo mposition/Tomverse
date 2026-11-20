@@ -4,8 +4,8 @@ import { setDeterministicTheme } from "./support/chat-state-fixtures";
 
 async function expectAligned(page: Page) {
   const tops = await Promise.all(["free", "pro", "max"].map(async id => ({
-    title: (await page.getByTestId(`pricing-plan-card-${id}`).locator("h2").boundingBox())!.y,
-    price: (await page.getByTestId(`pricing-plan-card-${id}`).locator("h2 + p + div").boundingBox())!.y,
+    title: (await page.getByTestId(`pricing-plan-card-${id}`).locator("h3").boundingBox())!.y,
+    price: (await page.getByTestId(`pricing-plan-card-${id}`).locator(".price-block, .sale-block").boundingBox())!.y,
     usage: (await page.getByTestId(`pricing-plan-card-${id}`).getByTestId("pricing-plan-usage").boundingBox())!.y,
     cta: (await page.getByTestId(`pricing-cta-${id}`).boundingBox())!.y,
     features: (await page.getByTestId(`pricing-plan-card-${id}`).locator(":scope > ul").boundingBox())!.y,
@@ -31,7 +31,8 @@ for (const theme of ["light", "dark"] as const) for (const promotion of [false, 
     await expect(page.getByTestId("pricing-sale-block")).toHaveCount(promotion ? 2 : 0);
     await expect(page.locator("main")).not.toContainText("NaN");
     await expectAligned(page);
-    await page.setViewportSize({ width: 1024, height: 1000 });
+    // The three cards sit side by side above 1080px (V2 breakpoint), with their rows on one grid.
+    await page.setViewportSize({ width: 1200, height: 1000 });
     await expect(page.locator("main")).not.toContainText("NaN");
     await expectAligned(page);
     await page.setViewportSize({ width: 1440, height: 1000 });
@@ -47,8 +48,9 @@ for (const theme of ["light", "dark"] as const) for (const promotion of [false, 
       while (getComputedStyle(previous).display === "none") previous = previous.previousElementSibling!;
       return element.getBoundingClientRect().top - previous.getBoundingClientRect().bottom;
     });
-    expect(mobileGap).toBeGreaterThanOrEqual(11);
-    expect(mobileGap).toBeLessThanOrEqual(13);
+    // One card gap (16px): the hidden placeholder adds none.
+    expect(mobileGap).toBeGreaterThanOrEqual(15);
+    expect(mobileGap).toBeLessThanOrEqual(17);
     await expectNoHorizontalOverflow(page);
   });
 }

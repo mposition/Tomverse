@@ -3770,6 +3770,20 @@ domains:
       The operator who approved a paid image billing measurement, by id and address. No user credits
       or images are stored; not reachable from User by cascade; undecided on every axis.
 
+  - domain: codingProviderTerms
+    prismaModel: CodingProviderTerms
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: unverified
+    note: >-
+      The operator who last applied or re-checked a provider's coding terms, by id and address. One
+      row per provider, no user content; not reachable from User by cascade; undecided on every axis.
+
   - domain: providerBillingConfig
     prismaModel: ProviderBillingConfig
     userLinkageRole: actor
