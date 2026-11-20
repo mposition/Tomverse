@@ -149,7 +149,7 @@ export function normaliseHelpGuideId(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const id = value
     .trim()
-    .replace(/^\[(.*)\]$/s, "$1")
+    .replace(/^\[([\s\S]*)\]$/, "$1")
     .trim()
     .replace(/^guide:/i, "")
     .trim();
