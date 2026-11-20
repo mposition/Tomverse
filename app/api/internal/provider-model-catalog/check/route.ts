@@ -15,6 +15,7 @@ import { checkProviderModelCatalogs } from "@/lib/providerModelCatalogMonitor";
 import { reconcileCatalogWithRegistry } from "@/lib/providerModelCatalogReconciliation";
 import { sendProviderModelCatalogReport } from "@/lib/providerModelCatalogReport";
 import { collectProviderModelDocEvidence } from "@/lib/providerModelDocEvidence";
+import { providerModelCatalogScanRuns } from "@/lib/providerModelCatalogScanGate";
 import {
   completeScheduledJob,
   failScheduledJob,
@@ -42,10 +43,17 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
 
+  const test = new URL(request.url).searchParams.get("test") === "true";
   const scheduledRun = await startScheduledJob("provider_model_catalog_monitor");
+  if (!providerModelCatalogScanRuns({ test })) {
+    // Recorded as a finished run, so the job's silence check stays quiet in an
+    // environment where doing nothing is the intended outcome.
+    const summary = { skipped: "not_production" as const };
+    await completeScheduledJob({ runId: scheduledRun?.id, processedCount: 0, result: summary });
+    return NextResponse.json(summary);
+  }
   try {
     const generatedAt = new Date();
-    const test = new URL(request.url).searchParams.get("test") === "true";
     // Weekly and off by default (MODEL_DISCOVERY_RESEARCH_LLM_MODEL_ID). Started
     // beside the scan, not after it: its model calls are the slowest step and
     // read nothing the scan writes. A failure costs only its own summary line.
