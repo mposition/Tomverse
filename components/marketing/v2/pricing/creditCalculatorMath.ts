@@ -31,7 +31,10 @@ export function calculateSend(tiers: readonly CalculatorTier[], band: number, we
   const sample = CALCULATOR_BANDS[band]?.sample ?? 0;
   const models = tiers.reduce((sum, tier) => sum + getWeightedUsageCredits(TIER_MODEL[tier], sample), 0);
   const searchCredits = web ? WEB_SEARCH_SURCHARGE_CREDITS * tiers.length : 0;
-  return { models, searchCredits, perSend: models + searchCredits };
+  // `base` is the cost before the length multiplier; `models` is after it and after rounding
+  // each model up, so base x multiplier is not always `models` (1 x 1.5 -> 2).
+  const base = tiers.reduce((sum, tier) => sum + getWeightedUsageCredits(TIER_MODEL[tier], 0), 0);
+  return { base, models, searchCredits, perSend: models + searchCredits };
 }
 
 /** How many sends a monthly allowance covers; zero when a send costs nothing to compute. */

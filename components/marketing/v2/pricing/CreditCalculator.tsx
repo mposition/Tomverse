@@ -32,7 +32,7 @@ export function CreditCalculator({ copy, plans, numberFormat, formatCredits, lon
   const [web, setWeb] = useState(false);
   const chosen = TIERS.filter((tier) => picked[tier]);
   const multiplier = BANDS[band].multiplier;
-  const { models, searchCredits, perSend } = calculateSend(chosen, band, web);
+  const { base, models, searchCredits, perSend } = calculateSend(chosen, band, web);
   const counts = plans.map((plan) => ({ ...plan, requests: requestsPerMonth(plan.monthlyCredits, perSend) }));
   const largest = Math.max(1, ...counts.map((plan) => plan.requests));
   // The unit word as it agrees with the amount ("credit" for one, "credits" otherwise).
@@ -77,7 +77,7 @@ export function CreditCalculator({ copy, plans, numberFormat, formatCredits, lon
         <span><b className="big-num" data-testid="pricing-calc-per">{numberFormat.format(perSend)}</b> <span className="muted">{creditUnit}</span></span>
       </div>
       <p className="calc-break" data-testid="pricing-calc-breakdown">
-        {fill(copy.breakdown, { models: numberFormat.format(models), mult: numberFormat.format(multiplier) })}
+        {fill(copy.breakdown, { base: numberFormat.format(base), models: numberFormat.format(models), mult: numberFormat.format(multiplier) })}
         {web ? fill(copy.breakdownWeb, { web: numberFormat.format(searchCredits) }) : null}
       </p>
       <div className="result-rows">

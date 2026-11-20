@@ -116,6 +116,26 @@ test("the calculator charges what a send is charged", () => {
   assert.equal(requestsPerMonth(300, 0), 0);
 });
 
+test("the breakdown keeps the base cost apart from the total after the length multiplier", () => {
+  // One Standard model at 1.5x: the base cost is 1 credit and the total is 2, not "2 x 1.5".
+  const send = calculateSend(["standard"], 1, false);
+  assert.equal(CALCULATOR_BANDS[1].multiplier, 1.5);
+  assert.deepEqual([send.base, send.models, send.perSend], [1, 2, 2]);
+  // Three tiers at 1.5x: base 13, total 2 + 6 + 12 after rounding each model up.
+  const all = calculateSend(["standard", "advanced", "premium"], 1, false);
+  assert.deepEqual([all.base, all.models], [13, 20]);
+  // The base ignores the web search surcharge; the total includes it.
+  const web = calculateSend(["standard"], 1, true);
+  assert.deepEqual([web.base, web.models, web.perSend], [1, 2, 10]);
+  // Every language shows the base, the multiplier and the total.
+  for (const locale of SEO_LOCALES) {
+    const { breakdown } = pricingPageContent[locale].calc;
+    for (const token of ["{base}", "{mult}", "{models}"]) assert.ok(breakdown.includes(token), `${locale}: ${token}`);
+    assert.ok(breakdown.indexOf("{base}") < breakdown.indexOf("{mult}") && breakdown.indexOf("{mult}") < breakdown.indexOf("{models}"), locale);
+  }
+  assert.match(source("CreditCalculator.tsx"), /base: numberFormat\.format\(base\)/);
+});
+
 test("the purchase flow is the previous page's, with its events and entry points", () => {
   const flow = source("usePricingPurchaseFlow.ts");
   const page = source("PricingPage.tsx");
