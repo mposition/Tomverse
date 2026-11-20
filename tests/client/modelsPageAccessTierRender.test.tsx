@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { SessionProvider } from "next-auth/react";
@@ -7,9 +8,14 @@ import { PathnameContext } from "next/dist/shared/lib/hooks-client-context.share
 
 import { LanguageProvider } from "@/components/LanguageProvider";
 import { ModelCatalogProvider } from "@/components/ModelCatalogProvider";
-import { ModelsPageContent, modelsPageCopy } from "@/components/marketing/ModelsPageContent";
+import { modelsPageContent } from "@/components/marketing/v2/models/modelsPageContent";
 import { AVAILABLE_MODELS } from "@/lib/models";
 import { SUPPORTED_LANGUAGES } from "@/lib/language";
+
+// The page imports its stylesheets; the test runner has no bundler, so give the
+// CommonJS loader an empty module for `.css` before the page is loaded.
+createRequire(import.meta.url).extensions[".css"] = (module: { exports: unknown }) => { module.exports = {}; };
+const loadModelsPage = async () => (await import("@/components/marketing/v2/models/ModelsPage")).ModelsPage;
 
 const ssrRouter: AppRouterInstance = {
   back: () => {},
@@ -28,13 +34,13 @@ const fixtureModels = [
   { ...freeModel, id: "models-test-free", name: "Free model", publiclyListed: true },
 ];
 
-const render = (language: (typeof SUPPORTED_LANGUAGES)[number]) => renderToStaticMarkup(
+const render = (ModelsPage: Awaited<ReturnType<typeof loadModelsPage>>, language: (typeof SUPPORTED_LANGUAGES)[number]) => renderToStaticMarkup(
   <AppRouterContext.Provider value={ssrRouter}>
     <PathnameContext.Provider value={language === "en" ? "/models" : `/${language}/models`}>
       <SessionProvider session={null}>
         <LanguageProvider initialLang={language}>
           <ModelCatalogProvider initialModels={fixtureModels}>
-            <ModelsPageContent />
+            <ModelsPage />
           </ModelCatalogProvider>
         </LanguageProvider>
       </SessionProvider>
@@ -42,15 +48,20 @@ const render = (language: (typeof SUPPORTED_LANGUAGES)[number]) => renderToStati
   </AppRouterContext.Provider>
 );
 
-test("Models access-tier copy renders for Guest and Free models in every locale", () => {
+test("Models access-tier copy renders for Guest and Free models in every locale", async () => {
+  const ModelsPage = await loadModelsPage();
   for (const language of SUPPORTED_LANGUAGES) {
-    const html = render(language);
-    const content = modelsPageCopy[language];
+    const html = render(ModelsPage, language);
+    const { list } = modelsPageContent[language];
 
-    for (const key of ["planExplanation", "planHintGuest", "planHintFree"] as const) {
-      assert.ok(html.includes(content[key]), `${language}: ${key} is rendered`);
-    }
+    // The explanation of every plan, and each model card's own plan chip.
+    assert.ok(html.includes(list.planNote.replaceAll("&", "&amp;")), `${language}: plan note is rendered`);
+    assert.ok(html.includes(`>${list.plans.Guest}</span>`), `${language}: Guest model chip is rendered`);
+    assert.ok(html.includes(`>${list.plans.Free}</span>`), `${language}: Free model chip is rendered`);
     assert.ok(html.includes('data-model-id="models-test-guest"'), `${language}: Guest model is rendered`);
     assert.ok(html.includes('data-model-id="models-test-free"'), `${language}: Free model is rendered`);
+    // Only the two catalogue models are listed, and the count says so.
+    assert.equal([...html.matchAll(/<article /g)].length, 2, `${language}: lists exactly the catalogue's models`);
+    assert.ok(html.includes(list.count.replace("{shown}", "2").replace("{total}", "2")), `${language}: result count`);
   }
 });
