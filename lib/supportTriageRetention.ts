@@ -15,6 +15,13 @@
  * is reported instead (`oldestOverdueAgeSeconds`). When the window itself was
  * never read, the class is left for the next run and its rows stay overdue.
  *
+ * A batch whose session was lost (the 150 ms idle timeout ending it after an
+ * event-loop stall, a closed connection, a pool with none to lend) is asked
+ * again at the same window and size while the gate allows; it is no fault of
+ * a row, so it moves no cursor and costs no strike. Its COMMIT may have taken
+ * effect, and the next window read sees only the rows still there. A run whose
+ * every batch is lost completes none, which makes it not progressing.
+ *
  * One batch deletes every class in `RETENTION_CLASSES`, one window read and
  * one delete per class, each class with its own cursor: run rows 30 days
  * after creation, and terminal suggestions 30 days after they became terminal
@@ -54,6 +61,7 @@
 import "server-only";
 
 import { writeSystemAuditLog } from "@/lib/adminAudit";
+import { amuxTransientDatabaseCode } from "@/lib/amux/readFailureCore";
 import { FEEDBACK_STATUSES, isTerminalFeedbackStatus } from "@/lib/feedbackLifecycleCore";
 import { prisma } from "@/lib/prisma";
 import {
@@ -211,7 +219,9 @@ type BatchResult =
       /** Classes that may hold more work past the cursor. */
       readonly full: readonly RetentionClass[];
     }
-  | { readonly kind: "cancelled"; readonly cls: RetentionClass; readonly window: Cursor; readonly windowRows: number };
+  | { readonly kind: "cancelled"; readonly cls: RetentionClass; readonly window: Cursor; readonly windowRows: number }
+  /** The session dropped or the pool refused: nothing to charge to a class. */
+  | { readonly kind: "connection_lost"; readonly code: string };
 
 const runBatch = async (input: {
   readonly runId: string;
@@ -278,6 +288,8 @@ const runBatch = async (input: {
     );
   } catch (error) {
     if (isStatementCancelled(error)) return { kind: "cancelled", cls: current, window: windowEnd, windowRows };
+    const connectionCode = amuxTransientDatabaseCode(error);
+    if (connectionCode) return { kind: "connection_lost", code: connectionCode };
     throw error;
   }
 };
@@ -369,6 +381,13 @@ export const runSupportTriageRetention = async (): Promise<RetentionRunResult> =
           floorCancellations[cls] = 0;
         }
         pending = pending.filter((cls) => !classes.includes(cls) || result.full.includes(cls));
+        continue;
+      }
+      if (result.kind === "connection_lost") {
+        // Same window, same size, next batch: the batch gate bounds the
+        // retries. A lost COMMIT may have taken effect; the next window read
+        // finds only what is still there, so asking again is the check.
+        console.warn(JSON.stringify({ event: "support_triage_retention_connection_lost", code: result.code }));
         continue;
       }
       const cls = result.cls;

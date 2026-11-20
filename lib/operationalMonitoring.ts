@@ -2,6 +2,7 @@ import "server-only";
 
 import * as Sentry from "@sentry/nextjs";
 
+import { resolveDeploymentEnvironment } from "@/lib/deploymentEnvironment";
 import { emailProvider } from "@/lib/emailProviderPort";
 import {
   operatorAlertProbeResult,
@@ -299,6 +300,9 @@ export async function reportOperationalIncident({
   const detail = [
     `Code: ${code}`,
     `Severity: ${severity}`,
+    // Every environment posts to the same channels; without this a dev
+    // incident reads as production (2026-11-20).
+    `Environment: ${resolveDeploymentEnvironment()}`,
     `Message: ${message}`,
     ...Object.entries(safeContext).map(([key, value]) => `${key}: ${String(value)}`),
     `Sentry event: ${eventId}`,
