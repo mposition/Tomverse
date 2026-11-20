@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { ModelsPageContent } from "@/components/marketing/ModelsPageContent";
+import { ModelsPage } from "@/components/marketing/v2/models/ModelsPage";
 import { LocalizedPublicPage } from "@/components/marketing/LocalizedPublicPage";
 import { localizedPublicPageMetadata, publicMarketingLocaleParams, type LocalizedPublicPageProps } from "@/lib/publicMarketingMetadata";
 
@@ -15,5 +15,5 @@ export async function generateMetadata(props: LocalizedPublicPageProps): Promise
 }
 
 export default function Page({ params }: LocalizedPublicPageProps) {
-  return <LocalizedPublicPage params={params} path="/models"><ModelsPageContent /></LocalizedPublicPage>;
+  return <LocalizedPublicPage params={params} path="/models"><ModelsPage /></LocalizedPublicPage>;
 }

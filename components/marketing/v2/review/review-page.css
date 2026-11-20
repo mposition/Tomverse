@@ -1,0 +1,56 @@
+/*
+ * Answer comparison page (approved homepage V2 concept, 2026-11-20), ported with
+ * port-css.cjs and then extended by hand (continue row, motion control).
+ * Every rule is scoped under .tv-page; keyframes are prefixed tvr-; text holds the
+ * 11px floor and fonts use the app's locale variables (docs/ui-contracts/typography.md).
+ */
+.tv-page .summary-modes { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); gap: 24px; align-items: start; }
+.tv-page .mode-card { display: none; }
+.tv-page .mode-card.on { display: grid; gap: 14px; animation: tvr-fadeUp .35s ease-out; }
+@keyframes tvr-fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.tv-page .quick-line { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 12px; padding: 12px 14px; border-radius: 12px; background: var(--panel-2); font-size: .9375rem; color: var(--ink-2); }
+.tv-page .quick-line b { font: 600 .75rem/1.6 var(--font-mono); color: var(--brand-hi); }
+.tv-page .finding { border-radius: 16px; background: var(--panel-2); padding: 16px 18px; display: grid; gap: 8px; }
+.tv-page .finding .k { font: 600 .6875rem/1 var(--font-mono); letter-spacing: .06em; color: var(--brand-hi); text-transform: uppercase; }
+.tv-page .finding blockquote { margin: 0; padding: 8px 12px; border-left: 2px solid var(--brand); background: rgb(21 93 251 / .08); border-radius: 0 10px 10px 0; font-size: .875rem; color: var(--ink-2); }
+.tv-page .finding blockquote cite { display: block; font-style: normal; font: 600 .6875rem/1.6 var(--font-mono); color: var(--ink-3); margin-top: 4px; }
+.tv-page .lens-out { display: grid; gap: 10px; margin-top: 18px; }
+.tv-page .lens-out p { display: grid; grid-template-columns: 8px minmax(0, 1fr); gap: 12px; align-items: baseline; color: var(--ink-2); font-size: .9375rem; }
+.tv-page .lens-out p::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--brand); }
+.tv-page .match { display: grid; gap: 10px; }
+.tv-page .match-bar { height: 10px; border-radius: 10px; background: var(--panel-2); overflow: hidden; }
+.tv-page .match-bar i { display: block; height: 100%; width: 100%; background: linear-gradient(90deg, var(--brand), #8fb2ff); transform-origin: left; animation: tvr-grow 2.4s cubic-bezier(.2,.8,.2,1) both; }
+@keyframes tvr-grow { from { transform: scaleX(0); } }
+.tv-page .prov-grid { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
+.tv-page .prov-cell { border-radius: 16px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); padding: 16px 12px; display: grid; justify-items: center; gap: 10px; font-size: .8125rem; color: var(--ink-2); text-align: center; }
+.tv-page .prov-cell .tile { width: 42px; height: 42px; border-radius: 12px; background: #fff; padding: 8px; display: grid; place-items: center; }
+.tv-page .prov-cell .tile img { width: 100%; height: 100%; object-fit: contain; }
+.tv-page .prov-cell .tile.mm { background: #b91c1c; color: #fff; font: 800 .75rem/1 var(--font-display); }
+@media (max-width: 1080px) { .tv-page .summary-modes { grid-template-columns: minmax(0, 1fr); } .tv-page .prov-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .tv-page .prov-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+/* Added when the concept became a page: the continue row and its bubble no longer use inline styles. */
+.tv-page .review-cont { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 12px 14px; border-radius: 14px; background: var(--selected); box-shadow: inset 0 0 0 1px var(--brand); }
+.tv-page .review-cont .tile { width: 40px; height: 40px; border-radius: 12px; background: #fff; padding: 7px; display: grid; place-items: center; }
+.tv-page .review-cont .tile img { width: 100%; height: 100%; object-fit: contain; }
+.tv-page .review-cont small { display: block; color: var(--ink-3); font-size: .75rem; }
+.tv-page .review-say { margin: 16px 0 0 auto; width: fit-content; max-width: 92%; }
+.tv-page .review-desc { margin-top: 18px; font-size: .9375rem; }
+.tv-page .review-lens-tabs { margin-top: 24px; }
+.tv-page .review-lens-note, .tv-page .review-modes-note { margin-top: 16px; }
+.tv-page .chapter.after-demo { padding-top: 40px; }
+.tv-page .chapter.tight { padding-top: 24px; }
+
+/* Motion control (WCAG 2.2.2): the page root carries data-motion="paused" when the
+   visitor prefers reduced motion or presses the pause button. */
+.tv-page .review-motion-toggle { display: inline-flex; align-items: center; gap: 8px; min-width: 44px; min-height: 44px; margin-top: 14px; padding: 10px 16px; border: 0; border-radius: 100px; background: var(--ghost-bg); color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--ghost-line); font: 600 .875rem/1 var(--font-body); cursor: pointer; }
+.tv-page .review-motion-toggle:hover { background: var(--ghost-bg-hover); color: var(--ink); }
+.tv-page .review-motion-toggle .icon { font-size: .75rem; letter-spacing: -.1em; }
+.tv-page[data-motion="paused"] *, .tv-page[data-motion="paused"] *::before, .tv-page[data-motion="paused"] *::after { animation: none !important; transition: none !important; }
+.tv-page[data-motion="paused"] .hero-media video { display: none; }
+.tv-page .seg button:focus-visible, .tv-page .review-motion-toggle:focus-visible { outline: 2px solid var(--brand-hi); outline-offset: 2px; }
+
+/* Reflow at 320px with a 200% root font size: long labels wrap instead of running past the edge. */
+.tv-page .prov-cell .prov-name { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.tv-page #review-lens-panel > .chip { max-width: 100%; white-space: normal; line-height: 1.4; }
+@media (max-width: 480px) { .tv-page .prov-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .tv-page .prov-cell { padding-inline: 8px; } }

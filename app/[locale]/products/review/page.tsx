@@ -2,9 +2,8 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { LanguageProvider } from "@/components/LanguageProvider";
 import { MARKETING_LOCALE_ALIASES, marketingLocaleFor } from "@/lib/marketingLocale";
-import { LandingPageContent } from "@/components/marketing/LandingPageContent";
+import { ReviewProductPage } from "@/components/marketing/v2/review/ReviewProductPage";
 import { REVIEW_PRODUCT_PATH } from "@/lib/marketingRoutes";
-import { PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE } from "@/lib/landingWorkspaceEntry";
 import { SEO_LOCALES, createPageMetadata, localizedPath, reviewOgCopy, reviewSeoCopy } from "@/lib/seo";
 
 const localeAliases = MARKETING_LOCALE_ALIASES;
@@ -40,7 +39,7 @@ export default async function LocalizedReviewProductPage({ params }: LocalizedRe
   return (
     <div lang={normalizedLocale}>
       <LanguageProvider initialLang={normalizedLocale} forceInitialLang>
-        <LandingPageContent guestTrialAvailable={PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE} />
+        <ReviewProductPage />
       </LanguageProvider>
     </div>
   );
