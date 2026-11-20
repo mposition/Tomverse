@@ -10,7 +10,6 @@ import { purchaseCtaCopy } from "@/components/billing/purchaseCopy";
 import { UpgradeInterestButton } from "@/components/marketing/UpgradeInterestButton";
 import { usePricingAccount } from "@/components/marketing/usePricingAccount";
 import { usePublicBilling } from "@/components/marketing/usePublicBilling";
-import { getDefaultBillingPlan } from "@/lib/billingPlanDefaults";
 import {
   billingCurrencyFractionDigits,
   billingMinorToMajor,
@@ -38,10 +37,13 @@ import { useMarketingChatEntry } from "../../MarketingChatAvailability";
 import { CreditCalculator } from "./CreditCalculator";
 import { PlanModelsDialog } from "./PlanModelsDialog";
 import { pricingPageContent } from "./pricingPageContent";
-import { annualDiscountPercent, commonDiscountPercent, joinPlanNames, promotionAppliesToPlan, promotionPeriodPhrase, promotionPlanNames } from "./pricingPromotion";
+import { annualDiscountPercent, commonDiscountPercent, displayablePromotion, joinPlanNames, promotionAppliesToPlan, promotionPeriodPhrase, promotionPlanNames } from "./pricingPromotion";
 import { usePricingPurchaseFlow } from "./usePricingPurchaseFlow";
 import "../v2-pages.css";
 import "./pricing-page.css";
+
+/** What a paid plan card shows for its price until the live market price loads. */
+const PRICE_PENDING = "—";
 
 // Pricing page (approved concept, owner 2026-11-20). Only the layout and wording are new:
 // prices, credits and packs come from the billing config, the plan buttons and the purchase
@@ -138,7 +140,7 @@ export function PricingPage() {
   const numberFormatter = new Intl.NumberFormat(NUMBER_LOCALE[lang]);
   const formatCredits = (count: number) =>
     formatCountedUnit(count, copy.plans.creditUnit, lang, (value) => numberFormatter.format(value));
-  const featuredPromotion = billing.config?.featuredPromotion ?? null;
+  const featuredPromotion = displayablePromotion(billing.config?.featuredPromotion);
   const publicCreditPacks = billing.config?.creditPacks ?? [];
   const catalog = publicModels.filter((model) => model.enabled);
   const limits = Object.fromEntries(PLAN_IDS.map((id) => [id, billing.planLimits(id)])) as Record<PlanId, ReturnType<typeof billing.planLimits>>;
@@ -155,23 +157,24 @@ export function PricingPage() {
     const displayAmount = interval === "annual" ? plan?.displayAnnualPriceAmount : plan?.displayMonthlyPriceAmount;
     return plan?.displayCurrency && typeof displayAmount === "number" ? plan.displayCurrency : plan?.currency || "USD";
   };
+  // A sale price only from the live market price: before /api/billing/config answers, or when
+  // it fails, there is no price to discount, so no sale price is shown.
   const formatSalePrice = (planId: PlanId, discountPercent: number) => {
     const plan = billing.config?.plans.find((item) => item.id === planId);
+    if (!plan) return null;
     const discountMultiplier = 1 - discountPercent / 100;
-    if (plan?.displayCurrency && typeof plan.displayMonthlyPriceAmount === "number") {
+    if (plan.displayCurrency && typeof plan.displayMonthlyPriceAmount === "number") {
       const digits = billingCurrencyFractionDigits(plan.displayCurrency as BillingCurrency);
       return withCurrencyCode(
         formatBillingAmount(plan.displayMonthlyPriceAmount * discountMultiplier, plan.displayCurrency as BillingCurrency, undefined, digits),
         plan.displayCurrency
       );
     }
-    // Without a market price the sale is quoted on the built-in plan table, in US dollars.
-    return withCurrencyCode(new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-      maximumFractionDigits: 1,
-      minimumFractionDigits: 0,
-    }).format((getDefaultBillingPlan(planId).monthlyPriceCents / 100) * discountMultiplier), "USD");
+    const currency = (plan.currency || "USD") as BillingCurrency;
+    return withCurrencyCode(
+      formatBillingAmount(billingMinorToMajor(plan.monthlyPriceCents, currency) * discountMultiplier, currency),
+      currency
+    );
   };
   const promotionEndDate = featuredPromotion
     ? new Intl.DateTimeFormat(NUMBER_LOCALE[lang], { year: "numeric", month: "long", day: "numeric", timeZone: "Australia/Brisbane" })
@@ -187,7 +190,8 @@ export function PricingPage() {
   const promotionValues = { percent, period: promotionPeriod, plans: promotionPlans };
   const saleDuration = fill(copy.plans.sale.duration, promotionValues);
   // A plan's annual saving is worked out from its own prices; the page names none it cannot back.
-  const annualPercent = (planId: PlanId) => annualDiscountPercent(billing.config?.plans.find((item) => item.id === planId) ?? getDefaultBillingPlan(planId));
+  // Like the prices, a saving is named only from the live market price.
+  const annualPercent = (planId: PlanId) => annualDiscountPercent(billing.config?.plans.find((item) => item.id === planId));
   const saveLabel = (value: number | null) => value === null ? null : fill(copy.plans.save, { percent: numberFormatter.format(value) });
   const selectorSave = saveLabel(commonDiscountPercent((["pro", "max"] as const).map(annualPercent)));
 
@@ -242,8 +246,11 @@ export function PricingPage() {
     const isRequestedTarget = planId !== "free" && pageIntent?.targetPlan === planId;
     const paid = planId !== "free";
     const annualSelected = paid && koIntervalSelector && subscriptionInterval === "annual";
-    const monthlyPrice = withCurrencyCode(billing.formatPlanPriceOrDefault(planId), planPriceCurrency(planId, "monthly"));
-    const annualPrice = withCurrencyCode(billing.formatPlanPriceOrDefault(planId, "annual"), planPriceCurrency(planId, "annual"));
+    // A paid price is stated only from the live market price; until it loads (or when it fails)
+    // the card shows a dash rather than a built-in default that may not be what checkout charges.
+    const livePrice = planId === "free" || Boolean(publicPlan);
+    const monthlyPrice = livePrice ? withCurrencyCode(billing.formatPlanPriceOrDefault(planId), planPriceCurrency(planId, "monthly")) : PRICE_PENDING;
+    const annualPrice = livePrice ? withCurrencyCode(billing.formatPlanPriceOrDefault(planId, "annual"), planPriceCurrency(planId, "annual")) : PRICE_PENDING;
     const annualMonthlyEquivalent = publicPlan
       ? publicPlan.displayCurrency && typeof publicPlan.displayAnnualPriceAmount === "number"
         ? formatBillingAmount(publicPlan.displayAnnualPriceAmount / 12, publicPlan.displayCurrency as BillingCurrency)
@@ -268,7 +275,7 @@ export function PricingPage() {
         <h3 id={`pricing-plan-name-${planId}`}>{name}</h3>
         <p className="who">{copy.plans.who[index]}</p>
       </div>
-      {promotionEligible && !annualSelected ? <div data-testid="pricing-sale-block" className="sale-block">
+      {promotionEligible && salePrice && !annualSelected ? <div data-testid="pricing-sale-block" className="sale-block">
         <div className="sale-top">
           <span className="chip amber">{copy.plans.sale.badge}</span>
           <span data-testid="pricing-discount-badge" className="sale-discount">{discountLabel}</span>

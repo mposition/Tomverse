@@ -71,7 +71,9 @@ test("ChatGPT vs Claude guide serves every comparison image", async ({ page }) =
   const imageCount = await images.count();
   for (let index = 0; index < imageCount; index += 1) {
     const image = images.nth(index);
-    await image.scrollIntoViewIfNeeded();
+    // On a phone the comparison table's header row (with two icons) is folded
+    // away; a hidden image cannot be scrolled to but must still load.
+    if (await image.isVisible()) await image.scrollIntoViewIfNeeded();
     await expect
       .poll(() =>
         image.evaluate((element) => (element as HTMLImageElement).naturalWidth)
