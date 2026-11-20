@@ -217,7 +217,8 @@ const normalizeReasoning = (body: unknown): { body: unknown; ignored: string[] }
     if (!isRecord(body) || typeof body.reasoning !== "string") return { body, ignored: [] };
     const effort = REASONING_EFFORT.safeParse(body.reasoning);
     if (effort.success) return { body: { ...body, reasoning: { effort: effort.data } }, ignored: [] };
-    const { reasoning: _dropped, ...rest } = body;
+    const rest = { ...body };
+    delete rest.reasoning;
     return { body: rest, ignored: ["reasoning"] };
 };
 
