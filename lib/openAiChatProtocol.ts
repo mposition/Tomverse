@@ -186,10 +186,12 @@ const requestSchema = z
         store: z.boolean().nullable().optional(),
         user: z.string().max(256).optional(),
         reasoning_effort: REASONING_EFFORT.nullable().optional(),
-        // The Responses-API spelling, which Cursor sends on Chat Completions
-        // for a model name it recognises. `effort` is `reasoning_effort`;
-        // `summary` has no place in a Chat Completions answer, so it is left
-        // out and named in `x-tomverse-ignored-parameters`.
+        // The Responses-API spelling. `effort` is applied as in
+        // `requestReasoningEffort`; `summary` has no place in a Chat Completions
+        // answer, so it is left out and named in
+        // `x-tomverse-ignored-parameters`. Cursor sends a bare string
+        // for a model name it recognises (production, 2026-11-20);
+        // `normalizeReasoning` turns that into this object first.
         reasoning: z
             .strictObject({
                 effort: REASONING_EFFORT.nullable().optional(),
@@ -200,7 +202,25 @@ const requestSchema = z
     })
     .strict();
 
-export type ChatCompletionRequest = z.infer<typeof requestSchema>;
+export type ChatCompletionRequest = z.infer<typeof requestSchema> & {
+    /** Request fields accepted but not acted on, for `x-tomverse-ignored-parameters`. */
+    ignoredParameters?: string[];
+};
+
+/**
+ * `reasoning: "high"` → `reasoning: { effort: "high" }`. A string that is not a
+ * known effort (`"none"`, a newer level) is a client default rather than a
+ * request the answer depends on, so it is dropped and named as ignored instead
+ * of failing every request from that client.
+ */
+const normalizeReasoning = (body: unknown): { body: unknown; ignored: string[] } => {
+    if (!isRecord(body) || typeof body.reasoning !== "string") return { body, ignored: [] };
+    const effort = REASONING_EFFORT.safeParse(body.reasoning);
+    if (effort.success) return { body: { ...body, reasoning: { effort: effort.data } }, ignored: [] };
+    const rest = { ...body };
+    delete rest.reasoning;
+    return { body: rest, ignored: ["reasoning"] };
+};
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === "object" && value !== null && !Array.isArray(value);
@@ -250,11 +270,16 @@ const normalizeCustomShapes = (body: unknown) => {
 };
 
 export const parseChatCompletionRequest = (body: unknown): ChatCompletionRequest => {
-    const parsed = requestSchema.safeParse(normalizeCustomShapes(body));
+    const reasoning = normalizeReasoning(body);
+    const parsed = requestSchema.safeParse(normalizeCustomShapes(reasoning.body));
     if (parsed.success) {
+        const ignoredParameters = [
+            ...reasoning.ignored,
+            ...(parsed.data.reasoning?.summary != null ? ["reasoning.summary"] : []),
+        ];
+        const data = ignoredParameters.length > 0 ? { ...parsed.data, ignoredParameters } : parsed.data;
         const effort = parsed.data.reasoning?.effort ?? null;
-        if (effort === null) return parsed.data;
-        if (parsed.data.reasoning_effort != null && parsed.data.reasoning_effort !== effort) {
+        if (effort !== null && parsed.data.reasoning_effort != null && parsed.data.reasoning_effort !== effort) {
             throw new ProtocolError(
                 400,
                 "conflicting_parameters",
@@ -262,7 +287,7 @@ export const parseChatCompletionRequest = (body: unknown): ChatCompletionRequest
                 "reasoning.effort"
             );
         }
-        return { ...parsed.data, reasoning_effort: effort };
+        return data;
     }
     const issue = parsed.error.issues[0];
     if (issue?.code === "unrecognized_keys") {
@@ -289,6 +314,22 @@ export type ModelCapabilityView = {
     vision: boolean;
     reasoning: boolean;
     maxOutputTokens: number;
+};
+
+const takesReasoningEffort = (model: ModelCapabilityView) => model.reasoning && model.provider === "openai";
+
+/**
+ * The effort to send. `reasoning_effort` is the caller's choice and is refused
+ * by `resolveRequestOptions` where it cannot apply. `reasoning.effort` is a
+ * client default (Cursor adds it for model names it recognises), so it is used
+ * where the model takes an effort and otherwise left out, with `reasoning`
+ * named in `ignored`.
+ */
+export const requestReasoningEffort = (request: ChatCompletionRequest, model: ModelCapabilityView) => {
+    if (request.reasoning_effort != null) return { effort: request.reasoning_effort, ignored: [] as string[] };
+    const hint = request.reasoning?.effort ?? null;
+    if (hint === null) return { effort: null, ignored: [] as string[] };
+    return takesReasoningEffort(model) ? { effort: hint, ignored: [] as string[] } : { effort: null, ignored: ["reasoning"] };
 };
 
 /** Validates option combinations against the model. Returns the output cap. */
@@ -328,7 +369,7 @@ export const resolveRequestOptions = (
             request.max_completion_tokens != null ? "max_completion_tokens" : "max_tokens"
         );
     }
-    if (request.reasoning_effort != null && !(model.reasoning && model.provider === "openai")) {
+    if (request.reasoning_effort != null && !takesReasoningEffort(model)) {
         throw new ProtocolError(
             400,
             "unsupported_parameter",
@@ -379,7 +420,7 @@ export const modelTakesRequestFeatures = (request: ChatCompletionRequest, model:
     return (
         (!strict || STRICT_TOOL_PROVIDERS.has(model.provider ?? "")) &&
         (!detail || IMAGE_DETAIL_PROVIDERS.has(model.provider ?? "")) &&
-        (request.reasoning_effort == null || (model.reasoning && model.provider === "openai"))
+        (request.reasoning_effort == null || takesReasoningEffort(model))
     );
 };
 

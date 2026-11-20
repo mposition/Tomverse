@@ -36,6 +36,7 @@ import {
   codingCatalogExternalChannelsEnabled,
   codingProfileSchema,
   codingProviderTermsSchema,
+  defaultCodingCapabilitySources,
   defaultPriceSources,
   MODEL_ID_PATTERN,
   OFFICIAL_SOURCE_HOSTS,
@@ -206,6 +207,8 @@ export async function GET(req: Request) {
       draftProviders: DRAFT_PROVIDERS.map((provider) => ({
         provider,
         defaultSources: defaultPriceSources(provider),
+        // What a chat-model link reads: one tool calling and one structured output page.
+        capabilitySources: defaultCodingCapabilitySources(provider),
         hosts: OFFICIAL_SOURCE_HOSTS[provider] ?? [],
       })),
     });
@@ -284,7 +287,8 @@ export async function POST(req: Request) {
       if (!facts || !isDraftProvider(facts.provider)) {
         return NextResponse.json({ error: "no_default_source", detail: facts?.provider ?? null }, { status: 422 });
       }
-      const urls = body.sourceUrls.length > 0 ? body.sourceUrls : defaultPriceSources(facts.provider);
+      const defaults = defaultCodingCapabilitySources(facts.provider);
+      const urls = body.sourceUrls.length > 0 ? body.sourceUrls : defaults ? [defaults.toolCalling, defaults.structuredOutput] : [];
       if (urls.length === 0) return NextResponse.json({ error: "no_default_source", detail: facts.provider }, { status: 422 });
       const draftLlm = await llmOrRefusal();
       if ("response" in draftLlm) return draftLlm.response;

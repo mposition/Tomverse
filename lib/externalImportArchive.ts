@@ -330,12 +330,32 @@ export function readArchiveEntryItems(
         if (role === "candidate") return { skipped: true };
         throw error;
     }
-    if (!Array.isArray(value)) {
+    const items = conversationItemsOf(value);
+    if (!items) {
         if (role === "candidate") return { skipped: true };
         throw new ExternalImportArchiveError(
             "The entry is not a list of conversations.",
             "no_conversation_data"
         );
     }
-    return { items: value };
+    return { items };
+}
+
+/**
+ * The conversation list a parsed export file holds: the value itself when it
+ * is an array, or its `conversations` array when the export wraps the list in
+ * an object -- Perplexity's account export writes
+ * `conversations-<timestamp>.json` as `{"conversations": [...]}`. Anything
+ * else holds no list, and the adapters' detect() still decides whose it is.
+ */
+export function conversationItemsOf(value: unknown): unknown[] | null {
+    if (Array.isArray(value)) return value;
+    if (
+        value !== null &&
+        typeof value === "object" &&
+        Array.isArray((value as { conversations?: unknown }).conversations)
+    ) {
+        return (value as { conversations: unknown[] }).conversations;
+    }
+    return null;
 }

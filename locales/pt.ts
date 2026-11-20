@@ -1562,7 +1562,7 @@ export const pt = {
         capacityConversations: "{used} de {limit} conversas importadas",
         selectFile: "Escolher arquivo de exportação",
         selectFileHint:
-            "Exportação de dados do ChatGPT, do Claude ou do Gemini (.zip ou .json), ou uma conversa do Perplexity exportada em Markdown (.md), até 1 GB. No Gemini, é preciso a exportação em JSON de Minha atividade → Apps Gemini, obtida no Google Takeout. Arquivos grandes não são problema — arquivos de mídia são ignorados sem serem lidos. Em um arquivo do Perplexity, trechos curtos de cada pergunta e do texto de resposta ao redor (no máximo 600 caracteres cada) são enviados a um modelo de IA (OpenAI) para saber onde termina cada pergunta.",
+            "Exportação de dados do ChatGPT, do Claude, do Gemini ou do Perplexity (.zip ou .json), ou uma conversa do Perplexity exportada em Markdown (.md), até 1 GB. No Gemini, é preciso a exportação em JSON de Minha atividade → Apps Gemini, obtida no Google Takeout. Arquivos grandes não são problema — arquivos de mídia são ignorados sem serem lidos. Em um arquivo do Perplexity, trechos curtos de cada pergunta e do texto de resposta ao redor (no máximo 600 caracteres cada) são enviados a um modelo de IA (OpenAI) para saber onde termina cada pergunta.",
         parsing: "Lendo a exportação no seu navegador…",
         parsingProgress: "{conversations} conversas encontradas",
         cancel: "Cancelar",
@@ -1699,10 +1699,10 @@ export const pt = {
             "Selecione Minha atividade, escolha Apps Gemini e defina o formato como JSON — o produto Gemini contém Gems, não conversas",
         guideGeminiStep3:
             "Exporte e envie o .zip quando o Google mandar o link de download",
-        guidePerplexityTitle: "Exportar uma conversa do Perplexity",
-        guidePerplexityStep1: "Abra no Perplexity a conversa que quer trazer",
-        guidePerplexityStep2: "Toque no botão Exportar abaixo de uma resposta e escolha Markdown",
-        guidePerplexityStep3: "Envie o arquivo .md. Um arquivo é uma conversa, e os links das fontes das respostas vêm junto. Para saber onde termina cada pergunta, trechos curtos de cada pergunta e do texto de resposta ao redor (no máximo 600 caracteres cada) são enviados a um modelo de IA (OpenAI).",
+        guidePerplexityTitle: "Exportar seus dados do Perplexity",
+        guidePerplexityStep1: "Peça uma exportação de dados nas configurações do Perplexity. Pesquisar “data” nas configurações encontra a opção",
+        guidePerplexityStep2: "Envie o arquivo .zip recebido sem alterações. Ele tem todas as conversas. Não traz a lista de fontes, então as respostas guardam só marcas como [1]",
+        guidePerplexityStep3: "Para trazer uma só conversa, envie o arquivo .md de Exportar → Markdown abaixo de uma resposta. Esse arquivo traz também os links das fontes. Para saber onde termina cada pergunta, trechos curtos de cada pergunta e do texto de resposta ao redor (no máximo 600 caracteres cada) são enviados a um modelo de IA (OpenAI).",
         guideFormats:
             "Arquivos ZIP e JSON são aceitos, além de arquivos Markdown (.md) do Perplexity. Uma exportação do Gemini precisa estar no formato JSON — HTML não pode ser lido.",
         guideStaysLocal:

@@ -1569,7 +1569,7 @@ export const ko = {
         capacityConversations: "가져온 대화 {limit}개 중 {used}개",
         selectFile: "내보내기 파일 선택",
         selectFileHint:
-            "ChatGPT·Claude·Gemini 데이터 내보내기(.zip 또는 .json) 또는 Perplexity 스레드 Markdown 내보내기(.md), 최대 1GB. Gemini는 Google Takeout에서 내 활동 → Gemini 앱을 JSON으로 내보낸 파일이어야 합니다. 용량이 커도 괜찮습니다 — 미디어 파일은 읽지 않고 건너뜁니다. Perplexity 파일은 질문과 답변의 경계를 정하려고 각 질문과 그 주변 답변의 짧은 발췌(각 600자 이내)를 AI 모델(OpenAI)에 보냅니다.",
+            "ChatGPT·Claude·Gemini·Perplexity 데이터 내보내기(.zip 또는 .json) 또는 Perplexity 스레드 Markdown 내보내기(.md), 최대 1GB. Gemini는 Google Takeout에서 내 활동 → Gemini 앱을 JSON으로 내보낸 파일이어야 합니다. 용량이 커도 괜찮습니다 — 미디어 파일은 읽지 않고 건너뜁니다. Perplexity 파일은 질문과 답변의 경계를 정하려고 각 질문과 그 주변 답변의 짧은 발췌(각 600자 이내)를 AI 모델(OpenAI)에 보냅니다.",
         parsing: "브라우저에서 내보내기 파일을 읽는 중…",
         parsingProgress: "대화 {conversations}개 발견",
         cancel: "취소",
@@ -1698,10 +1698,10 @@ export const ko = {
             "내 활동을 선택한 뒤 그 안에서 Gemini 앱을 고르고 형식을 JSON으로 지정합니다 — Gemini 항목 자체에는 대화가 아니라 Gem이 들어 있습니다",
         guideGeminiStep3:
             "내보낸 뒤 Google이 보내 준 다운로드 링크로 받은 .zip을 올립니다",
-        guidePerplexityTitle: "Perplexity 스레드 내보내기",
-        guidePerplexityStep1: "Perplexity에서 가져올 스레드를 엽니다",
-        guidePerplexityStep2: "답변 아래 내보내기 버튼을 누르고 Markdown을 고릅니다",
-        guidePerplexityStep3: "받은 .md 파일을 올립니다. 파일 하나가 스레드 하나이며, 답변의 출처 링크도 함께 가져옵니다. 질문과 답변의 경계를 정하려고 각 질문과 그 주변 답변의 짧은 발췌(각 600자 이내)를 AI 모델(OpenAI)에 보냅니다.",
+        guidePerplexityTitle: "Perplexity 데이터 내보내기",
+        guidePerplexityStep1: "Perplexity 설정에서 데이터 내보내기를 요청합니다. 설정 검색에서 ‘data’로 찾을 수 있습니다",
+        guidePerplexityStep2: "받은 .zip 파일을 그대로 올립니다. 모든 스레드가 들어 있습니다. 이 파일에는 출처 목록이 없어 답변에 [1] 같은 번호만 남습니다",
+        guidePerplexityStep3: "스레드 하나만 가져오려면 답변 아래 내보내기 → Markdown으로 받은 .md 파일을 올립니다. 이 파일은 출처 링크도 함께 가져옵니다. 질문과 답변의 경계를 정하려고 각 질문과 그 주변 답변의 짧은 발췌(각 600자 이내)를 AI 모델(OpenAI)에 보냅니다.",
         guideFormats:
             "ZIP·JSON 파일과 Perplexity의 Markdown(.md) 파일을 지원합니다. Gemini 내보내기는 JSON 형식이어야 하며 HTML은 읽을 수 없습니다.",
         guideStaysLocal:
