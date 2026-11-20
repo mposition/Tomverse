@@ -141,6 +141,22 @@ const GUIDE_STEP_COUNT = new Map(HELP_GUIDES.map((guide) => [guide.id, guide.ste
 const text = (value: unknown) => (typeof value === "string" ? value.trim() : "");
 
 /**
+ * The corpus labels guides as `[guide:<id>]`, and models often copy that label
+ * whole. Strip the brackets and the `guide:` prefix so a citation of a real
+ * guide is not dropped for its wrapping; anything else still has to be a real id.
+ */
+export function normaliseHelpGuideId(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const id = value
+    .trim()
+    .replace(/^\[(.*)\]$/s, "$1")
+    .trim()
+    .replace(/^guide:/i, "")
+    .trim();
+  return GUIDE_STEP_COUNT.has(id) ? id : null;
+}
+
+/**
  * The one cheap check on the model's output: every cited guide must exist and
  * every cited step must be one of that guide's steps. Unknown citations are
  * dropped; an "answered" reply left citing no real guide becomes not_found,
@@ -158,7 +174,7 @@ export function parseHelpAssistantOutput(output: unknown, fallbackNotFound: stri
     const entry = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
     const stepText = text(entry.text);
     if (!stepText) continue;
-    const guideId = typeof entry.guideId === "string" && GUIDE_STEP_COUNT.has(entry.guideId) ? entry.guideId : null;
+    const guideId = normaliseHelpGuideId(entry.guideId);
     const count = guideId ? GUIDE_STEP_COUNT.get(guideId)! : 0;
     const step =
       guideId && Number.isInteger(entry.step) && (entry.step as number) >= 1 && (entry.step as number) <= count
@@ -168,7 +184,8 @@ export function parseHelpAssistantOutput(output: unknown, fallbackNotFound: stri
   }
   const cited = new Set<string>();
   for (const id of Array.isArray(value.guideIds) ? value.guideIds : []) {
-    if (typeof id === "string" && GUIDE_STEP_COUNT.has(id)) cited.add(id);
+    const guideId = normaliseHelpGuideId(id);
+    if (guideId) cited.add(guideId);
   }
   for (const step of steps) if (step.guideId) cited.add(step.guideId);
   if (!summary || cited.size === 0) {
