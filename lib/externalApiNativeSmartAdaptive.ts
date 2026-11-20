@@ -187,9 +187,11 @@ const decideNativeSmartAdaptive = async (input: {
         }
         return estimate.breakdown.rawTotal + prepared.outputLimit <= capabilities.contextWindowTokens;
     });
-    // Nothing of this provider can take the request: refused here, before any
-    // router call, reservation or dispatch.
-    if (fits.length === 0) {
+    // Nothing of this provider a client could name can take the request:
+    // refused here, before any router call, reservation or dispatch. A
+    // frontier or apex model is only ever the router's pick beside them,
+    // never the one model left (it would answer, and charge, without a pick).
+    if (!fits.some((entry) => !isSmartAdaptiveOnlyModel(entry.model))) {
         if (refusal) throw refusal;
         throw unreadImage
             ? new NativeProtocolError(400, "image_input_unsupported", "No model available to Smart Adaptive here reads images.", "messages")
@@ -204,16 +206,16 @@ const decideNativeSmartAdaptive = async (input: {
     // The default is chosen among the models a client can name, never a
     // frontier or apex model only the router may pick.
     const nameable = candidates.filter((entry) => !isSmartAdaptiveOnlyModel(entry.model));
-    const defaultPool = nameable.length > 0 ? nameable : candidates;
     const defaultId = nativeSmartAdaptiveDefaultId(
-        defaultPool.map((entry) => entry.capabilities),
+        nameable.map((entry) => entry.capabilities),
         DEFAULT_MODEL_ID
     );
-    const fallback = defaultPool.find((entry) => entry.model.id === defaultId) ?? defaultPool[0];
+    const fallback = nameable.find((entry) => entry.model.id === defaultId) ?? nameable[0];
     const now = input.now ?? Date.now();
     const pinKey = `${input.keyId}\0${input.protocol}\0${nativeConversationId(input.protocol, input.request, input.body)}`;
 
-    const prompt = nativeLatestPrompt(input.protocol, input.body);
+    const latest = nativeLatestPrompt(input.protocol, input.body);
+    const prompt = latest.trim() ? latest : "";
     const userTurn = nativeUserTurn(input.protocol, input.body);
     const underWay = nativeConversationUnderWay(input.protocol, input.body);
     const router = (current: RunnableEntry | undefined) =>
@@ -245,11 +247,14 @@ const decideNativeSmartAdaptive = async (input: {
             // An identical concurrent request (a retry, an Idempotency-Key twin)
             // shares this router call rather than making its own.
             const flight = `${pinKey}\0turn:${digest(JSON.stringify(input.body))}`;
+            // Registered before anything is awaited, the gate check included,
+            // so a twin arriving meanwhile finds it.
             const shared = routing.get(flight);
-            if (!shared && !(await input.routerAllowed())) return keep;
-            const call = shared ?? router(current);
+            const call: Promise<NativeSmartDecision> =
+                shared ??
+                (async () => ((await input.routerAllowed()) ? router(current) : { entry: current, routedBy: "continued" as const }))();
             if (!shared) routing.set(flight, call);
-            let routed: Awaited<typeof call>;
+            let routed: NativeSmartDecision;
             try {
                 routed = await call;
             } finally {
