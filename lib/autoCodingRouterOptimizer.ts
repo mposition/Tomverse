@@ -163,8 +163,17 @@ export async function readCodingOptimizerAutomation(
             select: { value: true },
         });
         if (!row) return { ...CODING_OPTIMIZER_AUTOMATION_DEFAULT };
-        const value = JSON.parse(row.value) as Partial<CodingOptimizerAutomation>;
-        return { daily: value.daily === true, autoPromote: value.autoPromote === true };
+        const value: unknown = JSON.parse(row.value);
+        // Only a whole, well-formed setting counts; anything else spends nothing.
+        if (
+            !value || typeof value !== "object" || Array.isArray(value) ||
+            typeof (value as { daily?: unknown }).daily !== "boolean" ||
+            typeof (value as { autoPromote?: unknown }).autoPromote !== "boolean"
+        ) {
+            return { daily: false, autoPromote: false };
+        }
+        const { daily, autoPromote } = value as CodingOptimizerAutomation;
+        return { daily, autoPromote };
     } catch {
         return { daily: false, autoPromote: false };
     }
