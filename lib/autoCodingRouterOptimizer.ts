@@ -80,7 +80,7 @@ import {
 import { externalApiRunnableModels } from "@/lib/externalApiCatalog";
 import { readCodingRoutingReport } from "@/lib/externalApiRoutingReport";
 import { getRuntimeModels } from "@/lib/modelRegistry";
-import type { AiModel } from "@/lib/models";
+import { resolveModelRequestPricing, type AiModel } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -194,8 +194,30 @@ const nextUp = (candidates: readonly AutoLlmRouterCandidate[], pickId: string) =
     return above[0]?.id ?? null;
 };
 
+/** Tokens a call reported: a finite non-negative count, otherwise unknown. */
+const tokens = (value: number | undefined) => (Number.isFinite(value) && value! >= 0 ? value! : null);
+
 const costMicroUsd = (prices: Prices, usage: { inputTokens?: number; outputTokens?: number }) =>
-    Math.ceil((usage.inputTokens ?? 0) * prices.inputUsdPerMillionTokens + (usage.outputTokens ?? 0) * prices.outputUsdPerMillionTokens);
+    Math.ceil((tokens(usage.inputTokens) ?? 0) * prices.inputUsdPerMillionTokens + (tokens(usage.outputTokens) ?? 0) * prices.outputUsdPerMillionTokens);
+
+/**
+ * A model's prices at a prompt this size: a model priced higher above a
+ * context threshold is charged its higher tier. A task-evaluation run is priced
+ * at its whole input, which is never less than any one step's prompt, so the
+ * worst case and the charge are never under the tier any step reached.
+ */
+const tierPrices = (model: AiModel, promptTokens: number): Prices | null => {
+    try {
+        const pricing = resolveModelRequestPricing(model, { estimatedPromptTokens: Math.max(0, Math.ceil(promptTokens)) });
+        const prices = { inputUsdPerMillionTokens: pricing.inputUsdPerMillionTokens, outputUsdPerMillionTokens: pricing.outputUsdPerMillionTokens };
+        return Number.isFinite(prices.inputUsdPerMillionTokens) && Number.isFinite(prices.outputUsdPerMillionTokens) &&
+            prices.inputUsdPerMillionTokens > 0 && prices.outputUsdPerMillionTokens > 0
+            ? prices
+            : null;
+    } catch {
+        return null;
+    }
+};
 
 /** Starts one coding cycle; refusals cost nothing. Mirrors startAutoRouterOptimizerCycle. */
 export async function startCodingRouterOptimizerCycle(
@@ -344,9 +366,9 @@ async function runCodingCycle(input: {
             if (!pick) continue;
             for (const id of [pick, nextUp(candidatesFor(), pick)]) {
                 const model = id ? answerModels.get(id) : undefined;
-                const prices = model ? pricesOf(model) : null;
-                if (!model || !prices) continue;
-                const worst = costMicroUsd(prices, worstRun);
+                const worstPrices = model ? tierPrices(model, worstRun.inputTokens) : null;
+                if (!model || !worstPrices) continue;
+                const worst = costMicroUsd(worstPrices, worstRun);
                 if (evalTotal + worst > evalBudget) {
                     evalStop = "budget";
                     break;
@@ -361,8 +383,11 @@ async function runCodingCycle(input: {
                     limits: CYCLE_EVAL_LIMITS,
                     shouldContinue: () => true,
                     onResult: (result) => {
-                        const known = !result.usageUnknown;
-                        const microUsd = known ? costMicroUsd(prices, result) : worst;
+                        const runPrices = tierPrices(model, tokens(result.inputTokens) ?? worstRun.inputTokens);
+                        const known =
+                            !result.usageUnknown && runPrices !== null &&
+                            tokens(result.inputTokens) !== null && tokens(result.outputTokens) !== null;
+                        const microUsd = known ? costMicroUsd(runPrices, result) : worst;
                         addEvalSpend(model.provider, microUsd);
                         evalCalls.push({ known, microUsd });
                         evalResults.push(result);

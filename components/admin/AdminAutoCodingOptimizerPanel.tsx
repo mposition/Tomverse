@@ -333,7 +333,7 @@ export function AdminAutoCodingOptimizerPanel({ canWrite = true }: { canWrite?: 
             ) : null}
             <OptimizerEvidenceView summary={cycle.summary} spentMicroUsd={cycle.spentMicroUsd} />
             {cycle.failure ? <p className="mt-1 text-xs text-amber-300">{reason(cycle.failure)}</p> : null}
-            {cycle.summary ? (
+            {cycle.summary && typeof cycle.summary.evaluated === "number" ? (
               <p className="mt-1 text-xs text-zinc-400">
                 {cycle.summary.evaluated} {m.evaluated} · {cycle.summary.unchanged} {m.unchanged} · {cycle.summary.candidateWins} {m.candidateWins} ·{" "}
                 {cycle.summary.incumbentWins} {m.incumbentWins} · {cycle.summary.ties} {m.ties}

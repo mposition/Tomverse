@@ -268,7 +268,15 @@ export function createCodingEvalTools(
 ) {
   let testRuns = 0;
   let outputBytes = 0;
-  const metered = async <T extends object>(produce: () => Promise<T>): Promise<T | { error: string }> => {
+  // Tool calls of one step may run at once; they run one after another here,
+  // so a size or count check and the write it guards cannot interleave.
+  let queue: Promise<unknown> = Promise.resolve();
+  const metered = <T extends object>(produce: () => Promise<T>): Promise<T | { error: string }> => {
+    const run = queue.then(() => meteredNow(produce));
+    queue = run.catch(() => undefined);
+    return run;
+  };
+  const meteredNow = async <T extends object>(produce: () => Promise<T>): Promise<T | { error: string }> => {
     if (outputBytes >= limits.maxToolOutputBytes) return { error: "tool output budget exhausted" };
     const result = await produce();
     const size = Buffer.byteLength(JSON.stringify(result));
