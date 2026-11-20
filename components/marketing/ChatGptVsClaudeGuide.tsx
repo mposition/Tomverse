@@ -80,7 +80,7 @@ const guideCopy: Record<Language, GuideCopy> = {
     "reviewedLabel": "시연의 성격",
     "reviewedDate": "편집용 가상 예제 · 모델 실험 아님",
     "modelsLabel": "준비된 비교의 모델",
-    "scopeNote": "GPT-5.4 mini와 Claude Haiku 4.5는 이 가이드의 비교 링크에 설정된 모델 쌍입니다. 아래 문구는 실제 응답이나 성능 측정값이 아닙니다. 현재 모델 이용 여부와 기본 크레딧은 모델 목록에서 확인하세요.",
+    "scopeNote": "GPT 6 Luna와 Claude Haiku 5.5는 이 가이드의 비교 링크에 설정된 모델 쌍입니다. 아래 문구는 실제 응답이나 성능 측정값이 아닙니다. 현재 모델 이용 여부와 기본 크레딧은 모델 목록에서 확인하세요.",
     "resultsTitle": "두 모델에 같은 체크리스트를 적용하세요",
     "resultsBody": "브랜드별 성향을 미리 정하지 말고 실제 질문의 목적부터 적어보세요. 아래 기준은 두 모델에 동일하게 적용합니다.",
     "taskHeader": "사용 상황",
@@ -103,7 +103,7 @@ const guideCopy: Record<Language, GuideCopy> = {
     "faqTitle": "비교할 때 자주 묻는 질문",
     "relatedTitle": "비교를 이어가는 가이드",
     "ctaEyebrow": "같은 입력을 직접 비교",
-    "ctaTitle": "GPT-5.4 mini와 Claude Haiku 4.5 비교 준비하기",
+    "ctaTitle": "GPT 6 Luna와 Claude Haiku 5.5 비교 준비하기",
     "ctaBody": "이 링크는 선택된 두 모델, 위 질문과 가상 원문을 Review 입력창에 준비합니다. 이 준비된 비교 링크는 로그인 후 열립니다. 전송 전 기본 크레딧과 현재 모델 이용 범위를 확인하세요.",
     "ctaLabel": "같은 입력으로 비교 준비하기",
     "signInNote": "로그인 후 준비된 비교 화면으로 돌아옵니다. 이는 이 링크의 조건이며 모든 게스트 Review 체험이 로그인 필수라는 뜻은 아닙니다.",
@@ -231,7 +231,7 @@ const guideCopy: Record<Language, GuideCopy> = {
     "reviewedLabel": "About this demonstration",
     "reviewedDate": "Fictional editorial example · not a model test",
     "modelsLabel": "Models in the prepared comparison",
-    "scopeNote": "GPT-5.4 mini and Claude Haiku 4.5 are the pair configured in this guide’s comparison link. The text below is not a live response or a performance measurement. Check the model catalogue for current access and base credits.",
+    "scopeNote": "GPT 6 Luna and Claude Haiku 5.5 are the pair configured in this guide’s comparison link. The text below is not a live response or a performance measurement. Check the model catalogue for current access and base credits.",
     "resultsTitle": "Apply one checklist to both models",
     "resultsBody": "Start with what your question needs, rather than an assumed brand personality. Apply the criteria below equally to both models.",
     "taskHeader": "Situation",
@@ -254,7 +254,7 @@ const guideCopy: Record<Language, GuideCopy> = {
     "faqTitle": "Comparison FAQ",
     "relatedTitle": "Continue with these guides",
     "ctaEyebrow": "Compare the same input yourself",
-    "ctaTitle": "Prepare a GPT-5.4 mini and Claude Haiku 4.5 comparison",
+    "ctaTitle": "Prepare a GPT 6 Luna and Claude Haiku 5.5 comparison",
     "ctaBody": "This link prepares the two selected models, question and fictional source in Review. This prepared comparison link opens after sign-in. Check base credits and current model access before sending.",
     "ctaLabel": "Prepare the same-input comparison",
     "signInNote": "After sign-in you return to the prepared comparison. This is a condition of this link, not a claim that every guest Review trial requires sign-in.",
@@ -382,7 +382,7 @@ const guideCopy: Record<Language, GuideCopy> = {
     "reviewedLabel": "关于本演示",
     "reviewedDate": "虚构编辑示例 · 并非模型测试",
     "modelsLabel": "预设比较中的模型",
-    "scopeNote": "GPT-5.4 mini 和 Claude Haiku 4.5 是本指南比较链接中预设的模型。下文不是实时回答或性能测量，请在模型目录查看当前权限与基础积分。",
+    "scopeNote": "GPT 6 Luna 和 Claude Haiku 5.5 是本指南比较链接中预设的模型。下文不是实时回答或性能测量，请在模型目录查看当前权限与基础积分。",
     "resultsTitle": "对两个模型使用同一清单",
     "resultsBody": "先明确问题的目的，不要预设品牌风格。把下列标准同样用于两个模型。",
     "taskHeader": "使用场景",
@@ -405,7 +405,7 @@ const guideCopy: Record<Language, GuideCopy> = {
     "faqTitle": "比较常见问题",
     "relatedTitle": "继续阅读这些指南",
     "ctaEyebrow": "自己比较相同输入",
-    "ctaTitle": "准备比较 GPT-5.4 mini 与 Claude Haiku 4.5",
+    "ctaTitle": "准备比较 GPT 6 Luna 与 Claude Haiku 5.5",
     "ctaBody": "此链接在 Review 中准备两个所选模型、问题与虚构原文。该预设比较链接登录后打开；发送前请查看基础积分与当前模型权限。",
     "ctaLabel": "准备相同输入的比较",
     "signInNote": "登录后返回预设比较。这是此链接的条件，并不表示所有访客 Review 体验都必须登录。",
@@ -533,7 +533,7 @@ const guideCopy: Record<Language, GuideCopy> = {
     "reviewedLabel": "關於本示範",
     "reviewedDate": "虛構的編輯範例 · 並非模型測試",
     "modelsLabel": "預設比較中的模型",
-    "scopeNote": "GPT-5.4 mini 與 Claude Haiku 4.5 是本指南比較連結中預設的模型。下文不是即時回答或效能測量，請在模型目錄查看目前的權限與基礎點數。",
+    "scopeNote": "GPT 6 Luna 與 Claude Haiku 5.5 是本指南比較連結中預設的模型。下文不是即時回答或效能測量，請在模型目錄查看目前的權限與基礎點數。",
     "resultsTitle": "對兩個模型使用同一份清單",
     "resultsBody": "先明確問題的目的，不要預設品牌風格。將下列標準同樣套用於兩個模型。",
     "taskHeader": "使用情境",
@@ -556,7 +556,7 @@ const guideCopy: Record<Language, GuideCopy> = {
     "faqTitle": "比較常見問題",
     "relatedTitle": "繼續閱讀這些指南",
     "ctaEyebrow": "自行比較相同輸入",
-    "ctaTitle": "準備比較 GPT-5.4 mini 與 Claude Haiku 4.5",
+    "ctaTitle": "準備比較 GPT 6 Luna 與 Claude Haiku 5.5",
     "ctaBody": "此連結會在 Review 中預先準備兩個所選模型、問題與虛構原文。此預設比較連結需登入後開啟；傳送前請查看基礎點數與目前的模型權限。",
     "ctaLabel": "準備相同輸入的比較",
     "signInNote": "登入後會返回預設比較。這是此連結的條件，並不代表所有訪客的 Review 體驗都必須登入。",
@@ -684,7 +684,7 @@ const guideCopy: Record<Language, GuideCopy> = {
     "reviewedLabel": "À propos de la démonstration",
     "reviewedDate": "Exemple fictif rédigé · aucun test de modèle",
     "modelsLabel": "Modèles de la comparaison préparée",
-    "scopeNote": "GPT-5.4 mini et Claude Haiku 4.5 sont les modèles configurés dans le lien de comparaison. Le texte ci-dessous n’est ni une réponse réelle ni une mesure de performance. Consultez le catalogue pour l’accès actuel et les crédits de base.",
+    "scopeNote": "GPT 6 Luna et Claude Haiku 5.5 sont les modèles configurés dans le lien de comparaison. Le texte ci-dessous n’est ni une réponse réelle ni une mesure de performance. Consultez le catalogue pour l’accès actuel et les crédits de base.",
     "resultsTitle": "Une seule grille pour les deux modèles",
     "resultsBody": "Commencez par l’objectif de votre question, sans présumer d’un style propre à la marque. Appliquez les critères ci-dessous aux deux modèles.",
     "taskHeader": "Situation",
@@ -707,7 +707,7 @@ const guideCopy: Record<Language, GuideCopy> = {
     "faqTitle": "Questions fréquentes sur la comparaison",
     "relatedTitle": "Poursuivre avec ces guides",
     "ctaEyebrow": "Comparer vous-même les mêmes entrées",
-    "ctaTitle": "Préparer une comparaison GPT-5.4 mini et Claude Haiku 4.5",
+    "ctaTitle": "Préparer une comparaison GPT 6 Luna et Claude Haiku 5.5",
     "ctaBody": "Ce lien prépare les deux modèles, la question et la source fictive dans Review. Cette comparaison préparée s’ouvre après connexion. Vérifiez les crédits de base et l’accès actuel avant l’envoi.",
     "ctaLabel": "Préparer cette comparaison",
     "signInNote": "Après connexion, vous retrouvez la comparaison préparée. Cette condition concerne ce lien, pas tous les essais de Review sans compte.",
@@ -835,7 +835,7 @@ const guideCopy: Record<Language, GuideCopy> = {
     "reviewedLabel": "Über diese Darstellung",
     "reviewedDate": "Fiktives redaktionelles Beispiel · kein Modelltest",
     "modelsLabel": "Modelle des vorbereiteten Vergleichs",
-    "scopeNote": "GPT-5.4 mini und Claude Haiku 4.5 sind im Vergleichslink voreingestellt. Die folgenden Texte sind weder echte Antworten noch Leistungsmessungen. Aktuellen Zugriff und Basis-Credits finden Sie im Modellkatalog.",
+    "scopeNote": "GPT 6 Luna und Claude Haiku 5.5 sind im Vergleichslink voreingestellt. Die folgenden Texte sind weder echte Antworten noch Leistungsmessungen. Aktuellen Zugriff und Basis-Credits finden Sie im Modellkatalog.",
     "resultsTitle": "Eine Checkliste für beide Modelle",
     "resultsBody": "Beginnen Sie mit dem Ziel Ihrer Frage statt mit angenommenen Markeneigenschaften. Wenden Sie die Kriterien auf beide Modelle gleichermaßen an.",
     "taskHeader": "Situation",
@@ -858,7 +858,7 @@ const guideCopy: Record<Language, GuideCopy> = {
     "faqTitle": "Häufige Vergleichsfragen",
     "relatedTitle": "Weitere Leitfäden",
     "ctaEyebrow": "Dieselbe Eingabe selbst vergleichen",
-    "ctaTitle": "Vergleich von GPT-5.4 mini und Claude Haiku 4.5 vorbereiten",
+    "ctaTitle": "Vergleich von GPT 6 Luna und Claude Haiku 5.5 vorbereiten",
     "ctaBody": "Der Link bereitet beide Modelle, Frage und fiktive Quelle in Review vor. Dieser vorbereitete Vergleich öffnet sich nach der Anmeldung. Prüfen Sie vor dem Senden Basis-Credits und Modellzugriff.",
     "ctaLabel": "Vergleich vorbereiten",
     "signInNote": "Nach der Anmeldung kehren Sie zum vorbereiteten Vergleich zurück. Dies betrifft diesen Link, nicht sämtliche Review-Gasttests.",
@@ -986,7 +986,7 @@ const guideCopy: Record<Language, GuideCopy> = {
     "reviewedLabel": "Sobre esta demostración",
     "reviewedDate": "Ejemplo ficticio editado · no es una prueba de modelos",
     "modelsLabel": "Modelos de la comparación preparada",
-    "scopeNote": "GPT-5.4 mini y Claude Haiku 4.5 son los modelos configurados en el enlace. El texto siguiente no es una respuesta real ni una medición de rendimiento. Consulta el catálogo para ver acceso y créditos base actuales.",
+    "scopeNote": "GPT 6 Luna y Claude Haiku 5.5 son los modelos configurados en el enlace. El texto siguiente no es una respuesta real ni una medición de rendimiento. Consulta el catálogo para ver acceso y créditos base actuales.",
     "resultsTitle": "Aplica una misma lista a ambos modelos",
     "resultsBody": "Empieza por el objetivo de tu pregunta sin presuponer rasgos de cada marca. Aplica estos criterios por igual a ambos modelos.",
     "taskHeader": "Situación",
@@ -1009,7 +1009,7 @@ const guideCopy: Record<Language, GuideCopy> = {
     "faqTitle": "Preguntas frecuentes al comparar",
     "relatedTitle": "Continúa con estas guías",
     "ctaEyebrow": "Compara la misma entrada",
-    "ctaTitle": "Prepara una comparación de GPT-5.4 mini y Claude Haiku 4.5",
+    "ctaTitle": "Prepara una comparación de GPT 6 Luna y Claude Haiku 5.5",
     "ctaBody": "El enlace prepara los dos modelos, la pregunta y la fuente ficticia en Review. Esta comparación preparada se abre tras iniciar sesión. Revisa los créditos base y el acceso antes de enviar.",
     "ctaLabel": "Preparar la comparación",
     "signInNote": "Tras iniciar sesión vuelves a la comparación preparada. Esta condición es del enlace y no de todas las pruebas de Review como visitante.",
@@ -1137,7 +1137,7 @@ const guideCopy: Record<Language, GuideCopy> = {
     "reviewedLabel": "Sobre esta demonstração",
     "reviewedDate": "Exemplo fictício editado · não é um teste de modelos",
     "modelsLabel": "Modelos da comparação preparada",
-    "scopeNote": "GPT-5.4 mini e Claude Haiku 4.5 são os modelos configurados no link. O texto abaixo não é uma resposta real nem uma medição de desempenho. Confira o acesso e os créditos-base atuais no catálogo.",
+    "scopeNote": "GPT 6 Luna e Claude Haiku 5.5 são os modelos configurados no link. O texto abaixo não é uma resposta real nem uma medição de desempenho. Confira o acesso e os créditos-base atuais no catálogo.",
     "resultsTitle": "Use a mesma lista nos dois modelos",
     "resultsBody": "Comece pelo objetivo da pergunta, sem presumir características de cada marca. Aplique os critérios igualmente aos dois modelos.",
     "taskHeader": "Situação",
@@ -1160,7 +1160,7 @@ const guideCopy: Record<Language, GuideCopy> = {
     "faqTitle": "Dúvidas sobre comparação",
     "relatedTitle": "Continue com estes guias",
     "ctaEyebrow": "Compare a mesma entrada",
-    "ctaTitle": "Prepare uma comparação de GPT-5.4 mini e Claude Haiku 4.5",
+    "ctaTitle": "Prepare uma comparação de GPT 6 Luna e Claude Haiku 5.5",
     "ctaBody": "O link prepara os dois modelos, a pergunta e a fonte fictícia no Review. Esta comparação preparada abre após o login. Confira os créditos-base e o acesso antes de enviar.",
     "ctaLabel": "Preparar a comparação",
     "signInNote": "Após o login, você volta à comparação preparada. Essa condição é do link e não de todas as experiências de Review como visitante.",
@@ -1323,8 +1323,8 @@ export function ChatGptVsClaudeGuide() {
           <div className="rounded-2xl border border-zinc-200 bg-white/90 p-4 dark:border-zinc-800 dark:bg-zinc-950/80">
             <p className="text-xs font-bold uppercase tracking-wider text-zinc-500">{copy.modelsLabel}</p>
             <div className="mt-3 flex flex-wrap gap-3">
-              <ModelBadge image="/model-icons/chatgpt.png" name="GPT-5.4 mini" provider="OpenAI" />
-              <ModelBadge image="/model-icons/claude.png" name="Claude Haiku 4.5" provider="Anthropic" />
+              <ModelBadge image="/model-icons/chatgpt.png" name="GPT 6 Luna" provider="OpenAI" />
+              <ModelBadge image="/model-icons/claude.png" name="Claude Haiku 5.5" provider="Anthropic" />
             </div>
           </div>
           <div className="rounded-2xl border border-zinc-200 bg-white/90 p-4 dark:border-zinc-800 dark:bg-zinc-950/80">
@@ -1380,8 +1380,8 @@ export function ChatGptVsClaudeGuide() {
           <p className="mt-2 whitespace-pre-line text-sm font-semibold leading-6 text-white">{copy.samplePrompt}</p>
         </div>
         <div className="mt-4 grid gap-4 md:grid-cols-2">
-          <ResultCard image="/model-icons/chatgpt.png" title="GPT-5.4 mini" body={copy.gptResult} accent="blue" />
-          <ResultCard image="/model-icons/claude.png" title="Claude Haiku 4.5" body={copy.claudeResult} accent="orange" />
+          <ResultCard image="/model-icons/chatgpt.png" title="GPT 6 Luna" body={copy.gptResult} accent="blue" />
+          <ResultCard image="/model-icons/claude.png" title="Claude Haiku 5.5" body={copy.claudeResult} accent="orange" />
         </div>
         <p className="mt-5 rounded-xl bg-emerald-500/10 px-4 py-3 text-sm font-bold leading-6 text-emerald-100">{copy.resultTakeaway}</p>
         <p className="mt-3 text-xs leading-5 text-zinc-400">{copy.resultDisclaimer}</p>
@@ -1404,8 +1404,8 @@ export function ChatGptVsClaudeGuide() {
         <figure className="mt-7 overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950 p-3 shadow-2xl shadow-blue-950/20 sm:p-5">
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-3 text-sm font-semibold text-zinc-100 sm:p-4">{copy.screenPrompt}</div>
           <div className="mt-3 grid gap-3 md:grid-cols-2">
-            <PreviewPanel image="/model-icons/chatgpt.png" model="GPT-5.4 mini" body={copy.gptResult} />
-            <PreviewPanel image="/model-icons/claude.png" model="Claude Haiku 4.5" body={copy.claudeResult} />
+            <PreviewPanel image="/model-icons/chatgpt.png" model="GPT 6 Luna" body={copy.gptResult} />
+            <PreviewPanel image="/model-icons/claude.png" model="Claude Haiku 5.5" body={copy.claudeResult} />
           </div>
           <figcaption className="px-2 pb-1 pt-4 text-xs leading-5 text-zinc-400">{copy.screenCaption}</figcaption>
         </figure>
