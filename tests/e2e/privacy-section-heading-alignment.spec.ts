@@ -1,6 +1,9 @@
 import { expect, test } from "@playwright/test";
 import { setDeterministicTheme } from "./support/chat-state-fixtures";
 
+// The V2 document stacks every clause heading above its text, at every width, so
+// the heading must sit directly above the first paragraph of its own section --
+// never beside it, below it or a screen away.
 for (const width of [320, 1440]) for (const theme of ["light", "dark"] as const) {
   test(`privacy provider heading starts with its section at ${width}px in ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
@@ -16,10 +19,12 @@ for (const width of [320, 1440]) for (const theme of ["light", "dark"] as const)
       const text = [...heading.childNodes].find((child) => child.nodeType === Node.TEXT_NODE && child.textContent?.trim())!;
       range.selectNodeContents(text);
       const title = range.getBoundingClientRect();
-      return { titleTop: title.top, titleBottom: title.bottom, bodyTop: paragraph.getBoundingClientRect().top };
+      const body = paragraph.getBoundingClientRect();
+      return { titleBottom: title.bottom, bodyTop: body.top, titleLeft: title.left, bodyRight: body.right };
     });
-    if (width >= 768) expect(Math.abs(metrics.titleTop - metrics.bodyTop)).toBeLessThan(10);
-    else expect(metrics.titleBottom).toBeLessThanOrEqual(metrics.bodyTop);
+    expect(metrics.titleBottom).toBeLessThanOrEqual(metrics.bodyTop);
+    expect(metrics.bodyTop - metrics.titleBottom).toBeLessThan(48);
+    expect(metrics.titleLeft).toBeLessThan(metrics.bodyRight);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   });
 }

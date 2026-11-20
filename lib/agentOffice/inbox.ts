@@ -13,7 +13,12 @@ import {
   type AgentOfficeInboxCounts,
   type AgentOfficeOperatorQueue,
 } from "@/lib/agentOffice/live";
-import { agentOfficeChannel, AGENT_OFFICE_CHANNELS, type AgentOfficeChannel } from "@/lib/agentOffice/floor";
+import {
+  agentOfficeChannel,
+  AGENT_OFFICE_CHANNELS,
+  type AgentOfficeChannel,
+  type AgentOfficeQuotaChannel,
+} from "@/lib/agentOffice/floor";
 
 export const AGENT_OFFICE_CARDS_HREF = "/admin/amux-execution?tab=cards";
 export const AGENT_OFFICE_IDEAS_HREF = "/admin/amux-backlog?tab=ideas";
@@ -105,6 +110,52 @@ export function agentOfficeChannelQuota(readings: readonly AgentOfficeQuotaReadi
     return { kind: "old", percent: mean(old.map((r) => r.percent)), observedAt: newest.observedAt };
   }
   return { kind: "missing" };
+}
+
+/**
+ * A model's short name for a quota row: "gemini-4-hydrogen-high" is
+ * "Hydrogen", "claude-opus-5-5-high" is "Opus". An ID of another shape is
+ * shown as it is.
+ */
+export function agentOfficeQuotaModelLabel(modelId: string): string {
+  const name = /^gemini-4-([a-z]+)/.exec(modelId)?.[1] ?? /^claude-([a-z]+)-/.exec(modelId)?.[1] ??
+    (/^gemini-[0-9.]+-flash/.test(modelId) ? "flash" : null);
+  return name ? name[0].toUpperCase() + name.slice(1) : modelId;
+}
+
+export type AgentOfficeChannelQuotaRow = {
+  channel: AgentOfficeQuotaChannel;
+  /** The model's short name when the row is one model of its channel, else null. */
+  model: string | null;
+  quota: AgentOfficeChannelQuota;
+};
+
+/**
+ * The summary card's rows. A channel whose workers share one sign-in's limit
+ * is one row. Antigravity is one row per model (owner decision 2026-11-20):
+ * agy bounds each model group with its own limit, so Gemini 4 Argon can be
+ * spent while Hydrogen and Opus are nearly full, and a mean over the three
+ * workers would show a number no worker has. Rows follow the channels' order,
+ * and an Antigravity channel's models their workers' order.
+ */
+export function agentOfficeChannelQuotaRows(
+  channels: readonly AgentOfficeQuotaChannel[],
+  workers: readonly { quotaChannel: AgentOfficeQuotaChannel | null; model: string | null; quota: AgentOfficeQuotaReading }[],
+): AgentOfficeChannelQuotaRow[] {
+  return channels.flatMap((channel): AgentOfficeChannelQuotaRow[] => {
+    const own = workers.filter((worker) => worker.quotaChannel === channel);
+    if (channel !== "antigravity" || own.length === 0) {
+      return [{ channel, model: null, quota: agentOfficeChannelQuota(own.map((worker) => worker.quota)) }];
+    }
+    const models = [...new Set(own.map((worker) => (worker.model ? agentOfficeQuotaModelLabel(worker.model) : null)))];
+    return models.map((model) => ({
+      channel,
+      model,
+      quota: agentOfficeChannelQuota(own
+        .filter((worker) => (worker.model ? agentOfficeQuotaModelLabel(worker.model) : null) === model)
+        .map((worker) => worker.quota)),
+    }));
+  });
 }
 
 export function agentOfficeInbox(input: {

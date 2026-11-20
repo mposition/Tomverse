@@ -604,7 +604,7 @@ export const es: HelpLocaleCopy = {
       faq: [
         { q: "Lo exporté en HTML.", a: "La exportación de Gemini debe estar en formato JSON. El HTML no se puede leer; vuelve a exportar desde Takeout con el formato JSON." },
         { q: "¿Se sube el archivo original al servidor?", a: "El archivo original no sale de tu dispositivo. Solo se guarda en tu cuenta el texto de las conversaciones que elijas; no se importan imágenes, audio ni archivos adjuntos." },
-        { q: "¿Se pueden importar también conversaciones de Perplexity?", a: "Todavía no. Lo admitiremos pronto." },
+        { q: "¿Se pueden importar también conversaciones de Perplexity?", a: "Sí. En Perplexity, pulsa el botón de exportar bajo una respuesta y elige Markdown (.md); luego elige Perplexity en la pantalla de importación y sube el archivo. Un archivo es un hilo. La exportación de Perplexity no marca dónde termina una pregunta, así que una pregunta y su respuesta pueden dividirse mal; abre la conversación tras importar para comprobarlo." },
       ],
     },
     "import-guest-conversations": {

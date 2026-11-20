@@ -670,7 +670,7 @@ const launchNav: Record<Language, Omit<NavCopy, "chatItems" | "developerItems"> 
   ko: {
     chat: "채팅", review: "답변 비교", developers: "개발자", models: "모델", chatMenu: "채팅 기능", developersMenu: "개발자 메뉴", soon: "곧 출시", apiKeys: "API 키 관리",
     chatItems: [
-      { title: "Smart Adaptive", body: "질문을 다듬고 맞는 모델로" }, { title: "대화 이어가기", body: "다른 AI의 대화를 가져와 계속" },
+      { title: "스마트 자동(Smart Adaptive)", body: "질문을 다듬고 맞는 모델로" }, { title: "대화 이어가기", body: "다른 AI의 대화를 가져와 계속" },
       { title: "이미지 · 파일", body: "생성, 사진 편집, 파일 변환" }, { title: "플러그인 · MCP", body: "업무 도구를 대화 안으로" }, { title: "모바일 앱", body: "Android · iOS 곧 출시" },
     ],
     developerItems: [
@@ -847,8 +847,8 @@ function LaunchMarketingHeader({
             <div className="min-w-0 [&>label]:h-[44px] [&>label]:max-w-[126px] [&>label]:border-zinc-700 [&>label]:bg-zinc-900 [&>label]:text-zinc-100 [&_select]:text-zinc-100 [&_select]:[color-scheme:dark]">
               <MarketingLanguageSwitcher />
             </div>
-            {status !== "authenticated" && <Link href={loginHref} className={`hidden px-2 py-3 text-sm font-semibold text-zinc-300 hover:text-white lg:inline-flex ${launchFocus}`}>{copy.login}</Link>}
-            <Link href={primaryHref} data-testid="marketing-header-app-cta" data-session-state={status} onClick={() => trackStart("marketing_header")} className={`${showMobileEntry ? "col-start-1 row-start-2 inline-flex min-w-0 justify-center px-3 lg:px-5" : "hidden px-5"} min-h-[44px] items-center gap-2 rounded-full bg-[#155dfb] py-2 text-center text-sm font-bold shadow-[0_10px_40px_-12px_rgb(21_93_251/0.8)] transition hover:-translate-y-px hover:bg-[#144ee0] lg:inline-flex ${launchFocus}`}>
+            {status !== "authenticated" && <Link href={loginHref} className={`hidden shrink-0 whitespace-nowrap px-2 py-3 text-sm font-semibold text-zinc-300 hover:text-white lg:inline-flex ${launchFocus}`}>{copy.login}</Link>}
+            <Link href={primaryHref} data-testid="marketing-header-app-cta" data-session-state={status} onClick={() => trackStart("marketing_header")} className={`${showMobileEntry ? "col-start-1 row-start-2 inline-flex min-w-0 justify-center px-3 lg:px-5" : "hidden px-5"} min-h-[44px] items-center gap-2 whitespace-nowrap rounded-full bg-[#155dfb] py-2 text-center text-sm font-bold shadow-[0_10px_40px_-12px_rgb(21_93_251/0.8)] transition hover:-translate-y-px hover:bg-[#144ee0] lg:inline-flex ${launchFocus}`}>
               {appLabel}<ArrowRight className="h-4 w-4 shrink-0" aria-hidden="true" />
             </Link>
             <button ref={menuButtonRef} type="button" aria-label={isMenuOpen ? menuCopy.close : menuCopy.menu} aria-controls={menuId} aria-expanded={isMenuOpen} onClick={() => setIsMenuOpen((open) => !open)} data-testid="marketing-menu-button" className={`${showMobileEntry ? "col-start-2 row-start-2 justify-self-end" : ""} inline-flex h-[44px] w-[44px] shrink-0 items-center justify-center rounded-full border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 lg:hidden ${launchFocus}`}>

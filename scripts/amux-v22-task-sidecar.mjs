@@ -28,7 +28,8 @@ if (!["anthropic", "openai", "github-copilot", "cursor", "antigravity"].includes
   throw new Error("invalid sidecar provider");
 const config = { ...amuxV22SidecarLaunchConfigFromEnvironment(process.env), provider };
 // The agy /usage group that bounds the worker's model (default "Gemini 4
-// Argon"; Gemini Flash or Pro is "Gemini Models"). Read only for the quota.
+// Argon"; Hydrogen is "Gemini Models", Claude Opus "Claude and GPT
+// models"). Read only for the quota.
 const quotaGroup = process.env.TOMVERSE_AMUX_V22_ANTIGRAVITY_QUOTA_GROUP || undefined;
 const socketPath = process.env.TOMVERSE_AMUX_V22_SIDECAR_SOCKET;
 const stateDir = process.env.TOMVERSE_AMUX_V22_SIDECAR_STATE_DIR;

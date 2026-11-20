@@ -8,7 +8,6 @@ import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
 import { ChatGptVsClaudeGuide } from "./ChatGptVsClaudeGuide";
 import { AiReviewDemo } from "./AiReviewDemo";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
-import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
 import { LOCALIZED_SEO_PATHS, localizedPath } from "@/lib/seo";
 import { useMarketingChatEntry } from "./MarketingChatAvailability";
 import { marketingProductEntryHref } from "@/lib/marketingProductEntry";
@@ -81,7 +80,6 @@ export function MarketingInfoPage({
   const sectionId = useId();
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
   const pageHref = (href: string) => {
-    if (href === "/support/help-centre/chat-workspace") return chatWorkspaceGuideHref(lang);
     if (href.startsWith("/review") || /^\/chat(?=\?|$)/.test(href)) {
       const url = new URL(href.replace(/^\/chat(?=\?|$)/, "/review"), "https://tomverse.app");
       url.searchParams.set("lang", lang);

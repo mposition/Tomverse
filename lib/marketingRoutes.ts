@@ -22,7 +22,6 @@ const exactMarketingPaths = new Set([
   "/safety/trust-transparency",
   "/support",
   "/support/help-centre",
-  "/support/help-centre/chat-workspace",
   "/terms",
 ]);
 
@@ -60,7 +59,6 @@ export const LOCALIZED_MARKETING_BASE_PATHS = [
   "/safety/trust-transparency",
   "/support",
   "/support/help-centre",
-  "/support/help-centre/chat-workspace",
 ] as const;
 const localizedMarketingBasePaths = new Set<string>(LOCALIZED_MARKETING_BASE_PATHS);
 

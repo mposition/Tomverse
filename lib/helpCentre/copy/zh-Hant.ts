@@ -606,7 +606,7 @@ export const zhHant: HelpLocaleCopy = {
       faq: [
         { q: "我匯出成 HTML 了。", a: "Gemini 的匯出檔必須是 JSON 格式。HTML 無法讀取，請在 Takeout 中把格式改成 JSON 後重新匯出。" },
         { q: "原始檔案會上傳到伺服器嗎？", a: "原始檔案不會離開你的裝置。只有你選的對話文字會儲存到帳號中，圖片、語音和附件都不會匯入。" },
-        { q: "也能匯入 Perplexity 的對話嗎？", a: "目前還不支援，預計很快推出。" },
+        { q: "也能匯入 Perplexity 的對話嗎？", a: "可以。在 Perplexity 中按下回答下方的匯出按鈕並選擇 Markdown（.md），接著在匯入畫面選擇 Perplexity 並上傳該檔案。一個檔案對應一個討論串。Perplexity 的匯出沒有標示問題在哪裡結束，因此問題與回答可能被錯誤切分，匯入後請開啟對話確認。" },
       ],
     },
     "import-guest-conversations": {

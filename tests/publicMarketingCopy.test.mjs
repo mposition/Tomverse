@@ -7,6 +7,10 @@ import { homeV2Content, homeV2SourceCopy } from "../components/marketing/home/ho
 import { chatWorkspaceGuideContent } from "../components/marketing/chatWorkspaceGuideContent.ts";
 import { assistantKnowledgeGuideContent } from "../components/marketing/assistantKnowledgeGuideContent.ts";
 import { landingCopy } from "../components/marketing/landingContent.ts";
+import { chatPageContent } from "../components/marketing/v2/chat/chatPageContent.ts";
+import { cliPageContent } from "../components/marketing/v2/cli/cliPageContent.ts";
+import { developersPageContent, developersPageSeo } from "../components/marketing/v2/developers/developersPageContent.ts";
+import { helpCentreCopy } from "../lib/helpCentre/copy/index.ts";
 
 test("two-reviewer explanation reports quote evidence without promising provider independence or a correct-answer consensus", () => {
   const copy = landingCopy.en.loop;
@@ -92,4 +96,28 @@ test("Korean homepage action buttons name products like the header menu", () => 
   assert.match(hero.secondary, /^채팅/);
   assert.match(final.chat, /^채팅/);
   assert.match(final.review, /^답변 비교/);
+});
+
+test("Korean public copy and help centre name the product 스마트 자동(Smart Adaptive), never a bare English name", () => {
+  const surfaces = {
+    home: homeV2Content.ko,
+    chat: chatPageContent.ko,
+    cli: cliPageContent.ko,
+    developers: developersPageContent.ko,
+    developersSeo: developersPageSeo.ko,
+    faq: infoPages.faq.ko,
+    help: helpCentreCopy("ko"),
+  };
+  for (const [surface, copy] of Object.entries(surfaces)) {
+    const text = JSON.stringify(copy);
+    for (const match of text.matchAll(/Smart Adaptive/g)) {
+      assert.equal(
+        text.slice(Math.max(0, match.index - 7), match.index),
+        "스마트 자동(",
+        `${surface}: bare "Smart Adaptive" in Korean copy`
+      );
+    }
+  }
+  // The first mention in the FAQ introduces the English name once.
+  assert.ok(JSON.stringify(infoPages.faq.ko).includes("스마트 자동(Smart Adaptive)"));
 });

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { canUseModelWithPlan, type ModelTier } from "@/lib/models";
-import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
+import { helpCentreHref } from "@/lib/localizedHelpHref";
 
 export function PricingKoreanPlanLimits({ plan, dailyCredits, allowAttachments, appInputTokenLimit, appLongContext = false }: {
   plan: ModelTier;
@@ -31,7 +31,7 @@ export function PricingKoreanPlanLimits({ plan, dailyCredits, allowAttachments, 
         </ul>
       </details>
       <Link href="/ko/models" className="block font-bold underline underline-offset-4">지원 모델과 이용 시작 플랜 보기</Link>
-      <Link href={chatWorkspaceGuideHref("ko", "files-and-drive")} className="block font-bold underline underline-offset-4">파일·Google Drive 상세 안내</Link>
+      <Link href={helpCentreHref("ko")} className="block font-bold underline underline-offset-4">파일·Google Drive 상세 안내</Link>
     </div>
   );
 }

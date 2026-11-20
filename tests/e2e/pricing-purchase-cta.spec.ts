@@ -256,6 +256,9 @@ async function preparePricingPage(
 const gotoPricing = async (page: Page, query = "?lang=en") => {
   await page.goto(`/pricing${query}`);
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  // The add-on button is inert until the session resolves (a "loading" span, replaced by a
+  // link or a button), so a click made on the server-rendered HTML would go nowhere.
+  await expect(page.getByTestId("credit-pack-section-cta")).not.toHaveAttribute("data-cta-state", "loading");
 };
 
 const ctaState = (page: Page, planId: "free" | "pro" | "max") =>

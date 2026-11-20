@@ -12,6 +12,7 @@
   --panel-2: #272a33;
   --line: #31343f;
   --brand-hi: #5b8dff;
+  --brand-hi-text: #7aa4ff; /* brand-hi lifted for text on the translucent ghost button, 4.5:1 even while hovered */
   --ink: #fafafa;
   --ink-2: #dcdde3;
   --ink-3: #b0b2bc;
@@ -64,7 +65,7 @@
 .tv-home .btn { display: inline-flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 52px; padding: 14px 20px 14px 24px; border-radius: 100px; background: var(--brand); color: #fff; font-weight: 700; font-size: .9375rem; text-decoration: none; border: 0; transition: transform .2s ease, background .2s ease, box-shadow .2s ease; box-shadow: 0 10px 40px -12px rgb(21 93 251 / .8); }
 .tv-home .btn:hover { transform: translateY(-2px); background: #144ee0; }
 .tv-home .btn span:last-child { font-size: 1.25rem; line-height: 1; }
-.tv-home .btn.ghost { background: var(--ghost-bg); color: var(--brand-hi); box-shadow: inset 0 0 0 1px var(--ghost-line); }
+.tv-home .btn.ghost { background: var(--ghost-bg); color: var(--brand-hi-text); box-shadow: inset 0 0 0 1px var(--ghost-line); }
 .tv-home .btn.ghost:hover { background: var(--ghost-bg-hover); }
 .tv-home .dark-zone .btn.ghost { color: var(--ink); }
 .tv-home .btn.white { background: #fff; color: var(--brand); box-shadow: none; }
@@ -79,7 +80,7 @@
 .tv-home .hero .wrap { padding-block: 120px 32px; }
 .tv-home .hero h1 { font-size: clamp(3rem, 7.2vw, 6.5rem); font-weight: 900; line-height: 1.04; letter-spacing: -.055em; text-shadow: 0 2px 36px rgb(17 19 24 / .65); }
 .tv-home .hero h1 span { display: block; }
-.tv-home .hero h1 .blue { color: var(--brand-hi); background: linear-gradient(100deg, #9ec0ff 0%, #5b8dff 40%, #c2d6ff 60%, #5b8dff 100%); background-size: 220% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: tvh-sheen 7s ease-in-out infinite; }
+.tv-home .hero h1 .blue { color: var(--brand-hi); background: linear-gradient(100deg, #9ec0ff 0%, #5b8dff 40%, #c2d6ff 60%, #5b8dff 100%); background-size: 220% 100%; -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; animation: tvh-sheen 7s ease-in-out infinite; }
 .tv-home .hero-lede { max-width: 560px; margin-top: 32px; font-size: 1.1875rem; color: var(--ink-2); line-height: 1.6; }
 .tv-home .hero-actions { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 36px; }
 .tv-home .hero-note { margin-top: 18px; font-size: .8125rem; color: var(--ink-3); }
@@ -89,7 +90,7 @@
 .tv-home .pill b { font: 600 .6875rem/1 var(--font-mono); color: var(--brand-hi); }
 .tv-home .ribbon-wrap { padding-block: 0 16px; }
 .tv-home .threads { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 28px; }
-.tv-home .threads-label { font: 500 clamp(1.125rem, 1.8vw, 1.5rem)/1.1 var(--font-display); letter-spacing: -.02em; color: rgb(255 255 255 / .42); white-space: nowrap; }
+.tv-home .threads-label { font: 500 clamp(1.125rem, 1.8vw, 1.5rem)/1.1 var(--font-display); letter-spacing: -.02em; color: rgb(255 255 255 / .5); white-space: nowrap; }
 .tv-home .threads-label.one { color: #fff; font-weight: 700; }
 .tv-home .threads-canvas { position: relative; height: 112px; min-width: 0; }
 .tv-home .threads-canvas canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
@@ -105,7 +106,7 @@
 .tv-home .cap .arrow { margin-top: auto; font-size: 1.25rem; color: var(--ink-3); transition: transform .25s, color .25s; }
 .tv-home .cap:hover .arrow { transform: translate(4px, -4px); color: #fff; }
 .tv-home .cap.lead { background: var(--brand); color: #fff; }
-.tv-home .cap.lead .k, .tv-home .cap.lead p, .tv-home .cap.lead .arrow { color: rgb(255 255 255 / .85); }
+.tv-home .cap.lead .k, .tv-home .cap.lead p, .tv-home .cap.lead .arrow { color: #fff; }
 
 /* Continue conversations */
 .tv-home .continue-stage { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 32px; align-items: stretch; }
@@ -245,7 +246,7 @@
 .tv-home .console-bar i { width: 10px; height: 10px; border-radius: 50%; background: #2a2f3e; }
 .tv-home .console-bar span { margin-left: 10px; }
 .tv-home .console pre { margin: 0; padding: 24px; font: 400 .875rem/1.8 var(--font-mono); color: #c9d4ee; overflow-x: auto; min-height: 260px; }
-.tv-home .console pre .c { color: #5d6782; } .tv-home .console pre .s { color: #9ec0ff; } .tv-home .console pre .k { color: #f0abfc; } .tv-home .console pre .g { color: var(--ok); }
+.tv-home .console pre .c { color: #7d88a8; } .tv-home .console pre .s { color: #9ec0ff; } .tv-home .console pre .k { color: #f0abfc; } .tv-home .console pre .g { color: var(--ok); }
 .tv-home .api-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid #262a38; }
 .tv-home .api-facts div { padding: 18px 22px; border-right: 1px solid #262a38; }
 .tv-home .api-facts div:last-child { border-right: 0; }
@@ -288,8 +289,9 @@
 .tv-home .screen .compose i { margin-left: auto; width: 28px; height: 28px; border-radius: 50%; background: var(--brand); display: grid; place-items: center; font-style: normal; color: #fff; }
 .tv-home .screen.light { background: #fff; }
 .tv-home .screen.light .bar strong { color: var(--paper-ink); }
+.tv-home .screen.light .bar { color: var(--paper-ink-2); }
 .tv-home .screen.light .bubble.ai { background: #f2f4f8; color: var(--paper-ink); }
-.tv-home .screen.light .compose { background: #f2f4f8; }
+.tv-home .screen.light .compose { background: #f2f4f8; color: var(--paper-ink-2); }
 .tv-home .mini-answers { display: grid; gap: 8px; }
 .tv-home .mini-answers div { border-radius: 12px; background: #f2f4f8; padding: 10px; font-size: .6875rem; color: var(--paper-ink-2); }
 .tv-home .mini-answers b { display: block; color: var(--paper-ink); font-size: .75rem; }
@@ -300,7 +302,7 @@
 .tv-home .cli { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 32px; align-items: stretch; }
 .tv-home .term { display: flex; flex-direction: column; border-radius: 24px; background: #13151d; box-shadow: inset 0 0 0 1px #2c3142, 0 50px 140px -60px rgb(21 93 251 / .7); overflow: hidden; min-width: 0; }
 .tv-home .term pre { flex: 1; margin: 0; padding: 24px 26px 28px; font: 400 .875rem/1.75 var(--font-mono); color: #c9d4ee; min-height: 360px; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
-.tv-home .term .p { color: var(--brand-hi); } .tv-home .term .d { color: #5d6782; } .tv-home .term .add { color: var(--ok); } .tv-home .term .del { color: #fb7185; } .tv-home .term .y { color: #fde68a; }
+.tv-home .term .p { color: var(--brand-hi); } .tv-home .term .d { color: #7d88a8; } .tv-home .term .add { color: var(--ok); } .tv-home .term .del { color: #fb7185; } .tv-home .term .y { color: #fde68a; }
 .tv-home .caret { display: inline-block; width: .6em; height: 1.1em; background: var(--brand-hi); vertical-align: -3px; animation: tvh-blink 1s steps(1) infinite; }
 .tv-home .cli-steps { display: grid; gap: 1px; background: var(--line); border-radius: 22px; overflow: hidden; border: 1px solid var(--line); }
 .tv-home .cli-steps > div { background: var(--stage); padding: 18px 22px; display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 14px; }
@@ -337,7 +339,8 @@
   .tv-home .rise { animation: tvh-rise linear both; animation-timeline: view(); animation-range: entry 0% entry 30%; }
 }
 
-@keyframes tvh-rise { from { transform: translateY(20px); opacity: .5; } to { transform: none; opacity: 1; } }
+/* Translate only: an opacity ramp would paint text below AA while it is entering the viewport. */
+@keyframes tvh-rise { from { transform: translateY(20px); } to { transform: none; } }
 @keyframes tvh-sheen { 0%, 100% { background-position: 0% 0; } 50% { background-position: 100% 0; } }
 @keyframes tvh-marquee { to { transform: translateX(-50%); } }
 @keyframes tvh-scan { 0%, 55% { transform: translateX(-100%); } 85%, 100% { transform: translateX(100%); } }
@@ -435,22 +438,19 @@
 .tv-home .convert { display: flex; align-items: center; justify-content: center; gap: 18px; }
 .tv-home .files-in { display: grid; gap: 8px; }
 .tv-home .fi { display: grid; place-items: center; width: 54px; height: 40px; border-radius: 8px; font: 800 .6875rem/1 var(--font-mono); color: #fff; animation: tvh-fileIn 3.6s ease-in-out infinite; }
-.tv-home .fi.jpg { background: #2bb3a3; } .tv-home .fi.pdf { background: #e5484d; }
+.tv-home .fi.jpg { background: #0f766e; } .tv-home .fi.pdf { background: #d92d34; }
 .tv-home .files-in .fi:nth-child(2) { animation-delay: .3s; } .tv-home .files-in .fi:nth-child(3) { animation-delay: .6s; }
 .tv-home .fi.big { width: 76px; height: 96px; border-radius: 10px; font-size: .875rem; animation: tvh-fileOut 3.6s ease-in-out infinite; box-shadow: 0 16px 40px -14px rgb(229 72 77 / .8); }
 .tv-home .arrow-flow { color: var(--brand-hi); font-size: 1.5rem; animation: tvh-pulseArrow 1.8s ease-in-out infinite; }
-@keyframes tvh-fileIn { 0%, 15% { transform: translateX(-8px); opacity: .5; } 40%, 100% { transform: none; opacity: 1; } }
-@keyframes tvh-fileOut { 0%, 45% { transform: scale(.85); opacity: .35; } 65%, 100% { transform: none; opacity: 1; } }
-@keyframes tvh-pulseArrow { 0%, 100% { transform: translateX(0); opacity: .6; } 50% { transform: translateX(6px); opacity: 1; } }
+@keyframes tvh-fileIn { 0%, 15% { transform: translateX(-8px); } 40%, 100% { transform: none; } }
+@keyframes tvh-fileOut { 0%, 45% { transform: scale(.85); } 65%, 100% { transform: none; } }
+@keyframes tvh-pulseArrow { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(6px); } }
 @media (max-width: 1080px) { .tv-home .create-grid { grid-template-columns: minmax(0, 1fr); } }
 
 .tv-home .plug-asks { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }
 .tv-home .plug-asks .ask { display: inline-flex; align-items: center; gap: 10px; padding: 10px 14px 10px 10px; border-radius: 14px 14px 14px 4px; background: var(--selected); box-shadow: inset 0 0 0 1px var(--thread-line); font-size: .875rem; color: var(--ink); }
 .tv-home .plug-asks .ask img { width: 26px; height: 26px; border-radius: 8px; background: #fff; padding: 4px; flex: none; }
 
-.tv-home .source.soon, .tv-home .import-src.soon { opacity: .55; }
-.tv-home .source.soon::after, .tv-home .import-src.soon::after { display: none; }
-.tv-home .source.soon .file, .tv-home .import-src.soon code { color: #fcd34d; }
 
 /* Motion control (WCAG 2.2.2): the hero's pause button and prefers-reduced-motion
    both stop every animation on the page, the hero video and the auto-rotating demos. */

@@ -1,0 +1,167 @@
+/*
+ * Generated from the approved homepage V2 concept (2026-11-20), then extended for the live billing states.
+ * Every rule is scoped under .tv-page; keyframes are prefixed tvp2-; text holds the
+ * 11px floor and fonts use the app's locale variables (docs/ui-contracts/typography.md).
+ */
+.tv-page .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.tv-page .hero-lede, .tv-page .page-hero h1 { overflow-wrap: anywhere; }
+.tv-page .points-chapter { padding-block: 40px 0; }
+.tv-page .plans-chapter { padding-top: 48px; }
+
+/* Plans */
+.tv-page .plans3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: stretch; scroll-margin-top: 96px; }
+.tv-page .plan { border-radius: 24px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); padding: 28px; display: flex; flex-direction: column; gap: 16px; position: relative; min-width: 0; overflow-wrap: anywhere; }
+.tv-page .plan > * { min-width: 0; }
+.tv-page .plan.rec { background: linear-gradient(180deg, var(--thread-top), var(--panel)); box-shadow: inset 0 0 0 1px var(--brand), 0 40px 100px -50px rgb(21 93 251 / .7); }
+.tv-page .plan.requested { box-shadow: inset 0 0 0 2px var(--brand-hi), 0 0 0 4px rgb(21 93 251 / .4); }
+.tv-page .plan .tag { position: absolute; top: 20px; right: 20px; white-space: normal; }
+.tv-page .plan-head h3 { font-size: 1.5rem; font-weight: 900; letter-spacing: -.02em; }
+.tv-page .plan.rec .plan-head { padding-right: 96px; }
+.tv-page .plan .who { color: var(--ink-3); font-size: .875rem; margin-top: 4px; }
+.tv-page .price { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.tv-page .price .big-num { font-size: clamp(1.5rem, 9vw, 2.5rem); overflow-wrap: anywhere; }
+.tv-page .price small { color: var(--ink-3); font-size: .875rem; }
+.tv-page .price s { color: var(--ink-3); font-size: .9375rem; font-weight: 700; }
+.tv-page .price-sub { font-size: .8125rem; color: var(--ink-3); min-height: 1.3em; }
+.tv-page .sale-block { display: grid; gap: 8px; padding: 14px 16px; border-radius: 16px; background: rgb(251 191 36 / .1); box-shadow: inset 0 0 0 1px rgb(251 191 36 / .3); }
+.tv-page .sale-top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px 10px; }
+.tv-page .sale-top .chip { white-space: normal; }
+.tv-page .sale-discount { font-size: .875rem; font-weight: 800; color: #fcd34d; }
+.tv-page .annual-box { display: grid; align-content: start; gap: 6px; padding: 12px 14px; border-radius: 14px; background: var(--panel-2); font-size: .875rem; }
+.tv-page .annual-top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px 10px; font-weight: 700; }
+.tv-page .annual-top .chip { white-space: normal; }
+.tv-page .annual-price { font-size: 1.0625rem; font-weight: 800; }
+.tv-page .annual-eq, .tv-page .annual-note { color: var(--ink-3); font-size: .875rem; line-height: 1.5; }
+.tv-page .credits-line { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; padding: 12px 14px; border-radius: 12px; background: var(--panel-2); font-size: .875rem; }
+.tv-page .credits-line b { font-variant-numeric: tabular-nums; }
+.tv-page .plan .ticks { margin-top: 0; }
+.tv-page .plan-cta { display: grid; align-content: start; gap: 10px; }
+.tv-page .plan-cta .btn { width: 100%; justify-content: center; text-align: center; min-height: 52px; }
+.tv-page .plan-cta .btn span:last-child { font-size: inherit; line-height: inherit; }
+/* Secondary buttons sit on panels, where the shared blue label measures 4.2:1; white measures above AA. */
+.tv-page .btn.ghost { color: var(--ink); }
+.tv-page .btn:disabled { opacity: .7; cursor: default; transform: none; box-shadow: none; }
+/* A button that is still waiting for the session keeps full contrast; it is inert, not faded. */
+.tv-page .btn.is-busy { cursor: progress; transform: none; pointer-events: none; }
+.tv-page .cta-note { font-size: .875rem; line-height: 1.5; color: var(--ink-3); }
+.tv-page .cta-note span { display: block; margin-top: 4px; }
+.tv-page .plan-models { display: flex; justify-content: space-between; align-items: center; gap: 10px; width: 100%; border: 0; border-radius: 12px; padding: 12px 14px; background: transparent; box-shadow: inset 0 0 0 1px var(--line); color: var(--brand-hi); font: 700 .875rem/1.3 var(--font-body); text-align: left; cursor: pointer; transition: background .2s; }
+.tv-page .plan-models:hover { background: var(--panel-2); }
+.tv-page .plan-models b { font: 600 .75rem/1.2 var(--font-mono); color: var(--ink-3); white-space: nowrap; }
+.tv-page .plan-models.inline { display: inline-flex; width: auto; padding: 4px 8px; box-shadow: none; text-decoration: underline; text-underline-offset: 3px; font-size: .8125rem; }
+.tv-page .annual-slot { display: none; }
+@media (min-width: 1081px) {
+  /* The eight rows of a card line up across the three cards. */
+  .tv-page .plan { display: grid; grid-row: span 8; grid-template-rows: subgrid; }
+  .tv-page .annual-slot { display: block; }
+}
+
+/* Billing cycle (Korean), promotion and outcome notices */
+.tv-page .bill { border: 0; padding: 0; margin: 0 0 28px; min-width: 0; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 12px; }
+.tv-page .bill .seg label { position: relative; display: inline-flex; align-items: center; min-height: 44px; padding: 10px 18px; border-radius: 100px; cursor: pointer; color: var(--ink-3); font: 700 .8125rem/1 var(--font-body); }
+.tv-page .bill .seg label.on { background: var(--brand); color: #fff; }
+.tv-page .bill .seg label:focus-within { outline: 2px solid var(--brand-hi); outline-offset: 2px; }
+.tv-page .bill .seg input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.tv-page .promo-banner { display: grid; gap: 12px; margin-bottom: 28px; padding: 20px 24px; border-radius: 20px; background: linear-gradient(135deg, rgb(251 191 36 / .12), rgb(21 93 251 / .1)); box-shadow: inset 0 0 0 1px rgb(251 191 36 / .3); overflow-wrap: anywhere; }
+.tv-page .promo-top { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+.tv-page .promo-discount { font: 800 clamp(1.75rem, 5vw, 2.5rem)/1 var(--font-display); color: #fcd34d; }
+.tv-page .promo-duration { font-size: .875rem; font-weight: 700; color: var(--ink-2); }
+.tv-page .promo-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.tv-page .promo-chips .chip { white-space: normal; }
+.tv-page .outcome { margin-bottom: 24px; padding: 16px 20px; border-radius: 16px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--thread-line); font-size: .9375rem; overflow-wrap: anywhere; }
+.tv-page .outcome p + p { margin-top: 4px; color: var(--ink-2); }
+.tv-page .outcome.ok { background: rgb(52 211 153 / .08); box-shadow: inset 0 0 0 1px rgb(52 211 153 / .5); }
+
+/* Calculator */
+.tv-page .calc { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; }
+.tv-page .calc-pick { font-size: .875rem; margin-bottom: 12px; }
+.tv-page .ctx .calc-pick { margin-bottom: 8px; }
+.tv-page .ctx .calc-pick b { color: var(--ink); }
+.tv-page .calc-hint { font-size: .75rem; margin-top: 8px; }
+.tv-page .tier-pick { display: grid; gap: 10px; }
+.tv-page .tier-pick label { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 14px 16px; border-radius: 14px; background: var(--panel-2); cursor: pointer; }
+.tv-page .tier-pick input { width: 18px; height: 18px; accent-color: var(--brand); }
+.tv-page .tier-pick small { display: block; color: var(--ink-3); font-size: .75rem; }
+.tv-page .ctx { margin-top: 18px; }
+.tv-page .ctx input { width: 100%; min-height: 24px; accent-color: var(--brand); }
+.tv-page .ctx-labels { display: flex; justify-content: space-between; font-size: .6875rem; color: var(--ink-3); font-family: var(--font-mono); }
+.tv-page .search-toggle { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 14px 16px; border-radius: 14px; background: var(--panel-2); cursor: pointer; margin-top: 18px; }
+.tv-page .search-toggle input { width: 18px; height: 18px; accent-color: var(--brand); }
+.tv-page .search-toggle small { display: block; color: var(--ink-3); font-size: .75rem; }
+.tv-page .tier-pick label:focus-within, .tv-page .search-toggle:focus-within { outline: 2px solid var(--brand-hi); outline-offset: 2px; }
+.tv-page .calc-per { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; }
+.tv-page .calc-per .muted { font-size: .875rem; }
+.tv-page .calc-break { margin-top: 8px; text-align: right; font: 500 .8125rem/1.4 var(--font-mono); color: var(--ink-3); }
+.tv-page .calc .note { margin-top: 12px; }
+.tv-page .result-rows { display: grid; gap: 10px; margin-top: 16px; }
+.tv-page .result-row { display: grid; grid-template-columns: 70px minmax(0, 1fr) minmax(96px, auto); gap: 12px; align-items: center; font-size: .875rem; }
+.tv-page .result-row .bar { height: 10px; border-radius: 10px; background: var(--panel-2); overflow: hidden; }
+.tv-page .result-row .bar i { display: block; height: 100%; background: var(--brand); border-radius: 10px; transition: width .6s cubic-bezier(.2,.8,.2,1); }
+.tv-page .result-row b { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Credit packs */
+.tv-page .packs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.tv-page .pack:hover { transform: none; }
+.tv-page .pack .big-num { font-size: 2.25rem; }
+.tv-page .pack .pack-plans { font: 600 .75rem/1.4 var(--font-mono); color: var(--ink-3); overflow-wrap: anywhere; }
+.tv-page .pack .pack-credits { font-weight: 700; font-size: 1rem; color: var(--ink); }
+.tv-page .pack .foot-note { font-size: .8125rem; margin-top: auto; padding-top: 10px; }
+.tv-page .pack-cta { padding-top: 6px; }
+.tv-page .pack-cta .btn { width: 100%; justify-content: center; min-height: 48px; text-align: center; }
+.tv-page .pack-section-cta { margin-top: 20px; }
+.tv-page .pack-section-cta .btn { justify-content: center; min-height: 48px; text-align: center; }
+.tv-page .packs-policy-title { margin-top: 36px; font-size: 1.0625rem; font-weight: 800; }
+.tv-page .packs-policy { margin-top: 12px; max-width: 720px; }
+.tv-page .pack.skeleton { min-height: 280px; animation: tvp2-pulse 1.6s ease-in-out infinite; }
+.tv-page .pack.skeleton i { display: block; height: 16px; border-radius: 8px; background: var(--panel-2); }
+.tv-page .pack.skeleton i:first-child { width: 40%; }
+.tv-page .pack.skeleton i:nth-child(2) { height: 40px; width: 55%; }
+@keyframes tvp2-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+
+/* Models of a plan */
+.tv-page #plan-dialog { width: min(760px, calc(100vw - 32px)); max-height: min(82vh, 820px); padding: 0; border: 0; border-radius: 24px; background: var(--panel); color: var(--ink); box-shadow: inset 0 0 0 1px var(--thread-line), 0 40px 120px -20px rgb(0 0 0 / .7); overflow: hidden; }
+.tv-page #plan-dialog[open] { display: flex; flex-direction: column; animation: tvp2-pdIn .22s ease-out; }
+.tv-page #plan-dialog::backdrop { background: rgb(9 9 11 / .7); backdrop-filter: blur(4px); }
+@keyframes tvp2-pdIn { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
+.tv-page .pd-head { display: flex; justify-content: space-between; gap: 16px; padding: 24px 26px 16px; border-bottom: 1px solid var(--line); }
+.tv-page .pd-head h2 { font-size: 1.5rem; font-weight: 900; letter-spacing: -.03em; margin-top: 10px; }
+.tv-page .pd-head p { font-size: .875rem; margin-top: 6px; }
+.tv-page .pd-close { width: 44px; height: 44px; flex: none; border: 0; border-radius: 12px; background: var(--panel-2); color: var(--ink); font-size: 1rem; cursor: pointer; }
+.tv-page .pd-body { overflow-y: auto; padding: 18px 26px; display: grid; gap: 18px; }
+.tv-page .pd-group h3 { font: 600 .75rem/1 var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.tv-page .pd-group h3 img { width: 16px; height: 16px; border-radius: 4px; background: #fff; padding: 1px; }
+.tv-page .pd-list { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; margin: 0; padding: 0; }
+.tv-page .pd-item { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 10px; background: var(--panel-2); font-size: .8125rem; }
+.tv-page .pd-item b { font: 600 .6875rem/1 var(--font-mono); color: var(--ink-3); }
+.tv-page .pd-item.locked { color: var(--ink-3); }
+.tv-page .pd-item.locked::before { content: "🔒"; font-size: .6875rem; }
+.tv-page .pd-divider { display: flex; align-items: center; gap: 12px; font: 600 .75rem/1 var(--font-mono); color: #fcd34d; letter-spacing: .04em; }
+.tv-page .pd-divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.tv-page .pd-note { padding: 14px 26px 0; margin-top: 0; }
+.tv-page .pd-link { padding: 8px 26px 22px; font-size: .875rem; font-weight: 700; }
+.tv-page .pd-link a { color: var(--brand-hi); }
+
+/* Comparison table and FAQ */
+.tv-page .tbl td .plan-models.inline { vertical-align: baseline; }
+.tv-page .faq details p a { color: var(--brand-hi); }
+
+@media (max-width: 1080px) {
+  .tv-page .plans3, .tv-page .packs { grid-template-columns: minmax(0, 1fr); }
+  .tv-page .calc { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .tv-page .plan { padding: 22px; }
+  .tv-page .pd-head, .tv-page .pd-body { padding-inline: 18px; }
+  .tv-page .pd-note, .tv-page .pd-link { padding-inline: 18px; }
+  .tv-page .result-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .tv-page .result-row .bar { grid-column: 1 / -1; order: 3; }
+  .tv-page .promo-banner { padding: 16px; }
+}
+
+/* Motion control (WCAG 2.2.2): the page root carries data-motion="paused" when the
+   visitor prefers reduced motion or presses the pause button. */
+.tv-page .motion-toggle { display: inline-flex; align-items: center; gap: 8px; min-width: 44px; min-height: 44px; margin-top: 14px; padding: 10px 16px; border: 0; border-radius: 100px; background: var(--ghost-bg); color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--ghost-line); font: 600 .875rem/1 var(--font-body); cursor: pointer; }
+.tv-page .motion-toggle:hover { background: var(--ghost-bg-hover); color: var(--ink); }
+.tv-page .motion-toggle .icon { font-size: .75rem; letter-spacing: -.1em; }
+.tv-page[data-motion="paused"] *, .tv-page[data-motion="paused"] *::before, .tv-page[data-motion="paused"] *::after { animation: none !important; transition: none !important; }
+.tv-page .motion-toggle:focus-visible, .tv-page .plan-models:focus-visible, .tv-page .pd-close:focus-visible, .tv-page .btn:focus-visible, .tv-page .faq summary:focus-visible, .tv-page .tbl-wrap:focus-visible, .tv-page .ctx input:focus-visible { outline: 2px solid var(--brand-hi); outline-offset: 2px; }

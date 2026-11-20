@@ -527,11 +527,11 @@ export default function LaunchHomepage({ reviewInfoHref, variantCopy }: LaunchHo
           </div>
           <div className="continue-stage rise">
             <div className="sources">
-              {t.continue.sources.map((source, i) => <div key={source.name} className={`source${source.file ? "" : " soon"}`}>
+              {t.continue.sources.map((source, i) => <div key={source.name} className="source">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <span className="tile"><img src={MODEL_ICON(sourceIcons[i])} alt={source.name} /></span>
                 <div><strong>{source.name}</strong><small>{source.small}</small></div>
-                <span className="file">{source.file || t.continue.soon}</span>
+                <span className="file">{source.file}</span>
               </div>)}
             </div>
             <div className="thread" aria-label={t.continue.threadLabel}>
