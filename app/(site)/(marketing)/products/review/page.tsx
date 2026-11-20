@@ -1,7 +1,6 @@
 import { LanguageProvider } from "@/components/LanguageProvider";
-import { LandingPageContent } from "@/components/marketing/LandingPageContent";
+import { ReviewProductPage } from "@/components/marketing/v2/review/ReviewProductPage";
 import { REVIEW_PRODUCT_PATH } from "@/lib/marketingRoutes";
-import { PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE } from "@/lib/landingWorkspaceEntry";
 import { createPageMetadata, reviewOgCopy, reviewSeoCopy } from "@/lib/seo";
 
 export const metadata = createPageMetadata({
@@ -13,10 +12,10 @@ export const metadata = createPageMetadata({
   ogDescription: reviewOgCopy.en.description,
 });
 
-export default function ReviewProductPage() {
+export default function Page() {
   return (
     <LanguageProvider initialLang="en" forceInitialLang>
-      <LandingPageContent guestTrialAvailable={PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE} />
+      <ReviewProductPage />
     </LanguageProvider>
   );
 }

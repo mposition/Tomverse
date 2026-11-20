@@ -57,7 +57,7 @@ import { amuxV52VendorsToAvoid, buildAmuxV52PriorReviewFile, buildAmuxV52PriorRe
   formatAmuxV52ReviewEntries } from
   "@/lib/amux/v52ReviewFindingsCore";
 import { AMUX_V22_PROVIDERS, amuxV22ExecutionRole, amuxV22Provider,
-  amuxV22TaskWritesPatch } from "@/lib/amux/v22WorkerClaimCore";
+  amuxV22ReviewAuthorVendor, amuxV22TaskWritesPatch } from "@/lib/amux/v22WorkerClaimCore";
 
 export const AMUX_DELIVERY_RECEIPT_LEASE_MS = 30_000;
 
@@ -632,7 +632,10 @@ export async function pullAmuxWorkDelivery(input: {
               const provider = amuxV22Provider(assignment.provider);
               return provider ? AMUX_V22_PROVIDERS[provider].cli : assignment.provider;
             })(),
-            reviewAuthorVendor: assignment.provider,
+            // The model's vendor: an Antigravity worker on Opus is Anthropic
+            // (amuxV22ReviewAuthorVendor), and execution checks the same.
+            reviewAuthorVendor: amuxV22ReviewAuthorVendor(assignment.provider,
+              assignment.modelId),
             reviewScope,
             ...(reviewFeedbackJobId ? { reviewFeedbackJobId } : {}),
             // Preference only: the review server falls back when no other

@@ -1,0 +1,202 @@
+/*
+ * Policy pages (safety, privacy, terms, refund) from the approved V2 concept (2026-11-20); the document rules themselves are in ../v2-pages.css.
+ * Every rule is scoped under .tv-page; keyframes are prefixed tvlg-; text holds the
+ * 11px floor and fonts use the app's locale variables (docs/ui-contracts/typography.md).
+ */
+/* ===== Shared by the four policy pages ===== */
+/* Long words and addresses wrap instead of leaving the screen, at any text size. */
+.tv-page.tv-policy main { overflow-wrap: break-word; }
+.tv-page.tv-policy .crumb { flex-wrap: wrap; }
+.tv-page.tv-policy .inline-link { color: var(--brand-hi); font-weight: 600; text-decoration: underline; text-underline-offset: 4px; }
+.tv-page.tv-policy .policy-motion { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 8px; min-width: 44px; min-height: 44px; margin-top: 16px; padding: 10px 16px; border: 0; border-radius: 100px; background: var(--ghost-bg); color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--ghost-line); font: 600 .875rem/1 var(--font-body); cursor: pointer; }
+.tv-page.tv-policy .policy-motion:hover { background: var(--ghost-bg-hover); color: var(--ink); }
+.tv-page.tv-policy .policy-motion .icon { font-size: .75rem; letter-spacing: -.1em; }
+/* Secondary buttons keep white text: the blue one falls under 4.5:1 on the ghost fill. */
+.tv-page.tv-policy .btn.ghost { color: var(--ink); }
+/* The jump cards rise into place but never fade: a link is never drawn half-transparent. */
+.tv-page.tv-policy .toc-grid a { opacity: 1; animation-name: tvlg-tocRise; }
+@keyframes tvlg-tocRise { from { transform: translateY(12px); } to { transform: none; } }
+
+/* ===== Documents (privacy, terms, refund) ===== */
+/* A clause is the record: it is never drawn faded, whatever the scroll position. */
+.tv-page.tv-policy .legal-sec { animation: none; }
+.tv-page.tv-policy .legal-chapter { padding-top: 24px; }
+@media (min-width: 1081px) {
+  .tv-page.tv-policy .legal-body { grid-template-columns: 220px minmax(0, 1fr); gap: 48px; }
+}
+.tv-page.tv-policy .legal-meta .live { color: var(--ink-2); }
+.tv-page.tv-policy .legal-sec > h2 span { display: inline-flex; align-items: center; gap: 6px; }
+.tv-page.tv-policy .legal-icon { width: 14px; height: 14px; flex: none; }
+/* The reading measure of the old readableBody rule: about 80 characters a line. */
+.tv-page.tv-policy .legal-text > p, .tv-page.tv-policy .legal-groups p, .tv-page.tv-policy .legal-text ul.bullets { max-width: 80ch; }
+.tv-page.tv-policy .legal-text ul.bullets { margin: 10px 0 0; padding-left: 22px; list-style: disc; display: grid; gap: 8px; color: var(--ink-2); line-height: 1.8; }
+.tv-page.tv-policy .legal-text ul.bullets li::marker { color: var(--brand-hi); }
+.tv-page.tv-policy .legal-text .legal-links { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 16px; }
+.tv-page.tv-policy .legal-mail { color: var(--brand-hi); }
+.tv-page.tv-policy .legal-mail + p { margin-top: 16px; }
+.tv-page.tv-policy .legal-dl h3.dl-head { display: block; margin: 0; }
+.tv-page.tv-policy .legal-dl h3.dl-head::before { content: none; }
+.tv-page.tv-policy .legal-items { list-style: none; margin: 0; padding: 0; }
+.tv-page.tv-policy .legal-items li { display: grid; grid-template-columns: 168px minmax(0, 1fr); gap: 18px; padding: 15px 18px; border-top: 1px solid var(--line); color: var(--ink-2); font-size: .9375rem; line-height: 1.8; }
+.tv-page.tv-policy .legal-items li b { color: var(--ink); font-size: .875rem; font-weight: 700; line-height: 1.9; }
+.tv-page.tv-policy .legal-items li.plain { display: block; }
+.tv-page.tv-policy .legal-end-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+
+/* The provider table keeps its own markup; this only seats it in the dark page and
+   puts the search box after its introduction. */
+.tv-page.tv-policy .legal-table { display: flex; flex-direction: column; margin-top: 8px; }
+.tv-page.tv-policy .legal-table > div:not(.prov-tools) { display: contents; }
+.tv-page.tv-policy .legal-table h3 { order: 1; margin: 26px 0 0; color: var(--ink); }
+.tv-page.tv-policy .legal-table > div > p { order: 2; margin-top: 8px; color: var(--ink-2); line-height: 1.8; }
+.tv-page.tv-policy .legal-table .prov-tools { order: 3; }
+.tv-page.tv-policy .legal-table > div > p:last-of-type { order: 4; font-size: .8125rem; color: var(--ink-3); }
+.tv-page.tv-policy .legal-table [role="region"] { order: 5; margin-top: 12px; padding: 4px 14px; border-radius: 18px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); }
+.tv-page.tv-policy .legal-table .prov-empty { order: 6; margin-top: 12px; color: var(--ink-2); }
+.tv-page.tv-policy .legal-table > .sr-only { order: 7; }
+.tv-page.tv-policy .legal-table table { font-size: .875rem; line-height: 1.6; color: var(--ink-2); }
+.tv-page.tv-policy .legal-table thead th { color: var(--ink-3); font: 600 .75rem/1.4 var(--font-mono); letter-spacing: .02em; }
+.tv-page.tv-policy .legal-table tbody th { color: var(--ink); }
+.tv-page.tv-policy .legal-table tr { border-color: var(--line); }
+.tv-page.tv-policy .legal-table a { color: var(--brand-hi); }
+.tv-page.tv-policy .prov-tools label:focus-within { box-shadow: inset 0 0 0 2px var(--brand-hi); }
+.tv-page.tv-policy .prov-tools input::placeholder { color: var(--ink-3); opacity: 1; }
+
+/* The jump list folds away on a phone, where it would push the first clause a screen down. */
+.tv-page.tv-policy .toc-fold { display: none; margin-top: 32px; border-radius: 16px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); }
+.tv-page.tv-policy .toc-fold summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; padding: 0 16px; font-weight: 700; color: var(--ink); cursor: pointer; list-style: none; }
+.tv-page.tv-policy .toc-fold summary::-webkit-details-marker { display: none; }
+.tv-page.tv-policy .toc-fold summary::after { content: "+"; font: 600 1.25rem/1 var(--font-mono); color: var(--brand-hi); }
+.tv-page.tv-policy .toc-fold[open] summary::after { content: "−"; }
+.tv-page.tv-policy .toc-fold .toc-grid { margin: 0; padding: 0 12px 12px; grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 640px) {
+  .tv-page.tv-policy .toc-wide { display: none; }
+  .tv-page.tv-policy .toc-fold { display: block; }
+  .tv-page.tv-policy .legal-items li { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+}
+
+/* ===== Safety ===== */
+.tv-page.tv-policy .sf-hero { position: relative; padding-top: 80px; padding-bottom: 24px; overflow: hidden; }
+.tv-page.tv-policy .sf-hero::before { content: ""; position: absolute; left: 50%; top: -340px; width: 1100px; height: 760px; margin-left: -550px; background: radial-gradient(closest-side, rgb(21 93 251 / .38), transparent 70%); animation: tvlg-sfBreath 9s ease-in-out infinite; pointer-events: none; }
+@keyframes tvlg-sfBreath { 0%, 100% { opacity: .75; transform: scale(1); } 50% { opacity: 1; transform: scale(1.06); } }
+.tv-page.tv-policy .sf-hero .wrap { position: relative; z-index: 1; }
+.tv-page.tv-policy .sf-hero h1 { font-size: clamp(3rem, 7.4vw, 6rem); font-weight: 900; letter-spacing: -.055em; line-height: 1.02; margin-top: 18px; max-width: 14em; }
+.tv-page.tv-policy .sf-hero .lead { color: var(--ink-2); font-size: 1.1875rem; max-width: 58ch; margin-top: 24px; line-height: 1.7; }
+.tv-page.tv-policy .sf-flow { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 64px minmax(0, 1.2fr) 64px minmax(0, 1fr) 64px minmax(0, 1fr); align-items: center; margin: 56px 0 0; padding: 0; list-style: none; }
+.tv-page.tv-policy .sf-node { position: relative; border-radius: 22px; padding: 20px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); min-height: 148px; display: flex; flex-direction: column; gap: 8px; }
+.tv-page.tv-policy .sf-node .k { font: 600 .6875rem/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+.tv-page.tv-policy .sf-node strong { font-size: 1.125rem; font-weight: 800; letter-spacing: -.02em; }
+.tv-page.tv-policy .sf-node small { color: var(--ink-3); font-size: .8125rem; line-height: 1.5; }
+.tv-page.tv-policy .sf-node .ico { width: 36px; height: 36px; border-radius: 11px; display: grid; place-items: center; background: var(--panel-2); color: var(--brand-hi); }
+.tv-page.tv-policy .sf-node .ico svg { width: 18px; height: 18px; }
+.tv-page.tv-policy .sf-node.tv { background: linear-gradient(180deg, var(--thread-top), var(--panel)); box-shadow: inset 0 0 0 1px var(--thread-line), 0 40px 120px -40px rgb(21 93 251 / .75); }
+.tv-page.tv-policy .sf-node.tv .ico { background: var(--brand); color: #fff; }
+.tv-page.tv-policy .sf-node.tv::after { content: ""; position: absolute; inset: -1px; border-radius: 23px; padding: 1px; background: conic-gradient(from var(--tvlg-angle, 0deg), transparent 0 70%, #5b8dff 82%, #7dd3fc 90%, transparent 100%); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; animation: tvlg-sfSpin 5s linear infinite; pointer-events: none; }
+@property --tvlg-angle { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+@keyframes tvlg-sfSpin { to { --tvlg-angle: 360deg; } }
+.tv-page.tv-policy .sf-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.tv-page.tv-policy .sf-chips span { padding: 5px 9px; border-radius: 100px; background: rgb(21 93 251 / .16); color: #bcd0ff; font: 600 .6875rem/1.2 var(--font-body); }
+.tv-page.tv-policy .sf-pipe { position: relative; height: 2px; margin: 0 6px; background: var(--line); border-radius: 2px; }
+.tv-page.tv-policy .sf-pipe::before { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, #5b8dff, transparent); background-size: 50% 100%; background-repeat: no-repeat; animation: tvlg-sfFlow 2.2s linear infinite; animation-delay: var(--d, 0s); }
+.tv-page.tv-policy .sf-pipe::after { content: ""; position: absolute; right: -2px; top: -4px; border: 5px solid transparent; border-left: 7px solid var(--line); border-right: 0; }
+.tv-page.tv-policy .sf-pipe i { position: absolute; top: -4px; left: 0; width: 10px; height: 10px; border-radius: 50%; background: #7dd3fc; box-shadow: 0 0 14px 2px rgb(125 211 252 / .8); animation: tvlg-sfDot 2.2s cubic-bezier(.4, 0, .2, 1) infinite; animation-delay: var(--d, 0s); }
+@keyframes tvlg-sfFlow { from { background-position: -100% 0; } to { background-position: 200% 0; } }
+@keyframes tvlg-sfDot { 0% { left: 0; opacity: 0; } 15% { opacity: 1; } 85% { opacity: 1; } 100% { left: calc(100% - 10px); opacity: 0; } }
+.tv-page.tv-policy .sf-flow-cap { margin-top: 18px; font-size: .875rem; color: var(--ink-3); }
+.tv-page.tv-policy .sf-follow { padding-top: 24px; }
+.tv-page.tv-policy .sf-pillars { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.tv-page.tv-policy .sf-pillar { position: relative; border-radius: 26px; padding: 30px 28px 28px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); display: flex; flex-direction: column; gap: 14px; overflow: hidden; transition: transform .25s, box-shadow .25s; }
+.tv-page.tv-policy .sf-pillar:hover { transform: translateY(-4px); box-shadow: inset 0 0 0 1px var(--thread-line), 0 40px 90px -50px rgb(21 93 251 / .9); }
+.tv-page.tv-policy .sf-pillar::before { content: attr(data-n); position: absolute; right: 18px; top: 6px; font: 900 5.5rem/1 var(--font-display); letter-spacing: -.06em; color: rgb(255 255 255 / .04); }
+.tv-page.tv-policy .sf-badge { width: 48px; height: 48px; border-radius: 14px; display: grid; place-items: center; background: var(--panel-2); color: var(--ink); }
+.tv-page.tv-policy .sf-badge svg { width: 22px; height: 22px; }
+.tv-page.tv-policy .sf-pillar:nth-child(1) .sf-badge { background: rgb(52 211 153 / .14); color: #86efac; }
+.tv-page.tv-policy .sf-pillar:nth-child(2) .sf-badge { background: rgb(21 93 251 / .2); color: #b8cdff; }
+.tv-page.tv-policy .sf-pillar:nth-child(3) .sf-badge { background: rgb(251 191 36 / .14); color: #fcd34d; }
+.tv-page.tv-policy .sf-pillar h3 { font-size: 1.375rem; font-weight: 900; letter-spacing: -.03em; line-height: 1.3; }
+.tv-page.tv-policy .sf-pillar p { color: var(--ink-2); font-size: 1rem; line-height: 1.8; flex: 1; }
+.tv-page.tv-policy .sf-more { color: var(--brand-hi); font-weight: 700; font-size: .9375rem; text-decoration: none; }
+.tv-page.tv-policy .sf-more:hover { text-decoration: underline; }
+.tv-page.tv-policy .sf-try { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 24px; align-items: stretch; }
+.tv-page.tv-policy .sf-tabs { display: grid; gap: 10px; align-content: start; }
+.tv-page.tv-policy .sf-tabs button { text-align: left; border: 0; border-radius: 18px; padding: 18px 20px; background: var(--panel); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); font: inherit; cursor: pointer; display: grid; gap: 4px; transition: box-shadow .2s, background .2s; }
+.tv-page.tv-policy .sf-tabs button b { font-size: 1rem; font-weight: 800; }
+.tv-page.tv-policy .sf-tabs button span { color: var(--ink-3); font-size: .875rem; }
+.tv-page.tv-policy .sf-tabs button[aria-selected="true"] { background: linear-gradient(90deg, rgb(21 93 251 / .18), var(--panel)); box-shadow: inset 0 0 0 1px var(--brand); }
+.tv-page.tv-policy .sf-stage { position: relative; border-radius: 26px; padding: 28px; min-height: 340px; background: radial-gradient(90% 120% at 100% 0%, rgb(21 93 251 / .22), transparent 60%), var(--panel); box-shadow: inset 0 0 0 1px var(--thread-line); overflow: hidden; }
+.tv-page.tv-policy .sf-scene { animation: tvlg-sceneIn .45s cubic-bezier(.2, .7, .2, 1); }
+.tv-page.tv-policy .sf-scene[hidden] { display: none; }
+@keyframes tvlg-sceneIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+.tv-page.tv-policy .sf-scene h3 { font: 600 .6875rem/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 16px; }
+.tv-page.tv-policy .sf-file { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 14px 16px; border-radius: 16px; background: var(--panel-2); margin-bottom: 10px; opacity: 0; animation: tvlg-fileIn .5s ease forwards; }
+.tv-page.tv-policy .sf-file:nth-of-type(2) { animation-delay: .25s; }
+.tv-page.tv-policy .sf-file:nth-of-type(3) { animation-delay: .5s; }
+@keyframes tvlg-fileIn { from { opacity: 0; transform: translateX(-12px); } to { opacity: 1; transform: none; } }
+.tv-page.tv-policy .sf-file .ext { overflow-wrap: normal; white-space: nowrap; width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; font: 800 .6875rem/1 var(--font-mono); background: #fff; color: #18181b; }
+.tv-page.tv-policy .sf-file strong { display: block; font-size: .9375rem; }
+.tv-page.tv-policy .sf-file small { display: block; color: var(--ink-3); font-size: .8125rem; }
+.tv-page.tv-policy .sf-verdict { padding: 6px 10px; border-radius: 100px; font: 700 .75rem/1.2 var(--font-body); white-space: nowrap; }
+.tv-page.tv-policy .sf-verdict.ok { background: rgb(52 211 153 / .14); color: #86efac; }
+.tv-page.tv-policy .sf-verdict.no { background: rgb(248 113 113 / .14); color: #fca5a5; }
+.tv-page.tv-policy .sf-scan { position: relative; height: 3px; border-radius: 3px; background: var(--panel-2); overflow: hidden; margin: 4px 0 18px; }
+.tv-page.tv-policy .sf-scan::after { content: ""; position: absolute; inset: 0; width: 40%; background: linear-gradient(90deg, transparent, #34d399, transparent); animation: tvlg-scanGo 1.6s ease-in-out infinite; }
+@keyframes tvlg-scanGo { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
+.tv-page.tv-policy .sf-convo { border-radius: 18px; background: var(--panel-2); padding: 18px; display: grid; gap: 10px; transition: filter .5s, opacity .5s; }
+.tv-page.tv-policy .sf-bub { padding: 10px 14px; border-radius: 14px; font-size: .875rem; max-width: 80%; }
+.tv-page.tv-policy .sf-bub.me { justify-self: end; background: var(--brand); color: #fff; }
+.tv-page.tv-policy .sf-bub.ai { justify-self: start; background: var(--panel); color: var(--ink-2); }
+.tv-page.tv-policy .sf-lock { position: relative; }
+.tv-page.tv-policy .sf-veil { position: absolute; inset: 0; display: grid; place-items: center; border-radius: 18px; background: rgb(17 19 24 / .55); opacity: 0; pointer-events: none; transition: opacity .5s; text-align: center; }
+.tv-page.tv-policy .sf-veil .pad { display: block; width: 36px; height: 36px; margin: 0 auto; color: var(--ink); }
+.tv-page.tv-policy .sf-veil b { display: block; margin-top: 8px; }
+.tv-page.tv-policy .sf-veil small { display: block; color: var(--ink-2); font-size: .8125rem; }
+.tv-page.tv-policy .sf-lock.locked .sf-convo { filter: blur(6px); opacity: .6; }
+.tv-page.tv-policy .sf-lock.locked .sf-veil { opacity: 1; }
+.tv-page.tv-policy .sf-toggle { display: inline-flex; align-items: center; gap: 12px; min-height: 44px; margin-top: 14px; border: 0; background: transparent; color: var(--ink); font: 700 .9375rem/1.2 var(--font-body); cursor: pointer; text-align: left; }
+.tv-page.tv-policy .sf-toggle i { flex: none; width: 46px; height: 26px; border-radius: 100px; background: var(--panel-2); position: relative; box-shadow: inset 0 0 0 1px var(--line); transition: background .3s; }
+.tv-page.tv-policy .sf-toggle i::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: transform .3s cubic-bezier(.3, 1.4, .5, 1); }
+.tv-page.tv-policy .sf-toggle[aria-pressed="true"] i { background: var(--brand); }
+.tv-page.tv-policy .sf-toggle[aria-pressed="true"] i::after { transform: translateX(20px); }
+.tv-page.tv-policy .sf-link { margin-top: 12px; display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-radius: 16px; background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--thread-line); animation: tvlg-sceneIn .4s ease; }
+.tv-page.tv-policy .sf-link code { font: 600 .8125rem/1.3 var(--font-mono); color: var(--brand-hi); flex: 1; min-width: 0; }
+.tv-page.tv-policy .sf-link .ro { padding: 5px 9px; border-radius: 100px; background: rgb(52 211 153 / .14); color: #86efac; font: 700 .75rem/1.2 var(--font-body); }
+.tv-page.tv-policy .sf-caveat { margin-top: 12px; font-size: .875rem; color: var(--ink-2); line-height: 1.6; }
+.tv-page.tv-policy .sf-stage-note { margin-top: 18px; font-size: .75rem; color: var(--ink-3); }
+.tv-page.tv-policy .sf-docs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.tv-page.tv-policy .sf-doc { position: relative; display: flex; flex-direction: column; gap: 12px; border-radius: 24px; padding: 26px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); text-decoration: none; color: var(--ink); overflow: hidden; transition: transform .25s, box-shadow .25s; }
+.tv-page.tv-policy .sf-doc::after { content: ""; position: absolute; right: -40px; bottom: -40px; width: 160px; height: 160px; border-radius: 50%; background: radial-gradient(closest-side, rgb(21 93 251 / .35), transparent); opacity: 0; transition: opacity .3s; }
+.tv-page.tv-policy .sf-doc:hover { transform: translateY(-4px); box-shadow: inset 0 0 0 1px var(--brand), 0 30px 80px -40px rgb(21 93 251 / .8); }
+.tv-page.tv-policy .sf-doc:hover::after { opacity: 1; }
+.tv-page.tv-policy .sf-doc .k { font: 600 .6875rem/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--brand-hi); padding-right: 44px; }
+.tv-page.tv-policy .sf-doc h3 { font-size: 1.375rem; font-weight: 900; letter-spacing: -.03em; }
+.tv-page.tv-policy .sf-doc p { color: var(--ink-3); font-size: .9375rem; line-height: 1.7; flex: 1; }
+.tv-page.tv-policy .sf-doc .date { display: inline-flex; align-items: center; gap: 8px; font-size: .8125rem; color: var(--ink-2); }
+.tv-page.tv-policy .sf-doc .date::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+.tv-page.tv-policy .sf-doc .go { position: absolute; top: 24px; right: 24px; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--panel-2); color: var(--ink); transition: background .25s, transform .25s; }
+.tv-page.tv-policy .sf-doc:hover .go { background: var(--brand); transform: rotate(-45deg); }
+.tv-page.tv-policy .sf-closing { text-align: center; padding: 56px 0 8px; }
+.tv-page.tv-policy .sf-closing p { font-size: clamp(1.75rem, 4vw, 3rem); font-weight: 900; letter-spacing: -.045em; line-height: 1.2; max-width: 22ch; margin: 0 auto; }
+.tv-page.tv-policy .sf-closing p em { font-style: normal; color: var(--brand-hi); }
+.tv-page.tv-policy .sf-closing .hero-actions { justify-content: center; margin-top: 28px; }
+@media (max-width: 1080px) {
+  .tv-page.tv-policy .sf-flow { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .tv-page.tv-policy .sf-pipe { width: 2px; height: 40px; margin: 6px auto; }
+  .tv-page.tv-policy .sf-pipe::before { background: linear-gradient(180deg, transparent, #5b8dff, transparent); background-size: 100% 50%; animation-name: tvlg-sfFlowV; }
+  .tv-page.tv-policy .sf-pipe::after { right: auto; left: -4px; top: auto; bottom: -3px; border: 5px solid transparent; border-top: 7px solid var(--line); border-bottom: 0; }
+  .tv-page.tv-policy .sf-pipe i { left: -4px; animation-name: tvlg-sfDotV; }
+  .tv-page.tv-policy .sf-node { min-height: 0; }
+  .tv-page.tv-policy .sf-pillars, .tv-page.tv-policy .sf-docs, .tv-page.tv-policy .sf-try { grid-template-columns: minmax(0, 1fr); }
+}
+@keyframes tvlg-sfFlowV { from { background-position: 0 -100%; } to { background-position: 0 200%; } }
+@keyframes tvlg-sfDotV { 0% { top: 0; opacity: 0; } 15% { opacity: 1; } 85% { opacity: 1; } 100% { top: calc(100% - 10px); opacity: 0; } }
+
+/* ===== Motion (WCAG 2.2.2) =====
+   The page root carries data-motion="paused" when the visitor prefers reduced
+   motion or presses the pause button; the media query covers the first paint. */
+.tv-page.tv-policy[data-motion="paused"] *, .tv-page.tv-policy[data-motion="paused"] *::before, .tv-page.tv-policy[data-motion="paused"] *::after { animation: none !important; transition: none !important; }
+.tv-page.tv-policy[data-motion="paused"] .sf-file { opacity: 1; }
+.tv-page.tv-policy[data-motion="paused"] .sf-pipe i { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .tv-page.tv-policy *, .tv-page.tv-policy *::before, .tv-page.tv-policy *::after { animation: none !important; transition: none !important; }
+  .tv-page.tv-policy .sf-file { opacity: 1; }
+  .tv-page.tv-policy .sf-pipe i { display: none; }
+}

@@ -1,0 +1,88 @@
+/*
+ * Generated from the approved models page concept (2026-11-20), then namespaced by hand.
+ * Every rule is scoped under .tv-page and every class carries the m- prefix so it cannot
+ * collide with another V2 page's; keyframes are prefixed tvm-; text holds the 11px floor
+ * and fonts use the app's locale variables (docs/ui-contracts/typography.md).
+ */
+.tv-page .m-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+
+/* Filters */
+.tv-page .m-filters { display: grid; gap: 14px; padding: 20px; border-radius: 22px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); }
+.tv-page .m-search { display: flex; align-items: center; gap: 10px; padding: 0 16px; border-radius: 14px; background: var(--panel-2); min-height: 46px; min-width: 0; }
+.tv-page .m-search:focus-within { box-shadow: 0 0 0 2px var(--brand-hi); }
+.tv-page .m-search input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--ink); font: 500 1rem/1.4 var(--font-body); outline: none; }
+.tv-page .m-search input::placeholder { color: var(--ink-3); }
+.tv-page .m-toggle { display: none; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; padding: 8px 16px; border: 0; border-radius: 14px; background: var(--panel-2); color: var(--ink); font: 700 .9375rem/1.2 var(--font-body); cursor: pointer; }
+.tv-page .m-filter-body { display: grid; gap: 16px; }
+.tv-page .m-row { display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 8px 14px; align-items: start; }
+.tv-page .m-row-label { font: 600 .6875rem/1.4 var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); padding-top: 11px; overflow-wrap: anywhere; }
+.tv-page .m-chips { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.tv-page .m-help { grid-column: 2; font-size: .75rem; line-height: 1.55; color: var(--ink-3); }
+.tv-page .m-chip { border: 0; border-radius: 100px; padding: 8px 14px; background: var(--panel-2); color: var(--ink-2); font: 600 .8125rem/1.2 var(--font-body); cursor: pointer; min-height: 36px; display: inline-flex; align-items: center; gap: 6px; transition: background .2s, color .2s; }
+.tv-page .m-chip:hover { background: #31343f; color: var(--ink); }
+.tv-page .m-chip img { width: 16px; height: 16px; border-radius: 4px; background: #fff; padding: 1px; flex: none; }
+.tv-page .m-chip[aria-pressed="true"] { background: var(--brand); color: #fff; }
+.tv-page .m-chip:focus-visible, .tv-page .m-toggle:focus-visible, .tv-page .m-clear:focus-visible, .tv-page .m-link:focus-visible, .tv-page .m-guide:focus-visible, .tv-page .m-guide summary:focus-visible { outline: 2px solid var(--brand-hi); outline-offset: 2px; }
+
+/* Result line */
+.tv-page .m-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 22px 0 14px; }
+.tv-page .m-count { font-size: .875rem; color: var(--ink-3); }
+.tv-page .m-clear { border: 0; border-radius: 100px; padding: 8px 14px; min-height: 36px; background: var(--ghost-bg); color: var(--brand-hi); font: 600 .8125rem/1.2 var(--font-body); cursor: pointer; }
+.tv-page .m-clear:hover { background: var(--ghost-bg-hover); }
+.tv-page .m-link { color: var(--brand-hi); text-underline-offset: 3px; }
+
+/* Cards */
+.tv-page .m-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.tv-page .m-card { border-radius: 18px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); padding: 18px; display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 14px; align-items: center; min-width: 0; animation: tvm-pop .3s ease-out both; }
+.tv-page .m-tile { width: 44px; height: 44px; border-radius: 13px; background: #fff; padding: 8px; display: grid; place-items: center; flex: none; }
+.tv-page .m-tile img { width: 100%; height: 100%; object-fit: contain; }
+.tv-page .m-tile.mark { background: var(--panel-2); color: var(--ink); padding: 0; font: 800 .75rem/1 var(--font-display); }
+.tv-page .m-tile.mark[data-provider="minimax"] { background: #b91c1c; color: #fff; }
+.tv-page .m-main { min-width: 0; }
+.tv-page .m-card h3, .tv-page .m-band h3 { font-size: 1rem; font-weight: 800; letter-spacing: -.01em; line-height: 1.3; overflow-wrap: anywhere; }
+.tv-page .m-sub { font-size: .75rem; line-height: 1.5; color: var(--ink-3); margin-top: 2px; overflow-wrap: anywhere; }
+.tv-page .m-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.tv-page .m-cr { text-align: right; min-width: 0; }
+.tv-page .m-cr b { display: block; font: 800 1.5rem/1 var(--font-display); font-variant-numeric: tabular-nums; }
+.tv-page .m-cr small { font-size: .6875rem; color: var(--ink-3); }
+.tv-page .m-cr.low b { color: #86efac; }
+.tv-page .m-cr.mid b { color: #b8cdff; }
+.tv-page .m-cr.high b { color: #fcd34d; }
+.tv-page .m-empty { padding: 40px 24px; text-align: center; color: var(--ink-3); border-radius: 18px; box-shadow: inset 0 0 0 1px var(--line); }
+@keyframes tvm-pop { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+/* Reading credits */
+.tv-page .m-band { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 16px; border-radius: 18px; background: var(--panel-2); }
+.tv-page .m-band + .m-band { margin-top: 10px; }
+.tv-page .m-guide { margin-top: 28px; border-radius: 18px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); padding: 4px 20px; font-size: .875rem; color: var(--ink-2); scroll-margin-top: 96px; }
+.tv-page .m-guide summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-weight: 700; color: var(--ink); }
+.tv-page .m-guide > p { margin-top: 12px; line-height: 1.7; color: var(--ink-2); font-size: .875rem; max-width: none; }
+.tv-page .m-guide > p:last-child { margin-bottom: 16px; }
+.tv-page .m-guide dl { margin: 14px 0 0; display: grid; gap: 8px; }
+.tv-page .m-guide dl > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; padding: 10px 14px; border-radius: 12px; background: var(--panel-2); }
+.tv-page .m-guide dt { margin: 0; }
+.tv-page .m-guide dd { margin: 0; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+
+@media (max-width: 1080px) {
+  .tv-page .m-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .tv-page .m-grid { grid-template-columns: minmax(0, 1fr); }
+  .tv-page .m-filters { padding: 16px; }
+  .tv-page .m-toggle { display: flex; }
+  .tv-page .m-filter-body[data-open="false"] { display: none; }
+  .tv-page .m-row { grid-template-columns: minmax(0, 1fr); }
+  .tv-page .m-row-label { padding-top: 0; }
+  .tv-page .m-help { grid-column: 1; }
+  .tv-page .m-chip, .tv-page .m-clear { min-height: 44px; }
+  .tv-page .m-guide { padding-inline: 16px; }
+}
+@media (max-width: 420px) {
+  .tv-page .m-card, .tv-page .m-band { grid-template-columns: 44px minmax(0, 1fr); }
+  .tv-page .m-cr { grid-column: 1 / -1; display: flex; align-items: baseline; justify-content: flex-start; gap: 6px; }
+  .tv-page .m-cr b { display: inline; font-size: 1.25rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tv-page .m-card { animation: none; }
+  .tv-page .m-chip { transition: none; }
+}

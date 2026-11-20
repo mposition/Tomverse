@@ -675,6 +675,15 @@ test("the scheduled renewal extends identical content inside the last week and n
   assert.equal(decideSnapshotRenewal(snapshot(29), other, NOW), "content_changed");
   assert.equal(decideSnapshotRenewal(snapshot(2), other, NOW), "content_changed");
   assert.equal(decideSnapshotRenewal(snapshot(-3), other, NOW), "content_changed");
+  // A snapshot written before a row gained defaulted fields: its stored hash
+  // differs, its rows read through today's schema match, so it is renewed.
+  const legacy = (daysLeft) => ({ ...snapshot(daysLeft, other), normalizedHash: same });
+  assert.equal(decideSnapshotRenewal(legacy(2), same, NOW), "renew");
+  assert.equal(decideSnapshotRenewal(legacy(-3), same, NOW), "renew");
+  assert.equal(decideSnapshotRenewal(legacy(29), same, NOW), "not_due");
+  // Normalised content that still differs is not renewed.
+  assert.equal(decideSnapshotRenewal({ ...snapshot(2, other), normalizedHash: "c".repeat(64) }, same, NOW), "content_changed");
+  assert.equal(decideSnapshotRenewal({ ...snapshot(2, other), normalizedHash: null }, same, NOW), "content_changed");
 });
 
 test("page text drops scripts and tags", () => {

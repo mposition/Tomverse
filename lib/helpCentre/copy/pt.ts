@@ -92,15 +92,15 @@ export const pt: HelpLocaleCopy = {
   },
   categories: {
     "getting-started": { title: "Primeiros passos", description: "Da criação da conta até a primeira pergunta." },
-    chat: { title: "Chat", description: "Conversar com um modelo, escolher modelos e o Auto, melhorar perguntas, entrada de voz." },
+    chat: { title: "Chat", description: "Conversar com um modelo, escolher modelos e a Adaptação inteligente, melhoria automática de perguntas, entrada de voz e conversa por voz, localização atual." },
     review: { title: "Review · AI Review", description: "Leia as respostas de vários modelos lado a lado e veja as diferenças com o AI Review." },
     images: { title: "Imagens", description: "Crie imagens, edite partes de uma foto e compare resultados de vários modelos." },
     research: { title: "Pesquisa · Busca na web", description: "Busque informações recentes na web e receba relatórios com o Deep Research." },
-    files: { title: "Arquivos · Arquivos gerados", description: "Enviar arquivos, Google Drive e baixar arquivos criados pela IA." },
+    files: { title: "Arquivos · Arquivos gerados", description: "Enviar arquivos, Google Drive, converter arquivos e baixar arquivos criados pela IA." },
     assistants: { title: "Assistentes · Memory", description: "Seus assistentes, arquivos de conhecimento e a gestão da memória." },
     imports: { title: "Importar · Continuar", description: "Importe conversas de outros serviços de IA e continue de onde parou." },
     connectors: { title: "Conectores · MCP", description: "Conecte serviços externos e servidores MCP." },
-    coding: { title: "Ferramentas de programação · Chaves de API", description: "Use o Tomverse no Claude Code, no Codex e em ferramentas parecidas." },
+    coding: { title: "Ferramentas de programação · Chaves de API", description: "Use o Tomverse no Claude Code, no Codex, no Cursor e em ferramentas parecidas. Disponível a partir do plano Pro." },
     projects: { title: "Projetos · Compartilhar", description: "Organize, bloqueie e compartilhe conversas em projetos." },
     billing: { title: "Plano · Créditos · Pagamento", description: "Como os créditos são usados, troca de plano, cancelamento e reembolso." },
     account: { title: "Conta · Privacidade", description: "Métodos de login, baixar seus dados e excluir a conta." },
@@ -114,14 +114,14 @@ export const pt: HelpLocaleCopy = {
       summary: "Crie uma conta gratuita e entre com uma conta Google, Microsoft ou Apple, ou com um código de 6 dígitos enviado por e-mail.",
       steps: [
         { title: "Abrir a tela de login", body: "Toque em “Entrar / Criar conta”." },
-        { title: "Escolher o método", body: "Toque em um botão como “Continuar com Google” ou “Continuar com Microsoft”, ou digite o “Endereço de e-mail” e toque em “Receber código de login”. Os botões exibidos podem variar conforme o ambiente." },
+        { title: "Escolher o método", body: "Toque em “Continuar com Google”, “Continuar com Microsoft” ou “Continuar com Apple”, ou digite o “Endereço de e-mail” e toque em “Receber código de login”. Os botões exibidos podem variar conforme o ambiente." },
         { title: "Digitar o código", body: "Digite em “Digite o código” o código de 6 dígitos recebido por e-mail e toque em “Verificar”. Você também pode tocar no link de login que veio no e-mail." },
         { title: "Se for a primeira vez", body: "Se o e-mail ainda não tiver cadastro, toque em “Cadastrar com este endereço”." },
         { title: "Se o código não chegar", body: "Toque em “Enviar um novo código” ou use “Usar outro e-mail” para trocar o endereço." },
       ],
       faq: [
-        { q: "Por quanto tempo o código vale?", a: "Só por alguns minutos. Se expirar, toque em “Enviar um novo código”. Se você digitar o código errado várias vezes, o acesso é bloqueado por um tempo." },
-        { q: "Dá para usar sem entrar?", a: "Quando disponível, você pode experimentar como convidado. As conversas de convidado ficam salvas só neste navegador, não no servidor." },
+        { q: "Por quanto tempo o código vale?", a: "O código vale por até 10 minutos. Se expirar, toque em “Enviar um novo código”. Se você digitar o código errado várias vezes, o acesso é bloqueado por um tempo." },
+        { q: "Dá para usar sem entrar?", a: "Quando disponível, você pode experimentar como convidado. As conversas de convidado ficam salvas só neste navegador, não no servidor (os anexos ficam guardados por pouco tempo e depois são apagados automaticamente)." },
       ],
     },
     "tour-workspace": {
@@ -145,8 +145,8 @@ export const pt: HelpLocaleCopy = {
       steps: [
         { title: "Escolher o produto", body: "Na seleção de produto, no alto da tela, escolha “Chat” ou “Review”." },
         { title: "Chat", body: "No Chat, um modelo responde por vez. Se você escolher outro modelo, quem responde passa a ser ele." },
-        { title: "Do Chat para a comparação", body: "Para ver uma resposta do Chat em vários modelos, toque em “Comparar no Review”. Um novo Review é aberto com essa pergunta." },
-        { title: "Do Review para o Chat", body: "No resultado da análise do Review, toque em “Continuar no Chat” para seguir em um rascunho do Chat." },
+        { title: "Do Chat para a comparação", body: "Para ver uma resposta do Chat em vários modelos, toque em “Comparar no Review”. Uma nova conversa do Review é aberta com essa pergunta." },
+        { title: "Do Review para o Chat", body: "Se estiver logado, toque em “Continuar no Chat”, abaixo do resultado de uma análise do Review salva, para seguir em um rascunho do Chat. Isso ainda não está disponível em comparações de convidado nem em links compartilhados." },
       ],
       faq: [
         { q: "Posso mover uma conversa já criada para outro produto?", a: "Uma conversa abre no produto em que foi criada. Comparar ou continuar cria uma conversa nova." },
@@ -161,41 +161,72 @@ export const pt: HelpLocaleCopy = {
         { title: "Ver a Adaptação inteligente", body: "Em contas com o recurso disponível, o campo de mensagem tem a chave “Adaptação inteligente”, que começa ligada em um Chat vazio." },
         { title: "Escolher manualmente", body: "Abra o seletor de modelos e toque em um modelo na aba “Conversa”. A Adaptação inteligente é desligada e o modelo escolhido responde." },
         { title: "Ver quem respondeu", body: "Abaixo da resposta, o selo “Automático · nome do modelo” mostra qual modelo respondeu de fato." },
-        { title: "Ver a mensagem como foi lida", body: "Se o Auto reformulou sua mensagem, abra “Como o Auto leu sua mensagem”, abaixo do selo." },
+        { title: "Ver a mensagem como foi lida", body: "Se o Auto reformulou sua mensagem, abra “Como o Auto leu sua mensagem”, abaixo do selo. Isso não aparece em conversas com anexos." },
       ],
       faq: [
-        { q: "Quantos créditos isso usa?", a: "Com a Adaptação inteligente, os créditos dependem do modelo que respondeu. Se você escolher o modelo, vale o crédito base mostrado no seletor." },
+        { q: "Quantos créditos isso usa?", a: "Com a Adaptação inteligente, os créditos dependem do modelo que respondeu. Se você escolher o modelo, vale o crédito base desse modelo; entradas longas recebem um multiplicador e, se a busca na web for executada, cada modelo recebe 8 créditos a mais." },
         { q: "A mensagem que enviei é alterada ao ser salva?", a: "Não. Sua mensagem é salva exatamente como você a escreveu." },
         { q: "A Adaptação inteligente vai deixar de poder ser desligada?", a: "Não. Você pode desligá-la a qualquer momento escolhendo um modelo." },
       ],
     },
     "prompt-refiner": {
-      title: "Usar a sugestão para melhorar a pergunta",
-      summary: "“Melhorar redação” sugere uma frase mais clara sem enviar a pergunta. Você decide se vai usá-la.",
+      title: "Melhoria da pergunta (Adaptação inteligente)",
+      summary: "Em um Chat com a Adaptação inteligente ligada, o Tomverse melhora a pergunta enviada, quando necessário, antes de passá-la ao modelo que vai responder. Na conversa, ela fica salva exatamente como você a escreveu.",
       steps: [
-        { title: "Pedir a sugestão", body: "Quando disponível, escreva a pergunta no campo de mensagem e toque em “Melhorar redação”." },
-        { title: "Comparar", body: "O “Original” e a “Redação sugerida” aparecem lado a lado." },
-        { title: "Escolher", body: "Toque em “Usar esta redação” ou “Manter original”. Nenhuma das duas opções envia a mensagem ainda." },
-        { title: "Enviar", body: "Toque em “Enviar” como de costume. Se falhar, toque em “Tentar novamente”; o original não é alterado." },
+        { title: "Conferir a Adaptação inteligente", body: "Confira se a chave “Adaptação inteligente” do campo de mensagem está ligada. Em um Chat vazio, ela já começa ligada." },
+        { title: "Enviar", body: "Escreva a pergunta e toque em “Enviar”. Não há nenhum outro botão a tocar." },
+        { title: "Ver o resultado", body: "Abaixo da resposta, o selo “Automático · nome do modelo” mostra qual modelo respondeu. Se a pergunta foi reformulada, abra “Como o Auto leu sua mensagem”." },
+        { title: "Se quiser melhorar você mesmo", body: "Em uma conversa salva, com login, em que você desligou a Adaptação inteligente e escolheu o modelo, use “Melhorar redação” para receber uma sugestão e escolha “Usar esta redação” ou “Manter original”." },
       ],
       faq: [
-        { q: "E se eu mudar o texto enquanto a sugestão é gerada?", a: "Se mudar uma única letra, a sugestão desaparece. Toque em “Melhorar redação” de novo." },
-        { q: "Ele lê meus arquivos ou o histórico da conversa?", a: "Lê apenas a frase que você digitou agora. O histórico da conversa, os anexos e a memória não são usados." },
+        { q: "A mensagem que enviei é alterada ao ser salva?", a: "Não. A versão melhorada só vai para o modelo que responde, e a conversa guarda sua mensagem exatamente como você a escreveu." },
+        { q: "E se eu quiser enviar sem melhorar?", a: "Desligue a Adaptação inteligente e escolha o modelo." },
+        { q: "Ele lê conversas anteriores ou meus arquivos?", a: "Para entender referências como “corrija o código acima”, ele pode ler uma parte da resposta anterior. O conteúdo dos anexos não é lido, e em conversas com anexos a pergunta não é reescrita." },
       ],
     },
     "voice-input": {
       title: "Digitar por voz",
       summary: "O que você fala no microfone vira texto no campo de mensagem, e você pode corrigir antes de enviar.",
       steps: [
-        { title: "Começar a gravar", body: "Quando disponível, toque no microfone (“Gravar entrada de voz”) abaixo do campo de mensagem. Se o navegador pedir permissão para o microfone, permita." },
+        { title: "Começar a gravar", body: "Toque no microfone (“Gravar entrada de voz”) abaixo do campo de mensagem. Se o navegador pedir permissão para o microfone, permita." },
         { title: "Falar", body: "Enquanto você fala, o aviso “Gravando” e o tempo aparecem acima do campo de mensagem." },
         { title: "Transformar em texto", body: "Toque no mesmo botão de novo. Quando a conversão terminar, a frase entra no campo de mensagem." },
         { title: "Corrigir e enviar", body: "Corrija a frase e toque em “Enviar”. Para descartar a gravação, toque em “Descartar”." },
       ],
       faq: [
         { q: "A gravação fica salva?", a: "O Tomverse não guarda gravações. O áudio é enviado ao provedor de reconhecimento de voz apenas para ser transformado em texto, e gravações descartadas não são enviadas." },
-        { q: "Usa créditos?", a: "A entrada de voz não consome créditos. Pode haver um limite diário de uso." },
+        { q: "Usa créditos?", a: "A entrada de voz não consome créditos. Pode haver um limite diário de uso. A “conversa por voz”, em que você conversa falando, tem o uso de voz descontado à parte." },
         { q: "Não consigo gravar.", a: "Funciona nas versões mais recentes do Chrome, Edge, Safari e Firefox. Se o microfone estiver bloqueado, permita-o para este site nas configurações do navegador." },
+      ],
+    },
+    "voice-conversation": {
+      title: "Continuar a conversa falando (conversa por voz)",
+      summary: "Com o campo de mensagem vazio, o botão de conversa por voz permite continuar a conversa falando. As perguntas e respostas ficam neste chat, e o uso de voz é descontado em créditos.",
+      steps: [
+        { title: "Iniciar a conversa por voz", body: "Com o campo de mensagem vazio, o botão “Conversa por voz” aparece no lugar do botão de enviar. Toque nele e depois em “Iniciar conversa por voz”; o navegador pede permissão para o microfone. Permita." },
+        { title: "Falar", body: "Enquanto você fala, as legendas de você e do Tomverse aparecem separadas. Dá para interromper falando a qualquer momento." },
+        { title: "Desligar o microfone", body: "Mesmo com “Desativar microfone”, o tempo de conexão continua sendo contado. Para fazer uma pausa, é melhor encerrar a conversa." },
+        { title: "Encerrar a conversa", body: "Toque em “Encerrar conversa” para voltar ao mesmo chat. As perguntas e respostas continuam neste chat." },
+      ],
+      faq: [
+        { q: "Quantos créditos usa?", a: "Mesmo que você faça pausas ou desligue o microfone, o uso de voz é descontado em créditos pelo tempo conectado. O modelo que gera a resposta e a busca na web são descontados à parte. Antes de começar, é informado o máximo de créditos reservado temporariamente, e o que não for usado é devolvido depois do acerto." },
+        { q: "Qual a diferença para a entrada de voz?", a: "A entrada de voz transforma o que você fala em texto no campo de mensagem, que você pode corrigir antes de enviar, e não usa créditos. A conversa por voz é falada nos dois sentidos, e o uso de voz é descontado à parte." },
+        { q: "Dá para usar sem entrar?", a: "Não. Só com login, e uma conversa bloqueada precisa ser desbloqueada antes. O áudio é enviado ao provedor do serviço de conversa por voz, e o Tomverse não guarda gravações." },
+      ],
+    },
+    "use-current-location": {
+      title: "Perguntar sobre lugares próximos com a localização atual",
+      summary: "Ao ligar “Localização atual” em “Adicionar e ferramentas”, sua localização aproximada é enviada ao provedor de IA a cada mensagem, para responder perguntas como lugares próximos. Fica desligada por padrão.",
+      steps: [
+        { title: "Ligar", body: "No menu “Adicionar e ferramentas” do campo de mensagem, ligue “Localização atual”. Se o navegador ou o dispositivo pedir permissão de localização, permita." },
+        { title: "Conferir o estado", body: "Enquanto estiver ligada, aparece “Localização ativada · atualizada a cada mensagem”. Não há rastreamento em segundo plano." },
+        { title: "Perguntar", body: "Pergunte algo como “cafeterias perto de mim”. Se a pergunta precisar da localização atual, a permissão pode ser pedida antes da resposta mesmo que você não tenha ligado o recurso." },
+        { title: "Desligar", body: "Toque em “Desativar localização atual” ou desligue no menu “Adicionar e ferramentas”. Ela também desliga ao recarregar a página ou trocar de conta." },
+      ],
+      faq: [
+        { q: "Para onde vai a localização?", a: "Enquanto estiver ligada, a cada mensagem enviada sua localização aproximada vai junto com a solicitação ao provedor de IA que gera a resposta. Nenhum registro de localização à parte é criado." },
+        { q: "Os lugares ficam na resposta?", a: "A resposta da IA pode mencionar lugares, e a ela se aplicam as configurações normais de armazenamento, exportação e compartilhamento da conversa. Confira antes de compartilhar." },
+        { q: "E se eu negar a permissão?", a: "A conversa continua sem localização. Você pode digitar o lugar, e, se negar ou desligar, a permissão não é pedida de novo automaticamente na sessão atual." },
       ],
     },
     "chat-starters": {
@@ -217,7 +248,7 @@ export const pt: HelpLocaleCopy = {
       summary: "No Review, você envia a mesma pergunta para até 3 modelos e lê as respostas lado a lado.",
       steps: [
         { title: "Escolher os modelos", body: "No Review, abra a seleção de modelos e escolha até 3. Se já houver 3, escolha qual deles será substituído." },
-        { title: "Enviar a pergunta", body: "Escreva a pergunta e toque em “Enviar”. Os modelos escolhidos respondem ao mesmo tempo." },
+        { title: "Enviar a pergunta", body: "Escreva a pergunta e toque em “Comparar” (na tela Classic, “Enviar”). Os modelos escolhidos respondem ao mesmo tempo." },
         { title: "Perguntar a um só modelo", body: "Para continuar com um só modelo, use “Perguntar apenas a este modelo” no painel dele." },
         { title: "Mudar a visualização", body: "Alterne entre “Foco” e “Lado a lado”. Mudar a visualização não reenvia a pergunta." },
         { title: "Tirar um modelo", body: "Toque em “Remover da comparação”. Você pode voltar atrás com “Desfazer”." },
@@ -227,9 +258,24 @@ export const pt: HelpLocaleCopy = {
         { q: "Dá para comparar sem entrar?", a: "Quando disponível, convidados também podem comparar até 3 modelos." },
       ],
     },
+    "quick-difference-summary": {
+      title: "Ver as respostas rapidamente com o resumo rápido das diferenças",
+      summary: "Ao tocar em “Resumo rápido das diferenças” abaixo das respostas comparadas, a IA resume brevemente as conclusões em comum, as diferenças importantes, as principais afirmações de cada modelo e o que precisa de verificação adicional.",
+      steps: [
+        { title: "Preparar as respostas", body: "Espere até que as respostas dos vários modelos à mesma pergunta terminem." },
+        { title: "Iniciar o resumo", body: "Na tela de comparação, toque em “Resumo rápido das diferenças” (em telas estreitas, “Diferenças”)." },
+        { title: "Executar", body: "Confira o aviso “A IA comparará N respostas concluídas para a pergunta mais recente” e o uso estimado, e toque em “Analisar · N créditos”." },
+        { title: "Ler", body: "Leia na ordem “Conclusões em comum”, “Diferenças importantes”, “Principais afirmações por modelo” e “Precisa de verificação adicional”." },
+      ],
+      faq: [
+        { q: "Quantos créditos usa?", a: "Cerca de 1 crédito para uma comparação curta típica; respostas longas podem custar mais. Se a análise falhar, os créditos reservados são devolvidos." },
+        { q: "Ele diz qual é a resposta certa?", a: "Não. Só compara as respostas recebidas e não pesquisa na web nem verifica fatos externos. As citações por item e a verificação na web ficam no AI Review." },
+        { q: "Convidados também podem usar?", a: "Convidados podem usar uma vez por dia. Com login, o uso é sem limite, e em conversas salvas a análise é guardada." },
+      ],
+    },
     "read-ai-review": {
       title: "Executar e ler o AI Review",
-      summary: "Quando 2 ou mais respostas estiverem prontas, um modelo revisor separado resume o que têm em comum, as diferenças, as contradições, o que falta e o que vale conferir.",
+      summary: "Quando 2 ou mais respostas estiverem prontas, um modelo revisor separado (em geral, 2 revisores de provedores diferentes) resume o que têm em comum, as diferenças, as contradições, o que falta e o que vale conferir.",
       steps: [
         { title: "Ter as respostas prontas", body: "Confirme que 2 ou mais respostas à mesma pergunta já terminaram." },
         { title: "Executar", body: "Toque em “Revisão cruzada das respostas por IA” (no Studio para computador, “Analisar com Tomverse”)." },
@@ -239,8 +285,8 @@ export const pt: HelpLocaleCopy = {
       ],
       faq: [
         { q: "O AI Review dá a resposta certa?", a: "Não. Ele só compara as respostas recebidas e não faz busca na web nem checagem de fatos externa." },
-        { q: "E os créditos se falhar?", a: "Se não terminar, os créditos reservados são devolvidos. O custo aparece na tela antes de executar." },
-        { q: "Existe limite de uso?", a: "Convidados e o plano Free têm um limite mensal de execuções. Veja quantas restam na tela." },
+        { q: "E os créditos se falhar?", a: "Se não terminar, os créditos reservados são devolvidos. Uma execução costuma custar cerca de 8 créditos e, se o saldo for insuficiente, os créditos necessários aparecem antes de executar." },
+        { q: "Existe limite de uso?", a: "Convidados podem experimentar 1 vez por mês, e as execuções restantes aparecem na tela. O plano Free pode usar um número definido de execuções por mês, e o limite mensal aparece na tela de execução." },
       ],
     },
     "follow-citations": {
@@ -253,7 +299,7 @@ export const pt: HelpLocaleCopy = {
         { title: "Conferir na web (opcional)", body: "Se precisar, toque em “Verificar com busca na web” só naquele item. A verificação roda à parte, usa créditos e não altera a revisão original." },
       ],
       faq: [
-        { q: "Uma citação “Respaldado” significa que é verdade?", a: "Não. Significa apenas que esse trecho existe na resposta, sem garantia de que o conteúdo esteja correto." },
+        { q: "Se aparece “Esta citação foi encontrada na resposta de origem.”, isso significa que é verdade?", a: "Não. Significa apenas que esse trecho existe na resposta, sem garantia de que o conteúdo esteja correto. Para saber se é verdade, use “Verificar com busca na web” nesse item." },
         { q: "A correspondência com a fonte é uma medida de precisão?", a: "Não. Ela mostra apenas o quanto a citação coincide com o texto original." },
       ],
     },
@@ -278,7 +324,7 @@ export const pt: HelpLocaleCopy = {
       steps: [
         { title: "Escrever o pedido", body: "No campo de mensagem do Chat, descreva a cena que quer, por exemplo “Crie uma imagem: …”." },
         { title: "Enviar", body: "Envie a mensagem. Nenhuma confirmação extra é pedida, e no lugar da resposta aparece “Criando a imagem…”." },
-        { title: "Ver o resultado", body: "Quando termina, aparece um selo de qualidade (“Qualidade de rascunho”, “Qualidade padrão” ou “Alta qualidade”). Para mais qualidade, envie “Gera novamente esta imagem em alta qualidade”." },
+        { title: "Ver o resultado", body: "Quando termina, aparece um selo de qualidade (“Qualidade de rascunho”, “Qualidade padrão” ou “Alta qualidade”; o “Final” da tela de imagens corresponde à alta qualidade). Para mais qualidade, envie “Gera novamente esta imagem em alta qualidade”." },
         { title: "Continuar ajustando", body: "Envie algo como “Deixe mais azul” e a imagem é refeita a partir da anterior." },
       ],
       faq: [
@@ -291,10 +337,10 @@ export const pt: HelpLocaleCopy = {
       title: "Comparar imagens de vários modelos",
       summary: "Na tela de imagens, envie uma descrição a vários modelos ao mesmo tempo e compare os resultados lado a lado.",
       steps: [
-        { title: "Abrir a tela de imagens", body: "Na barra lateral, ao lado de “Novo chat”, abra “Novo…” e escolha “Nova imagem”. Você também pode escolher o modelo na aba “Imagem” do seletor de modelos." },
-        { title: "Escolher os modelos", body: "Em “Modelos”, escolha os modelos a comparar. A tela mostra quantos dá para escolher de uma vez." },
-        { title: "Qualidade e tamanho", body: "Escolha a “Qualidade” (Rascunho, Padrão, Final) e o “Tamanho” (Quadrada, Paisagem, Retrato)." },
-        { title: "Descrever e gerar", body: "Descreva a imagem, confira o preço de cada modelo e o total de créditos e toque em “Gerar”." },
+        { title: "Abrir a tela de imagens", body: "Toque no ícone de imagem à direita do botão “Novo chat”, na barra lateral (na barra lateral recolhida, toque em “+”), e escolha “Nova imagem”. Você também pode escolher o modelo na aba “Imagem” do seletor de modelos." },
+        { title: "Escolher os modelos", body: "No chip de modelo acima do campo de mensagem, escolha os modelos a comparar. A tela mostra quantos dá para escolher de uma vez." },
+        { title: "Qualidade e tamanho", body: "Escolha a “Qualidade” (Rascunho, Padrão, Final) e o “Tamanho” (Quadrada, Paisagem, Retrato). Alguns tamanhos só ficam disponíveis em certos modelos." },
+        { title: "Descrever e gerar", body: "Descreva a imagem, confira os créditos no chip de modelo (se escolher vários, “Total N créditos”) e toque em “Gerar”." },
         { title: "Receber o resultado", body: "Toque em “Tamanho original” ou “Baixar”. Se algum modelo falhar, você pode usar “Repetir este modelo” só nele." },
       ],
       faq: [
@@ -306,19 +352,19 @@ export const pt: HelpLocaleCopy = {
       title: "Editar uma foto anexada",
       summary: "Anexe uma foto no Chat e descreva o que mudar. Se for entendido como pedido de edição, a resposta vem como a imagem editada.",
       steps: [
-        { title: "Anexar a foto", body: "Em “Adicionar e ferramentas”, no campo de mensagem, use “Adicionar um ficheiro” para anexar a foto (PNG, JPEG, WebP, GIF)." },
+        { title: "Anexar a foto", body: "Em “Adicionar e ferramentas”, no campo de mensagem, use “Adicionar um ficheiro” para anexar a foto (exceto GIFs animados)." },
         { title: "Descrever a mudança", body: "Escreva o que mudar, como “Troque o fundo por uma praia ao entardecer”." },
         { title: "Enviar", body: "Se for um pedido de edição, a resposta vem como a imagem editada. Se não for, vem uma resposta comum sobre a foto." },
       ],
       faq: [
         { q: "A foto original é alterada?", a: "Não. A foto enviada fica como está e uma nova imagem é criada." },
         { q: "E se eu anexar várias fotos?", a: "A primeira das fotos anexadas é a que será editada." },
-        { q: "Quantos créditos usa?", a: "Os créditos de geração de imagem, e pode haver um acréscimo de edição que depende do modelo." },
+        { q: "Quantos créditos usa?", a: "Os créditos são descontados na hora, sem confirmação. Vale o preço da imagem no tamanho que combina com a orientação da foto, e pode haver um acréscimo de edição que depende do modelo." },
       ],
     },
     "image-credits": {
       title: "Créditos de imagem e reembolso",
-      summary: "Cada imagem usa um número fixo de créditos conforme a qualidade e o tamanho. Se a geração falhar, todos os créditos reservados são devolvidos.",
+      summary: "Cada imagem usa um número fixo de créditos conforme o modelo, a qualidade e o tamanho. Se a geração falhar, todos os créditos reservados são devolvidos.",
       steps: [
         { title: "Ver o preço", body: "Na tela de imagens, confira o preço de cada modelo e o total de créditos." },
         { title: "Gerar", body: "Ao tocar em “Gerar”, os créditos são reservados primeiro." },
@@ -326,6 +372,7 @@ export const pt: HelpLocaleCopy = {
       ],
       faq: [
         { q: "Em quais planos posso usar?", a: "Logado, você pode usar nos planos Free, Pro e Max, dentro dos créditos que tiver." },
+        { q: "E se o Chat responder com uma imagem ou editar uma foto?", a: "Os créditos são descontados na hora, sem confirmação de preço. Se falhar, são devolvidos pela mesma regra." },
         { q: "Quando recebo os créditos de volta?", a: "Quando a imagem não é criada por recusa do provedor, bloqueio de segurança, erro ou tempo esgotado." },
         { q: "Aparece “Os créditos do plano de hoje acabaram”.", a: "Imagens também usam os créditos diários do plano. Se você tiver créditos comprados, pode continuar usando." },
       ],
@@ -352,19 +399,19 @@ export const pt: HelpLocaleCopy = {
       summary: "Com a busca na web ativada, o Tomverse pesquisa sozinho quando a pergunta pede informação recente ou fontes e mostra os links abaixo da resposta.",
       steps: [
         { title: "Ativar a busca na web", body: "No menu “Adicionar e ferramentas”, ligue a chave “Pesquisa web”." },
-        { title: "Ver o estado", body: "Toque no indicador “Pesquisa web ativada”, no campo de mensagem, para ver quantos dos modelos escolhidos aceitam busca." },
+        { title: "Ver o estado", body: "Se você escolheu os modelos manualmente, toque no indicador “Pesquisa web ativada”, no campo de mensagem, para ver quantos dos modelos escolhidos aceitam busca." },
         { title: "Abrir as fontes", body: "Os links da lista “Fontes”, abaixo da resposta, abrem em uma nova aba." },
         { title: "Sugestão de nova busca", body: "Se a busca estiver desligada e a pergunta pedir informação recente, aparece o cartão “Verificar na web”. Ao tocar, a mesma pergunta é reenviada com busca." },
       ],
       faq: [
-        { q: "Há créditos extras?", a: "Cada modelo que realmente fez a busca recebe um acréscimo fixo de créditos, e os modelos que não buscaram têm esse valor devolvido." },
+        { q: "Há créditos extras?", a: "Cada modelo que faz a busca na web recebe 8 créditos a mais (o mesmo valor, qualquer que seja o número de buscas). Os modelos que não buscaram têm os 8 créditos devolvidos, e os modelos Perplexity não têm acréscimo." },
         { q: "Aparece “Os modelos que responderam não conseguem buscar na web”.", a: "Nenhum dos modelos escolhidos aceita busca. Adicione um modelo que aceite." },
       ],
     },
     // ------------------------------------------------------------------ files
     "attach-files": {
       title: "Anexar arquivos: formatos e tamanhos aceitos",
-      summary: "Você pode anexar vários arquivos por mensagem: imagens, PDF, Office, HWP, texto, código e ZIP.",
+      summary: "Você pode anexar vários arquivos por mensagem: documentos, tabelas e dados, código, imagens e ZIP. Todos os formatos aceitos estão na lista abaixo.",
       steps: [
         { title: "Adicionar os arquivos", body: "Em “Adicionar e ferramentas”, no campo de mensagem, toque em “Adicionar um ficheiro” → “Escolher do computador”, ou arraste os arquivos para o campo de mensagem." },
         { title: "Esperar a verificação", body: "Espere até os avisos “Enviando” e “Verificando” terminarem." },
@@ -372,7 +419,7 @@ export const pt: HelpLocaleCopy = {
       ],
       faq: [
         { q: "Quantos arquivos e de que tamanho?", a: "Os limites de quantidade e tamanho, com e sem login, e todos os formatos aceitos estão na lista de formatos abaixo." },
-        { q: "Quais arquivos não são aceitos?", a: "Executáveis, compactados que não sejam ZIP (RAR, 7Z etc.), áudio e vídeo, HEIC e TIFF, GIFs animados e documentos protegidos por senha." },
+        { q: "Quais arquivos não são aceitos?", a: "Programas e instaladores, compactados que não sejam ZIP (RAR, 7Z etc.), áudio e vídeo, algumas imagens como HEIC, TIFF e BMP, GIFs animados, Keynote e PSD, e documentos e ZIPs protegidos por senha não são aceitos." },
         { q: "Por quanto tempo o arquivo anexado fica guardado?", a: "Anexos de quem está logado ficam guardados junto com a conversa e são apagados quando a conversa ou a conta é excluída. Arquivos de convidado ficam guardados por pouco tempo e depois são apagados automaticamente." },
       ],
     },
@@ -390,6 +437,21 @@ export const pt: HelpLocaleCopy = {
         { q: "Quais arquivos aparecem?", a: "Documentos, planilhas e apresentações do Google. Eles são anexados convertidos em texto, xlsx e pptx, respectivamente." },
       ],
     },
+    "convert-files": {
+      title: "Converter arquivos anexados",
+      summary: "Anexe o arquivo e peça em linguagem natural: reunir fotos em um PDF, juntar ou dividir PDFs, mudar o formato de uma tabela.",
+      steps: [
+        { title: "Anexar o arquivo", body: "Em “Adicionar e ferramentas”, no campo de mensagem, use “Adicionar um ficheiro” para anexar a esta mensagem o arquivo a converter. Só os arquivos anexados a esta mensagem são convertidos." },
+        { title: "Dizer a conversão que quer", body: "Escreva algo como “Junte as duas fotos em um único PDF”, “Divida este PDF de 3 em 3 páginas” ou “Converta o Excel em CSV”. Dá para reunir fotos e PDFs em um só PDF, juntar, dividir, reordenar e girar páginas de PDF, transformar PDF em imagens, mudar o formato e o tamanho de imagens e converter tabelas de Excel e CSV." },
+        { title: "Enviar", body: "Envie a mensagem. Enquanto o arquivo é criado, aparece “Criando o arquivo…”." },
+        { title: "Baixar", body: "No cartão “Arquivo gerado”, abaixo da resposta, toque em “Baixar”. Se houver vários resultados, eles vêm reunidos em um único ZIP." },
+      ],
+      faq: [
+        { q: "Arquivos enviados antes também são convertidos?", a: "Não. Só os arquivos anexados à mensagem que você está enviando agora. Para converter um arquivo anterior, anexe-o de novo e envie." },
+        { q: "Preciso estar logado? Qualquer modelo serve?", a: "É preciso estar logado, e o modelo que responde precisa conseguir criar arquivos. Se o modelo que você escolheu não puder, isso é informado; peça de novo com a Adaptação inteligente ou outro modelo." },
+        { q: "Dá para converter um documento Word em PDF?", a: "Reescrever o conteúdo de um documento em outro formato não é uma conversão, e sim criar um novo arquivo, então o layout original não é copiado e sim refeito." },
+      ],
+    },
     "generated-files": {
       title: "Baixar arquivos criados pela IA",
       summary: "Peça algo como “Crie em Excel” e abaixo da resposta aparece um cartão “Arquivo gerado”, de onde você baixa o arquivo.",
@@ -400,7 +462,8 @@ export const pt: HelpLocaleCopy = {
         { title: "Pedir ajustes", body: "Ao tocar em “Criar uma revisão”, um rascunho com o arquivo anexado é preenchido no campo de mensagem. Você precisa enviá-lo, e o resultado é uma nova versão." },
       ],
       faq: [
-        { q: "Preciso estar logado?", a: "Sim. Logado, você pode usar em qualquer plano." },
+        { q: "Preciso estar logado?", a: "Sim. Logado, você pode usar em qualquer plano. Se o modelo que você escolheu não puder criar arquivos, isso é informado; peça de novo com a Adaptação inteligente ou outro modelo." },
+        { q: "Dá para mudar o formato de um arquivo que enviei?", a: "Sim. Para reunir fotos em um PDF, juntar ou dividir PDFs ou mudar o formato de uma tabela, veja o guia “Converter arquivos anexados”." },
         { q: "Aparece “Desbloqueie esta conversa para baixar o arquivo.”", a: "Os arquivos de uma conversa bloqueada só podem ser baixados depois de desbloqueá-la." },
         { q: "Pedir ajustes sobrescreve o arquivo original?", a: "Não. Uma nova versão é criada, e você vê as anteriores na lista “Versões do arquivo”." },
       ],
@@ -410,7 +473,7 @@ export const pt: HelpLocaleCopy = {
       title: "Criar seu assistente e adicionar arquivos de conhecimento",
       summary: "Reúna nome, instruções, modelo e arquivos de conhecimento em um assistente só seu e escolha-o nas conversas.",
       steps: [
-        { title: "Começar a criar", body: "Quando disponível, em “Configurações”, na aba “Assistentes de IA”, toque em “Novo assistente”. Você também pode começar por “Assistente”, no menu de ferramentas da conversa." },
+        { title: "Começar a criar", body: "Em “Configurações”, na aba “Assistentes de IA”, toque em “Novo assistente”. Você também pode começar por “Assistente”, no menu de ferramentas da conversa." },
         { title: "Nome e instruções", body: "Preencha “Nome” e “Instruções personalizadas” e toque em “Criar assistente”." },
         { title: "Adicionar arquivos de conhecimento", body: "Em “Arquivos de conhecimento que esta revisão pode usar”, toque em “Adicionar um ficheiro” e espere até ficar “pronto”." },
         { title: "Salvar", body: "Toque em “Guardar instruções, modelos e ficheiros”. Cada vez que você salva, uma nova revisão é criada." },
@@ -463,7 +526,7 @@ export const pt: HelpLocaleCopy = {
         { title: "Remover o bloqueio", body: "No menu, toque em “Desbloquear” e digite a senha." },
       ],
       faq: [
-        { q: "E se eu esquecer a senha?", a: "O Tomverse não consegue mostrar nem recuperar a senha. Fale com o suporte." },
+        { q: "E se eu esquecer a senha?", a: "O Tomverse não consegue mostrar nem redefinir a senha; se você a esquecer, não será possível reabrir essa conversa." },
         { q: "O bloqueio criptografa a conversa?", a: "Não. É só um bloqueio que impede abrir a conversa. Ao gerar uma resposta, o conteúdo é enviado ao provedor de IA." },
       ],
     },
@@ -477,7 +540,8 @@ export const pt: HelpLocaleCopy = {
         { title: "Parar de compartilhar", body: "Toque em “Parar compartilhamento”. O link anterior deixa de funcionar na hora." },
       ],
       faq: [
-        { q: "Por quanto tempo o link vale?", a: "Ele expira depois de um prazo definido, e a data de expiração aparece na página compartilhada." },
+        { q: "Por quanto tempo o link vale?", a: "Ele expira 30 dias depois de criado, e a data de expiração aparece na página compartilhada." },
+        { q: "Há conversas que não podem ser compartilhadas?", a: "Conversas que continuam uma conversa importada e conversas da tela de imagens não podem ser compartilhadas. A página compartilhada não inclui arquivos gerados nem imagens." },
         { q: "Minha memória (Memory) também é compartilhada?", a: "Não. O conteúdo da memória não é compartilhado. Apague o que for sensível antes de compartilhar." },
       ],
     },
@@ -528,13 +592,29 @@ export const pt: HelpLocaleCopy = {
         { q: "E se eu apagar o original?", a: "As mensagens do Tomverse ficam e aparece a marca “Original excluído”." },
       ],
     },
+    "import-gemini": {
+      title: "Importar conversas do Gemini",
+      summary: "Envie o arquivo JSON exportado de Minha atividade (Apps Gemini) pelo Google Takeout para salvar suas conversas antigas na conta do Tomverse. O arquivo original é lido apenas dentro do seu navegador.",
+      steps: [
+        { title: "Abrir o Takeout e desmarcar tudo", body: "Abra o Google Takeout e desmarque tudo." },
+        { title: "Apps Gemini em JSON", body: "Selecione “Minha atividade”, escolha nela os Apps Gemini e defina o formato como JSON. O item “Gemini” do Takeout contém Gems, não conversas." },
+        { title: "Baixar o arquivo", body: "Depois de exportar, baixe o arquivo .zip pelo link de download que o Google enviar. Não precisa descompactar." },
+        { title: "Abrir a tela de importação", body: "No Tomverse, em “Configurações”, na aba “Dados”, na linha “Importar de outro serviço de IA”, toque em “Gerir importações” e depois em “Começar uma nova importação”." },
+        { title: "Escolher e importar", body: "Em “Onde está sua conversa?”, escolha “Gemini” e selecione o arquivo em “Escolher arquivo de exportação”. Escolha as conversas, toque em “Revisar os chats selecionados (N)” e depois em “Importar N conversas”." },
+      ],
+      faq: [
+        { q: "Exportei em HTML.", a: "A exportação do Gemini precisa estar em JSON. HTML não pode ser lido; exporte de novo no Takeout com o formato JSON." },
+        { q: "O arquivo original é enviado ao servidor?", a: "O arquivo original não sai do seu dispositivo. Só o texto das conversas escolhidas é salvo na conta; imagens, áudios e anexos não são importados." },
+        { q: "Dá para importar conversas do Perplexity também?", a: "Sim. No Perplexity, toque no botão de exportar abaixo de uma resposta e escolha Markdown (.md); depois escolha Perplexity na tela de importação e envie o arquivo. Um arquivo é um thread. A exportação do Perplexity não marca onde uma pergunta termina, então pergunta e resposta podem ser divididas no lugar errado; abra a conversa depois de importar para conferir." },
+      ],
+    },
     "import-guest-conversations": {
       title: "Salvar na conta as conversas feitas como convidado",
       summary: "Passe para a sua conta as conversas de convidado que você teve neste navegador antes de entrar.",
       steps: [
         { title: "Entrar", body: "Ao entrar, aparece a janela “Importar suas conversas de convidado?”." },
         { title: "Escolher o que importar", body: "Toque em “Importar apenas a conversa atual” ou em “Importar todas as N conversas de convidado”. Para pular, toque em “Começar sem importar”." },
-        { title: "Importar depois", body: "Se você pulou, dá para fazer depois em “Configurações” → aba “Dados”, em “Importar as conversas de convidado deste navegador”." },
+        { title: "Importar depois", body: "Se você pulou, dá para fazer depois em “Configurações” → aba “Dados”, em “Importar as conversas de convidado deste navegador”. Isso só aparece se ainda houver conversas de convidado para importar neste navegador." },
       ],
       faq: [
         { q: "E se eu limpar os dados do navegador?", a: "Se você limpar os dados do navegador ou usar outro navegador ou dispositivo, as conversas de convidado não podem ser recuperadas." },
@@ -544,12 +624,12 @@ export const pt: HelpLocaleCopy = {
     // ------------------------------------------------------------- connectors
     "connect-plugin": {
       title: "Conectar um plugin e escolher as permissões",
-      summary: "Conecte um serviço externo como plugin e escolha você mesmo as permissões e as ferramentas que ele pode usar. Aparece nas contas que têm este recurso ativado.",
+      summary: "Conecte um serviço externo como plugin e escolha você mesmo as permissões e as ferramentas que ele pode usar. Depois de entrar, o botão de quebra-cabeça aparece no campo de mensagem do Chat.",
       steps: [
         { title: "Abrir a tela de plugins", body: "No campo de mensagem do Chat, toque no botão de quebra-cabeça e depois em “Gerenciar plugins”." },
         { title: "Iniciar a conexão", body: "Toque em “Adicionar conexão MCP” ou em “Conectar”, no cartão do serviço. Serviços marcados com “Configuração do servidor necessária” ainda não podem ser conectados." },
-        { title: "Escolher as permissões", body: "Para serviços com login, marque na lista “Permissões a conceder” só o que for necessário e toque em “Conectar”. Ao voltar do login do serviço, aparece “Conectados”." },
-        { title: "Salvar as ferramentas a usar", body: "Em “Gerenciar acesso”, marque em “Selecionar ferramentas” as que quiser e toque em “Salvar acesso”. As ferramentas só podem ser escolhidas no Chat depois de salvas." },
+        { title: "Escolher as permissões", body: "Para serviços com login, quando a lista “Permissões a conceder” aparecer, marque só o que for necessário e toque em “Conectar”. Ao voltar do login do serviço, aparece “Conectados”." },
+        { title: "Salvar as ferramentas a usar", body: "Em “Gerenciar acesso”, marque abaixo de “Selecionar ferramentas” as que quiser e toque em “Salvar acesso”. As ferramentas só podem ser escolhidas no Chat depois de salvas." },
       ],
       faq: [
         { q: "Quero mudar as permissões.", a: "Em “Gerenciar acesso”, toque em “Autenticar novamente” e escolha de novo." },
@@ -574,11 +654,11 @@ export const pt: HelpLocaleCopy = {
     },
     "use-plugin-in-chat": {
       title: "Usar plugins na conversa e aprovar as execuções",
-      summary: "No Chat, escolha o plugin conectado e, para ações que enviam algo para fora, confira o conteúdo e aprove.",
+      summary: "No Chat, escolha o plugin conectado e, a não ser que seja uma ferramenta de leitura já revisada, confira o conteúdo e aprove antes de executar.",
       steps: [
         { title: "Escolher o plugin", body: "No campo de mensagem do Chat, toque no botão de quebra-cabeça e escolha a conexão que quer usar nesta conversa." },
         { title: "Enviar a pergunta", body: "Pergunte como de costume. O modelo usa as ferramentas de que precisar." },
-        { title: "Aprovar a execução", body: "Para ações que escrevem em um serviço externo, aparece “Revisar esta ação em Plugins”. Em “Aprovações”, confira o que será enviado e toque em “Aprovar esta ação” ou “Rejeitar”." },
+        { title: "Aprovar a execução", body: "Quando aparecer “Revisar esta ação em Plugins”, toque em “Gerenciar plugins”, ao lado, confira na aba “Aprovações” o que será enviado e toque em “Aprovar esta ação” ou “Rejeitar”. Se você não aprovar em 10 minutos, o pedido expira." },
       ],
       faq: [
         { q: "Conectei, mas não aparece na lista.", a: "É preciso salvar pelo menos uma ferramenta em “Gerenciar acesso” para a conexão aparecer na lista." },
@@ -588,50 +668,83 @@ export const pt: HelpLocaleCopy = {
     // ----------------------------------------------------------------- coding
     "manage-api-keys": {
       title: "Criar e revogar chaves de API",
-      summary: "Crie chaves de API do Tomverse para usar em ferramentas de código, mude o limite e o nome e revogue as que não usa mais. Aparece nas contas com a API liberada.",
+      summary: "Crie chaves de API do Tomverse para usar em ferramentas de código, mude o limite e o nome e revogue as que não usa mais. A API e a CLI exigem o plano Pro ou superior. As chaves começam com tvk_.",
       steps: [
         { title: "Abrir a tela de chaves de API", body: "Em “Configurações”, na aba “Conta”, na linha “Chaves de API”, toque em “Gerenciar”." },
-        { title: "Criar a chave", body: "Preencha o “Nome”, defina, se quiser, o “Limite de créditos” e “Expira” (padrão de 90 dias) e toque em “Criar chave”." },
-        { title: "Guardar a chave", body: "Em “Copie sua chave agora”, toque em “Copiar”, guarde em um lugar seguro e toque em “Já salvei”. A chave só aparece essa vez." },
-        { title: "Gerenciar", body: "Na lista “Suas chaves”, use “Renomear”, “Alterar limite” e “Solicitações recentes”." },
-        { title: "Revogar e trocar", body: "Ao tocar em “Revogar”, as ferramentas que usam essa chave param na hora, e não dá para desfazer. Para trocar, crie uma nova chave, coloque-a na ferramenta e só então revogue a antiga." },
+        { title: "Criar a chave", body: "Toque em “Nova chave”, ao lado de “Suas chaves”, preencha o “Nome”, defina, se quiser, o “Limite de créditos (opcional)” e “Expira” (padrão de 90 dias) e toque em “Criar chave”." },
+        { title: "Guardar a chave", body: "Em “Copie sua chave agora”, toque em “Copiar”, guarde em um lugar seguro e toque em “Já salvei · Conectar uma ferramenta”. A chave só aparece essa vez." },
+        { title: "Gerenciar", body: "Na lista “Suas chaves”, toque em “⋯” na linha da chave e use “Renomear”, “Alterar limite” e “Solicitações recentes”." },
+        { title: "Revogar e trocar", body: "Ao tocar em “Revogar”, em “⋯” na linha da chave, as ferramentas que usam essa chave param na hora, e não dá para desfazer. Para trocar, crie uma nova chave, coloque-a na ferramenta e só então revogue a antiga." },
       ],
       faq: [
         { q: "Perdi a chave.", a: "Não dá para vê-la de novo. O Tomverse guarda apenas uma impressão digital da chave. Crie uma nova e revogue a antiga." },
         { q: "Quantas chaves posso criar?", a: "Até 10 chaves em uso por conta." },
-        { q: "Aparece “A API da Tomverse ainda não está disponível para esta conta.”", a: "A API está sendo liberada por etapas. Quando estiver disponível, você poderá criar chaves nesta tela." },
+        { q: "Aparece “A API e a CLI da Tomverse exigem um plano pago.”", a: "As chaves de API podem ser criadas no Pro ou superior. No Free elas ficam bloqueadas, e, ao mudar para Pro ou Max, você pode criar chaves. As chaves que você já tem podem ser revogadas nesta tela. Se aparecer “A API da Tomverse ainda não está disponível para esta conta.”, a API ainda não foi liberada para esta conta." },
       ],
     },
     "connect-claude-code": {
       title: "Conectar o Claude Code ao Tomverse",
-      summary: "No terminal ou na extensão oficial do VS Code, com poucas linhas de configuração o Claude Code passa a usar os modelos e os créditos do Tomverse.",
+      summary: "No terminal ou na extensão oficial do VS Code, com poucas linhas de configuração o Claude Code passa a usar os modelos Claude e os créditos do Tomverse. Disponível a partir do Pro.",
       steps: [
         { title: "Preparar a chave", body: "Crie e guarde uma chave seguindo o guia “Criar e revogar chaves de API”." },
-        { title: "Escolher o modelo", body: "Na tela de chaves de API, em “Ferramentas de programação”, escolha o “Modelo” no cartão “Configurar o Claude Code”. A lista só mostra modelos compatíveis com a ferramenta." },
-        { title: "Usar no terminal", body: "Use “Copiar” no bloco do PowerShell ou do macOS / Linux e cole no terminal. O comando claude, na última linha, inicia o Claude Code conectado ao Tomverse." },
-        { title: "Usar na extensão do VS Code", body: "Coloque o bloco “settings.json de usuário do VS Code” no settings.json de usuário e reinicie o VS Code." },
-        { title: "Colocar a chave", body: "Na configuração copiada, troque <YOUR_TOMVERSE_API_KEY> pela chave que você guardou." },
+        { title: "Escolher o modelo", body: "Na tela de chaves de API, em “Conectar uma ferramenta”, escolha “Claude Code” e depois o “Modelo”. O Claude Code usa apenas modelos Claude, então a lista só mostra modelos compatíveis com a ferramenta. Se escolher “Smart Adaptive”, um dos modelos Claude é escolhido no início da tarefa e mantido até o fim." },
+        { title: "Usar no terminal", body: "Escolha “Linha de comando”, depois “Windows (PowerShell)” ou “macOS / Linux”, use “Copiar” no bloco e cole no terminal. O comando claude, na última linha, inicia o Claude Code conectado ao Tomverse." },
+        { title: "Usar na extensão do VS Code", body: "Escolha “Extensão do VS Code”, coloque o bloco de settings.json que aparece no settings.json de usuário e reinicie o VS Code." },
+        { title: "Colocar a chave", body: "Se você acabou de criar a chave, ela já vem preenchida na configuração até você sair desta página. Caso contrário, troque <YOUR_TOMVERSE_API_KEY> na configuração copiada pela chave que você guardou." },
       ],
       faq: [
         { q: "Como volto para a minha conta original do Claude?", a: "Feche o terminal ou apague do settings.json a configuração que você colocou e reinicie o VS Code." },
         { q: "A busca na web não funciona.", a: "Ferramentas que rodam nos servidores da Anthropic, como a busca na web, não podem ser usadas na conexão com o Tomverse." },
+        { q: "Dá para usar modelos de outros provedores, como GPT ou Gemini?", a: "Não. O Claude Code usa apenas modelos Claude. Para usar modelos de todos os provedores, conecte uma ferramenta compatível com OpenAI, como o Cursor." },
         { q: "A chave fica escrita no settings.json?", a: "Sim. A extensão do Claude Code lê a chave de uma variável de ambiente, então ela fica gravada no arquivo. Não compartilhe esse arquivo." },
       ],
     },
     "connect-codex": {
       title: "Conectar o Codex ao Tomverse",
-      summary: "Adicione o Tomverse como provedor no arquivo de configuração do Codex e execute com --profile tomverse. Sua conta habitual do Codex não é alterada.",
+      summary: "Adicione o Tomverse como provedor no arquivo de configuração do Codex e execute com --profile tomverse. O Codex usa apenas modelos da OpenAI, e sua conta habitual do Codex não é alterada. Disponível a partir do Pro.",
       steps: [
-        { title: "Preparar a chave e o modelo", body: "Crie uma chave e, na tela de chaves de API, em “Ferramentas de programação” → “Configurar o Codex”, escolha o “Modelo”." },
+        { title: "Preparar a chave e o modelo", body: "Crie uma chave e, na tela de chaves de API, em “Conectar uma ferramenta”, escolha “Codex” e depois o “Modelo”. Se escolher “Smart Adaptive”, um dos modelos da OpenAI é escolhido no início da tarefa e mantido até o fim." },
         { title: "Adicionar o provedor", body: "Cole o bloco “Adicione a ~/.codex/config.toml” em ~/.codex/config.toml." },
         { title: "Salvar o perfil", body: "Salve o bloco seguinte como ~/.codex/tomverse.config.toml." },
         { title: "Colocar a chave e iniciar", body: "No bloco “Defina a chave onde o Codex é iniciado”, troque <YOUR_TOMVERSE_API_KEY> pela sua chave e execute. A última linha, codex --profile tomverse, inicia o Codex no Tomverse." },
-        { title: "Se você usa a extensão do VS Code", body: "A extensão só lê o config.toml, então coloque no início do config.toml o bloco “Na extensão do VS Code…” mostrado na tela." },
+        { title: "Se você usa a extensão do VS Code", body: "Escolha “Extensão do VS Code” e coloque no início do config.toml o bloco “Para a extensão do VS Code, que só lê config.toml…”. A chave é colocada como no bloco “Defina a chave onde o Codex é iniciado”." },
       ],
       faq: [
         { q: "Isso afeta minha conta habitual do Codex?", a: "Sem --profile tomverse, o Codex continua usando a conta original." },
         { q: "Como desfaço a configuração da extensão do VS Code?", a: "Apague a linha model_provider que você colocou no início do config.toml." },
         { q: "Algum recurso não funciona?", a: "Busca na web hospedada, conversas salvas e respostas em segundo plano não podem ser usadas." },
+        { q: "Dá para usar modelos de outros provedores, como Claude ou Gemini?", a: "Não. O Codex usa apenas modelos da OpenAI. Para usar modelos de todos os provedores, conecte uma ferramenta compatível com OpenAI, como o Cursor." },
+      ],
+    },
+    "connect-cursor": {
+      title: "Conectar o Cursor ao Tomverse",
+      summary: "Coloque o Tomverse na chave de API da OpenAI e na substituição da Base URL do Cursor para que o Chat e o Agent usem os modelos e os créditos do Tomverse. O Cursor é uma ferramenta compatível com OpenAI e aceita modelos de todos os provedores; disponível a partir do Pro.",
+      steps: [
+        { title: "Preparar a chave", body: "Crie e guarde uma chave seguindo o guia “Criar e revogar chaves de API”." },
+        { title: "Ver a configuração do Cursor", body: "Na tela de chaves de API, em “Conectar uma ferramenta”, escolha “Cursor” para ver a configuração. Uma chave recém-criada já vem preenchida até você sair desta página." },
+        { title: "Colocar no Cursor", body: "Em Settings > Models > API Keys, coloque a chave do Tomverse em OpenAI API Key e ative a substituição de OpenAI Base URL, informando a URL base mostrada na tela." },
+        { title: "Escolher o modelo", body: "Os modelos GPT oferecidos pelo Tomverse podem ser escolhidos direto na lista de modelos do Cursor. Outros modelos, como Claude ou Smart Adaptive, são adicionados uma única vez: digite o ID em Cursor Settings › Models e escolha Add Custom Model." },
+      ],
+      faq: [
+        { q: "Onde o Cursor usa isso?", a: "Esta chave é usada só no Chat e no Agent, e não no Tab, nos modelos próprios do Cursor nem nos agentes na nuvem." },
+        { q: "Por que posso usar modelos de todos os provedores?", a: "O Cursor é uma ferramenta compatível com OpenAI e deixa escolher modelos de todos os provedores permitidos no plano da sua conta. O Claude Code e o Codex usam apenas os modelos do próprio provedor." },
+        { q: "Como desfaço?", a: "No Cursor, desative a chave da OpenAI e a substituição da Base URL." },
+        { q: "As solicitações saem do meu computador?", a: "Não. O Cursor envia as solicitações dos próprios servidores, então elas chegam ao Tomverse pela internet, e não do seu computador." },
+      ],
+    },
+    "api-smart-adaptive": {
+      title: "Usar o Smart Adaptive na API",
+      summary: "Com o nome de modelo smart-adaptive, o Tomverse escolhe o modelo que responde a cada solicitação. Qual modelo respondeu vem junto na resposta. Disponível a partir do Pro.",
+      steps: [
+        { title: "Copiar a configuração", body: "Na tela de chaves de API, a configuração copiada ao escolher uma ferramenta já traz o Smart Adaptive por padrão. Não é preciso copiá-la de novo quando modelos são adicionados ou retirados." },
+        { title: "Usar o nome do modelo", body: "Em ferramentas compatíveis com OpenAI (Chat Completions), use smart-adaptive como nome do modelo." },
+        { title: "Ver quem respondeu", body: "O valor model da resposta e os cabeçalhos x-tomverse-routed-model e x-tomverse-routed-by mostram qual modelo respondeu e como foi escolhido." },
+        { title: "Conferir os créditos", body: "Os créditos são descontados conforme o modelo que respondeu. Em “Modelos permitidos pela API”, na tela de chaves de API, você vê a faixa de créditos por solicitação." },
+      ],
+      faq: [
+        { q: "Funciona no Claude Code e no Codex?", a: "Funciona, mas só escolhe entre os modelos do provedor de cada ferramenta (modelos Claude no Claude Code, modelos da OpenAI no Codex). Um modelo é escolhido no início da tarefa e mantido até o fim." },
+        { q: "E se eu quiser definir o modelo?", a: "Coloque como nome do modelo um ID de modelo mostrado em “Modelos permitidos pela API”." },
+        { q: "Funciona em outras ferramentas, como o Cursor?", a: "Em qualquer app que aceite um endpoint personalizado de OpenAI Chat Completions (URL base, chave de API, modelo), coloque esses três valores." },
       ],
     },
     "api-usage": {
@@ -639,30 +752,31 @@ export const pt: HelpLocaleCopy = {
       summary: "As solicitações feitas com uma chave usam os mesmos créditos da conta que o Chat, e você pode definir um limite de créditos para cada chave.",
       steps: [
         { title: "Ver o uso por chave", body: "Em “Suas chaves”, na tela de chaves de API, veja os créditos usados por cada chave e os reservados para solicitações em andamento." },
-        { title: "Ver as solicitações recentes", body: "Toque em “Solicitações recentes” para ver, por solicitação, o modelo, os créditos, os tokens de entrada e saída e o ID da solicitação." },
+        { title: "Ver as solicitações recentes", body: "Toque em “⋯” → “Solicitações recentes”, na linha da chave, para ver, por solicitação, o modelo, os créditos, os tokens de entrada e saída e o ID da solicitação." },
         { title: "Ver o saldo da conta", body: "Toque em “Saldo e uso da conta” para abrir a aba “Plano”." },
-        { title: "Créditos por modelo", body: "Em “Modelos disponíveis”, veja os créditos por solicitação de cada modelo." },
+        { title: "Créditos por modelo", body: "Em “Modelos permitidos pela API”, veja os créditos por solicitação de cada modelo." },
       ],
       faq: [
-        { q: "As solicitações falham com 401, 403, 404 ou 429.", a: "401: a chave está errada, expirou ou foi revogada. 403: a API está desligada na conta. 404: modelo não disponível (copie a configuração de novo). 429: o limite da chave, os créditos ou o limite de velocidade de solicitações foi atingido." },
-        { q: "Solicitações que falham também usam créditos?", a: "Se falharem antes de gerar qualquer saída, não usam." },
+        { q: "As solicitações falham com 401, 403, 404 ou 429.", a: "401: a chave está errada, expirou ou foi revogada. 403: a API está desligada nesta conta ou o uso da conta está restrito. 404: modelo não disponível (copie a configuração de novo). 429: o limite da chave, os créditos ou o limite de velocidade de solicitações foi atingido." },
+        { q: "Solicitações que falham também usam créditos?", a: "Se falharem antes de gerar qualquer saída, não usam. Se você interromper ou parar durante a resposta, a parte já gerada pode ser descontada." },
         { q: "A ferramenta faz várias solicitações.", a: "As etapas depois da execução de uma ferramenta e a compactação da conversa também contam como uma solicitação cada." },
       ],
     },
     // ---------------------------------------------------------- notifications
     "email-notifications": {
       title: "Configurar notificações por e-mail",
-      summary: "Escolha os tipos de e-mail que quer receber. Os e-mails de marketing só começam depois de você confirmar o país de residência e tocar no link do e-mail de confirmação.",
+      summary: "Escolha os tipos de e-mail que quer receber. Os e-mails de marketing só começam depois de você confirmar o país de residência e tocar em “Confirmar inscrição” no e-mail de confirmação.",
       steps: [
         { title: "Abrir as notificações por e-mail", body: "Em “Configurações”, na aba “Conta”, toque em “Notificações por e-mail” → “Abrir notificações por e-mail”." },
         { title: "Ligar e desligar itens", body: "“Segurança e conta” e “Cobrança” ficam sempre ligados. “Status do serviço” pode ser desligado, e “Novidades do produto”, “Boletim” e “Ofertas” começam desligados." },
-        { title: "Receber e-mails de marketing", body: "Para ligar um item de marketing, escolha primeiro o “País de residência” e toque em “Confirmar país”." },
-        { title: "E-mail de confirmação", body: "O envio só começa depois que você tocar no link do e-mail de confirmação. Se precisar, toque em “Reenviar e-mail de confirmação”." },
-        { title: "Desligar tudo de uma vez", body: "Toque em “Desligar todos os e-mails de marketing”." },
+        { title: "Receber e-mails de marketing", body: "Para ligar um item de marketing, escolha primeiro o “País de residência” (você também pode salvá-lo antes com “Confirmar país”)." },
+        { title: "E-mail de confirmação", body: "O envio só começa depois que você abrir o link do e-mail de confirmação e tocar em “Confirmar inscrição”. Se precisar, toque em “Reenviar e-mail de confirmação”." },
+        { title: "Desligar tudo de uma vez", body: "Quando um item de marketing está ligado, aparece “Desligar todos os e-mails de marketing”, e ao tocar nesse botão todos são desligados de uma vez." },
       ],
       faq: [
         { q: "Não dá para desligar os e-mails de segurança?", a: "São avisos obrigatórios de proteção da conta, então não dá para desligar. Os e-mails de cobrança também não." },
-        { q: "Liguei a chave, mas ela continua desligada.", a: "O e-mail de confirmação foi enviado. Ao tocar no link dele, a chave é ligada." },
+        { q: "Liguei a chave, mas ela continua desligada.", a: "O e-mail de confirmação foi enviado. Ao abrir o link dele e tocar em “Confirmar inscrição”, a chave é ligada." },
+        { q: "A chave de marketing não deixa eu tocar.", a: "Significa que seu país de residência ainda não recebe e-mails de marketing. Os e-mails de segurança, cobrança e status do serviço continuam chegando." },
         { q: "Dá para parar de receber sem entrar?", a: "Dá pelo link de cancelamento no rodapé do e-mail. Para ligar de novo, é preciso entrar." },
       ],
     },
@@ -672,7 +786,7 @@ export const pt: HelpLocaleCopy = {
       steps: [
         { title: "Abrir o menu", body: "Toque no botão de menu no canto superior esquerdo para abrir a gaveta. Nela ficam o novo chat, a busca e a lista de conversas e, embaixo, o uso, o idioma, o menu da conta e o feedback." },
         { title: "Enviar", body: "No teclado do celular, o Enter quebra a linha. Para enviar, toque no botão de enviar." },
-        { title: "Adicionar à tela inicial", body: "No menu da conta, toque em “Instalar Tomverse”. No iPhone, no Safari, toque em Compartilhar e escolha “Adicionar à Tela de Início”." },
+        { title: "Adicionar à tela inicial", body: "Se “Instalar Tomverse” aparecer no menu da conta, toque nele. No iPhone, siga a orientação desse menu: no Safari, toque em Compartilhar e escolha “Adicionar à Tela de Início”. Se o menu não aparecer, o app já foi instalado ou o navegador não oferece suporte." },
       ],
       faq: [
         { q: "Dá para enviar arquivos pelo celular?", a: "Sim. Sem login você pode anexar menos arquivos e menores; com login também pode usar o Google Drive. Os limites estão no guia de anexos." },
@@ -687,13 +801,14 @@ export const pt: HelpLocaleCopy = {
         { title: "Abrir as configurações", body: "Toque no botão da conta, na parte de baixo da barra lateral, e em “Configurações” no menu da conta." },
         { title: "Achar o cartão de métodos de login", body: "Na aba “Conta”, abra o cartão “Métodos de login”." },
         { title: "Vincular", body: "Toque em “Adicionar” na linha do método que quer vincular. O e-mail usa verificação por código, e o Google e a Microsoft levam ao login desses serviços." },
-        { title: "Remover", body: "Toque em “Remover” na linha do método que quer tirar e, quando o botão mudar, toque de novo em “Clique novamente para remover”." },
+        { title: "Remover", body: "Toque em “Remover” na linha do método que quer tirar e, quando o botão mudar, toque de novo em “Clique novamente para remover”. Se aparecer o aviso para entrar de novo, entre e remova outra vez." },
         { title: "Entrar de novo", body: "Ao remover, você é desconectado de todos os dispositivos, então entre de novo com um dos métodos que sobraram." },
       ],
       faq: [
         { q: "Posso excluir o último método de login?", a: "Não. A conta precisa ter pelo menos um método de login." },
-        { q: "Aparece “Esse e-mail já está em uso por outro método de login”.", a: "Entre com o método usado no primeiro cadastro (Google, Microsoft ou e-mail) e depois adicione o novo método nas configurações." },
+        { q: "Aparece “Esse e-mail já está em uso por outro método de login”.", a: "Entre com o método usado no primeiro cadastro (Google, Microsoft, Apple ou e-mail) e depois adicione o novo método nas configurações." },
         { q: "Aparece que a conta que quero vincular já está vinculada a outra conta do Tomverse.", a: "Uma conta externa só pode ser vinculada a uma conta do Tomverse." },
+        { q: "Eu me cadastrei com a Apple.", a: "O login com a Apple não aparece neste cartão, então não dá para adicioná-lo nem removê-lo aqui. Se você se cadastrou com a Apple, adicione também o e-mail ou o Google ou a Microsoft." },
       ],
     },
     "export-account-data": {
@@ -713,17 +828,16 @@ export const pt: HelpLocaleCopy = {
     },
     "delete-account": {
       title: "Excluir a conta",
-      summary: "Ao pedir a exclusão, você é desconectado na hora e, depois de 7 dias de carência, os dados, incluindo conversas e arquivos, são apagados de forma permanente.",
+      summary: "Ao pedir a exclusão, você é desconectado na hora e, depois de 7 dias de carência, os dados, incluindo conversas e arquivos, são apagados de forma permanente. Os registros mínimos necessários para cobrança e obrigações legais e os registros de cancelamento de inscrição podem permanecer.",
       steps: [
         { title: "Antes, baixar (recomendado)", body: "Se quiser guardar algum dado, baixe-o antes seguindo o guia “Baixar os dados da sua conta”." },
         { title: "Abrir a zona de risco", body: "Em “Configurações”, na parte de baixo da aba “Conta”, em “Zona de risco”, toque em “Excluir conta”." },
         { title: "Digitar a confirmação", body: "Marque a caixa de concordância e digite exatamente DELETE MY ACCOUNT." },
         { title: "Enviar o pedido", body: "Toque em “Excluir conta” e, depois, mais uma vez em “Solicitar exclusão da conta”. Se aparecer o aviso para entrar de novo, entre e repita." },
-        { title: "Encerrar assinaturas das lojas", body: "Se você pagou pela App Store ou pelo Google Play, excluir a conta não cancela a assinatura. Cancele à parte em cada loja." },
       ],
       faq: [
         { q: "Dá para cancelar a exclusão?", a: "Não pela tela. Escreva em até 7 dias para support@tomverse.app. Mesmo que a conta seja restaurada, o plano vale só até a data de vencimento original e a renovação automática não é religada." },
-        { q: "O plano que paguei é reembolsado?", a: "Em assinaturas pagas pela web, só a renovação automática é interrompida; não há reembolso." },
+        { q: "O plano que paguei é reembolsado?", a: "Só excluir a conta não gera reembolso. Se precisar de reembolso, envie o pedido antes de excluir." },
         { q: "Qual a diferença para “Excluir todos os chats”?", a: "“Excluir todos os chats” fica na aba de dados, apaga só as conversas e mantém a conta. Não dá para desfazer." },
       ],
     },
@@ -732,15 +846,15 @@ export const pt: HelpLocaleCopy = {
       title: "Como os créditos são descontados",
       summary: "Cada modelo tem um crédito base por resposta, entradas longas recebem um multiplicador, e a busca na web e as imagens são calculadas à parte.",
       steps: [
-        { title: "Ver o crédito base de cada modelo", body: "No seletor de modelos, confira o crédito base de cada modelo. Os valores podem mudar, então vale o número que aparece na tela." },
-        { title: "Estimativa antes de enviar", body: "O valor exibido antes de enviar é o crédito base estimado." },
-        { title: "Multiplicador para conversas e arquivos longos", body: "Se a conversa for longa ou o arquivo for grande, pode ser aplicado um multiplicador de 1,5x, 2x ou 3x conforme o tamanho da entrada." },
-        { title: "Busca na web e imagens", body: "Com a busca na web sempre ligada, um valor fixo é acrescentado e devolvido se não houve busca de fato. A geração de imagem tem créditos fixos por qualidade." },
-        { title: "Ordem de desconto", body: "Primeiro são usados os créditos do plano do mês e, depois, os créditos comprados, começando pelos que vencem antes." },
+        { title: "Ver a carga de créditos de cada modelo", body: "No seletor de modelos, compare a carga de créditos de cada modelo pelas barras (5 níveis) e por “cerca de N respostas”. O filtro “Uso” permite escolher as faixas de 1, 4, 8 e 12+ créditos. Os valores podem mudar, então vale o que aparece na tela." },
+        { title: "Estimativa ao escolher o modelo", body: "Quando você escolhe os modelos manualmente, a soma da “estimativa base” dos modelos escolhidos aparece abaixo do seletor. Com a Adaptação inteligente, são descontados os créditos do modelo que respondeu." },
+        { title: "Multiplicador para conversas e arquivos longos", body: "Se a entrada somada da pergunta atual, da conversa anterior e do conteúdo dos arquivos passar de 16 mil tokens, o multiplicador é de 1,5x; com 50 mil, 2x; com 100 mil, 3x. Anexar um arquivo em si não tem cobrança à parte." },
+        { title: "Busca na web e imagens", body: "Com a busca na web ligada, cada modelo que realizou a busca recebe 8 créditos a mais (sem multiplicador de tamanho da entrada, exceto nos modelos Perplexity, que não têm acréscimo). Se não houve busca, o valor é devolvido. A geração de imagem tem créditos fixos por modelo, qualidade e tamanho, mostrados no botão de gerar da tela de imagens (quando o Chat responde com uma imagem, o desconto é feito sem confirmação)." },
+        { title: "Ordem de desconto", body: "Primeiro são usados os créditos do plano do mês e, depois, os créditos comprados, começando pelos que vencem antes. Nos dias em que você atinge o limite diário, ainda pode continuar com créditos comprados." },
       ],
       faq: [
-        { q: "Descontou mais do que o valor mostrado.", a: "Conversas e arquivos longos podem receber o multiplicador de tamanho da entrada." },
-        { q: "Se a resposta falhar, os créditos são descontados?", a: "Se falhar antes de gerar uma resposta utilizável, ou se vier vazia, normalmente os créditos são devolvidos automaticamente. Se você interromper durante a resposta, a parte já gerada pode ser descontada." },
+        { q: "Descontou mais do que eu esperava.", a: "Podem somar-se o multiplicador de conversas e arquivos longos (1,5x, 2x, 3x) e a busca na web (+8 créditos por modelo)." },
+        { q: "Se a resposta falhar, os créditos são descontados?", a: "Se falhar ou vier vazia em um chat comum, os créditos não são descontados. Uma resposta que você interrompeu é descontada só pela parte recebida." },
         { q: "Aparece “Uma verificação de segurança interna pausou este pedido”.", a: "Nesse caso, nenhum crédito é descontado. Tente de novo em instantes ou escolha um modelo mais barato." },
       ],
     },
@@ -780,13 +894,13 @@ export const pt: HelpLocaleCopy = {
       summary: "O cancelamento vale quando o período de cobrança atual termina, e até lá você continua usando o plano de hoje.",
       steps: [
         { title: "Abrir a aba Plano", body: "No menu da conta, toque em “Utilização e plano” para abrir a aba “Plano”." },
-        { title: "Agendar o cancelamento", body: "No cartão “Cancelar plano”, toque em “Cancelar ao fim do período”." },
+        { title: "Agendar o cancelamento", body: "No cartão “Cancelar plano”, toque em “Cancelar ao fim do período”. Ao tocar, o cancelamento é agendado na hora, sem janela de confirmação." },
         { title: "Conferir o resultado", body: "Confirme que o botão mudou para “Cancelamento agendado” e que aparece o aviso de que a próxima cobrança não será feita." },
       ],
       faq: [
         { q: "Ao cancelar, viro Free na hora?", a: "Não. O plano atual continua até a data de vencimento exibida e só depois passa a Free." },
         { q: "Os créditos extras que comprei desaparecem?", a: "Não. Eles ficam até o vencimento, mas só podem ser usados nos modelos disponíveis no plano que passar a valer." },
-        { q: "Paguei pela loja de aplicativos.", a: "Assinaturas da App Store e do Google Play são canceladas em cada loja." },
+        { q: "Dá para desfazer o cancelamento agendado?", a: "Não pela tela. Para desfazer o agendamento, fale com o suporte." },
       ],
     },
     "request-refund": {
@@ -795,11 +909,12 @@ export const pt: HelpLocaleCopy = {
       steps: [
         { title: "Escrever o motivo", body: "Escreva o motivo no cartão “Solicitação de reembolso”, na aba “Plano”." },
         { title: "Enviar o pedido", body: "Ao tocar em “Solicitar reembolso”, aparecem “Solicitação de reembolso recebida” e a data de recebimento." },
-        { title: "Se pedir por e-mail", body: "Se o cartão não aparecer, envie para support@tomverse.app o e-mail da conta, o nome do plano ou do pacote de créditos, a data do pagamento, o número do recibo e o motivo." },
+        { title: "Se pedir por e-mail", body: "Se o cartão não aparecer, envie para support@tomverse.app o e-mail da conta, o nome do plano ou do pacote de créditos, a data do pagamento, o número do recibo e o motivo. Se você comprou um pacote de créditos no plano Free, não há o cartão; peça por e-mail." },
       ],
       faq: [
-        { q: "Em que casos há reembolso?", a: "Em casos que pedem correção depois da análise, como cobrança duplicada, não autorizada ou com valor errado, plano ou créditos não entregues e falha grave do serviço. Veja os critérios na página da política de reembolso." },
-        { q: "Pedir reembolso também cancela a assinatura?", a: "Só o pedido não cancela. Se for aprovado, a assinatura paga é cancelada e a conta passa a Free." },
+        { q: "Em que casos há reembolso?", a: "Em casos que pedem correção depois da análise, como cobrança duplicada, não autorizada ou com valor errado, plano ou créditos não entregues e falha grave do serviço, ou quando a lei exige o reembolso. Dependendo das circunstâncias, um reembolso parcial pode ser aprovado. Veja os critérios na página da política de reembolso." },
+        { q: "Pedir reembolso também cancela a assinatura?", a: "Só o pedido não cancela. Se o reembolso da assinatura for aprovado, a assinatura paga é cancelada e a conta passa a Free. O reembolso de um pacote de créditos recupera apenas os créditos desse pacote, e o que já foi usado pode ser compensado nos créditos concedidos depois." },
+        { q: "Posso enviar o pedido várias vezes?", a: "Só um pedido é analisado por vez. Quando for recebido, você recebe um e-mail de confirmação." },
         { q: "Quando o dinheiro volta?", a: "Depende do prazo de processamento do seu meio de pagamento." },
       ],
     },
@@ -809,7 +924,7 @@ export const pt: HelpLocaleCopy = {
       summary: "Tente de novo uma vez, escolha outro modelo ou envie sem anexos. Se continuar, veja o status do serviço e reporte o erro.",
       steps: [
         { title: "Ler o aviso", body: "Veja o aviso no cartão da resposta que falhou e “Ver informações de diagnóstico”. O ID de rastreamento aparece junto." },
-        { title: "Tentar de novo", body: "Toque em “Tentar novamente” ou escolha “Escolher outro modelo” ou “Reduzir o número de modelos”." },
+        { title: "Tentar de novo", body: "Toque em uma destas opções que aparecem no cartão: “Tentar novamente”, “Escolher outro modelo” ou “Reduzir o número de modelos” (depende do tipo de erro)." },
         { title: "Se o problema for o anexo", body: "Se o problema for o anexo, toque em “Tentar novamente sem arquivos”." },
         { title: "Se for o limite de tamanho", body: "Se aparecer “A resposta parou no limite de comprimento de saída.”, peça de novo para ele continuar de onde parou." },
         { title: "Se ainda não resolver", body: "Veja a página de status do serviço e toque em “Reportar erro”, no mesmo cartão." },
@@ -817,7 +932,7 @@ export const pt: HelpLocaleCopy = {
       faq: [
         { q: "Aparece “Já está a ser gerada uma resposta”.", a: "Espere a resposta em andamento terminar ou parar e tente de novo." },
         { q: "Aparece “Os créditos do plano deste mês foram esgotados”.", a: "Compre créditos adicionais ou faça upgrade do plano para continuar." },
-        { q: "Respostas que falham também descontam créditos?", a: "Os créditos reservados para respostas vazias ou que falharam normalmente são devolvidos." },
+        { q: "Respostas que falham também descontam créditos?", a: "Se falhar ou vier vazia em um chat comum, os créditos não são descontados. Uma resposta que você interrompeu é descontada só pela parte recebida." },
       ],
     },
     "file-upload-failed": {
@@ -840,9 +955,9 @@ export const pt: HelpLocaleCopy = {
       summary: "Com “Reportar erro” em uma resposta que falhou, os detalhes do erro e o ID de rastreamento seguem juntos. Opiniões em geral vão por “Feedback”.",
       steps: [
         { title: "Abrir a janela de relato", body: "No cartão da resposta que falhou, toque em “Reportar erro”. Para uma opinião em geral, toque em “Feedback”, na barra lateral." },
-        { title: "Escolher o tipo", body: "Escolha “Relatar problema”, “Solicitar recurso”, “Cobrança” ou “Outro” e escreva o conteúdo. O relato de erro pode ser enviado sem descrição." },
+        { title: "Escolher o tipo", body: "Para feedback geral, escolha “Relatar problema”, “Solicitar recurso”, “Cobrança” ou “Outro” e escreva pelo menos 5 caracteres. O relato de erro não pede o tipo e pode ser enviado sem descrição." },
         { title: "Conferir o que vai junto", body: "Em “Ver os detalhes do erro que serão anexados”, confira as informações de diagnóstico. Valores que parecem credenciais são ocultados automaticamente." },
-        { title: "Enviar", body: "Para receber o andamento, marque “Receber o estado por e-mail” e toque em “Enviar”. O número de recebimento é exibido." },
+        { title: "Enviar", body: "Para receber o recebimento e o andamento por e-mail, marque “Receber o estado por e-mail” e toque em “Enviar”. Se você não estiver logado, é preciso marcar esta opção e deixar um endereço de e-mail para receber resposta. O número de recebimento é exibido." },
       ],
       faq: [
         { q: "Preciso informar o ID de rastreamento?", a: "É opcional. O relato é recebido mesmo sem ele." },
@@ -853,7 +968,7 @@ export const pt: HelpLocaleCopy = {
       title: "Quando não consigo entrar",
       summary: "Tente de novo com o e-mail e o método de login do primeiro cadastro, no mesmo navegador.",
       steps: [
-        { title: "Conferir como você se cadastrou", body: "Confirme que é o e-mail e o método de login usados no cadastro (código por e-mail, Google, Microsoft etc.)." },
+        { title: "Conferir como você se cadastrou", body: "Confirme que é o e-mail e o método de login usados no cadastro (código por e-mail, Google, Microsoft, Apple)." },
         { title: "Pedir o código de novo", body: "Se o código do e-mail expirou, toque em “Enviar um novo código”. Você também pode tocar no link de login que veio no e-mail." },
         { title: "Se houver solicitações demais", body: "Se aparecer “Muitas solicitações”, espere o tempo indicado. Se passou do limite diário, tente de novo no dia seguinte." },
         { title: "No mesmo navegador", body: "Continue no mesmo navegador em que você iniciou o login. Se a verificação de segurança falhar, recarregue a página e tente de novo." },
@@ -866,15 +981,16 @@ export const pt: HelpLocaleCopy = {
     },
     "service-status": {
       title: "Ver o status do serviço",
-      summary: "Na página de status, você vê o estado de cada provedor de IA e as evidências que levaram a essa conclusão.",
+      summary: "Na página de status, você vê o estado de cada provedor de modelos de chat e as evidências que levaram a essa conclusão.",
       steps: [
         { title: "Abrir a página de status", body: "Abra tomverse.app/status. Não precisa estar logado." },
         { title: "Ver o resumo", body: "Confira o resumo do topo e o horário “Dados de” (UTC)." },
-        { title: "Ver o estado por provedor", body: "Em “Status dos provedores”, veja se cada um está Operacional, com Desempenho reduzido, com Incidente ou Desconhecido, e quais modelos são afetados." },
+        { title: "Ver o estado por provedor", body: "Em “Status dos provedores”, veja se cada um está Operacional, com Desempenho reduzido, com Incidente ou Desconhecido. Quando as falhas se concentram em um modelo específico, o nome dele também aparece." },
       ],
       faq: [
         { q: "“Desconhecido” significa que há uma falha?", a: "Não. Significa que não há evidência para avaliar o estado, e ele também não é presumido como normal." },
-        { q: "Se aparecer um aviso, meus créditos acabaram?", a: "Esse aviso, por si só, não significa que solicitações falharam nem que os créditos acabaram." },
+        { q: "Se aparecer “Desempenho reduzido”, meus créditos acabaram?", a: "Esse aviso, por si só, não significa que solicitações falharam nem que os créditos acabaram." },
+        { q: "Aparece também o estado da geração de imagens ou da busca na web?", a: "Não. Esta página mostra apenas o estado dos provedores de modelos de chat." },
       ],
     },
     "contact-support": {
@@ -883,7 +999,7 @@ export const pt: HelpLocaleCopy = {
       steps: [
         { title: "Abrir a página de suporte", body: "Abra a página de suporte." },
         { title: "Escolher o tipo", body: "Escolha entre “Suporte geral”, “Problema ou bug”, “Cobrança”, “Pedido de recurso” e “Outro”." },
-        { title: "Escrever a mensagem", body: "Preencha o endereço de e-mail e a mensagem. Se a tela mostrou um ID de rastreamento, inclua-o." },
+        { title: "Escrever a mensagem", body: "Preencha o endereço de e-mail e a mensagem. Se a tela mostrou um ID de rastreamento, preencha-o no campo “Trace ID ou referência”." },
         { title: "Enviar", body: "Ao tocar em “Enviar solicitação”, aparece o aviso de que foi recebida. O formulário não aceita capturas de tela, então envie-as à parte para o e-mail de suporte." },
       ],
       faq: [

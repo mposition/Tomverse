@@ -14,7 +14,7 @@ import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { localizedPath } from "@/lib/seo";
 import { REVIEW_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
 
-type ReviewDemoCopy = {
+export type ReviewDemoCopy = {
   eyebrow: string;
   title: string;
   description: string;
@@ -30,13 +30,13 @@ type ReviewDemoCopy = {
   tryReview: string;
 };
 
-const copy: Record<Language, ReviewDemoCopy> = {
+export const aiReviewDemoCopy: Record<Language, ReviewDemoCopy> = {
   en: {
     eyebrow: "AI Review",
     title: "Compare the answers, then review what they missed.",
     description:
       "After two or three models respond, AI Review organizes their common ground, important differences, contradictions, omissions, and claims that still need verification.",
-    example: "Fictional products · edited example answers",
+    example: "Example",
     promptLabel: "One question",
     prompt: "I’m comparing two fictional laptops. A weighs 1.2 kg with 8 GB RAM and costs A$700; B weighs 1.7 kg with 16 GB RAM and costs A$900. My budget is A$900. I’ll carry it daily and mainly use documents and video. What criteria and missing details should I consider?",
     before: "Before · three separate answers",
@@ -58,7 +58,7 @@ const copy: Record<Language, ReviewDemoCopy> = {
     title: "답변을 비교한 뒤, 놓친 부분까지 다시 검토하세요.",
     description:
       "2~3개 모델이 답변하면 AI Review가 합의점, 중요한 차이, 모순, 누락과 추가 검증이 필요한 주장을 구조화합니다.",
-    example: "가상 제품 · 편집용 답변 예시",
+    example: "예시",
     promptLabel: "한 번의 질문",
     prompt: "가상 노트북 두 개를 비교하고 있어. A는 1.2kg, RAM 8GB, 70만원이고 B는 1.7kg, RAM 16GB, 90만원이야. 예산은 90만원이고 매일 들고 다니며 문서와 영상 시청에 주로 쓸 거야. 어떤 기준으로 고르고, 무엇을 더 확인해야 할까?",
     before: "Before · 서로 다른 3개 답변",
@@ -79,7 +79,7 @@ const copy: Record<Language, ReviewDemoCopy> = {
     eyebrow: "AI Review",
     title: "比较回答后，再检查它们遗漏了什么。",
     description: "当两到三个模型回答后，AI Review 会整理共识、重要差异、矛盾、遗漏和仍需核实的说法。",
-    example: "虚构产品 · 编辑示例回答",
+    example: "示例",
     promptLabel: "一个问题",
     prompt: "我在比较两款虚构笔记本。A重1.2千克、内存8GB、价格700澳元；B重1.7千克、内存16GB、价格900澳元。预算900澳元，每天携带，主要处理文档和观看视频。该看哪些标准，还需要确认什么？",
     before: "Before · 三个独立回答",
@@ -99,7 +99,7 @@ const copy: Record<Language, ReviewDemoCopy> = {
     eyebrow: "AI Review",
     title: "比較回答後，再檢查它們遺漏了什麼。",
     description: "當兩到三個模型回答後，AI Review 會整理共識、重要差異、矛盾、遺漏，以及仍需查證的說法。",
-    example: "虛構產品 · 編輯示例回答",
+    example: "範例",
     promptLabel: "一個問題",
     prompt: "我正在比較兩款虛構的筆電。A 重 1.2 公斤、記憶體 8GB、售價 700 澳幣；B 重 1.7 公斤、記憶體 16GB、售價 900 澳幣。預算 900 澳幣，每天攜帶，主要處理文件和觀看影片。該看哪些標準，還需要確認什麼？",
     before: "Before · 三個獨立回答",
@@ -119,7 +119,7 @@ const copy: Record<Language, ReviewDemoCopy> = {
     eyebrow: "AI Review",
     title: "Comparez les réponses, puis repérez ce qu’elles ont oublié.",
     description: "Après deux ou trois réponses, AI Review structure les accords, différences, contradictions, omissions et points à vérifier.",
-    example: "Produits fictifs · réponses éditées",
+    example: "Exemple",
     promptLabel: "Une question",
     prompt: "Je compare deux ordinateurs fictifs : A, 1,2 kg, 8 Go de mémoire, prix 700 € ; B, 1,7 kg, 16 Go, prix 900 €. Mon budget est de 900 €. Je le transporte chaque jour pour des documents et des vidéos. Quels critères et informations manquantes examiner ?",
     before: "Avant · trois réponses séparées",
@@ -139,7 +139,7 @@ const copy: Record<Language, ReviewDemoCopy> = {
     eyebrow: "AI Review",
     title: "Antworten vergleichen und anschließend Lücken erkennen.",
     description: "Nach zwei oder drei Antworten ordnet AI Review Gemeinsamkeiten, Unterschiede, Widersprüche, Lücken und noch zu prüfende Aussagen.",
-    example: "Fiktive Produkte · redaktionelle Antworten",
+    example: "Beispiel",
     promptLabel: "Eine Frage",
     prompt: "Ich vergleiche zwei fiktive Laptops: A mit 1,2 kg, 8 GB RAM und Preis 700 €; B mit 1,7 kg, 16 GB RAM und Preis 900 €. Mein Budget ist 900 €. Ich trage ihn täglich und nutze Dokumente und Videos. Welche Kriterien und fehlenden Angaben sind wichtig?",
     before: "Vorher · drei getrennte Antworten",
@@ -159,7 +159,7 @@ const copy: Record<Language, ReviewDemoCopy> = {
     eyebrow: "AI Review",
     title: "Compara las respuestas y revisa lo que dejaron fuera.",
     description: "Tras dos o tres respuestas, AI Review organiza acuerdos, diferencias, contradicciones, omisiones y afirmaciones pendientes de verificar.",
-    example: "Productos ficticios · respuestas editadas",
+    example: "Ejemplo",
     promptLabel: "Una pregunta",
     prompt: "Comparo dos portátiles ficticios: A pesa 1,2 kg, tiene 8 GB y cuesta 700 €; B pesa 1,7 kg, tiene 16 GB y cuesta 900 €. Mi presupuesto es 900 € y lo llevaré a diario para documentos y vídeos. ¿Qué criterios e información faltante debo revisar?",
     before: "Antes · tres respuestas separadas",
@@ -179,7 +179,7 @@ const copy: Record<Language, ReviewDemoCopy> = {
     eyebrow: "AI Review",
     title: "Compare as respostas e revise o que ficou de fora.",
     description: "Depois de duas ou três respostas, o AI Review organiza consensos, diferenças, contradições, omissões e alegações que ainda precisam de verificação.",
-    example: "Produtos fictícios · respostas editadas",
+    example: "Exemplo",
     promptLabel: "Uma pergunta",
     prompt: "Comparo dois notebooks fictícios: A pesa 1,2 kg, tem 8 GB e custa R$700; B pesa 1,7 kg, tem 16 GB e custa R$900. Meu orçamento é R$900 e vou levá-lo diariamente para documentos e vídeos. Quais critérios e informações faltam?",
     before: "Antes · três respostas separadas",
@@ -205,7 +205,7 @@ export function AiReviewDemo({
   showLearnMore?: boolean;
 }) {
   const { lang } = useLanguage();
-  const text = copy[lang];
+  const text = aiReviewDemoCopy[lang];
   const reviewPath = lang === "en" ? "/ai-answer-review" : localizedPath(lang, "/ai-answer-review");
   const chatPath = `${REVIEW_WORKSPACE_PATH}?lang=${encodeURIComponent(lang)}`;
 

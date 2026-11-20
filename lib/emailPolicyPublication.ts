@@ -136,9 +136,15 @@ export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
   // (owner decision in chat; docs/policy/external-conversation-import-and-memory.md
   // §16). Observation only; the effective date did not move, nothing is added
   // to APPROVED_AMENDED_DIGESTS and no email is authorized.
+  // 2026-11-20: V2 page design (components/marketing/v2/policy): only
+  // PrivacyPolicy.tsx's layout moved; no wording changed (the privacyPolicy
+  // locale copy, ProviderDestinationTable.tsx, providerDataDestinations.ts and
+  // privacyNoticeStatus.ts are byte-for-byte the same). Observation only, not
+  // an approval; the effective date did not move, nothing is added to
+  // APPROVED_AMENDED_DIGESTS and no email is authorized.
   "/privacy": {
     date: "2026-11-16",
-    contentSha256: "b729a6341137af9c09bafababdba586eb323ae61bcfec99a6937ddf259196be7",
+    contentSha256: "0f3fb8cdf9a10347d278d40328fedac94a1299df2c8cf4a2e258561ac34910c9",
   },
   // 2026-11-19: terms gain the API-key clause, the app-store billing and
   // non-expiring store credit sentences, and the missing zh clauses.

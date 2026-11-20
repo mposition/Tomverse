@@ -21,26 +21,36 @@ import { resolveImageProviderBudget } from "@/lib/imageProviderBudget";
 import {
   SNAPSHOT_RENEWAL_WINDOW_MS,
   catalogContentHash,
-  codingProfileSchema,
+  codingActivationBlockers,
+  codingCatalogRowOf,
+  codingCatalogRowSchema,
+  codingProviderTermsSchema,
   decideSnapshotRenewal,
+  normalizedSnapshotContentHash,
   judgeCodingModel,
+  judgeCodingResolution,
   judgeImageModel,
+  resolveCodingEntry,
   resolveImageCatalog,
   snapshotCoverageUntil,
+  type ChatModelFacts,
   type CodingAdmission,
   type CodingCatalogRow,
-  type CodingProfile,
+  type CodingJudgeInput,
+  type CodingProviderTerms,
+  type CodingResolvedRow,
   type ImageAdmission,
   type ResolvedImageCatalog,
   type SnapshotRenewalDecision,
 } from "@/lib/modelCatalogCore";
 import { suggestCreditFloor } from "@/lib/modelAdoptionDraft";
 import { writeModelCatalogRenewalSystemAudit } from "@/lib/modelCatalogRenewalSystemAudit";
+import { resolveModelPricing } from "@/lib/modelPricing";
 import { isAiProvider } from "@/lib/modelRegistryShared";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { prisma } from "@/lib/prisma";
 import { providerDestinationIsEstablished } from "@/lib/providerDataDestinations";
-import type { AiProvider } from "@/lib/models";
+import { getModelUsageProfile, type AiModel, type AiProvider } from "@/lib/models";
 
 const IMAGE_CATALOG_TTL_MS = 15_000;
 
@@ -62,7 +72,7 @@ export const judgeImage = (model: ImageModelProfile): ImageAdmission =>
  * context window, so the worst input is the model's context, not chat's 128k;
  * Anthropic's cache write premium is the input multiplier there.
  */
-export const codingCreditFloor = (profile: CodingProfile): number | null => {
+export const codingCreditFloor = (profile: Pick<CodingJudgeInput, "pricing" | "capabilities" | "provider">): number | null => {
   const floor = suggestCreditFloor({
     inputUsdPerMillionTokens: profile.pricing.inputUsdPerMTok,
     outputUsdPerMillionTokens: profile.pricing.outputUsdPerMTok,
@@ -73,7 +83,7 @@ export const codingCreditFloor = (profile: CodingProfile): number | null => {
   return "credits" in floor ? floor.credits : null;
 };
 
-export const judgeCoding = (row: CodingCatalogRow): CodingAdmission =>
+export const judgeCoding = (row: CodingJudgeInput): CodingAdmission =>
   judgeCodingModel(row, {
     knownProvider: isAiProvider,
     providerDestinationEstablished: (provider) =>
@@ -170,51 +180,173 @@ export const invalidateImageModelCatalog = () => {
 
 // --- coding ------------------------------------------------------------------
 
+/** Cost sources that are the conservative class fallback, i.e. a price nobody verified. */
+const UNVERIFIED_COST_SOURCES = new Set(["conservative_fallback", "conservative_fallback_env_override"]);
+
+/**
+ * One chat registry model as the coding catalogue reads it. The price is the
+ * one chat resolves at the long-context tier for the whole window -- what a
+ * coding turn that fills the window is priced at -- so the coding floor and the
+ * managed path's own pricing check see the same worst case.
+ */
+export const chatModelFacts = (model: AiModel): ChatModelFacts => {
+  const context = model.contextWindowTokens ?? null;
+  const pricing = resolveModelPricing(model, { estimatedPromptTokens: context ?? 0 });
+  return {
+    id: model.id,
+    name: model.name,
+    provider: model.provider,
+    apiModelId: model.apiModel,
+    minimumPlan: model.minimumPlan === "Pro" ? "Pro" : "Free",
+    usageClass: model.usageClass,
+    creditWeight: getModelUsageProfile(model).credits,
+    enabled: model.enabled,
+    status: model.status,
+    publiclyListed: model.publiclyListed !== false,
+    catalogDeleted: model.catalogDeleted === true,
+    contextWindowTokens: context,
+    maxOutputTokens: pricing.maxOutputTokens,
+    imageInput: model.inputCapabilities?.image === true,
+    price: {
+      inputUsdPerMTok: pricing.inputUsdPerMillionTokens,
+      outputUsdPerMTok: pricing.outputUsdPerMillionTokens,
+      pricingVersion: pricing.pricingVersion,
+      effectiveDate: pricing.effectiveDate,
+      verified: !UNVERIFIED_COST_SOURCES.has(pricing.costSource),
+      reasoningBilledSeparately: pricing.reasoningTokenBilling === "billed_separately",
+    },
+  };
+};
+
+/** Every chat registry model, deleted ones included (a link to one is refused, not lost). */
+export const loadChatModelFacts = async (): Promise<ChatModelFacts[]> =>
+  (await getRuntimeModels({ includeCatalogDeleted: true })).map(chatModelFacts);
+
+export type CodingProviderTermsRecord = {
+  provider: string;
+  /** Null when nothing was applied yet, or the stored record does not parse. */
+  terms: CodingProviderTerms | null;
+  invalid: boolean;
+  draft: unknown;
+  draftCreatedAt: Date | null;
+  updatedByEmail: string | null;
+  updatedAt: Date;
+};
+
+export const loadCodingProviderTerms = async (
+  client: Pick<Prisma.TransactionClient, "codingProviderTerms"> = prisma
+): Promise<CodingProviderTermsRecord[]> =>
+  (await client.codingProviderTerms.findMany({ orderBy: { provider: "asc" } })).map((row) => {
+    const parsed = row.terms === null ? null : codingProviderTermsSchema.safeParse(row.terms);
+    return {
+      provider: row.provider,
+      terms: parsed?.success ? parsed.data : null,
+      invalid: parsed !== null && !parsed.success,
+      draft: row.draft,
+      draftCreatedAt: row.draftCreatedAt ?? null,
+      updatedByEmail: row.updatedByEmail ?? null,
+      updatedAt: row.updatedAt,
+    };
+  });
+
 export type CodingCatalogEntry = {
   modelId: string;
   enabled: boolean | null;
   holdReason: string | null;
-  profile: CodingCatalogRow | null;
+  source: "dedicated" | "chat" | null;
+  /** The resolved model (inherited values read in); null when the row cannot be read. */
+  profile: CodingResolvedRow | null;
   problem: string | null;
   admission: CodingAdmission | null;
+  warnings: string[];
+  /** Why it could not be turned on now, beyond the judge (provider conditions past 90 days). */
+  activationBlockers: string[];
+  termsSource: "provider" | "model" | null;
+  termsCheckedAt: string | null;
+  /** The stored row (a dedicated profile, or a chat link's own values). */
+  stored: unknown;
   draft: unknown;
   draftCreatedAt: Date | null;
 };
 
-export const loadCodingCatalog = async (
-  client: Pick<Prisma.TransactionClient, "modelCatalogEntry"> = prisma
-): Promise<CodingCatalogEntry[]> => {
-  const rows = await client.modelCatalogEntry.findMany({
-    where: { category: "coding" },
-    orderBy: [{ sortOrder: "asc" }, { modelId: "asc" }],
-  });
-  return rows.map((row) => {
-    const parsed = codingProfileSchema.safeParse(row.profile);
-    const profile = parsed.success ? { modelId: row.modelId, ...parsed.data } : null;
-    return {
-      modelId: row.modelId,
-      enabled: row.enabled,
-      holdReason: row.holdReason,
-      profile,
-      problem: row.profile === null ? "no_profile" : parsed.success ? null : "invalid_profile",
-      admission: profile ? judgeCoding(profile) : null,
-      draft: row.draft,
-      draftCreatedAt: row.draftCreatedAt ?? null,
-    };
-  });
+export type CodingCatalogContext = {
+  chat: readonly ChatModelFacts[];
+  providerTerms: readonly CodingProviderTermsRecord[];
 };
 
-/** Rows a snapshot may carry: enabled, not held, valid, admitted. */
+/** The lookups resolveCodingEntry takes, from loaded chat facts and provider records. */
+export const codingLookups = (context: CodingCatalogContext) => {
+  const chatById = new Map(context.chat.map((facts) => [facts.id, facts]));
+  const termsByProvider = new Map(context.providerTerms.flatMap((record) => (record.terms ? [[record.provider, record.terms] as const] : [])));
+  return {
+    chat: (id: string) => chatById.get(id) ?? null,
+    providerTerms: (provider: string) => termsByProvider.get(provider) ?? null,
+  };
+};
+
+export const resolveCodingRow = (
+  row: { modelId: string; enabled: boolean | null; holdReason: string | null; profile: unknown; draft: unknown; draftCreatedAt: Date | null },
+  lookups: ReturnType<typeof codingLookups>,
+  now: Date
+): CodingCatalogEntry => {
+  const resolution = resolveCodingEntry({ modelId: row.modelId, profile: row.profile, ...lookups, now });
+  return {
+    modelId: row.modelId,
+    enabled: row.enabled,
+    holdReason: row.holdReason,
+    source: resolution.source,
+    profile: resolution.row,
+    problem: resolution.problem,
+    admission: resolution.row || resolution.problem !== "no_profile" ? judgeCodingResolution(resolution, judgeCoding) : null,
+    warnings: resolution.warnings,
+    activationBlockers: codingActivationBlockers(resolution),
+    termsSource: resolution.termsSource,
+    termsCheckedAt: resolution.termsCheckedAt,
+    stored: row.profile,
+    draft: row.draft,
+    draftCreatedAt: row.draftCreatedAt ?? null,
+  };
+};
+
+/**
+ * Every coding row, resolved: chat links read the chat registry now, and all
+ * rows read their provider's conditions. `context` lets a caller that already
+ * loaded them (the admin read) avoid a second read.
+ */
+export const loadCodingCatalog = async (
+  client: Pick<Prisma.TransactionClient, "modelCatalogEntry" | "codingProviderTerms"> = prisma,
+  options: { now?: Date; context?: CodingCatalogContext } = {}
+): Promise<CodingCatalogEntry[]> => {
+  const [rows, context] = await Promise.all([
+    client.modelCatalogEntry.findMany({
+      where: { category: "coding" },
+      orderBy: [{ sortOrder: "asc" }, { modelId: "asc" }],
+    }),
+    options.context ??
+      Promise.all([loadChatModelFacts(), loadCodingProviderTerms(client)]).then(([chat, providerTerms]) => ({ chat, providerTerms })),
+  ]);
+  const lookups = codingLookups(context);
+  const now = options.now ?? new Date();
+  return rows.map((row) => resolveCodingRow(row, lookups, now));
+};
+
+/**
+ * Rows a snapshot may carry: enabled, not held, valid, admitted -- the
+ * resolved values, inherited ones included, with where each row is offered.
+ */
 export const servableCodingRows = (entries: readonly CodingCatalogEntry[]): CodingCatalogRow[] =>
-  entries
-    .filter(
-      (entry) =>
-        entry.enabled === true &&
-        !entry.holdReason &&
-        entry.profile !== null &&
-        entry.admission?.admitted === true
-    )
-    .map((entry) => entry.profile as CodingCatalogRow);
+  entries.flatMap((entry) => {
+    if (entry.enabled !== true || entry.holdReason || !entry.profile || entry.admission?.admitted !== true) return [];
+    const row = codingCatalogRowOf(entry.profile);
+    return row ? [row] : [];
+  });
+
+/** A snapshot's rows that parse; a row published before links existed reads as a dedicated Code row. */
+export const parseSnapshotRows = (models: readonly unknown[]): CodingCatalogRow[] =>
+  models.flatMap((model) => {
+    const parsed = codingCatalogRowSchema.safeParse(model);
+    return parsed.success ? [parsed.data] : [];
+  });
 
 export type PublishedSnapshot = {
   version: number;
@@ -331,7 +463,11 @@ export const renewCodingSnapshotIfUnchanged = async (
       where: { category: "coding" },
       orderBy: { version: "desc" },
     });
-    const decision = decideSnapshotRenewal(latest, contentHash, now);
+    const decision = decideSnapshotRenewal(
+      latest ? { ...latest, normalizedHash: normalizedSnapshotContentHash(latest.payload) } : null,
+      contentHash,
+      now
+    );
     if (decision !== "renew" || !latest) {
       return {
         decision,
@@ -363,27 +499,3 @@ export const renewCodingSnapshotIfUnchanged = async (
     return { decision, version: created.version, coverageUntil: created.coverageUntil };
   });
 };
-
-// --- chat (view) -------------------------------------------------------------
-
-export type ChatCatalogViewRow = {
-  modelId: string;
-  name: string;
-  provider: string;
-  enabled: boolean;
-  status: string;
-  publiclyListed: boolean;
-  minimumPlan: string;
-};
-
-/** Chat models stay in ModelRegistryEntry; this is the catalogue's read-only view of them. */
-export const loadChatCatalogView = async (): Promise<ChatCatalogViewRow[]> =>
-  (await getRuntimeModels()).map((model) => ({
-    modelId: model.id,
-    name: model.name,
-    provider: model.provider,
-    enabled: model.enabled,
-    status: model.status,
-    publiclyListed: model.publiclyListed !== false,
-    minimumPlan: model.minimumPlan,
-  }));

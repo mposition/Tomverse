@@ -147,6 +147,8 @@ const toolDefinition = z.discriminatedUnion("type", [
     }),
 ]);
 
+const REASONING_EFFORT = z.enum(["minimal", "low", "medium", "high"]);
+
 /**
  * Every field the API understands, at every level -- messages, tool calls,
  * tool definitions and tool_choice included. Anything else is refused.
@@ -183,7 +185,18 @@ const requestSchema = z
         n: z.number().int().nullable().optional(),
         store: z.boolean().nullable().optional(),
         user: z.string().max(256).optional(),
-        reasoning_effort: z.enum(["minimal", "low", "medium", "high"]).nullable().optional(),
+        reasoning_effort: REASONING_EFFORT.nullable().optional(),
+        // The Responses-API spelling, which Cursor sends on Chat Completions
+        // for a model name it recognises. `effort` is `reasoning_effort`;
+        // `summary` has no place in a Chat Completions answer, so it is left
+        // out and named in `x-tomverse-ignored-parameters`.
+        reasoning: z
+            .strictObject({
+                effort: REASONING_EFFORT.nullable().optional(),
+                summary: z.enum(["auto", "concise", "detailed"]).nullable().optional(),
+            })
+            .nullable()
+            .optional(),
     })
     .strict();
 
@@ -238,7 +251,19 @@ const normalizeCustomShapes = (body: unknown) => {
 
 export const parseChatCompletionRequest = (body: unknown): ChatCompletionRequest => {
     const parsed = requestSchema.safeParse(normalizeCustomShapes(body));
-    if (parsed.success) return parsed.data;
+    if (parsed.success) {
+        const effort = parsed.data.reasoning?.effort ?? null;
+        if (effort === null) return parsed.data;
+        if (parsed.data.reasoning_effort != null && parsed.data.reasoning_effort !== effort) {
+            throw new ProtocolError(
+                400,
+                "conflicting_parameters",
+                "reasoning_effort and reasoning.effort disagree. Send one of them.",
+                "reasoning.effort"
+            );
+        }
+        return { ...parsed.data, reasoning_effort: effort };
+    }
     const issue = parsed.error.issues[0];
     if (issue?.code === "unrecognized_keys") {
         const key = issue.keys[0] ?? "unknown";

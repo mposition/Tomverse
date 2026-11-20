@@ -111,7 +111,8 @@ for (const width of [160, 320, 390, 1024, 1440]) {
         await expect(header.getByTestId("marketing-header-app-cta")).toHaveAttribute("data-session-state", "unauthenticated");
         await footer.scrollIntoViewIfNeeded();
         await expect(footer).toBeVisible();
-        await expect(footer.locator("nav")).toHaveCount(4);
+        // Products, Developers, Help, Guides, Policies (homepage V2 footer).
+        await expect(footer.locator("nav")).toHaveCount(5);
         for (const slug of ["compare-ai-models", "ai-answer-review", "chatgpt-vs-claude", "ai-for-file-analysis"]) {
           await expect(footer.locator(`a[href='${localizedPath(language, `/${slug}`)}']`)).toHaveCount(1);
         }

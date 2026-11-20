@@ -43,7 +43,7 @@ test("a guide page steps through and keeps the step in the address", async ({ pa
   const guide = page.getByTestId("help-guide");
   await expect(guide.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 30_000 });
   const steps = guide.getByTestId("help-guide-steps").getByRole("button");
-  await expect(steps).toHaveCount(5);
+  await expect(steps).toHaveCount(4);
   await guide.getByRole("button", { name: /next/i }).click();
   await expect(page).toHaveURL(/#step-2$/);
   await expect(steps.nth(1)).toHaveAttribute("aria-current", "step");

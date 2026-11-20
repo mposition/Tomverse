@@ -1,5 +1,10 @@
 import { expect, test } from "@playwright/test";
 import { prepareGuestPage } from "./support/app-fixtures";
+import { infoPages } from "@/components/marketing/marketingInfoContent";
+
+// The card's first sentence, read from the copy so a wording update cannot leave
+// this check asserting a sentence the page no longer has.
+const dataHandling = infoPages.safety.en.sections.find(section => section.title === "Security and data handling")!;
 
 test("safety data guidance points to the privacy policy instead of itself", async ({ page, request }, info) => {
   await page.setViewportSize({ width: info.project.name.includes("mobile") ? 320 : 1440, height: 900 });
@@ -9,7 +14,7 @@ test("safety data guidance points to the privacy policy instead of itself", asyn
   const link = card.getByRole("link", { name: "Read the privacy policy" });
   await expect(link).toBeVisible({ timeout: 30_000 });
   await expect(card).not.toContainText("See the safety information");
-  await expect(card).toContainText("The AI provider that writes an answer processes the question and material needed for it");
+  await expect(card).toContainText(dataHandling.body.split(". ")[0]);
   await expect(link).toHaveAttribute("href", "/privacy");
   await link.focus();
   await expect(link).toBeFocused();

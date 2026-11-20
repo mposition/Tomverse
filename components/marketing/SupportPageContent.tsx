@@ -83,12 +83,13 @@ const copy: Record<Language, SupportCopy> = {
         "bullets": [
           "Include your account email",
           "Mention the plan involved",
-          "Add the checkout or refund time if known"
+          "Add the checkout or refund time if known",
+          "For a credit pack bought on the Free plan, request the refund with this form or by email"
         ]
       },
       {
         "title": "Model and file issues",
-        "body": "Report model availability, empty responses, unsupported files, PDF issues, and attachment errors.",
+        "body": "Report model availability, empty responses, unsupported files, PDF issues, attachment errors, image generation failures, and credit charges.",
         "bullets": [
           "Attach trace ID when shown",
           "Include model name",
@@ -148,12 +149,13 @@ const copy: Record<Language, SupportCopy> = {
         "bullets": [
           "계정 이메일을 포함해주세요",
           "관련 플랜을 알려주세요",
-          "결제 또는 환불 요청 시간을 함께 적어주세요"
+          "결제 또는 환불 요청 시간을 함께 적어주세요",
+          "Free 플랜에서 산 크레딧 팩의 환불은 이 양식이나 지원 이메일로 요청하세요"
         ]
       },
       {
         "title": "모델 및 파일 문제",
-        "body": "모델 사용 가능 여부, 빈 응답, 지원되지 않는 파일, PDF 문제, 첨부 오류를 접수할 수 있습니다.",
+        "body": "모델 사용 가능 여부, 빈 응답, 지원되지 않는 파일, PDF 문제, 첨부 오류, 이미지 생성 실패, 크레딧 차감 문의를 접수할 수 있습니다.",
         "bullets": [
           "표시된 추적 ID를 포함해주세요",
           "모델명을 알려주세요",
@@ -193,8 +195,8 @@ const copy: Record<Language, SupportCopy> = {
     "success": "지원 요청이 접수되었습니다.",
     "failed": "지원 요청을 전송하지 못했습니다.",
     "helpCta": "도움말 센터 보기",
-    "appCta": "리뷰 열기",
-    "messageExample": "예: 리뷰에서 PDF를 첨부한 뒤 답변이 나오지 않았습니다. 발생 시간, 모델명, 파일 형식·크기와 화면의 추적 ID를 함께 적어주세요. 비밀번호나 카드번호는 보내지 마세요."
+    "appCta": "답변 비교 열기",
+    "messageExample": "예: 답변 비교에서 PDF를 첨부한 뒤 답변이 나오지 않았습니다. 발생 시간, 모델명, 파일 형식·크기와 화면의 추적 ID를 함께 적어주세요. 비밀번호나 카드번호는 보내지 마세요."
   },
   "zh": {
     "eyebrow": "支持",
@@ -213,12 +215,13 @@ const copy: Record<Language, SupportCopy> = {
         "bullets": [
           "请包含账户邮箱",
           "说明相关套餐",
-          "如知道，请提供结账或退款时间"
+          "如知道，请提供结账或退款时间",
+          "在 Free 套餐购买的积分包，请通过此表单或支持邮箱申请退款"
         ]
       },
       {
         "title": "模型和文件问题",
-        "body": "报告模型可用性、空回复、不支持的文件、PDF 问题和附件错误。",
+        "body": "报告模型可用性、空回复、不支持的文件、PDF 问题、附件错误、图像生成失败和积分扣除。",
         "bullets": [
           "如有追踪 ID 请提供",
           "包含模型名称",
@@ -275,12 +278,13 @@ const copy: Record<Language, SupportCopy> = {
         "bullets": [
           "請附上帳戶的電子郵件",
           "說明相關的方案",
-          "如果知道，請提供結帳或退款的時間"
+          "如果知道，請提供結帳或退款的時間",
+          "在 Free 方案購買的點數包，請透過此表單或支援信箱申請退款"
         ]
       },
       {
         "title": "模型與檔案問題",
-        "body": "回報模型無法使用、空白回覆、不支援的檔案、PDF 問題和附件錯誤。",
+        "body": "回報模型無法使用、空白回覆、不支援的檔案、PDF 問題、附件錯誤、圖像產生失敗和點數扣除。",
         "bullets": [
           "如有追蹤 ID，請一併提供",
           "包含模型名稱",
@@ -337,12 +341,13 @@ const copy: Record<Language, SupportCopy> = {
         "bullets": [
           "Indiquez l'email du compte",
           "Mentionnez l'offre concernée",
-          "Ajoutez l'heure du paiement ou de la demande si possible"
+          "Ajoutez l'heure du paiement ou de la demande si possible",
+          "Pour un pack de crédits acheté avec l'offre Free, demandez le remboursement par ce formulaire ou par email"
         ]
       },
       {
         "title": "Modèles et fichiers",
-        "body": "Signalez disponibilité des modèles, réponses vides, fichiers non pris en charge, PDF et erreurs de pièces jointes.",
+        "body": "Signalez disponibilité des modèles, réponses vides, fichiers non pris en charge, PDF, erreurs de pièces jointes, échecs de génération d'images et débits de crédits.",
         "bullets": [
           "Ajoutez le trace ID affiché",
           "Indiquez le modèle",
@@ -399,12 +404,13 @@ const copy: Record<Language, SupportCopy> = {
         "bullets": [
           "Kontoe-Mail angeben",
           "Betroffenen Plan nennen",
-          "Zahlungs- oder Erstattungszeit hinzufügen"
+          "Zahlungs- oder Erstattungszeit hinzufügen",
+          "Für ein im Free-Plan gekauftes Credit-Paket die Erstattung über dieses Formular oder per E-Mail anfragen"
         ]
       },
       {
         "title": "Modelle und Dateien",
-        "body": "Melden Sie Modellverfügbarkeit, leere Antworten, nicht unterstützte Dateien, PDF-Probleme und Anhangfehler.",
+        "body": "Melden Sie Modellverfügbarkeit, leere Antworten, nicht unterstützte Dateien, PDF-Probleme, Anhangfehler, fehlgeschlagene Bilderzeugung und Credit-Abbuchungen.",
         "bullets": [
           "Trace ID angeben, falls sichtbar",
           "Modellnamen nennen",
@@ -461,12 +467,13 @@ const copy: Record<Language, SupportCopy> = {
         "bullets": [
           "Incluye el email de la cuenta",
           "Menciona el plan",
-          "Añade la hora de pago o reembolso si la conoces"
+          "Añade la hora de pago o reembolso si la conoces",
+          "Si compraste un paquete de créditos con el plan Free, pide el reembolso con este formulario o por email"
         ]
       },
       {
         "title": "Modelos y archivos",
-        "body": "Reporta disponibilidad de modelos, respuestas vacías, archivos no compatibles, PDFs y errores de adjuntos.",
+        "body": "Reporta disponibilidad de modelos, respuestas vacías, archivos no compatibles, PDFs, errores de adjuntos, fallos al generar imágenes y cargos de créditos.",
         "bullets": [
           "Incluye el trace ID si aparece",
           "Indica el modelo",
@@ -523,12 +530,13 @@ const copy: Record<Language, SupportCopy> = {
         "bullets": [
           "Inclua o email da conta",
           "Informe o plano envolvido",
-          "Adicione o horário do pagamento ou reembolso se souber"
+          "Adicione o horário do pagamento ou reembolso se souber",
+          "Para um pacote de créditos comprado no plano Free, peça o reembolso por este formulário ou por email"
         ]
       },
       {
         "title": "Modelos e arquivos",
-        "body": "Reporte disponibilidade de modelos, respostas vazias, arquivos não suportados, PDFs e erros de anexos.",
+        "body": "Reporte disponibilidade de modelos, respostas vazias, arquivos não suportados, PDFs, erros de anexos, falhas na geração de imagens e débitos de créditos.",
         "bullets": [
           "Inclua o trace ID quando aparecer",
           "Informe o modelo",

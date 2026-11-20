@@ -4,7 +4,7 @@ import { useId, useState, type ReactNode } from "react";
 import { ChevronUp, Lock } from "lucide-react";
 import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
 import { chatHelpCopy } from "@/components/chat/chatHelpCopy";
-import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
+import { helpCentreHref } from "@/lib/localizedHelpHref";
 import { useLanguage } from "@/components/LanguageProvider";
 import {
   isComparisonRailSteadyState,
@@ -512,7 +512,7 @@ export function ComparisonActionRail({
                   buttonLabel={helpCopy.helpAboutAiReview}
                   learnMoreLabel={helpCopy.learnMore}
                   topic="ai_review"
-                  href={chatWorkspaceGuideHref(lang, "ai-review")}
+                  href={helpCentreHref(lang)}
                   mobile={isMobile}
                   align="right"
                   testId={isMobile ? "ai-review-help-mobile" : "ai-review-help"}

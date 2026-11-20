@@ -34,7 +34,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
   "en": {
     "eyebrow": "Help Centre · Review workspace",
     "title": "Tomverse Review workspace guide",
-    "description": "Tomverse Chat is for an ongoing conversation with one model, supported by Smart Adaptive, manual model selection and question-refinement suggestions. This guide covers the Tomverse Review workspace with up to three answer panels and AI Review.",
+    "description": "Tomverse Chat is for an ongoing conversation with one model, supported by Smart Adaptive, manual model selection and automatic question refinement. This guide covers the Tomverse Review workspace with up to three answer panels and AI Review.",
     "updated": "Guide updated 12 October 2026",
     "contents": "On this page",
     "tourTitle": "1. Tour the chat screen",
@@ -132,7 +132,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
           },
           {
             "term": "Forgotten password",
-            "detail": "Tomverse cannot display or recover the original password. Keep it safely and contact support for available account-data options."
+            "detail": "Tomverse cannot display or reset the password, so a forgotten password means the conversation cannot be reopened. Keep it safely."
           },
           {
             "term": "Not encryption",
@@ -156,7 +156,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
         "items": [
           {
             "term": "Select models",
-            "detail": "Open the model picker before sending and review each model's usage class and estimated base credits."
+            "detail": "Compare how much credit each model uses with the five-level usage bar in the model picker."
           },
           {
             "term": "Active model",
@@ -179,15 +179,15 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
             "detail": "Open the model status reason and use a recommended fallback if a provider is temporarily limited."
           },
           {
-            "term": "Credit estimate",
-            "detail": "The amount before sending estimates the selected models’ base credits. Final usage can differ after processing files and long conversation history."
+            "term": "Credits charged",
+            "detail": "When you choose models yourself, the picker shows their estimated base credits. The actual charge can be higher with files, long conversation history and web search."
           }
         ]
       },
       {
         "id": "ai-review",
         "title": "6. Use AI Review",
-        "description": "After two or three model answers complete, open AI Review, choose a review mode, check the estimated credits, and run the review.",
+        "description": "After two or three model answers complete, open AI Review, choose a review mode and run the review. One run usually takes around 8 credits.",
         "items": [
           {
             "term": "Balanced",
@@ -215,7 +215,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
         "items": [
           {
             "term": "Supported",
-            "detail": "PNG, JPEG, WebP, PDF, text, Word, Excel, PowerPoint, OpenDocument files, and supported Google Drive exports."
+            "detail": "The full list of accepted formats is in the Help Centre guide on attaching files. Supported Google Drive exports can be attached too."
           },
           {
             "term": "Unsupported or failed",
@@ -250,7 +250,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
           },
           {
             "term": "AI Review",
-            "detail": "The setup screen shows its separate estimated charge before execution."
+            "detail": "A run usually takes around 8 credits and is refunded if it cannot finish. If your balance is too low, the credits needed are shown before it runs."
           },
           {
             "term": "Two balances",
@@ -303,15 +303,15 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
       "items": [
         {
           "term": "Smart Adaptive / Auto",
-          "detail": "When Auto is offered in the model picker, enable it and enter a question. Check which model is shown on the answer."
+          "detail": "If the Smart Adaptive switch in the composer is on, enter a question. Check which model is shown on the answer."
         },
         {
           "term": "Manual model selection",
           "detail": "Turn Auto off to choose an available model yourself. Check its base credits and supported capabilities first."
         },
         {
-          "term": "Question refinement",
-          "detail": "If a suggestion appears, check your original intent and conditions and choose whether to apply it. Add any missing requirements to the question."
+          "term": "Automatic question refinement",
+          "detail": "With Smart Adaptive on in Chat, your question is refined automatically as needed before it goes to the answering model, and the conversation keeps your message as you wrote it. To refine it yourself, turn Smart Adaptive off and choose a model."
         },
         {
           "term": "Files and follow-up questions",
@@ -321,12 +321,12 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
     }
   },
   "ko": {
-    "eyebrow": "도움말 센터 · Review 워크스페이스",
+    "eyebrow": "도움말 센터 · 답변 비교 워크스페이스",
     "title": "Tomverse Review 작업공간 가이드",
-    "description": "Tomverse Chat은 한 모델과 대화를 이어가며 Smart Adaptive·직접 모델 선택·질문 다듬기 제안을 활용하는 제품입니다. 이 가이드는 최대 세 모델의 답변 패널과 AI Review를 사용하는 Tomverse Review 작업공간을 설명합니다.",
+    "description": "Tomverse Chat은 한 모델과 대화를 이어가며 Smart Adaptive·직접 모델 선택·자동 질문 다듬기를 활용하는 제품입니다. 이 가이드는 최대 세 모델의 답변 패널과 AI Review를 사용하는 Tomverse Review 작업공간을 설명합니다.",
     "updated": "2026년 10월 12일 안내 업데이트",
     "contents": "이 페이지의 내용",
-    "tourTitle": "1. Review 화면 둘러보기",
+    "tourTitle": "1. 답변 비교 화면 둘러보기",
     "tourDescription": "워크스페이스 지도에서 번호를 누르면 해당 설명으로 이동합니다. 개인 대화 내용 없이 현재 사이드바 구조를 재현했습니다.",
     "tourItems": [
       {
@@ -421,7 +421,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
           },
           {
             "term": "비밀번호 분실",
-            "detail": "Tomverse는 원래 비밀번호를 표시하거나 복구할 수 없습니다. 안전하게 보관하고 가능한 계정 데이터 조치는 지원팀에 문의하세요."
+            "detail": "Tomverse는 비밀번호를 표시하거나 재설정할 수 없어, 잊으면 이 대화를 다시 열 수 없습니다. 안전하게 보관하세요."
           },
           {
             "term": "암호화 아님",
@@ -445,7 +445,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
         "items": [
           {
             "term": "모델 선택",
-            "detail": "보내기 전에 모델 선택창에서 사용량 클래스와 예상 기본 크레딧을 확인합니다."
+            "detail": "모델 선택창의 막대(5단계)와 약 N회 표시로 모델의 크레딧 부담을 확인합니다."
           },
           {
             "term": "활성 모델",
@@ -468,15 +468,15 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
             "detail": "상태 이유를 열고 공급자가 제한된 경우 추천 대체 모델을 사용합니다."
           },
           {
-            "term": "크레딧 예상",
-            "detail": "전송 전 값은 선택한 모델의 기본 크레딧 예상량입니다. 파일과 긴 대화 기록을 처리한 뒤 적용되는 사용량은 달라질 수 있습니다."
+            "term": "차감 크레딧",
+            "detail": "모델을 직접 고르면 선택창 아래에 기본 예상 크레딧이 보입니다. 파일, 긴 대화 기록, 웹 검색에 따라 실제 차감은 더 커질 수 있습니다."
           }
         ]
       },
       {
         "id": "ai-review",
         "title": "6. AI Review 사용법",
-        "description": "2~3개 모델 답변이 완료되면 AI Review를 열고 검토 방식과 예상 크레딧을 확인한 뒤 실행합니다.",
+        "description": "2~3개 모델 답변이 완료되면 AI Review를 열고 검토 방식을 확인한 뒤 실행합니다. 한 번에 보통 8크레딧 안팎이 듭니다.",
         "items": [
           {
             "term": "균형 검토",
@@ -504,7 +504,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
         "items": [
           {
             "term": "지원 형식",
-            "detail": "PNG, JPEG, WebP, PDF, 텍스트, Word, Excel, PowerPoint, OpenDocument와 지원되는 Google Drive 내보내기입니다."
+            "detail": "받는 형식 전체는 도움말 센터의 파일 첨부 가이드에 있습니다. 지원되는 Google Drive 내보내기도 첨부할 수 있습니다."
           },
           {
             "term": "실패 시",
@@ -539,7 +539,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
           },
           {
             "term": "AI Review",
-            "detail": "실행 전 설정 화면에서 별도 예상 차감량을 표시합니다."
+            "detail": "한 번에 보통 8크레딧 안팎이 들고, 완료하지 못하면 돌려받습니다. 잔액이 모자라면 실행 전에 필요한 크레딧이 표시됩니다."
           },
           {
             "term": "두 잔액",
@@ -592,15 +592,15 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
       "items": [
         {
           "term": "Smart Adaptive / Auto",
-          "detail": "모델 선택창에서 Auto가 제공되면 켜고 질문을 입력합니다. 답변에 표시되는 실제 모델을 확인하세요."
+          "detail": "입력창의 스마트 자동 스위치가 켜져 있으면 질문을 입력합니다. 답변에 표시되는 실제 모델을 확인하세요."
         },
         {
           "term": "직접 모델 선택",
           "detail": "Auto를 끄고 사용 가능한 모델을 직접 선택할 수 있습니다. 선택 전 모델의 기본 크레딧과 지원 기능을 확인하세요."
         },
         {
-          "term": "질문 다듬기 제안",
-          "detail": "제안이 표시되면 원래 의도와 조건을 확인하고 적용 여부를 직접 선택합니다. 필요한 조건이 빠졌다면 질문에 보완하세요."
+          "term": "자동 질문 다듬기",
+          "detail": "스마트 자동을 켠 채팅에서는 질문이 필요에 따라 자동으로 다듬어져 답할 모델에 전달되고, 대화에는 쓰신 그대로 저장됩니다. 직접 다듬고 싶다면 스마트 자동을 끄고 모델을 직접 고르세요."
         },
         {
           "term": "파일과 후속 질문",
@@ -612,7 +612,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
   "zh": {
     "eyebrow": "帮助中心 · Review 工作区",
     "title": "Tomverse Review 工作区指南",
-    "description": "Tomverse Chat 用于与一个模型持续对话，并提供 Smart Adaptive、手动选模型和提问优化建议。本指南介绍最多三个回答面板与 AI Review 的 Tomverse Review 工作区。",
+    "description": "Tomverse Chat 用于与一个模型持续对话，并提供 Smart Adaptive、手动选模型和自动提问优化。本指南介绍最多三个回答面板与 AI Review 的 Tomverse Review 工作区。",
     "updated": "指南更新于2026年10月12日",
     "contents": "本页内容",
     "tourTitle": "1. Review 界面导览",
@@ -710,7 +710,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
           },
           {
             "term": "忘记密码",
-            "detail": "Tomverse 无法显示或恢复原密码，请安全保存并向支持咨询可用的数据选项。"
+            "detail": "Tomverse 无法显示或重置密码，忘记后将无法再打开该对话，请妥善保存。"
           },
           {
             "term": "不是加密",
@@ -734,7 +734,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
         "items": [
           {
             "term": "选择模型",
-            "detail": "发送前查看用量类别和预计基础积分。"
+            "detail": "在模型选择器中，用用量条（5 级）比较模型的积分负担。"
           },
           {
             "term": "启用模型",
@@ -757,15 +757,15 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
             "detail": "查看状态原因并使用推荐替代模型。"
           },
           {
-            "term": "积分预估",
-            "detail": "发送前显示所选模型的基础积分预估；处理文件和较长对话记录后，最终用量可能不同。"
+            "term": "扣除的积分",
+            "detail": "自己选择模型时，选择器下方会显示基础预估积分；处理文件、较长对话记录和网页搜索后，实际扣除可能更高。"
           }
         ]
       },
       {
         "id": "ai-review",
         "title": "6. 使用 AI Review",
-        "description": "两到三个回答完成后，打开 AI Review，选择模式、确认预计积分并运行。",
+        "description": "两到三个回答完成后，打开 AI Review，选择模式并运行。每次运行通常约 8 积分。",
         "items": [
           {
             "term": "均衡",
@@ -793,7 +793,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
         "items": [
           {
             "term": "支持",
-            "detail": "PNG、JPEG、WebP、PDF、文本、Word、Excel、PowerPoint、OpenDocument 和支持的 Drive 导出。"
+            "detail": "支持的完整格式列表见帮助中心的“附加文件”指南；也可附加支持的 Drive 导出内容。"
           },
           {
             "term": "失败时",
@@ -828,7 +828,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
           },
           {
             "term": "AI Review",
-            "detail": "运行前单独显示预计用量。"
+            "detail": "每次运行通常约 8 积分，未能完成会退还；余额不足时，运行前会显示所需积分。"
           },
           {
             "term": "两种余额",
@@ -881,15 +881,15 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
       "items": [
         {
           "term": "Smart Adaptive / Auto",
-          "detail": "选择器提供 Auto 时开启并提问，在回答上查看实际使用模型。"
+          "detail": "输入框中的 Smart Adaptive 开关处于开启状态时直接提问，在回答上查看实际使用模型。"
         },
         {
           "term": "手动选模型",
           "detail": "关闭 Auto 后可自行选择可用模型，先查看基础积分与功能。"
         },
         {
-          "term": "提问优化建议",
-          "detail": "显示建议时检查原意与条件，自行决定是否采用；缺少条件时补充问题。"
+          "term": "自动优化提问",
+          "detail": "在开启 Smart Adaptive 的 Chat 中，提问会按需自动优化后交给回答的模型，对话中仍保存你写的原文。想自己优化时，请关闭 Smart Adaptive 并自行选择模型。"
         },
         {
           "term": "文件与追问",
@@ -901,7 +901,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
   "zh-Hant": {
     "eyebrow": "說明中心 · Review 工作區",
     "title": "Tomverse Review 工作區指南",
-    "description": "Tomverse Chat 可與單一模型持續對話，並提供 Smart Adaptive、手動選擇模型與提問最佳化建議。本指南說明最多三個回答面板，以及結合 AI Review 的 Tomverse Review 工作區。",
+    "description": "Tomverse Chat 可與單一模型持續對話，並提供 Smart Adaptive、手動選擇模型與自動提問最佳化。本指南說明最多三個回答面板，以及結合 AI Review 的 Tomverse Review 工作區。",
     "updated": "指南更新於2026年10月12日",
     "contents": "本頁內容",
     "tourTitle": "1. Review 介面導覽",
@@ -999,7 +999,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
           },
           {
             "term": "忘記密碼",
-            "detail": "Tomverse 無法顯示或還原原本的密碼，請妥善保存，並洽詢支援以了解可用的資料選項。"
+            "detail": "Tomverse 無法顯示或重設密碼，忘記後將無法再開啟該對話，請妥善保存。"
           },
           {
             "term": "並非加密",
@@ -1023,7 +1023,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
         "items": [
           {
             "term": "選擇模型",
-            "detail": "送出前可查看用量類別與預估基礎點數。"
+            "detail": "在模型選擇器中，用用量條（5 級）比較模型的點數負擔。"
           },
           {
             "term": "啟用模型",
@@ -1046,15 +1046,15 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
             "detail": "查看狀態原因，並使用建議的替代模型。"
           },
           {
-            "term": "點數預估",
-            "detail": "送出前顯示所選模型的基礎點數預估；處理檔案與較長的對話紀錄後，實際用量可能不同。"
+            "term": "扣除的點數",
+            "detail": "自行選擇模型時，選擇器下方會顯示基礎預估點數；處理檔案、較長對話紀錄與網路搜尋後，實際扣除可能更高。"
           }
         ]
       },
       {
         "id": "ai-review",
         "title": "6. 使用 AI Review",
-        "description": "兩到三個回答完成後，開啟 AI Review、選擇模式、確認預估點數並執行。",
+        "description": "兩到三個回答完成後，開啟 AI Review、選擇模式並執行。每次執行通常約 8 點數。",
         "items": [
           {
             "term": "均衡",
@@ -1082,7 +1082,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
         "items": [
           {
             "term": "支援",
-            "detail": "PNG、JPEG、WebP、PDF、文字、Word、Excel、PowerPoint、OpenDocument 及支援的 Drive 匯出格式。"
+            "detail": "支援的完整格式清單請見說明中心的「附加檔案」指南；也可附加支援的 Drive 匯出內容。"
           },
           {
             "term": "失敗時",
@@ -1117,7 +1117,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
           },
           {
             "term": "AI Review",
-            "detail": "執行前會另行顯示預估用量。"
+            "detail": "每次執行通常約 8 點數，未能完成會退還；餘額不足時，執行前會顯示所需點數。"
           },
           {
             "term": "兩種餘額",
@@ -1170,15 +1170,15 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
       "items": [
         {
           "term": "Smart Adaptive / Auto",
-          "detail": "選擇器提供 Auto 時開啟並提問，即可在回答上查看實際使用的模型。"
+          "detail": "輸入框中的 Smart Adaptive 開關開啟時直接提問，即可在回答上查看實際使用的模型。"
         },
         {
           "term": "手動選擇模型",
           "detail": "關閉 Auto 後可自行選擇可用的模型，並先查看基礎點數與功能。"
         },
         {
-          "term": "提問最佳化建議",
-          "detail": "顯示建議時，請檢查原意與條件，再自行決定是否採用；若缺少條件，請補充問題。"
+          "term": "自動最佳化提問",
+          "detail": "在開啟 Smart Adaptive 的 Chat 中，提問會視需要自動最佳化後交給回答的模型，對話中仍保存你寫的原文。想自己調整時，請關閉 Smart Adaptive 並自行選擇模型。"
         },
         {
           "term": "檔案與追問",
@@ -1190,7 +1190,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
   "fr": {
     "eyebrow": "Centre d’aide · Espace Review",
     "title": "Guide de l’espace Tomverse Review",
-    "description": "Tomverse Chat permet de poursuivre une conversation avec un modèle, avec Smart Adaptive, le choix manuel et les suggestions de reformulation. Ce guide présente l’espace Tomverse Review, ses trois panneaux maximum et AI Review.",
+    "description": "Tomverse Chat permet de poursuivre une conversation avec un modèle, avec Smart Adaptive, le choix manuel et la reformulation automatique. Ce guide présente l’espace Tomverse Review, ses trois panneaux maximum et AI Review.",
     "updated": "Guide mis à jour le 12 octobre 2026",
     "contents": "Dans cette page",
     "tourTitle": "1. Découvrir l’écran Review",
@@ -1288,7 +1288,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
           },
           {
             "term": "Mot de passe oublié",
-            "detail": "Tomverse ne peut ni afficher ni récupérer l’original; contactez le support pour les options disponibles."
+            "detail": "Tomverse ne peut ni afficher ni réinitialiser le mot de passe : si vous l’oubliez, la conversation ne peut plus être rouverte. Conservez-le en lieu sûr."
           },
           {
             "term": "Pas un chiffrement",
@@ -1312,7 +1312,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
         "items": [
           {
             "term": "Choisir",
-            "detail": "Vérifiez classe d’usage et crédits de base avant l’envoi."
+            "detail": "Comparez la charge en crédits des modèles grâce à la jauge d’usage (cinq niveaux) du sélecteur."
           },
           {
             "term": "Actif",
@@ -1335,15 +1335,15 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
             "detail": "Consultez la raison et utilisez un modèle de secours."
           },
           {
-            "term": "Estimation",
-            "detail": "Avant l’envoi, le montant estime les crédits de base des modèles choisis. L’usage final peut varier après traitement de fichiers et d’un long historique."
+            "term": "Crédits débités",
+            "detail": "Quand vous choisissez vous-même les modèles, le sélecteur affiche leurs crédits de base estimés. Le débit réel peut être plus élevé avec des fichiers, un long historique et la recherche web."
           }
         ]
       },
       {
         "id": "ai-review",
         "title": "6. Utiliser AI Review",
-        "description": "Après deux ou trois réponses, ouvrez AI Review, choisissez le mode, vérifiez les crédits et lancez.",
+        "description": "Après deux ou trois réponses, ouvrez AI Review, choisissez le mode et lancez. Une exécution coûte en général environ 8 crédits.",
         "items": [
           {
             "term": "Équilibré",
@@ -1371,7 +1371,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
         "items": [
           {
             "term": "Pris en charge",
-            "detail": "PNG, JPEG, WebP, PDF, texte, Word, Excel, PowerPoint, OpenDocument et exports Drive compatibles."
+            "detail": "La liste complète des formats acceptés se trouve dans le guide du centre d’aide sur les pièces jointes. Les exports Drive compatibles peuvent aussi être joints."
           },
           {
             "term": "Échec",
@@ -1406,7 +1406,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
           },
           {
             "term": "AI Review",
-            "detail": "Affiche sa propre estimation avant exécution."
+            "detail": "Une exécution coûte en général environ 8 crédits, restitués si elle ne peut pas aboutir. Si le solde est insuffisant, les crédits nécessaires s’affichent avant l’exécution."
           },
           {
             "term": "Deux soldes",
@@ -1459,15 +1459,15 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
       "items": [
         {
           "term": "Smart Adaptive / Auto",
-          "detail": "Activez Auto lorsqu’il est proposé dans le sélecteur, puis posez votre question. Vérifiez le modèle indiqué sur la réponse."
+          "detail": "Si l’interrupteur Smart Adaptive du champ de saisie est activé, posez votre question. Vérifiez le modèle indiqué sur la réponse."
         },
         {
           "term": "Choix manuel du modèle",
           "detail": "Désactivez Auto pour choisir un modèle disponible. Consultez d’abord crédits de base et fonctions."
         },
         {
-          "term": "Reformulation de la question",
-          "detail": "Si une suggestion apparaît, vérifiez intention et conditions puis décidez de l’appliquer. Complétez les exigences manquantes."
+          "term": "Reformulation automatique",
+          "detail": "Dans Chat avec Smart Adaptive activé, votre question est reformulée automatiquement si besoin avant d’aller au modèle qui répond, et la conversation conserve votre message tel quel. Pour la reformuler vous-même, désactivez Smart Adaptive et choisissez un modèle."
         },
         {
           "term": "Fichiers et questions de suivi",
@@ -1479,7 +1479,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
   "de": {
     "eyebrow": "Hilfe · Review-Workspace",
     "title": "Tomverse Review: Arbeitsbereich",
-    "description": "Tomverse Chat unterstützt fortlaufende Gespräche mit einem Modell, Smart Adaptive, manuelle Modellwahl und Vorschläge zur Präzisierung. Dieser Leitfaden erklärt Tomverse Review mit bis zu drei Antwortfeldern und AI Review.",
+    "description": "Tomverse Chat unterstützt fortlaufende Gespräche mit einem Modell, Smart Adaptive, manuelle Modellwahl und automatische Fragenoptimierung. Dieser Leitfaden erklärt Tomverse Review mit bis zu drei Antwortfeldern und AI Review.",
     "updated": "Anleitung aktualisiert am 12. Oktober 2026",
     "contents": "Auf dieser Seite",
     "tourTitle": "1. Review-Oberfläche kennenlernen",
@@ -1577,7 +1577,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
           },
           {
             "term": "Passwort vergessen",
-            "detail": "Tomverse kann das Original nicht anzeigen oder wiederherstellen; Support zu verfügbaren Datenoptionen fragen."
+            "detail": "Tomverse kann das Passwort weder anzeigen noch zurücksetzen; wer es vergisst, kann die Unterhaltung nicht mehr öffnen. Bewahren Sie es sicher auf."
           },
           {
             "term": "Keine Verschlüsselung",
@@ -1601,7 +1601,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
         "items": [
           {
             "term": "Auswählen",
-            "detail": "Nutzungsklasse und Basis-Credits vor dem Senden prüfen."
+            "detail": "Vergleichen Sie die Credit-Belastung der Modelle anhand der Nutzungsanzeige (fünf Stufen) in der Modellauswahl."
           },
           {
             "term": "Aktiv",
@@ -1624,15 +1624,15 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
             "detail": "Grund öffnen und empfohlenes Ersatzmodell nutzen."
           },
           {
-            "term": "Schätzung",
-            "detail": "Vor dem Senden werden die Basis-Credits der gewählten Modelle geschätzt. Nach Dateien und langem Gesprächsverlauf kann der endgültige Verbrauch abweichen."
+            "term": "Abgebuchte Credits",
+            "detail": "Wenn Sie Modelle selbst wählen, zeigt die Auswahl deren geschätzte Basis-Credits. Die tatsächliche Abbuchung kann mit Dateien, langem Verlauf und Websuche höher ausfallen."
           }
         ]
       },
       {
         "id": "ai-review",
         "title": "6. AI Review verwenden",
-        "description": "Nach zwei oder drei Antworten AI Review öffnen, Modus und Credits prüfen und starten.",
+        "description": "Nach zwei oder drei Antworten AI Review öffnen, Modus wählen und starten. Ein Lauf kostet meist etwa 8 Credits.",
         "items": [
           {
             "term": "Ausgewogen",
@@ -1660,7 +1660,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
         "items": [
           {
             "term": "Unterstützt",
-            "detail": "PNG, JPEG, WebP, PDF, Text, Word, Excel, PowerPoint, OpenDocument und unterstützte Drive-Exporte."
+            "detail": "Die vollständige Liste der akzeptierten Formate steht im Hilfecenter-Leitfaden zu Dateianhängen. Unterstützte Drive-Exporte lassen sich ebenfalls anhängen."
           },
           {
             "term": "Fehler",
@@ -1695,7 +1695,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
           },
           {
             "term": "AI Review",
-            "detail": "Separate Schätzung vor Ausführung."
+            "detail": "Ein Lauf kostet meist etwa 8 Credits und wird zurückerstattet, wenn er nicht abgeschlossen werden kann. Reicht das Guthaben nicht, werden die nötigen Credits vor dem Start angezeigt."
           },
           {
             "term": "Zwei Guthaben",
@@ -1748,15 +1748,15 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
       "items": [
         {
           "term": "Smart Adaptive / Auto",
-          "detail": "Aktivieren Sie Auto, wenn es in der Modellauswahl angeboten wird, und stellen Sie die Frage. Prüfen Sie das Modell an der Antwort."
+          "detail": "Ist der Smart-Adaptive-Schalter im Eingabefeld an, stellen Sie die Frage. Prüfen Sie das Modell an der Antwort."
         },
         {
           "term": "Manuelle Modellwahl",
           "detail": "Schalten Sie Auto aus, um ein verfügbares Modell zu wählen. Prüfen Sie zuerst Basis-Credits und Funktionen."
         },
         {
-          "term": "Frage präzisieren",
-          "detail": "Prüfen Sie bei einem Vorschlag Ihre Absicht und Bedingungen und entscheiden Sie über die Übernahme. Ergänzen Sie fehlende Anforderungen."
+          "term": "Automatische Fragenoptimierung",
+          "detail": "In Chat mit aktiviertem Smart Adaptive wird Ihre Frage bei Bedarf automatisch umformuliert, bevor sie an das antwortende Modell geht; die Unterhaltung behält Ihre Nachricht unverändert. Wenn Sie selbst formulieren möchten, schalten Sie Smart Adaptive aus und wählen Sie ein Modell."
         },
         {
           "term": "Dateien und Folgefragen",
@@ -1768,7 +1768,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
   "es": {
     "eyebrow": "Centro de ayuda · Espacio Review",
     "title": "Guía del espacio Tomverse Review",
-    "description": "Tomverse Chat permite conversar con un modelo usando Smart Adaptive, selección manual y sugerencias para precisar preguntas. Esta guía explica Tomverse Review, con hasta tres paneles de respuestas y AI Review.",
+    "description": "Tomverse Chat permite conversar con un modelo usando Smart Adaptive, selección manual y mejora automática de preguntas. Esta guía explica Tomverse Review, con hasta tres paneles de respuestas y AI Review.",
     "updated": "Guía actualizada el 12 de octubre de 2026",
     "contents": "En esta página",
     "tourTitle": "1. Recorrido por Review",
@@ -1866,7 +1866,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
           },
           {
             "term": "Contraseña olvidada",
-            "detail": "Tomverse no puede mostrar ni recuperar la original; consulta soporte sobre opciones de datos."
+            "detail": "Tomverse no puede mostrar ni restablecer la contraseña; si la olvidas, no podrás volver a abrir la conversación. Guárdala en un lugar seguro."
           },
           {
             "term": "No es cifrado",
@@ -1890,7 +1890,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
         "items": [
           {
             "term": "Seleccionar",
-            "detail": "Revisa clase de uso y créditos base antes de enviar."
+            "detail": "Compara la carga de créditos de los modelos con la barra de uso (cinco niveles) del selector."
           },
           {
             "term": "Activo",
@@ -1913,15 +1913,15 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
             "detail": "Consulta el motivo y usa un sustituto recomendado."
           },
           {
-            "term": "Estimación",
-            "detail": "Antes de enviar se estiman los créditos base de los modelos elegidos. El uso final puede variar al procesar archivos e historiales largos."
+            "term": "Créditos descontados",
+            "detail": "Si eliges los modelos tú mismo, el selector muestra sus créditos base estimados. El descuento real puede ser mayor con archivos, historiales largos y búsqueda web."
           }
         ]
       },
       {
         "id": "ai-review",
         "title": "6. Usar AI Review",
-        "description": "Tras dos o tres respuestas, abre AI Review, elige modo, revisa créditos y ejecuta.",
+        "description": "Tras dos o tres respuestas, abre AI Review, elige modo y ejecuta. Una ejecución suele costar unos 8 créditos.",
         "items": [
           {
             "term": "Equilibrado",
@@ -1949,7 +1949,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
         "items": [
           {
             "term": "Compatibles",
-            "detail": "PNG, JPEG, WebP, PDF, texto, Word, Excel, PowerPoint, OpenDocument y exportaciones Drive."
+            "detail": "La lista completa de formatos admitidos está en la guía del centro de ayuda sobre archivos adjuntos. También se pueden adjuntar exportaciones de Drive compatibles."
           },
           {
             "term": "Fallo",
@@ -1984,7 +1984,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
           },
           {
             "term": "AI Review",
-            "detail": "Muestra estimación separada antes de ejecutar."
+            "detail": "Una ejecución suele costar unos 8 créditos, que se devuelven si no se puede completar. Si el saldo no alcanza, los créditos necesarios se muestran antes de ejecutar."
           },
           {
             "term": "Dos saldos",
@@ -2037,15 +2037,15 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
       "items": [
         {
           "term": "Smart Adaptive / Auto",
-          "detail": "Activa Auto cuando esté disponible en el selector y pregunta. Comprueba qué modelo aparece en la respuesta."
+          "detail": "Si el interruptor de Smart Adaptive del cuadro de texto está activado, haz la pregunta. Comprueba qué modelo aparece en la respuesta."
         },
         {
           "term": "Selección manual",
           "detail": "Desactiva Auto para elegir un modelo disponible. Revisa antes créditos base y funciones."
         },
         {
-          "term": "Precisar la pregunta",
-          "detail": "Si aparece una sugerencia, comprueba intención y condiciones y decide si la aplicas. Completa los requisitos que falten."
+          "term": "Mejora automática de la pregunta",
+          "detail": "En Chat con Smart Adaptive activado, tu pregunta se reformula automáticamente cuando hace falta antes de llegar al modelo que responde, y la conversación conserva tu mensaje tal como lo escribiste. Para reformularla tú mismo, desactiva Smart Adaptive y elige un modelo."
         },
         {
           "term": "Archivos y preguntas de seguimiento",
@@ -2057,7 +2057,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
   "pt": {
     "eyebrow": "Centro de ajuda · Workspace Review",
     "title": "Guia do espaço Tomverse Review",
-    "description": "O Tomverse Chat permite conversar com um modelo usando Smart Adaptive, seleção manual e sugestões para aprimorar perguntas. Este guia explica o Tomverse Review, com até três painéis de respostas e AI Review.",
+    "description": "O Tomverse Chat permite conversar com um modelo usando Smart Adaptive, seleção manual e aprimoramento automático de perguntas. Este guia explica o Tomverse Review, com até três painéis de respostas e AI Review.",
     "updated": "Guia atualizado em 12 de outubro de 2026",
     "contents": "Nesta página",
     "tourTitle": "1. Conhecer a tela Review",
@@ -2155,7 +2155,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
           },
           {
             "term": "Esquecida",
-            "detail": "O Tomverse não mostra nem recupera a original; consulte o suporte sobre opções de dados."
+            "detail": "O Tomverse não consegue mostrar nem redefinir a senha; se você a esquecer, não será possível reabrir a conversa. Guarde-a em local seguro."
           },
           {
             "term": "Não é criptografia",
@@ -2179,7 +2179,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
         "items": [
           {
             "term": "Selecionar",
-            "detail": "Veja classe de uso e créditos base antes de enviar."
+            "detail": "Compare a carga de créditos dos modelos pela barra de uso (cinco níveis) do seletor."
           },
           {
             "term": "Ativo",
@@ -2202,15 +2202,15 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
             "detail": "Consulte o motivo e use uma alternativa recomendada."
           },
           {
-            "term": "Estimativa",
-            "detail": "Antes do envio, o valor estima os créditos-base dos modelos escolhidos. O uso final pode mudar após processar arquivos e históricos longos."
+            "term": "Créditos debitados",
+            "detail": "Se você escolhe os modelos, o seletor mostra seus créditos-base estimados. O débito real pode ser maior com arquivos, históricos longos e busca na web."
           }
         ]
       },
       {
         "id": "ai-review",
         "title": "6. Usar AI Review",
-        "description": "Após duas ou três respostas, abra AI Review, escolha modo, veja créditos e execute.",
+        "description": "Após duas ou três respostas, abra AI Review, escolha o modo e execute. Uma execução costuma custar cerca de 8 créditos.",
         "items": [
           {
             "term": "Equilibrado",
@@ -2238,7 +2238,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
         "items": [
           {
             "term": "Suportados",
-            "detail": "PNG, JPEG, WebP, PDF, texto, Word, Excel, PowerPoint, OpenDocument e exportações Drive."
+            "detail": "A lista completa de formatos aceitos está no guia da central de ajuda sobre anexos. Exportações do Drive compatíveis também podem ser anexadas."
           },
           {
             "term": "Falha",
@@ -2273,7 +2273,7 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
           },
           {
             "term": "AI Review",
-            "detail": "Mostra estimativa separada antes de executar."
+            "detail": "Uma execução costuma custar cerca de 8 créditos, devolvidos se ela não puder ser concluída. Se o saldo não bastar, os créditos necessários aparecem antes de executar."
           },
           {
             "term": "Dois saldos",
@@ -2326,15 +2326,15 @@ export const chatWorkspaceGuideContent: Record<Language, ChatWorkspaceGuideCopy>
       "items": [
         {
           "term": "Smart Adaptive / Auto",
-          "detail": "Ative Auto quando estiver disponível no seletor e faça a pergunta. Confira o modelo mostrado na resposta."
+          "detail": "Se a chave Smart Adaptive do campo de entrada estiver ativada, faça a pergunta. Confira o modelo mostrado na resposta."
         },
         {
           "term": "Seleção manual",
           "detail": "Desative Auto para escolher um modelo disponível. Confira antes os créditos-base e os recursos."
         },
         {
-          "term": "Aprimorar a pergunta",
-          "detail": "Se aparecer uma sugestão, confira intenção e condições e decida se aplica. Acrescente os requisitos ausentes."
+          "term": "Aprimoramento automático da pergunta",
+          "detail": "No Chat com o Smart Adaptive ativado, sua pergunta é reformulada automaticamente quando necessário antes de ir ao modelo que responde, e a conversa mantém sua mensagem como você a escreveu. Para reformular você mesmo, desative o Smart Adaptive e escolha um modelo."
         },
         {
           "term": "Arquivos e perguntas seguintes",

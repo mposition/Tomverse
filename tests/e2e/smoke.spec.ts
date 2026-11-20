@@ -30,25 +30,21 @@ test("home renders the marketing site", { tag: "@smoke" }, async ({ page }) => {
       startHref
     );
   }
-  // A start action opens only an available product.
-  await expect(page.getByTestId("landing-primary-cta")).toHaveText(
-    guestChatAvailable ? /Chat/ : /Review/
-  );
-  await expect(page.getByTestId("landing-primary-cta")).toHaveAttribute(
+  // The hero's primary action is answer comparison, through Review's guest
+  // preview; Chat is the second button and opens only when it is available.
+  await expect(page.getByTestId("landing-primary-cta")).toHaveText(/three AIs/);
+  await expect(page.getByTestId("landing-primary-cta")).toHaveAttribute("href", "/review?lang=en&entry=guest-preview");
+  await expect(page.getByTestId("landing-secondary-cta")).toHaveAttribute(
     "href",
-    startHref
+    guestChatAvailable ? `${CHAT_WORKSPACE_PATH}?lang=en` : "/en/products/chat"
   );
-  // The hero states the no-sign-up promise once. It used to carry it twice,
-  // in the signup note and again in a guest note, in near-identical words;
-  // the second element is gone.
-  await expect(page.getByTestId("landing-hero-signup-note")).toHaveText(
-    /Review/
-  );
+  // The hero states the no-sign-up promise once.
+  await expect(page.getByTestId("landing-hero-signup-note")).toHaveText(/no sign-up/i);
   await expect(page.getByTestId("landing-guest-note")).toHaveCount(0);
   await expect(page.getByTestId("landing-guest-cta")).toHaveCount(0);
 
   await page.getByTestId("marketing-language-switcher").selectOption("ko");
-  await expect(page.getByTestId("landing-hero-title")).toContainText("고민은 Tomverse에.");
+  await expect(page.getByTestId("landing-hero-title")).toContainText("세 AI에게 한 번에.");
 });
 
 test("signed-in homepage keeps the page visible and offers one continue action", { tag: "@smoke" }, async ({
@@ -73,14 +69,13 @@ test("signed-in homepage keeps the page visible and offers one continue action",
   await page.goto("/");
   await expect(page).toHaveURL(/\/$/);
   await expect(page.getByTestId("marketing-header-app-cta")).toHaveAttribute("data-session-state", "authenticated");
-  await expect(page.getByTestId("landing-primary-cta")).toHaveText(
-    /Review/
-  );
+  await expect(page.getByTestId("landing-primary-cta")).toHaveText(/three AIs/);
   await expect(page.getByTestId("landing-primary-cta")).toHaveAttribute(
     "href",
     "/review?lang=en"
   );
-  await expect(page.getByTestId("landing-hero-signup-note")).toContainText(/Review/);
+  // A signed-in visitor is not told they can compare without signing up.
+  await expect(page.getByTestId("landing-hero-signup-note")).toHaveCount(0);
   await expect(page.getByTestId("landing-guest-cta")).toHaveCount(0);
 });
 
@@ -124,7 +119,7 @@ test("pricing page supports Chinese copy", async ({ page }) => {
   await page.getByTestId("marketing-language-switcher").selectOption("zh");
   await expect(page).toHaveURL(/\/zh\/pricing$/);
   await expect(page.locator("html")).toHaveAttribute("lang", "zh");
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("先体验，再选择适合的套餐。");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("先免费试用，用得越多再升级。");
   await expect(page.getByTestId("pricing-credit-packs")).toBeVisible();
   await expect(page.locator('[data-pack-id="starter_500"]')).toContainText("500");
   await expect(page.locator('[data-pack-id="project_1500"]')).toContainText("1,500");

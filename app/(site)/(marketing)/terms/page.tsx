@@ -1,4 +1,4 @@
-import { MarketingInfoPage } from "@/components/marketing/MarketingInfoPage";
+import { LegalInfoDocument } from "@/components/marketing/v2/policy/LegalDocumentPage";
 import { infoPages } from "@/components/marketing/marketingInfoContent";
 import { withLegalSectionNav } from "@/lib/legalSectionNav";
 import { createPageMetadata } from "@/lib/seo";
@@ -11,5 +11,5 @@ export const metadata = createPageMetadata({
 });
 
 export default function TermsPage() {
-  return <MarketingInfoPage content={withLegalSectionNav(infoPages.terms)}readableBody />;
+  return <LegalInfoDocument document="terms" content={withLegalSectionNav(infoPages.terms)} />;
 }

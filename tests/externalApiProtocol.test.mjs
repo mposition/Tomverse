@@ -145,6 +145,21 @@ test("option combinations follow the documented rules", () => {
     assert.deepEqual(resolveRequestOptions(parse({ stop: "END" }), model).stop, ["END"]);
 });
 
+test("the Responses-style reasoning object Cursor sends is read as reasoning_effort", () => {
+    const parse = (extra) => parseChatCompletionRequest({ ...vscodeRequest, ...extra });
+    const reasoningModel = { ...model, reasoning: true };
+    assert.equal(parse({ reasoning: { effort: "medium", summary: "auto" } }).reasoning_effort, "medium");
+    assert.equal(parse({ reasoning: { effort: "low" }, reasoning_effort: "low" }).reasoning_effort, "low");
+    assert.equal(parse({ reasoning: { summary: "auto" } }).reasoning_effort, undefined);
+    assert.equal(parse({ reasoning: null }).reasoning_effort, undefined);
+    assert.equal(resolveRequestOptions(parse({ reasoning: { effort: "high" } }), reasoningModel).stream, true);
+    // Same rules as reasoning_effort: refused for a model that cannot take it.
+    rejects(() => resolveRequestOptions(parse({ reasoning: { effort: "high" } }), model), "unsupported_parameter");
+    rejects(() => parse({ reasoning: { effort: "low" }, reasoning_effort: "high" }), "conflicting_parameters");
+    rejects(() => parse({ reasoning: { effort: "low", budget: 10 } }), "unsupported_parameter");
+    rejects(() => parse({ reasoning: { effort: "extreme" } }), "invalid_request");
+});
+
 test("images: data URLs only, supported types, size bound, model capability", () => {
     rejects(() => decodeImageDataUrl("https://169.254.169.254/latest/meta-data", "p"), "unsupported_image_url");
     rejects(() => decodeImageDataUrl("file:///etc/passwd", "p"), "unsupported_image_url");
