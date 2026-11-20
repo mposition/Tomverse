@@ -234,7 +234,10 @@ test.describe("WCAG 1.4.4 resize text: 200% root font size", () => {
         const reachable = await target.evaluate((el) => {
           const rect = el.getBoundingClientRect();
           const y = rect.top + Math.min(rect.height, 24) / 2;
-          const hit = document.elementFromPoint(rect.left + Math.min(rect.width, 40) / 2, y);
+          // Horizontal centre, near the top: the V2 hero CTA is a pill whose rounded
+          // corner is not part of it for hit-testing, so a point near its left edge
+          // lands on the page behind it even when nothing covers the button.
+          const hit = document.elementFromPoint(rect.left + rect.width / 2, y);
           return hit !== null && el.contains(hit);
         });
         expect(reachable, "hero content scrolls clear of the consent bar").toBe(true);
