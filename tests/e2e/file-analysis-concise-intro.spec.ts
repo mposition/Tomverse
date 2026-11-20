@@ -11,6 +11,8 @@ test("file-analysis introduction and workflow card have distinct useful content"
   await expect(intro).toContainText("PDFs, Office documents, text and images");
   expect((await intro.textContent())!.trim()).not.toBe((await workflow.locator("p").textContent())!.trim());
   await expect(workflow.getByRole("listitem")).toHaveCount(3);
+  // On a phone the V2 hero stacks above the example; it is one scroll down.
+  await workflow.getByRole("heading").scrollIntoViewIfNeeded();
   await expect(workflow.getByRole("heading")).toBeInViewport();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
