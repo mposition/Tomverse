@@ -17,10 +17,10 @@ test("a coding cycle's run over the real cycle table", { skip: !databaseUrl }, a
     const url = new URL(databaseUrl);
     assert.ok(["127.0.0.1", "localhost"].includes(url.hostname));
     assert.match(url.pathname, /test/);
-    // The audit rows this suite writes are signed with the run's own key, so
-    // later suites that verify the whole chain still pass: never overwritten.
+    // The audit rows this suite writes are signed with the run's own secret
+    // (NEXTAUTH_SECRET, which the audit key falls back to), never a key of this
+    // suite's own: later suites verify the whole chain with the run's secret.
     process.env.NEXTAUTH_SECRET ??= "coding-optimizer-local-synthetic-secret";
-    process.env.ADMIN_AUDIT_INTEGRITY_KEY ??= "synthetic-coding-optimizer-audit";
     process.env.OPENAI_API_KEY ??= "sk-fixture-openai-server";
     process.env.DEEPSEEK_API_KEY ??= "sk-fixture-deepseek-server";
     const root = resolve(import.meta.dirname, "../..");
