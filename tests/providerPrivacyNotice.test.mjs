@@ -149,7 +149,8 @@ test("the privacy page preserves known disclosures and explicitly names unverifi
 test("the wide provider table scrolls on its own without widening the section", () => {
     const policy = readFileSync("components/legal/PrivacyPolicy.tsx", "utf8");
     const source = readFileSync("components/legal/ProviderDestinationTable.tsx", "utf8");
-    assert.match(policy, /className="min-w-0 text-sm/);
+    assert.match(policy, /className="min-w-0 legal-text"/);
+    assert.match(policy, /className="min-w-0 legal-table"/);
     const scroller = source.match(/<div\s+className="mt-3 overflow-x-auto[\s\S]*?>/);
     assert.ok(scroller, "the table is not inside a horizontal scroller");
     assert.match(scroller[0], /role="region"/);

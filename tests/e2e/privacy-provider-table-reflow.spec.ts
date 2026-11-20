@@ -84,8 +84,12 @@ test("the provider section wraps at 320px while its table scrolls", {
                 candidate.querySelector("table, [role='region']") !== null &&
                 candidate.querySelector("h2") !== null
         );
+        // The table's own cells (an unverified row's notice is a <p>) live in
+        // the scroller, which is allowed to be wider than the screen.
         const prose = section
-            ? Array.from(section.querySelectorAll("p, li, h2, h3"))
+            ? Array.from(section.querySelectorAll("p, li, h2, h3")).filter(
+                (element) => !element.closest("[role='region']")
+            )
             : [];
         let widest = 0;
         let offender: string | null = null;
