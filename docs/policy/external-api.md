@@ -646,10 +646,13 @@ providers, so signed or encrypted state is never sent to another provider.
   switch costs the reasoning and the cache, the trade the user's harder
   request asks for. The provider default is never a frontier or apex model,
   and a request only they fit is refused as it was before they were candidates.
-  Known limit: with a lost pin, two different messages of one session routed
-  at the same moment pick independently, and the dearer one admitted first
-  keeps the pin, so the other's tool rounds then run on it (reasoning and
-  cache lost, never the request). The conversation is the client's own id: Codex's
+  Known limit: one pin per session holds one model. Two different messages
+  the user sends on one session at the same moment (pinned or not) pick
+  independently, the dearer one admitted first keeps the pin, and the
+  other's tool rounds then run on it (reasoning and cache lost, never the
+  request). Claude Code and Codex send one user message per session at a
+  time, and a subagent never re-routes; per-tool-call stickiness on the
+  native protocols would remove the limit. The conversation is the client's own id: Codex's
   `prompt_cache_key` (its thread id; `session-id`/`thread-id` headers),
   Claude Code's `x-claude-code-session-id` or the session in
   `metadata.user_id`; otherwise a digest of the history's opening. The pin is
