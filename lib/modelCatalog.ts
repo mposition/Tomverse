@@ -494,27 +494,3 @@ export const renewCodingSnapshotIfUnchanged = async (
     return { decision, version: created.version, coverageUntil: created.coverageUntil };
   });
 };
-
-// --- chat (view) -------------------------------------------------------------
-
-export type ChatCatalogViewRow = {
-  modelId: string;
-  name: string;
-  provider: string;
-  enabled: boolean;
-  status: string;
-  publiclyListed: boolean;
-  minimumPlan: string;
-};
-
-/** Chat models stay in ModelRegistryEntry; this is the catalogue's read-only view of them. */
-export const loadChatCatalogView = async (): Promise<ChatCatalogViewRow[]> =>
-  (await getRuntimeModels()).map((model) => ({
-    modelId: model.id,
-    name: model.name,
-    provider: model.provider,
-    enabled: model.enabled,
-    status: model.status,
-    publiclyListed: model.publiclyListed !== false,
-    minimumPlan: model.minimumPlan,
-  }));

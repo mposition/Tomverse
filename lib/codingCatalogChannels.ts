@@ -15,7 +15,12 @@ import {
   parseSnapshotRows,
   servableCodingRows,
 } from "@/lib/modelCatalog";
-import { codingCatalogExternalChannelsEnabled, externalChannelModelIds, snapshotIsCurrent } from "@/lib/modelCatalogCore";
+import {
+  codingCatalogExternalChannelsEnabled,
+  codingPlanReaches,
+  externalChannelModelIds,
+  snapshotIsCurrent,
+} from "@/lib/modelCatalogCore";
 import type { AiModel, ModelTier } from "@/lib/models";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { prisma } from "@/lib/prisma";
@@ -28,11 +33,12 @@ let warnedNoSnapshot = 0;
  * The chat model ids this channel may offer to this plan, or null when the
  * switch is off (no filter).
  *
- * A model must be in the newest snapshot for the channel (publishing is the
- * step that exposes it) and must still be admitted now -- on, not held, the
- * channel still ticked, its provider's conditions still allowing it -- so a
- * hold or a re-check that refuses a model takes effect at once, not at the
- * next publish. No snapshot, or one past its coverage, offers nothing: an
+ * A model must be in the newest snapshot for the channel at a plan this
+ * account reaches (publishing is the step that exposes it) and must still be
+ * admitted now -- on, not held, the channel still ticked, its current minimum
+ * plan reached, its provider's conditions still allowing it -- so a hold, a
+ * raised plan or a re-check that refuses a model takes effect at once, not at
+ * the next publish. No snapshot, or one past its coverage, offers nothing: an
  * unpublished catalogue does not fall back to the whole registry.
  */
 export const externalChannelAllowlist = async (
@@ -63,7 +69,11 @@ export const externalChannelAllowlist = async (
     now,
     context: { chat: runtime.map(chatModelFacts), providerTerms: await loadCodingProviderTerms(prisma) },
   });
-  const admitted = servableCodingRows(entries).filter((row) => row.channels.includes(channel));
+  // The current row's channel and plan narrow the published row's: a plan
+  // raised or a channel unticked since publishing applies now.
+  const admitted = servableCodingRows(entries).filter(
+    (row) => row.channels.includes(channel) && codingPlanReaches(plan, row.minimumPlan)
+  );
   return externalChannelModelIds(parseSnapshotRows((snapshot.payload as { models?: unknown[] } | null)?.models ?? []), {
     channel,
     plan,

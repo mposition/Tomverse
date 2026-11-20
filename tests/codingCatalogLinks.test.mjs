@@ -11,6 +11,7 @@ import {
   codingCatalogExternalChannelsEnabled,
   codingCatalogRowOf,
   codingCatalogRowSchema,
+  codingPlanReaches,
   codingStoredProfileSchema,
   externalChannelModelIds,
   judgeCodingModel,
@@ -302,6 +303,10 @@ test("an external channel offers the chat links that list it, are still on and t
   assert.deepEqual([...externalChannelModelIds(rows, { channel: "api", plan: "Max", activeIds: new Set(["gpt-6-luna"]) })], ["gpt-6-luna"]);
   // A dedicated row is never offered externally.
   assert.equal(externalChannelModelIds(rows, { channel: "api", plan: "Max", activeIds: active }).has("qwen3.7-coder-plus"), false);
+  // A plan the coding scale does not know reaches nothing.
+  assert.equal(codingPlanReaches("Guest", "Free"), false);
+  assert.equal(codingPlanReaches("Free", "Free"), true);
+  assert.equal(codingPlanReaches("Pro", "Max"), false);
 });
 
 test("the external channels switch is off unless it is exactly true, and the CLI names itself", () => {

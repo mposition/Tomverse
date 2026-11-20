@@ -150,6 +150,10 @@ test("a hold, an untick or a provider re-check that refuses a model takes it off
   assert.deepEqual(await ids("Pro"), ["gpt-6-luna"]);
   entries = [{ ...entry("gpt-6-luna", ["code", "api"]), holdReason: "check" }];
   assert.deepEqual(await ids("Pro"), []);
+  // A minimum plan raised since publishing applies at once.
+  entries = [entry("gpt-6-luna", ["code", "api"], { minimumPlan: "Max" })];
+  assert.deepEqual(await ids("Pro"), []);
+  assert.deepEqual(await ids("Max"), ["gpt-6-luna"]);
   entries = [entry("gpt-6-luna", ["code"])];
   assert.deepEqual(await ids("Pro"), []);
   entries = [entry("gpt-6-luna", ["code", "api"])];

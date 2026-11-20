@@ -485,6 +485,10 @@ export type CodingResolution = {
 
 const PLAN_RANK: Record<CodingPlan, number> = { Free: 0, Pro: 1, Max: 2 };
 
+/** Whether an account on `plan` reaches a model's minimum; a plan this scale does not know reaches nothing. */
+export const codingPlanReaches = (plan: string, minimumPlan: CodingPlan): boolean =>
+  Object.hasOwn(PLAN_RANK, plan) && PLAN_RANK[plan as CodingPlan] >= PLAN_RANK[minimumPlan];
+
 /**
  * Resolve one stored coding row against the chat registry and the provider
  * conditions. Pure: the caller supplies both lookups.
@@ -648,7 +652,7 @@ export const externalChannelModelIds = (
           row.source === "chat" &&
           row.channels.includes(input.channel) &&
           input.activeIds.has(row.modelId) &&
-          PLAN_RANK[input.plan] >= PLAN_RANK[row.minimumPlan]
+          codingPlanReaches(input.plan, row.minimumPlan)
       )
       .map((row) => row.registryModelId ?? row.modelId)
   );
