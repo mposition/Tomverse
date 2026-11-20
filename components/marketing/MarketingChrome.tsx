@@ -670,7 +670,7 @@ const launchNav: Record<Language, Omit<NavCopy, "chatItems" | "developerItems"> 
   ko: {
     chat: "채팅", review: "답변 비교", developers: "개발자", models: "모델", chatMenu: "채팅 기능", developersMenu: "개발자 메뉴", soon: "곧 출시", apiKeys: "API 키 관리",
     chatItems: [
-      { title: "Smart Adaptive", body: "질문을 다듬고 맞는 모델로" }, { title: "대화 이어가기", body: "다른 AI의 대화를 가져와 계속" },
+      { title: "스마트 자동(Smart Adaptive)", body: "질문을 다듬고 맞는 모델로" }, { title: "대화 이어가기", body: "다른 AI의 대화를 가져와 계속" },
       { title: "이미지 · 파일", body: "생성, 사진 편집, 파일 변환" }, { title: "플러그인 · MCP", body: "업무 도구를 대화 안으로" }, { title: "모바일 앱", body: "Android · iOS 곧 출시" },
     ],
     developerItems: [

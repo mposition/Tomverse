@@ -66,7 +66,7 @@ test("every settings destination resolves to the deep link settings itself parse
     }
 });
 
-test("every guide destination resolves to an anchor that exists in every guide language", () => {
+test("every guide destination names a section that exists in every guide language and opens the help centre hub", () => {
     for (const [lang, copy] of Object.entries(chatWorkspaceGuideContent)) {
         const ids = new Set(copy.sections.map((section) => section.id));
         for (const id of HELP_GUIDE_SECTION_IDS) assert.ok(ids.has(id), `${lang} guide has no #${id}`);
@@ -74,8 +74,9 @@ test("every guide destination resolves to an anchor that exists in every guide l
             for (const destination of candidate.destinations.filter((d) => d.kind === "guide-section")) {
                 const resolved = resolveHelpDestination(destination, lang);
                 const url = new URL(resolved.href, "https://tomverse.app");
-                assert.equal(url.pathname, "/support/help-centre/chat-workspace");
-                assert.equal(url.hash, `#${destination.section}`);
+                // The guide page redirects to the hub, so the link goes there directly.
+                assert.equal(url.pathname, "/support/help-centre");
+                assert.equal(url.hash, "");
                 assert.equal(url.searchParams.get("lang"), lang);
             }
         }

@@ -275,7 +275,7 @@ export const homeSeoCopy: Record<Language, { title: string; description: string 
   },
   ko: {
     title: "어떤 AI를 쓸지, 고민은 Tomverse에. | Chat & Review",
-    description: "GPT, Claude, Gemini를 한곳에서. Chat의 Smart Adaptive로 기능·비용·품질을 고려한 모델 선택을 돕고 질문 제안은 직접 채택하세요. Review에서 답변의 차이·누락을 인용으로 비교하세요. Chat과 Review 모두 비회원으로 시작할 수 있습니다.",
+    description: "GPT, Claude, Gemini를 한곳에서. Chat의 스마트 자동(Smart Adaptive)으로 기능·비용·품질을 고려한 모델 선택을 돕고 질문 제안은 직접 채택하세요. Review에서 답변의 차이·누락을 인용으로 비교하세요. Chat과 Review 모두 비회원으로 시작할 수 있습니다.",
   },
   zh: {
     title: "该用哪个 AI，让 Tomverse 帮你选。| Chat & Review",
@@ -312,7 +312,7 @@ export const homeOgCopy: Record<Language, { title: string; description: string }
 
 const homeReviewEntryDescription: Record<Language, string> = {
   en: "Use GPT, Claude and Gemini in one place. Explore Smart Adaptive model selection and question suggestions you control in Chat; compare answer differences and omissions with quotes in Review. Try Review as a guest; Chat access depends on availability.",
-  ko: "GPT, Claude, Gemini를 한곳에서. Chat의 Smart Adaptive 모델 선택과 직접 확인하는 질문 제안을 알아보고, Review에서 답변의 차이·누락을 인용으로 비교하세요. Review는 비회원으로 체험할 수 있고 Chat은 현재 제공 범위에 따라 이용합니다.",
+  ko: "GPT, Claude, Gemini를 한곳에서. Chat의 스마트 자동(Smart Adaptive) 모델 선택과 직접 확인하는 질문 제안을 알아보고, Review에서 답변의 차이·누락을 인용으로 비교하세요. Review는 비회원으로 체험할 수 있고 Chat은 현재 제공 범위에 따라 이용합니다.",
   zh: "在一个地方使用GPT、Claude和Gemini。了解Chat的Smart Adaptive模型选择与由你决定的提问建议，在Review中结合引文比较差异与遗漏。Review可访客体验，Chat使用取决于当前提供范围。",
   "zh-Hant": "在同一個地方使用GPT、Claude和Gemini。了解Chat的Smart Adaptive模型選擇與由你決定的提問建議，在Review中搭配引文比較差異與遺漏。Review可用訪客身分體驗，Chat的使用取決於目前的提供範圍。",
   fr: "Retrouvez GPT, Claude et Gemini au même endroit. Découvrez le choix Smart Adaptive et les reformulations que vous contrôlez dans Chat ; comparez différences et omissions avec citations dans Review. Review est accessible sans compte ; l’accès à Chat dépend de sa disponibilité.",

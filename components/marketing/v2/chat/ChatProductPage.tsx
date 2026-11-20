@@ -38,6 +38,7 @@ const importSources: Array<[icon: string, name: string, file: string]> = [
   ["chatgpt", "ChatGPT", "conversations.json"],
   ["claude", "Claude", "claude-export.zip"],
   ["gemini", "Gemini", "takeout.zip"],
+  ["perplexity", "Perplexity", "thread.md"],
 ];
 
 function usePrefersReducedMotion() {
@@ -235,7 +236,6 @@ export function ChatProductPage() {
           </div>
           <div className="import-flow rise">
             {importSources.map(([icon, name, file]) => <div key={name} className="import-src"><ModelTile icon={icon} /><strong>{name}</strong><code>{file}</code></div>)}
-            <div className="import-src soon"><ModelTile icon="perplexity" /><strong>Perplexity</strong><code>{copy.continue.soon}</code></div>
           </div>
           <div className="steps rise" style={{ marginTop: 48 }}>
             {copy.continue.steps.map(([title, body], i) => <div key={title} className={`step${importStep === i ? " on" : ""}`}>

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { canUseModelWithPlan, type ModelTier } from "@/lib/models";
-import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
+import { helpCentreHref } from "@/lib/localizedHelpHref";
 
 export function PricingPlanCapabilities({ plan }: { plan: ModelTier }) {
   const { publicModels } = useModelCatalog();
@@ -23,7 +23,7 @@ export function PricingPlanCapabilities({ plan }: { plan: ModelTier }) {
           ))}
         </ul>
         <Link href="/models" className="block font-bold underline underline-offset-4">Compare model access and base credits</Link>
-        <Link href={chatWorkspaceGuideHref("en", "files-and-drive")} className="block font-bold underline underline-offset-4">File limits and Google Drive help</Link>
+        <Link href={helpCentreHref("en")} className="block font-bold underline underline-offset-4">File limits and Google Drive help</Link>
       </div>
     </details>
   );

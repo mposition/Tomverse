@@ -57,7 +57,6 @@ export const chatPageTranslations: Record<Exclude<Language, "ko" | "en">, ChatPa
       eyebrow: "接续对话",
       title: ["和其他 AI 聊过的对话，", "不用从头再解释。"],
       body: "上传从各服务导出的对话文件，提问、回答和来源就会原样带到 Tomverse。从那里接着提问，也听听其他模型的意见。",
-      soon: "即将支持",
       steps: [
         ["导出", "在原来使用的服务的设置中下载对话数据。"],
         ["上传", "在 设置 › 数据 › 导入对话 中上传文件，对话列表就会整理好。"],
@@ -179,7 +178,6 @@ export const chatPageTranslations: Record<Exclude<Language, "ko" | "en">, ChatPa
       eyebrow: "接續對話",
       title: ["和其他 AI 聊過的對話，", "不用從頭再解釋。"],
       body: "上傳從各服務匯出的對話檔案，提問、回答和來源就會原樣帶到 Tomverse。從那裡接著提問，也聽聽其他模型的意見。",
-      soon: "即將支援",
       steps: [
         ["匯出", "在原本使用的服務的設定中下載對話資料。"],
         ["上傳", "在 設定 › 資料 › 匯入對話 中上傳檔案，對話列表就會整理好。"],
@@ -301,7 +299,6 @@ export const chatPageTranslations: Record<Exclude<Language, "ko" | "en">, ChatPa
       eyebrow: "Continuer une conversation",
       title: ["Une conversation avec une autre IA ?", "Inutile de tout réexpliquer."],
       body: "Importez le fichier de conversation exporté depuis chaque service : vos questions, réponses et sources arrivent dans Tomverse telles quelles. Poursuivez à partir de là et écoutez aussi l’avis d’autres modèles.",
-      soon: "Bientôt",
       steps: [
         ["Exporter", "Téléchargez vos données de conversation depuis les réglages du service que vous utilisiez."],
         ["Importer", "Déposez le fichier dans Réglages › Données › Importer des conversations : votre liste de conversations s’organise."],
@@ -423,7 +420,6 @@ export const chatPageTranslations: Record<Exclude<Language, "ko" | "en">, ChatPa
       eyebrow: "Gespräche fortsetzen",
       title: ["Ein Gespräch mit einer anderen KI?", "Erklären Sie nicht alles noch einmal."],
       body: "Laden Sie die aus dem jeweiligen Dienst exportierte Gesprächsdatei hoch, und Fragen, Antworten und Quellen kommen so, wie sie waren, zu Tomverse. Fragen Sie von dort aus weiter und hören Sie auch die Meinung anderer Modelle.",
-      soon: "Demnächst",
       steps: [
         ["Exportieren", "Laden Sie Ihre Gesprächsdaten in den Einstellungen des bisherigen Dienstes herunter."],
         ["Hochladen", "Laden Sie die Datei unter Einstellungen › Daten › Gespräche importieren hoch, und Ihre Gesprächsliste wird geordnet."],
@@ -545,7 +541,6 @@ export const chatPageTranslations: Record<Exclude<Language, "ko" | "en">, ChatPa
       eyebrow: "Continuar conversaciones",
       title: ["¿Una conversación con otra IA?", "No la expliques otra vez desde cero."],
       body: "Sube el archivo de conversación exportado de cada servicio y tus preguntas, respuestas y fuentes llegan a Tomverse tal como estaban. Sigue preguntando desde ahí y escucha también la opinión de otros modelos.",
-      soon: "Próximamente",
       steps: [
         ["Exportar", "Descarga tus datos de conversación desde los ajustes del servicio que usabas."],
         ["Subir", "Sube el archivo en Ajustes › Datos › Importar conversaciones y tu lista de conversaciones queda ordenada."],
@@ -667,7 +662,6 @@ export const chatPageTranslations: Record<Exclude<Language, "ko" | "en">, ChatPa
       eyebrow: "Continuar conversas",
       title: ["Uma conversa com outra IA?", "Não explique tudo de novo."],
       body: "Envie o arquivo de conversa exportado de cada serviço, e suas perguntas, respostas e fontes chegam ao Tomverse como estavam. Continue perguntando a partir daí e ouça também a opinião de outros modelos.",
-      soon: "Em breve",
       steps: [
         ["Exportar", "Baixe os dados da conversa nas configurações do serviço que você usava."],
         ["Enviar", "Envie o arquivo em Configurações › Dados › Importar conversas, e sua lista de conversas fica organizada."],

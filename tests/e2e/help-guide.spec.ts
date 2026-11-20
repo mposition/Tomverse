@@ -93,12 +93,13 @@ test.describe("guided help", { tag: "@ui-risk" }, () => {
     await expect(answer.getByTestId("help-guide-offer")).toHaveAttribute("data-availability", "unavailable");
     await expect(answer.locator('[data-step][data-available="false"]')).toHaveCount(2);
 
-    // A reading page opens in a new tab through the registry's URL.
+    // A reading page opens in a new tab through the registry's URL. The old
+    // workspace guide redirects to the help centre hub, so the link goes there.
     await dialog.getByTestId("help-guide-back").click();
     await dialog.getByTestId("help-guide-intent-attach-files").click();
     const guideLink = answer.getByTestId("help-guide-offer").getByRole("link");
     await expect(guideLink).toHaveAttribute("target", "_blank");
-    await expect(guideLink).toHaveAttribute("href", /#files-and-drive$/);
+    await expect(guideLink).toHaveAttribute("href", /^\/support\/help-centre\?lang=[a-z-]+$/i);
 
     // Every control keeps a 44px touch target and nothing scrolls sideways.
     const small = await dialog.locator("button, a").evaluateAll((elements) =>

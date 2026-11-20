@@ -36,9 +36,10 @@ test("chat page copy states no provider count or unsupported claim", () => {
   // No estimate-before-send claim, and the Prompt Refiner is automatic.
   assert.doesNotMatch(JSON.stringify(chatPageContent.ko), /예상 크레딧|확인 후 채택|실행 전에 보여/);
   assert.doesNotMatch(JSON.stringify(chatPageContent.en), /estimated credits|after you confirm|shown before/i);
-  // Perplexity import and the mobile apps are announced as coming, not available.
-  assert.ok(chatPageContent.ko.continue.soon);
-  assert.match(chatPageContent.ko.mobile.eyebrow, /곧 출시/);});
+  // Perplexity import is offered now; only the mobile apps are announced as coming.
+  assert.ok(!("soon" in chatPageContent.ko.continue));
+  assert.match(chatPageContent.ko.mobile.eyebrow, /곧 출시/);
+});
 
 test("Korean chat page names the products like the header menu", () => {
   const ko = chatPageContent.ko;

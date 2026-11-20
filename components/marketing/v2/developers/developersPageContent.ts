@@ -90,7 +90,7 @@ const ko: DevelopersPageCopy = {
   crumb: "개발자",
   hero: {
     title: ["쓰던 코딩 도구는 그대로.", "모델은 {n}곳에서 고르세요."],
-    body: "Tomverse API 키 하나로 Codex, Claude Code, Cursor, VS Code, Aside를 연결합니다. Cursor, VS Code, Aside에서는 공급자 {n}곳의 모델을 고르고, Codex는 OpenAI 모델, Claude Code는 Anthropic 모델로 동작합니다. 모든 요청에 가장 비싼 모델을 쓸 필요는 없습니다. Smart Adaptive가 요청마다 알맞은 모델을 고르고, 키에 한도를 걸어 두면 그 한도를 넘지 않습니다.",
+    body: "Tomverse API 키 하나로 Codex, Claude Code, Cursor, VS Code, Aside를 연결합니다. Cursor, VS Code, Aside에서는 공급자 {n}곳의 모델을 고르고, Codex는 OpenAI 모델, Claude Code는 Anthropic 모델로 동작합니다. 모든 요청에 가장 비싼 모델을 쓸 필요는 없습니다. 스마트 자동(Smart Adaptive)이 요청마다 알맞은 모델을 고르고, 키에 한도를 걸어 두면 그 한도를 넘지 않습니다.",
     primary: "API 키 만들기",
     secondary: "도구별 연결 방법",
     note: "Pro 이상 플랜에서 쓸 수 있고, 채팅과 같은 크레딧을 씁니다.",
@@ -102,13 +102,13 @@ const ko: DevelopersPageCopy = {
     title: ["공급사마다 따로 가입하고,", "키마다 따로 결제하던 일을 하나로."],
     cards: [
       { k: "모델 선택", h: "도구는 그대로, 모델은 {n}곳에서", p: "OpenAI, Anthropic, Google, xAI, DeepSeek 등 공급자 {n}곳의 모델을 키 하나로 바꿔 가며 씁니다. 한 회사 구독은 해 줄 수 없는 일입니다. Codex는 OpenAI 모델, Claude Code는 Anthropic 모델 안에서 고릅니다." },
-      { k: "Smart Adaptive", h: "비싼 모델은 필요할 때만", p: "가벼운 요청은 가벼운 모델이, 설계와 디버깅은 고급 모델이 맡습니다. 어느 모델이 답했는지 응답마다 함께 돌아옵니다." },
+      { k: "스마트 자동(Smart Adaptive)", h: "비싼 모델은 필요할 때만", p: "가벼운 요청은 가벼운 모델이, 설계와 디버깅은 고급 모델이 맡습니다. 어느 모델이 답했는지 응답마다 함께 돌아옵니다." },
       { k: "예산", h: "정해 둔 만큼만 나갑니다", p: "키마다 크레딧 한도를 걸고, 프로젝트나 CI별로 키를 나눕니다. 한도를 넘어 크레딧이 나가지 않고, 키는 언제든 즉시 폐기할 수 있습니다." },
       { k: "하나의 계정", h: "비교해 보고, 그 모델로 코딩", p: "이 코드 문제에 어떤 모델이 맞는지 답변 비교로 먼저 견줘 보고, 고른 모델을 그대로 코딩 도구에 넣습니다." },
     ],
   },
   adaptive: {
-    eyebrow: "Smart Adaptive",
+    eyebrow: "스마트 자동(Smart Adaptive)",
     title: ["모든 요청에 가장 비싼", "모델이 필요하진 않습니다."],
     body: [
       "모델 이름에 ",
@@ -116,7 +116,7 @@ const ko: DevelopersPageCopy = {
       " 필드와 ",
       " 헤더에 실제로 답한 모델이 적혀 옵니다. Codex에서는 OpenAI 모델 안에서, Claude Code에서는 Anthropic 모델 안에서 고릅니다.",
     ],
-    savingLabels: ["Smart Adaptive", "전부 고급 모델"],
+    savingLabels: ["스마트 자동", "전부 고급 모델"],
     savingNote: "오른쪽 요청 다섯 개 기준 크레딧 합계 예시입니다.",
     routeAsks: ["변수 이름을 의미 있게 바꿔 줘", "이 함수에 타입 주석 달아 줘", "테스트가 가끔 실패하는 원인 찾아 줘", "README 설치 절차 다듬어 줘", "결제 모듈을 두 서비스로 나누는 설계"],
     tiers: { light: "가벼운 모델", mid: "중간 모델", high: "고급 모델" },
@@ -285,7 +285,7 @@ const en: DevelopersPageCopy = {
 };
 
 export const developersPageSeo: Record<Language, { title: string; description: string }> = {
-  ko: { title: "Tomverse API로 쓰던 코딩 도구 연결", description: "Tomverse API 키 하나로 Codex, Claude Code, Cursor, VS Code, Aside를 연결하고 Smart Adaptive로 요청마다 알맞은 모델을 쓰는 방법. Pro 이상 플랜에서 쓸 수 있습니다." },
+  ko: { title: "Tomverse API로 쓰던 코딩 도구 연결", description: "Tomverse API 키 하나로 Codex, Claude Code, Cursor, VS Code, Aside를 연결하고 스마트 자동(Smart Adaptive)으로 요청마다 알맞은 모델을 쓰는 방법. Pro 이상 플랜에서 쓸 수 있습니다." },
   en: { title: "Connect your coding tools with the Tomverse API", description: "Connect Codex, Claude Code, Cursor, VS Code and Aside with one Tomverse API key and let Smart Adaptive pick a suitable model per request. Available on Pro and above." },
   zh: { title: "用 Tomverse API 连接你的编程工具", description: "用一个 Tomverse API 密钥连接 Codex、Claude Code、Cursor、VS Code 和 Aside，并让 Smart Adaptive 为每个请求选择合适的模型。Pro 及以上方案可用。" },
   "zh-Hant": { title: "用 Tomverse API 連接你的程式開發工具", description: "用一組 Tomverse API 金鑰連接 Codex、Claude Code、Cursor、VS Code 和 Aside，並讓 Smart Adaptive 為每個請求選擇合適的模型。Pro 以上方案可用。" },

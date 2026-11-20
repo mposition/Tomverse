@@ -41,7 +41,7 @@ import { chatHelpCopy } from "@/components/chat/chatHelpCopy";
 import { useUserUsage, type UserPlan } from "@/components/chat/useUserUsage";
 import { dispatchAppToast } from "@/lib/appToast";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
-import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
+import { helpCentreHref } from "@/lib/localizedHelpHref";
 import { ACCOUNT_SETTINGS_OPEN_EVENT } from "@/lib/accountSettingsEvents";
 import { parseSettingsDeepLink } from "@/lib/settingsNavigation";
 import {
@@ -1449,7 +1449,7 @@ export function ChatSidebar({
                                 {helpCopy.replayTour}
                             </button>
                             <Link
-                                href={chatWorkspaceGuideHref(lang)}
+                                href={helpCentreHref(lang)}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 prefetch={false}
@@ -1582,7 +1582,7 @@ export function ChatSidebar({
                             buttonLabel={helpCopy.helpAboutStatus}
                             learnMoreLabel={helpCopy.learnMore}
                             topic="locked"
-                            href={chatWorkspaceGuideHref(lang, "states-and-labels")}
+                            href={helpCentreHref(lang)}
                             mobile={isMobileDrawer}
                             testId="status-help"
                         />
@@ -1679,7 +1679,7 @@ export function ChatSidebar({
                                 buttonLabel={helpCopy.helpAboutProjects}
                                 learnMoreLabel={helpCopy.learnMore}
                                 topic="project"
-                                href={chatWorkspaceGuideHref(lang, "projects")}
+                                href={helpCentreHref(lang)}
                                 mobile={isMobileDrawer}
                                 testId="projects-help"
                             />
@@ -2654,7 +2654,7 @@ export function ChatSidebar({
                                     buttonLabel={helpCopy.helpAboutCredits}
                                     learnMoreLabel={helpCopy.learnMore}
                                     topic="credits"
-                                    href={chatWorkspaceGuideHref(lang, "credits-and-plans")}
+                                    href={helpCentreHref(lang)}
                                     mobile={isMobileDrawer}
                                     testId="credits-help"
                                 />
