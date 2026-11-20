@@ -20,14 +20,16 @@ import type { ExternalApiProtocol } from "@/lib/externalApiProtocols";
  * offered.
  *
  * With CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED on, only the chat models the
- * newest coding snapshot lists for this channel (lib/codingCatalogChannels.ts);
- * off, the allow-list is null and nothing else is read.
+ * newest coding snapshot lists for this channel and the coding judge still
+ * admits now (lib/codingCatalogChannels.ts); off, the allow-list is null and
+ * nothing else is read.
  */
 export const externalApiRunnableModels = async (
     plan: ModelTier,
     options: { channel?: ExternalCodingChannel } = {}
 ): Promise<{ model: AiModel; capabilities: ExternalApiModelCapabilities }[]> => {
-    const [runtime, allowed] = await Promise.all([getRuntimeModels(), externalChannelAllowlist(options.channel ?? "api", plan)]);
+    const runtime = await getRuntimeModels();
+    const allowed = await externalChannelAllowlist(options.channel ?? "api", plan, { runtime });
     return runtime
         .filter(
             (model) =>
@@ -61,8 +63,9 @@ export const externalApiOfferedModels = async (
 /** The runnable models one wire protocol carries, for its model list and settings. */
 export const externalApiProtocolModels = async (
     plan: ModelTier,
-    protocol: ExternalApiProtocol
+    protocol: ExternalApiProtocol,
+    options: { channel?: ExternalCodingChannel } = {}
 ): Promise<ExternalApiModelCapabilities[]> =>
-    (await externalApiRunnableModels(plan))
+    (await externalApiRunnableModels(plan, options))
         .map((entry) => entry.capabilities)
         .filter((capabilities) => capabilities.protocols.includes(protocol));

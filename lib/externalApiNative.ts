@@ -19,7 +19,7 @@ import { ApiSecurityError, consumeApiRateLimit, readLimitedText } from "@/lib/ap
 import { externalApiAdmissionHook } from "@/lib/externalApiAdmission";
 import { externalApiRunnableModels } from "@/lib/externalApiCatalog";
 import { externalApiAccountAccess } from "@/lib/externalApiAccess";
-import { externalApiEnabled, SMART_ADAPTIVE_MODEL_ID } from "@/lib/externalApiCatalogCore";
+import { externalApiChannelFor, externalApiEnabled, SMART_ADAPTIVE_MODEL_ID } from "@/lib/externalApiCatalogCore";
 import { externalApiErrorResponse, idempotentReplay, positiveInteger } from "@/lib/externalApiInference";
 import { authenticateExternalApiKey, ExternalApiKeyError, type AuthenticatedExternalApiKey } from "@/lib/externalApiKeys";
 import { sha256Hex } from "@/lib/externalApiKeyCore";
@@ -182,12 +182,14 @@ export const resolveNativeModel = async (
     protocol: NativeProtocol,
     plan: Parameters<typeof externalApiRunnableModels>[0],
     requested: unknown,
-    smart?: Omit<Parameters<typeof routeNativeSmartAdaptive>[0], "protocol" | "runnable">
+    smart?: Omit<Parameters<typeof routeNativeSmartAdaptive>[0], "protocol" | "runnable">,
+    /** The coding-catalogue channel the request belongs to (read only while the external channels are on). */
+    channel: "api" | "cli" = "api"
 ): Promise<RunnableEntry & { routedBy?: NativeSmartDecision["routedBy"] }> => {
     if (typeof requested !== "string" || !requested) {
         throw new NativeProtocolError(400, "invalid_request", "model is required.", "model");
     }
-    const runnable = await externalApiRunnableModels(plan);
+    const runnable = await externalApiRunnableModels(plan, { channel });
     if (requested === SMART_ADAPTIVE_MODEL_ID) {
         const decision = smart ? await routeNativeSmartAdaptive({ ...smart, protocol, runnable }) : null;
         if (decision) return { ...decision.entry, routedBy: decision.routedBy };
@@ -534,7 +536,8 @@ export async function handleNativeGeneration(request: Request, spec: NativeProto
                       routerAllowed: () => smartAdaptiveRouterAllowed(key),
                       prepare: (candidate) => spec.prepare(body, candidate),
                   }
-                : undefined
+                : undefined,
+            externalApiChannelFor(request.headers.get("user-agent"))
         );
         const { model, capabilities } = entry;
         const routedHeaders: Record<string, string> = entry.routedBy
@@ -719,7 +722,8 @@ export async function handleNativeFreeCall(
                       prepare: (candidate) => options.prepare(body, candidate),
                       free: true,
                   }
-                : undefined
+                : undefined,
+            externalApiChannelFor(request.headers.get("user-agent"))
         );
         const prepared = options.prepare(body, { apiModel: entry.model.apiModel, maxOutputTokens: entry.capabilities.maxOutputTokens });
         const upstreamHeaders = checkForwardedHeaders(spec.upstreamHeaders(request, prepared));

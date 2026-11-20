@@ -3,18 +3,21 @@
 // off, nothing here reads the database and the external API offers what the
 // chat registry serves, as before. On, the external API, Smart Adaptive, the
 // coding-app settings and the tomverse CLI offer only the chat models the newest
-// coding snapshot lists for their channel. The snapshot is an allow-list only:
-// requests still run and bill through the chat registry's own path.
+// coding snapshot lists for their channel and the coding judge still admits
+// now. The snapshot is an allow-list only: requests still run and bill through
+// the chat registry's own path.
 import "server-only";
 
 import {
-  codingCatalogExternalChannelsEnabled,
-  codingCatalogRowSchema,
-  externalChannelModelIds,
-  snapshotIsCurrent,
-  type CodingCatalogRow,
-} from "@/lib/modelCatalogCore";
-import type { ModelTier } from "@/lib/models";
+  chatModelFacts,
+  loadCodingCatalog,
+  loadCodingProviderTerms,
+  parseSnapshotRows,
+  servableCodingRows,
+} from "@/lib/modelCatalog";
+import { codingCatalogExternalChannelsEnabled, externalChannelModelIds, snapshotIsCurrent } from "@/lib/modelCatalogCore";
+import type { AiModel, ModelTier } from "@/lib/models";
+import { getRuntimeModels } from "@/lib/modelRegistry";
 import { prisma } from "@/lib/prisma";
 
 export type ExternalCodingChannel = "api" | "cli";
@@ -23,23 +26,23 @@ let warnedNoSnapshot = 0;
 
 /**
  * The chat model ids this channel may offer to this plan, or null when the
- * switch is off (no filter). No snapshot, or one past its coverage, offers
- * nothing: an unpublished catalogue does not fall back to the whole registry.
+ * switch is off (no filter).
+ *
+ * A model must be in the newest snapshot for the channel (publishing is the
+ * step that exposes it) and must still be admitted now -- on, not held, the
+ * channel still ticked, its provider's conditions still allowing it -- so a
+ * hold or a re-check that refuses a model takes effect at once, not at the
+ * next publish. No snapshot, or one past its coverage, offers nothing: an
+ * unpublished catalogue does not fall back to the whole registry.
  */
 export const externalChannelAllowlist = async (
   channel: ExternalCodingChannel,
   plan: ModelTier,
-  env: Readonly<Record<string, string | undefined>> = process.env,
-  now: Date = new Date()
+  options: { runtime?: readonly AiModel[]; env?: Readonly<Record<string, string | undefined>>; now?: Date } = {}
 ): Promise<ReadonlySet<string> | null> => {
-  if (!codingCatalogExternalChannelsEnabled(env)) return null;
-  const [snapshot, active] = await Promise.all([
-    prisma.modelCatalogSnapshot.findFirst({ where: { category: "coding" }, orderBy: { version: "desc" } }),
-    prisma.modelCatalogEntry.findMany({
-      where: { category: "coding", enabled: true, holdReason: null },
-      select: { modelId: true },
-    }),
-  ]);
+  if (!codingCatalogExternalChannelsEnabled(options.env ?? process.env)) return null;
+  const now = options.now ?? new Date();
+  const snapshot = await prisma.modelCatalogSnapshot.findFirst({ where: { category: "coding" }, orderBy: { version: "desc" } });
   if (!snapshot || !snapshotIsCurrent(snapshot.coverageUntil, now)) {
     // Once a minute at most: this is on every external request.
     if (now.getTime() - warnedNoSnapshot > 60_000) {
@@ -55,13 +58,15 @@ export const externalChannelAllowlist = async (
     }
     return new Set();
   }
-  const models = ((snapshot.payload as { models?: unknown[] } | null)?.models ?? []).flatMap((model): CodingCatalogRow[] => {
-    const parsed = codingCatalogRowSchema.safeParse(model);
-    return parsed.success ? [parsed.data] : [];
+  const runtime = options.runtime ?? (await getRuntimeModels());
+  const entries = await loadCodingCatalog(prisma, {
+    now,
+    context: { chat: runtime.map(chatModelFacts), providerTerms: await loadCodingProviderTerms(prisma) },
   });
-  return externalChannelModelIds(models, {
+  const admitted = servableCodingRows(entries).filter((row) => row.channels.includes(channel));
+  return externalChannelModelIds(parseSnapshotRows((snapshot.payload as { models?: unknown[] } | null)?.models ?? []), {
     channel,
     plan,
-    activeIds: new Set(active.map((row) => row.modelId)),
+    activeIds: new Set(admitted.map((row) => row.modelId)),
   });
 };

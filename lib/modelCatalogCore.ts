@@ -414,9 +414,11 @@ export type CodingProviderTerms = z.infer<typeof codingProviderTermsSchema>;
 export const PROVIDER_TERMS_VALID_DAYS = 90;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** The first UTC day the conditions checked on `checkedAt` need a new check. */
-export const providerTermsDueOn = (checkedAt: string): string =>
-  new Date(Date.parse(`${checkedAt}T00:00:00Z`) + PROVIDER_TERMS_VALID_DAYS * DAY_MS).toISOString().slice(0, 10);
+/** The first UTC day the conditions checked on `checkedAt` need a new check; null for an unreadable date. */
+export const providerTermsDueOn = (checkedAt: string): string | null => {
+  const checked = Date.parse(`${checkedAt}T00:00:00Z`);
+  return Number.isFinite(checked) ? new Date(checked + PROVIDER_TERMS_VALID_DAYS * DAY_MS).toISOString().slice(0, 10) : null;
+};
 
 export const providerTermsExpired = (checkedAt: string, now: Date): boolean => {
   const checked = Date.parse(`${checkedAt}T00:00:00Z`);

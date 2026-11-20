@@ -124,7 +124,16 @@ export async function GET(req: Request) {
       else if (reason !== "already_in_catalog" && reason !== "deleted") excluded.push({ id: facts.id, name: facts.name, provider: facts.provider, reason });
     }
 
-    const providerOf = (entry: (typeof entries)[number]) => entry.profile?.provider ?? null;
+    // A row that does not resolve still names its provider where its stored
+    // row or its chat model says one, so that provider's conditions stay on
+    // the screen used to fix the row.
+    const providerOf = (entry: (typeof entries)[number]): string | null => {
+      if (entry.profile) return entry.profile.provider;
+      const stored = entry.stored as { provider?: unknown; registryModelId?: unknown } | null;
+      if (typeof stored?.provider === "string") return stored.provider;
+      if (typeof stored?.registryModelId === "string") return chatById.get(stored.registryModelId)?.provider ?? null;
+      return null;
+    };
     const providers = [
       ...new Set([
         ...entries.flatMap((entry) => (providerOf(entry) ? [providerOf(entry) as string] : [])),
