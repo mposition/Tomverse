@@ -7,6 +7,7 @@ import {
     AUTO_LLM_ROUTER_DEFAULT_REWRITE_GUIDANCE,
     type AutoLlmRouterGuidanceKind,
 } from "@/lib/autoLlmRouterCore";
+import { CHAT_IMAGE_ROUTING_CRITERIA } from "@/lib/chatImageIntentCore";
 import {
     parseActiveRouterGuidance,
     type ActiveRouterGuidance,
@@ -37,6 +38,14 @@ export const AUTO_LLM_ROUTER_REWRITE_GUIDANCE_SETTING_KEY = "auto.llmRouterRewri
  */
 export const AUTO_LLM_ROUTER_CODING_GUIDANCE_SETTING_KEY = "auto.llmRouterCodingGuidance";
 
+/**
+ * The image guidance: the criteria Chat's image routing call follows -- when a
+ * message is an image request, and which image model and preset make it
+ * (CHAT_IMAGE_ROUTING_CRITERIA is its code default). Only an image optimizer
+ * cycle (lib/imageRoutingOptimizer.ts) promotes into it.
+ */
+export const AUTO_LLM_ROUTER_IMAGE_GUIDANCE_SETTING_KEY = "auto.llmRouterImageGuidance";
+
 export type RouterGuidanceKind = AutoLlmRouterGuidanceKind;
 
 export const DEFAULT_ROUTER_GUIDANCE: ActiveRouterGuidance = {
@@ -57,10 +66,17 @@ export const DEFAULT_ROUTER_CODING_GUIDANCE: ActiveRouterGuidance = {
     history: [],
 };
 
+export const DEFAULT_ROUTER_IMAGE_GUIDANCE: ActiveRouterGuidance = {
+    guidance: CHAT_IMAGE_ROUTING_CRITERIA,
+    cycleId: null,
+    history: [],
+};
+
 const SLOTS: Record<RouterGuidanceKind, { key: string; fallback: ActiveRouterGuidance }> = {
     routing: { key: AUTO_LLM_ROUTER_GUIDANCE_SETTING_KEY, fallback: DEFAULT_ROUTER_GUIDANCE },
     rewrite: { key: AUTO_LLM_ROUTER_REWRITE_GUIDANCE_SETTING_KEY, fallback: DEFAULT_ROUTER_REWRITE_GUIDANCE },
     coding: { key: AUTO_LLM_ROUTER_CODING_GUIDANCE_SETTING_KEY, fallback: DEFAULT_ROUTER_CODING_GUIDANCE },
+    image: { key: AUTO_LLM_ROUTER_IMAGE_GUIDANCE_SETTING_KEY, fallback: DEFAULT_ROUTER_IMAGE_GUIDANCE },
 };
 
 type Reader = Pick<Prisma.TransactionClient, "appSetting">;
