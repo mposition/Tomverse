@@ -302,8 +302,13 @@ async function runCodingCycle(input: {
         const evalCalls: TaskEvaluationCall[] = [];
         const worstRun = codingEvalWorstCaseTokens(CYCLE_EVAL_LIMITS);
         const isolated = codingTaskEvalRunnerIsolated(process.env);
-        let evalStop: "runner_not_isolated" | "budget" | "deadline" | "cost_unknown" | null = isolated ? null : "runner_not_isolated";
-        for (const task of isolated ? CODING_EVAL_TASKS : []) {
+        const enoughCandidates = candidatesFor().length >= 2;
+        let evalStop: "runner_not_isolated" | "too_few_candidates" | "budget" | "deadline" | "cost_unknown" | null = !isolated
+            ? "runner_not_isolated"
+            : enoughCandidates
+              ? null
+              : "too_few_candidates";
+        for (const task of evalStop ? [] : CODING_EVAL_TASKS) {
             if (evalStop) break;
             if (Date.now() >= evalDeadline) {
                 evalStop = "deadline";
@@ -344,7 +349,7 @@ async function runCodingCycle(input: {
                 const worst = costMicroUsd(prices, worstRun);
                 if (evalTotal + worst > evalBudget) {
                     evalStop = "budget";
-                    continue;
+                    break;
                 }
                 if (Date.now() >= evalDeadline) {
                     evalStop = "deadline";
@@ -361,8 +366,10 @@ async function runCodingCycle(input: {
                         addEvalSpend(model.provider, microUsd);
                         evalCalls.push({ known, microUsd });
                         evalResults.push(result);
+                        if (!known) evalStop = "cost_unknown";
                     },
                 });
+                if (evalStop) break;
             }
         }
         const taskEvaluation: CodingTaskEvidence[] = summarizeCodingEval(evalResults).map((row) => ({
@@ -372,6 +379,26 @@ async function runCodingCycle(input: {
             byDifficulty: row.byDifficulty,
         }));
         const evidence = codingGeneratorEvidence({ taskEvaluation, liveRouting });
+
+        // A cost that could not be confirmed makes the cycle unpromotable
+        // (cost_unconfirmed), so the cycle proper is not run on top of it: the
+        // cycle is recorded as failed with what the evaluation spent.
+        if (evalStop === "cost_unknown") {
+            known = { spentMicroUsd: evalTotal, spentByProvider: evalSpent };
+            const recorded = await finishOptimizerCycle({
+                cycleId: input.cycleId,
+                data: {
+                    status: "failed",
+                    failure: "cost_unknown",
+                    summary: { taskEvaluation, taskEvaluationSpentMicroUsd: evalTotal, taskEvaluationStop: evalStop, liveRouting },
+                    spentMicroUsd: evalTotal,
+                    finishedAt: new Date(),
+                },
+                spentByProvider: evalSpent,
+            });
+            console.info(JSON.stringify({ event: "auto_coding_optimizer_cycle", cycleId: input.cycleId, recorded, status: "failed", failure: "cost_unknown", spentMicroUsd: evalTotal, taskRuns: evalResults.length, taskEvaluationStop: evalStop }));
+            return { recorded, status: "failed", failure: "cost_unknown" };
+        }
 
         // 2. The shared cycle on synthetic coding requests, on what is left.
         const result = await runOptimizerCycle(

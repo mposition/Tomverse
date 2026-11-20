@@ -62,6 +62,7 @@ export const adminAutoCodingOptimizerMessages = defineAdminMessages({
     taskEvalFrom: "from the cycle of",
     taskEvalStops: {
       runner_not_isolated: "Skipped: this runner is not marked isolated (CODING_TASK_EVAL_ISOLATED_RUNNER).",
+      too_few_candidates: "Skipped: fewer than two candidates to compare.",
       budget: "Stopped: the next run's worst case did not fit the evaluation's share of the budget.",
       deadline: "Stopped: the evaluation's time limit was reached.",
       cost_unknown: "Stopped: a call's cost was unknown.",
@@ -155,6 +156,7 @@ export const adminAutoCodingOptimizerMessages = defineAdminMessages({
     taskEvalFrom: "회차",
     taskEvalStops: {
       runner_not_isolated: "건너뜀: 이 runner가 격리됐다고 표시되지 않았습니다(CODING_TASK_EVAL_ISOLATED_RUNNER).",
+      too_few_candidates: "건너뜀: 비교할 후보가 두 개보다 적습니다.",
       budget: "중단: 다음 실행의 최악 비용이 평가 예산 몫에 들어가지 않았습니다.",
       deadline: "중단: 평가 시간 상한에 도달했습니다.",
       cost_unknown: "중단: 비용을 알 수 없는 호출이 있었습니다.",
