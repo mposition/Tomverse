@@ -93,7 +93,7 @@ type SqlChunk = {
 };
 type SqlCard = {
   id: string; cardType: string | null; status: string; reviewPrNumber: number | null;
-  terminal: boolean; displayKey: string | null; liveAttempt?: boolean;
+  terminal: boolean; archived?: boolean; displayKey: string | null; liveAttempt?: boolean;
   escalationId?: string | null; escalationReason?: string | null; lastAttemptReason?: string | null;
 };
 type SqlCheckoutEvidence = {
@@ -172,6 +172,9 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
           'id', w."id", 'cardType', w."cardType", 'status', w."status",
           -- A closed card has v4TerminalAt too (ideaCardCloseService.ts), but only a done one merged.
           'reviewPrNumber', w."reviewPrNumber", 'terminal', (w."v4TerminalAt" IS NOT NULL AND w."status" = 'done'),
+          -- An archived card has left the board: nothing runs or decides it
+          -- (ideaCardCloseService.ts judges only the cards still on the board).
+          'archived', (w."archivedAt" IS NOT NULL),
           'displayKey', w."displayKey",
           'liveAttempt', EXISTS (SELECT 1 FROM "AmuxExecutionAttempt" a
             WHERE a."taskId" = w."id" AND a."endedAt" IS NULL
@@ -248,7 +251,8 @@ export async function readAmuxIdeaProgressInTx(tx: Prisma.TransactionClient,
       chunks: (idea.chunks ?? []).map((chunk) => ({ ...chunk })),
       proposedUnits: idea.proposedUnits,
       cards: own.map((card) => ({ cardType: card.cardType, status: card.status,
-        reviewPrNumber: card.reviewPrNumber, merged: card.terminal, liveAttempt: card.liveAttempt })),
+        reviewPrNumber: card.reviewPrNumber, merged: card.terminal, archived: card.archived === true,
+        liveAttempt: card.liveAttempt })),
       lane,
     });
     return {

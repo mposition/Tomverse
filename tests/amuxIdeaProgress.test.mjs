@@ -79,6 +79,25 @@ test("each idea is at exactly one of the six stages, and a human step still open
   assert.deepEqual(counts, { total: 3, done: 1, inReview: 1 });
 });
 
+test("an archived card has left the board, so an idea whose cards were all archived stops waiting", () => {
+  const view = (value) => { const result = amuxIdeaProgress(facts(value)); return [result.stage, result.activity]; };
+  // 2026-11-20: the board's "archive all" left seven ideas "blocked" with no card the close could take.
+  assert.deepEqual(view({ submissionOrigin: "session", state: "completed", chunks: [chunk()],
+    cards: [task({ status: "blocked", archived: true }), task({ status: "backlog", archived: true })] }),
+  ["cancelled", null], "every Task archived and none merged: nothing is left to run or decide");
+  assert.deepEqual(view({ chunks: [chunk()], cards: [task({ status: "done", merged: true }), task({ status: "blocked", archived: true })] }),
+    ["done", null], "the merged work still counts as done");
+  assert.deepEqual(view({ chunks: [chunk()], cards: [task({ status: "blocked", archived: true }), task({ status: "backlog" })] }),
+    ["execution", "waiting"], "an archived blocked Task blocks nothing; the Task still on the board waits");
+  assert.deepEqual(view({ chunks: [chunk()], cards: [task({ cardType: "story", archived: true })] }), ["cancelled", null],
+    "archived stories alone do not hold an idea in execution");
+  assert.equal(amuxIdeaStatusNotice(amuxIdeaProgress(facts({ submissionOrigin: "session", state: "completed",
+    chunks: [chunk()], cards: [task({ status: "blocked", archived: true })] }))), null, "no notice asks the owner for anything");
+  const sql = read("lib/amux/ideaProgressRead.ts");
+  assert.match(sql, /'archived', \(w\."archivedAt" IS NOT NULL\)/, "the read carries each card's archived flag");
+  assert.match(sql, /archived: card\.archived === true/, "and passes it to the progress");
+});
+
 test("an unknown outcome is flagged, never a decision to retry", () => {
   for (const value of [chunk({ previewState: "outcome_unknown" }), chunk({ holdStatus: "outcome_unknown" }),
     chunk({ state: "outcome_unknown" })]) {
