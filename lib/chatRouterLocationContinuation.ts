@@ -29,7 +29,9 @@ const decision = z.object({
   image: z.discriminatedUnion("image", [
     z.object({ image: z.literal(false) }).strict(),
     z.object({ image: z.literal(true), modelId: z.string().max(300).nullable(), preset: z.enum(["draft", "standard", "final"]).nullable(),
-      prompt: z.string().max(1_500).nullable(), edit: z.boolean() }).strict(),
+      prompt: z.string().max(1_500).nullable(), edit: z.boolean(),
+      // The recorded routing decision, so the resumed turn links that record.
+      routingDecisionId: z.string().regex(/^[a-z0-9]{20,40}$/).optional() }).strict(),
   ]),
   expiresAt: z.number().int(),
 }).strict();

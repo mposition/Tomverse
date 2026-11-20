@@ -1070,6 +1070,33 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       take: EXPORT_ROW_CAP,
     }),
 
+  imageRoutingDecision: (userId) =>
+    prisma.imageRoutingDecision.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        conversationId: true,
+        source: true,
+        outcome: true,
+        imageModelId: true,
+        preset: true,
+        edit: true,
+        followUp: true,
+        attachedPhoto: true,
+        modelFallback: true,
+        groupId: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+  imageGenerationSignal: (userId) =>
+    prisma.imageGenerationSignal.findMany({
+      where: { userId },
+      select: { id: true, generationId: true, kind: true, createdAt: true },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
   imageGenerationGroup: (userId) =>
     prisma.imageGenerationGroup.findMany({
       where: { userId },

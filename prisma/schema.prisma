@@ -99,6 +99,8 @@ model User {
   promptRefinerProductAttempts           PromptRefinerProductAttempt[]
   chatResponseAttempts                 ChatResponseAttempt[]
   imageGenerationGroups                ImageGenerationGroup[]
+  imageRoutingDecisions                ImageRoutingDecision[]
+  imageGenerationSignals               ImageGenerationSignal[]
   imageCreditReservations              ImageCreditReservation[]
   memoryExtractionCreditReservations   MemoryExtractionCreditReservation[]
   adminNotes                           AdminNote[]
@@ -495,6 +497,7 @@ model Conversation {
   comparisonReviews     ComparisonReview[]
   imageGenerations      ImageGeneration[]
   imageGenerationGroups ImageGenerationGroup[]
+  imageRoutingDecisions ImageRoutingDecision[]
   cacheAffinities       DeploymentCacheAffinity[]
   continuationBridge    ConversationContinuationBridge?
   researchPreviewRuns   ResearchPreviewRun[]
@@ -2380,6 +2383,7 @@ model ImageGeneration {
   conversation    Conversation           @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   target          ImageGenerationTarget  @relation("TargetAttempts", fields: [targetId], references: [id], onDelete: Cascade)
   currentOfTarget ImageGenerationTarget? @relation("TargetCurrentAttempt")
+  signals         ImageGenerationSignal[]
   assets          ImageAsset[]
 
   @@unique([userId, idempotencyKey])
@@ -2402,9 +2406,65 @@ model ImageGenerationGroup {
   user         User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
   conversation Conversation            @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   targets      ImageGenerationTarget[]
+  /// The Chat routing decision this group answers, when one was recorded.
+  routingDecision ImageRoutingDecision?
 
   @@unique([userId, groupIdempotencyKey])
   @@index([conversationId, createdAt])
+}
+
+/// One Chat image routing decision (docs/policy/image-generation.md §13), for
+/// the image routing report and the image routing optimizer
+/// (lib/imageRoutingReportCore.ts, lib/imageRoutingOptimizer.ts). Content-free:
+/// which image model and preset the router chose and how, never the message
+/// or the prompt. Linked to the group it started once that group exists.
+model ImageRoutingDecision {
+  id             String   @id @default(cuid())
+  userId         String
+  conversationId String?
+  /// auto_chat (inside /api/chat) | composer (POST /api/chat/image-intent)
+  source         String
+  routerModelId  String
+  /// image | chat | error
+  outcome        String
+  imageModelId   String?
+  preset         String?
+  edit           Boolean  @default(false)
+  followUp       Boolean  @default(false)
+  attachedPhoto  Boolean  @default(false)
+  /// The router named no usable model or preset, so the default was taken.
+  modelFallback  Boolean  @default(false)
+  candidateCount Int
+  latencyMs      Int?
+  groupId        String?  @unique
+  createdAt      DateTime @default(now())
+
+  user         User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation Conversation?         @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  group        ImageGenerationGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@index([conversationId])
+}
+
+/// What a person did with one generated image: downloaded it, chose it in a
+/// comparison, rated it, or said they wanted a text answer instead. One row
+/// per kind per image. Content-free; the image routing report reads it.
+model ImageGenerationSignal {
+  id           String   @id @default(cuid())
+  userId       String
+  generationId String
+  /// download | selected | helpful | not_helpful | wanted_text
+  kind         String
+  createdAt    DateTime @default(now())
+
+  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  generation ImageGeneration @relation(fields: [generationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, generationId, kind])
+  @@index([createdAt])
+  @@index([generationId])
 }
 
 // A logical model slot inside a group. Retries append attempts under the
@@ -5066,7 +5126,7 @@ model AutoRouterOptimizerCycle {
   startedBy         String    @default("person")
   spentMicroUsd     Int       @default(0)
   promotedAt        DateTime?
-  /// routing | rewrite | coding -- which guidance the cycle improves
+  /// routing | rewrite | coding | image -- which guidance the cycle improves
   /// (AUTO_LLM_ROUTER_GUIDANCE_KINDS, held by a CHECK). All share one running
   /// cycle at a time and the same day and month caps.
   target            String    @default("routing")

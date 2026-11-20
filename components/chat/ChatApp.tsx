@@ -1871,6 +1871,8 @@ function ChatAppComponent({
             preset: request.preset,
             ...(request.prompt ? { prompt: request.prompt } : {}),
             ...(request.edit ? { edit: true as const } : {}),
+            // A retry after a failed first try links the same routing decision.
+            ...(request.routingDecisionId ? { routingDecisionId: request.routingDecisionId } : {}),
             assistantMessageId,
             ...(request.comparison ? { comparison: request.comparison } : {}),
           },
@@ -1903,6 +1905,8 @@ function ChatAppComponent({
                 // The photo is the one saved with the question; this only
                 // says to edit it.
                 ...(request.edit ? { edit: true } : {}),
+                // Links the routing decision to the group it starts (content-free).
+                ...(request.routingDecisionId ? { routingDecisionId: request.routingDecisionId } : {}),
               }),
               signal: controller.signal,
             }

@@ -83,9 +83,11 @@ import { consumeChatLocationIntentLimit } from "@/lib/chatLocationIntentRateLimi
 import { openRouterLocation, routerLocationDigest, sealRouterLocation, type RouterLocationContinuation } from "@/lib/chatRouterLocationContinuation";
 import { claimRouterLocation, consumeRouterLocation, routerLocationRefused, routerLocationResponse, type RouterLocationClaim } from "@/lib/chatRouterLocationPreparation";
 import { chatRouterImageHedgeMs, combinedChatImageIntentEnabled, createChatTurnImageRouting } from "@/lib/chatImageIntent";
+import { overrideImageRoutingDecisionAsChat, recordImageRoutingDecision } from "@/lib/imageRoutingDecisions";
 import {
     latestUserTurnHasAttachments,
     latestUserTurnHasImageAttachment,
+    type ChatImageDecision,
 } from "@/lib/chatImageIntentCore";
 import { CHAT_IMAGE_TURN_CONTENT_PREFIX } from "@/lib/chatImageTurnCore";
 import { autoLlmRouterCandidates, previousAnswerExcerpt, withRouterRewrite } from "@/lib/autoLlmRouterCore";
@@ -2838,8 +2840,36 @@ async function handleChatPost(
         if (earlyContextRefusal) return earlyContextRefusal;
         const detectedImageDecision = await imageRouting.resolve();
         // A document about images is still a file request, not an image turn.
-        const autoImageDecision = llmPick?.requiresFileGeneration
+        let autoImageDecision: ChatImageDecision = llmPick?.requiresFileGeneration
             ? { image: false as const } : detectedImageDecision;
+        // Every routing decision is measured, chat outcomes included. The
+        // standalone call records its own; the combined router's is recorded
+        // here, before the turn branches.
+        let imageRoutingDecisionId: string | null = detectedImageDecision.image ? detectedImageDecision.routingDecisionId ?? null : null;
+        const combinedImageOutcome = imageRouting.combinedOutcome();
+        const combinedImageContext = combinedImageOutcome ? await imageRouting.context?.catch(() => null) : null;
+        if (!imageRoutingDecisionId && combinedImageOutcome && combinedImageContext && session?.user?.id) {
+            const context = combinedImageContext;
+            imageRoutingDecisionId = await recordImageRoutingDecision({
+                userId: session.user.id,
+                conversationId: conversationId ?? null,
+                source: "auto_chat",
+                routerModelId: context?.modelId ?? "unknown",
+                decision: autoImageDecision,
+                outcome: autoImageDecision.image ? "image" : combinedImageOutcome === "error" ? "error" : "chat",
+                followUp: autoImageDecision.image ? autoImageDecision.prompt !== null : false,
+                attachedPhoto: context?.attachedPhoto ?? false,
+                candidateCount: context?.candidates.length ?? 0,
+                latencyMs: null,
+            });
+        } else if (imageRoutingDecisionId && detectedImageDecision.image && !autoImageDecision.image && session?.user?.id) {
+            await overrideImageRoutingDecisionAsChat({ decisionId: imageRoutingDecisionId, userId: session.user.id });
+        }
+        // The id travels with the decision, so a location-consent resume (which
+        // replays the sealed decision) links and overrides the same record.
+        if (imageRoutingDecisionId && autoImageDecision.image && !autoImageDecision.routingDecisionId) {
+            autoImageDecision = { ...autoImageDecision, routingDecisionId: imageRoutingDecisionId };
+        }
         // A request that started without an authorised plan cannot acquire a new
         // source after the Router has already decided from the native view.
         let afterRoutingContinuation = preparedContinuation.seed ? await readContinuation() : preparedContinuation;
@@ -3701,6 +3731,7 @@ async function handleChatPost(
         }
         if (autoImageDecision.image) {
             console.info(JSON.stringify({ event: "chat_auto_image_turn", traceId }));
+            const routingDecisionId = imageRoutingDecisionId;
             return new Response(
                 JSON.stringify({
                     imageTurn: {
@@ -3708,6 +3739,7 @@ async function handleChatPost(
                         preset: autoImageDecision.preset,
                         ...(autoImageDecision.prompt ? { prompt: autoImageDecision.prompt } : {}),
                         ...(autoImageDecision.edit ? { edit: true } : {}),
+                        ...(routingDecisionId ? { routingDecisionId } : {}),
                     },
                 }),
                 {

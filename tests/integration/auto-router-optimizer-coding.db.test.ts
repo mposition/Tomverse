@@ -38,6 +38,7 @@ import {
   startCodingRouterOptimizerCycle,
   updateCodingOptimizerAutomation,
 } from "@/lib/autoCodingRouterOptimizer";
+import { AUTO_IMAGE_OPTIMIZER_AUTOMATION_SETTING_KEY } from "@/lib/imageRoutingOptimizer";
 
 /**
  * The coding router optimizer (lib/autoCodingRouterOptimizer.ts): a third
@@ -61,11 +62,14 @@ const SETTING_KEYS = [
   AUTO_CODING_OPTIMIZER_AUTOMATION_SETTING_KEY,
   AUTO_ROUTER_OPTIMIZER_MODEL_SETTING_KEY,
   AUTO_LLM_ROUTER_MODEL_SETTING_KEY,
+  AUTO_IMAGE_OPTIMIZER_AUTOMATION_SETTING_KEY,
 ];
 
 const reset = async () => {
   await prisma.autoRouterOptimizerCycle.deleteMany({});
   await prisma.appSetting.deleteMany({ where: { key: { in: SETTING_KEYS } } });
+  // The image cycle's daily run is on by default; these tests are about coding.
+  await prisma.appSetting.create({ data: { key: AUTO_IMAGE_OPTIMIZER_AUTOMATION_SETTING_KEY, value: JSON.stringify({ daily: false, autoPromote: false, modelEval: false }) } });
 };
 beforeEach(reset);
 after(async () => {

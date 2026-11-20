@@ -405,7 +405,7 @@ const AUTO_LLM_ROUTER_REWRITE_TAIL = [
  * improves (AutoRouterOptimizerCycle.target), held to this list by the
  * column's CHECK constraint (scripts/check-enum-constraints.mjs).
  */
-export const AUTO_LLM_ROUTER_GUIDANCE_KINDS = ["routing", "rewrite", "coding"] as const;
+export const AUTO_LLM_ROUTER_GUIDANCE_KINDS = ["routing", "rewrite", "coding", "image"] as const;
 export type AutoLlmRouterGuidanceKind = (typeof AUTO_LLM_ROUTER_GUIDANCE_KINDS)[number];
 
 export const buildAutoLlmRouterSystem = (

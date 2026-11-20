@@ -390,6 +390,8 @@ const PROVIDER_MONTH = "provider-cost-month";
  */
 async function addProviderSpend(
     tx: Prisma.TransactionClient,
+    /** `provider` for a model provider's bucket, `image-provider` for an image provider's. */
+    bucket: "provider" | "image-provider",
     provider: string,
     period: string,
     start: Date,
@@ -399,7 +401,7 @@ async function addProviderSpend(
     const microUsd = Math.ceil(amount);
     await tx.$executeRaw`
         INSERT INTO "ChatUsageBucket" ("key", "period", "periodStart", "count", "updatedAt")
-        VALUES (${`provider:${provider}`}, ${period}, ${start}, ${microUsd}, NOW())
+        VALUES (${`${bucket}:${provider}`}, ${period}, ${start}, ${microUsd}, NOW())
         ON CONFLICT ("key", "period", "periodStart")
         DO UPDATE SET "count" = "ChatUsageBucket"."count" + ${microUsd}, "updatedAt" = NOW()
     `;
@@ -488,6 +490,8 @@ export async function finishOptimizerCycle(input: {
     cycleId: string;
     data: Prisma.AutoRouterOptimizerCycleUpdateManyMutationInput & { spentMicroUsd: number };
     spentByProvider: ReadonlyMap<string, number>;
+    /** What image providers were paid (an image cycle's evaluation), booked to their own buckets. */
+    imageSpentByProvider?: ReadonlyMap<string, number>;
 }): Promise<boolean> {
     return prisma.$transaction(async (tx) => {
         // The same lock as the stale-cycle close in reserveOptimizerCycle, so a
@@ -507,8 +511,12 @@ export async function finishOptimizerCycle(input: {
         const dayStart = utcDayStart(cycle.createdAt);
         const monthStart = utcMonthStart(cycle.createdAt);
         for (const [provider, microUsd] of input.spentByProvider) {
-            await addProviderSpend(tx, provider, PROVIDER_DAY, dayStart, microUsd);
-            await addProviderSpend(tx, provider, PROVIDER_MONTH, monthStart, microUsd);
+            await addProviderSpend(tx, "provider", provider, PROVIDER_DAY, dayStart, microUsd);
+            await addProviderSpend(tx, "provider", provider, PROVIDER_MONTH, monthStart, microUsd);
+        }
+        for (const [provider, microUsd] of input.imageSpentByProvider ?? []) {
+            await addProviderSpend(tx, "image-provider", provider, PROVIDER_DAY, dayStart, microUsd);
+            await addProviderSpend(tx, "image-provider", provider, PROVIDER_MONTH, monthStart, microUsd);
         }
         return true;
     });

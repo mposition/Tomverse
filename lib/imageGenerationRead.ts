@@ -66,6 +66,9 @@ export const IMAGE_GENERATION_READ_SELECT = {
   createdAt: true,
   completedAt: true,
   failedAt: true,
+  // The owner's own signals (thumbs, wanted text, selected), so a reload shows
+  // what they already said and a second press takes it back.
+  signals: { select: { userId: true, kind: true } },
   assets: {
     where: { status: "ready", deletedAt: null },
     select: { role: true, r2Key: true, mimeType: true },
@@ -93,6 +96,7 @@ export type ImageGenerationReadRow = {
   completedAt: Date | null;
   failedAt: Date | null;
   assets: Array<{ role: string; r2Key: string; mimeType: string }>;
+  signals?: Array<{ userId: string; kind: string }>;
 };
 
 export type ImageGenerationReservationRow = {
@@ -140,6 +144,7 @@ export async function serializeImageGeneration(
     createdAt: generation.createdAt.toISOString(),
     completedAt: generation.completedAt?.toISOString() ?? null,
     failedAt: generation.failedAt?.toISOString() ?? null,
+    signals: (generation.signals ?? []).filter((signal) => signal.userId === generation.userId).map((signal) => signal.kind),
     assets,
   };
 }

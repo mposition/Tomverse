@@ -517,6 +517,35 @@ domains:
     implementationStatus: implemented
     inUnifiedExport: included_filtered
 
+  - domain: imageRoutingDecision
+    prismaModel: ImageRoutingDecision
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+    note: >-
+      One Chat image routing decision: where it was made, the router model,
+      the outcome, the image model and preset chosen and how (fallback,
+      follow-up, edit, attached photo), the candidate count and latency, and
+      the image group it started. Holds no message or prompt text.
+
+  - domain: imageGenerationSignal
+    prismaModel: ImageGenerationSignal
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included
+    note: >-
+      What the person did with one generated image -- downloaded it, chose it
+      in a comparison, rated it, or said a text answer was wanted -- and when.
+      Removed with the account, and with the image.
+
   - domain: planChangeRequest
     prismaModel: PlanChangeRequest
     userLinkageRole: subject

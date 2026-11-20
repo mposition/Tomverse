@@ -1,10 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Download, Loader2 } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
+import { saveResponseAsFile } from "@/lib/browserDownload";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { imageDownloadFilename } from "@/lib/imageAssetDownload";
 import { isImageAssetUrlExpired } from "@/lib/imageAssetPayload";
 import { useImageModelCatalog } from "@/components/images/ImageModelCatalogProvider";
+import {
+  ImageFeedbackButtons,
+  ImageSelectButton,
+  useImageResultSelection,
+} from "@/components/images/ImageSignalControls";
 import { imageGenerationFeedbackCopy, imageResultQuality } from "@/locales/imageGenerationFeedback";
 
 /**
@@ -28,6 +36,7 @@ type GroupGeneration = {
   quality?: string;
   preset?: string;
   assets: GroupAsset[];
+  signals?: string[];
 };
 type GroupTarget = { targetId: string; modelId: string; currentGenerationId: string | null };
 type GroupView = {
@@ -58,6 +67,9 @@ export function ChatImageTurnCard({ groupId, modelIds }: { groupId: string; mode
   // is the failure the retry replaced.
   const [awaitingRetry, setAwaitingRetry] = useState(false);
   const retryBaselineRef = useRef(0);
+  const { selectedIn, select } = useImageResultSelection();
+  const [downloadingIds, setDownloadingIds] = useState<string[]>([]);
+  const [downloadFailedId, setDownloadFailedId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (inFlightRef.current) return;
@@ -123,6 +135,33 @@ export function ChatImageTurnCard({ groupId, modelIds }: { groupId: string; mode
     }
   };
 
+  // Saved through this application's own route, which answers
+  // Content-Disposition: attachment and records the download as a signal that
+  // the picture was wanted. The signed URL is never linked: it expires.
+  const download = async (generationId: string, modelId: string | null) => {
+    if (downloadingIds.includes(generationId)) return;
+    setDownloadingIds((ids) => [...ids, generationId]);
+    setDownloadFailedId(null);
+    try {
+      const response = await fetch(`/api/images/generations/${encodeURIComponent(generationId)}/download`, {
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        await discardResponseBody(response);
+        setDownloadFailedId(generationId);
+        return;
+      }
+      await saveResponseAsFile(
+        response,
+        imageDownloadFilename({ generationId, modelId, mimeType: "image/png" })
+      );
+    } catch {
+      setDownloadFailedId(generationId);
+    } finally {
+      setDownloadingIds((ids) => ids.filter((id) => id !== generationId));
+    }
+  };
+
   const current = (group?.targets ?? []).filter(target => !modelIds || modelIds.includes(target.modelId)).map((target) => ({
     target,
     generation:
@@ -130,6 +169,7 @@ export function ChatImageTurnCard({ groupId, modelIds }: { groupId: string; mode
         (generation) => generation.generationId === target.currentGenerationId
       ) ?? null,
   }));
+  const selectedId = selectedIn(groupId, current.map((item) => item.generation));
   // Polled while anything on screen can still change: not read yet, a model
   // without a finished attempt, or a retry not yet seen.
   const inProgress =
@@ -165,7 +205,11 @@ export function ChatImageTurnCard({ groupId, modelIds }: { groupId: string; mode
           generation?.assets.find((entry) => entry.role === "original") ??
           generation?.assets[0];
         return (
-          <figure key={target.targetId} className="min-w-0">
+          <figure
+            key={target.targetId}
+            data-selected={generation && selectedId === generation.generationId ? "true" : undefined}
+            className="min-w-0"
+          >
             {generation?.status === "succeeded" && asset ? (
               // eslint-disable-next-line @next/next/no-img-element -- signed, short-lived R2 URL; the optimizer would cache a link that expires
               <img
@@ -212,6 +256,44 @@ export function ChatImageTurnCard({ groupId, modelIds }: { groupId: string; mode
               <div data-testid="chat-image-quality" className="mt-3 max-w-md space-y-2 text-xs leading-relaxed text-zinc-600 dark:text-zinc-400">
                 <span className="inline-block rounded-md bg-blue-50 px-2 py-1 font-semibold text-blue-700 dark:bg-blue-950/50 dark:text-blue-300">{feedback[quality]}</span>
                 {quality === "medium" ? <><p>{feedback.upgradeHint}</p><p className="text-[11px]">{feedback.costHint}</p></> : null}
+              </div>
+            ) : null}
+            {generation?.status === "succeeded" && asset ? (
+              <div data-testid="chat-image-turn-actions" className="max-w-md">
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    data-testid="chat-image-turn-download"
+                    disabled={downloadingIds.includes(generation.generationId)}
+                    onClick={() => void download(generation.generationId, target.modelId)}
+                    className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-zinc-200 px-3 text-xs font-semibold text-zinc-600 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                  >
+                    {downloadingIds.includes(generation.generationId) ? (
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Download className="h-4 w-4" aria-hidden="true" />
+                    )}
+                    {t("chat.imageGenerationDownload")}
+                  </button>
+                  {current.length > 1 ? (
+                    <ImageSelectButton
+                      selected={selectedId === generation.generationId}
+                      onSelect={() =>
+                        void select(groupId, generation.generationId, selectedId)
+                      }
+                    />
+                  ) : null}
+                </div>
+                {downloadFailedId === generation.generationId ? (
+                  <p role="status" className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                    {t("chat.imageGenerationDownloadFailed")}
+                  </p>
+                ) : null}
+                <ImageFeedbackButtons
+                  key={generation.generationId}
+                  generationId={generation.generationId}
+                  initialSignals={generation.signals}
+                />
               </div>
             ) : null}
           </figure>
