@@ -100,14 +100,24 @@ import { prisma } from "@/lib/prisma";
  * requests. Apex candidates are left out of a cycle's menu: one apex answer
  * costs about what the rest of a cycle does.
  *
- * Paid. Off unless the owner turns its daily run on in Admin › Routing
- * (AUTO_CODING_OPTIMIZER_AUTOMATION_SETTING_KEY, default off), or a person
- * starts one there. Promotion is a person's click unless auto-promote is on.
+ * Paid. Its daily run is on by default (owner decision 2026-11-20,
+ * CODING_OPTIMIZER_AUTOMATION_DEFAULT) and can be turned off in Admin ›
+ * Routing; a person may also start one there. Promotion is a person's click
+ * unless auto-promote is on (default off). The task evaluation needs an
+ * isolated runner besides (codingTaskEvalRunnerIsolated).
  */
 
 export const AUTO_CODING_OPTIMIZER_AUTOMATION_SETTING_KEY = "auto.llmRouterCodingOptimizerAutomation";
 
 export type CodingOptimizerAutomation = { daily: boolean; autoPromote: boolean };
+
+/**
+ * With no row: the daily coding cycle on, auto-promote off (owner decision
+ * 2026-11-20). The daily run is paid within the optimizer's existing day and
+ * month caps; promotion stays a person's click until turned on. A row that
+ * cannot be read or parsed reads as both off: a broken setting never spends.
+ */
+export const CODING_OPTIMIZER_AUTOMATION_DEFAULT: CodingOptimizerAutomation = { daily: true, autoPromote: false };
 
 const GENERATOR_MAX_OUTPUT_TOKENS = 10_000;
 const GENERATOR_TIMEOUT_MS = 150_000;
@@ -152,15 +162,17 @@ export async function readCodingOptimizerAutomation(
             where: { key: AUTO_CODING_OPTIMIZER_AUTOMATION_SETTING_KEY },
             select: { value: true },
         });
-        const value = row ? (JSON.parse(row.value) as Partial<CodingOptimizerAutomation>) : null;
-        return { daily: value?.daily === true, autoPromote: value?.autoPromote === true };
+        if (!row) return { ...CODING_OPTIMIZER_AUTOMATION_DEFAULT };
+        const value = JSON.parse(row.value) as Partial<CodingOptimizerAutomation>;
+        return { daily: value.daily === true, autoPromote: value.autoPromote === true };
     } catch {
         return { daily: false, autoPromote: false };
     }
 }
 
 async function writeCodingOptimizerAutomation(tx: Prisma.TransactionClient, value: CodingOptimizerAutomation) {
-    if (!value.daily && !value.autoPromote) {
+    // The default is stored as no row; anything else, off included, as a row.
+    if (value.daily === CODING_OPTIMIZER_AUTOMATION_DEFAULT.daily && value.autoPromote === CODING_OPTIMIZER_AUTOMATION_DEFAULT.autoPromote) {
         await tx.appSetting.deleteMany({ where: { key: AUTO_CODING_OPTIMIZER_AUTOMATION_SETTING_KEY } });
         return;
     }

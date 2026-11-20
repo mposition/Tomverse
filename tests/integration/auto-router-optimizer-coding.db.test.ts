@@ -148,15 +148,23 @@ test("an automatic coding promotion is the optimizer's system actor, and a rollb
   assert.deepEqual(await rollBackCodingRouterGuidance(actor), { refused: "nothing_to_roll_back" });
 });
 
-test("the coding automation starts off, is audited, and the daily run picks coding without spending", async () => {
-  assert.deepEqual(await readCodingOptimizerAutomation(), { daily: false, autoPromote: false });
+test("the coding automation starts with its daily run on, is audited, and the daily run picks coding without spending", async () => {
+  // Owner decision 2026-11-20: daily on, auto-promote off, with no row.
+  assert.deepEqual(await readCodingOptimizerAutomation(), { daily: true, autoPromote: false });
+  await updateCodingOptimizerAutomation(actor, { daily: false, autoPromote: false });
+  assert.deepEqual(await readCodingOptimizerAutomation(), { daily: false, autoPromote: false }, "off is stored as a row");
+  assert.equal(await prisma.appSetting.count({ where: { key: AUTO_CODING_OPTIMIZER_AUTOMATION_SETTING_KEY } }), 1);
   assert.deepEqual(await runScheduledOptimizerCycle(), { started: false, reason: "daily_off" });
   await updateCodingOptimizerAutomation(actor, { daily: true, autoPromote: false });
-  assert.deepEqual(await readCodingOptimizerAutomation(), { daily: true, autoPromote: false });
+  assert.equal(await prisma.appSetting.count({ where: { key: AUTO_CODING_OPTIMIZER_AUTOMATION_SETTING_KEY } }), 0, "the default is no row");
   assert.equal(
-    await prisma.adminAuditLog.count({ where: { action: "auto.llm_router_coding_optimizer_automation.updated" } }) > 0,
+    await prisma.adminAuditLog.count({ where: { action: "auto.llm_router_coding_optimizer_automation.updated" } }) >= 2,
     true
   );
+  // A row that cannot be parsed never spends.
+  await prisma.appSetting.create({ data: { key: AUTO_CODING_OPTIMIZER_AUTOMATION_SETTING_KEY, value: "{not json" } });
+  assert.deepEqual(await readCodingOptimizerAutomation(), { daily: false, autoPromote: false });
+  await prisma.appSetting.deleteMany({ where: { key: AUTO_CODING_OPTIMIZER_AUTOMATION_SETTING_KEY } });
   // No optimizer model is set, so the coding cycle is refused before any call.
   assert.deepEqual(await runScheduledOptimizerCycle(), { started: false, reason: "optimizer_off", target: "coding" });
   assert.deepEqual(await startCodingRouterOptimizerCycle(actor), { refused: "optimizer_off" });

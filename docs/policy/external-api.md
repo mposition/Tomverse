@@ -351,9 +351,11 @@ improved by its own optimizer, as Chat's router is.
   - A promoted proposal becomes the `coding` guidance the live coding router
     reads (its code default is `AUTO_LLM_ROUTER_CODING_GUIDANCE`). Rollback
     goes one step back.
-  - Off by default: its daily switch and auto-promote in Admin › Routing
-    both start off, and a person may start one cycle. With several daily
-    switches on, the targets take turns, one cycle a day in all.
+  - Its daily run is on by default (owner decision 2026-11-20) and can be
+    turned off in Admin › Routing; auto-promote starts off, so a passed
+    proposal waits for a person's click. A person may also start a cycle.
+    With several daily switches on, the targets take turns, one cycle a day
+    in all. A setting row that cannot be read counts as both off.
 - **Task evaluation** (`lib/codingTaskEval.ts`).
   - Runs before the cycle proper, within up to 40 per cent of a coding cycle's
     budget. Each run starts only when its worst case
