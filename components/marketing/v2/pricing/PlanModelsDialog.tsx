@@ -49,14 +49,13 @@ function ModelGroups({ models, locked }: { models: readonly AiModel[]; locked: b
  * The models one plan can use, in a modal `<dialog>`: the browser moves focus into it,
  * traps it, closes it on Escape and puts focus back on the button that opened it.
  */
-export function PlanModelsDialog({ plan, planIndex, copy, models, dailyLabel, premiumLimit, catalogHref, onClose }: {
+export function PlanModelsDialog({ plan, planIndex, copy, models, dailyLabel, catalogHref, onClose }: {
   plan: ModelTier;
   planIndex: 0 | 1 | 2;
   copy: PricingPageCopy["models"];
   models: readonly AiModel[];
   /** The plan's daily limit, already formatted with its unit. */
   dailyLabel: string;
-  premiumLimit: string;
   catalogHref: string;
   onClose: () => void;
 }) {
@@ -71,7 +70,7 @@ export function PlanModelsDialog({ plan, planIndex, copy, models, dailyLabel, pr
   }, []);
   const usable = models.filter((model) => canUseModelWithPlan(plan, model));
   const locked = models.filter((model) => !canUseModelWithPlan(plan, model));
-  const values = { plan, n: usable.length, total: models.length, premium: premiumLimit, daily: dailyLabel };
+  const values = { plan, n: usable.length, total: models.length, daily: dailyLabel };
   return <dialog ref={ref} id="plan-dialog" data-testid="pricing-models-dialog" aria-labelledby="pd-title"
     onClose={onClose}
     onClick={(event) => { if (event.target === event.currentTarget) event.currentTarget.close(); }}>

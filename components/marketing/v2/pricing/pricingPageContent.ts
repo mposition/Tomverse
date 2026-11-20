@@ -10,8 +10,10 @@ import { pricingPageTranslations } from "./pricingPageContent.i18n";
  * and are filled into these placeholders:
  *
  * - `{standard}`, `{daily}`, `{n}` (credits): a counted credit amount, unit included
- * - `{premium}`: the Free plan's monthly higher-cost model responses
- * - `{percent}`: the featured promotion's discount, `{tokens}`: the configured input ceiling
+ * - `{percent}`: a discount (the plan's annual saving, or the featured promotion's), `{tokens}`: the
+ *   configured input ceiling
+ * - `{period}` and `{plans}`: the featured promotion's duration and the plans it applies to; the
+ *   duration reads `promo.period` and the plan list is joined with `promo.or`
  * - `{amount}`: a formatted price, `{plan}`: a plan name, `{n}` / `{total}`: model counts
  * - `{k}`, `{mult}`, `{models}`, `{web}`: the calculator's thresholds and amounts
  * - `{calc}` and `{models}` in a sentence become links; `{days}` is a pack's validity
@@ -61,7 +63,18 @@ export type PricingPageCopy = {
     note: string;
     starterPrefix: string;
     sale: { badge: string; regular: string; duration: string };
-    promo: { code: string; ends: string; eligibility: string; timezone: string; discount: string; billingNote: string };
+    promo: {
+      code: string;
+      ends: string;
+      eligibility: string;
+      timezone: string;
+      discount: string;
+      billingNote: string;
+      /** The duration as a phrase: `first` for one month, `months` (with `{n}`) for more. */
+      period: { first: string; months: string };
+      /** Joins plan names in a list ("Pro or Max"). */
+      or: string;
+    };
   };
   models: {
     title: string;
@@ -157,14 +170,14 @@ const ko: PricingPageCopy = {
       ["5시간 · 주간 초기화 없음", "몇 시간마다, 일주일마다 기다릴 필요가 없습니다. 기준은 월 크레딧이고, 하루 사용 한도는 각 플랜에 표시됩니다."],
       ["크레딧 하나로 모든 기능", "채팅, 답변 비교, 코딩 도구 연결이 같은 크레딧에서 차감됩니다."],
     ],
-    note: "Free는 하루 {daily} 한도가 있고, 고비용 모델은 월 {premium}회까지 쓸 수 있습니다. 비정상 사용과 비용 폭증을 막는 운영 안전장치는 모든 플랜에 적용됩니다.",
+    note: "Free는 하루 {daily} 한도가 있고, 고비용 모델은 월 사용 횟수 한도가 있습니다. 비정상 사용과 비용 폭증을 막는 운영 안전장치는 모든 플랜에 적용됩니다.",
   },
   plans: {
     heading: "플랜",
     recommended: "추천",
     who: ["처음 시작하는 사용자", "일상 생산성", "고강도 AI 워크플로"],
     ticks: {
-      free: ["선별된 모델 이용", "선별된 고비용 모델 월 최대 {premium}응답", "최대 3개 모델 비교", "로그인 후 파일 첨부, 공유 및 다운로드"],
+      free: ["선별된 모델 이용", "선별된 고비용 모델은 월 사용 횟수 한도가 있습니다", "최대 3개 모델 비교", "로그인 후 파일 첨부, 공유 및 다운로드"],
       pro: ["모든 사용 가능 모델 이용", "모델별 크레딧 차감량에 따라 월 제공량 사용", "최대 3개 모델 나란히 비교", "파일 첨부 및 Google Drive 파일"],
       max: ["모든 사용 가능 모델 이용", "Premium 등급 모델 사용에는 월 크레딧 및 공정 사용 정책 적용", "첨부 허용 시 10개 · 각 50 MiB · 총 100 MiB", "고급 모델과 긴 문서를 자주 쓰는 경우에 적합"],
     },
@@ -179,21 +192,23 @@ const ko: PricingPageCopy = {
     modelCount: "{n}개 / {total}개",
     cta: ["무료로 시작", "Pro로 업그레이드", "Max로 업그레이드"],
     annual: "연간",
-    save: "20% 할인",
+    save: "{percent}% 할인",
     checkout: "최종 결제 통화와 금액은 결제 화면에서 확인하세요.",
     equivalent: "월 환산 약 {amount}, 연간 일괄 결제",
     billingChoice: "다음 단계에서 월간 또는 연간 결제를 선택합니다. 결제 전에 확인하세요.",
     billingChoiceSignedOut: "로그인한 뒤 다음 단계에서 월간 또는 연간 결제를 선택합니다. 결제 전에 확인하세요.",
     note: "가격은 함께 표시된 통화의 세금 전 고정 금액입니다. 플랜별 일일 크레딧 한도와 모델별 운영 안전장치는 현재 사용량 안내를 확인하세요.",
     starterPrefix: "다음 기능에서 오셨습니다: ",
-    sale: { badge: "출시 특가", regular: "정가", duration: "첫 달 적용" },
+    sale: { badge: "출시 특가", regular: "정가", duration: "{period} 적용" },
     promo: {
       code: "코드",
       ends: "종료",
-      eligibility: "월간 Pro 또는 Max · 계정당 1회",
+      eligibility: "월간 {plans} · 계정당 1회",
       timezone: "브리즈번 시간",
       discount: "{percent}% 할인",
-      billingNote: "출시 특가: Pro 또는 Max 첫 달 {percent}% 할인. 언제든 취소할 수 있습니다.",
+      billingNote: "출시 특가: {plans} {period} {percent}% 할인. 언제든 취소할 수 있습니다.",
+      period: { first: "첫 달", months: "처음 {n}개월" },
+      or: "또는",
     },
   },
   models: {
@@ -201,7 +216,7 @@ const ko: PricingPageCopy = {
     sub: "전체 {total}개 중 {n}개 · 숫자는 짧은 요청 한 번의 기본 크레딧",
     close: "닫기",
     locked: "Pro 이상 전용 모델 {n}개",
-    notes: ["고비용 모델은 Free에서 월 {premium}회까지 쓸 수 있습니다. 하루 사용 한도는 {daily}입니다.", "모든 모델이 같은 월 크레딧에서 차감됩니다.", "Premium 등급 모델은 월 크레딧과 공정 사용 정책 안에서 씁니다."],
+    notes: ["고비용 모델은 Free에서 월 사용 횟수 한도가 있습니다. 하루 사용 한도는 {daily}입니다.", "모든 모델이 같은 월 크레딧에서 차감됩니다.", "Premium 등급 모델은 월 크레딧과 공정 사용 정책 안에서 씁니다."],
     catalogLink: "모델별 기본 크레딧 모두 보기",
   },
   calc: {
@@ -277,7 +292,7 @@ const ko: PricingPageCopy = {
       },
       {
         question: "출시 할인은 어떻게 적용되나요?",
-        answer: "출시 특가로 Pro 또는 Max 첫 달 동안 {percent}% 할인을 받을 수 있습니다. 이후에는 취소하지 않는 한 정가 월 요금으로 갱신됩니다.",
+        answer: "출시 특가로 {plans} {period} 동안 {percent}% 할인을 받을 수 있습니다. 이후에는 취소하지 않는 한 정가 월 요금으로 갱신됩니다.",
         promotionOnly: true,
       },
       {
@@ -314,7 +329,7 @@ const en: PricingPageCopy = {
       ],
       ["One credit pool for everything", "Chat, answer comparison and coding-tool connections all draw from the same credits."],
     ],
-    note: "Free has a daily limit of {daily} and up to {premium} higher-cost model responses a month. Operational safeguards against abnormal use and runaway cost apply to every plan.",
+    note: "Free has a daily limit of {daily} and a monthly response limit on higher-cost models. Operational safeguards against abnormal use and runaway cost apply to every plan.",
   },
   plans: {
     heading: "Plans",
@@ -323,7 +338,7 @@ const en: PricingPageCopy = {
     ticks: {
       free: [
         "Access to selected models",
-        "Up to {premium} selected higher-cost model responses per month",
+        "Monthly response limit on selected higher-cost models",
         "Compare up to 3 models",
         "File attachments, sharing and downloads after sign-in",
       ],
@@ -351,21 +366,23 @@ const en: PricingPageCopy = {
     modelCount: "{n} of {total}",
     cta: ["Start free", "Upgrade to Pro", "Upgrade to Max"],
     annual: "Annual · billed annually",
-    save: "Save 20%",
+    save: "Save {percent}%",
     checkout: "The fixed local price shown is charged once per year at checkout.",
     equivalent: "Monthly equivalent: about {amount}, billed annually.",
     billingChoice: "Choose monthly or annual billing in the next step, before payment.",
     billingChoiceSignedOut: "Choose monthly or annual billing in the next step after signing in, before payment.",
     note: "Prices are shown before tax in the selected fixed billing currency. On Max, Standard models have no daily limit; Premium usage is subject to monthly credits and the Fair Use Policy.",
     starterPrefix: "You came from ",
-    sale: { badge: "Launch special", regular: "Regular", duration: "for the first month" },
+    sale: { badge: "Launch special", regular: "Regular", duration: "for {period}" },
     promo: {
       code: "Code",
       ends: "Ends",
-      eligibility: "Monthly Pro or Max · one use per account",
+      eligibility: "Monthly {plans} · one use per account",
       timezone: "Brisbane time",
       discount: "{percent}% off",
-      billingNote: "Launch special: {percent}% off Pro or Max for your first month. Cancel anytime.",
+      billingNote: "Launch special: {percent}% off {plans} for {period}. Cancel anytime.",
+      period: { first: "the first month", months: "the first {n} months" },
+      or: "or",
     },
   },
   models: {
@@ -374,7 +391,7 @@ const en: PricingPageCopy = {
     close: "Close",
     locked: "{n} models for Pro and above",
     notes: [
-      "Higher-cost models are available on Free up to {premium} responses a month. The daily limit is {daily}.",
+      "Higher-cost models have a monthly response limit on Free. The daily limit is {daily}.",
       "Every model draws from the same monthly credits.",
       "Premium-category models follow your monthly credits and the Fair Use Policy.",
     ],
@@ -467,7 +484,7 @@ const en: PricingPageCopy = {
       },
       {
         question: "How does the launch discount work?",
-        answer: "The launch special gives {percent}% off Pro or Max for the first month. After that, the plan renews at the regular monthly price unless canceled.",
+        answer: "The launch special gives {percent}% off {plans} for {period}. After that, the plan renews at the regular monthly price unless canceled.",
         promotionOnly: true,
       },
       {

@@ -38,6 +38,7 @@ import { useMarketingChatEntry } from "../../MarketingChatAvailability";
 import { CreditCalculator } from "./CreditCalculator";
 import { PlanModelsDialog } from "./PlanModelsDialog";
 import { pricingPageContent } from "./pricingPageContent";
+import { annualDiscountPercent, commonDiscountPercent, joinPlanNames, promotionAppliesToPlan, promotionPeriodPhrase, promotionPlanNames } from "./pricingPromotion";
 import { usePricingPurchaseFlow } from "./usePricingPurchaseFlow";
 import "../v2-pages.css";
 import "./pricing-page.css";
@@ -54,9 +55,6 @@ type PlanId = (typeof PLAN_IDS)[number];
 const PLAN_NAME: Record<PlanId, ModelTier> = { free: "Free", pro: "Pro", max: "Max" };
 const PLAN_ORDER: Record<AccountPlanTier, number> = { Free: 0, Pro: 1, Max: 2 };
 const CREDIT_PACK_PLACEHOLDER_KEYS = ["starter_500", "project_1500", "power_4000"] as const;
-
-/** Free's monthly higher-cost model responses: CHAT_FREE_PRO_MODEL_RESPONSES_PER_MONTH's default in lib/chatSecurity.ts. */
-const FREE_HIGHER_COST_RESPONSES_PER_MONTH = 30;
 
 const NUMBER_LOCALE: Record<Language, string> = {
   en: "en-AU",
@@ -78,7 +76,7 @@ const KO_BILLING = {
   annual: "연간 결제",
   currency: (currency: string) => `표시 통화: ${currency}.`,
   annualTotal: (price: string) => `연 ${price} 일괄 결제`,
-  firstMonth: (price: string) => `첫 달 ${price} 결제`,
+  promotionPeriod: (period: string, price: string) => `${period} ${price} 결제`,
   month: (price: string) => `월 ${price} 결제`,
   confirm: "할인 적용과 최종 결제 조건은 다음 확인창에서 확인하세요.",
 };
@@ -145,7 +143,6 @@ export function PricingPage() {
   const catalog = publicModels.filter((model) => model.enabled);
   const limits = Object.fromEntries(PLAN_IDS.map((id) => [id, billing.planLimits(id)])) as Record<PlanId, ReturnType<typeof billing.planLimits>>;
   const dailyText = (id: PlanId) => limits[id].dailyCredits === 0 ? copy.plans.dailyNone : formatCredits(limits[id].dailyCredits);
-  const premiumCount = numberFormatter.format(FREE_HIGHER_COST_RESPONSES_PER_MONTH);
   const planModelCount = (id: PlanId) =>
     fill(copy.plans.modelCount, {
       n: numberFormatter.format(catalog.filter((model) => canUseModelWithPlan(PLAN_NAME[id], model)).length),
@@ -182,6 +179,17 @@ export function PricingPage() {
     : null;
   const percent = featuredPromotion ? numberFormatter.format(featuredPromotion.discountPercent) : "";
   const discountLabel = fill(copy.plans.promo.discount, { percent });
+  // How long the promotion lasts and which plans it is for come from the promotion itself.
+  const promotionPlans = joinPlanNames(promotionPlanNames(featuredPromotion), copy.plans.promo.or);
+  const promotionPeriod = featuredPromotion
+    ? promotionPeriodPhrase(copy.plans.promo.period, featuredPromotion.durationMonths, (value) => numberFormatter.format(value))
+    : "";
+  const promotionValues = { percent, period: promotionPeriod, plans: promotionPlans };
+  const saleDuration = fill(copy.plans.sale.duration, promotionValues);
+  // A plan's annual saving is worked out from its own prices; the page names none it cannot back.
+  const annualPercent = (planId: PlanId) => annualDiscountPercent(billing.config?.plans.find((item) => item.id === planId) ?? getDefaultBillingPlan(planId));
+  const saveLabel = (value: number | null) => value === null ? null : fill(copy.plans.save, { percent: numberFormatter.format(value) });
+  const selectorSave = saveLabel(commonDiscountPercent((["pro", "max"] as const).map(annualPercent)));
 
   const modelsHref = localizedPath(lang, "/models");
   const reviewHref = localizedPath(lang, "/products/review");
@@ -241,17 +249,14 @@ export function PricingPage() {
         ? formatBillingAmount(publicPlan.displayAnnualPriceAmount / 12, publicPlan.displayCurrency as BillingCurrency)
         : formatBillingAmount(billingMinorToMajor(publicPlan.annualPriceCents, publicPlan.currency as BillingCurrency) / 12, publicPlan.currency as BillingCurrency)
       : null;
-    const promotionEligible = Boolean(
-      featuredPromotion &&
-      featuredPromotion.appliesToPlanIds.includes(planId) &&
-      featuredPromotion.billingIntervals.includes("monthly")
-    );
+    const promotionEligible = promotionAppliesToPlan(featuredPromotion, planId);
     const salePrice = promotionEligible && featuredPromotion ? formatSalePrice(planId, featuredPromotion.discountPercent) : null;
     const period = copy.plans.period;
     const bigPrice = annualSelected ? annualPrice : monthlyPrice;
     const bigPeriod = annualSelected ? copy.plans.periodYear : period;
     const ctaClass = planButtonClass(highlighted);
-    const ticks = copy.plans.ticks[planId].map((tick) => fill(tick, { premium: premiumCount }));
+    const ticks = copy.plans.ticks[planId];
+    const planSave = saveLabel(annualPercent(planId));
     const ctaHidden = planId === "free" && shouldHideFreePlanCta(account.status, account.plan);
 
     return <article key={planId} className={`plan${highlighted ? " rec" : ""}${isRequestedTarget ? " requested" : ""}`}
@@ -275,7 +280,7 @@ export function PricingPage() {
           <small>{formatBillingPeriodLabel(period, lang)}</small>
           <s>{monthlyPrice}</s>
         </div>
-        <p className="price-sub">{copy.plans.sale.duration}. {copy.plans.sale.regular}: {monthlyPrice} {formatBillingPeriodLabel(period, lang)}.</p>
+        <p className="price-sub">{saleDuration}. {copy.plans.sale.regular}: {monthlyPrice} {formatBillingPeriodLabel(period, lang)}.</p>
       </div> : <div className="price-block">
         {/* The price and its period are separate spans so they can differ in size; the phrase is
             spoken once here and the visual pair is hidden, so it is never read as "$15per month". */}
@@ -288,7 +293,7 @@ export function PricingPage() {
       {paid ? <div className="annual-box">
         <div className="annual-top">
           <span>{copy.plans.annual}</span>
-          <span className="chip blue">{copy.plans.save}</span>
+          {planSave ? <span className="chip blue">{planSave}</span> : null}
         </div>
         {annualSelected ? null : <div className="annual-price">{formatPriceWithPeriod(annualPrice, copy.plans.periodYear, lang)}</div>}
         {annualMonthlyEquivalent ? <p className="annual-eq" data-testid={`pricing-annual-equivalent-${planId}`}>
@@ -375,7 +380,7 @@ export function PricingPage() {
         )}
         {lang === "ko" && paid && (ctaState === "signed_out" || ctaState === "upgrade") ? (
           <p data-testid={`pricing-selected-billing-${planId}`} className="cta-note">
-            {subscriptionInterval === "annual" ? KO_BILLING.annualTotal(annualPrice) : (salePrice ? KO_BILLING.firstMonth(salePrice) : KO_BILLING.month(monthlyPrice))}
+            {subscriptionInterval === "annual" ? KO_BILLING.annualTotal(annualPrice) : (salePrice ? KO_BILLING.promotionPeriod(promotionPeriod, salePrice) : KO_BILLING.month(monthlyPrice))}
             <span>{KO_BILLING.confirm}</span>
           </p>
         ) : null}
@@ -431,7 +436,7 @@ export function PricingPage() {
           <div className="sig-points" style={{ gridTemplateColumns: "repeat(3,minmax(0,1fr))", marginBottom: 0 }}>
             {copy.points.items.map(([title, body]) => <div key={title}><b>{title}</b><span>{body}</span></div>)}
           </div>
-          <p className="note">{fill(copy.points.note, { daily: dailyText("free"), premium: premiumCount })}</p>
+          <p className="note">{fill(copy.points.note, { daily: dailyText("free") })}</p>
         </div>
       </section>
 
@@ -444,16 +449,16 @@ export function PricingPage() {
           {/* One page-level status region rather than one per card: three announcements of
               "Checking your account" are noise, and the neutral buttons are already labelled. */}
           {account.status === "loading" ? <p role="status" className="sr-only">{ctaText.ctaLoadingStatus}</p> : null}
-          {featuredPromotion ? <div className="promo-banner">
+          {featuredPromotion && promotionPlans ? <div className="promo-banner">
             <div className="promo-top">
               <span className="chip amber">{copy.plans.sale.badge}</span>
               <b className="promo-discount">{discountLabel}</b>
-              <span className="promo-duration">{copy.plans.sale.duration}</span>
+              <span className="promo-duration">{saleDuration}</span>
             </div>
-            <p>{fill(copy.plans.promo.billingNote, { percent })}</p>
+            <p>{fill(copy.plans.promo.billingNote, promotionValues)}</p>
             <div className="promo-chips">
               <span className="chip blue">{copy.plans.promo.code}: {featuredPromotion.code}</span>
-              <span className="chip">{copy.plans.promo.eligibility}</span>
+              <span className="chip">{fill(copy.plans.promo.eligibility, promotionValues)}</span>
               <span className="chip">{copy.plans.promo.ends}: {promotionEndDate} · {copy.plans.promo.timezone}</span>
             </div>
           </div> : null}
@@ -466,7 +471,7 @@ export function PricingPage() {
                 <span>{interval === "annual" ? KO_BILLING.annual : KO_BILLING.monthly}</span>
               </label>)}
             </div>
-            <span className="chip blue">{copy.plans.save}</span>
+            {selectorSave ? <span className="chip blue">{selectorSave}</span> : null}
           </fieldset> : null}
           <div id={PRICING_PLANS_ANCHOR} className="plans3">
             {PLAN_IDS.map((planId, index) => renderPlanCard(planId, index as 0 | 1 | 2))}
@@ -482,7 +487,7 @@ export function PricingPage() {
       </section>
 
       {dialogPlan ? <PlanModelsDialog plan={PLAN_NAME[dialogPlan]} planIndex={PLAN_IDS.indexOf(dialogPlan) as 0 | 1 | 2} copy={copy.models}
-        models={catalog} dailyLabel={dailyText(dialogPlan)} premiumLimit={premiumCount} catalogHref={modelsHref}
+        models={catalog} dailyLabel={dailyText(dialogPlan)} catalogHref={modelsHref}
         onClose={() => setModelsPlan(null)} /> : null}
 
       <section id="calc" className="chapter signature-chapter" aria-labelledby="calc-title" data-testid="pricing-calculator">
@@ -588,9 +593,9 @@ export function PricingPage() {
           <span className="eyebrow">{copy.faq.eyebrow}</span>
           <h2 id="pricing-faq-title" className="section-title">{copy.faq.title}</h2>
           <div className="faq">
-            {copy.faq.items.filter((faq) => !faq.promotionOnly || featuredPromotion).map((faq) => <details key={faq.question}>
+            {copy.faq.items.filter((faq) => !faq.promotionOnly || (featuredPromotion && promotionPlans)).map((faq) => <details key={faq.question}>
               <summary>{faq.question}</summary>
-              <p><Linked text={fill(faq.answer, { percent })} links={{ calc: calcLink }} /></p>
+              <p><Linked text={fill(faq.answer, promotionValues)} links={{ calc: calcLink }} /></p>
             </details>)}
           </div>
         </div>
