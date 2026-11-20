@@ -711,7 +711,7 @@ function LaunchMarketingHeader({
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src="/tomverse-logo.png" alt="" className="h-full w-full object-cover" />
             </span>
-            <span className="text-sm font-bold tracking-[-0.02em] max-[240px]:sr-only sm:text-lg"><span data-testid="marketing-brand-name" className="after:content-['.']">Tomverse</span></span>
+            <span className="text-sm font-bold tracking-[-0.02em] max-[240px]:sr-only sm:text-lg"><span data-testid="marketing-brand-name" className="after:content-['.'_/_'']">Tomverse</span></span>
           </Link>
           <nav aria-label={copy.navigation} className="hidden items-center gap-1 text-sm font-semibold lg:flex">
             {items.map((item) => <Link key={item.key} href={localizedHref(lang, item.href)} data-testid={`header-${item.key}-link`} className={`rounded-full px-3 py-2 text-zinc-300 transition hover:bg-white/[0.06] hover:text-white ${launchFocus}`}>{item.label}</Link>)}
@@ -771,7 +771,7 @@ function LaunchMarketingFooter({ maxWidth = "max-w-7xl" }: MarketingFooterProps)
               <span className="h-[36px] w-[36px] shrink-0 overflow-hidden rounded-[10px] bg-white">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src="/tomverse-logo.png" alt="" className="h-full w-full object-cover" />
-              </span><span className="min-w-0 tracking-[-0.02em] [overflow-wrap:anywhere] after:content-['.']">Tomverse</span>
+              </span><span className="min-w-0 tracking-[-0.02em] [overflow-wrap:anywhere] after:content-['.'_/_'']">Tomverse</span>
             </Link>
             <p className="mt-4 max-w-md text-sm leading-6">{copy.description}</p>
           </div>
