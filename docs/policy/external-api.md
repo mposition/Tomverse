@@ -319,6 +319,71 @@ catalogue, so a customer never has to recopy it.
 - **Charging:** the request is reserved, charged and receipted as the routed
   model; `GET /usage` shows that model's id.
 
+### 5.2 Coding routing report and coding optimizer
+
+Owner decision 2026-11-20: the coding router is measured every day and can be
+improved by its own optimizer, as Chat's router is.
+
+- **Receipt fields.** Each Smart Adaptive request's receipt
+  (`ExternalApiRequest`) records `routedBy` (`router`, `continued`,
+  `default`), `routedHeld` and `routeConversation`, a SHA-256 prefix of the
+  conversation's routing key (never the key). A request that names a model
+  leaves them null. No request text is stored. Receipts written before these
+  columns existed have them null too, so for the first week the report counts
+  those Smart Adaptive requests among the requests that named a model.
+- **Report.** `lib/externalApiRoutingReportCore.ts` counts Smart Adaptive
+  requests per model and protocol, `topModelShare` (1 means one model took
+  everything), the held share, conversations that changed model, the error
+  share and credits. Admin › Routing shows the last 24 hours and 7 days, and
+  every daily optimizer run logs the last 24 hours as
+  `external_api_coding_routing_daily`, whether or not a cycle starts.
+- **Coding optimizer** (`lib/autoCodingRouterOptimizer.ts`, target `coding`).
+  It is the Chat optimizer's cycle run on the coding guidance. It shares the
+  same optimizer and router models, one running cycle at a time, and the
+  same day and month caps (`docs/policy/chat-unified-router-refiner-v1.md`).
+  It adds no spending ceiling.
+  - The external API keeps no text, so every case is a synthetic coding
+    request.
+  - The router is asked with the coding head, and a coding judge compares
+    the answers.
+  - The menu is the external API's Smart Adaptive candidates for the widest
+    plan, without apex.
+  - The generator also reads two kinds of pre-cycle evidence: the 7-day
+    report and the task evaluation.
+  - A promoted proposal becomes the `coding` guidance the live coding router
+    reads (its code default is `AUTO_LLM_ROUTER_CODING_GUIDANCE`). Rollback
+    goes one step back.
+  - Its daily run is on by default (owner decision 2026-11-20) and can be
+    turned off in Admin › Routing; auto-promote starts off, so a passed
+    proposal waits for a person's click. A person may also start a cycle.
+    With several daily switches on, the targets take turns, one cycle a day
+    in all. A setting row that cannot be read counts as both off.
+- **Task evaluation** (`lib/codingTaskEval.ts`).
+  - Runs before the cycle proper, within up to 40 per cent of a coding cycle's
+    budget. Each run starts only when its worst case
+    (`codingEvalWorstCaseTokens`, at the model's prices) still fits. A call
+    whose usage is unknown is charged its worst case and leaves the cycle's
+    cost coverage incomplete, so that cycle cannot be promoted. No retries.
+    It stops starting runs 15 minutes after the cycle began.
+  - For each of six fixed JS tasks (two easy, two medium, two hard), the
+    current coding guidance routes the task. Its pick and the next candidate
+    up each work it as an agent with `list_files`, `read_file`,
+    `write_file` and `run_tests` (the visible examples only), for at most
+    8 steps, with a 32 KB workspace and 32 KB of tool output.
+  - Pass or fail is decided in the trusted parent. A runner written by the
+    harness calls the model's exports in a child and returns their values.
+    The parent compares them with hidden expectations that never enter the
+    child, so printed output cannot fake a pass.
+  - The child runs `node --permission`: it reads only the task's temporary
+    folder, writes nothing, starts no processes or workers, and gets an
+    emptied environment.
+  - Node does not restrict network. So model-written code runs only where
+    the operator has isolated the runner from internal services, metadata
+    endpoints and credentials, and has set
+    `CODING_TASK_EVAL_ISOLATED_RUNNER=true` (default off). Anywhere else, a
+    coding cycle skips the evaluation and records
+    `taskEvaluationStop: runner_not_isolated`.
+
 ## 6. Data
 
 `ExternalApiKey`: name, prefix, digest, cap, expiry, revocation, last use.

@@ -275,6 +275,7 @@ export async function handleChatCompletions(request: Request): Promise<Response>
         let routedHeaders: Record<string, string> = {};
         // Remembers the routed model for the conversation once admission accepts it.
         let rememberRouted: (() => void) | undefined;
+        let routing: { routedBy: "router" | "continued" | "default"; held: boolean; conversation: string } | undefined;
         // A Tomverse id, or the provider's own id for exactly one offered model.
         const picked = parsed.model === SMART_ADAPTIVE_MODEL_ID ? null : pickRequestedModel(runnable, parsed.model);
         if (picked && "ambiguous" in picked) {
@@ -300,6 +301,7 @@ export async function handleChatCompletions(request: Request): Promise<Response>
             });
             entry = routed.entry;
             rememberRouted = routed.remember;
+            routing = { routedBy: routed.routedBy, held: routed.held ?? false, conversation: routed.conversationDigest };
             routedHeaders = { "x-tomverse-routed-model": entry.model.id, "x-tomverse-routed-by": routed.routedBy };
         }
         if (!entry) {
@@ -418,6 +420,7 @@ export async function handleChatCompletions(request: Request): Promise<Response>
                     clientName,
                     requestDigest,
                     idempotencyKeyDigest,
+                    routing,
                 }),
             });
         } catch (error) {

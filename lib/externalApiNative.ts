@@ -185,14 +185,29 @@ export const resolveNativeModel = async (
     smart?: Omit<Parameters<typeof routeNativeSmartAdaptive>[0], "protocol" | "runnable">,
     /** The coding-catalogue channel the request belongs to (read only while the external channels are on). */
     channel: "api" | "cli" = "api"
-): Promise<RunnableEntry & { routedBy?: NativeSmartDecision["routedBy"]; commit?: NativeSmartDecision["commit"] }> => {
+): Promise<
+    RunnableEntry & {
+        routedBy?: NativeSmartDecision["routedBy"];
+        commit?: NativeSmartDecision["commit"];
+        held?: boolean;
+        conversationDigest?: string;
+    }
+> => {
     if (typeof requested !== "string" || !requested) {
         throw new NativeProtocolError(400, "invalid_request", "model is required.", "model");
     }
     const runnable = await externalApiRunnableModels(plan, { channel, smartAdaptive: requested === SMART_ADAPTIVE_MODEL_ID });
     if (requested === SMART_ADAPTIVE_MODEL_ID) {
         const decision = smart ? await routeNativeSmartAdaptive({ ...smart, protocol, runnable }) : null;
-        if (decision) return { ...decision.entry, routedBy: decision.routedBy, commit: decision.commit };
+        if (decision) {
+            return {
+                ...decision.entry,
+                routedBy: decision.routedBy,
+                commit: decision.commit,
+                held: decision.held ?? false,
+                conversationDigest: decision.conversationDigest,
+            };
+        }
         throw new NativeProtocolError(
             404,
             "model_not_found",
@@ -586,6 +601,15 @@ export async function handleNativeGeneration(request: Request, spec: NativeProto
                     requestDigest,
                     idempotencyKeyDigest,
                     protocol: spec.protocol,
+                    ...(entry.routedBy
+                        ? {
+                              routing: {
+                                  routedBy: entry.routedBy,
+                                  held: entry.held ?? false,
+                                  conversation: entry.conversationDigest ?? null,
+                              },
+                          }
+                        : {}),
                 }),
             });
         } catch (error) {

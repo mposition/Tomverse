@@ -42,7 +42,6 @@ import {
     autoLlmRouterUserMessage,
     autoLlmRouterWorstCaseMicroUsd,
     buildAutoLlmRouterSystem,
-    AUTO_LLM_ROUTER_CODING_GUIDANCE,
     AUTO_LLM_ROUTER_CODING_VERSION,
     type CodingRouterContext,
     parseAutoLlmRouterOutput,
@@ -573,9 +572,9 @@ export async function pickAutoModelWithLlm(input: {
         ? settled(input.verifyPreparedContext()) : null;
     const [session, active, rewriteGuidance, preparedImageIntent] = await Promise.all([
         readRouterSession(input.conversationId, input.locationFusion?.resume?.traceId),
-        input.coding
-            ? { guidance: AUTO_LLM_ROUTER_CODING_GUIDANCE, cycleId: null }
-            : readActiveRouterGuidance(),
+        // A coding request follows the coding guidance (its code default, or a
+        // coding cycle's promotion), never the Chat one.
+        input.coding ? readActiveRouterGuidance(prisma, "coding") : readActiveRouterGuidance(),
         canRewrite ? readAutoLlmRouterRewrite().then(on => on ? readActiveRouterGuidance(prisma, "rewrite") : null) : null,
         input.imageIntent ?? null,
     ]);
@@ -586,12 +585,13 @@ export async function pickAutoModelWithLlm(input: {
     const rewrite = rewriteGuidance !== null;
     const compactSearchMenu = input.searchPlan === true && process.env.CHAT_ROUTER_COMPACT_SEARCH_MENU_ENABLED === "true";
     const version = autoLlmRouterDecisionVersion({
-        routingCycleId: active.cycleId,
+        // A coding call's cycle is named after the coding version suffix below.
+        routingCycleId: input.coding ? null : active.cycleId,
         rewrite,
         rewriteCycleId: rewriteGuidance?.cycleId ?? null,
     }) + (imageIntent ? "+image-intent-v3" : "") + (input.searchPlan ? "+search-plan-v2" : "") +
         (input.locationFusion ? "+location-v1" : "") + (compactSearchMenu ? "+compact-menu-v1" : "") +
-        (input.coding ? `+${AUTO_LLM_ROUTER_CODING_VERSION}` : "");
+        (input.coding ? `+${AUTO_LLM_ROUTER_CODING_VERSION}${active.cycleId ? `+${active.cycleId}` : ""}` : "");
     const call: AutoLlmRouterCallInput = {
         source: "live",
         traceId: input.traceId,
