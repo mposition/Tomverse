@@ -72,7 +72,8 @@ export function MarketingShell({
       />
       <MarketingProviders measurementId={measurementId} initialLang={initialLang} forceInitialLang={forceInitialLang} nonce={nonce}>
         <MarketingChatAvailabilityProvider guestTrialAvailable={PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE}>
-        {children}
+        {/* V2 public-site palette scope; see [data-tv-site] in app/globals.css. */}
+        <div data-tv-site="" className="contents">{children}</div>
         {/*
           UX-006. Inside the providers, because the viewport reads its dismiss
           label from LanguageProvider. Marketing, the admin console and the chat

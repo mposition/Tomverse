@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 /**
- * The Korean marketing nav names the Review product "리뷰", so the support
+ * The Korean marketing nav names the Review product "답변 비교", so the support
  * page body has to use the same name instead of the English one.
  */
 
@@ -26,10 +26,10 @@ const koBlock = () => {
 };
 
 test("Korean support copy names Review the way the nav does", () => {
-  assert.match(chromeSource, /lang === "ko" \? "리뷰" : "Review"/);
+  assert.match(chromeSource, /lang === "ko" \? "답변 비교" : "Review"/);
   const ko = koBlock();
-  assert.match(ko, /"appCta": "리뷰 열기"/);
-  assert.match(ko, /"messageExample": "예: 리뷰에서 PDF를/);
+  assert.match(ko, /"appCta": "답변 비교 열기"/);
+  assert.match(ko, /"messageExample": "예: 답변 비교에서 PDF를/);
   assert.doesNotMatch(ko, /"appCta": "Review/);
   assert.doesNotMatch(ko, /"messageExample": "[^"]*Review에서/);
 });
