@@ -49,6 +49,7 @@ import {
     parseChatCompletionRequest,
     PROTOCOL_LIMITS,
     ProtocolError,
+    requestReasoningEffort,
     resolveRequestOptions,
     SSE_DONE,
     sseData,
@@ -327,6 +328,7 @@ export async function handleChatCompletions(request: Request): Promise<Response>
         };
         const options = resolveRequestOptions(parsed, view);
         const converted = convertChatCompletionRequest(parsed, view);
+        const reasoning = requestReasoningEffort(parsed, view);
 
         const settings = getModelGenerationSettings(model, {
             temperature: parsed.temperature ?? undefined,
@@ -351,7 +353,8 @@ export async function handleChatCompletions(request: Request): Promise<Response>
                 : (["temperature", "top_p", "frequency_penalty", "presence_penalty"] as const).filter(
                       (param) => parsed[param] != null
                   )),
-            ...(parsed.reasoning?.summary != null ? ["reasoning.summary"] : []),
+            ...(parsed.ignoredParameters ?? []),
+            ...reasoning.ignored,
         ];
         const infoHeaders: Record<string, string> = {
             ...routedHeaders,
@@ -368,7 +371,7 @@ export async function handleChatCompletions(request: Request): Promise<Response>
                       openai: {
                           ...(baseOptions.openai ?? {}),
                           store: false,
-                          ...(parsed.reasoning_effort != null ? { reasoningEffort: parsed.reasoning_effort } : {}),
+                          ...(reasoning.effort != null ? { reasoningEffort: reasoning.effort } : {}),
                       },
                   }
                 : settings.providerOptions;

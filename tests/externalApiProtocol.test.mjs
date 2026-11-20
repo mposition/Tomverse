@@ -7,6 +7,7 @@ import {
     decodeImageDataUrl,
     parseChatCompletionRequest,
     ProtocolError,
+    requestReasoningEffort,
     resolveRequestOptions,
     toOpenAiFinishReason,
     toOpenAiUsage,
@@ -145,19 +146,44 @@ test("option combinations follow the documented rules", () => {
     assert.deepEqual(resolveRequestOptions(parse({ stop: "END" }), model).stop, ["END"]);
 });
 
-test("the Responses-style reasoning object Cursor sends is read as reasoning_effort", () => {
+test("the Responses-style reasoning object is an effort where the model takes one, else ignored", () => {
     const parse = (extra) => parseChatCompletionRequest({ ...vscodeRequest, ...extra });
     const reasoningModel = { ...model, reasoning: true };
-    assert.equal(parse({ reasoning: { effort: "medium", summary: "auto" } }).reasoning_effort, "medium");
-    assert.equal(parse({ reasoning: { effort: "low" }, reasoning_effort: "low" }).reasoning_effort, "low");
-    assert.equal(parse({ reasoning: { summary: "auto" } }).reasoning_effort, undefined);
-    assert.equal(parse({ reasoning: null }).reasoning_effort, undefined);
-    assert.equal(resolveRequestOptions(parse({ reasoning: { effort: "high" } }), reasoningModel).stream, true);
-    // Same rules as reasoning_effort: refused for a model that cannot take it.
-    rejects(() => resolveRequestOptions(parse({ reasoning: { effort: "high" } }), model), "unsupported_parameter");
+    const effort = (extra, view) => requestReasoningEffort(parse(extra), view);
+    assert.deepEqual(effort({ reasoning: { effort: "medium", summary: "auto" } }, reasoningModel), { effort: "medium", ignored: [] });
+    assert.deepEqual(effort({ reasoning: { effort: "low" }, reasoning_effort: "low" }, reasoningModel), { effort: "low", ignored: [] });
+    assert.deepEqual(effort({ reasoning: { summary: "auto" } }, reasoningModel), { effort: null, ignored: [] });
+    assert.deepEqual(effort({ reasoning: null }, reasoningModel), { effort: null, ignored: [] });
+    // A client default: a model that cannot take an effort still answers.
+    const hinted = parse({ reasoning: { effort: "high" } });
+    assert.equal(resolveRequestOptions(hinted, model).stream, true);
+    assert.deepEqual(requestReasoningEffort(hinted, model), { effort: null, ignored: ["reasoning"] });
+    assert.deepEqual(requestReasoningEffort(hinted, { ...reasoningModel, provider: "anthropic" }), { effort: null, ignored: ["reasoning"] });
+    // reasoning_effort is the caller's own choice and is still refused there.
+    rejects(() => resolveRequestOptions(parse({ reasoning_effort: "high" }), model), "unsupported_parameter");
     rejects(() => parse({ reasoning: { effort: "low" }, reasoning_effort: "high" }), "conflicting_parameters");
     rejects(() => parse({ reasoning: { effort: "low", budget: 10 } }), "unsupported_parameter");
     rejects(() => parse({ reasoning: { effort: "extreme" } }), "invalid_request");
+    assert.deepEqual(parse({ reasoning: { effort: "low", summary: "auto" } }).ignoredParameters, ["reasoning.summary"]);
+    assert.equal(parse({ reasoning: { effort: "low" } }).ignoredParameters, undefined);
+});
+
+test("a bare reasoning string, which Cursor sends for gpt-6-luna, is an effort or ignored", () => {
+    const parse = (extra) => parseChatCompletionRequest({ ...vscodeRequest, ...extra });
+    const reasoningModel = { ...model, reasoning: true };
+    const high = parse({ reasoning: "high" });
+    assert.equal(high.ignoredParameters, undefined);
+    assert.deepEqual(requestReasoningEffort(high, reasoningModel), { effort: "high", ignored: [] });
+    assert.deepEqual(requestReasoningEffort(high, model), { effort: null, ignored: ["reasoning"] });
+    assert.equal(resolveRequestOptions(high, model).stream, true);
+    rejects(() => parse({ reasoning: "low", reasoning_effort: "high" }), "conflicting_parameters");
+    for (const value of ["none", "xhigh", ""]) {
+        const ignored = parse({ reasoning: value });
+        assert.equal("reasoning" in ignored, false, value);
+        assert.deepEqual(ignored.ignoredParameters, ["reasoning"], value);
+        assert.deepEqual(requestReasoningEffort(ignored, reasoningModel), { effort: null, ignored: [] }, value);
+        assert.equal(resolveRequestOptions(ignored, model).stream, true, value);
+    }
 });
 
 test("images: data URLs only, supported types, size bound, model capability", () => {
