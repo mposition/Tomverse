@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { LanguageProvider } from "@/components/LanguageProvider";
 import { MARKETING_LOCALE_ALIASES, marketingLocaleFor } from "@/lib/marketingLocale";
-import { MarketingInfoPage } from "@/components/marketing/MarketingInfoPage";
+import { GuidePage } from "@/components/marketing/v2/guides/GuidePage";
 import {
   SEARCH_INTENT_SLUGS,
   isSearchIntentSlug,
@@ -59,16 +59,7 @@ export default async function LocalizedIntentPage({
   return (
     <div lang={normalizedLocale}>
       <LanguageProvider initialLang={normalizedLocale} forceInitialLang>
-        <MarketingInfoPage
-          content={searchIntentPages[intent]}
-          template={
-            intent === "chatgpt-vs-claude"
-              ? "chatgpt-vs-claude"
-              : intent === "ai-answer-review"
-                ? "ai-answer-review"
-                : undefined
-          }
-        />
+        <GuidePage slug={intent} />
       </LanguageProvider>
     </div>
   );
