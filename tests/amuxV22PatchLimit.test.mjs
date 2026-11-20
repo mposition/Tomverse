@@ -10,6 +10,8 @@ import { AMUX_V22_EMPTY_SHA256, AMUX_V22_PROXY_BODY_MAX_BYTES,
   AMUX_V22_TRANSFER_CHUNK_BYTES, amuxV22SizeAllowanceMs,
   amuxV22TransferChunkCount, amuxV22TransferChunkRange } from
   "../lib/amux/v22TransferCore.ts";
+import { AMUX_BRIDGE_CONTEXT_CHUNKS_FEATURE, AMUX_BRIDGE_FEATURES_HEADER,
+  AMUX_V22_CONTEXT_PART_NAMES } from "../lib/amux/v22ContextPartsCore.ts";
 import { TREE_LIMITS } from "../lib/engineeringAgentTreeVerify.ts";
 
 // Owner decision 2026-11-18 (docs/policy/amux-v22-result-transfer.md): a v22
@@ -110,6 +112,25 @@ test("the Rust bridge sends the new sidecar ops with exactly the designed keys",
   assert.match(bridge, /V22_TRANSFER_CHUNK_BYTES\.div_ceil\(3\) \* 4 \+ 64 \* 1024/);
   const base64Chunk = Math.ceil(AMUX_V22_TRANSFER_CHUNK_BYTES / 3) * 4;
   assert.ok(base64Chunk + 64 * 1024 < AMUX_V22_TRANSFER_BODY_MAX_BYTES);
+});
+
+// docs/policy/amux-v22-result-transfer.md 10.1: the context files go down in the same
+// chunks, and the Rust bridge names the same feature, files and keys the app and sidecar do.
+test("the Rust bridge asks for chunked context with the app's feature name and file names", () => {
+  const api = read("apps/tomverse-orchestrator/src/tomverse_api.rs");
+  const bridge = read("apps/tomverse-orchestrator/src/wsl_bridge.rs");
+  assert.match(api, new RegExp(String.raw`pub const BRIDGE_FEATURES_HEADER: &str = "${AMUX_BRIDGE_FEATURES_HEADER}";`));
+  assert.match(api, new RegExp(String.raw`pub const BRIDGE_FEATURE_CONTEXT_CHUNKS: &str = "${AMUX_BRIDGE_CONTEXT_CHUNKS_FEATURE}";`));
+  assert.match(api, /\.header\(BRIDGE_FEATURES_HEADER, BRIDGE_FEATURE_CONTEXT_CHUNKS\)/);
+  const names = AMUX_V22_CONTEXT_PART_NAMES.map((name) => `"${name}"`).join(", ");
+  assert.match(api, new RegExp(String.raw`pub const V22_CONTEXT_PART_NAMES: \[&str; ${AMUX_V22_CONTEXT_PART_NAMES.length}\] =\s+\[${names}\];`));
+  // One context answer is a chunk's base64 and a short envelope, under the request body bound.
+  assert.match(api, /pub const V22_CONTEXT_ANSWER_MAX_BYTES: usize =\s+V22_TRANSFER_CHUNK_BYTES\.div_ceil\(3\) \* 4 \+ 64 \* 1024;/);
+  // The chunk request and the sidecar op carry exactly the designed keys.
+  assert.match(api, /"attemptId": attempt_id, "worker": worker, "name": part\.name, "index": index,/);
+  assert.match(bridge, /serde_json::json!\(\{ "op": "put_context", "attemptId": attempt_id, "name": name,\s+"index": index, "totalBytes": total_bytes, "sha256": sha256,\s+"bytesBase64": bytes_base64 \}\)/);
+  assert.match(bridge, /"name": part\.name, "bytes": part\.bytes, "sha256": part\.sha256 \}\)/);
+  assert.match(bridge, /"contextParts"/);
 });
 
 test("the box sidecar and its capture hold no patch bound of ours", () => {

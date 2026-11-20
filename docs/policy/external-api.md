@@ -40,7 +40,7 @@ All default off. Server-side; hiding UI is never the gate.
 | Variable | Meaning |
 |---|---|
 | `EXTERNAL_API_ENABLED` | Exactly `true` turns the routes on. Anything else: every `/api/v1` route answers 503 `feature_unavailable` and nothing is dispatched. |
-| `EXTERNAL_API_ALLOWED_USER_IDS` | Comma-separated user IDs allowed to manage and use keys, or `*`. Empty means nobody. |
+| `EXTERNAL_API_ALLOWED_USER_IDS` | Comma-separated user IDs allowed to manage and use keys, or `*`. Empty means nobody. `*` still means paid accounts only: a Free account is refused whatever this list says (section 3). |
 | `EXTERNAL_API_PUBLIC_BASE_URL` | Optional canonical base URL shown to users (e.g. `https://tomverse.app/api/v1`). Otherwise derived from the request host. |
 | `NEXT_PUBLIC_EXTERNAL_API_SETTINGS_VISIBLE` | Build-time. Shows the API keys row in the settings panel. `/settings/api` itself checks availability through the server. |
 | `EXTERNAL_API_REQUESTS_PER_MINUTE` / `_PER_DAY` | Per-account request-rate abuse guard, defaults 120 / 20 000. Credits, the key cap and concurrency are what bound usage; this only stops runaway clients. |
@@ -50,7 +50,7 @@ All default off. Server-side; hiding UI is never the gate.
 | `EXTERNAL_API_ANTHROPIC_ENABLED` | Exactly `true` (and `EXTERNAL_API_ENABLED`) turns on the Anthropic Messages routes for Claude Code: `POST /api/anthropic/v1/messages`, its `count_tokens` and `GET /api/anthropic/v1/models`. Off: 503 `feature_unavailable`, nothing dispatched. |
 | `EXTERNAL_API_RESPONSES_ENABLED` | Exactly `true` (and `EXTERNAL_API_ENABLED`) turns on `POST /api/v1/responses` for Codex. Off: 503, nothing dispatched. |
 | `TOMVERSE_CLI_GUIDE_ENABLED` | Exactly `true` shows the Tomverse CLI install and connect card in Settings > API keys (section 11). Off until the package is published, so the page never points at a package that is not on the registry. It turns nothing on in the API. |
-| `EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED` | Exactly `true` lets Smart Adaptive (section 5.1) ask Chat's router model which candidate answers. Off by default, because each routed request adds one router call, held against the provider operational budget rather than the user's credits. Off, `smart-adaptive` still works and every request goes to the default model. |
+| `EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED` | Exactly `true` lets Smart Adaptive (section 5.1) ask Chat's router model which candidate answers. Off by default, because each routed request adds one router call, held against the provider operational budget rather than the user's credits. Off, `smart-adaptive` still works and every request goes to the default model (on a native protocol, that provider's default, section 10.6). |
 
 **Kill switch.** The Admin operational pause for AI chat
 (`feature.aiChatEnabled`) stops every new external dispatch at once (503
@@ -79,6 +79,17 @@ are settled normally in both cases. Revoking a key stops that key immediately.
   create-new then revoke-old. Revocation is always possible, even after the
   feature is switched off for the account: the settings page still lists
   existing keys, with revoke as the only action.
+- **Paid plans only** (owner decision 2026-11-19). Access needs the switch, the
+  allowlist and a Pro or Max effective plan (`externalApiPlanAllowed`, read
+  through `getUserBillingPlan`, so a lapsed subscription counts as Free). A
+  Free account cannot create a key (403 `PLAN_NOT_ELIGIBLE` from
+  `createExternalApiKey`), and every keyed request (`lib/externalApiAccess.ts`:
+  Chat Completions, Anthropic Messages, Responses, `/models`, `/usage`,
+  `/requests/status`) re-reads the plan, so a key made on a paid plan answers
+  403 `plan_not_eligible` once the account is Free. The Tomverse CLI is a Chat
+  Completions client and is refused the same way. A Free account still lists,
+  renames and revokes its keys; Settings > API keys shows it an upgrade prompt
+  instead of the create button.
 - Create, rename, cap change and revoke are written to the hash-chained audit
   log in the same transaction, with the prefix and never the secret or digest.
 - Unknown, revoked and expired keys, and keys of a suspended or
@@ -195,7 +206,7 @@ with Tomverse limit details under `tomverse` where they exist.
 |---|---|
 | 400 | `invalid_json`, `invalid_request`, `unsupported_parameter`, `conflicting_parameters`, `max_tokens_too_large`, `invalid_tool`, `invalid_tool_choice`, `invalid_tool_call`, `invalid_tool_result`, `unsupported_image_url`, `unsupported_image_type`, `invalid_image`, `model_does_not_support_images`, `invalid_request_selector` and `invalid_idempotency_key` (status lookup) |
 | 401 | `invalid_api_key` |
-| 403 | `account_not_enabled`, account restrictions from `assertUserOperationalAccess`, plan access |
+| 403 | `account_not_enabled` (not on the allowlist), `plan_not_eligible` (Free plan), account restrictions from `assertUserOperationalAccess`, plan access |
 | 404 | `model_not_found`, `request_not_found` (status lookup) |
 | 409 | `idempotent_request_in_progress`, `idempotent_request_completed` |
 | 413 | `image_too_large`, `too_many_images`, `tool_schema_too_large`, `request_body_too_large`, `CHAT_INPUT_TOKEN_LIMIT` |
@@ -430,12 +441,13 @@ Refused before dispatch, with nothing held (`lib/anthropicMessagesProtocol.ts`,
   hold, so a request fetch could not send never consumes provider budget);
 - stored or server-side state: `previous_response_id`, `conversation`,
   stored `prompt`, `background`, `item_reference`;
-- Smart Adaptive and models of another provider: a native request stays on
-  the model that produced its state. The model list per protocol is the same
-  runtime registry, plan and credential filter as `/models`, narrowed by
-  provider (`protocols` on each `/models` entry). A Responses request may
-  name the provider's model id (`gpt-5.6-luna`) when it maps to exactly one
-  offered model; Codex picks its patch tool by it.
+- models of another provider: a native request stays on its own provider.
+  The model list per protocol is the same runtime registry, plan and
+  credential filter as `/models`, narrowed by provider (`protocols` on each
+  `/models` entry). A Responses request may name the provider's model id
+  (`gpt-5.6-luna`) when it maps to exactly one offered model; Codex picks its
+  patch tool by it. `smart-adaptive` is accepted and routed among the
+  provider's own models (section 10.6).
 
 `anthropic-beta` is forwarded unchanged (filtering one half of a header/body
 pair yields a provider 400); the cost-bearing features are checked in the body.
@@ -570,7 +582,72 @@ times and reported a server error.
 
 Not yet verified, each a separate step: other operating systems, Claude Code
 and Codex against a deployed environment (their runs above called the handlers
-directly, not through the Next.js server), and any client against production.
+directly, not through the Next.js server), any client against production, and
+native Smart Adaptive (section 10.6) with real models or real clients end to end.
+
+### 10.6 Smart Adaptive on the native protocols (`lib/externalApiNativeSmartAdaptive.ts`)
+
+`model: "smart-adaptive"` on Anthropic Messages routes among the Anthropic
+models this key can run, on Responses among the OpenAI models -- never across
+providers, so signed or encrypted state is never sent to another provider.
+
+- **Constraint checked (provider docs, 2026-11-19).** Anthropic binds each
+  thinking block to the model that produced it; a model that cannot read an
+  earlier block drops it and the request still succeeds. OpenAI omits
+  incompatible encrypted reasoning when the model family changes, also without
+  failing. So a model switch mid-task costs reasoning and the prompt cache,
+  not the request; the gateway still avoids it.
+- **One pick per conversation.** The first request of a conversation (no model
+  output in its history) is routed with the same router call, gate and switch
+  as Chat Completions (section 5.1, `pickWithSmartAdaptiveRouter`); every later
+  request of that conversation goes to the same model (`x-tomverse-routed-by:
+  continued`). The conversation is the client's own id: Codex's
+  `prompt_cache_key` (its thread id; `session-id`/`thread-id` headers),
+  Claude Code's `x-claude-code-session-id` or the session in
+  `metadata.user_id`; otherwise a digest of the history's opening. The pin is
+  kept in this process for six hours from the conversation's last generation
+  request (a token count reads it without extending it).
+- **Candidates** are the provider's models the request fits: images only to a
+  model that reads them, and the input estimate plus the output the gateway
+  would reserve on that model (the client's limit within the model's own)
+  within its window, after the protocol's own check for that model (a
+  thinking budget above its output limit leaves it out). When no model of the
+  provider fits, the request is refused (`image_input_unsupported`,
+  `context_length_exceeded`, or the model check's own error) before any
+  router call or hold. Every refusal that does not depend on the model
+  (provider-run tools, cache TTL, stored state, forwarded headers) is checked
+  before the router call, so a request refused anyway never spends one.
+- **A missed pin never fails or re-routes.** A request whose history already
+  carries model output and whose pin this process does not have (another
+  instance, a restart) takes the provider default and pins it. The body
+  names no producing model to recover, and both providers accept the switch.
+  If the pinned model can no longer take the request (window, retirement),
+  another fitting model of the provider answers and the pin moves.
+- **Provider default:** the catalogue default (`gpt-6-luna`) when the
+  provider has it, otherwise the lower-median model by credits
+  (`nativeSmartAdaptiveDefaultId`). It also answers with the router switch
+  off, when the router gives no answer or names a model outside the
+  candidates, and for the free `count_tokens` call, which never routes and
+  reads the pin only.
+- **Money:** the pick happens before admission, so the reservation, receipt
+  and credits are the picked model's; billing code is unchanged. A refused
+  admission pauses router calls for the key for two minutes, as in section 5.1.
+  Responses carry `x-tomverse-routed-model` and `x-tomverse-routed-by`.
+- **Settings:** Claude Code and Codex offer Smart Adaptive first, scoped to
+  their provider (`nativeSmartAdaptiveCapabilities`): the smallest window
+  among those models (the conversation keeps its first model, so the tool
+  compacts before the smallest window), the default's output limit, the
+  dearest model's credits. Claude Code's Haiku alias stays on the cheapest
+  fixed Anthropic model, so background work makes no router call. Codex 0.146
+  given `smart-adaptive` (a slug it does not know) sends its generic function
+  tools (`shell_command`, `update_plan`, ...) and no freeform tool, captured
+  2026-11-19 against a local server; every OpenAI model takes those.
+- **Verified 2026-11-19** with a fake provider and a faked router over the real
+  ledger (`tests/integration/external-api-native.db.test.mjs`): Anthropic-only
+  and OpenAI-only candidate lists, a cross-provider router answer ignored, the
+  pick kept across tool rounds that carry thinking signatures and encrypted
+  reasoning, a dropped pin answered by the default with no router call and no
+  failure, every request settled.
 
 ## 11. Tomverse CLI (`apps/tomverse-cli`)
 
@@ -614,6 +691,14 @@ output contract are in `apps/tomverse-cli/README.md`.
   runtime with its own providers and store). The CLI follows its contracts --
   tool names, result states, the credential path list, argv-first commands --
   so a later shared executor can replace the CLI's local tools.
+
+- **Distribution** (owner decision 2026-11-19). The npm package
+  `@tomverse/cli` (Node.js 22 or later) under a proprietary use-only license
+  (`apps/tomverse-cli/LICENSE`), plus standalone executables (Node.js single
+  executable applications) for Windows, macOS and Linux on x64 and arm64,
+  attached to a GitHub Release `cli-v<version>`. The workflow
+  `tomverse-cli-release-check.yml` (run by hand) builds and tests all of them
+  and publishes nothing. The steps are in `apps/tomverse-cli/RELEASING.md`.
 
 Verification state, publication and the operating systems actually run are
 reported per change (the PR); package publication and enabling

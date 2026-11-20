@@ -14,6 +14,7 @@ import {
     asideProviderConfig,
     externalApiEnabled,
     externalApiModelCapabilities,
+    externalApiPlanAllowed,
     externalApiUserAllowed,
     isExternalApiServableModel,
     KEY_PLACEHOLDER,
@@ -89,6 +90,11 @@ test("exposure needs the switch, the account, the registry and the plan", () => 
     assert.equal(externalApiUserAllowed({}, "u1"), false);
     assert.equal(externalApiUserAllowed({ EXTERNAL_API_ALLOWED_USER_IDS: "u2, u1" }, "u1"), true);
     assert.equal(externalApiUserAllowed({ EXTERNAL_API_ALLOWED_USER_IDS: "*" }, "anyone"), true);
+    // Paid plans only, whatever the allowlist says.
+    assert.equal(externalApiPlanAllowed("Free"), false);
+    assert.equal(externalApiPlanAllowed("Pro"), true);
+    assert.equal(externalApiPlanAllowed("Max"), true);
+    assert.equal(externalApiPlanAllowed(undefined), false, "an unknown tier is not a paid plan");
     // The catalogue is the only list: no second, operator-kept list of ids.
     assert.equal(isExternalApiServableModel(baseModel, "Pro"), true);
     assert.equal(isExternalApiServableModel(baseModel, "Free"), false, "plan");
@@ -136,4 +142,16 @@ test("Smart Adaptive is offered with any model, its router call is off by defaul
     assert.equal(smart.creditWeight, 3, "the most a request can cost");
     assert.equal(smart.vision, true, "images are routed to a model that reads them");
     assert.equal(vscodeCustomEndpointConfig("https://x/api/v1", [smart])[0].models[0].name, "Smart Adaptive (Tomverse)");
+    assert.deepEqual(smart.protocols, ["chat_completions"], "candidates without native protocols: Chat Completions only");
+    const claude = { ...a, id: "c", provider: "anthropic", protocols: ["chat_completions", "anthropic_messages"] };
+    assert.deepEqual(smartAdaptiveCapabilities([a, claude]).protocols, ["chat_completions", "anthropic_messages"], "every protocol a candidate speaks");
+});
+
+test("native Smart Adaptive default: the catalogue default if the provider has it, else the lower-median model by credits", async () => {
+    const { nativeSmartAdaptiveDefaultId } = await import("../lib/externalApiCatalogCore.ts");
+    const m = (id, creditWeight) => ({ id, creditWeight });
+    assert.equal(nativeSmartAdaptiveDefaultId([]), null);
+    assert.equal(nativeSmartAdaptiveDefaultId([m("haiku", 1), m("sonnet", 6), m("opus", 12)]), "sonnet");
+    assert.equal(nativeSmartAdaptiveDefaultId([m("haiku", 1), m("sonnet", 6), m("opus", 12), m("fable", 20)]), "sonnet");
+    assert.equal(nativeSmartAdaptiveDefaultId([m("luna", 2), m("sol", 8), m("astra", 9)], "luna"), "luna");
 });

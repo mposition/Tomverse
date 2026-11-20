@@ -22,6 +22,8 @@ export function createDemoWorkspace(key: string, addConversation: (item: Convers
     uploadKnowledge: async (id, file) => { saveProfiles(profiles().map(row => row.id === id ? { ...row, knowledgeFiles: [...row.knowledgeFiles, { id: crypto.randomUUID(), name: file.name, processingStatus: "ready" }] } : row)); },
     imports: async (offset = 0) => ({ conversations: originals().slice(offset, offset + 50), total: originals().length, continuationEnabled: true }),
     source: async id => originals().find(row => row.id === id)!,
+    // The demo has no server to ask; the file's own split is used.
+    perplexitySplit: async () => { throw Error("DEMO_NO_SPLIT_HINTS"); },
     importText: async (provider, selected) => { const rows = originals(); for (const row of selected) rows.push({ id: crypto.randomUUID(), provider, title: row.title, locked: false, messageCount: row.messages.length, messages: row.messages.map(message => ({ id: message.rawExternalMessageId, role: message.role, content: message.content })) }); localStorage.setItem(key + ":imports", JSON.stringify(rows)); },
     continue: async (id, requestKey) => {
       const receiptKey = key + ":continuation:" + requestKey, existing = localStorage.getItem(receiptKey);

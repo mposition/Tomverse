@@ -176,6 +176,9 @@ export function nativeWorkspaceBearerRoute(path: string, method: string, enabled
   if (/^\/api\/assistant-profiles\/[A-Za-z0-9_-]{1,100}\/knowledge$/.test(path)) return ["GET", "POST"].includes(method);
   if (path === "/api/imports/external") return method === "POST";
   if (path === "/api/imports/external/capacity") return method === "GET";
+  // Split hints for a Perplexity file the iOS import sheet is opening:
+  // excerpts in, counts out, nothing stored (lib/perplexitySplitHints.ts).
+  if (path === "/api/imports/external/perplexity-split") return method === "POST";
   if (/^\/api\/imports\/external\/[A-Za-z0-9_-]{1,100}\/(batches|seal|finalize)$/.test(path)) return method === "POST";
   if (path === "/api/external-conversations") return method === "GET";
   if (/^\/api\/external-conversations\/[A-Za-z0-9_-]{1,100}$/.test(path)) return method === "GET";

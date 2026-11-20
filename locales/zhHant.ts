@@ -1547,13 +1547,13 @@ export const zhHant = {
     externalImport: {
         dataTabTitle: "從其他 AI 服務匯入",
         dataTabDescription:
-            "將 ChatGPT、Claude 或 Gemini（Google Takeout）匯出檔案中的歷史對話儲存到您的 Tomverse 帳戶。匯出檔案僅在您的瀏覽器中讀取。",
+            "將 ChatGPT、Claude、Gemini（Google Takeout）或 Perplexity 匯出檔案中的歷史對話儲存到您的 Tomverse 帳戶。匯出檔案僅在您的瀏覽器中讀取。",
         dataTabUsage: "已匯入 {conversations} 個對話 · 已儲存 {storage}",
         dataTabOpen: "管理匯入",
         dataTabUsageEmpty: "尚未匯入任何對話",
         pageTitle: "從其他 AI 服務匯入對話",
         pageDescription:
-            "上傳 ChatGPT、Claude 或 Gemini 的官方資料匯出檔案，檢視其內容，然後選擇要儲存到 Tomverse 帳戶的對話。",
+            "上傳 ChatGPT、Claude、Gemini 或 Perplexity 的官方資料匯出檔案，檢視其內容，然後選擇要儲存到 Tomverse 帳戶的對話。",
         backToImports: "返回匯入列表",
         signInRequired: "登入後即可從其他 AI 服務匯入對話。",
         disabledNotice: "外部對話匯入功能目前無法使用。",
@@ -1564,7 +1564,7 @@ export const zhHant = {
         capacityConversations: "已匯入 {used} 個對話（上限 {limit} 個）",
         selectFile: "選擇匯出檔案",
         selectFileHint:
-            "ChatGPT、Claude 或 Gemini 資料匯出檔（.zip 或 .json），最大 1GB。Gemini 需要在 Google Takeout 中匯出「我的活動 → Gemini 應用程式」的 JSON 格式檔案。檔案較大也沒關係 — 媒體檔案會直接略過，不會讀取。",
+            "ChatGPT、Claude 或 Gemini 資料匯出檔（.zip 或 .json），或以 Markdown（.md）匯出的 Perplexity 討論串，最大 1GB。Gemini 需要在 Google Takeout 中匯出「我的活動 → Gemini 應用程式」的 JSON 格式檔案。檔案較大也沒關係 — 媒體檔案會直接略過，不會讀取。對於 Perplexity 檔案，會將每個問題及其前後回答的簡短摘錄（每段不超過 600 字）傳送給 AI 模型（OpenAI），以判斷每個問題在哪裡結束。",
         parsing: "正在瀏覽器中讀取匯出檔案…",
         parsingProgress: "已發現 {conversations} 個對話",
         cancel: "取消",
@@ -1689,14 +1689,20 @@ export const zhHant = {
             "選擇「我的活動」，在其中勾選 Gemini 應用程式並將格式設為 JSON — Gemini 產品項目中放的是 Gem，不是對話",
         guideGeminiStep3:
             "匯出後，收到 Google 的下載連結再上傳該 .zip",
+        guidePerplexityTitle: "匯出 Perplexity 討論串",
+        guidePerplexityStep1: "在 Perplexity 中開啟要匯入的討論串",
+        guidePerplexityStep2: "按下回答下方的匯出按鈕並選擇 Markdown",
+        guidePerplexityStep3: "上傳取得的 .md 檔案。一個檔案對應一個討論串，回答中的來源連結也會一併匯入。為判斷每個問題在哪裡結束，會將每個問題及其前後回答的簡短摘錄（每段不超過 600 字）傳送給 AI 模型（OpenAI）。",
         guideFormats:
-            "同時支援 ZIP 檔案與 JSON 檔案。Gemini 匯出必須是 JSON 格式，HTML 無法讀取。",
+            "支援 ZIP、JSON 檔案以及 Perplexity 的 Markdown（.md）檔案。Gemini 匯出必須是 JSON 格式，HTML 無法讀取。",
         guideStaysLocal: "匯出檔案不會離開你的裝置，只會在瀏覽器中開啟。",
         guideMediaExcluded: "圖片、音訊與附件不會被匯入。",
         guidePrivacyDisclosure: "查看資料處理方式",
         guideContinue: "選擇匯出檔案",
         providerMismatchNotice:
             "辨識出這是 {detected} 的匯出檔案，將依 {detected} 繼續。",
+        perplexityStructureNotice:
+            "Perplexity 匯出不會標示問題在哪裡結束，問題和回答可能被拆錯。匯入後請開啟對話檢查，如拆分有誤可將其刪除。",
         // 建議使用桌上型電腦的狀態
         desktopRecommendedTitle: "此裝置難以安全地開啟該檔案",
         desktopRecommendedNoUpload: "匯出檔案沒有被上傳。",

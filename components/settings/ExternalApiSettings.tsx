@@ -46,7 +46,8 @@ type ModelSummary = ExternalApiModelCapabilities;
 type TomverseCliGuide = { install: string; powershell: string; posix: string };
 
 type Overview =
-    | { enabled: false; keys?: KeySummary[] }
+    // `plan_not_eligible`: a Free account; the API needs a paid plan.
+    | { enabled: false; reason?: "plan_not_eligible"; keys?: KeySummary[] }
     | {
           enabled: true;
           baseUrl: string;
@@ -606,8 +607,8 @@ const SHELLS: [Shell, string][] = [
 /**
  * One tool at a time: the person picks where the key is used and sees only
  * that tool's setup. Configurations carry the new key while this page holds
- * it and a placeholder otherwise. Native protocols never offer Smart Adaptive
- * (codingToolModels).
+ * it and a placeholder otherwise. Claude Code and Codex offer Smart Adaptive
+ * scoped to their own provider's models (codingToolModels).
  */
 function ConnectSection({
     baseUrl,
@@ -689,6 +690,7 @@ function ConnectSection({
                     <div data-testid="external-api-tool-claude-code">
                         <p className="text-xs text-zinc-500">{t("externalApi.claudeCodeHint")}</p>
                         <ToolModelSelect models={lists.claudeCode} value={claude.id} onChange={setClaudeId} testId="external-api-claude-code-model" />
+                        {claude.id === SMART_ADAPTIVE_MODEL_ID ? <p className="mt-1 text-xs text-zinc-500" data-testid="external-api-native-smart-hint">{t("externalApi.nativeSmartAdaptiveHint")}</p> : null}
                         <div className="mt-3 flex flex-wrap gap-2">
                             <Segmented options={surfaces} value={surface} onChange={setSurface} testId="external-api-surface" />
                             {surface === "terminal" ? <Segmented options={SHELLS} value={shell} onChange={setShell} testId="external-api-shell" /> : null}
@@ -717,6 +719,7 @@ function ConnectSection({
                     <div data-testid="external-api-tool-codex">
                         <p className="text-xs text-zinc-500">{t("externalApi.codexHint")}</p>
                         <ToolModelSelect models={lists.codex} value={codex.id} onChange={setCodexId} testId="external-api-codex-model" />
+                        {codex.id === SMART_ADAPTIVE_MODEL_ID ? <p className="mt-1 text-xs text-zinc-500" data-testid="external-api-native-smart-hint">{t("externalApi.nativeSmartAdaptiveHint")}</p> : null}
                         <div className="mt-3 flex flex-wrap gap-2">
                             <Segmented options={surfaces} value={surface} onChange={setSurface} testId="external-api-surface" />
                             <Segmented options={SHELLS} value={shell} onChange={setShell} testId="external-api-shell" />
@@ -952,9 +955,18 @@ export function ExternalApiSettings() {
             {!failed && !overview ? <p className="mt-8 text-sm text-zinc-500">{t("externalApi.loading")}</p> : null}
             {overview && !overview.enabled ? (
                 <>
-                    <p className={`${card} text-sm`} data-testid="external-api-unavailable">
-                        {t("externalApi.unavailable")}
-                    </p>
+                    {overview.reason === "plan_not_eligible" ? (
+                        <section className={card} data-testid="external-api-paid-plan">
+                            <p className="text-sm text-zinc-600 dark:text-zinc-300">{t("externalApi.paidPlanRequired")}</p>
+                            <Link href={settingsHrefForProduct(`${SETTINGS_HOME_PATH}?${SETTINGS_TAB_QUERY_PARAM}=plan`, product)} data-testid="external-api-upgrade" className={`mt-3 inline-flex ${primary}`}>
+                                {t("externalApi.paidPlanUpgrade")}
+                            </Link>
+                        </section>
+                    ) : (
+                        <p className={`${card} text-sm`} data-testid="external-api-unavailable">
+                            {t("externalApi.unavailable")}
+                        </p>
+                    )}
                     {overview.keys?.length ? (
                         // Still listed so a key issued earlier can be revoked.
                         <section className={card}>

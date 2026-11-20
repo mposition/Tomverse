@@ -6,7 +6,6 @@ import {
   isSnapshotTargetSha,
 } from "./decisionMakerCore.ts";
 import { isDmRequestId } from "./decisionMakerRequestCore.ts";
-import { AMUX_V22_TRANSPORT_MAX_BYTES } from "./v22LocalCliFlowCore.ts";
 import { v22PatchBinaryPayloads } from "./v22PatchBinary.ts";
 import { detectSecretsInFields } from "../engineeringAgentSecretPatterns.ts";
 
@@ -59,15 +58,26 @@ export const DM_WORKSPACE_HISTORY_DEPTH = 1000;
 // ---------------------------------------------------------------------------
 
 /**
- * The evidence the app hands over for one request, in UTF-8 bytes, all files
- * together. It crosses three processes in memory (the app's answer, the
- * bridge, the broker's socket line, base64), so it is bounded, as a memory
- * backstop only: twice the v22 transport backstop, so a run's report kept at
- * that backstop (lib/amux/v22LocalCliFlowCore.ts) fits beside its patch and
- * criteria (it was 16 MiB, under the 32 MiB report the local CLI flow keeps).
- * The broker and the bridge mirror it (dm_relay/workspace.rs).
+ * What the app's older `workspace` route (evidence inline in one answer) holds
+ * in all: 64 MiB, the memory the first relays and brokers were built around.
+ * Only that route and the inline lines of the older protocol keep it; the parts
+ * protocol (below) has no bound of ours on a file or on the evidence. The
+ * relay mirrors it (dm_relay/workspace.rs).
  */
-export const DM_WORKSPACE_EVIDENCE_MAX_BYTES = 2 * AMUX_V22_TRANSPORT_MAX_BYTES;
+export const DM_WORKSPACE_LEGACY_INLINE_MAX_BYTES = 64 * 1024 * 1024;
+/**
+ * The one file size left, and it is V8's: a file is checked as one string (the
+ * UTF-8 decode and the secret scan), and a string holds at most this many
+ * characters. A file with more bytes cannot be shown clean and is left out as
+ * `too_large`.
+ *
+ * Written out rather than read from `node:buffer`: this core reaches the Admin
+ * owner queue's client bundle (ownerQueueDmCore -> dmOwnerSettlementCore), whose
+ * `buffer` has no `constants`, and a read at module load would break that page.
+ * It is V8's 64-bit limit, (2^29 - 24); a test holds it equal to Node's
+ * `buffer.constants.MAX_STRING_LENGTH`.
+ */
+export const DM_WORKSPACE_TEXT_MAX_BYTES = 2 ** 29 - 24;
 /**
  * The request directory on the box's disk after the checkout, a backstop for
  * the box's own disk (it was 4 GiB; owner direction 2026-11-16).
@@ -76,8 +86,9 @@ export const DM_WORKSPACE_DISK_MAX_BYTES = 16 * 1024 * 1024 * 1024;
 /**
  * The workspace's one time limit (owner direction 2026-11-16: one generous
  * value in place of a five-minute build, two-minute git steps and a
- * fifteen-second lookup): the whole build at launch -- every git step, the
- * fetch included -- and each public commit lookup before it. It comes out of
+ * fifteen-second lookup): the whole build at launch -- the evidence parts
+ * received first, then every git step, the fetch included -- and each public
+ * commit lookup before it. It comes out of
  * the request's result window (eight hours from the assignment, the
  * database's), and the broker's answer deadline grows by it
  * (DM_BROKER_RESPONSE_DEADLINE_MS); the relay waits as long for the
@@ -126,12 +137,15 @@ export const dmWorkspaceText = (bytes: Uint8Array): string | null => {
  * §5's protections for every file that goes into a workspace, the same rules
  * the snapshot held: the name on the closed list, once; text, not binary; not
  * a secret path (§5's list, unchanged); and the secret scan
- * (`detectSecretsInFields`) finding nothing. A file that fails is left out and
- * counted; the rest still go. The whole set stays within the evidence cap, in
- * the order given.
+ * (`detectSecretsInFields`) finding nothing, over the whole file. A file that
+ * fails is left out and counted; the rest still go, in the order given. No
+ * size of ours: a file is left out as `too_large` only when it cannot be held
+ * as one string (`DM_WORKSPACE_TEXT_MAX_BYTES`, V8's), or -- for the inline
+ * protocol alone, which passes `totalMaxBytes` -- when the set passes that.
  */
 export const dmWorkspaceAcceptFiles = (
   files: ReadonlyArray<{ name: unknown; bytes: Uint8Array }>,
+  options: { totalMaxBytes?: number } = {},
 ): { files: DmWorkspaceFile[]; excluded: Partial<Record<DmWorkspaceExclusion, number>> } => {
   const excluded: Partial<Record<DmWorkspaceExclusion, number>> = {};
   const count = (reason: DmWorkspaceExclusion) => {
@@ -154,6 +168,10 @@ export const dmWorkspaceAcceptFiles = (
       count("secret_path");
       continue;
     }
+    if (file.bytes.length > DM_WORKSPACE_TEXT_MAX_BYTES) {
+      count("too_large");
+      continue;
+    }
     const text = dmWorkspaceText(file.bytes);
     if (text === null || text.length === 0) {
       count("not_text");
@@ -163,7 +181,7 @@ export const dmWorkspaceAcceptFiles = (
       count("secret_content");
       continue;
     }
-    if (total + file.bytes.length > DM_WORKSPACE_EVIDENCE_MAX_BYTES) {
+    if (options.totalMaxBytes !== undefined && total + file.bytes.length > options.totalMaxBytes) {
       count("too_large");
       continue;
     }
@@ -211,28 +229,50 @@ export const dmWorkspaceHasPatch = (workspace: Pick<DmWorkspace, "files">) =>
   workspace.files.some((file) => file.name === DM_WORKSPACE_PATCH_NAME);
 
 /**
+ * What the payload says of a file: its name, git blob id and size. The blob id
+ * is of the whole file, so the payload digest binds every byte without a byte
+ * of text in it.
+ */
+export type DmWorkspaceOutlineEntry = { name: DmWorkspaceEvidenceName; blob: string; bytes: number };
+/** A workspace as the payload names it: the commit and each file's entry, with no text. */
+export type DmWorkspaceOutline = { state: DmWorkspaceState; targetSha: string | null; entries: DmWorkspaceOutlineEntry[] };
+
+/** The outline of a workspace whose files are held as text. */
+export const dmWorkspaceOutline = (workspace: DmWorkspace): DmWorkspaceOutline => ({
+  state: workspace.state,
+  targetSha: workspace.targetSha,
+  entries: workspace.files.map((file) => {
+    const bytes = Buffer.from(file.text, "utf8");
+    return { name: file.name, blob: gitBlobId(bytes), bytes: bytes.length };
+  }),
+});
+
+/**
  * The workspace's part of the stdin payload: one JSON line naming the
  * repository, the commit and the file count, then one JSON line per evidence
  * file with its path in the workspace, its git blob id and its size. No file
  * text: the DM reads it in the workspace. Every newline inside a string is
  * escaped, so no file can add a line of its own. Always ends with a newline.
  */
-export const dmWorkspacePayloadLines = (workspace: DmWorkspace): string => {
+export const dmOutlinePayloadLines = (outline: DmWorkspaceOutline): string => {
   const head = JSON.stringify({
     workspace: {
       repository: DM_WORKSPACE_REPOSITORY_NAME,
-      commit: workspace.targetSha,
-      state: workspace.state,
-      patch: dmWorkspaceHasPatch(workspace),
-      files: workspace.files.length,
+      commit: outline.targetSha,
+      state: outline.state,
+      patch: outline.entries.some((entry) => entry.name === DM_WORKSPACE_PATCH_NAME),
+      files: outline.entries.length,
     },
   });
-  const files = workspace.files.map((file) => {
-    const bytes = Buffer.from(file.text, "utf8");
-    return `${JSON.stringify({ file: `evidence/${file.name}`, blob: gitBlobId(bytes), bytes: bytes.length })}\n`;
-  });
-  return `${head}\n${files.join("")}`;
+  const files = outline.entries.map((entry) =>
+    `${JSON.stringify({ file: `evidence/${entry.name}`, blob: entry.blob, bytes: entry.bytes })}
+`);
+  return `${head}
+${files.join("")}`;
 };
+
+export const dmWorkspacePayloadLines = (workspace: DmWorkspace): string =>
+  dmOutlinePayloadLines(dmWorkspaceOutline(workspace));
 
 /** The payload holds a workspace line: a raw newline followed by the header (no card string can hold one). */
 export const DM_WORKSPACE_LINE_MARK = '\n{"workspace":';
@@ -256,12 +296,26 @@ export const dmWorkspaceManifestDigest = (requestKey: Buffer, workspace: DmWorks
 // The broker's `workspace` exchange (bridge -> broker, before the intent)
 // ---------------------------------------------------------------------------
 
-/** The commit the app names, or null for develop's public head. */
+/**
+ * The commit the app names, or null for develop's public head, and the
+ * evidence: its files inline (the older protocol, `files`) or only their
+ * descriptions (`parts`: the bytes come later, with the launch). Exactly one of
+ * the two is set.
+ */
 export type DmWorkspaceRequest = {
   requestId: string;
   targetSha: string | null;
-  files: Array<{ name: unknown; bytes: Uint8Array }>;
+  files: Array<{ name: unknown; bytes: Uint8Array }> | null;
+  parts: DmWorkspaceRawPart[] | null;
 };
+
+/**
+ * A file the app describes: its name, its size, its sha256 (the transfer's
+ * check) and its git blob id (what the payload names). `name` is checked, not
+ * trusted, like a file's.
+ */
+export type DmWorkspaceRawPart = { name: unknown; bytes: number; sha256: string; blob: string };
+export type DmWorkspacePart = { name: DmWorkspaceEvidenceName; bytes: number; sha256: string; blob: string };
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -270,9 +324,9 @@ const hasExactKeys = (record: Record<string, unknown>, keys: readonly string[]) 
 /** The base64 alphabet and its padding, checked without a repeated group (a text of many megabytes would overflow the regex stack); the round trip below holds the rest. */
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 
-/** Canonical base64 within the evidence cap, or null. */
+/** Canonical base64 within the inline protocol's cap, or null. */
 const decodeBase64 = (text: unknown): Buffer | null => {
-  if (typeof text !== "string" || text.length % 4 !== 0 || text.length > Math.ceil(DM_WORKSPACE_EVIDENCE_MAX_BYTES / 3) * 4 || !BASE64.test(text)) {
+  if (typeof text !== "string" || text.length % 4 !== 0 || text.length > Math.ceil(DM_WORKSPACE_LEGACY_INLINE_MAX_BYTES / 3) * 4 || !BASE64.test(text)) {
     return null;
   }
   const bytes = Buffer.from(text, "base64");
@@ -296,6 +350,23 @@ export const dmEncodeWorkspaceFiles = (files: ReadonlyArray<DmWorkspaceFile>) =>
   files.map((file) => ({ name: file.name, content: Buffer.from(file.text, "utf8").toString("base64") }));
 
 const WORKSPACE_REQUEST_KEYS = ["v", "type", "requestId", "targetSha", "files"] as const;
+const WORKSPACE_REQUEST_PARTS_KEYS = ["v", "type", "requestId", "targetSha", "parts"] as const;
+const HEX_64 = /^[0-9a-f]{64}$/;
+const HEX_40 = /^[0-9a-f]{40}$/;
+
+/** `parts` of a `workspace` request: `[{ name, bytes, sha256, blob }]`, at most one per closed name. */
+export const dmParseWorkspaceParts = (value: unknown): DmWorkspaceRawPart[] | null => {
+  if (!Array.isArray(value) || value.length > DM_WORKSPACE_EVIDENCE_NAMES.length) return null;
+  const out: DmWorkspaceRawPart[] = [];
+  for (const entry of value) {
+    if (!isPlainObject(entry) || !hasExactKeys(entry, ["name", "bytes", "sha256", "blob"])) return null;
+    const { bytes, sha256, blob } = entry;
+    if (typeof bytes !== "number" || !Number.isSafeInteger(bytes) || bytes < 1) return null;
+    if (typeof sha256 !== "string" || !HEX_64.test(sha256) || typeof blob !== "string" || !HEX_40.test(blob)) return null;
+    out.push({ name: entry.name, bytes, sha256, blob });
+  }
+  return out;
+};
 
 /** A `workspace` request line, or null for anything else. */
 export const dmParseWorkspaceRequest = (line: string): DmWorkspaceRequest | null => {
@@ -305,13 +376,66 @@ export const dmParseWorkspaceRequest = (line: string): DmWorkspaceRequest | null
   } catch {
     return null;
   }
-  if (!isPlainObject(value) || !hasExactKeys(value, WORKSPACE_REQUEST_KEYS)) return null;
+  if (!isPlainObject(value)) return null;
+  const inline = hasExactKeys(value, WORKSPACE_REQUEST_KEYS);
+  if (!inline && !hasExactKeys(value, WORKSPACE_REQUEST_PARTS_KEYS)) return null;
   if (value.v !== 1 || value.type !== "workspace" || !isDmRequestId(value.requestId)) return null;
   if (value.targetSha !== null && (typeof value.targetSha !== "string" || !isSnapshotTargetSha(value.targetSha))) return null;
-  const files = dmParseWorkspaceFiles(value.files);
-  if (files === null) return null;
-  return { requestId: value.requestId, targetSha: value.targetSha as string | null, files };
+  const targetSha = value.targetSha as string | null;
+  if (inline) {
+    const files = dmParseWorkspaceFiles(value.files);
+    return files === null ? null : { requestId: value.requestId, targetSha, files, parts: null };
+  }
+  const parts = dmParseWorkspaceParts(value.parts);
+  return parts === null ? null : { requestId: value.requestId, targetSha, files: null, parts };
 };
+
+/**
+ * The parts a `workspace` request describes, through the same rules as a file
+ * but the bytes: the closed names, once, not a secret path. What can only be
+ * seen in the bytes (text, the secret scan, the size V8 can hold) is checked
+ * when the bytes arrive, before the launch (`dmAssembleWorkspace`); the app
+ * has checked the same over the whole file before it described it.
+ */
+export const dmWorkspaceAcceptParts = (
+  parts: ReadonlyArray<DmWorkspaceRawPart>,
+): { parts: DmWorkspacePart[]; excluded: Partial<Record<DmWorkspaceExclusion, number>> } => {
+  const excluded: Partial<Record<DmWorkspaceExclusion, number>> = {};
+  const count = (reason: DmWorkspaceExclusion) => {
+    excluded[reason] = (excluded[reason] ?? 0) + 1;
+  };
+  const accepted: DmWorkspacePart[] = [];
+  const seen = new Set<string>();
+  for (const part of parts) {
+    if (!isDmWorkspaceEvidenceName(part.name)) {
+      count("name_refused");
+      continue;
+    }
+    if (seen.has(part.name)) {
+      count("repeated");
+      continue;
+    }
+    seen.add(part.name);
+    if (isSecretRepositoryPath(`evidence/${part.name}`)) {
+      count("secret_path");
+      continue;
+    }
+    if (part.bytes > DM_WORKSPACE_TEXT_MAX_BYTES) {
+      count("too_large");
+      continue;
+    }
+    accepted.push({ name: part.name, bytes: part.bytes, sha256: part.sha256, blob: part.blob });
+  }
+  return { parts: accepted, excluded };
+};
+
+/** What the app tells the bridge of one file it holds: the bytes' size, sha256 and blob id. */
+export const dmWorkspacePartOf = (file: { name: DmWorkspaceEvidenceName; bytes: Uint8Array }): DmWorkspacePart => ({
+  name: file.name,
+  bytes: file.bytes.length,
+  sha256: createHash("sha256").update(file.bytes).digest("hex"),
+  blob: gitBlobId(file.bytes),
+});
 
 export const DM_WORKSPACE_NONE_REASONS = ["request_malformed", "target_unavailable"] as const;
 export type DmWorkspaceNoneReason = (typeof DM_WORKSPACE_NONE_REASONS)[number];
@@ -324,7 +448,7 @@ export type DmWorkspaceNoneReason = (typeof DM_WORKSPACE_NONE_REASONS)[number];
 export const dmEncodeWorkspaceAnswer = (
   requestId: string | null,
   result:
-    | { ok: true; workspace: DmWorkspace; excluded: Partial<Record<DmWorkspaceExclusion, number>>; reason: DmWorkspaceNoneReason | null }
+    | { ok: true; workspace: DmWorkspaceOutline; excluded: Partial<Record<DmWorkspaceExclusion, number>>; reason: DmWorkspaceNoneReason | null }
     | { ok: false },
 ) => ({
   v: 1 as const,
@@ -332,8 +456,8 @@ export const dmEncodeWorkspaceAnswer = (
   requestId,
   state: result.ok ? result.workspace.state : ("none" as const),
   targetSha: result.ok ? result.workspace.targetSha : null,
-  lines: result.ok ? Buffer.from(dmWorkspacePayloadLines(result.workspace), "utf8").toString("base64") : "",
-  files: result.ok ? result.workspace.files.map((file) => file.name) : [],
+  lines: result.ok ? Buffer.from(dmOutlinePayloadLines(result.workspace), "utf8").toString("base64") : "",
+  files: result.ok ? result.workspace.entries.map((entry) => entry.name) : [],
   reason: result.ok ? result.reason : ("request_malformed" as const),
   excluded: result.ok ? result.excluded : {},
 });
@@ -370,7 +494,7 @@ export const dmParseLaunchWorkspace = (value: unknown): DmLaunchWorkspace | null
   }
   const raw = dmParseWorkspaceFiles(value.files);
   if (raw === null) return undefined;
-  const accepted = dmWorkspaceAcceptFiles(raw);
+  const accepted = dmWorkspaceAcceptFiles(raw, { totalMaxBytes: DM_WORKSPACE_LEGACY_INLINE_MAX_BYTES });
   // Every file the bridge sends was accepted once already; one refused now means the bytes changed.
   if (accepted.files.length !== raw.length) return undefined;
   return { state, targetSha: value.targetSha as string | null, files: accepted.files };
@@ -380,6 +504,68 @@ export const dmEncodeLaunchWorkspace = (workspace: DmLaunchWorkspace | null) =>
   workspace === null
     ? null
     : { state: workspace.state, targetSha: workspace.targetSha, files: dmEncodeWorkspaceFiles(workspace.files) };
+
+/**
+ * The launch line's workspace in the parts protocol: the commit, its state and
+ * each file's description only. The bytes follow on the same connection, one
+ * chunk per line (lib/amux/decisionMakerBrokerCore.ts), and `dmAssembleWorkspace`
+ * turns them into the workspace the payload must match.
+ */
+export type DmLaunchWorkspaceParts = {
+  state: DmWorkspaceState;
+  targetSha: string | null;
+  parts: Array<{ name: DmWorkspaceEvidenceName; bytes: number; sha256: string }>;
+};
+
+export const dmParseLaunchWorkspaceParts = (value: unknown): DmLaunchWorkspaceParts | undefined => {
+  if (!isPlainObject(value) || !hasExactKeys(value, ["state", "targetSha", "parts"])) return undefined;
+  if (!(DM_WORKSPACE_STATES as readonly string[]).includes(value.state as string)) return undefined;
+  const state = value.state as DmWorkspaceState;
+  if (state === "none" ? value.targetSha !== null : typeof value.targetSha !== "string" || !isSnapshotTargetSha(value.targetSha)) {
+    return undefined;
+  }
+  if (!Array.isArray(value.parts) || value.parts.length > DM_WORKSPACE_EVIDENCE_NAMES.length) return undefined;
+  const parts: DmLaunchWorkspaceParts["parts"] = [];
+  for (const entry of value.parts) {
+    if (!isPlainObject(entry) || !hasExactKeys(entry, ["name", "bytes", "sha256"])) return undefined;
+    const { name, bytes, sha256 } = entry;
+    if (!isDmWorkspaceEvidenceName(name) || parts.some((part) => part.name === name)) return undefined;
+    if (typeof bytes !== "number" || !Number.isSafeInteger(bytes) || bytes < 1 || bytes > DM_WORKSPACE_TEXT_MAX_BYTES) return undefined;
+    if (typeof sha256 !== "string" || !HEX_64.test(sha256)) return undefined;
+    parts.push({ name, bytes, sha256 });
+  }
+  return { state, targetSha: value.targetSha as string | null, parts };
+};
+
+export const dmEncodeLaunchWorkspaceParts = (launch: DmLaunchWorkspaceParts) => ({
+  state: launch.state,
+  targetSha: launch.targetSha,
+  parts: launch.parts.map((part) => ({ name: part.name, bytes: part.bytes, sha256: part.sha256 })),
+});
+
+/**
+ * The bytes the bridge sent, as the workspace the broker builds. Each file is
+ * the size and the sha256 the launch line named, and then passes the
+ * workspace's checks over the whole file again -- text, the secret path list,
+ * the secret scan -- exactly as a file of the inline protocol does: this is the
+ * check before anything goes to the vendor, so a file it refuses refuses the
+ * workspace. `undefined` for any of that.
+ */
+export const dmAssembleWorkspace = (
+  launch: DmLaunchWorkspaceParts,
+  received: ReadonlyMap<DmWorkspaceEvidenceName, Uint8Array>,
+): DmLaunchWorkspace | undefined => {
+  const raw: Array<{ name: DmWorkspaceEvidenceName; bytes: Uint8Array }> = [];
+  for (const part of launch.parts) {
+    const bytes = received.get(part.name);
+    if (bytes === undefined || bytes.length !== part.bytes) return undefined;
+    if (createHash("sha256").update(bytes).digest("hex") !== part.sha256) return undefined;
+    raw.push({ name: part.name, bytes });
+  }
+  const accepted = dmWorkspaceAcceptFiles(raw);
+  if (accepted.files.length !== raw.length) return undefined;
+  return { state: launch.state, targetSha: launch.targetSha, files: accepted.files };
+};
 
 /**
  * The launch's workspace matches the payload the intent recorded: with a

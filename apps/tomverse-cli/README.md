@@ -5,18 +5,57 @@ code, proposes changes as diffs you approve, runs the commands you approve
 (tests, builds), and tells you what it did and what it cost. No Claude Code,
 Codex or repository checkout is needed.
 
-> **Status: not published.** This package is built and verified locally
-> (`npm pack`); it is not on the npm registry yet. The package name
-> `@tomverse/cli`, its license and publication are pending decisions.
+Needs a Tomverse Pro plan or above: API keys and the CLI are not available on
+the Free plan.
 
-## Install and connect
+## Install
 
-Requires Node.js 22.
+Works on Windows, macOS and Linux. Pick one:
+
+**With Node.js 22 or later** (any platform Node.js runs on):
 
 ```bash
-npm install -g ./tomverse-cli-0.1.0.tgz   # a local tarball until it is published
+npm install -g @tomverse/cli
 tomverse doctor
 ```
+
+**Without Node.js:** download the archive for your system from the
+[Tomverse CLI releases](https://github.com/mposition/Tomverse/releases?q=cli-v)
+and put `tomverse` (Windows: `tomverse.exe`) in a folder on your `PATH`. Each
+archive has a `.sha256` file to check it against.
+
+| System | Archive |
+|---|---|
+| Windows 10/11, x64 | `tomverse-<version>-windows-x64.zip` |
+| Windows 11 on Arm | `tomverse-<version>-windows-arm64.zip` |
+| macOS, Apple silicon | `tomverse-<version>-macos-arm64.tar.gz` |
+| macOS, Intel | `tomverse-<version>-macos-x64.tar.gz` |
+| Linux x64 (glibc 2.28+) | `tomverse-<version>-linux-x64.tar.gz` |
+| Linux Arm64 (glibc 2.28+) | `tomverse-<version>-linux-arm64.tar.gz` |
+
+```bash
+# macOS / Linux
+tar -xzf tomverse-<version>-<os>-<arch>.tar.gz
+sudo mv tomverse /usr/local/bin/          # or any folder on your PATH
+tomverse doctor
+```
+
+```powershell
+# Windows PowerShell
+Expand-Archive tomverse-<version>-windows-x64.zip -DestinationPath "$env:LOCALAPPDATA\Programs\tomverse"
+[Environment]::SetEnvironmentVariable("Path", "$([Environment]::GetEnvironmentVariable('Path','User'));$env:LOCALAPPDATA\Programs\tomverse", "User")
+# open a new terminal, then:
+tomverse doctor
+```
+
+The executables carry their own Node.js runtime, so they are large (about
+100 MB) and are not yet signed with a publisher certificate. Windows may show
+"Windows protected your PC" on first run (More info > Run anyway). macOS may
+block a file downloaded in a browser; allow it in System Settings > Privacy &
+Security, or run `xattr -d com.apple.quarantine tomverse`. Alpine and other
+musl-based Linux systems should use the npm package.
+
+## Connect
 
 1. Create a key in **Tomverse > Settings > API keys** (set a credit limit on
    it if you want a hard cap).
@@ -217,8 +256,9 @@ are not used by this CLI.
 
 ## Support
 
-- Node.js 22 on Windows (PowerShell), macOS (zsh) and Linux (bash). See the
-  repository's verification notes for which combinations were actually run.
+- Windows (PowerShell), macOS (zsh) and Linux (bash), with Node.js 22 or
+  later or as a standalone executable (see Install). Each release is built and
+  tested on every one of these systems before it is published.
 - Terminal text is English; Korean and other Unicode input, file names and
   output work.
 - Not in this version: MCP, plugins or skills, image input, a code index or
@@ -226,8 +266,19 @@ are not used by this CLI.
 
 ## Update and roll back
 
-Until publication, install a newer tarball over the old one with
-`npm install -g <tarball>`; to go back, install the previous tarball. Sessions
-are versioned: a CLI refuses a session written with a different schema
-instead of misreading it. Uninstall with `npm uninstall -g @tomverse/cli` and
-delete `~/.tomverse` to remove all local data.
+- npm: `npm install -g @tomverse/cli@latest` updates; to go back, install a
+  given version with `npm install -g @tomverse/cli@<version>`. Uninstall with
+  `npm uninstall -g @tomverse/cli`.
+- Standalone: replace the `tomverse` executable with the one from a newer (or
+  older) release archive. Uninstall by deleting it.
+
+Sessions are versioned: a CLI refuses a session written with a different
+schema instead of misreading it. Delete `~/.tomverse` to remove all local
+data.
+
+## License
+
+The Tomverse CLI is proprietary software: you may install and use it with your
+Tomverse account; see [LICENSE](LICENSE). Its open-source components keep
+their own licenses (the standalone archives list them in
+`THIRD_PARTY_NOTICES.txt`).

@@ -641,6 +641,40 @@ test("a verify (investigate) run can install packages, run tests and report what
   assert.equal(result.resultSha256, sha(result.resultText));
 });
 
+test("a read role's diff past the old 4 MiB display size goes into its report whole", async () => {
+  const patchBody = "diff --git a/data.json b/data.json\n" +
+    "+".concat("z".repeat(1023), "\n").repeat(5 * 1024);
+  assert.ok(Buffer.byteLength(patchBody) > 4 * 1024 * 1024);
+  const dir = await mkdtemp(join(tmpdir(), "amux-v22-flow-read-"));
+  try {
+    const result = await runAmuxV22OneShot({ ...request, role: "investigate" }, config, {
+      syntheticPlatform: true, spawnChild: fakeSpawn().spawnChild,
+      preservedPatchPath: join(dir, `${attemptId}.preserved.patch`),
+      ensureDependencies: async () => ({ ok: true }),
+      createShellJail: async () => ({ binPath: "/jail/bin", prefixPath: "/jail/prefix",
+        cleanup: async () => {} }),
+      captureBaseline: async () => ({ ok: true, baseSha: "a".repeat(40) }),
+      captureChangedPaths: async () => ({ ok: true, files: ["data.json"], contractPaths: [] }),
+      preserveWorkingTree: fakePreserve(patchBody, "e".repeat(40)),
+      discardAttemptChanges: async () => true });
+    assert.equal(result.kind, "succeeded");
+    assert.ok(result.resultText.includes(patchBody.replace(/\n$/, "")), "the whole diff is shown");
+    assert.ok(!result.resultText.includes("-byte diff is kept in"));
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test("a run given no transcript file keeps its stream past the old 32 MiB, never an output-limit kill", async () => {
+  const line = `${JSON.stringify({ type: "user", output: "y".repeat(1024 * 1024 - 40) })}\n`;
+  const big = Array.from({ length: 33 }, () => line);
+  const fake = fakeSpawn({ chunks: [...big, stream(resultEvent)] });
+  const result = await runAmuxV22OneShot({ ...request, role: "review" }, config, {
+    syntheticPlatform: true, spawnChild: fake.spawnChild });
+  assert.equal(result.kind, "succeeded");
+  const whole = [...big, stream(resultEvent)].join("");
+  assert.ok(Buffer.byteLength(whole) > 32 * 1024 * 1024);
+  assert.equal(result.outputDigest, sha(whole));
+});
+
 test("the health operation shows how long the live run has been quiet, and when it ended", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "amux-v22-flow-health-"));
   try {

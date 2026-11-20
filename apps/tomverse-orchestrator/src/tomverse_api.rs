@@ -17,6 +17,11 @@ use crate::worker::{CandidateRoutingSignals, RoutingTaskProfile};
 /// exactly what they were (tests/fixtures and main_wire_compat.rs pin them).
 pub const REQUEST_ID_HEADER: &str = "x-amux-request-id";
 pub const INSTANCE_ID_HEADER: &str = "x-amux-instance-id";
+/// What a delivery pull says this bridge can receive
+/// (lib/amux/v22ContextPartsCore.ts `AMUX_BRIDGE_FEATURES_HEADER`).
+pub const BRIDGE_FEATURES_HEADER: &str = "x-amux-bridge-features";
+/// The bridge fetches chunked context files (`AMUX_BRIDGE_CONTEXT_CHUNKS_FEATURE`).
+pub const BRIDGE_FEATURE_CONTEXT_CHUNKS: &str = "context_chunks";
 /// The most an old inline patch can be (lib/amux/v22PatchLimit.ts
 /// `AMUX_V22_LEGACY_INLINE_PATCH_MAX_BYTES`): what fits, JSON-escaped with its
 /// Task result, in the 10 MB request body Next.js buffers through the app's
@@ -354,6 +359,50 @@ impl<'a> V22ChangedPathsRef<'a> {
 /// the missing chunk indexes of a part.
 const V22_TRANSFER_ANSWER_MAX_BYTES: usize = 64 * 1024;
 
+/// The context files a delivery may name as chunks instead of embedding them
+/// (lib/amux/v22ContextPartsCore.ts `AMUX_V22_CONTEXT_PART_NAMES`).
+pub const V22_CONTEXT_PART_NAMES: [&str; 2] = ["prior.patch", "prior-conclusions.md"];
+
+/// One context chunk answer: a chunk's base64 and a short envelope. Not a
+/// bound on the file: the app sends the file one chunk per request.
+pub const V22_CONTEXT_ANSWER_MAX_BYTES: usize =
+    V22_TRANSFER_CHUNK_BYTES.div_ceil(3) * 4 + 64 * 1024;
+
+/// A context file a delivery pull names (docs/policy/amux-v22-result-transfer.md
+/// 10.1): its UTF-8 byte count and the sha256 of those bytes.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PulledContextPart {
+    pub name: String,
+    pub bytes: u64,
+    pub sha256: String,
+}
+
+/// What one context chunk request came to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum V22ContextAnswer {
+    /// The chunk, checked against the part the pull named.
+    Chunk(Vec<u8>),
+    /// 404: the app holds no such file now (`context_absent`).
+    Absent,
+    /// A refusal no retry changes: binding, a range or digest that is not the
+    /// pull's (the file changed since the pull).
+    Reject,
+    /// A lost, late, 503 or unreadable answer: the same chunk is asked again.
+    Unknown,
+}
+
+/// A delivery's context parts as the pull may name them: a known name once,
+/// at least one byte, a lowercase sha256.
+fn v22_context_parts_valid(parts: &[PulledContextPart]) -> bool {
+    parts.iter().enumerate().all(|(index, part)| {
+        V22_CONTEXT_PART_NAMES.contains(&part.name.as_str()) && part.bytes >= 1 &&
+            part.sha256.len() == 64 && part.sha256.bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()) &&
+            !parts[..index].iter().any(|earlier| earlier.name == part.name)
+    })
+}
+
 fn v22_commit_conflict(body: &Value) -> V22CommitAnswer {
     let indexes = |part: &str| -> Option<Vec<u64>> {
         match body.pointer(&format!("/missing/{part}")) {
@@ -389,7 +438,10 @@ const MAX_LIFECYCLE_RESPONSE_BYTES: usize = 128 * 1024;
 const MAX_QUEUE_ITEMS: usize = 512;
 
 /// A memory backstop for one prompt, context set or report crossing the
-/// bridge (AMUX_V22_TRANSPORT_MAX_BYTES), not a work limit.
+/// bridge (AMUX_V22_TRANSPORT_MAX_BYTES), not a work limit. A delivery whose
+/// pull named `context_parts` no longer carries the two files with no source
+/// bound (`prior.patch`, `prior-conclusions.md`) inside its prompt; this
+/// backstop still bounds what an old app embeds, and the old sidecar's path.
 pub const V22_TRANSPORT_MAX_BYTES: usize = 32 * 1024 * 1024;
 
 /// A report's bound: the transport backstop (the v22 local CLI flow, owner
@@ -399,13 +451,15 @@ pub fn v22_result_max_bytes() -> usize {
 }
 
 /// A delivered prompt with its context-file block, which may hold the brief,
-/// the previous patch and prior conclusions whole.
+/// the previous patch and prior conclusions whole when the app embeds them
+/// (an app or a bridge from before `context_chunks`). With `context_parts` the
+/// two unbounded files travel in chunks and never reach this check.
 pub fn v22_delivery_prompt_max_bytes() -> usize {
     2 * V22_TRANSPORT_MAX_BYTES
 }
 
 /// A delivery pull answer carries the prompt and its context files (the
-/// brief, the previous patch, prior conclusions).
+/// brief and, for an old app, the previous patch and prior conclusions).
 fn v22_delivery_response_max_bytes() -> usize {
     // JSON escaping can at most double the prompt.
     2 * v22_delivery_prompt_max_bytes() + MAX_LIFECYCLE_RESPONSE_BYTES
@@ -1663,6 +1717,73 @@ impl TomverseApi {
         })
     }
 
+    /// One chunk of a context file a delivery named
+    /// (`POST /api/internal/amux/v22/execution/context`,
+    /// docs/policy/amux-v22-result-transfer.md 10.1). Reading is idempotent:
+    /// the app rebuilds the file for every request, so a lost answer or a 503
+    /// is answered by asking for the same chunk again. The answer is checked
+    /// against the part the pull named (range length, total, whole-file
+    /// sha256); a file that changed since the pull is a `Reject`. An `Err` is a
+    /// malformed request of ours; anything the app or the network did is an
+    /// answer.
+    pub async fn v22_context_chunk(
+        &self,
+        attempt_id: &str,
+        worker: &str,
+        part: &PulledContextPart,
+        index: u64,
+    ) -> Result<V22ContextAnswer> {
+        use base64::Engine;
+        let Some((start, end)) = v22_transfer_chunk_range(part.bytes, index) else {
+            bail!("invalid v22 context chunk index");
+        };
+        if !V22_CONTEXT_PART_NAMES.contains(&part.name.as_str()) {
+            bail!("invalid v22 context part name");
+        }
+        let chunk_count = v22_transfer_chunk_count(part.bytes);
+        let response = self.client
+            .post(format!("{}/api/internal/amux/v22/execution/context", self.base_url))
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT +
+                v22_size_allowance((end - start).div_ceil(3) * 4))
+            .bearer_auth(&self.secret)
+            .json(&serde_json::json!({
+                "attemptId": attempt_id, "worker": worker, "name": part.name, "index": index,
+            })).send().await;
+        let Ok(response) = response else { return Ok(V22ContextAnswer::Unknown); };
+        let Ok(answer) = read_raw_answer(response, V22_CONTEXT_ANSWER_MAX_BYTES).await else {
+            return Ok(V22ContextAnswer::Unknown);
+        };
+        Ok(match answer.status {
+            StatusCode::OK => {
+                // A body that is not JSON is a lost answer (a proxy's page), not a verdict.
+                let Ok(body) = serde_json::from_slice::<Value>(&answer.body) else {
+                    return Ok(V22ContextAnswer::Unknown);
+                };
+                let envelope = body.get("attemptId").and_then(Value::as_str) == Some(attempt_id) &&
+                    body.get("name").and_then(Value::as_str) == Some(part.name.as_str()) &&
+                    body.get("index").and_then(Value::as_u64) == Some(index) &&
+                    body.get("totalBytes").and_then(Value::as_u64) == Some(part.bytes) &&
+                    body.get("chunkCount").and_then(Value::as_u64) == Some(chunk_count) &&
+                    body.get("sha256").and_then(Value::as_str) == Some(part.sha256.as_str());
+                if !envelope {
+                    // Another file, another range or another digest than the
+                    // pull named: asking again would not change it.
+                    return Ok(V22ContextAnswer::Reject);
+                }
+                let decoded = body.get("bytesBase64").and_then(Value::as_str).and_then(|encoded|
+                    base64::engine::general_purpose::STANDARD.decode(encoded).ok());
+                match decoded {
+                    Some(bytes) if bytes.len() as u64 == end - start => V22ContextAnswer::Chunk(bytes),
+                    _ => V22ContextAnswer::Unknown,
+                }
+            },
+            StatusCode::NOT_FOUND => V22ContextAnswer::Absent,
+            StatusCode::BAD_REQUEST | StatusCode::CONFLICT | StatusCode::UNAUTHORIZED |
+                StatusCode::FORBIDDEN => V22ContextAnswer::Reject,
+            _ => V22ContextAnswer::Unknown,
+        })
+    }
+
     /// The result (and its patch) commit of the chunked transfer: one POST of
     /// `transfer: "chunked_v1"`. A lost answer is the caller's to read back
     /// (`v22_result_commit_once`); a committed duplicate answers 200 again.
@@ -2554,6 +2675,7 @@ mod tests {
             prompt: String::new(),
             receipt_id: "receipt-1".to_owned(),
             lease_expires_at: String::new(),
+            context_parts: Vec::new(),
         };
         let api = TomverseApi::for_test_with_timeouts(
             format!("http://{address}"),
@@ -3747,6 +3869,11 @@ pub struct PulledDelivery {
     pub prompt: String,
     pub receipt_id: String,
     pub lease_expires_at: String,
+    /// The context files the app keeps out of the prompt and gives in chunks
+    /// (the pull's `x-amux-bridge-features: context_chunks`); absent for an
+    /// old app, which embeds them.
+    #[serde(default)]
+    pub context_parts: Vec<PulledContextPart>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -4087,6 +4214,10 @@ impl TomverseApi {
             .post(format!("{}/api/internal/amux/delivery/pull", self.base_url))
             .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
             .bearer_auth(&self.secret)
+            // This bridge fetches the chunked context files and hands them to
+            // the sidecar (docs/policy/amux-v22-result-transfer.md 10.1); an
+            // old app ignores the header and embeds them.
+            .header(BRIDGE_FEATURES_HEADER, BRIDGE_FEATURE_CONTEXT_CHUNKS)
             .json(&DeliveryPullRequest {
                 worker,
                 instance_id,
@@ -4130,6 +4261,9 @@ impl TomverseApi {
                 || !is_canonical_machine_id(&delivery.worker)
                 || !(0..=PRISMA_INT_MAX).contains(&delivery.task_revision)
                 || delivery.prompt.len() > v22_delivery_prompt_max_bytes()
+                || !v22_context_parts_valid(&delivery.context_parts)
+                // Chunked context belongs to a v22 execution the sidecar runs.
+                || (!delivery.context_parts.is_empty() && delivery.v22_execution.is_none())
             {
                 bail!("invalid Tomverse AMUX delivery response fields");
             }
