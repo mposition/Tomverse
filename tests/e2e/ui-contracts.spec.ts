@@ -105,7 +105,7 @@ test("the retired chat workspace guide URL redirects permanently to the help cen
 
   await prepareGuestPage(page, "en");
   await page.goto("/support/help-centre/chat-workspace?lang=ko");
-  await expect(page).toHaveURL(//ko/support/help-centre$/);
+  await expect(page).toHaveURL(/\/ko\/support\/help-centre$/);
   await expect(page.getByTestId("help-centre-hub")).toBeVisible();
 });
 

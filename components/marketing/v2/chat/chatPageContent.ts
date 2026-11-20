@@ -159,9 +159,9 @@ const ko: ChatPageCopy = {
     motionOn: "애니메이션 다시 재생",
   },
   adaptive: {
-    eyebrow: "Smart Adaptive",
+    eyebrow: "스마트 자동(Smart Adaptive)",
     title: ["보내는 순간,", "세 가지 일이 일어납니다."],
-    stepsLabel: "Smart Adaptive 단계",
+    stepsLabel: "스마트 자동 단계",
     steps: [
       ["질문을 다듬고", "목적·조건·우선순위를 정리"],
       ["모델을 고르고", "성격·기능·품질·비용을 함께"],
@@ -175,7 +175,7 @@ const ko: ChatPageCopy = {
     credits: "{c} 크레딧",
     chosenCredits: "{c} 크레딧 · 선택",
     routeNotes: ["깊은 추론이 필요한 질문에", "이 질문에는 이걸로 충분", "가장 어려운 작업에"],
-    answerMeta: "Gemini Flash-Lite가 답했습니다 · Smart Adaptive · {c} 크레딧",
+    answerMeta: "Gemini Flash-Lite가 답했습니다 · 스마트 자동 · {c} 크레딧",
     answer: "차로 1시간 안팎이고 주차장에서 가까운 곳 위주로 골랐어요. 정원형 수목원은 평지 산책로가 짧게 이어지고, 호숫가 카페 거리는 차에서 내려 바로 쉴 수 있어요. 출발 시간과 식사 장소를 알려 주시면 하루 동선으로 묶어 드릴게요.",
     followNote: "이어서 묻는 질문도 같은 방식으로 다시 고릅니다. 대화 중에 모델을 직접 바꿀 수도 있습니다.",
     note: "예시 화면입니다. 실제로 선택되는 모델과 크레딧은 질문, 플랜과 사용량에 따라 달라집니다.",

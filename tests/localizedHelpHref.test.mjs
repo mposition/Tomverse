@@ -12,6 +12,6 @@ test("help links preserve every supported app language", () => {
 });
 
 test("the retired chat workspace guide has no link builder", async () => {
-  const module = await import("../lib/localizedHelpHref.ts");
-  assert.equal("chatWorkspaceGuideHref" in module, false);
+  const helpHrefs = await import("../lib/localizedHelpHref.ts");
+  assert.equal("chatWorkspaceGuideHref" in helpHrefs, false);
 });

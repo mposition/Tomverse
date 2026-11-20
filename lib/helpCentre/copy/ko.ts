@@ -92,7 +92,7 @@ export const ko: HelpLocaleCopy = {
   },
   categories: {
     "getting-started": { title: "시작하기", description: "계정을 만들고 첫 질문을 보내기까지." },
-    chat: { title: "Chat", description: "한 모델과 대화하기, 모델 고르기와 스마트 자동, 자동 질문 다듬기, 음성 입력과 음성 대화, 현재 위치." },
+    chat: { title: "Chat", description: "한 모델과 대화하기, 모델 고르기와 스마트 자동(Smart Adaptive), 자동 질문 다듬기, 음성 입력과 음성 대화, 현재 위치." },
     review: { title: "답변 비교 · AI Review", description: "여러 모델의 답을 나란히 읽고 AI Review로 차이를 확인합니다." },
     images: { title: "이미지", description: "이미지를 만들고, 사진 일부를 고치고, 모델별 결과를 비교합니다." },
     research: { title: "리서치 · 웹 검색", description: "웹 검색으로 최신 정보를 찾고 Deep Research로 보고서를 받습니다." },
@@ -156,7 +156,7 @@ export const ko: HelpLocaleCopy = {
     // ------------------------------------------------------------------- chat
     "choose-model-auto": {
       title: "모델 고르기와 스마트 자동",
-      summary: "스마트 자동을 켜면 메시지마다 답할 모델이 정해지고, 끄면 직접 고른 모델 하나가 답합니다.",
+      summary: "스마트 자동(Smart Adaptive)을 켜면 메시지마다 답할 모델이 정해지고, 끄면 직접 고른 모델 하나가 답합니다.",
       steps: [
         { title: "스마트 자동 확인", body: "제공되는 계정이라면 입력창에 \"스마트 자동\" 스위치가 있고, 빈 Chat에서는 처음에 켜져 있습니다." },
         { title: "직접 고르기", body: "모델 선택창을 열고 \"채팅\" 탭에서 모델을 누릅니다. 이때 스마트 자동은 꺼지고 고른 모델이 답합니다." },
@@ -171,7 +171,7 @@ export const ko: HelpLocaleCopy = {
     },
     "prompt-refiner": {
       title: "질문 다듬기(스마트 자동)",
-      summary: "스마트 자동을 켠 Chat에서는 Tomverse가 보낸 질문을 필요에 따라 더 분명하게 다듬어 답할 모델에 전달합니다. 대화에는 쓰신 그대로 저장됩니다.",
+      summary: "스마트 자동(Smart Adaptive)을 켠 Chat에서는 Tomverse가 보낸 질문을 필요에 따라 더 분명하게 다듬어 답할 모델에 전달합니다. 대화에는 쓰신 그대로 저장됩니다.",
       steps: [
         { title: "스마트 자동 확인", body: "입력창의 \"스마트 자동\" 스위치가 켜져 있는지 확인합니다. 빈 Chat에서는 처음부터 켜져 있습니다." },
         { title: "보내기", body: "질문을 쓰고 \"전송\"을 누릅니다. 따로 누를 버튼은 없습니다." },
@@ -448,7 +448,7 @@ export const ko: HelpLocaleCopy = {
       ],
       faq: [
         { q: "앞서 올린 파일도 변환되나요?", a: "아니요. 변환 대상은 지금 보내는 메시지에 첨부한 파일입니다. 앞선 파일을 바꾸려면 다시 첨부해서 보내세요." },
-        { q: "로그인해야 하나요? 모델은 아무거나 되나요?", a: "로그인해야 하고, 파일을 만들 수 있는 모델이 답해야 합니다. 직접 고른 모델이 파일을 만들 수 없으면 그렇게 안내하니, 스마트 자동이나 다른 모델로 다시 요청하세요." },
+        { q: "로그인해야 하나요? 모델은 아무거나 되나요?", a: "로그인해야 하고, 파일을 만들 수 있는 모델이 답해야 합니다. 직접 고른 모델이 파일을 만들 수 없으면 그렇게 안내하니, 스마트 자동(Smart Adaptive)이나 다른 모델로 다시 요청하세요." },
         { q: "Word 문서를 PDF로 바꿔 줄 수 있나요?", a: "문서의 내용을 다른 형식으로 다시 쓰는 일은 변환이 아니라 새로 만드는 일이라, 원본의 레이아웃이 그대로 복사되지 않고 다시 만들어집니다." },
       ],
     },
@@ -462,7 +462,7 @@ export const ko: HelpLocaleCopy = {
         { title: "고쳐 달라고 하기", body: "\"수정본 만들기\"를 누르면 파일이 첨부된 초안이 입력창에 채워집니다. 직접 보내야 하며, 새 버전으로 만들어집니다." },
       ],
       faq: [
-        { q: "로그인해야 하나요?", a: "네. 로그인하면 플랜과 상관없이 쓸 수 있습니다. 직접 고른 모델이 파일을 만들 수 없으면 그렇게 안내하니, 스마트 자동이나 다른 모델로 다시 요청하세요." },
+        { q: "로그인해야 하나요?", a: "네. 로그인하면 플랜과 상관없이 쓸 수 있습니다. 직접 고른 모델이 파일을 만들 수 없으면 그렇게 안내하니, 스마트 자동(Smart Adaptive)이나 다른 모델로 다시 요청하세요." },
         { q: "올려 둔 파일을 다른 형식으로 바꿔 줄 수도 있나요?", a: "네. 사진을 PDF로 묶거나 PDF를 합치고 나누는 일, 표 파일의 형식 바꾸기는 \"첨부한 파일 변환하기\" 가이드를 보세요." },
         { q: "\"파일을 다운로드하려면 대화 잠금을 해제하세요\"가 떠요.", a: "잠긴 대화의 파일은 잠금을 풀어야 받을 수 있습니다." },
         { q: "고쳐 달라고 하면 원래 파일이 덮어써지나요?", a: "아닙니다. 새 버전이 생기고 \"파일 버전\" 목록에서 이전 버전을 볼 수 있습니다." },
@@ -687,7 +687,7 @@ export const ko: HelpLocaleCopy = {
       summary: "터미널이나 공식 VS Code 확장에서 설정 몇 줄로 Claude Code가 Tomverse의 Claude 모델과 크레딧을 쓰게 합니다. Pro 이상에서 쓸 수 있습니다.",
       steps: [
         { title: "키 준비", body: "\"API 키 만들기·폐기하기\" 가이드대로 키를 만들어 저장합니다." },
-        { title: "모델 고르기", body: "API 키 화면의 \"도구 연결\"에서 \"Claude Code\"를 고르고 \"모델\"을 고릅니다. Claude Code는 Claude 모델만 쓰므로 이 도구와 맞는 모델만 목록에 나옵니다. \"Smart Adaptive\"를 고르면 작업을 시작할 때 Claude 모델 중 하나를 고르고 작업이 끝날 때까지 그 모델을 씁니다." },
+        { title: "모델 고르기", body: "API 키 화면의 \"도구 연결\"에서 \"Claude Code\"를 고르고 \"모델\"을 고릅니다. Claude Code는 Claude 모델만 쓰므로 이 도구와 맞는 모델만 목록에 나옵니다. 스마트 자동(Smart Adaptive)을 고르면 작업을 시작할 때 Claude 모델 중 하나를 고르고 작업이 끝날 때까지 그 모델을 씁니다." },
         { title: "터미널에서 쓰기", body: "\"터미널\"을 고르고 \"Windows (PowerShell)\" 또는 \"macOS / Linux\"를 고른 뒤 블록을 \"복사\"해 터미널에 붙여 넣습니다. 마지막 줄의 claude 가 Tomverse로 연결된 Claude Code를 시작합니다." },
         { title: "VS Code 확장에서 쓰기", body: "\"VS Code 확장\"을 고르면 나오는 settings.json 블록을 사용자 settings.json에 넣고 VS Code를 다시 시작합니다." },
         { title: "키 넣기", body: "키를 방금 만들었다면 이 페이지를 떠나기 전까지는 설정에 이미 채워져 있습니다. 아니면 복사한 설정 안의 <YOUR_TOMVERSE_API_KEY> 를 저장해 둔 키로 바꿉니다." },
@@ -703,7 +703,7 @@ export const ko: HelpLocaleCopy = {
       title: "Codex를 Tomverse에 연결하기",
       summary: "Codex 설정 파일에 Tomverse 공급자를 추가하고 --profile tomverse 로 실행합니다. Codex는 OpenAI 모델만 쓰며, 평소 Codex 계정은 그대로 둡니다. Pro 이상에서 쓸 수 있습니다.",
       steps: [
-        { title: "키와 모델 준비", body: "키를 만들고, API 키 화면의 \"도구 연결\"에서 \"Codex\"를 고르고 \"모델\"을 고릅니다. \"Smart Adaptive\"를 고르면 작업을 시작할 때 OpenAI 모델 중 하나를 고르고 작업이 끝날 때까지 그 모델을 씁니다." },
+        { title: "키와 모델 준비", body: "키를 만들고, API 키 화면의 \"도구 연결\"에서 \"Codex\"를 고르고 \"모델\"을 고릅니다. 스마트 자동(Smart Adaptive)을 고르면 작업을 시작할 때 OpenAI 모델 중 하나를 고르고 작업이 끝날 때까지 그 모델을 씁니다." },
         { title: "공급자 추가", body: "\"~/.codex/config.toml에 추가\" 블록을 ~/.codex/config.toml 에 붙여 넣습니다." },
         { title: "프로필 저장", body: "다음 블록을 ~/.codex/tomverse.config.toml 로 저장합니다." },
         { title: "키 넣고 시작", body: "\"Codex를 시작하는 곳에 키를 설정\" 블록의 <YOUR_TOMVERSE_API_KEY> 를 키로 바꿔 실행합니다. 마지막 줄 codex --profile tomverse 가 Tomverse로 시작합니다." },
@@ -723,7 +723,7 @@ export const ko: HelpLocaleCopy = {
         { title: "키 준비", body: "\"API 키 만들기·폐기하기\" 가이드대로 키를 만들어 저장합니다." },
         { title: "Cursor 설정 보기", body: "API 키 화면의 \"도구 연결\"에서 \"Cursor\"를 고르면 Cursor 설정이 나옵니다. 방금 만든 키는 이 페이지를 떠나기 전까지 설정에 채워져 있습니다." },
         { title: "Cursor에 넣기", body: "Cursor의 Settings > Models > API Keys에서 OpenAI API 키에 Tomverse 키를 넣고, OpenAI Base URL 재정의를 켜서 화면의 기본 URL을 넣습니다." },
-        { title: "모델 고르기", body: "Tomverse가 제공하는 GPT 모델은 Cursor 기본 모델 목록에서 바로 고를 수 있습니다. Claude나 Smart Adaptive 같은 다른 모델은 Cursor Settings › Models에서 ID를 입력하고 Add Custom Model로 한 번만 추가합니다." },
+        { title: "모델 고르기", body: "Tomverse가 제공하는 GPT 모델은 Cursor 기본 모델 목록에서 바로 고를 수 있습니다. Claude나 스마트 자동(Smart Adaptive) 같은 다른 모델은 Cursor Settings › Models에서 ID를 입력하고 Add Custom Model로 한 번만 추가합니다." },
       ],
       faq: [
         { q: "Cursor의 어디에 쓰이나요?", a: "이 키는 Chat과 Agent에만 쓰이며 Tab, Cursor 자체 모델, 클라우드 에이전트에는 쓰이지 않습니다." },
@@ -733,10 +733,10 @@ export const ko: HelpLocaleCopy = {
       ],
     },
     "api-smart-adaptive": {
-      title: "API에서 Smart Adaptive 쓰기",
+      title: "API에서 스마트 자동 쓰기",
       summary: "모델 이름을 smart-adaptive로 하면 요청마다 Tomverse가 답할 모델을 골라 줍니다. 어느 모델이 답했는지는 응답에 함께 옵니다. Pro 이상에서 쓸 수 있습니다.",
       steps: [
-        { title: "설정 복사", body: "API 키 화면에서 도구를 고르면 복사되는 설정에 Smart Adaptive가 기본으로 들어 있습니다. 모델이 추가되거나 퇴역해도 설정을 다시 복사할 필요가 없습니다." },
+        { title: "설정 복사", body: "API 키 화면에서 도구를 고르면 복사되는 설정에 스마트 자동(Smart Adaptive)이 기본으로 들어 있습니다. 모델이 추가되거나 퇴역해도 설정을 다시 복사할 필요가 없습니다." },
         { title: "모델 이름 쓰기", body: "OpenAI 호환 도구(Chat Completions)에서는 모델 이름을 smart-adaptive로 합니다." },
         { title: "답한 모델 보기", body: "응답의 model 값과 x-tomverse-routed-model, x-tomverse-routed-by 헤더에 답한 모델과 고른 방식이 나옵니다." },
         { title: "크레딧 확인", body: "크레딧은 답한 모델 기준으로 차감됩니다. API 키 화면의 \"API 허용 모델\"에서 요청당 크레딧 범위를 볼 수 있습니다." },
@@ -847,7 +847,7 @@ export const ko: HelpLocaleCopy = {
       summary: "모델마다 답변 1회의 기본 크레딧이 정해져 있고, 입력이 길면 배율이 붙고, 웹 검색과 이미지는 따로 계산됩니다.",
       steps: [
         { title: "모델별 크레딧 부담 보기", body: "모델 선택창의 막대(5단계)와 \"약 N회\"로 모델의 크레딧 부담을 비교합니다. \"사용량\" 필터로 1·4·8·12+ 크레딧 구간을 고를 수 있습니다. 값은 바뀔 수 있으니 화면을 기준으로 하세요." },
-        { title: "직접 고를 때의 예상값", body: "모델을 직접 고르면 선택창 아래에 고른 모델의 \"기본 예상\" 크레딧 합계가 보입니다. 스마트 자동은 답한 모델의 크레딧이 차감됩니다." },
+        { title: "직접 고를 때의 예상값", body: "모델을 직접 고르면 선택창 아래에 고른 모델의 \"기본 예상\" 크레딧 합계가 보입니다. 스마트 자동(Smart Adaptive)은 답한 모델의 크레딧이 차감됩니다." },
         { title: "긴 대화·파일 배율", body: "현재 질문, 이전 대화, 첨부파일 내용을 합친 입력이 1만 6천 토큰을 넘으면 1.5배, 5만이면 2배, 10만이면 3배가 됩니다. 첨부파일 자체에는 별도 요금이 없습니다." },
         { title: "웹 검색과 이미지", body: "웹 검색을 켜면 검색이 실행된 모델마다 8크레딧이 더해집니다(입력 길이 배율 없음, Perplexity 모델 제외). 검색하지 않았으면 돌려받습니다. 이미지 생성은 모델·품질·크기별로 정해진 크레딧이며 이미지 화면의 생성 버튼에 표시됩니다(Chat에서 이미지로 답할 때는 확인 없이 차감)." },
         { title: "차감 순서", body: "이번 달 플랜 크레딧을 먼저 쓰고, 그다음 만료일이 가까운 추가 구매 크레딧부터 씁니다. 일일 한도에 닿은 날에는 추가 구매 크레딧으로 계속 쓸 수 있습니다." },
