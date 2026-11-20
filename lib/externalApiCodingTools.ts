@@ -175,7 +175,11 @@ const nativeToolModels = (models: readonly ExternalApiModelCapabilities[], proto
     const smart = models.find((model) => model.id === SMART_ADAPTIVE_MODEL_ID && model.protocols?.includes(protocol));
     // With only the Smart Adaptive entry to hand (which tools a model serves),
     // it stands as it is.
-    const scoped = smart && (fixed.length ? nativeSmartAdaptiveCapabilities(fixed, DEFAULT_MODEL_ID) : smart);
+    const native = smart && (fixed.length ? nativeSmartAdaptiveCapabilities(fixed, DEFAULT_MODEL_ID) : smart);
+    // Smart Adaptive also routes to models no client names directly (frontier,
+    // apex): the most a request costs is over those too, on this protocol only.
+    const ceiling = smart?.creditWeightByProtocol?.[protocol];
+    const scoped = native && ceiling !== undefined ? { ...native, creditWeight: Math.max(native.creditWeight, ceiling) } : native;
     return scoped ? [scoped, ...fixed] : fixed;
 };
 
