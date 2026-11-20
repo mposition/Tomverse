@@ -32,13 +32,14 @@ test("mobile marketing menu stays focused on the four primary destinations", asy
   await menuButton.click();
   // Product entry choices stay separate; FAQ and status remain in the footer.
   const menu = page.locator("header nav").filter({ has: page.getByTestId("mobile-chat-link") });
-  for (const id of ["chat", "review", "models", "pricing"]) {
+  for (const id of ["chat", "review", "developers", "pricing", "models"]) {
     await expect(menu.getByTestId(`mobile-${id}-link`)).toBeVisible();
   }
-  await expect(menu.locator('[data-testid^="mobile-"][data-testid$="-link"]')).toHaveCount(4);
+  await expect(menu.locator('[data-testid^="mobile-"][data-testid$="-link"]')).toHaveCount(5);
   await expect(menu.getByRole("link", { name: "Chat", exact: true })).toBeVisible();
   await expect(menu.getByRole("link", { name: "Review", exact: true })).toBeVisible();
-  await expect(menu.getByRole("link", { name: "Explore models", exact: true })).toBeVisible();
+  await expect(menu.getByRole("link", { name: "Developers", exact: true })).toBeVisible();
+  await expect(menu.getByRole("link", { name: "Models", exact: true })).toBeVisible();
   await expect(menu.getByRole("link", { name: "Pricing", exact: true })).toBeVisible();
   await expect(menu.getByRole("link", { name: "FAQ" })).toHaveCount(0);
   await expect(menu.getByRole("link", { name: "Service status" })).toHaveCount(0);

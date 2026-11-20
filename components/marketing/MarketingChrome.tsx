@@ -10,7 +10,8 @@ import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { LOCALIZED_SEO_PATHS, localizedPath } from "@/lib/seo";
 import { statusLinkLabel, statusNewTabCopy } from "./statusLinkCopy";
 import { LocaleSupportNotice } from "./LocaleSupportNotice";
-import { REVIEW_PRODUCT_PATH } from "@/lib/marketingRoutes";
+import { CHAT_PRODUCT_PATH, CLI_DOWNLOAD_PATH, DEVELOPERS_PATH, REVIEW_PRODUCT_PATH } from "@/lib/marketingRoutes";
+import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { useMarketingChatEntry } from "./MarketingChatAvailability";
 
 // Prefix only paths with an explicit `/[locale]` route. Legal pages keep their
@@ -652,6 +653,122 @@ const launchChrome = {
 
 const launchFocus = "focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-400";
 
+type NavEntry = { title: string; body: string; href: string };
+type NavCopy = { chat: string; review: string; developers: string; models: string; chatMenu: string; developersMenu: string; soon: string; apiKeys: string; chatItems: NavEntry[]; developerItems: NavEntry[] };
+
+// Homepage V2 navigation (owner approval 2026-11-20): 채팅 and 개발자 open
+// drop-downs into their pages' sections. `{n}` is the live provider count.
+const navEntries = (lang: Language): NavCopy => {
+  const c = launchNav[lang];
+  return {
+    ...c,
+    chatItems: c.chatItems.map((item, i) => ({ ...item, href: `${CHAT_PRODUCT_PATH}${["", "#continue", "#create", "#plugins", "#mobile"][i]}` })),
+    developerItems: c.developerItems.map((item, i) => ({ ...item, href: [DEVELOPERS_PATH, `${DEVELOPERS_PATH}#connect`, CLI_DOWNLOAD_PATH][i] })),
+  };
+};
+const launchNav: Record<Language, Omit<NavCopy, "chatItems" | "developerItems"> & { chatItems: Array<Omit<NavEntry, "href">>; developerItems: Array<Omit<NavEntry, "href">> }> = {
+  ko: {
+    chat: "채팅", review: "답변 비교", developers: "개발자", models: "모델", chatMenu: "채팅 기능", developersMenu: "개발자 메뉴", soon: "곧 출시", apiKeys: "API 키 관리",
+    chatItems: [
+      { title: "Smart Adaptive", body: "질문을 다듬고 맞는 모델로" }, { title: "대화 이어가기", body: "다른 AI의 대화를 가져와 계속" },
+      { title: "이미지 · 파일", body: "생성, 사진 편집, 파일 변환" }, { title: "플러그인 · MCP", body: "업무 도구를 대화 안으로" }, { title: "모바일 앱", body: "Android · iOS 곧 출시" },
+    ],
+    developerItems: [
+      { title: "Tomverse API", body: "API 키 하나로 공급자 {n}곳" }, { title: "코딩 도구 연결", body: "Codex · Claude Code · Cursor · VS Code" }, { title: "Tomverse CLI 다운로드", body: "터미널의 코딩 에이전트" },
+    ],
+  },
+  en: {
+    chat: "Chat", review: "Review", developers: "Developers", models: "Models", chatMenu: "Chat features", developersMenu: "Developer menu", soon: "Coming soon", apiKeys: "Manage API keys",
+    chatItems: [
+      { title: "Smart Adaptive", body: "Sharpens the question, picks the model" }, { title: "Continue a conversation", body: "Bring a chat from another AI and carry on" },
+      { title: "Images · files", body: "Generation, photo editing, file conversion" }, { title: "Plugins · MCP", body: "Your work tools inside the chat" }, { title: "Mobile apps", body: "Android · iOS coming soon" },
+    ],
+    developerItems: [
+      { title: "Tomverse API", body: "{n} providers with one API key" }, { title: "Connect coding tools", body: "Codex · Claude Code · Cursor · VS Code" }, { title: "Download Tomverse CLI", body: "A coding agent in your terminal" },
+    ],
+  },
+  zh: {
+    chat: "Chat", review: "Review", developers: "开发者", models: "模型", chatMenu: "Chat 功能", developersMenu: "开发者菜单", soon: "即将推出", apiKeys: "管理 API 密钥",
+    chatItems: [
+      { title: "Smart Adaptive", body: "优化问题，匹配合适的模型" }, { title: "继续对话", body: "导入其他 AI 的对话并继续" },
+      { title: "图片 · 文件", body: "生成、照片编辑、文件转换" }, { title: "插件 · MCP", body: "把工作工具带进对话" }, { title: "移动应用", body: "Android · iOS 即将推出" },
+    ],
+    developerItems: [
+      { title: "Tomverse API", body: "一个 API 密钥，{n} 家提供商" }, { title: "连接编程工具", body: "Codex · Claude Code · Cursor · VS Code" }, { title: "下载 Tomverse CLI", body: "终端里的编程代理" },
+    ],
+  },
+  "zh-Hant": {
+    chat: "Chat", review: "Review", developers: "開發者", models: "模型", chatMenu: "Chat 功能", developersMenu: "開發者選單", soon: "即將推出", apiKeys: "管理 API 金鑰",
+    chatItems: [
+      { title: "Smart Adaptive", body: "優化問題，配對合適的模型" }, { title: "繼續對話", body: "匯入其他 AI 的對話並繼續" },
+      { title: "圖片 · 檔案", body: "生成、照片編輯、檔案轉換" }, { title: "外掛 · MCP", body: "把工作工具帶進對話" }, { title: "行動應用程式", body: "Android · iOS 即將推出" },
+    ],
+    developerItems: [
+      { title: "Tomverse API", body: "一組 API 金鑰，{n} 家供應商" }, { title: "連接程式設計工具", body: "Codex · Claude Code · Cursor · VS Code" }, { title: "下載 Tomverse CLI", body: "終端機裡的程式設計代理" },
+    ],
+  },
+  fr: {
+    chat: "Chat", review: "Review", developers: "Développeurs", models: "Modèles", chatMenu: "Fonctions de Chat", developersMenu: "Menu développeurs", soon: "Bientôt", apiKeys: "Gérer les clés API",
+    chatItems: [
+      { title: "Smart Adaptive", body: "Affine la question, choisit le modèle" }, { title: "Reprendre une conversation", body: "Importez une conversation d’une autre IA" },
+      { title: "Images · fichiers", body: "Génération, retouche photo, conversion" }, { title: "Plugins · MCP", body: "Vos outils de travail dans la conversation" }, { title: "Applications mobiles", body: "Android · iOS bientôt" },
+    ],
+    developerItems: [
+      { title: "Tomverse API", body: "{n} fournisseurs avec une seule clé API" }, { title: "Connecter vos outils", body: "Codex · Claude Code · Cursor · VS Code" }, { title: "Télécharger Tomverse CLI", body: "Un agent de code dans votre terminal" },
+    ],
+  },
+  de: {
+    chat: "Chat", review: "Review", developers: "Entwickler", models: "Modelle", chatMenu: "Chat-Funktionen", developersMenu: "Entwicklermenü", soon: "In Kürze", apiKeys: "API-Schlüssel verwalten",
+    chatItems: [
+      { title: "Smart Adaptive", body: "Schärft die Frage, wählt das Modell" }, { title: "Unterhaltung fortsetzen", body: "Chats aus anderen KIs übernehmen" },
+      { title: "Bilder · Dateien", body: "Erstellen, Fotobearbeitung, Umwandlung" }, { title: "Plugins · MCP", body: "Ihre Arbeitstools im Chat" }, { title: "Mobile Apps", body: "Android · iOS in Kürze" },
+    ],
+    developerItems: [
+      { title: "Tomverse API", body: "{n} Anbieter mit einem API-Schlüssel" }, { title: "Coding-Tools verbinden", body: "Codex · Claude Code · Cursor · VS Code" }, { title: "Tomverse CLI herunterladen", body: "Ein Coding-Agent im Terminal" },
+    ],
+  },
+  es: {
+    chat: "Chat", review: "Review", developers: "Desarrolladores", models: "Modelos", chatMenu: "Funciones de Chat", developersMenu: "Menú de desarrolladores", soon: "Muy pronto", apiKeys: "Gestionar claves de API",
+    chatItems: [
+      { title: "Smart Adaptive", body: "Afina la pregunta y elige el modelo" }, { title: "Continuar una conversación", body: "Trae un chat de otra IA y sigue" },
+      { title: "Imágenes · archivos", body: "Generación, edición de fotos, conversión" }, { title: "Plugins · MCP", body: "Tus herramientas de trabajo en el chat" }, { title: "Apps móviles", body: "Android · iOS muy pronto" },
+    ],
+    developerItems: [
+      { title: "Tomverse API", body: "{n} proveedores con una clave de API" }, { title: "Conectar herramientas", body: "Codex · Claude Code · Cursor · VS Code" }, { title: "Descargar Tomverse CLI", body: "Un agente de código en tu terminal" },
+    ],
+  },
+  pt: {
+    chat: "Chat", review: "Review", developers: "Desenvolvedores", models: "Modelos", chatMenu: "Recursos do Chat", developersMenu: "Menu de desenvolvedores", soon: "Em breve", apiKeys: "Gerenciar chaves de API",
+    chatItems: [
+      { title: "Smart Adaptive", body: "Refina a pergunta e escolhe o modelo" }, { title: "Continuar uma conversa", body: "Traga um chat de outra IA e continue" },
+      { title: "Imagens · arquivos", body: "Geração, edição de fotos, conversão" }, { title: "Plugins · MCP", body: "Suas ferramentas de trabalho no chat" }, { title: "Apps móveis", body: "Android · iOS em breve" },
+    ],
+    developerItems: [
+      { title: "Tomverse API", body: "{n} provedores com uma chave de API" }, { title: "Conectar ferramentas", body: "Codex · Claude Code · Cursor · VS Code" }, { title: "Baixar Tomverse CLI", body: "Um agente de código no seu terminal" },
+    ],
+  },
+};
+
+function NavMenu({ label, items, testId, href, menuLabel, n, lang }: {
+  label: string; items: NavEntry[]; testId: string; href: string; menuLabel: string; n: number; lang: Language;
+}) {
+  return <div className="group relative">
+    <Link href={localizedHref(lang, href)} data-testid={testId}
+      className={`inline-flex items-center gap-1 rounded-full px-3 py-2 text-zinc-300 transition hover:bg-white/[0.06] hover:text-white group-focus-within:text-white ${launchFocus}`}>
+      <span className="after:ml-1 after:text-[11px] after:text-zinc-400 after:content-['▾'_/_'']">{label}</span>
+    </Link>
+    {/* Opens on hover and on keyboard focus within; every entry is also a plain link on its page. */}
+    <div role="group" aria-label={menuLabel}
+      className="invisible absolute left-[-16px] top-full z-50 grid min-w-[280px] gap-0.5 rounded-2xl bg-[rgb(28_30_37/0.97)] p-2 opacity-0 shadow-[inset_0_0_0_1px_#31343f,0_24px_60px_-20px_rgb(0_0_0/0.6)] backdrop-blur-xl transition duration-150 before:absolute before:inset-x-0 before:-top-3 before:h-3 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100 mt-2">
+      {items.map((item) => <Link key={item.href} href={localizedHref(lang, item.href)}
+        className={`grid gap-0.5 rounded-[10px] px-3 py-2.5 hover:bg-[#272a33] ${launchFocus}`}>
+        <b className="text-sm font-bold text-zinc-50">{item.title}</b>
+        <span className="text-xs font-medium text-zinc-400">{item.body.replaceAll("{n}", String(n))}</span>
+      </Link>)}
+    </div>
+  </div>;
+}
+
 function LaunchMarketingHeader({
   maxWidth = "max-w-7xl",
   localizedContentAvailable = true,
@@ -669,11 +786,17 @@ function LaunchMarketingHeader({
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLElement>(null);
   const chatHref = entry.chatAvailable ? suppliedChatHref ?? entry.chatHref : entry.chatHref;
+  const nav = navEntries(lang);
+  const { publicModels } = useModelCatalog();
+  const providerCount = new Set(publicModels.map((model) => model.provider)).size;
+  const n = providerCount >= 3 ? providerCount : 12;
+  // The header and footer go to pages; the CTA opens the app.
   const items = [
-    { label: lang === "ko" ? "채팅" : "Chat", href: chatHref, key: "chat" },
-    { label: lang === "ko" ? "답변 비교" : "Review", href: reviewInfoHref ?? localizedPath(lang, REVIEW_PRODUCT_PATH), key: "review" },
+    { label: nav.chat, href: CHAT_PRODUCT_PATH, key: "chat", menu: nav.chatItems, menuLabel: nav.chatMenu },
+    { label: nav.review, href: reviewInfoHref ?? localizedPath(lang, REVIEW_PRODUCT_PATH), key: "review" },
+    { label: nav.developers, href: DEVELOPERS_PATH, key: "developers", menu: nav.developerItems, menuLabel: nav.developersMenu },
     { label: copy.pricing, href: "/pricing", key: "pricing" },
-    { label: copy.models, href: "/models", key: "models" },
+    { label: nav.models, href: "/models", key: "models" },
   ];
   const primaryHref = entry.chatAvailable ? chatHref : entry.reviewHref;
   const loginHref = `/auth/signin?callbackUrl=${encodeURIComponent(primaryHref)}`;
@@ -714,7 +837,11 @@ function LaunchMarketingHeader({
             <span className="text-sm font-bold tracking-[-0.02em] max-[240px]:sr-only sm:text-lg"><span data-testid="marketing-brand-name" className="after:content-['.'_/_'']">Tomverse</span></span>
           </Link>
           <nav aria-label={copy.navigation} className="hidden items-center gap-1 text-sm font-semibold lg:flex">
-            {items.map((item) => <Link key={item.key} href={localizedHref(lang, item.href)} data-testid={`header-${item.key}-link`} className={`rounded-full px-3 py-2 text-zinc-300 transition hover:bg-white/[0.06] hover:text-white ${launchFocus}`}>{item.label}</Link>)}
+            {items.map((item) => item.menu
+              ? <NavMenu key={item.key} label={item.label} items={item.menu} href={item.href} testId={`header-${item.key}-link`} menuLabel={item.menuLabel} n={n} lang={lang} />
+              : <Link key={item.key} href={localizedHref(lang, item.href)} data-testid={`header-${item.key}-link`} className={`inline-flex items-center gap-1 rounded-full px-3 py-2 text-zinc-300 transition hover:bg-white/[0.06] hover:text-white ${launchFocus}`}>
+                <span className={item.key === "review" ? "after:ml-1 after:text-[11px] after:text-[#5b8dff] after:content-['✦'_/_'']" : undefined}>{item.label}</span>
+              </Link>)}
           </nav>
           <div className={`${showMobileEntry ? "contents lg:flex" : "flex"} min-w-0 items-center gap-[8px]`}>
             <div className="min-w-0 [&>label]:h-[44px] [&>label]:max-w-[126px] [&>label]:border-zinc-700 [&>label]:bg-zinc-900 [&>label]:text-zinc-100 [&_select]:text-zinc-100 [&_select]:[color-scheme:dark]">
@@ -744,13 +871,20 @@ function LaunchMarketingHeader({
 
 function LaunchMarketingFooter({ maxWidth = "max-w-7xl" }: MarketingFooterProps) {
   const { lang } = useLanguage();
-  const entry = useMarketingChatEntry();
   const copy = launchChrome[lang];
-  const columns = [
+  const nav = navEntries(lang);
+  const columns: Array<{ title: string; items: Array<{ label: string; href: string; soon?: boolean }> }> = [
     { title: copy.products, items: [
-      { label: "Tomverse Chat", href: entry.chatHref },
+      { label: "Tomverse Chat", href: CHAT_PRODUCT_PATH },
       { label: "Tomverse Review", href: localizedPath(lang, REVIEW_PRODUCT_PATH) },
+      { label: nav.chatItems[3].title, href: `${CHAT_PRODUCT_PATH}#plugins` },
+      { label: nav.chatItems[4].title, href: `${CHAT_PRODUCT_PATH}#mobile`, soon: true },
       { label: copy.models, href: "/models" }, { label: copy.pricing, href: "/pricing" },
+    ] },
+    { title: nav.developers, items: [
+      { label: "Tomverse API", href: DEVELOPERS_PATH },
+      { label: nav.apiKeys, href: "/settings/api" },
+      { label: nav.developerItems[2].title, href: CLI_DOWNLOAD_PATH, soon: true },
     ] },
     { title: copy.help, items: [
       { label: copy.helpCentre, href: "/support/help-centre" }, { label: copy.faq, href: "/faq" },
@@ -775,13 +909,13 @@ function LaunchMarketingFooter({ maxWidth = "max-w-7xl" }: MarketingFooterProps)
             </Link>
             <p className="mt-4 max-w-md text-sm leading-6">{copy.description}</p>
           </div>
-          <div className="grid min-w-0 grid-cols-2 gap-x-6 gap-y-8 max-[240px]:grid-cols-1 sm:grid-cols-4">
+          <div className="grid min-w-0 grid-cols-2 gap-x-6 gap-y-8 max-[240px]:grid-cols-1 sm:grid-cols-3 xl:grid-cols-5">
             {columns.map((column) => <nav key={column.title} aria-label={column.title} className="min-w-0 [overflow-wrap:anywhere]">
               <h2 className="mb-3 text-sm font-semibold text-zinc-100">{column.title}</h2>
               <ul className="space-y-1">
                 {column.items.map((item) => <li key={item.href}>
                   <Link href={localizedHref(lang, item.href)} target={item.href === "/status" ? "_blank" : undefined} rel={item.href === "/status" ? "noopener noreferrer" : undefined} prefetch={item.href === "/status" ? false : undefined} aria-label={item.href === "/status" ? statusLinkLabel(item.label, lang) : undefined} title={item.href === "/status" ? statusNewTabCopy[lang] : undefined} data-testid={item.href === "/status" ? "footer-status-link" : undefined} className={`inline-flex min-h-[36px] max-w-full items-center gap-1.5 py-1 text-sm leading-5 transition hover:text-white ${launchFocus}`}>
-                    <span className="min-w-0 break-words">{item.label}</span>{item.href === "/status" && <ExternalLink className="h-3 w-3 shrink-0" aria-hidden="true" />}
+                    <span className="min-w-0 break-words">{item.label}{item.soon && <em className="ml-1 text-[11px] font-semibold not-italic text-[#5b8dff]">{nav.soon}</em>}</span>{item.href === "/status" && <ExternalLink className="h-3 w-3 shrink-0" aria-hidden="true" />}
                   </Link>
                 </li>)}
               </ul>

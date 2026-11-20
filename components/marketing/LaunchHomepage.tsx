@@ -7,6 +7,8 @@ import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { localizedPath } from "@/lib/seo";
 import { workspaceDestination } from "@/lib/productEntryDestination";
+import { CLI_DOWNLOAD_PATH, DEVELOPERS_PATH } from "@/lib/marketingRoutes";
+import type { Language } from "@/lib/language";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
 import { useMarketingChatEntry } from "./MarketingChatAvailability";
 import { homeV2Content, type HomeV2Copy } from "./home/homeV2Content";
@@ -320,7 +322,7 @@ function CodeLines({ lines }: { lines: Token[][] }) {
   return <>{lines.map((line, i) => <span key={i}><TokenLine tokens={line} />{i < lines.length - 1 ? "\n" : ""}</span>)}</>;
 }
 
-function ApiSection({ copy, n, reduce }: { copy: HomeV2Copy["api"]; n: number; reduce: boolean }) {
+function ApiSection({ copy, n, reduce, lang }: { copy: HomeV2Copy["api"]; n: number; reduce: boolean; lang: Language }) {
   const configs = apiConfigs(copy.console);
   const clients: Array<{ key: keyof typeof configs; name: string; sub: string; icon?: string }> = [
     { key: "codex", name: "Codex", sub: copy.clients.codex, icon: MODEL_ICON("chatgpt") },
@@ -351,7 +353,7 @@ function ApiSection({ copy, n, reduce }: { copy: HomeV2Copy["api"]; n: number; r
     <div className="wrap">
       <div className="chapter-head">
         <div><span className="eyebrow">{copy.eyebrow}</span><h2 id="home-api-title"><Title lines={copy.title} /></h2></div>
-        <p>{fill(copy.body, n)}</p>
+        <p>{fill(copy.body, n)} <Link href={localizedPath(lang, DEVELOPERS_PATH)} style={{ color: "var(--brand-hi)" }}>{copy.devLink} ↗</Link></p>
       </div>
       <div className="api rise">
         <div className="clients" role="tablist" aria-label={copy.toolsLabel}>
@@ -671,7 +673,7 @@ export default function LaunchHomepage({ reviewInfoHref, variantCopy }: LaunchHo
         </div>
       </section>
 
-      <ApiSection copy={t.api} n={n} reduce={reduce} />
+      <ApiSection copy={t.api} n={n} reduce={reduce} lang={lang} />
 
       <section id="cli" className="chapter" aria-labelledby="home-cli-title">
         <div className="wrap">
@@ -688,6 +690,7 @@ export default function LaunchHomepage({ reviewInfoHref, variantCopy }: LaunchHo
               {t.cli.steps.map(([title, body], i) => <div key={title}><span>{String(i + 1).padStart(2, "0")}</span><div><h4>{title}</h4><p>{body}</p></div></div>)}
             </div>
           </div>
+          <div className="hero-actions" style={{ marginTop: 28 }}><Link className="btn" href={localizedPath(lang, CLI_DOWNLOAD_PATH)}><span>{t.cli.cta}</span><Arrow /></Link></div>
         </div>
       </section>
 

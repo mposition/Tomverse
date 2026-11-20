@@ -111,6 +111,7 @@ export type HomeV2Copy = {
     title: [string, string];
     body: string;
     toolsLabel: string;
+    devLink: string;
     clients: { codex: string; claude: string; vscode: string; cursor: string; aside: string; otherName: string; other: string };
     facts: Array<[string, string]>;
     note: string;
@@ -127,6 +128,7 @@ export type HomeV2Copy = {
     title: [string, string];
     body: string;
     terminalLabel: string;
+    cta: string;
     steps: Array<[string, string]>;
     term: { ask: string; reading: string; cause: string; diff: string; apply: string; run: string; summary: string };
   };
@@ -300,6 +302,7 @@ const ko: HomeV2Copy = {
     title: ["쓰던 코딩 도구에,", "Tomverse API 키 하나."],
     body: "공급사마다 따로 가입하고 결제할 필요 없이, 쓰던 코딩 도구에서 Tomverse 계정의 모델을 씁니다. 표준 OpenAI 호환 API를 쓰는 도구라면 모두 연결되고 공급자 {n}곳의 모델을 고를 수 있으며, Codex와 Claude Code는 각자 공급자의 모델 안에서 씁니다. Smart Adaptive가 가벼운 요청은 가벼운 모델로 보내 크레딧을 아끼고, 키에 한도를 걸어 두면 그 이상 쓰지 않습니다(Pro 이상).",
     toolsLabel: "연결할 도구",
+    devLink: "개발자 페이지",
     clients: {
       codex: "터미널 · VS Code 확장",
       claude: "터미널 · VS Code 확장",
@@ -334,6 +337,7 @@ const ko: HomeV2Copy = {
     title: ["터미널에서 바로,", "내 폴더의 코딩 에이전트."],
     body: "Claude Code나 Codex 없이도 Tomverse API 키 하나로 동작합니다. 코드를 읽고 diff를 제안하고, 승인한 명령만 실행한 뒤 무엇을 했고 얼마가 들었는지 알려 줍니다.",
     terminalLabel: "Tomverse CLI 실행 예시",
+    cta: "Tomverse CLI 알아보기",
     steps: [
       ["읽고 계획합니다", "현재 폴더의 코드만 읽습니다. 키는 설정·세션·로그 어디에도 쓰지 않습니다."],
       ["diff로 제안합니다", "바꿀 내용을 먼저 보여 주고, 승인한 변경만 적용합니다."],
@@ -520,6 +524,7 @@ const en: HomeV2Copy = {
     title: ["The coding tools you already use,", "one Tomverse API key."],
     body: "Use your Tomverse account’s models in the coding tools you already use, without signing up and paying for each provider. Any tool on the standard OpenAI-compatible API can connect and choose from {n} providers’ models; Codex and Claude Code stay within their own provider’s models. Smart Adaptive sends light requests to light models to save credits, and a key with a limit never goes past it (Pro and above).",
     toolsLabel: "Tool to connect",
+    devLink: "Developer page",
     clients: {
       codex: "Terminal · VS Code extension",
       claude: "Terminal · VS Code extension",
@@ -554,6 +559,7 @@ const en: HomeV2Copy = {
     title: ["Right in your terminal,", "a coding agent for your folder."],
     body: "Works with one Tomverse API key, no Claude Code or Codex needed. It reads the code, proposes a diff, runs only the commands you approve, then tells you what it did and what it cost.",
     terminalLabel: "Example Tomverse CLI session",
+    cta: "Explore Tomverse CLI",
     steps: [
       ["Reads and plans", "Reads only the code in the current folder. The key is never written to settings, sessions or logs."],
       ["Proposes a diff", "Shows the change first and applies only what you approve."],

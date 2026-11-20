@@ -79,7 +79,7 @@ for (const lang of ["en", "ko"] as const) {
     const guestChatAvailable = await page.getByTestId("launch-homepage").getAttribute("data-guest-chat-trial-available") === "true";
     await expect(page.getByTestId("landing-primary-cta")).toHaveAttribute("href", `/review?lang=${lang}&entry=guest-preview`);
     await expect(page.getByTestId("landing-secondary-cta")).toHaveAttribute(
-      "href", guestChatAvailable ? `${CHAT_WORKSPACE_PATH}?lang=${lang}` : `/${lang}#chat`
+      "href", guestChatAvailable ? `${CHAT_WORKSPACE_PATH}?lang=${lang}` : `/${lang}/products/chat`
     );
     const menuReview = page.getByTestId("header-review-link");
     if (!await menuReview.isVisible()) {
@@ -87,7 +87,8 @@ for (const lang of ["en", "ko"] as const) {
     }
     const reviewInfo = await menuReview.isVisible() ? menuReview : page.getByTestId("mobile-review-link");
     const chatIntro = await menuReview.isVisible() ? page.getByTestId("header-chat-link") : page.getByTestId("mobile-chat-link");
-    await expect(chatIntro).toHaveAttribute("href", guestChatAvailable ? `${CHAT_WORKSPACE_PATH}?lang=${lang}` : `/${lang}#chat`);
+    // The header goes to the Chat page; the hero's second button opens the app.
+    await expect(chatIntro).toHaveAttribute("href", lang === "en" ? "/products/chat" : `/${lang}/products/chat`);
     await expect(reviewInfo).toHaveAttribute("href", `/${lang}/products/review`);
     await reviewInfo.click();
     await expect(page).toHaveURL(new RegExp(`/${lang}/products/review$`));
@@ -128,9 +129,9 @@ test("Guest Chat either opens its introduction or starts the available workspace
   await page.goto("/ko");
   await expect(page.getByTestId("marketing-header-app-cta")).toHaveAttribute("data-session-state", "unauthenticated");
   const guestChatAvailable = await page.getByTestId("launch-homepage").getAttribute("data-guest-chat-trial-available") === "true";
-  const chatHref = guestChatAvailable ? `${CHAT_WORKSPACE_PATH}?lang=ko` : "/ko#chat";
-  await expect(page.getByTestId("header-chat-link")).toHaveAttribute("href", chatHref);
-  await expect(page.locator(`footer a[href='${chatHref}']`)).toHaveText("Tomverse Chat");
+  const chatHref = guestChatAvailable ? `${CHAT_WORKSPACE_PATH}?lang=ko` : "/ko/products/chat";
+  await expect(page.getByTestId("header-chat-link")).toHaveAttribute("href", "/ko/products/chat");
+  await expect(page.locator("footer a[href='/ko/products/chat']")).toHaveText("Tomverse Chat");
   await expect(page.getByTestId("landing-secondary-cta")).toHaveAttribute("href", chatHref);
   const destination = await page.getByTestId("landing-primary-cta").getAttribute("href");
   expect(destination).toBe("/review?lang=ko&entry=guest-preview");
@@ -162,7 +163,7 @@ test("the real marketing offer read is private and closed without an authenticat
   await expect(page.getByTestId("marketing-header-app-cta")).toHaveAttribute("data-session-state", "authenticated");
   await expect(page.getByTestId("marketing-header-app-cta")).toHaveAttribute("href", "/review?lang=en");
   await expect(page.getByTestId("marketing-header-app-cta")).toHaveText("Back to Review");
-  await expect(page.getByTestId("header-chat-link")).toHaveAttribute("href", "/en#chat");
+  await expect(page.getByTestId("header-chat-link")).toHaveAttribute("href", "/products/chat");
   // A signed-in visitor is not told they can compare without signing up.
   await expect(page.getByTestId("landing-hero-signup-note")).toHaveCount(0);
   await expect(page.getByTestId("landing-primary-cta")).toHaveAttribute("href", "/review?lang=en");
