@@ -87,6 +87,8 @@ export type ChatImageDecision =
            * image. Only ever true when the call was told a photo is attached.
            */
           edit: boolean;
+          /** The recorded routing decision (lib/imageRoutingDecisions.ts), when one was written. */
+          routingDecisionId?: string;
       };
 
 /** Prepared under the same image gates for standalone and combined routing. */
@@ -100,6 +102,8 @@ export type ChatImageIntentContext = {
     message?: string;
     maxOutputTokens: number;
     timeoutMs: number;
+    /** The image routing criteria in force (the promoted image guidance, or the default). */
+    criteria?: string;
 };
 
 /**
@@ -205,11 +209,16 @@ export const buildChatImageIntentSystem = (options: {
     combined?: boolean;
     followUp?: boolean;
     attachedPhoto?: boolean;
+    /**
+     * The routing criteria in force: a promoted image cycle's
+     * (lib/imageRoutingOptimizer.ts), or CHAT_IMAGE_ROUTING_CRITERIA.
+     */
+    criteria?: string;
 } = {}) => [
     "You route messages sent to a chat assistant that cannot draw.",
     "A separate image generator exists. Decide whether this message asks for a new image to be created and, if it does, which image model and preset should make it.",
     "",
-    CHAT_IMAGE_ROUTING_CRITERIA,
+    (options.criteria ?? CHAT_IMAGE_ROUTING_CRITERIA).trim(),
     "",
     options.followUp === false ? "No previous image is available. Set prompt to an empty string." :
         "A \"Previous image\" section, when present, is the prompt that made the last image in this conversation. A message that asks to change, redo or vary that image -- its colour, style, subject, details, composition or quality, e.g. \"make it bluer\", \"now as a watercolour\", \"add a hat\", \"regenerate this image in high quality\" -- is image=true: a new image is made from a new prompt. Then write prompt: the complete prompt for the new image, the previous prompt with the change applied, in the previous prompt's language, at most 1500 characters -- shorten the unchanged parts if needed, never the change. In every other case prompt is an empty string.",
@@ -366,6 +375,10 @@ export const readChatImageDecision = (data: unknown): ChatImageDecision => {
                 ? value.prompt.trim()
                 : null,
         edit: (value as { edit?: unknown }).edit === true,
+        ...(typeof (value as { routingDecisionId?: unknown }).routingDecisionId === "string" &&
+        /^[a-z0-9]{20,40}$/.test((value as { routingDecisionId: string }).routingDecisionId)
+            ? { routingDecisionId: (value as { routingDecisionId: string }).routingDecisionId }
+            : {}),
     };
 };
 

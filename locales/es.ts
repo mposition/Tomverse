@@ -402,6 +402,12 @@ export const es = {
         imageTurnGenerating: "Creando la imagen…",
         imageTurnFailed: "No se pudo crear la imagen. Inténtalo de nuevo.",
         imageTurnRetry: "Reintentar",
+        imageSignalHelpful: "Esta imagen me sirve",
+        imageSignalNotHelpful: "Esta imagen no es lo que buscaba",
+        imageSignalWantedText: "Quería una respuesta en texto",
+        imageSignalGroupLabel: "Opinión sobre esta imagen",
+        imageSignalSelect: "Elegir este resultado",
+        imageSignalSelected: "Elegido",
         responseComplete: "Respuesta completada.",
         responseIncomplete: "La respuesta se detuvo por el límite de longitud de salida.",
         responseIncompleteNotice: "La respuesta se cortó por el límite de longitud de salida. Puedes continuar con una pregunta de seguimiento.",
@@ -1556,7 +1562,7 @@ export const es = {
         capacityConversations: "{used} de {limit} conversaciones importadas",
         selectFile: "Elegir archivo de exportación",
         selectFileHint:
-            "Exportación de datos de ChatGPT, Claude o Gemini (.zip o .json), o un hilo de Perplexity exportado en Markdown (.md), hasta 1 GB. Para Gemini hace falta la exportación en JSON de Mi actividad → Aplicaciones de Gemini, obtenida en Google Takeout. Los archivos grandes no son problema: los archivos multimedia se omiten sin leerse. En un archivo de Perplexity se envían breves extractos de cada pregunta y del texto de respuesta que la rodea (600 caracteres como máximo cada uno) a un modelo de IA (OpenAI) para saber dónde termina cada pregunta.",
+            "Exportación de datos de ChatGPT, Claude, Gemini o Perplexity (.zip o .json), o un hilo de Perplexity exportado en Markdown (.md), hasta 1 GB. Para Gemini hace falta la exportación en JSON de Mi actividad → Aplicaciones de Gemini, obtenida en Google Takeout. Los archivos grandes no son problema: los archivos multimedia se omiten sin leerse. En un archivo de Perplexity se envían breves extractos de cada pregunta y del texto de respuesta que la rodea (600 caracteres como máximo cada uno) a un modelo de IA (OpenAI) para saber dónde termina cada pregunta.",
         parsing: "Leyendo la exportación en tu navegador…",
         parsingProgress: "{conversations} conversaciones encontradas",
         cancel: "Cancelar",
@@ -1693,10 +1699,10 @@ export const es = {
             "Selecciona Mi actividad, dentro elige Aplicaciones de Gemini y usa el formato JSON: el producto Gemini contiene Gems, no conversaciones",
         guideGeminiStep3:
             "Exporta y sube el .zip cuando Google te envíe el enlace de descarga",
-        guidePerplexityTitle: "Exportar un hilo de Perplexity",
-        guidePerplexityStep1: "Abre en Perplexity el hilo que quieres traer",
-        guidePerplexityStep2: "Pulsa el botón Exportar bajo una respuesta y elige Markdown",
-        guidePerplexityStep3: "Sube el archivo .md. Un archivo es un hilo, y los enlaces a las fuentes de las respuestas vienen incluidos. Para saber dónde termina cada pregunta, se envían breves extractos de cada pregunta y del texto de respuesta que la rodea (600 caracteres como máximo cada uno) a un modelo de IA (OpenAI).",
+        guidePerplexityTitle: "Exportar tus datos de Perplexity",
+        guidePerplexityStep1: "Solicita una exportación de datos en los ajustes de Perplexity. Buscando “data” en los ajustes la encuentras",
+        guidePerplexityStep2: "Sube tal cual el archivo .zip que recibas. Contiene todos los hilos. No incluye la lista de fuentes, así que las respuestas solo conservan marcas como [1]",
+        guidePerplexityStep3: "Para traer un solo hilo, sube en su lugar el archivo .md de Exportar → Markdown bajo una respuesta. Ese archivo trae también los enlaces a las fuentes. Para saber dónde termina cada pregunta, se envían breves extractos de cada pregunta y del texto de respuesta que la rodea (600 caracteres como máximo cada uno) a un modelo de IA (OpenAI).",
         guideFormats:
             "Se admiten archivos ZIP y JSON, y archivos Markdown (.md) de Perplexity. Una exportación de Gemini debe estar en formato JSON: el HTML no se puede leer.",
         guideStaysLocal:

@@ -57,6 +57,15 @@ export async function writeKeepaliveHealth({ worker, signal, observedAt, expires
 
 /** Use the CLI when the access token has this little left (or is past it). */
 export const CLAUDE_KEEPALIVE_REFRESH_WITHIN_MS = 10 * 60 * 1000;
+/**
+ * Ask the CLI no earlier than this before expiry. The CLI itself refreshes only
+ * inside its own five-minute buffer: on the box (2026-11-15..20) every round
+ * with five minutes or more left saw no refresh, every round with less did.
+ * Asking earlier logged a `refresh_failed` every eight hours, paged as
+ * AMUX_WORKER_REFRESH_FAILED, and left the actual refresh to the next round,
+ * which once landed five seconds before the copies expired.
+ */
+export const CLAUDE_CLI_REFRESH_LEAD_MS = 4 * 60 * 1000;
 /** Warn this long before the refresh token itself runs out. */
 export const CLAUDE_KEEPALIVE_RELOGIN_WARN_MS = 24 * 60 * 60 * 1000;
 
@@ -87,7 +96,8 @@ const iso = (ms) => (ms === null || ms === undefined ? null : new Date(ms).toISO
  * process ends (a non-zero exit rejects); `log(object)` writes one line.
  */
 export async function runClaudeLoginKeepalive({ readLogin, runCli, runStage, log: writeLog,
-  readCopyExpiries = async () => [], now = () => Date.now(), report = async () => {} }) {
+  readCopyExpiries = async () => [], now = () => Date.now(), report = async () => {},
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }) {
   // Every outcome line is also reported (owner decision 2026-11-15); a
   // failed report never changes the round.
   const log = async (line) => {
@@ -133,25 +143,41 @@ export async function runClaudeLoginKeepalive({ readLogin, runCli, runStage, log
     return 1;
   }
   const before = login.expiresAt ?? 0;
-  // The cheapest use first; a one-line prompt if status did not refresh.
-  for (const [how, args] of [
-    ["status", ["auth", "status"]],
-    ["prompt", ["-p", "Reply with OK.", "--model", "haiku",
-      "--output-format", "json", "--strict-mcp-config"]],
-  ]) {
-    try { await runCli(args); } catch { /* judged by the stored login below */ }
+  const refreshed = () => login.state === "fresh" && (login.expiresAt ?? 0) > before;
+  // The window is wider than the timer's step so a round always lands in it;
+  // a round that lands before the CLI would refresh waits here for it
+  // (at most the window less the lead, inside the unit's TimeoutStartSec).
+  const wait = login.expiresAt === null ? 0 : login.expiresAt - CLAUDE_CLI_REFRESH_LEAD_MS - now();
+  let how = null;
+  if (wait > 0) {
+    await sleep(wait);
     login = await read();
-    if (login.state === "fresh" && (login.expiresAt ?? 0) > before) {
-      let staged = "ok";
-      try { await runStage(); } catch { staged = "failed"; }
-      await log({ outcome: "refreshed", by: how, staged,
-        expiresAt: iso(login.expiresAt), refreshTokenExpiresAt: iso(login.refreshExpiresAt),
-        ...(reloginSoon(login) ? { warning: "relogin_soon" } : {}) });
-      return staged === "ok" ? 0 : 1;
-    }
-    if (login.state === "login_required") break;
+    // Another use of the operator's CLI may have refreshed it meanwhile.
+    if (refreshed()) how = "elsewhere";
   }
-  await log({ outcome: login.state === "login_required" ? "login_required" : "refresh_failed",
+  // The cheapest use first; a one-line prompt if status did not refresh.
+  if (!how && login.state === "refresh_due") {
+    for (const [use, args] of [
+      ["status", ["auth", "status"]],
+      ["prompt", ["-p", "Reply with OK.", "--model", "haiku",
+        "--output-format", "json", "--strict-mcp-config"]],
+    ]) {
+      try { await runCli(args); } catch { /* judged by the stored login below */ }
+      login = await read();
+      if (refreshed()) { how = use; break; }
+      if (login.state === "login_required") break;
+    }
+  }
+  const waited = wait > 0 ? { waitedSeconds: Math.round(wait / 1000) } : {};
+  if (how) {
+    let staged = "ok";
+    try { await runStage(); } catch { staged = "failed"; }
+    await log({ outcome: "refreshed", by: how, staged, ...waited,
+      expiresAt: iso(login.expiresAt), refreshTokenExpiresAt: iso(login.refreshExpiresAt),
+      ...(reloginSoon(login) ? { warning: "relogin_soon" } : {}) });
+    return staged === "ok" ? 0 : 1;
+  }
+  await log({ outcome: login.state === "login_required" ? "login_required" : "refresh_failed", ...waited,
     state: login.state, expiresAt: iso(login.expiresAt),
     refreshTokenExpiresAt: iso(login.refreshExpiresAt),
     action: "operator: run `claude auth login` as this user" });

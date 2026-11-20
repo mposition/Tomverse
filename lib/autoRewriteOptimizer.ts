@@ -61,10 +61,15 @@ import {
     isRewriteSampleTurn,
     rewriteSyntheticCaseViews,
     runRewriteOptimizerCycle,
-    scheduledOptimizerTarget,
+    OPTIMIZER_TARGET_SKIP_REFUSALS,
+    scheduledOptimizerOrder,
     type RewriteOptimizerDecision,
     type RewriteSyntheticCaseView,
 } from "@/lib/autoRewriteOptimizerCore";
+import { readCodingOptimizerAutomation, startCodingRouterOptimizerCycle } from "@/lib/autoCodingRouterOptimizer";
+import { readCodingRoutingReport } from "@/lib/externalApiRoutingReport";
+import { readImageOptimizerAutomation, startImageRoutingOptimizerCycle } from "@/lib/imageRoutingOptimizer";
+import { readImageRoutingReport } from "@/lib/imageRoutingReport";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import type { AiModel } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
@@ -621,29 +626,82 @@ export async function readAutoRewriteOptimizerState() {
  * nothing. `waitForCompletion` runs the cycle to its end before returning.
  */
 export async function runScheduledOptimizerCycle(options: { waitForCompletion?: boolean } = {}): Promise<
-    | { started: false; reason: "daily_off" | OptimizerStartRefusal; target?: "routing" | "rewrite" }
-    | { started: true; cycleId: string; target: "routing" | "rewrite"; outcome?: OptimizerRunOutcome }
+    | { started: false; reason: "daily_off" | OptimizerStartRefusal | "image_triage_off"; target?: "routing" | "rewrite" | "coding" | "image" }
+    | { started: true; cycleId: string; target: "routing" | "rewrite" | "coding" | "image"; outcome?: OptimizerRunOutcome }
 > {
-    const [routing, rewrite] = await Promise.all([readOptimizerAutomation(), readRewriteOptimizerAutomation()]);
+    await logDailyCodingRoutingReport();
+    await logDailyImageRoutingReport();
+    const [routing, rewrite, coding, image] = await Promise.all([
+        readOptimizerAutomation(),
+        readRewriteOptimizerAutomation(),
+        readCodingOptimizerAutomation(),
+        readImageOptimizerAutomation(),
+    ]);
+    const switchesOn = [routing.daily, rewrite.daily, coding.daily, image.daily].filter(Boolean).length;
     const last =
-        routing.daily && rewrite.daily
+        switchesOn > 1
             ? await prisma.autoRouterOptimizerCycle.findFirst({
                   where: { startedBy: "system" },
                   orderBy: { createdAt: "desc" },
                   select: { target: true },
               })
             : null;
-    const target = scheduledOptimizerTarget({
+    const order = scheduledOptimizerOrder({
         routingDaily: routing.daily,
         rewriteDaily: rewrite.daily,
-        lastSystemTarget: last?.target === "rewrite" ? "rewrite" : last?.target === "routing" ? "routing" : null,
+        codingDaily: coding.daily,
+        imageDaily: image.daily,
+        lastSystemTarget:
+            last?.target === "rewrite" || last?.target === "routing" || last?.target === "coding" || last?.target === "image"
+                ? last.target
+                : null,
     });
-    if (!target) return { started: false, reason: "daily_off" };
-    if (target === "routing") return { ...(await runScheduledAutoRouterOptimizerCycle(options)), target };
-    const result = await startAutoRewriteOptimizerCycle("system", options);
-    return "refused" in result
-        ? { started: false, reason: result.refused, target }
-        : { started: true, cycleId: result.cycleId, target, ...(result.outcome ? { outcome: result.outcome } : {}) };
+    if (order.length === 0) return { started: false, reason: "daily_off" };
+    let refusal: { started: false; reason: OptimizerStartRefusal | "image_triage_off" | "daily_off"; target: (typeof order)[number] } | null = null;
+    for (const target of order) {
+        if (target === "routing") {
+            const routed = await runScheduledAutoRouterOptimizerCycle(options);
+            if (routed.started || !OPTIMIZER_TARGET_SKIP_REFUSALS.has(routed.reason)) return { ...routed, target };
+            refusal = { ...routed, target };
+            continue;
+        }
+        const result =
+            target === "coding"
+                ? await startCodingRouterOptimizerCycle("system", options)
+                : target === "image"
+                  ? await startImageRoutingOptimizerCycle("system", options)
+                  : await startAutoRewriteOptimizerCycle("system", options);
+        if (!("refused" in result)) {
+            return { started: true, cycleId: result.cycleId, target, ...(result.outcome ? { outcome: result.outcome } : {}) };
+        }
+        refusal = { started: false, reason: result.refused, target };
+        if (!OPTIMIZER_TARGET_SKIP_REFUSALS.has(result.refused)) return refusal;
+    }
+    return refusal ?? { started: false, reason: "daily_off" };
+}
+
+/**
+ * The daily coding routing report (lib/externalApiRoutingReportCore.ts) as one
+ * log line, on every daily run whether or not a cycle starts: counts, shares
+ * and model ids only. Free; a failed read is logged and changes nothing.
+ */
+async function logDailyCodingRoutingReport() {
+    try {
+        const report = await readCodingRoutingReport(1);
+        console.info(JSON.stringify({ event: "external_api_coding_routing_daily", ...report, byModel: report.byModel.slice(0, 10) }));
+    } catch (error) {
+        console.warn(JSON.stringify({ event: "external_api_coding_routing_daily_failed", error: error instanceof Error ? error.name : "unknown" }));
+    }
+}
+
+/** The daily image routing report as one log line (counts only), on every daily run. */
+async function logDailyImageRoutingReport() {
+    try {
+        const report = await readImageRoutingReport(1);
+        console.info(JSON.stringify({ event: "image_routing_daily", ...report }));
+    } catch (error) {
+        console.warn(JSON.stringify({ event: "image_routing_daily_failed", error: error instanceof Error ? error.name : "unknown" }));
+    }
 }
 
 /**

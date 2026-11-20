@@ -428,6 +428,12 @@ export const generateImageWithProvider = async (input: {
   modelId?: string;
   /** Set for an edit: the photo the prompt changes. */
   editImage?: ImageEditInput;
+  /**
+   * False sends one attempt only, on every provider: a caller that settles a
+   * held budget by the reported cost (the image routing evaluation) must not
+   * pay for an earlier attempt it cannot see.
+   */
+  retry?: boolean;
 }): Promise<ImageProviderResult> => {
   const modelId = input.modelId ?? IMAGE_GENERATION_MODEL_ID;
   const model = getImageModel(modelId);
@@ -1058,7 +1064,7 @@ const generateWithFal = async (
  */
 const generateWithXai = async (
   model: ImageModelProfile,
-  input: { prompt: string; size: ImageSize; quality: ImageQuality; editImage?: ImageEditInput }
+  input: { prompt: string; size: ImageSize; quality: ImageQuality; editImage?: ImageEditInput; retry?: boolean }
 ): Promise<ImageProviderResult> => {
   const request = {
     apiModelId: model.apiModelId,
@@ -1082,7 +1088,8 @@ const generateWithXai = async (
   const apiKey = getXaiApiKey();
   let lastError: ImageProviderError | null = null;
 
-  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
+  const xaiRetries = input.retry === false ? 0 : RETRY_DELAYS_MS.length;
+  for (let attempt = 0; attempt <= xaiRetries; attempt += 1) {
     if (attempt > 0) {
       const base = RETRY_DELAYS_MS[attempt - 1];
       await wait(base + Math.floor(Math.random() * 500));

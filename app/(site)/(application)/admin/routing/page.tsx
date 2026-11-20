@@ -9,6 +9,8 @@ import { AdminAdaptiveStatisticsPanel } from "@/components/admin/AdminAdaptiveSt
 import { AutoRouterTab } from "@/components/admin/routing/AutoRouterOverview";
 import { AdminAutoRouterOptimizerPanel } from "@/components/admin/AdminAutoRouterOptimizerPanel";
 import { AdminAutoRewriteOptimizerPanel } from "@/components/admin/AdminAutoRewriteOptimizerPanel";
+import { AdminAutoCodingOptimizerPanel } from "@/components/admin/AdminAutoCodingOptimizerPanel";
+import { AdminImageRoutingOptimizerPanel } from "@/components/admin/AdminImageRoutingOptimizerPanel";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { getAdminRole } from "@/lib/adminAuth";
@@ -82,6 +84,8 @@ export default async function AdminRoutingPage({ searchParams }: PageProps<"/adm
         <>
           <AdminAutoRouterOptimizerPanel canSendToAmux={role === "owner"} canWrite={canWrite} />
           <AdminAutoRewriteOptimizerPanel canWrite={canWrite} />
+          <AdminAutoCodingOptimizerPanel canWrite={canWrite} />
+          <AdminImageRoutingOptimizerPanel canWrite={canWrite} />
         </>
       ) : tab.id === "shadow" ? (
         <AdminRoutingShadowPanel />

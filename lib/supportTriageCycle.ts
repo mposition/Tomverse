@@ -17,6 +17,7 @@
  */
 import "server-only";
 
+import { amuxDatabaseDiagnosticCode, amuxTransientDatabaseCode } from "@/lib/amux/readFailureCore";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { prisma } from "@/lib/prisma";
 import { supportTriageHeartbeatStale, type SupportTriageRunKind } from "@/lib/supportTriageCore";
@@ -61,6 +62,16 @@ const retentionHasWork = async () => {
   return suggestion !== null || overdue.overdueRemaining > 0;
 };
 
+/** The SQLSTATE, else the connection kind or Prisma code, else "none". */
+const databaseCodeOf = (error: unknown) => {
+  const prismaCode = (error as { code?: unknown } | null)?.code;
+  return (
+    amuxDatabaseDiagnosticCode(error) ??
+    amuxTransientDatabaseCode(error) ??
+    (typeof prismaCode === "string" && /^P\d{4}$/.test(prismaCode) ? prismaCode : "none")
+  );
+};
+
 const stepFailure = async (kind: SupportTriageRunKind, error: unknown): Promise<StepOutcome> => {
   if (isDailyCapExceeded(error)) {
     console.warn(JSON.stringify({ event: "support_triage_daily_cap", kind }));
@@ -76,7 +87,8 @@ const stepFailure = async (kind: SupportTriageRunKind, error: unknown): Promise<
     // The name only: a database error can quote the row it failed on.
     error: error instanceof Error ? error.name : "unknown",
     cooldownMs: INCIDENT_COOLDOWN_MS,
-    context: { component: "support-triage-cycle", kind },
+    // Codes, never text: the name alone left a 2026-11-20 failure undiagnosable.
+    context: { component: "support-triage-cycle", kind, databaseCode: databaseCodeOf(error) },
   }).catch(() => undefined);
   return "failed";
 };
@@ -106,13 +118,13 @@ export const runSupportTriageCycleQuietly = async ({
     } else if (!(await isDue("retention", now))) {
       retention = { outcome: "not_due" };
     } else {
-      const { notProgressing } = await runSupportTriageRetention();
+      const { notProgressing, lastConnectionLoss } = await runSupportTriageRetention();
       if (notProgressing) {
         await reportOperationalIncident({
           code: "SUPPORT_TRIAGE_RETENTION_NOT_PROGRESSING",
           title: "Support triage rows past their retention are not being deleted",
           cooldownMs: INCIDENT_COOLDOWN_MS,
-          context: { component: "support-triage-cycle" },
+          context: { component: "support-triage-cycle", lastConnectionLoss: lastConnectionLoss ?? "none" },
         }).catch(() => undefined);
       }
       retention = { outcome: "ran", notProgressing };

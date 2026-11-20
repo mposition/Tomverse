@@ -1,4 +1,5 @@
 import {
+    asIsoTimestamp,
     emptyWarnings,
     isRecord,
     type ExternalConversationAdapter,
@@ -7,10 +8,22 @@ import {
 } from "@/lib/externalImportAdapters/types";
 
 /**
- * Perplexity thread export adapter (Markdown).
+ * Perplexity export adapter: the account data export (JSON) and the
+ * per-thread Markdown export.
  *
- * Perplexity has no account-wide conversation export. Each thread has its own
- * "Export -> Markdown", which writes one `.md` file:
+ * The account export (Settings -> data export, delivered as a ZIP) holds
+ * `conversations-<timestamp>.json`, an object whose `conversations` list has
+ * one thread per item:
+ *
+ *   { "context_uuid", "context_title", "created_at", "updated_at",
+ *     "entries": [{ "entry_uuid", "query", "answer", "created_at", ... }] }
+ *
+ * Each entry is one question and its answer, so nothing has to be split. The
+ * answer keeps its [n] citation marks, but the export carries no source list
+ * for them. The archive walker unwraps the object (conversationItemsOf); the
+ * user-data spreadsheet beside it is never opened.
+ *
+ * A single thread also has "Export -> Markdown", which writes one `.md` file:
  *
  *   <img src="https://r2cdn.perplexity.ai/pplx-full-logo-...png" .../>
  *
@@ -139,6 +152,15 @@ const truncateTitle = (question: string): string => {
  * two threads that merely asked the same first question do not. Hashed so the
  * conversation text itself is not used as an identifier.
  */
+/**
+ * Conversations read from a Markdown thread carry this id prefix. Only those
+ * can be split in the wrong place -- the account export's entries are already
+ * one question and one answer each -- so the preview's split notice keys on it.
+ */
+export const PERPLEXITY_MARKDOWN_ID_PREFIX = "perplexity-md-";
+export const isPerplexityMarkdownConversation = (id: string): boolean =>
+    id.startsWith(PERPLEXITY_MARKDOWN_ID_PREFIX);
+
 const lineageId = (question: string, answer: string): string => {
     const text = `${question}\n${answer}`.replace(/\s+/g, " ").trim();
     let a = 0x811c9dc5;
@@ -148,7 +170,7 @@ const lineageId = (question: string, answer: string): string => {
         a = Math.imul(a ^ code, 0x01000193) >>> 0;
         b = Math.imul(b ^ code, 0x5bd1e995) >>> 0;
     }
-    return `perplexity-md-${a.toString(16).padStart(8, "0")}${b.toString(16).padStart(8, "0")}`;
+    return `${PERPLEXITY_MARKDOWN_ID_PREFIX}${a.toString(16).padStart(8, "0")}${b.toString(16).padStart(8, "0")}`;
 };
 
 type Turn = { question: string; heading: string; body: string[] };
@@ -457,16 +479,86 @@ function cleanAnswer(body: readonly string[]): string {
     return answer;
 }
 
+/** One thread of the account export: a uuid and its list of Q&A entries. */
+const isAccountThread = (value: unknown): value is Record<string, unknown> =>
+    isRecord(value) &&
+    typeof value.context_uuid === "string" &&
+    Array.isArray(value.entries);
+
+const hasAccountEntry = (value: unknown): boolean =>
+    isAccountThread(value) &&
+    (value.entries as unknown[]).some(
+        (entry) => isRecord(entry) && typeof entry.query === "string" && "answer" in entry
+    );
+
+function parseAccountThread(thread: Record<string, unknown>): ParsedExternalConversation | null {
+    const threadId = thread.context_uuid as string;
+    if (!threadId.trim()) return null;
+    const warnings = emptyWarnings();
+    const messages: ParsedExternalMessage[] = [];
+    const push = (
+        role: "user" | "assistant",
+        raw: unknown,
+        id: string,
+        timestamp: string | null
+    ) => {
+        const content = typeof raw === "string" ? raw.trim() : "";
+        if (!content) {
+            warnings.skippedEmptyMessages += 1;
+            return;
+        }
+        messages.push({
+            rawExternalMessageId: id,
+            role,
+            ordinal: messages.length,
+            content,
+            // engine_mode ("pro", ...) is a search mode, not a model.
+            sourceModelLabel: null,
+            sourceTimestamp: timestamp,
+        });
+    };
+    (thread.entries as unknown[]).forEach((entry, index) => {
+        if (!isRecord(entry) || typeof entry.query !== "string") {
+            warnings.skippedUnrecognizedContent += 1;
+            return;
+        }
+        const entryId =
+            typeof entry.entry_uuid === "string" && entry.entry_uuid
+                ? entry.entry_uuid
+                : `${threadId}-entry-${index}`;
+        const at = asIsoTimestamp(entry.created_at);
+        push("user", entry.query, `${entryId}-query`, at);
+        push("assistant", entry.answer, `${entryId}-answer`, at);
+    });
+    if (messages.length === 0) return null;
+    const title =
+        typeof thread.context_title === "string" && thread.context_title.trim()
+            ? truncateTitle(thread.context_title)
+            : truncateTitle(messages.find((message) => message.role === "user")?.content ?? "");
+    return {
+        rawExternalConversationId: threadId,
+        title,
+        sourceModelLabels: [],
+        sourceCreatedAt: asIsoTimestamp(thread.created_at),
+        sourceUpdatedAt: asIsoTimestamp(thread.updated_at),
+        messages,
+        warnings,
+    };
+}
+
 export const perplexityAdapter: ExternalConversationAdapter = {
     provider: "perplexity",
 
     detect(value: unknown): boolean {
         if (!Array.isArray(value) || value.length === 0) return false;
+        // A thread can be empty, so a prefix is scanned for one with an entry.
+        if (value.slice(0, 100).some(hasAccountEntry)) return true;
         const text = markdownOf(value[0]);
         return text !== null && looksLikePerplexityExport(text);
     },
 
     parseConversation(entry: unknown): ParsedExternalConversation | null {
+        if (isAccountThread(entry)) return parseAccountThread(entry);
         const text = markdownOf(entry);
         if (text === null) return null;
         const turns = splitTurns(text, hintsOf(entry));

@@ -48,6 +48,8 @@ export type ChatImageTurnRequest = {
     assistantMessageId?: string;
     /** Review panels share one priced image group, with distinct answer ids. */
     comparison?: { id: string; index: number; modelIds: string[] };
+    /** The routing decision this turn answers, linked to its group by the server. */
+    routingDecisionId?: string;
 };
 
 export const chatImageTurnGroupKey = (answerId: string) =>
@@ -62,11 +64,12 @@ const TURN_PRESETS = ["draft", "standard", "final"] as const;
  */
 export const readChatImageTurnRequest = (value: unknown): ChatImageTurnRequest | null => {
     if (typeof value !== "object" || value === null) return null;
-    const { modelIds, preset, prompt, edit } = value as {
+    const { modelIds, preset, prompt, edit, routingDecisionId } = value as {
         modelIds?: unknown;
         preset?: unknown;
         prompt?: unknown;
         edit?: unknown;
+        routingDecisionId?: unknown;
     };
     if (!Array.isArray(modelIds)) return null;
     return {
@@ -77,5 +80,6 @@ export const readChatImageTurnRequest = (value: unknown): ChatImageTurnRequest |
                 : null,
         ...(typeof prompt === "string" && prompt.trim() ? { prompt: prompt.trim() } : {}),
         ...(edit === true ? { edit: true as const } : {}),
+        ...(typeof routingDecisionId === "string" && /^[a-z0-9]{20,40}$/.test(routingDecisionId) ? { routingDecisionId } : {}),
     };
 };

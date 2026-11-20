@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { after, beforeEach, test } from "node:test";
 
+import { observeOperationalIncidents, type ObservedOperationalIncident } from "@/lib/operationalMonitoring";
 import { prisma } from "@/lib/prisma";
 import {
   SUPPORT_TRIAGE_CYCLE_CADENCE_MS,
@@ -102,6 +103,33 @@ test("the cycle reports a stuck retention and never throws", async () => {
   // Off, but a run row is past its retention: retention still takes its turn.
   const result = await runSupportTriageCycleQuietly({ env: {} });
   assert.deepEqual(result, { worker: { outcome: "off" }, retention: { outcome: "ran", notProgressing: true } });
+});
+
+test("a failed run's incident carries the SQLSTATE, never the database's text", async () => {
+  await prisma.$executeRawUnsafe(`ALTER TABLE "SupportTriageRun" DISABLE TRIGGER "SupportTriageRun_before_insert"`);
+  try {
+    await prisma.$executeRawUnsafe(`
+      INSERT INTO "SupportTriageRun" ("id", "kind", "outcome", "createdAt", "deadlineAt", "finishedAt")
+      SELECT 'refused', 'worker', 'success', t.b, t.b, t.b
+        FROM (SELECT (clock_timestamp() AT TIME ZONE 'UTC') - interval '31 days' AS b) t`);
+  } finally {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "SupportTriageRun" ENABLE TRIGGER "SupportTriageRun_before_insert"`);
+  }
+  await prisma.$executeRawUnsafe(`CREATE FUNCTION test_cycle_slow_delete() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN IF OLD."id" = 'refused' THEN RAISE EXCEPTION 'row refused' USING ERRCODE = 'check_violation'; END IF;
+    RETURN OLD; END $$`);
+  await prisma.$executeRawUnsafe(`CREATE TRIGGER "test_cycle_slow_delete" BEFORE DELETE ON "SupportTriageRun"
+    FOR EACH ROW EXECUTE FUNCTION test_cycle_slow_delete()`);
+  const seen: ObservedOperationalIncident[] = [];
+  const stop = observeOperationalIncidents((incident) => seen.push(incident));
+  try {
+    const result = await runSupportTriageCycleQuietly({ env: {} });
+    assert.equal(result.retention.outcome, "failed");
+  } finally {
+    stop();
+  }
+  const failed = seen.find((incident) => incident.code === "SUPPORT_TRIAGE_CYCLE_FAILED");
+  assert.deepEqual(failed?.context, { component: "support-triage-cycle", kind: "retention", databaseCode: "23514" });
 });
 
 test("the panel's health is quiet until triage is used, then names the last runs and what is overdue", async () => {

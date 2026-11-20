@@ -950,6 +950,188 @@ test("native protocols over the real shared credit ledger", { skip: !databaseUrl
             assert.equal(routerCalls.length, before + 1);
             const [reservation] = await reservationsFor(userId);
             assert.equal((await receiptFor(reservation.id)).modelId, other.model.id, "the receipt names the routed model");
+            const native = await receiptFor(reservation.id);
+            assert.ok(["router", "continued", "default"].includes(native.routedBy), "the routing decision is on the receipt");
+            assert.match(native.routeConversation, /^[0-9a-f]{32}$/);
+        } finally {
+            routerPick = null;
+            delete process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED;
+        }
+    });
+
+    await t.test("Claude Code Smart Adaptive: a message the user wrote moves the conversation up, never down", async () => {
+        process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED = "true";
+        resetNativeSmartAdaptivePins();
+        const pool = [...(await providerPool("anthropic", "anthropic_messages"))].sort(
+            (a, b) => a.capabilities.creditWeight - b.capabilities.creditWeight
+        );
+        const cheap = pool[0];
+        const strong = pool.at(-1);
+        assert.ok(strong.capabilities.creditWeight > cheap.capabilities.creditWeight, "the fixture has a cheaper and a stronger model");
+        const userId = await newUser();
+        allow(userId);
+        const { key } = await issueKey(userId);
+        reply = ({ signal }) => streamResponse(anthropicStream(), {}, signal);
+        const session = { headers: { "x-claude-code-session-id": "sess-up" } };
+        const userTurn = (text, before = claudeTurn2().messages) =>
+            claudeTurn2({
+                messages: [
+                    ...before,
+                    { role: "assistant", content: [{ type: "text", text: "Done." }] },
+                    { role: "user", content: [{ type: "text", text }] },
+                ],
+            });
+        try {
+            routerPick = cheap.model.id;
+            const before = routerCalls.length;
+            const first = await claude(key, claudeBody({ model: "smart-adaptive" }), session);
+            await first.text();
+            assert.deepEqual(routed(first), [cheap.model.id, "router"]);
+            assert.equal(routerCalls.at(-1).coding.currentModelId, null);
+            assert.equal(routerCalls.at(-1).taskKind, "external_api");
+
+            // A tool round: the pin, no router call.
+            const round = await claude(key, claudeTurn2(), session);
+            await round.text();
+            assert.deepEqual(routed(round), [cheap.model.id, "continued"]);
+            assert.equal(routerCalls.length, before + 1);
+
+            // The user writes again and the router asks for more: it moves up.
+            routerPick = strong.model.id;
+            const harder = userTurn("It still fails. Redesign the parser.");
+            const up = await claude(key, harder, session);
+            await up.text();
+            assert.equal(up.status, 200);
+            assert.deepEqual(routed(up), [strong.model.id, "router"]);
+            assert.equal(sent.at(-1).body.model, strong.model.apiModel);
+            const asked = routerCalls.at(-1);
+            assert.equal(routerCalls.length, before + 2, "one router call for the user's message");
+            assert.equal(asked.coding.currentModelId, cheap.model.id);
+            assert.equal(asked.coding.lastToolResult, "ok");
+            assert.equal(asked.coding.toolCount, 1);
+            assert.equal(asked.prompt, "It still fails. Redesign the parser.");
+
+            // Pinned once admitted: the next tool round stays on it.
+            const next = await claude(key, claudeTurn2({ messages: [...harder.messages,
+                { role: "assistant", content: [{ type: "tool_use", id: "toolu_2", name: "Edit", input: { path: "src/parse.ts" } }] },
+                { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_2", content: "ok" }] }] }), session);
+            await next.text();
+            assert.deepEqual(routed(next), [strong.model.id, "continued"]);
+
+            // A cheaper pick on a later message keeps the stronger model.
+            routerPick = cheap.model.id;
+            const light = await claude(key, userTurn("Thanks, now write the commit message", harder.messages), session);
+            await light.text();
+            assert.deepEqual(routed(light), [strong.model.id, "continued"]);
+            assert.equal(routerCalls.length, before + 3);
+
+            // A new history on the same session (a Claude Code subagent) keeps
+            // the session's model and makes no router call.
+            const subagentBefore = routerCalls.length;
+            routerPick = cheap.model.id;
+            const subagent = await claude(key, claudeBody({ model: "smart-adaptive", messages: [{ role: "user", content: [{ type: "text", text: "Search the repo for parse()" }] }] }), session);
+            await subagent.text();
+            assert.deepEqual(routed(subagent), [strong.model.id, "continued"]);
+            assert.equal(routerCalls.length, subagentBefore);
+            routerPick = strong.model.id;
+
+            // Two identical requests for one message at once share one router call.
+            const twinsBefore = routerCalls.length;
+            routerDelayMs = 50;
+            const twinBody = userTurn("Explain the change", harder.messages);
+            const twins = await Promise.all([claude(key, twinBody, session), claude(key, twinBody, session)]);
+            await Promise.all(twins.map((response) => response.text()));
+            routerDelayMs = 0;
+            assert.equal(routerCalls.length, twinsBefore + 1, "one router call for both");
+            assert.deepEqual(twins.map((response) => routed(response)[0]), [strong.model.id, strong.model.id]);
+
+            // A user message with no pin (a restart) is routed like a first request.
+            resetNativeSmartAdaptivePins();
+            routerPick = strong.model.id;
+            const restarted = await claude(key, userTurn("Carry on"), session);
+            await restarted.text();
+            assert.deepEqual(routed(restarted), [strong.model.id, "router"]);
+            assert.equal(routerCalls.at(-1).coding.currentModelId, null);
+        } finally {
+            routerPick = null;
+            delete process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED;
+        }
+    });
+
+    await t.test("native Smart Adaptive pins a model only once admission accepted it", async () => {
+        process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED = "true";
+        resetNativeSmartAdaptivePins();
+        const pool = [...(await providerPool("anthropic", "anthropic_messages"))].sort(
+            (a, b) => a.capabilities.creditWeight - b.capabilities.creditWeight
+        );
+        const fallback = poolDefault(pool);
+        const strong = pool.at(-1);
+        assert.ok(strong.capabilities.creditWeight > fallback.capabilities.creditWeight);
+        reply = ({ signal }) => streamResponse(anthropicStream(), {}, signal);
+        // A key cap that covers the default model's hold but not the strong one's.
+        const probeUser = await newUser();
+        const userId = await newUser();
+        allow(userId, probeUser);
+        const { key: probeKey } = await issueKey(probeUser);
+        await (await claude(probeKey, claudeBody({ model: fallback.model.id }))).text();
+        const [probe] = await reservationsFor(probeUser);
+        const { key } = await issueKey(userId, { creditCap: probe.reservedCredits });
+        const session = { headers: { "x-claude-code-session-id": "sess-refused" } };
+        try {
+            routerPick = strong.model.id;
+            const refused = await claude(key, claudeBody({ model: "smart-adaptive" }), session);
+            await refused.text();
+            assert.equal(refused.status, 429, "the strong model's hold is beyond the key cap");
+            // Nothing was pinned: the next tool round is the default's, not the refused model's.
+            const round = await claude(key, claudeTurn2(), session);
+            await round.text();
+            assert.equal(round.status, 200);
+            assert.deepEqual(routed(round), [fallback.model.id, "default"]);
+        } finally {
+            routerPick = null;
+            delete process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED;
+        }
+    });
+
+    await t.test("Codex Smart Adaptive: a message the user wrote moves the thread up", async () => {
+        process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED = "true";
+        resetNativeSmartAdaptivePins();
+        const pool = [...(await providerPool("openai", "responses"))].sort(
+            (a, b) => a.capabilities.creditWeight - b.capabilities.creditWeight
+        );
+        const cheap = pool[0];
+        const strong = pool.at(-1);
+        assert.ok(strong.capabilities.creditWeight > cheap.capabilities.creditWeight, "the fixture has a cheaper and a stronger OpenAI model");
+        const userId = await newUser();
+        allow(userId);
+        const { key } = await issueKey(userId);
+        reply = ({ signal }) => streamResponse(responsesStream(), {}, signal);
+        const opening = [{ type: "message", role: "user", content: [{ type: "input_text", text: "Fix the test" }] }];
+        const thread = { prompt_cache_key: ["thread", "fixture", "up"].join("-") };
+        try {
+            routerPick = cheap.model.id;
+            const first = await codex(key, codexBody({ model: "smart-adaptive", ...thread, input: opening }));
+            await first.text();
+            assert.deepEqual(routed(first), [cheap.model.id, "router"]);
+            routerPick = strong.model.id;
+            const later = codexBody({
+                model: "smart-adaptive",
+                ...thread,
+                input: [
+                    ...opening,
+                    { type: "function_call", call_id: "c1", name: "shell_command", arguments: "{}" },
+                    { type: "function_call_output", call_id: "c1", output: "1 failed" },
+                    { type: "message", role: "assistant", content: [{ type: "output_text", text: "Tried a fix." }] },
+                    { type: "message", role: "user", content: [{ type: "input_text", text: "Still failing" }] },
+                ],
+            });
+            const up = await codex(key, later);
+            await up.text();
+            assert.deepEqual(routed(up), [strong.model.id, "router"]);
+            const asked = routerCalls.at(-1);
+            assert.equal(asked.coding.currentModelId, cheap.model.id);
+            assert.equal(asked.coding.lastToolResult, "1 failed");
+            assert.equal(asked.previousAnswer, "Tried a fix.");
         } finally {
             routerPick = null;
             delete process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED;

@@ -51,7 +51,7 @@ approvalTicket: N/A
 |---|---|---|
 | **A — Import** | ChatGPT·Claude 공식 export의 브라우저 파싱, 선택 대화의 정규화 저장, account-private read-only viewer, 삭제·export | Gemini, memory 추출·주입, 이어서 대화하기, password lock, 공유 링크, `Conversation` 변환 |
 | **A2 — Gemini Import** | Google Takeout `My Activity → Gemini Apps`의 JSON parser. **scope 승인됨 (2026-08-14, §23)** — 계약은 `docs/policy/external-import-gemini-a2.md`이며, 분기별 독립 대화·내용 형태 인식·중첩 아카이브 미해제·첨부 누락 표시가 그 핵심입니다. 승인은 **구현 착수까지**이고 production 활성화는 별도입니다 | HTML export, Gems, scheduled actions, 첨부 파일 복제 |
-| **A3 — Perplexity Import** | 스레드별 Markdown export(`.md`, 답변 아래 Export → Markdown) 하나를 한 대화로 읽는 parser(`lib/externalImportAdapters/perplexity.ts`). 출처 각주는 `[n]` 표시와 답변 끝 "Sources" 목록으로 보존합니다. 파일만으로 정할 수 없는 두 경계(여러 줄 질문이 어디서 끝나는지, 출처 없는 답변 뒤 `# ` 제목이 새 질문인지)는 각 질문과 그 주변 답변의 발췌(각 600자 이내)만 `/api/imports/external/perplexity-split`에 보내 모델(기본 `gpt-6-luna`, `EXTERNAL_IMPORT_PERPLEXITY_SPLIT_MODEL_ID`로 바꿔도 고지한 OpenAI 모델만)이 번호·예/아니오로 답하고, 원문은 그 번호대로 자릅니다(§11 예외, §16). 운영자 요청(2026-11-19 채팅)으로 구현하며 별도 scope token은 두지 않습니다(AGENTS.md Frontier 절). DB CHECK 확장 migration `20261119120000`이 함께 갑니다 | 공유 링크 Import(perplexity.ai는 서버 요청에 Cloudflare 봇 검사로 답해 가져올 수 없음), 계정 전체 일괄 export(Perplexity가 제공하지 않음), PDF·DOCX export, 첨부·이미지 |
+| **A3 — Perplexity Import** | 계정 데이터 export(설정 → 데이터 내보내기, 이메일로 받는 `.zip` 안의 `conversations-<시각>.json`, `{"conversations": [...]}` 객체)와 스레드별 Markdown export(`.md`, 답변 아래 Export → Markdown) 하나를 한 대화로 읽는 parser(`lib/externalImportAdapters/perplexity.ts`). 계정 export는 항목마다 질문 하나·답변 하나라 분리 판단이 필요 없고 모델 호출도 없습니다. 출처 목록은 들어 있지 않아 답변의 `[n]` 표시만 남습니다. 같은 zip의 `user-data-*.xlsx`는 열지 않습니다. 아래 나머지는 Markdown 경로입니다. 출처 각주는 `[n]` 표시와 답변 끝 "Sources" 목록으로 보존합니다. 파일만으로 정할 수 없는 두 경계(여러 줄 질문이 어디서 끝나는지, 출처 없는 답변 뒤 `# ` 제목이 새 질문인지)는 각 질문과 그 주변 답변의 발췌(각 600자 이내)만 `/api/imports/external/perplexity-split`에 보내 모델(기본 `gpt-6-luna`, `EXTERNAL_IMPORT_PERPLEXITY_SPLIT_MODEL_ID`로 바꿔도 고지한 OpenAI 모델만)이 번호·예/아니오로 답하고, 원문은 그 번호대로 자릅니다(§11 예외, §16). 운영자 요청(2026-11-19 채팅)으로 구현하며 별도 scope token은 두지 않습니다(AGENTS.md Frontier 절). DB CHECK 확장 migration `20261119120000`이 함께 갑니다 | 공유 링크 Import(perplexity.ai는 서버 요청에 Cloudflare 봇 검사로 답해 가져올 수 없음), PDF·DOCX export, 첨부·이미지 |
 | **B — 계정 장기 메모리** | 메모리 후보 추출·검토·승인, 서버 주도 retrieval·주입, context bundle, external conversation lock 일반화 + memory suspension | Assistant Profile, knowledge, 외부 embedding(§9a의 기본 꺼진 스위치 뒤 경로는 예외) |
 | **C — Assistant Profile** | private 프로필(지시문·모델·도구·memory 범위·지식 파일), 버전 고정, searchTerms 기반 knowledge RAG | public marketplace, 공유·판매, Actions, OAuth connector, 코드 실행, 외부 embedding(§9a의 기본 꺼진 스위치 뒤 경로는 예외) |
 
@@ -2327,7 +2327,11 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
   lexical이므로 의미 검색 품질에 한계가 있습니다. 의미 검색은 §9a의 기본 꺼진
   스위치 뒤에 구현돼 있고(2026-11-12), 켜는 것이 별도 승인입니다.
 - 모바일 대형 archive Import는 데스크톱 권장으로 제한됩니다.
-- Perplexity는 스레드마다 `.md` 파일 하나를 올립니다(한 번에 한 스레드). export에
+- Perplexity 계정 export(zip)는 스레드 id(`context_uuid`)와 항목별 시각을 그대로 쓰고, 모델명은
+  없습니다(`engine_mode`는 검색 모드라 모델 표시로 쓰지 않습니다). 출처 목록이 없어 `[n]` 표시만
+  남습니다. 같은 스레드를 계정 export와 `.md`로 각각 가져오면 id 체계가 달라 서로 다른 대화로
+  저장됩니다.
+- Perplexity `.md`는 스레드마다 파일 하나를 올립니다(한 번에 한 스레드). export에
   시각·모델명이 없어 출처 시각과 모델 표시는 비어 있습니다. lineage는 첫 질문과 첫
   답변의 hash(파일 분리 기준)라 같은 스레드의 재-export만 묶입니다. 턴 경계는 `---` 뒤
   `# ` 제목이며, 답변 안의 같은 모양은 답변 끝 각주 정의의 턴 번호(`[^턴_n]:`)로 되돌립니다.

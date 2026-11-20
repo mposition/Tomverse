@@ -171,6 +171,11 @@ commit하므로, 이 판정은 실수와 우회를 잡지만 자격증명 도용
   하루 능력 48회 × 8배치 = 384배치는 **성공 배치 수가 아니라 시작할 수 있는 배치 수**이고, abort된 배치도 이 수를 쓴다. 바닥 요구 21을 빼고 남는 363배치가 abort 여유다. 이 산수는 부류별 DELETE 문장이 `statement_timeout`(400ms) 안에, 배치 하나가 `C_guarded`(10.3초) 안에 끝난다는 **측정되지 않은 전제** 위에 있다. 그래서 "삭제 기한을 맞춘다"는 두 번 확인한다. **(1) P1 착수 전, staging 부하 시험** — P1 전에는 triage flag가 꺼져 production에 지울 행이 없으므로, staging에 8절의 하루 유도 상한만큼(suggestion 2,600행과 run 104행) **보존 기한이 이미 지난 행**을 seed하고 예정 회차를 24시간 돌려 (a) `batchesCompleted = 0 AND overdueRemaining > 0`으로 끝난 회차 0회, (b) 24시간 뒤 `overdueRemaining = 0`, (c) `oldestOverdueAgeSeconds` 최대 86,400초 미만, (d) abort된 배치 수 ≤ 363을 기록한다. 밀린 행을 다 비운 뒤의 배치 0 회차는 실패가 아니다. **(2) P1d 착수 전, production 7일 관측** — 같은 (a)~(c)를 실제 부하로 다시 보고, (d)는 **UTC 하루 단위**로 그 7일 각각에서 abort된 배치 수 ≤ 363을 본다. 어느 쪽이든 실패하면 원인이 처리량인지 독성 행인지 먼저 가르고, 처리량이면 배치 크기와 `C_guarded`를 다시 측정해 이 정책의 새 버전으로 고친다.
 - 한 배치가 `statement_timeout`으로 abort되면 다음 배치 크기를 500 → 250 → 125로 줄인다. 바닥에서 같은 회차에
   두 번 abort되면 커서를 그 창 너머로 전진시키고 `blocked`를 센다. 건너뛴 행은 다음 회차가 다시 시도한다.
+- 배치의 세션을 잃으면(150ms idle timeout `25P03`, 연결 종료, pool이 연결을 못 내줌 —
+  `lib/amux/readFailureCore.ts`의 일시 오류 목록) 행 탓이 아니므로 커서·크기·strike를 건드리지 않고 같은 창을
+  다음 배치로 다시 시도한다. 배치 계수기와 예산이 재시도 횟수를 막는다. COMMIT이 실제로는 반영됐을 수 있지만, 다음
+  창 읽기가 남은 행만 보므로 다시 시도하는 것이 곧 확인이다. 모든 배치가 세션을 잃은 회차는 완료 배치가 0이라 아래
+  진행 실패 조건에 걸린다(2026-11-20).
 - **지워지지 않는 행은 수용 대상이 아니라 경보다.** 어떤 행이 자기 삭제 기한을 24시간 넘기면
   (`RETENTION_OVERDUE_GRACE = 86,400초`, `oldestOverdueAgeSeconds > 86,400`) heartbeat가 연다(7절).
 - 회차가 `batchesCompleted = 0 AND overdueRemaining > 0`으로 끝나거나 위 기한 조건에 걸리면 retention route가
@@ -198,7 +203,7 @@ commit하므로, 이 판정은 실수와 우회를 잡지만 자격증명 도용
 - **지연 판정의 retention 세 조건**: (1) liveness — 기대 주기 30분, 임계 80분, (2) progress 단발 — 최근 종료 행이
   `batchesCompleted = 0 AND overdueRemaining > 0`, (3) progress 기한 — `oldestOverdueAgeSeconds > 86,400`.
   worker에도 liveness 조건이 있다.
-- 회차가 실패하거나 보존이 진행하지 못하면 운영 경보(`SUPPORT_TRIAGE_CYCLE_FAILED`, `SUPPORT_TRIAGE_RETENTION_NOT_PROGRESSING`)가 오류 이름만 담아 나간다. cron 자체가 멈추면 기존 cron 감시가 잡고, 패널의 지연 경고는 triage가 켜졌거나 지울 제안이 남은 동안에만 판정한다.
+- 회차가 실패하거나 보존이 진행하지 못하면 운영 경보(`SUPPORT_TRIAGE_CYCLE_FAILED`, `SUPPORT_TRIAGE_RETENTION_NOT_PROGRESSING`)가 오류 이름과 DB 오류 코드(SQLSTATE, 연결 종류나 Prisma 코드 — 오류 문구는 담지 않는다)만 담아 나간다. 모든 운영 경보 본문에는 배포 환경 이름이 붙는다. cron 자체가 멈추면 기존 cron 감시가 잡고, 패널의 지연 경고는 triage가 켜졌거나 지울 제안이 남은 동안에만 판정한다.
 
 ## 8. 수치 상한과 감사량
 

@@ -1288,6 +1288,20 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "The grouping that makes the groupId in image_generations resolvable, and nothing else. The group idempotency key is a client-supplied deduplication token.",
   },
   {
+    domain: "imageRoutingDecision",
+    publicName: "image_routing_decisions",
+    prismaModel: "ImageRoutingDecision",
+    state: "included_filtered",
+    withheldReason:
+      "How Chat chose to answer a message with an image: where the choice was made, the outcome, the image model and preset, and the image group it started. Withheld: the router model id, candidate count and latency, which describe the service rather than the person. No message or prompt text is stored.",
+  },
+  {
+    domain: "imageGenerationSignal",
+    publicName: "image_feedback",
+    prismaModel: "ImageGenerationSignal",
+    state: "included",
+  },
+  {
     domain: "refundRequest",
     publicName: "refund_requests",
     prismaModel: "RefundRequest",

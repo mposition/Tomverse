@@ -943,6 +943,10 @@ run(
     // An operator's status for a cycle's code and setting recommendations:
     // stored in the summary with its audit entry, never losing a concurrent one.
     "tests/integration/auto-router-optimizer-recommendations.db.test.ts",
+    // Its coding cycles (lib/autoCodingRouterOptimizer.ts): the third target
+    // in the same table, lock and caps, promotion into the coding guidance
+    // only, and the daily switch's default.
+    "tests/integration/auto-router-optimizer-coding.db.test.ts",
     "tests/integration/smart-adaptive-daily.db.test.ts",
     // Excluding a discovered model and reviewing it again: the structured
     // decision record, a rescan that leaves the exclusion alone, and the
@@ -1139,6 +1143,16 @@ run(
     "--test-concurrency=1",
     "tests/integration/tomverse-cli.db.test.mjs"],
   "Running the Tomverse CLI receipt, cost, cap, revocation and process scenarios over the real gateway",
+);
+// A coding optimizer cycle's run over the real cycle table and provider spend:
+// the router, the task evaluation's agent runs and the cycle proper's calls
+// are module mocks, so it has its own process.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1",
+    "tests/integration/auto-router-optimizer-coding-run.db.test.mjs"],
+  "Running the coding optimizer cycle's isolation gate, unknown-cost stops and evaluation spend",
 );
 // The native protocols (Claude Code Messages, Codex Responses) fake only the
 // one upstream module and run on the same ledger, key cap and receipts.
@@ -1494,6 +1508,43 @@ run(
     "tests/integration/image-billing-measurement.db.test.ts",
   ],
   "Running the image billing measurement scenarios"
+);
+// What a person did with a generated image (download, chosen, helpful, not
+// helpful, wanted text): one row per kind, ownership in the write, the two
+// opposing verdicts replacing each other, one chosen result per comparison.
+run(
+  [
+    "--conditions=react-server",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/image-generation-signals.db.test.ts",
+  ],
+  "Running the image generation signal scenarios"
+);
+// The image routing optimizer (lib/imageRoutingOptimizer.ts): its target in
+// the shared cycle table, promotion into the image criteria only, its
+// automation default and the routing decision records.
+run(
+  [
+    "--conditions=react-server",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/image-routing-optimizer.db.test.ts",
+  ],
+  "Running the image routing optimizer promotion, automation and decision scenarios"
+);
+// An image routing cycle's run: the routing call, the optimizer model and the
+// image evaluation are module mocks, so it has its own process.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1",
+    "tests/integration/image-routing-optimizer-run.db.test.mjs"],
+  "Running the image routing cycle's intent gate, unknown-cost stops and image budget booking"
 );
 // The weekly production-to-staging/dev catalogue copy: references land on this
 // environment's ids, the sync actor's audit entry, and a price revision an

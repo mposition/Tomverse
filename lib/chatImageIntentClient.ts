@@ -53,5 +53,6 @@ export async function askChatImageTurn(
         preset: decision.preset,
         ...(decision.prompt ? { prompt: decision.prompt } : {}),
         ...(decision.edit ? { edit: true as const } : {}),
+        ...(decision.routingDecisionId ? { routingDecisionId: decision.routingDecisionId } : {}),
     };
 }

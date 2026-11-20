@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { prepareGuestPage } from "./support/app-fixtures";
 import { layoutBox } from "./support/engine-capabilities";
 import { reviewPageContent } from "@/components/marketing/v2/review/reviewPageContent";
+import { reviewDemoVideo } from "@/components/marketing/v2/reviewDemoVideo";
 
 /**
  * The answer comparison page's product evidence (/products/review, V2).
@@ -37,11 +38,23 @@ test.describe("answer comparison product evidence", () => {
     expect(label!.toLowerCase()).not.toContain("screenshot");
     expect(label!.toLowerCase()).not.toContain(".mp4");
     expect(label!.length).toBeGreaterThan(30);
-    await expect(demo(page)).toHaveAttribute("poster", "/marketing/v2/review-demo.jpg");
+    await expect(demo(page)).toHaveAttribute("poster", reviewDemoVideo("en").poster);
 
     // The old div mock-up and the old hero captures are not allowed back.
     await expect(page.getByTestId("landing-hero-product-demo")).toHaveCount(0);
     await expect(page.locator("main picture")).toHaveCount(0);
+  });
+
+  test("plays the recording made in the page language", async ({ page }) => {
+    // The demo shows the app chrome and the demo answers; a Korean recording
+    // under a Chinese page reads as a broken translation.
+    await prepareGuestPage(page, "zh");
+    await page.goto("/zh/products/review");
+    await expect(page.getByTestId("review-product-title")).toBeVisible();
+    await expect(demo(page)).toHaveAttribute("src", reviewDemoVideo("zh").src);
+    await expect(demo(page)).toHaveAttribute("poster", reviewDemoVideo("zh").poster);
+    expect(reviewDemoVideo("zh").src).toBe("/marketing/v2/review-demo-zh.mp4");
+    expect(reviewDemoVideo("ko").src).toBe("/marketing/v2/review-demo.mp4");
   });
 
   test("the recording reserves its space before it loads", async ({ page }) => {

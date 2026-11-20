@@ -448,6 +448,10 @@ test("external inference API over the real shared credit ledger", { skip: !datab
             assert.ok(routerCalls[0].models.length > routerCalls[0].eligibleModelIds.length, "the router model is looked up among all runtime models");
             const receipt = await db.externalApiRequest.findFirst({ where: { userId }, orderBy: { createdAt: "desc" } });
             assert.equal(receipt.modelId, SECOND, "the receipt and the charge are the routed model's");
+            // The routing decision is on the receipt, content-free, for the coding routing report.
+            assert.equal(receipt.routedBy, "router");
+            assert.equal(receipt.routedHeld, false);
+            assert.match(receipt.routeConversation, /^[0-9a-f]{32}$/);
 
             // The tool round goes to the model that made the call: no router call.
             routerPick = MODEL_ID;
@@ -541,6 +545,27 @@ test("external inference API over the real shared credit ledger", { skip: !datab
             assert.equal(next.headers.get("x-tomverse-routed-model"), MODEL_ID);
             assert.equal(routerCalls.length, 2);
             assert.equal(routerCalls[1].previousAnswer, "Done.");
+            assert.equal(routerCalls[1].taskKind, "external_api");
+            assert.equal(routerCalls[1].coding.currentModelId, stranger.headers.get("x-tomverse-routed-model"), "the model last admitted on this conversation (same opening)");
+            assert.equal(routerCalls[1].coding.modelTurns, 1);
+
+            // Within a conversation the model only moves up.
+            const credits = routerCalls[0].creditsByModelId;
+            const STRONG = Object.keys(credits)
+                .filter((id) => credits[id] > credits[SECOND])
+                .sort((a, b) => credits[b] - credits[a])[0];
+            assert.ok(STRONG, "the fixture has a candidate dearer than SECOND");
+            const task = { role: "user", content: "Design the cache layer" };
+            routerPick = STRONG;
+            const strong = await call(key, body({ model: "smart-adaptive", messages: [task] }));
+            assert.equal(strong.headers.get("x-tomverse-routed-model"), STRONG);
+            routerPick = SECOND;
+            const held = await call(key, body({ model: "smart-adaptive", messages: [task, { role: "assistant", content: "Plan." }, { role: "user", content: "Rename it" }] }));
+            assert.equal(held.headers.get("x-tomverse-routed-model"), STRONG, "a cheaper pick keeps the conversation's model");
+            assert.equal(held.headers.get("x-tomverse-routed-by"), "continued");
+            assert.equal(routerCalls.at(-1).coding.currentModelId, STRONG);
+            const other = await call(key, body({ model: "smart-adaptive", messages: [{ role: "user", content: "Unrelated question" }] }));
+            assert.equal(other.headers.get("x-tomverse-routed-model"), SECOND, "another conversation routes freely");
 
             // An image: only models that read images are candidates.
             routerPick = SECOND;

@@ -33,7 +33,9 @@ export const writeAutoRouterOptimizerSystemAudit = (
         action:
             | "auto.llm_router_optimizer.cycle_started"
             | "auto.llm_router_guidance.promoted"
-            | "auto.llm_router_rewrite_guidance.promoted";
+            | "auto.llm_router_rewrite_guidance.promoted"
+            | "auto.llm_router_coding_guidance.promoted"
+            | "auto.llm_router_image_guidance.promoted";
         targetId: string;
         summary: string;
         metadata: Prisma.InputJsonObject;

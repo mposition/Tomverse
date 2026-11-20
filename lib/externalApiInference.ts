@@ -49,6 +49,7 @@ import {
     parseChatCompletionRequest,
     PROTOCOL_LIMITS,
     ProtocolError,
+    requestReasoningEffort,
     resolveRequestOptions,
     SSE_DONE,
     sseData,
@@ -264,12 +265,18 @@ export async function handleChatCompletions(request: Request): Promise<Response>
         const { plan } = account;
         // The tomverse CLI's channel, or the API's (read only while the coding
         // catalogue's external channels are switched on).
+        // Smart Adaptive's pool also holds the classes only it routes to
+        // (frontier, apex); a model named directly comes from the narrower list.
         const runnable = await externalApiRunnableModels(plan.tier, {
             channel: externalApiChannelFor(request.headers.get("user-agent")),
+            smartAdaptive: parsed.model === SMART_ADAPTIVE_MODEL_ID,
         });
         // Smart Adaptive: Tomverse picks one of the runnable models, and the
         // response says which one answered (the `model` field and a header).
         let routedHeaders: Record<string, string> = {};
+        // Remembers the routed model for the conversation once admission accepts it.
+        let rememberRouted: (() => void) | undefined;
+        let routing: { routedBy: "router" | "continued" | "default"; held: boolean; conversation: string } | undefined;
         // A Tomverse id, or the provider's own id for exactly one offered model.
         const picked = parsed.model === SMART_ADAPTIVE_MODEL_ID ? null : pickRequestedModel(runnable, parsed.model);
         if (picked && "ambiguous" in picked) {
@@ -291,8 +298,11 @@ export async function handleChatCompletions(request: Request): Promise<Response>
                 routerAllowed: () => smartAdaptiveRouterAllowed(key),
                 idempotencyKeyDigest,
                 requestDigest,
+                userAgent: request.headers.get("user-agent"),
             });
             entry = routed.entry;
+            rememberRouted = routed.remember;
+            routing = { routedBy: routed.routedBy, held: routed.held ?? false, conversation: routed.conversationDigest };
             routedHeaders = { "x-tomverse-routed-model": entry.model.id, "x-tomverse-routed-by": routed.routedBy };
         }
         if (!entry) {
@@ -318,6 +328,7 @@ export async function handleChatCompletions(request: Request): Promise<Response>
         };
         const options = resolveRequestOptions(parsed, view);
         const converted = convertChatCompletionRequest(parsed, view);
+        const reasoning = requestReasoningEffort(parsed, view);
 
         const settings = getModelGenerationSettings(model, {
             temperature: parsed.temperature ?? undefined,
@@ -342,7 +353,8 @@ export async function handleChatCompletions(request: Request): Promise<Response>
                 : (["temperature", "top_p", "frequency_penalty", "presence_penalty"] as const).filter(
                       (param) => parsed[param] != null
                   )),
-            ...(parsed.reasoning?.summary != null ? ["reasoning.summary"] : []),
+            ...(parsed.ignoredParameters ?? []),
+            ...reasoning.ignored,
         ];
         const infoHeaders: Record<string, string> = {
             ...routedHeaders,
@@ -359,7 +371,7 @@ export async function handleChatCompletions(request: Request): Promise<Response>
                       openai: {
                           ...(baseOptions.openai ?? {}),
                           store: false,
-                          ...(parsed.reasoning_effort != null ? { reasoningEffort: parsed.reasoning_effort } : {}),
+                          ...(reasoning.effort != null ? { reasoningEffort: reasoning.effort } : {}),
                       },
                   }
                 : settings.providerOptions;
@@ -411,6 +423,7 @@ export async function handleChatCompletions(request: Request): Promise<Response>
                     clientName,
                     requestDigest,
                     idempotencyKeyDigest,
+                    routing,
                 }),
             });
         } catch (error) {
@@ -431,6 +444,7 @@ export async function handleChatCompletions(request: Request): Promise<Response>
         }
         leaseId = grant.leaseId;
         reservation = grant.usageReservation;
+        rememberRouted?.();
 
         const tools: ToolSet = Object.fromEntries(
             converted.tools.map((definition) => [

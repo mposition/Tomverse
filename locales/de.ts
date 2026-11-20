@@ -391,6 +391,12 @@ export const de = {
         imageTurnGenerating: "Bild wird erstellt…",
         imageTurnFailed: "Das Bild konnte nicht erstellt werden. Bitte versuchen Sie es erneut.",
         imageTurnRetry: "Erneut versuchen",
+        imageSignalHelpful: "Das Bild gefällt mir",
+        imageSignalNotHelpful: "Das Bild trifft es nicht",
+        imageSignalWantedText: "Ich wollte eine Textantwort",
+        imageSignalGroupLabel: "Feedback zu diesem Bild",
+        imageSignalSelect: "Dieses Ergebnis wählen",
+        imageSignalSelected: "Gewählt",
         responseComplete: "Antwort abgeschlossen.",
         responseIncomplete: "Die Antwort wurde durch das Ausgabelängenlimit beendet.",
         responseIncompleteNotice: "Die Antwort wurde durch das Ausgabelängenlimit abgeschnitten. Mit einer Anschlussfrage können Sie fortfahren.",
@@ -1556,7 +1562,7 @@ export const de = {
         capacityConversations: "{used} von {limit} importierten Unterhaltungen",
         selectFile: "Exportdatei auswählen",
         selectFileHint:
-            "Datenexport von ChatGPT, Claude oder Gemini (.zip oder .json) oder ein als Markdown (.md) exportierter Perplexity-Thread, bis zu 1 GB. Für Gemini wird der JSON-Export von Meine Aktivitäten → Gemini-Apps aus Google Takeout benötigt. Große Archive sind kein Problem — Mediendateien werden übersprungen, ohne gelesen zu werden. Bei einer Perplexity-Datei werden kurze Auszüge jeder Frage und des umgebenden Antworttexts (je höchstens 600 Zeichen) an ein KI-Modell (OpenAI) gesendet, um zu erkennen, wo jede Frage endet.",
+            "Datenexport von ChatGPT, Claude, Gemini oder Perplexity (.zip oder .json) oder ein als Markdown (.md) exportierter Perplexity-Thread, bis zu 1 GB. Für Gemini wird der JSON-Export von Meine Aktivitäten → Gemini-Apps aus Google Takeout benötigt. Große Archive sind kein Problem — Mediendateien werden übersprungen, ohne gelesen zu werden. Bei einer Perplexity-Datei werden kurze Auszüge jeder Frage und des umgebenden Antworttexts (je höchstens 600 Zeichen) an ein KI-Modell (OpenAI) gesendet, um zu erkennen, wo jede Frage endet.",
         parsing: "Export wird in Ihrem Browser gelesen…",
         parsingProgress: "{conversations} Unterhaltungen gefunden",
         cancel: "Abbrechen",
@@ -1694,10 +1700,10 @@ export const de = {
             "Wählen Sie Meine Aktivitäten, darin Gemini-Apps, und stellen Sie das Format auf JSON — das Produkt Gemini enthält Gems, keine Unterhaltungen",
         guideGeminiStep3:
             "Exportieren und die .zip hochladen, sobald Google den Download-Link sendet",
-        guidePerplexityTitle: "Perplexity-Thread exportieren",
-        guidePerplexityStep1: "Öffnen Sie in Perplexity den Thread, den Sie übernehmen möchten",
-        guidePerplexityStep2: "Tippen Sie unter einer Antwort auf Exportieren und wählen Sie Markdown",
-        guidePerplexityStep3: "Laden Sie die .md-Datei hoch. Eine Datei ist ein Thread, und die Quellenlinks der Antworten kommen mit. Um zu erkennen, wo jede Frage endet, werden kurze Auszüge jeder Frage und des umgebenden Antworttexts (je höchstens 600 Zeichen) an ein KI-Modell (OpenAI) gesendet.",
+        guidePerplexityTitle: "Perplexity-Daten exportieren",
+        guidePerplexityStep1: "Fordern Sie in den Perplexity-Einstellungen einen Datenexport an. Die Suche nach „data“ in den Einstellungen findet ihn",
+        guidePerplexityStep2: "Laden Sie die erhaltene .zip-Datei unverändert hoch. Sie enthält alle Threads. Eine Quellenliste fehlt darin, daher behalten die Antworten nur Marken wie [1]",
+        guidePerplexityStep3: "Für einen einzelnen Thread laden Sie stattdessen die .md-Datei aus Exportieren → Markdown unter einer Antwort hoch. Diese Datei bringt auch die Quellenlinks mit. Um zu erkennen, wo jede Frage endet, werden kurze Auszüge jeder Frage und des umgebenden Antworttexts (je höchstens 600 Zeichen) an ein KI-Modell (OpenAI) gesendet.",
         guideFormats:
             "ZIP- und JSON-Dateien werden unterstützt, außerdem Markdown-Dateien (.md) von Perplexity. Ein Gemini-Export muss im JSON-Format vorliegen — HTML kann nicht gelesen werden.",
         guideStaysLocal:

@@ -9,6 +9,11 @@
 .dark .review-analysis-actions { background:#18181b; border-color:#3f3f46; color:#f4f4f5; }
 .dark .review-analysis-action-note { color:#a1a1aa; }
 .dark .review-analysis-actions button { border-color:#52525b; }
+@media (prefers-color-scheme:dark) {
+  html:not(.light) .review-analysis-actions { background:#18181b; border-color:#3f3f46; color:#f4f4f5; }
+  html:not(.light) .review-analysis-action-note { color:#a1a1aa; }
+  html:not(.light) .review-analysis-actions button { border-color:#52525b; }
+}
 @media (max-width:768px) {
   .review-quick-summary-panel.review-quick-summary-panel { overflow-y:auto; }
   .review-quick-summary-body.review-quick-summary-body { flex:0 0 auto; overflow:visible; }

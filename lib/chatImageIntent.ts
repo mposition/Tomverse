@@ -14,11 +14,14 @@ import {
     readAutoLlmRouterModelId,
 } from "@/lib/autoLlmRouterSettings";
 import { callCostMicroUsd } from "@/lib/autoRouterOptimizerCore";
+import { readActiveRouterGuidance } from "@/lib/autoLlmRouterGuidance";
+import { recordImageRoutingDecision } from "@/lib/imageRoutingDecisions";
+import type { ImageRoutingDecisionSource } from "@/lib/imageRoutingCore";
 import {
     CHAT_IMAGE_INTENT_FOLLOW_UP_TIMEOUT_MS,
     CHAT_IMAGE_INTENT_MAX_OUTPUT_TOKENS,
-    CHAT_IMAGE_INTENT_SYSTEM,
     CHAT_IMAGE_INTENT_TIMEOUT_MS,
+    buildChatImageIntentSystem,
     chatImageIntentOutputSchema,
     chatImageIntentPrompt,
     chatImageIntentUserMessage,
@@ -140,11 +143,17 @@ type ChatImageRequestInput = {
      * it, among the models that can, and never asks without the edit switch.
      */
     attachedPhoto?: boolean;
+    /** Where the decision is made, for its content-free record (lib/imageRoutingDecisions.ts). */
+    source?: ImageRoutingDecisionSource;
 };
 
 type PreparedChatImageIntent = ChatImageIntentContext & {
     model: AiModel;
     prices: { inputUsdPerMillionTokens: number; outputUsdPerMillionTokens: number };
+    /** The standalone call's instructions, with the criteria in force. */
+    system: string;
+    /** Who the decision is recorded for, or null when it is not recorded. */
+    record: { userId: string; conversationId: string | null; source: ImageRoutingDecisionSource } | null;
 };
 
 async function prepareChatImageRequest(input: ChatImageRequestInput): Promise<PreparedChatImageIntent | null> {
@@ -208,11 +217,17 @@ async function prepareChatImageRequest(input: ChatImageRequestInput): Promise<Pr
             ? await readPreviousImagePrompt(input.userId, input.conversationId, input.request)
             : null;
     const prompt = chatImageIntentUserMessage(input.text, candidates, previous, attachedPhoto);
+    // The criteria in force: a promoted image cycle's, or the code default.
+    const criteria = (await readActiveRouterGuidance(prisma, "image")).guidance;
+    const system = buildChatImageIntentSystem({ criteria });
+    const record = input.userId && input.source
+        ? { userId: input.userId, conversationId: input.conversationId ?? null, source: input.source }
+        : null;
     const maxOutputTokens = CHAT_IMAGE_INTENT_MAX_OUTPUT_TOKENS;
     const timeoutMs = previous
         ? CHAT_IMAGE_INTENT_FOLLOW_UP_TIMEOUT_MS
         : CHAT_IMAGE_INTENT_TIMEOUT_MS;
-    return { model, modelId: model.id, prices, candidates, previousImagePrompt: previous, attachedPhoto, prompt, message: chatImageIntentPrompt(input.text), maxOutputTokens, timeoutMs };
+    return { model, modelId: model.id, prices, candidates, previousImagePrompt: previous, attachedPhoto, prompt, message: chatImageIntentPrompt(input.text), maxOutputTokens, timeoutMs, criteria, system, record };
 }
 
 export async function detectChatImageRequest(input: ChatImageRequestInput): Promise<ChatImageDecision> {
@@ -220,10 +235,19 @@ export async function detectChatImageRequest(input: ChatImageRequestInput): Prom
     return prepared ? runPreparedChatImageRequest(prepared, input.traceId) : NOT_IMAGE;
 }
 
-async function runPreparedChatImageRequest(prepared: PreparedChatImageIntent, traceId: string): Promise<ChatImageDecision> {
-    const { model, prices, candidates, previousImagePrompt: previous, attachedPhoto, prompt, maxOutputTokens, timeoutMs } = prepared;
+/**
+ * `onAnswered` hears the outcome once the call has answered and says whether
+ * this call records it. A combined turn's fallback records nothing: the route
+ * records the one decision the turn follows (createChatTurnImageRouting).
+ */
+async function runPreparedChatImageRequest(
+    prepared: PreparedChatImageIntent,
+    traceId: string,
+    onAnswered: (outcome: "image" | "chat" | "error") => boolean = () => true
+): Promise<ChatImageDecision> {
+    const { model, prices, candidates, previousImagePrompt: previous, attachedPhoto, prompt, maxOutputTokens, timeoutMs, system } = prepared;
     const worstCase = autoLlmRouterWorstCaseMicroUsd({
-        system: CHAT_IMAGE_INTENT_SYSTEM,
+        system,
         prompt,
         maxOutputTokens,
         ...prices,
@@ -247,7 +271,7 @@ async function runPreparedChatImageRequest(prepared: PreparedChatImageIntent, tr
     try {
         const generated = await generateText({
             model: getActiveAiModel(model),
-            system: CHAT_IMAGE_INTENT_SYSTEM,
+            system,
             prompt,
             maxOutputTokens,
             maxRetries: 0,
@@ -299,6 +323,19 @@ async function runPreparedChatImageRequest(prepared: PreparedChatImageIntent, tr
             latencyMs: Date.now() - startedAt,
         })
     );
+    if (onAnswered(outcome) && prepared.record) {
+        const id = await recordImageRoutingDecision({
+            ...prepared.record,
+            routerModelId: model.id,
+            decision,
+            outcome,
+            followUp: decision.image ? decision.prompt !== null : false,
+            attachedPhoto,
+            candidateCount: candidates.length,
+            latencyMs: Date.now() - startedAt,
+        });
+        if (id && decision.image) decision = { ...decision, routingDecisionId: id };
+    }
     return decision;
 }
 
@@ -336,6 +373,7 @@ async function prepareChatTurnImage(input: ChatTurnImageInput): Promise<Prepared
             conversationId: input.conversationId,
             request: input.request,
             attachedPhoto: input.attachedPhoto,
+            source: "auto_chat",
         });
     } catch {
         // A routing aid must not fail the turn; the turn is then chat.
@@ -375,13 +413,30 @@ export const chatRouterImageHedgeMs = (raw = process.env.CHAT_ROUTER_IMAGE_HEDGE
 export function createChatTurnImageRouting(input: ChatTurnImageInput | null, combined: boolean, savedDecision?: ChatImageDecision) {
     const prepared = input && (combined || savedDecision?.image) ? prepareChatTurnImage(input) : undefined;
     let decision: ChatImageDecision | undefined;
+    let fallbackOutcome: "image" | "chat" | "error" | null = null;
     let fallback = !input || savedDecision ? Promise.resolve(NOT_IMAGE)
         : !combined ? detectChatTurnImage(input) : undefined;
     const startFallback = () => fallback ??= prepared!.then(value => value
-        ? runPreparedChatImageRequest(value, input!.traceId) : NOT_IMAGE).catch(() => NOT_IMAGE);
+        ? runPreparedChatImageRequest(value, input!.traceId, (outcome) => {
+            fallbackOutcome = outcome;
+            return !combined;
+        }) : NOT_IMAGE).catch(() => {
+            fallbackOutcome = "error";
+            return NOT_IMAGE;
+        });
     return {
         context: combined ? prepared : undefined,
         accept: (value: ChatImageDecision) => { decision = value; },
+        /**
+         * On a combined turn not resumed from a saved decision, the outcome the
+         * route records for the decision the turn follows (the router's, or the
+         * fallback's when the router gave none); null when nothing records here.
+         */
+        combinedOutcome: (): "image" | "chat" | "error" | null => {
+            if (!combined || savedDecision) return null;
+            if (decision !== undefined) return decision.image ? "image" : "chat";
+            return fallbackOutcome;
+        },
         /**
          * Starts the separate image classification now, while the combined
          * router call is still running, so a router that then times out does
@@ -407,4 +462,49 @@ export function createChatTurnImageRouting(input: ChatTurnImageInput | null, com
             return startFallback();
         },
     };
+}
+
+/**
+ * One image routing call as the live router makes it, with the criteria given
+ * and nothing recorded: the image optimizer (lib/imageRoutingOptimizer.ts)
+ * replays its synthetic messages through it. Same instructions, candidates,
+ * output schema and parse as a live call; no previous image, no photo. Paid
+ * to the router model's provider; the caller counts the usage. Never throws.
+ */
+export async function probeChatImageRouting(input: {
+    model: AiModel;
+    criteria: string;
+    text: string;
+    candidates: ChatImageIntentContext["candidates"];
+    timeoutMs?: number;
+}): Promise<{ decision: ChatImageDecision; usage: { inputTokens?: number; outputTokens?: number } | undefined; failed: boolean }> {
+    const prompt = chatImageIntentUserMessage(input.text, input.candidates, null, false);
+    try {
+        const generated = await generateText({
+            model: getActiveAiModel(input.model),
+            system: buildChatImageIntentSystem({ criteria: input.criteria }),
+            prompt,
+            maxOutputTokens: CHAT_IMAGE_INTENT_MAX_OUTPUT_TOKENS,
+            maxRetries: 0,
+            abortSignal: AbortSignal.timeout(input.timeoutMs ?? CHAT_IMAGE_INTENT_TIMEOUT_MS * 2),
+            output: Output.object({
+                schema: jsonSchema(chatImageIntentOutputSchema(input.candidates) as unknown as JSONSchema7),
+                name: "chat_image_intent",
+            }),
+            providerOptions: autoLlmRouterProviderOptions(input.model.provider),
+        });
+        return {
+            decision: parseChatImageIntentOutput(generated.output, input.candidates, false, false),
+            usage: generated.usage as { inputTokens?: number; outputTokens?: number } | undefined,
+            failed: false,
+        };
+    } catch {
+        return { decision: NOT_IMAGE, usage: undefined, failed: true };
+    }
+}
+
+/** The image candidates a plain Chat message (no photo) is routed among now. */
+export async function chatImageRoutingCandidates(): Promise<ChatImageIntentContext["candidates"]> {
+    const [imageModels, typicalSeconds] = await Promise.all([refreshImageModelCatalog(), readImageModelTypicalSeconds()]);
+    return chatImageModelCandidates(imageModels, typicalSeconds);
 }

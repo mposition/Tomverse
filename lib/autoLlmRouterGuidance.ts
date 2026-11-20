@@ -2,10 +2,13 @@ import "server-only";
 
 import type { Prisma } from "@prisma/client";
 import {
+    AUTO_LLM_ROUTER_CODING_GUIDANCE,
     AUTO_LLM_ROUTER_DEFAULT_GUIDANCE,
     AUTO_LLM_ROUTER_DEFAULT_REWRITE_GUIDANCE,
     type AutoLlmRouterGuidanceKind,
 } from "@/lib/autoLlmRouterCore";
+import { CHAT_IMAGE_ROUTING_CRITERIA } from "@/lib/chatImageIntentCore";
+import { IMAGE_CRITERIA_MAX_CHARS } from "@/lib/imageRoutingOptimizerCore";
 import {
     parseActiveRouterGuidance,
     type ActiveRouterGuidance,
@@ -29,6 +32,21 @@ export const AUTO_LLM_ROUTER_GUIDANCE_SETTING_KEY = "auto.llmRouterGuidance";
  */
 export const AUTO_LLM_ROUTER_REWRITE_GUIDANCE_SETTING_KEY = "auto.llmRouterRewriteGuidance";
 
+/**
+ * The coding guidance: what the external API's Smart Adaptive router follows
+ * for coding requests. Its code default is AUTO_LLM_ROUTER_CODING_GUIDANCE;
+ * only a coding optimizer cycle promotes into it.
+ */
+export const AUTO_LLM_ROUTER_CODING_GUIDANCE_SETTING_KEY = "auto.llmRouterCodingGuidance";
+
+/**
+ * The image guidance: the criteria Chat's image routing call follows -- when a
+ * message is an image request, and which image model and preset make it
+ * (CHAT_IMAGE_ROUTING_CRITERIA is its code default). Only an image optimizer
+ * cycle (lib/imageRoutingOptimizer.ts) promotes into it.
+ */
+export const AUTO_LLM_ROUTER_IMAGE_GUIDANCE_SETTING_KEY = "auto.llmRouterImageGuidance";
+
 export type RouterGuidanceKind = AutoLlmRouterGuidanceKind;
 
 export const DEFAULT_ROUTER_GUIDANCE: ActiveRouterGuidance = {
@@ -43,9 +61,30 @@ export const DEFAULT_ROUTER_REWRITE_GUIDANCE: ActiveRouterGuidance = {
     history: [],
 };
 
-const SLOTS: Record<RouterGuidanceKind, { key: string; fallback: ActiveRouterGuidance }> = {
+export const DEFAULT_ROUTER_CODING_GUIDANCE: ActiveRouterGuidance = {
+    guidance: AUTO_LLM_ROUTER_CODING_GUIDANCE,
+    cycleId: null,
+    history: [],
+};
+
+export const DEFAULT_ROUTER_IMAGE_GUIDANCE: ActiveRouterGuidance = {
+    guidance: CHAT_IMAGE_ROUTING_CRITERIA,
+    cycleId: null,
+    history: [],
+};
+
+/** The image criteria are many lines long; a stored one is admitted within its own cap. */
+const admitImageGuidance = (raw: unknown): string | null => {
+    if (typeof raw !== "string") return null;
+    const text = raw.replace(/\r\n?/g, "\n").trim();
+    return text && text.length <= IMAGE_CRITERIA_MAX_CHARS ? text : null;
+};
+
+const SLOTS: Record<RouterGuidanceKind, { key: string; fallback: ActiveRouterGuidance; admit?: (raw: unknown) => string | null }> = {
     routing: { key: AUTO_LLM_ROUTER_GUIDANCE_SETTING_KEY, fallback: DEFAULT_ROUTER_GUIDANCE },
     rewrite: { key: AUTO_LLM_ROUTER_REWRITE_GUIDANCE_SETTING_KEY, fallback: DEFAULT_ROUTER_REWRITE_GUIDANCE },
+    coding: { key: AUTO_LLM_ROUTER_CODING_GUIDANCE_SETTING_KEY, fallback: DEFAULT_ROUTER_CODING_GUIDANCE },
+    image: { key: AUTO_LLM_ROUTER_IMAGE_GUIDANCE_SETTING_KEY, fallback: DEFAULT_ROUTER_IMAGE_GUIDANCE, admit: admitImageGuidance },
 };
 
 type Reader = Pick<Prisma.TransactionClient, "appSetting">;
@@ -64,7 +103,7 @@ export async function readActiveRouterGuidance(
             where: { key: slot.key },
             select: { value: true },
         });
-        return parseActiveRouterGuidance(row?.value) ?? slot.fallback;
+        return parseActiveRouterGuidance(row?.value, slot.admit) ?? slot.fallback;
     } catch {
         return slot.fallback;
     }

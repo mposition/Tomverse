@@ -171,10 +171,13 @@ for a model that takes none of them they are left out of the call and named in
 the `x-tomverse-ignored-parameters` response header, because coding clients send
 them on every request -- VS Code always sends a temperature), `stop` (up to 4), `n: 1`, `store: false`,
 `user` (accepted, no effect), `reasoning_effort` (OpenAI reasoning models only), and its
-Responses-API spelling `reasoning: { effort, summary }`, which Cursor sends for a model name it
-recognises (seen with `gpt-6-luna` on production, 2026-11-20): `effort` is read as `reasoning_effort`
-(both sent and different is refused), and `summary`, which has no place in a Chat Completions answer, is
-left out and named in `x-tomverse-ignored-parameters`.
+Responses-API spelling `reasoning`, either `{ effort, summary }` or a bare effort string, which Cursor
+sends for a model name it recognises (a string with `gpt-6-luna` on production, 2026-11-20). It is a client
+default, not the caller's choice: `effort` is sent where the model takes `reasoning_effort` and otherwise
+left out (a string that is no known effort, such as `none`, always is), with `reasoning` named in
+`x-tomverse-ignored-parameters` -- unlike `reasoning_effort` itself, which is refused where it cannot
+apply. Both sent and different is refused. `summary`, which has no place in a Chat Completions answer, is
+left out and named in the same header.
 The request body may be up to 12 MB.
 
 **Refused with a typed 400:** any other field (`unsupported_parameter`, naming
@@ -242,7 +245,13 @@ it is the id the settings page puts in a copied configuration by default:
 the id stays the same while models are added to or retired from the
 catalogue, so a customer never has to recopy it.
 
-- **Candidates:** the offered models that fit the request -- images only to a
+- **Candidates:** the offered models, plus the `frontier` and `apex` models
+  this plan reaches (owner decision 2026-11-20: Smart Adaptive may route to
+  them, no client may name them, and each request is charged that model's own
+  credits under the key's cap; they join only beside a model of their
+  provider a client can name, and are only ever the router's pick, never the
+  default and never the one model left),
+  that fit the request -- images only to a
   model that reads them, the requested output within the model's limit, a
   rough input estimate plus that output within its window, and the optional
   features the request uses (`strict` tools, image `detail`,
@@ -261,8 +270,17 @@ catalogue, so a customer never has to recopy it.
   from the window to size the input), and the largest credits per request. A request
   beyond every candidate gets the default model's ordinary limit error.
 - **Router input:** the latest user message's text and the assistant text
-  before it, bounded by the router itself. Nothing is stored: the external API
-  passes no conversation id, so the router writes no `AutoRouterDecision` row.
+  before it, bounded by the router itself, and the coding signals
+  (`CodingRouterContext`): the client's User-Agent, the number of tools, the
+  model turns so far, the input size, the end of the latest tool result
+  (600 characters, where errors and test summaries print) and the model
+  already working on the conversation. The router reads them with the coding
+  head and guidance (`AUTO_LLM_ROUTER_CODING_GUIDANCE`, version `coding-v1`):
+  quality first, credits only between candidates expected to do the work
+  equally well, strength by tier then credits, apex only for the hardest work.
+  The guidance is fixed in code; the router optimizer measures and replaces
+  Chat's guidance only. Nothing is stored: the external API passes no
+  conversation id, so the router writes no `AutoRouterDecision` row.
 - **Tool loops:** a request that carries tool results back goes to the model
   that made those tool calls. When a Smart Adaptive answer ends with tool
   calls, its model is remembered in process for ten minutes under the key and
@@ -271,7 +289,22 @@ catalogue, so a customer never has to recopy it.
   requests with the same history, refused requests and answers without calls
   never overwrite each other. A miss (another instance, a restart) routes
   again and shows as `routed-by: router`, so across instances a tool loop can
-  change model. A new user message is routed again.
+  change model.
+- **A new user message** is routed again, and within a conversation the model
+  only moves up (`escalateOnly`): a pick with fewer credits than the model
+  already working on the conversation keeps that model (`routed-by:
+  continued`), an equal or stronger one moves. The conversation is known by
+  the opening of its history (everything before the first assistant message)
+  under the key; its model is remembered in process for six hours once
+  admission accepted a request on it, so a pick the account could not pay for
+  is never held. With the router gate closed it keeps its model too. A miss
+  (another instance, a restart, a client that rewrites the opening) routes
+  freely.
+- **Log:** every Smart Adaptive decision, on every protocol, is one
+  `external_api_smart_adaptive_routed` line (request id, protocol,
+  `routedBy`, model, `held`, the client's User-Agent cut to 40 characters),
+  and the router's own `chat_auto_llm_router` line carries
+  `taskKind: external_api`. No request text is logged.
 - **No answer** (router switch off, no router model configured, provider budget
   refused, timeout, invalid output, one candidate left): the default model
   (`DEFAULT_MODEL_ID`) if it fits, otherwise the first candidate in catalogue
@@ -288,6 +321,72 @@ catalogue, so a customer never has to recopy it.
   `smart-adaptive` and the settings page, instead of a bare `model_not_found`.
 - **Charging:** the request is reserved, charged and receipted as the routed
   model; `GET /usage` shows that model's id.
+
+### 5.2 Coding routing report and coding optimizer
+
+Owner decision 2026-11-20: the coding router is measured every day and can be
+improved by its own optimizer, as Chat's router is.
+
+- **Receipt fields.** Each Smart Adaptive request's receipt
+  (`ExternalApiRequest`) records `routedBy` (`router`, `continued`,
+  `default`), `routedHeld` and `routeConversation`, a SHA-256 prefix of the
+  conversation's routing key (never the key). A request that names a model
+  leaves them null. No request text is stored. Receipts written before these
+  columns existed have them null too, so for the first week the report counts
+  those Smart Adaptive requests among the requests that named a model.
+- **Report.** `lib/externalApiRoutingReportCore.ts` counts Smart Adaptive
+  requests per model and protocol, `topModelShare` (1 means one model took
+  everything), the held share, conversations that changed model, the error
+  share and credits. Admin › Routing shows the last 24 hours and 7 days, and
+  every daily optimizer run logs the last 24 hours as
+  `external_api_coding_routing_daily`, whether or not a cycle starts.
+- **Coding optimizer** (`lib/autoCodingRouterOptimizer.ts`, target `coding`).
+  It is the Chat optimizer's cycle run on the coding guidance. It shares the
+  same optimizer and router models, one running cycle at a time, and the
+  same day and month caps (`AUTO_ROUTER_OPTIMIZER_DAY_CAP_MICRO_USD` and
+  `AUTO_ROUTER_OPTIMIZER_MONTH_CAP_MICRO_USD` in `lib/autoRouterOptimizerCore.ts`).
+  It adds no spending ceiling.
+  - The external API keeps no text, so every case is a synthetic coding
+    request.
+  - The router is asked with the coding head, and a coding judge compares
+    the answers.
+  - The menu is the external API's Smart Adaptive candidates for the widest
+    plan, without apex.
+  - The generator also reads two kinds of pre-cycle evidence: the 7-day
+    report and the task evaluation.
+  - A promoted proposal becomes the `coding` guidance the live coding router
+    reads (its code default is `AUTO_LLM_ROUTER_CODING_GUIDANCE`). Rollback
+    goes one step back.
+  - Its daily run is on by default (owner decision 2026-11-20) and can be
+    turned off in Admin › Routing; auto-promote starts off, so a passed
+    proposal waits for a person's click. A person may also start a cycle.
+    With several daily switches on, the targets take turns, one cycle a day
+    in all. A setting row that cannot be read counts as both off.
+- **Task evaluation** (`lib/codingTaskEval.ts`).
+  - Runs before the cycle proper, within up to 40 per cent of a coding cycle's
+    budget. Each run starts only when its worst case
+    (`codingEvalWorstCaseTokens`, at the model's prices) still fits. A call
+    whose usage is unknown is charged its worst case and leaves the cycle's
+    cost coverage incomplete, so that cycle cannot be promoted. No retries.
+    It stops starting runs 15 minutes after the cycle began.
+  - For each of six fixed JS tasks (two easy, two medium, two hard), the
+    current coding guidance routes the task. Its pick and the next candidate
+    up each work it as an agent with `list_files`, `read_file`,
+    `write_file` and `run_tests` (the visible examples only), for at most
+    8 steps, with a 32 KB workspace and 32 KB of tool output.
+  - Pass or fail is decided in the trusted parent. A runner written by the
+    harness calls the model's exports in a child and returns their values.
+    The parent compares them with hidden expectations that never enter the
+    child, so printed output cannot fake a pass.
+  - The child runs `node --permission`: it reads only the task's temporary
+    folder, writes nothing, starts no processes or workers, and gets an
+    emptied environment.
+  - Node does not restrict network. So model-written code runs only where
+    the operator has isolated the runner from internal services, metadata
+    endpoints and credentials, and has set
+    `CODING_TASK_EVAL_ISOLATED_RUNNER=true` (default off). Anywhere else, a
+    coding cycle skips the evaluation and records
+    `taskEvaluationStop: runner_not_isolated`.
 
 ## 6. Data
 
@@ -590,14 +689,15 @@ every request): Chat, Agent fix and re-run, a refused then approved command,
 and a stopped reply all passed -- 15 requests, each answered 200 once, no
 retries and no server errors; the stopped reply settled as cancelled at 1
 credit, and the receipts matched the server's request times. With model
-`gpt-6-luna` the first request was refused with 400 until the `reasoning`
-object (section 6) was accepted: Cursor sends it for a model name it
-recognises.
+`gpt-6-luna` the first request was refused with 400: Cursor adds `reasoning`
+(section 6) for a model name it recognises. Accepting the object form was not
+enough -- after it was deployed the 400 named a string -- so the string form is
+accepted too, and `reasoning` is left out where the model takes no effort.
 
 Not yet verified, each a separate step: other operating systems, Claude Code
 and Codex against a deployed environment (their runs above called the handlers
 directly, not through the Next.js server), Cursor against production with a
-named model once the `reasoning` object is deployed, and native Smart Adaptive
+named model once the `reasoning` string is accepted, and native Smart Adaptive
 (section 10.6) with real models or real clients end to end.
 
 ### 10.6 Smart Adaptive on the native protocols (`lib/externalApiNativeSmartAdaptive.ts`)
@@ -612,11 +712,32 @@ providers, so signed or encrypted state is never sent to another provider.
   incompatible encrypted reasoning when the model family changes, also without
   failing. So a model switch mid-task costs reasoning and the prompt cache,
   not the request; the gateway still avoids it.
-- **One pick per conversation.** The first request of a conversation (no model
-  output in its history) is routed with the same router call, gate and switch
-  as Chat Completions (section 5.1, `pickWithSmartAdaptiveRouter`); every later
-  request of that conversation goes to the same model (`x-tomverse-routed-by:
-  continued`). The conversation is the client's own id: Codex's
+- **One pick per conversation, moving only up.** The first request of a
+  conversation (no model output in its history) is routed with the same
+  router call, gate, switch and coding guidance as Chat Completions (section
+  5.1, `pickWithSmartAdaptiveRouter`); every tool round of that conversation
+  goes to the same model (`x-tomverse-routed-by: continued`). A later message
+  the user wrote (the history ends with a user message carrying no
+  `tool_result`, or a Responses user message rather than a tool output; read
+  from the structure, never the text) is routed again with the pinned model
+  as `currentModelId`: a cheaper pick keeps the pin, a stronger one answers.
+  Every pin is written only once admission accepted the request, so a model
+  the account cannot pay for never takes the conversation, and the rule is
+  checked again when it is written, so of two messages routed at once the
+  cheaper one admitted last cannot lower it. A request that opens a new
+  history on the same session (a Claude Code subagent) keeps the session's
+  model and is not routed, so it cannot move the model under the main loop's
+  tool rounds; identical concurrent requests share one router call. The
+  switch costs the reasoning and the cache, the trade the user's harder
+  request asks for. The provider default is never a frontier or apex model,
+  and a request only they fit is refused as it was before they were candidates.
+  Known limit: one pin per session holds one model. Two different messages
+  the user sends on one session at the same moment (pinned or not) pick
+  independently, the dearer one admitted first keeps the pin, and the
+  other's tool rounds then run on it (reasoning and cache lost, never the
+  request). Claude Code and Codex send one user message per session at a
+  time, and a subagent never re-routes; per-tool-call stickiness on the
+  native protocols would remove the limit. The conversation is the client's own id: Codex's
   `prompt_cache_key` (its thread id; `session-id`/`thread-id` headers),
   Claude Code's `x-claude-code-session-id` or the session in
   `metadata.user_id`; otherwise a digest of the history's opening. The pin is
@@ -632,9 +753,10 @@ providers, so signed or encrypted state is never sent to another provider.
   router call or hold. Every refusal that does not depend on the model
   (provider-run tools, cache TTL, stored state, forwarded headers) is checked
   before the router call, so a request refused anyway never spends one.
-- **A missed pin never fails or re-routes.** A request whose history already
-  carries model output and whose pin this process does not have (another
-  instance, a restart) takes the provider default and pins it. The body
+- **A missed pin never fails.** A tool round whose history already carries
+  model output and whose pin this process does not have (another instance, a
+  restart) takes the provider default and pins it; a message the user wrote
+  is routed like a first request. The body
   names no producing model to recover, and both providers accept the switch.
   If the pinned model can no longer take the request (window, retirement),
   another fitting model of the provider answers and the pin moves.

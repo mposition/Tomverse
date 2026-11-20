@@ -87,12 +87,33 @@ const REGISTRY = {
     reason:
       "An administrator's per-model web search route: off or the application-managed backend. NULL follows the code. There is no value for a provider's native tool on purpose -- its cost ceiling is verified per model in lib/webSearchCapability.ts, not chosen in a form.",
   },
+  ImageRoutingDecision_source_check: {
+    owner: "list",
+    module: "lib/imageRoutingCore.ts",
+    list: "IMAGE_ROUTING_DECISION_SOURCES",
+    reason:
+      "Where a Chat image routing decision was made: inside /api/chat for an Auto turn, or the composer's own image-intent call. The image routing report splits by it.",
+  },
+  ImageRoutingDecision_outcome_check: {
+    owner: "list",
+    module: "lib/imageRoutingCore.ts",
+    list: "IMAGE_ROUTING_DECISION_OUTCOMES",
+    reason:
+      "What an image routing decision was: an image, a text answer, or a call that failed. The report's shares are over exactly these.",
+  },
+  ImageGenerationSignal_kind_check: {
+    owner: "list",
+    module: "lib/imageRoutingCore.ts",
+    list: "IMAGE_GENERATION_SIGNAL_KINDS",
+    reason:
+      "What a person did with a generated image. The signal route accepts only these, and the report counts each.",
+  },
   AutoRouterOptimizerCycle_target_check: {
     owner: "list",
     module: "lib/autoLlmRouterCore.ts",
     list: "AUTO_LLM_ROUTER_GUIDANCE_KINDS",
     reason:
-      "Which guidance an optimizer cycle improves: the router's routing guidance or its rewrite guidance. Promotion writes the cycle's proposal into the guidance its target names, so a third value the code did not know would have no guidance to promote into.",
+      "Which guidance an optimizer cycle improves: the router's routing guidance, its rewrite guidance, the external API's coding guidance, or Chat's image routing criteria. Promotion writes the cycle's proposal into the guidance its target names, so a value the code did not know would have no guidance to promote into.",
   },
   Conversation_selectionMode_check: {
     owner: "list",

@@ -472,3 +472,16 @@ test("candidate isolation does not reach archive safety refusals", () => {
         assert.equal(decision.reason, reason);
     }
 });
+
+test("a list wrapped as an object's conversations key is read like a bare list", () => {
+    assert.deepEqual(readArchiveEntryItems('{"conversations":[{"a":1}]}', "candidate"), {
+        items: [{ a: 1 }],
+    });
+    assert.deepEqual(readArchiveEntryItems('{"conversations":[{"a":1}]}', "conversations"), {
+        items: [{ a: 1 }],
+    });
+    // A conversations key that is not a list is still no list.
+    assert.deepEqual(readArchiveEntryItems('{"conversations":{"a":1}}', "candidate"), {
+        skipped: true,
+    });
+});

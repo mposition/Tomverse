@@ -1,4 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
+import fs from "node:fs";
+import { strToU8, zipSync } from "fflate";
 import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
 import { setDeterministicTheme } from "./support/chat-state-fixtures";
 import { expectAccessibleContrast } from "./support/ui-audit";
@@ -43,6 +45,55 @@ for (const theme of ["light", "dark"] as const) {
     expect(api.createCount + api.finalizeCount + api.deleteCount + api.snapshotDeleteCount + api.exportCount).toBe(0);
   });
 }
+
+// Theme "system" on a dark OS: no .dark class on <html>, yet every dark:
+// utility applies (app/globals.css). The import screen's own stylesheet read
+// only .dark, so its page stayed light under light text -- the step label and
+// the failure message vanished.
+test("the import wizard stays readable when the theme follows a dark OS", async ({ page }) => {
+  await prepareGuestPage(page, "ko");
+  const account = await mockAuthenticatedApi(page);
+  account.theme = "system";
+  await page.addInitScript(() => {
+    document.cookie = "tomverse_theme=system; Path=/; Max-Age=31536000; SameSite=Lax";
+    window.localStorage.setItem("tomverse_theme_preference", "system");
+  });
+  await page.emulateMedia({ colorScheme: "dark" });
+  await mockImportApi(page);
+
+  await page.goto("/settings/imports/new");
+  expect(await page.evaluate(() => document.documentElement.classList.contains("dark"))).toBe(false);
+  await page.getByTestId("external-import-file-input").setInputFiles({
+    name: "conversations.json",
+    mimeType: "application/json",
+    buffer: Buffer.from("this is not an export", "utf8"),
+  });
+  const failed = page.getByTestId("external-import-parse-failed");
+  await expect(failed).toBeVisible();
+  await expectAccessibleContrast(failed.locator("p").first(), "system-dark parse failure");
+  await expectAccessibleContrast(
+    page.getByTestId("external-import-step-indicator").locator('[data-state="current"]'),
+    "system-dark current step"
+  );
+});
+
+/**
+ * Perplexity's account data export as it arrives by email: a ZIP holding the
+ * wrapped conversations JSON and a user-data spreadsheet the worker never
+ * opens. Synthetic values, real layout.
+ */
+const perplexityAccountExportFile = () => ({
+  name: "user_data_export_2026-11-18.zip",
+  mimeType: "application/zip",
+  buffer: Buffer.from(
+    zipSync({
+      "conversations-20261118_091203-0b7f3c2e.json": strToU8(
+        fs.readFileSync("tests/fixtures/perplexityAccount/conversations.json", "utf8")
+      ),
+      "user-data-20261118_091203-0b7f3c2e.xlsx": new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0, 0]),
+    })
+  ),
+});
 
 /**
  * A minimal but structurally faithful ChatGPT export: a top-level array of
@@ -806,7 +857,7 @@ test.describe("external import settings", () => {
     await page.goto("/settings/imports/new");
     await page.getByTestId("external-import-guide-perplexity").click();
     await expect(page.getByTestId("external-import-guide")).toContainText(
-      "Perplexity 스레드 내보내기"
+      "Perplexity 데이터 내보내기"
     );
     await page
       .getByTestId("external-import-file-input")
@@ -843,6 +894,44 @@ test.describe("external import settings", () => {
       "Sources:\n[1] https://example.com/starter-care"
     );
     expect(conversation.messages[1].content).not.toContain("[^1_");
+  });
+
+  test("a Perplexity account export ZIP imports every thread without a split notice", async ({
+    page,
+  }) => {
+    await prepareGuestPage(page, "ko");
+    await mockAuthenticatedApi(page);
+    const api = await mockImportApi(page);
+
+    await page.goto("/settings/imports/new");
+    await page.getByTestId("external-import-guide-perplexity").click();
+    await page
+      .getByTestId("external-import-file-input")
+      .setInputFiles(perplexityAccountExportFile());
+
+    await expect(page.getByTestId("external-import-selection")).toBeVisible();
+    await expect(
+      page.getByTestId("external-import-conversation-toggle")
+    ).toHaveCount(2);
+    await expect(
+      page.getByText("How long does a sourdough starter keep in the fridge?")
+    ).toBeVisible();
+    // Each entry is already one question and one answer: nothing to split,
+    // nothing sent to the split route.
+    await expect(
+      page.getByTestId("external-import-perplexity-structure-notice")
+    ).toHaveCount(0);
+    await expect(
+      page.getByTestId("external-import-provider-mismatch")
+    ).toHaveCount(0);
+
+    await page.getByTestId("external-import-continue-to-review").click();
+    await expect(page.getByTestId("external-import-review")).toBeVisible();
+    expect(api.createProviders).toEqual(["perplexity"]);
+    expect(api.splitBodies).toHaveLength(0);
+    const sent = api.batchBodies.flatMap((batch) => batch.conversations);
+    const first = sent.find((c) => c.title === "How long does a sourdough starter keep in the fridge?");
+    expect(first?.messages.map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant"]);
   });
 
   test("split hints from the import route put a multi-line question back together", async ({
