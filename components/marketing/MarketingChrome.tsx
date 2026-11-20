@@ -280,8 +280,8 @@ function LegacyMarketingHeader({
   const { status: sessionStatus } = useSession();
   const entry = useMarketingChatEntry();
   const navigationItems = [
-    { label: lang === "ko" ? "채팅" : "Chat", href: entry.chatHref },
-    { label: lang === "ko" ? "리뷰" : "Review", href: REVIEW_PRODUCT_PATH },
+    { label: lang === "ko" ? "채팅" : lang === "zh" || lang === "zh-Hant" ? "聊天" : "Chat", href: entry.chatHref },
+    { label: lang === "ko" ? "리뷰" : lang === "zh" ? "回答比较" : lang === "zh-Hant" ? "回答比較" : "Review", href: REVIEW_PRODUCT_PATH },
     ...labels.topMenu.slice(1),
   ];
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -605,7 +605,7 @@ const launchChrome = {
     products: "产品", help: "帮助", policies: "政策", guides: "使用指南",
     models: "探索模型", pricing: "价格方案", helpCentre: "帮助中心", faq: "常见问题", support: "联系客服",
     status: "服务状态", safety: "安全与数据处理", privacy: "隐私政策", terms: "使用条款", refund: "退款政策",
-    login: "登录", start: "开始 Chat", back: "返回 Chat", navigation: "主导航",
+    login: "登录", start: "开始聊天", back: "返回聊天", navigation: "主导航",
     description: "在同一个地方使用多个 AI，为问题选择模型，并比较回答中的不同观点。",
     caution: "做出重要决定前，请自行核实 AI 的回答。",
   },
@@ -613,7 +613,7 @@ const launchChrome = {
     products: "產品", help: "說明", policies: "政策", guides: "使用指南",
     models: "探索模型", pricing: "價格方案", helpCentre: "說明中心", faq: "常見問題", support: "聯絡客服",
     status: "服務狀態", safety: "安全與資料處理", privacy: "隱私權政策", terms: "使用條款", refund: "退款政策",
-    login: "登入", start: "開始 Chat", back: "返回 Chat", navigation: "主導覽",
+    login: "登入", start: "開始聊天", back: "返回聊天", navigation: "主導覽",
     description: "在同一個地方使用多個 AI，為問題選擇模型，並比較回答中的不同觀點。",
     caution: "做出重要決定前，請自行查證 AI 的回答。",
   },
@@ -688,7 +688,7 @@ const launchNav: Record<Language, Omit<NavCopy, "chatItems" | "developerItems"> 
     ],
   },
   zh: {
-    chat: "Chat", review: "Review", developers: "开发者", models: "模型", chatMenu: "Chat 功能", developersMenu: "开发者菜单", soon: "即将推出", apiKeys: "管理 API 密钥",
+    chat: "聊天", review: "回答比较", developers: "开发者", models: "模型", chatMenu: "聊天功能", developersMenu: "开发者菜单", soon: "即将推出", apiKeys: "管理 API 密钥",
     chatItems: [
       { title: "Smart Adaptive", body: "优化问题，匹配合适的模型" }, { title: "继续对话", body: "导入其他 AI 的对话并继续" },
       { title: "图片 · 文件", body: "生成、照片编辑、文件转换" }, { title: "插件 · MCP", body: "把工作工具带进对话" }, { title: "移动应用", body: "Android · iOS 即将推出" },
@@ -698,7 +698,7 @@ const launchNav: Record<Language, Omit<NavCopy, "chatItems" | "developerItems"> 
     ],
   },
   "zh-Hant": {
-    chat: "Chat", review: "Review", developers: "開發者", models: "模型", chatMenu: "Chat 功能", developersMenu: "開發者選單", soon: "即將推出", apiKeys: "管理 API 金鑰",
+    chat: "聊天", review: "回答比較", developers: "開發者", models: "模型", chatMenu: "聊天功能", developersMenu: "開發者選單", soon: "即將推出", apiKeys: "管理 API 金鑰",
     chatItems: [
       { title: "Smart Adaptive", body: "優化問題，配對合適的模型" }, { title: "繼續對話", body: "匯入其他 AI 的對話並繼續" },
       { title: "圖片 · 檔案", body: "生成、照片編輯、檔案轉換" }, { title: "外掛 · MCP", body: "把工作工具帶進對話" }, { title: "行動應用程式", body: "Android · iOS 即將推出" },
