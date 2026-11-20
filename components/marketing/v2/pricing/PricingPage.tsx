@@ -275,7 +275,7 @@ export function PricingPage() {
         <h3 id={`pricing-plan-name-${planId}`}>{name}</h3>
         <p className="who">{copy.plans.who[index]}</p>
       </div>
-      {promotionEligible && !annualSelected ? <div data-testid="pricing-sale-block" className="sale-block">
+      {promotionEligible && salePrice && !annualSelected ? <div data-testid="pricing-sale-block" className="sale-block">
         <div className="sale-top">
           <span className="chip amber">{copy.plans.sale.badge}</span>
           <span data-testid="pricing-discount-badge" className="sale-discount">{discountLabel}</span>

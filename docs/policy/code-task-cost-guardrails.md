@@ -144,9 +144,10 @@ migration 적용은 별도입니다. 구현한 A1 범위와 확정 값은 10절�
   때까지 `CODE_MODEL_UNAVAILABLE`입니다. `channels`에 `code`가 없는 행도 같은 거절입니다.
   `GET /api/code/model-catalog`는 스냅샷을 그대로 내려주며(목록은 허가가 아님), 클라이언트는
   `channels`에 `code`가 있는 행만 보여야 합니다.
-- 이 변경 뒤 처음 계산한 해시는 `source`·`channels`가 들어가 이전 스냅샷과 다르므로, 정기 갱신
-  (`renewCodingSnapshotIfUnchanged`)은 사람이 한 번 발행할 때까지 갱신하지 않습니다. 이전 스냅샷은
-  coverage가 끝날 때까지 관리형 경로에서 그대로 쓰입니다.
+- 이 변경 뒤 처음 계산한 해시는 `source`·`channels`가 들어가 이전 스냅샷의 `contentHash`와 다릅니다.
+  정기 갱신(`renewCodingSnapshotIfUnchanged`)은 이전 스냅샷의 행을 지금 schema로 다시 읽은 해시
+  (`normalizedSnapshotContentHash`)도 비교하므로, 내용이 같으면 사람이 발행하지 않아도 갱신합니다.
+  다시 읽을 수 없는 행이 있거나 내용이 실제로 다르면 갱신하지 않고 사람의 발행을 기다립니다.
 
 ### 6.2 공급자 조건 (공급자 단위)
 
