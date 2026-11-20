@@ -201,9 +201,9 @@ export const deliveredEvalImageCostMicroUsd = (
  * Needs the provider's own key in the environment (OPENAI_IMAGE_API_KEY or the
  * chat OpenAI key, GOOGLE, FAL_KEY, BFL_API_KEY, the Qwen and xAI keys); without
  * it the adapter refuses before any request and the result costs 0. Image
- * editing is not reachable from here. The adapter retries a rate limit, a 5xx
- * or a transport failure up to twice, and a retried request may be billed, so a
- * failure after the request was sent is reported as costUnknown.
+ * editing is not reachable from here. Each image is one request (retry: false),
+ * and a failure after the request was sent may still be billed, so it is
+ * reported as costUnknown.
  */
 export const generateEvalImage = async (input: GenerateEvalImageInput): Promise<GenerateEvalImageResult> => {
   const { model, preset } = input;

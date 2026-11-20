@@ -66,8 +66,8 @@ import { prisma } from "@/lib/prisma";
  * model with image triage on) exactly as live; the optimizer model writes the
  * cases and the proposal and, in the model evaluation, judges the images.
  *
- * Paid. The daily cycle is on by default (owner decision 2026-11-20); it makes
- * text calls only. The model evaluation makes real images (image providers,
+ * Paid. Every switch starts off; the daily cycle, once the owner turns it on,
+ * makes text calls only. The model evaluation makes real images (image providers,
  * booked to their own budget buckets) and is off until the owner turns it on.
  * Promotion is a person's click unless auto-promote is on (default off).
  */
@@ -121,7 +121,11 @@ const INTENT_CASES = 32;
 const MODEL_EVAL_REQUESTS = 12;
 /** Share of the cycle's budget the image-making evaluation may spend. */
 const MODEL_EVAL_BUDGET_SHARE = 0.5;
-/** The image adapter retries a failed request up to twice: an image of unknown cost is charged three worst cases. */
+/**
+ * Evaluation images are sent once (retry: false), so one worst case bounds an
+ * attempt. The hold and an unknown cost still count three: a margin kept from
+ * the reviewed design, released at settlement for an image whose cost is known.
+ */
 const IMAGE_ATTEMPTS_BOUND = 3;
 
 type ImageEvalProviderHold = { provider: string; microUsd: number; at: Date };
