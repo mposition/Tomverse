@@ -178,22 +178,25 @@ function ThreadsBand({ many, one, reduce }: { many: string; one: string; reduce:
 
 function AdaptiveDemo({ copy, n, reduce }: { copy: HomeV2Copy["adaptive"]; n: number; reduce: boolean }) {
   const [mode, setMode] = useState<"auto" | "manual">("auto");
-  const [scanIndex, setScanIndex] = useState(-1);
-  const [chosen, setChosen] = useState(false);
+  // The scan walks the tiles in timer callbacks; at rest (and with reduced
+  // motion) it has finished, so the picked provider is marked.
+  const [scanStep, setScanStep] = useState(providerTiles.length);
   const autoCycle = useRef(true);
   const tabs = useRef<Array<HTMLButtonElement | null>>([]);
 
   useEffect(() => {
-    if (mode !== "auto") return;
-    setChosen(false);
-    if (reduce) { setScanIndex(-1); setChosen(true); return; }
+    if (mode !== "auto" || reduce) return;
     let i = 0;
     const timer = window.setInterval(() => {
-      if (i < providerTiles.length) { setScanIndex(i); i += 1; return; }
-      setScanIndex(-1); setChosen(true); window.clearInterval(timer);
+      setScanStep(i);
+      i += 1;
+      if (i > providerTiles.length) window.clearInterval(timer);
     }, 90);
     return () => window.clearInterval(timer);
   }, [mode, reduce]);
+  const scanDone = reduce || scanStep >= providerTiles.length;
+  const scanIndex = scanDone ? -1 : scanStep;
+  const chosen = scanDone;
 
   useEffect(() => {
     if (reduce) return;
