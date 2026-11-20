@@ -32,14 +32,17 @@ for (const scenario of ["USD", "AUD", "KRW", "partial", "unavailable"] as const)
     const monthlyCurrency = scenario === "partial" || scenario === "unavailable" ? "USD" : currency;
     const annualCurrency = scenario === "unavailable" ? "USD" : currency;
     if (scenario === "unavailable") {
-      await expect(pro).toContainText("$15 USD");
-      await expect(pro).toContainText("$144 USD");
+      // Without the live billing config the card states no price (a dash), only the currency note.
+      await expect(pro.getByTestId("pricing-plan-price")).toHaveText("—");
+      await expect(pro).not.toContainText("$15");
+      await expect(pro).not.toContainText("$144");
     } else {
       const monthly = scenario === "partial" ? "$15" : formatBillingAmount(plans[1].displayMonthlyPriceAmount!, currency);
       await expect(pro).toContainText(`${monthly} ${monthlyCurrency}`);
       await expect(pro).toContainText(`${formatBillingAmount(plans[1].displayAnnualPriceAmount, currency)} ${annualCurrency}`);
       await expect(page.getByTestId("pricing-credit-packs")).toContainText(`${formatBillingAmount(billingMinorToMajor(packMinor, currency), currency)} ${currency}`);
-      if (promotion) await expect(pro).toContainText(scenario === "partial" ? "$7.5 USD" : "A$10.00 AUD");
+      // A sale is priced on the live plan: its display amount, else its own USD price.
+      if (promotion) await expect(pro).toContainText(scenario === "partial" ? "$7.50 USD" : "A$10.00 AUD");
     }
     await expect(pro).toContainText(`표시 통화: ${annualCurrency}. 최종 결제 통화와 금액은 결제 화면에서 확인하세요.`);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
