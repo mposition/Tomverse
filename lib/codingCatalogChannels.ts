@@ -50,7 +50,7 @@ export const externalChannelAllowlist = async (
   const now = options.now ?? new Date();
   const snapshot = await prisma.modelCatalogSnapshot.findFirst({ where: { category: "coding" }, orderBy: { version: "desc" } });
   if (!snapshot || !snapshotIsCurrent(snapshot.coverageUntil, now)) {
-    // Once a minute at most: this is on every external request.
+    // Once a minute per instance at most: this is on every external request.
     if (now.getTime() - warnedNoSnapshot > 60_000) {
       warnedNoSnapshot = now.getTime();
       console.warn(

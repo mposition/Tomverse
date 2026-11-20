@@ -291,6 +291,11 @@ export function AdminCodingCatalogPanel() {
     setBusy(false);
     setActivate(null);
     await load();
+    // A failed publish keeps a refusal on screen: the model is on, but not in a new snapshot.
+    if (publish && version === null) {
+      showToast({ tone: "refused", title: c.activate.donePublishFailed(item.name) });
+      return;
+    }
     showToast({ tone: "ok", title: version ? c.activate.donePublished(item.name, version) : c.activate.done(item.name) });
   };
 

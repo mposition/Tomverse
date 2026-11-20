@@ -248,6 +248,7 @@ export const adminCodingCatalogMessages = defineAdminMessages({
       confirm: "Activate",
       done: (name: string) => `Activated ${name}.`,
       donePublished: (name: string, version: number) => `Activated ${name} and published snapshot v${version}.`,
+      donePublishFailed: (name: string) => `Activated ${name}, but the snapshot was not published. Publish it from the snapshot card.`,
     },
 
     providers: {
@@ -554,6 +555,7 @@ export const adminCodingCatalogMessages = defineAdminMessages({
       confirm: "활성화",
       done: (name: string) => `${name}을(를) 활성화했습니다.`,
       donePublished: (name: string, version: number) => `${name}을(를) 활성화하고 스냅샷 v${version}을 발행했습니다.`,
+      donePublishFailed: (name: string) => `${name}을(를) 활성화했지만 스냅샷은 발행되지 않았습니다. 스냅샷 카드에서 발행해 주세요.`,
     },
 
     providers: {
