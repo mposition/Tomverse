@@ -26,6 +26,7 @@ worker 계정 `tommy`에는 sudo가 없다. 아래는 관리자 계정에서 운
 4. 네트워크를 계정별로 막는다.
    - DM 계정은 자기 공급사 host로만 나간다.
    - broker는 GitHub 공개 host(`api.github.com`, 2026-11-15부터 작업 공간의 git fetch를 위해 `github.com`)로만 나간다. `raw.githubusercontent.com`은 스냅샷이 없어져 더 쓰지 않는다.
+   - broker에 허용하는 주소는 GitHub이 공개한 git·API 주소 대역(`https://api.github.com/meta`의 `git`과 `api` IPv4)이다. DNS 응답 하나를 허용 목록으로 쓰지 않는다: `github.com`은 몇 분마다 다른 주소로 응답해서, 10분마다 찍은 응답 하나로는 broker의 git fetch가 연결하자마자 거절됐다(2026-11-20, `failed:git_failed:fetch`). 기록은 `decision-maker-s0-records/2026-11-20__broker-github-egress.md`.
    - 방식(UID별 방화벽 규칙 등)은 운영자가 고른다. 스크립트는 결과만 잰다.
 5. DM 계정과 broker의 홈은 다른 계정이 읽을 수 없게 둔다. worker의 홈, clone, `~/.amux`도 마찬가지다.
 
