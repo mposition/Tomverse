@@ -640,6 +640,13 @@ test("fresh captures run only behind their switch, before the plan and every pai
   const recorder = await readFile(new URL("../tools/marketing-video/fresh-review.mjs", import.meta.url), "utf8");
   assert.ok(recorder.indexOf("paid = 1;") < recorder.indexOf('chat-send-button"]\').click()'), "marked paid before the send click");
   assert.ok(recorder.indexOf("paid = 2;") < recorder.indexOf('await entry.locator("button").first().click()'), "marked paid before the analysis click");
+  // The analysis button is also on right after the send, before any answer starts (2026-11-20):
+  // the recorder waits for it to go off, then on, and counts the page as still only while it is on.
+  const send = recorder.indexOf("chat-send-button\"]').click()");
+  const off = recorder.indexOf("await page.waitForFunction(analysisOff");
+  const on = recorder.indexOf('await entry.locator("button:not([disabled])").first().waitFor(');
+  assert.ok(send > 0 && send < off && off < on, "off, then on, after the send");
+  assert.ok(recorder.includes("still = !now.off && now.length === last ? still + 1 : 0;"), "a page is still only while the button is on");
   assert.doesNotMatch(block, /paid\(|speakLine\(|makeMedia\(/u);
   assert.ok(source.includes("`job/creative/${run}/sources/**`"), "the plan call may read the run's own packs");
 });

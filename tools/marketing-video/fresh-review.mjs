@@ -256,13 +256,23 @@ async function record({ locale, outDir, question, dry }) {
     log.push({ paid: "send attempted" });
     await page.locator('[data-testid="chat-send-button"]').click();
     const entry = page.locator('[data-testid="studio-analysis-entry"]');
+    // The analysis button is on whenever no model is answering, which includes the moment right
+    // after the send, before any answer has started (2026-11-20: it passed at once, Claude Haiku
+    // 5.5 was still "Connecting" 40 s later, and the click found it off). So wait for it to go
+    // off (answers started), then on again (every answer settled), and count the page as still
+    // only while it stays on.
+    const analysisOff = () => document.querySelector('[data-testid="studio-analysis-entry"] button')?.disabled === true;
+    await page.waitForFunction(analysisOff, null, { timeout: 60_000 }).catch(() => {});
     await entry.locator("button:not([disabled])").first().waitFor({ timeout: 300_000 });
     let last = -1;
-    for (let k = 0, still = 0; k < 240 && still < 4; k += 1) {
+    for (let k = 0, still = 0; k < 300 && still < 4; k += 1) {
       await page.waitForTimeout(1000);
-      const length = await page.evaluate(() => document.body.innerText.length);
-      still = length === last ? still + 1 : 0;
-      last = length;
+      const now = await page.evaluate(() => ({
+        length: document.body.innerText.length,
+        off: document.querySelector('[data-testid="studio-analysis-entry"] button')?.disabled === true,
+      }));
+      still = !now.off && now.length === last ? still + 1 : 0;
+      last = now.length;
     }
     await page.getByRole("button", { name: L.side }).first().click();
     await page.waitForTimeout(2000);
