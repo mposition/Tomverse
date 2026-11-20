@@ -13,6 +13,7 @@ import {
   imageDownloadContentDisposition,
   imageDownloadFilename,
 } from "@/lib/imageAssetDownload";
+import { recordImageGenerationSignal } from "@/lib/imageGenerationSignals";
 import { IMAGE_ORIGINAL_MAX_READ_BYTES } from "@/lib/imageGenerationStateCore";
 import { prisma } from "@/lib/prisma";
 import { readOwnR2ObjectBytes } from "@/lib/r2";
@@ -144,6 +145,15 @@ export async function GET(req: Request, { params }: Params) {
       modelId: generation.modelId,
       mimeType,
     });
+
+    // A download is the strongest quiet signal that the picture was wanted
+    // (image routing measurement). Awaited, but never allowed to cost the
+    // person the file they just paid for.
+    await recordImageGenerationSignal({
+      userId,
+      generationId: generation.id,
+      kind: "download",
+    }).catch((error) => console.error("Image download signal failed:", error));
 
     return new Response(new Uint8Array(bytes), {
       headers: {

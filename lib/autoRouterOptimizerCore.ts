@@ -361,15 +361,19 @@ export type ActiveRouterGuidance = RouterGuidanceStep & {
 /** How many earlier guidances rollback can walk back through. */
 export const AUTO_ROUTER_GUIDANCE_HISTORY_MAX = 10;
 
-const parseStep = (value: unknown): RouterGuidanceStep | null => {
+const parseStep = (value: unknown, admit: (raw: unknown) => string | null = admitGuidance): RouterGuidanceStep | null => {
     const step = value as Partial<RouterGuidanceStep> | null;
-    const guidance = admitGuidance(step?.guidance);
+    const guidance = admit(step?.guidance);
     if (!guidance) return null;
     return { guidance, cycleId: typeof step?.cycleId === "string" ? step.cycleId : null };
 };
 
 /** The stored value, or null when absent or not a valid guidance record. */
-export const parseActiveRouterGuidance = (raw: string | null | undefined): ActiveRouterGuidance | null => {
+export const parseActiveRouterGuidance = (
+    raw: string | null | undefined,
+    /** The kind's own admission; the router guidance's bounds unless given (the image criteria are longer). */
+    admit: (raw: unknown) => string | null = admitGuidance
+): ActiveRouterGuidance | null => {
     if (!raw) return null;
     let value: unknown;
     try {
@@ -377,14 +381,14 @@ export const parseActiveRouterGuidance = (raw: string | null | undefined): Activ
     } catch {
         return null;
     }
-    const current = parseStep(value);
+    const current = parseStep(value, admit);
     if (!current?.cycleId) return null;
     const { history, previous } = value as { history?: unknown; previous?: unknown };
     // A record from before the history existed kept one `previous` step.
     const steps = Array.isArray(history) ? history : previous ? [previous] : [];
     return {
         ...current,
-        history: steps.flatMap((step) => parseStep(step) ?? []).slice(0, AUTO_ROUTER_GUIDANCE_HISTORY_MAX),
+        history: steps.flatMap((step) => parseStep(step, admit) ?? []).slice(0, AUTO_ROUTER_GUIDANCE_HISTORY_MAX),
     };
 };
 

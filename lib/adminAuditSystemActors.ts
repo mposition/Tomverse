@@ -470,7 +470,8 @@ export const systemAuditActionAllowed = (
     ((action === "auto.llm_router_optimizer.cycle_started" ||
       action === "auto.llm_router_guidance.promoted" ||
       action === "auto.llm_router_rewrite_guidance.promoted" ||
-      action === "auto.llm_router_coding_guidance.promoted") &&
+      action === "auto.llm_router_coding_guidance.promoted" ||
+      action === "auto.llm_router_image_guidance.promoted") &&
       targetType === "AutoRouterOptimizerCycle") ||
      // Its own setting changes (lib/autoRouterTunablesCore.ts), owner approval
      // 2026-10-20, on the one settings row they live in.

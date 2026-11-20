@@ -80,6 +80,7 @@ export async function POST(req: Request) {
       conversationId: body.conversationId ?? null,
       request: req,
       attachedPhoto: body.attachedPhoto === true,
+      source: "composer",
     });
     return NextResponse.json(decision);
   } catch (error) {

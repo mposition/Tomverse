@@ -498,21 +498,45 @@ export const rewriteSyntheticCaseViews = (cases: unknown): RewriteSyntheticCaseV
 /**
  * Which cycle the daily maintenance run starts, if any. One a day whichever it
  * is (the system's daily count is shared by every target); with several
- * switches on the targets take turns in the order routing, rewrite, coding,
+ * switches on the targets take turns in the order routing, rewrite, coding, image,
  * starting after the last system cycle's target.
  */
 export const scheduledOptimizerTarget = (input: {
     routingDaily: boolean;
     rewriteDaily: boolean;
     codingDaily?: boolean;
+    imageDaily?: boolean;
     lastSystemTarget: AutoLlmRouterGuidanceKind | null;
 }): AutoLlmRouterGuidanceKind | null => {
     const on = ([
         ["routing", input.routingDaily],
         ["rewrite", input.rewriteDaily],
         ["coding", input.codingDaily === true],
+        ["image", input.imageDaily === true],
     ] as const).flatMap(([target, daily]) => (daily ? [target] : []));
     if (on.length === 0) return null;
     const last = input.lastSystemTarget ? on.indexOf(input.lastSystemTarget) : -1;
     return on[(last + 1) % on.length];
 };
+
+/**
+ * Every switched-on target in the order the daily run tries them: the turn's
+ * target first, then the rest of the rotation. A target that cannot start for
+ * a reason of its own (image triage off, no router, no prices) hands the day to
+ * the next one, so it never holds the others off by being picked every day.
+ */
+export const scheduledOptimizerOrder = (input: Parameters<typeof scheduledOptimizerTarget>[0]): AutoLlmRouterGuidanceKind[] => {
+    const first = scheduledOptimizerTarget(input);
+    if (!first) return [];
+    const order: AutoLlmRouterGuidanceKind[] = [];
+    let last: AutoLlmRouterGuidanceKind | null = input.lastSystemTarget;
+    for (;;) {
+        const next = scheduledOptimizerTarget({ ...input, lastSystemTarget: last });
+        if (!next || order.includes(next)) return order;
+        order.push(next);
+        last = next;
+    }
+};
+
+/** Refusals that belong to one target only: the daily run tries the next. */
+export const OPTIMIZER_TARGET_SKIP_REFUSALS: ReadonlySet<string> = new Set(["image_triage_off", "router_off", "pricing_unavailable"]);
