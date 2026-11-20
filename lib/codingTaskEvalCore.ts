@@ -1,27 +1,76 @@
 /**
  * Pure pieces of the coding-task evaluation harness: the fixed task set, the
- * result shape, the per-model summary and the workspace path guard.
+ * result shape, the per-model summary, the workspace path guard, the verdict
+ * logic and the worst-case cost bound.
  *
  * No server-only import and no SDK import, so a test (or a report page) can use
  * it anywhere. The module that runs a model against a task is
  * lib/codingTaskEval.ts.
  *
- * Every task is a tiny Node-built-ins-only ES module project. `files` is what
- * the model starts with; `tests` is a hidden `node:test` file the model never
- * sees. The tests import `./src/index.mjs` and must finish well under a second.
+ * How a verdict cannot be forged. A task has no test file. It has `cases`:
+ * a call (or a constructor plus method steps) and the value it must return.
+ * The model's module runs in a child process next to a runner this harness
+ * wrote. The child receives the calls with their arguments only. It sends the
+ * values it computed back, inside a frame marked with a one-time token. The
+ * expected values exist only in the parent process, which compares them. Model
+ * code can print anything, call process.exit, or even learn the token: it still
+ * cannot produce a passing frame, because it never sees what a pass looks like.
+ *
+ * Wire format for values in cases (plain JSON): `undefined`, `NaN`, `Infinity`
+ * and `-Infinity` are written as {"$":"undefined"} and so on; {"$":"self"} is
+ * a method returning the object it was called on.
  */
 
 export type CodingEvalDifficulty = "easy" | "medium" | "hard";
 
+/** A value in the case wire format. Must survive JSON.parse(JSON.stringify(x)). */
+export type CodingEvalValue = unknown;
+
+/** What one call produced, as the runner reports it (values already in wire format). */
+export type CodingEvalOutcome = {
+  ok: boolean;
+  value?: CodingEvalValue;
+  /** Constructor name of the thrown value when `ok` is false. */
+  error?: string;
+  /** Own enumerable properties of the thrown value, in wire format. */
+  props?: Record<string, CodingEvalValue>;
+};
+
+export type CodingEvalStep =
+  | { method: string; args?: CodingEvalValue[]; expect: CodingEvalValue }
+  | { method: string; args?: CodingEvalValue[]; expectThrows: string }
+  | { get: string; expect: CodingEvalValue };
+
+export type CodingEvalCase =
+  | {
+      /** Name of an export of src/index.mjs. */
+      call: string;
+      args: CodingEvalValue[];
+      expect?: CodingEvalValue;
+      /** Constructor name of the error the call must throw (for example "RangeError"). */
+      expectThrows?: string;
+      /** Extra parent-side check of the outcome (never sent to the child). */
+      check?: (outcome: CodingEvalOutcome) => boolean;
+    }
+  | {
+      /** Name of a class exported by src/index.mjs. */
+      construct: string;
+      args: CodingEvalValue[];
+      steps?: CodingEvalStep[];
+      expectThrows?: string;
+    };
+
 export type CodingEvalTask = {
   id: string;
   difficulty: CodingEvalDifficulty;
-  /** What the model is asked to do. Describes behaviour, never the test file. */
+  /** What the model is asked to do. Describes behaviour, never the cases. */
   prompt: string;
   /** Starting workspace: relative path -> file content. */
   files: Record<string, string>;
-  /** Hidden `node:test` file, written next to `src/` only while tests run. */
-  tests: string;
+  /** A few cases the model can run (run_tests) and sees the failures of. */
+  examples: readonly CodingEvalCase[];
+  /** The final grade: every one of these must pass. Includes the examples. */
+  hidden: readonly CodingEvalCase[];
 };
 
 export type CodingEvalFailure = null | "tests_failed" | "no_change" | "step_limit" | "timeout" | "error";
@@ -37,14 +86,20 @@ export type CodingEvalResult = {
   inputTokens: number;
   outputTokens: number;
   failure: CodingEvalFailure;
+  /**
+   * True when the token counts may be too low: a step reported no usage, or the
+   * task ended in `error` or `timeout` (a call in flight reports nothing).
+   * Charge the worst case (codingEvalWorstCaseTokens) for such a result.
+   */
+  usageUnknown: boolean;
 };
 
 export type CodingEvalLimits = {
   /** Agent step cap (one step = one model call plus its tool executions). */
   maxSteps: number;
-  /** Wall clock for one sandboxed `node` test run. */
+  /** Wall clock for one sandboxed `node` run of a case list. */
   testTimeoutMs: number;
-  /** Characters of test output kept; the tail is kept because failures print last. */
+  /** Characters of run_tests output kept; the tail is kept because failures print last. */
   testOutputMaxChars: number;
   /** Wall clock for a whole task: model calls, tools and the final judging run. */
   taskTimeoutMs: number;
@@ -52,6 +107,10 @@ export type CodingEvalLimits = {
   maxTestRunsPerTask: number;
   maxFiles: number;
   maxFileBytes: number;
+  /** Total bytes of all files in the workspace. */
+  maxWorkspaceBytes: number;
+  /** Total bytes of tool results returned to the model in one task. */
+  maxToolOutputBytes: number;
   maxPathLength: number;
   maxNameLength: number;
   maxDepth: number;
@@ -66,16 +125,255 @@ export const CODING_EVAL_LIMITS: Readonly<CodingEvalLimits> = Object.freeze({
   maxTestRunsPerTask: 8,
   maxFiles: 20,
   maxFileBytes: 64 * 1024,
+  maxWorkspaceBytes: 256 * 1024,
+  maxToolOutputBytes: 256 * 1024,
   maxPathLength: 120,
   maxNameLength: 64,
   maxDepth: 5,
   maxOutputTokensPerStep: 8_192,
 });
 
-/** The hidden test file's name. It exists in the workspace only during a test run. */
-export const CODING_EVAL_HIDDEN_TEST_FILE = "zz_hidden_acceptance.test.mjs";
+/** The module under test. Every task's runner imports exactly this file. */
+export const CODING_EVAL_ENTRY_FILE = "src/index.mjs";
+
+/** The trusted runner's name. It exists in the workspace only while cases run. */
+export const CODING_EVAL_RUNNER_FILE = "zz_eval_runner.mjs";
+
+const RESERVED_FILES: readonly string[] = [CODING_EVAL_RUNNER_FILE];
 
 const DIFFICULTIES: readonly CodingEvalDifficulty[] = ["easy", "medium", "hard"];
+
+export const CODING_EVAL_UNDEFINED = Object.freeze({ $: "undefined" });
+export const CODING_EVAL_SELF = Object.freeze({ $: "self" });
+export const CODING_EVAL_NAN = Object.freeze({ $: "NaN" });
+
+// ---------------------------------------------------------------------------
+// Case builders (task data below)
+// ---------------------------------------------------------------------------
+
+const U = CODING_EVAL_UNDEFINED;
+const SELF = CODING_EVAL_SELF;
+
+const fn = (call: string, args: CodingEvalValue[], expect: CodingEvalValue): CodingEvalCase => ({ call, args, expect });
+const fnThrows = (
+  call: string,
+  args: CodingEvalValue[],
+  expectThrows: string,
+  check?: (outcome: CodingEvalOutcome) => boolean,
+): CodingEvalCase => ({ call, args, expectThrows, ...(check ? { check } : {}) });
+const method = (name: string, args: CodingEvalValue[], expect: CodingEvalValue): CodingEvalStep => ({
+  method: name,
+  args,
+  expect,
+});
+const getter = (name: string, expect: CodingEvalValue): CodingEvalStep => ({ get: name, expect });
+
+// ---------------------------------------------------------------------------
+// Tasks
+// ---------------------------------------------------------------------------
+
+const RANGE_EXAMPLES: CodingEvalCase[] = [
+  fn("sumRange", [1, 5], 15),
+  fn("lastN", [[1, 2, 3, 4], 2], [3, 4]),
+  fn("lastN", [[1, 2, 3], 0], []),
+];
+const RANGE_HIDDEN: CodingEvalCase[] = [
+  ...RANGE_EXAMPLES,
+  fn("sumRange", [3, 3], 3),
+  fn("sumRange", [-2, 2], 0),
+  fn("sumRange", [5, 1], 0),
+  fn("lastN", [[1, 2, 3, 4], 4], [1, 2, 3, 4]),
+  fn("lastN", [[1, 2, 3], -1], []),
+  fn("lastN", [[1, 2, 3], 10], [1, 2, 3]),
+];
+
+const QUERY_EXAMPLES: CodingEvalCase[] = [
+  fn("parseQuery", ["a=1&b=2"], { a: "1", b: "2" }),
+  fn("parseQuery", ["token=abc=def=="], { token: "abc=def==" }),
+  fn("parseQuery", ["a=1&a=2"], { a: ["1", "2"] }),
+];
+const QUERY_HIDDEN: CodingEvalCase[] = [
+  ...QUERY_EXAMPLES,
+  fn("parseQuery", ["?x=1"], { x: "1" }),
+  fn("parseQuery", [""], {}),
+  fn("parseQuery", ["?"], {}),
+  fn("parseQuery", ["&&a=1&"], { a: "1" }),
+  fn("parseQuery", ["flag&x=1"], { flag: "", x: "1" }),
+  fn("parseQuery", ["empty="], { empty: "" }),
+  fn("parseQuery", ["name=John+Doe&city=S%C3%A3o%20Paulo"], { name: "John Doe", city: "São Paulo" }),
+  fn("parseQuery", ["q=100%25"], { q: "100%" }),
+  fn("parseQuery", ["a%20b=c%26d"], { "a b": "c&d" }),
+  fn("parseQuery", ["a=1&a=2&b=x&a=3"], { a: ["1", "2", "3"], b: "x" }),
+];
+
+const LRU_EXAMPLES: CodingEvalCase[] = [
+  {
+    construct: "LRUCache",
+    args: [2],
+    steps: [
+      method("set", ["a", 1], SELF),
+      method("set", ["b", 2], SELF),
+      method("get", ["a"], 1),
+      method("get", ["missing"], U),
+      getter("size", 2),
+    ],
+  },
+  {
+    construct: "LRUCache",
+    args: [2],
+    steps: [
+      method("set", ["a", 1], SELF),
+      method("set", ["b", 2], SELF),
+      method("set", ["c", 3], SELF),
+      method("has", ["a"], false),
+      method("keys", [], ["b", "c"]),
+    ],
+  },
+];
+const LRU_HIDDEN: CodingEvalCase[] = [
+  ...LRU_EXAMPLES,
+  {
+    construct: "LRUCache",
+    args: [2],
+    steps: [
+      method("set", ["a", 1], SELF),
+      method("set", ["b", 2], SELF),
+      method("get", ["a"], 1),
+      method("set", ["c", 3], SELF),
+      method("has", ["b"], false),
+      method("keys", [], ["a", "c"]),
+    ],
+  },
+  {
+    construct: "LRUCache",
+    args: [2],
+    steps: [
+      method("set", ["a", 1], SELF),
+      method("set", ["b", 2], SELF),
+      method("set", ["a", 10], SELF),
+      getter("size", 2),
+      method("keys", [], ["b", "a"]),
+      method("set", ["c", 3], SELF),
+      method("has", ["b"], false),
+      method("get", ["a"], 10),
+    ],
+  },
+  {
+    construct: "LRUCache",
+    args: [2],
+    steps: [
+      method("set", ["a", 1], SELF),
+      method("set", ["b", 2], SELF),
+      method("has", ["a"], true),
+      method("set", ["c", 3], SELF),
+      method("has", ["a"], false),
+    ],
+  },
+  {
+    construct: "LRUCache",
+    args: [1],
+    steps: [method("set", ["a", U], SELF), method("has", ["a"], true), getter("size", 1)],
+  },
+  {
+    construct: "LRUCache",
+    args: [1],
+    steps: [
+      method("set", ["a", 1], SELF),
+      method("set", ["b", 2], SELF),
+      method("has", ["a"], false),
+      method("get", ["b"], 2),
+      getter("size", 1),
+    ],
+  },
+  { construct: "LRUCache", args: [0], expectThrows: "RangeError" },
+  { construct: "LRUCache", args: [-1], expectThrows: "RangeError" },
+  { construct: "LRUCache", args: [1.5], expectThrows: "RangeError" },
+  { construct: "LRUCache", args: [CODING_EVAL_NAN], expectThrows: "RangeError" },
+];
+
+const MERGE_EXAMPLES: CodingEvalCase[] = [
+  fn("mergeIntervals", [[[8, 10], [1, 3], [2, 6], [15, 18]]], [[1, 6], [8, 10], [15, 18]]),
+  fn("mergeIntervals", [[[1, 3], [3, 5]]], [[1, 5]]),
+];
+const MERGE_HIDDEN: CodingEvalCase[] = [
+  ...MERGE_EXAMPLES,
+  fn("mergeIntervals", [[[1, 2], [3, 4]]], [[1, 2], [3, 4]]),
+  fn("mergeIntervals", [[[1, 10], [2, 3], [4, 5]]], [[1, 10]]),
+  fn("mergeIntervals", [[[1, 4], [2, 3]]], [[1, 4]]),
+  fn("mergeIntervals", [[[-5, -1], [-3, 0], [7, 7], [7, 7]]], [[-5, 0], [7, 7]]),
+  fn("mergeIntervals", [[]], []),
+  fnThrows("mergeIntervals", [[[1, 2], [5, 3]]], "RangeError"),
+];
+
+const BAD_EXPRESSIONS = ["", "   ", "2 $ 3", "abc", "(1 + 2", "1 + 2)", "()", "1 +", "* 3", "1 2", "1.2.3", "2 ** 3"];
+const EXPRESSION_EXAMPLES: CodingEvalCase[] = [
+  fn("evaluate", ["2 + 3 * 4"], 14),
+  fn("evaluate", ["2^3^2"], 512),
+  fn("evaluate", ["-2^2"], -4),
+  fnThrows("evaluate", ["1 +"], "SyntaxError"),
+];
+const EXPRESSION_HIDDEN: CodingEvalCase[] = [
+  ...EXPRESSION_EXAMPLES,
+  fn("evaluate", ["42"], 42),
+  fn("evaluate", ["  2.5 "], 2.5),
+  fn("evaluate", [".5 + .25"], 0.75),
+  fn("evaluate", ["1+2"], 3),
+  fn("evaluate", ["2 * 3 + 4"], 10),
+  fn("evaluate", ["2 * 3 ^ 2"], 18),
+  fn("evaluate", ["1 - 2 - 3"], -4),
+  fn("evaluate", ["8 / 2 / 2"], 2),
+  fn("evaluate", ["10 / 4"], 2.5),
+  fn("evaluate", ["2^10"], 1024),
+  fn("evaluate", ["-3"], -3),
+  fn("evaluate", ["--3"], 3),
+  fn("evaluate", ["2*-3"], -6),
+  fn("evaluate", ["2^-2"], 0.25),
+  fn("evaluate", ["+4 - -1"], 5),
+  fn("evaluate", ["(2 + 3) * 4"], 20),
+  fn("evaluate", ["((1))"], 1),
+  fn("evaluate", ["2 * (3 + (4 - 1)) ^ 2"], 72),
+  fn("evaluate", ["-(1 + 2)"], -3),
+  ...BAD_EXPRESSIONS.map((source) => fnThrows("evaluate", [source], "SyntaxError")),
+  fnThrows("evaluate", ["1 / 0"], "RangeError"),
+  fnThrows("evaluate", ["4 / (2 - 2)"], "RangeError"),
+];
+
+type Graph = Record<string, string[]>;
+
+/** Parent-side check: the thrown CycleError lists a real cycle (each name depends on the next). */
+const realCycle =
+  (graph: Graph, options: { exclude?: string[]; exact?: string[] } = {}) =>
+  (outcome: CodingEvalOutcome): boolean => {
+    const cycle = outcome.props ? outcome.props.cycle : undefined;
+    if (outcome.ok || !Array.isArray(cycle) || cycle.length < 2) return false;
+    if (!cycle.every((name) => typeof name === "string") || cycle[0] !== cycle[cycle.length - 1]) return false;
+    for (let i = 0; i + 1 < cycle.length; i++) {
+      const dependencies = Object.prototype.hasOwnProperty.call(graph, cycle[i]) ? graph[cycle[i]] : [];
+      if (!dependencies.includes(cycle[i + 1])) return false;
+    }
+    if (options.exclude && cycle.some((name) => options.exclude?.includes(name))) return false;
+    if (options.exact && JSON.stringify(cycle) !== JSON.stringify(options.exact)) return false;
+    return true;
+  };
+
+const THREE_CYCLE: Graph = { a: ["b"], b: ["c"], c: ["a"] };
+const SELF_CYCLE: Graph = { a: ["a"] };
+const TAIL_CYCLE: Graph = { x: ["a"], a: ["b"], b: ["a"], y: [] };
+const TOPO_EXAMPLES: CodingEvalCase[] = [
+  fn("topoSort", [{ app: ["lib", "util"], lib: ["util"], util: [] }], ["util", "lib", "app"]),
+  fn("topoSort", [{ b: [], a: [], c: ["a", "b"] }], ["a", "b", "c"]),
+  fnThrows("topoSort", [THREE_CYCLE], "CycleError", realCycle(THREE_CYCLE)),
+];
+const TOPO_HIDDEN: CodingEvalCase[] = [
+  ...TOPO_EXAMPLES,
+  fn("topoSort", [{ z: [], y: ["z"], a: ["z"], m: [] }], ["m", "z", "a", "y"]),
+  fn("topoSort", [{ a: ["z"] }], ["z", "a"]),
+  fn("topoSort", [{}], []),
+  fn("topoSort", [{ a: ["b", "b"], b: [] }], ["b", "a"]),
+  fn("topoSort", [{ a: ["b"], b: ["c"] }], ["c", "b", "a"]),
+  fnThrows("topoSort", [SELF_CYCLE], "CycleError", realCycle(SELF_CYCLE, { exact: ["a", "a"] })),
+  fnThrows("topoSort", [TAIL_CYCLE], "CycleError", realCycle(TAIL_CYCLE, { exclude: ["x", "y"] })),
+];
 
 export const CODING_EVAL_TASKS: readonly CodingEvalTask[] = [
   {
@@ -89,7 +387,7 @@ export const CODING_EVAL_TASKS: readonly CodingEvalTask[] = [
       "",
       "lastN(items, n): a new array holding the last n items of the array `items`.",
       "n = 0 (or negative) gives an empty array; an n larger than the length gives a full copy.",
-      "The input array must not be modified.",
+      "The input array must not be modified, and the result must be a new array.",
     ].join("\n"),
     files: {
       "src/index.mjs": [
@@ -107,40 +405,8 @@ export const CODING_EVAL_TASKS: readonly CodingEvalTask[] = [
         "",
       ].join("\n"),
     },
-    tests: [
-      'import test from "node:test";',
-      'import assert from "node:assert/strict";',
-      'import { sumRange, lastN } from "./src/index.mjs";',
-      "",
-      'test("sumRange is inclusive on both ends", () => {',
-      "  assert.equal(sumRange(1, 5), 15);",
-      "  assert.equal(sumRange(3, 3), 3);",
-      "  assert.equal(sumRange(-2, 2), 0);",
-      "});",
-      "",
-      'test("sumRange of a reversed range is 0", () => {',
-      "  assert.equal(sumRange(5, 1), 0);",
-      "});",
-      "",
-      'test("lastN returns the tail", () => {',
-      "  assert.deepEqual(lastN([1, 2, 3, 4], 2), [3, 4]);",
-      "  assert.deepEqual(lastN([1, 2, 3, 4], 4), [1, 2, 3, 4]);",
-      "});",
-      "",
-      'test("lastN with zero or negative n is empty", () => {',
-      "  assert.deepEqual(lastN([1, 2, 3], 0), []);",
-      "  assert.deepEqual(lastN([1, 2, 3], -1), []);",
-      "});",
-      "",
-      'test("lastN with n larger than the array returns a copy", () => {',
-      "  const items = [1, 2, 3];",
-      "  const result = lastN(items, 10);",
-      "  assert.deepEqual(result, [1, 2, 3]);",
-      "  assert.notEqual(result, items);",
-      "  assert.deepEqual(items, [1, 2, 3]);",
-      "});",
-      "",
-    ].join("\n"),
+    examples: RANGE_EXAMPLES,
+    hidden: RANGE_HIDDEN,
   },
   {
     id: "query-string-parser",
@@ -169,42 +435,8 @@ export const CODING_EVAL_TASKS: readonly CodingEvalTask[] = [
         "",
       ].join("\n"),
     },
-    tests: [
-      'import test from "node:test";',
-      'import assert from "node:assert/strict";',
-      'import { parseQuery } from "./src/index.mjs";',
-      "",
-      'test("parses plain pairs and ignores a leading question mark", () => {',
-      '  assert.deepEqual(parseQuery("a=1&b=2"), { a: "1", b: "2" });',
-      '  assert.deepEqual(parseQuery("?x=1"), { x: "1" });',
-      "});",
-      "",
-      'test("empty input and empty pairs", () => {',
-      "  assert.deepEqual(parseQuery(\"\"), {});",
-      "  assert.deepEqual(parseQuery(\"?\"), {});",
-      '  assert.deepEqual(parseQuery("&&a=1&"), { a: "1" });',
-      "});",
-      "",
-      'test("the value keeps everything after the first equals sign", () => {',
-      '  assert.deepEqual(parseQuery("token=abc=def=="), { token: "abc=def==" });',
-      "});",
-      "",
-      'test("a key without a value is an empty string", () => {',
-      '  assert.deepEqual(parseQuery("flag&x=1"), { flag: "", x: "1" });',
-      '  assert.deepEqual(parseQuery("empty="), { empty: "" });',
-      "});",
-      "",
-      'test("percent decoding and plus as space", () => {',
-      '  assert.deepEqual(parseQuery("name=John+Doe&city=S%C3%A3o%20Paulo"), { name: "John Doe", city: "S\\u00e3o Paulo" });',
-      '  assert.deepEqual(parseQuery("q=100%25"), { q: "100%" });',
-      '  assert.deepEqual(parseQuery("a%20b=c%26d"), { "a b": "c&d" });',
-      "});",
-      "",
-      'test("repeated keys collect values in order", () => {',
-      '  assert.deepEqual(parseQuery("a=1&a=2&b=x&a=3"), { a: ["1", "2", "3"], b: "x" });',
-      "});",
-      "",
-    ].join("\n"),
+    examples: QUERY_EXAMPLES,
+    hidden: QUERY_HIDDEN,
   },
   {
     id: "lru-cache",
@@ -252,75 +484,8 @@ export const CODING_EVAL_TASKS: readonly CodingEvalTask[] = [
         "",
       ].join("\n"),
     },
-    tests: [
-      'import test from "node:test";',
-      'import assert from "node:assert/strict";',
-      'import { LRUCache } from "./src/index.mjs";',
-      "",
-      'test("stores and returns values", () => {',
-      "  const cache = new LRUCache(2);",
-      '  cache.set("a", 1);',
-      '  cache.set("b", 2);',
-      '  assert.equal(cache.get("a"), 1);',
-      '  assert.equal(cache.get("b"), 2);',
-      '  assert.equal(cache.get("missing"), undefined);',
-      "  assert.equal(cache.size, 2);",
-      "});",
-      "",
-      'test("evicts the least recently used entry", () => {',
-      "  const cache = new LRUCache(2);",
-      '  cache.set("a", 1).set("b", 2).set("c", 3);',
-      '  assert.equal(cache.has("a"), false);',
-      '  assert.deepEqual(cache.keys(), ["b", "c"]);',
-      "  assert.equal(cache.size, 2);",
-      "});",
-      "",
-      'test("get refreshes recency", () => {',
-      "  const cache = new LRUCache(2);",
-      '  cache.set("a", 1);',
-      '  cache.set("b", 2);',
-      '  cache.get("a");',
-      '  cache.set("c", 3);',
-      '  assert.equal(cache.has("b"), false);',
-      '  assert.deepEqual(cache.keys(), ["a", "c"]);',
-      "});",
-      "",
-      'test("set on an existing key replaces the value and refreshes recency without growing", () => {',
-      "  const cache = new LRUCache(2);",
-      '  cache.set("a", 1);',
-      '  cache.set("b", 2);',
-      '  cache.set("a", 10);',
-      "  assert.equal(cache.size, 2);",
-      '  assert.deepEqual(cache.keys(), ["b", "a"]);',
-      '  cache.set("c", 3);',
-      '  assert.equal(cache.has("b"), false);',
-      '  assert.equal(cache.get("a"), 10);',
-      "});",
-      "",
-      'test("has does not change recency", () => {',
-      "  const cache = new LRUCache(2);",
-      '  cache.set("a", 1);',
-      '  cache.set("b", 2);',
-      '  assert.equal(cache.has("a"), true);',
-      '  cache.set("c", 3);',
-      '  assert.equal(cache.has("a"), false);',
-      "});",
-      "",
-      'test("a stored undefined value is still a present key", () => {',
-      "  const cache = new LRUCache(1);",
-      '  cache.set("a", undefined);',
-      '  assert.equal(cache.has("a"), true);',
-      "  assert.equal(cache.size, 1);",
-      "});",
-      "",
-      'test("capacity must be a positive integer", () => {',
-      "  assert.throws(() => new LRUCache(0), RangeError);",
-      "  assert.throws(() => new LRUCache(-1), RangeError);",
-      "  assert.throws(() => new LRUCache(1.5), RangeError);",
-      "  assert.throws(() => new LRUCache(Number.NaN), RangeError);",
-      "});",
-      "",
-    ].join("\n"),
+    examples: LRU_EXAMPLES,
+    hidden: LRU_HIDDEN,
   },
   {
     id: "merge-intervals",
@@ -356,48 +521,8 @@ export const CODING_EVAL_TASKS: readonly CodingEvalTask[] = [
         "",
       ].join("\n"),
     },
-    tests: [
-      'import test from "node:test";',
-      'import assert from "node:assert/strict";',
-      'import { mergeIntervals } from "./src/index.mjs";',
-      "",
-      'test("merges overlapping intervals out of order", () => {',
-      "  assert.deepEqual(mergeIntervals([[8, 10], [1, 3], [2, 6], [15, 18]]), [[1, 6], [8, 10], [15, 18]]);",
-      "});",
-      "",
-      'test("intervals touching at a point merge, separate ones do not", () => {',
-      "  assert.deepEqual(mergeIntervals([[1, 3], [3, 5]]), [[1, 5]]);",
-      "  assert.deepEqual(mergeIntervals([[1, 2], [3, 4]]), [[1, 2], [3, 4]]);",
-      "});",
-      "",
-      'test("a contained interval does not shrink the outer one", () => {',
-      "  assert.deepEqual(mergeIntervals([[1, 10], [2, 3], [4, 5]]), [[1, 10]]);",
-      "  assert.deepEqual(mergeIntervals([[1, 4], [2, 3]]), [[1, 4]]);",
-      "});",
-      "",
-      'test("negative numbers, duplicates and single points", () => {',
-      "  assert.deepEqual(mergeIntervals([[-5, -1], [-3, 0], [7, 7], [7, 7]]), [[-5, 0], [7, 7]]);",
-      "});",
-      "",
-      'test("empty input", () => {',
-      "  assert.deepEqual(mergeIntervals([]), []);",
-      "});",
-      "",
-      'test("an inverted interval is a RangeError", () => {',
-      "  assert.throws(() => mergeIntervals([[1, 2], [5, 3]]), RangeError);",
-      "});",
-      "",
-      'test("input is not mutated and the result shares no arrays with it", () => {',
-      "  const input = [[8, 10], [1, 3], [2, 6]];",
-      "  const before = JSON.stringify(input);",
-      "  const result = mergeIntervals(input);",
-      "  assert.equal(JSON.stringify(input), before);",
-      "  for (const pair of result) for (const original of input) assert.notEqual(pair, original);",
-      "  result[0][0] = 99;",
-      "  assert.equal(JSON.stringify(input), before);",
-      "});",
-      "",
-    ].join("\n"),
+    examples: MERGE_EXAMPLES,
+    hidden: MERGE_HIDDEN,
   },
   {
     id: "expression-parser",
@@ -435,63 +560,8 @@ export const CODING_EVAL_TASKS: readonly CodingEvalTask[] = [
         "",
       ].join("\n"),
     },
-    tests: [
-      'import test from "node:test";',
-      'import assert from "node:assert/strict";',
-      'import { evaluate } from "./src/index.mjs";',
-      "",
-      'test("numbers and whitespace", () => {',
-      '  assert.equal(evaluate("42"), 42);',
-      '  assert.equal(evaluate("  2.5 "), 2.5);',
-      '  assert.equal(evaluate(".5 + .25"), 0.75);',
-      '  assert.equal(evaluate("1+2"), 3);',
-      "});",
-      "",
-      'test("precedence", () => {',
-      '  assert.equal(evaluate("2 + 3 * 4"), 14);',
-      '  assert.equal(evaluate("2 * 3 + 4"), 10);',
-      '  assert.equal(evaluate("2 * 3 ^ 2"), 18);',
-      "});",
-      "",
-      'test("left associativity of the other operators", () => {',
-      '  assert.equal(evaluate("1 - 2 - 3"), -4);',
-      '  assert.equal(evaluate("8 / 2 / 2"), 2);',
-      '  assert.equal(evaluate("10 / 4"), 2.5);',
-      "});",
-      "",
-      'test("exponent is right associative", () => {',
-      '  assert.equal(evaluate("2^3^2"), 512);',
-      '  assert.equal(evaluate("2^10"), 1024);',
-      "});",
-      "",
-      'test("unary operators", () => {',
-      '  assert.equal(evaluate("-3"), -3);',
-      '  assert.equal(evaluate("--3"), 3);',
-      '  assert.equal(evaluate("2*-3"), -6);',
-      '  assert.equal(evaluate("-2^2"), -4);',
-      '  assert.equal(evaluate("2^-2"), 0.25);',
-      '  assert.equal(evaluate("+4 - -1"), 5);',
-      "});",
-      "",
-      'test("parentheses", () => {',
-      '  assert.equal(evaluate("(2 + 3) * 4"), 20);',
-      '  assert.equal(evaluate("((1))"), 1);',
-      '  assert.equal(evaluate("2 * (3 + (4 - 1)) ^ 2"), 72);',
-      '  assert.equal(evaluate("-(1 + 2)"), -3);',
-      "});",
-      "",
-      'test("malformed input is a SyntaxError", () => {',
-      '  for (const bad of ["", "   ", "2 $ 3", "abc", "(1 + 2", "1 + 2)", "()", "1 +", "* 3", "1 2", "1.2.3", "2 ** 3"]) {',
-      "    assert.throws(() => evaluate(bad), SyntaxError, JSON.stringify(bad));",
-      "  }",
-      "});",
-      "",
-      'test("division by zero is a RangeError", () => {',
-      '  assert.throws(() => evaluate("1 / 0"), RangeError);',
-      '  assert.throws(() => evaluate("4 / (2 - 2)"), RangeError);',
-      "});",
-      "",
-    ].join("\n"),
+    examples: EXPRESSION_EXAMPLES,
+    hidden: EXPRESSION_HIDDEN,
   },
   {
     id: "dependency-order",
@@ -511,7 +581,7 @@ export const CODING_EVAL_TASKS: readonly CodingEvalTask[] = [
       "  Its `cycle` property is an array of node names that starts and ends with the same node, where each",
       "  name depends on the next one: [\"a\", \"b\", \"a\"] means a depends on b and b depends on a.",
       "  A self-dependency gives [\"a\", \"a\"]. Only nodes that really are on a cycle may appear in it.",
-      "- Do not modify the input object.",
+      "- Do not modify the input object, and return a new array.",
     ].join("\n"),
     files: {
       "src/index.mjs": [
@@ -530,80 +600,18 @@ export const CODING_EVAL_TASKS: readonly CodingEvalTask[] = [
         "",
       ].join("\n"),
     },
-    tests: [
-      'import test from "node:test";',
-      'import assert from "node:assert/strict";',
-      'import { topoSort, CycleError } from "./src/index.mjs";',
-      "",
-      "// Each name in `cycle` must depend on the next, and the list must close on its first node.",
-      "const assertRealCycle = (graph, cycle) => {",
-      "  assert.ok(Array.isArray(cycle) && cycle.length >= 2, \"cycle must list at least two entries\");",
-      "  assert.equal(cycle[0], cycle[cycle.length - 1]);",
-      "  for (let i = 0; i + 1 < cycle.length; i++) {",
-      "    assert.ok((graph[cycle[i]] || []).includes(cycle[i + 1]), `${cycle[i]} does not depend on ${cycle[i + 1]}`);",
-      "  }",
-      "};",
-      "",
-      'test("dependencies come first", () => {',
-      '  assert.deepEqual(topoSort({ app: ["lib", "util"], lib: ["util"], util: [] }), ["util", "lib", "app"]);',
-      "});",
-      "",
-      'test("ties are broken by string order", () => {',
-      '  assert.deepEqual(topoSort({ b: [], a: [], c: ["a", "b"] }), ["a", "b", "c"]);',
-      '  assert.deepEqual(topoSort({ z: [], y: ["z"], a: ["z"], m: [] }), ["m", "z", "a", "y"]);',
-      "});",
-      "",
-      'test("a node that only appears as a dependency is included", () => {',
-      '  assert.deepEqual(topoSort({ a: ["z"] }), ["z", "a"]);',
-      "});",
-      "",
-      'test("empty graph and duplicate dependencies", () => {',
-      "  assert.deepEqual(topoSort({}), []);",
-      '  assert.deepEqual(topoSort({ a: ["b", "b"], b: [] }), ["b", "a"]);',
-      "});",
-      "",
-      'test("the input graph is not modified", () => {',
-      '  const graph = { a: ["b"], b: ["c"] };',
-      "  const before = JSON.stringify(graph);",
-      "  topoSort(graph);",
-      "  assert.equal(JSON.stringify(graph), before);",
-      "});",
-      "",
-      'test("a cycle throws CycleError with a real cycle", () => {',
-      '  const graph = { a: ["b"], b: ["c"], c: ["a"] };',
-      "  assert.throws(() => topoSort(graph), (error) => {",
-      "    assert.ok(error instanceof CycleError);",
-      "    assertRealCycle(graph, error.cycle);",
-      "    return true;",
-      "  });",
-      "});",
-      "",
-      'test("a self-dependency is a cycle", () => {',
-      '  const graph = { a: ["a"] };',
-      "  assert.throws(() => topoSort(graph), (error) => {",
-      "    assert.ok(error instanceof CycleError);",
-      '    assert.deepEqual(error.cycle, ["a", "a"]);',
-      "    return true;",
-      "  });",
-      "});",
-      "",
-      'test("only nodes on the cycle are reported, not the ones that lead to it", () => {',
-      '  const graph = { x: ["a"], a: ["b"], b: ["a"], y: [] };',
-      "  assert.throws(() => topoSort(graph), (error) => {",
-      "    assert.ok(error instanceof CycleError);",
-      "    assertRealCycle(graph, error.cycle);",
-      '    assert.ok(!error.cycle.includes("x") && !error.cycle.includes("y"));',
-      "    return true;",
-      "  });",
-      "});",
-      "",
-    ].join("\n"),
+    examples: TOPO_EXAMPLES,
+    hidden: TOPO_HIDDEN,
   },
 ];
 
 export function getCodingEvalTask(id: string): CodingEvalTask | undefined {
   return CODING_EVAL_TASKS.find((task) => task.id === id);
 }
+
+// ---------------------------------------------------------------------------
+// Summary
+// ---------------------------------------------------------------------------
 
 export type CodingEvalDifficultyCount = { tasks: number; passed: number };
 
@@ -657,6 +665,10 @@ export function summarizeCodingEval(results: readonly CodingEvalResult[]): Codin
     }));
 }
 
+// ---------------------------------------------------------------------------
+// Workspace guard
+// ---------------------------------------------------------------------------
+
 const SEGMENT_PATTERN = /^[A-Za-z0-9._-]+$/;
 const WINDOWS_DEVICE_NAME = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$/i;
 
@@ -667,9 +679,9 @@ const WINDOWS_DEVICE_NAME = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$/i;
  * Refused: non-strings, empty text, NUL, backslashes, absolute paths, drive
  * letters (`C:x` included), any `.` / `..` / empty segment (a leading `./` is
  * tolerated), characters outside letters, digits and `._-`, Windows device
- * names, trailing dots, names or paths over the limits, and the hidden test
- * file's name. It is lexical on purpose: the workspace holds only files this
- * harness wrote, and the model cannot create links.
+ * names, trailing dots, names or paths over the limits, and the runner's name.
+ * It is lexical on purpose: the workspace holds only files this harness wrote,
+ * and the model cannot create links.
  */
 export function resolveSandboxPath(
   root: string,
@@ -688,7 +700,7 @@ export function resolveSandboxPath(
     if (!SEGMENT_PATTERN.test(segment) || /^\.+$/.test(segment) || segment.endsWith(".")) return null;
     if (WINDOWS_DEVICE_NAME.test(segment)) return null;
   }
-  if (segments[segments.length - 1] === CODING_EVAL_HIDDEN_TEST_FILE) return null;
+  if (RESERVED_FILES.includes(segments[segments.length - 1])) return null;
   const separator = root.includes("\\") && !root.includes("/") ? "\\" : "/";
   const base = root.endsWith("/") || root.endsWith("\\") ? root.slice(0, -1) : root;
   return `${base}${separator}${segments.join(separator)}`;
@@ -696,23 +708,480 @@ export function resolveSandboxPath(
 
 /** Why a write would break the workspace limits, or null when it is fine. */
 export function checkSandboxWrite(
-  existingFileCount: number,
-  isNewFile: boolean,
-  content: unknown,
-  limits: Pick<CodingEvalLimits, "maxFiles" | "maxFileBytes"> = CODING_EVAL_LIMITS,
+  write: {
+    /** Files in the workspace before this write. */
+    fileCount: number;
+    isNewFile: boolean;
+    /** Bytes of every other file (the file being replaced is not counted). */
+    otherBytes: number;
+    content: unknown;
+  },
+  limits: Pick<CodingEvalLimits, "maxFiles" | "maxFileBytes" | "maxWorkspaceBytes"> = CODING_EVAL_LIMITS,
 ): string | null {
+  const { content } = write;
   if (typeof content !== "string") return "content must be a string";
   if (content.includes("\0")) return "content must be text";
-  if (new TextEncoder().encode(content).length > limits.maxFileBytes) {
-    return `file is larger than ${limits.maxFileBytes} bytes`;
+  const bytes = new TextEncoder().encode(content).length;
+  if (bytes > limits.maxFileBytes) return `file is larger than ${limits.maxFileBytes} bytes`;
+  if (write.isNewFile && write.fileCount >= limits.maxFiles) return `workspace already has ${limits.maxFiles} files`;
+  if (write.otherBytes + bytes > limits.maxWorkspaceBytes) {
+    return `workspace would be larger than ${limits.maxWorkspaceBytes} bytes in total`;
   }
-  if (isNewFile && existingFileCount >= limits.maxFiles) return `workspace already has ${limits.maxFiles} files`;
   return null;
 }
 
-/** Keeps the end of `text` (where a failing test prints its reason) within `maxChars`. */
+/** Keeps the end of `text` (where a failure is reported) within `maxChars`. */
 export function keepTail(text: string, maxChars: number): string {
   if (text.length <= maxChars) return text;
   const marker = "[...output truncated...]\n";
   return marker + text.slice(text.length - Math.max(0, maxChars - marker.length));
+}
+
+// ---------------------------------------------------------------------------
+// Verdicts: the parent's side of the protocol
+// ---------------------------------------------------------------------------
+
+/** Prefix of the one line the runner writes. A token follows, then the JSON. */
+export const CODING_EVAL_FRAME_PREFIX = "@@CODING-EVAL-FRAME@@";
+
+/** JSON with sorted keys, so equal values compare equal as strings. */
+export function canonicalJson(value: unknown): string {
+  if (value === undefined) return "undefined";
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
+    .join(",")}}`;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
+const clip = (text: string, max = 300): string => (text.length > max ? `${text.slice(0, max)}...` : text);
+
+/** What the runner is given: calls and arguments, never an expected value. */
+export function buildRunnerCases(cases: readonly CodingEvalCase[]): unknown[] {
+  return cases.map((entry) => {
+    if ("call" in entry) return { call: entry.call, args: entry.args };
+    return {
+      construct: entry.construct,
+      args: entry.args,
+      steps: (entry.steps || []).map((step) =>
+        "get" in step ? { get: step.get } : { method: step.method, args: step.args || [] },
+      ),
+    };
+  });
+}
+
+/**
+ * Finds the runner's frame in the child's stdout. Lines without the exact
+ * `PREFIX token ` start are ignored, so model output cannot be mistaken for it.
+ * Exactly one frame is accepted: a second one means something else wrote one.
+ */
+export function parseRunnerOutput(stdout: string, token: string): { frame: unknown } | { problem: string } {
+  const start = `${CODING_EVAL_FRAME_PREFIX} ${token} `;
+  const frames = stdout.split(/\r?\n/).filter((line) => line.startsWith(start));
+  if (frames.length === 0) return { problem: "no result frame (the module exited early, crashed or hung)" };
+  if (frames.length > 1) return { problem: "more than one result frame (output was tampered with)" };
+  try {
+    return { frame: JSON.parse(frames[0].slice(start.length)) };
+  } catch {
+    return { problem: "the result frame is not valid JSON" };
+  }
+}
+
+export type CodingEvalCaseVerdict = {
+  passed: boolean;
+  reason: string;
+  expected?: string;
+  actual?: string;
+};
+
+export type CodingEvalJudgement = {
+  passed: boolean;
+  /** Why no verdicts exist (import failure, malformed frame), or null. */
+  problem: string | null;
+  verdicts: CodingEvalCaseVerdict[];
+};
+
+const ok = (): CodingEvalCaseVerdict => ({ passed: true, reason: "ok" });
+const notOk = (reason: string, expected?: unknown, actual?: unknown): CodingEvalCaseVerdict => ({
+  passed: false,
+  reason,
+  ...(expected !== undefined ? { expected: clip(typeof expected === "string" ? expected : canonicalJson(expected)) } : {}),
+  ...(actual !== undefined ? { actual: clip(typeof actual === "string" ? actual : canonicalJson(actual)) } : {}),
+});
+
+function judgeOutcome(
+  reported: unknown,
+  expectation: { expect?: unknown; hasExpect: boolean; expectThrows?: string },
+): CodingEvalCaseVerdict {
+  if (!isRecord(reported) || typeof reported.ok !== "boolean") return notOk("malformed outcome");
+  if (expectation.expectThrows !== undefined) {
+    if (reported.ok) return notOk("expected an exception", `throws ${expectation.expectThrows}`, reported.value);
+    if (reported.error !== expectation.expectThrows) {
+      return notOk("wrong exception type", `throws ${expectation.expectThrows}`, `threw ${String(reported.error)}`);
+    }
+    return ok();
+  }
+  if (!expectation.hasExpect) return notOk("the case has no expectation");
+  if (!reported.ok) return notOk("threw an exception", expectation.expect, `threw ${String(reported.error)}`);
+  if (canonicalJson(reported.value) !== canonicalJson(expectation.expect)) {
+    return notOk("wrong result", expectation.expect, reported.value);
+  }
+  return ok();
+}
+
+function judgeCase(entry: CodingEvalCase, reported: unknown): CodingEvalCaseVerdict {
+  if (!isRecord(reported)) return notOk("malformed outcome");
+  if ("call" in entry) {
+    if (canonicalJson(reported.argsAfter) !== canonicalJson(entry.args)) {
+      return notOk("the function modified its arguments", entry.args, reported.argsAfter);
+    }
+    if (reported.aliased !== false) return notOk("the result shares an object with the arguments (return a copy)");
+    const verdict = judgeOutcome(reported, {
+      expect: entry.expect,
+      hasExpect: "expect" in entry,
+      expectThrows: entry.expectThrows,
+    });
+    if (!verdict.passed || !entry.check) return verdict;
+    let accepted = false;
+    try {
+      accepted = entry.check(reported as unknown as CodingEvalOutcome) === true;
+    } catch {
+      accepted = false;
+    }
+    return accepted ? verdict : notOk("the reported cycle is not a real cycle of the input", undefined, reported.props);
+  }
+  const constructed = reported.ctor;
+  if (entry.expectThrows !== undefined) {
+    return judgeOutcome(isRecord(constructed) ? { ok: constructed.ok, error: constructed.error } : undefined, {
+      hasExpect: false,
+      expectThrows: entry.expectThrows,
+    });
+  }
+  if (!isRecord(constructed) || constructed.ok !== true) {
+    return notOk("the constructor threw", undefined, isRecord(constructed) ? String(constructed.error) : undefined);
+  }
+  const steps = entry.steps || [];
+  const reportedSteps = reported.steps;
+  if (!Array.isArray(reportedSteps) || reportedSteps.length !== steps.length) return notOk("missing step results");
+  for (let index = 0; index < steps.length; index++) {
+    const step = steps[index];
+    const label = "get" in step ? `.${step.get}` : `.${step.method}(${stepArguments(step.args)})`;
+    const verdict = judgeOutcome(reportedSteps[index], {
+      expect: "expect" in step ? step.expect : undefined,
+      hasExpect: "expect" in step,
+      expectThrows: "expectThrows" in step ? step.expectThrows : undefined,
+    });
+    if (!verdict.passed) return { ...verdict, reason: `step ${index + 1} ${label}: ${verdict.reason}` };
+  }
+  return ok();
+}
+
+function stepArguments(args: readonly unknown[] | undefined): string {
+  return canonicalJson(args || []).slice(1, -1);
+}
+
+/** Compares the runner's frame with the cases. Never throws; anything unreadable fails. */
+export function judgeCodingEvalCases(cases: readonly CodingEvalCase[], frame: unknown): CodingEvalJudgement {
+  const failed = (problem: string): CodingEvalJudgement => ({ passed: false, problem, verdicts: [] });
+  try {
+    if (!isRecord(frame)) return failed("malformed result frame");
+    if (typeof frame.importError === "string") return failed(`the module failed to load: ${clip(frame.importError)}`);
+    if (!Array.isArray(frame.results) || frame.results.length !== cases.length) {
+      return failed("the result frame does not match the case list");
+    }
+    const verdicts = cases.map((entry, index) => judgeCase(entry, (frame.results as unknown[])[index]));
+    return { passed: verdicts.every((verdict) => verdict.passed), problem: null, verdicts };
+  } catch {
+    return failed("the result frame could not be read");
+  }
+}
+
+/** One line naming a case, for failure reports. */
+export function describeCodingEvalCase(entry: CodingEvalCase): string {
+  if ("call" in entry) return clip(`${entry.call}(${stepArguments(entry.args)})`, 200);
+  const steps = (entry.steps || []).map((step) => ("get" in step ? `.${step.get}` : `.${step.method}(${stepArguments(step.args)})`));
+  return clip(`new ${entry.construct}(${stepArguments(entry.args)})${steps.join("")}`, 200);
+}
+
+/** The failing cases of a judgement as text for the model: input, expected, actual. */
+export function formatCodingEvalReport(
+  cases: readonly CodingEvalCase[],
+  judgement: CodingEvalJudgement,
+  maxShown = 5,
+): string {
+  if (judgement.problem) return judgement.problem;
+  const failing = judgement.verdicts
+    .map((verdict, index) => ({ verdict, index }))
+    .filter(({ verdict }) => !verdict.passed);
+  if (failing.length === 0) return `all ${cases.length} checks passed`;
+  const lines = [`${failing.length} of ${cases.length} checks failed`];
+  for (const { verdict, index } of failing.slice(0, maxShown)) {
+    lines.push(`- ${describeCodingEvalCase(cases[index])}`);
+    lines.push(`  ${verdict.reason}`);
+    if (verdict.expected !== undefined) lines.push(`  expected: ${verdict.expected}`);
+    if (verdict.actual !== undefined) lines.push(`  actual:   ${verdict.actual}`);
+  }
+  if (failing.length > maxShown) lines.push(`... and ${failing.length - maxShown} more failing checks`);
+  return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// The trusted runner
+// ---------------------------------------------------------------------------
+
+/**
+ * Source of the runner the harness writes into the workspace and runs inside
+ * the permission sandbox. It reads the token and the calls from stdin BEFORE it
+ * imports the model's module, and keeps its own references to the output and
+ * exit functions, so module code cannot read the token from stdin or hijack the
+ * write. It reports values only; it has no idea what the right ones are.
+ */
+export const CODING_EVAL_RUNNER_SOURCE = String.raw`import { pathToFileURL } from "node:url";
+import { join } from "node:path";
+
+const writeOut = process.stdout.write.bind(process.stdout);
+const exitNow = process.exit.bind(process);
+const stringify = JSON.stringify;
+const parse = JSON.parse;
+const isArray = Array.isArray;
+const keysOf = Object.keys;
+const getProto = Object.getPrototypeOf;
+const createObject = Object.create;
+const objectProto = Object.prototype;
+const hasOwn = Object.prototype.hasOwnProperty;
+const FRAME = "@@CODING-EVAL-FRAME@@";
+const MAX_NODES = 20000;
+const MAX_DEPTH = 24;
+
+const chunks = [];
+for await (const chunk of process.stdin) chunks.push(chunk);
+const input = Buffer.concat(chunks).toString("utf8");
+const newline = input.indexOf("\n");
+const token = input.slice(0, newline);
+const payload = parse(input.slice(newline + 1));
+
+function decode(value) {
+  if (isArray(value)) return value.map(decode);
+  if (value !== null && typeof value === "object") {
+    if (hasOwn.call(value, "$")) {
+      const tag = value["$"];
+      if (tag === "undefined") return undefined;
+      if (tag === "NaN") return NaN;
+      if (tag === "Infinity") return Infinity;
+      if (tag === "-Infinity") return -Infinity;
+    }
+    const out = {};
+    for (const key of keysOf(value)) out[key] = decode(value[key]);
+    return out;
+  }
+  return value;
+}
+
+function collectObjects(root) {
+  const seen = new Set();
+  const stack = [root];
+  let count = 0;
+  while (stack.length > 0 && count < MAX_NODES) {
+    const value = stack.pop();
+    if (value === null || typeof value !== "object" || seen.has(value)) continue;
+    seen.add(value);
+    count += 1;
+    for (const key of keysOf(value)) stack.push(value[key]);
+  }
+  return seen;
+}
+
+function sharesObject(result, inputObjects) {
+  for (const value of collectObjects(result)) if (inputObjects.has(value)) return true;
+  return false;
+}
+
+function makeEncoder(self) {
+  let nodes = 0;
+  function encode(value, depth) {
+    nodes += 1;
+    if (nodes > MAX_NODES || depth > MAX_DEPTH) return { "$": "toolarge" };
+    if (value === undefined) return { "$": "undefined" };
+    if (value === null || typeof value === "boolean") return value;
+    if (typeof value === "number") {
+      if (value !== value) return { "$": "NaN" };
+      if (value === Infinity) return { "$": "Infinity" };
+      if (value === -Infinity) return { "$": "-Infinity" };
+      return value;
+    }
+    if (typeof value === "string") {
+      return value.length > 4000 ? { "$": "longstring", length: value.length, head: value.slice(0, 80) } : value;
+    }
+    if (typeof value !== "object") return { "$": "unserializable", type: typeof value };
+    if (self !== undefined && value === self) return { "$": "self" };
+    if (isArray(value)) {
+      const out = [];
+      for (let i = 0; i < value.length && i < MAX_NODES; i++) out.push(encode(value[i], depth + 1));
+      return out;
+    }
+    const proto = getProto(value);
+    const out = createObject(null);
+    for (const key of keysOf(value)) out[key] = encode(value[key], depth + 1);
+    if (proto !== objectProto && proto !== null) {
+      const name = proto.constructor && typeof proto.constructor.name === "string" ? proto.constructor.name : "unknown";
+      return { "$": "instance", class: name, value: out };
+    }
+    if (hasOwn.call(out, "$")) return { "$": "object", value: out };
+    return out;
+  }
+  return (value) => encode(value, 0);
+}
+
+function errorName(error) {
+  try {
+    const name = error && error.constructor && error.constructor.name;
+    return typeof name === "string" && name !== "" ? name : typeof error;
+  } catch {
+    return "unknown";
+  }
+}
+
+function errorProps(error) {
+  const props = createObject(null);
+  try {
+    if (error !== null && typeof error === "object") {
+      const encode = makeEncoder(undefined);
+      for (const key of keysOf(error)) props[key] = encode(error[key]);
+    }
+  } catch {
+    return props;
+  }
+  return props;
+}
+
+function attempt(thunk, self) {
+  try {
+    const raw = thunk();
+    return { outcome: { ok: true, value: makeEncoder(self)(raw) }, raw };
+  } catch (error) {
+    return { outcome: { ok: false, error: errorName(error), props: errorProps(error) }, raw: undefined };
+  }
+}
+
+const prepared = payload.cases.map((entry) => {
+  if (entry.call !== undefined) {
+    const args = decode(entry.args);
+    return { kind: "call", name: entry.call, args, objects: collectObjects(args) };
+  }
+  const steps = (entry.steps || []).map((step) =>
+    step.get !== undefined ? { get: step.get } : { method: step.method, args: decode(step.args || []) },
+  );
+  return { kind: "construct", name: entry.construct, args: decode(entry.args), steps };
+});
+
+let moduleExports = null;
+let importError = null;
+try {
+  moduleExports = await import(pathToFileURL(join(process.cwd(), "src", "index.mjs")).href);
+} catch (error) {
+  importError = (errorName(error) + ": " + String(error && error.message)).slice(0, 300);
+}
+
+const results = [];
+if (importError === null) {
+  for (const entry of prepared) {
+    const target = moduleExports[entry.name];
+    if (entry.kind === "call") {
+      if (typeof target !== "function") {
+        results.push({ ok: false, error: "NotAFunction", props: {}, argsAfter: [], aliased: false });
+        continue;
+      }
+      const { outcome, raw } = attempt(() => target(...entry.args), undefined);
+      outcome.argsAfter = makeEncoder(undefined)(entry.args);
+      outcome.aliased = outcome.ok ? sharesObject(raw, entry.objects) : false;
+      results.push(outcome);
+      continue;
+    }
+    let instance;
+    let constructed;
+    if (typeof target !== "function") {
+      constructed = { ok: false, error: "NotAFunction" };
+    } else {
+      const made = attempt(() => new target(...entry.args), undefined);
+      instance = made.raw;
+      constructed = made.outcome.ok ? { ok: true } : { ok: false, error: made.outcome.error };
+    }
+    const stepResults = [];
+    if (constructed.ok) {
+      for (const step of entry.steps) {
+        const run = step.get !== undefined ? () => instance[step.get] : () => instance[step.method](...step.args);
+        stepResults.push(attempt(run, instance).outcome);
+      }
+    }
+    results.push({ ctor: constructed, steps: stepResults });
+  }
+}
+
+writeOut("\n" + FRAME + " " + token + " " + stringify({ importError, results }) + "\n", () => exitNow(0));
+`;
+
+// ---------------------------------------------------------------------------
+// Prompt and cost bound
+// ---------------------------------------------------------------------------
+
+/** The system prompt the agent gets. Exported because the worst-case input bound counts its size. */
+export function codingEvalSystemPrompt(maxSteps: number): string {
+  return [
+    "You are an autonomous coding agent fixing or finishing a small JavaScript project (ES modules, Node.js built-ins only, no packages to install).",
+    "Tools: list_files, read_file, write_file (whole file content), run_tests.",
+    "run_tests runs example checks and shows the failing ones with input, expected value and actual value. The final grade also uses further hidden checks of the same behaviour, so implement everything the task describes, not only what the examples show.",
+    "Work efficiently: you have at most " + maxSteps + " steps, and each reply that calls tools is one step. Several tool calls in one reply cost one step.",
+    "Read the code first, write your changes, then call run_tests. Keep going until run_tests passes.",
+    "When run_tests passes, stop and reply with one short sentence. Do not rewrite working code afterwards.",
+    "Never try to read or write outside the project folder.",
+  ].join("\n");
+}
+
+/** Generous size of the four tool definitions (names, descriptions, JSON schemas) sent with every request. */
+const TOOL_DEFINITION_BYTES = 4 * 1024;
+
+/**
+ * Worst-case tokens one task can bill, for budgeting before a run.
+ *
+ * Basis: a token covers at least one byte of text, so bytes are an upper bound
+ * on tokens for every tokenizer. One task makes at most `maxSteps` model calls
+ * (maxRetries is 0, so none repeat). Step k (counted from 0) is sent
+ *   system prompt + tool definitions + the longest task prompt
+ *   + the workspace limit              (what the files can hold)
+ *   + the tool-output limit            (everything read_file/list_files/run_tests may return)
+ *   + k * (maxOutputTokensPerStep      (each earlier reply, at its cap)
+ *          + maxOutputTokensPerStep)   (their tool-result stubs: a tool call costs the model
+ *                                       at least ~20 tokens and a refused call's result is
+ *                                       under 20, so stubs never exceed the calls)
+ * Summing k = 0 .. maxSteps-1 gives the input bound; the output bound is
+ * maxSteps * maxOutputTokensPerStep. The workspace and the tool-output limit are
+ * both counted although the second mostly repeats the first: over-counting is
+ * the safe side. The final judging run makes no model call.
+ */
+export function codingEvalWorstCaseTokens(
+  limits: Pick<
+    CodingEvalLimits,
+    "maxSteps" | "maxOutputTokensPerStep" | "maxWorkspaceBytes" | "maxToolOutputBytes"
+  > = CODING_EVAL_LIMITS,
+  tasks: readonly CodingEvalTask[] = CODING_EVAL_TASKS,
+): { inputTokens: number; outputTokens: number } {
+  const bytes = (text: string) => new TextEncoder().encode(text).length;
+  const longestPrompt = Math.max(0, ...tasks.map((task) => bytes(task.prompt)));
+  const base =
+    bytes(codingEvalSystemPrompt(limits.maxSteps)) +
+    TOOL_DEFINITION_BYTES +
+    longestPrompt +
+    limits.maxWorkspaceBytes +
+    limits.maxToolOutputBytes;
+  const growthPerStep = 2 * limits.maxOutputTokensPerStep;
+  const steps = limits.maxSteps;
+  return {
+    inputTokens: steps * base + growthPerStep * ((steps * (steps - 1)) / 2),
+    outputTokens: steps * limits.maxOutputTokensPerStep,
+  };
 }

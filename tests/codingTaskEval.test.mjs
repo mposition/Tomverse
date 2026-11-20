@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -7,18 +6,19 @@ import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 
+import { APICallError } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 
 import {
-  CODING_EVAL_HIDDEN_TEST_FILE,
   CODING_EVAL_LIMITS,
+  CODING_EVAL_RUNNER_FILE,
   CODING_EVAL_TASKS,
 } from "../lib/codingTaskEvalCore.ts";
 import {
   createCodingEvalTools,
   runCodingEval,
   runCodingEvalTask,
-  runSandboxedTests,
+  runSandboxedCases,
 } from "../lib/codingTaskEval.ts";
 
 // No test in this file reaches a real provider: every model is a MockLanguageModelV4
@@ -75,7 +75,7 @@ const harnessDirs = () => readdirSync(tmpdir()).filter((name) => name.startsWith
 async function withDirs(fn) {
   const base = await realpath(await mkdtemp(join(tmpdir(), "ceval-test-")));
   const workspace = join(base, "ws");
-  await mkdir(workspace);
+  await mkdir(join(workspace, "src"), { recursive: true });
   try {
     return await fn(base, workspace);
   } finally {
@@ -83,112 +83,119 @@ async function withDirs(fn) {
   }
 }
 
+const withModule = (source, fn) =>
+  withDirs(async (base, workspace) => {
+    await writeFile(join(workspace, "src", "index.mjs"), source, "utf8");
+    return fn(base, workspace);
+  });
+
 // ---------------------------------------------------------------------------
-// Sandbox boundary
+// Sandbox boundary: the probe is the model's module and reports what it could do
 // ---------------------------------------------------------------------------
 
-const probeSource = ({ secretFile, secretDir, repoFile, home }) => `
-import test from "node:test";
-import assert from "node:assert/strict";
+const probeModule = ({ secretFile, secretDir, writeInside, writeOutside, repoFile, home }) => `
 import fs from "node:fs";
-const denied = { code: "ERR_ACCESS_DENIED" };
+import childProcess from "node:child_process";
+import { Worker } from "node:worker_threads";
 
-test("the parent environment is not visible", () => {
-  assert.equal(process.env.CODING_EVAL_SECRET_PROBE, undefined);
-  // Windows: SystemRoot is required to start node. libuv also fills in a fixed list of
-  // variables unless they are given, so the harness passes them blank.
-  const blankOnWindows = new Set(["homedrive", "homepath", "logonserver", "path", "systemdrive", "temp", "userdomain", "username", "userprofile", "windir"]);
-  for (const [key, value] of Object.entries(process.env)) {
-    const name = key.toLowerCase();
-    if (name === "systemroot") continue;
-    assert.ok(blankOnWindows.has(name), "unexpected variable " + key);
-    assert.equal(value, "", key + " must be blank");
+const attempt = (action) => {
+  try {
+    action();
+    return "allowed";
+  } catch (error) {
+    return error && error.code ? error.code : "failed";
   }
-});
-test("a file in the parent folder cannot be read by absolute path", () => {
-  assert.throws(() => fs.readFileSync(${JSON.stringify(secretFile)}, "utf8"), denied);
-});
-test("a file in the parent folder cannot be read by relative path", () => {
-  assert.throws(() => fs.readFileSync("../secret.txt", "utf8"), denied);
-});
-test("the parent folder cannot be listed", () => {
-  assert.throws(() => fs.readdirSync(".."), denied);
-  assert.throws(() => fs.readdirSync(${JSON.stringify(secretDir)}), denied);
-});
-test("a repository file and the home folder cannot be read", () => {
-  assert.throws(() => fs.readFileSync(${JSON.stringify(repoFile)}, "utf8"), denied);
-  assert.throws(() => fs.readdirSync(${JSON.stringify(home)}), denied);
-});
-test("the workspace itself is readable", () => {
-  assert.equal(fs.readFileSync("./marker.txt", "utf8"), "inside");
-});
-test("nothing can be written, in the workspace or outside it", () => {
-  assert.throws(() => fs.writeFileSync("./written.txt", "x"), denied);
-  assert.throws(() => fs.writeFileSync("../written.txt", "x"), denied);
-  assert.throws(() => fs.mkdirSync("./newdir"), denied);
-});
-test("child processes cannot be started", async () => {
-  const childProcess = await import("node:child_process");
-  assert.throws(() => childProcess.spawnSync(process.execPath, ["-e", "1"]), denied);
-});
-test("worker threads cannot be started", async () => {
-  const { Worker } = await import("node:worker_threads");
-  assert.throws(() => new Worker("1", { eval: true }), denied);
-});
+};
+
+export function probe() {
+  return {
+    secretEnv: process.env.CODING_EVAL_SECRET_PROBE === undefined ? "absent" : "present",
+    filledEnv: Object.entries(process.env)
+      .filter(([key, value]) => value !== "" && key.toLowerCase() !== "systemroot")
+      .map(([key]) => key),
+    readParentAbsolute: attempt(() => fs.readFileSync(${JSON.stringify(secretFile)}, "utf8")),
+    listParentAbsolute: attempt(() => fs.readdirSync(${JSON.stringify(secretDir)})),
+    listParentRelative: attempt(() => fs.readdirSync("..")),
+    readRepoFile: attempt(() => fs.readFileSync(${JSON.stringify(repoFile)}, "utf8")),
+    listHome: attempt(() => fs.readdirSync(${JSON.stringify(home)})),
+    readInside: attempt(() => fs.readFileSync("./marker.txt", "utf8")),
+    writeInside: attempt(() => fs.writeFileSync(${JSON.stringify(writeInside)}, "x")),
+    writeOutside: attempt(() => fs.writeFileSync(${JSON.stringify(writeOutside)}, "x")),
+    spawnProcess: attempt(() => childProcess.spawnSync(process.execPath, ["-e", "1"])),
+    startWorker: attempt(() => new Worker("1", { eval: true }).terminate()),
+  };
+}
 `;
+
+const DENIED = "ERR_ACCESS_DENIED";
 
 async function prepareProbe(base, workspace) {
   const secretFile = join(base, "secret.txt");
   await writeFile(secretFile, "PARENT-FILE-SECRET", "utf8");
   await writeFile(join(workspace, "marker.txt"), "inside", "utf8");
-  return probeSource({
+  return probeModule({
     secretFile,
     secretDir: base,
+    writeInside: join(workspace, "written-inside.txt"),
+    writeOutside: join(base, "written-outside.txt"),
     repoFile: resolve("package.json"),
     home: homedir(),
   });
 }
 
-test("sandboxed code cannot read other files, the parent environment, or start processes", async () => {
+test("sandboxed code cannot read other files, see the parent environment, write, or start processes", async () => {
   process.env.CODING_EVAL_SECRET_PROBE = "PARENT-ENV-SECRET";
   try {
     await withDirs(async (base, workspace) => {
-      const source = await prepareProbe(base, workspace);
-      const result = await runSandboxedTests(workspace, source);
-      assert.equal(result.passed, true, result.output);
-      assert.ok(!existsSync(join(workspace, "written.txt")) && !existsSync(join(base, "written.txt")));
-      assert.ok(!existsSync(join(workspace, "newdir")));
+      await writeFile(join(workspace, "src", "index.mjs"), await prepareProbe(base, workspace), "utf8");
+      const result = await runSandboxedCases(workspace, [
+        {
+          call: "probe",
+          args: [],
+          expect: {
+            secretEnv: "absent",
+            filledEnv: [],
+            readParentAbsolute: DENIED,
+            listParentAbsolute: DENIED,
+            listParentRelative: DENIED,
+            readRepoFile: DENIED,
+            listHome: DENIED,
+            readInside: "allowed",
+            writeInside: DENIED,
+            writeOutside: DENIED,
+            spawnProcess: DENIED,
+            startWorker: DENIED,
+          },
+        },
+      ]);
+      assert.equal(result.problem, null, result.logs);
+      assert.deepEqual(result.verdicts, [{ passed: true, reason: "ok" }]);
+      assert.equal(result.passed, true);
+      assert.ok(!existsSync(join(workspace, "written-inside.txt")) && !existsSync(join(base, "written-outside.txt")));
     });
   } finally {
     delete process.env.CODING_EVAL_SECRET_PROBE;
   }
 });
 
-test("the probe is not vacuous: the same probe fails without the permission model", async () => {
+test("the probe is not vacuous: the same module run without the permission model reaches everything", async () => {
   process.env.CODING_EVAL_SECRET_PROBE = "PARENT-ENV-SECRET";
   try {
     await withDirs(async (base, workspace) => {
       const source = await prepareProbe(base, workspace);
-      await writeFile(join(workspace, "probe.test.mjs"), source, "utf8");
-      const unrestricted = spawnSync(process.execPath, ["--test-reporter=tap", "probe.test.mjs"], {
-        cwd: workspace,
-        // The outer test runner marks its children; without this the probe would speak V8 serialisation.
-        env: { ...process.env, NODE_TEST_CONTEXT: undefined },
-        encoding: "utf8",
-        timeout: 20_000,
-      });
-      assert.notEqual(unrestricted.status, 0, "an unrestricted node must trip the probe");
-      const failedNames = [...unrestricted.stdout.matchAll(/^not ok \d+ - (.+)$/gm)].map((match) => match[1]);
-      for (const expected of [
-        "the parent environment is not visible",
-        "a file in the parent folder cannot be read by absolute path",
-        "nothing can be written, in the workspace or outside it",
-        "child processes cannot be started",
-      ]) {
-        assert.ok(failedNames.includes(expected), `unrestricted run should fail: ${expected}; failed: ${JSON.stringify(failedNames)}`);
-      }
-      await rm(join(workspace, "written.txt"), { force: true });
-      await rm(join(base, "written.txt"), { force: true });
+      const file = join(workspace, "src", "index.mjs");
+      await writeFile(file, source, "utf8");
+      const { probe } = await import(`file:///${file.replaceAll("\\", "/")}`);
+      const seen = probe();
+      assert.equal(seen.secretEnv, "present");
+      assert.equal(seen.readParentAbsolute, "allowed");
+      assert.equal(seen.listParentAbsolute, "allowed");
+      assert.equal(seen.readRepoFile, "allowed");
+      assert.equal(seen.listHome, "allowed");
+      assert.equal(seen.writeInside, "allowed");
+      assert.equal(seen.writeOutside, "allowed");
+      assert.equal(seen.spawnProcess, "allowed");
+      assert.ok(existsSync(join(workspace, "written-inside.txt")), "the control really did write");
     });
   } finally {
     delete process.env.CODING_EVAL_SECRET_PROBE;
@@ -200,109 +207,190 @@ test("the network is NOT blocked by the permission model (documented limit: the 
   await new Promise((done) => server.listen(0, "127.0.0.1", done));
   try {
     const { port } = server.address();
-    await withDirs(async (_base, workspace) => {
-      const source = `
-import test from "node:test";
-import assert from "node:assert/strict";
-test("a local HTTP request succeeds from inside the sandbox", async () => {
-  const response = await fetch("http://127.0.0.1:${port}/");
-  assert.equal(await response.text(), "reachable");
-});
+    const source = `
+const response = await fetch("http://127.0.0.1:${port}/");
+const text = await response.text();
+export function reached() { return text; }
 `;
-      const result = await runSandboxedTests(workspace, source);
-      assert.equal(result.passed, true, result.output);
+    await withModule(source, async (_base, workspace) => {
+      const result = await runSandboxedCases(workspace, [{ call: "reached", args: [], expect: "reachable" }]);
+      assert.equal(result.passed, true, result.problem || JSON.stringify(result.verdicts));
     });
   } finally {
     await new Promise((done) => server.close(done));
   }
 });
 
-test("the hidden test file exists only while the tests run, and the workspace path is masked in output", async () => {
-  await withDirs(async (_base, workspace) => {
-    const source = `
-import test from "node:test";
-test("fails with a stack", () => { throw new Error("boom " + process.cwd()); });
+// ---------------------------------------------------------------------------
+// The verdict cannot be forged by the model's code
+// ---------------------------------------------------------------------------
+
+const KNOWN_TOKEN = "known-token-0123456789abcdef";
+const hiddenCases = task.hidden;
+
+test("forgery: fake TAP output and process.exit(0) at import time is not a pass", async () => {
+  const source = `
+console.log("TAP version 13");
+console.log("ok 1 - everything");
+console.log("# tests 1");
+console.log("# pass 1");
+console.log("# fail 0");
+process.exit(0);
 `;
-    const result = await runSandboxedTests(workspace, source);
+  await withModule(source, async (_base, workspace) => {
+    const result = await runSandboxedCases(workspace, hiddenCases);
     assert.equal(result.passed, false);
-    assert.ok(!existsSync(join(workspace, CODING_EVAL_HIDDEN_TEST_FILE)));
-    assert.ok(!result.output.includes(workspace), "the real temp path leaked into the output the model sees");
-    assert.match(result.output, /<workspace>/);
+    assert.match(result.problem, /no result frame/);
+    assert.equal(result.exitCode, 0, "the forged run really did exit cleanly");
+    assert.match(result.logs, /# pass 1/, "the fake output is only a log");
   });
 });
 
-test("a hanging test is killed at the timeout", async () => {
-  await withDirs(async (_base, workspace) => {
-    const source = `
-import test from "node:test";
-test("never ends", async () => {
-  setInterval(() => {}, 1000);
-  await new Promise(() => {});
-});
+test("forgery: a fake frame without the real token is ignored", async () => {
+  const frame = JSON.stringify({ importError: null, results: hiddenCases.map(() => ({ ok: true, value: 0 })) });
+  const source = `
+console.log("@@CODING-EVAL-FRAME@@ guessed-token " + ${JSON.stringify(frame)});
+process.exit(0);
 `;
-    const started = Date.now();
-    const result = await runSandboxedTests(workspace, source, { testTimeoutMs: 700, testOutputMaxChars: 4000 });
-    assert.equal(result.timedOut, true);
+  await withModule(source, async (_base, workspace) => {
+    const result = await runSandboxedCases(workspace, hiddenCases);
     assert.equal(result.passed, false);
-    assert.ok(Date.now() - started < 8000, "the kill must not wait for the child");
+    assert.match(result.problem, /no result frame/);
   });
 });
 
-test("a busy loop is killed at the timeout", async () => {
-  await withDirs(async (_base, workspace) => {
-    const source = `
-import test from "node:test";
-test("spins", () => { while (true) {} });
+test("forgery: even knowing the token, a frame of guessed values fails, because the expectations never enter the child", async () => {
+  // The module is given the token (the test passes the same one to the harness) and tries the strongest
+  // thing it can: print a well-formed frame for every case, with every value it could plausibly guess.
+  const guesses = hiddenCases.map((entry) => ({ ok: true, value: 0, argsAfter: entry.args, aliased: false }));
+  const frame = JSON.stringify({ importError: null, results: guesses });
+  const source = `
+process.stdout.write("\\n@@CODING-EVAL-FRAME@@ ${KNOWN_TOKEN} " + ${JSON.stringify(frame)} + "\\n");
+process.exit(0);
 `;
-    const result = await runSandboxedTests(workspace, source, { testTimeoutMs: 700, testOutputMaxChars: 4000 });
-    assert.equal(result.timedOut, true);
+  await withModule(source, async (_base, workspace) => {
+    const result = await runSandboxedCases(workspace, hiddenCases, { token: KNOWN_TOKEN });
     assert.equal(result.passed, false);
+    assert.equal(result.problem, null, "the frame was accepted as well formed and judged");
+    assert.ok(result.verdicts.some((verdict) => !verdict.passed));
   });
 });
 
-test("an abort signal kills a running test run", async () => {
-  await withDirs(async (_base, workspace) => {
-    const source = `
-import test from "node:test";
-test("spins", () => { while (true) {} });
+test("forgery: knowing the token and echoing a frame next to a correct solution is rejected as tampering", async () => {
+  const frame = JSON.stringify({ importError: null, results: [] });
+  const source = `${SOLUTION}
+process.stdout.write("\\n@@CODING-EVAL-FRAME@@ ${KNOWN_TOKEN} " + ${JSON.stringify(frame)} + "\\n");
 `;
-    const controller = new AbortController();
-    setTimeout(() => controller.abort(), 300);
-    const started = Date.now();
-    const result = await runSandboxedTests(workspace, source, CODING_EVAL_LIMITS, controller.signal);
+  await withModule(source, async (_base, workspace) => {
+    const result = await runSandboxedCases(workspace, hiddenCases, { token: KNOWN_TOKEN });
+    assert.equal(result.passed, false);
+    assert.match(result.problem, /more than one result frame/);
+  });
+});
+
+test("forgery: replacing process.stdout.write or JSON.stringify at import time cannot change what the runner reports", async () => {
+  const source = `${SOLUTION}
+process.stdout.write = () => true;
+JSON.stringify = () => '{"importError":null,"results":[]}';
+JSON.parse = () => ({ cases: [] });
+Array.isArray = () => false;
+`;
+  await withModule(source, async (_base, workspace) => {
+    const result = await runSandboxedCases(workspace, hiddenCases);
+    assert.equal(result.problem, null, "the runner kept its own references");
+    assert.equal(result.passed, true, "a correct module with hostile globals is still judged by its values");
+  });
+});
+
+test("forgery: the module cannot read the token or the cases from stdin, the runner has consumed them", async () => {
+  const source = `
+import fs from "node:fs";
+let stolen = "none";
+try { stolen = fs.readFileSync(0, "utf8"); } catch (error) { stolen = "unreadable:" + (error && error.code); }
+console.log("STOLEN-START" + stolen + "STOLEN-END");
+process.exit(0);
+`;
+  await withModule(source, async (_base, workspace) => {
+    const result = await runSandboxedCases(workspace, hiddenCases, { token: KNOWN_TOKEN });
+    assert.equal(result.passed, false);
+    assert.ok(result.logs.includes("STOLEN-START"), "the module ran and printed what it read");
+    assert.ok(!result.logs.includes(KNOWN_TOKEN), "the token must not reach module code");
+    assert.ok(!result.logs.includes("sumRange"), "the cases must not reach module code through stdin");
+  });
+});
+
+test("forgery: exiting while a case runs, a crash or a hang at import all fail", async () => {
+  await withModule(
+    "export function sumRange() { process.exit(0); }\nexport function lastN() { return []; }\n",
+    async (_base, workspace) => {
+      const result = await runSandboxedCases(workspace, hiddenCases);
+      assert.equal(result.passed, false);
+      assert.match(result.problem, /no result frame/);
+    },
+  );
+  await withModule('throw new Error("boom at import");\n', async (_base, workspace) => {
+    const result = await runSandboxedCases(workspace, hiddenCases);
+    assert.equal(result.passed, false);
+    assert.match(result.problem, /failed to load: Error: boom at import/);
+  });
+  await withModule("export const = ;\n", async (_base, workspace) => {
+    const result = await runSandboxedCases(workspace, hiddenCases);
+    assert.equal(result.passed, false);
+    assert.match(result.problem, /failed to load: SyntaxError/);
+  });
+  await withModule("setInterval(() => {}, 1000);\nawait new Promise(() => {});\n", async (_base, workspace) => {
+    const result = await runSandboxedCases(workspace, hiddenCases, {
+      limits: { testTimeoutMs: 700, testOutputMaxChars: 4000 },
+    });
+    assert.equal(result.passed, false);
     assert.equal(result.timedOut, true);
-    assert.ok(Date.now() - started < 8000);
   });
 });
 
-test("a file without any test is not a pass", async () => {
-  await withDirs(async (_base, workspace) => {
-    assert.equal((await runSandboxedTests(workspace, "// nothing here\n")).passed, false);
-    assert.equal(
-      (await runSandboxedTests(workspace, 'import test from "node:test";\ntest.skip("x", () => {});\n')).passed,
-      false,
-    );
-    assert.equal(
-      (await runSandboxedTests(workspace, 'import test from "node:test";\ntest("ok", () => {});\n')).passed,
-      true,
-    );
+test("a correct module passes, and its console output is only a log", async () => {
+  await withModule(`${SOLUTION}\nconsole.log("debug line from the module");\n`, async (_base, workspace) => {
+    const result = await runSandboxedCases(workspace, hiddenCases);
+    assert.equal(result.passed, true);
+    assert.match(result.logs, /debug line from the module/);
+    assert.ok(!existsSync(join(workspace, CODING_EVAL_RUNNER_FILE)), "the runner is removed afterwards");
   });
 });
 
-test("test output is cut to its tail", async () => {
-  await withDirs(async (_base, workspace) => {
-    const source = `
-import test from "node:test";
+test("a busy loop and an abort signal both stop the child", async () => {
+  await withModule(
+    "export function sumRange() { while (true) {} }\nexport function lastN() { return []; }\n",
+    async (_base, workspace) => {
+      const started = Date.now();
+      const result = await runSandboxedCases(workspace, hiddenCases, {
+        limits: { testTimeoutMs: 700, testOutputMaxChars: 4000 },
+      });
+      assert.equal(result.timedOut, true);
+      assert.equal(result.passed, false);
+      assert.equal(result.problem, "timeout");
+      assert.ok(Date.now() - started < 8000);
+
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), 300);
+      const aborted = await runSandboxedCases(workspace, hiddenCases, { signal: controller.signal });
+      assert.equal(aborted.timedOut, true);
+    },
+  );
+});
+
+test("module output is cut to its tail and the workspace path is masked", async () => {
+  const source = `${SOLUTION}
 for (let i = 0; i < 3000; i++) console.log("noise line " + i);
-test("failure after a lot of output", () => { throw new Error("the-reason"); });
+console.log("cwd is " + process.cwd());
 `;
-    const result = await runSandboxedTests(workspace, source, { testTimeoutMs: 15000, testOutputMaxChars: 1000 });
-    assert.equal(result.passed, false);
-    assert.ok(result.output.length <= 1000);
-    assert.ok(result.output.startsWith("[...output truncated...]"));
-    assert.match(result.output, /^# fail 1$/m, "the summary at the end of the output must survive");
-    assert.ok(!result.output.includes("noise line 5 "), "early output must be dropped");
-    assert.ok(!/noise line 5\s/.test(result.output), "early output must be dropped");
+  await withModule(source, async (_base, workspace) => {
+    const result = await runSandboxedCases(workspace, hiddenCases, {
+      limits: { testTimeoutMs: 15000, testOutputMaxChars: 500 },
+    });
+    assert.equal(result.passed, true);
+    assert.ok(result.logs.length <= 500);
+    assert.ok(result.logs.startsWith("[...output truncated...]"));
+    assert.ok(!result.logs.includes(workspace), "the real temp path must not reach the model");
+    assert.match(result.logs, /cwd is <workspace>/);
   });
 });
 
@@ -314,7 +402,7 @@ const callTool = (tools, name, input) => tools[name].execute(input, { toolCallId
 
 test("tools refuse paths that leave the workspace and never write outside it", async () => {
   await withDirs(async (base, workspace) => {
-    const tools = createCodingEvalTools(workspace, task.tests);
+    const tools = createCodingEvalTools(workspace, task);
     const absoluteTarget = join(base, "absolute-escape.txt");
     const attempts = [
       "../escape.txt",
@@ -325,7 +413,7 @@ test("tools refuse paths that leave the workspace and never write outside it", a
       "C:/escape.txt",
       "..\\escape.txt",
       "a\0b.txt",
-      CODING_EVAL_HIDDEN_TEST_FILE,
+      CODING_EVAL_RUNNER_FILE,
     ];
     for (const path of attempts) {
       const written = await callTool(tools, "write_file", { path, content: "pwned" });
@@ -336,14 +424,14 @@ test("tools refuse paths that leave the workspace and never write outside it", a
     assert.ok(!existsSync(join(base, "escape.txt")));
     assert.ok(!existsSync(absoluteTarget));
     assert.deepEqual(readdirSync(base).sort(), ["ws"]);
-    assert.deepEqual(readdirSync(workspace), []);
+    assert.deepEqual(readdirSync(workspace), ["src"]);
   });
 });
 
 test("tools read, write, list and cap the workspace", async () => {
   await withDirs(async (_base, workspace) => {
-    const limits = { ...CODING_EVAL_LIMITS, maxFiles: 3, maxFileBytes: 100, maxTestRunsPerTask: 1 };
-    const tools = createCodingEvalTools(workspace, 'import test from "node:test";\ntest("ok", () => {});\n', limits);
+    const limits = { ...CODING_EVAL_LIMITS, maxFiles: 3, maxFileBytes: 100, maxWorkspaceBytes: 110, maxTestRunsPerTask: 1 };
+    const tools = createCodingEvalTools(workspace, task, limits);
     assert.deepEqual(await callTool(tools, "write_file", { path: "./src/a.mjs", content: "export const a = 1;\n" }), {
       ok: true,
       bytes: 20,
@@ -355,11 +443,56 @@ test("tools read, write, list and cap the workspace", async () => {
     assert.match((await callTool(tools, "write_file", { path: "d.txt", content: "d" })).error, /3 files/);
     assert.deepEqual(await callTool(tools, "write_file", { path: "c.txt", content: "c2" }), { ok: true, bytes: 2 });
     assert.match((await callTool(tools, "write_file", { path: "c.txt", content: "x".repeat(101) })).error, /larger/);
+    // a.mjs (20) and c.txt (2) stay; b.txt may grow until the total reaches the 110 byte cap.
+    assert.match((await callTool(tools, "write_file", { path: "b.txt", content: "y".repeat(100) })).error, /in total/);
+    assert.deepEqual(await callTool(tools, "write_file", { path: "b.txt", content: "y".repeat(88) }), { ok: true, bytes: 88 });
     const listed = await callTool(tools, "list_files", {});
     assert.deepEqual(listed.files.map((file) => file.path), ["b.txt", "c.txt", "src/a.mjs"]);
+  });
+});
+
+test("tool output is metered: once the task's budget is spent every tool refuses", async () => {
+  await withDirs(async (_base, workspace) => {
+    await writeFile(join(workspace, "src", "big.mjs"), "x".repeat(400), "utf8");
+    const tools = createCodingEvalTools(workspace, task, { ...CODING_EVAL_LIMITS, maxToolOutputBytes: 600 });
+    assert.ok("content" in (await callTool(tools, "read_file", { path: "src/big.mjs" })));
+    // About 400 bytes of content and its envelope are spent; a second copy does not fit.
+    const refusal = { error: "tool output budget exhausted" };
+    assert.deepEqual(await callTool(tools, "read_file", { path: "src/big.mjs" }), refusal);
+    assert.deepEqual(await callTool(tools, "list_files", {}), refusal);
+    assert.deepEqual(await callTool(tools, "run_tests", {}), refusal);
+    assert.deepEqual(await callTool(tools, "write_file", { path: "n.txt", content: "n" }), refusal);
+    assert.ok(!existsSync(join(workspace, "n.txt")), "a refused write must not happen");
+  });
+});
+
+test("run_tests shows the examples' input, expected and actual values and nothing from the hidden cases", async () => {
+  await withDirs(async (_base, workspace) => {
+    await writeFile(join(workspace, "src", "index.mjs"), task.files["src/index.mjs"], "utf8");
+    const tools = createCodingEvalTools(workspace, task);
+    const run = await callTool(tools, "run_tests", {});
+    assert.equal(run.passed, false);
+    assert.equal(run.examples, task.examples.length);
+    assert.match(run.output, /sumRange\(1,5\)/);
+    assert.match(run.output, /expected: 15/);
+    assert.match(run.output, /actual: {3}10/);
+    for (const hiddenOnly of ["sumRange(5,1)", "sumRange(-2,2)", "lastN([1,2,3],10)"]) {
+      assert.ok(!run.output.includes(hiddenOnly), `${hiddenOnly} is a hidden case`);
+    }
+
+    await writeFile(join(workspace, "src", "index.mjs"), SOLUTION, "utf8");
+    const passing = await callTool(tools, "run_tests", {});
+    assert.equal(passing.passed, true);
+    assert.match(passing.output, /all \d+ checks passed/);
+  });
+});
+
+test("run_tests is limited per task", async () => {
+  await withDirs(async (_base, workspace) => {
+    await writeFile(join(workspace, "src", "index.mjs"), SOLUTION, "utf8");
+    const tools = createCodingEvalTools(workspace, task, { ...CODING_EVAL_LIMITS, maxTestRunsPerTask: 1 });
     assert.equal((await callTool(tools, "run_tests", {})).passed, true);
     assert.match((await callTool(tools, "run_tests", {})).error, /limited/);
-    assert.ok(!(await callTool(tools, "list_files", {})).files.some((file) => file.path === CODING_EVAL_HIDDEN_TEST_FILE));
   });
 });
 
@@ -388,34 +521,47 @@ test("a model that writes the fix and runs the tests passes", async () => {
       inputTokens: 120 + 200 + 260 + 300,
       outputTokens: 12 + 90 + 8 + 7,
       failure: null,
+      usageUnknown: false,
     },
   );
-  assert.ok(result.durationMs >= 0);
   assert.equal(model.doGenerateCalls.length, 4);
   const first = model.doGenerateCalls[0];
   assert.deepEqual(first.tools.map((entry) => entry.name).sort(), ["list_files", "read_file", "run_tests", "write_file"]);
   assert.equal(first.maxOutputTokens, CODING_EVAL_LIMITS.maxOutputTokensPerStep);
-  // The model saw the task and the failing starting code, never the hidden test source.
+  // The model saw the task and the starting code, and no case beyond the examples.
   const everything = JSON.stringify(model.doGenerateCalls.map((call) => call.prompt));
   assert.match(everything, /sumRange/);
-  assert.ok(!everything.includes("assert.equal(sumRange(1, 5), 15)"));
+  assert.ok(!everything.includes("sumRange(5,1)"));
   assert.deepEqual(harnessDirs().filter((name) => !before.includes(name)), [], "the temp workspace must be removed");
 });
 
-test("the verdict comes from the final files, not from what the model claims", async () => {
+test("the verdict comes from the final files on the hidden cases, not from the examples", async () => {
+  // Passes every example, fails a hidden one: lastN(items, -1) is not an empty array.
+  const examplesOnly = SOLUTION.replace("return n <= 0 ? [] : items.slice(-n);", "return n === 0 ? [] : items.slice(-n);");
+  const model = scripted([
+    toolCalls([["write_file", { path: "src/index.mjs", content: examplesOnly }]]),
+    toolCalls([["run_tests", {}]]),
+    finalText("done"),
+  ]);
+  const result = await runCodingEvalTask({ task, model: fakeAiModel(), callModel: () => model });
+  const shown = JSON.stringify(model.doGenerateCalls[2].prompt);
+  assert.match(shown, /all \d+ checks passed/, "the examples passed, as the model saw");
+  assert.equal(result.passed, false);
+  assert.equal(result.failure, "tests_failed");
+});
+
+test("a model that only claims success is no_change", async () => {
   const model = scripted([finalText("I fixed it, trust me.")]);
   const result = await runCodingEvalTask({ task, model: fakeAiModel(), callModel: () => model });
   assert.equal(result.passed, false);
   assert.equal(result.failure, "no_change");
   assert.equal(result.steps, 1);
+  assert.equal(result.usageUnknown, false);
 });
 
-test("a change that still fails the tests is tests_failed", async () => {
+test("a change that still fails the cases is tests_failed", async () => {
   const wrong = SOLUTION.replace("n <= 0 ? [] : items.slice(-n)", "items.slice(-n)");
-  const model = scripted([
-    toolCalls([["write_file", { path: "src/index.mjs", content: wrong }]]),
-    finalText("done"),
-  ]);
+  const model = scripted([toolCalls([["write_file", { path: "src/index.mjs", content: wrong }]]), finalText("done")]);
   const result = await runCodingEvalTask({ task, model: fakeAiModel(), callModel: () => model });
   assert.equal(result.passed, false);
   assert.equal(result.failure, "tests_failed");
@@ -423,18 +569,14 @@ test("a change that still fails the tests is tests_failed", async () => {
 
 test("a model that keeps calling tools stops at the step limit", async () => {
   const forever = new MockLanguageModelV4({ doGenerate: async () => toolCalls([["list_files", {}]], 10, 1) });
-  const result = await runCodingEvalTask({
-    task,
-    model: fakeAiModel(),
-    callModel: () => forever,
-    limits: { maxSteps: 3 },
-  });
+  const result = await runCodingEvalTask({ task, model: fakeAiModel(), callModel: () => forever, limits: { maxSteps: 3 } });
   assert.equal(forever.doGenerateCalls.length, 3);
   assert.equal(result.steps, 3);
   assert.equal(result.passed, false);
   assert.equal(result.failure, "step_limit");
   assert.equal(result.inputTokens, 30);
   assert.equal(result.outputTokens, 3);
+  assert.equal(result.usageUnknown, false);
 });
 
 test("the default step limit is 10", async () => {
@@ -446,10 +588,7 @@ test("the default step limit is 10", async () => {
 });
 
 test("a model that solves the task on its last allowed step is a pass, not a step limit", async () => {
-  const model = scripted([
-    toolCalls([["write_file", { path: "src/index.mjs", content: SOLUTION }]]),
-    finalText("done"),
-  ]);
+  const model = scripted([toolCalls([["write_file", { path: "src/index.mjs", content: SOLUTION }]]), finalText("done")]);
   const result = await runCodingEvalTask({ task, model: fakeAiModel(), callModel: () => model, limits: { maxSteps: 2 } });
   assert.equal(result.passed, true);
   assert.equal(result.failure, null);
@@ -478,16 +617,54 @@ test("an attempt to write outside the workspace is refused and leaves nothing be
   assert.equal(result.steps, 2);
 });
 
-test("a provider error is reported as error, not thrown", async () => {
+test("a provider error is reported as error, never retried, and its usage is unknown", async () => {
   const broken = new MockLanguageModelV4({
     doGenerate: async () => {
-      throw new Error("provider exploded");
+      throw new APICallError({
+        message: "overloaded",
+        url: "https://provider.invalid/v1",
+        requestBodyValues: {},
+        statusCode: 529,
+        isRetryable: true,
+      });
     },
   });
   const result = await runCodingEvalTask({ task, model: fakeAiModel(), callModel: () => broken });
+  assert.equal(broken.doGenerateCalls.length, 1, "maxRetries is 0: a retryable error is still one call");
   assert.equal(result.passed, false);
   assert.equal(result.failure, "error");
   assert.equal(result.steps, 0);
+  assert.equal(result.usageUnknown, true);
+});
+
+test("an error after some steps keeps the counted usage and marks it unknown", async () => {
+  const model = scripted([
+    toolCalls([["list_files", {}]], 100, 10),
+    () => {
+      throw new Error("provider exploded");
+    },
+  ]);
+  const result = await runCodingEvalTask({ task, model: fakeAiModel(), callModel: () => model });
+  assert.equal(result.failure, "error");
+  assert.equal(result.steps, 1);
+  assert.equal(result.inputTokens, 100);
+  assert.equal(result.usageUnknown, true);
+});
+
+test("a step that reports no usage marks the result usageUnknown", async () => {
+  const silent = {
+    content: [{ type: "text", text: "done" }],
+    finishReason: { unified: "stop", raw: "stop" },
+    usage: {
+      inputTokens: { total: undefined, noCache: undefined, cacheRead: undefined, cacheWrite: undefined },
+      outputTokens: { total: undefined, text: undefined, reasoning: undefined },
+    },
+    warnings: [],
+  };
+  const model = scripted([silent]);
+  const result = await runCodingEvalTask({ task, model: fakeAiModel(), callModel: () => model });
+  assert.equal(result.failure, "no_change");
+  assert.equal(result.usageUnknown, true);
 });
 
 test("a failing model factory is reported as error", async () => {
@@ -499,9 +676,10 @@ test("a failing model factory is reported as error", async () => {
     },
   });
   assert.equal(result.failure, "error");
+  assert.equal(result.usageUnknown, true);
 });
 
-test("the task timeout stops a stuck model and is reported as timeout", async () => {
+test("the task timeout stops a stuck model and is reported as timeout with unknown usage", async () => {
   const stuck = new MockLanguageModelV4({
     doGenerate: (options) =>
       new Promise((_resolve, reject) => {
@@ -517,6 +695,7 @@ test("the task timeout stops a stuck model and is reported as timeout", async ()
   });
   assert.equal(result.passed, false);
   assert.equal(result.failure, "timeout");
+  assert.equal(result.usageUnknown, true);
   assert.ok(Date.now() - started < 8000);
 });
 
@@ -560,6 +739,19 @@ test("runCodingEval never starts anything when shouldContinue is false from the 
   });
   assert.deepEqual(results, []);
   assert.equal(built, 0);
+});
+
+test("runCodingEval handles a single (task, model) pair", async () => {
+  const model = scripted([toolCalls([["write_file", { path: "src/index.mjs", content: SOLUTION }]]), finalText()]);
+  const results = await runCodingEval({
+    tasks: [task],
+    models: [fakeAiModel("single")],
+    callModel: () => model,
+    shouldContinue: () => true,
+  });
+  assert.equal(results.length, 1);
+  assert.equal(results[0].passed, true);
+  assert.equal(results[0].modelId, "single");
 });
 
 test("runCodingEval runs at most two tasks at once and returns results in dispatch order", async () => {
@@ -611,12 +803,9 @@ test("runCodingEval defaults to one task at a time", async () => {
   assert.equal(peak, 1);
 });
 
-test("the task files are unchanged after a run (the harness copies them)", async () => {
+test("the task data is unchanged after a run (the harness copies the files)", async () => {
   const snapshot = JSON.stringify(CODING_EVAL_TASKS);
-  const model = scripted([
-    toolCalls([["write_file", { path: "src/index.mjs", content: SOLUTION }]]),
-    finalText(),
-  ]);
+  const model = scripted([toolCalls([["write_file", { path: "src/index.mjs", content: SOLUTION }]]), finalText()]);
   await runCodingEvalTask({ task, model: fakeAiModel(), callModel: () => model });
   assert.equal(JSON.stringify(CODING_EVAL_TASKS), snapshot);
 });

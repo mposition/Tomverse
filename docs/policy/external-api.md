@@ -355,19 +355,30 @@ improved by its own optimizer, as Chat's router is.
     both start off, and a person may start one cycle. With several daily
     switches on, the targets take turns, one cycle a day in all.
 - **Task evaluation** (`lib/codingTaskEval.ts`).
-  - Runs within up to 40 per cent of a coding cycle's budget, before the
-    cycle proper.
+  - Runs before the cycle proper, within up to 40 per cent of a coding cycle's
+    budget. Each run starts only when its worst case
+    (`codingEvalWorstCaseTokens`, at the model's prices) still fits. A call
+    whose usage is unknown is charged its worst case and leaves the cycle's
+    cost coverage incomplete, so that cycle cannot be promoted. No retries.
+    It stops starting runs 15 minutes after the cycle began.
   - For each of six fixed JS tasks (two easy, two medium, two hard), the
     current coding guidance routes the task. Its pick and the next candidate
-    up each work it as an agent with `list_files`, `read_file`, `write_file`
-    and `run_tests`, for at most 10 steps.
-  - The harness then runs the hidden tests itself.
-  - Sandbox: the tests run in a child `node` with `--permission` (reads only
-    the task's temporary folder, writes nothing, no child processes or
-    workers) and an emptied environment. Nothing the parent holds is
-    readable from it. Network is not restricted by Node, which is why no
-    secret is reachable inside.
-  - Each run's cost is counted as it ends against the evaluation's share.
+    up each work it as an agent with `list_files`, `read_file`,
+    `write_file` and `run_tests` (the visible examples only), for at most
+    10 steps.
+  - Pass or fail is decided in the trusted parent. A runner written by the
+    harness calls the model's exports in a child and returns their values.
+    The parent compares them with hidden expectations that never enter the
+    child, so printed output cannot fake a pass.
+  - The child runs `node --permission`: it reads only the task's temporary
+    folder, writes nothing, starts no processes or workers, and gets an
+    emptied environment.
+  - Node does not restrict network. So model-written code runs only where
+    the operator has isolated the runner from internal services, metadata
+    endpoints and credentials, and has set
+    `CODING_TASK_EVAL_ISOLATED_RUNNER=true` (default off). Anywhere else, a
+    coding cycle skips the evaluation and records
+    `taskEvaluationStop: runner_not_isolated`.
 
 ## 6. Data
 

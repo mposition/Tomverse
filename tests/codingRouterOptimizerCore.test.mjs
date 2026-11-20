@@ -6,6 +6,8 @@ import {
     CODING_ROUTER_SYNTHESIZER_SYSTEM,
     CODING_TASK_EVAL_BUDGET_SHARE,
     codingGeneratorEvidence,
+    codingTaskEvalRunnerIsolated,
+    withTaskEvaluationCost,
 } from "../lib/autoCodingRouterOptimizerCore.ts";
 import { AUTO_LLM_ROUTER_GUIDANCE_KINDS } from "../lib/autoLlmRouterCore.ts";
 import { AUTO_ROUTER_GENERATOR_SYSTEM, AUTO_ROUTER_JUDGE_OUTPUT_RULE } from "../lib/autoRouterOptimizerCore.ts";
@@ -50,6 +52,7 @@ test("the coding prompts are about coding, and the generator keeps the shared ru
     assert.match(CODING_ROUTER_GENERATOR_SYSTEM, /taskEvaluation/);
     assert.match(CODING_ROUTER_GENERATOR_SYSTEM, /liveRouting/);
     assert.match(CODING_ROUTER_GENERATOR_SYSTEM, /Leave settingChanges empty/);
+    assert.match(CODING_ROUTER_GENERATOR_SYSTEM, /does not license naming a model/, "a synthetic-only cycle names no model");
     // Every other line of the shared instructions is kept as written.
     const shared = AUTO_ROUTER_GENERATOR_SYSTEM.split("\n").filter((line) => !/chat message|stock suggestion/.test(line));
     for (const line of shared) assert.ok(CODING_ROUTER_GENERATOR_SYSTEM.includes(line), line.slice(0, 60));
@@ -113,4 +116,25 @@ test("the generator's coding evidence is counts and model ids, never text", () =
     assert.equal(evidence.liveRouting.topModelShare, 1);
     assert.ok(!("errors" in evidence.liveRouting), "error codes stay in Admin");
     assert.equal(JSON.parse(codingGeneratorEvidence({ taskEvaluation: [], liveRouting: null })).liveRouting, null);
+});
+
+test("model-written code runs only on a runner the operator marked isolated", () => {
+    assert.equal(codingTaskEvalRunnerIsolated({}), false);
+    assert.equal(codingTaskEvalRunnerIsolated({ CODING_TASK_EVAL_ISOLATED_RUNNER: "TRUE" }), false);
+    assert.equal(codingTaskEvalRunnerIsolated({ CODING_TASK_EVAL_ISOLATED_RUNNER: "true" }), true);
+});
+
+test("the task evaluation's calls count in the cycle's cost coverage", () => {
+    const coverage = { complete: true, knownMicroUsd: 100, started: 4, completed: 4, knownCalls: 4, unknownCalls: 0, usagePricedCalls: 4, version: "optimizer-cost-v1" };
+    const known = withTaskEvaluationCost(coverage, [{ known: true, microUsd: 30 }, { known: true, microUsd: 20 }]);
+    assert.deepEqual(
+        { ...known },
+        { ...coverage, knownMicroUsd: 150, started: 6, completed: 6, knownCalls: 6, usagePricedCalls: 6 }
+    );
+    const unknown = withTaskEvaluationCost(coverage, [{ known: true, microUsd: 30 }, { known: false, microUsd: 500 }]);
+    assert.equal(unknown.complete, false, "one unknown call leaves the coverage incomplete");
+    assert.equal(unknown.unknownCalls, 1);
+    assert.equal(unknown.knownMicroUsd, 130, "an unknown call's worst case is spend, not known cost");
+    assert.equal(unknown.started, unknown.completed);
+    assert.deepEqual(withTaskEvaluationCost(coverage, []), coverage);
 });

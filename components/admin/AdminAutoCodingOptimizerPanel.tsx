@@ -24,6 +24,7 @@ type Summary = OptimizerEvidenceSummary & {
   incumbentWins: number;
   ties: number;
   taskEvaluation?: { modelId: string; tasks: number; passed: number }[];
+  taskEvaluationStop?: string | null;
 };
 
 type SyntheticCase = {
@@ -144,7 +145,10 @@ export function AdminAutoCodingOptimizerPanel({ canWrite = true }: { canWrite?: 
   const status = (value: string) => (m.statuses as Record<string, string>)[value] ?? value;
   const locked = !canWrite;
   const writeProps = { writable: canWrite, requiredRole: screens.needsRole } as const;
-  const latestTasks = state?.cycles.find((cycle) => cycle.summary?.taskEvaluation?.length)?.summary?.taskEvaluation ?? [];
+  // The newest finished cycle's evaluation, named by its date, even when it ran none.
+  const evaluated = state?.cycles.find((cycle) => cycle.status !== "running" && cycle.summary);
+  const latestTasks = evaluated?.summary?.taskEvaluation ?? [];
+  const evalStop = evaluated?.summary?.taskEvaluationStop ?? null;
 
   const report = (title: string, value: CodingRoutingReport | null, testId: string) => (
     <div className="rounded-2xl border border-zinc-800 p-4 text-xs text-zinc-300" data-testid={testId}>
@@ -198,6 +202,14 @@ export function AdminAutoCodingOptimizerPanel({ canWrite = true }: { canWrite?: 
 
       <div className="rounded-2xl border border-zinc-800 p-4 text-xs text-zinc-300" data-testid="admin-auto-coding-optimizer-tasks">
         <p className="mb-2 text-sm font-bold text-zinc-200">{m.taskEvalTitle}</p>
+        {evaluated ? (
+          <p className="mb-1 text-zinc-500">
+            {m.taskEvalFrom} {formatAestDateTime(evaluated.createdAt, { seconds: true }) ?? "-"}
+          </p>
+        ) : null}
+        {evalStop ? (
+          <p className="mb-1 text-amber-300">{(m.taskEvalStops as Record<string, string>)[evalStop] ?? evalStop}</p>
+        ) : null}
         {latestTasks.length === 0 ? (
           <p className="text-zinc-500">{m.taskEvalNone}</p>
         ) : (

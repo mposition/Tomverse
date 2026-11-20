@@ -11,8 +11,12 @@ import {
     CODING_ROUTER_JUDGE_SYSTEM,
     CODING_ROUTER_SYNTHESIZER_SYSTEM,
     CODING_TASK_EVAL_BUDGET_SHARE,
+    CODING_TASK_EVAL_DEADLINE_MS,
     codingGeneratorEvidence,
+    codingTaskEvalRunnerIsolated,
+    withTaskEvaluationCost,
     type CodingTaskEvidence,
+    type TaskEvaluationCall,
 } from "@/lib/autoCodingRouterOptimizerCore";
 import { callAutoLlmRouter } from "@/lib/autoLlmRouter";
 import {
@@ -64,7 +68,13 @@ import {
 import { writeAutoRouterOptimizerSystemAudit } from "@/lib/autoRouterOptimizerSystemAudit";
 import { estimateTextTokens } from "@/lib/chatTokenEstimate";
 import { runCodingEval } from "@/lib/codingTaskEval";
-import { CODING_EVAL_TASKS, summarizeCodingEval, type CodingEvalResult } from "@/lib/codingTaskEvalCore";
+import {
+    CODING_EVAL_LIMITS,
+    CODING_EVAL_TASKS,
+    codingEvalWorstCaseTokens,
+    summarizeCodingEval,
+    type CodingEvalResult,
+} from "@/lib/codingTaskEvalCore";
 import { externalApiRunnableModels } from "@/lib/externalApiCatalog";
 import { readCodingRoutingReport } from "@/lib/externalApiRoutingReport";
 import { getRuntimeModels } from "@/lib/modelRegistry";
@@ -97,10 +107,18 @@ export const AUTO_CODING_OPTIMIZER_AUTOMATION_SETTING_KEY = "auto.llmRouterCodin
 
 export type CodingOptimizerAutomation = { daily: boolean; autoPromote: boolean };
 
-const GENERATOR_MAX_OUTPUT_TOKENS = 6_000;
+const GENERATOR_MAX_OUTPUT_TOKENS = 10_000;
 const GENERATOR_TIMEOUT_MS = 150_000;
 const SYNTHESIZER_MAX_OUTPUT_TOKENS = 12_000;
 const SYNTHESIZER_TIMEOUT_MS = 150_000;
+/**
+ * The task evaluation's limits inside a cycle: the fixed tasks are a few
+ * hundred bytes, so a 32 KB workspace and 32 KB of tool output leave ample
+ * room while keeping a run's worst case (codingEvalWorstCaseTokens, bytes as
+ * an upper bound on tokens) near a million input tokens rather than six.
+ */
+const CYCLE_EVAL_LIMITS = { ...CODING_EVAL_LIMITS, maxWorkspaceBytes: 32 * 1024, maxToolOutputBytes: 32 * 1024, maxSteps: 8 };
+
 /** The live routing report the generator reads. */
 const LIVE_ROUTING_DAYS = 7;
 
@@ -268,32 +286,63 @@ async function runCodingCycle(input: {
                 coding: syntheticCoding(text),
             });
 
-        // 1. The task evaluation, within its share of the budget.
+        // 1. The task evaluation, within its share of the budget, only on an
+        // isolated runner (codingTaskEvalRunnerIsolated). Each run starts only
+        // when its worst case still fits; a call whose usage is unknown is
+        // charged its worst case and leaves the cycle's cost coverage
+        // incomplete, so the cycle cannot be promoted on unconfirmed spend.
         const evalBudget = Math.floor(input.budgetMicroUsd * CODING_TASK_EVAL_BUDGET_SHARE);
+        const evalDeadline = Date.now() + CODING_TASK_EVAL_DEADLINE_MS;
         const evalResults: CodingEvalResult[] = [];
-        for (const task of CODING_EVAL_TASKS) {
-            if (evalTotal >= evalBudget) break;
+        const evalCalls: TaskEvaluationCall[] = [];
+        const worstRun = codingEvalWorstCaseTokens(CYCLE_EVAL_LIMITS);
+        const isolated = codingTaskEvalRunnerIsolated(process.env);
+        let evalStop: "runner_not_isolated" | "budget" | "deadline" | "cost_unknown" | null = isolated ? null : "runner_not_isolated";
+        for (const task of isolated ? CODING_EVAL_TASKS : []) {
+            if (evalStop) break;
+            if (Date.now() >= evalDeadline) {
+                evalStop = "deadline";
+                break;
+            }
             const routed = await routeWith(input.incumbentGuidance, task.prompt, `task-${task.id}`);
-            if (routed.usage) addEvalSpend(input.routerModel.provider, costMicroUsd(input.routerPrices, routed.usage));
+            if (routed.usage?.inputTokens === undefined || routed.usage.outputTokens === undefined) {
+                // A router call with unknown usage: stop spending on the evaluation.
+                evalCalls.push({ known: false, microUsd: 0 });
+                evalStop = "cost_unknown";
+                break;
+            }
+            const routerCost = costMicroUsd(input.routerPrices, routed.usage);
+            addEvalSpend(input.routerModel.provider, routerCost);
+            evalCalls.push({ known: true, microUsd: routerCost });
             const pick = routed.pick?.modelId;
             if (!pick) continue;
-            const ids = [pick, nextUp(candidatesFor(), pick)].filter((id): id is string => Boolean(id));
-            const models = ids.flatMap((id) => {
-                const model = answerModels.get(id);
-                return model && pricesOf(model) ? [model] : [];
-            });
-            // Each run's cost is counted as it ends, so the next run is checked against it.
-            await runCodingEval({
-                tasks: [task],
-                models,
-                shouldContinue: () => evalTotal < evalBudget,
-                onResult: (result) => {
-                    const model = answerModels.get(result.modelId);
-                    const prices = model ? pricesOf(model) : null;
-                    if (model && prices) addEvalSpend(model.provider, costMicroUsd(prices, result));
-                    evalResults.push(result);
-                },
-            });
+            for (const id of [pick, nextUp(candidatesFor(), pick)]) {
+                const model = id ? answerModels.get(id) : undefined;
+                const prices = model ? pricesOf(model) : null;
+                if (!model || !prices) continue;
+                const worst = costMicroUsd(prices, worstRun);
+                if (evalTotal + worst > evalBudget) {
+                    evalStop = "budget";
+                    continue;
+                }
+                if (Date.now() >= evalDeadline) {
+                    evalStop = "deadline";
+                    break;
+                }
+                await runCodingEval({
+                    tasks: [task],
+                    models: [model],
+                    limits: CYCLE_EVAL_LIMITS,
+                    shouldContinue: () => true,
+                    onResult: (result) => {
+                        const known = !result.usageUnknown;
+                        const microUsd = known ? costMicroUsd(prices, result) : worst;
+                        addEvalSpend(model.provider, microUsd);
+                        evalCalls.push({ known, microUsd });
+                        evalResults.push(result);
+                    },
+                });
+            }
         }
         const taskEvaluation: CodingTaskEvidence[] = summarizeCodingEval(evalResults).map((row) => ({
             modelId: row.modelId,
@@ -375,7 +424,11 @@ async function runCodingCycle(input: {
                 cases: result.cases,
                 summary: {
                     ...result.summary,
-                    ...optimizerVerificationSummary(result),
+                    // The task evaluation's calls count in the cycle's cost coverage.
+                    ...optimizerVerificationSummary({
+                        ...result,
+                        costCoverage: withTaskEvaluationCost(result.costCoverage, evalCalls),
+                    }),
                     failedCalls: result.failedCalls,
                     failedByKind: result.failedByKind,
                     report: result.report,
@@ -386,6 +439,7 @@ async function runCodingCycle(input: {
                     // The coding cycle's own evidence, content-free.
                     taskEvaluation,
                     taskEvaluationSpentMicroUsd: evalTotal,
+                    taskEvaluationStop: evalStop,
                     liveRouting,
                 },
                 spentMicroUsd,
@@ -408,6 +462,7 @@ async function runCodingCycle(input: {
             spentMicroUsd,
             taskEvaluationSpentMicroUsd: evalTotal,
             taskRuns: evalResults.length,
+            taskEvaluationStop: evalStop,
             taskPassed: evalResults.filter((item) => item.passed).length,
             decided: result.summary.decided,
             gate: result.gate,

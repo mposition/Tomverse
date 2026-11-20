@@ -43,7 +43,7 @@ export const CODING_ROUTER_GENERATOR_SYSTEM = [
               ? "A coding agent repeats its request many times per task, so a model that fails costs more rounds than a stronger one that succeeds: put quality first and compare credits only between candidates expected to do the work equally well. Reserve apex candidates for the hardest work."
               : line
     ),
-    "taskEvaluation, when present, is pre-cycle evidence from before this guidance was written: candidates each worked small coding tasks in a sandbox and hidden tests decided whether they passed (per model and difficulty). It is the strongest evidence of which models finish coding work; you may name a model it measured, within the difficulty it measured.",
+    "taskEvaluation, when present, is pre-cycle evidence from before this guidance was written: candidates each worked small coding tasks in a sandbox and hidden tests decided whether they passed (per model and difficulty). Use it to set rules by tier and credits for each kind of coding work; it does not license naming a model, which stays limited to models directComparisons judged.",
     "liveRouting, when present, is the coding routing report of real external API traffic before this cycle: counts and shares only (requests per model, how often a cheaper pick was held, conversations that changed model, error share). A topModelShare near 1 means one model took almost every request.",
     "Keep the rule that a conversation keeps currentModelId unless a request needs a stronger model. Leave settingChanges empty: a coding cycle changes no settings.",
 ].join("\n");
@@ -97,3 +97,48 @@ export const codingGeneratorEvidence = (input: {
 
 /** Share of the cycle's budget the task evaluation may spend before the cycle proper. */
 export const CODING_TASK_EVAL_BUDGET_SHARE = 0.4;
+
+/**
+ * Whether this process may run model-written code for the task evaluation.
+ * Node's permission model bounds the child's files, processes and environment
+ * but not its network, so the evaluation runs only on a runner the operator
+ * has isolated from internal services, metadata endpoints and credentials,
+ * and says so with CODING_TASK_EVAL_ISOLATED_RUNNER=true. Off, a coding cycle
+ * skips the evaluation and records why.
+ */
+export const codingTaskEvalRunnerIsolated = (env: Readonly<Record<string, string | undefined>>) =>
+    env.CODING_TASK_EVAL_ISOLATED_RUNNER === "true";
+
+/** A task-evaluation call's cost: known from reported usage, or not. */
+export type TaskEvaluationCall = { known: boolean; microUsd: number };
+
+/**
+ * The cycle's cost coverage with the task evaluation's calls in it, so a
+ * promotion checks the whole cycle's spend: one call whose usage is unknown
+ * leaves the coverage incomplete and the cycle unpromotable (cost_unconfirmed).
+ */
+export const withTaskEvaluationCost = <C extends {
+    complete: boolean;
+    knownMicroUsd: number;
+    started: number;
+    completed: number;
+    knownCalls: number;
+    unknownCalls: number;
+    usagePricedCalls: number;
+}>(coverage: C, calls: readonly TaskEvaluationCall[]): C => {
+    const known = calls.filter((call) => call.known);
+    const unknown = calls.length - known.length;
+    return {
+        ...coverage,
+        complete: coverage.complete && unknown === 0,
+        knownMicroUsd: coverage.knownMicroUsd + known.reduce((sum, call) => sum + call.microUsd, 0),
+        started: coverage.started + calls.length,
+        completed: coverage.completed + calls.length,
+        knownCalls: coverage.knownCalls + known.length,
+        unknownCalls: coverage.unknownCalls + unknown,
+        usagePricedCalls: coverage.usagePricedCalls + known.length,
+    };
+};
+
+/** The task evaluation stops starting runs this long after the cycle began. */
+export const CODING_TASK_EVAL_DEADLINE_MS = 15 * 60_000;
