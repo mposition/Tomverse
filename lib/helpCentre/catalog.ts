@@ -40,9 +40,12 @@ export const HELP_GUIDES: readonly HelpGuideMeta[] = [
   { id: "choose-model-auto", category: "chat", minutes: 1, steps: steps(4), requiresSignIn: false, popular: 1, action: { kind: "product", product: "chat" } },
   { id: "prompt-refiner", category: "chat", minutes: 1, steps: steps(4), requiresSignIn: false, action: { kind: "product", product: "chat" } },
   { id: "voice-input", category: "chat", minutes: 1, steps: steps(4), requiresSignIn: false, action: { kind: "product", product: "chat" } },
+  { id: "voice-conversation", category: "chat", minutes: 2, steps: steps(4), requiresSignIn: true, isNew: true, action: { kind: "product", product: "chat" } },
+  { id: "use-current-location", category: "chat", minutes: 2, steps: steps(4), requiresSignIn: false, isNew: true, action: { kind: "product", product: "chat" } },
   { id: "chat-starters", category: "chat", minutes: 1, steps: steps(3), requiresSignIn: false, action: { kind: "product", product: "chat" } },
   // review
   { id: "compare-answers", category: "review", minutes: 2, steps: steps(5, { 1: "review-composer", 2: "review-composer" }), requiresSignIn: false, popular: 2, action: { kind: "product", product: "review" } },
+  { id: "quick-difference-summary", category: "review", minutes: 1, steps: steps(4), requiresSignIn: false, isNew: true, action: { kind: "product", product: "review" } },
   { id: "read-ai-review", category: "review", minutes: 3, steps: steps(5), requiresSignIn: false, action: { kind: "product", product: "review" } },
   { id: "follow-citations", category: "review", minutes: 2, steps: steps(4), requiresSignIn: false, action: { kind: "product", product: "review" } },
   { id: "save-share-review", category: "review", minutes: 2, steps: steps(4), requiresSignIn: true, action: { kind: "product", product: "review" } },
@@ -57,6 +60,7 @@ export const HELP_GUIDES: readonly HelpGuideMeta[] = [
   // files
   { id: "attach-files", category: "files", minutes: 1, steps: steps(3), requiresSignIn: false, action: { kind: "product", product: "chat" } },
   { id: "google-drive", category: "files", minutes: 2, steps: steps(4), requiresSignIn: true, action: { kind: "product", product: "chat" } },
+  { id: "convert-files", category: "files", minutes: 2, steps: steps(4), requiresSignIn: true, isNew: true, action: { kind: "product", product: "chat" } },
   { id: "generated-files", category: "files", minutes: 2, steps: steps(4), requiresSignIn: true, action: { kind: "product", product: "chat" } },
   // assistants
   { id: "create-assistant", category: "assistants", minutes: 4, steps: steps(5), requiresSignIn: true, action: { kind: "settings", section: "assistants" } },
@@ -69,26 +73,29 @@ export const HELP_GUIDES: readonly HelpGuideMeta[] = [
   { id: "import-chatgpt", category: "imports", minutes: 5, steps: steps(5), requiresSignIn: true, popular: 4, action: { kind: "settings", section: "external-import" } },
   { id: "import-claude", category: "imports", minutes: 5, steps: steps(4), requiresSignIn: true, action: { kind: "settings", section: "external-import" } },
   { id: "continue-imported", category: "imports", minutes: 2, steps: steps(4), requiresSignIn: true, action: { kind: "settings", section: "external-import" } },
+  { id: "import-gemini", category: "imports", minutes: 5, steps: steps(5), requiresSignIn: true, isNew: true, action: { kind: "settings", section: "external-import" } },
   { id: "import-guest-conversations", category: "imports", minutes: 1, steps: steps(3), requiresSignIn: true, action: { kind: "settings-tab", tab: "data" } },
   // connectors
   { id: "connect-plugin", category: "connectors", minutes: 3, steps: steps(4), requiresSignIn: true, isNew: true, action: { kind: "product", product: "chat" } },
   { id: "custom-mcp-server", category: "connectors", minutes: 3, steps: steps(4), requiresSignIn: true, isNew: true, action: { kind: "product", product: "chat" } },
   { id: "use-plugin-in-chat", category: "connectors", minutes: 2, steps: steps(3), requiresSignIn: true, action: { kind: "product", product: "chat" } },
   // coding
-  { id: "manage-api-keys", category: "coding", minutes: 2, steps: steps(5), requiresSignIn: true, isNew: true, action: { kind: "settings", section: "api-keys" } },
-  { id: "connect-claude-code", category: "coding", minutes: 4, steps: steps(5), requiresSignIn: true, isNew: true, action: { kind: "settings", section: "api-keys" } },
-  { id: "connect-codex", category: "coding", minutes: 4, steps: steps(5), requiresSignIn: true, isNew: true, action: { kind: "settings", section: "api-keys" } },
-  { id: "api-usage", category: "coding", minutes: 2, steps: steps(4), requiresSignIn: true, action: { kind: "settings", section: "api-keys" } },
+  { id: "manage-api-keys", category: "coding", minutes: 2, steps: steps(5), requiresSignIn: true, plan: "paid", isNew: true, action: { kind: "settings", section: "api-keys" } },
+  { id: "connect-claude-code", category: "coding", minutes: 4, steps: steps(5), requiresSignIn: true, plan: "paid", isNew: true, action: { kind: "settings", section: "api-keys" } },
+  { id: "connect-codex", category: "coding", minutes: 4, steps: steps(5), requiresSignIn: true, plan: "paid", isNew: true, action: { kind: "settings", section: "api-keys" } },
+  { id: "connect-cursor", category: "coding", minutes: 4, steps: steps(4), requiresSignIn: true, plan: "paid", isNew: true, action: { kind: "settings", section: "api-keys" } },
+  { id: "api-smart-adaptive", category: "coding", minutes: 2, steps: steps(4), requiresSignIn: true, plan: "paid", isNew: true, action: { kind: "settings", section: "api-keys" } },
+  { id: "api-usage", category: "coding", minutes: 2, steps: steps(4), requiresSignIn: true, plan: "paid", action: { kind: "settings", section: "api-keys" } },
   // billing
   { id: "how-credits-work", category: "billing", minutes: 2, steps: steps(5), requiresSignIn: false, action: { kind: "public", path: "/pricing" } },
   { id: "check-credits", category: "billing", minutes: 1, steps: steps(4), requiresSignIn: true, popular: 6, action: { kind: "settings-tab", tab: "plan" } },
   { id: "change-plan", category: "billing", minutes: 2, steps: steps(5, { 1: "pricing-page" }), requiresSignIn: true, plan: "paid", action: { kind: "public", path: "/pricing" } },
   { id: "cancel-subscription", category: "billing", minutes: 1, steps: steps(3), requiresSignIn: true, plan: "paid", action: { kind: "settings-tab", tab: "plan" } },
-  { id: "request-refund", category: "billing", minutes: 2, steps: steps(3), requiresSignIn: true, plan: "paid", action: { kind: "public", path: "/refund" } },
+  { id: "request-refund", category: "billing", minutes: 2, steps: steps(3), requiresSignIn: true, action: { kind: "public", path: "/refund" } },
   // account
   { id: "manage-login-methods", category: "account", minutes: 2, steps: steps(5), requiresSignIn: true, action: { kind: "settings-tab", tab: "account" } },
   { id: "export-account-data", category: "account", minutes: 2, steps: steps(5), requiresSignIn: true, action: { kind: "settings", section: "account-data" } },
-  { id: "delete-account", category: "account", minutes: 3, steps: steps(5), requiresSignIn: true, action: { kind: "settings-tab", tab: "account" } },
+  { id: "delete-account", category: "account", minutes: 3, steps: steps(4), requiresSignIn: true, action: { kind: "settings-tab", tab: "account" } },
   // notifications
   { id: "email-notifications", category: "notifications", minutes: 2, steps: steps(5), requiresSignIn: true, action: { kind: "settings", section: "email-notifications" } },
   { id: "use-on-mobile", category: "notifications", minutes: 1, steps: steps(3), requiresSignIn: false, action: { kind: "product", product: "chat" } },

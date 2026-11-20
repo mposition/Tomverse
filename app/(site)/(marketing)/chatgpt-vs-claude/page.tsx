@@ -1,5 +1,5 @@
 import { LanguageProvider } from "@/components/LanguageProvider";
-import { MarketingInfoPage } from "@/components/marketing/MarketingInfoPage";
+import { GuidePage } from "@/components/marketing/v2/guides/GuidePage";
 import { searchIntentPages } from "@/components/marketing/searchIntentContent";
 import { createPageMetadata } from "@/lib/seo";
 
@@ -15,10 +15,7 @@ export const metadata = createPageMetadata({
 export default function ChatGptVsClaudePage() {
   return (
     <LanguageProvider initialLang="en" forceInitialLang>
-      <MarketingInfoPage
-        content={searchIntentPages["chatgpt-vs-claude"]}
-        template="chatgpt-vs-claude"
-      />
+      <GuidePage slug="chatgpt-vs-claude" />
     </LanguageProvider>
   );
 }

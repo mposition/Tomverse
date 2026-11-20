@@ -10,7 +10,6 @@ import {
   reasonText,
   STAGE_TONE,
 } from "@/components/admin/modelCatalog/ImageCatalogViews";
-import { AdminDataTable, type AdminDataColumn } from "@/components/admin/ui/AdminDataTable";
 import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
 import { AdminTechInfo } from "@/components/admin/ui/AdminTechInfo";
 import { AdminTile } from "@/components/admin/ui/AdminTile";
@@ -21,9 +20,9 @@ import {
   codingEdit,
   codingEditProblems,
   type CodingEditValue,
-  codingNeedsAction,
   codingNextAction,
   type CodingProfileView,
+  type CodingResolvedView,
   codingServing,
   type CodingStage,
   codingStage,
@@ -31,177 +30,17 @@ import {
   reasonMessage,
 } from "@/lib/adminModelCatalogFlow";
 
-// The coding catalogue's screens, laid out like the image ones
-// (ImageCatalogViews): a list with one next step per waiting model, a detail
-// view with the draft as a field table, and the add form. No JSON to type;
-// the stored row stays readable under the technical details.
+// A dedicated coding model's screens (a model chat does not have, with its
+// whole profile here), laid out like the image ones (ImageCatalogViews): a
+// detail view with the draft as a field table, and the add form. No JSON to
+// type; the stored row stays readable under the technical details. The list
+// and chat links are CodingListViews and CodingLinkViews.
 
 export function CodingStageChip({ m, stage }: { m: CatalogMessages; stage: CodingStage }) {
   return <AdminStatusChip tone={STAGE_TONE[stage]}>{m.codingFlow.stageChip[stage]}</AdminStatusChip>;
 }
 
 const subtitle = (item: CodingCatalogItem) => [item.id, item.provider].filter(Boolean).join(" · ");
-
-/** The list: models waiting for the operator first, then serving and held ones. */
-export function CodingCatalogList({
-  m,
-  items,
-  onOpen,
-  onAction,
-  onHold,
-}: {
-  m: CatalogMessages;
-  items: readonly CodingCatalogItem[];
-  onOpen: (item: CodingCatalogItem) => void;
-  onAction: (item: CodingCatalogItem, action: ImageNextAction) => void;
-  onHold: (item: CodingCatalogItem) => void;
-}) {
-  const c = m.codingFlow;
-  const staged = items.map((item) => ({ item, stage: codingStage(item) }));
-  const pending = staged.filter((entry) => codingNeedsAction(entry.stage));
-  const settled = staged.filter((entry) => !codingNeedsAction(entry.stage));
-  const servingCount = settled.filter((entry) => entry.stage === "serving").length;
-  const heldCount = settled.length - servingCount;
-
-  const columns: AdminDataColumn<(typeof settled)[number]>[] = [
-    {
-      key: "model",
-      header: m.model,
-      render: ({ item }) => (
-        <div className="min-w-0">
-          <div className="font-bold text-zinc-100">{item.name}</div>
-          <div className="truncate font-mono text-xs text-zinc-500">{subtitle(item)}</div>
-        </div>
-      ),
-    },
-    {
-      key: "state",
-      header: m.state,
-      render: ({ item, stage }) => (
-        <div className="flex flex-col items-start gap-1">
-          <CodingStageChip m={m} stage={stage} />
-          {item.holdReason ? <span className="text-xs text-zinc-400">{m.holdReasonLine(item.holdReason)}</span> : null}
-        </div>
-      ),
-    },
-    {
-      key: "weight",
-      header: c.fields.creditWeight,
-      render: ({ item }) => <span className="font-mono text-xs">{item.profile?.pricing.creditWeight ?? "—"}</span>,
-    },
-    {
-      key: "checked",
-      header: m.verifiedAtLabel,
-      render: ({ item }) => <span className="text-xs text-zinc-400">{item.profile?.pricing.verifiedAt ?? "—"}</span>,
-    },
-    {
-      key: "actions",
-      header: m.actions,
-      align: "right",
-      render: ({ item, stage }) => (
-        <div className="flex flex-wrap justify-end gap-1.5">
-          <button
-            type="button"
-            onClick={() => onOpen(item)}
-            className="min-h-8 rounded-xl border border-zinc-700 bg-zinc-900 px-3 text-xs font-bold text-zinc-100 hover:bg-zinc-800"
-          >
-            {c.viewProfile}
-          </button>
-          {stage === "serving" ? (
-            <AdminWriteButton size="sm" variant="secondary" onClick={() => onHold(item)}>
-              {m.holdAction}
-            </AdminWriteButton>
-          ) : item.admission?.admitted ? (
-            <AdminWriteButton size="sm" variant="secondary" onClick={() => onAction(item, "enable")}>
-              {m.enable}
-            </AdminWriteButton>
-          ) : null}
-        </div>
-      ),
-    },
-  ];
-
-  return (
-    <div className="flex min-w-0 flex-col gap-5">
-      {pending.length > 0 ? (
-        <section className="flex flex-col gap-3" data-testid="model-catalog-coding-pending-list">
-          <div>
-            <h3 className="text-sm font-bold text-zinc-100">
-              {m.pendingTitle} <span className="ml-1 rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-300">{pending.length}</span>
-            </h3>
-            <p className="mt-0.5 text-xs text-zinc-400">{m.pendingNote}</p>
-          </div>
-          {pending.map(({ item, stage }) => {
-            const action = codingNextAction(stage);
-            const serving = codingServing(item);
-            return (
-              <div
-                key={item.id}
-                data-testid="model-catalog-pending-coding"
-                data-stage={stage}
-                className="flex flex-col gap-3 rounded-2xl border border-amber-500/30 bg-zinc-950/40 p-4 sm:flex-row sm:items-center"
-              >
-                <div className="flex min-w-0 flex-1 flex-col gap-2">
-                  <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
-                    <span className="font-bold text-zinc-100">{item.name}</span>
-                    <span className="truncate font-mono text-xs text-zinc-500">{subtitle(item)}</span>
-                  </div>
-                  <ImageFlowStepper m={m} stage={stage} labels={c.steps} />
-                  <p className="text-xs font-bold text-amber-300">{c.stage[stage]}</p>
-                  {serving ? (
-                    <div>
-                      <CodingStageChip m={m} stage="serving" />
-                    </div>
-                  ) : null}
-                </div>
-                <div className="flex shrink-0 flex-wrap gap-2">
-                  {/* A serving model with a new draft can still be held from here. */}
-                  {serving ? (
-                    <AdminWriteButton variant="secondary" onClick={() => onHold(item)} data-testid="model-catalog-coding-hold">
-                      {m.holdAction}
-                    </AdminWriteButton>
-                  ) : null}
-                  {action === "review_prices" ? null : (
-                    <button
-                      type="button"
-                      onClick={() => onOpen(item)}
-                      className="min-h-10 rounded-xl border border-zinc-700 bg-zinc-900 px-3 text-sm font-bold text-zinc-100 hover:bg-zinc-800"
-                    >
-                      {c.viewProfile}
-                    </button>
-                  )}
-                  <AdminWriteButton onClick={() => (action === "review_prices" ? onOpen(item) : onAction(item, action))}>
-                    {c.nextAction[action]}
-                  </AdminWriteButton>
-                </div>
-              </div>
-            );
-          })}
-        </section>
-      ) : null}
-      <section className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-end justify-between gap-2">
-          <div>
-            <h3 className="text-sm font-bold text-zinc-100">{m.settledTitle}</h3>
-            <p className="mt-0.5 text-xs text-zinc-400">{m.settledNote}</p>
-          </div>
-          <div className="flex gap-1.5">
-            <AdminStatusChip tone="ok">{m.countServing(servingCount)}</AdminStatusChip>
-            {heldCount > 0 ? <AdminStatusChip tone="warn">{m.countHeld(heldCount)}</AdminStatusChip> : null}
-          </div>
-        </div>
-        <AdminDataTable
-          caption={m.settledTitle}
-          columns={columns}
-          rows={settled}
-          rowKey={({ item }) => item.id}
-          cardTitle={({ item }) => item.name}
-          emptyState={<p className="text-sm text-zinc-400">{c.noModels}</p>}
-        />
-      </section>
-    </div>
-  );
-}
 
 const inputClass = (problem: boolean, edited: boolean) =>
   `rounded-lg border bg-zinc-950 px-2 py-1.5 text-sm font-bold text-zinc-100 outline-none focus:border-blue-500 ${
@@ -218,7 +57,7 @@ export function CodingProfileTable({
   onEdit,
 }: {
   m: CatalogMessages;
-  profile: CodingProfileView;
+  profile: CodingProfileView | CodingResolvedView;
   floor: number | null;
   edits?: Readonly<CodingEditValue>;
   editable?: boolean;
@@ -309,7 +148,7 @@ export function CodingProfileTable({
     { key: "image", label: c.fields.imageInput, value: caps.imageInput ? c.yes : c.no },
     { key: "context", label: c.fields.maxContext, value: caps.maxContextTokens.toLocaleString("en-US") },
     { key: "maxOutput", label: c.fields.maxOutput, value: caps.maxOutputTokens.toLocaleString("en-US") },
-    { key: "region", label: c.fields.region, value: profile.processingRegion },
+    { key: "region", label: c.fields.region, value: profile.processingRegion ?? "—" },
   ];
 
   return (
@@ -360,7 +199,7 @@ function CodingEvidenceBox({
   fromDraft,
 }: {
   m: CatalogMessages;
-  profile: CodingProfileView;
+  profile: CodingProfileView | CodingResolvedView;
   reasons: readonly string[];
   edited: number;
   fromDraft: boolean;
@@ -381,16 +220,28 @@ function CodingEvidenceBox({
         </dd>
         <dt className="text-xs font-bold text-zinc-500">{c.termsLabel}</dt>
         <dd className="min-w-0">
-          {linkList([profile.terms.url])}
-          <span className={`block text-xs font-bold ${profile.terms.allowsResaleAndCodingAgent ? "text-emerald-300" : "text-red-300"}`}>
-            {profile.terms.allowsResaleAndCodingAgent ? c.termsAllows : c.termsDenies}
-          </span>
-          <span className="text-xs text-zinc-400">{c.checkedOn(profile.terms.checkedAt)}</span>
+          {profile.terms ? (
+            <>
+              {linkList([profile.terms.url])}
+              <span className={`block text-xs font-bold ${profile.terms.allowsResaleAndCodingAgent ? "text-emerald-300" : "text-red-300"}`}>
+                {profile.terms.allowsResaleAndCodingAgent ? c.termsAllows : c.termsDenies}
+              </span>
+              <span className="text-xs text-zinc-400">{c.checkedOn(profile.terms.checkedAt)}</span>
+            </>
+          ) : (
+            <span className="text-xs text-zinc-400">—</span>
+          )}
         </dd>
         <dt className="text-xs font-bold text-zinc-500">{c.retentionLabel}</dt>
         <dd className="min-w-0">
-          {linkList([profile.retention.url])}
-          <span className="text-xs text-zinc-400">{c.checkedOn(profile.retention.checkedAt)}</span>
+          {profile.retention ? (
+            <>
+              {linkList([profile.retention.url])}
+              <span className="text-xs text-zinc-400">{c.checkedOn(profile.retention.checkedAt)}</span>
+            </>
+          ) : (
+            <span className="text-xs text-zinc-400">—</span>
+          )}
         </dd>
         {fromDraft ? (
           <>

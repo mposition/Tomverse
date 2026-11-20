@@ -402,6 +402,8 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       "default model",
       "guest lineup",
       "fallback model",
+      "coding catalog",
+      "provider conditions",
     ],
     tabs: [
       {
@@ -420,9 +422,15 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         description: "The fallback model, the guest lineup and the account default",
       },
       {
+        // The id stays "catalog": bookmarks and runbooks name ?tab=catalog.
         id: "catalog",
-        label: "Image & coding catalog",
-        description: "Enable or hold image and coding models, price history, LLM drafts, the Code snapshot",
+        label: "Image catalog",
+        description: "Enable or hold image models, price history, LLM drafts",
+      },
+      {
+        id: "coding",
+        label: "Coding catalog",
+        description: "Coding models for Code, the API and the CLI, chat links, provider conditions, the Code snapshot",
       },
     ],
   },

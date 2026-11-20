@@ -3,9 +3,12 @@ import { after, before, test } from "node:test";
 import type { Session } from "next-auth";
 
 import { takeAuditChainLock } from "@/lib/adminAudit";
+import { applyProviderTermsDraft, linkChatModel, saveCodingSettings, storeProviderTermsDraft, unlinkCodingModel } from "@/lib/codingCatalogAdmin";
 import { getImageModel, IMAGE_MODEL_REGISTRY, resetActiveImageModelCatalog } from "@/lib/imageModelRegistry";
 import {
+  codingCreditFloor,
   latestCodingSnapshot,
+  loadCodingCatalog,
   publishCodingSnapshot,
   refreshImageModelCatalog,
   renewCodingSnapshotIfUnchanged,
@@ -54,6 +57,7 @@ const withTriggersOff = async (table: string, trigger: string, sql: string) => {
 
 const cleanup = async () => {
   await prisma.modelCatalogEntry.deleteMany({});
+  await prisma.codingProviderTerms.deleteMany({});
   await withTriggersOff(
     "ModelCatalogPriceRevision",
     "ModelCatalogPriceRevision_append_only_trigger",
@@ -704,4 +708,126 @@ test("a priced runtime image model whose stored profile no longer parses cannot 
   const row = await prisma.modelCatalogEntry.findUnique({ where: { category_modelId: { category: "image", modelId } } });
   assert.deepEqual(row?.profile, stored);
   assert.equal(await auditCount("model_catalog.entry_updated"), auditsBefore);
+});
+
+// --- chat links and provider conditions (owner decision 2026-11-20) ---------------
+
+const LINKED = "gpt-6-luna";
+const OPENAI_TERMS = "https://openai.com/policies/services-agreement";
+const OPENAI_RETENTION = "https://platform.openai.com/docs/guides/your-data";
+const today = () => new Date().toISOString().slice(0, 10);
+
+const linkedEntry = async () => (await loadCodingCatalog()).find((entry) => entry.modelId === LINKED)!;
+
+test("a chat link is created off with its audit row, reads chat's values, and needs its provider's conditions to turn on", async () => {
+  await cleanup();
+  const linkedBefore = await auditCount("model_catalog.coding_linked");
+  await linkChatModel({
+    registryModelId: LINKED,
+    draft: { toolCalling: "parallel", structuredOutput: "strict_schema", note: "", sources: ["https://developers.openai.com/api/docs/pricing"], draftedAt: today() },
+    session,
+  });
+  assert.equal(await auditCount("model_catalog.coding_linked"), linkedBefore + 1);
+  const row = await prisma.modelCatalogEntry.findUniqueOrThrow({ where: { category_modelId: { category: "coding", modelId: LINKED } } });
+  assert.equal(row.enabled, null);
+  assert.equal((row.profile as { source: string }).source, "chat");
+  // Only the link's own values are stored.
+  assert.equal((row.profile as { name?: string }).name, undefined);
+
+  await assert.rejects(
+    linkChatModel({
+      registryModelId: LINKED,
+      draft: { toolCalling: "parallel", structuredOutput: "strict_schema", note: "", sources: [], draftedAt: today() },
+      session,
+    }),
+    (error: unknown) => error instanceof CatalogRefusal && error.code === "already_in_catalog"
+  );
+
+  const entry = await linkedEntry();
+  assert.equal(entry.source, "chat");
+  assert.equal(entry.profile?.apiModelId, "gpt-6-luna");
+  assert.ok((entry.profile?.capabilities.maxContextTokens ?? 0) > 0);
+  assert.ok(entry.admission?.admitted === false && entry.admission.reasons.includes("provider_terms_missing"));
+  await assert.rejects(
+    updateCatalogEntry({ category: "coding", modelId: LINKED, patch: { enabled: true }, session }),
+    (error: unknown) => error instanceof CatalogRefusal && error.code === "not_admitted" && error.reasons.includes("provider_terms_missing")
+  );
+});
+
+test("applied provider conditions and a weight at the floor let the link turn on, and the snapshot carries the resolved row", async () => {
+  const draftsBefore = await auditCount("model_catalog.provider_terms_draft_stored");
+  const appliedBefore = await auditCount("model_catalog.provider_terms_applied");
+  await storeProviderTermsDraft({
+    provider: "openai",
+    draft: {
+      allowsResaleAndCodingAgent: true,
+      termsUrl: OPENAI_TERMS,
+      retentionUrl: OPENAI_RETENTION,
+      processingRegion: "US",
+      checkedAt: today(),
+      sources: [OPENAI_TERMS, OPENAI_RETENTION],
+    },
+    session,
+  });
+  assert.equal(await auditCount("model_catalog.provider_terms_draft_stored"), draftsBefore + 1);
+  // A stored draft is not applied: the link is still refused.
+  assert.ok((await linkedEntry()).admission?.admitted === false);
+  await applyProviderTermsDraft({ provider: "openai", session });
+  assert.equal(await auditCount("model_catalog.provider_terms_applied"), appliedBefore + 1);
+  const terms = await prisma.codingProviderTerms.findUniqueOrThrow({ where: { provider: "openai" } });
+  assert.equal(terms.draft, null);
+
+  const floor = codingCreditFloor((await linkedEntry()).profile!);
+  assert.ok(floor !== null);
+  await saveCodingSettings({ modelId: LINKED, settings: { creditWeight: floor, channels: ["api", "code"] }, session });
+  const entry = await linkedEntry();
+  assert.deepEqual(entry.admission, { admitted: true });
+  await updateCatalogEntry({ category: "coding", modelId: LINKED, patch: { enabled: true }, session });
+
+  const published = await publishCodingSnapshot({ session });
+  const snapshotRow = published.snapshot.models.find((model) => model.modelId === LINKED)!;
+  assert.equal(snapshotRow.source, "chat");
+  assert.deepEqual(snapshotRow.channels, ["code", "api"]);
+  assert.equal(snapshotRow.pricing.creditWeight, floor);
+  assert.equal(snapshotRow.terms.url, OPENAI_TERMS);
+  assert.ok(snapshotRow.pricing.pricingVersion);
+});
+
+test("provider conditions past 90 days keep a serving link on and refuse a new activation", async () => {
+  await prisma.codingProviderTerms.update({
+    where: { provider: "openai" },
+    data: {
+      terms: {
+        allowsResaleAndCodingAgent: true,
+        termsUrl: OPENAI_TERMS,
+        retentionUrl: OPENAI_RETENTION,
+        processingRegion: "US",
+        checkedAt: "2026-01-01",
+        sources: [OPENAI_TERMS],
+      },
+    },
+  });
+  const entry = await linkedEntry();
+  assert.deepEqual(entry.warnings, ["provider_terms_expired"]);
+  assert.deepEqual(entry.admission, { admitted: true });
+  // Already on: a settings change is judged and kept.
+  await saveCodingSettings({ modelId: LINKED, settings: { channels: ["code"] }, session });
+  // Held and turned on again is a new activation.
+  await updateCatalogEntry({ category: "coding", modelId: LINKED, patch: { holdReason: "check" }, session });
+  await assert.rejects(
+    updateCatalogEntry({ category: "coding", modelId: LINKED, patch: { holdReason: null, enabled: true }, session }),
+    (error: unknown) => error instanceof CatalogRefusal && error.reasons.includes("provider_terms_expired")
+  );
+});
+
+test("a link is taken out of the catalogue only once it is off, with its audit row", async () => {
+  await assert.rejects(
+    unlinkCodingModel({ modelId: LINKED, session }),
+    (error: unknown) => error instanceof CatalogRefusal && error.code === "unlink_turn_off_first"
+  );
+  await updateCatalogEntry({ category: "coding", modelId: LINKED, patch: { enabled: false, holdReason: null }, session });
+  const before = await auditCount("model_catalog.coding_unlinked");
+  await unlinkCodingModel({ modelId: LINKED, session });
+  assert.equal(await auditCount("model_catalog.coding_unlinked"), before + 1);
+  assert.equal(await prisma.modelCatalogEntry.count({ where: { category: "coding", modelId: LINKED } }), 0);
 });

@@ -1,0 +1,81 @@
+/*
+ * Usage guides (approved concept, owner 2026-11-20): additions on top of the shared V2
+ * sheet (../v2-pages.css already holds the generated .gd-*, .ba, .fx and .gd-faq rules).
+ * Every rule is scoped under .tv-page; text holds the 11px floor and fonts use the app's
+ * locale variables (docs/ui-contracts/typography.md). No keyframes live here.
+ */
+
+/* Motion control (WCAG 2.2.2): the page root carries data-motion="paused" when the
+   visitor prefers reduced motion or presses the pause button. */
+.tv-page .gd-motion-toggle { display: inline-flex; align-items: center; gap: 8px; min-width: 44px; min-height: 44px; margin-top: 14px; padding: 10px 16px; border: 0; border-radius: 100px; background: var(--ghost-bg); color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--ghost-line); font: 600 .875rem/1 var(--font-body); cursor: pointer; }
+.tv-page .gd-motion-toggle:hover { background: var(--ghost-bg-hover); color: var(--ink); }
+.tv-page .gd-motion-toggle .icon { font-size: .75rem; letter-spacing: -.1em; }
+.tv-page[data-motion="paused"] *, .tv-page[data-motion="paused"] *::before, .tv-page[data-motion="paused"] *::after { animation: none !important; transition: none !important; }
+
+.tv-page .gd-motion-toggle:focus-visible, .tv-page .gd-tabs a:focus-visible, .tv-page .seg button:focus-visible, .tv-page .gd-prompt button:focus-visible,
+.tv-page .gd-faq summary:focus-visible, .tv-page .gd-link:focus-visible, .tv-page .gd-related a:focus-visible, .tv-page .fmt-details summary:focus-visible { outline: 2px solid var(--brand-hi); outline-offset: 2px; }
+
+/* Hero */
+.tv-page .gd-hero .eyebrow { margin: 0; }
+.tv-page .crumb span { color: var(--ink-3); }
+.tv-page .gd-tabs a { display: inline-flex; align-items: center; min-height: 40px; }
+.tv-page .gd-hero .hero-actions .btn { max-width: 100%; }
+
+/* Row headings and model outputs: the generator that built the shared sheet skips every
+   selector that names a <header>, so these rules live here. */
+.tv-page .gd-row > header { position: sticky; top: 96px; align-self: start; }
+.tv-page .gd-row > header span { font: 600 .75rem/1 var(--font-mono); color: var(--brand-hi); padding: 6px 8px; border-radius: 8px; background: rgb(21 93 251 / .14); }
+.tv-page .gd-row > header h2 { font-size: clamp(1.625rem, 2.8vw, 2.375rem); font-weight: 900; letter-spacing: -.04em; line-height: 1.2; margin-top: 16px; overflow-wrap: anywhere; }
+.tv-page .gd-out header { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: .9375rem; margin-bottom: 12px; }
+.tv-page .gd-out header img { width: 28px; height: 28px; border-radius: 8px; background: #fff; padding: 4px; }
+
+/* Row text */
+.tv-page .gd-body > p.eyebrow { font: 600 .8125rem/1 var(--font-mono); color: var(--brand-hi); }
+.tv-page .gd-pill + p { margin-top: 14px; }
+.tv-page .gd-body > p, .tv-page .gd-faq details p, .tv-page .gd-card p { overflow-wrap: anywhere; }
+.tv-page .gd-link { min-height: 44px; }
+
+/* Before / after: the headline is a section title (h2) and the findings are articles (h3) */
+.tv-page .ba-head h2 { font-size: 1.25rem; font-weight: 900; letter-spacing: -.02em; line-height: 1.3; margin-top: 8px; }
+.tv-page .ans .mk { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 8px; background: var(--panel); color: var(--ink); font: 800 .75rem/1 var(--font-display); margin-bottom: 8px; }
+.tv-page .tile h3 { font-size: .9375rem; font-weight: 800; color: var(--ink); margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+.tv-page .tile h3::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--c, var(--brand)); flex: none; }
+.tv-page .seg { display: inline-grid; grid-template-columns: 1fr 1fr; }
+.tv-page .seg i { width: calc(50% - 4px); }
+.tv-page .seg[data-view="after"] i { transform: translateX(100%); }
+.tv-page .seg button { min-width: 72px; min-height: 44px; text-transform: uppercase; letter-spacing: .04em; }
+
+/* Attachment formats: a list on wide screens, collapsible groups on small ones */
+.tv-page .gd-formats { margin-top: 22px; }
+.tv-page .gd-formats .fmt-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.tv-page .gd-formats .fmt-list li { padding: 14px 16px; border-radius: 14px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink-2); font-size: .9375rem; line-height: 1.7; overflow-wrap: anywhere; }
+.tv-page .gd-formats .fmt-list strong { color: var(--ink); }
+.tv-page .gd-formats .fmt-details { display: none; gap: 10px; }
+.tv-page .gd-formats details { border-radius: 14px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink-2); font-size: .9375rem; line-height: 1.6; overflow-wrap: anywhere; }
+.tv-page .gd-formats summary { display: grid; gap: 2px; min-height: 44px; padding: 12px 14px; cursor: pointer; list-style: none; }
+.tv-page .gd-formats summary::-webkit-details-marker { display: none; }
+.tv-page .gd-formats summary .name { color: var(--ink); font-weight: 800; }
+.tv-page .gd-formats summary .more { color: var(--brand-hi); font-weight: 700; font-size: .8125rem; }
+.tv-page .gd-formats details > p { padding: 0 14px 14px; color: var(--ink-2); font-size: .875rem; line-height: 1.7; }
+
+/* Model comparison */
+.tv-page .gd-models span { max-width: 100%; }
+.tv-page .gd-matrix .mrow > * { overflow-wrap: anywhere; }
+
+@media (max-width: 1080px) {
+  /* The shared sheet ends with a two-column .gd-top that would beat its own one-column query. */
+  .tv-page .gd-top, .tv-page .gd-top:not(.solo) { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  .tv-page .gd-hero { padding-top: 56px; }
+  .tv-page .gd-row > header { position: static; }
+}
+@media (max-width: 639px) {
+  .tv-page .gd-hero { padding-top: 36px; }
+  .tv-page .gd-hero h1, .tv-page .gd-top:not(.solo) h1 { font-size: clamp(1.875rem, 9.5vw, 2.5rem); }
+  .tv-page .gd-hero .lead { font-size: 1rem; line-height: 1.7; margin-top: 16px; }
+  .tv-page .gd-hero .hero-actions { margin-top: 22px; }
+  .tv-page .gd-tabs { margin-bottom: 18px; }
+  .tv-page .gd-row { padding: 36px 0; }
+  .tv-page .gd-formats .fmt-list { display: none; }
+  .tv-page .gd-formats .fmt-details { display: grid; }
+  .tv-page .seg { width: 100%; }
+}

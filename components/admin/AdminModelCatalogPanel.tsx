@@ -1,15 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Plus, RefreshCw } from "lucide-react";
+import { ArrowRight, Plus, RefreshCw } from "lucide-react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
-import {
-  CodingCatalogList,
-  CodingModelDetail,
-  CodingModelForm,
-  type CodingModelFormValue,
-} from "@/components/admin/modelCatalog/CodingCatalogViews";
 import {
   CatalogToast,
   type CatalogToastValue,
@@ -26,15 +21,10 @@ import { AdminStateBlock } from "@/components/admin/ui/AdminStateBlock";
 import { AdminTile } from "@/components/admin/ui/AdminTile";
 import { AdminWriteButton } from "@/components/admin/ui/AdminWriteButton";
 import { adminFetch, isAdminFetchTimeout } from "@/lib/adminFetch";
+import { adminCodingCatalogMessages } from "@/lib/adminMessages/codingCatalog";
 import { adminModelCatalogMessages } from "@/lib/adminMessages/modelCatalog";
 import { adminModelsBoardMessages } from "@/lib/adminMessages/modelsBoard";
 import {
-  type CodingCatalogItem,
-  codingCatalogItems,
-  codingDraftSources,
-  codingEdit,
-  type CodingEditValue,
-  codingStage,
   creditOverrides,
   type ImageCatalogItem,
   imageCatalogItems,
@@ -54,12 +44,11 @@ import {
   runtimeImageProfileTemplate,
 } from "@/lib/runtimeImageProviders";
 
-// Operator surface over /api/admin/model-catalog. Image models follow one
-// guided flow (details -> price draft -> check prices -> turn on) with no JSON
-// to type; the schemas and the judge stay server-side (lib/modelCatalogCore.ts).
-// Coding models follow the same four steps; their draft is a whole profile,
-// shown as a field table where only the name, minimum plan and credit weight
-// are the operator's to change.
+// Operator surface over /api/admin/model-catalog for image models: one guided
+// flow (details -> price draft -> check prices -> turn on) with no JSON to
+// type; the schemas and the judge stay server-side (lib/modelCatalogCore.ts).
+// Coding models have their own tab (AdminCodingCatalogPanel, owner decision
+// 2026-11-20); this one links there for an old bookmark that came for them.
 
 // A draft fetches up to three pages (10 s each) and makes one LLM call (90 s);
 // the 15 s admin default cut it off and the panel showed nothing.
@@ -70,11 +59,6 @@ type CatalogReport = {
   image: Parameters<typeof imageCatalogItems>[0] & {
     providers?: { provider: string; defaultSources: string[]; hosts: string[] }[];
   };
-  coding: Parameters<typeof codingCatalogItems>[0] & {
-    snapshot: { version: number; models: unknown[]; coverageUntil: string } | null;
-    providers?: { provider: string; defaultSources: string[]; hosts: string[] }[];
-  };
-  chat: { models: { modelId: string; name: string; provider: string; enabled: boolean }[] };
   video: { policy: { reasons: string[] } };
   draftLlm: { configured: boolean; env: string };
 };
@@ -93,15 +77,6 @@ const emptyForm = (provider = "openai"): ImageModelFormValue => ({
   sources: "",
 });
 
-const emptyCodingForm = (provider = "anthropic"): CodingModelFormValue => ({
-  modelId: null,
-  provider,
-  apiModelId: "",
-  priceUrl: "",
-  termsUrl: "",
-  retentionUrl: "",
-});
-
 const elapsedText = (ms: number) => {
   const seconds = Math.max(0, Math.floor(ms / 1000));
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
@@ -109,6 +84,7 @@ const elapsedText = (ms: number) => {
 
 export function AdminModelCatalogPanel() {
   const m = useAdminMessages(adminModelCatalogMessages);
+  const coding = useAdminMessages(adminCodingCatalogMessages);
   const board = useAdminMessages(adminModelsBoardMessages).catalog;
   const [report, setReport] = useState<CatalogReport | null>(null);
   const [loading, setLoading] = useState(false);
@@ -121,15 +97,11 @@ export function AdminModelCatalogPanel() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [edits, setEdits] = useState<Record<string, Record<string, string>>>({});
   const [form, setForm] = useState<{ mode: "add" | "fix"; modelId: string | null; value: ImageModelFormValue } | null>(null);
-  const [drafting, setDrafting] = useState<{ category: "image" | "coding"; modelId: string; startedAt: number } | null>(null);
+  const [drafting, setDrafting] = useState<{ category: "image"; modelId: string; startedAt: number } | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [confirmEnable, setConfirmEnable] = useState<ImageCatalogItem | null>(null);
   const [busy, setBusy] = useState(false);
-  const [codingOpenId, setCodingOpenId] = useState<string | null>(null);
-  const [codingEdits, setCodingEdits] = useState<Record<string, CodingEditValue>>({});
-  const [codingForm, setCodingForm] = useState<CodingModelFormValue | null>(null);
-  const [confirmCodingEnable, setConfirmCodingEnable] = useState<CodingCatalogItem | null>(null);
-  const [hold, setHold] = useState<{ category: "image" | "coding"; modelId: string; name: string } | null>(null);
+  const [hold, setHold] = useState<{ category: "image"; modelId: string; name: string } | null>(null);
   const [holdReason, setHoldReason] = useState("");
   // The billing measurement screen for one provider model (no catalogue row needed).
   const [measure, setMeasure] = useState<MeasureTarget | null>(null);
@@ -189,9 +161,6 @@ export function AdminModelCatalogPanel() {
   const items = useMemo(() => (report ? imageCatalogItems(report.image) : []), [report]);
   const providers = report?.image.providers ?? [];
   const openItem = items.find((item) => item.id === openId) ?? null;
-  const codingItems = useMemo(() => (report ? codingCatalogItems(report.coding) : []), [report]);
-  const codingProviders = report?.coding.providers ?? [];
-  const openCoding = codingItems.find((item) => item.id === codingOpenId) ?? null;
 
   const refusedToast = useCallback(
     (codes: readonly string[], detail = "", measureTarget?: MeasureTarget) => {
@@ -444,114 +413,6 @@ export function AdminModelCatalogPanel() {
     showToast({ tone: "ok", title: m.toastSaved });
   };
 
-  /**
-   * Ask for a coding profile draft (one paid LLM call), like requestDraft:
-   * on a timeout the catalogue is read again, the request is not resent.
-   */
-  const requestCodingDraft = async (value: CodingModelFormValue) => {
-    const apiModelId = value.apiModelId.trim();
-    // A new draft for an existing row keeps that row's id (it can differ from the API id).
-    const modelId = value.modelId ?? apiModelId;
-    const before = codingItems.find((item) => item.id === modelId)?.draftCreatedAt ?? null;
-    const defaults = codingProviders.find((entry) => entry.provider === value.provider)?.defaultSources ?? [];
-    setCodingForm(null);
-    setDrafting({ category: "coding", modelId, startedAt: Date.now() });
-    setNow(Date.now());
-    setCodingOpenId(modelId);
-    showToast({ tone: "progress", title: m.codingFlow.draftingTitle, body: m.codingFlow.draftingBody });
-    const result = await send(
-      "POST",
-      {
-        action: "draft",
-        category: "coding",
-        modelId,
-        provider: value.provider,
-        apiModelId,
-        sourceUrls: codingDraftSources(value, defaults),
-      },
-      DRAFT_REQUEST_TIMEOUT_MS
-    );
-    setDrafting(null);
-    if (result.ok) {
-      const next = await load();
-      const name = (next ? codingCatalogItems(next.coding).find((item) => item.id === modelId)?.name : null) ?? apiModelId;
-      showToast({ tone: "ok", title: m.codingFlow.toastDraftReady(name), body: m.codingFlow.toastDraftReadyBody });
-      return;
-    }
-    if (result.timedOut) {
-      showToast({ tone: "progress", title: m.toastChecking });
-      const next = await load();
-      const after = next ? codingCatalogItems(next.coding).find((item) => item.id === modelId)?.draftCreatedAt ?? null : null;
-      if (after && after !== before) showToast({ tone: "ok", title: m.toastFinishedAnyway });
-      else refusedToast(["timeout"]);
-    }
-  };
-
-  /** The form for a new draft of an existing model, with the pages its last profile or draft read. */
-  const codingFormFor = (item: CodingCatalogItem): CodingModelFormValue => {
-    const shown = item.draft ?? item.profile;
-    return {
-      modelId: item.id,
-      provider: item.provider || codingProviders[0]?.provider || "anthropic",
-      apiModelId: item.apiModelId,
-      priceUrl: shown?.pricing.sources.find((url) => url !== shown.terms.url && url !== shown.retention.url) ?? "",
-      termsUrl: shown?.terms.url ?? "",
-      retentionUrl: shown?.retention.url ?? "",
-    };
-  };
-
-  const onCodingAction = (item: CodingCatalogItem, action: ImageNextAction) => {
-    if (action === "enable") {
-      setConfirmCodingEnable(item);
-      return;
-    }
-    if (action === "make_draft" || action === "redraft" || action === "fix_profile") {
-      setCodingForm(codingFormFor(item));
-      return;
-    }
-    setCodingOpenId(item.id);
-  };
-
-  const applyCodingProfile = async (item: CodingCatalogItem) => {
-    if (!item.draft) return;
-    setBusy(true);
-    const result = await send("POST", {
-      action: "apply_draft",
-      category: "coding",
-      modelId: item.id,
-      codingEdit: codingEdit(item.draft, codingEdits[item.id] ?? {}),
-    });
-    setBusy(false);
-    if (!result.ok) return;
-    setCodingEdits((current) => ({ ...current, [item.id]: {} }));
-    const next = await load();
-    const updated = next ? codingCatalogItems(next.coding).find((entry) => entry.id === item.id) : null;
-    const stage = updated ? codingStage(updated) : null;
-    showToast({
-      tone: "ok",
-      title: m.codingFlow.toastApplied(updated?.name ?? item.name),
-      body: stage === "ready_to_enable" ? m.toastAppliedBody : stage && stage !== "serving" ? m.codingFlow.stage[stage] : undefined,
-      action: updated && stage === "ready_to_enable" ? { label: m.goEnable, onClick: () => setConfirmCodingEnable(updated) } : null,
-    });
-  };
-
-  const enableCoding = async (item: CodingCatalogItem) => {
-    setBusy(true);
-    const result = await send("PATCH", { category: "coding", modelId: item.id, enabled: true, holdReason: null });
-    setBusy(false);
-    setConfirmCodingEnable(null);
-    if (!result.ok) return;
-    await load();
-    showToast({ tone: "ok", title: m.toastEnabled(item.name) });
-  };
-
-  const publishSnapshot = async () => {
-    if ((await send("POST", { action: "publish_snapshot" })).ok) {
-      await load();
-      showToast({ tone: "ok", title: m.toastSaved });
-    }
-  };
-
   const enableRange = confirmEnable?.served ? priceRange(confirmEnable.served.prices) : null;
   const formValid =
     form !== null &&
@@ -559,16 +420,6 @@ export function AdminModelCatalogPanel() {
     form.value.sizes.length > 0 &&
     form.value.qualities.length > 0 &&
     providers.some((entry) => entry.provider === form.value.provider);
-  // The retention page is required (a draft without one is refused for
-  // nothing), and the price page only where the provider has no default.
-  const codingFormValid =
-    codingForm !== null &&
-    codingForm.apiModelId.trim().length > 0 &&
-    codingForm.termsUrl.trim().length > 0 &&
-    codingForm.retentionUrl.trim().length > 0 &&
-    codingProviders.some(
-      (entry) => entry.provider === codingForm.provider && (codingForm.priceUrl.trim().length > 0 || entry.defaultSources.length > 0)
-    );
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
@@ -695,80 +546,21 @@ export function AdminModelCatalogPanel() {
             )}
           </AdminTile>
 
-          <AdminTile
-            title={m.coding}
-            action={
-              <AdminWriteButton
-                size="sm"
-                disabled={!report.draftLlm.configured || drafting !== null || codingProviders.length === 0}
-                onClick={() => setCodingForm(emptyCodingForm(codingProviders.find((entry) => entry.provider === "anthropic")?.provider ?? codingProviders[0]?.provider))}
-                data-testid="model-catalog-add-coding"
-              >
-                <Plus className="h-4 w-4" aria-hidden />
-                {m.codingFlow.add}
-              </AdminWriteButton>
-            }
-          >
-            {!report.draftLlm.configured ? (
-              <p className="text-xs text-amber-300">{m.draftNotConfigured(report.draftLlm.env)}</p>
-            ) : null}
-            {openCoding ? (
-              <CodingModelDetail
-                m={m}
-                item={openCoding}
-                edits={codingEdits[openCoding.id] ?? {}}
-                drafting={drafting?.category === "coding" && drafting.modelId === openCoding.id ? elapsedText(now - drafting.startedAt) : null}
-                onBack={() => setCodingOpenId(null)}
-                onEdit={(field, value) =>
-                  setCodingEdits((current) => ({ ...current, [openCoding.id]: { ...(current[openCoding.id] ?? {}), [field]: value } }))
-                }
-                onResetEdits={() => setCodingEdits((current) => ({ ...current, [openCoding.id]: {} }))}
-                onApply={() => void applyCodingProfile(openCoding)}
-                onAction={(action) => onCodingAction(openCoding, action)}
-                onHold={() => {
-                  setHoldReason("");
-                  setHold({ category: "coding", modelId: openCoding.id, name: openCoding.name });
-                }}
-              />
-            ) : drafting?.category === "coding" && !codingItems.some((item) => item.id === drafting.modelId) ? (
-              // A brand-new model has no row until its draft is stored.
-              <AdminStateBlock kind="loading" />
-            ) : (
-              <CodingCatalogList
-                m={m}
-                items={codingItems}
-                onOpen={(item) => setCodingOpenId(item.id)}
-                onAction={onCodingAction}
-                onHold={(item) => {
-                  setHoldReason("");
-                  setHold({ category: "coding", modelId: item.id, name: item.name });
-                }}
-              />
-            )}
-            <div className="border-t border-zinc-800 pt-3">
-              <div className="text-sm font-bold text-zinc-100">{m.snapshot}</div>
-              <div className="text-xs text-zinc-400">
-                {report.coding.snapshot
-                  ? m.snapshotLine(report.coding.snapshot.version, report.coding.snapshot.models.length, report.coding.snapshot.coverageUntil.slice(0, 10))
-                  : m.snapshotNone}
-              </div>
-              <AdminWriteButton size="sm" variant="secondary" className="mt-2" onClick={() => void publishSnapshot()}>
-                {m.publishSnapshot}
-              </AdminWriteButton>
-            </div>
-          </AdminTile>
-
-          <AdminTile title={m.chat} description={m.chatNote} action={<span className="text-xs text-zinc-500">{board.chatCount(report.chat.models.length)}</span>}>
-            <ul className="grid gap-1 text-xs text-zinc-300 sm:grid-cols-2">
-              {report.chat.models.map((row) => (
-                <li key={row.modelId} className="font-mono">
-                  {row.modelId} · {row.provider} · {row.enabled ? m.serving : m.inherit}
-                </li>
-              ))}
-            </ul>
-          </AdminTile>
-
           <AdminTile title={m.video} description={m.videoNote} />
+
+          <div
+            data-testid="model-catalog-coding-moved"
+            className="flex flex-col gap-2 rounded-2xl border border-zinc-800 bg-zinc-900 p-4 text-sm sm:flex-row sm:items-center"
+          >
+            <p className="min-w-0 flex-1 text-zinc-300">{coding.movedFromImage}</p>
+            <Link
+              href="/admin/models?tab=coding"
+              className="inline-flex min-h-10 items-center gap-1 rounded-xl border border-zinc-700 px-3 font-bold text-zinc-100 hover:bg-zinc-800"
+            >
+              {coding.movedLink}
+              <ArrowRight className="h-4 w-4" aria-hidden />
+            </Link>
+          </div>
         </>
       ) : null}
 
@@ -812,41 +604,6 @@ export function AdminModelCatalogPanel() {
         busy={busy}
         onConfirm={() => confirmEnable && void enable(confirmEnable)}
         onClose={() => setConfirmEnable(null)}
-      />
-
-      <AdminReasonDialog
-        open={codingForm !== null}
-        title={m.codingFlow.addTitle}
-        description={m.codingFlow.addDescription}
-        confirmLabel={m.codingFlow.addConfirm}
-        confirmDisabled={!codingFormValid}
-        onConfirm={() => codingForm && void requestCodingDraft(codingForm)}
-        onClose={() => setCodingForm(null)}
-      >
-        {codingForm ? <CodingModelForm m={m} value={codingForm} onChange={setCodingForm} providers={codingProviders} /> : null}
-      </AdminReasonDialog>
-
-      <AdminConfirmDialog
-        open={confirmCodingEnable !== null}
-        title={confirmCodingEnable ? m.enableTitle(confirmCodingEnable.name) : ""}
-        summary={
-          confirmCodingEnable?.profile
-            ? m.codingFlow.enableSummary(confirmCodingEnable.profile.pricing.inputUsdPerMTok, confirmCodingEnable.profile.pricing.outputUsdPerMTok)
-            : undefined
-        }
-        effects={
-          confirmCodingEnable?.profile
-            ? [
-                m.codingFlow.enableEffectListed(confirmCodingEnable.name, confirmCodingEnable.profile.minimumPlan),
-                m.codingFlow.enableEffectCharges(confirmCodingEnable.profile.pricing.creditWeight, confirmCodingEnable.provider),
-                m.codingFlow.enableEffectSnapshot,
-              ]
-            : []
-        }
-        confirmLabel={m.enable}
-        busy={busy}
-        onConfirm={() => confirmCodingEnable && void enableCoding(confirmCodingEnable)}
-        onClose={() => setConfirmCodingEnable(null)}
       />
 
       <AdminReasonDialog
