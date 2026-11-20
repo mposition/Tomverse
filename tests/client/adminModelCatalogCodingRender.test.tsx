@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { CodingCatalogList, CodingModelDetail, CodingModelForm } from "@/components/admin/modelCatalog/CodingCatalogViews";
+import { CodingModelDetail, CodingModelForm } from "@/components/admin/modelCatalog/CodingCatalogViews";
 import { adminMessagesFor } from "@/lib/adminLocale";
 import { adminModelCatalogMessages } from "@/lib/adminMessages/modelCatalog";
 import { codingCatalogItems } from "@/lib/adminModelCatalogFlow";
@@ -53,20 +53,6 @@ const items = codingCatalogItems({
   ],
 });
 const sonnet = items.find((item) => item.id === "claude-sonnet-5-5")!;
-
-test("the coding list puts waiting models first with one next step each, in words, and no JSON", () => {
-  const html = renderToStaticMarkup(<CodingCatalogList m={en} items={items} onOpen={noop} onAction={noop} onHold={noop} />);
-  assert.equal(html.match(/data-testid="model-catalog-pending-coding"/g)?.length, 2);
-  assert.match(html, /data-stage="profile_invalid"/);
-  assert.match(html, /data-stage="draft_ready"/);
-  assert.match(html, />Check profile</);
-  assert.match(html, />Make a new draft</);
-  assert.match(html, /The saved profile is not valid/);
-  assert.match(html, />Profile draft</);
-  assert.doesNotMatch(html, /invalid_profile<|no_profile|JSON|<textarea/);
-  assert.match(html, /GPT 6 Coder/);
-  assert.match(html, />1 serving</);
-});
 
 test("the profile check shows prices and evidence read-only and the operator's three fields editable", () => {
   const applyButton = (html: string) => html.match(/<button[^>]*data-testid="model-catalog-coding-apply"[^>]*>/)?.[0] ?? "";

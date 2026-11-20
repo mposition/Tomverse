@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { toAnthropicModelList } from "@/lib/anthropicMessagesProtocol";
 import { getUserBillingPlan } from "@/lib/billingEntitlements";
 import { externalApiProtocolModels } from "@/lib/externalApiCatalog";
+import { externalApiChannelFor } from "@/lib/externalApiCatalogCore";
 import { authenticateNative, nativeRefusal } from "@/lib/externalApiNative";
 import { anthropicMessagesSpec } from "@/lib/externalApiNativeSpecs";
 import { NO_STORE_HEADERS } from "@/lib/externalApiRoutes";
@@ -13,7 +14,9 @@ export async function GET(request: Request) {
     try {
         const key = await authenticateNative(request, anthropicMessagesSpec, "external-api-reads");
         const plan = await getUserBillingPlan(key.userId);
-        const models = await externalApiProtocolModels(plan.tier, "anthropic_messages");
+        const models = await externalApiProtocolModels(plan.tier, "anthropic_messages", {
+            channel: externalApiChannelFor(request.headers.get("user-agent")),
+        });
         return Response.json(toAnthropicModelList(models), { headers: NO_STORE_HEADERS });
     } catch (error) {
         const refusal = nativeRefusal(error, anthropicMessagesSpec.render);

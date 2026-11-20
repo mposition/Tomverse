@@ -83,13 +83,17 @@ test.describe("coding model catalogue flow", () => {
   });
 
   test("a coding draft is checked as a field table, applied with the operator's weight, then turned on after a confirmation", async ({ page }) => {
+    // Coding models have their own tab (2026-11-20); the image tab links there.
     await page.goto("/admin/models?tab=catalog");
+    await expect(page.getByTestId("model-catalog-coding-moved")).toBeVisible();
+    await page.goto("/admin/models?tab=coding");
     // No profile JSON to type anywhere on the screen.
     await expect(page.getByText("Profile (JSON)")).toHaveCount(0);
+    await expect(page.getByTestId("coding-channel-banner")).toHaveAttribute("data-external", "off");
 
-    const card = page.getByTestId("model-catalog-pending-coding").filter({ hasText: CODER });
-    await expect(card).toHaveAttribute("data-stage", "draft_ready");
-    await card.getByRole("button", { name: "Check profile" }).click();
+    const table = page.getByTestId("coding-model-table");
+    await expect(table.getByTestId("coding-source-badge").first()).toBeVisible();
+    await table.getByRole("button", { name: /Flow Test Coder/ }).first().click();
 
     const detail = page.getByTestId("model-catalog-coding-detail");
     await expect(detail).toBeVisible();
@@ -121,12 +125,12 @@ test.describe("coding model catalogue flow", () => {
 
     await expect(detail).toHaveAttribute("data-stage", "ready_to_enable");
     await detail.getByRole("button", { name: "Turn on", exact: true }).click();
-    const dialog = page.getByRole("dialog", { name: "Turn on Flow Coder?" });
-    await expect(dialog).toContainText("from the Pro plan");
-    await expect(dialog).toContainText("weight 9");
-    await dialog.getByRole("button", { name: /Turn on/ }).click();
+    const dialog = page.getByRole("dialog", { name: "Activate Flow Coder?" });
+    await expect(dialog).toContainText("(Pro and up)");
+    await expect(dialog).toContainText("weight ×9");
+    await dialog.getByRole("button", { name: /^Activate$/ }).click();
 
-    await expect(page.getByTestId("model-catalog-toast")).toContainText("Flow Coder is on.");
+    await expect(page.getByTestId("model-catalog-toast")).toContainText("Activated Flow Coder.");
     expect((await adminFixtureDatabase().modelCatalogEntry.findUniqueOrThrow({ where: key })).enabled).toBe(true);
     await expect(detail).toHaveAttribute("data-stage", "serving");
   });

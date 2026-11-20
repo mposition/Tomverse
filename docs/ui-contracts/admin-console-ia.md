@@ -56,7 +56,7 @@ page and never the table. A tab with no screen draws `AdminTabPlaceholder`
 | Customers & Revenue | Refunds | `/admin/refunds` | — |
 | Customers & Revenue | Credit ledger | `/admin/credit-ledger` | — |
 | AI Platform | Providers | `/admin/providers` | `health`, `usage-cost`, `incidents` |
-| AI Platform | Models | `/admin/models` | `registry`, `discovery`, `defaults`, `catalog` |
+| AI Platform | Models | `/admin/models` | `registry`, `discovery`, `defaults`, `catalog` (image), `coding` |
 | AI Platform | Routing | `/admin/routing` | `auto`, `optimizer`, `shadow`, `stats` (owner only) |
 | AI Agents | Agents home | `/admin/office` | `dashboard` (Team board, opens first), `live` |
 | AI Agents | Marketing | `/admin/marketing` | `overview`, `queue`, `published`, `accounts`, `reports`, `settings` |
@@ -805,6 +805,18 @@ slot per provider), and the logged-in default stays a code constant with no
 admin write. A figure the loaders do not provide (per-provider p95, 7-day
 request trend per model, post-change reaction numbers) is left off the screen
 rather than stored or invented.
+
+**Image and coding catalogues are two tabs (owner decision 2026-11-20).**
+`?tab=catalog` is the **Image catalog** (image models and the video note); its
+id did not change, so a bookmark or runbook that names it still lands, and the
+tab links to the coding one for a reader who came for coding models.
+`?tab=coding` is the **Coding catalog**, with two sections in the tab --
+**Models** (both kinds of coding row, the chat candidates and the Code
+snapshot) and **Provider conditions** (`&view=providers` opens it). The chat
+registry's read-only list that sat in the old combined tab was dropped: the
+Registry tab is the chat list, and the coding tab's candidates show chat models
+where they matter. Turning a coding model on or holding it stays on
+`/api/admin/model-catalog`; the tab reads `/api/admin/model-catalog/coding`.
 
 ## Language
 

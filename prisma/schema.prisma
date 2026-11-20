@@ -12392,6 +12392,23 @@ model ModelCatalogSnapshot {
   @@index([category, version])
 }
 
+/// Provider conditions every coding model of one provider is judged against:
+/// terms (resale and coding-agent use), data retention and processing region.
+/// `terms` is what an operator applied, `draft` an LLM re-check waiting for one
+/// (lib/codingCatalogAdmin.ts). Checked more than 90 days ago, it must be
+/// checked again before a new model of that provider turns on.
+model CodingProviderTerms {
+  provider       String    @id
+  terms          Json?
+  draft          Json?
+  draftSource    String?
+  draftCreatedAt DateTime?
+  updatedById    String?
+  updatedByEmail String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
 /// Code financial metadata only. Generated text and prompts are never stored.
 model CodeTaskReservation {
   id String @id
