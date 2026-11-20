@@ -9,7 +9,7 @@ test("Korean pricing navigation translates product actions and preserves destina
   const prefix = mobile ? "mobile" : "header";
   const chat = page.getByTestId(`${prefix}-chat-link`);
   await expect(chat).toHaveText("채팅");
-  await expect(chat).toHaveAttribute("href", /(?:\/ko#chat|\/chat\?lang=ko)/);
+  await expect(chat).toHaveAttribute("href", "/ko/products/chat");
   await expect(page.getByTestId(`${prefix}-review-link`)).toHaveText("답변 비교");
   await expect(page.getByTestId(`${prefix}-review-link`)).toHaveAttribute("href", "/ko/products/review");
   await expectNoHorizontalOverflow(page);

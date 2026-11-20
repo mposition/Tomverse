@@ -1,0 +1,50 @@
+/*
+ * Generated from the approved homepage V2 concept (2026-11-20).
+ * Every rule is scoped under .tv-page; keyframes are prefixed tvc-; text holds the
+ * 11px floor and fonts use the app's locale variables (docs/ui-contracts/typography.md).
+ */
+.tv-page .pipe { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: 24px; align-items: stretch; }
+.tv-page .pipe-steps { display: grid; gap: 8px; align-content: start; }
+.tv-page .pipe-steps button { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 14px; align-items: center; text-align: left; border: 0; border-radius: 16px; padding: 14px 16px; background: var(--panel); color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--line); font: inherit; cursor: pointer; transition: background .25s, box-shadow .25s; }
+.tv-page .pipe-steps button b { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: var(--panel-2); font: 700 .8125rem/1 var(--font-mono); color: var(--ink-3); }
+.tv-page .pipe-steps button strong { display: block; color: var(--ink); font-size: 1rem; }
+.tv-page .pipe-steps button small { display: block; font-size: .8125rem; color: var(--ink-3); margin-top: 2px; }
+.tv-page .pipe-steps button[aria-selected="true"] { background: var(--selected); box-shadow: inset 0 0 0 1px var(--brand); }
+.tv-page .pipe-steps button[aria-selected="true"] b { background: var(--brand); color: #fff; }
+.tv-page .pipe-view { position: relative; min-height: 360px; display: grid; }
+.tv-page .pipe-view > div { grid-area: 1 / 1; display: flex; flex-direction: column; gap: 16px; justify-content: center; opacity: 0; transform: translateY(10px); transition: opacity .4s, transform .4s; pointer-events: none; }
+.tv-page .pipe-view > div.on { opacity: 1; transform: none; pointer-events: auto; }
+.tv-page .q-big { font-size: clamp(1.25rem, 2.2vw, 1.625rem); font-weight: 750; line-height: 1.45; letter-spacing: -.015em; }
+.tv-page .q-old { font-size: 1.0625rem; color: var(--ink-3); text-decoration: line-through; text-decoration-color: rgb(161 161 170 / .4); }
+.tv-page .diff-tags { display: flex; gap: 8px; flex-wrap: wrap; }
+.tv-page .route-row { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 12px 14px; border-radius: 14px; background: var(--panel-2); }
+.tv-page .route-row.win { background: var(--selected); box-shadow: inset 0 0 0 1px var(--brand); }
+.tv-page .route-row .tile { width: 40px; height: 40px; border-radius: 12px; background: #fff; padding: 7px; display: grid; place-items: center; }
+.tv-page .route-row .tile img { width: 100%; height: 100%; object-fit: contain; }
+.tv-page .route-row small { display: block; color: var(--ink-3); font-size: .75rem; }
+.tv-page .answer-card { padding: 20px; border-radius: 18px; background: var(--panel-2); font-size: .9375rem; color: var(--ink-2); line-height: 1.7; }
+.tv-page .answer-meta { display: flex; gap: 8px; align-items: center; font-size: .75rem; color: var(--ink-3); }
+.tv-page .import-flow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.tv-page .import-src { border-radius: 18px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); padding: 18px; display: grid; gap: 10px; justify-items: start; position: relative; overflow: hidden; }
+.tv-page .import-src .tile { width: 44px; height: 44px; border-radius: 13px; background: #fff; padding: 8px; display: grid; place-items: center; }
+.tv-page .import-src .tile img { width: 100%; height: 100%; object-fit: contain; }
+.tv-page .import-src code { font: 500 .75rem/1 var(--font-mono); color: var(--ink-3); background: var(--panel-2); padding: 6px 8px; border-radius: 8px; }
+.tv-page .import-src::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--brand); transform: scaleX(0); transform-origin: left; animation: tvc-load 4.8s ease-in-out infinite; }
+.tv-page .import-src:nth-child(2)::after { animation-delay: 1.2s; } .tv-page .import-src:nth-child(3)::after { animation-delay: 2.4s; } .tv-page .import-src:nth-child(4)::after { animation-delay: 3.6s; }
+@keyframes tvc-load { 0% { transform: scaleX(0); } 40%, 60% { transform: scaleX(1); } 100% { transform: scaleX(1); opacity: 0; } }
+.tv-page .scope { display: grid; gap: 10px; }
+.tv-page .scope label { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 12px 14px; border-radius: 14px; background: var(--panel-2); cursor: pointer; font-size: .9375rem; }
+.tv-page .scope input { width: 18px; height: 18px; accent-color: var(--brand); }
+.tv-page .scope small { color: var(--ink-3); font-size: .75rem; }
+.tv-page .mini-phone { width: 230px; height: 440px; border-radius: 38px; background: #050507; box-shadow: inset 0 0 0 2px #2c2c33, inset 0 0 0 9px #0c0c10, 0 50px 100px -40px rgb(21 93 251 / .6); padding: 16px; margin-inline: auto; }
+.tv-page .mini-phone .screen { height: 100%; }
+@media (max-width: 1080px) { .tv-page .pipe { grid-template-columns: minmax(0, 1fr); } .tv-page .import-flow { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Motion control (WCAG 2.2.2): the page root carries data-motion="paused" when the
+   visitor prefers reduced motion or presses the pause button. */
+.tv-page .chat-motion-toggle { display: inline-flex; align-items: center; gap: 8px; min-width: 44px; min-height: 44px; margin-top: 14px; padding: 10px 16px; border: 0; border-radius: 100px; background: var(--ghost-bg); color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--ghost-line); font: 600 .875rem/1 var(--font-body); cursor: pointer; }
+.tv-page .chat-motion-toggle:hover { background: var(--ghost-bg-hover); color: var(--ink); }
+.tv-page .chat-motion-toggle .icon { font-size: .75rem; letter-spacing: -.1em; }
+.tv-page[data-motion="paused"] *, .tv-page[data-motion="paused"] *::before, .tv-page[data-motion="paused"] *::after { animation: none !important; transition: none !important; }
+.tv-page[data-motion="paused"] .hero-media video { display: none; }
+.tv-page .pipe-steps button:focus-visible, .tv-page .chat-motion-toggle:focus-visible { outline: 2px solid var(--brand-hi); outline-offset: 2px; }
