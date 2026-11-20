@@ -1,5 +1,6 @@
 /**
- * Incremental parser for a JSON file whose top level is one huge array.
+ * Incremental parser for a JSON file whose top level is one huge array
+ * (or that array as the only `conversations` key of an object).
  *
  * docs/policy/external-conversation-import-and-memory.md §5.1: ChatGPT's
  * `conversations.json` is a single array holding every conversation a person
@@ -31,7 +32,20 @@ export class ExternalImportJsonStreamError extends Error {
     }
 }
 
-type ParserPhase = "before_array" | "between_items" | "in_item" | "after_array";
+type ParserPhase =
+    | "before_array"
+    | "wrapper_key"
+    | "between_items"
+    | "in_item"
+    | "after_array";
+
+/**
+ * The one object wrapper accepted around the array: Perplexity's account
+ * export writes `{"conversations": [...]}`. Only this exact single key is
+ * read; any other object is still "not an array".
+ */
+const WRAPPER_PREFIX = /^\s*"conversations"\s*:\s*$/;
+const MAX_WRAPPER_PREFIX = 64;
 
 export type JsonArrayStreamOptions = {
     /**
@@ -51,6 +65,8 @@ export class JsonArrayStreamParser {
     private depth = 0;
     private inString = false;
     private escaped = false;
+    private wrapper: "none" | "open" | "closed" = "none";
+    private prefix = "";
     private readonly maxItemCharacters: number;
 
     constructor(options: JsonArrayStreamOptions = {}) {
@@ -66,6 +82,11 @@ export class JsonArrayStreamParser {
 
             if (this.phase === "before_array") {
                 if (isWhitespace(character)) continue;
+                if (character === "{" && this.wrapper === "none") {
+                    this.wrapper = "open";
+                    this.phase = "wrapper_key";
+                    continue;
+                }
                 if (character !== "[") {
                     throw new ExternalImportJsonStreamError(
                         "The export's top level is not a JSON array.",
@@ -76,8 +97,28 @@ export class JsonArrayStreamParser {
                 continue;
             }
 
+            if (this.phase === "wrapper_key") {
+                if (character === "[" && WRAPPER_PREFIX.test(this.prefix)) {
+                    this.prefix = "";
+                    this.phase = "between_items";
+                    continue;
+                }
+                this.prefix += character;
+                if (character === "[" || this.prefix.length > MAX_WRAPPER_PREFIX) {
+                    throw new ExternalImportJsonStreamError(
+                        "The export's top level is not a JSON array.",
+                        "not_an_array"
+                    );
+                }
+                continue;
+            }
+
             if (this.phase === "after_array") {
                 if (isWhitespace(character)) continue;
+                if (character === "}" && this.wrapper === "open") {
+                    this.wrapper = "closed";
+                    continue;
+                }
                 throw new ExternalImportJsonStreamError(
                     "Unexpected content after the top-level array.",
                     "trailing_content"
@@ -160,7 +201,7 @@ export class JsonArrayStreamParser {
      * silently partial import.
      */
     end(): void {
-        if (this.phase !== "after_array") {
+        if (this.phase !== "after_array" || this.wrapper === "open") {
             throw new ExternalImportJsonStreamError(
                 "The export ended before the top-level array closed.",
                 "truncated"

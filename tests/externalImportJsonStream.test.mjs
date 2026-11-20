@@ -84,7 +84,7 @@ test("Korean and emoji content survives chunking mid-value", () => {
 
 test("a non-array top level is refused immediately", () => {
     assert.throws(
-        () => parseAll(['{"conversations": []}']),
+        () => parseAll(['{"items": []}']),
         (error) =>
             error instanceof ExternalImportJsonStreamError &&
             error.reason === "not_an_array"
@@ -152,4 +152,38 @@ test("a truncated scalar item is not emitted as a complete one", () => {
             error instanceof ExternalImportJsonStreamError &&
             error.reason === "truncated"
     );
+});
+
+test("the array wrapped as an object's only conversations key is read", () => {
+    // Perplexity's account export: {"conversations": [...]}.
+    const source = '{\n  "conversations": [\n{"id":1},\n{"id":2}\n  ]\n}\n';
+    const whole = parseAll([source]);
+    assert.deepEqual(whole, [{ id: 1 }, { id: 2 }]);
+    assert.deepEqual(parseAll(source.split("")), whole);
+});
+
+test("a wrapped array that is cut short, or never closed, is refused", () => {
+    for (const source of ['{"conversations": [{"id":1}]', '{"conversations": [{"id":1}']) {
+        assert.throws(
+            () => parseAll([source]),
+            (error) =>
+                error instanceof ExternalImportJsonStreamError &&
+                error.reason === "truncated"
+        );
+    }
+});
+
+test("a wrapper with any other key or content is not read", () => {
+    for (const source of [
+        '{"threads": [1]}',
+        '{"a": 1, "conversations": [1]}',
+        '{"conversations": [1], "more": 2}',
+        '{"conversations": [1]}}',
+    ]) {
+        assert.throws(
+            () => parseAll([source]),
+            (error) => error instanceof ExternalImportJsonStreamError,
+            source
+        );
+    }
 });

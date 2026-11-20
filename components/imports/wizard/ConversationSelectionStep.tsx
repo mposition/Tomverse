@@ -10,6 +10,7 @@ import {
     providerLabel,
     secondaryButtonClass,
 } from "@/components/imports/importFormatting";
+import { isPerplexityMarkdownConversation } from "@/lib/externalImportAdapters/perplexity";
 import { EXTERNAL_IMPORT_STORAGE_LIMITS } from "@/lib/externalImportLimits";
 import {
     filteredRows,
@@ -160,7 +161,8 @@ export function ConversationSelectionStep({
                     })}
                 </p>
             )}
-            {state.detectedProvider === "perplexity" && (
+            {state.detectedProvider === "perplexity" &&
+                state.rows.some((row) => isPerplexityMarkdownConversation(row.id)) && (
                 // A Markdown export does not mark where a multi-line question
                 // ends, and an uncited answer's own rule and heading look like
                 // a new question. The parser cannot tell; the user can.
