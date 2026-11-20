@@ -53,7 +53,10 @@ export const MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,119}$/;
  */
 export const OFFICIAL_SOURCE_HOSTS: Readonly<Record<string, readonly string[]>> = {
   openai: ["openai.com", "developers.openai.com", "platform.openai.com"],
-  anthropic: ["www.anthropic.com", "anthropic.com", "docs.anthropic.com", "docs.claude.com", "www.claude.com"],
+  // The Claude API docs moved to platform.claude.com, which also serves the
+  // Console (sign-in, workbench), so only its /docs/ path counts there.
+  anthropic: ["www.anthropic.com", "anthropic.com", "docs.anthropic.com", "docs.claude.com", "www.claude.com", "platform.claude.com/docs/"],
+  cohere: ["docs.cohere.com"],
   // Google moved the Gemini API docs to AI Studio in 2026-11 and ai.google.dev
   // now answers 301. AI Studio also serves user-built apps and shared prompts,
   // so only its /docs/ path counts as documentation.
@@ -88,6 +91,75 @@ export const DEFAULT_PRICE_SOURCES: Readonly<Record<string, readonly string[]>> 
 
 export const defaultPriceSources = (provider: string): readonly string[] =>
   Object.hasOwn(DEFAULT_PRICE_SOURCES, provider) ? DEFAULT_PRICE_SOURCES[provider] : [];
+
+export type CodingCapabilitySources = { toolCalling: string; structuredOutput: string };
+
+/**
+ * The pages a coding link draft reads for tool calling and structured output,
+ * one each per draft provider. Each was checked on 2026-11-20 to answer 200
+ * without a redirect (the fetch refuses redirects), to carry its text in the
+ * HTML or Markdown, and to fit the draft page limits. A docs move turns one
+ * into fetch_failed; the operator can then enter the new page in the dialog.
+ */
+export const DEFAULT_CODING_CAPABILITY_SOURCES: Readonly<Record<string, CodingCapabilitySources>> = {
+  openai: {
+    toolCalling: "https://developers.openai.com/api/docs/guides/function-calling",
+    structuredOutput: "https://developers.openai.com/api/docs/guides/structured-outputs",
+  },
+  anthropic: {
+    toolCalling: "https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview.md",
+    structuredOutput: "https://platform.claude.com/docs/en/build-with-claude/structured-outputs.md",
+  },
+  cohere: {
+    toolCalling: "https://docs.cohere.com/docs/tool-use-overview",
+    structuredOutput: "https://docs.cohere.com/docs/structured-outputs",
+  },
+  google: {
+    toolCalling: "https://aistudio.google.com/docs/function-calling",
+    structuredOutput: "https://aistudio.google.com/docs/structured-output",
+  },
+  groq: {
+    toolCalling: "https://console.groq.com/docs/tool-use/overview",
+    structuredOutput: "https://console.groq.com/docs/structured-outputs",
+  },
+  xai: {
+    toolCalling: "https://docs.x.ai/developers/tools/function-calling",
+    structuredOutput: "https://docs.x.ai/developers/model-capabilities/text/structured-outputs",
+  },
+  // DeepSeek answers the slashless paths with a 302 to these.
+  deepseek: {
+    toolCalling: "https://api-docs.deepseek.com/guides/tool_calls/",
+    structuredOutput: "https://api-docs.deepseek.com/guides/json_mode/",
+  },
+  mistral: {
+    toolCalling: "https://docs.mistral.ai/inference/conversations/function-calling",
+    structuredOutput: "https://docs.mistral.ai/inference/conversations/structured-output",
+  },
+  moonshot: {
+    toolCalling: "https://platform.kimi.ai/docs/guide/use-kimi-api-to-complete-tool-calls",
+    structuredOutput: "https://platform.kimi.ai/docs/guide/use-json-mode-feature-of-kimi-api",
+  },
+  // MiniMax has no structured output guide; the chat API reference states response_format.
+  minimax: {
+    toolCalling: "https://platform.minimax.io/docs/guides/text-m3-function-call.md",
+    structuredOutput: "https://platform.minimax.io/docs/api-reference/text-post.md",
+  },
+  qwen: {
+    toolCalling: "https://www.alibabacloud.com/help/en/model-studio/qwen-function-calling",
+    structuredOutput: "https://www.alibabacloud.com/help/en/model-studio/qwen-structured-output",
+  },
+  zhipu: {
+    toolCalling: "https://docs.z.ai/guides/capabilities/function-calling",
+    structuredOutput: "https://docs.z.ai/guides/capabilities/struct-output",
+  },
+  perplexity: {
+    toolCalling: "https://docs.perplexity.ai/docs/agent-api/tools/custom-functions",
+    structuredOutput: "https://docs.perplexity.ai/docs/agent-api/output-control",
+  },
+};
+
+export const defaultCodingCapabilitySources = (provider: string): CodingCapabilitySources | null =>
+  Object.hasOwn(DEFAULT_CODING_CAPABILITY_SOURCES, provider) ? DEFAULT_CODING_CAPABILITY_SOURCES[provider] : null;
 
 /**
  * Exact hosts only: a subdomain wildcard would admit user-written pages

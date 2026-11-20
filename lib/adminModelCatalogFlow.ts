@@ -875,7 +875,12 @@ export type CodingCatalogReport = Parameters<typeof codingCatalogItems>[0] & {
   servableCount: number;
   externalChannels: { enabled: boolean; env: string };
   draftLlm: { configured: boolean; env: string };
-  draftProviders: { provider: string; defaultSources: string[]; hosts: string[] }[];
+  draftProviders: {
+    provider: string;
+    defaultSources: string[];
+    capabilitySources: { toolCalling: string; structuredOutput: string } | null;
+    hosts: string[];
+  }[];
 };
 
 /** How many models wait on each kind of check, for the summary tile. */
