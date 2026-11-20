@@ -129,7 +129,11 @@ test("Review information is localized static marketing while the workspace remai
   for (const locale of ["en", "ko", "zh", "fr", "de", "es", "pt", "kr", "cn"]) {
     assert.equal(isStaticMarketingPathname(`/${locale}/products/review`), true);
   }
-  for (const path of ["/review", "/ko/review", "/ko/products/review/settings", "/ko/products/chat"]) {
+  // The V2 detail pages (Chat introduction, Developers, CLI) are static marketing too.
+  for (const path of ["/products/chat", "/ko/products/chat", "/developers", "/ko/developers", "/developers/cli", "/ko/developers/cli"]) {
+    assert.equal(isStaticMarketingPathname(path), true, `${path} is a static marketing page`);
+  }
+  for (const path of ["/review", "/ko/review", "/ko/products/review/settings", "/ko/products/chat/settings"]) {
     assert.equal(isStaticMarketingPathname(path), false, `${path} must not inherit static marketing policy`);
   }
   assert.equal(localizedMarketingRedirect({ pathname: "/products/review", language: "ko", source: "accept" }), "/ko/products/review");

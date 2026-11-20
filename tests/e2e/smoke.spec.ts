@@ -36,7 +36,7 @@ test("home renders the marketing site", { tag: "@smoke" }, async ({ page }) => {
   await expect(page.getByTestId("landing-primary-cta")).toHaveAttribute("href", "/review?lang=en&entry=guest-preview");
   await expect(page.getByTestId("landing-secondary-cta")).toHaveAttribute(
     "href",
-    guestChatAvailable ? `${CHAT_WORKSPACE_PATH}?lang=en` : "/en#chat"
+    guestChatAvailable ? `${CHAT_WORKSPACE_PATH}?lang=en` : "/en/products/chat"
   );
   // The hero states the no-sign-up promise once.
   await expect(page.getByTestId("landing-hero-signup-note")).toHaveText(/no sign-up/i);

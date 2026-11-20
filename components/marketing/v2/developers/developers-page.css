@@ -1,0 +1,61 @@
+/*
+ * Developers page styles from the approved concept (2026-11-20); shared rules live in ../v2-pages.css.
+ * Every rule is scoped under .tv-page; keyframes are prefixed tvd-; text holds the
+ * 11px floor and fonts use the app's locale variables (docs/ui-contracts/typography.md).
+ */
+.tv-page .why { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.tv-page .why .card h3 { font-size: 1.25rem; }
+.tv-page .route-demo { display: grid; gap: 10px; }
+.tv-page .route-line { display: grid; grid-template-columns: minmax(0, 1fr) 150px 60px; gap: 14px; align-items: center; padding: 12px 16px; border-radius: 14px; background: var(--panel-2); font-size: .9375rem; opacity: .35; transform: translateX(-6px); transition: opacity .4s, transform .4s; }
+.tv-page .route-line.on { opacity: 1; transform: none; }
+.tv-page .route-line code { font: 500 .8125rem/1.4 var(--font-mono); color: var(--ink-2); }
+.tv-page .route-line .m { display: flex; align-items: center; gap: 8px; font-size: .8125rem; color: var(--ink-2); }
+.tv-page .route-line .m img { width: 18px; height: 18px; border-radius: 5px; background: #fff; padding: 2px; }
+.tv-page .route-line .cr { text-align: right; font: 700 .875rem/1 var(--font-mono); font-variant-numeric: tabular-nums; }
+.tv-page .saving { display: grid; grid-template-columns: 110px minmax(0, 1fr) 70px; gap: 12px; align-items: center; font-size: .8125rem; color: var(--ink-3); }
+.tv-page .saving .bar { height: 12px; border-radius: 12px; background: var(--panel-2); overflow: hidden; }
+.tv-page .saving .bar i { display: block; height: 100%; border-radius: 12px; background: var(--brand); transition: width 1s cubic-bezier(.2,.8,.2,1); }
+.tv-page .saving .bar.gray i { background: #4b5063; }
+.tv-page .saving b { text-align: right; color: var(--ink); font: 700 .875rem/1 var(--font-mono); }
+.tv-page .proto { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.tv-page .proto code { font: 500 .8125rem/1.5 var(--font-mono); color: #9ec0ff; word-break: break-all; }
+.tv-page .flow { display: grid; grid-template-columns: minmax(0, 1fr) 90px minmax(0, 1.1fr) 90px minmax(0, 1fr); align-items: center; gap: 0; }
+.tv-page .flow .node { border-radius: 18px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); padding: 18px; text-align: center; }
+.tv-page .flow .node.mid { background: linear-gradient(180deg, var(--thread-top), var(--panel)); box-shadow: inset 0 0 0 1px var(--brand); }
+.tv-page .flow .node strong { display: block; font-size: 1rem; }
+.tv-page .flow .node small { display: block; color: var(--ink-3); font-size: .75rem; margin-top: 4px; }
+.tv-page .flow .wire { position: relative; height: 2px; background: var(--line); }
+.tv-page .flow .wire::after { content: ""; position: absolute; top: -3px; width: 8px; height: 8px; border-radius: 50%; background: #9ec0ff; box-shadow: 0 0 10px var(--brand-hi); animation: tvd-travel 2s linear infinite; }
+.tv-page .flow .wire.back::after { animation-direction: reverse; animation-delay: 1s; }
+@keyframes tvd-travel { from { left: 0; } to { left: calc(100% - 8px); } }
+.tv-page .key-card { display: grid; gap: 16px; }
+.tv-page .key-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding: 14px 16px; border-radius: 14px; background: var(--panel-2); }
+.tv-page .key-row code { font: 500 .875rem/1 var(--font-mono); color: var(--ink); }
+.tv-page .key-cap input[type=range] { width: 100%; accent-color: var(--brand); }
+.tv-page .cap-val { display: flex; justify-content: space-between; align-items: baseline; }
+@media (max-width: 1080px) { .tv-page .why { grid-template-columns: repeat(2, minmax(0, 1fr)); } .tv-page .proto { grid-template-columns: minmax(0, 1fr); } .tv-page .flow { grid-template-columns: minmax(0, 1fr); gap: 10px; } .tv-page .flow .wire { height: 24px; width: 2px; margin: 0 auto; } .tv-page .flow .wire::after { display: none; } }
+@media (max-width: 640px) { .tv-page .why { grid-template-columns: minmax(0, 1fr); } .tv-page .route-line { grid-template-columns: minmax(0, 1fr); } .tv-page .route-line .cr { text-align: left; } }
+.tv-page .saving > span:first-child { overflow-wrap: anywhere; }
+.tv-page .key-card .key-row:last-child { background: transparent; box-shadow: inset 0 0 0 1px var(--line); }
+.tv-page .key-card .btn { min-height: 36px; padding: 6px 14px; font-size: .8125rem; }
+.tv-page .key-range { display: flex; justify-content: space-between; font-size: .75rem; color: var(--ink-3); }
+.tv-page .cap-val .big-num { font-size: 2rem; }
+.tv-page .dev-code { font-family: var(--font-mono); color: #9ec0ff; overflow-wrap: anywhere; }
+.tv-page .faq a { color: var(--brand-hi); }
+.tv-page .dev-cli-link { margin-top: 24px; }
+
+/* One switch for every moving part: the OS preference or the hero's pause button. */
+.tv-page .motion-toggle { display: inline-flex; align-items: center; gap: 8px; min-width: 44px; min-height: 44px; margin-top: 14px; padding: 10px 16px; border: 0; border-radius: 100px; background: var(--ghost-bg); color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--ghost-line); font: 600 .875rem/1 var(--font-body); cursor: pointer; }
+.tv-page .motion-toggle:hover { background: var(--ghost-bg-hover); color: var(--ink); }
+.tv-page .motion-toggle .icon { font-size: .75rem; letter-spacing: -.1em; }
+.tv-page[data-motion="paused"] *, .tv-page[data-motion="paused"] *::before, .tv-page[data-motion="paused"] *::after { animation: none !important; transition: none !important; }
+.tv-page[data-motion="paused"] .hero-media video { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .tv-page .route-line { transition: none; }
+  .tv-page .saving .bar i { transition: none; }
+}
+@media (max-width: 640px) {
+  .tv-page .saving { grid-template-columns: 84px minmax(0, 1fr) 44px; gap: 8px; }
+  .tv-page .key-row code { overflow-wrap: anywhere; }
+}
+.tv-page .key-cap { display: grid; gap: 10px; }

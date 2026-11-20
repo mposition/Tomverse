@@ -26,7 +26,7 @@ const koBlock = () => {
 };
 
 test("Korean support copy names Review the way the nav does", () => {
-  assert.match(chromeSource, /lang === "ko" \? "답변 비교" : "Review"/);
+  assert.match(chromeSource, /ko: \{\n\s+chat: "채팅", review: "답변 비교",/);
   const ko = koBlock();
   assert.match(ko, /"appCta": "답변 비교 열기"/);
   assert.match(ko, /"messageExample": "예: 답변 비교에서 PDF를/);

@@ -160,6 +160,7 @@ export const homeV2Translations: Record<Exclude<Language, "ko" | "en">, HomeV2Co
       title: ["在你常用的编程工具里，", "一个 Tomverse API 密钥。"],
       body: "无需在每家提供商分别注册和付费，就能在常用的编程工具中使用 Tomverse 账户的模型。任何使用标准 OpenAI 兼容 API 的工具都能连接，并可从 {n} 家提供商的模型中选择；Codex 和 Claude Code 只使用各自提供商的模型。Smart Adaptive 会把轻量请求发给轻量模型以节省积分，为密钥设定上限后不会超出（Pro 及以上）。",
       toolsLabel: "要连接的工具",
+      devLink: "开发者页面",
       clients: {
         codex: "终端 · VS Code 扩展",
         claude: "终端 · VS Code 扩展",
@@ -194,6 +195,7 @@ export const homeV2Translations: Record<Exclude<Language, "ko" | "en">, HomeV2Co
       title: ["直接在终端里，", "你文件夹里的编程代理。"],
       body: "无需 Claude Code 或 Codex，只用一个 Tomverse API 密钥就能运行。它会读取代码、提出 diff，只执行你批准的命令，然后告诉你做了什么、花了多少。",
       terminalLabel: "Tomverse CLI 运行示例",
+      cta: "了解 Tomverse CLI",
       steps: [
         ["读取并规划", "只读取当前文件夹中的代码。密钥不会写入设置、会话或日志中的任何地方。"],
         ["用 diff 提出建议", "先展示要更改的内容，只应用你批准的更改。"],
@@ -379,6 +381,7 @@ export const homeV2Translations: Record<Exclude<Language, "ko" | "en">, HomeV2Co
       title: ["在你常用的程式開發工具裡，", "一組 Tomverse API 金鑰。"],
       body: "不必在每家供應商分別註冊和付款，就能在常用的程式開發工具中使用 Tomverse 帳戶的模型。任何使用標準 OpenAI 相容 API 的工具都能連接，並可從 {n} 家供應商的模型中選擇；Codex 和 Claude Code 只使用各自供應商的模型。Smart Adaptive 會把輕量請求送給輕量模型以節省點數，為金鑰設定上限後不會超出（Pro 以上）。",
       toolsLabel: "要串接的工具",
+      devLink: "開發者頁面",
       clients: {
         codex: "終端機 · VS Code 擴充功能",
         claude: "終端機 · VS Code 擴充功能",
@@ -413,6 +416,7 @@ export const homeV2Translations: Record<Exclude<Language, "ko" | "en">, HomeV2Co
       title: ["直接在終端機裡，", "你資料夾裡的程式開發代理。"],
       body: "不需要 Claude Code 或 Codex，只要一組 Tomverse API 金鑰就能運作。它會讀取程式碼、提出 diff，只執行你核准的指令，最後告訴你做了什麼、花了多少。",
       terminalLabel: "Tomverse CLI 執行範例",
+      cta: "了解 Tomverse CLI",
       steps: [
         ["讀取並規劃", "只讀取目前資料夾中的程式碼。金鑰不會寫入設定、工作階段或記錄檔的任何地方。"],
         ["用 diff 提出建議", "先顯示要變更的內容，只套用你核准的變更。"],
@@ -598,6 +602,7 @@ export const homeV2Translations: Record<Exclude<Language, "ko" | "en">, HomeV2Co
       title: ["Dans vos outils de code habituels,", "une seule clé API Tomverse."],
       body: "Utilisez les modèles de votre compte Tomverse dans vos outils de code habituels, sans vous inscrire ni payer chez chaque fournisseur. Tout outil compatible avec l’API OpenAI standard peut se connecter et choisir parmi les modèles de {n} fournisseurs ; Codex et Claude Code restent sur les modèles de leur propre fournisseur. Smart Adaptive envoie les requêtes légères vers des modèles légers pour économiser des crédits, et une clé dotée d’une limite ne la dépasse jamais (Pro et plus).",
       toolsLabel: "Outil à connecter",
+      devLink: "Page développeurs",
       clients: {
         codex: "Terminal · extension VS Code",
         claude: "Terminal · extension VS Code",
@@ -632,6 +637,7 @@ export const homeV2Translations: Record<Exclude<Language, "ko" | "en">, HomeV2Co
       title: ["Directement dans votre terminal,", "un agent de code pour votre dossier."],
       body: "Fonctionne avec une seule clé API Tomverse, sans Claude Code ni Codex. Il lit le code, propose un diff, n’exécute que les commandes que vous approuvez, puis vous dit ce qu’il a fait et ce que cela a coûté.",
       terminalLabel: "Exemple de session Tomverse CLI",
+      cta: "Découvrir Tomverse CLI",
       steps: [
         ["Il lit et planifie", "Il ne lit que le code du dossier courant. La clé n’est jamais écrite dans les réglages, les sessions ni les journaux."],
         ["Il propose un diff", "Il montre d’abord les modifications et n’applique que celles que vous approuvez."],
@@ -817,6 +823,7 @@ export const homeV2Translations: Record<Exclude<Language, "ko" | "en">, HomeV2Co
       title: ["In Ihren gewohnten Coding-Tools,", "ein einziger Tomverse-API-Schlüssel."],
       body: "Nutzen Sie die Modelle Ihres Tomverse-Kontos in Ihren gewohnten Coding-Tools, ohne sich bei jedem Anbieter einzeln anzumelden und zu bezahlen. Jedes Tool mit der standardmäßigen OpenAI-kompatiblen API lässt sich verbinden und kann aus den Modellen von {n} Anbietern wählen; Codex und Claude Code bleiben bei den Modellen ihres eigenen Anbieters. Smart Adaptive schickt leichte Anfragen an leichte Modelle und spart so Credits, und ein Schlüssel mit Limit überschreitet es nie (ab Pro).",
       toolsLabel: "Zu verbindendes Tool",
+      devLink: "Entwicklerseite",
       clients: {
         codex: "Terminal · VS-Code-Erweiterung",
         claude: "Terminal · VS-Code-Erweiterung",
@@ -851,6 +858,7 @@ export const homeV2Translations: Record<Exclude<Language, "ko" | "en">, HomeV2Co
       title: ["Direkt im Terminal:", "ein Coding-Agent für Ihren Ordner."],
       body: "Funktioniert mit einem einzigen Tomverse-API-Schlüssel, ganz ohne Claude Code oder Codex. Er liest den Code, schlägt einen Diff vor, führt nur die Befehle aus, die Sie freigeben, und berichtet anschließend, was er getan hat und was es gekostet hat.",
       terminalLabel: "Beispiel einer Tomverse-CLI-Sitzung",
+      cta: "Tomverse CLI entdecken",
       steps: [
         ["Liest und plant", "Liest nur den Code im aktuellen Ordner. Der Schlüssel wird nirgends in Einstellungen, Sitzungen oder Protokolle geschrieben."],
         ["Schlägt einen Diff vor", "Zeigt die Änderung zuerst und übernimmt nur, was Sie freigeben."],
@@ -1036,6 +1044,7 @@ export const homeV2Translations: Record<Exclude<Language, "ko" | "en">, HomeV2Co
       title: ["En las herramientas de código que ya usas,", "una sola clave de Tomverse API."],
       body: "Usa los modelos de tu cuenta de Tomverse en las herramientas de código que ya usas, sin registrarte ni pagar en cada proveedor por separado. Cualquier herramienta con la API estándar compatible con OpenAI puede conectarse y elegir entre los modelos de {n} proveedores; Codex y Claude Code se quedan en los modelos de su propio proveedor. Smart Adaptive envía las peticiones ligeras a modelos ligeros para ahorrar créditos, y una clave con límite nunca lo supera (Pro o superior).",
       toolsLabel: "Herramienta que conectar",
+      devLink: "Página para desarrolladores",
       clients: {
         codex: "Terminal · extensión de VS Code",
         claude: "Terminal · extensión de VS Code",
@@ -1070,6 +1079,7 @@ export const homeV2Translations: Record<Exclude<Language, "ko" | "en">, HomeV2Co
       title: ["Directamente en tu terminal,", "un agente de código para tu carpeta."],
       body: "Funciona con una sola clave de Tomverse API, sin necesidad de Claude Code ni Codex. Lee el código, propone un diff, solo ejecuta los comandos que apruebas y después te cuenta qué hizo y cuánto costó.",
       terminalLabel: "Ejemplo de sesión de Tomverse CLI",
+      cta: "Conocer Tomverse CLI",
       steps: [
         ["Lee y planifica", "Solo lee el código de la carpeta actual. La clave nunca se escribe en la configuración, las sesiones ni los registros."],
         ["Propone un diff", "Primero muestra los cambios y solo aplica los que apruebas."],
@@ -1255,6 +1265,7 @@ export const homeV2Translations: Record<Exclude<Language, "ko" | "en">, HomeV2Co
       title: ["Nas ferramentas de código que você já usa,", "uma única chave da Tomverse API."],
       body: "Use os modelos da sua conta Tomverse nas ferramentas de código que você já usa, sem se cadastrar e pagar em cada provedor. Qualquer ferramenta com a API padrão compatível com a OpenAI pode se conectar e escolher entre os modelos de {n} provedores; Codex e Claude Code ficam nos modelos do próprio provedor. O Smart Adaptive envia pedidos leves para modelos leves para economizar créditos, e uma chave com limite nunca passa dele (Pro ou superior).",
       toolsLabel: "Ferramenta para conectar",
+      devLink: "Página para desenvolvedores",
       clients: {
         codex: "Terminal · extensão do VS Code",
         claude: "Terminal · extensão do VS Code",
@@ -1289,6 +1300,7 @@ export const homeV2Translations: Record<Exclude<Language, "ko" | "en">, HomeV2Co
       title: ["Direto no terminal,", "um agente de código para a sua pasta."],
       body: "Funciona com uma única chave da Tomverse API, sem precisar de Claude Code ou Codex. Ele lê o código, propõe um diff, executa só os comandos que você aprovar e depois conta o que fez e quanto custou.",
       terminalLabel: "Exemplo de sessão do Tomverse CLI",
+      cta: "Conhecer Tomverse CLI",
       steps: [
         ["Lê e planeja", "Lê apenas o código da pasta atual. A chave nunca é gravada em configurações, sessões ou logs."],
         ["Propõe um diff", "Mostra primeiro o que vai mudar e aplica só as alterações que você aprovar."],
