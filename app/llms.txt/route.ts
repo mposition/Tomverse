@@ -33,7 +33,6 @@ const PAGES: ReadonlyArray<{ path: string; title: string }> = [
   { path: "/safety/trust-transparency", title: "Trust and transparency" },
   { path: "/support", title: "Support" },
   { path: "/support/help-centre", title: "Help centre" },
-  { path: "/support/help-centre/chat-workspace", title: "Chat workspace" },
   { path: "/privacy", title: "Privacy" },
   { path: "/terms", title: "Terms" },
 ];

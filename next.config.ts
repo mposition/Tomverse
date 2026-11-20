@@ -102,6 +102,20 @@ const nextConfig: NextConfig = {
         // 307 costs one request.
         permanent: false,
       },
+      {
+        // The Chat workspace guide was folded into the help centre (owner
+        // 2026-11-20). Unlike /help this is a real move, so it is permanent
+        // (308): the old URL will not come back. The query string (`?lang=`)
+        // is carried to the hub; the proxy then picks the localized hub.
+        source: "/support/help-centre/chat-workspace",
+        destination: "/support/help-centre",
+        permanent: true,
+      },
+      {
+        source: "/:locale(en|ko|zh|zh-Hant|fr|de|es|pt)/support/help-centre/chat-workspace",
+        destination: "/:locale/support/help-centre",
+        permanent: true,
+      },
     ];
   },
   async headers() {

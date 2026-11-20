@@ -112,16 +112,6 @@ export const publicMarketingMetadataCopy = {
     ["Centro de ayuda de Tomverse | Pregunta y te respondemos", "Chat, Review, imágenes, investigación, archivos, asistentes, importación, conectores, herramientas de programación, planes y créditos: resuélvelo con guías paso a paso y el asistente de ayuda."],
     ["Central de Ajuda do Tomverse | Pergunte e receba a resposta", "Chat, Review, imagens, pesquisa, arquivos, assistentes, importação, conectores, ferramentas de código, planos e créditos: resolva com guias passo a passo e o assistente de ajuda."],
   ),
-  "/support/help-centre/chat-workspace": localized(
-    ["Tomverse Chat and Review Workspace Guide", "Learn when to use Chat or Review, choose models, refine questions, compare answers and work with files, saved conversations and credits."],
-    ["Tomverse Chat·Review 작업 공간 가이드", "Chat과 Review를 언제 사용할지 알아보고, 모델 선택·질문 다듬기·답변 비교와 파일·저장한 대화·크레딧 사용을 살펴보세요."],
-    ["Tomverse Chat 与 Review 工作区指南", "了解何时使用 Chat 或 Review，如何选择模型、优化提问、比较回答，以及使用文件、已保存对话和积分。"],
-    ["Tomverse Chat 與 Review 工作區指南", "了解何時使用 Chat 或 Review、如何選擇模型、優化提問、比較回答，以及使用檔案、已儲存對話與點數。"],
-    ["Guide des espaces Chat et Review de Tomverse", "Découvrez quand utiliser Chat ou Review, choisir un modèle, préciser une question, comparer les réponses et utiliser fichiers, conversations et crédits."],
-    ["Tomverse Anleitung für Chat und Review", "Wann Chat oder Review helfen, wie Sie Modelle wählen, Fragen präzisieren und Antworten vergleichen sowie Dateien, Gespräche und Credits nutzen."],
-    ["Guía de espacios Chat y Review de Tomverse", "Aprende cuándo usar Chat o Review, elegir modelos, precisar preguntas, comparar respuestas y trabajar con archivos, conversaciones y créditos."],
-    ["Guia dos espaços Chat e Review do Tomverse", "Aprenda quando usar Chat ou Review, escolher modelos, aprimorar perguntas, comparar respostas e usar arquivos, conversas e créditos."],
-  ),
 } satisfies Record<string, Record<Language, Copy>>;
 
 export type PublicMarketingPagePath = keyof typeof publicMarketingMetadataCopy;

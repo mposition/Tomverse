@@ -261,7 +261,7 @@ const representatives: Array<{ language: Language; next: Language; base: PublicM
   { language: "ko", next: "fr", base: "/about" },
   { language: "fr", next: "de", base: "/faq" },
   { language: "de", next: "pt", base: "/models" },
-  { language: "pt", next: "ko", base: "/support/help-centre/chat-workspace" },
+  { language: "pt", next: "ko", base: "/support/help-centre" },
 ];
 
 for (const { language, next, base } of representatives) {

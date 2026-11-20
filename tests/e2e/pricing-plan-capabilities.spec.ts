@@ -22,7 +22,7 @@ test("each plan exposes eligible public models and concrete attachment limits", 
       }
     }
     await expect(details.getByRole("link", { name: "Compare model access and base credits" })).toHaveAttribute("href", "/models");
-    await expect(details.getByRole("link", { name: "File limits and Google Drive help" })).toHaveAttribute("href", "/support/help-centre/chat-workspace?lang=en#files-and-drive");
+    await expect(details.getByRole("link", { name: "File limits and Google Drive help" })).toHaveAttribute("href", "/support/help-centre?lang=en");
     await details.locator("summary").click();
     await expect(details).not.toHaveAttribute("open");
   }
