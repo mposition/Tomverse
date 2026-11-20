@@ -343,7 +343,8 @@ improved by its own optimizer, as Chat's router is.
 - **Coding optimizer** (`lib/autoCodingRouterOptimizer.ts`, target `coding`).
   It is the Chat optimizer's cycle run on the coding guidance. It shares the
   same optimizer and router models, one running cycle at a time, and the
-  same day and month caps (`docs/policy/chat-unified-router-refiner-v1.md`).
+  same day and month caps (`AUTO_ROUTER_OPTIMIZER_DAY_CAP_MICRO_USD` and
+  `AUTO_ROUTER_OPTIMIZER_MONTH_CAP_MICRO_USD` in `lib/autoRouterOptimizerCore.ts`).
   It adds no spending ceiling.
   - The external API keeps no text, so every case is a synthetic coding
     request.
