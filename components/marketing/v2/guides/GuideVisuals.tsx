@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
+import { reviewDemoVideo } from "@/components/marketing/v2/reviewDemoVideo";
 import { aiReviewDemoCopy } from "@/components/marketing/AiReviewDemo";
 import type { GuideCopy } from "@/components/marketing/ChatGptVsClaudeGuide";
 import { homeV2Content } from "@/components/marketing/home/homeV2Content";
@@ -74,7 +75,7 @@ export function GuideVideo({ reduce }: { reduce: boolean }) {
     video.play().catch(() => {});
   }, [reduce]);
   return <figure className="demo-frame">
-    <video ref={ref} src="/marketing/v2/review-demo.mp4" poster="/marketing/v2/review-demo.jpg" autoPlay={!reduce} muted loop playsInline preload="metadata" aria-label={review.videoLabel} />
+    <video ref={ref} src={reviewDemoVideo(lang).src} poster={reviewDemoVideo(lang).poster} autoPlay={!reduce} muted loop playsInline preload="metadata" aria-label={review.videoLabel} />
     <figcaption>{review.caption}</figcaption>
   </figure>;
 }

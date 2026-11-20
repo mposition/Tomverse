@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Fragment, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
+import { reviewDemoVideo } from "@/components/marketing/v2/reviewDemoVideo";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { AI_REVIEW_CREDITS, QUICK_SUMMARY_CREDITS } from "@/lib/comparisonReviewCost";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
@@ -179,7 +180,7 @@ export function ReviewProductPage() {
         <div className="wrap">
           <figure className="demo-frame rise">
             <div className="demo-bar" aria-hidden="true"><i /><i /><i /><span>tomverse.app/review</span></div>
-            <LoopVideo src="/marketing/v2/review-demo.mp4" poster="/marketing/v2/review-demo.jpg" reduce={reduce} preload="metadata" label={copy.demo.videoLabel} />
+            <LoopVideo src={reviewDemoVideo(lang).src} poster={reviewDemoVideo(lang).poster} reduce={reduce} preload="metadata" label={copy.demo.videoLabel} />
             <figcaption data-testid="review-demo-caption">{copy.demo.caption}</figcaption>
           </figure>
         </div>
