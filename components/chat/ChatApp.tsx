@@ -1903,6 +1903,8 @@ function ChatAppComponent({
                 // The photo is the one saved with the question; this only
                 // says to edit it.
                 ...(request.edit ? { edit: true } : {}),
+                // Links the routing decision to the group it starts (content-free).
+                ...(request.routingDecisionId ? { routingDecisionId: request.routingDecisionId } : {}),
               }),
               signal: controller.signal,
             }

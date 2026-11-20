@@ -18,6 +18,7 @@ import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { chatErrorResponse } from "@/lib/chatSecurity";
 import { startChatImageTurn } from "@/lib/chatImageTurn";
 import { processImageGenerationGroup } from "@/lib/imageGenerationService";
+import { IMAGE_ROUTING_DECISION_ID_PATTERN, linkImageRoutingDecision } from "@/lib/imageRoutingDecisions";
 
 // POST /api/conversations/[conversationId]/image-turn -- answers a saved
 // Tomverse Chat question with an image in the same conversation, instead of
@@ -41,6 +42,9 @@ const imageTurnSchema = z
     // Edit the photo attached to the saved question. Only a flag: the server
     // finds the photo from the question itself.
     edit: z.boolean().optional(),
+    // The routing decision this turn answers (content-free); linked to the
+    // group only when it is this person's own image decision.
+    routingDecisionId: z.string().regex(IMAGE_ROUTING_DECISION_ID_PATTERN).optional(),
   })
   .strict();
 
@@ -77,6 +81,10 @@ export async function POST(req: Request, { params }: Params) {
       ...(body.edit ? { edit: true } : {}),
       request: req,
     });
+
+    if (body.routingDecisionId) {
+      await linkImageRoutingDecision({ decisionId: body.routingDecisionId, userId, groupId: turn.groupId });
+    }
 
     // Post-response execution, as in POST /api/images/generations: a process
     // death here is the stale case the reconciliation sweep refunds.

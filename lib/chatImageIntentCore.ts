@@ -87,6 +87,8 @@ export type ChatImageDecision =
            * image. Only ever true when the call was told a photo is attached.
            */
           edit: boolean;
+          /** The recorded routing decision (lib/imageRoutingDecisions.ts), when one was written. */
+          routingDecisionId?: string;
       };
 
 /** Prepared under the same image gates for standalone and combined routing. */
@@ -100,6 +102,8 @@ export type ChatImageIntentContext = {
     message?: string;
     maxOutputTokens: number;
     timeoutMs: number;
+    /** The image routing criteria in force (the promoted image guidance, or the default). */
+    criteria?: string;
 };
 
 /**
@@ -371,6 +375,10 @@ export const readChatImageDecision = (data: unknown): ChatImageDecision => {
                 ? value.prompt.trim()
                 : null,
         edit: (value as { edit?: unknown }).edit === true,
+        ...(typeof (value as { routingDecisionId?: unknown }).routingDecisionId === "string" &&
+        /^[a-z0-9]{20,40}$/.test((value as { routingDecisionId: string }).routingDecisionId)
+            ? { routingDecisionId: (value as { routingDecisionId: string }).routingDecisionId }
+            : {}),
     };
 };
 

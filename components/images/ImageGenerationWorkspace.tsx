@@ -43,6 +43,7 @@ import {
   type ImageModelProfile,
 } from "@/lib/imageModelRegistry";
 import { useImageModelCatalog } from "@/components/images/ImageModelCatalogProvider";
+import { ImageSelectButton, useImageResultSelection } from "@/components/images/ImageSignalControls";
 import {
   limitImageModelSelection,
   reportedImageModelLimit,
@@ -355,6 +356,8 @@ export function ImageGenerationWorkspace({
   const preparedPromptRef = useRef<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [downloadingIds, setDownloadingIds] = useState<string[]>([]);
+  // Which result the person chose, per comparison group (image routing signal).
+  const resultSelection = useImageResultSelection();
   // Kept apart from submitError: a download that failed says nothing about the
   // composer, and overwriting a submit refusal with it would lose the reason
   // the user still has to act on.
@@ -1356,6 +1359,11 @@ export function ImageGenerationWorkspace({
                     key={generation.targetId ?? generation.generationId}
                     data-testid="image-comparison-card"
                     data-model-id={generation.modelId ?? ""}
+                    data-selected={
+                      resultSelection.selection[group.groupId] === generation.generationId
+                        ? "true"
+                        : undefined
+                    }
                     className="flex min-w-0 flex-col gap-1.5"
                   >
                     {group.targets.length > 1 && (
@@ -1364,6 +1372,22 @@ export function ImageGenerationWorkspace({
                       </p>
                     )}
                     {renderResult(generation)}
+                    {/*
+                      Choosing a result is a measurement of which model
+                      answered the prompt best, so it exists only where there
+                      is something to choose between and only for a picture
+                      that finished.
+                    */}
+                    {group.targets.length > 1 && generation.status === "succeeded" ? (
+                      <ImageSelectButton
+                        selected={
+                          resultSelection.selection[group.groupId] === generation.generationId
+                        }
+                        onSelect={() =>
+                          void resultSelection.select(group.groupId, generation.generationId)
+                        }
+                      />
+                    ) : null}
                   </section>
                 ))}
               </div>

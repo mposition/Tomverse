@@ -140,6 +140,7 @@ export const routerRequest = (input: AutoLlmRouterCallInput) => {
             combined: true,
             followUp: imageIntent.previousImagePrompt !== null,
             attachedPhoto: imageIntent.attachedPhoto,
+            criteria: imageIntent.criteria,
         }) : "") + (input.searchPlan ? "\n\n" + routerSearchInstructions(input.searchUtcDate ?? new Date().toISOString().slice(0, 10)) : "") +
             (authored ? "\n\nFor requiresLocation, use the full authoredMessage if supplied, otherwise message. " +
                 (input.existingLocationTurn ? "Decide on this turn alone: earlier turns and the rewrite are not requests for device location. " : "") +

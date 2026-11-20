@@ -83,6 +83,7 @@ import { consumeChatLocationIntentLimit } from "@/lib/chatLocationIntentRateLimi
 import { openRouterLocation, routerLocationDigest, sealRouterLocation, type RouterLocationContinuation } from "@/lib/chatRouterLocationContinuation";
 import { claimRouterLocation, consumeRouterLocation, routerLocationRefused, routerLocationResponse, type RouterLocationClaim } from "@/lib/chatRouterLocationPreparation";
 import { chatRouterImageHedgeMs, combinedChatImageIntentEnabled, createChatTurnImageRouting } from "@/lib/chatImageIntent";
+import { recordImageRoutingDecision } from "@/lib/imageRoutingDecisions";
 import {
     latestUserTurnHasAttachments,
     latestUserTurnHasImageAttachment,
@@ -3701,6 +3702,24 @@ async function handleChatPost(
         }
         if (autoImageDecision.image) {
             console.info(JSON.stringify({ event: "chat_auto_image_turn", traceId }));
+            // A decision the combined router made has no record yet; the
+            // standalone call writes its own (lib/chatImageIntent.ts).
+            let routingDecisionId = autoImageDecision.routingDecisionId ?? null;
+            if (!routingDecisionId && session?.user?.id) {
+                const context = await imageRouting.context?.catch(() => null);
+                routingDecisionId = await recordImageRoutingDecision({
+                    userId: session.user.id,
+                    conversationId: conversationId ?? null,
+                    source: "auto_chat",
+                    routerModelId: context?.modelId ?? "unknown",
+                    decision: autoImageDecision,
+                    outcome: "image",
+                    followUp: autoImageDecision.prompt !== null,
+                    attachedPhoto: context?.attachedPhoto ?? false,
+                    candidateCount: context?.candidates.length ?? 0,
+                    latencyMs: null,
+                });
+            }
             return new Response(
                 JSON.stringify({
                     imageTurn: {
@@ -3708,6 +3727,7 @@ async function handleChatPost(
                         preset: autoImageDecision.preset,
                         ...(autoImageDecision.prompt ? { prompt: autoImageDecision.prompt } : {}),
                         ...(autoImageDecision.edit ? { edit: true } : {}),
+                        ...(routingDecisionId ? { routingDecisionId } : {}),
                     },
                 }),
                 {

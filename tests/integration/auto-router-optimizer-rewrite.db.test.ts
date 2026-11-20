@@ -46,6 +46,7 @@ import {
   updateRewriteOptimizerAutomation,
 } from "@/lib/autoRewriteOptimizer";
 import { AUTO_CODING_OPTIMIZER_AUTOMATION_SETTING_KEY } from "@/lib/autoCodingRouterOptimizer";
+import { AUTO_IMAGE_OPTIMIZER_AUTOMATION_SETTING_KEY } from "@/lib/imageRoutingOptimizer";
 
 // The rewrite optimizer's money, promotion and audit steps on a real database
 // (lib/autoRewriteOptimizer.ts). No model is called: the cycle's calls are
@@ -75,12 +76,17 @@ const createdUsers: string[] = [];
 const reset = async () => {
   await prisma.autoRouterOptimizerCycle.deleteMany({});
   await prisma.appSetting.deleteMany({ where: { key: { in: SETTING_KEYS } } });
-  // The coding cycle's daily run is on by default; these tests are about the
-  // routing and rewrite targets alone.
+  // The coding and image cycles' daily runs are on by default; these tests are
+  // about the routing and rewrite targets alone.
   await prisma.appSetting.upsert({
     where: { key: AUTO_CODING_OPTIMIZER_AUTOMATION_SETTING_KEY },
     create: { key: AUTO_CODING_OPTIMIZER_AUTOMATION_SETTING_KEY, value: JSON.stringify({ daily: false, autoPromote: false }) },
     update: { value: JSON.stringify({ daily: false, autoPromote: false }) },
+  });
+  await prisma.appSetting.upsert({
+    where: { key: AUTO_IMAGE_OPTIMIZER_AUTOMATION_SETTING_KEY },
+    create: { key: AUTO_IMAGE_OPTIMIZER_AUTOMATION_SETTING_KEY, value: JSON.stringify({ daily: false, autoPromote: false, modelEval: false }) },
+    update: { value: JSON.stringify({ daily: false, autoPromote: false, modelEval: false }) },
   });
   if (createdUsers.length > 0) {
     await prisma.user.deleteMany({ where: { id: { in: createdUsers.splice(0) } } });
@@ -89,7 +95,7 @@ const reset = async () => {
 beforeEach(reset);
 after(async () => {
   await reset();
-  await prisma.appSetting.deleteMany({ where: { key: AUTO_CODING_OPTIMIZER_AUTOMATION_SETTING_KEY } });
+  await prisma.appSetting.deleteMany({ where: { key: { in: [AUTO_CODING_OPTIMIZER_AUTOMATION_SETTING_KEY, AUTO_IMAGE_OPTIMIZER_AUTOMATION_SETTING_KEY] } } });
   await prisma.$disconnect();
 });
 

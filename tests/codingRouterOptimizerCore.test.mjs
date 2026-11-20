@@ -21,7 +21,7 @@ import { summarizeCodingRouting } from "../lib/externalApiRoutingReportCore.ts";
  */
 
 test("coding is a third guidance kind an optimizer cycle may improve", () => {
-    assert.deepEqual([...AUTO_LLM_ROUTER_GUIDANCE_KINDS], ["routing", "rewrite", "coding"]);
+    assert.deepEqual([...AUTO_LLM_ROUTER_GUIDANCE_KINDS].slice(0, 3), ["routing", "rewrite", "coding"]);
 });
 
 test("the daily run takes the switched-on targets in turn, one a day", () => {
