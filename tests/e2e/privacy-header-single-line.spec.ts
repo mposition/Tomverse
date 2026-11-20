@@ -12,7 +12,7 @@ for (const theme of ["light", "dark"] as const) {
     const header = page.getByTestId("launch-marketing-header");
     const cta = header.getByTestId("marketing-header-app-cta");
     await expect(cta).toHaveAttribute("data-session-state", "unauthenticated", { timeout: 30_000 });
-    const links = [header.getByRole("link", { name: "Explore models", exact: true }), header.getByRole("link", { name: /^Sign in$/i }), cta];
+    const links = [header.getByRole("link", { name: "Models", exact: true }), header.getByRole("link", { name: /^Sign in$/i }), cta];
     for (const width of [1440, 1280, 1024]) {
       await page.setViewportSize({ width, height: 900 });
       for (const link of links) {
