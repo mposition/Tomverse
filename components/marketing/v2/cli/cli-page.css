@@ -1,0 +1,49 @@
+/*
+ * CLI download page (approved homepage V2 concept, 2026-11-20), ported with
+ * port-css.cjs and then adjusted by hand: the copy button is .cmd-copy so it cannot
+ * collide with .split .copy, commands wrap instead of scrolling, and the
+ * motion control and "coming soon" notes are new.
+ * Every rule is scoped under .tv-page; keyframes are prefixed tvl-; text holds the
+ * 11px floor and fonts use the app's locale variables (docs/ui-contracts/typography.md).
+ */
+.tv-page .install { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 24px; align-items: stretch; }
+.tv-page .cmd { display: flex; align-items: center; gap: 12px; padding: 16px 18px; border-radius: 16px; background: #0b0d14; box-shadow: inset 0 0 0 1px #2c3142; font: 500 1rem/1.4 var(--font-mono); color: #c9d4ee; min-width: 0; }
+.tv-page .cmd .p { color: var(--brand-hi); user-select: none; flex: none; }
+.tv-page .cmd code { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tv-page .cmd-copy { border: 0; border-radius: 10px; padding: 8px 12px; background: var(--brand); color: #fff; font: 700 .75rem/1 var(--font-body); cursor: pointer; flex: none; min-height: 34px; min-width: 44px; }
+.tv-page .cmd-copy.done { background: #16a34a; }
+.tv-page .hero-cmd { max-width: 560px; margin-top: 32px; }
+.tv-page .os-panel { display: none; gap: 12px; }
+.tv-page .os-panel.on { display: grid; animation: tvl-fadeUp .3s ease-out; }
+.tv-page .os-step { font-size: .875rem; }
+.tv-page .os-tabs { margin-bottom: 20px; }
+@keyframes tvl-fadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.tv-page .req { display: grid; gap: 10px; }
+.tv-page .req div { display: flex; justify-content: space-between; gap: 12px; padding: 12px 14px; border-radius: 12px; background: var(--panel-2); font-size: .875rem; }
+.tv-page .req b { font-weight: 700; text-align: right; }
+.tv-page .req a { color: var(--brand-hi); text-decoration: underline; text-underline-offset: 3px; }
+.tv-page .first { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.tv-page .first .card .cmd { font-size: .8125rem; padding: 10px 12px; }
+.tv-page .ver { display: inline-flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.tv-page .chapter.after-hero { padding-top: 56px; }
+.tv-page .chapter.tight { padding-top: 24px; }
+.tv-page .cards.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.tv-page .cta-band .hero-actions { margin: 0; }
+.tv-page .panel-label { font-size: .875rem; color: var(--ink-3); margin-bottom: 12px; }
+
+/* Not published yet: the install command is shown, but a visitor must not think it works today. */
+.tv-page .soon-note { display: flex; align-items: flex-start; gap: 10px; margin-top: 16px; padding: 12px 14px; border-radius: 12px; background: rgb(251 191 36 / .1); box-shadow: inset 0 0 0 1px rgb(251 191 36 / .28); color: var(--ink-2); font-size: .875rem; line-height: 1.5; }
+.tv-page .soon-note .chip { flex: none; margin-top: 2px; }
+.tv-page .page-hero .soon-note { max-width: 560px; background: rgb(33 27 12 / .72); }
+.tv-page .term pre.doctor { min-height: 0; }
+.tv-page .example-note { padding: 12px 26px 18px; font-size: .75rem; color: var(--ink-3); }
+
+/* Motion control (WCAG 2.2.2): the hero's pause button and prefers-reduced-motion stop every animation. */
+.tv-page .motion-toggle { display: inline-flex; align-items: center; gap: 8px; min-width: 44px; min-height: 44px; margin-top: 14px; padding: 10px 16px; border: 0; border-radius: 100px; background: var(--ghost-bg); color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--ghost-line); font: 600 .875rem/1 var(--font-body); cursor: pointer; }
+.tv-page .motion-toggle:hover { background: var(--ghost-bg-hover); color: var(--ink); }
+.tv-page .motion-toggle .icon { font-size: .75rem; letter-spacing: -.1em; }
+.tv-page[data-motion="paused"] *, .tv-page[data-motion="paused"] *::before, .tv-page[data-motion="paused"] *::after { animation: none !important; transition: none !important; }
+.tv-page[data-motion="paused"] .hero-media video { display: none; }
+
+@media (max-width: 1080px) { .tv-page .install { grid-template-columns: minmax(0, 1fr); } .tv-page .first { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .tv-page .first { grid-template-columns: minmax(0, 1fr); } .tv-page .cmd { font-size: .875rem; } .tv-page .cards.two { grid-template-columns: minmax(0, 1fr); } .tv-page .example-note { padding-inline: 18px; } }

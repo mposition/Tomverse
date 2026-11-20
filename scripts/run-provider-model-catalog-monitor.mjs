@@ -37,6 +37,8 @@ try {
   if (!response.ok) {
     console.error("Daily provider model catalog monitor failed:", response.status, result);
     process.exitCode = 1;
+  } else if (result?.skipped) {
+    console.log("Daily provider model catalog monitor skipped:", result.skipped);
   } else {
     console.log("Daily provider model catalog monitor completed:", {
       generatedAt: result?.generatedAt,

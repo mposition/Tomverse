@@ -51,7 +51,7 @@ test("a file nothing in the suites reaches runs no job", () => {
     assert.deepEqual(scope("docs/qa/review-parity-baseline.md"), []);
     assert.deepEqual(scope("tests/e2e/chat.spec.ts"), []);
     assert.deepEqual(scope("tests/rustVendorScope.test.mjs"), []);
-    assert.deepEqual(scope("components/marketing/LaunchHomepage.module.css"), []);
+    assert.deepEqual(scope("components/marketing/home/home-v2.css"), []);
 });
 
 test("a suite runs its own lane, and not every lane", () => {

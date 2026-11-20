@@ -100,7 +100,10 @@ export async function answerHelpQuestion(input: {
       void settleRouterCost(model.provider, actual - worstCase, reservedAt);
     }
     const answer = parseHelpAssistantOutput(generated.output, copy.ui.notFound);
-    return log(input, model.id, answer.status, Date.now() - startedAt, { ok: true, answer });
+    // "not_found_uncited": the model answered, but no citation named a real guide.
+    const modelAnswered = (generated.output as { status?: unknown } | undefined)?.status === "answered";
+    const outcome = answer.status === "not_found" && modelAnswered ? "not_found_uncited" : answer.status;
+    return log(input, model.id, outcome, Date.now() - startedAt, { ok: true, answer });
   } catch {
     return log(input, model.id, "error", Date.now() - startedAt, { ok: false, reason: "error" });
   }

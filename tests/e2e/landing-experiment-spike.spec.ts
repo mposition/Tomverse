@@ -32,7 +32,7 @@ const BUNDLE_ID = "home-hero-v1";
 // run together; the fixture experiment covers English and Korean.
 const VARIANT_COOKIE = `${EXPERIMENT_ID}.${BUNDLE_ID}.b.enko`;
 const CONTROL_COOKIE = `${EXPERIMENT_ID}.${BUNDLE_ID}.control.enko`;
-const DEFAULT_HEADLINE_EN = "Which AI should you use?";
+const DEFAULT_HEADLINE_EN = "Can you trust this answer?";
 const VARIANT_HEADLINE_EN = "Several AI answers.";
 const VARIANT_HEADLINE_KO = "AI 답변은 여럿.";
 const CONSENT_KEY = "tomverse_analytics_consent_v1";
