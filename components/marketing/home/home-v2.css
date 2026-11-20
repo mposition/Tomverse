@@ -451,11 +451,6 @@
 .tv-home .plug-asks .ask { display: inline-flex; align-items: center; gap: 10px; padding: 10px 14px 10px 10px; border-radius: 14px 14px 14px 4px; background: var(--selected); box-shadow: inset 0 0 0 1px var(--thread-line); font-size: .875rem; color: var(--ink); }
 .tv-home .plug-asks .ask img { width: 26px; height: 26px; border-radius: 8px; background: #fff; padding: 4px; flex: none; }
 
-/* Dim the tile only; the text keeps its own AA colour instead of a group opacity. */
-.tv-home .source.soon .tile { opacity: .55; }
-.tv-home .source.soon strong { color: var(--ink-3); }
-.tv-home .source.soon::after, .tv-home .import-src.soon::after { display: none; }
-.tv-home .source.soon .file, .tv-home .import-src.soon code { color: #fcd34d; }
 
 /* Motion control (WCAG 2.2.2): the hero's pause button and prefers-reduced-motion
    both stop every animation on the page, the hero video and the auto-rotating demos. */

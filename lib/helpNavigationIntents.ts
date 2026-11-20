@@ -38,7 +38,7 @@
  */
 
 import { ACCOUNT_SETTINGS_TABS, type AccountSettingsTab } from "@/lib/accountSettingsEvents";
-import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
+import { helpCentreHref } from "@/lib/localizedHelpHref";
 import { SETTINGS_SECTION_IDS, settingsSectionHref, type SettingsSectionId } from "@/lib/settingsNavigation";
 import type { Language } from "@/components/LanguageProvider";
 
@@ -47,7 +47,11 @@ export const HELP_NAVIGATION_REGISTRY_VERSION = "help-nav-intents-v2";
 /** The approved size of the first registry (backlog HELP-NAV-01: 8 to 12 intents). */
 export const HELP_INTENT_COUNT_RANGE = { min: 8, max: 12 } as const;
 
-/** The Chat workspace guide's section anchors (components/marketing/chatWorkspaceGuideContent.ts). */
+/**
+ * The Chat workspace guide's section ids (components/marketing/chatWorkspaceGuideContent.ts).
+ * The guide page itself redirects to the help centre hub, so a guide-section
+ * destination opens the hub; the id still names the evidence a destination rests on.
+ */
 export const HELP_GUIDE_SECTION_IDS = [
     "states-and-labels",
     "projects",
@@ -268,8 +272,8 @@ export type ResolvedHelpDestination =
 
 /**
  * The only way a destination becomes something clickable. Settings sections and
- * guide anchors go through the functions the rest of the app uses, so a moved
- * settings row or a renamed anchor changes here with them.
+ * the help centre hub go through the functions the rest of the app uses, so a
+ * moved settings row or help centre changes here with them.
  */
 export const resolveHelpDestination = (destination: HelpDestination, lang: Language): ResolvedHelpDestination => {
     switch (destination.kind) {
@@ -278,7 +282,7 @@ export const resolveHelpDestination = (destination: HelpDestination, lang: Langu
         case "settings-tab":
             return { type: "open-settings-tab", tab: destination.tab };
         case "guide-section":
-            return { type: "href", href: chatWorkspaceGuideHref(lang, destination.section) };
+            return { type: "href", href: helpCentreHref(lang) };
         case "public-route":
             return { type: "href", href: `${destination.path}?lang=${lang}` };
         case "feedback":

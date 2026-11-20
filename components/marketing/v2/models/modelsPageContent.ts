@@ -72,9 +72,9 @@ const ko: ModelsPageCopy = {
   crumb: "모델",
   hero: {
     title: ["공급자 {n}곳의 모델,", "한 목록에서."],
-    body: "이용 플랜, 크레딧, 이미지 입력과 추론 여부로 걸러 보세요. 채팅과 답변 비교에서 고를 수 있는 모델입니다. 고르기 어렵다면 Smart Adaptive에 맡기면 됩니다.",
+    body: "이용 플랜, 크레딧, 이미지 입력과 추론 여부로 걸러 보세요. 채팅과 답변 비교에서 고를 수 있는 모델입니다. 고르기 어렵다면 스마트 자동(Smart Adaptive)에 맡기면 됩니다.",
     primary: "모델 찾아보기",
-    secondary: "Smart Adaptive 알아보기",
+    secondary: "스마트 자동 알아보기",
   },
   list: {
     sectionLabel: "모델 목록",

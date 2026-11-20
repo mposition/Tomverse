@@ -15,6 +15,13 @@ import { marketingProductEntryHref } from "../lib/marketingProductEntry.ts";
  * blocked -- so it is the copy swap, not the font.
  */
 
+test("the retired chat workspace guide is no longer a marketing page", () => {
+  const retired = "/support/help-centre/chat-workspace";
+  assert.equal(isStaticMarketingPathname(retired), false);
+  assert.equal(isStaticMarketingPathname(`/ko${retired}`), false);
+  assert.ok(!LOCALIZED_MARKETING_BASE_PATHS.includes(retired));
+});
+
 test("an explicit ?lang= sends the English root to that locale", () => {
   assert.equal(
     localizedMarketingRedirect({ pathname: "/", language: "ko", source: "search" }),
