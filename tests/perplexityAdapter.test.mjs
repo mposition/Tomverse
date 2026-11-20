@@ -278,3 +278,81 @@ test("the pipeline previews one importable conversation for the file", () => {
     assert.equal(preview.totals.importableConversations, 1);
     assert.equal(preview.totals.messages, 6);
 });
+
+// The account data export: a ZIP whose conversations-<timestamp>.json wraps
+// the thread list in an object. The fixture follows a real export's keys;
+// every value in it is synthetic.
+
+const ACCOUNT = readFileSync(
+    new URL("./fixtures/perplexityAccount/conversations.json", import.meta.url),
+    "utf8"
+);
+
+test("the account export's wrapped list is found in the archive and detected", async () => {
+    const { readArchiveEntryItems, classifyArchiveEntry } = await import(
+        "../lib/externalImportArchive.ts"
+    );
+    const decision = classifyArchiveEntry({
+        name: "conversations-20261118_091203-0b7f3c2e.json",
+        uncompressedBytes: ACCOUNT.length,
+        compressedBytes: ACCOUNT.length,
+    });
+    assert.deepEqual(decision, { kind: "parse", role: "candidate" });
+    // The spreadsheet beside it is never opened.
+    assert.equal(
+        classifyArchiveEntry({ name: "user-data-20261118.xlsx", uncompressedBytes: 10, compressedBytes: 10 }).kind,
+        "skip"
+    );
+    const read = readArchiveEntryItems(ACCOUNT, "candidate");
+    assert.equal(read.items.length, 3);
+    assert.equal(detectExternalImportAdapter(read.items)?.provider, "perplexity");
+});
+
+test("each account-export entry is one question and one answer, with the export's ids and times", () => {
+    const items = JSON.parse(ACCOUNT).conversations;
+    const { conversations, unparsableCount } = parseConversationItems("perplexity", items);
+    // The empty thread has nothing to import.
+    assert.equal(unparsableCount, 1);
+    assert.equal(conversations.length, 2);
+
+    const [first, second] = conversations;
+    assert.equal(first.rawExternalConversationId, "0b7f3c2e-5d41-4a8e-9c6b-1f2e3d4c5b6a");
+    assert.equal(first.title, "How long does a sourdough starter keep in the fridge?");
+    assert.equal(first.sourceCreatedAt, "2026-11-18T09:12:03.104Z");
+    assert.deepEqual(first.messages.map((m) => [m.role, m.ordinal]), [
+        ["user", 0],
+        ["assistant", 1],
+        ["user", 2],
+        ["assistant", 3],
+    ]);
+    assert.equal(first.messages[0].rawExternalMessageId, "7a1c9e40-2b3d-4f5e-8a6b-0c1d2e3f4a5b-query");
+    assert.equal(first.messages[3].rawExternalMessageId, "9d2e8f71-3c4b-4a6d-9e7f-1a2b3c4d5e6f-answer");
+    assert.equal(first.messages[2].sourceTimestamp, "2026-11-18T09:15:20.007Z");
+    // The answer is kept as written; the export has no source list for [n].
+    assert.match(first.messages[1].content, /## Before you travel/);
+    assert.match(first.messages[1].content, /\[2\]$/);
+    assert.deepEqual(first.sourceModelLabels, []);
+    assert.equal(first.messages[1].sourceModelLabel, null);
+
+    // No title falls back to the first question; an unanswered entry keeps
+    // its question and counts the missing answer.
+    assert.equal(second.title, "Which flour makes the most active starter?");
+    assert.deepEqual(second.messages.map((m) => m.role), ["user", "assistant", "user"]);
+    assert.equal(second.warnings.skippedEmptyMessages, 1);
+});
+
+test("only Markdown conversations carry the split-uncertainty id", async () => {
+    const { isPerplexityMarkdownConversation } = await import(
+        "../lib/externalImportAdapters/perplexity.ts"
+    );
+    const markdown = parse(THREAD);
+    assert.ok(isPerplexityMarkdownConversation(markdown.rawExternalConversationId));
+    const [account] = parseConversationItems("perplexity", JSON.parse(ACCOUNT).conversations).conversations;
+    assert.equal(isPerplexityMarkdownConversation(account.rawExternalConversationId), false);
+});
+
+test("another provider's list is not mistaken for the account export", () => {
+    assert.equal(perplexityAdapter.detect([{ uuid: "x", chat_messages: [] }]), false);
+    assert.equal(perplexityAdapter.detect([{ context_uuid: "x", entries: [] }]), false);
+    assert.equal(perplexityAdapter.detect([{ context_uuid: "x", entries: [{ query: "q" }] }]), false);
+});

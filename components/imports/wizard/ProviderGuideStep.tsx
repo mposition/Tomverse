@@ -60,10 +60,10 @@ const PROVIDER_CARDS: ReadonlyArray<{
         ],
     },
     {
-        // Perplexity has no account-wide export; each thread exports itself
-        // as Markdown from the Export button under an answer, one file per
-        // thread. Share links are not an option: perplexity.ai answers a
-        // server-side fetch with a bot challenge.
+        // The account data export (a ZIP by email) holds every thread; a
+        // single thread also exports itself as Markdown from the Export
+        // button under an answer. Share links are not an option:
+        // perplexity.ai answers a server-side fetch with a bot challenge.
         provider: "perplexity",
         titleKey: "externalImport.guidePerplexityTitle",
         stepKeys: [

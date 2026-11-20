@@ -19,6 +19,7 @@ import type {
 import {
     ExternalImportArchiveError,
     classifyArchiveEntry,
+    conversationItemsOf,
     readArchiveEntryItems,
     requiresStreamingParse,
     type ArchiveEntryInfo,
@@ -158,7 +159,10 @@ async function parseArchive(file: File): Promise<{
     if (!lowerName.endsWith(".zip")) {
         const text = await file.text();
         const markdown = /\.(md|markdown)$/.test(lowerName);
-        let value: unknown = markdown ? [perplexityMarkdownEntry(text)] : JSON.parse(text);
+        // A wrapped list ({"conversations": [...]}) is read like a bare one.
+        let value: unknown = markdown
+            ? [perplexityMarkdownEntry(text)]
+            : (conversationItemsOf(JSON.parse(text)) ?? []);
         const adapter = detectExternalImportAdapter(value);
         if (!adapter) {
             throw new ExternalImportArchiveError(

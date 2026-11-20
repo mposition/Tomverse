@@ -10,6 +10,10 @@
     color: var(--j-ink);
     background: var(--j-paper);
 }
+/* Dark is "chose dark" (.dark) or "follows a dark OS" (no .light) -- the same
+   two cases the Tailwind dark: variant matches (app/globals.css). Reading
+   only .dark left the page light under system-dark while the dark: text
+   classes inside it turned light, so the text vanished. */
 .dark .import-journey {
     --j-paper: #14171d;
     --j-ink: #f3f5fa;
@@ -17,6 +21,16 @@
     --j-muted: #bbc3cf;
     --j-soft: #1c2129;
     --j-blue: #6091fa;
+}
+@media (prefers-color-scheme: dark) {
+    html:not(.light) .import-journey {
+        --j-paper: #14171d;
+        --j-ink: #f3f5fa;
+        --j-line: #343b47;
+        --j-muted: #bbc3cf;
+        --j-soft: #1c2129;
+        --j-blue: #6091fa;
+    }
 }
 .journey-bar {
     display: flex;
@@ -237,6 +251,12 @@
 .dark .journey-memory {
     background: #15342e;
     color: #8adbc7;
+}
+@media (prefers-color-scheme: dark) {
+    html:not(.light) .journey-memory {
+        background: #15342e;
+        color: #8adbc7;
+    }
 }
 .journey-result .journey-card blockquote {
     clear: both;
