@@ -49,3 +49,8 @@
 .tv-page[data-motion="paused"] *, .tv-page[data-motion="paused"] *::before, .tv-page[data-motion="paused"] *::after { animation: none !important; transition: none !important; }
 .tv-page[data-motion="paused"] .hero-media video { display: none; }
 .tv-page .seg button:focus-visible, .tv-page .review-motion-toggle:focus-visible { outline: 2px solid var(--brand-hi); outline-offset: 2px; }
+
+/* Reflow at 320px with a 200% root font size: long labels wrap instead of running past the edge. */
+.tv-page .prov-cell .prov-name { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.tv-page #review-lens-panel > .chip { max-width: 100%; white-space: normal; line-height: 1.4; }
+@media (max-width: 480px) { .tv-page .prov-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .tv-page .prov-cell { padding-inline: 8px; } }

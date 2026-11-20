@@ -297,7 +297,7 @@ export function ReviewProductPage() {
             {providerTiles.map((tile) => <li key={tile.title} className="prov-cell">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               {tile.icon ? <span className="tile"><img src={MODEL_ICON(tile.icon)} alt="" /></span> : <span className="tile mm" aria-hidden="true">MM</span>}
-              {tile.title}
+              <span className="prov-name">{tile.title}</span>
             </li>)}
           </ul>
           <p className="note"><Linked text={copy.providers.note} links={{ models: <Link href={modelsHref} style={linkStyle}>{copy.providers.modelsLink}</Link> }} /></p>

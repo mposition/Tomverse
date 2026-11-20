@@ -154,6 +154,9 @@ for (const lang of ["en", "ko"] as const) {
 
     await expect(page.locator(".cta-band").getByRole("link", { name: copy.cta.pricing })).toHaveAttribute("href", `/${lang}/pricing`);
     await expect(page.locator("#providers").getByRole("link", { name: copy.providers.modelsLink })).toHaveAttribute("href", `/${lang}/models`);
+    // The calculator link sits in the credit answer, which stays collapsed until it
+    // is opened (only the first FAQ item starts open), so open it before the lookup.
+    await page.locator("#faq details").nth(1).locator("summary").click();
     await expect(page.locator("#faq").getByRole("link", { name: copy.faq.calcLink })).toHaveAttribute("href", `/${lang}/pricing#calc`);
   });
 
@@ -221,7 +224,7 @@ test("/ko keeps the locale on the brand link and Review information link", async
   // The public model and pricing pages have actual locale routes.
   const header = page.locator("header");
   for (const [name, href] of [
-    ["모델 살펴보기", "/ko/models"],
+    ["모델", "/ko/models"],
     ["요금제", "/ko/pricing"],
   ] as const) {
     await expect(header.getByRole("link", { name, exact: true }).first()).toHaveAttribute("href", href);
