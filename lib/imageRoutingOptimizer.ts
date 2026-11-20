@@ -28,6 +28,7 @@ import { imageProviderBudgetBucketKey, resolveImageProviderBudget } from "@/lib/
 import { listEnabledImageModels, type ImageModelProvider } from "@/lib/imageModelRegistry";
 import { readImageRoutingReport } from "@/lib/imageRoutingReport";
 import { runImageModelEval } from "@/lib/imageRoutingModelEval";
+import { IMAGE_ROUTING_JUDGE_MAX_OUTPUT_TOKENS } from "@/lib/imageRoutingModelEvalCore";
 import {
     IMAGE_ROUTING_SYNTHESIZER_SYSTEM,
     admitSyntheticImageRequests,
@@ -75,8 +76,11 @@ export const AUTO_IMAGE_OPTIMIZER_AUTOMATION_SETTING_KEY = "auto.llmRouterImageO
 
 export type ImageOptimizerAutomation = { daily: boolean; autoPromote: boolean; modelEval: boolean };
 
-/** No row: daily on, auto-promote off, the image-making evaluation off. */
-export const IMAGE_OPTIMIZER_AUTOMATION_DEFAULT: ImageOptimizerAutomation = { daily: true, autoPromote: false, modelEval: false };
+/**
+ * No row: everything off. The daily cycle is a new paid run (text calls under
+ * the shared optimizer caps), so the owner turns it on in Admin › Routing.
+ */
+export const IMAGE_OPTIMIZER_AUTOMATION_DEFAULT: ImageOptimizerAutomation = { daily: false, autoPromote: false, modelEval: false };
 
 const ALL_OFF: ImageOptimizerAutomation = { daily: false, autoPromote: false, modelEval: false };
 
@@ -164,7 +168,7 @@ const GENERATOR_MAX_OUTPUT_TOKENS = 8_000;
  * instructions, against an output limit of 64 tokens (raised for safety).
  */
 const JUDGE_CALL_INPUT_TOKENS_BOUND = 2 * 8_000 + 8_000;
-const JUDGE_CALL_OUTPUT_TOKENS = 1_024;
+const JUDGE_CALL_OUTPUT_TOKENS = IMAGE_ROUTING_JUDGE_MAX_OUTPUT_TOKENS;
 const SYNTHESIZER_MAX_OUTPUT_TOKENS = 12_000;
 const CALL_TIMEOUT_MS = 150_000;
 

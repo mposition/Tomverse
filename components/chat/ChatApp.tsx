@@ -1871,6 +1871,8 @@ function ChatAppComponent({
             preset: request.preset,
             ...(request.prompt ? { prompt: request.prompt } : {}),
             ...(request.edit ? { edit: true as const } : {}),
+            // A retry after a failed first try links the same routing decision.
+            ...(request.routingDecisionId ? { routingDecisionId: request.routingDecisionId } : {}),
             assistantMessageId,
             ...(request.comparison ? { comparison: request.comparison } : {}),
           },

@@ -153,7 +153,13 @@ export const admitSyntheticImageRequests = (raw: unknown, count: number): Synthe
 
 export type ImageJudgement = "A" | "B" | "equal";
 
-export const IMAGE_ROUTING_JUDGE_MAX_OUTPUT_TOKENS = 64;
+/**
+ * Room for a model that writes anything before the one-word object (the Chat
+ * optimizer judge's lesson, lib/autoRouterOptimizer.ts): the call also asks
+ * for no reasoning. The cycle budgets this many output tokens per call
+ * (JUDGE_CALL_OUTPUT_TOKENS in lib/imageRoutingOptimizer.ts).
+ */
+export const IMAGE_ROUTING_JUDGE_MAX_OUTPUT_TOKENS = 1_024;
 
 export const IMAGE_ROUTING_JUDGE_SYSTEM = [
   "You compare two images, A and B, that were generated from the same user request.",

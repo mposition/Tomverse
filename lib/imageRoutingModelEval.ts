@@ -231,6 +231,9 @@ export const generateEvalImage = async (input: GenerateEvalImageInput): Promise<
         size: option.size,
         quality: option.quality,
         modelId: model.id,
+        // One request: the reported cost is then the whole cost, and the
+        // caller's hold settles to it (lib/imageRoutingOptimizer.ts).
+        retry: false,
       }),
       input.signal
     );
@@ -370,6 +373,7 @@ export const judgeImagePair = async (input: JudgeImagePairInput): Promise<JudgeI
         system: IMAGE_ROUTING_JUDGE_SYSTEM,
         messages: [judgeMessage(input, swap)],
         maxOutputTokens: IMAGE_ROUTING_JUDGE_MAX_OUTPUT_TOKENS,
+        reasoning: "none",
         maxRetries: 0,
         ...(input.signal ? { abortSignal: input.signal } : {}),
         output: Output.object({

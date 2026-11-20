@@ -91,18 +91,19 @@ test("an image promotion writes the image criteria only, with every cost known, 
   assert.equal((entry.metadata as { systemActor?: string }).systemActor, "auto-router-optimizer");
 });
 
-test("the image automation: daily on, auto-promote and image evaluation off; a malformed row spends nothing", async () => {
-  assert.deepEqual(await readImageOptimizerAutomation(), { daily: true, autoPromote: false, modelEval: false });
+test("the image automation starts all off; a malformed row spends nothing", async () => {
+  assert.deepEqual(await readImageOptimizerAutomation(), { daily: false, autoPromote: false, modelEval: false });
   await updateImageOptimizerAutomation(actor, { daily: true, autoPromote: false, modelEval: true });
   assert.deepEqual(await readImageOptimizerAutomation(), { daily: true, autoPromote: false, modelEval: true });
-  await updateImageOptimizerAutomation(actor, { daily: true, autoPromote: false, modelEval: false });
+  await updateImageOptimizerAutomation(actor, { daily: false, autoPromote: false, modelEval: false });
   assert.equal(await prisma.appSetting.count({ where: { key: AUTO_IMAGE_OPTIMIZER_AUTOMATION_SETTING_KEY } }), 0, "the default is no row");
   for (const value of ["{bad", '{"daily":true,"autoPromote":false}', '{"daily":true,"autoPromote":false,"modelEval":"yes"}']) {
     await prisma.appSetting.create({ data: { key: AUTO_IMAGE_OPTIMIZER_AUTOMATION_SETTING_KEY, value } });
     assert.deepEqual(await readImageOptimizerAutomation(), { daily: false, autoPromote: false, modelEval: false }, value);
     await prisma.appSetting.deleteMany({ where: { key: AUTO_IMAGE_OPTIMIZER_AUTOMATION_SETTING_KEY } });
   }
-  // With coding off, the daily run picks image, and without an optimizer model it spends nothing.
+  // Switched on with coding off, the daily run picks image, and without an optimizer model it spends nothing.
+  await updateImageOptimizerAutomation(actor, { daily: true, autoPromote: false, modelEval: false });
   await prisma.appSetting.create({ data: { key: AUTO_CODING_OPTIMIZER_AUTOMATION_SETTING_KEY, value: JSON.stringify({ daily: false, autoPromote: false }) } });
   assert.deepEqual(await runScheduledOptimizerCycle(), { started: false, reason: "optimizer_off", target: "image" });
   assert.equal(await prisma.autoRouterOptimizerCycle.count(), 0);
