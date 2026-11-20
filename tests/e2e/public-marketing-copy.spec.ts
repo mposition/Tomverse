@@ -290,7 +290,12 @@ test("FAQ explains both products and French Knowledge identifies its English med
   await page.setViewportSize({ width: 320, height: 900 });
   await page.goto("/ko/faq");
   const productQuestion = infoPages.faq.ko.sections[0];
-  await expect(page.getByRole("heading", { name: productQuestion.title, exact: true })).toBeVisible();
+  const productToggle = page.getByRole("button", { name: productQuestion.title, exact: true });
+  await expect(productToggle).toBeVisible({ timeout: 30_000 });
+  await expect(async () => {
+    if (await productToggle.getAttribute("aria-expanded") === "false") await productToggle.click();
+    await expect(productToggle).toHaveAttribute("aria-expanded", "true", { timeout: 1_000 });
+  }).toPass({ timeout: 30_000 });
   await expect(page.getByText(productQuestion.body, { exact: true })).toBeVisible();
   expect(productQuestion.body).toContain("Chat");
   expect(productQuestion.body).toContain("Review");

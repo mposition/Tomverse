@@ -20,7 +20,7 @@ import { providerBucketKey } from "@/lib/chatProviderHolds";
 import { COST_PER_CREDIT_CEILING_MICRO_USD } from "@/lib/chatCostGuardrails";
 import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
 import { loadCodingCatalog, servableCodingRows } from "@/lib/modelCatalog";
-import { canonicalJson, codingProfileSchema, type CodingCatalogRow } from "@/lib/modelCatalogCore";
+import { CODE_MANAGED_UNBOUNDED_PROVIDERS, canonicalJson, codingCatalogRowSchema, type CodingCatalogRow } from "@/lib/modelCatalogCore";
 import { isAiProvider } from "@/lib/modelRegistryShared";
 import { isMissingDatabaseSchemaError } from "@/lib/databaseError";
 import { getModelPricingProfile, resolveModelPricing } from "@/lib/modelPricing";
@@ -153,14 +153,16 @@ async function modelPair(userId: string, request: Pick<ReserveRequest, "catalogV
         }).modelId === id) as Record<string, unknown> | undefined;
         if (!raw)
             return fail(403, "CODE_MODEL_UNAVAILABLE");
-        const profile = { ...raw };
-        delete profile.modelId;
-        const parsed = codingProfileSchema.safeParse(profile);
+        // A row published before chat links existed has no source or channels
+        // and reads as a dedicated row offered to Code, as the resolved one does.
+        const parsed = codingCatalogRowSchema.safeParse(raw);
         if (!parsed.success)
             return fail(503, "CODE_CATALOG_INVALID");
-        const row = { modelId: id, ...parsed.data } as CodingCatalogRow;
+        const row: CodingCatalogRow = parsed.data;
         const current = available.find(r => r.modelId === id);
-        if (!current || canonicalJson(current) !== canonicalJson(row) || row.capabilities.structuredOutput === "none")
+        // Inherited chat values are resolved in, so a chat price or limit that
+        // moved since the snapshot fails here until it is published again.
+        if (!current || canonicalJson(current) !== canonicalJson(row) || row.capabilities.structuredOutput === "none" || !row.channels.includes("code"))
             return fail(403, "CODE_MODEL_UNAVAILABLE");
         const rank = { Free: 0, Pro: 1, Max: 2 };
         if (rank[plan] < rank[row.minimumPlan])
@@ -169,7 +171,7 @@ async function modelPair(userId: string, request: Pick<ReserveRequest, "catalogV
             return fail(403, "CODE_PROVIDER_UNSUPPORTED");
         // Inference hosts/aggregators need their own destination pin, while
         // Perplexity's native search fees are not represented by token-only rows.
-        if (["openrouter", "deepinfra", "together", "sail", "perplexity"].includes(row.provider))
+        if (CODE_MANAGED_UNBOUNDED_PROVIDERS.includes(row.provider))
             return fail(403, "CODE_PROVIDER_COST_UNBOUNDED");
         // The coding catalogue is independent of Chat's static model registry.
         // Endpoints and credential aliases still come solely from getActiveAiModel.

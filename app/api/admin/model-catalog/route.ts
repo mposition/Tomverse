@@ -9,13 +9,8 @@ import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib
 import { authOptions } from "@/lib/auth";
 import { IMAGE_MODEL_REGISTRY, type ImageModelProfile, minimumCreditsForImageOption } from "@/lib/imageModelRegistry";
 import {
-  codingCreditFloor,
   imageProviderBudgetReady,
-  judgeCoding,
   judgeImage,
-  latestCodingSnapshot,
-  loadChatCatalogView,
-  loadCodingCatalog,
   loadImageBillingTermRows,
   loadImageCatalog,
   publishCodingSnapshot,
@@ -32,7 +27,6 @@ import {
 } from "@/lib/modelCatalogAdmin";
 import {
   codingDraftEditSchema,
-  codingProfileSchema,
   defaultPriceSources,
   imageCreditOverrideSchema,
   imageFullProfileSchema,
@@ -52,7 +46,6 @@ import {
   MODEL_CATALOG_DRAFT_LLM_MODEL_ENV,
 } from "@/lib/modelCatalogDraftLlm";
 import { prisma } from "@/lib/prisma";
-import { AI_PROVIDERS } from "@/lib/modelRegistryShared";
 import {
   RUNTIME_IMAGE_PROVIDERS,
   RUNTIME_IMAGE_QUALITIES,
@@ -60,10 +53,11 @@ import {
   runtimeImageProfileTemplate,
 } from "@/lib/runtimeImageProviders";
 
-// The dynamic model catalogue (image and coding; chat is a read-only view of
-// the model registry; video has no activation policy yet). Every write commits
-// with its audit row and turning a model on runs the category's judge
-// (lib/modelCatalogCore.ts).
+// The dynamic model catalogue (image and coding; video has no activation
+// policy yet). GET reads the image catalogue; the coding catalogue's read, its
+// chat links and provider conditions are /api/admin/model-catalog/coding.
+// Writes here serve both: every write commits with its audit row and turning a
+// model on runs the category's judge (lib/modelCatalogCore.ts).
 
 const refusalResponse = (error: unknown) => {
   if (error instanceof CatalogRefusal) {
@@ -107,17 +101,6 @@ const reviewDraft = (base: ImageModelProfile | null, draft: unknown) => {
   return reviewImageDraft(base, parsed.data as never, { minimumCredits: minimumCreditsForImageOption });
 };
 
-/** A stored coding draft's floor and what the judge would say at its values, or null when it does not parse. */
-const reviewCodingDraft = (modelId: string, draft: unknown) => {
-  const parsed = codingProfileSchema.safeParse(draft);
-  if (!parsed.success) return null;
-  const admission = judgeCoding({ modelId, ...parsed.data });
-  return { floor: codingCreditFloor(parsed.data), reasons: admission.admitted ? [] : [...admission.reasons] };
-};
-
-/** Providers a coding draft can read: known to the code, with official documentation hosts. */
-const CODING_DRAFT_PROVIDERS = AI_PROVIDERS.filter((provider) => Object.hasOwn(OFFICIAL_SOURCE_HOSTS, provider));
-
 const adminSession = async (write: boolean) => {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id || !isAdminSession(session)) {
@@ -135,7 +118,7 @@ export async function GET(req: Request) {
     if ("response" in auth) return auth.response;
     await consumeApiRateLimit(req, auth.session.user.id, "admin-model-catalog", { minute: 30, day: 1_000 });
 
-    const [image, imageRows, revisions, coding, chat, snapshot, billingTermRows] = await Promise.all([
+    const [image, imageRows, revisions, billingTermRows] = await Promise.all([
       loadImageCatalog(),
       prisma.modelCatalogEntry.findMany({ where: { category: "image" } }),
       prisma.modelCatalogPriceRevision.findMany({
@@ -143,9 +126,6 @@ export async function GET(req: Request) {
         orderBy: { createdAt: "desc" },
         take: 100,
       }),
-      loadCodingCatalog(),
-      loadChatCatalogView(),
-      latestCodingSnapshot(),
       loadImageBillingTermRows(),
     ]);
     const billingTerms = latestBillingTerms(billingTermRows);
@@ -211,23 +191,6 @@ export async function GET(req: Request) {
           hosts: OFFICIAL_SOURCE_HOSTS[provider] ?? [],
         })),
       },
-      coding: {
-        models: coding.map((entry) => ({
-          ...entry,
-          // The floor the judge holds the credit weight to, at the stored profile's prices.
-          floor: entry.profile ? codingCreditFloor(entry.profile) : null,
-          draftReview: reviewCodingDraft(entry.modelId, entry.draft),
-        })),
-        snapshot,
-        // What the add form offers: a draft reads up to three official pages
-        // (price, terms, retention); the price page may default.
-        providers: CODING_DRAFT_PROVIDERS.map((provider) => ({
-          provider,
-          defaultSources: defaultPriceSources(provider),
-          hosts: OFFICIAL_SOURCE_HOSTS[provider] ?? [],
-        })),
-      },
-      chat: { models: chat, editable: false, editAt: "/admin/models?tab=registry" },
       video: { models: [], policy: judgeVideoModel() },
       draftLlm: {
         configured: Boolean(process.env[MODEL_CATALOG_DRAFT_LLM_MODEL_ENV]?.trim()),

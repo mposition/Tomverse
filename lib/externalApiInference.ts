@@ -31,7 +31,7 @@ import {
 import { atLeastOneToken, createTokenEstimateAccumulator, estimateTextTokens } from "@/lib/chatTokenEstimate";
 import { ApiSecurityError, consumeApiRateLimit, readLimitedText } from "@/lib/apiSecurity";
 import { externalApiAccountAccess } from "@/lib/externalApiAccess";
-import { externalApiEnabled, SMART_ADAPTIVE_MODEL_ID } from "@/lib/externalApiCatalogCore";
+import { externalApiChannelFor, externalApiEnabled, SMART_ADAPTIVE_MODEL_ID } from "@/lib/externalApiCatalogCore";
 import { getRuntimeModel } from "@/lib/modelRegistry";
 import { noteSmartAdaptiveRefusal, rememberSmartAdaptiveToolCalls, routeSmartAdaptive, smartAdaptiveRouterAllowed } from "@/lib/externalApiSmartAdaptive";
 import { externalApiRunnableModels } from "@/lib/externalApiCatalog";
@@ -262,7 +262,11 @@ export async function handleChatCompletions(request: Request): Promise<Response>
         }
 
         const { plan } = account;
-        const runnable = await externalApiRunnableModels(plan.tier);
+        // The tomverse CLI's channel, or the API's (read only while the coding
+        // catalogue's external channels are switched on).
+        const runnable = await externalApiRunnableModels(plan.tier, {
+            channel: externalApiChannelFor(request.headers.get("user-agent")),
+        });
         // Smart Adaptive: Tomverse picks one of the runnable models, and the
         // response says which one answered (the `model` field and a header).
         let routedHeaders: Record<string, string> = {};
