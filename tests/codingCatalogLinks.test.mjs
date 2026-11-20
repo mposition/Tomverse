@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
-import { resolve as resolvePath } from "node:path";
-import test, { mock } from "node:test";
-import { pathToFileURL } from "node:url";
+import test from "node:test";
 
 import {
   canonicalJson,
@@ -23,11 +21,9 @@ import {
 } from "../lib/modelCatalogCore.ts";
 import { externalApiChannelFor } from "../lib/externalApiCatalogCore.ts";
 
-// The draft module builds its model client from lib/activeAiModel.ts, whose
-// provider SDKs these pure answer checks never call.
-const mod = (path) => pathToFileURL(resolvePath(import.meta.dirname, "..", path)).href;
-mock.module(mod("lib/activeAiModel.ts"), { namedExports: { getActiveAiModel: () => null } });
-const { codingCapabilitiesFromAnswer, providerTermsFromAnswer } = await import(mod("lib/modelCatalogDraftLlm.ts"));
+// The unit lane runs without --experimental-test-module-mocks, so the draft
+// module is imported as it is; these answer checks never call a model.
+import { codingCapabilitiesFromAnswer, providerTermsFromAnswer } from "../lib/modelCatalogDraftLlm.ts";
 
 // Chat links, provider conditions and the external channels of the coding
 // catalogue (owner decision 2026-11-20).
