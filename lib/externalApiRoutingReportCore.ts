@@ -41,6 +41,8 @@ export type CodingRoutingReport = {
     errorShare: number;
     errors: { code: string; count: number }[];
     credits: number;
+    /** The window held more Smart Adaptive requests than were read. */
+    truncated?: boolean;
 };
 
 const share = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 1000) / 1000 : 0);

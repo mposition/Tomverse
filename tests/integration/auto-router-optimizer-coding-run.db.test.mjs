@@ -17,12 +17,12 @@ test("a coding cycle's run over the real cycle table", { skip: !databaseUrl }, a
     const url = new URL(databaseUrl);
     assert.ok(["127.0.0.1", "localhost"].includes(url.hostname));
     assert.match(url.pathname, /test/);
-    Object.assign(process.env, {
-        NEXTAUTH_SECRET: "coding-optimizer-local-synthetic-secret",
-        ADMIN_AUDIT_INTEGRITY_KEY: "synthetic-coding-optimizer-audit",
-        OPENAI_API_KEY: "sk-fixture-openai-server",
-        DEEPSEEK_API_KEY: "sk-fixture-deepseek-server",
-    });
+    // The audit rows this suite writes are signed with the run's own key, so
+    // later suites that verify the whole chain still pass: never overwritten.
+    process.env.NEXTAUTH_SECRET ??= "coding-optimizer-local-synthetic-secret";
+    process.env.ADMIN_AUDIT_INTEGRITY_KEY ??= "synthetic-coding-optimizer-audit";
+    process.env.OPENAI_API_KEY ??= "sk-fixture-openai-server";
+    process.env.DEEPSEEK_API_KEY ??= "sk-fixture-deepseek-server";
     const root = resolve(import.meta.dirname, "../..");
     const mod = (path) => pathToFileURL(resolve(root, path)).href;
 
@@ -90,6 +90,7 @@ test("a coding cycle's run over the real cycle table", { skip: !databaseUrl }, a
     await updateOptimizerModel(actor, routerModel.id);
     await updateAutoLlmRouterModelId(actor, routerModel.id);
 
+    const spendBefore = await prisma.chatUsageBucket.findMany({ where: { key: { startsWith: "provider:" } } });
     const reset = async () => {
         await prisma.autoRouterOptimizerCycle.deleteMany({});
         routerCalls.length = 0;
@@ -187,6 +188,11 @@ test("a coding cycle's run over the real cycle table", { skip: !databaseUrl }, a
     } finally {
         delete process.env.CODING_TASK_EVAL_ISOLATED_RUNNER;
         await prisma.autoRouterOptimizerCycle.deleteMany({});
+        // The settings and provider spend this suite wrote.
+        await prisma.appSetting.deleteMany({ where: { key: { in: ["auto.llmRouterOptimizerModelId", "auto.llmRouterModelId"] } } });
+        // Provider spend back to what it was before this suite.
+        await prisma.chatUsageBucket.deleteMany({ where: { key: { startsWith: "provider:" } } });
+        if (spendBefore.length) await prisma.chatUsageBucket.createMany({ data: spendBefore });
         await prisma.$disconnect();
     }
 });
