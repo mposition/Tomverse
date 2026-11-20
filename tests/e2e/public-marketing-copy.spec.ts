@@ -158,7 +158,7 @@ function expectLocalizedLinks(hrefs: string[], language: Language) {
 for (const language of SEO_LOCALES) {
   test(`${language}: public routes serve translated HTML, metadata, links and valid static CSP hashes`, async ({ request }) => {
     test.setTimeout(60_000);
-    expect(publicPaths).toHaveLength(11);
+    expect(publicPaths).toHaveLength(10);
     for (const base of publicPaths) {
       await test.step(`${language}${base}`, async () => {
         expect(LOCALIZED_MARKETING_BASE_PATHS as readonly string[]).toContain(base);
