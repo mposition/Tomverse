@@ -55,6 +55,42 @@ test("citations to guides or steps that do not exist are dropped", () => {
   assert.equal(answer.note, null);
 });
 
+test("a citation copied from the corpus label still counts as the real guide", () => {
+  // The corpus shows guides as [guide:<id>]; models often copy the label whole.
+  const answer = parseHelpAssistantOutput(
+    {
+      status: "answered",
+      summary: "Attach the photo and say what to change.",
+      steps: [
+        { text: "Attach the photo.", guideId: "guide:edit-photo", step: 1 },
+        { text: "Write the change.", guideId: "[guide:edit-photo]", step: 2 },
+        { text: "Send it.", guideId: " Guide: edit-photo ", step: 3 },
+      ],
+      note: null,
+      guideIds: ["[guide:edit-photo]"],
+    },
+    NOT_FOUND
+  );
+  assert.equal(answer.status, "answered");
+  assert.deepEqual(answer.guideIds, ["edit-photo"]);
+  assert.deepEqual(
+    answer.steps.map((step) => [step.guideId, step.step]),
+    [
+      ["edit-photo", 1],
+      ["edit-photo", 2],
+      ["edit-photo", 3],
+    ]
+  );
+});
+
+test("a wrapped id that is not a real guide is still dropped", () => {
+  const answer = parseHelpAssistantOutput(
+    { status: "answered", summary: "Trust me.", steps: [], note: null, guideIds: ["[guide:made-up]", "guide:"] },
+    NOT_FOUND
+  );
+  assert.deepEqual(answer, { status: "not_found", summary: NOT_FOUND });
+});
+
 test("an answer that cites nothing real is shown as not found", () => {
   const answer = parseHelpAssistantOutput(
     { status: "answered", summary: "Trust me.", steps: [{ text: "x", guideId: "nope", step: 1 }], note: null, guideIds: ["nope"] },
