@@ -17,14 +17,14 @@ import { CHATGPT_VS_CLAUDE_MODEL_IDS } from "@/lib/marketingModelReferences";
 import { REVIEW_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 
-type TaskRow = {
+export type TaskRow = {
   task: string;
   gpt: string;
   claude: string;
   decision: string;
 };
 
-type GuideCopy = {
+export type GuideCopy = {
   jumpLabel: string;
   jumpLinks: Array<{ label: string; href: string }>;
   scopeEyebrow: string;
@@ -72,7 +72,7 @@ type GuideCopy = {
   independentNotice: string;
 };
 
-const guideCopy: Record<Language, GuideCopy> = {
+export const guideCopy: Record<Language, GuideCopy> = {
   "ko": {
     "jumpLabel": "이 가이드의 구성",
     "scopeEyebrow": "비교할 모델과 예제 범위",
