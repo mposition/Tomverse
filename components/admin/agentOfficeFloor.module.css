@@ -141,6 +141,9 @@
 .qbars { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 0; }
 .qrow { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--mu); }
 .qrow > span:first-child { width: 54px; }
+/* Antigravity: its name once, then one indented row per model (each has its own limit). */
+.qhead { font-size: 11.5px; color: var(--mu); }
+.qsub > span:first-child { padding-left: 8px; box-sizing: border-box; }
 .qtrack { flex: 1; height: 6px; border-radius: 3px; background: var(--grs); overflow: hidden; display: block; }
 .qfill { display: block; height: 100%; border-radius: 3px; }
 .qrow b { font-weight: 600; width: 34px; text-align: right; color: var(--tx); }

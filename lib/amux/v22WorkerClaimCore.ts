@@ -81,6 +81,23 @@ export const amuxV22ProviderRoleSupported = (provider: string, role: string) => 
   return known !== null && amuxV22OneShotRoleSupported(role) &&
     (role !== "implement" || AMUX_V22_PROVIDERS[known].implement);
 };
+/**
+ * The vendor the review server keeps away from a v22 change: the vendor of
+ * the model that wrote it, not the CLI it ran in. Antigravity runs Google's,
+ * Anthropic's and OpenAI's models through one CLI (agy 1.5.4 lists Gemini 4,
+ * Claude Opus/Sonnet 5.5 and GPT-OSS), so its model ID decides; a model ID
+ * that names no known vendor is "unknown", which the review server refuses
+ * rather than pair with a reviewer it cannot show to differ (owner decision
+ * 2026-11-20: Antigravity workers on Hydrogen and Opus as well as Argon).
+ * Every other provider keeps its provider name, as before.
+ */
+export function amuxV22ReviewAuthorVendor(provider: string, modelId: string): string {
+  if (amuxV22Provider(provider) !== "antigravity") return provider;
+  if (modelId.startsWith("gemini-")) return "google";
+  if (modelId.startsWith("claude-")) return "anthropic";
+  if (modelId.startsWith("gpt-")) return "openai";
+  return "unknown";
+}
 export const amuxV22OneShotRouteSupported = (provider: string, modelId: string) => {
   const known = amuxV22Provider(provider);
   return known !== null && AMUX_V22_PROVIDERS[known].model.test(modelId);

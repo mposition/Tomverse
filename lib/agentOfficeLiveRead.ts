@@ -400,11 +400,16 @@ async function readAmuxWorkers(): Promise<AgentOfficeAmuxState> {
     const read = await readAmuxRegistryAndDerivedCatalog(prisma);
     // The derived catalog names provider classes; seats show the roster's
     // labels, assigned or not.
-    const catalog: AmuxConfiguredWorker[] | null = read.derived === null
+    // The model a worker runs is its v22 profile's (the summary card splits
+    // Antigravity by model, lib/agentOffice/inbox.ts).
+    const configured = read.derived === null ? null : amuxDerivedCatalogAsConfigured(read.derived);
+    const v22Models = new Map((configured?.v22 ?? []).map((worker) => [worker.worker_name, worker.model]));
+    const catalog: AmuxConfiguredWorker[] | null = configured === null
       ? null
-      : amuxDerivedCatalogAsConfigured(read.derived).workers.map((worker) => ({
+      : configured.workers.map((worker) => ({
           ...worker,
           provider: agentOfficeProviderLabel(worker.provider),
+          model: v22Models.get(worker.worker_name) ?? worker.model,
         }));
     if (read.registrations !== null) {
       roster = agentOfficeAmuxRosterFromRegistry(read.registrations, AGENT_OFFICE_AMUX_ROSTER.map((worker) => worker.name));
