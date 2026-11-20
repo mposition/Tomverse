@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
+import { reviewDemoVideo } from "@/components/marketing/v2/reviewDemoVideo";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { localizedPath } from "@/lib/seo";
@@ -630,7 +631,7 @@ export default function LaunchHomepage({ reviewInfoHref, variantCopy }: LaunchHo
           <div className="sig-points rise">{t.review.points.map(([title, body]) => <div key={title}><b>{title}</b><span>{body}</span></div>)}</div>
           <figure className="demo-frame rise">
             <div className="demo-bar" aria-hidden="true"><i /><i /><i /><span>tomverse.app/review</span></div>
-            <video src="/marketing/v2/review-demo.mp4" poster="/marketing/v2/review-demo.jpg" autoPlay={!reduce} muted loop playsInline preload="metadata" aria-label={t.review.videoLabel} />
+            <video src={reviewDemoVideo(lang).src} poster={reviewDemoVideo(lang).poster} autoPlay={!reduce} muted loop playsInline preload="metadata" aria-label={t.review.videoLabel} />
             <figcaption>{t.review.caption}</figcaption>
           </figure>
         </div>
