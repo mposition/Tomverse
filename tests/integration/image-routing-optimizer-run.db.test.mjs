@@ -16,9 +16,8 @@ test("an image routing cycle's run over the real cycle table", { skip: !database
     const url = new URL(databaseUrl);
     assert.ok(["127.0.0.1", "localhost"].includes(url.hostname));
     assert.match(url.pathname, /test/);
-    // The run's own audit key signs the rows this suite writes: never overwritten.
+    // The runner's NEXTAUTH_SECRET signs the audit rows, as for every suite sharing the chain.
     process.env.NEXTAUTH_SECRET ??= "image-optimizer-local-synthetic-secret";
-    process.env.ADMIN_AUDIT_INTEGRITY_KEY ??= "synthetic-image-optimizer-audit";
     process.env.OPENAI_API_KEY ??= "sk-fixture-openai-server";
     const root = resolve(import.meta.dirname, "../..");
     const mod = (path) => pathToFileURL(resolve(root, path)).href;

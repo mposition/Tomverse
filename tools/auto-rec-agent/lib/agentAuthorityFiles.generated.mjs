@@ -49,6 +49,10 @@ const CONTROL_PLANE_PATTERNS = [
   // The subscription channel starts the Codex binary the worker names and sets
   // the child's environment: which program runs is a person's decision.
   "lib/marketingCodexChannelCore.ts",
+  // The coding task evaluation starts Node on the model's code in a permission-
+  // restricted child: which program runs, and with what flags, is a person's
+  // decision.
+  "lib/codingTaskEval.ts",
   // The official hosts a market fact may cite (S3f): which competitor and which
   // host is a person's decision about content.
   "lib/marketingIntelReportCore.ts",
