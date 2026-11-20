@@ -1,13 +1,21 @@
 import "server-only";
 import { assertOperationalFeatureEnabled } from "@/lib/appSettings";
 import { pickAutoModelWithLlm } from "@/lib/autoLlmRouter";
-import { estimateTextTokens } from "@/lib/chatTokenEstimate";
+import type { CodingRouterContext } from "@/lib/autoLlmRouterCore";
 import { keyCreditTotals } from "@/lib/externalApiAdmission";
 import type { externalApiRunnableModels } from "@/lib/externalApiCatalog";
-import { smartAdaptiveRouterEnabled } from "@/lib/externalApiCatalogCore";
+import { isSmartAdaptiveOnlyModel, smartAdaptiveRouterEnabled } from "@/lib/externalApiCatalogCore";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { DEFAULT_MODEL_ID } from "@/lib/models";
-import { modelTakesRequestFeatures, toolCallText, type ChatCompletionRequest } from "@/lib/openAiChatProtocol";
+import {
+    chatText,
+    conversationModelMayMove,
+    estimatedChatInputTokens,
+    escalateOnly,
+    smartAdaptiveCodingContext,
+    smartAdaptiveConversationKey,
+} from "@/lib/externalApiSmartAdaptiveCore";
+import { modelTakesRequestFeatures, type ChatCompletionRequest } from "@/lib/openAiChatProtocol";
 import { prisma } from "@/lib/prisma";
 
 type RunnableEntry = Awaited<ReturnType<typeof externalApiRunnableModels>>[number];
@@ -44,6 +52,21 @@ type RunnableEntry = Awaited<ReturnType<typeof externalApiRunnableModels>>[numbe
  * requests and requests that never produced a call cannot overwrite each
  * other. Only ids and model ids are kept; a miss (another instance, a
  * restart, ten minutes later) simply routes again.
+ *
+ * A new user message is routed with the coding guidance and what the request
+ * shows of the task (lib/autoLlmRouterCore.ts, CodingRouterContext), and the
+ * model already working on the conversation. Within a conversation the model
+ * only moves up: a pick with fewer credits than that model keeps that model,
+ * because a switch mid-task loses its cache and reasoning, while a task that
+ * needs more can still move to a stronger one. The conversation is known by
+ * the opening of its history (everything before the first assistant message);
+ * its model is remembered in this process once admission accepted a request
+ * on it, so a pick the account cannot pay for is never held. A miss (another
+ * instance, a restart, six hours later, a client that rewrites the opening)
+ * routes freely, as before.
+ *
+ * Every decision is logged as `external_api_smart_adaptive_routed`: ids,
+ * counts and the model, never the request's text.
  */
 
 const STICKY_MS = 10 * 60_000;
@@ -65,6 +88,34 @@ export const rememberSmartAdaptiveToolCalls = (
     }
 };
 
+const CONVERSATION_MS = 6 * 60 * 60_000;
+const CONVERSATION_MAX = 5_000;
+const conversations = new Map<string, { modelId: string; creditWeight: number; at: number }>();
+
+/**
+ * Checked again here: a concurrent message of the conversation may have moved
+ * it to a stronger model since this request was routed. It may move down only
+ * while it still names `unfitModelId`, the model this request could not use.
+ */
+const rememberConversation = (conversation: string, entry: RunnableEntry, now: number, unfitModelId: string | null) => {
+    const existing = conversations.get(conversation);
+    const onlyUp = !(unfitModelId !== null && existing?.modelId === unfitModelId);
+    if (!conversationModelMayMove(existing, entry.capabilities.creditWeight, now, CONVERSATION_MS, onlyUp)) {
+        return;
+    }
+    conversations.delete(conversation);
+    if (conversations.size >= CONVERSATION_MAX) conversations.delete(conversations.keys().next().value as string);
+    conversations.set(conversation, { modelId: entry.model.id, creditWeight: entry.capabilities.creditWeight, at: now });
+};
+
+/** Test-only: forget every conversation and tool-call memory. */
+export const resetSmartAdaptiveMemory = () => {
+    conversations.clear();
+    sticky.clear();
+    refused.clear();
+    routing.clear();
+};
+
 /** The tool-call ids the trailing tool results of this request answer. */
 const answeredToolCallIds = (request: ChatCompletionRequest) => {
     const messages = request.messages;
@@ -84,7 +135,7 @@ export const noteSmartAdaptiveRefusal = (keyId: string, now = Date.now()) => {
 };
 
 /** Idempotent requests routing now, by key and Idempotency-Key digest. */
-const routing = new Map<string, Promise<{ entry: RunnableEntry; routedBy: "router" | "default" }>>();
+const routing = new Map<string, Promise<Omit<SmartAdaptiveDecision, "remember">>>();
 
 /** Whether the paid router call may be made for this key now. */
 export const smartAdaptiveRouterAllowed = async (
@@ -106,35 +157,12 @@ export const smartAdaptiveRouterAllowed = async (
     return true;
 };
 
-const textOf = (content: unknown): string =>
-    typeof content === "string"
-        ? content
-        : Array.isArray(content)
-          ? content
-                .map((part) => (part && typeof part === "object" && "text" in part ? String(part.text) : ""))
-                .filter(Boolean)
-                .join("\n")
-          : "";
-
 const hasImage = (request: ChatCompletionRequest) =>
     request.messages.some(
         (message) =>
             message.role === "user" &&
             Array.isArray(message.content) &&
             message.content.some((part) => part.type === "image_url")
-    );
-
-/** A rough size of the request, only to leave out models it cannot fit. */
-const estimatedInputTokens = (request: ChatCompletionRequest) =>
-    estimateTextTokens(
-        request.messages
-            .map((message) =>
-                [
-                    textOf(message.content),
-                    ...(message.role === "assistant" ? (message.tool_calls ?? []).map(toolCallText) : []),
-                ].join("\n")
-            )
-            .join("\n") + JSON.stringify(request.tools ?? [])
     );
 
 /** Where the latest user message is, and the turn it belongs to. */
@@ -148,12 +176,12 @@ const latestTurn = (request: ChatCompletionRequest) => {
         const message = messages[at];
         if (message.role === "user") break;
         if (message.role === "assistant") {
-            previous = textOf(message.content) || null;
+            previous = chatText(message.content) || null;
             break;
         }
     }
     return {
-        prompt: textOf(messages[index].content),
+        prompt: chatText(messages[index].content),
         previousAnswer: previous,
     };
 };
@@ -161,7 +189,7 @@ const latestTurn = (request: ChatCompletionRequest) => {
 export const smartAdaptiveCandidates = (request: ChatCompletionRequest, runnable: readonly RunnableEntry[]) => {
     const images = hasImage(request);
     const output = request.max_completion_tokens ?? request.max_tokens ?? 0;
-    const input = estimatedInputTokens(request);
+    const input = estimatedChatInputTokens(request);
     return runnable.filter(
         ({ model, capabilities }) =>
             (!images || capabilities.vision) &&
@@ -189,20 +217,59 @@ export const routeSmartAdaptive = async (input: {
     idempotencyKeyDigest: string | null;
     /** Digest of the request body: only an identical duplicate shares a pick. */
     requestDigest: string;
+    /** The client's User-Agent, for the router and the log. */
+    userAgent?: string | null;
     now?: number;
 }): Promise<SmartAdaptiveDecision> => {
+    const now = input.now ?? Date.now();
+    const conversation = smartAdaptiveConversationKey(input.keyId, input.request);
+    const known = conversations.get(conversation);
+    const decision = await decideSmartAdaptive(input, conversation, now);
+    // The remembered model may only be lowered when it no longer fits this
+    // request (window, retirement) and something else answered.
+    const knownFresh = known !== undefined && now - known.at < CONVERSATION_MS;
+    const knownFits = knownFresh && smartAdaptiveCandidates(input.request, input.runnable).some((entry) => entry.model.id === known.modelId);
+    const unfit = knownFresh && !knownFits ? known.modelId : null;
+    console.info(
+        JSON.stringify({
+            event: "external_api_smart_adaptive_routed",
+            requestId: input.requestId,
+            protocol: "chat_completions",
+            routedBy: decision.routedBy,
+            modelId: decision.entry.model.id,
+            held: decision.held ?? false,
+            client: input.userAgent?.slice(0, 40) ?? null,
+        })
+    );
+    return {
+        ...decision,
+        // Called once admission accepted the request on this model.
+        remember: () => rememberConversation(conversation, decision.entry, Date.now(), unfit),
+    };
+};
+
+const decideSmartAdaptive = async (
+    input: Parameters<typeof routeSmartAdaptive>[0],
+    conversation: string,
+    now: number
+): Promise<Omit<SmartAdaptiveDecision, "remember">> => {
     const eligible = smartAdaptiveCandidates(input.request, input.runnable);
     // Nothing fits: the default model answers, and its own limits refuse the
     // request with the usual error.
     const pool = eligible.length > 0 ? eligible : input.runnable;
-    const fallback = pool.find((entry) => entry.model.id === DEFAULT_MODEL_ID) ?? pool[0];
+    // When none of the models a client could name fits, the default model
+    // answers and its own limits refuse the request: a frontier or apex model
+    // is only ever the router's pick beside them.
+    const nameable = pool.filter((entry) => !isSmartAdaptiveOnlyModel(entry.model));
+    const fallbackPool = nameable.length > 0 ? nameable : input.runnable.filter((entry) => !isSmartAdaptiveOnlyModel(entry.model));
+    const fallback =
+        fallbackPool.find((entry) => entry.model.id === DEFAULT_MODEL_ID) ?? fallbackPool[0] ?? input.runnable[0];
     const turn = latestTurn(input.request);
     if (!turn || eligible.length < 2) return { entry: fallback, routedBy: "default" };
 
     // A tool round goes to the model that made the calls it answers, before
     // the router gate is asked: a gate closed for a while (a refusal two
     // minutes ago) must not hand a running task to another model.
-    const now = input.now ?? Date.now();
     for (const id of answeredToolCallIds(input.request)) {
         const remembered = sticky.get(callKey(input.keyId, id));
         if (!remembered || now - remembered.at >= STICKY_MS) continue;
@@ -212,6 +279,19 @@ export const routeSmartAdaptive = async (input: {
         // the model was retired). The entry stays: another round answering the
         // same call may still fit it, and the ten-minute expiry clears it.
     }
+
+    // The model already working on this conversation, if it still fits.
+    const known = conversations.get(conversation);
+    const current =
+        known && now - known.at < CONVERSATION_MS
+            ? eligible.find((candidate) => candidate.model.id === known.modelId)
+            : undefined;
+    // Nothing for the router to read, or only router-only models fit: no
+    // router call, and the conversation keeps its model or takes the default.
+    if (!turn.prompt.trim() || nameable.length === 0) {
+        return current ? { entry: current, routedBy: "continued" } : { entry: fallback, routedBy: "default" };
+    }
+    const coding = smartAdaptiveCodingContext(input.request, input.userAgent ?? null, current?.model.id ?? null);
 
     // One router call per Idempotency-Key at a time in this process: a
     // concurrent duplicate waits for that call and takes the same model, and
@@ -225,10 +305,18 @@ export const routeSmartAdaptive = async (input: {
     const decide = async () => {
         const pending = flight ? routing.get(flight) : undefined;
         if (pending) return pending;
-        const decision = (async () =>
-            (await input.routerAllowed())
-                ? pickWithSmartAdaptiveRouter({ ...input, eligible, fallback, ...turn })
-                : { entry: fallback, routedBy: "default" as const })();
+        const decision = (async (): Promise<Omit<SmartAdaptiveDecision, "remember">> => {
+            // Gate closed: the conversation keeps its model, or the default.
+            if (!(await input.routerAllowed())) {
+                return current ? { entry: current, routedBy: "continued" } : { entry: fallback, routedBy: "default" };
+            }
+            const routed = await pickWithSmartAdaptiveRouter({ ...input, eligible, fallback: current ?? fallback, ...turn, coding });
+            if (routed.routedBy !== "router") {
+                return current ? { entry: current, routedBy: "continued" } : routed;
+            }
+            const { entry, held } = escalateOnly(current, routed.entry);
+            return held ? { entry, routedBy: "continued", held } : routed;
+        })();
         if (!flight) return decision;
         routing.set(flight, decision);
         try {
@@ -243,6 +331,10 @@ export const routeSmartAdaptive = async (input: {
 export type SmartAdaptiveDecision = {
     entry: RunnableEntry;
     routedBy: "router" | "continued" | "default";
+    /** The router picked a cheaper model and the conversation kept its own. */
+    held?: boolean;
+    /** Remember this model for the conversation; call once admission accepted it. */
+    remember: () => void;
 };
 
 /**
@@ -257,6 +349,7 @@ export const pickWithSmartAdaptiveRouter = async (input: {
     previousAnswer: string | null;
     eligible: readonly RunnableEntry[];
     fallback: RunnableEntry;
+    coding: CodingRouterContext;
 }): Promise<{ entry: RunnableEntry; routedBy: "router" | "default" }> => {
     const { eligible, fallback } = input;
     const pick = await pickAutoModelWithLlm({
@@ -274,6 +367,7 @@ export const pickWithSmartAdaptiveRouter = async (input: {
         conversationId: null,
         traceId: input.requestId,
         rewriteAllowed: false,
+        coding: input.coding,
     }).catch(() => null);
     // The router's answer only ever names a model already eligible here.
     const picked = pick ? eligible.find((entry) => entry.model.id === pick.modelId) : undefined;

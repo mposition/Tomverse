@@ -264,12 +264,17 @@ export async function handleChatCompletions(request: Request): Promise<Response>
         const { plan } = account;
         // The tomverse CLI's channel, or the API's (read only while the coding
         // catalogue's external channels are switched on).
+        // Smart Adaptive's pool also holds the classes only it routes to
+        // (frontier, apex); a model named directly comes from the narrower list.
         const runnable = await externalApiRunnableModels(plan.tier, {
             channel: externalApiChannelFor(request.headers.get("user-agent")),
+            smartAdaptive: parsed.model === SMART_ADAPTIVE_MODEL_ID,
         });
         // Smart Adaptive: Tomverse picks one of the runnable models, and the
         // response says which one answered (the `model` field and a header).
         let routedHeaders: Record<string, string> = {};
+        // Remembers the routed model for the conversation once admission accepts it.
+        let rememberRouted: (() => void) | undefined;
         // A Tomverse id, or the provider's own id for exactly one offered model.
         const picked = parsed.model === SMART_ADAPTIVE_MODEL_ID ? null : pickRequestedModel(runnable, parsed.model);
         if (picked && "ambiguous" in picked) {
@@ -291,8 +296,10 @@ export async function handleChatCompletions(request: Request): Promise<Response>
                 routerAllowed: () => smartAdaptiveRouterAllowed(key),
                 idempotencyKeyDigest,
                 requestDigest,
+                userAgent: request.headers.get("user-agent"),
             });
             entry = routed.entry;
+            rememberRouted = routed.remember;
             routedHeaders = { "x-tomverse-routed-model": entry.model.id, "x-tomverse-routed-by": routed.routedBy };
         }
         if (!entry) {
@@ -431,6 +438,7 @@ export async function handleChatCompletions(request: Request): Promise<Response>
         }
         leaseId = grant.leaseId;
         reservation = grant.usageReservation;
+        rememberRouted?.();
 
         const tools: ToolSet = Object.fromEntries(
             converted.tools.map((definition) => [
