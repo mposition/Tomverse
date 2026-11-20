@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
 import { CHAT_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
-import { launchAccountEntryCopy, launchReviewEntryCopy } from "@/components/marketing/launchHomepageContent";
+import { homeV2Content } from "@/components/marketing/home/homeV2Content";
 
 const guides = [
   "compare-ai-models",
@@ -77,8 +77,9 @@ for (const lang of ["en", "ko"] as const) {
     await expect(page.getByTestId("landing-hero-title")).toBeVisible();
     await expect(page.getByTestId("marketing-header-app-cta")).toHaveAttribute("data-session-state", "unauthenticated");
     const guestChatAvailable = await page.getByTestId("launch-homepage").getAttribute("data-guest-chat-trial-available") === "true";
-    await expect(page.getByTestId("landing-primary-cta")).toHaveAttribute(
-      "href", guestChatAvailable ? `${CHAT_WORKSPACE_PATH}?lang=${lang}` : `/review?lang=${lang}`
+    await expect(page.getByTestId("landing-primary-cta")).toHaveAttribute("href", `/review?lang=${lang}&entry=guest-preview`);
+    await expect(page.getByTestId("landing-secondary-cta")).toHaveAttribute(
+      "href", guestChatAvailable ? `${CHAT_WORKSPACE_PATH}?lang=${lang}` : `/${lang}#chat`
     );
     const menuReview = page.getByTestId("header-review-link");
     if (!await menuReview.isVisible()) {
@@ -130,13 +131,9 @@ test("Guest Chat either opens its introduction or starts the available workspace
   const chatHref = guestChatAvailable ? `${CHAT_WORKSPACE_PATH}?lang=ko` : "/ko#chat";
   await expect(page.getByTestId("header-chat-link")).toHaveAttribute("href", chatHref);
   await expect(page.locator(`footer a[href='${chatHref}']`)).toHaveText("Tomverse Chat");
-  if (!guestChatAvailable) {
-    await page.getByTestId("header-chat-link").click();
-    await expect(page).toHaveURL(/\/ko#chat$/);
-    await expect(page.locator("#chat")).toBeVisible();
-  }
+  await expect(page.getByTestId("landing-secondary-cta")).toHaveAttribute("href", chatHref);
   const destination = await page.getByTestId("landing-primary-cta").getAttribute("href");
-  expect(destination).toBe(guestChatAvailable ? `${CHAT_WORKSPACE_PATH}?lang=ko` : "/review?lang=ko");
+  expect(destination).toBe("/review?lang=ko&entry=guest-preview");
   const destinationUrl = new URL(destination!, "https://tomverse.test");
   const loaded = page.waitForResponse(response => response.request().isNavigationRequest() && new URL(response.url()).pathname === destinationUrl.pathname);
   await page.getByTestId("landing-primary-cta").click();
@@ -166,13 +163,12 @@ test("the real marketing offer read is private and closed without an authenticat
   await expect(page.getByTestId("marketing-header-app-cta")).toHaveAttribute("href", "/review?lang=en");
   await expect(page.getByTestId("marketing-header-app-cta")).toHaveText("Back to Review");
   await expect(page.getByTestId("header-chat-link")).toHaveAttribute("href", "/en#chat");
-  await expect(page.getByTestId("landing-hero-signup-note")).toHaveText(launchReviewEntryCopy.en.heroAccess);
-  await expect(page.locator("#launch-plans-title").locator("..").locator("p").nth(1)).toHaveText(launchReviewEntryCopy.en.plansBody);
-  await expect(page.locator("#launch-guest-title")).toHaveText(launchAccountEntryCopy.en.guestTitle);
-  await expect(page.locator("#launch-guest-title").locator("..").locator("p")).toHaveText(launchReviewEntryCopy.en.guestBody);
+  // A signed-in visitor is not told they can compare without signing up.
+  await expect(page.getByTestId("landing-hero-signup-note")).toHaveCount(0);
+  await expect(page.getByTestId("landing-primary-cta")).toHaveAttribute("href", "/review?lang=en");
 });
 
-test("an offered account opens Chat and sees account-specific access copy", async ({ page }) => {
+test("an offered account opens Chat from the hero's Chat button", async ({ page }) => {
   await prepareGuestPage(page, "ko");
   await mockAuthenticatedApi(page);
   await page.context().addCookies([{ name: "__tomverse_e2e_chat_workspace", value: "1", url: "http://127.0.0.1:3114" }]);
@@ -180,12 +176,13 @@ test("an offered account opens Chat and sees account-specific access copy", asyn
     status: 200, contentType: "application/json", body: JSON.stringify({ offered: true }),
   }));
   await page.goto("/ko");
-  await expect(page.getByTestId("landing-primary-cta")).toHaveAccessibleName("채팅 시작하기");
-  await expect(page.getByTestId("landing-primary-cta")).toHaveAttribute("href", `${CHAT_WORKSPACE_PATH}?lang=ko`);
-  await expect(page.getByTestId("landing-hero-signup-note")).toHaveText(launchAccountEntryCopy.ko.heroAccess);
-  await expect(page.locator("#launch-guest-title")).toHaveText("나에게 맞는 AI, 한곳에서 시작하세요.");
+  const chat = page.getByTestId("landing-secondary-cta");
+  await expect(chat).toHaveAccessibleName(homeV2Content.ko.hero.secondary);
+  await expect(chat).toHaveAttribute("href", `${CHAT_WORKSPACE_PATH}?lang=ko`);
+  await expect(page.getByTestId("landing-primary-cta")).toHaveAccessibleName(homeV2Content.ko.hero.primary);
+  await expect(page.getByTestId("landing-hero-signup-note")).toHaveCount(0);
   const loaded = page.waitForResponse(response => response.request().isNavigationRequest() && new URL(response.url()).pathname === CHAT_WORKSPACE_PATH);
-  await page.getByTestId("landing-primary-cta").click();
+  await chat.click();
   expect((await loaded).status()).toBe(200);
   await expect(page).toHaveURL(url => url.pathname === CHAT_WORKSPACE_PATH && url.searchParams.get("lang") === "ko");
 });
@@ -206,7 +203,7 @@ test("a marketing Review entry preserves an authenticated organizer preference",
   await expect.poll(() => page.evaluate(() => localStorage.getItem("tomverse_sidebar_organizer_v1"))).toBe("expanded");
 });
 
-test("resolving a session preserves the selected example and the mounted hero", async ({ page }) => {
+test("resolving a session preserves the chosen Smart Adaptive mode and the mounted hero", async ({ page }) => {
   await prepareGuestPage(page, "en");
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.unroute("**/api/auth/session**");
@@ -224,7 +221,7 @@ test("resolving a session preserves the selected example and the mounted hero", 
     const title = page.getByTestId("landing-hero-title");
     const originalTitle = await title.elementHandle();
     expect(originalTitle).not.toBeNull();
-    const tabs = page.getByTestId("launch-gallery").getByRole("tab");
+    const tabs = page.locator("#chat").getByRole("tab");
     await tabs.nth(1).click();
     await expect(tabs.nth(1)).toHaveAttribute("aria-selected", "true");
     releaseSession();
@@ -236,7 +233,7 @@ test("resolving a session preserves the selected example and the mounted hero", 
   }
 });
 
-test("everyday examples change their results with keyboard input without calling an AI", async ({ page }) => {
+test("the API tool tabs switch the sample settings with the keyboard without calling an AI", async ({ page }) => {
   await prepareGuestPage(page, "en");
   let providerRequests = 0;
   await page.route("**/api/chat", route => {
@@ -244,24 +241,20 @@ test("everyday examples change their results with keyboard input without calling
     return route.fulfill({ status: 409, body: "{}" });
   });
   await page.goto("/");
-  const gallery = page.getByTestId("launch-gallery");
-  const tabs = gallery.getByRole("tab");
-  const panel = gallery.getByRole("tabpanel");
-  await expect(tabs).toHaveCount(3);
+  const api = page.locator("#api");
+  const tabs = api.getByRole("tab");
+  const panel = api.getByRole("tabpanel");
+  await expect(tabs).toHaveCount(6);
+  await tabs.nth(0).click();
   await expect(tabs.nth(0)).toHaveAttribute("aria-selected", "true");
-  const travel = await panel.innerText();
-  await tabs.nth(0).focus();
+  await expect(panel).toContainText("~/.codex/config.toml");
   await page.keyboard.press("ArrowRight");
   await expect(tabs.nth(1)).toBeFocused();
   await expect(tabs.nth(1)).toHaveAttribute("aria-selected", "true");
-  await expect(panel).not.toHaveText(travel, { useInnerText: true });
-  const learning = await panel.innerText();
-  await page.keyboard.press("End");
-  await expect(tabs.nth(2)).toHaveAttribute("aria-selected", "true");
-  await expect(panel).not.toHaveText(learning, { useInnerText: true });
-  await page.keyboard.press("Home");
+  await expect(panel).toContainText("ANTHROPIC_BASE_URL");
+  await page.keyboard.press("ArrowLeft");
   await expect(tabs.nth(0)).toHaveAttribute("aria-selected", "true");
-  await expect(panel).toHaveText(travel, { useInnerText: true });
+  await expect(panel).toContainText("~/.codex/config.toml");
   expect(providerRequests).toBe(0);
 });
 
@@ -308,7 +301,7 @@ test("hero motion can be turned off without hiding its content", async ({ page }
   await expect(control).toHaveAccessibleName("Resume animation");
   expect(await hero.evaluate(element => element.getAnimations({ subtree: true }).length)).toBe(0);
   await expect(page.getByTestId("landing-hero-title")).toBeVisible();
-  await expect(hero.getByRole("heading", { level: 2 })).toBeVisible();
+  await expect(page.getByTestId("landing-primary-cta")).toBeVisible();
   await control.click();
   await expect(control).toHaveAttribute("aria-pressed", "false");
   await expect.poll(() => hero.evaluate(element => element.getAnimations({ subtree: true }).length)).toBeGreaterThan(0);
