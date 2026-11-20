@@ -216,7 +216,7 @@ test("resolving a session preserves the chosen Smart Adaptive mode and the mount
     const title = page.getByTestId("landing-hero-title");
     const originalTitle = await title.elementHandle();
     expect(originalTitle).not.toBeNull();
-    const tabs = page.locator("#adaptive").getByRole("tab");
+    const tabs = page.locator("#chat").getByRole("tab");
     await tabs.nth(1).click();
     await expect(tabs.nth(1)).toHaveAttribute("aria-selected", "true");
     releaseSession();

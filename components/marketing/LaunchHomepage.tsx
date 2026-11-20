@@ -43,7 +43,7 @@ const pluginRows: Array<Array<[string, string]>> = [
 const manualPicks: Array<[string, string, string]> = [
   ["chatgpt", "GPT 6.2 Sol", "OpenAI"], ["claude", "Claude Fable 5.2", "Anthropic"], ["gemini", "Gemini 4 Argon", "Google"], ["grok", "Grok 4.7", "xAI"],
 ];
-const indexAnchors = ["adaptive", "continue", "plugins", "review", "mobile", "api", "cli", "plans"] as const;
+const indexAnchors = ["chat", "continue", "plugins", "review", "mobile", "api", "cli", "plans"] as const;
 
 const fill = (text: string, n: number) => text.replaceAll("{n}", String(n));
 
@@ -506,7 +506,7 @@ export default function LaunchHomepage({ reviewInfoHref, variantCopy }: LaunchHo
         </div>
       </section>
 
-      <section id="adaptive" className="chapter paper" aria-labelledby="home-adaptive-title">
+      <section id="chat" className="chapter paper" aria-labelledby="home-adaptive-title">
         <div className="wrap">
           <div className="chapter-head">
             <div><span className="eyebrow">{t.adaptive.eyebrow}</span><h2 id="home-adaptive-title"><Title lines={t.adaptive.title} /></h2></div>

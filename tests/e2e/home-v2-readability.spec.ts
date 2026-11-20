@@ -32,7 +32,7 @@ for (const lang of ["ko", "en"] as const) for (const theme of ["light", "dark"] 
 
     await expectAccessibleContrast(page.getByTestId("landing-hero-signup-note"), "Home sign-up note");
     await expectAccessibleContrast(page.getByTestId("launch-motion-toggle"), "Home motion control");
-    for (const id of ["adaptive", "continue", "plugins"]) {
+    for (const id of ["chat", "continue", "plugins"]) {
       const note = page.locator(`#${id} .note`).first();
       await note.scrollIntoViewIfNeeded();
       expect(await note.evaluate((node) => parseFloat(getComputedStyle(node).fontSize))).toBeGreaterThanOrEqual(11);
