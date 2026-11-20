@@ -1,5 +1,6 @@
 import "server-only";
 import { chatUserMaxInputTokens } from "@/lib/chatInputLimits";
+import { externalChannelAllowlist, type ExternalCodingChannel } from "@/lib/codingCatalogChannels";
 import {
     externalApiModelCapabilities,
     isExternalApiServableModel,
@@ -17,13 +18,23 @@ import type { ExternalApiProtocol } from "@/lib/externalApiProtocols";
  * validated against, so the list and execution cannot disagree. A model whose
  * provider has no credential on this deployment could only fail, so it is not
  * offered.
+ *
+ * With CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED on, only the chat models the
+ * newest coding snapshot lists for this channel (lib/codingCatalogChannels.ts);
+ * off, the allow-list is null and nothing else is read.
  */
 export const externalApiRunnableModels = async (
-    plan: ModelTier
+    plan: ModelTier,
+    options: { channel?: ExternalCodingChannel } = {}
 ): Promise<{ model: AiModel; capabilities: ExternalApiModelCapabilities }[]> => {
-    const runtime = await getRuntimeModels();
+    const [runtime, allowed] = await Promise.all([getRuntimeModels(), externalChannelAllowlist(options.channel ?? "api", plan)]);
     return runtime
-        .filter((model) => isExternalApiServableModel(model, plan) && isProviderApiKeyConfigured(model.provider))
+        .filter(
+            (model) =>
+                isExternalApiServableModel(model, plan) &&
+                isProviderApiKeyConfigured(model.provider) &&
+                (allowed === null || allowed.has(model.id))
+        )
         .map((model) => ({
             model,
             capabilities: externalApiModelCapabilities(model, {
@@ -38,8 +49,11 @@ export const externalApiRunnableModels = async (
  * What `GET /models` and the settings page offer: Smart Adaptive first, then
  * every runnable model.
  */
-export const externalApiOfferedModels = async (plan: ModelTier): Promise<ExternalApiModelCapabilities[]> => {
-    const runnable = (await externalApiRunnableModels(plan)).map((entry) => entry.capabilities);
+export const externalApiOfferedModels = async (
+    plan: ModelTier,
+    options: { channel?: ExternalCodingChannel } = {}
+): Promise<ExternalApiModelCapabilities[]> => {
+    const runnable = (await externalApiRunnableModels(plan, options)).map((entry) => entry.capabilities);
     const smart = smartAdaptiveCapabilities(runnable, DEFAULT_MODEL_ID);
     return smart ? [smart, ...runnable] : runnable;
 };
