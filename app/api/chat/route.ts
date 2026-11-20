@@ -83,7 +83,7 @@ import { consumeChatLocationIntentLimit } from "@/lib/chatLocationIntentRateLimi
 import { openRouterLocation, routerLocationDigest, sealRouterLocation, type RouterLocationContinuation } from "@/lib/chatRouterLocationContinuation";
 import { claimRouterLocation, consumeRouterLocation, routerLocationRefused, routerLocationResponse, type RouterLocationClaim } from "@/lib/chatRouterLocationPreparation";
 import { chatRouterImageHedgeMs, combinedChatImageIntentEnabled, createChatTurnImageRouting } from "@/lib/chatImageIntent";
-import { recordImageRoutingDecision } from "@/lib/imageRoutingDecisions";
+import { overrideImageRoutingDecisionAsChat, recordImageRoutingDecision } from "@/lib/imageRoutingDecisions";
 import {
     latestUserTurnHasAttachments,
     latestUserTurnHasImageAttachment,
@@ -2841,6 +2841,27 @@ async function handleChatPost(
         // A document about images is still a file request, not an image turn.
         const autoImageDecision = llmPick?.requiresFileGeneration
             ? { image: false as const } : detectedImageDecision;
+        // Every routing decision is measured, chat outcomes included. The
+        // standalone call records its own; the combined router's is recorded
+        // here, before the turn branches.
+        let imageRoutingDecisionId: string | null = detectedImageDecision.image ? detectedImageDecision.routingDecisionId ?? null : null;
+        if (!imageRoutingDecisionId && imageRouting.combinedDecided() && session?.user?.id) {
+            const context = await imageRouting.context?.catch(() => null);
+            imageRoutingDecisionId = await recordImageRoutingDecision({
+                userId: session.user.id,
+                conversationId: conversationId ?? null,
+                source: "auto_chat",
+                routerModelId: context?.modelId ?? "unknown",
+                decision: autoImageDecision,
+                outcome: autoImageDecision.image ? "image" : "chat",
+                followUp: autoImageDecision.image ? autoImageDecision.prompt !== null : false,
+                attachedPhoto: context?.attachedPhoto ?? false,
+                candidateCount: context?.candidates.length ?? 0,
+                latencyMs: null,
+            });
+        } else if (imageRoutingDecisionId && detectedImageDecision.image && !autoImageDecision.image && session?.user?.id) {
+            await overrideImageRoutingDecisionAsChat({ decisionId: imageRoutingDecisionId, userId: session.user.id });
+        }
         // A request that started without an authorised plan cannot acquire a new
         // source after the Router has already decided from the native view.
         let afterRoutingContinuation = preparedContinuation.seed ? await readContinuation() : preparedContinuation;
@@ -3702,24 +3723,7 @@ async function handleChatPost(
         }
         if (autoImageDecision.image) {
             console.info(JSON.stringify({ event: "chat_auto_image_turn", traceId }));
-            // A decision the combined router made has no record yet; the
-            // standalone call writes its own (lib/chatImageIntent.ts).
-            let routingDecisionId = autoImageDecision.routingDecisionId ?? null;
-            if (!routingDecisionId && session?.user?.id) {
-                const context = await imageRouting.context?.catch(() => null);
-                routingDecisionId = await recordImageRoutingDecision({
-                    userId: session.user.id,
-                    conversationId: conversationId ?? null,
-                    source: "auto_chat",
-                    routerModelId: context?.modelId ?? "unknown",
-                    decision: autoImageDecision,
-                    outcome: "image",
-                    followUp: autoImageDecision.prompt !== null,
-                    attachedPhoto: context?.attachedPhoto ?? false,
-                    candidateCount: context?.candidates.length ?? 0,
-                    latencyMs: null,
-                });
-            }
+            const routingDecisionId = imageRoutingDecisionId;
             return new Response(
                 JSON.stringify({
                     imageTurn: {

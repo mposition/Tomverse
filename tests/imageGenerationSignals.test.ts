@@ -26,6 +26,7 @@ function fakeDb(generations: { id: string; userId: string; groupId: string }[]) 
     return true;
   };
   const tables = {
+    $queryRaw: async () => [],
     imageGeneration: {
       findFirst: async ({ where }: { where: { id: string; userId: string } }) =>
         generations.find((g) => g.id === where.id && g.userId === where.userId) ?? null,

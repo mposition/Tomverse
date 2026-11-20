@@ -26,11 +26,11 @@ export async function recordImageRoutingDecision(input: {
     latencyMs: number | null;
 }): Promise<string | null> {
     const image = input.decision.image ? input.decision : null;
-    try {
-        const row = await prisma.imageRoutingDecision.create({
+    const create = (conversationId: string | null) =>
+        prisma.imageRoutingDecision.create({
             data: {
                 userId: input.userId,
-                conversationId: input.conversationId,
+                conversationId,
                 source: input.source,
                 routerModelId: input.routerModelId,
                 outcome: input.outcome,
@@ -46,7 +46,16 @@ export async function recordImageRoutingDecision(input: {
             },
             select: { id: true },
         });
-        return row.id;
+    try {
+        try {
+            return (await create(input.conversationId)).id;
+        } catch (error) {
+            // A conversation that is gone (or not yet written) keeps the
+            // decision, without the link: the foreign key sets it null on delete.
+            const code = (error as { code?: unknown } | null)?.code;
+            if (code !== "P2003" || input.conversationId === null) throw error;
+            return (await create(null)).id;
+        }
     } catch (error) {
         console.warn(JSON.stringify({ event: "image_routing_decision_record_failed", error: error instanceof Error ? error.name : "unknown" }));
         return null;
@@ -66,5 +75,21 @@ export async function linkImageRoutingDecision(input: { decisionId: string; user
     } catch (error) {
         // A group already linked to another decision (unique), or a lost row.
         console.warn(JSON.stringify({ event: "image_routing_decision_link_failed", error: error instanceof Error ? error.name : "unknown" }));
+    }
+}
+
+/**
+ * A recorded image decision the turn did not follow (a file request about
+ * images answers as a file turn): it is a chat outcome, not an image without
+ * a group. Only the person's own, unlinked image decision.
+ */
+export async function overrideImageRoutingDecisionAsChat(input: { decisionId: string; userId: string }): Promise<void> {
+    try {
+        await prisma.imageRoutingDecision.updateMany({
+            where: { id: input.decisionId, userId: input.userId, outcome: "image", groupId: null },
+            data: { outcome: "chat" },
+        });
+    } catch (error) {
+        console.warn(JSON.stringify({ event: "image_routing_decision_override_failed", error: error instanceof Error ? error.name : "unknown" }));
     }
 }

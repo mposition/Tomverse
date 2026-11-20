@@ -61,7 +61,8 @@ import {
     isRewriteSampleTurn,
     rewriteSyntheticCaseViews,
     runRewriteOptimizerCycle,
-    scheduledOptimizerTarget,
+    OPTIMIZER_TARGET_SKIP_REFUSALS,
+    scheduledOptimizerOrder,
     type RewriteOptimizerDecision,
     type RewriteSyntheticCaseView,
 } from "@/lib/autoRewriteOptimizerCore";
@@ -645,7 +646,7 @@ export async function runScheduledOptimizerCycle(options: { waitForCompletion?: 
                   select: { target: true },
               })
             : null;
-    const target = scheduledOptimizerTarget({
+    const order = scheduledOptimizerOrder({
         routingDaily: routing.daily,
         rewriteDaily: rewrite.daily,
         codingDaily: coding.daily,
@@ -655,17 +656,28 @@ export async function runScheduledOptimizerCycle(options: { waitForCompletion?: 
                 ? last.target
                 : null,
     });
-    if (!target) return { started: false, reason: "daily_off" };
-    if (target === "routing") return { ...(await runScheduledAutoRouterOptimizerCycle(options)), target };
-    const result =
-        target === "coding"
-            ? await startCodingRouterOptimizerCycle("system", options)
-            : target === "image"
-              ? await startImageRoutingOptimizerCycle("system", options)
-              : await startAutoRewriteOptimizerCycle("system", options);
-    return "refused" in result
-        ? { started: false, reason: result.refused, target }
-        : { started: true, cycleId: result.cycleId, target, ...(result.outcome ? { outcome: result.outcome } : {}) };
+    if (order.length === 0) return { started: false, reason: "daily_off" };
+    let refusal: { started: false; reason: OptimizerStartRefusal | "image_triage_off" | "daily_off"; target: (typeof order)[number] } | null = null;
+    for (const target of order) {
+        if (target === "routing") {
+            const routed = await runScheduledAutoRouterOptimizerCycle(options);
+            if (routed.started || !OPTIMIZER_TARGET_SKIP_REFUSALS.has(routed.reason)) return { ...routed, target };
+            refusal = { ...routed, target };
+            continue;
+        }
+        const result =
+            target === "coding"
+                ? await startCodingRouterOptimizerCycle("system", options)
+                : target === "image"
+                  ? await startImageRoutingOptimizerCycle("system", options)
+                  : await startAutoRewriteOptimizerCycle("system", options);
+        if (!("refused" in result)) {
+            return { started: true, cycleId: result.cycleId, target, ...(result.outcome ? { outcome: result.outcome } : {}) };
+        }
+        refusal = { started: false, reason: result.refused, target };
+        if (!OPTIMIZER_TARGET_SKIP_REFUSALS.has(result.refused)) return refusal;
+    }
+    return refusal ?? { started: false, reason: "daily_off" };
 }
 
 /**

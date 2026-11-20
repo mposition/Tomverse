@@ -1088,12 +1088,14 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         createdAt: true,
       },
       orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
     }),
   imageGenerationSignal: (userId) =>
     prisma.imageGenerationSignal.findMany({
       where: { userId },
       select: { id: true, generationId: true, kind: true, createdAt: true },
       orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
     }),
   imageGenerationGroup: (userId) =>
     prisma.imageGenerationGroup.findMany({

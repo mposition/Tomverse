@@ -212,13 +212,15 @@ export type ImageCycleFailure =
     | "too_few_cases"
     | "accuracy_below"
     | "false_images_above"
+    | "model_choice_below"
     | "no_improvement";
 
 /**
  * Whether the proposal may be promoted. On the withheld half it must answer at
  * least as many messages correctly and route no more text requests to an image,
  * and it must improve something measured: intent accuracy, or agreement with
- * the judged winners of the model evaluation. Every cost must be known.
+ * the judged winners of the model evaluation, and when the model evaluation
+ * ran it must not agree with fewer of them. Every cost must be known.
  */
 export const imageCycleGate = (input: {
     costComplete: boolean;
@@ -235,6 +237,9 @@ export const imageCycleGate = (input: {
     if (input.incumbentScore.cases < IMAGE_INTENT_MIN_EVAL_CASES) return "too_few_cases";
     if (input.candidateScore.correct < input.incumbentScore.correct) return "accuracy_below";
     if (input.candidateScore.falseImage > input.incumbentScore.falseImage) return "false_images_above";
+    if (input.candidateAgreement.judged > 0 && input.candidateAgreement.agreed < input.incumbentAgreement.agreed) {
+        return "model_choice_below";
+    }
     const betterIntent = input.candidateScore.correct > input.incumbentScore.correct;
     const betterChoice =
         input.candidateAgreement.judged > 0 && input.candidateAgreement.agreed > input.incumbentAgreement.agreed;

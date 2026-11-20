@@ -136,6 +136,11 @@ test("the gate: no worse on accuracy, no more false images, and something better
         null,
         "better model choice at equal accuracy"
     );
+    assert.equal(
+        imageCycleGate({ ...base, incumbentAgreement: { judged: 6, agreed: 4 }, candidateAgreement: { judged: 6, agreed: 3 } }),
+        "model_choice_below",
+        "better intent does not buy worse model choice"
+    );
     assert.deepEqual(modelChoiceAgreement(["a", null, "b", "c"], ["a", "x", "x", "c"]), { judged: 3, agreed: 2 });
     assert.equal(imageCyclePromotable({ status: "passed", candidateGuidance: "c", summary: { costComplete: true } }), true);
     assert.equal(imageCyclePromotable({ status: "passed", candidateGuidance: "c", summary: { costComplete: false } }), false);
@@ -174,4 +179,14 @@ test("the image routing report counts decisions, outcomes per model and what peo
     assert.equal(gpt.helpfulShare, 0.5);
     assert.equal(report.wantedText, 1);
     assert.equal(report.models[0].modelId, "gpt-image-2", "most generations first");
+});
+
+test("a target that cannot start hands the day to the next one in turn", async () => {
+    const { scheduledOptimizerOrder, OPTIMIZER_TARGET_SKIP_REFUSALS } = await import("../lib/autoRewriteOptimizerCore.ts");
+    const all = { routingDaily: true, rewriteDaily: true, codingDaily: true, imageDaily: true };
+    assert.deepEqual(scheduledOptimizerOrder({ ...all, lastSystemTarget: "coding" }), ["image", "routing", "rewrite", "coding"]);
+    assert.deepEqual(scheduledOptimizerOrder({ ...all, lastSystemTarget: null }), ["routing", "rewrite", "coding", "image"]);
+    assert.deepEqual(scheduledOptimizerOrder({ routingDaily: false, rewriteDaily: false, codingDaily: false, imageDaily: false, lastSystemTarget: null }), []);
+    assert.ok(OPTIMIZER_TARGET_SKIP_REFUSALS.has("image_triage_off"));
+    assert.ok(!OPTIMIZER_TARGET_SKIP_REFUSALS.has("already_running"), "the shared lock stops the day");
 });

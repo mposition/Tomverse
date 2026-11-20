@@ -235,7 +235,12 @@ export async function detectChatImageRequest(input: ChatImageRequestInput): Prom
     return prepared ? runPreparedChatImageRequest(prepared, input.traceId) : NOT_IMAGE;
 }
 
-async function runPreparedChatImageRequest(prepared: PreparedChatImageIntent, traceId: string): Promise<ChatImageDecision> {
+/**
+ * `shouldRecord` is asked once the call has answered: a hedged call on a
+ * combined turn records only when the router has not decided, so one turn is
+ * one routing decision.
+ */
+async function runPreparedChatImageRequest(prepared: PreparedChatImageIntent, traceId: string, shouldRecord: () => boolean = () => true): Promise<ChatImageDecision> {
     const { model, prices, candidates, previousImagePrompt: previous, attachedPhoto, prompt, maxOutputTokens, timeoutMs, system } = prepared;
     const worstCase = autoLlmRouterWorstCaseMicroUsd({
         system,
@@ -314,7 +319,7 @@ async function runPreparedChatImageRequest(prepared: PreparedChatImageIntent, tr
             latencyMs: Date.now() - startedAt,
         })
     );
-    if (prepared.record) {
+    if (prepared.record && shouldRecord()) {
         const id = await recordImageRoutingDecision({
             ...prepared.record,
             routerModelId: model.id,
@@ -404,13 +409,20 @@ export const chatRouterImageHedgeMs = (raw = process.env.CHAT_ROUTER_IMAGE_HEDGE
 export function createChatTurnImageRouting(input: ChatTurnImageInput | null, combined: boolean, savedDecision?: ChatImageDecision) {
     const prepared = input && (combined || savedDecision?.image) ? prepareChatTurnImage(input) : undefined;
     let decision: ChatImageDecision | undefined;
+    let fallbackRecorded = false;
     let fallback = !input || savedDecision ? Promise.resolve(NOT_IMAGE)
         : !combined ? detectChatTurnImage(input) : undefined;
     const startFallback = () => fallback ??= prepared!.then(value => value
-        ? runPreparedChatImageRequest(value, input!.traceId) : NOT_IMAGE).catch(() => NOT_IMAGE);
+        ? runPreparedChatImageRequest(value, input!.traceId, () => {
+            if (decision !== undefined) return false;
+            fallbackRecorded = true;
+            return true;
+        }) : NOT_IMAGE).catch(() => NOT_IMAGE);
     return {
         context: combined ? prepared : undefined,
         accept: (value: ChatImageDecision) => { decision = value; },
+        /** Whether the combined router call decided this turn (its decision has no record of its own). */
+        combinedDecided: () => combined && !savedDecision && decision !== undefined && !fallbackRecorded,
         /**
          * Starts the separate image classification now, while the combined
          * router call is still running, so a router that then times out does

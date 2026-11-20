@@ -136,6 +136,24 @@ test("a routing decision is recorded content-free and linked only to its owner's
   assert.equal((await prisma.imageRoutingDecision.findUniqueOrThrow({ where: { id: decisionId } })).groupId, null, "another person's group never links");
   await linkImageRoutingDecision({ decisionId, userId: user.id, groupId: group.id });
   assert.equal((await prisma.imageRoutingDecision.findUniqueOrThrow({ where: { id: decisionId } })).groupId, group.id);
+  // Deleting the conversation keeps the record without the link; a gone conversation is not a lost decision.
+  await prisma.imageGenerationGroup.deleteMany({ where: { id: group.id } });
+  await prisma.conversation.delete({ where: { id: conversation.id } });
+  assert.equal((await prisma.imageRoutingDecision.findUniqueOrThrow({ where: { id: decisionId } })).conversationId, null);
+  const orphan = await recordImageRoutingDecision({
+    userId: user.id,
+    conversationId: conversation.id,
+    source: "composer",
+    routerModelId: "gpt-6-luna",
+    decision: { image: false },
+    outcome: "chat",
+    followUp: false,
+    attachedPhoto: false,
+    candidateCount: 5,
+    latencyMs: null,
+  });
+  assert.ok(orphan, "recorded without the conversation that is gone");
+  assert.equal((await prisma.imageRoutingDecision.findUniqueOrThrow({ where: { id: orphan } })).conversationId, null);
   // Deleting the person deletes the record.
   await prisma.user.delete({ where: { id: user.id } });
   assert.equal(await prisma.imageRoutingDecision.count({ where: { id: decisionId } }), 0);

@@ -13,6 +13,8 @@ import { prisma } from "@/lib/prisma";
 // signal route cannot be used to learn which generation ids exist.
 
 type SignalTables = {
+  /** Locks the generation's group row for the rest of the transaction. */
+  $queryRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
   imageGeneration: {
     findFirst(args: {
       where: { id: string; userId: string };
@@ -63,6 +65,10 @@ export async function recordImageGenerationSignal(
       select: { id: true, groupId: true },
     });
     if (!generation) return { ok: false, reason: "not_found" } as const;
+    // One writer per group at a time: helpful/not_helpful on one image and the
+    // one `selected` per comparison are read-then-write rules, which two
+    // concurrent requests under READ COMMITTED would otherwise both pass.
+    await tx.$queryRaw`SELECT 1 FROM "ImageGenerationGroup" WHERE "id" = ${generation.groupId} FOR UPDATE`;
 
     const rival = mutuallyExclusiveSignalKind(input.kind);
     if (rival) {

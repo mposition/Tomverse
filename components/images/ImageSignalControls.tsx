@@ -25,9 +25,20 @@ const pressedClass =
   "border-accent-image-300 bg-accent-image-50 text-accent-image-800 dark:border-accent-image-800 dark:bg-accent-image-950/40 dark:text-accent-image-200";
 
 /** Thumbs up, thumbs down and "I wanted a text answer" for one succeeded image. */
-export function ImageFeedbackButtons({ generationId }: { generationId: string }) {
+export function ImageFeedbackButtons({
+  generationId,
+  initialSignals,
+}: {
+  generationId: string;
+  /** What the person already recorded for this image, from the read. */
+  initialSignals?: readonly string[];
+}) {
   const { t } = useLanguage();
-  const [active, setActive] = useState<ImageGenerationSignalKind[]>([]);
+  const [active, setActive] = useState<ImageGenerationSignalKind[]>(() =>
+    (initialSignals ?? []).filter((kind): kind is ImageGenerationSignalKind =>
+      kind === "helpful" || kind === "not_helpful" || kind === "wanted_text"
+    )
+  );
   const [busy, setBusy] = useState(false);
 
   const press = async (kind: ImageGenerationUserSignalKind) => {
@@ -96,14 +107,23 @@ export function ImageFeedbackButtons({ generationId }: { generationId: string })
 
 /**
  * The one result a person chose in a comparison, per group. Choosing another
- * moves the choice; a refused choice goes back to what it was.
+ * moves the choice; a refused choice goes back to what it was. A choice made
+ * before this page loaded comes from the read (`signals` holding "selected").
  */
 export function useImageResultSelection() {
   const [selection, setSelection] = useState<Record<string, string>>({});
 
+  const selectedIn = useCallback(
+    (groupKey: string, generations: readonly ({ generationId: string; signals?: readonly string[] } | null)[]) =>
+      selection[groupKey] ??
+      generations.find((generation) => generation?.signals?.includes("selected"))?.generationId ??
+      null,
+    [selection]
+  );
+
   const select = useCallback(
-    async (groupKey: string, generationId: string) => {
-      const previous = selection[groupKey];
+    async (groupKey: string, generationId: string, stored: string | null = null) => {
+      const previous = selection[groupKey] ?? stored ?? undefined;
       if (previous === generationId) return;
       setSelection((current) => ({ ...current, [groupKey]: generationId }));
       const accepted = await sendImageGenerationSignal(generationId, "selected", true);
@@ -118,7 +138,7 @@ export function useImageResultSelection() {
     [selection]
   );
 
-  return { selection, select };
+  return { selection, selectedIn, select };
 }
 
 /** "Choose this result" under one model's image in a multi-model comparison. */

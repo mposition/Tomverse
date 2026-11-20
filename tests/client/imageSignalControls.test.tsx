@@ -26,3 +26,10 @@ test("the choose-this-result control states whether it is chosen, in words and i
   assert.match(chosen, />Chosen</);
   assert.match(render(<ImageSelectButton selected={false} onSelect={() => {}} />, "ko"), /이 결과 선택/);
 });
+
+test("a reload shows what the person already said, so a second press takes it back", () => {
+  const html = render(<ImageFeedbackButtons generationId="gen-1" initialSignals={["helpful", "wanted_text", "selected", "download"]} />);
+  assert.match(html, /data-testid="image-signal-helpful"[^>]*aria-pressed="true"/);
+  assert.match(html, /data-testid="image-signal-not-helpful"[^>]*aria-pressed="false"/);
+  assert.match(html, /data-testid="image-signal-wanted-text"[^>]*aria-pressed="true"/);
+});

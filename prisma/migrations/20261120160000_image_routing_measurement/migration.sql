@@ -28,6 +28,9 @@ CREATE INDEX "ImageRoutingDecision_createdAt_idx" ON "ImageRoutingDecision"("cre
 CREATE INDEX "ImageRoutingDecision_userId_createdAt_idx" ON "ImageRoutingDecision"("userId", "createdAt");
 ALTER TABLE "ImageRoutingDecision" ADD CONSTRAINT "ImageRoutingDecision_userId_fkey"
     FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+CREATE INDEX "ImageRoutingDecision_conversationId_idx" ON "ImageRoutingDecision"("conversationId");
+ALTER TABLE "ImageRoutingDecision" ADD CONSTRAINT "ImageRoutingDecision_conversationId_fkey"
+    FOREIGN KEY ("conversationId") REFERENCES "Conversation"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 ALTER TABLE "ImageRoutingDecision" ADD CONSTRAINT "ImageRoutingDecision_groupId_fkey"
     FOREIGN KEY ("groupId") REFERENCES "ImageGenerationGroup"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 

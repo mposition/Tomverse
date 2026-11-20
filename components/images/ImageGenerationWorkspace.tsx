@@ -43,7 +43,7 @@ import {
   type ImageModelProfile,
 } from "@/lib/imageModelRegistry";
 import { useImageModelCatalog } from "@/components/images/ImageModelCatalogProvider";
-import { ImageSelectButton, useImageResultSelection } from "@/components/images/ImageSignalControls";
+import { ImageFeedbackButtons, ImageSelectButton, useImageResultSelection } from "@/components/images/ImageSignalControls";
 import {
   limitImageModelSelection,
   reportedImageModelLimit,
@@ -137,6 +137,8 @@ type GenerationView = {
   groupId?: string;
   targetId?: string;
   attemptNumber?: number;
+  /** The person's own recorded signals for this image. */
+  signals?: string[];
 };
 
 /**
@@ -1360,7 +1362,7 @@ export function ImageGenerationWorkspace({
                     data-testid="image-comparison-card"
                     data-model-id={generation.modelId ?? ""}
                     data-selected={
-                      resultSelection.selection[group.groupId] === generation.generationId
+                      resultSelection.selectedIn(group.groupId, group.targets) === generation.generationId
                         ? "true"
                         : undefined
                     }
@@ -1381,11 +1383,22 @@ export function ImageGenerationWorkspace({
                     {group.targets.length > 1 && generation.status === "succeeded" ? (
                       <ImageSelectButton
                         selected={
-                          resultSelection.selection[group.groupId] === generation.generationId
+                          resultSelection.selectedIn(group.groupId, group.targets) === generation.generationId
                         }
                         onSelect={() =>
-                          void resultSelection.select(group.groupId, generation.generationId)
+                          void resultSelection.select(
+                            group.groupId,
+                            generation.generationId,
+                            resultSelection.selectedIn(group.groupId, group.targets)
+                          )
                         }
+                      />
+                    ) : null}
+                    {generation.status === "succeeded" ? (
+                      <ImageFeedbackButtons
+                        key={generation.generationId}
+                        generationId={generation.generationId}
+                        initialSignals={generation.signals}
                       />
                     ) : null}
                   </section>

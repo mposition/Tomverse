@@ -36,6 +36,7 @@ type GroupGeneration = {
   quality?: string;
   preset?: string;
   assets: GroupAsset[];
+  signals?: string[];
 };
 type GroupTarget = { targetId: string; modelId: string; currentGenerationId: string | null };
 type GroupView = {
@@ -66,7 +67,7 @@ export function ChatImageTurnCard({ groupId, modelIds }: { groupId: string; mode
   // is the failure the retry replaced.
   const [awaitingRetry, setAwaitingRetry] = useState(false);
   const retryBaselineRef = useRef(0);
-  const { selection, select } = useImageResultSelection();
+  const { selectedIn, select } = useImageResultSelection();
   const [downloadingIds, setDownloadingIds] = useState<string[]>([]);
   const [downloadFailedId, setDownloadFailedId] = useState<string | null>(null);
 
@@ -168,6 +169,7 @@ export function ChatImageTurnCard({ groupId, modelIds }: { groupId: string; mode
         (generation) => generation.generationId === target.currentGenerationId
       ) ?? null,
   }));
+  const selectedId = selectedIn(groupId, current.map((item) => item.generation));
   // Polled while anything on screen can still change: not read yet, a model
   // without a finished attempt, or a retry not yet seen.
   const inProgress =
@@ -205,7 +207,7 @@ export function ChatImageTurnCard({ groupId, modelIds }: { groupId: string; mode
         return (
           <figure
             key={target.targetId}
-            data-selected={generation && selection[groupId] === generation.generationId ? "true" : undefined}
+            data-selected={generation && selectedId === generation.generationId ? "true" : undefined}
             className="min-w-0"
           >
             {generation?.status === "succeeded" && asset ? (
@@ -275,8 +277,10 @@ export function ChatImageTurnCard({ groupId, modelIds }: { groupId: string; mode
                   </button>
                   {current.length > 1 ? (
                     <ImageSelectButton
-                      selected={selection[groupId] === generation.generationId}
-                      onSelect={() => void select(groupId, generation.generationId)}
+                      selected={selectedId === generation.generationId}
+                      onSelect={() =>
+                        void select(groupId, generation.generationId, selectedId)
+                      }
                     />
                   ) : null}
                 </div>
@@ -285,7 +289,11 @@ export function ChatImageTurnCard({ groupId, modelIds }: { groupId: string; mode
                     {t("chat.imageGenerationDownloadFailed")}
                   </p>
                 ) : null}
-                <ImageFeedbackButtons key={generation.generationId} generationId={generation.generationId} />
+                <ImageFeedbackButtons
+                  key={generation.generationId}
+                  generationId={generation.generationId}
+                  initialSignals={generation.signals}
+                />
               </div>
             ) : null}
           </figure>
