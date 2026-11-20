@@ -7,8 +7,8 @@
 import { createHash } from "node:crypto";
 import { boundedToolResult, type CodingRouterContext } from "@/lib/autoLlmRouterCore";
 import { estimateTextTokens } from "@/lib/chatTokenEstimate";
-import { isRecord } from "@/lib/externalApiNativeCore";
-import type { NATIVE_PROTOCOL_PROVIDER } from "@/lib/externalApiProtocols";
+import { estimateNativeInput, isRecord } from "@/lib/externalApiNativeCore";
+import { NATIVE_PROTOCOL_PROVIDER } from "@/lib/externalApiProtocols";
 import { toolCallText, type ChatCompletionRequest } from "@/lib/openAiChatProtocol";
 
 export type NativeSmartProtocol = keyof typeof NATIVE_PROTOCOL_PROVIDER;
@@ -28,6 +28,23 @@ export const escalateOnly = <E extends { capabilities: { creditWeight: number } 
     current && picked.capabilities.creditWeight < current.capabilities.creditWeight
         ? { entry: current, held: true }
         : { entry: picked, held: false };
+
+/**
+ * Whether a conversation's remembered model may become one costing
+ * `nextCredits`, once admission accepted it. Checked when it is written, not
+ * only when it was picked: two messages of one conversation can be routed at
+ * once, and the dearer pick admitted first must not be overwritten by the
+ * cheaper one admitted after it. `onlyUp` is false when the remembered model
+ * could no longer take the request (window, retirement), so the memory may
+ * then move to whatever answered.
+ */
+export const conversationModelMayMove = (
+    existing: { creditWeight: number; at: number } | undefined,
+    nextCredits: number,
+    now: number,
+    ttlMs: number,
+    onlyUp: boolean
+) => !onlyUp || !existing || now - existing.at >= ttlMs || nextCredits >= existing.creditWeight;
 
 // ---- Chat Completions ----
 
@@ -110,11 +127,46 @@ export const nativeText = (content: unknown): string =>
         : Array.isArray(content)
           ? content
                 .map((part) =>
-                    isRecord(part) && (part.type === "text" || part.type === "input_text") && typeof part.text === "string" ? part.text : ""
+                    isRecord(part) &&
+                    (part.type === "text" || part.type === "input_text" || part.type === "output_text") &&
+                    typeof part.text === "string"
+                        ? part.text
+                        : ""
                 )
                 .filter(Boolean)
                 .join("\n")
           : "";
+
+/** The index of the latest user item that carries text, or -1. */
+const latestUserTextIndex = (items: readonly unknown[]) => {
+    for (let index = items.length - 1; index >= 0; index -= 1) {
+        const item = items[index];
+        if (isRecord(item) && item.role === "user" && nativeText(item.content)) return index;
+    }
+    return -1;
+};
+
+/** The latest user text, for the router. */
+export const nativeLatestPrompt = (protocol: NativeSmartProtocol, body: Record<string, unknown>) => {
+    const items = nativeHistory(protocol, body);
+    const index = latestUserTextIndex(items);
+    return index < 0 ? "" : nativeText((items[index] as Record<string, unknown>).content);
+};
+
+/** The assistant text just before the latest user text, as Chat Completions passes it. */
+export const nativePreviousAnswer = (protocol: NativeSmartProtocol, body: Record<string, unknown>): string | null => {
+    const items = nativeHistory(protocol, body);
+    for (let index = latestUserTextIndex(items) - 1; index >= 0; index -= 1) {
+        const item = items[index];
+        if (!isRecord(item)) continue;
+        if (item.role === "user" && nativeText(item.content)) return null;
+        if (item.role === "assistant") {
+            const text = nativeText(item.content).trim();
+            if (text) return text;
+        }
+    }
+    return null;
+};
 
 /**
  * Whether the request ends with a message the user wrote, rather than a tool
@@ -162,7 +214,8 @@ export const nativeCodingContext = (
         client: userAgent?.slice(0, 80) || null,
         toolCount: Array.isArray(body.tools) ? body.tools.length : 0,
         modelTurns: items.filter((item) => isNativeOutput(protocol, item)).length,
-        inputTokens: estimateTextTokens(JSON.stringify([body.system ?? body.instructions ?? null, items])),
+        // The gateway's own estimate: tools counted, images and files by their own rules.
+        inputTokens: estimateNativeInput(body, NATIVE_PROTOCOL_PROVIDER[protocol]).breakdown.rawTotal,
         lastToolResult: boundedToolResult(latestNativeToolResult(protocol, body)),
         currentModelId,
     };

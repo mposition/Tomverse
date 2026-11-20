@@ -12,7 +12,9 @@ import {
 import { isExternalApiServableModel, smartAdaptiveCapabilities } from "../lib/externalApiCatalogCore.ts";
 import { codingToolModels } from "../lib/externalApiCodingTools.ts";
 import {
+    conversationModelMayMove,
     escalateOnly,
+    nativePreviousAnswer,
     nativeCodingContext,
     nativeUserTurn,
     smartAdaptiveCodingContext,
@@ -208,5 +210,41 @@ test("native: a message the user wrote is told from a tool round by its structur
     assert.equal(
         nativeCodingContext("responses", null, responsesTool, null).lastToolResult,
         "2 passed, 1 failed"
+    );
+});
+
+test("the remembered model is checked again when it is written", () => {
+    const hour = 60 * 60_000;
+    const now = 10 * hour;
+    const pinned = { creditWeight: 32, at: now - 1_000 };
+    assert.equal(conversationModelMayMove(undefined, 1, now, hour, true), true, "nothing remembered");
+    assert.equal(conversationModelMayMove(pinned, 16, now, hour, true), false, "a cheaper model admitted later never lowers it");
+    assert.equal(conversationModelMayMove(pinned, 32, now, hour, true), true);
+    assert.equal(conversationModelMayMove(pinned, 80, now, hour, true), true);
+    assert.equal(conversationModelMayMove({ ...pinned, at: now - 2 * hour }, 1, now, hour, true), true, "an expired one");
+    assert.equal(conversationModelMayMove(pinned, 1, now, hour, false), true, "the remembered model no longer fits");
+});
+
+test("native: the previous answer is the assistant text before the latest user text", () => {
+    assert.equal(
+        nativePreviousAnswer("anthropic_messages", {
+            messages: [
+                { role: "user", content: "Fix it" },
+                { role: "assistant", content: [{ type: "text", text: "Fixed the parser." }] },
+                { role: "user", content: [{ type: "text", text: "Now the tests" }] },
+            ],
+        }),
+        "Fixed the parser."
+    );
+    assert.equal(nativePreviousAnswer("anthropic_messages", { messages: [{ role: "user", content: "First" }] }), null);
+    assert.equal(
+        nativePreviousAnswer("responses", {
+            input: [
+                { type: "message", role: "user", content: "Add tests" },
+                { type: "message", role: "assistant", content: [{ type: "output_text", text: "Added two." }] },
+                { type: "message", role: "user", content: [{ type: "input_text", text: "One more" }] },
+            ],
+        }),
+        "Added two."
     );
 });

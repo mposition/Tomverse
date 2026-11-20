@@ -1035,6 +1035,86 @@ test("native protocols over the real shared credit ledger", { skip: !databaseUrl
         }
     });
 
+    await t.test("native Smart Adaptive pins a model only once admission accepted it", async () => {
+        process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED = "true";
+        resetNativeSmartAdaptivePins();
+        const pool = [...(await providerPool("anthropic", "anthropic_messages"))].sort(
+            (a, b) => a.capabilities.creditWeight - b.capabilities.creditWeight
+        );
+        const fallback = poolDefault(pool);
+        const strong = pool.at(-1);
+        assert.ok(strong.capabilities.creditWeight > fallback.capabilities.creditWeight);
+        reply = ({ signal }) => streamResponse(anthropicStream(), {}, signal);
+        // A key cap that covers the default model's hold but not the strong one's.
+        const probeUser = await newUser();
+        const userId = await newUser();
+        allow(userId, probeUser);
+        const { key: probeKey } = await issueKey(probeUser);
+        await (await claude(probeKey, claudeBody({ model: fallback.model.id }))).text();
+        const [probe] = await reservationsFor(probeUser);
+        const { key } = await issueKey(userId, { creditCap: probe.reservedCredits });
+        const session = { headers: { "x-claude-code-session-id": "sess-refused" } };
+        try {
+            routerPick = strong.model.id;
+            const refused = await claude(key, claudeBody({ model: "smart-adaptive" }), session);
+            await refused.text();
+            assert.equal(refused.status, 429, "the strong model's hold is beyond the key cap");
+            // Nothing was pinned: the next tool round is the default's, not the refused model's.
+            const round = await claude(key, claudeTurn2(), session);
+            await round.text();
+            assert.equal(round.status, 200);
+            assert.deepEqual(routed(round), [fallback.model.id, "default"]);
+        } finally {
+            routerPick = null;
+            delete process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED;
+        }
+    });
+
+    await t.test("Codex Smart Adaptive: a message the user wrote moves the thread up", async () => {
+        process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED = "true";
+        resetNativeSmartAdaptivePins();
+        const pool = [...(await providerPool("openai", "responses"))].sort(
+            (a, b) => a.capabilities.creditWeight - b.capabilities.creditWeight
+        );
+        const cheap = pool[0];
+        const strong = pool.at(-1);
+        assert.ok(strong.capabilities.creditWeight > cheap.capabilities.creditWeight, "the fixture has a cheaper and a stronger OpenAI model");
+        const userId = await newUser();
+        allow(userId);
+        const { key } = await issueKey(userId);
+        reply = ({ signal }) => streamResponse(responsesStream(), {}, signal);
+        const opening = [{ type: "message", role: "user", content: [{ type: "input_text", text: "Fix the test" }] }];
+        const thread = { prompt_cache_key: ["thread", "fixture", "up"].join("-") };
+        try {
+            routerPick = cheap.model.id;
+            const first = await codex(key, codexBody({ model: "smart-adaptive", ...thread, input: opening }));
+            await first.text();
+            assert.deepEqual(routed(first), [cheap.model.id, "router"]);
+            routerPick = strong.model.id;
+            const later = codexBody({
+                model: "smart-adaptive",
+                ...thread,
+                input: [
+                    ...opening,
+                    { type: "function_call", call_id: "c1", name: "shell_command", arguments: "{}" },
+                    { type: "function_call_output", call_id: "c1", output: "1 failed" },
+                    { type: "message", role: "assistant", content: [{ type: "output_text", text: "Tried a fix." }] },
+                    { type: "message", role: "user", content: [{ type: "input_text", text: "Still failing" }] },
+                ],
+            });
+            const up = await codex(key, later);
+            await up.text();
+            assert.deepEqual(routed(up), [strong.model.id, "router"]);
+            const asked = routerCalls.at(-1);
+            assert.equal(asked.coding.currentModelId, cheap.model.id);
+            assert.equal(asked.coding.lastToolResult, "1 failed");
+            assert.equal(asked.previousAnswer, "Tried a fix.");
+        } finally {
+            routerPick = null;
+            delete process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED;
+        }
+    });
+
     await t.test("non-streaming Messages and the free token count", async () => {
         const userId = await newUser();
         allow(userId);

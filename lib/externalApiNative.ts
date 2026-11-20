@@ -589,18 +589,20 @@ export async function handleNativeGeneration(request: Request, spec: NativeProto
                 }),
             });
         } catch (error) {
-            // As on Chat Completions: no router call for this key for a while.
-            if (smartAdaptive && isChatAccessError(error)) noteSmartAdaptiveRefusal(key.keyId);
+            // A twin of a request already recorded under this key gets its
+            // receipt, and does not pause the key's router calls.
             if (idempotencyKeyDigest && (isChatAccessError(error) || error instanceof ApiSecurityError)) {
                 const replay = await idempotentReplay(key.keyId, idempotencyKeyDigest, requestDigest, render);
                 if (replay) return replay;
             }
+            // As on Chat Completions: no router call for this key for a while.
+            if (smartAdaptive && isChatAccessError(error)) noteSmartAdaptiveRefusal(key.keyId);
             throw error;
         }
         leaseId = grant.leaseId;
         reservation = grant.usageReservation;
-        // Smart Adaptive moved the conversation to a stronger model: pinned now
-        // that admission accepted it.
+        // Smart Adaptive: the conversation's pin is written now that admission
+        // accepted this model.
         entry.commit?.();
 
         if (request.signal?.aborted) {

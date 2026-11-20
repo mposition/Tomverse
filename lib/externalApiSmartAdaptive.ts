@@ -9,6 +9,7 @@ import { getRuntimeModels } from "@/lib/modelRegistry";
 import { DEFAULT_MODEL_ID } from "@/lib/models";
 import {
     chatText,
+    conversationModelMayMove,
     estimatedChatInputTokens,
     escalateOnly,
     smartAdaptiveCodingContext,
@@ -89,12 +90,17 @@ export const rememberSmartAdaptiveToolCalls = (
 
 const CONVERSATION_MS = 6 * 60 * 60_000;
 const CONVERSATION_MAX = 5_000;
-const conversations = new Map<string, { modelId: string; at: number }>();
+const conversations = new Map<string, { modelId: string; creditWeight: number; at: number }>();
 
-const rememberConversation = (conversation: string, modelId: string, now: number) => {
+const rememberConversation = (conversation: string, entry: RunnableEntry, now: number, onlyUp: boolean) => {
+    // Checked again here: a concurrent message of the conversation may have
+    // moved it to a stronger model since this request was routed.
+    if (!conversationModelMayMove(conversations.get(conversation), entry.capabilities.creditWeight, now, CONVERSATION_MS, onlyUp)) {
+        return;
+    }
     conversations.delete(conversation);
     if (conversations.size >= CONVERSATION_MAX) conversations.delete(conversations.keys().next().value as string);
-    conversations.set(conversation, { modelId, at: now });
+    conversations.set(conversation, { modelId: entry.model.id, creditWeight: entry.capabilities.creditWeight, at: now });
 };
 
 /** Test-only: forget every conversation and tool-call memory. */
@@ -212,7 +218,13 @@ export const routeSmartAdaptive = async (input: {
 }): Promise<SmartAdaptiveDecision> => {
     const now = input.now ?? Date.now();
     const conversation = smartAdaptiveConversationKey(input.keyId, input.request);
+    const known = conversations.get(conversation);
     const decision = await decideSmartAdaptive(input, conversation, now);
+    // The remembered model may only be lowered when it no longer fits this
+    // request (window, retirement) and something else answered.
+    const knownFresh = known !== undefined && now - known.at < CONVERSATION_MS;
+    const knownFits = knownFresh && smartAdaptiveCandidates(input.request, input.runnable).some((entry) => entry.model.id === known.modelId);
+    const onlyUp = !(knownFresh && !knownFits);
     console.info(
         JSON.stringify({
             event: "external_api_smart_adaptive_routed",
@@ -227,7 +239,7 @@ export const routeSmartAdaptive = async (input: {
     return {
         ...decision,
         // Called once admission accepted the request on this model.
-        remember: () => rememberConversation(conversation, decision.entry.model.id, Date.now()),
+        remember: () => rememberConversation(conversation, decision.entry, Date.now(), onlyUp),
     };
 };
 

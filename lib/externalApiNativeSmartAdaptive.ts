@@ -6,11 +6,13 @@ import { estimateNativeInput, isRecord, NativeProtocolError } from "@/lib/extern
 import { NATIVE_PROTOCOL_PROVIDER } from "@/lib/externalApiProtocols";
 import { pickWithSmartAdaptiveRouter } from "@/lib/externalApiSmartAdaptive";
 import {
+    conversationModelMayMove,
     escalateOnly,
     isNativeOutput,
     nativeCodingContext,
     nativeHistory,
-    nativeText,
+    nativeLatestPrompt,
+    nativePreviousAnswer,
     nativeUserTurn,
     type NativeSmartProtocol,
 } from "@/lib/externalApiSmartAdaptiveCore";
@@ -29,27 +31,29 @@ export type { NativeSmartProtocol };
  * model cannot read (Anthropic: thinking blocks are bound to the model that
  * produced them; OpenAI: incompatible encrypted reasoning is omitted). Neither
  * fails the request, but the reasoning and the prompt cache are lost. So the
- * first request of a conversation is routed, and every later one goes to the
- * same model.
+ * first request of a conversation is routed, and every tool round after it
+ * goes to the same model.
  *
  * The conversation is known by the id the client already sends: Codex's
  * `prompt_cache_key` (its thread id, also its `session-id` header), Claude
  * Code's session (`x-claude-code-session-id`, or the session in
  * `metadata.user_id`). Without one, by the opening of the history (the
  * messages before the first model output), which an append-only conversation
- * keeps. The pin lives in this process; a miss on a request that already
- * carries model output (another instance, a restart, an expired pin) is never
- * routed again: it takes the provider's default model and pins that. A model
- * switch there costs reasoning, never the request.
+ * keeps. The pin lives in this process and is written only once admission
+ * accepted the request (`commit`), so a model the account could not pay for
+ * is never pinned. A tool round that misses it (another instance, a restart,
+ * an expired pin) is never routed: it takes the provider's default model and
+ * pins that. A model switch there costs reasoning, never the request.
  *
  * The paid router call is made on a conversation's first request and on each
  * later message the user wrote (not a tool round), behind the same gate and
  * switch as Chat Completions (smartAdaptiveRouterAllowed), with the coding
  * guidance and what the request shows of the task. On a later message the
  * model only moves up (escalateOnly): a pick cheaper than the pinned model
- * keeps the pin, a stronger one moves it, and the move is pinned only once
- * admission accepted it (`commit`), so a model the account cannot pay for
- * never takes the conversation. A user message with no pin (another
+ * keeps the pin and a stronger one moves it. The rule is checked again when
+ * the pin is written, so of two messages routed at once the cheaper one
+ * admitted last cannot lower it; only a pinned model that no longer fits the
+ * request lets the pin move down. A user message with no pin (another
  * instance, a restart) is routed like a first request.
  * A free call (token count) never routes: the pin, or the default.
  * Every decision is logged as `external_api_smart_adaptive_routed`.
@@ -57,7 +61,7 @@ export type { NativeSmartProtocol };
 
 const PIN_MS = 6 * 60 * 60_000;
 const PIN_MAX = 5_000;
-const pins = new Map<string, { modelId: string; at: number }>();
+const pins = new Map<string, { modelId: string; creditWeight: number; at: number }>();
 const routing = new Map<string, Promise<NativeSmartDecision>>();
 
 export type NativeSmartDecision = {
@@ -65,16 +69,23 @@ export type NativeSmartDecision = {
     routedBy: "router" | "continued" | "default";
     /** The router picked a cheaper model and the conversation kept its pin. */
     held?: boolean;
-    /** Pins a move to a stronger model; called once admission accepted it. */
+    /**
+     * Writes the pin; called once admission accepted the request, so a model
+     * the account could not pay for is never pinned. Absent on a free call.
+     */
     commit?: () => void;
 };
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 32);
 
-const pin = (pinKey: string, modelId: string, now: number) => {
+const pin = (pinKey: string, entry: RunnableEntry, now: number, onlyUp: boolean) => {
+    const existing = pins.get(pinKey);
+    // Checked again here: a concurrent message of the conversation may have
+    // moved the pin to a stronger model since this request was routed.
+    if (!conversationModelMayMove(existing, entry.capabilities.creditWeight, now, PIN_MS, onlyUp)) return;
     pins.delete(pinKey);
     if (pins.size >= PIN_MAX) pins.delete(pins.keys().next().value as string);
-    pins.set(pinKey, { modelId, at: now });
+    pins.set(pinKey, { modelId: entry.model.id, creditWeight: entry.capabilities.creditWeight, at: now });
 };
 
 /** Whether the request already carries something a model produced. */
@@ -103,19 +114,6 @@ export const nativeConversationId = (
     const firstOutput = items.findIndex((item) => isNativeOutput(protocol, item));
     const opening = firstOutput < 0 ? items : items.slice(0, firstOutput);
     return `opening:${digest(JSON.stringify([body.system ?? body.instructions ?? null, opening]))}`;
-};
-
-/** The latest user text, for the router. */
-export const nativeLatestPrompt = (protocol: NativeSmartProtocol, body: Record<string, unknown>) => {
-    const items = nativeHistory(protocol, body);
-    for (let index = items.length - 1; index >= 0; index -= 1) {
-        const item = items[index];
-        if (isRecord(item) && item.role === "user") {
-            const text = nativeText(item.content);
-            if (text) return text;
-        }
-    }
-    return "";
 };
 
 export const routeNativeSmartAdaptive = async (
@@ -212,43 +210,43 @@ const decideNativeSmartAdaptive = async (input: {
             userId: input.userId,
             requestId: input.requestId,
             prompt,
-            previousAnswer: null,
+            previousAnswer: nativePreviousAnswer(input.protocol, input.body),
             eligible: candidates,
             fallback: current ?? fallback,
             coding: nativeCodingContext(input.protocol, input.request.headers.get("user-agent"), input.body, current?.model.id ?? null),
         });
 
+    const commitFor = (entry: RunnableEntry, onlyUp: boolean) => () => pin(pinKey, entry, Date.now(), onlyUp);
+
     const pinned = pins.get(pinKey);
-    if (pinned && now - pinned.at < PIN_MS) {
+    const pinFresh = pinned !== undefined && now - pinned.at < PIN_MS;
+    if (pinFresh) {
         const current = candidates.find((candidate) => candidate.model.id === pinned.modelId);
         if (current) {
-            if (!input.free) pin(pinKey, current.model.id, now);
-            if (input.free || !userTurn || candidates.length < 2 || !prompt) return { entry: current, routedBy: "continued" };
+            if (input.free) return { entry: current, routedBy: "continued" };
+            const keep: NativeSmartDecision = { entry: current, routedBy: "continued", commit: commitFor(current, true) };
+            if (!userTurn || candidates.length < 2 || !prompt) return keep;
             // A message the user wrote: the router may move the conversation
             // to a stronger model, never to a cheaper one.
-            if (!(await input.routerAllowed())) return { entry: current, routedBy: "continued" };
+            if (!(await input.routerAllowed())) return keep;
             const routed = await router(current);
-            if (routed.routedBy !== "router" || routed.entry.model.id === current.model.id) {
-                return { entry: current, routedBy: "continued" };
-            }
+            if (routed.routedBy !== "router" || routed.entry.model.id === current.model.id) return keep;
             const { entry, held } = escalateOnly(current, routed.entry);
-            if (held) return { entry, routedBy: "continued", held };
-            return { entry, routedBy: "router", commit: () => pin(pinKey, entry.model.id, Date.now()) };
+            if (held) return { ...keep, held };
+            return { entry, routedBy: "router", commit: commitFor(entry, true) };
         }
         // The pinned model cannot take this request any more (the history
         // outgrew its window, or it was retired): another of the provider's
-        // models answers rather than a refusal, and the pin moves with it.
+        // models answers rather than a refusal, and the pin moves with it,
+        // down if need be.
     }
     if (input.free) return { entry: fallback, routedBy: "default" };
+    const onlyUp = !pinFresh;
 
-    const settle = (decision: NativeSmartDecision) => {
-        pin(pinKey, decision.entry.model.id, now);
-        return decision;
-    };
     // A tool round with no pin keeps to the default; a message the user wrote
     // is routed like a first request.
     if ((nativeConversationUnderWay(input.protocol, input.body) && !userTurn) || candidates.length < 2 || !prompt) {
-        return settle({ entry: fallback, routedBy: "default" });
+        return { entry: fallback, routedBy: "default", commit: commitFor(fallback, onlyUp) };
     }
     // Concurrent first requests of one conversation share one router call;
     // each still takes the shared pick only if it is one of its own candidates.
@@ -258,15 +256,16 @@ const decideNativeSmartAdaptive = async (input: {
     if (pending) {
         const shared = await pending;
         const entry = candidates.find((candidate) => candidate.model.id === shared.entry.model.id);
-        return entry ? { entry, routedBy: shared.routedBy } : { entry: fallback, routedBy: "default" };
+        return entry
+            ? { entry, routedBy: shared.routedBy, commit: commitFor(entry, onlyUp) }
+            : { entry: fallback, routedBy: "default" };
     }
-    const decision = (async () =>
-        settle(
-            (await input.routerAllowed()) ? await router(undefined) : { entry: fallback, routedBy: "default" }
-        ))();
+    const decision: Promise<NativeSmartDecision> = (async () =>
+        (await input.routerAllowed()) ? await router(undefined) : { entry: fallback, routedBy: "default" as const })();
     routing.set(pinKey, decision);
     try {
-        return await decision;
+        const decided = await decision;
+        return { ...decided, commit: commitFor(decided.entry, onlyUp) };
     } finally {
         routing.delete(pinKey);
     }
