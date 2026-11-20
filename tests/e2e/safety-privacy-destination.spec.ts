@@ -9,7 +9,7 @@ test("safety data guidance points to the privacy policy instead of itself", asyn
   const link = card.getByRole("link", { name: "Read the privacy policy" });
   await expect(link).toBeVisible({ timeout: 30_000 });
   await expect(card).not.toContainText("See the safety information");
-  await expect(card).toContainText("Your selected AI provider processes the question and material needed to answer");
+  await expect(card).toContainText("The AI provider that writes an answer processes the question and material needed for it");
   await expect(link).toHaveAttribute("href", "/privacy");
   await link.focus();
   await expect(link).toBeFocused();
