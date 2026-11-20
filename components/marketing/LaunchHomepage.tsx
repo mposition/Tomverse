@@ -22,7 +22,7 @@ const MODEL_ICON = (name: string) => `/model-icons/${name}.png`;
 const PLUGIN_ICON = (name: string) => `/plugins/providers/${name}`;
 const API_BASE = "https://tomverse.app/api/v1";
 const ANTHROPIC_BASE = "https://tomverse.app/api/anthropic";
-const MASKED_KEY = "tv_••••••••";
+const MASKED_KEY = "tvk_••••••••";
 
 /** Fallback when the catalogue has not loaded: the count on 2026-11-19. */
 const FALLBACK_PROVIDER_COUNT = 12;
@@ -289,7 +289,7 @@ const apiConfigs = (c: HomeV2Copy["api"]["console"]): Record<string, Config> => 
     [], ["$ claude"], [["g", c.claudeOk]],
   ] },
   vscode: { file: "Chat: Manage Language Models", lines: [
-    [["c", "# Add Models → Custom Endpoint"]], ["Endpoint   ", ["s", API_BASE]], ["Model      ", ["s", "smart-adaptive"]],
+    [["c", "# Add Models → Custom Endpoint"]], ["Endpoint   ", ["s", `${API_BASE}/chat/completions`]], ["Model      ", ["s", "smart-adaptive"]],
     [], [["c", c.vscodeKeyNote]], [["g", c.vscodeOk]],
   ] },
   cursor: { file: "Cursor › Settings › Models", lines: [

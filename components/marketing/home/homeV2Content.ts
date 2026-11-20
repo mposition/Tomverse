@@ -171,7 +171,7 @@ const ko: HomeV2Copy = {
       { k: "채팅 · 플러그인 · MCP", h: "업무 도구와 연결", p: "GitHub, Notion, Slack, Google Drive부터 직접 등록한 MCP 서버까지." },
       { k: "답변 비교", h: "세 답변, 한 화면", p: "최대 3개 모델의 답을 나란히 읽고 AI Review로 정리합니다." },
       { k: "모바일 · 곧 출시", h: "Android · iOS 앱", p: "같은 대화와 같은 계정을 주머니 속에서." },
-      { k: "개발자 · Tomverse API", h: "쓰던 코딩 도구에 연결", p: "Codex, Claude Code, Cursor 등 OpenAI 호환 도구에 API 키 하나로." },
+      { k: "개발자 · Tomverse API", h: "쓰던 코딩 도구에 연결", p: "Codex, Claude Code, Cursor 등 쓰던 코딩 도구에 API 키 하나로." },
       { k: "개발자 · CLI · 곧 출시", h: "터미널의 코딩 에이전트", p: "내 폴더에서 diff를 제안하고, 승인한 것만 실행합니다." },
       { k: "요금제", h: "필요한 만큼", p: "Free · Pro · Max. 먼저 써 보고, 자주 쓰게 되면 고르세요." },
     ],
@@ -298,7 +298,7 @@ const ko: HomeV2Copy = {
   api: {
     eyebrow: "개발자 · Tomverse API",
     title: ["쓰던 코딩 도구에,", "Tomverse API 키 하나."],
-    body: "공급사마다 따로 가입하고 결제할 필요 없이, 쓰던 코딩 도구에서 공급자 {n}곳의 모델을 씁니다. Smart Adaptive가 가벼운 요청은 가벼운 모델로 보내 크레딧을 아끼고, 키마다 걸어 둔 한도를 넘지 않습니다. 표준 OpenAI 호환 API를 쓰는 도구라면 모두 연결됩니다(Pro 이상).",
+    body: "공급사마다 따로 가입하고 결제할 필요 없이, 쓰던 코딩 도구에서 Tomverse 계정의 모델을 씁니다. 표준 OpenAI 호환 API를 쓰는 도구라면 모두 연결되고 공급자 {n}곳의 모델을 고를 수 있으며, Codex와 Claude Code는 각자 공급자의 모델 안에서 씁니다. Smart Adaptive가 가벼운 요청은 가벼운 모델로 보내 크레딧을 아끼고, 키에 한도를 걸어 두면 그 이상 쓰지 않습니다(Pro 이상).",
     toolsLabel: "연결할 도구",
     clients: {
       codex: "터미널 · VS Code 확장",
@@ -391,7 +391,7 @@ const en: HomeV2Copy = {
       { k: "Chat · Plugins · MCP", h: "Connect your work tools", p: "From GitHub, Notion, Slack and Google Drive to MCP servers you register yourself." },
       { k: "Answer comparison", h: "Three answers, one screen", p: "Read up to three models' answers side by side and sum them up with AI Review." },
       { k: "Mobile · Coming soon", h: "Android and iOS apps", p: "The same conversations and the same account, in your pocket." },
-      { k: "Developers · Tomverse API", h: "Plug into your coding tools", p: "Codex, Claude Code, Cursor and other OpenAI-compatible tools, with one API key." },
+      { k: "Developers · Tomverse API", h: "Plug into your coding tools", p: "Codex, Claude Code, Cursor and the other coding tools you use, with one API key." },
       { k: "Developers · CLI · Coming soon", h: "A coding agent in your terminal", p: "Proposes diffs in your folder and runs only what you approve." },
       { k: "Plans", h: "As much as you need", p: "Free · Pro · Max. Try it first, choose a plan once you use it often." },
     ],
@@ -518,7 +518,7 @@ const en: HomeV2Copy = {
   api: {
     eyebrow: "Developers · Tomverse API",
     title: ["The coding tools you already use,", "one Tomverse API key."],
-    body: "Use models from {n} providers in the coding tools you already use, without signing up and paying for each provider. Smart Adaptive sends light requests to light models to save credits, and every key stays within the limit you set for it. Any tool that uses the standard OpenAI-compatible API can connect (Pro and above).",
+    body: "Use your Tomverse account’s models in the coding tools you already use, without signing up and paying for each provider. Any tool on the standard OpenAI-compatible API can connect and choose from {n} providers’ models; Codex and Claude Code stay within their own provider’s models. Smart Adaptive sends light requests to light models to save credits, and a key with a limit never goes past it (Pro and above).",
     toolsLabel: "Tool to connect",
     clients: {
       codex: "Terminal · VS Code extension",

@@ -31,7 +31,7 @@ export const homeV2Translations: Record<Exclude<Language, "ko" | "en">, HomeV2Co
         { k: "Chat · 插件 · MCP", h: "连接工作工具", p: "从 GitHub、Notion、Slack、Google Drive，到你自己注册的 MCP 服务器。" },
         { k: "回答比较", h: "三个回答，一个画面", p: "并排阅读最多 3 个模型的回答，并用 AI Review 整理。" },
         { k: "移动端 · 即将推出", h: "Android · iOS 应用", p: "同样的对话、同样的账户，装进口袋。" },
-        { k: "开发者 · Tomverse API", h: "连接你常用的编程工具", p: "Codex、Claude Code、Cursor 等 OpenAI 兼容工具，只需一个 API 密钥。" },
+        { k: "开发者 · Tomverse API", h: "连接你常用的编程工具", p: "Codex、Claude Code、Cursor 等常用编程工具，一个 API 密钥即可连接。" },
         { k: "开发者 · CLI · 即将推出", h: "终端里的编程代理", p: "在你的文件夹中提出 diff，只执行你批准的操作。" },
         { k: "价格方案", h: "按需选择", p: "Free · Pro · Max。先试用，常用了再选择。" },
       ],
@@ -158,7 +158,7 @@ export const homeV2Translations: Record<Exclude<Language, "ko" | "en">, HomeV2Co
     api: {
       eyebrow: "开发者 · Tomverse API",
       title: ["在你常用的编程工具里，", "一个 Tomverse API 密钥。"],
-      body: "无需在每家提供商分别注册和付费，就能在常用的编程工具中使用 {n} 家提供商的模型。Smart Adaptive 会把轻量请求发给轻量模型以节省积分，并且不会超过你为每个密钥设定的上限。只要是使用标准 OpenAI 兼容 API 的工具，都可以连接（Pro 及以上）。",
+      body: "无需在每家提供商分别注册和付费，就能在常用的编程工具中使用 Tomverse 账户的模型。任何使用标准 OpenAI 兼容 API 的工具都能连接，并可从 {n} 家提供商的模型中选择；Codex 和 Claude Code 只使用各自提供商的模型。Smart Adaptive 会把轻量请求发给轻量模型以节省积分，为密钥设定上限后不会超出（Pro 及以上）。",
       toolsLabel: "要连接的工具",
       clients: {
         codex: "终端 · VS Code 扩展",
@@ -250,7 +250,7 @@ export const homeV2Translations: Record<Exclude<Language, "ko" | "en">, HomeV2Co
         { k: "Chat · 外掛 · MCP", h: "串接工作工具", p: "從 GitHub、Notion、Slack、Google Drive，到你自行登錄的 MCP 伺服器。" },
         { k: "回答比較", h: "三個回答，一個畫面", p: "並排閱讀最多 3 個模型的回答，並用 AI Review 整理。" },
         { k: "行動版 · 即將推出", h: "Android · iOS App", p: "同樣的對話、同樣的帳戶，放進口袋。" },
-        { k: "開發者 · Tomverse API", h: "串接你常用的程式開發工具", p: "Codex、Claude Code、Cursor 等 OpenAI 相容工具，只要一組 API 金鑰。" },
+        { k: "開發者 · Tomverse API", h: "串接你常用的程式開發工具", p: "Codex、Claude Code、Cursor 等常用程式開發工具，一組 API 金鑰即可連接。" },
         { k: "開發者 · CLI · 即將推出", h: "終端機裡的程式開發代理", p: "在你的資料夾中提出 diff，只執行你核准的項目。" },
         { k: "價格方案", h: "依需求選擇", p: "Free · Pro · Max。先試用，常用了再選。" },
       ],
@@ -377,7 +377,7 @@ export const homeV2Translations: Record<Exclude<Language, "ko" | "en">, HomeV2Co
     api: {
       eyebrow: "開發者 · Tomverse API",
       title: ["在你常用的程式開發工具裡，", "一組 Tomverse API 金鑰。"],
-      body: "不必在每家供應商分別註冊和付款，就能在常用的程式開發工具中使用 {n} 家供應商的模型。Smart Adaptive 會把輕量請求送給輕量模型以節省點數，也不會超過你為每組金鑰設定的上限。只要是使用標準 OpenAI 相容 API 的工具，都能串接（Pro 以上）。",
+      body: "不必在每家供應商分別註冊和付款，就能在常用的程式開發工具中使用 Tomverse 帳戶的模型。任何使用標準 OpenAI 相容 API 的工具都能連接，並可從 {n} 家供應商的模型中選擇；Codex 和 Claude Code 只使用各自供應商的模型。Smart Adaptive 會把輕量請求送給輕量模型以節省點數，為金鑰設定上限後不會超出（Pro 以上）。",
       toolsLabel: "要串接的工具",
       clients: {
         codex: "終端機 · VS Code 擴充功能",
@@ -469,7 +469,7 @@ export const homeV2Translations: Record<Exclude<Language, "ko" | "en">, HomeV2Co
         { k: "Chat · Plugins · MCP", h: "Reliez vos outils de travail", p: "De GitHub, Notion, Slack et Google Drive jusqu’aux serveurs MCP que vous ajoutez vous-même." },
         { k: "Comparaison des réponses", h: "Trois réponses, un écran", p: "Lisez côte à côte les réponses d’au plus 3 modèles et récapitulez-les avec AI Review." },
         { k: "Mobile · Bientôt disponible", h: "Applications Android · iOS", p: "Les mêmes conversations, le même compte, dans votre poche." },
-        { k: "Développeurs · Tomverse API", h: "Branché sur vos outils de code", p: "Codex, Claude Code, Cursor et d’autres outils compatibles OpenAI, avec une seule clé API." },
+        { k: "Développeurs · Tomverse API", h: "Branché sur vos outils de code", p: "Codex, Claude Code, Cursor et vos autres outils de code, avec une seule clé API." },
         { k: "Développeurs · CLI · Bientôt disponible", h: "Un agent de code dans votre terminal", p: "Propose des diffs dans votre dossier et n’exécute que ce que vous approuvez." },
         { k: "Tarifs", h: "Selon vos besoins", p: "Free · Pro · Max. Essayez d’abord, choisissez quand vous l’utilisez souvent." },
       ],
@@ -596,7 +596,7 @@ export const homeV2Translations: Record<Exclude<Language, "ko" | "en">, HomeV2Co
     api: {
       eyebrow: "Développeurs · Tomverse API",
       title: ["Dans vos outils de code habituels,", "une seule clé API Tomverse."],
-      body: "Utilisez les modèles de {n} fournisseurs dans vos outils de code habituels, sans vous inscrire ni payer chez chaque fournisseur. Smart Adaptive envoie les requêtes légères vers des modèles légers pour économiser des crédits, et chaque clé reste dans la limite que vous lui avez fixée. Tout outil qui utilise l’API standard compatible OpenAI peut se connecter (Pro et au-delà).",
+      body: "Utilisez les modèles de votre compte Tomverse dans vos outils de code habituels, sans vous inscrire ni payer chez chaque fournisseur. Tout outil compatible avec l’API OpenAI standard peut se connecter et choisir parmi les modèles de {n} fournisseurs ; Codex et Claude Code restent sur les modèles de leur propre fournisseur. Smart Adaptive envoie les requêtes légères vers des modèles légers pour économiser des crédits, et une clé dotée d’une limite ne la dépasse jamais (Pro et plus).",
       toolsLabel: "Outil à connecter",
       clients: {
         codex: "Terminal · extension VS Code",
@@ -688,7 +688,7 @@ export const homeV2Translations: Record<Exclude<Language, "ko" | "en">, HomeV2Co
         { k: "Chat · Plugins · MCP", h: "Mit Ihren Arbeitstools verbunden", p: "Von GitHub, Notion, Slack und Google Drive bis zu MCP-Servern, die Sie selbst eintragen." },
         { k: "Antwortvergleich", h: "Drei Antworten, ein Bildschirm", p: "Lesen Sie die Antworten von bis zu 3 Modellen nebeneinander und fassen Sie sie mit AI Review zusammen." },
         { k: "Mobil · Demnächst", h: "Apps für Android · iOS", p: "Dieselben Unterhaltungen, dasselbe Konto, in Ihrer Tasche." },
-        { k: "Entwickler · Tomverse API", h: "Anschluss an Ihre Coding-Tools", p: "Codex, Claude Code, Cursor und andere OpenAI-kompatible Tools, mit einem einzigen API-Schlüssel." },
+        { k: "Entwickler · Tomverse API", h: "Anschluss an Ihre Coding-Tools", p: "Codex, Claude Code, Cursor und Ihre anderen Coding-Tools, mit einem einzigen API-Schlüssel." },
         { k: "Entwickler · CLI · Demnächst", h: "Ein Coding-Agent im Terminal", p: "Schlägt in Ihrem Ordner Diffs vor und führt nur aus, was Sie freigeben." },
         { k: "Tarife", h: "So viel, wie Sie brauchen", p: "Free · Pro · Max. Erst ausprobieren, dann wählen, wenn Sie es oft nutzen." },
       ],
@@ -815,7 +815,7 @@ export const homeV2Translations: Record<Exclude<Language, "ko" | "en">, HomeV2Co
     api: {
       eyebrow: "Entwickler · Tomverse API",
       title: ["In Ihren gewohnten Coding-Tools,", "ein einziger Tomverse-API-Schlüssel."],
-      body: "Nutzen Sie Modelle von {n} Anbietern in Ihren gewohnten Coding-Tools, ohne sich bei jedem Anbieter einzeln anzumelden und zu bezahlen. Smart Adaptive schickt leichte Anfragen an leichte Modelle und spart so Credits, und kein Schlüssel überschreitet das Limit, das Sie dafür festgelegt haben. Jedes Tool, das die standardmäßige OpenAI-kompatible API nutzt, lässt sich verbinden (ab Pro).",
+      body: "Nutzen Sie die Modelle Ihres Tomverse-Kontos in Ihren gewohnten Coding-Tools, ohne sich bei jedem Anbieter einzeln anzumelden und zu bezahlen. Jedes Tool mit der standardmäßigen OpenAI-kompatiblen API lässt sich verbinden und kann aus den Modellen von {n} Anbietern wählen; Codex und Claude Code bleiben bei den Modellen ihres eigenen Anbieters. Smart Adaptive schickt leichte Anfragen an leichte Modelle und spart so Credits, und ein Schlüssel mit Limit überschreitet es nie (ab Pro).",
       toolsLabel: "Zu verbindendes Tool",
       clients: {
         codex: "Terminal · VS-Code-Erweiterung",
@@ -907,7 +907,7 @@ export const homeV2Translations: Record<Exclude<Language, "ko" | "en">, HomeV2Co
         { k: "Chat · Plugins · MCP", h: "Conecta tus herramientas de trabajo", p: "Desde GitHub, Notion, Slack y Google Drive hasta servidores MCP que registres tú mismo." },
         { k: "Comparación de respuestas", h: "Tres respuestas, una pantalla", p: "Lee las respuestas de hasta 3 modelos una al lado de otra y resúmelas con AI Review." },
         { k: "Móvil · Próximamente", h: "Apps para Android · iOS", p: "Las mismas conversaciones y la misma cuenta, en tu bolsillo." },
-        { k: "Desarrolladores · Tomverse API", h: "Conéctalo a tus herramientas de código", p: "Codex, Claude Code, Cursor y otras herramientas compatibles con OpenAI, con una sola clave de API." },
+        { k: "Desarrolladores · Tomverse API", h: "Conéctalo a tus herramientas de código", p: "Codex, Claude Code, Cursor y las demás herramientas de código que usas, con una sola clave de API." },
         { k: "Desarrolladores · CLI · Próximamente", h: "Un agente de código en tu terminal", p: "Propone diffs en tu carpeta y solo ejecuta lo que apruebas." },
         { k: "Planes", h: "Lo que necesites", p: "Free · Pro · Max. Pruébalo primero y elige cuando lo uses a menudo." },
       ],
@@ -1034,7 +1034,7 @@ export const homeV2Translations: Record<Exclude<Language, "ko" | "en">, HomeV2Co
     api: {
       eyebrow: "Desarrolladores · Tomverse API",
       title: ["En las herramientas de código que ya usas,", "una sola clave de Tomverse API."],
-      body: "Usa modelos de {n} proveedores en las herramientas de código que ya usas, sin registrarte ni pagar en cada proveedor por separado. Smart Adaptive envía las peticiones ligeras a modelos ligeros para ahorrar créditos, y ninguna clave supera el límite que le hayas fijado. Cualquier herramienta que use la API estándar compatible con OpenAI puede conectarse (Pro o superior).",
+      body: "Usa los modelos de tu cuenta de Tomverse en las herramientas de código que ya usas, sin registrarte ni pagar en cada proveedor por separado. Cualquier herramienta con la API estándar compatible con OpenAI puede conectarse y elegir entre los modelos de {n} proveedores; Codex y Claude Code se quedan en los modelos de su propio proveedor. Smart Adaptive envía las peticiones ligeras a modelos ligeros para ahorrar créditos, y una clave con límite nunca lo supera (Pro o superior).",
       toolsLabel: "Herramienta que conectar",
       clients: {
         codex: "Terminal · extensión de VS Code",
@@ -1126,7 +1126,7 @@ export const homeV2Translations: Record<Exclude<Language, "ko" | "en">, HomeV2Co
         { k: "Chat · Plugins · MCP", h: "Conecte suas ferramentas de trabalho", p: "Do GitHub, Notion, Slack e Google Drive aos servidores MCP que você mesmo cadastrar." },
         { k: "Comparação de respostas", h: "Três respostas, uma tela", p: "Leia lado a lado as respostas de até 3 modelos e organize tudo com o AI Review." },
         { k: "Celular · Em breve", h: "Apps para Android · iOS", p: "As mesmas conversas e a mesma conta, no seu bolso." },
-        { k: "Desenvolvedores · Tomverse API", h: "Conecte às suas ferramentas de código", p: "Codex, Claude Code, Cursor e outras ferramentas compatíveis com OpenAI, com uma única chave de API." },
+        { k: "Desenvolvedores · Tomverse API", h: "Conecte às suas ferramentas de código", p: "Codex, Claude Code, Cursor e as outras ferramentas de código que você usa, com uma única chave de API." },
         { k: "Desenvolvedores · CLI · Em breve", h: "Um agente de código no terminal", p: "Propõe diffs na sua pasta e só executa o que você aprovar." },
         { k: "Planos", h: "Na medida certa", p: "Free · Pro · Max. Experimente primeiro e escolha quando passar a usar com frequência." },
       ],
@@ -1253,7 +1253,7 @@ export const homeV2Translations: Record<Exclude<Language, "ko" | "en">, HomeV2Co
     api: {
       eyebrow: "Desenvolvedores · Tomverse API",
       title: ["Nas ferramentas de código que você já usa,", "uma única chave da Tomverse API."],
-      body: "Use modelos de {n} provedores nas ferramentas de código que você já usa, sem se cadastrar e pagar em cada provedor. O Smart Adaptive envia pedidos leves para modelos leves para economizar créditos, e nenhuma chave passa do limite que você definiu para ela. Qualquer ferramenta que use a API padrão compatível com OpenAI pode se conectar (Pro ou superior).",
+      body: "Use os modelos da sua conta Tomverse nas ferramentas de código que você já usa, sem se cadastrar e pagar em cada provedor. Qualquer ferramenta com a API padrão compatível com a OpenAI pode se conectar e escolher entre os modelos de {n} provedores; Codex e Claude Code ficam nos modelos do próprio provedor. O Smart Adaptive envia pedidos leves para modelos leves para economizar créditos, e uma chave com limite nunca passa dele (Pro ou superior).",
       toolsLabel: "Ferramenta para conectar",
       clients: {
         codex: "Terminal · extensão do VS Code",
