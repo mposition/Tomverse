@@ -1572,7 +1572,7 @@ export const en = {
         capacityConversations: "{used} of {limit} imported conversations",
         selectFile: "Choose export file",
         selectFileHint:
-            "ChatGPT, Claude or Gemini data export (.zip or .json), or a Perplexity thread exported as Markdown (.md), up to 1GB. A Gemini export has to be Google Takeout's My Activity → Gemini Apps in the JSON format. Large archives are fine — media files are skipped without being read. For a Perplexity file, short excerpts of each question and the answer text around it (600 characters at most each) are sent to an AI model (OpenAI) to find where each question ends.",
+            "ChatGPT, Claude, Gemini or Perplexity data export (.zip or .json), or a Perplexity thread exported as Markdown (.md), up to 1GB. A Gemini export has to be Google Takeout's My Activity → Gemini Apps in the JSON format. Large archives are fine — media files are skipped without being read. For a Perplexity file, short excerpts of each question and the answer text around it (600 characters at most each) are sent to an AI model (OpenAI) to find where each question ends.",
         parsing: "Reading the export in your browser…",
         parsingProgress: "{conversations} conversations found",
         cancel: "Cancel",
@@ -1703,10 +1703,10 @@ export const en = {
             "Select My Activity, then inside it choose Gemini Apps and set the format to JSON — the Gemini product itself holds Gems, not conversations",
         guideGeminiStep3:
             "Export, then upload the .zip once Google emails you the download link",
-        guidePerplexityTitle: "Export a Perplexity thread",
-        guidePerplexityStep1: "Open the thread you want to bring over in Perplexity",
-        guidePerplexityStep2: "Press the Export button under an answer and choose Markdown",
-        guidePerplexityStep3: "Upload the .md file. One file is one thread, and the answers' source links come with it. To find where each question ends, short excerpts of each question and the answer text around it (600 characters at most each) are sent to an AI model (OpenAI).",
+        guidePerplexityTitle: "Export your Perplexity data",
+        guidePerplexityStep1: "Request a data export in Perplexity's settings. Searching the settings for “data” finds it",
+        guidePerplexityStep2: "Upload the .zip you receive as it is. It holds every thread. It has no source list, so the answers keep only marks like [1]",
+        guidePerplexityStep3: "To bring over a single thread, upload the .md file from Export → Markdown under an answer instead. That file brings the source links too. To find where each question ends, short excerpts of each question and the answer text around it (600 characters at most each) are sent to an AI model (OpenAI).",
         guideFormats:
             "ZIP and JSON files are supported, and Markdown (.md) files from Perplexity. A Gemini export has to be in the JSON format — HTML cannot be read.",
         guideStaysLocal:

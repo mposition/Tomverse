@@ -1564,7 +1564,7 @@ export const zhHant = {
         capacityConversations: "已匯入 {used} 個對話（上限 {limit} 個）",
         selectFile: "選擇匯出檔案",
         selectFileHint:
-            "ChatGPT、Claude 或 Gemini 資料匯出檔（.zip 或 .json），或以 Markdown（.md）匯出的 Perplexity 討論串，最大 1GB。Gemini 需要在 Google Takeout 中匯出「我的活動 → Gemini 應用程式」的 JSON 格式檔案。檔案較大也沒關係 — 媒體檔案會直接略過，不會讀取。對於 Perplexity 檔案，會將每個問題及其前後回答的簡短摘錄（每段不超過 600 字）傳送給 AI 模型（OpenAI），以判斷每個問題在哪裡結束。",
+            "ChatGPT、Claude、Gemini 或 Perplexity 資料匯出檔（.zip 或 .json），或以 Markdown（.md）匯出的 Perplexity 討論串，最大 1GB。Gemini 需要在 Google Takeout 中匯出「我的活動 → Gemini 應用程式」的 JSON 格式檔案。檔案較大也沒關係 — 媒體檔案會直接略過，不會讀取。對於 Perplexity 檔案，會將每個問題及其前後回答的簡短摘錄（每段不超過 600 字）傳送給 AI 模型（OpenAI），以判斷每個問題在哪裡結束。",
         parsing: "正在瀏覽器中讀取匯出檔案…",
         parsingProgress: "已發現 {conversations} 個對話",
         cancel: "取消",
@@ -1689,10 +1689,10 @@ export const zhHant = {
             "選擇「我的活動」，在其中勾選 Gemini 應用程式並將格式設為 JSON — Gemini 產品項目中放的是 Gem，不是對話",
         guideGeminiStep3:
             "匯出後，收到 Google 的下載連結再上傳該 .zip",
-        guidePerplexityTitle: "匯出 Perplexity 討論串",
-        guidePerplexityStep1: "在 Perplexity 中開啟要匯入的討論串",
-        guidePerplexityStep2: "按下回答下方的匯出按鈕並選擇 Markdown",
-        guidePerplexityStep3: "上傳取得的 .md 檔案。一個檔案對應一個討論串，回答中的來源連結也會一併匯入。為判斷每個問題在哪裡結束，會將每個問題及其前後回答的簡短摘錄（每段不超過 600 字）傳送給 AI 模型（OpenAI）。",
+        guidePerplexityTitle: "匯出 Perplexity 資料",
+        guidePerplexityStep1: "在 Perplexity 設定中申請資料匯出。在設定中搜尋「data」即可找到",
+        guidePerplexityStep2: "直接上傳收到的 .zip 檔案，其中包含所有討論串。此檔案沒有來源清單，回答中只保留 [1] 這樣的編號",
+        guidePerplexityStep3: "若只匯入一個討論串，請上傳透過回答下方的匯出 → Markdown 取得的 .md 檔案，來源連結也會一併匯入。為判斷每個問題在哪裡結束，會將每個問題及其前後回答的簡短摘錄（每段不超過 600 字）傳送給 AI 模型（OpenAI）。",
         guideFormats:
             "支援 ZIP、JSON 檔案以及 Perplexity 的 Markdown（.md）檔案。Gemini 匯出必須是 JSON 格式，HTML 無法讀取。",
         guideStaysLocal: "匯出檔案不會離開你的裝置，只會在瀏覽器中開啟。",

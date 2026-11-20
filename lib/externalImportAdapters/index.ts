@@ -32,8 +32,11 @@ export const EXTERNAL_IMPORT_ADAPTERS: readonly ExternalConversationAdapter[] =
  * but the wizard only ever offers to resume `preview_ready`.
  *
  * v4 adds the Perplexity Markdown thread export.
+ *
+ * v5 adds the Perplexity account export (a list wrapped as
+ * {"conversations": [...]}).
  */
-export const EXTERNAL_IMPORT_PARSER_VERSION = "v4";
+export const EXTERNAL_IMPORT_PARSER_VERSION = "v5";
 
 /** First adapter whose detect() accepts the parsed export, or null. */
 export function detectExternalImportAdapter(
