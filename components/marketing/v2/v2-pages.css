@@ -446,6 +446,8 @@
 .tv-page .faq details p { padding-bottom: 20px; color: var(--ink-3); font-size: .9375rem; }
 .tv-page .cta-band { border-radius: 32px; padding: 56px; background: radial-gradient(80% 120% at 100% 0%, rgb(21 93 251 / .55), transparent 60%), var(--panel); box-shadow: inset 0 0 0 1px var(--thread-line); display: flex; justify-content: space-between; align-items: center; gap: 32px; flex-wrap: wrap; }
 .tv-page .cta-band h2 { font-size: clamp(1.75rem, 3.4vw, 2.75rem); font-weight: 900; letter-spacing: -.04em; line-height: 1.15; }
+.tv-page .cta-band > * { min-width: 0; }
+.tv-page .cta-band h2 { -webkit-hyphens: auto; hyphens: auto; }
 .tv-page .cta-band p { color: var(--ink-2); margin-top: 10px; }
 .tv-page .tbl-wrap { overflow-x: auto; border-radius: 20px; box-shadow: inset 0 0 0 1px var(--line); }
 .tv-page .tbl { width: 100%; border-collapse: collapse; font-size: .9rem; min-width: 640px; }
