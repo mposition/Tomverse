@@ -257,7 +257,6 @@ const decideSmartAdaptive = async (
     // Nothing fits: the default model answers, and its own limits refuse the
     // request with the usual error.
     const pool = eligible.length > 0 ? eligible : input.runnable;
-    // Never a frontier or apex model only the router may pick.
     // When none of the models a client could name fits, the default model
     // answers and its own limits refuse the request: a frontier or apex model
     // is only ever the router's pick beside them.
@@ -266,9 +265,7 @@ const decideSmartAdaptive = async (
     const fallback =
         fallbackPool.find((entry) => entry.model.id === DEFAULT_MODEL_ID) ?? fallbackPool[0] ?? input.runnable[0];
     const turn = latestTurn(input.request);
-    if (!turn || !turn.prompt.trim() || eligible.length < 2 || nameable.length === 0) {
-        return { entry: fallback, routedBy: "default" };
-    }
+    if (!turn || eligible.length < 2) return { entry: fallback, routedBy: "default" };
 
     // A tool round goes to the model that made the calls it answers, before
     // the router gate is asked: a gate closed for a while (a refusal two
@@ -289,6 +286,11 @@ const decideSmartAdaptive = async (
         known && now - known.at < CONVERSATION_MS
             ? eligible.find((candidate) => candidate.model.id === known.modelId)
             : undefined;
+    // Nothing for the router to read, or only router-only models fit: no
+    // router call, and the conversation keeps its model or takes the default.
+    if (!turn.prompt.trim() || nameable.length === 0) {
+        return current ? { entry: current, routedBy: "continued" } : { entry: fallback, routedBy: "default" };
+    }
     const coding = smartAdaptiveCodingContext(input.request, input.userAgent ?? null, current?.model.id ?? null);
 
     // One router call per Idempotency-Key at a time in this process: a

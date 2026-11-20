@@ -362,9 +362,11 @@ export const AUTO_LLM_ROUTER_MAX_TOOL_RESULT_CHARS = 600;
 export const boundedToolResult = (text: string | null | undefined): string | null => {
     const trimmed = text?.trim();
     if (!trimmed) return null;
-    return trimmed.length <= AUTO_LLM_ROUTER_MAX_TOOL_RESULT_CHARS
-        ? trimmed
-        : `[...] ${trimmed.slice(trimmed.length - AUTO_LLM_ROUTER_MAX_TOOL_RESULT_CHARS)}`;
+    if (trimmed.length <= AUTO_LLM_ROUTER_MAX_TOOL_RESULT_CHARS) return trimmed;
+    let start = trimmed.length - AUTO_LLM_ROUTER_MAX_TOOL_RESULT_CHARS;
+    // Never start on the second half of a surrogate pair.
+    if (/[\uDC00-\uDFFF]/.test(trimmed[start] ?? "")) start += 1;
+    return `[...] ${trimmed.slice(start)}`;
 };
 
 const AUTO_LLM_ROUTER_SYSTEM_TAIL = [

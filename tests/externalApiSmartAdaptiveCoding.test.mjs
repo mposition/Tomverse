@@ -18,6 +18,7 @@ import { codingToolModels } from "../lib/externalApiCodingTools.ts";
 import {
     conversationModelMayMove,
     escalateOnly,
+    nativeLastUserText,
     nativePreviousAnswer,
     nativeCodingContext,
     nativeUserTurn,
@@ -128,6 +129,11 @@ test("a tool result travels as its bounded end", () => {
     const bounded = boundedToolResult(long);
     assert.ok(bounded.endsWith("FAILED 3 tests"), "the summary printed last is kept");
     assert.ok(bounded.length <= AUTO_LLM_ROUTER_MAX_TOOL_RESULT_CHARS + 10);
+    // The cut never leaves half a surrogate pair.
+    for (const pad of [0, 1]) {
+        const emoji = boundedToolResult("x".repeat(pad) + "😀".repeat(AUTO_LLM_ROUTER_MAX_TOOL_RESULT_CHARS));
+        assert.doesNotMatch(emoji.slice(6), /^[\uDC00-\uDFFF]/);
+    }
 });
 
 const entry = (id, creditWeight) => ({ model: { id }, capabilities: { creditWeight } });
@@ -215,6 +221,11 @@ test("native: a message the user wrote is told from a tool round by its structur
     assert.equal(nativeUserTurn("responses", responsesUser), true);
     assert.equal(nativeUserTurn("responses", { input: "Add tests" }), true, "a string input is the user's");
     assert.equal(nativeUserTurn("responses", responsesTool), false);
+    // A blank last message is not answered by an earlier turn's text.
+    const blank = { messages: [...anthropicUser.messages, { role: "assistant", content: "ok" }, { role: "user", content: [{ type: "image", source: {} }] }] };
+    assert.equal(nativeUserTurn("anthropic_messages", blank), true);
+    assert.equal(nativeLastUserText("anthropic_messages", blank), "");
+    assert.equal(nativeLastUserText("anthropic_messages", anthropicUser), "Refactor the parser");
     assert.equal(
         nativeCodingContext("responses", null, responsesTool, null).lastToolResult,
         "2 passed, 1 failed"

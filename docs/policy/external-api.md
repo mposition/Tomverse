@@ -241,8 +241,9 @@ catalogue, so a customer never has to recopy it.
 - **Candidates:** the offered models, plus the `frontier` and `apex` models
   this plan reaches (owner decision 2026-11-20: Smart Adaptive may route to
   them, no client may name them, and each request is charged that model's own
-  credits under the key's cap; they are only ever the router's pick beside a
-  model a client can name, never the default and never the one model left),
+  credits under the key's cap; they join only beside a model of their
+  provider a client can name, and are only ever the router's pick, never the
+  default and never the one model left),
   that fit the request -- images only to a
   model that reads them, the requested output within the model's limit, a
   rough input estimate plus that output within its window, and the optional
@@ -644,7 +645,11 @@ providers, so signed or encrypted state is never sent to another provider.
   tool rounds; identical concurrent requests share one router call. The
   switch costs the reasoning and the cache, the trade the user's harder
   request asks for. The provider default is never a frontier or apex model,
-  and a request only they fit is refused as it was before they were candidates. The conversation is the client's own id: Codex's
+  and a request only they fit is refused as it was before they were candidates.
+  Known limit: with a lost pin, two different messages of one session routed
+  at the same moment pick independently, and the dearer one admitted first
+  keeps the pin, so the other's tool rounds then run on it (reasoning and
+  cache lost, never the request). The conversation is the client's own id: Codex's
   `prompt_cache_key` (its thread id; `session-id`/`thread-id` headers),
   Claude Code's `x-claude-code-session-id` or the session in
   `metadata.user_id`; otherwise a digest of the history's opening. The pin is

@@ -153,6 +153,13 @@ export const nativeLatestPrompt = (protocol: NativeSmartProtocol, body: Record<s
     return index < 0 ? "" : nativeText((items[index] as Record<string, unknown>).content);
 };
 
+/** The text of the user message this request ends with ("" when it ends otherwise). */
+export const nativeLastUserText = (protocol: NativeSmartProtocol, body: Record<string, unknown>) => {
+    const items = nativeHistory(protocol, body);
+    const last = items[items.length - 1];
+    return isRecord(last) && last.role === "user" ? nativeText(last.content) : "";
+};
+
 /** The assistant text just before the latest user text, as Chat Completions passes it. */
 export const nativePreviousAnswer = (protocol: NativeSmartProtocol, body: Record<string, unknown>): string | null => {
     const items = nativeHistory(protocol, body);

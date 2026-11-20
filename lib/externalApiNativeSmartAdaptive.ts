@@ -11,7 +11,7 @@ import {
     isNativeOutput,
     nativeCodingContext,
     nativeHistory,
-    nativeLatestPrompt,
+    nativeLastUserText,
     nativePreviousAnswer,
     nativeUserTurn,
     type NativeSmartProtocol,
@@ -214,9 +214,11 @@ const decideNativeSmartAdaptive = async (input: {
     const now = input.now ?? Date.now();
     const pinKey = `${input.keyId}\0${input.protocol}\0${nativeConversationId(input.protocol, input.request, input.body)}`;
 
-    const latest = nativeLatestPrompt(input.protocol, input.body);
-    const prompt = latest.trim() ? latest : "";
     const userTurn = nativeUserTurn(input.protocol, input.body);
+    // The router reads the message this request ends with; a blank one (an
+    // image alone) is not routed, never answered by an earlier turn's text.
+    const latest = userTurn ? nativeLastUserText(input.protocol, input.body) : "";
+    const prompt = latest.trim() ? latest : "";
     const underWay = nativeConversationUnderWay(input.protocol, input.body);
     const router = (current: RunnableEntry | undefined) =>
         pickWithSmartAdaptiveRouter({

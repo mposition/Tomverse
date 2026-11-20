@@ -4,6 +4,7 @@ import { externalChannelAllowlist, type ExternalCodingChannel } from "@/lib/codi
 import {
     externalApiModelCapabilities,
     isExternalApiServableModel,
+    isSmartAdaptiveOnlyModel,
     smartAdaptiveCapabilities,
     type ExternalApiModelCapabilities,
 } from "@/lib/externalApiCatalogCore";
@@ -34,13 +35,20 @@ export const externalApiRunnableModels = async (
 ): Promise<{ model: AiModel; capabilities: ExternalApiModelCapabilities }[]> => {
     const runtime = await getRuntimeModels();
     const allowed = await externalChannelAllowlist(options.channel ?? "api", plan, { runtime });
-    return runtime
-        .filter(
-            (model) =>
-                isExternalApiServableModel(model, plan, { smartAdaptive: options.smartAdaptive }) &&
-                isProviderApiKeyConfigured(model.provider) &&
-                (allowed === null || allowed.has(model.id))
-        )
+    const servable = runtime.filter(
+        (model) =>
+            isExternalApiServableModel(model, plan, { smartAdaptive: options.smartAdaptive }) &&
+            isProviderApiKeyConfigured(model.provider) &&
+            (allowed === null || allowed.has(model.id))
+    );
+    // A router-only model joins only beside a model of its provider a client
+    // can name, so it is never the default, never the one model left, and a
+    // native protocol never offers Smart Adaptive over router-only models alone.
+    const nameableProviders = new Set(
+        servable.filter((model) => !isSmartAdaptiveOnlyModel(model)).map((model) => model.provider)
+    );
+    return servable
+        .filter((model) => !isSmartAdaptiveOnlyModel(model) || nameableProviders.has(model.provider))
         .map((model) => ({
             model,
             capabilities: externalApiModelCapabilities(model, {
