@@ -58,11 +58,25 @@ const EXPOSABLE_USAGE_CLASSES = new Set<AiModel["usageClass"]>([
 export const externalApiChannelFor = (userAgent: string | null | undefined): "api" | "cli" =>
     typeof userAgent === "string" && userAgent.startsWith("tomverse-cli/") ? "cli" : "api";
 
-export const isExternalApiServableModel = (model: AiModel, plan: ModelTier) =>
+/**
+ * Usage classes Smart Adaptive may route to but no client may name directly
+ * (owner decision 2026-11-20): the coding guidance sends only the hardest
+ * work to them (AUTO_LLM_ROUTER_CODING_GUIDANCE), each request is charged
+ * that model's own credits, and the key's cap and the account's credits still
+ * refuse what they do not cover.
+ */
+const SMART_ADAPTIVE_ONLY_USAGE_CLASSES = new Set<AiModel["usageClass"]>(["frontier", "apex"]);
+
+export const isExternalApiServableModel = (
+    model: AiModel,
+    plan: ModelTier,
+    options: { smartAdaptive?: boolean } = {}
+) =>
     model.enabled &&
     !model.catalogDeleted &&
     (model.status === "enabled" || model.status === "limited") &&
-    EXPOSABLE_USAGE_CLASSES.has(model.usageClass) &&
+    (EXPOSABLE_USAGE_CLASSES.has(model.usageClass) ||
+        (options.smartAdaptive === true && SMART_ADAPTIVE_ONLY_USAGE_CLASSES.has(model.usageClass))) &&
     canUseModelWithPlan(plan, model);
 
 export type ExternalApiModelCapabilities = {
@@ -86,6 +100,11 @@ export type ExternalApiModelCapabilities = {
      * (Codex picks its patch tool by model). Absent for Smart Adaptive.
      */
     providerModelId?: string;
+    /**
+     * Smart Adaptive only: the most one request can cost on each protocol. A
+     * native protocol routes among its own provider's models only.
+     */
+    creditWeightByProtocol?: Partial<Record<ExternalApiProtocol, number>>;
 };
 
 export const externalApiModelCapabilities = (
@@ -159,6 +178,14 @@ export const smartAdaptiveCapabilities = (
               // encrypted state never crosses providers.
               protocols: EXTERNAL_API_PROTOCOLS.filter((protocol) =>
                   candidates.some((candidate) => (candidate.protocols ?? ["chat_completions"]).includes(protocol))
+              ),
+              creditWeightByProtocol: Object.fromEntries(
+                  EXTERNAL_API_PROTOCOLS.flatMap((protocol) => {
+                      const weights = candidates
+                          .filter((candidate) => (candidate.protocols ?? ["chat_completions"]).includes(protocol))
+                          .map((candidate) => candidate.creditWeight);
+                      return weights.length ? [[protocol, Math.max(...weights)]] : [];
+                  })
               ),
           };
 

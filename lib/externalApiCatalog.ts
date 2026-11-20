@@ -19,6 +19,10 @@ import type { ExternalApiProtocol } from "@/lib/externalApiProtocols";
  * provider has no credential on this deployment could only fail, so it is not
  * offered.
  *
+ * `smartAdaptive` adds the classes only Smart Adaptive routes to (frontier and
+ * apex, lib/externalApiCatalogCore.ts); a client naming one of those directly
+ * is still refused.
+ *
  * With CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED on, only the chat models the
  * newest coding snapshot lists for this channel and the coding judge still
  * admits now (lib/codingCatalogChannels.ts); off, the allow-list is null and
@@ -26,14 +30,14 @@ import type { ExternalApiProtocol } from "@/lib/externalApiProtocols";
  */
 export const externalApiRunnableModels = async (
     plan: ModelTier,
-    options: { channel?: ExternalCodingChannel } = {}
+    options: { channel?: ExternalCodingChannel; smartAdaptive?: boolean } = {}
 ): Promise<{ model: AiModel; capabilities: ExternalApiModelCapabilities }[]> => {
     const runtime = await getRuntimeModels();
     const allowed = await externalChannelAllowlist(options.channel ?? "api", plan, { runtime });
     return runtime
         .filter(
             (model) =>
-                isExternalApiServableModel(model, plan) &&
+                isExternalApiServableModel(model, plan, { smartAdaptive: options.smartAdaptive }) &&
                 isProviderApiKeyConfigured(model.provider) &&
                 (allowed === null || allowed.has(model.id))
         )
@@ -49,14 +53,21 @@ export const externalApiRunnableModels = async (
 
 /**
  * What `GET /models` and the settings page offer: Smart Adaptive first, then
- * every runnable model.
+ * every runnable model. Smart Adaptive's limits and credits are over its own
+ * candidates, which include the classes only it routes to.
  */
 export const externalApiOfferedModels = async (
     plan: ModelTier,
     options: { channel?: ExternalCodingChannel } = {}
 ): Promise<ExternalApiModelCapabilities[]> => {
-    const runnable = (await externalApiRunnableModels(plan, options)).map((entry) => entry.capabilities);
-    const smart = smartAdaptiveCapabilities(runnable, DEFAULT_MODEL_ID);
+    const pool = await externalApiRunnableModels(plan, { ...options, smartAdaptive: true });
+    const runnable = pool
+        .filter((entry) => isExternalApiServableModel(entry.model, plan))
+        .map((entry) => entry.capabilities);
+    const smart = smartAdaptiveCapabilities(
+        pool.map((entry) => entry.capabilities),
+        DEFAULT_MODEL_ID
+    );
     return smart ? [smart, ...runnable] : runnable;
 };
 

@@ -185,14 +185,14 @@ export const resolveNativeModel = async (
     smart?: Omit<Parameters<typeof routeNativeSmartAdaptive>[0], "protocol" | "runnable">,
     /** The coding-catalogue channel the request belongs to (read only while the external channels are on). */
     channel: "api" | "cli" = "api"
-): Promise<RunnableEntry & { routedBy?: NativeSmartDecision["routedBy"] }> => {
+): Promise<RunnableEntry & { routedBy?: NativeSmartDecision["routedBy"]; commit?: NativeSmartDecision["commit"] }> => {
     if (typeof requested !== "string" || !requested) {
         throw new NativeProtocolError(400, "invalid_request", "model is required.", "model");
     }
-    const runnable = await externalApiRunnableModels(plan, { channel });
+    const runnable = await externalApiRunnableModels(plan, { channel, smartAdaptive: requested === SMART_ADAPTIVE_MODEL_ID });
     if (requested === SMART_ADAPTIVE_MODEL_ID) {
         const decision = smart ? await routeNativeSmartAdaptive({ ...smart, protocol, runnable }) : null;
-        if (decision) return { ...decision.entry, routedBy: decision.routedBy };
+        if (decision) return { ...decision.entry, routedBy: decision.routedBy, commit: decision.commit };
         throw new NativeProtocolError(
             404,
             "model_not_found",
@@ -599,6 +599,9 @@ export async function handleNativeGeneration(request: Request, spec: NativeProto
         }
         leaseId = grant.leaseId;
         reservation = grant.usageReservation;
+        // Smart Adaptive moved the conversation to a stronger model: pinned now
+        // that admission accepted it.
+        entry.commit?.();
 
         if (request.signal?.aborted) {
             throw new NativeProtocolError(499, "request_cancelled", "The request was cancelled before it was sent.");

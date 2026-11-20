@@ -5,10 +5,19 @@ import { nativeSmartAdaptiveDefaultId } from "@/lib/externalApiCatalogCore";
 import { estimateNativeInput, isRecord, NativeProtocolError } from "@/lib/externalApiNativeCore";
 import { NATIVE_PROTOCOL_PROVIDER } from "@/lib/externalApiProtocols";
 import { pickWithSmartAdaptiveRouter } from "@/lib/externalApiSmartAdaptive";
+import {
+    escalateOnly,
+    isNativeOutput,
+    nativeCodingContext,
+    nativeHistory,
+    nativeText,
+    nativeUserTurn,
+    type NativeSmartProtocol,
+} from "@/lib/externalApiSmartAdaptiveCore";
 import { DEFAULT_MODEL_ID } from "@/lib/models";
 
 type RunnableEntry = Awaited<ReturnType<typeof externalApiRunnableModels>>[number];
-export type NativeSmartProtocol = keyof typeof NATIVE_PROTOCOL_PROVIDER;
+export type { NativeSmartProtocol };
 
 /**
  * Smart Adaptive on the native protocols: Claude Code (Anthropic Messages)
@@ -33,9 +42,17 @@ export type NativeSmartProtocol = keyof typeof NATIVE_PROTOCOL_PROVIDER;
  * routed again: it takes the provider's default model and pins that. A model
  * switch there costs reasoning, never the request.
  *
- * The paid router call is made only on a conversation's first request, behind
- * the same gate and switch as Chat Completions (smartAdaptiveRouterAllowed).
+ * The paid router call is made on a conversation's first request and on each
+ * later message the user wrote (not a tool round), behind the same gate and
+ * switch as Chat Completions (smartAdaptiveRouterAllowed), with the coding
+ * guidance and what the request shows of the task. On a later message the
+ * model only moves up (escalateOnly): a pick cheaper than the pinned model
+ * keeps the pin, a stronger one moves it, and the move is pinned only once
+ * admission accepted it (`commit`), so a model the account cannot pay for
+ * never takes the conversation. A user message with no pin (another
+ * instance, a restart) is routed like a first request.
  * A free call (token count) never routes: the pin, or the default.
+ * Every decision is logged as `external_api_smart_adaptive_routed`.
  */
 
 const PIN_MS = 6 * 60 * 60_000;
@@ -43,7 +60,14 @@ const PIN_MAX = 5_000;
 const pins = new Map<string, { modelId: string; at: number }>();
 const routing = new Map<string, Promise<NativeSmartDecision>>();
 
-export type NativeSmartDecision = { entry: RunnableEntry; routedBy: "router" | "continued" | "default" };
+export type NativeSmartDecision = {
+    entry: RunnableEntry;
+    routedBy: "router" | "continued" | "default";
+    /** The router picked a cheaper model and the conversation kept its pin. */
+    held?: boolean;
+    /** Pins a move to a stronger model; called once admission accepted it. */
+    commit?: () => void;
+};
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 32);
 
@@ -53,26 +77,9 @@ const pin = (pinKey: string, modelId: string, now: number) => {
     pins.set(pinKey, { modelId, at: now });
 };
 
-/** Items a provider produced: their presence means the conversation is under way. */
-const RESPONSES_OUTPUT_TYPES = new Set(["reasoning", "compaction", "item_reference"]);
-const isResponsesOutput = (item: unknown) =>
-    isRecord(item) &&
-    (item.role === "assistant" ||
-        (typeof item.type === "string" &&
-            (RESPONSES_OUTPUT_TYPES.has(item.type) || item.type.endsWith("_call") || item.type.endsWith("_call_output"))));
-
-const history = (protocol: NativeSmartProtocol, body: Record<string, unknown>): unknown[] => {
-    if (protocol === "anthropic_messages") return Array.isArray(body.messages) ? body.messages : [];
-    if (Array.isArray(body.input)) return body.input;
-    return typeof body.input === "string" ? [{ role: "user", content: body.input }] : [];
-};
-
-const isOutput = (protocol: NativeSmartProtocol, item: unknown) =>
-    protocol === "anthropic_messages" ? isRecord(item) && item.role === "assistant" : isResponsesOutput(item);
-
 /** Whether the request already carries something a model produced. */
 export const nativeConversationUnderWay = (protocol: NativeSmartProtocol, body: Record<string, unknown>) =>
-    history(protocol, body).some((item) => isOutput(protocol, item));
+    nativeHistory(protocol, body).some((item) => isNativeOutput(protocol, item));
 
 /** The conversation this request belongs to, as the client identifies it. */
 export const nativeConversationId = (
@@ -92,38 +99,46 @@ export const nativeConversationId = (
         const userId = isRecord(body.metadata) ? body.metadata.user_id : undefined;
         if (typeof userId === "string" && /session/i.test(userId)) return `client:${digest(userId)}`;
     }
-    const items = history(protocol, body);
-    const firstOutput = items.findIndex((item) => isOutput(protocol, item));
+    const items = nativeHistory(protocol, body);
+    const firstOutput = items.findIndex((item) => isNativeOutput(protocol, item));
     const opening = firstOutput < 0 ? items : items.slice(0, firstOutput);
     return `opening:${digest(JSON.stringify([body.system ?? body.instructions ?? null, opening]))}`;
 };
 
-const textOf = (content: unknown): string =>
-    typeof content === "string"
-        ? content
-        : Array.isArray(content)
-          ? content
-                .map((part) =>
-                    isRecord(part) && (part.type === "text" || part.type === "input_text") && typeof part.text === "string" ? part.text : ""
-                )
-                .filter(Boolean)
-                .join("\n")
-          : "";
-
 /** The latest user text, for the router. */
 export const nativeLatestPrompt = (protocol: NativeSmartProtocol, body: Record<string, unknown>) => {
-    const items = history(protocol, body);
+    const items = nativeHistory(protocol, body);
     for (let index = items.length - 1; index >= 0; index -= 1) {
         const item = items[index];
         if (isRecord(item) && item.role === "user") {
-            const text = textOf(item.content);
+            const text = nativeText(item.content);
             if (text) return text;
         }
     }
     return "";
 };
 
-export const routeNativeSmartAdaptive = async (input: {
+export const routeNativeSmartAdaptive = async (
+    input: Parameters<typeof decideNativeSmartAdaptive>[0]
+): Promise<NativeSmartDecision | null> => {
+    const decision = await decideNativeSmartAdaptive(input);
+    if (decision && !input.free) {
+        console.info(
+            JSON.stringify({
+                event: "external_api_smart_adaptive_routed",
+                requestId: input.requestId,
+                protocol: input.protocol,
+                routedBy: decision.routedBy,
+                modelId: decision.entry.model.id,
+                held: decision.held ?? false,
+                client: input.request.headers.get("user-agent")?.slice(0, 40) ?? null,
+            })
+        );
+    }
+    return decision;
+};
+
+const decideNativeSmartAdaptive = async (input: {
     protocol: NativeSmartProtocol;
     request: Request;
     body: Record<string, unknown>;
@@ -190,12 +205,35 @@ export const routeNativeSmartAdaptive = async (input: {
     const now = input.now ?? Date.now();
     const pinKey = `${input.keyId}\0${input.protocol}\0${nativeConversationId(input.protocol, input.request, input.body)}`;
 
+    const prompt = nativeLatestPrompt(input.protocol, input.body);
+    const userTurn = nativeUserTurn(input.protocol, input.body);
+    const router = (current: RunnableEntry | undefined) =>
+        pickWithSmartAdaptiveRouter({
+            userId: input.userId,
+            requestId: input.requestId,
+            prompt,
+            previousAnswer: null,
+            eligible: candidates,
+            fallback: current ?? fallback,
+            coding: nativeCodingContext(input.protocol, input.request.headers.get("user-agent"), input.body, current?.model.id ?? null),
+        });
+
     const pinned = pins.get(pinKey);
     if (pinned && now - pinned.at < PIN_MS) {
-        const entry = candidates.find((candidate) => candidate.model.id === pinned.modelId);
-        if (entry) {
-            if (!input.free) pin(pinKey, entry.model.id, now);
-            return { entry, routedBy: "continued" };
+        const current = candidates.find((candidate) => candidate.model.id === pinned.modelId);
+        if (current) {
+            if (!input.free) pin(pinKey, current.model.id, now);
+            if (input.free || !userTurn || candidates.length < 2 || !prompt) return { entry: current, routedBy: "continued" };
+            // A message the user wrote: the router may move the conversation
+            // to a stronger model, never to a cheaper one.
+            if (!(await input.routerAllowed())) return { entry: current, routedBy: "continued" };
+            const routed = await router(current);
+            if (routed.routedBy !== "router" || routed.entry.model.id === current.model.id) {
+                return { entry: current, routedBy: "continued" };
+            }
+            const { entry, held } = escalateOnly(current, routed.entry);
+            if (held) return { entry, routedBy: "continued", held };
+            return { entry, routedBy: "router", commit: () => pin(pinKey, entry.model.id, Date.now()) };
         }
         // The pinned model cannot take this request any more (the history
         // outgrew its window, or it was retired): another of the provider's
@@ -207,8 +245,9 @@ export const routeNativeSmartAdaptive = async (input: {
         pin(pinKey, decision.entry.model.id, now);
         return decision;
     };
-    const prompt = nativeLatestPrompt(input.protocol, input.body);
-    if (nativeConversationUnderWay(input.protocol, input.body) || candidates.length < 2 || !prompt) {
+    // A tool round with no pin keeps to the default; a message the user wrote
+    // is routed like a first request.
+    if ((nativeConversationUnderWay(input.protocol, input.body) && !userTurn) || candidates.length < 2 || !prompt) {
         return settle({ entry: fallback, routedBy: "default" });
     }
     // Concurrent first requests of one conversation share one router call;
@@ -223,16 +262,7 @@ export const routeNativeSmartAdaptive = async (input: {
     }
     const decision = (async () =>
         settle(
-            (await input.routerAllowed())
-                ? await pickWithSmartAdaptiveRouter({
-                      userId: input.userId,
-                      requestId: input.requestId,
-                      prompt,
-                      previousAnswer: null,
-                      eligible: candidates,
-                      fallback,
-                  })
-                : { entry: fallback, routedBy: "default" }
+            (await input.routerAllowed()) ? await router(undefined) : { entry: fallback, routedBy: "default" }
         ))();
     routing.set(pinKey, decision);
     try {

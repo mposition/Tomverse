@@ -238,7 +238,10 @@ it is the id the settings page puts in a copied configuration by default:
 the id stays the same while models are added to or retired from the
 catalogue, so a customer never has to recopy it.
 
-- **Candidates:** the offered models that fit the request -- images only to a
+- **Candidates:** the offered models, plus the `frontier` and `apex` models
+  this plan reaches (owner decision 2026-11-20: Smart Adaptive may route to
+  them, no client may name them, and each request is charged that model's own
+  credits under the key's cap), that fit the request -- images only to a
   model that reads them, the requested output within the model's limit, a
   rough input estimate plus that output within its window, and the optional
   features the request uses (`strict` tools, image `detail`,
@@ -257,8 +260,17 @@ catalogue, so a customer never has to recopy it.
   from the window to size the input), and the largest credits per request. A request
   beyond every candidate gets the default model's ordinary limit error.
 - **Router input:** the latest user message's text and the assistant text
-  before it, bounded by the router itself. Nothing is stored: the external API
-  passes no conversation id, so the router writes no `AutoRouterDecision` row.
+  before it, bounded by the router itself, and the coding signals
+  (`CodingRouterContext`): the client's User-Agent, the number of tools, the
+  model turns so far, the input size, the end of the latest tool result
+  (600 characters, where errors and test summaries print) and the model
+  already working on the conversation. The router reads them with the coding
+  head and guidance (`AUTO_LLM_ROUTER_CODING_GUIDANCE`, version `coding-v1`):
+  quality first, credits only between candidates expected to do the work
+  equally well, strength by tier then credits, apex only for the hardest work.
+  The guidance is fixed in code; the router optimizer measures and replaces
+  Chat's guidance only. Nothing is stored: the external API passes no
+  conversation id, so the router writes no `AutoRouterDecision` row.
 - **Tool loops:** a request that carries tool results back goes to the model
   that made those tool calls. When a Smart Adaptive answer ends with tool
   calls, its model is remembered in process for ten minutes under the key and
@@ -267,7 +279,22 @@ catalogue, so a customer never has to recopy it.
   requests with the same history, refused requests and answers without calls
   never overwrite each other. A miss (another instance, a restart) routes
   again and shows as `routed-by: router`, so across instances a tool loop can
-  change model. A new user message is routed again.
+  change model.
+- **A new user message** is routed again, and within a conversation the model
+  only moves up (`escalateOnly`): a pick with fewer credits than the model
+  already working on the conversation keeps that model (`routed-by:
+  continued`), an equal or stronger one moves. The conversation is known by
+  the opening of its history (everything before the first assistant message)
+  under the key; its model is remembered in process for six hours once
+  admission accepted a request on it, so a pick the account could not pay for
+  is never held. With the router gate closed it keeps its model too. A miss
+  (another instance, a restart, a client that rewrites the opening) routes
+  freely.
+- **Log:** every Smart Adaptive decision, on every protocol, is one
+  `external_api_smart_adaptive_routed` line (request id, protocol,
+  `routedBy`, model, `held`, the client's User-Agent cut to 40 characters),
+  and the router's own `chat_auto_llm_router` line carries
+  `taskKind: external_api`. No request text is logged.
 - **No answer** (router switch off, no router model configured, provider budget
   refused, timeout, invalid output, one candidate left): the default model
   (`DEFAULT_MODEL_ID`) if it fits, otherwise the first candidate in catalogue
@@ -597,11 +624,18 @@ providers, so signed or encrypted state is never sent to another provider.
   incompatible encrypted reasoning when the model family changes, also without
   failing. So a model switch mid-task costs reasoning and the prompt cache,
   not the request; the gateway still avoids it.
-- **One pick per conversation.** The first request of a conversation (no model
-  output in its history) is routed with the same router call, gate and switch
-  as Chat Completions (section 5.1, `pickWithSmartAdaptiveRouter`); every later
-  request of that conversation goes to the same model (`x-tomverse-routed-by:
-  continued`). The conversation is the client's own id: Codex's
+- **One pick per conversation, moving only up.** The first request of a
+  conversation (no model output in its history) is routed with the same
+  router call, gate, switch and coding guidance as Chat Completions (section
+  5.1, `pickWithSmartAdaptiveRouter`); every tool round of that conversation
+  goes to the same model (`x-tomverse-routed-by: continued`). A later message
+  the user wrote (the history ends with a user message carrying no
+  `tool_result`, or a Responses user message rather than a tool output; read
+  from the structure, never the text) is routed again with the pinned model
+  as `currentModelId`: a cheaper pick keeps the pin, a stronger one answers
+  and is pinned only once admission accepted it, so a model the account
+  cannot pay for never takes the conversation. The switch costs the
+  reasoning and the cache, the trade the user's harder request asks for. The conversation is the client's own id: Codex's
   `prompt_cache_key` (its thread id; `session-id`/`thread-id` headers),
   Claude Code's `x-claude-code-session-id` or the session in
   `metadata.user_id`; otherwise a digest of the history's opening. The pin is
@@ -617,9 +651,10 @@ providers, so signed or encrypted state is never sent to another provider.
   router call or hold. Every refusal that does not depend on the model
   (provider-run tools, cache TTL, stored state, forwarded headers) is checked
   before the router call, so a request refused anyway never spends one.
-- **A missed pin never fails or re-routes.** A request whose history already
-  carries model output and whose pin this process does not have (another
-  instance, a restart) takes the provider default and pins it. The body
+- **A missed pin never fails.** A tool round whose history already carries
+  model output and whose pin this process does not have (another instance, a
+  restart) takes the provider default and pins it; a message the user wrote
+  is routed like a first request. The body
   names no producing model to recover, and both providers accept the switch.
   If the pinned model can no longer take the request (window, retirement),
   another fitting model of the provider answers and the pin moves.

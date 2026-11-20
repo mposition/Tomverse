@@ -1,0 +1,212 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+    AUTO_LLM_ROUTER_CODING_GUIDANCE,
+    AUTO_LLM_ROUTER_CODING_VERSION,
+    AUTO_LLM_ROUTER_DEFAULT_GUIDANCE,
+    AUTO_LLM_ROUTER_MAX_TOOL_RESULT_CHARS,
+    AUTO_LLM_ROUTER_SYSTEM,
+    boundedToolResult,
+    buildAutoLlmRouterSystem,
+} from "../lib/autoLlmRouterCore.ts";
+import { isExternalApiServableModel, smartAdaptiveCapabilities } from "../lib/externalApiCatalogCore.ts";
+import { codingToolModels } from "../lib/externalApiCodingTools.ts";
+import {
+    escalateOnly,
+    nativeCodingContext,
+    nativeUserTurn,
+    smartAdaptiveCodingContext,
+    smartAdaptiveConversationKey,
+} from "../lib/externalApiSmartAdaptiveCore.ts";
+
+/**
+ * Smart Adaptive as a coding router (owner decision 2026-11-20): the coding
+ * guidance, the signals it reads, a model that only moves up within a
+ * conversation, and frontier/apex models that only Smart Adaptive routes to.
+ */
+
+const model = (usageClass, extra = {}) => ({
+    id: `fixture-${usageClass}`,
+    name: "Fixture",
+    apiModel: "fixture-upstream",
+    provider: "anthropic",
+    icon: "",
+    bestFor: "",
+    minimumPlan: "Pro",
+    usageClass,
+    enabled: true,
+    status: "enabled",
+    ...extra,
+});
+
+test("frontier and apex models are Smart Adaptive candidates only", () => {
+    for (const usageClass of ["frontier", "apex"]) {
+        assert.equal(isExternalApiServableModel(model(usageClass), "Pro"), false, `${usageClass} cannot be named directly`);
+        assert.equal(isExternalApiServableModel(model(usageClass), "Pro", { smartAdaptive: true }), true, `${usageClass} routes`);
+        assert.equal(isExternalApiServableModel(model(usageClass), "Free", { smartAdaptive: true }), false, "the plan still applies");
+        assert.equal(
+            isExternalApiServableModel(model(usageClass, { enabled: false }), "Pro", { smartAdaptive: true }),
+            false,
+            "a disabled model never routes"
+        );
+    }
+    for (const usageClass of ["research", "deep-research"]) {
+        assert.equal(isExternalApiServableModel(model(usageClass), "Max", { smartAdaptive: true }), false, `${usageClass} never`);
+    }
+    assert.equal(isExternalApiServableModel(model("premium"), "Pro", { smartAdaptive: true }), true);
+});
+
+const caps = (id, creditWeight, protocols) => ({
+    id,
+    name: id,
+    provider: "x",
+    tools: true,
+    vision: true,
+    reasoning: true,
+    contextWindowTokens: 200_000,
+    maxOutputTokens: 64_000,
+    creditWeight,
+    protocols,
+});
+
+test("Smart Adaptive states the most a request costs, per protocol", () => {
+    const smart = smartAdaptiveCapabilities([
+        caps("haiku", 1, ["chat_completions", "anthropic_messages"]),
+        caps("fable", 80, ["chat_completions", "anthropic_messages"]),
+        caps("luna", 1, ["chat_completions", "responses"]),
+        caps("sol", 16, ["chat_completions", "responses"]),
+    ]);
+    assert.equal(smart.creditWeight, 80);
+    assert.deepEqual(smart.creditWeightByProtocol, { chat_completions: 80, anthropic_messages: 80, responses: 16 });
+
+    // The settings page lists the directly nameable models only, and Smart
+    // Adaptive's ceiling on each protocol still counts the routed-only ones.
+    const tools = codingToolModels([
+        { ...smart, id: "smart-adaptive" },
+        caps("haiku", 1, ["chat_completions", "anthropic_messages"]),
+        caps("luna", 1, ["chat_completions", "responses"]),
+        caps("sol", 16, ["chat_completions", "responses"]),
+    ]);
+    assert.equal(tools.claudeCode[0].id, "smart-adaptive");
+    assert.equal(tools.claudeCode[0].creditWeight, 80, "Fable is routed to on Claude Code");
+    assert.equal(tools.codex[0].creditWeight, 16, "an Anthropic model never sets Codex's ceiling");
+    assert.ok(!tools.claudeCode.some((entry) => entry.id === "fable"), "never offered by name");
+});
+
+test("the coding router has its own head and fixed guidance", () => {
+    const system = buildAutoLlmRouterSystem(AUTO_LLM_ROUTER_CODING_GUIDANCE, { coding: true });
+    assert.match(system, /coding agent/);
+    assert.match(system, /Always set requiresFileGeneration to false/);
+    assert.doesNotMatch(system, /one chat message/);
+    assert.ok(system.includes(AUTO_LLM_ROUTER_CODING_GUIDANCE));
+    assert.ok(!system.includes(AUTO_LLM_ROUTER_DEFAULT_GUIDANCE), "the Chat guidance is not in a coding call");
+    // Quality first: credits only break ties, and the strongest tiers are named.
+    assert.match(AUTO_LLM_ROUTER_CODING_GUIDANCE, /compare credits only between candidates you expect to do the work equally well/);
+    assert.match(AUTO_LLM_ROUTER_CODING_GUIDANCE, /frontier/);
+    assert.match(AUTO_LLM_ROUTER_CODING_GUIDANCE, /Apex candidates are for the hardest work only/);
+    assert.match(AUTO_LLM_ROUTER_CODING_GUIDANCE, /currentModelId/);
+    assert.equal(AUTO_LLM_ROUTER_CODING_VERSION, "coding-v1");
+    // The Chat prompt is unchanged by the coding head.
+    assert.match(AUTO_LLM_ROUTER_SYSTEM, /one chat message/);
+});
+
+test("a tool result travels as its bounded end", () => {
+    assert.equal(boundedToolResult(null), null);
+    assert.equal(boundedToolResult("   "), null);
+    assert.equal(boundedToolResult(" ok "), "ok");
+    const long = `${"x".repeat(5_000)}FAILED 3 tests`;
+    const bounded = boundedToolResult(long);
+    assert.ok(bounded.endsWith("FAILED 3 tests"), "the summary printed last is kept");
+    assert.ok(bounded.length <= AUTO_LLM_ROUTER_MAX_TOOL_RESULT_CHARS + 10);
+});
+
+const entry = (id, creditWeight) => ({ model: { id }, capabilities: { creditWeight } });
+
+test("within a conversation the model only moves up", () => {
+    const luna = entry("luna", 1);
+    const sonnet = entry("sonnet", 16);
+    const opus = entry("opus", 32);
+    assert.deepEqual(escalateOnly(undefined, luna), { entry: luna, held: false }, "nothing to hold");
+    assert.deepEqual(escalateOnly(sonnet, luna), { entry: sonnet, held: true }, "a cheaper pick keeps the current model");
+    assert.deepEqual(escalateOnly(sonnet, opus), { entry: opus, held: false }, "a stronger pick moves");
+    assert.deepEqual(escalateOnly(luna, entry("deepseek", 1)), { entry: entry("deepseek", 1), held: false }, "an equal one may move");
+});
+
+test("Chat Completions: one conversation key across rounds, and the coding signals", () => {
+    const opening = [
+        { role: "system", content: "You are a coding agent." },
+        { role: "user", content: "Fix the failing test" },
+    ];
+    const first = { model: "smart-adaptive", messages: opening };
+    const later = {
+        model: "smart-adaptive",
+        tools: [{ type: "function", function: { name: "run", parameters: {} } }],
+        messages: [
+            ...opening,
+            { role: "assistant", content: null, tool_calls: [{ id: "c1", type: "function", function: { name: "run", arguments: "{}" } }] },
+            { role: "tool", tool_call_id: "c1", content: "Error: expected 2, got 3\n1 failed" },
+            { role: "assistant", content: "Still failing." },
+            { role: "user", content: "It still does not work" },
+        ],
+    };
+    assert.equal(smartAdaptiveConversationKey("k1", first), smartAdaptiveConversationKey("k1", later));
+    assert.notEqual(smartAdaptiveConversationKey("k1", first), smartAdaptiveConversationKey("k2", first), "per key");
+    assert.notEqual(
+        smartAdaptiveConversationKey("k1", first),
+        smartAdaptiveConversationKey("k1", { ...first, messages: [{ role: "user", content: "Another task" }] })
+    );
+    const coding = smartAdaptiveCodingContext(later, "Cursor/2.1 (Windows)", "sonnet");
+    assert.equal(coding.client, "Cursor/2.1 (Windows)");
+    assert.equal(coding.toolCount, 1);
+    assert.equal(coding.modelTurns, 2);
+    assert.ok(coding.inputTokens > 0);
+    assert.equal(coding.lastToolResult, "Error: expected 2, got 3\n1 failed");
+    assert.equal(coding.currentModelId, "sonnet");
+});
+
+test("native: a message the user wrote is told from a tool round by its structure", () => {
+    const anthropicUser = { messages: [{ role: "user", content: [{ type: "text", text: "Refactor the parser" }] }] };
+    const anthropicTool = {
+        tools: [{ name: "bash" }, { name: "edit" }],
+        messages: [
+            { role: "user", content: "Refactor the parser" },
+            { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "bash", input: {} }] },
+            {
+                role: "user",
+                content: [
+                    { type: "tool_result", tool_use_id: "t1", content: "TypeError: x is undefined" },
+                    { type: "text", text: "<system-reminder>context</system-reminder>" },
+                ],
+            },
+        ],
+    };
+    assert.equal(nativeUserTurn("anthropic_messages", anthropicUser), true);
+    assert.equal(nativeUserTurn("anthropic_messages", anthropicTool), false, "a tool_result with reminder text is a tool round");
+    const context = nativeCodingContext(
+        "anthropic_messages",
+        "claude-cli/2.1.278",
+        anthropicTool,
+        "claude-sonnet-5-5"
+    );
+    assert.equal(context.client, "claude-cli/2.1.278");
+    assert.equal(context.toolCount, 2);
+    assert.equal(context.modelTurns, 1);
+    assert.equal(context.lastToolResult, "TypeError: x is undefined");
+    assert.equal(context.currentModelId, "claude-sonnet-5-5");
+
+    const responsesUser = { input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Add tests" }] }] };
+    const responsesTool = {
+        input: [
+            { type: "message", role: "user", content: "Add tests" },
+            { type: "function_call", call_id: "f1", name: "shell", arguments: "{}" },
+            { type: "function_call_output", call_id: "f1", output: "2 passed, 1 failed" },
+        ],
+    };
+    assert.equal(nativeUserTurn("responses", responsesUser), true);
+    assert.equal(nativeUserTurn("responses", { input: "Add tests" }), true, "a string input is the user's");
+    assert.equal(nativeUserTurn("responses", responsesTool), false);
+    assert.equal(
+        nativeCodingContext("responses", null, responsesTool, null).lastToolResult,
+        "2 passed, 1 failed"
+    );
+});
