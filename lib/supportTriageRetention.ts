@@ -304,6 +304,8 @@ export type RetentionRunResult = {
   readonly oldestOverdueAgeSeconds: number;
   /** True when the route must answer non-2xx: no progress, or a row past its grace. */
   readonly notProgressing: boolean;
+  /** The code of the last batch whose session was lost, for the not-progressing alert. */
+  readonly lastConnectionLoss: string | null;
 };
 
 /** Rows past their boundary (or a suggestion past its expiry) in every class, and how long the oldest has waited. */
@@ -347,6 +349,7 @@ export const runSupportTriageRetention = async (): Promise<RetentionRunResult> =
   let batchesCompleted = 0;
   let deleted = 0;
   let blocked = 0;
+  let lastConnectionLoss: string | null = null;
   const cursors: Partial<Record<RetentionClass, Cursor>> = {};
   const sizes = Object.fromEntries(RETENTION_CLASSES.map((cls) => [cls, RETENTION_BATCH_SIZES[0]])) as Record<
     RetentionClass,
@@ -388,6 +391,7 @@ export const runSupportTriageRetention = async (): Promise<RetentionRunResult> =
         // retries. A lost COMMIT may have taken effect; the next window read
         // finds only what is still there, so asking again is the check.
         console.warn(JSON.stringify({ event: "support_triage_retention_connection_lost", code: result.code }));
+        lastConnectionLoss = result.code;
         continue;
       }
       const cls = result.cls;
@@ -434,6 +438,7 @@ export const runSupportTriageRetention = async (): Promise<RetentionRunResult> =
       notProgressing:
         (batchesCompleted === 0 && overdueRemaining > 0) ||
         oldestOverdueAgeSeconds > RETENTION_OVERDUE_GRACE_SECONDS,
+      lastConnectionLoss,
     };
   } catch (error) {
     await finishSupportTriageRun({

@@ -118,13 +118,13 @@ export const runSupportTriageCycleQuietly = async ({
     } else if (!(await isDue("retention", now))) {
       retention = { outcome: "not_due" };
     } else {
-      const { notProgressing } = await runSupportTriageRetention();
+      const { notProgressing, lastConnectionLoss } = await runSupportTriageRetention();
       if (notProgressing) {
         await reportOperationalIncident({
           code: "SUPPORT_TRIAGE_RETENTION_NOT_PROGRESSING",
           title: "Support triage rows past their retention are not being deleted",
           cooldownMs: INCIDENT_COOLDOWN_MS,
-          context: { component: "support-triage-cycle" },
+          context: { component: "support-triage-cycle", lastConnectionLoss: lastConnectionLoss ?? "none" },
         }).catch(() => undefined);
       }
       retention = { outcome: "ran", notProgressing };
