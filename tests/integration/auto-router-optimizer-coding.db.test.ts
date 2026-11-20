@@ -161,10 +161,12 @@ test("the coding automation starts with its daily run on, is audited, and the da
     await prisma.adminAuditLog.count({ where: { action: "auto.llm_router_coding_optimizer_automation.updated" } }) >= 2,
     true
   );
-  // A row that cannot be parsed never spends.
-  await prisma.appSetting.create({ data: { key: AUTO_CODING_OPTIMIZER_AUTOMATION_SETTING_KEY, value: "{not json" } });
-  assert.deepEqual(await readCodingOptimizerAutomation(), { daily: false, autoPromote: false });
-  await prisma.appSetting.deleteMany({ where: { key: AUTO_CODING_OPTIMIZER_AUTOMATION_SETTING_KEY } });
+  // A row that cannot be parsed, or is not exactly two booleans, never spends.
+  for (const value of ["{not json", "null", "[]", '{"daily":true,"autoPromote":"invalid"}', '{"autoPromote":true}', '{"daily":1,"autoPromote":false}']) {
+    await prisma.appSetting.create({ data: { key: AUTO_CODING_OPTIMIZER_AUTOMATION_SETTING_KEY, value } });
+    assert.deepEqual(await readCodingOptimizerAutomation(), { daily: false, autoPromote: false }, value);
+    await prisma.appSetting.deleteMany({ where: { key: AUTO_CODING_OPTIMIZER_AUTOMATION_SETTING_KEY } });
+  }
   // No optimizer model is set, so the coding cycle is refused before any call.
   assert.deepEqual(await runScheduledOptimizerCycle(), { started: false, reason: "optimizer_off", target: "coding" });
   assert.deepEqual(await startCodingRouterOptimizerCycle(actor), { refused: "optimizer_off" });
