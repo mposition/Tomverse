@@ -393,8 +393,11 @@ const auditOf = (questionId: string) => prisma.adminAuditLog.findMany({
   orderBy: [{ createdAt: "asc" }, { id: "asc" }],
   select: { action: true, actorUserId: true, metadata: true, entryHash: true } });
 
-const stageOf = async (ideaId: string, actor = OWNER_ID) =>
-  (await readAmuxIdeaProgressForOwner(actor)).find((row) => row.ideaId === ideaId);
+// A finished idea leaves the Ideas list unless it is the opened one, so the read opens this idea.
+const stageOf = async (ideaId: string, actor = OWNER_ID) => {
+  const { requestId } = await prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: ideaId }, select: { requestId: true } });
+  return (await readAmuxIdeaProgressForOwner(actor, requestId)).find((row) => row.ideaId === ideaId);
+};
 
 test("the switch off leaves no question and files none, whatever the ideas look like", async () => {
   const { ideaId } = await seedIdea([{ status: "blocked" }]);
