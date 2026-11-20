@@ -50,6 +50,8 @@ export type AmuxIdeaProgressFacts = {
   /** The idea's own registered cards (stories and tasks). */
   /** `merged`: v4TerminalAt is set (the merge was observed); a cancelled card is closed but not merged. */
   cards: Array<{ cardType: string | null; status: string; reviewPrNumber: number | null; merged: boolean;
+    /** The card left the board (archivedAt set): nothing runs or decides it, so it counts as closed. */
+    archived?: boolean;
     /** An attempt that has not ended holds an unexpired lease. */
     liveAttempt?: boolean }>;
   /** The idea lane's runs (ideaLaneCore.ts), null when the lane never took the idea. */
@@ -75,7 +77,11 @@ const FINISHED = new Set(["draft_ready", "partially_decided", "decided"]);
 
 export function amuxIdeaProgress(facts: AmuxIdeaProgressFacts): AmuxIdeaProgress {
   const tasks = facts.cards.filter((card) => card.cardType !== "story");
-  const closed = (task: (typeof tasks)[number]) => task.merged || task.status === "cancelled";
+  // An archived card is closed as well: the board's "archive all" and a single
+  // archive take it off every view and loop, and the card close judges only the
+  // cards still on the board (ideaCardCloseService.ts), so an idea whose cards
+  // were all archived would otherwise show as blocked with nothing to close it.
+  const closed = (task: (typeof tasks)[number]) => task.merged || task.status === "cancelled" || task.archived === true;
   const counts = {
     total: tasks.length,
     done: tasks.filter((task) => task.merged).length,
@@ -143,8 +149,10 @@ export function amuxIdeaProgress(facts: AmuxIdeaProgressFacts): AmuxIdeaProgress
     if (tasks.every(closed)) return at(counts.done > 0 ? "done" : "cancelled");
     return at(counts.inReview > 0 ? "review" : "execution");
   }
-  // Cards registered without a Task yet (stories only) are still execution.
-  if (facts.cards.length > 0) return at("execution");
+  // Cards registered without a Task yet (stories only) are still execution,
+  // unless every one of them was archived off the board.
+  if (facts.cards.some((card) => card.archived !== true)) return at("execution");
+  if (facts.cards.length > 0) return at("cancelled");
   if (facts.state === "analyzing") return at("analysis");
   // An analysis that finished with nothing left to decide (rejected, or every
   // proposal refused or expired) waits for nobody.
