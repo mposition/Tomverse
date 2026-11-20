@@ -92,9 +92,12 @@ for (const lang of ["en", "ko"] as const) {
     await expect(reviewInfo).toHaveAttribute("href", `/${lang}/products/review`);
     await reviewInfo.click();
     await expect(page).toHaveURL(new RegExp(`/${lang}/products/review$`));
-    await expect(page.getByTestId("landing-loop-section")).toBeVisible();
-    await expect(page.getByTestId("landing-quick-summary-card")).toBeVisible();
-    await expect(page.getByTestId("landing-item-verification-card")).toBeVisible();
+    // The V2 Review page: hero, demo and the two modes (quick summary, AI Review).
+    await expect(page.getByTestId("review-product-page")).toBeVisible();
+    await expect(page.getByTestId("review-product-title")).toBeVisible();
+    await expect(page.getByTestId("review-demo-caption")).toBeVisible();
+    await expect(page.locator("#modes").getByRole("tab")).toHaveCount(2);
+    await expect(page.locator("#review-mode-panel")).toBeVisible();
     await expect(page.getByTestId("landing-primary-cta")).toHaveAttribute(
       "href", `/review?lang=${lang}`
     );

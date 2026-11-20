@@ -310,8 +310,10 @@ for (const scheme of ["light", "dark"] as const) {
     await page.goto("/pricing?lang=en");
     await expect(page.getByText(PROMOTION_CODE)).toBeVisible();
 
-    // The blue card, and the credit-guide card that repeats its treatment.
-    const cards = page.locator(".bg-blue-700");
+    // The V2 recommended plan card (Pro), with the promotion's sale block on it.
+    const cards = page.getByTestId("pricing-plan-card-pro");
+    await expect(cards).toHaveCount(1);
+    await expect(cards.getByTestId("pricing-sale-block")).toBeVisible();
     const cardCount = await cards.count();
     expect(cardCount, "highlighted surfaces present").toBeGreaterThan(0);
 

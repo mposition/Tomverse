@@ -101,14 +101,17 @@ test("a visitor who prefers reduced motion gets no rotation and no pause button"
   await expect(demo).toHaveAttribute("data-view", "after");
 });
 
-test("the model comparison keeps its prepared comparison and the model pair of the reference list", async ({ page }) => {
+test("the model comparison keeps its prepared comparison and the model pair of the reference list", async ({ page }, info) => {
   await prepareGuestPage(page, "en");
   await page.goto("/chatgpt-vs-claude");
   const prepared = page.locator('a[href*="source"][href*="chatgpt-vs-claude"]');
   await expect(prepared).toHaveCount(1);
   const href = decodeURIComponent((await prepared.getAttribute("href"))!);
   expect(href).toContain("models=");
-  await expect(page.getByTestId("comparison-task-table").getByRole("columnheader")).toHaveCount(4);
+  // On a phone the header row folds into per-cell labels (v2-pages.css), as
+  // comparison-mobile-task-cards.spec.ts expects.
+  const table = page.getByTestId("comparison-task-table");
+  await expect(table.getByRole("columnheader")).toHaveCount(info.project.name.includes("mobile") ? 0 : 4);
   await expect(page.getByTestId("guide-fact-pair").locator(".fact").first()).toBeVisible();
 });
 

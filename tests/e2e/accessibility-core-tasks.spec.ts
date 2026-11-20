@@ -51,7 +51,10 @@ test.describe("core-task accessibility (automatable slice)", () => {
     // Walk the tab order until a consent action is reached. Bounded so a
     // trap or an unreachable control fails rather than hangs.
     let reached: string | null = null;
-    for (let step = 0; step < 60 && !reached; step += 1) {
+    // The bound is the page's own count of focusable controls (the V2 header,
+    // homepage and footer put the bottom bar well past 60 stops), plus slack.
+    const stops = await page.locator('a[href], button, select, input, textarea, [tabindex="0"]').count();
+    for (let step = 0; step < stops + 10 && !reached; step += 1) {
       await page.keyboard.press("Tab");
       const focused = await focusedDescriptor(page);
       if (!focused) continue;
