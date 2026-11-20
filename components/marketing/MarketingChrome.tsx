@@ -704,14 +704,14 @@ function LaunchMarketingHeader({
 
   return (
     <>
-      <header className="sticky top-0 z-40 border-b border-white/[0.08] bg-[rgb(17_19_24/0.82)] text-white backdrop-blur-xl backdrop-saturate-150" data-testid="launch-marketing-header">
+      <header className="relative z-40 border-b border-white/[0.08] lg:sticky lg:top-0 bg-[rgb(17_19_24/0.82)] text-white backdrop-blur-xl backdrop-saturate-150" data-testid="launch-marketing-header">
         <div className={`mx-auto ${showMobileEntry ? "grid grid-cols-[minmax(0,1fr)_auto] lg:flex" : "flex flex-wrap"} min-h-[72px] ${maxWidth} items-center justify-between gap-[12px] px-[16px] py-3 sm:px-6 lg:flex-nowrap lg:px-[64px]`}>
           <Link href={localizedHref(lang, "/")} className={`flex shrink-0 ${showMobileEntry ? "min-w-0 flex-wrap" : ""} items-center gap-[8px] ${launchFocus}`} data-testid="marketing-brand-link" onClick={() => setIsMenuOpen(false)}>
             <span className="flex h-[36px] w-[36px] shrink-0 overflow-hidden rounded-[10px] bg-white">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src="/tomverse-logo.png" alt="" className="h-full w-full object-cover" />
             </span>
-            <span className="text-sm font-bold tracking-[-0.02em] max-[240px]:sr-only sm:text-lg"><span data-testid="marketing-brand-name">Tomverse</span><span aria-hidden="true">.</span></span>
+            <span className="text-sm font-bold tracking-[-0.02em] max-[240px]:sr-only sm:text-lg"><span data-testid="marketing-brand-name" className="after:content-['.']">Tomverse</span></span>
           </Link>
           <nav aria-label={copy.navigation} className="hidden items-center gap-1 text-sm font-semibold lg:flex">
             {items.map((item) => <Link key={item.key} href={localizedHref(lang, item.href)} data-testid={`header-${item.key}-link`} className={`rounded-full px-3 py-2 text-zinc-300 transition hover:bg-white/[0.06] hover:text-white ${launchFocus}`}>{item.label}</Link>)}
@@ -771,7 +771,7 @@ function LaunchMarketingFooter({ maxWidth = "max-w-7xl" }: MarketingFooterProps)
               <span className="h-[36px] w-[36px] shrink-0 overflow-hidden rounded-[10px] bg-white">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src="/tomverse-logo.png" alt="" className="h-full w-full object-cover" />
-              </span><span className="min-w-0 tracking-[-0.02em] [overflow-wrap:anywhere]">Tomverse<span aria-hidden="true">.</span></span>
+              </span><span className="min-w-0 tracking-[-0.02em] [overflow-wrap:anywhere] after:content-['.']">Tomverse</span>
             </Link>
             <p className="mt-4 max-w-md text-sm leading-6">{copy.description}</p>
           </div>

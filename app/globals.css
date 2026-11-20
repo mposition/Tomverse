@@ -325,6 +325,12 @@
   --color-zinc-700: #31343f;
 }
 
+/* The public header is sticky from 1024px up; keep anchored and scrolled-to
+   headings clear of it. */
+@media (min-width: 1024px) {
+  html:has([data-tv-site]) { scroll-padding-top: 88px; }
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
