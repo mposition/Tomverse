@@ -152,6 +152,19 @@ test("a coding cycle's run over the real cycle table", { skip: !databaseUrl }, a
             assert.ok(bucket && Number(bucket.count) >= row.spentMicroUsd, "booked to the provider's spend");
         });
 
+        await t.test("a router call reporting a negative or non-finite count is unknown, not free", async () => {
+            for (const bad of [{ inputTokens: -50, outputTokens: 10 }, { inputTokens: Number.NaN, outputTokens: 10 }]) {
+                await reset();
+                process.env.CODING_TASK_EVAL_ISOLATED_RUNNER = "true";
+                routerReply = (input) => ({ outcome: "picked", pick: { modelId: cheapest(input.candidates) }, usage: bad });
+                const { row } = await run();
+                assert.equal(row.failure, "cost_unknown", JSON.stringify(bad));
+                assert.equal(evalRuns.length, 0);
+                assert.ok(row.spentMicroUsd > 0);
+                assert.equal(row.summary.costCoverage.complete, false);
+            }
+        });
+
         await t.test("known costs run every task, each run's cost counted as it ends", async () => {
             await reset();
             process.env.CODING_TASK_EVAL_ISOLATED_RUNNER = "true";

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, readdirSync } from "node:fs";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -808,4 +808,28 @@ test("the task data is unchanged after a run (the harness copies the files)", as
   const model = scripted([toolCalls([["write_file", { path: "src/index.mjs", content: SOLUTION }]]), finalText()]);
   await runCodingEvalTask({ task, model: fakeAiModel(), callModel: () => model });
   assert.equal(JSON.stringify(CODING_EVAL_TASKS), snapshot);
+});
+
+test("a negative or non-finite step count marks the run unknown, never cancels a real count", async () => {
+  for (const bad of [-90, Number.NaN, Number.POSITIVE_INFINITY]) {
+    const model = scripted([toolCalls([["list_files", {}]], 100, 10), finalText("done", bad, 5)]);
+    const result = await runCodingEvalTask({ task, model: fakeAiModel(), callModel: () => model });
+    assert.equal(result.usageUnknown, true, String(bad));
+    assert.equal(result.inputTokens, 100, "only the valid count is added");
+  }
+});
+
+test("a write is refused before it is made once its answer no longer fits the tool output budget", async () => {
+  await withDirs(async (_base, workspace) => {
+    await writeFile(join(workspace, "src", "index.mjs"), "export const x = 1;\n");
+    const tools = createCodingEvalTools(workspace, task, { ...CODING_EVAL_LIMITS, maxToolOutputBytes: 200 });
+    // Spend the budget down with listings until a write's answer cannot fit.
+    for (let i = 0; i < 10; i += 1) await tools.list_files.execute({}, { toolCallId: `l${i}`, messages: [] });
+    const answer = await tools.write_file.execute(
+      { path: "src/index.mjs", content: "export const x = 2;\n" },
+      { toolCallId: "w", messages: [] }
+    );
+    assert.match(answer.error ?? "", /budget exhausted/);
+    assert.equal(await readFile(join(workspace, "src", "index.mjs"), "utf8"), "export const x = 1;\n", "nothing changed behind the refusal");
+  });
 });

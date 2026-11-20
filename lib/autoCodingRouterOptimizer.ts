@@ -121,6 +121,23 @@ const SYNTHESIZER_TIMEOUT_MS = 150_000;
  */
 const CYCLE_EVAL_LIMITS = { ...CODING_EVAL_LIMITS, maxWorkspaceBytes: 32 * 1024, maxToolOutputBytes: 32 * 1024, maxSteps: 8 };
 
+/** A cycle's cost coverage before any call (lib/autoOptimizerCost.ts). */
+const EMPTY_COST_COVERAGE = {
+    version: "optimizer-cost-v1" as const,
+    basis: "reported_usage_configured_prices" as const,
+    complete: true,
+    knownMicroUsd: 0,
+    started: 0,
+    completed: 0,
+    notStarted: 0,
+    failed: 0,
+    knownCalls: 0,
+    noDispatchCalls: 0,
+    unknownCalls: 0,
+    usagePricedCalls: 0,
+    calls: [],
+};
+
 /** More than the router's fixed coding head, guidance and tail, in bytes. */
 const ROUTER_INSTRUCTIONS_BOUND_BYTES = 32 * 1024;
 
@@ -351,7 +368,7 @@ async function runCodingCycle(input: {
                 break;
             }
             const routed = await routeWith(input.incumbentGuidance, task.prompt, `task-${task.id}`);
-            if (routed.usage?.inputTokens === undefined || routed.usage.outputTokens === undefined) {
+            if (tokens(routed.usage?.inputTokens) === null || tokens(routed.usage?.outputTokens) === null) {
                 // Usage unknown: charged its worst case, and the evaluation stops.
                 const worst = worstRoute;
                 addEvalSpend(input.routerModel.provider, worst);
@@ -359,7 +376,7 @@ async function runCodingCycle(input: {
                 evalStop = "cost_unknown";
                 break;
             }
-            const routerCost = costMicroUsd(input.routerPrices, routed.usage);
+            const routerCost = costMicroUsd(input.routerPrices, routed.usage ?? {});
             addEvalSpend(input.routerModel.provider, routerCost);
             evalCalls.push({ known: true, microUsd: routerCost });
             const pick = routed.pick?.modelId;
@@ -415,7 +432,14 @@ async function runCodingCycle(input: {
                 data: {
                     status: "failed",
                     failure: "cost_unknown",
-                    summary: { taskEvaluation, taskEvaluationSpentMicroUsd: evalTotal, taskEvaluationStop: evalStop, liveRouting },
+                    summary: {
+                        taskEvaluation,
+                        taskEvaluationSpentMicroUsd: evalTotal,
+                        taskEvaluationStop: evalStop,
+                        liveRouting,
+                        // The evaluation's calls alone: incomplete, which is why the cycle stopped.
+                        costCoverage: withTaskEvaluationCost(EMPTY_COST_COVERAGE, evalCalls),
+                    },
                     spentMicroUsd: evalTotal,
                     finishedAt: new Date(),
                 },

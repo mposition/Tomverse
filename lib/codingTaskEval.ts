@@ -260,6 +260,9 @@ function sameFiles(a: Record<string, string>, b: Record<string, string>): boolea
  * counts against `maxToolOutputBytes` for the task; once that is spent every
  * tool answers with a short refusal.
  */
+/** More than write_file's answer ({ ok, bytes } or a refusal) ever takes. */
+const MUTATION_ANSWER_MAX_BYTES = 512;
+
 export function createCodingEvalTools(
   root: string,
   task: Pick<CodingEvalTask, "examples">,
@@ -271,13 +274,21 @@ export function createCodingEvalTools(
   // Tool calls of one step may run at once; they run one after another here,
   // so a size or count check and the write it guards cannot interleave.
   let queue: Promise<unknown> = Promise.resolve();
-  const metered = <T extends object>(produce: () => Promise<T>): Promise<T | { error: string }> => {
-    const run = queue.then(() => meteredNow(produce));
+  const metered = <T extends object>(produce: () => Promise<T>, mutates = false): Promise<T | { error: string }> => {
+    const run = queue.then(() => meteredNow(produce, mutates));
     queue = run.catch(() => undefined);
     return run;
   };
-  const meteredNow = async <T extends object>(produce: () => Promise<T>): Promise<T | { error: string }> => {
+  const meteredNow = async <T extends object>(
+    produce: () => Promise<T>,
+    mutates = false,
+  ): Promise<T | { error: string }> => {
     if (outputBytes >= limits.maxToolOutputBytes) return { error: "tool output budget exhausted" };
+    // A call that changes the workspace runs only when its short answer still
+    // fits, so a change is never made behind an "exhausted" answer.
+    if (mutates && outputBytes + MUTATION_ANSWER_MAX_BYTES > limits.maxToolOutputBytes) {
+      return { error: "tool output budget exhausted" };
+    }
     const result = await produce();
     const size = Buffer.byteLength(JSON.stringify(result));
     if (outputBytes + size > limits.maxToolOutputBytes) {
@@ -336,7 +347,7 @@ export function createCodingEvalTools(
           await mkdir(dirname(resolved), { recursive: true });
           await writeFile(resolved, content, "utf8");
           return { ok: true, bytes: Buffer.byteLength(content) };
-        }),
+        }, true),
     }),
     run_tests: tool({
       description:
@@ -427,9 +438,14 @@ export async function runCodingEvalTask(input: RunCodingEvalTaskInput): Promise<
         abortSignal: controller.signal,
         onStepEnd: (step) => {
           steps += 1;
-          if (typeof step.usage.inputTokens === "number") inputTokens += step.usage.inputTokens;
+          // Each step's count must be a finite non-negative number: one that is
+          // not makes the run's usage unknown, so a bad count can never cancel
+          // a real one into a total that looks confirmed.
+          const stepInput = step.usage.inputTokens;
+          const stepOutput = step.usage.outputTokens;
+          if (typeof stepInput === "number" && Number.isFinite(stepInput) && stepInput >= 0) inputTokens += stepInput;
           else missingUsage = true;
-          if (typeof step.usage.outputTokens === "number") outputTokens += step.usage.outputTokens;
+          if (typeof stepOutput === "number" && Number.isFinite(stepOutput) && stepOutput >= 0) outputTokens += stepOutput;
           else missingUsage = true;
           lastFinishReason = step.finishReason;
         },
