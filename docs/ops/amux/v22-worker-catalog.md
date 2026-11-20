@@ -73,7 +73,7 @@ Antigravity is the one exception (below).
 
 Claude (`anthropic:<worker>`, from `~/.claude/.credentials.json` to
 `<worker>/cli/.credentials.json`) is staged whenever its access token has not
-expired; the login keepalive refreshes it 10 minutes before expiry and
+expired; the login keepalive refreshes it about 4 minutes before expiry and
 restages the copies (the former 2 h minimum only left the same token in place
 and failed the unit for two hours of every token, 2026-11-16). Until 2026-11-06 the timer staged Codex and Copilot only; the
 Claude copies made on 2026-10-12 expired that night, the quota reading
@@ -91,8 +91,12 @@ Claude worker and the anthropic Decision Maker stopped. The operator user's
 `amux-v22-claude-login-keepalive.timer` (user unit, every 5 min,
 `scripts/amux-v22-claude-login-keepalive.mjs`, units and `.env.example` in
 `scripts/systemd/`) closes that gap: when the access token has 10 min or less
-left it runs `claude auth status`, then if that did not refresh it a one-line
-`claude -p` on Haiku, and on a refresh restages the Claude copies at once. It
+left it waits until 4 min are left (the CLI refreshes only inside its own
+5-minute buffer; asking earlier logged a `refresh_failed` every 8 h that paged
+as `AMUX_WORKER_REFRESH_FAILED`, 2026-11-20), then runs `claude auth status`,
+then if that did not refresh it a one-line `claude -p` on Haiku, and on a
+refresh restages the Claude copies at once. A refresh does not extend
+`refreshTokenExpiresAt`; only `claude auth login` does. It
 reads only `expiresAt`/`refreshTokenExpiresAt` and never prints a token. A
 cleared login logs `login_required` and fails the unit; that one still needs
 the operator's `claude auth login` as the operator user. Install as that user
