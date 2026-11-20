@@ -1,4 +1,5 @@
 import "server-only";
+import { createHash } from "node:crypto";
 import { assertOperationalFeatureEnabled } from "@/lib/appSettings";
 import { pickAutoModelWithLlm } from "@/lib/autoLlmRouter";
 import type { CodingRouterContext } from "@/lib/autoLlmRouterCore";
@@ -135,7 +136,7 @@ export const noteSmartAdaptiveRefusal = (keyId: string, now = Date.now()) => {
 };
 
 /** Idempotent requests routing now, by key and Idempotency-Key digest. */
-const routing = new Map<string, Promise<Omit<SmartAdaptiveDecision, "remember">>>();
+const routing = new Map<string, Promise<Omit<SmartAdaptiveDecision, "remember" | "conversationDigest">>>();
 
 /** Whether the paid router call may be made for this key now. */
 export const smartAdaptiveRouterAllowed = async (
@@ -243,6 +244,7 @@ export const routeSmartAdaptive = async (input: {
     );
     return {
         ...decision,
+        conversationDigest: createHash("sha256").update(conversation).digest("hex").slice(0, 32),
         // Called once admission accepted the request on this model.
         remember: () => rememberConversation(conversation, decision.entry, Date.now(), unfit),
     };
@@ -252,7 +254,7 @@ const decideSmartAdaptive = async (
     input: Parameters<typeof routeSmartAdaptive>[0],
     conversation: string,
     now: number
-): Promise<Omit<SmartAdaptiveDecision, "remember">> => {
+): Promise<Omit<SmartAdaptiveDecision, "remember" | "conversationDigest">> => {
     const eligible = smartAdaptiveCandidates(input.request, input.runnable);
     // Nothing fits: the default model answers, and its own limits refuse the
     // request with the usual error.
@@ -305,7 +307,7 @@ const decideSmartAdaptive = async (
     const decide = async () => {
         const pending = flight ? routing.get(flight) : undefined;
         if (pending) return pending;
-        const decision = (async (): Promise<Omit<SmartAdaptiveDecision, "remember">> => {
+        const decision = (async (): Promise<Omit<SmartAdaptiveDecision, "remember" | "conversationDigest">> => {
             // Gate closed: the conversation keeps its model, or the default.
             if (!(await input.routerAllowed())) {
                 return current ? { entry: current, routedBy: "continued" } : { entry: fallback, routedBy: "default" };
@@ -335,6 +337,8 @@ export type SmartAdaptiveDecision = {
     held?: boolean;
     /** Remember this model for the conversation; call once admission accepted it. */
     remember: () => void;
+    /** SHA-256 prefix of the conversation key, for the receipt; never the key. */
+    conversationDigest: string;
 };
 
 /**

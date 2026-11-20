@@ -2,6 +2,7 @@ import "server-only";
 
 import type { Prisma } from "@prisma/client";
 import {
+    AUTO_LLM_ROUTER_CODING_GUIDANCE,
     AUTO_LLM_ROUTER_DEFAULT_GUIDANCE,
     AUTO_LLM_ROUTER_DEFAULT_REWRITE_GUIDANCE,
     type AutoLlmRouterGuidanceKind,
@@ -29,6 +30,13 @@ export const AUTO_LLM_ROUTER_GUIDANCE_SETTING_KEY = "auto.llmRouterGuidance";
  */
 export const AUTO_LLM_ROUTER_REWRITE_GUIDANCE_SETTING_KEY = "auto.llmRouterRewriteGuidance";
 
+/**
+ * The coding guidance: what the external API's Smart Adaptive router follows
+ * for coding requests. Its code default is AUTO_LLM_ROUTER_CODING_GUIDANCE;
+ * only a coding optimizer cycle promotes into it.
+ */
+export const AUTO_LLM_ROUTER_CODING_GUIDANCE_SETTING_KEY = "auto.llmRouterCodingGuidance";
+
 export type RouterGuidanceKind = AutoLlmRouterGuidanceKind;
 
 export const DEFAULT_ROUTER_GUIDANCE: ActiveRouterGuidance = {
@@ -43,9 +51,16 @@ export const DEFAULT_ROUTER_REWRITE_GUIDANCE: ActiveRouterGuidance = {
     history: [],
 };
 
+export const DEFAULT_ROUTER_CODING_GUIDANCE: ActiveRouterGuidance = {
+    guidance: AUTO_LLM_ROUTER_CODING_GUIDANCE,
+    cycleId: null,
+    history: [],
+};
+
 const SLOTS: Record<RouterGuidanceKind, { key: string; fallback: ActiveRouterGuidance }> = {
     routing: { key: AUTO_LLM_ROUTER_GUIDANCE_SETTING_KEY, fallback: DEFAULT_ROUTER_GUIDANCE },
     rewrite: { key: AUTO_LLM_ROUTER_REWRITE_GUIDANCE_SETTING_KEY, fallback: DEFAULT_ROUTER_REWRITE_GUIDANCE },
+    coding: { key: AUTO_LLM_ROUTER_CODING_GUIDANCE_SETTING_KEY, fallback: DEFAULT_ROUTER_CODING_GUIDANCE },
 };
 
 type Reader = Pick<Prisma.TransactionClient, "appSetting">;

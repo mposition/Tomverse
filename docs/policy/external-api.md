@@ -319,6 +319,56 @@ catalogue, so a customer never has to recopy it.
 - **Charging:** the request is reserved, charged and receipted as the routed
   model; `GET /usage` shows that model's id.
 
+### 5.2 Coding routing report and coding optimizer
+
+Owner decision 2026-11-20: the coding router is measured every day and can be
+improved by its own optimizer, as Chat's router is.
+
+- **Receipt fields.** Each Smart Adaptive request's receipt
+  (`ExternalApiRequest`) records `routedBy` (`router`, `continued`,
+  `default`), `routedHeld` and `routeConversation`, a SHA-256 prefix of the
+  conversation's routing key (never the key). A request that names a model
+  leaves them null. No request text is stored.
+- **Report.** `lib/externalApiRoutingReportCore.ts` counts Smart Adaptive
+  requests per model and protocol, `topModelShare` (1 means one model took
+  everything), the held share, conversations that changed model, the error
+  share and credits. Admin › Routing shows the last 24 hours and 7 days, and
+  every daily optimizer run logs the last 24 hours as
+  `external_api_coding_routing_daily`, whether or not a cycle starts.
+- **Coding optimizer** (`lib/autoCodingRouterOptimizer.ts`, target `coding`).
+  It is the Chat optimizer's cycle run on the coding guidance. It shares the
+  same optimizer and router models, one running cycle at a time, and the
+  same day and month caps (`docs/policy/chat-unified-router-refiner-v1.md`).
+  It adds no spending ceiling.
+  - The external API keeps no text, so every case is a synthetic coding
+    request.
+  - The router is asked with the coding head, and a coding judge compares
+    the answers.
+  - The menu is the external API's Smart Adaptive candidates for the widest
+    plan, without apex.
+  - The generator also reads two kinds of pre-cycle evidence: the 7-day
+    report and the task evaluation.
+  - A promoted proposal becomes the `coding` guidance the live coding router
+    reads (its code default is `AUTO_LLM_ROUTER_CODING_GUIDANCE`). Rollback
+    goes one step back.
+  - Off by default: its daily switch and auto-promote in Admin › Routing
+    both start off, and a person may start one cycle. With several daily
+    switches on, the targets take turns, one cycle a day in all.
+- **Task evaluation** (`lib/codingTaskEval.ts`).
+  - Runs within up to 40 per cent of a coding cycle's budget, before the
+    cycle proper.
+  - For each of six fixed JS tasks (two easy, two medium, two hard), the
+    current coding guidance routes the task. Its pick and the next candidate
+    up each work it as an agent with `list_files`, `read_file`, `write_file`
+    and `run_tests`, for at most 10 steps.
+  - The harness then runs the hidden tests itself.
+  - Sandbox: the tests run in a child `node` with `--permission` (reads only
+    the task's temporary folder, writes nothing, no child processes or
+    workers) and an emptied environment. Nothing the parent holds is
+    readable from it. Network is not restricted by Node, which is why no
+    secret is reachable inside.
+  - Each run's cost is counted as it ends against the evaluation's share.
+
 ## 6. Data
 
 `ExternalApiKey`: name, prefix, digest, cap, expiry, revocation, last use.

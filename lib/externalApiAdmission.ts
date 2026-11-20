@@ -58,6 +58,12 @@ export const externalApiAdmissionHook =
         idempotencyKeyDigest: string | null;
         /** Which wire protocol the request arrived on; content-free metadata. */
         protocol?: ExternalApiProtocol;
+        /**
+         * Smart Adaptive's decision, content-free: how the model was chosen,
+         * whether a cheaper pick was held, and a digest of the conversation's
+         * routing key (lib/externalApiRoutingReportCore.ts reads them).
+         */
+        routing?: { routedBy: "router" | "continued" | "default"; held: boolean; conversation: string | null };
         now?: () => Date;
     }) =>
     async (
@@ -122,6 +128,13 @@ export const externalApiAdmissionHook =
                 modelId: input.modelId,
                 stream: input.stream,
                 protocol: input.protocol ?? "chat_completions",
+                ...(input.routing
+                    ? {
+                          routedBy: input.routing.routedBy,
+                          routedHeld: input.routing.held,
+                          routeConversation: input.routing.conversation,
+                      }
+                    : {}),
             },
         });
         // At most once a minute: the row is already locked, and a timestamp

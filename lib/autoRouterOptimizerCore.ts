@@ -770,7 +770,7 @@ export const optimizerCallFailureDetail = (error: unknown) => {
 /** Correlate failures to their model without logging request or response content. */
 export async function traceOptimizerCall<T>(
     context: {
-        event: "auto_router_optimizer_call_failed" | "auto_rewrite_optimizer_call_failed";
+        event: "auto_router_optimizer_call_failed" | "auto_rewrite_optimizer_call_failed" | "auto_coding_optimizer_call_failed";
         cycleId: string;
         kind: OptimizerCallKind;
         modelId: string;

@@ -318,8 +318,9 @@ export const AUTO_LLM_ROUTER_DEFAULT_GUIDANCE = [
  * coding clients). A coding agent repeats its request many times per task, and
  * a weak model that fails costs more rounds than a strong one that succeeds,
  * so quality comes first here and credits only break ties. Fixed in code and
- * versioned with AUTO_LLM_ROUTER_CODING_VERSION: the optimizer measures and
- * replaces the Chat guidance only, on Chat samples.
+ * versioned with AUTO_LLM_ROUTER_CODING_VERSION. This is the code default of
+ * the "coding" guidance: only a coding optimizer cycle (lib/autoCodingRouterOptimizer.ts)
+ * replaces it, measured on coding tasks; the Chat optimizer never does.
  */
 export const AUTO_LLM_ROUTER_CODING_VERSION = "coding-v1";
 
@@ -404,7 +405,7 @@ const AUTO_LLM_ROUTER_REWRITE_TAIL = [
  * improves (AutoRouterOptimizerCycle.target), held to this list by the
  * column's CHECK constraint (scripts/check-enum-constraints.mjs).
  */
-export const AUTO_LLM_ROUTER_GUIDANCE_KINDS = ["routing", "rewrite"] as const;
+export const AUTO_LLM_ROUTER_GUIDANCE_KINDS = ["routing", "rewrite", "coding"] as const;
 export type AutoLlmRouterGuidanceKind = (typeof AUTO_LLM_ROUTER_GUIDANCE_KINDS)[number];
 
 export const buildAutoLlmRouterSystem = (

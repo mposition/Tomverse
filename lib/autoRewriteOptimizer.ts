@@ -65,6 +65,8 @@ import {
     type RewriteOptimizerDecision,
     type RewriteSyntheticCaseView,
 } from "@/lib/autoRewriteOptimizerCore";
+import { readCodingOptimizerAutomation, startCodingRouterOptimizerCycle } from "@/lib/autoCodingRouterOptimizer";
+import { readCodingRoutingReport } from "@/lib/externalApiRoutingReport";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import type { AiModel } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
@@ -621,12 +623,18 @@ export async function readAutoRewriteOptimizerState() {
  * nothing. `waitForCompletion` runs the cycle to its end before returning.
  */
 export async function runScheduledOptimizerCycle(options: { waitForCompletion?: boolean } = {}): Promise<
-    | { started: false; reason: "daily_off" | OptimizerStartRefusal; target?: "routing" | "rewrite" }
-    | { started: true; cycleId: string; target: "routing" | "rewrite"; outcome?: OptimizerRunOutcome }
+    | { started: false; reason: "daily_off" | OptimizerStartRefusal; target?: "routing" | "rewrite" | "coding" }
+    | { started: true; cycleId: string; target: "routing" | "rewrite" | "coding"; outcome?: OptimizerRunOutcome }
 > {
-    const [routing, rewrite] = await Promise.all([readOptimizerAutomation(), readRewriteOptimizerAutomation()]);
+    await logDailyCodingRoutingReport();
+    const [routing, rewrite, coding] = await Promise.all([
+        readOptimizerAutomation(),
+        readRewriteOptimizerAutomation(),
+        readCodingOptimizerAutomation(),
+    ]);
+    const switchesOn = [routing.daily, rewrite.daily, coding.daily].filter(Boolean).length;
     const last =
-        routing.daily && rewrite.daily
+        switchesOn > 1
             ? await prisma.autoRouterOptimizerCycle.findFirst({
                   where: { startedBy: "system" },
                   orderBy: { createdAt: "desc" },
@@ -636,14 +644,33 @@ export async function runScheduledOptimizerCycle(options: { waitForCompletion?: 
     const target = scheduledOptimizerTarget({
         routingDaily: routing.daily,
         rewriteDaily: rewrite.daily,
-        lastSystemTarget: last?.target === "rewrite" ? "rewrite" : last?.target === "routing" ? "routing" : null,
+        codingDaily: coding.daily,
+        lastSystemTarget:
+            last?.target === "rewrite" || last?.target === "routing" || last?.target === "coding" ? last.target : null,
     });
     if (!target) return { started: false, reason: "daily_off" };
     if (target === "routing") return { ...(await runScheduledAutoRouterOptimizerCycle(options)), target };
-    const result = await startAutoRewriteOptimizerCycle("system", options);
+    const result =
+        target === "coding"
+            ? await startCodingRouterOptimizerCycle("system", options)
+            : await startAutoRewriteOptimizerCycle("system", options);
     return "refused" in result
         ? { started: false, reason: result.refused, target }
         : { started: true, cycleId: result.cycleId, target, ...(result.outcome ? { outcome: result.outcome } : {}) };
+}
+
+/**
+ * The daily coding routing report (lib/externalApiRoutingReportCore.ts) as one
+ * log line, on every daily run whether or not a cycle starts: counts, shares
+ * and model ids only. Free; a failed read is logged and changes nothing.
+ */
+async function logDailyCodingRoutingReport() {
+    try {
+        const report = await readCodingRoutingReport(1);
+        console.info(JSON.stringify({ event: "external_api_coding_routing_daily", ...report, byModel: report.byModel.slice(0, 10) }));
+    } catch (error) {
+        console.warn(JSON.stringify({ event: "external_api_coding_routing_daily_failed", error: error instanceof Error ? error.name : "unknown" }));
+    }
 }
 
 /**

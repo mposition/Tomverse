@@ -2107,6 +2107,13 @@ model ExternalApiRequest {
   /// Wire protocol: chat_completions, anthropic_messages or responses. Rows
   /// written before the column existed are Chat Completions.
   protocol             String                @default("chat_completions")
+  /// Smart Adaptive only: router | continued | default; NULL for a model named
+  /// directly. Content-free, for the coding routing report.
+  routedBy             String?
+  /// The router picked a cheaper model and the conversation kept its own.
+  routedHeld           Boolean?
+  /// SHA-256 prefix of the conversation's routing key, never the key itself.
+  routeConversation    String?
   finishReason         String?
   errorCode            String?
   createdAt            DateTime              @default(now())
@@ -2115,6 +2122,7 @@ model ExternalApiRequest {
   @@unique([keyId, idempotencyKeyDigest])
   @@index([userId, createdAt])
   @@index([keyId, createdAt])
+  @@index([createdAt])
 }
 
 /// A default-off, owner-scoped Research Preview execution that can survive a
@@ -5058,8 +5066,8 @@ model AutoRouterOptimizerCycle {
   startedBy         String    @default("person")
   spentMicroUsd     Int       @default(0)
   promotedAt        DateTime?
-  /// routing | rewrite -- which guidance the cycle improves
-  /// (AUTO_LLM_ROUTER_GUIDANCE_KINDS, held by a CHECK). Both share one running
+  /// routing | rewrite | coding -- which guidance the cycle improves
+  /// (AUTO_LLM_ROUTER_GUIDANCE_KINDS, held by a CHECK). All share one running
   /// cycle at a time and the same day and month caps.
   target            String    @default("routing")
 
