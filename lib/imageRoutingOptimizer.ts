@@ -66,8 +66,8 @@ import { prisma } from "@/lib/prisma";
  * model with image triage on) exactly as live; the optimizer model writes the
  * cases and the proposal and, in the model evaluation, judges the images.
  *
- * Paid. Every switch starts off; the daily cycle, once the owner turns it on,
- * makes text calls only. The model evaluation makes real images (image providers,
+ * Paid. The daily cycle is on by default (owner approval 2026-11-20); it makes
+ * text calls only. The model evaluation makes real images (image providers,
  * booked to their own budget buckets) and is off until the owner turns it on.
  * Promotion is a person's click unless auto-promote is on (default off).
  */
@@ -77,10 +77,11 @@ export const AUTO_IMAGE_OPTIMIZER_AUTOMATION_SETTING_KEY = "auto.llmRouterImageO
 export type ImageOptimizerAutomation = { daily: boolean; autoPromote: boolean; modelEval: boolean };
 
 /**
- * No row: everything off. The daily cycle is a new paid run (text calls under
- * the shared optimizer caps), so the owner turns it on in Admin › Routing.
+ * No row: the daily cycle on (owner approval in chat, 2026-11-20: text calls
+ * under the shared optimizer caps), auto-promote and the image-making
+ * evaluation off.
  */
-export const IMAGE_OPTIMIZER_AUTOMATION_DEFAULT: ImageOptimizerAutomation = { daily: false, autoPromote: false, modelEval: false };
+export const IMAGE_OPTIMIZER_AUTOMATION_DEFAULT: ImageOptimizerAutomation = { daily: true, autoPromote: false, modelEval: false };
 
 const ALL_OFF: ImageOptimizerAutomation = { daily: false, autoPromote: false, modelEval: false };
 
