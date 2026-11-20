@@ -20,8 +20,10 @@ import {
 } from "@/lib/autoCodingRouterOptimizerCore";
 import { callAutoLlmRouter } from "@/lib/autoLlmRouter";
 import {
+    AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS,
     AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS,
     autoLlmRouterCandidates,
+    autoLlmRouterWorstCaseMicroUsd,
     resolveAutoLlmRouterModel,
     type AutoLlmRouterCandidate,
     type CodingRouterContext,
@@ -118,6 +120,9 @@ const SYNTHESIZER_TIMEOUT_MS = 150_000;
  * an upper bound on tokens) near a million input tokens rather than six.
  */
 const CYCLE_EVAL_LIMITS = { ...CODING_EVAL_LIMITS, maxWorkspaceBytes: 32 * 1024, maxToolOutputBytes: 32 * 1024, maxSteps: 8 };
+
+/** More than the router's fixed coding head, guidance and tail, in bytes. */
+const ROUTER_INSTRUCTIONS_BOUND_BYTES = 32 * 1024;
 
 /** The live routing report the generator reads. */
 const LIVE_ROUTING_DAYS = 7;
@@ -306,8 +311,18 @@ async function runCodingCycle(input: {
             }
             const routed = await routeWith(input.incumbentGuidance, task.prompt, `task-${task.id}`);
             if (routed.usage?.inputTokens === undefined || routed.usage.outputTokens === undefined) {
-                // A router call with unknown usage: stop spending on the evaluation.
-                evalCalls.push({ known: false, microUsd: 0 });
+                // A router call with unknown usage is charged its worst case --
+                // the request with generous room for the fixed instructions,
+                // at the call's output ceiling -- and the evaluation stops.
+                const worst =
+                    autoLlmRouterWorstCaseMicroUsd({
+                        system: " ".repeat(ROUTER_INSTRUCTIONS_BOUND_BYTES),
+                        prompt: JSON.stringify(candidatesFor()) + task.prompt,
+                        maxOutputTokens: AUTO_LLM_ROUTER_MAX_OUTPUT_TOKENS,
+                        ...input.routerPrices,
+                    }) ?? 0;
+                addEvalSpend(input.routerModel.provider, worst);
+                evalCalls.push({ known: false, microUsd: worst });
                 evalStop = "cost_unknown";
                 break;
             }
