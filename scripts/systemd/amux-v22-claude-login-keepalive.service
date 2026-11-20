@@ -10,7 +10,9 @@ Type=oneshot
 EnvironmentFile=%h/.config/tomverse-amux-v22/claude-login-keepalive.env
 ExecStart=/usr/bin/node %h/.local/lib/tomverse-amux-v22/amux-v22-claude-login-keepalive.mjs
 WorkingDirectory=%h
-TimeoutStartSec=300
+# A round may wait up to 6 min for the CLI's own refresh buffer, then run the
+# CLI twice (180 s each) and restage (60 s).
+TimeoutStartSec=900
 UMask=0077
 NoNewPrivileges=true
 StandardOutput=journal

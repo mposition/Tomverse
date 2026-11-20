@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  CLAUDE_CLI_REFRESH_LEAD_MS,
   CLAUDE_KEEPALIVE_REFRESH_WITHIN_MS,
   claudeLoginState,
   runClaudeLoginKeepalive,
@@ -57,6 +58,8 @@ function harness(logins, { cliFails = false, stageFails = false, copies = [] } =
         if (cliFails) throw new Error("exit 1");
       },
       runStage: async () => { calls.push("stage"); if (stageFails) throw new Error("exit 1"); },
+      // The stored login may change while a round waits, like after a CLI use.
+      sleep: async (ms) => { calls.push(`sleep ${ms}`); index += 1; },
       log: (line) => lines.push(line),
     },
   };
@@ -91,6 +94,59 @@ test("a refresh that never happens fails the unit without a stage", async () => 
   assert.equal(await runClaudeLoginKeepalive(h.deps), 1);
   assert.deepEqual(h.calls, ["auth status", "prompt"]);
   assert.equal(h.lines[0].outcome, "refresh_failed");
+});
+
+// On the box (2026-11-15..20) the CLI declined every refresh with five minutes
+// or more left, so the first round in the window logged refresh_failed every
+// eight hours and paged AMUX_WORKER_REFRESH_FAILED.
+test("a round that lands before the CLI would refresh waits for it instead of failing", async () => {
+  const early = login({ expiresAt: NOW + 9 * 60_000 });
+  const h = harness([early, early, login({ expiresAt: NOW + 8 * HOUR })]);
+  assert.equal(await runClaudeLoginKeepalive(h.deps), 0);
+  assert.deepEqual(h.calls, [`sleep ${9 * 60_000 - CLAUDE_CLI_REFRESH_LEAD_MS}`, "auth status", "stage"]);
+  assert.equal(h.lines.length, 1);
+  assert.equal(h.lines[0].outcome, "refreshed");
+  assert.equal(h.lines[0].by, "status");
+  assert.equal(h.lines[0].waitedSeconds, 300);
+});
+
+test("the wait fits the window: no round waits past the lead", () => {
+  assert.ok(CLAUDE_CLI_REFRESH_LEAD_MS > 0);
+  assert.ok(CLAUDE_CLI_REFRESH_LEAD_MS < 5 * 60_000, "inside the CLI's own buffer");
+  // The timer steps 5 min; the window must be wider so a round always lands in it.
+  assert.ok(CLAUDE_KEEPALIVE_REFRESH_WITHIN_MS - CLAUDE_CLI_REFRESH_LEAD_MS > 5 * 60_000);
+});
+
+test("a login refreshed by another use during the wait is restaged without the CLI", async () => {
+  const h = harness([login({ expiresAt: NOW + 9 * 60_000 }), login({ expiresAt: NOW + 8 * HOUR })]);
+  assert.equal(await runClaudeLoginKeepalive(h.deps), 0);
+  assert.deepEqual(h.calls, [`sleep ${9 * 60_000 - CLAUDE_CLI_REFRESH_LEAD_MS}`, "stage"]);
+  assert.equal(h.lines[0].by, "elsewhere");
+});
+
+test("a round inside the CLI's buffer asks at once", async () => {
+  const h = harness([login({ expiresAt: NOW + CLAUDE_CLI_REFRESH_LEAD_MS - 1 }),
+    login({ expiresAt: NOW + 8 * HOUR })]);
+  assert.equal(await runClaudeLoginKeepalive(h.deps), 0);
+  assert.deepEqual(h.calls, ["auth status", "stage"]);
+  assert.equal(h.lines[0].waitedSeconds, undefined);
+});
+
+test("a refresh that still fails after the wait is reported once", async () => {
+  const early = login({ expiresAt: NOW + 9 * 60_000 });
+  const h = harness([early], { cliFails: true });
+  assert.equal(await runClaudeLoginKeepalive(h.deps), 1);
+  assert.deepEqual(h.calls, [`sleep ${9 * 60_000 - CLAUDE_CLI_REFRESH_LEAD_MS}`, "auth status", "prompt"]);
+  assert.equal(h.lines.length, 1);
+  assert.equal(h.lines[0].outcome, "refresh_failed");
+});
+
+test("a login cleared during the wait needs the operator and uses no CLI", async () => {
+  const h = harness([login({ expiresAt: NOW + 9 * 60_000 }),
+    login({ accessToken: "", refreshToken: "", expiresAt: 0 })]);
+  assert.equal(await runClaudeLoginKeepalive(h.deps), 1);
+  assert.deepEqual(h.calls, [`sleep ${9 * 60_000 - CLAUDE_CLI_REFRESH_LEAD_MS}`]);
+  assert.equal(h.lines[0].outcome, "login_required");
 });
 
 test("a login the operator must renew uses no CLI at all", async () => {
