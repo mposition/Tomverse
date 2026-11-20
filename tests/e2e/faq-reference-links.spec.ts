@@ -18,7 +18,7 @@ test("Korean FAQ answers expose working credit safety and privacy references", a
     }).toPass({ timeout: 30_000 });
   }
   const answers = page.getByRole("article");
-  for (const [label, path] of [["모델별 크레딧 확인", "/models"], ["안전한 데이터 처리", "/safety/security-privacy"], ["개인정보 처리방침", "/privacy"]]) {
+  for (const [label, path] of [["요금제의 크레딧 안내 보기", "/pricing"], ["안전한 데이터 처리", "/safety/security-privacy"], ["개인정보 처리방침", "/privacy"]]) {
     const link = answers.getByRole("link", { name: label, exact: true });
     await link.scrollIntoViewIfNeeded();
     await expect(link).toBeVisible();

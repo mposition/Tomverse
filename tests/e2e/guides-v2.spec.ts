@@ -25,7 +25,7 @@ for (const slug of SEARCH_INTENT_SLUGS) {
       await expect(page.getByTestId("guide-page")).toHaveAttribute("data-guide", slug);
       await expect(page.getByTestId("guide-page")).toHaveAttribute("lang", lang);
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(copy.title);
-      const tabs = page.getByRole("navigation", { name: guidesUiCopy[lang].guides });
+      const tabs = page.getByRole("main").getByRole("navigation", { name: guidesUiCopy[lang].guides });
       await expect(tabs.getByRole("link")).toHaveCount(SEARCH_INTENT_SLUGS.length);
       await expect(tabs.locator('[aria-current="page"]')).toHaveText(guidesUiCopy[lang].tabs[slug]);
       // The start link of the introduction and of the closing band lead to the same place.
@@ -47,7 +47,7 @@ for (const slug of SEARCH_INTENT_SLUGS) {
 test("the guide tabs lead to the other guides in the visitor's language", async ({ page }) => {
   await prepareGuestPage(page, "ko");
   await page.goto("/ko/compare-ai-models");
-  const tabs = page.getByRole("navigation", { name: guidesUiCopy.ko.guides });
+  const tabs = page.getByRole("main").getByRole("navigation", { name: guidesUiCopy.ko.guides });
   await expect(tabs.getByRole("link", { name: guidesUiCopy.ko.tabs["ai-answer-review"] })).toHaveAttribute("href", "/ko/ai-answer-review");
   await tabs.getByRole("link", { name: guidesUiCopy.ko.tabs["ai-for-file-analysis"] }).click();
   await expect(page).toHaveURL(/\/ko\/ai-for-file-analysis$/);
@@ -63,12 +63,12 @@ test("the answer review demo switches by hand, rotates every 6 seconds and stops
   const after = demo.getByRole("button", { name: "After", exact: true });
   await expect(demo).toHaveAttribute("data-view", "before");
   await expect(before).toHaveAttribute("aria-pressed", "true");
-  await expect(demo.getByText("Common ground")).toBeHidden();
+  await expect(demo.getByText("Common ground", { exact: true })).toBeHidden();
 
   // It rotates on its own after 6 seconds.
   await page.clock.fastForward(6100);
   await expect(demo).toHaveAttribute("data-view", "after");
-  await expect(demo.getByText("Common ground")).toBeVisible();
+  await expect(demo.getByText("Common ground", { exact: true })).toBeVisible();
   await expect(after).toHaveAttribute("aria-pressed", "true");
 
   // The pause button stops the rotation.
