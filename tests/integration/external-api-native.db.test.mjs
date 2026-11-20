@@ -1022,6 +1022,16 @@ test("native protocols over the real shared credit ledger", { skip: !databaseUrl
             assert.deepEqual(routed(light), [strong.model.id, "continued"]);
             assert.equal(routerCalls.length, before + 3);
 
+            // Two identical requests for one message at once share one router call.
+            const twinsBefore = routerCalls.length;
+            routerDelayMs = 50;
+            const twinBody = userTurn("Explain the change", harder.messages);
+            const twins = await Promise.all([claude(key, twinBody, session), claude(key, twinBody, session)]);
+            await Promise.all(twins.map((response) => response.text()));
+            routerDelayMs = 0;
+            assert.equal(routerCalls.length, twinsBefore + 1, "one router call for both");
+            assert.deepEqual(twins.map((response) => routed(response)[0]), [strong.model.id, strong.model.id]);
+
             // A user message with no pin (a restart) is routed like a first request.
             resetNativeSmartAdaptivePins();
             routerPick = strong.model.id;

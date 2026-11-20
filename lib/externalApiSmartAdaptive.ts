@@ -92,10 +92,15 @@ const CONVERSATION_MS = 6 * 60 * 60_000;
 const CONVERSATION_MAX = 5_000;
 const conversations = new Map<string, { modelId: string; creditWeight: number; at: number }>();
 
-const rememberConversation = (conversation: string, entry: RunnableEntry, now: number, onlyUp: boolean) => {
-    // Checked again here: a concurrent message of the conversation may have
-    // moved it to a stronger model since this request was routed.
-    if (!conversationModelMayMove(conversations.get(conversation), entry.capabilities.creditWeight, now, CONVERSATION_MS, onlyUp)) {
+/**
+ * Checked again here: a concurrent message of the conversation may have moved
+ * it to a stronger model since this request was routed. It may move down only
+ * while it still names `unfitModelId`, the model this request could not use.
+ */
+const rememberConversation = (conversation: string, entry: RunnableEntry, now: number, unfitModelId: string | null) => {
+    const existing = conversations.get(conversation);
+    const onlyUp = !(unfitModelId !== null && existing?.modelId === unfitModelId);
+    if (!conversationModelMayMove(existing, entry.capabilities.creditWeight, now, CONVERSATION_MS, onlyUp)) {
         return;
     }
     conversations.delete(conversation);
@@ -224,7 +229,7 @@ export const routeSmartAdaptive = async (input: {
     // request (window, retirement) and something else answered.
     const knownFresh = known !== undefined && now - known.at < CONVERSATION_MS;
     const knownFits = knownFresh && smartAdaptiveCandidates(input.request, input.runnable).some((entry) => entry.model.id === known.modelId);
-    const onlyUp = !(knownFresh && !knownFits);
+    const unfit = knownFresh && !knownFits ? known.modelId : null;
     console.info(
         JSON.stringify({
             event: "external_api_smart_adaptive_routed",
@@ -239,7 +244,7 @@ export const routeSmartAdaptive = async (input: {
     return {
         ...decision,
         // Called once admission accepted the request on this model.
-        remember: () => rememberConversation(conversation, decision.entry, Date.now(), onlyUp),
+        remember: () => rememberConversation(conversation, decision.entry, Date.now(), unfit),
     };
 };
 

@@ -78,8 +78,14 @@ export type NativeSmartDecision = {
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 32);
 
-const pin = (pinKey: string, entry: RunnableEntry, now: number, onlyUp: boolean) => {
+/**
+ * `unfitModelId`: the pinned model this request could not use. The pin may
+ * move down only while it still names that model; if another request moved
+ * it meanwhile, the escalate-only rule applies again.
+ */
+const pin = (pinKey: string, entry: RunnableEntry, now: number, unfitModelId: string | null) => {
     const existing = pins.get(pinKey);
+    const onlyUp = !(unfitModelId !== null && existing?.modelId === unfitModelId);
     // Checked again here: a concurrent message of the conversation may have
     // moved the pin to a stronger model since this request was routed.
     if (!conversationModelMayMove(existing, entry.capabilities.creditWeight, now, PIN_MS, onlyUp)) return;
@@ -216,7 +222,7 @@ const decideNativeSmartAdaptive = async (input: {
             coding: nativeCodingContext(input.protocol, input.request.headers.get("user-agent"), input.body, current?.model.id ?? null),
         });
 
-    const commitFor = (entry: RunnableEntry, onlyUp: boolean) => () => pin(pinKey, entry, Date.now(), onlyUp);
+    const commitFor = (entry: RunnableEntry, unfitModelId: string | null) => () => pin(pinKey, entry, Date.now(), unfitModelId);
 
     const pinned = pins.get(pinKey);
     const pinFresh = pinned !== undefined && now - pinned.at < PIN_MS;
@@ -224,16 +230,28 @@ const decideNativeSmartAdaptive = async (input: {
         const current = candidates.find((candidate) => candidate.model.id === pinned.modelId);
         if (current) {
             if (input.free) return { entry: current, routedBy: "continued" };
-            const keep: NativeSmartDecision = { entry: current, routedBy: "continued", commit: commitFor(current, true) };
+            const keep: NativeSmartDecision = { entry: current, routedBy: "continued", commit: commitFor(current, null) };
             if (!userTurn || candidates.length < 2 || !prompt) return keep;
             // A message the user wrote: the router may move the conversation
             // to a stronger model, never to a cheaper one.
             if (!(await input.routerAllowed())) return keep;
-            const routed = await router(current);
+            // An identical concurrent request (a retry, an Idempotency-Key twin)
+            // shares this router call rather than making its own.
+            const flight = `${pinKey}\0turn:${digest(JSON.stringify(input.body))}`;
+            const shared = routing.get(flight);
+            const call = shared ?? router(current);
+            if (!shared) routing.set(flight, call);
+            let routed: Awaited<typeof call>;
+            try {
+                routed = await call;
+            } finally {
+                if (!shared) routing.delete(flight);
+            }
+            routed = { ...routed, entry: candidates.find((candidate) => candidate.model.id === routed.entry.model.id) ?? current };
             if (routed.routedBy !== "router" || routed.entry.model.id === current.model.id) return keep;
             const { entry, held } = escalateOnly(current, routed.entry);
             if (held) return { ...keep, held };
-            return { entry, routedBy: "router", commit: commitFor(entry, true) };
+            return { entry, routedBy: "router", commit: commitFor(entry, null) };
         }
         // The pinned model cannot take this request any more (the history
         // outgrew its window, or it was retired): another of the provider's
@@ -241,12 +259,13 @@ const decideNativeSmartAdaptive = async (input: {
         // down if need be.
     }
     if (input.free) return { entry: fallback, routedBy: "default" };
-    const onlyUp = !pinFresh;
+    // Reached with a fresh pin only when its model could not take this request.
+    const unfit = pinFresh ? pinned.modelId : null;
 
     // A tool round with no pin keeps to the default; a message the user wrote
     // is routed like a first request.
     if ((nativeConversationUnderWay(input.protocol, input.body) && !userTurn) || candidates.length < 2 || !prompt) {
-        return { entry: fallback, routedBy: "default", commit: commitFor(fallback, onlyUp) };
+        return { entry: fallback, routedBy: "default", commit: commitFor(fallback, unfit) };
     }
     // Concurrent first requests of one conversation share one router call;
     // each still takes the shared pick only if it is one of its own candidates.
@@ -257,7 +276,7 @@ const decideNativeSmartAdaptive = async (input: {
         const shared = await pending;
         const entry = candidates.find((candidate) => candidate.model.id === shared.entry.model.id);
         return entry
-            ? { entry, routedBy: shared.routedBy, commit: commitFor(entry, onlyUp) }
+            ? { entry, routedBy: shared.routedBy, commit: commitFor(entry, unfit) }
             : { entry: fallback, routedBy: "default" };
     }
     const decision: Promise<NativeSmartDecision> = (async () =>
@@ -265,7 +284,7 @@ const decideNativeSmartAdaptive = async (input: {
     routing.set(pinKey, decision);
     try {
         const decided = await decision;
-        return { ...decided, commit: commitFor(decided.entry, onlyUp) };
+        return { ...decided, commit: commitFor(decided.entry, unfit) };
     } finally {
         routing.delete(pinKey);
     }
