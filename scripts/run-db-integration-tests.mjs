@@ -943,6 +943,10 @@ run(
     // An operator's status for a cycle's code and setting recommendations:
     // stored in the summary with its audit entry, never losing a concurrent one.
     "tests/integration/auto-router-optimizer-recommendations.db.test.ts",
+    // Its coding cycles (lib/autoCodingRouterOptimizer.ts): the third target
+    // in the same table, lock and caps, promotion into the coding guidance
+    // only, and the daily switch's default.
+    "tests/integration/auto-router-optimizer-coding.db.test.ts",
     "tests/integration/smart-adaptive-daily.db.test.ts",
     // Excluding a discovered model and reviewing it again: the structured
     // decision record, a rescan that leaves the exclusion alone, and the
@@ -1139,6 +1143,16 @@ run(
     "--test-concurrency=1",
     "tests/integration/tomverse-cli.db.test.mjs"],
   "Running the Tomverse CLI receipt, cost, cap, revocation and process scenarios over the real gateway",
+);
+// A coding optimizer cycle's run over the real cycle table and provider spend:
+// the router, the task evaluation's agent runs and the cycle proper's calls
+// are module mocks, so it has its own process.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1",
+    "tests/integration/auto-router-optimizer-coding-run.db.test.mjs"],
+  "Running the coding optimizer cycle's isolation gate, unknown-cost stops and evaluation spend",
 );
 // The native protocols (Claude Code Messages, Codex Responses) fake only the
 // one upstream module and run on the same ledger, key cap and receipts.

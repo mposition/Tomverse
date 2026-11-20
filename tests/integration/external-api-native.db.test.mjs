@@ -950,6 +950,9 @@ test("native protocols over the real shared credit ledger", { skip: !databaseUrl
             assert.equal(routerCalls.length, before + 1);
             const [reservation] = await reservationsFor(userId);
             assert.equal((await receiptFor(reservation.id)).modelId, other.model.id, "the receipt names the routed model");
+            const native = await receiptFor(reservation.id);
+            assert.ok(["router", "continued", "default"].includes(native.routedBy), "the routing decision is on the receipt");
+            assert.match(native.routeConversation, /^[0-9a-f]{32}$/);
         } finally {
             routerPick = null;
             delete process.env.EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED;

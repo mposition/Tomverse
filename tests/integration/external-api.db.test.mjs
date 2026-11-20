@@ -448,6 +448,10 @@ test("external inference API over the real shared credit ledger", { skip: !datab
             assert.ok(routerCalls[0].models.length > routerCalls[0].eligibleModelIds.length, "the router model is looked up among all runtime models");
             const receipt = await db.externalApiRequest.findFirst({ where: { userId }, orderBy: { createdAt: "desc" } });
             assert.equal(receipt.modelId, SECOND, "the receipt and the charge are the routed model's");
+            // The routing decision is on the receipt, content-free, for the coding routing report.
+            assert.equal(receipt.routedBy, "router");
+            assert.equal(receipt.routedHeld, false);
+            assert.match(receipt.routeConversation, /^[0-9a-f]{32}$/);
 
             // The tool round goes to the model that made the call: no router call.
             routerPick = MODEL_ID;

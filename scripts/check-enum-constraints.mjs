@@ -92,7 +92,7 @@ const REGISTRY = {
     module: "lib/autoLlmRouterCore.ts",
     list: "AUTO_LLM_ROUTER_GUIDANCE_KINDS",
     reason:
-      "Which guidance an optimizer cycle improves: the router's routing guidance or its rewrite guidance. Promotion writes the cycle's proposal into the guidance its target names, so a third value the code did not know would have no guidance to promote into.",
+      "Which guidance an optimizer cycle improves: the router's routing guidance, its rewrite guidance, or the external API's coding guidance. Promotion writes the cycle's proposal into the guidance its target names, so a value the code did not know would have no guidance to promote into.",
   },
   Conversation_selectionMode_check: {
     owner: "list",

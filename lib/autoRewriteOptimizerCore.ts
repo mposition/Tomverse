@@ -496,19 +496,23 @@ export const rewriteSyntheticCaseViews = (cases: unknown): RewriteSyntheticCaseV
         : [];
 
 /**
- * Which cycle the daily maintenance run starts, if any. One a day either way
- * (the system's daily count is shared by both targets); with both switches on
- * the targets alternate, starting with routing.
+ * Which cycle the daily maintenance run starts, if any. One a day whichever it
+ * is (the system's daily count is shared by every target); with several
+ * switches on the targets take turns in the order routing, rewrite, coding,
+ * starting after the last system cycle's target.
  */
 export const scheduledOptimizerTarget = (input: {
     routingDaily: boolean;
     rewriteDaily: boolean;
+    codingDaily?: boolean;
     lastSystemTarget: AutoLlmRouterGuidanceKind | null;
 }): AutoLlmRouterGuidanceKind | null => {
-    if (input.routingDaily && input.rewriteDaily) {
-        return input.lastSystemTarget === "routing" ? "rewrite" : "routing";
-    }
-    if (input.rewriteDaily) return "rewrite";
-    if (input.routingDaily) return "routing";
-    return null;
+    const on = ([
+        ["routing", input.routingDaily],
+        ["rewrite", input.rewriteDaily],
+        ["coding", input.codingDaily === true],
+    ] as const).flatMap(([target, daily]) => (daily ? [target] : []));
+    if (on.length === 0) return null;
+    const last = input.lastSystemTarget ? on.indexOf(input.lastSystemTarget) : -1;
+    return on[(last + 1) % on.length];
 };

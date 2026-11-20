@@ -74,6 +74,8 @@ export type NativeSmartDecision = {
      * the account could not pay for is never pinned. Absent on a free call.
      */
     commit?: () => void;
+    /** SHA-256 prefix of the pin key, for the receipt; never the key. */
+    conversationDigest?: string;
 };
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 32);
@@ -83,6 +85,10 @@ const digest = (value: string) => createHash("sha256").update(value).digest("hex
  * move down only while it still names that model; if another request moved
  * it meanwhile, the escalate-only rule applies again.
  */
+/** The key a conversation's pin is kept under: the API key, the protocol and the conversation. */
+const nativePinKey = (input: { keyId: string; protocol: NativeSmartProtocol; request: Request; body: Record<string, unknown> }) =>
+    `${input.keyId}\0${input.protocol}\0${nativeConversationId(input.protocol, input.request, input.body)}`;
+
 const pin = (pinKey: string, entry: RunnableEntry, now: number, unfitModelId: string | null) => {
     const existing = pins.get(pinKey);
     const onlyUp = !(unfitModelId !== null && existing?.modelId === unfitModelId);
@@ -125,7 +131,8 @@ export const nativeConversationId = (
 export const routeNativeSmartAdaptive = async (
     input: Parameters<typeof decideNativeSmartAdaptive>[0]
 ): Promise<NativeSmartDecision | null> => {
-    const decision = await decideNativeSmartAdaptive(input);
+    const decided = await decideNativeSmartAdaptive(input);
+    const decision = decided && { ...decided, conversationDigest: digest(nativePinKey(input)) };
     if (decision && !input.free) {
         console.info(
             JSON.stringify({
@@ -212,7 +219,7 @@ const decideNativeSmartAdaptive = async (input: {
     );
     const fallback = nameable.find((entry) => entry.model.id === defaultId) ?? nameable[0];
     const now = input.now ?? Date.now();
-    const pinKey = `${input.keyId}\0${input.protocol}\0${nativeConversationId(input.protocol, input.request, input.body)}`;
+    const pinKey = nativePinKey(input);
 
     const userTurn = nativeUserTurn(input.protocol, input.body);
     // The router reads the message this request ends with; a blank one (an
