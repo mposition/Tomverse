@@ -113,10 +113,12 @@ test("test campaign retains first-touch UTM through consent, chat, signup, and c
   );
   const guestChatAvailable = await page.getByTestId("launch-homepage")
     .getAttribute("data-guest-chat-trial-available") === "true";
-  const startHref = guestChatAvailable ? `${CHAT_WORKSPACE_PATH}?lang=en` : "/review?lang=en";
+  // Chat is the hero's second button when it is available; answer comparison is always the first.
+  const startHref = guestChatAvailable ? `${CHAT_WORKSPACE_PATH}?lang=en` : "/review?lang=en&entry=guest-preview";
   const destination = new URL(startHref, page.url()).href;
-  await expect(page.getByTestId("landing-primary-cta")).toHaveAttribute("href", startHref);
-  await page.getByTestId("landing-primary-cta").click();
+  const start = page.getByTestId(guestChatAvailable ? "landing-secondary-cta" : "landing-primary-cta");
+  await expect(start).toHaveAttribute("href", startHref);
+  await start.click();
   await expect(page).toHaveURL(destination);
 
   // A full reload proves queued events and the first-touch UTM do not depend on
