@@ -1,9 +1,13 @@
 import { expect, test } from "@playwright/test";
 import { INPUT_CREDIT_MULTIPLIERS } from "../../lib/models";
 import { NATIVE_ATTACHMENT_ESTIMATED_TOKENS } from "../../lib/chatAttachmentTokens";
+import { prepareGuestPage } from "./support/app-fixtures";
+import { mockModelsCatalog } from "./support/models-catalog-fixture";
 
 test("model base-credit help explains inclusive input multiplier bands", async ({ page }, info) => {
   await page.setViewportSize({ width: info.project.name.includes("mobile") ? 320 : 1440, height: 900 });
+  await prepareGuestPage(page, "en");
+  await mockModelsCatalog(page);
   await page.goto("/models?lang=en");
   const link = page.locator('a[href="#model-input-credit-guide"]').first();
   await link.focus();
