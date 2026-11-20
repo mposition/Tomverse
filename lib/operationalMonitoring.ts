@@ -299,6 +299,11 @@ export async function reportOperationalIncident({
   const detail = [
     `Code: ${code}`,
     `Severity: ${severity}`,
+    // Every environment posts to the same channels; without this a dev
+    // incident reads as production (2026-11-20). A label only, read raw: an
+    // import of lib/deploymentEnvironment.ts would grow the pinned Prompt
+    // Refiner runtime source closure.
+    `Environment: ${process.env.APP_ENV || process.env.RAILWAY_ENVIRONMENT_NAME || process.env.NODE_ENV || "unknown"}`,
     `Message: ${message}`,
     ...Object.entries(safeContext).map(([key, value]) => `${key}: ${String(value)}`),
     `Sentry event: ${eventId}`,
