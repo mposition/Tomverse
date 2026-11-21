@@ -46,6 +46,7 @@ import {
   buildPrTitle,
   checkChangeScope,
   classifyReviewExit,
+  claudeLoginState,
   cycleUrlFrom,
   failedTests,
   leaseAllowsPublish,
@@ -526,6 +527,14 @@ export async function runDailyBatch(deps) {
     }
     return 1;
   };
+  // Before any claim: a login that cannot carry one task stops the batch with
+  // its own reason instead of spending a task on an agent_error (2026-11-21).
+  // A test harness without the probe runs as before.
+  const login = deps.claudeLoginState ? deps.claudeLoginState() : "usable";
+  if (login === "login_required") {
+    deps.log("daily_login_required");
+    return stopped("login_required");
+  }
   try {
     for (let count = 0; count < LIMITS.tasksPerDay && deps.now() - started < LIMITS.dailyRunMs; count += 1) {
       let empty = false;
@@ -704,6 +713,16 @@ export function realRunnerDeps(env) {
       remove: (path) => rmSync(path, { force: true }),
       symlink: (target, path) => symlinkSync(target, path, "dir"),
       listTestFiles,
+    },
+    // Reads only the stored login's expiry fields; see core.mjs claudeLoginState.
+    claudeLoginState: () => {
+      let credentialsText = null;
+      try {
+        credentialsText = readFileSync(join(config.home, ".claude", ".credentials.json"), "utf8");
+      } catch {
+        // no login file: judged below
+      }
+      return claudeLoginState({ envToken: config.claudeOauthToken, credentialsText, now: Date.now() });
     },
     // Journal lines: event names, codes, ids and counts, never agent or test output.
     log: (event, fields = {}) => emit(JSON.stringify({ at: stamp(), event, ...fields })),

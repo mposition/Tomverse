@@ -302,6 +302,23 @@ PC에서 `claude setup-token`으로 토큰을 만들어 root만 읽는 파일에
 sudo sh -c 'umask 077; nano /etc/autorec/claude.env'   # CLAUDE_CODE_OAUTH_TOKEN=...
 ```
 
+**로그인 유지 (2026-11-21).** `/login`으로 한 로그인은 Claude를 쓸 때만 갱신되고, refresh token
+자체에도 만료일이 있어 갱신해도 늘지 않습니다. 2026-11-21에는 이 로그인이 끝나 있어 첫 작업이
+`agent_error`(1턴, "OAuth session expired and could not be refreshed")로 멈췄습니다. 그래서:
+
+- `autorec-claude-login-keepalive.timer`(5분마다, `autorec` 계정)가 운영자 로그인과 같은
+  `scripts/amux-v22-claude-login-keepalive.mjs`로 Claude를 쓰지 않는 날에도 access token을
+  갱신합니다. worker 사본이 없으므로 재배포하지 않습니다(`AMUX_V22_KEEPALIVE_RESTAGE=off`).
+  refresh token이 하루 안에 끝나면 journal에 `relogin_soon`을 남깁니다.
+  `journalctl -u autorec-claude-login-keepalive`로 봅니다. `claude.env`에 토큰이 있으면 `env_token`만 남깁니다.
+- 일일 runner는 첫 claim 전에 저장된 로그인의 만료 필드만 읽습니다. 로그인이 없거나 refresh
+  token이 3시간 안에 끝나면 작업을 claim하지 않고 `login_required`로 회차를 멈춥니다. 중단 알림에
+  다시 로그인하는 명령이 함께 나갑니다.
+- 다시 로그인: tomverse-admin으로 `sudo -u autorec -H /home/autorec/.local/bin/claude auth login`.
+  `claude setup-token` 토큰(위)을 쓰면 이 만료가 없어집니다.
+
+timer 켜기(설치 뒤 한 번): `sudo systemctl daemon-reload && sudo systemctl enable --now autorec-claude-login-keepalive.timer`.
+
 ### 6. 검토 서버 접근 (`autorec` → `review`)
 
 `autorec`이 같은 서버의 검토 서버에 `tools/review-orchestrator/README.md`의 Windows PC와 같은
@@ -379,6 +396,7 @@ systemctl list-timers autorec-runner.timer
 | `push_failed` | publish | push가 실패했고, 확인해 보니 브랜치가 없음 |
 | `pr_failed` | publish | 브랜치는 push됐지만 PR을 찾지도 열지도 못함. 브랜치는 GitHub에 남습니다 |
 | `runner_error` | 어디서나(publish 전) | 예상하지 못한 오류 |
+| `login_required` | 일일 회차 시작(중단 알림만) | `autorec` Claude 로그인이 없거나 refresh token이 3시간 안에 끝남. 작업을 claim하지 않음 |
 
 **gateway가 요청을 받지 않는 경우**(`claim_failed`의 `code`로 보입니다. 권장안은 claim되지 않았습니다):
 `gateway_config_missing`(3단계 값 없음), `peer_not_runner`(요청한 프로세스가 runner 본체가 아님 —
