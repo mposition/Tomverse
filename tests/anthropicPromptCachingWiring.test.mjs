@@ -266,6 +266,12 @@ const PATH_CALL_SITES = {
     clientMarkers: ["lib/anthropicMessagesProtocol.ts"],
     settlement: ["lib/externalApiNative.ts"],
   },
+  // OpenAI Chat Completions has no marker, so Tomverse adds the automatic one.
+  external_api_chat_completions: {
+    budget: ["lib/externalApiInference.ts"],
+    request: ["lib/externalApiInference.ts"],
+    settlement: ["lib/externalApiInference.ts"],
+  },
 };
 
 /**
@@ -463,9 +469,15 @@ test("the first launch scope is chat_turn alone", () => {
   const caching = Object.entries(ANTHROPIC_PROMPT_CACHE_PATHS)
     .filter(([, policy]) => policy.caches)
     .map(([path]) => path);
-  // external_api_messages is the one addition, and a different kind: the
-  // client (Claude Code) places the markers; Tomverse reserves and bills them.
-  assert.deepEqual(caching, ["chat_turn", "external_api_messages"]);
+  // external_api_messages is a different kind: the client (Claude Code)
+  // places the markers; Tomverse reserves and bills them.
+  // external_api_chat_completions: OpenAI-compatible coding clients resend a
+  // stateless prefix on every request and have no marker of their own.
+  assert.deepEqual(caching, [
+    "chat_turn",
+    "external_api_messages",
+    "external_api_chat_completions",
+  ]);
 });
 
 test("a searching turn is a different path, and it does not cache", () => {
