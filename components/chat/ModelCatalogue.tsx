@@ -90,6 +90,13 @@ type ModelCatalogueProps = {
   isAtCapacity?: boolean;
   /** Id of the (visually hidden) element explaining that cap. */
   limitDescriptionId?: string;
+  /**
+   * A selection-mode change is being confirmed (for a new Chat, its first
+   * Send creating the Chat in Smart Adaptive). The picker does not take a
+   * model then, so no row offers itself, as the recommendation cards and the
+   * Smart Adaptive switch already do not.
+   */
+  selectionLocked?: boolean;
   recentModelIds: string[];
   onToggleFavorite: (modelId: string) => void;
   onSelectModel: (model: AiModel, trigger: HTMLButtonElement) => void;
@@ -114,6 +121,7 @@ export function ModelCatalogue({
   favoriteModelIds,
   isAtCapacity = false,
   limitDescriptionId,
+  selectionLocked = false,
   recentModelIds,
   onToggleFavorite,
   onSelectModel,
@@ -440,7 +448,7 @@ export function ModelCatalogue({
                       data-model-minimum-plan={model.minimumPlan}
                       data-model-image-input={modelSupportsImageInput(model)}
                       data-model-plan-locked={isPlanLocked}
-                      disabled={selectionDisabled && !isSelected}
+                      disabled={selectionLocked || (selectionDisabled && !isSelected)}
                       onClick={(event) => onSelectModel(model, event.currentTarget)}
                       aria-pressed={isSelected}
                       aria-describedby={
