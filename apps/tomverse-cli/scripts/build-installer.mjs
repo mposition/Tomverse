@@ -63,6 +63,10 @@ if (process.platform === "win32") {
     const pkgFile = join(out, `tomverse-${version}-${target}.pkg`);
     rmSync(pkgFile, { force: true });
     run("pkgbuild", ["--root", root, "--identifier", "app.tomverse.cli", "--version", version, "--install-location", "/", pkgFile]);
+    // Every user of the Mac must be able to run what is installed.
+    run("pkgutil", ["--expand-full", pkgFile, join(work, "expanded")]);
+    const mode = run("stat", ["-f", "%Lp", join(work, "expanded", "Payload", "usr", "local", "bin", "tomverse")]).trim();
+    if (mode !== "755") fail(`the packaged tomverse has mode ${mode}, not 755`);
     checksum(pkgFile);
 } else {
     const debArch = { x64: "amd64", arm64: "arm64" }[process.arch];

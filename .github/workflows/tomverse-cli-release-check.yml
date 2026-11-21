@@ -612,6 +612,7 @@ jobs:
           umask 077
           printf '%s' "$APP_P12" | base64 --decode > "$RUNNER_TEMP/app.p12"
           printf '%s' "$INSTALLER_P12" | base64 --decode > "$RUNNER_TEMP/installer.p12"
+          umask 022
           security import "$RUNNER_TEMP/app.p12" -k "$keychain" -P "$P12_PASSWORD" -T /usr/bin/codesign
           security import "$RUNNER_TEMP/installer.p12" -k "$keychain" -P "$P12_PASSWORD" -T /usr/bin/pkgbuild -T /usr/bin/productsign
           rm -f "$RUNNER_TEMP/app.p12" "$RUNNER_TEMP/installer.p12"
@@ -632,9 +633,10 @@ jobs:
           installer_identity="$(security find-identity -v "$KEYCHAIN" | awk -v t="($TEAM_ID)" '/Developer ID Installer/ && index($0, t) { print $2; exit }')"
           test -n "$app_identity" || { echo "no Developer ID Application identity for team $TEAM_ID"; exit 1; }
           test -n "$installer_identity" || { echo "no Developer ID Installer identity for team $TEAM_ID"; exit 1; }
-          umask 077
           key="$RUNNER_TEMP/notary.p8"
-          printf '%s' "$NOTARY_KEY" | base64 --decode > "$key"
+          # Owner-only for the key file alone; the package payload below keeps normal modes.
+          (umask 077 && printf '%s' "$NOTARY_KEY" | base64 --decode > "$key")
+          umask 022
           notarize() {
             # One submission, waited on; a failure prints Apple's log and stops. Never resubmitted here.
             out="$(xcrun notarytool submit "$1" --key "$key" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" --wait --timeout 45m --output-format json)"
@@ -662,11 +664,19 @@ jobs:
             # The executable alone, for the archive (a bare binary cannot be stapled; Gatekeeper checks online).
             ditto -c -k --keepParent "$work/stage/tomverse" "$work/tomverse.zip"
             notarize "$work/tomverse.zip"
+            # What every user of the Mac must be able to run and read, whatever the extraction left.
+            chmod 755 "$work/stage/tomverse"
+            chmod 644 "$work/stage/LICENSE" "$work/stage/README.md" "$work/stage/THIRD_PARTY_NOTICES.txt"
             tar -czf "signed/$base.tar.gz" -C "$work/stage" tomverse LICENSE README.md THIRD_PARTY_NOTICES.txt
             cp "$work/stage/tomverse" "$work/root/usr/local/bin/tomverse"
             for doc in LICENSE README.md THIRD_PARTY_NOTICES.txt; do cp "$work/stage/$doc" "$work/root/usr/local/share/doc/tomverse-cli/$doc"; done
+            chmod -R u=rwX,go=rX "$work/root"
+            chmod 755 "$work/root/usr/local/bin/tomverse"
             pkgbuild --root "$work/root" --identifier app.tomverse.cli --version "$version" --install-location / \
               --sign "$installer_identity" --keychain "$KEYCHAIN" --timestamp "signed/$base.pkg"
+            pkgutil --expand-full "signed/$base.pkg" "$work/expanded"
+            mode="$(stat -f %Lp "$work/expanded/Payload/usr/local/bin/tomverse")"
+            test "$mode" = 755 || { echo "the packaged tomverse has mode $mode, not 755"; exit 1; }
             notarize "signed/$base.pkg"
             xcrun stapler staple "signed/$base.pkg"
             xcrun stapler validate "signed/$base.pkg"

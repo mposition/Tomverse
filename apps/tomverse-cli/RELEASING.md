@@ -70,8 +70,17 @@ ships as the next version.
 
 ## 3. Publish the installers
 
-Where: local PC, PowerShell, with the six artifacts from step 1 unzipped into
-one folder (each holds that system's installer, archive and `.sha256` files).
+Where: local PC, PowerShell, with the step 1 artifacts unzipped into one
+folder (each holds that system's installer, archive and `.sha256` files):
+
+- the four Windows and Linux artifacts: `tomverse-cli-windows-*`,
+  `tomverse-cli-linux-*`;
+- for macOS, **only** `tomverse-cli-macos-signed` (the signed, notarized
+  `.pkg` and `.tar.gz` with their own `.sha256`), when the run had macOS
+  signing on (`CLI_MACOS_SIGNING` = `on`, `sign-macos` green). The
+  `tomverse-cli-macos-arm64`/`-x64` artifacts are the unsigned builds that
+  signing starts from; do not publish them next to the signed ones. Without
+  signing, use those two and the README's unsigned-macOS note stays true.
 
 ```powershell
 gh release create cli-v0.1.0 --repo mposition/Tomverse --title "Tomverse CLI 0.1.0" --notes "Install: npm install -g @tomverse/cli, or download the installer for your system below (Windows .msi, macOS .pkg, Linux .deb/.rpm)." tomverse-0.1.0-*.msi tomverse-0.1.0-*.pkg tomverse-0.1.0-*.deb tomverse-0.1.0-*.rpm tomverse-0.1.0-*.zip tomverse-0.1.0-*.tar.gz tomverse-0.1.0-*.sha256
