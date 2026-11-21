@@ -550,11 +550,11 @@ async function recordPromotionRedemptionFromCheckout(
       const payerUnverified =
         chargedNothing && cardLimit !== null && !paymentMethodFingerprintHash;
       if (payerUnverified) riskFlags.add("payment_method_unverified");
-      const overCardLimit =
-        payerUnverified ||
-        (chargedNothing &&
-          cardLimit !== null &&
-          otherAccountsOnCard.length >= cardLimit);
+      const cardAtLimit =
+        cardLimit !== null && otherAccountsOnCard.length >= cardLimit;
+      // A paid checkout over the limit is granted and marked, not refused.
+      if (cardAtLimit && !chargedNothing) riskFlags.add("paid_over_card_limit");
+      const overCardLimit = payerUnverified || (chargedNothing && cardAtLimit);
 
       const recordRedemption = () =>
         tx.billingPromotionRedemption.create({

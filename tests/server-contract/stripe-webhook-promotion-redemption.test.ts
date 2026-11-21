@@ -761,7 +761,11 @@ test("a paid checkout over the card limit is flagged, not cancelled", async () =
 
   assert.deepEqual(world.cancels, []);
   assert.equal(world.userUpdates[0].plan, "Max");
-  assert.deepEqual(flagsOf(world.redemptionRows[0]), ["shared_payment_method"]);
+  // Marked as over the limit, so it is told apart from sharing under it.
+  assert.deepEqual(flagsOf(world.redemptionRows[0]).sort(), [
+    "paid_over_card_limit",
+    "shared_payment_method",
+  ]);
 });
 
 test("a database fault while deciding the card limit fails the webhook and grants nothing", async () => {

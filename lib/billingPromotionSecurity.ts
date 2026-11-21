@@ -37,13 +37,21 @@ export type PromotionRiskFlag =
    * checkout is refused (with `payment_method_limit`) rather than let through
    * uncounted.
    */
-  | "payment_method_unverified";
+  | "payment_method_unverified"
+  /**
+   * A paid checkout whose card was already at the per-card limit. Granted --
+   * a paid checkout is never cancelled with the payment kept (owner decision,
+   * 2026-11-21) -- but marked, so it can be told apart from ordinary sharing
+   * under the limit (`shared_payment_method`).
+   */
+  | "paid_over_card_limit";
 
 const PROMOTION_RISK_FLAGS: readonly PromotionRiskFlag[] = [
   "shared_ip",
   "shared_payment_method",
   "payment_method_limit",
   "payment_method_unverified",
+  "paid_over_card_limit",
 ];
 
 const PROMOTION_IP_WINDOW_MS = 30 * 86_400_000;
@@ -213,14 +221,13 @@ export async function releasePromotionCheckout(
     await prisma.chatRequestLease.deleteMany({
       where: {
         id,
+        // An unbound lease is only released with a time bound: without
+        // one it could be a newer attempt's lease whose bind failed.
         OR: [
           { admissionId: checkoutSessionLeaseTag(options.checkoutSessionId) },
-          {
-            admissionId: null,
-            ...(options.takenAtOrBefore
-              ? { createdAt: { lte: options.takenAtOrBefore } }
-              : {}),
-          },
+          ...(options.takenAtOrBefore
+            ? [{ admissionId: null, createdAt: { lte: options.takenAtOrBefore } }]
+            : []),
         ],
       },
     });
