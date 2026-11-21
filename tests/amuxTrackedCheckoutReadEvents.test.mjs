@@ -485,10 +485,12 @@ test("detail mode names init refusals and refused Read paths by name only", () =
   const paths = createAmuxTrackedCheckoutReadObserver({ directory,
     files: ["src/a.ts"], detail: true });
   observe(paths, use("read_1", "Read", { file_path: `${directory}/.env` }));
+  observe(paths, reply("read_1"));
   assert.deepEqual(paths.rejectDetail(), [{ code: "read_path_refused", path: ".env" }]);
   const outside = createAmuxTrackedCheckoutReadObserver({ directory,
     files: ["src/a.ts"], detail: true });
   observe(outside, use("read_1", "Read", { file_path: "/home/runner/.claude/x" }));
+  observe(outside, reply("read_1"));
   assert.deepEqual(outside.rejectDetail(),
     [{ code: "read_path_refused", path: "<outside>" }]);
   const tool = createAmuxTrackedCheckoutReadObserver({ directory,
@@ -498,8 +500,80 @@ test("detail mode names init refusals and refused Read paths by name only", () =
   // Off by default: nothing is retained.
   const quiet = make();
   observe(quiet, use("read_1", "Read", { file_path: `${directory}/.env` }));
+  observe(quiet, reply("read_1"));
   assert.deepEqual(quiet.rejectDetail(), []);
   assert.equal(quiet.rejectReason(), "read_path_refused");
+});
+
+test("a Read outside the allowlist that the CLI denies is a failed call, not a read", () => {
+  // The idea text held links relative to its own folder; the model tried
+  // them, the CLI's permission rules denied them (staging 2026-11-21).
+  for (const path of [`${directory}/.env`, "/tmp/workboard.md",
+    "/run/amux-cli/claude-oauth-token", `${directory}/src/../secrets.txt`]) {
+    const observer = make();
+    observe(observer, use("read_1", "Read", { file_path: path }));
+    observe(observer, reply("read_1", true));
+    assert.equal(observer.rejectReason(), null);
+    assert.deepEqual(complete(observer), { kind: "complete", files: [] });
+    assert.deepEqual(observer.toolErrors(), { Read: 1, Grep: 0, Glob: 0 });
+  }
+});
+
+test("outside bytes that arrive as a successful result still refuse the answer", () => {
+  for (const path of [`${directory}/.env`, "/tmp/workboard.md"]) {
+    for (const success of [reply("read_1"), { type: "user", message: {
+      role: "user", content: [{ type: "tool_result", tool_use_id: "read_1",
+        content: "outside bytes" }] } }]) {
+      const observer = make();
+      observe(observer, use("read_1", "Read", { file_path: path }));
+      observe(observer, success);
+      assert.equal(observer.rejectReason(), "read_path_refused");
+      assert.deepEqual(complete(observer), { kind: "unverified" });
+    }
+  }
+  // A denied attempt earlier does not excuse a later outside read that lands.
+  const later = make();
+  observe(later, use("read_1", "Read", { file_path: "/tmp/workboard.md" }));
+  observe(later, reply("read_1", true));
+  observe(later, use("read_2", "Read", { file_path: "/tmp/workboard.md" }));
+  observe(later, reply("read_2"));
+  assert.equal(later.rejectReason(), "read_path_refused");
+  assert.deepEqual(complete(later), { kind: "unverified" });
+});
+
+test("an outside Read with no result leaves the tool unfinished", () => {
+  const observer = make();
+  observe(observer, use("read_1", "Read", { file_path: "/tmp/workboard.md" }));
+  assert.deepEqual(complete(observer), { kind: "unverified" });
+  assert.equal(observer.rejectReason(), "tool_result_pending");
+  // Same rule as an allowed Read left without its result.
+  const allowedRead = make();
+  observe(allowedRead, use("read_1", "Read", { file_path: file }));
+  assert.deepEqual(complete(allowedRead), { kind: "unverified" });
+  assert.equal(allowedRead.rejectReason(), "tool_result_pending");
+});
+
+test("analysis stream keeps the answer when an outside Read was denied", () => {
+  const blockedBoth = { type: "assistant", message: { role: "assistant",
+    content: [
+      { type: "tool_use", id: "read_out", name: "Read",
+        input: { file_path: "/tmp/workboard.md" } },
+      { type: "tool_use", id: "read_in", name: "Read",
+        input: { file_path: file } }] } };
+  const replies = { type: "user", message: { role: "user", content: [
+    { type: "tool_result", tool_use_id: "read_out", is_error: true,
+      content: "Permission to use Read has been denied." },
+    { type: "tool_result", tool_use_id: "read_in", content: "file bytes" }] } };
+  assert.deepEqual(analyze([analysisInit, blockedBoth, replies, analysisResult]), {
+    kind: "verified_success", rawModelOutput: analysisResult.result,
+    readFiles: ["src/a.ts"], inputTokens: 14, outputTokens: 2,
+    toolErrors: { Read: 1, Grep: 0, Glob: 0 },
+  });
+  // The same stream with the outside bytes delivered is refused.
+  const leaked = structuredClone(replies);
+  delete leaked.message.content[0].is_error;
+  assert.deepEqual(analyze([analysisInit, blockedBoth, leaked, analysisResult]),
+    { kind: "outcome_unknown" });
 });
 
 test("thinking_tokens progress events pass only in their measured content-free shape", () => {
