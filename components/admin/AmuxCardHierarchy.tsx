@@ -125,10 +125,24 @@ const dayStart = (day: string) => {
   return Number.isFinite(at.getTime()) && at.getTime() <= Date.now() ? at.toISOString() : null;
 };
 
-/** The save transaction waits up to 5 s for a connection and runs at most
- * 60 s (portfolioNodeEditService.ts); after that a missing row is final. */
-const SAVE_SETTLED_MS = 70_000;
-type Sent = { requestId: string; sentAt: number };
+/** A save whose answer was lost. Its confirmation binds the node's latest
+ * assessment, so of it and any later save from the same state only one can
+ * ever be written (tests/integration/amux-portfolio-node-edit.db.test.ts).
+ * It is kept per node for this tab, so closing the sheet never forgets it. */
+type Sent = { requestId: string };
+const pendingKey = (nodeId: string) => `amux-node-edit-pending:${nodeId}`;
+const readPending = (nodeId: string): Sent | null => {
+  try {
+    const value = JSON.parse(window.sessionStorage.getItem(pendingKey(nodeId)) ?? "null");
+    return value && typeof value.requestId === "string" ? { requestId: value.requestId } : null;
+  } catch { return null; }
+};
+const writePending = (nodeId: string, sent: Sent | null) => {
+  try {
+    if (sent) window.sessionStorage.setItem(pendingKey(nodeId), JSON.stringify(sent));
+    else window.sessionStorage.removeItem(pendingKey(nodeId));
+  } catch { /* the server-side binding still refuses a duplicate */ }
+};
 
 type Draft = { title: string; description: string; value: number;
   uncertainty: typeof UNCERTAINTY[number]; reason: string; day: string };
@@ -144,17 +158,17 @@ function AmuxPortfolioNodeSheet({ nodeId, level, m, onClose, onSaved }: {
   const [error, setError] = useState<string | null>(null);
   const [reauth, setReauth] = useState(false);
   const [done, setDone] = useState<string | null>(null);
-  /** A save whose outcome is not known yet, and when it was sent. */
-  const [unknown, setUnknown] = useState<Sent | null>(null);
+  /** A save whose outcome is not known yet. */
+  const [unknown, setUnknownState] = useState<Sent | null>(() =>
+    typeof window === "undefined" ? null : readPending(nodeId));
+  const setUnknown = (sent: Sent | null) => { setUnknownState(sent); writePending(nodeId, sent); };
   /** Bumped after a save, so the sheet reads the node's new revision. */
   const [reload, setReload] = useState(0);
   const headingRef = useRef<HTMLHeadingElement | null>(null);
-  // The read runs once per node; a locale switch only relabels it.
-  const messagesRef = useRef(m);
-  messagesRef.current = m;
+  /** Why the node could not be read, as a code the current locale words. */
+  const [loadFailure, setLoadFailure] = useState<string | null>(null);
 
   useEffect(() => {
-    const m = messagesRef.current;
     let cancelled = false;
     void (async () => {
       try {
@@ -164,7 +178,7 @@ function AmuxPortfolioNodeSheet({ nodeId, level, m, onClose, onSaved }: {
         if (response.status === 428) { setReauth(true); return; }
         const json: unknown = await response.json().catch(() => null);
         const parsed = nodeRead.safeParse(json);
-        if (!response.ok || !parsed.success) { setError(m.failed(errorCode(json))); return; }
+        if (!response.ok || !parsed.success) { setLoadFailure(errorCode(json)); return; }
         setRead(parsed.data);
         setDraft({ title: parsed.data.content?.title ?? "",
           description: parsed.data.content?.description ?? "",
@@ -172,7 +186,7 @@ function AmuxPortfolioNodeSheet({ nodeId, level, m, onClose, onSaved }: {
           uncertainty: (UNCERTAINTY as readonly string[]).includes(parsed.data.assessment?.uncertainty ?? "") ?
             parsed.data.assessment!.uncertainty as Draft["uncertainty"] : "medium",
           reason: parsed.data.assessment ? "operator_override" : "initial", day: today() });
-      } catch { if (!cancelled) setError(m.failed("unavailable")); }
+      } catch { if (!cancelled) setLoadFailure("unavailable"); }
     })();
     return () => { cancelled = true; };
   }, [nodeId, reload]);
@@ -215,7 +229,9 @@ function AmuxPortfolioNodeSheet({ nodeId, level, m, onClose, onSaved }: {
   const save = async () => {
     if (!preview || busy) return;
     setBusy(true); setError(null);
-    const sent = { requestId: preview.requestId, sentAt: Date.now() };
+    const sent = { requestId: preview.requestId };
+    // Remembered before sending: a closed tab or sheet still finds it.
+    setUnknown(sent);
     try {
       const response = await post({ action: "save_node_edit",
         approval: { payload: preview.payload, confirmationDigest: preview.data.confirmationDigest } });
@@ -223,6 +239,7 @@ function AmuxPortfolioNodeSheet({ nodeId, level, m, onClose, onSaved }: {
       const json: unknown = await response.json().catch(() => null);
       const parsed = saveRead.safeParse(json);
       if (response.ok && parsed.success) {
+        setUnknown(null);
         const scored = parsed.data.tasks.filter((task) => task.state === "scored").length;
         setDone(m.saved(scored, parsed.data.tasks.length - scored)); setPreview(null);
         onSaved(); setReload((value) => value + 1); return;
@@ -231,20 +248,18 @@ function AmuxPortfolioNodeSheet({ nodeId, level, m, onClose, onSaved }: {
       // answer or a lost response is read back, never retried (agent foundation).
       const code = errorCode(json);
       if (!response.ok && code !== "outcome_unknown" && code !== "unavailable") {
-        setError(m.failed(code)); setPreview(null); return;
+        setUnknown(null); setError(m.failed(code)); setPreview(null); return;
       }
-      setUnknown(sent);
       await readBack(sent);
     } catch {
-      setUnknown(sent);
       await readBack(sent);
     } finally { setBusy(false); }
   };
 
-  /** Only an explicit not_found, read once the save's transaction can no
-   * longer be running, means nothing was written; anything else keeps the
-   * outcome unknown and the save closed. */
-  const readBack = async ({ requestId, sentAt }: Sent) => {
+  /** approved: written. not_found: no record yet, and a new save is safe,
+   * because the lost one is then refused if it ever arrives. Anything else
+   * keeps the outcome unknown and the save closed. */
+  const readBack = async ({ requestId }: Sent) => {
     setError(m.failed("outcome_unknown"));
     try {
       const back = await adminFetch(`/api/admin/amux/portfolio?kind=assessment&requestId=${requestId}`,
@@ -255,11 +270,23 @@ function AmuxPortfolioNodeSheet({ nodeId, level, m, onClose, onSaved }: {
       if (state === "approved") {
         setUnknown(null); setPreview(null); setError(null); setDone(m.unknownSaved); onSaved();
         setReload((value) => value + 1);
-      } else if (state === "not_found" && Date.now() - sentAt > SAVE_SETTLED_MS) {
+      } else if (state === "not_found") {
         setUnknown(null); setPreview(null); setError(m.unknownNotSaved);
+        setReload((value) => value + 1);
       } else setError(m.unknownPending);
     } catch { setError(m.unknownPending); }
   };
+
+  // A save this tab lost earlier for this node is checked before anything else.
+  const resumed = useRef(false);
+  useEffect(() => {
+    if (!read || resumed.current) return;
+    resumed.current = true;
+    // The unknown state already holds it (its initial value).
+    const pending = readPending(nodeId);
+    if (pending) void readBack(pending);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on the first read
+  }, [read]);
 
   const levelName = m.levels[level];
   const prior = read?.assessment?.value ?? null;
@@ -282,7 +309,7 @@ function AmuxPortfolioNodeSheet({ nodeId, level, m, onClose, onSaved }: {
       </header>
       {reauth && <div role="alert" className={workspace.notice}>
         <Link href={adminRecentAuthenticationHref(window.location.pathname + window.location.search)}>{m.reauth}</Link></div>}
-      {!read && !reauth && !error && <p role="status" className={styles.status}>{m.loading}</p>}
+      {!read && !reauth && !loadFailure && <p role="status" className={styles.status}>{m.loading}</p>}
       {read && draft && <>
         {readOnly && <p className={styles.note}>{m.readOnlyArchived}</p>}
         <label className={styles.field}><span>{m.title}</span>
@@ -336,7 +363,7 @@ function AmuxPortfolioNodeSheet({ nodeId, level, m, onClose, onSaved }: {
         </div>
         <small className={styles.status}>{m.ownerOnly}</small>
       </>}
-      {error && !read && <p role="alert" className={styles.note}>{error}</p>}
+      {loadFailure && !read && <p role="alert" className={styles.note}>{m.failed(loadFailure)}</p>}
     </section>
   </div>;
 }

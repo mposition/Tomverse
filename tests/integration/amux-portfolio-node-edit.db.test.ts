@@ -237,6 +237,28 @@ test("an assessment saved after the preview sends the owner back to review", asy
   }));
 });
 
+test("of two saves previewed from the same state, only one can ever be written", async () => {
+  const { previewAmuxPortfolioNodeEdit, saveAmuxPortfolioNodeEdit, AmuxPortfolioError } =
+    await services();
+  await lifecycle(async (tx) => scoredFeature(tx, async (ids) => {
+    const owner = session();
+    // A request whose outcome the sheet lost, and a fresh one the owner made
+    // after reading no record: whichever arrives second is refused.
+    const lost = payload(ids, { content: null, value: 1 });
+    const fresh = payload(ids, { content: null, value: 3 });
+    const lostPreview = await previewAmuxPortfolioNodeEdit(owner, lost, digestKey, { loadKeys });
+    const freshPreview = await previewAmuxPortfolioNodeEdit(owner, fresh, digestKey, { loadKeys });
+    await saveAmuxPortfolioNodeEdit({ session: owner, request: request(), payload: fresh,
+      confirmationDigest: freshPreview.confirmationDigest, digestKey });
+    await assert.rejects(saveAmuxPortfolioNodeEdit({ session: owner, request: request(),
+      payload: lost, confirmationDigest: lostPreview.confirmationDigest, digestKey }),
+    (error: unknown) => error instanceof AmuxPortfolioError && error.code === "reconfirm");
+    const rows = await tx.$queryRaw<Array<{ count: number }>>`
+      SELECT COUNT(*)::int AS "count" FROM "AmuxPortfolioAssessment" WHERE "nodeId" = ${ids.feature}`;
+    assert.equal(rows[0].count, 2); // the seed's first, and the fresh save only
+  }));
+});
+
 test("the database accepts a content revision only in the exact owner shape", async () => {
   await lifecycle(async (tx) => scoredFeature(tx, async (ids) => {
     const db = queryAdapter(tx);
