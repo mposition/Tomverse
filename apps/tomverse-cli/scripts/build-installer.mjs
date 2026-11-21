@@ -11,6 +11,8 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, w
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+// The package maintainer contact printed in the .deb control file; not a mail sender.
+const MAINTAINER_CONTACT = "support@tomverse.app";
 const app = join(dirname(fileURLToPath(import.meta.url)), "..");
 const fail = (message) => {
     console.error(`build-installer FAILED: ${message}`);
@@ -88,7 +90,7 @@ if (process.platform === "win32") {
             "Package: tomverse-cli",
             `Version: ${version}`,
             `Architecture: ${debArch}`,
-            "Maintainer: Tomverse <support@tomverse.app>",
+            `Maintainer: Tomverse <${MAINTAINER_CONTACT}>`,
             "Homepage: https://tomverse.app",
             "Section: devel",
             "Priority: optional",
