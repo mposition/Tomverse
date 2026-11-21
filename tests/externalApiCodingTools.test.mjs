@@ -102,7 +102,7 @@ test("Cursor and the per-tool model lists", () => {
     const lists = codingToolModels([smart, sonnet, haiku, luna]);
     assert.deepEqual(lists.claudeCode.map((m) => m.id), ["smart-adaptive", "claude-sonnet-5", "claude-haiku-4-5"]);
     assert.deepEqual(lists.codex.map((m) => m.id), ["smart-adaptive", "gpt-5-6-luna"]);
-    assert.ok(!lists.cursor.some((m) => m.id === "smart-adaptive"), "Agent starts on a fixed model");
+    assert.deepEqual(lists.cursor.map((m) => m.id), ["smart-adaptive", "claude-sonnet-5", "claude-haiku-4-5", "gpt-5-6-luna"], "Smart Adaptive first, verified with Cursor on production");
 });
 
 test("Smart Adaptive on Claude Code and Codex: scoped to the tool's provider, haiku alias fixed", () => {
@@ -129,7 +129,7 @@ test("Smart Adaptive on Claude Code and Codex: scoped to the tool's provider, ha
     assert.ok(codex.profileToml.includes("model_context_window = 192000"));
     // Asked which tools one Smart Adaptive entry serves, with nothing else to hand.
     const alone = codingToolModels([smart]);
-    assert.deepEqual([alone.claudeCode.length, alone.codex.length, alone.cursor.length], [1, 1, 0]);
+    assert.deepEqual([alone.claudeCode.length, alone.codex.length, alone.cursor.length], [1, 1, 1]);
 });
 
 test("a request names a model by Tomverse id or by one offered model's provider id, never another model", async () => {

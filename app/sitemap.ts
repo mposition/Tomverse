@@ -29,6 +29,7 @@ const publicPages: Array<{
   { path: "/products/chat", changeFrequency: "weekly", priority: 0.9 },
   { path: "/developers", changeFrequency: "weekly", priority: 0.8 },
   { path: "/developers/cli", changeFrequency: "weekly", priority: 0.7 },
+  { path: "/developers/cursor", changeFrequency: "weekly", priority: 0.7 },
   { path: "/models", changeFrequency: "weekly", priority: 0.8 },
   { path: "/pricing", changeFrequency: "weekly", priority: 0.8 },
   { path: "/faq", changeFrequency: "monthly", priority: 0.6 },

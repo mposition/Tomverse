@@ -628,10 +628,14 @@ compaction as unsupported (`capabilities.remote_compaction` default), so no
   each thread with a small model it picks itself (observed: `gpt-6-luna`);
   that is one more ordinary request with its own credits, and there is no
   setting to change its model.
-- **Cursor:** OpenAI API key + base-URL override + a fixed custom model, on the
-  Chat Completions route. Cursor's backend makes the calls, so only a public
-  HTTPS deployment works; Tab, Cursor's own models and cloud agents never use
-  the key.
+- **Cursor:** OpenAI API key + base-URL override + a custom model, on the
+  Chat Completions route. Settings offers `smart-adaptive` first (verified with
+  Cursor on production, 10.5); the public guide at `/developers/cursor` lists
+  every model ID a paid key can name, read from the live catalogue with the
+  same rule as `/models` (`isExternalApiServableModel`), plus the retired IDs
+  and their catalogue replacements. Cursor's backend makes the calls, so only a
+  public HTTPS deployment works; Tab, Cursor's own models and cloud agents never
+  use the key.
 
 ### 10.5 Verification
 

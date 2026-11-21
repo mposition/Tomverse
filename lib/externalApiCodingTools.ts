@@ -187,9 +187,12 @@ const nativeToolModels = (models: readonly ExternalApiModelCapabilities[], proto
 export const codingToolModels = (models: readonly ExternalApiModelCapabilities[]) => ({
     claudeCode: nativeToolModels(models, "anthropic_messages"),
     codex: nativeToolModels(models, "responses"),
-    // Cursor's Agent is verified with a fixed model first; Smart Adaptive is
-    // offered on Chat Completions but not recommended here until verified.
-    cursor: models.filter((model) => (model.protocols?.includes("chat_completions") ?? true) && model.id !== SMART_ADAPTIVE_MODEL_ID),
+    // Smart Adaptive first: Cursor Chat, Agent and Stop were verified with it
+    // on production (2026-11-20, docs/policy/external-api.md 10.5).
+    cursor: [
+        ...models.filter((model) => model.id === SMART_ADAPTIVE_MODEL_ID && (model.protocols?.includes("chat_completions") ?? true)),
+        ...models.filter((model) => (model.protocols?.includes("chat_completions") ?? true) && model.id !== SMART_ADAPTIVE_MODEL_ID),
+    ],
 });
 
 /**

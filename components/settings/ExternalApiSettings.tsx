@@ -15,6 +15,8 @@ import {
     type ExternalApiModelCapabilities,
 } from "@/lib/externalApiCatalogCore";
 import { claudeCodeConfig, codexConfig, codingToolModels, cursorConfig } from "@/lib/externalApiCodingTools";
+import { CURSOR_GUIDE_PATH } from "@/lib/marketingRoutes";
+import { localizedPath } from "@/lib/seo";
 
 /**
  * Settings > API keys. Lists, limits and revokes the account's external API
@@ -621,7 +623,7 @@ function ConnectSection({
     apiKey: string | null;
     tomverseCli?: TomverseCliGuide | null;
 }) {
-    const { t } = useLanguage();
+    const { t, lang } = useLanguage();
     const key = apiKey ?? KEY_PLACEHOLDER;
     const [platform, setPlatform] = useState<Platform | null>(null);
     const [shell, setShell] = useState<Shell>("powershell");
@@ -757,6 +759,11 @@ function ConnectSection({
                         <Notes>
                             <p>{t("externalApi.codingToolsIntro")}</p>
                             <p>{t("externalApi.cursorNotes")}</p>
+                            <p>
+                                <Link href={localizedPath(lang, CURSOR_GUIDE_PATH)} className="font-semibold text-blue-600 underline-offset-2 hover:underline dark:text-blue-400" data-testid="external-api-cursor-guide">
+                                    {t("externalApi.cursorGuide")} →
+                                </Link>
+                            </p>
                         </Notes>
                     </div>
                 );

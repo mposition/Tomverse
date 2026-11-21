@@ -19,6 +19,8 @@ type ModelCatalogContextValue = {
   models: readonly AiModel[];
   enabledModels: readonly AiModel[];
   publicModels: readonly AiModel[];
+  /** True once the live catalogue request has finished, whether or not it succeeded. */
+  catalogLoaded: boolean;
   getModel: (modelId: string) => AiModel | undefined;
   getEnabledModel: (modelId: string) => AiModel | undefined;
   isEnabledModelId: (modelId: string) => boolean;
@@ -36,6 +38,7 @@ const fallbackValue = (): ModelCatalogContextValue => {
     models: AVAILABLE_MODELS,
     enabledModels: AVAILABLE_MODELS.filter((model) => model.enabled),
     publicModels: STATIC_PUBLIC_MODELS,
+    catalogLoaded: false,
     getModel: (modelId) => modelMap.get(modelId),
     getEnabledModel: (modelId) => {
       const model = modelMap.get(modelId);
@@ -56,17 +59,22 @@ export function ModelCatalogProvider({
   initialModels?: readonly AiModel[];
 }) {
   const [models, setModels] = useState<readonly AiModel[]>(initialModels);
+  const [catalogLoaded, setCatalogLoaded] = useState(false);
 
   const reload = useCallback(async () => {
     // `no-cache`, not `no-store`: still revalidates on every reload, but sends
     // `If-None-Match` so an unchanged catalogue comes back as a 304 with no
     // body. SEC-012 -- this fires on every page load.
-    const response = await fetch("/api/models/catalog", { cache: "no-cache" });
-    const data = (await response.json().catch(() => null)) as
-      | { models?: AiModel[] }
-      | null;
-    if (!response.ok || !Array.isArray(data?.models)) return;
-    setModels(data.models);
+    try {
+      const response = await fetch("/api/models/catalog", { cache: "no-cache" });
+      const data = (await response.json().catch(() => null)) as
+        | { models?: AiModel[] }
+        | null;
+      if (!response.ok || !Array.isArray(data?.models)) return;
+      setModels(data.models);
+    } finally {
+      setCatalogLoaded(true);
+    }
   }, []);
 
   useEffect(() => {
@@ -90,6 +98,7 @@ export function ModelCatalogProvider({
       models,
       enabledModels,
       publicModels,
+      catalogLoaded,
       getModel: (modelId) => modelMap.get(modelId),
       getEnabledModel: (modelId) => {
         const model = modelMap.get(modelId);
@@ -101,7 +110,7 @@ export function ModelCatalogProvider({
       },
       reload,
     };
-  }, [models, reload]);
+  }, [models, catalogLoaded, reload]);
 
   return (
     <ModelCatalogContext.Provider value={value}>
