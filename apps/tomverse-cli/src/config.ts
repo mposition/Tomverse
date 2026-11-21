@@ -91,6 +91,8 @@ export type Endpoint = {
     basePath: string;
     /** The general-API endpoint as saved, when it was read as the coding API. */
     movedFrom?: string;
+    /** Where the moved endpoint came from: TOMVERSE_ENDPOINT outranks the saved config. */
+    movedFromSource?: "env" | "config";
 };
 
 export const resolveEndpoint = (config: CliConfig, env: NodeJS.ProcessEnv = process.env): Endpoint => {
@@ -123,11 +125,19 @@ export const resolveEndpoint = (config: CliConfig, env: NodeJS.ProcessEnv = proc
         throw new ConfigError(`The endpoint must be the coding API root ending in ${CODING_API_ROOT}, for example ${DEFAULT_ENDPOINT}.`);
     }
     const base = `${url.origin}${path}`;
-    return path === given ? { base, origin: url.origin, basePath: path } : { base, origin: url.origin, basePath: path, movedFrom: `${url.origin}${given}` };
+    if (path === given) return { base, origin: url.origin, basePath: path };
+    const movedFromSource = env.TOMVERSE_ENDPOINT?.trim() ? "env" : "config";
+    return { base, origin: url.origin, basePath: path, movedFrom: `${url.origin}${given}`, movedFromSource };
 };
 
-/** One line for doctor and `config show` when a saved general-API endpoint was read as the coding API. */
-export const endpointMoveNote = (endpoint: Endpoint) =>
-    endpoint.movedFrom
-        ? `saved as ${endpoint.movedFrom}, which is Tomverse's general API; the CLI uses the coding API ${endpoint.base} instead (save it with: tomverse config set endpoint ${endpoint.base})`
-        : null;
+/** One line for doctor and `config show` when a general-API endpoint was read as the coding API. */
+export const endpointMoveNote = (endpoint: Endpoint) => {
+    if (!endpoint.movedFrom) return null;
+    // The fix differs by source: saving the config does not change an environment variable that outranks it.
+    const fix =
+        endpoint.movedFromSource === "env"
+            ? `set TOMVERSE_ENDPOINT=${endpoint.base}`
+            : `save it with: tomverse config set endpoint ${endpoint.base}`;
+    const where = endpoint.movedFromSource === "env" ? "TOMVERSE_ENDPOINT is" : "saved as";
+    return `${where} ${endpoint.movedFrom}, which is Tomverse's general API; the CLI uses the coding API ${endpoint.base} instead (${fix})`;
+};

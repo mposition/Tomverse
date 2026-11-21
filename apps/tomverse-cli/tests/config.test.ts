@@ -31,6 +31,11 @@ test("a moved endpoint says so in one line; one already on the coding API says n
     assert.match(endpointMoveNote(moved) ?? "", /tomverse config set endpoint https:\/\/tomverse\.app\/api\/code\/v1/);
     assert.equal(endpointMoveNote(resolveEndpoint({ endpoint: "https://tomverse.app/api/code/v1" }, noEnv)), null);
     assert.equal(endpointMoveNote(resolveEndpoint({}, noEnv)), null);
+    // From TOMVERSE_ENDPOINT, saving the config would not help: the note names the variable.
+    const fromEnv = endpointMoveNote(resolveEndpoint({}, { TOMVERSE_ENDPOINT: "https://tomverse.app/api/v1" } as NodeJS.ProcessEnv)) ?? "";
+    assert.match(fromEnv, /^TOMVERSE_ENDPOINT is https:\/\/tomverse\.app\/api\/v1/);
+    assert.match(fromEnv, /set TOMVERSE_ENDPOINT=https:\/\/tomverse\.app\/api\/code\/v1/);
+    assert.doesNotMatch(fromEnv, /config set endpoint/);
 });
 
 test("the coding API root is kept as given; anything else is refused", () => {
