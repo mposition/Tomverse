@@ -117,7 +117,14 @@ export type AnthropicPromptCachePath =
      * it reserves the write premium when the request carries one and bills the
      * provider-reported writes.
      */
-    | "external_api_messages";
+    | "external_api_messages"
+    /**
+     * An external API request on OpenAI Chat Completions (Cursor, VS Code,
+     * JetBrains, Raycast and other OpenAI-compatible clients) that resolves to
+     * an Anthropic model. The format has no cache marker of its own, so
+     * Tomverse adds the automatic one.
+     */
+    | "external_api_chat_completions";
 
 type PromptCachePathPolicy = {
     /** Whether requests on this path carry `cache_control`. */
@@ -240,6 +247,22 @@ export const ANTHROPIC_PROMPT_CACHE_PATHS: Readonly<
             "(lib/anthropicMessagesProtocol.ts), and settlement bills the " +
             "provider-reported cache_creation_input_tokens as writes. Stripping " +
             "the markers instead would bill every turn uncached.",
+    },
+    external_api_chat_completions: {
+        caches: true,
+        rationale:
+            "OpenAI-compatible coding clients resend the same system prompt, " +
+            "tool definitions and history on every request, often several " +
+            "times a minute within one task, and the request is stateless so " +
+            "the whole prefix travels each time. Chat Completions has no " +
+            "cache marker, so without one from Tomverse every Anthropic-routed " +
+            "request was billed fully uncached -- the largest repeated prefix " +
+            "this application sends. The automatic top-level marker moves the " +
+            "breakpoint forward as the history grows, exactly as on a chat " +
+            "turn. The three parts are in lib/externalApiInference.ts: the " +
+            "budget reserves the write premium, getModelGenerationSettings adds " +
+            "the marker (Anthropic only), and settlement bills the " +
+            "provider-reported writes.",
     },
     memory_extraction: {
         caches: false,
