@@ -45,13 +45,19 @@ test("the tool tabs change with the arrow keys and stay readable as one tablist"
   await codex.click();
   await expect(codex).toHaveAttribute("aria-selected", "true");
   await expect(page.getByTestId("developers-console")).toContainText("model_providers.tomverse");
+  // Coding tools use the coding API (docs/policy/external-api.md §10.4).
+  await expect(page.getByTestId("developers-console")).toContainText("https://tomverse.app/api/code/v1");
   await page.keyboard.press("ArrowRight");
   const claude = page.getByTestId("developers-tool-claude");
   await expect(claude).toHaveAttribute("aria-selected", "true");
   await expect(claude).toBeFocused();
   await expect(page.getByTestId("developers-console")).toContainText("ANTHROPIC_BASE_URL");
+  await expect(page.getByTestId("developers-console")).toContainText("https://tomverse.app/api/code/anthropic");
   await page.keyboard.press("End");
   await expect(page.getByTestId("developers-tool-other")).toHaveAttribute("aria-selected", "true");
+  // Other apps stay on the general API.
+  await expect(page.getByTestId("developers-console")).toContainText("https://tomverse.app/api/v1");
+  await expect(page.getByTestId("developers-console")).not.toContainText("/api/code/");
   await expect(page.getByRole("tab", { selected: true })).toHaveCount(1);
 });
 
