@@ -50,11 +50,16 @@ test("the binding holds digests and the inputs the owner saw, never text", () =>
     payload: amuxPortfolioNodeEditPayloadSchema.parse(payload()),
     priorContentDigest: "a".repeat(64), nextContentDigest: "b".repeat(64),
     priorAssessmentId: "assessment-1",
-    affectedTasks: [{ taskId: "task-b", scoreId: "score-b", assessmentId: null },
-      { taskId: "task-a", scoreId: null, assessmentId: "assessment-a" }] });
+    affectedTasks: [{ taskId: "task-b", scoreId: "score-b", inputs: [
+      { subjectId: "epic-1", revision: 0, assessmentId: "assessment-e" },
+      { subjectId: "task-b", revision: 2, assessmentId: null }] },
+    { taskId: "task-a", scoreId: null, inputs: [] }] });
   assert.deepEqual(binding.affectedTasks.map((task) => task.taskId), ["task-a", "task-b"]);
   assert.equal(binding.priorAssessmentId, "assessment-1");
   assert.equal(binding.affectedTasks[1].scoreId, "score-b");
+  // Order on the path is kept: the score reads it top down.
+  assert.deepEqual(binding.affectedTasks[1].inputs.map((item) => item.subjectId),
+    ["epic-1", "task-b"]);
   assert.equal(JSON.stringify(binding).includes("crawl policy"), false);
   assert.equal(binding.nextContentDigest, "b".repeat(64));
 });

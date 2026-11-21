@@ -18,7 +18,7 @@ import { amuxPortfolioOwnerId, AmuxPortfolioError,
   writeAmuxPortfolioAssessmentInTx } from "./portfolioAssessmentService.ts";
 import { AMUX_NODE_REVISE_ACTION, AMUX_NODE_REVISE_TARGET,
   amuxNodeEditBinding, amuxNodeEditEvidenceRef, amuxNodeEditReasonFits,
-  amuxProjectedTaskScore, type AmuxPortfolioNodeEditPayload,
+  amuxProjectedTaskScore, type AmuxNodeEditTaskInputs, type AmuxPortfolioNodeEditPayload,
   type AmuxPortfolioNodeLevel } from "./portfolioNodeEditCore.ts";
 import { writeAmuxPortfolioScoreInTx } from "./portfolioScoreService.ts";
 
@@ -63,7 +63,8 @@ async function nodeContext(db: Db, nodeId: string) {
 /** Open Tasks under the node, across Epics and Features: the Tasks whose
  * score this node's value feeds. */
 async function affectedTasks(db: Db, nodeId: string) {
-  return db.$queryRaw<Array<{ id: string; displayKey: string | null }>>`
+  return db.$queryRaw<Array<{ id: string; displayKey: string | null; revision: number;
+    parentFeatureNodeId: string; parentStoryCardId: string | null }>>`
     WITH RECURSIVE tree("id", "depth") AS (
       SELECT "id", 0 FROM "AmuxPortfolioNode" WHERE "id" = ${nodeId}
       UNION ALL
@@ -71,11 +72,66 @@ async function affectedTasks(db: Db, nodeId: string) {
       JOIN "AmuxPortfolioNode" child ON child."parentId" = tree."id"
       WHERE child."state" = 'active' AND tree."depth" < 2
     )
-    SELECT card."id", card."displayKey" FROM tree
+    SELECT card."id", card."displayKey", card."revision", card."parentFeatureNodeId",
+      card."parentStoryCardId" FROM tree
     JOIN "AmuxWorkItem" card ON card."parentFeatureNodeId" = tree."id"
     WHERE card."cardType" = 'task' AND card."sourceSystem" = 'admin-idea-v4'
       AND card."status" NOT IN ('done', 'cancelled') AND card."archivedAt" IS NULL
     ORDER BY card."displayKey" ASC NULLS LAST, card."id" ASC`;
+}
+
+/** What each affected Task's score is calculated from, as read now: the
+ * latest score, and every subject on its path with its revision and latest
+ * assessment (portfolioScoreService.ts buildScorePlan reads the same). */
+async function taskScoreInputs(db: Db,
+  tasks: Awaited<ReturnType<typeof affectedTasks>>) {
+  const latestScore = new Map<string, { id: string; scoreTotal: number; components: unknown }>();
+  if (tasks.length === 0) return { latestScore, inputs: [] as AmuxNodeEditTaskInputs[] };
+  const storyIds = [...new Set(tasks.flatMap((task) =>
+    task.parentStoryCardId ? [task.parentStoryCardId] : []))];
+  const stories = storyIds.length === 0 ? [] : await db.amuxWorkItem.findMany({
+    where: { id: { in: storyIds } }, select: { id: true, revision: true } });
+  const nodes = new Map<string, { parentId: string | null; revision: number }>();
+  let frontier = [...new Set(tasks.map((task) => task.parentFeatureNodeId))];
+  for (let depth = 0; depth < 3 && frontier.length > 0; depth++) {
+    const rows = await db.amuxPortfolioNode.findMany({ where: { id: { in: frontier } },
+      select: { id: true, parentId: true, revision: true } });
+    for (const row of rows) nodes.set(row.id, row);
+    frontier = [...new Set(rows.flatMap((row) =>
+      row.parentId && !nodes.has(row.parentId) ? [row.parentId] : []))];
+  }
+  const taskIds = tasks.map((task) => task.id);
+  const cardIds = [...taskIds, ...storyIds];
+  const [scores, assessments] = await Promise.all([
+    db.$queryRaw<Array<{ taskId: string; id: string; scoreTotal: number; components: unknown }>>`
+      SELECT DISTINCT ON ("taskId") "taskId", "id"::text AS "id", "scoreTotal", "components"
+      FROM "AmuxPortfolioScoreSnapshot" WHERE "taskId" = ANY(${taskIds}::text[])
+      ORDER BY "taskId", "computedAt" DESC, "id" DESC`,
+    db.$queryRaw<Array<{ subjectId: string; id: string }>>`
+      SELECT DISTINCT ON (COALESCE("nodeId", "cardId"))
+        COALESCE("nodeId", "cardId") AS "subjectId", "id"::text AS "id"
+      FROM "AmuxPortfolioAssessment"
+      WHERE "nodeId" = ANY(${[...nodes.keys()]}::text[]) OR "cardId" = ANY(${cardIds}::text[])
+      ORDER BY COALESCE("nodeId", "cardId"), "assessmentVersion" DESC`,
+  ]);
+  for (const row of scores) latestScore.set(row.taskId, row);
+  const latestAssessment = new Map(assessments.map((row) => [row.subjectId, row.id]));
+  const storyRevision = new Map(stories.map((row) => [row.id, row.revision]));
+  const subject = (subjectId: string, revision: number | null) => ({ subjectId, revision,
+    assessmentId: latestAssessment.get(subjectId) ?? null });
+  const inputs = tasks.map((task) => {
+    const path: Array<ReturnType<typeof subject>> = [];
+    for (let id: string | null = task.parentFeatureNodeId, depth = 0; id && depth < 3; depth++) {
+      const row = nodes.get(id);
+      path.unshift(subject(id, row?.revision ?? null));
+      id = row?.parentId ?? null;
+    }
+    if (task.parentStoryCardId) path.push(subject(task.parentStoryCardId,
+      storyRevision.get(task.parentStoryCardId) ?? null));
+    path.push(subject(task.id, task.revision));
+    return { taskId: task.id, scoreId: latestScore.get(task.id)?.id ?? null, inputs: path };
+  });
+  return { latestScore, inputs };
 }
 
 const contentBody = (title: string, description: string) =>
@@ -120,26 +176,11 @@ async function buildPlan(db: Db, actorUserId: string,
   const priorValue = prior && typeof (prior.metrics as Record<string, unknown>)?.value === "number" ?
     (prior.metrics as Record<string, number>).value : null;
   const tasks = await affectedTasks(db, node.id);
-  const taskIds = tasks.map((task) => task.id);
-  const [scores, assessments] = taskIds.length === 0 ? [[], []] : await Promise.all([
-    db.$queryRaw<Array<{ taskId: string; id: string; scoreTotal: number; components: unknown }>>`
-      SELECT DISTINCT ON ("taskId") "taskId", "id"::text AS "id", "scoreTotal", "components"
-      FROM "AmuxPortfolioScoreSnapshot" WHERE "taskId" = ANY(${taskIds}::text[])
-      ORDER BY "taskId", "computedAt" DESC, "id" DESC`,
-    db.$queryRaw<Array<{ cardId: string; id: string }>>`
-      SELECT DISTINCT ON ("cardId") "cardId", "id"::text AS "id"
-      FROM "AmuxPortfolioAssessment" WHERE "cardId" = ANY(${taskIds}::text[])
-      ORDER BY "cardId", "assessmentVersion" DESC`,
-  ]);
-  const latestScore = new Map(scores.map((row) => [row.taskId, row]));
-  const latestAssessment = new Map(assessments.map((row) => [row.cardId, row.id]));
+  const { latestScore, inputs } = await taskScoreInputs(db, tasks);
   const canonical = Buffer.from(amuxCanonicalJson(amuxNodeEditBinding({
     actorUserId, payload, level, priorContentDigest: node.contentDigest,
     nextContentDigest: nextContent?.digest ?? null,
-    priorAssessmentId: prior?.id ?? null,
-    affectedTasks: tasks.map((task) => ({ taskId: task.id,
-      scoreId: latestScore.get(task.id)?.id ?? null,
-      assessmentId: latestAssessment.get(task.id) ?? null })) })), "utf8");
+    priorAssessmentId: prior?.id ?? null, affectedTasks: inputs })), "utf8");
   try {
     const digest = amuxContentDigest(canonical, "portfolio_assessment",
       payload.id, digestKey);

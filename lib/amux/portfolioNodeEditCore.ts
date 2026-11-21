@@ -64,10 +64,11 @@ export function amuxNodeEditBinding(input: {
   nextContentDigest: string | null;
   /** The node's latest assessment the owner saw, or null for a first one. */
   priorAssessmentId: string | null;
-  /** Each open Task with the latest score and own assessment the preview
-   * read: a newer one written meanwhile asks the owner to review again. */
-  affectedTasks: ReadonlyArray<{ taskId: string; scoreId: string | null;
-    assessmentId: string | null }>;
+  /** Each open Task with its latest score and, for every subject its score
+   * reads (Initiative, Epic, Feature, Story, Task), that subject's revision
+   * and latest assessment as the preview read them. Anything written
+   * meanwhile asks the owner to review again. */
+  affectedTasks: ReadonlyArray<AmuxNodeEditTaskInputs>;
 }) {
   const { payload } = input;
   return {
@@ -83,10 +84,16 @@ export function amuxNodeEditBinding(input: {
     evidenceAsOf: new Date(payload.evidenceAsOf).toISOString(),
     affectedTasks: [...input.affectedTasks]
       .map((task) => ({ taskId: task.taskId, scoreId: task.scoreId,
-        assessmentId: task.assessmentId }))
+        inputs: task.inputs.map((item) => ({ subjectId: item.subjectId,
+          revision: item.revision, assessmentId: item.assessmentId })) }))
       .sort((a, b) => a.taskId < b.taskId ? -1 : a.taskId > b.taskId ? 1 : 0),
   };
 }
+
+export type AmuxNodeEditTaskInputs = { taskId: string; scoreId: string | null;
+  /** Top down: Initiative, Epic, Feature, then the Story when present, then the Task. */
+  inputs: ReadonlyArray<{ subjectId: string; revision: number | null;
+    assessmentId: string | null }> };
 
 /** The preview's estimate of a Task's next total: only this level's value
  * component moves. The saved score is recalculated from every input by the

@@ -218,18 +218,22 @@ test("an assessment saved after the preview sends the owner back to review", asy
     writeAmuxPortfolioAssessmentInTx, AmuxPortfolioError } = await services();
   await lifecycle(async (tx) => scoredFeature(tx, async (ids) => {
     const owner = session();
-    const edit = payload(ids, { content: null });
-    const preview = await previewAmuxPortfolioNodeEdit(owner, edit, digestKey, { loadKeys });
-    // Another value lands on the same Feature between preview and save.
-    await writeAmuxPortfolioAssessmentInTx(tx, { session: owner, request: request(),
-      confirmationDigest: null, digestKey, payload: { id: randomUUID(),
-        requestId: randomUUID(), subject: { kind: "feature", id: ids.feature },
-        metrics: { value: 1 }, uncertainty: "low", evidenceRefs: ["proof_0002"],
-        evidenceAsOf: new Date(Date.now() - 60_000).toISOString(),
-        reasonCode: "new_evidence", modelProposalDigest: null } });
-    await assert.rejects(saveAmuxPortfolioNodeEdit({ session: owner, request: request(),
-      payload: edit, confirmationDigest: preview.confirmationDigest, digestKey }),
-    (error: unknown) => error instanceof AmuxPortfolioError && error.code === "reconfirm");
+    // Another value lands between preview and save: on the same Feature, or
+    // on the Epic above it, which the Task's recalculated score also reads.
+    for (const [kind, id] of [["feature", ids.feature], ["epic", ids.epic]] as const) {
+      const edit = payload(ids, { content: null });
+      const preview = await previewAmuxPortfolioNodeEdit(owner, edit, digestKey, { loadKeys });
+      await writeAmuxPortfolioAssessmentInTx(tx, { session: owner, request: request(),
+        confirmationDigest: null, digestKey, payload: { id: randomUUID(),
+          requestId: randomUUID(), subject: { kind, id },
+          metrics: { value: 1 }, uncertainty: "low", evidenceRefs: ["proof_0002"],
+          evidenceAsOf: new Date(Date.now() - 60_000).toISOString(),
+          reasonCode: "new_evidence", modelProposalDigest: null } });
+      await assert.rejects(saveAmuxPortfolioNodeEdit({ session: owner, request: request(),
+        payload: edit, confirmationDigest: preview.confirmationDigest, digestKey }),
+      (error: unknown) => error instanceof AmuxPortfolioError && error.code === "reconfirm",
+      `${kind} assessment after the preview`);
+    }
   }));
 });
 

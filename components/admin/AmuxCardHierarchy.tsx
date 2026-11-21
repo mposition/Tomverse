@@ -141,6 +141,8 @@ function AmuxPortfolioNodeSheet({ nodeId, level, m, onClose, onSaved }: {
   const [done, setDone] = useState<string | null>(null);
   /** The requestId of a save whose outcome is not known yet. */
   const [unknown, setUnknown] = useState<string | null>(null);
+  /** Bumped after a save, so the sheet reads the node's new revision. */
+  const [reload, setReload] = useState(0);
   const headingRef = useRef<HTMLHeadingElement | null>(null);
   // The read runs once per node; a locale switch only relabels it.
   const messagesRef = useRef(m);
@@ -168,8 +170,12 @@ function AmuxPortfolioNodeSheet({ nodeId, level, m, onClose, onSaved }: {
       } catch { if (!cancelled) setError(m.failed("unavailable")); }
     })();
     return () => { cancelled = true; };
-  }, [nodeId]);
-  useEffect(() => { headingRef.current?.focus(); }, [read]);
+  }, [nodeId, reload]);
+  // Focus once, when the node first arrives; a re-read after a save keeps
+  // the owner where they are.
+  const focused = useRef(false);
+  useEffect(() => { if (read && !focused.current) { focused.current = true;
+    headingRef.current?.focus(); } }, [read]);
 
   const change = (next: Partial<Draft>) => {
     if (unknown) return;
@@ -213,14 +219,20 @@ function AmuxPortfolioNodeSheet({ nodeId, level, m, onClose, onSaved }: {
       if (response.ok && parsed.success) {
         const scored = parsed.data.tasks.filter((task) => task.state === "scored").length;
         setDone(m.saved(scored, parsed.data.tasks.length - scored)); setPreview(null);
-        onSaved(); return;
+        onSaved(); setReload((value) => value + 1); return;
       }
+      // A named refusal was rolled back. An unknown outcome, an unreadable
+      // answer or a lost response is read back, never retried (agent foundation).
       const code = errorCode(json);
-      if (code !== "outcome_unknown") { setError(m.failed(code)); setPreview(null); return; }
-      // An unknown outcome is read back, never retried (agent foundation).
+      if (!response.ok && code !== "outcome_unknown" && code !== "unavailable") {
+        setError(m.failed(code)); setPreview(null); return;
+      }
       setUnknown(preview.requestId);
       await readBack(preview.requestId);
-    } catch { setError(m.failed("unavailable")); } finally { setBusy(false); }
+    } catch {
+      setUnknown(preview.requestId);
+      await readBack(preview.requestId);
+    } finally { setBusy(false); }
   };
 
   /** Only an explicit not_found means nothing was written; anything else
@@ -235,6 +247,7 @@ function AmuxPortfolioNodeSheet({ nodeId, level, m, onClose, onSaved }: {
         (await back.json().catch(() => null) as { state?: string } | null)?.state : null;
       if (state === "approved") {
         setUnknown(null); setPreview(null); setError(null); setDone(m.unknownSaved); onSaved();
+        setReload((value) => value + 1);
       } else if (state === "not_found") {
         setUnknown(null); setPreview(null); setError(m.unknownNotSaved);
       } else setError(m.unknownPending);
