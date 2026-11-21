@@ -28,6 +28,7 @@ import {
   publishCodingSnapshot,
   servableCodingRows,
 } from "@/lib/modelCatalog";
+import { codingApiCreditView } from "@/lib/codingRowRuntime";
 import { CatalogRefusal } from "@/lib/modelCatalogAdmin";
 import {
   CODING_CATALOG_EXTERNAL_CHANNELS_ENV,
@@ -153,6 +154,8 @@ export async function GET(req: Request) {
           ...entry,
           // The floor the judge holds the credit weight to, at the resolved prices.
           floor: entry.profile ? codingCreditFloor(entry.profile) : null,
+          // A dedicated row's coding API credits: the chat rule's minimum or its override, as a request is charged.
+          apiCredit: entry.source === "dedicated" && entry.profile ? codingApiCreditView(entry.profile) : null,
           draftReview: reviewCodingDraft(entry.draft),
           chat: linked ? (chatById.get(linked) ?? null) : null,
         };

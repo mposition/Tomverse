@@ -1544,6 +1544,8 @@ test("external inference API over the real shared credit ledger", { skip: !datab
         assert.equal(byIdJson.request.status, "settled");
         assert.equal(byIdJson.request.outcome, "completed");
         assert.equal(byIdJson.request.protocol, "chat_completions");
+        // Which API it came through, by its address (owner decision 2026-11-21).
+        assert.equal(byIdJson.request.surface, "general");
         const [reservation] = await reservationsFor(userId);
         assert.equal(byIdJson.request.chargedCredits, reservation.settledCredits);
         assert.equal(byIdJson.usage_source, "server_settlement");

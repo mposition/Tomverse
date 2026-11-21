@@ -21,8 +21,8 @@ import { DEFAULT_MODEL_ID } from "@/lib/models";
 /**
  * The coding API's base from the general API's: `https://host/api/v1` ->
  * `https://host/api/code/v1` (owner decision 2026-11-21). Claude Code, Codex,
- * Cursor and the tomverse CLI are configured with it; Aside, VS Code and
- * other apps keep the general base.
+ * Cursor, VS Code (Copilot Chat's custom endpoint) and the tomverse CLI are
+ * configured with it; Aside and other apps keep the general base.
  */
 export const codingApiBaseUrl = (generalBaseUrl: string) =>
     /\/api\/v1$/.test(generalBaseUrl)

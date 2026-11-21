@@ -420,11 +420,20 @@ test("a dedicated row's channels are its one setting, and a new draft keeps them
     saveCodingSettings({ modelId, settings: { creditWeight: 9 }, session }),
     (error: unknown) => error instanceof CatalogRefusal && error.code === "settings_linked_only"
   );
+  // Its coding API credits: set before a new draft, which keeps them with the channels.
+  const apiCreditOf = async () => ((await prisma.modelCatalogEntry.findUnique({ where: key }))?.profile as { apiCreditWeight?: number } | null)?.apiCreditWeight;
+  const set = await saveCodingSettings({ modelId, settings: { apiCreditWeight: 12 }, session });
+  assert.deepEqual(set.changes, [{ field: "apiCreditWeight", from: null, to: 12 }]);
+  assert.equal(await apiCreditOf(), 12);
   await storeCatalogDraft({ category: "coding", modelId, draft: codingProfile, session });
   await applyCatalogDraft({ category: "coding", modelId, session });
   assert.deepEqual(await channelsOf(), ["code", "api"]);
+  assert.equal(await apiCreditOf(), 12, "a new draft keeps the operator's coding API credits");
   await saveCodingSettings({ modelId, settings: { channels: ["code"] }, session });
   assert.deepEqual(await channelsOf(), ["code"]);
+  // Removed: back to the chat rule's minimum, never stored.
+  await saveCodingSettings({ modelId, settings: { apiCreditWeight: null }, session });
+  assert.equal(await apiCreditOf(), undefined);
 });
 
 test("an image draft carries its runtime profile and never prices another model", async () => {

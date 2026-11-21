@@ -5,13 +5,14 @@
 // model lists, Smart Adaptive, the coding-app settings and the tomverse CLI --
 // offers the rows the newest coding snapshot lists for the coding API that the
 // coding judge still admits now. A chat link runs and bills as its chat
-// registry model. A dedicated row runs as its own published row and bills at
-// that row's prices and credit weight, through the same reservation,
+// registry model. A dedicated row runs as its own published row at that row's
+// prices, charged credits by the chat rule (its apiCreditWeight, or the chat
+// floor at the chat input limit), through the same reservation,
 // settlement, provider budget and concurrency as every external request.
 // The general API (/api/v1, /api/anthropic) never reads this.
 import "server-only";
 
-import { codingRowRuntime, type CodingRowRuntime } from "@/lib/codingRowRuntime";
+import { codingApiCredit, codingRowRuntime, type CodingApiCreditBasis, type CodingRowRuntime } from "@/lib/codingRowRuntime";
 import {
   chatModelFacts,
   loadCodingCatalog,
@@ -34,14 +35,16 @@ import { prisma } from "@/lib/prisma";
 
 /**
  * What the reservation of a dedicated row's request records beside the row's
- * own prices: the snapshot it was priced from, and the cache-write rate that
- * bounds a client's prompt-cache marker (lib/codingRowRuntime.ts).
+ * own prices: the snapshot it was priced from, the cache-write rate that
+ * bounds a client's prompt-cache marker, and how its credits were set
+ * (lib/codingRowRuntime.ts codingApiCredit).
  */
 export type CodingCatalogPricing = {
   cacheWriteUsdPerMillionTokens: number | null;
   /** `coding_catalog_snapshot:<version>:<contentHash>`. */
   pricingVersion: string;
   costSource: "coding_catalog_snapshot";
+  creditBasis: { basis: CodingApiCreditBasis; credits: number; floorCredits: number };
 };
 
 export type CodingApiModel = { model: AiModel; pricing?: CodingCatalogPricing };
@@ -53,10 +56,13 @@ let warnedRefusal = 0;
 export const codingApiDedicatedModel = (
   row: CodingCatalogRow,
   built: Extract<CodingRowRuntime, { ok: true }>,
-  snapshot: { version: number; contentHash: string }
+  snapshot: { version: number; contentHash: string },
+  credit: { credits: number; basis: CodingApiCreditBasis; floorCredits: number }
 ): CodingApiModel => ({
   model: {
     ...built.runtime,
+    // The coding API's credits (the chat rule), not Code's `pricing.creditWeight`.
+    creditWeight: credit.credits,
     maxOutputTokens: built.price.maxOutputTokens,
     inputUsdPerMillionTokens: built.price.inputUsdPerMillionTokens,
     outputUsdPerMillionTokens: built.price.outputUsdPerMillionTokens,
@@ -67,6 +73,7 @@ export const codingApiDedicatedModel = (
     cacheWriteUsdPerMillionTokens: built.price.cacheWriteUsdPerMillionTokens ?? null,
     pricingVersion: `coding_catalog_snapshot:${snapshot.version}:${snapshot.contentHash}`,
     costSource: "coding_catalog_snapshot",
+    creditBasis: { basis: credit.basis, credits: credit.credits, floorCredits: credit.floorCredits },
   },
 });
 
@@ -140,7 +147,13 @@ export const codingApiModels = async (
       refused.push({ modelId: row.modelId, code: built.code });
       continue;
     }
-    models.push(codingApiDedicatedModel(row, built, snapshot));
+    // Charged by the chat rule, at the output ceiling the registry bounds.
+    const credit = codingApiCredit(row, built.price.maxOutputTokens);
+    if (!credit.ok) {
+      refused.push({ modelId: row.modelId, code: credit.reason });
+      continue;
+    }
+    models.push(codingApiDedicatedModel(row, built, snapshot, credit));
   }
   if (refused.length > 0 && now.getTime() - warnedRefusal > 60_000) {
     warnedRefusal = now.getTime();

@@ -295,6 +295,19 @@ export type ChatBudget = {
     longContextSettlement?: ChatLongContextSettlement | null;
     /** Provider calls reserved for, when more than one (tool loops). */
     providerCallPasses?: number;
+    /** A dedicated coding row on the coding API: how its credits were set. */
+    creditBasis?: ChatCreditBasis;
+};
+
+/**
+ * How a coding API request on a dedicated coding row was charged
+ * (lib/codingRowRuntime.ts codingApiCredit): the chat rule's minimum, or the
+ * operator's higher `apiCreditWeight`, beside the minimum it was held to.
+ */
+export type ChatCreditBasis = {
+    basis: "chat_rule_floor" | "api_override";
+    credits: number;
+    floorCredits: number;
 };
 
 type ReservationEntry = {
@@ -407,6 +420,7 @@ export type ChatUsageReservation = {
     addOnReservations: AddOnCreditReservationEntry[];
     pricingVersion?: string;
     costSource?: string;
+    creditBasis?: ChatCreditBasis;
     longContextThresholdTokens?: number | null;
     longContextSettlement?: ChatLongContextSettlement | null;
     providerCallPasses?: number;
@@ -592,6 +606,15 @@ const durableReservationPayloadSchema = z
         // still deserializes and settles at the rates it was reserved with.
         pricingVersion: z.string().min(1).max(120).optional(),
         costSource: z.string().min(1).max(60).optional(),
+        // A dedicated coding row on the coding API; absent everywhere else.
+        creditBasis: z
+            .object({
+                basis: z.enum(["chat_rule_floor", "api_override"]),
+                credits: z.number().int().positive(),
+                floorCredits: z.number().int().positive(),
+            })
+            .strict()
+            .optional(),
         longContextThresholdTokens: z.number().int().nonnegative().nullable().optional(),
         // Absent on a one-call turn and on every reservation written before it.
         providerCallPasses: z.number().int().min(2).max(4).optional(),
@@ -1062,19 +1085,26 @@ export const createChatBudget = (
          * the model (registry overrides); this adds what an override cannot
          * carry: the cache-write rate that bounds a client's cache marker, and
          * the snapshot the price came from, so the reservation and its
-         * settlement record which catalogue version was charged.
+         * settlement record which catalogue version was charged. Such a row
+         * also takes no more input than chatUserMaxInputTokens(), long context
+         * or not: its credits are worked out at that limit
+         * (lib/codingRowRuntime.ts codingApiCreditFloor), and /models says so.
          */
         catalogPricing?: {
             cacheWriteUsdPerMillionTokens: number | null;
             pricingVersion: string;
             costSource: "coding_catalog_snapshot";
+            /** How the row's credits were set; carried to the reservation and its settlement. */
+            creditBasis?: ChatCreditBasis;
         };
     }
 ): ChatBudget => {
     const maxInputTokens =
         kind === "guest"
             ? guestChatMaxInputTokens()
-            : accountChatMaxInputTokens(model);
+            : options?.catalogPricing
+              ? Math.min(accountChatMaxInputTokens(model), chatUserMaxInputTokens())
+              : accountChatMaxInputTokens(model);
 
     // The limit is checked against the raw estimate, deliberately: it bounds
     // the conversation the user sent, not the margin and tool overhead the
@@ -1174,8 +1204,9 @@ export const createChatBudget = (
                       LONG_CONTEXT_TIER_ESTIMATE_MARGIN
               )
             : tokens;
+    const { creditBasis, ...catalogRates } = options?.catalogPricing ?? {};
     const catalogPriced = (resolved: ResolvedModelPricing): ResolvedModelPricing =>
-        options?.catalogPricing ? { ...resolved, ...options.catalogPricing } : resolved;
+        options?.catalogPricing ? { ...resolved, ...catalogRates } : resolved;
     let pricing = catalogPriced(resolveModelRequestPricing(model, {
         estimatedPromptTokens: tierPromptTokens(contextInputTokens),
     }));
@@ -1286,6 +1317,7 @@ export const createChatBudget = (
         costSource: pricing.costSource,
         longContextThresholdTokens: pricing.longContextThresholdTokens,
         ...(passes > 1 ? { providerCallPasses: passes } : {}),
+        ...(creditBasis ? { creditBasis } : {}),
     };
 };
 
@@ -4190,6 +4222,7 @@ export const acquireChatAccess = async (
             // re-settle an existing reservation at the new rate.
             pricingVersion: budget.pricingVersion,
             costSource: budget.costSource,
+            ...(budget.creditBasis ? { creditBasis: budget.creditBasis } : {}),
             longContextThresholdTokens: budget.longContextThresholdTokens,
             longContextSettlement: budget.longContextSettlement ?? null,
             ...(budget.providerCallPasses
@@ -5292,6 +5325,8 @@ export const settleChatUsage = async (
                     promptCacheTtl: canonical.promptCacheTtl ?? null,
                     pricingVersion: canonical.pricingVersion ?? null,
                     reservationCostSource: canonical.costSource ?? null,
+                    // How a dedicated coding row's credits were set; absent elsewhere.
+                    ...(canonical.creditBasis ? { creditBasis: canonical.creditBasis } : {}),
                     longContextThresholdTokens:
                         canonical.longContextThresholdTokens ?? null,
                     usageSource,

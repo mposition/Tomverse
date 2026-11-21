@@ -74,6 +74,8 @@ process.env.OPENAI_API_KEY = "test-openai-key-not-real";
 
 const { externalApiRunnableModels, externalApiOfferedModels } = await import(mod("lib/externalApiCatalog.ts"));
 const { loadCodingCatalog, servableCodingRows } = await import(mod("lib/modelCatalog.ts"));
+const { codingApiCreditFloor } = await import(mod("lib/codingRowRuntime.ts"));
+const { toOpenAiModelEntry } = await import(mod("lib/externalApiCatalogCore.ts"));
 
 const TERMS = "https://openai.com/policies/services-agreement";
 const RETENTION = "https://platform.openai.com/docs/guides/your-data";
@@ -181,7 +183,10 @@ test("switched on, the coding API offers the published rows of both sources that
   // The dedicated row runs as its own row, priced from the snapshot.
   const coder = (await externalApiRunnableModels("Pro", { surface: "coding" })).find((item) => item.model.id === "coder-x");
   assert.equal(coder.model.apiModel, "coder-x-2026-11");
-  assert.equal(coder.capabilities.creditWeight, 7);
+  // Credits by the chat rule at the chat input limit, not Code's weight of 7.
+  const floor = codingApiCreditFloor({ provider: "openai", pricing: { inputUsdPerMTok: 0.2, outputUsdPerMTok: 0.8 } }, 4_000);
+  assert.ok(floor !== null && floor !== 7);
+  assert.equal(coder.capabilities.creditWeight, floor);
   assert.equal(coder.capabilities.maxOutputTokens, 4_000);
   assert.equal(coder.model.inputUsdPerMillionTokens, 0.2);
   assert.equal(coder.model.outputUsdPerMillionTokens, 0.8);
@@ -189,12 +194,33 @@ test("switched on, the coding API offers the published rows of both sources that
     cacheWriteUsdPerMillionTokens: null,
     pricingVersion: `coding_catalog_snapshot:7:${"c".repeat(64)}`,
     costSource: "coding_catalog_snapshot",
+    creditBasis: { basis: "chat_rule_floor", credits: floor, floorCredits: floor },
   });
+  // What /api/code/v1/models lists for it (app/api/code/v1/models -> toOpenAiModelEntry).
+  const listed = (await externalApiOfferedModels("Pro", { surface: "coding" })).find((model) => model.id === "coder-x");
+  assert.equal(toOpenAiModelEntry(listed).tomverse.credits_per_request, floor);
   // A chat link runs and bills as its chat model.
   const luna = (await externalApiRunnableModels("Pro", { surface: "coding" })).find((item) => item.model.id === "gpt-6-luna");
   assert.equal(luna.catalogPricing, undefined);
   // Smart Adaptive is drawn from the same list.
   assert.deepEqual((await externalApiOfferedModels("Pro", { surface: "coding" })).map((model) => model.id), ["smart-adaptive", "gpt-6-luna", "coder-x"]);
+  setSwitch(undefined);
+});
+
+test("an apiCreditWeight above the chat rule's floor is what the coding API lists and charges, after a publish", async () => {
+  setSwitch("true");
+  providerTerms = [termsRow()];
+  const floor = codingApiCreditFloor({ provider: "openai", pricing: { inputUsdPerMTok: 0.2, outputUsdPerMTok: 0.8 } }, 4_000);
+  entries = [dedicatedEntry("coder-x", ["code", "api"], { apiCreditWeight: floor + 5 })];
+  await publish(13);
+  const [coder] = await externalApiRunnableModels("Pro", { surface: "coding" });
+  assert.equal(coder.capabilities.creditWeight, floor + 5);
+  assert.deepEqual(coder.catalogPricing.creditBasis, { basis: "api_override", credits: floor + 5, floorCredits: floor });
+  const listed = (await externalApiOfferedModels("Pro", { surface: "coding" })).find((model) => model.id === "coder-x");
+  assert.equal(toOpenAiModelEntry(listed).tomverse.credits_per_request, floor + 5);
+  // Changed since publishing: not offered until the next publish.
+  entries = [dedicatedEntry("coder-x", ["code", "api"], { apiCreditWeight: floor + 6 })];
+  assert.deepEqual(await ids("Pro", "coding"), []);
   setSwitch(undefined);
 });
 

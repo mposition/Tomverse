@@ -427,6 +427,7 @@ export async function handleChatCompletions(request: Request, options: { surface
                     clientName,
                     requestDigest,
                     idempotencyKeyDigest,
+                    surface: options.surface,
                     routing,
                 }),
             });

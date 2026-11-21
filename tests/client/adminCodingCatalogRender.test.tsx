@@ -11,6 +11,7 @@ import { adminModelCatalogMessages } from "@/lib/adminMessages/modelCatalog";
 import {
   type CodingProviderRow,
   codingCatalogItems,
+  codingDedicatedSettings,
   codingSettingsFrom,
   codingSettingsProblems,
   codingSettingsRequest,
@@ -183,6 +184,47 @@ test("a dedicated row picks where it is offered: Code and the coding API", () =>
   assert.match(html, />코딩 API</);
   // Nothing changed yet: nothing to save.
   assert.match(html.match(/<button[^>]*data-testid="coding-dedicated-channels-save"[^>]*>/)?.[0] ?? "", / disabled=""/);
+});
+
+test("a dedicated row on the coding API shows its two credits: Code's, and the coding API's chat-rule minimum", () => {
+  const devstral = items.find((item) => item.id === "devstral-2")!;
+  const onApi = {
+    ...devstral,
+    channels: ["code", "api"],
+    apiCredit: { codeCredits: 9, override: null, floorCredits: 3, credits: 3, basis: "chat_rule_floor" as const, refusal: null },
+  };
+  const html = renderToStaticMarkup(<CodingChannelsTile c={c} item={onApi} busy={false} onSave={noop} />);
+  assert.match(html, /Tomverse Code 크레딧/);
+  assert.match(html, /×9/);
+  assert.match(html, /data-testid="coding-dedicated-api-credits"/);
+  assert.match(html, /코딩 API 크레딧/);
+  assert.match(html, /<input[^>]*placeholder="3"[^>]*data-testid="coding-dedicated-api-credit-input"/);
+  assert.match(html, /기본값: 채팅 기준 최소값 ×3/);
+  // Off the coding API, only Code's credits are shown.
+  const offApi = renderToStaticMarkup(<CodingChannelsTile c={c} item={{ ...onApi, channels: ["code"] }} busy={false} onSave={noop} />);
+  assert.doesNotMatch(offApi, /coding-dedicated-api-credits/);
+  // A floor that cannot be worked out says the coding API does not offer it.
+  const unbounded = renderToStaticMarkup(
+    <CodingChannelsTile c={cEn} item={{ ...onApi, apiCredit: { ...onApi.apiCredit, floorCredits: null, credits: null, basis: null, refusal: "api_credit_floor_unbounded" } }} busy={false} onSave={noop} />
+  );
+  assert.match(unbounded, /the coding API does not offer it/);
+});
+
+test("a dedicated row's settings read the override only while the coding API is ticked", () => {
+  const base = { storedChannels: ["code", "api"], storedOverride: null };
+  // On the coding API: an invalid override holds the save back.
+  assert.equal(codingDedicatedSettings({ ...base, channels: ["code", "api"], override: "abc" }).canSave, false);
+  assert.deepEqual(codingDedicatedSettings({ ...base, channels: ["code", "api"], override: "12" }).request, { apiCreditWeight: 12 });
+  // The coding API unticked: the hidden field neither blocks nor is sent.
+  const off = codingDedicatedSettings({ ...base, channels: ["code"], override: "abc" });
+  assert.equal(off.overrideInvalid, false);
+  assert.equal(off.canSave, true);
+  assert.deepEqual(off.request, { channels: ["code"] });
+  // Nothing changed, or no channel left: nothing to save.
+  assert.equal(codingDedicatedSettings({ ...base, channels: ["code", "api"], override: "" }).canSave, false);
+  assert.equal(codingDedicatedSettings({ ...base, channels: [], override: "" }).canSave, false);
+  // Clearing a stored override sends null: back to the chat rule's minimum.
+  assert.deepEqual(codingDedicatedSettings({ ...base, storedOverride: 9, channels: ["code", "api"], override: "" }).request, { apiCreditWeight: null });
 });
 
 test("the list filters by source, provider, status and text", () => {

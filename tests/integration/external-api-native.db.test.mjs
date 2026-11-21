@@ -283,6 +283,7 @@ test("native protocols over the real shared credit ledger", { skip: !databaseUrl
         assert.ok(reservation.settledCredits > 0);
         const receipt = await receiptFor(reservation.id);
         assert.equal(receipt.protocol, "anthropic_messages");
+        assert.equal(receipt.surface, "general", "sent to /api/anthropic: the general API");
         assert.equal(receipt.keyId, summary.id);
         assert.equal(receipt.finishReason, "tool_use");
         assert.equal(receipt.modelId, "claude-sonnet-5");
@@ -534,6 +535,7 @@ test("native protocols over the real shared credit ledger", { skip: !databaseUrl
         assert.equal(reservation.settledOutputTokens, 700);
         const receipt = await receiptFor(reservation.id);
         assert.equal(receipt.protocol, "responses");
+        assert.equal(receipt.surface, "general");
         assert.equal(receipt.modelId, "gpt-5-6-luna");
         assert.equal(receipt.finishReason, "completed");
     });

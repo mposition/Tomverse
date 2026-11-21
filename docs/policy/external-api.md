@@ -8,12 +8,13 @@ other apps and coding tools. Two APIs (owner decision 2026-11-21), decided by
 the address alone, on one key, one plan check (Pro or Max) and one ledger:
 
 - **The general API** -- `/api/v1/*` and `/api/anthropic/v1/*` -- for AI
-  browsers such as Aside and other apps (VS Code's Custom Endpoint, any
-  OpenAI-compatible app). It always offers the chat registry's models.
+  browsers such as Aside and other OpenAI-compatible apps. It always offers
+  the chat registry's models.
 - **The coding API** -- `/api/code/v1/*` (`chat/completions`, `responses`,
   `models`, `usage`, `requests/status`) and `/api/code/anthropic/v1/*`
   (`messages`, `messages/count_tokens`, `models`) -- for Claude Code, Codex,
-  Cursor and the tomverse CLI. While `CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED`
+  Cursor, the tomverse CLI and VS Code (GitHub Copilot Chat's custom endpoint,
+  a coding assistant; owner decision 2026-11-21). While `CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED`
   is off (the default) it offers and runs exactly what the general API does;
   on, it offers the coding catalogue's models (section 5, "Which models").
   The same handlers serve both, told which API the route is
@@ -23,9 +24,9 @@ the address alone, on one key, one plan check (Pro or Max) and one ledger:
 Three wire protocols, on both APIs:
 
 - **OpenAI Chat Completions** (`.../v1/chat/completions`): Aside (Custom
-  Provider, Pi `openai-completions`) and VS Code (Custom Endpoint,
-  `chat-completions`) on the general API; Cursor (OpenAI base-URL override)
-  and the tomverse CLI on the coding API.
+  Provider, Pi `openai-completions`) and other apps on the general API;
+  Cursor (OpenAI base-URL override), VS Code (Custom Endpoint,
+  `chat-completions`) and the tomverse CLI on the coding API.
 - **Anthropic Messages** (`.../anthropic/v1/messages`): Claude Code, CLI and
   the official VS Code extension, on the coding API (section 10).
 - **OpenAI Responses** (`.../v1/responses`): Codex, CLI and the official VS
@@ -173,8 +174,26 @@ the CLI moved onto the coding API) and that the coding judge still admits now
 (docs/policy/code-task-cost-guardrails.md 6.3). A chat link runs and bills as
 its chat registry model. A coding row chat does not have (a dedicated row)
 runs as its own published row: its API model id, context, output limit, input
-and output prices and credit weight, through the same reservation, provider
-budget, concurrency, key cap and settlement as every request here. Its
+and output prices, through the same reservation, provider budget,
+concurrency, key cap and settlement as every request here. Its credits follow
+the chat rule (owner decision 2026-11-21): this API takes at most the chat
+input limit (`CHAT_USER_MAX_INPUT_TOKENS`) and settles with the chat input
+multiplier, so a request is charged the row's `apiCreditWeight` when the
+operator set one, otherwise the chat catalogue's own floor
+(the arithmetic `suggestCreditFloor` and the chat guardrails use -- credits x
+input multiplier x `COST_PER_CREDIT_CEILING_MICRO_USD` covering the worst turn
+-- worked out directly, not rounded up to a chat class: at every
+input-multiplier band's largest input up to that limit, the row's output
+ceiling and, for Anthropic, 1.25x input, the largest of them, so a short prompt
+with a full answer at x1 is covered too; above 1,000 credits it counts as
+unworkable), worked out when the request is priced and never stored. Such a
+row takes no more input than that limit even where Chat's long context is on:
+a longer request is refused with `CHAT_INPUT_TOKEN_LIMIT` before anything is
+held or sent. An override below that floor, or a floor that cannot be worked out,
+keeps the row off this API. Code's managed path keeps the row's
+`pricing.creditWeight`. The reservation and the settlement record
+`creditBasis` (`chat_rule_floor` or `api_override`, the credits and the
+floor), and `credits_per_request` lists the same credits. Its
 reservation records `pricingVersion: coding_catalog_snapshot:<version>:<hash>`
 and `costSource: coding_catalog_snapshot`, and the settlement's pricing
 snapshot carries both, so a receipt names the catalogue version it was charged
@@ -435,13 +454,18 @@ improved by its own optimizer, as Chat's router is.
 `ExternalApiRequest`: the link from a key to its reservation, model, whether
 it streamed, the wire protocol (`chat_completions`, `anthropic_messages` or
 `responses`; migration `20261118160000_external_api_request_protocol`, rows
-from before it read as Chat Completions), the client user agent, finish reason,
+from before it read as Chat Completions), which API it came through (`surface`:
+`general` or `coding`, from the route, held to those two by a CHECK constraint;
+migration `20261121120000_external_api_request_surface`, rows from before it
+stay NULL and are shown as not recorded, with no backfill), the client user agent, finish reason,
 error code, timestamps, and digests of the body and Idempotency-Key. No prompt, output, tool argument,
 image or key material is stored or logged. Every credit and token figure lives
 on the shared reservation.
 
 The account data export includes both tables without the digests
-(`api_keys`, `api_requests`). Deleting the account deletes its keys and
+(`api_keys`, `api_requests`, the latter with `surface`). The key's receipts --
+`GET /usage`, `GET /requests/status` and Settings > API keys -- return `surface`
+too, null for a request recorded before it. Deleting the account deletes its keys and
 request links; the shared reservation rows stay, detached from the person, as
 every Chat reservation does.
 
@@ -456,17 +480,17 @@ into the setup until the person leaves the page; it is held only in the page's
 memory, never stored. Any other app that takes a custom OpenAI Chat Completions
 endpoint needs only three values: base URL, key and model (`smart-adaptive`). The
 models allowed through the API are listed in a searchable section, each with
-the tools that can use it. Claude Code, Codex, Cursor and the tomverse CLI are
-configured with the coding API's base URL and its models; Aside, VS Code and
-other apps with the general API's. Details are in section 10.4.
+the tools that can use it. Claude Code, Codex, Cursor, VS Code and the
+tomverse CLI are configured with the coding API's base URL and its models;
+Aside and other apps with the general API's. Details are in section 10.4.
 
 - **Aside:** add a Custom Provider and paste the JSON: provider `tomverse`,
   `api: "openai-completions"`, `baseUrl`, `apiKey`, `authHeader: true`, and per
   model `id`, `name`, `reasoning`, `input` (`text`, plus `image` where
   supported), `contextWindow`, `maxTokens`.
-- **VS Code:** run *Chat: Manage Language Models* → *Add Models* → *Custom
-  Endpoint* and use the generated entry as the `chatLanguageModels.json`
-  provider: `vendor: "customendpoint"`, `apiType: "chat-completions"`,
+- **VS Code** (a coding tool: the coding API's base URL and models): run
+  *Chat: Manage Language Models* → *Add Models* → *Custom Endpoint* and use the
+  generated entry as the `chatLanguageModels.json` provider: `vendor: "customendpoint"`, `apiType: "chat-completions"`,
   `apiKey: "${input:tomverseApiKey}"` (VS Code asks once and keeps it in its
   secret storage), per model the full `/chat/completions` URL, `toolCalling`,
   `vision`, `streaming`, `maxInputTokens`, `maxOutputTokens`. VS Code's
