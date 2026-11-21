@@ -12,8 +12,9 @@ repository root on the operator's PC.
 The intake secret and origin are environment variables
 (`TOMVERSE_AMUX_SESSION_INTAKE_CLIENT_SECRET`, `TOMVERSE_AMUX_SESSION_INTAKE_ORIGIN`)
 set by the operator. Never print, echo or write them, and never ask for them in
-chat. If the command answers `credential_unavailable`, tell the operator the
-variables are missing in this tool's environment.
+chat. `credential_unavailable` means the secret is missing in this tool's
+environment and `origin_invalid` means the origin is missing or not HTTPS; tell
+the operator which one.
 
 ## Idea only
 
@@ -25,8 +26,9 @@ variables are missing in this tool's environment.
    npm run amux:idea -- submit --tool "Claude Code" --provider "Anthropic" --title "<one line>" --body <file.md>
    ```
 
-   Without `--repo` the checkout's GitHub origin is the reference. Add
-   `--pr owner/name#123` for a pull request.
+   Without `--repo` the checkout's GitHub origin is the reference
+   (`repository_unavailable` when there is none; `--no-repo` sends none on
+   purpose). Add `--pr owner/name#123` for a pull request.
 
 The box analyses the idea and the operator approves its plan in the Admin idea.
 

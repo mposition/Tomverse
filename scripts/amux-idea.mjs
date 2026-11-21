@@ -78,7 +78,7 @@ const PULL = /^([A-Za-z0-9_.-]{1,64}\/[A-Za-z0-9_.-]{1,100})#([1-9][0-9]*)$/;
 
 /** owner/name of a GitHub remote URL, or null. */
 export function githubRepositoryOf(url) {
-  const match = /github\.com[:/]([A-Za-z0-9_.-]{1,64})\/([A-Za-z0-9_.-]{1,100}?)(?:\.git)?\/?$/
+  const match = /(?:^|[/@])github\.com[:/]([A-Za-z0-9_.-]{1,64})\/([A-Za-z0-9_.-]{1,100}?)(?:\.git)?\/?$/
     .exec(typeof url === "string" ? url.trim() : "");
   return match ? `${match[1]}/${match[2]}` : null;
 }

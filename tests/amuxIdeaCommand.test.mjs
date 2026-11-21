@@ -48,6 +48,7 @@ test("the idea text is its one-line title, then the body", () => {
   assert.equal(githubRepositoryOf("https://github.com/mposition/Tomverse.git\n"), "mposition/Tomverse");
   assert.equal(githubRepositoryOf("git@github.com:mposition/Tomverse.git"), "mposition/Tomverse");
   assert.equal(githubRepositoryOf("https://gitlab.com/a/b"), null);
+  assert.equal(githubRepositoryOf("https://notgithub.com/a/b.git"), null);
 });
 
 test("submit with a plan sends the checked plan once and reports its state", async () => {

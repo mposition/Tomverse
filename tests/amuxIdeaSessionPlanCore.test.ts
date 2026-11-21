@@ -100,6 +100,9 @@ test("a plan must be a closed proposal: no question, rejection or remainder", ()
     { outcome: "needs_information", ownerQuestion: "Which settings page?" },
     { ownerQuestion: "Which settings page?" },
     { ownerQuestion: 3 },
+    // A declared owner-input page without its question is not a proposal either.
+    { outcome: "needs_information" },
+    { coverageStatus: "needs_owner_input", ownerQuestion: null },
   ]) {
     assert.deepEqual(inspectAmuxIdeaSessionPlan(amuxSessionPlanFixture(overrides), randomUUID()),
       { ok: false, code: "plan_rejected", reason: "question" }, JSON.stringify(overrides));

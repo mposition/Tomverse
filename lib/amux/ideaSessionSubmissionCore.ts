@@ -210,9 +210,14 @@ export function inspectAmuxIdeaSessionPlan(value: unknown,
   // The session page bookkeeping drops a question written beside units, as a
   // box answer's assumptions stand with no owner present. A session has its
   // owner in chat, so an open question is refused here instead of vanishing.
-  const question = (value as Record<string, unknown>).ownerQuestion;
-  if (question !== undefined && question !== null &&
-      !(typeof question === "string" && question.trim().length === 0)) {
+  // The same bookkeeping turns a declared owner-input page into a proposal,
+  // so the session's own declaration is read before it.
+  const declared = value as Record<string, unknown>;
+  const question = declared.ownerQuestion;
+  if ((question !== undefined && question !== null &&
+      !(typeof question === "string" && question.trim().length === 0)) ||
+      declared.outcome === "needs_information" ||
+      declared.coverageStatus === "needs_owner_input") {
     return { ok: false, code: "plan_rejected", reason: "question" };
   }
   const raw = JSON.stringify(value);
