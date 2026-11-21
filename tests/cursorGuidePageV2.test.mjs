@@ -54,6 +54,11 @@ test("facts the guide states match docs/policy/external-api.md in every language
     assert.equal(copy.toc.items.length, 8, `${locale}: one entry per section`);
     // Cursor's Tab completion and own models never use the key.
     assert.match(copy.notice.body, /Tab/, `${locale}: Tab is billed by Cursor`);
+    // No GPT model in Cursor’s own list is a Tomverse model (owner, 2026-11-21): the
+    // notice, the routing row and the not-found answer all say so.
+    assert.match(copy.notice.body, /GPT/, `${locale}: notice warns about Cursor’s GPT list`);
+    assert.match(copy.routing.rows[1].result, /model_not_found/, `${locale}: Cursor GPT row fails`);
+    assert.match(copy.faq.items[2].a, /GPT/, `${locale}: not-found answer names Cursor’s GPT list`);
     // No stale model ids or hard-coded model counts in copy: the table reads the catalogue.
     assert.doesNotMatch(text, /gpt-5-6-luna|\b37\b/, `${locale}: stale id or fixed count`);
   }

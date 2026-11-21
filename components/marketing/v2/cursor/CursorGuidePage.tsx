@@ -32,6 +32,8 @@ const KEY_PATH = "/settings/api";
 const SECTION_IDS = ["before", "step-key", "step-cursor", "step-model", "routing", "models", "verify", "troubleshooting"] as const;
 /** Whether each routing row reaches Tomverse, in the order of copy.routing.rows. */
 const ROUTE_TO_TOMVERSE = [true, true, false, false] as const;
+/** Rows that reach Tomverse but fail: Cursor list GPT names are not Tomverse model ids. */
+const ROUTE_FAILS = [false, true, false, false] as const;
 const COPY_ALL = [`OpenAI API Key: <YOUR_TOMVERSE_API_KEY>`, `Override OpenAI Base URL: ${API_BASE}`, `Custom model: ${SMART_ADAPTIVE_ID}`].join("\n");
 /** An example receipt, not live data: what a connected Cursor key's receipts look like. */
 const RECEIPT_EXAMPLE = [
@@ -270,7 +272,7 @@ export function CursorGuidePage() {
               <thead><tr>{copy.routing.head.map((head) => <th key={head} scope="col">{head}</th>)}</tr></thead>
               <tbody>{copy.routing.rows.map((row, i) => <tr key={row.pick}>
                 <th scope="row" data-label={copy.routing.head[0]}>{row.pick}</th>
-                <td data-label={copy.routing.head[1]}><span className={`cg-dest${ROUTE_TO_TOMVERSE[i] ? " ok" : ""}`}>{ROUTE_TO_TOMVERSE[i] ? copy.routing.toTomverse : copy.routing.toCursor}</span></td>
+                <td data-label={copy.routing.head[1]}><span className={`cg-dest${ROUTE_FAILS[i] ? " warn" : ROUTE_TO_TOMVERSE[i] ? " ok" : ""}`}>{ROUTE_TO_TOMVERSE[i] ? copy.routing.toTomverse : copy.routing.toCursor}</span></td>
                 <td data-label={copy.routing.head[2]}>{row.result}</td>
               </tr>)}</tbody>
             </table>

@@ -311,8 +311,11 @@ catalogue, so a customer never has to recopy it.
   order, `routed-by: default`. A pick outside the candidates is never taken.
 - **A model named by its provider id.** Chat Completions, like the native
   protocols, takes the provider's model id (`gpt-5.6-luna`) when exactly one
-  offered model uses it, so a coding tool's built-in model list (Cursor's GPT
-  models, with the OpenAI base URL overridden) works without a custom model.
+  offered model uses it, so a coding tool's built-in model name works when it
+  matches one. Cursor's built-in GPT list matched none of the served models
+  (owner, 2026-11-21), so with the base URL overridden those picks reach
+  Tomverse and fail as `model_not_found`; Settings and `/developers/cursor` tell
+  Cursor users to add a Tomverse ID instead.
   An id two offered models share is a 400 `model_ambiguous` naming the
   Tomverse ids. A name no offered model uses is never mapped to another model:
   it is not found.

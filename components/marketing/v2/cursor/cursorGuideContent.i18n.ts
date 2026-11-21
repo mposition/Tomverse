@@ -25,7 +25,7 @@ export const cursorGuideTranslations: Record<Exclude<Language, "ko" | "en">, Cur
     },
     notice: {
       title: "开始之前请注意",
-      body: "Cursor 只能更改 OpenAI 地址。因此进入 Tomverse 的请求只有两类：你添加了 Tomverse 模型 ID 后选择的请求，以及 Cursor 列表中的 OpenAI 模型。Cursor 列表中的 Claude、Gemini 和 Grok，以及 Auto、Composer 和 Tab 补全，都按 Cursor 的费用计费。",
+      body: "Cursor 只能更改 OpenAI 地址。地址改为 Tomverse 后，Cursor 列表中的 GPT 模型也会发往 Tomverse，但它们的名称与 Tomverse 的模型不同，因此会报错。在启用 Tomverse 密钥期间，请添加 Tomverse 模型 ID 并选择它。Cursor 列表中的 Claude、Gemini、Grok 以及 Auto、Composer 和 Tab 自动补全由 Cursor 计费。",
     },
     steps: {
       title: "连接方法",
@@ -51,7 +51,7 @@ export const cursorGuideTranslations: Record<Exclude<Language, "ko" | "en">, Cur
       toCursor: "Cursor",
       rows: [
         { pick: "你添加的 Tomverse 模型 ID（smart-adaptive、gpt-6-luna …）", result: "使用 Tomverse 积分作答。收据上会记录作答的模型。" },
-        { pick: "Cursor 列表中的 OpenAI 模型", result: "如果 Tomverse 提供同一模型，就由该模型作答；如果没有，则出现 model_not_found 错误。" },
+        { pick: "Cursor 列表中的 OpenAI 模型", result: "名称与 Tomverse 模型 ID 不一致时会出现 model_not_found 错误。Cursor 列表中的 GPT 模型名称不同，无法使用，请改为添加下表中的 ID。" },
         { pick: "Cursor 列表中的 Claude · Gemini · Grok", result: "按 Cursor 计费，不使用你的 Tomverse 密钥。要通过 Tomverse 使用它们，请添加下表中的 ID。" },
         { pick: "Auto · Composer · Tab 补全", result: "属于 Cursor 自身功能，不经过 Tomverse。" },
       ],
@@ -92,7 +92,7 @@ export const cursorGuideTranslations: Record<Exclude<Language, "ko" | "en">, Cur
       items: [
         { q: "“… is not included in your weekly usage”", a: "你从 Cursor 列表中选择了模型，被 Cursor 拦截了。该请求没有到达 Tomverse。请选择你添加的 Tomverse ID（例如 gemini-4-neon）。" },
         { q: "“Override OpenAI Base URL returned HTTP 401”", a: "密钥错误、已过期或已被撤销。请在“设置 › API 密钥”中查看密钥状态，必要时创建新密钥并重新填入。" },
-        { q: "出现 model_not_found 错误", a: "ID 拼写有误，或当前账户无法使用该模型。请从上表复制 ID 后重新添加。" },
+        { q: "出现 model_not_found 错误", a: "你选择了 Cursor 自带列表中的 GPT 模型、ID 拼写有误，或当前账户无法使用该模型。请从上表复制 ID 添加后，选择该名称。" },
         { q: "出现 HTTP 400", a: "错误信息会指出被拒绝的功能或值；该功能无法通过 Tomverse 使用。请把错误信息和 Request ID 发送给支持团队，我们会与服务器记录对照。" },
         { q: "想暂时关闭 Tomverse", a: "在 Cursor Settings 中关闭 OpenAI API Key 和 Override OpenAI Base URL 开关，Cursor 即恢复原样。已添加的模型可以保留。" },
         { q: "回答中途停止了", a: "按下 Stop 或连接中断时，只按已收到的部分扣除积分，收据中会标记为“已中断”。" },
@@ -117,7 +117,7 @@ export const cursorGuideTranslations: Record<Exclude<Language, "ko" | "en">, Cur
     },
     notice: {
       title: "開始之前請注意",
-      body: "Cursor 只能更改 OpenAI 位址。因此進入 Tomverse 的請求只有兩種：你新增 Tomverse 模型 ID 後選擇的請求，以及 Cursor 清單中的 OpenAI 模型。Cursor 清單中的 Claude、Gemini 和 Grok，以及 Auto、Composer 和 Tab 自動完成，都依 Cursor 的費用計算。",
+      body: "Cursor 只能更改 OpenAI 位址。位址改為 Tomverse 後，Cursor 清單中的 GPT 模型也會送到 Tomverse，但它們的名稱與 Tomverse 的模型不同，因此會出錯。啟用 Tomverse 金鑰期間，請新增 Tomverse 模型 ID 並選擇它。Cursor 清單中的 Claude、Gemini、Grok 以及 Auto、Composer 和 Tab 自動完成由 Cursor 計費。",
     },
     steps: {
       title: "連接方式",
@@ -143,7 +143,7 @@ export const cursorGuideTranslations: Record<Exclude<Language, "ko" | "en">, Cur
       toCursor: "Cursor",
       rows: [
         { pick: "你新增的 Tomverse 模型 ID（smart-adaptive、gpt-6-luna …）", result: "使用 Tomverse 點數作答。收據上會記錄作答的模型。" },
-        { pick: "Cursor 清單中的 OpenAI 模型", result: "若 Tomverse 提供同一模型，就由它作答；若沒有，則出現 model_not_found 錯誤。" },
+        { pick: "Cursor 清單中的 OpenAI 模型", result: "名稱與 Tomverse 模型 ID 不一致時會出現 model_not_found 錯誤。Cursor 清單中的 GPT 模型名稱不同，無法使用，請改為新增下表中的 ID。" },
         { pick: "Cursor 清單中的 Claude · Gemini · Grok", result: "依 Cursor 計費，不使用你的 Tomverse 金鑰。要透過 Tomverse 使用，請新增下表中的 ID。" },
         { pick: "Auto · Composer · Tab 自動完成", result: "屬於 Cursor 本身的功能，不經過 Tomverse。" },
       ],
@@ -184,7 +184,7 @@ export const cursorGuideTranslations: Record<Exclude<Language, "ko" | "en">, Cur
       items: [
         { q: "“… is not included in your weekly usage”", a: "你從 Cursor 清單中選了模型，被 Cursor 攔下。這筆請求沒有送到 Tomverse。請選擇你新增的 Tomverse ID（例如 gemini-4-neon）。" },
         { q: "“Override OpenAI Base URL returned HTTP 401”", a: "金鑰錯誤、已過期或已被撤銷。請在「設定 › API 金鑰」中查看金鑰狀態，必要時建立新金鑰並重新填入。" },
-        { q: "出現 model_not_found 錯誤", a: "ID 拼寫有誤，或此帳戶目前無法使用該模型。請從上表複製 ID 後重新新增。" },
+        { q: "出現 model_not_found 錯誤", a: "你選擇了 Cursor 內建清單中的 GPT 模型、ID 拼寫有誤，或此帳戶目前無法使用該模型。請從上表複製 ID 新增後，選擇該名稱。" },
         { q: "出現 HTTP 400", a: "錯誤訊息會指出被拒絕的功能或值；該功能無法透過 Tomverse 使用。請把訊息與 Request ID 寄給支援團隊，我們會與伺服器紀錄比對。" },
         { q: "想暫時關閉 Tomverse", a: "在 Cursor Settings 中關閉 OpenAI API Key 與 Override OpenAI Base URL 開關，Cursor 就會恢復原狀。已新增的模型可以保留。" },
         { q: "回答中途停止了", a: "按下 Stop 或連線中斷時，只依已收到的部分扣點，收據會標示為「已中斷」。" },
@@ -209,7 +209,7 @@ export const cursorGuideTranslations: Record<Exclude<Language, "ko" | "en">, Cur
     },
     notice: {
       title: "Avant de commencer",
-      body: "Cursor ne peut modifier que son adresse OpenAI. Seules deux sortes de requêtes atteignent donc Tomverse : celles pour lesquelles vous choisissez un ID de modèle Tomverse que vous avez ajouté, et les modèles OpenAI de la liste de Cursor. Claude, Gemini et Grok de la liste de Cursor, Auto, Composer et la complétion Tab sont facturés par Cursor.",
+      body: "Cursor ne peut modifier que son adresse OpenAI. Une fois cette adresse pointée vers Tomverse, les modèles GPT de la liste de Cursor arrivent aussi chez Tomverse, mais leurs noms diffèrent de ceux des modèles Tomverse : ils échouent. Tant que la clé Tomverse est activée, ajoutez un ID de modèle Tomverse et choisissez-le. Claude, Gemini et Grok de la liste de Cursor, Auto, Composer et la complétion Tab sont facturés par Cursor.",
     },
     steps: {
       title: "Connexion",
@@ -235,7 +235,7 @@ export const cursorGuideTranslations: Record<Exclude<Language, "ko" | "en">, Cur
       toCursor: "Cursor",
       rows: [
         { pick: "Un ID de modèle Tomverse que vous avez ajouté (smart-adaptive, gpt-6-luna …)", result: "Répondu avec des crédits Tomverse. Le reçu indique le modèle qui a répondu." },
-        { pick: "Un modèle OpenAI de la liste de Cursor", result: "Si Tomverse propose le même modèle, c’est lui qui répond ; sinon, une erreur model_not_found s’affiche." },
+        { pick: "Un modèle OpenAI de la liste de Cursor", result: "Si le nom ne correspond pas à un ID de modèle Tomverse, vous obtenez une erreur model_not_found. Les modèles GPT de la liste de Cursor portent d’autres noms : ajoutez plutôt un ID du tableau ci-dessous." },
         { pick: "Claude · Gemini · Grok de la liste de Cursor", result: "Facturé par Cursor, sans votre clé Tomverse. Pour les utiliser via Tomverse, ajoutez leurs ID du tableau ci-dessous." },
         { pick: "Auto · Composer · complétion Tab", result: "Fonctions propres à Cursor, qui ne passent jamais par Tomverse." },
       ],
@@ -276,7 +276,7 @@ export const cursorGuideTranslations: Record<Exclude<Language, "ko" | "en">, Cur
       items: [
         { q: "« … is not included in your weekly usage »", a: "Vous avez choisi un modèle de la liste de Cursor, et Cursor l’a bloqué. La requête n’a jamais atteint Tomverse. Choisissez un ID Tomverse que vous avez ajouté (par exemple gemini-4-neon)." },
         { q: "« Override OpenAI Base URL returned HTTP 401 »", a: "La clé est incorrecte, expirée ou révoquée. Vérifiez-la dans Paramètres › Clés API et, si besoin, créez une nouvelle clé et collez-la à nouveau." },
-        { q: "J’obtiens model_not_found", a: "L’ID est mal orthographié, ou ce compte ne peut pas utiliser ce modèle pour le moment. Copiez l’ID du tableau ci-dessus et ajoutez-le à nouveau." },
+        { q: "J’obtiens model_not_found", a: "Vous avez choisi un modèle GPT de la liste de Cursor, l’ID est mal orthographié, ou ce compte ne peut pas utiliser ce modèle pour l’instant. Copiez l’ID depuis le tableau ci-dessus, ajoutez-le et choisissez ce nom." },
         { q: "J’obtiens HTTP 400", a: "Le message d’erreur indique la fonction ou la valeur refusée ; cette fonction n’est pas disponible via Tomverse. Envoyez le message et le Request ID au support : nous le comparerons aux journaux du serveur." },
         { q: "Je veux désactiver Tomverse temporairement", a: "Dans Cursor Settings, désactivez les interrupteurs OpenAI API Key et Override OpenAI Base URL : Cursor revient à son fonctionnement normal. Vous pouvez garder les modèles ajoutés." },
         { q: "Une réponse s’est arrêtée au milieu", a: "Si vous appuyez sur Stop ou si la connexion se coupe, seule la partie reçue est facturée, et le reçu indique « Interrompu »." },
@@ -301,7 +301,7 @@ export const cursorGuideTranslations: Record<Exclude<Language, "ko" | "en">, Cur
     },
     notice: {
       title: "Vorab wichtig",
-      body: "Cursor kann nur seine OpenAI-Adresse ändern. Zu Tomverse gelangen daher nur Anfragen, bei denen Sie eine von Ihnen hinzugefügte Tomverse-Modell-ID wählen, sowie die OpenAI-Modelle aus Cursors Liste. Claude, Gemini und Grok aus Cursors Liste, Auto, Composer und die Tab-Vervollständigung werden von Cursor abgerechnet.",
+      body: "Cursor kann nur seine OpenAI-Adresse ändern. Zeigt sie auf Tomverse, gehen auch die GPT-Modelle aus Cursors Liste an Tomverse, doch ihre Namen weichen von den Tomverse-Modellen ab, deshalb schlagen sie fehl. Solange der Tomverse-Schlüssel aktiv ist, fügen Sie eine Tomverse-Modell-ID hinzu und wählen diese. Claude, Gemini und Grok aus Cursors Liste, Auto, Composer und die Tab-Vervollständigung rechnet Cursor ab.",
     },
     steps: {
       title: "Verbinden",
@@ -327,7 +327,7 @@ export const cursorGuideTranslations: Record<Exclude<Language, "ko" | "en">, Cur
       toCursor: "Cursor",
       rows: [
         { pick: "Eine von Ihnen hinzugefügte Tomverse-Modell-ID (smart-adaptive, gpt-6-luna …)", result: "Wird mit Tomverse-Credits beantwortet. Der Beleg zeigt das antwortende Modell." },
-        { pick: "Ein OpenAI-Modell aus Cursors Liste", result: "Bietet Tomverse dasselbe Modell an, antwortet es; wenn nicht, erscheint der Fehler model_not_found." },
+        { pick: "Ein OpenAI-Modell aus Cursors Liste", result: "Stimmt der Name mit keiner Tomverse-Modell-ID überein, erhalten Sie den Fehler model_not_found. Die GPT-Modelle aus Cursors Liste heißen anders, fügen Sie stattdessen eine ID aus der Tabelle unten hinzu." },
         { pick: "Claude · Gemini · Grok aus Cursors Liste", result: "Wird von Cursor abgerechnet, ohne Ihren Tomverse-Schlüssel. Um sie über Tomverse zu nutzen, fügen Sie ihre IDs aus der Tabelle unten hinzu." },
         { pick: "Auto · Composer · Tab-Vervollständigung", result: "Eigene Funktionen von Cursor, die nie über Tomverse laufen." },
       ],
@@ -368,7 +368,7 @@ export const cursorGuideTranslations: Record<Exclude<Language, "ko" | "en">, Cur
       items: [
         { q: "„… is not included in your weekly usage“", a: "Sie haben ein Modell aus Cursors Liste gewählt, und Cursor hat es gestoppt. Die Anfrage ist nie bei Tomverse angekommen. Wählen Sie eine von Ihnen hinzugefügte Tomverse-ID (zum Beispiel gemini-4-neon)." },
         { q: "„Override OpenAI Base URL returned HTTP 401“", a: "Der Schlüssel ist falsch, abgelaufen oder widerrufen. Prüfen Sie ihn unter Einstellungen › API-Schlüssel und erstellen Sie bei Bedarf einen neuen Schlüssel, den Sie erneut eintragen." },
-        { q: "Ich erhalte model_not_found", a: "Die ID ist falsch geschrieben oder dieses Konto kann das Modell derzeit nicht nutzen. Kopieren Sie die ID aus der Tabelle oben und fügen Sie sie erneut hinzu." },
+        { q: "Ich erhalte model_not_found", a: "Sie haben ein GPT-Modell aus Cursors eigener Liste gewählt, die ID ist falsch geschrieben oder dieses Konto kann das Modell derzeit nicht nutzen. Kopieren Sie die ID aus der Tabelle oben, fügen Sie sie hinzu und wählen Sie diesen Namen." },
         { q: "Ich erhalte HTTP 400", a: "Die Fehlermeldung nennt die abgelehnte Funktion oder den Wert; diese Funktion ist über Tomverse nicht verfügbar. Senden Sie die Meldung und die Request ID an den Support, wir gleichen sie mit dem Serverprotokoll ab." },
         { q: "Ich möchte Tomverse vorübergehend ausschalten", a: "Schalten Sie in den Cursor Settings die Schalter OpenAI API Key und Override OpenAI Base URL aus, dann ist Cursor wieder im Ursprungszustand. Die hinzugefügten Modelle können Sie behalten." },
         { q: "Eine Antwort ist auf halbem Weg stehen geblieben", a: "Wenn Sie Stop drücken oder die Verbindung abbricht, wird nur das Erhaltene berechnet, und der Beleg vermerkt „Gestoppt“." },
@@ -393,7 +393,7 @@ export const cursorGuideTranslations: Record<Exclude<Language, "ko" | "en">, Cur
     },
     notice: {
       title: "Antes de empezar",
-      body: "Cursor solo puede cambiar su dirección de OpenAI. Por eso, las solicitudes que llegan a Tomverse son solo las de un ID de modelo de Tomverse que hayas añadido y los modelos de OpenAI de la lista de Cursor. Claude, Gemini y Grok de la lista de Cursor, Auto, Composer y el autocompletado Tab los factura Cursor.",
+      body: "Cursor solo puede cambiar su dirección de OpenAI. Cuando apunta a Tomverse, los modelos GPT de la lista de Cursor también llegan a Tomverse, pero sus nombres no coinciden con los de los modelos de Tomverse, así que fallan. Mientras la clave de Tomverse esté activada, añade un ID de modelo de Tomverse y elígelo. Claude, Gemini y Grok de la lista de Cursor, Auto, Composer y el autocompletado Tab los cobra Cursor.",
     },
     steps: {
       title: "Conectar",
@@ -419,7 +419,7 @@ export const cursorGuideTranslations: Record<Exclude<Language, "ko" | "en">, Cur
       toCursor: "Cursor",
       rows: [
         { pick: "Un ID de modelo de Tomverse que añadiste (smart-adaptive, gpt-6-luna …)", result: "Responde con créditos de Tomverse. El recibo muestra el modelo que respondió." },
-        { pick: "Un modelo de OpenAI de la lista de Cursor", result: "Si Tomverse ofrece el mismo modelo, responde con él; si no, aparece un error model_not_found." },
+        { pick: "Un modelo de OpenAI de la lista de Cursor", result: "Si el nombre no coincide con un ID de modelo de Tomverse, aparece el error model_not_found. Los modelos GPT de la lista de Cursor tienen otros nombres, así que añade en su lugar un ID de la tabla de abajo." },
         { pick: "Claude · Gemini · Grok de la lista de Cursor", result: "Lo factura Cursor, sin tu clave de Tomverse. Para usarlos a través de Tomverse, añade sus ID de la tabla de abajo." },
         { pick: "Auto · Composer · autocompletado Tab", result: "Son funciones propias de Cursor y nunca pasan por Tomverse." },
       ],
@@ -460,7 +460,7 @@ export const cursorGuideTranslations: Record<Exclude<Language, "ko" | "en">, Cur
       items: [
         { q: "“… is not included in your weekly usage”", a: "Elegiste un modelo de la lista de Cursor y Cursor lo bloqueó. La solicitud nunca llegó a Tomverse. Elige un ID de Tomverse que hayas añadido (por ejemplo, gemini-4-neon)." },
         { q: "“Override OpenAI Base URL returned HTTP 401”", a: "La clave es incorrecta, ha caducado o ha sido revocada. Revísala en Ajustes › Claves de API y, si hace falta, crea una clave nueva y pégala de nuevo." },
-        { q: "Aparece model_not_found", a: "El ID está mal escrito o esta cuenta no puede usar ese modelo ahora. Copia el ID de la tabla de arriba y añádelo de nuevo." },
+        { q: "Aparece model_not_found", a: "Elegiste un modelo GPT de la lista propia de Cursor, el ID está mal escrito o esta cuenta no puede usar ese modelo ahora. Copia el ID de la tabla de arriba, añádelo y elige ese nombre." },
         { q: "Aparece HTTP 400", a: "El error indica la función o el valor rechazado; esa función no está disponible a través de Tomverse. Envía el mensaje y el Request ID a soporte y lo compararemos con el registro del servidor." },
         { q: "Quiero desactivar Tomverse un tiempo", a: "En Cursor Settings, desactiva los interruptores OpenAI API Key y Override OpenAI Base URL y Cursor vuelve a funcionar como antes. Puedes dejar los modelos que añadiste." },
         { q: "Una respuesta se detuvo a mitad", a: "Si pulsas Stop o se corta la conexión, solo se cobra lo que recibiste y el recibo indica “Detenido”." },
@@ -485,7 +485,7 @@ export const cursorGuideTranslations: Record<Exclude<Language, "ko" | "en">, Cur
     },
     notice: {
       title: "Antes de começar",
-      body: "O Cursor só pode alterar o endereço da OpenAI. Por isso, as solicitações que chegam ao Tomverse são apenas as que você faz com um ID de modelo do Tomverse que tenha adicionado, e os modelos da OpenAI na lista do Cursor. Claude, Gemini e Grok da lista do Cursor, Auto, Composer e o autocompletar Tab são cobrados pelo Cursor.",
+      body: "O Cursor só pode alterar o endereço da OpenAI. Quando ele aponta para o Tomverse, os modelos GPT da lista do Cursor também chegam ao Tomverse, mas os nomes deles não correspondem aos dos modelos do Tomverse, então falham. Enquanto a chave do Tomverse estiver ativada, adicione um ID de modelo do Tomverse e escolha-o. Claude, Gemini e Grok da lista do Cursor, Auto, Composer e o preenchimento automático Tab são cobrados pelo Cursor.",
     },
     steps: {
       title: "Conectar",
@@ -511,7 +511,7 @@ export const cursorGuideTranslations: Record<Exclude<Language, "ko" | "en">, Cur
       toCursor: "Cursor",
       rows: [
         { pick: "Um ID de modelo do Tomverse que você adicionou (smart-adaptive, gpt-6-luna …)", result: "Respondido com créditos do Tomverse. O recibo mostra o modelo que respondeu." },
-        { pick: "Um modelo da OpenAI na lista do Cursor", result: "Se o Tomverse oferecer o mesmo modelo, ele responde; se não, aparece o erro model_not_found." },
+        { pick: "Um modelo da OpenAI na lista do Cursor", result: "Se o nome não corresponder a um ID de modelo do Tomverse, aparece o erro model_not_found. Os modelos GPT da lista do Cursor têm outros nomes, então adicione um ID da tabela abaixo." },
         { pick: "Claude · Gemini · Grok na lista do Cursor", result: "Cobrado pelo Cursor, sem a sua chave do Tomverse. Para usá-los pelo Tomverse, adicione os IDs da tabela abaixo." },
         { pick: "Auto · Composer · autocompletar Tab", result: "Recursos próprios do Cursor, que nunca passam pelo Tomverse." },
       ],
@@ -552,7 +552,7 @@ export const cursorGuideTranslations: Record<Exclude<Language, "ko" | "en">, Cur
       items: [
         { q: "“… is not included in your weekly usage”", a: "Você escolheu um modelo da lista do Cursor e o Cursor o bloqueou. A solicitação nunca chegou ao Tomverse. Escolha um ID do Tomverse que você adicionou (por exemplo, gemini-4-neon)." },
         { q: "“Override OpenAI Base URL returned HTTP 401”", a: "A chave está errada, expirou ou foi revogada. Verifique em Configurações › Chaves de API e, se preciso, crie uma chave nova e cole-a de novo." },
-        { q: "Aparece model_not_found", a: "O ID está com erro de digitação ou esta conta não pode usar esse modelo agora. Copie o ID da tabela acima e adicione-o de novo." },
+        { q: "Aparece model_not_found", a: "Você escolheu um modelo GPT da lista do próprio Cursor, o ID está com erro de digitação ou esta conta não pode usar esse modelo agora. Copie o ID da tabela acima, adicione-o e escolha esse nome." },
         { q: "Aparece HTTP 400", a: "A mensagem de erro indica o recurso ou valor recusado; esse recurso não está disponível pelo Tomverse. Envie a mensagem e o Request ID para o suporte, e vamos conferir com o registro do servidor." },
         { q: "Quero desligar o Tomverse por um tempo", a: "Em Cursor Settings, desligue as opções OpenAI API Key e Override OpenAI Base URL e o Cursor volta ao normal. Os modelos que você adicionou podem ficar." },
         { q: "A resposta parou no meio", a: "Se você pressionar Stop ou a conexão cair, só é cobrado o que foi recebido, e o recibo mostra “Interrompido”." },

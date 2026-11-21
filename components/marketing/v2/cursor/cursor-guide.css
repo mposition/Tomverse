@@ -87,6 +87,7 @@
 .tv-page .cg-routes td:last-child { color: var(--ink-2); }
 .tv-page .cg-dest { display: inline-block; padding: 3px 10px; border-radius: 999px; background: rgb(176 178 188 / .14); color: var(--ink-3); font-size: .8125rem; font-weight: 600; white-space: nowrap; }
 .tv-page .cg-dest.ok { background: rgb(52 211 153 / .14); color: var(--ok); }
+.tv-page .cg-dest.warn { background: rgb(251 191 36 / .14); color: #fbbf24; }
 .tv-page .cg-models td { vertical-align: middle; }
 .tv-page .cg-models td:first-child { width: 31%; }
 .tv-page .cg-models td:nth-child(2) { width: 36%; }
