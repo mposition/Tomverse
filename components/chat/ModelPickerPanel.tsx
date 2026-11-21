@@ -869,6 +869,7 @@ export function ModelPickerPanel({
           recentModelIds={recentModelIds}
           isAtCapacity={isAtCapacity}
           limitDescriptionId={limitDescriptionId}
+          selectionLocked={selectionModePending}
           onToggleFavorite={onToggleFavorite}
           onSelectModel={(model, trigger) => {
             void selectModel(model, trigger);
