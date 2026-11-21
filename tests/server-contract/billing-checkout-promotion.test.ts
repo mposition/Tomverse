@@ -58,6 +58,8 @@ type SessionCreateCall = {
 
 type World = {
   cookieReads: number;
+  burstAlerts: string[];
+  leaseBinds: string[];
   redemptionUsers: string[];
   grantedUsers: string[];
   promotionIncrements: number;
@@ -85,7 +87,7 @@ type World = {
 };
 
 const freshWorld = (): World => ({
-  cookieReads: 0, redemptionUsers: [], grantedUsers: [], promotionIncrements: 0,
+  cookieReads: 0, burstAlerts: [], leaseBinds: [], redemptionUsers: [], grantedUsers: [], promotionIncrements: 0,
   session: { user: { id: "user_1" } },
   user: {
     id: "user_1",
@@ -137,6 +139,8 @@ const PROMOTION: import("../../lib/billingConfig").BillingPromotionConfig = {
   startsAt: null,
   endsAt: ENDS_AT,
   allowAnnualStacking: false,
+  maxRedemptionsPerPaymentMethod: 3,
+  allowedCountries: [],
   isActive: true,
 };
 
@@ -173,6 +177,12 @@ async function loadRoute(): Promise<{
         : { ok: false, response: Response.json({ code: "MOBILE_TOKEN_INVALID" }, { status: 401 }) },
     } });
     mock.module(mod("lib/standardEmailLane.ts"), { namedExports: { enqueueStandardEmail: async () => undefined } });
+    mock.module(mod("lib/promotionBurstAlert.ts"), { namedExports: {
+      alertOnPromotionBurst: async (promotionId: string) => {
+        world.burstAlerts.push(promotionId);
+        return { alerted: false, inWindow: 1 };
+      },
+    } });
 
     const realApiSecurity = original("lib/apiSecurity.ts");
     apiSecurityErrorClass =
@@ -249,6 +259,13 @@ async function loadRoute(): Promise<{
         releasePromotionCheckout: async (promotionId: string) => {
           if (world.releaseShouldFail) throw new Error("lease store offline");
           world.releases.push(promotionId);
+        },
+        bindPromotionCheckoutLease: async (
+          promotionId: string,
+          _userId: string,
+          checkoutSessionId: string
+        ) => {
+          world.leaseBinds.push(`${promotionId}:${checkoutSessionId}`);
         },
       },
     });
@@ -836,6 +853,8 @@ test("native pass redemption uses the bearer account and never a cookie or Strip
   assert.equal(world.promotionIncrements, 1);
   assert.equal(world.sessionCreateCalls.length, 0);
   assert.equal(world.customerCreateKeys.length, 0);
+  // A pass never reaches the checkout webhook, so its burst check runs here.
+  assert.equal(world.burstAlerts.length, 1);
 });
 
 for (const promoCode of [undefined, "STRIPE-FREE-COUPON"]) test(`native requests cannot open paid checkout: ${promoCode}`, async () => {
@@ -881,4 +900,12 @@ for (const [name, entitlement] of [
   assert.equal(response.status, 409);
   assert.deepEqual(world.grantedUsers, []);
   assert.equal(world.promotionIncrements, 0);
+});
+
+test("a promotion checkout binds its lease to the Session it created", async () => {
+  // So only that Session's webhooks can release the lease.
+  const response = await post({ planId: "max", promoCode: "EDDIEFRIEND100" });
+  assert.equal(response.status, 200);
+  assert.equal(world.leaseBinds.length, 1);
+  assert.match(world.leaseBinds[0], /^promo_db:/);
 });

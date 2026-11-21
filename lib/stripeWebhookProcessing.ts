@@ -14,6 +14,8 @@ import {
   releasePromotionCheckout,
 } from "@/lib/billingPromotionSecurity";
 import { prisma } from "@/lib/prisma";
+import { promotionRiskIdentifierCutoff } from "@/lib/billingPromotionCore";
+import { alertOnPromotionBurst } from "@/lib/promotionBurstAlert";
 import { getStripe } from "@/lib/stripe";
 import {
   analyticsAttributionFromMetadata,
@@ -93,8 +95,22 @@ const addBillingPeriod = (
  */
 async function syncSubscription(
   subscription: Stripe.Subscription,
-  observedAt: Date
+  observedAt: Date,
+  options: { promotionDecided?: boolean } = {}
 ) {
+  if (
+    !options.promotionDecided &&
+    (await promotionCardLimitWithholds(subscription))
+  ) {
+    console.warn(
+      JSON.stringify({
+        event: "promotion_payment_method_limit_sync_withheld",
+        subscriptionId: subscription.id,
+        subscriptionStatus: subscription.status,
+      })
+    );
+    return null;
+  }
   const customerId =
     typeof subscription.customer === "string"
       ? subscription.customer
@@ -285,11 +301,133 @@ export async function resyncAccountBillingFromStripe({
   };
 }
 
+/**
+ * A promotion redemption that could not be recorded for a reason a redelivery
+ * would not change: the promotion row is gone. Stripe has already applied the
+ * discount, so the plan is still granted. (A promotion that was switched off
+ * or ran out mid-checkout is still recorded -- see
+ * `recordPromotionRedemptionFromCheckout`.) Any other error is left to fail
+ * the webhook so Stripe delivers it again.
+ */
+class PromotionRedemptionNotRecorded extends Error {}
+
+const isUniqueViolation = (error: unknown) =>
+  Boolean(
+    error &&
+      typeof error === "object" &&
+      (error as { code?: unknown }).code === "P2002"
+  );
+
+/**
+ * Whether a sync of this subscription must not grant its plan because the
+ * per-card limit refused it, or has not decided yet.
+ *
+ * Asked by every sync, not only by checkout completion: Stripe delivers
+ * `customer.subscription.created`, `invoice.paid` and the completion in any
+ * order, and each resyncs the subscription. Only the completion decides the
+ * limit -- under the card lock, and it records the decision -- so a sync that
+ * arrives before it waits: it grants nothing until the completion has either
+ * recorded a redemption or granted the subscription to the account itself. A
+ * read-only count here could not see a concurrent completion on the same card
+ * and would let two accounts in through one remaining place.
+ *
+ * Every zero-charge promotion checkout waits (`billingExpectedAmountMinor`
+ * "0"), whatever the promotion's per-card limit is set to right now: the
+ * setting can change while a checkout is in flight, and the completion reads
+ * it again under the lock. A paid one is never refused, so it has nothing to
+ * wait for.
+ */
+async function promotionCardLimitWithholds(subscription: Stripe.Subscription) {
+  const promotionId = subscription.metadata?.promotionId;
+  const userId = subscription.metadata?.userId;
+  if (!promotionId || !userId) return false;
+  const recorded = await prisma.billingPromotionRedemption.findFirst({
+    where: { stripeSubscriptionId: subscription.id },
+    select: { riskFlags: true },
+  });
+  if (recorded) {
+    return parsePromotionRiskFlags(recorded.riskFlags).includes(
+      "payment_method_limit"
+    );
+  }
+  if (subscription.metadata?.billingExpectedAmountMinor !== "0") return false;
+  // No redemption recorded: either the completion has not run, or it ran
+  // without recording (promotion row gone) and granted the plan anyway -- in
+  // which case the account already carries this subscription.
+  const account = await prisma.user.findFirst({
+    where: { id: userId },
+    select: { stripeSubscriptionId: true },
+  });
+  return account?.stripeSubscriptionId !== subscription.id;
+}
+
+/**
+ * What a completion that hit a unique violation had decided. Either the same
+ * Checkout Session was recorded by a concurrent delivery -- its stored answer
+ * stands -- or this account already redeemed the promotion through another
+ * Session, in which case a zero-charge duplicate is refused like an over-limit
+ * card: the account has had the promotion once.
+ */
+async function redemptionAfterUniqueViolation(
+  session: Stripe.Checkout.Session,
+  promotionId: string
+): Promise<PromotionRedemptionOutcome> {
+  const stored = await prisma.billingPromotionRedemption.findUnique({
+    where: { stripeCheckoutSessionId: session.id },
+    select: { riskFlags: true },
+  });
+  if (stored) {
+    return {
+      promotionId,
+      refused: parsePromotionRiskFlags(stored.riskFlags).includes(
+        "payment_method_limit"
+      ),
+    };
+  }
+  return { promotionId, refused: checkoutChargedNothing(session) };
+}
+
+/**
+ * Whether this checkout charged nothing. `amount_total` answers when Stripe
+ * gives it; when it does not, the amount the checkout itself recorded as
+ * expected (`billingExpectedAmountMinor`) decides -- so a missing total
+ * cannot turn a free checkout into a "paid" one that the per-card limit only
+ * flags.
+ */
+const checkoutChargedNothing = (session: Stripe.Checkout.Session) =>
+  session.amount_total === 0 ||
+  (session.amount_total === null &&
+    session.metadata?.billingExpectedAmountMinor === "0");
+
+/**
+ * Which promotion lease a webhook about this Checkout Session may release:
+ * the one bound to this Session (stamped right after the Session was
+ * created), or -- if it was never bound -- one taken no later than the
+ * Session's creation second, as before. A lease bound to another Session is
+ * never touched, so no redelivery can free a later checkout's lease.
+ */
+const promotionLeaseOwnership = (session: Stripe.Checkout.Session) => ({
+  checkoutSessionId: session.id,
+  ...(typeof session.created === "number"
+    ? { takenAtOrBefore: new Date(session.created * 1000) }
+    : {}),
+});
+
+/**
+ * What recording the checkout's promotion decided. `refused` means the card
+ * was over the promotion's per-card limit: the redemption is recorded with the
+ * `payment_method_limit` flag, nothing is counted against the promotion, and
+ * the caller must cancel the subscription instead of granting the plan.
+ */
+type PromotionRedemptionOutcome = { promotionId: string; refused: boolean };
+
 async function recordPromotionRedemptionFromCheckout(
   session: Stripe.Checkout.Session,
   subscriptionId: string,
-  paymentMethodFingerprintHash: string | null
-) {
+  paymentMethodFingerprintHash: string | null,
+  /** The checkout charged nothing; only then does the per-card limit refuse. */
+  chargedNothing: boolean
+): Promise<PromotionRedemptionOutcome | null> {
   const promotionId = session.metadata?.promotionId || null;
   const planId = normalizePlanId(session.metadata?.planId);
   const billingInterval = session.metadata?.billingInterval;
@@ -303,7 +441,7 @@ async function recordPromotionRedemptionFromCheckout(
     !planId ||
     (billingInterval !== "monthly" && billingInterval !== "annual")
   ) {
-    return;
+    return null;
   }
 
   const clientIpHash = /^[a-f0-9]{64}$/.test(
@@ -316,7 +454,25 @@ async function recordPromotionRedemptionFromCheckout(
   );
 
   try {
-    await prisma.$transaction(async (tx) => {
+    return await prisma.$transaction(async (tx) => {
+      // First, before the promotion's current policy is read: a redelivered
+      // webhook answers what the first delivery decided, so a refusal whose
+      // cancellation failed is retried even if the promotion has since been
+      // switched off -- otherwise the retry would fall through to granting
+      // the plan.
+      const existing = await tx.billingPromotionRedemption.findUnique({
+        where: { stripeCheckoutSessionId: session.id },
+        select: { riskFlags: true },
+      });
+      if (existing) {
+        return {
+          promotionId,
+          refused: parsePromotionRiskFlags(existing.riskFlags).includes(
+            "payment_method_limit"
+          ),
+        };
+      }
+
       const promotion = await tx.billingPromotion.findUnique({
         where: { id: promotionId },
         select: {
@@ -327,96 +483,247 @@ async function recordPromotionRedemptionFromCheckout(
           endsAt: true,
           appliesToPlanIds: true,
           allowAnnualStacking: true,
+          maxRedemptionsPerPaymentMethod: true,
         },
       });
+      if (!promotion) {
+        throw new PromotionRedemptionNotRecorded("Promotion no longer exists.");
+      }
       const now = new Date();
       let eligiblePlanIds: unknown = [];
       try {
-        eligiblePlanIds = JSON.parse(promotion?.appliesToPlanIds || "[]");
+        eligiblePlanIds = JSON.parse(promotion.appliesToPlanIds || "[]");
       } catch {
         eligiblePlanIds = [];
       }
 
-      if (
-        !promotion?.isActive ||
-        !promotion.maxRedemptions ||
-        !promotion.endsAt ||
-        (promotion.startsAt && promotion.startsAt > now) ||
-        promotion.endsAt <= now ||
-        !Array.isArray(eligiblePlanIds) ||
-        !eligiblePlanIds.includes(planId) ||
-        (billingInterval === "annual" && !promotion.allowAnnualStacking)
-      ) {
-        throw new Error("Promotion policy is no longer redeemable.");
+      // Closed since the checkout started: switched off, expired, or no longer
+      // covering this plan. Stripe has already applied the discount, so the
+      // plan is still granted as before -- but the completion is still
+      // recorded, under the card lock below, so it counts against the card. A
+      // closed promotion is not a way past the per-card limit. It is not
+      // counted against the promotion's own redemptions.
+      const maxRedemptions = promotion.maxRedemptions;
+      const promotionOpen = Boolean(
+        promotion.isActive &&
+          maxRedemptions &&
+          promotion.endsAt &&
+          !(promotion.startsAt && promotion.startsAt > now) &&
+          promotion.endsAt > now &&
+          Array.isArray(eligiblePlanIds) &&
+          eligiblePlanIds.includes(planId) &&
+          !(billingInterval === "annual" && !promotion.allowAnnualStacking)
+      );
+
+      // Other accounts this card has already redeemed this promotion on,
+      // fetched only as far as the limit needs. Serialised per (promotion,
+      // card) so two completions on the same card cannot both read the count
+      // from before the other and both fit under the limit.
+      const cardLimit = promotion.maxRedemptionsPerPaymentMethod;
+      if (paymentMethodFingerprintHash) {
+        const cardLockKey = `promotion-card:${promotionId}:${paymentMethodFingerprintHash}`;
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${cardLockKey}))`;
       }
-
-      const existing = await tx.billingPromotionRedemption.findUnique({
-        where: { stripeCheckoutSessionId: session.id },
-        select: { id: true },
-      });
-      if (existing) return;
-
-      const paymentMethodReuse = paymentMethodFingerprintHash
-        ? await tx.billingPromotionRedemption.findFirst({
+      const otherAccountsOnCard = paymentMethodFingerprintHash
+        ? await tx.billingPromotionRedemption.findMany({
             where: {
               promotionId,
               paymentMethodFingerprintHash,
               userId: { not: userId },
+              // Within the 90 days the hash is kept (the privacy notice's
+              // promise; maintenance clears it after). Stated here so the
+              // count does not depend on when that job last ran.
+              redeemedAt: { gte: promotionRiskIdentifierCutoff(now) },
+              // Refused attempts granted nothing, so they do not use up a
+              // place -- raising the limit later admits as many as it says.
+              NOT: { riskFlags: { contains: "payment_method_limit" } },
             },
-            select: { id: true },
+            select: { userId: true },
+            distinct: ["userId"],
+            take: Math.max(cardLimit ?? 1, 1),
           })
-        : null;
+        : [];
       const riskFlags = new Set(metadataRiskFlags);
-      if (paymentMethodReuse) riskFlags.add("shared_payment_method");
+      if (otherAccountsOnCard.length > 0) riskFlags.add("shared_payment_method");
+      // A limited promotion that cannot identify the payer cannot count them;
+      // a zero-charge checkout is refused rather than let through uncounted.
+      const payerUnverified =
+        chargedNothing && cardLimit !== null && !paymentMethodFingerprintHash;
+      if (payerUnverified) riskFlags.add("payment_method_unverified");
+      const cardAtLimit =
+        cardLimit !== null && otherAccountsOnCard.length >= cardLimit;
+      // A paid checkout over the limit is granted and marked, not refused.
+      if (cardAtLimit && !chargedNothing) riskFlags.add("paid_over_card_limit");
+      const overCardLimit = payerUnverified || (chargedNothing && cardAtLimit);
 
-      const updatedPromotion = await tx.billingPromotion.updateMany({
-        where: {
-          id: promotionId,
-          isActive: true,
-          endsAt: { gt: now },
-          redeemedCount: { lt: promotion.maxRedemptions },
-        },
-        data: { redeemedCount: { increment: 1 } },
-      });
+      const recordRedemption = () =>
+        tx.billingPromotionRedemption.create({
+          data: {
+            promotionId,
+            userId,
+            planId,
+            billingInterval,
+            stripeCheckoutSessionId: session.id,
+            stripeSubscriptionId: subscriptionId,
+            clientIpHash,
+            paymentMethodFingerprintHash,
+            riskFlags: encodePromotionRiskFlags(riskFlags),
+          },
+        });
 
-      if (updatedPromotion.count !== 1) {
-        throw new Error("Promotion redemption limit reached.");
+      if (overCardLimit) {
+        // Recorded so the account cannot try again and the Admin risk count
+        // sees it; not counted against the promotion, which granted nothing.
+        riskFlags.add("payment_method_limit");
+        await recordRedemption();
+        return { promotionId, refused: true };
       }
 
-      await tx.billingPromotionRedemption.create({
-        data: {
-          promotionId,
-          userId,
-          planId,
-          billingInterval,
-          stripeCheckoutSessionId: session.id,
-          stripeSubscriptionId: subscriptionId,
-          clientIpHash,
-          paymentMethodFingerprintHash,
-          riskFlags: encodePromotionRiskFlags(riskFlags),
-        },
-      });
+      const counted =
+        promotionOpen && maxRedemptions
+          ? (
+              await tx.billingPromotion.updateMany({
+                where: {
+                  id: promotionId,
+                  isActive: true,
+                  endsAt: { gt: now },
+                  redeemedCount: { lt: maxRedemptions },
+                },
+                data: { redeemedCount: { increment: 1 } },
+              })
+            ).count === 1
+          : false;
+      if (!counted) {
+        // Closed, or its last redemption taken by a concurrent completion:
+        // granted and recorded (so the card is counted), not counted.
+        console.warn(
+          JSON.stringify({
+            event: "promotion_redemption_recorded_uncounted",
+            promotionId,
+            promotionOpen,
+          })
+        );
+      }
+      await recordRedemption();
+      return { promotionId, refused: false };
     });
   } finally {
-    await releasePromotionCheckout(promotionId, userId).catch(() => undefined);
+    // Only this Session's lease, so a redelivery of a completion that failed
+    // cannot free the lease a later checkout has since taken.
+    await releasePromotionCheckout(
+      promotionId,
+      userId,
+      promotionLeaseOwnership(session)
+    ).catch(() => undefined);
   }
 }
 
+/**
+ * Cancels a subscription whose card was over the promotion's per-card limit.
+ *
+ * Throws on failure, so the webhook is answered with an error and Stripe
+ * delivers it again. The retry reads the subscription afresh
+ * (`handleCheckoutCompleted`) and finds the refusal already recorded, so an
+ * unknown outcome is re-checked against Stripe rather than repeated blindly.
+ */
+async function cancelOverLimitPromotionSubscription(
+  subscription: Stripe.Subscription,
+  promotionId: string
+) {
+  console.warn(
+    JSON.stringify({
+      event: "promotion_payment_method_limit_refused",
+      promotionId,
+      subscriptionId: subscription.id,
+      subscriptionStatus: subscription.status,
+    })
+  );
+  // Whatever the account already holds through this subscription is taken
+  // back now, not left for the deletion event: a plan must not outlive the
+  // refusal, however it was granted. Through the same entitlement write the
+  // deletion event uses -- under the account lock, the web plan reset and the
+  // plan recomputed with any store subscription or pass the account also
+  // holds -- and only for the account that carries this subscription.
+  const carrier = await prisma.user.findFirst({
+    where: { stripeSubscriptionId: subscription.id },
+    select: { id: true, stripeSubscriptionId: true },
+  });
+  if (carrier?.stripeSubscriptionId === subscription.id) {
+    await applyWebSubscriptionSnapshot({
+      userId: carrier.id,
+      plan: "Free",
+      subscriptionId: null,
+      priceId: null,
+      status: "canceled",
+      periodEnd: getPeriodEnd(subscription),
+      interval: null,
+      cancelAtPeriodEnd: false,
+      observedAt: new Date(),
+      deletedSubscriptionId: subscription.id,
+    });
+  }
+  if (subscription.status === "canceled") return;
+  await getStripe().subscriptions.cancel(subscription.id, {
+    invoice_now: false,
+    prorate: false,
+    cancellation_details: {
+      comment: "Promotion per-card redemption limit exceeded.",
+    },
+  });
+}
+
 async function getSubscriptionPaymentMethodFingerprintHash(
-  subscription: Stripe.Subscription
+  subscription: Stripe.Subscription,
+  options: { failClosed?: boolean; session?: Stripe.Checkout.Session } = {}
 ) {
   try {
     const stripe = getStripe();
-    const value = subscription.default_payment_method;
-    const paymentMethod =
+    const resolve = async (
+      value: string | Stripe.PaymentMethod | null | undefined
+    ) =>
       typeof value === "string"
         ? await stripe.paymentMethods.retrieve(value)
         : value && typeof value === "object"
           ? value
           : null;
-    const fingerprint = paymentMethodFingerprint(paymentMethod);
-    return fingerprint ? hashPaymentMethodFingerprint(fingerprint) : null;
+    // Only the method this checkout itself used, read from the records of the
+    // checkout first: the Session's own SetupIntent / PaymentIntent, then the
+    // subscription's pending SetupIntent (how a zero-charge subscription
+    // collects it). The subscription's current default payment method comes
+    // last -- Checkout sets it (all 52 OZBFREE redemptions had one), but it
+    // can be changed afterwards, before a delayed webhook is processed.
+    // Never another method merely attached to the customer.
+    const fromIntent = async (
+      intentId: string | null | undefined,
+      kind: "setup" | "payment"
+    ) => {
+      if (!intentId) return null;
+      const intent =
+        kind === "setup"
+          ? await stripe.setupIntents.retrieve(intentId)
+          : await stripe.paymentIntents.retrieve(intentId);
+      return paymentMethodFingerprint(await resolve(intent.payment_method));
+    };
+    const intentId = (value: string | { id: string } | null | undefined) =>
+      typeof value === "string" ? value : value?.id;
+    const session = options.session;
+    const candidates: (() => Promise<string | null>)[] = [
+      () => fromIntent(intentId(session?.setup_intent), "setup"),
+      () => fromIntent(intentId(session?.payment_intent), "payment"),
+      () => fromIntent(intentId(subscription.pending_setup_intent), "setup"),
+      async () =>
+        paymentMethodFingerprint(await resolve(subscription.default_payment_method)),
+    ];
+    for (const candidate of candidates) {
+      const fingerprint = await candidate();
+      if (fingerprint) return hashPaymentMethodFingerprint(fingerprint);
+    }
+    return null;
   } catch (error) {
+    // For a promotion checkout the card decides the per-card limit, so an
+    // unreadable card fails the webhook and Stripe delivers it again, instead
+    // of reading as "no card" and passing the limit.
+    if (options.failClosed) throw error;
     console.warn("Promotion payment-method risk check skipped.", {
       errorName: error instanceof Error ? error.name : "UnknownError",
     });
@@ -440,16 +747,52 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   const subscription = await getStripe().subscriptions.retrieve(subscriptionId, {
     expand: ["default_payment_method"],
   });
-  const paymentMethodFingerprintHash =
-    await getSubscriptionPaymentMethodFingerprintHash(subscription);
-  await recordPromotionRedemptionFromCheckout(
+  const promotionId = session.metadata?.promotionId || null;
+  // Only a promotion checkout needs to know the card.
+  const paymentMethodFingerprintHash = promotionId
+    ? await getSubscriptionPaymentMethodFingerprintHash(subscription, {
+        failClosed: true,
+        session,
+      })
+    : null;
+  const redemption = await recordPromotionRedemptionFromCheckout(
     session,
     subscriptionId,
-    paymentMethodFingerprintHash
-  ).catch((error) => {
-    console.error("Promotion redemption record failed:", error);
+    paymentMethodFingerprintHash,
+    checkoutChargedNothing(session)
+  ).catch(async (error) => {
+    // Only the outcomes a redelivery would repeat are absorbed; anything else
+    // (a database fault mid-decision) fails the webhook, so a transient error
+    // cannot be the way past the per-card limit.
+    if (error instanceof PromotionRedemptionNotRecorded) {
+      console.error("Promotion redemption not recorded:", error);
+      return null;
+    }
+    if (isUniqueViolation(error) && promotionId) {
+      return redemptionAfterUniqueViolation(session, promotionId);
+    }
+    throw error;
   });
-  const synced = await syncSubscription(subscription, observedAt);
+  if (redemption) {
+    await alertOnPromotionBurst(redemption.promotionId).catch((error) => {
+      console.error("Promotion burst alert failed:", error);
+    });
+  }
+  // Null only when the promotion row itself is gone: there is no limit left
+  // to apply.
+  const refused = redemption?.refused ?? false;
+  if (refused && promotionId) {
+    await cancelOverLimitPromotionSubscription(subscription, promotionId);
+    // No sync, no welcome mail, no purchase event: the plan was never granted.
+    // The cancellation's own customer.subscription.deleted keeps the account
+    // on Free.
+    return;
+  }
+  // The completion has just decided the per-card limit itself, so its own
+  // sync does not wait for that decision.
+  const synced = await syncSubscription(subscription, observedAt, {
+    promotionDecided: true,
+  });
   let billingSnapshot: CheckoutBillingSnapshot | null = null;
   if (synced && session.amount_total !== null) {
     const legacyCurrency = normalizeBillingCurrency(session.currency);
@@ -629,9 +972,11 @@ async function handleCheckoutExpired(session: Stripe.Checkout.Session) {
     // behaviour this handler improves on rather than a failure.
     return;
   }
-  await releasePromotionCheckout(promotionId, userId, {
-    takenAtOrBefore: new Date(session.created * 1000),
-  }).catch((error) => {
+  await releasePromotionCheckout(
+    promotionId,
+    userId,
+    promotionLeaseOwnership(session)
+  ).catch((error) => {
     console.error("Promotion checkout lease release failed.", {
       stripeCheckoutSessionId: session.id,
       promotionId,
