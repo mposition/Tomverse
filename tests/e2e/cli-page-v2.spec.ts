@@ -57,8 +57,10 @@ for (const { path, lang } of pages) {
     await expect(title).toContainText(copy.hero.title[0]);
     await expect(title).toContainText(copy.hero.title[1]);
     await expect(page.getByTestId("cli-page")).toHaveAttribute("lang", lang);
-    // Nothing in the page itself says the CLI is not released (the site header and footer have their own "soon" chips).
+    // Nothing says the CLI is not released: not the page, and not its own link in the footer
+    // (the mobile apps keep their "soon" chips elsewhere in the header and footer).
     await expect(page.locator("main").getByText(/곧 출시|coming soon/i)).toHaveCount(0);
+    await expect(page.locator('footer a[href$="/developers/cli"]')).not.toContainText(/곧 출시|coming soon|soon/i);
     await expect(page.locator("#install")).toBeAttached();
     await expect(page.getByTestId("cli-downloads")).toBeAttached();
 

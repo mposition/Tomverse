@@ -163,10 +163,10 @@ const ko: DevelopersPageCopy = {
     demoNote: "예시 화면입니다. 실제 키는 설정 › API 키에서 만듭니다.",
   },
   cli: {
-    eyebrow: "Tomverse CLI · 곧 출시",
+    eyebrow: "Tomverse CLI",
     title: ["도구가 없어도,", "터미널 하나면 됩니다."],
-    body: "Tomverse API 키만 있으면 내 폴더에서 동작하는 코딩 에이전트입니다. 코드를 읽고 diff를 제안하고, 승인한 명령만 실행한 뒤 무엇을 했고 얼마가 들었는지 알려 줍니다.",
-    cta: "CLI 자세히 보기",
+    body: "Tomverse API 키만 있으면 내 폴더에서 동작하는 코딩 에이전트입니다. 코드를 읽고 diff를 제안하고, 승인한 명령만 실행한 뒤 무엇을 했고 얼마가 들었는지 알려 줍니다. Windows는 .msi나 winget, macOS는 .pkg, Linux는 .deb·.rpm 설치 프로그램으로 설치하고, Node.js가 있으면 npm으로도 설치합니다.",
+    cta: "CLI 설치 안내 보기",
   },
   faq: {
     eyebrow: "자주 묻는 질문",
@@ -263,10 +263,10 @@ const en: DevelopersPageCopy = {
     demoNote: "An example screen. You create real keys in Settings › API keys.",
   },
   cli: {
-    eyebrow: "Tomverse CLI · Coming soon",
+    eyebrow: "Tomverse CLI",
     title: ["No tool needed,", "a terminal is enough."],
-    body: "With just a Tomverse API key it is a coding agent that works in your own folder. It reads the code, proposes a diff, runs only the commands you approve, then tells you what it did and what it cost.",
-    cta: "More about the CLI",
+    body: "With just a Tomverse API key it is a coding agent that works in your own folder. It reads the code, proposes a diff, runs only the commands you approve, then tells you what it did and what it cost. Install it with an installer (.msi or winget on Windows, .pkg on macOS, .deb or .rpm on Linux), or with npm if you have Node.js.",
+    cta: "See the CLI install guide",
   },
   faq: {
     eyebrow: "FAQ",
