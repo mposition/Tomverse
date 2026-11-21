@@ -1,6 +1,6 @@
 {
   "name": "@tomverse/cli",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Tomverse coding CLI: work on your own folder with a Tomverse API key.",
   "license": "SEE LICENSE IN LICENSE",
   "author": "Tomverse",

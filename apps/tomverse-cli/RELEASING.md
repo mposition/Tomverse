@@ -85,7 +85,7 @@ folder (each holds that system's installer, archive and `.sha256` files):
   signing, use those two and the README's unsigned-macOS note stays true.
 
 ```powershell
-gh release create cli-v0.1.0 --repo mposition/Tomverse --title "Tomverse CLI 0.1.0" --notes "Install: npm install -g @tomverse/cli, or download the installer for your system below (Windows .msi, macOS .pkg, Linux .deb/.rpm)." tomverse-0.1.0-*.msi tomverse-0.1.0-*.pkg tomverse-0.1.0-*.deb tomverse-0.1.0-*.rpm tomverse-0.1.0-*.zip tomverse-0.1.0-*.tar.gz tomverse-0.1.0-*.sha256
+gh release create cli-v1.0.0 --repo mposition/Tomverse --title "Tomverse CLI 1.0.0" --notes "Install: npm install -g @tomverse/cli, or download the installer for your system below (Windows .msi, macOS .pkg, Linux .deb/.rpm)." tomverse-1.0.0-*.msi tomverse-1.0.0-*.pkg tomverse-1.0.0-*.deb tomverse-1.0.0-*.rpm tomverse-1.0.0-*.zip tomverse-1.0.0-*.tar.gz tomverse-1.0.0-*.sha256
 ```
 
 The README links to `https://github.com/mposition/Tomverse/releases?q=cli-v`.
@@ -105,9 +105,9 @@ Where: local PC, PowerShell, the repository clone, with the folder from step 3.
 
 ```powershell
 node apps\tomverse-cli\scripts\winget-manifest.mjs <folder from step 3>
-winget validate --manifest apps\tomverse-cli\release\winget\manifests\t\Tomverse\CLI\0.1.0
+winget validate --manifest apps\tomverse-cli\release\winget\manifests\t\Tomverse\CLI\1.0.0
 winget install Microsoft.WingetCreate
-wingetcreate submit --token (gh auth token) apps\tomverse-cli\release\winget\manifests\t\Tomverse\CLI\0.1.0
+wingetcreate submit --token (gh auth token) apps\tomverse-cli\release\winget\manifests\t\Tomverse\CLI\1.0.0
 ```
 
 `wingetcreate submit` forks `microsoft/winget-pkgs` under the signed-in GitHub
