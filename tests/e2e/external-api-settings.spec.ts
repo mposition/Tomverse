@@ -290,12 +290,15 @@ test("API keys: Claude Code, Codex and Cursor each get their own configuration @
     await expect(profile).toContainText('web_search = "disabled"');
     await expect(page.getByTestId("external-api-codex-model").locator("option")).toHaveCount(2);
 
-    // Cursor: the Chat Completions base URL with a fixed model.
+    // Cursor: the Chat Completions base URL with Smart Adaptive first (verified with
+    // Cursor on production 2026-11-20), and a link to the Cursor guide's model IDs.
     await page.getByTestId("external-api-platform-cursor").click();
     const cursor = page.getByTestId("external-api-cursor-config");
+    // Cursor is a coding tool: it takes the coding API address (owner decision 2026-11-21).
     await expect(cursor).toContainText(`Override OpenAI Base URL: ${codingBaseUrl}`);
-    await expect(cursor).not.toContainText("smart-adaptive");
-    // GPT models come from Cursor's own list; anything else is added once.
+    await expect(cursor).toContainText("Custom model: smart-adaptive");
+    await expect(page.getByTestId("external-api-cursor-guide")).toHaveAttribute("href", /\/developers\/cursor$/);
+    // Cursor's own GPT list is not Tomverse models: every model is added once by ID.
     await expect(page.getByTestId("external-api-cursor-models")).toContainText("Add Custom Model");
     // The model list says which tools take each model.
     await page.getByTestId("external-api-models-search").fill("sonnet");

@@ -1413,7 +1413,6 @@ export const zhHant = {
         dataRetentionTitle: "資料保留",
         dataRetentionDescription: "標準對話會保留到你刪除為止。登入後新增的附件會與對話一併儲存，在你刪除該對話或帳戶時刪除。未登入時新增的附件為暫存，會被自動清除。",
         attachmentRetentionNotice: "登入後新增的檔案會與對話一併儲存，用於傳送給模型及擷取文件內容，並保留到你刪除該對話或帳戶為止。未登入時新增的檔案為暫存，會被自動清除。",
-        dangerZone: "危險區域",
         dangerZoneDescription: "這些操作會影響已儲存的 Tomverse 資料。刪除對話前請先匯出重要內容。",
         deleteAllChats: "刪除所有對話",
         deleteAllChatsConfirm: "刪除所有已儲存的對話？此操作無法復原。",

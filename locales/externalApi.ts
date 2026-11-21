@@ -96,6 +96,7 @@ const en = {
     cursorTitle: "Cursor",
     cursorHint: "Cursor Settings > Models > API Keys. Cursor sends these requests from its own servers, so they reach Tomverse over the internet rather than from your computer.",
     cursorNotes: "Only Chat and Agent use this key; Tab, Cursor's own models and its cloud agents do not. To undo, turn off the OpenAI key and the base URL override.",
+    cursorGuide: "Detailed Cursor guide, with every model ID",
     toolErrorsTitle: "If a request fails",
     toolErrors: "401: the key is wrong, expired or revoked. 403: the API is not enabled for this account. 404: the model is not offered to this account — copy the configuration again. 429: a key limit, your credits or a rate limit was reached. 400 naming a tool or field: that feature is not available through Tomverse.",
     introShort: "Use Tomverse models and credits in tools such as Claude Code, Codex and Cursor. Treat a key like a password.",
@@ -123,7 +124,7 @@ const en = {
     otherChip: "OpenAI-compatible apps",
     notesTitle: "Good to know · how to undo",
     modelsPick: "Models in this configuration. Most people need only Smart Adaptive.",
-    cursorModels: "GPT models that Tomverse offers can be picked straight from Cursor's own model list. Add any other model, such as Claude or Smart Adaptive, once: type its ID in Cursor Settings › Models and choose Add Custom Model.",
+    cursorModels: "The GPT models in Cursor's own list are not Tomverse models and fail with this key. Add the model you picked above once: type its ID in Cursor Settings › Models and choose Add Custom Model.",
     creditsRange: "{min}–{max} credits per request, charged as the model that answers",
 };
 
@@ -226,6 +227,7 @@ const ko: ExternalApiCopy = {
     cursorTitle: "Cursor 설정",
     cursorHint: "Cursor Settings > Models > API Keys. Cursor는 자체 서버에서 이 요청을 보내므로, 요청은 내 컴퓨터가 아니라 인터넷을 거쳐 Tomverse에 도착합니다.",
     cursorNotes: "이 키는 Chat과 Agent에만 쓰이며 Tab, Cursor 자체 모델, 클라우드 에이전트에는 쓰이지 않습니다. 되돌리려면 OpenAI 키와 Base URL 재정의를 끄세요.",
+    cursorGuide: "모델 ID 표가 있는 Cursor 자세한 안내",
     toolErrorsTitle: "요청이 실패하면",
     toolErrors: "401: 키가 틀렸거나 만료·폐기되었습니다. 403: 이 계정에서 API가 켜져 있지 않습니다. 404: 이 계정에 제공되지 않는 모델입니다. 설정을 다시 복사하세요. 429: 키 한도, 크레딧 또는 요청 속도 한도에 도달했습니다. 도구나 필드를 언급하는 400: 그 기능은 Tomverse에서 쓸 수 없습니다.",
     introShort: "Claude Code, Codex, Cursor 같은 도구에서 Tomverse 모델과 크레딧을 씁니다. 키는 비밀번호처럼 다루세요.",
@@ -253,7 +255,7 @@ const ko: ExternalApiCopy = {
     otherChip: "OpenAI 호환 앱",
     notesTitle: "알아 둘 점 · 되돌리는 방법",
     modelsPick: "이 설정에 넣을 모델입니다. 대부분은 Smart Adaptive 하나면 충분합니다.",
-    cursorModels: "Tomverse가 제공하는 GPT 모델은 Cursor 기본 모델 목록에서 바로 고를 수 있습니다. Claude나 Smart Adaptive 같은 다른 모델은 Cursor Settings › Models에서 ID를 입력하고 Add Custom Model로 한 번만 추가하세요.",
+    cursorModels: "Cursor 기본 목록의 GPT 모델은 Tomverse 모델이 아니어서 이 키로는 오류가 납니다. 위에서 고른 모델의 ID를 Cursor Settings › Models에 입력하고 Add Custom Model로 한 번만 추가하세요.",
     creditsRange: "요청당 {min}~{max}크레딧, 답한 모델 기준",
 };
 
@@ -354,6 +356,7 @@ const zh: ExternalApiCopy = {
     cursorTitle: "Cursor 设置",
     cursorHint: "Cursor Settings > Models > API Keys。Cursor 从自己的服务器发送这些请求，因此请求经由互联网而不是你的电脑到达 Tomverse。",
     cursorNotes: "此密钥只用于 Chat 和 Agent，不用于 Tab、Cursor 自有模型或云端智能体。要撤销，请关闭 OpenAI 密钥和 Base URL 覆盖。",
+    cursorGuide: "Cursor 详细连接指南（含全部模型 ID）",
     toolErrorsTitle: "请求失败时",
     toolErrors: "401：密钥错误、已过期或已撤销。403：此账户未启用 API。404：此账户不提供该模型，请重新复制配置。429：达到了密钥额度、积分或请求频率上限。提到工具或字段的 400：该功能无法通过 Tomverse 使用。",
     introShort: "在 Claude Code、Codex、Cursor 等工具中使用 Tomverse 的模型和额度。请像对待密码一样保管密钥。",
@@ -381,7 +384,7 @@ const zh: ExternalApiCopy = {
     otherChip: "兼容 OpenAI 的应用",
     notesTitle: "注意事项 · 如何撤销",
     modelsPick: "此配置包含的模型。大多数人只需要 Smart Adaptive。",
-    cursorModels: "Tomverse 提供的 GPT 模型可以直接在 Cursor 自带的模型列表中选择。其他模型（如 Claude 或 Smart Adaptive）只需添加一次：在 Cursor Settings › Models 中输入 ID，然后选择 Add Custom Model。",
+    cursorModels: "Cursor 自带列表中的 GPT 模型不是 Tomverse 模型，用这个密钥会报错。请在 Cursor Settings › Models 中输入上面所选模型的 ID，然后选择 Add Custom Model 添加一次。",
     creditsRange: "每次请求 {min}–{max} 积分，按实际回答的模型计费",
 };
 
@@ -482,6 +485,7 @@ const zhHant: ExternalApiCopy = {
     cursorTitle: "Cursor 設定",
     cursorHint: "Cursor Settings > Models > API Keys。Cursor 從自己的伺服器傳送這些請求，因此請求是經由網際網路而不是你的電腦抵達 Tomverse。",
     cursorNotes: "此金鑰只用於 Chat 和 Agent，不用於 Tab、Cursor 自有模型或雲端代理程式。要復原，請關閉 OpenAI 金鑰和 Base URL 覆寫。",
+    cursorGuide: "Cursor 詳細連接指南（含全部模型 ID）",
     toolErrorsTitle: "請求失敗時",
     toolErrors: "401：金鑰錯誤、已過期或已撤銷。403：此帳戶未啟用 API。404：此帳戶未提供該模型，請重新複製設定。429：已達金鑰額度、點數或請求頻率上限。提到工具或欄位的 400：該功能無法透過 Tomverse 使用。",
     introShort: "在 Claude Code、Codex、Cursor 等工具中使用 Tomverse 的模型和點數。請像對待密碼一樣保管金鑰。",
@@ -509,7 +513,7 @@ const zhHant: ExternalApiCopy = {
     otherChip: "相容 OpenAI 的應用程式",
     notesTitle: "注意事項 · 如何復原",
     modelsPick: "此設定包含的模型。大多數人只需要 Smart Adaptive。",
-    cursorModels: "Tomverse 提供的 GPT 模型可以直接在 Cursor 內建的模型清單中選擇。其他模型（例如 Claude 或 Smart Adaptive）只需新增一次：在 Cursor Settings › Models 輸入 ID，再選擇 Add Custom Model。",
+    cursorModels: "Cursor 內建清單中的 GPT 模型不是 Tomverse 模型，用這組金鑰會出錯。請在 Cursor Settings › Models 輸入上方所選模型的 ID，再選擇 Add Custom Model 新增一次。",
     creditsRange: "每次請求 {min}–{max} 點，依實際回答的模型計費",
 };
 
@@ -610,6 +614,7 @@ const fr: ExternalApiCopy = {
     cursorTitle: "Configurer Cursor",
     cursorHint: "Cursor Settings > Models > API Keys. Cursor envoie ces requêtes depuis ses propres serveurs : elles arrivent chez Tomverse par Internet, et non depuis votre ordinateur.",
     cursorNotes: "Seuls Chat et Agent utilisent cette clé ; Tab, les modèles propres à Cursor et ses agents cloud ne l’utilisent pas. Pour annuler, désactivez la clé OpenAI et le remplacement de la Base URL.",
+    cursorGuide: "Guide détaillé pour Cursor, avec tous les ID de modèle",
     toolErrorsTitle: "Si une requête échoue",
     toolErrors: "401 : la clé est incorrecte, expirée ou révoquée. 403 : l’API n’est pas activée pour ce compte. 404 : le modèle n’est pas proposé à ce compte — copiez à nouveau la configuration. 429 : une limite de clé, vos crédits ou une limite de débit est atteinte. 400 mentionnant un outil ou un champ : cette fonction n’est pas disponible via Tomverse.",
     introShort: "Utilisez les modèles et les crédits Tomverse dans des outils comme Claude Code, Codex et Cursor. Traitez une clé comme un mot de passe.",
@@ -637,7 +642,7 @@ const fr: ExternalApiCopy = {
     otherChip: "Apps compatibles OpenAI",
     notesTitle: "Bon à savoir · comment annuler",
     modelsPick: "Les modèles de cette configuration. La plupart des gens n'ont besoin que de Smart Adaptive.",
-    cursorModels: "Les modèles GPT proposés par Tomverse se choisissent directement dans la liste de modèles de Cursor. Ajoutez tout autre modèle, comme Claude ou Smart Adaptive, une seule fois : saisissez son ID dans Cursor Settings › Models et choisissez Add Custom Model.",
+    cursorModels: "Les modèles GPT de la liste de Cursor ne sont pas des modèles Tomverse et échouent avec cette clé. Ajoutez une fois le modèle choisi ci-dessus : saisissez son ID dans Cursor Settings › Models et choisissez Add Custom Model.",
     creditsRange: "{min} à {max} crédits par requête, facturés selon le modèle qui répond",
 };
 
@@ -738,6 +743,7 @@ const de: ExternalApiCopy = {
     cursorTitle: "Cursor einrichten",
     cursorHint: "Cursor Settings > Models > API Keys. Cursor sendet diese Anfragen von seinen eigenen Servern, daher erreichen sie Tomverse über das Internet und nicht von Ihrem Computer aus.",
     cursorNotes: "Nur Chat und Agent verwenden diesen Schlüssel; Tab, die eigenen Modelle von Cursor und seine Cloud-Agenten nicht. Zum Rückgängigmachen den OpenAI-Schlüssel und die Überschreibung der Base URL ausschalten.",
+    cursorGuide: "Ausführliche Anleitung für Cursor mit allen Modell-IDs",
     toolErrorsTitle: "Wenn eine Anfrage fehlschlägt",
     toolErrors: "401: Der Schlüssel ist falsch, abgelaufen oder widerrufen. 403: Die API ist für dieses Konto nicht aktiviert. 404: Das Modell wird diesem Konto nicht angeboten – kopieren Sie die Konfiguration erneut. 429: Ein Schlüssellimit, Ihre Credits oder ein Anfragelimit ist erreicht. 400 mit Nennung eines Werkzeugs oder Felds: Diese Funktion ist über Tomverse nicht verfügbar.",
     introShort: "Nutzen Sie Tomverse-Modelle und -Credits in Tools wie Claude Code, Codex und Cursor. Behandeln Sie einen Schlüssel wie ein Passwort.",
@@ -765,7 +771,7 @@ const de: ExternalApiCopy = {
     otherChip: "OpenAI-kompatible Apps",
     notesTitle: "Gut zu wissen · rückgängig machen",
     modelsPick: "Die Modelle in dieser Konfiguration. Die meisten brauchen nur Smart Adaptive.",
-    cursorModels: "GPT-Modelle, die Tomverse anbietet, lassen sich direkt in Cursors eigener Modellliste auswählen. Jedes andere Modell, etwa Claude oder Smart Adaptive, fügen Sie einmal hinzu: ID in Cursor Settings › Models eingeben und Add Custom Model wählen.",
+    cursorModels: "Die GPT-Modelle aus Cursors eigener Liste sind keine Tomverse-Modelle und schlagen mit diesem Schlüssel fehl. Fügen Sie das oben gewählte Modell einmal hinzu: ID in Cursor Settings › Models eingeben und Add Custom Model wählen.",
     creditsRange: "{min}–{max} Credits pro Anfrage, berechnet nach dem antwortenden Modell",
 };
 
@@ -866,6 +872,7 @@ const es: ExternalApiCopy = {
     cursorTitle: "Configurar Cursor",
     cursorHint: "Cursor Settings > Models > API Keys. Cursor envía estas solicitudes desde sus propios servidores, así que llegan a Tomverse por internet y no desde tu ordenador.",
     cursorNotes: "Solo Chat y Agent usan esta clave; Tab, los modelos propios de Cursor y sus agentes en la nube no. Para deshacerlo, desactiva la clave de OpenAI y la sustitución de la Base URL.",
+    cursorGuide: "Guía detallada para Cursor, con todos los ID de modelo",
     toolErrorsTitle: "Si una solicitud falla",
     toolErrors: "401: la clave es incorrecta, ha caducado o se ha revocado. 403: la API no está activada para esta cuenta. 404: el modelo no se ofrece a esta cuenta; vuelve a copiar la configuración. 429: se alcanzó un límite de la clave, tus créditos o un límite de frecuencia. 400 que nombra una herramienta o un campo: esa función no está disponible a través de Tomverse.",
     introShort: "Usa los modelos y créditos de Tomverse en herramientas como Claude Code, Codex y Cursor. Trata una clave como una contraseña.",
@@ -893,7 +900,7 @@ const es: ExternalApiCopy = {
     otherChip: "Apps compatibles con OpenAI",
     notesTitle: "Conviene saber · cómo deshacerlo",
     modelsPick: "Los modelos de esta configuración. A la mayoría le basta con Smart Adaptive.",
-    cursorModels: "Los modelos GPT que ofrece Tomverse se eligen directamente en la lista de modelos de Cursor. Cualquier otro modelo, como Claude o Smart Adaptive, se añade una sola vez: escribe su ID en Cursor Settings › Models y elige Add Custom Model.",
+    cursorModels: "Los modelos GPT de la lista propia de Cursor no son modelos de Tomverse y fallan con esta clave. Añade una vez el modelo elegido arriba: escribe su ID en Cursor Settings › Models y elige Add Custom Model.",
     creditsRange: "{min}–{max} créditos por solicitud, según el modelo que responde",
 };
 
@@ -994,6 +1001,7 @@ const pt: ExternalApiCopy = {
     cursorTitle: "Configurar o Cursor",
     cursorHint: "Cursor Settings > Models > API Keys. O Cursor envia estas solicitações dos próprios servidores, então elas chegam ao Tomverse pela internet, e não do seu computador.",
     cursorNotes: "Só o Chat e o Agent usam esta chave; o Tab, os modelos próprios do Cursor e os agentes na nuvem não. Para desfazer, desative a chave da OpenAI e a substituição da Base URL.",
+    cursorGuide: "Guia detalhado para o Cursor, com todos os IDs de modelo",
     toolErrorsTitle: "Se uma solicitação falhar",
     toolErrors: "401: a chave está errada, expirou ou foi revogada. 403: a API não está ativada para esta conta. 404: o modelo não é oferecido a esta conta — copie a configuração de novo. 429: um limite da chave, seus créditos ou um limite de frequência foi atingido. 400 que cita uma ferramenta ou um campo: esse recurso não está disponível pelo Tomverse.",
     introShort: "Use os modelos e créditos do Tomverse em ferramentas como Claude Code, Codex e Cursor. Trate uma chave como uma senha.",
@@ -1021,7 +1029,7 @@ const pt: ExternalApiCopy = {
     otherChip: "Apps compatíveis com OpenAI",
     notesTitle: "Bom saber · como desfazer",
     modelsPick: "Os modelos desta configuração. A maioria precisa só do Smart Adaptive.",
-    cursorModels: "Os modelos GPT oferecidos pelo Tomverse podem ser escolhidos direto na lista de modelos do Cursor. Qualquer outro modelo, como Claude ou Smart Adaptive, é adicionado uma única vez: digite o ID em Cursor Settings › Models e escolha Add Custom Model.",
+    cursorModels: "Os modelos GPT da lista do próprio Cursor não são modelos do Tomverse e falham com esta chave. Adicione uma vez o modelo escolhido acima: digite o ID em Cursor Settings › Models e escolha Add Custom Model.",
     creditsRange: "{min}–{max} créditos por solicitação, conforme o modelo que responde",
 };
 

@@ -831,7 +831,7 @@ export const en: HelpLocaleCopy = {
       summary: "When you request deletion you're signed out at once, and after a 7-day grace period your data, including chats and files, is permanently deleted. Minimum records needed for billing and legal obligations, and unsubscribe records, may be kept.",
       steps: [
         { title: "Download first (recommended)", body: "If there's data you want to keep, download it first as described in the \"Download your account data\" guide." },
-        { title: "Open the danger zone", body: "In \"Settings\", on the \"Account\" tab, select \"Delete account\" under \"Danger zone\" near the bottom." },
+        { title: "Open account deletion", body: "In \"Settings\", at the bottom of the \"Account\" tab, select \"Delete account\"." },
         { title: "Type to confirm", body: "Tick the consent checkbox and type DELETE MY ACCOUNT exactly." },
         { title: "Send the request", body: "Select \"Delete account\", then select \"Request account deletion\" once more. If you're asked to sign in again, sign in and repeat." },
       ],

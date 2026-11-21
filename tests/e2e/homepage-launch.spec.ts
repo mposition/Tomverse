@@ -247,10 +247,12 @@ test("the API tool tabs switch the sample settings with the keyboard without cal
   await tabs.nth(0).click();
   await expect(tabs.nth(0)).toHaveAttribute("aria-selected", "true");
   await expect(panel).toContainText("~/.codex/config.toml");
+  await expect(panel).toContainText("https://tomverse.app/api/code/v1");
   await page.keyboard.press("ArrowRight");
   await expect(tabs.nth(1)).toBeFocused();
   await expect(tabs.nth(1)).toHaveAttribute("aria-selected", "true");
   await expect(panel).toContainText("ANTHROPIC_BASE_URL");
+  await expect(panel).toContainText("https://tomverse.app/api/code/anthropic");
   await page.keyboard.press("ArrowLeft");
   await expect(tabs.nth(0)).toHaveAttribute("aria-selected", "true");
   await expect(panel).toContainText("~/.codex/config.toml");

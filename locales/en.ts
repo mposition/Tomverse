@@ -1409,7 +1409,6 @@ export const en = {
         dataRetentionTitle: "Data retention",
         dataRetentionDescription: "Standard chats remain until you delete them. Files you attach while signed in are stored with the conversation and are deleted when you delete that conversation or your account. Files attached without an account are temporary and are removed automatically.",
         attachmentRetentionNotice: "Files you attach while signed in are stored with the conversation and used for model delivery and document extraction. They are kept until you delete the conversation or your account. Files attached without an account are temporary and are removed automatically.",
-        dangerZone: "Danger zone",
         dangerZoneDescription: "These actions affect stored Tomverse data. Export anything important before deleting conversations.",
         deleteAllChats: "Delete all chats",
         deleteAllChatsConfirm: "Delete all stored conversations? This cannot be undone.",

@@ -24,7 +24,9 @@ type LaunchHomepageProps = { reviewInfoHref: string; variantCopy?: LandingSurfac
 const MODEL_ICON = (name: string) => `/model-icons/${name}.png`;
 const PLUGIN_ICON = (name: string) => `/plugins/providers/${name}`;
 const API_BASE = "https://tomverse.app/api/v1";
-const ANTHROPIC_BASE = "https://tomverse.app/api/anthropic";
+/** The coding API (docs/policy/external-api.md): Codex, Cursor and Claude Code. Other apps keep API_BASE. */
+const CODING_API_BASE = "https://tomverse.app/api/code/v1";
+const CODING_ANTHROPIC_BASE = "https://tomverse.app/api/code/anthropic";
 const MASKED_KEY = "tvk_••••••••";
 
 /** Fallback when the catalogue has not loaded: the count on 2026-11-19. */
@@ -280,13 +282,13 @@ type Config = { file: string; lines: Token[][] };
 const apiConfigs = (c: HomeV2Copy["api"]["console"]): Record<string, Config> => ({
   codex: { file: "~/.codex/config.toml", lines: [
     [["c", c.codexComment]], ["[model_providers.tomverse]"],
-    [["k", "name"], " = ", ["s", "\"Tomverse\""]], [["k", "base_url"], " = ", ["s", `"${API_BASE}"`]],
+    [["k", "name"], " = ", ["s", "\"Tomverse\""]], [["k", "base_url"], " = ", ["s", `"${CODING_API_BASE}"`]],
     [["k", "env_key"], " = ", ["s", "\"TOMVERSE_API_KEY\""]], [["k", "wire_api"], " = ", ["s", "\"responses\""]],
     [], ["$ codex --profile tomverse"], [["g", c.codexOk]],
   ] },
   claude: { file: c.claudeFile, lines: [
     [["c", c.claudeComment]],
-    [["k", "export"], " ANTHROPIC_BASE_URL=", ["s", `"${ANTHROPIC_BASE}"`]],
+    [["k", "export"], " ANTHROPIC_BASE_URL=", ["s", `"${CODING_ANTHROPIC_BASE}"`]],
     [["k", "export"], " ANTHROPIC_AUTH_TOKEN=", ["s", `"${MASKED_KEY}"`]],
     [["k", "export"], " ANTHROPIC_MODEL=", ["s", `"${c.chosenModel}"`]],
     [], ["$ claude"], [["g", c.claudeOk]],
@@ -296,7 +298,7 @@ const apiConfigs = (c: HomeV2Copy["api"]["console"]): Record<string, Config> => 
     [], [["c", c.vscodeKeyNote]], [["g", c.vscodeOk]],
   ] },
   cursor: { file: "Cursor › Settings › Models", lines: [
-    ["OpenAI API Key             ", ["s", MASKED_KEY]], ["Override OpenAI Base URL   ", ["s", API_BASE]],
+    ["OpenAI API Key             ", ["s", MASKED_KEY]], ["Override OpenAI Base URL   ", ["s", CODING_API_BASE]],
     ["Custom model               ", ["s", c.chosenModel]], [], [["g", c.cursorOk]],
   ] },
   aside: { file: "Aside › Custom Provider", lines: [

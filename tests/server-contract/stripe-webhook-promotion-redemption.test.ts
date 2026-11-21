@@ -46,9 +46,39 @@ type World = {
     promotionId: string;
     userId: string;
     takenAtOrBefore?: Date;
+    checkoutSessionId?: string;
   }[];
   subscription: Stripe.Subscription;
   paymentMethodRetrieves: string[];
+  /** The promotion's per-card limit; null = none. */
+  cardLimit: number | null;
+  /** Other accounts the card has already redeemed this promotion on. */
+  otherAccountsOnCard: string[];
+  /** riskFlags of recorded redemptions, by Checkout Session id. */
+  recordedFlags: Map<string, string>;
+  cancels: { id: string; params: unknown }[];
+  cancelFailure: Error | null;
+  burstAlerts: string[];
+  promotionActive: boolean;
+  /** Thrown from the per-card count, i.e. a database fault mid-decision. */
+  recordFault: Error | null;
+  paymentMethodFault: Error | null;
+  lockCalls: unknown[][];
+  countWheres: Record<string, unknown>[];
+  /** The promotion's last redemption taken by a concurrent completion. */
+  promotionExhausted: boolean;
+  /**
+   * A concurrent delivery of the same Session recorded first: invisible to
+   * this transaction's read, so its insert hits the unique constraint.
+   */
+  concurrentRow: { riskFlags: string } | null;
+  /** The account already redeemed the promotion through another Session. */
+  accountAlreadyRedeemed: boolean;
+  customerDefaultPaymentMethod: string | null;
+  customerPaymentMethods: Record<string, unknown>[];
+  /** The payment method on the Session's own SetupIntent / PaymentIntent. */
+  setupIntentPaymentMethod: string | null;
+  paymentIntentPaymentMethod: string | null;
 };
 
 const subscriptionFixture = (): Stripe.Subscription =>
@@ -84,6 +114,27 @@ const freshWorld = (): World => ({
   releaseCalls: [],
   subscription: subscriptionFixture(),
   paymentMethodRetrieves: [],
+  // No per-card limit unless a test sets one: a limited zero-charge checkout
+  // with no identifiable payer is refused, and most of these tests are about
+  // other things.
+  cardLimit: null,
+  otherAccountsOnCard: [],
+  recordedFlags: new Map(),
+  cancels: [],
+  cancelFailure: null,
+  burstAlerts: [],
+  promotionActive: true,
+  recordFault: null,
+  paymentMethodFault: null,
+  lockCalls: [],
+  countWheres: [],
+  promotionExhausted: false,
+  concurrentRow: null,
+  accountAlreadyRedeemed: false,
+  customerDefaultPaymentMethod: null,
+  customerPaymentMethods: [],
+  setupIntentPaymentMethod: null,
+  paymentIntentPaymentMethod: null,
 });
 
 let world = freshWorld();
@@ -95,8 +146,24 @@ async function loadProcessor() {
     const original = (path: string) =>
       require(resolve(ROOT, path)) as Record<string, unknown>;
 
+    const otherAccountsOnCard = async ({
+      take,
+      where,
+    }: {
+      take?: number;
+      where?: Record<string, unknown>;
+    }) => {
+      if (where) world.countWheres.push(where);
+      if (world.recordFault) throw world.recordFault;
+      return world.otherAccountsOnCard
+        .slice(0, take ?? world.otherAccountsOnCard.length)
+        .map((userId) => ({ userId }));
+    };
     const tx = {
-      $executeRaw: async () => 0,
+      $executeRaw: async (...args: unknown[]) => {
+        world.lockCalls.push(args);
+        return 0;
+      },
       user: {
         findUniqueOrThrow: async () => ({ id: "user_1", plan: "Free", subscriptionSyncedAt: null }),
         update: async ({ data }: { data: Record<string, unknown> }) => {
@@ -107,14 +174,16 @@ async function loadProcessor() {
       billingPromotion: {
         findUnique: async () => ({
           id: "promo_db",
-          isActive: true,
+          isActive: world.promotionActive,
           maxRedemptions: 1000,
           startsAt: null,
           endsAt: new Date("2026-12-31T00:00:00.000Z"),
           appliesToPlanIds: JSON.stringify(["max"]),
           allowAnnualStacking: false,
+          maxRedemptionsPerPaymentMethod: world.cardLimit,
         }),
         updateMany: async () => {
+          if (world.promotionExhausted) return { count: 0 };
           world.redeemedCount += 1;
           return { count: 1 };
         },
@@ -126,11 +195,25 @@ async function loadProcessor() {
           where: { stripeCheckoutSessionId: string };
         }) =>
           world.recordedSessionIds.has(where.stripeCheckoutSessionId)
-            ? { id: "existing" }
+            ? {
+                id: "existing",
+                riskFlags:
+                  world.recordedFlags.get(where.stripeCheckoutSessionId) ?? "[]",
+              }
             : null,
         findFirst: async () => null,
+        findMany: otherAccountsOnCard,
         create: async ({ data }: { data: Record<string, unknown> }) => {
+          if (world.concurrentRow || world.accountAlreadyRedeemed) {
+            throw Object.assign(new Error("Unique constraint failed"), {
+              code: "P2002",
+            });
+          }
           world.recordedSessionIds.add(data.stripeCheckoutSessionId as string);
+          world.recordedFlags.set(
+            data.stripeCheckoutSessionId as string,
+            data.riskFlags as string
+          );
           world.redemptionRows.push(data);
           return data;
         },
@@ -142,14 +225,51 @@ async function loadProcessor() {
         prisma: {
           $transaction: async (fn: (client: unknown) => Promise<unknown>) =>
             fn(tx),
+          // Read by the sync-time per-card check, outside any transaction.
+          billingPromotionRedemption: {
+            findUnique: async () => world.concurrentRow,
+            findFirst: async ({
+              where,
+            }: {
+              where: { stripeSubscriptionId: string };
+            }) => {
+              const row = world.redemptionRows.find(
+                (item) => item.stripeSubscriptionId === where.stripeSubscriptionId
+              );
+              return row ? { riskFlags: row.riskFlags } : null;
+            },
+            findMany: otherAccountsOnCard,
+          },
+          billingPromotion: {
+            findUnique: async () => ({
+              maxRedemptionsPerPaymentMethod: world.cardLimit,
+            }),
+          },
           user: {
             findFirst: async () => ({
               id: "user_1",
               email: "buyer@example.com",
               subscriptionSyncedAt: null,
               settings: { language: "en" },
+              // What the last sync granted, as the account would now carry it.
+              stripeSubscriptionId:
+                (world.userUpdates.at(-1)?.stripeSubscriptionId as
+                  | string
+                  | undefined) ?? null,
             }),
-            updateMany: async ({ data }: { data: Record<string, unknown> }) => {
+            updateMany: async ({
+              where,
+              data,
+            }: {
+              where: { stripeSubscriptionId?: string };
+              data: Record<string, unknown>;
+            }) => {
+              // Scoped to one subscription: only matches the account that
+              // carries it, as the real query would.
+              if (where.stripeSubscriptionId !== undefined) {
+                const carried = world.userUpdates.at(-1)?.stripeSubscriptionId;
+                if (carried !== where.stripeSubscriptionId) return { count: 0 };
+              }
               world.userUpdates.push(data);
               return { count: 1 };
             },
@@ -162,12 +282,47 @@ async function loadProcessor() {
       namedExports: {
         isStripeConfigured: () => true,
         getStripe: () => ({
-          subscriptions: { retrieve: async () => world.subscription },
+          subscriptions: {
+            retrieve: async () => world.subscription,
+            cancel: async (id: string, params: unknown) => {
+              if (world.cancelFailure) throw world.cancelFailure;
+              world.cancels.push({ id, params });
+              world.subscription = {
+                ...world.subscription,
+                status: "canceled",
+              } as Stripe.Subscription;
+              return world.subscription;
+            },
+          },
           paymentMethods: {
             retrieve: async (id: string) => {
+              if (world.paymentMethodFault) throw world.paymentMethodFault;
               world.paymentMethodRetrieves.push(id);
-              return { id, type: "card", card: { fingerprint: "fp_1" } };
+              return id === "pm_link"
+                ? { id, type: "link", link: { email: "Payer@Example.com" } }
+                : { id, type: "card", card: { fingerprint: "fp_1" } };
             },
+            list: async () => ({ data: world.customerPaymentMethods }),
+          },
+          setupIntents: {
+            retrieve: async (id: string) => ({
+              id,
+              payment_method: world.setupIntentPaymentMethod,
+            }),
+          },
+          paymentIntents: {
+            retrieve: async (id: string) => ({
+              id,
+              payment_method: world.paymentIntentPaymentMethod,
+            }),
+          },
+          customers: {
+            retrieve: async () => ({
+              id: "cus_1",
+              invoice_settings: {
+                default_payment_method: world.customerDefaultPaymentMethod,
+              },
+            }),
           },
         }),
       },
@@ -180,13 +335,14 @@ async function loadProcessor() {
         releasePromotionCheckout: async (
           promotionId: string,
           userId: string,
-          options: { takenAtOrBefore?: Date } = {}
+          options: { takenAtOrBefore?: Date; checkoutSessionId?: string } = {}
         ) => {
           world.releases.push(promotionId);
           world.releaseCalls.push({
             promotionId,
             userId,
             takenAtOrBefore: options.takenAtOrBefore,
+            checkoutSessionId: options.checkoutSessionId,
           });
         },
       },
@@ -227,6 +383,14 @@ async function loadProcessor() {
     mock.module(mod("lib/standardEmailLane.ts"), {
       namedExports: {
         enqueueStandardEmail: async () => null,
+      },
+    });
+    mock.module(mod("lib/promotionBurstAlert.ts"), {
+      namedExports: {
+        alertOnPromotionBurst: async (promotionId: string) => {
+          world.burstAlerts.push(promotionId);
+          return { alerted: false, inWindow: 1 };
+        },
       },
     });
     mock.module(mod("lib/billingTransactions.ts"), {
@@ -409,6 +573,7 @@ test("the release is bounded by the Session's own creation time", async () => {
     world.releaseCalls[0].takenAtOrBefore,
     new Date(SESSION_CREATED_SECONDS * 1000)
   );
+  assert.equal(world.releaseCalls[0].checkoutSessionId, "cs_expired");
 });
 
 test("an expired checkout consumes no redemption and touches no subscription", async () => {
@@ -440,4 +605,513 @@ test("an expired checkout with no creation time releases nothing", async () => {
   await processStripeEvent(expiredEvent(expiringSession({ created: null })));
 
   assert.deepEqual(world.releaseCalls, []);
+});
+
+/* -------------------------------------------------------------------------- */
+/* Per-card limit (OZBFREE, 2026-11-20: 41 accounts on four cards)             */
+/* -------------------------------------------------------------------------- */
+
+const withCard = () => {
+  world.cardLimit = 3;
+  world.subscription = {
+    ...world.subscription,
+    default_payment_method: "pm_card",
+  } as Stripe.Subscription;
+};
+
+const flagsOf = (row: Record<string, unknown>) =>
+  JSON.parse(String(row.riskFlags)) as string[];
+
+test("a card under its limit still gets the plan, flagged as shared", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  withCard();
+  world.otherAccountsOnCard = ["user_a", "user_b"];
+  await processStripeEvent(completedEvent(zeroDueSession()));
+
+  assert.deepEqual(world.cancels, []);
+  assert.equal(world.userUpdates[0].plan, "Max");
+  assert.equal(world.redeemedCount, 1);
+  assert.deepEqual(flagsOf(world.redemptionRows[0]), ["shared_payment_method"]);
+});
+
+test("a card over its limit is cancelled instead of granted", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  withCard();
+  world.otherAccountsOnCard = ["user_a", "user_b", "user_c"];
+  await processStripeEvent(completedEvent(zeroDueSession()));
+
+  assert.equal(world.cancels.length, 1);
+  assert.equal(world.cancels[0].id, "sub_zero_due");
+  assert.deepEqual(
+    (world.cancels[0].params as { invoice_now: boolean; prorate: boolean })
+      .invoice_now,
+    false
+  );
+  // Never granted, never counted, but recorded so the account cannot retry and
+  // the Admin risk count sees it.
+  assert.deepEqual(world.userUpdates, []);
+  assert.equal(world.redeemedCount, 0);
+  assert.equal(world.redemptionRows.length, 1);
+  assert.deepEqual(flagsOf(world.redemptionRows[0]).sort(), [
+    "payment_method_limit",
+    "shared_payment_method",
+  ]);
+});
+
+test("a promotion with no per-card limit does not refuse a reused card", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  withCard();
+  world.cardLimit = null;
+  world.otherAccountsOnCard = Array.from({ length: 40 }, (_, i) => `user_${i}`);
+  await processStripeEvent(completedEvent(zeroDueSession()));
+
+  assert.deepEqual(world.cancels, []);
+  assert.equal(world.userUpdates[0].plan, "Max");
+});
+
+test("a failed cancellation fails the webhook, and the redelivery cancels without granting", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  withCard();
+  world.otherAccountsOnCard = ["user_a", "user_b", "user_c"];
+  world.cancelFailure = new Error("stripe unavailable");
+  const session = zeroDueSession();
+  await assert.rejects(processStripeEvent(completedEvent(session)));
+  assert.deepEqual(world.userUpdates, []);
+
+  // Stripe delivers it again. The refusal is already recorded, so the retry
+  // cancels from that record rather than re-deciding -- and still grants nothing.
+  world.cancelFailure = null;
+  await processStripeEvent(completedEvent(session));
+  assert.equal(world.cancels.length, 1);
+  assert.deepEqual(world.userUpdates, []);
+  assert.equal(world.redemptionRows.length, 1);
+  assert.equal(world.redeemedCount, 0);
+});
+
+test("a redelivery after a successful cancellation does not cancel twice", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  withCard();
+  world.otherAccountsOnCard = ["user_a", "user_b", "user_c"];
+  const session = zeroDueSession();
+  await processStripeEvent(completedEvent(session));
+  await processStripeEvent(completedEvent(session));
+  assert.equal(world.cancels.length, 1);
+  assert.deepEqual(world.userUpdates, []);
+});
+
+test("every recorded redemption is checked for a burst, refused ones included", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  withCard();
+  await processStripeEvent(completedEvent(zeroDueSession("cs_ok")));
+  world.otherAccountsOnCard = ["user_a", "user_b", "user_c"];
+  await processStripeEvent(completedEvent(zeroDueSession("cs_refused")));
+  assert.deepEqual(world.burstAlerts, ["promo_db", "promo_db"]);
+});
+
+/* -------------------------------------------------------------------------- */
+/* Independent review, round 1                                                 */
+/* -------------------------------------------------------------------------- */
+
+/** A subscription as Checkout creates it for a zero-due promotion. */
+const withPromotionSubscription = () => {
+  world.cardLimit = 3;
+  world.subscription = {
+    ...world.subscription,
+    default_payment_method: "pm_card",
+    metadata: {
+      ...world.subscription.metadata,
+      userId: "user_1",
+      promotionId: "promo_db",
+      billingExpectedAmountMinor: "0",
+    },
+  } as Stripe.Subscription;
+};
+
+const subscriptionEvent = (type: string) =>
+  ({
+    id: `evt_${type}`,
+    type,
+    data: { object: world.subscription },
+  }) as unknown as Stripe.Event;
+
+test("the per-card count is taken under a lock on that promotion and card", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  withCard();
+  await processStripeEvent(completedEvent(zeroDueSession()));
+  // Other statements in the same flow use $executeRaw too; pick the card lock.
+  const cardLocks = world.lockCalls.filter(
+    ([, key]) => typeof key === "string" && key.startsWith("promotion-card:")
+  );
+  assert.equal(cardLocks.length, 1);
+  const [strings, key] = cardLocks[0] as [TemplateStringsArray, string];
+  assert.match(strings.join("?"), /pg_advisory_xact_lock/);
+  assert.match(key, /^promotion-card:promo_db:[a-f0-9]{64}$/);
+});
+
+test("a paid checkout over the card limit is flagged, not cancelled", async () => {
+  // Cancelling would keep the customer's money and deny the plan.
+  const { processStripeEvent } = await loadProcessor();
+  withCard();
+  world.otherAccountsOnCard = ["user_a", "user_b", "user_c"];
+  const paid = {
+    ...(zeroDueSession("cs_paid") as unknown as Record<string, unknown>),
+    amount_total: 750,
+  } as unknown as Stripe.Checkout.Session;
+  await processStripeEvent(completedEvent(paid));
+
+  assert.deepEqual(world.cancels, []);
+  assert.equal(world.userUpdates[0].plan, "Max");
+  // Marked as over the limit, so it is told apart from sharing under it.
+  assert.deepEqual(flagsOf(world.redemptionRows[0]).sort(), [
+    "paid_over_card_limit",
+    "shared_payment_method",
+  ]);
+});
+
+test("a database fault while deciding the card limit fails the webhook and grants nothing", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  withCard();
+  world.recordFault = new Error("connection reset");
+  await assert.rejects(processStripeEvent(completedEvent(zeroDueSession())));
+  assert.deepEqual(world.userUpdates, []);
+  assert.deepEqual(world.redemptionRows, []);
+});
+
+test("an unreadable card on a promotion checkout fails the webhook instead of passing the limit", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  withCard();
+  world.paymentMethodFault = new Error("stripe unavailable");
+  await assert.rejects(processStripeEvent(completedEvent(zeroDueSession())));
+  assert.deepEqual(world.userUpdates, []);
+});
+
+test("a promotion switched off mid-checkout still cannot carry an over-limit card past the limit", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  withPromotionSubscription();
+  world.promotionActive = false;
+  world.otherAccountsOnCard = ["user_a", "user_b", "user_c"];
+  await processStripeEvent(completedEvent(zeroDueSession()));
+
+  assert.equal(world.cancels.length, 1);
+  assert.deepEqual(world.userUpdates, []);
+  assert.equal(world.redemptionRows.length, 1);
+  assert.ok(flagsOf(world.redemptionRows[0]).includes("payment_method_limit"));
+  assert.equal(world.redeemedCount, 0);
+});
+
+test("a subscription event that arrives before the completion does not grant an over-limit card", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  withPromotionSubscription();
+  world.otherAccountsOnCard = ["user_a", "user_b", "user_c"];
+  await processStripeEvent(subscriptionEvent("customer.subscription.created"));
+  assert.deepEqual(world.userUpdates, []);
+});
+
+test("a subscription event after a recorded refusal does not grant either", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  withPromotionSubscription();
+  world.otherAccountsOnCard = ["user_a", "user_b", "user_c"];
+  world.cancelFailure = new Error("stripe unavailable");
+  await assert.rejects(processStripeEvent(completedEvent(zeroDueSession())));
+  // The cancellation is being retried; meanwhile Stripe sends an update.
+  await processStripeEvent(subscriptionEvent("customer.subscription.updated"));
+  assert.deepEqual(world.userUpdates, []);
+});
+
+test("a subscription event before the completion waits even with places left", async () => {
+  // Review round 2: a read-only count cannot see a concurrent completion on
+  // the same card, so two events could each take the last place. Only the
+  // completion -- under the card lock -- decides; until then nothing is granted.
+  const { processStripeEvent } = await loadProcessor();
+  withPromotionSubscription();
+  world.otherAccountsOnCard = ["user_a", "user_b"];
+  await processStripeEvent(subscriptionEvent("customer.subscription.created"));
+  assert.equal(world.userUpdates.length, 0);
+
+  await processStripeEvent(completedEvent(zeroDueSession()));
+  assert.equal(world.userUpdates.length, 1);
+  assert.equal(world.userUpdates[0].plan, "Max");
+
+  // Once the completion has granted it, later events sync as usual.
+  await processStripeEvent(subscriptionEvent("customer.subscription.updated"));
+  assert.equal(world.userUpdates.length, 2);
+});
+
+test("a completion after the promotion closed is granted, recorded against the card, and not counted", async () => {
+  // Review round 3: completions on a closed promotion used to leave no row,
+  // so they were invisible to every later card count. Several Sessions opened
+  // on one card before the promotion closed could all be granted.
+  const { processStripeEvent } = await loadProcessor();
+  withPromotionSubscription();
+  world.promotionActive = false;
+  world.otherAccountsOnCard = ["user_a"];
+  await processStripeEvent(completedEvent(zeroDueSession()));
+
+  assert.equal(world.userUpdates.length, 1);
+  assert.equal(world.redemptionRows.length, 1);
+  assert.notEqual(world.redemptionRows[0].paymentMethodFingerprintHash, null);
+  assert.equal(world.redeemedCount, 0);
+  // The card count for that completion ran under the card lock too.
+  assert.ok(
+    world.lockCalls.some(
+      ([, key]) => typeof key === "string" && key.startsWith("promotion-card:")
+    )
+  );
+
+  await processStripeEvent(subscriptionEvent("customer.subscription.updated"));
+  assert.equal(world.userUpdates.length, 2);
+});
+
+test("a completion that loses the last redemption to a concurrent one is recorded, not counted", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  withCard();
+  world.promotionExhausted = true;
+  await processStripeEvent(completedEvent(zeroDueSession()));
+  assert.equal(world.userUpdates[0].plan, "Max");
+  assert.equal(world.redemptionRows.length, 1);
+  assert.equal(world.redeemedCount, 0);
+});
+
+test("a concurrent delivery of the same completion answers with the stored decision", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  withPromotionSubscription();
+  world.concurrentRow = {
+    riskFlags: JSON.stringify(["payment_method_limit", "shared_payment_method"]),
+  };
+  await processStripeEvent(completedEvent(zeroDueSession()));
+  assert.equal(world.cancels.length, 1);
+  assert.deepEqual(world.userUpdates, []);
+});
+
+test("a stored grant from a concurrent delivery is kept, not re-decided", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  withCard();
+  world.concurrentRow = { riskFlags: "[]" };
+  await processStripeEvent(completedEvent(zeroDueSession()));
+  assert.deepEqual(world.cancels, []);
+  assert.equal(world.userUpdates[0].plan, "Max");
+});
+
+test("refused attempts do not use up places on the card", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  withCard();
+  await processStripeEvent(completedEvent(zeroDueSession()));
+  const cardCount = world.countWheres.find(
+    (where) => "paymentMethodFingerprintHash" in where
+  );
+  assert.deepEqual(cardCount?.NOT, {
+    riskFlags: { contains: "payment_method_limit" },
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Independent review, round 4                                                 */
+/* -------------------------------------------------------------------------- */
+
+test("a zero-charge promotion subscription waits for the completion even while its limit is off", async () => {
+  // The limit can be switched off and on while a checkout is in flight; the
+  // wait does not depend on the setting the sync happens to read.
+  const { processStripeEvent } = await loadProcessor();
+  withPromotionSubscription();
+  world.cardLimit = null;
+  await processStripeEvent(subscriptionEvent("customer.subscription.created"));
+  assert.equal(world.userUpdates.length, 0);
+});
+
+test("a refusal takes back a plan the account already holds through that subscription", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  withPromotionSubscription();
+  // However it got there, the account already carries this subscription.
+  world.userUpdates.push({ plan: "Max", stripeSubscriptionId: "sub_zero_due" });
+  world.otherAccountsOnCard = ["user_a", "user_b", "user_c"];
+  await processStripeEvent(completedEvent(zeroDueSession()));
+
+  assert.equal(world.cancels.length, 1);
+  const last = world.userUpdates.at(-1);
+  assert.equal(last?.plan, "Free");
+  assert.equal(last?.stripeSubscriptionId, null);
+});
+
+test("a zero-charge duplicate from an account that already redeemed through another Session is refused", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  withPromotionSubscription();
+  world.accountAlreadyRedeemed = true;
+  await processStripeEvent(completedEvent(zeroDueSession("cs_second")));
+  assert.equal(world.cancels.length, 1);
+  assert.equal(world.userUpdates.length, 0);
+});
+
+/* -------------------------------------------------------------------------- */
+/* Independent review, round 5                                                 */
+/* -------------------------------------------------------------------------- */
+
+const cardLockKeys = () =>
+  world.lockCalls
+    .map(([, key]) => key)
+    .filter((key): key is string => typeof key === "string" && key.startsWith("promotion-card:"));
+
+const sessionWith = (fields: Record<string, unknown>) =>
+  ({
+    ...(zeroDueSession() as unknown as Record<string, unknown>),
+    ...fields,
+  }) as unknown as Stripe.Checkout.Session;
+
+test("a Session SetupIntent identifies the card when the subscription has none", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  world.cardLimit = 3;
+  world.setupIntentPaymentMethod = "pm_from_setup";
+  world.otherAccountsOnCard = ["user_a", "user_b", "user_c"];
+  await processStripeEvent(completedEvent(sessionWith({ setup_intent: "seti_1" })));
+  assert.equal(cardLockKeys().length, 1);
+  assert.equal(world.cancels.length, 1);
+});
+
+test("a paid Session's PaymentIntent identifies the card too", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  world.cardLimit = 3;
+  world.paymentIntentPaymentMethod = "pm_from_payment";
+  await processStripeEvent(
+    completedEvent(sessionWith({ payment_intent: "pi_1", amount_total: 500 }))
+  );
+  assert.equal(cardLockKeys().length, 1);
+});
+
+test("a card merely attached to the customer is never taken for the one this checkout used", async () => {
+  // Review round 6: it may be a different card -- counting it would let the
+  // shared card through or refuse for an unrelated one.
+  const { processStripeEvent } = await loadProcessor();
+  world.cardLimit = 3;
+  world.customerDefaultPaymentMethod = "pm_other_card";
+  world.customerPaymentMethods = [
+    { id: "pm_other", type: "card", card: { fingerprint: "fp_other" } },
+  ];
+  await processStripeEvent(completedEvent(zeroDueSession()));
+  assert.equal(cardLockKeys().length, 0);
+  assert.ok(flagsOf(world.redemptionRows[0]).includes("payment_method_unverified"));
+});
+
+test("the completion releases only the lease bound to its own Session", async () => {
+  // Review rounds 7-10: by Session id, so no redelivery can free a later
+  // checkout's lease whatever the clocks say; an unbound (legacy) lease falls
+  // back to the creation time.
+  const { processStripeEvent } = await loadProcessor();
+  await processStripeEvent(
+    completedEvent(sessionWith({ created: SESSION_CREATED_SECONDS }))
+  );
+  assert.equal(world.releaseCalls.length, 1);
+  assert.equal(world.releaseCalls[0].checkoutSessionId, "cs_zero");
+  assert.deepEqual(
+    world.releaseCalls[0].takenAtOrBefore,
+    new Date(SESSION_CREATED_SECONDS * 1000)
+  );
+});
+
+test("the per-card count looks back only as far as the card hash is kept", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  withCard();
+  await processStripeEvent(completedEvent(zeroDueSession()));
+  const cardCount = world.countWheres.find(
+    (where) => "paymentMethodFingerprintHash" in where
+  ) as { redeemedAt?: { gte?: Date } } | undefined;
+  const cutoff = cardCount?.redeemedAt?.gte;
+  assert.ok(cutoff instanceof Date);
+  const days = (Date.now() - cutoff.getTime()) / 86_400_000;
+  assert.ok(Math.abs(days - 90) < 0.01, String(days));
+});
+
+test("a zero-charge subscription's pending SetupIntent identifies the card", async () => {
+  // How Stripe collects the method on a subscription that owes nothing yet.
+  const { processStripeEvent } = await loadProcessor();
+  world.cardLimit = 3;
+  world.setupIntentPaymentMethod = "pm_from_pending_setup";
+  world.subscription = {
+    ...world.subscription,
+    pending_setup_intent: "seti_pending",
+  } as Stripe.Subscription;
+  world.otherAccountsOnCard = ["user_a", "user_b", "user_c"];
+  await processStripeEvent(completedEvent(zeroDueSession()));
+  assert.equal(cardLockKeys().length, 1);
+  assert.equal(world.cancels.length, 1);
+});
+
+test("a checkout without a promotion does not look the card up at all", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  withCard();
+  const plain = sessionWith({
+    metadata: { userId: "user_1", planId: "max", billingInterval: "monthly" },
+  });
+  await processStripeEvent(completedEvent(plain));
+  assert.deepEqual(world.paymentMethodRetrieves, []);
+  assert.equal(world.userUpdates[0].plan, "Max");
+});
+
+test("a Stripe Link payer is identified by the Link email", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  world.cardLimit = 3;
+  world.subscription = {
+    ...world.subscription,
+    default_payment_method: "pm_link",
+  } as Stripe.Subscription;
+  await processStripeEvent(completedEvent(zeroDueSession()));
+  assert.equal(cardLockKeys().length, 1);
+  assert.equal(world.userUpdates[0].plan, "Max");
+});
+
+test("a limited zero-charge checkout whose payer cannot be identified is refused", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  world.cardLimit = 3;
+  await processStripeEvent(completedEvent(zeroDueSession()));
+  assert.equal(world.cancels.length, 1);
+  assert.deepEqual(world.userUpdates, []);
+  assert.deepEqual(flagsOf(world.redemptionRows[0]).sort(), [
+    "payment_method_limit",
+    "payment_method_unverified",
+  ]);
+});
+
+test("an unidentifiable payer is not refused when the promotion has no per-card limit", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  world.cardLimit = null;
+  await processStripeEvent(completedEvent(zeroDueSession()));
+  assert.deepEqual(world.cancels, []);
+  assert.equal(world.userUpdates[0].plan, "Max");
+});
+
+/* -------------------------------------------------------------------------- */
+/* Independent review, round 9                                                 */
+/* -------------------------------------------------------------------------- */
+
+test("a checkout with no amount total but a zero expected amount is treated as free", async () => {
+  // A missing total must not turn a free checkout into a "paid" one that the
+  // per-card limit only flags.
+  const { processStripeEvent } = await loadProcessor();
+  withCard();
+  world.otherAccountsOnCard = ["user_a", "user_b", "user_c"];
+  const session = sessionWith({
+    amount_total: null,
+    metadata: {
+      ...(zeroDueSession().metadata as Record<string, string>),
+      billingExpectedAmountMinor: "0",
+    },
+  });
+  await processStripeEvent(completedEvent(session));
+  assert.equal(world.cancels.length, 1);
+  assert.deepEqual(world.userUpdates, []);
+});
+
+
+test("the card the checkout used wins over a default changed afterwards", async () => {
+  // Review round 10: the subscription default can change before a delayed
+  // webhook is processed; the Session's own intent records what was used.
+  const { processStripeEvent } = await loadProcessor();
+  withCard();
+  world.setupIntentPaymentMethod = "pm_link";
+  await processStripeEvent(completedEvent(sessionWith({ setup_intent: "seti_1" })));
+  const key = cardLockKeys()[0];
+  assert.ok(key);
+  // pm_link resolves to a Link identity, distinct from the default card's.
+  world.lockCalls = [];
+  world.setupIntentPaymentMethod = null;
+  await processStripeEvent(completedEvent(zeroDueSession("cs_default_only")));
+  assert.notEqual(cardLockKeys()[0], key);
 });

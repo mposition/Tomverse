@@ -369,8 +369,11 @@ catalogue, so a customer never has to recopy it.
   order, `routed-by: default`. A pick outside the candidates is never taken.
 - **A model named by its provider id.** Chat Completions, like the native
   protocols, takes the provider's model id (`gpt-5.6-luna`) when exactly one
-  offered model uses it, so a coding tool's built-in model list (Cursor's GPT
-  models, with the OpenAI base URL overridden) works without a custom model.
+  offered model uses it, so a coding tool's built-in model name works when it
+  matches one. Cursor's built-in GPT list matched none of the served models
+  (owner, 2026-11-21), so with the base URL overridden those picks reach
+  Tomverse and fail as `model_not_found`; Settings and `/developers/cursor` tell
+  Cursor users to add a Tomverse ID instead.
   An id two offered models share is a 400 `model_ambiguous` naming the
   Tomverse ids. A name no offered model uses is never mapped to another model:
   it is not found.
@@ -694,9 +697,16 @@ compaction as unsupported (`capabilities.remote_compaction` default), so no
   that is one more ordinary request with its own credits, and there is no
   setting to change its model.
 - **Cursor:** OpenAI API key + base-URL override (`https://<host>/api/code/v1`)
-  + a fixed custom model, on the coding API's Chat Completions route. Cursor's backend makes the calls, so only a public
-  HTTPS deployment works; Tab, Cursor's own models and cloud agents never use
-  the key.
+  + a custom model, on the coding API's Chat Completions route. Settings offers
+  `smart-adaptive` first (verified with Cursor on production, 10.5); the public
+  guide at `/developers/cursor` lists every model ID a paid key can name, read
+  from the live chat catalogue with `isExternalApiServableModel`, plus the
+  retired IDs and their catalogue replacements. That is the coding API's list
+  while `CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED` is off (production,
+  2026-11-21); turning it on changes the coding API's models, and the guide's
+  table must then read the coding catalogue before the switch goes on. Cursor's
+  backend makes the calls, so only a public HTTPS deployment works; Tab,
+  Cursor's own models and cloud agents never use the key.
 
 ### 10.5 Verification
 

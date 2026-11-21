@@ -1,4 +1,5 @@
 import "server-only";
+import { promotionRiskIdentifierCutoff } from "@/lib/billingPromotionCore";
 import { lockSubscriptionAccount } from "@/lib/subscriptionEntitlements";
 
 import {
@@ -830,8 +831,9 @@ export async function cleanupExpiredData() {
   const promotionRiskIdentifiers = await step("promotion_risk_identifiers", () =>
     prisma.billingPromotionRedemption.updateMany({
       where: {
+        // The same cutoff the per-card limit counts within.
         redeemedAt: {
-          lt: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000),
+          lt: promotionRiskIdentifierCutoff(new Date()),
         },
         OR: [
           { clientIpHash: { not: null } },

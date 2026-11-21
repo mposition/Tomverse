@@ -150,7 +150,7 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
    켜짐이고, 정확히 `disabled`일 때만 꺼지는 kill switch다(결과 검토·운영자 대기 정리·T2 조언·라우팅 route의 스위치는 2026-11-16에 없앴다). 작업 공간 자체의 kill switch는 2026-11-16에 없앴다(§0c-6). DM 승인자는 worker가 준 선택지뿐 아니라 DM의 자유 텍스트
    답도 적용한다(§0a-1).
 5. **그대로인 보호선.** DM 프로세스 환경에 앱·GitHub·bridge 자격증명이 없다. 네트워크는 공급사 API와, broker의 가져오기 단계의
-   공개 GitHub(`api.github.com`의 commit 조회, `github.com`의 git fetch)뿐이다. DM이 내릴 수 있는 결정의 종류와 결과 검증(§6
+   공개 GitHub(`api.github.com`의 commit 조회, `github.com`의 git fetch)뿐이다. broker의 GitHub 허용은 IP 단위로, GitHub이 자기 git·API 서비스 주소로 공개한 IPv4 대역(`https://api.github.com/meta`의 `git`과 `api`)의 443 포트다. 호스트 이름은 보지 않는다(운영자 결정 2026-11-21: DNS 답 하나를 허용하던 규칙은 `github.com`의 주소가 바뀔 때마다 작업 공간 fetch를 끊었다. 기록 `docs/ops/amux/decision-maker-s0-records/2026-11-20__broker-github-egress.md`). DM이 내릴 수 있는 결정의 종류와 결과 검증(§6
    스키마, 허용 선택지, 앱의 재검증)은 바꾸지 않는다. 작업 공간의 근거 파일에도 §5의 비밀 경로 목록과 secret 검사를 앱과 broker가
    각각 적용한다. 요청 디렉터리는 모든 종료 경로에서 지운다. 전송 의도(§10)의 payload digest와 manifest digest가 작업 공간의
    commit과 근거 파일 바이트를 모두 묶는다.
@@ -460,7 +460,7 @@ v1에서 이 선언은 **라우팅에 쓰지 않는다.** 운영자가 판단할
   | 주체 | 읽고 쓰는 것 | 네트워크 |
   |---|---|---|
   | worker | 자기 worktree와 홈. 요청 디렉터리·DM 프로세스·broker를 읽거나 ptrace할 수 없고 sudo 없음 | 기존 그대로 |
-  | DM broker | 요청 디렉터리를 만들고 지움, 작업 공간 가져오기(공개 commit 조회와 git fetch), DM 프로세스 시작, DM stdout을 pipe로 받아 bridge의 로컬 소켓으로 넘김. 공급사 CLI 인증·bridge 자격증명 없음 | GitHub 공개 host와 bridge 로컬 소켓만 |
+  | DM broker | 요청 디렉터리를 만들고 지움, 작업 공간 가져오기(공개 commit 조회와 git fetch), DM 프로세스 시작, DM stdout을 pipe로 받아 bridge의 로컬 소켓으로 넘김. 공급사 CLI 인증·bridge 자격증명 없음 | GitHub이 공개한 git·API IPv4 대역의 443(IP 단위, 호스트 이름은 보지 않음)과 bridge 로컬 소켓만 |
   | DM 공급사 계정(공급사마다 하나) | 자기 공급사 CLI의 인증 하나, 요청 디렉터리 읽기만, 자기 임시 디렉터리 | 자기 공급사 API host만 |
   | bridge | 기존 bridge 자격증명. 요청 디렉터리 접근 없음 | 앱 route만 |
 
