@@ -185,22 +185,42 @@ migration 적용은 별도입니다. 구현한 A1 범위와 확정 값은 10절�
   가져오는 URL과 답의 URL 모두 `isOfficialSourceUrl`로 검사합니다. 초안은 운영자가 지금 값과
   비교한 뒤 적용하고, 저장·적용·버리기는 각각 감사 기록과 함께 씁니다.
 
-### 6.3 외부 채널 (기본 꺼짐)
+### 6.3 코딩 API (기본 꺼짐)
 
-- `CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED`가 `true`가 아니면 `/api/v1`·Smart Adaptive·코딩 앱
-  연동 설정·tomverse CLI는 지금처럼 채팅 레지스트리를 씁니다(코딩 카탈로그를 읽지 않음).
-- 켜면 최신 코딩 스냅샷에서 노출 채널에 `api`가 있는 채팅 연결 행만 `/api/v1/models`, Smart
-  Adaptive 후보, 코딩 앱 설정, 네이티브 프로토콜(Anthropic Messages·Responses)에 남습니다.
-  tomverse CLI 요청(User-Agent `tomverse-cli/…`, 모델 목록·네이티브 프로토콜 포함)은 `cli`
-  채널을 따릅니다. 스냅샷에 있는 것만으로는 부족하고 **지금도 판정을 통과해야** 합니다(켜짐·보류
-  아님·지금 행에도 그 채널이 있음·공급자 조건 허용). 보류나 거절로 바뀐 다시 확인은 다음 발행을
-  기다리지 않고 바로 빠집니다. 발행된 행이나 지금 행의 `minimumPlan`이 계정 플랜보다 높아도
-  빠집니다(좁히기만 함).
-- 스냅샷은 허용 목록일 뿐입니다. 요청의 실행·가격·크레딧은 채팅 레지스트리 경로 그대로이고,
-  플랜 검사(Free는 API·CLI 불가)도 그대로입니다. 연결 행의 `creditWeight` 덮어쓰기는 Code 관리형
-  경로에만 쓰입니다.
-- 스냅샷이 없거나 coverage가 지났으면 외부 채널은 아무 모델도 내놓지 않습니다(채팅 레지스트리
-  전체로 되돌아가지 않음). 로그 `coding_catalog_external_channels_no_snapshot`을 남깁니다.
+외부 API는 주소로 둘로 나뉩니다(운영자 결정 2026-11-21, docs/policy/external-api.md). 일반 API
+(`/api/v1`, `/api/anthropic`)는 Aside 같은 앱용이고 항상 채팅 레지스트리를 씁니다. 코딩 API
+(`/api/code/v1`, `/api/code/anthropic`)는 Claude Code·Codex·Cursor·tomverse CLI용입니다.
+User-Agent로 채널을 나누지 않습니다.
+
+- 노출 채널은 `code`(Code 관리형 경로)와 `api`(코딩 API) 둘입니다. 예전에 저장된 `cli`는
+  읽을 때 코딩 API로 봅니다(`onCodingApi`). 저장된 행과 스냅샷을 다시 쓰지 않으므로 스냅샷 해시와
+  관리형 경로의 canonicalJson 비교가 그대로입니다. Admin은 "Code / 코딩 API" 둘만 보이고, 저장할 때
+  `api`를 씁니다. 전용 행도 코딩 API 채널을 고를 수 있습니다(전용 행에서 바꿀 수 있는 설정은 채널
+  하나이며, 새 초안을 적용해도 채널은 유지됩니다).
+- `CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED`가 `true`가 아니면 코딩 API는 일반 API와 똑같이 채팅
+  레지스트리를 보여 주고 실행합니다(코딩 카탈로그를 읽지 않음). 클라이언트가 새 주소로 옮겨도
+  깨지지 않게 하려는 것입니다.
+- 켜면 최신 코딩 스냅샷에서 코딩 API 채널이 있는 행(채팅 연결 행과 전용 행 모두)만 코딩 API의
+  모델 목록, Smart Adaptive 후보, 코딩 앱 설정, 네이티브 프로토콜(Anthropic Messages·Responses)에
+  남습니다. 스냅샷에 있는 것만으로는 부족하고 **지금도 판정을 통과해야** 합니다(켜짐·보류 아님·지금
+  행에도 코딩 API 채널이 있음·공급자 조건 허용). 보류나 거절로 바뀐 다시 확인은 다음 발행을 기다리지
+  않고 바로 빠집니다. 발행된 행이나 지금 행의 `minimumPlan`이 계정 플랜보다 높아도 빠집니다.
+- **채팅 연결 행**은 채팅 레지스트리 경로 그대로 실행·과금합니다(가격·크레딧은 채팅 모델의 것).
+  연결 행의 `creditWeight` 덮어쓰기는 Code 관리형 경로에만 쓰입니다.
+- **전용 행**은 발행된 자기 행으로 실행합니다(`lib/codingRowRuntime.ts`, 관리형 경로와 같은 변환).
+  크레딧은 행의 `pricing.creditWeight`, 단가는 행의 입력·출력 단가이며, 외부 API의 기존 예약·정산
+  (`acquireChatAccess`·`settleChatUsage`, 공급자 비용 예산, 동시성, 키 상한, 계정 크레딧)을 그대로
+  탑니다. 검증되지 않은 캐시 할인은 정가로, Anthropic 행의 캐시 쓰기는 자기 입력 단가의 1.25배로
+  예약합니다. 예약과 정산 스냅샷에 `pricingVersion: coding_catalog_snapshot:<version>:<hash>`와
+  `costSource: coding_catalog_snapshot`이 남아 어떤 카탈로그 버전으로 과금했는지 보입니다(새 컬럼
+  없음). 지금 판정이 허용하는 행이 발행된 행과 정확히 같을 때만 노출합니다 — 바뀐 값은 다음 발행
+  뒤에 과금합니다. 상한이 없는 공급자(`CODE_MANAGED_UNBOUNDED_PROVIDERS`)는 코딩 API 채널을 켠
+  전용 행에서 판정이 거절하고(`provider_cost_unbounded`) 실행 직전에도 거절합니다. 크레딧 하한
+  아래인 행은 판정이 이미 거절합니다.
+- 플랜 검사(Free는 API·CLI 불가)는 두 API 모두 그대로입니다.
+- 스냅샷이 없거나 coverage가 지났으면 코딩 API는 아무 모델도 내놓지 않습니다(채팅 레지스트리
+  전체로 되돌아가지 않음). 로그 `coding_catalog_external_channels_no_snapshot`을 남깁니다. 발행 뒤
+  바뀌었거나 실행할 수 없는 전용 행은 `coding_api_dedicated_rows_refused`로 남깁니다.
 
 ## 7. 제품 귀속
 

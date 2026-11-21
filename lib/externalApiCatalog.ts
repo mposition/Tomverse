@@ -1,6 +1,6 @@
 import "server-only";
 import { chatUserMaxInputTokens } from "@/lib/chatInputLimits";
-import { externalChannelAllowlist, type ExternalCodingChannel } from "@/lib/codingCatalogChannels";
+import { codingApiModels, type CodingCatalogPricing } from "@/lib/codingCatalogChannels";
 import {
     externalApiModelCapabilities,
     isExternalApiServableModel,
@@ -14,49 +14,76 @@ import { getRuntimeModels } from "@/lib/modelRegistry";
 import type { ExternalApiProtocol } from "@/lib/externalApiProtocols";
 
 /**
- * The models this plan can run through the external API right now, read from
- * the runtime registry on every call -- the same source the request is
- * validated against, so the list and execution cannot disagree. A model whose
- * provider has no credential on this deployment could only fail, so it is not
- * offered.
+ * Which of the two external APIs a request came through (owner decision
+ * 2026-11-21), decided by its address alone:
+ * - "general": /api/v1 and /api/anthropic, for AI browsers such as Aside and
+ *   other apps. Always the chat registry's models.
+ * - "coding": /api/code/v1 and /api/code/anthropic, for Claude Code, Codex,
+ *   Cursor and the tomverse CLI. The coding catalogue's models while
+ *   CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED is on; the general API's otherwise.
+ * The same key, plan check, ledger and limits serve both.
+ */
+export type ExternalApiSurface = "general" | "coding";
+
+export type ExternalApiRunnableEntry = {
+    model: AiModel;
+    capabilities: ExternalApiModelCapabilities;
+    /** A dedicated coding row's snapshot pricing, for its reservation (createChatBudget). */
+    catalogPricing?: CodingCatalogPricing;
+};
+
+/**
+ * The models this plan can run through one external API right now, read on
+ * every call -- the same source the request is validated against, so the list
+ * and execution cannot disagree. A model whose provider has no credential on
+ * this deployment could only fail, so it is not offered.
  *
  * `smartAdaptive` adds the classes only Smart Adaptive routes to (frontier and
  * apex, lib/externalApiCatalogCore.ts); a client naming one of those directly
  * is still refused.
- *
- * With CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED on, only the chat models the
- * newest coding snapshot lists for this channel and the coding judge still
- * admits now (lib/codingCatalogChannels.ts); off, the allow-list is null and
- * nothing else is read.
  */
 export const externalApiRunnableModels = async (
     plan: ModelTier,
-    options: { channel?: ExternalCodingChannel; smartAdaptive?: boolean } = {}
-): Promise<{ model: AiModel; capabilities: ExternalApiModelCapabilities }[]> => {
+    options: { surface: ExternalApiSurface; smartAdaptive?: boolean }
+): Promise<ExternalApiRunnableEntry[]> => {
     const runtime = await getRuntimeModels();
-    const allowed = await externalChannelAllowlist(options.channel ?? "api", plan, { runtime });
-    const servable = runtime.filter(
-        (model) =>
+    const coding = options.surface === "coding" ? await codingApiModels(plan, { runtime }) : null;
+    const pool: { model: AiModel; pricing?: CodingCatalogPricing }[] = coding ?? runtime.map((model) => ({ model }));
+    const servable = pool.filter(
+        ({ model }) =>
             isExternalApiServableModel(model, plan, { smartAdaptive: options.smartAdaptive }) &&
-            isProviderApiKeyConfigured(model.provider) &&
-            (allowed === null || allowed.has(model.id))
+            isProviderApiKeyConfigured(model.provider)
     );
     // A router-only model joins only beside a model of its provider a client
     // can name, so it is never the default, never the one model left, and a
     // native protocol never offers Smart Adaptive over router-only models alone.
     const nameableProviders = new Set(
-        servable.filter((model) => !isSmartAdaptiveOnlyModel(model)).map((model) => model.provider)
+        servable.filter(({ model }) => !isSmartAdaptiveOnlyModel(model)).map(({ model }) => model.provider)
     );
     return servable
-        .filter((model) => !isSmartAdaptiveOnlyModel(model) || nameableProviders.has(model.provider))
-        .map((model) => ({
+        .filter(({ model }) => !isSmartAdaptiveOnlyModel(model) || nameableProviders.has(model.provider))
+        .map(({ model, pricing }) => ({
             model,
             capabilities: externalApiModelCapabilities(model, {
                 maxInputTokens: chatUserMaxInputTokens(),
                 maxOutputTokens: resolveModelRequestPricing(model, { estimatedPromptTokens: 1 }).maxOutputTokens,
                 creditWeight: getModelUsageProfile(model).credits,
             }),
+            ...(pricing ? { catalogPricing: pricing } : {}),
         }));
+};
+
+/**
+ * The runtime models and any candidate that is not one -- a dedicated coding
+ * row on the coding API -- for the router, which describes each candidate from
+ * the model list it is given (lib/autoLlmRouterCore.ts autoLlmRouterCandidates).
+ */
+export const withCandidateModels = (
+    runtime: readonly AiModel[],
+    candidates: readonly Pick<ExternalApiRunnableEntry, "model">[]
+): AiModel[] => {
+    const known = new Set(runtime.map((model) => model.id));
+    return [...runtime, ...candidates.map((entry) => entry.model).filter((model) => !known.has(model.id))];
 };
 
 /**
@@ -66,7 +93,7 @@ export const externalApiRunnableModels = async (
  */
 export const externalApiOfferedModels = async (
     plan: ModelTier,
-    options: { channel?: ExternalCodingChannel } = {}
+    options: { surface: ExternalApiSurface }
 ): Promise<ExternalApiModelCapabilities[]> => {
     const pool = await externalApiRunnableModels(plan, { ...options, smartAdaptive: true });
     const runnable = pool
@@ -83,7 +110,7 @@ export const externalApiOfferedModels = async (
 export const externalApiProtocolModels = async (
     plan: ModelTier,
     protocol: ExternalApiProtocol,
-    options: { channel?: ExternalCodingChannel } = {}
+    options: { surface: ExternalApiSurface }
 ): Promise<ExternalApiModelCapabilities[]> =>
     (await externalApiRunnableModels(plan, options))
         .map((entry) => entry.capabilities)

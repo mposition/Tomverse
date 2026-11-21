@@ -17,9 +17,9 @@ import {
 import { estimateTextTokens } from "@/lib/chatTokenEstimate";
 import { ApiSecurityError, consumeApiRateLimit, readLimitedText } from "@/lib/apiSecurity";
 import { externalApiAdmissionHook } from "@/lib/externalApiAdmission";
-import { externalApiRunnableModels } from "@/lib/externalApiCatalog";
+import { externalApiRunnableModels, type ExternalApiRunnableEntry, type ExternalApiSurface } from "@/lib/externalApiCatalog";
 import { externalApiAccountAccess } from "@/lib/externalApiAccess";
-import { externalApiChannelFor, externalApiEnabled, SMART_ADAPTIVE_MODEL_ID } from "@/lib/externalApiCatalogCore";
+import { externalApiEnabled, SMART_ADAPTIVE_MODEL_ID } from "@/lib/externalApiCatalogCore";
 import { externalApiErrorResponse, idempotentReplay, positiveInteger } from "@/lib/externalApiInference";
 import { authenticateExternalApiKey, ExternalApiKeyError, type AuthenticatedExternalApiKey } from "@/lib/externalApiKeys";
 import { sha256Hex } from "@/lib/externalApiKeyCore";
@@ -167,7 +167,7 @@ export const readNativeJson = async (request: Request) => {
     }
 };
 
-type RunnableEntry = Awaited<ReturnType<typeof externalApiRunnableModels>>[number];
+type RunnableEntry = ExternalApiRunnableEntry;
 
 /**
  * The model a native request names, from the same runtime registry, plan and
@@ -182,9 +182,9 @@ export const resolveNativeModel = async (
     protocol: NativeProtocol,
     plan: Parameters<typeof externalApiRunnableModels>[0],
     requested: unknown,
-    smart?: Omit<Parameters<typeof routeNativeSmartAdaptive>[0], "protocol" | "runnable">,
-    /** The coding-catalogue channel the request belongs to (read only while the external channels are on). */
-    channel: "api" | "cli" = "api"
+    smart: Omit<Parameters<typeof routeNativeSmartAdaptive>[0], "protocol" | "runnable"> | undefined,
+    /** Which external API the request came through (its address). */
+    surface: ExternalApiSurface
 ): Promise<
     RunnableEntry & {
         routedBy?: NativeSmartDecision["routedBy"];
@@ -196,7 +196,7 @@ export const resolveNativeModel = async (
     if (typeof requested !== "string" || !requested) {
         throw new NativeProtocolError(400, "invalid_request", "model is required.", "model");
     }
-    const runnable = await externalApiRunnableModels(plan, { channel, smartAdaptive: requested === SMART_ADAPTIVE_MODEL_ID });
+    const runnable = await externalApiRunnableModels(plan, { surface, smartAdaptive: requested === SMART_ADAPTIVE_MODEL_ID });
     if (requested === SMART_ADAPTIVE_MODEL_ID) {
         const decision = smart ? await routeNativeSmartAdaptive({ ...smart, protocol, runnable }) : null;
         if (decision) {
@@ -499,8 +499,12 @@ const relayStream = (
     });
 };
 
-/** POST of one native generation request, for either protocol. */
-export async function handleNativeGeneration(request: Request, spec: NativeProtocolSpec): Promise<Response> {
+/** POST of one native generation request, for either protocol, on the general or the coding API. */
+export async function handleNativeGeneration(
+    request: Request,
+    spec: NativeProtocolSpec,
+    options: { surface: ExternalApiSurface }
+): Promise<Response> {
     const requestId = `req_${randomUUID().replaceAll("-", "")}`;
     const render = spec.render;
     let leaseId: string | null = null;
@@ -552,7 +556,7 @@ export async function handleNativeGeneration(request: Request, spec: NativeProto
                       prepare: (candidate) => spec.prepare(body, candidate),
                   }
                 : undefined,
-            externalApiChannelFor(request.headers.get("user-agent"))
+            options.surface
         );
         const { model, capabilities } = entry;
         const routedHeaders: Record<string, string> = entry.routedBy
@@ -574,6 +578,8 @@ export async function handleNativeGeneration(request: Request, spec: NativeProto
             totalOutputTokenCap: prepared.outputLimit,
             reservationOnlyInputTokens: estimate.reservationOnlyInputTokens,
             ...(prepared.hasCacheMarker ? { promptCachePath: "external_api_messages" as const } : {}),
+            // A dedicated coding row: its snapshot and cache-write bound.
+            ...(entry.catalogPricing ? { catalogPricing: entry.catalogPricing } : {}),
         });
         // The provider limit and the reserved output are one number: if the
         // pricing tier for this prompt size allows less, the request says so.
@@ -727,7 +733,11 @@ export async function handleNativeGeneration(request: Request, spec: NativeProto
 export async function handleNativeFreeCall(
     request: Request,
     spec: Pick<NativeProtocolSpec, "protocol" | "provider" | "acceptsXApiKey" | "render" | "upstreamHeaders">,
-    options: { upstreamPath: string; prepare: (body: unknown, model: { apiModel: string; maxOutputTokens: number }) => Prepared }
+    options: {
+        upstreamPath: string;
+        prepare: (body: unknown, model: { apiModel: string; maxOutputTokens: number }) => Prepared;
+        surface: ExternalApiSurface;
+    }
 ): Promise<Response> {
     const requestId = `req_${randomUUID().replaceAll("-", "")}`;
     try {
@@ -752,7 +762,7 @@ export async function handleNativeFreeCall(
                       free: true,
                   }
                 : undefined,
-            externalApiChannelFor(request.headers.get("user-agent"))
+            options.surface
         );
         const prepared = options.prepare(body, { apiModel: entry.model.apiModel, maxOutputTokens: entry.capabilities.maxOutputTokens });
         const upstreamHeaders = checkForwardedHeaders(spec.upstreamHeaders(request, prepared));

@@ -7,20 +7,20 @@ import {
   normalizedSnapshotContentHash,
   codingActivationBlockers,
   codingCandidateExclusion,
+  codingApiSnapshotRows,
   codingCatalogExternalChannelsEnabled,
   codingCatalogRowOf,
   codingCatalogRowSchema,
   codingPlanReaches,
   codingStoredProfileSchema,
-  externalChannelModelIds,
   judgeCodingModel,
   judgeCodingResolution,
   providerTermsDueOn,
   providerTermsExpired,
+  onCodingApi,
   resolveCodingEntry,
   snapshotPendingChanges,
 } from "../lib/modelCatalogCore.ts";
-import { externalApiChannelFor } from "../lib/externalApiCatalogCore.ts";
 
 // The unit lane runs without --experimental-test-module-mocks, so the draft
 // module is imported as it is; these answer checks never call a model.
@@ -235,8 +235,17 @@ test("a dedicated row keeps its own terms until its provider has a record, then 
   assert.equal(provider.termsSource, "provider");
   assert.equal(provider.row.terms.url, "https://www.alibabacloud.com/help/en/legal/terms");
   assert.equal(provider.row.processingRegion, "Singapore, US");
-  // The external API runs chat models only: a dedicated row cannot list API or CLI.
-  assert.ok(resolve(dedicated({ channels: ["code", "api"] }), { modelId: "qwen3.7-coder-plus", terms: {} }).refusals.includes("dedicated_code_only"));
+  // A dedicated row may be offered on the coding API (owner decision
+  // 2026-11-21): it runs there as its own row, so only a provider whose cost a
+  // token row cannot bound is refused, as Code's managed path refuses it.
+  const onApi = resolve(dedicated({ channels: ["code", "api"] }), { modelId: "qwen3.7-coder-plus", terms: {} });
+  assert.deepEqual(onApi.refusals, []);
+  assert.deepEqual(onApi.row.channels, ["code", "api"]);
+  for (const channels of [["code", "api"], ["cli"]]) {
+    const unbounded = resolve(dedicated({ provider: "openrouter", channels }), { modelId: "qwen3.7-coder-plus", terms: {} });
+    assert.ok(unbounded.refusals.includes("provider_cost_unbounded"), channels.join(","));
+  }
+  assert.deepEqual(resolve(dedicated({ provider: "openrouter", channels: ["code"] }), { modelId: "qwen3.7-coder-plus", terms: {} }).refusals, []);
 });
 
 test("a snapshot row published before links parses to the same row a dedicated entry resolves to today", () => {
@@ -288,36 +297,39 @@ test("coding candidates are active, listed chat models of a served usage class n
   assert.equal(codingCandidateExclusion(chat({ id: "bad id with spaces" }), none), "invalid_id");
 });
 
-test("an external channel offers the chat links that list it, are still on and the plan reaches", () => {
+test("the coding API offers the rows of either source that list it, are still on and the plan reaches", () => {
   const rows = [
-    codingCatalogRowOf(resolve(link({ channels: ["code", "api", "cli"] })).row),
+    codingCatalogRowOf(resolve(link({ channels: ["code", "api"] })).row),
     codingCatalogRowOf(resolve(link({ registryModelId: "gpt-6-luna", channels: ["code", "api"], minimumPlan: "Max" }), {
       modelId: "gpt-6-luna",
       chatModels: [chat({ id: "gpt-6-luna", provider: "anthropic" })],
     }).row),
     codingCatalogRowOf(resolve(dedicated({ channels: ["code"] }), { modelId: "qwen3.7-coder-plus", terms: {} }).row),
+    // Saved with the CLI's own channel before the CLI moved onto the coding API.
+    codingCatalogRowOf(resolve(dedicated({ name: "Coder CLI", channels: ["cli"] }), { modelId: "qwen3.7-coder-cli", terms: {} }).row),
   ];
-  const active = new Set(["claude-sonnet-4-6", "gpt-6-luna", "qwen3.7-coder-plus"]);
-  assert.deepEqual([...externalChannelModelIds(rows, { channel: "api", plan: "Pro", activeIds: active })], ["claude-sonnet-4-6"]);
-  assert.deepEqual([...externalChannelModelIds(rows, { channel: "api", plan: "Max", activeIds: active })].sort(), ["claude-sonnet-4-6", "gpt-6-luna"]);
-  assert.deepEqual([...externalChannelModelIds(rows, { channel: "cli", plan: "Max", activeIds: active })], ["claude-sonnet-4-6"]);
+  const ids = (plan, activeIds) => codingApiSnapshotRows(rows, { plan, activeIds }).map((row) => row.modelId).sort();
+  const active = new Set(["claude-sonnet-4-6", "gpt-6-luna", "qwen3.7-coder-plus", "qwen3.7-coder-cli"]);
+  assert.deepEqual(ids("Pro", active), ["claude-sonnet-4-6", "qwen3.7-coder-cli"]);
+  assert.deepEqual(ids("Max", active), ["claude-sonnet-4-6", "gpt-6-luna", "qwen3.7-coder-cli"]);
   // A row turned off or held after publishing leaves at once.
-  assert.deepEqual([...externalChannelModelIds(rows, { channel: "api", plan: "Max", activeIds: new Set(["gpt-6-luna"]) })], ["gpt-6-luna"]);
-  // A dedicated row is never offered externally.
-  assert.equal(externalChannelModelIds(rows, { channel: "api", plan: "Max", activeIds: active }).has("qwen3.7-coder-plus"), false);
+  assert.deepEqual(ids("Max", new Set(["gpt-6-luna"])), ["gpt-6-luna"]);
+  // A row offered to Code only is not on the coding API.
+  assert.equal(ids("Max", active).includes("qwen3.7-coder-plus"), false);
+  // "api", or the older "cli", is the coding API.
+  assert.equal(onCodingApi(["code"]), false);
+  assert.equal(onCodingApi(["api"]), true);
+  assert.equal(onCodingApi(["code", "cli"]), true);
   // A plan the coding scale does not know reaches nothing.
   assert.equal(codingPlanReaches("Guest", "Free"), false);
   assert.equal(codingPlanReaches("Free", "Free"), true);
   assert.equal(codingPlanReaches("Pro", "Max"), false);
 });
 
-test("the external channels switch is off unless it is exactly true, and the CLI names itself", () => {
+test("the coding API switch is off unless it is exactly true", () => {
   assert.equal(codingCatalogExternalChannelsEnabled({}), false);
   assert.equal(codingCatalogExternalChannelsEnabled({ CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED: "1" }), false);
   assert.equal(codingCatalogExternalChannelsEnabled({ CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED: "true" }), true);
-  assert.equal(externalApiChannelFor("tomverse-cli/0.4.1"), "cli");
-  assert.equal(externalApiChannelFor("claude-cli/2.1.278 (external, cli)"), "api");
-  assert.equal(externalApiChannelFor(null), "api");
 });
 
 test("a capability draft reads an unknown answer as none, and a terms draft must cite pages it fetched", () => {

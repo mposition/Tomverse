@@ -269,13 +269,19 @@ export const CODING_TOOL_CALLING = ["none", "basic", "parallel"] as const;
 export const CODING_STRUCTURED_OUTPUT = ["none", "json_mode", "strict_schema", "forced_tool_use", "response_schema"] as const;
 
 /**
- * Where a coding model is offered (owner decision 2026-11-20): Code's managed
- * path, the external API (/api/v1, Smart Adaptive, the coding-app settings)
- * and the tomverse CLI. The two external channels read this only while
- * CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED is on.
+ * Where a coding model is offered: Code's managed path ("code") and the coding
+ * API ("api": /api/code/v1 and /api/code/anthropic, used by Claude Code, Codex,
+ * Cursor and the tomverse CLI; owner decision 2026-11-21). "cli" was the
+ * tomverse CLI's own channel before the CLI moved onto the coding API; a row
+ * stored with it still parses and reads as the coding API (onCodingApi), so
+ * no stored row or snapshot needs rewriting. The coding API reads this only
+ * while CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED is on.
  */
 export const CODING_CHANNELS = ["code", "api", "cli"] as const;
 export type CodingChannel = (typeof CODING_CHANNELS)[number];
+
+/** Whether a row's channels put it on the coding API ("api", or the older "cli"). */
+export const onCodingApi = (channels: readonly string[]): boolean => channels.includes("api") || channels.includes("cli");
 
 /** Channels in one fixed order, so the same choice always hashes the same. */
 export const normalizeCodingChannels = (channels: readonly CodingChannel[]): CodingChannel[] =>
@@ -641,9 +647,11 @@ export const resolveCodingEntry = (input: {
     };
   }
 
-  // A dedicated row: chat cannot serve it, so the external channels cannot either.
+  // A dedicated row runs on its own row's prices on the coding API too
+  // (lib/codingRowRuntime.ts), so a provider whose cost a token row cannot
+  // bound is refused there as Code's managed path refuses it.
   const channels = stored.channels ?? (["code"] as CodingChannel[]);
-  if (channels.some((channel) => channel !== "code")) refusals.push("dedicated_code_only");
+  if (onCodingApi(channels) && CODE_MANAGED_UNBOUNDED_PROVIDERS.includes(stored.provider)) refusals.push("provider_cost_unbounded");
   const providerTerms = input.providerTerms(stored.provider);
   const terms = providerTerms
     ? { allowsResaleAndCodingAgent: providerTerms.allowsResaleAndCodingAgent, url: providerTerms.termsUrl, checkedAt: providerTerms.checkedAt }
@@ -708,31 +716,25 @@ export const codingCandidateExclusion = (chat: ChatModelFacts, codingIds: Readon
 };
 
 /**
- * The chat models an external channel may offer while the switch is on: chat
- * links in the snapshot that list the channel, whose coding row is still on
- * and not held, at a plan that reaches the row's minimum. A dedicated row is
- * never offered: the external API runs chat registry models only.
+ * The snapshot rows the coding API may offer while the switch is on: rows of
+ * either source that list the coding API, whose coding row is still on and not
+ * held now, at a plan that reaches the row's minimum. A chat link runs as its
+ * chat registry model; a dedicated row runs as its own row
+ * (lib/codingCatalogChannels.ts).
  */
-export const externalChannelModelIds = (
+export const codingApiSnapshotRows = (
   rows: readonly CodingCatalogRow[],
-  input: { channel: "api" | "cli"; plan: CodingPlan; activeIds: ReadonlySet<string> }
-): Set<string> =>
-  new Set(
-    rows
-      .filter(
-        (row) =>
-          row.source === "chat" &&
-          row.channels.includes(input.channel) &&
-          input.activeIds.has(row.modelId) &&
-          codingPlanReaches(input.plan, row.minimumPlan)
-      )
-      .map((row) => row.registryModelId ?? row.modelId)
+  input: { plan: CodingPlan; activeIds: ReadonlySet<string> }
+): CodingCatalogRow[] =>
+  rows.filter(
+    (row) => onCodingApi(row.channels) && input.activeIds.has(row.modelId) && codingPlanReaches(input.plan, row.minimumPlan)
   );
 
 /**
- * The external channels (api, cli) read the coding snapshot only while this is
- * "true". Off -- the default -- the external API, Smart Adaptive, the coding-app
- * settings and the CLI read the chat registry exactly as before.
+ * The coding API reads the coding snapshot only while this is "true". Off --
+ * the default -- the coding API offers and runs exactly what the general API
+ * does (the chat registry), so a client moved to the new address keeps working.
+ * The general API never reads the coding catalogue.
  */
 export const CODING_CATALOG_EXTERNAL_CHANNELS_ENV = "CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED";
 

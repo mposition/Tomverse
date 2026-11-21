@@ -34,7 +34,7 @@ test("connection lost before any answer: looked up by its key, reported, never s
             assert.equal(record!.lookup, "found", "the server knows it by the Idempotency-Key recorded before sending");
             assert.equal(record!.receipt!.status, "settled");
             assert.ok(record!.requestId?.startsWith("req_"));
-            const lookups = gateway.requests.filter((r) => r.url === "/api/v1/requests/status");
+            const lookups = gateway.requests.filter((r) => r.url === "/api/code/v1/requests/status");
             assert.equal(lookups[0]!.headers["idempotency-key"], record!.idempotencyKey);
         }
     ));
@@ -224,7 +224,7 @@ test("a journal that cannot be written stops the session before the next paid re
         async (gateway) => {
             let writes = 0;
             const home = tempDir("home");
-            const endpoint = { base: gateway.base, origin: new URL(gateway.base).origin, basePath: "/api/v1" };
+            const endpoint = { base: gateway.base, origin: new URL(gateway.base).origin, basePath: "/api/code/v1" };
             const client = new Gateway(endpoint, (await import("./fakeGateway.js")).TEST_KEY);
             const catalog = await client.models();
             const root = makeRepo();

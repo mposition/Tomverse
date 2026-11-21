@@ -91,9 +91,9 @@ test("Tomverse CLI over the real gateway and shared credit ledger", { skip: !dat
     });
 
     const { handleChatCompletions } = await import(mod("lib/externalApiInference.ts"));
-    const { GET: modelsRoute } = await import(mod("app/api/v1/models/route.ts"));
-    const { GET: usageRoute } = await import(mod("app/api/v1/usage/route.ts"));
-    const { GET: statusRoute } = await import(mod("app/api/v1/requests/status/route.ts"));
+    const { GET: modelsRoute } = await import(mod("app/api/code/v1/models/route.ts"));
+    const { GET: usageRoute } = await import(mod("app/api/code/v1/usage/route.ts"));
+    const { GET: statusRoute } = await import(mod("app/api/code/v1/requests/status/route.ts"));
     const keys = await import(mod("lib/externalApiKeys.ts"));
     const { Runner } = await import(mod("apps/tomverse-cli/src/agent.ts"));
     const { Gateway } = await import(mod("apps/tomverse-cli/src/gateway.ts"));
@@ -119,10 +119,10 @@ test("Tomverse CLI over the real gateway and shared credit ledger", { skip: !dat
             });
             const path = req.url.split("?")[0];
             const response =
-                path === "/api/v1/chat/completions" ? await handleChatCompletions(request)
-                : path === "/api/v1/models" ? await modelsRoute(request)
-                : path === "/api/v1/usage" ? await usageRoute(request)
-                : path === "/api/v1/requests/status" ? await statusRoute(request)
+                path === "/api/code/v1/chat/completions" ? await handleChatCompletions(request, { surface: "coding" })
+                : path === "/api/code/v1/models" ? await modelsRoute(request)
+                : path === "/api/code/v1/usage" ? await usageRoute(request)
+                : path === "/api/code/v1/requests/status" ? await statusRoute(request)
                 : new Response("not found", { status: 404 });
             res.writeHead(response.status, Object.fromEntries(response.headers));
             if (!response.body) return res.end();
@@ -145,7 +145,7 @@ test("Tomverse CLI over the real gateway and shared credit ledger", { skip: !dat
         if (![6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080].includes(server.address().port)) break;
         await new Promise((r) => server.close(r));
     }
-    const base = `http://127.0.0.1:${server.address().port}/api/v1`;
+    const base = `http://127.0.0.1:${server.address().port}/api/code/v1`;
     t.after(async () => {
         server.closeAllConnections();
         server.close();
@@ -168,7 +168,7 @@ test("Tomverse CLI over the real gateway and shared credit ledger", { skip: !dat
         return dir;
     };
     const runnerFor = async (key, root, prompter) => {
-        const endpoint = { base, origin: new URL(base).origin, basePath: "/api/v1" };
+        const endpoint = { base, origin: new URL(base).origin, basePath: "/api/code/v1" };
         const gateway = new Gateway(endpoint, key);
         const catalog = (await gateway.models()).filter((m) => m.tools);
         const model = catalog.find((m) => m.id === MODEL_ID);
@@ -208,7 +208,7 @@ test("Tomverse CLI over the real gateway and shared credit ledger", { skip: !dat
         assert.ok(rows.every((r) => r.clientName?.startsWith("tomverse-cli/")));
 
         // Another client on the same key: not part of the session's cost.
-        const other = await handleChatCompletions(new Request(`${base}/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ model: MODEL_ID, messages: [{ role: "user", content: "hi" }] }) }));
+        const other = await handleChatCompletions(new Request(`${base}/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ model: MODEL_ID, messages: [{ role: "user", content: "hi" }] }) }), { surface: "general" });
         assert.equal(other.status, 200);
         await other.text();
         const cost = await sessionCost(gateway, journal);
