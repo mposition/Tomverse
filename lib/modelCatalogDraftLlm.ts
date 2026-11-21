@@ -55,6 +55,7 @@ export const MAX_DRAFT_SOURCES = 3;
 export type DraftPage = { url: string; text: string };
 
 export class DraftRefusal extends Error {
+  override readonly name = "DraftRefusal";
   constructor(readonly code: string, readonly detail: string | null = null) {
     super(code);
   }

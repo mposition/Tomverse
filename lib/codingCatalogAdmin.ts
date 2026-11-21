@@ -414,8 +414,8 @@ export const fillLinkCapabilities = async (input: {
   } catch (error) {
     const name = (error as { name?: unknown } | null)?.name;
     if (name === "TimeoutError" || name === "AbortError") throw new CatalogRefusal("timeout_outcome_unknown", [], 504);
-    const refusal = error as { code?: unknown; detail?: unknown; constructor?: { name?: string } } | null;
-    if (refusal?.constructor?.name === "DraftRefusal" && typeof refusal.code === "string") {
+    const refusal = error as { name?: unknown; code?: unknown; detail?: unknown } | null;
+    if (refusal?.name === "DraftRefusal" && typeof refusal.code === "string") {
       throw new CatalogRefusal(refusal.code, typeof refusal.detail === "string" ? [refusal.detail] : [], 422);
     }
     throw new CatalogRefusal("draft_failed", [], 502);
