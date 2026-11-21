@@ -177,7 +177,8 @@ test("native protocols over the real shared credit ledger", { skip: !databaseUrl
                 body: typeof payload === "string" ? payload : JSON.stringify(payload),
                 signal: init.signal,
             }),
-            anthropicMessagesSpec
+            anthropicMessagesSpec,
+            { surface: "general" }
         );
     const codex = (key, payload, init = {}) =>
         handleNativeGeneration(
@@ -187,7 +188,8 @@ test("native protocols over the real shared credit ledger", { skip: !databaseUrl
                 body: typeof payload === "string" ? payload : JSON.stringify(payload),
                 signal: init.signal,
             }),
-            responsesSpec
+            responsesSpec,
+            { surface: "general" }
         );
     const chat = (key, payload, init = {}) =>
         handleChatCompletions(
@@ -195,7 +197,8 @@ test("native protocols over the real shared credit ledger", { skip: !databaseUrl
                 method: "POST",
                 headers: { authorization: `Bearer ${key}`, "content-type": "application/json", ...(init.headers ?? {}) },
                 body: JSON.stringify(payload),
-            })
+            }),
+            { surface: "general" }
         );
 
     t.after(async () => {
@@ -598,7 +601,7 @@ test("native protocols over the real shared credit ledger", { skip: !databaseUrl
     // Smart Adaptive on the native protocols: one provider's models, one pick
     // per conversation, never a failed request when the pin is missed.
     const providerPool = async (provider, protocol) =>
-        (await externalApiRunnableModels("Pro")).filter(
+        (await externalApiRunnableModels("Pro", { surface: "general" })).filter(
             (entry) => entry.model.provider === provider && entry.capabilities.protocols.includes(protocol)
         );
     const poolDefault = (pool) =>
@@ -718,6 +721,7 @@ test("native protocols over the real shared credit ledger", { skip: !databaseUrl
             const counted = await handleNativeFreeCall(countRequest, anthropicMessagesSpec, {
                 upstreamPath: anthropicCountTokensPath(countRequest),
                 prepare: (body, model) => prepareAnthropicMessages(body, model, { countTokens: true }),
+                surface: "general",
             });
             assert.equal(counted.status, 200);
             assert.equal(sent.at(-1).body.model, fallback.model.apiModel, "the session's pinned model");
@@ -1160,6 +1164,7 @@ test("native protocols over the real shared credit ledger", { skip: !databaseUrl
         const counted = await handleNativeFreeCall(countRequest, anthropicMessagesSpec, {
             upstreamPath: anthropicCountTokensPath(countRequest),
             prepare: (body, model) => prepareAnthropicMessages(body, model, { countTokens: true }),
+            surface: "general",
         });
         assert.equal(counted.status, 200);
         assert.equal((await counted.json()).input_tokens, 1_234);

@@ -1,18 +1,35 @@
-# External inference API (`/api/v1`)
+# External inference API (`/api/v1`, `/api/code/v1`)
 
 Status: implemented, default off. Live activation, paid smoke tests and the
 production migration are separate, approved steps (section 9).
 
 The API lets an account use its existing Tomverse models and credits from
-coding tools. Three wire protocols, one key, one ledger:
+other apps and coding tools. Two APIs (owner decision 2026-11-21), decided by
+the address alone, on one key, one plan check (Pro or Max) and one ledger:
 
-- **OpenAI Chat Completions** (`/api/v1/chat/completions`): Aside (Custom
-  Provider, Pi `openai-completions`), VS Code (Custom Endpoint,
-  `chat-completions`) and Cursor (OpenAI base-URL override).
-- **Anthropic Messages** (`/api/anthropic/v1/messages`): Claude Code, CLI and
-  the official VS Code extension (section 10).
-- **OpenAI Responses** (`/api/v1/responses`): Codex, CLI and the official VS
-  Code extension (section 10).
+- **The general API** -- `/api/v1/*` and `/api/anthropic/v1/*` -- for AI
+  browsers such as Aside and other apps (VS Code's Custom Endpoint, any
+  OpenAI-compatible app). It always offers the chat registry's models.
+- **The coding API** -- `/api/code/v1/*` (`chat/completions`, `responses`,
+  `models`, `usage`, `requests/status`) and `/api/code/anthropic/v1/*`
+  (`messages`, `messages/count_tokens`, `models`) -- for Claude Code, Codex,
+  Cursor and the tomverse CLI. While `CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED`
+  is off (the default) it offers and runs exactly what the general API does;
+  on, it offers the coding catalogue's models (section 5, "Which models").
+  The same handlers serve both, told which API the route is
+  (`lib/externalApiCatalog.ts` `ExternalApiSurface`); the User-Agent decides
+  nothing.
+
+Three wire protocols, on both APIs:
+
+- **OpenAI Chat Completions** (`.../v1/chat/completions`): Aside (Custom
+  Provider, Pi `openai-completions`) and VS Code (Custom Endpoint,
+  `chat-completions`) on the general API; Cursor (OpenAI base-URL override)
+  and the tomverse CLI on the coding API.
+- **Anthropic Messages** (`.../anthropic/v1/messages`): Claude Code, CLI and
+  the official VS Code extension, on the coding API (section 10).
+- **OpenAI Responses** (`.../v1/responses`): Codex, CLI and the official VS
+  Code extension, on the coding API (section 10).
 
 It is a stateless inference gateway. It is not a Tomverse agent, not a tool
 runner and not a separate billing product. The coding tool runs its own agent
@@ -41,7 +58,8 @@ All default off. Server-side; hiding UI is never the gate.
 |---|---|
 | `EXTERNAL_API_ENABLED` | Exactly `true` turns the routes on. Anything else: every `/api/v1` route answers 503 `feature_unavailable` and nothing is dispatched. |
 | `EXTERNAL_API_ALLOWED_USER_IDS` | Comma-separated user IDs allowed to manage and use keys, or `*`. Empty means nobody. `*` still means paid accounts only: a Free account is refused whatever this list says (section 3). |
-| `EXTERNAL_API_PUBLIC_BASE_URL` | Optional canonical base URL shown to users (e.g. `https://tomverse.app/api/v1`). Otherwise derived from the request host. |
+| `EXTERNAL_API_PUBLIC_BASE_URL` | Optional canonical base URL of the general API shown to users (e.g. `https://tomverse.app/api/v1`). Otherwise derived from the request host. The coding API's base is the same with `/api/code/v1` (`lib/externalApiCodingTools.ts` `codingApiBaseUrl`). |
+| `CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED` | Exactly `true` makes the coding API offer the coding catalogue's models (section 5). Off, the coding API offers the chat registry like the general API. The general API never reads it. Kept under its earlier name, so nothing has to be renamed in an environment that already has it. |
 | `NEXT_PUBLIC_EXTERNAL_API_SETTINGS_VISIBLE` | Build-time. Shows the API keys row in the settings panel. `/settings/api` itself checks availability through the server. |
 | `EXTERNAL_API_REQUESTS_PER_MINUTE` / `_PER_DAY` | Per-account request-rate abuse guard, defaults 120 / 20 000. Credits, the key cap and concurrency are what bound usage; this only stops runaway clients. |
 | `EXTERNAL_API_HEARTBEAT_MS` | How often an in-flight request renews its concurrency slot and reservation, default 60 000. Runs from dispatch, including the wait for a streaming request's first part. Lowered only by tests. |
@@ -138,13 +156,34 @@ reservation every minute so the sweep does not close a live call.
 
 ## 5. API contract
 
-Base URL `https://<host>/api/v1`. Bearer authentication only.
+Base URL `https://<host>/api/v1` (general) or `https://<host>/api/code/v1`
+(coding). Bearer authentication only. Every endpoint below exists on both.
 
-**Which models.** The model catalogue is the only list. A model is offered when
-the runtime registry serves it to the account's plan (enabled, status enabled
-or limited, not deleted), it is not a research or deep-research model, and its
-provider has a credential on this deployment. There is no second, operator-kept
-list of ids: enabling a model in the catalogue offers it here too.
+**Which models.** On the general API, and on the coding API while
+`CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED` is off, the chat catalogue is the
+only list. A model is offered when the runtime registry serves it to the
+account's plan (enabled, status enabled or limited, not deleted), it is not a
+research or deep-research model, and its provider has a credential on this
+deployment. There is no second, operator-kept list of ids: enabling a model in
+the catalogue offers it here too.
+
+With the switch on, the coding API offers the rows of the newest coding
+snapshot whose channels include the coding API (`api`, or `cli` saved before
+the CLI moved onto the coding API) and that the coding judge still admits now
+(docs/policy/code-task-cost-guardrails.md 6.3). A chat link runs and bills as
+its chat registry model. A coding row chat does not have (a dedicated row)
+runs as its own published row: its API model id, context, output limit, input
+and output prices and credit weight, through the same reservation, provider
+budget, concurrency, key cap and settlement as every request here. Its
+reservation records `pricingVersion: coding_catalog_snapshot:<version>:<hash>`
+and `costSource: coding_catalog_snapshot`, and the settlement's pricing
+snapshot carries both, so a receipt names the catalogue version it was charged
+at. An unverified cache discount is full input price; an Anthropic row bounds
+a client's cache marker at 1.25x its own input price. A dedicated row is
+offered only while the row the judge admits now is exactly the published one,
+and never for inference hosts, aggregators or Perplexity
+(`CODE_MANAGED_UNBOUNDED_PROVIDERS`). No snapshot, or one past its coverage,
+offers nothing on the coding API.
 
 | Endpoint | Purpose |
 |---|---|
@@ -413,8 +452,10 @@ alone by default, plus any model the person ticks to pin it. The new key is fill
 into the setup until the person leaves the page; it is held only in the page's
 memory, never stored. Any other app that takes a custom OpenAI Chat Completions
 endpoint needs only three values: base URL, key and model (`smart-adaptive`). The
-models allowed through the API are listed in a searchable section. Claude Code,
-Codex and Cursor details are in section 10.4.
+models allowed through the API are listed in a searchable section, each with
+the tools that can use it. Claude Code, Codex, Cursor and the tomverse CLI are
+configured with the coding API's base URL and its models; Aside, VS Code and
+other apps with the general API's. Details are in section 10.4.
 
 - **Aside:** add a Custom Provider and paste the JSON: provider `tomverse`,
   `api: "openai-completions"`, `baseUrl`, `apiKey`, `authHeader: true`, and per
@@ -600,8 +641,8 @@ compaction as unsupported (`capabilities.remote_compaction` default), so no
 
 ### 10.4 Client configuration (`lib/externalApiCodingTools.ts`)
 
-- **Claude Code:** `ANTHROPIC_BASE_URL=https://<host>/api/anthropic` (the client
-  adds `/v1/messages`), `ANTHROPIC_AUTH_TOKEN=<key>` (`x-api-key` is accepted
+- **Claude Code:** `ANTHROPIC_BASE_URL=https://<host>/api/code/anthropic` (the
+  coding API; the client adds `/v1/messages`), `ANTHROPIC_AUTH_TOKEN=<key>` (`x-api-key` is accepted
   too), every model alias (`ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_OPUS/SONNET/HAIKU_MODEL`,
   `CLAUDE_CODE_SUBAGENT_MODEL`) pinned to offered models,
   `CLAUDE_CODE_MAX_OUTPUT_TOKENS`, `CLAUDE_CODE_AUTO_COMPACT_WINDOW` below the
@@ -615,7 +656,7 @@ compaction as unsupported (`capabilities.remote_compaction` default), so no
   Without a review result Claude Code refuses actions that need one (Bash),
   and manual permission mode works regardless.
 - **Codex:** `[model_providers.tomverse]` in `~/.codex/config.toml`
-  (`wire_api = "responses"`, `env_key = "TOMVERSE_API_KEY"`, request and stream
+  (`base_url = "https://<host>/api/code/v1"`, `wire_api = "responses"`, `env_key = "TOMVERSE_API_KEY"`, request and stream
   retries 0, `supports_websockets = false`) and a profile file
   `~/.codex/tomverse.config.toml` (`model_provider`, `model`,
   `web_search = "disabled"`, `approvals_reviewer = "user"`, `review_model`,
@@ -628,8 +669,8 @@ compaction as unsupported (`capabilities.remote_compaction` default), so no
   each thread with a small model it picks itself (observed: `gpt-6-luna`);
   that is one more ordinary request with its own credits, and there is no
   setting to change its model.
-- **Cursor:** OpenAI API key + base-URL override + a fixed custom model, on the
-  Chat Completions route. Cursor's backend makes the calls, so only a public
+- **Cursor:** OpenAI API key + base-URL override (`https://<host>/api/code/v1`)
+  + a fixed custom model, on the coding API's Chat Completions route. Cursor's backend makes the calls, so only a public
   HTTPS deployment works; Tab, Cursor's own models and cloud agents never use
   the key.
 
@@ -788,8 +829,11 @@ providers, so signed or encrypted state is never sent to another provider.
 ## 11. Tomverse CLI (`apps/tomverse-cli`)
 
 Tomverse's own coding agent, `@tomverse/cli` (bin `tomverse`), is a client of
-this API like any other: Chat Completions only, one key, the account's shared
-credits, the key cap as the only hard credit limit. No separate wallet, task
+the coding API like Claude Code, Codex and Cursor: `https://tomverse.app/api/code/v1`
+by default, Chat Completions only, one key, the account's shared credits, the
+key cap as the only hard credit limit. An endpoint saved before the move ends
+in `/api/v1` and is read as `/api/code/v1` on the same server
+(`apps/tomverse-cli/src/config.ts`). No separate wallet, task
 price, Conversation, `productKey` or server-side agent. The user guide and
 output contract are in `apps/tomverse-cli/README.md`.
 

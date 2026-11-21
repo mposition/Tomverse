@@ -274,6 +274,7 @@ export function CodingModelDetail({
   onApply,
   onAction,
   onHold,
+  channels,
 }: {
   m: CatalogMessages;
   item: CodingCatalogItem;
@@ -285,6 +286,8 @@ export function CodingModelDetail({
   onApply: () => void;
   onAction: (action: ImageNextAction) => void;
   onHold: () => void;
+  /** Where the row is offered (Code, the coding API); shown beside a stored profile. */
+  channels?: ReactNode;
 }) {
   const c = m.codingFlow;
   const stage = codingStage(item);
@@ -402,6 +405,7 @@ export function CodingModelDetail({
                 <AdminWriteButton onClick={() => onAction(nextAction)}>{c.nextAction[nextAction]}</AdminWriteButton>
               )}
             </AdminTile>
+            {item.profile ? channels : null}
           </div>
         </div>
       )}

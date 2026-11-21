@@ -9,7 +9,12 @@ import { join } from "node:path";
  * part of it.
  */
 
-export const DEFAULT_ENDPOINT = "https://tomverse.app/api/v1";
+/** The coding API (Tomverse's /api/code/v1): the CLI is a coding client. */
+export const DEFAULT_ENDPOINT = "https://tomverse.app/api/code/v1";
+
+const CODING_API_ROOT = "/api/code/v1";
+/** The general API root an endpoint saved before the CLI moved to the coding API ends in. */
+const GENERAL_API_ROOT = "/api/v1";
 
 export type CliConfig = {
     endpoint?: string;
@@ -74,8 +79,11 @@ const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
 /**
  * The one base URL the key is ever sent to. https, or http for a loopback
  * host when the user explicitly allowed it. No credentials, query or fragment
- * in it, and it must end at the API root (`/api/v1`) so a mistyped site URL
- * is caught here rather than by a redirect.
+ * in it, and it must end at the coding API root (`/api/code/v1`) so a
+ * mistyped site URL is caught here rather than by a redirect. An endpoint
+ * saved before the CLI moved to the coding API ends at the general root
+ * (`/api/v1`); it is read as the coding API on the same server, so a saved
+ * configuration keeps working without being rewritten.
  */
 export const resolveEndpoint = (config: CliConfig, env: NodeJS.ProcessEnv = process.env) => {
     const raw = (env.TOMVERSE_ENDPOINT?.trim() || config.endpoint || DEFAULT_ENDPOINT).trim();
@@ -98,9 +106,13 @@ export const resolveEndpoint = (config: CliConfig, env: NodeJS.ProcessEnv = proc
     } else if (url.protocol !== "https:") {
         throw new ConfigError("The endpoint must use https.");
     }
-    const path = url.pathname.replace(/\/+$/, "");
-    if (!path.endsWith("/api/v1")) {
-        throw new ConfigError(`The endpoint must be the API root ending in /api/v1, for example ${DEFAULT_ENDPOINT}.`);
+    const given = url.pathname.replace(/\/+$/, "");
+    const path =
+        !given.endsWith(CODING_API_ROOT) && given.endsWith(GENERAL_API_ROOT)
+            ? `${given.slice(0, -GENERAL_API_ROOT.length)}${CODING_API_ROOT}`
+            : given;
+    if (!path.endsWith(CODING_API_ROOT)) {
+        throw new ConfigError(`The endpoint must be the coding API root ending in ${CODING_API_ROOT}, for example ${DEFAULT_ENDPOINT}.`);
     }
     return { base: `${url.origin}${path}`, origin: url.origin, basePath: path };
 };

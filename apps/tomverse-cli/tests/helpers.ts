@@ -65,7 +65,7 @@ export const makeRunner = async (
     root: string,
     options: { prompter?: Prompter | null; home?: string | null; readOnly?: boolean; model?: string; maxRequests?: number; output?: Output; contextWindow?: number } = {}
 ) => {
-    const endpoint = { base: gateway.base, origin: new URL(gateway.base).origin, basePath: "/api/v1" };
+    const endpoint = { base: gateway.base, origin: new URL(gateway.base).origin, basePath: "/api/code/v1" };
     const client = new Gateway(endpoint, TEST_KEY);
     const catalog = (await client.models()).filter((m) => m.tools);
     const modelId = options.model ?? "fake-coder";

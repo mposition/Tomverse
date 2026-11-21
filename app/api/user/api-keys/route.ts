@@ -4,7 +4,7 @@ import { z } from "zod";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import { externalApiOfferedModels } from "@/lib/externalApiCatalog";
 import { externalApiPlanAllowed } from "@/lib/externalApiCatalogCore";
-import { tomverseCliGuide } from "@/lib/externalApiCodingTools";
+import { codingApiBaseUrl, tomverseCliGuide } from "@/lib/externalApiCodingTools";
 import {
     EXTERNAL_API_KEY_LIMITS,
     externalApiKeyExpiry,
@@ -35,20 +35,29 @@ export async function GET(request: Request) {
             if (!externalApiPlanAllowed(plan.tier)) {
                 return managementJson(200, { enabled: false, reason: "plan_not_eligible", keys: await listExternalApiKeys(userId) });
             }
+            // Two APIs on one key (owner decision 2026-11-21): the general one
+            // for Aside, VS Code and other apps, the coding one for Claude Code,
+            // Codex, Cursor and the tomverse CLI.
             const baseUrl = externalApiBaseUrl(request);
-            const models = await externalApiOfferedModels(plan.tier);
+            const codingBaseUrl = codingApiBaseUrl(baseUrl);
+            const [models, codingModels] = await Promise.all([
+                externalApiOfferedModels(plan.tier, { surface: "general" }),
+                externalApiOfferedModels(plan.tier, { surface: "coding" }),
+            ]);
             return managementJson(200, {
                 enabled: true,
                 baseUrl,
+                codingBaseUrl,
                 limits: {
                     maxKeys: EXTERNAL_API_KEY_LIMITS.maxKeysPerUser,
                     maxCreditCap: EXTERNAL_API_KEY_LIMITS.maxCreditCap,
                     expiryDays: EXTERNAL_API_KEY_LIMITS.expiryDays,
                 },
                 models,
+                codingModels,
                 keys: await listExternalApiKeys(userId),
                 // Null until the Tomverse CLI package is published.
-                tomverseCli: tomverseCliGuide(process.env, baseUrl),
+                tomverseCli: tomverseCliGuide(process.env, codingBaseUrl),
             });
         }),
         {

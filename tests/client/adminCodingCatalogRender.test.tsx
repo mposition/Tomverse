@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { CodingCandidates, CodingLinkDetail } from "@/components/admin/modelCatalog/CodingLinkViews";
+import { CodingCandidates, CodingChannelsTile, CodingLinkDetail } from "@/components/admin/modelCatalog/CodingLinkViews";
 import { CodingChannelBanner, CodingModelTable, CodingSummary } from "@/components/admin/modelCatalog/CodingListViews";
 import { CodingProviderTable, ProviderTermsDraftPanel } from "@/components/admin/modelCatalog/CodingProviderViews";
 import { adminMessagesFor } from "@/lib/adminLocale";
@@ -172,6 +172,19 @@ test("the list shows both kinds of row with their source, inherited limits, floo
   assert.doesNotMatch(html, /credits_below_floor/);
 });
 
+test("a dedicated row picks where it is offered: Code and the coding API", () => {
+  const devstral = items.find((item) => item.id === "devstral-2")!;
+  assert.deepEqual(devstral.channels, ["code"]);
+  const html = renderToStaticMarkup(<CodingChannelsTile c={c} item={devstral} busy={false} onSave={noop} />);
+  assert.match(html, /data-testid="coding-dedicated-channel-code"[^>]*checked=""/);
+  assert.match(html, /data-testid="coding-dedicated-channel-api"/);
+  assert.doesNotMatch(html, /coding-dedicated-channel-api"[^>]*checked=""/);
+  assert.doesNotMatch(html, /coding-dedicated-channel-cli/);
+  assert.match(html, />코딩 API</);
+  // Nothing changed yet: nothing to save.
+  assert.match(html.match(/<button[^>]*data-testid="coding-dedicated-channels-save"[^>]*>/)?.[0] ?? "", / disabled=""/);
+});
+
 test("the list filters by source, provider, status and text", () => {
   const base = { query: "", provider: "all", source: "all" as const, state: "all" as const };
   assert.deepEqual(filterCodingItems(items, { ...base, source: "dedicated" }).map((item) => item.id), ["devstral-2"]);
@@ -186,7 +199,7 @@ test("the banner says who reads the catalogue, from the switch", () => {
   assert.match(off, /지금은 Code 관리형 경로만 이 카탈로그를 읽습니다/);
   const on = renderToStaticMarkup(<CodingChannelBanner c={cEn} external={{ enabled: true, env: "CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED" }} />);
   assert.match(on, /data-external="on"/);
-  assert.match(on, /External channels follow this catalog/);
+  assert.match(on, /The coding API follows this catalog/);
 });
 
 test("the summary counts active, waiting and candidates, and the snapshot names its pending changes", () => {
@@ -294,10 +307,16 @@ test("the settings request sends only what changed, and null puts an override ba
   const link = sonnet.link!;
   const value = codingSettingsFrom(link);
   assert.deepEqual(codingSettingsRequest(link, value), {});
-  assert.deepEqual(codingSettingsRequest(link, { ...value, creditWeight: "", channels: ["cli", "code"] }), {
+  assert.deepEqual(codingSettingsRequest(link, { ...value, creditWeight: "", channels: ["api"] }), {
     creditWeight: null,
-    channels: ["code", "cli"],
+    channels: ["api"],
   });
+  // Two channels on screen: Code and the coding API. A link saved with the
+  // CLI's older channel reads as the coding API and is sent unchanged.
+  const older = { ...link, channels: ["code", "cli"] };
+  assert.deepEqual(codingSettingsFrom(older).channels, ["code", "api"]);
+  assert.deepEqual(codingSettingsRequest(older, codingSettingsFrom(older)), {});
+  assert.deepEqual(codingSettingsRequest(older, { ...codingSettingsFrom(older), channels: ["code"] }), { channels: ["code"] });
   assert.deepEqual(codingSettingsRequest(link, { ...value, minimumPlan: "Max", toolCalling: "basic" }), { toolCalling: "basic", minimumPlan: "Max" });
   assert.deepEqual(codingSettingsProblems({ ...value, channels: [] }, { floor: 5, chatWeight: 6 }), { channels: "none_selected" });
   assert.deepEqual(codingSettingsProblems({ ...value, creditWeight: "4" }, { floor: 5, chatWeight: 6 }), { creditWeight: "below_floor" });

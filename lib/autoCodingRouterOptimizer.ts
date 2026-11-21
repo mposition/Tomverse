@@ -77,7 +77,7 @@ import {
     summarizeCodingEval,
     type CodingEvalResult,
 } from "@/lib/codingTaskEvalCore";
-import { externalApiRunnableModels } from "@/lib/externalApiCatalog";
+import { externalApiRunnableModels, withCandidateModels } from "@/lib/externalApiCatalog";
 import { readCodingRoutingReport } from "@/lib/externalApiRoutingReport";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { resolveModelRequestPricing, type AiModel } from "@/lib/models";
@@ -201,12 +201,13 @@ async function writeCodingOptimizerAutomation(tx: Prisma.TransactionClient, valu
  * the external API would filter on).
  */
 async function codingCandidateMenu(models: readonly AiModel[]) {
-    const runnable = (await externalApiRunnableModels("Max", { smartAdaptive: true })).filter(
+    // The coding API's candidates: the coding guidance routes there.
+    const runnable = (await externalApiRunnableModels("Max", { surface: "coding", smartAdaptive: true })).filter(
         (entry) => entry.model.usageClass !== "apex"
     );
     const candidates = autoLlmRouterCandidates(
         runnable.map((entry) => entry.model.id),
-        models,
+        withCandidateModels(models, runnable),
         Object.fromEntries(runnable.map((entry) => [entry.model.id, entry.capabilities.creditWeight]))
     );
     return (): AutoLlmRouterCandidate[] => candidates;

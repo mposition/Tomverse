@@ -31,10 +31,10 @@ import {
 import { atLeastOneToken, createTokenEstimateAccumulator, estimateTextTokens } from "@/lib/chatTokenEstimate";
 import { ApiSecurityError, consumeApiRateLimit, readLimitedText } from "@/lib/apiSecurity";
 import { externalApiAccountAccess } from "@/lib/externalApiAccess";
-import { externalApiChannelFor, externalApiEnabled, SMART_ADAPTIVE_MODEL_ID } from "@/lib/externalApiCatalogCore";
+import { externalApiEnabled, SMART_ADAPTIVE_MODEL_ID } from "@/lib/externalApiCatalogCore";
 import { getRuntimeModel } from "@/lib/modelRegistry";
 import { noteSmartAdaptiveRefusal, rememberSmartAdaptiveToolCalls, routeSmartAdaptive, smartAdaptiveRouterAllowed } from "@/lib/externalApiSmartAdaptive";
-import { externalApiRunnableModels } from "@/lib/externalApiCatalog";
+import { externalApiRunnableModels, type ExternalApiSurface } from "@/lib/externalApiCatalog";
 import { externalApiAdmissionHook } from "@/lib/externalApiAdmission";
 import { pickRequestedModel } from "@/lib/externalApiProtocols";
 import { authenticateExternalApiKey, ExternalApiKeyError } from "@/lib/externalApiKeys";
@@ -66,7 +66,9 @@ import {
 } from "@/lib/providerMonitoring";
 
 /**
- * POST /api/v1/chat/completions.
+ * POST /api/v1/chat/completions (the general API) and
+ * /api/code/v1/chat/completions (the coding API): the same handler, told
+ * which API it serves (lib/externalApiCatalog.ts ExternalApiSurface).
  *
  * One external request is one provider generation. The server never runs a
  * client tool and never loops: a tool call goes back to the client, and the
@@ -219,7 +221,7 @@ const recordReceipt = (requestId: string, data: { finishReason?: string | null; 
             console.error(JSON.stringify({ event: "external_api_receipt_update_failed", requestId, message: String(error) }))
         );
 
-export async function handleChatCompletions(request: Request): Promise<Response> {
+export async function handleChatCompletions(request: Request, options: { surface: ExternalApiSurface }): Promise<Response> {
     const requestId = `req_${randomUUID().replaceAll("-", "")}`;
     if (!externalApiEnabled(process.env)) {
         return externalApiErrorResponse(503, "The Tomverse API is not enabled.", "feature_unavailable", { requestId });
@@ -263,12 +265,12 @@ export async function handleChatCompletions(request: Request): Promise<Response>
         }
 
         const { plan } = account;
-        // The tomverse CLI's channel, or the API's (read only while the coding
-        // catalogue's external channels are switched on).
-        // Smart Adaptive's pool also holds the classes only it routes to
-        // (frontier, apex); a model named directly comes from the narrower list.
+        // This API's models: the chat registry's, or on the coding API the
+        // coding catalogue's while it is switched on. Smart Adaptive's pool also
+        // holds the classes only it routes to (frontier, apex); a model named
+        // directly comes from the narrower list.
         const runnable = await externalApiRunnableModels(plan.tier, {
-            channel: externalApiChannelFor(request.headers.get("user-agent")),
+            surface: options.surface,
             smartAdaptive: parsed.model === SMART_ADAPTIVE_MODEL_ID,
         });
         // Smart Adaptive: Tomverse picks one of the runnable models, and the
@@ -326,7 +328,7 @@ export async function handleChatCompletions(request: Request): Promise<Response>
             reasoning: capabilities.reasoning,
             maxOutputTokens: capabilities.maxOutputTokens,
         };
-        const options = resolveRequestOptions(parsed, view);
+        const requestOptions = resolveRequestOptions(parsed, view);
         const converted = convertChatCompletionRequest(parsed, view);
         const reasoning = requestReasoningEffort(parsed, view);
 
@@ -404,8 +406,10 @@ export async function handleChatCompletions(request: Request): Promise<Response>
         // the client that is the model's maximum, reserved in full -- never a
         // smaller typical reservation with a larger provider limit.
         const budget = createChatBudget("user", model, atLeastOneToken(estimate.breakdown()), {
-            totalOutputTokenCap: options.requestedOutputTokens ?? capabilities.maxOutputTokens,
+            totalOutputTokenCap: requestOptions.requestedOutputTokens ?? capabilities.maxOutputTokens,
             reservationOnlyInputTokens,
+            // A dedicated coding row: its snapshot and cache-write bound.
+            ...(entry.catalogPricing ? { catalogPricing: entry.catalogPricing } : {}),
         });
 
         const clientName = request.headers.get("user-agent")?.slice(0, 80) ?? null;
@@ -419,7 +423,7 @@ export async function handleChatCompletions(request: Request): Promise<Response>
                     keyId: key.keyId,
                     userId: key.userId,
                     modelId: model.id,
-                    stream: options.stream,
+                    stream: requestOptions.stream,
                     clientName,
                     requestDigest,
                     idempotencyKeyDigest,
@@ -486,7 +490,7 @@ export async function handleChatCompletions(request: Request): Promise<Response>
             controller,
             created: Math.floor(Date.now() / 1000),
             completionId: `chatcmpl-${requestId.slice(4)}`,
-            includeUsage: options.includeUsage,
+            includeUsage: requestOptions.includeUsage,
             dispose: disposeDispatch,
             customTools: converted.customTools,
             // Smart Adaptive: the round answering these calls goes to this model.
@@ -515,7 +519,7 @@ export async function handleChatCompletions(request: Request): Promise<Response>
             ...(samplingAllowed && parsed.top_p != null ? { topP: parsed.top_p } : {}),
             ...(samplingAllowed && parsed.frequency_penalty != null ? { frequencyPenalty: parsed.frequency_penalty } : {}),
             ...(samplingAllowed && parsed.presence_penalty != null ? { presencePenalty: parsed.presence_penalty } : {}),
-            ...(options.stop ? { stopSequences: options.stop } : {}),
+            ...(requestOptions.stop ? { stopSequences: requestOptions.stop } : {}),
             ...otherSettings,
             ...(providerOptions ? { providerOptions: providerOptions as never } : {}),
             maxOutputTokens: budget.maxOutputTokens,
@@ -528,7 +532,7 @@ export async function handleChatCompletions(request: Request): Promise<Response>
         });
 
         handedToStream = true;
-        if (options.stream) {
+        if (requestOptions.stream) {
             // The HTTP status is decided after the first real stream part, so a
             // request the SDK or adapter refused before sending gets a 400 like
             // the non-streaming path, not a 200 with an error event.

@@ -1617,7 +1617,11 @@ export type PricingCostSource =
     | "registry_env_override"
     | "model_registry_override"
     | "conservative_fallback"
-    | "conservative_fallback_env_override";
+    | "conservative_fallback_env_override"
+    // Never resolved here: a dedicated coding row priced from its published
+    // coding snapshot row, set by the coding API's reservation
+    // (createChatBudget's catalogPricing, lib/codingCatalogChannels.ts).
+    | "coding_catalog_snapshot";
 
 export type ResolvedModelPricing = {
     modelId: string;
