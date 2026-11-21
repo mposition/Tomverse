@@ -42,6 +42,8 @@ export type DevelopersPageCopy = {
     eyebrow: string;
     title: [string, string];
     note: string;
+    /** Link to the Cursor connection guide (/developers/cursor). */
+    cursorGuide: string;
   };
   proto: {
     eyebrow: string;
@@ -126,6 +128,7 @@ const ko: DevelopersPageCopy = {
     eyebrow: "도구별 연결",
     title: ["설정 › API 키에서 도구를 고르면", "붙여 넣을 설정이 바로 나옵니다."],
     note: "설정 › API 키 화면이 만들어 주는 설정을 줄여 보여 줍니다. 실제 값은 고른 모델과 새로 만든 키로 채워집니다. Cursor의 Tab과 Cursor 자체 모델은 이 키를 쓰지 않습니다.",
+    cursorGuide: "Cursor 자세한 연결 안내",
   },
   proto: {
     eyebrow: "지원하는 방식",
@@ -225,6 +228,7 @@ const en: DevelopersPageCopy = {
     eyebrow: "Connect your tool",
     title: ["Pick a tool in Settings › API keys", "and the settings to paste appear."],
     note: "A shortened version of the settings that Settings › API keys generates. The real values are filled in with the model you choose and a new key. Cursor’s Tab and Cursor’s own models do not use this key.",
+    cursorGuide: "Detailed Cursor guide",
   },
   proto: {
     eyebrow: "Supported protocols",

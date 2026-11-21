@@ -6,6 +6,7 @@ import { useLanguage } from "@/components/LanguageProvider";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { MarketingFooter, MarketingHeader } from "@/components/marketing/MarketingChrome";
 import { homeV2Content, type HomeV2Copy } from "@/components/marketing/home/homeV2Content";
+import { CURSOR_GUIDE_PATH } from "@/lib/marketingRoutes";
 import { localizedPath } from "@/lib/seo";
 import { developersPageContent, type DevelopersPageCopy } from "./developersPageContent";
 import "../v2-pages.css";
@@ -349,6 +350,7 @@ export function DevelopersPage() {
           <h2 id="connect-title" className="section-title"><Title lines={copy.connect.title} /></h2>
           <ToolConsole copy={home.api} reduce={reduce} />
           <p className="note">{copy.connect.note}</p>
+          <div className="dev-cli-link"><Link className="btn ghost" href={localizedPath(lang, CURSOR_GUIDE_PATH)} data-testid="developers-cursor-guide-link"><span>{copy.connect.cursorGuide}</span><Arrow /></Link></div>
         </div>
       </section>
 

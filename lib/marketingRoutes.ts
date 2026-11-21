@@ -9,6 +9,7 @@ const exactMarketingPaths = new Set([
   "/compare-ai-models",
   "/developers",
   "/developers/cli",
+  "/developers/cursor",
   "/faq",
   "/models",
   "/pricing",
@@ -49,6 +50,7 @@ export const LOCALIZED_MARKETING_BASE_PATHS = [
   "/products/chat",
   "/developers",
   "/developers/cli",
+  "/developers/cursor",
   "/about",
   "/faq",
   "/pricing",
@@ -67,6 +69,8 @@ export const REVIEW_PRODUCT_PATH = "/products/review";
 export const CHAT_PRODUCT_PATH = "/products/chat";
 export const DEVELOPERS_PATH = "/developers";
 export const CLI_DOWNLOAD_PATH = "/developers/cli";
+/** Cursor connection guide (owner approval 2026-11-21). */
+export const CURSOR_GUIDE_PATH = "/developers/cursor";
 
 const normalizePathname = (pathname: string) => {
   if (!pathname || pathname === "/") return "/";
