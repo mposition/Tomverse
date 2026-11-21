@@ -47,7 +47,9 @@ macOS and Linux with Node 22 and 24, and builds and tests the six standalone
 executables; on each of those machines it also builds the installer, installs
 it, runs `tomverse --version` and uninstalls it. It publishes nothing. Every
 job must be green; download the six `tomverse-cli-<os>-<arch>` artifacts from
-the run's summary page (kept 14 days).
+the run's summary page (kept 14 days), and with macOS signing on
+(`CLI_MACOS_SIGNING` = `on`, which also asks the owner to approve the
+`cli-release` environment) also `tomverse-cli-macos-signed`.
 
 ## 2. Publish the npm package
 
