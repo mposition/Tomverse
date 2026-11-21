@@ -1,5 +1,20 @@
 import type { BillingCurrency } from "@/lib/billingMarkets";
 
+/**
+ * How long a redemption keeps the keyed IP and payment-method hashes the
+ * abuse checks read. The privacy notice promises they are removed after 90
+ * days (`lib/maintenance.ts` clears them), so the per-card limit and the
+ * shared-IP signal look back exactly this far and no further: a card's places
+ * renew after 90 days. Lengthening this is a change to the privacy notice,
+ * not a code change.
+ */
+export const PROMOTION_RISK_IDENTIFIER_RETENTION_DAYS = 90;
+
+export const promotionRiskIdentifierCutoff = (now: Date) =>
+  new Date(
+    now.getTime() - PROMOTION_RISK_IDENTIFIER_RETENTION_DAYS * 86_400_000
+  );
+
 export type PromotionValidationReason =
   | "invalid"
   | "unavailable"

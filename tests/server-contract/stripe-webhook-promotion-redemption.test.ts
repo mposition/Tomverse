@@ -569,7 +569,7 @@ test("the release is bounded by the Session's own creation time", async () => {
 
   assert.deepEqual(
     world.releaseCalls[0].takenAtOrBefore,
-    new Date(SESSION_CREATED_SECONDS * 1000)
+    new Date((SESSION_CREATED_SECONDS + 1) * 1000 - 1)
   );
 });
 
@@ -983,16 +983,32 @@ test("a card merely attached to the customer is never taken for the one this che
   assert.ok(flagsOf(world.redemptionRows[0]).includes("payment_method_unverified"));
 });
 
-test("the completion releases the promotion lease without a creation-time bound", async () => {
-  // Review round 7: Stripe's created is whole seconds and the lease row has
-  // milliseconds, so a bound would strand a lease taken in the same second.
-  // After a completion no later attempt can hold it, so none is needed.
+test("the completion's lease release is bounded by the end of the Session's creation second", async () => {
+  // Review rounds 7-8: bounded, so a redelivered failed completion cannot free
+  // a later checkout's lease; to the end of the second, because Stripe's
+  // created is whole seconds and the lease row has milliseconds.
   const { processStripeEvent } = await loadProcessor();
   await processStripeEvent(
     completedEvent(sessionWith({ created: SESSION_CREATED_SECONDS }))
   );
   assert.equal(world.releaseCalls.length, 1);
-  assert.equal(world.releaseCalls[0].takenAtOrBefore, undefined);
+  assert.deepEqual(
+    world.releaseCalls[0].takenAtOrBefore,
+    new Date((SESSION_CREATED_SECONDS + 1) * 1000 - 1)
+  );
+});
+
+test("the per-card count looks back only as far as the card hash is kept", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  withCard();
+  await processStripeEvent(completedEvent(zeroDueSession()));
+  const cardCount = world.countWheres.find(
+    (where) => "paymentMethodFingerprintHash" in where
+  ) as { redeemedAt?: { gte?: Date } } | undefined;
+  const cutoff = cardCount?.redeemedAt?.gte;
+  assert.ok(cutoff instanceof Date);
+  const days = (Date.now() - cutoff.getTime()) / 86_400_000;
+  assert.ok(Math.abs(days - 90) < 0.01, String(days));
 });
 
 test("a zero-charge subscription's pending SetupIntent identifies the card", async () => {

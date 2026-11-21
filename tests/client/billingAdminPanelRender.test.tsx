@@ -235,7 +235,7 @@ test("a promotion's per-card limit and allowed countries are editable on the pro
     initialTab: "promotions",
     promotions: [promotion({ maxRedemptionsPerPaymentMethod: 3, allowedCountries: ["AU", "NZ"] })],
   });
-  assert.match(html, />Max accounts per card \(free checkouts\)</);
+  assert.match(html, />Max accounts per card \(free checkouts, last 90 days\)</);
   assert.match(html, />Allowed countries \(visitor IP\)</);
   assert.match(html, /value="3"/);
   assert.match(html, /value="AU, NZ"/);

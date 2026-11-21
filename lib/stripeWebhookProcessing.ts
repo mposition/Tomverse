@@ -14,6 +14,7 @@ import {
   releasePromotionCheckout,
 } from "@/lib/billingPromotionSecurity";
 import { prisma } from "@/lib/prisma";
+import { promotionRiskIdentifierCutoff } from "@/lib/billingPromotionCore";
 import { alertOnPromotionBurst } from "@/lib/promotionBurstAlert";
 import { getStripe } from "@/lib/stripe";
 import {
@@ -387,6 +388,22 @@ async function redemptionAfterUniqueViolation(
 }
 
 /**
+ * The latest lease creation time that can belong to this Checkout Session.
+ *
+ * The lease is taken immediately before the Session is created, so it was
+ * taken no later than the Session. Stripe reports `created` in whole seconds
+ * while the lease row keeps milliseconds, so the bound is the end of that
+ * second: a lease taken earlier in the same second is still this Session's. A
+ * later attempt cannot take a lease in that second -- this one is held until
+ * the checkout resolves. Without a creation time the release is unbounded, as
+ * before (Stripe always sends one).
+ */
+const promotionLeaseReleaseBound = (session: Stripe.Checkout.Session) =>
+  typeof session.created === "number"
+    ? { takenAtOrBefore: new Date((session.created + 1) * 1000 - 1) }
+    : {};
+
+/**
  * What recording the checkout's promotion decided. `refused` means the card
  * was over the promotion's per-card limit: the redemption is recorded with the
  * `payment_method_limit` flag, nothing is counted against the promotion, and
@@ -503,6 +520,10 @@ async function recordPromotionRedemptionFromCheckout(
               promotionId,
               paymentMethodFingerprintHash,
               userId: { not: userId },
+              // Within the 90 days the hash is kept (the privacy notice's
+              // promise; maintenance clears it after). Stated here so the
+              // count does not depend on when that job last ran.
+              redeemedAt: { gte: promotionRiskIdentifierCutoff(now) },
               // Refused attempts granted nothing, so they do not use up a
               // place -- raising the limit later admits as many as it says.
               NOT: { riskFlags: { contains: "payment_method_limit" } },
@@ -577,12 +598,13 @@ async function recordPromotionRedemptionFromCheckout(
       return { promotionId, refused: false };
     });
   } finally {
-    // Unbounded, unlike the expiry handler: once a completion has run, this
-    // account has redeemed the promotion (or been refused it), so no later
-    // attempt can be holding the lease. A bound on session.created would also
-    // be wrong here -- Stripe gives seconds, the lease row milliseconds, so a
-    // lease taken in the same second would never be released.
-    await releasePromotionCheckout(promotionId, userId).catch(() => undefined);
+    // Bounded by this Session, so a redelivery of a completion that failed
+    // cannot free the lease a later checkout has since taken.
+    await releasePromotionCheckout(
+      promotionId,
+      userId,
+      promotionLeaseReleaseBound(session)
+    ).catch(() => undefined);
   }
 }
 
@@ -955,9 +977,11 @@ async function handleCheckoutExpired(session: Stripe.Checkout.Session) {
     // behaviour this handler improves on rather than a failure.
     return;
   }
-  await releasePromotionCheckout(promotionId, userId, {
-    takenAtOrBefore: new Date(session.created * 1000),
-  }).catch((error) => {
+  await releasePromotionCheckout(
+    promotionId,
+    userId,
+    promotionLeaseReleaseBound(session)
+  ).catch((error) => {
     console.error("Promotion checkout lease release failed.", {
       stripeCheckoutSessionId: session.id,
       promotionId,
