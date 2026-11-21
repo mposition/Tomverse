@@ -577,7 +577,15 @@ async function recordPromotionRedemptionFromCheckout(
       return { promotionId, refused: false };
     });
   } finally {
-    await releasePromotionCheckout(promotionId, userId).catch(() => undefined);
+    // Bounded by this Session's creation time, as the expiry handler is: a
+    // redelivery days later must not free a lease a later attempt now holds.
+    await releasePromotionCheckout(
+      promotionId,
+      userId,
+      typeof session.created === "number"
+        ? { takenAtOrBefore: new Date(session.created * 1000) }
+        : {}
+    ).catch(() => undefined);
   }
 }
 
@@ -637,7 +645,7 @@ async function cancelOverLimitPromotionSubscription(
 
 async function getSubscriptionPaymentMethodFingerprintHash(
   subscription: Stripe.Subscription,
-  options: { failClosed?: boolean } = {}
+  options: { failClosed?: boolean; session?: Stripe.Checkout.Session } = {}
 ) {
   try {
     const stripe = getStripe();
@@ -649,35 +657,37 @@ async function getSubscriptionPaymentMethodFingerprintHash(
         : value && typeof value === "object"
           ? value
           : null;
-    // The subscription's own method first. A subscription without one bills
-    // the customer's default, and a zero-charge Checkout may leave only a
-    // method attached to the customer -- so those are read too, before
-    // concluding the payer cannot be identified.
+    // Only the method this checkout itself used: the subscription's, then the
+    // Session's own SetupIntent (a zero-charge subscription Checkout saves the
+    // card through one) or PaymentIntent. Never another method merely attached
+    // to the customer -- it may be a different card, which would count the
+    // wrong card or refuse for an unrelated one.
     const fromSubscription = paymentMethodFingerprint(
       await resolve(subscription.default_payment_method)
     );
     if (fromSubscription) return hashPaymentMethodFingerprint(fromSubscription);
-    const customerId =
-      typeof subscription.customer === "string"
-        ? subscription.customer
-        : subscription.customer?.id;
-    if (!customerId) return null;
-    const customer = await stripe.customers.retrieve(customerId);
-    if (!("deleted" in customer && customer.deleted)) {
-      const fromCustomer = paymentMethodFingerprint(
-        await resolve(
-          (customer as Stripe.Customer).invoice_settings?.default_payment_method
-        )
+    const session = options.session;
+    const setupIntentId =
+      typeof session?.setup_intent === "string"
+        ? session.setup_intent
+        : session?.setup_intent?.id;
+    if (setupIntentId) {
+      const intent = await stripe.setupIntents.retrieve(setupIntentId);
+      const fromSetup = paymentMethodFingerprint(
+        await resolve(intent.payment_method)
       );
-      if (fromCustomer) return hashPaymentMethodFingerprint(fromCustomer);
+      if (fromSetup) return hashPaymentMethodFingerprint(fromSetup);
     }
-    const attached = await stripe.paymentMethods.list({
-      customer: customerId,
-      limit: 5,
-    });
-    for (const method of attached.data) {
-      const fingerprint = paymentMethodFingerprint(method);
-      if (fingerprint) return hashPaymentMethodFingerprint(fingerprint);
+    const paymentIntentId =
+      typeof session?.payment_intent === "string"
+        ? session.payment_intent
+        : session?.payment_intent?.id;
+    if (paymentIntentId) {
+      const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+      const fromPayment = paymentMethodFingerprint(
+        await resolve(intent.payment_method)
+      );
+      if (fromPayment) return hashPaymentMethodFingerprint(fromPayment);
     }
     return null;
   } catch (error) {
@@ -712,6 +722,7 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   const paymentMethodFingerprintHash =
     await getSubscriptionPaymentMethodFingerprintHash(subscription, {
       failClosed: Boolean(promotionId),
+      session,
     });
   const redemption = await recordPromotionRedemptionFromCheckout(
     session,

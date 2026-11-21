@@ -75,6 +75,9 @@ type World = {
   accountAlreadyRedeemed: boolean;
   customerDefaultPaymentMethod: string | null;
   customerPaymentMethods: Record<string, unknown>[];
+  /** The payment method on the Session's own SetupIntent / PaymentIntent. */
+  setupIntentPaymentMethod: string | null;
+  paymentIntentPaymentMethod: string | null;
 };
 
 const subscriptionFixture = (): Stripe.Subscription =>
@@ -129,6 +132,8 @@ const freshWorld = (): World => ({
   accountAlreadyRedeemed: false,
   customerDefaultPaymentMethod: null,
   customerPaymentMethods: [],
+  setupIntentPaymentMethod: null,
+  paymentIntentPaymentMethod: null,
 });
 
 let world = freshWorld();
@@ -297,6 +302,18 @@ async function loadProcessor() {
                 : { id, type: "card", card: { fingerprint: "fp_1" } };
             },
             list: async () => ({ data: world.customerPaymentMethods }),
+          },
+          setupIntents: {
+            retrieve: async (id: string) => ({
+              id,
+              payment_method: world.setupIntentPaymentMethod,
+            }),
+          },
+          paymentIntents: {
+            retrieve: async (id: string) => ({
+              id,
+              payment_method: world.paymentIntentPaymentMethod,
+            }),
           },
           customers: {
             retrieve: async () => ({
@@ -926,25 +943,55 @@ const cardLockKeys = () =>
     .map(([, key]) => key)
     .filter((key): key is string => typeof key === "string" && key.startsWith("promotion-card:"));
 
-test("a subscription without its own payment method is counted by the customer's default", async () => {
+const sessionWith = (fields: Record<string, unknown>) =>
+  ({
+    ...(zeroDueSession() as unknown as Record<string, unknown>),
+    ...fields,
+  }) as unknown as Stripe.Checkout.Session;
+
+test("a subscription without its own payment method is counted by the Session's SetupIntent", async () => {
   const { processStripeEvent } = await loadProcessor();
   world.cardLimit = 3;
-  world.customerDefaultPaymentMethod = "pm_customer_default";
+  world.setupIntentPaymentMethod = "pm_from_setup";
   world.otherAccountsOnCard = ["user_a", "user_b", "user_c"];
-  await processStripeEvent(completedEvent(zeroDueSession()));
+  await processStripeEvent(completedEvent(sessionWith({ setup_intent: "seti_1" })));
   assert.equal(cardLockKeys().length, 1);
   assert.equal(world.cancels.length, 1);
 });
 
-test("a payment method attached to the customer is used when there is no default", async () => {
+test("a paid Session's PaymentIntent identifies the card too", async () => {
   const { processStripeEvent } = await loadProcessor();
   world.cardLimit = 3;
+  world.paymentIntentPaymentMethod = "pm_from_payment";
+  await processStripeEvent(
+    completedEvent(sessionWith({ payment_intent: "pi_1", amount_total: 500 }))
+  );
+  assert.equal(cardLockKeys().length, 1);
+});
+
+test("a card merely attached to the customer is never taken for the one this checkout used", async () => {
+  // Review round 6: it may be a different card -- counting it would let the
+  // shared card through or refuse for an unrelated one.
+  const { processStripeEvent } = await loadProcessor();
+  world.cardLimit = 3;
+  world.customerDefaultPaymentMethod = "pm_other_card";
   world.customerPaymentMethods = [
-    { id: "pm_attached", type: "card", card: { fingerprint: "fp_attached" } },
+    { id: "pm_other", type: "card", card: { fingerprint: "fp_other" } },
   ];
   await processStripeEvent(completedEvent(zeroDueSession()));
-  assert.equal(cardLockKeys().length, 1);
-  assert.equal(world.userUpdates[0].plan, "Max");
+  assert.equal(cardLockKeys().length, 0);
+  assert.ok(flagsOf(world.redemptionRows[0]).includes("payment_method_unverified"));
+});
+
+test("the promotion lease release is bounded by the Session's creation time", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  await processStripeEvent(
+    completedEvent(sessionWith({ created: SESSION_CREATED_SECONDS }))
+  );
+  assert.deepEqual(
+    world.releaseCalls[0].takenAtOrBefore,
+    new Date(SESSION_CREATED_SECONDS * 1000)
+  );
 });
 
 test("a Stripe Link payer is identified by the Link email", async () => {
