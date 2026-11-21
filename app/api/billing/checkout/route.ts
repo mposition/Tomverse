@@ -35,6 +35,7 @@ import { checkoutPlanEligibilityBlock } from "@/lib/checkoutPlanEligibilityCore"
 import { FOUNDING_TESTER_PASS_STARTED_TEMPLATE } from "@/lib/emailTemplateDefinitions";
 import { enqueueStandardEmail } from "@/lib/standardEmailLane";
 import { prisma } from "@/lib/prisma";
+import { alertOnPromotionBurst } from "@/lib/promotionBurstAlert";
 import { lockSubscriptionAccount } from "@/lib/subscriptionEntitlements";
 import { getPublicAppOrigin } from "@/lib/publicUrl";
 import { PRODUCT_SURFACE_PATH } from "@/lib/productSurfaceRoutes";
@@ -616,6 +617,10 @@ export async function POST(req: Request) {
         promotion: internalPass,
         clientIpHash: promotionClientIpHash,
         riskFlags: promotionRiskFlags,
+      });
+      // A pass never reaches the checkout webhook, so its burst check runs here.
+      await alertOnPromotionBurst(internalPass.id).catch((alertError) => {
+        console.error("Promotion burst alert failed:", alertError);
       });
       // Queued rather than sent here: a pass that activated and a welcome that
       // never arrived leaves somebody with sixty days of Pro and no idea why

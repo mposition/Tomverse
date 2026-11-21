@@ -9,7 +9,59 @@ export type PromotionValidationReason =
   | "plan_not_eligible"
   | "annual_not_allowed"
   | "currency_not_supported"
+  | "country_not_eligible"
   | "already_used";
+
+/**
+ * `BillingPromotion.allowedCountries` as upper-case two-letter codes.
+ *
+ * A malformed value reads as a list nobody's country matches, not as "no
+ * restriction": a promotion someone limited to one country must not open to
+ * every country because the stored JSON was damaged.
+ */
+const UNMATCHABLE_COUNTRIES = ["--"];
+export const parsePromotionCountries = (
+  value: string | null | undefined
+): string[] => {
+  try {
+    const parsed: unknown = JSON.parse(value || "[]");
+    if (!Array.isArray(parsed)) return UNMATCHABLE_COUNTRIES;
+    const codes = parsed.map((item) =>
+      typeof item === "string" ? item.trim().toUpperCase() : ""
+    );
+    return codes.every((code) => /^[A-Z]{2}$/.test(code))
+      ? codes
+      : UNMATCHABLE_COUNTRIES;
+  } catch {
+    return UNMATCHABLE_COUNTRIES;
+  }
+};
+
+/**
+ * Whether the visitor's country lets them use a promotion limited to some
+ * countries.
+ *
+ * `country` is Cloudflare's estimate from the request IP -- the only country
+ * signal this deliberately uses. The card's issuing country is not one: many
+ * residents pay with cards issued elsewhere, and refusing them would refuse the
+ * people the promotion was for.
+ *
+ * An unknown country is refused for a restricted promotion: a request that
+ * cannot say where it is from has not shown it is from an allowed country.
+ */
+export const promotionCountryFailure = ({
+  allowedCountries,
+  country,
+}: {
+  allowedCountries: readonly string[] | null | undefined;
+  country: string | null | undefined;
+}): "country_not_eligible" | null => {
+  if (!allowedCountries || allowedCountries.length === 0) return null;
+  const visitor = (country || "").trim().toUpperCase();
+  return visitor && allowedCountries.includes(visitor)
+    ? null
+    : "country_not_eligible";
+};
 
 /**
  * The billing currencies a fixed-amount promotion can be charged in.
@@ -215,6 +267,12 @@ export const promotionValidationError = (reason: PromotionValidationReason) => {
         code: "PROMOTION_CURRENCY_NOT_SUPPORTED",
         message:
           "Fixed-amount promotion codes are currently available only for USD checkout. Use a percentage promotion for localized billing.",
+      };
+    case "country_not_eligible":
+      return {
+        status: 403,
+        code: "PROMOTION_COUNTRY_NOT_ELIGIBLE",
+        message: "This promotion is not available in your region.",
       };
     case "unavailable":
       return {

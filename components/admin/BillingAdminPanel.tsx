@@ -166,8 +166,21 @@ const newPromotion = (): EditablePromotion => ({
   startsAt: null,
   endsAt: new Date(Date.now() + 30 * 86_400_000).toISOString(),
   allowAnnualStacking: false,
+  maxRedemptionsPerPaymentMethod: 3,
+  allowedCountries: [],
   isActive: true,
 });
+
+/** "au, NZ" -> ["AU", "NZ"]; anything that is not a two-letter code is dropped. */
+const parseCountryList = (value: string) =>
+  Array.from(
+    new Set(
+      value
+        .split(/[\s,]+/)
+        .map((item) => item.trim().toUpperCase())
+        .filter((item) => /^[A-Z]{2}$/.test(item))
+    )
+  );
 
 const PLAN_VALUE_FIELDS = [
   "monthlyPriceCents",
@@ -245,6 +258,11 @@ export function promotionChangeLines(
           : `US$ ${dollars(x.discountAmountCents)}`,
     },
     { label: p.maxRedemptions, read: (x) => x.maxRedemptions },
+    {
+      label: p.maxRedemptionsPerCard,
+      read: (x) => x.maxRedemptionsPerPaymentMethod,
+    },
+    { label: p.allowedCountries, read: (x) => x.allowedCountries },
     { label: p.durationMonths, read: (x) => x.durationMonths },
     { label: p.fulfillment, read: (x) => x.fulfillmentType },
     { label: p.passDurationDays, read: (x) => x.accessDurationDays },
@@ -717,6 +735,36 @@ function PromotionCard({
                   event.target.value.trim().length > 0
                     ? Number(event.target.value) || 1
                     : null,
+              })
+            }
+          />
+        </Field>
+        <Field label={m.maxRedemptionsPerCard}>
+          <TextInput
+            type="number"
+            min="1"
+            value={promotion.maxRedemptionsPerPaymentMethod ?? ""}
+            placeholder={m.noLimit}
+            onChange={(event) =>
+              onChange({
+                ...promotion,
+                maxRedemptionsPerPaymentMethod:
+                  event.target.value.trim().length > 0
+                    ? Math.max(1, Math.floor(Number(event.target.value)) || 1)
+                    : null,
+              })
+            }
+          />
+        </Field>
+        <Field label={m.allowedCountries}>
+          <TextInput
+            key={`${promotion.id}:${promotion.allowedCountries.join(",")}`}
+            defaultValue={promotion.allowedCountries.join(", ")}
+            placeholder={m.allowedCountriesPlaceholder}
+            onBlur={(event) =>
+              onChange({
+                ...promotion,
+                allowedCountries: parseCountryList(event.target.value),
               })
             }
           />

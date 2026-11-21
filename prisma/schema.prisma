@@ -1774,6 +1774,16 @@ model BillingPromotion {
   startsAt              DateTime?
   endsAt                DateTime?
   allowAnnualStacking   Boolean                      @default(false)
+  /// How many accounts one payment card may redeem this promotion on, counted
+  /// by Stripe card fingerprint. Null means no per-card limit. The checkout
+  /// webhook cancels a subscription that would exceed it. A family sharing one
+  /// card fits under the default; a card farming accounts does not.
+  maxRedemptionsPerPaymentMethod Int?                @default(3)
+  /// ISO 3166-1 alpha-2 codes as JSON, e.g. ["AU"]. Empty means anywhere.
+  /// Compared with Cloudflare's estimate of the visitor's country when the code
+  /// is validated and again at checkout. The card's issuing country is not
+  /// used: many residents pay with cards issued elsewhere.
+  allowedCountries      String                       @default("[]")
   isActive              Boolean                      @default(true)
   createdAt             DateTime                     @default(now())
   updatedAt             DateTime                     @updatedAt

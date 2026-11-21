@@ -137,6 +137,8 @@ const PROMOTION: import("../../lib/billingConfig").BillingPromotionConfig = {
   startsAt: null,
   endsAt: ENDS_AT,
   allowAnnualStacking: false,
+  maxRedemptionsPerPaymentMethod: 3,
+  allowedCountries: [],
   isActive: true,
 };
 

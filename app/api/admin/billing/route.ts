@@ -91,6 +91,19 @@ const promotionSchema = z
     startsAt: z.string().datetime().nullable().optional(),
     endsAt: z.string().datetime().nullable().optional(),
     allowAnnualStacking: z.boolean(),
+    // Tomverse-side refusals, not part of the Stripe coupon: changing them
+    // never resets the Stripe linkage below (`policyChanged`).
+    maxRedemptionsPerPaymentMethod: z
+      .number()
+      .int()
+      .min(1)
+      .max(1_000_000)
+      .nullable()
+      .optional(),
+    allowedCountries: z
+      .array(z.string().regex(/^[A-Za-z]{2}$/))
+      .max(60)
+      .optional(),
     isActive: z.boolean(),
     updatedAt: z.string().datetime().nullable().optional(),
   })
@@ -209,6 +222,30 @@ const storedPolicyInput = (
 
 const planName = (id: "free" | "pro" | "max") =>
   id === "max" ? "Max" : id === "pro" ? "Pro" : "Free";
+
+/**
+ * The per-card limit and the allowed countries as stored. A field the request
+ * left out is left as it is, so an older Admin client that does not send them
+ * cannot clear them; on create the column defaults apply (3 per card, any
+ * country).
+ */
+const promotionAbuseLimitFields = (promotion: {
+  maxRedemptionsPerPaymentMethod?: number | null;
+  allowedCountries?: string[];
+}) => ({
+  ...(promotion.maxRedemptionsPerPaymentMethod !== undefined
+    ? { maxRedemptionsPerPaymentMethod: promotion.maxRedemptionsPerPaymentMethod }
+    : {}),
+  ...(promotion.allowedCountries !== undefined
+    ? {
+        allowedCountries: JSON.stringify(
+          Array.from(
+            new Set(promotion.allowedCountries.map((code) => code.toUpperCase()))
+          ).sort()
+        ),
+      }
+    : {}),
+});
 
 export async function GET(req: Request) {
   try {
@@ -445,6 +482,7 @@ export async function PATCH(req: Request) {
           startsAt,
           endsAt,
           allowAnnualStacking: promotion.allowAnnualStacking,
+          ...promotionAbuseLimitFields(promotion),
           isActive: promotion.isActive,
         },
         update: {
@@ -461,6 +499,7 @@ export async function PATCH(req: Request) {
           startsAt,
           endsAt,
           allowAnnualStacking: promotion.allowAnnualStacking,
+          ...promotionAbuseLimitFields(promotion),
           isActive: promotion.isActive,
         },
       });

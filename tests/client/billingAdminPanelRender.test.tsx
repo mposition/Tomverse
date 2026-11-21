@@ -62,6 +62,8 @@ const promotion = (overrides: Partial<BillingPromotionConfig> = {}): BillingProm
   startsAt: null,
   endsAt: "2026-12-31T00:00:00.000Z",
   allowAnnualStacking: false,
+  maxRedemptionsPerPaymentMethod: 3,
+  allowedCountries: [],
   isActive: true,
   ...overrides,
 });

@@ -10,17 +10,33 @@ import {
   type BillingPromotionConfig,
 } from "@/lib/billingConfig";
 import {
+  promotionCountryFailure,
   promotionCurrencyFailure,
   promotionEligibilityFailure,
   type PromotionValidationReason,
 } from "@/lib/billingPromotionCore";
 import type { BillingCurrency } from "@/lib/billingMarkets";
 import { getAnonymousClientKey } from "@/lib/clientIp";
+import { getTrustedIpCountry } from "@/lib/trustedIpCountry";
 import { prisma } from "@/lib/prisma";
 import { promotionStripePolicyViolation } from "@/lib/stripePromotionProvisioningCore";
 
 export type BillingInterval = "monthly" | "annual";
-export type PromotionRiskFlag = "shared_ip" | "shared_payment_method";
+export type PromotionRiskFlag =
+  | "shared_ip"
+  | "shared_payment_method"
+  /**
+   * The card had already redeemed this promotion on as many other accounts as
+   * `BillingPromotion.maxRedemptionsPerPaymentMethod` allows, so the checkout
+   * webhook cancelled this subscription instead of granting the plan.
+   */
+  | "payment_method_limit";
+
+const PROMOTION_RISK_FLAGS: readonly PromotionRiskFlag[] = [
+  "shared_ip",
+  "shared_payment_method",
+  "payment_method_limit",
+];
 
 const PROMOTION_IP_WINDOW_MS = 30 * 86_400_000;
 const PROMOTION_IP_DISTINCT_ACCOUNT_THRESHOLD = 3;
@@ -72,9 +88,8 @@ export const parsePromotionRiskFlags = (
   try {
     const parsed = JSON.parse(value || "[]");
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (item): item is PromotionRiskFlag =>
-        item === "shared_ip" || item === "shared_payment_method"
+    return parsed.filter((item): item is PromotionRiskFlag =>
+      PROMOTION_RISK_FLAGS.includes(item)
     );
   } catch {
     return [];
@@ -252,6 +267,14 @@ export async function validatePromotionForCheckout({
   // is drawn from is the answer Checkout will give.
   const currencyFailure = promotionCurrencyFailure({ promotion, currency });
   if (currencyFailure) return { valid: false, reason: currencyFailure };
+
+  // Also decided before any redemption lookup, and by the same function on
+  // both endpoints, so the order summary and Checkout give the same answer.
+  const countryFailure = promotionCountryFailure({
+    allowedCountries: promotion.allowedCountries,
+    country: getTrustedIpCountry(request.headers),
+  });
+  if (countryFailure) return { valid: false, reason: countryFailure };
 
   if (userId) {
     const existingRedemption =
