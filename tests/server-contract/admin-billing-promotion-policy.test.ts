@@ -75,6 +75,7 @@ type World = {
   permissions: string[];
   promotionRows: (typeof FIXED_ROW)[];
   writes: string[];
+  writeArgs: { write: string; args: unknown }[];
   audits: number;
 };
 
@@ -84,6 +85,7 @@ const freshWorld = (): World => ({
   permissions: ["billing:write"],
   promotionRows: [FIXED_ROW],
   writes: [],
+  writeArgs: [],
   audits: 0,
 });
 
@@ -101,8 +103,9 @@ const model = (name: string, reads: Record<string, unknown>) =>
   new Proxy(reads, {
     get(target, property: string) {
       if (property in target) return target[property];
-      return async () => {
+      return async (args?: unknown) => {
         world.writes.push(`${name}.${property}`);
+        world.writeArgs.push({ write: `${name}.${property}`, args });
         return { count: 0 };
       };
     },
@@ -375,11 +378,43 @@ test("two-letter allowed countries and a per-card limit save", async () => {
         discountPercent: 100,
         discountAmountCents: null,
         isActive: true,
-        allowedCountries: ["au", "NZ"],
+        allowedCountries: ["nz", "AU", "au"],
         maxRedemptionsPerPaymentMethod: 3,
       }),
     ],
   });
   assert.equal(response.status, 200);
-  assert.ok(world.writes.includes("billingPromotion.upsert"));
+  const upsert = world.writeArgs.find(
+    (item) => item.write === "billingPromotion.upsert"
+  )?.args as {
+    create: Record<string, unknown>;
+    update: Record<string, unknown>;
+  };
+  // Stored upper-cased, de-duplicated and sorted, on create and on update.
+  for (const side of [upsert.create, upsert.update]) {
+    assert.equal(side.allowedCountries, JSON.stringify(["AU", "NZ"]));
+    assert.equal(side.maxRedemptionsPerPaymentMethod, 3);
+  }
+});
+
+test("a save that leaves the new fields out does not clear them", async () => {
+  // An older Admin client sends neither field; the stored values must stand.
+  world.promotionRows = [];
+  const { response } = await patch({
+    promotions: [
+      payload({
+        id: "promo_ozb",
+        code: "OZB",
+        discountPercent: 100,
+        discountAmountCents: null,
+        isActive: true,
+      }),
+    ],
+  });
+  assert.equal(response.status, 200);
+  const upsert = world.writeArgs.find(
+    (item) => item.write === "billingPromotion.upsert"
+  )?.args as { update: Record<string, unknown> };
+  assert.equal("allowedCountries" in upsert.update, false);
+  assert.equal("maxRedemptionsPerPaymentMethod" in upsert.update, false);
 });

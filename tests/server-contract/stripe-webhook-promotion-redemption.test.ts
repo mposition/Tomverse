@@ -71,6 +71,8 @@ type World = {
    * this transaction's read, so its insert hits the unique constraint.
    */
   concurrentRow: { riskFlags: string } | null;
+  /** The account already redeemed the promotion through another Session. */
+  accountAlreadyRedeemed: boolean;
 };
 
 const subscriptionFixture = (): Stripe.Subscription =>
@@ -119,6 +121,7 @@ const freshWorld = (): World => ({
   countWheres: [],
   promotionExhausted: false,
   concurrentRow: null,
+  accountAlreadyRedeemed: false,
 });
 
 let world = freshWorld();
@@ -188,7 +191,7 @@ async function loadProcessor() {
         findFirst: async () => null,
         findMany: otherAccountsOnCard,
         create: async ({ data }: { data: Record<string, unknown> }) => {
-          if (world.concurrentRow) {
+          if (world.concurrentRow || world.accountAlreadyRedeemed) {
             throw Object.assign(new Error("Unique constraint failed"), {
               code: "P2002",
             });
@@ -241,7 +244,19 @@ async function loadProcessor() {
                   | string
                   | undefined) ?? null,
             }),
-            updateMany: async ({ data }: { data: Record<string, unknown> }) => {
+            updateMany: async ({
+              where,
+              data,
+            }: {
+              where: { stripeSubscriptionId?: string };
+              data: Record<string, unknown>;
+            }) => {
+              // Scoped to one subscription: only matches the account that
+              // carries it, as the real query would.
+              if (where.stripeSubscriptionId !== undefined) {
+                const carried = world.userUpdates.at(-1)?.stripeSubscriptionId;
+                if (carried !== where.stripeSubscriptionId) return { count: 0 };
+              }
               world.userUpdates.push(data);
               return { count: 1 };
             },
@@ -843,4 +858,41 @@ test("refused attempts do not use up places on the card", async () => {
   assert.deepEqual(cardCount?.NOT, {
     riskFlags: { contains: "payment_method_limit" },
   });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Independent review, round 4                                                 */
+/* -------------------------------------------------------------------------- */
+
+test("a zero-charge promotion subscription waits for the completion even while its limit is off", async () => {
+  // The limit can be switched off and on while a checkout is in flight; the
+  // wait does not depend on the setting the sync happens to read.
+  const { processStripeEvent } = await loadProcessor();
+  withPromotionSubscription();
+  world.cardLimit = null;
+  await processStripeEvent(subscriptionEvent("customer.subscription.created"));
+  assert.equal(world.userUpdates.length, 0);
+});
+
+test("a refusal takes back a plan the account already holds through that subscription", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  withPromotionSubscription();
+  // However it got there, the account already carries this subscription.
+  world.userUpdates.push({ plan: "Max", stripeSubscriptionId: "sub_zero_due" });
+  world.otherAccountsOnCard = ["user_a", "user_b", "user_c"];
+  await processStripeEvent(completedEvent(zeroDueSession()));
+
+  assert.equal(world.cancels.length, 1);
+  const last = world.userUpdates.at(-1);
+  assert.equal(last?.plan, "Free");
+  assert.equal(last?.stripeSubscriptionId, null);
+});
+
+test("a zero-charge duplicate from an account that already redeemed through another Session is refused", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  withPromotionSubscription();
+  world.accountAlreadyRedeemed = true;
+  await processStripeEvent(completedEvent(zeroDueSession("cs_second")));
+  assert.equal(world.cancels.length, 1);
+  assert.equal(world.userUpdates.length, 0);
 });

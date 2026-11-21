@@ -26,15 +26,15 @@ export const parsePromotionCountries = (
 ): string[] => {
   try {
     const parsed: unknown = JSON.parse(value || "[]");
-    if (!Array.isArray(parsed)) return UNMATCHABLE_COUNTRIES;
+    if (!Array.isArray(parsed)) return [...UNMATCHABLE_COUNTRIES];
     const codes = parsed.map((item) =>
       typeof item === "string" ? item.trim().toUpperCase() : ""
     );
     return codes.every((code) => /^[A-Z]{2}$/.test(code))
       ? codes
-      : UNMATCHABLE_COUNTRIES;
+      : [...UNMATCHABLE_COUNTRIES];
   } catch {
-    return UNMATCHABLE_COUNTRIES;
+    return [...UNMATCHABLE_COUNTRIES];
   }
 };
 

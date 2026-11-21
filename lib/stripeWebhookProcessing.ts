@@ -330,9 +330,11 @@ const isUniqueViolation = (error: unknown) =>
  * read-only count here could not see a concurrent completion on the same card
  * and would let two accounts in through one remaining place.
  *
- * Only a zero-charge promotion checkout on a promotion with a per-card limit
- * waits (`billingExpectedAmountMinor` "0"): a paid one is never refused, so it
- * has nothing to wait for.
+ * Every zero-charge promotion checkout waits (`billingExpectedAmountMinor`
+ * "0"), whatever the promotion's per-card limit is set to right now: the
+ * setting can change while a checkout is in flight, and the completion reads
+ * it again under the lock. A paid one is never refused, so it has nothing to
+ * wait for.
  */
 async function promotionCardLimitWithholds(subscription: Stripe.Subscription) {
   const promotionId = subscription.metadata?.promotionId;
@@ -348,11 +350,6 @@ async function promotionCardLimitWithholds(subscription: Stripe.Subscription) {
     );
   }
   if (subscription.metadata?.billingExpectedAmountMinor !== "0") return false;
-  const promotion = await prisma.billingPromotion.findUnique({
-    where: { id: promotionId },
-    select: { maxRedemptionsPerPaymentMethod: true },
-  });
-  if ((promotion?.maxRedemptionsPerPaymentMethod ?? null) === null) return false;
   // No redemption recorded: either the completion has not run, or it ran
   // without recording (promotion row gone) and granted the plan anyway -- in
   // which case the account already carries this subscription.
@@ -598,6 +595,23 @@ async function cancelOverLimitPromotionSubscription(
       subscriptionStatus: subscription.status,
     })
   );
+  // Whatever the account already holds through this subscription is taken
+  // back now, not left for the deletion event: a plan must not outlive the
+  // refusal, however it was granted. Scoped to the account that carries this
+  // subscription, so a different subscription on the same customer is left
+  // alone. Idempotent, so a redelivery repeats it harmlessly.
+  await prisma.user.updateMany({
+    where: { stripeSubscriptionId: subscription.id },
+    data: {
+      plan: "Free",
+      stripeSubscriptionId: null,
+      stripePriceId: null,
+      subscriptionStatus: "canceled",
+      subscriptionBillingInterval: null,
+      subscriptionCancelAtPeriodEnd: false,
+      subscriptionSyncedAt: new Date(),
+    },
+  });
   if (subscription.status === "canceled") return;
   await getStripe().subscriptions.cancel(subscription.id, {
     invoice_now: false,
