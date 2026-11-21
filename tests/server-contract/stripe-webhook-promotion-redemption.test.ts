@@ -46,6 +46,7 @@ type World = {
     promotionId: string;
     userId: string;
     takenAtOrBefore?: Date;
+    checkoutSessionId?: string;
   }[];
   subscription: Stripe.Subscription;
   paymentMethodRetrieves: string[];
@@ -334,13 +335,14 @@ async function loadProcessor() {
         releasePromotionCheckout: async (
           promotionId: string,
           userId: string,
-          options: { takenAtOrBefore?: Date } = {}
+          options: { takenAtOrBefore?: Date; checkoutSessionId?: string } = {}
         ) => {
           world.releases.push(promotionId);
           world.releaseCalls.push({
             promotionId,
             userId,
             takenAtOrBefore: options.takenAtOrBefore,
+            checkoutSessionId: options.checkoutSessionId,
           });
         },
       },
@@ -569,8 +571,9 @@ test("the release is bounded by the Session's own creation time", async () => {
 
   assert.deepEqual(
     world.releaseCalls[0].takenAtOrBefore,
-    new Date((SESSION_CREATED_SECONDS + 1) * 1000 - 1)
+    new Date(SESSION_CREATED_SECONDS * 1000)
   );
+  assert.equal(world.releaseCalls[0].checkoutSessionId, "cs_expired");
 });
 
 test("an expired checkout consumes no redemption and touches no subscription", async () => {
@@ -983,18 +986,19 @@ test("a card merely attached to the customer is never taken for the one this che
   assert.ok(flagsOf(world.redemptionRows[0]).includes("payment_method_unverified"));
 });
 
-test("the completion's lease release is bounded by the end of the Session's creation second", async () => {
-  // Review rounds 7-8: bounded, so a redelivered failed completion cannot free
-  // a later checkout's lease; to the end of the second, because Stripe's
-  // created is whole seconds and the lease row has milliseconds.
+test("the completion releases only the lease bound to its own Session", async () => {
+  // Review rounds 7-10: by Session id, so no redelivery can free a later
+  // checkout's lease whatever the clocks say; an unbound (legacy) lease falls
+  // back to the creation time.
   const { processStripeEvent } = await loadProcessor();
   await processStripeEvent(
     completedEvent(sessionWith({ created: SESSION_CREATED_SECONDS }))
   );
   assert.equal(world.releaseCalls.length, 1);
+  assert.equal(world.releaseCalls[0].checkoutSessionId, "cs_zero");
   assert.deepEqual(
     world.releaseCalls[0].takenAtOrBefore,
-    new Date((SESSION_CREATED_SECONDS + 1) * 1000 - 1)
+    new Date(SESSION_CREATED_SECONDS * 1000)
   );
 });
 
@@ -1091,14 +1095,19 @@ test("a checkout with no amount total but a zero expected amount is treated as f
   assert.deepEqual(world.userUpdates, []);
 });
 
-test("the lease bound never reaches past the second the Session was created in", async () => {
-  // Any later checkout's lease is created after this Session's completion or
-  // expiry, both of which follow the creation second; the bound stops at its
-  // last millisecond.
+
+test("the card the checkout used wins over a default changed afterwards", async () => {
+  // Review round 10: the subscription default can change before a delayed
+  // webhook is processed; the Session's own intent records what was used.
   const { processStripeEvent } = await loadProcessor();
-  await processStripeEvent(
-    completedEvent(sessionWith({ created: SESSION_CREATED_SECONDS }))
-  );
-  const bound = world.releaseCalls[0].takenAtOrBefore as Date;
-  assert.equal(bound.getTime() - SESSION_CREATED_SECONDS * 1000, 999);
+  withCard();
+  world.setupIntentPaymentMethod = "pm_link";
+  await processStripeEvent(completedEvent(sessionWith({ setup_intent: "seti_1" })));
+  const key = cardLockKeys()[0];
+  assert.ok(key);
+  // pm_link resolves to a Link identity, distinct from the default card's.
+  world.lockCalls = [];
+  world.setupIntentPaymentMethod = null;
+  await processStripeEvent(completedEvent(zeroDueSession("cs_default_only")));
+  assert.notEqual(cardLockKeys()[0], key);
 });

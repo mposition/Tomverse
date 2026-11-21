@@ -23,6 +23,7 @@ import {
   PROMOTION_CHECKOUT_TTL_SECONDS,
   releasePromotionCheckout,
   reservePromotionCheckout,
+  bindPromotionCheckoutLease,
   validatePromotionForCheckout,
   type PromotionRiskFlag,
 } from "@/lib/billingPromotionSecurity";
@@ -856,6 +857,22 @@ export async function POST(req: Request) {
         }
       );
 
+      if (appliedPromotion) {
+        // Tie the lease to this Session, so only this Session's webhooks can
+        // release it. Not fatal: an unbound lease is still released by time,
+        // as before, and expires on its own.
+        await bindPromotionCheckoutLease(
+          appliedPromotion.id,
+          user.id,
+          checkoutSession.id
+        ).catch((bindError) => {
+          console.error("Promotion checkout lease bind failed.", {
+            traceId,
+            promotionId: appliedPromotion.id,
+            errorName: bindError instanceof Error ? bindError.name : "UnknownError",
+          });
+        });
+      }
       return NextResponse.json({ url: checkoutSession.url });
     } catch (error) {
       if (promotionLeaseReserved && appliedPromotion) {

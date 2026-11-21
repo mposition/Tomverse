@@ -59,6 +59,7 @@ type SessionCreateCall = {
 type World = {
   cookieReads: number;
   burstAlerts: string[];
+  leaseBinds: string[];
   redemptionUsers: string[];
   grantedUsers: string[];
   promotionIncrements: number;
@@ -86,7 +87,7 @@ type World = {
 };
 
 const freshWorld = (): World => ({
-  cookieReads: 0, burstAlerts: [], redemptionUsers: [], grantedUsers: [], promotionIncrements: 0,
+  cookieReads: 0, burstAlerts: [], leaseBinds: [], redemptionUsers: [], grantedUsers: [], promotionIncrements: 0,
   session: { user: { id: "user_1" } },
   user: {
     id: "user_1",
@@ -258,6 +259,13 @@ async function loadRoute(): Promise<{
         releasePromotionCheckout: async (promotionId: string) => {
           if (world.releaseShouldFail) throw new Error("lease store offline");
           world.releases.push(promotionId);
+        },
+        bindPromotionCheckoutLease: async (
+          promotionId: string,
+          _userId: string,
+          checkoutSessionId: string
+        ) => {
+          world.leaseBinds.push(`${promotionId}:${checkoutSessionId}`);
         },
       },
     });
@@ -892,4 +900,12 @@ for (const [name, entitlement] of [
   assert.equal(response.status, 409);
   assert.deepEqual(world.grantedUsers, []);
   assert.equal(world.promotionIncrements, 0);
+});
+
+test("a promotion checkout binds its lease to the Session it created", async () => {
+  // So only that Session's webhooks can release the lease.
+  const response = await post({ planId: "max", promoCode: "EDDIEFRIEND100" });
+  assert.equal(response.status, 200);
+  assert.equal(world.leaseBinds.length, 1);
+  assert.match(world.leaseBinds[0], /^promo_db:/);
 });

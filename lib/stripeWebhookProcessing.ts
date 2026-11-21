@@ -400,36 +400,18 @@ const checkoutChargedNothing = (session: Stripe.Checkout.Session) =>
     session.metadata?.billingExpectedAmountMinor === "0");
 
 /**
- * The latest lease creation time that can belong to this Checkout Session.
- *
- * The lease is taken immediately before the Session is created, so it was
- * taken no later than the Session. Stripe reports `created` in whole seconds
- * while the lease row keeps milliseconds, so the bound is the end of that
- * second: a lease taken earlier in the same second is still this Session's.
- *
- * No other attempt's lease can fall inside that second. This Session's lease
- * exists from just before `created` until the checkout resolves, and while it
- * exists `reservePromotionCheckout` refuses a second one (409) for the same
- * account and promotion. It is released only by this Session's completion --
- * which needs the customer to finish the payment page, seconds at least after
- * `created` -- or its expiry, 30 minutes after; or by the checkout route
- * itself when Session creation failed. So any later lease is created after
- * the second `created` falls in, and this bound never reaches it.
- *
- * The one exception is an unknown outcome: Stripe created the Session but the
- * response was lost, the route released the lease, and the customer retried
- * within the same second. That orphan Session's only later webhook is its
- * expiry, 31 minutes on -- when the retry's lease, taken in the same second
- * with the same 31-minute TTL, is itself expiring -- so the most this bound
- * can do there is free that lease moments before its own TTL would.
- *
- * Without a creation time the release is unbounded, as before (Stripe always
- * sends one).
+ * Which promotion lease a webhook about this Checkout Session may release:
+ * the one bound to this Session (stamped right after the Session was
+ * created), or -- if it was never bound -- one taken no later than the
+ * Session's creation second, as before. A lease bound to another Session is
+ * never touched, so no redelivery can free a later checkout's lease.
  */
-const promotionLeaseReleaseBound = (session: Stripe.Checkout.Session) =>
-  typeof session.created === "number"
-    ? { takenAtOrBefore: new Date((session.created + 1) * 1000 - 1) }
-    : {};
+const promotionLeaseOwnership = (session: Stripe.Checkout.Session) => ({
+  checkoutSessionId: session.id,
+  ...(typeof session.created === "number"
+    ? { takenAtOrBefore: new Date(session.created * 1000) }
+    : {}),
+});
 
 /**
  * What recording the checkout's promotion decided. `refused` means the card
@@ -626,12 +608,12 @@ async function recordPromotionRedemptionFromCheckout(
       return { promotionId, refused: false };
     });
   } finally {
-    // Bounded by this Session, so a redelivery of a completion that failed
+    // Only this Session's lease, so a redelivery of a completion that failed
     // cannot free the lease a later checkout has since taken.
     await releasePromotionCheckout(
       promotionId,
       userId,
-      promotionLeaseReleaseBound(session)
+      promotionLeaseOwnership(session)
     ).catch(() => undefined);
   }
 }
@@ -704,52 +686,37 @@ async function getSubscriptionPaymentMethodFingerprintHash(
         : value && typeof value === "object"
           ? value
           : null;
-    // Only the method this checkout itself used. Subscription-mode Checkout
-    // makes it the subscription's default payment method (all 52 OZBFREE
-    // redemptions on 2026-11-17..20 had one); a zero-charge subscription
-    // collects it through the subscription's pending SetupIntent; the
-    // Session's own SetupIntent / PaymentIntent cover the remaining shapes.
-    // Never another method merely attached to the customer -- it may be a
-    // different card, which would count the wrong card or refuse for an
-    // unrelated one.
-    const fromSubscription = paymentMethodFingerprint(
-      await resolve(subscription.default_payment_method)
-    );
-    if (fromSubscription) return hashPaymentMethodFingerprint(fromSubscription);
-    const pendingSetupIntent = subscription.pending_setup_intent;
-    const pendingSetupIntentId =
-      typeof pendingSetupIntent === "string"
-        ? pendingSetupIntent
-        : pendingSetupIntent?.id;
-    if (pendingSetupIntentId) {
-      const intent = await stripe.setupIntents.retrieve(pendingSetupIntentId);
-      const fromPending = paymentMethodFingerprint(
-        await resolve(intent.payment_method)
-      );
-      if (fromPending) return hashPaymentMethodFingerprint(fromPending);
-    }
+    // Only the method this checkout itself used, read from the records of the
+    // checkout first: the Session's own SetupIntent / PaymentIntent, then the
+    // subscription's pending SetupIntent (how a zero-charge subscription
+    // collects it). The subscription's current default payment method comes
+    // last -- Checkout sets it (all 52 OZBFREE redemptions had one), but it
+    // can be changed afterwards, before a delayed webhook is processed.
+    // Never another method merely attached to the customer.
+    const fromIntent = async (
+      intentId: string | null | undefined,
+      kind: "setup" | "payment"
+    ) => {
+      if (!intentId) return null;
+      const intent =
+        kind === "setup"
+          ? await stripe.setupIntents.retrieve(intentId)
+          : await stripe.paymentIntents.retrieve(intentId);
+      return paymentMethodFingerprint(await resolve(intent.payment_method));
+    };
+    const intentId = (value: string | { id: string } | null | undefined) =>
+      typeof value === "string" ? value : value?.id;
     const session = options.session;
-    const setupIntentId =
-      typeof session?.setup_intent === "string"
-        ? session.setup_intent
-        : session?.setup_intent?.id;
-    if (setupIntentId) {
-      const intent = await stripe.setupIntents.retrieve(setupIntentId);
-      const fromSetup = paymentMethodFingerprint(
-        await resolve(intent.payment_method)
-      );
-      if (fromSetup) return hashPaymentMethodFingerprint(fromSetup);
-    }
-    const paymentIntentId =
-      typeof session?.payment_intent === "string"
-        ? session.payment_intent
-        : session?.payment_intent?.id;
-    if (paymentIntentId) {
-      const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
-      const fromPayment = paymentMethodFingerprint(
-        await resolve(intent.payment_method)
-      );
-      if (fromPayment) return hashPaymentMethodFingerprint(fromPayment);
+    const candidates: (() => Promise<string | null>)[] = [
+      () => fromIntent(intentId(session?.setup_intent), "setup"),
+      () => fromIntent(intentId(session?.payment_intent), "payment"),
+      () => fromIntent(intentId(subscription.pending_setup_intent), "setup"),
+      async () =>
+        paymentMethodFingerprint(await resolve(subscription.default_payment_method)),
+    ];
+    for (const candidate of candidates) {
+      const fingerprint = await candidate();
+      if (fingerprint) return hashPaymentMethodFingerprint(fingerprint);
     }
     return null;
   } catch (error) {
@@ -1008,7 +975,7 @@ async function handleCheckoutExpired(session: Stripe.Checkout.Session) {
   await releasePromotionCheckout(
     promotionId,
     userId,
-    promotionLeaseReleaseBound(session)
+    promotionLeaseOwnership(session)
   ).catch((error) => {
     console.error("Promotion checkout lease release failed.", {
       stripeCheckoutSessionId: session.id,

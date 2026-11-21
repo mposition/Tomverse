@@ -158,10 +158,39 @@ export async function reservePromotionCheckout(
   return { id, expiresAt };
 }
 
+/** The value a lease carries once its Checkout Session exists. */
+const checkoutSessionLeaseTag = (checkoutSessionId: string) =>
+  `stripe-session:${checkoutSessionId}`;
+
+/**
+ * Records which Checkout Session a promotion lease belongs to, right after the
+ * Session is created, so a webhook about that Session releases exactly that
+ * lease. Only an unbound lease is stamped: one already bound to another
+ * Session is not taken over.
+ */
+export async function bindPromotionCheckoutLease(
+  promotionId: string,
+  userId: string,
+  checkoutSessionId: string
+) {
+  await prisma.chatRequestLease.updateMany({
+    where: { id: promotionLeaseId(promotionId, userId), admissionId: null },
+    data: { admissionId: checkoutSessionLeaseTag(checkoutSessionId) },
+  });
+}
+
 export async function releasePromotionCheckout(
   promotionId: string,
   userId: string,
   options: {
+    /**
+     * Release only the lease bound to this Checkout Session
+     * (`bindPromotionCheckoutLease`), or -- for a lease that was never bound:
+     * taken before this change, or its bind failed -- one taken no later than
+     * `takenAtOrBefore`. A lease bound to a different Session is never
+     * released by this one's webhook, however the clocks compare.
+     */
+    checkoutSessionId?: string;
     /**
      * Release only a lease taken no later than this instant.
      *
@@ -179,9 +208,27 @@ export async function releasePromotionCheckout(
     takenAtOrBefore?: Date;
   } = {}
 ) {
+  const id = promotionLeaseId(promotionId, userId);
+  if (options.checkoutSessionId) {
+    await prisma.chatRequestLease.deleteMany({
+      where: {
+        id,
+        OR: [
+          { admissionId: checkoutSessionLeaseTag(options.checkoutSessionId) },
+          {
+            admissionId: null,
+            ...(options.takenAtOrBefore
+              ? { createdAt: { lte: options.takenAtOrBefore } }
+              : {}),
+          },
+        ],
+      },
+    });
+    return;
+  }
   await prisma.chatRequestLease.deleteMany({
     where: {
-      id: promotionLeaseId(promotionId, userId),
+      id,
       ...(options.takenAtOrBefore
         ? { createdAt: { lte: options.takenAtOrBefore } }
         : {}),
