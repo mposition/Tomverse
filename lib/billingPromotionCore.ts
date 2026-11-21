@@ -19,7 +19,8 @@ export type PromotionValidationReason =
  * restriction": a promotion someone limited to one country must not open to
  * every country because the stored JSON was damaged.
  */
-const UNMATCHABLE_COUNTRIES = ["--"];
+// Not two letters, so no visitor country can ever equal it.
+const UNMATCHABLE_COUNTRIES = ["INVALID"];
 export const parsePromotionCountries = (
   value: string | null | undefined
 ): string[] => {

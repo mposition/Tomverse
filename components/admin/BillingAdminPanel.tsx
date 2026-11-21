@@ -1645,11 +1645,11 @@ export function BillingAdminPanel({
               {m.review.summary(dirtyPlanCount, dirtyPriceCount, dirtyPromotionCount)}
             </p>
             <p className="text-xs text-zinc-400">{m.review.liveNote}</p>
-            {hasIssues ? (
+            {/* "You can still save" is true only of warnings; a refusal
+                blocks the save and is listed in the issues panel. */}
+            {promotionRefusals.size === 0 && stripeWarnings.length > 0 ? (
               <p className="text-xs text-amber-300">
-                {m.review.warningsNote(
-                  promotionRefusals.size + stripeWarnings.length
-                )}
+                {m.review.warningsNote(stripeWarnings.length)}
               </p>
             ) : null}
           </div>

@@ -229,3 +229,23 @@ test("billing copy has a Korean twin in plain polite speech", () => {
   assert.match(adminBillingLifecycleMessages.en.paidUsersDetail(null), /could not be read/);
   assert.match(adminBillingLifecycleMessages.ko.refundQueueDetail(null, 1), /읽지 못했어요/);
 });
+
+test("a promotion's per-card limit and allowed countries are editable on the promotions tab", () => {
+  const html = panel({
+    initialTab: "promotions",
+    promotions: [promotion({ maxRedemptionsPerPaymentMethod: 3, allowedCountries: ["AU", "NZ"] })],
+  });
+  assert.match(html, />Max accounts per card</);
+  assert.match(html, />Allowed countries \(visitor IP\)</);
+  assert.match(html, /value="3"/);
+  assert.match(html, /value="AU, NZ"/);
+});
+
+test("an allowed-countries entry that is not a two-letter code is listed as a refusal", () => {
+  const html = panel({
+    initialTab: "promotions",
+    promotions: [promotion({ allowedCountries: ["AUSTRALIA"] })],
+  });
+  assert.match(html, /allowed countries must be two-letter codes/);
+  assert.match(html, /AUSTRALIA/);
+});

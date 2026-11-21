@@ -64,6 +64,13 @@ type World = {
   paymentMethodFault: Error | null;
   lockCalls: unknown[][];
   countWheres: Record<string, unknown>[];
+  /** The promotion's last redemption taken by a concurrent completion. */
+  promotionExhausted: boolean;
+  /**
+   * A concurrent delivery of the same Session recorded first: invisible to
+   * this transaction's read, so its insert hits the unique constraint.
+   */
+  concurrentRow: { riskFlags: string } | null;
 };
 
 const subscriptionFixture = (): Stripe.Subscription =>
@@ -110,6 +117,8 @@ const freshWorld = (): World => ({
   paymentMethodFault: null,
   lockCalls: [],
   countWheres: [],
+  promotionExhausted: false,
+  concurrentRow: null,
 });
 
 let world = freshWorld();
@@ -158,6 +167,7 @@ async function loadProcessor() {
           maxRedemptionsPerPaymentMethod: world.cardLimit,
         }),
         updateMany: async () => {
+          if (world.promotionExhausted) return { count: 0 };
           world.redeemedCount += 1;
           return { count: 1 };
         },
@@ -178,6 +188,11 @@ async function loadProcessor() {
         findFirst: async () => null,
         findMany: otherAccountsOnCard,
         create: async ({ data }: { data: Record<string, unknown> }) => {
+          if (world.concurrentRow) {
+            throw Object.assign(new Error("Unique constraint failed"), {
+              code: "P2002",
+            });
+          }
           world.recordedSessionIds.add(data.stripeCheckoutSessionId as string);
           world.recordedFlags.set(
             data.stripeCheckoutSessionId as string,
@@ -196,6 +211,7 @@ async function loadProcessor() {
             fn(tx),
           // Read by the sync-time per-card check, outside any transaction.
           billingPromotionRedemption: {
+            findUnique: async () => world.concurrentRow,
             findFirst: async ({
               where,
             }: {
@@ -711,17 +727,17 @@ test("an unreadable card on a promotion checkout fails the webhook instead of pa
 });
 
 test("a promotion switched off mid-checkout still cannot carry an over-limit card past the limit", async () => {
-  // The redemption is not recorded (the old behaviour, kept: Stripe already
-  // applied the discount), but the card limit is still decided and enforced.
   const { processStripeEvent } = await loadProcessor();
   withPromotionSubscription();
   world.promotionActive = false;
   world.otherAccountsOnCard = ["user_a", "user_b", "user_c"];
   await processStripeEvent(completedEvent(zeroDueSession()));
 
-  assert.deepEqual(world.redemptionRows, []);
   assert.equal(world.cancels.length, 1);
   assert.deepEqual(world.userUpdates, []);
+  assert.equal(world.redemptionRows.length, 1);
+  assert.ok(flagsOf(world.redemptionRows[0]).includes("payment_method_limit"));
+  assert.equal(world.redeemedCount, 0);
 });
 
 test("a subscription event that arrives before the completion does not grant an over-limit card", async () => {
@@ -762,18 +778,59 @@ test("a subscription event before the completion waits even with places left", a
   assert.equal(world.userUpdates.length, 2);
 });
 
-test("a completion that could not record still lets later events sync its granted plan", async () => {
-  // Promotion switched off mid-checkout, card under the limit: the plan is
-  // granted without a redemption row, and the account carrying the
-  // subscription is what tells later events the decision was made.
+test("a completion after the promotion closed is granted, recorded against the card, and not counted", async () => {
+  // Review round 3: completions on a closed promotion used to leave no row,
+  // so they were invisible to every later card count. Several Sessions opened
+  // on one card before the promotion closed could all be granted.
   const { processStripeEvent } = await loadProcessor();
   withPromotionSubscription();
   world.promotionActive = false;
   world.otherAccountsOnCard = ["user_a"];
   await processStripeEvent(completedEvent(zeroDueSession()));
+
   assert.equal(world.userUpdates.length, 1);
+  assert.equal(world.redemptionRows.length, 1);
+  assert.notEqual(world.redemptionRows[0].paymentMethodFingerprintHash, null);
+  assert.equal(world.redeemedCount, 0);
+  // The card count for that completion ran under the card lock too.
+  assert.ok(
+    world.lockCalls.some(
+      ([, key]) => typeof key === "string" && key.startsWith("promotion-card:")
+    )
+  );
+
   await processStripeEvent(subscriptionEvent("customer.subscription.updated"));
   assert.equal(world.userUpdates.length, 2);
+});
+
+test("a completion that loses the last redemption to a concurrent one is recorded, not counted", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  withCard();
+  world.promotionExhausted = true;
+  await processStripeEvent(completedEvent(zeroDueSession()));
+  assert.equal(world.userUpdates[0].plan, "Max");
+  assert.equal(world.redemptionRows.length, 1);
+  assert.equal(world.redeemedCount, 0);
+});
+
+test("a concurrent delivery of the same completion answers with the stored decision", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  withPromotionSubscription();
+  world.concurrentRow = {
+    riskFlags: JSON.stringify(["payment_method_limit", "shared_payment_method"]),
+  };
+  await processStripeEvent(completedEvent(zeroDueSession()));
+  assert.equal(world.cancels.length, 1);
+  assert.deepEqual(world.userUpdates, []);
+});
+
+test("a stored grant from a concurrent delivery is kept, not re-decided", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  withCard();
+  world.concurrentRow = { riskFlags: "[]" };
+  await processStripeEvent(completedEvent(zeroDueSession()));
+  assert.deepEqual(world.cancels, []);
+  assert.equal(world.userUpdates[0].plan, "Max");
 });
 
 test("refused attempts do not use up places on the card", async () => {
