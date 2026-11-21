@@ -131,3 +131,60 @@ export const streamFailureGrantInput = (
     ...(contentFreeError(subject) ? { error: contentFreeError(subject) } : {}),
   };
 };
+
+/** A provider status that rejects what the request carried, not the call. */
+const CONTENT_REJECTION_STATUS = new Set([400, 413, 415, 422]);
+
+export type EmptyResponseCause = {
+  /** The root the turn's health record and report are filed under. */
+  root: "AI_EMPTY_RESPONSE" | "AI_STREAM_FAILED";
+  diagnosticCode: string;
+  /** The error whose metadata is recorded; never sent anywhere whole. */
+  cause: unknown;
+  /**
+   * The provider refused a request that carried the user's own files.
+   *
+   * Counted for the provider's error trail but not as a model failure, and
+   * the user is told the file could not be read. On 2026-11-21 one PDF that
+   * Mistral OCR had already refused was sent natively, both xAI and Anthropic
+   * answered 400, and the turns paged "Model failure for 5 minutes" for two
+   * providers while telling the user to pick another model.
+   */
+  attachmentRejected: boolean;
+};
+
+/**
+ * What an answer that ended empty is evidence of.
+ *
+ * The SDK settles an empty stream as `AI_NoOutputGeneratedError`, which names
+ * the symptom. When the provider had answered the call with an HTTP error, the
+ * stream reported that first through `onError`, and that error is the cause:
+ * it is filed under `AI_STREAM_FAILED` with its status, where a 4xx classifies
+ * as a request-contract rejection instead of a model that answered nothing.
+ */
+export const emptyResponseCause = (input: {
+  completionError: unknown;
+  observedStreamError: unknown;
+  /** The finish reason, already reduced to a code. */
+  finishReasonCode: string;
+  /** Whether the request sent the provider any user file (image, PDF). */
+  carriedFiles: boolean;
+}): EmptyResponseCause => {
+  const observedStatus = safeErrorMetadata(input.observedStreamError).statusCode;
+  if (input.observedStreamError && observedStatus !== undefined) {
+    return {
+      root: "AI_STREAM_FAILED",
+      diagnosticCode: providerDiagnosticCode("AI_STREAM_FAILED", input.observedStreamError),
+      cause: input.observedStreamError,
+      attachmentRejected: input.carriedFiles && CONTENT_REJECTION_STATUS.has(observedStatus),
+    };
+  }
+  return {
+    root: "AI_EMPTY_RESPONSE",
+    diagnosticCode: input.completionError
+      ? providerDiagnosticCode("AI_EMPTY_RESPONSE", input.completionError)
+      : `AI_EMPTY_RESPONSE.${input.finishReasonCode}`,
+    cause: input.completionError,
+    attachmentRejected: false,
+  };
+};

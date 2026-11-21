@@ -360,6 +360,82 @@ test("a stored draft is audited, applied in one step, and cleared", async () => 
   );
 });
 
+test("an automatic draft is audited as the system actor, with no administrator on the entry", async () => {
+  const humanBefore = await auditCount("model_catalog.draft_stored");
+  const autoBefore = await auditCount("model_catalog.draft_auto_stored");
+  assert.equal(
+    await storeCatalogDraft({ category: "coding", modelId: "gpt-auto-draft-test", draft: codingProfile, system: true }),
+    "stored"
+  );
+  // The person's action is untouched; the system's own action is written once.
+  assert.equal(await auditCount("model_catalog.draft_stored"), humanBefore);
+  assert.equal(await auditCount("model_catalog.draft_auto_stored"), autoBefore + 1);
+  const entry = await prisma.adminAuditLog.findFirst({
+    where: { action: "model_catalog.draft_auto_stored", targetId: "coding:gpt-auto-draft-test" },
+    orderBy: { createdAt: "desc" },
+  });
+  assert.equal(entry?.actorUserId, null);
+  assert.equal(entry?.actorEmail, null);
+  assert.equal((entry?.metadata as { systemActor?: string } | null)?.systemActor, "model-catalog-auto-draft");
+  const row = await prisma.modelCatalogEntry.findUnique({
+    where: { category_modelId: { category: "coding", modelId: "gpt-auto-draft-test" } },
+  });
+  // A draft only: nothing is applied and nothing is enabled by it.
+  assert.equal(row?.draftSource, "llm");
+  assert.equal(row?.profile, null);
+  assert.notEqual(row?.enabled, true);
+});
+
+test("an automatic draft never overwrites a row an operator already holds", async () => {
+  const modelId = "gpt-auto-draft-held";
+  const operatorDraft = { ...codingProfile, name: "Operator draft" };
+  await storeCatalogDraft({ category: "coding", modelId, draft: operatorDraft, session });
+  const before = await prisma.modelCatalogEntry.findUnique({ where: { category_modelId: { category: "coding", modelId } } });
+  const autoBefore = await auditCount("model_catalog.draft_auto_stored");
+  const result = await storeCatalogDraft({
+    category: "coding",
+    modelId,
+    draft: { ...codingProfile, name: "Automatic draft" },
+    system: true,
+  });
+  assert.equal(result, "exists");
+  const after = await prisma.modelCatalogEntry.findUnique({ where: { category_modelId: { category: "coding", modelId } } });
+  assert.deepEqual(after?.draft, before?.draft);
+  assert.equal((after?.draft as { name?: string } | null)?.name, "Operator draft");
+  assert.equal(after?.draftCreatedAt?.getTime(), before?.draftCreatedAt?.getTime());
+  // Nothing was written, so nothing was audited.
+  assert.equal(await auditCount("model_catalog.draft_auto_stored"), autoBefore);
+});
+
+test("a dedicated row's channels are its one setting, and a new draft keeps them", async () => {
+  const modelId = "gpt-draft-test";
+  const key = { category_modelId: { category: "coding", modelId } };
+  const channelsOf = async () => ((await prisma.modelCatalogEntry.findUnique({ where: key }))?.profile as { channels?: string[] } | null)?.channels;
+  // Offered on the coding API too (owner decision 2026-11-21).
+  const saved = await saveCodingSettings({ modelId, settings: { channels: ["code", "api"] }, session });
+  assert.deepEqual(saved.changes, [{ field: "channels", from: ["code"], to: ["code", "api"] }]);
+  assert.deepEqual(await channelsOf(), ["code", "api"]);
+  // Anything else on a dedicated row changes only through a draft.
+  await assert.rejects(
+    saveCodingSettings({ modelId, settings: { creditWeight: 9 }, session }),
+    (error: unknown) => error instanceof CatalogRefusal && error.code === "settings_linked_only"
+  );
+  // Its coding API credits: set before a new draft, which keeps them with the channels.
+  const apiCreditOf = async () => ((await prisma.modelCatalogEntry.findUnique({ where: key }))?.profile as { apiCreditWeight?: number } | null)?.apiCreditWeight;
+  const set = await saveCodingSettings({ modelId, settings: { apiCreditWeight: 12 }, session });
+  assert.deepEqual(set.changes, [{ field: "apiCreditWeight", from: null, to: 12 }]);
+  assert.equal(await apiCreditOf(), 12);
+  await storeCatalogDraft({ category: "coding", modelId, draft: codingProfile, session });
+  await applyCatalogDraft({ category: "coding", modelId, session });
+  assert.deepEqual(await channelsOf(), ["code", "api"]);
+  assert.equal(await apiCreditOf(), 12, "a new draft keeps the operator's coding API credits");
+  await saveCodingSettings({ modelId, settings: { channels: ["code"] }, session });
+  assert.deepEqual(await channelsOf(), ["code"]);
+  // Removed: back to the chat rule's minimum, never stored.
+  await saveCodingSettings({ modelId, settings: { apiCreditWeight: null }, session });
+  assert.equal(await apiCreditOf(), undefined);
+});
+
 test("an image draft carries its runtime profile and never prices another model", async () => {
   const modelId = "catalog-draft-profile";
   const profile = {

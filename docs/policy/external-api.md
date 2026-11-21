@@ -1,18 +1,38 @@
-# External inference API (`/api/v1`)
+# External inference API (`/api/v1`, `/api/code/v1`)
 
 Status: implemented, default off. Live activation, paid smoke tests and the
 production migration are separate, approved steps (section 9).
 
 The API lets an account use its existing Tomverse models and credits from
-coding tools. Three wire protocols, one key, one ledger:
+other apps and coding tools. Two APIs (owner decision 2026-11-21), decided by
+the address alone, on one key, one plan check (Pro or Max) and one ledger:
 
-- **OpenAI Chat Completions** (`/api/v1/chat/completions`): Aside (Custom
-  Provider, Pi `openai-completions`), VS Code (Custom Endpoint,
-  `chat-completions`) and Cursor (OpenAI base-URL override).
-- **Anthropic Messages** (`/api/anthropic/v1/messages`): Claude Code, CLI and
-  the official VS Code extension (section 10).
-- **OpenAI Responses** (`/api/v1/responses`): Codex, CLI and the official VS
-  Code extension (section 10).
+- **The general API** -- `/api/v1/*` and `/api/anthropic/v1/*` -- for AI
+  browsers and apps: Aside, Brave Leo, Raycast, BrowserOS and other
+  OpenAI-compatible apps. It always offers the chat registry's models.
+- **The coding API** -- `/api/code/v1/*` (`chat/completions`, `responses`,
+  `models`, `usage`, `requests/status`) and `/api/code/anthropic/v1/*`
+  (`messages`, `messages/count_tokens`, `models`) -- for Claude Code, Codex,
+  Cursor, the tomverse CLI, VS Code (GitHub Copilot Chat's custom endpoint,
+  a coding assistant) and JetBrains AI Assistant (OpenAI-compatible provider,
+  no Anthropic format; owner decision 2026-11-21). While `CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED`
+  is off (the default) it offers and runs exactly what the general API does;
+  on, it offers the coding catalogue's models (section 5, "Which models").
+  The same handlers serve both, told which API the route is
+  (`lib/externalApiCatalog.ts` `ExternalApiSurface`); the User-Agent decides
+  nothing.
+
+Three wire protocols, on both APIs:
+
+- **OpenAI Chat Completions** (`.../v1/chat/completions`): Aside (Custom
+  Provider, Pi `openai-completions`), Brave Leo, Raycast, BrowserOS and other
+  apps on the general API; Cursor (OpenAI base-URL override), VS Code (Custom
+  Endpoint, `chat-completions`), JetBrains AI Assistant and the tomverse CLI on
+  the coding API.
+- **Anthropic Messages** (`.../anthropic/v1/messages`): Claude Code, CLI and
+  the official VS Code extension, on the coding API (section 10).
+- **OpenAI Responses** (`.../v1/responses`): Codex, CLI and the official VS
+  Code extension, on the coding API (section 10).
 
 It is a stateless inference gateway. It is not a Tomverse agent, not a tool
 runner and not a separate billing product. The coding tool runs its own agent
@@ -41,7 +61,8 @@ All default off. Server-side; hiding UI is never the gate.
 |---|---|
 | `EXTERNAL_API_ENABLED` | Exactly `true` turns the routes on. Anything else: every `/api/v1` route answers 503 `feature_unavailable` and nothing is dispatched. |
 | `EXTERNAL_API_ALLOWED_USER_IDS` | Comma-separated user IDs allowed to manage and use keys, or `*`. Empty means nobody. `*` still means paid accounts only: a Free account is refused whatever this list says (section 3). |
-| `EXTERNAL_API_PUBLIC_BASE_URL` | Optional canonical base URL shown to users (e.g. `https://tomverse.app/api/v1`). Otherwise derived from the request host. |
+| `EXTERNAL_API_PUBLIC_BASE_URL` | Optional canonical base URL of the general API shown to users (e.g. `https://tomverse.app/api/v1`). Otherwise derived from the request host. The coding API's base is the same with `/api/code/v1` (`lib/externalApiCodingTools.ts` `codingApiBaseUrl`). |
+| `CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED` | Exactly `true` makes the coding API offer the coding catalogue's models (section 5). Off, the coding API offers the chat registry like the general API. The general API never reads it. Kept under its earlier name, so nothing has to be renamed in an environment that already has it. |
 | `NEXT_PUBLIC_EXTERNAL_API_SETTINGS_VISIBLE` | Build-time. Shows the API keys row in the settings panel. `/settings/api` itself checks availability through the server. |
 | `EXTERNAL_API_REQUESTS_PER_MINUTE` / `_PER_DAY` | Per-account request-rate abuse guard, defaults 120 / 20 000. Credits, the key cap and concurrency are what bound usage; this only stops runaway clients. |
 | `EXTERNAL_API_HEARTBEAT_MS` | How often an in-flight request renews its concurrency slot and reservation, default 60 000. Runs from dispatch, including the wait for a streaming request's first part. Lowered only by tests. |
@@ -49,7 +70,7 @@ All default off. Server-side; hiding UI is never the gate.
 | `EXTERNAL_API_TIMEOUT_MS` | Server timeout for one generation, default 600 000. |
 | `EXTERNAL_API_ANTHROPIC_ENABLED` | Exactly `true` (and `EXTERNAL_API_ENABLED`) turns on the Anthropic Messages routes for Claude Code: `POST /api/anthropic/v1/messages`, its `count_tokens` and `GET /api/anthropic/v1/models`. Off: 503 `feature_unavailable`, nothing dispatched. |
 | `EXTERNAL_API_RESPONSES_ENABLED` | Exactly `true` (and `EXTERNAL_API_ENABLED`) turns on `POST /api/v1/responses` for Codex. Off: 503, nothing dispatched. |
-| `TOMVERSE_CLI_GUIDE_ENABLED` | Exactly `true` shows the Tomverse CLI install and connect card in Settings > API keys (section 11). Off until the package is published, so the page never points at a package that is not on the registry. It turns nothing on in the API. |
+| `TOMVERSE_CLI_GUIDE_ENABLED` | Exactly `true` shows the Tomverse CLI install and connect card in Settings > Developer and Settings > API keys (section 11). Off until the package is published, so the page never points at a package that is not on the registry. It turns nothing on in the API. |
 | `EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED` | Exactly `true` lets Smart Adaptive (section 5.1) ask Chat's router model which candidate answers. Off by default, because each routed request adds one router call, held against the provider operational budget rather than the user's credits. Off, `smart-adaptive` still works and every request goes to the default model (on a native protocol, that provider's default, section 10.6). |
 
 **Kill switch.** The Admin operational pause for AI chat
@@ -138,13 +159,52 @@ reservation every minute so the sweep does not close a live call.
 
 ## 5. API contract
 
-Base URL `https://<host>/api/v1`. Bearer authentication only.
+Base URL `https://<host>/api/v1` (general) or `https://<host>/api/code/v1`
+(coding). Bearer authentication only. Every endpoint below exists on both.
 
-**Which models.** The model catalogue is the only list. A model is offered when
-the runtime registry serves it to the account's plan (enabled, status enabled
-or limited, not deleted), it is not a research or deep-research model, and its
-provider has a credential on this deployment. There is no second, operator-kept
-list of ids: enabling a model in the catalogue offers it here too.
+**Which models.** On the general API, and on the coding API while
+`CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED` is off, the chat catalogue is the
+only list. A model is offered when the runtime registry serves it to the
+account's plan (enabled, status enabled or limited, not deleted), it is not a
+research or deep-research model, and its provider has a credential on this
+deployment. There is no second, operator-kept list of ids: enabling a model in
+the catalogue offers it here too.
+
+With the switch on, the coding API offers the rows of the newest coding
+snapshot whose channels include the coding API (`api`, or `cli` saved before
+the CLI moved onto the coding API) and that the coding judge still admits now
+(docs/policy/code-task-cost-guardrails.md 6.3). A chat link runs and bills as
+its chat registry model. A coding row chat does not have (a dedicated row)
+runs as its own published row: its API model id, context, output limit, input
+and output prices, through the same reservation, provider budget,
+concurrency, key cap and settlement as every request here. Its credits follow
+the chat rule (owner decision 2026-11-21): this API takes at most the chat
+input limit (`CHAT_USER_MAX_INPUT_TOKENS`) and settles with the chat input
+multiplier, so a request is charged the row's `apiCreditWeight` when the
+operator set one, otherwise the chat catalogue's own floor
+(the arithmetic `suggestCreditFloor` and the chat guardrails use -- credits x
+input multiplier x `COST_PER_CREDIT_CEILING_MICRO_USD` covering the worst turn
+-- worked out directly, not rounded up to a chat class: at every
+input-multiplier band's largest input up to that limit, the row's output
+ceiling and, for Anthropic, 1.25x input, the largest of them, so a short prompt
+with a full answer at x1 is covered too; above 1,000 credits it counts as
+unworkable), worked out when the request is priced and never stored. Such a
+row takes no more input than that limit even where Chat's long context is on:
+a longer request is refused with `CHAT_INPUT_TOKEN_LIMIT` before anything is
+held or sent. An override below that floor, or a floor that cannot be worked out,
+keeps the row off this API. Code's managed path keeps the row's
+`pricing.creditWeight`. The reservation and the settlement record
+`creditBasis` (`chat_rule_floor` or `api_override`, the credits and the
+floor), and `credits_per_request` lists the same credits. Its
+reservation records `pricingVersion: coding_catalog_snapshot:<version>:<hash>`
+and `costSource: coding_catalog_snapshot`, and the settlement's pricing
+snapshot carries both, so a receipt names the catalogue version it was charged
+at. An unverified cache discount is full input price; an Anthropic row bounds
+a client's cache marker at 1.25x its own input price. A dedicated row is
+offered only while the row the judge admits now is exactly the published one,
+and never for inference hosts, aggregators or Perplexity
+(`CODE_MANAGED_UNBOUNDED_PROVIDERS`). No snapshot, or one past its coverage,
+offers nothing on the coding API.
 
 | Endpoint | Purpose |
 |---|---|
@@ -311,8 +371,11 @@ catalogue, so a customer never has to recopy it.
   order, `routed-by: default`. A pick outside the candidates is never taken.
 - **A model named by its provider id.** Chat Completions, like the native
   protocols, takes the provider's model id (`gpt-5.6-luna`) when exactly one
-  offered model uses it, so a coding tool's built-in model list (Cursor's GPT
-  models, with the OpenAI base URL overridden) works without a custom model.
+  offered model uses it, so a coding tool's built-in model name works when it
+  matches one. Cursor's built-in GPT list matched none of the served models
+  (owner, 2026-11-21), so with the base URL overridden those picks reach
+  Tomverse and fail as `model_not_found`; Settings and `/developers/cursor` tell
+  Cursor users to add a Tomverse ID instead.
   An id two offered models share is a 400 `model_ambiguous` naming the
   Tomverse ids. A name no offered model uses is never mapped to another model:
   it is not found.
@@ -394,36 +457,74 @@ improved by its own optimizer, as Chat's router is.
 `ExternalApiRequest`: the link from a key to its reservation, model, whether
 it streamed, the wire protocol (`chat_completions`, `anthropic_messages` or
 `responses`; migration `20261118160000_external_api_request_protocol`, rows
-from before it read as Chat Completions), the client user agent, finish reason,
+from before it read as Chat Completions), which API it came through (`surface`:
+`general` or `coding`, from the route, held to those two by a CHECK constraint;
+migration `20261121120000_external_api_request_surface`, rows from before it
+stay NULL and are shown as not recorded, with no backfill), the client user agent, finish reason,
 error code, timestamps, and digests of the body and Idempotency-Key. No prompt, output, tool argument,
 image or key material is stored or logged. Every credit and token figure lives
 on the shared reservation.
 
 The account data export includes both tables without the digests
-(`api_keys`, `api_requests`). Deleting the account deletes its keys and
+(`api_keys`, `api_requests`, the latter with `surface`). The key's receipts --
+`GET /usage`, `GET /requests/status` and Settings > API keys -- return `surface`
+too, null for a request recorded before it. Deleting the account deletes its keys and
 request links; the shared reservation rows stay, detached from the person, as
 every Chat reservation does.
 
 ## 7. Client setup
 
-`/settings/api` lists the keys, makes a key in a dialog and shows its secret once
-in a second dialog. Under "Connect a tool" the person picks one tool (Claude Code,
-Codex, Cursor, Aside, VS Code or another OpenAI-compatible app) and sees only that
-tool's setup, built from the offered models. Aside and VS Code take Smart Adaptive
-alone by default, plus any model the person ticks to pin it. The new key is filled
+Settings has a **Developer** tab (`docs/ui-contracts/settings-navigation.md` 2.3): the
+key summary, the four connection addresses (general `/api/v1` and `/api/anthropic`,
+coding `/api/code/v1` and `/api/code/anthropic`, each copyable) and the CLI install
+line, read from the same key list. One key serves both APIs; a request row records
+which one it came through (`surface`).
+
+`/settings/api` lists the keys, makes a key in a dialog (which says the key works on
+both APIs, and that one key per tool lets one tool be cut off) and shows its secret
+once in a second dialog. Under "Connect a tool" the person first picks the API --
+**General API** or **Coding API** -- which shows that API's two addresses, then one
+tool, and sees only that tool's setup, built from that API's offered models. The
+tools, by API (`lib/externalApiAppGuides.ts`): general -- Aside, Brave Leo, Raycast,
+BrowserOS and other OpenAI-compatible apps; coding -- Tomverse CLI, Claude Code,
+Codex, Cursor, VS Code and JetBrains. "Models allowed through the API" is split the
+same way, and a model only the coding API offers is marked "Coding only". Recent
+requests show an API column (coding, general, or a dash for a request recorded before
+the column). Aside, Raycast and VS Code take Smart Adaptive alone by default, plus any
+model the person ticks to pin it. The new key is filled
 into the setup until the person leaves the page; it is held only in the page's
 memory, never stored. Any other app that takes a custom OpenAI Chat Completions
 endpoint needs only three values: base URL, key and model (`smart-adaptive`). The
-models allowed through the API are listed in a searchable section. Claude Code,
-Codex and Cursor details are in section 10.4.
+models allowed through the API are listed in a searchable section, each with
+the tools that can use it on that API. Claude Code, Codex, Cursor, VS Code, JetBrains
+and the tomverse CLI are configured with the coding API's base URL and its models;
+Aside, Brave Leo, Raycast, BrowserOS and other apps with the general API's. Details
+are in section 10.4.
 
 - **Aside:** add a Custom Provider and paste the JSON: provider `tomverse`,
   `api: "openai-completions"`, `baseUrl`, `apiKey`, `authHeader: true`, and per
   model `id`, `name`, `reasoning`, `input` (`text`, plus `image` where
   supported), `contextWindow`, `maxTokens`.
-- **VS Code:** run *Chat: Manage Language Models* → *Add Models* → *Custom
-  Endpoint* and use the generated entry as the `chatLanguageModels.json`
-  provider: `vendor: "customendpoint"`, `apiType: "chat-completions"`,
+- **Brave Leo** (general API; checked against Brave's documentation 2026-11-21):
+  Settings > Leo > Bring your own model > add a model. *Server endpoint* is the full
+  path `https://<host>/api/v1/chat/completions`; *Model request name* is the model
+  id (`smart-adaptive`); *API Key* is the key. Leo handles text in and out only.
+- **Raycast** (general API; checked against Raycast's manual 2026-11-21): Settings >
+  AI > Custom Providers, file `~/.config/raycast/ai/providers.yaml`. `base_url` is
+  `https://<host>/api/v1` without `/chat/completions`; `api_keys` maps an alias to
+  the key; `models` is required (`id`, `name`, `provider` alias, `context`,
+  `abilities`). Settings generates the file from the ticked models. Tools also need
+  a top-level `tools` block, which the person adds from Raycast's guide.
+- **BrowserOS** (general API): `chrome://browseros/settings`, the "OpenAI Compatible"
+  card: Base URL `https://<host>/api/v1`, model id, key.
+- **JetBrains AI Assistant** (coding API): Settings > Tools > AI Assistant >
+  Providers & API keys (Models & API keys in newer versions) > OpenAI-compatible:
+  URL `https://<host>/api/code/v1` and the key, then Test Connection. The Anthropic
+  format is not supported there. Menu names change between versions, so the guide
+  gives values only.
+- **VS Code** (a coding tool: the coding API's base URL and models): run
+  *Chat: Manage Language Models* → *Add Models* → *Custom Endpoint* and use the
+  generated entry as the `chatLanguageModels.json` provider: `vendor: "customendpoint"`, `apiType: "chat-completions"`,
   `apiKey: "${input:tomverseApiKey}"` (VS Code asks once and keeps it in its
   secret storage), per model the full `/chat/completions` URL, `toolCalling`,
   `vision`, `streaming`, `maxInputTokens`, `maxOutputTokens`. VS Code's
@@ -601,8 +702,8 @@ compaction as unsupported (`capabilities.remote_compaction` default), so no
 
 ### 10.4 Client configuration (`lib/externalApiCodingTools.ts`)
 
-- **Claude Code:** `ANTHROPIC_BASE_URL=https://<host>/api/anthropic` (the client
-  adds `/v1/messages`), `ANTHROPIC_AUTH_TOKEN=<key>` (`x-api-key` is accepted
+- **Claude Code:** `ANTHROPIC_BASE_URL=https://<host>/api/code/anthropic` (the
+  coding API; the client adds `/v1/messages`), `ANTHROPIC_AUTH_TOKEN=<key>` (`x-api-key` is accepted
   too), every model alias (`ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_OPUS/SONNET/HAIKU_MODEL`,
   `CLAUDE_CODE_SUBAGENT_MODEL`) pinned to offered models,
   `CLAUDE_CODE_MAX_OUTPUT_TOKENS`, `CLAUDE_CODE_AUTO_COMPACT_WINDOW` below the
@@ -616,7 +717,7 @@ compaction as unsupported (`capabilities.remote_compaction` default), so no
   Without a review result Claude Code refuses actions that need one (Bash),
   and manual permission mode works regardless.
 - **Codex:** `[model_providers.tomverse]` in `~/.codex/config.toml`
-  (`wire_api = "responses"`, `env_key = "TOMVERSE_API_KEY"`, request and stream
+  (`base_url = "https://<host>/api/code/v1"`, `wire_api = "responses"`, `env_key = "TOMVERSE_API_KEY"`, request and stream
   retries 0, `supports_websockets = false`) and a profile file
   `~/.codex/tomverse.config.toml` (`model_provider`, `model`,
   `web_search = "disabled"`, `approvals_reviewer = "user"`, `review_model`,
@@ -629,10 +730,17 @@ compaction as unsupported (`capabilities.remote_compaction` default), so no
   each thread with a small model it picks itself (observed: `gpt-6-luna`);
   that is one more ordinary request with its own credits, and there is no
   setting to change its model.
-- **Cursor:** OpenAI API key + base-URL override + a fixed custom model, on the
-  Chat Completions route. Cursor's backend makes the calls, so only a public
-  HTTPS deployment works; Tab, Cursor's own models and cloud agents never use
-  the key.
+- **Cursor:** OpenAI API key + base-URL override (`https://<host>/api/code/v1`)
+  + a custom model, on the coding API's Chat Completions route. Settings offers
+  `smart-adaptive` first (verified with Cursor on production, 10.5); the public
+  guide at `/developers/cursor` lists every model ID a paid key can name, read
+  from the live chat catalogue with `isExternalApiServableModel`, plus the
+  retired IDs and their catalogue replacements. That is the coding API's list
+  while `CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED` is off (production,
+  2026-11-21); turning it on changes the coding API's models, and the guide's
+  table must then read the coding catalogue before the switch goes on. Cursor's
+  backend makes the calls, so only a public HTTPS deployment works; Tab,
+  Cursor's own models and cloud agents never use the key.
 
 ### 10.5 Verification
 
@@ -693,11 +801,13 @@ credit, and the receipts matched the server's request times. With model
 (section 6) for a model name it recognises. Accepting the object form was not
 enough -- after it was deployed the 400 named a string -- so the string form is
 accepted too, and `reasoning` is left out where the model takes no effort.
+With that deployed (2026-11-21, release #4131), Cursor Chat with `gpt-6-luna`
+answered: 3 requests, each 200 once, no server errors.
 
 Not yet verified, each a separate step: other operating systems, Claude Code
 and Codex against a deployed environment (their runs above called the handlers
-directly, not through the Next.js server), Cursor against production with a
-named model once the `reasoning` string is accepted, and native Smart Adaptive
+directly, not through the Next.js server), Cursor Agent with a named model on
+production (Chat is verified above), and native Smart Adaptive
 (section 10.6) with real models or real clients end to end.
 
 ### 10.6 Smart Adaptive on the native protocols (`lib/externalApiNativeSmartAdaptive.ts`)
@@ -789,8 +899,11 @@ providers, so signed or encrypted state is never sent to another provider.
 ## 11. Tomverse CLI (`apps/tomverse-cli`)
 
 Tomverse's own coding agent, `@tomverse/cli` (bin `tomverse`), is a client of
-this API like any other: Chat Completions only, one key, the account's shared
-credits, the key cap as the only hard credit limit. No separate wallet, task
+the coding API like Claude Code, Codex and Cursor: `https://tomverse.app/api/code/v1`
+by default, Chat Completions only, one key, the account's shared credits, the
+key cap as the only hard credit limit. An endpoint saved before the move ends
+in `/api/v1` and is read as `/api/code/v1` on the same server
+(`apps/tomverse-cli/src/config.ts`). No separate wallet, task
 price, Conversation, `productKey` or server-side agent. The user guide and
 output contract are in `apps/tomverse-cli/README.md`.
 

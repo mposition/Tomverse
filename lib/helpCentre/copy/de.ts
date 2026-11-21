@@ -832,7 +832,7 @@ export const de: HelpLocaleCopy = {
       summary: "Nach der Löschanfrage werden Sie sofort abgemeldet, und nach einer Frist von 7 Tagen werden Ihre Daten einschließlich Unterhaltungen und Dateien dauerhaft gelöscht. Die für Zahlungen und gesetzliche Pflichten nötigen Mindestaufzeichnungen sowie Aufzeichnungen zum Abbestellen von E-Mails können bestehen bleiben.",
       steps: [
         { title: "Zuerst herunterladen (empfohlen)", body: "Wenn Sie Daten behalten möchten, laden Sie sie zuerst wie in der Anleitung „Eigene Kontodaten herunterladen“ herunter." },
-        { title: "Gefahrenbereich öffnen", body: "Klicken Sie in den „Einstellungen“ im Tab „Konto“ weiter unten im „Gefahrenbereich“ auf „Konto löschen“." },
+        { title: "Kontolöschung öffnen", body: "Klicken Sie in den „Einstellungen“ ganz unten im Tab „Konto“ auf „Konto löschen“." },
         { title: "Bestätigung eingeben", body: "Setzen Sie den Haken bei der Zustimmung und geben Sie genau DELETE MY ACCOUNT ein." },
         { title: "Anfrage senden", body: "Klicken Sie auf „Konto löschen“ und dann noch einmal auf „Dauerhafte Löschung bestätigen“. Erscheint der Hinweis, sich erneut anzumelden, melden Sie sich an und wiederholen Sie den Vorgang." },
       ],

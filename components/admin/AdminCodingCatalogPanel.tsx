@@ -5,7 +5,7 @@ import { Plus, RefreshCw } from "lucide-react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { CodingModelDetail, CodingModelForm, type CodingModelFormValue } from "@/components/admin/modelCatalog/CodingCatalogViews";
-import { CodingCandidates, CodingLinkDetail } from "@/components/admin/modelCatalog/CodingLinkViews";
+import { CodingCandidates, CodingChannelsTile, CodingLinkDetail } from "@/components/admin/modelCatalog/CodingLinkViews";
 import {
   CandidateSummary,
   CodingChannelBanner,
@@ -48,6 +48,7 @@ import {
   refusalReasons,
 } from "@/lib/adminModelCatalogFlow";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
+import { CODING_DRAFT_QUERY_KEYS, codingDraftRequest } from "@/lib/codingCatalogDraftLink";
 
 // Admin > Models > Coding catalog (owner decision 2026-11-20; Figma "코딩
 // 카탈로그 시안 v1"). Two sections: the models (both kinds of row, the chat
@@ -87,6 +88,13 @@ const initialView = (): View => {
   return new URLSearchParams(window.location.search).get("view") === "providers" ? "providers" : "models";
 };
 
+/** Drops a handled discovery link's query, so a reload does not open the form again. */
+const clearCodingDraftQuery = () => {
+  const url = new URL(window.location.href);
+  for (const key of CODING_DRAFT_QUERY_KEYS) url.searchParams.delete(key);
+  window.history.replaceState(window.history.state, "", url);
+};
+
 export function AdminCodingCatalogPanel() {
   const c = useAdminMessages(adminCodingCatalogMessages);
   const m = useAdminMessages(adminModelCatalogMessages);
@@ -116,6 +124,8 @@ export function AdminCodingCatalogPanel() {
   const [codingEdits, setCodingEdits] = useState<Record<string, CodingEditValue>>({});
   const [codingForm, setCodingForm] = useState<CodingModelFormValue | null>(null);
   const [drafting, setDrafting] = useState<{ modelId: string; startedAt: number } | null>(null);
+  // A link from the discovery queue (?draft=coding&provider=&api=), held until the report has loaded.
+  const [pendingDraft, setPendingDraft] = useState<{ provider: string; apiModelId: string } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showToast = useCallback((value: CatalogToastValue | null) => {
@@ -145,6 +155,7 @@ export function AdminCodingCatalogPanel() {
   useEffect(() => {
     queueMicrotask(() => {
       setView(initialView());
+      setPendingDraft(codingDraftRequest(window.location.search));
       void load();
     });
   }, [load]);
@@ -155,10 +166,40 @@ export function AdminCodingCatalogPanel() {
     return () => clearInterval(timer);
   }, [adding, providerDrafting, drafting]);
 
+  const providerRows = useMemo(() => report?.providers ?? [], [report]);
   const items = useMemo(() => (report ? codingCatalogItems(report) : []), [report]);
   const shown = useMemo(() => filterCodingItems(items, filter), [items, filter]);
   const openItem = items.find((item) => item.id === openId) ?? null;
-  const providerRows = useMemo(() => report?.providers ?? [], [report]);
+
+  // The discovery queue sends a coding model here with its provider and API
+  // model id filled in. The form opens prefilled (the provider's confirmed
+  // terms and retention pages too, when it has them); nothing is written until
+  // the operator confirms. A model already in the catalogue opens its row.
+  useEffect(() => {
+    if (!pendingDraft || !report) return;
+    const request = pendingDraft;
+    queueMicrotask(() => {
+      setPendingDraft(null);
+      clearCodingDraftQuery();
+      const existing = items.find((item) => item.id === request.apiModelId);
+      if (existing) {
+        setView("models");
+        setOpenId(existing.id);
+        return;
+      }
+      const provider = report.draftProviders.some((entry) => entry.provider === request.provider)
+        ? request.provider
+        : (report.draftProviders[0]?.provider ?? request.provider);
+      const terms = providerRows.find((row) => row.provider === provider)?.terms ?? null;
+      setView("models");
+      setCodingForm({
+        ...emptyCodingForm(provider),
+        apiModelId: request.apiModelId,
+        termsUrl: terms?.termsUrl ?? "",
+        retentionUrl: terms?.retentionUrl ?? "",
+      });
+    });
+  }, [pendingDraft, report, items, providerRows]);
   const pendingIds = useMemo(() => new Set((report?.snapshot?.pendingChanges ?? []).map((change) => change.modelId)), [report]);
   const reason = useCallback((code: string) => reasonText(m, reasonMessage(code)), [m]);
 
@@ -244,6 +285,16 @@ export function AdminCodingCatalogPanel() {
       delete next[item.id];
       return next;
     });
+    await load();
+    showToast({ tone: "ok", title: c.detail.saved });
+  };
+
+  // A dedicated row's settings here: where it is offered, and its coding API credits.
+  const saveChannels = async (item: CodingCatalogItem, settings: { channels?: string[]; apiCreditWeight?: number | null }) => {
+    setBusy(true);
+    const result = await send(CODING_API, "POST", { action: "settings", modelId: item.id, settings });
+    setBusy(false);
+    if (!result.ok) return;
     await load();
     showToast({ tone: "ok", title: c.detail.saved });
   };
@@ -500,6 +551,15 @@ export function AdminCodingCatalogPanel() {
             setHoldReason("");
             setHold({ modelId: openItem.id, name: openItem.name });
           }}
+          channels={
+            <CodingChannelsTile
+              key={`${openItem.id}:${openItem.channels.join(",")}:${openItem.apiCredit?.override ?? ""}`}
+              c={c}
+              item={openItem}
+              busy={busy}
+              onSave={(settings) => void saveChannels(openItem, settings)}
+            />
+          }
         />
       ) : drafting && !items.some((item) => item.id === drafting.modelId) ? (
         <AdminStateBlock kind="loading" />

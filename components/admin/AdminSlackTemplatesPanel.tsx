@@ -31,6 +31,7 @@ const EMPTY_WEBHOOK_CONFIGURATION: WebhookConfiguration = {
   provider_usage_daily: false,
   provider_model_catalog_daily: false,
   provider_alert: false,
+  promotion_alert: false,
 };
 
 export function AdminSlackTemplatesPanel() {

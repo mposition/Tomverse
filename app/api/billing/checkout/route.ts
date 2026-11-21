@@ -23,6 +23,7 @@ import {
   PROMOTION_CHECKOUT_TTL_SECONDS,
   releasePromotionCheckout,
   reservePromotionCheckout,
+  bindPromotionCheckoutLease,
   validatePromotionForCheckout,
   type PromotionRiskFlag,
 } from "@/lib/billingPromotionSecurity";
@@ -35,6 +36,7 @@ import { checkoutPlanEligibilityBlock } from "@/lib/checkoutPlanEligibilityCore"
 import { FOUNDING_TESTER_PASS_STARTED_TEMPLATE } from "@/lib/emailTemplateDefinitions";
 import { enqueueStandardEmail } from "@/lib/standardEmailLane";
 import { prisma } from "@/lib/prisma";
+import { alertOnPromotionBurst } from "@/lib/promotionBurstAlert";
 import { lockSubscriptionAccount } from "@/lib/subscriptionEntitlements";
 import { getPublicAppOrigin } from "@/lib/publicUrl";
 import { PRODUCT_SURFACE_PATH } from "@/lib/productSurfaceRoutes";
@@ -617,6 +619,10 @@ export async function POST(req: Request) {
         clientIpHash: promotionClientIpHash,
         riskFlags: promotionRiskFlags,
       });
+      // A pass never reaches the checkout webhook, so its burst check runs here.
+      await alertOnPromotionBurst(internalPass.id).catch((alertError) => {
+        console.error("Promotion burst alert failed:", alertError);
+      });
       // Queued rather than sent here: a pass that activated and a welcome that
       // never arrived leaves somebody with sixty days of Pro and no idea why
       // (docs/policy/email-notifications.md §2.4).
@@ -851,6 +857,22 @@ export async function POST(req: Request) {
         }
       );
 
+      if (appliedPromotion) {
+        // Tie the lease to this Session, so only this Session's webhooks can
+        // release it. Not fatal: an unbound lease is still released by time,
+        // as before, and expires on its own.
+        await bindPromotionCheckoutLease(
+          appliedPromotion.id,
+          user.id,
+          checkoutSession.id
+        ).catch((bindError) => {
+          console.error("Promotion checkout lease bind failed.", {
+            traceId,
+            promotionId: appliedPromotion.id,
+            errorName: bindError instanceof Error ? bindError.name : "UnknownError",
+          });
+        });
+      }
       return NextResponse.json({ url: checkoutSession.url });
     } catch (error) {
       if (promotionLeaseReserved && appliedPromotion) {

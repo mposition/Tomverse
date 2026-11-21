@@ -159,7 +159,6 @@ export type ReasonMessage =
   | { key: "chatPriceUnverified" }
   | { key: "reasoningCostUnbounded" }
   | { key: "providerCostUnbounded" }
-  | { key: "dedicatedCodeOnly" }
   | { key: "providerTermsMissing" }
   | { key: "providerTermsExpired" }
   | { key: "alreadyInCatalog" }
@@ -283,8 +282,6 @@ export const reasonMessage = (code: string, detail = ""): ReasonMessage => {
       return { key: "reasoningCostUnbounded" };
     case "provider_cost_unbounded":
       return { key: "providerCostUnbounded" };
-    case "dedicated_code_only":
-      return { key: "dedicatedCodeOnly" };
     case "provider_terms_missing":
       return { key: "providerTermsMissing" };
     case "provider_terms_expired":
@@ -545,9 +542,30 @@ export type CodingLinkView = {
 };
 
 export const CODING_PLANS = ["Free", "Pro", "Max"] as const;
-export const CODING_CHANNEL_ORDER = ["code", "api", "cli"] as const;
+/**
+ * The channels the screen shows and sets: Code, and the coding API (owner
+ * decision 2026-11-21). A row stored with the older "cli" channel reads as the
+ * coding API; saving writes "api".
+ */
+export const CODING_CHANNEL_ORDER = ["code", "api"] as const;
+export const codingChannelsShown = (channels: readonly string[]): string[] =>
+  CODING_CHANNEL_ORDER.filter((channel) => (channel === "api" ? channels.includes("api") || channels.includes("cli") : channels.includes(channel)));
 export const CODING_TOOL_CALLING_VALUES = ["none", "basic", "parallel"] as const;
 export const CODING_STRUCTURED_OUTPUT_VALUES = ["none", "json_mode", "strict_schema", "forced_tool_use", "response_schema"] as const;
+
+/**
+ * A dedicated row's two credits (owner decision 2026-11-21): Code's
+ * managed-path credits, and the coding API's -- the chat rule's minimum unless
+ * the operator set a higher override (lib/codingRowRuntime.ts codingApiCreditView).
+ */
+export type CodingApiCreditView = {
+  codeCredits: number;
+  override: number | null;
+  floorCredits: number | null;
+  credits: number | null;
+  basis: "chat_rule_floor" | "api_override" | null;
+  refusal: string | null;
+};
 
 export type CodingCatalogItem = {
   id: string;
@@ -573,6 +591,8 @@ export type CodingCatalogItem = {
   profile: CodingResolvedView | null;
   /** The credit weight's floor at the stored profile's prices. */
   floor: number | null;
+  /** A dedicated row's coding API credits; null for a link or an unreadable row. */
+  apiCredit: CodingApiCreditView | null;
   problem: string | null;
   admission: Admission | null;
   draft: CodingProfileView | null;
@@ -618,6 +638,7 @@ export const codingCatalogItems = (report: {
     draft: unknown;
     draftCreatedAt?: string | null;
     floor?: number | null;
+    apiCredit?: CodingApiCreditView | null;
     draftReview?: { floor: number | null; reasons: string[] } | null;
   }>;
 }): CodingCatalogItem[] =>
@@ -626,7 +647,7 @@ export const codingCatalogItems = (report: {
     const draft = looksLikeCodingProfile(row.draft) ? row.draft : null;
     const link = looksLikeLink(row.stored) ? row.stored : null;
     const shown = draft ?? profile;
-    const channels = (profile as { channels?: string[] } | null)?.channels ?? link?.channels ?? ["code"];
+    const channels = codingChannelsShown((profile as { channels?: string[] } | null)?.channels ?? link?.channels ?? ["code"]);
     return {
       id: row.modelId,
       name: profile?.name ?? row.chat?.name ?? draft?.name ?? row.modelId,
@@ -644,6 +665,7 @@ export const codingCatalogItems = (report: {
       chat: row.chat ?? null,
       profile,
       floor: row.floor ?? null,
+      apiCredit: row.apiCredit ?? null,
       problem: row.problem,
       admission: row.admission,
       draft,
@@ -715,7 +737,7 @@ export const codingSettingsFrom = (link: CodingLinkView): CodingSettingsValue =>
   structuredOutput: link.capabilities.structuredOutput,
   minimumPlan: link.minimumPlan ?? "",
   creditWeight: link.creditWeight === undefined ? "" : String(link.creditWeight),
-  channels: CODING_CHANNEL_ORDER.filter((channel) => link.channels.includes(channel)),
+  channels: codingChannelsShown(link.channels),
 });
 
 /** The weight a link would charge with these settings: its own, or chat's. */
@@ -761,6 +783,38 @@ export const codingSettingsRequest = (link: CodingLinkView, value: CodingSetting
   const channels = CODING_CHANNEL_ORDER.filter((channel) => value.channels.includes(channel));
   if (channels.join(",") !== before.channels.join(",")) out.channels = channels;
   return out;
+};
+
+/**
+ * A dedicated row's settings form (owner decision 2026-11-21): its channels,
+ * and its coding API credits. The override is read only while the coding API
+ * is ticked -- with it off the field is hidden, so neither its value nor its
+ * check holds the save back, and nothing about it is sent.
+ */
+export const codingDedicatedSettings = (input: {
+  channels: readonly string[];
+  storedChannels: readonly string[];
+  /** The override field as typed; "" is the chat rule's minimum. */
+  override: string;
+  storedOverride: number | null;
+}) => {
+  const ordered = CODING_CHANNEL_ORDER.filter((channel) => input.channels.includes(channel));
+  const channelsChanged = ordered.join(",") !== input.storedChannels.join(",");
+  const onApi = ordered.includes("api");
+  const typed = input.override.trim() === "" ? null : Number(input.override.trim());
+  const overrideInvalid = onApi && typed !== null && (!Number.isInteger(typed) || typed <= 0 || typed > 1_000);
+  const overrideChanged = onApi && !overrideInvalid && typed !== input.storedOverride;
+  const request: { channels?: string[]; apiCreditWeight?: number | null } = {
+    ...(channelsChanged ? { channels: ordered } : {}),
+    ...(overrideChanged ? { apiCreditWeight: typed } : {}),
+  };
+  return {
+    onApi,
+    typed,
+    overrideInvalid,
+    canSave: ordered.length > 0 && !overrideInvalid && (channelsChanged || overrideChanged),
+    request,
+  };
 };
 
 /** Whether the stored profile is what the Code client is served now. */

@@ -52,6 +52,13 @@ const REGISTRY = {
     owner: "database",
     reason: "The OAuth handler and maintenance own the authorization lifecycle. The callback's untrusted state parameter is an opaque lookup token, never the stored lifecycle state.",
   },
+  ExternalApiRequest_surface_check: {
+    owner: "list",
+    module: "lib/externalApiCatalogCore.ts",
+    list: "EXTERNAL_API_SURFACES",
+    reason:
+      "Which external API a request came through, decided by its route (general or coding) and written by the receipt in lib/externalApiAdmission.ts. NULL is a request recorded before the column existed.",
+  },
   Feedback_answerSignal_check: {
     owner: "list",
     module: "lib/feedbackPolicy.ts",

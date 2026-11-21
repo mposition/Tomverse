@@ -98,6 +98,7 @@ for (const lang of ["en", "ko"] as const) {
     await expect(page.getByTestId("review-demo-caption")).toBeVisible();
     await expect(page.locator("#modes").getByRole("tab")).toHaveCount(2);
     await expect(page.locator("#review-mode-panel")).toBeVisible();
+    // A guest's Review CTA carries the preview marker (lib/productEntryDestination.ts).
     await expect(page.getByTestId("landing-primary-cta")).toHaveAttribute(
       "href", `/review?lang=${lang}&entry=guest-preview`
     );
@@ -252,10 +253,12 @@ test("the API tool tabs switch the sample settings with the keyboard without cal
   await tabs.nth(0).click();
   await expect(tabs.nth(0)).toHaveAttribute("aria-selected", "true");
   await expect(panel).toContainText("~/.codex/config.toml");
+  await expect(panel).toContainText("https://tomverse.app/api/code/v1");
   await page.keyboard.press("ArrowRight");
   await expect(tabs.nth(1)).toBeFocused();
   await expect(tabs.nth(1)).toHaveAttribute("aria-selected", "true");
   await expect(panel).toContainText("ANTHROPIC_BASE_URL");
+  await expect(panel).toContainText("https://tomverse.app/api/code/anthropic");
   await page.keyboard.press("ArrowLeft");
   await expect(tabs.nth(0)).toHaveAttribute("aria-selected", "true");
   await expect(panel).toContainText("~/.codex/config.toml");

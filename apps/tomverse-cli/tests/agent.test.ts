@@ -36,13 +36,13 @@ test("read -> approved patch -> approved test command -> report, over the real H
         assert.equal((command.output as { exitCode: number }).exitCode, 0);
         assert.match((command.output as { stdout: string }).stdout, /PASS/);
 
-        // Wire: four generations, each POST /api/v1/chat/completions with its own
+        // Wire: four generations, each POST /api/code/v1/chat/completions with its own
         // Idempotency-Key, the key only in Authorization, no retries.
         assert.equal(gateway.completions.length, 4);
         const keys = gateway.completions.map((c) => c.headers["idempotency-key"]);
         assert.equal(new Set(keys).size, 4, "a new Idempotency-Key per generation");
         for (const c of gateway.completions) {
-            assert.equal(c.url, "/api/v1/chat/completions");
+            assert.equal(c.url, "/api/code/v1/chat/completions");
             assert.equal(c.headers.authorization, `Bearer ${TEST_KEY}`);
             assert.match(String(c.headers["user-agent"]), /^tomverse-cli\//);
             assert.equal(c.body.model, "fake-coder");

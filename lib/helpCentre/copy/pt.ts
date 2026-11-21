@@ -831,7 +831,7 @@ export const pt: HelpLocaleCopy = {
       summary: "Ao pedir a exclusão, você é desconectado na hora e, depois de 7 dias de carência, os dados, incluindo conversas e arquivos, são apagados de forma permanente. Os registros mínimos necessários para cobrança e obrigações legais e os registros de cancelamento de inscrição podem permanecer.",
       steps: [
         { title: "Antes, baixar (recomendado)", body: "Se quiser guardar algum dado, baixe-o antes seguindo o guia “Baixar os dados da sua conta”." },
-        { title: "Abrir a zona de risco", body: "Em “Configurações”, na parte de baixo da aba “Conta”, em “Zona de risco”, toque em “Excluir conta”." },
+        { title: "Abrir a exclusão da conta", body: "Em “Configurações”, no fim da aba “Conta”, toque em “Excluir conta”." },
         { title: "Digitar a confirmação", body: "Marque a caixa de concordância e digite exatamente DELETE MY ACCOUNT." },
         { title: "Enviar o pedido", body: "Toque em “Excluir conta” e, depois, mais uma vez em “Solicitar exclusão da conta”. Se aparecer o aviso para entrar de novo, entre e repita." },
       ],

@@ -306,6 +306,7 @@ const receiptSelect = {
     modelId: true,
     stream: true,
     protocol: true,
+    surface: true,
     clientName: true,
     finishReason: true,
     errorCode: true,
@@ -330,6 +331,8 @@ type ReceiptRow = {
     modelId: string;
     stream: boolean;
     protocol: string;
+    /** general | coding; null on a request recorded before the column existed. */
+    surface: string | null;
     clientName: string | null;
     finishReason: string | null;
     errorCode: string | null;
@@ -354,6 +357,8 @@ const toReceipt = (row: ReceiptRow) => {
         modelId: row.modelId,
         stream: row.stream,
         protocol: row.protocol,
+        // Which API it came through; null is "not recorded" (older requests).
+        surface: row.surface,
         client: row.clientName,
         createdAt: row.createdAt.toISOString(),
         completedAt: row.completedAt?.toISOString() ?? null,

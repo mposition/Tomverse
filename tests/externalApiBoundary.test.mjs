@@ -25,6 +25,18 @@ const BEARER_FILES = [
     "lib/externalApiNative.ts",
     "lib/externalApiNativeSpecs.ts",
     "lib/externalApiNativeUpstream.ts",
+    "lib/externalApiModelRoutes.ts",
+    // The coding API (owner decision 2026-11-21): the same handlers on their own addresses.
+    "app/api/code/v1/chat/completions/route.ts",
+    "app/api/code/v1/responses/route.ts",
+    "app/api/code/v1/models/route.ts",
+    "app/api/code/v1/usage/route.ts",
+    "app/api/code/v1/requests/status/route.ts",
+    "app/api/code/anthropic/v1/messages/route.ts",
+    "app/api/code/anthropic/v1/messages/count_tokens/route.ts",
+    "app/api/code/anthropic/v1/models/route.ts",
+    "lib/codingCatalogChannels.ts",
+    "lib/codingRowRuntime.ts",
 ];
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
@@ -49,6 +61,14 @@ test("only the exact completion path skips the Origin check", () => {
         assert.equal(requiresMutationOriginCheck("POST", `${exact}/x`), true, `${exact}/x`);
     }
     assert.equal(requiresMutationOriginCheck("POST", "/api/anthropic/v1/other"), true);
+    // The coding API's generation routes, on the same exact-path condition.
+    for (const exact of ["/api/code/v1/chat/completions", "/api/code/v1/responses", "/api/code/anthropic/v1/messages", "/api/code/anthropic/v1/messages/count_tokens"]) {
+        assert.equal(requiresMutationOriginCheck("POST", exact), false, exact);
+        assert.equal(requiresMutationOriginCheck("POST", `${exact}/x`), true, `${exact}/x`);
+    }
+    // Code's managed path keeps the Origin check.
+    assert.equal(requiresMutationOriginCheck("POST", "/api/code/managed"), true);
+    assert.equal(requiresMutationOriginCheck("POST", "/api/code/v1/other"), true);
     assert.equal(requiresMutationOriginCheck("POST", "/api/v1/responses/compact"), true, "no remote compaction endpoint exists");
 });
 
@@ -74,6 +94,46 @@ test("native protocols: one upstream call per request, at a fixed provider URL w
     for (const line of logs) {
         assert.ok(!/authorization|\.key\b|\braw\b|\bbody\b|payload|upstreamBody|\btext\b/.test(line), line);
     }
+});
+
+test("each route names its API by its address, and the receipt records it", () => {
+    // The general API: /api/v1 and /api/anthropic. The coding API: /api/code/...
+    const routes = {
+        "app/api/v1/chat/completions/route.ts": "general",
+        "app/api/v1/responses/route.ts": "general",
+        "app/api/v1/models/route.ts": "general",
+        "app/api/anthropic/v1/messages/route.ts": "general",
+        "app/api/anthropic/v1/messages/count_tokens/route.ts": "general",
+        "app/api/anthropic/v1/models/route.ts": "general",
+        "app/api/code/v1/chat/completions/route.ts": "coding",
+        "app/api/code/v1/responses/route.ts": "coding",
+        "app/api/code/v1/models/route.ts": "coding",
+        "app/api/code/anthropic/v1/messages/route.ts": "coding",
+        "app/api/code/anthropic/v1/messages/count_tokens/route.ts": "coding",
+        "app/api/code/anthropic/v1/models/route.ts": "coding",
+    };
+    for (const [file, surface] of Object.entries(routes)) {
+        const source = read(file);
+        const named = [...source.matchAll(/surface: "(general|coding)"|, "(general|coding)"\)/g)].map((match) => match[1] ?? match[2]);
+        assert.deepEqual(named, [surface], file);
+        assert.ok(!/user-agent/i.test(source), `${file}: the User-Agent decides nothing`);
+    }
+    // Both generation handlers hand the route's API to the receipt.
+    for (const file of ["lib/externalApiInference.ts", "lib/externalApiNative.ts"]) {
+        assert.match(read(file), /externalApiAdmissionHook\(\{[\s\S]*?surface: options\.surface,[\s\S]*?\}\)/, file);
+    }
+    const admission = read("lib/externalApiAdmission.ts");
+    assert.match(admission, /surface: ExternalApiSurface;/, "required, never defaulted");
+    assert.match(admission, /surface: input\.surface,/);
+    // And the key's receipts return it, null for rows recorded before it existed.
+    const keysSource = read("lib/externalApiKeys.ts");
+    assert.match(keysSource, /surface: true,/);
+    assert.match(keysSource, /surface: row\.surface,/);
+    // The CHECK constraint and the application list are one set.
+    const migration = read("prisma/migrations/20261121120000_external_api_request_surface/migration.sql");
+    assert.match(migration, /ADD COLUMN "surface" TEXT,/);
+    assert.match(migration, /CHECK \("surface" IN \('general', 'coding'\)\)/);
+    assert.ok(!/UPDATE\s+"ExternalApiRequest"/i.test(migration), "no backfill: older rows stay NULL");
 });
 
 test("request status lookup is a read: GET only, key-scoped, no dispatch, reservation or write", () => {

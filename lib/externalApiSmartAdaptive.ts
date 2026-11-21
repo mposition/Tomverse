@@ -4,7 +4,7 @@ import { assertOperationalFeatureEnabled } from "@/lib/appSettings";
 import { pickAutoModelWithLlm } from "@/lib/autoLlmRouter";
 import type { CodingRouterContext } from "@/lib/autoLlmRouterCore";
 import { keyCreditTotals } from "@/lib/externalApiAdmission";
-import type { externalApiRunnableModels } from "@/lib/externalApiCatalog";
+import { withCandidateModels, type externalApiRunnableModels } from "@/lib/externalApiCatalog";
 import { isSmartAdaptiveOnlyModel, smartAdaptiveRouterEnabled } from "@/lib/externalApiCatalogCore";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { DEFAULT_MODEL_ID } from "@/lib/models";
@@ -362,7 +362,8 @@ export const pickWithSmartAdaptiveRouter = async (input: {
         eligibleModelIds: eligible.map((entry) => entry.model.id),
         // Every runtime model, not just the candidates: the router model set in
         // Admin › Routing is looked up here and need not be a candidate itself.
-        models: await getRuntimeModels(),
+        // A dedicated coding row is not a runtime model; it joins as itself.
+        models: withCandidateModels(await getRuntimeModels(), eligible),
         creditsByModelId: Object.fromEntries(eligible.map((entry) => [entry.model.id, entry.capabilities.creditWeight])),
         ruleModelId: fallback.model.id,
         taskKind: "external_api",

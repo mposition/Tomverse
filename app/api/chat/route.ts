@@ -231,7 +231,7 @@ import { splitProviderInstructions } from "@/lib/chatProviderPrompt";
 import { resolveChatCompletionOutcome } from "@tomverse/chat-core";
 import { ERROR_REPORT_TOKEN_HEADER } from "@/lib/errorReportContract";
 import { issueChatErrorReportGrant } from "@/lib/traceErrorEvidence";
-import { streamFailureGrantInput } from "@/lib/chatStreamErrorReport";
+import { emptyResponseCause, streamFailureGrantInput } from "@/lib/chatStreamErrorReport";
 import {
     consumePerplexityResponseCapture,
     consumePerplexityUsage,
@@ -4064,6 +4064,8 @@ async function handleChatPost(
             name: string;
             scope: "current_turn" | "past_turn";
         }> = [];
+        // User files (images, native PDFs) the provider is sent as file parts.
+        let nativeFilePartCount = 0;
 
         for (const [messageIndex, msg] of executionMessages.entries()) {
             if (msg.role === "assistant") {
@@ -5059,6 +5061,7 @@ async function handleChatPost(
             estimatedInputTokens +=
                 estimateTextTokens(text) + nativeAttachmentTokens;
 
+            nativeFilePartCount += fileParts.length;
             formattedMessages.push({
                 role: "user",
                 content: [
@@ -7204,6 +7207,10 @@ async function handleChatPost(
                         elapsedMs: Date.now() - firstTokenWatchStartedAt,
                     })
                 );
+                // Checkpoints renew the attempt's lease only once text
+                // arrives; a first token minutes away would otherwise find
+                // it expired at the terminal CAS (2026-11-21).
+                durableCheckpointWriter?.renewLease();
             }, plan.intervalMs);
             // Same reason as the lease heartbeat: a pending timer must never
             // be why a worker stays up after its request is done.
@@ -8431,6 +8438,7 @@ async function handleChatPost(
                         let streamErrorReport: ReturnType<
                             typeof issueStreamErrorReport
                         > = null;
+                        let attachmentRejected = false;
                         if (
                             isEmptyResponse &&
                             durableAttempt &&
@@ -8455,28 +8463,45 @@ async function handleChatPost(
                             durableCheckpointWriter = null;
                         }
                         if (isEmptyResponse) {
-                            const completionMetadata = safeErrorMetadata(
-                                completionError
-                            );
                             const finishReasonCode = String(
                                 rawFinishReason || finishReason || "unknown"
                             )
                                 .replace(/[^A-Za-z0-9_.-]/g, "_")
                                 .toUpperCase()
                                 .slice(0, 40);
-                            const diagnosticCode = completionError
-                                ? providerDiagnosticCode(
-                                      "AI_EMPTY_RESPONSE",
-                                      completionError
-                                  )
-                                : `AI_EMPTY_RESPONSE.${finishReasonCode}`;
+                            // The provider's own HTTP error, when it sent one,
+                            // is the cause; the SDK's "no output" is the symptom.
+                            const emptyCause = emptyResponseCause({
+                                completionError,
+                                observedStreamError,
+                                finishReasonCode,
+                                carriedFiles: nativeFilePartCount > 0,
+                            });
+                            const diagnosticCode = emptyCause.diagnosticCode;
+                            const completionMetadata = safeErrorMetadata(
+                                emptyCause.cause
+                            );
+                            attachmentRejected = emptyCause.attachmentRejected;
+                            if (attachmentRejected) {
+                                console.warn(
+                                    JSON.stringify({
+                                        event: "chat_attachment_rejected_by_provider",
+                                        traceId,
+                                        provider: dispatched.provider,
+                                        modelId: dispatched.modelId,
+                                        httpStatus: completionMetadata.statusCode,
+                                        filePartCount: nativeFilePartCount,
+                                        timestamp: new Date().toISOString(),
+                                    })
+                                );
+                            }
                             // The server has just judged this turn failed, so a
                             // report of it can be verified like any other
                             // server error (operator decision 2026-11-16).
                             streamErrorReport = issueStreamErrorReport(
-                                "AI_EMPTY_RESPONSE",
+                                emptyCause.root,
                                 diagnosticCode,
-                                completionError
+                                emptyCause.cause
                             );
                             try {
                                 await recordProviderFailure(
@@ -8498,11 +8523,15 @@ async function handleChatPost(
                                             completionMetadata.isRetryable,
                                     }
                                 );
-                                await recordModelFailure(
-                                    dispatched.modelId,
-                                    dispatched.provider,
-                                    diagnosticCode
-                                );
+                                // A file the provider would not read says
+                                // nothing about the model's health.
+                                if (!attachmentRejected) {
+                                    await recordModelFailure(
+                                        dispatched.modelId,
+                                        dispatched.provider,
+                                        diagnosticCode
+                                    );
+                                }
                             } catch (error) {
                                 logRequestError(
                                     "provider_empty_response_record_failed",
@@ -8546,6 +8575,9 @@ async function handleChatPost(
                                     : {}),
                                 ...(streamErrorReport
                                     ? { errorReport: streamErrorReport }
+                                    : {}),
+                                ...(attachmentRejected
+                                    ? { failure: { kind: "attachment_rejected" as const } }
                                     : {}),
                             })
                         );

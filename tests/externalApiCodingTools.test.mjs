@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
     anthropicBaseUrl,
+    codingApiBaseUrl,
     claudeCodeConfig,
     codexConfig,
     codexModelId,
@@ -38,6 +39,16 @@ const gpt55Thinking = model("gpt-5-5-thinking", { provider: "openai", protocols:
 const smart = model("smart-adaptive", { provider: "tomverse", protocols: ["chat_completions", "anthropic_messages", "responses"], creditWeight: 9 });
 const opus = model("claude-opus-5", { provider: "anthropic", creditWeight: 12, contextWindowTokens: 1_000_000, maxOutputTokens: 128_000, protocols: ["chat_completions", "anthropic_messages"], providerModelId: "claude-opus-5" });
 const BASE = "https://tomverse.example/api/v1";
+
+test("two APIs on one host: the coding API beside the general one, each with its Anthropic namespace", () => {
+    assert.equal(codingApiBaseUrl(BASE), "https://tomverse.example/api/code/v1");
+    assert.equal(codingApiBaseUrl("https://tomverse.example/custom"), "https://tomverse.example/api/code/v1");
+    assert.equal(anthropicBaseUrl(BASE), "https://tomverse.example/api/anthropic");
+    assert.equal(anthropicBaseUrl(codingApiBaseUrl(BASE)), "https://tomverse.example/api/code/anthropic");
+    // Settings configures Claude Code with the coding API's base.
+    const env = Object.fromEntries(claudeCodeConfig(codingApiBaseUrl(BASE), sonnet, [sonnet, haiku]).env);
+    assert.equal(env.ANTHROPIC_BASE_URL, "https://tomverse.example/api/code/anthropic");
+});
 
 test("Claude Code: Anthropic namespace, every model alias pinned, 5-minute cache, placeholder key", () => {
     assert.equal(anthropicBaseUrl(BASE), "https://tomverse.example/api/anthropic");
@@ -102,7 +113,7 @@ test("Cursor and the per-tool model lists", () => {
     const lists = codingToolModels([smart, sonnet, haiku, luna]);
     assert.deepEqual(lists.claudeCode.map((m) => m.id), ["smart-adaptive", "claude-sonnet-5", "claude-haiku-4-5"]);
     assert.deepEqual(lists.codex.map((m) => m.id), ["smart-adaptive", "gpt-5-6-luna"]);
-    assert.ok(!lists.cursor.some((m) => m.id === "smart-adaptive"), "Agent starts on a fixed model");
+    assert.deepEqual(lists.cursor.map((m) => m.id), ["smart-adaptive", "claude-sonnet-5", "claude-haiku-4-5", "gpt-5-6-luna"], "Smart Adaptive first, verified with Cursor on production");
 });
 
 test("Smart Adaptive on Claude Code and Codex: scoped to the tool's provider, haiku alias fixed", () => {
@@ -129,7 +140,7 @@ test("Smart Adaptive on Claude Code and Codex: scoped to the tool's provider, ha
     assert.ok(codex.profileToml.includes("model_context_window = 192000"));
     // Asked which tools one Smart Adaptive entry serves, with nothing else to hand.
     const alone = codingToolModels([smart]);
-    assert.deepEqual([alone.claudeCode.length, alone.codex.length, alone.cursor.length], [1, 1, 0]);
+    assert.deepEqual([alone.claudeCode.length, alone.codex.length, alone.cursor.length], [1, 1, 1]);
 });
 
 test("a request names a model by Tomverse id or by one offered model's provider id, never another model", async () => {
@@ -148,14 +159,15 @@ test("a request names a model by Tomverse id or by one offered model's provider 
 });
 
 test("Tomverse CLI guide: off until published; key in the shell only; endpoint only when not the default", () => {
-    assert.equal(tomverseCliGuide({}, "https://tomverse.app/api/v1"), null);
-    assert.equal(tomverseCliGuide({ TOMVERSE_CLI_GUIDE_ENABLED: "1" }, "https://tomverse.app/api/v1"), null);
-    const guide = tomverseCliGuide({ TOMVERSE_CLI_GUIDE_ENABLED: "true" }, "https://tomverse.app/api/v1");
+    assert.equal(tomverseCliGuide({}, "https://tomverse.app/api/code/v1"), null);
+    assert.equal(tomverseCliGuide({ TOMVERSE_CLI_GUIDE_ENABLED: "1" }, "https://tomverse.app/api/code/v1"), null);
+    // The CLI's default endpoint is the coding API.
+    const guide = tomverseCliGuide({ TOMVERSE_CLI_GUIDE_ENABLED: "true" }, "https://tomverse.app/api/code/v1");
     assert.equal(guide.install, "npm install -g @tomverse/cli");
     assert.equal(guide.powershell, `$env:TOMVERSE_API_KEY = "${KEY_PLACEHOLDER}"\ntomverse doctor`);
     assert.equal(guide.posix, `export TOMVERSE_API_KEY="${KEY_PLACEHOLDER}"\ntomverse doctor`);
-    const staging = tomverseCliGuide({ TOMVERSE_CLI_GUIDE_ENABLED: "true" }, "https://dev.tomverse.app/api/v1");
-    assert.match(staging.posix, /tomverse config set endpoint 'https:\/\/dev\.tomverse\.app\/api\/v1'/);
+    const staging = tomverseCliGuide({ TOMVERSE_CLI_GUIDE_ENABLED: "true" }, "https://dev.tomverse.app/api/code/v1");
+    assert.match(staging.posix, /tomverse config set endpoint 'https:\/\/dev\.tomverse\.app\/api\/code\/v1'/);
     assert.match(tomverseCliGuide({ TOMVERSE_CLI_GUIDE_ENABLED: "true" }, "https://x.example/api/v1;rm -rf ~").posix, /endpoint 'https:\/\/x\.example\/api\/v1;rm -rf ~'/, "quoted as one argument");
     assert.ok(!/--api-key/.test(staging.posix + staging.powershell), "the key is never a command-line argument");
 });

@@ -10,7 +10,7 @@ export const adminCodingCatalogMessages = defineAdminMessages({
   en: {
     title: "Coding catalog",
     description:
-      "Choose and turn on the coding models Code, the API and the CLI use. A linked chat model keeps chat's name, prices, context and output limit.",
+      "Choose and turn on the coding models Code and the coding API use. A linked chat model keeps chat's name, prices, context and output limit.",
     refresh: "Refresh",
     addDedicated: "Add coding model",
     views: { models: "Models", providers: "Provider conditions" },
@@ -49,10 +49,10 @@ export const adminCodingCatalogMessages = defineAdminMessages({
     banner: {
       offTitle: "Switch-over pending: only Code's managed path reads this catalog",
       offBody: (env: string) =>
-        `/api/v1, Smart Adaptive, the tomverse CLI and the Claude Code, Codex and Cursor settings still use the chat registry. With ${env}=true they follow each row's channels in the newest snapshot.`,
-      onTitle: "External channels follow this catalog",
+        `The coding API (/api/code/v1 and /api/code/anthropic: Claude Code, Codex, Cursor, the tomverse CLI and its Smart Adaptive) still offers the chat registry, as the general API does. With ${env}=true it follows the rows with Coding API in the newest snapshot.`,
+      onTitle: "The coding API follows this catalog",
       onBody:
-        "/api/v1, Smart Adaptive and the coding-app settings offer the chat links whose channels include API; the tomverse CLI those with CLI. Requests still bill through chat. With no valid snapshot nothing is offered.",
+        "The coding API, its Smart Adaptive and the coding-app settings offer the rows whose channels include Coding API. A chat link bills as its chat model; a model chat does not have bills at its own row's prices and credits. The general API (/api/v1) keeps the chat registry. With no valid snapshot nothing is offered.",
     },
 
     filter: {
@@ -98,7 +98,7 @@ export const adminCodingCatalogMessages = defineAdminMessages({
       ready: "Ready to activate",
       snapshotChanged: "Changed since the snapshot",
     },
-    channel: { code: "Code", api: "API", cli: "CLI" },
+    channel: { code: "Code", api: "Coding API", cli: "Coding API" },
 
     candidates: {
       title: "Coding candidates among chat models",
@@ -145,7 +145,7 @@ export const adminCodingCatalogMessages = defineAdminMessages({
       show: "Show",
       hide: "Hide",
       footnote:
-        "Adding makes one LLM call over the provider's documentation (agent budget, not user credits). The model stays inactive and invisible to Code, the API and the CLI until you activate it.",
+        "Adding makes one LLM call over the provider's documentation (agent budget, not user credits). The model stays inactive and invisible to Code and the coding API until you activate it.",
       added: (name: string) => `Added ${name}. Check its coding settings.`,
     },
 
@@ -195,8 +195,17 @@ export const adminCodingCatalogMessages = defineAdminMessages({
       weightInvalid: "a whole number from 1 to 1000",
       channelsTitle: "Channels",
       channelsHelp:
-        "API: /api/v1 and the Claude Code, Codex and Cursor settings. CLI: the tomverse CLI model list. They apply while the external channels switch is on; Code reads the next published snapshot.",
+        "Coding API: /api/code/v1 and /api/code/anthropic, which Claude Code, Codex, Cursor and the tomverse CLI use. It applies after the next publish while the coding API switch is on; Code reads the next published snapshot too.",
       channelsNone: "Pick at least one channel.",
+      codeCreditsTitle: "Tomverse Code credits",
+      codeCreditsHelp: "Charged per call on Code's managed path. Its floor assumes the whole context window as input; a new draft changes it.",
+      apiCreditsTitle: "Coding API credits",
+      apiCreditsDefault: (n: number) => `Default: the chat rule's minimum, ×${n}`,
+      apiCreditsBelow: (n: number) => `Below the chat rule's minimum ×${n}: the coding API does not offer this model`,
+      apiCreditsUnbounded:
+        "The chat rule cannot price this model (no price or output cap, or a minimum above 1,000 credits), so the coding API does not offer it",
+      apiCreditsHelp:
+        "The coding API takes up to the chat input limit and charges by the chat rule. Leave blank to charge its minimum; enter a higher number to charge more. Applies after the next publish.",
       save: "Save settings",
       saved: "Saved the coding settings.",
       reset: "Undo changes",
@@ -237,7 +246,7 @@ export const adminCodingCatalogMessages = defineAdminMessages({
       title: (name: string) => `Activate ${name}?`,
       summary: (provider: string, apiModelId: string, source: string) => `${provider} · ${apiModelId} · ${source}`,
       effectChannels: (name: string, channels: string, plan: string, external: boolean) =>
-        `${name} becomes available on ${channels} (${plan} and up).${external ? "" : " API and CLI apply once the external channels switch is on."}`,
+        `${name} becomes available on ${channels} (${plan} and up).${external ? "" : " The coding API applies once its switch is on."}`,
       effectCredits: (weight: number) => `Each request charges credits at weight ×${weight}.`,
       effectProvider: (provider: string) => `The model's cost is paid to ${provider}.`,
       effectSnapshot: (version: number | null, until: string | null) =>
@@ -325,7 +334,7 @@ export const adminCodingCatalogMessages = defineAdminMessages({
   },
   ko: {
     title: "코딩 카탈로그",
-    description: "Code·API·CLI에서 쓸 코딩 모델을 고르고 켭니다. 채팅 모델을 연결하면 이름·단가·컨텍스트·최대 출력은 채팅 값을 그대로 씁니다.",
+    description: "Code와 코딩 API에서 쓸 코딩 모델을 고르고 켭니다. 채팅 모델을 연결하면 이름·단가·컨텍스트·최대 출력은 채팅 값을 그대로 씁니다.",
     refresh: "새로고침",
     addDedicated: "코딩 모델 추가",
     views: { models: "모델", providers: "공급자 조건" },
@@ -363,10 +372,10 @@ export const adminCodingCatalogMessages = defineAdminMessages({
     banner: {
       offTitle: "전환 준비 중 — 지금은 Code 관리형 경로만 이 카탈로그를 읽습니다",
       offBody: (env: string) =>
-        `/api/v1, Smart Adaptive, tomverse CLI, Claude Code·Codex·Cursor 연동 설정은 아직 채팅 레지스트리를 씁니다. ${env}=true로 전환하면 최신 스냅샷의 각 행 노출 채널을 따릅니다.`,
-      onTitle: "외부 채널이 이 카탈로그를 따릅니다",
+        `코딩 API(/api/code/v1, /api/code/anthropic — Claude Code·Codex·Cursor·tomverse CLI와 그 Smart Adaptive)는 아직 일반 API처럼 채팅 레지스트리를 씁니다. ${env}=true로 전환하면 최신 스냅샷에서 코딩 API에 노출한 행을 따릅니다.`,
+      onTitle: "코딩 API가 이 카탈로그를 따릅니다",
       onBody:
-        "/api/v1, Smart Adaptive, 코딩 앱 연동 설정은 노출 채널에 API가 있는 채팅 모델 연결 행만, tomverse CLI는 CLI가 있는 행만 씁니다. 과금은 그대로 채팅 경로입니다. 유효한 스냅샷이 없으면 아무 모델도 보이지 않습니다.",
+        "코딩 API와 그 Smart Adaptive, 코딩 앱 연동 설정은 노출 채널에 코딩 API가 있는 행만 씁니다. 채팅 모델 연결 행은 채팅 모델로, 채팅에 없는 모델은 자기 행의 단가와 크레딧으로 과금합니다. 일반 API(/api/v1)는 채팅 레지스트리 그대로입니다. 유효한 스냅샷이 없으면 아무 모델도 보이지 않습니다.",
     },
 
     filter: {
@@ -412,7 +421,7 @@ export const adminCodingCatalogMessages = defineAdminMessages({
       ready: "활성화 가능",
       snapshotChanged: "스냅샷 이후 변경",
     },
-    channel: { code: "Code", api: "API", cli: "CLI" },
+    channel: { code: "Code", api: "코딩 API", cli: "코딩 API" },
 
     candidates: {
       title: "채팅 모델 중 코딩 후보",
@@ -457,7 +466,7 @@ export const adminCodingCatalogMessages = defineAdminMessages({
       show: "목록 펼치기",
       hide: "접기",
       footnote:
-        "추가 버튼은 초안만 만듭니다 — 공급자 문서를 읽는 LLM 호출 1회이며 비용은 에이전트 예산에서 나갑니다(사용자 크레딧과 무관). 활성화 전까지 Code·API·CLI에 보이지 않습니다.",
+        "추가 버튼은 초안만 만듭니다 — 공급자 문서를 읽는 LLM 호출 1회이며 비용은 에이전트 예산에서 나갑니다(사용자 크레딧과 무관). 활성화 전까지 Code와 코딩 API에 보이지 않습니다.",
       added: (name: string) => `${name}을(를) 추가했습니다. 코딩 전용 설정을 확인해 주세요.`,
     },
 
@@ -504,8 +513,17 @@ export const adminCodingCatalogMessages = defineAdminMessages({
       weightInvalid: "1부터 1000 사이의 정수",
       channelsTitle: "노출 채널",
       channelsHelp:
-        "API를 켜면 /api/v1과 Claude Code·Codex·Cursor 연동 설정에, CLI는 tomverse CLI 모델 목록에 보입니다(외부 채널 스위치가 켜져 있을 때). Code는 다음 스냅샷 발행 후 반영됩니다.",
+        "코딩 API를 켜면 Claude Code·Codex·Cursor·tomverse CLI가 쓰는 /api/code/v1, /api/code/anthropic에 보입니다(다음 발행 뒤, 코딩 API 스위치가 켜져 있을 때). Code도 다음 스냅샷 발행 후 반영됩니다.",
       channelsNone: "채널을 하나 이상 고르세요.",
+      codeCreditsTitle: "Tomverse Code 크레딧",
+      codeCreditsHelp: "Code 관리형 경로에서 호출마다 차감합니다. 하한은 전체 컨텍스트를 입력으로 봅니다. 새 초안으로 바꿉니다.",
+      apiCreditsTitle: "코딩 API 크레딧",
+      apiCreditsDefault: (n: number) => `기본값: 채팅 기준 최소값 ×${n}`,
+      apiCreditsBelow: (n: number) => `채팅 기준 최소값 ×${n}보다 낮아 코딩 API에 노출하지 않습니다`,
+      apiCreditsUnbounded:
+        "채팅 기준 하한을 계산할 수 없어(가격이나 출력 상한을 모르거나, 하한이 1,000 크레딧을 넘음) 코딩 API에 노출하지 않습니다",
+      apiCreditsHelp:
+        "코딩 API는 채팅 입력 한도까지만 받고 채팅 규칙으로 과금합니다. 비워 두면 그 최소값을, 더 높은 수를 넣으면 그 값을 받습니다. 다음 발행 뒤 적용됩니다.",
       save: "설정 저장",
       saved: "코딩 전용 설정을 저장했습니다.",
       reset: "변경 취소",
@@ -546,7 +564,7 @@ export const adminCodingCatalogMessages = defineAdminMessages({
       title: (name: string) => `${name}을(를) 활성화할까요?`,
       summary: (provider: string, apiModelId: string, source: string) => `${provider} · ${apiModelId} · ${source}`,
       effectChannels: (name: string, channels: string, plan: string, external: boolean) =>
-        `${channels} 사용자에게 ${name}이(가) 보입니다(${plan} 이상).${external ? "" : " API·CLI는 외부 채널 스위치를 켜야 적용됩니다."}`,
+        `${channels} 사용자에게 ${name}이(가) 보입니다(${plan} 이상).${external ? "" : " 코딩 API는 스위치를 켜야 적용됩니다."}`,
       effectCredits: (weight: number) => `요청마다 사용자 크레딧이 ×${weight} 가중치로 차감됩니다.`,
       effectProvider: (provider: string) => `모델 호출 비용은 ${provider} 공급자 예산에서 나갑니다.`,
       effectSnapshot: (version: number | null, until: string | null) =>

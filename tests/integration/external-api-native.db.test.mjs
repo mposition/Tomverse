@@ -177,7 +177,8 @@ test("native protocols over the real shared credit ledger", { skip: !databaseUrl
                 body: typeof payload === "string" ? payload : JSON.stringify(payload),
                 signal: init.signal,
             }),
-            anthropicMessagesSpec
+            anthropicMessagesSpec,
+            { surface: "general" }
         );
     const codex = (key, payload, init = {}) =>
         handleNativeGeneration(
@@ -187,7 +188,8 @@ test("native protocols over the real shared credit ledger", { skip: !databaseUrl
                 body: typeof payload === "string" ? payload : JSON.stringify(payload),
                 signal: init.signal,
             }),
-            responsesSpec
+            responsesSpec,
+            { surface: "general" }
         );
     const chat = (key, payload, init = {}) =>
         handleChatCompletions(
@@ -195,7 +197,8 @@ test("native protocols over the real shared credit ledger", { skip: !databaseUrl
                 method: "POST",
                 headers: { authorization: `Bearer ${key}`, "content-type": "application/json", ...(init.headers ?? {}) },
                 body: JSON.stringify(payload),
-            })
+            }),
+            { surface: "general" }
         );
 
     t.after(async () => {
@@ -280,6 +283,7 @@ test("native protocols over the real shared credit ledger", { skip: !databaseUrl
         assert.ok(reservation.settledCredits > 0);
         const receipt = await receiptFor(reservation.id);
         assert.equal(receipt.protocol, "anthropic_messages");
+        assert.equal(receipt.surface, "general", "sent to /api/anthropic: the general API");
         assert.equal(receipt.keyId, summary.id);
         assert.equal(receipt.finishReason, "tool_use");
         assert.equal(receipt.modelId, "claude-sonnet-5");
@@ -531,6 +535,7 @@ test("native protocols over the real shared credit ledger", { skip: !databaseUrl
         assert.equal(reservation.settledOutputTokens, 700);
         const receipt = await receiptFor(reservation.id);
         assert.equal(receipt.protocol, "responses");
+        assert.equal(receipt.surface, "general");
         assert.equal(receipt.modelId, "gpt-5-6-luna");
         assert.equal(receipt.finishReason, "completed");
     });
@@ -598,7 +603,7 @@ test("native protocols over the real shared credit ledger", { skip: !databaseUrl
     // Smart Adaptive on the native protocols: one provider's models, one pick
     // per conversation, never a failed request when the pin is missed.
     const providerPool = async (provider, protocol) =>
-        (await externalApiRunnableModels("Pro")).filter(
+        (await externalApiRunnableModels("Pro", { surface: "general" })).filter(
             (entry) => entry.model.provider === provider && entry.capabilities.protocols.includes(protocol)
         );
     const poolDefault = (pool) =>
@@ -718,6 +723,7 @@ test("native protocols over the real shared credit ledger", { skip: !databaseUrl
             const counted = await handleNativeFreeCall(countRequest, anthropicMessagesSpec, {
                 upstreamPath: anthropicCountTokensPath(countRequest),
                 prepare: (body, model) => prepareAnthropicMessages(body, model, { countTokens: true }),
+                surface: "general",
             });
             assert.equal(counted.status, 200);
             assert.equal(sent.at(-1).body.model, fallback.model.apiModel, "the session's pinned model");
@@ -1160,6 +1166,7 @@ test("native protocols over the real shared credit ledger", { skip: !databaseUrl
         const counted = await handleNativeFreeCall(countRequest, anthropicMessagesSpec, {
             upstreamPath: anthropicCountTokensPath(countRequest),
             prepare: (body, model) => prepareAnthropicMessages(body, model, { countTokens: true }),
+            surface: "general",
         });
         assert.equal(counted.status, 200);
         assert.equal((await counted.json()).input_tokens, 1_234);

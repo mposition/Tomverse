@@ -265,7 +265,7 @@ export async function recordNewProviderResearchWorkItems(input: {
 }
 
 /** The queue fields of a research proposal, from what was stored when it was filed. */
-const researchAssessment = (research: NewProviderResearchAnalysis): {
+export const researchAssessment = (research: NewProviderResearchAnalysis): {
     priority: ModelReviewPriority;
     kind: ModelReviewKind;
     product: ModelProductSurface;
@@ -281,13 +281,12 @@ const researchAssessment = (research: NewProviderResearchAnalysis): {
             : research.product === "code"
               ? "specialized_code"
               : "general_chat",
-    // Code has no surface of its own in this queue; "unsupported" also keeps
-    // the panel from offering a chat adoption for it.
+    // A code proposal goes to the coding catalogue as a draft, never to Chat.
     product:
         research.product === "image"
             ? "image_generation"
             : research.product === "code"
-              ? "unsupported"
+              ? "coding"
               : "chat",
     verdictKo: research.verdictKo,
     pointsKo: research.pointsKo,

@@ -15,6 +15,15 @@ import { EXTERNAL_API_PROTOCOLS, protocolsForProvider, type ExternalApiProtocol 
 
 export type ExternalApiEnv = Record<string, string | undefined>;
 
+/**
+ * The two external APIs, decided by the request's address (owner decision
+ * 2026-11-21): general (/api/v1, /api/anthropic) and coding (/api/code/v1,
+ * /api/code/anthropic). Also the values ExternalApiRequest.surface may hold
+ * (its CHECK constraint, scripts/check-enum-constraints.mjs).
+ */
+export const EXTERNAL_API_SURFACES = ["general", "coding"] as const;
+export type ExternalApiSurface = (typeof EXTERNAL_API_SURFACES)[number];
+
 export const externalApiEnabled = (env: ExternalApiEnv) =>
     env.EXTERNAL_API_ENABLED === "true";
 
@@ -47,16 +56,6 @@ const EXPOSABLE_USAGE_CLASSES = new Set<AiModel["usageClass"]>([
     "reasoning",
     "premium-reasoning",
 ]);
-
-/**
- * Which coding-catalogue channel a request belongs to: the tomverse CLI names
- * itself in its User-Agent (apps/tomverse-cli/src/gateway.ts); everything else
- * is the API. Only read while CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED is on,
- * and it only narrows a list: a spoofed header gets the CLI's models, on the
- * same plan check and billing.
- */
-export const externalApiChannelFor = (userAgent: string | null | undefined): "api" | "cli" =>
-    typeof userAgent === "string" && userAgent.startsWith("tomverse-cli/") ? "cli" : "api";
 
 /**
  * Usage classes Smart Adaptive may route to but no client may name directly

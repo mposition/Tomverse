@@ -273,7 +273,7 @@ export const SYSTEM_AUDIT_ACTORS = [
   "qa-release-intake", "support-triage-worker", "support-triage-retention", "trace-report-analysis",
   "qa-release-merge-lane",
   "agent-digest-retention",
-  ...PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS, "develop-ci-repair", "billing-finance-ops-intake", "support-triage-account-deletion", "amux-decision-router", "amux-decision-maker-openai", "amux-decision-maker-anthropic", "ops-observer", "model-catalog-renewal", "model-catalog-env-sync", "amux-portfolio-scorer",
+  ...PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS, "develop-ci-repair", "billing-finance-ops-intake", "support-triage-account-deletion", "amux-decision-router", "amux-decision-maker-openai", "amux-decision-maker-anthropic", "ops-observer", "model-catalog-renewal", "model-catalog-env-sync", "amux-portfolio-scorer", "model-catalog-auto-draft",
 ] as const;
 export type SystemAuditActor = (typeof SYSTEM_AUDIT_ACTORS)[number];
 
@@ -434,7 +434,7 @@ export const systemAuditActionAllowed = (
   isSystemAuditActor(actor) &&
   (actor !== "product-research-scout" ||
     (action === "product_research.scout.test_session_issued" && targetType === "User")) &&
-  marketingGeneratorAuditScope(actor, action, targetType) && modelCatalogRenewalAuditScope(actor, action, targetType) && modelCatalogEnvSyncAuditScope(actor, action, targetType) && supportTriageAuditScope(actor, action, targetType) && amuxPortfolioScorerAuditScope(actor, action, targetType) &&
+  marketingGeneratorAuditScope(actor, action, targetType) && modelCatalogRenewalAuditScope(actor, action, targetType) && modelCatalogEnvSyncAuditScope(actor, action, targetType) && modelCatalogAutoDraftAuditScope(actor, action, targetType) && supportTriageAuditScope(actor, action, targetType) && amuxPortfolioScorerAuditScope(actor, action, targetType) &&
   (actor !== "trace-report-analysis" ||
     (action === "trace_report_analysis.idea_submitted" && targetType === "AmuxIdeaSubmission")) &&
   (actor !== "develop-ci-repair" ||
@@ -661,6 +661,22 @@ export const MODEL_CATALOG_ENV_SYNC_TARGET = "ModelCatalogEnvSync" as const;
 function modelCatalogEnvSyncAuditScope(actor: unknown, action: unknown, targetType: unknown): boolean {
   return actor !== "model-catalog-env-sync" ||
     (action === "model_catalog.env_synced" && targetType === "ModelCatalogEnvSync");
+}
+
+/**
+ * The coding catalogue draft the daily model scan files for a newly found
+ * code-specialized model (lib/modelDiscoveryCodingAutoDraft.ts), only while the
+ * owner has set MODEL_DISCOVERY_CODING_AUTO_DRAFT_ENABLED=true: one action about
+ * one catalogue row, written in the transaction that stores the draft. It
+ * stores a draft and nothing else; turning a model on is a person's, with
+ * writeAdminAuditLog. Not a person, so never approval evidence. Joined into
+ * `systemAuditActionAllowed()` on its existing first line.
+ */
+export const MODEL_CATALOG_AUTO_DRAFT_AUDIT_ACTOR = "model-catalog-auto-draft" as const satisfies SystemAuditActor;
+export const MODEL_CATALOG_AUTO_DRAFT_STORED_ACTION = "model_catalog.draft_auto_stored" as const;
+function modelCatalogAutoDraftAuditScope(actor: unknown, action: unknown, targetType: unknown): boolean {
+  return actor !== "model-catalog-auto-draft" ||
+    (action === "model_catalog.draft_auto_stored" && targetType === "ModelCatalogEntry");
 }
 
 /**

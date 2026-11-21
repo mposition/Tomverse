@@ -148,6 +148,25 @@ migration 적용은 별도입니다. 구현한 A1 범위와 확정 값은 10절�
   정기 갱신(`renewCodingSnapshotIfUnchanged`)은 이전 스냅샷의 행을 지금 schema로 다시 읽은 해시
   (`normalizedSnapshotContentHash`)도 비교하므로, 내용이 같으면 사람이 발행하지 않아도 갱신합니다.
   다시 읽을 수 없는 행이 있거나 내용이 실제로 다르면 갱신하지 않고 사람의 발행을 기다립니다.
+- **코딩 특화 모델은 모델 발견 목록에서 채팅을 거치지 않고 코딩 전용 행의 초안으로 갑니다
+  (운영자 결정 2026-11-21).** 발견 목록의 제품 구분에 `coding`이 있고(기존 `isCodeSpecializedModel`
+  판정 그대로, 새 분류기 없음), 그 행에는 채팅 "채택" 대신 "코딩 초안" 링크가 뜹니다. 링크는 공급자와
+  API 모델 id가 채워진 코딩 전용 양식을 엽니다(`?tab=coding&draft=coding&provider=&api=`; 공급자의
+  확인된 약관·보존 문서 주소가 있으면 함께 채웁니다). 초안 공급자가 아니면 이유를 보여 줍니다.
+  주간 새 공급자 리서치의 code 제안도 같은 `coding` 행이지만, 연결되지 않은 공급자만 나오므로
+  링크 대신 "공급자 연결이 먼저 필요"라는 이유가 보입니다.
+- **자동 초안(기본 꺼짐).** `MODEL_DISCOVERY_CODING_AUTO_DRAFT_ENABLED=true`일 때만, 일일 스캔이
+  새로 만든 코딩 후보 항목마다 위 양식과 같은 초안(공식 페이지 읽기 +
+  `MODEL_CATALOG_DRAFT_LLM_MODEL_ID` 호출 1회, `storeCatalogDraft`)을 만듭니다. 켜는 것은 운영자의
+  몫이며 코드는 켜지 않습니다. 한 번의 스캔에서 모델 호출은 최대 5회이고, 호출 전에 결정적으로 거릅니다:
+  초안 공급자일 것, 그 공급자의 확인된 약관·보존 주소가 코딩 카탈로그에 이미 있고 기본 가격 페이지가
+  있을 것(없으면 호출이 보존 근거 부족으로 거절되어 비용만 쓰므로 호출하지 않습니다), 코딩 카탈로그에
+  그 모델의 행이나 초안이 없을 것(저장할 때 한 번 더, 만들기 전용으로 확인하므로 그 사이 운영자가 만든
+  초안은 덮어쓰지 않습니다). 마감은 경쟁 없이 단계마다 확인하고, 모델 호출은 자기 timeout(90초)과
+  저장 여유가 남을 때만 시작합니다. 실패나 시간 초과는 기록만 하고 다시 시도하지 않습니다(결과를 모르는
+  유료 호출). 초안만 저장하고 활성화는 하지 않으며, 감사 기록은 시스템 행위자
+  `model-catalog-auto-draft`(`model_catalog.draft_auto_stored`)로 같은 트랜잭션에서 남깁니다.
+  일일 스캔 응답 `codingAutoDraft`에 건수가 보입니다.
 
 ### 6.2 공급자 조건 (공급자 단위)
 
@@ -166,22 +185,68 @@ migration 적용은 별도입니다. 구현한 A1 범위와 확정 값은 10절�
   가져오는 URL과 답의 URL 모두 `isOfficialSourceUrl`로 검사합니다. 초안은 운영자가 지금 값과
   비교한 뒤 적용하고, 저장·적용·버리기는 각각 감사 기록과 함께 씁니다.
 
-### 6.3 외부 채널 (기본 꺼짐)
+### 6.3 코딩 API (기본 꺼짐)
 
-- `CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED`가 `true`가 아니면 `/api/v1`·Smart Adaptive·코딩 앱
-  연동 설정·tomverse CLI는 지금처럼 채팅 레지스트리를 씁니다(코딩 카탈로그를 읽지 않음).
-- 켜면 최신 코딩 스냅샷에서 노출 채널에 `api`가 있는 채팅 연결 행만 `/api/v1/models`, Smart
-  Adaptive 후보, 코딩 앱 설정, 네이티브 프로토콜(Anthropic Messages·Responses)에 남습니다.
-  tomverse CLI 요청(User-Agent `tomverse-cli/…`, 모델 목록·네이티브 프로토콜 포함)은 `cli`
-  채널을 따릅니다. 스냅샷에 있는 것만으로는 부족하고 **지금도 판정을 통과해야** 합니다(켜짐·보류
-  아님·지금 행에도 그 채널이 있음·공급자 조건 허용). 보류나 거절로 바뀐 다시 확인은 다음 발행을
-  기다리지 않고 바로 빠집니다. 발행된 행이나 지금 행의 `minimumPlan`이 계정 플랜보다 높아도
-  빠집니다(좁히기만 함).
-- 스냅샷은 허용 목록일 뿐입니다. 요청의 실행·가격·크레딧은 채팅 레지스트리 경로 그대로이고,
-  플랜 검사(Free는 API·CLI 불가)도 그대로입니다. 연결 행의 `creditWeight` 덮어쓰기는 Code 관리형
-  경로에만 쓰입니다.
-- 스냅샷이 없거나 coverage가 지났으면 외부 채널은 아무 모델도 내놓지 않습니다(채팅 레지스트리
-  전체로 되돌아가지 않음). 로그 `coding_catalog_external_channels_no_snapshot`을 남깁니다.
+외부 API는 주소로 둘로 나뉩니다(운영자 결정 2026-11-21, docs/policy/external-api.md). 일반 API
+(`/api/v1`, `/api/anthropic`)는 Aside 같은 앱용이고 항상 채팅 레지스트리를 씁니다. 코딩 API
+(`/api/code/v1`, `/api/code/anthropic`)는 Claude Code·Codex·Cursor·tomverse CLI용입니다.
+User-Agent로 채널을 나누지 않습니다.
+
+- 노출 채널은 `code`(Code 관리형 경로)와 `api`(코딩 API) 둘입니다. 예전에 저장된 `cli`는
+  읽을 때 코딩 API로 봅니다(`onCodingApi`). 저장된 행과 스냅샷을 다시 쓰지 않으므로 스냅샷 해시와
+  관리형 경로의 canonicalJson 비교가 그대로입니다. Admin은 "Code / 코딩 API" 둘만 보이고, 저장할 때
+  `api`를 씁니다. 전용 행도 코딩 API 채널을 고를 수 있습니다(전용 행에서 바꿀 수 있는 설정은 채널
+  하나이며, 새 초안을 적용해도 채널은 유지됩니다).
+- `CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED`가 `true`가 아니면 코딩 API는 일반 API와 똑같이 채팅
+  레지스트리를 보여 주고 실행합니다(코딩 카탈로그를 읽지 않음). 클라이언트가 새 주소로 옮겨도
+  깨지지 않게 하려는 것입니다.
+- 켜면 최신 코딩 스냅샷에서 코딩 API 채널이 있는 행(채팅 연결 행과 전용 행 모두)만 코딩 API의
+  모델 목록, Smart Adaptive 후보, 코딩 앱 설정, 네이티브 프로토콜(Anthropic Messages·Responses)에
+  남습니다. 스냅샷에 있는 것만으로는 부족하고 **지금도 판정을 통과해야** 합니다(켜짐·보류 아님·지금
+  행에도 코딩 API 채널이 있음·공급자 조건 허용). 보류나 거절로 바뀐 다시 확인은 다음 발행을 기다리지
+  않고 바로 빠집니다. 발행된 행이나 지금 행의 `minimumPlan`이 계정 플랜보다 높아도 빠집니다.
+- **채팅 연결 행**은 채팅 레지스트리 경로 그대로 실행·과금합니다(가격·크레딧은 채팅 모델의 것).
+  연결 행의 `creditWeight` 덮어쓰기는 Code 관리형 경로에만 쓰입니다.
+- **전용 행**은 발행된 자기 행으로 실행합니다(`lib/codingRowRuntime.ts`, 관리형 경로와 같은 변환).
+  단가는 행의 입력·출력 단가이며, 외부 API의 기존 예약·정산(`acquireChatAccess`·`settleChatUsage`,
+  공급자 비용 예산, 동시성, 키 상한, 계정 크레딧)을 그대로 탑니다.
+- **전용 행의 코딩 API 크레딧**은 채팅과 같은 규칙입니다(운영자 결정 2026-11-21). 코딩 API는 모든
+  모델의 입력을 `chatUserMaxInputTokens()`로 제한하고 채팅 예약·정산(입력 크기별 배수 포함)을 타므로,
+  전체 컨텍스트를 최악의 입력으로 보는 Code 기준 하한(`codingCreditFloor`)은 여기서 과합니다.
+  - 기본값은 채팅 규칙 하한입니다. 채팅 가드레일·`suggestCreditFloor`와 같은 산식(크레딧 × 입력 배수 ×
+    `COST_PER_CREDIT_CEILING_MICRO_USD`가 최악 비용을 덮음)으로, 입력 배수 구간(`INPUT_CREDIT_MULTIPLIERS`:
+    16k까지 ×1, 50k까지 ×1.5, 100k까지 ×2, 그 위 ×3)마다 그 구간의 가장 큰 입력(상한
+    `chatUserMaxInputTokens()`까지)과 레지스트리 공급자 상한으로 묶은 최대 출력의 최악 비용(행의 입력·
+    출력 단가, Anthropic은 입력 1.25배)을 `ceil(최악 비용 / (구간 배수 × 크레딧당 micro-USD))`로 나눈 값
+    중 가장 큰 것입니다. 출력 단가가 큰 모델은 짧은 입력 구간(×1)에서 하한이 정해집니다(검토
+    r-20261121-013001-f5a5e7). 채팅 등급 크레딧(최대 80)으로 올려 맞추지 않고 직접 계산하므로 81~1,000도
+    그대로 받습니다(검토 r-20261121-015353-7a8db0). 1,000(덮어쓰기 상한)을 넘으면 계산할 수 없는 것으로
+    봅니다. `suggestCreditFloor` 자체는 바꾸지 않았습니다. 저장하지 않고 과금할 때 계산하므로
+    `apiCreditWeight`가 없는 행과 스냅샷의 canonicalJson·해시는 그대로입니다. 그래서 이 값은
+    `CHAT_USER_MAX_INPUT_TOKENS` 같은 런타임 값을 따라 달라집니다(채팅 모델 과금과 같은 성질).
+  - 운영자가 더 받고 싶으면 전용 행에 `apiCreditWeight`(1~1,000 정수)를 넣습니다. 하한 이상이면 그 값을
+    받고, 하한 미만이거나 하한을 계산할 수 없으면(가격·출력 상한을 모르거나 1,000을 넘음) 코딩
+    API는 그 행을 노출하지 않습니다(`api_credits_below_floor:<N>`, `api_credit_floor_unbounded`).
+    Code 노출은 그대로입니다. `apiCreditWeight`는 행의 일부라 바꾸면 다음 발행 뒤 적용됩니다.
+  - 코딩 API의 전용 행은 입력을 `chatUserMaxInputTokens()`까지만 받습니다. 채팅 장문맥
+    (`CHAT_LONG_CONTEXT_ENABLED`)이 켜져 있어도 같고, 넘는 요청은 보내거나 잡아 두지 않고
+    `CHAT_INPUT_TOKEN_LIMIT`(413)로 거절합니다. 하한과 `/models`가 그 한도를 기준으로 하기 때문입니다.
+    채팅 연결 행과 일반 API는 그대로입니다.
+  - `pricing.creditWeight`는 Tomverse Code(관리형) 크레딧으로 그대로이며, 판정의 Code 하한도 그대로입니다.
+  - 예약 payload와 정산 `pricingSnapshot`에 `creditBasis: { basis: "chat_rule_floor" | "api_override",
+    credits, floorCredits }`가 남습니다(새 컬럼 없음). `/api/code/v1/models`의 `credits_per_request`와
+    Smart Adaptive의 크레딧도 같은 값입니다. Admin 코딩 행 상세는 두 크레딧을 나눠 보여 줍니다.
+- 전용 행 실행의 그 밖의 규칙: 검증되지 않은 캐시 할인은 정가로, Anthropic 행의 캐시 쓰기는 자기
+  입력 단가의 1.25배로 예약합니다. 예약과 정산 스냅샷에 `pricingVersion: coding_catalog_snapshot:<version>:<hash>`와
+  `costSource: coding_catalog_snapshot`이 남아 어떤 카탈로그 버전으로 과금했는지 보입니다(새 컬럼
+  없음). 지금 판정이 허용하는 행이 발행된 행과 정확히 같을 때만 노출합니다 — 바뀐 값은 다음 발행
+  뒤에 과금합니다. 상한이 없는 공급자(`CODE_MANAGED_UNBOUNDED_PROVIDERS`)는 코딩 API 채널을 켠
+  전용 행에서 판정이 거절하고(`provider_cost_unbounded`) 실행 직전에도 거절합니다. Code 크레딧
+  (`pricing.creditWeight`)이 Code 하한 아래인 행은 판정이 이미 거절합니다.
+- 플랜 검사(Free는 API·CLI 불가)는 두 API 모두 그대로입니다.
+- 스냅샷이 없거나 coverage가 지났으면 코딩 API는 아무 모델도 내놓지 않습니다(채팅 레지스트리
+  전체로 되돌아가지 않음). 로그 `coding_catalog_external_channels_no_snapshot`을 남깁니다. 발행 뒤
+  바뀌었거나 실행할 수 없는 전용 행은 `coding_api_dedicated_rows_refused`로 남깁니다.
 
 ## 7. 제품 귀속
 

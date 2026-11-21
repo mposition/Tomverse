@@ -393,8 +393,7 @@ const auditOf = (questionId: string) => prisma.adminAuditLog.findMany({
   orderBy: [{ createdAt: "asc" }, { id: "asc" }],
   select: { action: true, actorUserId: true, metadata: true, entryHash: true } });
 
-// A finished idea leaves the Ideas list unless it is the opened one (#4129),
-// so the idea under test is read as the opened idea.
+// A finished idea leaves the Ideas list unless it is the opened one, so the read opens this idea.
 const stageOf = async (ideaId: string, actor = OWNER_ID) => {
   const { requestId } = await prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: ideaId }, select: { requestId: true } });
   return (await readAmuxIdeaProgressForOwner(actor, requestId)).find((row) => row.ideaId === ideaId);

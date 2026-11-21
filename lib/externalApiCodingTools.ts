@@ -18,8 +18,22 @@ import { DEFAULT_MODEL_ID } from "@/lib/models";
  * The key is a placeholder unless the caller passes the one just created.
  */
 
-/** `https://host/api/v1` -> `https://host/api/anthropic` (Claude Code adds /v1). */
-export const anthropicBaseUrl = (openAiBaseUrl: string) => openAiBaseUrl.replace(/\/api\/v1$/, "/api/anthropic");
+/**
+ * The coding API's base from the general API's: `https://host/api/v1` ->
+ * `https://host/api/code/v1` (owner decision 2026-11-21). Claude Code, Codex,
+ * Cursor, VS Code (Copilot Chat's custom endpoint) and the tomverse CLI are
+ * configured with it; Aside and other apps keep the general base.
+ */
+export const codingApiBaseUrl = (generalBaseUrl: string) =>
+    /\/api\/v1$/.test(generalBaseUrl)
+        ? generalBaseUrl.replace(/\/api\/v1$/, "/api/code/v1")
+        : `${new URL(generalBaseUrl).origin}/api/code/v1`;
+
+/**
+ * The Anthropic base beside an OpenAI-compatible one (Claude Code adds /v1):
+ * `.../api/v1` -> `.../api/anthropic`, `.../api/code/v1` -> `.../api/code/anthropic`.
+ */
+export const anthropicBaseUrl = (openAiBaseUrl: string) => openAiBaseUrl.replace(/\/v1$/, "/anthropic");
 
 const byCredits = (models: readonly ExternalApiModelCapabilities[]) =>
     [...models].sort((a, b) => a.creditWeight - b.creditWeight || a.id.localeCompare(b.id));
@@ -187,9 +201,12 @@ const nativeToolModels = (models: readonly ExternalApiModelCapabilities[], proto
 export const codingToolModels = (models: readonly ExternalApiModelCapabilities[]) => ({
     claudeCode: nativeToolModels(models, "anthropic_messages"),
     codex: nativeToolModels(models, "responses"),
-    // Cursor's Agent is verified with a fixed model first; Smart Adaptive is
-    // offered on Chat Completions but not recommended here until verified.
-    cursor: models.filter((model) => (model.protocols?.includes("chat_completions") ?? true) && model.id !== SMART_ADAPTIVE_MODEL_ID),
+    // Smart Adaptive first: Cursor Chat, Agent and Stop were verified with it
+    // on production (2026-11-20, docs/policy/external-api.md 10.5).
+    cursor: [
+        ...models.filter((model) => model.id === SMART_ADAPTIVE_MODEL_ID && (model.protocols?.includes("chat_completions") ?? true)),
+        ...models.filter((model) => (model.protocols?.includes("chat_completions") ?? true) && model.id !== SMART_ADAPTIVE_MODEL_ID),
+    ],
 });
 
 /**
@@ -197,15 +214,16 @@ export const codingToolModels = (models: readonly ExternalApiModelCapabilities[]
  * is published. Off by default (TOMVERSE_CLI_GUIDE_ENABLED) so the page never
  * tells anyone to install a package that is not on the registry yet. The key
  * goes into an environment variable for the current shell only; the CLI also
- * asks for it, hidden, when it is not set.
+ * asks for it, hidden, when it is not set. The CLI is a coding API client:
+ * its endpoint is the coding API's base (apps/tomverse-cli/src/config.ts).
  */
-export const TOMVERSE_CLI_DEFAULT_ENDPOINT = "https://tomverse.app/api/v1";
+export const TOMVERSE_CLI_DEFAULT_ENDPOINT = "https://tomverse.app/api/code/v1";
 
-export const tomverseCliGuide = (env: Record<string, string | undefined>, openAiBaseUrl: string) => {
+export const tomverseCliGuide = (env: Record<string, string | undefined>, codingBaseUrl: string) => {
     if (env.TOMVERSE_CLI_GUIDE_ENABLED !== "true") return null;
     // Single-quoted for both shells, so the URL is one argument whatever it contains.
-    const quoted = `'${openAiBaseUrl.replaceAll("'", "")}'`;
-    const endpoint = openAiBaseUrl === TOMVERSE_CLI_DEFAULT_ENDPOINT ? [] : [`tomverse config set endpoint ${quoted}`];
+    const quoted = `'${codingBaseUrl.replaceAll("'", "")}'`;
+    const endpoint = codingBaseUrl === TOMVERSE_CLI_DEFAULT_ENDPOINT ? [] : [`tomverse config set endpoint ${quoted}`];
     return {
         install: "npm install -g @tomverse/cli",
         powershell: [`$env:TOMVERSE_API_KEY = "${KEY_PLACEHOLDER}"`, ...endpoint, "tomverse doctor"].join("\n"),

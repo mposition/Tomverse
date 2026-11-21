@@ -19,10 +19,12 @@ import {
   CODING_TOOL_CALLING,
   canonicalJson,
   codingCandidateExclusion,
+  codingApiCreditWeightSchema,
   codingChannelsSchema,
   codingLinkedProfileSchema,
   codingProviderTermsSchema,
   codingStoredProfileSchema,
+  type CodingDedicatedProfile,
   type CodingLinkedProfile,
   type CodingProviderTerms,
 } from "@/lib/modelCatalogCore";
@@ -117,6 +119,8 @@ export const codingSettingsSchema = z
     minimumPlan: z.enum(CODING_PLANS).nullable().optional(),
     creditWeight: z.number().int().positive().max(1_000).nullable().optional(),
     channels: codingChannelsSchema.optional(),
+    /** A dedicated row's coding API credits; null puts it back on the chat rule's minimum. */
+    apiCreditWeight: codingApiCreditWeightSchema.nullable().optional(),
   })
   .strict();
 export type CodingSettings = z.infer<typeof codingSettingsSchema>;
@@ -155,9 +159,35 @@ export const applyCodingSettings = (
 };
 
 /**
- * Save a link's own settings. Goes through updateCatalogEntry, so a serving
- * link is judged again at the new values (a credit weight below the floor is
- * refused there, not saved).
+ * A dedicated row's settings here (owner decision 2026-11-21): where it is
+ * offered, and its coding API credits when they should be above the chat
+ * rule's minimum (null removes the override). Everything else in its profile
+ * is what its draft read, so it changes only through a new draft.
+ */
+export const applyDedicatedSettings = (
+  stored: CodingDedicatedProfile,
+  settings: CodingSettings
+): { profile: CodingDedicatedProfile; changes: { field: string; from: unknown; to: unknown }[] } | null => {
+  if (Object.keys(settings).some((field) => field !== "channels" && field !== "apiCreditWeight")) return null;
+  const fromChannels = stored.channels ?? ["code"];
+  const toChannels = settings.channels ?? fromChannels;
+  const profile: CodingDedicatedProfile = { ...stored, channels: toChannels };
+  if (settings.apiCreditWeight === null) delete profile.apiCreditWeight;
+  else if (settings.apiCreditWeight !== undefined) profile.apiCreditWeight = settings.apiCreditWeight;
+  const changes: { field: string; from: unknown; to: unknown }[] = [];
+  if (canonicalJson(fromChannels) !== canonicalJson(toChannels)) changes.push({ field: "channels", from: fromChannels, to: toChannels });
+  if ((stored.apiCreditWeight ?? null) !== (profile.apiCreditWeight ?? null)) {
+    changes.push({ field: "apiCreditWeight", from: stored.apiCreditWeight ?? null, to: profile.apiCreditWeight ?? null });
+  }
+  return { profile, changes };
+};
+
+/**
+ * Save a link's own settings, or a dedicated row's channels and coding API
+ * credits. Goes through updateCatalogEntry, so a serving row is judged again
+ * at the new values (a credit weight below the floor is refused there, not
+ * saved). A coding API credit below the chat rule's minimum is saved: the
+ * coding API refuses the row until it is raised, and Code is unaffected.
  */
 export const saveCodingSettings = async (input: {
   modelId: string;
@@ -172,8 +202,15 @@ export const saveCodingSettings = async (input: {
     });
     if (!before) throw new CatalogRefusal("unknown_model", [], 404);
     const parsed = codingStoredProfileSchema.safeParse(before.profile);
-    if (!parsed.success || parsed.data.source !== "chat") throw new CatalogRefusal("settings_linked_only", [], 400);
-    const { profile, changes } = applyCodingSettings(parsed.data, input.settings);
+    if (!parsed.success) throw new CatalogRefusal("settings_linked_only", [], 400);
+    const applied =
+      parsed.data.source === "chat"
+        ? input.settings.apiCreditWeight === undefined
+          ? applyCodingSettings(parsed.data, input.settings)
+          : null
+        : applyDedicatedSettings(parsed.data, input.settings);
+    if (!applied) throw new CatalogRefusal("settings_linked_only", [], 400);
+    const { profile, changes } = applied;
     if (changes.length === 0) return { row: before, changes };
     const row = await updateCatalogEntry({
       category: "coding",
