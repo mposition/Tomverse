@@ -174,7 +174,25 @@ test("the answer is the result event's response, from a request-review run that 
   assert.deepEqual(antigravityAnswer(jsonl(init(), toolStep("run_command"), result())), { reason: "antigravity_tool_refused" });
   assert.deepEqual(antigravityAnswer(jsonl(init(), { event: "step_update", step_update: { step_type: "tool",
     tool_name: "read_file", subagent_info: {} } }, result())), { reason: "antigravity_step_unexpected" });
-  assert.deepEqual(antigravityAnswer(jsonl(init(), { event: "telemetry" }, result())), { reason: "antigravity_event_unexpected" });
+  // An unseen kind passes when nothing in it names an action (owner direction
+  // 2026-11-21); one that names a tool or carries a tool field does not.
+  assert.deepEqual(antigravityAnswer(jsonl(init(), { event: "telemetry" }, result())), { text: VERDICT });
+  assert.deepEqual(antigravityAnswer(jsonl(init(), { event: "step_update", step_update: {
+    conversation_id: "c", step_index: 2, state: "DONE", step_type: "system_message", duration_seconds: 0 } },
+  result())), { text: VERDICT });
+  assert.deepEqual(antigravityAnswer(jsonl(init(), { event: "tool_use", name: "run_command" }, result())),
+    { reason: "antigravity_event_unexpected" });
+  assert.deepEqual(antigravityAnswer(jsonl(init(), { event: "notice", detail: { CommandLine: "x" } }, result())),
+    { reason: "antigravity_event_unexpected" });
+  assert.deepEqual(antigravityAnswer(jsonl(init(), { event: "step_update", step_update: {
+    step_type: "browser", state: "DONE" } }, result())), { reason: "antigravity_step_unexpected" });
+  // An unseen step that names a tool, even the allowed read, is still an action.
+  assert.deepEqual(antigravityAnswer(jsonl(init(), { event: "step_update", step_update: {
+    step_type: "browser", tool_name: "read_file" } }, result())), { reason: "antigravity_step_unexpected" });
+  // A tool named on any step, whatever its type, must be a file read.
+  assert.deepEqual(antigravityAnswer(jsonl(init(), { event: "step_update", step_update: {
+    step_type: "system_message", tool_name: "run_command" } }, result())), { reason: "antigravity_tool_refused" });
+  assert.deepEqual(antigravityAnswer(jsonl(init(), null, result())), { reason: "antigravity_event_unexpected" });
   assert.deepEqual(antigravityAnswer(jsonl(init(), result({ status: "ERROR" }))), { reason: "antigravity_no_result" });
   assert.deepEqual(antigravityAnswer(`${jsonl(init())}not json\n`), { reason: "antigravity_stream_invalid" });
 });

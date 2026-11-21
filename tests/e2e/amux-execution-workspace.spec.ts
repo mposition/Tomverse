@@ -8,6 +8,10 @@ const a = { id:"qa-task-104", title:"Open details without losing the board", sou
   progress:null, briefPresent:true, updatedAt:"2026-10-12T05:00:00Z" };
 const b = { ...a, id:"qa-task-105", sourceKey:"AMUX-105", title:"Preserve the second card", priority:"p1",
   displayKey:"AMUX-GITHUB-007" };
+const hierarchyNode = { type:"node", id:"node-1", title:"Generated file delivery", level:"initiative",
+  parentId:null, state:"active", createdAt:"2026-10-28T00:00:00Z", assessment:null, progress:{done:1,total:3},
+  rollup:{ total:3, done:1, cancelled:0, remaining:2, openCards:2, lastActivityAt:"2026-11-20T00:00:00Z",
+    distribution:{ done:1, review:1, doing:1, todo:0, backlog:0, attention:0 } }, archivable:false };
 const lanes = ["tomverse_backlog","amux_backlog","todo","in_progress","in_review","attention"];
 const detail = (card=a) => ({ ...card, revision:3, body:JSON.stringify({
   problem:"Keep the board context",scopeIn:["Same-page dialog"],scopeOut:[],completionCriteria:["Keyboard focus returns"] }),
@@ -39,8 +43,16 @@ async function setup(page:Page, opts:{ delayed?:boolean; reauth?:boolean; moveUn
       lanes:lanes.map(lane=>({lane,cards:lane==="tomverse_backlog"?(promoted?[b]:[a,b]):
         lane==="amux_backlog"&&promoted?[{...a,status:"todo"}]:[]})),
     }});
+    if(p.get("view")==="hierarchy"&&p.get("parentKind")==="root") return route.fulfill({json:{
+      page:0,pageSize:8,total:1,scope:p.get("scope")??"active",sort:p.get("sort")??"remaining",createdWithinDays:null,
+      summary:{active:1,complete:0,empty:0,stale:0,cleanup:0,all:1,tasksDone:1,tasksTotal:3,remaining:2},
+      unassignedCount:1,archiveEnabled:false,items:[hierarchyNode],
+    }});
     if(p.get("view")==="hierarchy") return route.fulfill({json:{
-      page:0,pageSize:8,total:1,items:[{type:"card",...b}],
+      page:0,pageSize:8,total:1,items:[{type:"card",...b,createdAt:"2026-11-10T00:00:00Z"}],
+    }});
+    if(p.get("view")==="hierarchy_search") return route.fulfill({json:{
+      query:p.get("q"),matchedNodes:1,matchedCards:0,rows:[{depth:0,match:true,item:hierarchyNode}],
     }});
     return route.fulfill({json:{cards:[],counts:{}}});
   });
@@ -317,8 +329,21 @@ test("Korean board and detail render with the console theme",async({page})=>{
 test("hierarchy metadata stays readable in the console's own dark theme",async({page})=>{
   await setup(page);
   await page.getByRole("button",{name:"Hierarchy",exact:true}).click();
-  await expect(page.getByText(/backlog · impl · standard/)).toHaveCSS("color",await palette(page,"--color-zinc-400"));
+  const grid=page.getByTestId("amux-hierarchy-grid");
+  // The rollup reads at a glance: progress, what is left and when it last moved.
+  const row=grid.getByTestId("amux-tree-row-node-1");
+  await expect(row).toContainText("Generated file delivery");
+  await expect(row).toContainText("1/3");
+  await expect(row).toContainText("33%");
+  await expect(grid.getByRole("group",{name:"Hierarchy filter"}).getByRole("button",{name:/^In progress/}))
+    .toHaveAttribute("aria-pressed","true");
+  await grid.getByRole("button",{name:/Cards without an approved hierarchy/}).click();
+  await expect(grid.getByText("impl · standard")).toHaveCSS("color",await palette(page,"--color-zinc-400"));
   // docs/policy/amux-card-display-key.md decision 5: tree entries name the number, Task ID beside it.
   await expect(page.getByTestId("amux-tree-card-label")).toHaveText("AMUX-GITHUB-007 (Task ID: qa-task-105)");
+  // Search runs on the server and shows each match with its ancestors.
+  await grid.getByRole("textbox",{name:"Search by title or card number"}).fill("delivery");
+  await expect(grid.getByText(/1 hierarchy and 0 cards match/)).toBeVisible();
+  await page.screenshot({path:test.info().outputPath("hierarchy-desktop.png")});
 });
 

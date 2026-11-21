@@ -948,9 +948,13 @@ output contract are in `apps/tomverse-cli/README.md`.
   `@tomverse/cli` (Node.js 22 or later) under a proprietary use-only license
   (`apps/tomverse-cli/LICENSE`), plus standalone executables (Node.js single
   executable applications) for Windows, macOS and Linux on x64 and arm64,
-  attached to a GitHub Release `cli-v<version>`. The workflow
-  `tomverse-cli-release-check.yml` (run by hand) builds and tests all of them
-  and publishes nothing. The steps are in `apps/tomverse-cli/RELEASING.md`.
+  shipped as native installers (owner decision 2026-11-21: Windows `.msi`,
+  macOS `.pkg`, Linux `.deb`/`.rpm`) and plain archives, attached to a GitHub
+  Release `cli-v<version>`, and on Windows through winget (`Tomverse.CLI`, a
+  pull request to `microsoft/winget-pkgs` per version, submitted by the
+  operator). The workflow `tomverse-cli-release-check.yml` (run
+  by hand) builds and tests all of them, installing and removing each
+  installer, and publishes nothing. The steps are in `apps/tomverse-cli/RELEASING.md`.
 
 Verification state, publication and the operating systems actually run are
 reported per change (the PR); package publication and enabling

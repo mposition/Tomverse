@@ -847,7 +847,13 @@ const anonymise = (value) => createHash("sha256").update(value).digest("hex").sl
 // credentialed-job portion of this digest moves.
 // 2026-11-05 owner decision: the feedback auto-fix workflows were deleted, which
 // removes their credentialed jobs and the one reason that forbade every path.
-const POSTURE_DIGEST = "d370f9cecedc";
+// 2026-11-21 owner-approved Tomverse CLI macOS signing
+// (.github/workflows/tomverse-cli-release-check.yml): one credentialed job,
+// sign-macos, in the `cli-release` environment (Developer ID certificates and
+// the notary key), behind vars.CLI_MACOS_SIGNING and workflow_dispatch only,
+// restoring no cache. No reason and no path rule changes; only the
+// credentialed-job portion of this digest moves.
+const POSTURE_DIGEST = "c8c401037e24";
 
 test("no owner-reviewed exclusion is left, and the committed workflows need none", () => {
   // The last one was the feedback auto-fix promotion workflow, deleted 2026-11-05.

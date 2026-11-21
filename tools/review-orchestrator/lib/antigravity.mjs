@@ -18,6 +18,31 @@ const MAX_QUOTA_BYTES = 128_000;
 /** The only file tool a review run may call (agy's stream name for a read). */
 const READ_TOOLS = new Set(["read_file"]);
 const EVENTS = new Set(["init", "step_update", "result"]);
+const STEPS = new Set(["user_input", "agent_response", "tool", "checkpoint"]);
+
+/**
+ * An event or step kind agy has not shown before passes when neither its name
+ * nor any key it carries names an action (owner direction 2026-11-21: on that
+ * day a worker run lost its result to a `system_message` step that held only
+ * ids, state and duration). The same rule as the app's
+ * lib/amux/cliStreamUnknownKind.mjs, kept here because this server imports
+ * nothing from the app; values are never read.
+ */
+const ACTION = /tool|subagent|collab|command|shell|exec|patch|change|diff|mcp|browser|web|url|fetch|search|write|edit|file|path|computer|image|task|plugin|skill|permission|interaction|approval|confirm|call|function|interpret|sandbox|spawn|process/i;
+export function antigravityUnknownKindActs(name, body) {
+  if (typeof name !== "string" || !/^[a-z][a-z0-9_.]{0,47}$/i.test(name) || ACTION.test(name)) return true;
+  const stack = [body];
+  while (stack.length > 0) {
+    const value = stack.pop();
+    if (!value || typeof value !== "object") continue;
+    if (Array.isArray(value)) { stack.push(...value); continue; }
+    for (const [key, child] of Object.entries(value)) {
+      if (ACTION.test(key)) return true;
+      if (child && typeof child === "object") stack.push(child);
+    }
+  }
+  return false;
+}
 
 /** The review prompt as the one user event agy reads on stdin. */
 export const antigravityStdin = (prompt) =>
@@ -48,15 +73,27 @@ export function antigravityAnswer(stdout) {
   }
   let result = null;
   for (const event of events) {
-    if (!event || !EVENTS.has(event.event)) return { reason: "antigravity_event_unexpected" };
+    if (!event || typeof event !== "object" || Array.isArray(event)) {
+      return { reason: "antigravity_event_unexpected" };
+    }
+    if (!EVENTS.has(event.event)) {
+      if (antigravityUnknownKindActs(event.event, event)) return { reason: "antigravity_event_unexpected" };
+      continue;
+    }
     if (event.event === "result") result = event.result;
     if (event.event !== "step_update") continue;
     const step = event.step_update;
     if (!step || typeof step !== "object" || Object.hasOwn(step, "subagent_info")) {
       return { reason: "antigravity_step_unexpected" };
     }
-    if (step.step_type === "tool" && !READ_TOOLS.has(step.tool_name)) {
-      return { reason: "antigravity_tool_refused" };
+    // A tool is named in tool_name / tool_info; whatever the step's type, a
+    // named tool must be a file read.
+    if ((step.step_type === "tool" || Object.hasOwn(step, "tool_name") || Object.hasOwn(step, "tool_info")) &&
+        !READ_TOOLS.has(step.tool_name)) return { reason: "antigravity_tool_refused" };
+    // An unseen step that names an action -- a read on the list included --
+    // stays refused.
+    if (!STEPS.has(step.step_type) && antigravityUnknownKindActs(step.step_type, step)) {
+      return { reason: "antigravity_step_unexpected" };
     }
   }
   if (!result || result.status !== "SUCCESS" || typeof result.response !== "string" ||

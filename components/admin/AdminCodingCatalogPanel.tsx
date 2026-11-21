@@ -8,17 +8,13 @@ import { CodingModelDetail, CodingModelForm, type CodingModelFormValue } from "@
 import { CodingCandidates, CodingChannelsTile, CodingLinkDetail } from "@/components/admin/modelCatalog/CodingLinkViews";
 import {
   CandidateSummary,
+  CapabilityFillBar,
+  type CapabilityFillResult,
   CodingChannelBanner,
   CodingFilterBar,
   CodingModelTable,
   CodingSummary,
 } from "@/components/admin/modelCatalog/CodingListViews";
-import {
-  CodingProviderTable,
-  ProviderStartFields,
-  type ProviderStartForm,
-  ProviderTermsDraftPanel,
-} from "@/components/admin/modelCatalog/CodingProviderViews";
 import { CatalogToast, type CatalogToastValue, reasonText } from "@/components/admin/modelCatalog/ImageCatalogViews";
 import { AdminConfirmDialog } from "@/components/admin/ui/AdminConfirmDialog";
 import { AdminReasonDialog } from "@/components/admin/ui/AdminReasonDialog";
@@ -34,15 +30,18 @@ import {
   type CodingCatalogItem,
   type CodingCatalogReport,
   type CodingEditValue,
+  type CodingLinkAllResult,
   type CodingListFilter,
   type CodingSettingsValue,
   type ImageNextAction,
+  capabilityFillTargets,
   codingCatalogItems,
   codingDraftSources,
   codingEdit,
   codingSettingsFrom,
   codingSettingsRequest,
   filterCodingItems,
+  fillRunStop,
   isSessionGone,
   reasonMessage,
   refusalReasons,
@@ -51,9 +50,9 @@ import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { CODING_DRAFT_QUERY_KEYS, codingDraftRequest } from "@/lib/codingCatalogDraftLink";
 
 // Admin > Models > Coding catalog (owner decision 2026-11-20; Figma "코딩
-// 카탈로그 시안 v1"). Two sections: the models (both kinds of row, the chat
-// candidates and the Code snapshot) and the per-provider conditions. Reads
-// /api/admin/model-catalog/coding; turning a model on or holding it and a
+// 카탈로그 시안 v1"): the models (both kinds of row, the chat candidates and
+// the Code snapshot). Provider conditions are gone (owner decision 2026-11-21).
+// Reads /api/admin/model-catalog/coding; turning a model on or holding it and a
 // dedicated model's whole-profile draft go through /api/admin/model-catalog,
 // where one writer judges every activation.
 
@@ -63,8 +62,7 @@ const CODING_PATH = "/admin/models?tab=coding";
 // A draft fetches up to three pages (10 s each) and makes one LLM call (90 s).
 const DRAFT_REQUEST_TIMEOUT_MS = 130_000;
 
-type SendResult = { ok: true; payload: unknown } | { ok: false; timedOut: boolean };
-type View = "models" | "providers";
+type SendResult = { ok: true; payload: unknown } | { ok: false; timedOut: boolean; code?: string };
 
 const elapsedText = (ms: number) => {
   const seconds = Math.max(0, Math.floor(ms / 1000));
@@ -79,14 +77,7 @@ const emptyCodingForm = (provider = "anthropic"): CodingModelFormValue => ({
   provider,
   apiModelId: "",
   priceUrl: "",
-  termsUrl: "",
-  retentionUrl: "",
 });
-
-const initialView = (): View => {
-  if (typeof window === "undefined") return "models";
-  return new URLSearchParams(window.location.search).get("view") === "providers" ? "providers" : "models";
-};
 
 /** Drops a handled discovery link's query, so a reload does not open the form again. */
 const clearCodingDraftQuery = () => {
@@ -104,18 +95,22 @@ export function AdminCodingCatalogPanel() {
   const [loadError, setLoadError] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [toast, setToast] = useState<CatalogToastValue | null>(null);
-  const [view, setView] = useState<View>("models");
   const [candidatesOpen, setCandidatesOpen] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
   const [filter, setFilter] = useState<CodingListFilter>({ query: "", provider: "all", source: "all", state: "all" });
   const [settings, setSettings] = useState<Record<string, CodingSettingsValue>>({});
   const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(() => Date.now());
-  const [adding, setAdding] = useState<{ id: string; startedAt: number } | null>(null);
-  const [urlPrompt, setUrlPrompt] = useState<{ candidate: CodingCandidateView; toolUrl: string; structuredUrl: string } | null>(null);
-  const [providerDrafting, setProviderDrafting] = useState<{ provider: string; startedAt: number } | null>(null);
-  const [openProviderDraft, setOpenProviderDraft] = useState<string | null>(null);
-  const [providerStart, setProviderStart] = useState<ProviderStartForm | null>(null);
+  // The candidate being added (a request with no LLM call), and the add-all flow.
+  const [adding, setAdding] = useState<string | null>(null);
+  const [linkAll, setLinkAll] = useState<{ publish: boolean } | null>(null);
+  const [addingAll, setAddingAll] = useState(false);
+  const [linkAllResult, setLinkAllResult] = useState<{ result: CodingLinkAllResult; publish: number | "failed" | null } | null>(null);
+  // "Fill capabilities with the LLM": one row at a time (a request per row), so no request outlives the HTTP limit.
+  const [fillConfirm, setFillConfirm] = useState(false);
+  const [fillRun, setFillRun] = useState<{ done: number; total: number } | null>(null);
+  const [fillResult, setFillResult] = useState<CapabilityFillResult | null>(null);
+  const [fillingId, setFillingId] = useState<string | null>(null);
   const [activate, setActivate] = useState<{ item: CodingCatalogItem; publish: boolean } | null>(null);
   const [hold, setHold] = useState<{ modelId: string; name: string } | null>(null);
   const [holdReason, setHoldReason] = useState("");
@@ -154,27 +149,24 @@ export function AdminCodingCatalogPanel() {
 
   useEffect(() => {
     queueMicrotask(() => {
-      setView(initialView());
       setPendingDraft(codingDraftRequest(window.location.search));
       void load();
     });
   }, [load]);
 
   useEffect(() => {
-    if (!adding && !providerDrafting && !drafting) return;
+    if (!drafting) return;
     const timer = setInterval(() => setNow(Date.now()), 1_000);
     return () => clearInterval(timer);
-  }, [adding, providerDrafting, drafting]);
+  }, [drafting]);
 
-  const providerRows = useMemo(() => report?.providers ?? [], [report]);
   const items = useMemo(() => (report ? codingCatalogItems(report) : []), [report]);
   const shown = useMemo(() => filterCodingItems(items, filter), [items, filter]);
   const openItem = items.find((item) => item.id === openId) ?? null;
 
   // The discovery queue sends a coding model here with its provider and API
-  // model id filled in. The form opens prefilled (the provider's confirmed
-  // terms and retention pages too, when it has them); nothing is written until
-  // the operator confirms. A model already in the catalogue opens its row.
+  // model id filled in. The form opens prefilled; nothing is written until the
+  // operator confirms. A model already in the catalogue opens its row.
   useEffect(() => {
     if (!pendingDraft || !report) return;
     const request = pendingDraft;
@@ -183,23 +175,15 @@ export function AdminCodingCatalogPanel() {
       clearCodingDraftQuery();
       const existing = items.find((item) => item.id === request.apiModelId);
       if (existing) {
-        setView("models");
         setOpenId(existing.id);
         return;
       }
       const provider = report.draftProviders.some((entry) => entry.provider === request.provider)
         ? request.provider
         : (report.draftProviders[0]?.provider ?? request.provider);
-      const terms = providerRows.find((row) => row.provider === provider)?.terms ?? null;
-      setView("models");
-      setCodingForm({
-        ...emptyCodingForm(provider),
-        apiModelId: request.apiModelId,
-        termsUrl: terms?.termsUrl ?? "",
-        retentionUrl: terms?.retentionUrl ?? "",
-      });
+      setCodingForm({ ...emptyCodingForm(provider), apiModelId: request.apiModelId });
     });
-  }, [pendingDraft, report, items, providerRows]);
+  }, [pendingDraft, report, items]);
   const pendingIds = useMemo(() => new Set((report?.snapshot?.pendingChanges ?? []).map((change) => change.modelId)), [report]);
   const reason = useCallback((code: string) => reasonText(m, reasonMessage(code)), [m]);
 
@@ -210,17 +194,19 @@ export function AdminCodingCatalogPanel() {
   );
 
   /** One request; refusals become a toast in words. A timeout is reported, never retried here. */
-  const send = async (url: string, method: "PATCH" | "POST", body: unknown, timeoutMs?: number): Promise<SendResult> => {
+  const send = async (url: string, method: "PATCH" | "POST", body: unknown, timeoutMs?: number, quiet = false): Promise<SendResult> => {
     let response: Response;
     try {
       response = await adminFetch(url, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body), timeoutMs });
     } catch (error) {
       const timedOut = isAdminFetchTimeout(error);
-      if (!timedOut) refused(["network_error"]);
-      return { ok: false, timedOut };
+      if (!timedOut && !quiet) refused(["network_error"]);
+      return { ok: false, timedOut, ...(timedOut ? {} : { code: "network_error" }) };
     }
     const payload = (await response.json().catch(() => null)) as { error?: string; reasons?: string[]; detail?: string | null } | null;
     if (!response.ok) {
+      const code = isSessionGone(response.status, payload) ? "session_expired" : response.status === 403 ? "forbidden" : (payload?.error ?? String(response.status));
+      if (quiet && code !== "session_expired") return { ok: false, timedOut: false, code };
       if (isSessionGone(response.status, payload)) {
         setSessionExpired(true);
         showToast({
@@ -233,7 +219,7 @@ export function AdminCodingCatalogPanel() {
       } else {
         refused(refusalReasons(payload?.error ?? String(response.status), payload?.reasons ?? []), payload?.detail ?? "");
       }
-      return { ok: false, timedOut: false };
+      return { ok: false, timedOut: false, code };
     }
     return { ok: true, payload };
   };
@@ -243,11 +229,10 @@ export function AdminCodingCatalogPanel() {
 
   // --- chat links --------------------------------------------------------------
 
-  const addCandidate = async (candidate: CodingCandidateView, sourceUrls: string[] = []) => {
-    setUrlPrompt(null);
-    setAdding({ id: candidate.id, startedAt: Date.now() });
-    setNow(Date.now());
-    const result = await send(CODING_API, "POST", { action: "link", registryModelId: candidate.id, sourceUrls }, DRAFT_REQUEST_TIMEOUT_MS);
+  // A link reads the chat registry only: no LLM call, no page.
+  const addCandidate = async (candidate: CodingCandidateView) => {
+    setAdding(candidate.id);
+    const result = await send(CODING_API, "POST", { action: "link", registryModelId: candidate.id });
     setAdding(null);
     if (result.ok) {
       await load();
@@ -261,16 +246,79 @@ export function AdminCodingCatalogPanel() {
       const next = await load();
       if (next?.models.some((row) => row.modelId === candidate.id)) showToast({ tone: "ok", title: c.toast.finishedAnyway });
       else refused(["timeout"]);
-      return;
     }
   };
 
-  const onAdd = (candidate: CodingCandidateView) => {
-    // The draft reads one tool calling page and one structured output page;
-    // the dialog shows the provider's defaults so the operator sees and can
-    // replace what is read before the draft call.
-    const defaults = report?.draftProviders.find((entry) => entry.provider === candidate.provider)?.capabilitySources ?? null;
-    setUrlPrompt({ candidate, toolUrl: defaults?.toolCalling ?? "", structuredUrl: defaults?.structuredOutput ?? "" });
+  // Every candidate the judge passes, linked on Code and the coding API and switched on (one request).
+  const doLinkAll = async (publish: boolean) => {
+    setLinkAll(null);
+    setAddingAll(true);
+    setLinkAllResult(null);
+    const result = await send(CODING_API, "POST", { action: "link_all" }, DRAFT_REQUEST_TIMEOUT_MS);
+    if (!result.ok) {
+      setAddingAll(false);
+      if (result.timedOut) {
+        // Each model commits on its own: what was added before the timeout stays added.
+        showToast({ tone: "progress", title: c.toast.checking });
+        await load();
+        refused(["timeout"]);
+      }
+      return;
+    }
+    const outcome = result.payload as CodingLinkAllResult;
+    let published: number | "failed" | null = null;
+    if (publish && outcome.added.length > 0) published = (await publishSnapshot()) ?? "failed";
+    await load();
+    setAddingAll(false);
+    setLinkAllResult({ result: outcome, publish: published });
+  };
+
+  const fillTargets = useMemo(
+    () => capabilityFillTargets(items, report?.capabilityFill.providers ?? []),
+    [items, report]
+  );
+
+  // One row: a single paid LLM call. A failure leaves the row as it was; a timeout is an unknown outcome and is not retried here.
+  const fillOne = async (item: CodingCatalogItem) => {
+    setFillingId(item.id);
+    const result = await send(CODING_API, "POST", { action: "fill_capabilities", modelId: item.id }, DRAFT_REQUEST_TIMEOUT_MS);
+    setFillingId(null);
+    if (result.ok) {
+      await load();
+      showToast({ tone: "ok", title: c.fill.done(item.name) });
+      return;
+    }
+    if (result.timedOut) {
+      await load();
+      refused(["timeout_outcome_unknown"]);
+    }
+  };
+
+  // Every row still on the registry's values, one request after another, with progress.
+  const fillAll = async () => {
+    setFillConfirm(false);
+    const targets = fillTargets.targets;
+    setFillResult(null);
+    setFillRun({ done: 0, total: targets.length });
+    let ok = 0;
+    let stopped = false;
+    const failed: { modelId: string; code: string }[] = [];
+    for (const target of targets) {
+      const result = await send(CODING_API, "POST", { action: "fill_capabilities", modelId: target.id }, DRAFT_REQUEST_TIMEOUT_MS, true);
+      if (result.ok) ok += 1;
+      else {
+        failed.push({ modelId: target.id, code: result.timedOut ? "timeout_outcome_unknown" : (result.code ?? "unknown") });
+        const stop = fillRunStop(result);
+        if (stop !== "continue") {
+          stopped = stop === "unknown_outcome";
+          break;
+        }
+      }
+      setFillRun({ done: ok + failed.length, total: targets.length });
+    }
+    await load();
+    setFillRun(null);
+    setFillResult({ total: targets.length, ok, failed, stopped });
   };
 
   const saveSettings = async (item: CodingCatalogItem) => {
@@ -399,9 +447,8 @@ export function AdminCodingCatalogPanel() {
       modelId: item.id,
       provider: item.provider || report?.draftProviders[0]?.provider || "anthropic",
       apiModelId: item.apiModelId,
+      // A row drafted before terms pages were dropped lists them among its sources; the price page is the other one.
       priceUrl: profile?.pricing.sources.find((url) => url !== profile.terms?.url && url !== profile.retention?.url) ?? "",
-      termsUrl: profile?.terms?.url ?? "",
-      retentionUrl: profile?.retention?.url ?? "",
     };
   };
 
@@ -431,73 +478,16 @@ export function AdminCodingCatalogPanel() {
     showToast({ tone: "ok", title: m.codingFlow.toastApplied(name) });
   };
 
-  // --- provider conditions -------------------------------------------------------
-
-  const draftProviderTerms = async (provider: string, sourceUrls: string[]) => {
-    setProviderStart(null);
-    setProviderDrafting({ provider, startedAt: Date.now() });
-    setNow(Date.now());
-    const result = await send(CODING_API, "POST", { action: "provider_terms_draft", provider, sourceUrls }, DRAFT_REQUEST_TIMEOUT_MS);
-    setProviderDrafting(null);
-    if (result.ok) {
-      await load();
-      setOpenProviderDraft(provider);
-      showToast({ tone: "ok", title: c.providers.draftReady(provider) });
-      return;
-    }
-    if (result.timedOut) {
-      showToast({ tone: "progress", title: c.toast.checking });
-      const next = await load();
-      if (next?.providers.find((row) => row.provider === provider)?.draft) {
-        setOpenProviderDraft(provider);
-        showToast({ tone: "ok", title: c.toast.finishedAnyway });
-      } else refused(["timeout"]);
-    }
-  };
-
-  const settleProviderDraft = async (provider: string, apply: boolean) => {
-    setBusy(true);
-    const result = await send(CODING_API, "POST", { action: apply ? "provider_terms_apply" : "provider_terms_discard", provider });
-    setBusy(false);
-    if (!result.ok) return;
-    setOpenProviderDraft(null);
-    await load();
-    showToast({ tone: "ok", title: apply ? c.providers.applied(provider) : c.providers.discarded });
-  };
-
   // --- render ----------------------------------------------------------------------
 
   const providerNames = useMemo(() => [...new Set(items.map((item) => item.provider).filter(Boolean))].sort(), [items]);
-  const openProviderRow = providerRows.find((row) => row.provider === openProviderDraft) ?? null;
   const activateItem = activate?.item ?? null;
-  const activateProvider = activateItem ? (providerRows.find((row) => row.provider === activateItem.provider) ?? null) : null;
-  const startRow = providerStart ? (providerRows.find((row) => row.provider === providerStart.provider) ?? null) : null;
   const codingFormValid =
     codingForm !== null &&
     codingForm.apiModelId.trim().length > 0 &&
-    codingForm.termsUrl.trim().length > 0 &&
-    codingForm.retentionUrl.trim().length > 0 &&
     (report?.draftProviders ?? []).some(
       (entry) => entry.provider === codingForm.provider && (codingForm.priceUrl.trim().length > 0 || entry.defaultSources.length > 0)
     );
-
-  const viewButton = (id: View, count: number) => (
-    <button
-      type="button"
-      aria-pressed={view === id}
-      onClick={() => {
-        setView(id);
-        setOpenId(null);
-        setCandidatesOpen(false);
-      }}
-      data-testid={`coding-view-${id}`}
-      className={`min-h-9 rounded-xl border px-3 text-sm font-bold ${
-        view === id ? "border-blue-500 bg-blue-500/10 text-zinc-100" : "border-zinc-700 text-zinc-300 hover:bg-zinc-800"
-      }`}
-    >
-      {c.views[id]} · {count}
-    </button>
-  );
 
   const linkValue = openItem?.source === "chat" ? settingsFor(openItem) : null;
   const modelsView = !report ? null : openItem && linkValue ? (
@@ -505,7 +495,6 @@ export function AdminCodingCatalogPanel() {
           key={openItem.id}
           c={c}
           item={openItem}
-          provider={providerRows.find((row) => row.provider === openItem.provider) ?? null}
           value={linkValue}
           busy={busy}
           reasonText={reason}
@@ -523,16 +512,20 @@ export function AdminCodingCatalogPanel() {
             })
           }
           onSave={() => void saveSettings(openItem)}
+          fill={{
+            configured: report.capabilityFill.configured,
+            env: report.capabilityFill.env,
+            supported: report.capabilityFill.providers.includes(openItem.provider),
+            running: fillingId === openItem.id,
+            busy: fillingId !== null || fillRun !== null,
+            onFill: () => void fillOne(openItem),
+          }}
           onActivate={() => setActivate({ item: openItem, publish: false })}
           onHold={() => {
             setHoldReason("");
             setHold({ modelId: openItem.id, name: openItem.name });
           }}
           onUnlink={() => setUnlink(openItem)}
-          onProviders={() => {
-            setOpenId(null);
-            setView("providers");
-          }}
         />
       ) : openItem ? (
         <CodingModelDetail
@@ -580,9 +573,14 @@ export function AdminCodingCatalogPanel() {
             c={c}
             candidates={report.candidates.eligible}
             excluded={report.candidates.excluded}
-            adding={adding ? { id: adding.id, elapsed: elapsedText(now - adding.startedAt) } : null}
-            draftConfigured={report.draftLlm.configured}
-            onAdd={onAdd}
+            adding={adding}
+            addingAll={addingAll}
+            result={linkAllResult?.result ?? null}
+            resultPublish={linkAllResult?.publish ?? null}
+            reasonText={reason}
+            onAdd={(candidate) => void addCandidate(candidate)}
+            onAddAll={() => setLinkAll({ publish: false })}
+            onCloseResult={() => setLinkAllResult(null)}
             onBack={() => setCandidatesOpen(false)}
           />
         </>
@@ -600,6 +598,18 @@ export function AdminCodingCatalogPanel() {
         />
         <CodingFilterBar c={c} providers={providerNames} filter={filter} onChange={setFilter} />
         <CodingChannelBanner c={c} external={report.externalChannels} />
+        <CapabilityFillBar
+          c={c}
+          count={fillTargets.targets.length}
+          skipped={fillTargets.unsupported.length}
+          configured={report.capabilityFill.configured}
+          env={report.capabilityFill.env}
+          progress={fillRun}
+          result={fillResult}
+          reasonText={reason}
+          onFillAll={() => setFillConfirm(true)}
+          onClose={() => setFillResult(null)}
+        />
         <CodingModelTable c={c} items={shown} pendingIds={pendingIds} reasonText={reason} onOpen={(item) => setOpenId(item.id)} />
         <CandidateSummary c={c} candidates={report.candidates.eligible} onOpen={() => setCandidatesOpen(true)} />
       </>
@@ -649,46 +659,7 @@ export function AdminCodingCatalogPanel() {
       {toast ? <CatalogToast m={m} toast={toast} onClose={() => showToast(null)} /> : null}
       {loading && !report ? <AdminStateBlock kind="loading" /> : null}
 
-      {report ? (
-        <>
-          <div role="group" aria-label={c.viewsLabel} className="flex flex-wrap gap-2">
-            {viewButton("models", items.length)}
-            {viewButton("providers", providerRows.length)}
-          </div>
-          {view === "providers" ? (
-            <>
-              <CodingProviderTable
-                c={c}
-                providers={providerRows}
-                drafting={providerDrafting?.provider ?? null}
-                openDraft={openProviderDraft}
-                draftConfigured={report.draftLlm.configured}
-                onCheck={(row) =>
-                  row.terms ? void draftProviderTerms(row.provider, []) : setProviderStart({ provider: row.provider, termsUrl: "", retentionUrl: "", extraUrl: "" })
-                }
-                onOpenDraft={(row) => setOpenProviderDraft(openProviderDraft === row.provider ? null : row.provider)}
-              />
-              {providerDrafting ? (
-                <p className="text-xs font-bold text-blue-300" role="status">
-                  {c.providers.drafting} {elapsedText(now - providerDrafting.startedAt)}
-                </p>
-              ) : null}
-              {openProviderRow ? (
-                <ProviderTermsDraftPanel
-                  c={c}
-                  row={openProviderRow}
-                  busy={busy}
-                  onDiscard={() => void settleProviderDraft(openProviderRow.provider, false)}
-                  onApply={() => void settleProviderDraft(openProviderRow.provider, true)}
-                />
-              ) : null}
-              <p className="text-xs text-zinc-500">{c.providers.footnote}</p>
-            </>
-          ) : (
-            modelsView
-          )}
-        </>
-      ) : null}
+      {modelsView}
 
       <AdminConfirmDialog
         open={activateItem !== null}
@@ -711,7 +682,6 @@ export function AdminCodingCatalogPanel() {
                 c.activate.effectProvider(activateItem.provider),
                 c.activate.effectSnapshot(report?.snapshot?.version ?? null, report?.snapshot?.coverageUntil.slice(0, 10) ?? null),
                 c.activate.effectJudge,
-                c.activate.conditions(activateItem.provider, activateProvider?.checkedAt ?? activateItem.termsCheckedAt),
                 c.activate.undo,
                 <label key="publish" className="inline-flex items-center gap-2 font-bold text-zinc-100">
                   <input
@@ -733,6 +703,38 @@ export function AdminCodingCatalogPanel() {
       />
 
       <AdminConfirmDialog
+        open={linkAll !== null}
+        title={c.candidates.addAllTitle(report?.candidates.eligible.length ?? 0)}
+        effects={[
+          ...c.candidates.addAllEffects(report?.candidates.eligible.length ?? 0),
+          <label key="publish" className="inline-flex items-center gap-2 font-bold text-zinc-100">
+            <input
+              type="checkbox"
+              checked={linkAll?.publish ?? false}
+              onChange={(event) => setLinkAll({ publish: event.target.checked })}
+              data-testid="coding-link-all-publish-option"
+              className="h-4 w-4 accent-blue-600"
+            />
+            {c.candidates.addAllPublish}
+          </label>,
+        ]}
+        confirmLabel={c.candidates.addAllConfirm}
+        busy={addingAll}
+        onConfirm={() => linkAll && void doLinkAll(linkAll.publish)}
+        onClose={() => setLinkAll(null)}
+      />
+
+      <AdminConfirmDialog
+        open={fillConfirm}
+        title={c.fill.allTitle(fillTargets.targets.length)}
+        effects={c.fill.allEffects(fillTargets.targets.length, fillTargets.unsupported.length)}
+        confirmLabel={c.fill.allConfirm}
+        busy={fillRun !== null}
+        onConfirm={() => void fillAll()}
+        onClose={() => setFillConfirm(false)}
+      />
+
+      <AdminConfirmDialog
         open={unlink !== null}
         title={unlink ? c.detail.unlinkTitle(unlink.name) : ""}
         effects={c.detail.unlinkEffects}
@@ -742,69 +744,6 @@ export function AdminCodingCatalogPanel() {
         onConfirm={() => unlink && void doUnlink(unlink)}
         onClose={() => setUnlink(null)}
       />
-
-      <AdminReasonDialog
-        open={urlPrompt !== null}
-        title={urlPrompt ? c.candidates.urlTitle(urlPrompt.candidate.name) : ""}
-        description={
-          report?.draftProviders.find((entry) => entry.provider === urlPrompt?.candidate.provider)?.capabilitySources
-            ? c.candidates.urlDescription
-            : c.candidates.urlDescriptionNoDefault
-        }
-        confirmLabel={c.candidates.urlConfirm}
-        confirmDisabled={!urlPrompt?.toolUrl.trim()}
-        onConfirm={() =>
-          urlPrompt &&
-          void addCandidate(
-            urlPrompt.candidate,
-            [...new Set([urlPrompt.toolUrl.trim(), urlPrompt.structuredUrl.trim()].filter(Boolean))]
-          )
-        }
-        onClose={() => setUrlPrompt(null)}
-      >
-        {urlPrompt ? (
-          <div className="space-y-3">
-            <label className="block text-xs font-bold text-zinc-300">
-              {c.candidates.toolUrlLabel}
-              <input
-                type="url"
-                value={urlPrompt.toolUrl}
-                onChange={(event) => setUrlPrompt({ ...urlPrompt, toolUrl: event.target.value })}
-                data-testid="coding-candidate-tool-url"
-                className="mt-1 w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 font-mono text-sm text-zinc-100 outline-none focus:border-blue-500"
-              />
-            </label>
-            <label className="block text-xs font-bold text-zinc-300">
-              {c.candidates.structuredUrlLabel}
-              <input
-                type="url"
-                value={urlPrompt.structuredUrl}
-                onChange={(event) => setUrlPrompt({ ...urlPrompt, structuredUrl: event.target.value })}
-                data-testid="coding-candidate-structured-url"
-                className="mt-1 w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 font-mono text-sm text-zinc-100 outline-none focus:border-blue-500"
-              />
-            </label>
-          </div>
-        ) : null}
-      </AdminReasonDialog>
-
-      <AdminReasonDialog
-        open={providerStart !== null}
-        title={providerStart ? c.providers.startTitle(providerStart.provider) : ""}
-        description={c.providers.startDescription}
-        confirmLabel={c.providers.startConfirm}
-        confirmDisabled={!providerStart?.termsUrl.trim() || !providerStart?.retentionUrl.trim()}
-        onConfirm={() =>
-          providerStart &&
-          void draftProviderTerms(
-            providerStart.provider,
-            [...new Set([providerStart.termsUrl.trim(), providerStart.retentionUrl.trim(), providerStart.extraUrl.trim()].filter(Boolean))]
-          )
-        }
-        onClose={() => setProviderStart(null)}
-      >
-        {providerStart ? <ProviderStartFields c={c} value={providerStart} hosts={startRow?.hosts ?? []} onChange={setProviderStart} /> : null}
-      </AdminReasonDialog>
 
       <AdminReasonDialog
         open={codingForm !== null}

@@ -947,7 +947,9 @@ v6에서 열린 결정은 다음과 같이 닫는다. 분석 완료 시각에서
 
 제목·설명 본문은 암호화된 전용 필드에만 두고, 일반 카드 필드·source snapshot·승인 receipt·canonical 감사·7년 이력에 복제하지 않는다. 현행 v4 카드의 일반 `title`은 비본문 placeholder이고 `description`은 `NULL`이다. 삭제 뒤에도 계층/카드의 식별자·revision **번호·ID만**·keyed digest·결정 metadata·canonical 감사는 기존 **7년** 기준으로 남긴다. revision snapshot에 제목·설명 본문을 넣지 않는다. 따라서 삭제된 항목은 본문이 없는 상태로 명확히 표시하며, digest에서 제목을 복구하거나 빈 제목을 원래 제목처럼 표시하지 않는다. 유효한 legal hold만 v5·v6 조건으로 삭제를 일시 정지할 수 있다.
 
-현행 노드 schema에는 보관 시각과 본문 정리 상태가 없고, 카드의 표시 설명을 암호화해 보존·삭제하는 경로도 완성되지 않았다. 종료 뒤 재활성화와 이미 삭제된 본문의 복원·새 revision 절차를 별도 계약으로 정하기 전에는 그 전이를 허용하지 않는다. 이 수치 승인은 구현·migration **파일 작성**의 근거일 뿐, migration 적용·비합성 쓰기·정리 worker·staging/live 전환을 열지 않는다. 백업과 키 수명까지 포함한 삭제 증거를 별도 gate로 확인한다.
+노드 schema는 DB가 처음 보관할 때 쓰는 보관 시각(`archivedAt`)과 90일 기한(`contentPurgeAfter`)을 가지지만, 본문 정리 상태와 정리 worker는 없고, 카드의 표시 설명을 암호화해 보존·삭제하는 경로도 완성되지 않았다. 종료 뒤 재활성화와 이미 삭제된 본문의 복원·새 revision 절차를 별도 계약으로 정하기 전에는 그 전이를 허용하지 않는다. 이 수치 승인은 구현·migration **파일 작성**의 근거일 뿐, migration 적용·비합성 쓰기·정리 worker·staging/live 전환을 열지 않는다. 백업과 키 수명까지 포함한 삭제 증거를 별도 gate로 확인한다.
+
+2026-11-21 운영자 결정: Admin › 실행 보드의 계층 목록에서 owner가 남은 작업이 없는 계층(완료 또는 작업 0개)을 하위 Epic·Feature와 함께 보관할 수 있다(`app/api/admin/amux/hierarchy-archive`). 최근 재인증한 owner만, 같은 transaction의 감사 체인 기록과 함께, 기본 꺼짐 스위치 `AMUX_HIERARCHY_ARCHIVE_ENABLED=1`일 때만 쓴다. 보관 시각과 90일 기한은 DB가 쓰고, 재활성화는 위 문장대로 계속 막는다. 본문 정리 worker는 이 결정에 포함되지 않는다.
 
 ## v9 — 카드 작업 본문 보존 [결정, 운영자 mposition 2026-10-01]
 

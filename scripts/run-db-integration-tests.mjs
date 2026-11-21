@@ -462,6 +462,9 @@ run(
     // Feature from a Task card; the database accepts a content revision only
     // in the exact owner shape, and every open Task below is rescored.
     "tests/integration/amux-portfolio-node-edit.db.test.ts",
+    // Owner decision 2026-11-21: the hierarchy list's rollups, and the owner's
+    // one-way hierarchy archive against the node guards and the audit chain.
+    "tests/integration/amux-hierarchy-archive.db.test.ts",
     // AMUX-FILEREQ-004 (2026-11-09): the owner closes the escalation an
     // earlier attempt left open on a done or todo card, with one chained
     // audit entry; review, blocked and running cards refuse.
