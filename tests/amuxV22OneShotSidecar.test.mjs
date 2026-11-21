@@ -979,6 +979,30 @@ test("a refused CLI stream leaves one journal line with its reason and event nam
   assert.equal(thrown.failure, "invalid_result");
 });
 
+test("an unseen kind the check let pass is named in one journal line, and the run keeps its result", async () => {
+  const codex = { ...config, provider: "openai", binaryPath: "/opt/tomverse-amux-v22/codex",
+    claudeConfigDir: "/var/lib/tomverse-amux-v22-codex-impl/cli" };
+  const secret = "SYNTHETIC-never-logged";
+  const output = [
+    { type: "thread.started", thread_id: "t" }, { type: "turn.started" },
+    { type: "item.completed", item: { id: "i0", type: "error", message: secret } },
+    { type: "item.completed", item: { id: "i1", type: "error", message: secret } },
+    { type: "item.completed", item: { id: "i2", type: "agent_message", text: "done" } },
+    { type: "turn.completed", usage: { input_tokens: 1, cached_input_tokens: 0,
+      output_tokens: 1, reasoning_output_tokens: 0 } },
+  ].map((event) => JSON.stringify(event)).join("\n") + "\n";
+  const lines = [];
+  const result = await runAmuxV22OneShot({ ...request, modelId: "gpt-6-luna" }, codex,
+    { syntheticPlatform: true, spawnChild: fakeSpawn(output).spawnChild,
+      channelPreflight: () => null, logInvalidOutput: (line) => lines.push(line),
+      createRunHome: async (_provider, value) => ({
+        config: { ...value, homePath: "/run-home", claudeConfigDir: "/run-home/codex" },
+        cleanup: async () => {} }) });
+  assert.notEqual(result.failure, "invalid_result");
+  assert.deepEqual(lines, [`amux v22 unrecognized_events attempt=${request.attemptId} ` +
+    "provider=openai kinds=item:error*2"]);
+});
+
 test("a Codex sidecar runs its own CLI under the role's sandbox and returns a Codex receipt", async () => {
   const codex = { ...config, provider: "openai", binaryPath: "/opt/tomverse-amux-v22/codex",
     claudeConfigDir: "/var/lib/tomverse-amux-v22-codex-impl/cli" };
