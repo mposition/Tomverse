@@ -458,6 +458,10 @@ run(
     // Owner decision 2026-11-14: an unchanged score's active window is
     // extended by the system refresher, up to its baseline, never past it.
     "tests/integration/amux-portfolio-score-refresh.db.test.ts",
+    // Owner decision 2026-11-21: the owner edits an Initiative, Epic or
+    // Feature from a Task card; the database accepts a content revision only
+    // in the exact owner shape, and every open Task below is rescored.
+    "tests/integration/amux-portfolio-node-edit.db.test.ts",
     // Owner decision 2026-11-21: the hierarchy list's rollups, and the owner's
     // one-way hierarchy archive against the node guards and the audit chain.
     "tests/integration/amux-hierarchy-archive.db.test.ts",

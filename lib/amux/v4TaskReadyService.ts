@@ -24,6 +24,7 @@ import { readAmuxAssignmentCatalogs } from "./workerAssignmentCatalog.ts";
 import { amuxDependencyUnpublishedPatchSql } from "./v4DependencyPublication.ts";
 import { evaluateAmuxV4TaskReady, type AmuxV4TaskReadyFacts } from
   "./v4TaskReadyCore.ts";
+import { amuxApprovedNodeStillCurrent } from "./portfolioNodeEditCore.ts";
 import { AMUX_UNIT_DECISION_AUDIT_SELECT, amuxUnitDecisionAuditActorValid,
   readAmuxPlanRegistrationAuditFor } from "./ideaSystemRegistrationCore.ts";
 
@@ -127,10 +128,15 @@ async function currentPath(tx: Prisma.TransactionClient, card: {
     const node = nodes.get(approved.id);
     if (!node || node.state !== "active" ||
         node.level !== (["initiative", "epic", "feature"] as const)[index] ||
-        node.parentId !== (index ? path[index - 1]!.id : null) ||
-        node.revision !== approved.revision ||
-        node.contentDigest !== approved.content.digest ||
-        node.contentDigestKeyId !== approved.content.keyId) return false;
+        node.parentId !== (index ? path[index - 1]!.id : null)) return false;
+    // Owner decision 2026-11-21: an owner's revision of the node's title and
+    // description keeps the Task's approved path (portfolioNodeEditService.ts).
+    const approvedRevision = node.revision > approved.revision ?
+      await tx.amuxPortfolioNodeRevision.findUnique({
+        where: { nodeId_revision: { nodeId: node.id, revision: approved.revision } },
+        select: { contentDigest: true, contentDigestKeyId: true, decisionId: true },
+      }) : null;
+    if (!amuxApprovedNodeStillCurrent({ approved, node, approvedRevision })) return false;
     const revision = await tx.amuxPortfolioNodeRevision.findUnique({
       where: { nodeId_revision: { nodeId: node.id, revision: node.revision } },
       select: { decisionId: true },

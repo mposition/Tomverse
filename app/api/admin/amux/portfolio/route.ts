@@ -21,6 +21,10 @@ import { amuxPortfolioAssessmentApprovalSchema,
   amuxPortfolioScoreApprovalSchema,
   amuxPortfolioScorePayloadSchema } from "@/lib/amux/portfolioScoreSchemas";
 import { loadCurrentAmuxContentKeys } from "@/lib/amux/ideaKeyConfig";
+import { amuxPortfolioNodeEditApprovalSchema,
+  amuxPortfolioNodeEditPayloadSchema } from "@/lib/amux/portfolioNodeEditCore";
+import { previewAmuxPortfolioNodeEdit, readAmuxPortfolioNodeForEdit,
+  saveAmuxPortfolioNodeEdit } from "@/lib/amux/portfolioNodeEditService";
 import { AmuxV4TaskReadyError, readAmuxV4TaskReady } from
   "@/lib/amux/v4TaskReadyService";
 import { hasValidMutationOrigin } from "@/lib/requestOrigin";
@@ -35,6 +39,11 @@ const requestSchema = z.discriminatedUnion("action", [
     payload: amuxPortfolioScorePayloadSchema }).strict(),
   z.object({ action: z.literal("confirm_score"),
     approval: amuxPortfolioScoreApprovalSchema }).strict(),
+  // Owner decision 2026-11-21: edit an Initiative, Epic or Feature.
+  z.object({ action: z.literal("preview_node_edit"),
+    payload: amuxPortfolioNodeEditPayloadSchema }).strict(),
+  z.object({ action: z.literal("save_node_edit"),
+    approval: amuxPortfolioNodeEditApprovalSchema }).strict(),
 ]);
 
 export async function POST(request: Request) {
@@ -58,7 +67,7 @@ export async function POST(request: Request) {
     await consumeApiRateLimit(request, session.user.id,
       "admin-amux-v4-portfolio", { minute: 6, day: 80 });
     let raw: unknown;
-    try { raw = JSON.parse(await readLimitedText(request, 12_288)); }
+    try { raw = JSON.parse(await readLimitedText(request, 32_768)); }
     catch { return NextResponse.json({ error: "schema_rejected" },
       { status: 400, headers: noStore }); }
     const parsed = requestSchema.safeParse(raw);
@@ -82,6 +91,17 @@ export async function POST(request: Request) {
         ...action.approval, digestKey: keys });
       return NextResponse.json({ ...result, retryWrite: false },
         { status: 201, headers: noStore });
+    }
+    if (action.action === "preview_node_edit") {
+      const preview = await previewAmuxPortfolioNodeEdit(session, action.payload, keys);
+      return NextResponse.json({ ...preview, retryWrite: false }, { headers: noStore });
+    }
+    if (action.action === "save_node_edit") {
+      requestId = action.approval.payload.requestId;
+      const result = await saveAmuxPortfolioNodeEdit({ session, request,
+        ...action.approval, digestKey: keys });
+      return NextResponse.json({ ...result, promotionAuthorized: false,
+        retryWrite: false }, { status: 201, headers: noStore });
     }
     if (action.action === "preview_score") {
       const plan = await previewAmuxPortfolioScore(session, action.payload, keys);
@@ -137,6 +157,11 @@ export async function GET(request: Request) {
     if (kind === "latest_score") {
       const taskId = url.searchParams.get("taskId") ?? "";
       const result = await readLatestAmuxPortfolioScore(session, taskId);
+      return NextResponse.json(result, { headers: noStore });
+    }
+    if (kind === "node") {
+      const result = await readAmuxPortfolioNodeForEdit(session,
+        url.searchParams.get("nodeId") ?? "");
       return NextResponse.json(result, { headers: noStore });
     }
     if (kind === "task_ready") {
