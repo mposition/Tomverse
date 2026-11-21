@@ -169,7 +169,7 @@ export const homeV2Translations: Record<Exclude<Language, "ko" | "en">, HomeV2Co
         otherName: "OpenAI 兼容工具",
         other: "只需更改 Base URL 和密钥即可连接",
       },
-      facts: [["OpenAI 兼容", "https://tomverse.app/api/v1"], ["Anthropic 兼容", "https://tomverse.app/api/anthropic"], ["API 密钥", "设置 > API 密钥 · 每个密钥的积分上限"]],
+      facts: [["编程工具", "https://tomverse.app/api/code/v1"], ["其他应用", "https://tomverse.app/api/v1"], ["API 密钥", "设置 > API 密钥 · 每个密钥的积分上限"]],
       note: "这里展示的是“设置 > API 密钥”页面生成的设置的精简版。实际值会用你选择的模型和新建的密钥填入。不在列表中的工具需支持 OpenAI 兼容 API（Chat Completions·Responses）才能连接。",
       console: {
         codexComment: "# 添加 Tomverse 提供商（默认设置保持不变）",
@@ -389,7 +389,7 @@ export const homeV2Translations: Record<Exclude<Language, "ko" | "en">, HomeV2Co
         otherName: "OpenAI 相容工具",
         other: "只要更改 Base URL 和金鑰就能串接",
       },
-      facts: [["OpenAI 相容", "https://tomverse.app/api/v1"], ["Anthropic 相容", "https://tomverse.app/api/anthropic"], ["API 金鑰", "設定 > API 金鑰 · 每組金鑰的點數上限"]],
+      facts: [["程式開發工具", "https://tomverse.app/api/code/v1"], ["其他應用程式", "https://tomverse.app/api/v1"], ["API 金鑰", "設定 > API 金鑰 · 每組金鑰的點數上限"]],
       note: "這裡顯示的是「設定 > API 金鑰」畫面所產生設定的精簡版。實際值會以你選擇的模型和新建立的金鑰填入。不在清單上的工具，需支援 OpenAI 相容 API（Chat Completions·Responses）才能串接。",
       console: {
         codexComment: "# 新增 Tomverse 供應商（預設設定維持不變）",
@@ -609,7 +609,7 @@ export const homeV2Translations: Record<Exclude<Language, "ko" | "en">, HomeV2Co
         otherName: "Outils compatibles OpenAI",
         other: "Changez simplement l’URL de base et la clé",
       },
-      facts: [["Compatible OpenAI", "https://tomverse.app/api/v1"], ["Compatible Anthropic", "https://tomverse.app/api/anthropic"], ["Clés API", "Paramètres > Clés API · limite de crédits par clé"]],
+      facts: [["Outils de code", "https://tomverse.app/api/code/v1"], ["Autres applications", "https://tomverse.app/api/v1"], ["Clés API", "Paramètres > Clés API · limite de crédits par clé"]],
       note: "Version abrégée des réglages générés par l’écran Paramètres > Clés API. Les vraies valeurs sont remplies avec le modèle choisi et une nouvelle clé. Les outils absents de la liste doivent prendre en charge l’API compatible OpenAI (Chat Completions · Responses) pour se connecter.",
       console: {
         codexComment: "# Ajouter Tomverse comme fournisseur (vos réglages par défaut restent inchangés)",
@@ -829,7 +829,7 @@ export const homeV2Translations: Record<Exclude<Language, "ko" | "en">, HomeV2Co
         otherName: "OpenAI-kompatible Tools",
         other: "Nur Base URL und Schlüssel ändern, schon verbunden",
       },
-      facts: [["OpenAI-kompatibel", "https://tomverse.app/api/v1"], ["Anthropic-kompatibel", "https://tomverse.app/api/anthropic"], ["API-Schlüssel", "Einstellungen > API-Schlüssel · Credit-Limit pro Schlüssel"]],
+      facts: [["Coding-Tools", "https://tomverse.app/api/code/v1"], ["Andere Apps", "https://tomverse.app/api/v1"], ["API-Schlüssel", "Einstellungen > API-Schlüssel · Credit-Limit pro Schlüssel"]],
       note: "Eine gekürzte Fassung der Einstellungen, die die Seite Einstellungen > API-Schlüssel erzeugt. Die echten Werte werden mit dem gewählten Modell und einem neu erstellten Schlüssel gefüllt. Nicht aufgeführte Tools müssen die OpenAI-kompatible API (Chat Completions · Responses) unterstützen, um sich zu verbinden.",
       console: {
         codexComment: "# Tomverse als Anbieter hinzufügen (Standardeinstellungen bleiben unverändert)",
@@ -1049,7 +1049,7 @@ export const homeV2Translations: Record<Exclude<Language, "ko" | "en">, HomeV2Co
         otherName: "Herramientas compatibles con OpenAI",
         other: "Solo cambia la Base URL y la clave",
       },
-      facts: [["Compatible con OpenAI", "https://tomverse.app/api/v1"], ["Compatible con Anthropic", "https://tomverse.app/api/anthropic"], ["Claves de API", "Ajustes > Claves de API · límite de créditos por clave"]],
+      facts: [["Herramientas de código", "https://tomverse.app/api/code/v1"], ["Otras aplicaciones", "https://tomverse.app/api/v1"], ["Claves de API", "Ajustes > Claves de API · límite de créditos por clave"]],
       note: "Versión abreviada de la configuración que genera la pantalla Ajustes > Claves de API. Los valores reales se rellenan con el modelo que elijas y una clave nueva. Las herramientas que no aparecen en la lista deben admitir la API compatible con OpenAI (Chat Completions · Responses) para conectarse.",
       console: {
         codexComment: "# Añadir Tomverse como proveedor (la configuración predeterminada no cambia)",
@@ -1269,7 +1269,7 @@ export const homeV2Translations: Record<Exclude<Language, "ko" | "en">, HomeV2Co
         otherName: "Ferramentas compatíveis com OpenAI",
         other: "Basta trocar a Base URL e a chave",
       },
-      facts: [["Compatível com OpenAI", "https://tomverse.app/api/v1"], ["Compatível com Anthropic", "https://tomverse.app/api/anthropic"], ["Chaves de API", "Configurações > Chaves de API · limite de créditos por chave"]],
+      facts: [["Ferramentas de código", "https://tomverse.app/api/code/v1"], ["Outros apps", "https://tomverse.app/api/v1"], ["Chaves de API", "Configurações > Chaves de API · limite de créditos por chave"]],
       note: "Versão resumida das configurações que a tela Configurações > Chaves de API gera. Os valores reais são preenchidos com o modelo escolhido e uma chave nova. Ferramentas que não estão na lista precisam oferecer suporte à API compatível com OpenAI (Chat Completions · Responses) para se conectar.",
       console: {
         codexComment: "# Adicionar o Tomverse como provedor (as configurações padrão não mudam)",
