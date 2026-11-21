@@ -21,7 +21,11 @@ class CatalogRefusal extends Error {
     this.status = status;
   }
 }
+// Mirrors lib/modelCatalogDraftLlm.ts, including its `name`: the fill path tells
+// a draft refusal by name (a `.constructor` read is a runtime-loader reach the
+// control-plane slice refuses).
 class DraftRefusal extends Error {
+  name = "DraftRefusal";
   constructor(code, detail = null) {
     super(code);
     this.code = code;
