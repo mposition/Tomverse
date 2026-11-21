@@ -674,7 +674,7 @@ const launchNav: Record<Language, Omit<NavCopy, "chatItems" | "developerItems"> 
       { title: "이미지 · 파일", body: "생성, 사진 편집, 파일 변환" }, { title: "플러그인 · MCP", body: "업무 도구를 대화 안으로" }, { title: "모바일 앱", body: "Android · iOS 곧 출시" },
     ],
     developerItems: [
-      { title: "Tomverse API", body: "API 키 하나로 공급자 {n}곳" }, { title: "코딩 도구 연결", body: "Codex · Claude Code · Cursor · VS Code" }, { title: "Tomverse CLI 다운로드", body: "터미널의 코딩 에이전트" },
+      { title: "Tomverse API", body: "API 키 하나로 공급자 {n}곳" }, { title: "코딩 도구 연결", body: "Codex · Claude Code · Cursor · VS Code" }, { title: "Tomverse CLI 설치", body: "터미널의 코딩 에이전트" },
     ],
   },
   en: {
@@ -684,7 +684,7 @@ const launchNav: Record<Language, Omit<NavCopy, "chatItems" | "developerItems"> 
       { title: "Images · files", body: "Generation, photo editing, file conversion" }, { title: "Plugins · MCP", body: "Your work tools inside the chat" }, { title: "Mobile apps", body: "Android · iOS coming soon" },
     ],
     developerItems: [
-      { title: "Tomverse API", body: "{n} providers with one API key" }, { title: "Connect coding tools", body: "Codex · Claude Code · Cursor · VS Code" }, { title: "Download Tomverse CLI", body: "A coding agent in your terminal" },
+      { title: "Tomverse API", body: "{n} providers with one API key" }, { title: "Connect coding tools", body: "Codex · Claude Code · Cursor · VS Code" }, { title: "Install Tomverse CLI", body: "A coding agent in your terminal" },
     ],
   },
   zh: {
@@ -694,7 +694,7 @@ const launchNav: Record<Language, Omit<NavCopy, "chatItems" | "developerItems"> 
       { title: "图片 · 文件", body: "生成、照片编辑、文件转换" }, { title: "插件 · MCP", body: "把工作工具带进对话" }, { title: "移动应用", body: "Android · iOS 即将推出" },
     ],
     developerItems: [
-      { title: "Tomverse API", body: "一个 API 密钥，{n} 家提供商" }, { title: "连接编程工具", body: "Codex · Claude Code · Cursor · VS Code" }, { title: "下载 Tomverse CLI", body: "终端里的编程代理" },
+      { title: "Tomverse API", body: "一个 API 密钥，{n} 家提供商" }, { title: "连接编程工具", body: "Codex · Claude Code · Cursor · VS Code" }, { title: "安装 Tomverse CLI", body: "终端里的编程代理" },
     ],
   },
   "zh-Hant": {
@@ -704,7 +704,7 @@ const launchNav: Record<Language, Omit<NavCopy, "chatItems" | "developerItems"> 
       { title: "圖片 · 檔案", body: "生成、照片編輯、檔案轉換" }, { title: "外掛 · MCP", body: "把工作工具帶進對話" }, { title: "行動應用程式", body: "Android · iOS 即將推出" },
     ],
     developerItems: [
-      { title: "Tomverse API", body: "一組 API 金鑰，{n} 家供應商" }, { title: "連接程式設計工具", body: "Codex · Claude Code · Cursor · VS Code" }, { title: "下載 Tomverse CLI", body: "終端機裡的程式設計代理" },
+      { title: "Tomverse API", body: "一組 API 金鑰，{n} 家供應商" }, { title: "連接程式設計工具", body: "Codex · Claude Code · Cursor · VS Code" }, { title: "安裝 Tomverse CLI", body: "終端機裡的程式設計代理" },
     ],
   },
   fr: {
@@ -714,7 +714,7 @@ const launchNav: Record<Language, Omit<NavCopy, "chatItems" | "developerItems"> 
       { title: "Images · fichiers", body: "Génération, retouche photo, conversion" }, { title: "Plugins · MCP", body: "Vos outils de travail dans la conversation" }, { title: "Applications mobiles", body: "Android · iOS bientôt" },
     ],
     developerItems: [
-      { title: "Tomverse API", body: "{n} fournisseurs avec une seule clé API" }, { title: "Connecter vos outils", body: "Codex · Claude Code · Cursor · VS Code" }, { title: "Télécharger Tomverse CLI", body: "Un agent de code dans votre terminal" },
+      { title: "Tomverse API", body: "{n} fournisseurs avec une seule clé API" }, { title: "Connecter vos outils", body: "Codex · Claude Code · Cursor · VS Code" }, { title: "Installer Tomverse CLI", body: "Un agent de code dans votre terminal" },
     ],
   },
   de: {
@@ -724,7 +724,7 @@ const launchNav: Record<Language, Omit<NavCopy, "chatItems" | "developerItems"> 
       { title: "Bilder · Dateien", body: "Erstellen, Fotobearbeitung, Umwandlung" }, { title: "Plugins · MCP", body: "Ihre Arbeitstools im Chat" }, { title: "Mobile Apps", body: "Android · iOS in Kürze" },
     ],
     developerItems: [
-      { title: "Tomverse API", body: "{n} Anbieter mit einem API-Schlüssel" }, { title: "Coding-Tools verbinden", body: "Codex · Claude Code · Cursor · VS Code" }, { title: "Tomverse CLI herunterladen", body: "Ein Coding-Agent im Terminal" },
+      { title: "Tomverse API", body: "{n} Anbieter mit einem API-Schlüssel" }, { title: "Coding-Tools verbinden", body: "Codex · Claude Code · Cursor · VS Code" }, { title: "Tomverse CLI installieren", body: "Ein Coding-Agent im Terminal" },
     ],
   },
   es: {
@@ -734,7 +734,7 @@ const launchNav: Record<Language, Omit<NavCopy, "chatItems" | "developerItems"> 
       { title: "Imágenes · archivos", body: "Generación, edición de fotos, conversión" }, { title: "Plugins · MCP", body: "Tus herramientas de trabajo en el chat" }, { title: "Apps móviles", body: "Android · iOS muy pronto" },
     ],
     developerItems: [
-      { title: "Tomverse API", body: "{n} proveedores con una clave de API" }, { title: "Conectar herramientas", body: "Codex · Claude Code · Cursor · VS Code" }, { title: "Descargar Tomverse CLI", body: "Un agente de código en tu terminal" },
+      { title: "Tomverse API", body: "{n} proveedores con una clave de API" }, { title: "Conectar herramientas", body: "Codex · Claude Code · Cursor · VS Code" }, { title: "Instalar Tomverse CLI", body: "Un agente de código en tu terminal" },
     ],
   },
   pt: {
@@ -744,7 +744,7 @@ const launchNav: Record<Language, Omit<NavCopy, "chatItems" | "developerItems"> 
       { title: "Imagens · arquivos", body: "Geração, edição de fotos, conversão" }, { title: "Plugins · MCP", body: "Suas ferramentas de trabalho no chat" }, { title: "Apps móveis", body: "Android · iOS em breve" },
     ],
     developerItems: [
-      { title: "Tomverse API", body: "{n} provedores com uma chave de API" }, { title: "Conectar ferramentas", body: "Codex · Claude Code · Cursor · VS Code" }, { title: "Baixar Tomverse CLI", body: "Um agente de código no seu terminal" },
+      { title: "Tomverse API", body: "{n} provedores com uma chave de API" }, { title: "Conectar ferramentas", body: "Codex · Claude Code · Cursor · VS Code" }, { title: "Instalar o Tomverse CLI", body: "Um agente de código no seu terminal" },
     ],
   },
 };
@@ -884,7 +884,7 @@ function LaunchMarketingFooter({ maxWidth = "max-w-7xl" }: MarketingFooterProps)
     { title: nav.developers, items: [
       { label: "Tomverse API", href: DEVELOPERS_PATH },
       { label: nav.apiKeys, href: "/settings/api" },
-      { label: nav.developerItems[2].title, href: CLI_DOWNLOAD_PATH, soon: true },
+      { label: nav.developerItems[2].title, href: CLI_DOWNLOAD_PATH },
     ] },
     { title: copy.help, items: [
       { label: copy.helpCentre, href: "/support/help-centre" }, { label: copy.faq, href: "/faq" },

@@ -46,7 +46,7 @@ export const zh = {
         imported: "已导入的对话",
         lastMessage: "最后一条消息",
         entry: "继续在其他 AI 中开始的对话",
-        entryHint: "从 ChatGPT、Claude 或 Gemini 导入对话。",
+        entryHint: "从 ChatGPT、Claude、Gemini 或 Perplexity 导入对话。",
         where: "您的对话保存在哪里？",
         official: "打开官方指南",
         returnGuide: "收到文件后，请返回“设置 → 数据 → 导入对话”。",

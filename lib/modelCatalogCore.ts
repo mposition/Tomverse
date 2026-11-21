@@ -319,24 +319,28 @@ export const codingProfileSchema = z
         sources: z.array(z.string().url()).min(1).max(10),
       })
       .strict(),
+    // Provider conditions are no longer judged or collected (owner decision
+    // 2026-11-21). A row stored or published with them still parses, and a
+    // snapshot row that carries them hashes as it did; a new row omits them.
     terms: z
       .object({
         allowsResaleAndCodingAgent: z.boolean(),
         url: z.string().url(),
         checkedAt: isoDate,
       })
-      .strict(),
-    retention: z.object({ url: z.string().url(), checkedAt: isoDate }).strict(),
-    processingRegion: z.string().trim().min(2).max(40),
+      .strict()
+      .optional(),
+    retention: z.object({ url: z.string().url(), checkedAt: isoDate }).strict().optional(),
+    processingRegion: z.string().trim().min(2).max(40).optional(),
   })
   .strict();
 export type CodingProfile = z.infer<typeof codingProfileSchema>;
 
 /**
  * What the operator may change in a coding draft before applying it: the
- * display name, the plan that sees the model and the credit weight. Prices,
- * capabilities and the terms and retention evidence are what the cited pages
- * say, so they are not editable; a different answer is a new draft.
+ * display name, the plan that sees the model and the credit weight. Prices
+ * and capabilities are what the cited pages say, so they are not editable; a
+ * different answer is a new draft.
  */
 export const codingDraftEditSchema = z
   .object({
@@ -371,7 +375,7 @@ export const applyCodingDraftEdits = (
   };
 };
 
-// --- coding: stored rows, chat links and provider conditions -------------------
+// --- coding: stored rows and chat links ---------------------------------------
 //
 // A coding row is one of two kinds (owner decision 2026-11-20):
 //   - dedicated: a model chat does not have; the row carries its whole profile
@@ -380,9 +384,11 @@ export const applyCodingDraftEdits = (
 //     prices, context, output limit and image input are read from the chat
 //     registry every time the catalogue is resolved, never copied; the row holds
 //     only what is the coding catalogue's own.
-// Terms, data retention and processing region are per provider
-// (CodingProviderTerms). A dedicated row's own terms stand in until its
-// provider has a record, so no row that serves today is refused by the move.
+// Provider conditions (terms, retention, region) are not a coding admission
+// rule (owner decision 2026-11-21): chat models are added without them. Where a
+// provider record (CodingProviderTerms, no longer written) or a dedicated row's
+// own fields exist they are still carried into the resolved row, unjudged, so
+// a snapshot row published with them compares as it did.
 
 /**
  * A dedicated row's credits on the coding API, when the operator charges more
@@ -425,7 +431,7 @@ export const codingLinkedProfileSchema = z
     /** Absent: the chat model's credit weight. Never below the coding floor to serve. */
     creditWeight: z.number().int().positive().max(1_000).optional(),
     channels: codingChannelsSchema,
-    /** What the LLM draft read and answered, so the screen can show where the two capability values came from. */
+    /** Where the two capability values came from: the chat registry now; an LLM draft's pages on a link made before. */
     evidence: z
       .object({
         sources: z.array(z.string().url()).max(CODING_EVIDENCE_MAX_SOURCES),
@@ -481,15 +487,15 @@ export const codingCatalogRowSchema = z
   .strict();
 export type CodingCatalogRow = z.output<typeof codingCatalogRowSchema>;
 
-/** A row as the judge sees it: provider conditions may still be missing. */
-export type CodingJudgeInput = Omit<CodingCatalogRow, "modelId" | "source" | "channels" | "registryModelId" | "apiCreditWeight" | "terms" | "retention" | "processingRegion"> & {
-  terms: CodingCatalogRow["terms"] | null;
-  retention: CodingCatalogRow["retention"] | null;
-  processingRegion: string | null;
-};
-export type CodingResolvedRow = Pick<CodingCatalogRow, "modelId" | "source" | "registryModelId" | "channels" | "apiCreditWeight"> & CodingJudgeInput;
+/** A row as the judge sees it (a draft profile too): what is priced and offered, never provider conditions. */
+export type CodingJudgeInput = Omit<CodingCatalogRow, "modelId" | "source" | "channels" | "registryModelId" | "apiCreditWeight">;
+export type CodingResolvedRow = CodingCatalogRow;
 
-/** What an operator applied for one provider (CodingProviderTerms.terms). */
+/**
+ * What an operator applied for one provider before provider conditions were
+ * dropped (CodingProviderTerms.terms). Read only, so rows that carried them
+ * keep their published content; nothing writes it any more.
+ */
 export const codingProviderTermsSchema = z
   .object({
     allowsResaleAndCodingAgent: z.boolean(),
@@ -503,23 +509,6 @@ export const codingProviderTermsSchema = z
   })
   .strict();
 export type CodingProviderTerms = z.infer<typeof codingProviderTermsSchema>;
-
-/** Provider conditions are checked again after this many days (owner decision 2026-11-20). */
-export const PROVIDER_TERMS_VALID_DAYS = 90;
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-/** The first UTC day the conditions checked on `checkedAt` need a new check; null for an unreadable date. */
-export const providerTermsDueOn = (checkedAt: string): string | null => {
-  const checked = Date.parse(`${checkedAt}T00:00:00Z`);
-  return Number.isFinite(checked) ? new Date(checked + PROVIDER_TERMS_VALID_DAYS * DAY_MS).toISOString().slice(0, 10) : null;
-};
-
-export const providerTermsExpired = (checkedAt: string, now: Date): boolean => {
-  const checked = Date.parse(`${checkedAt}T00:00:00Z`);
-  // An unreadable date cannot show the check is recent.
-  if (!Number.isFinite(checked)) return true;
-  return now.getTime() >= checked + PROVIDER_TERMS_VALID_DAYS * DAY_MS;
-};
 
 /**
  * A chat registry model as the coding catalogue reads it. Built on the server
@@ -567,13 +556,13 @@ export type CodingResolution = {
   /** Null when the row cannot be read at all; `problem` says why. */
   row: CodingResolvedRow | null;
   problem: string | null;
-  /** Refusals the row's values alone cannot show (the linked chat model's state). */
+  /**
+   * Refusals the row's values alone cannot show (the linked chat model's
+   * state). A chat link's are split by channel in judgeCodingChannels.
+   */
   refusals: string[];
-  /** Not refusals: a serving model keeps serving. `provider_terms_expired` blocks a new activation. */
-  warnings: string[];
-  /** Where the terms came from: the provider record, or a dedicated row's own fields. */
-  termsSource: "provider" | "model" | null;
-  termsCheckedAt: string | null;
+  /** A chat link whose chat model has no context window: its row carries a placeholder, and Code refuses it. */
+  contextUnknown: boolean;
   stored: CodingStoredProfile | null;
 };
 
@@ -584,24 +573,22 @@ export const codingPlanReaches = (plan: string, minimumPlan: CodingPlan): boolea
   Object.hasOwn(PLAN_RANK, plan) && PLAN_RANK[plan as CodingPlan] >= PLAN_RANK[minimumPlan];
 
 /**
- * Resolve one stored coding row against the chat registry and the provider
- * conditions. Pure: the caller supplies both lookups.
+ * Resolve one stored coding row against the chat registry (and the provider
+ * records that still carry conditions into the row). Pure: the caller supplies
+ * both lookups.
  */
 export const resolveCodingEntry = (input: {
   modelId: string;
   profile: unknown;
   chat: (registryModelId: string) => ChatModelFacts | null;
   providerTerms: (provider: string) => CodingProviderTerms | null;
-  now: Date;
 }): CodingResolution => {
   const empty = (problem: string, stored: CodingStoredProfile | null = null, source: CodingResolution["source"] = null): CodingResolution => ({
     source,
     row: null,
     problem,
     refusals: [],
-    warnings: [],
-    termsSource: null,
-    termsCheckedAt: null,
+    contextUnknown: false,
     stored,
   });
   if (input.profile === null || input.profile === undefined) return empty("no_profile");
@@ -609,21 +596,21 @@ export const resolveCodingEntry = (input: {
   if (!parsed.success) return empty("invalid_profile");
   const stored = parsed.data;
   const refusals: string[] = [];
-  const warnings: string[] = [];
 
   if (stored.source === "chat") {
     const chat = input.chat(stored.registryModelId);
     if (!chat) return empty("chat_model_missing", stored, "chat");
-    if (chat.contextWindowTokens === null) return empty("chat_context_unknown", stored, "chat");
+    // Code needs the window (its credit floor assumes all of it); the coding API runs the chat
+    // model under chat's own input limit and does not. The row of an unknown window carries
+    // the output cap as a placeholder so it still publishes for the coding API, and Code
+    // refuses it (chat_context_unknown, judgeCodingChannels).
+    const contextUnknown = chat.contextWindowTokens === null;
+    if (contextUnknown) refusals.push("chat_context_unknown");
     if (chat.catalogDeleted) refusals.push("chat_model_deleted");
     else if (!chat.enabled || (chat.status !== "enabled" && chat.status !== "limited")) refusals.push("chat_model_disabled");
     if (!chat.price.verified) refusals.push("chat_price_unverified");
-    if (stored.channels.includes("code")) {
-      if (chat.price.reasoningBilledSeparately) refusals.push("reasoning_cost_unbounded");
-      if (CODE_MANAGED_UNBOUNDED_PROVIDERS.includes(chat.provider)) refusals.push("provider_cost_unbounded");
-    }
-    const terms = input.providerTerms(chat.provider);
-    if (terms && providerTermsExpired(terms.checkedAt, input.now)) warnings.push("provider_terms_expired");
+    if (chat.price.reasoningBilledSeparately) refusals.push("reasoning_cost_unbounded");
+    if (CODE_MANAGED_UNBOUNDED_PROVIDERS.includes(chat.provider)) refusals.push("provider_cost_unbounded");
     return {
       source: "chat",
       row: {
@@ -639,7 +626,7 @@ export const resolveCodingEntry = (input: {
           toolCalling: stored.capabilities.toolCalling,
           structuredOutput: stored.capabilities.structuredOutput,
           imageInput: chat.imageInput,
-          maxContextTokens: chat.contextWindowTokens,
+          maxContextTokens: chat.contextWindowTokens ?? chat.maxOutputTokens,
           maxOutputTokens: chat.maxOutputTokens,
         },
         pricing: {
@@ -650,15 +637,11 @@ export const resolveCodingEntry = (input: {
           sources: [],
           pricingVersion: chat.price.pricingVersion,
         },
-        terms: terms ? { allowsResaleAndCodingAgent: terms.allowsResaleAndCodingAgent, url: terms.termsUrl, checkedAt: terms.checkedAt } : null,
-        retention: terms ? { url: terms.retentionUrl, checkedAt: terms.checkedAt } : null,
-        processingRegion: terms ? terms.processingRegion : null,
+        ...conditionsOf(input.providerTerms(chat.provider)),
       },
       problem: null,
       refusals,
-      warnings,
-      termsSource: terms ? "provider" : null,
-      termsCheckedAt: terms?.checkedAt ?? null,
+      contextUnknown,
       stored,
     };
   }
@@ -669,12 +652,6 @@ export const resolveCodingEntry = (input: {
   const channels = stored.channels ?? (["code"] as CodingChannel[]);
   if (onCodingApi(channels) && CODE_MANAGED_UNBOUNDED_PROVIDERS.includes(stored.provider)) refusals.push("provider_cost_unbounded");
   const providerTerms = input.providerTerms(stored.provider);
-  const terms = providerTerms
-    ? { allowsResaleAndCodingAgent: providerTerms.allowsResaleAndCodingAgent, url: providerTerms.termsUrl, checkedAt: providerTerms.checkedAt }
-    : stored.terms;
-  const retention = providerTerms ? { url: providerTerms.retentionUrl, checkedAt: providerTerms.checkedAt } : stored.retention;
-  const checkedAt = providerTerms?.checkedAt ?? (stored.terms.checkedAt < stored.retention.checkedAt ? stored.terms.checkedAt : stored.retention.checkedAt);
-  if (providerTermsExpired(checkedAt, input.now)) warnings.push("provider_terms_expired");
   return {
     source: "dedicated",
     row: {
@@ -688,31 +665,44 @@ export const resolveCodingEntry = (input: {
       minimumPlan: stored.minimumPlan,
       capabilities: stored.capabilities,
       pricing: stored.pricing,
-      terms,
-      retention,
-      processingRegion: providerTerms?.processingRegion ?? stored.processingRegion,
+      // A provider record, applied earlier, stands in for the row's own fields.
+      ...(providerTerms
+        ? conditionsOf(providerTerms)
+        : {
+            ...(stored.terms ? { terms: stored.terms } : {}),
+            ...(stored.retention ? { retention: stored.retention } : {}),
+            ...(stored.processingRegion ? { processingRegion: stored.processingRegion } : {}),
+          }),
     },
     problem: null,
     refusals,
-    warnings,
-    termsSource: providerTerms ? "provider" : "model",
-    termsCheckedAt: checkedAt,
+    contextUnknown: false,
     stored,
   };
 };
 
-/** The snapshot row of an admitted resolution; null while any provider condition is missing. */
-export const codingCatalogRowOf = (row: CodingResolvedRow): CodingCatalogRow | null => {
-  if (!row.terms || !row.retention || !row.processingRegion) return null;
-  const { registryModelId, ...rest } = row;
-  return {
-    ...rest,
-    ...(registryModelId === undefined ? {} : { registryModelId }),
-    terms: row.terms,
-    retention: row.retention,
-    processingRegion: row.processingRegion,
-  };
-};
+/** The condition fields a provider record puts on a row; none when the provider has no record. */
+const conditionsOf = (terms: CodingProviderTerms | null) =>
+  terms
+    ? {
+        terms: { allowsResaleAndCodingAgent: terms.allowsResaleAndCodingAgent, url: terms.termsUrl, checkedAt: terms.checkedAt },
+        retention: { url: terms.retentionUrl, checkedAt: terms.checkedAt },
+        processingRegion: terms.processingRegion,
+      }
+    : {};
+
+/**
+ * The two capability values of a chat link, from what the chat registry
+ * already knows (owner decision 2026-11-21). The coding candidates are the
+ * classes the external API serves, and that API offers every model with tool
+ * calling (`capabilities.tools`, lib/externalApiCatalogCore.ts), so a candidate
+ * supports it. The registry records nothing about structured output, so that
+ * stays at the conservative "none" until the operator sets it on the link.
+ */
+export const registryCodingCapabilities = (): CodingLinkedProfile["capabilities"] => ({
+  toolCalling: "basic",
+  structuredOutput: "none",
+});
 
 /** Usage classes a chat model may have to be offered as a coding candidate (the external API's servable classes). */
 export const CODING_CANDIDATE_USAGE_CLASSES: readonly string[] = ["standard", "advanced", "premium", "reasoning", "premium-reasoning"];
@@ -1205,7 +1195,10 @@ export type CodingAdmission = { admitted: true } | { admitted: false; reasons: r
 /**
  * Whether a coding model may be offered in managed mode
  * (TomverseCode product-strategy 17.6, docs/policy/code-task-cost-guardrails.md 6).
- * Terms and retention evidence are required; absence is refusal.
+ * Provider conditions (terms, retention, region) are not judged (owner
+ * decision 2026-11-21): chat models are added without them. What is judged is
+ * the credit floor, a known provider with an established data destination,
+ * official price sources and tool calling.
  */
 export const judgeCodingModel = (
   profile: CodingJudgeInput,
@@ -1222,14 +1215,6 @@ export const judgeCodingModel = (
   else if (profile.pricing.creditWeight < floor) reasons.push(`credits_below_floor:${floor}`);
   if (!deps.knownProvider(profile.provider)) reasons.push("unknown_provider");
   if (!deps.providerDestinationEstablished(profile.provider)) reasons.push("provider_destination_unproven");
-  // Provider conditions: absence is refusal.
-  if (!profile.terms || !profile.retention || !profile.processingRegion) {
-    reasons.push("provider_terms_missing");
-  } else {
-    if (!profile.terms.allowsResaleAndCodingAgent) reasons.push("terms_do_not_allow");
-    if (!isOfficialSourceUrl(profile.provider, profile.terms.url)) reasons.push("terms_source_unofficial");
-    if (!isOfficialSourceUrl(profile.provider, profile.retention.url)) reasons.push("retention_source_unofficial");
-  }
   for (const source of profile.pricing.sources) {
     if (!isOfficialSourceUrl(profile.provider, source)) reasons.push(`unofficial_price_source:${source}`);
   }
@@ -1237,26 +1222,70 @@ export const judgeCodingModel = (
   return reasons.length === 0 ? { admitted: true } : { admitted: false, reasons };
 };
 
-/** The judge's answer for a resolved entry, with the refusals only the resolution can see. */
-export const judgeCodingResolution = (
-  resolution: Pick<CodingResolution, "row" | "problem" | "refusals">,
-  judge: (row: CodingJudgeInput) => CodingAdmission
-): CodingAdmission => {
-  if (!resolution.row) return { admitted: false, reasons: [resolution.problem ?? "no_profile"] };
-  const admission = judge(resolution.row);
-  const reasons = [...(admission.admitted ? [] : admission.reasons), ...resolution.refusals];
-  return reasons.length === 0 ? { admitted: true } : { admitted: false, reasons };
+/**
+ * What only Code's managed path needs of a chat link: a credit weight above the
+ * worst turn with the whole context window as input, that window, separately
+ * billed reasoning bounded, and a structured output to read a plan with. The
+ * coding API runs a chat link as its chat model, under chat's input limit and
+ * chat's credits, so none of this stands in its way (owner decision 2026-11-21).
+ */
+const CODE_ONLY_REASONS: readonly string[] = [
+  "credit_floor_unbounded",
+  "credits_below_floor",
+  "chat_context_unknown",
+  "reasoning_cost_unbounded",
+  "no_structured_output",
+];
+const reasonName = (reason: string) => reason.split(":")[0];
+
+export type CodingChannelJudgement = {
+  /** Admitted when the row passes on at least one channel it is offered on. */
+  admission: CodingAdmission;
+  /** One channel's answer; null when the row is not offered there (or cannot be read). */
+  code: CodingAdmission | null;
+  api: CodingAdmission | null;
+  /** The stored channels the row passes on, in their stored order: what a snapshot row lists and a channel serves. */
+  effectiveChannels: CodingChannel[];
 };
 
+const admissionOf = (reasons: readonly string[]): CodingAdmission =>
+  reasons.length === 0 ? { admitted: true } : { admitted: false, reasons: [...new Set(reasons)] };
+
 /**
- * What stops a model from being turned on now, beyond the judge: provider
- * conditions past their 90 days. A model already on keeps serving with the
- * warning (a lapsed re-check is not evidence the terms changed, and dropping
- * it would end Code's managed turns at the next snapshot); a new one waits for
- * the re-check.
+ * The judge's answer per channel for a resolved entry, with the refusals only
+ * the resolution can see.
+ *
+ * A dedicated row has one answer for every channel it is offered on (the coding
+ * API prices it by its own rule, lib/codingRowRuntime.ts). A chat link is judged
+ * per channel: the coding API needs the chat side to pass, a known provider with
+ * an established data destination, tool calling and a bounded provider cost;
+ * Code needs all of that and CODE_ONLY_REASONS too. A row that passes on one
+ * channel is offered there only.
  */
-export const codingActivationBlockers = (resolution: Pick<CodingResolution, "warnings">): string[] =>
-  resolution.warnings.includes("provider_terms_expired") ? ["provider_terms_expired"] : [];
+export const judgeCodingChannels = (
+  resolution: Pick<CodingResolution, "source" | "row" | "problem" | "refusals">,
+  judge: (row: CodingJudgeInput) => CodingAdmission
+): CodingChannelJudgement => {
+  const row = resolution.row;
+  if (!row) {
+    return { admission: { admitted: false, reasons: [resolution.problem ?? "no_profile"] }, code: null, api: null, effectiveChannels: [] };
+  }
+  const base = judge(row);
+  const all = [...(base.admitted ? [] : base.reasons), ...resolution.refusals];
+  const onCode = row.channels.includes("code");
+  const onApi = onCodingApi(row.channels);
+  const chatLink = resolution.source === "chat";
+  const codeReasons = chatLink && row.capabilities.structuredOutput === "none" ? [...all, "no_structured_output"] : all;
+  const code = onCode ? admissionOf(codeReasons) : null;
+  const api = onApi ? admissionOf(chatLink ? all.filter((reason) => !CODE_ONLY_REASONS.includes(reasonName(reason))) : all) : null;
+  const effectiveChannels = row.channels.filter((channel) => {
+    const answer = channel === "code" ? code : api;
+    return answer?.admitted === true;
+  });
+  if (effectiveChannels.length > 0) return { admission: { admitted: true }, code, api, effectiveChannels };
+  const reasons = [...(code && !code.admitted ? code.reasons : []), ...(api && !api.admitted ? api.reasons : [])];
+  return { admission: admissionOf(reasons), code, api, effectiveChannels };
+};
 
 /** Video has no activation policy yet: every video model is refused. */
 export const judgeVideoModel = (): { admitted: false; reasons: readonly string[] } => ({

@@ -30,7 +30,7 @@ export const ko = {
         imported: "가져온 대화",
         lastMessage: "마지막 메시지",
         "entry": "다른 AI 대화 이어가기",
-        "entryHint": "ChatGPT, Claude, Gemini에서 하던 대화를 가져오세요.",
+        "entryHint": "ChatGPT, Claude, Gemini, Perplexity에서 하던 대화를 가져오세요.",
         "where": "어디에서 대화를 가져올까요?",
         "official": "공식 안내 열기",
         "returnGuide": "파일이 도착하면 설정 → 데이터 → 대화 가져오기로 돌아오세요.",

@@ -101,14 +101,22 @@ export function ChatCommandBar({ workspace, locked = false, conversationTitle }:
   </header>;
 }
 
-// The history drawer's sidebar opens a conversation from a row (role="button") or a message
-// search hit. Keyboard: only the row, since Enter on a real button also fires a click.
+// The history drawer's sidebar opens a conversation from a row (role="button"), a message
+// search hit, or the new-conversation launcher (its main button and menu items; the caret
+// that only opens the menu keeps the drawer open). Keyboard: only the row, since Enter on a
+// real button also fires a click.
+const DRAWER_CLOSING_ACTIONS = [
+  "[data-testid='message-search-result']",
+  "[data-testid='sidebar-new-chat']",
+  "[data-testid='new-conversation-menu-chat']",
+  "[data-testid='new-conversation-menu-image']",
+].join(", ");
 function opensConversation(target: EventTarget, keyboard = false) {
   if (!(target instanceof Element)) return false;
   const action = target.closest("button, a, input, [role='button'], [role='menuitem']");
   if (!action || (keyboard && action !== target)) return false;
   const row = "[data-testid='sidebar-conversation-item']";
-  return action.matches(keyboard ? row : `${row}, [data-testid='message-search-result']`);
+  return action.matches(keyboard ? row : `${row}, ${DRAWER_CLOSING_ACTIONS}`);
 }
 
 export function ReviewNavigation({ sidebar, onNewChat, onChat, onReview, product = "review", locked = false }: { sidebar: ReactNode; onNewChat: () => void; onChat?: () => boolean; onReview?: () => boolean; product?: ChatWorkspaceProduct | "plugins"; locked?: boolean }) {

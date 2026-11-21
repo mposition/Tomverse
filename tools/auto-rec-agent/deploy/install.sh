@@ -32,12 +32,16 @@ FILES=(
   tools/review-orchestrator/lib/fsutil.mjs
   tools/review-orchestrator/client/review.mjs
   tools/auto-rec-agent/deploy/review-ssh
+  # The Claude login keepalive the autorec units below run (2026-11-21).
+  scripts/amux-v22-claude-login-keepalive.mjs
 )
 UNITS=(
   autorec-runner.service
   autorec-runner.timer
   autorec-gateway.socket
   autorec-gateway@.service
+  autorec-claude-login-keepalive.service
+  autorec-claude-login-keepalive.timer
 )
 
 fail() { echo "install: $*" >&2; exit "${2:-1}"; }

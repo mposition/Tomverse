@@ -29,7 +29,7 @@ export const fr = {
         imported: "Discussions importées",
         lastMessage: "Dernier message",
         entry: "Reprendre une discussion avec une autre IA",
-        entryHint: "Importez une conversation depuis ChatGPT, Claude ou Gemini.",
+        entryHint: "Importez une conversation depuis ChatGPT, Claude, Gemini ou Perplexity.",
         where: "Où se trouve votre conversation ?",
         official: "Ouvrir le guide officiel",
         returnGuide: "Une fois le fichier reçu, revenez dans Paramètres → Données → Importer des conversations.",

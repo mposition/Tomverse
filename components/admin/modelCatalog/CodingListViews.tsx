@@ -56,6 +56,38 @@ export function CodingStateChip({ c, item }: { c: CodingMessages; item: CodingCa
   return <AdminStatusChip tone={STATE_TONE[state]}>{c.state[state]}</AdminStatusChip>;
 }
 
+/** What each channel says of a row: the coding API and Code can differ for a chat link (owner decision 2026-11-21). */
+export function ChannelVerdicts({
+  c,
+  item,
+  reasonText,
+}: {
+  c: CodingMessages;
+  item: CodingCatalogItem;
+  reasonText: (code: string) => string;
+}) {
+  const rows = (["api", "code"] as const).flatMap((channel) => {
+    const answer = item.channelAdmission[channel];
+    return answer ? [{ channel, answer }] : [];
+  });
+  if (rows.length === 0 || item.source !== "chat") return null;
+  return (
+    <ul className="mt-1 flex flex-col gap-0.5" data-testid="coding-channel-verdicts">
+      {rows.map(({ channel, answer }) => (
+        <li
+          key={channel}
+          data-channel={channel}
+          data-admitted={answer.admitted ? "true" : "false"}
+          className={`text-[11px] ${answer.admitted ? "text-emerald-300" : "font-bold text-amber-300"}`}
+        >
+          {c.channelVerdict[channel](answer.admitted)}
+          {!answer.admitted ? c.channelVerdict.reasons((answer.reasons ?? []).slice(0, 2).map(reasonText).join(" / ")) : null}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function ChannelChips({ c, channels, enabled }: { c: CodingMessages; channels: readonly string[]; enabled: boolean }) {
   if (!enabled) return <span className="text-xs text-zinc-500">{c.list.notOffered}</span>;
   return (
@@ -123,14 +155,14 @@ export function CodingSummary({
   const active = items.filter((item) => codingListState(item) === "active").length;
   const inactive = items.filter((item) => codingListState(item) === "inactive").length;
   const attention = codingAttentionCounts(items);
-  const attentionCount = attention.floor + attention.terms + attention.other;
+  const attentionCount = attention.floor + attention.other;
   return (
     <div className={`grid min-w-0 gap-3 ${showSnapshot ? "lg:grid-cols-[1fr_1fr_1fr_1.8fr]" : "sm:grid-cols-3"}`} data-testid="coding-summary">
       <Tile label={c.tiles.active} value={active} detail={c.tiles.activeDetail(snapshot?.version ?? null, inactive)} tone="ok" />
       <Tile
         label={c.tiles.attention}
         value={attentionCount}
-        detail={c.tiles.attentionDetail(attention.floor, attention.terms, attention.other)}
+        detail={c.tiles.attentionDetail(attention.floor, attention.other)}
         tone="warn"
       />
       <Tile
@@ -350,7 +382,8 @@ export function CodingModelTable({
         item.profile ? (
           <span className="flex flex-col">
             <span className="font-mono text-xs font-bold text-zinc-100">
-              {formatTokens(item.profile.capabilities.maxContextTokens)} / {formatTokens(item.profile.capabilities.maxOutputTokens)}
+              {item.contextUnknown ? "—" : formatTokens(item.profile.capabilities.maxContextTokens)} /{" "}
+              {formatTokens(item.profile.capabilities.maxOutputTokens)}
             </span>
             <span className="text-[11px] text-zinc-500">{item.source === "chat" ? c.list.inherited : c.list.ownValue}</span>
           </span>
@@ -396,7 +429,16 @@ export function CodingModelTable({
     {
       key: "channels",
       header: col.channels,
-      render: (item) => <ChannelChips c={c} channels={item.channels} enabled={codingListState(item) === "active"} />,
+      render: (item) => (
+        <span className="flex flex-col">
+          <ChannelChips
+            c={c}
+            channels={item.effectiveChannels.length > 0 ? item.effectiveChannels : item.channels}
+            enabled={codingListState(item) === "active"}
+          />
+          <ChannelVerdicts c={c} item={item} reasonText={reasonText} />
+        </span>
+      ),
     },
   ];
   return (
@@ -420,6 +462,85 @@ export function CodingModelTable({
         />
       </div>
     </AdminTile>
+  );
+}
+
+export type CapabilityFillResult = { total: number; ok: number; failed: { modelId: string; code: string }[]; stopped: boolean };
+
+/**
+ * "Fill capabilities with the LLM" for the rows still on the registry's
+ * conservative values: one button, the run's progress (N/M, one request per
+ * row) and what it did. Off, with the reason, while the draft model is not set.
+ */
+export function CapabilityFillBar({
+  c,
+  count,
+  skipped,
+  configured,
+  env,
+  progress,
+  result,
+  reasonText,
+  onFillAll,
+  onClose,
+}: {
+  c: CodingMessages;
+  count: number;
+  skipped: number;
+  configured: boolean;
+  env: string;
+  progress: { done: number; total: number } | null;
+  result: CapabilityFillResult | null;
+  reasonText: (code: string) => string;
+  onFillAll: () => void;
+  onClose: () => void;
+}) {
+  if (count === 0 && !progress && !result) return null;
+  return (
+    <div className="flex flex-col gap-2 rounded-2xl border border-zinc-800 bg-zinc-900 p-4" data-testid="coding-fill-bar">
+      <div className="flex flex-wrap items-center gap-3">
+        <AdminWriteButton disabled={!configured || progress !== null || count === 0} onClick={onFillAll} data-testid="coding-fill-all">
+          {progress ? c.fill.progress(progress.done, progress.total) : c.fill.all(count)}
+        </AdminWriteButton>
+        {!configured ? (
+          <p className="text-xs text-amber-300" data-testid="coding-fill-off">
+            {c.fill.off(env)}
+          </p>
+        ) : skipped > 0 ? (
+          <p className="text-xs text-zinc-400">{c.fill.noSource} · {skipped}</p>
+        ) : null}
+      </div>
+      {progress ? (
+        <p className="text-xs font-bold text-blue-300" role="status" data-testid="coding-fill-progress" data-done={progress.done} data-total={progress.total}>
+          {c.fill.progress(progress.done, progress.total)}
+        </p>
+      ) : null}
+      {result ? (
+        <div className="flex flex-col gap-1 text-sm" role="status" data-testid="coding-fill-result" data-ok={result.ok}>
+          <div className="flex items-start gap-2">
+            <p className="min-w-0 flex-1 font-bold text-zinc-100">
+              {c.fill.resultTitle} · {c.fill.resultDone(result.ok, result.total)}
+            </p>
+            <button type="button" onClick={onClose} className="text-xs font-bold text-zinc-400 underline hover:text-zinc-100">
+              {c.fill.resultClose}
+            </button>
+          </div>
+          {result.failed.length > 0 ? (
+            <>
+              <p className="text-xs font-bold text-amber-300">{c.fill.resultFailed(result.failed.length)}</p>
+              <ul className="list-disc pl-4 text-xs text-zinc-300" data-testid="coding-fill-failures">
+                {result.failed.map((row) => (
+                  <li key={row.modelId} data-model={row.modelId}>
+                    <span className="font-mono">{row.modelId}</span> — {reasonText(row.code)}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+          {result.stopped ? <p className="text-xs font-bold text-amber-300">{c.fill.resultStopped}</p> : null}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

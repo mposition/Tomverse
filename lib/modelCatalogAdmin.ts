@@ -239,13 +239,11 @@ export const updateCatalogEntry = async (input: {
         if (!admission.admitted) throw new CatalogRefusal("not_admitted", admission.reasons ?? []);
       } else {
         // Resolved as the catalogue resolves it: a chat link reads the chat
-        // registry now, and every row its provider's conditions (in this
-        // transaction, after the lock, so a re-check applied meanwhile is seen).
+        // registry now (in this transaction, after the lock).
         const [chat, providerTerms] = await Promise.all([loadChatModelFacts(), loadCodingProviderTerms(tx)]);
         const entry = resolveCodingRow(
           { modelId, enabled: true, holdReason: null, profile: next.profile, draft: null, draftCreatedAt: null },
-          codingLookups({ chat, providerTerms }),
-          new Date()
+          codingLookups({ chat, providerTerms })
         );
         if (!entry.profile && (entry.problem === "no_profile" || entry.problem === "invalid_profile")) {
           throw new CatalogRefusal("not_admitted", ["no_valid_profile"]);
@@ -253,10 +251,6 @@ export const updateCatalogEntry = async (input: {
         if (!entry.admission?.admitted) {
           throw new CatalogRefusal("not_admitted", entry.admission?.reasons ?? [entry.problem ?? "no_valid_profile"]);
         }
-        // Provider conditions past their 90 days stop a new activation only:
-        // a model already on keeps serving with the warning.
-        const wasServing = before?.enabled === true && !before.holdReason;
-        if (!wasServing && entry.activationBlockers.length > 0) throw new CatalogRefusal("not_admitted", entry.activationBlockers);
       }
     }
 

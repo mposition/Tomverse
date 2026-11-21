@@ -1148,8 +1148,10 @@ export async function readAmuxV4UnitDecision(session: Session, lookup: {
       select: { id: true, sourceSystem: true, sourceKey: true,
         v4SourceApprovalId: true, status: true },
     }) : Promise.resolve(null),
+    // The creating revision. An owner revision (portfolioNodeEditService.ts)
+    // carries the same decision forward at a later revision number.
     row.resolvedNodeId ? prisma.amuxPortfolioNodeRevision.findFirst({
-      where: { nodeId: row.resolvedNodeId, decisionId: row.id },
+      where: { nodeId: row.resolvedNodeId, decisionId: row.id, revision: 0 },
       select: { nodeId: true, revision: true, contentDigest: true,
         contentDigestKeyId: true, authorizationAuditLogId: true },
     }) : Promise.resolve(null),
@@ -1239,10 +1241,13 @@ export async function readAmuxV4UnitDecision(session: Session, lookup: {
       (row.state === "consumed" && row.action === "create_node" &&
         (!nodeRevision || !node || node.id !== row.resolvedNodeId ||
           nodeRevision.nodeId !== node.id || nodeRevision.revision !== 0 ||
-          nodeRevision.contentDigest !== node.contentDigest ||
-          nodeRevision.contentDigestKeyId !== node.contentDigestKeyId ||
           nodeRevision.authorizationAuditLogId !== row.finalAuditLogId ||
-          node.authorizationAuditLogId !== row.finalAuditLogId)) ||
+          // A node the owner revised since carries the revision's own audit
+          // and digest; only an unrevised node must still equal revision 0.
+          (node.revision === 0 &&
+            (nodeRevision.contentDigest !== node.contentDigest ||
+              nodeRevision.contentDigestKeyId !== node.contentDigestKeyId ||
+              node.authorizationAuditLogId !== row.finalAuditLogId)))) ||
       (row.state === "consumed" && row.action === "reject_unit" &&
         (!decisionDraft || decisionDraft.state !== "rejected" ||
           decisionDraft.ideaId !== row.ideaId ||

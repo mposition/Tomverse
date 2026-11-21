@@ -10,7 +10,6 @@ import { isCreditFloor, suggestCreditFloor } from "../lib/modelAdoptionDraft.ts"
 import {
   canonicalJson,
   catalogContentHash,
-  codingCatalogRowOf,
   codingCatalogRowSchema,
   codingStoredProfileSchema,
   resolveCodingEntry,
@@ -192,8 +191,7 @@ test("a row without apiCreditWeight hashes exactly as before; the default is nev
     processingRegion: "Singapore",
     channels: ["code", "api"],
   };
-  const resolve = (stored) =>
-    codingCatalogRowOf(resolveCodingEntry({ modelId: "qwen3.7-coder-plus", profile: stored, chat: () => null, providerTerms: () => null, now: new Date("2026-11-21T00:00:00Z") }).row);
+  const resolve = (stored) => resolveCodingEntry({ modelId: "qwen3.7-coder-plus", profile: stored, chat: () => null, providerTerms: () => null }).row;
   const current = resolve(profile);
   // The row as it was resolved before the field existed.
   const before = { modelId: "qwen3.7-coder-plus", source: "dedicated", ...profile };

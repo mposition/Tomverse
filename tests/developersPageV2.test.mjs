@@ -45,7 +45,10 @@ test("facts the page states match docs/policy/external-api.md in every language"
     assert.match(copy.hero.note, /Pro/, `${locale}: Pro-only note`);
     assert.match(JSON.stringify(copy.keys.ticks), /10/, `${locale}: ten keys per account`);
     assert.match(JSON.stringify(copy.faq.items[1]), /Pro/, `${locale}: Free FAQ`);
-    // The CLI is not on npm yet, so no install command or "now available" wording.
+    // The CLI is released: its block carries no "coming soon" and names the installers (.msi, winget, .pkg,
+    // .deb) and npm. The commands themselves live on the install page, so none is written here.
+    assert.doesNotMatch(JSON.stringify(copy.cli), /곧 출시|coming soon|即将推出|即將推出|Bientôt|Demnächst|Próximamente|Em breve/i, `${locale}: CLI block still says soon`);
+    for (const word of [/\.msi/, /winget/, /\.pkg/, /\.deb/, /npm/]) assert.match(copy.cli.body, word, `${locale}: CLI install ways ${word}`);
     assert.doesNotMatch(text, /npm (?:i|install)\b|npx /, `${locale}: CLI install command`);
     // "Estimated credits before sending" is not a feature.
     assert.doesNotMatch(text, /3\.2/, `${locale}: stale CLI cost example`);

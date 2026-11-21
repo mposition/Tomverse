@@ -621,3 +621,74 @@ test("a failing related test names itself in the journal, not only in the totals
   const failed = events.find((entry) => entry.event === "tests_failed");
   assert.deepEqual(failed?.failures, ["the change breaks this"]);
 });
+
+// 2026-11-21: the autorec Claude login had expired and could not be
+// refreshed. The first task was claimed, Claude exited 1 after one turn, and
+// the alert said only agent_error.
+test("a daily batch with no usable Claude login claims nothing and stops with login_required", async () => {
+  const { deps, calls, gatewayCalls, events } = fakeRunner();
+  deps.config.dailyProduct = true;
+  deps.claudeLoginState = () => "login_required";
+  assert.equal(await runDailyBatch(deps), 1);
+  assert.deepEqual(ops(gatewayCalls), ["halt_notice"]);
+  assert.equal(gatewayCalls[0].header.reason, "login_required");
+  assert.equal(gatewayCalls[0].header.attempted, 0);
+  assert.equal(calls.some((x) => /^claude /.test(x.signature)), false);
+  assert.ok(events.some((event) => event.event === "daily_login_required"));
+});
+
+test("a usable login or a setup-token token runs the daily batch as before", async () => {
+  for (const state of ["usable", "env_token"]) {
+    const { deps, gatewayCalls } = fakeRunner({ gateway: { claim: { status: "empty" } } });
+    deps.config.dailyProduct = true;
+    deps.claudeLoginState = () => state;
+    assert.equal(await runDailyBatch(deps), 0);
+    assert.deepEqual(ops(gatewayCalls), ["claim"]);
+  }
+});
+
+test("the login judgement reads expiry fields only and needs room for one task", async () => {
+  const { claudeLoginState } = await import("../tools/auto-rec-agent/lib/core.mjs");
+  const now = Date.parse("2026-11-21T00:00:00.000Z");
+  const login = (fields) => JSON.stringify({ claudeAiOauth: { accessToken: "a".repeat(20), refreshToken: "r".repeat(20),
+    expiresAt: now + 60_000, refreshTokenExpiresAt: now + 10 * 24 * 60 * 60_000, ...fields } });
+  assert.equal(claudeLoginState({ credentialsText: login({}), now }), "usable");
+  // An access token about to expire is the CLI's to refresh; only the refresh token decides.
+  assert.equal(claudeLoginState({ credentialsText: login({ expiresAt: now - 1 }), now }), "usable");
+  assert.equal(claudeLoginState({ credentialsText: login({ refreshTokenExpiresAt: now + LIMITS.loginMinimumMs - 1 }), now }), "login_required");
+  assert.equal(claudeLoginState({ credentialsText: login({ refreshTokenExpiresAt: now - 1 }), now }), "login_required");
+  // What the CLI leaves after a rejected refresh, and a missing or broken file.
+  assert.equal(claudeLoginState({ credentialsText: login({ accessToken: "", refreshToken: "" }), now }), "login_required");
+  assert.equal(claudeLoginState({ credentialsText: null, now }), "login_required");
+  assert.equal(claudeLoginState({ credentialsText: "not json", now }), "login_required");
+  assert.equal(claudeLoginState({ credentialsText: "{}", now }), "login_required");
+  // A long-lived token replaces the stored login.
+  assert.equal(claudeLoginState({ envToken: "sk-ant-oat01-x", credentialsText: null, now }), "env_token");
+  assert.equal(claudeLoginState({ envToken: "  ", credentialsText: null, now }), "login_required");
+});
+
+test("the real runner probes the login before claiming, and the app accepts the reason", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { DAILY_HALT_REASONS } = await import("../tools/auto-rec-agent/lib/contract.mjs");
+  const source = readFileSync(new URL("../tools/auto-rec-agent/bin/autorec-runner.mjs", import.meta.url), "utf8");
+  assert.match(source, /claudeLoginState: \(\) => \{/);
+  assert.match(source, /join\(config\.home, "\.claude", "\.credentials\.json"\)/);
+  assert.ok(source.indexOf('stopped("login_required")') < source.indexOf("for (let count = 0; count < LIMITS.tasksPerDay"));
+  assert.ok(DAILY_HALT_REASONS.includes("login_required"));
+});
+
+test("the installer ships the login keepalive for autorec, with no restage, and enables nothing", async () => {
+  const { readFileSync } = await import("node:fs");
+  const read = (path) => readFileSync(new URL(`../tools/auto-rec-agent/deploy/${path}`, import.meta.url), "utf8");
+  const install = read("install.sh");
+  assert.match(install, /^\s+scripts\/amux-v22-claude-login-keepalive\.mjs$/m);
+  assert.match(install, /^\s+autorec-claude-login-keepalive\.service$/m);
+  assert.match(install, /^\s+autorec-claude-login-keepalive\.timer$/m);
+  assert.doesNotMatch(install, /enable --now autorec-claude-login-keepalive/);
+  const unit = read("autorec-claude-login-keepalive.service").split(/\r?\n/);
+  for (const line of ["User=autorec", "Environment=AMUX_V22_KEEPALIVE_RESTAGE=off", "Environment=HOME=/home/autorec",
+    "ExecStart=/usr/bin/node /usr/local/lib/autorec-agent/scripts/amux-v22-claude-login-keepalive.mjs", "NoNewPrivileges=yes"]) {
+    assert.ok(unit.includes(line), line);
+  }
+  assert.match(read("autorec-claude-login-keepalive.timer"), /^Unit=autorec-claude-login-keepalive\.service$/m);
+});

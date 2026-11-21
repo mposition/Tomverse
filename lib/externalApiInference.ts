@@ -332,8 +332,12 @@ export async function handleChatCompletions(request: Request, options: { surface
         const converted = convertChatCompletionRequest(parsed, view);
         const reasoning = requestReasoningEffort(parsed, view);
 
+        // The prompt cache marker rides in providerOptions, so only Anthropic
+        // models get one (lib/anthropicPromptCaching.ts). The budget below is
+        // given the same path, so the write premium is reserved before dispatch.
         const settings = getModelGenerationSettings(model, {
             temperature: parsed.temperature ?? undefined,
+            promptCachePath: "external_api_chat_completions",
         });
         // Provider-specific options the central compatibility layer derives
         // (e.g. a reasoning profile); never taken from the request.
@@ -408,6 +412,8 @@ export async function handleChatCompletions(request: Request, options: { surface
         const budget = createChatBudget("user", model, atLeastOneToken(estimate.breakdown()), {
             totalOutputTokenCap: requestOptions.requestedOutputTokens ?? capabilities.maxOutputTokens,
             reservationOnlyInputTokens,
+            // The same path the request settings were given above.
+            promptCachePath: "external_api_chat_completions",
             // A dedicated coding row: its snapshot and cache-write bound.
             ...(entry.catalogPricing ? { catalogPricing: entry.catalogPricing } : {}),
         });
