@@ -30,8 +30,14 @@
 ## 변경
 
 broker의 `github` 집합을 GitHub이 공개한 git·API 주소 대역(`https://api.github.com/meta`의 `git`과 `api`, IPv4만)으로
-채운다. 집합은 `flags interval; auto-merge`다. 허용 포트(443)와 대상(GitHub뿐), DM 공급사 계정의 규칙은 그대로다.
+채운다. 집합은 `flags interval; auto-merge`다. 허용 포트(443)와 DM 공급사 계정의 규칙은 그대로다.
 meta를 읽지 못하거나 IPv4 대역이 8개보다 적으면 실행이 실패하고 이전 규칙이 남는다.
+
+이 규칙은 IP 단위다. 호스트 이름(SNI)은 보지 않는다. 이전 규칙도 IP 단위였고, 허용한 것이 DNS 답 몇 개에서
+GitHub이 자기 서비스 주소로 공개한 대역 전체로 넓어졌다. 그 대역 안에 GitHub이 아닌 서비스가 있으면 broker는 그곳에도
+443으로 연결할 수 있다. GitHub은 이 대역을 자기 git·API 서비스의 주소로 공개하므로 그런 경우는 없다고 보고, 아래
+차단 검증으로 대역 밖이 막히는 것을 확인했다. broker는 공개 저장소의 commit 조회와 fetch만 하고 자격증명이 없으므로(`docs/policy/amux-decision-maker.md` §5),
+대역 안의 다른 곳에 닿아도 보낼 비밀이 없다. 호스트 이름까지 검사하는 egress(SNI 허용 목록 proxy)는 두지 않았다.
 
 | 파일 | SHA-256 |
 |---|---|
@@ -81,6 +87,51 @@ exit=0 ms=18902
 
 되돌리기: `sudo cp -p /usr/local/libexec/amux-dm-egress.before-20261120b /usr/local/libexec/amux-dm-egress` 뒤
 `sudo systemctl start amux-dm-egress.service`.
+
+## 차단 검증 (2026-11-21)
+
+독립 검토(`r-20261120-124157-900bdc`, reject)가 GitHub 밖으로의 연결이 막히는지 확인하라고 했다. 운영자가
+tomverse-admin으로 `sudo bash /home/tommy/.tmp-amux-sweep-box/dm-egress-negative-check.sh`를 실행했다. 이 스크립트는
+`amux-dm-broker`로, broker unit과 같은 격리 설정 아래에서 각 주소에 `curl`로 연결한다. 출력(`000`은 연결 실패):
+
+```text
+allowed  https://github.com -> 200
+allowed  https://api.github.com/meta -> 200
+refused? https://api.openai.com -> 000
+refused? https://api.anthropic.com -> 000
+refused? https://example.com -> 000
+refused? https://www.google.com -> 000
+refused? https://login.microsoftonline.com -> 000
+refused? https://registry.npmjs.org -> 000
+```
+
+검증 스크립트:
+
+```bash
+#!/usr/bin/env bash
+# Read-only check of the DM broker's egress, as amux-dm-broker under the broker
+# unit's sandbox: GitHub's hosts connect, every other destination is refused.
+# Changes nothing on the box.
+set -u
+[ "$(id -u)" = 0 ] || { echo "run with sudo" >&2; exit 2; }
+probe() { # url
+  systemd-run --quiet --wait --pipe --collect -p User=amux-dm-broker -p Group=amux-dm-broker \
+    -p PrivateTmp=true -p ProtectSystem=strict -p ProtectHome=read-only -p PrivateDevices=true \
+    -p ProtectProc=invisible -p ProcSubset=pid -p "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6" \
+    -p NoNewPrivileges=true \
+    /usr/bin/curl -sS -o /dev/null -m 8 -w '%{http_code}' "$1" 2>&1 | tail -1
+}
+for url in https://github.com https://api.github.com/meta; do
+  echo "allowed  $url -> $(probe "$url")"
+done
+for url in https://api.openai.com https://api.anthropic.com https://example.com https://www.google.com \
+  https://login.microsoftonline.com https://registry.npmjs.org; do
+  echo "refused? $url -> $(probe "$url")"
+done
+```
+
+GitHub의 두 host만 닿고, 다른 공급사와 일반 사이트는 막혔다. GitHub 대역과 같은 클라우드(Azure)에 있는
+`login.microsoftonline.com`도 막혔다.
 
 ## 남는 것
 
