@@ -98,8 +98,9 @@ for (const lang of ["en", "ko"] as const) {
     await expect(page.getByTestId("review-demo-caption")).toBeVisible();
     await expect(page.locator("#modes").getByRole("tab")).toHaveCount(2);
     await expect(page.locator("#review-mode-panel")).toBeVisible();
+    // A guest's Review CTA carries the preview marker (lib/productEntryDestination.ts).
     await expect(page.getByTestId("landing-primary-cta")).toHaveAttribute(
-      "href", `/review?lang=${lang}`
+      "href", `/review?lang=${lang}&entry=guest-preview`
     );
   });
 }
