@@ -8,8 +8,10 @@ name: Tomverse CLI release check
 #   the installed copy) on Windows, macOS and Linux with Node 22 and 24.
 # - standalone executables: one Node.js single executable application per
 #   OS and architecture (a SEA is built on the platform it targets), each run
-#   through the same process suite with no Node.js on PATH, then kept as a
-#   workflow artifact with its .sha256.
+#   through the same process suite with no Node.js on PATH; then its native
+#   installer (Windows .msi, macOS .pkg, Linux .deb and .rpm) is built,
+#   installed, run and removed again on that machine. Archives and installers
+#   are kept as workflow artifacts, each with its .sha256.
 #
 # It only builds and tests. It publishes nothing: no npm publish, no GitHub
 # Release, no signing identity. The operator runs it by hand before a release
@@ -174,13 +176,47 @@ jobs:
           exe="$(node -e "const p=require('path'),v=require('./package.json').version;console.log(p.resolve('release','tomverse-'+v+'-'+process.env.TARGET,process.platform==='win32'?'tomverse.exe':'tomverse'))")"
           TOMVERSE_CLI_BIN="$exe" node --import tsx --test --test-concurrency=1 tests/cli.process.test.ts
 
-      - name: Keep the archive
+      # WiX runs on .NET; not every Windows image ships the SDK (Arm).
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 8.0.x
+
+      # WiX v5 (MS-RL); v6 adds the Open Source Maintenance Fee terms.
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          dotnet tool install wix --version 5.0.2 --tool-path "$env:RUNNER_TEMP\wix"
+          $env:WIX = "$env:RUNNER_TEMP\wix\wix.exe"
+          node apps/tomverse-cli/scripts/build-installer.mjs
+
+      - name: Install, run and remove the MSI
+        shell: pwsh
+        run: |
+          $msi = Get-Item "apps/tomverse-cli/release/tomverse-*-$env:TARGET.msi"
+          $p = Start-Process msiexec -ArgumentList "/i `"$($msi.FullName)`" /qn /l*v `"$env:RUNNER_TEMP\install.log`"" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\install.log" -Tail 50; throw "msiexec /i exited $($p.ExitCode)" }
+          $exe = Join-Path $env:LOCALAPPDATA "Programs\Tomverse CLI	omverse.exe"
+          $version = & $exe --version
+          if ($version -ne (Get-Content apps/tomverse-cli/package.json | ConvertFrom-Json).version) { throw "installed tomverse --version printed '$version'" }
+          $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+          if ($userPath -notlike "*Tomverse CLI*") { throw "the user PATH does not name the install folder: $userPath" }
+          $p = Start-Process msiexec -ArgumentList "/x `"$($msi.FullName)`" /qn" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "msiexec /x exited $($p.ExitCode)" }
+          if (Test-Path $exe) { throw "tomverse.exe is still there after uninstall" }
+          if ([Environment]::GetEnvironmentVariable("Path", "User") -like "*Tomverse CLI*") { throw "the user PATH still names the install folder" }
+
+      - name: Keep the archive and installers
         uses: actions/upload-artifact@v7
         with:
           name: tomverse-cli-windows-x64
           path: |
             apps/tomverse-cli/release/*.zip
             apps/tomverse-cli/release/*.tar.gz
+            apps/tomverse-cli/release/*.msi
+            apps/tomverse-cli/release/*.pkg
+            apps/tomverse-cli/release/*.deb
+            apps/tomverse-cli/release/*.rpm
             apps/tomverse-cli/release/*.sha256
           if-no-files-found: error
           retention-days: 14
@@ -220,13 +256,47 @@ jobs:
           exe="$(node -e "const p=require('path'),v=require('./package.json').version;console.log(p.resolve('release','tomverse-'+v+'-'+process.env.TARGET,process.platform==='win32'?'tomverse.exe':'tomverse'))")"
           TOMVERSE_CLI_BIN="$exe" node --import tsx --test --test-concurrency=1 tests/cli.process.test.ts
 
-      - name: Keep the archive
+      # WiX runs on .NET; not every Windows image ships the SDK (Arm).
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 8.0.x
+
+      # WiX v5 (MS-RL); v6 adds the Open Source Maintenance Fee terms.
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          dotnet tool install wix --version 5.0.2 --tool-path "$env:RUNNER_TEMP\wix"
+          $env:WIX = "$env:RUNNER_TEMP\wix\wix.exe"
+          node apps/tomverse-cli/scripts/build-installer.mjs
+
+      - name: Install, run and remove the MSI
+        shell: pwsh
+        run: |
+          $msi = Get-Item "apps/tomverse-cli/release/tomverse-*-$env:TARGET.msi"
+          $p = Start-Process msiexec -ArgumentList "/i `"$($msi.FullName)`" /qn /l*v `"$env:RUNNER_TEMP\install.log`"" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\install.log" -Tail 50; throw "msiexec /i exited $($p.ExitCode)" }
+          $exe = Join-Path $env:LOCALAPPDATA "Programs\Tomverse CLI	omverse.exe"
+          $version = & $exe --version
+          if ($version -ne (Get-Content apps/tomverse-cli/package.json | ConvertFrom-Json).version) { throw "installed tomverse --version printed '$version'" }
+          $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+          if ($userPath -notlike "*Tomverse CLI*") { throw "the user PATH does not name the install folder: $userPath" }
+          $p = Start-Process msiexec -ArgumentList "/x `"$($msi.FullName)`" /qn" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "msiexec /x exited $($p.ExitCode)" }
+          if (Test-Path $exe) { throw "tomverse.exe is still there after uninstall" }
+          if ([Environment]::GetEnvironmentVariable("Path", "User") -like "*Tomverse CLI*") { throw "the user PATH still names the install folder" }
+
+      - name: Keep the archive and installers
         uses: actions/upload-artifact@v7
         with:
           name: tomverse-cli-windows-arm64
           path: |
             apps/tomverse-cli/release/*.zip
             apps/tomverse-cli/release/*.tar.gz
+            apps/tomverse-cli/release/*.msi
+            apps/tomverse-cli/release/*.pkg
+            apps/tomverse-cli/release/*.deb
+            apps/tomverse-cli/release/*.rpm
             apps/tomverse-cli/release/*.sha256
           if-no-files-found: error
           retention-days: 14
@@ -266,13 +336,31 @@ jobs:
           exe="$(node -e "const p=require('path'),v=require('./package.json').version;console.log(p.resolve('release','tomverse-'+v+'-'+process.env.TARGET,process.platform==='win32'?'tomverse.exe':'tomverse'))")"
           TOMVERSE_CLI_BIN="$exe" node --import tsx --test --test-concurrency=1 tests/cli.process.test.ts
 
-      - name: Keep the archive
+      - name: Build the installer
+        run: node apps/tomverse-cli/scripts/build-installer.mjs
+
+      - name: Install, run and remove the PKG
+        run: |
+          pkg="$(ls apps/tomverse-cli/release/tomverse-*-$TARGET.pkg)"
+          sudo installer -pkg "$pkg" -target /
+          test "$(/usr/local/bin/tomverse --version)" = "$(node -p "require('./apps/tomverse-cli/package.json').version")"
+          pkgutil --pkg-info app.tomverse.cli
+          sudo rm /usr/local/bin/tomverse
+          sudo rm -rf /usr/local/share/doc/tomverse-cli
+          sudo pkgutil --forget app.tomverse.cli
+          test ! -e /usr/local/bin/tomverse
+
+      - name: Keep the archive and installers
         uses: actions/upload-artifact@v7
         with:
           name: tomverse-cli-macos-arm64
           path: |
             apps/tomverse-cli/release/*.zip
             apps/tomverse-cli/release/*.tar.gz
+            apps/tomverse-cli/release/*.msi
+            apps/tomverse-cli/release/*.pkg
+            apps/tomverse-cli/release/*.deb
+            apps/tomverse-cli/release/*.rpm
             apps/tomverse-cli/release/*.sha256
           if-no-files-found: error
           retention-days: 14
@@ -312,13 +400,31 @@ jobs:
           exe="$(node -e "const p=require('path'),v=require('./package.json').version;console.log(p.resolve('release','tomverse-'+v+'-'+process.env.TARGET,process.platform==='win32'?'tomverse.exe':'tomverse'))")"
           TOMVERSE_CLI_BIN="$exe" node --import tsx --test --test-concurrency=1 tests/cli.process.test.ts
 
-      - name: Keep the archive
+      - name: Build the installer
+        run: node apps/tomverse-cli/scripts/build-installer.mjs
+
+      - name: Install, run and remove the PKG
+        run: |
+          pkg="$(ls apps/tomverse-cli/release/tomverse-*-$TARGET.pkg)"
+          sudo installer -pkg "$pkg" -target /
+          test "$(/usr/local/bin/tomverse --version)" = "$(node -p "require('./apps/tomverse-cli/package.json').version")"
+          pkgutil --pkg-info app.tomverse.cli
+          sudo rm /usr/local/bin/tomverse
+          sudo rm -rf /usr/local/share/doc/tomverse-cli
+          sudo pkgutil --forget app.tomverse.cli
+          test ! -e /usr/local/bin/tomverse
+
+      - name: Keep the archive and installers
         uses: actions/upload-artifact@v7
         with:
           name: tomverse-cli-macos-x64
           path: |
             apps/tomverse-cli/release/*.zip
             apps/tomverse-cli/release/*.tar.gz
+            apps/tomverse-cli/release/*.msi
+            apps/tomverse-cli/release/*.pkg
+            apps/tomverse-cli/release/*.deb
+            apps/tomverse-cli/release/*.rpm
             apps/tomverse-cli/release/*.sha256
           if-no-files-found: error
           retention-days: 14
@@ -358,13 +464,36 @@ jobs:
           exe="$(node -e "const p=require('path'),v=require('./package.json').version;console.log(p.resolve('release','tomverse-'+v+'-'+process.env.TARGET,process.platform==='win32'?'tomverse.exe':'tomverse'))")"
           TOMVERSE_CLI_BIN="$exe" node --import tsx --test --test-concurrency=1 tests/cli.process.test.ts
 
-      - name: Keep the archive
+      - name: Build the installers
+        run: |
+          command -v rpmbuild || { sudo apt-get update && sudo apt-get install -y rpm; }
+          node apps/tomverse-cli/scripts/build-installer.mjs
+
+      - name: Install, run and remove the DEB
+        run: |
+          deb="$(ls apps/tomverse-cli/release/tomverse-*-$TARGET.deb)"
+          sudo dpkg -i "$deb"
+          test "$(/usr/bin/tomverse --version)" = "$(node -p "require('./apps/tomverse-cli/package.json').version")"
+          sudo dpkg -r tomverse-cli
+          test ! -e /usr/bin/tomverse
+
+      - name: Install, run and remove the RPM (Fedora container)
+        run: |
+          rpm="$(basename "$(ls apps/tomverse-cli/release/tomverse-*-$TARGET.rpm)")"
+          want="$(node -p "require('./apps/tomverse-cli/package.json').version")"
+          docker run --rm -v "$PWD/apps/tomverse-cli/release:/release:ro" fedora:41 sh -ec             "dnf -y -q install /release/$rpm && test \"\$(tomverse --version)\" = '$want' && dnf -y -q remove tomverse-cli && test ! -e /usr/bin/tomverse"
+
+      - name: Keep the archive and installers
         uses: actions/upload-artifact@v7
         with:
           name: tomverse-cli-linux-x64
           path: |
             apps/tomverse-cli/release/*.zip
             apps/tomverse-cli/release/*.tar.gz
+            apps/tomverse-cli/release/*.msi
+            apps/tomverse-cli/release/*.pkg
+            apps/tomverse-cli/release/*.deb
+            apps/tomverse-cli/release/*.rpm
             apps/tomverse-cli/release/*.sha256
           if-no-files-found: error
           retention-days: 14
@@ -404,13 +533,36 @@ jobs:
           exe="$(node -e "const p=require('path'),v=require('./package.json').version;console.log(p.resolve('release','tomverse-'+v+'-'+process.env.TARGET,process.platform==='win32'?'tomverse.exe':'tomverse'))")"
           TOMVERSE_CLI_BIN="$exe" node --import tsx --test --test-concurrency=1 tests/cli.process.test.ts
 
-      - name: Keep the archive
+      - name: Build the installers
+        run: |
+          command -v rpmbuild || { sudo apt-get update && sudo apt-get install -y rpm; }
+          node apps/tomverse-cli/scripts/build-installer.mjs
+
+      - name: Install, run and remove the DEB
+        run: |
+          deb="$(ls apps/tomverse-cli/release/tomverse-*-$TARGET.deb)"
+          sudo dpkg -i "$deb"
+          test "$(/usr/bin/tomverse --version)" = "$(node -p "require('./apps/tomverse-cli/package.json').version")"
+          sudo dpkg -r tomverse-cli
+          test ! -e /usr/bin/tomverse
+
+      - name: Install, run and remove the RPM (Fedora container)
+        run: |
+          rpm="$(basename "$(ls apps/tomverse-cli/release/tomverse-*-$TARGET.rpm)")"
+          want="$(node -p "require('./apps/tomverse-cli/package.json').version")"
+          docker run --rm -v "$PWD/apps/tomverse-cli/release:/release:ro" fedora:41 sh -ec             "dnf -y -q install /release/$rpm && test \"\$(tomverse --version)\" = '$want' && dnf -y -q remove tomverse-cli && test ! -e /usr/bin/tomverse"
+
+      - name: Keep the archive and installers
         uses: actions/upload-artifact@v7
         with:
           name: tomverse-cli-linux-arm64
           path: |
             apps/tomverse-cli/release/*.zip
             apps/tomverse-cli/release/*.tar.gz
+            apps/tomverse-cli/release/*.msi
+            apps/tomverse-cli/release/*.pkg
+            apps/tomverse-cli/release/*.deb
+            apps/tomverse-cli/release/*.rpm
             apps/tomverse-cli/release/*.sha256
           if-no-files-found: error
           retention-days: 14
