@@ -120,7 +120,13 @@ export const fetchOfficialPage = async (
     await response.body?.cancel().catch(() => undefined);
     throw new DraftRefusal("page_too_large", url);
   }
-  const body = await readBounded(response);
+  let body: string | null;
+  try {
+    body = await readBounded(response);
+  } catch {
+    // The timeout can fire while the body streams; that is a failed fetch, not a server error.
+    throw new DraftRefusal("fetch_failed", url);
+  }
   if (body === null) throw new DraftRefusal("page_too_large", url);
   return { url, text: pageToText(body) };
 };
