@@ -235,7 +235,7 @@ export function CliPage() {
           <p className="hero-lede">{c.hero.lede}</p>
           <Command prompt="$" text={COMMANDS.install} copy={c.copy} copied={c.copied} className="hero-cmd" />
           <SoonNote>{c.hero.soonNote}</SoonNote>
-          <p className="hero-note ver"><span className="chip blue">v0.1.0</span><span>{c.hero.platforms}</span><span className="chip amber">{c.hero.soon}</span></p>
+          <p className="hero-note ver"><span className="chip blue">v1.0.0</span><span>{c.hero.platforms}</span><span className="chip amber">{c.hero.soon}</span></p>
           {!prefersReducedMotion && <button type="button" className="motion-toggle" data-testid="launch-motion-toggle" aria-pressed={motionPaused}
             onClick={() => setMotionPaused((paused) => !paused)}>
             <span className="icon" aria-hidden="true">{motionPaused ? "▶" : "❚❚"}</span>{motionPaused ? c.hero.motionOn : c.hero.motionOff}

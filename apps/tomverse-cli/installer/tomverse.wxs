@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Windows installer for the standalone Tomverse CLI (WiX Toolset v5,
+  scripts/build-installer.mjs). Per-user: no administrator prompt; installs to
+  %LOCALAPPDATA%\Programs\Tomverse CLI and adds that folder to the user's PATH.
+  UpgradeCode must never change: it is how a newer MSI replaces an older one.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+      Name="Tomverse CLI"
+      Manufacturer="Tomverse"
+      Version="$(var.Version)"
+      UpgradeCode="40AFA4E5-5C61-4C75-8964-673D9AF31EFE"
+      Scope="perUser"
+      Compressed="yes">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of the Tomverse CLI is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+    <Property Id="ARPURLINFOABOUT" Value="https://tomverse.app" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="ProgramsFolder" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="Tomverse CLI" />
+      </Directory>
+    </StandardDirectory>
+
+    <!-- A per-user component keys on an HKCU value, not a file (ICE38). -->
+    <Component Id="TomverseCli" Directory="INSTALLFOLDER" Guid="24E7C97C-5114-48B6-91B0-70A83028C32F">
+      <File Id="TomverseExe" Source="$(var.StageDir)\tomverse.exe" />
+      <File Id="TomverseLicense" Source="$(var.StageDir)\LICENSE" Name="LICENSE.txt" />
+      <File Id="TomverseReadme" Source="$(var.StageDir)\README.md" />
+      <File Id="TomverseNotices" Source="$(var.StageDir)\THIRD_PARTY_NOTICES.txt" />
+      <RegistryValue Root="HKCU" Key="Software\Tomverse\CLI" Name="InstallFolder" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
+      <Environment Id="UserPath" Name="PATH" Value="[INSTALLFOLDER]" Part="last" Action="set" System="no" Permanent="no" />
+      <RemoveFolder Id="RemoveInstallFolder" Directory="INSTALLFOLDER" On="uninstall" />
+      <RemoveFolder Id="RemoveProgramsFolder" Directory="ProgramsFolder" On="uninstall" />
+    </Component>
+  </Package>
+</Wix>
