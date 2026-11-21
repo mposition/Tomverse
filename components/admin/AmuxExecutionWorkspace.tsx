@@ -17,6 +17,8 @@ import { AmuxTaskCeilingPanel, type AmuxTaskCeilingView } from "./AmuxTaskCeilin
 import { isAmuxSettledCardWithOpenEscalation } from "@/lib/amux/settledCardEscalationCore";
 import { AmuxCardIdentity, AmuxSourceKeySuffix, amuxCardLabel, amuxDistinctSourceKey } from "./AmuxCardIdentity";
 import styles from "./AmuxExecutionWorkspace.module.css";
+import { AmuxCardHierarchy } from "./AmuxCardHierarchy";
+import type { AmuxHierarchyStep } from "@/lib/amux/cardHierarchyCore";
 import { useCallback, useEffect, useRef, useState, type DragEvent as ReactDragEvent, type PointerEvent } from "react";
 
 import { AdminChannelIcon, adminChannelName } from "@/components/admin/ui/AdminChannelIcon";
@@ -96,6 +98,8 @@ type Detail = Omit<Card, "score"> & { revision: number; body: string | null;
   legacyCard?: AmuxLegacyCardView | null;
   /** The owner's re-approval of a waiting Task's cost ceiling; null or absent when none is read. */
   ceilingReapproval?: AmuxTaskCeilingView | null;
+  /** Initiative > Epic > Feature > Story > Task; null for a card with no v4 place. */
+  hierarchy?: AmuxHierarchyStep[] | null;
   result: { attemptId: string; state: "available" | "purged";
     createdAt: string; text: string | null; sha256: string | null;
     patch: { state: "available"; baseSha: string; sha256: string } |
@@ -959,6 +963,9 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, initialView = "bo
             <Copy size={14} aria-hidden="true" />{m.copyLink}</button>
           {copyNotice && <p role="status">{copyNotice}</p>}
         </header>
+        {selected.hierarchy && <AmuxCardHierarchy key={selected.id} steps={selected.hierarchy}
+          onOpenCard={(id) => void openCard(id)}
+          onSaved={() => { void refreshBoard(); void openCard(selected.id, false); }} />}
         <div className={styles.detailLayout}>
           <div className={styles.detailMain}>
             <div className={styles.tabs} role="tablist" aria-label={m.detail}>

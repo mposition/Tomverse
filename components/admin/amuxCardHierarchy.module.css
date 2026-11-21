@@ -1,0 +1,62 @@
+/* Owner request 2026-11-21: the Task card's hierarchy line and the node edit
+   sheet. Colours come only from the --amux-* tokens the dialog overlay
+   defines, so the Admin Light theme remaps them like the rest of the board. */
+.block { display:flex; flex-direction:column; gap:8px; padding:14px; margin-bottom:20px; border:1px solid var(--amux-border); border-radius:10px; background:var(--amux-canvas); }
+.blockHead { display:flex; flex-wrap:wrap; align-items:baseline; gap:8px; font-size:12px; }
+.blockHead strong { font-weight:600; }
+.blockHead span { color:var(--amux-subtle); font-size:11px; }
+.line { display:flex; align-items:stretch; gap:6px; overflow-x:auto; padding-bottom:2px; list-style:none; margin:0; }
+.line li { display:flex; align-items:stretch; gap:6px; flex:1 1 0; min-width:150px; }
+.line li + li::before { content:"›"; align-self:center; color:var(--amux-subtle); font-size:16px; }
+.step { display:flex; flex-direction:column; gap:4px; flex:1; min-width:0; padding:10px 12px; text-align:left; border:1px solid var(--amux-border); border-radius:8px; background:var(--amux-canvas); color:var(--amux-text); font-size:13px; }
+button.step { cursor:pointer; }
+button.step:hover { border-color:var(--amux-blue); }
+button.step:focus-visible { outline:2px solid var(--amux-blue); outline-offset:2px; }
+.current { border-color:var(--amux-blue); background:var(--amux-selected); }
+.archived { border-color:var(--amux-warning); }
+.missing { border-style:dashed; background:transparent; color:var(--amux-subtle); }
+.stepTop { display:flex; align-items:center; gap:6px; font-size:10px; font-weight:600; letter-spacing:.02em; color:var(--amux-subtle); text-transform:uppercase; }
+.stepTop em { font-style:normal; font-weight:500; text-transform:none; color:var(--amux-blue); }
+.stepTitle { font-weight:500; line-height:1.45; overflow-wrap:anywhere; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.archived .stepTitle { color:var(--amux-muted); }
+.stepMeta { display:flex; flex-wrap:wrap; align-items:center; gap:6px; font-size:11px; color:var(--amux-muted); }
+.stepMeta code { font-family:var(--font-code); }
+.pill { padding:1px 6px; border-radius:4px; font-size:11px; font-weight:500; border:1px solid var(--amux-border); }
+.pillWarn { color:var(--amux-warning); background:var(--amux-warning-tint); border-color:transparent; }
+.pillWork { color:var(--amux-blue); background:var(--amux-selected); border-color:transparent; }
+.note { font-size:11px; color:var(--amux-warning); }
+.layer { position:absolute; inset:0; z-index:5; display:flex; justify-content:flex-end; background:rgb(0 0 0 / .45); }
+.sheet { width:min(560px,100%); align-self:flex-start; display:flex; flex-direction:column; gap:16px; padding:20px 24px; min-height:100%; background:var(--amux-raised); border-left:1px solid var(--amux-border); font-size:13px; }
+.sheetHead { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+.sheetHead p { font-family:var(--font-code); font-size:11px; color:var(--amux-muted); }
+.sheetHead h4 { font-size:16px; font-weight:700; overflow-wrap:anywhere; }
+.field { display:flex; flex-direction:column; gap:6px; }
+.field > span:first-child, .field legend { font-size:12px; font-weight:600; }
+.field small { font-size:11px; color:var(--amux-subtle); }
+.field input[type="text"], .field input[type="date"], .field textarea { width:100%; padding:8px 10px; border:1px solid var(--amux-border); border-radius:6px; background:var(--amux-canvas); color:var(--amux-text); font-size:13px; }
+.field textarea { min-height:84px; resize:vertical; }
+.field input:focus-visible, .field textarea:focus-visible { outline:2px solid var(--amux-blue); outline-offset:1px; }
+.field fieldset, fieldset.field { border:0; padding:0; margin:0; }
+.segments { display:flex; flex-wrap:wrap; gap:6px; }
+.segments label { position:relative; }
+.segments input { position:absolute; opacity:0; inset:0; cursor:pointer; }
+.segments span { display:inline-block; padding:5px 12px; border:1px solid var(--amux-border); border-radius:6px; background:var(--amux-canvas); color:var(--amux-muted); font-size:12px; }
+.segments input:checked + span { border-color:var(--amux-blue); background:var(--amux-selected); color:var(--amux-blue); font-weight:500; }
+.segments input:focus-visible + span { outline:2px solid var(--amux-blue); outline-offset:2px; }
+.segments input:disabled + span { opacity:.5; }
+.sectionHead { display:flex; flex-wrap:wrap; align-items:baseline; gap:8px; }
+.sectionHead strong { font-size:13px; font-weight:700; }
+.sectionHead span { font-size:11px; color:var(--amux-subtle); }
+.impact { display:flex; flex-direction:column; gap:4px; padding:10px 12px; border:1px solid var(--amux-blue); border-radius:8px; background:var(--amux-selected); }
+.impact strong { color:var(--amux-blue); font-size:12px; font-weight:500; }
+.impact p, .impact li { font-size:11px; color:var(--amux-muted); }
+.impact ul { list-style:none; padding:0; margin:0; }
+.actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; }
+.primary { background:var(--amux-selected); border-color:var(--amux-blue); color:var(--amux-blue); font-weight:600; }
+.status { font-size:12px; color:var(--amux-muted); }
+@media (max-width: 720px) {
+  .line { flex-direction:column; }
+  .line li { min-width:0; }
+  .line li + li::before { content:"↓"; align-self:flex-start; padding-left:12px; }
+  .sheet { padding:16px; }
+}

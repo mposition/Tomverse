@@ -57,7 +57,7 @@
 .dialogBar { justify-content:space-between; padding:12px 24px; background:var(--amux-canvas); border-bottom:1px solid var(--amux-border); font-size:12px; }
 .dialogBar span { color:var(--amux-muted); }
 .dialogScroll { overflow-y:auto; overscroll-behavior:contain; scrollbar-gutter:stable; min-height:200px; }
-.detail { padding:24px 28px; }
+.detail { position:relative; padding:24px 28px; }
 .detailHeader { margin-bottom:22px; }
 .detailHeader h3 { font-size:22px; font-weight:700; margin-bottom:8px; overflow-wrap:anywhere; }
 .detailHeader p { color:var(--amux-muted); font-size:12px; overflow-wrap:anywhere; }
