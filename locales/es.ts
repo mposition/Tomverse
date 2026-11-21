@@ -1404,7 +1404,6 @@ export const es = {
         dataRetentionTitle: "Retención de datos",
         dataRetentionDescription: "Los chats estándar permanecen hasta que los eliminas. Los archivos que adjuntas con la sesión iniciada se guardan con la conversación y se eliminan cuando borras esa conversación o tu cuenta. Los archivos adjuntados sin cuenta son temporales y se eliminan automáticamente.",
         attachmentRetentionNotice: "Los archivos que adjuntas con la sesión iniciada se guardan con la conversación y se usan para la entrega al modelo y la extracción de documentos. Se conservan hasta que borras la conversación o tu cuenta. Los archivos adjuntados sin cuenta son temporales y se eliminan automáticamente.",
-        dangerZone: "Zona de riesgo",
         dangerZoneDescription: "Estas acciones afectan a los datos guardados en Tomverse. Exporta lo importante antes de borrar conversaciones.",
         deleteAllChats: "Eliminar todos los chats",
         deleteAllChatsConfirm: "¿Eliminar todas las conversaciones guardadas? Esta acción no se puede deshacer.",

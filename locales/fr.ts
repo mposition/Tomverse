@@ -1404,7 +1404,6 @@ export const fr = {
         dataRetentionTitle: "Conservation des données",
         dataRetentionDescription: "Les conversations standard restent stockées jusqu'à leur suppression. Les fichiers joints en étant connecté sont conservés avec la conversation et supprimés lorsque vous supprimez cette conversation ou votre compte. Les fichiers joints sans compte sont temporaires et sont supprimés automatiquement.",
         attachmentRetentionNotice: "Les fichiers joints en étant connecté sont conservés avec la conversation et servent à l'envoi au modèle et à l'extraction de documents. Ils sont conservés jusqu'à la suppression de la conversation ou de votre compte. Les fichiers joints sans compte sont temporaires et sont supprimés automatiquement.",
-        dangerZone: "Zone sensible",
         dangerZoneDescription: "Ces actions affectent les données Tomverse stockées. Exportez les conversations importantes avant suppression.",
         deleteAllChats: "Supprimer tous les chats",
         deleteAllChatsConfirm: "Supprimer toutes les conversations stockées ? Cette action est irréversible.",
