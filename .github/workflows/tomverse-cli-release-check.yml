@@ -634,11 +634,12 @@ jobs:
           test -n "$app_identity" || { echo "no Developer ID Application identity for team $TEAM_ID"; exit 1; }
           test -n "$installer_identity" || { echo "no Developer ID Installer identity for team $TEAM_ID"; exit 1; }
           key="$RUNNER_TEMP/notary.p8"
+          private_key_header='-----BEGIN PRIVATE KEY-----'
           # Owner-only for the key file alone; the package payload below keeps normal modes.
           # The secret may hold the .p8 file base64-encoded or as its PEM text.
           (
             umask 077
-            if printf '%s' "$NOTARY_KEY" | grep -q -- '-----BEGIN PRIVATE KEY-----'; then
+            if printf '%s' "$NOTARY_KEY" | grep -q -- "$private_key_header"; then
               printf '%s\n' "$NOTARY_KEY" | tr -d '\r' > "$key"
             else
               printf '%s' "$NOTARY_KEY" | tr -d ' \r\n\t' | base64 --decode > "$key"
@@ -646,7 +647,7 @@ jobs:
           )
           umask 022
           # Checked before anything is sent to Apple; says what arrived, never its content.
-          if ! head -1 "$key" | grep -q -- '-----BEGIN PRIVATE KEY-----' || ! openssl pkey -in "$key" -noout 2> /dev/null; then
+          if ! head -1 "$key" | grep -q -- "$private_key_header" || ! openssl pkey -in "$key" -noout 2> /dev/null; then
             echo "APPLE_NOTARY_KEY_P8_BASE64 does not decode to a .p8 private key:"
             echo "  $(wc -c < "$key" | tr -d ' ') bytes; first line is $(head -1 "$key" | grep -q -- '-----BEGIN' && echo 'a PEM header' || echo 'not a PEM header')."
             echo "  Put the content of AuthKey_<KEY ID>.p8.base64.txt (or of the .p8 file itself) in the cli-release environment secret."

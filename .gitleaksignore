@@ -1954,3 +1954,9 @@ f3e50cee8ef2da7d8da21a4426eb599813419628:tests/nativeReviewHandoffTransport.test
 # exact findings in the two immutable commits that changed this assertion.
 9ce144dd9343177ee624af852495ed081ebf1732:tests/agentAutoRecRunner.test.mjs:aws-access-token:322
 a6d0bd61229a658169ab90bad312ff209144556c:tests/agentAutoRecRunner.test.mjs:aws-access-token:322
+
+# The CLI signing workflow compares two literal PEM headers, not key material.
+# Gitleaks joins the first header to the second and flags the shell between
+# them. The follow-up reuses one header constant. Only this release pick's
+# immutable commit/path/rule/line is suppressed; actual keys remain scanned.
+4bb5e15ec8b1f87a1845a4b5a82a74268455f22c:.github/workflows/tomverse-cli-release-check.yml:private-key:641
