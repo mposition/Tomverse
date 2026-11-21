@@ -1,0 +1,33 @@
+[Unit]
+Description=Tomverse auto-rec agent Claude login keepalive (autorec account)
+Documentation=https://github.com/mposition/Tomverse/blob/develop/tools/auto-rec-agent/README.md
+After=network-online.target
+Wants=network-online.target
+ConditionFileNotEmpty=/usr/local/lib/autorec-agent/scripts/amux-v22-claude-login-keepalive.mjs
+
+[Service]
+Type=oneshot
+User=autorec
+Group=autorec
+# The same script the AMUX operator login uses (scripts/amux-v22-claude-login-
+# keepalive.mjs): it refreshes the access token on days the daily runner does
+# not use Claude, and logs relogin_soon a day before the refresh token ends.
+# autorec has no worker copies, so nothing is restaged or reported (2026-11-21).
+Environment=AMUX_V22_KEEPALIVE_RESTAGE=off
+Environment=AMUX_V22_CLAUDE_BIN=/home/autorec/.local/bin/claude
+# With a `claude setup-token` token here the stored login is not used, and the
+# keepalive only logs env_token.
+EnvironmentFile=-/etc/autorec/claude.env
+Environment=HOME=/home/autorec
+Environment=PATH=/home/autorec/.local/bin:/usr/local/bin:/usr/bin:/bin
+WorkingDirectory=/home/autorec
+ExecStart=/usr/bin/node /usr/local/lib/autorec-agent/scripts/amux-v22-claude-login-keepalive.mjs
+# A round may wait up to 6 min for the CLI's own refresh buffer, then run the
+# CLI twice (180 s each).
+TimeoutStartSec=900
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=autorec-claude-login-keepalive

@@ -21,6 +21,8 @@ export const dailyProductHaltNotice = (input: DailyProductHalt) => ({
       ? "Check the existing claim and any confirmed PR before restarting; do not repeat a confirmed publication."
       : ["publish_unknown", "result_unknown", "review_unknown"].includes(input.reason)
       ? "Look up the existing PR or review before restarting; do not resubmit an unknown outcome."
+      : input.reason === "login_required"
+      ? "The autorec Claude login is gone or about to end; no task was claimed. As tomverse-admin on the AMUX box: sudo -u autorec -H /home/autorec/.local/bin/claude auth login"
       : "Inspect the service failure before restarting. The daily task cap still applies.",
     "Open /admin/product-research?tab=suggestions and /admin/routing?tab=optimizer for task state.",
   ].join("\n"),

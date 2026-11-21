@@ -19,6 +19,9 @@ export const DAILY_APP_HALT_PATH = "/api/internal/product-improvements/halt";
 export const DAILY_HALT_REASONS = Object.freeze([
   "claim_failed", "publish_unknown", "result_unknown", "result_failed", "setup_failed", "agent_error", "timeout",
   "review_unknown", "lease_expired", "runner_error", "rate_limited", "push_rejected", "push_failed", "pr_failed",
+  // The autorec Claude login is gone or ends before one task could finish;
+  // checked before the first claim, so no task is spent on it (2026-11-21).
+  "login_required",
 ]);
 export const appRequestHeaders = (secret) => ({
   authorization: `Bearer ${secret}`,
@@ -102,6 +105,9 @@ export const LIMITS = Object.freeze({
   tasksPerDay: 24,
   // Leave five hours inside the unit's 23h bound for the last task and cleanup.
   dailyRunMs: 18 * 60 * 60_000,
+  // A Claude login whose refresh token ends sooner than this cannot carry one
+  // task (agent, tests, review, publish), so the daily batch does not claim.
+  loginMinimumMs: 3 * 60 * 60_000,
   bundleBytes: 50 * 1024 * 1024,
   headerBytes: 256 * 1024,
   instructionChars: 20_000,
