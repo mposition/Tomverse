@@ -198,3 +198,22 @@ test("a refresh token with less than a day left warns", async () => {
   await runClaudeLoginKeepalive(h.deps);
   assert.equal(h.lines[0].warning, "relogin_soon");
 });
+
+// The autorec account (2026-11-21) has no worker copies: main() passes no
+// stage at all, which is "skipped", never a failed or silent restage.
+test("a login with no stage to run is refreshed and reports the restage as skipped", async () => {
+  const h = harness([login({ expiresAt: NOW + 60_000 }), login({ expiresAt: NOW + 8 * HOUR })]);
+  h.deps.runStage = null;
+  assert.equal(await runClaudeLoginKeepalive(h.deps), 0);
+  assert.deepEqual(h.calls, ["auth status"]);
+  assert.equal(h.lines[0].outcome, "refreshed");
+  assert.equal(h.lines[0].staged, "skipped");
+});
+
+test("the restage opt-out is explicit; a unit that forgot its workers still fails the restage", async () => {
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync(new URL("../scripts/amux-v22-claude-login-keepalive.mjs", import.meta.url), "utf8");
+  assert.match(source, /process\.env\.AMUX_V22_KEEPALIVE_RESTAGE !== "off"/);
+  assert.match(source, /runStage: !restage \? null :/);
+  assert.match(source, /AMUX_V22_STAGE_AUTH_SCRIPT or AMUX_V22_CLAUDE_WORKERS is not set/);
+});

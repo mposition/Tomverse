@@ -170,12 +170,14 @@ export async function runClaudeLoginKeepalive({ readLogin, runCli, runStage, log
   }
   const waited = wait > 0 ? { waitedSeconds: Math.round(wait / 1000) } : {};
   if (how) {
-    let staged = "ok";
-    try { await runStage(); } catch { staged = "failed"; }
+    // No stage at all (an account with no worker copies, e.g. autorec) is
+    // "skipped", never a silent "ok": that is set explicitly in main().
+    let staged = runStage ? "ok" : "skipped";
+    if (runStage) { try { await runStage(); } catch { staged = "failed"; } }
     await log({ outcome: "refreshed", by: how, staged, ...waited,
       expiresAt: iso(login.expiresAt), refreshTokenExpiresAt: iso(login.refreshExpiresAt),
       ...(reloginSoon(login) ? { warning: "relogin_soon" } : {}) });
-    return staged === "ok" ? 0 : 1;
+    return staged === "failed" ? 1 : 0;
   }
   await log({ outcome: login.state === "login_required" ? "login_required" : "refresh_failed", ...waited,
     state: login.state, expiresAt: iso(login.expiresAt),
@@ -206,8 +208,17 @@ async function main() {
   if (!home) { console.error("HOME is not set"); return 2; }
   const cli = process.env.AMUX_V22_CLAUDE_BIN || join(home, ".local/bin/claude");
   const stageScript = process.env.AMUX_V22_STAGE_AUTH_SCRIPT;
-  const workers = (process.env.AMUX_V22_CLAUDE_WORKERS || "")
-    .split(/\s+/).filter(Boolean);
+  // "off": this login has no worker copies to restage or report next to --
+  // the daily product agent's autorec account (2026-11-21). Explicit, so an
+  // operator unit that merely forgot its workers still fails its restage.
+  const restage = process.env.AMUX_V22_KEEPALIVE_RESTAGE !== "off";
+  const workers = restage ? (process.env.AMUX_V22_CLAUDE_WORKERS || "")
+    .split(/\s+/).filter(Boolean) : [];
+  if (!restage && process.env.CLAUDE_CODE_OAUTH_TOKEN?.trim()) {
+    // A `claude setup-token` token replaces the stored login; nothing to refresh.
+    console.log(JSON.stringify({ event: "amux_v22_claude_keepalive", outcome: "env_token" }));
+    return 0;
+  }
   const workDir = await mkdtemp(join(tmpdir(), "amux-claude-keepalive-"));
   try {
     return await runClaudeLoginKeepalive({
@@ -222,7 +233,7 @@ async function main() {
       })),
       runCli: (args) => run(cli, args, { cwd: workDir, timeout: 180_000 }),
       // A missing stage setting is a failed restage, never a silent "ok".
-      runStage: () => (stageScript && workers.length > 0 ?
+      runStage: !restage ? null : () => (stageScript && workers.length > 0 ?
         run(process.execPath, [stageScript, ...workers.map((w) => `anthropic:${w}`)],
           { timeout: 60_000 }) :
         Promise.reject(new Error("AMUX_V22_STAGE_AUTH_SCRIPT or AMUX_V22_CLAUDE_WORKERS is not set"))),
