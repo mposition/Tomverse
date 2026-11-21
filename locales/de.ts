@@ -29,7 +29,7 @@ export const de = {
         imported: "Importierte Chats",
         lastMessage: "Letzte Nachricht",
         entry: "Einen Chat aus einer anderen KI fortsetzen",
-        entryHint: "Übernehmen Sie eine Unterhaltung aus ChatGPT, Claude oder Gemini.",
+        entryHint: "Übernehmen Sie eine Unterhaltung aus ChatGPT, Claude, Gemini oder Perplexity.",
         where: "Wo befindet sich Ihre Unterhaltung?",
         official: "Offizielle Anleitung öffnen",
         returnGuide: "Sobald Sie die Datei haben, gehen Sie zurück zu Einstellungen → Daten → Unterhaltungen importieren.",

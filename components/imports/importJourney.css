@@ -280,6 +280,11 @@
     .journey-layout > section {
         padding: 44px 24px 26px 0;
     }
+    /* The layout is full width here, so the back link lines up with the
+       content column (rail width + column gap) instead of a centred box. */
+    .journey-back {
+        margin: 12px 0 24px calc(clamp(185px, 22vw, 265px) + clamp(36px, 5vw, 72px));
+    }
     .journey-result [data-testid="continuation-quick-action-create"] {
         min-width: 160px;
     }
