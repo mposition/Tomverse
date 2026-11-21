@@ -93,6 +93,18 @@ Report implemented and tested behavior separately from documentation, review, me
   `chore`는 판단이 필요 없는 기계적 작업입니다.
   역할이 달라도 PR Fast Gate의 통과 기준은 같습니다.
 
+# AMUX에 아이디어 넣기
+
+운영자가 "이거 AMUX(backlog)에 넣어 주세요"라고 하면 어느 도구든 같은 명령을 씁니다(`docs/policy/amux-intake.md`
+"세션 계획 첨부 접수"). 비밀값과 origin은 운영자 PC 환경 변수에만 있고, 출력하거나 저장소에 쓰지 않습니다.
+
+- 아이디어만: `npm run amux:idea -- submit --tool "<도구 이름>" --provider "<모델 공급사>" --title "<한 줄>" --body idea.md`
+- 계획도 함께: `npm run amux:idea -- prompt --title "<한 줄>" --body idea.md`로 box와 같은 분석 프롬프트를 보고,
+  저장소를 읽은 뒤 그 답(JSON 하나)을 `plan.json`에 써서 `check --plan plan.json`으로 확인하고 `submit`에
+  `--plan plan.json`을 더합니다. 계획은 운영자가 Admin에서 한 번 승인해야 카드가 됩니다.
+- 결과의 `adminPath`를 운영자에게 알립니다. 실패는 닫힌 코드만 나오며, 같은 요청을 다시 보내지 말고
+  `readback --request-id <id>`로 확인합니다.
+
 # 영역별 규칙 색인
 
 해당 영역을 **고칠 때만** 그 문서를 읽습니다. 영역별 상세 규칙 원문은

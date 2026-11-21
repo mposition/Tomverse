@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import { isAmuxIdeaRequestId } from "./ideaRequestIdCore.ts";
 import { isAmuxSessionIntakeClientSecret } from
   "./ideaSessionIntakeReadbackCore.ts";
+import { readAmuxSessionPlanRegistration,
+  type AmuxSessionPlanRegistration } from "./ideaSessionPlanCore.ts";
 import {
   inspectAmuxIdeaSessionSubmission,
   type AmuxIdeaSessionSubmissionInspection,
@@ -20,6 +22,7 @@ const CLOSED_REFUSALS = new Map<string, number>([
   ["schema_rejected", 400],
   ["content_refused", 400],
   ["metadata_incomplete", 400],
+  ["plan_rejected", 400],
   ["audit_unavailable", 503],
   ["scope_unavailable", 409],
   ["outside_scope", 409],
@@ -37,6 +40,8 @@ export type AmuxSessionIntakeCommitted = {
   hasExternalSources: boolean;
   adminPath: string;
   recoveredByReadback: boolean;
+  /** The attached plan, when the reply named one; a read-back never does. */
+  plan?: AmuxSessionPlanRegistration & { unitCount: number };
 };
 
 export type AmuxSessionIntakeClientResult =
@@ -111,8 +116,9 @@ export function prepareAmuxSessionIntakeSubmission(
 ): Extract<AmuxIdeaSessionSubmissionInspection, { ok: true }> {
   const requestId = createRequestId();
   const candidate = record(value);
+  const keys = ["version", "input", "source"];
   if (!isAmuxIdeaRequestId(requestId) || !candidate ||
-      !exactKeys(candidate, ["version", "input", "source"])) {
+      !exactKeys(candidate, Object.hasOwn(candidate, "plan") ? [...keys, "plan"] : keys)) {
     throw new Error("schema_rejected");
   }
   const inspected = inspectAmuxIdeaSessionSubmission({
@@ -136,6 +142,8 @@ const committed = (
       body.adminPath !== `/admin/amux-backlog?tab=ideas&idea=${encodeURIComponent(requestId)}`) {
     return null;
   }
+  const plan = body.plan === undefined ? undefined : readAmuxSessionPlanRegistration(body.plan);
+  if (plan === null) return null;
   return {
     state: "committed",
     requestId,
@@ -144,6 +152,7 @@ const committed = (
     hasExternalSources: body.hasExternalSources,
     adminPath: body.adminPath,
     recoveredByReadback,
+    ...(plan ? { plan } : {}),
   };
 };
 
@@ -228,6 +237,8 @@ export async function submitAmuxSessionIntakeClientRequest(input: {
         requestId,
         input: input.inspected.input,
         source: input.inspected.source,
+        // The exact text the local check passed; the route checks it again.
+        ...(input.inspected.plan ? { plan: JSON.parse(input.inspected.plan.raw) } : {}),
       }),
     });
   } catch {

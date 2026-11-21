@@ -42,6 +42,19 @@ test("Admin idea detail links a lane idea's PR, and no PR before the run opens o
     /amux-idea-detail-lane/);
 });
 
+test("Admin marks a plan a coding session wrote, and only that one", () => {
+  const sessionPlan = renderToStaticMarkup(createElement(AmuxIdeaDetailSummary,
+    { row: { ...row([]), submissionOrigin: "session", sessionPlan: true } }));
+  assert.match(sessionPlan, /data-testid="amux-session-plan"/);
+  assert.ok([adminAmuxIdeaProgressMessages.ko.sessionPlan, adminAmuxIdeaProgressMessages.en.sessionPlan]
+    .some((text) => sessionPlan.includes(text)));
+  assert.doesNotMatch(renderToStaticMarkup(createElement(AmuxIdeaDetailSummary,
+    { row: { ...row([]), submissionOrigin: "session", sessionPlan: false } })), /amux-session-plan/);
+  for (const m of [adminAmuxIdeaProgressMessages.ko, adminAmuxIdeaProgressMessages.en]) {
+    assert.match(m.sessionPlan, /box/);
+  }
+});
+
 test("Admin distinguishes an older unpinned idea from a damaged pin", () => {
   const legacy = renderToStaticMarkup(createElement(AmuxIdeaDetailSummary,
     { row: { ...row([]), submissionOrigin: "session",

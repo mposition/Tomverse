@@ -8,7 +8,9 @@ import type { Session } from "next-auth";
 
 import { takeAuditChainLock, writeSystemAuditLog } from
   "@/lib/adminAudit";
-import { auditRowActorKind,
+import { auditRowActorKind, AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
+  AMUX_SESSION_PLAN_ATTACHED_ACTION, AMUX_SESSION_PLAN_ATTACHED_SCOPE,
+  AMUX_SESSION_PLAN_ATTACHED_TARGET,
   AMUX_V19_SYSTEM_REGISTRATION_ACTION,
   AMUX_V19_SYSTEM_REGISTRATION_TARGET } from
   "@/lib/adminAuditSystemActors";
@@ -46,12 +48,16 @@ import { createInitialIdeaOnlySourcePlan } from
 import { commitAmuxOperatingScope, readAmuxOperatingScopeAuthority,
   type AmuxOperatingScopeAuthority } from
   "@/lib/amux/ideaOperatingScopeStore";
-import { inspectAmuxIdeaSessionSubmission } from
+import { inspectAmuxIdeaSessionSubmission,
+  type AmuxIdeaSessionSubmissionInspection } from
   "@/lib/amux/ideaSessionSubmissionCore";
-import { commitAmuxIdeaSessionSubmission as commitPinnedSessionSubmission } from
+import { AmuxIdeaSessionSubmissionError,
+  commitAmuxIdeaSessionSubmission as commitPinnedSessionSubmission,
+  readAmuxIdeaSessionSubmissionRequest, submitAmuxIdeaFromSession } from
   "@/lib/amux/ideaSessionSubmissionService";
-import { commitAmuxV19CompletedIdeaSystemRegistrationForTest,
-  readAmuxV19SystemRegistration } from
+import { AmuxV19SystemRegistrationError,
+  commitAmuxV19CompletedIdeaSystemRegistrationForTest,
+  readAmuxV19SystemRegistration, registerAttachedSessionPlanFromSystem } from
   "@/lib/amux/ideaSystemRegistrationService";
 import { AmuxV20RegistrationRefusalStoreError,
   recordAmuxV20RegistrationRefusal } from
@@ -79,6 +85,13 @@ import { readAmuxV22PublicPrConsent } from "@/lib/amux/v22PublicPrConsent";
 import { evaluateAmuxV4TaskReadyInTransaction, loadAmuxV4TaskReadyContext } from
   "@/lib/amux/v4TaskReadyService";
 import { prisma } from "@/lib/prisma";
+import { prepareAmuxV4CardPlan } from "@/lib/amux/ideaCardPlanApprovalService";
+import { prepareAmuxV4NodePlan } from "@/lib/amux/ideaNodePlanApprovalService";
+import { buildAmuxSessionAnalysisQueueWhere } from
+  "@/lib/amux/ideaSessionAnalysisQueueWhereCore";
+import { AMUX_SESSION_PLAN_AUTO_REGISTER_ENV, AMUX_SESSION_PLAN_MODEL_ID } from
+  "@/lib/amux/ideaSessionPlanCore";
+import { amuxSessionPlanFixture } from "../fixtures/amuxSessionPlan.mjs";
 import { ensureModelRegistrySeeded } from "@/lib/modelRegistry";
 import { seedAmuxWorkerCatalog, truncateAmuxWorkerRegistry } from "./amuxDerivedCatalogFixture";
 
@@ -1402,4 +1415,154 @@ test("a batch close answers per idea and one refusal leaves the others closed", 
     ideaIds: [second.ideaId], reason: "Not my idea" }), { code: "forbidden" });
   await assert.rejects(closeAmuxIdeasForOwner({ session, request,
     ideaIds: [second.ideaId], reason: "no" }), { code: "invalid" });
+});
+
+// Owner decision 2026-11-21: a coding session attaches the plan it wrote to
+// its intake. These run in this suite because plan approval and system
+// registration decrypt every active node, whose keys live in this process.
+const inspectSessionPlanIntake = (plan?: unknown): Extract<AmuxIdeaSessionSubmissionInspection, { ok: true }> => {
+  const requestId = randomUUID();
+  const inspected = inspectAmuxIdeaSessionSubmission({ version: 1, requestId,
+    input: { version: 1, idea: `Dark mode toggle ${requestId}`, repositories: [],
+      pullRequests: [] },
+    source: { toolName: "Claude Code", modelProvider: "Anthropic",
+      sessionDisplay: "session plan DB test" },
+    ...(plan === undefined ? {} : { plan }) });
+  if (!inspected.ok) throw new Error(inspected.code);
+  return inspected;
+};
+
+const queuedIdeaIds = async () => (await prisma.amuxIdeaSessionAnalysisReservation.findMany({
+  where: buildAmuxSessionAnalysisQueueWhere(new Date(), null), select: { ideaId: true } }))
+  .map((row) => row.ideaId);
+
+test("an attached plan skips the box queue and waits for the owner's one plan approval", async () => {
+  delete process.env[AMUX_SESSION_PLAN_AUTO_REGISTER_ENV];
+  const inspected = inspectSessionPlanIntake(amuxSessionPlanFixture());
+  const committed = await submitAmuxIdeaFromSession({ inspected });
+  assert.deepEqual(committed.plan && { unitCount: committed.plan.unitCount,
+    registration: committed.plan.registration },
+  { unitCount: 4, registration: { state: "awaiting_approval" } });
+
+  const idea = await prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: committed.ideaId },
+    select: { state: true, analysisCompletedAt: true, currentSourcePlanRevisionId: true,
+      systemRegistrationAuditLogId: true } });
+  assert.equal(idea.state, "awaiting_owner");
+  assert.notEqual(idea.analysisCompletedAt, null);
+  assert.equal(idea.currentSourcePlanRevisionId, committed.plan?.planId);
+  assert.equal(idea.systemRegistrationAuditLogId, null);
+  const units = await prisma.amuxIdeaDraftUnit.findMany({ where: { ideaId: committed.ideaId },
+    select: { unitKind: true, state: true } });
+  assert.deepEqual(units.map((unit) => `${unit.unitKind}:${unit.state}`).sort(),
+    ["card:proposed", "node:proposed", "node:proposed", "node:proposed"]);
+  const preview = await prisma.amuxIdeaTransferPreview.findFirstOrThrow({
+    where: { ideaId: committed.ideaId }, select: { modelId: true, confirmationAuditLogId: true } });
+  assert.equal(preview.modelId, AMUX_SESSION_PLAN_MODEL_ID);
+
+  // One content-free system audit records the session author and the missing
+  // read evidence, and the page is bound to it.
+  const audit = await prisma.adminAuditLog.findUniqueOrThrow({
+    where: { id: preview.confirmationAuditLogId ?? "" } });
+  assert.equal(auditRowActorKind(audit), "system");
+  assert.equal(audit.action, AMUX_SESSION_PLAN_ATTACHED_ACTION);
+  assert.equal(audit.targetType, AMUX_SESSION_PLAN_ATTACHED_TARGET);
+  assert.equal(audit.targetId, committed.ideaId);
+  const metadata = audit.metadata as Record<string, unknown>;
+  assert.equal(metadata.systemActor, AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR);
+  assert.equal(metadata.actorScope, AMUX_SESSION_PLAN_ATTACHED_SCOPE);
+  assert.equal(metadata.planAuthor, "session");
+  assert.equal(metadata.readEvidence, "none");
+  assert.equal(metadata.submissionAuditId, committed.auditId);
+  assert.doesNotMatch(JSON.stringify(audit), /toggle|Claude Code|Anthropic/i);
+
+  // No box analysis: not in the queue, no claim, no result. The intake reads
+  // back as committed exactly as before.
+  assert.equal((await queuedIdeaIds()).includes(committed.ideaId), false);
+  assert.equal(await prisma.amuxIdeaSessionAnalysisBudgetClaim.count({
+    where: { reservationId: committed.reservationId } }), 0);
+  assert.equal(await prisma.amuxIdeaSessionAnalysisResult.count({
+    where: { ideaId: committed.ideaId } }), 0);
+  const readBack = await readAmuxIdeaSessionSubmissionRequest(inspected.requestId);
+  assert.equal(readBack.status, "committed");
+
+  // The Admin idea shows it at plan approval, marked as session-written.
+  const rows = await readAmuxIdeaProgressForOwner(authority.approvedByUserId, inspected.requestId);
+  const row = rows.find((entry) => entry.ideaId === committed.ideaId);
+  assert.equal(row?.stage, "plan_approval");
+  assert.equal(row?.waitingFor, "plan_approval");
+  assert.equal(row?.sessionPlan, true);
+
+  // The owner's one plan approval reads it like any box plan.
+  const nodes = await prepareAmuxV4NodePlan(session, request,
+    { ideaId: committed.ideaId, reasons: {} }, { allowEmpty: true });
+  assert.equal(nodes.plan.length, 3);
+  const cards = await prepareAmuxV4CardPlan(session, request,
+    { ideaId: committed.ideaId, reasons: {}, publicPrConsentOff: [] },
+    { allowEmpty: true, pendingFeatures: new Map(nodes.plan.filter((entry) =>
+      entry.level === "feature").map((entry) => [entry.localRef, entry.nodeId])),
+    deferAll: nodes.remaining > 0 });
+  assert.equal(cards.plan.length, 1);
+
+  // With the switch off, nothing registers it without the owner.
+  await assert.rejects(registerAttachedSessionPlanFromSystem(committed.ideaId),
+    (error) => error instanceof AmuxV19SystemRegistrationError && error.code === "write_disabled");
+});
+
+test("without a plan the intake waits in the box queue as before", async () => {
+  delete process.env[AMUX_SESSION_PLAN_AUTO_REGISTER_ENV];
+  const committed = await submitAmuxIdeaFromSession({ inspected: inspectSessionPlanIntake() });
+  assert.equal(Object.hasOwn(committed, "plan"), false);
+  const idea = await prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: committed.ideaId },
+    select: { state: true, currentSourcePlanRevisionId: true } });
+  assert.deepEqual(idea, { state: "submitted", currentSourcePlanRevisionId: null });
+  assert.equal(await prisma.amuxIdeaDraftUnit.count({ where: { ideaId: committed.ideaId } }), 0);
+  assert.equal(await prisma.adminAuditLog.count({ where: {
+    action: AMUX_SESSION_PLAN_ATTACHED_ACTION, targetId: committed.ideaId } }), 0);
+  assert.equal((await queuedIdeaIds()).includes(committed.ideaId), true);
+  const rows = await readAmuxIdeaProgressForOwner(authority.approvedByUserId);
+  assert.equal(rows.find((entry) => entry.ideaId === committed.ideaId)?.sessionPlan, false);
+
+  // The session plan switch never registers an idea a session did not plan.
+  process.env[AMUX_SESSION_PLAN_AUTO_REGISTER_ENV] = "enabled";
+  try {
+    await assert.rejects(registerAttachedSessionPlanFromSystem(committed.ideaId),
+      (error) => error instanceof AmuxV19SystemRegistrationError && error.code === "not_found");
+  } finally {
+    delete process.env[AMUX_SESSION_PLAN_AUTO_REGISTER_ENV];
+  }
+});
+
+test("with its switch on, an attached plan registers through the system registration Guard", async () => {
+  await approveSyntheticTaskCatalog();
+  process.env[AMUX_SESSION_PLAN_AUTO_REGISTER_ENV] = "enabled";
+  try {
+    const committed = await submitAmuxIdeaFromSession({ inspected: inspectSessionPlanIntake(amuxSessionPlanFixture()) });
+    assert.deepEqual(committed.plan?.registration, { state: "registered" });
+    const idea = await prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: committed.ideaId },
+      select: { state: true, systemRegistrationAuditLogId: true } });
+    assert.equal(idea.state, "completed");
+    assert.notEqual(idea.systemRegistrationAuditLogId, null);
+    const decisions = await prisma.amuxIdeaUnitDecision.findMany({
+      where: { ideaId: committed.ideaId }, select: { action: true, state: true } });
+    assert.ok(decisions.some((decision) => decision.action === "register_card" &&
+      decision.state === "consumed"));
+    assert.equal(await prisma.amuxIdeaDraftUnit.count({ where: { ideaId: committed.ideaId,
+      state: "proposed" } }), 0);
+  } finally {
+    delete process.env[AMUX_SESSION_PLAN_AUTO_REGISTER_ENV];
+  }
+});
+
+test("a plan the writer refuses rolls the whole intake back", async () => {
+  const inspected = inspectSessionPlanIntake(amuxSessionPlanFixture());
+  // A plan that bypassed the route's check: the same writer refuses it inside
+  // the transaction, and the idea and its queue receipt are not written.
+  const forged = { ...inspected, plan: { raw: JSON.stringify({ outcome: "propose",
+    coverageStatus: "complete", coveredScope: "Nothing.", units: [{ kind: "card" }] }),
+  unitCount: 1 } };
+  await assert.rejects(submitAmuxIdeaFromSession({ inspected: forged }),
+    (error) => error instanceof AmuxIdeaSessionSubmissionError && error.code === "plan_rejected");
+  assert.equal(await prisma.amuxIdeaSubmission.count({
+    where: { requestId: inspected.requestId } }), 0);
+  assert.equal((await readAmuxIdeaSessionSubmissionRequest(inspected.requestId)).status, "absent");
 });

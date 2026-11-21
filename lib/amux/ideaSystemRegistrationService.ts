@@ -14,6 +14,8 @@ import { loadAmuxCardDuplicateScanner } from
 import { orderAmuxV4CardPlan } from "./ideaCardPlanCore.ts";
 import { AmuxV4CardPlanError } from "./ideaCardPlanCore.ts";
 import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
+import { AMUX_SESSION_PLAN_MODEL_ID,
+  amuxSessionPlanAutoRegisterEnabled } from "./ideaSessionPlanCore.ts";
 import { createAmuxContentKeyRing } from "./ideaKeyStore.ts";
 import { loadAmuxNodeDuplicateScanner } from
   "./ideaNodeDuplicateScanService.ts";
@@ -750,6 +752,22 @@ async function commitAmuxV19CompletedIdeaSystemRegistration(
 export async function registerCompletedAmuxIdeaFromSystem(ideaId: string) {
   if (!amuxV19SystemRegistrationEnabled(process.env)) {
     throw new AmuxV19SystemRegistrationError("write_disabled");
+  }
+  return commitAmuxV19CompletedIdeaSystemRegistration(ideaId);
+}
+
+/** Owner decision 2026-11-21: a session-written plan registers without the
+ * owner's plan approval only behind its own default-off switch, never the box
+ * analysis one. The one cheap check: the idea's page was written by a session
+ * (its preview carries the session plan model label, which a box claim cannot
+ * produce), so this switch never registers a box plan. */
+export async function registerAttachedSessionPlanFromSystem(ideaId: string) {
+  if (!amuxSessionPlanAutoRegisterEnabled(process.env)) {
+    throw new AmuxV19SystemRegistrationError("write_disabled");
+  }
+  if (!IDEA_ID.test(ideaId) || await prisma.amuxIdeaTransferPreview.count({ where: {
+    ideaId, modelId: AMUX_SESSION_PLAN_MODEL_ID } }) !== 1) {
+    throw new AmuxV19SystemRegistrationError("not_found");
   }
   return commitAmuxV19CompletedIdeaSystemRegistration(ideaId);
 }

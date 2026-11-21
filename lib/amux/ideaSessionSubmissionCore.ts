@@ -1,8 +1,11 @@
 import { isAmuxIdeaAnalysisProvider } from "./ideaAnalysisChannelCore.ts";
+import { inspectAmuxAnalysisContinuation } from "./ideaAnalysisContinuationCore.ts";
+import { AMUX_V4_ANALYSIS_PROMPT_VERSION } from "./ideaAnalysisPromptCore.ts";
 import type { AmuxIdeaModelSelection } from "./ideaFrontierSelectionCore.ts";
 import type { IdeaInput } from "./ideaInputCore.ts";
 import { isAmuxIdeaRequestId } from "./ideaRequestIdCore.ts";
 import type { AmuxOperatingScopeAuthority } from "./ideaOperatingScopeStore.ts";
+import { amuxSessionPageRefusalDetail } from "./ideaSessionReviewDetailCore.ts";
 
 /** Refused before the intake transaction starts, so nothing was written. */
 const SESSION_PREWRITE_STATUS: Readonly<Record<string, number>> = {
@@ -25,10 +28,22 @@ export type AmuxIdeaSessionSource = {
   sessionDisplay: string;
 };
 
+/** A plan the coding session wrote itself, in the session analysis answer
+ * format (owner decision 2026-11-21). `raw` is the exact JSON text the plan
+ * writer parses; it already passed the same parser and content checks. */
+export type AmuxIdeaSessionPlan = {
+  raw: string;
+  /** Every unit the plan holds, evidence included: one storage key each. */
+  unitCount: number;
+};
+
 export type AmuxIdeaSessionSubmissionInspection =
   | { ok: true; requestId: string; input: IdeaInput; source: AmuxIdeaSessionSource;
-      counts: { ideaBytes: number; repositoryCount: number; pullRequestCount: number } }
-  | { ok: false; code: "schema_rejected" | "content_refused" | "metadata_incomplete" };
+      counts: { ideaBytes: number; repositoryCount: number; pullRequestCount: number };
+      /** Absent: the box analysis queue makes the plan, as before. */
+      plan?: AmuxIdeaSessionPlan }
+  | { ok: false; code: "schema_rejected" | "content_refused" | "metadata_incomplete" |
+      "plan_rejected" };
 
 export type AmuxIdeaSessionInputInspection =
   | { ok: true; input: IdeaInput;
@@ -152,9 +167,88 @@ export function inspectSealedAmuxIdeaSessionInput(value: unknown): AmuxIdeaSessi
   return inspectAmuxIdeaSessionInputV1(value, false);
 }
 
+/** The page a session-written plan is checked as: the first page of a session
+ * analysis, which is exactly the context the plan writer gives it (one
+ * operator idea, no history, no inherited references). */
+const SESSION_PLAN_PAGE = { chunkIndex: 0, permittedTargetRefs: [], history: [] } as const;
+
+export type AmuxIdeaSessionPlanInspection =
+  | { ok: true; plan: AmuxIdeaSessionPlan }
+  | { ok: false; code: "content_refused" }
+  | { ok: false; code: "plan_rejected";
+      /** not_a_proposal: no card or node to approve; continues: the plan names
+       * unfinished cards, which a session plan must include itself; question:
+       * it asks the owner something, which the session asks in its own chat. */
+      reason: "schema" | "not_a_proposal" | "continues" | "question";
+      detail?: ReturnType<typeof amuxSessionPageRefusalDetail> };
+
+const planStrings = (value: unknown, found: string[] = []): string[] => {
+  if (typeof value === "string") found.push(value);
+  else if (Array.isArray(value)) value.forEach((entry) => planStrings(entry, found));
+  else if (value && typeof value === "object") {
+    Object.values(value as Record<string, unknown>).forEach((entry) => planStrings(entry, found));
+  }
+  return found;
+};
+
+/**
+ * A session-written plan passes the same checks a box analysis answer meets:
+ * the intake's content refusals on every text it holds, then the session plan
+ * writer's own parser on the first page (ideaAnalysisContinuationCore.ts, with
+ * the session page bookkeeping derived the same way). It must close the plan:
+ * a proposal with at least one unit and no remainder. `previewId` only fills
+ * the derived header; the verdict does not depend on it.
+ */
+export function inspectAmuxIdeaSessionPlan(value: unknown,
+  previewId: string): AmuxIdeaSessionPlanInspection {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { ok: false, code: "plan_rejected", reason: "schema" };
+  }
+  if (!planStrings(value).every((text) => text.length === 0 || contentAdmitted(text))) {
+    return { ok: false, code: "content_refused" };
+  }
+  // The session page bookkeeping drops a question written beside units, as a
+  // box answer's assumptions stand with no owner present. A session has its
+  // owner in chat, so an open question is refused here instead of vanishing.
+  // The same bookkeeping turns a declared owner-input page into a proposal,
+  // so the session's own declaration is read before it.
+  const declared = value as Record<string, unknown>;
+  const question = declared.ownerQuestion;
+  if ((question !== undefined && question !== null &&
+      !(typeof question === "string" && question.trim().length === 0)) ||
+      declared.outcome === "needs_information" ||
+      declared.coverageStatus === "needs_owner_input") {
+    return { ok: false, code: "plan_rejected", reason: "question" };
+  }
+  const raw = JSON.stringify(value);
+  const page = { ...SESSION_PLAN_PAGE, previewId };
+  const inspected = inspectAmuxAnalysisContinuation({
+    raw, expectedPreviewId: previewId, expectedChunkIndex: 0,
+    expectedRevisionChunkIndex: 0, permittedSourceRefIds: ["operator_idea"],
+    permittedTargetRefs: [], sourceUnitCount: 1, coveredStartOrdinal: 0,
+    coveredEndOrdinal: 0, history: [], templateVersion: AMUX_V4_ANALYSIS_PROMPT_VERSION,
+    sessionPage: true,
+  });
+  if (!inspected.ok) {
+    return { ok: false, code: "plan_rejected", reason: "schema",
+      detail: amuxSessionPageRefusalDetail(raw, page) };
+  }
+  const { chunk } = inspected.parsed;
+  if (chunk.outcome !== "propose" ||
+      !chunk.units.some((unit) => unit.kind !== "evidence")) {
+    return { ok: false, code: "plan_rejected", reason: "not_a_proposal" };
+  }
+  if (inspected.cursor.nextCursor !== null) {
+    return { ok: false, code: "plan_rejected", reason: "continues" };
+  }
+  return { ok: true, plan: { raw, unitCount: chunk.units.length } };
+}
+
 export function inspectAmuxIdeaSessionSubmission(value: unknown): AmuxIdeaSessionSubmissionInspection {
+  const keys = ["version", "requestId", "input", "source"];
   if (!value || typeof value !== "object" || Array.isArray(value) ||
-      !exactKeys(value as Record<string, unknown>, ["version", "requestId", "input", "source"])) {
+      !exactKeys(value as Record<string, unknown>,
+        Object.hasOwn(value, "plan") ? [...keys, "plan"] : keys)) {
     return { ok: false, code: "schema_rejected" };
   }
   const record = value as Record<string, unknown>;
@@ -166,7 +260,12 @@ export function inspectAmuxIdeaSessionSubmission(value: unknown): AmuxIdeaSessio
   if (!source.ok) return { ok: false, code: "schema_rejected" };
   const inspected = inspectAmuxIdeaSessionInput(record.input);
   if (!inspected.ok) return inspected;
-  return { ...inspected, requestId: record.requestId, source: source.source };
+  if (!Object.hasOwn(record, "plan")) {
+    return { ...inspected, requestId: record.requestId, source: source.source };
+  }
+  const plan = inspectAmuxIdeaSessionPlan(record.plan, record.requestId);
+  if (!plan.ok) return { ok: false, code: plan.code };
+  return { ...inspected, requestId: record.requestId, source: source.source, plan: plan.plan };
 }
 
 const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/;
