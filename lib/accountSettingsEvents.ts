@@ -16,6 +16,9 @@ export const ACCOUNT_SETTINGS_TABS = [
   "assistants",
   "ai",
   "data",
+  // Everything a developer sets up once to use the account from other
+  // apps and tools: the API key, the two APIs' addresses and the CLI.
+  "developer",
   "plan",
 ] as const;
 

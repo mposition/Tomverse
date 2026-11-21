@@ -15,6 +15,22 @@ import {
     type ExternalApiModelCapabilities,
 } from "@/lib/externalApiCatalogCore";
 import { claudeCodeConfig, codexConfig, codingToolModels, cursorConfig } from "@/lib/externalApiCodingTools";
+import { ApiCopyLine } from "@/components/settings/ApiCopyLine";
+import {
+    braveLeoConfig,
+    browserOsConfig,
+    EXTERNAL_API_PLATFORMS,
+    EXTERNAL_API_PLATFORM_NAMES,
+    effectiveModelPick,
+    externalApiAddresses,
+    externalApiPlatformSurface,
+    externalApiSurfaceKey,
+    isExternalApiPlatform,
+    jetBrainsConfig,
+    raycastProvidersYaml,
+    type ExternalApiGuideSurface,
+    type ExternalApiPlatform,
+} from "@/lib/externalApiAppGuides";
 import { CURSOR_GUIDE_PATH } from "@/lib/marketingRoutes";
 import { localizedPath } from "@/lib/seo";
 
@@ -67,6 +83,8 @@ type RequestRow = {
     requestId: string;
     modelId: string;
     protocol?: string;
+    /** Which API the request came through; null for a request recorded before it was kept. */
+    surface?: string | null;
     createdAt: string;
     status: string;
     outcome: string | null;
@@ -183,6 +201,17 @@ function KeyUsage({ keyId }: { keyId: string }) {
     }, [keyId]);
     if (failed) return <p className="mt-2 text-xs text-red-600">{t("externalApi.errorGeneric")}</p>;
     if (!rows) return <p className="mt-2 text-xs text-zinc-500">{t("externalApi.loading")}</p>;
+    return <UsageRows rows={rows} />;
+}
+
+/** The API a request came through, as the person reads it; "—" when it was not recorded. */
+const surfaceLabel = (surface: string | null | undefined, t: (key: string) => string) => {
+    const key = externalApiSurfaceKey(surface);
+    return key === "coding" ? t("externalApi.apiCoding") : key === "general" ? t("externalApi.apiGeneral") : "—";
+};
+
+export function UsageRows({ rows }: { rows: RequestRow[] }) {
+    const { t } = useLanguage();
     if (rows.length === 0) return <p className="mt-2 text-xs text-zinc-500">{t("externalApi.usageEmpty")}</p>;
     return (
         <ul className="mt-2 divide-y divide-zinc-200 text-xs dark:divide-zinc-800" data-testid="external-api-key-usage">
@@ -196,6 +225,9 @@ function KeyUsage({ keyId }: { keyId: string }) {
                         <span className="text-zinc-500">{new Date(row.createdAt).toLocaleString()}</span>
                     </div>
                     <div className="mt-0.5 flex flex-wrap gap-x-3 text-zinc-500">
+                        <span data-testid="external-api-usage-api">
+                            {t("externalApi.colApi")}: {surfaceLabel(row.surface, t)}
+                        </span>
                         {row.status === "held" ? (
                             <span>{t("externalApi.usageHeld")}</span>
                         ) : (
@@ -488,6 +520,7 @@ function ModelSearchList({
     picked,
     onToggle,
     toolsFor,
+    badgeFor,
     testId,
 }: {
     models: ModelSummary[];
@@ -496,6 +529,8 @@ function ModelSearchList({
     onToggle?: (id: string) => void;
     /** The tools a model works with, shown under its name. */
     toolsFor?: (model: ModelSummary) => string;
+    /** A short mark beside the name, e.g. a model only the coding API offers. */
+    badgeFor?: (model: ModelSummary) => string | null;
     testId: string;
 }) {
     const { t } = useLanguage();
@@ -527,6 +562,14 @@ function ModelSearchList({
                         <span className="flex min-w-0 flex-1 flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
                             <span className="min-w-0">
                                 <span className="font-semibold">{model.name}</span>
+                                {badgeFor?.(model) ? (
+                                    <span
+                                        data-testid="external-api-model-badge"
+                                        className="ml-2 rounded-full bg-zinc-200 px-2 py-0.5 text-xs font-semibold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
+                                    >
+                                        {badgeFor(model)}
+                                    </span>
+                                ) : null}
                                 <span className="block break-all font-mono text-xs text-zinc-500">{model.id}</span>
                                 {model.id === SMART_ADAPTIVE_MODEL_ID ? (
                                     <span className="block text-xs text-zinc-600 dark:text-zinc-300">{t("externalApi.smartAdaptiveHint")}</span>
@@ -601,8 +644,6 @@ function Notes({ children }: { children: ReactNode }) {
     );
 }
 
-type Platform = "tomverse-cli" | "claude-code" | "codex" | "cursor" | "aside" | "vscode" | "other";
-const PLATFORMS: Platform[] = ["tomverse-cli", "claude-code", "codex", "cursor", "aside", "vscode", "other"];
 type Shell = "powershell" | "posix";
 type Surface = "terminal" | "extension";
 const SHELLS: [Shell, string][] = [
@@ -610,22 +651,41 @@ const SHELLS: [Shell, string][] = [
     ["posix", "macOS / Linux"],
 ];
 
+/** The models an OpenAI Chat Completions app can name. */
+const chatModels = (models: ModelSummary[]) => models.filter((model) => model.protocols?.includes("chat_completions") ?? true);
+
+/** The id an app should start with: Smart Adaptive when offered, else the first model. */
+const defaultModelId = (models: ModelSummary[]) => (models.find((model) => model.id === SMART_ADAPTIVE_MODEL_ID) ?? models[0])?.id;
+
+/** Both address forms of one API, each with its copy button. */
+function ApiAddresses({ api, openAiBaseUrl }: { api: ExternalApiGuideSurface; openAiBaseUrl: string }) {
+    const { t } = useLanguage();
+    const addresses = externalApiAddresses(openAiBaseUrl);
+    return (
+        <div className="mt-3 grid gap-2 rounded-xl border border-zinc-200 p-3 dark:border-zinc-800" data-testid={`external-api-addresses-${api}`}>
+            <ApiCopyLine label={t("externalApi.addrOpenAi")} value={addresses.openAi} testId={`external-api-address-${api}-openai`} />
+            <ApiCopyLine label={t("externalApi.addrAnthropic")} value={addresses.anthropic} testId={`external-api-address-${api}-anthropic`} />
+        </div>
+    );
+}
+
 /**
- * One tool at a time: the person picks where the key is used and sees only
- * that tool's setup. Configurations carry the new key while this page holds
- * it and a placeholder otherwise. Claude Code and Codex offer Smart Adaptive
- * scoped to their own provider's models (codingToolModels). The coding tools
- * -- Claude Code, Codex, Cursor, the tomverse CLI and VS Code (Copilot Chat's
- * custom endpoint) -- use the coding API's address and models; Aside and other
- * OpenAI-compatible apps the general API's (owner decision 2026-11-21).
+ * One tool at a time: the person picks which API the tool belongs to (the
+ * general API for apps and AI browsers, the coding API for coding tools), then
+ * where the key is used, and sees only that tool's setup. Configurations carry
+ * the new key while this page holds it and a placeholder otherwise. Claude
+ * Code and Codex offer Smart Adaptive scoped to their own provider's models
+ * (codingToolModels). Which tool is on which API is
+ * lib/externalApiAppGuides.ts (owner decision 2026-11-21).
  */
-function ConnectSection({
+export function ConnectSection({
     baseUrl,
     models,
     codingBaseUrl,
     codingModels,
     apiKey,
     tomverseCli,
+    focusTool,
 }: {
     baseUrl: string;
     models: ModelSummary[];
@@ -633,10 +693,14 @@ function ConnectSection({
     codingModels: ModelSummary[];
     apiKey: string | null;
     tomverseCli?: TomverseCliGuide | null;
+    /** A tool named by the address (`?tool=`): opens its API tab and its setup. */
+    focusTool?: ExternalApiPlatform | null;
 }) {
     const { t, lang } = useLanguage();
     const key = apiKey ?? KEY_PLACEHOLDER;
-    const [platform, setPlatform] = useState<Platform | null>(null);
+    const startTool = focusTool && (focusTool !== "tomverse-cli" || tomverseCli) ? focusTool : null;
+    const [api, setApi] = useState<ExternalApiGuideSurface>(startTool ? externalApiPlatformSurface(startTool) : "general");
+    const [platform, setPlatform] = useState<ExternalApiPlatform | null>(startTool);
     const [shell, setShell] = useState<Shell>("powershell");
     const [surface, setSurface] = useState<Surface>("terminal");
     const lists = useMemo(() => codingToolModels(codingModels), [codingModels]);
@@ -644,39 +708,53 @@ function ConnectSection({
     const [codexId, setCodexId] = useState<string | undefined>();
     const [cursorId, setCursorId] = useState<string | undefined>();
     const [otherId, setOtherId] = useState<string | undefined>();
-    // Aside and VS Code take a model list: Smart Adaptive alone until the
-    // person ticks more, because its id survives catalogue changes.
-    const [picked, setPicked] = useState<string[] | null>(null);
-    const pickedIds =
-        picked ?? (models.some((model) => model.id === SMART_ADAPTIVE_MODEL_ID) ? [SMART_ADAPTIVE_MODEL_ID] : models.map((model) => model.id));
-    const pickedModels = models.filter((model) => pickedIds.includes(model.id));
-    // VS Code is a coding tool: it lists the coding API's models, never an empty list.
-    const pickedCodingModels = (() => {
-        const chosen = codingModels.filter((model) => pickedIds.includes(model.id));
-        if (chosen.length) return chosen;
-        const fallback = codingModels.find((model) => model.id === SMART_ADAPTIVE_MODEL_ID) ?? codingModels[0];
-        return fallback ? [fallback] : [];
-    })();
-    const togglePicked = (id: string) => {
-        if (!pickedIds.includes(id)) setPicked([...pickedIds, id]);
+    const [braveId, setBraveId] = useState<string | undefined>();
+    const [browserOsId, setBrowserOsId] = useState<string | undefined>();
+    // Aside and Raycast (general API) and VS Code (coding API) take a model
+    // list. Each API keeps its own selection over its own models; Smart
+    // Adaptive alone until the person ticks more, because its id survives
+    // catalogue changes. The ticked boxes and the copied text read the same
+    // effective list (effectiveModelPick).
+    const [pickedGeneral, setPickedGeneral] = useState<string[] | null>(null);
+    const [pickedCoding, setPickedCoding] = useState<string[] | null>(null);
+    const pickedGeneralIds = effectiveModelPick(models, pickedGeneral);
+    const pickedCodingIds = effectiveModelPick(codingModels, pickedCoding);
+    const pickedModels = models.filter((model) => pickedGeneralIds.includes(model.id));
+    const pickedCodingModels = codingModels.filter((model) => pickedCodingIds.includes(model.id));
+    const toggleIn = (current: string[], set: (next: string[]) => void) => (id: string) => {
+        if (!current.includes(id)) set([...current, id]);
         // Keep at least one model, so a copied configuration is never empty.
-        else if (pickedIds.length > 1) setPicked(pickedIds.filter((value) => value !== id));
+        else if (current.length > 1) set(current.filter((value) => value !== id));
     };
+    const togglePickedGeneral = toggleIn(pickedGeneralIds, setPickedGeneral);
+    const togglePickedCoding = toggleIn(pickedCodingIds, setPickedCoding);
+
+    // Opened from the Developer tab's links: bring the section into view once
+    // it exists (the page loads its data first, so the browser's own anchor
+    // scroll has nothing to land on).
+    useEffect(() => {
+        if (startTool || window.location.hash === "#connect") {
+            document.getElementById("connect")?.scrollIntoView({ block: "start" });
+        }
+    }, [startTool]);
 
     const surfaces: [Surface, string][] = [
         ["terminal", t("externalApi.terminal")],
         ["extension", t("externalApi.vscodeExtension")],
     ];
-    const platformName = (id: Platform) =>
-        ({ "tomverse-cli": "Tomverse CLI", "claude-code": "Claude Code", codex: "Codex", cursor: "Cursor", aside: "Aside", vscode: "VS Code", other: t("externalApi.platformOther") })[id];
-    const platformHint = (id: Platform) =>
+    const platformName = (id: ExternalApiPlatform) => (id === "other" ? t("externalApi.platformOther") : EXTERNAL_API_PLATFORM_NAMES[id]);
+    const platformHint = (id: ExternalApiPlatform) =>
         ({
             "tomverse-cli": t("externalApi.terminal"),
             "claude-code": `${t("externalApi.terminal")} · ${t("externalApi.vscodeExtension")}`,
             codex: `${t("externalApi.terminal")} · ${t("externalApi.vscodeExtension")}`,
             cursor: "Chat · Agent",
             aside: "Custom Provider",
+            "brave-leo": "Bring your own model",
+            raycast: "Custom Providers",
+            browseros: "OpenAI Compatible",
             vscode: t("externalApi.vscodeChip"),
+            jetbrains: "AI Assistant",
             other: t("externalApi.otherChip"),
         })[id];
     const noModels = <p className="mt-3 text-xs text-zinc-500">{t("externalApi.codingToolNoModels")}</p>;
@@ -787,26 +865,75 @@ function ConnectSection({
                 );
             }
             case "aside":
+            case "raycast":
             case "vscode":
                 return (
                     <div data-testid={`external-api-tool-${platform}`}>
-                        <p className="text-xs text-zinc-500">{platform === "aside" ? t("externalApi.asideHint") : t("externalApi.vscodeHint")}</p>
+                        <p className="text-xs text-zinc-500">
+                            {platform === "aside" ? t("externalApi.asideHint") : platform === "raycast" ? t("externalApi.raycastHint") : t("externalApi.vscodeHint")}
+                        </p>
                         <p className="mt-3 text-sm font-semibold">{t("externalApi.modelsPick")}</p>
-                        <ModelSearchList models={platform === "aside" ? models : codingModels} picked={pickedIds} onToggle={togglePicked} testId="external-api-pick-models" />
+                        <ModelSearchList
+                            models={platform === "vscode" ? codingModels : models}
+                            picked={platform === "vscode" ? pickedCodingIds : pickedGeneralIds}
+                            onToggle={platform === "vscode" ? togglePickedCoding : togglePickedGeneral}
+                            testId="external-api-pick-models"
+                        />
                         {platform === "aside" ? (
                             <CopyBlock label="Aside" value={JSON.stringify(asideProviderConfig(baseUrl, pickedModels, key), null, 2)} testId="external-api-aside-config" />
+                        ) : platform === "raycast" ? (
+                            <>
+                                <CopyBlock label="~/.config/raycast/ai/providers.yaml" value={raycastProvidersYaml(baseUrl, pickedModels, key)} testId="external-api-raycast-config" />
+                                <Notes>
+                                    <p>{t("externalApi.raycastNotes")}</p>
+                                </Notes>
+                            </>
                         ) : (
                             // VS Code asks for the key itself and stores it securely.
                             <CopyBlock label="VS Code" value={JSON.stringify(vscodeCustomEndpointConfig(codingBaseUrl, pickedCodingModels), null, 2)} testId="external-api-vscode-config" />
                         )}
                     </div>
                 );
+            case "brave-leo":
+            case "browseros": {
+                const options = chatModels(models);
+                const chosenId = platform === "brave-leo" ? braveId : browserOsId;
+                const chosen = options.find((model) => model.id === chosenId)?.id ?? defaultModelId(options) ?? SMART_ADAPTIVE_MODEL_ID;
+                const setChosen = platform === "brave-leo" ? setBraveId : setBrowserOsId;
+                return (
+                    <div data-testid={`external-api-tool-${platform}`}>
+                        <p className="text-xs text-zinc-500">{platform === "brave-leo" ? t("externalApi.braveLeoHint") : t("externalApi.browserOsHint")}</p>
+                        {options.length ? <ToolModelSelect models={options} value={chosen} onChange={setChosen} testId={`external-api-${platform}-model`} /> : null}
+                        <CopyBlock
+                            label={platform === "brave-leo" ? "Brave Leo" : "BrowserOS"}
+                            value={platform === "brave-leo" ? braveLeoConfig(baseUrl, chosen, key) : browserOsConfig(baseUrl, chosen, key)}
+                            testId={`external-api-${platform}-config`}
+                        />
+                        {platform === "brave-leo" ? (
+                            <Notes>
+                                <p>{t("externalApi.braveLeoNotes")}</p>
+                            </Notes>
+                        ) : null}
+                    </div>
+                );
+            }
+            case "jetbrains":
+                return (
+                    <div data-testid="external-api-tool-jetbrains">
+                        <p className="text-xs text-zinc-500">{t("externalApi.jetbrainsHint")}</p>
+                        <CopyBlock label="JetBrains AI Assistant" value={jetBrainsConfig(codingBaseUrl, key)} testId="external-api-jetbrains-config" />
+                        <Notes>
+                            <p>{t("externalApi.jetbrainsNotes")}</p>
+                        </Notes>
+                    </div>
+                );
             case "other": {
-                const other = models.find((model) => model.id === otherId) ?? models.find((model) => model.id === SMART_ADAPTIVE_MODEL_ID) ?? models[0];
+                const options = chatModels(models);
+                const other = options.find((model) => model.id === otherId) ?? options.find((model) => model.id === SMART_ADAPTIVE_MODEL_ID) ?? options[0];
                 return (
                     <div data-testid="external-api-tool-other">
                         <p className="text-xs text-zinc-500">{t("externalApi.genericHint")}</p>
-                        {other ? <ToolModelSelect models={models} value={other.id} onChange={setOtherId} testId="external-api-other-model" /> : null}
+                        {other ? <ToolModelSelect models={options} value={other.id} onChange={setOtherId} testId="external-api-other-model" /> : null}
                         <CopyBlock label={t("externalApi.genericTitle")} value={genericConfig(baseUrl, other?.id ?? SMART_ADAPTIVE_MODEL_ID, key)} testId="external-api-generic-config" />
                     </div>
                 );
@@ -815,6 +942,11 @@ function ConnectSection({
                 return null;
         }
     })();
+
+    const apiOptions: [ExternalApiGuideSurface, string][] = [
+        ["general", t("externalApi.apiGeneral")],
+        ["coding", t("externalApi.apiCoding")],
+    ];
 
     return (
         <section id="connect" className="mt-6 scroll-mt-6 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60" data-testid="external-api-connect">
@@ -825,24 +957,42 @@ function ConnectSection({
                     ✓ {t("externalApi.keyFilledIn")}
                 </p>
             ) : null}
+            <div className="mt-3">
+                <Segmented
+                    options={apiOptions}
+                    value={api}
+                    onChange={(next) => {
+                        setApi(next);
+                        // A tool belongs to one API: leaving it clears the setup.
+                        setPlatform(null);
+                    }}
+                    testId="external-api-connect-api"
+                />
+            </div>
+            <p className="mt-2 text-xs leading-5 text-zinc-500" data-testid={`external-api-connect-hint-${api}`}>
+                {api === "general" ? t("externalApi.connectGeneralHint") : t("externalApi.connectCodingHint")}
+            </p>
+            <ApiAddresses api={api} openAiBaseUrl={api === "general" ? baseUrl : codingBaseUrl} />
             <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3" role="group" aria-label={t("externalApi.connectTitle")}>
-                {PLATFORMS.filter((id) => id !== "tomverse-cli" || tomverseCli).map((id) => (
-                    <button
-                        key={id}
-                        type="button"
-                        aria-pressed={platform === id}
-                        data-testid={`external-api-platform-${id}`}
-                        onClick={() => setPlatform(id)}
-                        className={`rounded-xl border p-3 text-left ${
-                            platform === id
-                                ? "border-zinc-900 bg-zinc-50 ring-1 ring-zinc-900 dark:border-zinc-100 dark:bg-zinc-900 dark:ring-zinc-100"
-                                : "border-zinc-300 hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-900"
-                        }`}
-                    >
-                        <span className="block text-sm font-bold">{platformName(id)}</span>
-                        <span className="mt-0.5 hidden text-xs text-zinc-500 sm:block">{platformHint(id)}</span>
-                    </button>
-                ))}
+                {EXTERNAL_API_PLATFORMS[api]
+                    .filter((id) => id !== "tomverse-cli" || tomverseCli)
+                    .map((id) => (
+                        <button
+                            key={id}
+                            type="button"
+                            aria-pressed={platform === id}
+                            data-testid={`external-api-platform-${id}`}
+                            onClick={() => setPlatform(id)}
+                            className={`rounded-xl border p-3 text-left ${
+                                platform === id
+                                    ? "border-zinc-900 bg-zinc-50 ring-1 ring-zinc-900 dark:border-zinc-100 dark:bg-zinc-900 dark:ring-zinc-100"
+                                    : "border-zinc-300 hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-900"
+                            }`}
+                        >
+                            <span className="block text-sm font-bold">{platformName(id)}</span>
+                            <span className="mt-0.5 hidden text-xs text-zinc-500 sm:block">{platformHint(id)}</span>
+                        </button>
+                    ))}
             </div>
             {platform ? (
                 <div className="mt-4 border-t border-zinc-200 pt-4 dark:border-zinc-800">
@@ -855,29 +1005,73 @@ function ConnectSection({
 }
 
 /**
- * Which tools can use a model, from the protocols it carries and the API that
- * offers it: the coding tools (VS Code among them) through the coding API,
- * Aside and other apps through the general one.
+ * Which tools can use a model on one API, from the protocols it carries: the
+ * coding tools through the coding API, apps and AI browsers through the
+ * general one.
  */
-const toolsForModel = (model: ModelSummary, otherLabel: string, offeredOn: { general: boolean; coding: boolean }) => {
-    const lists = offeredOn.coding ? codingToolModels([model]) : { claudeCode: [], codex: [], cursor: [] };
+export const toolsForModel = (model: ModelSummary, otherLabel: string, api: ExternalApiGuideSurface) => {
     const chatCompletions = model.protocols?.includes("chat_completions") ?? true;
+    if (api === "general") {
+        return chatCompletions
+            ? [...EXTERNAL_API_PLATFORMS.general.filter((id) => id !== "other").map((id) => EXTERNAL_API_PLATFORM_NAMES[id as Exclude<ExternalApiPlatform, "other">]), otherLabel].join(" · ")
+            : "";
+    }
+    const lists = codingToolModels([model]);
     return [
         lists.claudeCode.length ? "Claude Code" : null,
         lists.codex.length ? "Codex" : null,
         lists.cursor.length ? "Cursor" : null,
-        offeredOn.coding && chatCompletions ? "VS Code" : null,
-        ...(offeredOn.general && chatCompletions ? ["Aside", otherLabel] : []),
+        chatCompletions ? "VS Code" : null,
+        chatCompletions ? "JetBrains" : null,
     ]
         .filter(Boolean)
         .join(" · ");
 };
 
-/** Every model either API offers, the general API's first. */
-const listedModels = (overview: Extract<Overview, { enabled: true }>) => {
-    const general = new Set(overview.models.map((model) => model.id));
-    return [...overview.models, ...(overview.codingModels ?? []).filter((model) => !general.has(model.id))];
-};
+/** The models allowed through one API: chat models on the general API, the coding API's own list on the other. */
+export function AllowedModels({
+    overview,
+    initialApi = "general",
+}: {
+    overview: Extract<Overview, { enabled: true }>;
+    initialApi?: ExternalApiGuideSurface;
+}) {
+    const { t } = useLanguage();
+    const [api, setApi] = useState<ExternalApiGuideSurface>(initialApi);
+    const general = overview.models;
+    const coding = overview.codingModels ?? overview.models;
+    const list = api === "general" ? general : coding;
+    // A model only the coding API offers (a dedicated coding row) is marked.
+    const generalIds = new Set(general.map((model) => model.id));
+    const codingOnly = (model: ModelSummary) => api === "coding" && overview.codingModels !== undefined && !generalIds.has(model.id);
+    const apiOptions: [ExternalApiGuideSurface, string][] = [
+        ["general", t("externalApi.apiGeneral")],
+        ["coding", t("externalApi.apiCoding")],
+    ];
+    return (
+        <section className="mt-6 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60" data-testid="external-api-allowed-models">
+            <div className="flex items-center justify-between gap-3">
+                <h2 className="text-base font-bold">{t("externalApi.modelsTitle")}</h2>
+                <span className="text-xs text-zinc-500">{fill(t("externalApi.modelsCount"), { count: list.length })}</span>
+            </div>
+            <p className="mt-1 text-sm text-zinc-500">{t("externalApi.modelsIntro")}</p>
+            <div className="mt-3">
+                <Segmented options={apiOptions} value={api} onChange={setApi} testId="external-api-models-api" />
+            </div>
+            {list.length === 0 ? (
+                <p className="mt-2 text-sm text-zinc-500">{t("externalApi.noModels")}</p>
+            ) : (
+                <ModelSearchList
+                    key={api}
+                    models={list}
+                    toolsFor={(model) => toolsForModel(model, t("externalApi.platformOther"), api)}
+                    badgeFor={(model) => (codingOnly(model) ? t("externalApi.codingOnly") : null)}
+                    testId="external-api-models"
+                />
+            )}
+        </section>
+    );
+}
 
 export function ExternalApiSettings() {
     const { t } = useLanguage();
@@ -895,6 +1089,8 @@ export function ExternalApiSettings() {
     // dialog, then filled into the tool setup until the person leaves the page.
     const [newKey, setNewKey] = useState<string | null>(null);
     const [keyDialogOpen, setKeyDialogOpen] = useState(false);
+    // `?tool=` from the Developer tab's install link: which tool's setup opens.
+    const [focusTool, setFocusTool] = useState<ExternalApiPlatform | null>(null);
 
     const [version, setVersion] = useState(0);
     const load = useCallback(() => setVersion((value) => value + 1), []);
@@ -912,6 +1108,9 @@ export function ExternalApiSettings() {
                     return;
                 }
                 setFailed(false);
+                // Read with the data, so the setup opens once the section exists.
+                const tool = new URLSearchParams(window.location.search).get("tool");
+                setFocusTool(isExternalApiPlatform(tool) ? tool : null);
                 setOverview(body as Overview);
             })
             .catch(() => {
@@ -978,6 +1177,12 @@ export function ExternalApiSettings() {
                 {t("externalApi.pageTitle")}
             </h1>
             <p className="mt-2 text-sm leading-6 text-zinc-500 dark:text-zinc-400">{t("externalApi.introShort")}</p>
+            <p
+                className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-200"
+                data-testid="external-api-share-warning"
+            >
+                {t("externalApi.shareWarning")}
+            </p>
 
             {signedOut ? (
                 <section className={card} data-testid="external-api-signin">
@@ -1033,35 +1238,17 @@ export function ExternalApiSettings() {
                     </section>
 
                     <ConnectSection
+                        key={focusTool ?? "none"}
                         baseUrl={overview.baseUrl}
                         models={overview.models}
                         codingBaseUrl={overview.codingBaseUrl ?? overview.baseUrl}
                         codingModels={overview.codingModels ?? overview.models}
                         apiKey={newKey}
                         tomverseCli={overview.tomverseCli}
+                        focusTool={focusTool}
                     />
 
-                    <section className={card} data-testid="external-api-allowed-models">
-                        <div className="flex items-center justify-between gap-3">
-                            <h2 className="text-base font-bold">{t("externalApi.modelsTitle")}</h2>
-                            <span className="text-xs text-zinc-500">{fill(t("externalApi.modelsCount"), { count: listedModels(overview).length })}</span>
-                        </div>
-                        <p className="mt-1 text-sm text-zinc-500">{t("externalApi.modelsIntro")}</p>
-                        {listedModels(overview).length === 0 ? (
-                            <p className="mt-2 text-sm text-zinc-500">{t("externalApi.noModels")}</p>
-                        ) : (
-                            <ModelSearchList
-                                models={listedModels(overview)}
-                                toolsFor={(model) =>
-                                    toolsForModel(model, t("externalApi.platformOther"), {
-                                        general: overview.models.some((entry) => entry.id === model.id),
-                                        coding: (overview.codingModels ?? overview.models).some((entry) => entry.id === model.id),
-                                    })
-                                }
-                                testId="external-api-models"
-                            />
-                        )}
-                    </section>
+                    <AllowedModels overview={overview} />
 
                     <details className="mt-6 rounded-2xl border border-zinc-200 px-4 py-3 text-sm text-zinc-500 dark:border-zinc-800">
                         <summary className="cursor-pointer font-semibold">{t("externalApi.toolErrorsTitle")}</summary>
@@ -1071,6 +1258,9 @@ export function ExternalApiSettings() {
                     {createOpen ? (
                         <Modal title={t("externalApi.createTitle")} onClose={closeCreate} testId="external-api-create-dialog">
                             <p className="mt-1 text-sm text-zinc-500">{t("externalApi.createIntro")}</p>
+                            <p className="mt-2 text-sm text-zinc-500" data-testid="external-api-create-surfaces">
+                                {t("externalApi.createSurfaces")}
+                            </p>
                             <form
                                 className="mt-4 grid gap-3"
                                 onSubmit={(event) => {

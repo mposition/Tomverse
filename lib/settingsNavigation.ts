@@ -115,9 +115,11 @@ export const SETTINGS_SECTION_TAB: Record<SettingsSectionId, AccountSettingsTab>
         // marketing choice discoverable without recasting email as stored
         // account data.
         "email-notifications": "account",
-        // Keys are an account credential, next to sign-in and email rather
-        // than among the data operations.
-        "api-keys": "account",
+        // Keys are what the Developer tab is about: the same tab holds the
+        // addresses and the CLI they are used with. The row left the account
+        // tab on 2026-11-21, so an older deep link still opens the tab the
+        // section is in today (the section decides the tab).
+        "api-keys": "developer",
     };
 
 /**
@@ -138,6 +140,7 @@ export const SETTINGS_TAB_LABEL_KEY: Record<AccountSettingsTab, string> = {
     assistants: "settingsNav.assistantsTab",
     ai: "settingsNav.aiPersonalization",
     data: "auth.dataTab",
+    developer: "externalApi.developerTab",
     plan: "auth.planTab",
 };
 

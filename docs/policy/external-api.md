@@ -8,13 +8,14 @@ other apps and coding tools. Two APIs (owner decision 2026-11-21), decided by
 the address alone, on one key, one plan check (Pro or Max) and one ledger:
 
 - **The general API** -- `/api/v1/*` and `/api/anthropic/v1/*` -- for AI
-  browsers such as Aside and other OpenAI-compatible apps. It always offers
-  the chat registry's models.
+  browsers and apps: Aside, Brave Leo, Raycast, BrowserOS and other
+  OpenAI-compatible apps. It always offers the chat registry's models.
 - **The coding API** -- `/api/code/v1/*` (`chat/completions`, `responses`,
   `models`, `usage`, `requests/status`) and `/api/code/anthropic/v1/*`
   (`messages`, `messages/count_tokens`, `models`) -- for Claude Code, Codex,
-  Cursor, the tomverse CLI and VS Code (GitHub Copilot Chat's custom endpoint,
-  a coding assistant; owner decision 2026-11-21). While `CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED`
+  Cursor, the tomverse CLI, VS Code (GitHub Copilot Chat's custom endpoint,
+  a coding assistant) and JetBrains AI Assistant (OpenAI-compatible provider,
+  no Anthropic format; owner decision 2026-11-21). While `CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED`
   is off (the default) it offers and runs exactly what the general API does;
   on, it offers the coding catalogue's models (section 5, "Which models").
   The same handlers serve both, told which API the route is
@@ -24,9 +25,10 @@ the address alone, on one key, one plan check (Pro or Max) and one ledger:
 Three wire protocols, on both APIs:
 
 - **OpenAI Chat Completions** (`.../v1/chat/completions`): Aside (Custom
-  Provider, Pi `openai-completions`) and other apps on the general API;
-  Cursor (OpenAI base-URL override), VS Code (Custom Endpoint,
-  `chat-completions`) and the tomverse CLI on the coding API.
+  Provider, Pi `openai-completions`), Brave Leo, Raycast, BrowserOS and other
+  apps on the general API; Cursor (OpenAI base-URL override), VS Code (Custom
+  Endpoint, `chat-completions`), JetBrains AI Assistant and the tomverse CLI on
+  the coding API.
 - **Anthropic Messages** (`.../anthropic/v1/messages`): Claude Code, CLI and
   the official VS Code extension, on the coding API (section 10).
 - **OpenAI Responses** (`.../v1/responses`): Codex, CLI and the official VS
@@ -68,7 +70,7 @@ All default off. Server-side; hiding UI is never the gate.
 | `EXTERNAL_API_TIMEOUT_MS` | Server timeout for one generation, default 600 000. |
 | `EXTERNAL_API_ANTHROPIC_ENABLED` | Exactly `true` (and `EXTERNAL_API_ENABLED`) turns on the Anthropic Messages routes for Claude Code: `POST /api/anthropic/v1/messages`, its `count_tokens` and `GET /api/anthropic/v1/models`. Off: 503 `feature_unavailable`, nothing dispatched. |
 | `EXTERNAL_API_RESPONSES_ENABLED` | Exactly `true` (and `EXTERNAL_API_ENABLED`) turns on `POST /api/v1/responses` for Codex. Off: 503, nothing dispatched. |
-| `TOMVERSE_CLI_GUIDE_ENABLED` | Exactly `true` shows the Tomverse CLI install and connect card in Settings > API keys (section 11). Off until the package is published, so the page never points at a package that is not on the registry. It turns nothing on in the API. |
+| `TOMVERSE_CLI_GUIDE_ENABLED` | Exactly `true` shows the Tomverse CLI install and connect card in Settings > Developer and Settings > API keys (section 11). Off until the package is published, so the page never points at a package that is not on the registry. It turns nothing on in the API. |
 | `EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED` | Exactly `true` lets Smart Adaptive (section 5.1) ask Chat's router model which candidate answers. Off by default, because each routed request adds one router call, held against the provider operational budget rather than the user's credits. Off, `smart-adaptive` still works and every request goes to the default model (on a native protocol, that provider's default, section 10.6). |
 
 **Kill switch.** The Admin operational pause for AI chat
@@ -471,23 +473,54 @@ every Chat reservation does.
 
 ## 7. Client setup
 
-`/settings/api` lists the keys, makes a key in a dialog and shows its secret once
-in a second dialog. Under "Connect a tool" the person picks one tool (Claude Code,
-Codex, Cursor, Aside, VS Code or another OpenAI-compatible app) and sees only that
-tool's setup, built from the offered models. Aside and VS Code take Smart Adaptive
-alone by default, plus any model the person ticks to pin it. The new key is filled
+Settings has a **Developer** tab (`docs/ui-contracts/settings-navigation.md` 2.3): the
+key summary, the four connection addresses (general `/api/v1` and `/api/anthropic`,
+coding `/api/code/v1` and `/api/code/anthropic`, each copyable) and the CLI install
+line, read from the same key list. One key serves both APIs; a request row records
+which one it came through (`surface`).
+
+`/settings/api` lists the keys, makes a key in a dialog (which says the key works on
+both APIs, and that one key per tool lets one tool be cut off) and shows its secret
+once in a second dialog. Under "Connect a tool" the person first picks the API --
+**General API** or **Coding API** -- which shows that API's two addresses, then one
+tool, and sees only that tool's setup, built from that API's offered models. The
+tools, by API (`lib/externalApiAppGuides.ts`): general -- Aside, Brave Leo, Raycast,
+BrowserOS and other OpenAI-compatible apps; coding -- Tomverse CLI, Claude Code,
+Codex, Cursor, VS Code and JetBrains. "Models allowed through the API" is split the
+same way, and a model only the coding API offers is marked "Coding only". Recent
+requests show an API column (coding, general, or a dash for a request recorded before
+the column). Aside, Raycast and VS Code take Smart Adaptive alone by default, plus any
+model the person ticks to pin it. The new key is filled
 into the setup until the person leaves the page; it is held only in the page's
 memory, never stored. Any other app that takes a custom OpenAI Chat Completions
 endpoint needs only three values: base URL, key and model (`smart-adaptive`). The
 models allowed through the API are listed in a searchable section, each with
-the tools that can use it. Claude Code, Codex, Cursor, VS Code and the
-tomverse CLI are configured with the coding API's base URL and its models;
-Aside and other apps with the general API's. Details are in section 10.4.
+the tools that can use it on that API. Claude Code, Codex, Cursor, VS Code, JetBrains
+and the tomverse CLI are configured with the coding API's base URL and its models;
+Aside, Brave Leo, Raycast, BrowserOS and other apps with the general API's. Details
+are in section 10.4.
 
 - **Aside:** add a Custom Provider and paste the JSON: provider `tomverse`,
   `api: "openai-completions"`, `baseUrl`, `apiKey`, `authHeader: true`, and per
   model `id`, `name`, `reasoning`, `input` (`text`, plus `image` where
   supported), `contextWindow`, `maxTokens`.
+- **Brave Leo** (general API; checked against Brave's documentation 2026-11-21):
+  Settings > Leo > Bring your own model > add a model. *Server endpoint* is the full
+  path `https://<host>/api/v1/chat/completions`; *Model request name* is the model
+  id (`smart-adaptive`); *API Key* is the key. Leo handles text in and out only.
+- **Raycast** (general API; checked against Raycast's manual 2026-11-21): Settings >
+  AI > Custom Providers, file `~/.config/raycast/ai/providers.yaml`. `base_url` is
+  `https://<host>/api/v1` without `/chat/completions`; `api_keys` maps an alias to
+  the key; `models` is required (`id`, `name`, `provider` alias, `context`,
+  `abilities`). Settings generates the file from the ticked models. Tools also need
+  a top-level `tools` block, which the person adds from Raycast's guide.
+- **BrowserOS** (general API): `chrome://browseros/settings`, the "OpenAI Compatible"
+  card: Base URL `https://<host>/api/v1`, model id, key.
+- **JetBrains AI Assistant** (coding API): Settings > Tools > AI Assistant >
+  Providers & API keys (Models & API keys in newer versions) > OpenAI-compatible:
+  URL `https://<host>/api/code/v1` and the key, then Test Connection. The Anthropic
+  format is not supported there. Menu names change between versions, so the guide
+  gives values only.
 - **VS Code** (a coding tool: the coding API's base URL and models): run
   *Chat: Manage Language Models* → *Add Models* → *Custom Endpoint* and use the
   generated entry as the `chatLanguageModels.json` provider: `vendor: "customendpoint"`, `apiType: "chat-completions"`,

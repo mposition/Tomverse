@@ -115,7 +115,7 @@ async function mockSettingsEntryApis(page: Page) {
 
 async function openSettingsTab(
   page: Page,
-  tab: "account" | "data" | "ai" | "assistants"
+  tab: "account" | "data" | "ai" | "assistants" | "developer"
 ) {
   // The panel lives in the sidebar, which on mobile is the drawer -- but only
   // when it is not already mounted. Reaching for the drawer button with the
@@ -136,6 +136,49 @@ async function openSettingsTab(
   await expect(settingsDialog(page)).toBeVisible();
 }
 
+// The Developer tab reads the key list the API page reads (docs/ui-contracts/
+// settings-navigation.md 2.3); a Free account is answered without addresses.
+async function mockApiKeys(page: Page, plan: "pro" | "free") {
+  await page.route(
+    (url) => url.pathname === "/api/user/api-keys",
+    (route) =>
+      route.fulfill(
+        json(
+          plan === "free"
+            ? { enabled: false, reason: "plan_not_eligible", keys: [] }
+            : {
+                enabled: true,
+                baseUrl: "https://tomverse.app/api/v1",
+                codingBaseUrl: "https://tomverse.app/api/code/v1",
+                limits: { maxKeys: 10, maxCreditCap: 1000000, expiryDays: [30] },
+                models: [],
+                keys: [
+                  {
+                    id: "key_1",
+                    name: "Work laptop",
+                    keyPrefix: ["tvk", "ab12cd34"].join("_"),
+                    creditCap: null,
+                    committedCredits: 0,
+                    heldCredits: 0,
+                    requestCount: 0,
+                    state: "active",
+                    expiresAt: null,
+                    revokedAt: null,
+                    lastUsedAt: "2026-11-20T01:00:00.000Z",
+                    createdAt: "2026-11-17T00:00:00.000Z",
+                  },
+                ],
+                tomverseCli: {
+                  install: "npm install -g @tomverse/cli",
+                  powershell: "tomverse doctor",
+                  posix: "tomverse doctor",
+                },
+              }
+        )
+      )
+  );
+}
+
 async function gotoReviewWithSettings(page: Page) {
   await prepareGuestPage(page, "ko");
   await mockAuthenticatedApi(page);
@@ -145,6 +188,67 @@ async function gotoReviewWithSettings(page: Page) {
 }
 
 test.describe("settings information architecture", () => {
+  test("the tab strip ends data, developer, plan, and the account tab has no API row @ui-risk", async ({
+    page,
+  }) => {
+    await mockApiKeys(page, "pro");
+    await gotoReviewWithSettings(page);
+    await openSettingsTab(page, "account");
+    const ids = await page
+      .locator("[data-testid^=settings-tab-]")
+      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-testid")));
+    expect(ids).toEqual([
+      "settings-tab-account",
+      "settings-tab-preferences",
+      "settings-tab-assistants",
+      "settings-tab-ai",
+      "settings-tab-data",
+      "settings-tab-developer",
+      "settings-tab-plan",
+    ]);
+    await expect(page.getByTestId("settings-tab-developer")).toHaveText("개발자");
+    // The row moved: it is not on the account tab any more.
+    await expect(page.getByTestId("api-keys-entry")).toHaveCount(0);
+    await expect(page.getByTestId("settings-account-api-keys")).toHaveCount(0);
+  });
+
+  test("the Developer tab shows the key summary, both APIs' addresses and the CLI @ui-risk", async ({
+    page,
+  }) => {
+    await mockApiKeys(page, "pro");
+    await gotoReviewWithSettings(page);
+    await openSettingsTab(page, "developer");
+    const tab = page.getByTestId("settings-developer-tab");
+    await expect(tab).toContainText("키 하나로 두 API를 모두 쓸 수 있습니다");
+    await expect(page.getByTestId("developer-keys-summary")).toContainText("사용 중인 키 1개");
+    await expect(page.getByTestId("developer-manage-keys")).toHaveAttribute("href", "/settings/api");
+    await expect(page.getByTestId("developer-endpoint-general-openai")).toHaveText("https://tomverse.app/api/v1");
+    await expect(page.getByTestId("developer-endpoint-general-anthropic")).toHaveText("https://tomverse.app/api/anthropic");
+    await expect(page.getByTestId("developer-endpoint-coding-openai")).toHaveText("https://tomverse.app/api/code/v1");
+    await expect(page.getByTestId("developer-endpoint-coding-anthropic")).toHaveText("https://tomverse.app/api/code/anthropic");
+    await expect(page.getByTestId("developer-endpoints-general")).toContainText("Brave Leo");
+    await expect(page.getByTestId("developer-endpoints-coding")).toContainText("JetBrains");
+    await expect(page.getByTestId("developer-tool-guide")).toHaveAttribute("href", "/settings/api#connect");
+    await expect(page.getByTestId("developer-cli-command")).toHaveText("npm install -g @tomverse/cli && tomverse doctor");
+    await expect(page.getByTestId("developer-cli-guide")).toHaveAttribute("href", "/settings/api?tool=tomverse-cli#connect");
+    await expect(page.getByTestId("developer-footnote")).toContainText("Pro 이상");
+    // Nothing runs off the side of a phone-width panel.
+    expect(await tab.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+  });
+
+  test("a Free account sees the Pro notice instead of the key summary @ui-risk", async ({
+    page,
+  }) => {
+    await mockApiKeys(page, "free");
+    await gotoReviewWithSettings(page);
+    await openSettingsTab(page, "developer");
+    await expect(page.getByTestId("developer-plan-required")).toContainText("Pro 이상");
+    await expect(page.getByTestId("developer-keys")).toHaveCount(0);
+    await expect(page.getByTestId("developer-endpoints")).toHaveCount(0);
+    await page.getByTestId("developer-upgrade").click();
+    await expect(page.getByTestId("settings-tab-plan")).toHaveAttribute("aria-pressed", "true");
+  });
+
   test("each feature sits in the group its tab owns, as a row @ui-risk", async ({
     page,
   }) => {
