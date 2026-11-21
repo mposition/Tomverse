@@ -11,6 +11,7 @@ import { adminModelCatalogMessages } from "@/lib/adminMessages/modelCatalog";
 import {
   type CodingProviderRow,
   codingCatalogItems,
+  codingDedicatedSettings,
   codingSettingsFrom,
   codingSettingsProblems,
   codingSettingsRequest,
@@ -207,6 +208,23 @@ test("a dedicated row on the coding API shows its two credits: Code's, and the c
     <CodingChannelsTile c={cEn} item={{ ...onApi, apiCredit: { ...onApi.apiCredit, floorCredits: null, credits: null, basis: null, refusal: "api_credit_floor_unbounded" } }} busy={false} onSave={noop} />
   );
   assert.match(unbounded, /the coding API does not offer it/);
+});
+
+test("a dedicated row's settings read the override only while the coding API is ticked", () => {
+  const base = { storedChannels: ["code", "api"], storedOverride: null };
+  // On the coding API: an invalid override holds the save back.
+  assert.equal(codingDedicatedSettings({ ...base, channels: ["code", "api"], override: "abc" }).canSave, false);
+  assert.deepEqual(codingDedicatedSettings({ ...base, channels: ["code", "api"], override: "12" }).request, { apiCreditWeight: 12 });
+  // The coding API unticked: the hidden field neither blocks nor is sent.
+  const off = codingDedicatedSettings({ ...base, channels: ["code"], override: "abc" });
+  assert.equal(off.overrideInvalid, false);
+  assert.equal(off.canSave, true);
+  assert.deepEqual(off.request, { channels: ["code"] });
+  // Nothing changed, or no channel left: nothing to save.
+  assert.equal(codingDedicatedSettings({ ...base, channels: ["code", "api"], override: "" }).canSave, false);
+  assert.equal(codingDedicatedSettings({ ...base, channels: [], override: "" }).canSave, false);
+  // Clearing a stored override sends null: back to the chat rule's minimum.
+  assert.deepEqual(codingDedicatedSettings({ ...base, storedOverride: 9, channels: ["code", "api"], override: "" }).request, { apiCreditWeight: null });
 });
 
 test("the list filters by source, provider, status and text", () => {

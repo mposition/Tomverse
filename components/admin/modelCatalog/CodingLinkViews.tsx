@@ -22,6 +22,7 @@ import {
   type CodingCatalogItem,
   type CodingProviderRow,
   type CodingSettingsValue,
+  codingDedicatedSettings,
   codingRefusals,
   codingServing,
   codingSettingsFrom,
@@ -642,16 +643,15 @@ export function CodingChannelsTile({
   const [channels, setChannels] = useState<string[]>(item.channels);
   const storedOverride = item.apiCredit?.override ?? null;
   const [override, setOverride] = useState<string>(storedOverride === null ? "" : String(storedOverride));
-  const ordered = CODING_CHANNEL_ORDER.filter((channel) => channels.includes(channel));
-  const channelsChanged = ordered.join(",") !== item.channels.join(",");
-  const typed = override.trim() === "" ? null : Number(override.trim());
-  const overrideInvalid = typed !== null && (!Number.isInteger(typed) || typed <= 0 || typed > 1_000);
-  const overrideChanged = !overrideInvalid && typed !== storedOverride;
+  const { onApi, typed, overrideInvalid, canSave, request } = codingDedicatedSettings({
+    channels,
+    storedChannels: item.channels,
+    override,
+    storedOverride,
+  });
   const credit = item.apiCredit;
   const floor = credit?.floorCredits ?? null;
-  const onApi = channels.includes("api");
-  const save = () =>
-    onSave({ ...(channelsChanged ? { channels: ordered } : {}), ...(overrideChanged ? { apiCreditWeight: typed } : {}) });
+  const save = () => onSave(request);
   return (
     <AdminTile title={c.detail.channelsTitle}>
       <div className="flex flex-wrap gap-3">
@@ -708,7 +708,7 @@ export function CodingChannelsTile({
         </div>
       ) : null}
       <AdminWriteButton
-        disabled={busy || (!channelsChanged && !overrideChanged) || channels.length === 0 || overrideInvalid}
+        disabled={busy || !canSave}
         onClick={save}
         data-testid="coding-dedicated-channels-save"
       >

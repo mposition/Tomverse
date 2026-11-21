@@ -180,11 +180,16 @@ the chat rule (owner decision 2026-11-21): this API takes at most the chat
 input limit (`CHAT_USER_MAX_INPUT_TOKENS`) and settles with the chat input
 multiplier, so a request is charged the row's `apiCreditWeight` when the
 operator set one, otherwise the chat catalogue's own floor
-(`suggestCreditFloor` at the row's output ceiling and, for Anthropic, 1.25x
-input, taken at every input-multiplier band's largest input up to that limit,
-the largest of them, so a short prompt with a full answer at x1 is covered
-too; above 1,000 credits it counts as unworkable), worked out when the request
-is priced and never stored. An override below that floor, or a floor that cannot be worked out,
+(the arithmetic `suggestCreditFloor` and the chat guardrails use -- credits x
+input multiplier x `COST_PER_CREDIT_CEILING_MICRO_USD` covering the worst turn
+-- worked out directly, not rounded up to a chat class: at every
+input-multiplier band's largest input up to that limit, the row's output
+ceiling and, for Anthropic, 1.25x input, the largest of them, so a short prompt
+with a full answer at x1 is covered too; above 1,000 credits it counts as
+unworkable), worked out when the request is priced and never stored. Such a
+row takes no more input than that limit even where Chat's long context is on:
+a longer request is refused with `CHAT_INPUT_TOKEN_LIMIT` before anything is
+held or sent. An override below that floor, or a floor that cannot be worked out,
 keeps the row off this API. Code's managed path keeps the row's
 `pricing.creditWeight`. The reservation and the settlement record
 `creditBasis` (`chat_rule_floor` or `api_override`, the credits and the

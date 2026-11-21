@@ -203,7 +203,7 @@ export const adminCodingCatalogMessages = defineAdminMessages({
       apiCreditsDefault: (n: number) => `Default: the chat rule's minimum, ×${n}`,
       apiCreditsBelow: (n: number) => `Below the chat rule's minimum ×${n}: the coding API does not offer this model`,
       apiCreditsUnbounded:
-        "The chat rule cannot price this model (no price or output cap, or a minimum above every class or above 1,000 credits), so the coding API does not offer it",
+        "The chat rule cannot price this model (no price or output cap, or a minimum above 1,000 credits), so the coding API does not offer it",
       apiCreditsHelp:
         "The coding API takes up to the chat input limit and charges by the chat rule. Leave blank to charge its minimum; enter a higher number to charge more. Applies after the next publish.",
       save: "Save settings",
@@ -521,7 +521,7 @@ export const adminCodingCatalogMessages = defineAdminMessages({
       apiCreditsDefault: (n: number) => `기본값: 채팅 기준 최소값 ×${n}`,
       apiCreditsBelow: (n: number) => `채팅 기준 최소값 ×${n}보다 낮아 코딩 API에 노출하지 않습니다`,
       apiCreditsUnbounded:
-        "채팅 기준 하한을 계산할 수 없어(가격이나 출력 상한을 모르거나, 하한이 모든 등급 또는 1,000 크레딧을 넘음) 코딩 API에 노출하지 않습니다",
+        "채팅 기준 하한을 계산할 수 없어(가격이나 출력 상한을 모르거나, 하한이 1,000 크레딧을 넘음) 코딩 API에 노출하지 않습니다",
       apiCreditsHelp:
         "코딩 API는 채팅 입력 한도까지만 받고 채팅 규칙으로 과금합니다. 비워 두면 그 최소값을, 더 높은 수를 넣으면 그 값을 받습니다. 다음 발행 뒤 적용됩니다.",
       save: "설정 저장",
