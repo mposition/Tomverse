@@ -520,7 +520,7 @@ export const newProviderResearchAnalysis = (evidence: unknown): NewProviderResea
   const connected = value.scope === CONNECTED_IMAGE_RESEARCH_SCOPE;
   const verdictKo = connected
     ? `연결된 공급자 ${read("providerName")}의 이미지 모델 ${read("modelName")}: 모델 목록 API에는 나오지 않아 공식 문서 리서치로 찾은 후보입니다(${read("comparableTo") || "현재 이미지 모델"}과 비교).`
-    : `미연결 공급자 ${read("providerName")}의 ${read("modelName")}: Tomverse ${PRODUCT_LABEL_KO[product]}의 ${read("comparableTo") || "현재 모델"}에 견줄 만한 후보(웹 리서치 제안).`;
+    : `미연결 공급자 ${read("providerName")}의 ${read("modelName")}: Tomverse ${PRODUCT_LABEL_KO[product]}의 ${read("comparableTo") || "현재 모델"}에 견줄 만한 ${product === "code" ? "코딩 카탈로그 초안 후보" : "후보"}(웹 리서치 제안).`;
   const pointsKo = [
     `비교 기준: ${read("benchmarkBasisKo")}`,
     `가용 API: ${read("apiAvailabilityKo")}`,
@@ -529,7 +529,9 @@ export const newProviderResearchAnalysis = (evidence: unknown): NewProviderResea
   ];
   const nextStepKo = connected
     ? "이미지 카탈로그로 들이려면 이 공급자의 이미지 어댑터가 있어야 합니다. 있으면 이미지·코딩 카탈로그에서 초안을 만들고, 없으면 어댑터 작업을 따로 정하거나 제외합니다."
-    : "공급자 연결(API 키·어댑터·약관·가격 검증)이 먼저 필요해 여기서 바로 채택할 수 없습니다. 연결할 가치가 있으면 연결 작업을 따로 정하고, 아니면 제외합니다.";
+    : product === "code"
+      ? "'코딩 초안'으로 코딩 카탈로그 양식을 열어 공식 가격·약관·보존 문서를 확인합니다. 활성화 전에 공급자 연결(API 키·호출 경로)이 따로 필요하고, Chat에는 편입하지 않습니다. 필요 없으면 제외합니다."
+      : "공급자 연결(API 키·어댑터·약관·가격 검증)이 먼저 필요해 여기서 바로 채택할 수 없습니다. 연결할 가치가 있으면 연결 작업을 따로 정하고, 아니면 제외합니다.";
   return {
     product,
     connected,

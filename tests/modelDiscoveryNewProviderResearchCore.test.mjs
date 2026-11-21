@@ -330,3 +330,18 @@ test("the last research run is stored bounded and read back, and a bad row reads
   assert.equal(parseNewProviderResearchRunRecord("not json"), null);
   assert.equal(parseNewProviderResearchRunRecord(JSON.stringify({ week: "2026-W47" })), null);
 });
+
+test("a code proposal reads as a coding-catalogue draft candidate, not a chat adoption", () => {
+  const { accepted } = acceptNewProviderCandidates({
+    product: "code",
+    answer: { candidates: [candidate({ providerName: "Cursor Labs", modelName: "Composer 2", apiModelId: "composer-2", comparableTo: "GPT 6 Codex" })] },
+    connectedProviders: CONNECTED,
+    knownApiModels: [],
+  });
+  assert.equal(accepted.length, 1);
+  const analysis = newProviderResearchAnalysis(JSON.parse(JSON.stringify(newProviderResearchEvidence(accepted[0], "sonar-pro"))));
+  assert.equal(analysis.product, "code");
+  assert.match(analysis.verdictKo, /코딩 카탈로그 초안 후보/);
+  assert.match(analysis.nextStepKo, /코딩 초안/);
+  assert.doesNotMatch(analysis.nextStepKo, /여기서 바로 채택할 수 없습니다/);
+});

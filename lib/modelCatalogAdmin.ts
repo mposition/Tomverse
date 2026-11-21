@@ -8,6 +8,7 @@ import type { Session } from "next-auth";
 import { z } from "zod";
 
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
+import { writeModelCatalogAutoDraftSystemAudit } from "@/lib/modelCatalogAutoDraftSystemAudit";
 import { IMAGE_MODEL_REGISTRY, type ImageModelProfile, minimumCreditsForImageOption } from "@/lib/imageModelRegistry";
 import {
   codingCreditFloor,
@@ -536,9 +537,12 @@ export const storeCatalogDraft = async (input: {
    * and a priced one refuses the draft.
    */
   imageProfile?: unknown;
-  session: Session;
-  request?: Request;
-}) =>
+} & (
+  | { session: Session; request?: Request; system?: never }
+  // The daily scan's own draft for a new coding model: audited as the system
+  // actor, never as an administrator, and never with a session to borrow.
+  | { system: true; session?: never; request?: never }
+)) =>
   prisma.$transaction(async (tx) => {
     await takeAuditChainLock(tx);
     // A chat link's profile is the chat registry's: a whole-profile draft for
@@ -588,6 +592,14 @@ export const storeCatalogDraft = async (input: {
       create: { category: input.category, modelId: input.modelId, ...data },
       update: data,
     });
+    if (input.system) {
+      await writeModelCatalogAutoDraftSystemAudit(tx, {
+        targetId: `${input.category}:${input.modelId}`,
+        summary: `Stored an automatic LLM draft for ${input.category} model ${input.modelId}.`,
+        metadata: { category: input.category, modelId: input.modelId, profileSaved: profile !== undefined },
+      });
+      return;
+    }
     await writeAdminAuditLog({
       session: input.session,
       request: input.request,
