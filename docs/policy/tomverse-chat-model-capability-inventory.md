@@ -36,6 +36,7 @@ gaps are scheduled rather than discovered during Router implementation.
 | Model lifecycle vs the provider's own catalogue | `ProviderModelCatalogEntry` | DB |
 | Unconnected providers worth considering (weekly LLM web research, off by default via `MODEL_DISCOVERY_RESEARCH_LLM_MODEL_ID`) | `ModelLifecycleWorkItem` with `evidence.discoveredBy = "new_provider_research"`, `lib/modelDiscoveryNewProviderResearch.ts` | DB, proposal only |
 | Image models of connected providers that no model-list API returns (same weekly run, one more call, off by default via `MODEL_DISCOVERY_CONNECTED_IMAGE_RESEARCH_ENABLED=true`; cited on the provider's official docs; never auto-excluded as vanished) | same, with `evidence.scope = "connected_image"` | DB, proposal only |
+| Coding catalogue drafts for newly found code-specialized models (daily scan, off by default via `MODEL_DISCOVERY_CODING_AUTO_DRAFT_ENABLED=true`; at most 5 calls a run; draft only, never enabled) | `ModelCatalogEntry` (category `coding`, `draft`), `lib/modelDiscoveryCodingAutoDraft.ts` | DB, proposal only |
 | Prompt token estimate | `lib/chatTokenEstimate.ts` | code, **model-agnostic** |
 
 Two of these are stronger than a greenfield Router would assume and should be
