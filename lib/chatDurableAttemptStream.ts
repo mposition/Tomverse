@@ -9,6 +9,16 @@ import { checkpointChatResponseAttempt } from "@/lib/chatResponseAttemptPersiste
 export const CHAT_DURABLE_PARTIAL_MAX_CHARACTERS = 100_000;
 export const CHAT_DURABLE_CHECKPOINT_CHARACTER_STEP = 2_048;
 export const CHAT_DURABLE_CHECKPOINT_INTERVAL_MS = 1_000;
+/**
+ * Renew the lease on its own when nothing has been written for this long.
+ *
+ * Checkpoints renew the lease, but they follow visible text. A model that
+ * reasons for minutes before its first token (Fable 5.2 on three PDFs, 290 to
+ * 516 s, 2026-11-21) outlived the claim's 4-minute lease, so the answer it
+ * then streamed was refused at the terminal CAS (CHAT_ATTEMPT_REVISION_CONFLICT)
+ * and the turn failed after the user had read it.
+ */
+export const CHAT_DURABLE_LEASE_RENEWAL_INTERVAL_MS = 60_000;
 const LEASE_RENEWAL_HEADROOM_MS = 15_000;
 
 const durablePrefix = (content: string) =>
@@ -68,6 +78,53 @@ export function createChatResponseAttemptCheckpointWriter(input: {
     })()
       .catch((error) => {
         failure = error;
+      })
+      .finally(() => {
+        running = null;
+        if (pendingContent !== null && !failure) pump();
+      });
+  };
+
+  /**
+   * Renews the lease with the content already persisted, while no text is
+   * arriving. Called from the first-token keepalive tick; a no-op until
+   * CHAT_DURABLE_LEASE_RENEWAL_INTERVAL_MS has passed since the last write,
+   * and whenever a checkpoint is queued or running (which renews it anyway).
+   *
+   * A failed renewal is logged and left for the next tick, never turned into
+   * the writer's failure: the terminal flush still performs the authoritative
+   * owner/revision/lease CAS, and a turn short enough to need no renewal must
+   * not fail on one.
+   */
+  const renewLease = () => {
+    if (failure || running || pendingContent !== null) return;
+    if (Date.now() - lastStartedAt < CHAT_DURABLE_LEASE_RENEWAL_INTERVAL_MS) return;
+    lastStartedAt = Date.now();
+    running = (async () => {
+      const updated = await persistCheckpoint({
+        userId: input.userId,
+        assistantMessageId: input.assistantMessageId,
+        ownerId: input.ownerId,
+        expectedRevision: revision,
+        partialContent: persistedContent,
+        actualModelId,
+        provider,
+        leaseExpiresAt: new Date(
+          Date.now() + CHAT_RESPONSE_ATTEMPT_MAX_LEASE_MS - LEASE_RENEWAL_HEADROOM_MS
+        ),
+      });
+      if (!updated) throw new Error("CHAT_ATTEMPT_CHECKPOINT_NOT_FOUND");
+      revision = updated.checkpointRevision;
+      persistedContent = updated.partialContent;
+    })()
+      .catch((error) => {
+        const named = error as { name?: unknown; code?: unknown } | null;
+        console.warn(JSON.stringify({
+          event: "chat_attempt_lease_renewal_failed",
+          assistantMessageId: input.assistantMessageId,
+          name: typeof named?.name === "string" ? named.name : "Error",
+          code: typeof named?.code === "string" ? named.code : null,
+        }));
       })
       .finally(() => {
         running = null;
@@ -139,7 +196,7 @@ export function createChatResponseAttemptCheckpointWriter(input: {
     return { revision, partialContent: persistedContent, actualModelId, provider };
   };
 
-  return { setAttribution, observe, flush };
+  return { setAttribution, observe, flush, renewLease };
 }
 
 export type ChatResponseAttemptCheckpointWriter = ReturnType<
