@@ -101,3 +101,31 @@ test("developer page stops every animation when motion is paused or reduced", ()
   assert.match(css, /\.tv-page\[data-motion="paused"\] \*/);
   assert.match(css, /\.tv-page\[data-motion="paused"\] \.hero-media video \{ display: none; \}/);
 });
+
+test("coding tool examples point at the coding API and other apps at the general API (docs/policy/external-api.md §1, §10.4)", async () => {
+  // The tool console is drawn on the homepage and the developer page from the same shape.
+  for (const file of ["components/marketing/v2/developers/DevelopersPage.tsx", "components/marketing/LaunchHomepage.tsx"]) {
+    const source = readFileSync(file, "utf8");
+    const block = (tool) => {
+      const start = source.indexOf(`\n  ${tool}: {`);
+      return start < 0 ? "" : source.slice(start, source.indexOf("] },", start));
+    };
+    assert.match(source, /const CODING_API_BASE = "https:\/\/tomverse\.app\/api\/code\/v1";/, file);
+    assert.match(source, /const CODING_ANTHROPIC_BASE = "https:\/\/tomverse\.app\/api\/code\/anthropic";/, file);
+    for (const tool of ["codex", "cursor"]) assert.match(block(tool), /CODING_API_BASE\b/, `${file}: ${tool}`);
+    assert.match(block("claude"), /ANTHROPIC_BASE_URL=", \["s", `"\$\{CODING_ANTHROPIC_BASE\}"`\]/, `${file}: claude`);
+    for (const tool of ["vscode", "aside", "other"]) {
+      assert.match(block(tool), /\bAPI_BASE\b/, `${file}: ${tool}`);
+      assert.doesNotMatch(block(tool), /CODING_/, `${file}: ${tool} stays on the general API`);
+    }
+  }
+  const developers = readFileSync("components/marketing/v2/developers/DevelopersPage.tsx", "utf8");
+  assert.match(developers, /"POST \/api\/code\/v1\/responses"/);
+  assert.match(developers, /"POST \/api\/code\/anthropic\/v1\/messages"/);
+  assert.match(readFileSync("components/marketing/v2/cli/CliPage.tsx", "utf8"), /\["endpoint", "https:\/\/tomverse\.app\/api\/code\/v1"\]/);
+  const { homeV2Content } = await import("../components/marketing/home/homeV2Content.ts");
+  for (const locale of SEO_LOCALES) {
+    const values = homeV2Content[locale].api.facts.map(([, value]) => value);
+    assert.deepEqual(values.slice(0, 2), ["https://tomverse.app/api/code/v1", "https://tomverse.app/api/v1"], locale);
+  }
+});

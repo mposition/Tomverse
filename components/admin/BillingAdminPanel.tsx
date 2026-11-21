@@ -166,8 +166,62 @@ const newPromotion = (): EditablePromotion => ({
   startsAt: null,
   endsAt: new Date(Date.now() + 30 * 86_400_000).toISOString(),
   allowAnnualStacking: false,
+  maxRedemptionsPerPaymentMethod: 3,
+  allowedCountries: [],
   isActive: true,
 });
+
+/**
+ * "nz, au" -> ["AU", "NZ"], sorted and de-duplicated the way the server stores
+ * them. Entries that are not two-letter codes are kept, upper-cased, rather
+ * than dropped: dropping a typo could leave an empty list, and an empty list
+ * opens the promotion to every country. Kept, they raise a warning here and the
+ * server refuses to save them.
+ */
+const parseCountryList = (value: string) =>
+  Array.from(
+    new Set(
+      value
+        .split(/[\s,]+/)
+        .map((item) => item.trim().toUpperCase())
+        .filter((item) => item.length > 0)
+    )
+  ).sort();
+
+const isCountryCode = (value: string) => /^[A-Z]{2}$/.test(value);
+
+/** Free text while typing; the parsed list goes to the draft on every change. */
+function CountryListInput({
+  value,
+  placeholder,
+  onChange,
+}: {
+  value: string[];
+  placeholder: string;
+  onChange: (next: string[]) => void;
+}) {
+  const [text, setText] = useState(value.join(", "));
+  const joined = value.join(",");
+  const [followed, setFollowed] = useState(joined);
+  // Follow the draft when it changes from outside (discard, reload), but not
+  // while the text already says the same thing -- that would fight the typing.
+  // Adjusted during render, the way React documents for state derived from a
+  // changed prop, rather than in an effect.
+  if (followed !== joined) {
+    setFollowed(joined);
+    if (parseCountryList(text).join(",") !== joined) setText(value.join(", "));
+  }
+  return (
+    <TextInput
+      value={text}
+      placeholder={placeholder}
+      onChange={(event) => {
+        setText(event.target.value);
+        onChange(parseCountryList(event.target.value));
+      }}
+    />
+  );
+}
 
 const PLAN_VALUE_FIELDS = [
   "monthlyPriceCents",
@@ -245,6 +299,14 @@ export function promotionChangeLines(
           : `US$ ${dollars(x.discountAmountCents)}`,
     },
     { label: p.maxRedemptions, read: (x) => x.maxRedemptions },
+    {
+      label: p.maxRedemptionsPerCard,
+      read: (x) => x.maxRedemptionsPerPaymentMethod,
+    },
+    {
+      label: p.allowedCountries,
+      read: (x) => x.allowedCountries.join(", ") || null,
+    },
     { label: p.durationMonths, read: (x) => x.durationMonths },
     { label: p.fulfillment, read: (x) => x.fulfillmentType },
     { label: p.passDurationDays, read: (x) => x.accessDurationDays },
@@ -721,6 +783,32 @@ function PromotionCard({
             }
           />
         </Field>
+        <Field label={m.maxRedemptionsPerCard}>
+          <TextInput
+            type="number"
+            min="1"
+            value={promotion.maxRedemptionsPerPaymentMethod ?? ""}
+            placeholder={m.noLimit}
+            onChange={(event) =>
+              onChange({
+                ...promotion,
+                maxRedemptionsPerPaymentMethod:
+                  event.target.value.trim().length > 0
+                    ? Math.max(1, Math.floor(Number(event.target.value)) || 1)
+                    : null,
+              })
+            }
+          />
+        </Field>
+        <Field label={m.allowedCountries}>
+          <CountryListInput
+            value={promotion.allowedCountries}
+            placeholder={m.allowedCountriesPlaceholder}
+            onChange={(allowedCountries) =>
+              onChange({ ...promotion, allowedCountries })
+            }
+          />
+        </Field>
         <Field label={m.starts}>
           <TextInput
             type="date"
@@ -1100,10 +1188,24 @@ export function BillingAdminPanel({
         existing: baseline ? policyInput(baseline) : null,
         next: policyInput(promotion),
       });
-      if (refusal) entries.set(promotion.id, refusal.message);
+      if (refusal) {
+        entries.set(promotion.id, refusal.message);
+        return;
+      }
+      // Refused here rather than warned about: the server refuses it, and an
+      // empty list after dropping a typo would open the code to every country.
+      const badCountries = promotion.allowedCountries.filter(
+        (code) => !isCountryCode(code)
+      );
+      if (badCountries.length > 0) {
+        entries.set(
+          promotion.id,
+          m.warnings.invalidCountries(promotion.code, badCountries.join(", "))
+        );
+      }
     });
     return entries;
-  }, [baselinePromotions, draftPromotions]);
+  }, [baselinePromotions, draftPromotions, m]);
 
   const stripeWarnings = useMemo(() => {
     const warnings: string[] = [];
@@ -1546,11 +1648,11 @@ export function BillingAdminPanel({
               {m.review.summary(dirtyPlanCount, dirtyPriceCount, dirtyPromotionCount)}
             </p>
             <p className="text-xs text-zinc-400">{m.review.liveNote}</p>
-            {hasIssues ? (
+            {/* "You can still save" is true only of warnings; a refusal
+                blocks the save and is listed in the issues panel. */}
+            {promotionRefusals.size === 0 && stripeWarnings.length > 0 ? (
               <p className="text-xs text-amber-300">
-                {m.review.warningsNote(
-                  promotionRefusals.size + stripeWarnings.length
-                )}
+                {m.review.warningsNote(stripeWarnings.length)}
               </p>
             ) : null}
           </div>

@@ -1402,7 +1402,6 @@ export const ko = {
         dataRetentionTitle: "데이터 보관",
         dataRetentionDescription: "일반 대화는 사용자가 삭제할 때까지 보관됩니다. 로그인 상태에서 첨부한 파일은 대화와 함께 보관되며, 해당 대화나 계정을 삭제할 때 삭제됩니다. 로그인하지 않고 첨부한 파일은 임시 보관이며 자동으로 삭제됩니다.",
         attachmentRetentionNotice: "로그인 상태에서 첨부한 파일은 대화와 함께 저장되어 모델 전달과 문서 추출에 사용되며, 대화나 계정을 삭제할 때까지 보관됩니다. 로그인하지 않고 첨부한 파일은 임시 보관이며 자동으로 삭제됩니다.",
-        dangerZone: "위험 영역",
         dangerZoneDescription: "저장된 Tomverse 데이터에 영향을 주는 작업입니다. 중요한 내용은 삭제 전에 먼저 내보내 주세요.",
         deleteAllChats: "모든 대화 삭제",
         deleteAllChatsConfirm: "저장된 모든 대화를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.",

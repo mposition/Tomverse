@@ -330,3 +330,19 @@ test("the last research run is stored bounded and read back, and a bad row reads
   assert.equal(parseNewProviderResearchRunRecord("not json"), null);
   assert.equal(parseNewProviderResearchRunRecord(JSON.stringify({ week: "2026-W47" })), null);
 });
+
+test("a code proposal is a coding-catalogue candidate that needs the provider connected first, never a chat adoption", () => {
+  const { accepted } = acceptNewProviderCandidates({
+    product: "code",
+    answer: { candidates: [candidate({ providerName: "Cursor Labs", modelName: "Composer 2", apiModelId: "composer-2", comparableTo: "GPT 6 Codex" })] },
+    connectedProviders: CONNECTED,
+    knownApiModels: [],
+  });
+  assert.equal(accepted.length, 1);
+  const analysis = newProviderResearchAnalysis(JSON.parse(JSON.stringify(newProviderResearchEvidence(accepted[0], "sonar-pro"))));
+  assert.equal(analysis.product, "code");
+  assert.match(analysis.verdictKo, /코딩 카탈로그 후보/);
+  // An unconnected provider cannot be drafted yet: the text says so, then points at the coding catalogue.
+  assert.match(analysis.nextStepKo, /공급자 연결/);
+  assert.match(analysis.nextStepKo, /코딩 카탈로그에서 초안/);
+});

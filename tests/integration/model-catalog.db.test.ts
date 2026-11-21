@@ -360,6 +360,53 @@ test("a stored draft is audited, applied in one step, and cleared", async () => 
   );
 });
 
+test("an automatic draft is audited as the system actor, with no administrator on the entry", async () => {
+  const humanBefore = await auditCount("model_catalog.draft_stored");
+  const autoBefore = await auditCount("model_catalog.draft_auto_stored");
+  assert.equal(
+    await storeCatalogDraft({ category: "coding", modelId: "gpt-auto-draft-test", draft: codingProfile, system: true }),
+    "stored"
+  );
+  // The person's action is untouched; the system's own action is written once.
+  assert.equal(await auditCount("model_catalog.draft_stored"), humanBefore);
+  assert.equal(await auditCount("model_catalog.draft_auto_stored"), autoBefore + 1);
+  const entry = await prisma.adminAuditLog.findFirst({
+    where: { action: "model_catalog.draft_auto_stored", targetId: "coding:gpt-auto-draft-test" },
+    orderBy: { createdAt: "desc" },
+  });
+  assert.equal(entry?.actorUserId, null);
+  assert.equal(entry?.actorEmail, null);
+  assert.equal((entry?.metadata as { systemActor?: string } | null)?.systemActor, "model-catalog-auto-draft");
+  const row = await prisma.modelCatalogEntry.findUnique({
+    where: { category_modelId: { category: "coding", modelId: "gpt-auto-draft-test" } },
+  });
+  // A draft only: nothing is applied and nothing is enabled by it.
+  assert.equal(row?.draftSource, "llm");
+  assert.equal(row?.profile, null);
+  assert.notEqual(row?.enabled, true);
+});
+
+test("an automatic draft never overwrites a row an operator already holds", async () => {
+  const modelId = "gpt-auto-draft-held";
+  const operatorDraft = { ...codingProfile, name: "Operator draft" };
+  await storeCatalogDraft({ category: "coding", modelId, draft: operatorDraft, session });
+  const before = await prisma.modelCatalogEntry.findUnique({ where: { category_modelId: { category: "coding", modelId } } });
+  const autoBefore = await auditCount("model_catalog.draft_auto_stored");
+  const result = await storeCatalogDraft({
+    category: "coding",
+    modelId,
+    draft: { ...codingProfile, name: "Automatic draft" },
+    system: true,
+  });
+  assert.equal(result, "exists");
+  const after = await prisma.modelCatalogEntry.findUnique({ where: { category_modelId: { category: "coding", modelId } } });
+  assert.deepEqual(after?.draft, before?.draft);
+  assert.equal((after?.draft as { name?: string } | null)?.name, "Operator draft");
+  assert.equal(after?.draftCreatedAt?.getTime(), before?.draftCreatedAt?.getTime());
+  // Nothing was written, so nothing was audited.
+  assert.equal(await auditCount("model_catalog.draft_auto_stored"), autoBefore);
+});
+
 test("a dedicated row's channels are its one setting, and a new draft keeps them", async () => {
   const modelId = "gpt-draft-test";
   const key = { category_modelId: { category: "coding", modelId } };

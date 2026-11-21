@@ -1594,14 +1594,17 @@ export function AuthButton({
                                                 })}
                                             </div>
                                         </section>
-                                        <section className="rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-950/70 dark:bg-red-950/20">
-                                            <h3 className="text-sm font-bold text-red-700 dark:text-red-300">{t("auth.dangerZone")}</h3>
-                                            <p className="mt-1 text-sm leading-6 text-red-700/80 dark:text-red-200/80">{t("auth.accountDangerZoneDescription")}</p>
+                                        {/* Styled like every other section, with no "danger zone" heading:
+                                            users read the red card as a sign that something was wrong with
+                                            their account (owner feedback 2026-11-21). The confirmation
+                                            dialog still guards the deletion. */}
+                                        <section className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
+                                            <p className="text-sm leading-6 text-zinc-500">{t("auth.accountDangerZoneDescription")}</p>
                                             <button
                                                 ref={deleteAccountButtonRef}
                                                 type="button"
                                                 onClick={() => setIsDeleteAccountModalOpen(true)}
-                                                className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-red-300 bg-white px-3 py-3 text-sm font-semibold text-red-600 transition-colors hover:bg-red-50 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-950/70"
+                                                className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-3 text-sm font-semibold text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
                                             >
                                                 <Trash2 className="h-4 w-4" />
                                                 {t("auth.deleteAccount")}
@@ -2066,14 +2069,19 @@ export function AuthButton({
                                                 {t("auth.attachmentRetentionNotice")}
                                             </p>
                                         </section>
-                                        <section className="rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-950/70 dark:bg-red-950/20">
-                                            <h3 className="text-sm font-bold text-red-700 dark:text-red-300">{t("auth.dangerZone")}</h3>
-                                            <p className="mt-1 text-sm leading-6 text-red-700/80 dark:text-red-200/80">{t("auth.dangerZoneDescription")}</p>
+                                        {/* Same neutral section as the others (see the account tab). Only the
+                                            armed second click turns red, where the extra attention is due. */}
+                                        <section className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
+                                            <p className="text-sm leading-6 text-zinc-500">{t("auth.dangerZoneDescription")}</p>
                                             <button
                                                 type="button"
                                                 onClick={handleDeleteAllConversations}
                                                 disabled={isDeletingChats}
-                                                className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-red-200 bg-white px-3 py-3 text-sm font-semibold text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-950/70"
+                                                className={`mt-3 flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-3 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                                                    isDeleteAllArmed
+                                                        ? "border-red-300 bg-white text-red-600 hover:bg-red-50 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-950/70"
+                                                        : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                                                }`}
                                             >
                                                 <Trash2 className="h-4 w-4" />
                                                 {isDeletingChats
