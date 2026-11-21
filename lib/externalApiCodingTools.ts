@@ -210,9 +210,12 @@ export const codingToolModels = (models: readonly ExternalApiModelCapabilities[]
 });
 
 /**
- * The Tomverse CLI (apps/tomverse-cli): what Settings shows once the package
- * is published. Off by default (TOMVERSE_CLI_GUIDE_ENABLED) so the page never
- * tells anyone to install a package that is not on the registry yet. The key
+ * The Tomverse CLI (apps/tomverse-cli): what Settings shows once the CLI is
+ * published. Off by default (TOMVERSE_CLI_GUIDE_ENABLED) so the page never
+ * tells anyone to install something that is not released yet. `install` is
+ * the npm command (macOS, Linux, or anywhere Node.js 22 is present) and
+ * `installWindows` the winget one; the installers (.msi, .pkg, .deb, .rpm) are
+ * on the install page, /developers/cli (components/marketing/v2/cli). The key
  * goes into an environment variable for the current shell only; the CLI also
  * asks for it, hidden, when it is not set. The CLI is a coding API client:
  * its endpoint is the coding API's base (apps/tomverse-cli/src/config.ts).
@@ -226,6 +229,7 @@ export const tomverseCliGuide = (env: Record<string, string | undefined>, coding
     const endpoint = codingBaseUrl === TOMVERSE_CLI_DEFAULT_ENDPOINT ? [] : [`tomverse config set endpoint ${quoted}`];
     return {
         install: "npm install -g @tomverse/cli",
+        installWindows: "winget install Tomverse.CLI",
         powershell: [`$env:TOMVERSE_API_KEY = "${KEY_PLACEHOLDER}"`, ...endpoint, "tomverse doctor"].join("\n"),
         posix: [`export TOMVERSE_API_KEY="${KEY_PLACEHOLDER}"`, ...endpoint, "tomverse doctor"].join("\n"),
     };

@@ -329,7 +329,7 @@ test("API keys: Claude Code, Codex and Cursor each get their own configuration @
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
 });
 
-test("API keys: the Tomverse CLI choice, once enabled, shows install and a key for this terminal only @ui-risk", async ({ page, isMobile }) => {
+test("API keys: the Tomverse CLI choice, once enabled, shows an install per operating system and a key for this terminal only @ui-risk", async ({ page, isMobile }) => {
     await page.setViewportSize({ width: isMobile ? 320 : 1280, height: 900 });
     await prepareGuestPage(page, "ko");
     await page.route(
@@ -345,6 +345,7 @@ test("API keys: the Tomverse CLI choice, once enabled, shows install and a key f
                     keys: [],
                     tomverseCli: {
                         install: "npm install -g @tomverse/cli",
+                        installWindows: "winget install Tomverse.CLI",
                         powershell: '$env:TOMVERSE_API_KEY = "<YOUR_TOMVERSE_API_KEY>"\ntomverse doctor',
                         posix: 'export TOMVERSE_API_KEY="<YOUR_TOMVERSE_API_KEY>"\ntomverse doctor',
                     },
@@ -357,11 +358,22 @@ test("API keys: the Tomverse CLI choice, once enabled, shows install and a key f
     await page.getByTestId("external-api-platform-tomverse-cli").click();
     const panel = page.getByTestId("external-api-tool-tomverse-cli");
     await expect(page.getByTestId("external-api-connect").getByRole("heading", { name: "Tomverse CLI" })).toBeVisible();
-    await expect(page.getByTestId("external-api-tomverse-cli-install")).toContainText("npm install -g @tomverse/cli");
+    await expect(panel).toContainText("설치 프로그램이나 Node.js 22로 설치합니다");
+    // This computer's system is chosen first (the browser under test decides which), so each is picked explicitly.
+    await page.getByTestId("external-api-cli-os-windows").click();
+    await expect(page.getByTestId("external-api-cli-os-windows")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("external-api-tomverse-cli-install")).toContainText("winget install Tomverse.CLI");
     await expect(page.getByTestId("external-api-tomverse-cli-powershell")).toContainText("$env:TOMVERSE_API_KEY");
-    await page.getByTestId("external-api-shell-posix").click();
+    await page.getByTestId("external-api-cli-os-macos").click();
+    await expect(page.getByTestId("external-api-tomverse-cli-install")).toContainText("npm install -g @tomverse/cli");
     await expect(page.getByTestId("external-api-tomverse-cli-powershell")).toHaveCount(0);
     await expect(page.getByTestId("external-api-tomverse-cli-posix")).toContainText("export TOMVERSE_API_KEY");
+    await page.getByTestId("external-api-cli-os-linux").click();
+    await expect(page.getByTestId("external-api-tomverse-cli-install")).toContainText("npm install -g @tomverse/cli");
+    await expect(page.getByTestId("external-api-tomverse-cli-posix")).toContainText("export TOMVERSE_API_KEY");
+    // The installers (.msi, .pkg, .deb, .rpm) are on the install page, in this language.
+    await expect(panel).toContainText("설치 프로그램(.msi · .pkg · .deb · .rpm)이나 npm으로 설치하려면");
+    await expect(page.getByTestId("external-api-cli-install-guide")).toHaveAttribute("href", /\/ko\/developers\/cli#install$/);
     await expect(panel).toContainText("격리(sandbox)되지 않습니다");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
 });

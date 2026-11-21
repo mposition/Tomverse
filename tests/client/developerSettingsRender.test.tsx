@@ -118,9 +118,27 @@ test("the Korean tab reads as designed", () => {
     assert.match(body, /API와 CLI는 Pro 이상에서 쓸 수 있습니다\. 요청은 Chat과 같은 계정 크레딧을 씁니다\./);
 });
 
-test("the CLI card stays hidden until the install guide is published", () => {
+test("the CLI card and banner stay hidden until the install guide is published", () => {
     const markup = render(element(DeveloperSettingsView, { overview: ready({ tomverseCli: null }) }), "en");
     assert.doesNotMatch(markup, /developer-cli/);
+});
+
+// The anchor tag of one link, so attribute order never matters.
+const hrefOf = (markup: string, testId: string) => new RegExp(`<a[^>]*data-testid="${testId}"[^>]*>`).exec(markup)?.[0].match(/href="([^"]*)"/)?.[1] ?? null;
+
+test("the CLI banner opens the tab and links to the install page in the current language", () => {
+    const en = render(element(DeveloperSettingsView, { overview: ready() }), "en");
+    assert.match(text(en), /Tomverse CLI — a coding agent in your terminal/);
+    assert.match(text(en), /Installers for Windows, macOS and Linux, winget and npm./);
+    assert.match(text(en), /See install instructions/);
+    assert.equal(hrefOf(en, "developer-cli-banner-link"), "/en/developers/cli");
+    // Above the key summary: the first thing in the tab.
+    assert.ok(en.indexOf('data-testid="developer-cli-banner"') < en.indexOf('data-testid="developer-keys"'));
+
+    const ko = render(element(DeveloperSettingsView, { overview: ready() }), "ko");
+    assert.match(text(ko), /Tomverse CLI — 터미널의 코딩 에이전트/);
+    assert.match(text(ko), /설치 안내 보기/);
+    assert.equal(hrefOf(ko, "developer-cli-banner-link"), "/ko/developers/cli");
 });
 
 test("a Free account sees the Pro notice and an upgrade button, no keys and no addresses", () => {
@@ -206,6 +224,29 @@ test("the CLI choice appears once the guide is published", () => {
     });
     assert.match(markup, /external-api-platform-tomverse-cli"/);
     assert.match(markup, /data-testid="external-api-tool-tomverse-cli"/);
+});
+
+test("the CLI install picks an operating system, starts on Windows with winget, and links to the installers", () => {
+    const markup = connect("tomverse-cli", {
+        tomverseCli: {
+            install: "npm install -g @tomverse/cli",
+            installWindows: "winget install Tomverse.CLI",
+            powershell: "$env:TOMVERSE_API_KEY",
+            posix: "export TOMVERSE_API_KEY",
+        },
+    });
+    // Windows, macOS and Linux; no operating system is read on the server, so Windows is the first paint.
+    for (const os of ["windows", "macos", "linux"]) assert.match(markup, new RegExp(`data-testid="external-api-cli-os-${os}"`), os);
+    assert.equal(pressed(markup, "external-api-cli-os-windows"), true);
+    assert.equal(pressed(markup, "external-api-cli-os-macos"), false);
+    const install = text(markup);
+    assert.match(install, /winget install Tomverse\.CLI/);
+    assert.doesNotMatch(install, /npm install -g @tomverse\/cli/);
+    assert.match(markup, /data-testid="external-api-tomverse-cli-powershell"/);
+    assert.doesNotMatch(markup, /data-testid="external-api-tomverse-cli-posix"/);
+    assert.match(install, /Install it with an installer or with Node\.js 22\./);
+    assert.match(install, /To install with an installer \(\.msi · \.pkg · \.deb · \.rpm\) or npm, see the install instructions by operating system/);
+    assert.equal(hrefOf(markup, "external-api-cli-install-guide"), "/en/developers/cli#install");
 });
 
 // Each button's own tag, so attribute order never matters.
