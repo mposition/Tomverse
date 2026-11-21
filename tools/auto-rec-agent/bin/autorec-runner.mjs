@@ -113,7 +113,8 @@ export function readRunnerConfig(env) {
     npmBin: env.AUTOREC_NPM_BIN || DEFAULTS.npmBin,
     dailyProduct: env.AUTOREC_RUN_DAILY === "true",
     // Optional: a `claude setup-token` token from /etc/autorec/claude.env.
-    claudeOauthToken: env.CLAUDE_CODE_OAUTH_TOKEN || null,
+    // Trimmed, so a blank line is no token for Claude and for the login check alike.
+    claudeOauthToken: env.CLAUDE_CODE_OAUTH_TOKEN?.trim() || null,
   };
 }
 

@@ -52,3 +52,16 @@ test("a new durable notice reaches the existing operator channels; a replay neve
   assert.equal((await POST(request())).status, 200);
   assert.equal(alerts.length, 1);
 });
+
+// 2026-11-21: the runner now stops before any claim when autorec's Claude
+// login is gone, under its own reason, and the notice says how to log in.
+test("a login_required halt is accepted and its notice carries the re-login command", async () => {
+  const response = await POST(request({ ...notice, reason: "login_required", attempted: 0, prOpened: 0, lastPrUrl: null }));
+  assert.equal(response.status, 200);
+  assert.equal(notices[0].reason, "login_required");
+  assert.equal(alerts[0].context.reason, "login_required");
+  const { dailyProductHaltNotice } = await import(mod("lib/dailyProductAgentAlertCore.ts"));
+  const { detail } = dailyProductHaltNotice({ ...notice, reason: "login_required", attempted: 0, prOpened: 0, lastPrUrl: null });
+  assert.match(detail, /no task was claimed/);
+  assert.match(detail, /sudo -u autorec -H \/home\/autorec\/\.local\/bin\/claude auth login/);
+});
