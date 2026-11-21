@@ -767,6 +767,19 @@ export const codingSettingsRequest = (link: CodingLinkView, value: CodingSetting
 };
 
 /**
+ * Whether a "fill all" run may start its next paid call after one row failed.
+ * An unknown outcome stops it: a client-side timeout, the server's own LLM
+ * timeout (504 `timeout_outcome_unknown`) or a network error may each have left
+ * a paid call running or its write landed, so no further call starts. A lost
+ * session stops it too. Any other refusal is about that row and the run goes on.
+ */
+export const fillRunStop = (result: { timedOut: boolean; code?: string }): "continue" | "unknown_outcome" | "session" => {
+  if (result.timedOut || result.code === "timeout_outcome_unknown" || result.code === "network_error") return "unknown_outcome";
+  if (result.code === "session_expired") return "session";
+  return "continue";
+};
+
+/**
  * A dedicated row's settings form (owner decision 2026-11-21): its channels,
  * and its coding API credits. The override is read only while the coding API
  * is ticked -- with it off the field is hidden, so neither its value nor its

@@ -41,6 +41,7 @@ import {
   codingSettingsFrom,
   codingSettingsRequest,
   filterCodingItems,
+  fillRunStop,
   isSessionGone,
   reasonMessage,
   refusalReasons,
@@ -307,9 +308,9 @@ export function AdminCodingCatalogPanel() {
       if (result.ok) ok += 1;
       else {
         failed.push({ modelId: target.id, code: result.timedOut ? "timeout_outcome_unknown" : (result.code ?? "unknown") });
-        // The outcome of a timed-out call is unknown and it is never retried; a lost session ends the run too.
-        if (result.timedOut || result.code === "session_expired") {
-          stopped = result.timedOut;
+        const stop = fillRunStop(result);
+        if (stop !== "continue") {
+          stopped = stop === "unknown_outcome";
           break;
         }
       }

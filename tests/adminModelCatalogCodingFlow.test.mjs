@@ -11,6 +11,7 @@ import {
   codingNextAction,
   codingServing,
   codingStage,
+  fillRunStop,
   linkAllReasonRows,
   reasonMessage,
 } from "../lib/adminModelCatalogFlow.ts";
@@ -173,4 +174,15 @@ test("an applied coding draft changes only the three operator fields, and names 
   assert.equal(codingDraftEditSchema.safeParse({ inputUsdPerMTok: 0.01 }).success, false);
   assert.equal(codingDraftEditSchema.safeParse({ creditWeight: 0 }).success, false);
   assert.equal(codingDraftEditSchema.safeParse({ minimumPlan: "Enterprise" }).success, false);
+});
+
+test("a fill-all run stops at an unknown outcome and goes on past a row's own refusal", () => {
+  // Each of these may have left a paid call running, so no further call starts.
+  assert.equal(fillRunStop({ timedOut: true }), "unknown_outcome");
+  assert.equal(fillRunStop({ timedOut: false, code: "timeout_outcome_unknown" }), "unknown_outcome");
+  assert.equal(fillRunStop({ timedOut: false, code: "network_error" }), "unknown_outcome");
+  assert.equal(fillRunStop({ timedOut: false, code: "session_expired" }), "session");
+  for (const code of ["fetch_failed", "unofficial_source", "no_capability_source", "draft_failed", undefined]) {
+    assert.equal(fillRunStop({ timedOut: false, code }), "continue", String(code));
+  }
 });
