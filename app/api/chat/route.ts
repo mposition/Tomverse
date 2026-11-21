@@ -7207,6 +7207,10 @@ async function handleChatPost(
                         elapsedMs: Date.now() - firstTokenWatchStartedAt,
                     })
                 );
+                // Checkpoints renew the attempt's lease only once text
+                // arrives; a first token minutes away would otherwise find
+                // it expired at the terminal CAS (2026-11-21).
+                durableCheckpointWriter?.renewLease();
             }, plan.intervalMs);
             // Same reason as the lease heartbeat: a pending timer must never
             // be why a worker stays up after its request is done.

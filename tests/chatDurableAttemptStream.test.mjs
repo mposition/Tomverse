@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  CHAT_DURABLE_LEASE_RENEWAL_INTERVAL_MS,
   CHAT_DURABLE_PARTIAL_MAX_CHARACTERS,
   createChatResponseAttemptCheckpointWriter,
 } from "../lib/chatDurableAttemptStream.ts";
@@ -93,4 +94,116 @@ test("a small visible prefix is checkpointed when no later chunk arrives", async
   await new Promise((resolve) => setTimeout(resolve, 1_100));
   assert.equal(calls.length, 1);
   assert.equal(calls[0].partialContent, "visible");
+});
+
+// 2026-11-21: Fable 5.2 reasoned 290-516 s before its first token on a turn
+// with three PDFs. Only checkpoints renewed the lease, and they follow text,
+// so the claim's 4-minute lease had expired and the terminal CAS refused the
+// answer the user had already read (CHAT_ATTEMPT_REVISION_CONFLICT).
+const leaseWriter = (calls, persist = async (input) => {
+  calls.push(input);
+  return attemptRow(input, calls.length);
+}) => createChatResponseAttemptCheckpointWriter(
+  {
+    userId: "user_1",
+    assistantMessageId: "assistant_1",
+    ownerId: "worker_1",
+    initialRevision: 0,
+    requestedModelId: "provider/model",
+  },
+  persist
+);
+const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+test("while no text arrives, the lease is renewed once a minute has passed since the last write", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
+  const calls = [];
+  const writer = leaseWriter(calls);
+  writer.renewLease();
+  await settle();
+  assert.equal(calls.length, 0, "too soon after the claim");
+
+  t.mock.timers.tick(CHAT_DURABLE_LEASE_RENEWAL_INTERVAL_MS);
+  writer.renewLease();
+  await settle();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].partialContent, "", "nothing new is written");
+  assert.equal(calls[0].expectedRevision, 0);
+  const leaseMs = calls[0].leaseExpiresAt.getTime() - Date.now();
+  assert.ok(leaseMs > 4 * 60_000 && leaseMs <= 5 * 60_000, String(leaseMs));
+
+  // The next tick inside the minute does nothing; the one after renews again
+  // against the revision the first renewal returned.
+  writer.renewLease();
+  await settle();
+  assert.equal(calls.length, 1);
+  t.mock.timers.tick(CHAT_DURABLE_LEASE_RENEWAL_INTERVAL_MS);
+  writer.renewLease();
+  await settle();
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].expectedRevision, 1);
+
+  // Eight minutes of reasoning, then the answer: the terminal flush CASes
+  // against the latest revision.
+  for (let minute = 0; minute < 6; minute += 1) {
+    t.mock.timers.tick(CHAT_DURABLE_LEASE_RENEWAL_INTERVAL_MS);
+    writer.renewLease();
+    await settle();
+  }
+  const final = await writer.flush("the answer");
+  assert.equal(final.partialContent, "the answer");
+  assert.equal(calls.at(-1).expectedRevision, calls.length - 1);
+});
+
+test("a failed renewal is logged and retried, never the writer's failure", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: 2_000_000 });
+  const calls = [];
+  let refuse = true;
+  const warnings = [];
+  t.mock.method(console, "warn", (line) => warnings.push(line));
+  const writer = leaseWriter(calls, async (input) => {
+    calls.push(input);
+    if (refuse) throw Object.assign(new Error("db unavailable"), { name: "PrismaClientKnownRequestError", code: "P1001" });
+    return attemptRow(input, calls.length);
+  });
+  t.mock.timers.tick(CHAT_DURABLE_LEASE_RENEWAL_INTERVAL_MS);
+  writer.renewLease();
+  await settle();
+  assert.equal(calls.length, 1);
+  assert.equal(warnings.length, 1);
+  const logged = JSON.parse(warnings[0]);
+  assert.equal(logged.event, "chat_attempt_lease_renewal_failed");
+  assert.equal(logged.code, "P1001");
+  assert.doesNotMatch(warnings[0], /db unavailable/);
+
+  refuse = false;
+  t.mock.timers.tick(CHAT_DURABLE_LEASE_RENEWAL_INTERVAL_MS);
+  writer.renewLease();
+  await settle();
+  assert.equal(calls.length, 2);
+  const final = await writer.flush("ok");
+  assert.equal(final.partialContent, "ok");
+});
+
+test("a renewal never runs while text is queued or being checkpointed", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 3_000_000 });
+  const calls = [];
+  const writer = leaseWriter(calls);
+  writer.observe("x");
+  t.mock.timers.tick(CHAT_DURABLE_LEASE_RENEWAL_INTERVAL_MS);
+  writer.renewLease();
+  await settle();
+  // The queued text is what gets written; no lease-only write beside it.
+  assert.ok(calls.every((call) => call.partialContent === "x"), JSON.stringify(calls.map((c) => c.partialContent)));
+});
+
+test("the chat route renews the attempt lease from the first-token keepalive tick", async () => {
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
+  const tick = source.slice(source.indexOf("keepaliveWriter = setInterval(() => {"),
+    source.indexOf("}, plan.intervalMs);"));
+  assert.match(tick, /state: "awaiting_first_token"/);
+  assert.match(tick, /durableCheckpointWriter\?\.renewLease\(\);/);
+  // The tick stops at the first visible token, after which checkpoints renew it.
+  assert.match(tick, /if \(visibleTokenEmitted \|\| streamState !== "open"\) \{\s*stopFirstTokenWatch\(\);/);
 });
