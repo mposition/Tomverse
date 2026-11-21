@@ -101,6 +101,16 @@ test("submit without a plan is the existing intake body, with this checkout as i
     fetcher: async (_url, init) => { body = JSON.parse(init.body); return committed(); },
   });
   assert.deepEqual(body.input.repositories, []);
+
+  // No --repo and no GitHub origin: refused before any request.
+  let calls = 0;
+  await assert.rejects(runAmuxIdeaCommand(submitArgs, env, {
+    ...files({ "idea.md": "x" }), createRequestId: () => requestId, onPrepared: () => {},
+    defaultRepository: () => null, fetcher: async () => { calls++; return committed(); },
+  }), /repository_unavailable/);
+  assert.equal(calls, 0);
+  assert.deepEqual(amuxIdeaErrorReport(new Error("repository_unavailable")),
+    { error: "repository_unavailable" });
 });
 
 test("a refused plan stops before any request, with only the parser's closed verdict", async () => {

@@ -36,7 +36,9 @@ The box analyses the idea and the operator approves its plan in the Admin idea.
    exact analysis prompt the box would run.
 2. Read the repository as the work needs, then write the answer: one JSON object
    with `outcome: "propose"`, `coverageStatus: "complete"`, `coveredScope` and
-   `units` in the prompt's unit format. Every Task names `expectedPaths`.
+   `units` in the prompt's unit format. Every Task names `expectedPaths`. Leave
+   out `ownerQuestion`: a plan with an open question is refused, so ask the
+   operator in chat first.
 3. `npm run amux:idea -- check --plan <plan.json>` runs the same parser and
    content checks with no network. Fix what it names (rule, field, unit index).
 4. Submit with `--plan <plan.json>` added to the idea-only command.

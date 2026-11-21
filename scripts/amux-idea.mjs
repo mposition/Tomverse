@@ -35,8 +35,9 @@ import { inspectAmuxIdeaSessionPlan } from "../lib/amux/ideaSessionSubmissionCor
  * session that writes its own plan answers it with one JSON object. `check`
  * runs the same parser and content checks locally with no network. `submit`
  * sends the idea (and plan) once; without --repo it names this checkout's
- * GitHub origin. The client secret and the origin come from the environment
- * only (TOMVERSE_AMUX_SESSION_INTAKE_CLIENT_SECRET,
+ * GitHub origin, and refuses (repository_unavailable) when there is none.
+ * The client secret and the origin come from the environment only
+ * (TOMVERSE_AMUX_SESSION_INTAKE_CLIENT_SECRET,
  * TOMVERSE_AMUX_SESSION_INTAKE_ORIGIN) and are never printed.
  */
 
@@ -181,8 +182,14 @@ export async function runAmuxIdeaCommand(args, env = process.env, dependencies =
   const tool = flags["--tool"]?.trim();
   const provider = flags["--provider"]?.trim();
   if (!tool || !provider) throw new Error("metadata_incomplete");
-  const repositories = flags["--no-repo"] ? [] : flags["--repo"] ??
-    [(dependencies.defaultRepository ?? defaultRepository)()].filter(Boolean);
+  let repositories = flags["--no-repo"] ? [] : flags["--repo"];
+  if (!repositories) {
+    // An idea sent without the reference the operator expected could not be
+    // analysed against the code; say so instead of sending none.
+    const origin = (dependencies.defaultRepository ?? defaultRepository)();
+    if (!origin) throw new Error("repository_unavailable");
+    repositories = [origin];
+  }
   const pullRequests = (flags["--pr"] ?? []).map((value) => {
     const match = PULL.exec(value);
     if (!match) throw new Error("schema_rejected");
@@ -214,7 +221,7 @@ const print = (value) => new Promise((resolvePrint, reject) => {
 
 const CLOSED_ERRORS = new Set(["command_invalid", "credential_unavailable", "origin_invalid",
   "request_id_invalid", "input_unavailable", "schema_rejected", "content_refused",
-  "metadata_incomplete", "plan_rejected"]);
+  "metadata_incomplete", "plan_rejected", "repository_unavailable"]);
 
 /** What a failure may print: a closed code, and for a refused plan the
  * parser's own closed rule, field and unit position. Never input or secret. */

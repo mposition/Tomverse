@@ -177,8 +177,9 @@ export type AmuxIdeaSessionPlanInspection =
   | { ok: false; code: "content_refused" }
   | { ok: false; code: "plan_rejected";
       /** not_a_proposal: no card or node to approve; continues: the plan names
-       * unfinished cards, which a session plan must include itself. */
-      reason: "schema" | "not_a_proposal" | "continues";
+       * unfinished cards, which a session plan must include itself; question:
+       * it asks the owner something, which the session asks in its own chat. */
+      reason: "schema" | "not_a_proposal" | "continues" | "question";
       detail?: ReturnType<typeof amuxSessionPageRefusalDetail> };
 
 const planStrings = (value: unknown, found: string[] = []): string[] => {
@@ -205,6 +206,14 @@ export function inspectAmuxIdeaSessionPlan(value: unknown,
   }
   if (!planStrings(value).every((text) => text.length === 0 || contentAdmitted(text))) {
     return { ok: false, code: "content_refused" };
+  }
+  // The session page bookkeeping drops a question written beside units, as a
+  // box answer's assumptions stand with no owner present. A session has its
+  // owner in chat, so an open question is refused here instead of vanishing.
+  const question = (value as Record<string, unknown>).ownerQuestion;
+  if (question !== undefined && question !== null &&
+      !(typeof question === "string" && question.trim().length === 0)) {
+    return { ok: false, code: "plan_rejected", reason: "question" };
   }
   const raw = JSON.stringify(value);
   const page = { ...SESSION_PLAN_PAGE, previewId };

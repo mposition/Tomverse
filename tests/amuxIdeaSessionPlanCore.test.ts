@@ -94,10 +94,20 @@ test("a plan must be a closed proposal: no question, rejection or remainder", ()
   assert.deepEqual(inspectAmuxIdeaSessionPlan(amuxSessionPlanFixture({
     outcome: "reject", units: [] }), randomUUID()),
   { ok: false, code: "plan_rejected", reason: "not_a_proposal" });
-  const question = inspectAmuxIdeaSessionPlan(amuxSessionPlanFixture({
-    outcome: "needs_information", ownerQuestion: "Which settings page?" }), randomUUID());
-  assert.equal(question.ok, false);
-  assert.equal(!question.ok && question.code, "plan_rejected");
+  // A question is refused whether or not units stand beside it: the session
+  // bookkeeping would otherwise drop it and the plan would pass without it.
+  for (const overrides of [
+    { outcome: "needs_information", ownerQuestion: "Which settings page?" },
+    { ownerQuestion: "Which settings page?" },
+    { ownerQuestion: 3 },
+  ]) {
+    assert.deepEqual(inspectAmuxIdeaSessionPlan(amuxSessionPlanFixture(overrides), randomUUID()),
+      { ok: false, code: "plan_rejected", reason: "question" }, JSON.stringify(overrides));
+  }
+  for (const ownerQuestion of [null, "", "  "]) {
+    assert.equal(inspectAmuxIdeaSessionPlan(amuxSessionPlanFixture({ ownerQuestion }),
+      randomUUID()).ok, true, JSON.stringify(ownerQuestion));
+  }
 });
 
 test("automatic registration of session plans is on only for the exact word", () => {
