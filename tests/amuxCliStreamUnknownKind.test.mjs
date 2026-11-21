@@ -98,6 +98,11 @@ test("Antigravity: an unseen kind with a tool field, a disallowed tool, a subage
     "investigate"), "tool:edit_file");
   assert.equal(refused([init(), step({ step_type: "system_message", subagent_info: {} }), done]),
     "subagent");
+  // An unseen step that names a tool on the role's list is still an action.
+  assert.equal(refused([init(), step({ step_type: "browser", tool_name: "read_file" }), done]),
+    "step:browser");
+  assert.equal(refused([init(), step({ step_type: "system_message", tool_name: "read_file",
+    tool_info: { name: "read_file" } }), done]), "step:system_message");
   assert.equal(refused([init("always-proceed"), done]), "permission_mode");
   assert.equal(refused([init(), step({ step_type: "system_message" })]), "no_result");
   assert.equal(parseAmuxV22ChannelOutput("antigravity", `${jsonl(init())}not json\n${jsonl(done)}`,
@@ -157,6 +162,9 @@ test("Copilot: an unseen event passes and is counted; a tool named anywhere is h
     "tool:edit");
   assert.equal(reason({ type: "subagent.started", data: { agentName: "x" } }, "implement"),
     "subagent");
+  // An unseen event that names an action without a toolName stays refused.
+  assert.equal(reason({ type: "browser.open", data: {} }), "event:browser.open");
+  assert.equal(reason({ type: "session.notice", data: { command: "ls" } }), "event:session.notice");
   assert.equal(parse("github-copilot", copilot({ type: "tool.execution_start",
     data: { toolName: "edit" } }), { role: "implement" }).valid, true);
 });
@@ -207,6 +215,10 @@ test("v19 Codex and Cursor channels pass a harmless unseen kind and still refuse
     { type: "thread.compacted" }));
   assert.equal(fine.result.kind, "verified_success");
   assert.deepEqual(fine.unseen, { "item:error": 1, "event:thread.compacted": 1 });
+  // The verified result carries them, as the Claude channel's result does.
+  assert.deepEqual(fine.result.unrecognizedEvents, fine.unseen);
+  assert.equal(Object.hasOwn(v19("openai", "gpt-6-luna", codexStream()).result,
+    "unrecognizedEvents"), false);
   assert.equal(v19("openai", "gpt-6-luna", codexStream({ type: "item.started",
     item: { id: "i0", type: "web_search", query: "x" } })).reason, "tool_refused");
   assert.equal(v19("openai", "gpt-6-luna", codexStream({ type: "exec_approval_request" })).reason,

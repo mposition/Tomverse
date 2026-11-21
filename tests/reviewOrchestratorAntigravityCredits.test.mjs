@@ -186,6 +186,9 @@ test("the answer is the result event's response, from a request-review run that 
     { reason: "antigravity_event_unexpected" });
   assert.deepEqual(antigravityAnswer(jsonl(init(), { event: "step_update", step_update: {
     step_type: "browser", state: "DONE" } }, result())), { reason: "antigravity_step_unexpected" });
+  // An unseen step that names a tool, even the allowed read, is still an action.
+  assert.deepEqual(antigravityAnswer(jsonl(init(), { event: "step_update", step_update: {
+    step_type: "browser", tool_name: "read_file" } }, result())), { reason: "antigravity_step_unexpected" });
   // A tool named on any step, whatever its type, must be a file read.
   assert.deepEqual(antigravityAnswer(jsonl(init(), { event: "step_update", step_update: {
     step_type: "system_message", tool_name: "run_command" } }, result())), { reason: "antigravity_tool_refused" });

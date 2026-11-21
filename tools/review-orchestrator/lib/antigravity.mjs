@@ -88,9 +88,11 @@ export function antigravityAnswer(stdout) {
     }
     // A tool is named in tool_name / tool_info; whatever the step's type, a
     // named tool must be a file read.
-    if (step.step_type === "tool" || Object.hasOwn(step, "tool_name") || Object.hasOwn(step, "tool_info")) {
-      if (!READ_TOOLS.has(step.tool_name)) return { reason: "antigravity_tool_refused" };
-    } else if (!STEPS.has(step.step_type) && antigravityUnknownKindActs(step.step_type, step)) {
+    if ((step.step_type === "tool" || Object.hasOwn(step, "tool_name") || Object.hasOwn(step, "tool_info")) &&
+        !READ_TOOLS.has(step.tool_name)) return { reason: "antigravity_tool_refused" };
+    // An unseen step that names an action -- a read on the list included --
+    // stays refused.
+    if (!STEPS.has(step.step_type) && antigravityUnknownKindActs(step.step_type, step)) {
       return { reason: "antigravity_step_unexpected" };
     }
   }
