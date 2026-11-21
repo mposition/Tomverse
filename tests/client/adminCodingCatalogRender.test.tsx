@@ -4,12 +4,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { CodingCandidates, CodingChannelsTile, CodingLinkDetail } from "@/components/admin/modelCatalog/CodingLinkViews";
 import { CodingChannelBanner, CodingModelTable, CodingSummary } from "@/components/admin/modelCatalog/CodingListViews";
-import { CodingProviderTable, ProviderTermsDraftPanel } from "@/components/admin/modelCatalog/CodingProviderViews";
 import { adminMessagesFor } from "@/lib/adminLocale";
 import { adminCodingCatalogMessages } from "@/lib/adminMessages/codingCatalog";
 import { adminModelCatalogMessages } from "@/lib/adminMessages/modelCatalog";
 import {
-  type CodingProviderRow,
+  type CodingLinkAllResult,
   codingCatalogItems,
   codingDedicatedSettings,
   codingSettingsFrom,
@@ -21,16 +20,14 @@ import {
 import { reasonText } from "@/components/admin/modelCatalog/ImageCatalogViews";
 
 // The coding catalogue tab (Figma "코딩 카탈로그 시안 v1"): the list, a chat
-// link's detail, the candidates and the provider conditions.
+// link's detail and the candidates (one at a time, or all at once). Provider
+// conditions are gone (owner decision 2026-11-21).
 
 const c = adminMessagesFor(adminCodingCatalogMessages, "ko");
 const cEn = adminMessagesFor(adminCodingCatalogMessages, "en");
 const m = adminMessagesFor(adminModelCatalogMessages, "ko");
 const noop = () => {};
 const reason = (code: string) => reasonText(m, reasonMessage(code));
-
-const TERMS = "https://www.anthropic.com/legal/commercial-terms";
-const RETENTION = "https://docs.anthropic.com/en/docs/data-retention";
 
 const chat = {
   id: "claude-sonnet-4-6",
@@ -61,9 +58,6 @@ const resolved = (overrides: Record<string, unknown> = {}) => ({
   minimumPlan: "Pro",
   capabilities: { toolCalling: "parallel", structuredOutput: "forced_tool_use", imageInput: true, maxContextTokens: 1_000_000, maxOutputTokens: 64_000 },
   pricing: { inputUsdPerMTok: 3, outputUsdPerMTok: 15, creditWeight: 8, verifiedAt: "2026-08-03", sources: [], pricingVersion: "v1" },
-  terms: { allowsResaleAndCodingAgent: true, url: TERMS, checkedAt: "2026-11-10" },
-  retention: { url: RETENTION, checkedAt: "2026-11-10" },
-  processingRegion: "US",
   ...overrides,
 });
 
@@ -91,10 +85,6 @@ const report = {
       profile: resolved(),
       stored,
       chat,
-      warnings: [],
-      activationBlockers: [],
-      termsSource: "provider" as const,
-      termsCheckedAt: "2026-11-10",
       problem: null,
       admission: { admitted: true },
       draft: null,
@@ -108,10 +98,6 @@ const report = {
       profile: resolved({ modelId: "kimi-k3", name: "Kimi K3", provider: "moonshot", apiModelId: "kimi-k3", pricing: { ...resolved().pricing, creditWeight: 1 } }),
       stored: { ...stored, registryModelId: "kimi-k3", creditWeight: undefined },
       chat: { ...chat, id: "kimi-k3", name: "Kimi K3", provider: "moonshot", creditWeight: 1 },
-      warnings: [],
-      activationBlockers: [],
-      termsSource: "provider" as const,
-      termsCheckedAt: "2026-10-30",
       problem: null,
       admission: { admitted: false, reasons: ["credits_below_floor:2"] },
       draft: null,
@@ -125,10 +111,6 @@ const report = {
       profile: resolved({ modelId: "devstral-2", source: "dedicated", registryModelId: undefined, channels: ["code"], name: "Devstral 2", provider: "mistral", apiModelId: "devstral-2" }),
       stored: null,
       chat: null,
-      warnings: [],
-      activationBlockers: [],
-      termsSource: "model" as const,
-      termsCheckedAt: "2026-11-02",
       problem: null,
       admission: { admitted: true },
       draft: null,
@@ -138,23 +120,6 @@ const report = {
 };
 const items = codingCatalogItems(report);
 const sonnet = items[0];
-
-const providerRow = (overrides: Partial<CodingProviderRow> = {}): CodingProviderRow => ({
-  provider: "anthropic",
-  terms: { allowsResaleAndCodingAgent: true, termsUrl: TERMS, retentionUrl: RETENTION, processingRegion: "US", checkedAt: "2026-11-10", sources: [TERMS] },
-  state: "confirmed",
-  checkedAt: "2026-11-10",
-  dueOn: "2027-02-08",
-  draft: null,
-  draftCreatedAt: null,
-  updatedByEmail: null,
-  modelCount: 1,
-  candidateCount: 0,
-  legacyTermsCount: 0,
-  draftable: true,
-  hosts: ["www.anthropic.com", "docs.anthropic.com"],
-  ...overrides,
-});
 
 test("the list shows both kinds of row with their source, inherited limits, floor and channels", () => {
   const html = renderToStaticMarkup(<CodingModelTable c={c} items={items} pendingIds={new Set()} reasonText={reason} onOpen={noop} />);
@@ -279,7 +244,6 @@ test("a chat link's detail shows chat's values read-only and its own settings ed
     <CodingLinkDetail
       c={c}
       item={sonnet}
-      provider={providerRow()}
       value={codingSettingsFrom(sonnet.link!)}
       busy={false}
       reasonText={reason}
@@ -294,7 +258,6 @@ test("a chat link's detail shows chat's values read-only and its own settings ed
       onActivate={noop}
       onHold={noop}
       onUnlink={noop}
-      onProviders={noop}
     />
   );
   assert.match(html, /data-testid="coding-link-inherited"/);
@@ -305,9 +268,14 @@ test("a chat link's detail shows chat's values read-only and its own settings ed
   assert.doesNotMatch(html.slice(html.indexOf("coding-link-inherited"), html.indexOf("coding-link-settings")), /<input/);
   assert.match(html, /data-testid="coding-link-weight"[^>]*value="8"/);
   assert.match(html, /data-testid="coding-link-channel-api"[^>]*checked=""/);
+  // This link was drafted from pages (before the registry took over): its values say so.
   assert.match(html, />LLM 초안</);
-  assert.match(html, /anthropic 공급자 조건/);
-  assert.match(html, /재판매·코딩 에이전트 허용/);
+  assert.doesNotMatch(html, /data-testid="coding-link-sources-registry"/);
+  // Provider conditions are not on the screen: no tile, no judge line.
+  assert.doesNotMatch(html, /공급자 조건/);
+  assert.doesNotMatch(html, /coding-link-terms/);
+  assert.doesNotMatch(html, /재판매·코딩 에이전트/);
+  assert.doesNotMatch(html, /약관/);
   assert.match(html, /data-admitted="true"/);
   assert.match(html, /data-testid="coding-link-activate"/);
   assert.doesNotMatch(html.match(/<button[^>]*data-testid="coding-link-activate"[^>]*>/)?.[0] ?? "", / disabled=""/);
@@ -321,7 +289,6 @@ test("a link that cannot be activated says why, and an unsaved change blocks act
     <CodingLinkDetail
       c={c}
       item={kimi}
-      provider={providerRow({ provider: "moonshot", terms: null, state: "missing", checkedAt: null, dueOn: null })}
       value={{ ...codingSettingsFrom(kimi.link!), creditWeight: "3" }}
       busy={false}
       reasonText={reason}
@@ -336,12 +303,11 @@ test("a link that cannot be activated says why, and an unsaved change blocks act
       onActivate={noop}
       onHold={noop}
       onUnlink={noop}
-      onProviders={noop}
     />
   );
   assert.match(html, /data-testid="coding-link-refusals"/);
   assert.match(html, /크레딧 가중치가 최소값 2보다 낮습니다/);
-  assert.match(html, /아직 확인하지 않았습니다/);
+  assert.doesNotMatch(html, /아직 확인하지 않았습니다/);
   assert.match(html.match(/<button[^>]*data-testid="coding-link-activate"[^>]*>/)?.[0] ?? "", / disabled=""/);
 });
 
@@ -367,58 +333,131 @@ test("the settings request sends only what changed, and null puts an override ba
   assert.deepEqual(codingSettingsProblems({ ...value, creditWeight: "1.5" }, { floor: 1, chatWeight: 6 }), { creditWeight: "not_a_number" });
 });
 
-test("a candidate shows what it inherits from chat and its provider's conditions, with one add button", () => {
+const registryStored = {
+  ...stored,
+  capabilities: { toolCalling: "basic", structuredOutput: "none" },
+  creditWeight: undefined,
+  evidence: { sources: [], draftedAt: "2026-11-21", toolCalling: "basic", structuredOutput: "none" },
+};
+
+test("a link made from the registry says its capabilities came from there, and shows no provider conditions", () => {
+  const item = codingCatalogItems({
+    models: [
+      {
+        modelId: "claude-sonnet-4-6",
+        enabled: null,
+        holdReason: null,
+        source: "chat" as const,
+        profile: resolved({ capabilities: { toolCalling: "basic", structuredOutput: "none", imageInput: true, maxContextTokens: 1_000_000, maxOutputTokens: 64_000 } }),
+        stored: registryStored,
+        chat,
+        problem: null,
+        admission: { admitted: true },
+        draft: null,
+        floor: 5,
+      },
+    ],
+  })[0];
   const html = renderToStaticMarkup(
-    <CodingCandidates
+    <CodingLinkDetail
       c={c}
-      candidates={[
-        { ...chat, id: "gpt-6-luna", name: "GPT 6 Luna", provider: "openai", terms: { state: "confirmed", checkedAt: "2026-11-08", dueOn: "2027-02-06" } },
-        { ...chat, id: "deepseek-v4-pro", name: "DeepSeek V4 Pro", provider: "deepseek", terms: { state: "missing", checkedAt: null, dueOn: null } },
-      ]}
-      excluded={[{ id: "gpt-6-luna-mini", name: "GPT 6 Luna Mini", provider: "openai", reason: "usage_class:research" }]}
-      adding={{ id: "gpt-6-luna", elapsed: "0:12" }}
-      draftConfigured
-      onAdd={noop}
+      item={item}
+      value={codingSettingsFrom(item.link!)}
+      busy={false}
+      reasonText={reason}
+      toolCallingLabel={(value) => m.codingFlow.toolCalling[value] ?? value}
+      structuredOutputLabel={(value) => m.codingFlow.structuredOutput[value] ?? value}
+      stepperLabel={m.stepperLabel}
+      stepStates={m.stepStates}
       onBack={noop}
+      onChange={noop}
+      onReset={noop}
+      onSave={noop}
+      onActivate={noop}
+      onHold={noop}
+      onUnlink={noop}
     />
   );
+  assert.match(html, />채팅 레지스트리</);
+  assert.doesNotMatch(html, />LLM 초안</);
+  assert.match(html, /data-testid="coding-link-sources-registry"/);
+  assert.match(html, /채팅 레지스트리에서 가져왔습니다/);
+  assert.doesNotMatch(html, /공급자 조건/);
+  assert.doesNotMatch(html, /약관/);
+  // Tool calling passes the judge; structured output stays at the conservative none until the operator sets it.
+  assert.match(html, /data-admitted="true"/);
+});
+
+const candidateProps = {
+  c,
+  candidates: [
+    { ...chat, id: "gpt-6-luna", name: "GPT 6 Luna", provider: "openai" },
+    { ...chat, id: "deepseek-v4-pro", name: "DeepSeek V4 Pro", provider: "deepseek" },
+  ],
+  excluded: [{ id: "gpt-6-luna-mini", name: "GPT 6 Luna Mini", provider: "openai", reason: "usage_class:research" }],
+  adding: null,
+  addingAll: false,
+  result: null,
+  resultPublish: null,
+  reasonText: reason,
+  onAdd: noop,
+  onAddAll: noop,
+  onCloseResult: noop,
+  onBack: noop,
+};
+
+test("a candidate shows what it inherits from chat, with one add button and one add-all button, and no provider conditions", () => {
+  const html = renderToStaticMarkup(<CodingCandidates {...candidateProps} adding="gpt-6-luna" />);
   assert.equal(html.match(/data-testid="coding-candidate"/g)?.length, 2);
   assert.match(html, />1M \/ 64K</);
   assert.match(html, />3\.00 \/ 15\.00</);
-  assert.match(html, /openai 공급자 조건 확인됨 · 2026-11-08/);
-  assert.match(html, /deepseek 공급자 조건 미확인/);
-  assert.match(html, /공급자 문서를 읽는 중 · 0:12/);
   assert.match(html, /후보에서 제외된 채팅 모델/);
+  // No provider conditions line, and no documentation prompt: an add reads the registry only.
+  assert.doesNotMatch(html, /coding-candidate-terms/);
+  assert.doesNotMatch(html, /공급자 조건/);
+  assert.doesNotMatch(html, /공급자 문서를 읽는 중/);
+  assert.match(html, /LLM은 호출하지 않습니다/);
+  // One request is in flight: the add buttons wait, and the one being added says so.
+  assert.match(html, /추가 중…/);
+  const buttons = html.match(/<button[^>]*data-testid="coding-candidate-add"[^>]*>/g) ?? [];
+  assert.equal(buttons.length, 2);
+  for (const button of buttons) assert.match(button, / disabled=""/);
+  assert.match(html, /data-testid="coding-candidates-add-all"[^>]*disabled=""/);
+  // Idle: both are available, and the add-all button names what it does.
+  const idle = renderToStaticMarkup(<CodingCandidates {...candidateProps} />);
+  assert.doesNotMatch(idle.match(/<button[^>]*data-testid="coding-candidates-add-all"[^>]*>/)?.[0] ?? "", / disabled=""/);
+  assert.match(idle, />채팅 모델 한 번에 추가</);
+  // With nothing to add there is no add-all button.
+  assert.doesNotMatch(renderToStaticMarkup(<CodingCandidates {...candidateProps} candidates={[]} />), /coding-candidates-add-all/);
 });
 
-test("provider conditions list each provider's state, and a draft is compared field by field", () => {
-  const rows = [
-    providerRow(),
-    providerRow({
-      provider: "qwen",
-      state: "expired",
-      checkedAt: "2026-08-12",
-      dueOn: "2026-11-10",
-      terms: { allowsResaleAndCodingAgent: true, termsUrl: "https://www.alibabacloud.com/help/en/terms", retentionUrl: "https://www.alibabacloud.com/help/en/privacy", processingRegion: "Singapore", checkedAt: "2026-08-12", sources: ["https://www.alibabacloud.com/help/en/terms"] },
-      draft: { allowsResaleAndCodingAgent: true, termsUrl: "https://www.alibabacloud.com/help/en/terms", retentionUrl: "https://www.alibabacloud.com/help/en/privacy", processingRegion: "Singapore, US", checkedAt: "2026-11-20", sources: ["https://www.alibabacloud.com/help/en/terms"], evidence: "Section 4." },
-      draftCreatedAt: "2026-11-20T04:22:00.000Z",
-      hosts: ["www.alibabacloud.com"],
-    }),
-    providerRow({ provider: "xai", terms: null, state: "missing", checkedAt: null, dueOn: null, modelCount: 1 }),
-  ];
-  const table = renderToStaticMarkup(
-    <CodingProviderTable c={c} providers={rows} drafting={null} openDraft="qwen" draftConfigured onCheck={noop} onOpenDraft={noop} />
+test("the add-all result says how many were added, the reasons for the rest by count, and what to do about the snapshot", () => {
+  const result: CodingLinkAllResult = {
+    attempted: 5,
+    added: ["a", "b"],
+    refused: [
+      { modelId: "c", reasons: ["credits_below_floor:7"] },
+      { modelId: "d", reasons: ["credits_below_floor:9", "unknown_provider"] },
+      { modelId: "e", reasons: ["provider_destination_unproven"] },
+    ],
+    reasonCounts: { credits_below_floor: 2, unknown_provider: 1, provider_destination_unproven: 1 },
+  };
+  const html = renderToStaticMarkup(<CodingCandidates {...candidateProps} result={result} resultPublish={null} />);
+  assert.match(html, /data-testid="coding-link-all-result"[^>]*data-added="2"/);
+  assert.match(html, /채팅 모델 5개 중 2개를 추가하고 활성화했습니다/);
+  assert.match(html, /3개는 추가하지 않았습니다/);
+  assert.match(html, /data-reason="credits_below_floor"[^>]*>[^<]*크레딧 가중치가 최소값 7보다 낮습니다[^<]*· 2</);
+  assert.match(html, /data-reason="unknown_provider"[^>]*>[^<]*· 1</);
+  assert.match(html, /data-reason="provider_destination_unproven"[^>]*>[^<]*· 1</);
+  // The snapshot is not published unless asked: the screen says to publish it.
+  assert.match(html, /스냅샷을 발행해 주세요/);
+  const published = renderToStaticMarkup(<CodingCandidates {...candidateProps} result={result} resultPublish={21} />);
+  assert.match(published, /스냅샷 v21을 발행했습니다/);
+  const failed = renderToStaticMarkup(<CodingCandidates {...candidateProps} result={result} resultPublish="failed" />);
+  assert.match(failed, /스냅샷은 발행되지 않았습니다/);
+  // Nothing added: nothing to publish.
+  const none = renderToStaticMarkup(
+    <CodingCandidates {...candidateProps} result={{ attempted: 1, added: [], refused: [{ modelId: "c", reasons: ["unknown_provider"] }], reasonCounts: { unknown_provider: 1 } }} />
   );
-  assert.match(table, /data-state="confirmed"/);
-  assert.match(table, /data-state="expired"/);
-  assert.match(table, />다시 확인 필요</);
-  assert.match(table, /2026-11-10 기한 경과/);
-  assert.match(table, />확인 시작</);
-  assert.match(table, />다시 확인</);
-  const draft = renderToStaticMarkup(<ProviderTermsDraftPanel c={c} row={rows[1]} busy={false} onDiscard={noop} onApply={noop} />);
-  assert.equal(draft.match(/data-changed="true"/g)?.length, 1);
-  assert.match(draft, /Singapore, US/);
-  assert.match(draft, />바뀜</);
-  assert.match(draft, /근거 문장 — Section 4\./);
-  assert.match(draft, /data-testid="coding-provider-apply"/);
+  assert.doesNotMatch(none, /coding-link-all-publish/);
 });

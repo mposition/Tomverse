@@ -1,8 +1,9 @@
 import { defineAdminMessages } from "@/lib/adminLocale";
 
 /**
- * Copy for the coding catalogue tab (AdminCodingCatalogPanel): chat links,
- * provider conditions, the Code snapshot and the external channel switch. A
+ * Copy for the coding catalogue tab (AdminCodingCatalogPanel): chat links, the
+ * Code snapshot and the external channel switch. Provider conditions are gone
+ * (owner decision 2026-11-21). A
  * dedicated model's whole-profile draft keeps its copy in modelCatalog.ts
  * (`codingFlow`), where the image flow it mirrors lives.
  */
@@ -13,16 +14,14 @@ export const adminCodingCatalogMessages = defineAdminMessages({
       "Choose and turn on the coding models Code and the coding API use. A linked chat model keeps chat's name, prices, context and output limit.",
     refresh: "Refresh",
     addDedicated: "Add coding model",
-    views: { models: "Models", providers: "Provider conditions" },
-    viewsLabel: "Coding catalog sections",
 
     tiles: {
       active: "Active",
       activeDetail: (version: number | null, inactive: number) =>
         `${version === null ? "No snapshot yet" : `In Code snapshot v${version}`} · ${inactive} inactive`,
       attention: "Needs a check",
-      attentionDetail: (floor: number, terms: number, other: number) =>
-        [floor ? `${floor} below the credit floor` : "", terms ? `${terms} provider conditions` : "", other ? `${other} other` : ""]
+      attentionDetail: (floor: number, other: number) =>
+        [floor ? `${floor} below the credit floor` : "", other ? `${other} other` : ""]
           .filter(Boolean)
           .join(" · ") || "Nothing waiting",
       candidates: "Chat candidates",
@@ -103,7 +102,7 @@ export const adminCodingCatalogMessages = defineAdminMessages({
     candidates: {
       title: "Coding candidates among chat models",
       note:
-        "Active, listed chat models of a usage class the API serves that are not in the coding catalog yet. Adding one makes an LLM read the provider's documentation and draft tool calling and structured output.",
+        "Active, listed chat models of a usage class the API serves that are not in the coding catalog yet. Adding one reads the chat registry: tool calling is taken from it, and no LLM call is made.",
       summaryOpen: "View candidates",
       back: "Back to the list",
       none: "Every eligible chat model is already in the coding catalog.",
@@ -116,20 +115,26 @@ export const adminCodingCatalogMessages = defineAdminMessages({
       yes: "Yes",
       no: "No",
       inheritNote: "These values come from chat. The coding catalog sets only tool calling, structured output and channels.",
-      termsConfirmed: (provider: string, date: string) => `${provider} provider conditions checked · ${date}`,
-      termsExpired: (provider: string) => `${provider} provider conditions need a new check (over 90 days)`,
-      termsMissing: (provider: string) => `${provider} provider conditions not checked yet. Check them before activating.`,
       add: "Add to coding catalog",
-      adding: "Drafting…",
-      addingSteps: (elapsed: string) => `Reading the provider's documentation · ${elapsed}`,
-      urlTitle: (name: string) => `Documentation for ${name}`,
-      urlDescription:
-        "The draft reads these official pages. The provider's defaults are filled in; replace one if the provider moved its docs.",
-      urlDescriptionNoDefault:
-        "This provider has no default documentation page. Enter the official pages that state tool calling and structured output.",
-      toolUrlLabel: "Tool calling documentation",
-      structuredUrlLabel: "Structured output documentation (optional)",
-      urlConfirm: "Draft and add",
+      adding: "Adding…",
+      addAll: "Add all chat models",
+      addAllTitle: (count: number) => `Add ${count} chat model${count === 1 ? "" : "s"} to the coding catalog?`,
+      addAllEffects: (count: number) => [
+        `Each of the ${count} candidate${count === 1 ? "" : "s"} the judge passes is linked on Code and the coding API at its chat credits, and switched on.`,
+        "Tool calling comes from the chat registry. Structured output stays at None until you set it on the model; Code needs another value.",
+        "A model the judge refuses is left out and leaves nothing behind. The result lists the reasons.",
+        "Nothing reaches Code or the coding API until a snapshot is published.",
+        "Undo: hold a model from the list at any time. Work already under way finishes.",
+      ],
+      addAllPublish: "Publish the Code snapshot right after adding",
+      addAllConfirm: "Add and activate",
+      resultTitle: "Result",
+      resultAdded: (added: number, attempted: number) => `${added} of ${attempted} chat models added and active.`,
+      resultLeftOut: (count: number) => `${count} left out, by reason:`,
+      resultPublished: (version: number) => `Published snapshot v${version}.`,
+      resultPublishNext: "Publish a snapshot so Code and the coding API see them.",
+      resultPublishFailed: "The models were added, but the snapshot was not published. Publish it from the snapshot card.",
+      resultDismiss: "Close",
       excludedTitle: "Chat models left out",
       excludedNote: "A model left out can still be added later, once chat lists and enables it.",
       excludedReason: (reason: string) =>
@@ -145,7 +150,7 @@ export const adminCodingCatalogMessages = defineAdminMessages({
       show: "Show",
       hide: "Hide",
       footnote:
-        "Adding makes one LLM call over the provider's documentation (agent budget, not user credits). The model stays inactive and invisible to Code and the coding API until you activate it.",
+        "Adding makes no LLM call and costs nothing. A single add leaves the model inactive and invisible to Code and the coding API until you activate it.",
       added: (name: string) => `Added ${name}. Check its coding settings.`,
     },
 
@@ -159,11 +164,14 @@ export const adminCodingCatalogMessages = defineAdminMessages({
         "It becomes a coding candidate again. The audit log keeps the link's values.",
       ],
       unlinked: (name: string) => `Removed ${name} from the coding catalog.`,
-      steps: { profile: "Model details", draft: "Capability draft", review: "Check", enable: "Activate" },
-      stepNotes: { profile: "from chat", draft: "LLM draft", review: "now", enable: "after the check" },
+      steps: { profile: "Model details", draft: "Capabilities", review: "Check", enable: "Activate" },
+      stepNotes: { profile: "from chat", draft: "LLM draft", registry: "chat registry", review: "now", enable: "after the check" },
       reviewTitle: "Check the coding settings, then activate once the judge passes.",
-      reviewBody: (provider: string) =>
-        `Tool calling and structured output were drafted by an LLM from ${provider}'s official documentation. Values inherited from chat cannot be changed here.`,
+      reviewBody: (origin: "registry" | "llm", provider: string) =>
+        (origin === "llm"
+          ? `Tool calling and structured output were drafted by an LLM from ${provider}'s official documentation.`
+          : "Tool calling comes from the chat registry; structured output stays at None until you set it.") +
+        " Values inherited from chat cannot be changed here.",
       inheritedTitle: "Inherited from chat",
       readOnly: "read-only",
       inheritedNote: "The chat registry row's values, read on every load. A change in chat shows here too, and reaches Code at the next snapshot.",
@@ -183,6 +191,7 @@ export const adminCodingCatalogMessages = defineAdminMessages({
       settingsTitle: "Coding settings",
       settingsNote: "Values set on this screen. The judge decides from these.",
       llmDraft: "LLM draft",
+      registryChip: "Chat registry",
       toolCallingHelp: "\"None\" is refused: Code's loop needs tool calls.",
       structuredOutputHelp: "Code needs one of these to read a plan; \"None\" is not served.",
       planFollowChat: (plan: string) => `Same as chat · ${plan}`,
@@ -209,33 +218,21 @@ export const adminCodingCatalogMessages = defineAdminMessages({
       save: "Save settings",
       saved: "Saved the coding settings.",
       reset: "Undo changes",
-      termsTitle: "Provider conditions",
-      termsFor: (provider: string) => `${provider} provider conditions`,
-      termsApplies: (date: string, count: number) => `Checked ${date}, applies to every model of this provider · used by ${count} coding model${count === 1 ? "" : "s"}`,
-      termsLegacy: "This model still reads its own terms: its provider has no record yet.",
-      termsMissing: "Not checked yet. A model of this provider cannot be activated until it is.",
-      termsAllows: "Allows resale and coding agents",
-      termsDenies: "Resale and coding-agent use not confirmed",
-      termsLabel: "Terms",
-      retentionLabel: "Retention",
-      regionLabel: "Region",
-      termsRecheck: "Check again under Provider conditions",
       sourcesTitle: "Sources",
       sourcesRead: "Pages read",
-      sourcesAt: "Drafted",
+      sourcesAt: "Read on",
       sourcesNone: "No pages recorded.",
+      sourcesRegistry: "Read from the chat registry. No page was read.",
       officialSources: "Official sources",
       verdictTitle: "Judge",
       verdictPass: "Can be activated",
       verdictServing: "Active",
       verdictFail: "Cannot be activated yet",
-      verdictPassItems: (tools: string, weight: number, floor: number | null, provider: string) => [
+      verdictPassItems: (tools: string, weight: number, floor: number | null) => [
         `Tool calling: ${tools}`,
         floor === null ? `Credit weight ×${weight}` : `Credit weight ×${weight}, floor ×${floor}`,
-        `Terms: ${provider} allows resale and coding-agent use`,
         "Sources: the provider's own documentation",
       ],
-      warning: "Warning",
       activate: "Activate",
       activateNext: "Next: the confirmation shows the channels and credits.",
       hold: "Hold",
@@ -253,71 +250,13 @@ export const adminCodingCatalogMessages = defineAdminMessages({
         version === null
           ? "Code's managed path uses it after the first snapshot is published."
           : `Code's managed path uses it after the next snapshot. Snapshot v${version} is valid until ${until}.`,
-      effectJudge: "The judge passed: tool calling, credit floor, terms and official sources.",
-      conditions: (provider: string, date: string | null) => `Provider conditions: ${provider} · ${date ? `checked ${date}` : "not checked"}`,
+      effectJudge: "The judge passed: tool calling, credit floor and official sources.",
       undo: "Undo: hold it from the list at any time. Work already under way finishes.",
       publishAfter: "Publish the Code snapshot right after activating",
       confirm: "Activate",
       done: (name: string) => `Activated ${name}.`,
       donePublished: (name: string, version: number) => `Activated ${name} and published snapshot v${version}.`,
       donePublishFailed: (name: string) => `Activated ${name}, but the snapshot was not published. Publish it from the snapshot card.`,
-    },
-
-    providers: {
-      bannerTitle: "Provider conditions are checked once per provider",
-      bannerBody:
-        "Terms, data retention and region are used for every coding model of the provider. 90 days after the check they need a new one, and no new model of that provider can be activated until it is done.",
-      title: "Provider conditions",
-      note: "\"Check again\" makes an LLM read the provider's terms and retention pages and draft the conditions. The draft is saved only when an operator applies it.",
-      columns: {
-        provider: "Provider",
-        terms: "Terms",
-        resale: "Resale · coding agents",
-        retention: "Retention",
-        region: "Region",
-        checked: "Checked",
-        state: "Status",
-        action: "Check again (LLM draft)",
-      },
-      counts: (models: number, candidates: number) => `${models} coding model${models === 1 ? "" : "s"}${candidates ? ` · ${candidates} candidate${candidates === 1 ? "" : "s"}` : ""}`,
-      legacy: (count: number) => `${count} still read their own terms`,
-      allowed: "Allowed",
-      denied: "Not allowed",
-      unchecked: "Unchecked",
-      state: { confirmed: "Checked", expired: "Check again", missing: "Unchecked", invalid: "Unreadable" },
-      expiredSince: (date: string) => `due ${date}`,
-      dueOn: (date: string) => `next check by ${date}`,
-      recheck: "Check again",
-      start: "Start check",
-      viewDraft: "View draft",
-      drafting: "Drafting…",
-      notDraftable: "No documentation hosts",
-      count: { confirmed: (n: number) => `${n} checked`, expired: (n: number) => `${n} need a check`, missing: (n: number) => `${n} unchecked` },
-      startTitle: (provider: string) => `Check ${provider}'s conditions`,
-      startDescription: "Enter the provider's official terms page and data retention page. One LLM call reads them and drafts the conditions.",
-      termsUrl: "Terms page URL",
-      retentionUrl: "Data retention page URL",
-      extraUrl: "Region page URL (optional)",
-      hosts: (hosts: string) => `Allowed hosts: ${hosts}`,
-      startConfirm: "Read and draft",
-      draftTitle: (provider: string) => `${provider} re-check draft`,
-      draftMeta: (when: string) => `${when} · LLM draft · not saved yet`,
-      compare: { item: "Item", current: (date: string | null) => (date ? `Current (${date})` : "Current"), draft: "Draft" },
-      rows: { resale: "Resale · coding agents", terms: "Terms page", retention: "Retention page", region: "Region" },
-      unchanged: "unchanged",
-      changed: "changed",
-      none: "—",
-      checksOfficial: (hosts: string) => `Every cited URL is on the provider's official domain (${hosts})`,
-      checksEvidence: (text: string) => `Evidence: ${text}`,
-      applyNote: (provider: string, count: number) =>
-        `Applying recalculates the judge for ${count} ${provider} coding model${count === 1 ? "" : "s"}.`,
-      discard: "Discard",
-      apply: "Apply draft",
-      applied: (provider: string) => `Applied ${provider}'s conditions.`,
-      discarded: "Discarded the draft.",
-      draftReady: (provider: string) => `The re-check draft for ${provider} is ready. Compare and apply it.`,
-      footnote:
-        "A check is one LLM call over the provider's documentation (agent budget). The model's answer is not saved as is: the cited URLs are checked against the provider's official domains first, and an operator applies it.",
     },
 
     toast: {
@@ -337,16 +276,14 @@ export const adminCodingCatalogMessages = defineAdminMessages({
     description: "Code와 코딩 API에서 쓸 코딩 모델을 고르고 켭니다. 채팅 모델을 연결하면 이름·단가·컨텍스트·최대 출력은 채팅 값을 그대로 씁니다.",
     refresh: "새로고침",
     addDedicated: "코딩 모델 추가",
-    views: { models: "모델", providers: "공급자 조건" },
-    viewsLabel: "코딩 카탈로그 구역",
 
     tiles: {
       active: "활성",
       activeDetail: (version: number | null, inactive: number) =>
         `${version === null ? "발행한 스냅샷 없음" : `Code 스냅샷 v${version}에 반영`} · 비활성 ${inactive}`,
       attention: "확인 필요",
-      attentionDetail: (floor: number, terms: number, other: number) =>
-        [floor ? `크레딧 하한 미만 ${floor}` : "", terms ? `공급자 조건 ${terms}` : "", other ? `기타 ${other}` : ""]
+      attentionDetail: (floor: number, other: number) =>
+        [floor ? `크레딧 하한 미만 ${floor}` : "", other ? `기타 ${other}` : ""]
           .filter(Boolean)
           .join(" · ") || "기다리는 모델 없음",
       candidates: "채팅 후보",
@@ -426,7 +363,7 @@ export const adminCodingCatalogMessages = defineAdminMessages({
     candidates: {
       title: "채팅 모델 중 코딩 후보",
       note:
-        "활성이고 usageClass standard 이상인 채팅 모델 가운데 아직 코딩 카탈로그에 없는 모델입니다. 추가를 누르면 LLM이 공급자 문서를 읽어 Tool calling·구조화 출력 초안을 만듭니다.",
+        "활성이고 usageClass standard 이상인 채팅 모델 가운데 아직 코딩 카탈로그에 없는 모델입니다. 추가하면 채팅 레지스트리에서 Tool calling을 가져오며 LLM은 호출하지 않습니다.",
       summaryOpen: "후보 보기",
       back: "목록으로",
       none: "조건에 맞는 채팅 모델은 모두 코딩 카탈로그에 있습니다.",
@@ -439,18 +376,26 @@ export const adminCodingCatalogMessages = defineAdminMessages({
       yes: "지원",
       no: "없음",
       inheritNote: "위 값은 채팅에서 상속합니다. 코딩 카탈로그에서는 Tool calling·구조화 출력·노출 채널만 정합니다.",
-      termsConfirmed: (provider: string, date: string) => `${provider} 공급자 조건 확인됨 · ${date}`,
-      termsExpired: (provider: string) => `${provider} 공급자 조건 다시 확인 필요 — 확인 후 90일 경과`,
-      termsMissing: (provider: string) => `${provider} 공급자 조건 미확인 — 추가 후 공급자 조건에서 확인해야 활성화할 수 있습니다`,
       add: "코딩 카탈로그에 추가",
-      adding: "초안 만드는 중…",
-      addingSteps: (elapsed: string) => `공급자 문서를 읽는 중 · ${elapsed}`,
-      urlTitle: (name: string) => `${name} 문서 주소`,
-      urlDescription: "초안은 아래 공식 문서를 읽습니다. 공급자 기본 주소가 채워져 있고, 문서가 옮겨졌으면 바꿔 넣으면 됩니다.",
-      urlDescriptionNoDefault: "이 공급자는 기본 문서 주소가 없습니다. Tool calling과 구조화 출력을 적은 공식 문서 주소를 넣어 주세요.",
-      toolUrlLabel: "Tool calling 문서",
-      structuredUrlLabel: "구조화 출력 문서 (선택)",
-      urlConfirm: "초안 만들고 추가",
+      adding: "추가 중…",
+      addAll: "채팅 모델 한 번에 추가",
+      addAllTitle: (count: number) => `채팅 모델 ${count}개를 코딩 카탈로그에 추가할까요?`,
+      addAllEffects: (count: number) => [
+        `후보 ${count}개 가운데 판정을 통과한 모델을 Code와 코딩 API에 채팅 크레딧 그대로 연결하고 활성화합니다.`,
+        "Tool calling은 채팅 레지스트리에서 가져옵니다. 구조화 출력은 모델에서 정하기 전까지 없음이며, Code에서 쓰려면 다른 값이 필요합니다.",
+        "판정에서 거절된 모델은 추가하지 않고 아무것도 남기지 않습니다. 거절 사유는 결과에 건수로 보입니다.",
+        "스냅샷을 발행하기 전에는 Code와 코딩 API에 보이지 않습니다.",
+        "되돌리기: 목록에서 언제든 보류합니다. 진행 중인 작업은 끝까지 갑니다.",
+      ],
+      addAllPublish: "추가 후 바로 Code 스냅샷 발행",
+      addAllConfirm: "추가하고 활성화",
+      resultTitle: "결과",
+      resultAdded: (added: number, attempted: number) => `채팅 모델 ${attempted}개 중 ${added}개를 추가하고 활성화했습니다.`,
+      resultLeftOut: (count: number) => `${count}개는 추가하지 않았습니다. 사유별 건수:`,
+      resultPublished: (version: number) => `스냅샷 v${version}을 발행했습니다.`,
+      resultPublishNext: "Code와 코딩 API에 보이려면 스냅샷을 발행해 주세요.",
+      resultPublishFailed: "모델은 추가했지만 스냅샷은 발행되지 않았습니다. 스냅샷 카드에서 발행해 주세요.",
+      resultDismiss: "닫기",
       excludedTitle: "후보에서 제외된 채팅 모델",
       excludedNote: "채팅에서 활성화·공개되면 나중에 다시 후보가 됩니다.",
       excludedReason: (reason: string) =>
@@ -466,7 +411,7 @@ export const adminCodingCatalogMessages = defineAdminMessages({
       show: "목록 펼치기",
       hide: "접기",
       footnote:
-        "추가 버튼은 초안만 만듭니다 — 공급자 문서를 읽는 LLM 호출 1회이며 비용은 에이전트 예산에서 나갑니다(사용자 크레딧과 무관). 활성화 전까지 Code와 코딩 API에 보이지 않습니다.",
+        "추가는 LLM을 호출하지 않아 비용이 들지 않습니다. 하나씩 추가한 모델은 활성화하기 전까지 Code와 코딩 API에 보이지 않습니다.",
       added: (name: string) => `${name}을(를) 추가했습니다. 코딩 전용 설정을 확인해 주세요.`,
     },
 
@@ -477,11 +422,14 @@ export const adminCodingCatalogMessages = defineAdminMessages({
       unlinkTitle: (name: string) => `${name}을(를) 코딩 카탈로그에서 뺄까요?`,
       unlinkEffects: ["코딩 연결만 지웁니다. 채팅 모델은 그대로입니다.", "다시 코딩 후보가 됩니다. 연결 값은 감사 기록에 남습니다."],
       unlinked: (name: string) => `${name}을(를) 코딩 카탈로그에서 뺐습니다.`,
-      steps: { profile: "모델 정보", draft: "코딩 능력 초안", review: "확인", enable: "활성화" },
-      stepNotes: { profile: "채팅에서 상속", draft: "LLM 초안", review: "지금 할 일", enable: "확인 후" },
+      steps: { profile: "모델 정보", draft: "코딩 능력", review: "확인", enable: "활성화" },
+      stepNotes: { profile: "채팅에서 상속", draft: "LLM 초안", registry: "채팅 레지스트리", review: "지금 할 일", enable: "확인 후" },
       reviewTitle: "코딩 전용 설정을 확인하고, 판정이 통과하면 활성화하세요.",
-      reviewBody: (provider: string) =>
-        `Tool calling·구조화 출력은 LLM이 ${provider} 공식 문서에서 읽은 값입니다. 채팅에서 상속한 값은 이 화면에서 바꿀 수 없습니다.`,
+      reviewBody: (origin: "registry" | "llm", provider: string) =>
+        (origin === "llm"
+          ? `Tool calling·구조화 출력은 LLM이 ${provider} 공식 문서에서 읽은 값입니다.`
+          : "Tool calling은 채팅 레지스트리에서 가져왔고, 구조화 출력은 정하기 전까지 없음입니다.") +
+        " 채팅에서 상속한 값은 이 화면에서 바꿀 수 없습니다.",
       inheritedTitle: "채팅에서 상속",
       readOnly: "읽기 전용",
       inheritedNote: "채팅 레지스트리 행의 값을 그대로 씁니다. 채팅에서 바꾸면 여기도 바뀌고, Code에는 다음 스냅샷부터 반영됩니다.",
@@ -501,6 +449,7 @@ export const adminCodingCatalogMessages = defineAdminMessages({
       settingsTitle: "코딩 전용 설정",
       settingsNote: "이 화면에서 정하는 값입니다. 판정 함수가 이 값으로 통과 여부를 계산합니다.",
       llmDraft: "LLM 초안",
+      registryChip: "채팅 레지스트리",
       toolCallingHelp: "\"없음\"이면 판정에서 거절됩니다 — Code의 작업 루프는 도구 호출이 필요합니다.",
       structuredOutputHelp: "Code가 계획을 읽으려면 이 중 하나가 필요합니다. \"없음\"이면 Code에서 쓰지 않습니다.",
       planFollowChat: (plan: string) => `채팅과 같음 · ${plan}`,
@@ -527,33 +476,21 @@ export const adminCodingCatalogMessages = defineAdminMessages({
       save: "설정 저장",
       saved: "코딩 전용 설정을 저장했습니다.",
       reset: "변경 취소",
-      termsTitle: "공급자 조건",
-      termsFor: (provider: string) => `${provider} 공급자 조건`,
-      termsApplies: (date: string, count: number) => `${date} 확인, 이 공급자의 모든 모델에 적용 · 코딩 모델 ${count}개가 이 확인을 씁니다`,
-      termsLegacy: "이 모델은 아직 자기 행의 약관 값을 씁니다 — 공급자 조건이 아직 없습니다.",
-      termsMissing: "아직 확인하지 않았습니다. 확인 전에는 이 공급자의 모델을 활성화할 수 없습니다.",
-      termsAllows: "재판매·코딩 에이전트 허용",
-      termsDenies: "재판매·코딩 에이전트 허용 미확인",
-      termsLabel: "약관",
-      retentionLabel: "보존 정책",
-      regionLabel: "처리 리전",
-      termsRecheck: "공급자 조건 화면에서 다시 확인",
       sourcesTitle: "출처",
       sourcesRead: "읽은 문서",
-      sourcesAt: "초안 시각",
+      sourcesAt: "읽은 날",
       sourcesNone: "기록된 문서가 없습니다.",
+      sourcesRegistry: "채팅 레지스트리에서 가져왔습니다. 읽은 문서는 없습니다.",
       officialSources: "공식 출처",
       verdictTitle: "판정 결과",
       verdictPass: "활성화할 수 있습니다",
       verdictServing: "활성",
       verdictFail: "아직 활성화할 수 없습니다",
-      verdictPassItems: (tools: string, weight: number, floor: number | null, provider: string) => [
+      verdictPassItems: (tools: string, weight: number, floor: number | null) => [
         `Tool calling — ${tools}`,
         floor === null ? `크레딧 ×${weight}` : `크레딧 ×${weight} — 하한 ×${floor} 이상입니다`,
-        `약관 — ${provider}이(가) 재판매·코딩 에이전트 사용을 허용합니다`,
         "출처 — 공급자 공식 문서입니다",
       ],
-      warning: "경고",
       activate: "활성화",
       activateNext: "다음: 확인 대화상자에서 노출 범위와 크레딧을 확인합니다",
       hold: "보류",
@@ -571,70 +508,13 @@ export const adminCodingCatalogMessages = defineAdminMessages({
         version === null
           ? "Code 관리형 경로에는 첫 스냅샷 발행 후 반영됩니다."
           : `Code 관리형 경로에는 다음 스냅샷 발행 후 반영됩니다. 지금 스냅샷 v${version}는 ${until}까지 유효합니다.`,
-      effectJudge: "판정 통과 — Tool calling · 크레딧 하한 · 약관 · 공식 출처",
-      conditions: (provider: string, date: string | null) => `공급자 조건: ${provider} · ${date ? `${date} 확인` : "미확인"}`,
+      effectJudge: "판정 통과 — Tool calling · 크레딧 하한 · 공식 출처",
       undo: "되돌리기: 목록에서 언제든 보류합니다. 진행 중인 작업은 끝까지 갑니다.",
       publishAfter: "활성화 후 바로 Code 스냅샷 발행",
       confirm: "활성화",
       done: (name: string) => `${name}을(를) 활성화했습니다.`,
       donePublished: (name: string, version: number) => `${name}을(를) 활성화하고 스냅샷 v${version}을 발행했습니다.`,
       donePublishFailed: (name: string) => `${name}을(를) 활성화했지만 스냅샷은 발행되지 않았습니다. 스냅샷 카드에서 발행해 주세요.`,
-    },
-
-    providers: {
-      bannerTitle: "공급자 조건은 공급자 단위로 한 번 확인합니다",
-      bannerBody:
-        "확인한 약관·보존 정책·처리 리전은 그 공급자의 모든 코딩 모델 판정에 쓰입니다. 확인 후 90일이 지나면 \"다시 확인 필요\"로 바뀌고, 그 공급자의 새 모델은 다시 확인할 때까지 활성화할 수 없습니다.",
-      title: "공급자 조건",
-      note: "\"다시 확인\"을 누르면 LLM이 공급자의 약관·보존 문서를 읽어 초안을 만듭니다. 초안은 운영자가 적용해야 저장됩니다.",
-      columns: {
-        provider: "공급자",
-        terms: "약관",
-        resale: "재판매·코딩 에이전트",
-        retention: "보존 정책",
-        region: "처리 리전",
-        checked: "확인일",
-        state: "상태",
-        action: "다시 확인 (LLM 초안)",
-      },
-      counts: (models: number, candidates: number) => `코딩 모델 ${models}개${candidates ? ` · 후보 ${candidates}` : ""}`,
-      legacy: (count: number) => `${count}개는 아직 자기 행 약관 사용`,
-      allowed: "허용",
-      denied: "불허",
-      unchecked: "미확인",
-      state: { confirmed: "확인됨", expired: "다시 확인 필요", missing: "미확인", invalid: "읽을 수 없음" },
-      expiredSince: (date: string) => `${date} 기한 경과`,
-      dueOn: (date: string) => `${date}까지 유효`,
-      recheck: "다시 확인",
-      start: "확인 시작",
-      viewDraft: "초안 보는 중",
-      drafting: "초안 만드는 중…",
-      notDraftable: "공식 문서 도메인 없음",
-      count: { confirmed: (n: number) => `확인됨 ${n}`, expired: (n: number) => `다시 확인 필요 ${n}`, missing: (n: number) => `미확인 ${n}` },
-      startTitle: (provider: string) => `${provider} 공급자 조건 확인`,
-      startDescription: "공급자의 공식 약관 문서와 데이터 보존 문서 주소를 넣어 주세요. LLM 호출 1회로 읽고 초안을 만듭니다.",
-      termsUrl: "약관 문서 주소",
-      retentionUrl: "데이터 보존 문서 주소",
-      extraUrl: "처리 리전 문서 주소 (선택)",
-      hosts: (hosts: string) => `허용 도메인: ${hosts}`,
-      startConfirm: "읽고 초안 만들기",
-      draftTitle: (provider: string) => `${provider} 다시 확인 초안`,
-      draftMeta: (when: string) => `${when} · LLM 초안 · 아직 저장되지 않았습니다`,
-      compare: { item: "항목", current: (date: string | null) => (date ? `지금 값 (${date})` : "지금 값"), draft: "초안" },
-      rows: { resale: "재판매·코딩 에이전트", terms: "약관 문서", retention: "보존 정책 문서", region: "처리 리전" },
-      unchanged: "변경 없음",
-      changed: "바뀜",
-      none: "—",
-      checksOfficial: (hosts: string) => `인용 URL이 모두 공급자 공식 도메인(${hosts})에 있습니다`,
-      checksEvidence: (text: string) => `근거 문장 — ${text}`,
-      applyNote: (provider: string, count: number) => `적용하면 ${provider} 코딩 모델 ${count}개의 판정을 다시 계산합니다.`,
-      discard: "버리기",
-      apply: "초안 적용",
-      applied: (provider: string) => `${provider} 공급자 조건을 적용했습니다.`,
-      discarded: "초안을 버렸습니다.",
-      draftReady: (provider: string) => `${provider} 다시 확인 초안이 준비됐습니다. 비교한 뒤 적용하세요.`,
-      footnote:
-        "다시 확인은 공급자 문서를 읽는 LLM 호출 1회이며 비용은 에이전트 예산에서 나갑니다. 모델 출력은 그대로 저장되지 않고, 인용 URL이 공급자 공식 도메인인지 한 번 검사한 뒤 운영자가 적용합니다.",
     },
 
     toast: {

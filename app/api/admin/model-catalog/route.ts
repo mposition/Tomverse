@@ -55,7 +55,7 @@ import {
 
 // The dynamic model catalogue (image and coding; video has no activation
 // policy yet). GET reads the image catalogue; the coding catalogue's read, its
-// chat links and provider conditions are /api/admin/model-catalog/coding.
+// chat links are /api/admin/model-catalog/coding.
 // Writes here serve both: every write commits with its audit row and turning a
 // model on runs the category's judge (lib/modelCatalogCore.ts).
 

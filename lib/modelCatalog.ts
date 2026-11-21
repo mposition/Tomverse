@@ -21,8 +21,6 @@ import { resolveImageProviderBudget } from "@/lib/imageProviderBudget";
 import {
   SNAPSHOT_RENEWAL_WINDOW_MS,
   catalogContentHash,
-  codingActivationBlockers,
-  codingCatalogRowOf,
   codingCatalogRowSchema,
   codingProviderTermsSchema,
   decideSnapshotRenewal,
@@ -222,15 +220,15 @@ export const chatModelFacts = (model: AiModel): ChatModelFacts => {
 export const loadChatModelFacts = async (): Promise<ChatModelFacts[]> =>
   (await getRuntimeModels({ includeCatalogDeleted: true })).map(chatModelFacts);
 
+/**
+ * A provider's conditions as applied before they were dropped as an admission
+ * rule (owner decision 2026-11-21). Read only: a row of that provider still
+ * carries them into its snapshot row, unjudged, so published content holds.
+ */
 export type CodingProviderTermsRecord = {
   provider: string;
-  /** Null when nothing was applied yet, or the stored record does not parse. */
+  /** Null when nothing was applied, or the stored record does not parse. */
   terms: CodingProviderTerms | null;
-  invalid: boolean;
-  draft: unknown;
-  draftCreatedAt: Date | null;
-  updatedByEmail: string | null;
-  updatedAt: Date;
 };
 
 export const loadCodingProviderTerms = async (
@@ -238,15 +236,7 @@ export const loadCodingProviderTerms = async (
 ): Promise<CodingProviderTermsRecord[]> =>
   (await client.codingProviderTerms.findMany({ orderBy: { provider: "asc" } })).map((row) => {
     const parsed = row.terms === null ? null : codingProviderTermsSchema.safeParse(row.terms);
-    return {
-      provider: row.provider,
-      terms: parsed?.success ? parsed.data : null,
-      invalid: parsed !== null && !parsed.success,
-      draft: row.draft,
-      draftCreatedAt: row.draftCreatedAt ?? null,
-      updatedByEmail: row.updatedByEmail ?? null,
-      updatedAt: row.updatedAt,
-    };
+    return { provider: row.provider, terms: parsed?.success ? parsed.data : null };
   });
 
 export type CodingCatalogEntry = {
@@ -258,11 +248,6 @@ export type CodingCatalogEntry = {
   profile: CodingResolvedRow | null;
   problem: string | null;
   admission: CodingAdmission | null;
-  warnings: string[];
-  /** Why it could not be turned on now, beyond the judge (provider conditions past 90 days). */
-  activationBlockers: string[];
-  termsSource: "provider" | "model" | null;
-  termsCheckedAt: string | null;
   /** The stored row (a dedicated profile, or a chat link's own values). */
   stored: unknown;
   draft: unknown;
@@ -286,10 +271,9 @@ export const codingLookups = (context: CodingCatalogContext) => {
 
 export const resolveCodingRow = (
   row: { modelId: string; enabled: boolean | null; holdReason: string | null; profile: unknown; draft: unknown; draftCreatedAt: Date | null },
-  lookups: ReturnType<typeof codingLookups>,
-  now: Date
+  lookups: ReturnType<typeof codingLookups>
 ): CodingCatalogEntry => {
-  const resolution = resolveCodingEntry({ modelId: row.modelId, profile: row.profile, ...lookups, now });
+  const resolution = resolveCodingEntry({ modelId: row.modelId, profile: row.profile, ...lookups });
   return {
     modelId: row.modelId,
     enabled: row.enabled,
@@ -298,10 +282,6 @@ export const resolveCodingRow = (
     profile: resolution.row,
     problem: resolution.problem,
     admission: resolution.row || resolution.problem !== "no_profile" ? judgeCodingResolution(resolution, judgeCoding) : null,
-    warnings: resolution.warnings,
-    activationBlockers: codingActivationBlockers(resolution),
-    termsSource: resolution.termsSource,
-    termsCheckedAt: resolution.termsCheckedAt,
     stored: row.profile,
     draft: row.draft,
     draftCreatedAt: row.draftCreatedAt ?? null,
@@ -309,13 +289,13 @@ export const resolveCodingRow = (
 };
 
 /**
- * Every coding row, resolved: chat links read the chat registry now, and all
- * rows read their provider's conditions. `context` lets a caller that already
- * loaded them (the admin read) avoid a second read.
+ * Every coding row, resolved: chat links read the chat registry now. `context`
+ * lets a caller that already loaded the registry (the admin read) avoid a
+ * second read.
  */
 export const loadCodingCatalog = async (
   client: Pick<Prisma.TransactionClient, "modelCatalogEntry" | "codingProviderTerms"> = prisma,
-  options: { now?: Date; context?: CodingCatalogContext } = {}
+  options: { context?: CodingCatalogContext } = {}
 ): Promise<CodingCatalogEntry[]> => {
   const [rows, context] = await Promise.all([
     client.modelCatalogEntry.findMany({
@@ -326,8 +306,7 @@ export const loadCodingCatalog = async (
       Promise.all([loadChatModelFacts(), loadCodingProviderTerms(client)]).then(([chat, providerTerms]) => ({ chat, providerTerms })),
   ]);
   const lookups = codingLookups(context);
-  const now = options.now ?? new Date();
-  return rows.map((row) => resolveCodingRow(row, lookups, now));
+  return rows.map((row) => resolveCodingRow(row, lookups));
 };
 
 /**
@@ -335,11 +314,9 @@ export const loadCodingCatalog = async (
  * resolved values, inherited ones included, with where each row is offered.
  */
 export const servableCodingRows = (entries: readonly CodingCatalogEntry[]): CodingCatalogRow[] =>
-  entries.flatMap((entry) => {
-    if (entry.enabled !== true || entry.holdReason || !entry.profile || entry.admission?.admitted !== true) return [];
-    const row = codingCatalogRowOf(entry.profile);
-    return row ? [row] : [];
-  });
+  entries.flatMap((entry) =>
+    entry.enabled !== true || entry.holdReason || !entry.profile || entry.admission?.admitted !== true ? [] : [entry.profile]
+  );
 
 /** A snapshot's rows that parse; a row published before links existed reads as a dedicated Code row. */
 export const parseSnapshotRows = (models: readonly unknown[]): CodingCatalogRow[] =>

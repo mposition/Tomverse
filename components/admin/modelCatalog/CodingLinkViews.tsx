@@ -20,8 +20,9 @@ import {
   CODING_TOOL_CALLING_VALUES,
   type CodingCandidateView,
   type CodingCatalogItem,
-  type CodingProviderRow,
+  type CodingLinkAllResult,
   type CodingSettingsValue,
+  capabilityOrigin,
   codingDedicatedSettings,
   codingRefusals,
   codingServing,
@@ -30,11 +31,12 @@ import {
   codingSettingsRequest,
   codingStage,
   effectiveCreditWeight,
+  linkAllReasonRows,
 } from "@/lib/adminModelCatalogFlow";
 
 // The coding tab's chat-link screens (Figma 02 and 03): the candidates a chat
-// model can be linked from, and one link's detail -- what it inherits from
-// chat (read-only), its own settings, its provider's conditions, the judge.
+// model can be linked from (one at a time, or all at once), and one link's
+// detail -- what it inherits from chat (read-only), its own settings, the judge.
 
 const money = (usd: number) => usd.toFixed(2);
 
@@ -45,39 +47,91 @@ const factRow = (label: string, value: React.ReactNode) => (
   </div>
 );
 
-function TermsLine({ c, provider, terms }: { c: CodingMessages; provider: string; terms: CodingCandidateView["terms"] }) {
-  const tone = terms.state === "confirmed" ? "text-emerald-300" : "text-amber-300";
-  const text =
-    terms.state === "confirmed" && terms.checkedAt
-      ? c.candidates.termsConfirmed(provider, terms.checkedAt)
-      : terms.state === "expired"
-        ? c.candidates.termsExpired(provider)
-        : c.candidates.termsMissing(provider);
+/** What the last "add all" run did: how many were added and the judge's reasons for the rest, by count. */
+function LinkAllResult({
+  c,
+  result,
+  publish,
+  reasonText,
+  onClose,
+}: {
+  c: CodingMessages;
+  result: CodingLinkAllResult;
+  /** Null: nothing was published for this run. A number: the snapshot version. "failed": the publish was asked for and did not happen. */
+  publish: number | "failed" | null;
+  reasonText: (code: string) => string;
+  onClose: () => void;
+}) {
+  const rows = linkAllReasonRows(result);
+  const leftOut = result.attempted - result.added.length;
   return (
-    <p className={`flex gap-1.5 text-xs font-bold ${tone}`} data-testid="coding-candidate-terms" data-state={terms.state}>
-      <span aria-hidden>●</span>
-      {text}
-    </p>
+    <section
+      className="flex flex-col gap-2 rounded-2xl border border-blue-500/40 bg-blue-500/10 p-4 text-sm"
+      role="status"
+      data-testid="coding-link-all-result"
+      data-added={result.added.length}
+    >
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="font-bold text-zinc-100">{c.candidates.resultTitle}</p>
+          <p className="text-zinc-300">{c.candidates.resultAdded(result.added.length, result.attempted)}</p>
+        </div>
+        <button type="button" onClick={onClose} className="text-xs font-bold text-zinc-400 underline hover:text-zinc-100">
+          {c.candidates.resultDismiss}
+        </button>
+      </div>
+      {leftOut > 0 ? (
+        <div>
+          <p className="text-xs font-bold text-amber-300">{c.candidates.resultLeftOut(leftOut)}</p>
+          <ul className="mt-1 list-disc pl-4 text-xs text-zinc-300" data-testid="coding-link-all-reasons">
+            {rows.map((row) => (
+              <li key={row.reason} data-reason={row.reason}>
+                {reasonText(row.sample)} · {row.count}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {result.added.length > 0 ? (
+        <p className={`text-xs font-bold ${publish === "failed" ? "text-red-300" : "text-blue-300"}`} data-testid="coding-link-all-publish">
+          {publish === "failed"
+            ? c.candidates.resultPublishFailed
+            : publish === null
+              ? c.candidates.resultPublishNext
+              : c.candidates.resultPublished(publish)}
+        </p>
+      ) : null}
+    </section>
   );
 }
 
-/** The chat models that can become coding links, each with one add button. */
+/** The chat models that can become coding links, each with one add button, and one button to add them all. */
 export function CodingCandidates({
   c,
   candidates,
   excluded,
   adding,
-  draftConfigured,
+  addingAll,
+  result,
+  resultPublish,
+  reasonText,
   onAdd,
+  onAddAll,
+  onCloseResult,
   onBack,
 }: {
   c: CodingMessages;
   candidates: readonly CodingCandidateView[];
   excluded: readonly { id: string; name: string; provider: string; reason: string }[];
-  /** The candidate being drafted and how long it has taken, if any. */
-  adding: { id: string; elapsed: string } | null;
-  draftConfigured: boolean;
+  /** The candidate being added, if any. */
+  adding: string | null;
+  addingAll: boolean;
+  result: CodingLinkAllResult | null;
+  resultPublish: number | "failed" | null;
+  reasonText: (code: string) => string;
   onAdd: (candidate: CodingCandidateView) => void;
+  onAddAll: () => void;
+  onCloseResult: () => void;
   onBack: () => void;
 }) {
   const [showExcluded, setShowExcluded] = useState(false);
@@ -97,11 +151,19 @@ export function CodingCandidates({
           </span>
         }
         description={c.candidates.note}
+        action={
+          candidates.length > 0 ? (
+            <AdminWriteButton disabled={adding !== null || addingAll} onClick={onAddAll} data-testid="coding-candidates-add-all">
+              {addingAll ? c.candidates.adding : c.candidates.addAll}
+            </AdminWriteButton>
+          ) : undefined
+        }
       >
+        {result ? <LinkAllResult c={c} result={result} publish={resultPublish} reasonText={reasonText} onClose={onCloseResult} /> : null}
         {candidates.length === 0 ? <p className="text-sm text-zinc-400">{c.candidates.none}</p> : null}
         <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-3">
           {candidates.map((candidate) => {
-            const busy = adding?.id === candidate.id;
+            const busy = adding === candidate.id;
             return (
               <article
                 key={candidate.id}
@@ -129,22 +191,20 @@ export function CodingCandidates({
                   {factRow(c.candidates.facts.weight, `×${candidate.creditWeight}`)}
                 </dl>
                 <p className="text-xs text-zinc-500">{c.candidates.inheritNote}</p>
-                <TermsLine c={c} provider={candidate.provider} terms={candidate.terms} />
-                {busy ? (
-                  <div className="rounded-xl border border-blue-500/40 bg-blue-500/10 p-3 text-xs" role="status">
-                    <p className="flex items-center gap-2 font-bold text-blue-300">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-                      {c.candidates.addingSteps(adding.elapsed)}
-                    </p>
-                  </div>
-                ) : null}
                 <AdminWriteButton
                   className="mt-auto"
-                  disabled={!draftConfigured || adding !== null}
+                  disabled={adding !== null || addingAll}
                   onClick={() => onAdd(candidate)}
                   data-testid="coding-candidate-add"
                 >
-                  {busy ? c.candidates.adding : c.candidates.add}
+                  {busy ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                      {c.candidates.adding}
+                    </>
+                  ) : (
+                    c.candidates.add
+                  )}
                 </AdminWriteButton>
               </article>
             );
@@ -224,14 +284,18 @@ function SettingRow({ title, code, children }: { title: string; code: string; ch
   );
 }
 
-const LlmChip = ({ c, show }: { c: CodingMessages; show: boolean }) =>
-  show ? <span className="rounded-md bg-blue-500/15 px-1.5 py-0.5 text-[11px] font-bold text-blue-300">{c.detail.llmDraft}</span> : null;
+/** Marks a capability value that is still the one the link was made with, and where it came from. */
+const OriginChip = ({ c, origin, show }: { c: CodingMessages; origin: "registry" | "llm"; show: boolean }) =>
+  show ? (
+    <span className="rounded-md bg-blue-500/15 px-1.5 py-0.5 text-[11px] font-bold text-blue-300">
+      {origin === "llm" ? c.detail.llmDraft : c.detail.registryChip}
+    </span>
+  ) : null;
 
-/** One chat link: what it inherits, its own settings, its provider's conditions and the judge. */
+/** One chat link: what it inherits, its own settings and the judge. */
 export function CodingLinkDetail({
   c,
   item,
-  provider,
   value,
   busy,
   reasonText,
@@ -246,11 +310,9 @@ export function CodingLinkDetail({
   onActivate,
   onHold,
   onUnlink,
-  onProviders,
 }: {
   c: CodingMessages;
   item: CodingCatalogItem;
-  provider: CodingProviderRow | null;
   /** The settings form, as edited. */
   value: CodingSettingsValue;
   busy: boolean;
@@ -266,9 +328,9 @@ export function CodingLinkDetail({
   onActivate: () => void;
   onHold: () => void;
   onUnlink: () => void;
-  onProviders: () => void;
 }) {
   const link = item.link;
+  const origin = link ? capabilityOrigin(link) : "registry";
   const chat = item.chat;
   const stage = codingStage(item);
   const serving = codingServing(item);
@@ -282,9 +344,13 @@ export function CodingLinkDetail({
     id,
     label: c.detail.steps[id],
     state: STEP_STATES[stage][index],
-    note: id === "draft" && link?.evidence ? `${c.detail.stepNotes.draft} ${link.evidence.draftedAt}` : c.detail.stepNotes[id],
+    note:
+      id === "draft"
+        ? origin === "llm" && link?.evidence
+          ? `${c.detail.stepNotes.draft} ${link.evidence.draftedAt}`
+          : c.detail.stepNotes.registry
+        : c.detail.stepNotes[id],
   }));
-  const terms = provider?.terms ?? null;
 
   return (
     <div className="flex min-w-0 flex-col gap-4" data-testid="coding-link-detail" data-stage={stage}>
@@ -333,7 +399,7 @@ export function CodingLinkDetail({
       {!serving ? (
         <div className="rounded-2xl border border-blue-500/40 bg-blue-500/10 p-4 text-sm">
           <p className="font-bold text-blue-300">{c.detail.reviewTitle}</p>
-          <p className="mt-1 text-zinc-300">{c.detail.reviewBody(item.provider)}</p>
+          <p className="mt-1 text-zinc-300">{c.detail.reviewBody(origin, item.provider)}</p>
         </div>
       ) : null}
 
@@ -394,7 +460,7 @@ export function CodingLinkDetail({
                     label={toolCallingLabel}
                     onToggle={(toolCalling) => onChange({ ...value, toolCalling })}
                   />
-                  <LlmChip c={c} show={link?.evidence?.toolCalling === value.toolCalling} />
+                  <OriginChip c={c} origin={origin} show={link?.evidence?.toolCalling === value.toolCalling} />
                 </div>
                 <p className={`text-xs ${value.toolCalling === "none" ? "font-bold text-red-300" : "text-zinc-500"}`}>{c.detail.toolCallingHelp}</p>
               </SettingRow>
@@ -413,7 +479,7 @@ export function CodingLinkDetail({
                       </option>
                     ))}
                   </select>
-                  <LlmChip c={c} show={link?.evidence?.structuredOutput === value.structuredOutput} />
+                  <OriginChip c={c} origin={origin} show={link?.evidence?.structuredOutput === value.structuredOutput} />
                 </div>
                 <p className={`text-xs ${value.structuredOutput === "none" ? "font-bold text-red-300" : "text-zinc-500"}`}>
                   {c.detail.structuredOutputHelp}
@@ -491,55 +557,12 @@ export function CodingLinkDetail({
         </div>
 
         <div className="flex min-w-0 flex-col gap-4">
-          <AdminTile
-            title={c.detail.termsTitle}
-            action={
-              provider ? (
-                <AdminStatusChip tone={provider.state === "confirmed" ? "ok" : provider.state === "missing" ? "warn" : "bad"}>
-                  {c.providers.state[provider.state]}
-                </AdminStatusChip>
-              ) : undefined
-            }
-          >
-            <div className="flex flex-col gap-3 text-sm" data-testid="coding-link-terms">
-              <div className="rounded-xl border border-zinc-800 p-3">
-                <p className="flex items-center gap-2 font-bold text-zinc-100">
-                  <AdminProviderMark provider={item.provider} size={20} />
-                  {c.detail.termsFor(item.provider)}
-                </p>
-                <p className="mt-1 text-xs text-zinc-400">
-                  {terms ? c.detail.termsApplies(terms.checkedAt, provider?.modelCount ?? 0) : c.detail.termsMissing}
-                </p>
-              </div>
-              {terms ? (
-                <dl className="grid grid-cols-[6rem_minmax(0,1fr)] gap-x-3 gap-y-2">
-                  <dt className="text-xs text-zinc-400">{c.detail.termsLabel}</dt>
-                  <dd className="min-w-0">
-                    <span className={`block text-xs font-bold ${terms.allowsResaleAndCodingAgent ? "text-emerald-300" : "text-red-300"}`}>
-                      {terms.allowsResaleAndCodingAgent ? c.detail.termsAllows : c.detail.termsDenies}
-                    </span>
-                    <a href={terms.termsUrl} target="_blank" rel="noreferrer" className="break-all font-mono text-xs text-blue-300 underline">
-                      {terms.termsUrl.replace(/^https:\/\//, "")}
-                    </a>
-                  </dd>
-                  <dt className="text-xs text-zinc-400">{c.detail.retentionLabel}</dt>
-                  <dd className="min-w-0">
-                    <a href={terms.retentionUrl} target="_blank" rel="noreferrer" className="break-all font-mono text-xs text-blue-300 underline">
-                      {terms.retentionUrl.replace(/^https:\/\//, "")}
-                    </a>
-                  </dd>
-                  <dt className="text-xs text-zinc-400">{c.detail.regionLabel}</dt>
-                  <dd className="text-xs font-bold text-zinc-100">{terms.processingRegion}</dd>
-                </dl>
-              ) : null}
-              <button type="button" onClick={onProviders} className="self-start text-xs font-bold text-blue-300 underline">
-                {c.detail.termsRecheck}
-              </button>
-            </div>
-          </AdminTile>
-
           <AdminTile title={c.detail.sourcesTitle} action={<AdminStatusChip tone="ok">{c.detail.officialSources}</AdminStatusChip>}>
-            {link?.evidence ? (
+            {origin === "registry" ? (
+              <p className="text-xs text-zinc-400" data-testid="coding-link-sources-registry">
+                {c.detail.sourcesRegistry}
+              </p>
+            ) : link?.evidence ? (
               <dl className="grid grid-cols-[6rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-sm">
                 <dt className="text-xs text-zinc-400">{c.detail.sourcesRead}</dt>
                 <dd className="min-w-0">
@@ -576,7 +599,7 @@ export function CodingLinkDetail({
               {refusals.length === 0 && item.profile ? (
                 <ul className="flex flex-col gap-1 rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-3 text-xs text-zinc-200">
                   {c.detail
-                    .verdictPassItems(toolCallingLabel(item.profile.capabilities.toolCalling), item.profile.pricing.creditWeight, item.floor, item.provider)
+                    .verdictPassItems(toolCallingLabel(item.profile.capabilities.toolCalling), item.profile.pricing.creditWeight, item.floor)
                     .map((line) => (
                       <li key={line} className="flex gap-1.5">
                         <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-300" aria-hidden />
@@ -594,15 +617,6 @@ export function CodingLinkDetail({
                   ))}
                 </ul>
               )}
-              {item.warnings.length > 0 ? (
-                <ul className="mt-2 flex flex-col gap-1 rounded-xl bg-amber-500/10 p-3 text-xs text-amber-300" data-testid="coding-link-warnings">
-                  {item.warnings.map((warning) => (
-                    <li key={warning}>
-                      {c.detail.warning}: {reasonText(warning)}
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
             </div>
             {!serving ? (
               <>

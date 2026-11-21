@@ -8,13 +8,10 @@ import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
 import {
-  applyProviderTermsDraft,
-  chatLinkRefusal,
   codingSettingsSchema,
-  discardProviderTermsDraft,
+  linkAllChatModels,
   linkChatModel,
   saveCodingSettings,
-  storeProviderTermsDraft,
   unlinkCodingModel,
 } from "@/lib/codingCatalogAdmin";
 import {
@@ -36,43 +33,30 @@ import {
   codingCandidateExclusion,
   codingCatalogExternalChannelsEnabled,
   codingProfileSchema,
-  codingProviderTermsSchema,
-  defaultCodingCapabilitySources,
   defaultPriceSources,
   MODEL_ID_PATTERN,
   OFFICIAL_SOURCE_HOSTS,
-  providerTermsDueOn,
-  providerTermsExpired,
   snapshotIsCurrent,
   snapshotPendingChanges,
 } from "@/lib/modelCatalogCore";
-import {
-  catalogDraftLlmFromEnv,
-  DraftRefusal,
-  fetchOfficialPage,
-  MAX_DRAFT_SOURCES,
-  MODEL_CATALOG_DRAFT_LLM_MODEL_ENV,
-} from "@/lib/modelCatalogDraftLlm";
+import { MODEL_CATALOG_DRAFT_LLM_MODEL_ENV } from "@/lib/modelCatalogDraftLlm";
 import { AI_PROVIDERS } from "@/lib/modelRegistryShared";
 
 // The coding catalogue's own surface (Admin > Models > Coding catalog): chat
-// links, provider conditions and the Code snapshot. Turning a model on or
-// holding it, and a dedicated model's whole-profile draft, stay on
-// /api/admin/model-catalog so one writer judges every activation.
+// links (one, or all candidates at once, with no LLM call) and the Code
+// snapshot. Turning a model on or holding it, and a dedicated model's
+// whole-profile draft, stay on /api/admin/model-catalog so one writer judges
+// every activation.
 
 const refusalResponse = (error: unknown) => {
   if (error instanceof CatalogRefusal) {
     return NextResponse.json({ error: error.code, reasons: error.reasons }, { status: error.status });
-  }
-  if (error instanceof DraftRefusal) {
-    return NextResponse.json({ error: error.code, detail: error.detail }, { status: 422 });
   }
   return apiSecurityResponse(error);
 };
 
 /** Providers a draft can read: known to the code, with official documentation hosts. */
 const DRAFT_PROVIDERS = AI_PROVIDERS.filter((provider) => Object.hasOwn(OFFICIAL_SOURCE_HOSTS, provider));
-const isDraftProvider = (provider: string) => (DRAFT_PROVIDERS as readonly string[]).includes(provider);
 
 const adminSession = async (write: boolean) => {
   const session = await getServerSession(authOptions);
@@ -93,8 +77,6 @@ const reviewCodingDraft = (draft: unknown) => {
   return { floor: codingCreditFloor(parsed.data), reasons: admission.admitted ? [] : [...admission.reasons] };
 };
 
-type TermsState = "confirmed" | "expired" | "missing" | "invalid";
-
 export async function GET(req: Request) {
   try {
     const auth = await adminSession(false);
@@ -103,18 +85,8 @@ export async function GET(req: Request) {
 
     const now = new Date();
     const [chat, providerTerms, snapshot] = await Promise.all([loadChatModelFacts(), loadCodingProviderTerms(), latestCodingSnapshot()]);
-    const entries = await loadCodingCatalog(undefined, { now, context: { chat, providerTerms } });
+    const entries = await loadCodingCatalog(undefined, { context: { chat, providerTerms } });
     const chatById = new Map(chat.map((facts) => [facts.id, facts]));
-    const termsByProvider = new Map(providerTerms.map((record) => [record.provider, record]));
-    const termsState = (provider: string): { state: TermsState; checkedAt: string | null; dueOn: string | null } => {
-      const record = termsByProvider.get(provider);
-      if (!record?.terms) return { state: record?.invalid ? "invalid" : "missing", checkedAt: null, dueOn: null };
-      return {
-        state: providerTermsExpired(record.terms.checkedAt, now) ? "expired" : "confirmed",
-        checkedAt: record.terms.checkedAt,
-        dueOn: providerTermsDueOn(record.terms.checkedAt),
-      };
-    };
 
     const codingIds = new Set(entries.map((entry) => entry.modelId));
     const eligible: typeof chat = [];
@@ -125,24 +97,6 @@ export async function GET(req: Request) {
       // A deleted model or one already linked is not worth listing as "left out".
       else if (reason !== "already_in_catalog" && reason !== "deleted") excluded.push({ id: facts.id, name: facts.name, provider: facts.provider, reason });
     }
-
-    // A row that does not resolve still names its provider where its stored
-    // row or its chat model says one, so that provider's conditions stay on
-    // the screen used to fix the row.
-    const providerOf = (entry: (typeof entries)[number]): string | null => {
-      if (entry.profile) return entry.profile.provider;
-      const stored = entry.stored as { provider?: unknown; registryModelId?: unknown } | null;
-      if (typeof stored?.provider === "string") return stored.provider;
-      if (typeof stored?.registryModelId === "string") return chatById.get(stored.registryModelId)?.provider ?? null;
-      return null;
-    };
-    const providers = [
-      ...new Set([
-        ...entries.flatMap((entry) => (providerOf(entry) ? [providerOf(entry) as string] : [])),
-        ...eligible.map((facts) => facts.provider),
-        ...providerTerms.map((record) => record.provider),
-      ]),
-    ].sort();
 
     const current = servableCodingRows(entries);
     const published = snapshot ? parseSnapshotRows(snapshot.models) : [];
@@ -160,28 +114,7 @@ export async function GET(req: Request) {
           chat: linked ? (chatById.get(linked) ?? null) : null,
         };
       }),
-      candidates: {
-        eligible: eligible.map((facts) => ({ ...facts, terms: termsState(facts.provider) })),
-        excluded,
-      },
-      providers: providers.map((provider) => {
-        const record = termsByProvider.get(provider);
-        const draft = record?.draft ? codingProviderTermsSchema.safeParse(record.draft) : null;
-        return {
-          provider,
-          terms: record?.terms ?? null,
-          ...termsState(provider),
-          draft: draft?.success ? draft.data : null,
-          draftCreatedAt: record?.draftCreatedAt ?? null,
-          updatedByEmail: record?.updatedByEmail ?? null,
-          modelCount: entries.filter((entry) => providerOf(entry) === provider).length,
-          candidateCount: eligible.filter((facts) => facts.provider === provider).length,
-          // Rows that still read their own terms because this provider has no record.
-          legacyTermsCount: entries.filter((entry) => providerOf(entry) === provider && entry.termsSource === "model").length,
-          draftable: isDraftProvider(provider),
-          hosts: OFFICIAL_SOURCE_HOSTS[provider] ?? [],
-        };
-      }),
+      candidates: { eligible, excluded },
       snapshot: snapshot
         ? {
             version: snapshot.version,
@@ -206,12 +139,10 @@ export async function GET(req: Request) {
         configured: Boolean(process.env[MODEL_CATALOG_DRAFT_LLM_MODEL_ENV]?.trim()),
         env: MODEL_CATALOG_DRAFT_LLM_MODEL_ENV,
       },
-      // What the dedicated add form offers (a draft reads price, terms and retention pages).
+      // What the dedicated add form offers (a draft reads the price page).
       draftProviders: DRAFT_PROVIDERS.map((provider) => ({
         provider,
         defaultSources: defaultPriceSources(provider),
-        // What a chat-model link reads: one tool calling and one structured output page.
-        capabilitySources: defaultCodingCapabilitySources(provider),
         hosts: OFFICIAL_SOURCE_HOSTS[provider] ?? [],
       })),
     });
@@ -220,38 +151,13 @@ export async function GET(req: Request) {
   }
 }
 
-const sourceUrls = z.array(z.string().url()).max(MAX_DRAFT_SOURCES);
-const providerName = z.string().regex(/^[a-z][a-z0-9-]{0,39}$/);
-
 const postBodySchema = z.discriminatedUnion("action", [
-  z.object({
-    action: z.literal("link"),
-    registryModelId: z.string().regex(MODEL_ID_PATTERN),
-    // Empty means the provider's default documentation pages.
-    sourceUrls: sourceUrls.default([]),
-  }),
+  z.object({ action: z.literal("link"), registryModelId: z.string().regex(MODEL_ID_PATTERN) }),
+  z.object({ action: z.literal("link_all") }),
   z.object({ action: z.literal("settings"), modelId: z.string().regex(MODEL_ID_PATTERN), settings: codingSettingsSchema }),
   z.object({ action: z.literal("unlink"), modelId: z.string().regex(MODEL_ID_PATTERN) }),
-  z.object({
-    action: z.literal("provider_terms_draft"),
-    provider: providerName,
-    // Empty means the pages the applied record cites (a re-check).
-    sourceUrls: sourceUrls.default([]),
-  }),
-  z.object({ action: z.literal("provider_terms_apply"), provider: providerName }),
-  z.object({ action: z.literal("provider_terms_discard"), provider: providerName }),
   z.object({ action: z.literal("publish_snapshot") }),
 ]);
-
-const llmOrRefusal = async () => {
-  const llm = await catalogDraftLlmFromEnv();
-  if (!llm) {
-    return {
-      response: NextResponse.json({ error: "draft_llm_not_configured", env: MODEL_CATALOG_DRAFT_LLM_MODEL_ENV }, { status: 409 }),
-    } as const;
-  }
-  return { llm } as const;
-};
 
 export async function POST(req: Request) {
   try {
@@ -269,54 +175,17 @@ export async function POST(req: Request) {
       await unlinkCodingModel({ modelId: body.modelId, session, request: req });
       return NextResponse.json({ ok: true });
     }
-    if (body.action === "provider_terms_apply") {
-      const terms = await applyProviderTermsDraft({ provider: body.provider, session, request: req });
-      return NextResponse.json({ ok: true, terms });
-    }
-    if (body.action === "provider_terms_discard") {
-      await discardProviderTermsDraft({ provider: body.provider, session, request: req });
-      return NextResponse.json({ ok: true });
-    }
     if (body.action === "publish_snapshot") {
       const result = await publishCodingSnapshot({ session, request: req });
       return NextResponse.json({ ok: true, ...result });
     }
-
-    if (body.action === "link") {
-      // Refused for free before the paid draft call; checked again in the write.
-      const refusal = await chatLinkRefusal(body.registryModelId);
-      if (refusal) return NextResponse.json({ error: refusal.code, reasons: refusal.reasons }, { status: 409 });
-      const facts = (await loadChatModelFacts()).find((model) => model.id === body.registryModelId);
-      if (!facts || !isDraftProvider(facts.provider)) {
-        return NextResponse.json({ error: "no_default_source", detail: facts?.provider ?? null }, { status: 422 });
-      }
-      const defaults = defaultCodingCapabilitySources(facts.provider);
-      const urls = body.sourceUrls.length > 0 ? body.sourceUrls : defaults ? [defaults.toolCalling, defaults.structuredOutput] : [];
-      if (urls.length === 0) return NextResponse.json({ error: "no_default_source", detail: facts.provider }, { status: 422 });
-      const draftLlm = await llmOrRefusal();
-      if ("response" in draftLlm) return draftLlm.response;
-      const pages = [];
-      for (const url of urls) pages.push(await fetchOfficialPage(facts.provider, url));
-      const draft = await draftLlm.llm.draftCodingCapabilities({ provider: facts.provider, apiModelId: facts.apiModelId, pages });
-      await linkChatModel({ registryModelId: body.registryModelId, draft, session, request: req });
-      return NextResponse.json({ ok: true, draft });
+    if (body.action === "link_all") {
+      return NextResponse.json({ ok: true, ...(await linkAllChatModels({ session, request: req })) });
     }
 
-    // provider_terms_draft: one LLM call over the provider's own pages.
-    if (!isDraftProvider(body.provider)) return NextResponse.json({ error: "unknown_provider", detail: body.provider }, { status: 400 });
-    let urls = body.sourceUrls;
-    if (urls.length === 0) {
-      const current = (await loadCodingProviderTerms()).find((record) => record.provider === body.provider)?.terms;
-      urls = current ? [...new Set([current.termsUrl, current.retentionUrl])] : [];
-    }
-    if (urls.length === 0) return NextResponse.json({ error: "no_terms_source", detail: body.provider }, { status: 422 });
-    const draftLlm = await llmOrRefusal();
-    if ("response" in draftLlm) return draftLlm.response;
-    const pages = [];
-    for (const url of urls) pages.push(await fetchOfficialPage(body.provider, url));
-    const draft = await draftLlm.llm.draftProviderTerms({ provider: body.provider, pages });
-    await storeProviderTermsDraft({ provider: body.provider, draft, session, request: req });
-    return NextResponse.json({ ok: true, draft });
+    // link: nothing is read or called; the registry already has what a link needs.
+    await linkChatModel({ registryModelId: body.registryModelId, session, request: req });
+    return NextResponse.json({ ok: true });
   } catch (error) {
     return refusalResponse(error) ?? NextResponse.json({ error: "Catalog action failed." }, { status: 500 });
   }

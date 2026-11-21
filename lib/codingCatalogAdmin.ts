@@ -1,9 +1,10 @@
 // Operator writes the coding catalogue has and the image one does not: linking
-// a chat registry model, a link's own settings, and the per-provider conditions
-// (owner decision 2026-11-20). Every write commits with its audit row in one
-// transaction, after the audit chain lock every catalogue writer takes first.
-// Turning a model on stays in lib/modelCatalogAdmin.ts updateCatalogEntry, so
-// one judge decides it.
+// a chat registry model (one, or every candidate at once) and a link's own
+// settings (owner decision 2026-11-20). Provider conditions are not collected
+// any more (owner decision 2026-11-21). Every write commits with its audit row
+// in one transaction, after the audit chain lock every catalogue writer takes
+// first. Turning a model on stays in lib/modelCatalogAdmin.ts
+// updateCatalogEntry, so one judge decides it.
 import "server-only";
 
 import { Prisma } from "@prisma/client";
@@ -22,22 +23,16 @@ import {
   codingApiCreditWeightSchema,
   codingChannelsSchema,
   codingLinkedProfileSchema,
-  codingProviderTermsSchema,
   codingStoredProfileSchema,
+  registryCodingCapabilities,
+  type CodingChannel,
   type CodingDedicatedProfile,
   type CodingLinkedProfile,
-  type CodingProviderTerms,
 } from "@/lib/modelCatalogCore";
-import type { CodingCapabilitiesDraft } from "@/lib/modelCatalogDraftLlm";
 import { prisma } from "@/lib/prisma";
 
-const PROVIDER_PATTERN = /^[a-z][a-z0-9-]{0,39}$/;
-
-/**
- * Why this chat model cannot be linked now, or null. Read before the paid
- * draft call so a refusal costs nothing, and again inside the write.
- */
-export const chatLinkRefusal = async (
+/** Why this chat model cannot be linked now, or null. Read before the write and again inside it. */
+const chatLinkRefusal = async (
   registryModelId: string,
   client: Pick<Prisma.TransactionClient, "modelCatalogEntry"> = prisma
 ): Promise<{ code: string; reasons: string[] } | null> => {
@@ -55,61 +50,118 @@ export const chatLinkRefusal = async (
 };
 
 /**
- * Add a chat model to the coding catalogue as a link, switched off, with the
- * LLM draft's tool calling and structured output. Offered to Code only until
- * the operator ticks the other channels.
+ * Write one chat link inside the caller's transaction, after the audit chain
+ * lock. No LLM call and no page read (owner decision 2026-11-21): the two
+ * capability values come from the chat registry (registryCodingCapabilities),
+ * and the link's evidence records that with no pages.
  */
-export const linkChatModel = async (input: {
-  registryModelId: string;
-  draft: CodingCapabilitiesDraft;
-  session: Session;
-  request?: Request;
-}) =>
+const createChatLink = async (
+  tx: Prisma.TransactionClient,
+  input: { registryModelId: string; channels: CodingChannel[]; batch: boolean; session: Session; request?: Request }
+) => {
+  const refusal = await chatLinkRefusal(input.registryModelId, tx);
+  if (refusal) throw new CatalogRefusal(refusal.code, refusal.reasons, 409);
+  const capabilities = registryCodingCapabilities();
+  const profile: CodingLinkedProfile = codingLinkedProfileSchema.parse({
+    source: "chat",
+    registryModelId: input.registryModelId,
+    capabilities,
+    channels: input.channels,
+    evidence: { sources: [], draftedAt: new Date().toISOString().slice(0, 10), ...capabilities },
+  });
+  const row = await tx.modelCatalogEntry.create({
+    data: {
+      category: "coding",
+      modelId: input.registryModelId,
+      enabled: null,
+      profile: profile as unknown as Prisma.InputJsonValue,
+      draftSource: null,
+      updatedById: input.session.user?.id ?? null,
+      updatedByEmail: input.session.user?.email ?? null,
+    },
+  });
+  await writeAdminAuditLog({
+    session: input.session,
+    request: input.request,
+    action: "model_catalog.coding_linked",
+    targetType: "ModelCatalogEntry",
+    targetId: `coding:${input.registryModelId}`,
+    summary: `Linked chat model ${input.registryModelId} into the coding catalogue${input.batch ? " (add all)" : " (switched off)"}.`,
+    metadata: {
+      modelId: input.registryModelId,
+      toolCalling: profile.capabilities.toolCalling,
+      structuredOutput: profile.capabilities.structuredOutput,
+      channels: profile.channels,
+      source: "chat_registry",
+      batch: input.batch,
+    },
+    tx,
+  });
+  return row;
+};
+
+/**
+ * Add a chat model to the coding catalogue as a link, switched off. Offered to
+ * Code only until the operator ticks the other channels.
+ */
+export const linkChatModel = async (input: { registryModelId: string; session: Session; request?: Request }) =>
   prisma.$transaction(async (tx) => {
     await takeAuditChainLock(tx);
-    const refusal = await chatLinkRefusal(input.registryModelId, tx);
-    if (refusal) throw new CatalogRefusal(refusal.code, refusal.reasons, 409);
-    const profile: CodingLinkedProfile = codingLinkedProfileSchema.parse({
-      source: "chat",
-      registryModelId: input.registryModelId,
-      capabilities: { toolCalling: input.draft.toolCalling, structuredOutput: input.draft.structuredOutput },
-      channels: ["code"],
-      evidence: {
-        sources: input.draft.sources.slice(0, 3),
-        draftedAt: input.draft.draftedAt,
-        toolCalling: input.draft.toolCalling,
-        structuredOutput: input.draft.structuredOutput,
-        ...(input.draft.note ? { note: input.draft.note } : {}),
-      },
-    });
-    const row = await tx.modelCatalogEntry.create({
-      data: {
-        category: "coding",
-        modelId: input.registryModelId,
-        enabled: null,
-        profile: profile as unknown as Prisma.InputJsonValue,
-        draftSource: null,
-        updatedById: input.session.user?.id ?? null,
-        updatedByEmail: input.session.user?.email ?? null,
-      },
-    });
-    await writeAdminAuditLog({
-      session: input.session,
-      request: input.request,
-      action: "model_catalog.coding_linked",
-      targetType: "ModelCatalogEntry",
-      targetId: `coding:${input.registryModelId}`,
-      summary: `Linked chat model ${input.registryModelId} into the coding catalogue (switched off).`,
-      metadata: {
-        modelId: input.registryModelId,
-        toolCalling: profile.capabilities.toolCalling,
-        structuredOutput: profile.capabilities.structuredOutput,
-        sources: profile.evidence?.sources ?? [],
-      },
-      tx,
-    });
-    return row;
+    return createChatLink(tx, { ...input, channels: ["code"], batch: false });
   });
+
+export type LinkAllResult = {
+  /** Chat candidates the run looked at. */
+  attempted: number;
+  /** Models linked and switched on. */
+  added: string[];
+  /** Models left out, with the judge's reasons (a refused model leaves no row). */
+  refused: { modelId: string; reasons: string[] }[];
+  /** Refusal reasons counted across the run (a reason's detail after ":" is dropped). */
+  reasonCounts: Record<string, number>;
+};
+
+const reasonName = (reason: string) => reason.split(":")[0];
+
+/**
+ * Link every chat candidate that passes the coding judge, on Code and the
+ * coding API at chat's credits, and switch it on (owner decision 2026-11-21).
+ * One transaction per model: the link, its audit row and the activation (the
+ * same judge as turning a model on by hand) commit together or not at all, so
+ * a refused model leaves nothing behind and one failure never stops the rest.
+ * The snapshot is not published here; the caller does that in its own step.
+ */
+export const linkAllChatModels = async (input: { session: Session; request?: Request }): Promise<LinkAllResult> => {
+  const [chat, existing] = await Promise.all([
+    loadChatModelFacts(),
+    prisma.modelCatalogEntry.findMany({ where: { category: "coding" }, select: { modelId: true } }),
+  ]);
+  const codingIds = new Set(existing.map((row) => row.modelId));
+  const candidates = chat.filter((facts) => codingCandidateExclusion(facts, codingIds) === null);
+  const result: LinkAllResult = { attempted: candidates.length, added: [], refused: [], reasonCounts: {} };
+  for (const facts of candidates) {
+    try {
+      await prisma.$transaction(async (tx) => {
+        await takeAuditChainLock(tx);
+        await createChatLink(tx, { registryModelId: facts.id, channels: ["code", "api"], batch: true, session: input.session, request: input.request });
+        await updateCatalogEntry({
+          category: "coding",
+          modelId: facts.id,
+          patch: { enabled: true, holdReason: null },
+          session: input.session,
+          request: input.request,
+          tx,
+        });
+      });
+      result.added.push(facts.id);
+    } catch (error) {
+      const reasons = error instanceof CatalogRefusal ? (error.reasons.length > 0 ? [...error.reasons] : [error.code]) : ["write_failed"];
+      result.refused.push({ modelId: facts.id, reasons });
+      for (const reason of new Set(reasons.map(reasonName))) result.reasonCounts[reason] = (result.reasonCounts[reason] ?? 0) + 1;
+    }
+  }
+  return result;
+};
 
 /** A link's own values. Null removes an override, so the chat value is read again. */
 export const codingSettingsSchema = z
@@ -250,114 +302,3 @@ export const unlinkCodingModel = async (input: { modelId: string; session: Sessi
       tx,
     });
   });
-
-// --- provider conditions ------------------------------------------------------
-
-const assertProvider = (provider: string) => {
-  if (!PROVIDER_PATTERN.test(provider)) throw new CatalogRefusal("invalid_provider", [], 400);
-};
-
-/** Store an LLM re-check of one provider's conditions. Nothing reads it until an operator applies it. */
-export const storeProviderTermsDraft = async (input: {
-  provider: string;
-  draft: CodingProviderTerms;
-  session: Session;
-  request?: Request;
-}) => {
-  assertProvider(input.provider);
-  const draft = codingProviderTermsSchema.parse(input.draft);
-  return prisma.$transaction(async (tx) => {
-    await takeAuditChainLock(tx);
-    const data = {
-      draft: draft as unknown as Prisma.InputJsonValue,
-      draftSource: "llm",
-      draftCreatedAt: new Date(),
-    };
-    await tx.codingProviderTerms.upsert({
-      where: { provider: input.provider },
-      create: { provider: input.provider, ...data },
-      update: data,
-    });
-    await writeAdminAuditLog({
-      session: input.session,
-      request: input.request,
-      action: "model_catalog.provider_terms_draft_stored",
-      targetType: "CodingProviderTerms",
-      targetId: input.provider,
-      summary: `Stored an LLM re-check of ${input.provider}'s coding conditions.`,
-      metadata: { provider: input.provider, sources: draft.sources, allowsResaleAndCodingAgent: draft.allowsResaleAndCodingAgent },
-      tx,
-    });
-    return draft;
-  });
-};
-
-/**
- * Apply a provider's stored re-check after an operator compared it. Every
- * coding model of this provider is judged against it from the next read; the
- * draft and its application commit together, so a draft written in between is
- * neither applied nor lost.
- */
-export const applyProviderTermsDraft = async (input: { provider: string; session: Session; request?: Request }) => {
-  assertProvider(input.provider);
-  return prisma.$transaction(async (tx) => {
-    await takeAuditChainLock(tx);
-    const rows = await tx.$queryRaw<{ terms: unknown; draft: unknown }[]>`
-      SELECT "terms", "draft" FROM "CodingProviderTerms"
-      WHERE "provider" = ${input.provider}
-      FOR UPDATE`;
-    const row = rows[0];
-    if (!row?.draft) throw new CatalogRefusal("no_draft", [], 404);
-    const parsed = codingProviderTermsSchema.safeParse(row.draft);
-    if (!parsed.success) throw new CatalogRefusal("invalid_draft", parsed.error.issues.map((i) => i.path.join(".")), 400);
-    await tx.codingProviderTerms.update({
-      where: { provider: input.provider },
-      data: {
-        terms: parsed.data as unknown as Prisma.InputJsonValue,
-        draft: Prisma.DbNull,
-        draftSource: null,
-        draftCreatedAt: null,
-        updatedById: input.session.user?.id ?? null,
-        updatedByEmail: input.session.user?.email ?? null,
-      },
-    });
-    await writeAdminAuditLog({
-      session: input.session,
-      request: input.request,
-      action: "model_catalog.provider_terms_applied",
-      targetType: "CodingProviderTerms",
-      targetId: input.provider,
-      summary: `Applied ${input.provider}'s coding conditions checked ${parsed.data.checkedAt}.`,
-      metadata: {
-        provider: input.provider,
-        before: (row.terms ?? null) as Prisma.JsonValue,
-        after: parsed.data as unknown as Prisma.JsonValue,
-      },
-      tx,
-    });
-    return parsed.data;
-  });
-};
-
-export const discardProviderTermsDraft = async (input: { provider: string; session: Session; request?: Request }) => {
-  assertProvider(input.provider);
-  return prisma.$transaction(async (tx) => {
-    await takeAuditChainLock(tx);
-    const before = await tx.codingProviderTerms.findUnique({ where: { provider: input.provider } });
-    if (!before?.draft) throw new CatalogRefusal("no_draft", [], 404);
-    await tx.codingProviderTerms.update({
-      where: { provider: input.provider },
-      data: { draft: Prisma.DbNull, draftSource: null, draftCreatedAt: null },
-    });
-    await writeAdminAuditLog({
-      session: input.session,
-      request: input.request,
-      action: "model_catalog.provider_terms_draft_discarded",
-      targetType: "CodingProviderTerms",
-      targetId: input.provider,
-      summary: `Discarded the LLM re-check of ${input.provider}'s coding conditions.`,
-      metadata: { provider: input.provider },
-      tx,
-    });
-  });
-};

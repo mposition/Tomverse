@@ -112,10 +112,10 @@ migration 적용은 별도입니다. 구현한 A1 범위와 확정 값은 10절�
   판정 함수(`judgeCodingModel`, `lib/modelCatalogCore.ts`)가 공식 도메인이 아닌 출처를 거절합니다.
   가격이 없거나 검증되지 않은 행은 켤 수 없습니다(운영자 결정 2026-10-19: 코딩 모델을 배포 없이
   추가할 수 있게 `lib/modelPricing.ts` profile을 필수로 두지 않음).
-- **약관 근거가 없는 모델은 코딩 카테고리에서 거절합니다.** provider의 재판매·코딩 에이전트
-  용도 허용 근거(출처 URL·확인일)와 데이터 보존 정책 근거가 기록되지 않은 모델은 판정
-  함수가 거절합니다. 비어 있는 근거를 "허용"으로 읽는 기본값을 두지 않습니다.
-  같은 판정이 `providerDataDestinations`의 해당 provider 행이 established(proven)인지도 봅니다.
+- **공급자 약관·보존·처리 리전은 코딩 판정이 묻지 않습니다(운영자 결정 2026-11-21).** 채팅 모델을
+  추가할 때 없는 확인을 코딩 카탈로그에만 두지 않습니다. 판정 함수는 크레딧 하한, 알려진 공급자,
+  `providerDataDestinations`의 해당 provider 행이 established(proven)인지(개인정보 쪽은 채팅과 같은
+  장치), 공식 도메인의 가격 출처, 도구 호출을 봅니다. 6.2절을 보십시오.
 - **Code에 내려주는 카탈로그는 불변 스냅샷**(`version`·`contentHash`·`coverageUntil`)이며,
   **목록은 허가가 아닙니다** — 권한은 호출마다 서버가 다시 판정합니다.
   발행은 Admin `/admin/models?tab=coding`(코딩 카탈로그 탭, 2026-11-20에 이미지 카탈로그
@@ -132,13 +132,32 @@ migration 적용은 별도입니다. 구현한 A1 범위와 확정 값은 10절�
   채팅 레지스트리(`ModelRegistryEntry`)에서 가져옵니다. 단가는 채팅 가격 해석
   (`resolveModelPricing`)이 컨텍스트 전체 크기에서 내는 값(장문 구간)이고, 확인 근거는 채팅
   가격표의 `pricingVersion`입니다. 대체 가격(conservative fallback)이면 판정이 거절합니다.
-  행에는 코딩 전용 값만 저장합니다: `toolCalling`·`structuredOutput`(LLM 초안, 운영자가 수정
-  가능), `minimumPlan` 덮어쓰기(없으면 채팅 플랜, Guest는 Free), `creditWeight`(없으면 채팅
+  행에는 코딩 전용 값만 저장합니다: `toolCalling`·`structuredOutput`(운영자가 수정 가능),
+  `minimumPlan` 덮어쓰기(없으면 채팅 플랜, Guest는 Free), `creditWeight`(없으면 채팅
   가중치, 하한 미만이면 켤 수 없음), 노출 채널 `channels`.
+- **연결은 채팅 레지스트리만 읽습니다. LLM 호출도 문서 읽기도 없습니다(운영자 결정 2026-11-21).**
+  `toolCalling`은 `basic`입니다: 코딩 후보는 외부 API가 내놓는 사용 등급이고, 그 API는 모든 모델을 도구
+  호출 가능(`capabilities.tools`, `lib/externalApiCatalogCore.ts`)으로 내놓기 때문입니다. 레지스트리에는
+  구조화 출력 정보가 없으므로 `structuredOutput`은 보수적 기본값 `none`이고, Code 관리형 경로는 `none`
+  행을 쓰지 않으므로(`CODE_MODEL_UNAVAILABLE`) Code에서 쓰려면 운영자가 행에서 값을 정합니다.
+  `evidence`는 `sources: []`(읽은 문서 없음)로 남고, 화면은 이를 "채팅 레지스트리"로 보입니다. 예전에
+  LLM 초안으로 만든 행의 `evidence`(문서 주소 있음)는 그대로 읽습니다. 한 번에 연결하는 길은 아래를
+  보십시오.
+- **"채팅 모델 한 번에 추가"**(코딩 탭 후보 목록, `POST /api/admin/model-catalog/coding`
+  `action: "link_all"`). 후보(`codingCandidateExclusion`을 통과한 채팅 모델) 하나마다 트랜잭션 하나로
+  연결(`model_catalog.coding_linked`, `metadata.batch: true`)과 활성화(`updateCatalogEntry`, 켤 때와
+  같은 판정)를 함께 커밋합니다. 채널은 `code`와 `api`이고 크레딧은 채팅 그대로입니다. 판정이 거절한
+  모델은 행도 감사 기록도 남기지 않고(롤백), 한 모델의 실패가 나머지를 막지 않습니다. 결과는 추가한
+  수와 거절 사유별 건수입니다(`unknown_provider`, `provider_destination_unproven`,
+  `credits_below_floor`, `credit_floor_unbounded`, `chat_context_unknown`, `provider_cost_unbounded` 등).
+  스냅샷은 이 요청이 발행하지 않으며, 화면의 "추가 후 바로 Code 스냅샷 발행" 체크가 활성화와 같은
+  `publish_snapshot` 요청을 이어서 보냅니다. 확인 대화상자를 한 번 거칩니다.
 - 연결한 채팅 모델이 비활성·삭제되면 판정이 거절합니다(`chat_model_disabled`·`chat_model_deleted`).
   채널에 `code`가 있으면 추론 토큰 별도 과금 모델과 관리형 경로가 부르지 않는 공급자도 판정에서
   거절합니다(관리형 경로의 같은 거절을 활성화 전에 보입니다).
-- 스냅샷 행은 해석된 값(상속 값 포함)과 `source`·`channels`를 담습니다. 이전에 발행한 행에는
+- 스냅샷 행은 해석된 값(상속 값 포함)과 `source`·`channels`를 담습니다. `terms`·`retention`·
+  `processingRegion`은 선택 필드입니다: 공급자 행이 있거나 전용 행이 자기 값으로 갖고 있으면 판정하지
+  않고 그대로 싣고(이미 발행한 행의 canonicalJson·`contentHash`가 바뀌지 않게), 없으면 싣지 않습니다. 이전에 발행한 행에는
   둘이 없고, 읽을 때 `dedicated`·`["code"]`로 읽습니다. `POST /api/code/managed`는 스냅샷 행과
   지금 해석한 행을 canonicalJson으로 비교하므로, 채팅에서 단가·상한이 바뀐 연결 행은 다시 발행할
   때까지 `CODE_MODEL_UNAVAILABLE`입니다. `channels`에 `code`가 없는 행도 같은 거절입니다.
@@ -151,39 +170,41 @@ migration 적용은 별도입니다. 구현한 A1 범위와 확정 값은 10절�
 - **코딩 특화 모델은 모델 발견 목록에서 채팅을 거치지 않고 코딩 전용 행의 초안으로 갑니다
   (운영자 결정 2026-11-21).** 발견 목록의 제품 구분에 `coding`이 있고(기존 `isCodeSpecializedModel`
   판정 그대로, 새 분류기 없음), 그 행에는 채팅 "채택" 대신 "코딩 초안" 링크가 뜹니다. 링크는 공급자와
-  API 모델 id가 채워진 코딩 전용 양식을 엽니다(`?tab=coding&draft=coding&provider=&api=`; 공급자의
-  확인된 약관·보존 문서 주소가 있으면 함께 채웁니다). 초안 공급자가 아니면 이유를 보여 줍니다.
+  API 모델 id가 채워진 코딩 전용 양식을 엽니다(`?tab=coding&draft=coding&provider=&api=`). 초안
+  공급자가 아니면 이유를 보여 줍니다.
   주간 새 공급자 리서치의 code 제안도 같은 `coding` 행이지만, 연결되지 않은 공급자만 나오므로
   링크 대신 "공급자 연결이 먼저 필요"라는 이유가 보입니다.
 - **자동 초안(기본 꺼짐).** `MODEL_DISCOVERY_CODING_AUTO_DRAFT_ENABLED=true`일 때만, 일일 스캔이
   새로 만든 코딩 후보 항목마다 위 양식과 같은 초안(공식 페이지 읽기 +
   `MODEL_CATALOG_DRAFT_LLM_MODEL_ID` 호출 1회, `storeCatalogDraft`)을 만듭니다. 켜는 것은 운영자의
   몫이며 코드는 켜지 않습니다. 한 번의 스캔에서 모델 호출은 최대 5회이고, 호출 전에 결정적으로 거릅니다:
-  초안 공급자일 것, 그 공급자의 확인된 약관·보존 주소가 코딩 카탈로그에 이미 있고 기본 가격 페이지가
-  있을 것(없으면 호출이 보존 근거 부족으로 거절되어 비용만 쓰므로 호출하지 않습니다), 코딩 카탈로그에
-  그 모델의 행이나 초안이 없을 것(저장할 때 한 번 더, 만들기 전용으로 확인하므로 그 사이 운영자가 만든
+  초안 공급자일 것, 기본 가격 페이지가 있을 것(초안은 그 가격 페이지만 읽습니다. 약관·보존 페이지는
+  더 이상 읽지 않습니다), 코딩 카탈로그에 그 모델의 행이나 초안이 없을 것(저장할 때 한 번 더, 만들기 전용으로 확인하므로 그 사이 운영자가 만든
   초안은 덮어쓰지 않습니다). 마감은 경쟁 없이 단계마다 확인하고, 모델 호출은 자기 timeout(90초)과
   저장 여유가 남을 때만 시작합니다. 실패나 시간 초과는 기록만 하고 다시 시도하지 않습니다(결과를 모르는
   유료 호출). 초안만 저장하고 활성화는 하지 않으며, 감사 기록은 시스템 행위자
   `model-catalog-auto-draft`(`model_catalog.draft_auto_stored`)로 같은 트랜잭션에서 남깁니다.
   일일 스캔 응답 `codingAutoDraft`에 건수가 보입니다.
 
-### 6.2 공급자 조건 (공급자 단위)
+### 6.2 공급자 조건은 더 이상 판정하지 않습니다 (운영자 결정 2026-11-21)
 
-- 약관(재판매·코딩 에이전트 허용, URL), 보존(URL), 처리 리전, 확인일, 출처는 공급자마다 한 행
-  (`CodingProviderTerms`)입니다. 판정은 연결 행과 전용 행 모두 이 행을 읽습니다.
-- 공급자 행이 없는 **전용 행은 자기 행의 terms·retention·processingRegion을 대체 값으로 씁니다.**
-  배포만으로 지금 활성인 행이 거절되지 않게 하려는 것입니다(데이터 이전 없음). 공급자 행을
-  적용하면 그때부터 그 공급자의 모든 행이 공급자 행을 씁니다. 연결 행에는 대체 값이 없어 공급자
-  행이 없으면 거절합니다(`provider_terms_missing`).
-- **유효기간 90일**: 확인일부터 90일이 지나면 "다시 확인 필요"입니다. 그 공급자의 모델은 **새로
-  활성화할 수 없고**(`provider_terms_expired`), **이미 활성인 모델은 경고만 띄우고 계속 씁니다.**
-  90일은 재확인 주기이지 약관이 바뀌었다는 근거가 아니며, 거절로 두면 다음 발행·정기 갱신에서
-  활성 모델이 빠져 Code 관리형 작업이 끊기기 때문입니다. 약관이 실제로 바뀌었으면 다시 확인
-  초안을 적용하는 순간 판정이 바뀌어 다음 발행에서 빠집니다.
-- "다시 확인"은 공급자 공식 문서를 읽는 LLM 초안(`MODEL_CATALOG_DRAFT_LLM_MODEL_ID`, 호출 1회)이며
-  가져오는 URL과 답의 URL 모두 `isOfficialSourceUrl`로 검사합니다. 초안은 운영자가 지금 값과
-  비교한 뒤 적용하고, 저장·적용·버리기는 각각 감사 기록과 함께 씁니다.
+2026-11-20에 공급자마다 약관(재판매·코딩 에이전트 허용)·보존 URL·처리 리전을 확인하고 90일마다 다시
+확인하게 했던 규칙을 없앱니다. 채팅 모델을 추가할 때는 이런 확인이 없으므로 코딩 카탈로그에만 두지
+않습니다. 연결 행과 전용 행 모두 같습니다.
+
+- **없어진 것**: 판정의 `provider_terms_missing`·`terms_do_not_allow`·`terms_source_unofficial`·
+  `retention_source_unofficial`, 90일 경고와 활성화 차단(`provider_terms_expired`), Admin의 "공급자
+  조건" 화면과 재확인 초안(`provider_terms_draft`·`provider_terms_apply`·`provider_terms_discard`),
+  연결할 때 읽던 도구 호출 문서와 LLM 초안, 전용 행 초안이 요구하던 약관·보존 페이지.
+- **남는 판정**: `unknown_provider`, `provider_destination_unproven`(공급자 데이터 목적지 기록 —
+  채팅과 같은 개인정보 장치), 크레딧 하한(`credit_floor_unbounded`·`credits_below_floor`), 가격 출처가
+  공식 도메인인지(`unofficial_price_source`), `no_tool_calling`, 상한 없는 공급자
+  (`provider_cost_unbounded`), 연결 행의 채팅 쪽 거절(비활성·삭제·가격 미확인·추론 비용 등).
+- **데이터와 스키마**: `CodingProviderTerms` 표와 그 행은 지우지 않습니다(migration 없음). 행이
+  `terms`·`retention`·`processingRegion`을 이미 갖고 있거나 그 공급자 행이 있으면 해석된 행과 스냅샷
+  행에 그대로 실어(판정에는 쓰지 않음) 이미 발행한 행의 `canonicalJson`·`contentHash`와 관리형 경로의
+  `modelPair` 비교가 그대로 맞습니다. 새 행은 이 필드 없이 만들어지며 스냅샷 행 schema에서 세 필드는
+  선택입니다. 이전 감사 기록(`model_catalog.provider_terms_*`)은 지우지 않습니다.
 
 ### 6.3 코딩 API (기본 꺼짐)
 
@@ -203,7 +224,7 @@ User-Agent로 채널을 나누지 않습니다.
 - 켜면 최신 코딩 스냅샷에서 코딩 API 채널이 있는 행(채팅 연결 행과 전용 행 모두)만 코딩 API의
   모델 목록, Smart Adaptive 후보, 코딩 앱 설정, 네이티브 프로토콜(Anthropic Messages·Responses)에
   남습니다. 스냅샷에 있는 것만으로는 부족하고 **지금도 판정을 통과해야** 합니다(켜짐·보류 아님·지금
-  행에도 코딩 API 채널이 있음·공급자 조건 허용). 보류나 거절로 바뀐 다시 확인은 다음 발행을 기다리지
+  행에도 코딩 API 채널이 있음). 보류나 판정 거절로 바뀐 행은 다음 발행을 기다리지
   않고 바로 빠집니다. 발행된 행이나 지금 행의 `minimumPlan`이 계정 플랜보다 높아도 빠집니다.
 - **채팅 연결 행**은 채팅 레지스트리 경로 그대로 실행·과금합니다(가격·크레딧은 채팅 모델의 것).
   연결 행의 `creditWeight` 덮어쓰기는 Code 관리형 경로에만 쓰입니다.

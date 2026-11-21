@@ -123,14 +123,14 @@ export function CodingSummary({
   const active = items.filter((item) => codingListState(item) === "active").length;
   const inactive = items.filter((item) => codingListState(item) === "inactive").length;
   const attention = codingAttentionCounts(items);
-  const attentionCount = attention.floor + attention.terms + attention.other;
+  const attentionCount = attention.floor + attention.other;
   return (
     <div className={`grid min-w-0 gap-3 ${showSnapshot ? "lg:grid-cols-[1fr_1fr_1fr_1.8fr]" : "sm:grid-cols-3"}`} data-testid="coding-summary">
       <Tile label={c.tiles.active} value={active} detail={c.tiles.activeDetail(snapshot?.version ?? null, inactive)} tone="ok" />
       <Tile
         label={c.tiles.attention}
         value={attentionCount}
-        detail={c.tiles.attentionDetail(attention.floor, attention.terms, attention.other)}
+        detail={c.tiles.attentionDetail(attention.floor, attention.other)}
         tone="warn"
       />
       <Tile

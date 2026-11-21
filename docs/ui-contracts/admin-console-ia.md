@@ -810,9 +810,14 @@ rather than stored or invented.
 `?tab=catalog` is the **Image catalog** (image models and the video note); its
 id did not change, so a bookmark or runbook that names it still lands, and the
 tab links to the coding one for a reader who came for coding models.
-`?tab=coding` is the **Coding catalog**, with two sections in the tab --
-**Models** (both kinds of coding row, the chat candidates and the Code
-snapshot) and **Provider conditions** (`&view=providers` opens it). The chat
+`?tab=coding` is the **Coding catalog**: the models (both kinds of coding row, the
+chat candidates and the Code snapshot). There is no Provider conditions
+section any more (owner decision 2026-11-21): the coding judge no longer asks
+for a provider's terms, retention or region, and `&view=providers` just opens
+the models. The candidates view adds one chat model at a time, or every
+candidate at once (**Add all chat models**, one confirmation, optional snapshot
+publish, a result of how many were added and the refusals by reason); neither
+makes an LLM call. The chat
 registry's read-only list that sat in the old combined tab was dropped: the
 Registry tab is the chat list, and the coding tab's candidates show chat models
 where they matter. Turning a coding model on or holding it stays on
@@ -821,8 +826,7 @@ where they matter. Turning a coding model on or holding it stays on
 A code-specialized model in the Models `discovery` queue is its own product
 ("코딩", `coding`): its row offers **"코딩 초안"** instead of Chat's adopt
 button. The link is `?tab=coding&draft=coding&provider=<provider>&api=<apiModelId>`;
-the coding tab opens the dedicated-model form with both filled in (and the
-provider's confirmed terms and retention pages when it has them), removes those
+the coding tab opens the dedicated-model form with both filled in, removes those
 query keys, and writes nothing until the operator confirms. A model already in
 the coding catalogue opens its row instead. A provider a draft cannot read shows
 the reason in place of the link, as the image rows do. The link needs no adapter.

@@ -145,10 +145,6 @@ export type ReasonMessage =
   | { key: "codingFloorUnbounded" }
   | { key: "unknownProvider" }
   | { key: "destinationUnproven" }
-  | { key: "termsDoNotAllow" }
-  | { key: "termsUnofficial" }
-  | { key: "retentionUnofficial" }
-  | { key: "retentionMissing" }
   | { key: "noToolCalling" }
   | { key: "noProfile" }
   | { key: "draftIncomplete"; detail: string }
@@ -159,14 +155,11 @@ export type ReasonMessage =
   | { key: "chatPriceUnverified" }
   | { key: "reasoningCostUnbounded" }
   | { key: "providerCostUnbounded" }
-  | { key: "providerTermsMissing" }
-  | { key: "providerTermsExpired" }
   | { key: "alreadyInCatalog" }
   | { key: "notACandidate" }
   | { key: "linkedRowProfileDraft" }
   | { key: "settingsLinkedOnly" }
   | { key: "unlinkTurnOffFirst" }
-  | { key: "noTermsSource" }
   | { key: "unknownModel" }
   | { key: "unknown"; code: string };
 
@@ -213,12 +206,6 @@ export const reasonMessage = (code: string, detail = ""): ReasonMessage => {
       return { key: "unknownProvider" };
     case "provider_destination_unproven":
       return { key: "destinationUnproven" };
-    case "terms_do_not_allow":
-      return { key: "termsDoNotAllow" };
-    case "terms_source_unofficial":
-      return { key: "termsUnofficial" };
-    case "retention_source_unofficial":
-      return { key: "retentionUnofficial" };
     case "no_tool_calling":
       return { key: "noToolCalling" };
     case "no_profile":
@@ -233,8 +220,7 @@ export const reasonMessage = (code: string, detail = ""): ReasonMessage => {
     case "no_default_source":
       return { key: "noDefaultSource" };
     case "draft_rejected":
-      // A coding draft is refused for missing evidence or fields, not a missing price.
-      if (detail === "retention_source_missing") return { key: "retentionMissing" };
+      // A coding draft is refused for missing fields, not a missing price.
       if (detail === "credit_floor_unbounded") return { key: "codingFloorUnbounded" };
       if (detail && !/^(no_options|invalid_prices)/.test(detail)) return { key: "draftIncomplete", detail };
       return { key: "noPriceFound", detail: detail.replace(/^(no_options|invalid_prices):?\s*/, "") };
@@ -282,10 +268,6 @@ export const reasonMessage = (code: string, detail = ""): ReasonMessage => {
       return { key: "reasoningCostUnbounded" };
     case "provider_cost_unbounded":
       return { key: "providerCostUnbounded" };
-    case "provider_terms_missing":
-      return { key: "providerTermsMissing" };
-    case "provider_terms_expired":
-      return { key: "providerTermsExpired" };
     case "already_in_catalog":
       return { key: "alreadyInCatalog" };
     case "not_a_candidate":
@@ -297,8 +279,6 @@ export const reasonMessage = (code: string, detail = ""): ReasonMessage => {
       return { key: "settingsLinkedOnly" };
     case "unlink_turn_off_first":
       return { key: "unlinkTurnOffFirst" };
-    case "no_terms_source":
-      return { key: "noTermsSource" };
     case "unknown_model":
       return { key: "unknownModel" };
     default:
@@ -484,8 +464,8 @@ export const imageCatalogItems = (report: {
 
 // --- coding ------------------------------------------------------------------
 // The same four steps for a coding model, whose draft is a whole profile
-// (name, plan, capabilities, prices, terms and retention evidence). The
-// judge is judgeCodingModel on the server; these only read its answer.
+// (name, plan, capabilities and prices). The judge is judgeCodingModel on the
+// server; these only read its answer.
 
 export type CodingProfileView = {
   name: string;
@@ -500,17 +480,14 @@ export type CodingProfileView = {
     maxOutputTokens: number;
   };
   pricing: { inputUsdPerMTok: number; outputUsdPerMTok: number; creditWeight: number; verifiedAt: string; sources: string[]; pricingVersion?: string };
-  terms: { allowsResaleAndCodingAgent: boolean; url: string; checkedAt: string };
-  retention: { url: string; checkedAt: string };
-  processingRegion: string;
+  /** Carried only by a row stored or published with provider conditions; never judged (owner decision 2026-11-21). */
+  terms?: { allowsResaleAndCodingAgent: boolean; url: string; checkedAt: string };
+  retention?: { url: string; checkedAt: string };
+  processingRegion?: string;
 };
 
-/** A resolved row: a chat link's provider conditions can still be missing. */
-export type CodingResolvedView = Omit<CodingProfileView, "terms" | "retention" | "processingRegion"> & {
-  terms: CodingProfileView["terms"] | null;
-  retention: CodingProfileView["retention"] | null;
-  processingRegion: string | null;
-};
+/** A resolved row reads the same as a profile. */
+export type CodingResolvedView = CodingProfileView;
 
 /** A chat registry model as the server reported it (lib/modelCatalogCore.ts ChatModelFacts). */
 export type ChatFactsView = {
@@ -578,12 +555,6 @@ export type CodingCatalogItem = {
   source: "dedicated" | "chat" | null;
   /** Where it is offered once on. */
   channels: string[];
-  /** Not refusals: a serving model keeps serving (provider conditions past 90 days). */
-  warnings: string[];
-  /** What stops turning it on now besides the judge. */
-  activationBlockers: string[];
-  termsSource: "provider" | "model" | null;
-  termsCheckedAt: string | null;
   /** A chat link's stored values, and the chat model it reads. */
   link: CodingLinkView | null;
   chat: ChatFactsView | null;
@@ -607,7 +578,7 @@ export type CodingStage = Exclude<ImageStage, "needs_budget">;
 
 const looksLikeCodingProfile = (value: unknown): value is CodingProfileView => {
   const v = value as Partial<CodingProfileView> | null;
-  return Boolean(v && typeof v.name === "string" && v.pricing && v.capabilities && v.terms && v.retention);
+  return Boolean(v && typeof v.name === "string" && v.pricing && v.capabilities);
 };
 
 const looksLikeResolvedRow = (value: unknown): value is CodingResolvedView => {
@@ -629,10 +600,6 @@ export const codingCatalogItems = (report: {
     profile: unknown;
     stored?: unknown;
     chat?: ChatFactsView | null;
-    warnings?: string[];
-    activationBlockers?: string[];
-    termsSource?: "provider" | "model" | null;
-    termsCheckedAt?: string | null;
     problem: string | null;
     admission: Admission | null;
     draft: unknown;
@@ -657,10 +624,6 @@ export const codingCatalogItems = (report: {
       holdReason: row.holdReason,
       source: row.source ?? (link ? "chat" : profile || draft ? "dedicated" : null),
       channels,
-      warnings: row.warnings ?? [],
-      activationBlockers: row.activationBlockers ?? [],
-      termsSource: row.termsSource ?? null,
-      termsCheckedAt: row.termsCheckedAt ?? null,
       link,
       chat: row.chat ?? null,
       profile,
@@ -683,19 +646,13 @@ export const codingStage = (item: CodingCatalogItem): CodingStage => {
     return item.source === "chat" || (item.problem !== null && item.problem !== "no_profile") ? "blocked" : "needs_draft";
   }
   if (item.holdReason || item.enabled === false) return "held";
-  if (item.admission?.admitted) {
-    if (item.enabled === true) return "serving";
-    return item.activationBlockers.length > 0 ? "blocked" : "ready_to_enable";
-  }
+  if (item.admission?.admitted) return item.enabled === true ? "serving" : "ready_to_enable";
   return "blocked";
 };
 
-/** Every reason this model cannot be turned on now: the judge's, then the activation blockers. */
+/** Every reason this model cannot be turned on now: the judge's. */
 export const codingRefusals = (item: CodingCatalogItem): string[] => [
-  ...new Set([
-    ...(item.admission?.admitted ? [] : (item.admission?.reasons ?? (item.problem ? [item.problem] : []))),
-    ...item.activationBlockers,
-  ]),
+  ...new Set(item.admission?.admitted ? [] : (item.admission?.reasons ?? (item.problem ? [item.problem] : []))),
 ];
 
 /** The list's three words: on, needs a check, off. */
@@ -863,52 +820,48 @@ export const codingEdit = (
   return out;
 };
 
-/**
- * The URLs a coding draft reads: the price page (or the provider's default),
- * then the terms and the retention pages, without repeats, at most three.
- */
-export const codingDraftSources = (
-  input: { priceUrl: string; termsUrl: string; retentionUrl: string },
-  defaultSources: readonly string[]
-): string[] => {
+/** The URLs a coding draft reads: the price page, or the provider's default (owner decision 2026-11-21: no terms or retention pages). */
+export const codingDraftSources = (input: { priceUrl: string }, defaultSources: readonly string[]): string[] => {
   const price = input.priceUrl.trim() || defaultSources[0] || "";
-  return [...new Set([price, input.termsUrl.trim(), input.retentionUrl.trim()].filter(Boolean))].slice(0, 3);
+  return price ? [price] : [];
 };
 
 
 // --- the coding tab's report (GET /api/admin/model-catalog/coding) -----------
 
-export type ProviderTermsState = "confirmed" | "expired" | "missing" | "invalid";
+export type CodingCandidateView = ChatFactsView;
 
-export type ProviderTermsView = {
-  allowsResaleAndCodingAgent: boolean;
-  termsUrl: string;
-  retentionUrl: string;
-  processingRegion: string;
-  checkedAt: string;
-  sources: string[];
-  evidence?: string;
+/** What "Add chat models" answers (POST link_all): how many were added, and the judge's reasons for the rest. */
+export type CodingLinkAllResult = {
+  attempted: number;
+  added: string[];
+  refused: { modelId: string; reasons: string[] }[];
+  reasonCounts: Record<string, number>;
 };
 
-export type CodingProviderRow = {
-  provider: string;
-  terms: ProviderTermsView | null;
-  state: ProviderTermsState;
-  checkedAt: string | null;
-  dueOn: string | null;
-  draft: ProviderTermsView | null;
-  draftCreatedAt: string | null;
-  updatedByEmail: string | null;
-  modelCount: number;
-  candidateCount: number;
-  legacyTermsCount: number;
-  draftable: boolean;
-  hosts: string[];
-};
+/**
+ * Refusal reasons of a link-all run, most common first. `sample` is the first
+ * full reason of that name (it keeps the detail the count dropped, such as the
+ * credit floor), which the screen turns into words.
+ */
+export const linkAllReasonRows = (
+  result: Pick<CodingLinkAllResult, "reasonCounts" | "refused">
+): { reason: string; sample: string; count: number }[] =>
+  Object.entries(result.reasonCounts)
+    .map(([reason, count]) => ({
+      reason,
+      sample: result.refused.flatMap((row) => row.reasons).find((full) => full.split(":")[0] === reason) ?? reason,
+      count,
+    }))
+    .sort((a, b) => b.count - a.count || a.reason.localeCompare(b.reason));
 
-export type CodingCandidateView = ChatFactsView & {
-  terms: { state: ProviderTermsState; checkedAt: string | null; dueOn: string | null };
-};
+/**
+ * Where a link's two capability values came from: the chat registry (a link
+ * made without pages), or an LLM draft that read the provider's documentation
+ * (a link made before owner decision 2026-11-21).
+ */
+export const capabilityOrigin = (link: Pick<CodingLinkView, "evidence">): "registry" | "llm" =>
+  link.evidence && link.evidence.sources.length > 0 ? "llm" : "registry";
 
 export type CodingSnapshotView = {
   version: number;
@@ -924,42 +877,21 @@ export type CodingSnapshotView = {
 
 export type CodingCatalogReport = Parameters<typeof codingCatalogItems>[0] & {
   candidates: { eligible: CodingCandidateView[]; excluded: { id: string; name: string; provider: string; reason: string }[] };
-  providers: CodingProviderRow[];
   snapshot: CodingSnapshotView | null;
   servableCount: number;
   externalChannels: { enabled: boolean; env: string };
   draftLlm: { configured: boolean; env: string };
-  draftProviders: {
-    provider: string;
-    defaultSources: string[];
-    capabilitySources: { toolCalling: string; structuredOutput: string } | null;
-    hosts: string[];
-  }[];
+  draftProviders: { provider: string; defaultSources: string[]; hosts: string[] }[];
 };
 
 /** How many models wait on each kind of check, for the summary tile. */
 export const codingAttentionCounts = (items: readonly CodingCatalogItem[]) => {
   let floor = 0;
-  let terms = 0;
   let other = 0;
   for (const item of items) {
     if (codingListState(item) !== "attention") continue;
-    const reasons = codingRefusals(item);
-    if (reasons.some((reason) => reason.startsWith("credits_below_floor"))) floor += 1;
-    else if (reasons.some((reason) => reason.startsWith("provider_terms") || reason.startsWith("terms_") || reason.startsWith("retention_")))
-      terms += 1;
+    if (codingRefusals(item).some((reason) => reason.startsWith("credits_below_floor"))) floor += 1;
     else other += 1;
   }
-  return { floor, terms, other };
+  return { floor, other };
 };
-
-/** One field of a provider re-check draft against the applied record. */
-export const providerTermsComparison = (current: ProviderTermsView | null, draft: ProviderTermsView) =>
-  (
-    [
-      ["resale", current?.allowsResaleAndCodingAgent ?? null, draft.allowsResaleAndCodingAgent],
-      ["terms", current?.termsUrl ?? null, draft.termsUrl],
-      ["retention", current?.retentionUrl ?? null, draft.retentionUrl],
-      ["region", current?.processingRegion ?? null, draft.processingRegion],
-    ] as const
-  ).map(([key, before, after]) => ({ key, before, after, changed: before !== after }));

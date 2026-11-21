@@ -148,7 +148,6 @@ export function CodingProfileTable({
     { key: "image", label: c.fields.imageInput, value: caps.imageInput ? c.yes : c.no },
     { key: "context", label: c.fields.maxContext, value: caps.maxContextTokens.toLocaleString("en-US") },
     { key: "maxOutput", label: c.fields.maxOutput, value: caps.maxOutputTokens.toLocaleString("en-US") },
-    { key: "region", label: c.fields.region, value: profile.processingRegion ?? "—" },
   ];
 
   return (
@@ -190,7 +189,7 @@ const linkList = (urls: readonly string[]) =>
     </a>
   ));
 
-/** Where the prices, terms and retention answers came from, and when they were checked. */
+/** Where the price answers came from, and when they were checked. */
 function CodingEvidenceBox({
   m,
   profile,
@@ -217,31 +216,6 @@ function CodingEvidenceBox({
         <dd className="min-w-0">
           {linkList(profile.pricing.sources)}
           <span className="text-xs text-zinc-400">{c.checkedOn(profile.pricing.verifiedAt)}</span>
-        </dd>
-        <dt className="text-xs font-bold text-zinc-500">{c.termsLabel}</dt>
-        <dd className="min-w-0">
-          {profile.terms ? (
-            <>
-              {linkList([profile.terms.url])}
-              <span className={`block text-xs font-bold ${profile.terms.allowsResaleAndCodingAgent ? "text-emerald-300" : "text-red-300"}`}>
-                {profile.terms.allowsResaleAndCodingAgent ? c.termsAllows : c.termsDenies}
-              </span>
-              <span className="text-xs text-zinc-400">{c.checkedOn(profile.terms.checkedAt)}</span>
-            </>
-          ) : (
-            <span className="text-xs text-zinc-400">—</span>
-          )}
-        </dd>
-        <dt className="text-xs font-bold text-zinc-500">{c.retentionLabel}</dt>
-        <dd className="min-w-0">
-          {profile.retention ? (
-            <>
-              {linkList([profile.retention.url])}
-              <span className="text-xs text-zinc-400">{c.checkedOn(profile.retention.checkedAt)}</span>
-            </>
-          ) : (
-            <span className="text-xs text-zinc-400">—</span>
-          )}
         </dd>
         {fromDraft ? (
           <>
@@ -427,8 +401,6 @@ export type CodingModelFormValue = {
   provider: string;
   apiModelId: string;
   priceUrl: string;
-  termsUrl: string;
-  retentionUrl: string;
 };
 
 const field =
@@ -436,7 +408,7 @@ const field =
 const help = "mt-1 block text-xs font-normal text-zinc-500";
 
 /**
- * The add form: provider, API model id and the three pages a draft reads.
+ * The add form: provider, API model id and the price page a draft reads.
  * The profile itself is the draft's answer, checked in the next step.
  */
 export function CodingModelForm({
@@ -452,20 +424,6 @@ export function CodingModelForm({
 }) {
   const c = m.codingFlow;
   const current = providers.find((entry) => entry.provider === value.provider);
-  const url = (key: "priceUrl" | "termsUrl" | "retentionUrl", label: string, note: string, placeholder?: string) => (
-    <label className="text-xs font-bold text-zinc-300">
-      {label}
-      <input
-        type="url"
-        className={`${field} font-mono`}
-        placeholder={placeholder}
-        value={value[key]}
-        onChange={(event) => onChange({ ...value, [key]: event.target.value })}
-        data-testid={`model-catalog-coding-${key}`}
-      />
-      <span className={help}>{note}</span>
-    </label>
-  );
   return (
     <div className="flex flex-col gap-4 text-sm" data-testid="model-catalog-coding-form">
       <div>
@@ -489,14 +447,18 @@ export function CodingModelForm({
         />
         <span className={help}>{value.modelId ? c.redraftIdHelp(value.modelId) : c.apiModelIdHelp}</span>
       </label>
-      {url(
-        "priceUrl",
-        c.priceUrlLabel,
-        current?.defaultSources[0] ? c.priceUrlDefault(current.defaultSources[0]) : c.priceUrlNoDefault,
-        current?.defaultSources[0]
-      )}
-      {url("termsUrl", c.termsUrlLabel, c.termsUrlHelp)}
-      {url("retentionUrl", c.retentionUrlLabel, c.retentionUrlHelp)}
+      <label className="text-xs font-bold text-zinc-300">
+        {c.priceUrlLabel}
+        <input
+          type="url"
+          className={`${field} font-mono`}
+          placeholder={current?.defaultSources[0]}
+          value={value.priceUrl}
+          onChange={(event) => onChange({ ...value, priceUrl: event.target.value })}
+          data-testid="model-catalog-coding-priceUrl"
+        />
+        <span className={help}>{current?.defaultSources[0] ? c.priceUrlDefault(current.defaultSources[0]) : c.priceUrlNoDefault}</span>
+      </label>
       <p className="text-xs text-zinc-500">{c.addFootnote}</p>
     </div>
   );
