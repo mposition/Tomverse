@@ -70,6 +70,13 @@ export type ChatStreamTrailer = {
    * Absent on every turn that completed or that the user stopped.
    */
   errorReport?: { token: string; code: string };
+  /**
+   * Why a turn the server judged failed ended without text, when it knows
+   * something the user can act on. `attachment_rejected`: the provider refused
+   * the request the user's own file rode on (lib/chatStreamErrorReport.ts
+   * `emptyResponseCause`). Absent otherwise; an older client ignores it.
+   */
+  failure?: { kind: "attachment_rejected" };
 };
 
 const ERROR_REPORT_TOKEN_MAX_LENGTH = 2_048;
@@ -106,7 +113,8 @@ export function parseChatStreamTrailer(
     !("completion" in record) &&
     !("artifacts" in record) &&
     !("fileGenerationRetry" in record) &&
-    !("errorReport" in record)
+    !("errorReport" in record) &&
+    !("failure" in record)
   ) {
     return { searchMetadata: projectResearchSearchMetadata(parsed) };
   }
@@ -157,6 +165,11 @@ export function parseChatStreamTrailer(
     typeof retryRecord.modelId === "string" &&
     retryRecord.modelId.length > 0
       ? { fileGenerationRetry: { modelId: retryRecord.modelId } }
+      : {}),
+    ...(record.failure &&
+    typeof record.failure === "object" &&
+    (record.failure as Record<string, unknown>).kind === "attachment_rejected"
+      ? { failure: { kind: "attachment_rejected" as const } }
       : {}),
   };
 }

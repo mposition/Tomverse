@@ -2532,7 +2532,11 @@ function ChatAppComponent({
         }
         setAssistantMessage(
           assistantMessageId,
-          `${t("chat.responseEmpty")}${
+          // The server knows when the provider refused the user's own file;
+          // "pick another model" is the wrong advice then (2026-11-21).
+          `${t(trailer?.failure?.kind === "attachment_rejected"
+            ? "chat.responseAttachmentRejected"
+            : "chat.responseEmpty")}${
             requestTraceId
               ? `\n${t("chat.traceId")}: ${requestTraceId}`
               : ""

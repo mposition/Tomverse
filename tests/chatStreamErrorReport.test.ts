@@ -3,9 +3,11 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
+  emptyResponseCause,
   isLocalRuntimeError,
   streamFailureGrantInput,
 } from "../lib/chatStreamErrorReport";
+import { classifyProviderFailure } from "../lib/providerErrorClassification";
 import { traceEvidenceRecordability } from "../lib/errorReportContract";
 import {
   buildChatStreamTrailerChunk,
@@ -34,7 +36,7 @@ const SECRET = "an-error-report-secret-of-32-chars!!";
 const nodeError = (name: string, code: string, message: string) =>
   Object.assign(new TypeError(message), { name, code });
 
-const noOutput = Object.assign(new Error("No output generated."), {
+const sdkNoOutput = Object.assign(new Error("No output generated."), {
   name: "AI_NoOutputGeneratedError",
 });
 
@@ -54,7 +56,7 @@ test("a Node runtime misuse is this process's own failure; a network or provider
     isLocalRuntimeError(Object.assign(new Error("bad"), { code: "ERR_INVALID_STATE", statusCode: 500 })),
     false
   );
-  assert.equal(isLocalRuntimeError(noOutput), false);
+  assert.equal(isLocalRuntimeError(sdkNoOutput), false);
   assert.equal(isLocalRuntimeError(null), false);
 });
 
@@ -90,7 +92,7 @@ test("an empty answer this process caused is named after the cause and recorded 
     diagnosticCode: "AI_EMPTY_RESPONSE.AI_NoOutputGeneratedError",
     provider: "openai",
     modelId: "gpt-6-luna",
-    error: noOutput,
+    error: sdkNoOutput,
     observedStreamError: cause,
   });
   assert.equal(grant.errorCode, "AI_EMPTY_RESPONSE.ERR_INVALID_STATE");
@@ -255,7 +257,7 @@ test("the token signed for a stream failure verifies for its trace after the tra
       diagnosticCode: "AI_EMPTY_RESPONSE.AI_NoOutputGeneratedError",
       provider: "openai",
       modelId: "gpt-6-luna",
-      error: noOutput,
+      error: sdkNoOutput,
       observedStreamError: nodeError("TypeError", "ERR_INVALID_STATE", "Invalid state"),
     });
     // What issueChatErrorReportGrant signs for a recordable code.
@@ -285,15 +287,111 @@ test("the token signed for a stream failure verifies for its trace after the tra
   }
 });
 
+// 2026-11-21: a PDF Mistral OCR had refused was sent natively; xAI and
+// Anthropic both answered 400 through onError, the SDK settled "no output",
+// and the symptom paged "Model failure for 5 minutes" for both providers.
+const apiCallError = (statusCode: number) =>
+  Object.assign(new Error("Bad Request: the document could not be read"), {
+    name: "AI_APICallError",
+    statusCode,
+    isRetryable: false,
+  });
+
+test("an empty answer the provider refused with 400 is filed under that 400, not the SDK symptom", () => {
+  const cause = emptyResponseCause({
+    completionError: sdkNoOutput,
+    observedStreamError: apiCallError(400),
+    finishReasonCode: "ERROR",
+    carriedFiles: false,
+  });
+  assert.equal(cause.root, "AI_STREAM_FAILED");
+  assert.equal(cause.diagnosticCode, "AI_STREAM_FAILED.AI_APICallError.HTTP_400");
+  assert.equal(cause.attachmentRejected, false);
+  // A request-contract rejection, not a model that answered nothing.
+  assert.equal(classifyProviderFailure({ diagnosticCode: cause.diagnosticCode, httpStatus: 400 }).category,
+    "REQUEST_CONTRACT");
+});
+
+test("a provider refusing a request that carried the user's files is an attachment rejection", () => {
+  for (const status of [400, 413, 415, 422]) {
+    const cause = emptyResponseCause({
+      completionError: sdkNoOutput,
+      observedStreamError: apiCallError(status),
+      finishReasonCode: "ERROR",
+      carriedFiles: true,
+    });
+    assert.equal(cause.attachmentRejected, true, String(status));
+  }
+  // Auth, rate limit and server errors are the provider's, files or not.
+  for (const status of [401, 403, 429, 500, 503]) {
+    const cause = emptyResponseCause({
+      completionError: sdkNoOutput,
+      observedStreamError: apiCallError(status),
+      finishReasonCode: "ERROR",
+      carriedFiles: true,
+    });
+    assert.equal(cause.attachmentRejected, false, String(status));
+    assert.equal(cause.root, "AI_STREAM_FAILED");
+  }
+});
+
+test("an empty answer with no provider HTTP error keeps the empty-response code", () => {
+  assert.deepEqual(
+    emptyResponseCause({ completionError: sdkNoOutput, observedStreamError: null,
+      finishReasonCode: "STOP", carriedFiles: true }),
+    { root: "AI_EMPTY_RESPONSE", diagnosticCode: "AI_EMPTY_RESPONSE.AI_NoOutputGeneratedError",
+      cause: sdkNoOutput, attachmentRejected: false }
+  );
+  assert.equal(
+    emptyResponseCause({ completionError: undefined, observedStreamError: undefined,
+      finishReasonCode: "STOP", carriedFiles: false }).diagnosticCode,
+    "AI_EMPTY_RESPONSE.STOP"
+  );
+  // A stream error without a status (a socket reset) is not a provider answer.
+  const reset = Object.assign(new Error("socket hang up"), { code: "ECONNRESET" });
+  assert.equal(
+    emptyResponseCause({ completionError: sdkNoOutput, observedStreamError: reset,
+      finishReasonCode: "ERROR", carriedFiles: true }).root,
+    "AI_EMPTY_RESPONSE"
+  );
+});
+
+test("the trailer carries an attachment rejection and drops any other failure kind", () => {
+  const chunk = buildChatStreamTrailerChunk({
+    searchMetadata: null,
+    failure: { kind: "attachment_rejected" },
+  });
+  assert.deepEqual(parseChatStreamTrailer(splitSearchMetadataTrailer(chunk).searchMetadataJson)?.failure,
+    { kind: "attachment_rejected" });
+  for (const failure of [{ kind: "other" }, "attachment_rejected", null, {}]) {
+    const parsed = parseChatStreamTrailer(JSON.stringify({ searchMetadata: null, failure }));
+    assert.equal(parsed?.failure, undefined, JSON.stringify(failure));
+  }
+});
+
+test("the chat route skips the model failure count only for an attachment rejection", () => {
+  const source = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
+  const emptyBranch = source.slice(source.indexOf("if (isEmptyResponse) {"),
+    source.indexOf("await recordProviderSuccess(", source.indexOf("if (isEmptyResponse) {")));
+  assert.match(emptyBranch, /carriedFiles: nativeFilePartCount > 0/);
+  // The provider's error trail is still written; only the model page is skipped.
+  assert.ok(emptyBranch.indexOf("await recordProviderFailure(") <
+    emptyBranch.indexOf("if (!attachmentRejected) {"));
+  assert.match(emptyBranch, /if \(!attachmentRejected\) \{\s*await recordModelFailure\(/);
+  assert.match(source, /nativeFilePartCount \+= fileParts\.length;/);
+});
+
 test("the chat route issues the stream report only from its two failed-settlement branches", () => {
   const source = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
-  const calls = [...source.matchAll(/issueStreamErrorReport\(\s*"(AI_[A-Z_]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(calls.sort(), ["AI_EMPTY_RESPONSE", "AI_STREAM_FAILED"]);
+  // The empty branch files under the root `emptyResponseCause` chose; the
+  // mid-stream failure branch under its own literal root.
+  const calls = [...source.matchAll(/issueStreamErrorReport\(\s*("AI_[A-Z_]+"|emptyCause\.root)/g)].map((match) => match[1]);
+  assert.deepEqual(calls.sort(), ['"AI_STREAM_FAILED"', "emptyCause.root"]);
 
   // The empty-answer grant sits inside the branch that decided the turn was
   // empty, before the trailer that carries it.
   const emptyBranch = source.indexOf("if (isEmptyResponse) {");
-  const emptyGrant = source.indexOf('issueStreamErrorReport(\n                                "AI_EMPTY_RESPONSE"');
+  const emptyGrant = source.indexOf("issueStreamErrorReport(\n                                emptyCause.root");
   const successBranch = source.indexOf("await recordProviderSuccess(", emptyBranch);
   assert.ok(emptyBranch > 0 && emptyGrant > emptyBranch && emptyGrant < successBranch);
   assert.ok(source.indexOf("{ errorReport: streamErrorReport }", successBranch) > successBranch);
