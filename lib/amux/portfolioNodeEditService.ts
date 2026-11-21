@@ -85,6 +85,7 @@ type Plan = {
   level: AmuxPortfolioNodeLevel; node: NodeRow; decisionId: string;
   nextContent: { digest: string; digestKeyId: string } | null;
   priorValue: number | null; tasks: Array<{ id: string; displayKey: string | null }>;
+  latestScore: Map<string, { scoreTotal: number; components: unknown }>;
   confirmationDigest: string;
 };
 
@@ -112,21 +113,37 @@ async function buildPlan(db: Db, actorUserId: string,
   }
   const prior = await db.amuxPortfolioAssessment.findFirst({
     where: { nodeId: node.id }, orderBy: { assessmentVersion: "desc" },
-    select: { metrics: true } });
+    select: { id: true, metrics: true } });
   if (!amuxNodeEditReasonFits(payload.reasonCode, prior !== null)) {
     throw new AmuxPortfolioError("reconfirm");
   }
   const priorValue = prior && typeof (prior.metrics as Record<string, unknown>)?.value === "number" ?
     (prior.metrics as Record<string, number>).value : null;
   const tasks = await affectedTasks(db, node.id);
+  const taskIds = tasks.map((task) => task.id);
+  const [scores, assessments] = taskIds.length === 0 ? [[], []] : await Promise.all([
+    db.$queryRaw<Array<{ taskId: string; id: string; scoreTotal: number; components: unknown }>>`
+      SELECT DISTINCT ON ("taskId") "taskId", "id"::text AS "id", "scoreTotal", "components"
+      FROM "AmuxPortfolioScoreSnapshot" WHERE "taskId" = ANY(${taskIds}::text[])
+      ORDER BY "taskId", "computedAt" DESC, "id" DESC`,
+    db.$queryRaw<Array<{ cardId: string; id: string }>>`
+      SELECT DISTINCT ON ("cardId") "cardId", "id"::text AS "id"
+      FROM "AmuxPortfolioAssessment" WHERE "cardId" = ANY(${taskIds}::text[])
+      ORDER BY "cardId", "assessmentVersion" DESC`,
+  ]);
+  const latestScore = new Map(scores.map((row) => [row.taskId, row]));
+  const latestAssessment = new Map(assessments.map((row) => [row.cardId, row.id]));
   const canonical = Buffer.from(amuxCanonicalJson(amuxNodeEditBinding({
     actorUserId, payload, level, priorContentDigest: node.contentDigest,
     nextContentDigest: nextContent?.digest ?? null,
-    affectedTaskIds: tasks.map((task) => task.id) })), "utf8");
+    priorAssessmentId: prior?.id ?? null,
+    affectedTasks: tasks.map((task) => ({ taskId: task.id,
+      scoreId: latestScore.get(task.id)?.id ?? null,
+      assessmentId: latestAssessment.get(task.id) ?? null })) })), "utf8");
   try {
     const digest = amuxContentDigest(canonical, "portfolio_assessment",
       payload.id, digestKey);
-    return { level, node, decisionId, nextContent, priorValue, tasks,
+    return { level, node, decisionId, nextContent, priorValue, tasks, latestScore,
       confirmationDigest: digest.digest };
   } finally { canonical.fill(0); }
 }
@@ -148,13 +165,7 @@ export async function previewAmuxPortfolioNodeEdit(session: Session,
   const keys = await keysFor(context, payload, deps);
   try {
     const plan = await buildPlan(prisma, actorUserId, payload, digestKey, keys, context);
-    const scores = plan.tasks.length === 0 ? [] :
-      await prisma.amuxPortfolioScoreSnapshot.findMany({
-        where: { taskId: { in: plan.tasks.map((task) => task.id) } },
-        orderBy: [{ computedAt: "desc" }, { id: "desc" }],
-        select: { taskId: true, scoreTotal: true, components: true } });
-    const latest = new Map<string, { scoreTotal: number; components: unknown }>();
-    for (const row of scores) if (!latest.has(row.taskId)) latest.set(row.taskId, row);
+    const latest = plan.latestScore;
     return {
       confirmationDigest: plan.confirmationDigest, level: plan.level,
       contentChanged: plan.nextContent !== null,

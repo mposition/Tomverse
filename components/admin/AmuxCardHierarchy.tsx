@@ -139,6 +139,8 @@ function AmuxPortfolioNodeSheet({ nodeId, level, m, onClose, onSaved }: {
   const [error, setError] = useState<string | null>(null);
   const [reauth, setReauth] = useState(false);
   const [done, setDone] = useState<string | null>(null);
+  /** The requestId of a save whose outcome is not known yet. */
+  const [unknown, setUnknown] = useState<string | null>(null);
   const headingRef = useRef<HTMLHeadingElement | null>(null);
   // The read runs once per node; a locale switch only relabels it.
   const messagesRef = useRef(m);
@@ -170,6 +172,7 @@ function AmuxPortfolioNodeSheet({ nodeId, level, m, onClose, onSaved }: {
   useEffect(() => { headingRef.current?.focus(); }, [read]);
 
   const change = (next: Partial<Draft>) => {
+    if (unknown) return;
     setDraft((prior) => prior ? { ...prior, ...next } : prior);
     setPreview(null); setDone(null); setError(null);
   };
@@ -215,18 +218,33 @@ function AmuxPortfolioNodeSheet({ nodeId, level, m, onClose, onSaved }: {
       const code = errorCode(json);
       if (code !== "outcome_unknown") { setError(m.failed(code)); setPreview(null); return; }
       // An unknown outcome is read back, never retried (agent foundation).
-      setError(m.failed(code));
-      const back = await adminFetch(`/api/admin/amux/portfolio?kind=assessment&requestId=${preview.requestId}`,
-        { cache: "no-store" });
-      const state = (await back.json().catch(() => null) as { state?: string } | null)?.state;
-      setError(null); setPreview(null);
-      if (state === "approved") { setDone(m.unknownSaved); onSaved(); } else setError(m.unknownNotSaved);
+      setUnknown(preview.requestId);
+      await readBack(preview.requestId);
     } catch { setError(m.failed("unavailable")); } finally { setBusy(false); }
+  };
+
+  /** Only an explicit not_found means nothing was written; anything else
+   * keeps the outcome unknown and the save closed. */
+  const readBack = async (requestId: string) => {
+    setError(m.failed("outcome_unknown"));
+    try {
+      const back = await adminFetch(`/api/admin/amux/portfolio?kind=assessment&requestId=${requestId}`,
+        { cache: "no-store" });
+      if (back.status === 428) { setReauth(true); return; }
+      const state = back.ok ?
+        (await back.json().catch(() => null) as { state?: string } | null)?.state : null;
+      if (state === "approved") {
+        setUnknown(null); setPreview(null); setError(null); setDone(m.unknownSaved); onSaved();
+      } else if (state === "not_found") {
+        setUnknown(null); setPreview(null); setError(m.unknownNotSaved);
+      } else setError(m.unknownPending);
+    } catch { setError(m.unknownPending); }
   };
 
   const levelName = m.levels[level];
   const prior = read?.assessment?.value ?? null;
-  const locked = !read?.editable;
+  const readOnly = !read?.editable;
+  const locked = readOnly || unknown !== null;
   return <div className={styles.layer} role="presentation" onClick={(event) => {
     if (event.target === event.currentTarget) onClose(); }}>
     <section className={styles.sheet} role="dialog" aria-modal="false" aria-labelledby="amux-node-sheet-title"
@@ -246,7 +264,7 @@ function AmuxPortfolioNodeSheet({ nodeId, level, m, onClose, onSaved }: {
         <Link href={adminRecentAuthenticationHref(window.location.pathname + window.location.search)}>{m.reauth}</Link></div>}
       {!read && !reauth && !error && <p role="status" className={styles.status}>{m.loading}</p>}
       {read && draft && <>
-        {read.state !== "active" && <p className={styles.note}>{m.readOnlyArchived}</p>}
+        {readOnly && <p className={styles.note}>{m.readOnlyArchived}</p>}
         <label className={styles.field}><span>{m.title}</span>
           <input type="text" value={draft.title} maxLength={200}
             disabled={locked || !read.contentEditable || busy}
@@ -285,6 +303,9 @@ function AmuxPortfolioNodeSheet({ nodeId, level, m, onClose, onSaved }: {
         {done && <p role="status" className={styles.status}>{done}</p>}
         <div className={styles.actions}>
           <button type="button" className={workspace.button} onClick={onClose}>{m.cancel}</button>
+          {!readOnly && unknown && <button type="button" className={`${workspace.button} ${styles.primary}`}
+            disabled={busy} onClick={() => { setBusy(true); void readBack(unknown).finally(() => setBusy(false)); }}
+            data-testid="amux-node-readback">{m.checkAgain}</button>}
           {!locked && (preview ?
             <button type="button" className={`${workspace.button} ${styles.primary}`} disabled={busy}
               onClick={() => void save()} data-testid="amux-node-save">{m.save}</button> :

@@ -104,7 +104,7 @@ test("the Feature step opens the edit sheet; review then save goes through the p
   await sheet.getByTestId("amux-node-save").click();
   await expect(sheet.getByRole("status")).toContainText("1 Task score recalculated");
   expect(posts.map((post) => post.action)).toEqual(["preview_node_edit", "save_node_edit"]);
-  const preview = posts[0] as { payload: { content: { title: string }; value: number; reasonCode: string } };
+  const preview = posts[0] as unknown as { payload: { content: { title: string }; value: number; reasonCode: string } };
   expect(preview.payload.content.title).toBe("AEO-01 crawl and llms.txt policy");
   expect(preview.payload.value).toBe(5);
   expect(preview.payload.reasonCode).toBe("operator_override");

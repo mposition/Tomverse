@@ -45,12 +45,16 @@ test("the owner's evidence reference passes the existing assessment schema", () 
     reasonCode: "operator_override", modelProposalDigest: null }).success, true);
 });
 
-test("the binding holds digests, never text, and sorts the affected Tasks", () => {
+test("the binding holds digests and the inputs the owner saw, never text", () => {
   const binding = amuxNodeEditBinding({ actorUserId: "owner", level: "feature",
     payload: amuxPortfolioNodeEditPayloadSchema.parse(payload()),
     priorContentDigest: "a".repeat(64), nextContentDigest: "b".repeat(64),
-    affectedTaskIds: ["task-b", "task-a"] });
-  assert.deepEqual(binding.affectedTaskIds, ["task-a", "task-b"]);
+    priorAssessmentId: "assessment-1",
+    affectedTasks: [{ taskId: "task-b", scoreId: "score-b", assessmentId: null },
+      { taskId: "task-a", scoreId: null, assessmentId: "assessment-a" }] });
+  assert.deepEqual(binding.affectedTasks.map((task) => task.taskId), ["task-a", "task-b"]);
+  assert.equal(binding.priorAssessmentId, "assessment-1");
+  assert.equal(binding.affectedTasks[1].scoreId, "score-b");
   assert.equal(JSON.stringify(binding).includes("crawl policy"), false);
   assert.equal(binding.nextContentDigest, "b".repeat(64));
 });

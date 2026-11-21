@@ -56,7 +56,7 @@ export const adminAmuxHierarchyMessages = defineAdminMessages({
     saved: (scored: number, skipped: number) =>
       `Saved. ${scored} Task score${scored === 1 ? "" : "s"} recalculated` +
       (skipped ? `, ${skipped} waiting for their own assessment.` : "."),
-    ownerOnly: "Only the owner can edit. Other admins see this panel read-only.",
+    ownerOnly: "Only the owner can open and edit AMUX nodes.",
     readOnlyArchived: "An archived node is read-only.",
     reauth: "Sign in again to continue",
     failed: (code: string) => ({ reconfirm: "The node changed since you opened it. Review again.",
@@ -67,6 +67,8 @@ export const adminAmuxHierarchyMessages = defineAdminMessages({
       `Save failed (${code}).`,
     unknownSaved: "The save was recorded.",
     unknownNotSaved: "Nothing was saved. Review again.",
+    unknownPending: "The outcome is still unknown. Nothing will be sent again; check once more.",
+    checkAgain: "Check the outcome again",
   },
   ko: {
     heading: "소속 계층",
@@ -123,7 +125,7 @@ export const adminAmuxHierarchyMessages = defineAdminMessages({
     saved: (scored: number, skipped: number) =>
       `저장했습니다. Task 점수 ${scored}개를 다시 계산했습니다` +
       (skipped ? `. ${skipped}개는 자기 평가가 없어 기다립니다.` : "."),
-    ownerOnly: "Owner 권한만 편집할 수 있습니다. 다른 관리자에게는 읽기 전용으로 열립니다.",
+    ownerOnly: "AMUX 노드는 Owner만 열고 편집할 수 있습니다.",
     readOnlyArchived: "보관된 노드는 읽기 전용입니다.",
     reauth: "다시 로그인하고 계속하기",
     failed: (code: string) => ({ reconfirm: "연 뒤에 노드가 바뀌었습니다. 다시 확인하세요.",
@@ -134,5 +136,7 @@ export const adminAmuxHierarchyMessages = defineAdminMessages({
       `저장하지 못했습니다 (${code}).`,
     unknownSaved: "저장이 기록돼 있습니다.",
     unknownNotSaved: "저장되지 않았습니다. 다시 확인하세요.",
+    unknownPending: "결과를 아직 알 수 없습니다. 다시 보내지 않으니 한 번 더 확인하세요.",
+    checkAgain: "결과 다시 확인",
   },
 });

@@ -61,20 +61,30 @@ export const amuxNodeEditEvidenceRef = (id: string, revision: number) =>
 export function amuxNodeEditBinding(input: {
   actorUserId: string; payload: AmuxPortfolioNodeEditPayload;
   level: AmuxPortfolioNodeLevel; priorContentDigest: string;
-  nextContentDigest: string | null; affectedTaskIds: readonly string[];
+  nextContentDigest: string | null;
+  /** The node's latest assessment the owner saw, or null for a first one. */
+  priorAssessmentId: string | null;
+  /** Each open Task with the latest score and own assessment the preview
+   * read: a newer one written meanwhile asks the owner to review again. */
+  affectedTasks: ReadonlyArray<{ taskId: string; scoreId: string | null;
+    assessmentId: string | null }>;
 }) {
   const { payload } = input;
   return {
-    schemaVersion: 1, actorUserId: input.actorUserId,
+    schemaVersion: 2, actorUserId: input.actorUserId,
     id: payload.id, requestId: payload.requestId,
     nodeId: payload.nodeId, level: input.level,
     expectedRevision: payload.expectedRevision,
     priorContentDigest: input.priorContentDigest,
     nextContentDigest: input.nextContentDigest,
+    priorAssessmentId: input.priorAssessmentId,
     value: payload.value, uncertainty: payload.uncertainty,
     reasonCode: payload.reasonCode,
     evidenceAsOf: new Date(payload.evidenceAsOf).toISOString(),
-    affectedTaskIds: [...input.affectedTaskIds].sort(),
+    affectedTasks: [...input.affectedTasks]
+      .map((task) => ({ taskId: task.taskId, scoreId: task.scoreId,
+        assessmentId: task.assessmentId }))
+      .sort((a, b) => a.taskId < b.taskId ? -1 : a.taskId > b.taskId ? 1 : 0),
   };
 }
 
