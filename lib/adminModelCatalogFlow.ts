@@ -785,6 +785,38 @@ export const codingSettingsRequest = (link: CodingLinkView, value: CodingSetting
   return out;
 };
 
+/**
+ * A dedicated row's settings form (owner decision 2026-11-21): its channels,
+ * and its coding API credits. The override is read only while the coding API
+ * is ticked -- with it off the field is hidden, so neither its value nor its
+ * check holds the save back, and nothing about it is sent.
+ */
+export const codingDedicatedSettings = (input: {
+  channels: readonly string[];
+  storedChannels: readonly string[];
+  /** The override field as typed; "" is the chat rule's minimum. */
+  override: string;
+  storedOverride: number | null;
+}) => {
+  const ordered = CODING_CHANNEL_ORDER.filter((channel) => input.channels.includes(channel));
+  const channelsChanged = ordered.join(",") !== input.storedChannels.join(",");
+  const onApi = ordered.includes("api");
+  const typed = input.override.trim() === "" ? null : Number(input.override.trim());
+  const overrideInvalid = onApi && typed !== null && (!Number.isInteger(typed) || typed <= 0 || typed > 1_000);
+  const overrideChanged = onApi && !overrideInvalid && typed !== input.storedOverride;
+  const request: { channels?: string[]; apiCreditWeight?: number | null } = {
+    ...(channelsChanged ? { channels: ordered } : {}),
+    ...(overrideChanged ? { apiCreditWeight: typed } : {}),
+  };
+  return {
+    onApi,
+    typed,
+    overrideInvalid,
+    canSave: ordered.length > 0 && !overrideInvalid && (channelsChanged || overrideChanged),
+    request,
+  };
+};
+
 /** Whether the stored profile is what the Code client is served now. */
 export const codingServing = (item: CodingCatalogItem) =>
   item.profile !== null && item.enabled === true && !item.holdReason && item.admission?.admitted === true;

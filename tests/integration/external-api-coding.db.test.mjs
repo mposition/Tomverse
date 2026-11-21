@@ -66,6 +66,7 @@ test("the coding API over the real shared credit ledger", { skip: !databaseUrl }
     const { codingCreditFloor, loadCodingCatalog, servableCodingRows } = await import(mod("lib/modelCatalog.ts"));
     const { catalogContentHash } = await import(mod("lib/modelCatalogCore.ts"));
     const { codingApiCreditFloor } = await import(mod("lib/codingRowRuntime.ts"));
+    const { chatUserMaxInputTokens } = await import(mod("lib/chatInputLimits.ts"));
     const keys = await import(mod("lib/externalApiKeys.ts"));
 
     const MODEL_ID = `claude-coder-fixture-${randomUUID().slice(0, 8)}`;
@@ -288,6 +289,33 @@ test("the coding API over the real shared credit ledger", { skip: !databaseUrl }
         assert.deepEqual(reservation.pricingSnapshot.creditBasis, { basis: "api_override", credits: override, floorCredits: apiFloor });
         assert.equal(reservation.pricingSnapshot.pricingVersion, `coding_catalog_snapshot:${published.version}:${published.contentHash}`);
         // Back to the chat rule for the scenario below.
+        await db.modelCatalogEntry.update({ where: { category_modelId: { category: "coding", modelId: MODEL_ID } }, data: { profile } });
+        await publish();
+    });
+
+    await t.test("a dedicated row with a long window takes no more than the chat input limit: refused, nothing sent or held", async () => {
+        process.env.CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED = "true";
+        assert.notEqual(process.env.CHAT_LONG_CONTEXT_ENABLED, "0", "Chat's long context is on, as by default");
+        const wide = { ...profile, capabilities: { ...profile.capabilities, maxContextTokens: 1_000_000 } };
+        // Code's weight is held to the whole window; the coding API's is not.
+        wide.pricing = { ...profile.pricing, creditWeight: codingCreditFloor(wide) };
+        await db.modelCatalogEntry.update({ where: { category_modelId: { category: "coding", modelId: MODEL_ID } }, data: { profile: wide } });
+        await publish();
+        const userId = await newUser();
+        process.env.EXTERNAL_API_ALLOWED_USER_IDS = userId;
+        const { key } = await issueKey(userId);
+        const before = sent.length;
+        // Well past the chat input limit, well inside the row's window.
+        const long = "lorem ipsum dolor sit amet ".repeat(Math.ceil(chatUserMaxInputTokens() / 3));
+        const refused = await messages("coding", key, { ...body(MODEL_ID), messages: [{ role: "user", content: [{ type: "text", text: long }] }] });
+        assert.equal(refused.status, 413);
+        assert.equal(sent.length, before, "nothing dispatched");
+        assert.equal(await db.chatCreditReservation.count({ where: { userId } }), 0, "nothing held");
+        // A request within the limit still runs.
+        reply = () => new Response(anthropicStream(), { status: 200, headers: { "content-type": "text/event-stream", "request-id": "req_provider_4" } });
+        const ok = await messages("coding", key, body(MODEL_ID));
+        assert.equal(ok.status, 200);
+        await ok.text();
         await db.modelCatalogEntry.update({ where: { category_modelId: { category: "coding", modelId: MODEL_ID } }, data: { profile } });
         await publish();
     });

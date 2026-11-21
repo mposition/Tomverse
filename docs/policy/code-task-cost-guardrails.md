@@ -194,19 +194,25 @@ User-Agent로 채널을 나누지 않습니다.
 - **전용 행의 코딩 API 크레딧**은 채팅과 같은 규칙입니다(운영자 결정 2026-11-21). 코딩 API는 모든
   모델의 입력을 `chatUserMaxInputTokens()`로 제한하고 채팅 예약·정산(입력 크기별 배수 포함)을 타므로,
   전체 컨텍스트를 최악의 입력으로 보는 Code 기준 하한(`codingCreditFloor`)은 여기서 과합니다.
-  - 기본값은 채팅 규칙 하한입니다: `suggestCreditFloor`(채팅 레지스트리 화면·`modelAdoptionDraft`와
-    같은 함수)에 행의 입력·출력 단가, 레지스트리 공급자 상한으로 묶은 최대 출력, Anthropic은 입력
-    1.25배를 넣되, 입력 배수 구간(`INPUT_CREDIT_MULTIPLIERS`: 16k까지 ×1, 50k까지 ×1.5, 100k까지 ×2,
-    그 위 ×3)마다 그 구간의 가장 큰 입력(상한 `chatUserMaxInputTokens()`까지)과 최대 출력으로 계산한
-    값 중 가장 큰 것입니다. 출력 단가가 큰 모델은 짧은 입력 구간(×1)에서 하한이 정해집니다(검토
-    r-20261121-013001-f5a5e7). 1,000(덮어쓰기 상한)을 넘는 하한은 계산할 수 없는 것으로 봅니다.
-    `suggestCreditFloor` 자체는 바꾸지 않았습니다. 저장하지 않고 과금할 때 계산하므로
+  - 기본값은 채팅 규칙 하한입니다. 채팅 가드레일·`suggestCreditFloor`와 같은 산식(크레딧 × 입력 배수 ×
+    `COST_PER_CREDIT_CEILING_MICRO_USD`가 최악 비용을 덮음)으로, 입력 배수 구간(`INPUT_CREDIT_MULTIPLIERS`:
+    16k까지 ×1, 50k까지 ×1.5, 100k까지 ×2, 그 위 ×3)마다 그 구간의 가장 큰 입력(상한
+    `chatUserMaxInputTokens()`까지)과 레지스트리 공급자 상한으로 묶은 최대 출력의 최악 비용(행의 입력·
+    출력 단가, Anthropic은 입력 1.25배)을 `ceil(최악 비용 / (구간 배수 × 크레딧당 micro-USD))`로 나눈 값
+    중 가장 큰 것입니다. 출력 단가가 큰 모델은 짧은 입력 구간(×1)에서 하한이 정해집니다(검토
+    r-20261121-013001-f5a5e7). 채팅 등급 크레딧(최대 80)으로 올려 맞추지 않고 직접 계산하므로 81~1,000도
+    그대로 받습니다(검토 r-20261121-015353-7a8db0). 1,000(덮어쓰기 상한)을 넘으면 계산할 수 없는 것으로
+    봅니다. `suggestCreditFloor` 자체는 바꾸지 않았습니다. 저장하지 않고 과금할 때 계산하므로
     `apiCreditWeight`가 없는 행과 스냅샷의 canonicalJson·해시는 그대로입니다. 그래서 이 값은
     `CHAT_USER_MAX_INPUT_TOKENS` 같은 런타임 값을 따라 달라집니다(채팅 모델 과금과 같은 성질).
   - 운영자가 더 받고 싶으면 전용 행에 `apiCreditWeight`(1~1,000 정수)를 넣습니다. 하한 이상이면 그 값을
-    받고, 하한 미만이거나 하한을 계산할 수 없으면(가격·출력 상한을 모르거나 모든 등급을 넘음) 코딩
+    받고, 하한 미만이거나 하한을 계산할 수 없으면(가격·출력 상한을 모르거나 1,000을 넘음) 코딩
     API는 그 행을 노출하지 않습니다(`api_credits_below_floor:<N>`, `api_credit_floor_unbounded`).
     Code 노출은 그대로입니다. `apiCreditWeight`는 행의 일부라 바꾸면 다음 발행 뒤 적용됩니다.
+  - 코딩 API의 전용 행은 입력을 `chatUserMaxInputTokens()`까지만 받습니다. 채팅 장문맥
+    (`CHAT_LONG_CONTEXT_ENABLED`)이 켜져 있어도 같고, 넘는 요청은 보내거나 잡아 두지 않고
+    `CHAT_INPUT_TOKEN_LIMIT`(413)로 거절합니다. 하한과 `/models`가 그 한도를 기준으로 하기 때문입니다.
+    채팅 연결 행과 일반 API는 그대로입니다.
   - `pricing.creditWeight`는 Tomverse Code(관리형) 크레딧으로 그대로이며, 판정의 Code 하한도 그대로입니다.
   - 예약 payload와 정산 `pricingSnapshot`에 `creditBasis: { basis: "chat_rule_floor" | "api_override",
     credits, floorCredits }`가 남습니다(새 컬럼 없음). `/api/code/v1/models`의 `credits_per_request`와

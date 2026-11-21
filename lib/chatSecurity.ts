@@ -1085,7 +1085,10 @@ export const createChatBudget = (
          * the model (registry overrides); this adds what an override cannot
          * carry: the cache-write rate that bounds a client's cache marker, and
          * the snapshot the price came from, so the reservation and its
-         * settlement record which catalogue version was charged.
+         * settlement record which catalogue version was charged. Such a row
+         * also takes no more input than chatUserMaxInputTokens(), long context
+         * or not: its credits are worked out at that limit
+         * (lib/codingRowRuntime.ts codingApiCreditFloor), and /models says so.
          */
         catalogPricing?: {
             cacheWriteUsdPerMillionTokens: number | null;
@@ -1099,7 +1102,9 @@ export const createChatBudget = (
     const maxInputTokens =
         kind === "guest"
             ? guestChatMaxInputTokens()
-            : accountChatMaxInputTokens(model);
+            : options?.catalogPricing
+              ? Math.min(accountChatMaxInputTokens(model), chatUserMaxInputTokens())
+              : accountChatMaxInputTokens(model);
 
     // The limit is checked against the raw estimate, deliberately: it bounds
     // the conversation the user sent, not the margin and tool overhead the

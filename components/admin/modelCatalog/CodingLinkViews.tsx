@@ -22,6 +22,7 @@ import {
   type CodingCatalogItem,
   type CodingProviderRow,
   type CodingSettingsValue,
+  codingDedicatedSettings,
   codingRefusals,
   codingServing,
   codingSettingsFrom,
@@ -642,16 +643,15 @@ export function CodingChannelsTile({
   const [channels, setChannels] = useState<string[]>(item.channels);
   const storedOverride = item.apiCredit?.override ?? null;
   const [override, setOverride] = useState<string>(storedOverride === null ? "" : String(storedOverride));
-  const ordered = CODING_CHANNEL_ORDER.filter((channel) => channels.includes(channel));
-  const channelsChanged = ordered.join(",") !== item.channels.join(",");
-  const typed = override.trim() === "" ? null : Number(override.trim());
-  const overrideInvalid = typed !== null && (!Number.isInteger(typed) || typed <= 0 || typed > 1_000);
-  const overrideChanged = !overrideInvalid && typed !== storedOverride;
+  const { onApi, typed, overrideInvalid, canSave, request } = codingDedicatedSettings({
+    channels,
+    storedChannels: item.channels,
+    override,
+    storedOverride,
+  });
   const credit = item.apiCredit;
   const floor = credit?.floorCredits ?? null;
-  const onApi = channels.includes("api");
-  const save = () =>
-    onSave({ ...(channelsChanged ? { channels: ordered } : {}), ...(overrideChanged ? { apiCreditWeight: typed } : {}) });
+  const save = () => onSave(request);
   return (
     <AdminTile title={c.detail.channelsTitle}>
       <div className="flex flex-wrap gap-3">
@@ -694,10 +694,11 @@ export function CodingChannelsTile({
               data-testid="coding-dedicated-api-credit-input"
               className="w-28 rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-right font-mono text-sm text-zinc-100 outline-none focus:border-blue-500"
             />
-            {floor === null ? (
-              <AdminStatusChip tone="bad">{c.detail.apiCreditsUnbounded}</AdminStatusChip>
-            ) : overrideInvalid ? (
+            {/* An invalid typed value is what blocks Save, so it is named first. */}
+            {overrideInvalid ? (
               <AdminStatusChip tone="bad">{c.detail.weightInvalid}</AdminStatusChip>
+            ) : floor === null ? (
+              <AdminStatusChip tone="bad">{c.detail.apiCreditsUnbounded}</AdminStatusChip>
             ) : typed !== null && typed < floor ? (
               <AdminStatusChip tone="bad">{c.detail.apiCreditsBelow(floor)}</AdminStatusChip>
             ) : (
@@ -708,7 +709,7 @@ export function CodingChannelsTile({
         </div>
       ) : null}
       <AdminWriteButton
-        disabled={busy || (!channelsChanged && !overrideChanged) || channels.length === 0 || overrideInvalid}
+        disabled={busy || !canSave}
         onClick={save}
         data-testid="coding-dedicated-channels-save"
       >

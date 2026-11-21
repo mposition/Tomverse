@@ -15,7 +15,9 @@ import {
   codingStoredProfileSchema,
   resolveCodingEntry,
 } from "../lib/modelCatalogCore.ts";
-import { getModelUsageProfile, getWeightedUsageCredits } from "../lib/models.ts";
+import { getInputCreditMultiplier, getModelUsageProfile, getWeightedUsageCredits } from "../lib/models.ts";
+import { COST_PER_CREDIT_CEILING_MICRO_USD } from "../lib/chatCostGuardrails.ts";
+import { ChatAccessError } from "../lib/chatSecurity.ts";
 
 // A dedicated coding row on the coding API (owner decisions 2026-11-21): it
 // runs as its own published row at that row's prices, through the chat
@@ -24,12 +26,12 @@ import { getModelUsageProfile, getWeightedUsageCredits } from "../lib/models.ts"
 // input limit -- while Code's managed path keeps pricing.creditWeight. One
 // conversion with Code's managed path (lib/codingRowRuntime.ts).
 
-/** The chat floor at one input size: what suggestCreditFloor says for that worst turn. */
-const floorAtInput = (input, output, maxOutputTokens, inputTokens, multiplier = 1) => {
-  const floor = suggestCreditFloor({ inputUsdPerMillionTokens: input, outputUsdPerMillionTokens: output, maxOutputTokens, inputPriceMultiplier: multiplier, worstCaseInputTokens: inputTokens });
-  assert.ok(isCreditFloor(floor));
-  return floor.credits;
-};
+/**
+ * The floor at one input size, worked out by hand: the worst turn in micro-USD
+ * over what one credit covers there (input multiplier x US$0.04).
+ */
+const floorAtInput = (input, output, maxOutputTokens, inputTokens, multiplier = 1) =>
+  Math.ceil(Math.ceil(inputTokens * input * multiplier + maxOutputTokens * output) / (getInputCreditMultiplier(inputTokens) * COST_PER_CREDIT_CEILING_MICRO_USD));
 /** The largest floor over the input bands' worst turns (x1 to 16k, x1.5 to 50k, x2 to 100k, x3 to the limit). */
 const bandFloor = (input, output, maxOutputTokens, multiplier = 1) =>
   Math.max(...[16_000, 50_000, 100_000, chatUserMaxInputTokens()].map((tokens) => floorAtInput(input, output, maxOutputTokens, tokens, multiplier)));
@@ -99,20 +101,24 @@ test("by default a dedicated row's coding API credits are the chat rule's floor,
 });
 
 test("the floor covers every input band: an output-heavy model is decided by the short-prompt band", () => {
-  // US$1/M in, US$20/M out, 32k output. At the 128k limit (x3) the chat floor
-  // is 8 credits, but a 16k prompt (x1) with a full answer costs US$0.656,
-  // more than 8 credits cover there (US$0.32).
+  // US$1/M in, US$20/M out, 32k output. At the 128k limit (x3) 7 credits
+  // cover the worst turn (US$0.768 against US$0.84), but a 16k prompt (x1)
+  // with a full answer costs US$0.656, which needs 17 credits there.
   const atLimit = floorAtInput(1, 20, 32_000, chatUserMaxInputTokens());
   const shortBand = floorAtInput(1, 20, 32_000, 16_000);
-  assert.equal(atLimit, 8);
-  assert.ok(shortBand > atLimit, `short band ${shortBand} above the limit's ${atLimit}`);
+  assert.equal(atLimit, 7);
+  assert.equal(shortBand, 17);
   const dear = row({ capabilities: { ...row().capabilities, maxOutputTokens: 32_000 }, pricing: { ...row().pricing, inputUsdPerMTok: 1, outputUsdPerMTok: 20 } });
   assert.equal(codingApiCreditFloor(dear, 32_000), shortBand);
   assert.equal(codingApiCreditFloor(dear, 32_000), bandFloor(1, 20, 32_000));
   // What the floor buys covers the 16k turn at x1: credits x 1 x US$0.04.
   assert.ok(codingApiCreditFloor(dear, 32_000) * 40_000 >= 16_000 * 1 + 32_000 * 20);
-  // An input-heavy model is still decided at the input limit: unchanged.
-  assert.equal(codingApiCreditFloor(row({ pricing: { ...row().pricing, inputUsdPerMTok: 5, outputUsdPerMTok: 1 } }), 4_000), floorAtInput(5, 1, 4_000, chatUserMaxInputTokens()));
+  // An input-heavy model is decided by a long-prompt band, never the short one:
+  // at the 128k limit, the 100k prompt at x2 is the dearest per credit.
+  const inputHeavy = codingApiCreditFloor(row({ pricing: { ...row().pricing, inputUsdPerMTok: 5, outputUsdPerMTok: 1 } }), 4_000);
+  assert.equal(inputHeavy, bandFloor(5, 1, 4_000));
+  assert.equal(inputHeavy, floorAtInput(5, 1, 4_000, 100_000));
+  assert.ok(inputHeavy > floorAtInput(5, 1, 4_000, 16_000));
   // A smaller input limit stops at the limit: no band past it is priced.
   assert.equal(codingApiCreditFloor(dear, 32_000, 10_000), floorAtInput(1, 20, 32_000, 10_000));
 });
@@ -125,6 +131,25 @@ test("an Anthropic row's floor prices the five-minute cache write at 1.25x its i
   const worst = (multiplier) =>
     suggestCreditFloor({ inputUsdPerMillionTokens: 3, outputUsdPerMillionTokens: 15, maxOutputTokens: 8_000, inputPriceMultiplier: multiplier, worstCaseInputTokens: chatUserMaxInputTokens() }).worstCaseMicroUsd;
   assert.ok(worst(1.25) > worst(1));
+});
+
+test("a floor above the chat classes (81 to 1,000) is charged, and an override in that range too", () => {
+  // US$10/M in, US$50/M out, 64k output: a 16k prompt with a full answer costs
+  // US$3.36 at x1, 84 credits -- above the largest chat class (80), which a
+  // class search would have refused.
+  const dear = row({ capabilities: { ...row().capabilities, maxOutputTokens: 64_000 }, pricing: { ...row().pricing, inputUsdPerMTok: 10, outputUsdPerMTok: 50 } });
+  assert.equal(codingApiCreditFloor(dear, 64_000), 84);
+  assert.equal(isCreditFloor(suggestCreditFloor({ inputUsdPerMillionTokens: 10, outputUsdPerMillionTokens: 50, maxOutputTokens: 64_000, worstCaseInputTokens: 16_000 })), false);
+  assert.deepEqual(apiCredit(dear).credit, { ok: true, credits: 84, basis: "chat_rule_floor", floorCredits: 84 });
+  assert.deepEqual(apiCredit({ ...dear, apiCreditWeight: 200 }).credit, { ok: true, credits: 200, basis: "api_override", floorCredits: 84 });
+  assert.deepEqual(apiCredit({ ...dear, apiCreditWeight: 1_000 }).credit, { ok: true, credits: 1_000, basis: "api_override", floorCredits: 84 });
+  assert.deepEqual(apiCredit({ ...dear, apiCreditWeight: 83 }).credit, { ok: false, reason: "api_credits_below_floor:84", floorCredits: 84 });
+  // Exactly at the cap is chargeable; one credit more is not.
+  // US$1 in; 64k output at US$624.75/M makes the 16k turn exactly 1,000 credits.
+  const at = (output) => row({ capabilities: { ...row().capabilities, maxOutputTokens: 64_000 }, pricing: { ...row().pricing, inputUsdPerMTok: 1, outputUsdPerMTok: output } });
+  assert.equal(codingApiCreditFloor(at(624.75), 64_000), 1_000);
+  assert.equal(codingApiCreditFloor(at(625.375), 64_000), null, "1,001 credits: above what the coding API charges");
+  assert.deepEqual(apiCredit(at(625.375)).credit, { ok: false, reason: "api_credit_floor_unbounded", floorCredits: null });
 });
 
 test("an apiCreditWeight at or above the floor is charged; one below it keeps the row off the coding API", () => {
@@ -294,6 +319,23 @@ test("an Anthropic dedicated row bounds a client's cache marker at 1.25x its own
   const unmarked = createChatBudget("user", model, 2_000, { totalOutputTokenCap: 4_000, catalogPricing: pricing });
   assert.equal(unmarked.promptCacheWriteReservedPremiumMicroUsd, 0);
   assert.equal(marked.usageCredits, unmarked.usageCredits, "a cache write is an operational hold, never credits");
+});
+
+test("a dedicated row on the coding API takes no more input than the chat input limit, long context or not", () => {
+  // A 1M-token window: Chat's long context would take a longer prompt.
+  const wide = row({ capabilities: { ...row().capabilities, maxContextTokens: 1_000_000 } });
+  const { built, credit } = apiCredit(wide);
+  const { model, pricing } = codingApiDedicatedModel(wide, built, SNAPSHOT, credit);
+  const limit = chatUserMaxInputTokens();
+  assert.ok(createChatBudget("user", model, limit, { totalOutputTokenCap: 4_000, catalogPricing: pricing }));
+  assert.throws(
+    () => createChatBudget("user", model, limit + 1_000, { totalOutputTokenCap: 4_000, catalogPricing: pricing }),
+    (error) => error instanceof ChatAccessError && error.code === "CHAT_INPUT_TOKEN_LIMIT" && error.status === 413
+  );
+  // The same window without the coding catalogue's pricing is Chat's, unchanged.
+  if (process.env.CHAT_LONG_CONTEXT_ENABLED !== "0") {
+    assert.ok(createChatBudget("user", model, limit + 1_000, { totalOutputTokenCap: 4_000 }));
+  }
 });
 
 test("a chat model's reservation is unchanged without catalogue pricing", () => {

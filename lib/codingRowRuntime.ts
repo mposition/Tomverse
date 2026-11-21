@@ -2,12 +2,12 @@
 // One conversion for both places a dedicated row runs: Code's managed path
 // (lib/codeManagedService.ts) and the coding API (lib/codingCatalogChannels.ts).
 // The row is the published snapshot row; nothing here reads the database.
+import { COST_PER_CREDIT_CEILING_MICRO_USD } from "@/lib/chatCostGuardrails";
 import { chatUserMaxInputTokens } from "@/lib/chatInputLimits";
-import { isCreditFloor, suggestCreditFloor } from "@/lib/modelAdoptionDraft";
 import { CODE_MANAGED_UNBOUNDED_PROVIDERS, CODING_API_CREDIT_WEIGHT_MAX, type CodingCatalogRow } from "@/lib/modelCatalogCore";
 import { MODEL_PRICING, PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER, resolveModelPricing, type ResolvedModelPricing } from "@/lib/modelPricing";
 import { isAiProvider } from "@/lib/modelRegistryShared";
-import { INPUT_CREDIT_MULTIPLIERS, type AiModel } from "@/lib/models";
+import { getInputCreditMultiplier, INPUT_CREDIT_MULTIPLIERS, type AiModel } from "@/lib/models";
 
 export type CodingRowPrice = {
   inputUsdPerMillionTokens: number;
@@ -129,9 +129,10 @@ export const codingRowRuntime = (
 //
 // The coding API takes every model's input up to chatUserMaxInputTokens() and
 // settles through the chat reservation, input-size multiplier included, so a
-// dedicated row there is charged by the chat rule: the chat catalogue's own
-// floor (suggestCreditFloor, as the chat registry screen and adoption use it)
-// over every input band up to that limit, at the row's output ceiling. Code's managed path keeps
+// dedicated row there is charged by the chat rule: the credits whose cover
+// (credits x input multiplier x COST_PER_CREDIT_CEILING_MICRO_USD, the same
+// arithmetic suggestCreditFloor and the chat guardrails use) meets the worst
+// turn of every input band up to that limit, at the row's output ceiling. Code's managed path keeps
 // `pricing.creditWeight`, whose floor (codingCreditFloor) assumes the whole
 // context window as input and would overcharge here.
 
@@ -141,40 +142,43 @@ export type CodingApiCredit =
   | { ok: true; credits: number; basis: CodingApiCreditBasis; floorCredits: number }
   | { ok: false; reason: "api_credit_floor_unbounded" | `api_credits_below_floor:${number}`; floorCredits: number | null };
 
+const positive = (value: number) => Number.isFinite(value) && value > 0;
+
 /**
  * The chat rule's minimum credits for a dedicated row on the coding API, or
- * null when it cannot be worked out (no price, no output cap, above every
- * class, or above CODING_API_CREDIT_WEIGHT_MAX). `maxOutputTokens` is the
- * row's output ceiling as codingRowRuntime bounds it against the registry.
+ * null when it cannot be worked out (no price, no output cap) or is above
+ * CODING_API_CREDIT_WEIGHT_MAX. `maxOutputTokens` is the row's output ceiling
+ * as codingRowRuntime bounds it against the registry.
  *
  * A request is charged its credits times the multiplier of its own input band
  * (INPUT_CREDIT_MULTIPLIERS: x1 to 16k, x1.5 to 50k, x2 to 100k, x3 above), so
  * the floor must cover the worst turn of every band, not only the largest
  * input: for a model whose output is dear, a short prompt with a full answer
  * at x1 costs more per credit than the longest prompt at x3. Each band's worst
- * turn is its largest input (up to the input limit) with the full output; the
- * floor is the largest of the bands' floors. suggestCreditFloor itself is the
- * chat catalogue's and is not changed here.
+ * turn is its largest input (up to the input limit) with the full output, and
+ * its floor is ceil(worst turn / (band multiplier x
+ * COST_PER_CREDIT_CEILING_MICRO_USD)); the floor is the largest of them.
+ * Worked out directly rather than by suggestCreditFloor, whose search stops at
+ * the chat classes (80 credits at most): the coding API charges any whole
+ * number up to 1,000.
  */
 export const codingApiCreditFloor = (
   row: Pick<CodingCatalogRow, "provider" | "pricing">,
   maxOutputTokens: number,
   worstCaseInputTokens: number = chatUserMaxInputTokens()
 ): number | null => {
+  const inputPrice = row.pricing.inputUsdPerMTok * (row.provider === "anthropic" ? PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER : 1);
+  const outputPrice = row.pricing.outputUsdPerMTok;
+  if (!positive(inputPrice) || !positive(outputPrice) || !positive(maxOutputTokens) || !positive(worstCaseInputTokens)) return null;
   const bandInputs = [
     ...new Set([...INPUT_CREDIT_MULTIPLIERS.map((band) => band.aboveTokens), worstCaseInputTokens].map((edge) => Math.min(edge, worstCaseInputTokens))),
   ];
-  let credits = 0;
+  let credits = 1;
   for (const inputTokens of bandInputs) {
-    const floor = suggestCreditFloor({
-      inputUsdPerMillionTokens: row.pricing.inputUsdPerMTok,
-      outputUsdPerMillionTokens: row.pricing.outputUsdPerMTok,
-      maxOutputTokens,
-      inputPriceMultiplier: row.provider === "anthropic" ? PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER : 1,
-      worstCaseInputTokens: inputTokens,
-    });
-    if (!isCreditFloor(floor)) return null;
-    credits = Math.max(credits, floor.credits);
+    // Tokens times USD per million is micro-USD.
+    const worstMicroUsd = Math.ceil(inputTokens * inputPrice + maxOutputTokens * outputPrice);
+    const coverPerCredit = getInputCreditMultiplier(inputTokens) * COST_PER_CREDIT_CEILING_MICRO_USD;
+    credits = Math.max(credits, Math.ceil(worstMicroUsd / coverPerCredit));
   }
   return credits > CODING_API_CREDIT_WEIGHT_MAX ? null : credits;
 };
