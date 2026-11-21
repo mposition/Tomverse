@@ -37,7 +37,7 @@ export const zhHant = {
         imported: "已匯入的對話",
         lastMessage: "最後一則訊息",
         entry: "接續在其他 AI 中開始的對話",
-        entryHint: "從 ChatGPT、Claude 或 Gemini 匯入對話。",
+        entryHint: "從 ChatGPT、Claude、Gemini 或 Perplexity 匯入對話。",
         where: "您的對話存在哪裡？",
         official: "開啟官方指南",
         returnGuide: "收到檔案後，請回到「設定 → 資料 → 匯入對話」。",

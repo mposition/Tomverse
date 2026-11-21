@@ -754,6 +754,10 @@ for (const [width, theme] of [[1600, "light"], [430, "dark"]] as const) {
     await expect(page.getByTestId("chat-textarea")).toBeDisabled();
     await finishControlledStream(page, "studio-history");
     await expect(page.getByTestId("chat-textarea")).toBeEnabled();
+    // The sidebar's own new-chat button starts a conversation too, so it closes the drawer.
+    const newChatHistory = await openHistory();
+    await newChatHistory.getByTestId("sidebar-new-chat").click();
+    await expect(newChatHistory).toHaveCount(0);
   });
 }
 
