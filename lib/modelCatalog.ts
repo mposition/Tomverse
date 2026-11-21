@@ -26,7 +26,7 @@ import {
   decideSnapshotRenewal,
   normalizedSnapshotContentHash,
   judgeCodingModel,
-  judgeCodingResolution,
+  judgeCodingChannels,
   judgeImageModel,
   resolveCodingEntry,
   resolveImageCatalog,
@@ -34,6 +34,7 @@ import {
   type ChatModelFacts,
   type CodingAdmission,
   type CodingCatalogRow,
+  type CodingChannel,
   type CodingJudgeInput,
   type CodingProviderTerms,
   type CodingResolvedRow,
@@ -247,7 +248,14 @@ export type CodingCatalogEntry = {
   /** The resolved model (inherited values read in); null when the row cannot be read. */
   profile: CodingResolvedRow | null;
   problem: string | null;
+  /** Admitted when the row passes on at least one channel it is offered on. */
   admission: CodingAdmission | null;
+  /** Each channel's own answer (null: not offered there, or unreadable). A chat link can pass the coding API and not Code. */
+  channelAdmission: { code: CodingAdmission | null; api: CodingAdmission | null };
+  /** The stored channels the row passes on. */
+  effectiveChannels: CodingChannel[];
+  /** A chat link whose chat model has no context window (Code refuses it). */
+  contextUnknown: boolean;
   /** The stored row (a dedicated profile, or a chat link's own values). */
   stored: unknown;
   draft: unknown;
@@ -274,6 +282,7 @@ export const resolveCodingRow = (
   lookups: ReturnType<typeof codingLookups>
 ): CodingCatalogEntry => {
   const resolution = resolveCodingEntry({ modelId: row.modelId, profile: row.profile, ...lookups });
+  const judgement = resolution.row || resolution.problem !== "no_profile" ? judgeCodingChannels(resolution, judgeCoding) : null;
   return {
     modelId: row.modelId,
     enabled: row.enabled,
@@ -281,7 +290,10 @@ export const resolveCodingRow = (
     source: resolution.source,
     profile: resolution.row,
     problem: resolution.problem,
-    admission: resolution.row || resolution.problem !== "no_profile" ? judgeCodingResolution(resolution, judgeCoding) : null,
+    admission: judgement?.admission ?? null,
+    channelAdmission: { code: judgement?.code ?? null, api: judgement?.api ?? null },
+    effectiveChannels: judgement?.effectiveChannels ?? [],
+    contextUnknown: resolution.contextUnknown,
     stored: row.profile,
     draft: row.draft,
     draftCreatedAt: row.draftCreatedAt ?? null,
@@ -310,13 +322,21 @@ export const loadCodingCatalog = async (
 };
 
 /**
- * Rows a snapshot may carry: enabled, not held, valid, admitted -- the
- * resolved values, inherited ones included, with where each row is offered.
+ * Rows a snapshot may carry: enabled, not held, valid, admitted on at least one
+ * channel -- the resolved values, inherited ones included. A row lists only the
+ * channels it passes on (owner decision 2026-11-21): a chat link that fails
+ * Code's rules but passes the coding API's is published for the coding API
+ * alone, so Code's managed path, which compares this row with its snapshot row
+ * and needs `code` in it, keeps Code's rules. A row that passes on every
+ * channel it lists is returned as it resolved, so its published content does
+ * not move.
  */
 export const servableCodingRows = (entries: readonly CodingCatalogEntry[]): CodingCatalogRow[] =>
-  entries.flatMap((entry) =>
-    entry.enabled !== true || entry.holdReason || !entry.profile || entry.admission?.admitted !== true ? [] : [entry.profile]
-  );
+  entries.flatMap((entry) => {
+    if (entry.enabled !== true || entry.holdReason || !entry.profile || entry.admission?.admitted !== true) return [];
+    const channels = entry.effectiveChannels;
+    return [channels.length === entry.profile.channels.length ? entry.profile : { ...entry.profile, channels }];
+  });
 
 /** A snapshot's rows that parse; a row published before links existed reads as a dedicated Code row. */
 export const parseSnapshotRows = (models: readonly unknown[]): CodingCatalogRow[] =>

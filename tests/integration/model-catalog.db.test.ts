@@ -3,7 +3,7 @@ import { after, before, test } from "node:test";
 import type { Session } from "next-auth";
 
 import { takeAuditChainLock } from "@/lib/adminAudit";
-import { linkAllChatModels, linkChatModel, saveCodingSettings, unlinkCodingModel } from "@/lib/codingCatalogAdmin";
+import { fillLinkCapabilities, linkAllChatModels, linkChatModel, saveCodingSettings, unlinkCodingModel } from "@/lib/codingCatalogAdmin";
 import { getImageModel, IMAGE_MODEL_REGISTRY, resetActiveImageModelCatalog } from "@/lib/imageModelRegistry";
 import {
   codingCreditFloor,
@@ -12,6 +12,7 @@ import {
   parseSnapshotRows,
   publishCodingSnapshot,
   refreshImageModelCatalog,
+  servableCodingRows,
   renewCodingSnapshotIfUnchanged,
 } from "@/lib/modelCatalog";
 import {
@@ -811,6 +812,8 @@ const LINKED = "gpt-6-luna";
 const OPENAI_TERMS = "https://openai.com/policies/services-agreement";
 const OPENAI_RETENTION = "https://platform.openai.com/docs/guides/your-data";
 
+const today = () => new Date().toISOString().slice(0, 10);
+
 const linkedEntry = async () => (await loadCodingCatalog()).find((entry) => entry.modelId === LINKED)!;
 
 test("a chat link is created off with its audit row, reads chat's values and the registry's capabilities, and needs no provider conditions", async () => {
@@ -843,9 +846,9 @@ test("a chat link is created off with its audit row, reads chat's values and the
   assert.equal(entry.profile?.terms, undefined);
   if (entry.admission?.admitted === false) {
     assert.deepEqual(
-      entry.admission.reasons.filter((reason) => !reason.startsWith("credits_below_floor")),
+      entry.admission.reasons.filter((reason) => !reason.startsWith("credits_below_floor") && reason !== "no_structured_output"),
       [],
-      "only the credit floor may stand in the way"
+      "only Code's own rules (the credit floor, structured output) may stand in the way of a Code-only link"
     );
   }
 });
@@ -853,9 +856,11 @@ test("a chat link is created off with its audit row, reads chat's values and the
 test("a weight at the floor lets the link turn on with no provider record, and the snapshot carries a row without conditions", async () => {
   const floor = codingCreditFloor((await linkedEntry()).profile!);
   assert.ok(floor !== null);
-  await saveCodingSettings({ modelId: LINKED, settings: { creditWeight: floor, channels: ["api", "code"] }, session });
+  // Code reads a plan through a structured output: the registry has none, so the operator sets one.
+  await saveCodingSettings({ modelId: LINKED, settings: { creditWeight: floor, structuredOutput: "json_mode", channels: ["api", "code"] }, session });
   const entry = await linkedEntry();
   assert.deepEqual(entry.admission, { admitted: true });
+  assert.deepEqual(entry.effectiveChannels, ["code", "api"]);
   await updateCatalogEntry({ category: "coding", modelId: LINKED, patch: { enabled: true }, session });
 
   const published = await publishCodingSnapshot({ session });
@@ -917,18 +922,22 @@ test("a link is taken out of the catalogue only once it is off, with its audit r
   assert.equal(await prisma.modelCatalogEntry.count({ where: { category: "coding", modelId: LINKED } }), 0);
 });
 
-test("add-all links every candidate on Code and the coding API at chat's credits and switches it on; a refused model leaves no row", async () => {
+test("add-all links every candidate on the coding API at chat's credits, on Code only where Code's rules pass, and a refused model leaves no row", async () => {
   await cleanup();
   const linkedBefore = await auditCount("model_catalog.coding_linked");
   const updatedBefore = await auditCount("model_catalog.entry_updated");
   const result = await linkAllChatModels({ session });
   assert.ok(result.attempted > 0, "the chat registry has candidates");
+  // The coding API takes nearly everything: Code's credit floor, context window and structured output do not stand in its way.
+  assert.ok(result.added.length >= result.attempted - 2, `added ${result.added.length} of ${result.attempted}: ${JSON.stringify(result.reasonCounts)}`);
   assert.equal(result.attempted, result.added.length + result.refused.length);
-  assert.equal(result.reasonCounts && Object.values(result.reasonCounts).every((count) => count > 0), true);
+  assert.ok(result.withCode.every((id) => result.added.includes(id)));
   assert.equal(new Set(result.added).size, result.added.length);
-  // Every refused model is counted under at least one reason name.
   assert.ok(result.refused.every((row) => row.reasons.length > 0));
-  assert.ok(Object.values(result.reasonCounts).reduce((sum, count) => sum + count, 0) >= result.refused.length);
+  // What is left over is a real reason, never one of Code's.
+  for (const reason of Object.keys(result.reasonCounts)) {
+    assert.ok(!["credits_below_floor", "credit_floor_unbounded", "chat_context_unknown", "no_structured_output", "reasoning_cost_unbounded"].includes(reason), reason);
+  }
 
   const rows = await prisma.modelCatalogEntry.findMany({ where: { category: "coding" } });
   assert.deepEqual(rows.map((row) => row.modelId).sort(), [...result.added].sort());
@@ -936,16 +945,22 @@ test("add-all links every candidate on Code and the coding API at chat's credits
     const stored = row.profile as { source: string; channels: string[]; creditWeight?: number; capabilities: unknown };
     assert.equal(row.enabled, true, row.modelId);
     assert.equal(stored.source, "chat");
-    assert.deepEqual(stored.channels, ["code", "api"]);
+    assert.deepEqual(stored.channels, result.withCode.includes(row.modelId) ? ["code", "api"] : ["api"], row.modelId);
     assert.equal(stored.creditWeight, undefined, "credits stay chat's");
     assert.deepEqual(stored.capabilities, { toolCalling: "basic", structuredOutput: "none" });
   }
+  // The registry gives no structured output, so Code is on for none of them until the operator sets one.
+  assert.deepEqual(result.withCode, []);
   // The same audit rows as adding and activating by hand: one link and one activation per model, none for the refused.
   assert.equal(await auditCount("model_catalog.coding_linked"), linkedBefore + result.added.length);
   assert.equal(await auditCount("model_catalog.entry_updated"), updatedBefore + result.added.length);
-  // The judge admits everything that was added.
   const catalogue = await loadCodingCatalog();
-  for (const entry of catalogue) assert.deepEqual(entry.admission, { admitted: true }, entry.modelId);
+  for (const entry of catalogue) {
+    assert.deepEqual(entry.admission, { admitted: true }, entry.modelId);
+    assert.deepEqual(entry.effectiveChannels, ["api"], entry.modelId);
+    assert.deepEqual(entry.channelAdmission.api, { admitted: true }, entry.modelId);
+    assert.equal(entry.channelAdmission.code, null, "Code is not among its channels");
+  }
 
   // A second run adds nothing: what was added is no longer a candidate, and what was refused is refused again.
   const again = await linkAllChatModels({ session });
@@ -954,10 +969,84 @@ test("add-all links every candidate on Code and the coding API at chat's credits
   assert.deepEqual(again.reasonCounts, result.reasonCounts);
   assert.equal(await prisma.modelCatalogEntry.count({ where: { category: "coding" } }), result.added.length);
 
-  // Nothing reaches Code until a snapshot is published; the next publish lists what was added.
+  // Nothing reaches the coding API until a snapshot is published; the next publish lists what was added, for the coding API only.
   const published = await publishCodingSnapshot({ session });
   assert.deepEqual(
     published.snapshot.models.map((model) => model.modelId).sort(),
     [...result.added].sort()
   );
+  for (const model of published.snapshot.models) assert.deepEqual(model.channels, ["api"], model.modelId);
+});
+
+test("a link that passes the coding API and fails Code is published for the coding API alone, and the snapshot of one that passes both does not move", async () => {
+  await cleanup();
+  await linkChatModel({ registryModelId: LINKED, session });
+  const floor = codingCreditFloor((await linkedEntry()).profile!)!;
+  // Both channels, structured output set, but chat's own credits below Code's floor.
+  await saveCodingSettings({ modelId: LINKED, settings: { structuredOutput: "json_mode", channels: ["api", "code"] }, session });
+  const entry = await linkedEntry();
+  const chatCredits = entry.profile!.pricing.creditWeight;
+  assert.ok(chatCredits < floor, "this registry model's chat credits are below Code's floor");
+  assert.equal(entry.channelAdmission.api?.admitted, true);
+  assert.equal(entry.channelAdmission.code?.admitted, false);
+  assert.deepEqual(entry.admission, { admitted: true });
+  assert.deepEqual(entry.effectiveChannels, ["api"]);
+  await updateCatalogEntry({ category: "coding", modelId: LINKED, patch: { enabled: true }, session });
+
+  // The snapshot row lists the coding API alone, so Code's managed path (which needs "code" in it and compares it with this very row) keeps Code's rules.
+  const servable = servableCodingRows(await loadCodingCatalog());
+  assert.deepEqual(servable.map((row) => [row.modelId, row.channels]), [[LINKED, ["api"]]]);
+  const published = await publishCodingSnapshot({ session });
+  assert.deepEqual(published.snapshot.models.map((row) => row.channels), [["api"]]);
+
+  // Raised to the floor, the same link passes both: its row lists both channels, as an unchanged published one would.
+  await saveCodingSettings({ modelId: LINKED, settings: { creditWeight: floor }, session });
+  assert.deepEqual((await linkedEntry()).effectiveChannels, ["code", "api"]);
+  assert.deepEqual(servableCodingRows(await loadCodingCatalog()).map((row) => row.channels), [["code", "api"]]);
+  await updateCatalogEntry({ category: "coding", modelId: LINKED, patch: { holdReason: "done" }, session });
+});
+
+test("filling a link's capabilities from the documentation changes only its capabilities and evidence, never its channels, and is audited", async () => {
+  await cleanup();
+  await linkChatModel({ registryModelId: LINKED, session });
+  await saveCodingSettings({ modelId: LINKED, settings: { channels: ["api"] }, session });
+  const filledBefore = await auditCount("model_catalog.coding_capabilities_filled");
+  const updatedBefore = await auditCount("model_catalog.entry_updated");
+  const sources = ["https://developers.openai.com/api/docs/guides/function-calling", "https://developers.openai.com/api/docs/guides/structured-outputs"];
+  let llmCalls = 0;
+  const deps = {
+    draftLlm: async () => ({
+      draftImagePrices: async () => {
+        throw new Error("not used");
+      },
+      draftCodingProfile: async () => {
+        throw new Error("not used");
+      },
+      draftCodingCapabilities: async ({ pages }: { pages: { url: string }[] }) => {
+        llmCalls += 1;
+        return { toolCalling: "parallel" as const, structuredOutput: "strict_schema" as const, note: "Stated on the pages.", sources: pages.map((page) => page.url), draftedAt: today() };
+      },
+    }),
+    fetchPage: async (_provider: string, url: string) => ({ url, text: "page" }),
+  };
+  const result = await fillLinkCapabilities({ modelId: LINKED, session, deps: deps as never });
+  assert.equal(llmCalls, 1);
+  assert.deepEqual(result.changes.map((change) => change.field), ["toolCalling", "structuredOutput"]);
+  const row = await prisma.modelCatalogEntry.findUniqueOrThrow({ where: { category_modelId: { category: "coding", modelId: LINKED } } });
+  const stored = row.profile as { capabilities: unknown; channels: string[]; evidence: { sources: string[]; note?: string } };
+  assert.deepEqual(stored.capabilities, { toolCalling: "parallel", structuredOutput: "strict_schema" });
+  assert.deepEqual(stored.evidence.sources, sources);
+  assert.equal(stored.evidence.note, "Stated on the pages.");
+  assert.deepEqual(stored.channels, ["api"], "Code stays the operator's to tick");
+  assert.equal(await auditCount("model_catalog.coding_capabilities_filled"), filledBefore + 1);
+  assert.equal(await auditCount("model_catalog.entry_updated"), updatedBefore + 1);
+
+  // A failure changes nothing and writes nothing.
+  const failing = { ...deps, draftLlm: async () => ({ draftCodingCapabilities: async () => { throw Object.assign(new Error("t"), { name: "TimeoutError" }); } }) };
+  await assert.rejects(
+    fillLinkCapabilities({ modelId: LINKED, session, deps: failing as never }),
+    (error: unknown) => error instanceof CatalogRefusal && error.code === "timeout_outcome_unknown"
+  );
+  assert.deepEqual((await prisma.modelCatalogEntry.findUniqueOrThrow({ where: { category_modelId: { category: "coding", modelId: LINKED } } })).profile, row.profile);
+  assert.equal(await auditCount("model_catalog.coding_capabilities_filled"), filledBefore + 1);
 });

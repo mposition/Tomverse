@@ -5,9 +5,11 @@ import { pathToFileURL } from "node:url";
 
 // Adding chat models to the coding catalogue (owner decision 2026-11-21): one
 // at a time and all at once, both from the chat registry with no LLM call. The
-// all-at-once run commits one transaction per model -- the link, its audit row
-// and the activation -- so a refused or failed model leaves nothing behind and
-// never stops the rest.
+// all-at-once run links every candidate on the coding API and on Code too only
+// when it passes Code's rules (the judge's per-channel answers are faked here;
+// tests/codingCatalogLinks.test.mjs holds the rules). It commits one
+// transaction per model -- the link, its audit row and the activation -- so a
+// refused or failed model leaves nothing behind and never stops the rest.
 
 const root = resolve(import.meta.dirname, "../..");
 const mod = (path) => pathToFileURL(resolve(root, path)).href;
@@ -22,7 +24,7 @@ class CatalogRefusal extends Error {
 }
 
 // What the fake database holds, and what a transaction may roll back.
-const state = { rows: new Map(), audits: [], preexisting: [], facts: [], updates: [], locks: 0 };
+const state = { rows: new Map(), audits: [], preexisting: [], facts: [], updates: [], probes: [], locks: 0 };
 const clone = () => ({ rows: new Map(state.rows), audits: [...state.audits] });
 
 const tx = {
@@ -66,7 +68,26 @@ mock.module(mod("lib/adminAudit.ts"), {
     },
   },
 });
-mock.module(mod("lib/modelCatalog.ts"), { namedExports: { loadChatModelFacts: async () => state.facts } });
+const ok = { admitted: true };
+mock.module(mod("lib/modelCatalog.ts"), {
+  namedExports: {
+    loadChatModelFacts: async () => state.facts,
+    loadCodingProviderTerms: async () => [],
+    codingLookups: () => ({}),
+    // The per-channel answer for the link as it would be made, by model id.
+    resolveCodingRow: (row) => {
+      state.probes.push({ id: row.modelId, profile: row.profile });
+      if (row.modelId.startsWith("refused-both")) {
+        const no = { admitted: false, reasons: ["provider_destination_unproven"] };
+        return { problem: null, channelAdmission: { api: no, code: no } };
+      }
+      if (row.modelId.startsWith("api-only")) {
+        return { problem: null, channelAdmission: { api: ok, code: { admitted: false, reasons: ["credits_below_floor:7", "no_structured_output"] } } };
+      }
+      return { problem: null, channelAdmission: { api: ok, code: ok } };
+    },
+  },
+});
 mock.module(mod("lib/modelCatalogAdmin.ts"), {
   namedExports: {
     CatalogRefusal,
@@ -108,6 +129,7 @@ const reset = (facts, preexisting = []) => {
   state.rows = new Map();
   state.audits = [];
   state.updates = [];
+  state.probes = [];
   state.locks = 0;
   state.preexisting = preexisting;
   state.facts = facts;
@@ -135,13 +157,15 @@ test("a link takes its two capability values from the registry, with no page and
   await assert.rejects(linkChatModel({ registryModelId: "gpt-off", session }), (error) => error.code === "not_a_candidate" && error.reasons[0] === "disabled");
 });
 
-test("add-all links every candidate on Code and the coding API, activates it, and counts refusals by reason without stopping", async () => {
+test("add-all links every candidate on the coding API, on Code too only where Code's rules pass, and counts refusals without stopping", async () => {
   reset(
     [
       chat("gpt-a"),
       chat("judge-refused"),
+      chat("api-only-1"),
       chat("db-down"),
-      chat("judge-refused-too"),
+      chat("refused-both"),
+      chat("api-only-2"),
       chat("gpt-d"),
       // Not candidates: off, unlisted, an unserved class, and one already in the catalogue.
       chat("gpt-off", { enabled: false }),
@@ -152,41 +176,50 @@ test("add-all links every candidate on Code and the coding API, activates it, an
     ["gpt-have"]
   );
   const result = await linkAllChatModels({ session });
-  assert.equal(result.attempted, 5);
-  // The two models around the failures were still added.
-  assert.deepEqual(result.added, ["gpt-a", "gpt-d"]);
+  assert.equal(result.attempted, 7);
+  // Every model that passes the coding API is added, the ones around the failures too.
+  assert.deepEqual(result.added, ["gpt-a", "api-only-1", "api-only-2", "gpt-d"]);
+  // Of those, only the ones that pass Code's rules are on Code.
+  assert.deepEqual(result.withCode, ["gpt-a", "gpt-d"]);
   assert.deepEqual(result.refused, [
     { modelId: "judge-refused", reasons: ["credits_below_floor:7", "unknown_provider"] },
     { modelId: "db-down", reasons: ["write_failed"] },
-    { modelId: "judge-refused-too", reasons: ["credits_below_floor:9"] },
+    { modelId: "refused-both", reasons: ["provider_destination_unproven"] },
   ]);
   // Counted by reason name, the detail after ":" dropped, one count per model.
-  assert.deepEqual(result.reasonCounts, { credits_below_floor: 2, unknown_provider: 1, write_failed: 1 });
+  assert.deepEqual(result.reasonCounts, { credits_below_floor: 1, unknown_provider: 1, write_failed: 1, provider_destination_unproven: 1 });
+  assert.deepEqual(result.codeReasonCounts, { credits_below_floor: 2, no_structured_output: 2 });
+  assert.deepEqual(result.codeRefused.map((row) => row.modelId), ["api-only-1", "api-only-2"]);
 
   // Only the added models left a row: a refused or failed one rolled back with its audit row.
-  assert.deepEqual([...state.rows.keys()].sort(), ["gpt-a", "gpt-d"]);
-  for (const id of ["gpt-a", "gpt-d"]) {
+  assert.deepEqual([...state.rows.keys()].sort(), ["api-only-1", "api-only-2", "gpt-a", "gpt-d"]);
+  for (const id of ["gpt-a", "gpt-d", "api-only-1", "api-only-2"]) {
     const row = state.rows.get(id);
     assert.equal(row.enabled, true);
-    assert.deepEqual(row.profile.channels, ["code", "api"]);
+    assert.deepEqual(row.profile.channels, id.startsWith("api-only") ? ["api"] : ["code", "api"], id);
     assert.deepEqual(row.profile.capabilities, { toolCalling: "basic", structuredOutput: "none" });
-    // Credits stay chat's: nothing overrides them.
+    // Credits stay chat's: nothing overrides them, and nothing raises them.
     assert.equal(row.profile.creditWeight, undefined);
   }
-  assert.deepEqual(state.audits.map((entry) => [entry.action, entry.targetId, entry.metadata.batch]), [
-    ["model_catalog.coding_linked", "coding:gpt-a", true],
-    ["model_catalog.coding_linked", "coding:gpt-d", true],
+  assert.deepEqual(state.audits.map((entry) => [entry.action, entry.targetId, entry.metadata.batch, entry.metadata.channels]), [
+    ["model_catalog.coding_linked", "coding:gpt-a", true, ["code", "api"]],
+    ["model_catalog.coding_linked", "coding:api-only-1", true, ["api"]],
+    ["model_catalog.coding_linked", "coding:api-only-2", true, ["api"]],
+    ["model_catalog.coding_linked", "coding:gpt-d", true, ["code", "api"]],
   ]);
-  // Each model took the audit chain lock, and was activated through the one judge (updateCatalogEntry).
-  assert.equal(state.locks, 5);
-  assert.deepEqual(state.updates.map((update) => update.modelId), ["gpt-a", "judge-refused", "db-down", "judge-refused-too", "gpt-d"]);
+  // Each link was judged on both channels as it would be made, before anything was written.
+  assert.equal(state.probes.length, 7);
+  for (const probe of state.probes) assert.deepEqual(probe.profile.channels, ["code", "api"]);
+  // A model refused by the probe takes no lock and opens no transaction; the rest took the audit chain lock and were activated through the one judge (updateCatalogEntry).
+  assert.equal(state.locks, 6);
+  assert.deepEqual(state.updates.map((update) => update.modelId), ["gpt-a", "judge-refused", "api-only-1", "db-down", "api-only-2", "gpt-d"]);
   for (const update of state.updates) assert.deepEqual(update.patch, { enabled: true, holdReason: null });
 });
 
 test("add-all with no candidate does nothing", async () => {
   reset([chat("gpt-off", { enabled: false }), chat("gpt-have")], ["gpt-have"]);
   const result = await linkAllChatModels({ session });
-  assert.deepEqual(result, { attempted: 0, added: [], refused: [], reasonCounts: {} });
+  assert.deepEqual(result, { attempted: 0, added: [], withCode: [], refused: [], reasonCounts: {}, codeReasonCounts: {}, codeRefused: [] });
   assert.equal(state.rows.size, 0);
   assert.equal(state.audits.length, 0);
   assert.equal(state.locks, 0);

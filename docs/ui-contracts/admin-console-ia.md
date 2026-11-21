@@ -816,8 +816,14 @@ section any more (owner decision 2026-11-21): the coding judge no longer asks
 for a provider's terms, retention or region, and `&view=providers` just opens
 the models. The candidates view adds one chat model at a time, or every
 candidate at once (**Add all chat models**, one confirmation, optional snapshot
-publish, a result of how many were added and the refusals by reason); neither
-makes an LLM call. The chat
+publish, a result of how many were added on the coding API, how many of those
+on Code too, and the refusals by reason); neither makes an LLM call. A chat
+link is judged per channel, and the list and the link's detail show what each
+channel says (coding API can be offered / Code refused: reason). **Fill
+capabilities with the LLM** (a button on a link's detail, and "fill all rows
+without them" on the list, each one paid LLM call per row, sent one request per
+row with N/M progress) is off, with the reason, while
+`MODEL_CATALOG_DRAFT_LLM_MODEL_ID` is not set. The chat
 registry's read-only list that sat in the old combined tab was dropped: the
 Registry tab is the chat list, and the coding tab's candidates show chat models
 where they matter. Turning a coding model on or holding it stays on

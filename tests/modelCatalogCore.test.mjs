@@ -17,7 +17,9 @@ import {
   imageExecutionDrift,
   imageExecutionProfile,
   isOfficialSourceUrl,
+  DEFAULT_CODING_CAPABILITY_SOURCES,
   DEFAULT_PRICE_SOURCES,
+  defaultCodingCapabilitySources,
   defaultPriceSources,
   OFFICIAL_SOURCE_HOSTS,
   judgeCodingModel,
@@ -35,6 +37,7 @@ import {
   reviewImageDraft,
 } from "../lib/modelCatalogCore.ts";
 import {
+  codingCapabilitiesFromAnswer,
   codingDraftFromAnswer,
   draftPricingVersion,
   imageDraftFromAnswer,
@@ -455,6 +458,34 @@ test("default price sources are official for their provider and fit the draft li
   assert.deepEqual(defaultPriceSources("qwen"), ["https://www.alibabacloud.com/help/en/model-studio/model-pricing"]);
   assert.deepEqual(defaultPriceSources("toString"), []);
   assert.deepEqual(defaultPriceSources("unknown"), []);
+});
+
+test("every chat draft provider has an official tool calling and structured output page", () => {
+  const draftProviders = AI_PROVIDERS.filter((provider) => Object.hasOwn(OFFICIAL_SOURCE_HOSTS, provider));
+  assert.deepEqual(Object.keys(DEFAULT_CODING_CAPABILITY_SOURCES).sort(), [...draftProviders].sort());
+  for (const [provider, sources] of Object.entries(DEFAULT_CODING_CAPABILITY_SOURCES)) {
+    assert.notEqual(sources.toolCalling, sources.structuredOutput, provider);
+    for (const url of [sources.toolCalling, sources.structuredOutput]) assert.equal(isOfficialSourceUrl(provider, url), true, url);
+  }
+  assert.equal(defaultCodingCapabilitySources("toString"), null);
+  assert.equal(defaultCodingCapabilitySources("openrouter"), null);
+  // The hosts the capability pages need: the Claude docs path and Cohere's docs host.
+  assert.equal(isOfficialSourceUrl("anthropic", "https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview.md"), true);
+  assert.equal(isOfficialSourceUrl("cohere", "https://docs.cohere.com/docs/tool-use-overview"), true);
+});
+
+test("a capability answer is read conservatively: an unknown value is none, and the sources are the pages that were fetched", () => {
+  const sources = ["https://developers.openai.com/api/docs/guides/function-calling"];
+  const draft = codingCapabilitiesFromAnswer({ toolCalling: "parallel", structuredOutput: "made_up", note: " a  b " }, sources);
+  assert.equal(draft.toolCalling, "parallel");
+  assert.equal(draft.structuredOutput, "none");
+  assert.equal(draft.note, "a b");
+  assert.deepEqual(draft.sources, sources);
+  assert.deepEqual(
+    [codingCapabilitiesFromAnswer(null, sources).toolCalling, codingCapabilitiesFromAnswer({ toolCalling: 5 }, sources).toolCalling],
+    ["none", "none"]
+  );
+  assert.match(draft.draftedAt, /^\d{4}-\d{2}-\d{2}$/);
 });
 
 test("only documentation on a provider's own host is official", () => {

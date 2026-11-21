@@ -146,6 +146,10 @@ export type ReasonMessage =
   | { key: "unknownProvider" }
   | { key: "destinationUnproven" }
   | { key: "noToolCalling" }
+  | { key: "noStructuredOutput" }
+  | { key: "noCapabilitySource" }
+  | { key: "timeoutUnknown" }
+  | { key: "draftFailed" }
   | { key: "noProfile" }
   | { key: "draftIncomplete"; detail: string }
   | { key: "chatModelMissing" }
@@ -208,6 +212,14 @@ export const reasonMessage = (code: string, detail = ""): ReasonMessage => {
       return { key: "destinationUnproven" };
     case "no_tool_calling":
       return { key: "noToolCalling" };
+    case "no_structured_output":
+      return { key: "noStructuredOutput" };
+    case "no_capability_source":
+      return { key: "noCapabilitySource" };
+    case "timeout_outcome_unknown":
+      return { key: "timeoutUnknown" };
+    case "draft_failed":
+      return { key: "draftFailed" };
     case "no_profile":
     case "no_valid_profile":
       return { key: "noProfile" };
@@ -555,6 +567,12 @@ export type CodingCatalogItem = {
   source: "dedicated" | "chat" | null;
   /** Where it is offered once on. */
   channels: string[];
+  /** Each channel's own answer (null: not offered there). A chat link can pass the coding API and not Code. */
+  channelAdmission: { code: Admission | null; api: Admission | null };
+  /** The stored channels the row passes on. */
+  effectiveChannels: string[];
+  /** A chat link whose chat model has no context window (Code refuses it). */
+  contextUnknown: boolean;
   /** A chat link's stored values, and the chat model it reads. */
   link: CodingLinkView | null;
   chat: ChatFactsView | null;
@@ -600,6 +618,9 @@ export const codingCatalogItems = (report: {
     profile: unknown;
     stored?: unknown;
     chat?: ChatFactsView | null;
+    channelAdmission?: { code: Admission | null; api: Admission | null };
+    effectiveChannels?: string[];
+    contextUnknown?: boolean;
     problem: string | null;
     admission: Admission | null;
     draft: unknown;
@@ -624,6 +645,9 @@ export const codingCatalogItems = (report: {
       holdReason: row.holdReason,
       source: row.source ?? (link ? "chat" : profile || draft ? "dedicated" : null),
       channels,
+      channelAdmission: row.channelAdmission ?? { code: null, api: null },
+      effectiveChannels: codingChannelsShown(row.effectiveChannels ?? []),
+      contextUnknown: row.contextUnknown ?? false,
       link,
       chat: row.chat ?? null,
       profile,
@@ -834,9 +858,15 @@ export type CodingCandidateView = ChatFactsView;
 /** What "Add chat models" answers (POST link_all): how many were added, and the judge's reasons for the rest. */
 export type CodingLinkAllResult = {
   attempted: number;
+  /** Added on the coding API. */
   added: string[];
+  /** Of those, also on Code. */
+  withCode: string[];
   refused: { modelId: string; reasons: string[] }[];
   reasonCounts: Record<string, number>;
+  /** Why the added models without Code are not on Code. */
+  codeReasonCounts: Record<string, number>;
+  codeRefused: { modelId: string; reasons: string[] }[];
 };
 
 /**
@@ -846,11 +876,18 @@ export type CodingLinkAllResult = {
  */
 export const linkAllReasonRows = (
   result: Pick<CodingLinkAllResult, "reasonCounts" | "refused">
-): { reason: string; sample: string; count: number }[] =>
-  Object.entries(result.reasonCounts)
+): { reason: string; sample: string; count: number }[] => reasonCountRows(result.reasonCounts, result.refused);
+
+/** The same rows for why the added models are not on Code. */
+export const linkAllCodeReasonRows = (
+  result: Pick<CodingLinkAllResult, "codeReasonCounts" | "codeRefused">
+): { reason: string; sample: string; count: number }[] => reasonCountRows(result.codeReasonCounts, result.codeRefused);
+
+const reasonCountRows = (counts: Record<string, number>, refused: readonly { reasons: string[] }[]) =>
+  Object.entries(counts)
     .map(([reason, count]) => ({
       reason,
-      sample: result.refused.flatMap((row) => row.reasons).find((full) => full.split(":")[0] === reason) ?? reason,
+      sample: refused.flatMap((row) => row.reasons).find((full) => full.split(":")[0] === reason) ?? reason,
       count,
     }))
     .sort((a, b) => b.count - a.count || a.reason.localeCompare(b.reason));
@@ -881,6 +918,8 @@ export type CodingCatalogReport = Parameters<typeof codingCatalogItems>[0] & {
   servableCount: number;
   externalChannels: { enabled: boolean; env: string };
   draftLlm: { configured: boolean; env: string };
+  /** "Fill capabilities with the LLM": the draft model is set, and these providers have default documentation pages. */
+  capabilityFill: { configured: boolean; env: string; providers: string[] };
   draftProviders: { provider: string; defaultSources: string[]; hosts: string[] }[];
 };
 
@@ -894,4 +933,22 @@ export const codingAttentionCounts = (items: readonly CodingCatalogItem[]) => {
     else other += 1;
   }
   return { floor, other };
+};
+
+/**
+ * The chat links that still carry the registry's conservative capability values
+ * (structured output None, or no documentation read), split into the ones the
+ * LLM can fill (the provider has default pages) and the ones it cannot.
+ */
+export const capabilityFillTargets = (
+  items: readonly CodingCatalogItem[],
+  providers: readonly string[]
+): { targets: CodingCatalogItem[]; unsupported: CodingCatalogItem[] } => {
+  const needing = items.filter(
+    (item) => item.source === "chat" && item.link !== null && (item.link.capabilities.structuredOutput === "none" || capabilityOrigin(item.link) === "registry")
+  );
+  return {
+    targets: needing.filter((item) => providers.includes(item.provider)),
+    unsupported: needing.filter((item) => !providers.includes(item.provider)),
+  };
 };

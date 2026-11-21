@@ -8,6 +8,8 @@ import { CodingModelDetail, CodingModelForm, type CodingModelFormValue } from "@
 import { CodingCandidates, CodingChannelsTile, CodingLinkDetail } from "@/components/admin/modelCatalog/CodingLinkViews";
 import {
   CandidateSummary,
+  CapabilityFillBar,
+  type CapabilityFillResult,
   CodingChannelBanner,
   CodingFilterBar,
   CodingModelTable,
@@ -32,6 +34,7 @@ import {
   type CodingListFilter,
   type CodingSettingsValue,
   type ImageNextAction,
+  capabilityFillTargets,
   codingCatalogItems,
   codingDraftSources,
   codingEdit,
@@ -58,7 +61,7 @@ const CODING_PATH = "/admin/models?tab=coding";
 // A draft fetches up to three pages (10 s each) and makes one LLM call (90 s).
 const DRAFT_REQUEST_TIMEOUT_MS = 130_000;
 
-type SendResult = { ok: true; payload: unknown } | { ok: false; timedOut: boolean };
+type SendResult = { ok: true; payload: unknown } | { ok: false; timedOut: boolean; code?: string };
 
 const elapsedText = (ms: number) => {
   const seconds = Math.max(0, Math.floor(ms / 1000));
@@ -102,6 +105,11 @@ export function AdminCodingCatalogPanel() {
   const [linkAll, setLinkAll] = useState<{ publish: boolean } | null>(null);
   const [addingAll, setAddingAll] = useState(false);
   const [linkAllResult, setLinkAllResult] = useState<{ result: CodingLinkAllResult; publish: number | "failed" | null } | null>(null);
+  // "Fill capabilities with the LLM": one row at a time (a request per row), so no request outlives the HTTP limit.
+  const [fillConfirm, setFillConfirm] = useState(false);
+  const [fillRun, setFillRun] = useState<{ done: number; total: number } | null>(null);
+  const [fillResult, setFillResult] = useState<CapabilityFillResult | null>(null);
+  const [fillingId, setFillingId] = useState<string | null>(null);
   const [activate, setActivate] = useState<{ item: CodingCatalogItem; publish: boolean } | null>(null);
   const [hold, setHold] = useState<{ modelId: string; name: string } | null>(null);
   const [holdReason, setHoldReason] = useState("");
@@ -185,17 +193,19 @@ export function AdminCodingCatalogPanel() {
   );
 
   /** One request; refusals become a toast in words. A timeout is reported, never retried here. */
-  const send = async (url: string, method: "PATCH" | "POST", body: unknown, timeoutMs?: number): Promise<SendResult> => {
+  const send = async (url: string, method: "PATCH" | "POST", body: unknown, timeoutMs?: number, quiet = false): Promise<SendResult> => {
     let response: Response;
     try {
       response = await adminFetch(url, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body), timeoutMs });
     } catch (error) {
       const timedOut = isAdminFetchTimeout(error);
-      if (!timedOut) refused(["network_error"]);
-      return { ok: false, timedOut };
+      if (!timedOut && !quiet) refused(["network_error"]);
+      return { ok: false, timedOut, ...(timedOut ? {} : { code: "network_error" }) };
     }
     const payload = (await response.json().catch(() => null)) as { error?: string; reasons?: string[]; detail?: string | null } | null;
     if (!response.ok) {
+      const code = isSessionGone(response.status, payload) ? "session_expired" : response.status === 403 ? "forbidden" : (payload?.error ?? String(response.status));
+      if (quiet && code !== "session_expired") return { ok: false, timedOut: false, code };
       if (isSessionGone(response.status, payload)) {
         setSessionExpired(true);
         showToast({
@@ -208,7 +218,7 @@ export function AdminCodingCatalogPanel() {
       } else {
         refused(refusalReasons(payload?.error ?? String(response.status), payload?.reasons ?? []), payload?.detail ?? "");
       }
-      return { ok: false, timedOut: false };
+      return { ok: false, timedOut: false, code };
     }
     return { ok: true, payload };
   };
@@ -260,6 +270,54 @@ export function AdminCodingCatalogPanel() {
     await load();
     setAddingAll(false);
     setLinkAllResult({ result: outcome, publish: published });
+  };
+
+  const fillTargets = useMemo(
+    () => capabilityFillTargets(items, report?.capabilityFill.providers ?? []),
+    [items, report]
+  );
+
+  // One row: a single paid LLM call. A failure leaves the row as it was; a timeout is an unknown outcome and is not retried here.
+  const fillOne = async (item: CodingCatalogItem) => {
+    setFillingId(item.id);
+    const result = await send(CODING_API, "POST", { action: "fill_capabilities", modelId: item.id }, DRAFT_REQUEST_TIMEOUT_MS);
+    setFillingId(null);
+    if (result.ok) {
+      await load();
+      showToast({ tone: "ok", title: c.fill.done(item.name) });
+      return;
+    }
+    if (result.timedOut) {
+      await load();
+      refused(["timeout_outcome_unknown"]);
+    }
+  };
+
+  // Every row still on the registry's values, one request after another, with progress.
+  const fillAll = async () => {
+    setFillConfirm(false);
+    const targets = fillTargets.targets;
+    setFillResult(null);
+    setFillRun({ done: 0, total: targets.length });
+    let ok = 0;
+    let stopped = false;
+    const failed: { modelId: string; code: string }[] = [];
+    for (const target of targets) {
+      const result = await send(CODING_API, "POST", { action: "fill_capabilities", modelId: target.id }, DRAFT_REQUEST_TIMEOUT_MS, true);
+      if (result.ok) ok += 1;
+      else {
+        failed.push({ modelId: target.id, code: result.timedOut ? "timeout_outcome_unknown" : (result.code ?? "unknown") });
+        // The outcome of a timed-out call is unknown and it is never retried; a lost session ends the run too.
+        if (result.timedOut || result.code === "session_expired") {
+          stopped = result.timedOut;
+          break;
+        }
+      }
+      setFillRun({ done: ok + failed.length, total: targets.length });
+    }
+    await load();
+    setFillRun(null);
+    setFillResult({ total: targets.length, ok, failed, stopped });
   };
 
   const saveSettings = async (item: CodingCatalogItem) => {
@@ -453,6 +511,14 @@ export function AdminCodingCatalogPanel() {
             })
           }
           onSave={() => void saveSettings(openItem)}
+          fill={{
+            configured: report.capabilityFill.configured,
+            env: report.capabilityFill.env,
+            supported: report.capabilityFill.providers.includes(openItem.provider),
+            running: fillingId === openItem.id,
+            busy: fillingId !== null || fillRun !== null,
+            onFill: () => void fillOne(openItem),
+          }}
           onActivate={() => setActivate({ item: openItem, publish: false })}
           onHold={() => {
             setHoldReason("");
@@ -531,6 +597,18 @@ export function AdminCodingCatalogPanel() {
         />
         <CodingFilterBar c={c} providers={providerNames} filter={filter} onChange={setFilter} />
         <CodingChannelBanner c={c} external={report.externalChannels} />
+        <CapabilityFillBar
+          c={c}
+          count={fillTargets.targets.length}
+          skipped={fillTargets.unsupported.length}
+          configured={report.capabilityFill.configured}
+          env={report.capabilityFill.env}
+          progress={fillRun}
+          result={fillResult}
+          reasonText={reason}
+          onFillAll={() => setFillConfirm(true)}
+          onClose={() => setFillResult(null)}
+        />
         <CodingModelTable c={c} items={shown} pendingIds={pendingIds} reasonText={reason} onOpen={(item) => setOpenId(item.id)} />
         <CandidateSummary c={c} candidates={report.candidates.eligible} onOpen={() => setCandidatesOpen(true)} />
       </>
@@ -643,6 +721,16 @@ export function AdminCodingCatalogPanel() {
         busy={addingAll}
         onConfirm={() => linkAll && void doLinkAll(linkAll.publish)}
         onClose={() => setLinkAll(null)}
+      />
+
+      <AdminConfirmDialog
+        open={fillConfirm}
+        title={c.fill.allTitle(fillTargets.targets.length)}
+        effects={c.fill.allEffects(fillTargets.targets.length, fillTargets.unsupported.length)}
+        confirmLabel={c.fill.allConfirm}
+        busy={fillRun !== null}
+        onConfirm={() => void fillAll()}
+        onClose={() => setFillConfirm(false)}
       />
 
       <AdminConfirmDialog

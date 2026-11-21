@@ -9,6 +9,7 @@ import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib
 import { authOptions } from "@/lib/auth";
 import {
   codingSettingsSchema,
+  fillLinkCapabilities,
   linkAllChatModels,
   linkChatModel,
   saveCodingSettings,
@@ -33,6 +34,7 @@ import {
   codingCandidateExclusion,
   codingCatalogExternalChannelsEnabled,
   codingProfileSchema,
+  DEFAULT_CODING_CAPABILITY_SOURCES,
   defaultPriceSources,
   MODEL_ID_PATTERN,
   OFFICIAL_SOURCE_HOSTS,
@@ -139,6 +141,12 @@ export async function GET(req: Request) {
         configured: Boolean(process.env[MODEL_CATALOG_DRAFT_LLM_MODEL_ENV]?.trim()),
         env: MODEL_CATALOG_DRAFT_LLM_MODEL_ENV,
       },
+      // "Fill capabilities with the LLM" (one paid call per row): needs the draft model, and pages for the provider.
+      capabilityFill: {
+        configured: Boolean(process.env[MODEL_CATALOG_DRAFT_LLM_MODEL_ENV]?.trim()),
+        env: MODEL_CATALOG_DRAFT_LLM_MODEL_ENV,
+        providers: Object.keys(DEFAULT_CODING_CAPABILITY_SOURCES),
+      },
       // What the dedicated add form offers (a draft reads the price page).
       draftProviders: DRAFT_PROVIDERS.map((provider) => ({
         provider,
@@ -154,6 +162,8 @@ export async function GET(req: Request) {
 const postBodySchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("link"), registryModelId: z.string().regex(MODEL_ID_PATTERN) }),
   z.object({ action: z.literal("link_all") }),
+  // One row, one LLM call. A screen with many rows sends one request each.
+  z.object({ action: z.literal("fill_capabilities"), modelId: z.string().regex(MODEL_ID_PATTERN) }),
   z.object({ action: z.literal("settings"), modelId: z.string().regex(MODEL_ID_PATTERN), settings: codingSettingsSchema }),
   z.object({ action: z.literal("unlink"), modelId: z.string().regex(MODEL_ID_PATTERN) }),
   z.object({ action: z.literal("publish_snapshot") }),
@@ -178,6 +188,10 @@ export async function POST(req: Request) {
     if (body.action === "publish_snapshot") {
       const result = await publishCodingSnapshot({ session, request: req });
       return NextResponse.json({ ok: true, ...result });
+    }
+    if (body.action === "fill_capabilities") {
+      const result = await fillLinkCapabilities({ modelId: body.modelId, session, request: req });
+      return NextResponse.json({ ok: true, changes: result.changes, draft: result.draft });
     }
     if (body.action === "link_all") {
       return NextResponse.json({ ok: true, ...(await linkAllChatModels({ session, request: req })) });

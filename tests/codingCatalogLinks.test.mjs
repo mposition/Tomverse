@@ -11,8 +11,8 @@ import {
   codingCatalogRowSchema,
   codingPlanReaches,
   codingStoredProfileSchema,
+  judgeCodingChannels,
   judgeCodingModel,
-  judgeCodingResolution,
   onCodingApi,
   registryCodingCapabilities,
   resolveCodingEntry,
@@ -104,6 +104,9 @@ const resolve = (profile, { chatModels = [chat()], terms = {}, modelId = "claude
     providerTerms: (provider) => terms[provider] ?? null,
   });
 
+/** The overall answer of the per-channel judge, as the single answer it used to be. */
+const judgeCodingResolution = (resolution, judge) => judgeCodingChannels(resolution, judge).admission;
+
 const deps = (floor = 5) => ({
   knownProvider: () => true,
   providerDestinationEstablished: () => true,
@@ -183,16 +186,84 @@ test("the judge refuses a link whose chat model is off, deleted, unpriced or mis
   assert.ok(judge(resolve(link(), { chatModels: [chat({ catalogDeleted: true })] })).reasons.includes("chat_model_deleted"));
   assert.ok(judge(resolve(link(), { chatModels: [chat({ price: { ...chat().price, verified: false } })] })).reasons.includes("chat_price_unverified"));
   assert.deepEqual(judge(resolve(link(), { chatModels: [] })), { admitted: false, reasons: ["chat_model_missing"] });
-  assert.deepEqual(judge(resolve(link(), { chatModels: [chat({ contextWindowTokens: null })] })), {
-    admitted: false,
-    reasons: ["chat_context_unknown"],
-  });
+  // An unknown context window is Code's problem only: the row resolves, carries a placeholder, and the coding API still takes it.
+  const noContext = resolve(link({ channels: ["code"] }), { chatModels: [chat({ contextWindowTokens: null })] });
+  assert.equal(noContext.contextUnknown, true);
+  assert.deepEqual(judge(noContext), { admitted: false, reasons: ["chat_context_unknown"] });
+  const noContextApi = resolve(link({ channels: ["code", "api"] }), { chatModels: [chat({ contextWindowTokens: null })] });
+  assert.deepEqual(judgeCodingChannels(noContextApi, (row) => judgeCodingModel(row, deps())).effectiveChannels, ["api"]);
   // Code's managed path refuses separately billed reasoning; the judge says so before activation.
   const reasoning = resolve(link(), { chatModels: [chat({ price: { ...chat().price, reasoningBilledSeparately: true } })] });
   assert.ok(judge(reasoning).reasons.includes("reasoning_cost_unbounded"));
   // An API-only link is not held to Code's managed-path limits.
   const apiOnly = resolve(link({ channels: ["api"] }), { chatModels: [chat({ price: { ...chat().price, reasoningBilledSeparately: true } })] });
   assert.equal(judge(apiOnly).admitted, true);
+});
+
+test("a chat link is judged per channel: the coding API needs the chat side, Code needs Code's rules too", () => {
+  const channels = (profile, options = {}, floor = 5) =>
+    judgeCodingChannels(resolve(profile, options), (row) => judgeCodingModel(row, deps(floor)));
+  const both = link({ channels: ["code", "api"], capabilities: { toolCalling: "basic", structuredOutput: "none" } });
+
+  // Chat credits below Code's floor, no structured output, separately billed reasoning, unknown window:
+  // none of it stands in the coding API's way; every one stands in Code's.
+  const heavy = channels(both, { chatModels: [chat({ contextWindowTokens: null, price: { ...chat().price, reasoningBilledSeparately: true } })] }, 99);
+  assert.deepEqual(heavy.api, { admitted: true });
+  assert.equal(heavy.code.admitted, false);
+  for (const reason of ["credits_below_floor:99", "chat_context_unknown", "reasoning_cost_unbounded", "no_structured_output"]) {
+    assert.ok(heavy.code.reasons.includes(reason), reason);
+  }
+  assert.deepEqual(heavy.admission, { admitted: true });
+  assert.deepEqual(heavy.effectiveChannels, ["api"]);
+
+  // A floor nobody can compute is Code's too.
+  assert.ok(channels(both, {}, null).code.reasons.includes("credit_floor_unbounded"));
+  assert.deepEqual(channels(both, {}, null).api, { admitted: true });
+
+  // Once the structured output is set and the weight meets the floor, both pass.
+  const ready = channels(link({ channels: ["code", "api"], creditWeight: 9 }), {}, 9);
+  assert.deepEqual(ready.code, { admitted: true });
+  assert.deepEqual(ready.effectiveChannels, ["code", "api"]);
+
+  // What stands in the way of both channels stands in the way of the row.
+  for (const [reason, options, depsOverride] of [
+    ["chat_model_disabled", { chatModels: [chat({ enabled: false })] }, {}],
+    ["chat_price_unverified", { chatModels: [chat({ price: { ...chat().price, verified: false } })] }, {}],
+    ["provider_cost_unbounded", { chatModels: [chat({ provider: "perplexity" })] }, {}],
+    ["provider_destination_unproven", {}, { providerDestinationEstablished: () => false }],
+    ["unknown_provider", {}, { knownProvider: () => false }],
+  ]) {
+    const refused = judgeCodingChannels(resolve(both, options), (row) => judgeCodingModel(row, { ...deps(), ...depsOverride }));
+    assert.equal(refused.admission.admitted, false, reason);
+    assert.ok(refused.api.reasons.includes(reason), `api: ${reason}`);
+    assert.ok(refused.code.reasons.includes(reason), `code: ${reason}`);
+    assert.deepEqual(refused.effectiveChannels, [], reason);
+  }
+  const noTools = channels(link({ channels: ["code", "api"], capabilities: { toolCalling: "none", structuredOutput: "json_mode" } }));
+  assert.ok(noTools.api.reasons.includes("no_tool_calling") && noTools.code.reasons.includes("no_tool_calling"));
+
+  // A channel the row is not offered on has no answer; a Code-only row that fails Code is refused as before.
+  const codeOnly = channels(link({ channels: ["code"], capabilities: { toolCalling: "basic", structuredOutput: "none" } }));
+  assert.equal(codeOnly.api, null);
+  assert.deepEqual(codeOnly.admission, { admitted: false, reasons: ["no_structured_output"] });
+  const apiOnly = channels(link({ channels: ["api"], capabilities: { toolCalling: "basic", structuredOutput: "none" } }), {}, 99);
+  assert.equal(apiOnly.code, null);
+  assert.deepEqual(apiOnly.admission, { admitted: true });
+  // The older "cli" channel is the coding API.
+  assert.deepEqual(channels(link({ channels: ["code", "cli"], capabilities: { toolCalling: "basic", structuredOutput: "none" } }), {}, 99).effectiveChannels, ["cli"]);
+});
+
+test("a dedicated row has one answer for every channel, as before", () => {
+  const dedicatedChannels = (profile, floor = 5) =>
+    judgeCodingChannels(resolve(profile, { modelId: "qwen3.7-coder-plus" }), (row) => judgeCodingModel(row, deps(floor)));
+  // Below the floor, structured output none: a dedicated row is judged as one thing on both channels (the coding API has its own credit rule).
+  const below = dedicatedChannels(dedicated({ channels: ["code", "api"], capabilities: { ...dedicated().capabilities, structuredOutput: "none" } }), 99);
+  assert.equal(below.code.admitted, false);
+  assert.equal(below.api.admitted, false);
+  assert.deepEqual(below.code.reasons, below.api.reasons);
+  assert.ok(!below.code.reasons.includes("no_structured_output"));
+  const ok = dedicatedChannels(dedicated({ channels: ["code", "api"] }));
+  assert.deepEqual(ok.effectiveChannels, ["code", "api"]);
 });
 
 test("the judge asks for no provider conditions: a row with none passes, and terms never refuse", () => {

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { ChoiceChips } from "@/components/admin/modelCatalog/ImageCatalogViews";
-import { CodingSourceBadge, CodingStateChip, formatTokens, type CodingMessages } from "@/components/admin/modelCatalog/CodingListViews";
+import { ChannelVerdicts, CodingSourceBadge, CodingStateChip, formatTokens, type CodingMessages } from "@/components/admin/modelCatalog/CodingListViews";
 import { AdminProviderMark } from "@/components/admin/ui/AdminProviderMark";
 import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
 import { AdminStepper } from "@/components/admin/ui/AdminStepper";
@@ -31,6 +31,7 @@ import {
   codingSettingsRequest,
   codingStage,
   effectiveCreditWeight,
+  linkAllCodeReasonRows,
   linkAllReasonRows,
 } from "@/lib/adminModelCatalogFlow";
 
@@ -63,6 +64,7 @@ function LinkAllResult({
   onClose: () => void;
 }) {
   const rows = linkAllReasonRows(result);
+  const codeRows = linkAllCodeReasonRows(result);
   const leftOut = result.attempted - result.added.length;
   return (
     <section
@@ -74,7 +76,7 @@ function LinkAllResult({
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           <p className="font-bold text-zinc-100">{c.candidates.resultTitle}</p>
-          <p className="text-zinc-300">{c.candidates.resultAdded(result.added.length, result.attempted)}</p>
+          <p className="text-zinc-300">{c.candidates.resultAdded(result.added.length, result.attempted, result.withCode.length)}</p>
         </div>
         <button type="button" onClick={onClose} className="text-xs font-bold text-zinc-400 underline hover:text-zinc-100">
           {c.candidates.resultDismiss}
@@ -85,6 +87,18 @@ function LinkAllResult({
           <p className="text-xs font-bold text-amber-300">{c.candidates.resultLeftOut(leftOut)}</p>
           <ul className="mt-1 list-disc pl-4 text-xs text-zinc-300" data-testid="coding-link-all-reasons">
             {rows.map((row) => (
+              <li key={row.reason} data-reason={row.reason}>
+                {reasonText(row.sample)} · {row.count}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {codeRows.length > 0 ? (
+        <div>
+          <p className="text-xs font-bold text-blue-300">{c.candidates.resultNoCode(result.added.length - result.withCode.length)}</p>
+          <ul className="mt-1 list-disc pl-4 text-xs text-zinc-300" data-testid="coding-link-all-code-reasons">
+            {codeRows.map((row) => (
               <li key={row.reason} data-reason={row.reason}>
                 {reasonText(row.sample)} · {row.count}
               </li>
@@ -310,9 +324,12 @@ export function CodingLinkDetail({
   onActivate,
   onHold,
   onUnlink,
+  fill,
 }: {
   c: CodingMessages;
   item: CodingCatalogItem;
+  /** "Fill capabilities with the LLM" for this link: whether it can run, why not, and the run. */
+  fill: { configured: boolean; env: string; supported: boolean; running: boolean; busy: boolean; onFill: () => void };
   /** The settings form, as edited. */
   value: CodingSettingsValue;
   busy: boolean;
@@ -585,6 +602,24 @@ export function CodingLinkDetail({
             ) : (
               <p className="text-xs text-zinc-400">{c.detail.sourcesNone}</p>
             )}
+            <div className="flex flex-col gap-1 border-t border-zinc-800 pt-3" data-testid="coding-link-fill">
+              <AdminWriteButton
+                size="sm"
+                variant="secondary"
+                disabled={!fill.configured || !fill.supported || fill.busy}
+                onClick={fill.onFill}
+                data-testid="coding-link-fill-button"
+              >
+                {fill.running ? c.fill.filling : c.fill.button}
+              </AdminWriteButton>
+              {!fill.configured ? (
+                <p className="text-xs text-amber-300">{c.fill.off(fill.env)}</p>
+              ) : !fill.supported ? (
+                <p className="text-xs text-zinc-400">{c.fill.noSource}</p>
+              ) : (
+                <p className="text-xs text-zinc-500">{c.fill.rowNote}</p>
+              )}
+            </div>
           </AdminTile>
 
           <AdminTile
@@ -596,6 +631,7 @@ export function CodingLinkDetail({
             }
           >
             <div data-testid="coding-link-verdict" data-admitted={refusals.length === 0 ? "true" : "false"}>
+              <ChannelVerdicts c={c} item={item} reasonText={reasonText} />
               {refusals.length === 0 && item.profile ? (
                 <ul className="flex flex-col gap-1 rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-3 text-xs text-zinc-200">
                   {c.detail

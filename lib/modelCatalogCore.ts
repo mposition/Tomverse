@@ -92,6 +92,75 @@ export const DEFAULT_PRICE_SOURCES: Readonly<Record<string, readonly string[]>> 
 export const defaultPriceSources = (provider: string): readonly string[] =>
   Object.hasOwn(DEFAULT_PRICE_SOURCES, provider) ? DEFAULT_PRICE_SOURCES[provider] : [];
 
+export type CodingCapabilitySources = { toolCalling: string; structuredOutput: string };
+
+/**
+ * The pages a coding link draft reads for tool calling and structured output,
+ * one each per draft provider. Each was checked on 2026-11-20 to answer 200
+ * without a redirect (the fetch refuses redirects), to carry its text in the
+ * HTML or Markdown, and to fit the draft page limits. A docs move turns one
+ * into fetch_failed; the operator can then enter the new page in the dialog.
+ */
+export const DEFAULT_CODING_CAPABILITY_SOURCES: Readonly<Record<string, CodingCapabilitySources>> = {
+  openai: {
+    toolCalling: "https://developers.openai.com/api/docs/guides/function-calling",
+    structuredOutput: "https://developers.openai.com/api/docs/guides/structured-outputs",
+  },
+  anthropic: {
+    toolCalling: "https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview.md",
+    structuredOutput: "https://platform.claude.com/docs/en/build-with-claude/structured-outputs.md",
+  },
+  cohere: {
+    toolCalling: "https://docs.cohere.com/docs/tool-use-overview",
+    structuredOutput: "https://docs.cohere.com/docs/structured-outputs",
+  },
+  google: {
+    toolCalling: "https://aistudio.google.com/docs/function-calling",
+    structuredOutput: "https://aistudio.google.com/docs/structured-output",
+  },
+  groq: {
+    toolCalling: "https://console.groq.com/docs/tool-use/overview",
+    structuredOutput: "https://console.groq.com/docs/structured-outputs",
+  },
+  xai: {
+    toolCalling: "https://docs.x.ai/developers/tools/function-calling",
+    structuredOutput: "https://docs.x.ai/developers/model-capabilities/text/structured-outputs",
+  },
+  // DeepSeek answers the slashless paths with a 302 to these.
+  deepseek: {
+    toolCalling: "https://api-docs.deepseek.com/guides/tool_calls/",
+    structuredOutput: "https://api-docs.deepseek.com/guides/json_mode/",
+  },
+  mistral: {
+    toolCalling: "https://docs.mistral.ai/inference/conversations/function-calling",
+    structuredOutput: "https://docs.mistral.ai/inference/conversations/structured-output",
+  },
+  moonshot: {
+    toolCalling: "https://platform.kimi.ai/docs/guide/use-kimi-api-to-complete-tool-calls",
+    structuredOutput: "https://platform.kimi.ai/docs/guide/use-json-mode-feature-of-kimi-api",
+  },
+  // MiniMax has no structured output guide; the chat API reference states response_format.
+  minimax: {
+    toolCalling: "https://platform.minimax.io/docs/guides/text-m3-function-call.md",
+    structuredOutput: "https://platform.minimax.io/docs/api-reference/text-post.md",
+  },
+  qwen: {
+    toolCalling: "https://www.alibabacloud.com/help/en/model-studio/qwen-function-calling",
+    structuredOutput: "https://www.alibabacloud.com/help/en/model-studio/qwen-structured-output",
+  },
+  zhipu: {
+    toolCalling: "https://docs.z.ai/guides/capabilities/function-calling",
+    structuredOutput: "https://docs.z.ai/guides/capabilities/struct-output",
+  },
+  perplexity: {
+    toolCalling: "https://docs.perplexity.ai/docs/agent-api/tools/custom-functions",
+    structuredOutput: "https://docs.perplexity.ai/docs/agent-api/output-control",
+  },
+};
+
+export const defaultCodingCapabilitySources = (provider: string): CodingCapabilitySources | null =>
+  Object.hasOwn(DEFAULT_CODING_CAPABILITY_SOURCES, provider) ? DEFAULT_CODING_CAPABILITY_SOURCES[provider] : null;
+
 /**
  * Exact hosts only: a subdomain wildcard would admit user-written pages
  * (community.openai.com) as "official", and this list is also the fetch
@@ -487,8 +556,13 @@ export type CodingResolution = {
   /** Null when the row cannot be read at all; `problem` says why. */
   row: CodingResolvedRow | null;
   problem: string | null;
-  /** Refusals the row's values alone cannot show (the linked chat model's state). */
+  /**
+   * Refusals the row's values alone cannot show (the linked chat model's
+   * state). A chat link's are split by channel in judgeCodingChannels.
+   */
   refusals: string[];
+  /** A chat link whose chat model has no context window: its row carries a placeholder, and Code refuses it. */
+  contextUnknown: boolean;
   stored: CodingStoredProfile | null;
 };
 
@@ -514,6 +588,7 @@ export const resolveCodingEntry = (input: {
     row: null,
     problem,
     refusals: [],
+    contextUnknown: false,
     stored,
   });
   if (input.profile === null || input.profile === undefined) return empty("no_profile");
@@ -525,14 +600,17 @@ export const resolveCodingEntry = (input: {
   if (stored.source === "chat") {
     const chat = input.chat(stored.registryModelId);
     if (!chat) return empty("chat_model_missing", stored, "chat");
-    if (chat.contextWindowTokens === null) return empty("chat_context_unknown", stored, "chat");
+    // Code needs the window (its credit floor assumes all of it); the coding API runs the chat
+    // model under chat's own input limit and does not. The row of an unknown window carries
+    // the output cap as a placeholder so it still publishes for the coding API, and Code
+    // refuses it (chat_context_unknown, judgeCodingChannels).
+    const contextUnknown = chat.contextWindowTokens === null;
+    if (contextUnknown) refusals.push("chat_context_unknown");
     if (chat.catalogDeleted) refusals.push("chat_model_deleted");
     else if (!chat.enabled || (chat.status !== "enabled" && chat.status !== "limited")) refusals.push("chat_model_disabled");
     if (!chat.price.verified) refusals.push("chat_price_unverified");
-    if (stored.channels.includes("code")) {
-      if (chat.price.reasoningBilledSeparately) refusals.push("reasoning_cost_unbounded");
-      if (CODE_MANAGED_UNBOUNDED_PROVIDERS.includes(chat.provider)) refusals.push("provider_cost_unbounded");
-    }
+    if (chat.price.reasoningBilledSeparately) refusals.push("reasoning_cost_unbounded");
+    if (CODE_MANAGED_UNBOUNDED_PROVIDERS.includes(chat.provider)) refusals.push("provider_cost_unbounded");
     return {
       source: "chat",
       row: {
@@ -548,7 +626,7 @@ export const resolveCodingEntry = (input: {
           toolCalling: stored.capabilities.toolCalling,
           structuredOutput: stored.capabilities.structuredOutput,
           imageInput: chat.imageInput,
-          maxContextTokens: chat.contextWindowTokens,
+          maxContextTokens: chat.contextWindowTokens ?? chat.maxOutputTokens,
           maxOutputTokens: chat.maxOutputTokens,
         },
         pricing: {
@@ -563,6 +641,7 @@ export const resolveCodingEntry = (input: {
       },
       problem: null,
       refusals,
+      contextUnknown,
       stored,
     };
   }
@@ -597,6 +676,7 @@ export const resolveCodingEntry = (input: {
     },
     problem: null,
     refusals,
+    contextUnknown: false,
     stored,
   };
 };
@@ -1142,15 +1222,69 @@ export const judgeCodingModel = (
   return reasons.length === 0 ? { admitted: true } : { admitted: false, reasons };
 };
 
-/** The judge's answer for a resolved entry, with the refusals only the resolution can see. */
-export const judgeCodingResolution = (
-  resolution: Pick<CodingResolution, "row" | "problem" | "refusals">,
+/**
+ * What only Code's managed path needs of a chat link: a credit weight above the
+ * worst turn with the whole context window as input, that window, separately
+ * billed reasoning bounded, and a structured output to read a plan with. The
+ * coding API runs a chat link as its chat model, under chat's input limit and
+ * chat's credits, so none of this stands in its way (owner decision 2026-11-21).
+ */
+const CODE_ONLY_REASONS: readonly string[] = [
+  "credit_floor_unbounded",
+  "credits_below_floor",
+  "chat_context_unknown",
+  "reasoning_cost_unbounded",
+  "no_structured_output",
+];
+const reasonName = (reason: string) => reason.split(":")[0];
+
+export type CodingChannelJudgement = {
+  /** Admitted when the row passes on at least one channel it is offered on. */
+  admission: CodingAdmission;
+  /** One channel's answer; null when the row is not offered there (or cannot be read). */
+  code: CodingAdmission | null;
+  api: CodingAdmission | null;
+  /** The stored channels the row passes on, in their stored order: what a snapshot row lists and a channel serves. */
+  effectiveChannels: CodingChannel[];
+};
+
+const admissionOf = (reasons: readonly string[]): CodingAdmission =>
+  reasons.length === 0 ? { admitted: true } : { admitted: false, reasons: [...new Set(reasons)] };
+
+/**
+ * The judge's answer per channel for a resolved entry, with the refusals only
+ * the resolution can see.
+ *
+ * A dedicated row has one answer for every channel it is offered on (the coding
+ * API prices it by its own rule, lib/codingRowRuntime.ts). A chat link is judged
+ * per channel: the coding API needs the chat side to pass, a known provider with
+ * an established data destination, tool calling and a bounded provider cost;
+ * Code needs all of that and CODE_ONLY_REASONS too. A row that passes on one
+ * channel is offered there only.
+ */
+export const judgeCodingChannels = (
+  resolution: Pick<CodingResolution, "source" | "row" | "problem" | "refusals">,
   judge: (row: CodingJudgeInput) => CodingAdmission
-): CodingAdmission => {
-  if (!resolution.row) return { admitted: false, reasons: [resolution.problem ?? "no_profile"] };
-  const admission = judge(resolution.row);
-  const reasons = [...(admission.admitted ? [] : admission.reasons), ...resolution.refusals];
-  return reasons.length === 0 ? { admitted: true } : { admitted: false, reasons };
+): CodingChannelJudgement => {
+  const row = resolution.row;
+  if (!row) {
+    return { admission: { admitted: false, reasons: [resolution.problem ?? "no_profile"] }, code: null, api: null, effectiveChannels: [] };
+  }
+  const base = judge(row);
+  const all = [...(base.admitted ? [] : base.reasons), ...resolution.refusals];
+  const onCode = row.channels.includes("code");
+  const onApi = onCodingApi(row.channels);
+  const chatLink = resolution.source === "chat";
+  const codeReasons = chatLink && row.capabilities.structuredOutput === "none" ? [...all, "no_structured_output"] : all;
+  const code = onCode ? admissionOf(codeReasons) : null;
+  const api = onApi ? admissionOf(chatLink ? all.filter((reason) => !CODE_ONLY_REASONS.includes(reasonName(reason))) : all) : null;
+  const effectiveChannels = row.channels.filter((channel) => {
+    const answer = channel === "code" ? code : api;
+    return answer?.admitted === true;
+  });
+  if (effectiveChannels.length > 0) return { admission: { admitted: true }, code, api, effectiveChannels };
+  const reasons = [...(code && !code.admitted ? code.reasons : []), ...(api && !api.admitted ? api.reasons : [])];
+  return { admission: admissionOf(reasons), code, api, effectiveChannels };
 };
 
 /** Video has no activation policy yet: every video model is refused. */

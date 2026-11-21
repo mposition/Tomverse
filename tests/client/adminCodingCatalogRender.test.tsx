@@ -3,12 +3,13 @@ import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { CodingCandidates, CodingChannelsTile, CodingLinkDetail } from "@/components/admin/modelCatalog/CodingLinkViews";
-import { CodingChannelBanner, CodingModelTable, CodingSummary } from "@/components/admin/modelCatalog/CodingListViews";
+import { CapabilityFillBar, CodingChannelBanner, CodingModelTable, CodingSummary } from "@/components/admin/modelCatalog/CodingListViews";
 import { adminMessagesFor } from "@/lib/adminLocale";
 import { adminCodingCatalogMessages } from "@/lib/adminMessages/codingCatalog";
 import { adminModelCatalogMessages } from "@/lib/adminMessages/modelCatalog";
 import {
   type CodingLinkAllResult,
+  capabilityFillTargets,
   codingCatalogItems,
   codingDedicatedSettings,
   codingSettingsFrom,
@@ -27,6 +28,7 @@ const c = adminMessagesFor(adminCodingCatalogMessages, "ko");
 const cEn = adminMessagesFor(adminCodingCatalogMessages, "en");
 const m = adminMessagesFor(adminModelCatalogMessages, "ko");
 const noop = () => {};
+const fillReady = { configured: true, env: "MODEL_CATALOG_DRAFT_LLM_MODEL_ID", supported: true, running: false, busy: false, onFill: noop };
 const reason = (code: string) => reasonText(m, reasonMessage(code));
 
 const chat = {
@@ -258,6 +260,7 @@ test("a chat link's detail shows chat's values read-only and its own settings ed
       onActivate={noop}
       onHold={noop}
       onUnlink={noop}
+      fill={fillReady}
     />
   );
   assert.match(html, /data-testid="coding-link-inherited"/);
@@ -303,6 +306,7 @@ test("a link that cannot be activated says why, and an unsaved change blocks act
       onActivate={noop}
       onHold={noop}
       onUnlink={noop}
+      fill={fillReady}
     />
   );
   assert.match(html, /data-testid="coding-link-refusals"/);
@@ -376,6 +380,7 @@ test("a link made from the registry says its capabilities came from there, and s
       onActivate={noop}
       onHold={noop}
       onUnlink={noop}
+      fill={fillReady}
     />
   );
   assert.match(html, />채팅 레지스트리</);
@@ -433,22 +438,33 @@ test("a candidate shows what it inherits from chat, with one add button and one 
 
 test("the add-all result says how many were added, the reasons for the rest by count, and what to do about the snapshot", () => {
   const result: CodingLinkAllResult = {
-    attempted: 5,
-    added: ["a", "b"],
+    attempted: 6,
+    added: ["a", "b", "f"],
+    withCode: ["a"],
     refused: [
-      { modelId: "c", reasons: ["credits_below_floor:7"] },
-      { modelId: "d", reasons: ["credits_below_floor:9", "unknown_provider"] },
-      { modelId: "e", reasons: ["provider_destination_unproven"] },
+      { modelId: "c", reasons: ["provider_destination_unproven"] },
+      { modelId: "d", reasons: ["unknown_provider"] },
+      { modelId: "e", reasons: ["unknown_provider"] },
     ],
-    reasonCounts: { credits_below_floor: 2, unknown_provider: 1, provider_destination_unproven: 1 },
+    reasonCounts: { unknown_provider: 2, provider_destination_unproven: 1 },
+    // b and f are on the coding API but not on Code.
+    codeReasonCounts: { credits_below_floor: 2, no_structured_output: 2 },
+    codeRefused: [
+      { modelId: "b", reasons: ["credits_below_floor:7", "no_structured_output"] },
+      { modelId: "f", reasons: ["credits_below_floor:9", "no_structured_output"] },
+    ],
   };
   const html = renderToStaticMarkup(<CodingCandidates {...candidateProps} result={result} resultPublish={null} />);
-  assert.match(html, /data-testid="coding-link-all-result"[^>]*data-added="2"/);
-  assert.match(html, /채팅 모델 5개 중 2개를 추가하고 활성화했습니다/);
+  assert.match(html, /data-testid="coding-link-all-result"[^>]*data-added="3"/);
+  assert.match(html, /채팅 모델 6개 중 3개를 코딩 API로 추가했고, 그중 1개는 Code까지 연결했습니다/);
   assert.match(html, /3개는 추가하지 않았습니다/);
-  assert.match(html, /data-reason="credits_below_floor"[^>]*>[^<]*크레딧 가중치가 최소값 7보다 낮습니다[^<]*· 2</);
-  assert.match(html, /data-reason="unknown_provider"[^>]*>[^<]*· 1</);
+  assert.match(html, /data-reason="unknown_provider"[^>]*>[^<]*· 2</);
   assert.match(html, /data-reason="provider_destination_unproven"[^>]*>[^<]*· 1</);
+  // The two added without Code say why Code does not have them.
+  assert.match(html, /2개는 Code 없이 추가했습니다/);
+  assert.match(html, /data-testid="coding-link-all-code-reasons"/);
+  assert.match(html, /data-reason="credits_below_floor"[^>]*>[^<]*크레딧 가중치가 최소값 7보다 낮습니다[^<]*· 2</);
+  assert.match(html, /data-reason="no_structured_output"[^>]*>[^<]*구조화 출력이 없음[^<]*· 2</);
   // The snapshot is not published unless asked: the screen says to publish it.
   assert.match(html, /스냅샷을 발행해 주세요/);
   const published = renderToStaticMarkup(<CodingCandidates {...candidateProps} result={result} resultPublish={21} />);
@@ -457,7 +473,137 @@ test("the add-all result says how many were added, the reasons for the rest by c
   assert.match(failed, /스냅샷은 발행되지 않았습니다/);
   // Nothing added: nothing to publish.
   const none = renderToStaticMarkup(
-    <CodingCandidates {...candidateProps} result={{ attempted: 1, added: [], refused: [{ modelId: "c", reasons: ["unknown_provider"] }], reasonCounts: { unknown_provider: 1 } }} />
+    <CodingCandidates
+      {...candidateProps}
+      result={{ attempted: 1, added: [], withCode: [], refused: [{ modelId: "c", reasons: ["unknown_provider"] }], reasonCounts: { unknown_provider: 1 }, codeReasonCounts: {}, codeRefused: [] }}
+    />
   );
   assert.doesNotMatch(none, /coding-link-all-publish/);
+});
+
+const apiOnlyItem = codingCatalogItems({
+  models: [
+    {
+      modelId: "gpt-6-luna",
+      enabled: true,
+      holdReason: null,
+      source: "chat" as const,
+      profile: resolved({ modelId: "gpt-6-luna", name: "GPT 6 Luna", provider: "openai", channels: ["api"] }),
+      stored: { ...stored, registryModelId: "gpt-6-luna", channels: ["api"], capabilities: { toolCalling: "basic", structuredOutput: "none" }, evidence: { sources: [], draftedAt: "2026-11-21", toolCalling: "basic", structuredOutput: "none" } },
+      chat: { ...chat, id: "gpt-6-luna", name: "GPT 6 Luna", provider: "openai" },
+      problem: null,
+      admission: { admitted: true },
+      channelAdmission: { api: { admitted: true }, code: { admitted: false, reasons: ["credits_below_floor:7", "no_structured_output"] } },
+      effectiveChannels: ["api"],
+      draft: null,
+      floor: 7,
+    },
+  ],
+})[0];
+
+test("the list and a link's detail say per channel what can be offered, and why Code is refused", () => {
+  const list = renderToStaticMarkup(<CodingModelTable c={c} items={[apiOnlyItem]} pendingIds={new Set()} reasonText={reason} onOpen={noop} />);
+  assert.match(list, /data-testid="coding-channel-verdicts"/);
+  assert.match(list, /data-channel="api" data-admitted="true"[^>]*>코딩 API: 노출 가능</);
+  assert.match(list, /data-channel="code" data-admitted="false"[^>]*>Code: 거절 · 크레딧 가중치가 최소값 7보다 낮습니다/);
+  // It serves on the coding API only: Code is not among the channel chips.
+  assert.match(list.match(/data-testid="coding-channels">.*?<\/span><\/span>/)?.[0] ?? "", /코딩 API/);
+  assert.doesNotMatch(list.match(/data-testid="coding-channels">.*?<\/span><\/span>/)?.[0] ?? "", />Code</);
+  const detail = renderToStaticMarkup(
+    <CodingLinkDetail
+      c={c}
+      item={apiOnlyItem}
+      value={codingSettingsFrom(apiOnlyItem.link!)}
+      busy={false}
+      reasonText={reason}
+      toolCallingLabel={(value) => value}
+      structuredOutputLabel={(value) => value}
+      stepperLabel={m.stepperLabel}
+      stepStates={m.stepStates}
+      onBack={noop}
+      onChange={noop}
+      onReset={noop}
+      onSave={noop}
+      onActivate={noop}
+      onHold={noop}
+      onUnlink={noop}
+      fill={fillReady}
+    />
+  );
+  assert.match(detail, /data-channel="api" data-admitted="true"/);
+  assert.match(detail, /data-channel="code" data-admitted="false"/);
+});
+
+test("a link's detail has one fill button, off with the reason while the draft model is not set or the provider has no pages", () => {
+  const render = (fill: typeof fillReady) =>
+    renderToStaticMarkup(
+      <CodingLinkDetail
+        c={c}
+        item={apiOnlyItem}
+        value={codingSettingsFrom(apiOnlyItem.link!)}
+        busy={false}
+        reasonText={reason}
+        toolCallingLabel={(value) => value}
+        structuredOutputLabel={(value) => value}
+        stepperLabel={m.stepperLabel}
+        stepStates={m.stepStates}
+        onBack={noop}
+        onChange={noop}
+        onReset={noop}
+        onSave={noop}
+        onActivate={noop}
+        onHold={noop}
+        onUnlink={noop}
+        fill={fill}
+      />
+    );
+  const button = (html: string) => html.match(/<button[^>]*data-testid="coding-link-fill-button"[^>]*>/)?.[0] ?? "";
+  const ready = render(fillReady);
+  assert.match(ready, />LLM으로 기능 정보 채우기</);
+  assert.doesNotMatch(button(ready), / disabled=""/);
+  assert.match(ready, /LLM 호출 1회/);
+  assert.match(button(render({ ...fillReady, running: true, busy: true })), / disabled=""/);
+  assert.match(render({ ...fillReady, running: true, busy: true }), />공식 문서를 읽는 중…</);
+  const off = render({ ...fillReady, configured: false });
+  assert.match(button(off), / disabled=""/);
+  assert.match(off, /꺼져 있습니다\. MODEL_CATALOG_DRAFT_LLM_MODEL_ID에 활성 모델을 지정하면 켜집니다/);
+  const noSource = render({ ...fillReady, supported: false });
+  assert.match(button(noSource), / disabled=""/);
+  assert.match(noSource, /이 공급자는 공식 문서 주소가 없습니다/);
+});
+
+test("the fill bar counts the rows to fill, shows N/M while it runs, and lists what failed and why", () => {
+  const { targets, unsupported } = capabilityFillTargets(
+    [apiOnlyItem, ...items],
+    ["openai"]
+  );
+  // The registry-made link of a provider with pages is a target; the drafted ones (with pages read) are not.
+  assert.deepEqual(targets.map((item) => item.id), ["gpt-6-luna"]);
+  assert.deepEqual(capabilityFillTargets([apiOnlyItem], []).unsupported.map((item) => item.id), ["gpt-6-luna"]);
+  assert.equal(unsupported.length, 0);
+
+  const barProps = { c, count: 3, skipped: 1, configured: true, env: "MODEL_CATALOG_DRAFT_LLM_MODEL_ID", progress: null, result: null, reasonText: reason, onFillAll: noop, onClose: noop };
+  const idle = renderToStaticMarkup(<CapabilityFillBar {...barProps} />);
+  assert.match(idle, />정보 없는 행 3개 모두 채우기</);
+  assert.doesNotMatch(idle.match(/<button[^>]*data-testid="coding-fill-all"[^>]*>/)?.[0] ?? "", / disabled=""/);
+  const running = renderToStaticMarkup(<CapabilityFillBar {...barProps} progress={{ done: 1, total: 3 }} />);
+  assert.match(running, /data-testid="coding-fill-progress" data-done="1" data-total="3"/);
+  assert.match(running, /채우는 중 1\/3/);
+  assert.match(running.match(/<button[^>]*data-testid="coding-fill-all"[^>]*>/)?.[0] ?? "", / disabled=""/);
+  const off = renderToStaticMarkup(<CapabilityFillBar {...barProps} configured={false} />);
+  assert.match(off, /data-testid="coding-fill-off"/);
+  assert.match(off.match(/<button[^>]*data-testid="coding-fill-all"[^>]*>/)?.[0] ?? "", / disabled=""/);
+  const done = renderToStaticMarkup(
+    <CapabilityFillBar
+      {...barProps}
+      result={{ total: 3, ok: 1, failed: [{ modelId: "a", code: "fetch_failed" }, { modelId: "b", code: "timeout_outcome_unknown" }], stopped: true }}
+    />
+  );
+  assert.match(done, /행 3개 중 1개를 채웠습니다/);
+  assert.match(done, /2개는 값을 그대로 두었습니다/);
+  assert.match(done, /data-model="a"[^>]*>.*문서를 읽지 못했습니다|data-model="a"/);
+  assert.match(done, /data-model="b"/);
+  assert.match(done, /시간 초과 뒤 멈췄습니다/);
+  // Nothing to fill and nothing running: the bar is not drawn.
+  assert.equal(renderToStaticMarkup(<CapabilityFillBar {...barProps} count={0} />), "");
 });

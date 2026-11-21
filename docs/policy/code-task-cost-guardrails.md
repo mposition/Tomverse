@@ -135,21 +135,53 @@ migration 적용은 별도입니다. 구현한 A1 범위와 확정 값은 10절�
   행에는 코딩 전용 값만 저장합니다: `toolCalling`·`structuredOutput`(운영자가 수정 가능),
   `minimumPlan` 덮어쓰기(없으면 채팅 플랜, Guest는 Free), `creditWeight`(없으면 채팅
   가중치, 하한 미만이면 켤 수 없음), 노출 채널 `channels`.
-- **연결은 채팅 레지스트리만 읽습니다. LLM 호출도 문서 읽기도 없습니다(운영자 결정 2026-11-21).**
-  `toolCalling`은 `basic`입니다: 코딩 후보는 외부 API가 내놓는 사용 등급이고, 그 API는 모든 모델을 도구
+- **연결은 채팅 레지스트리만 읽고 즉시 됩니다. 연결에는 LLM 호출도 문서 읽기도 없습니다(운영자
+  결정 2026-11-21).** `toolCalling`은 `basic`입니다: 코딩 후보는 외부 API가 내놓는 사용 등급이고, 그 API는 모든 모델을 도구
   호출 가능(`capabilities.tools`, `lib/externalApiCatalogCore.ts`)으로 내놓기 때문입니다. 레지스트리에는
   구조화 출력 정보가 없으므로 `structuredOutput`은 보수적 기본값 `none`이고, Code 관리형 경로는 `none`
   행을 쓰지 않으므로(`CODE_MODEL_UNAVAILABLE`) Code에서 쓰려면 운영자가 행에서 값을 정합니다.
   `evidence`는 `sources: []`(읽은 문서 없음)로 남고, 화면은 이를 "채팅 레지스트리"로 보입니다. 예전에
   LLM 초안으로 만든 행의 `evidence`(문서 주소 있음)는 그대로 읽습니다. 한 번에 연결하는 길은 아래를
   보십시오.
+- **채널별 판정(운영자 결정 2026-11-21).** 채팅 연결 행은 코딩 API에서 채팅 모델 그대로(채팅 입력 한도·
+  채팅 크레딧)로 실행되므로 Code 기준이 코딩 API 노출을 막지 않습니다. `judgeCodingChannels`
+  (`lib/modelCatalogCore.ts`)가 채널마다 답합니다. **코딩 API**: 채팅 쪽 통과(활성·공개·삭제 아님·가격
+  확인됨), 알려진 공급자와 데이터 목적지, 도구 호출, 상한 있는 공급자(`provider_cost_unbounded`),
+  공식 가격 출처. **Code**: 위 전부에 더해 크레딧 하한(`credits_below_floor`·`credit_floor_unbounded`),
+  채팅 레지스트리의 컨텍스트 크기(`chat_context_unknown`), 추론 토큰 별도 과금 아님
+  (`reasoning_cost_unbounded`), 구조화 출력이 `none`이 아님(`no_structured_output`). 컨텍스트 크기를 모르는
+  채팅 모델의 행은 출력 상한을 컨텍스트 자리표시로 담아 스냅샷에 실립니다(코딩 API는 그 값을 쓰지
+  않고, Code는 `chat_context_unknown`으로 거절). 전용 행은 지금까지처럼 모든 채널에 하나의 판정이고,
+  코딩 API 크레딧은 `codingApiCredit` 규칙입니다. 한 채널에서만 통과한 행은 그 채널에서만 노출합니다:
+  `servableCodingRows`가 행의 `channels`를 통과한 채널로 좁혀 스냅샷에 싣습니다. 두 채널을 모두 통과한
+  행은 해석된 그대로라 이미 발행한 행의 `canonicalJson`·해시는 그대로입니다. Code 관리형 경로는 이
+  좁혀진 행을 지금 행으로 비교하고 `channels`에 `code`가 있어야 하므로 Code 기준은 그대로입니다.
+  활성화는 행이 적어도 한 채널에서 통과하면 됩니다. 판정 결과를 스냅샷에 따로 싣지 않습니다.
+  Admin 목록·상세는 채널마다 "노출 가능 / 거절: 사유"를 보입니다.
+- **"LLM으로 기능 정보 채우기"(운영자 결정 2026-11-21, 유료 호출, 요청 때만).** 구조화 출력이 `none`이거나
+  읽은 문서가 없는(`evidence.sources`가 비어 있는) 채팅 연결 행의 `toolCalling`·`structuredOutput`을 공급자
+  공식 문서로 채웁니다. 행 상세 버튼과 목록의 "정보 없는 행 모두 채우기"(확인 대화상자 한 번)가 있고,
+  `MODEL_CATALOG_DRAFT_LLM_MODEL_ID`가 없으면 둘 다 꺼지고 이유를 보입니다.
+  서버 action `fill_capabilities`는 **한 행에 LLM 호출 한 번**만 합니다(HTTP 시간 제한 때문에 요청 하나에서
+  여러 호출을 이어 돌리지 않음). 여러 행은 화면이 행마다 요청을 하나씩 순서대로 보내고 N/M을
+  보입니다. 읽는 문서는 공급자별 기본 한 쌍(`DEFAULT_CODING_CAPABILITY_SOURCES`, #4121: Tool calling·
+  구조화 출력)이고, 가져오는 주소와 답이 기댄 모든 주소를 `isOfficialSourceUrl`로 검사합니다. 답은
+  `codingCapabilitiesFromAnswer`가 읽습니다(모르는 값은 `none`). 실패는 행을 바꾸지 않고 사유만
+  보입니다. 시간 초과는 비용이 나갔을 수 있는 결과 불명 호출이라 자동으로 다시 하지 않고 화면은 거기서
+  멈춥니다. 성공하면 `updateCatalogEntry`(같은 판정, 같은 트랜잭션)로 `capabilities`와 `evidence`(sources,
+  draftedAt, note)를 쓰고 `model_catalog.coding_capabilities_filled`를 같은 트랜잭션에 남깁니다.
+  **채널은 바꾸지 않습니다.** 값이 채워져 Code 판정을 통과하게 돼도 Code 채널은 운영자가 상세에서
+  켭니다. 바뀐 행은 "스냅샷 이후 변경"으로 보이며 다음 발행에 반영됩니다.
 - **"채팅 모델 한 번에 추가"**(코딩 탭 후보 목록, `POST /api/admin/model-catalog/coding`
   `action: "link_all"`). 후보(`codingCandidateExclusion`을 통과한 채팅 모델) 하나마다 트랜잭션 하나로
   연결(`model_catalog.coding_linked`, `metadata.batch: true`)과 활성화(`updateCatalogEntry`, 켤 때와
-  같은 판정)를 함께 커밋합니다. 채널은 `code`와 `api`이고 크레딧은 채팅 그대로입니다. 판정이 거절한
-  모델은 행도 감사 기록도 남기지 않고(롤백), 한 모델의 실패가 나머지를 막지 않습니다. 결과는 추가한
-  수와 거절 사유별 건수입니다(`unknown_provider`, `provider_destination_unproven`,
-  `credits_below_floor`, `credit_floor_unbounded`, `chat_context_unknown`, `provider_cost_unbounded` 등).
+  같은 판정)를 함께 커밋합니다. 채널은 늘 `api`(코딩 API)이고, 연결을 만들기 전에 두 채널을 판정해
+  Code 판정도 통과하는 모델에만 `code`를 함께 켭니다. 크레딧은 채팅 그대로이며 올리지 않습니다. 코딩
+  API에서 거절된 모델은 행도 감사 기록도 남기지 않고(롤백), 한 모델의 실패가 나머지를 막지 않습니다.
+  결과는 "코딩 API로 추가 N개, 그중 Code까지 M개, 추가 안 됨 K개(사유별 건수)"와 Code 없이 추가한
+  모델의 Code 사유별 건수입니다(`unknown_provider`, `provider_destination_unproven`,
+  `provider_cost_unbounded`, 채팅 쪽 거절 등이 추가 안 됨의 사유이고, `credits_below_floor`·
+  `no_structured_output` 등은 Code 사유입니다).
   스냅샷은 이 요청이 발행하지 않으며, 화면의 "추가 후 바로 Code 스냅샷 발행" 체크가 활성화와 같은
   `publish_snapshot` 요청을 이어서 보냅니다. 확인 대화상자를 한 번 거칩니다.
 - 연결한 채팅 모델이 비활성·삭제되면 판정이 거절합니다(`chat_model_disabled`·`chat_model_deleted`).
