@@ -73,6 +73,8 @@ type World = {
   concurrentRow: { riskFlags: string } | null;
   /** The account already redeemed the promotion through another Session. */
   accountAlreadyRedeemed: boolean;
+  customerDefaultPaymentMethod: string | null;
+  customerPaymentMethods: Record<string, unknown>[];
 };
 
 const subscriptionFixture = (): Stripe.Subscription =>
@@ -108,7 +110,10 @@ const freshWorld = (): World => ({
   releaseCalls: [],
   subscription: subscriptionFixture(),
   paymentMethodRetrieves: [],
-  cardLimit: 3,
+  // No per-card limit unless a test sets one: a limited zero-charge checkout
+  // with no identifiable payer is refused, and most of these tests are about
+  // other things.
+  cardLimit: null,
   otherAccountsOnCard: [],
   recordedFlags: new Map(),
   cancels: [],
@@ -122,6 +127,8 @@ const freshWorld = (): World => ({
   promotionExhausted: false,
   concurrentRow: null,
   accountAlreadyRedeemed: false,
+  customerDefaultPaymentMethod: null,
+  customerPaymentMethods: [],
 });
 
 let world = freshWorld();
@@ -285,8 +292,19 @@ async function loadProcessor() {
             retrieve: async (id: string) => {
               if (world.paymentMethodFault) throw world.paymentMethodFault;
               world.paymentMethodRetrieves.push(id);
-              return { id, type: "card", card: { fingerprint: "fp_1" } };
+              return id === "pm_link"
+                ? { id, type: "link", link: { email: "Payer@Example.com" } }
+                : { id, type: "card", card: { fingerprint: "fp_1" } };
             },
+            list: async () => ({ data: world.customerPaymentMethods }),
+          },
+          customers: {
+            retrieve: async () => ({
+              id: "cus_1",
+              invoice_settings: {
+                default_payment_method: world.customerDefaultPaymentMethod,
+              },
+            }),
           },
         }),
       },
@@ -574,6 +592,7 @@ test("an expired checkout with no creation time releases nothing", async () => {
 /* -------------------------------------------------------------------------- */
 
 const withCard = () => {
+  world.cardLimit = 3;
   world.subscription = {
     ...world.subscription,
     default_payment_method: "pm_card",
@@ -675,6 +694,7 @@ test("every recorded redemption is checked for a burst, refused ones included", 
 
 /** A subscription as Checkout creates it for a zero-due promotion. */
 const withPromotionSubscription = () => {
+  world.cardLimit = 3;
   world.subscription = {
     ...world.subscription,
     default_payment_method: "pm_card",
@@ -895,4 +915,66 @@ test("a zero-charge duplicate from an account that already redeemed through anot
   await processStripeEvent(completedEvent(zeroDueSession("cs_second")));
   assert.equal(world.cancels.length, 1);
   assert.equal(world.userUpdates.length, 0);
+});
+
+/* -------------------------------------------------------------------------- */
+/* Independent review, round 5                                                 */
+/* -------------------------------------------------------------------------- */
+
+const cardLockKeys = () =>
+  world.lockCalls
+    .map(([, key]) => key)
+    .filter((key): key is string => typeof key === "string" && key.startsWith("promotion-card:"));
+
+test("a subscription without its own payment method is counted by the customer's default", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  world.cardLimit = 3;
+  world.customerDefaultPaymentMethod = "pm_customer_default";
+  world.otherAccountsOnCard = ["user_a", "user_b", "user_c"];
+  await processStripeEvent(completedEvent(zeroDueSession()));
+  assert.equal(cardLockKeys().length, 1);
+  assert.equal(world.cancels.length, 1);
+});
+
+test("a payment method attached to the customer is used when there is no default", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  world.cardLimit = 3;
+  world.customerPaymentMethods = [
+    { id: "pm_attached", type: "card", card: { fingerprint: "fp_attached" } },
+  ];
+  await processStripeEvent(completedEvent(zeroDueSession()));
+  assert.equal(cardLockKeys().length, 1);
+  assert.equal(world.userUpdates[0].plan, "Max");
+});
+
+test("a Stripe Link payer is identified by the Link email", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  world.cardLimit = 3;
+  world.subscription = {
+    ...world.subscription,
+    default_payment_method: "pm_link",
+  } as Stripe.Subscription;
+  await processStripeEvent(completedEvent(zeroDueSession()));
+  assert.equal(cardLockKeys().length, 1);
+  assert.equal(world.userUpdates[0].plan, "Max");
+});
+
+test("a limited zero-charge checkout whose payer cannot be identified is refused", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  world.cardLimit = 3;
+  await processStripeEvent(completedEvent(zeroDueSession()));
+  assert.equal(world.cancels.length, 1);
+  assert.deepEqual(world.userUpdates, []);
+  assert.deepEqual(flagsOf(world.redemptionRows[0]).sort(), [
+    "payment_method_limit",
+    "payment_method_unverified",
+  ]);
+});
+
+test("an unidentifiable payer is not refused when the promotion has no per-card limit", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  world.cardLimit = null;
+  await processStripeEvent(completedEvent(zeroDueSession()));
+  assert.deepEqual(world.cancels, []);
+  assert.equal(world.userUpdates[0].plan, "Max");
 });

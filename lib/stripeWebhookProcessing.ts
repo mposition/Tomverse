@@ -514,10 +514,16 @@ async function recordPromotionRedemptionFromCheckout(
         : [];
       const riskFlags = new Set(metadataRiskFlags);
       if (otherAccountsOnCard.length > 0) riskFlags.add("shared_payment_method");
+      // A limited promotion that cannot identify the payer cannot count them;
+      // a zero-charge checkout is refused rather than let through uncounted.
+      const payerUnverified =
+        chargedNothing && cardLimit !== null && !paymentMethodFingerprintHash;
+      if (payerUnverified) riskFlags.add("payment_method_unverified");
       const overCardLimit =
-        chargedNothing &&
-        cardLimit !== null &&
-        otherAccountsOnCard.length >= cardLimit;
+        payerUnverified ||
+        (chargedNothing &&
+          cardLimit !== null &&
+          otherAccountsOnCard.length >= cardLimit);
 
       const recordRedemption = () =>
         tx.billingPromotionRedemption.create({
@@ -597,21 +603,28 @@ async function cancelOverLimitPromotionSubscription(
   );
   // Whatever the account already holds through this subscription is taken
   // back now, not left for the deletion event: a plan must not outlive the
-  // refusal, however it was granted. Scoped to the account that carries this
-  // subscription, so a different subscription on the same customer is left
-  // alone. Idempotent, so a redelivery repeats it harmlessly.
-  await prisma.user.updateMany({
+  // refusal, however it was granted. Through the same entitlement write the
+  // deletion event uses -- under the account lock, the web plan reset and the
+  // plan recomputed with any store subscription or pass the account also
+  // holds -- and only for the account that carries this subscription.
+  const carrier = await prisma.user.findFirst({
     where: { stripeSubscriptionId: subscription.id },
-    data: {
-      plan: "Free",
-      stripeSubscriptionId: null,
-      stripePriceId: null,
-      subscriptionStatus: "canceled",
-      subscriptionBillingInterval: null,
-      subscriptionCancelAtPeriodEnd: false,
-      subscriptionSyncedAt: new Date(),
-    },
+    select: { id: true, stripeSubscriptionId: true },
   });
+  if (carrier?.stripeSubscriptionId === subscription.id) {
+    await applyWebSubscriptionSnapshot({
+      userId: carrier.id,
+      plan: "Free",
+      subscriptionId: null,
+      priceId: null,
+      status: "canceled",
+      periodEnd: getPeriodEnd(subscription),
+      interval: null,
+      cancelAtPeriodEnd: false,
+      observedAt: new Date(),
+      deletedSubscriptionId: subscription.id,
+    });
+  }
   if (subscription.status === "canceled") return;
   await getStripe().subscriptions.cancel(subscription.id, {
     invoice_now: false,
@@ -628,15 +641,45 @@ async function getSubscriptionPaymentMethodFingerprintHash(
 ) {
   try {
     const stripe = getStripe();
-    const value = subscription.default_payment_method;
-    const paymentMethod =
+    const resolve = async (
+      value: string | Stripe.PaymentMethod | null | undefined
+    ) =>
       typeof value === "string"
         ? await stripe.paymentMethods.retrieve(value)
         : value && typeof value === "object"
           ? value
           : null;
-    const fingerprint = paymentMethodFingerprint(paymentMethod);
-    return fingerprint ? hashPaymentMethodFingerprint(fingerprint) : null;
+    // The subscription's own method first. A subscription without one bills
+    // the customer's default, and a zero-charge Checkout may leave only a
+    // method attached to the customer -- so those are read too, before
+    // concluding the payer cannot be identified.
+    const fromSubscription = paymentMethodFingerprint(
+      await resolve(subscription.default_payment_method)
+    );
+    if (fromSubscription) return hashPaymentMethodFingerprint(fromSubscription);
+    const customerId =
+      typeof subscription.customer === "string"
+        ? subscription.customer
+        : subscription.customer?.id;
+    if (!customerId) return null;
+    const customer = await stripe.customers.retrieve(customerId);
+    if (!("deleted" in customer && customer.deleted)) {
+      const fromCustomer = paymentMethodFingerprint(
+        await resolve(
+          (customer as Stripe.Customer).invoice_settings?.default_payment_method
+        )
+      );
+      if (fromCustomer) return hashPaymentMethodFingerprint(fromCustomer);
+    }
+    const attached = await stripe.paymentMethods.list({
+      customer: customerId,
+      limit: 5,
+    });
+    for (const method of attached.data) {
+      const fingerprint = paymentMethodFingerprint(method);
+      if (fingerprint) return hashPaymentMethodFingerprint(fingerprint);
+    }
+    return null;
   } catch (error) {
     // For a promotion checkout the card decides the per-card limit, so an
     // unreadable card fails the webhook and Stripe delivers it again, instead

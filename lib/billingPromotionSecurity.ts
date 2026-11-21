@@ -30,12 +30,20 @@ export type PromotionRiskFlag =
    * `BillingPromotion.maxRedemptionsPerPaymentMethod` allows, so the checkout
    * webhook cancelled this subscription instead of granting the plan.
    */
-  | "payment_method_limit";
+  | "payment_method_limit"
+  /**
+   * No payment method on the subscription or the customer could be
+   * identified, so the per-card limit could not be counted. A zero-charge
+   * checkout is refused (with `payment_method_limit`) rather than let through
+   * uncounted.
+   */
+  | "payment_method_unverified";
 
 const PROMOTION_RISK_FLAGS: readonly PromotionRiskFlag[] = [
   "shared_ip",
   "shared_payment_method",
   "payment_method_limit",
+  "payment_method_unverified",
 ];
 
 const PROMOTION_IP_WINDOW_MS = 30 * 86_400_000;
@@ -73,9 +81,19 @@ export const paymentMethodFingerprint = (
   const details = record[paymentMethod.type];
   if (!details || typeof details !== "object") return null;
   const fingerprint = (details as Record<string, unknown>).fingerprint;
-  return typeof fingerprint === "string" && fingerprint.trim()
-    ? fingerprint.trim()
-    : null;
+  if (typeof fingerprint === "string" && fingerprint.trim()) {
+    return fingerprint.trim();
+  }
+  // Stripe Link carries no card fingerprint; the Link account's email is
+  // what identifies the payer across accounts. Prefixed so it can never equal
+  // a card fingerprint.
+  if (paymentMethod.type === "link") {
+    const email = (details as Record<string, unknown>).email;
+    return typeof email === "string" && email.trim()
+      ? `link:${email.trim().toLowerCase()}`
+      : null;
+  }
+  return null;
 };
 
 export const encodePromotionRiskFlags = (

@@ -58,6 +58,7 @@ type SessionCreateCall = {
 
 type World = {
   cookieReads: number;
+  burstAlerts: string[];
   redemptionUsers: string[];
   grantedUsers: string[];
   promotionIncrements: number;
@@ -85,7 +86,7 @@ type World = {
 };
 
 const freshWorld = (): World => ({
-  cookieReads: 0, redemptionUsers: [], grantedUsers: [], promotionIncrements: 0,
+  cookieReads: 0, burstAlerts: [], redemptionUsers: [], grantedUsers: [], promotionIncrements: 0,
   session: { user: { id: "user_1" } },
   user: {
     id: "user_1",
@@ -175,6 +176,12 @@ async function loadRoute(): Promise<{
         : { ok: false, response: Response.json({ code: "MOBILE_TOKEN_INVALID" }, { status: 401 }) },
     } });
     mock.module(mod("lib/standardEmailLane.ts"), { namedExports: { enqueueStandardEmail: async () => undefined } });
+    mock.module(mod("lib/promotionBurstAlert.ts"), { namedExports: {
+      alertOnPromotionBurst: async (promotionId: string) => {
+        world.burstAlerts.push(promotionId);
+        return { alerted: false, inWindow: 1 };
+      },
+    } });
 
     const realApiSecurity = original("lib/apiSecurity.ts");
     apiSecurityErrorClass =
@@ -838,6 +845,8 @@ test("native pass redemption uses the bearer account and never a cookie or Strip
   assert.equal(world.promotionIncrements, 1);
   assert.equal(world.sessionCreateCalls.length, 0);
   assert.equal(world.customerCreateKeys.length, 0);
+  // A pass never reaches the checkout webhook, so its burst check runs here.
+  assert.equal(world.burstAlerts.length, 1);
 });
 
 for (const promoCode of [undefined, "STRIPE-FREE-COUPON"]) test(`native requests cannot open paid checkout: ${promoCode}`, async () => {
