@@ -18,6 +18,7 @@ export const adminModelDiscoveryMessages = defineAdminMessages({
     product: {
       chat: "Chat",
       image_generation: "Image generation",
+      coding: "Coding",
       unsupported: "Unsupported product",
     },
     toast: {
@@ -147,6 +148,10 @@ export const adminModelDiscoveryMessages = defineAdminMessages({
       noImageAdapter: (provider: string) => `No image adapter (${provider})`,
       noImageAdapterTitle:
         "Image models can be added at runtime only for providers the code can already call (openai, google, xai, fal, qwen, bfl). This one needs an adapter first.",
+      codingDraft: "Coding draft",
+      noCodingProvider: (provider: string) => `No coding draft provider (${provider})`,
+      noCodingProviderTitle:
+        "A coding draft reads the provider's official price, terms and retention pages, so it needs a provider the code knows with official documentation hosts. This one has none yet.",
       nextStep: "Next:",
       exclude: "Exclude",
       reopen: "Review again",
@@ -199,6 +204,7 @@ export const adminModelDiscoveryMessages = defineAdminMessages({
     product: {
       chat: "Chat",
       image_generation: "이미지 생성",
+      coding: "코딩",
       unsupported: "미지원 제품",
     },
     toast: {
@@ -327,6 +333,10 @@ export const adminModelDiscoveryMessages = defineAdminMessages({
       noImageAdapter: (provider: string) => `이미지 어댑터 없음 (${provider})`,
       noImageAdapterTitle:
         "런타임 이미지 모델은 코드가 이미 호출할 수 있는 공급자(openai, google, xai, fal, qwen, bfl)만 추가할 수 있습니다. 이 공급자는 어댑터부터 필요합니다.",
+      codingDraft: "코딩 초안",
+      noCodingProvider: (provider: string) => `코딩 초안 공급자 아님 (${provider})`,
+      noCodingProviderTitle:
+        "코딩 초안은 공급자의 공식 가격·약관·보존 문서를 읽으므로, 코드가 아는 공급자 중 공식 문서 호스트가 있는 곳만 만들 수 있습니다. 이 공급자는 아직 없습니다.",
       nextStep: "다음 →",
       exclude: "제외",
       reopen: "재검토",

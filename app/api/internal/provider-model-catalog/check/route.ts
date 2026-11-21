@@ -10,6 +10,7 @@ import {
   summariseLifecycleChanges,
 } from "@/lib/modelLifecycleWorkItems";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
+import { codingAutoDraftCandidates, runCodingAutoDraft } from "@/lib/modelDiscoveryCodingAutoDraft";
 import { runNewProviderModelResearch } from "@/lib/modelDiscoveryNewProviderResearch";
 import { checkProviderModelCatalogs } from "@/lib/providerModelCatalogMonitor";
 import { reconcileCatalogWithRegistry } from "@/lib/providerModelCatalogReconciliation";
@@ -54,6 +55,7 @@ export async function POST(request: Request) {
   }
   try {
     const generatedAt = new Date();
+    const requestStartedAt = Date.now();
     // Weekly and off by default (MODEL_DISCOVERY_RESEARCH_LLM_MODEL_ID). Started
     // beside the scan, not after it: its model calls are the slowest step and
     // read nothing the scan writes. A failure costs only its own summary line.
@@ -125,6 +127,18 @@ export async function POST(request: Request) {
       test,
     });
     const research = await newProviderResearch;
+    // Off unless MODEL_DISCOVERY_CODING_AUTO_DRAFT_ENABLED=true. After the report,
+    // so a draft's paid call can never cost the scan its mail; bounded to the
+    // route's time and to a few calls, and a failure is logged and nothing more.
+    const codingAutoDraft = test
+      ? undefined
+      : await runCodingAutoDraft({
+          candidates: codingAutoDraftCandidates({ scan: discovery.createdItems }),
+          deadlineAt: requestStartedAt + 175_000,
+        }).catch((error) => {
+          console.error("Coding catalogue auto draft failed:", error instanceof Error ? error.name : "unknown");
+          return undefined;
+        });
     const checked = results.filter((result) => result.status === "checked").length;
     const failed = results.filter((result) => result.status === "failed").length;
     const skipped = results.filter((result) => result.status === "skipped").length;
@@ -162,6 +176,15 @@ export async function POST(request: Request) {
       vanishedReopened: vanished?.reopened ?? null,
       newProviderResearch: research?.status ?? null,
       newProviderResearchFiled: research?.status === "ran" ? research.created.length : null,
+      codingAutoDraft: codingAutoDraft
+        ? {
+            status: codingAutoDraft.status,
+            drafted: codingAutoDraft.drafted.length,
+            skipped: codingAutoDraft.skipped.length,
+            failed: codingAutoDraft.failed.length,
+            stopped: codingAutoDraft.stopped,
+          }
+        : null,
     };
     // A provider whose every enabled model went missing at once is far more
     // likely to be a broken catalog response than a real mass retirement.

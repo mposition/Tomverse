@@ -38,6 +38,7 @@ export type ModelReviewKind = (typeof MODEL_REVIEW_KINDS)[number];
 export const MODEL_PRODUCT_SURFACES = [
   "chat",
   "image_generation",
+  "coding",
   "unsupported",
 ] as const;
 export type ModelProductSurface = (typeof MODEL_PRODUCT_SURFACES)[number];
@@ -155,6 +156,9 @@ export const isSpecializedNonChatModel = (apiModel: string) =>
 export const modelProductSurface = (apiModel: string): ModelProductSurface => {
   if (isImageGenerationModel(apiModel)) return "image_generation";
   if (isSpecializedNonChatModel(apiModel)) return "unsupported";
+  // A code-specialized model has no reason to enter Chat: it goes to the
+  // coding catalogue as a draft (owner decision 2026-11-21).
+  if (isCodeSpecializedModel(apiModel)) return "coding";
   return "chat";
 };
 
@@ -1639,6 +1643,18 @@ export const assessModelLifecycleItem = (input: {
         "스캔이 한 번 성공한 뒤에 판단해야 합니다. 지금 채택하면 제공되지 않는 모델을 등록할 수 있습니다.",
     });
   }
+  // Before the alias and snapshot branches: those compare against the Chat
+  // portfolio, which a coding model never joins.
+  if (product === "coding" && !isPreviewModel(input.apiModel)) {
+    return triaged({
+      priority: "review",
+      kind: "specialized_code",
+      product,
+      verdictKo: `${provider}의 코딩 특화 모델입니다. 채팅이 아니라 코딩 카탈로그 초안으로 보낼 후보입니다.`,
+      nextStepKo:
+        "'코딩 초안'으로 공급자와 API 모델 ID가 채워진 코딩 카탈로그 양식을 열어 가격·약관 근거를 확인한 뒤 활성화합니다. Chat에는 편입하지 않습니다.",
+    });
+  }
   if (isMovingModelAlias(input.apiModel)) {
     const portfolio = smartChatAssessment({
       apiModel: input.apiModel,
@@ -1692,16 +1708,6 @@ export const assessModelLifecycleItem = (input: {
       pointsKo: [googleBraveSearchNote.trim()],
       nextStepKo:
         "안정 버전만 검토하는 정책에 따라 지금은 제외합니다. 정식 출시되면 새 후보로 다시 올라옵니다.",
-    });
-  }
-  if (isCodeSpecializedModel(input.apiModel)) {
-    return triaged({
-      priority: "low",
-      kind: "specialized_code",
-      product,
-      verdictKo: `${provider}의 코드 작업 특화 모델입니다.`,
-      nextStepKo:
-        "Chat의 일반 대화 수요로는 편입 근거가 약합니다. 코딩 제품 범위가 정해질 때 다시 보는 것이 맞습니다.",
     });
   }
   return smartChatAssessment({

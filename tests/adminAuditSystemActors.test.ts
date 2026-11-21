@@ -193,6 +193,8 @@ test("the system actor list is closed and changes only by review", () => {
     // The weekly production-to-staging/dev catalogue copy: one action, one target.
     "model-catalog-env-sync",
     "amux-portfolio-scorer",
+    // The daily scan's coding catalogue draft for a new code-specialized model: one action about one entry row.
+    "model-catalog-auto-draft",
   ]);
   assert.equal(SYSTEM_AUDIT_ACTOR_METADATA_KEY, "systemActor");
   assert.equal(isSystemAuditActor("marketing-guard"), true);
@@ -570,6 +572,26 @@ test("the catalogue environment sync actor may only record a sync", () => {
   // And the renewal actor cannot record a sync.
   assert.equal(systemAuditActionAllowed("model-catalog-renewal",
     "model_catalog.env_synced", "ModelCatalogEnvSync"), false);
+});
+
+test("the coding catalogue auto-draft actor may only record a stored draft", () => {
+  assert.equal(isSystemAuditActor("model-catalog-auto-draft"), true);
+  assert.equal(systemAuditActionAllowed("model-catalog-auto-draft",
+    "model_catalog.draft_auto_stored", "ModelCatalogEntry"), true);
+  // It cannot turn a model on, edit an entry, publish a snapshot, or write under a person's draft action.
+  assert.equal(systemAuditActionAllowed("model-catalog-auto-draft",
+    "model_catalog.entry_updated", "ModelCatalogEntry"), false);
+  assert.equal(systemAuditActionAllowed("model-catalog-auto-draft",
+    "model_catalog.draft_stored", "ModelCatalogEntry"), false);
+  assert.equal(systemAuditActionAllowed("model-catalog-auto-draft",
+    "model_catalog.snapshot_published", "ModelCatalogSnapshot"), false);
+  assert.equal(systemAuditActionAllowed("model-catalog-auto-draft",
+    "model_catalog.draft_auto_stored", "ModelCatalogSnapshot"), false);
+  // The other catalogue actors cannot record it.
+  assert.equal(systemAuditActionAllowed("model-catalog-renewal",
+    "model_catalog.draft_auto_stored", "ModelCatalogEntry"), false);
+  assert.equal(systemAuditActionAllowed("model-catalog-env-sync",
+    "model_catalog.draft_auto_stored", "ModelCatalogEntry"), false);
 });
 
 test("the Auto router coding agent may only claim a recommendation and record its result", () => {

@@ -1161,3 +1161,61 @@ test("an adopted model that is already served reads as a rollout to close, not a
     "retirement"
   );
 });
+
+test("a code-specialized model is a coding candidate, never a chat adoption", () => {
+  for (const apiModel of ["qwen3-coder-flash", "gpt-5.1-codex-mini", "devstral-code-2", "Qwen/Qwen3-Coder-480B"]) {
+    assert.equal(modelProductSurface(apiModel), "coding", apiModel);
+    assert.equal(shouldQueueModelCandidate(apiModel), true, apiModel);
+  }
+  // An image or unsupported id keeps its own surface even when it also reads as code.
+  assert.equal(modelProductSurface("codex-image-1"), "image_generation");
+  assert.equal(modelProductSurface("gpt-5-codex-audio"), "unsupported");
+  assert.equal(modelProductSurface("gpt-5.6-sol"), "chat");
+
+  const assessment = assessModelLifecycleItem({
+    action: "add",
+    apiModel: "qwen3-coder-flash",
+    providers: ["qwen"],
+    availability: "current",
+    lifecycle: null,
+    servedByTomverse: false,
+  });
+  assert.equal(assessment.product, "coding");
+  assert.equal(assessment.kind, "specialized_code");
+  // Above the old "revisit later" priority: it is a candidate to act on now.
+  assert.equal(assessment.priority, "review");
+  assert.match(assessment.verdictKo, /코딩 카탈로그 초안/);
+  assert.match(assessment.nextStepKo, /코딩 초안/);
+  assert.doesNotMatch(assessment.analysisKo, /다시 보는 것이 맞습니다/);
+});
+
+test("a dated or moving coding id is judged as coding, not against the chat portfolio", () => {
+  for (const apiModel of ["qwen3-coder-flash-2026-10-01", "qwen3-coder-flash-latest"]) {
+    const assessment = assessModelLifecycleItem({
+      action: "add",
+      apiModel,
+      providers: ["qwen"],
+      availability: "current",
+      lifecycle: null,
+      servedByTomverse: false,
+    });
+    assert.equal(assessment.product, "coding", apiModel);
+    assert.equal(assessment.kind, "specialized_code", apiModel);
+  }
+});
+
+test("a coding id keeps the verdicts that come before the product branches", () => {
+  const base = { action: "add" as const, apiModel: "qwen3-coder-flash", providers: ["qwen"], lifecycle: null };
+  assert.equal(
+    assessModelLifecycleItem({ ...base, availability: "unknown", servedByTomverse: false }).priority,
+    "needs_evidence"
+  );
+  assert.equal(
+    assessModelLifecycleItem({ ...base, availability: "current", servedByTomverse: true }).priority,
+    "no_action"
+  );
+  assert.equal(
+    assessModelLifecycleItem({ ...base, availability: "stale", servedByTomverse: false }).priority,
+    "no_action"
+  );
+});

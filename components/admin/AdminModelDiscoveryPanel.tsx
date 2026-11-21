@@ -11,6 +11,7 @@ import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
 import { AdminTile } from "@/components/admin/ui/AdminTile";
 import { AdminWriteButton } from "@/components/admin/ui/AdminWriteButton";
 import type { AdminTone } from "@/lib/adminUiCore";
+import { codingDraftOffer } from "@/lib/codingCatalogDraftLink";
 import { catalogImageDraftHref, runtimeImageProviderFor } from "@/lib/runtimeImageProviders";
 import {
   WORK_ITEM_EXCLUSION_REASONS,
@@ -30,7 +31,7 @@ type ReviewPriority =
   | "low"
   | "no_action";
 type Availability = "current" | "stale" | "unknown";
-type ModelProduct = "chat" | "image_generation" | "unsupported";
+type ModelProduct = "chat" | "image_generation" | "coding" | "unsupported";
 
 export type ModelWorkItemRow = {
   id: string;
@@ -131,7 +132,7 @@ const PRIORITY_VALUES = Object.keys(PRIORITY_ORDER) as ReviewPriority[];
 
 const AVAILABILITY_VALUES: Availability[] = ["current", "stale", "unknown"];
 
-const PRODUCT_VALUES: ModelProduct[] = ["chat", "image_generation", "unsupported"];
+const PRODUCT_VALUES: ModelProduct[] = ["chat", "image_generation", "coding", "unsupported"];
 
 const ageDays = (firstSeenAt: string) => {
   const seen = new Date(firstSeenAt).getTime();
@@ -219,6 +220,37 @@ const imageDraftProvider = (group: ModelFamilyGroup) => {
   const member = imageDraftMember(group);
   return member ? runtimeImageProviderFor(member.provider) : null;
 };
+
+/** The coding hand-off of a coding candidate: the prefilled draft link, or why there is none. */
+function CodingDraftAction({
+  offer,
+  labels,
+}: {
+  offer: ReturnType<typeof codingDraftOffer>;
+  labels: { draft: string; noProvider: (provider: string) => string; noProviderTitle: string };
+}) {
+  if (!offer) return null;
+  if (offer.kind === "draft") {
+    return (
+      <a
+        data-testid="model-discovery-coding-draft"
+        href={offer.href}
+        className="inline-flex min-h-8 items-center rounded-xl border border-violet-500/40 bg-violet-500/10 px-3 text-xs font-bold text-violet-300 hover:bg-violet-500/20"
+      >
+        {labels.draft}
+      </a>
+    );
+  }
+  return (
+    <span
+      data-testid="model-discovery-coding-no-provider"
+      className="inline-flex min-h-8 items-center rounded-xl border border-dashed border-zinc-700 px-3 text-xs text-zinc-500"
+      title={labels.noProviderTitle}
+    >
+      {labels.noProvider(offer.provider)}
+    </span>
+  );
+}
 
 const buildGroups = (rows: readonly ModelWorkItemRow[]): ModelFamilyGroup[] => {
   const byFamily = new Map<string, ModelWorkItemRow[]>();
@@ -856,6 +888,16 @@ export function AdminModelDiscoveryPanel() {
                   {m.table.noImageAdapter(imageDraftMember(group)!.provider)}
                 </span>
               )
+            ) : null}
+            {view === "open" && !live ? (
+              <CodingDraftAction
+                offer={codingDraftOffer(group.representative)}
+                labels={{
+                  draft: m.table.codingDraft,
+                  noProvider: m.table.noCodingProvider,
+                  noProviderTitle: m.table.noCodingProviderTitle,
+                }}
+              />
             ) : null}
             {view === "open" && rolloutIds([group]).length > 0 ? (
               <AdminWriteButton
