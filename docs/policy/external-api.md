@@ -692,11 +692,13 @@ credit, and the receipts matched the server's request times. With model
 (section 6) for a model name it recognises. Accepting the object form was not
 enough -- after it was deployed the 400 named a string -- so the string form is
 accepted too, and `reasoning` is left out where the model takes no effort.
+With that deployed (2026-11-21, release #4131), Cursor Chat with `gpt-6-luna`
+answered: 3 requests, each 200 once, no server errors.
 
 Not yet verified, each a separate step: other operating systems, Claude Code
 and Codex against a deployed environment (their runs above called the handlers
-directly, not through the Next.js server), Cursor against production with a
-named model once the `reasoning` string is accepted, and native Smart Adaptive
+directly, not through the Next.js server), Cursor Agent with a named model on
+production (Chat is verified above), and native Smart Adaptive
 (section 10.6) with real models or real clients end to end.
 
 ### 10.6 Smart Adaptive on the native protocols (`lib/externalApiNativeSmartAdaptive.ts`)
