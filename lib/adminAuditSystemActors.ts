@@ -33,6 +33,13 @@ export const AMUX_SESSION_ANALYSIS_RESERVED_TARGET =
   "AmuxIdeaSessionAnalysisReservation" as const;
 export const AMUX_SESSION_ANALYSIS_RESERVED_SCOPE =
   "session-analysis-reservation-v1" as const;
+/** Owner decision 2026-11-21: the session attached its own plan, which took
+ * the place of the box analysis. It stands in for the result audit the plan
+ * writer binds the page to; it is never an approval of that plan. */
+export const AMUX_SESSION_PLAN_ATTACHED_ACTION =
+  "amux.idea.session_plan_attached" as const;
+export const AMUX_SESSION_PLAN_ATTACHED_TARGET = "AmuxIdeaSubmission" as const;
+export const AMUX_SESSION_PLAN_ATTACHED_SCOPE = "session-plan-attached-v1" as const;
 /** Session CLI cost uses the same monthly Agent ledger as v4, but never a
  * preview receipt or a user credit. */
 export const AMUX_V19_SESSION_BUDGET_CLAIM_ACTION =
@@ -429,7 +436,10 @@ export const amuxSessionIntakeSystemAuditScope = (
     : action === AMUX_SESSION_ANALYSIS_RESERVED_ACTION &&
         targetType === AMUX_SESSION_ANALYSIS_RESERVED_TARGET
       ? AMUX_SESSION_ANALYSIS_RESERVED_SCOPE
-      : null;
+      : action === AMUX_SESSION_PLAN_ATTACHED_ACTION &&
+          targetType === AMUX_SESSION_PLAN_ATTACHED_TARGET
+        ? AMUX_SESSION_PLAN_ATTACHED_SCOPE
+        : null;
 
 export const systemAuditActionAllowed = (
   actor: unknown, action: unknown, targetType: unknown,

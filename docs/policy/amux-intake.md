@@ -1,5 +1,40 @@
 # AMUX intake
 
+## 운영자 결정 2026-11-21 (대화) — 세션 계획 첨부 접수와 원클릭 승인
+
+운영자 결정(2026-11-21, 대화): Codex, Claude Code, Cursor, Antigravity 어디서든 같은 한 줄로 아이디어와
+그 세션이 쓴 계획을 올린다. 세션 계획 첨부 접수, 기존 계획 승인 한 번으로 등록, 승인 없는 자동 등록은
+기본 꺼짐. 아이디어를 넣는 입구는 운영자 GitHub 계정으로 코드를 바꾸는 입구이므로 기본은 사람의 승인
+한 번이다. 새 table·migration은 없고 버전 번호는 올리지 않는다.
+
+1. **공용 명령.** `npm run amux:idea -- submit --tool <도구> --provider <모델 공급사> --title <한 줄>
+   [--body <md 파일>|-] [--plan <계획 JSON>|-] [--repo owner/name]... [--pr owner/name#번호]...`.
+   `--repo`가 없으면 이 checkout의 GitHub origin을 참조로 넣는다(`--no-repo`로 끈다). `prompt`는 box가
+   이 아이디어에 쓸 분석 프롬프트를 그대로 출력하고, `check`는 네트워크 없이 계획을 같은 검사로 확인한다.
+   접수 비밀값(`TOMVERSE_AMUX_SESSION_INTAKE_CLIENT_SECRET`)과 origin(`TOMVERSE_AMUX_SESSION_INTAKE_ORIGIN`)은
+   환경 변수로만 읽고 출력하지 않는다. 기존 `local:amux-session-intake`와 같은 route·자격증명·read-back이다.
+2. **선택 필드 `plan`.** 형식은 box 분석 답과 같다(Story·Task·노드·증거 단위). 페이지 머리 필드는 앱이
+   세션 분석과 같은 방식으로 채운다. 검사는 새로 만들지 않고 둘을 그대로 쓴다. 계획 안의 모든 글에 접수
+   내용 검사(비밀값·개인정보·절대 경로·사설 URL)를 하고, 세션 분석 계획 writer의 parser로 첫 페이지 검사를
+   한다. 닫힌 제안이어야 한다(노드나 카드가 하나 이상, 남은 범위 없음, 질문 없음). route가 한 번, 같은
+   transaction 안에서 한 번 더 검사하고, 통과하지 못하면 아무것도 쓰지 않는다(`plan_rejected`·
+   `content_refused`).
+3. **box 분석을 건너뛴다.** 통과하면 접수와 같은 transaction에서 내용 없는 시스템 감사
+   `amux.idea.session_plan_attached`(작성자 session, 읽은 근거 없음)를 남기고, box 결과 route와 같은 계획
+   writer가 같은 source plan·페이지·제안 단위를 쓴다. 아이디어는 `awaiting_owner`가 된다. 대기열
+   receipt(예약 행)는 read-back 계약 때문에 그대로 쓰지만, box 대기열은 `submitted`·`analyzing` 아이디어만
+   집으므로 이 아이디어를 분석하지 않는다. 페이지 미리보기의 모델 표시는 `session-written-plan`이다.
+4. **원클릭 승인.** 승인은 기존 계획 승인 한 번이다(이 문서 v18 절 3항). 이후 점수·승격·실행은 같다.
+   Admin 아이디어 상세는 "코딩 세션이 작성한 계획, box 분석 없음, 읽은 파일 기록 없음"을 표시한다. 출처의
+   세 표시(도구 이름·모델 공급사·세션 표시)는 다른 세션 아이디어처럼 아이디어와 함께 암호화해 보관한다.
+5. **자동 등록 스위치.** `TOMVERSE_AMUX_SESSION_PLAN_AUTO_REGISTER`가 정확히 `enabled`일 때만 승인 없이
+   기존 시스템 등록 Guard로 바로 등록한다. 기본은 없음(꺼짐)이고 box 분석 자동 등록
+   (`TOMVERSE_AMUX_V19_SYSTEM_REGISTRATION`)과 별개다. 이 스위치는 미리보기에 세션 계획 표시가 있는 아이디어만
+   등록한다. 결과는 접수 응답의 `plan.state`(`awaiting_approval`·`registered`·`registration_incomplete`)로
+   돌아오고, 등록이 끝나지 않아도 접수는 그대로이며 다시 시도하지 않는다. 켜는 것은 자율 Agent에 권한을 주는
+   일이므로 운영자의 한 줄 승인이 필요하다.
+6. **대체 경로.** `plan`이 없는 접수는 이전과 똑같다(box 무인 분석 대기열).
+
 ## 운영자 결정 2026-11-16 (대화) — 아이디어 분석·등록의 스위치 정리
 
 운영자 결정(2026-11-16, 대화): "v19, v22 같은 불명확한 용어가 혼동을 주고, 쓸데없는 플래그 variable이

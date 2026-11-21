@@ -28,7 +28,7 @@ const readbackPath = (requestId: string) =>
 
 const SUBMISSION_ERROR_STATUS: Record<
   AmuxIdeaSessionSubmissionError["code"],
-  409 | 503
+  400 | 409 | 503
 > = {
   audit_unavailable: 503,
   scope_unavailable: 409,
@@ -38,6 +38,7 @@ const SUBMISSION_ERROR_STATUS: Record<
   reference_snapshot_unavailable: 503,
   key_store_unavailable: 503,
   request_already_seen: 409,
+  plan_rejected: 400,
   outcome_unknown: 503,
 };
 
@@ -86,7 +87,7 @@ export async function POST(request: Request): Promise<Response> {
   }
   try {
     const committed = await submitAmuxIdeaFromSession({ inspected });
-    return amuxJsonNoStore(amuxSessionIntakeReadbackReply(
+    return amuxJsonNoStore({ ...amuxSessionIntakeReadbackReply(
       inspected.requestId,
       {
         status: "committed",
@@ -96,7 +97,9 @@ export async function POST(request: Request): Promise<Response> {
         hasExternalSources:
           inspected.counts.repositoryCount + inspected.counts.pullRequestCount > 0,
       },
-    ).body, 201);
+    ).body, ...(committed.plan ? { plan: {
+      ...(committed.plan.registration ?? { state: "awaiting_approval" }),
+      unitCount: committed.plan.unitCount } } : {}) }, 201);
   } catch (error) {
     return submissionFailure(error, inspected.requestId);
   }

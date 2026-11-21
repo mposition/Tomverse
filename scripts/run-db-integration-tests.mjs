@@ -595,7 +595,8 @@ run(
     "tests/integration/amux-v20-registration-refusal.db.test.ts",
     // v19 unattended registration turns one completed session analysis into
     // nodes, cards, assessments and scores under exact system evidence, or
-    // leaves the backlog untouched and records one durable refusal.
+    // leaves the backlog untouched and records one durable refusal. It also
+    // holds the session-attached plan cases (owner decision 2026-11-21).
     "tests/integration/amux-v19-system-registration.db.test.ts",
     // Retention must clear due bodies, preserve the audit trail and retire
     // external unit keys without silently extending a legal hold.

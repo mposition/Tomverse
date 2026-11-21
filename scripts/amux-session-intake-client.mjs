@@ -60,6 +60,7 @@ const CLOSED_CLIENT_ERRORS = new Set([
   "schema_rejected",
   "content_refused",
   "metadata_incomplete",
+  "plan_rejected",
 ]);
 
 const closedErrorCode = (error) =>
