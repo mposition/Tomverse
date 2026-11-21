@@ -19,6 +19,16 @@ npm install -g @tomverse/cli
 tomverse doctor
 ```
 
+**Windows, with winget** (the same installer as below, no download page):
+
+```powershell
+winget install Tomverse.CLI
+# open a new terminal, then:
+tomverse doctor
+```
+
+Update with `winget upgrade Tomverse.CLI`, remove with `winget uninstall Tomverse.CLI`.
+
 **Without Node.js:** download the installer for your system from the
 [Tomverse CLI releases](https://github.com/mposition/Tomverse/releases?q=cli-v),
 run it, then open a new terminal and run `tomverse doctor`. Each file has a

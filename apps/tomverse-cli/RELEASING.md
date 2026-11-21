@@ -92,6 +92,28 @@ The README links to `https://github.com/mposition/Tomverse/releases?q=cli-v`.
 Mark the release "latest" only if the repository has no other releases that
 should hold that place.
 
+## 3b. Submit to winget (Windows Package Manager)
+
+`winget install Tomverse.CLI` works once Microsoft merges a pull request to the
+public `microsoft/winget-pkgs` repository that points at the two MSIs of the
+GitHub Release from step 3 -- an outside publication, so the operator submits
+it. Their checks scan the installers and install them on a test machine; the
+first submission of a new package is also reviewed by a person (usually a day
+or more). Every later version is a new pull request.
+
+Where: local PC, PowerShell, the repository clone, with the folder from step 3.
+
+```powershell
+node apps\tomverse-cli\scripts\winget-manifest.mjs <folder from step 3>
+winget validate --manifest apps\tomverse-cli\release\winget\manifests\t\Tomverse\CLI\0.1.0
+winget install Microsoft.WingetCreate
+wingetcreate submit --token (gh auth token) apps\tomverse-cli\release\winget\manifests\t\Tomverse\CLI\0.1.0
+```
+
+`wingetcreate submit` forks `microsoft/winget-pkgs` under the signed-in GitHub
+account and opens the pull request; it prints its URL. The token comes from
+`gh` and is not typed or shown.
+
 ## 4. After publishing: show the guide in Settings
 
 Where: Railway dashboard (or `railway variables`), the web service of each
