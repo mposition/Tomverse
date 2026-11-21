@@ -35,6 +35,7 @@ import { openAmuxV52ReviewFindingsRow } from "./v52ReviewFindingsStore.ts";
 import { amuxCardWaitFromState, amuxCardWaitVisible } from "./cardWaitReasonCore.ts";
 import { readAmuxCardWaitReasons } from "./cardWaitReasonStore.ts";
 import { amuxInfraFailureKindOfReason } from "./infraFailureCore.ts";
+import { projectAmuxCardHierarchy } from "./cardHierarchyCore.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -341,6 +342,66 @@ async function nodeItems(nodes: NodeRow[],
   return nodes.map((node, index) => nodeItem(node, titles[index],
     assessments.get(node.id) ?? null,
     rollups.get(node.id) ?? emptyAmuxHierarchyRollup()));
+}
+
+const metricOf = (metrics: unknown, key: string): number | null => {
+  const value = metrics && typeof metrics === "object" ?
+    (metrics as Record<string, unknown>)[key] : null;
+  return typeof value === "number" && Number.isInteger(value) ? value : null;
+};
+
+/** Owner request 2026-11-21: the line a Task or Story belongs to. Archived
+ * nodes still show (their title may be purged); a read that fails shows no
+ * line rather than an error. Values are the latest assessment only when it
+ * is bound to the subject's current revision, as the score reads them. */
+export async function readAmuxCardHierarchy(card: Pick<CardRow, "id" |
+  "cardType" | "displayKey" | "status" | "archivedAt" | "parentFeatureNodeId" |
+  "parentStoryCardId" | "revision">, title: string | null) {
+  if (card.cardType !== "task" && card.cardType !== "story") return null;
+  const story = card.cardType === "task" && card.parentStoryCardId ?
+    await prisma.amuxWorkItem.findUnique({ where: { id: card.parentStoryCardId },
+      select: cardSelect }) : null;
+  const featureId = card.parentFeatureNodeId ?? story?.parentFeatureNodeId ?? null;
+  const select = { ...nodeSelect, displayPrefix: true } as const;
+  const feature = featureId ? await prisma.amuxPortfolioNode.findUnique({
+    where: { id: featureId }, select }) : null;
+  const epic = feature?.parentId ? await prisma.amuxPortfolioNode.findUnique({
+    where: { id: feature.parentId }, select }) : null;
+  const initiative = epic?.parentId ? await prisma.amuxPortfolioNode.findUnique({
+    where: { id: epic.parentId }, select }) : null;
+  const nodes = [initiative, epic, feature].filter((node) => node !== null);
+  const cards = [card, ...(story ? [story] : [])];
+  const [titles, storyTitle, assessments] = await Promise.all([
+    nodeTitles(nodes), story ? readAmuxCardTitle(story) : Promise.resolve(null),
+    prisma.$queryRaw<Array<{ subjectId: string; subjectRevision: number; metrics: unknown }>>`
+      SELECT DISTINCT ON (COALESCE("nodeId", "cardId"))
+        COALESCE("nodeId", "cardId") AS "subjectId", "subjectRevision", "metrics"
+      FROM "AmuxPortfolioAssessment"
+      WHERE "nodeId" = ANY(${nodes.map((node) => node.id)}::text[])
+        OR "cardId" = ANY(${cards.map((row) => row.id)}::text[])
+      ORDER BY COALESCE("nodeId", "cardId"), "assessmentVersion" DESC`,
+  ]);
+  const latest = new Map(assessments.map((row) => [row.subjectId, row]));
+  const bound = (id: string, revision: number, key: string) => {
+    const row = latest.get(id);
+    return row && row.subjectRevision === revision ? metricOf(row.metrics, key) : null;
+  };
+  const nodeInput = (node: typeof feature) => node ? {
+    id: node.id, level: node.level, parentId: node.parentId, state: node.state,
+    displayPrefix: node.displayPrefix,
+    title: titles[nodes.indexOf(node)] ?? null,
+    value: bound(node.id, node.revision, "value") } : null;
+  const cardInput = (row: typeof card, rowTitle: string | null) => ({
+    id: row.id, cardType: row.cardType, displayKey: row.displayKey,
+    status: row.status, archived: row.archivedAt !== null, title: rowTitle,
+    parentFeatureNodeId: row.parentFeatureNodeId,
+    parentStoryCardId: row.parentStoryCardId,
+    metric: bound(row.id, row.revision,
+      row.cardType === "story" ? "impact" : "contribution") });
+  return projectAmuxCardHierarchy({ card: cardInput(card, title),
+    story: story ? cardInput(story, storyTitle) : null,
+    feature: nodeInput(feature), epic: nodeInput(epic),
+    initiative: nodeInput(initiative) });
 }
 
 export type AmuxHierarchyParent = { kind: "root" } | { kind: "unassigned" } |
@@ -661,12 +722,13 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
   // The owner re-approves a waiting Task's ceiling at the current price
   // (v4TaskCeilingReapprovalCore.ts); a failed read shows no offer.
   const v4Task = card.sourceSystem === "admin-idea-v4" && card.cardType === "task";
-  const [ceilingReapproval, ceilingEntries] = await Promise.all([
+  const [ceilingReapproval, ceilingEntries, hierarchy] = await Promise.all([
     v4Task ? readAmuxV4TaskCeilingReapprovalView(taskId) : null,
     readCeilingEntries(v4Task ? [taskId] : []),
+    readAmuxCardHierarchy(card, summary?.title ?? null).catch(() => null),
   ]);
   return { ...summary, revision: card.revision, body, brief,
-    legacyCard, ceilingReapproval,
+    legacyCard, ceilingReapproval, hierarchy,
     feedback: card.cardType === "task" ? projectAmuxTaskFeedback({
       id: card.id, revision: card.revision, status: card.status,
       createdAt: card.createdAt,
