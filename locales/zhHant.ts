@@ -392,6 +392,7 @@ export const zhHant = {
         tooManyRequestsRetry: "請求傳送過快，請在 {seconds} 秒後重試。",
         responseBodyMissing: "無法開啟回應串流。",
         responseEmpty: "AI 服務供應商已結束要求，但未回傳答案。請稍後重試或選擇其他模型。",
+        responseAttachmentRejected: "模型無法讀取附加的檔案。檔案可能已損壞、設有密碼，或超出模型的大小或頁數限制。請檢查檔案，或直接貼上其文字。",
         modelRetired: "此模型已不再提供。請選擇其他目前可用的模型。",
         modelRetiredWithReplacement: "此模型已不再提供。請選擇 {model} 或其他目前可用的模型。",
         responseCancelled: "回覆產生已停止。",

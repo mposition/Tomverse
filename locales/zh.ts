@@ -397,6 +397,7 @@ export const zh = {
         tooManyRequestsRetry: "请求发送过快，请在 {seconds} 秒后重试。",
         responseBodyMissing: "无法打开响应流。",
         responseEmpty: "AI 提供商结束了请求，但未返回答案。请稍后重试或选择其他模型。",
+        responseAttachmentRejected: "模型无法读取所附文件。文件可能已损坏、设有密码，或超出了模型的大小或页数限制。请检查文件，或直接粘贴其文本。",
         modelRetired: "此模型已不再提供。请选择其他当前可用的模型。",
         modelRetiredWithReplacement: "此模型已不再提供。请选择 {model} 或其他当前可用的模型。",
         responseCancelled: "回复生成已停止。",
