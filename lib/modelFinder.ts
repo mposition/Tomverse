@@ -424,9 +424,16 @@ const DOCUMENT_PATTERN =
 // Exported for lib/webSearchSuggestion.ts's "web search: auto" inline
 // suggestion, which shares this signal (source/citation/research intent
 // correlates strongly with needing current information) rather than
-// duplicating a second Korean/English keyword regex.
+// duplicating a second keyword regex.
+//
+// One vocabulary per supported UI language (en, ko, zh, zh-Hant, de, fr, es,
+// pt). This runs client-side on every keystroke, so it stays a free local
+// regex rather than a model call. Latin-script words sit inside `\b`; CJK and
+// Hangul terms sit outside it, because `\b` (without the `u` flag) never fires
+// between two CJK characters. German singular "Quelle" only counts after an
+// article or preposition, because French "quelle" ("which") is spelled the same.
 export const RESEARCH_PATTERN =
-  /\b(source|sources|citation|citations|research|web search|latest evidence)\b|출처|근거|웹\s*검색|자료\s*조사|최신\s*정보/i;
+  /\b(source|sources|citation|citations|research|web search|latest evidence|quellen|quellenangaben?|(?:die|der|eine|einer|mit|ohne)\s+quelle|websuche|recherch\w*|fuentes?|investigación|búsqueda web|fontes?|citação|citações|pesquisas?)\b|출처|근거|웹\s*검색|자료\s*조사|최신\s*정보|来源|出处|参考资料|参考文献|网络搜索|联网搜索|最新信息|最新资讯|來源|出處|參考資料|參考文獻|網路搜尋|網路搜索|上網搜尋|最新資訊/i;
 
 export const getContextualModelSuggestion = ({
   text,
@@ -452,7 +459,12 @@ export const getContextualModelSuggestion = ({
     );
   });
 
-  if (normalizedText.length >= 12 && RESEARCH_PATTERN.test(normalizedText)) {
+  // The length floor keeps the card from flashing on a half-typed word. A Han
+  // character carries roughly a word, so it counts double: "请列出参考文献和出处"
+  // is a whole question at ten characters.
+  const typedLength =
+    normalizedText.length + (normalizedText.match(/[㐀-鿿]/g)?.length ?? 0);
+  if (typedLength >= 12 && RESEARCH_PATTERN.test(normalizedText)) {
     return {
       key: "research:perplexity/sonar",
       modelId: "perplexity/sonar",
