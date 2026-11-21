@@ -14,7 +14,8 @@ name: Tomverse CLI release check
 #   are kept as workflow artifacts, each with its .sha256.
 #
 # It only builds and tests. It publishes nothing: no npm publish, no GitHub
-# Release, no signing identity. The operator runs it by hand before a release
+# Release. The one job with credentials is `sign-macos` (default off, at the
+# end). The operator runs it by hand before a release
 # (Actions > Tomverse CLI release check > Run workflow) and publishes from the
 # result -- apps/tomverse-cli/RELEASING.md.
 
