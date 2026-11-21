@@ -635,8 +635,23 @@ jobs:
           test -n "$installer_identity" || { echo "no Developer ID Installer identity for team $TEAM_ID"; exit 1; }
           key="$RUNNER_TEMP/notary.p8"
           # Owner-only for the key file alone; the package payload below keeps normal modes.
-          (umask 077 && printf '%s' "$NOTARY_KEY" | base64 --decode > "$key")
+          # The secret may hold the .p8 file base64-encoded or as its PEM text.
+          (
+            umask 077
+            if printf '%s' "$NOTARY_KEY" | grep -q -- '-----BEGIN PRIVATE KEY-----'; then
+              printf '%s\n' "$NOTARY_KEY" | tr -d '\r' > "$key"
+            else
+              printf '%s' "$NOTARY_KEY" | tr -d ' \r\n\t' | base64 --decode > "$key"
+            fi
+          )
           umask 022
+          # Checked before anything is sent to Apple; says what arrived, never its content.
+          if ! head -1 "$key" | grep -q -- '-----BEGIN PRIVATE KEY-----' || ! openssl pkey -in "$key" -noout 2> /dev/null; then
+            echo "APPLE_NOTARY_KEY_P8_BASE64 does not decode to a .p8 private key:"
+            echo "  $(wc -c < "$key" | tr -d ' ') bytes; first line is $(head -1 "$key" | grep -q -- '-----BEGIN' && echo 'a PEM header' || echo 'not a PEM header')."
+            echo "  Put the content of AuthKey_<KEY ID>.p8.base64.txt (or of the .p8 file itself) in the cli-release environment secret."
+            exit 1
+          fi
           notarize() {
             # One submission, waited on; a failure prints Apple's log and stops. Never resubmitted here.
             out="$(xcrun notarytool submit "$1" --key "$key" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" --wait --timeout 45m --output-format json)"
