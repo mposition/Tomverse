@@ -7,6 +7,7 @@ import {
     isSmartAdaptiveOnlyModel,
     smartAdaptiveCapabilities,
     type ExternalApiModelCapabilities,
+    type ExternalApiSurface,
 } from "@/lib/externalApiCatalogCore";
 import { isProviderApiKeyConfigured } from "@/lib/modelRegistryShared";
 import { DEFAULT_MODEL_ID, getModelUsageProfile, resolveModelRequestPricing, type AiModel, type ModelTier } from "@/lib/models";
@@ -23,7 +24,7 @@ import type { ExternalApiProtocol } from "@/lib/externalApiProtocols";
  *   CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED is on; the general API's otherwise.
  * The same key, plan check, ledger and limits serve both.
  */
-export type ExternalApiSurface = "general" | "coding";
+export type { ExternalApiSurface };
 
 export type ExternalApiRunnableEntry = {
     model: AiModel;

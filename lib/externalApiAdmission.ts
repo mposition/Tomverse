@@ -2,6 +2,7 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 import { ChatAccessError } from "@/lib/chatSecurity";
 import { externalApiKeyState } from "@/lib/externalApiKeyCore";
+import type { ExternalApiSurface } from "@/lib/externalApiCatalogCore";
 import type { ExternalApiProtocol } from "@/lib/externalApiProtocols";
 
 export type KeyCreditTotals = { committed: number; held: number; count: number };
@@ -58,6 +59,8 @@ export const externalApiAdmissionHook =
         idempotencyKeyDigest: string | null;
         /** Which wire protocol the request arrived on; content-free metadata. */
         protocol?: ExternalApiProtocol;
+        /** Which external API the request came through (its address); content-free. */
+        surface: ExternalApiSurface;
         /**
          * Smart Adaptive's decision, content-free: how the model was chosen,
          * whether a cheaper pick was held, and a digest of the conversation's
@@ -128,6 +131,7 @@ export const externalApiAdmissionHook =
                 modelId: input.modelId,
                 stream: input.stream,
                 protocol: input.protocol ?? "chat_completions",
+                surface: input.surface,
                 ...(input.routing
                     ? {
                           routedBy: input.routing.routedBy,

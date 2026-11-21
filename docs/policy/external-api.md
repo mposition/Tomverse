@@ -446,13 +446,18 @@ improved by its own optimizer, as Chat's router is.
 `ExternalApiRequest`: the link from a key to its reservation, model, whether
 it streamed, the wire protocol (`chat_completions`, `anthropic_messages` or
 `responses`; migration `20261118160000_external_api_request_protocol`, rows
-from before it read as Chat Completions), the client user agent, finish reason,
+from before it read as Chat Completions), which API it came through (`surface`:
+`general` or `coding`, from the route, held to those two by a CHECK constraint;
+migration `20261121120000_external_api_request_surface`, rows from before it
+stay NULL and are shown as not recorded, with no backfill), the client user agent, finish reason,
 error code, timestamps, and digests of the body and Idempotency-Key. No prompt, output, tool argument,
 image or key material is stored or logged. Every credit and token figure lives
 on the shared reservation.
 
 The account data export includes both tables without the digests
-(`api_keys`, `api_requests`). Deleting the account deletes its keys and
+(`api_keys`, `api_requests`, the latter with `surface`). The key's receipts --
+`GET /usage`, `GET /requests/status` and Settings > API keys -- return `surface`
+too, null for a request recorded before it. Deleting the account deletes its keys and
 request links; the shared reservation rows stay, detached from the person, as
 every Chat reservation does.
 

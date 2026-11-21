@@ -218,9 +218,40 @@ test("the coding API over the real shared credit ledger", { skip: !databaseUrl }
         const receipt = await db.externalApiRequest.findUnique({ where: { reservationId: reservation.id } });
         assert.equal(receipt.modelId, MODEL_ID);
         assert.equal(receipt.protocol, "anthropic_messages");
+        assert.equal(receipt.surface, "coding", "sent to /api/code/anthropic: the coding API");
         // The provider budget holds what the request really cost, not the reservation.
         const bucket = await db.chatUsageBucket.findFirst({ where: { key: { contains: "anthropic" }, period: "provider-cost-day" } });
         assert.ok(bucket && Number(bucket.count) >= Number(reservation.settledCostMicroUsd));
+    });
+
+    await t.test("each request records the API it came through; the key's usage returns it, and an older row reads as not recorded", async () => {
+        process.env.CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED = "true";
+        const userId = await newUser();
+        process.env.EXTERNAL_API_ALLOWED_USER_IDS = userId;
+        const { key, summary } = await issueKey(userId);
+        reply = () => new Response(anthropicStream(), { status: 200, headers: { "content-type": "text/event-stream", "request-id": "req_provider_3" } });
+        // The coding API with the dedicated row, the general API with a chat model.
+        const coding = await messages("coding", key, body(MODEL_ID));
+        assert.equal(coding.status, 200);
+        await coding.text();
+        const general = await messages("general", key, body("claude-sonnet-5"));
+        assert.equal(general.status, 200);
+        await general.text();
+        const receipts = await db.externalApiRequest.findMany({ where: { userId }, orderBy: { createdAt: "asc" } });
+        assert.deepEqual(receipts.map((row) => [row.modelId, row.surface]), [
+            [MODEL_ID, "coding"],
+            ["claude-sonnet-5", "general"],
+        ]);
+        // A row written before the column existed: NULL, never guessed.
+        await db.$executeRaw`UPDATE "ExternalApiRequest" SET "surface" = NULL WHERE "id" = ${receipts[1].id}`;
+        const usage = await keys.externalApiKeyUsage(summary.id, 10);
+        const byId = new Map(usage.map((row) => [row.requestId, row.surface]));
+        assert.equal(byId.get(receipts[0].id), "coding");
+        assert.equal(byId.get(receipts[1].id), null);
+        // The settings route reads the same list (app/api/user/api-keys/[keyId]).
+        assert.ok(usage.every((row) => "surface" in row));
+        // The database refuses a value the application does not write.
+        await assert.rejects(db.$executeRaw`UPDATE "ExternalApiRequest" SET "surface" = 'other' WHERE "id" = ${receipts[0].id}`);
     });
 
     await t.test("the general API refuses the dedicated row by name, with nothing sent or held", async () => {

@@ -2117,6 +2117,10 @@ model ExternalApiRequest {
   routedHeld           Boolean?
   /// SHA-256 prefix of the conversation's routing key, never the key itself.
   routeConversation    String?
+  /// Which external API the request came through, by its address: general
+  /// (/api/v1, /api/anthropic) or coding (/api/code/v1, /api/code/anthropic).
+  /// NULL on rows written before the column existed (shown as not recorded).
+  surface              String?
   finishReason         String?
   errorCode            String?
   createdAt            DateTime              @default(now())

@@ -15,6 +15,15 @@ import { EXTERNAL_API_PROTOCOLS, protocolsForProvider, type ExternalApiProtocol 
 
 export type ExternalApiEnv = Record<string, string | undefined>;
 
+/**
+ * The two external APIs, decided by the request's address (owner decision
+ * 2026-11-21): general (/api/v1, /api/anthropic) and coding (/api/code/v1,
+ * /api/code/anthropic). Also the values ExternalApiRequest.surface may hold
+ * (its CHECK constraint, scripts/check-enum-constraints.mjs).
+ */
+export const EXTERNAL_API_SURFACES = ["general", "coding"] as const;
+export type ExternalApiSurface = (typeof EXTERNAL_API_SURFACES)[number];
+
 export const externalApiEnabled = (env: ExternalApiEnv) =>
     env.EXTERNAL_API_ENABLED === "true";
 
