@@ -125,6 +125,11 @@ const dayStart = (day: string) => {
   return Number.isFinite(at.getTime()) && at.getTime() <= Date.now() ? at.toISOString() : null;
 };
 
+/** The save transaction waits up to 5 s for a connection and runs at most
+ * 60 s (portfolioNodeEditService.ts); after that a missing row is final. */
+const SAVE_SETTLED_MS = 70_000;
+type Sent = { requestId: string; sentAt: number };
+
 type Draft = { title: string; description: string; value: number;
   uncertainty: typeof UNCERTAINTY[number]; reason: string; day: string };
 
@@ -139,8 +144,8 @@ function AmuxPortfolioNodeSheet({ nodeId, level, m, onClose, onSaved }: {
   const [error, setError] = useState<string | null>(null);
   const [reauth, setReauth] = useState(false);
   const [done, setDone] = useState<string | null>(null);
-  /** The requestId of a save whose outcome is not known yet. */
-  const [unknown, setUnknown] = useState<string | null>(null);
+  /** A save whose outcome is not known yet, and when it was sent. */
+  const [unknown, setUnknown] = useState<Sent | null>(null);
   /** Bumped after a save, so the sheet reads the node's new revision. */
   const [reload, setReload] = useState(0);
   const headingRef = useRef<HTMLHeadingElement | null>(null);
@@ -210,6 +215,7 @@ function AmuxPortfolioNodeSheet({ nodeId, level, m, onClose, onSaved }: {
   const save = async () => {
     if (!preview || busy) return;
     setBusy(true); setError(null);
+    const sent = { requestId: preview.requestId, sentAt: Date.now() };
     try {
       const response = await post({ action: "save_node_edit",
         approval: { payload: preview.payload, confirmationDigest: preview.data.confirmationDigest } });
@@ -227,17 +233,18 @@ function AmuxPortfolioNodeSheet({ nodeId, level, m, onClose, onSaved }: {
       if (!response.ok && code !== "outcome_unknown" && code !== "unavailable") {
         setError(m.failed(code)); setPreview(null); return;
       }
-      setUnknown(preview.requestId);
-      await readBack(preview.requestId);
+      setUnknown(sent);
+      await readBack(sent);
     } catch {
-      setUnknown(preview.requestId);
-      await readBack(preview.requestId);
+      setUnknown(sent);
+      await readBack(sent);
     } finally { setBusy(false); }
   };
 
-  /** Only an explicit not_found means nothing was written; anything else
-   * keeps the outcome unknown and the save closed. */
-  const readBack = async (requestId: string) => {
+  /** Only an explicit not_found, read once the save's transaction can no
+   * longer be running, means nothing was written; anything else keeps the
+   * outcome unknown and the save closed. */
+  const readBack = async ({ requestId, sentAt }: Sent) => {
     setError(m.failed("outcome_unknown"));
     try {
       const back = await adminFetch(`/api/admin/amux/portfolio?kind=assessment&requestId=${requestId}`,
@@ -248,7 +255,7 @@ function AmuxPortfolioNodeSheet({ nodeId, level, m, onClose, onSaved }: {
       if (state === "approved") {
         setUnknown(null); setPreview(null); setError(null); setDone(m.unknownSaved); onSaved();
         setReload((value) => value + 1);
-      } else if (state === "not_found") {
+      } else if (state === "not_found" && Date.now() - sentAt > SAVE_SETTLED_MS) {
         setUnknown(null); setPreview(null); setError(m.unknownNotSaved);
       } else setError(m.unknownPending);
     } catch { setError(m.unknownPending); }
@@ -282,11 +289,12 @@ function AmuxPortfolioNodeSheet({ nodeId, level, m, onClose, onSaved }: {
           <input type="text" value={draft.title} maxLength={200}
             disabled={locked || !read.contentEditable || busy}
             onChange={(event) => change({ title: event.target.value })} /></label>
-        <label className={styles.field}><span>{m.description}</span>
-          <textarea value={draft.description} maxLength={4000}
+        <div className={styles.field}><label htmlFor="amux-node-description">{m.description}</label>
+          <textarea id="amux-node-description" value={draft.description} maxLength={4000}
+            aria-describedby="amux-node-description-note"
             disabled={locked || !read.contentEditable || busy}
             onChange={(event) => change({ description: event.target.value })} />
-          <small>{read.contentEditable ? m.contentNote : m.contentLocked}</small></label>
+          <small id="amux-node-description-note">{read.contentEditable ? m.contentNote : m.contentLocked}</small></div>
         <div className={styles.sectionHead}><strong>{m.scoreHeading}</strong>
           <span>{m.scoreHint(WEIGHT[level])}</span></div>
         <Segments legend={m.valueLabel} name="value" disabled={locked || busy}
@@ -300,10 +308,11 @@ function AmuxPortfolioNodeSheet({ nodeId, level, m, onClose, onSaved }: {
           options={(read.assessment ? REASONS : ["initial"] as const).map((value) =>
             ({ value, label: m.reasonOptions[value] }))}
           selected={draft.reason} onChange={(value) => change({ reason: value })} />
-        <label className={styles.field}><span>{m.evidenceAsOf}</span>
-          <input type="date" value={draft.day} max={today()} disabled={locked || busy}
+        <div className={styles.field}><label htmlFor="amux-node-evidence">{m.evidenceAsOf}</label>
+          <input id="amux-node-evidence" type="date" value={draft.day} max={today()}
+            aria-describedby="amux-node-evidence-note" disabled={locked || busy}
             onChange={(event) => change({ day: event.target.value })} />
-          <small>{m.evidenceNote}</small></label>
+          <small id="amux-node-evidence-note">{m.evidenceNote}</small></div>
         {preview && <div className={styles.impact} data-testid="amux-node-preview">
           <strong>{m.previewHeading(preview.data.tasks.length)}</strong>
           <p>{preview.data.contentChanged ? m.revision(preview.data.revisionAfter) : m.noRevision}</p>

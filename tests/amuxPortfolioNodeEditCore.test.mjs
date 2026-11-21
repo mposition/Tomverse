@@ -80,3 +80,25 @@ test("a first assessment says initial; a later one must not", () => {
   assert.equal(amuxNodeEditReasonFits("initial", true), false);
   assert.equal(amuxNodeEditReasonFits("new_evidence", true), true);
 });
+
+test("a Task's approved path stands through the owner's node revisions, nothing else", async () => {
+  const { amuxApprovedNodeStillCurrent } = await import("../lib/amux/portfolioNodeEditCore.ts");
+  const approved = { revision: 0, content: { digest: "a".repeat(64), keyId: "k1" },
+    approvedDecisionId: "decision-1" };
+  const rev0 = { contentDigest: "a".repeat(64), contentDigestKeyId: "k1", decisionId: "decision-1" };
+  // Unrevised: the node itself must carry the approved content.
+  assert.equal(amuxApprovedNodeStillCurrent({ approved, approvedRevision: null,
+    node: { revision: 0, contentDigest: "a".repeat(64), contentDigestKeyId: "k1" } }), true);
+  assert.equal(amuxApprovedNodeStillCurrent({ approved, approvedRevision: null,
+    node: { revision: 0, contentDigest: "b".repeat(64), contentDigestKeyId: "k1" } }), false);
+  // Revised by the owner: the approved revision is still on record.
+  const revised = { revision: 2, contentDigest: "c".repeat(64), contentDigestKeyId: "k1" };
+  assert.equal(amuxApprovedNodeStillCurrent({ approved, node: revised, approvedRevision: rev0 }), true);
+  for (const approvedRevision of [null, { ...rev0, contentDigest: "d".repeat(64) },
+    { ...rev0, contentDigestKeyId: "k2" }, { ...rev0, decisionId: "decision-2" }]) {
+    assert.equal(amuxApprovedNodeStillCurrent({ approved, node: revised, approvedRevision }), false);
+  }
+  // A node older than the approval never stands.
+  assert.equal(amuxApprovedNodeStillCurrent({ approved: { ...approved, revision: 3 },
+    node: revised, approvedRevision: rev0 }), false);
+});

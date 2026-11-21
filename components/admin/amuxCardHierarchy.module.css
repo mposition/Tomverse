@@ -31,7 +31,7 @@ button.step:focus-visible { outline:2px solid var(--amux-blue); outline-offset:2
 .sheetHead p { font-family:var(--font-code); font-size:11px; color:var(--amux-muted); }
 .sheetHead h4 { font-size:16px; font-weight:700; overflow-wrap:anywhere; }
 .field { display:flex; flex-direction:column; gap:6px; }
-.field > span:first-child, .field legend { font-size:12px; font-weight:600; }
+.field > span:first-child, .field > label, .field legend { font-size:12px; font-weight:600; }
 .field small { font-size:11px; color:var(--amux-subtle); }
 .field input[type="text"], .field input[type="date"], .field textarea { width:100%; padding:8px 10px; border:1px solid var(--amux-border); border-radius:6px; background:var(--amux-canvas); color:var(--amux-text); font-size:13px; }
 .field textarea { min-height:84px; resize:vertical; }

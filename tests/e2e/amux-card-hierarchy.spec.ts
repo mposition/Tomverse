@@ -94,9 +94,9 @@ test("the Feature step opens the edit sheet; review then save goes through the p
   const { posts, details } = await setup(page);
   await page.getByTestId("amux-hierarchy-feature").click();
   const sheet = page.getByTestId("amux-node-sheet");
-  await expect(sheet.getByRole("textbox", { name: "Title" })).toHaveValue("AEO-01 crawl policy");
-  await sheet.getByRole("textbox", { name: "Title" }).fill("AEO-01 crawl and llms.txt policy");
-  await sheet.getByText("5", { exact: true }).click();
+  await expect(sheet.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("AEO-01 crawl policy");
+  await sheet.getByRole("textbox", { name: "Title", exact: true }).fill("AEO-01 crawl and llms.txt policy");
+  await sheet.getByRole("radio", { name: "5", exact: true }).check();
   await sheet.getByTestId("amux-node-review").click();
   await expect(sheet.getByTestId("amux-node-preview")).toContainText("1 open Task");
   await expect(sheet.getByTestId("amux-node-preview")).toContainText("AMUX-CRAWL-002 62 → 64 (estimate)");

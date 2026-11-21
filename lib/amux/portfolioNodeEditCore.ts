@@ -110,6 +110,30 @@ export function amuxProjectedTaskScore(input: {
     input.nextValue * AMUX_NODE_VALUE_WEIGHT[input.level];
 }
 
+/** Whether a node still stands where a Task's approval put it. The same
+ * revision must carry the approved content. A later revision is the owner's
+ * own edit only (the database accepts no other content change, and each
+ * owner revision keeps the creating decision and parent): it stands when the
+ * approved revision is still on record with the approved content and
+ * decision. The current revision's decision is checked by the caller. */
+export function amuxApprovedNodeStillCurrent(input: {
+  approved: { revision: number; content: { digest: string; keyId: string };
+    approvedDecisionId: string };
+  node: { revision: number; contentDigest: string; contentDigestKeyId: string };
+  approvedRevision: { contentDigest: string; contentDigestKeyId: string;
+    decisionId: string } | null;
+}): boolean {
+  const { approved, node, approvedRevision } = input;
+  if (node.revision === approved.revision) {
+    return node.contentDigest === approved.content.digest &&
+      node.contentDigestKeyId === approved.content.keyId;
+  }
+  return node.revision > approved.revision && approvedRevision !== null &&
+    approvedRevision.contentDigest === approved.content.digest &&
+    approvedRevision.contentDigestKeyId === approved.content.keyId &&
+    approvedRevision.decisionId === approved.approvedDecisionId;
+}
+
 /** A first assessment must say "initial"; a later one must not (the
  * assessment guard's version chain). */
 export const amuxNodeEditReasonFits = (reasonCode: string, hasPrior: boolean) =>

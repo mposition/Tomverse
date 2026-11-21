@@ -458,6 +458,10 @@ run(
     // Owner decision 2026-11-14: an unchanged score's active window is
     // extended by the system refresher, up to its baseline, never past it.
     "tests/integration/amux-portfolio-score-refresh.db.test.ts",
+    // Owner decision 2026-11-21: the owner edits an Initiative, Epic or
+    // Feature from a Task card; the database accepts a content revision only
+    // in the exact owner shape, and every open Task below is rescored.
+    "tests/integration/amux-portfolio-node-edit.db.test.ts",
     // AMUX-FILEREQ-004 (2026-11-09): the owner closes the escalation an
     // earlier attempt left open on a done or todo card, with one chained
     // audit entry; review, blocked and running cards refuse.
