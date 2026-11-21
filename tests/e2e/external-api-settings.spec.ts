@@ -352,6 +352,8 @@ test("API keys: the Tomverse CLI choice, once enabled, shows install and a key f
             })
     );
     await page.goto("/settings/api");
+    // The Tomverse CLI is a coding API tool (#4140), so the coding API is chosen first.
+    await page.getByTestId("external-api-connect-api-coding").click();
     await page.getByTestId("external-api-platform-tomverse-cli").click();
     const panel = page.getByTestId("external-api-tool-tomverse-cli");
     await expect(page.getByTestId("external-api-connect").getByRole("heading", { name: "Tomverse CLI" })).toBeVisible();
