@@ -196,7 +196,7 @@ jobs:
           $msi = Get-Item "apps/tomverse-cli/release/tomverse-*-$env:TARGET.msi"
           $p = Start-Process msiexec -ArgumentList "/i `"$($msi.FullName)`" /qn /l*v `"$env:RUNNER_TEMP\install.log`"" -Wait -PassThru
           if ($p.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\install.log" -Tail 50; throw "msiexec /i exited $($p.ExitCode)" }
-          $exe = Join-Path $env:LOCALAPPDATA "Programs\Tomverse CLI	omverse.exe"
+          $exe = Join-Path $env:LOCALAPPDATA "Programs\Tomverse CLI\tomverse.exe"
           $version = & $exe --version
           if ($version -ne (Get-Content apps/tomverse-cli/package.json | ConvertFrom-Json).version) { throw "installed tomverse --version printed '$version'" }
           $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -276,7 +276,7 @@ jobs:
           $msi = Get-Item "apps/tomverse-cli/release/tomverse-*-$env:TARGET.msi"
           $p = Start-Process msiexec -ArgumentList "/i `"$($msi.FullName)`" /qn /l*v `"$env:RUNNER_TEMP\install.log`"" -Wait -PassThru
           if ($p.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\install.log" -Tail 50; throw "msiexec /i exited $($p.ExitCode)" }
-          $exe = Join-Path $env:LOCALAPPDATA "Programs\Tomverse CLI	omverse.exe"
+          $exe = Join-Path $env:LOCALAPPDATA "Programs\Tomverse CLI\tomverse.exe"
           $version = & $exe --version
           if ($version -ne (Get-Content apps/tomverse-cli/package.json | ConvertFrom-Json).version) { throw "installed tomverse --version printed '$version'" }
           $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
