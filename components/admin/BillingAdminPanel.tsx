@@ -303,7 +303,10 @@ export function promotionChangeLines(
       label: p.maxRedemptionsPerCard,
       read: (x) => x.maxRedemptionsPerPaymentMethod,
     },
-    { label: p.allowedCountries, read: (x) => x.allowedCountries },
+    {
+      label: p.allowedCountries,
+      read: (x) => x.allowedCountries.join(", ") || null,
+    },
     { label: p.durationMonths, read: (x) => x.durationMonths },
     { label: p.fulfillment, read: (x) => x.fulfillmentType },
     { label: p.passDurationDays, read: (x) => x.accessDurationDays },

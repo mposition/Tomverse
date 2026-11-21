@@ -1068,3 +1068,37 @@ test("an unidentifiable payer is not refused when the promotion has no per-card 
   assert.deepEqual(world.cancels, []);
   assert.equal(world.userUpdates[0].plan, "Max");
 });
+
+/* -------------------------------------------------------------------------- */
+/* Independent review, round 9                                                 */
+/* -------------------------------------------------------------------------- */
+
+test("a checkout with no amount total but a zero expected amount is treated as free", async () => {
+  // A missing total must not turn a free checkout into a "paid" one that the
+  // per-card limit only flags.
+  const { processStripeEvent } = await loadProcessor();
+  withCard();
+  world.otherAccountsOnCard = ["user_a", "user_b", "user_c"];
+  const session = sessionWith({
+    amount_total: null,
+    metadata: {
+      ...(zeroDueSession().metadata as Record<string, string>),
+      billingExpectedAmountMinor: "0",
+    },
+  });
+  await processStripeEvent(completedEvent(session));
+  assert.equal(world.cancels.length, 1);
+  assert.deepEqual(world.userUpdates, []);
+});
+
+test("the lease bound never reaches past the second the Session was created in", async () => {
+  // Any later checkout's lease is created after this Session's completion or
+  // expiry, both of which follow the creation second; the bound stops at its
+  // last millisecond.
+  const { processStripeEvent } = await loadProcessor();
+  await processStripeEvent(
+    completedEvent(sessionWith({ created: SESSION_CREATED_SECONDS }))
+  );
+  const bound = world.releaseCalls[0].takenAtOrBefore as Date;
+  assert.equal(bound.getTime() - SESSION_CREATED_SECONDS * 1000, 999);
+});

@@ -384,8 +384,20 @@ async function redemptionAfterUniqueViolation(
       ),
     };
   }
-  return { promotionId, refused: session.amount_total === 0 };
+  return { promotionId, refused: checkoutChargedNothing(session) };
 }
+
+/**
+ * Whether this checkout charged nothing. `amount_total` answers when Stripe
+ * gives it; when it does not, the amount the checkout itself recorded as
+ * expected (`billingExpectedAmountMinor`) decides -- so a missing total
+ * cannot turn a free checkout into a "paid" one that the per-card limit only
+ * flags.
+ */
+const checkoutChargedNothing = (session: Stripe.Checkout.Session) =>
+  session.amount_total === 0 ||
+  (session.amount_total === null &&
+    session.metadata?.billingExpectedAmountMinor === "0");
 
 /**
  * The latest lease creation time that can belong to this Checkout Session.
@@ -393,10 +405,26 @@ async function redemptionAfterUniqueViolation(
  * The lease is taken immediately before the Session is created, so it was
  * taken no later than the Session. Stripe reports `created` in whole seconds
  * while the lease row keeps milliseconds, so the bound is the end of that
- * second: a lease taken earlier in the same second is still this Session's. A
- * later attempt cannot take a lease in that second -- this one is held until
- * the checkout resolves. Without a creation time the release is unbounded, as
- * before (Stripe always sends one).
+ * second: a lease taken earlier in the same second is still this Session's.
+ *
+ * No other attempt's lease can fall inside that second. This Session's lease
+ * exists from just before `created` until the checkout resolves, and while it
+ * exists `reservePromotionCheckout` refuses a second one (409) for the same
+ * account and promotion. It is released only by this Session's completion --
+ * which needs the customer to finish the payment page, seconds at least after
+ * `created` -- or its expiry, 30 minutes after; or by the checkout route
+ * itself when Session creation failed. So any later lease is created after
+ * the second `created` falls in, and this bound never reaches it.
+ *
+ * The one exception is an unknown outcome: Stripe created the Session but the
+ * response was lost, the route released the lease, and the customer retried
+ * within the same second. That orphan Session's only later webhook is its
+ * expiry, 31 minutes on -- when the retry's lease, taken in the same second
+ * with the same 31-minute TTL, is itself expiring -- so the most this bound
+ * can do there is free that lease moments before its own TTL would.
+ *
+ * Without a creation time the release is unbounded, as before (Stripe always
+ * sends one).
  */
 const promotionLeaseReleaseBound = (session: Stripe.Checkout.Session) =>
   typeof session.created === "number"
@@ -764,7 +792,7 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
     session,
     subscriptionId,
     paymentMethodFingerprintHash,
-    session.amount_total === 0
+    checkoutChargedNothing(session)
   ).catch(async (error) => {
     // Only the outcomes a redelivery would repeat are absorbed; anything else
     // (a database fault mid-decision) fails the webhook, so a transient error
