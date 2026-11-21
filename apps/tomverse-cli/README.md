@@ -68,8 +68,10 @@ musl-based Linux systems should use the npm package.
 
 Revoke or limit a key in Settings > API keys; the CLI has no key management.
 
-The CLI talks only to `https://tomverse.app/api/v1` unless you set another
-endpoint with `tomverse config set endpoint <url>` (or `TOMVERSE_ENDPOINT`).
+The CLI talks only to Tomverse's coding API, `https://tomverse.app/api/code/v1`,
+unless you set another endpoint with `tomverse config set endpoint <url>` (or
+`TOMVERSE_ENDPOINT`). An endpoint saved before the CLI moved to the coding API
+ends in `/api/v1`; it is read as `/api/code/v1` on the same server.
 It must be https; plain http is accepted only for a loopback development
 server after `tomverse config set allow-insecure-localhost true`. Redirects
 are never followed, so the key cannot be carried to another address. Nothing
@@ -193,7 +195,7 @@ session.
   processes) and saves the session. Press it twice to quit at once.
 - **A lost answer:** each model request gets its own Idempotency-Key, recorded
   before it is sent. If the connection breaks, the CLI asks Tomverse about that
-  request (`GET /api/v1/requests/status`, read only). Tomverse does not store
+  request (`GET /api/code/v1/requests/status`, read only). Tomverse does not store
   answers, so a lost answer cannot be shown again; you choose whether to send
   the step again as a new request (it can be charged again). "Not found" does
   not mean "not charged": the request may still arrive.
@@ -247,7 +249,7 @@ as unknown, never as zero.
 
 ## Models
 
-The catalogue comes from `GET /api/v1/models`; the CLI uses only models with
+The catalogue comes from `GET /api/code/v1/models`; the CLI uses only models with
 tool calls over Chat Completions and keeps no model or price list of its own.
 A session stays on one model. With `smart-adaptive`, the model that answers the
 first request is pinned for the rest of the session (including compaction and

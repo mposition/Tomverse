@@ -113,7 +113,9 @@ test("the page reads the live catalogue, keeps its ids and test ids, and injects
   assert.match(source, /catalogLoaded/);
   for (const id of ["cursor-guide-page", "cursor-guide-title", "cursor-guide-primary-cta", "cursor-guide-models", "cursor-guide-model-search"]) assert.ok(source.includes(`"${id}"`), id);
   for (const id of ["before", "step-key", "step-cursor", "step-model", "routing", "models", "verify", "troubleshooting"]) assert.ok(source.includes(`"${id}"`), id);
-  assert.doesNotMatch(source, /https:\/\/tomverse\.app\/(?!api\/v1)/);
+  // Cursor is a coding tool, so it uses the coding API (external-api.md section 1).
+  assert.match(source, /const API_BASE = "https:\/\/tomverse\.app\/api\/code\/v1";/);
+  assert.doesNotMatch(source, /https:\/\/tomverse\.app\/(?!api\/code\/v1)/);
 });
 
 test("every guide rule is scoped under .tv-page and uses the cg- prefix", () => {

@@ -23,6 +23,7 @@ import {
   codingLinkedProfileSchema,
   codingProviderTermsSchema,
   codingStoredProfileSchema,
+  type CodingDedicatedProfile,
   type CodingLinkedProfile,
   type CodingProviderTerms,
 } from "@/lib/modelCatalogCore";
@@ -155,9 +156,27 @@ export const applyCodingSettings = (
 };
 
 /**
- * Save a link's own settings. Goes through updateCatalogEntry, so a serving
- * link is judged again at the new values (a credit weight below the floor is
- * refused there, not saved).
+ * Where a dedicated row is offered: its channels are the one setting it has
+ * here (owner decision 2026-11-21); everything else in its profile is what its
+ * draft read, so it changes only through a new draft.
+ */
+export const applyDedicatedChannels = (
+  stored: CodingDedicatedProfile,
+  settings: CodingSettings
+): { profile: CodingDedicatedProfile; changes: { field: string; from: unknown; to: unknown }[] } | null => {
+  if (Object.keys(settings).some((field) => field !== "channels")) return null;
+  const from = stored.channels ?? ["code"];
+  const to = settings.channels ?? from;
+  return {
+    profile: { ...stored, channels: to },
+    changes: canonicalJson(from) === canonicalJson(to) ? [] : [{ field: "channels", from, to }],
+  };
+};
+
+/**
+ * Save a link's own settings, or a dedicated row's channels. Goes through
+ * updateCatalogEntry, so a serving row is judged again at the new values (a
+ * credit weight below the floor is refused there, not saved).
  */
 export const saveCodingSettings = async (input: {
   modelId: string;
@@ -172,8 +191,11 @@ export const saveCodingSettings = async (input: {
     });
     if (!before) throw new CatalogRefusal("unknown_model", [], 404);
     const parsed = codingStoredProfileSchema.safeParse(before.profile);
-    if (!parsed.success || parsed.data.source !== "chat") throw new CatalogRefusal("settings_linked_only", [], 400);
-    const { profile, changes } = applyCodingSettings(parsed.data, input.settings);
+    if (!parsed.success) throw new CatalogRefusal("settings_linked_only", [], 400);
+    const applied =
+      parsed.data.source === "chat" ? applyCodingSettings(parsed.data, input.settings) : applyDedicatedChannels(parsed.data, input.settings);
+    if (!applied) throw new CatalogRefusal("settings_linked_only", [], 400);
+    const { profile, changes } = applied;
     if (changes.length === 0) return { row: before, changes };
     const row = await updateCatalogEntry({
       category: "coding",

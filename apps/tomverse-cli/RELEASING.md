@@ -14,10 +14,10 @@ What a release consists of:
 
 ## Before anything: production runs the server side
 
-The published CLI talks to `https://tomverse.app/api/v1` (production). Publish
-only after production is running the release that has the paid-plan gate for
-the API and CLI (PR #4092) and Smart Adaptive on Claude Code and Codex
-(PR #4094). Check with a Pro account's key, from any folder:
+The published CLI talks to the coding API, `https://tomverse.app/api/code/v1`
+(production). Publish only after production is running the release that has
+the paid-plan gate for the API and CLI (PR #4092), Smart Adaptive on Claude
+Code and Codex (PR #4094) and the coding API routes. Check with a Pro account's key, from any folder:
 
 ```powershell
 $env:TOMVERSE_API_KEY = "<a Pro account's key>"

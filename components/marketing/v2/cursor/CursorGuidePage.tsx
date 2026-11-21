@@ -21,7 +21,8 @@ import "./cursor-guide.css";
 // Cursor connection guide (Figma draft approved by the owner 2026-11-21). The model
 // table is read from the live catalogue; everything else is in cursorGuideContent.
 
-const API_BASE = "https://tomverse.app/api/v1";
+/** The coding API (external-api.md section 1): Cursor, Claude Code, Codex and the CLI use it. */
+const API_BASE = "https://tomverse.app/api/code/v1";
 const MASKED_KEY = "tvk_••••••••";
 const SMART_ADAPTIVE_ID = "smart-adaptive";
 /** Rows shown before "Show all", Smart Adaptive included. */

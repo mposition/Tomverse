@@ -24,6 +24,7 @@ import {
   applyImageCreditOverrides,
   canonicalJson,
   type CodingDraftEdit,
+  codingDedicatedProfileSchema,
   codingProfileSchema,
   codingStoredProfileSchema,
   freePricingVersion,
@@ -92,13 +93,10 @@ const validateProfile = (category: StoredCatalogCategory, modelId: string, profi
     const parsed = codingStoredProfileSchema.safeParse(profile);
     if (!parsed.success) throw new CatalogRefusal("invalid_profile", parsed.error.issues.map((i) => i.path.join(".")), 400);
     // A chat link keeps the registry id as its own: the managed path and the
-    // external channels look the model up by it.
+    // coding API look the model up by it. A dedicated row may be offered on the
+    // coding API too (owner decision 2026-11-21); it runs as its own row there.
     if (parsed.data.source === "chat" && parsed.data.registryModelId !== modelId) {
       throw new CatalogRefusal("invalid_profile", ["registryModelId_must_equal_modelId"], 400);
-    }
-    // The external API runs chat registry models only.
-    if (parsed.data.source !== "chat" && (parsed.data.channels ?? ["code"]).some((channel) => channel !== "code")) {
-      throw new CatalogRefusal("invalid_profile", ["dedicated_code_only"], 400);
     }
     return parsed.data;
   }
@@ -460,8 +458,8 @@ export const applyCatalogDraft = async (input: {
     // Before the row lock below: the catalogue writers take this lock first,
     // so a row lock is never held while waiting for it (no lock-order deadlock).
     await takeAuditChainLock(tx);
-    const rows = await tx.$queryRaw<{ draft: unknown }[]>`
-      SELECT "draft" FROM "ModelCatalogEntry"
+    const rows = await tx.$queryRaw<{ draft: unknown; profile: unknown }[]>`
+      SELECT "draft", "profile" FROM "ModelCatalogEntry"
       WHERE "category" = ${input.category} AND "modelId" = ${input.modelId}
       FOR UPDATE`;
     const draft = rows[0]?.draft;
@@ -476,10 +474,14 @@ export const applyCatalogDraft = async (input: {
       const floor = codingCreditFloor(edited.profile);
       if (floor === null) throw new CatalogRefusal("not_admitted", ["credit_floor_unbounded"]);
       if (edited.profile.pricing.creditWeight < floor) throw new CatalogRefusal("not_admitted", [`credits_below_floor:${floor}`]);
+      // A new draft replaces the profile, not where the row is offered: a
+      // dedicated row keeps the channels the operator chose for it.
+      const stored = codingDedicatedProfileSchema.safeParse(rows[0]?.profile);
+      const channels = stored.success ? stored.data.channels : undefined;
       await updateCatalogEntry({
         category: "coding",
         modelId: input.modelId,
-        patch: { profile: edited.profile },
+        patch: { profile: channels ? { ...edited.profile, channels } : edited.profile },
         session: input.session,
         request: input.request,
         tx,

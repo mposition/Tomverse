@@ -293,7 +293,7 @@ test("API keys: Claude Code, Codex and Cursor each get their own configuration @
     await expect(cursor).toContainText(`Override OpenAI Base URL: ${baseUrl}`);
     await expect(cursor).toContainText("Custom model: smart-adaptive");
     await expect(page.getByTestId("external-api-cursor-guide")).toHaveAttribute("href", /\/developers\/cursor$/);
-    // GPT models come from Cursor's own list; anything else is added once.
+    // Cursor's own GPT list is not Tomverse models: every model is added once by ID.
     await expect(page.getByTestId("external-api-cursor-models")).toContainText("Add Custom Model");
     // The model list says which tools take each model.
     await page.getByTestId("external-api-models-search").fill("sonnet");
