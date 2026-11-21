@@ -63,15 +63,8 @@ const codingDraft = {
     outputUsdPerMTok: 8,
     creditWeight: 4,
     verifiedAt: "2026-11-12",
-    sources: [
-      "https://developers.openai.com/api/docs/pricing",
-      "https://openai.com/policies/services-agreement",
-      "https://platform.openai.com/docs/guides/your-data",
-    ],
+    sources: ["https://developers.openai.com/api/docs/pricing"],
   },
-  terms: { allowsResaleAndCodingAgent: true, url: "https://openai.com/policies/services-agreement", checkedAt: "2026-11-12" },
-  retention: { url: "https://platform.openai.com/docs/guides/your-data", checkedAt: "2026-11-12" },
-  processingRegion: "US",
 };
 
 test.describe("coding model catalogue flow", () => {
@@ -100,10 +93,9 @@ test.describe("coding model catalogue flow", () => {
     const profile = detail.getByTestId("model-catalog-coding-profile");
     // Prices and evidence are read, not typed.
     await expect(profile.getByText("$8", { exact: true })).toBeVisible();
-    // The terms page is also one of the pages the draft read, so it is listed twice.
-    await expect(detail.getByRole("link", { name: /openai\.com\/policies\/services-agreement/ })).toHaveCount(2);
-    await expect(detail.getByRole("link", { name: /platform\.openai\.com\/docs\/guides\/your-data/ }).first()).toBeVisible();
-    await expect(detail.getByText("Allows resale and coding agents")).toBeVisible();
+    // The draft read the price page only; no terms or retention page is shown or required.
+    await expect(detail.getByRole("link", { name: /developers\.openai\.com\/api\/docs\/pricing/ }).first()).toBeVisible();
+    await expect(detail.getByText("Allows resale and coding agents")).toHaveCount(0);
 
     const weight = detail.getByTestId("model-catalog-coding-weight");
     const apply = detail.getByTestId("model-catalog-coding-apply");

@@ -163,13 +163,13 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
   models: {
     label: "모델",
     description: "모델 레지스트리, 발견된 모델, 기본 모델",
-    aliases: ["레지스트리", "카탈로그", "발견", "후보", "수명주기", "백로그", "기본 모델", "게스트 라인업", "대체 모델", "코딩 카탈로그", "공급자 조건"],
+    aliases: ["레지스트리", "카탈로그", "발견", "후보", "수명주기", "백로그", "기본 모델", "게스트 라인업", "대체 모델", "코딩 카탈로그"],
     tabs: {
       registry: { label: "레지스트리", description: "가용성, 가격 override, API 구성" },
       discovery: { label: "발견", description: "공급자가 공개했지만 아직 결정되지 않은 모델" },
       defaults: { label: "기본 모델", description: "대체 모델, 게스트 라인업, 계정 기본값" },
       catalog: { label: "이미지 카탈로그", description: "이미지 모델의 켜기·보류, 가격 이력, LLM 초안" },
-      coding: { label: "코딩 카탈로그", description: "Code·API·CLI용 코딩 모델, 채팅 모델 연결, 공급자 조건, Code 스냅샷" },
+      coding: { label: "코딩 카탈로그", description: "Code·API·CLI용 코딩 모델, 채팅 모델 연결, Code 스냅샷" },
     },
   },
   routing: {
