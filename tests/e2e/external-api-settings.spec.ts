@@ -81,8 +81,8 @@ const mockKeys = async (page: Page, options: { enabled: boolean; keys?: Array<Re
             return route.fulfill({
                 json: {
                     requests: [
-                        { requestId: "req_held", modelId: model.id, createdAt: "2026-11-17T01:00:00.000Z", status: "held", outcome: null, heldCredits: 1, chargedCredits: null, usage: null, errorCode: null },
-                        { requestId: "req_done", modelId: model.id, createdAt: "2026-11-17T00:30:00.000Z", status: "settled", outcome: "completed", heldCredits: 0, chargedCredits: 1, usage: { inputTokens: 120, outputTokens: 30 }, errorCode: null },
+                        { requestId: "req_held", modelId: model.id, surface: "coding", createdAt: "2026-11-17T01:00:00.000Z", status: "held", outcome: null, heldCredits: 1, chargedCredits: null, usage: null, errorCode: null },
+                        { requestId: "req_done", modelId: model.id, surface: "general", createdAt: "2026-11-17T00:30:00.000Z", status: "settled", outcome: "completed", heldCredits: 0, chargedCredits: 1, usage: { inputTokens: 120, outputTokens: 30 }, errorCode: null },
                     ],
                 },
             });
@@ -140,9 +140,14 @@ test("API keys: a key is made in a dialog, shown once in another, then filled in
     await expect(page.getByTestId("external-api-tool-aside")).toHaveCount(0);
     await expect(page.getByTestId("external-api-name")).toHaveCount(0);
 
+    // One key, two APIs: said above the list, in the warning and in the create dialog.
+    await expect(page.getByText("키 하나로 일반 API와 코딩 API를 모두 씁니다")).toBeVisible();
+    await expect(page.getByTestId("external-api-share-warning")).toContainText("도구마다 키를 따로 만들면 한 도구에서 새어도 그 키만 폐기하면 됩니다");
+
     await page.getByTestId("external-api-new").click();
     const dialog = page.getByTestId("external-api-create-dialog");
     await expect(dialog).toBeVisible();
+    await expect(page.getByTestId("external-api-create-surfaces")).toContainText("일반 API와 코딩 API에 모두 쓸 수 있습니다");
     await page.getByTestId("external-api-name").fill("회사 노트북");
     await page.getByTestId("external-api-cap").fill("5OO");
     await page.getByTestId("external-api-create").click();
@@ -173,12 +178,19 @@ test("API keys: a key is made in a dialog, shown once in another, then filled in
     await expect(aside).not.toContainText('"smart-adaptive"');
     await page.getByTestId("external-api-pick-gpt-6-luna").click();
     await expect(page.getByTestId("external-api-pick-gpt-6-luna")).toBeChecked();
-    // VS Code stores the key itself, so it is never written into its file.
+    // VS Code is a coding tool: it is on the Coding API tab, and stores the key
+    // itself, so it is never written into its file.
+    await expect(page.getByTestId("external-api-platform-vscode")).toHaveCount(0);
+    await page.getByTestId("external-api-connect-api-coding").click();
+    await expect(page.getByTestId("external-api-tool-aside")).toHaveCount(0);
     await page.getByTestId("external-api-platform-vscode").click();
     await expect(page.getByTestId("external-api-tool-aside")).toHaveCount(0);
     const vscode = page.getByTestId("external-api-vscode-config");
     await expect(vscode).toContainText(`${codingBaseUrl}/chat/completions`);
     await expect(vscode).not.toContainText(SECRET);
+    // Each API keeps its own model choice: VS Code's box is ticked on its own.
+    await expect(page.getByTestId("external-api-pick-smart-adaptive")).toBeChecked();
+    await page.getByTestId("external-api-connect-api-general").click();
     await page.getByTestId("external-api-platform-other").click();
     await expect(page.getByTestId("external-api-generic-config")).toContainText("Model: smart-adaptive");
 
@@ -223,6 +235,10 @@ test("API keys: a key is made in a dialog, shown once in another, then filled in
     await expect(usage).toContainText("진행 중이거나 아직 확정되지 않음");
     await expect(usage).toContainText("입력 120 · 출력 30");
     await expect(usage).toContainText("req_done");
+    // Which API each request came through.
+    const apis = usage.getByTestId("external-api-usage-api");
+    await expect(apis.nth(0)).toContainText("코딩 API");
+    await expect(apis.nth(1)).toContainText("일반 API");
 
     await row.getByTestId("external-api-key-menu").click();
     page.once("dialog", (prompt) => prompt.accept());
@@ -257,7 +273,11 @@ test("API keys: Claude Code, Codex and Cursor each get their own configuration @
     await expect(connect.getByRole("heading", { name: "도구 연결" })).toBeVisible();
 
     // Claude Code: the Anthropic namespace, Smart Adaptive among Anthropic
-    // models by default, background work on the cheapest fixed model.
+    // models by default, background work on the cheapest fixed model. It is a
+    // coding tool, so it sits under the Coding API tab with that API's addresses.
+    await page.getByTestId("external-api-connect-api-coding").click();
+    await expect(page.getByTestId("external-api-address-coding-openai")).toHaveText(codingBaseUrl);
+    await expect(page.getByTestId("external-api-address-coding-anthropic")).toHaveText("https://tomverse.app/api/code/anthropic");
     await page.getByTestId("external-api-platform-claude-code").click();
     const claude = page.getByTestId("external-api-claude-code-powershell");
     await expect(claude).toContainText('ANTHROPIC_BASE_URL = "https://tomverse.app/api/code/anthropic"');
@@ -300,7 +320,8 @@ test("API keys: Claude Code, Codex and Cursor each get their own configuration @
     await expect(page.getByTestId("external-api-cursor-guide")).toHaveAttribute("href", /\/developers\/cursor$/);
     // Cursor's own GPT list is not Tomverse models: every model is added once by ID.
     await expect(page.getByTestId("external-api-cursor-models")).toContainText("Add Custom Model");
-    // The model list says which tools take each model.
+    // The model list says which tools take each model, per API.
+    await page.getByTestId("external-api-models-api-coding").click();
     await page.getByTestId("external-api-models-search").fill("sonnet");
     await expect(page.getByTestId("external-api-models")).toContainText("Claude Code · Cursor");
     // The Tomverse CLI choice stays hidden until the package is published.
@@ -340,5 +361,48 @@ test("API keys: the Tomverse CLI choice, once enabled, shows install and a key f
     await expect(page.getByTestId("external-api-tomverse-cli-powershell")).toHaveCount(0);
     await expect(page.getByTestId("external-api-tomverse-cli-posix")).toContainText("export TOMVERSE_API_KEY");
     await expect(panel).toContainText("격리(sandbox)되지 않습니다");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+});
+
+test("API keys: the general API tools -- Brave Leo, Raycast, BrowserOS -- and JetBrains on the coding API @ui-risk", async ({ page, isMobile }) => {
+    await page.setViewportSize({ width: isMobile ? 320 : 1280, height: 900 });
+    await prepareGuestPage(page, "ko");
+    await mockKeys(page, { enabled: true });
+    await page.goto("/settings/api");
+    const connect = page.getByTestId("external-api-connect");
+
+    // General API tab: its own two addresses and its tools.
+    await expect(page.getByTestId("external-api-address-general-openai")).toHaveText(baseUrl);
+    await expect(page.getByTestId("external-api-address-general-anthropic")).toHaveText("https://tomverse.app/api/anthropic");
+    for (const id of ["aside", "brave-leo", "raycast", "browseros", "other"]) {
+        await expect(page.getByTestId(`external-api-platform-${id}`)).toBeVisible();
+    }
+    await expect(page.getByTestId("external-api-platform-jetbrains")).toHaveCount(0);
+
+    // Brave Leo wants the whole path, not the base.
+    await page.getByTestId("external-api-platform-brave-leo").click();
+    const brave = page.getByTestId("external-api-brave-leo-config");
+    await expect(brave).toContainText(`Server endpoint: ${baseUrl}/chat/completions`);
+    await expect(brave).toContainText("Model request name: smart-adaptive");
+
+    // Raycast: the base stops at /v1, the model list is in the file.
+    await page.getByTestId("external-api-platform-raycast").click();
+    const raycast = page.getByTestId("external-api-raycast-config");
+    await expect(raycast).toContainText(`base_url: ${baseUrl}`);
+    await expect(raycast).not.toContainText("chat/completions");
+    await expect(raycast).toContainText('id: "smart-adaptive"');
+    await page.getByTestId("external-api-pick-gpt-6-luna").check();
+    await expect(raycast).toContainText('id: "gpt-6-luna"');
+    await expect(connect).toContainText("tools 블록");
+
+    // BrowserOS: base URL, model id, key.
+    await page.getByTestId("external-api-platform-browseros").click();
+    await expect(page.getByTestId("external-api-browseros-config")).toContainText(`Base URL: ${baseUrl}`);
+
+    // JetBrains is a coding tool: the coding URL only.
+    await page.getByTestId("external-api-connect-api-coding").click();
+    await page.getByTestId("external-api-platform-jetbrains").click();
+    await expect(page.getByTestId("external-api-jetbrains-config")).toContainText(`URL: ${codingBaseUrl}`);
+    await expect(page.getByTestId("external-api-tool-jetbrains")).toContainText("Test Connection");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
 });

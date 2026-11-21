@@ -23,6 +23,7 @@ import {
 } from "../lib/settingsNavigation.ts";
 import {
   consumePendingAccountSettingsRequest,
+  isAccountSettingsTab,
   readAccountSettingsOpenRequest,
 } from "../lib/accountSettingsEvents.ts";
 import { de } from "../locales/de.ts";
@@ -77,8 +78,9 @@ test("every entry names the tab it is actually in, and stays a separate row", ()
     // Communication choices sit with the account identity they reach, on the
     // default tab rather than behind the data-management tab.
     "email-notifications": "account",
-    // An account credential, beside sign-in and email.
-    "api-keys": "account",
+    // The Developer tab: the key, the addresses and the CLI it is used with.
+    // It left the account tab on 2026-11-21.
+    "api-keys": "developer",
   };
 
   const elementIds = new Set();
@@ -180,6 +182,19 @@ test("isSettingsSectionId rejects anything that has no row to restore", () => {
   assert.equal(isSettingsSectionId(null), false);
   assert.equal(isSettingsSectionId(undefined), false);
   assert.equal(isSettingsSectionId(42), false);
+});
+
+test("an older api-keys link minted for the account tab opens the Developer tab", () => {
+  assert.deepEqual(parseSettingsDeepLink("?settings=account&settingsSection=api-keys"), {
+    tab: "developer",
+    section: "api-keys",
+  });
+  assert.deepEqual(parseSettingsDeepLink("?settings=developer"), { tab: "developer", section: null });
+});
+
+test("the Developer tab is a real tab id with a name key the panel and trail share", () => {
+  assert.equal(isAccountSettingsTab("developer"), true);
+  assert.equal(SETTINGS_TAB_LABEL_KEY.developer, "externalApi.developerTab");
 });
 
 test("the open request reads both the object and the bare tab shape", () => {
