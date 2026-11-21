@@ -949,7 +949,7 @@ const sessionWith = (fields: Record<string, unknown>) =>
     ...fields,
   }) as unknown as Stripe.Checkout.Session;
 
-test("a subscription without its own payment method is counted by the Session's SetupIntent", async () => {
+test("a Session SetupIntent identifies the card when the subscription has none", async () => {
   const { processStripeEvent } = await loadProcessor();
   world.cardLimit = 3;
   world.setupIntentPaymentMethod = "pm_from_setup";
@@ -983,15 +983,42 @@ test("a card merely attached to the customer is never taken for the one this che
   assert.ok(flagsOf(world.redemptionRows[0]).includes("payment_method_unverified"));
 });
 
-test("the promotion lease release is bounded by the Session's creation time", async () => {
+test("the completion releases the promotion lease without a creation-time bound", async () => {
+  // Review round 7: Stripe's created is whole seconds and the lease row has
+  // milliseconds, so a bound would strand a lease taken in the same second.
+  // After a completion no later attempt can hold it, so none is needed.
   const { processStripeEvent } = await loadProcessor();
   await processStripeEvent(
     completedEvent(sessionWith({ created: SESSION_CREATED_SECONDS }))
   );
-  assert.deepEqual(
-    world.releaseCalls[0].takenAtOrBefore,
-    new Date(SESSION_CREATED_SECONDS * 1000)
-  );
+  assert.equal(world.releaseCalls.length, 1);
+  assert.equal(world.releaseCalls[0].takenAtOrBefore, undefined);
+});
+
+test("a zero-charge subscription's pending SetupIntent identifies the card", async () => {
+  // How Stripe collects the method on a subscription that owes nothing yet.
+  const { processStripeEvent } = await loadProcessor();
+  world.cardLimit = 3;
+  world.setupIntentPaymentMethod = "pm_from_pending_setup";
+  world.subscription = {
+    ...world.subscription,
+    pending_setup_intent: "seti_pending",
+  } as Stripe.Subscription;
+  world.otherAccountsOnCard = ["user_a", "user_b", "user_c"];
+  await processStripeEvent(completedEvent(zeroDueSession()));
+  assert.equal(cardLockKeys().length, 1);
+  assert.equal(world.cancels.length, 1);
+});
+
+test("a checkout without a promotion does not look the card up at all", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  withCard();
+  const plain = sessionWith({
+    metadata: { userId: "user_1", planId: "max", billingInterval: "monthly" },
+  });
+  await processStripeEvent(completedEvent(plain));
+  assert.deepEqual(world.paymentMethodRetrieves, []);
+  assert.equal(world.userUpdates[0].plan, "Max");
 });
 
 test("a Stripe Link payer is identified by the Link email", async () => {

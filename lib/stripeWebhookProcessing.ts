@@ -577,15 +577,12 @@ async function recordPromotionRedemptionFromCheckout(
       return { promotionId, refused: false };
     });
   } finally {
-    // Bounded by this Session's creation time, as the expiry handler is: a
-    // redelivery days later must not free a lease a later attempt now holds.
-    await releasePromotionCheckout(
-      promotionId,
-      userId,
-      typeof session.created === "number"
-        ? { takenAtOrBefore: new Date(session.created * 1000) }
-        : {}
-    ).catch(() => undefined);
+    // Unbounded, unlike the expiry handler: once a completion has run, this
+    // account has redeemed the promotion (or been refused it), so no later
+    // attempt can be holding the lease. A bound on session.created would also
+    // be wrong here -- Stripe gives seconds, the lease row milliseconds, so a
+    // lease taken in the same second would never be released.
+    await releasePromotionCheckout(promotionId, userId).catch(() => undefined);
   }
 }
 
@@ -657,15 +654,30 @@ async function getSubscriptionPaymentMethodFingerprintHash(
         : value && typeof value === "object"
           ? value
           : null;
-    // Only the method this checkout itself used: the subscription's, then the
-    // Session's own SetupIntent (a zero-charge subscription Checkout saves the
-    // card through one) or PaymentIntent. Never another method merely attached
-    // to the customer -- it may be a different card, which would count the
-    // wrong card or refuse for an unrelated one.
+    // Only the method this checkout itself used. Subscription-mode Checkout
+    // makes it the subscription's default payment method (all 52 OZBFREE
+    // redemptions on 2026-11-17..20 had one); a zero-charge subscription
+    // collects it through the subscription's pending SetupIntent; the
+    // Session's own SetupIntent / PaymentIntent cover the remaining shapes.
+    // Never another method merely attached to the customer -- it may be a
+    // different card, which would count the wrong card or refuse for an
+    // unrelated one.
     const fromSubscription = paymentMethodFingerprint(
       await resolve(subscription.default_payment_method)
     );
     if (fromSubscription) return hashPaymentMethodFingerprint(fromSubscription);
+    const pendingSetupIntent = subscription.pending_setup_intent;
+    const pendingSetupIntentId =
+      typeof pendingSetupIntent === "string"
+        ? pendingSetupIntent
+        : pendingSetupIntent?.id;
+    if (pendingSetupIntentId) {
+      const intent = await stripe.setupIntents.retrieve(pendingSetupIntentId);
+      const fromPending = paymentMethodFingerprint(
+        await resolve(intent.payment_method)
+      );
+      if (fromPending) return hashPaymentMethodFingerprint(fromPending);
+    }
     const session = options.session;
     const setupIntentId =
       typeof session?.setup_intent === "string"
@@ -719,11 +731,13 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
     expand: ["default_payment_method"],
   });
   const promotionId = session.metadata?.promotionId || null;
-  const paymentMethodFingerprintHash =
-    await getSubscriptionPaymentMethodFingerprintHash(subscription, {
-      failClosed: Boolean(promotionId),
-      session,
-    });
+  // Only a promotion checkout needs to know the card.
+  const paymentMethodFingerprintHash = promotionId
+    ? await getSubscriptionPaymentMethodFingerprintHash(subscription, {
+        failClosed: true,
+        session,
+      })
+    : null;
   const redemption = await recordPromotionRedemptionFromCheckout(
     session,
     subscriptionId,
