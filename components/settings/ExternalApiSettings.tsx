@@ -613,8 +613,9 @@ const SHELLS: [Shell, string][] = [
  * that tool's setup. Configurations carry the new key while this page holds
  * it and a placeholder otherwise. Claude Code and Codex offer Smart Adaptive
  * scoped to their own provider's models (codingToolModels). The coding tools
- * use the coding API's address and models; Aside, VS Code and other apps the
- * general API's.
+ * -- Claude Code, Codex, Cursor, the tomverse CLI and VS Code (Copilot Chat's
+ * custom endpoint) -- use the coding API's address and models; Aside and other
+ * OpenAI-compatible apps the general API's (owner decision 2026-11-21).
  */
 function ConnectSection({
     baseUrl,
@@ -647,6 +648,13 @@ function ConnectSection({
     const pickedIds =
         picked ?? (models.some((model) => model.id === SMART_ADAPTIVE_MODEL_ID) ? [SMART_ADAPTIVE_MODEL_ID] : models.map((model) => model.id));
     const pickedModels = models.filter((model) => pickedIds.includes(model.id));
+    // VS Code is a coding tool: it lists the coding API's models, never an empty list.
+    const pickedCodingModels = (() => {
+        const chosen = codingModels.filter((model) => pickedIds.includes(model.id));
+        if (chosen.length) return chosen;
+        const fallback = codingModels.find((model) => model.id === SMART_ADAPTIVE_MODEL_ID) ?? codingModels[0];
+        return fallback ? [fallback] : [];
+    })();
     const togglePicked = (id: string) => {
         if (!pickedIds.includes(id)) setPicked([...pickedIds, id]);
         // Keep at least one model, so a copied configuration is never empty.
@@ -777,12 +785,12 @@ function ConnectSection({
                     <div data-testid={`external-api-tool-${platform}`}>
                         <p className="text-xs text-zinc-500">{platform === "aside" ? t("externalApi.asideHint") : t("externalApi.vscodeHint")}</p>
                         <p className="mt-3 text-sm font-semibold">{t("externalApi.modelsPick")}</p>
-                        <ModelSearchList models={models} picked={pickedIds} onToggle={togglePicked} testId="external-api-pick-models" />
+                        <ModelSearchList models={platform === "aside" ? models : codingModels} picked={pickedIds} onToggle={togglePicked} testId="external-api-pick-models" />
                         {platform === "aside" ? (
                             <CopyBlock label="Aside" value={JSON.stringify(asideProviderConfig(baseUrl, pickedModels, key), null, 2)} testId="external-api-aside-config" />
                         ) : (
                             // VS Code asks for the key itself and stores it securely.
-                            <CopyBlock label="VS Code" value={JSON.stringify(vscodeCustomEndpointConfig(baseUrl, pickedModels), null, 2)} testId="external-api-vscode-config" />
+                            <CopyBlock label="VS Code" value={JSON.stringify(vscodeCustomEndpointConfig(codingBaseUrl, pickedCodingModels), null, 2)} testId="external-api-vscode-config" />
                         )}
                     </div>
                 );
@@ -841,17 +849,18 @@ function ConnectSection({
 
 /**
  * Which tools can use a model, from the protocols it carries and the API that
- * offers it: the coding tools through the coding API, the rest through the
- * general one.
+ * offers it: the coding tools (VS Code among them) through the coding API,
+ * Aside and other apps through the general one.
  */
 const toolsForModel = (model: ModelSummary, otherLabel: string, offeredOn: { general: boolean; coding: boolean }) => {
     const lists = offeredOn.coding ? codingToolModels([model]) : { claudeCode: [], codex: [], cursor: [] };
-    const chat = offeredOn.general && (model.protocols?.includes("chat_completions") ?? true);
+    const chatCompletions = model.protocols?.includes("chat_completions") ?? true;
     return [
         lists.claudeCode.length ? "Claude Code" : null,
         lists.codex.length ? "Codex" : null,
         lists.cursor.length ? "Cursor" : null,
-        ...(chat ? ["Aside", "VS Code", otherLabel] : []),
+        offeredOn.coding && chatCompletions ? "VS Code" : null,
+        ...(offeredOn.general && chatCompletions ? ["Aside", otherLabel] : []),
     ]
         .filter(Boolean)
         .join(" · ");

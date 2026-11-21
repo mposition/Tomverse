@@ -196,7 +196,11 @@ User-Agent로 채널을 나누지 않습니다.
   전체 컨텍스트를 최악의 입력으로 보는 Code 기준 하한(`codingCreditFloor`)은 여기서 과합니다.
   - 기본값은 채팅 규칙 하한입니다: `suggestCreditFloor`(채팅 레지스트리 화면·`modelAdoptionDraft`와
     같은 함수)에 행의 입력·출력 단가, 레지스트리 공급자 상한으로 묶은 최대 출력, Anthropic은 입력
-    1.25배, 최악 입력 `chatUserMaxInputTokens()`를 넣은 값입니다. 저장하지 않고 과금할 때 계산하므로
+    1.25배를 넣되, 입력 배수 구간(`INPUT_CREDIT_MULTIPLIERS`: 16k까지 ×1, 50k까지 ×1.5, 100k까지 ×2,
+    그 위 ×3)마다 그 구간의 가장 큰 입력(상한 `chatUserMaxInputTokens()`까지)과 최대 출력으로 계산한
+    값 중 가장 큰 것입니다. 출력 단가가 큰 모델은 짧은 입력 구간(×1)에서 하한이 정해집니다(검토
+    r-20261121-013001-f5a5e7). 1,000(덮어쓰기 상한)을 넘는 하한은 계산할 수 없는 것으로 봅니다.
+    `suggestCreditFloor` 자체는 바꾸지 않았습니다. 저장하지 않고 과금할 때 계산하므로
     `apiCreditWeight`가 없는 행과 스냅샷의 canonicalJson·해시는 그대로입니다. 그래서 이 값은
     `CHAT_USER_MAX_INPUT_TOKENS` 같은 런타임 값을 따라 달라집니다(채팅 모델 과금과 같은 성질).
   - 운영자가 더 받고 싶으면 전용 행에 `apiCreditWeight`(1~1,000 정수)를 넣습니다. 하한 이상이면 그 값을

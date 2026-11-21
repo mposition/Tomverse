@@ -8,12 +8,13 @@ other apps and coding tools. Two APIs (owner decision 2026-11-21), decided by
 the address alone, on one key, one plan check (Pro or Max) and one ledger:
 
 - **The general API** -- `/api/v1/*` and `/api/anthropic/v1/*` -- for AI
-  browsers such as Aside and other apps (VS Code's Custom Endpoint, any
-  OpenAI-compatible app). It always offers the chat registry's models.
+  browsers such as Aside and other OpenAI-compatible apps. It always offers
+  the chat registry's models.
 - **The coding API** -- `/api/code/v1/*` (`chat/completions`, `responses`,
   `models`, `usage`, `requests/status`) and `/api/code/anthropic/v1/*`
   (`messages`, `messages/count_tokens`, `models`) -- for Claude Code, Codex,
-  Cursor and the tomverse CLI. While `CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED`
+  Cursor, the tomverse CLI and VS Code (GitHub Copilot Chat's custom endpoint,
+  a coding assistant; owner decision 2026-11-21). While `CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED`
   is off (the default) it offers and runs exactly what the general API does;
   on, it offers the coding catalogue's models (section 5, "Which models").
   The same handlers serve both, told which API the route is
@@ -23,9 +24,9 @@ the address alone, on one key, one plan check (Pro or Max) and one ledger:
 Three wire protocols, on both APIs:
 
 - **OpenAI Chat Completions** (`.../v1/chat/completions`): Aside (Custom
-  Provider, Pi `openai-completions`) and VS Code (Custom Endpoint,
-  `chat-completions`) on the general API; Cursor (OpenAI base-URL override)
-  and the tomverse CLI on the coding API.
+  Provider, Pi `openai-completions`) and other apps on the general API;
+  Cursor (OpenAI base-URL override), VS Code (Custom Endpoint,
+  `chat-completions`) and the tomverse CLI on the coding API.
 - **Anthropic Messages** (`.../anthropic/v1/messages`): Claude Code, CLI and
   the official VS Code extension, on the coding API (section 10).
 - **OpenAI Responses** (`.../v1/responses`): Codex, CLI and the official VS
@@ -179,9 +180,11 @@ the chat rule (owner decision 2026-11-21): this API takes at most the chat
 input limit (`CHAT_USER_MAX_INPUT_TOKENS`) and settles with the chat input
 multiplier, so a request is charged the row's `apiCreditWeight` when the
 operator set one, otherwise the chat catalogue's own floor
-(`suggestCreditFloor` at that input limit, the row's output ceiling and, for
-Anthropic, 1.25x input), worked out when the request is priced and never
-stored. An override below that floor, or a floor that cannot be worked out,
+(`suggestCreditFloor` at the row's output ceiling and, for Anthropic, 1.25x
+input, taken at every input-multiplier band's largest input up to that limit,
+the largest of them, so a short prompt with a full answer at x1 is covered
+too; above 1,000 credits it counts as unworkable), worked out when the request
+is priced and never stored. An override below that floor, or a floor that cannot be worked out,
 keeps the row off this API. Code's managed path keeps the row's
 `pricing.creditWeight`. The reservation and the settlement record
 `creditBasis` (`chat_rule_floor` or `api_override`, the credits and the
@@ -464,17 +467,17 @@ into the setup until the person leaves the page; it is held only in the page's
 memory, never stored. Any other app that takes a custom OpenAI Chat Completions
 endpoint needs only three values: base URL, key and model (`smart-adaptive`). The
 models allowed through the API are listed in a searchable section, each with
-the tools that can use it. Claude Code, Codex, Cursor and the tomverse CLI are
-configured with the coding API's base URL and its models; Aside, VS Code and
-other apps with the general API's. Details are in section 10.4.
+the tools that can use it. Claude Code, Codex, Cursor, VS Code and the
+tomverse CLI are configured with the coding API's base URL and its models;
+Aside and other apps with the general API's. Details are in section 10.4.
 
 - **Aside:** add a Custom Provider and paste the JSON: provider `tomverse`,
   `api: "openai-completions"`, `baseUrl`, `apiKey`, `authHeader: true`, and per
   model `id`, `name`, `reasoning`, `input` (`text`, plus `image` where
   supported), `contextWindow`, `maxTokens`.
-- **VS Code:** run *Chat: Manage Language Models* → *Add Models* → *Custom
-  Endpoint* and use the generated entry as the `chatLanguageModels.json`
-  provider: `vendor: "customendpoint"`, `apiType: "chat-completions"`,
+- **VS Code** (a coding tool: the coding API's base URL and models): run
+  *Chat: Manage Language Models* → *Add Models* → *Custom Endpoint* and use the
+  generated entry as the `chatLanguageModels.json` provider: `vendor: "customendpoint"`, `apiType: "chat-completions"`,
   `apiKey: "${input:tomverseApiKey}"` (VS Code asks once and keeps it in its
   secret storage), per model the full `/chat/completions` URL, `toolCalling`,
   `vision`, `streaming`, `maxInputTokens`, `maxOutputTokens`. VS Code's

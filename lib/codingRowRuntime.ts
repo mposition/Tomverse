@@ -4,10 +4,10 @@
 // The row is the published snapshot row; nothing here reads the database.
 import { chatUserMaxInputTokens } from "@/lib/chatInputLimits";
 import { isCreditFloor, suggestCreditFloor } from "@/lib/modelAdoptionDraft";
-import { CODE_MANAGED_UNBOUNDED_PROVIDERS, type CodingCatalogRow } from "@/lib/modelCatalogCore";
+import { CODE_MANAGED_UNBOUNDED_PROVIDERS, CODING_API_CREDIT_WEIGHT_MAX, type CodingCatalogRow } from "@/lib/modelCatalogCore";
 import { MODEL_PRICING, PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER, resolveModelPricing, type ResolvedModelPricing } from "@/lib/modelPricing";
 import { isAiProvider } from "@/lib/modelRegistryShared";
-import type { AiModel } from "@/lib/models";
+import { INPUT_CREDIT_MULTIPLIERS, type AiModel } from "@/lib/models";
 
 export type CodingRowPrice = {
   inputUsdPerMillionTokens: number;
@@ -131,7 +131,7 @@ export const codingRowRuntime = (
 // settles through the chat reservation, input-size multiplier included, so a
 // dedicated row there is charged by the chat rule: the chat catalogue's own
 // floor (suggestCreditFloor, as the chat registry screen and adoption use it)
-// at that input limit and the row's output ceiling. Code's managed path keeps
+// over every input band up to that limit, at the row's output ceiling. Code's managed path keeps
 // `pricing.creditWeight`, whose floor (codingCreditFloor) assumes the whole
 // context window as input and would overcharge here.
 
@@ -143,23 +143,40 @@ export type CodingApiCredit =
 
 /**
  * The chat rule's minimum credits for a dedicated row on the coding API, or
- * null when it cannot be worked out (no price, no output cap, or above every
- * class). `maxOutputTokens` is the row's output ceiling as codingRowRuntime
- * bounds it against the registry.
+ * null when it cannot be worked out (no price, no output cap, above every
+ * class, or above CODING_API_CREDIT_WEIGHT_MAX). `maxOutputTokens` is the
+ * row's output ceiling as codingRowRuntime bounds it against the registry.
+ *
+ * A request is charged its credits times the multiplier of its own input band
+ * (INPUT_CREDIT_MULTIPLIERS: x1 to 16k, x1.5 to 50k, x2 to 100k, x3 above), so
+ * the floor must cover the worst turn of every band, not only the largest
+ * input: for a model whose output is dear, a short prompt with a full answer
+ * at x1 costs more per credit than the longest prompt at x3. Each band's worst
+ * turn is its largest input (up to the input limit) with the full output; the
+ * floor is the largest of the bands' floors. suggestCreditFloor itself is the
+ * chat catalogue's and is not changed here.
  */
 export const codingApiCreditFloor = (
   row: Pick<CodingCatalogRow, "provider" | "pricing">,
   maxOutputTokens: number,
   worstCaseInputTokens: number = chatUserMaxInputTokens()
 ): number | null => {
-  const floor = suggestCreditFloor({
-    inputUsdPerMillionTokens: row.pricing.inputUsdPerMTok,
-    outputUsdPerMillionTokens: row.pricing.outputUsdPerMTok,
-    maxOutputTokens,
-    inputPriceMultiplier: row.provider === "anthropic" ? PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER : 1,
-    worstCaseInputTokens,
-  });
-  return isCreditFloor(floor) ? floor.credits : null;
+  const bandInputs = [
+    ...new Set([...INPUT_CREDIT_MULTIPLIERS.map((band) => band.aboveTokens), worstCaseInputTokens].map((edge) => Math.min(edge, worstCaseInputTokens))),
+  ];
+  let credits = 0;
+  for (const inputTokens of bandInputs) {
+    const floor = suggestCreditFloor({
+      inputUsdPerMillionTokens: row.pricing.inputUsdPerMTok,
+      outputUsdPerMillionTokens: row.pricing.outputUsdPerMTok,
+      maxOutputTokens,
+      inputPriceMultiplier: row.provider === "anthropic" ? PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER : 1,
+      worstCaseInputTokens: inputTokens,
+    });
+    if (!isCreditFloor(floor)) return null;
+    credits = Math.max(credits, floor.credits);
+  }
+  return credits > CODING_API_CREDIT_WEIGHT_MAX ? null : credits;
 };
 
 /**

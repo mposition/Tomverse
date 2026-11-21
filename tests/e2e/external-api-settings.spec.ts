@@ -18,6 +18,8 @@ const model = {
 // Smart Adaptive's weight is the most a request can cost, so above the cheapest model.
 const smartAdaptive = { ...model, id: "smart-adaptive", name: "Smart Adaptive", provider: "tomverse", creditWeight: 4 };
 const baseUrl = "https://tomverse.app/api/v1";
+// The coding API (owner decision 2026-11-21): Claude Code, Codex, Cursor, VS Code and the CLI.
+const codingBaseUrl = "https://tomverse.app/api/code/v1";
 // Synthetic key shape, assembled so no line reads like a credential.
 const FIXTURE_PREFIX = ["tvk", "ab12cd34"].join("_");
 const SECRET = [FIXTURE_PREFIX, "S".repeat(43)].join("_");
@@ -54,6 +56,7 @@ const mockKeys = async (page: Page, options: { enabled: boolean; keys?: Array<Re
                 json: {
                     enabled: true,
                     baseUrl,
+                    codingBaseUrl,
                     limits: { maxKeys: 10, maxCreditCap: 1000000, expiryDays: [7, 30, 90, 365] },
                     models: [smartAdaptive, model],
                     keys,
@@ -174,7 +177,7 @@ test("API keys: a key is made in a dialog, shown once in another, then filled in
     await page.getByTestId("external-api-platform-vscode").click();
     await expect(page.getByTestId("external-api-tool-aside")).toHaveCount(0);
     const vscode = page.getByTestId("external-api-vscode-config");
-    await expect(vscode).toContainText(`${baseUrl}/chat/completions`);
+    await expect(vscode).toContainText(`${codingBaseUrl}/chat/completions`);
     await expect(vscode).not.toContainText(SECRET);
     await page.getByTestId("external-api-platform-other").click();
     await expect(page.getByTestId("external-api-generic-config")).toContainText("Model: smart-adaptive");
@@ -242,6 +245,7 @@ test("API keys: Claude Code, Codex and Cursor each get their own configuration @
                 json: {
                     enabled: true,
                     baseUrl,
+                    codingBaseUrl,
                     limits: { maxKeys: 10, maxCreditCap: 1000000, expiryDays: [7, 30, 90, 365] },
                     models: [{ ...smartAdaptive, protocols: ["chat_completions", "anthropic_messages", "responses"] }, sonnet, haiku, luna],
                     keys: [],
@@ -256,7 +260,7 @@ test("API keys: Claude Code, Codex and Cursor each get their own configuration @
     // models by default, background work on the cheapest fixed model.
     await page.getByTestId("external-api-platform-claude-code").click();
     const claude = page.getByTestId("external-api-claude-code-powershell");
-    await expect(claude).toContainText('ANTHROPIC_BASE_URL = "https://tomverse.app/api/anthropic"');
+    await expect(claude).toContainText('ANTHROPIC_BASE_URL = "https://tomverse.app/api/code/anthropic"');
     await expect(claude).toContainText('ANTHROPIC_MODEL = "smart-adaptive"');
     await expect(claude).toContainText('ANTHROPIC_DEFAULT_HAIKU_MODEL = "claude-haiku-4-5"');
     await expect(claude).toContainText("<YOUR_TOMVERSE_API_KEY>");
@@ -289,7 +293,7 @@ test("API keys: Claude Code, Codex and Cursor each get their own configuration @
     // Cursor: the Chat Completions base URL with a fixed model.
     await page.getByTestId("external-api-platform-cursor").click();
     const cursor = page.getByTestId("external-api-cursor-config");
-    await expect(cursor).toContainText(`Override OpenAI Base URL: ${baseUrl}`);
+    await expect(cursor).toContainText(`Override OpenAI Base URL: ${codingBaseUrl}`);
     await expect(cursor).not.toContainText("smart-adaptive");
     // GPT models come from Cursor's own list; anything else is added once.
     await expect(page.getByTestId("external-api-cursor-models")).toContainText("Add Custom Model");
@@ -311,6 +315,7 @@ test("API keys: the Tomverse CLI choice, once enabled, shows install and a key f
                 json: {
                     enabled: true,
                     baseUrl,
+                    codingBaseUrl,
                     limits: { maxKeys: 10, maxCreditCap: 1000000, expiryDays: [7, 30, 90, 365] },
                     models: [smartAdaptive, model],
                     keys: [],

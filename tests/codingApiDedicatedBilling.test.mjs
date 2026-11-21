@@ -24,6 +24,16 @@ import { getModelUsageProfile, getWeightedUsageCredits } from "../lib/models.ts"
 // input limit -- while Code's managed path keeps pricing.creditWeight. One
 // conversion with Code's managed path (lib/codingRowRuntime.ts).
 
+/** The chat floor at one input size: what suggestCreditFloor says for that worst turn. */
+const floorAtInput = (input, output, maxOutputTokens, inputTokens, multiplier = 1) => {
+  const floor = suggestCreditFloor({ inputUsdPerMillionTokens: input, outputUsdPerMillionTokens: output, maxOutputTokens, inputPriceMultiplier: multiplier, worstCaseInputTokens: inputTokens });
+  assert.ok(isCreditFloor(floor));
+  return floor.credits;
+};
+/** The largest floor over the input bands' worst turns (x1 to 16k, x1.5 to 50k, x2 to 100k, x3 to the limit). */
+const bandFloor = (input, output, maxOutputTokens, multiplier = 1) =>
+  Math.max(...[16_000, 50_000, 100_000, chatUserMaxInputTokens()].map((tokens) => floorAtInput(input, output, maxOutputTokens, tokens, multiplier)));
+
 /** The coding API's credits for a row, as a request is charged. */
 const apiCredit = (dedicated) => {
   const built = codingRowRuntime(dedicated, SNAPSHOT);
@@ -83,26 +93,38 @@ test("by default a dedicated row's coding API credits are the chat rule's floor,
   const codeFloor = codingCreditFloor(large);
   assert.ok(codeFloor !== null);
   const { credit } = apiCredit({ ...large, pricing: { ...large.pricing, creditWeight: codeFloor } });
-  const chatFloor = suggestCreditFloor({
-    inputUsdPerMillionTokens: 1,
-    outputUsdPerMillionTokens: 4,
-    maxOutputTokens: 16_000,
-    inputPriceMultiplier: 1,
-    worstCaseInputTokens: chatUserMaxInputTokens(),
-  });
-  assert.ok(isCreditFloor(chatFloor));
-  assert.deepEqual(credit, { ok: true, credits: chatFloor.credits, basis: "chat_rule_floor", floorCredits: chatFloor.credits });
+  const chatFloor = bandFloor(1, 4, 16_000);
+  assert.deepEqual(credit, { ok: true, credits: chatFloor, basis: "chat_rule_floor", floorCredits: chatFloor });
   assert.ok(credit.credits < codeFloor, `coding API ${credit.credits} below Code ${codeFloor}`);
+});
+
+test("the floor covers every input band: an output-heavy model is decided by the short-prompt band", () => {
+  // US$1/M in, US$20/M out, 32k output. At the 128k limit (x3) the chat floor
+  // is 8 credits, but a 16k prompt (x1) with a full answer costs US$0.656,
+  // more than 8 credits cover there (US$0.32).
+  const atLimit = floorAtInput(1, 20, 32_000, chatUserMaxInputTokens());
+  const shortBand = floorAtInput(1, 20, 32_000, 16_000);
+  assert.equal(atLimit, 8);
+  assert.ok(shortBand > atLimit, `short band ${shortBand} above the limit's ${atLimit}`);
+  const dear = row({ capabilities: { ...row().capabilities, maxOutputTokens: 32_000 }, pricing: { ...row().pricing, inputUsdPerMTok: 1, outputUsdPerMTok: 20 } });
+  assert.equal(codingApiCreditFloor(dear, 32_000), shortBand);
+  assert.equal(codingApiCreditFloor(dear, 32_000), bandFloor(1, 20, 32_000));
+  // What the floor buys covers the 16k turn at x1: credits x 1 x US$0.04.
+  assert.ok(codingApiCreditFloor(dear, 32_000) * 40_000 >= 16_000 * 1 + 32_000 * 20);
+  // An input-heavy model is still decided at the input limit: unchanged.
+  assert.equal(codingApiCreditFloor(row({ pricing: { ...row().pricing, inputUsdPerMTok: 5, outputUsdPerMTok: 1 } }), 4_000), floorAtInput(5, 1, 4_000, chatUserMaxInputTokens()));
+  // A smaller input limit stops at the limit: no band past it is priced.
+  assert.equal(codingApiCreditFloor(dear, 32_000, 10_000), floorAtInput(1, 20, 32_000, 10_000));
 });
 
 test("an Anthropic row's floor prices the five-minute cache write at 1.25x its input", () => {
   const base = { capabilities: { ...row().capabilities, maxOutputTokens: 8_000 }, pricing: { ...row().pricing, inputUsdPerMTok: 3, outputUsdPerMTok: 15 } };
-  const floorAt = (multiplier) =>
-    suggestCreditFloor({ inputUsdPerMillionTokens: 3, outputUsdPerMillionTokens: 15, maxOutputTokens: 8_000, inputPriceMultiplier: multiplier, worstCaseInputTokens: chatUserMaxInputTokens() });
-  assert.equal(codingApiCreditFloor({ ...row(base), provider: "anthropic" }, 8_000), floorAt(1.25).credits);
-  assert.equal(codingApiCreditFloor(row(base), 8_000), floorAt(1).credits);
+  assert.equal(codingApiCreditFloor({ ...row(base), provider: "anthropic" }, 8_000), bandFloor(3, 15, 8_000, 1.25));
+  assert.equal(codingApiCreditFloor(row(base), 8_000), bandFloor(3, 15, 8_000, 1));
   // The worst case the floor covers is larger with the write premium.
-  assert.ok(floorAt(1.25).worstCaseMicroUsd > floorAt(1).worstCaseMicroUsd);
+  const worst = (multiplier) =>
+    suggestCreditFloor({ inputUsdPerMillionTokens: 3, outputUsdPerMillionTokens: 15, maxOutputTokens: 8_000, inputPriceMultiplier: multiplier, worstCaseInputTokens: chatUserMaxInputTokens() }).worstCaseMicroUsd;
+  assert.ok(worst(1.25) > worst(1));
 });
 
 test("an apiCreditWeight at or above the floor is charged; one below it keeps the row off the coding API", () => {
