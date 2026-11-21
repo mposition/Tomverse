@@ -63,6 +63,7 @@ type World = {
   recordFault: Error | null;
   paymentMethodFault: Error | null;
   lockCalls: unknown[][];
+  countWheres: Record<string, unknown>[];
 };
 
 const subscriptionFixture = (): Stripe.Subscription =>
@@ -108,6 +109,7 @@ const freshWorld = (): World => ({
   recordFault: null,
   paymentMethodFault: null,
   lockCalls: [],
+  countWheres: [],
 });
 
 let world = freshWorld();
@@ -119,7 +121,14 @@ async function loadProcessor() {
     const original = (path: string) =>
       require(resolve(ROOT, path)) as Record<string, unknown>;
 
-    const otherAccountsOnCard = async ({ take }: { take?: number }) => {
+    const otherAccountsOnCard = async ({
+      take,
+      where,
+    }: {
+      take?: number;
+      where?: Record<string, unknown>;
+    }) => {
+      if (where) world.countWheres.push(where);
       if (world.recordFault) throw world.recordFault;
       return world.otherAccountsOnCard
         .slice(0, take ?? world.otherAccountsOnCard.length)
@@ -210,6 +219,11 @@ async function loadProcessor() {
               email: "buyer@example.com",
               subscriptionSyncedAt: null,
               settings: { language: "en" },
+              // What the last sync granted, as the account would now carry it.
+              stripeSubscriptionId:
+                (world.userUpdates.at(-1)?.stripeSubscriptionId as
+                  | string
+                  | undefined) ?? null,
             }),
             updateMany: async ({ data }: { data: Record<string, unknown> }) => {
               world.userUpdates.push(data);
@@ -729,10 +743,47 @@ test("a subscription event after a recorded refusal does not grant either", asyn
   assert.deepEqual(world.userUpdates, []);
 });
 
-test("a subscription event for an account under the limit still syncs", async () => {
+test("a subscription event before the completion waits even with places left", async () => {
+  // Review round 2: a read-only count cannot see a concurrent completion on
+  // the same card, so two events could each take the last place. Only the
+  // completion -- under the card lock -- decides; until then nothing is granted.
   const { processStripeEvent } = await loadProcessor();
   withPromotionSubscription();
-  world.otherAccountsOnCard = ["user_a"];
-  await processStripeEvent(subscriptionEvent("customer.subscription.updated"));
+  world.otherAccountsOnCard = ["user_a", "user_b"];
+  await processStripeEvent(subscriptionEvent("customer.subscription.created"));
+  assert.equal(world.userUpdates.length, 0);
+
+  await processStripeEvent(completedEvent(zeroDueSession()));
+  assert.equal(world.userUpdates.length, 1);
   assert.equal(world.userUpdates[0].plan, "Max");
+
+  // Once the completion has granted it, later events sync as usual.
+  await processStripeEvent(subscriptionEvent("customer.subscription.updated"));
+  assert.equal(world.userUpdates.length, 2);
+});
+
+test("a completion that could not record still lets later events sync its granted plan", async () => {
+  // Promotion switched off mid-checkout, card under the limit: the plan is
+  // granted without a redemption row, and the account carrying the
+  // subscription is what tells later events the decision was made.
+  const { processStripeEvent } = await loadProcessor();
+  withPromotionSubscription();
+  world.promotionActive = false;
+  world.otherAccountsOnCard = ["user_a"];
+  await processStripeEvent(completedEvent(zeroDueSession()));
+  assert.equal(world.userUpdates.length, 1);
+  await processStripeEvent(subscriptionEvent("customer.subscription.updated"));
+  assert.equal(world.userUpdates.length, 2);
+});
+
+test("refused attempts do not use up places on the card", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  withCard();
+  await processStripeEvent(completedEvent(zeroDueSession()));
+  const cardCount = world.countWheres.find(
+    (where) => "paymentMethodFingerprintHash" in where
+  );
+  assert.deepEqual(cardCount?.NOT, {
+    riskFlags: { contains: "payment_method_limit" },
+  });
 });

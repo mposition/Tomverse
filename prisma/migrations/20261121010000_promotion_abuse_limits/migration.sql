@@ -9,7 +9,13 @@
 -- Both columns have constant defaults, so PostgreSQL adds them without
 -- rewriting the table.
 --
+-- Plus an index on BillingPromotionRedemption."stripeSubscriptionId": every
+-- subscription sync of a promotion subscription now looks its redemption up
+-- by subscription. The table holds one row per redemption, so the build is
+-- brief.
+--
 -- Rollback:
+--   DROP INDEX "BillingPromotionRedemption_stripeSubscriptionId_idx";
 --   ALTER TABLE "BillingPromotion" DROP COLUMN "maxRedemptionsPerPaymentMethod";
 --   ALTER TABLE "BillingPromotion" DROP COLUMN "allowedCountries";
 BEGIN;
@@ -17,5 +23,8 @@ BEGIN;
 ALTER TABLE "BillingPromotion"
     ADD COLUMN "maxRedemptionsPerPaymentMethod" INTEGER DEFAULT 3,
     ADD COLUMN "allowedCountries" TEXT NOT NULL DEFAULT '[]';
+
+CREATE INDEX "BillingPromotionRedemption_stripeSubscriptionId_idx"
+    ON "BillingPromotionRedemption"("stripeSubscriptionId");
 
 COMMIT;

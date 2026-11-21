@@ -1820,6 +1820,7 @@ model BillingPromotionRedemption {
   @@index([promotionId, clientIpHash, redeemedAt])
   @@index([promotionId, paymentMethodFingerprintHash, redeemedAt])
   @@index([userId, redeemedAt])
+  @@index([stripeSubscriptionId])
   @@index([accessEndsAt, reminderSentAt])
   @@index([accessEndsAt, expiredAt])
 }

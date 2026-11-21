@@ -94,9 +94,13 @@ const addBillingPeriod = (
  */
 async function syncSubscription(
   subscription: Stripe.Subscription,
-  observedAt: Date
+  observedAt: Date,
+  options: { promotionDecided?: boolean } = {}
 ) {
-  if (await promotionCardLimitRefuses(subscription)) {
+  if (
+    !options.promotionDecided &&
+    (await promotionCardLimitWithholds(subscription))
+  ) {
     console.warn(
       JSON.stringify({
         event: "promotion_payment_method_limit_sync_withheld",
@@ -313,24 +317,23 @@ const isUniqueViolation = (error: unknown) =>
   );
 
 /**
- * Whether a subscription came from a promotion checkout that the per-card
- * limit refuses, so no event may grant its plan.
+ * Whether a sync of this subscription must not grant its plan because the
+ * per-card limit refused it, or has not decided yet.
  *
  * Asked by every sync, not only by checkout completion: Stripe delivers
  * `customer.subscription.created`, `invoice.paid` and the completion in any
- * order, and each resyncs the subscription. A recorded redemption answers
- * directly. Before one exists -- the completion not yet processed, or its
- * record failed -- the same count is made read-only; the completion handler's
- * locked count is the one that records and cancels.
+ * order, and each resyncs the subscription. Only the completion decides the
+ * limit -- under the card lock, and it records the decision -- so a sync that
+ * arrives before it waits: it grants nothing until the completion has either
+ * recorded a redemption or granted the subscription to the account itself. A
+ * read-only count here could not see a concurrent completion on the same card
+ * and would let two accounts in through one remaining place.
  *
- * Only a checkout that charged nothing is refused (`billingExpectedAmountMinor`
- * "0"): cancelling a paid one would keep the customer's money and deny the
- * plan. A paid checkout on a reused card is flagged instead.
+ * Only a zero-charge promotion checkout on a promotion with a per-card limit
+ * waits (`billingExpectedAmountMinor` "0"): a paid one is never refused, so it
+ * has nothing to wait for.
  */
-async function promotionCardLimitRefuses(
-  subscription: Stripe.Subscription,
-  knownFingerprintHash?: string | null
-) {
+async function promotionCardLimitWithholds(subscription: Stripe.Subscription) {
   const promotionId = subscription.metadata?.promotionId;
   const userId = subscription.metadata?.userId;
   if (!promotionId || !userId) return false;
@@ -348,20 +351,42 @@ async function promotionCardLimitRefuses(
     where: { id: promotionId },
     select: { maxRedemptionsPerPaymentMethod: true },
   });
+  if ((promotion?.maxRedemptionsPerPaymentMethod ?? null) === null) return false;
+  // No redemption recorded: either the completion has not run, or it ran and
+  // could not record (promotion switched off) but granted the plan anyway --
+  // in which case the account already carries this subscription.
+  const account = await prisma.user.findFirst({
+    where: { id: userId },
+    select: { stripeSubscriptionId: true },
+  });
+  return account?.stripeSubscriptionId !== subscription.id;
+}
+
+/**
+ * The per-card count for a completion whose redemption could not be recorded
+ * (promotion switched off or exhausted mid-checkout). Nothing is recorded on
+ * this path, so a concurrent completion cannot change the count it reads.
+ */
+async function cardOverLimitWithoutRecord(
+  subscription: Stripe.Subscription,
+  fingerprintHash: string | null,
+  chargedNothing: boolean
+) {
+  const promotionId = subscription.metadata?.promotionId;
+  const userId = subscription.metadata?.userId;
+  if (!promotionId || !userId || !fingerprintHash || !chargedNothing) return false;
+  const promotion = await prisma.billingPromotion.findUnique({
+    where: { id: promotionId },
+    select: { maxRedemptionsPerPaymentMethod: true },
+  });
   const limit = promotion?.maxRedemptionsPerPaymentMethod ?? null;
   if (limit === null) return false;
-  const fingerprintHash =
-    knownFingerprintHash !== undefined
-      ? knownFingerprintHash
-      : await getSubscriptionPaymentMethodFingerprintHash(subscription, {
-          failClosed: true,
-        });
-  if (!fingerprintHash) return false;
   const others = await prisma.billingPromotionRedemption.findMany({
     where: {
       promotionId,
       paymentMethodFingerprintHash: fingerprintHash,
       userId: { not: userId },
+      NOT: { riskFlags: { contains: "payment_method_limit" } },
     },
     select: { userId: true },
     distinct: ["userId"],
@@ -481,6 +506,9 @@ async function recordPromotionRedemptionFromCheckout(
               promotionId,
               paymentMethodFingerprintHash,
               userId: { not: userId },
+              // Refused attempts granted nothing, so they do not use up a
+              // place -- raising the limit later admits as many as it says.
+              NOT: { riskFlags: { contains: "payment_method_limit" } },
             },
             select: { userId: true },
             distinct: ["userId"],
@@ -653,7 +681,11 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   }
   const refused = redemption
     ? redemption.refused
-    : await promotionCardLimitRefuses(subscription, paymentMethodFingerprintHash);
+    : await cardOverLimitWithoutRecord(
+        subscription,
+        paymentMethodFingerprintHash,
+        session.amount_total === 0
+      );
   if (refused && promotionId) {
     await cancelOverLimitPromotionSubscription(subscription, promotionId);
     // No sync, no welcome mail, no purchase event: the plan was never granted.
@@ -661,7 +693,11 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
     // on Free.
     return;
   }
-  const synced = await syncSubscription(subscription, observedAt);
+  // The completion has just decided the per-card limit itself, so its own
+  // sync does not wait for that decision.
+  const synced = await syncSubscription(subscription, observedAt, {
+    promotionDecided: true,
+  });
   let billingSnapshot: CheckoutBillingSnapshot | null = null;
   if (synced && session.amount_total !== null) {
     const legacyCurrency = normalizeBillingCurrency(session.currency);

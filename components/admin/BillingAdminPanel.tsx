@@ -1185,10 +1185,24 @@ export function BillingAdminPanel({
         existing: baseline ? policyInput(baseline) : null,
         next: policyInput(promotion),
       });
-      if (refusal) entries.set(promotion.id, refusal.message);
+      if (refusal) {
+        entries.set(promotion.id, refusal.message);
+        return;
+      }
+      // Refused here rather than warned about: the server refuses it, and an
+      // empty list after dropping a typo would open the code to every country.
+      const badCountries = promotion.allowedCountries.filter(
+        (code) => !isCountryCode(code)
+      );
+      if (badCountries.length > 0) {
+        entries.set(
+          promotion.id,
+          m.warnings.invalidCountries(promotion.code, badCountries.join(", "))
+        );
+      }
     });
     return entries;
-  }, [baselinePromotions, draftPromotions]);
+  }, [baselinePromotions, draftPromotions, m]);
 
   const stripeWarnings = useMemo(() => {
     const warnings: string[] = [];
@@ -1217,14 +1231,6 @@ export function BillingAdminPanel({
         (!promotion.maxRedemptions || !promotion.endsAt)
       ) {
         warnings.push(m.warnings.activeNeedsCapAndEnd(promotion.code));
-      }
-      const badCountries = promotion.allowedCountries.filter(
-        (code) => !isCountryCode(code)
-      );
-      if (badCountries.length > 0) {
-        warnings.push(
-          m.warnings.invalidCountries(promotion.code, badCountries.join(", "))
-        );
       }
       if (
         promotion.startsAt &&

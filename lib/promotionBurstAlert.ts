@@ -67,9 +67,23 @@ export async function alertOnPromotionBurst(
   });
   const band = promotionBurstBand(inWindow, PROMOTION_BURST_THRESHOLD);
   if (band === null) return { alerted: false as const, inWindow };
-  if (!(await claimBurstBand(promotionBurstAlertKey(promotionId, band, now), now))) {
+  const bandKey = promotionBurstAlertKey(promotionId, band, now);
+  if (!(await claimBurstBand(bandKey, now))) {
     return { alerted: false as const, inWindow };
   }
+  try {
+    return await reportBurst(promotionId, since, inWindow);
+  } catch (error) {
+    // The claim is given back, so the next redemption in the band reports it
+    // instead of the band staying silent after one failed send.
+    await prisma.chatRequestLease
+      .deleteMany({ where: { id: bandKey } })
+      .catch(() => undefined);
+    throw error;
+  }
+}
+
+async function reportBurst(promotionId: string, since: Date, inWindow: number) {
   const [flagged, promotion] = await Promise.all([
     prisma.billingPromotionRedemption.count({
       where: { promotionId, redeemedAt: { gte: since }, riskFlags: { not: "[]" } },
@@ -80,7 +94,7 @@ export async function alertOnPromotionBurst(
     }),
   ]);
   if (!promotion) return { alerted: false as const, inWindow };
-  await sendManagedSlackMessage({
+  const delivery = await sendManagedSlackMessage({
     key: "promotion_alert",
     variables: {
       code: promotion.code,
@@ -96,5 +110,11 @@ export async function alertOnPromotionBurst(
     targetType: "BillingPromotion",
     targetId: promotionId,
   });
-  return { alerted: true as const, inWindow };
+  // A failed send gives the band back for the next redemption to retry; a
+  // skipped one (template off, no webhook configured) is a decision, not a
+  // fault, and keeps the claim.
+  if (delivery.status === "failed") {
+    throw new Error("Promotion burst alert send failed.");
+  }
+  return { alerted: delivery.delivered, inWindow };
 }
