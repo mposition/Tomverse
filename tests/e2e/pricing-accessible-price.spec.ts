@@ -52,9 +52,12 @@ test.describe("pricing price/period accessible text", () => {
   });
 
   test("each plan exposes its price phrase exactly once", async ({ page }) => {
-    const text = await exposedText(page);
-
-    const phrases = text.match(/\$\s?\d[\d.,]*\s+per month/g) ?? [];
+    // Paid prices show a dash until the live billing config arrives (#4115),
+    // so wait for every plan's price before counting.
+    const pricePhrases = async () =>
+      (await exposedText(page)).match(/\$\s?\d[\d.,]*\s+per month/g) ?? [];
+    await expect.poll(async () => (await pricePhrases()).length).toBeGreaterThanOrEqual(3);
+    const phrases = await pricePhrases();
 
     // One per plan card. If the visual split spans were still exposed, the
     // same plan would surface its price twice -- once as the spoken phrase
