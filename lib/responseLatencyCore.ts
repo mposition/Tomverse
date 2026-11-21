@@ -154,6 +154,7 @@ export const RESPONSE_LATENCY_ANALYSIS_RULE =
   "Parallel timings overlap: never sum them or subtract unrelated percentiles. Missing measurements are unknown. " +
   "chatPresearchLatency covers only Smart Adaptive attempts with an app presearch timer, not all search. Its 24h and 7d windows overlap. " +
   "Use completed browser p95 and the fraction of all recorded attempts confirmed complete with content within 10s together. Report missing clients and sample size. " +
+  "missingClientNoToken attempts failed before a stream and never get a browser token; missingClientServerCompleted attempts finished on the server without a browser report. " +
   "These aggregates alone cannot identify a slow model, establish answer quality or justify a routing change; propose a matched test with the same questions and official sources. " +
   "contextPrepareMs and draftPrepareMs run together. locationIntentMs may overlap new conversation preparation or refinerPrepareMs. freshLocationOverlapMs measures the portion of a reused new conversation intent request that elapsed before the saved turn needed its result. locationMs includes remaining intent, device and human permission waits. " +
   "Report sample counts; small samples cannot prove a model is faster. Keep failed/cancelled/primary-only outcomes visible. " +
