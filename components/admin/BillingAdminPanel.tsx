@@ -171,16 +171,57 @@ const newPromotion = (): EditablePromotion => ({
   isActive: true,
 });
 
-/** "au, NZ" -> ["AU", "NZ"]; anything that is not a two-letter code is dropped. */
+/**
+ * "nz, au" -> ["AU", "NZ"], sorted and de-duplicated the way the server stores
+ * them. Entries that are not two-letter codes are kept, upper-cased, rather
+ * than dropped: dropping a typo could leave an empty list, and an empty list
+ * opens the promotion to every country. Kept, they raise a warning here and the
+ * server refuses to save them.
+ */
 const parseCountryList = (value: string) =>
   Array.from(
     new Set(
       value
         .split(/[\s,]+/)
         .map((item) => item.trim().toUpperCase())
-        .filter((item) => /^[A-Z]{2}$/.test(item))
+        .filter((item) => item.length > 0)
     )
+  ).sort();
+
+const isCountryCode = (value: string) => /^[A-Z]{2}$/.test(value);
+
+/** Free text while typing; the parsed list goes to the draft on every change. */
+function CountryListInput({
+  value,
+  placeholder,
+  onChange,
+}: {
+  value: string[];
+  placeholder: string;
+  onChange: (next: string[]) => void;
+}) {
+  const [text, setText] = useState(value.join(", "));
+  const joined = value.join(",");
+  const [followed, setFollowed] = useState(joined);
+  // Follow the draft when it changes from outside (discard, reload), but not
+  // while the text already says the same thing -- that would fight the typing.
+  // Adjusted during render, the way React documents for state derived from a
+  // changed prop, rather than in an effect.
+  if (followed !== joined) {
+    setFollowed(joined);
+    if (parseCountryList(text).join(",") !== joined) setText(value.join(", "));
+  }
+  return (
+    <TextInput
+      value={text}
+      placeholder={placeholder}
+      onChange={(event) => {
+        setText(event.target.value);
+        onChange(parseCountryList(event.target.value));
+      }}
+    />
   );
+}
 
 const PLAN_VALUE_FIELDS = [
   "monthlyPriceCents",
@@ -757,15 +798,11 @@ function PromotionCard({
           />
         </Field>
         <Field label={m.allowedCountries}>
-          <TextInput
-            key={`${promotion.id}:${promotion.allowedCountries.join(",")}`}
-            defaultValue={promotion.allowedCountries.join(", ")}
+          <CountryListInput
+            value={promotion.allowedCountries}
             placeholder={m.allowedCountriesPlaceholder}
-            onBlur={(event) =>
-              onChange({
-                ...promotion,
-                allowedCountries: parseCountryList(event.target.value),
-              })
+            onChange={(allowedCountries) =>
+              onChange({ ...promotion, allowedCountries })
             }
           />
         </Field>
@@ -1180,6 +1217,14 @@ export function BillingAdminPanel({
         (!promotion.maxRedemptions || !promotion.endsAt)
       ) {
         warnings.push(m.warnings.activeNeedsCapAndEnd(promotion.code));
+      }
+      const badCountries = promotion.allowedCountries.filter(
+        (code) => !isCountryCode(code)
+      );
+      if (badCountries.length > 0) {
+        warnings.push(
+          m.warnings.invalidCountries(promotion.code, badCountries.join(", "))
+        );
       }
       if (
         promotion.startsAt &&

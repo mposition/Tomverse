@@ -58,6 +58,11 @@ type World = {
   cancels: { id: string; params: unknown }[];
   cancelFailure: Error | null;
   burstAlerts: string[];
+  promotionActive: boolean;
+  /** Thrown from the per-card count, i.e. a database fault mid-decision. */
+  recordFault: Error | null;
+  paymentMethodFault: Error | null;
+  lockCalls: unknown[][];
 };
 
 const subscriptionFixture = (): Stripe.Subscription =>
@@ -99,6 +104,10 @@ const freshWorld = (): World => ({
   cancels: [],
   cancelFailure: null,
   burstAlerts: [],
+  promotionActive: true,
+  recordFault: null,
+  paymentMethodFault: null,
+  lockCalls: [],
 });
 
 let world = freshWorld();
@@ -110,8 +119,17 @@ async function loadProcessor() {
     const original = (path: string) =>
       require(resolve(ROOT, path)) as Record<string, unknown>;
 
+    const otherAccountsOnCard = async ({ take }: { take?: number }) => {
+      if (world.recordFault) throw world.recordFault;
+      return world.otherAccountsOnCard
+        .slice(0, take ?? world.otherAccountsOnCard.length)
+        .map((userId) => ({ userId }));
+    };
     const tx = {
-      $executeRaw: async () => 0,
+      $executeRaw: async (...args: unknown[]) => {
+        world.lockCalls.push(args);
+        return 0;
+      },
       user: {
         findUniqueOrThrow: async () => ({ id: "user_1", plan: "Free", subscriptionSyncedAt: null }),
         update: async ({ data }: { data: Record<string, unknown> }) => {
@@ -122,7 +140,7 @@ async function loadProcessor() {
       billingPromotion: {
         findUnique: async () => ({
           id: "promo_db",
-          isActive: true,
+          isActive: world.promotionActive,
           maxRedemptions: 1000,
           startsAt: null,
           endsAt: new Date("2026-12-31T00:00:00.000Z"),
@@ -149,10 +167,7 @@ async function loadProcessor() {
               }
             : null,
         findFirst: async () => null,
-        findMany: async ({ take }: { take?: number }) =>
-          world.otherAccountsOnCard
-            .slice(0, take ?? world.otherAccountsOnCard.length)
-            .map((userId) => ({ userId })),
+        findMany: otherAccountsOnCard,
         create: async ({ data }: { data: Record<string, unknown> }) => {
           world.recordedSessionIds.add(data.stripeCheckoutSessionId as string);
           world.recordedFlags.set(
@@ -170,6 +185,25 @@ async function loadProcessor() {
         prisma: {
           $transaction: async (fn: (client: unknown) => Promise<unknown>) =>
             fn(tx),
+          // Read by the sync-time per-card check, outside any transaction.
+          billingPromotionRedemption: {
+            findFirst: async ({
+              where,
+            }: {
+              where: { stripeSubscriptionId: string };
+            }) => {
+              const row = world.redemptionRows.find(
+                (item) => item.stripeSubscriptionId === where.stripeSubscriptionId
+              );
+              return row ? { riskFlags: row.riskFlags } : null;
+            },
+            findMany: otherAccountsOnCard,
+          },
+          billingPromotion: {
+            findUnique: async () => ({
+              maxRedemptionsPerPaymentMethod: world.cardLimit,
+            }),
+          },
           user: {
             findFirst: async () => ({
               id: "user_1",
@@ -204,6 +238,7 @@ async function loadProcessor() {
           },
           paymentMethods: {
             retrieve: async (id: string) => {
+              if (world.paymentMethodFault) throw world.paymentMethodFault;
               world.paymentMethodRetrieves.push(id);
               return { id, type: "card", card: { fingerprint: "fp_1" } };
             },
@@ -587,4 +622,117 @@ test("every recorded redemption is checked for a burst, refused ones included", 
   world.otherAccountsOnCard = ["user_a", "user_b", "user_c"];
   await processStripeEvent(completedEvent(zeroDueSession("cs_refused")));
   assert.deepEqual(world.burstAlerts, ["promo_db", "promo_db"]);
+});
+
+/* -------------------------------------------------------------------------- */
+/* Independent review, round 1                                                 */
+/* -------------------------------------------------------------------------- */
+
+/** A subscription as Checkout creates it for a zero-due promotion. */
+const withPromotionSubscription = () => {
+  world.subscription = {
+    ...world.subscription,
+    default_payment_method: "pm_card",
+    metadata: {
+      ...world.subscription.metadata,
+      userId: "user_1",
+      promotionId: "promo_db",
+      billingExpectedAmountMinor: "0",
+    },
+  } as Stripe.Subscription;
+};
+
+const subscriptionEvent = (type: string) =>
+  ({
+    id: `evt_${type}`,
+    type,
+    data: { object: world.subscription },
+  }) as unknown as Stripe.Event;
+
+test("the per-card count is taken under a lock on that promotion and card", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  withCard();
+  await processStripeEvent(completedEvent(zeroDueSession()));
+  // Other statements in the same flow use $executeRaw too; pick the card lock.
+  const cardLocks = world.lockCalls.filter(
+    ([, key]) => typeof key === "string" && key.startsWith("promotion-card:")
+  );
+  assert.equal(cardLocks.length, 1);
+  const [strings, key] = cardLocks[0] as [TemplateStringsArray, string];
+  assert.match(strings.join("?"), /pg_advisory_xact_lock/);
+  assert.match(key, /^promotion-card:promo_db:[a-f0-9]{64}$/);
+});
+
+test("a paid checkout over the card limit is flagged, not cancelled", async () => {
+  // Cancelling would keep the customer's money and deny the plan.
+  const { processStripeEvent } = await loadProcessor();
+  withCard();
+  world.otherAccountsOnCard = ["user_a", "user_b", "user_c"];
+  const paid = {
+    ...(zeroDueSession("cs_paid") as unknown as Record<string, unknown>),
+    amount_total: 750,
+  } as unknown as Stripe.Checkout.Session;
+  await processStripeEvent(completedEvent(paid));
+
+  assert.deepEqual(world.cancels, []);
+  assert.equal(world.userUpdates[0].plan, "Max");
+  assert.deepEqual(flagsOf(world.redemptionRows[0]), ["shared_payment_method"]);
+});
+
+test("a database fault while deciding the card limit fails the webhook and grants nothing", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  withCard();
+  world.recordFault = new Error("connection reset");
+  await assert.rejects(processStripeEvent(completedEvent(zeroDueSession())));
+  assert.deepEqual(world.userUpdates, []);
+  assert.deepEqual(world.redemptionRows, []);
+});
+
+test("an unreadable card on a promotion checkout fails the webhook instead of passing the limit", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  withCard();
+  world.paymentMethodFault = new Error("stripe unavailable");
+  await assert.rejects(processStripeEvent(completedEvent(zeroDueSession())));
+  assert.deepEqual(world.userUpdates, []);
+});
+
+test("a promotion switched off mid-checkout still cannot carry an over-limit card past the limit", async () => {
+  // The redemption is not recorded (the old behaviour, kept: Stripe already
+  // applied the discount), but the card limit is still decided and enforced.
+  const { processStripeEvent } = await loadProcessor();
+  withPromotionSubscription();
+  world.promotionActive = false;
+  world.otherAccountsOnCard = ["user_a", "user_b", "user_c"];
+  await processStripeEvent(completedEvent(zeroDueSession()));
+
+  assert.deepEqual(world.redemptionRows, []);
+  assert.equal(world.cancels.length, 1);
+  assert.deepEqual(world.userUpdates, []);
+});
+
+test("a subscription event that arrives before the completion does not grant an over-limit card", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  withPromotionSubscription();
+  world.otherAccountsOnCard = ["user_a", "user_b", "user_c"];
+  await processStripeEvent(subscriptionEvent("customer.subscription.created"));
+  assert.deepEqual(world.userUpdates, []);
+});
+
+test("a subscription event after a recorded refusal does not grant either", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  withPromotionSubscription();
+  world.otherAccountsOnCard = ["user_a", "user_b", "user_c"];
+  world.cancelFailure = new Error("stripe unavailable");
+  await assert.rejects(processStripeEvent(completedEvent(zeroDueSession())));
+  // The cancellation is being retried; meanwhile Stripe sends an update.
+  await processStripeEvent(subscriptionEvent("customer.subscription.updated"));
+  assert.deepEqual(world.userUpdates, []);
+});
+
+test("a subscription event for an account under the limit still syncs", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  withPromotionSubscription();
+  world.otherAccountsOnCard = ["user_a"];
+  await processStripeEvent(subscriptionEvent("customer.subscription.updated"));
+  assert.equal(world.userUpdates[0].plan, "Max");
 });

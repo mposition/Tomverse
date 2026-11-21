@@ -7,7 +7,8 @@ import {
 } from "../lib/billingPromotionCore.ts";
 import {
   PROMOTION_BURST_THRESHOLD,
-  promotionBurstAlertDue,
+  promotionBurstAlertKey,
+  promotionBurstBand,
 } from "../lib/promotionBurstAlertCore.ts";
 
 test("a promotion without allowed countries is open to every visitor", () => {
@@ -70,17 +71,40 @@ test("damaged allowed countries never open a promotion to everyone", () => {
   }
 });
 
-test("a burst alert fires as the hourly count reaches each multiple of the threshold", () => {
+test("a burst is banded by tens from the threshold up", () => {
   assert.equal(PROMOTION_BURST_THRESHOLD, 10);
-  const fired = [];
-  for (let count = 1; count <= 41; count += 1) {
-    if (promotionBurstAlertDue(count)) fired.push(count);
-  }
-  assert.deepEqual(fired, [10, 20, 30, 40]);
+  assert.equal(promotionBurstBand(9), null);
+  assert.equal(promotionBurstBand(10), 1);
+  assert.equal(promotionBurstBand(19), 1);
+  assert.equal(promotionBurstBand(20), 2);
+  assert.equal(promotionBurstBand(41), 4);
 });
 
-test("a burst alert never fires on a nonsense threshold", () => {
-  assert.equal(promotionBurstAlertDue(10, 0), false);
-  assert.equal(promotionBurstAlertDue(10, -5), false);
-  assert.equal(promotionBurstAlertDue(10, Number.NaN), false);
+test("a count that jumps past an exact multiple still lands in the band", () => {
+  // Two redemptions committing together: 9 -> 11 never shows 10.
+  assert.equal(promotionBurstBand(11), 1);
+});
+
+test("one band in one time slot has one key, so it is reported once", () => {
+  const now = new Date("2026-11-20T09:10:00.000Z");
+  const later = new Date("2026-11-20T09:50:00.000Z");
+  const nextSlot = new Date("2026-11-20T10:05:00.000Z");
+  assert.equal(
+    promotionBurstAlertKey("promo_1", 1, now),
+    promotionBurstAlertKey("promo_1", 1, later)
+  );
+  assert.notEqual(
+    promotionBurstAlertKey("promo_1", 1, now),
+    promotionBurstAlertKey("promo_1", 2, now)
+  );
+  assert.notEqual(
+    promotionBurstAlertKey("promo_1", 1, now),
+    promotionBurstAlertKey("promo_1", 1, nextSlot)
+  );
+});
+
+test("a burst band never forms on a nonsense threshold", () => {
+  assert.equal(promotionBurstBand(10, 0), null);
+  assert.equal(promotionBurstBand(10, -5), null);
+  assert.equal(promotionBurstBand(10, Number.NaN), null);
 });

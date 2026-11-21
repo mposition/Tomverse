@@ -337,3 +337,49 @@ test("an unchanged fixed-amount promotion rides along with an unrelated edit", a
 
   assert.equal(response.status, 200);
 });
+
+/* -------------------------------------------------------------------------- */
+/* Allowed countries (promotion abuse limits, 2026-11-21)                      */
+/* -------------------------------------------------------------------------- */
+
+test("an allowed-countries entry that is not a two-letter code is refused, and nothing is written", async () => {
+  // An admin typing a country name must not end up with an empty list, which
+  // would open the promotion to every country.
+  world.promotionRows = [];
+  for (const allowedCountries of [["Australia"], ["AU", "N"], ["A U"]]) {
+    world.writes = [];
+    const { response } = await patch({
+      promotions: [
+        payload({
+          id: "promo_ozb",
+          code: "OZB",
+          discountPercent: 100,
+          discountAmountCents: null,
+          isActive: true,
+          allowedCountries,
+        }),
+      ],
+    });
+    assert.equal(response.status, 400, JSON.stringify(allowedCountries));
+    assert.deepEqual(world.writes, [], JSON.stringify(allowedCountries));
+  }
+});
+
+test("two-letter allowed countries and a per-card limit save", async () => {
+  world.promotionRows = [];
+  const { response } = await patch({
+    promotions: [
+      payload({
+        id: "promo_ozb",
+        code: "OZB",
+        discountPercent: 100,
+        discountAmountCents: null,
+        isActive: true,
+        allowedCountries: ["au", "NZ"],
+        maxRedemptionsPerPaymentMethod: 3,
+      }),
+    ],
+  });
+  assert.equal(response.status, 200);
+  assert.ok(world.writes.includes("billingPromotion.upsert"));
+});

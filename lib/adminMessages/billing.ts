@@ -145,6 +145,8 @@ export const adminBillingMessages = defineAdminMessages({
         `${code}: choose at least one eligible plan.`,
       activeNeedsCapAndEnd: (code: string) =>
         `${code}: active codes require max redemptions and an end date.`,
+      invalidCountries: (code: string, entries: string) =>
+        `${code}: allowed countries must be two-letter codes such as AU (not saved: ${entries}).`,
       endBeforeStart: (code: string) =>
         `${code}: end date must be after start date.`,
       couponId: (code: string) =>
@@ -351,6 +353,8 @@ export const adminBillingMessages = defineAdminMessages({
         `${code}: 적용 플랜을 하나 이상 골라 주세요.`,
       activeNeedsCapAndEnd: (code: string) =>
         `${code}: 활성 코드에는 최대 사용 횟수와 종료일이 필요해요.`,
+      invalidCountries: (code: string, entries: string) =>
+        `${code}: 허용 국가는 AU처럼 두 글자 코드로 적어 주세요(저장 안 됨: ${entries}).`,
       endBeforeStart: (code: string) =>
         `${code}: 종료일은 시작일보다 뒤여야 해요.`,
       couponId: (code: string) =>
