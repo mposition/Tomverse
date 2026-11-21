@@ -50,9 +50,13 @@ type Overview =
     | { enabled: false; reason?: "plan_not_eligible"; keys?: KeySummary[] }
     | {
           enabled: true;
+          /** The general API: Aside, VS Code and other apps. */
           baseUrl: string;
+          /** The coding API: Claude Code, Codex, Cursor and the tomverse CLI. */
+          codingBaseUrl?: string;
           limits: { maxKeys: number; maxCreditCap: number; expiryDays: number[] };
           models: ModelSummary[];
+          codingModels?: ModelSummary[];
           keys: KeySummary[];
           tomverseCli?: TomverseCliGuide | null;
       };
@@ -608,16 +612,22 @@ const SHELLS: [Shell, string][] = [
  * One tool at a time: the person picks where the key is used and sees only
  * that tool's setup. Configurations carry the new key while this page holds
  * it and a placeholder otherwise. Claude Code and Codex offer Smart Adaptive
- * scoped to their own provider's models (codingToolModels).
+ * scoped to their own provider's models (codingToolModels). The coding tools
+ * use the coding API's address and models; Aside, VS Code and other apps the
+ * general API's.
  */
 function ConnectSection({
     baseUrl,
     models,
+    codingBaseUrl,
+    codingModels,
     apiKey,
     tomverseCli,
 }: {
     baseUrl: string;
     models: ModelSummary[];
+    codingBaseUrl: string;
+    codingModels: ModelSummary[];
     apiKey: string | null;
     tomverseCli?: TomverseCliGuide | null;
 }) {
@@ -626,7 +636,7 @@ function ConnectSection({
     const [platform, setPlatform] = useState<Platform | null>(null);
     const [shell, setShell] = useState<Shell>("powershell");
     const [surface, setSurface] = useState<Surface>("terminal");
-    const lists = useMemo(() => codingToolModels(models), [models]);
+    const lists = useMemo(() => codingToolModels(codingModels), [codingModels]);
     const [claudeId, setClaudeId] = useState<string | undefined>();
     const [codexId, setCodexId] = useState<string | undefined>();
     const [cursorId, setCursorId] = useState<string | undefined>();
@@ -685,7 +695,7 @@ function ConnectSection({
             case "claude-code": {
                 const claude = lists.claudeCode.find((model) => model.id === claudeId) ?? lists.claudeCode[0];
                 if (!claude) return noModels;
-                const config = claudeCodeConfig(baseUrl, claude, lists.claudeCode, key);
+                const config = claudeCodeConfig(codingBaseUrl, claude, lists.claudeCode, key);
                 return (
                     <div data-testid="external-api-tool-claude-code">
                         <p className="text-xs text-zinc-500">{t("externalApi.claudeCodeHint")}</p>
@@ -713,7 +723,7 @@ function ConnectSection({
             case "codex": {
                 const codex = lists.codex.find((model) => model.id === codexId) ?? lists.codex[0];
                 if (!codex) return noModels;
-                const files = codexConfig(baseUrl, codex, lists.codex);
+                const files = codexConfig(codingBaseUrl, codex, lists.codex);
                 const withKey = (text: string) => text.replace(KEY_PLACEHOLDER, key);
                 return (
                     <div data-testid="external-api-tool-codex">
@@ -753,7 +763,7 @@ function ConnectSection({
                         <p className="text-xs text-zinc-500">{t("externalApi.cursorHint")}</p>
                         <p className="mt-1 text-xs font-semibold text-zinc-600 dark:text-zinc-300" data-testid="external-api-cursor-models">{t("externalApi.cursorModels")}</p>
                         <ToolModelSelect models={lists.cursor} value={cursor.id} onChange={setCursorId} testId="external-api-cursor-model" />
-                        <CopyBlock label="Cursor Settings › Models" value={cursorConfig(baseUrl, cursor, key)} testId="external-api-cursor-config" />
+                        <CopyBlock label="Cursor Settings › Models" value={cursorConfig(codingBaseUrl, cursor, key)} testId="external-api-cursor-config" />
                         <Notes>
                             <p>{t("externalApi.codingToolsIntro")}</p>
                             <p>{t("externalApi.cursorNotes")}</p>
@@ -829,10 +839,14 @@ function ConnectSection({
     );
 }
 
-/** Which tools can use a model, from the protocols it carries. */
-const toolsForModel = (model: ModelSummary, otherLabel: string) => {
-    const lists = codingToolModels([model]);
-    const chat = model.protocols?.includes("chat_completions") ?? true;
+/**
+ * Which tools can use a model, from the protocols it carries and the API that
+ * offers it: the coding tools through the coding API, the rest through the
+ * general one.
+ */
+const toolsForModel = (model: ModelSummary, otherLabel: string, offeredOn: { general: boolean; coding: boolean }) => {
+    const lists = offeredOn.coding ? codingToolModels([model]) : { claudeCode: [], codex: [], cursor: [] };
+    const chat = offeredOn.general && (model.protocols?.includes("chat_completions") ?? true);
     return [
         lists.claudeCode.length ? "Claude Code" : null,
         lists.codex.length ? "Codex" : null,
@@ -841,6 +855,12 @@ const toolsForModel = (model: ModelSummary, otherLabel: string) => {
     ]
         .filter(Boolean)
         .join(" · ");
+};
+
+/** Every model either API offers, the general API's first. */
+const listedModels = (overview: Extract<Overview, { enabled: true }>) => {
+    const general = new Set(overview.models.map((model) => model.id));
+    return [...overview.models, ...(overview.codingModels ?? []).filter((model) => !general.has(model.id))];
 };
 
 export function ExternalApiSettings() {
@@ -996,18 +1016,34 @@ export function ExternalApiSettings() {
                         </Link>
                     </section>
 
-                    <ConnectSection baseUrl={overview.baseUrl} models={overview.models} apiKey={newKey} tomverseCli={overview.tomverseCli} />
+                    <ConnectSection
+                        baseUrl={overview.baseUrl}
+                        models={overview.models}
+                        codingBaseUrl={overview.codingBaseUrl ?? overview.baseUrl}
+                        codingModels={overview.codingModels ?? overview.models}
+                        apiKey={newKey}
+                        tomverseCli={overview.tomverseCli}
+                    />
 
                     <section className={card} data-testid="external-api-allowed-models">
                         <div className="flex items-center justify-between gap-3">
                             <h2 className="text-base font-bold">{t("externalApi.modelsTitle")}</h2>
-                            <span className="text-xs text-zinc-500">{fill(t("externalApi.modelsCount"), { count: overview.models.length })}</span>
+                            <span className="text-xs text-zinc-500">{fill(t("externalApi.modelsCount"), { count: listedModels(overview).length })}</span>
                         </div>
                         <p className="mt-1 text-sm text-zinc-500">{t("externalApi.modelsIntro")}</p>
-                        {overview.models.length === 0 ? (
+                        {listedModels(overview).length === 0 ? (
                             <p className="mt-2 text-sm text-zinc-500">{t("externalApi.noModels")}</p>
                         ) : (
-                            <ModelSearchList models={overview.models} toolsFor={(model) => toolsForModel(model, t("externalApi.platformOther"))} testId="external-api-models" />
+                            <ModelSearchList
+                                models={listedModels(overview)}
+                                toolsFor={(model) =>
+                                    toolsForModel(model, t("externalApi.platformOther"), {
+                                        general: overview.models.some((entry) => entry.id === model.id),
+                                        coding: (overview.codingModels ?? overview.models).some((entry) => entry.id === model.id),
+                                    })
+                                }
+                                testId="external-api-models"
+                            />
                         )}
                     </section>
 

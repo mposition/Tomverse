@@ -20,11 +20,10 @@ import { providerBucketKey } from "@/lib/chatProviderHolds";
 import { COST_PER_CREDIT_CEILING_MICRO_USD } from "@/lib/chatCostGuardrails";
 import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
 import { loadCodingCatalog, servableCodingRows } from "@/lib/modelCatalog";
-import { CODE_MANAGED_UNBOUNDED_PROVIDERS, canonicalJson, codingCatalogRowSchema, type CodingCatalogRow } from "@/lib/modelCatalogCore";
-import { isAiProvider } from "@/lib/modelRegistryShared";
+import { canonicalJson, codingCatalogRowSchema, type CodingCatalogRow } from "@/lib/modelCatalogCore";
+import { codingRowRuntime } from "@/lib/codingRowRuntime";
 import { isMissingDatabaseSchemaError } from "@/lib/databaseError";
-import { getModelPricingProfile, resolveModelPricing } from "@/lib/modelPricing";
-import { getWeightedUsageCredits, getSettledUsageCredits, type AiModel, type ModelTier } from "@/lib/models";
+import { getWeightedUsageCredits, getSettledUsageCredits, type ModelTier } from "@/lib/models";
 import { prepareCodeProvider, codeProviderCredentialReady, type CodeProviderResult } from "@/lib/codeManagedProvider";
 import { CODE_TASK_TTL_MS, CODE_HEARTBEAT_INTERVAL_MS, CODE_PROVIDER_TIMEOUT_MS, CODE_MAX_OUTPUT_TOKENS, codeBilling, codeCallCeiling, codeConcurrentCalls, codeManagedEnabled, codeSchemaAndPrompt, codeTaskLimit, validCodeUsage, codeManagedReconciliationSchema, type CodeManagedReconciliation, type CodeManagedRequest, type CompleteRequest, type CodeModelPair, type ReserveRequest } from "@/lib/codeManagedCore";
 type Tx = Prisma.TransactionClient;
@@ -167,34 +166,14 @@ async function modelPair(userId: string, request: Pick<ReserveRequest, "catalogV
         const rank = { Free: 0, Pro: 1, Max: 2 };
         if (rank[plan] < rank[row.minimumPlan])
             return fail(403, "CODE_MODEL_PLAN_FORBIDDEN");
-        if (!isAiProvider(row.provider))
-            return fail(403, "CODE_PROVIDER_UNSUPPORTED");
-        // Inference hosts/aggregators need their own destination pin, while
-        // Perplexity's native search fees are not represented by token-only rows.
-        if (CODE_MANAGED_UNBOUNDED_PROVIDERS.includes(row.provider))
-            return fail(403, "CODE_PROVIDER_COST_UNBOUNDED");
-        // The coding catalogue is independent of Chat's static model registry.
-        // Endpoints and credential aliases still come solely from getActiveAiModel.
-        const runtime: AiModel = { id, name: row.name, apiModel: row.apiModelId, provider: row.provider, icon: "", bestFor: "Coding",
-            minimumPlan: row.minimumPlan === "Max" ? "Pro" : row.minimumPlan, usageClass: "standard", enabled: true, status: "enabled",
-            creditWeight: row.pricing.creditWeight, contextWindowTokens: row.capabilities.maxContextTokens, maxOutputTokens: row.capabilities.maxOutputTokens };
-        const staticProfile = getModelPricingProfile(id);
-        const known = staticProfile?.provider === row.provider && staticProfile.apiModelId === row.apiModelId
-            ? resolveModelPricing(runtime, { estimatedPromptTokens: row.capabilities.maxContextTokens }) : null;
-        if (known?.reasoningTokenBilling === "billed_separately")
-            return fail(403, "CODE_REASONING_COST_UNBOUNDED");
-        if (known && (known.inputUsdPerMillionTokens > row.pricing.inputUsdPerMTok || known.outputUsdPerMillionTokens > row.pricing.outputUsdPerMTok))
-            return fail(409, "CODE_CATALOG_PRICING_CHANGED");
-        const price = { inputUsdPerMillionTokens: row.pricing.inputUsdPerMTok, outputUsdPerMillionTokens: row.pricing.outputUsdPerMTok,
-            // An unverified cache discount is full input price. No cache markers are
-            // requested; retain the existing Anthropic 5-minute premium upper bound.
-            cachedInputPriceMultiplier: 1, cacheWriteUsdPerMillionTokens: row.provider === "anthropic"
-                ? Math.max(known?.cacheWriteUsdPerMillionTokens ?? 0, row.pricing.inputUsdPerMTok * 1.25) : known?.cacheWriteUsdPerMillionTokens,
-            maxOutputTokens: Math.min(row.capabilities.maxOutputTokens, CODE_MAX_OUTPUT_TOKENS, known?.providerMaxOutputTokens ?? Infinity),
-            costSource: `coding_catalog_snapshot:${snapshot.version}:${snapshot.contentHash}`,
-            cacheWriteBoundSource: known?.cacheWriteUsdPerMillionTokens !== undefined ? known?.pricingVersion :
-                row.provider === "anthropic" ? "coding_credit_floor_anthropic_1.25" : "no_cache_write_requested" };
-        return { row, runtime, price };
+        // The row as a runtime model and its price (lib/codingRowRuntime.ts,
+        // shared with the coding API). No cache markers are requested here;
+        // the Anthropic 5-minute premium stays the upper bound.
+        const built = codingRowRuntime(row, snapshot);
+        if (!built.ok)
+            return fail(built.code === "CODE_CATALOG_PRICING_CHANGED" ? 409 : 403, built.code);
+        const price = { ...built.price, maxOutputTokens: Math.min(built.price.maxOutputTokens, CODE_MAX_OUTPUT_TOKENS) };
+        return { row, runtime: built.runtime, price };
     };
     const executor = await resolve(request.executorModelId), reviewer = await resolve(request.reviewerModelId);
     if (executor.row.provider === reviewer.row.provider)

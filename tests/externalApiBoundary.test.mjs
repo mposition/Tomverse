@@ -25,6 +25,18 @@ const BEARER_FILES = [
     "lib/externalApiNative.ts",
     "lib/externalApiNativeSpecs.ts",
     "lib/externalApiNativeUpstream.ts",
+    "lib/externalApiModelRoutes.ts",
+    // The coding API (owner decision 2026-11-21): the same handlers on their own addresses.
+    "app/api/code/v1/chat/completions/route.ts",
+    "app/api/code/v1/responses/route.ts",
+    "app/api/code/v1/models/route.ts",
+    "app/api/code/v1/usage/route.ts",
+    "app/api/code/v1/requests/status/route.ts",
+    "app/api/code/anthropic/v1/messages/route.ts",
+    "app/api/code/anthropic/v1/messages/count_tokens/route.ts",
+    "app/api/code/anthropic/v1/models/route.ts",
+    "lib/codingCatalogChannels.ts",
+    "lib/codingRowRuntime.ts",
 ];
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
@@ -49,6 +61,14 @@ test("only the exact completion path skips the Origin check", () => {
         assert.equal(requiresMutationOriginCheck("POST", `${exact}/x`), true, `${exact}/x`);
     }
     assert.equal(requiresMutationOriginCheck("POST", "/api/anthropic/v1/other"), true);
+    // The coding API's generation routes, on the same exact-path condition.
+    for (const exact of ["/api/code/v1/chat/completions", "/api/code/v1/responses", "/api/code/anthropic/v1/messages", "/api/code/anthropic/v1/messages/count_tokens"]) {
+        assert.equal(requiresMutationOriginCheck("POST", exact), false, exact);
+        assert.equal(requiresMutationOriginCheck("POST", `${exact}/x`), true, `${exact}/x`);
+    }
+    // Code's managed path keeps the Origin check.
+    assert.equal(requiresMutationOriginCheck("POST", "/api/code/managed"), true);
+    assert.equal(requiresMutationOriginCheck("POST", "/api/code/v1/other"), true);
     assert.equal(requiresMutationOriginCheck("POST", "/api/v1/responses/compact"), true, "no remote compaction endpoint exists");
 });
 

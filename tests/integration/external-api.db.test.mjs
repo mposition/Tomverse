@@ -191,7 +191,8 @@ test("external inference API over the real shared credit ledger", { skip: !datab
                 headers: { authorization: `Bearer ${key}`, "content-type": "application/json", "user-agent": "fixture-client/1.0", ...(init.headers ?? {}) },
                 body: typeof payload === "string" ? payload : JSON.stringify(payload),
                 signal: init.signal,
-            })
+            }),
+            { surface: "general" }
         );
     const reservationsFor = (userId) =>
         db.chatCreditReservation.findMany({ where: { userId }, orderBy: { createdAt: "asc" } });
@@ -230,7 +231,8 @@ test("external inference API over the real shared credit ledger", { skip: !datab
             assert.equal(response.status, 401, credential);
         }
         const noHeader = await handleChatCompletions(
-            new Request("http://localhost/api/v1/chat/completions", { method: "POST", headers: { cookie: "next-auth.session-token=x" }, body: JSON.stringify(body()) })
+            new Request("http://localhost/api/v1/chat/completions", { method: "POST", headers: { cookie: "next-auth.session-token=x" }, body: JSON.stringify(body()) }),
+            { surface: "general" }
         );
         assert.equal(noHeader.status, 401);
         assert.equal(dispatches, 0);

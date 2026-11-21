@@ -5,7 +5,7 @@ import { Plus, RefreshCw } from "lucide-react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { CodingModelDetail, CodingModelForm, type CodingModelFormValue } from "@/components/admin/modelCatalog/CodingCatalogViews";
-import { CodingCandidates, CodingLinkDetail } from "@/components/admin/modelCatalog/CodingLinkViews";
+import { CodingCandidates, CodingChannelsTile, CodingLinkDetail } from "@/components/admin/modelCatalog/CodingLinkViews";
 import {
   CandidateSummary,
   CodingChannelBanner,
@@ -244,6 +244,16 @@ export function AdminCodingCatalogPanel() {
       delete next[item.id];
       return next;
     });
+    await load();
+    showToast({ tone: "ok", title: c.detail.saved });
+  };
+
+  // A dedicated row's one setting here: where it is offered.
+  const saveChannels = async (item: CodingCatalogItem, channels: string[]) => {
+    setBusy(true);
+    const result = await send(CODING_API, "POST", { action: "settings", modelId: item.id, settings: { channels } });
+    setBusy(false);
+    if (!result.ok) return;
     await load();
     showToast({ tone: "ok", title: c.detail.saved });
   };
@@ -500,6 +510,15 @@ export function AdminCodingCatalogPanel() {
             setHoldReason("");
             setHold({ modelId: openItem.id, name: openItem.name });
           }}
+          channels={
+            <CodingChannelsTile
+              key={`${openItem.id}:${openItem.channels.join(",")}`}
+              c={c}
+              item={openItem}
+              busy={busy}
+              onSave={(channels) => void saveChannels(openItem, channels)}
+            />
+          }
         />
       ) : drafting && !items.some((item) => item.id === drafting.modelId) ? (
         <AdminStateBlock kind="loading" />

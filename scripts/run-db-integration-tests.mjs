@@ -1163,6 +1163,16 @@ run(
     "tests/integration/external-api-native.db.test.mjs"],
   "Running the native-protocol relay, refusal, cache, cancellation and cross-protocol cap scenarios",
 );
+// The coding API: a coding row chat does not have runs on its own published
+// row and is charged its row's credit weight and prices on the same ledger.
+// Fakes only the one upstream module; own process for its module mocks.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1",
+    "tests/integration/external-api-coding.db.test.mjs"],
+  "Running the coding API's catalogue, dedicated-row billing and general-API refusal scenarios",
+);
 // The budget suite mocks Prisma and the audit writer while exercising real
 // PostgreSQL constraints. Module mocks must be isolated from the batch above.
 run(

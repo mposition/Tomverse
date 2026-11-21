@@ -360,6 +360,26 @@ test("a stored draft is audited, applied in one step, and cleared", async () => 
   );
 });
 
+test("a dedicated row's channels are its one setting, and a new draft keeps them", async () => {
+  const modelId = "gpt-draft-test";
+  const key = { category_modelId: { category: "coding", modelId } };
+  const channelsOf = async () => ((await prisma.modelCatalogEntry.findUnique({ where: key }))?.profile as { channels?: string[] } | null)?.channels;
+  // Offered on the coding API too (owner decision 2026-11-21).
+  const saved = await saveCodingSettings({ modelId, settings: { channels: ["code", "api"] }, session });
+  assert.deepEqual(saved.changes, [{ field: "channels", from: ["code"], to: ["code", "api"] }]);
+  assert.deepEqual(await channelsOf(), ["code", "api"]);
+  // Anything else on a dedicated row changes only through a draft.
+  await assert.rejects(
+    saveCodingSettings({ modelId, settings: { creditWeight: 9 }, session }),
+    (error: unknown) => error instanceof CatalogRefusal && error.code === "settings_linked_only"
+  );
+  await storeCatalogDraft({ category: "coding", modelId, draft: codingProfile, session });
+  await applyCatalogDraft({ category: "coding", modelId, session });
+  assert.deepEqual(await channelsOf(), ["code", "api"]);
+  await saveCodingSettings({ modelId, settings: { channels: ["code"] }, session });
+  assert.deepEqual(await channelsOf(), ["code"]);
+});
+
 test("an image draft carries its runtime profile and never prices another model", async () => {
   const modelId = "catalog-draft-profile";
   const profile = {

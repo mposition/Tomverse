@@ -57,7 +57,7 @@ export class FakeGateway {
     constructor(readonly options: FakeGatewayOptions) {}
 
     get base() {
-        return `http://127.0.0.1:${this.port}/api/v1`;
+        return `http://127.0.0.1:${this.port}/api/code/v1`;
     }
 
     async start() {
@@ -99,15 +99,15 @@ export class FakeGateway {
         if (this.revoked || req.headers.authorization !== `Bearer ${TEST_KEY}`) {
             return this.json(res, 401, { error: { message: "A valid Tomverse API key is required.", code: "invalid_api_key", type: "authentication_error" } });
         }
-        if (url.pathname === "/api/v1/models") return this.json(res, 200, { object: "list", data: this.options.models ?? DEFAULT_MODELS });
-        if (url.pathname === "/api/v1/usage") {
+        if (url.pathname === "/api/code/v1/models") return this.json(res, 200, { object: "list", data: this.options.models ?? DEFAULT_MODELS });
+        if (url.pathname === "/api/code/v1/usage") {
             return this.json(res, 200, {
                 object: "tomverse.usage",
                 key: { prefix: TEST_KEY.slice(0, 12), name: "test", credit_cap: 500, committed_credits: 0, held_credits: 0, remaining_cap_credits: 500, expires_at: null },
                 requests: [...this.receipts.values()].reverse().slice(0, Number(url.searchParams.get("limit") ?? 50)).map((r) => this.receiptView(r)),
             });
         }
-        if (url.pathname === "/api/v1/requests/status") {
+        if (url.pathname === "/api/code/v1/requests/status") {
             if (this.statusFails) return this.json(res, 503, { error: { message: "unavailable", code: "feature_unavailable" } });
             const byId = url.searchParams.get("request_id");
             const idem = req.headers["idempotency-key"];
@@ -115,7 +115,7 @@ export class FakeGateway {
             if (!hit) return this.json(res, 404, { error: { message: "No request of this key matches.", code: "request_not_found" } });
             return this.json(res, 200, { object: "tomverse.request_status", request: this.receiptView(hit), usage_source: "server_settlement", output_stored: false });
         }
-        if (url.pathname === "/api/v1/chat/completions" && req.method === "POST") return this.completion(req, res, recorded);
+        if (url.pathname === "/api/code/v1/chat/completions" && req.method === "POST") return this.completion(req, res, recorded);
         res.writeHead(404);
         res.end("not found");
     }

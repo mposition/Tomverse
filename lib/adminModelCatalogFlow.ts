@@ -159,7 +159,6 @@ export type ReasonMessage =
   | { key: "chatPriceUnverified" }
   | { key: "reasoningCostUnbounded" }
   | { key: "providerCostUnbounded" }
-  | { key: "dedicatedCodeOnly" }
   | { key: "providerTermsMissing" }
   | { key: "providerTermsExpired" }
   | { key: "alreadyInCatalog" }
@@ -283,8 +282,6 @@ export const reasonMessage = (code: string, detail = ""): ReasonMessage => {
       return { key: "reasoningCostUnbounded" };
     case "provider_cost_unbounded":
       return { key: "providerCostUnbounded" };
-    case "dedicated_code_only":
-      return { key: "dedicatedCodeOnly" };
     case "provider_terms_missing":
       return { key: "providerTermsMissing" };
     case "provider_terms_expired":
@@ -545,7 +542,14 @@ export type CodingLinkView = {
 };
 
 export const CODING_PLANS = ["Free", "Pro", "Max"] as const;
-export const CODING_CHANNEL_ORDER = ["code", "api", "cli"] as const;
+/**
+ * The channels the screen shows and sets: Code, and the coding API (owner
+ * decision 2026-11-21). A row stored with the older "cli" channel reads as the
+ * coding API; saving writes "api".
+ */
+export const CODING_CHANNEL_ORDER = ["code", "api"] as const;
+export const codingChannelsShown = (channels: readonly string[]): string[] =>
+  CODING_CHANNEL_ORDER.filter((channel) => (channel === "api" ? channels.includes("api") || channels.includes("cli") : channels.includes(channel)));
 export const CODING_TOOL_CALLING_VALUES = ["none", "basic", "parallel"] as const;
 export const CODING_STRUCTURED_OUTPUT_VALUES = ["none", "json_mode", "strict_schema", "forced_tool_use", "response_schema"] as const;
 
@@ -626,7 +630,7 @@ export const codingCatalogItems = (report: {
     const draft = looksLikeCodingProfile(row.draft) ? row.draft : null;
     const link = looksLikeLink(row.stored) ? row.stored : null;
     const shown = draft ?? profile;
-    const channels = (profile as { channels?: string[] } | null)?.channels ?? link?.channels ?? ["code"];
+    const channels = codingChannelsShown((profile as { channels?: string[] } | null)?.channels ?? link?.channels ?? ["code"]);
     return {
       id: row.modelId,
       name: profile?.name ?? row.chat?.name ?? draft?.name ?? row.modelId,
@@ -715,7 +719,7 @@ export const codingSettingsFrom = (link: CodingLinkView): CodingSettingsValue =>
   structuredOutput: link.capabilities.structuredOutput,
   minimumPlan: link.minimumPlan ?? "",
   creditWeight: link.creditWeight === undefined ? "" : String(link.creditWeight),
-  channels: CODING_CHANNEL_ORDER.filter((channel) => link.channels.includes(channel)),
+  channels: codingChannelsShown(link.channels),
 });
 
 /** The weight a link would charge with these settings: its own, or chat's. */
