@@ -17,7 +17,9 @@ import "./developers-page.css";
 
 const MODEL_ICON = (name: string) => `/model-icons/${name}.png`;
 const API_BASE = "https://tomverse.app/api/v1";
-const ANTHROPIC_BASE = "https://tomverse.app/api/anthropic";
+/** The coding API (docs/policy/external-api.md): Codex, Cursor and Claude Code. Other apps keep API_BASE. */
+const CODING_API_BASE = "https://tomverse.app/api/code/v1";
+const CODING_ANTHROPIC_BASE = "https://tomverse.app/api/code/anthropic";
 const MASKED_KEY = "tvk_••••••••";
 /** Fallback when the catalogue has not loaded: the count on 2026-11-19. */
 const FALLBACK_PROVIDER_COUNT = 12;
@@ -59,13 +61,13 @@ type Config = { file: string; lines: Token[][] };
 const apiConfigs = (c: HomeV2Copy["api"]["console"]): Record<ToolKey, Config> => ({
   codex: { file: "~/.codex/config.toml", lines: [
     [["c", c.codexComment]], ["[model_providers.tomverse]"],
-    [["k", "name"], " = ", ["s", "\"Tomverse\""]], [["k", "base_url"], " = ", ["s", `"${API_BASE}"`]],
+    [["k", "name"], " = ", ["s", "\"Tomverse\""]], [["k", "base_url"], " = ", ["s", `"${CODING_API_BASE}"`]],
     [["k", "env_key"], " = ", ["s", "\"TOMVERSE_API_KEY\""]], [["k", "wire_api"], " = ", ["s", "\"responses\""]],
     [], ["$ codex --profile tomverse"], [["g", c.codexOk]],
   ] },
   claude: { file: c.claudeFile, lines: [
     [["c", c.claudeComment]],
-    [["k", "export"], " ANTHROPIC_BASE_URL=", ["s", `"${ANTHROPIC_BASE}"`]],
+    [["k", "export"], " ANTHROPIC_BASE_URL=", ["s", `"${CODING_ANTHROPIC_BASE}"`]],
     [["k", "export"], " ANTHROPIC_AUTH_TOKEN=", ["s", `"${MASKED_KEY}"`]],
     [["k", "export"], " ANTHROPIC_MODEL=", ["s", `"${c.chosenModel}"`]],
     [], ["$ claude"], [["g", c.claudeOk]],
@@ -75,7 +77,7 @@ const apiConfigs = (c: HomeV2Copy["api"]["console"]): Record<ToolKey, Config> =>
     [], [["c", c.vscodeKeyNote]], [["g", c.vscodeOk]],
   ] },
   cursor: { file: "Cursor › Settings › Models", lines: [
-    ["OpenAI API Key             ", ["s", MASKED_KEY]], ["Override OpenAI Base URL   ", ["s", API_BASE]],
+    ["OpenAI API Key             ", ["s", MASKED_KEY]], ["Override OpenAI Base URL   ", ["s", CODING_API_BASE]],
     ["Custom model               ", ["s", c.chosenModel]], [], [["g", c.cursorOk]],
   ] },
   aside: { file: "Aside › Custom Provider", lines: [
@@ -359,7 +361,7 @@ export function DevelopersPage() {
           <span className="eyebrow">{copy.proto.eyebrow}</span>
           <h2 id="proto-title" className="section-title"><Title lines={copy.proto.title} /></h2>
           <div className="proto rise">
-            {([["OpenAI Chat Completions", "POST /api/v1/chat/completions"], ["OpenAI Responses", "POST /api/v1/responses"], ["Anthropic Messages", "POST /api/anthropic/v1/messages"]] as const).map(([name, path], i) =>
+            {([["OpenAI Chat Completions", "POST /api/v1/chat/completions"], ["OpenAI Responses", "POST /api/code/v1/responses"], ["Anthropic Messages", "POST /api/code/anthropic/v1/messages"]] as const).map(([name, path], i) =>
               <div key={name} className="card"><span className="k">{name}</span><code>{path}</code><p>{f(copy.proto.descriptions[i])}</p></div>)}
           </div>
           <div className="panel rise" style={{ marginTop: 24 }}>

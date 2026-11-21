@@ -310,7 +310,7 @@ const ko: HomeV2Copy = {
       otherName: "OpenAI 호환 도구",
       other: "Base URL과 키만 바꾸면 연결",
     },
-    facts: [["OpenAI 호환", "https://tomverse.app/api/v1"], ["Anthropic 호환", "https://tomverse.app/api/anthropic"], ["API 키", "설정 > API 키 · 키별 크레딧 한도"]],
+    facts: [["코딩 도구", "https://tomverse.app/api/code/v1"], ["다른 앱", "https://tomverse.app/api/v1"], ["API 키", "설정 > API 키 · 키별 크레딧 한도"]],
     note: "설정 > API 키 화면이 만들어 주는 설정을 줄여 보여 줍니다. 실제 값은 고른 모델과 새로 만든 키로 채워집니다. 목록에 없는 도구는 OpenAI 호환 API(Chat Completions·Responses)를 지원해야 연결됩니다.",
     console: {
       codexComment: "# Tomverse 공급자 추가 (기본 설정은 그대로)",
@@ -531,7 +531,7 @@ const en: HomeV2Copy = {
       otherName: "OpenAI-compatible tools",
       other: "Change the base URL and key to connect",
     },
-    facts: [["OpenAI-compatible", "https://tomverse.app/api/v1"], ["Anthropic-compatible", "https://tomverse.app/api/anthropic"], ["API keys", "Settings > API keys · a credit limit per key"]],
+    facts: [["Coding tools", "https://tomverse.app/api/code/v1"], ["Other apps", "https://tomverse.app/api/v1"], ["API keys", "Settings > API keys · a credit limit per key"]],
     note: "A shortened version of the settings that Settings > API keys generates. The real values are filled in with the model you choose and a new key. Tools not listed need to support the OpenAI-compatible API (Chat Completions or Responses) to connect.",
     console: {
       codexComment: "# Add Tomverse as a provider (your defaults stay as they are)",
