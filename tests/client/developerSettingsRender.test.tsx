@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import React from "react";
-import { renderWithLanguage } from "./support/renderWithLanguage.tsx";
-import { DeveloperSettingsView } from "../components/settings/DeveloperSettingsTab.tsx";
-import { AllowedModels, ConnectSection, UsageRows } from "../components/settings/ExternalApiSettings.tsx";
-import { ACCOUNT_SETTINGS_TABS } from "../lib/accountSettingsEvents.ts";
-import { SETTINGS_SECTION_TAB, SETTINGS_TAB_LABEL_KEY, settingsSectionHref } from "../lib/settingsNavigation.ts";
-import { externalApiCopy } from "../locales/externalApi.ts";
+import { renderWithLanguage } from "../support/renderWithLanguage.tsx";
+import { DeveloperSettingsView } from "../../components/settings/DeveloperSettingsTab.tsx";
+import { AllowedModels, ConnectSection, UsageRows } from "../../components/settings/ExternalApiSettings.tsx";
+import { ACCOUNT_SETTINGS_TABS } from "../../lib/accountSettingsEvents.ts";
+import { SETTINGS_SECTION_TAB, SETTINGS_TAB_LABEL_KEY, settingsSectionHref } from "../../lib/settingsNavigation.ts";
+import { externalApiCopy } from "../../locales/externalApi.ts";
+import type { Language } from "../../lib/language.ts";
 
 /**
  * Settings > Developer and the API keys page, rendered (owner decision
@@ -16,12 +17,16 @@ import { externalApiCopy } from "../locales/externalApi.ts";
  * condition (client components).
  */
 
-const render = (element, lang = "ko") => renderWithLanguage(element, lang);
+const render = (element: React.ReactElement, lang: Language = "ko") => renderWithLanguage(element, lang);
+
+// The fixtures below are partial on purpose (only what each view reads), so they
+// are passed untyped rather than restating every prop type here.
+const element = (type: unknown, props: unknown) => React.createElement(type as never, props as never) as React.ReactElement;
 
 // Markup puts an attribute's value in quotes and escapes `"`; compare as text.
-const text = (markup) => markup.replace(/<[^>]+>/g, " ").replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").replace(/\s+/g, " ");
+const text = (markup: string) => markup.replace(/<[^>]+>/g, " ").replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").replace(/\s+/g, " ");
 
-const model = (id, extra = {}) => ({
+const model = (id: string, extra: Record<string, unknown> = {}) => ({
     id,
     name: id,
     provider: "x",
@@ -41,7 +46,7 @@ const codingOnly = model("coding-only", { name: "Coding Only" });
 const GENERAL = "https://tomverse.app/api/v1";
 const CODING = "https://tomverse.app/api/code/v1";
 
-const ready = (extra = {}) => ({
+const ready = (extra: Record<string, unknown> = {}) => ({
     kind: "ready",
     baseUrl: GENERAL,
     codingBaseUrl: CODING,
@@ -68,7 +73,7 @@ test("the Developer tab sits between data and plan, and names itself through the
 });
 
 test("the Account tab no longer has an API keys row; the panel renders the Developer tab", () => {
-    const source = readFileSync(new URL("../components/auth/AuthButton.tsx", import.meta.url), "utf8");
+    const source = readFileSync(new URL("../../components/auth/AuthButton.tsx", import.meta.url), "utf8");
     assert.doesNotMatch(source, /api-keys-entry/);
     assert.doesNotMatch(source, /settings-account-api-keys/);
     assert.doesNotMatch(source, /NEXT_PUBLIC_EXTERNAL_API_SETTINGS_VISIBLE/);
@@ -79,7 +84,7 @@ test("the Account tab no longer has an API keys row; the panel renders the Devel
 });
 
 test("a Pro account sees the key summary, all four addresses, the tool names and the CLI card", () => {
-    const markup = render(React.createElement(DeveloperSettingsView, { overview: ready() }), "en");
+    const markup = render(element(DeveloperSettingsView, { overview: ready() }), "en");
     const body = text(markup);
     assert.match(body, /Use Tomverse models and credits in other apps and coding tools\. One key works with both APIs\./);
     assert.match(body, /2 keys in use/);
@@ -105,7 +110,7 @@ test("a Pro account sees the key summary, all four addresses, the tool names and
 });
 
 test("the Korean tab reads as designed", () => {
-    const body = text(render(React.createElement(DeveloperSettingsView, { overview: ready({ keys: [] }) })));
+    const body = text(render(element(DeveloperSettingsView, { overview: ready({ keys: [] }) })));
     assert.match(body, /개발자/);
     assert.match(body, /다른 앱과 코딩 도구에서 Tomverse 모델과 크레딧을 씁니다\. 키 하나로 두 API를 모두 쓸 수 있습니다\./);
     assert.match(body, /사용 중인 키 없음/);
@@ -114,12 +119,12 @@ test("the Korean tab reads as designed", () => {
 });
 
 test("the CLI card stays hidden until the install guide is published", () => {
-    const markup = render(React.createElement(DeveloperSettingsView, { overview: ready({ tomverseCli: null }) }), "en");
+    const markup = render(element(DeveloperSettingsView, { overview: ready({ tomverseCli: null }) }), "en");
     assert.doesNotMatch(markup, /developer-cli/);
 });
 
 test("a Free account sees the Pro notice and an upgrade button, no keys and no addresses", () => {
-    const markup = render(React.createElement(DeveloperSettingsView, { overview: { kind: "plan" } }), "en");
+    const markup = render(element(DeveloperSettingsView, { overview: { kind: "plan" } }), "en");
     assert.match(markup, /data-testid="developer-plan-required"/);
     assert.match(markup, /data-testid="developer-upgrade"/);
     assert.match(text(markup), /available on Pro and above/);
@@ -127,14 +132,14 @@ test("a Free account sees the Pro notice and an upgrade button, no keys and no a
 });
 
 test("a signed-out visitor is asked to sign in", () => {
-    const markup = render(React.createElement(DeveloperSettingsView, { overview: { kind: "signedOut" } }), "en");
+    const markup = render(element(DeveloperSettingsView, { overview: { kind: "signedOut" } }), "en");
     assert.match(markup, /data-testid="developer-signin"/);
     assert.doesNotMatch(markup, /developer-endpoints/);
 });
 
-const connect = (focusTool, extra = {}) =>
+const connect = (focusTool: string | null, extra: Record<string, unknown> = {}) =>
     render(
-        React.createElement(ConnectSection, {
+        element(ConnectSection, {
             baseUrl: GENERAL,
             models: [smart, luna, generalOnly],
             codingBaseUrl: CODING,
@@ -204,9 +209,9 @@ test("the CLI choice appears once the guide is published", () => {
 });
 
 // Each button's own tag, so attribute order never matters.
-const pressed = (markup, testId) => new RegExp(`<button[^>]*data-testid="${testId}"[^>]*>`).exec(markup)?.[0].includes('aria-pressed="true"') ?? null;
+const pressed = (markup: string, testId: string) => new RegExp(`<button[^>]*data-testid="${testId}"[^>]*>`).exec(markup)?.[0].includes('aria-pressed="true"') ?? null;
 
-const checked = (markup, id) =>
+const checked = (markup: string, id: string) =>
     new RegExp(`<input[^>]*data-testid="external-api-pick-${id}"[^>]*>`).exec(markup)?.[0].includes('checked=""') ?? null;
 
 test("each API keeps its own model list: a ticked box and the copied file always agree", () => {
@@ -243,13 +248,13 @@ test("the allowed models split by API and mark a coding-only model", () => {
         codingModels: [codingOnly, luna],
         keys: [],
     };
-    const general = render(React.createElement(AllowedModels, { overview }), "en");
+    const general = render(element(AllowedModels, { overview }), "en");
     assert.match(general, /GPT 6 Luna/);
     assert.doesNotMatch(general, /Coding Only/);
     assert.doesNotMatch(general, /external-api-model-badge/);
     assert.match(text(general), /Aside · Brave Leo · Raycast · BrowserOS · Other/);
 
-    const coding = render(React.createElement(AllowedModels, { overview, initialApi: "coding" }), "en");
+    const coding = render(element(AllowedModels, { overview, initialApi: "coding" }), "en");
     assert.match(coding, /Coding Only/);
     assert.equal((coding.match(/external-api-model-badge/g) ?? []).length, 1);
     assert.match(text(coding), /Coding only/);
@@ -258,7 +263,7 @@ test("the allowed models split by API and mark a coding-only model", () => {
 });
 
 test("recent requests carry an API column: coding, general, or a dash", () => {
-    const row = (requestId, surface) => ({
+    const row = (requestId: string, surface: string | null) => ({
         requestId,
         modelId: "gpt-6-luna",
         surface,
@@ -271,7 +276,7 @@ test("recent requests carry an API column: coding, general, or a dash", () => {
         errorCode: null,
     });
     const markup = render(
-        React.createElement(UsageRows, { rows: [row("req_c", "coding"), row("req_g", "general"), row("req_old", null)] })
+        element(UsageRows, { rows: [row("req_c", "coding"), row("req_g", "general"), row("req_old", null)] })
     );
     const cells = [...markup.matchAll(/data-testid="external-api-usage-api">([^<]*(?:<!-- -->)?[^<]*(?:<!-- -->)?[^<]*)</g)].map((match) =>
         match[1].replace(/<!-- -->/g, "")

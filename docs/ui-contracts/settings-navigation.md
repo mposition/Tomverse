@@ -17,7 +17,7 @@ Owning modules:
 - `app/(site)/(application)/settings/layout.tsx` — the route shell that
   renders that strip for every `/settings/**` screen
 
-Coverage: `tests/settingsNavigation.test.mjs`, `tests/developerSettingsRender.test.mjs`,
+Coverage: `tests/settingsNavigation.test.mjs`, `tests/client/developerSettingsRender.test.tsx`,
 `tests/e2e/settings-information-architecture.spec.ts` (desktop *and* mobile
 projects, same assertions).
 
