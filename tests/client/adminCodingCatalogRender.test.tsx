@@ -185,6 +185,30 @@ test("a dedicated row picks where it is offered: Code and the coding API", () =>
   assert.match(html.match(/<button[^>]*data-testid="coding-dedicated-channels-save"[^>]*>/)?.[0] ?? "", / disabled=""/);
 });
 
+test("a dedicated row on the coding API shows its two credits: Code's, and the coding API's chat-rule minimum", () => {
+  const devstral = items.find((item) => item.id === "devstral-2")!;
+  const onApi = {
+    ...devstral,
+    channels: ["code", "api"],
+    apiCredit: { codeCredits: 9, override: null, floorCredits: 3, credits: 3, basis: "chat_rule_floor" as const, refusal: null },
+  };
+  const html = renderToStaticMarkup(<CodingChannelsTile c={c} item={onApi} busy={false} onSave={noop} />);
+  assert.match(html, /Tomverse Code 크레딧/);
+  assert.match(html, /×9/);
+  assert.match(html, /data-testid="coding-dedicated-api-credits"/);
+  assert.match(html, /코딩 API 크레딧/);
+  assert.match(html, /<input[^>]*placeholder="3"[^>]*data-testid="coding-dedicated-api-credit-input"/);
+  assert.match(html, /기본값: 채팅 기준 최소값 ×3/);
+  // Off the coding API, only Code's credits are shown.
+  const offApi = renderToStaticMarkup(<CodingChannelsTile c={c} item={{ ...onApi, channels: ["code"] }} busy={false} onSave={noop} />);
+  assert.doesNotMatch(offApi, /coding-dedicated-api-credits/);
+  // A floor that cannot be worked out says the coding API does not offer it.
+  const unbounded = renderToStaticMarkup(
+    <CodingChannelsTile c={cEn} item={{ ...onApi, apiCredit: { ...onApi.apiCredit, floorCredits: null, credits: null, basis: null, refusal: "api_credit_floor_unbounded" } }} busy={false} onSave={noop} />
+  );
+  assert.match(unbounded, /the coding API does not offer it/);
+});
+
 test("the list filters by source, provider, status and text", () => {
   const base = { query: "", provider: "all", source: "all" as const, state: "all" as const };
   assert.deepEqual(filterCodingItems(items, { ...base, source: "dedicated" }).map((item) => item.id), ["devstral-2"]);

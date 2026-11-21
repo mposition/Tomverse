@@ -248,10 +248,10 @@ export function AdminCodingCatalogPanel() {
     showToast({ tone: "ok", title: c.detail.saved });
   };
 
-  // A dedicated row's one setting here: where it is offered.
-  const saveChannels = async (item: CodingCatalogItem, channels: string[]) => {
+  // A dedicated row's settings here: where it is offered, and its coding API credits.
+  const saveChannels = async (item: CodingCatalogItem, settings: { channels?: string[]; apiCreditWeight?: number | null }) => {
     setBusy(true);
-    const result = await send(CODING_API, "POST", { action: "settings", modelId: item.id, settings: { channels } });
+    const result = await send(CODING_API, "POST", { action: "settings", modelId: item.id, settings });
     setBusy(false);
     if (!result.ok) return;
     await load();
@@ -512,11 +512,11 @@ export function AdminCodingCatalogPanel() {
           }}
           channels={
             <CodingChannelsTile
-              key={`${openItem.id}:${openItem.channels.join(",")}`}
+              key={`${openItem.id}:${openItem.channels.join(",")}:${openItem.apiCredit?.override ?? ""}`}
               c={c}
               item={openItem}
               busy={busy}
-              onSave={(channels) => void saveChannels(openItem, channels)}
+              onSave={(settings) => void saveChannels(openItem, settings)}
             />
           }
         />

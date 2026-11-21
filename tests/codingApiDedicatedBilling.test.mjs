@@ -2,15 +2,35 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createChatBudget } from "../lib/chatSecurity.ts";
+import { chatUserMaxInputTokens } from "../lib/chatInputLimits.ts";
 import { codingApiDedicatedModel } from "../lib/codingCatalogChannels.ts";
-import { codingRowRuntime, registryPricesFor } from "../lib/codingRowRuntime.ts";
-import { codingCatalogRowSchema } from "../lib/modelCatalogCore.ts";
+import { codingApiCredit, codingApiCreditFloor, codingApiCreditView, codingRowRuntime, registryPricesFor } from "../lib/codingRowRuntime.ts";
+import { codingCreditFloor } from "../lib/modelCatalog.ts";
+import { isCreditFloor, suggestCreditFloor } from "../lib/modelAdoptionDraft.ts";
+import {
+  canonicalJson,
+  catalogContentHash,
+  codingCatalogRowOf,
+  codingCatalogRowSchema,
+  codingStoredProfileSchema,
+  resolveCodingEntry,
+} from "../lib/modelCatalogCore.ts";
 import { getModelUsageProfile, getWeightedUsageCredits } from "../lib/models.ts";
 
-// A dedicated coding row on the coding API (owner decision 2026-11-21): it runs
-// as its own published row and is charged at that row's prices and credit
-// weight through the chat reservation, which records the snapshot it was
-// priced from. One conversion with Code's managed path (lib/codingRowRuntime.ts).
+// A dedicated coding row on the coding API (owner decisions 2026-11-21): it
+// runs as its own published row at that row's prices, through the chat
+// reservation, which records the snapshot it was priced from. Its credits there
+// follow the chat rule -- its apiCreditWeight, or the chat floor at the chat
+// input limit -- while Code's managed path keeps pricing.creditWeight. One
+// conversion with Code's managed path (lib/codingRowRuntime.ts).
+
+/** The coding API's credits for a row, as a request is charged. */
+const apiCredit = (dedicated) => {
+  const built = codingRowRuntime(dedicated, SNAPSHOT);
+  assert.equal(built.ok, true);
+  const credit = codingApiCredit(dedicated, built.price.maxOutputTokens);
+  return { built, credit };
+};
 
 const SNAPSHOT = { version: 12, contentHash: "a".repeat(64) };
 
@@ -32,13 +52,13 @@ const row = (overrides = {}) =>
   });
 
 test("a dedicated row runs as its own model: the row's credits, context, output limit and prices", () => {
-  const built = codingRowRuntime(row(), SNAPSHOT);
-  assert.equal(built.ok, true);
-  const { model, pricing } = codingApiDedicatedModel(row(), built, SNAPSHOT);
+  const { built, credit } = apiCredit(row());
+  assert.equal(credit.ok, true);
+  const { model, pricing } = codingApiDedicatedModel(row(), built, SNAPSHOT, credit);
   assert.equal(model.id, "qwen3.7-coder-plus");
   assert.equal(model.apiModel, "qwen3.7-coder-plus");
   assert.equal(model.provider, "qwen");
-  assert.equal(getModelUsageProfile(model).credits, 9, "the row's credit weight, not a class default");
+  assert.equal(getModelUsageProfile(model).credits, credit.credits, "the coding API's credits, not Code's");
   assert.equal(model.contextWindowTokens, 256_000);
   assert.equal(model.maxOutputTokens, 32_000);
   assert.equal(model.inputUsdPerMillionTokens, 1);
@@ -49,7 +69,98 @@ test("a dedicated row runs as its own model: the row's credits, context, output 
     cacheWriteUsdPerMillionTokens: null,
     pricingVersion: `coding_catalog_snapshot:12:${"a".repeat(64)}`,
     costSource: "coding_catalog_snapshot",
+    creditBasis: { basis: "chat_rule_floor", credits: credit.credits, floorCredits: credit.credits },
   });
+});
+
+test("by default a dedicated row's coding API credits are the chat rule's floor, below Code's for a large context", () => {
+  // A 1M-token context: Code's floor prices the whole window as input, the
+  // coding API only what it accepts (the chat input limit).
+  const large = row({
+    capabilities: { ...row().capabilities, maxContextTokens: 1_000_000, maxOutputTokens: 16_000 },
+    pricing: { ...row().pricing, inputUsdPerMTok: 1, outputUsdPerMTok: 4 },
+  });
+  const codeFloor = codingCreditFloor(large);
+  assert.ok(codeFloor !== null);
+  const { credit } = apiCredit({ ...large, pricing: { ...large.pricing, creditWeight: codeFloor } });
+  const chatFloor = suggestCreditFloor({
+    inputUsdPerMillionTokens: 1,
+    outputUsdPerMillionTokens: 4,
+    maxOutputTokens: 16_000,
+    inputPriceMultiplier: 1,
+    worstCaseInputTokens: chatUserMaxInputTokens(),
+  });
+  assert.ok(isCreditFloor(chatFloor));
+  assert.deepEqual(credit, { ok: true, credits: chatFloor.credits, basis: "chat_rule_floor", floorCredits: chatFloor.credits });
+  assert.ok(credit.credits < codeFloor, `coding API ${credit.credits} below Code ${codeFloor}`);
+});
+
+test("an Anthropic row's floor prices the five-minute cache write at 1.25x its input", () => {
+  const base = { capabilities: { ...row().capabilities, maxOutputTokens: 8_000 }, pricing: { ...row().pricing, inputUsdPerMTok: 3, outputUsdPerMTok: 15 } };
+  const floorAt = (multiplier) =>
+    suggestCreditFloor({ inputUsdPerMillionTokens: 3, outputUsdPerMillionTokens: 15, maxOutputTokens: 8_000, inputPriceMultiplier: multiplier, worstCaseInputTokens: chatUserMaxInputTokens() });
+  assert.equal(codingApiCreditFloor({ ...row(base), provider: "anthropic" }, 8_000), floorAt(1.25).credits);
+  assert.equal(codingApiCreditFloor(row(base), 8_000), floorAt(1).credits);
+  // The worst case the floor covers is larger with the write premium.
+  assert.ok(floorAt(1.25).worstCaseMicroUsd > floorAt(1).worstCaseMicroUsd);
+});
+
+test("an apiCreditWeight at or above the floor is charged; one below it keeps the row off the coding API", () => {
+  const { credit: floor } = apiCredit(row());
+  const at = apiCredit(row({ apiCreditWeight: floor.floorCredits })).credit;
+  assert.deepEqual(at, { ok: true, credits: floor.floorCredits, basis: "api_override", floorCredits: floor.floorCredits });
+  const above = apiCredit(row({ apiCreditWeight: floor.floorCredits + 7 })).credit;
+  assert.deepEqual(above, { ok: true, credits: floor.floorCredits + 7, basis: "api_override", floorCredits: floor.floorCredits });
+  assert.ok(floor.floorCredits > 1, "this row's floor leaves room below it");
+  assert.deepEqual(apiCredit(row({ apiCreditWeight: floor.floorCredits - 1 })).credit, {
+    ok: false,
+    reason: `api_credits_below_floor:${floor.floorCredits}`,
+    floorCredits: floor.floorCredits,
+  });
+  // Code's credits are untouched by either.
+  assert.equal(codingApiCreditView(row({ apiCreditWeight: floor.floorCredits + 7 })).codeCredits, 9);
+});
+
+test("a row whose floor cannot be worked out is not offered on the coding API", () => {
+  // Priced above every class the credit system was sized for.
+  const dear = row({ pricing: { ...row().pricing, inputUsdPerMTok: 900, outputUsdPerMTok: 900 } });
+  const { credit } = apiCredit(dear);
+  assert.deepEqual(credit, { ok: false, reason: "api_credit_floor_unbounded", floorCredits: null });
+  assert.equal(codingApiCreditFloor(dear, 0), null, "no output cap, no floor");
+  const view = codingApiCreditView(dear);
+  assert.equal(view.credits, null);
+  assert.equal(view.refusal, "api_credit_floor_unbounded");
+});
+
+test("a row without apiCreditWeight hashes exactly as before; the default is never stored", () => {
+  const profile = {
+    name: "Qwen 3.7 Coder Plus",
+    provider: "qwen",
+    apiModelId: "qwen3.7-coder-plus",
+    minimumPlan: "Pro",
+    capabilities: { toolCalling: "parallel", structuredOutput: "strict_schema", imageInput: false, maxContextTokens: 256_000, maxOutputTokens: 32_000 },
+    pricing: { inputUsdPerMTok: 1, outputUsdPerMTok: 5, creditWeight: 9, verifiedAt: "2026-11-01", sources: ["https://www.alibabacloud.com/help/en/model-studio/model-pricing"] },
+    terms: { allowsResaleAndCodingAgent: true, url: "https://www.alibabacloud.com/help/en/legal/terms", checkedAt: "2026-11-18" },
+    retention: { url: "https://www.alibabacloud.com/help/en/legal/privacy", checkedAt: "2026-11-18" },
+    processingRegion: "Singapore",
+    channels: ["code", "api"],
+  };
+  const resolve = (stored) =>
+    codingCatalogRowOf(resolveCodingEntry({ modelId: "qwen3.7-coder-plus", profile: stored, chat: () => null, providerTerms: () => null, now: new Date("2026-11-21T00:00:00Z") }).row);
+  const current = resolve(profile);
+  // The row as it was resolved before the field existed.
+  const before = { modelId: "qwen3.7-coder-plus", source: "dedicated", ...profile };
+  assert.equal(canonicalJson(current), canonicalJson(before));
+  assert.equal(catalogContentHash([current]), catalogContentHash([before]));
+  assert.ok(!canonicalJson(current).includes("apiCreditWeight"));
+  // A snapshot row written before it parses to the same row.
+  assert.equal(canonicalJson(codingCatalogRowSchema.parse(JSON.parse(JSON.stringify(before)))), canonicalJson(current));
+  // Set, it is part of the row (and of the next publish).
+  const set = resolve({ ...profile, apiCreditWeight: 12 });
+  assert.equal(set.apiCreditWeight, 12);
+  assert.notEqual(catalogContentHash([set]), catalogContentHash([current]));
+  assert.equal(codingStoredProfileSchema.safeParse({ ...profile, apiCreditWeight: 0 }).success, false);
+  assert.equal(codingStoredProfileSchema.safeParse({ ...profile, apiCreditWeight: 1_001 }).success, false);
 });
 
 test("a known provider model registered under another catalogue id is checked against the registry all the same", () => {
@@ -124,14 +235,17 @@ test("providers whose cost a token row cannot bound, and unknown providers, are 
   assert.deepEqual(codingRowRuntime(row({ provider: "not-a-provider" }), SNAPSHOT), { ok: false, code: "CODE_PROVIDER_UNSUPPORTED" });
 });
 
-test("the reservation charges the row's credit weight at its prices and records the snapshot", () => {
+test("the reservation charges the coding API's credits at the row's prices and records the snapshot and the basis", () => {
   const dedicated = row();
-  const built = codingRowRuntime(dedicated, SNAPSHOT);
-  const { model, pricing } = codingApiDedicatedModel(dedicated, built, SNAPSHOT);
+  const { built, credit } = apiCredit(dedicated);
+  const { model, pricing } = codingApiDedicatedModel(dedicated, built, SNAPSHOT, credit);
   const budget = createChatBudget("user", model, 2_000, { totalOutputTokenCap: 4_000, catalogPricing: pricing });
   assert.equal(budget.modelId, "qwen3.7-coder-plus");
-  assert.equal(budget.usageCredits, getWeightedUsageCredits({ usageClass: "standard", creditWeight: 9 }, 2_000));
-  assert.equal(budget.usageCredits, 9);
+  assert.equal(budget.usageCredits, getWeightedUsageCredits({ usageClass: "standard", creditWeight: credit.credits }, 2_000));
+  assert.deepEqual(budget.creditBasis, { basis: "chat_rule_floor", credits: credit.credits, floorCredits: credit.floorCredits });
+  // A larger prompt is charged the chat input multiplier on the same credits.
+  const long = createChatBudget("user", model, 100_000, { totalOutputTokenCap: 4_000, catalogPricing: pricing });
+  assert.equal(long.usageCredits, getWeightedUsageCredits({ usageClass: "standard", creditWeight: credit.credits }, 100_000));
   assert.equal(budget.inputUsdPerMillionTokens, 1);
   assert.equal(budget.outputUsdPerMillionTokens, 5);
   assert.equal(budget.cachedInputPriceMultiplier, 1);
@@ -145,9 +259,8 @@ test("the reservation charges the row's credit weight at its prices and records 
 
 test("an Anthropic dedicated row bounds a client's cache marker at 1.25x its own input price", () => {
   const dedicated = row({ provider: "anthropic", apiModelId: "claude-coder-x", modelId: "claude-coder-x" });
-  const built = codingRowRuntime(dedicated, SNAPSHOT);
-  assert.equal(built.ok, true);
-  const { model, pricing } = codingApiDedicatedModel(dedicated, built, SNAPSHOT);
+  const { built, credit } = apiCredit(dedicated);
+  const { model, pricing } = codingApiDedicatedModel(dedicated, built, SNAPSHOT, credit);
   assert.equal(pricing.cacheWriteUsdPerMillionTokens, 1.25);
   const marked = createChatBudget("user", model, 2_000, {
     totalOutputTokenCap: 4_000,
@@ -165,5 +278,6 @@ test("a chat model's reservation is unchanged without catalogue pricing", () => 
   const chatModel = { id: "gpt-6-luna", name: "GPT 6 Luna", apiModel: "gpt-6-luna", provider: "openai", icon: "", bestFor: "", minimumPlan: "Free", usageClass: "standard", enabled: true, status: "enabled" };
   const plain = createChatBudget("user", chatModel, 2_000, { totalOutputTokenCap: 4_000 });
   assert.notEqual(plain.costSource, "coding_catalog_snapshot");
+  assert.equal(plain.creditBasis, undefined);
   assert.ok(!String(plain.pricingVersion).startsWith("coding_catalog_snapshot"));
 });

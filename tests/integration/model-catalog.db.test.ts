@@ -378,6 +378,13 @@ test("a dedicated row's channels are its one setting, and a new draft keeps them
   assert.deepEqual(await channelsOf(), ["code", "api"]);
   await saveCodingSettings({ modelId, settings: { channels: ["code"] }, session });
   assert.deepEqual(await channelsOf(), ["code"]);
+  // Its coding API credits: set, then removed (back to the chat rule's minimum, never stored).
+  const apiCreditOf = async () => ((await prisma.modelCatalogEntry.findUnique({ where: key }))?.profile as { apiCreditWeight?: number } | null)?.apiCreditWeight;
+  const set = await saveCodingSettings({ modelId, settings: { apiCreditWeight: 12 }, session });
+  assert.deepEqual(set.changes, [{ field: "apiCreditWeight", from: null, to: 12 }]);
+  assert.equal(await apiCreditOf(), 12);
+  await saveCodingSettings({ modelId, settings: { apiCreditWeight: null }, session });
+  assert.equal(await apiCreditOf(), undefined);
 });
 
 test("an image draft carries its runtime profile and never prices another model", async () => {

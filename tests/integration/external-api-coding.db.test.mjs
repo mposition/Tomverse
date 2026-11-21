@@ -13,7 +13,9 @@ import { getSingleAccountCostCeiling, providerBudgetEnvName } from "../../lib/pr
  * have (a dedicated row) runs as its own published row on the coding API, and
  * is charged its row's credit weight at its row's prices through the same
  * reservation, provider budget and settlement as every external request; the
- * general API never offers it. Only the provider is faked.
+ * general API never offers it. Its credits there follow the chat rule (the chat
+ * floor at the chat input limit, or its apiCreditWeight), while Code keeps
+ * pricing.creditWeight. Only the provider is faked.
  */
 const databaseUrl = process.env.TEST_DATABASE_URL;
 test("the coding API over the real shared credit ledger", { skip: !databaseUrl }, async (t) => {
@@ -63,6 +65,7 @@ test("the coding API over the real shared credit ledger", { skip: !databaseUrl }
     const { GET: generalModels } = await import(mod("app/api/anthropic/v1/models/route.ts"));
     const { codingCreditFloor, loadCodingCatalog, servableCodingRows } = await import(mod("lib/modelCatalog.ts"));
     const { catalogContentHash } = await import(mod("lib/modelCatalogCore.ts"));
+    const { codingApiCreditFloor } = await import(mod("lib/codingRowRuntime.ts"));
     const keys = await import(mod("lib/externalApiKeys.ts"));
 
     const MODEL_ID = `claude-coder-fixture-${randomUUID().slice(0, 8)}`;
@@ -80,9 +83,21 @@ test("the coding API over the real shared credit ledger", { skip: !databaseUrl }
         processingRegion: "US",
         channels: ["code", "api"],
     };
-    // A weight above the coding floor, and not any chat class's default.
+    // Code's weight: above the coding floor, and not any chat class's default.
     const creditWeight = codingCreditFloor(profile) + 4;
     profile.pricing.creditWeight = creditWeight;
+    // The coding API's: the chat rule's floor at the chat input limit (Anthropic at 1.25x input).
+    const apiFloor = codingApiCreditFloor(profile, profile.capabilities.maxOutputTokens);
+    assert.ok(apiFloor !== null && apiFloor !== creditWeight);
+    /** Publishes the rows the judges admit now, as the publish step would. */
+    const publish = async () => {
+        const rows = servableCodingRows(await loadCodingCatalog(db));
+        const hash = catalogContentHash(rows);
+        const created = await db.modelCatalogSnapshot.create({
+            data: { category: "coding", contentHash: hash, payload: { models: rows }, coverageUntil: new Date(Date.now() + 86_400_000) },
+        });
+        return { rows, contentHash: hash, version: created.version };
+    };
 
     const sse = (events) => events.map(([name, data]) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`).join("");
     const anthropicStream = () =>
@@ -182,10 +197,10 @@ test("the coding API over the real shared credit ledger", { skip: !databaseUrl }
         assert.equal(reservation.source, "external_api");
         assert.equal(reservation.modelId, MODEL_ID);
         assert.equal(reservation.provider, "anthropic");
-        assert.equal(reservation.reservedCredits, creditWeight, "held at the row's credit weight");
+        assert.equal(reservation.reservedCredits, apiFloor, "held at the chat rule's floor, not Code's weight");
         assert.equal(reservation.status, "settled");
         assert.equal(reservation.outcome, "completed");
-        assert.equal(reservation.settledCredits, creditWeight, "settled once, at the row's credit weight");
+        assert.equal(reservation.settledCredits, apiFloor, "settled once, at the same credits");
         assert.equal(reservation.settledInputTokens, 1_200);
         assert.equal(reservation.settledCacheWriteInputTokens, 300);
         assert.equal(reservation.settledOutputTokens, 120);
@@ -197,6 +212,9 @@ test("the coding API over the real shared credit ledger", { skip: !databaseUrl }
         assert.equal(payload.costSource, "coding_catalog_snapshot");
         assert.equal(reservation.pricingSnapshot.pricingVersion, `coding_catalog_snapshot:${snapshot.version}:${contentHash}`);
         assert.equal(reservation.pricingSnapshot.reservationCostSource, "coding_catalog_snapshot");
+        // And on what basis its credits were set.
+        assert.deepEqual(payload.creditBasis, { basis: "chat_rule_floor", credits: apiFloor, floorCredits: apiFloor });
+        assert.deepEqual(reservation.pricingSnapshot.creditBasis, { basis: "chat_rule_floor", credits: apiFloor, floorCredits: apiFloor });
         const receipt = await db.externalApiRequest.findUnique({ where: { reservationId: reservation.id } });
         assert.equal(receipt.modelId, MODEL_ID);
         assert.equal(receipt.protocol, "anthropic_messages");
@@ -215,6 +233,32 @@ test("the coding API over the real shared credit ledger", { skip: !databaseUrl }
         assert.equal(refused.status, 404);
         assert.equal(sent.length, before);
         assert.equal(await db.chatCreditReservation.count({ where: { userId } }), 0);
+    });
+
+    await t.test("an apiCreditWeight above the floor is charged once published, and recorded as the override", async () => {
+        process.env.CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED = "true";
+        const override = apiFloor + 3;
+        await db.modelCatalogEntry.update({
+            where: { category_modelId: { category: "coding", modelId: MODEL_ID } },
+            data: { profile: { ...profile, apiCreditWeight: override } },
+        });
+        const published = await publish();
+        const userId = await newUser();
+        process.env.EXTERNAL_API_ALLOWED_USER_IDS = userId;
+        const { key } = await issueKey(userId);
+        reply = () => new Response(anthropicStream(), { status: 200, headers: { "content-type": "text/event-stream", "request-id": "req_provider_2" } });
+        const response = await messages("coding", key, body(MODEL_ID));
+        assert.equal(response.status, 200);
+        await response.text();
+        const [reservation] = await db.chatCreditReservation.findMany({ where: { userId } });
+        assert.equal(reservation.reservedCredits, override);
+        assert.equal(reservation.settledCredits, override);
+        assert.deepEqual(reservation.reservationPayload.creditBasis, { basis: "api_override", credits: override, floorCredits: apiFloor });
+        assert.deepEqual(reservation.pricingSnapshot.creditBasis, { basis: "api_override", credits: override, floorCredits: apiFloor });
+        assert.equal(reservation.pricingSnapshot.pricingVersion, `coding_catalog_snapshot:${published.version}:${published.contentHash}`);
+        // Back to the chat rule for the scenario below.
+        await db.modelCatalogEntry.update({ where: { category_modelId: { category: "coding", modelId: MODEL_ID } }, data: { profile } });
+        await publish();
     });
 
     await t.test("a row changed since publishing is not charged at the old price: it waits for the next publish", async () => {

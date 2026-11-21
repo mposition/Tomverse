@@ -2,8 +2,10 @@
 // One conversion for both places a dedicated row runs: Code's managed path
 // (lib/codeManagedService.ts) and the coding API (lib/codingCatalogChannels.ts).
 // The row is the published snapshot row; nothing here reads the database.
+import { chatUserMaxInputTokens } from "@/lib/chatInputLimits";
+import { isCreditFloor, suggestCreditFloor } from "@/lib/modelAdoptionDraft";
 import { CODE_MANAGED_UNBOUNDED_PROVIDERS, type CodingCatalogRow } from "@/lib/modelCatalogCore";
-import { MODEL_PRICING, resolveModelPricing, type ResolvedModelPricing } from "@/lib/modelPricing";
+import { MODEL_PRICING, PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER, resolveModelPricing, type ResolvedModelPricing } from "@/lib/modelPricing";
 import { isAiProvider } from "@/lib/modelRegistryShared";
 import type { AiModel } from "@/lib/models";
 
@@ -25,6 +27,9 @@ export type CodingRowRefusal =
   | "CODE_PROVIDER_COST_UNBOUNDED"
   | "CODE_REASONING_COST_UNBOUNDED"
   | "CODE_CATALOG_PRICING_CHANGED";
+
+/** What the conversion reads of a row: a published snapshot row, or a resolved catalogue row. */
+export type CodingRowInput = Pick<CodingCatalogRow, "modelId" | "name" | "apiModelId" | "provider" | "minimumPlan" | "pricing" | "capabilities">;
 
 export type CodingRowRuntime =
   | { ok: true; runtime: AiModel; price: CodingRowPrice }
@@ -49,7 +54,7 @@ export type RegistryPrice = Pick<
  * More than one profile can name one provider model (a "thinking" variant);
  * all of them are returned and the checks take the strictest.
  */
-export const registryPricesFor = (row: Pick<CodingCatalogRow, "provider" | "apiModelId" | "capabilities">, runtime: AiModel): RegistryPrice[] =>
+export const registryPricesFor = (row: Pick<CodingRowInput, "provider" | "apiModelId" | "capabilities">, runtime: AiModel): RegistryPrice[] =>
   MODEL_PRICING.filter((profile) => profile.provider === row.provider && profile.apiModelId === row.apiModelId).map((profile) =>
     resolveModelPricing({ ...runtime, id: profile.modelId }, { estimatedPromptTokens: row.capabilities.maxContextTokens })
   );
@@ -64,9 +69,9 @@ export const registryPricesFor = (row: Pick<CodingCatalogRow, "provider" | "apiM
  * provider's settable ceiling the registry knows for it.
  */
 export const codingRowRuntime = (
-  row: CodingCatalogRow,
+  row: CodingRowInput,
   snapshot: { version: number; contentHash: string },
-  deps: { registryPrices?: (row: CodingCatalogRow, runtime: AiModel) => readonly RegistryPrice[] } = {}
+  deps: { registryPrices?: (row: CodingRowInput, runtime: AiModel) => readonly RegistryPrice[] } = {}
 ): CodingRowRuntime => {
   if (!isAiProvider(row.provider)) return { ok: false, code: "CODE_PROVIDER_UNSUPPORTED" };
   if (CODE_MANAGED_UNBOUNDED_PROVIDERS.includes(row.provider)) return { ok: false, code: "CODE_PROVIDER_COST_UNBOUNDED" };
@@ -107,7 +112,7 @@ export const codingRowRuntime = (
       // No verified write rate is taken as Anthropic's 5-minute write premium
       // over the row's own input price, the same multiplier the credit floor uses.
       cacheWriteUsdPerMillionTokens:
-        row.provider === "anthropic" ? Math.max(knownWrite ?? 0, row.pricing.inputUsdPerMTok * 1.25) : knownWrite,
+        row.provider === "anthropic" ? Math.max(knownWrite ?? 0, row.pricing.inputUsdPerMTok * PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER) : knownWrite,
       maxOutputTokens: Math.min(row.capabilities.maxOutputTokens, ...known.map((price) => price.providerMaxOutputTokens ?? Infinity)),
       costSource: `coding_catalog_snapshot:${snapshot.version}:${snapshot.contentHash}`,
       cacheWriteBoundSource:
@@ -118,4 +123,87 @@ export const codingRowRuntime = (
             : "no_cache_write_requested",
     },
   };
+};
+
+// --- credits on the coding API (owner decision 2026-11-21) --------------------
+//
+// The coding API takes every model's input up to chatUserMaxInputTokens() and
+// settles through the chat reservation, input-size multiplier included, so a
+// dedicated row there is charged by the chat rule: the chat catalogue's own
+// floor (suggestCreditFloor, as the chat registry screen and adoption use it)
+// at that input limit and the row's output ceiling. Code's managed path keeps
+// `pricing.creditWeight`, whose floor (codingCreditFloor) assumes the whole
+// context window as input and would overcharge here.
+
+export type CodingApiCreditBasis = "chat_rule_floor" | "api_override";
+
+export type CodingApiCredit =
+  | { ok: true; credits: number; basis: CodingApiCreditBasis; floorCredits: number }
+  | { ok: false; reason: "api_credit_floor_unbounded" | `api_credits_below_floor:${number}`; floorCredits: number | null };
+
+/**
+ * The chat rule's minimum credits for a dedicated row on the coding API, or
+ * null when it cannot be worked out (no price, no output cap, or above every
+ * class). `maxOutputTokens` is the row's output ceiling as codingRowRuntime
+ * bounds it against the registry.
+ */
+export const codingApiCreditFloor = (
+  row: Pick<CodingCatalogRow, "provider" | "pricing">,
+  maxOutputTokens: number,
+  worstCaseInputTokens: number = chatUserMaxInputTokens()
+): number | null => {
+  const floor = suggestCreditFloor({
+    inputUsdPerMillionTokens: row.pricing.inputUsdPerMTok,
+    outputUsdPerMillionTokens: row.pricing.outputUsdPerMTok,
+    maxOutputTokens,
+    inputPriceMultiplier: row.provider === "anthropic" ? PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER : 1,
+    worstCaseInputTokens,
+  });
+  return isCreditFloor(floor) ? floor.credits : null;
+};
+
+/**
+ * What a dedicated row is charged per request on the coding API: its
+ * `apiCreditWeight` when the operator set one at or above the chat rule's
+ * minimum, otherwise that minimum. Refused -- the row is not offered on the
+ * coding API, Code is unaffected -- when the minimum cannot be worked out or
+ * the override is below it.
+ */
+export const codingApiCredit = (
+  row: Pick<CodingCatalogRow, "provider" | "pricing" | "apiCreditWeight">,
+  maxOutputTokens: number,
+  worstCaseInputTokens?: number
+): CodingApiCredit => {
+  const floorCredits = codingApiCreditFloor(row, maxOutputTokens, worstCaseInputTokens);
+  if (floorCredits === null) return { ok: false, reason: "api_credit_floor_unbounded", floorCredits };
+  if (row.apiCreditWeight === undefined) return { ok: true, credits: floorCredits, basis: "chat_rule_floor", floorCredits };
+  if (row.apiCreditWeight < floorCredits) return { ok: false, reason: `api_credits_below_floor:${floorCredits}`, floorCredits };
+  return { ok: true, credits: row.apiCreditWeight, basis: "api_override", floorCredits };
+};
+
+/** What the coding catalogue screen shows of a dedicated row's two credits. */
+export type CodingApiCreditView = {
+  /** Code's managed-path credits (`pricing.creditWeight`). */
+  codeCredits: number;
+  /** The operator's coding API credits, when set. */
+  override: number | null;
+  /** The chat rule's minimum on the coding API; null when it cannot be worked out. */
+  floorCredits: number | null;
+  /** What the coding API charges; null while it refuses the row. */
+  credits: number | null;
+  basis: CodingApiCreditBasis | null;
+  /** Why the coding API does not offer the row, or null. */
+  refusal: string | null;
+};
+
+export const codingApiCreditView = (row: CodingRowInput & Pick<CodingCatalogRow, "apiCreditWeight">): CodingApiCreditView => {
+  const codeCredits = row.pricing.creditWeight;
+  const override = row.apiCreditWeight ?? null;
+  // The same conversion and output ceiling a request is charged at.
+  const built = codingRowRuntime(row, { version: 0, contentHash: "" });
+  if (!built.ok) return { codeCredits, override, floorCredits: null, credits: null, basis: null, refusal: built.code };
+  const credit = codingApiCredit(row, built.price.maxOutputTokens);
+  return credit.ok
+    ? { codeCredits, override, floorCredits: credit.floorCredits, credits: credit.credits, basis: credit.basis, refusal: null }
+    : { codeCredits, override, floorCredits: credit.floorCredits, credits: null, basis: null, refusal: credit.reason };
 };

@@ -173,8 +173,19 @@ the CLI moved onto the coding API) and that the coding judge still admits now
 (docs/policy/code-task-cost-guardrails.md 6.3). A chat link runs and bills as
 its chat registry model. A coding row chat does not have (a dedicated row)
 runs as its own published row: its API model id, context, output limit, input
-and output prices and credit weight, through the same reservation, provider
-budget, concurrency, key cap and settlement as every request here. Its
+and output prices, through the same reservation, provider budget,
+concurrency, key cap and settlement as every request here. Its credits follow
+the chat rule (owner decision 2026-11-21): this API takes at most the chat
+input limit (`CHAT_USER_MAX_INPUT_TOKENS`) and settles with the chat input
+multiplier, so a request is charged the row's `apiCreditWeight` when the
+operator set one, otherwise the chat catalogue's own floor
+(`suggestCreditFloor` at that input limit, the row's output ceiling and, for
+Anthropic, 1.25x input), worked out when the request is priced and never
+stored. An override below that floor, or a floor that cannot be worked out,
+keeps the row off this API. Code's managed path keeps the row's
+`pricing.creditWeight`. The reservation and the settlement record
+`creditBasis` (`chat_rule_floor` or `api_override`, the credits and the
+floor), and `credits_per_request` lists the same credits. Its
 reservation records `pricingVersion: coding_catalog_snapshot:<version>:<hash>`
 and `costSource: coding_catalog_snapshot`, and the settlement's pricing
 snapshot carries both, so a receipt names the catalogue version it was charged

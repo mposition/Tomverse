@@ -623,9 +623,10 @@ export function CodingLinkDetail({
 }
 
 /**
- * Where a dedicated row is offered: Code and the coding API (owner decision
- * 2026-11-21). The one setting such a row has on this screen; its profile
- * changes only through a new draft.
+ * A dedicated row's settings on this screen (owner decision 2026-11-21): where
+ * it is offered (Code, the coding API) and, on the coding API, its credits --
+ * the chat rule's minimum unless the operator enters a higher one. Code keeps
+ * the profile's credit weight. Everything else changes through a new draft.
  */
 export function CodingChannelsTile({
   c,
@@ -636,10 +637,21 @@ export function CodingChannelsTile({
   c: CodingMessages;
   item: CodingCatalogItem;
   busy: boolean;
-  onSave: (channels: string[]) => void;
+  onSave: (settings: { channels?: string[]; apiCreditWeight?: number | null }) => void;
 }) {
   const [channels, setChannels] = useState<string[]>(item.channels);
-  const changed = CODING_CHANNEL_ORDER.filter((channel) => channels.includes(channel)).join(",") !== item.channels.join(",");
+  const storedOverride = item.apiCredit?.override ?? null;
+  const [override, setOverride] = useState<string>(storedOverride === null ? "" : String(storedOverride));
+  const ordered = CODING_CHANNEL_ORDER.filter((channel) => channels.includes(channel));
+  const channelsChanged = ordered.join(",") !== item.channels.join(",");
+  const typed = override.trim() === "" ? null : Number(override.trim());
+  const overrideInvalid = typed !== null && (!Number.isInteger(typed) || typed <= 0 || typed > 1_000);
+  const overrideChanged = !overrideInvalid && typed !== storedOverride;
+  const credit = item.apiCredit;
+  const floor = credit?.floorCredits ?? null;
+  const onApi = channels.includes("api");
+  const save = () =>
+    onSave({ ...(channelsChanged ? { channels: ordered } : {}), ...(overrideChanged ? { apiCreditWeight: typed } : {}) });
   return (
     <AdminTile title={c.detail.channelsTitle}>
       <div className="flex flex-wrap gap-3">
@@ -661,9 +673,43 @@ export function CodingChannelsTile({
       <p className={`text-xs ${channels.length === 0 ? "font-bold text-red-300" : "text-zinc-500"}`}>
         {channels.length === 0 ? c.detail.channelsNone : c.detail.channelsHelp}
       </p>
+      <div className="flex flex-col gap-1 border-t border-zinc-800 pt-3" data-testid="coding-dedicated-credits">
+        <p className="text-sm font-bold text-zinc-100">
+          {c.detail.codeCreditsTitle} <span className="font-mono">×{credit?.codeCredits ?? "—"}</span>
+        </p>
+        <p className="text-xs text-zinc-500">{c.detail.codeCreditsHelp}</p>
+      </div>
+      {onApi ? (
+        <div className="flex flex-col gap-1" data-testid="coding-dedicated-api-credits">
+          <label className="text-sm font-bold text-zinc-100" htmlFor={`coding-api-credit-${item.id}`}>
+            {c.detail.apiCreditsTitle}
+          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              id={`coding-api-credit-${item.id}`}
+              inputMode="numeric"
+              value={override}
+              placeholder={floor === null ? "" : String(floor)}
+              onChange={(event) => setOverride(event.target.value)}
+              data-testid="coding-dedicated-api-credit-input"
+              className="w-28 rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-right font-mono text-sm text-zinc-100 outline-none focus:border-blue-500"
+            />
+            {floor === null ? (
+              <AdminStatusChip tone="bad">{c.detail.apiCreditsUnbounded}</AdminStatusChip>
+            ) : overrideInvalid ? (
+              <AdminStatusChip tone="bad">{c.detail.weightInvalid}</AdminStatusChip>
+            ) : typed !== null && typed < floor ? (
+              <AdminStatusChip tone="bad">{c.detail.apiCreditsBelow(floor)}</AdminStatusChip>
+            ) : (
+              <AdminStatusChip tone="ok">{typed === null ? c.detail.apiCreditsDefault(floor) : c.detail.weightFloorOk(floor)}</AdminStatusChip>
+            )}
+          </div>
+          <p className="text-xs text-zinc-500">{c.detail.apiCreditsHelp}</p>
+        </div>
+      ) : null}
       <AdminWriteButton
-        disabled={busy || !changed || channels.length === 0}
-        onClick={() => onSave(CODING_CHANNEL_ORDER.filter((channel) => channels.includes(channel)))}
+        disabled={busy || (!channelsChanged && !overrideChanged) || channels.length === 0 || overrideInvalid}
+        onClick={save}
         data-testid="coding-dedicated-channels-save"
       >
         {c.detail.save}
