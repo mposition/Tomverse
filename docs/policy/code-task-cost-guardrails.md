@@ -208,15 +208,41 @@ User-Agent로 채널을 나누지 않습니다.
 - **채팅 연결 행**은 채팅 레지스트리 경로 그대로 실행·과금합니다(가격·크레딧은 채팅 모델의 것).
   연결 행의 `creditWeight` 덮어쓰기는 Code 관리형 경로에만 쓰입니다.
 - **전용 행**은 발행된 자기 행으로 실행합니다(`lib/codingRowRuntime.ts`, 관리형 경로와 같은 변환).
-  크레딧은 행의 `pricing.creditWeight`, 단가는 행의 입력·출력 단가이며, 외부 API의 기존 예약·정산
-  (`acquireChatAccess`·`settleChatUsage`, 공급자 비용 예산, 동시성, 키 상한, 계정 크레딧)을 그대로
-  탑니다. 검증되지 않은 캐시 할인은 정가로, Anthropic 행의 캐시 쓰기는 자기 입력 단가의 1.25배로
-  예약합니다. 예약과 정산 스냅샷에 `pricingVersion: coding_catalog_snapshot:<version>:<hash>`와
+  단가는 행의 입력·출력 단가이며, 외부 API의 기존 예약·정산(`acquireChatAccess`·`settleChatUsage`,
+  공급자 비용 예산, 동시성, 키 상한, 계정 크레딧)을 그대로 탑니다.
+- **전용 행의 코딩 API 크레딧**은 채팅과 같은 규칙입니다(운영자 결정 2026-11-21). 코딩 API는 모든
+  모델의 입력을 `chatUserMaxInputTokens()`로 제한하고 채팅 예약·정산(입력 크기별 배수 포함)을 타므로,
+  전체 컨텍스트를 최악의 입력으로 보는 Code 기준 하한(`codingCreditFloor`)은 여기서 과합니다.
+  - 기본값은 채팅 규칙 하한입니다. 채팅 가드레일·`suggestCreditFloor`와 같은 산식(크레딧 × 입력 배수 ×
+    `COST_PER_CREDIT_CEILING_MICRO_USD`가 최악 비용을 덮음)으로, 입력 배수 구간(`INPUT_CREDIT_MULTIPLIERS`:
+    16k까지 ×1, 50k까지 ×1.5, 100k까지 ×2, 그 위 ×3)마다 그 구간의 가장 큰 입력(상한
+    `chatUserMaxInputTokens()`까지)과 레지스트리 공급자 상한으로 묶은 최대 출력의 최악 비용(행의 입력·
+    출력 단가, Anthropic은 입력 1.25배)을 `ceil(최악 비용 / (구간 배수 × 크레딧당 micro-USD))`로 나눈 값
+    중 가장 큰 것입니다. 출력 단가가 큰 모델은 짧은 입력 구간(×1)에서 하한이 정해집니다(검토
+    r-20261121-013001-f5a5e7). 채팅 등급 크레딧(최대 80)으로 올려 맞추지 않고 직접 계산하므로 81~1,000도
+    그대로 받습니다(검토 r-20261121-015353-7a8db0). 1,000(덮어쓰기 상한)을 넘으면 계산할 수 없는 것으로
+    봅니다. `suggestCreditFloor` 자체는 바꾸지 않았습니다. 저장하지 않고 과금할 때 계산하므로
+    `apiCreditWeight`가 없는 행과 스냅샷의 canonicalJson·해시는 그대로입니다. 그래서 이 값은
+    `CHAT_USER_MAX_INPUT_TOKENS` 같은 런타임 값을 따라 달라집니다(채팅 모델 과금과 같은 성질).
+  - 운영자가 더 받고 싶으면 전용 행에 `apiCreditWeight`(1~1,000 정수)를 넣습니다. 하한 이상이면 그 값을
+    받고, 하한 미만이거나 하한을 계산할 수 없으면(가격·출력 상한을 모르거나 1,000을 넘음) 코딩
+    API는 그 행을 노출하지 않습니다(`api_credits_below_floor:<N>`, `api_credit_floor_unbounded`).
+    Code 노출은 그대로입니다. `apiCreditWeight`는 행의 일부라 바꾸면 다음 발행 뒤 적용됩니다.
+  - 코딩 API의 전용 행은 입력을 `chatUserMaxInputTokens()`까지만 받습니다. 채팅 장문맥
+    (`CHAT_LONG_CONTEXT_ENABLED`)이 켜져 있어도 같고, 넘는 요청은 보내거나 잡아 두지 않고
+    `CHAT_INPUT_TOKEN_LIMIT`(413)로 거절합니다. 하한과 `/models`가 그 한도를 기준으로 하기 때문입니다.
+    채팅 연결 행과 일반 API는 그대로입니다.
+  - `pricing.creditWeight`는 Tomverse Code(관리형) 크레딧으로 그대로이며, 판정의 Code 하한도 그대로입니다.
+  - 예약 payload와 정산 `pricingSnapshot`에 `creditBasis: { basis: "chat_rule_floor" | "api_override",
+    credits, floorCredits }`가 남습니다(새 컬럼 없음). `/api/code/v1/models`의 `credits_per_request`와
+    Smart Adaptive의 크레딧도 같은 값입니다. Admin 코딩 행 상세는 두 크레딧을 나눠 보여 줍니다.
+- 전용 행 실행의 그 밖의 규칙: 검증되지 않은 캐시 할인은 정가로, Anthropic 행의 캐시 쓰기는 자기
+  입력 단가의 1.25배로 예약합니다. 예약과 정산 스냅샷에 `pricingVersion: coding_catalog_snapshot:<version>:<hash>`와
   `costSource: coding_catalog_snapshot`이 남아 어떤 카탈로그 버전으로 과금했는지 보입니다(새 컬럼
   없음). 지금 판정이 허용하는 행이 발행된 행과 정확히 같을 때만 노출합니다 — 바뀐 값은 다음 발행
   뒤에 과금합니다. 상한이 없는 공급자(`CODE_MANAGED_UNBOUNDED_PROVIDERS`)는 코딩 API 채널을 켠
-  전용 행에서 판정이 거절하고(`provider_cost_unbounded`) 실행 직전에도 거절합니다. 크레딧 하한
-  아래인 행은 판정이 이미 거절합니다.
+  전용 행에서 판정이 거절하고(`provider_cost_unbounded`) 실행 직전에도 거절합니다. Code 크레딧
+  (`pricing.creditWeight`)이 Code 하한 아래인 행은 판정이 이미 거절합니다.
 - 플랜 검사(Free는 API·CLI 불가)는 두 API 모두 그대로입니다.
 - 스냅샷이 없거나 coverage가 지났으면 코딩 API는 아무 모델도 내놓지 않습니다(채팅 레지스트리
   전체로 되돌아가지 않음). 로그 `coding_catalog_external_channels_no_snapshot`을 남깁니다. 발행 뒤

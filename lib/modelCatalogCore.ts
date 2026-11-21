@@ -384,11 +384,25 @@ export const applyCodingDraftEdits = (
 // (CodingProviderTerms). A dedicated row's own terms stand in until its
 // provider has a record, so no row that serves today is refused by the move.
 
+/**
+ * A dedicated row's credits on the coding API, when the operator charges more
+ * there than the chat rule's minimum (owner decision 2026-11-21). Absent -- the
+ * default, and every row stored before it -- the coding API charges that
+ * minimum, worked out when a request is priced (lib/codingRowRuntime.ts
+ * codingApiCredit); it is never stored, so a row without it hashes as before.
+ * `pricing.creditWeight` stays Code's managed-path credits.
+ */
+/** The most a coding API credit may be, override or floor (lib/codingRowRuntime.ts codingApiCreditFloor). */
+export const CODING_API_CREDIT_WEIGHT_MAX = 1_000;
+
+export const codingApiCreditWeightSchema = z.number().int().positive().max(CODING_API_CREDIT_WEIGHT_MAX);
+
 /** A dedicated row: the whole profile, plus where it is offered (Code only until set). */
 export const codingDedicatedProfileSchema = codingProfileSchema
   .extend({
     source: z.literal("dedicated").optional(),
     channels: codingChannelsSchema.optional(),
+    apiCreditWeight: codingApiCreditWeightSchema.optional(),
   })
   .strict();
 export type CodingDedicatedProfile = z.infer<typeof codingDedicatedProfileSchema>;
@@ -441,6 +455,8 @@ export const codingCatalogRowSchema = z
     source: z.enum(["dedicated", "chat"]).default("dedicated"),
     registryModelId: z.string().regex(MODEL_ID_PATTERN).optional(),
     channels: codingChannelsSchema.default(["code"]),
+    /** A dedicated row's coding API credits, when set (codingDedicatedProfileSchema). */
+    apiCreditWeight: codingApiCreditWeightSchema.optional(),
     name: codingProfileSchema.shape.name,
     provider: codingProfileSchema.shape.provider,
     apiModelId: codingProfileSchema.shape.apiModelId,
@@ -466,12 +482,12 @@ export const codingCatalogRowSchema = z
 export type CodingCatalogRow = z.output<typeof codingCatalogRowSchema>;
 
 /** A row as the judge sees it: provider conditions may still be missing. */
-export type CodingJudgeInput = Omit<CodingCatalogRow, "modelId" | "source" | "channels" | "registryModelId" | "terms" | "retention" | "processingRegion"> & {
+export type CodingJudgeInput = Omit<CodingCatalogRow, "modelId" | "source" | "channels" | "registryModelId" | "apiCreditWeight" | "terms" | "retention" | "processingRegion"> & {
   terms: CodingCatalogRow["terms"] | null;
   retention: CodingCatalogRow["retention"] | null;
   processingRegion: string | null;
 };
-export type CodingResolvedRow = Pick<CodingCatalogRow, "modelId" | "source" | "registryModelId" | "channels"> & CodingJudgeInput;
+export type CodingResolvedRow = Pick<CodingCatalogRow, "modelId" | "source" | "registryModelId" | "channels" | "apiCreditWeight"> & CodingJudgeInput;
 
 /** What an operator applied for one provider (CodingProviderTerms.terms). */
 export const codingProviderTermsSchema = z
@@ -665,6 +681,7 @@ export const resolveCodingEntry = (input: {
       modelId: input.modelId,
       source: "dedicated",
       channels,
+      ...(stored.apiCreditWeight === undefined ? {} : { apiCreditWeight: stored.apiCreditWeight }),
       name: stored.name,
       provider: stored.provider,
       apiModelId: stored.apiModelId,

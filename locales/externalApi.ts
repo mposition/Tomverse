@@ -1,7 +1,7 @@
 /** Settings > API keys (docs/policy/external-api.md). One shape per language. */
 const en = {
     entryTitle: "API keys",
-    entryDescription: "Use your Tomverse models and credits in coding tools such as Aside and VS Code.",
+    entryDescription: "Use your Tomverse models and credits in apps such as Aside and in coding tools such as Claude Code, Codex, Cursor and VS Code.",
     entryOpen: "Manage",
     pageTitle: "API keys",
     intro: "Requests made with a key use this account's credits, the same way Chat does. Every model call a tool makes is its own request — including each step after a tool runs.",
@@ -33,7 +33,7 @@ const en = {
     asideTitle: "Aside",
     asideHint: "In Aside, add a Custom Provider and paste this JSON.",
     vscodeTitle: "VS Code",
-    vscodeHint: "Run “Chat: Manage Language Models”, choose Add Models → Custom Endpoint, and use this as the file contents. VS Code asks for the key once and stores it securely.",
+    vscodeHint: "Run “Chat: Manage Language Models”, choose Add Models → Custom Endpoint, and use this as the file contents. It connects GitHub Copilot Chat to Tomverse's coding API. VS Code asks for the key once and stores it securely.",
     genericTitle: "Other OpenAI-compatible tools",
     genericHint: "Any app that takes a custom OpenAI Chat Completions endpoint (base URL, API key, model).",
     includeInConfig: "Include in the client configuration",
@@ -132,7 +132,7 @@ type ExternalApiCopy = typeof en;
 
 const ko: ExternalApiCopy = {
     entryTitle: "API 키",
-    entryDescription: "Aside, VS Code 같은 코딩 도구에서 Tomverse 모델과 크레딧을 사용합니다.",
+    entryDescription: "Aside 같은 앱과 Claude Code·Codex·Cursor·VS Code 같은 코딩 도구에서 Tomverse 모델과 크레딧을 사용합니다.",
     entryOpen: "관리",
     pageTitle: "API 키",
     intro: "키로 보낸 요청은 Chat과 똑같이 이 계정의 크레딧을 사용합니다. 도구가 모델을 부를 때마다 각각 별도 요청이며, 도구 실행 뒤의 단계도 마찬가지입니다.",
@@ -164,7 +164,7 @@ const ko: ExternalApiCopy = {
     asideTitle: "Aside",
     asideHint: "Aside에서 Custom Provider를 추가하고 이 JSON을 붙여 넣으세요.",
     vscodeTitle: "VS Code",
-    vscodeHint: "“Chat: Manage Language Models”를 실행하고 Add Models → Custom Endpoint를 고른 뒤 파일 내용을 이것으로 바꾸세요. VS Code가 키를 한 번 묻고 안전하게 보관합니다.",
+    vscodeHint: "“Chat: Manage Language Models”를 실행하고 Add Models → Custom Endpoint를 고른 뒤 파일 내용을 이것으로 바꾸세요. GitHub Copilot Chat을 Tomverse 코딩 API에 연결합니다. VS Code가 키를 한 번 묻고 안전하게 보관합니다.",
     genericTitle: "그 밖의 OpenAI 호환 도구",
     genericHint: "사용자 지정 OpenAI Chat Completions 엔드포인트(기본 URL, API 키, 모델)를 받는 앱이면 이 세 값을 넣으면 됩니다.",
     includeInConfig: "클라이언트 설정에 포함",
@@ -261,7 +261,7 @@ const ko: ExternalApiCopy = {
 
 const zh: ExternalApiCopy = {
     entryTitle: "API 密钥",
-    entryDescription: "在 Aside、VS Code 等编程工具中使用你的 Tomverse 模型和积分。",
+    entryDescription: "在 Aside 等应用以及 Claude Code、Codex、Cursor、VS Code 等编程工具中使用你的 Tomverse 模型和积分。",
     entryOpen: "管理",
     pageTitle: "API 密钥",
     intro: "用密钥发出的请求和 Chat 一样消耗本账户的积分。工具每调用一次模型就是一个单独的请求，包括工具运行之后的每一步。",
@@ -293,7 +293,7 @@ const zh: ExternalApiCopy = {
     asideTitle: "Aside",
     asideHint: "在 Aside 中添加 Custom Provider，并粘贴此 JSON。",
     vscodeTitle: "VS Code",
-    vscodeHint: "运行“Chat: Manage Language Models”，选择 Add Models → Custom Endpoint，并将文件内容替换为以下内容。VS Code 会询问一次密钥并安全保存。",
+    vscodeHint: "运行“Chat: Manage Language Models”，选择 Add Models → Custom Endpoint，并将文件内容替换为以下内容。这会把 GitHub Copilot Chat 连接到 Tomverse 编程 API。VS Code 会询问一次密钥并安全保存。",
     genericTitle: "其他兼容 OpenAI 的工具",
     genericHint: "任何支持自定义 OpenAI Chat Completions 端点（基础 URL、API 密钥、模型）的应用都可以填入这三项。",
     includeInConfig: "包含在客户端配置中",
@@ -390,7 +390,7 @@ const zh: ExternalApiCopy = {
 
 const zhHant: ExternalApiCopy = {
     entryTitle: "API 金鑰",
-    entryDescription: "在 Aside、VS Code 等程式設計工具中使用你的 Tomverse 模型和點數。",
+    entryDescription: "在 Aside 等應用程式以及 Claude Code、Codex、Cursor、VS Code 等程式設計工具中使用你的 Tomverse 模型和點數。",
     entryOpen: "管理",
     pageTitle: "API 金鑰",
     intro: "用金鑰發出的請求和 Chat 一樣使用本帳戶的點數。工具每呼叫一次模型就是一個獨立請求，包括工具執行之後的每一步。",
@@ -422,7 +422,7 @@ const zhHant: ExternalApiCopy = {
     asideTitle: "Aside",
     asideHint: "在 Aside 中新增 Custom Provider，並貼上這段 JSON。",
     vscodeTitle: "VS Code",
-    vscodeHint: "執行「Chat: Manage Language Models」，選擇 Add Models → Custom Endpoint，並把檔案內容換成以下內容。VS Code 會詢問一次金鑰並安全保存。",
+    vscodeHint: "執行「Chat: Manage Language Models」，選擇 Add Models → Custom Endpoint，並把檔案內容換成以下內容。這會把 GitHub Copilot Chat 連接到 Tomverse 程式設計 API。VS Code 會詢問一次金鑰並安全保存。",
     genericTitle: "其他相容 OpenAI 的工具",
     genericHint: "任何支援自訂 OpenAI Chat Completions 端點（基礎 URL、API 金鑰、模型）的應用程式都可以填入這三項。",
     includeInConfig: "包含在用戶端設定中",
@@ -519,7 +519,7 @@ const zhHant: ExternalApiCopy = {
 
 const fr: ExternalApiCopy = {
     entryTitle: "Clés API",
-    entryDescription: "Utilisez vos modèles et crédits Tomverse dans des outils de code comme Aside et VS Code.",
+    entryDescription: "Utilisez vos modèles et crédits Tomverse dans des applications comme Aside et des outils de code comme Claude Code, Codex, Cursor et VS Code.",
     entryOpen: "Gérer",
     pageTitle: "Clés API",
     intro: "Les requêtes faites avec une clé utilisent les crédits de ce compte, exactement comme Chat. Chaque appel de modèle d'un outil est une requête distincte, y compris chaque étape après l'exécution d'un outil.",
@@ -551,7 +551,7 @@ const fr: ExternalApiCopy = {
     asideTitle: "Aside",
     asideHint: "Dans Aside, ajoutez un Custom Provider et collez ce JSON.",
     vscodeTitle: "VS Code",
-    vscodeHint: "Lancez « Chat: Manage Language Models », choisissez Add Models → Custom Endpoint et utilisez ceci comme contenu du fichier. VS Code demande la clé une fois et la conserve de façon sécurisée.",
+    vscodeHint: "Lancez « Chat: Manage Language Models », choisissez Add Models → Custom Endpoint et utilisez ceci comme contenu du fichier. Cela connecte GitHub Copilot Chat à l’API de code de Tomverse. VS Code demande la clé une fois et la conserve de façon sécurisée.",
     genericTitle: "Autres outils compatibles OpenAI",
     genericHint: "Toute application qui accepte un point de terminaison OpenAI Chat Completions personnalisé (URL de base, clé API, modèle).",
     includeInConfig: "Inclure dans la configuration du client",
@@ -648,7 +648,7 @@ const fr: ExternalApiCopy = {
 
 const de: ExternalApiCopy = {
     entryTitle: "API-Schlüssel",
-    entryDescription: "Nutzen Sie Ihre Tomverse-Modelle und -Credits in Coding-Tools wie Aside und VS Code.",
+    entryDescription: "Nutzen Sie Ihre Tomverse-Modelle und -Credits in Apps wie Aside und in Coding-Tools wie Claude Code, Codex, Cursor und VS Code.",
     entryOpen: "Verwalten",
     pageTitle: "API-Schlüssel",
     intro: "Anfragen mit einem Schlüssel verbrauchen die Credits dieses Kontos – genau wie Chat. Jeder Modellaufruf eines Tools ist eine eigene Anfrage, auch jeder Schritt nach einer Tool-Ausführung.",
@@ -680,7 +680,7 @@ const de: ExternalApiCopy = {
     asideTitle: "Aside",
     asideHint: "Fügen Sie in Aside einen Custom Provider hinzu und fügen Sie dieses JSON ein.",
     vscodeTitle: "VS Code",
-    vscodeHint: "Führen Sie „Chat: Manage Language Models“ aus, wählen Sie Add Models → Custom Endpoint und verwenden Sie dies als Dateiinhalt. VS Code fragt den Schlüssel einmal ab und speichert ihn sicher.",
+    vscodeHint: "Führen Sie „Chat: Manage Language Models“ aus, wählen Sie Add Models → Custom Endpoint und verwenden Sie dies als Dateiinhalt. Damit wird GitHub Copilot Chat mit der Coding-API von Tomverse verbunden. VS Code fragt den Schlüssel einmal ab und speichert ihn sicher.",
     genericTitle: "Andere OpenAI-kompatible Tools",
     genericHint: "Jede App, die einen eigenen OpenAI-Chat-Completions-Endpunkt annimmt (Basis-URL, API-Schlüssel, Modell).",
     includeInConfig: "In die Client-Konfiguration aufnehmen",
@@ -777,7 +777,7 @@ const de: ExternalApiCopy = {
 
 const es: ExternalApiCopy = {
     entryTitle: "Claves de API",
-    entryDescription: "Usa tus modelos y créditos de Tomverse en herramientas de código como Aside y VS Code.",
+    entryDescription: "Usa tus modelos y créditos de Tomverse en apps como Aside y en herramientas de código como Claude Code, Codex, Cursor y VS Code.",
     entryOpen: "Gestionar",
     pageTitle: "Claves de API",
     intro: "Las solicitudes hechas con una clave usan los créditos de esta cuenta, igual que Chat. Cada llamada al modelo que hace una herramienta es una solicitud aparte, incluido cada paso después de ejecutar una herramienta.",
@@ -809,7 +809,7 @@ const es: ExternalApiCopy = {
     asideTitle: "Aside",
     asideHint: "En Aside, añade un Custom Provider y pega este JSON.",
     vscodeTitle: "VS Code",
-    vscodeHint: "Ejecuta «Chat: Manage Language Models», elige Add Models → Custom Endpoint y usa esto como contenido del archivo. VS Code pide la clave una vez y la guarda de forma segura.",
+    vscodeHint: "Ejecuta «Chat: Manage Language Models», elige Add Models → Custom Endpoint y usa esto como contenido del archivo. Conecta GitHub Copilot Chat con la API de código de Tomverse. VS Code pide la clave una vez y la guarda de forma segura.",
     genericTitle: "Otras herramientas compatibles con OpenAI",
     genericHint: "Cualquier app que acepte un endpoint personalizado de OpenAI Chat Completions (URL base, clave de API, modelo).",
     includeInConfig: "Incluir en la configuración del cliente",
@@ -906,7 +906,7 @@ const es: ExternalApiCopy = {
 
 const pt: ExternalApiCopy = {
     entryTitle: "Chaves de API",
-    entryDescription: "Use seus modelos e créditos da Tomverse em ferramentas de código como Aside e VS Code.",
+    entryDescription: "Use seus modelos e créditos da Tomverse em apps como o Aside e em ferramentas de código como Claude Code, Codex, Cursor e VS Code.",
     entryOpen: "Gerenciar",
     pageTitle: "Chaves de API",
     intro: "As solicitações feitas com uma chave usam os créditos desta conta, assim como o Chat. Cada chamada de modelo feita por uma ferramenta é uma solicitação separada, incluindo cada etapa depois que uma ferramenta é executada.",
@@ -938,7 +938,7 @@ const pt: ExternalApiCopy = {
     asideTitle: "Aside",
     asideHint: "No Aside, adicione um Custom Provider e cole este JSON.",
     vscodeTitle: "VS Code",
-    vscodeHint: "Execute “Chat: Manage Language Models”, escolha Add Models → Custom Endpoint e use isto como conteúdo do arquivo. O VS Code pede a chave uma vez e a guarda com segurança.",
+    vscodeHint: "Execute “Chat: Manage Language Models”, escolha Add Models → Custom Endpoint e use isto como conteúdo do arquivo. Isso conecta o GitHub Copilot Chat à API de código da Tomverse. O VS Code pede a chave uma vez e a guarda com segurança.",
     genericTitle: "Outras ferramentas compatíveis com OpenAI",
     genericHint: "Qualquer app que aceite um endpoint personalizado de OpenAI Chat Completions (URL base, chave de API, modelo).",
     includeInConfig: "Incluir na configuração do cliente",

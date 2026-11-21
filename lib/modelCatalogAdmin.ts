@@ -475,14 +475,19 @@ export const applyCatalogDraft = async (input: {
       const floor = codingCreditFloor(edited.profile);
       if (floor === null) throw new CatalogRefusal("not_admitted", ["credit_floor_unbounded"]);
       if (edited.profile.pricing.creditWeight < floor) throw new CatalogRefusal("not_admitted", [`credits_below_floor:${floor}`]);
-      // A new draft replaces the profile, not where the row is offered: a
-      // dedicated row keeps the channels the operator chose for it.
+      // A new draft replaces the profile, not the operator's own settings on
+      // it: a dedicated row keeps where it is offered and its coding API credits.
       const stored = codingDedicatedProfileSchema.safeParse(rows[0]?.profile);
-      const channels = stored.success ? stored.data.channels : undefined;
+      const kept = stored.success
+        ? {
+            ...(stored.data.channels ? { channels: stored.data.channels } : {}),
+            ...(stored.data.apiCreditWeight === undefined ? {} : { apiCreditWeight: stored.data.apiCreditWeight }),
+          }
+        : {};
       await updateCatalogEntry({
         category: "coding",
         modelId: input.modelId,
-        patch: { profile: channels ? { ...edited.profile, channels } : edited.profile },
+        patch: { profile: { ...edited.profile, ...kept } },
         session: input.session,
         request: input.request,
         tx,

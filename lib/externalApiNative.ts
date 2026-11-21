@@ -607,6 +607,7 @@ export async function handleNativeGeneration(
                     requestDigest,
                     idempotencyKeyDigest,
                     protocol: spec.protocol,
+                    surface: options.surface,
                     ...(entry.routedBy
                         ? {
                               routing: {

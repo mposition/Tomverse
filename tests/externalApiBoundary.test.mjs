@@ -96,6 +96,46 @@ test("native protocols: one upstream call per request, at a fixed provider URL w
     }
 });
 
+test("each route names its API by its address, and the receipt records it", () => {
+    // The general API: /api/v1 and /api/anthropic. The coding API: /api/code/...
+    const routes = {
+        "app/api/v1/chat/completions/route.ts": "general",
+        "app/api/v1/responses/route.ts": "general",
+        "app/api/v1/models/route.ts": "general",
+        "app/api/anthropic/v1/messages/route.ts": "general",
+        "app/api/anthropic/v1/messages/count_tokens/route.ts": "general",
+        "app/api/anthropic/v1/models/route.ts": "general",
+        "app/api/code/v1/chat/completions/route.ts": "coding",
+        "app/api/code/v1/responses/route.ts": "coding",
+        "app/api/code/v1/models/route.ts": "coding",
+        "app/api/code/anthropic/v1/messages/route.ts": "coding",
+        "app/api/code/anthropic/v1/messages/count_tokens/route.ts": "coding",
+        "app/api/code/anthropic/v1/models/route.ts": "coding",
+    };
+    for (const [file, surface] of Object.entries(routes)) {
+        const source = read(file);
+        const named = [...source.matchAll(/surface: "(general|coding)"|, "(general|coding)"\)/g)].map((match) => match[1] ?? match[2]);
+        assert.deepEqual(named, [surface], file);
+        assert.ok(!/user-agent/i.test(source), `${file}: the User-Agent decides nothing`);
+    }
+    // Both generation handlers hand the route's API to the receipt.
+    for (const file of ["lib/externalApiInference.ts", "lib/externalApiNative.ts"]) {
+        assert.match(read(file), /externalApiAdmissionHook\(\{[\s\S]*?surface: options\.surface,[\s\S]*?\}\)/, file);
+    }
+    const admission = read("lib/externalApiAdmission.ts");
+    assert.match(admission, /surface: ExternalApiSurface;/, "required, never defaulted");
+    assert.match(admission, /surface: input\.surface,/);
+    // And the key's receipts return it, null for rows recorded before it existed.
+    const keysSource = read("lib/externalApiKeys.ts");
+    assert.match(keysSource, /surface: true,/);
+    assert.match(keysSource, /surface: row\.surface,/);
+    // The CHECK constraint and the application list are one set.
+    const migration = read("prisma/migrations/20261121120000_external_api_request_surface/migration.sql");
+    assert.match(migration, /ADD COLUMN "surface" TEXT,/);
+    assert.match(migration, /CHECK \("surface" IN \('general', 'coding'\)\)/);
+    assert.ok(!/UPDATE\s+"ExternalApiRequest"/i.test(migration), "no backfill: older rows stay NULL");
+});
+
 test("request status lookup is a read: GET only, key-scoped, no dispatch, reservation or write", () => {
     const route = read("app/api/v1/requests/status/route.ts");
     assert.match(route, /export async function GET\(/);
