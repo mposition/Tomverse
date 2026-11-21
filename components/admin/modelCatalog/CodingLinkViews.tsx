@@ -694,10 +694,11 @@ export function CodingChannelsTile({
               data-testid="coding-dedicated-api-credit-input"
               className="w-28 rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-right font-mono text-sm text-zinc-100 outline-none focus:border-blue-500"
             />
-            {floor === null ? (
-              <AdminStatusChip tone="bad">{c.detail.apiCreditsUnbounded}</AdminStatusChip>
-            ) : overrideInvalid ? (
+            {/* An invalid typed value is what blocks Save, so it is named first. */}
+            {overrideInvalid ? (
               <AdminStatusChip tone="bad">{c.detail.weightInvalid}</AdminStatusChip>
+            ) : floor === null ? (
+              <AdminStatusChip tone="bad">{c.detail.apiCreditsUnbounded}</AdminStatusChip>
             ) : typed !== null && typed < floor ? (
               <AdminStatusChip tone="bad">{c.detail.apiCreditsBelow(floor)}</AdminStatusChip>
             ) : (
