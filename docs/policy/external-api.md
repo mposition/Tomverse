@@ -670,7 +670,10 @@ are the deployment's own (`lib/externalApiNativeUpstream.ts`, no redirects).
   the ledger's input is uncached + cache read + cache write. A request carrying
   a client `cache_control` marker reserves the 5-minute write premium
   (caching path `external_api_messages`, `lib/anthropicPromptCaching.ts`) and
-  settles writes at the write rate. Responses usage: `input_tokens` includes
+  settles writes at the write rate. A Chat Completions request that resolves to
+  an Anthropic model gets Tomverse's automatic 5-minute marker (caching path
+  `external_api_chat_completions`) with the same reservation and settlement.
+  Responses usage: `input_tokens` includes
   cached tokens, output includes reasoning.
 - Settlement follows section 4: provider usage when reported; zero when the
   provider refused with a 4xx (not 408) or no credential existed; a cancelled
