@@ -39,14 +39,16 @@ const request = () => new Request("http://localhost/api/admin/amux/portfolio", {
 const STOP = new Error("node edit fixture stop");
 
 type Ids = { initiative: string; epic: string; feature: string; task: string;
-  sourceApproval: string };
+  sourceApproval: string;
+  /** Each node's latest assessment as the owner's sheet would read it. */
+  latest: Record<string, string> };
 
 /** The shared seed's scored backlog Task under Initiative > Epic > Feature,
  * with the revision-0 rows a registered node carries. */
 async function scoredFeature(tx: LifecycleTx, work: (ids: Ids) => Promise<void>) {
   try {
     await seedAmuxV4PortfolioRecoveryPrerequisites(queryAdapter(tx), {
-      afterSourceConsumed: async ({ ids }: { ids: Ids }) => {
+      afterSourceConsumed: async ({ ids }: { ids: Omit<Ids, "latest"> }) => {
         for (const nodeId of [ids.initiative, ids.epic, ids.feature]) {
           await tx.$executeRaw`INSERT INTO "AmuxPortfolioNodeRevision"
             ("id", "nodeId", "revision", "priorRevision", "parentIdAtApproval",
@@ -57,7 +59,11 @@ async function scoredFeature(tx: LifecycleTx, work: (ids: Ids) => Promise<void>)
               CURRENT_TIMESTAMP
             FROM "AmuxPortfolioNode" WHERE "id" = ${nodeId}`;
         }
-        await work(ids);
+        const latest = await tx.$queryRaw<Array<{ nodeId: string; id: string }>>`
+          SELECT DISTINCT ON ("nodeId") "nodeId", "id"::text AS "id" FROM "AmuxPortfolioAssessment"
+          WHERE "nodeId" IN (${ids.initiative}, ${ids.epic}, ${ids.feature})
+          ORDER BY "nodeId", "assessmentVersion" DESC`;
+        await work({ ...ids, latest: Object.fromEntries(latest.map((row) => [row.nodeId, row.id])) });
         throw STOP;
       },
     });
@@ -67,6 +73,7 @@ async function scoredFeature(tx: LifecycleTx, work: (ids: Ids) => Promise<void>)
 const payload = (ids: Ids, extra: Record<string, unknown> = {}) => ({
   id: randomUUID(), requestId: randomUUID(), nodeId: ids.feature,
   expectedRevision: 0,
+  expectedAssessmentId: ids.latest[(extra.nodeId as string | undefined) ?? ids.feature] ?? null,
   content: { title: "AEO-01 crawl policy", description: "Let AI search bots read public pages." },
   value: 2, uncertainty: "low" as const, reasonCode: "operator_override" as const,
   evidenceAsOf: new Date(Date.now() - 60_000).toISOString(), ...extra });
@@ -198,6 +205,8 @@ test("a changed field, a stale revision, a non-owner or a first-assessment reaso
       { ...edit, expectedRevision: 1 }, digestKey, { loadKeys }), code("reconfirm"));
     await assert.rejects(previewAmuxPortfolioNodeEdit(owner,
       { ...edit, reasonCode: "initial" }, digestKey, { loadKeys }), code("reconfirm"));
+    await assert.rejects(previewAmuxPortfolioNodeEdit(owner,
+      { ...edit, expectedAssessmentId: randomUUID() }, digestKey, { loadKeys }), code("reconfirm"));
     await assert.rejects(previewAmuxPortfolioNodeEdit(session(OTHER_EMAIL), edit,
       digestKey, { loadKeys }), code("forbidden"));
     await assert.rejects(saveAmuxPortfolioNodeEdit({ session: session(OTHER_EMAIL),
@@ -221,7 +230,11 @@ test("an assessment saved after the preview sends the owner back to review", asy
     // Another value lands between preview and save: on the same Feature, or
     // on the Epic above it, which the Task's recalculated score also reads.
     for (const [kind, id] of [["feature", ids.feature], ["epic", ids.epic]] as const) {
-      const edit = payload(ids, { content: null });
+      // The sheet reads the Feature's latest assessment again each time.
+      const [latest] = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT "id"::text AS "id" FROM "AmuxPortfolioAssessment" WHERE "nodeId" = ${ids.feature}
+        ORDER BY "assessmentVersion" DESC LIMIT 1`;
+      const edit = payload(ids, { content: null, expectedAssessmentId: latest.id });
       const preview = await previewAmuxPortfolioNodeEdit(owner, edit, digestKey, { loadKeys });
       await writeAmuxPortfolioAssessmentInTx(tx, { session: owner, request: request(),
         confirmationDigest: null, digestKey, payload: { id: randomUUID(),
@@ -252,6 +265,10 @@ test("of two saves previewed from the same state, only one can ever be written",
       confirmationDigest: freshPreview.confirmationDigest, digestKey });
     await assert.rejects(saveAmuxPortfolioNodeEdit({ session: owner, request: request(),
       payload: lost, confirmationDigest: lostPreview.confirmationDigest, digestKey }),
+    (error: unknown) => error instanceof AmuxPortfolioError && error.code === "reconfirm");
+    // A sheet still showing the old read cannot even preview over the save it has not seen.
+    await assert.rejects(previewAmuxPortfolioNodeEdit(owner,
+      payload(ids, { content: null, value: 5 }), digestKey, { loadKeys }),
     (error: unknown) => error instanceof AmuxPortfolioError && error.code === "reconfirm");
     const rows = await tx.$queryRaw<Array<{ count: number }>>`
       SELECT COUNT(*)::int AS "count" FROM "AmuxPortfolioAssessment" WHERE "nodeId" = ${ids.feature}`;

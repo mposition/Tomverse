@@ -33,6 +33,9 @@ export const amuxPortfolioNodeEditPayloadSchema = z.object({
   /** The new assessment's id and the save's idempotency key. */
   id: z.uuid(), requestId: z.uuid(),
   nodeId, expectedRevision: z.number().int().min(0).max(1_000_000),
+  /** The node's latest assessment the owner's sheet read, or null when it
+   * read none. Any other latest assessment means the owner has not seen it. */
+  expectedAssessmentId: z.uuid().nullable(),
   /** Null keeps the current title and description. */
   content: z.object({ title: singleLine(AMUX_NODE_TITLE_MAX),
     description: multiLine(AMUX_NODE_DESCRIPTION_MAX) }).strict().nullable(),

@@ -66,7 +66,7 @@ export const adminAmuxHierarchyMessages = defineAdminMessages({
       outcome_unknown: "The save outcome is unknown; checking…" } as Record<string, string>)[code] ??
       `Save failed (${code}).`,
     unknownSaved: "The save was recorded.",
-    unknownNotSaved: "No save is on record. You can review and save again: if the lost request ever arrives, it is refused.",
+    unknownNotSaved: "No save is on record yet. The node is read again; a save made from it is refused if the lost one is written first, so nothing is overwritten unseen.",
     unknownPending: "The outcome is still unknown. Nothing is sent again; check again.",
     checkAgain: "Check the outcome again",
   },
@@ -135,7 +135,7 @@ export const adminAmuxHierarchyMessages = defineAdminMessages({
       outcome_unknown: "저장 결과를 알 수 없어 확인하는 중입니다…" } as Record<string, string>)[code] ??
       `저장하지 못했습니다 (${code}).`,
     unknownSaved: "저장이 기록돼 있습니다.",
-    unknownNotSaved: "저장 기록이 없습니다. 다시 확인하고 저장해도 됩니다. 늦게 도착한 이전 요청은 거부됩니다.",
+    unknownNotSaved: "아직 저장 기록이 없습니다. 노드를 다시 읽었습니다. 이전 요청이 먼저 기록되면 지금 화면에서 하는 저장은 거부되므로, 보지 못한 값을 덮어쓰지 않습니다.",
     unknownPending: "결과를 아직 알 수 없습니다. 다시 보내지 않으니 다시 확인하세요.",
     checkAgain: "결과 다시 확인",
   },

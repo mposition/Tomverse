@@ -13,6 +13,7 @@ const payload = (extra = {}) => ({
   id: "0b6c3f7e-2b1d-4d55-9a51-0a2c3e4f5a61",
   requestId: "1c7d4f8e-3c2e-4e66-8b62-1b3d4f5a6b72",
   nodeId: "33333333-cccc-4ccc-8ccc-000000000003", expectedRevision: 0,
+  expectedAssessmentId: "2d8e5f9e-4d3f-4f77-9c73-2c4e5f6a7b83",
   content: { title: "AEO-01 crawl policy", description: "Let AI search bots read\r\npublic pages." },
   value: 4, uncertainty: "medium", reasonCode: "operator_override",
   evidenceAsOf: "2026-11-21T00:00:00.000Z", ...extra });

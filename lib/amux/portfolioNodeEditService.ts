@@ -170,7 +170,8 @@ async function buildPlan(db: Db, actorUserId: string,
   const prior = await db.amuxPortfolioAssessment.findFirst({
     where: { nodeId: node.id }, orderBy: { assessmentVersion: "desc" },
     select: { id: true, metrics: true } });
-  if (!amuxNodeEditReasonFits(payload.reasonCode, prior !== null)) {
+  if ((prior?.id ?? null) !== payload.expectedAssessmentId ||
+      !amuxNodeEditReasonFits(payload.reasonCode, prior !== null)) {
     throw new AmuxPortfolioError("reconfirm");
   }
   const priorValue = prior && typeof (prior.metrics as Record<string, unknown>)?.value === "number" ?
@@ -366,7 +367,7 @@ export async function readAmuxPortfolioNodeForEdit(session: Session,
   }
   const latest = await prisma.amuxPortfolioAssessment.findFirst({
     where: { nodeId }, orderBy: { assessmentVersion: "desc" },
-    select: { assessmentVersion: true, subjectRevision: true, metrics: true,
+    select: { id: true, assessmentVersion: true, subjectRevision: true, metrics: true,
       uncertainty: true, evidenceAsOf: true, reasonCode: true } });
   const value = latest && typeof (latest.metrics as Record<string, unknown>)?.value === "number" ?
     (latest.metrics as Record<string, number>).value : null;
@@ -375,7 +376,7 @@ export async function readAmuxPortfolioNodeForEdit(session: Session,
     // An archived node is read-only. An unreadable body keeps the value
     // editable but never offers a text field to overwrite unseen text.
     editable: node.state === "active", contentEditable: content !== null,
-    assessment: latest ? { version: latest.assessmentVersion, value,
+    assessment: latest ? { id: latest.id, version: latest.assessmentVersion, value,
       uncertainty: latest.uncertainty, reasonCode: latest.reasonCode,
       evidenceAsOf: latest.evidenceAsOf.toISOString(),
       bound: latest.subjectRevision === node.revision } : null };

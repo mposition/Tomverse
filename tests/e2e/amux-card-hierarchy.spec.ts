@@ -48,7 +48,7 @@ async function setup(page: Page, story = true) {
     if (route.request().method() === "GET") return route.fulfill({ json: { id: FEATURE,
       level: "feature", state: "active", revision: 0, displayPrefix: "AMUX-CRAWL",
       content: { title: "AEO-01 crawl policy", description: "Let AI search bots read public pages." },
-      editable: true, contentEditable: true, assessment: { version: 1, value: 4,
+      editable: true, contentEditable: true, assessment: { id: "2d8e5f9e-4d3f-4f77-9c73-2c4e5f6a7b83", version: 1, value: 4,
         uncertainty: "medium", reasonCode: "initial", evidenceAsOf: "2026-11-20T00:00:00.000Z",
         bound: true } } });
     const body = route.request().postDataJSON();
@@ -108,6 +108,9 @@ test("the Feature step opens the edit sheet; review then save goes through the p
   expect(preview.payload.content.title).toBe("AEO-01 crawl and llms.txt policy");
   expect(preview.payload.value).toBe(5);
   expect(preview.payload.reasonCode).toBe("operator_override");
+  // The sheet sends the assessment it read, so an unseen newer one is refused.
+  expect((posts[0] as unknown as { payload: { expectedAssessmentId: string } }).payload
+    .expectedAssessmentId).toBe("2d8e5f9e-4d3f-4f77-9c73-2c4e5f6a7b83");
   // The card is read again only when the sheet closes.
   const before = details();
   await sheet.getByRole("button", { name: "Close", exact: true }).click();

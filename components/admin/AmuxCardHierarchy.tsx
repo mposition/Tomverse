@@ -97,7 +97,7 @@ const nodeRead = z.object({ id: z.string(), level: z.enum(["initiative", "epic",
   state: z.string(), revision: z.number().int(), displayPrefix: z.string().nullable(),
   content: z.object({ title: z.string(), description: z.string() }).nullable(),
   editable: z.boolean(), contentEditable: z.boolean(),
-  assessment: z.object({ version: z.number().int(), value: z.number().int().nullable(),
+  assessment: z.object({ id: z.string(), version: z.number().int(), value: z.number().int().nullable(),
     uncertainty: z.string(), reasonCode: z.string(), evidenceAsOf: z.string(),
     bound: z.boolean() }).nullable() });
 type NodeRead = z.infer<typeof nodeRead>;
@@ -212,7 +212,7 @@ function AmuxPortfolioNodeSheet({ nodeId, level, m, onClose, onSaved }: {
     if (!evidenceAsOf || (textChanged && draft.title.trim() === "")) { setError(m.failed("invalid_input")); return; }
     const requestId = crypto.randomUUID();
     const payload = { id: crypto.randomUUID(), requestId, nodeId: read.id,
-      expectedRevision: read.revision,
+      expectedRevision: read.revision, expectedAssessmentId: read.assessment?.id ?? null,
       content: textChanged ? { title: draft.title.trim(), description: draft.description } : null,
       value: draft.value, uncertainty: draft.uncertainty, reasonCode: draft.reason, evidenceAsOf };
     setBusy(true); setError(null);
