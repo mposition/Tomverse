@@ -221,7 +221,13 @@ function AmuxPortfolioNodeSheet({ nodeId, level, m, onClose, onSaved }: {
       if (response.status === 428) { setReauth(true); return; }
       const json: unknown = await response.json().catch(() => null);
       const parsed = previewRead.safeParse(json);
-      if (!response.ok || !parsed.success) { setError(m.failed(errorCode(json))); return; }
+      if (!response.ok || !parsed.success) {
+        const code = errorCode(json);
+        setError(m.failed(code));
+        // The node moved on: read it again so the next review starts from it.
+        if (code === "reconfirm") setReload((value) => value + 1);
+        return;
+      }
       setPreview({ data: parsed.data, payload, requestId });
     } catch { setError(m.failed("unavailable")); } finally { setBusy(false); }
   };
@@ -248,7 +254,9 @@ function AmuxPortfolioNodeSheet({ nodeId, level, m, onClose, onSaved }: {
       // answer or a lost response is read back, never retried (agent foundation).
       const code = errorCode(json);
       if (!response.ok && code !== "outcome_unknown" && code !== "unavailable") {
-        setUnknown(null); setError(m.failed(code)); setPreview(null); return;
+        setUnknown(null); setError(m.failed(code)); setPreview(null);
+        if (code === "reconfirm") setReload((value) => value + 1);
+        return;
       }
       await readBack(sent);
     } catch {
