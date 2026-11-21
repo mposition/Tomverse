@@ -21,8 +21,14 @@
  *   holds that provider's confirmed terms and retention pages (a draft without
  *   a retention page is refused by codingDraftFromAnswer, so the call would be
  *   spent for nothing) and a default price page exists;
- * - never a model the coding catalogue already has a row or draft for;
- * - the same draft model and page host checks as the manual draft.
+ * - never a model the coding catalogue already has a row or draft for, checked
+ *   before the call and again when the draft is stored (create-only: an
+ *   operator's own draft made meanwhile is never overwritten);
+ * - the same draft model and page host checks as the manual draft;
+ * - a deadline checked before every step in turn, with no race: a page read is
+ *   capped inside what is left, and the model call starts only with its own
+ *   timeout plus a margin for the store still left. Nothing starts after the
+ *   deadline, because nothing is left running to start it.
  * A failed or timed out call is recorded and never retried: its outcome is
  * unknown, and the operator's "Coding draft" button is the retry.
  *
@@ -38,6 +44,7 @@ import { loadCodingProviderTerms, type CodingProviderTermsRecord } from "@/lib/m
 import { storeCatalogDraft } from "@/lib/modelCatalogAdmin";
 import { defaultPriceSources, MODEL_ID_PATTERN } from "@/lib/modelCatalogCore";
 import {
+  CATALOG_DRAFT_LLM_TIMEOUT_MS,
   catalogDraftLlmFromEnv,
   DraftRefusal,
   fetchOfficialPage,
@@ -50,9 +57,13 @@ import { prisma } from "@/lib/prisma";
 export const MODEL_DISCOVERY_CODING_AUTO_DRAFT_ENV = "MODEL_DISCOVERY_CODING_AUTO_DRAFT_ENABLED";
 /** Paid draft calls one scan may make. A small bound on spending nobody asked for in the moment. */
 export const CODING_AUTO_DRAFT_MAX_PER_RUN = 5;
-/** The route allows 180 s; no draft starts with less than this left (pages and the model call take most of it). */
-const MIN_WINDOW_MS = 45_000;
-const DEFAULT_WINDOW_MS = 120_000;
+/** What the store (one short transaction) needs after the model call returns. */
+const STORE_MARGIN_MS = 5_000;
+/** The model call starts only with this much left: its own timeout, then the store. */
+const LLM_WINDOW_MS = CATALOG_DRAFT_LLM_TIMEOUT_MS + STORE_MARGIN_MS;
+/** A page read needs at least this much beyond the model call's window to be worth starting. */
+const MIN_PAGE_MS = 1_000;
+const DEFAULT_WINDOW_MS = 150_000;
 
 export const codingAutoDraftEnabled = (env: Readonly<Record<string, string | undefined>> = process.env) =>
   env[MODEL_DISCOVERY_CODING_AUTO_DRAFT_ENV] === "true";
@@ -64,17 +75,14 @@ export type CodingAutoDraftCandidate = {
 };
 
 /**
- * The code-specialized items a scan filed and the code proposals the weekly
- * research filed. The product comes from the same triage the queue shows
- * (modelProductSurface; the research's own product), never a second classifier.
+ * The code-specialized items a scan filed, by the same triage the queue shows
+ * (modelProductSurface), never a second classifier. The weekly research's code
+ * proposals are not candidates: they name providers Tomverse is not connected
+ * to, which a draft cannot read.
  */
 export const codingAutoDraftCandidates = (input: {
   scan: readonly CodingAutoDraftCandidate[];
-  research: readonly { provider: string; apiModel: string; product: string }[];
-}): CodingAutoDraftCandidate[] => [
-  ...input.scan.filter((item) => modelProductSurface(item.apiModel) === "coding"),
-  ...input.research.filter((item) => item.product === "code").map(({ provider, apiModel }) => ({ provider, apiModel })),
-];
+}): CodingAutoDraftCandidate[] => input.scan.filter((item) => modelProductSurface(item.apiModel) === "coding");
 
 export type CodingAutoDraftSkipReason =
   | "not_draft_provider"
@@ -100,8 +108,10 @@ export type CodingAutoDraftDeps = {
   draftLlm: () => Promise<CatalogDraftLlm | null>;
   providerTerms: () => Promise<CodingProviderTermsRecord[]>;
   entryExists: (modelId: string) => Promise<boolean>;
-  fetchPage: (provider: string, url: string) => Promise<DraftPage>;
-  store: (input: { modelId: string; draft: unknown }) => Promise<unknown>;
+  /** `maxMs` caps the read inside what is left of the deadline. */
+  fetchPage: (provider: string, url: string, maxMs: number) => Promise<DraftPage>;
+  /** "exists" when the row appeared meanwhile: nothing was written. */
+  store: (input: { modelId: string; draft: unknown }) => Promise<"stored" | "exists">;
   now: () => number;
 };
 
@@ -110,24 +120,9 @@ const defaultDeps: CodingAutoDraftDeps = {
   providerTerms: () => loadCodingProviderTerms(),
   entryExists: async (modelId) =>
     (await prisma.modelCatalogEntry.count({ where: { category: "coding", modelId } })) > 0,
-  fetchPage: fetchOfficialPage,
+  fetchPage: (provider, url, maxMs) => fetchOfficialPage(provider, url, maxMs),
   store: ({ modelId, draft }) => storeCatalogDraft({ category: "coding", modelId, draft, system: true }),
   now: () => Date.now(),
-};
-
-const UNKNOWN = Symbol("unknown_outcome");
-const withinWindow = async <T>(work: Promise<T>, ms: number): Promise<T | typeof UNKNOWN> => {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      work,
-      new Promise<typeof UNKNOWN>((resolve) => {
-        timer = setTimeout(() => resolve(UNKNOWN), ms);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
 };
 
 const emptySummary = (status: CodingAutoDraftSummary["status"], considered = 0): CodingAutoDraftSummary => ({
@@ -198,36 +193,54 @@ export async function runCodingAutoDraft(input: {
       summary.stopped = "cap";
       break;
     }
-    const remaining = deadlineAt - deps.now();
-    if (remaining < MIN_WINDOW_MS) {
+    const remaining = () => deadlineAt - deps.now();
+    // Nothing is worth starting if the model call could not start after the pages.
+    if (remaining() < LLM_WINDOW_MS + MIN_PAGE_MS) {
       summary.stopped = "time_budget";
       break;
     }
 
-    // The same three pages the manual form reads: price, terms, retention.
+    // The same three pages the manual form reads: price, terms, retention. One
+    // await after another, each checked against what is left; no step is left
+    // running behind a deadline.
     const sources = codingDraftSources(
       { priceUrl: price, termsUrl: terms.termsUrl, retentionUrl: terms.retentionUrl },
       defaultPriceSources(sighting.provider)
     );
-    const draftOne = async () => {
-      const pages: DraftPage[] = [];
-      for (const url of sources) pages.push(await deps.fetchPage(sighting.provider, url));
-      // The paid call starts here; a page that would not load costs nothing.
-      attempts += 1;
-      const draft = await llm.draftCodingProfile({ provider: sighting.provider, apiModelId: modelId, pages });
-      await deps.store({ modelId, draft });
-    };
+    const pages: DraftPage[] = [];
+    let pageFailure: string | null = null;
+    for (const url of sources) {
+      const left = remaining();
+      if (left < LLM_WINDOW_MS + MIN_PAGE_MS) break;
+      try {
+        pages.push(await deps.fetchPage(sighting.provider, url, left - LLM_WINDOW_MS));
+      } catch (error) {
+        pageFailure = error instanceof DraftRefusal ? error.code : "fetch_failed";
+        break;
+      }
+    }
+    if (pageFailure) {
+      summary.failed.push({ apiModel: modelId, code: pageFailure });
+      continue;
+    }
+    // The paid call starts only with its own timeout and the store still left.
+    if (pages.length < sources.length || remaining() < LLM_WINDOW_MS) {
+      summary.stopped = "time_budget";
+      break;
+    }
+    attempts += 1;
     try {
-      const outcome = await withinWindow(draftOne(), remaining - 5_000);
-      if (outcome === UNKNOWN) {
-        // The call may still finish and store its draft, or may have been
-        // charged without one. Not retried; the operator can read the catalogue.
+      const draft = await llm.draftCodingProfile({ provider: sighting.provider, apiModelId: modelId, pages });
+      if ((await deps.store({ modelId, draft })) === "exists") skip("already_in_catalogue");
+      else summary.drafted.push(modelId);
+    } catch (error) {
+      const name = (error as { name?: unknown })?.name;
+      if (name === "TimeoutError" || name === "AbortError") {
+        // The call may have been charged without an answer. Not retried.
         summary.failed.push({ apiModel: modelId, code: "timeout_outcome_unknown" });
         summary.stopped = "unknown_outcome";
         break;
       }
-      summary.drafted.push(modelId);
-    } catch (error) {
       const code = error instanceof DraftRefusal ? error.code : (error as { code?: unknown })?.code;
       summary.failed.push({ apiModel: modelId, code: typeof code === "string" ? code : "draft_failed" });
     }

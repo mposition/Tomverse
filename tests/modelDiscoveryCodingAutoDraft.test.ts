@@ -39,6 +39,8 @@ const harness = (overrides: Partial<CodingAutoDraftDeps> & { existing?: string[]
     providerTerms: 0,
     entryExists: 0,
     pages: [] as string[],
+    pageCaps: [] as number[],
+    clock: 1_000_000,
     llm: [] as string[],
     stored: [] as Array<{ modelId: string; draft: unknown }>,
   };
@@ -70,14 +72,16 @@ const harness = (overrides: Partial<CodingAutoDraftDeps> & { existing?: string[]
       calls.entryExists += 1;
       return (existing ?? []).includes(modelId);
     },
-    fetchPage: async (_provider, url) => {
+    fetchPage: async (_provider, url, maxMs) => {
       calls.pages.push(url);
+      calls.pageCaps.push(maxMs);
       return { url, text: "page" };
     },
     store: async (input) => {
       calls.stored.push(input);
+      return "stored" as const;
     },
-    now: () => 1_000_000,
+    now: () => calls.clock,
     ...depOverrides,
   };
   return { calls, deps };
@@ -224,13 +228,67 @@ test("a page that will not load costs no model call and does not stop the next m
   assert.deepEqual(summary.drafted, ["qwen3-coder-b"]);
 });
 
-test("a call that outlives the window is an unknown outcome: recorded, not retried, and the run stops", async () => {
-  const { calls, deps } = harness({ profile: () => new Promise(() => undefined) });
+test("a page read that finishes late starts no model call and no store", async () => {
+  const { calls, deps } = harness({
+    fetchPage: async (_provider, url, maxMs) => {
+      calls.pages.push(url);
+      calls.pageCaps.push(maxMs);
+      // The read returns, but only after the deadline has gone.
+      calls.clock = 1_000_000 + 200_000;
+      return { url, text: "page" };
+    },
+  });
   const summary = await runCodingAutoDraft({
     candidates: [qwen("qwen3-coder-a"), qwen("qwen3-coder-b")],
     env: ON,
-    // The 45 s minimum window plus the 5 s margin: the race gives up after 1 ms.
-    deadlineAt: 1_000_000 + 45_006,
+    deadlineAt: 1_000_000 + 150_000,
+    deps,
+  });
+  assert.equal(calls.llm.length, 0);
+  assert.equal(calls.stored.length, 0);
+  assert.equal(summary.stopped, "time_budget");
+  assert.equal(summary.drafted.length, 0);
+  // Only the first page was asked for; nothing else was started after the deadline.
+  assert.equal(calls.pages.length, 1);
+});
+
+test("a page read is capped inside what is left once the model call window is reserved", async () => {
+  const { calls, deps } = harness();
+  await runCodingAutoDraft({
+    candidates: [qwen("qwen3-coder-a")],
+    env: ON,
+    deadlineAt: 1_000_000 + 130_000,
+    deps,
+  });
+  // 130 s left, 95 s kept for the model call (90 s timeout plus the store margin).
+  assert.equal(calls.pageCaps.length, 3);
+  for (const cap of calls.pageCaps) assert.equal(cap, 35_000);
+  assert.equal(calls.llm.length, 1);
+});
+
+test("too little time for the model call means no model call and no page read", async () => {
+  const { calls, deps } = harness();
+  const summary = await runCodingAutoDraft({
+    candidates: [qwen("qwen3-coder-a")],
+    env: ON,
+    // The model call needs 95 s; 60 s is left.
+    deadlineAt: 1_000_000 + 60_000,
+    deps,
+  });
+  assert.equal(summary.stopped, "time_budget");
+  assert.equal(calls.pages.length + calls.llm.length + calls.stored.length, 0);
+});
+
+test("the model call own timeout is an unknown outcome: recorded, not retried, and the run stops", async () => {
+  const timeout = Object.assign(new Error("timed out"), { name: "TimeoutError" });
+  const { calls, deps } = harness({
+    profile: async () => {
+      throw timeout;
+    },
+  });
+  const summary = await runCodingAutoDraft({
+    candidates: [qwen("qwen3-coder-a"), qwen("qwen3-coder-b")],
+    env: ON,
     deps,
   });
   assert.deepEqual(summary.failed, [{ apiModel: "qwen3-coder-a", code: "timeout_outcome_unknown" }]);
@@ -239,19 +297,19 @@ test("a call that outlives the window is an unknown outcome: recorded, not retri
   assert.equal(calls.stored.length, 0);
 });
 
-test("no draft starts when too little of the request is left", async () => {
-  const { calls, deps } = harness();
-  const summary = await runCodingAutoDraft({
-    candidates: [qwen("qwen3-coder-a")],
-    env: ON,
-    deadlineAt: 1_000_000 + 10_000,
-    deps,
+test("a row that appeared while the model call ran is reported as existing, not drafted", async () => {
+  const { calls, deps } = harness({
+    store: async (input) => {
+      calls.stored.push(input);
+      return "exists" as const;
+    },
   });
-  assert.equal(summary.stopped, "time_budget");
-  assert.equal(calls.pages.length + calls.llm.length, 0);
+  const summary = await runCodingAutoDraft({ candidates: [qwen("qwen3-coder-a")], env: ON, deps });
+  assert.deepEqual(summary.drafted, []);
+  assert.deepEqual(summary.skipped, [{ apiModel: "qwen3-coder-a", reason: "already_in_catalogue" }]);
 });
 
-test("candidates are the code-specialized scan items and the code research proposals only", () => {
+test("candidates are the code-specialized scan items only, never the weekly research proposals", () => {
   const picked = codingAutoDraftCandidates({
     scan: [
       { provider: "qwen", apiModel: "qwen3-coder-flash" },
@@ -259,14 +317,9 @@ test("candidates are the code-specialized scan items and the code research propo
       { provider: "openai", apiModel: "gpt-image-3" },
       { provider: "openai", apiModel: "gpt-6-codex" },
     ],
-    research: [
-      { provider: "cursorlabs", apiModel: "composer-2", product: "code" },
-      { provider: "someone", apiModel: "chat-x", product: "chat" },
-      { provider: "someone", apiModel: "img-x", product: "image" },
-    ],
   });
   assert.deepEqual(
     picked.map((item) => item.apiModel),
-    ["qwen3-coder-flash", "gpt-6-codex", "composer-2"]
+    ["qwen3-coder-flash", "gpt-6-codex"]
   );
 });

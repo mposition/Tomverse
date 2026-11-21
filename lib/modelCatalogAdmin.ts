@@ -524,7 +524,15 @@ export const applyCatalogDraft = async (input: {
   if (input.category === "image") invalidateImageModelCatalog();
 };
 
-/** Store a model-written draft, with its audit row. Nothing it holds serves until applied. */
+/**
+ * Store a model-written draft, with its audit row. Nothing it holds serves until applied.
+ *
+ * The system path (the daily scan's automatic draft) only creates: a row that
+ * already exists -- an operator's draft, edit or profile made while the model
+ * call ran -- is left untouched and reported as "exists", with no audit entry.
+ * The check and the create share one transaction under the audit chain lock
+ * every other writer of this row takes first.
+ */
 export const storeCatalogDraft = async (input: {
   category: StoredCatalogCategory;
   modelId: string;
@@ -542,9 +550,16 @@ export const storeCatalogDraft = async (input: {
   // The daily scan's own draft for a new coding model: audited as the system
   // actor, never as an administrator, and never with a session to borrow.
   | { system: true; session?: never; request?: never }
-)) =>
+)): Promise<"stored" | "exists"> =>
   prisma.$transaction(async (tx) => {
     await takeAuditChainLock(tx);
+    if (input.system) {
+      const held = await tx.modelCatalogEntry.findUnique({
+        where: { category_modelId: { category: input.category, modelId: input.modelId } },
+        select: { modelId: true },
+      });
+      if (held) return "exists" as const;
+    }
     // A chat link's profile is the chat registry's: a whole-profile draft for
     // it would turn the link into a copy. Its own values have their own draft.
     if (input.category === "coding") {
@@ -587,18 +602,22 @@ export const storeCatalogDraft = async (input: {
       draftCreatedAt: new Date(),
       ...(profile === undefined ? {} : { profile }),
     };
-    await tx.modelCatalogEntry.upsert({
-      where: { category_modelId: { category: input.category, modelId: input.modelId } },
-      create: { category: input.category, modelId: input.modelId, ...data },
-      update: data,
-    });
+    if (input.system) {
+      await tx.modelCatalogEntry.create({ data: { category: input.category, modelId: input.modelId, ...data } });
+    } else {
+      await tx.modelCatalogEntry.upsert({
+        where: { category_modelId: { category: input.category, modelId: input.modelId } },
+        create: { category: input.category, modelId: input.modelId, ...data },
+        update: data,
+      });
+    }
     if (input.system) {
       await writeModelCatalogAutoDraftSystemAudit(tx, {
         targetId: `${input.category}:${input.modelId}`,
         summary: `Stored an automatic LLM draft for ${input.category} model ${input.modelId}.`,
         metadata: { category: input.category, modelId: input.modelId, profileSaved: profile !== undefined },
       });
-      return;
+      return "stored" as const;
     }
     await writeAdminAuditLog({
       session: input.session,
@@ -610,4 +629,5 @@ export const storeCatalogDraft = async (input: {
       metadata: { category: input.category, modelId: input.modelId, profileSaved: profile !== undefined },
       tx,
     });
+    return "stored" as const;
   });

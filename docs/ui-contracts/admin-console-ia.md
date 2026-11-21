@@ -86,7 +86,7 @@ Release = 릴리스, Safety & recovery = 안전·복구, Feature flags = 기능 
 Messaging = 메시징). `tests/adminNavigation.test.mjs` writes the whole table out
 and fails when the code and this list disagree.
 
-The Models `discovery` tab also lists the weekly new-provider research proposals (Chat, Image and Code providers Tomverse is not connected to, with cited sources; off unless `MODEL_DISCOVERY_RESEARCH_LLM_MODEL_ID` is set) in the same queue, marked "새 공급자 리서치" and excludable but never adopted into Chat there (a Code proposal gets the "코딩 초안" link below); it is not a new tab. Image models of already-connected providers found by the same research (their model-list APIs do not return image models) appear there too, marked "이미지 모델 리서치 (연결 공급자)". Above the queue, a "지난 모델 리서치" tile shows the last run that called the model: per call what was proposed and filed, and each dropped proposal with its reason (and, for a missing official citation, the URLs it did cite), so a run that rejected everything does not look like a run that found nothing.
+The Models `discovery` tab also lists the weekly new-provider research proposals (Chat, Image and Code providers Tomverse is not connected to, with cited sources; off unless `MODEL_DISCOVERY_RESEARCH_LLM_MODEL_ID` is set) in the same queue, marked "새 공급자 리서치" and excludable but never adopted into Chat there (a Code proposal names a provider Tomverse is not connected to, so it shows the reason instead of the "코딩 초안" link below); it is not a new tab. Image models of already-connected providers found by the same research (their model-list APIs do not return image models) appear there too, marked "이미지 모델 리서치 (연결 공급자)". Above the queue, a "지난 모델 리서치" tile shows the last run that called the model: per call what was proposed and filed, and each dropped proposal with its reason (and, for a missing official citation, the URLs it did cite), so a run that rejected everything does not look like a run that found nothing.
 
 ### The 2026-11-07 restructuring
 
@@ -825,8 +825,7 @@ the coding tab opens the dedicated-model form with both filled in (and the
 provider's confirmed terms and retention pages when it has them), removes those
 query keys, and writes nothing until the operator confirms. A model already in
 the coding catalogue opens its row instead. A provider a draft cannot read shows
-the reason in place of the link, as the image rows do. The link needs no adapter
-and appears for a research proposal too.
+the reason in place of the link, as the image rows do. The link needs no adapter.
 
 ## Language
 

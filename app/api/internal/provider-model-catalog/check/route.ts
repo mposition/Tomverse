@@ -133,11 +133,8 @@ export async function POST(request: Request) {
     const codingAutoDraft = test
       ? undefined
       : await runCodingAutoDraft({
-          candidates: codingAutoDraftCandidates({
-            scan: discovery.createdItems,
-            research: research?.status === "ran" ? research.created : [],
-          }),
-          deadlineAt: requestStartedAt + 165_000,
+          candidates: codingAutoDraftCandidates({ scan: discovery.createdItems }),
+          deadlineAt: requestStartedAt + 175_000,
         }).catch((error) => {
           console.error("Coding catalogue auto draft failed:", error instanceof Error ? error.name : "unknown");
           return undefined;

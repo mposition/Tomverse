@@ -43,6 +43,8 @@ import { getEnabledRuntimeModel } from "@/lib/modelRegistry";
 export const MODEL_CATALOG_DRAFT_LLM_MODEL_ENV = "MODEL_CATALOG_DRAFT_LLM_MODEL_ID";
 const MAX_OUTPUT_TOKENS = 2_000;
 const TIMEOUT_MS = 90_000;
+/** The longest one draft model call can run; a caller with a deadline starts none with less left. */
+export const CATALOG_DRAFT_LLM_TIMEOUT_MS = TIMEOUT_MS;
 const PAGE_TIMEOUT_MS = 10_000;
 const PAGE_MAX_BYTES = 2_000_000;
 // Provider guides run long and keep per-image token tables near the end:
@@ -91,7 +93,12 @@ const readBounded = async (response: Response): Promise<string | null> => {
 };
 
 /** Fetch one official page: https, the provider's own hosts, no redirects, bounded. */
-export const fetchOfficialPage = async (provider: string, url: string): Promise<DraftPage> => {
+export const fetchOfficialPage = async (
+  provider: string,
+  url: string,
+  /** A caller with a deadline caps the read (and its body) inside what is left. */
+  maxMs: number = PAGE_TIMEOUT_MS
+): Promise<DraftPage> => {
   if (!isOfficialSourceUrl(provider, url)) throw new DraftRefusal("unofficial_source", url);
   let response: Response;
   try {
@@ -99,7 +106,7 @@ export const fetchOfficialPage = async (provider: string, url: string): Promise<
       headers: { Accept: "text/html, text/markdown, text/plain;q=0.9", "User-Agent": "TomverseModelCatalog/1.0" },
       cache: "no-store",
       redirect: "error",
-      signal: AbortSignal.timeout(PAGE_TIMEOUT_MS),
+      signal: AbortSignal.timeout(Math.max(1, Math.min(PAGE_TIMEOUT_MS, maxMs))),
     });
   } catch {
     throw new DraftRefusal("fetch_failed", url);

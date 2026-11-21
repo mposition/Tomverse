@@ -363,7 +363,10 @@ test("a stored draft is audited, applied in one step, and cleared", async () => 
 test("an automatic draft is audited as the system actor, with no administrator on the entry", async () => {
   const humanBefore = await auditCount("model_catalog.draft_stored");
   const autoBefore = await auditCount("model_catalog.draft_auto_stored");
-  await storeCatalogDraft({ category: "coding", modelId: "gpt-auto-draft-test", draft: codingProfile, system: true });
+  assert.equal(
+    await storeCatalogDraft({ category: "coding", modelId: "gpt-auto-draft-test", draft: codingProfile, system: true }),
+    "stored"
+  );
   // The person's action is untouched; the system's own action is written once.
   assert.equal(await auditCount("model_catalog.draft_stored"), humanBefore);
   assert.equal(await auditCount("model_catalog.draft_auto_stored"), autoBefore + 1);
@@ -381,6 +384,27 @@ test("an automatic draft is audited as the system actor, with no administrator o
   assert.equal(row?.draftSource, "llm");
   assert.equal(row?.profile, null);
   assert.notEqual(row?.enabled, true);
+});
+
+test("an automatic draft never overwrites a row an operator already holds", async () => {
+  const modelId = "gpt-auto-draft-held";
+  const operatorDraft = { ...codingProfile, name: "Operator draft" };
+  await storeCatalogDraft({ category: "coding", modelId, draft: operatorDraft, session });
+  const before = await prisma.modelCatalogEntry.findUnique({ where: { category_modelId: { category: "coding", modelId } } });
+  const autoBefore = await auditCount("model_catalog.draft_auto_stored");
+  const result = await storeCatalogDraft({
+    category: "coding",
+    modelId,
+    draft: { ...codingProfile, name: "Automatic draft" },
+    system: true,
+  });
+  assert.equal(result, "exists");
+  const after = await prisma.modelCatalogEntry.findUnique({ where: { category_modelId: { category: "coding", modelId } } });
+  assert.deepEqual(after?.draft, before?.draft);
+  assert.equal((after?.draft as { name?: string } | null)?.name, "Operator draft");
+  assert.equal(after?.draftCreatedAt?.getTime(), before?.draftCreatedAt?.getTime());
+  // Nothing was written, so nothing was audited.
+  assert.equal(await auditCount("model_catalog.draft_auto_stored"), autoBefore);
 });
 
 test("an image draft carries its runtime profile and never prices another model", async () => {
