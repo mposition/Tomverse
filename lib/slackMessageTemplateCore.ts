@@ -3,6 +3,7 @@ export const SLACK_TEMPLATE_KEYS = [
   "provider_usage_daily",
   "provider_model_catalog_daily",
   "provider_alert",
+  "promotion_alert",
 ] as const;
 
 // Slack's special mention syntax. Keep this outside editable templates so every
@@ -96,6 +97,26 @@ export const DEFAULT_SLACK_TEMPLATES: SlackTemplateDefinition[] = [
     titleTemplate: "{{title}}",
     bodyTemplate: "*Provider:* {{provider}}\n{{detail}}",
     allowedVariables: ["title", "provider", "detail"],
+  },
+  {
+    key: "promotion_alert",
+    name: "Promotion burst alert",
+    description:
+      "Sent when one promotion code is redeemed unusually often within an hour -- the shape of account farming (OZBFREE, 2026-11-20).",
+    enabled: true,
+    titleTemplate:
+      "Promotion {{code}}: {{count}} redemptions in {{windowMinutes}} min",
+    bodyTemplate:
+      "*Risk-flagged in window:* {{flagged}} (shared IP, shared card or card limit)\n*Used:* {{used}} / {{cap}}\nReview: {{adminUrl}}",
+    allowedVariables: [
+      "code",
+      "count",
+      "windowMinutes",
+      "flagged",
+      "used",
+      "cap",
+      "adminUrl",
+    ],
   },
 ];
 

@@ -67,6 +67,9 @@ export async function GET(req: Request) {
             process.env.SLACK_WEBHOOK_URL
         ),
         provider_alert: Boolean(process.env.SLACK_WEBHOOK_URL),
+        promotion_alert: Boolean(
+          process.env.OPS_ALERT_SLACK_WEBHOOK_URL || process.env.SLACK_WEBHOOK_URL
+        ),
       },
       schedule: {
         cron: "0 0 * * * / 30 0 * * *",
@@ -182,6 +185,25 @@ export async function POST(req: Request) {
                 },
                 webhookUrl:
                   process.env.PROVIDER_MODEL_CATALOG_SLACK_WEBHOOK_URL ||
+                  process.env.OPS_ALERT_SLACK_WEBHOOK_URL ||
+                  process.env.SLACK_WEBHOOK_URL,
+                targetType: "SlackTemplateTest",
+                targetId: body.key,
+                test: true,
+              })
+          : body.key === "promotion_alert"
+            ? await sendManagedSlackMessage({
+                key: "promotion_alert",
+                variables: {
+                  code: "EXAMPLE",
+                  count: 10,
+                  windowMinutes: 60,
+                  flagged: 4,
+                  used: 52,
+                  cap: 1000,
+                  adminUrl: "https://tomverse.app/admin/billing?tab=promotions",
+                },
+                webhookUrl:
                   process.env.OPS_ALERT_SLACK_WEBHOOK_URL ||
                   process.env.SLACK_WEBHOOK_URL,
                 targetType: "SlackTemplateTest",

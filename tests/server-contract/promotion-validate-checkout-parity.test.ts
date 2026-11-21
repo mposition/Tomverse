@@ -40,6 +40,8 @@ const HEALTHY: import("../../lib/billingConfig").BillingPromotionConfig = {
   startsAt: null,
   endsAt: "2026-12-01T00:00:00.000Z",
   allowAnnualStacking: false,
+  maxRedemptionsPerPaymentMethod: 3,
+  allowedCountries: [],
   isActive: true,
 };
 
@@ -79,14 +81,20 @@ async function loadValidator() {
 }
 
 const NOW = new Date("2026-08-14T00:00:00.000Z");
-const request = () =>
+// Outside production the visitor country is read straight from Cloudflare's
+// header (lib/trustedIpCountry.ts), which is what lets these tests set it.
+const request = (country?: string) =>
   new Request("https://tomverse.app/api/billing/promotion/validate", {
-    headers: { "x-forwarded-for": "203.0.113.7" },
+    headers: {
+      "x-forwarded-for": "203.0.113.7",
+      ...(country ? { "cf-ipcountry": country } : {}),
+    },
   });
 
 const validate = async (
   overrides: Partial<typeof HEALTHY> = {},
-  currency: import("../../lib/billingMarkets").BillingCurrency = "USD"
+  currency: import("../../lib/billingMarkets").BillingCurrency = "USD",
+  country?: string
 ) => {
   const { validatePromotionForCheckout } = await loadValidator();
   promotionRow = { ...HEALTHY, ...overrides };
@@ -96,7 +104,7 @@ const validate = async (
     billingInterval: "monthly",
     currency,
     userId: null,
-    request: request(),
+    request: request(country),
     now: NOW,
   });
 };
@@ -254,4 +262,51 @@ test("an internal pass is unaffected by the currency of the market", async () =>
     "AUD"
   );
   assert.equal(result.valid, true);
+});
+
+/* -------------------------------------------------------------------------- */
+/* Allowed countries: the visitor's IP country, never the card's               */
+/* -------------------------------------------------------------------------- */
+
+test("a country-limited promotion validates for a visitor from that country", async () => {
+  const result = await validate({ allowedCountries: ["AU"] }, "AUD", "AU");
+  assert.equal(result.valid, true);
+});
+
+test("a country-limited promotion is refused elsewhere, with its own code", async () => {
+  const { promotionValidationError } = (await import(
+    mod("lib/billingPromotionCore.ts")
+  )) as typeof import("../../lib/billingPromotionCore");
+  for (const country of ["TW", "HK", "SG", "JP", "US"]) {
+    const result = await validate({ allowedCountries: ["AU"] }, "USD", country);
+    assert.equal(result.valid, false, country);
+    const rendered = promotionValidationError(
+      result.valid === false ? result.reason : "invalid"
+    );
+    assert.equal(rendered.code, "PROMOTION_COUNTRY_NOT_ELIGIBLE", country);
+  }
+});
+
+test("a country-limited promotion is refused when the visitor's country is unknown", async () => {
+  const result = await validate({ allowedCountries: ["AU"] }, "AUD");
+  assert.equal(result.valid, false);
+});
+
+test("a promotion without allowed countries ignores the visitor's country", async () => {
+  for (const country of ["TW", undefined]) {
+    const result = await validate({ allowedCountries: [] }, "USD", country);
+    assert.equal(result.valid, true, String(country));
+  }
+});
+
+test("the country gate covers an internal pass too", async () => {
+  const pass = {
+    fulfillmentType: "internal_pass" as const,
+    accessDurationDays: 60,
+    durationMonths: 1,
+    appliesToPlanIds: ["pro"] as ("pro" | "max")[],
+    allowedCountries: ["AU"],
+  };
+  assert.equal((await validate(pass, "AUD", "AU")).valid, true);
+  assert.equal((await validate(pass, "AUD", "TW")).valid, false);
 });

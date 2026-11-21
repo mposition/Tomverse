@@ -13,7 +13,10 @@ import {
   type BillingPlanConfig,
   type BillingPlanId,
 } from "@/lib/billingPlanDefaults";
-import { promotionEligibilityFailure } from "@/lib/billingPromotionCore";
+import {
+  parsePromotionCountries,
+  promotionEligibilityFailure,
+} from "@/lib/billingPromotionCore";
 import { getPublicCreditPackCatalog } from "@/lib/creditPacks";
 
 // The plan shape and its built-in values live in lib/billingPlanDefaults.ts so
@@ -44,6 +47,10 @@ export type BillingPromotionConfig = {
   startsAt: string | null;
   endsAt: string | null;
   allowAnnualStacking: boolean;
+  /** Accounts one card may redeem on; null = no per-card limit. */
+  maxRedemptionsPerPaymentMethod: number | null;
+  /** ISO country codes the visitor must be in (by IP); empty = anywhere. */
+  allowedCountries: string[];
   isActive: boolean;
   updatedAt?: string | null;
 };
@@ -335,6 +342,8 @@ const toBillingPromotionConfig = (
     startsAt: row.startsAt?.toISOString() || null,
     endsAt: row.endsAt?.toISOString() || null,
     allowAnnualStacking: row.allowAnnualStacking,
+    maxRedemptionsPerPaymentMethod: row.maxRedemptionsPerPaymentMethod,
+    allowedCountries: parsePromotionCountries(row.allowedCountries),
     isActive: row.isActive,
     updatedAt: row.updatedAt.toISOString(),
   });
