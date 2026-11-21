@@ -171,6 +171,9 @@ export function AmuxIdeaDetailSummary({ row, reservationReleaseAvailable = false
         <AmuxSessionIdeaCancelPanel ideaId={row.ideaId} /> : null}
       {row.submissionOrigin === "session" ?
         <AmuxSessionAnalysisStopPanel ideaId={row.ideaId} /> : null}
+      {row.sessionPlan ? (
+        <p className="text-amber-200" data-testid="amux-session-plan">{m.sessionPlan}</p>
+      ) : null}
       {row.submissionOrigin === "session" && row.referencePins === null &&
           row.referencePinsLegacy ? (
         <p className="text-zinc-400">{m.intakePinsLegacy}</p>

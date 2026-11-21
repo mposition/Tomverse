@@ -4,6 +4,8 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { after, before, mock, test } from "node:test";
 
+import { amuxSessionPlanFixture } from "../fixtures/amuxSessionPlan.mjs";
+
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
 const requestId = "34340477-7664-42f4-b3fe-845d10365051";
@@ -34,6 +36,7 @@ let writes = 0;
 let writeError: Error | null = null;
 let written: unknown;
 let committedRequestId = requestId;
+let committedPlan: Record<string, unknown> | undefined;
 
 class FakeAmuxIdeaSessionSubmissionError extends Error {
   constructor(
@@ -59,7 +62,8 @@ mock.module(mod("lib/amux/ideaSessionSubmissionService.ts"), { namedExports: {
     if (writeError) throw writeError;
     return { requestId: committedRequestId, ideaId, reservationId,
       auditId: "synthetic-submission-audit", reservationAuditId: "synthetic-reservation-audit",
-      operatingScopeSettingId: "synthetic-scope" };
+      operatingScopeSettingId: "synthetic-scope",
+      ...(committedPlan ? { plan: committedPlan } : {}) };
   },
 } });
 
@@ -82,6 +86,7 @@ const reset = () => {
   writeError = null;
   written = undefined;
   committedRequestId = requestId;
+  committedPlan = undefined;
   process.env.TOMVERSE_AMUX_SESSION_INTAKE_CLIENT_SECRET = secret;
   for (const name of conflictingEnvNames) {
     delete process.env[name];
@@ -316,4 +321,55 @@ test("session POST hides unexpected writer failures and forbids blind retry", as
     error: "session_intake_submission_failed", retryWrite: false, requestId,
     readbackPath: `/api/internal/amux/ideas/session-intake?requestId=${requestId}`,
   });
+});
+
+test("session POST with an attached plan hands the checked plan to the writer and names its state", async () => {
+  reset();
+  committedPlan = { auditId: "synthetic-plan-audit", planId: "synthetic-plan", unitCount: 4,
+    registration: { state: "awaiting_approval" } };
+  const plan = amuxSessionPlanFixture();
+  const response = await route.POST(post(JSON.stringify({ ...submission, plan })));
+  assert.equal(response.status, 201);
+  const text = await response.text();
+  assert.deepEqual(JSON.parse(text), {
+    status: "committed", requestId, ideaId, reservationId, hasExternalSources: true,
+    adminPath: `/admin/amux-backlog?tab=ideas&idea=${requestId}`,
+    plan: { state: "awaiting_approval", unitCount: 4 },
+  });
+  // Neither the plan text nor its audit or plan ids leave in the reply.
+  assert.doesNotMatch(text, /toggle|synthetic-plan|c0:card/);
+  assert.equal(writes, 1);
+  const inspected = (written as { inspected: { plan?: { raw: string; unitCount: number } } }).inspected;
+  assert.deepEqual(inspected.plan, { raw: JSON.stringify(plan), unitCount: 4 });
+
+  reset();
+  committedPlan = { auditId: "a", planId: "p", unitCount: 4,
+    registration: { state: "registration_incomplete", code: "halted" } };
+  const refused = await route.POST(post(JSON.stringify({ ...submission, plan })));
+  assert.deepEqual((await refused.json()).plan,
+    { state: "registration_incomplete", code: "halted", unitCount: 4 });
+});
+
+test("session POST refuses a malformed or sensitive plan before the writer", async () => {
+  for (const [plan, error] of [
+    [amuxSessionPlanFixture({ coverageStatus: "more", remainingScope: "More cards." }), "plan_rejected"],
+    [amuxSessionPlanFixture({ units: [] }), "plan_rejected"],
+    ["not a plan", "plan_rejected"],
+    [amuxSessionPlanFixture({ coveredScope: "Use token=abcdefghijkl here." }), "content_refused"],
+  ] as const) {
+    reset();
+    const response = await route.POST(post(JSON.stringify({ ...submission, plan })));
+    assert.equal(response.status, 400, error);
+    assert.deepEqual(await response.json(), { error, retryWrite: false });
+    assert.equal(writes, 0, error);
+  }
+});
+
+test("a plan the writer refuses inside its transaction is a closed refusal, nothing written", async () => {
+  reset();
+  writeError = new FakeAmuxIdeaSessionSubmissionError("plan_rejected");
+  const response = await route.POST(post(JSON.stringify({ ...submission, plan: amuxSessionPlanFixture() })));
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { error: "plan_rejected", retryWrite: false, requestId,
+    readbackPath: `/api/internal/amux/ideas/session-intake?requestId=${requestId}` });
 });
