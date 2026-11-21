@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { createChatBudget } from "../lib/chatSecurity.ts";
 import { codingApiDedicatedModel } from "../lib/codingCatalogChannels.ts";
-import { codingRowRuntime } from "../lib/codingRowRuntime.ts";
+import { codingRowRuntime, registryPricesFor } from "../lib/codingRowRuntime.ts";
 import { codingCatalogRowSchema } from "../lib/modelCatalogCore.ts";
 import { getModelUsageProfile, getWeightedUsageCredits } from "../lib/models.ts";
 
@@ -50,6 +50,71 @@ test("a dedicated row runs as its own model: the row's credits, context, output 
     pricingVersion: `coding_catalog_snapshot:12:${"a".repeat(64)}`,
     costSource: "coding_catalog_snapshot",
   });
+});
+
+test("a known provider model registered under another catalogue id is checked against the registry all the same", () => {
+  // gpt-6-luna is in the price registry; the row calls it under its own id.
+  const alias = (pricing = {}) =>
+    row({ modelId: "luna-coder-alias", name: "Luna Coder", provider: "openai", apiModelId: "gpt-6-luna", pricing: { ...row().pricing, ...pricing } });
+  const registry = registryPricesFor(alias(), { id: "luna-coder-alias", provider: "openai", apiModel: "gpt-6-luna", usageClass: "standard", maxOutputTokens: 32_000 });
+  assert.ok(registry.length > 0, "found by provider and API model id, not by the row's id");
+  const [known] = registry;
+  assert.ok(known.inputUsdPerMillionTokens > 0 && known.outputUsdPerMillionTokens > 0);
+  // Priced under what the registry says that model costs: refused, never reserved low and dispatched.
+  assert.deepEqual(
+    codingRowRuntime(alias({ inputUsdPerMTok: known.inputUsdPerMillionTokens / 2, outputUsdPerMTok: known.outputUsdPerMillionTokens }), SNAPSHOT),
+    { ok: false, code: "CODE_CATALOG_PRICING_CHANGED" }
+  );
+  assert.deepEqual(
+    codingRowRuntime(alias({ inputUsdPerMTok: known.inputUsdPerMillionTokens, outputUsdPerMTok: known.outputUsdPerMillionTokens / 2 }), SNAPSHOT),
+    { ok: false, code: "CODE_CATALOG_PRICING_CHANGED" }
+  );
+  // Priced at or above it: runs, at the row's own prices, bounded by the registry's version.
+  const atRegistry = codingRowRuntime(alias({ inputUsdPerMTok: known.inputUsdPerMillionTokens, outputUsdPerMTok: known.outputUsdPerMillionTokens }), SNAPSHOT);
+  assert.equal(atRegistry.ok, true);
+  assert.equal(atRegistry.price.inputUsdPerMillionTokens, known.inputUsdPerMillionTokens);
+  assert.equal(atRegistry.price.cacheWriteBoundSource, known.pricingVersion);
+  assert.equal(atRegistry.price.maxOutputTokens, Math.min(32_000, known.providerMaxOutputTokens ?? Infinity));
+});
+
+test("the registry's reasoning billing, output ceiling and price floor apply to any row calling that provider model", () => {
+  const price = (overrides = {}) => ({
+    inputUsdPerMillionTokens: 1,
+    outputUsdPerMillionTokens: 5,
+    reasoningTokenBilling: "billed_as_output",
+    providerMaxOutputTokens: null,
+    cacheWriteUsdPerMillionTokens: null,
+    pricingVersion: "fixture-2026-11-21",
+    ...overrides,
+  });
+  const run = (prices, overrides = {}) => codingRowRuntime(row(overrides), SNAPSHOT, { registryPrices: () => prices });
+  assert.deepEqual(run([price({ reasoningTokenBilling: "billed_separately" })]), { ok: false, code: "CODE_REASONING_COST_UNBOUNDED" });
+  assert.deepEqual(run([price({ outputUsdPerMillionTokens: 6 })]), { ok: false, code: "CODE_CATALOG_PRICING_CHANGED" });
+  assert.deepEqual(run([price({ inputUsdPerMillionTokens: 1.5 })]), { ok: false, code: "CODE_CATALOG_PRICING_CHANGED" });
+  // The provider's settable ceiling holds the row's output limit down.
+  assert.equal(run([price({ providerMaxOutputTokens: 8_000 })]).price.maxOutputTokens, 8_000);
+  assert.equal(run([price()]).price.maxOutputTokens, 32_000);
+  // Two profiles of one provider model: the strictest of each.
+  const both = run([
+    price({ providerMaxOutputTokens: 16_000, cacheWriteUsdPerMillionTokens: 1.25 }),
+    price({ providerMaxOutputTokens: 8_000, cacheWriteUsdPerMillionTokens: 2, pricingVersion: "fixture-thinking" }),
+  ]);
+  assert.equal(both.price.maxOutputTokens, 8_000);
+  assert.equal(both.price.cacheWriteUsdPerMillionTokens, 2);
+  assert.equal(both.price.cacheWriteBoundSource, "fixture-thinking");
+  assert.deepEqual(run([price(), price({ reasoningTokenBilling: "billed_separately" })]), { ok: false, code: "CODE_REASONING_COST_UNBOUNDED" });
+  assert.deepEqual(run([price(), price({ outputUsdPerMillionTokens: 9 })]), { ok: false, code: "CODE_CATALOG_PRICING_CHANGED" });
+  // Unknown to the registry: the row's own values stand.
+  const unknown = run([]);
+  assert.equal(unknown.ok, true);
+  assert.equal(unknown.price.cacheWriteUsdPerMillionTokens, undefined);
+  assert.equal(unknown.price.cacheWriteBoundSource, "no_cache_write_requested");
+  // Known with no write rate: null, bounded by that profile's version.
+  assert.equal(run([price()]).price.cacheWriteUsdPerMillionTokens, null);
+  assert.equal(run([price()]).price.cacheWriteBoundSource, "fixture-2026-11-21");
+  // An Anthropic row's write bound is the larger of the registry's and 1.25x its own input.
+  assert.equal(run([price({ cacheWriteUsdPerMillionTokens: 3 })], { provider: "anthropic" }).price.cacheWriteUsdPerMillionTokens, 3);
+  assert.equal(run([], { provider: "anthropic" }).price.cacheWriteUsdPerMillionTokens, 1.25);
 });
 
 test("providers whose cost a token row cannot bound, and unknown providers, are refused", () => {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ConfigError, DEFAULT_ENDPOINT, resolveEndpoint } from "../src/config.js";
+import { ConfigError, DEFAULT_ENDPOINT, endpointMoveNote, resolveEndpoint } from "../src/config.js";
 
 const noEnv = { TOMVERSE_ENDPOINT: "" } as NodeJS.ProcessEnv;
 
@@ -22,6 +22,15 @@ test("an endpoint saved at the general API root is read as the coding API on the
     );
     // The environment variable is read the same way.
     assert.equal(resolveEndpoint({}, { TOMVERSE_ENDPOINT: "https://tomverse.app/api/v1" } as NodeJS.ProcessEnv).base, "https://tomverse.app/api/code/v1");
+});
+
+test("a moved endpoint says so in one line; one already on the coding API says nothing", () => {
+    const moved = resolveEndpoint({ endpoint: "https://tomverse.app/api/v1" }, noEnv);
+    assert.equal(moved.movedFrom, "https://tomverse.app/api/v1");
+    assert.match(endpointMoveNote(moved) ?? "", /general API.*coding API https:\/\/tomverse\.app\/api\/code\/v1/);
+    assert.match(endpointMoveNote(moved) ?? "", /tomverse config set endpoint https:\/\/tomverse\.app\/api\/code\/v1/);
+    assert.equal(endpointMoveNote(resolveEndpoint({ endpoint: "https://tomverse.app/api/code/v1" }, noEnv)), null);
+    assert.equal(endpointMoveNote(resolveEndpoint({}, noEnv)), null);
 });
 
 test("the coding API root is kept as given; anything else is refused", () => {

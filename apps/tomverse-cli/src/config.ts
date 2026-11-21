@@ -85,7 +85,15 @@ const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
  * (`/api/v1`); it is read as the coding API on the same server, so a saved
  * configuration keeps working without being rewritten.
  */
-export const resolveEndpoint = (config: CliConfig, env: NodeJS.ProcessEnv = process.env) => {
+export type Endpoint = {
+    base: string;
+    origin: string;
+    basePath: string;
+    /** The general-API endpoint as saved, when it was read as the coding API. */
+    movedFrom?: string;
+};
+
+export const resolveEndpoint = (config: CliConfig, env: NodeJS.ProcessEnv = process.env): Endpoint => {
     const raw = (env.TOMVERSE_ENDPOINT?.trim() || config.endpoint || DEFAULT_ENDPOINT).trim();
     let url: URL;
     try {
@@ -114,7 +122,12 @@ export const resolveEndpoint = (config: CliConfig, env: NodeJS.ProcessEnv = proc
     if (!path.endsWith(CODING_API_ROOT)) {
         throw new ConfigError(`The endpoint must be the coding API root ending in ${CODING_API_ROOT}, for example ${DEFAULT_ENDPOINT}.`);
     }
-    return { base: `${url.origin}${path}`, origin: url.origin, basePath: path };
+    const base = `${url.origin}${path}`;
+    return path === given ? { base, origin: url.origin, basePath: path } : { base, origin: url.origin, basePath: path, movedFrom: `${url.origin}${given}` };
 };
 
-export type Endpoint = ReturnType<typeof resolveEndpoint>;
+/** One line for doctor and `config show` when a saved general-API endpoint was read as the coding API. */
+export const endpointMoveNote = (endpoint: Endpoint) =>
+    endpoint.movedFrom
+        ? `saved as ${endpoint.movedFrom}, which is Tomverse's general API; the CLI uses the coding API ${endpoint.base} instead (save it with: tomverse config set endpoint ${endpoint.base})`
+        : null;
