@@ -19,41 +19,39 @@ npm install -g @tomverse/cli
 tomverse doctor
 ```
 
-**Without Node.js:** download the archive for your system from the
-[Tomverse CLI releases](https://github.com/mposition/Tomverse/releases?q=cli-v)
-and put `tomverse` (Windows: `tomverse.exe`) in a folder on your `PATH`. Each
-archive has a `.sha256` file to check it against.
+**Without Node.js:** download the installer for your system from the
+[Tomverse CLI releases](https://github.com/mposition/Tomverse/releases?q=cli-v),
+run it, then open a new terminal and run `tomverse doctor`. Each file has a
+`.sha256` to check it against.
 
-| System | Archive |
-|---|---|
-| Windows 10/11, x64 | `tomverse-<version>-windows-x64.zip` |
-| Windows 11 on Arm | `tomverse-<version>-windows-arm64.zip` |
-| macOS, Apple silicon | `tomverse-<version>-macos-arm64.tar.gz` |
-| macOS, Intel | `tomverse-<version>-macos-x64.tar.gz` |
-| Linux x64 (glibc 2.28+) | `tomverse-<version>-linux-x64.tar.gz` |
-| Linux Arm64 (glibc 2.28+) | `tomverse-<version>-linux-arm64.tar.gz` |
+| System | Installer | Installs to | Remove with |
+|---|---|---|---|
+| Windows 10/11, x64 | `tomverse-<version>-windows-x64.msi` | `%LOCALAPPDATA%\Programs\Tomverse CLI` (on your PATH; no administrator needed) | Settings > Apps |
+| Windows 11 on Arm | `tomverse-<version>-windows-arm64.msi` | same | Settings > Apps |
+| macOS, Apple silicon | `tomverse-<version>-macos-arm64.pkg` | `/usr/local/bin/tomverse` | `sudo rm /usr/local/bin/tomverse && sudo pkgutil --forget app.tomverse.cli` |
+| macOS, Intel | `tomverse-<version>-macos-x64.pkg` | same | same |
+| Ubuntu, Debian (x64, Arm64) | `tomverse-<version>-linux-<x64\|arm64>.deb` | `/usr/bin/tomverse` | `sudo apt remove tomverse-cli` |
+| Fedora, RHEL (x64, Arm64) | `tomverse-<version>-linux-<x64\|arm64>.rpm` | `/usr/bin/tomverse` | `sudo dnf remove tomverse-cli` |
 
 ```bash
-# macOS / Linux
-tar -xzf tomverse-<version>-<os>-<arch>.tar.gz
-sudo mv tomverse /usr/local/bin/          # or any folder on your PATH
-tomverse doctor
+# Ubuntu / Debian
+sudo apt install ./tomverse-<version>-linux-x64.deb
+# Fedora / RHEL
+sudo dnf install ./tomverse-<version>-linux-x64.rpm
 ```
 
-```powershell
-# Windows PowerShell
-Expand-Archive tomverse-<version>-windows-x64.zip -DestinationPath "$env:LOCALAPPDATA\Programs\tomverse"
-[Environment]::SetEnvironmentVariable("Path", "$([Environment]::GetEnvironmentVariable('Path','User'));$env:LOCALAPPDATA\Programs\tomverse", "User")
-# open a new terminal, then:
-tomverse doctor
-```
+Each installer also exists as a plain archive (`.zip` for Windows, `.tar.gz`
+for macOS and Linux) holding the same `tomverse` executable, for a folder of
+your choice.
 
 The executables carry their own Node.js runtime, so they are large (about
-100 MB) and are not yet signed with a publisher certificate. Windows may show
-"Windows protected your PC" on first run (More info > Run anyway). macOS may
-block a file downloaded in a browser; allow it in System Settings > Privacy &
-Security, or run `xattr -d com.apple.quarantine tomverse`. Alpine and other
-musl-based Linux systems should use the npm package.
+100 MB). The Windows installer is not yet signed with a publisher certificate:
+Windows may show "Windows protected your PC" (More info > Run anyway). Until
+the macOS package is signed and notarized, macOS refuses to open it from a
+browser download: open it with Control-click > Open, or allow it in System
+Settings > Privacy & Security. Linux
+packages need glibc 2.28 or later; Alpine and other musl-based systems should
+use the npm package.
 
 ## Connect
 

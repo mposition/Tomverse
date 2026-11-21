@@ -8,9 +8,10 @@ What a release consists of:
 
 - the npm package `@tomverse/cli` (needs Node.js 22 or later; Windows, macOS,
   Linux), published from `apps/tomverse-cli`;
-- six standalone archives for users without Node.js (Windows x64/arm64, macOS
-  arm64/x64, Linux x64/arm64), attached to a GitHub Release `cli-v<version>`
-  on `mposition/Tomverse`.
+- installers for users without Node.js, attached to a GitHub Release
+  `cli-v<version>` on `mposition/Tomverse`: Windows `.msi` (x64, arm64), macOS
+  `.pkg` (arm64, x64), Linux `.deb` and `.rpm` (x64, arm64), plus the same
+  executable as plain `.zip`/`.tar.gz` archives, each with a `.sha256`.
 
 ## Before anything: production runs the server side
 
@@ -43,8 +44,10 @@ Where: a browser, signed in to the npm account that will own the package.
 Where: GitHub > Actions > **Tomverse CLI release check** > Run workflow, on the
 branch or commit to release. It builds and tests the npm package on Windows,
 macOS and Linux with Node 22 and 24, and builds and tests the six standalone
-executables. It publishes nothing. Every job must be green; download the six
-`tomverse-cli-<os>-<arch>` artifacts from the run's summary page.
+executables; on each of those machines it also builds the installer, installs
+it, runs `tomverse --version` and uninstalls it. It publishes nothing. Every
+job must be green; download the six `tomverse-cli-<os>-<arch>` artifacts from
+the run's summary page (kept 14 days).
 
 ## 2. Publish the npm package
 
@@ -65,15 +68,13 @@ the installed copy) before anything is uploaded; a failure stops the publish.
 A published version can never be reused, even after `npm unpublish`; a fix
 ships as the next version.
 
-## 3. Publish the standalone archives
+## 3. Publish the installers
 
 Where: local PC, PowerShell, with the six artifacts from step 1 unzipped into
-one folder.
+one folder (each holds that system's installer, archive and `.sha256` files).
 
 ```powershell
-gh release create cli-v0.1.0 --repo mposition/Tomverse --title "Tomverse CLI 0.1.0" `
-  --notes "Install: npm install -g @tomverse/cli, or download the archive for your system below." `
-  tomverse-0.1.0-*.zip tomverse-0.1.0-*.tar.gz tomverse-0.1.0-*.sha256
+gh release create cli-v0.1.0 --repo mposition/Tomverse --title "Tomverse CLI 0.1.0" --notes "Install: npm install -g @tomverse/cli, or download the installer for your system below (Windows .msi, macOS .pkg, Linux .deb/.rpm)." tomverse-0.1.0-*.msi tomverse-0.1.0-*.pkg tomverse-0.1.0-*.deb tomverse-0.1.0-*.rpm tomverse-0.1.0-*.zip tomverse-0.1.0-*.tar.gz tomverse-0.1.0-*.sha256
 ```
 
 The README links to `https://github.com/mposition/Tomverse/releases?q=cli-v`.
@@ -94,11 +95,18 @@ has never had the CLI.
 
 ## Not done yet (decisions with a cost)
 
-- **Code signing.** The standalone executables have no publisher signature:
-  Windows SmartScreen warns on first run, and macOS warns about a downloaded
-  file (it has an ad-hoc signature, which Apple silicon needs to run it).
-  Removing the warnings needs an Apple Developer ID with notarization and a
-  Windows code-signing certificate, both paid.
+- **macOS signing and notarization.** The `.pkg` and the executable in it are
+  not yet signed with a Developer ID (the executable has the ad-hoc signature
+  Apple silicon needs to run it), so macOS refuses a `.pkg` opened from a
+  browser download until the user allows it. The Apple Developer Program
+  membership exists (owner, 2026-11-21); signing in the release check needs
+  Developer ID Application and Installer certificates and a notarization key
+  as repository secrets, which changes the workflows' reviewed credential
+  posture -- a separate, approved step.
+- **Windows signing.** The `.msi` is unsigned, so SmartScreen warns on first
+  run. A code-signing certificate or Microsoft's Artifact (Trusted) Signing is
+  paid; a Microsoft Store MSIX is signed by Microsoft for free but needs a
+  separate package and proof that the CLI's child processes work inside it.
 - **npm provenance / trusted publishing.** Publishing from GitHub Actions with
   OIDC would attach a provenance statement and remove the local `npm login`.
   It needs a publish workflow and an npm trusted-publisher setting.
