@@ -86,6 +86,51 @@ test("Smart Auto never shows a contextual add-a-model suggestion", () => {
   );
 });
 
+test("a source-seeking question suggests the research model in every supported UI language", () => {
+  const sourceQuestions = {
+    en: "What is the weather forecast for Brisbane this weekend? Please include sources.",
+    ko: "이번 주말 브리즈번 날씨 예보는 어떤가요? 출처를 함께 알려 주세요.",
+    zh: "这个周末布里斯班的天气预报如何？请附上来源。",
+    "zh-Hant": "這個週末布里斯本的天氣預報如何？請附上來源。",
+    de: "Wie ist die Wettervorhersage für Brisbane am Wochenende? Bitte mit Quellen.",
+    fr: "Quelle est la météo prévue à Brisbane ce week-end ? Merci d'indiquer vos sources.",
+    es: "¿Cuál es el pronóstico del tiempo en Brisbane este fin de semana? Incluye las fuentes.",
+    pt: "Qual é a previsão do tempo em Brisbane neste fim de semana? Inclua as fontes.",
+  };
+  for (const [locale, text] of Object.entries(sourceQuestions)) {
+    assert.deepEqual(
+      getContextualModelSuggestion({ text, attachments: [] }),
+      { key: "research:perplexity/sonar", modelId: "perplexity/sonar", reason: "research" },
+      locale
+    );
+  }
+  // Other source wordings per language reach the same card.
+  for (const text of [
+    "請問這篇文章的出處是哪裡？",
+    "幫我整理參考資料並提供最新資訊",
+    "请列出参考文献和出处",
+    "Kannst du dazu eine Recherche machen?",
+    "Was ist die Quelle für diese Zahl?",
+    "Fais une recherche sur ce sujet, s'il te plaît.",
+    "Necesito una investigación con citas confiables.",
+    "Preciso de uma pesquisa com citações sobre o tema.",
+  ]) {
+    assert.equal(getContextualModelSuggestion({ text, attachments: [] })?.reason, "research", text);
+  }
+  // An ordinary question in each language shows no card.
+  for (const text of [
+    "這個週末布里斯本的天氣預報如何？",
+    "这个周末布里斯班的天气预报如何？",
+    "Wie ist das Wetter in Brisbane am Wochenende?",
+    "Quel temps fera-t-il à Brisbane ce week-end ?",
+    "Quelle heure est-il à Brisbane maintenant ?",
+    "¿Qué tiempo hará en Brisbane este fin de semana?",
+    "Como vai estar o tempo em Brisbane no fim de semana?",
+  ]) {
+    assert.equal(getContextualModelSuggestion({ text, attachments: [] }), null, text);
+  }
+});
+
 test("model finder combination always returns 2-3 distinct models with a primary matching the ranked top pick", () => {
   const answers = { tasks: ["documents", "coding"], priority: "fast" };
   const combo = getModelFinderCombination(answers);
