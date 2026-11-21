@@ -25,6 +25,12 @@ import {
   amuxExecutionLaneWhere, type AmuxExecutionLane,
 } from "./adminExecutionViewCore.ts";
 import type { AmuxV52AttemptReviewView } from "./v52ReviewFindingsCore.ts";
+import {
+  amuxHierarchyArchivable, amuxHierarchyArchiveEnabled, amuxHierarchyMatches,
+  emptyAmuxHierarchyRollup, selectAmuxHierarchies, summarizeAmuxHierarchies,
+  type AmuxHierarchyRollup, type AmuxHierarchyScope, type AmuxHierarchySort,
+} from "./adminHierarchyCore.ts";
+import { readAmuxHierarchyRollups } from "./adminHierarchyRollupStore.ts";
 import { openAmuxV52ReviewFindingsRow } from "./v52ReviewFindingsStore.ts";
 import { amuxCardWaitFromState, amuxCardWaitVisible } from "./cardWaitReasonCore.ts";
 import { readAmuxCardWaitReasons } from "./cardWaitReasonStore.ts";
@@ -41,7 +47,7 @@ const cardSelect = {
   v4TitleCiphertext: true, v4TitleKeyId: true, v4TitleKeyVersion: true,
   v4TitleDigest: true, v4TitleDigestKeyId: true, updatedAt: true,
   v4SourceApprovalId: true,
-  archivedAt: true, revision: true,
+  archivedAt: true, revision: true, createdAt: true,
   v22AcceptedAssignment: { select: { workerName: true, lane: true,
     assignedAt: true } },
 } as const;
@@ -192,6 +198,7 @@ async function cardSummaries(rows: CardRow[]) {
     /** In the archive drawer; the archive lane also holds finished cards that were never archived. */
     archived: row.archivedAt !== null,
     updatedAt: row.updatedAt.toISOString(),
+    createdAt: row.createdAt.toISOString(),
   }));
 }
 
@@ -251,7 +258,7 @@ const nodeSelect = {
   id: true, level: true, parentId: true, state: true, revision: true,
   titleCiphertext: true, descriptionCiphertext: true,
   contentKeyId: true, contentKeyVersion: true,
-  contentDigest: true, contentDigestKeyId: true,
+  contentDigest: true, contentDigestKeyId: true, createdAt: true,
 } as const;
 
 async function nodeTitles(rows: NodeRow[],
@@ -299,53 +306,56 @@ async function nodeTitles(rows: NodeRow[],
   }));
 }
 
-async function nodeIndicators(rows: NodeRow[]) {
-  if (rows.length === 0) return new Map<string, {
-    assessment: unknown; progress: { done: number; total: number } }>();
+async function nodeAssessments(rows: NodeRow[]) {
+  if (rows.length === 0) return new Map<string, unknown>();
   const ids = rows.map((row) => row.id);
-  const [assessments, counts] = await Promise.all([
-    prisma.$queryRaw<Array<{ nodeId: string; subjectRevision: number;
-      metrics: unknown; evidenceAsOf: Date }>>`
-      SELECT DISTINCT ON ("nodeId") "nodeId", "subjectRevision",
-        "metrics", "evidenceAsOf"
-      FROM "AmuxPortfolioAssessment"
-      WHERE "nodeId" = ANY(${ids}::text[])
-      ORDER BY "nodeId", "approvedAt" DESC, "id" DESC
-    `,
-    prisma.$queryRaw<Array<{ rootId: string; total: number; done: number }>>`
-      WITH RECURSIVE descendants("rootId", "id", "depth") AS (
-        SELECT "id", "id", 0 FROM "AmuxPortfolioNode"
-        WHERE "id" = ANY(${ids}::text[])
-        UNION ALL
-        SELECT d."rootId", child."id", d."depth" + 1
-        FROM descendants d
-        JOIN "AmuxPortfolioNode" child ON child."parentId" = d."id"
-        WHERE child."state" = 'active' AND d."depth" < 2
-      )
-      SELECT d."rootId", COUNT(card."id")::int AS "total",
-        COUNT(card."id") FILTER (WHERE card."status" = 'done')::int AS "done"
-      FROM descendants d
-      LEFT JOIN "AmuxWorkItem" card ON card."parentFeatureNodeId" = d."id"
-        AND card."cardType" = 'task'
-        AND card."archivedAt" IS NULL
-      GROUP BY d."rootId"
-    `,
-  ]);
+  const assessments = await prisma.$queryRaw<Array<{ nodeId: string;
+    subjectRevision: number; metrics: unknown }>>`
+    SELECT DISTINCT ON ("nodeId") "nodeId", "subjectRevision", "metrics"
+    FROM "AmuxPortfolioAssessment"
+    WHERE "nodeId" = ANY(${ids}::text[])
+    ORDER BY "nodeId", "approvedAt" DESC, "id" DESC
+  `;
   const latest = new Map(assessments.map((item) => [item.nodeId, item]));
-  const progress = new Map(counts.map((row) => [row.rootId,
-    { done: row.done, total: row.total }]));
-  return new Map(rows.map((row) => [row.id, {
-    assessment: latest.get(row.id)?.subjectRevision === row.revision ?
-      latest.get(row.id)?.metrics ?? null : null,
-    progress: progress.get(row.id) ?? { done: 0, total: 0 },
-  }]));
+  return new Map(rows.map((row) => [row.id,
+    latest.get(row.id)?.subjectRevision === row.revision ?
+      latest.get(row.id)?.metrics ?? null : null]));
+}
+
+function nodeItem(node: NodeRow, title: string | null, assessment: unknown,
+  rollup: AmuxHierarchyRollup) {
+  return { type: "node" as const, id: node.id, title, level: node.level,
+    parentId: node.parentId, state: node.state,
+    createdAt: node.createdAt.toISOString(), assessment,
+    progress: { done: rollup.done, total: rollup.total }, rollup,
+    archivable: amuxHierarchyArchivable(rollup) };
+}
+
+async function nodeItems(nodes: NodeRow[],
+  known?: Map<string, AmuxHierarchyRollup>) {
+  const [titles, assessments, rollups] = await Promise.all([
+    nodeTitles(nodes), nodeAssessments(nodes),
+    known ? Promise.resolve(known) :
+      readAmuxHierarchyRollups(prisma, nodes.map((node) => node.id)),
+  ]);
+  return nodes.map((node, index) => nodeItem(node, titles[index],
+    assessments.get(node.id) ?? null,
+    rollups.get(node.id) ?? emptyAmuxHierarchyRollup()));
 }
 
 export type AmuxHierarchyParent = { kind: "root" } | { kind: "unassigned" } |
   { kind: "node" | "story"; id: string };
 
+export type AmuxHierarchyRootOptions = {
+  scope: AmuxHierarchyScope; sort: AmuxHierarchySort;
+  createdWithinDays: number | null;
+};
+
+const defaultRootOptions: AmuxHierarchyRootOptions = {
+  scope: "active", sort: "remaining", createdWithinDays: null };
+
 export async function readAmuxExecutionHierarchy(parent: AmuxHierarchyParent,
-  page: number) {
+  page: number, rootOptions: AmuxHierarchyRootOptions = defaultRootOptions) {
   const skip = page * AMUX_EXECUTION_PAGE_SIZE;
   if (parent.kind === "unassigned") {
     const where = { parentFeatureNodeId: null,
@@ -392,24 +402,123 @@ export async function readAmuxExecutionHierarchy(parent: AmuxHierarchyParent,
         total, items: (await cardSummaries(cards)).map((card) => ({
           type: "card" as const, ...card })) };
     }
+    const where = { parentId: parent.id, state: "active" };
+    const [total, nodes] = await Promise.all([
+      prisma.amuxPortfolioNode.count({ where }),
+      prisma.amuxPortfolioNode.findMany({ where,
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        skip, take: AMUX_EXECUTION_PAGE_SIZE, select: nodeSelect }),
+    ]);
+    return { parent, page, pageSize: AMUX_EXECUTION_PAGE_SIZE, total,
+      items: await nodeItems(nodes) };
   }
-  const where = { parentId: parent.kind === "root" ? null : parent.id,
-    state: "active" };
-  const [total, nodes] = await Promise.all([
-    prisma.amuxPortfolioNode.count({ where }),
-    prisma.amuxPortfolioNode.findMany({ where,
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-      skip, take: AMUX_EXECUTION_PAGE_SIZE, select: nodeSelect }),
+  // The top level is filtered and sorted by its rollups, so every active
+  // Initiative is measured; only the shown page is decrypted.
+  const nowMs = Date.now();
+  const [roots, unassignedCount] = await Promise.all([
+    prisma.amuxPortfolioNode.findMany({ where: { parentId: null, state: "active" },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: nodeSelect }),
+    prisma.amuxWorkItem.count({ where: { parentFeatureNodeId: null,
+      parentStoryCardId: null, archivedAt: null } }),
   ]);
-  const [titles, indicators] = await Promise.all([
-    nodeTitles(nodes), nodeIndicators(nodes),
+  const rollups = await readAmuxHierarchyRollups(prisma, roots.map((node) => node.id));
+  const facts = roots.map((node) => ({ id: node.id, node,
+    createdAt: node.createdAt.toISOString(),
+    rollup: rollups.get(node.id) ?? emptyAmuxHierarchyRollup() }));
+  const selected = selectAmuxHierarchies(facts, { ...rootOptions, nowMs });
+  const shown = selected.slice(skip, skip + AMUX_EXECUTION_PAGE_SIZE);
+  return { parent, page, pageSize: AMUX_EXECUTION_PAGE_SIZE,
+    total: selected.length, ...rootOptions,
+    summary: summarizeAmuxHierarchies(facts, nowMs), unassignedCount,
+    archiveEnabled: amuxHierarchyArchiveEnabled(process.env),
+    items: await nodeItems(shown.map((fact) => fact.node), rollups) };
+}
+
+async function mapPool<T, R>(items: T[], size: number, run: (item: T) => Promise<R>) {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(size, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next++;
+      out[index] = await run(items[index]);
+    }
+  }));
+  return out;
+}
+
+/**
+ * Searches every active hierarchy title and every linked, unarchived card by
+ * number, Task ID or title. Titles are stored encrypted, so they are opened
+ * here on the server. Each match is returned with its ancestors (as context,
+ * not matches) in tree order, so the list reads like the expanded tree.
+ */
+export async function readAmuxExecutionHierarchySearch(query: string) {
+  const [nodes, linkedCards] = await Promise.all([
+    prisma.amuxPortfolioNode.findMany({ where: { state: "active" },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: nodeSelect }),
+    prisma.amuxWorkItem.findMany({ where: { archivedAt: null,
+      OR: [{ parentFeatureNodeId: { not: null } }, { parentStoryCardId: { not: null } }] },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: cardSelect }),
   ]);
-  return { parent, page, pageSize: AMUX_EXECUTION_PAGE_SIZE, total,
-    items: nodes.map((node, index) => ({ type: "node" as const,
-      id: node.id, title: titles[index], level: node.level,
-      parentId: node.parentId, state: node.state,
-      assessment: indicators.get(node.id)?.assessment ?? null,
-      progress: indicators.get(node.id)?.progress ?? { done: 0, total: 0 } })) };
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const cardById = new Map(linkedCards.map((card) => [card.id, card]));
+  const [nodeTitleList, cardTitleList] = await Promise.all([
+    nodeTitles(nodes), mapPool(linkedCards, 16, readAmuxCardTitle),
+  ]);
+  const nodeTitle = new Map(nodes.map((node, index) => [node.id, nodeTitleList[index]]));
+  const featureOf = (card: CardRow): string | null => card.parentFeatureNodeId ??
+    (card.parentStoryCardId ? cardById.get(card.parentStoryCardId)?.parentFeatureNodeId ?? null : null);
+  const matchedNodes = new Set(nodes.filter((node) =>
+    amuxHierarchyMatches(query, nodeTitle.get(node.id), node.id)).map((node) => node.id));
+  const matchedCards = new Set(linkedCards.filter((card, index) => {
+    const feature = featureOf(card);
+    return feature !== null && nodeById.has(feature) &&
+      amuxHierarchyMatches(query, cardTitleList[index], card.displayKey, card.sourceKey, card.id);
+  }).map((card) => card.id));
+
+  // Every match brings its ancestors along.
+  const includedNodes = new Set<string>();
+  const includedCards = new Set<string>();
+  const includeNodeChain = (id: string | null) => {
+    for (let at = id; at && !includedNodes.has(at); at = nodeById.get(at)?.parentId ?? null)
+      if (nodeById.has(at)) includedNodes.add(at);
+  };
+  for (const id of matchedNodes) includeNodeChain(id);
+  for (const id of matchedCards) {
+    const card = cardById.get(id)!;
+    includedCards.add(id);
+    if (card.parentStoryCardId && cardById.has(card.parentStoryCardId))
+      includedCards.add(card.parentStoryCardId);
+    includeNodeChain(featureOf(card));
+  }
+  const nodeRows = nodes.filter((node) => includedNodes.has(node.id));
+  const cardRows = linkedCards.filter((card) => includedCards.has(card.id));
+  const [items, cards] = await Promise.all([nodeItems(nodeRows), cardSummaries(cardRows)]);
+  const nodeItemById = new Map(items.map((item) => [item.id, item]));
+  const cardItemById = new Map(cards.map((card) => [card.id, card]));
+
+  type Row = { depth: number; match: boolean;
+    item: ReturnType<typeof nodeItem> | ({ type: "card" } & AmuxExecutionCardSummary) };
+  const rows: Row[] = [];
+  const childNodes = (parentId: string | null) =>
+    nodeRows.filter((node) => node.parentId === parentId);
+  const pushCard = (card: CardRow, depth: number) => {
+    const item = cardItemById.get(card.id);
+    if (!item) return;
+    rows.push({ depth, match: matchedCards.has(card.id), item: { type: "card", ...item } });
+    for (const child of cardRows) if (child.parentStoryCardId === card.id) pushCard(child, depth + 1);
+  };
+  const pushNode = (node: NodeRow, depth: number) => {
+    rows.push({ depth, match: matchedNodes.has(node.id), item: nodeItemById.get(node.id)! });
+    for (const child of childNodes(node.id)) pushNode(child, depth + 1);
+    for (const card of cardRows)
+      if (card.parentFeatureNodeId === node.id && !card.parentStoryCardId) pushCard(card, depth + 1);
+    for (const card of cardRows)
+      if (card.parentStoryCardId && !includedCards.has(card.parentStoryCardId) &&
+          featureOf(card) === node.id) pushCard(card, depth + 1);
+  };
+  for (const root of childNodes(null)) pushNode(root, 0);
+  return { query, matchedNodes: matchedNodes.size, matchedCards: matchedCards.size, rows };
 }
 
 export async function readAmuxExecutionTaskDetail(taskId: string) {

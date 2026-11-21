@@ -47,6 +47,8 @@ test("execution UI reads the same DB through bounded owner-only read routes", as
   const route = await readFile(new URL("../app/api/admin/amux/execution-view/route.ts", import.meta.url), "utf8");
   const service = await readFile(new URL("../lib/amux/adminExecutionRead.ts", import.meta.url), "utf8");
   const ui = await readFile(new URL("../components/admin/AmuxExecutionWorkspace.tsx", import.meta.url), "utf8");
+  // The hierarchy tree lives in its own read-only component.
+  const tree = await readFile(new URL("../components/admin/AmuxHierarchyGrid.tsx", import.meta.url), "utf8");
   assert.match(route, /getAdminRole\(session\) !== "owner"/);
   assert.match(route, /assertRecentAdminAuthentication\(session\)/);
   assert.match(route, /private, no-store, max-age=0/);
@@ -54,7 +56,7 @@ test("execution UI reads the same DB through bounded owner-only read routes", as
   assert.match(service, /loadAmuxContentUnitKeys/);
   assert.match(service, /verifyAmuxContentDigest/);
   assert.match(service, /readAmuxV22TaskResultForOwner/);
-  assert.match(ui, /aria-expanded=/);
+  assert.match(tree, /aria-expanded=/);
   assert.match(ui, /m\.loadMore\(/);
   assert.match(ui, /selected\.reviews/);
   assert.match(ui, /selected\.result\.text/);
@@ -64,6 +66,7 @@ test("execution UI reads the same DB through bounded owner-only read routes", as
   assert.match(ui, /currentRevision/);
   assert.doesNotMatch(route, /export async function (POST|PUT|PATCH|DELETE)/);
   assert.doesNotMatch(ui, /method: "(POST|PUT|PATCH|DELETE)"/);
+  assert.doesNotMatch(tree, /method: "(POST|PUT|PATCH|DELETE)"/);
 });
 
 test("a card waiting on the owner opens on the same owner review Assignment hosts", async () => {

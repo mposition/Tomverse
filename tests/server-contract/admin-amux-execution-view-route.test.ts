@@ -9,6 +9,8 @@ let session: { user: { id: string } } | null = null;
 let role = "viewer";
 let recent = false;
 let reads = 0;
+let lastRootOptions: unknown = null;
+let lastQuery: string | null = null;
 
 mock.module("next-auth/next", { namedExports: {
   getServerSession: async () => session,
@@ -36,8 +38,11 @@ mock.module(mod("lib/amux/adminExecutionRead.ts"), { namedExports: {
     return { counts: {}, lanes: [] }; },
   readAmuxExecutionBoard: async () => { reads += 1;
     return { counts: {}, cards: [] }; },
-  readAmuxExecutionHierarchy: async () => { reads += 1;
+  readAmuxExecutionHierarchy: async (_parent: unknown, _page: number, options: unknown) => {
+    reads += 1; lastRootOptions = options;
     return { total: 0, items: [] }; },
+  readAmuxExecutionHierarchySearch: async (query: string) => { reads += 1; lastQuery = query;
+    return { query, matchedNodes: 0, matchedCards: 0, rows: [] }; },
   readAmuxExecutionTaskDetail: async () => { reads += 1;
     return { id: "card-1", title: "private" }; },
 } });
@@ -68,4 +73,36 @@ test("private execution views require owner and recent reauthentication", async 
   assert.equal((await GET(new Request(`${base}?view=hierarchy&parentKind=unassigned`))).status, 200);
   assert.equal((await GET(new Request(`${base}?view=detail&taskId=card-1`))).status, 200);
   assert.equal(reads, 5);
+});
+
+test("the hierarchy list takes its tab, sort and creation filter at the top level only", async () => {
+  const { GET } = await route;
+  session = { user: { id: "owner" } }; role = "owner"; recent = true; reads = 0;
+  const status = async (query: string) => (await GET(new Request(`${base}?${query}`))).status;
+  assert.equal(await status("view=hierarchy&parentKind=root"), 200);
+  assert.deepEqual(lastRootOptions, { scope: "active", sort: "remaining", createdWithinDays: null });
+  assert.equal(await status("view=hierarchy&parentKind=root&scope=cleanup"), 200);
+  assert.deepEqual(lastRootOptions, { scope: "cleanup", sort: "stale", createdWithinDays: null });
+  assert.equal(await status("view=hierarchy&parentKind=root&scope=all&sort=created&createdWithin=30"), 200);
+  assert.deepEqual(lastRootOptions, { scope: "all", sort: "created", createdWithinDays: 30 });
+  for (const query of ["view=hierarchy&parentKind=root&scope=archived",
+    "view=hierarchy&parentKind=root&sort=title",
+    "view=hierarchy&parentKind=root&createdWithin=31",
+    "view=hierarchy&parentKind=node&parentId=n1&scope=all",
+    "view=hierarchy&parentKind=root&scope=all&scope=active"])
+    assert.equal(await status(query), 400, query);
+  assert.equal(reads, 3);
+});
+
+test("hierarchy search needs one bounded query and returns what the reader found", async () => {
+  const { GET } = await route;
+  session = { user: { id: "owner" } }; role = "owner"; recent = true; reads = 0;
+  const response = await GET(new Request(`${base}?view=hierarchy_search&q=${encodeURIComponent("  다운로드 ")}`));
+  assert.equal(response.status, 200);
+  assert.equal(lastQuery, "다운로드");
+  assert.equal(response.headers.get("cache-control"), "private, no-store, max-age=0");
+  for (const query of ["view=hierarchy_search", "view=hierarchy_search&q=%20",
+    `view=hierarchy_search&q=${"x".repeat(81)}`, "view=hierarchy_search&q=a&page=1"])
+    assert.equal((await GET(new Request(`${base}?${query}`))).status, 400, query);
+  assert.equal(reads, 1);
 });
