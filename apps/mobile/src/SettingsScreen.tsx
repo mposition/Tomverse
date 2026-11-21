@@ -13,7 +13,10 @@ import { Bot, Brain, ChevronDown, ChevronRight, Clock3, CreditCard, Database, Ex
 import { mobileSettingsDesignCopy } from "../../../locales/mobileSettingsDesign";
 import "./settings.css";
 
-const tabIcons: Record<AccountSettingsTab, LucideIcon> = { account: UserRound, preferences: Settings2, assistants: Bot, ai: Brain, data: Database, plan: CreditCard };
+// The web settings panel has a Developer tab (API keys, addresses, CLI); the native app does not, so it is left out of the strip.
+type NativeSettingsTab = Exclude<AccountSettingsTab, "developer">;
+const NATIVE_SETTINGS_TABS = ACCOUNT_SETTINGS_TABS.filter((item): item is NativeSettingsTab => item !== "developer");
+const tabIcons: Record<NativeSettingsTab, LucideIcon> = { account: UserRound, preferences: Settings2, assistants: Bot, ai: Brain, data: Database, plan: CreditCard };
 
 export function SettingsScreen({ transport, signedIn, language, theme, onLanguage, onTheme, onAccount, onSignOut, onAssistants, onImports, initialTab = "account" }: {
   transport: ChatTransport; signedIn: boolean; language: MobileLanguage; theme: string;
@@ -25,7 +28,7 @@ export function SettingsScreen({ transport, signedIn, language, theme, onLanguag
   const copy = mobileCopy[language]; const c = mobileParityCopy(language); const navigation = mobileSettingsCopy(language);
   const design = mobileSettingsDesignCopy(language);
   const [now, setNow] = useState(() => Date.now());
-  const [tab, setTab] = useState<AccountSettingsTab>(initialTab);
+  const [tab, setTab] = useState<AccountSettingsTab>(initialTab === "developer" ? "account" : initialTab);
   const [detail, setDetail] = useState<"memory" | null>(null);
   const entryPrefix = useId();
   const memoryEntry = useRef<HTMLButtonElement>(null);
@@ -94,7 +97,7 @@ export function SettingsScreen({ transport, signedIn, language, theme, onLanguag
   const readFailed = detail === "memory" ? failedReads.includes("memory") : ({ account: ["account", "security"], preferences: ["preferences"], assistants: ["assistants"], ai: ["preferences", "models"], data: [], plan: [] }[tab]).some(key => failedReads.includes(key));
   const toggle = (Icon: LucideIcon, title: string, checked: boolean, disabled: boolean, onChange: (value: boolean) => void) => <label className="settings-toggle-row"><Icon size={21} aria-hidden="true" /><span>{title}</span><input type="checkbox" role="switch" checked={checked} disabled={disabled} onChange={event => onChange(event.target.checked)} /></label>;
   return <div className="native-settings">
-    {detail ? <button type="button" className="settings-detail-back" onClick={() => { setDetail(null); setMessage(""); }}><span aria-hidden="true">← </span>{navigation.back}</button> : <nav className="settings-tabs" aria-label={c.settings}>{ACCOUNT_SETTINGS_TABS.map(item => { const Icon = tabIcons[item]; return <button key={item} data-testid={`native-settings-tab-${item}`} aria-current={tab === item ? "page" : undefined} onClick={() => { setTab(item); setMessage(""); }}><Icon size={18} aria-hidden="true" /><span>{navigation[item]}</span></button>; })}</nav>}
+    {detail ? <button type="button" className="settings-detail-back" onClick={() => { setDetail(null); setMessage(""); }}><span aria-hidden="true">← </span>{navigation.back}</button> : <nav className="settings-tabs" aria-label={c.settings}>{NATIVE_SETTINGS_TABS.map(item => { const Icon = tabIcons[item]; return <button key={item} data-testid={`native-settings-tab-${item}`} aria-current={tab === item ? "page" : undefined} onClick={() => { setTab(item); setMessage(""); }}><Icon size={18} aria-hidden="true" /><span>{navigation[item]}</span></button>; })}</nav>}
     {loading && <p role="status">{copy.loading}</p>}
     {message && <p role="status" className="notice">{message}</p>}
     {readFailed && <p role="status" className="notice">{c.unavailable}</p>}

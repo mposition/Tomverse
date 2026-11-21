@@ -17,7 +17,7 @@ Owning modules:
 - `app/(site)/(application)/settings/layout.tsx` — the route shell that
   renders that strip for every `/settings/**` screen
 
-Coverage: `tests/settingsNavigation.test.mjs`,
+Coverage: `tests/settingsNavigation.test.mjs`, `tests/developerSettingsRender.test.mjs`,
 `tests/e2e/settings-information-architecture.spec.ts` (desktop *and* mobile
 projects, same assertions).
 
@@ -101,13 +101,38 @@ which tab happened to exist first:
 | `external-import` | `data` | `auth.dataTab` | `settingsNav.dataAndPersonalization` |
 | `account-data` | `data` | `auth.dataTab` | `settingsNav.dataAndPersonalization` |
 | `email-notifications` | `account` | `auth.accountTab` | its account communication row |
-| `api-keys` | `account` | `auth.accountTab` | its API keys row (shown only where `NEXT_PUBLIC_EXTERNAL_API_SETTINGS_VISIBLE=true`) |
+| `api-keys` | `developer` | `externalApi.developerTab` | its key summary card (section 2.3) |
+
+The tabs, in order: account, preferences, AI assistants, AI personalization, data,
+**developer**, plan.
 
 Email notifications live on the default Account tab because they are choices
 about communication to the signed-in identity, not stored-data operations.
 The account quick menu also links directly to the same detail page. That entry
 states both the benefit and that marketing email is optional and can be turned
 off at any time; it never changes consent by navigation alone.
+
+## 2.3 Developer tab
+
+The Developer tab (`developer`, `components/settings/DeveloperSettingsTab.tsx`, owner
+decision 2026-11-21) holds what a person sets up once to use the account from other
+apps: a title and one sentence, then, in order, the API key summary card (active key
+count, last use, "Manage keys" to `/settings/api`), the connection addresses card
+(general API `/api/v1` and `/api/anthropic`, coding API `/api/code/v1` and
+`/api/code/anthropic`, each line with a copy button and each group naming its tools,
+ending in a link to the per-tool setup on `/settings/api#connect`), the Tomverse CLI card
+(only while the install guide is published, `tomverseCli` in the key list), and a footnote
+that the API and CLI need Pro or above and use the same credits as Chat.
+
+- It reads the key list the API page reads (`GET /api/user/api-keys`) and adds no route.
+  The addresses come from that response, so the tab and the page cannot disagree.
+- A Free account sees the Pro-or-above notice and an upgrade button (opens the plan tab)
+  instead of the card; a signed-out answer shows a sign-in link.
+- "Manage keys" carries the row id `settings-entry-api-keys`, so "Back to settings" from
+  `/settings/api` lands on this tab with that control focused. The Account tab has no API
+  row any more; `settings=account&settingsSection=api-keys` still opens the Developer
+  tab, because the section decides the tab.
+- The native mobile app has no Developer tab (`apps/mobile/src/SettingsScreen.tsx`).
 
 **A tab is a home, not a signpost.** The assistants tab renders the collection
 — its list, its states and its create action — rather than one row linking to a

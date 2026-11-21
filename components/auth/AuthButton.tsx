@@ -23,6 +23,7 @@ import {
     ChevronDown,
     ChevronRight,
     Clock3,
+    Code2,
     CreditCard,
     Crown,
     Database,
@@ -80,6 +81,7 @@ import {
     type AccountSettingsTab,
 } from "@/lib/accountSettingsEvents";
 import { SettingsEntryRow } from "@/components/settings/SettingsEntryRow";
+import { DeveloperSettingsTab } from "@/components/settings/DeveloperSettingsTab";
 import { rememberSettingsReturnProduct } from "@/components/settings/useSettingsReturnProduct";
 import {
     isSettingsSectionId,
@@ -1404,14 +1406,14 @@ export function AuthButton({
 
                         <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[13rem_1fr]">
                             {/*
-                              Six tabs wrap rather than shrink. `grid-cols-4`
-                              held four across at `sm`; a fifth and sixth would
-                              have divided the same row again and taken every
-                              label below the 11px floor the typography
-                              contract sets. Two columns then three gives a
-                              clean 3x2 at `sm` and 2x3 below it, so no label
-                              is ever cut and the touch targets keep their
-                              height.
+                              Seven tabs wrap rather than shrink. `grid-cols-4`
+                              held four across at `sm`; a fifth, sixth and
+                              seventh would have divided the same row again and
+                              taken every label below the 11px floor the
+                              typography contract sets. Two columns then three
+                              wraps them (3 + 3 + 1 at `sm`, 2 per row below
+                              it), so no label is ever cut and the touch
+                              targets keep their height.
                             */}
                             <nav className="grid grid-cols-2 gap-2 border-b border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950/50 sm:grid-cols-3 md:flex md:flex-col md:overflow-visible md:border-b-0 md:border-r">
                                 {[
@@ -1431,6 +1433,8 @@ export function AuthButton({
                                         icon: Sparkles,
                                     },
                                     { id: "data", label: t("auth.dataTab"), icon: Database },
+                                    // Same key as the breadcrumb, like the tabs above.
+                                    { id: "developer", label: t(SETTINGS_TAB_LABEL_KEY.developer), icon: Code2 },
                                     { id: "plan", label: t("auth.planTab"), icon: CreditCard },
                                 ].map((item) => {
                                     const Icon = item.icon;
@@ -1507,27 +1511,6 @@ export function AuthButton({
                                                 linkTestId="email-notifications-entry-link"
                                             />
                                         </section>
-                                        {process.env.NEXT_PUBLIC_EXTERNAL_API_SETTINGS_VISIBLE === "true" ? (
-                                            // Shown only where the API is offered; the server
-                                            // gates every key route regardless of this row.
-                                            <section
-                                                aria-label={t("externalApi.entryTitle")}
-                                                className="rounded-2xl border border-zinc-200 bg-zinc-50 p-1 dark:border-zinc-800 dark:bg-zinc-950/60"
-                                                data-testid="settings-account-api-keys"
-                                            >
-                                                <SettingsEntryRow
-                                                    section="api-keys"
-                                                    href="/settings/api"
-                                                    icon={KeyRound}
-                                                    title={t("externalApi.entryTitle")}
-                                                    description={t("externalApi.entryDescription")}
-                                                    actionLabel={t("externalApi.entryOpen")}
-                                                    onNavigate={closeSettingsModal}
-                                                    testId="api-keys-entry"
-                                                    linkTestId="api-keys-entry-link"
-                                                />
-                                            </section>
-                                        ) : null}
                                         <section className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
                                             <div className="flex items-start gap-3">
                                                 <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-status-success-500" />
@@ -2101,6 +2084,13 @@ export function AuthButton({
                                             </button>
                                         </section>
                                     </div>
+                                )}
+
+                                {activeSettingsTab === "developer" && (
+                                    <DeveloperSettingsTab
+                                        onUpgrade={() => setActiveSettingsTab("plan")}
+                                        onNavigate={closeSettingsModal}
+                                    />
                                 )}
 
                                 {activeSettingsTab === "plan" && (
