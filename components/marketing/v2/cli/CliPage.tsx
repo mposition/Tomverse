@@ -32,7 +32,7 @@ type Token = string | [cls: "add", text: string];
 const DOCTOR_ROWS: Array<[name: string, detail: string]> = [
   ["node", "Node 22.11.0"],
   ["folder", "/home/me/projects/calc (trusted)"],
-  ["endpoint", "https://tomverse.app/api/v1"],
+  ["endpoint", "https://tomverse.app/api/code/v1"],
   ["key", "tvk_ab12cd34_… (from TOMVERSE_API_KEY)"],
   ["models", "7 tool-capable models"],
   ["credits", "key cap none, committed 0, held 0"],
