@@ -10,13 +10,17 @@ import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
 import {
   readAmuxExecutionBoard, readAmuxExecutionBoardSnapshot,
-  readAmuxExecutionHierarchy,
+  readAmuxExecutionHierarchy, readAmuxExecutionHierarchySearch,
   readAmuxExecutionFeedback,
   readAmuxExecutionTaskDetail,
 } from "@/lib/amux/adminExecutionRead";
 import {
   parseAmuxExecutionLane, parseAmuxExecutionPage,
 } from "@/lib/amux/adminExecutionViewCore";
+import {
+  parseAmuxHierarchyCreatedWithin, parseAmuxHierarchyScope,
+  parseAmuxHierarchySearch, parseAmuxHierarchySort,
+} from "@/lib/amux/adminHierarchyCore";
 import { readAmuxOwnerRecoveryInspection } from
   "@/lib/amux/ownerRecoveryInspectionRead";
 import { AMUX_V22_RECOVERY_ID_PATTERN, AMUX_V22_RECOVERY_MAX_REVISION } from
@@ -49,7 +53,9 @@ export async function GET(request: Request) {
     const view = params.get("view");
     const allowed = view === "board_snapshot" ? ["view"] :
       view === "board" ? ["view", "lane", "page"] :
-      view === "hierarchy" ? ["view", "parentKind", "parentId", "page"] :
+      view === "hierarchy" ? ["view", "parentKind", "parentId", "page", "scope",
+        "sort", "createdWithin"] :
+      view === "hierarchy_search" ? ["view", "q"] :
       view === "feedback" ? ["view", "parentKind", "parentId"] :
       view === "recovery_inspection" ? ["view", "taskId", "taskRevision", "attemptId"] :
       view === "detail" ? ["view", "taskId"] : null;
@@ -73,8 +79,22 @@ export async function GET(request: Request) {
       const parent = parentKind === "root" ? { kind: "root" as const } :
         parentKind === "unassigned" ? { kind: "unassigned" as const } :
         { kind: parentKind as "node" | "story", id: parentId! };
-      const result = await readAmuxExecutionHierarchy(parent, page);
+      // Tabs, sort and the creation filter apply to the top level only.
+      if (parentKind !== "root" && ["scope", "sort", "createdWithin"]
+        .some((key) => params.has(key))) return json({ error: "invalid_request" }, 400);
+      const scope = parseAmuxHierarchyScope(params.get("scope"));
+      const sort = scope && parseAmuxHierarchySort(params.get("sort"), scope);
+      const createdWithinDays = parseAmuxHierarchyCreatedWithin(params.get("createdWithin"));
+      if (!scope || !sort || createdWithinDays === undefined)
+        return json({ error: "invalid_request" }, 400);
+      const result = await readAmuxExecutionHierarchy(parent, page,
+        { scope, sort, createdWithinDays });
       return result ? json(result) : json({ error: "not_found" }, 404);
+    }
+    if (view === "hierarchy_search") {
+      const query = parseAmuxHierarchySearch(params.get("q"));
+      if (!query) return json({ error: "invalid_request" }, 400);
+      return json(await readAmuxExecutionHierarchySearch(query));
     }
     if (view === "feedback") {
       const kind = params.get("parentKind");
