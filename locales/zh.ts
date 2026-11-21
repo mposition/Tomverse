@@ -1418,7 +1418,6 @@ export const zh = {
         dataRetentionTitle: "数据保留",
         dataRetentionDescription: "标准对话会保留到你删除为止。登录后添加的附件与对话一同保存，在你删除该对话或账户时删除。未登录时添加的附件为临时存储，会被自动清除。",
         attachmentRetentionNotice: "登录后添加的文件会与对话一同存储，用于发送给模型和提取文档内容，并保留到你删除该对话或账户为止。未登录时添加的文件为临时存储，会被自动清除。",
-        dangerZone: "危险区域",
         dangerZoneDescription: "这些操作会影响已存储的 Tomverse 数据。删除对话前请先导出重要内容。",
         deleteAllChats: "删除所有对话",
         deleteAllChatsConfirm: "删除所有已存储的对话？此操作无法撤销。",

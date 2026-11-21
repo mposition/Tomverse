@@ -830,7 +830,7 @@ export const es: HelpLocaleCopy = {
       summary: "Al solicitar la eliminación se cierra tu sesión al instante y, pasado el plazo de gracia de 7 días, tus datos, incluidas las conversaciones y los archivos, se eliminan de forma permanente. Pueden conservarse los registros mínimos necesarios para obligaciones de pago y legales, y el registro de bajas de correo.",
       steps: [
         { title: "Antes, descarga tus datos (recomendado)", body: "Si quieres conservar algún dato, descárgalo antes siguiendo la guía «Descargar los datos de tu cuenta»." },
-        { title: "Abrir la zona de riesgo", body: "En la pestaña «Cuenta» de «Ajustes», en «Zona de riesgo», abajo, pulsa «Eliminar cuenta»." },
+        { title: "Abrir la eliminación de la cuenta", body: "En la pestaña «Cuenta» de «Ajustes», al final, pulsa «Eliminar cuenta»." },
         { title: "Escribir la confirmación", body: "Marca la casilla de consentimiento y escribe exactamente DELETE MY ACCOUNT." },
         { title: "Enviar la solicitud", body: "Pulsa «Eliminar cuenta» y vuelve a pulsar «Solicitar eliminación de cuenta». Si se te pide iniciar sesión de nuevo, hazlo y repite el paso." },
       ],

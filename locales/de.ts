@@ -1404,7 +1404,6 @@ export const de = {
         dataRetentionTitle: "Datenaufbewahrung",
         dataRetentionDescription: "Standard-Chats bleiben gespeichert, bis du sie löschst. Dateien, die du angemeldet anhängst, werden mit der Unterhaltung gespeichert und gelöscht, wenn du diese Unterhaltung oder dein Konto löschst. Ohne Konto angehängte Dateien sind temporär und werden automatisch entfernt.",
         attachmentRetentionNotice: "Dateien, die du angemeldet anhängst, werden mit der Unterhaltung gespeichert und für Modellbereitstellung und Dokumentextraktion genutzt. Sie bleiben erhalten, bis du die Unterhaltung oder dein Konto löschst. Ohne Konto angehängte Dateien sind temporär und werden automatisch entfernt.",
-        dangerZone: "Gefahrenbereich",
         dangerZoneDescription: "Diese Aktionen betreffen gespeicherte Tomverse-Daten. Exportiere wichtige Chats vor dem Löschen.",
         deleteAllChats: "Alle Chats löschen",
         deleteAllChatsConfirm: "Alle gespeicherten Unterhaltungen löschen? Diese Aktion kann nicht rückgängig gemacht werden.",

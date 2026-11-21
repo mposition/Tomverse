@@ -832,7 +832,7 @@ export const fr: HelpLocaleCopy = {
       summary: "Quand vous demandez la suppression, vous êtes déconnecté tout de suite ; après un délai de grâce de 7 jours, vos données, y compris conversations et fichiers, sont supprimées définitivement. Les enregistrements minimaux nécessaires aux obligations de paiement et légales, ainsi que les enregistrements de désabonnement, peuvent être conservés.",
       steps: [
         { title: "Télécharger d’abord (recommandé)", body: "Si vous souhaitez conserver des données, téléchargez-les d’abord en suivant le guide « Télécharger les données de votre compte »." },
-        { title: "Ouvrir la zone sensible", body: "Dans la « Zone sensible » en bas de l’onglet « Compte » des « Paramètres », cliquez sur « Supprimer le compte »." },
+        { title: "Ouvrir la suppression du compte", body: "Tout en bas de l’onglet « Compte » des « Paramètres », cliquez sur « Supprimer le compte »." },
         { title: "Saisir la confirmation", body: "Cochez la case de consentement et saisissez exactement DELETE MY ACCOUNT." },
         { title: "Envoyer la demande", body: "Cliquez sur « Supprimer le compte », puis encore une fois sur « Demander la suppression du compte ». Si l’on vous demande de vous reconnecter, faites-le puis recommencez." },
       ],
