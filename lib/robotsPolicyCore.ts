@@ -122,6 +122,70 @@ export const REFUSED_AI_CRAWLERS = [
 ] as const;
 
 /**
+ * The paths no invited crawler reaches, on the canonical site.
+ *
+ * Shared by the `*` group and every named group that grants the same access,
+ * because of the same RFC 9309 §2.2.1 rule the refused list above relies on:
+ * a group that names a crawler *replaces* the `*` group for it -- it does not
+ * add to it. A private path listed only under `*` would be open to every
+ * named crawler, so the groups quote this one list rather than copies that
+ * can drift.
+ */
+export const CANONICAL_PRIVATE_DISALLOW = [
+  "/admin",
+  "/api",
+  "/auth",
+  // The Playwright fixture mount. It is a 404 on any real deployment
+  // (lib/e2eTestMode.ts), so this is belt-and-braces rather than the
+  // control -- but it also keeps the path out of any crawler's history.
+  "/e2e",
+  "/chat$",
+  "/chat/",
+  "/share",
+] as const;
+
+/**
+ * Crawlers that maintain a search index: OpenAI's OAI-SearchBot, Anthropic's
+ * Claude-SearchBot and Perplexity's PerplexityBot.
+ *
+ * They get exactly the `*` access -- the site exists to be found. Naming them
+ * is not what grants that (an unnamed crawler falls back to `*`); it is what
+ * says the classification out loud, and what puts the Content-Signal line in
+ * a group these crawlers actually read. Since a named group replaces `*` for
+ * the token, a consumer that reads the signal from its own group would see no
+ * declaration at all while these stayed unnamed.
+ *
+ * Product tokens are exact, so this does nothing for the same operators'
+ * training crawlers -- ClaudeBot and GPTBot stay on the refused list above.
+ *
+ * Googlebot and Bingbot are deliberately not named: `*` already says
+ * everything there is to say to them, and a named group could only drift from
+ * it.
+ */
+export const SEARCH_INDEX_CRAWLERS = [
+  "OAI-SearchBot",
+  "Claude-SearchBot",
+  "PerplexityBot",
+] as const;
+
+/**
+ * Fetchers a product sends because one of its users asked for a page:
+ * ChatGPT-User, Claude-User, Perplexity-User.
+ *
+ * Same access and same reasoning as the search indexers above -- a fetch a
+ * person asked for is the use `use=reference` already declares. Naming them
+ * is an access statement, not a usage one: the Content-Signal value is
+ * unchanged, so the undecided `ai-input` question
+ * (docs/ops/search-indexing-boundary.md §6) stays exactly as undecided as it
+ * was.
+ */
+export const USER_REQUEST_FETCHERS = [
+  "ChatGPT-User",
+  "Claude-User",
+  "Perplexity-User",
+] as const;
+
+/**
  * The content signals the canonical site declares (https://contentsignals.org/).
  *
  * Same provenance as the list above: this is the value Cloudflare's managed
