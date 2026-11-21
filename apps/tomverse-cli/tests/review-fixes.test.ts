@@ -473,7 +473,7 @@ test("another key never records a lookup for this session", () =>
             journal.state.keyPrefix = "tvk_zzzzzzzz";
             assert.equal(await runner.runTask("Hi"), "unknown_outcome");
             assert.equal(journal.state.generations[0]!.lookup, undefined);
-            assert.equal(gateway.requests.filter((r) => r.url.startsWith("/api/v1/requests/status")).length, 0);
+            assert.equal(gateway.requests.filter((r) => r.url.startsWith("/api/code/v1/requests/status")).length, 0);
         }
     ));
 test("a 4xx without Tomverse's request id (a proxy in front) is not taken as a refusal before dispatch", () =>
@@ -505,7 +505,7 @@ test("the checkpoint that first holds an approval request already lists it as pe
             const writes: any[] = [];
             const home = tempDir("home");
             const root = makeRepo();
-            const endpoint = { base: gateway.base, origin: new URL(gateway.base).origin, basePath: "/api/v1" };
+            const endpoint = { base: gateway.base, origin: new URL(gateway.base).origin, basePath: "/api/code/v1" };
             const client = new Gateway(endpoint, TEST_KEY);
             const catalog = await client.models();
             const journal = Journal.create(

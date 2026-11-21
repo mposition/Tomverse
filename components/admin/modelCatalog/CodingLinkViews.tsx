@@ -621,3 +621,53 @@ export function CodingLinkDetail({
     </div>
   );
 }
+
+/**
+ * Where a dedicated row is offered: Code and the coding API (owner decision
+ * 2026-11-21). The one setting such a row has on this screen; its profile
+ * changes only through a new draft.
+ */
+export function CodingChannelsTile({
+  c,
+  item,
+  busy,
+  onSave,
+}: {
+  c: CodingMessages;
+  item: CodingCatalogItem;
+  busy: boolean;
+  onSave: (channels: string[]) => void;
+}) {
+  const [channels, setChannels] = useState<string[]>(item.channels);
+  const changed = CODING_CHANNEL_ORDER.filter((channel) => channels.includes(channel)).join(",") !== item.channels.join(",");
+  return (
+    <AdminTile title={c.detail.channelsTitle}>
+      <div className="flex flex-wrap gap-3">
+        {CODING_CHANNEL_ORDER.map((channel) => (
+          <label key={channel} className="inline-flex items-center gap-2 text-sm font-bold text-zinc-100">
+            <input
+              type="checkbox"
+              checked={channels.includes(channel)}
+              onChange={(event) =>
+                setChannels(event.target.checked ? [...channels, channel] : channels.filter((entry) => entry !== channel))
+              }
+              data-testid={`coding-dedicated-channel-${channel}`}
+              className="h-4 w-4 accent-blue-600"
+            />
+            {c.channel[channel]}
+          </label>
+        ))}
+      </div>
+      <p className={`text-xs ${channels.length === 0 ? "font-bold text-red-300" : "text-zinc-500"}`}>
+        {channels.length === 0 ? c.detail.channelsNone : c.detail.channelsHelp}
+      </p>
+      <AdminWriteButton
+        disabled={busy || !changed || channels.length === 0}
+        onClick={() => onSave(CODING_CHANNEL_ORDER.filter((channel) => channels.includes(channel)))}
+        data-testid="coding-dedicated-channels-save"
+      >
+        {c.detail.save}
+      </AdminWriteButton>
+    </AdminTile>
+  );
+}

@@ -1056,6 +1056,19 @@ export const createChatBudget = (
          * reserve or consume more than this value.
          */
         totalOutputTokenCap?: number;
+        /**
+         * A dedicated coding row on the coding API (lib/codingCatalogChannels.ts).
+         * Its input, output and cached-input rates are already the row's own on
+         * the model (registry overrides); this adds what an override cannot
+         * carry: the cache-write rate that bounds a client's cache marker, and
+         * the snapshot the price came from, so the reservation and its
+         * settlement record which catalogue version was charged.
+         */
+        catalogPricing?: {
+            cacheWriteUsdPerMillionTokens: number | null;
+            pricingVersion: string;
+            costSource: "coding_catalog_snapshot";
+        };
     }
 ): ChatBudget => {
     const maxInputTokens =
@@ -1161,14 +1174,16 @@ export const createChatBudget = (
                       LONG_CONTEXT_TIER_ESTIMATE_MARGIN
               )
             : tokens;
-    let pricing = resolveModelRequestPricing(model, {
+    const catalogPriced = (resolved: ResolvedModelPricing): ResolvedModelPricing =>
+        options?.catalogPricing ? { ...resolved, ...options.catalogPricing } : resolved;
+    let pricing = catalogPriced(resolveModelRequestPricing(model, {
         estimatedPromptTokens: tierPromptTokens(contextInputTokens),
-    });
-    if (passes > 1) pricing = resolveModelRequestPricing(model, {
+    }));
+    if (passes > 1) pricing = catalogPriced(resolveModelRequestPricing(model, {
         estimatedPromptTokens: tierPromptTokens(
             contextInputTokens + pricing.maxOutputTokens
         ),
-    });
+    }));
     // Every paid step re-sends its context. Earlier assistant output can also
     // be re-sent; reserve it without changing authored-input credit weight.
     const requestedTotalOutputCap = options?.totalOutputTokenCap;

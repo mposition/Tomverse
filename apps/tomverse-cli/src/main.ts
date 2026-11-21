@@ -7,7 +7,7 @@ import { AuthError, keyPrefix, maskKey, readKey } from "./auth.js";
 import type { ApprovalMemory } from "./approvals.js";
 import { UndoError, renderChange, undoChange, viewChanges } from "./changes.js";
 import { userShell } from "./commands.js";
-import { ConfigError, ensureHome, readConfig, resolveEndpoint, tomverseHome, writeConfig, type CliConfig } from "./config.js";
+import { ConfigError, endpointMoveNote, ensureHome, readConfig, resolveEndpoint, tomverseHome, writeConfig, type CliConfig } from "./config.js";
 import { createOutput, safeLine, type Output } from "./display.js";
 import { Gateway, GatewayError, type CatalogModel, type Receipt } from "./gateway.js";
 import { askLine, isInteractive, terminalPrompter } from "./interactive.js";
@@ -125,7 +125,8 @@ const doctor = async (ctx: Context) => {
     let gateway: Gateway | null = null;
     try {
         const endpoint = resolveEndpoint(ctx.config);
-        add("endpoint", "pass", endpoint.base);
+        const moved = endpointMoveNote(endpoint);
+        add("endpoint", "pass", moved ? `${endpoint.base} (${moved})` : endpoint.base);
         // Noted before reading: readKey takes the key out of the environment.
         const source = process.env.TOMVERSE_API_KEY?.trim() ? "TOMVERSE_API_KEY" : "terminal input";
         const key = await readKey();
@@ -388,7 +389,9 @@ const configCommand = async (ctx: Context, args: string[]) => {
         // Shown even when the stored endpoint is invalid: this is where one looks at it.
         let endpointNote: string;
         try {
-            endpointNote = config.endpoint ?? `(default) ${resolveEndpoint(config).base}`;
+            const resolved = resolveEndpoint(config, { ...process.env, TOMVERSE_ENDPOINT: "" });
+            const moved = endpointMoveNote(resolved);
+            endpointNote = config.endpoint ? (moved ? `${config.endpoint} -- ${moved}` : config.endpoint) : `(default) ${resolved.base}`;
         } catch (error) {
             endpointNote = `${config.endpoint ?? "(default)"} -- invalid: ${(error as Error).message}`;
         }

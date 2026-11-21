@@ -61,6 +61,13 @@ const EXEMPT_MUTATION_PATHS = [
   "/api/v1/responses",
   "/api/anthropic/v1/messages",
   "/api/anthropic/v1/messages/count_tokens",
+  // The coding API (owner decision 2026-11-21): the same handlers on their
+  // own addresses for Claude Code, Codex, Cursor and the tomverse CLI, on the
+  // same Bearer-only condition and the same test.
+  "/api/code/v1/chat/completions",
+  "/api/code/v1/responses",
+  "/api/code/anthropic/v1/messages",
+  "/api/code/anthropic/v1/messages/count_tokens",
 ];
 
 const parseOrigin = (value: string | null) => {

@@ -49,16 +49,6 @@ const EXPOSABLE_USAGE_CLASSES = new Set<AiModel["usageClass"]>([
 ]);
 
 /**
- * Which coding-catalogue channel a request belongs to: the tomverse CLI names
- * itself in its User-Agent (apps/tomverse-cli/src/gateway.ts); everything else
- * is the API. Only read while CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED is on,
- * and it only narrows a list: a spoofed header gets the CLI's models, on the
- * same plan check and billing.
- */
-export const externalApiChannelFor = (userAgent: string | null | undefined): "api" | "cli" =>
-    typeof userAgent === "string" && userAgent.startsWith("tomverse-cli/") ? "cli" : "api";
-
-/**
  * Usage classes Smart Adaptive may route to but no client may name directly
  * (owner decision 2026-11-20): the coding guidance sends only the hardest
  * work to them (AUTO_LLM_ROUTER_CODING_GUIDANCE), each request is charged
