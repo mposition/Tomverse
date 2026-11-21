@@ -12698,11 +12698,11 @@ model ModelCatalogSnapshot {
   @@index([category, version])
 }
 
-/// Provider conditions every coding model of one provider is judged against:
-/// terms (resale and coding-agent use), data retention and processing region.
-/// `terms` is what an operator applied, `draft` an LLM re-check waiting for one
-/// (lib/codingCatalogAdmin.ts). Checked more than 90 days ago, it must be
-/// checked again before a new model of that provider turns on.
+/// Provider conditions an operator applied for one provider before they were
+/// dropped as a coding admission rule (owner decision 2026-11-21): terms,
+/// data retention and processing region. Read only now: nothing writes or
+/// judges them, and a coding row of that provider still carries them into its
+/// snapshot row, so rows already published keep their content.
 model CodingProviderTerms {
   provider       String    @id
   terms          Json?

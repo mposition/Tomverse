@@ -115,7 +115,6 @@ export const codingApiModels = async (
   }
   const runtime = options.runtime ?? (await getRuntimeModels());
   const entries = await loadCodingCatalog(prisma, {
-    now,
     context: { chat: runtime.map(chatModelFacts), providerTerms: await loadCodingProviderTerms(prisma) },
   });
   // The current row's channels and plan narrow the published row's: a plan

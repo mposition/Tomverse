@@ -20,11 +20,14 @@ test("argv runs the program directly: shell characters are plain arguments", asy
 
 test("the shell form names its shell and runs a pipeline there", async () => {
     const cwd = tempDir("cmd");
-    const plan = planCommand({ command: process.platform === "win32" ? "Write-Output 'one two' | ForEach-Object { $_.ToUpper() }" : "echo 'one two' | tr a-z A-Z" }, cwd, 10_000);
+    const plan = planCommand({ command: process.platform === "win32" ? "Write-Output 'one two' | ForEach-Object { $_.ToUpper() }" : "echo 'one two' | tr a-z A-Z" }, cwd, 120_000);
     assert.equal(plan.mode, "shell");
     assert.ok(plan.shell && plan.file === plan.shell);
     assert.match(plan.file, process.platform === "win32" ? /powershell\.exe$/i : /\/(bash|zsh|sh|dash)$/);
+    // The CLI's own default limit: the first Windows PowerShell start on a
+    // fresh machine (a CI runner) took over 10 s and was ended as a timeout.
     const result = await runCommand(plan, never);
+    assert.equal(result.timedOut, false, `timed out after ${result.durationMs} ms`);
     assert.equal(result.exitCode, 0, result.stderr);
     assert.match(result.stdout, /ONE TWO/);
 });
