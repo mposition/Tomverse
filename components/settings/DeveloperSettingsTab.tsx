@@ -12,6 +12,8 @@ import {
     externalApiAddresses,
     type ExternalApiGuideSurface,
 } from "@/lib/externalApiAppGuides";
+import { CLI_DOWNLOAD_PATH } from "@/lib/marketingRoutes";
+import { localizedPath } from "@/lib/seo";
 import { settingsSectionElementId } from "@/lib/settingsNavigation";
 
 /**
@@ -86,7 +88,7 @@ export function DeveloperSettingsView({
     onUpgrade?: () => void;
     onNavigate?: () => void;
 }) {
-    const { t } = useLanguage();
+    const { t, lang } = useLanguage();
     const other = t("externalApi.platformOther");
 
     const body = (() => {
@@ -136,6 +138,30 @@ export function DeveloperSettingsView({
                 const coding = externalApiAddresses(overview.codingBaseUrl);
                 return (
                     <>
+                        {overview.tomverseCli ? (
+                            // The install page for every operating system (components/marketing/v2/cli).
+                            <section
+                                className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-blue-200 bg-blue-50 p-4 dark:border-blue-900/60 dark:bg-blue-950/30"
+                                data-testid="developer-cli-banner"
+                            >
+                                <div className="min-w-[12rem] flex-1">
+                                    <h3 className="flex items-center gap-2 text-sm font-bold text-zinc-900 dark:text-zinc-100">
+                                        <Terminal className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" aria-hidden="true" />
+                                        {t("externalApi.devCliBannerTitle")}
+                                    </h3>
+                                    <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400">{t("externalApi.devCliBannerBody")}</p>
+                                </div>
+                                <Link
+                                    href={localizedPath(lang, CLI_DOWNLOAD_PATH)}
+                                    onClick={onNavigate}
+                                    data-testid="developer-cli-banner-link"
+                                    className="inline-flex items-center rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-zinc-950"
+                                >
+                                    {t("externalApi.devCliBannerLink")}
+                                </Link>
+                            </section>
+                        ) : null}
+
                         <section className={card} data-testid="developer-keys">
                             <div className="flex flex-wrap items-center gap-3">
                                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">

@@ -22,7 +22,7 @@ test("CLI page copy exists in every locale with the same structure as Korean", (
   }
 });
 
-test("CLI page keeps the first-run commands and the sections that say it is not published yet", () => {
+test("CLI page keeps the first-run commands and the install facts in every locale", () => {
   for (const locale of SEO_LOCALES) {
     const copy = cliPageContent[locale];
     assert.equal(copy.first.steps.length, 4, locale);
@@ -30,21 +30,33 @@ test("CLI page keeps the first-run commands and the sections that say it is not 
     // Commands and answers are not translated; only the task in quotes is.
     assert.deepEqual(copy.first.steps.map((step) => step.cmd).filter((_, i) => i !== 2), ["cd ~/projects/my-app", "tomverse models", "[y/n] y"], locale);
     assert.match(copy.first.steps[2].cmd, /^tomverse ".+"$/, locale);
-    // The package is not on npm yet: both install surfaces must say so.
-    assert.ok(copy.hero.soon.trim() && copy.hero.soonNote.trim() && copy.install.soonNote.trim(), locale);
-    assert.match(copy.install.req.node[1], /22/, `${locale}: Node.js 22 (package.json engines >=22)`);
+    // The installers need no Node.js; npm needs 22 or later (package.json engines >=22).
+    assert.match(copy.install.req.node[1], /22/, `${locale}: npm needs Node.js 22`);
     assert.match(copy.install.req.plan[1], /Pro/, `${locale}: paid plan required`);
-    assert.match(copy.hero.platforms, /Node\.js 22/, locale);
+    assert.match(copy.install.req.os[1], /Windows 10·11 · macOS · Linux/, locale);
+    assert.match(copy.hero.noNode, /Node\.js/, locale);
+    assert.match(copy.hero.plan, /Pro/, locale);
     assert.match(copy.update.removeNote, /~\/\.tomverse/, locale);
+    // The download button names the system through {os}; the SmartScreen notice has its click path in the middle.
+    assert.match(copy.hero.downloadFor, /\{os\}/, locale);
+    assert.equal(copy.install.windows.smartScreen.length, 3, locale);
+    assert.match(copy.install.macos.installerBody, /\/usr\/local\/bin\/tomverse/, locale);
+    assert.match(copy.install.linux.packageBody, /glibc 2\.28/, locale);
   }
 });
 
-test("CLI page copy uses the real key prefix and links to no download until a release exists", () => {
+test("CLI page copy says nothing is coming soon, uses the real key prefix and carries no URL or version", () => {
   for (const locale of SEO_LOCALES) {
     const text = strings(cliPageContent[locale]).join("\n");
     assert.doesNotMatch(text, /\btv_\.\.\./, `${locale}: API keys start with tvk_`);
-    assert.doesNotMatch(text, /github\.com\/mposition/i, `${locale}: no download link until a release exists`);
+    assert.doesNotMatch(text, /https?:\/\//, `${locale}: URLs are built in cliRelease.ts, not written in copy`);
+    assert.doesNotMatch(text, /\b0\.1\.0\b|\b1\.0\.0\b/, `${locale}: the version comes from cliRelease.ts`);
   }
+  for (const locale of ["ko", "en"]) {
+    assert.doesNotMatch(strings(cliPageContent[locale]).join("\n"), /곧 출시|공개되면|coming soon|once it is published|not on npm yet/i, locale);
+  }
+  assert.equal(cliPageContent.ko.crumb.current, "CLI 설치");
+  assert.equal(cliPageContent.en.crumb.current, "CLI install");
 });
 
 test("the six translated locales are translated, not copies of English", () => {
@@ -52,6 +64,8 @@ test("the six translated locales are translated, not copies of English", () => {
     const copy = cliPageContent[locale];
     assert.notEqual(copy.hero.lede, cliPageContent.en.hero.lede, locale);
     assert.notEqual(copy.install.capNote, cliPageContent.en.install.capNote, locale);
+    assert.notEqual(copy.install.windows.installerBody, cliPageContent.en.install.windows.installerBody, locale);
+    assert.notEqual(copy.downloads.title, cliPageContent.en.downloads.title, locale);
     assert.notEqual(copy.safe.ticks[3][1], cliPageContent.en.safe.ticks[3][1], locale);
   }
 });
@@ -99,4 +113,10 @@ test("CLI page code needs no inline script or innerHTML and keeps its test ids a
   assert.match(source, /data-testid="cli-page"/);
   assert.match(source, /data-testid="cli-title"/);
   assert.match(source, /prefers-reduced-motion/);
+  // Download links are built in cliRelease.ts; the page writes neither a version nor a GitHub URL.
+  assert.doesNotMatch(source, /github\.com|\b0\.1\.0\b|\b1\.0\.0\b/);
+  for (const id of ["cli-download", "cli-show-install", "cli-other-os", "cli-downloads", "cli-release-link"]) {
+    assert.ok(source.includes(`data-testid="${id}"`), id);
+  }
+  assert.match(source, /id="install"/);
 });

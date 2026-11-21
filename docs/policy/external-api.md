@@ -940,6 +940,12 @@ output contract are in `apps/tomverse-cli/README.md`.
   own permissions; the CLI does not claim a sandbox.
 - **Smart Adaptive.** The first answer's `x-tomverse-routed-model` is pinned for
   the session before any tool of that answer runs; later requests name it.
+- **Install page.** Settings > Developer (a banner at the top of the tab) and the CLI
+  card in Settings > API keys link to the public install page `/developers/cli`
+  (installers, winget, npm; every download URL is built in
+  `components/marketing/v2/cli/cliRelease.ts` for the GitHub Release
+  `cli-v<version>`, and its version must equal `apps/tomverse-cli/package.json`).
+  Both Settings surfaces stay behind `TOMVERSE_CLI_GUIDE_ENABLED`.
 - **Tomverse Code.** Its Rust host is not embedded in v1 (a Windows desktop
   runtime with its own providers and store). The CLI follows its contracts --
   tool names, result states, the credential path list, argv-first commands --
