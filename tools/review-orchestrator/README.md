@@ -350,7 +350,9 @@ $RO status
   감쌉니다), 출력은 stream-json이고 판정은 마지막 `result` 이벤트의 `response`에서 읽습니다. 원본 스트림은
   `reviews/<slot>.stream.jsonl`, `report`에는 최종 답만 남습니다. `--settings`의 deny 규칙이 명령 실행·쓰기·URL·MCP를
   막고, agy의 파일 도구는 `request-review` 권한 모드에서만 작업 폴더 밖을 읽지 못하므로 첫 `init` 이벤트가
-  그 모드가 아니거나, `read_file` 외 도구를 부른 실행은 `unknown`입니다. 켜는 순서(review 계정, 박스 root):
+  그 모드가 아니거나, `read_file` 외 도구를 부른 실행은 `unknown`입니다. 처음 보는 이벤트·단계 종류는 이름과 키에
+  도구·명령·파일·경로·권한을 뜻하는 말이 없으면 통과합니다(2026-11-21, app의 `lib/amux/cliStreamUnknownKind.mjs`와
+  같은 규칙). 켜는 순서(review 계정, 박스 root):
   1. agy를 review 계정 PATH에 설치하고 `agy` 로그인(Google AI 계정; tommy의 로그인은 review 계정이 읽을 수 없음).
   2. 읽기 전용 agent 파일 `~review/.gemini/config/agents/review-read/agent.md`:
      ```
