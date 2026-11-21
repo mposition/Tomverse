@@ -57,9 +57,23 @@ export async function archiveAmuxHierarchyNodes(input: {
       ) SELECT "rootId", "id", "level" FROM descendants
     `;
     const all = [...new Map(subtree.map((row) => [row.id, row])).values()];
+    const allIds = all.map((row) => row.id);
     await tx.$queryRaw`
       SELECT "id" FROM "AmuxPortfolioNode"
-      WHERE "id" = ANY(${all.map((row) => row.id)}::text[]) ORDER BY "id" FOR UPDATE
+      WHERE "id" = ANY(${allIds}::text[]) ORDER BY "id" FOR UPDATE
+    `;
+    // Every card under the subtree, Story-linked Tasks included, is locked
+    // before the work is counted: the database guard sees only cards directly
+    // under a Feature, so without this a Task reopened under a Story between
+    // the count and the archive would be archived with work left. A new card
+    // waits on these locks (its parent key), and so does any status change.
+    await tx.$queryRaw`
+      SELECT card."id" FROM "AmuxWorkItem" card
+      WHERE card."parentFeatureNodeId" = ANY(${allIds}::text[])
+        OR card."parentStoryCardId" IN (
+          SELECT story."id" FROM "AmuxWorkItem" story
+          WHERE story."parentFeatureNodeId" = ANY(${allIds}::text[]))
+      ORDER BY card."id" FOR UPDATE
     `;
     const rollups = await readAmuxHierarchyRollups(tx, named);
     for (const id of named) {

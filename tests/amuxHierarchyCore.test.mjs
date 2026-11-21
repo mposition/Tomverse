@@ -134,4 +134,8 @@ test("the archive write stays out of the read-only board and view route", async 
   assert.match(service, /takeAuditChainLock\(tx\)/);
   assert.match(service, /writeAdminAuditLog\(\{ tx,/);
   assert.match(service, /amuxHierarchyArchiveEnabled\(process\.env\)/);
+  // Cards under the subtree, Story-linked ones too, are locked before the work is counted.
+  const cardLock = service.indexOf('FROM "AmuxWorkItem" card');
+  assert.ok(cardLock > 0 && /ORDER BY card\."id" FOR UPDATE/.test(service.slice(cardLock)));
+  assert.ok(cardLock < service.indexOf("readAmuxHierarchyRollups(tx, named)"));
 });

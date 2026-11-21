@@ -53,9 +53,10 @@ export const adminAmuxHierarchyMessages = defineAdminMessages({
     archive: "Archive",
     archiveSelected: (count: number) => `Archive ${count} selected`,
     select: (title: string) => `Select ${title}`,
-    archiveConfirm: (count: number) => count === 1 ?
-      "Archive this hierarchy? It leaves every tab, and its title and description are deleted after 90 days. This cannot be undone." :
-      `Archive ${count} hierarchies? They leave every tab, and their titles and descriptions are deleted after 90 days. This cannot be undone.`,
+    archiveConfirm: (count: number) => (count === 1 ?
+      "Archive this hierarchy together with every Epic and Feature under it, including ones not expanded here?" :
+      `Archive ${count} hierarchies together with every Epic and Feature under them, including ones not expanded here?`) +
+      " They leave every tab, and each one's title and description are deleted after 90 days. This cannot be undone.",
     archiveConfirmButton: "Archive permanently",
     cancel: "Cancel",
     archiving: "Archiving…",
@@ -120,7 +121,7 @@ export const adminAmuxHierarchyMessages = defineAdminMessages({
     archiveSelected: (count: number) => `선택한 ${count}개 보관`,
     select: (title: string) => `${title} 선택`,
     archiveConfirm: (count: number) =>
-      `계층 ${count}개를 보관할까요? 모든 탭에서 빠지고, 90일 뒤 제목과 설명이 삭제됩니다. 되돌릴 수 없습니다.`,
+      `계층 ${count}개와 그 아래의 모든 Epic·Feature(여기서 펼치지 않은 것 포함)를 함께 보관할까요? 모두 모든 탭에서 빠지고, 각각 90일 뒤 제목과 설명이 삭제됩니다. 되돌릴 수 없습니다.`,
     archiveConfirmButton: "영구 보관",
     cancel: "취소",
     archiving: "보관 중…",
