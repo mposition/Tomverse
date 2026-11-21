@@ -7,14 +7,14 @@ import { z } from "zod";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminFetch } from "@/lib/adminFetch";
-import { adminAmuxHierarchyMessages } from "@/lib/adminMessages/amuxHierarchy";
+import { adminAmuxCardHierarchyMessages } from "@/lib/adminMessages/amuxCardHierarchy";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import type { AmuxHierarchyNodeLevel, AmuxHierarchyStep } from "@/lib/amux/cardHierarchyCore";
 import { amuxVisibleInspectionText } from "@/lib/amux/adminExecutionViewCore";
 import workspace from "./AmuxExecutionWorkspace.module.css";
 import styles from "./amuxCardHierarchy.module.css";
 
-const useHierarchyMessages = () => useAdminMessages(adminAmuxHierarchyMessages);
+const useHierarchyMessages = () => useAdminMessages(adminAmuxCardHierarchyMessages);
 type Messages = ReturnType<typeof useHierarchyMessages>;
 
 /** Owner request 2026-11-21: Initiative > Epic > Feature > Story > Task on a

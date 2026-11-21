@@ -1,6 +1,6 @@
 import { defineAdminMessages } from "@/lib/adminLocale";
 
-export const adminAmuxHierarchyMessages = defineAdminMessages({
+export const adminAmuxCardHierarchyMessages = defineAdminMessages({
   en: {
     heading: "Hierarchy",
     hint: "Select a level above to open it and edit it.",
