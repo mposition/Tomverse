@@ -392,6 +392,7 @@ export const fr = {
         tooManyRequestsRetry: "Les requêtes sont envoyées trop rapidement. Réessayez dans {seconds} secondes.",
         responseBodyMissing: "Le flux de réponse n'a pas pu être ouvert.",
         responseEmpty: "Le fournisseur d'IA a terminé la requête sans réponse. Réessayez bientôt ou sélectionnez un autre modèle.",
+        responseAttachmentRejected: "Le modèle n'a pas pu lire le fichier joint. Il est peut-être endommagé, protégé par un mot de passe ou au-delà de la limite de taille ou de pages du modèle. Vérifiez le fichier ou collez son texte directement.",
         modelRetired: "Ce modèle n'est plus disponible. Sélectionnez un autre modèle actuel.",
         modelRetiredWithReplacement: "Ce modèle n'est plus disponible. Sélectionnez {model} ou un autre modèle actuel.",
         responseCancelled: "La génération de la réponse a été arrêtée.",

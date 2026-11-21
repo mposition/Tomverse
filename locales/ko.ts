@@ -360,6 +360,7 @@ export const ko = {
         tooManyRequestsRetry: "요청이 너무 빠르게 전송되었습니다. {seconds}초 후 다시 시도해 주세요.",
         responseBodyMissing: "응답 스트림을 열 수 없습니다.",
         responseEmpty: "AI 제공업체가 답변 없이 요청을 종료했습니다. 잠시 후 다시 시도하거나 다른 모델을 선택해 주세요.",
+        responseAttachmentRejected: "모델이 첨부 파일을 읽지 못했습니다. 파일이 손상됐거나, 암호가 걸려 있거나, 모델의 크기·페이지 한도를 넘었을 수 있습니다. 파일을 확인하거나 내용을 텍스트로 붙여 넣어 주세요.",
         modelRetired: "이 모델은 더 이상 제공되지 않습니다. 다른 최신 모델을 선택해 주세요.",
         modelRetiredWithReplacement: "이 모델은 더 이상 제공되지 않습니다. {model} 또는 다른 최신 모델을 선택해 주세요.",
         responseCancelled: "응답 생성이 중지되었습니다.",

@@ -361,6 +361,7 @@ export const en = {
         tooManyRequestsRetry: "Requests are being sent too quickly. Please try again in {seconds} seconds.",
         responseBodyMissing: "The response stream could not be opened.",
         responseEmpty: "The AI provider ended the request without an answer. Try again shortly or select another model.",
+        responseAttachmentRejected: "The model could not read the attached file. It may be damaged, password-protected, or over the model's size or page limit. Check the file, or paste its text instead.",
         modelRetired: "This model is no longer available. Please select another current model.",
         modelRetiredWithReplacement: "This model is no longer available. Please select {model} or another current model.",
         responseCancelled: "Response generation was stopped.",

@@ -381,6 +381,7 @@ export const de = {
         tooManyRequestsRetry: "Anfragen werden zu schnell gesendet. Bitte versuchen Sie es in {seconds} Sekunden erneut.",
         responseBodyMissing: "Der Antwortstream konnte nicht geöffnet werden.",
         responseEmpty: "Der KI-Anbieter hat die Anfrage ohne Antwort beendet. Versuchen Sie es gleich erneut oder wählen Sie ein anderes Modell.",
+        responseAttachmentRejected: "Das Modell konnte die angehängte Datei nicht lesen. Sie ist möglicherweise beschädigt, passwortgeschützt oder überschreitet die Größen- oder Seitengrenze des Modells. Prüfen Sie die Datei oder fügen Sie ihren Text direkt ein.",
         modelRetired: "Dieses Modell ist nicht mehr verfügbar. Wählen Sie ein anderes aktuelles Modell.",
         modelRetiredWithReplacement: "Dieses Modell ist nicht mehr verfügbar. Wählen Sie {model} oder ein anderes aktuelles Modell.",
         responseCancelled: "Die Antwortgenerierung wurde gestoppt.",
