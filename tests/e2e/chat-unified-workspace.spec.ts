@@ -4849,13 +4849,12 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     else expect(payload.currentLocation).toMatchObject({ latitude: -27.47, longitude: 153.025 });
   });
 
-  for (const change of ["conversation", "account", "model"] as const) {
+  for (const change of ["conversation", "account"] as const) {
     test(`a fresh Auto send abandoned by a ${change} change cannot send coordinates or a question`, async ({ page }, testInfo) => {
       const viewport = testInfo.project.name.startsWith("mobile-") ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
       const { state, create, intent, intentBodies, locationReads } = await prepareGatedFreshSend(page, viewport);
       if (change === "conversation") await chooseConversation(page, SECOND_CONVERSATION);
       if (change === "account") await switchToFixtureAccountB(page, state);
-      if (change === "model") await chooseModel(page, MODEL_B);
       const response = page.waitForResponse(value => new URL(value.url()).pathname === "/api/products/chat/conversations" && value.request().method() === "POST");
       create.release(); intent.release(); state.releaseMessageSaveResponse();
       await response;
@@ -4866,6 +4865,26 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
       expect(intentBodies).toHaveLength(freshLocationEarly ? 1 : 0);
     });
   }
+
+  // While the first Send creates the Chat in Smart Adaptive, the picker takes
+  // no model: every row is disabled, as the recommendation cards and the switch
+  // are, and the send goes ahead on Smart Adaptive (owner decision 2026-11-21).
+  // A clickable row that ignored the click let this test pass only when its
+  // check ran before the model call.
+  test("a fresh Auto send locks the model choice while it creates the Chat, and goes ahead on Smart Adaptive", async ({ page }, testInfo) => {
+    const viewport = testInfo.project.name.startsWith("mobile-") ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
+    const { state, create, intent } = await prepareGatedFreshSend(page, viewport);
+    const picker = await openModelPickerCatalogue(page);
+    await expect(picker.locator(`[data-testid="model-option"][data-model-id="${MODEL_B}"]`)).toBeDisabled();
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#chat-input-popover")).toHaveCount(0);
+    create.release(); intent.release(); state.releaseMessageSaveResponse();
+    await expect.poll(async () => (await requests(page)).length).toBe(1);
+    const [payload] = await requests(page);
+    expect(payload.messages?.at(-1)?.content).toBe(freshQuestion);
+    await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveAttribute("aria-checked", "true");
+  });
 
   for (const outcome of ["not_dispatched", "unknown"] as const) {
     test(`a fresh Auto send continues after ${outcome} location preparation`, async ({ page }, testInfo) => {

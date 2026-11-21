@@ -93,7 +93,10 @@ authorizes the mode (when it refuses, the Chat is created manual), which is stor
 Chat and its selected models. Send waits for the returned row to confirm the
 owner, product, mode, capability and model settings. An older server can
 ignore the header; the client reads the same created row and stores Auto
-through its existing PATCH before dispatch.
+through its existing PATCH before dispatch. While that first Send is creating
+the Chat, the model picker takes no model: the Smart Adaptive switch, the
+recommendation cards and every catalogue row are disabled, and the send goes
+ahead on Smart Adaptive (owner decision 2026-11-21).
 
 If a signed-in user has chosen manual on the blank draft and explicitly switches Smart
 Adaptive back on, the same server-confirmation sequence runs immediately. In
