@@ -361,6 +361,17 @@ export async function bindResearchFundingReservation(segmentId: string, reservat
   if (changed.count !== 1) throw new ResearchPreviewRunError(409, "RESEARCH_FUNDING_BIND_CONFLICT", "The Research funding segment could not be bound.");
 }
 
+/**
+ * Recovery only: releases a stale segment that never had a reservation bound.
+ * Conditional on "reserving" with no reservation, so a worker whose bind lands
+ * first keeps its segment (and the hold its dispatch will use).
+ */
+export async function releaseUnboundResearchFundingSegment(segmentId: string) {
+  const changed = await prisma.researchFundingSegment.updateMany({ where: { id: segmentId, status: "reserving", reservationId: null },
+    data: { status: "released", settledAt: null } });
+  return changed.count === 1;
+}
+
 /** Nothing was reserved (refusal) or the reservation was settled at zero before any dispatch. */
 export const releaseResearchFundingSegment = (segmentId: string) =>
   prisma.researchFundingSegment.updateMany({ where: { id: segmentId, status: { in: ["reserving", "reserved"] } },

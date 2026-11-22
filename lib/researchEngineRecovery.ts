@@ -5,7 +5,7 @@ import { researchFundingAdapter, settleResearchSegmentIfReady } from "@/lib/rese
 import { researchEvidenceStore, researchNow } from "@/lib/researchEngineRuntime";
 import {
   bindResearchFundingReservation, lockResearchRun, markResearchDispatchUnknown, markResearchFundingUnknown,
-  RESEARCH_EVIDENCE_ABANDONED_SWEEP_MS, RESEARCH_ITEM_MAX_ATTEMPTS, RESEARCH_SEGMENT_RESERVING_STALE_MS, releaseResearchFundingSegment,
+  RESEARCH_EVIDENCE_ABANDONED_SWEEP_MS, RESEARCH_ITEM_MAX_ATTEMPTS, RESEARCH_SEGMENT_RESERVING_STALE_MS, releaseUnboundResearchFundingSegment,
 } from "@/lib/researchEngineStore";
 import { advanceResearchRun, ensureResearchPrivateSourceGranted } from "@/lib/researchEngineWorker";
 
@@ -77,15 +77,28 @@ export async function recoverStaleReservingSegments(limit = 100) {
   for (const segment of segments) {
     if (!segment.run || !segment.runId || segment.run.recoveryQuarantinedAt) continue;
     const ok = await isolate(segment.runId, async () => {
+      // A slow worker may still bind its reservation and record a dispatch while
+      // this runs. Every step below is conditional on the segment still being
+      // unbound, so whichever bind lands first owns the segment; recovery never
+      // releases a segment a worker has bound.
       const reservation = await prisma.chatCreditReservation.findFirst({ where: { traceId: segment.id, status: "reserved" }, select: { id: true, reservedCredits: true } });
-      if (reservation) {
-        await bindResearchFundingReservation(segment.id, reservation.id, Math.min(reservation.reservedCredits, segment.reservedCredits));
-        const funding = await researchFundingAdapter();
-        await funding.settle({ userId: segment.run!.userId, reservationId: reservation.id, usage: { inputTokens: 0, outputTokens: 0,
-          cachedInputTokens: 0, cacheWriteInputTokens: 0, reasoningTokens: 0, usageFromProvider: true, outcome: "failed", searchExecuted: false,
-          searchQueryCount: 0, searchBackendRequestCount: 0, searchQueriesObserved: true } });
+      if (!reservation) {
+        await releaseUnboundResearchFundingSegment(segment.id);
+        return;
       }
-      await releaseResearchFundingSegment(segment.id);
+      try {
+        await bindResearchFundingReservation(segment.id, reservation.id, Math.min(reservation.reservedCredits, segment.reservedCredits));
+      } catch (error) {
+        if ((error as { code?: string }).code === "RESEARCH_FUNDING_BIND_CONFLICT") return; // the worker bound it first
+        throw error;
+      }
+      // Recovery owns the hold now: the worker's own bind is refused, so nothing dispatches on it.
+      const funding = await researchFundingAdapter();
+      await funding.settle({ userId: segment.run!.userId, reservationId: reservation.id, usage: { inputTokens: 0, outputTokens: 0,
+        cachedInputTokens: 0, cacheWriteInputTokens: 0, reasoningTokens: 0, usageFromProvider: true, outcome: "failed", searchExecuted: false,
+        searchQueryCount: 0, searchBackendRequestCount: 0, searchQueriesObserved: true } });
+      await prisma.researchFundingSegment.updateMany({ where: { id: segment.id, status: "reserved", reservationId: reservation.id },
+        data: { status: "released", settledAt: null } });
     });
     if (ok) recovered += 1;
   }

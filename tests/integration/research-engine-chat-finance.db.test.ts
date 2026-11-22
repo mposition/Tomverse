@@ -6,8 +6,8 @@ import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
 import { setResearchFundingAdapter } from "@/lib/researchEngineFunding";
 import { createResearchRun, readResearchRunDto } from "@/lib/researchEngineService";
 import { drainResearchWork, processOneResearchWorkItem } from "@/lib/researchEngineWorker";
-import { readResearchRunMoney, RESEARCH_SEGMENT_RESERVING_STALE_MS, claimResearchFundingRoom } from "@/lib/researchEngineStore";
-import { recoverResearchEngine } from "@/lib/researchEngineRecovery";
+import { bindResearchFundingReservation, readResearchRunMoney, RESEARCH_SEGMENT_RESERVING_STALE_MS, claimResearchFundingRoom } from "@/lib/researchEngineStore";
+import { recoverResearchEngine, recoverStaleReservingSegments } from "@/lib/researchEngineRecovery";
 import { createFakeModel, createFakeWeb, createUser, defaultResponse, fakeRequest, installFakes, users } from "./researchEngineHarness";
 
 /**
@@ -109,4 +109,55 @@ test("a crash between claiming room and binding the reservation neither leaks a 
   const recovered = await prisma.researchFundingSegment.findUniqueOrThrow({ where: { id: segment.id } });
   assert.equal(recovered.status, "released");
   assert.equal((await readResearchRunMoney(prisma, run.id)).reservedCredits, 0);
+});
+
+/**
+ * A worker slower than the stale cutoff may bind its reservation while recovery
+ * is looking at the same "reserving" segment. The lookup is intercepted to land
+ * the worker's bind in exactly that window.
+ */
+async function raceWorkerBindDuringRecovery(label: string, reserveBeforeRecovery: boolean) {
+  const fakes = installFakes();
+  const user = await createUser(label);
+  const { run } = await createResearchRun({ request: fakeRequest(), userId: user.id, payload: { userMessageId: randomUUID(), assistantMessageId: randomUUID(),
+    brief: brief("Slow worker question"), sources: [], profile: "standard", approvedCredits: 500, autoStart: false } });
+  const segment = await claimResearchFundingRoom({ runId: run.id, purpose: "work", credits: 20, modelId: "gemini-3-1-pro", provider: "google", pricingVersion: "p" });
+  const reserveAsWorker = () => fakes.funding.adapter.reserve({ userId: user.id, segmentId: segment.id, model: {} as never, searchEnabled: false,
+    estimate: { credits: 20, pricingVersion: "p", searchSurchargeCredits: 0, budget: {} } as never });
+  const early = reserveBeforeRecovery ? await reserveAsWorker() : null;
+  fakes.clock.advance(RESEARCH_SEGMENT_RESERVING_STALE_MS + 1_000);
+  await prisma.researchFundingSegment.update({ where: { id: segment.id }, data: { createdAt: new Date(Date.now() - RESEARCH_SEGMENT_RESERVING_STALE_MS - 1_000) } });
+  const delegate = prisma.chatCreditReservation as unknown as { findFirst: (args: unknown) => Promise<unknown> };
+  const original = delegate.findFirst;
+  let reservationId: string | undefined;
+  delegate.findFirst = async (args) => {
+    const seen = await original.call(prisma.chatCreditReservation, args);
+    if ((args as { where?: { traceId?: string } }).where?.traceId === segment.id && !reservationId) {
+      const reservation = early ?? await reserveAsWorker();
+      assert.ok(reservation.ok);
+      reservationId = reservation.reservationId;
+      await bindResearchFundingReservation(segment.id, reservation.reservationId, reservation.reservedCredits);
+    }
+    return seen;
+  };
+  try {
+    await recoverStaleReservingSegments();
+  } finally {
+    delegate.findFirst = original;
+  }
+  const after = await prisma.researchFundingSegment.findUniqueOrThrow({ where: { id: segment.id } });
+  assert.equal(after.status, "reserved", "the worker keeps the segment it bound");
+  assert.equal(after.reservationId, reservationId);
+  assert.equal(fakes.funding.reservations.get(reservationId!)?.status, "reserved", "the worker's hold is not refunded under it");
+  assert.equal((await readResearchRunMoney(prisma, run.id)).reservedCredits, 20, "the hold still counts against the approved total");
+  const current = await prisma.researchPreviewRun.findUniqueOrThrow({ where: { id: run.id } });
+  assert.equal(current.recoveryFailureCount, 0, "losing the race to a live worker is not a recovery failure");
+}
+
+test("stale reserving recovery that saw no reservation never releases a segment a worker binds meanwhile", async () => {
+  await raceWorkerBindDuringRecovery("finance-race-none", false);
+});
+
+test("stale reserving recovery that saw a reservation leaves it to the worker that bound it first", async () => {
+  await raceWorkerBindDuringRecovery("finance-race-seen", true);
 });
