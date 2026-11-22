@@ -186,9 +186,10 @@ async function databaseNow(tx: Tx): Promise<Date> {
 export async function commitAmuxSessionAnalysisPlanInTx(tx: Tx, input: {
   ideaId: string; claimId: string; resultAuditId: string; modelId: string;
   rawModelOutput: string; keys: AmuxContentKeys; unitIds?: readonly string[];
-  /** The existing hierarchy read before the transaction. Without it (its
-   * read failed) the page is checked against the active nodes' ids and
-   * levels, and its stored prompt carries no titles. */
+  /** The existing hierarchy with titles, read before the transaction, for
+   * the first page's stored prompt (a box claim's answer is checked against
+   * the claim-time ids and levels read inside; a session-written plan's
+   * against this list). Without it the stored prompt carries no titles. */
   existingNodes?: readonly AmuxPermittedTargetRef[];
 }): Promise<AmuxSessionPlanOutcome> {
   const locked = await tx.$queryRaw<Array<{ id: string }>>`
@@ -215,14 +216,24 @@ export async function commitAmuxSessionAnalysisPlanInTx(tx: Tx, input: {
     }
     return { state: "plan_refused" as const, reason };
   };
+  // A box claim's first page (owner decision 2026-11-22): its prompt listed
+  // the existing nodes created by the claim time. The answer is checked
+  // against the ids and levels of every active node created by that time,
+  // read here, so the check does not depend on titles or on when the result
+  // arrives; a node archived since is refused, as registration would refuse
+  // it. A session-written plan has no claim and keeps the list it was
+  // checked against at intake.
+  const claim = idea.currentSourcePlanRevisionId !== null ? null :
+    await tx.amuxIdeaSessionAnalysisBudgetClaim.findUnique({
+      where: { id: input.claimId }, select: { createdAt: true } });
+  const claimNodes = claim ? await readAmuxActiveNodeTargetsInTx(tx,
+    { createdAtOrBefore: claim.createdAt }) : null;
   let context: AmuxSessionPageContext;
   try {
     context = await readAmuxSessionPageContextInTx(tx, { ideaId: idea.id,
       actorUserId: idea.actorUserId, planId: idea.currentSourcePlanRevisionId,
       now, keys: input.keys,
-      existingNodes: input.existingNodes ?? await readAmuxActiveNodeTargetsInTx(tx, {
-        createdAtOrBefore: (await tx.amuxIdeaSessionAnalysisBudgetClaim.findUnique({
-          where: { id: input.claimId }, select: { createdAt: true } }))?.createdAt ?? now }) });
+      existingNodes: input.existingNodes ?? claimNodes ?? [] });
   } catch (error) {
     if (error instanceof AmuxSessionAnalysisPlanError &&
         error.code === "continuation_unavailable") {
@@ -235,7 +246,7 @@ export async function commitAmuxSessionAnalysisPlanInTx(tx: Tx, input: {
     raw: input.rawModelOutput, keys: input.keys, unitIds: input.unitIds,
     chunkIndex: context.chunkIndex, revisionChunkIndex: context.chunkIndex,
     permittedSourceRefIds: ["operator_idea"],
-    permittedTargetRefs: context.permittedTargetRefs,
+    permittedTargetRefs: claimNodes ?? context.permittedTargetRefs,
     sourceUnitCount: 1, coveredStartOrdinal: 0, coveredEndOrdinal: 0,
     history: context.history, templateVersion: AMUX_V4_ANALYSIS_PROMPT_VERSION,
     sessionPage: true });
@@ -244,7 +255,7 @@ export async function commitAmuxSessionAnalysisPlanInTx(tx: Tx, input: {
       claimId: input.claimId, chunkIndex: context.chunkIndex, now,
       reason: amuxSessionPageRefusalDetail(input.rawModelOutput, { previewId,
         chunkIndex: context.chunkIndex,
-        permittedTargetRefs: context.permittedTargetRefs,
+        permittedTargetRefs: claimNodes ?? context.permittedTargetRefs,
         history: context.history }) });
     return { state: "plan_refused", reason: "invalid_result" };
   }

@@ -78,12 +78,18 @@ export async function chooseAmuxFeatureDisplayPrefix(
   `;
   const picked = pickAmuxFeatureDisplayPrefix(candidates, new Set(taken.map((row) => row.displayPrefix)));
   if (picked !== null) return picked;
-  const highest = await tx.$queryRaw<Array<{ highest: bigint | number | null }>>`
-    SELECT MAX(substring("displayPrefix" FROM 5)::BIGINT) AS "highest" FROM "AmuxPortfolioNode"
-    WHERE "displayPrefix" ~ '^FEAT[0-9]{1,12}$'
+  // The smallest FEAT<n> no node holds: at most one more than the number of
+  // FEAT prefixes, which stays far inside the 16-character limit.
+  const held = await tx.$queryRaw<Array<{ displayPrefix: string }>>`
+    SELECT "displayPrefix" FROM "AmuxPortfolioNode"
+    WHERE "displayPrefix" ~ '^FEAT[1-9][0-9]{0,11}$'
   `;
-  const next = `FEAT${BigInt(highest[0]?.highest ?? 0) + BigInt(1)}`;
-  return isAmuxCardDisplayPrefix(next) ? next : null;
+  const used = new Set(held.map((row) => row.displayPrefix));
+  for (let number = 1; number <= used.size + 1; number += 1) {
+    const candidate = `FEAT${number}`;
+    if (!used.has(candidate) && isAmuxCardDisplayPrefix(candidate)) return candidate;
+  }
+  return null;
 }
 
 /**
