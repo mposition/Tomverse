@@ -2,9 +2,16 @@ import { expect, test, type Page } from "@playwright/test";
 import { mockReviewHandoffBackground } from "./support/review-handoff-background-fixtures";
 
 import {
+  createQaPdfBuffer,
+  createQaXlsxBuffer,
   expectNoHorizontalOverflow,
+  mockAttachmentUpload,
   mockAuthenticatedApi,
+  openRecentConversation,
   prepareGuestPage,
+  selectModelsViaPicker,
+  type AttachmentUploadQaState,
+  type QaConversationMessage,
 } from "./support/app-fixtures";
 import { GUEST_DAILY_CREDIT_LIMIT, mockGuestUsage, restoreActiveConversation } from "./support/chat-state-fixtures";
 
@@ -124,6 +131,8 @@ test.describe("Tomverse Chat and Review product switcher", () => {
     await expect(page.getByTestId("chat-textarea")).toHaveValue(question);
     expect(transferredPrompts).toContain(question);
     expect(execution).toEqual([]);
+    // A text-only question keeps the plain handoff: no file prompt.
+    await expect(page.getByTestId("review-file-reattach")).toHaveCount(0);
   });
 
   test("Review is current and does not present Smart Adaptive as a product", async ({
@@ -320,4 +329,292 @@ test.describe("Guest Chat and Review product entry", () => {
     await signIn.click();
     expect(await page.evaluate(() => localStorage.getItem("tomverse_pending_guest_import"))).toBeNull();
   });
+});
+
+/*
+  "Compare in Review" from a Chat question sent with one readable document
+  (lib/chatReviewHandoff.ts). The file never travels: Review opens the question
+  and asks for it again through its own composer. Two fictional quotes
+  share a name and differ in content -- A: 10%, B: 30% -- so a spec can tell
+  which bytes the send actually carried.
+*/
+test.describe("Compare in Review with the question's file", () => {
+  const QUESTION = "중도 해지하면 얼마를 내나요?";
+  const NOTICE = "Chat의 질문을 가져왔습니다. 같은 파일로 비교하려면 다시 첨부하세요.";
+  const QUOTE_A = { name: "quote.pdf", mimeType: "application/pdf", buffer: createQaPdfBuffer("Quote A cancellation fee 10 percent") };
+  const QUOTE_B = { name: "quote.pdf", mimeType: "application/pdf", buffer: createQaPdfBuffer("Quote B cancellation fee 30 percent and more") };
+  const storedQuote = (id: string) => ({ id, attachmentId: id, ordinal: 0, name: "quote.pdf", mediaType: "application/pdf", size: 1200, kind: "file" as const });
+  const pdfConversation: QaConversationMessage[] = [
+    { id: "pdf-question", role: "user", content: QUESTION, attachments: [storedQuote("att-chat-a")] },
+    { id: "pdf-answer", role: "assistant", content: "남은 기간 요금의 10%입니다.", modelId: "gpt-5-6-luna" },
+    { id: "later-question", role: "user", content: "보증 기간은요?" },
+    { id: "later-answer", role: "assistant", content: "2년입니다.", modelId: "gpt-5-6-luna" },
+  ];
+
+  /** Every request that would run, reserve, save or upload something. */
+  const SIDE_EFFECT = /^\/api\/chat(?:\/|$)|\/messages(?:$|\?)|__qa_upload__|review-handoff|credit|reserv|router/;
+
+  let uploads: AttachmentUploadQaState;
+  let sideEffects: string[];
+  let uploadedBodies: string[];
+  let chatBodies: string[];
+  let savedUploadIds: string[][];
+
+  test.beforeEach(async ({ page, baseURL }) => {
+    sideEffects = [];
+    uploadedBodies = [];
+    chatBodies = [];
+    savedUploadIds = [];
+    await mockReviewHandoffBackground(page);
+    await prepareGuestPage(page, "ko");
+    await page.context().addCookies([{ name: "__tomverse_e2e_chat_workspace", value: "1", url: baseURL! }]);
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      // The composer's read-only availability estimate runs on every Review
+      // open and model change; it reserves and increments nothing
+      // (app/api/chat/availability/route.ts), so it is not a side effect.
+      if (url.pathname === "/api/chat/availability") return;
+      if (request.method() !== "GET" && SIDE_EFFECT.test(url.pathname)) sideEffects.push(`${request.method()} ${url.pathname}`);
+      if (url.pathname.includes("__qa_upload__")) uploadedBodies.push(request.postDataBuffer()?.toString("latin1") ?? "");
+      if (request.method() === "POST" && /\/messages(?:$|\?)/.test(url.pathname)) {
+        const body = request.postDataJSON() as { messages?: Array<{ attachmentUploadIds?: string[] }> } | null;
+        for (const message of body?.messages ?? []) savedUploadIds.push(message.attachmentUploadIds ?? []);
+      }
+    });
+  });
+
+  // The Chat conversation is an extra one: the fixture creates every new
+  // conversation as its primary `qa-conversation`, so the Review the send
+  // creates starts empty instead of inheriting the Chat transcript.
+  const CHAT_TITLE = "견적서 질문";
+  const seed = async (page: Page, messages: QaConversationMessage[] = pdfConversation) => {
+    await mockAuthenticatedApi(page, { productKey: "review", language: "ko", messages: [],
+      extraConversations: [{ id: "chat-quote", title: CHAT_TITLE, productKey: "chat", messages }] });
+    uploads = await mockAttachmentUpload(page);
+    await page.route("**/api/chat", async (route) => {
+      if (route.request().method() !== "POST") { await route.fallback(); return; }
+      chatBodies.push(route.request().postData() || "");
+      await route.fulfill({ status: 200, contentType: "text/plain; charset=utf-8", headers: { "X-Request-ID": "qa-trace-id" }, body: "비교 답변입니다." });
+    });
+  };
+  const composer = (page: Page) => page.locator('[data-testid="chat-input"]:visible');
+  const chooseFile = async (page: Page, file: { name: string; mimeType: string; buffer: Buffer } | null) => {
+    const chooser = page.waitForEvent("filechooser");
+    await composer(page).getByTestId("review-file-reattach-choose").click();
+    await (await chooser).setFiles(file ? [file] : []);
+  };
+  const newestUserTurn = (body: string) =>
+    [...(JSON.parse(body) as { messages: Array<{ role: string; attachments?: Array<Record<string, unknown>> }> }).messages]
+      .reverse().find((message) => message.role === "user")!;
+  /** Opens the seeded Chat and presses Compare on the answer `index`. */
+  const compareFromChat = async (page: Page, index = 0) => {
+    await page.goto("/chat?lang=ko&conversation=chat-quote");
+    const compare = page.getByTestId("chat-compare-in-review").nth(index);
+    await expect(compare).toBeVisible();
+    // A double press is still one handoff.
+    await compare.evaluate((button) => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click(); });
+    await expect(page).toHaveURL(/\/review(?:\?|$)/);
+  };
+
+  test("an earlier answer's PDF question opens Review asking for that PDF, and only the send runs the models", async ({ page }) => {
+    await seed(page);
+    await compareFromChat(page, 0);
+    // The one-shot token is spent and stripped with the rest of the preset.
+    await expect(page).not.toHaveURL(/fileHandoff|prompt=/);
+    await expect(composer(page).getByTestId("chat-textarea")).toHaveValue(QUESTION);
+    const notice = composer(page).getByTestId("review-file-reattach");
+    await expect(notice).toHaveText(new RegExp(NOTICE));
+    await expect(notice.getByRole("button", { name: "파일 선택" })).toBeVisible();
+    await expect(composer(page).getByTestId("attachment-complete")).toHaveCount(0);
+    await expect(composer(page).getByTestId("review-file-reattach")).toHaveCount(1);
+    // Opening it ran nothing: no model or router call, no pre-save, no
+    // reservation and no upload.
+    await page.waitForTimeout(500);
+    expect(sideEffects).toEqual([]);
+
+    await selectModelsViaPicker(page, ["gpt-5-6-luna", "gemini-2-5-flash"]);
+    // Cancelling the picker changes nothing.
+    await chooseFile(page, null);
+    await expect(notice).toBeVisible();
+    expect(uploads.prepareCount).toBe(0);
+
+    await chooseFile(page, QUOTE_A);
+    await expect(composer(page).getByTestId("attachment-complete")).toHaveCount(1);
+    await expect(composer(page).getByTestId("attachment-complete")).toContainText("quote.pdf");
+    await expect(composer(page).getByTestId("review-file-reattach-attached")).toHaveText("파일 첨부됨");
+    await expect(composer(page).getByTestId("review-file-reattach")).toHaveCount(0);
+    // The person picked the file; nothing claims it is the original.
+    await expect(composer(page)).not.toContainText("원본");
+    expect(chatBodies).toEqual([]);
+    expect(sideEffects.every((entry) => /^(PUT|PATCH) \/api\/chat$|__qa_upload__/.test(entry))).toBe(true);
+
+    await composer(page).getByRole("button", { name: /전송|Send/ }).click();
+    await expect.poll(() => chatBodies.length).toBe(2);
+    expect(savedUploadIds.flat()).toEqual([uploads.uploadIds.at(-1)]);
+    for (const body of chatBodies) {
+      const attachments = newestUserTurn(body).attachments ?? [];
+      expect(attachments).toHaveLength(1);
+      expect(attachments[0]).toMatchObject({ name: "quote.pdf" });
+      // The Review's own new upload, never the Chat message's stored file.
+      expect(body).not.toContain("att-chat-a");
+      expect(body).not.toContain("objectKey");
+    }
+    expect(uploadedBodies).toHaveLength(1);
+    expect(uploadedBodies[0]).toContain("10 percent");
+    await expect(page.getByTestId("review-file-reattach-attached")).toHaveCount(0);
+  });
+
+  test("failure, retry, removal and a wrong pick never stand in for the question's PDF", async ({ page }) => {
+    await seed(page);
+    await compareFromChat(page, 0);
+    const notice = composer(page).getByTestId("review-file-reattach");
+    await expect(notice).toBeVisible();
+
+    uploads.finalizeFailure = { status: 422, code: "INVALID_PDF_ATTACHMENT" };
+    await chooseFile(page, QUOTE_A);
+    await expect(composer(page).getByTestId("attachment-failed")).toBeVisible();
+    await expect(notice).toBeVisible();
+    uploads.finalizeFailure = null;
+    await composer(page).getByTestId("attachment-retry").click();
+    await expect(composer(page).getByTestId("attachment-complete")).toHaveCount(1);
+    await expect(composer(page).getByTestId("review-file-reattach-attached")).toBeVisible();
+
+    // Removing the PDF asks for it again.
+    await composer(page).getByTestId("attachment-remove").click();
+    await expect(composer(page).getByTestId("attachment-complete")).toHaveCount(0);
+    await expect(notice).toBeVisible();
+
+    // B shares A's name and question; picking it is the person's choice and
+    // the composer says only "File attached". Swapping back to A sends A.
+    await chooseFile(page, QUOTE_B);
+    await expect(composer(page).getByTestId("review-file-reattach-attached")).toBeVisible();
+    await composer(page).getByTestId("attachment-remove").click();
+    await chooseFile(page, QUOTE_A);
+    await expect(composer(page).getByTestId("attachment-complete")).toHaveCount(1);
+
+    await composer(page).getByRole("button", { name: /전송|Send/ }).click();
+    await expect.poll(() => chatBodies.length).toBeGreaterThan(0);
+    const sentUploadId = savedUploadIds.flat();
+    expect(sentUploadId).toHaveLength(1);
+    // upl-qa-N is the Nth finalize, and every finalize follows its own upload.
+    const sentBytes = uploadedBodies[Number(sentUploadId[0].replace("upl-qa-", "")) - 1];
+    expect(sentBytes).toContain("Quote A");
+    expect(sentBytes).not.toContain("Quote B");
+    for (const body of chatBodies) {
+      expect(newestUserTurn(body).attachments).toHaveLength(1);
+      expect(body).not.toContain("att-chat-a");
+    }
+  });
+
+  test("the question can be sent without the PDF, and the prompt is visible until then", async ({ page }) => {
+    await seed(page);
+    await compareFromChat(page, 0);
+    await expect(composer(page).getByTestId("review-file-reattach")).toBeVisible();
+    await composer(page).getByRole("button", { name: /전송|Send/ }).click();
+    await expect.poll(() => chatBodies.length).toBeGreaterThan(0);
+    expect(newestUserTurn(chatBodies[0]).attachments ?? []).toEqual([]);
+    expect(uploads.prepareCount).toBe(0);
+    await expect(page.getByTestId("review-file-reattach")).toHaveCount(0);
+  });
+
+  test("a text-only later question and a file-only turn never borrow the PDF or another question", async ({ page }) => {
+    await seed(page, [
+      ...pdfConversation,
+      { id: "file-only", role: "user", content: "", attachments: [storedQuote("att-chat-b")] },
+      { id: "file-only-answer", role: "assistant", content: "견적서입니다.", modelId: "gpt-5-6-luna" },
+    ]);
+    await page.goto("/chat?lang=ko&conversation=chat-quote");
+    const compares = page.getByTestId("chat-compare-in-review");
+    await expect(compares).toHaveCount(3);
+    // The file-only turn explains instead of comparing an older question.
+    await compares.nth(2).click();
+    await expect(page.getByText("이 답변의 질문에는 파일만 있어 비교할 질문이 없습니다.", { exact: false })).toBeVisible();
+    await expect(page).toHaveURL(/\/chat/);
+    // The later text-only question keeps the plain handoff.
+    await compares.nth(1).click();
+    await expect(page).toHaveURL(/\/review(?:\?|$)/);
+    await expect(composer(page).getByTestId("chat-textarea")).toHaveValue(/보증 기간은요\?$/);
+    await expect(page.getByTestId("review-file-reattach")).toHaveCount(0);
+  });
+
+  test("Studio Review asks for the PDF too, and the picker opens from the keyboard", async ({ page }) => {
+    await prepareGuestPage(page, "ko", "studio");
+    await seed(page);
+    await compareFromChat(page, 0);
+    const choose = composer(page).getByTestId("review-file-reattach-choose");
+    await expect(composer(page).getByTestId("review-file-reattach")).toHaveText(new RegExp(NOTICE));
+    // The prompt sits above the input; the input keeps its own full row.
+    await expect(composer(page).getByTestId("chat-textarea")).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+    await choose.focus();
+    const chooser = page.waitForEvent("filechooser");
+    await page.keyboard.press("Enter");
+    await (await chooser).setFiles([QUOTE_A]);
+    await expect(composer(page).getByTestId("review-file-reattach-attached")).toHaveText("파일 첨부됨");
+    expect(chatBodies).toEqual([]);
+  });
+
+  test("a question sent with one spreadsheet asks for it again the same way", async ({ page }) => {
+    const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    await seed(page, [
+      { id: "xlsx-question", role: "user", content: "가장 싼 항목은?", attachments: [{ ...storedQuote("att-chat-x"), name: "prices.xlsx", mediaType: XLSX_TYPE }] },
+      { id: "xlsx-answer", role: "assistant", content: "B 항목입니다.", modelId: "gpt-5-6-luna" },
+    ]);
+    await compareFromChat(page, 0);
+    await expect(composer(page).getByTestId("chat-textarea")).toHaveValue("가장 싼 항목은?");
+    await expect(composer(page).getByTestId("review-file-reattach")).toHaveText(new RegExp(NOTICE));
+    await page.waitForTimeout(300);
+    expect(sideEffects).toEqual([]);
+    await chooseFile(page, { name: "prices.xlsx", mimeType: XLSX_TYPE, buffer: createQaXlsxBuffer() });
+    await expect(composer(page).getByTestId("attachment-complete")).toContainText("prices.xlsx");
+    await expect(composer(page).getByTestId("review-file-reattach-attached")).toHaveText("파일 첨부됨");
+    await composer(page).getByRole("button", { name: /전송|Send/ }).click();
+    await expect.poll(() => chatBodies.length).toBeGreaterThan(0);
+    for (const body of chatBodies) {
+      expect(newestUserTurn(body).attachments).toHaveLength(1);
+      expect(newestUserTurn(body).attachments?.[0]).toMatchObject({ name: "prices.xlsx" });
+      expect(body).not.toContain("att-chat-x");
+    }
+  });
+
+  test("a copied handoff URL opens the question without the file prompt", async ({ page }) => {
+    await seed(page);
+    // Another tab, or a URL pasted later: this tab never issued the token.
+    await page.goto(`/review?lang=ko&prompt=${encodeURIComponent(QUESTION)}&fileHandoff=copied-token`);
+    await expect(composer(page).getByTestId("chat-textarea")).toHaveValue(QUESTION);
+    await expect(page.getByTestId("review-file-reattach")).toHaveCount(0);
+  });
+
+  for (const existing of ["text", "file"] as const) {
+    test(`a Review draft already holding ${existing === "text" ? "text" : "only a file"} is kept as it is`, async ({ page }) => {
+      await seed(page);
+      await page.goto("/review?lang=ko");
+      if (existing === "text") {
+        await composer(page).getByTestId("chat-textarea").fill("내가 쓰던 Review 질문");
+      } else {
+        await composer(page).getByTestId("composer-tools-button").click();
+        await page.getByTestId("tools-attach-row").click();
+        const chooser = page.waitForEvent("filechooser");
+        await page.getByTestId("attach-local-file-row").click();
+        await (await chooser).setFiles([QUOTE_B]);
+        await expect(composer(page).getByTestId("attachment-complete")).toHaveCount(1);
+      }
+      const uploadsBefore = uploadedBodies.length;
+      const switcher = await openProductSwitcher(page);
+      await switcher.getByTestId("chat-product-chat").click();
+      await expect(page).toHaveURL(/\/chat/);
+      await openRecentConversation(page, { title: CHAT_TITLE });
+      const compare = page.getByTestId("chat-compare-in-review").first();
+      await expect(compare).toBeVisible();
+      await compare.click();
+      await expect(page).toHaveURL(/\/review(?:\?|$)/);
+      await expect(page.getByText("작성 중인 Review 초안을 유지했습니다.")).toBeVisible();
+      await expect(composer(page).getByTestId("chat-textarea")).toHaveValue(existing === "text" ? "내가 쓰던 Review 질문" : "");
+      await expect(composer(page).getByTestId("attachment-complete")).toHaveCount(existing === "text" ? 0 : 1);
+      await expect(page.getByTestId("review-file-reattach")).toHaveCount(0);
+      await expect(page.getByTestId("review-file-reattach-attached")).toHaveCount(0);
+      expect(uploadedBodies.length).toBe(uploadsBefore);
+      expect(chatBodies).toEqual([]);
+    });
+  }
 });
