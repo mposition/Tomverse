@@ -80,16 +80,22 @@ export async function createChatResearchFundingAdapter(): Promise<ResearchFundin
       const access = security.identifyChatCaller(internalRequest(), userId, plan.tier, {
         dailyMessageLimit: plan.dailyMessageLimit, monthlyMessageLimit: plan.monthlyMessageLimit,
       });
+      let acquired: Awaited<ReturnType<typeof security.acquireChatAccess>>;
       try {
-        const acquired = await security.acquireChatAccess(access, estimate.budget as Parameters<typeof security.acquireChatAccess>[1], {
+        acquired = await security.acquireChatAccess(access, estimate.budget as Parameters<typeof security.acquireChatAccess>[1], {
           source: "chat", traceId: segmentId, enabledTools: searchEnabled ? ["web_search"] : [],
         });
-        await security.extendChatReservationExpiry(acquired.usageReservation.reservationId, 30 * 60);
-        return { ok: true as const, reservationId: acquired.usageReservation.reservationId,
-          reservedCredits: acquired.usageReservation.usageCredits, leaseId: acquired.leaseId };
       } catch (error) {
         return { ok: false as const, ...classifyResearchFundingError(error) };
       }
+      // Once a hold exists it is always returned so the caller binds it to the
+      // segment. A longer expiry is only an optimisation: expiry reconciliation
+      // defers a segment whose dispatch is still active.
+      await security.extendChatReservationExpiry(acquired.usageReservation.reservationId, 30 * 60).catch((error: unknown) => {
+        console.warn("[research-engine] reservation expiry extension failed", { segmentId, code: (error as { code?: string })?.code ?? "unknown" });
+      });
+      return { ok: true as const, reservationId: acquired.usageReservation.reservationId,
+        reservedCredits: acquired.usageReservation.usageCredits, leaseId: acquired.leaseId };
     },
     async releaseLease({ userId, leaseId, segmentId }) {
       if (!leaseId) return;

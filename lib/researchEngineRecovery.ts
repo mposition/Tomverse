@@ -143,7 +143,12 @@ export async function settlePendingResearchSegments(limit = 100) {
 }
 
 export async function drainResearchEvidenceCleanup(limit = 200) {
-  const rows = await prisma.researchEvidenceObjectCleanup.findMany({ where: { attempts: { lt: 10 } }, orderBy: { createdAt: "asc" }, take: limit });
+  // Deleted or revoked private text must eventually go: a failing row backs off
+  // but is never dropped from the queue, so a long storage outage still drains.
+  // Rows inserted by the deletion trigger carry the database clock.
+  const now = new Date(Math.max(researchNow().getTime(), Date.now()));
+  const rows = await prisma.researchEvidenceObjectCleanup.findMany({ where: { nextAttemptAt: { lte: now } },
+    orderBy: [{ nextAttemptAt: "asc" }, { createdAt: "asc" }], take: limit });
   const store = await researchEvidenceStore();
   let deleted = 0;
   for (const row of rows) {
@@ -152,7 +157,9 @@ export async function drainResearchEvidenceCleanup(limit = 200) {
       await prisma.researchEvidenceObjectCleanup.delete({ where: { id: row.id } });
       deleted += 1;
     } catch {
-      await prisma.researchEvidenceObjectCleanup.update({ where: { id: row.id }, data: { attempts: { increment: 1 } } }).catch(() => undefined);
+      const backoffMs = Math.min(6 * 60 * 60_000, 60_000 * 2 ** Math.min(row.attempts, 12));
+      await prisma.researchEvidenceObjectCleanup.update({ where: { id: row.id },
+        data: { attempts: { increment: 1 }, nextAttemptAt: new Date(now.getTime() + backoffMs) } }).catch(() => undefined);
     }
   }
   return deleted;

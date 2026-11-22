@@ -2494,9 +2494,13 @@ model ResearchClaim {
 model ResearchEvidenceObjectCleanup {
   id        String   @id @default(cuid())
   objectKey String   @unique
-  reason    String
-  attempts  Int      @default(0)
-  createdAt DateTime @default(now())
+  reason        String
+  attempts      Int      @default(0)
+  // Failed deletions back off (capped at six hours) and are never given up.
+  nextAttemptAt DateTime @default(now())
+  createdAt     DateTime @default(now())
+
+  @@index([nextAttemptAt])
 }
 
 // What one dispatched attempt cost, at its own provider's rates.

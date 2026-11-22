@@ -420,6 +420,29 @@ test("a run with an unsettled unknown dispatch cannot be deleted; synthesis re-c
   assert.equal(await prisma.researchEvidenceObjectCleanup.count({ where: { objectKey: { in: privateKeys } } }), privateKeys.length);
 });
 
+test("evidence cleanup backs off through a long storage outage but never gives up", async () => {
+  const fakes = installFakes();
+  const objectKey = `research-evidence/outage/${randomUUID()}`;
+  fakes.store.objects.set(objectKey, "private text that must eventually be deleted");
+  await prisma.researchEvidenceObjectCleanup.create({ data: { objectKey, reason: "source_revoked" } });
+  const realDelete = fakes.store.delete;
+  fakes.store.delete = async () => { throw new Error("storage unavailable"); };
+  try {
+    for (let attempt = 0; attempt < 15; attempt++) {
+      await drainResearchEvidenceCleanup();
+      fakes.clock.advance(7 * 60 * 60_000);
+    }
+  } finally {
+    fakes.store.delete = realDelete;
+  }
+  const row = await prisma.researchEvidenceObjectCleanup.findUniqueOrThrow({ where: { objectKey } });
+  assert.equal(row.attempts, 15, "every failure is counted and the row stays queued");
+  assert.ok(row.nextAttemptAt.getTime() - fakes.clock.now().getTime() <= 6 * 60 * 60_000, "backoff is capped");
+  await drainResearchEvidenceCleanup();
+  assert.equal(fakes.store.objects.has(objectKey), false, "the object is deleted once storage recovers");
+  assert.equal(await prisma.researchEvidenceObjectCleanup.count({ where: { objectKey } }), 0);
+});
+
 test("a section revision keeps the parent's claim keys so kept sections still cite valid claims", async () => {
   installFakes({ model: createFakeModel({ respond: (call) => defaultResponse(call, { subquestions: 2, sections: 2 }) }) });
   createFakeWeb();

@@ -64,7 +64,8 @@ Chat의 Auto/manual 선택은 바꾸지 않습니다. Research 실행 모델은 
 ## 5. 데이터 수명
 
 - run·대화·계정 삭제는 cascade로 행을 지우고, 비공개 증거 객체는 같은 문장의 DB trigger가
-  `ResearchEvidenceObjectCleanup`에 넣어 maintenance가 지웁니다. funding segment는 사용자 내용이
+  `ResearchEvidenceObjectCleanup`에 넣어 maintenance가 지웁니다(삭제 실패는 최대 6시간 간격으로
+  계속 재시도하며 포기하지 않습니다). funding segment는 사용자 내용이
   없는 금융 기록이라 지우지 않고 run 연결만 끊으며(`runId = NULL`), 만료 reconcile은 이런 segment의
   미정산 hold를 환불하지 않고 결과 불명으로 정산합니다. 직접 run 삭제는 미정산·unknown hold가 있으면
   거절합니다.

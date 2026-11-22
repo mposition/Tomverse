@@ -414,14 +414,17 @@ CREATE TABLE "ResearchEvidenceObjectCleanup" (
   "objectKey" TEXT NOT NULL,
   "reason" TEXT NOT NULL,
   "attempts" INTEGER NOT NULL DEFAULT 0,
+  "nextAttemptAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "ResearchEvidenceObjectCleanup_pkey" PRIMARY KEY ("id"),
+  CONSTRAINT "ResearchEvidenceObjectCleanup_attempts_check" CHECK ("attempts" >= 0),
   CONSTRAINT "ResearchEvidenceObjectCleanup_reason_check" CHECK ("reason" IN (
     'run_deleted', 'conversation_deleted', 'account_deleted', 'source_revoked', 'superseded'
   )),
   CONSTRAINT "ResearchEvidenceObjectCleanup_key_check" CHECK ("objectKey" LIKE 'research-evidence/%')
 );
 CREATE UNIQUE INDEX "ResearchEvidenceObjectCleanup_objectKey_key" ON "ResearchEvidenceObjectCleanup"("objectKey");
+CREATE INDEX "ResearchEvidenceObjectCleanup_nextAttemptAt_idx" ON "ResearchEvidenceObjectCleanup"("nextAttemptAt");
 
 ALTER TABLE "ResearchPreviewGeneration" ADD CONSTRAINT "ResearchPreviewGeneration_workItemId_fkey"
   FOREIGN KEY ("workItemId") REFERENCES "ResearchWorkItem"("id") ON DELETE CASCADE ON UPDATE CASCADE;
