@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 import { expectNoHorizontalOverflow, prepareGuestPage } from "./support/app-fixtures";
+import { formatContrastSample, measureContrastInScope } from "./support/ui-audit";
 import { developersPageContent } from "@/components/marketing/v2/developers/developersPageContent";
+import { vscodeGuideCopy } from "@/locales/developerTools";
 
 // Developer page V2 (approved concept 2026-11-20): it opens, shows its title and the
 // primary action, does not overflow a 320px phone, and the tool tabs work from the keyboard.
@@ -21,10 +23,7 @@ test("the existing Developers submenu orders API, CLI, native VS Code and integr
   expect(links).toEqual(["/developers", "/developers/cli", "/developers#tomverse-vscode", "/developers#connect"]);
   await menu.getByRole("link", { name: /Tomverse for VS Code/ }).click();
   await expect(page).toHaveURL(/#tomverse-vscode$/);
-  const guide = page.getByTestId("tomverse-vscode-guide");
-  await expect(guide).toContainText("Marketplace publication is pending");
-  await expect(guide).toContainText("An earlier build passed on Linux x64 in Ubuntu WSL2");
-  await expect(guide.getByRole("link", { name: "Download VSIX" })).toHaveAttribute("href", "https://github.com/mposition/Tomverse/releases/download/tomverse-vscode-v1.0.0/tomverse-vscode-1.0.0.vsix");
+  await expect(page.getByTestId("tomverse-vscode-guide").getByRole("heading", { level: 2 })).toContainText(vscodeGuideCopy.en.title[0]);
   await expectNoHorizontalOverflow(page);
 });
 
@@ -32,6 +31,49 @@ const pages = [
   { lang: "en", path: "/developers" },
   { lang: "ko", path: "/ko/developers" },
 ] as const;
+
+test("the VS Code guide keeps its steps, single action, and readable mockup across locales", async ({ page }, testInfo) => {
+  test.setTimeout(120_000);
+  const mobile = testInfo.project.name.startsWith("mobile");
+  await page.setViewportSize({ width: mobile ? 375 : 1440, height: 1000 });
+  for (const { lang, path } of [...pages, { lang: "zh", path: "/zh/developers" }] as const) {
+    await prepareGuestPage(page, lang);
+    await page.goto(path);
+    const guide = page.getByTestId("tomverse-vscode-guide");
+    const copy = vscodeGuideCopy[lang];
+    await expect(guide.getByRole("heading", { level: 2 })).toContainText(copy.title[1]);
+    await expect(guide.locator("ol > li")).toHaveCount(4);
+    await expect(guide.locator("ul > li")).toHaveCount(4);
+    await expect(guide.getByRole("link")).toHaveCount(1);
+    await expect(guide.getByRole("link", { name: copy.createKey })).toHaveAttribute("href", "/settings/api");
+    await expect(guide.locator(".vsc-window")).toHaveAttribute("aria-hidden", "true");
+    await expect(guide.locator(".vsc-note")).toHaveText(copy.availability);
+    await expect(guide.locator(".vsc-editor")).toBeVisible({ visible: !mobile });
+    await expectNoHorizontalOverflow(page);
+    await guide.scrollIntoViewIfNeeded();
+    await page.evaluate(() => document.fonts.ready);
+    if (!mobile) {
+      const lines = await guide.getByRole("heading", { level: 2 }).evaluate(
+        heading => heading.getBoundingClientRect().height / Number.parseFloat(getComputedStyle(heading).lineHeight),
+      );
+      expect(lines).toBeCloseTo(2);
+    }
+    const samples = await measureContrastInScope(guide);
+    expect(samples.some(sample => sample.text === copy.mock.effort + " ▾")).toBe(true);
+    const failures = samples.filter(sample => sample.ratio < 4.5).map(sample => formatContrastSample(lang, sample));
+    expect(failures).toEqual([]);
+    await testInfo.attach(`vscode-contrast-${lang}`, {
+      body: JSON.stringify({ samples: samples.length, minimum: Math.min(...samples.map(sample => sample.ratio)) }),
+      contentType: "application/json",
+    });
+    await guide.screenshot({
+      path: testInfo.outputPath(`vscode-${lang}-${mobile ? 375 : 1440}.png`),
+      animations: "disabled",
+      scale: "css",
+      style: '[data-testid="launch-marketing-header"], [data-testid="chat-consent-notice"], [data-testid="analytics-settings-button"] { visibility: hidden; }',
+    });
+  }
+});
 
 for (const { lang, path } of pages) {
   test(`${lang} developer page opens with its title and primary action`, async ({ page }) => {

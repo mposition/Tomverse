@@ -755,7 +755,7 @@ export function ModelPickerPanel({
           />
         </div>
       )}
-      {reasoningEffortSlot}
+      {isAutoMode && reasoningEffortSlot}
       {selectedModelIds.length > 0 && (
         <div className="mb-2 shrink-0 px-1">
           <p className="mb-1 px-1 text-[11px] font-bold uppercase tracking-wide text-zinc-400">
@@ -828,6 +828,8 @@ export function ModelPickerPanel({
           </div>
         </div>
       )}
+
+      {!isAutoMode && reasoningEffortSlot}
 
       {/*
         Hitting the comparison cap is a normal constraint, not an error. It used
