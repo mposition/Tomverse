@@ -128,6 +128,35 @@ test("API keys: an account the API was switched off for can still revoke its key
     expect(calls).toContain("DELETE /api/user/api-keys/key_old");
 });
 
+test("API key actions dismiss on outside press and keep menu actions usable", async ({ page }) => {
+    await prepareGuestPage(page, "en");
+    const key = { keyPrefix: FIXTURE_PREFIX, creditCap: 60, committedCredits: 0, heldCredits: 0, requestCount: 0, state: "active", expiresAt: null, revokedAt: null, lastUsedAt: null, createdAt: "2026-11-17T00:00:00.000Z" };
+    const calls = await mockKeys(page, { enabled: true, keys: [
+        { ...key, id: "key_a", name: "Work laptop" },
+        { ...key, id: "key_b", name: "Test laptop" },
+    ] });
+    await page.route("**/_next/static/**", (route) => route.continue());
+    await page.goto("/settings/api");
+    const work = page.getByTestId("external-api-key").filter({ hasText: "Work laptop" });
+    const other = page.getByTestId("external-api-key").filter({ hasText: "Test laptop" });
+    const workTrigger = work.getByTestId("external-api-key-menu");
+    const otherTrigger = other.getByTestId("external-api-key-menu");
+    await workTrigger.click();
+    await expect(work.getByRole("menu")).toBeVisible();
+    await work.getByText("Work laptop", { exact: true }).click();
+    await expect(work.getByRole("menu")).toHaveCount(0);
+    await expect(workTrigger).toHaveAttribute("aria-expanded", "false");
+    await workTrigger.click();
+    await page.getByRole("heading", { name: "API keys", exact: true }).click();
+    await expect(work.getByRole("menu")).toHaveCount(0);
+    await otherTrigger.click();
+    await expect(other.getByRole("menu")).toBeVisible();
+    await other.getByRole("menuitem", { name: "Rename" }).click();
+    await expect(other.getByRole("menu")).toHaveCount(0);
+    await expect(other.getByRole("textbox")).toHaveValue("Test laptop");
+    expect(calls.every((call) => call.startsWith("GET "))).toBe(true);
+});
+
 test("API keys: a key is made in a dialog, shown once in another, then filled into one tool's setup @ui-risk", async ({ page, isMobile }) => {
     await page.setViewportSize({ width: isMobile ? 320 : 1280, height: 900 });
     await prepareGuestPage(page, "ko");
