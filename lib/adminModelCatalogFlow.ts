@@ -590,6 +590,23 @@ export const codingNotesRequest = (value: { strengths: string; weaknesses: strin
   return strengths.length + weaknesses.length === 0 ? null : { strengths, weaknesses };
 };
 
+/**
+ * Whether typed notes would change the stored ones, compared as they would be
+ * saved (codingNotesRequest: trimmed lines, blank lines dropped), so trailing
+ * spaces or an empty line alone is not an edit. The server reads the same two
+ * lists as no change (lib/codingCatalogAdmin.ts editedCodingNotes).
+ */
+export const codingNotesChanged = (
+  value: { strengths: string; weaknesses: string },
+  stored: { strengths: readonly string[]; weaknesses: readonly string[] } | null | undefined
+) => {
+  const next = codingNotesRequest(value);
+  const current = stored && stored.strengths.length + stored.weaknesses.length > 0 ? stored : null;
+  if (next === null || current === null) return next !== current;
+  const same = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((line, index) => line === b[index]);
+  return !same(next.strengths, current.strengths) || !same(next.weaknesses, current.weaknesses);
+};
+
 /** A chat link's own stored values. */
 export type CodingLinkView = {
   registryModelId: string;
