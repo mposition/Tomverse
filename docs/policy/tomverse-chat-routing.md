@@ -195,6 +195,23 @@ part of this change. These tool-free samples do not establish attachment,
 search, file, Memory or continuation E2E success, production answer quality,
 provider non-inferiority or cost savings.
 
+A separate Chat cost-efficiency objective (`chat_cost_efficiency`) is
+diagnostic only. Within the same one challenger slot and offered menu it draws
+a lower-credit candidate first, then a same-credit candidate with a lower
+provider-cost estimate under one shared assumption, and otherwise the existing
+same/next-higher draw labelled a quality comparison, never a savings sample.
+Its judge reads the same bounded message the answering models received, never
+credits or model names, in the existing two orders; equal, insufficient, order
+disagreement and missing verdicts stay separate. Every stored objective is
+refused by the shared promotion eligibility for manual and system promotion,
+and a diagnostic never applies setting changes, promotes, or makes its
+recommendations actionable. A person starts it in Admin only while the
+default-off `AUTO_ROUTER_COST_EFFICIENCY_DIAGNOSTIC` switch is on, under the
+existing optimizer model approval and spending ceilings. Its acceptance
+criteria are recorded with the run and are a proposal until the owner confirms
+them; results never change them. See
+`docs/ops/auto-cost-efficiency-diagnostic.md`.
+
 ## 12. Release evidence
 
 The separate owner-approved

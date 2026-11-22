@@ -70,3 +70,17 @@ test("parallel tool calls cannot race into a second source read", async () => {
         read: async () => { reads++; await Promise.resolve(); } } });
     assert.equal(reads, 1); assert.ok(requests.length <= 2);
 });
+
+test("the router call passes its reported cache split on, for callers that price it", async () => {
+    const { callAutoLlmRouter } = await load();
+    requests = []; answer = "normal";
+    const saved = { ...usage.inputTokens };
+    Object.assign(usage.inputTokens, { noCache: 13, cacheRead: 5, cacheWrite: 2 });
+    try {
+        const result = await callAutoLlmRouter({ ...base, importedSource: undefined });
+        assert.equal(result.usage?.inputTokens, 20);
+        assert.deepEqual(result.usage?.inputTokenDetails, { cacheReadTokens: 5, cacheWriteTokens: 2 });
+    } finally {
+        Object.assign(usage.inputTokens, saved);
+    }
+});

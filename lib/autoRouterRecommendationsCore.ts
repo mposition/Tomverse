@@ -192,6 +192,8 @@ export const displayedRecommendationStatus = (
 
 /** The report's code and setting recommendations with their status; guidance ones are left out. */
 export const actionableRecommendations = (summary: unknown, now: number = Date.now()): ActionableRecommendation[] => {
+    // A diagnostic-only cycle (any stored objective) proposes nothing an agent or a send may act on.
+    if (record(summary)?.objective !== undefined) return [];
     const recommendations = record(record(summary)?.report)?.recommendations;
     if (!Array.isArray(recommendations)) return [];
     const entries = recommendationStatusEntries(summary);

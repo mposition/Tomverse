@@ -7,6 +7,7 @@ import type { AdminTone } from "@/lib/adminUiCore";
 export function optimizerCycleTone(status: string): AdminTone {
   switch (status) {
     case "running":
+    case "diagnostic":
       return "info";
     case "passed":
       return "ok";
