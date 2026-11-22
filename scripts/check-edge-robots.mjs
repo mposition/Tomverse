@@ -163,8 +163,8 @@ if (canonical) {
   expect(/^Sitemap:/m.test(own), "the canonical site does not name its sitemap");
   expect(/^Host:/m.test(own), "the canonical site does not name its host");
 
-  // Content-Signal is checked across the whole served file, not our half, and
-  // the rule is "one meaning" rather than "one line".
+  // Our Content-Signal is required in our half. The merged file is checked
+  // separately for consistency because crawlers receive that version.
   //
   // While Cloudflare's managed block cannot be turned off
   // (docs/ops/search-indexing-boundary.md §4a), production
@@ -175,12 +175,20 @@ if (canonical) {
   // the safety here rests on the values being identical, not on a rule saying
   // duplicates are fine. Guard exactly that:
   //
-  //   * zero declarations fails -- the policy would have vanished;
+  //   * our half must declare the value we ship;
+  //   * zero declarations in the merged file fails;
   //   * duplicates do not fail -- that is the expected state today;
-  //   * declarations that disagree once normalised fail, and so does one that
-  //     disagrees with what we ship.
+  //   * merged declarations that disagree once normalised fail.
   const normaliseSignal = (value) =>
     value.replace(/\s+/g, "").toLowerCase();
+  const ownDeclared = [...own.matchAll(/^Content-Signal:(.*)$/gim)].map((match) =>
+    normaliseSignal(match[1])
+  );
+  expect(ownDeclared.length > 0, "our robots.txt declares no Content-Signal");
+  expect(
+    ownDeclared.every((value) => value === normaliseSignal(CONTENT_SIGNAL)),
+    `our Content-Signal differs from ${CONTENT_SIGNAL}`
+  );
   const declared = [...served.matchAll(/^Content-Signal:(.*)$/gim)].map((match) =>
     normaliseSignal(match[1])
   );
@@ -191,7 +199,7 @@ if (canonical) {
   );
   expect(
     declared.every((value) => value === normaliseSignal(CONTENT_SIGNAL)),
-    `a served Content-Signal differs from ${CONTENT_SIGNAL}`
+    `a served Content-Signal differs from our policy ${CONTENT_SIGNAL}`
   );
   expect(
     !/noindex/i.test(rootHeaders.get("x-robots-tag") ?? ""),
