@@ -367,6 +367,17 @@ catalogue, so a customer never has to recopy it.
   The guidance is fixed in code; the router optimizer measures and replaces
   Chat's guidance only. Nothing is stored: the external API passes no
   conversation id, so the router writes no `AutoRouterDecision` row.
+  Each candidate is described by its `bestFor`. On the coding catalogue a
+  row's coding notes stand in for chat's `bestFor` when it has them (owner
+  decision 2026-11-22, `withCandidateModels` in `lib/externalApiCatalog.ts`):
+  "Coding strengths: ...; Coding weaknesses: ...", every item whole (at most
+  three of each, 120 characters each; nothing in the router path cuts a
+  candidate description). A row without notes keeps `bestFor`. The notes are
+  read from the current coding row, not the snapshot, and the chat registry's
+  `bestFor` and the Chat router are unchanged. The coding optimizer's
+  candidate menu reads the same descriptions. Notes come from the same
+  "Fill with the LLM" call as a link's capabilities, or from the operator
+  (`docs/policy/code-task-cost-guardrails.md` 6.1).
 - **Tool loops:** a request that carries tool results back goes to the model
   that made those tool calls. When a Smart Adaptive answer ends with tool
   calls, its model is remembered in process for ten minutes under the key and

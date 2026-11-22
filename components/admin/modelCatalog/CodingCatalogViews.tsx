@@ -297,6 +297,7 @@ export function CodingModelDetail({
   onAction,
   onHold,
   channels,
+  notes,
 }: {
   m: CatalogMessages;
   item: CodingCatalogItem;
@@ -310,6 +311,8 @@ export function CodingModelDetail({
   onHold: () => void;
   /** Where the row is offered (Code, the coding API); shown beside a stored profile. */
   channels?: ReactNode;
+  /** The row's coding notes (CodingNotesTile); shown beside a stored profile. */
+  notes?: ReactNode;
 }) {
   const c = m.codingFlow;
   const stage = codingStage(item);
@@ -428,6 +431,7 @@ export function CodingModelDetail({
               )}
             </AdminTile>
             {item.profile ? channels : null}
+            {item.profile ? notes : null}
           </div>
         </div>
       )}

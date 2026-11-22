@@ -274,12 +274,12 @@ export const adminCodingCatalogMessages = defineAdminMessages({
       button: "Fill capabilities with the LLM",
       filling: "Reading the documentation…",
       rowNote:
-        "One LLM call over the provider's tool calling and structured output pages (agent budget). It changes only these two values and their sources; the channels stay as they are, so tick Code yourself once it passes.",
+        "One LLM call over the provider's tool calling and structured output pages (agent budget). It changes only these two values, their sources and the coding notes; the channels stay as they are, so tick Code yourself once it passes.",
       done: (name: string) => `Filled the capabilities of ${name}. They reach Code and the coding API at the next snapshot.`,
-      all: (count: number) => `Fill the capabilities of ${count} row${count === 1 ? "" : "s"} without them`,
+      all: (count: number) => `Fill ${count} row${count === 1 ? "" : "s"} missing capabilities or coding notes`,
       allTitle: (count: number) => `Fill ${count} row${count === 1 ? "" : "s"} with the LLM?`,
       allEffects: (count: number, skipped: number) => [
-        `One LLM call per row (${count}), one after another, each over the provider's tool calling and structured output pages. This is a paid call from the agent budget.`,
+        `One LLM call per row (${count}), one after another, each over the provider's tool calling and structured output pages. The same call writes the coding notes. This is a paid call from the agent budget.`,
         "A row that fails or times out keeps its values and is listed with the reason. A timed-out call may have been charged and is not retried; the run stops there.",
         `${skipped} row${skipped === 1 ? "" : "s"} of providers with no documentation pages are not included.`,
         "Channels do not change. Changed rows show as changed since the snapshot and reach Code and the coding API at the next publish.",
@@ -293,6 +293,20 @@ export const adminCodingCatalogMessages = defineAdminMessages({
       resultClose: "Close",
       off: (env: string) => `Off: set ${env} to an enabled model to turn it on.`,
       noSource: "No documentation pages for this provider.",
+    },
+
+    notes: {
+      title: "Coding notes",
+      description: "Strengths and weaknesses at coding work. The coding API's Smart Adaptive reads them instead of chat's description.",
+      strengths: "Strengths",
+      weaknesses: "Weaknesses",
+      sources: "Stands on",
+      byOperator: "Written by you",
+      dated: (drafted: string, edited: string | null) => (edited ? `Drafted ${drafted} · edited ${edited}` : `Drafted ${drafted}`),
+      empty: "No coding notes yet. Fill with the LLM, or write them below.",
+      editHelp: "One note per line, up to 3 each, 120 characters each. Leave both empty to remove them.",
+      save: "Save notes",
+      problem: { too_many: "Up to 3 lines.", too_long: "Each line up to 120 characters." } as Record<string, string>,
     },
 
     toast: {
@@ -568,12 +582,12 @@ export const adminCodingCatalogMessages = defineAdminMessages({
       button: "LLM으로 기능 정보 채우기",
       filling: "공식 문서를 읽는 중…",
       rowNote:
-        "공급자의 Tool calling·구조화 출력 문서를 읽는 LLM 호출 1회입니다(에이전트 예산). 이 두 값과 출처만 바꾸고 채널은 그대로이므로, Code 판정을 통과하면 Code 채널은 직접 켜 주세요.",
+        "공급자의 Tool calling·구조화 출력 문서를 읽는 LLM 호출 1회입니다(에이전트 예산). 이 두 값과 출처, 코딩 장단점만 바꾸고 채널은 그대로이므로, Code 판정을 통과하면 Code 채널은 직접 켜 주세요.",
       done: (name: string) => `${name}의 기능 정보를 채웠습니다. Code와 코딩 API에는 다음 스냅샷부터 반영됩니다.`,
-      all: (count: number) => `정보 없는 행 ${count}개 모두 채우기`,
+      all: (count: number) => `기능 정보나 장단점이 없는 행 ${count}개 모두 채우기`,
       allTitle: (count: number) => `행 ${count}개를 LLM으로 채울까요?`,
       allEffects: (count: number, skipped: number) => [
-        `행마다 LLM 호출 1회(${count}회)를 차례로 합니다. 각 호출은 공급자의 Tool calling·구조화 출력 문서를 읽으며, 에이전트 예산에서 나가는 유료 호출입니다.`,
+        `행마다 LLM 호출 1회(${count}회)를 차례로 합니다. 각 호출은 공급자의 Tool calling·구조화 출력 문서를 읽고 같은 호출로 코딩 장단점도 씁니다. 에이전트 예산에서 나가는 유료 호출입니다.`,
         "실패하거나 시간이 지난 행은 값을 그대로 두고 사유를 보여 줍니다. 시간 초과 호출은 비용이 나갔을 수 있어 다시 시도하지 않고, 거기서 멈춥니다.",
         `공식 문서 주소가 없는 공급자의 ${skipped}개 행은 포함하지 않습니다.`,
         "채널은 바뀌지 않습니다. 바뀐 행은 \"스냅샷 이후 변경\"으로 보이며 다음 발행 때 Code와 코딩 API에 반영됩니다.",
@@ -587,6 +601,20 @@ export const adminCodingCatalogMessages = defineAdminMessages({
       resultClose: "닫기",
       off: (env: string) => `꺼져 있습니다. ${env}에 활성 모델을 지정하면 켜집니다.`,
       noSource: "이 공급자는 공식 문서 주소가 없습니다.",
+    },
+
+    notes: {
+      title: "코딩 장단점",
+      description: "코딩 작업에서의 강점과 약점입니다. 코딩 API의 Smart Adaptive가 채팅 설명 대신 이 내용을 읽습니다.",
+      strengths: "강점",
+      weaknesses: "약점",
+      sources: "근거 문서",
+      byOperator: "운영자 입력",
+      dated: (drafted: string, edited: string | null) => (edited ? `${drafted} 작성 · ${edited} 수정` : `${drafted} 작성`),
+      empty: "아직 코딩 장단점이 없습니다. LLM으로 채우거나 아래에 직접 적어 주세요.",
+      editHelp: "한 줄에 하나씩, 각각 3개까지, 한 줄 120자까지 적습니다. 둘 다 비우면 장단점을 지웁니다.",
+      save: "장단점 저장",
+      problem: { too_many: "3줄까지 적을 수 있습니다.", too_long: "한 줄은 120자까지입니다." } as Record<string, string>,
     },
 
     toast: {

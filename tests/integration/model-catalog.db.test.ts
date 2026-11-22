@@ -1140,3 +1140,115 @@ test("filling a link's capabilities from the documentation changes only its capa
   assert.deepEqual((await prisma.modelCatalogEntry.findUniqueOrThrow({ where: { category_modelId: { category: "coding", modelId: LINKED } } })).profile, row.profile);
   assert.equal(await auditCount("model_catalog.coding_capabilities_filled"), filledBefore + 1);
 });
+
+// Coding notes (owner decision 2026-11-22): filled by the same call as the
+// capabilities, standing on the fetched official pages, edited by the
+// operator, kept through a new draft, and never part of a published row.
+test("coding notes are filled with the capabilities, edited by the operator, and leave the published content as it was", async () => {
+  await cleanup();
+  await linkChatModel({ registryModelId: LINKED, session });
+  const floor = codingCreditFloor((await linkedEntry()).profile!)!;
+  await saveCodingSettings({ modelId: LINKED, settings: { creditWeight: floor, structuredOutput: "supported", channels: ["api", "code"] }, session });
+  await updateCatalogEntry({ category: "coding", modelId: LINKED, patch: { enabled: true }, session });
+  const first = await publishCodingSnapshot({ session });
+  const key = { category_modelId: { category: "coding", modelId: LINKED } };
+  const stored = async () => (await prisma.modelCatalogEntry.findUniqueOrThrow({ where: key })).profile as { codingNotes?: { strengths: string[]; weaknesses: string[]; sources: string[]; editedAt?: string } };
+
+  let answer: { strengths: string[]; weaknesses: string[]; sourceUrls: string[] } = { strengths: [], weaknesses: [], sourceUrls: [] };
+  const deps = {
+    draftLlm: async () => ({
+      draftImagePrices: async () => {
+        throw new Error("not used");
+      },
+      draftCodingProfile: async () => {
+        throw new Error("not used");
+      },
+      draftCodingCapabilities: async ({ pages }: { pages: { url: string }[] }) => ({
+        toolCalling: "basic" as const,
+        structuredOutput: "supported" as const,
+        note: "",
+        sources: pages.map((page) => page.url),
+        draftedAt: today(),
+        codingNotes: answer,
+      }),
+    }),
+    fetchPage: async (_provider: string, url: string) => ({ url, text: "page" }),
+  };
+  const pages = ["https://developers.openai.com/api/docs/guides/function-calling", "https://developers.openai.com/api/docs/guides/structured-outputs"];
+
+  // A page that is not the provider's: refused, nothing written.
+  answer = { strengths: ["Best coder"], weaknesses: [], sourceUrls: ["https://blog.example/gpt"] };
+  const before = await stored();
+  await assert.rejects(
+    fillLinkCapabilities({ modelId: LINKED, session, deps: deps as never }),
+    (error: unknown) => error instanceof CatalogRefusal && error.code === "unofficial_source"
+  );
+  assert.deepEqual(await stored(), before);
+
+  // Notes on the fetched pages: written with the capabilities.
+  answer = { strengths: ["Parallel tool calls in one response", "Strict schema outputs"], weaknesses: ["No schema on JSON mode"], sourceUrls: [pages[0]] };
+  await fillLinkCapabilities({ modelId: LINKED, session, deps: deps as never });
+  const filled = await stored();
+  assert.deepEqual(filled.codingNotes?.strengths, answer.strengths);
+  assert.deepEqual(filled.codingNotes?.sources, [pages[0]]);
+  // The published content is the same: notes are not part of a resolved or snapshot row.
+  const servable = servableCodingRows(await loadCodingCatalog());
+  assert.ok(servable.every((row) => !("codingNotes" in row)));
+  const again = await publishCodingSnapshot({ session });
+  assert.equal(again.created, false, "nothing to publish: the content hash did not move");
+  assert.equal(again.snapshot.contentHash, first.snapshot.contentHash);
+
+  // The operator edits them: kept sources, an edit date; an empty pair removes them.
+  const edited = await saveCodingSettings({ modelId: LINKED, settings: { codingNotes: { strengths: ["Parallel tool calls"], weaknesses: [] } }, session });
+  assert.deepEqual(edited.changes.map((change) => change.field), ["codingNotes"]);
+  assert.deepEqual((await stored()).codingNotes?.sources, [pages[0]]);
+  assert.equal((await stored()).codingNotes?.editedAt, today());
+  // The same text again changes nothing.
+  assert.deepEqual((await saveCodingSettings({ modelId: LINKED, settings: { codingNotes: { strengths: ["Parallel tool calls"], weaknesses: [] } }, session })).changes, []);
+  assert.equal(codingSettingsSchema.safeParse({ codingNotes: { strengths: ["x".repeat(121)], weaknesses: [] } }).success, false);
+  assert.equal(codingSettingsSchema.safeParse({ codingNotes: { strengths: ["a", "b", "c", "d"], weaknesses: [] } }).success, false);
+  await saveCodingSettings({ modelId: LINKED, settings: { codingNotes: null }, session });
+  assert.equal((await stored()).codingNotes, undefined);
+  assert.equal((await publishCodingSnapshot({ session })).created, false);
+  await updateCatalogEntry({ category: "coding", modelId: LINKED, patch: { enabled: false }, session });
+});
+
+test("a dedicated row takes coding notes from the operator and from a fill, and keeps them through a new draft", async () => {
+  const modelId = "gpt-notes-dedicated";
+  await storeCatalogDraft({ category: "coding", modelId, draft: { ...codingProfile, apiModelId: modelId }, session });
+  await applyCatalogDraft({ category: "coding", modelId, session });
+  const key = { category_modelId: { category: "coding", modelId } };
+  const notesOf = async () => ((await prisma.modelCatalogEntry.findUniqueOrThrow({ where: key })).profile as { codingNotes?: { strengths: string[]; sources: string[] } }).codingNotes;
+  await saveCodingSettings({ modelId, settings: { codingNotes: { strengths: ["Fast on short edits"], weaknesses: ["Weak at long plans"] } }, session });
+  assert.deepEqual((await notesOf())?.strengths, ["Fast on short edits"]);
+  assert.deepEqual((await notesOf())?.sources, [], "written by the operator");
+  // Anything else on a dedicated row still changes only through a draft.
+  await assert.rejects(
+    saveCodingSettings({ modelId, settings: { creditWeight: 9 }, session }),
+    (error: unknown) => error instanceof CatalogRefusal && error.code === "settings_linked_only"
+  );
+  // A new draft keeps them.
+  await storeCatalogDraft({ category: "coding", modelId, draft: { ...codingProfile, apiModelId: modelId }, session });
+  await applyCatalogDraft({ category: "coding", modelId, session });
+  assert.deepEqual((await notesOf())?.strengths, ["Fast on short edits"]);
+  // A fill writes the notes only, standing on the fetched page.
+  const page = "https://developers.openai.com/api/docs/guides/function-calling";
+  const deps = {
+    draftLlm: async () => ({
+      draftCodingCapabilities: async ({ pages }: { pages: { url: string }[] }) => ({
+        toolCalling: "none" as const,
+        structuredOutput: "none" as const,
+        note: "",
+        sources: pages.map((entry) => entry.url),
+        draftedAt: today(),
+        codingNotes: { strengths: ["Parallel tool calls"], weaknesses: [], sourceUrls: [page] },
+      }),
+    }),
+    fetchPage: async (_provider: string, url: string) => ({ url, text: "page" }),
+  };
+  const capabilitiesBefore = ((await prisma.modelCatalogEntry.findUniqueOrThrow({ where: key })).profile as { capabilities: unknown }).capabilities;
+  await fillLinkCapabilities({ modelId, session, deps: deps as never });
+  assert.deepEqual((await notesOf())?.strengths, ["Parallel tool calls"]);
+  assert.deepEqual((await notesOf())?.sources, [page]);
+  assert.deepEqual(((await prisma.modelCatalogEntry.findUniqueOrThrow({ where: key })).profile as { capabilities: unknown }).capabilities, capabilitiesBefore, "a dedicated row's capabilities are its draft's");
+});
