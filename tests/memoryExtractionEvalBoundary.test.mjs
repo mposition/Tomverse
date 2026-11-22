@@ -433,11 +433,12 @@ test("a budget opens the budget gate and nothing else", () => {
     );
 });
 
-test("only the owner-launch pairs resolve for runtime use, and only until they expire", () => {
+test("only the owner-launch pairs resolve for runtime use, and they hold until revoked", () => {
     // The other half of the same contract: every other pair fails closed even
-    // with the flag on (§12.1), and the one approval ends on its own date.
+    // with the flag on (§12.1). An owner launch has no expiry (owner decision
+    // 2026-11-22), so a later date changes nothing; revoking a pair closes it.
     const during = new Date("2026-10-24T00:00:00Z");
-    const after = new Date("2026-11-22T00:00:00Z");
+    const later = new Date("2099-01-01T00:00:00Z");
     for (const entry of MEMORY_EXTRACTION_EVAL_REGISTER) {
         const pair = {
             extractionModelId: entry.extractionModelId,
@@ -450,7 +451,14 @@ test("only the owner-launch pairs resolve for runtime use, and only until they e
             launched,
             `${pair.extractionModelId}::${pair.promptVersion}`
         );
-        assert.equal(findApprovedEvalPair(pair, { kind: "none" }, MEMORY_EXTRACTION_EVAL_REGISTER, after), null);
+        assert.equal(
+            Boolean(findApprovedEvalPair(pair, { kind: "none" }, MEMORY_EXTRACTION_EVAL_REGISTER, later)),
+            launched
+        );
+        assert.equal(
+            findApprovedEvalPair(pair, { kind: "revoked", pairs: [pair] }, MEMORY_EXTRACTION_EVAL_REGISTER, during),
+            null
+        );
     }
 });
 
