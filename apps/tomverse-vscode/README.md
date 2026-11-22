@@ -4,7 +4,7 @@ Ask about a local project, or select **Agent** to propose edits and commands. Re
 
 ## Install and connect
 
-Get `tomverse-vscode-0.1.0.vsix` from the [public preview release](https://github.com/mposition/Tomverse/releases/tag/tomverse-vscode-v0.1.0). In local VS Code Desktop, run **Extensions: Install from VSIX** and select the downloaded file. Open **Tomverse** in the Activity Bar, choose **Connect API key**, and enter your Tomverse API key in the native password input. The key stays in VS Code SecretStorage. Connection refresh only fetches metadata; it does not generate a paid answer. Disconnect removes the local key; revoke it in Tomverse account settings if needed.
+Get `tomverse-vscode-1.0.0.vsix` from the [public preview release](https://github.com/mposition/Tomverse/releases/tag/tomverse-vscode-v1.0.0). In local VS Code Desktop, run **Extensions: Install from VSIX** and select the downloaded file. Open **Tomverse** in the Activity Bar, choose **Connect API key**, and enter your Tomverse API key in the native password input. The key stays in VS Code SecretStorage. Connection refresh only fetches metadata; it does not generate a paid answer. Disconnect removes the local key; revoke it in Tomverse account settings if needed.
 
 The default API base is `https://tomverse.app/api/code/v1`. Only the user's application settings can change it. Workspace settings, environment variables and project instructions cannot select the key or endpoint. The extension never falls back to the general API. A 404/503 can indicate that the selected server's coding API is not deployed/enabled. API eligibility, shared credits and the key's cap are enforced by Tomverse. Use the server-provided catalog; models cannot be added by typing arbitrary IDs.
 

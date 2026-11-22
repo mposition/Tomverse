@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useLanguage } from "@/components/LanguageProvider";
 import { developerToolsCopy } from "@/locales/developerTools";
 
-const previewDownload = "https://github.com/mposition/Tomverse/releases/download/tomverse-vscode-v0.1.0/tomverse-vscode-0.1.0.vsix";
+const previewDownload = "https://github.com/mposition/Tomverse/releases/download/tomverse-vscode-v1.0.0/tomverse-vscode-1.0.0.vsix";
 
 /** Native extension setup; separate from VS Code's compatible-provider guide. */
 export function TomverseVscodeGuide() {

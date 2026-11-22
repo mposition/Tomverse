@@ -99,7 +99,7 @@ export async function run() {
         assert.equal(fake.completions.length, 1);
         assert.match(JSON.stringify(fake.completions[0]!.body), /fixture diagnostic/);
         assert.equal(controller.snapshot().cost?.charged, 3);
-        assert.equal(fake.completions[0]!.headers["user-agent"], "tomverse-vscode/0.1.0");
+        assert.equal(fake.completions[0]!.headers["user-agent"], `tomverse-vscode/${extension.packageJSON.version}`);
         assert.equal(JSON.stringify(fake.completions[0]!.body.tools).includes("apply_patch"), false);
         assert.equal(JSON.stringify(controller.snapshot()).includes(TEST_KEY), false);
         record("sidebar Ask stream, read-only tools, duplicate send refusal, own receipt", controller.snapshot().cost);

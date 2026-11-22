@@ -24,7 +24,7 @@ test("the existing Developers submenu orders API, CLI, native VS Code and integr
   const guide = page.getByTestId("tomverse-vscode-guide");
   await expect(guide).toContainText("Marketplace publication is pending");
   await expect(guide).toContainText("An earlier build passed on Linux x64 in Ubuntu WSL2");
-  await expect(guide.getByRole("link", { name: "Download VSIX" })).toHaveAttribute("href", "https://github.com/mposition/Tomverse/releases/download/tomverse-vscode-v0.1.0/tomverse-vscode-0.1.0.vsix");
+  await expect(guide.getByRole("link", { name: "Download VSIX" })).toHaveAttribute("href", "https://github.com/mposition/Tomverse/releases/download/tomverse-vscode-v1.0.0/tomverse-vscode-1.0.0.vsix");
   await expectNoHorizontalOverflow(page);
 });
 
