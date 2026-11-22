@@ -13,6 +13,13 @@ export const AMUX_NODE_DESCRIPTION_MAX = 4_000;
 
 export type AmuxPortfolioNodeLevel = "initiative" | "epic" | "feature";
 
+/** Owner decision 2026-11-22: an Epic may move under another active
+ * Initiative and a Feature under another active Epic; an Initiative never
+ * moves. The move is a node revision like a content revision. */
+export const AMUX_NODE_PARENT_LEVEL: Readonly<Record<AmuxPortfolioNodeLevel, AmuxPortfolioNodeLevel | null>> = {
+  initiative: null, epic: "initiative", feature: "epic",
+};
+
 /** The weight each level's value carries in the Task score
  * (portfolioScoreCore.ts): Initiative x4, Epic x3, Feature x2. */
 export const AMUX_NODE_VALUE_WEIGHT: Record<AmuxPortfolioNodeLevel, number> = {
@@ -39,6 +46,8 @@ export const amuxPortfolioNodeEditPayloadSchema = z.object({
   /** Null keeps the current title and description. */
   content: z.object({ title: singleLine(AMUX_NODE_TITLE_MAX),
     description: multiLine(AMUX_NODE_DESCRIPTION_MAX) }).strict().nullable(),
+  /** The new parent (owner decision 2026-11-22); absent or null keeps it. */
+  parentId: nodeId.nullable().optional(),
   value: rating,
   uncertainty: z.enum(["low", "medium", "high"]),
   reasonCode: z.enum(["initial", "new_evidence", "operator_override", "major_event"]),
@@ -65,6 +74,11 @@ export function amuxNodeEditBinding(input: {
   actorUserId: string; payload: AmuxPortfolioNodeEditPayload;
   level: AmuxPortfolioNodeLevel; priorContentDigest: string;
   nextContentDigest: string | null;
+  /** The parent before the save and the one it moves to, or null when it stays. */
+  priorParentId: string | null; nextParentId: string | null;
+  /** A move's new ancestors, parent first, each with the revision and latest
+   * assessment the preview read; empty when the node stays. */
+  nextParentPath?: ReadonlyArray<{ subjectId: string; revision: number; assessmentId: string }>;
   /** The node's latest assessment the owner saw, or null for a first one. */
   priorAssessmentId: string | null;
   /** Each open Task with its latest score and, for every subject its score
@@ -75,12 +89,15 @@ export function amuxNodeEditBinding(input: {
 }) {
   const { payload } = input;
   return {
-    schemaVersion: 2, actorUserId: input.actorUserId,
+    schemaVersion: 3, actorUserId: input.actorUserId,
     id: payload.id, requestId: payload.requestId,
     nodeId: payload.nodeId, level: input.level,
     expectedRevision: payload.expectedRevision,
     priorContentDigest: input.priorContentDigest,
     nextContentDigest: input.nextContentDigest,
+    priorParentId: input.priorParentId, nextParentId: input.nextParentId,
+    nextParentPath: (input.nextParentPath ?? []).map((item) => ({ subjectId: item.subjectId,
+      revision: item.revision, assessmentId: item.assessmentId })),
     priorAssessmentId: input.priorAssessmentId,
     value: payload.value, uncertainty: payload.uncertainty,
     reasonCode: payload.reasonCode,
@@ -113,10 +130,33 @@ export function amuxProjectedTaskScore(input: {
     input.nextValue * AMUX_NODE_VALUE_WEIGHT[input.level];
 }
 
+/** A moved node's open Task score estimate (owner decision 2026-11-22): the
+ * node's own weighted value and each new ancestor's replace the components
+ * of the levels they fill. Null when the current score cannot be read. */
+export function amuxProjectedMoveTaskScore(input: {
+  level: AmuxPortfolioNodeLevel; nextValue: number;
+  ancestors: Partial<Record<AmuxPortfolioNodeLevel, number>>;
+  currentTotal: number | null; currentComponents: unknown;
+}): number | null {
+  if (input.currentTotal === null || typeof input.currentComponents !== "object" ||
+      input.currentComponents === null) return null;
+  const components = input.currentComponents as Record<string, unknown>;
+  const values: Partial<Record<AmuxPortfolioNodeLevel, number>> =
+    { ...input.ancestors, [input.level]: input.nextValue };
+  let total = input.currentTotal;
+  for (const [level, value] of Object.entries(values) as Array<[AmuxPortfolioNodeLevel, number]>) {
+    const current = components[level];
+    if (typeof current !== "number" || !Number.isFinite(current)) return null;
+    total += value * AMUX_NODE_VALUE_WEIGHT[level] - current;
+  }
+  return total;
+}
+
 /** Whether a node still stands where a Task's approval put it. The same
  * revision must carry the approved content. A later revision is the owner's
  * own edit only (the database accepts no other content change, and each
- * owner revision keeps the creating decision and parent): it stands when the
+ * owner revision keeps the creating decision; since 2026-11-22 it may move the
+ * node under another parent, which the caller reads from the live chain): it stands when the
  * approved revision is still on record with the approved content and
  * decision. The current revision's decision is checked by the caller. */
 export function amuxApprovedNodeStillCurrent(input: {

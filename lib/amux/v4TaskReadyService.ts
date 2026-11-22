@@ -118,34 +118,51 @@ async function currentPath(tx: Prisma.TransactionClient, card: {
       (snapshot.card.parentStory?.id ?? null) !== card.parentStoryCardId) {
     return false;
   }
-  const rows = await tx.amuxPortfolioNode.findMany({
-    where: { id: { in: path.map((item) => item.id) } },
-    select: { id: true, level: true, parentId: true, state: true,
-      revision: true, contentDigest: true, contentDigestKeyId: true },
-  });
-  const nodes = new Map(rows.map((item) => [item.id, item]));
-  for (const [index, approved] of path.entries()) {
-    const node = nodes.get(approved.id);
-    if (!node || node.state !== "active" ||
-        node.level !== (["initiative", "epic", "feature"] as const)[index] ||
-        node.parentId !== (index ? path[index - 1]!.id : null)) return false;
-    // Owner decision 2026-11-21: an owner's revision of the node's title and
-    // description keeps the Task's approved path (portfolioNodeEditService.ts).
-    const approvedRevision = node.revision > approved.revision ?
-      await tx.amuxPortfolioNodeRevision.findUnique({
-        where: { nodeId_revision: { nodeId: node.id, revision: approved.revision } },
-        select: { contentDigest: true, contentDigestKeyId: true, decisionId: true },
-      }) : null;
-    if (!amuxApprovedNodeStillCurrent({ approved, node, approvedRevision })) return false;
+  // The Feature's live chain, read upward. Owner decision 2026-11-22: the
+  // owner may move a Feature or an Epic under another parent, which the
+  // portfolio guard accepts only as an owner revision, so an ancestor may
+  // differ from the one the Task was approved under. A node still on the
+  // approved path keeps the approved content and decision; a replaced
+  // ancestor must be an active node registered by a consumed create_node.
+  const levels = ["initiative", "epic", "feature"] as const;
+  const live: Array<{ id: string; level: string; parentId: string | null; state: string;
+    revision: number; contentDigest: string; contentDigestKeyId: string }> = [];
+  for (let id: string | null = card.parentFeatureNodeId; id && live.length < 3;) {
+    const row: (typeof live)[number] | null = await tx.amuxPortfolioNode.findUnique({ where: { id },
+      select: { id: true, level: true, parentId: true, state: true,
+        revision: true, contentDigest: true, contentDigestKeyId: true } });
+    if (!row) return false;
+    live.unshift(row);
+    id = row.parentId;
+  }
+  if (live.length !== 3 || live[0]!.parentId !== null) return false;
+  for (const [index, node] of live.entries()) {
+    const approved = path[index]!;
+    if (node.state !== "active" || node.level !== levels[index] ||
+        node.parentId !== (index ? live[index - 1]!.id : null)) return false;
+    const onApprovedPath = node.id === approved.id;
+    // The Feature is the card's own and never replaced.
+    if (index === 2 && !onApprovedPath) return false;
+    if (onApprovedPath) {
+      // Owner decision 2026-11-21: an owner's revision of the node keeps the
+      // Task's approved path (portfolioNodeEditService.ts).
+      const approvedRevision = node.revision > approved.revision ?
+        await tx.amuxPortfolioNodeRevision.findUnique({
+          where: { nodeId_revision: { nodeId: node.id, revision: approved.revision } },
+          select: { contentDigest: true, contentDigestKeyId: true, decisionId: true },
+        }) : null;
+      if (!amuxApprovedNodeStillCurrent({ approved, node, approvedRevision })) return false;
+    }
     const revision = await tx.amuxPortfolioNodeRevision.findUnique({
       where: { nodeId_revision: { nodeId: node.id, revision: node.revision } },
-      select: { decisionId: true },
+      select: { decisionId: true, parentIdAtApproval: true },
     });
     const decision = revision ? await tx.amuxIdeaUnitDecision.findUnique({
       where: { id: revision.decisionId },
       select: { state: true, action: true, resolvedNodeId: true },
     }) : null;
-    if (revision?.decisionId !== approved.approvedDecisionId ||
+    if (!revision || (onApprovedPath && revision.decisionId !== approved.approvedDecisionId) ||
+        revision.parentIdAtApproval !== node.parentId ||
         decision?.state !== "consumed" || decision.action !== "create_node" ||
         decision.resolvedNodeId !== node.id) return false;
   }
