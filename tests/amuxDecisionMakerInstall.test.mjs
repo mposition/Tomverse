@@ -360,4 +360,10 @@ test("the host installer is a dry run unless --apply, never runs the host, and r
   const beforeApply = code.slice(code.indexOf("dm_main() {"), dryRunEnd);
   assert.doesNotMatch(beforeApply, /\/usr\/bin\/install -|\bmv -T|\bdm_place\b|> "\$backup/);
   assert.doesNotMatch(code, /"\$work\/\$DM_HOST_ASSET_MEMBER"\s*(?:$|[;&|])|"\$DM_HOST_DEST"\s+--/m);
+  // The EXIT trap runs after dm_main returns, when its locals are gone: the path is expanded when it is set.
+  assert.match(code, /printf -v quoted '%q' "\$work"\n\s*trap "rm -rf -- \$quoted" EXIT/);
+  assert.doesNotMatch(code, /trap '[^']*\$work/);
+  // A replaced file's owner, group and mode are kept beside its bytes, and --rollback puts them back.
+  assert.match(code, /\/usr\/bin\/stat -c '%u %g %a' -- "\$DM_HOST_DEST" > "\$backup\/meta"/);
+  assert.match(code, /dm_place "\$backup\/codex-code-mode-host" .* "\$owner" "\$group" "\$mode"$/m);
 });

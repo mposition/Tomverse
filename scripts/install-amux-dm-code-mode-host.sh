@@ -69,12 +69,13 @@ dm_dest_state() {
   fi
 }
 
-# Puts a checked file in place: staged beside the destination, checked, renamed.
+# Puts a checked file in place: staged beside the destination with the given
+# owner, group and mode, checked, renamed.
 dm_place() {
-  local source=$1 wanted=$2 stage
+  local source=$1 wanted=$2 owner=${3:-0} group=${4:-0} mode=${5:-0555} stage
   dm_directory_safe "$(dirname -- "$DM_HOST_DEST")" || dm_fail "$(dirname -- "$DM_HOST_DEST") is not root's directory closed to others"
   stage="$(dirname -- "$DM_HOST_DEST")/.codex-code-mode-host.stage.$$"
-  /usr/bin/install -o root -g root -m 0555 -- "$source" "$stage"
+  /usr/bin/install -o "$owner" -g "$group" -m "$mode" -- "$source" "$stage"
   if [[ $(dm_sha256_of "$stage") != "$wanted" ]]; then
     rm -f -- "$stage"
     dm_fail "the staged copy does not match its sha256; nothing moved"
@@ -94,14 +95,18 @@ dm_rollback() {
       dm_say "rolled back: $DM_HOST_DEST removed (nothing was there before)" ;;
     file)
       [[ -f $backup/codex-code-mode-host && ! -L $backup/codex-code-mode-host ]] || dm_fail "$backup has no saved file"
-      dm_place "$backup/codex-code-mode-host" "$(dm_sha256_of "$backup/codex-code-mode-host")"
-      dm_say "rolled back: $DM_HOST_DEST restored from $backup" ;;
+      local meta owner group mode
+      meta=$(cat -- "$backup/meta" 2>/dev/null) || dm_fail "$backup has no meta file"
+      read -r owner group mode <<<"$meta"
+      [[ $owner =~ ^[0-9]+$ && $group =~ ^[0-9]+$ && $mode =~ ^[0-7]{3,4}$ ]] || dm_fail "$backup/meta is not '<uid> <gid> <mode>'"
+      dm_place "$backup/codex-code-mode-host" "$(dm_sha256_of "$backup/codex-code-mode-host")" "$owner" "$group" "$mode"
+      dm_say "rolled back: $DM_HOST_DEST restored from $backup (owner $owner:$group, mode $mode)" ;;
     *) dm_fail "$backup/state is neither absent nor file" ;;
   esac
 }
 
 dm_main() {
-  local apply=0 work state backup
+  local apply=0 work state backup quoted
   case ${1:-} in
     "") ;;
     --apply) apply=1 ;;
@@ -118,7 +123,10 @@ dm_main() {
   done
 
   work=$(mktemp -d)
-  trap 'rm -rf -- "$work"' EXIT
+  # The path is expanded now: the trap runs after dm_main returns, when `work` is out of scope.
+  printf -v quoted '%q' "$work"
+  # shellcheck disable=SC2064
+  trap "rm -rf -- $quoted" EXIT
   /usr/bin/curl -fsSL --proto '=https' --max-time 300 -o "$work/asset.tar.gz" -- "$DM_HOST_ASSET_URL" || dm_fail "download failed"
   [[ $(dm_sha256_of "$work/asset.tar.gz") == "$DM_HOST_ASSET_SHA256" ]] || dm_fail "the release asset's sha256 is not $DM_HOST_ASSET_SHA256"
   [[ $(/usr/bin/tar -tzf "$work/asset.tar.gz") == "$DM_HOST_ASSET_MEMBER" ]] || dm_fail "the release asset holds more or other than $DM_HOST_ASSET_MEMBER"
@@ -150,7 +158,9 @@ dm_main() {
   if [[ $state == absent ]]; then
     printf 'absent\n' > "$backup/state"
   else
+    # The bytes, and the owner, group and mode --rollback puts back.
     /usr/bin/install -o root -g root -m 0400 -- "$DM_HOST_DEST" "$backup/codex-code-mode-host"
+    /usr/bin/stat -c '%u %g %a' -- "$DM_HOST_DEST" > "$backup/meta"
     printf 'file\n' > "$backup/state"
   fi
   dm_place "$work/$DM_HOST_ASSET_MEMBER" "$DM_HOST_SHA256"
