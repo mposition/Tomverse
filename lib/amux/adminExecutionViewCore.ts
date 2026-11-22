@@ -40,7 +40,21 @@ const attention: Prisma.AmuxWorkItemWhereInput = {
   ],
 };
 
+/** Owner direction 2026-11-21: the board's lanes hold what runs, so a Story
+ * stays off them; it shows on its Tasks' hierarchy line and in the hierarchy
+ * view. A card with no type (legacy, unplaced) is not a Story: `cardType
+ * <> 'story'` alone would drop it, because NULL never compares. Archive-all
+ * still archives Stories (adminExecutionArchiveService.ts). */
+export const AMUX_EXECUTION_BOARD_CARD_WHERE: Prisma.AmuxWorkItemWhereInput = {
+  OR: [{ cardType: null }, { cardType: { not: "story" } }],
+};
+
 export function amuxExecutionLaneWhere(lane: AmuxExecutionLane): Prisma.AmuxWorkItemWhereInput {
+  const where = laneWhere(lane);
+  return { AND: [where, AMUX_EXECUTION_BOARD_CARD_WHERE] };
+}
+
+function laneWhere(lane: AmuxExecutionLane): Prisma.AmuxWorkItemWhereInput {
   const active = { archivedAt: null };
   if (lane === "attention") return { AND: [active, attention] };
   const ordinary = { NOT: attention };

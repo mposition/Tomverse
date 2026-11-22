@@ -227,7 +227,7 @@ export async function readAmuxExecutionBoard(lane: AmuxExecutionLane, page: numb
 }
 
 export async function readAmuxExecutionBoardSnapshot() {
-  const [counts, pages] = await Promise.all([
+  const [counts, pages, activeStories] = await Promise.all([
     Promise.all(AMUX_EXECUTION_LANES.map(async (name) => ({
       lane: name, total: await prisma.amuxWorkItem.count({
         where: amuxExecutionLaneWhere(name),
@@ -240,12 +240,15 @@ export async function readAmuxExecutionBoardSnapshot() {
         take: AMUX_EXECUTION_PAGE_SIZE, select: cardSelect,
       }),
     }))),
+    // Off the lanes, but archive-all still archives them: its confirmation says so.
+    prisma.amuxWorkItem.count({ where: { cardType: "story", archivedAt: null } }),
   ]);
   const summaries = await cardSummaries(pages.flatMap((page) => page.rows));
   const byId = new Map(summaries.map((card) => [card.id, card]));
   return { pageSize: AMUX_EXECUTION_PAGE_SIZE,
     counts: Object.fromEntries(counts.map((item) => [item.lane, item.total])) as
       Record<AmuxExecutionLane, number>,
+    activeStories,
     lanes: pages.map((page) => ({ lane: page.lane,
       cards: page.rows.map((row) => byId.get(row.id)!) })),
   };
@@ -371,7 +374,8 @@ export async function readAmuxCardHierarchy(card: Pick<CardRow, "id" |
     where: { id: epic.parentId }, select }) : null;
   const nodes = [initiative, epic, feature].filter((node) => node !== null);
   const cards = [card, ...(story ? [story] : [])];
-  const [titles, storyTitle, assessments] = await Promise.all([
+  const storyId = story?.id ?? (card.cardType === "story" ? card.id : null);
+  const [titles, storyTitle, assessments, storyTasks] = await Promise.all([
     nodeTitles(nodes), story ? readAmuxCardTitle(story) : Promise.resolve(null),
     prisma.$queryRaw<Array<{ subjectId: string; subjectRevision: number; metrics: unknown }>>`
       SELECT DISTINCT ON (COALESCE("nodeId", "cardId"))
@@ -380,7 +384,14 @@ export async function readAmuxCardHierarchy(card: Pick<CardRow, "id" |
       WHERE "nodeId" = ANY(${nodes.map((node) => node.id)}::text[])
         OR "cardId" = ANY(${cards.map((row) => row.id)}::text[])
       ORDER BY COALESCE("nodeId", "cardId"), "assessmentVersion" DESC`,
+    storyId ? prisma.amuxWorkItem.groupBy({ by: ["status"],
+      where: { parentStoryCardId: storyId, cardType: "task", archivedAt: null },
+      _count: { _all: true } }) : Promise.resolve([]),
   ]);
+  const storyProgress = storyId ? {
+    done: storyTasks.filter((row) => row.status === "done")
+      .reduce((sum, row) => sum + row._count._all, 0),
+    total: storyTasks.reduce((sum, row) => sum + row._count._all, 0) } : null;
   const latest = new Map(assessments.map((row) => [row.subjectId, row]));
   const bound = (id: string, revision: number, key: string) => {
     const row = latest.get(id);
@@ -397,7 +408,8 @@ export async function readAmuxCardHierarchy(card: Pick<CardRow, "id" |
     parentFeatureNodeId: row.parentFeatureNodeId,
     parentStoryCardId: row.parentStoryCardId,
     metric: bound(row.id, row.revision,
-      row.cardType === "story" ? "impact" : "contribution") });
+      row.cardType === "story" ? "impact" : "contribution"),
+    progress: row.cardType === "story" ? storyProgress : null });
   return projectAmuxCardHierarchy({ card: cardInput(card, title),
     story: story ? cardInput(story, storyTitle) : null,
     feature: nodeInput(feature), epic: nodeInput(epic),
