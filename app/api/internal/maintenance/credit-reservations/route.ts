@@ -44,6 +44,7 @@ import { runSupportTriageCycleQuietly } from "@/lib/supportTriageCycle";
 import { runTraceReportAnalysisQuietly } from "@/lib/traceReportAnalysis";
 import { runDevelopCiRepairQuietly } from "@/lib/developCiRepair";
 import { reconcileVoiceConversationsQuietly } from "@/lib/voiceConversationRecovery";
+import { recoverStaleResearchPreviewRuns } from "@/lib/researchPreviewRecovery";
 
 const isAuthorized = (request: Request) => {
   const configured = process.env.MAINTENANCE_SECRET;
@@ -108,6 +109,16 @@ export async function POST(request: Request) {
     const deepResearchSettlements =
       await reconcileUnsettledDeepResearchSettlementsQuietly();
     const voiceConversations = await reconcileVoiceConversationsQuietly();
+    // Research Preview recovery is a bounded DB-only step. It runs before the
+    // generic expiry sweep so known usage and unknown dispatches are classified
+    // while the Research run still owns the hold. No claim or provider work is
+    // reachable from this recovery-only module.
+    const researchPreviewRuns = await recoverStaleResearchPreviewRuns()
+      .then((recovered) => ({ recovered, deferred: 0 }))
+      .catch(() => {
+        console.warn(JSON.stringify({ event: "research_preview_recovery_deferred" }));
+        return { recovered: 0, deferred: 1 };
+      });
     const result = await reconcileCreditReservationsWithRetry();
     // Code owns independent task/call leases and shares the same credit wallet.
     const codeTasks = await reconcileExpiredCodeTasks().catch(() => {
@@ -255,6 +266,7 @@ export async function POST(request: Request) {
         codeTasks,
         deepResearchSettlements,
         voiceConversations,
+        researchPreviewRuns,
         infrastructureMonitor,
         notificationDeliveries,
         refundRequests,
@@ -279,6 +291,7 @@ export async function POST(request: Request) {
         codeTasks,
         deepResearchSettlements,
         voiceConversations,
+        researchPreviewRuns,
         infrastructureMonitor,
         notificationDeliveries,
         refundRequests,

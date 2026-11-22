@@ -483,6 +483,10 @@ export async function completeResearchPreviewGeneration(input: {
   const settlementUsage = checkpointJson(input.settlementUsage);
   return prisma.$transaction(async (tx) => {
     const now = new Date();
+    // Completion and stale recovery must observe the run in one serial order.
+    // Lock before the first state read to keep an older `dispatch_started`
+    // snapshot from overwriting a completion with known provider usage.
+    await tx.$queryRaw`SELECT "id" FROM "ResearchPreviewRun" WHERE "id" = ${input.runId} FOR UPDATE`;
     const run = await tx.researchPreviewRun.findFirst({
       where: {
         id: input.runId,
@@ -721,6 +725,11 @@ export async function finishResearchPreviewRunWithoutReport(input: {
 }) {
   const usage = checkpointJson(input.settlementUsage);
   return prisma.$transaction(async (tx) => {
+    // Uses the same run -> generation order as completion and stale recovery.
+    // Without this lock, a worker catch path can hold the generation while
+    // recovery holds the run, deadlock, or overwrite recovery after reading an
+    // older running lease.
+    await tx.$queryRaw`SELECT "id" FROM "ResearchPreviewRun" WHERE "id" = ${input.runId} FOR UPDATE`;
     const run = await tx.researchPreviewRun.findFirst({
       where: {
         id: input.runId,
@@ -845,6 +854,11 @@ export async function recoverStalePreparingResearchPreviewRun(runId: string) {
 export async function recoverStaleResearchPreviewRun(runId: string) {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`research-preview-run:${runId}`}))`;
+    // Serializes with generation completion and cancellation before recovery
+    // reads status, lease fencing or the newest generation. The advisory lock
+    // keeps duplicate recovery workers apart; the row lock is the shared
+    // boundary with the live worker.
+    await tx.$queryRaw`SELECT "id" FROM "ResearchPreviewRun" WHERE "id" = ${runId} FOR UPDATE`;
     const run = await tx.researchPreviewRun.findUnique({
       where: { id: runId },
       include: { generations: { orderBy: { generationIndex: "desc" }, take: 1 } },

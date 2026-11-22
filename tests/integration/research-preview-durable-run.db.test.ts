@@ -13,6 +13,7 @@ import {
   claimNextResearchPreviewRun,
   completeResearchPreviewGeneration,
   createPreparingResearchPreviewRun,
+  finishResearchPreviewRunWithoutReport,
   markResearchPreviewDispatchStarted,
   readEligibleResearchPreviewSource,
   readResearchPreviewRunDto,
@@ -26,6 +27,7 @@ import {
 import { parseResearchPreviewCheckpoint } from "@/lib/researchPreviewStep";
 import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
 import { createConversationUnlockCookie } from "@/lib/conversationLock";
+import { recoverStaleResearchPreviewRuns as runResearchPreviewRecovery } from "@/lib/researchPreviewRecovery";
 
 const root = resolve(import.meta.dirname, "../..");
 const mod = (file: string) => pathToFileURL(resolve(root, file)).href;
@@ -53,6 +55,60 @@ process.env.CHAT_PROVIDER_GOOGLE_COST_MICROUSD_PER_MONTH = "1000000000";
 
 const users: string[] = [];
 const reservations: string[] = [];
+
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Holds one run row until `release()` is called. The backend pid lets the test
+ * use PostgreSQL's blocking graph as its barrier instead of assuming a delay
+ * was long enough for both contenders to reach the critical section.
+ */
+const holdResearchPreviewRunRow = (runId: string) => {
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => { release = resolve; });
+  let signalHeld!: (pid: number) => void;
+  const held = new Promise<number>((resolve) => { signalHeld = resolve; });
+  const committed = prisma.$transaction(async (tx) => {
+    const [backend] = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid()::int AS pid`;
+    await tx.$queryRaw`SELECT "id" FROM "ResearchPreviewRun" WHERE "id" = ${runId} FOR UPDATE`;
+    signalHeld(backend!.pid);
+    await released;
+  }, { timeout: 15_000 });
+  return { held, release, committed };
+};
+
+/** Waits until `minimum` sessions are in the blocker pid's transitive wait graph. */
+const waitForBlockedResearchSessions = async (
+  blockerPid: number,
+  minimum: number,
+  contenders: Promise<unknown>[],
+) => {
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    const [row] = await prisma.$queryRaw<Array<{ waiting: number }>>`
+      WITH RECURSIVE blocked(pid) AS (
+        SELECT activity.pid
+        FROM pg_stat_activity activity
+        WHERE ${blockerPid} = ANY(pg_blocking_pids(activity.pid))
+        UNION
+        SELECT activity.pid
+        FROM pg_stat_activity activity
+        JOIN blocked predecessor
+          ON predecessor.pid = ANY(pg_blocking_pids(activity.pid))
+      )
+      SELECT count(*)::int AS waiting FROM blocked
+    `;
+    if ((row?.waiting ?? 0) >= minimum) return;
+    const finished = await Promise.race([
+      Promise.allSettled(contenders).then(() => true),
+      pause(20).then(() => false),
+    ]);
+    if (finished) throw new Error("A Research contender finished before reaching the row-lock barrier.");
+    if (Date.now() > deadline) {
+      throw new Error(`Only ${row?.waiting ?? 0} Research contender(s) reached the row-lock barrier.`);
+    }
+  }
+};
 
 after(async () => {
   await prisma.user.deleteMany({ where: { id: { in: users } } });
@@ -894,6 +950,254 @@ test("a stale dispatch is quarantined as outcome_unknown and can never resume", 
   await assert.rejects(
     resumeResearchPreviewRun(row.user.id, row.runId),
     /no safe checkpoint/i
+  );
+});
+
+test("maintenance recovers and settles a stale dispatch once without a worker or provider call", async () => {
+  const { created, held } = await createServiceFixture("maintenance-stale-dispatch");
+  const ownerId = "maintenance-stale-worker";
+  const claimed = await claimNextResearchPreviewRun(ownerId);
+  assert.equal(claimed?.id, created.run.id);
+  if (!claimed) throw new Error("Expected queued run");
+  const generation = await beginResearchPreviewGeneration({
+    runId: claimed.id,
+    ownerId,
+    leaseEpoch: claimed.leaseEpoch,
+    checkpointVersion: 0,
+    generationIndex: 1,
+  });
+  await markResearchPreviewDispatchStarted({
+    runId: claimed.id,
+    generationId: generation.id,
+    ownerId,
+    leaseEpoch: claimed.leaseEpoch,
+  });
+  await prisma.researchPreviewRun.update({
+    where: { id: claimed.id },
+    data: { leaseExpiresAt: new Date(Date.now() - 1_000) },
+  });
+
+  assert.equal(await runResearchPreviewRecovery(), 1);
+  const recovered = await prisma.researchPreviewRun.findUniqueOrThrow({
+    where: { id: claimed.id },
+    include: { generations: true },
+  });
+  assert.equal(recovered.status, "attention");
+  assert.equal(recovered.generations[0]?.status, "outcome_unknown");
+  assert.equal(activeModel.doGenerateCalls.length, 0);
+  const reservation = await prisma.chatCreditReservation.findUniqueOrThrow({
+    where: { id: held[0]!.id },
+  });
+  assert.notEqual(reservation.status, "reserved");
+  const attemptCount = await prisma.chatAttemptUsage.count({
+    where: { reservationId: reservation.id },
+  });
+
+  assert.equal(await runResearchPreviewRecovery(), 0);
+  assert.equal(
+    await prisma.chatAttemptUsage.count({ where: { reservationId: reservation.id } }),
+    attemptCount,
+  );
+  assert.equal(
+    (await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: reservation.id } })).status,
+    reservation.status,
+  );
+});
+
+test("maintenance leaves an active Research lease untouched", async () => {
+  const { user, created } = await createServiceFixture("maintenance-active-lease");
+  const ownerId = "maintenance-active-worker";
+  const claimed = await claimNextResearchPreviewRun(ownerId);
+  assert.equal(claimed?.id, created.run.id);
+  if (!claimed) throw new Error("Expected queued run");
+
+  assert.equal(await runResearchPreviewRecovery(), 0);
+  const active = await prisma.researchPreviewRun.findUniqueOrThrow({
+    where: { id: claimed.id },
+  });
+  assert.equal(active.status, "running");
+  assert.equal(active.leaseOwner, ownerId);
+  assert.equal(active.leaseEpoch, claimed.leaseEpoch);
+  assert.equal(activeModel.doGenerateCalls.length, 0);
+
+  await requestResearchPreviewCancellation(user.id, claimed.id);
+  await prisma.researchPreviewRun.update({
+    where: { id: claimed.id },
+    data: { leaseExpiresAt: new Date(Date.now() - 1_000) },
+  });
+  assert.equal(await runResearchPreviewRecovery(), 1);
+});
+
+test("late completion and stale recovery serialize before reading one run", async () => {
+  const row = await fixture("completion-recovery-race");
+  const ownerId = "completion-recovery-worker";
+  const claimed = await claimNextResearchPreviewRun(ownerId);
+  assert.equal(claimed?.id, row.runId);
+  if (!claimed) throw new Error("Expected queued run");
+  const generation = await beginResearchPreviewGeneration({
+    runId: row.runId,
+    ownerId,
+    leaseEpoch: claimed.leaseEpoch,
+    checkpointVersion: 0,
+    generationIndex: 1,
+  });
+  await markResearchPreviewDispatchStarted({
+    runId: row.runId,
+    generationId: generation.id,
+    ownerId,
+    leaseEpoch: claimed.leaseEpoch,
+  });
+  await prisma.researchPreviewRun.update({
+    where: { id: row.runId },
+    data: { leaseExpiresAt: new Date(Date.now() - 1_000) },
+  });
+
+  const barrier = holdResearchPreviewRunRow(row.runId);
+  const blockerPid = await barrier.held;
+  const completion = completeResearchPreviewGeneration({
+    runId: row.runId,
+    generationId: generation.id,
+    ownerId,
+    leaseEpoch: claimed.leaseEpoch,
+    checkpoint: checkpoint({
+      question: row.question,
+      completedSteps: 1,
+      inputTokens: 120,
+      outputTokens: 40,
+    }),
+    stepCount: 1,
+    searchCount: 0,
+    readCount: 0,
+    stepUsage: {
+      inputTokens: 120,
+      cachedInputTokens: 0,
+      cacheWriteInputTokens: 0,
+      outputTokens: 40,
+      reasoningTokens: 0,
+    },
+    settlementUsage: {
+      inputTokens: 120,
+      cachedInputTokens: 0,
+      cacheWriteInputTokens: 0,
+      outputTokens: 40,
+      reasoningTokens: 0,
+      usageFromProvider: true,
+      outcome: "completed",
+      searchSurchargeCredits: 8,
+      searchExecuted: false,
+      searchQueryCount: 0,
+      searchBackendRequestCount: 0,
+      searchQueriesObserved: true,
+    },
+    terminal: {
+      content: "A late but known Research report.",
+      modelId,
+      searchMetadata: { research: { outcome: "partial" } },
+    },
+  });
+  await waitForBlockedResearchSessions(blockerPid, 1, [completion]);
+  const recovery = recoverStaleResearchPreviewRun(row.runId);
+  await waitForBlockedResearchSessions(blockerPid, 2, [completion, recovery]);
+  barrier.release();
+  await barrier.committed;
+
+  await completion;
+  assert.equal(await recovery, "unchanged");
+  const stored = await prisma.researchPreviewRun.findUniqueOrThrow({
+    where: { id: row.runId },
+    include: { generations: true, message: true },
+  });
+  assert.equal(stored.status, "completed");
+  assert.equal(stored.stopReason, "report_submitted");
+  assert.equal(stored.generations[0]?.status, "completed");
+  assert.equal(stored.message?.content, "A late but known Research report.");
+  assert.deepEqual(stored.settlementUsage, {
+    inputTokens: 120,
+    cachedInputTokens: 0,
+    cacheWriteInputTokens: 0,
+    outputTokens: 40,
+    reasoningTokens: 0,
+    usageFromProvider: true,
+    outcome: "completed",
+    searchSurchargeCredits: 8,
+    searchExecuted: false,
+    searchQueryCount: 0,
+    searchBackendRequestCount: 0,
+    searchQueriesObserved: true,
+  });
+});
+
+test("stale recovery serializes ahead of a late worker failure without a lock inversion", async () => {
+  const row = await fixture("recovery-worker-failure-race");
+  const ownerId = "recovery-worker-failure-owner";
+  const claimed = await claimNextResearchPreviewRun(ownerId);
+  assert.equal(claimed?.id, row.runId);
+  if (!claimed) throw new Error("Expected queued run");
+  const generation = await beginResearchPreviewGeneration({
+    runId: row.runId,
+    ownerId,
+    leaseEpoch: claimed.leaseEpoch,
+    checkpointVersion: 0,
+    generationIndex: 1,
+  });
+  await markResearchPreviewDispatchStarted({
+    runId: row.runId,
+    generationId: generation.id,
+    ownerId,
+    leaseEpoch: claimed.leaseEpoch,
+  });
+  await prisma.researchPreviewRun.update({
+    where: { id: row.runId },
+    data: { leaseExpiresAt: new Date(Date.now() - 1_000) },
+  });
+
+  const barrier = holdResearchPreviewRunRow(row.runId);
+  const blockerPid = await barrier.held;
+  const recovery = recoverStaleResearchPreviewRun(row.runId);
+  await waitForBlockedResearchSessions(blockerPid, 1, [recovery]);
+  const workerFailure = finishResearchPreviewRunWithoutReport({
+    runId: row.runId,
+    generationId: generation.id,
+    ownerId,
+    leaseEpoch: claimed.leaseEpoch,
+    status: "failed",
+    stopReason: "provider_error",
+    generationStatus: "outcome_unknown",
+    settlementUsage: {
+      inputTokens: 0,
+      cachedInputTokens: 0,
+      cacheWriteInputTokens: 0,
+      outputTokens: 0,
+      reasoningTokens: 0,
+      usageFromProvider: true,
+      outcome: "failed",
+      searchSurchargeCredits: 8,
+      searchExecuted: false,
+      searchQueryCount: 0,
+      searchBackendRequestCount: 0,
+      searchQueriesObserved: true,
+    },
+  });
+  await waitForBlockedResearchSessions(blockerPid, 2, [recovery, workerFailure]);
+  barrier.release();
+  await barrier.committed;
+
+  assert.equal(await recovery, "outcome_unknown");
+  assert.equal(await workerFailure, false);
+  const stored = await prisma.researchPreviewRun.findUniqueOrThrow({
+    where: { id: row.runId },
+    include: { generations: true },
+  });
+  assert.equal(stored.status, "attention");
+  assert.equal(stored.stopReason, "outcome_unknown");
+  assert.equal(stored.generations[0]?.status, "outcome_unknown");
+  assert.equal(
+    (stored.settlementUsage as { usageFromProvider: boolean }).usageFromProvider,
+    false,
+  );
+  assert.equal(
+    (stored.settlementUsage as { searchQueriesObserved: boolean }).searchQueriesObserved,
+    false,
   );
 });
 
