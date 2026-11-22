@@ -229,6 +229,37 @@ test.describe("admin read surfaces", () => {
     await expect(page.getByText(FIXTURE_ANALYTICS.eventName)).toBeVisible();
   });
 
+  test("analytics renders the product funnel's connected journey dropoff detail", async ({
+    page,
+  }) => {
+    await page.goto("/admin/analytics?tab=product");
+
+    // Seeded Studio attempts: one replied after a draft conflict, one cancelled
+    // after it, one quiet after ready, and a one-hour-old one still pending.
+    const detail = page.getByTestId("connected-journey-dropoff");
+    await expect(detail.getByRole("heading", { name: "Attempts without an observed first reply" })).toBeVisible();
+    const studio = detail.getByTestId("connected-journey-dropoff-review_studio-none");
+    await expect(studio).toContainText("2 without reply of 3 mature · 1 replied");
+    await expect(studio).toContainText(
+      "Mature 3 = replied 1 + no reply with a recorded reason 1 + no reply and no reason 1"
+    );
+    await expect(studio.getByTestId("journey-last-stage-preview")).toHaveText("1");
+    await expect(studio.getByTestId("journey-last-stage-ready")).toHaveText("1");
+    await expect(studio.getByTestId("journey-reason-draft_conflict")).toContainText("Conflict with existing draft");
+    await expect(studio.getByTestId("journey-reason-draft_conflict").getByRole("cell")).toHaveText([
+      /Conflict with existing draft/, "1", "1",
+    ]);
+    await expect(studio.getByTestId("journey-reason-source_unavailable")).toHaveCount(0);
+
+    // Import has no preview stage, so that column reads not applicable.
+    const imported = detail.getByTestId("connected-journey-dropoff-import_complete-new");
+    await expect(imported.getByTestId("journey-last-stage-preview")).toHaveText("Not applicable");
+    await expect(imported.getByTestId("journey-reason-create_failed")).toBeVisible();
+
+    // Counts only: no seeded journey key reaches the page.
+    await expect(page.getByText(/6f1c2a4e-1b7d/)).toHaveCount(0);
+  });
+
   test("analytics' imports tab renders the content-free import and memory report", async ({
     page,
   }) => {
