@@ -146,9 +146,11 @@ export const adminCodingCatalogMessages = defineAdminMessages({
             ? "not listed"
             : reason === "invalid_id"
               ? "id not accepted"
-              : reason.startsWith("usage_class:")
-                ? `usage class ${reason.slice("usage_class:".length)}`
-                : reason,
+              : reason === "chat_credits_missing"
+                ? "no chat credits set"
+                : reason.startsWith("usage_class:")
+                  ? `usage class ${reason.slice("usage_class:".length)}`
+                  : reason,
       show: "Show",
       hide: "Hide",
       footnote:
@@ -455,9 +457,11 @@ export const adminCodingCatalogMessages = defineAdminMessages({
             ? "비공개"
             : reason === "invalid_id"
               ? "카탈로그가 받지 않는 id"
-              : reason.startsWith("usage_class:")
-                ? `usageClass ${reason.slice("usage_class:".length)}`
-                : reason,
+              : reason === "chat_credits_missing"
+                ? "채팅 크레딧 미설정"
+                : reason.startsWith("usage_class:")
+                  ? `usageClass ${reason.slice("usage_class:".length)}`
+                  : reason,
       show: "목록 펼치기",
       hide: "접기",
       footnote:

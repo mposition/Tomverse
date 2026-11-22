@@ -11,6 +11,7 @@ import type { Session } from "next-auth";
 
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { isE2EDatabaseDisabled } from "@/lib/e2eTestMode";
+import { hasRegistryCredits } from "@/lib/externalApiCatalogCore";
 import {
   IMAGE_MODEL_REGISTRY,
   minimumCreditsForImageOption,
@@ -199,6 +200,8 @@ export const chatModelFacts = (model: AiModel): ChatModelFacts => {
     minimumPlan: model.minimumPlan === "Pro" ? "Pro" : "Free",
     usageClass: model.usageClass,
     creditWeight: getModelUsageProfile(model).credits,
+    // The same condition the coding API serves frontier and apex models on.
+    registryCredits: hasRegistryCredits(model),
     enabled: model.enabled,
     status: model.status,
     publiclyListed: model.publiclyListed !== false,

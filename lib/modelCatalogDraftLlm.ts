@@ -458,7 +458,9 @@ const tierListSchema = codingDraftBasisSchema.shape.priceTiers.unwrap();
 
 /**
  * The price tiers an answer lists: [] for one flat price, null when the list is
- * malformed (the draft is then refused, not priced from part of it).
+ * malformed or out of order -- upToInputTokens not ascending, or an open (null)
+ * tier before the last (codingDraftBasisSchema) -- so the draft is refused, not
+ * priced from part of it.
  */
 type PriceTier = NonNullable<CodingDraftBasis["priceTiers"]>[number];
 
@@ -468,9 +470,16 @@ const answeredTiers = (value: unknown): PriceTier[] | null => {
   return parsed.success ? parsed.data : null;
 };
 
-/** The dearest of the answered rate and every tier's: code picks the rate, never below a listed tier. */
+/**
+ * The dearest of the answered rate and every tier's: code picks the rate, never
+ * below a listed tier. An answered rate that is not a price (negative, not a
+ * finite number) is passed on as it is, so the profile schema refuses the draft
+ * rather than a tier standing in for it.
+ */
 const dearestRate = (answered: unknown, tierRates: readonly number[]): unknown =>
-  tierRates.length === 0 ? answered : Math.max(typeof answered === "number" && Number.isFinite(answered) ? answered : 0, ...tierRates);
+  tierRates.length === 0 || typeof answered !== "number" || !Number.isFinite(answered) || answered < 0
+    ? answered
+    : Math.max(answered, ...tierRates);
 
 /**
  * Turn the model's coding answer into a profile draft, or refuse it.

@@ -141,8 +141,12 @@ migration 적용은 별도입니다. 구현한 A1 범위와 확정 값은 10절�
   - **구간 가격**: 요청 하나의 입력 토큰 수가 그 요청 전체의 입력·출력 단가를 정하는 모델은 가장 비싼
     구간의 입력·출력 단가를 프로필 단가로 씁니다. LLM은 구간표를 `pricing.tiers`로 함께 답하고, 코드는
     답한 단가와 모든 구간 단가 중 큰 값을 씁니다(싼 구간을 답해도 가장 비싼 구간으로 올림, 그보다 높은
-    답은 그대로). 구간표가 잘못된 형식이면 초안을 거절합니다(`pricing.tiers`). 구간표는
-    `basis.priceTiers`에 남고 초안 화면에 보입니다. 크레딧 하한은 이 단가로 계산됩니다.
+    답은 그대로). 구간표가 잘못된 형식이면 초안을 거절합니다(`pricing.tiers`): 단가가 음수이거나 숫자가
+    아닌 구간, `upToInputTokens`가 오름차순이 아닌 구간표(같은 값 반복 포함), 상한 없음(`null`)이 마지막이
+    아닌 구간표입니다(`codingDraftBasisSchema`). 구간이 있을 때 답한 기본 단가가 음수이거나 숫자가 아니면
+    구간 단가로 메우지 않고 그대로 넘겨 프로필 스키마가 거절합니다(`pricing.inputUsdPerMTok` 등). 구간표는
+    `basis.priceTiers`에 남고 초안 화면에 보입니다. 화면의 구간 범위는 이 검사를 통과한 값만 보입니다.
+    크레딧 하한은 이 단가로 계산됩니다.
   - `basis`는 저장된 프로필에만 있고 해석된 행·스냅샷 행에는 싣지 않으므로 `canonicalJson`·해시를
     바꾸지 않습니다. 이전 행에는 없습니다.
 - **구조화 출력은 "지원(`supported`) / 지원 안 함(`none`)" 두 값입니다(운영자 결정 2026-11-22).** 실행이
@@ -155,8 +159,12 @@ migration 적용은 별도입니다. 구현한 A1 범위와 확정 값은 10절�
   (`codingStructuredOutputChoice`). 저장된 행과 발행된 스냅샷을 다시 쓰지 않으므로 `canonicalJson`·해시는
   그대로입니다. 두 값으로 바뀌는 때는 저장할 때뿐입니다: 연결 행 설정 저장(`codingSettingsSchema`는 두 값만
   받고, 화면은 다른 칸을 바꿔 저장할 때 이전 값을 보이는 선택지로 함께 보냄), 전용 행 초안 적용
-  (`applyCodingDraftEdits`), "LLM으로 기능 정보 채우기". 그 행은 "스냅샷 이후 변경"이 되고 다음 발행에
-  실립니다. LLM 답 스키마(`CODING_SCHEMA`·`CAPABILITY_SCHEMA`)도 두 값만 받습니다.
+  (`applyCodingDraftEdits`), "LLM으로 기능 정보 채우기". 그 밖의 프로필 쓰기도 마찬가지입니다: 프로필을
+  싣는 모든 쓰기(직접 PATCH 포함, `updateCatalogEntry`)는 이전 값을 거절하지 않고 `supported`로 바꿔
+  저장하고(`codingProfileForWrite`, 연결 행의 `evidence.structuredOutput` 포함), 바꾼 값을 감사 행의
+  `structuredOutputRewritten`에 남깁니다. 다른 칸만 고쳐도 이전 행 저장이 막히지 않게 하려는 것입니다.
+  켜기·보류처럼 프로필을 싣지 않는 쓰기는 프로필을 다시 쓰지 않습니다. 그 행은 "스냅샷 이후 변경"이
+  되고 다음 발행에 실립니다. LLM 답 스키마(`CODING_SCHEMA`·`CAPABILITY_SCHEMA`)도 두 값만 받습니다.
 - **채팅 모델 연결 행**(`profile.source: "chat"`, `registryModelId` = 행의 `modelId`):
   이름·공급자·API 모델 id·단가·컨텍스트·최대 출력·이미지 입력을 **복사하지 않고 읽을 때마다**
   채팅 레지스트리(`ModelRegistryEntry`)에서 가져옵니다. 단가는 채팅 가격 해석
@@ -178,8 +186,13 @@ migration 적용은 별도입니다. 구현한 A1 범위와 확정 값은 10절�
   (`AUTO_LLM_ROUTER_CODING_GUIDANCE`), 코딩 카탈로그에서는 클라이언트가 이 등급을 직접 고를 수도 있습니다
   (`docs/policy/external-api.md` 5.1). 한 번에 추가(`link_all`)에도 들어갑니다. 연결 행이므로 코딩 API는
   채팅 크레딧 그대로이고, 채팅 레지스트리의 크레딧이 양의 정수가 아니면 코딩 API에 노출하지 않습니다
-  (`hasRegistryCredits`). Code 채널은 Code 하한 규칙 그대로입니다. 예약·정산 경로는 바뀌지 않습니다.
-  research 등급은 여전히 후보가 아닙니다.
+  (`hasRegistryCredits`). 후보 목록·한 번에 추가·판정도 같은 조건을 씁니다: 레지스트리에 크레딧이 없는
+  `frontier`·`apex` 모델은 등급 기본값(32·80)이 아무도 정하지 않은 값이므로 후보에서 빠지고
+  (`codingCandidateExclusion`, 사유 `chat_credits_missing`), 이미 연결된 행은 두 채널 모두에서 같은 사유로
+  거절되어 발행되지 않습니다(`resolveCodingEntry`; 링크에 Code 크레딧을 따로 적어도 마찬가지). 그래서 Admin에서
+  통과로 보인 행이 실행 단계에서 조용히 빠지는 일이 없습니다(`ChatModelFacts.registryCredits`). Code 채널은
+  그 밖에 Code 하한 규칙 그대로입니다. 예약·정산 경로는 바뀌지 않습니다. research 등급은 여전히 후보가
+  아닙니다.
 - **채널별 판정(운영자 결정 2026-11-21).** 채팅 연결 행은 코딩 API에서 채팅 모델 그대로(채팅 입력 한도·
   채팅 크레딧)로 실행되므로 Code 기준이 코딩 API 노출을 막지 않습니다. `judgeCodingChannels`
   (`lib/modelCatalogCore.ts`)가 채널마다 답합니다. **코딩 API**: 채팅 쪽 통과(활성·공개·삭제 아님·가격

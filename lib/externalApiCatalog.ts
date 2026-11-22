@@ -69,11 +69,11 @@ export const externalApiRunnableModels = async (
             isProviderApiKeyConfigured(model.provider)
     );
     // A router-only model joins only beside a model of its provider a client
-    // can name, so it is never the one model left, and a native protocol never
-    // offers Smart Adaptive over router-only models alone. A model a client can
-    // name is offered on its own; Smart Adaptive still never defaults to the
-    // frontier and apex classes (lib/externalApiSmartAdaptive.ts,
-    // lib/externalApiNativeSmartAdaptive.ts).
+    // can name, so it is never the one model left. A model a client can name
+    // is offered on its own. On either API Smart Adaptive never defaults to the
+    // frontier and apex classes, and is offered on a protocol only beside a
+    // model of another class (smartAdaptiveCapabilities,
+    // lib/externalApiSmartAdaptive.ts, lib/externalApiNativeSmartAdaptive.ts).
     const nameableProviders = new Set(servable.filter(({ model }) => nameable(model)).map(({ model }) => model.provider));
     return servable
         .filter(({ model }) => nameable(model) || nameableProviders.has(model.provider))
@@ -117,7 +117,8 @@ export const withCandidateModels = (
 /**
  * What `GET /models` and the settings page offer: Smart Adaptive first, then
  * every runnable model. Smart Adaptive's limits and credits are over its own
- * candidates, which include the classes only it routes to.
+ * candidates, which include the classes only it routes to; it is listed only
+ * while one of them is a model it may default to (not frontier or apex).
  */
 export const externalApiOfferedModels = async (
     plan: ModelTier,

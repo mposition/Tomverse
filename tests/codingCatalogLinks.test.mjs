@@ -35,6 +35,8 @@ const chat = (overrides = {}) => ({
   minimumPlan: "Pro",
   usageClass: "premium",
   creditWeight: 6,
+  // The registry sets this model's credits (chatModelFacts, hasRegistryCredits).
+  registryCredits: true,
   enabled: true,
   status: "enabled",
   publiclyListed: true,
@@ -242,6 +244,24 @@ test("a chat link is judged per channel: the coding API needs the chat side, Cod
   const noTools = channels(link({ channels: ["code", "api"], capabilities: { toolCalling: "none", structuredOutput: "json_mode" } }));
   assert.ok(noTools.api.reasons.includes("no_tool_calling") && noTools.code.reasons.includes("no_tool_calling"));
 
+  // A frontier or apex link whose chat model has no registry credits: its credits
+  // would be a class default nobody set, and the coding API never serves it
+  // (hasRegistryCredits), so the judge refuses it on both channels, a Code
+  // credit weight on the link or not.
+  for (const usageClass of ["frontier", "apex"]) {
+    for (const profile of [both, link({ channels: ["code", "api"], creditWeight: 120 })]) {
+      const unpriced = channels(profile, { chatModels: [chat({ usageClass, creditWeight: 80, registryCredits: false })] });
+      assert.equal(unpriced.admission.admitted, false, usageClass);
+      assert.ok(unpriced.api.reasons.includes("chat_credits_missing"), `api: ${usageClass}`);
+      assert.ok(unpriced.code.reasons.includes("chat_credits_missing"), `code: ${usageClass}`);
+      assert.deepEqual(unpriced.effectiveChannels, []);
+    }
+    // With credits the registry holds, the coding API takes it.
+    assert.deepEqual(channels(both, { chatModels: [chat({ usageClass, creditWeight: 80 })] }).api, { admitted: true });
+  }
+  // Other classes are charged their class default as Chat charges them: never refused for it.
+  assert.deepEqual(channels(both, { chatModels: [chat({ registryCredits: false })] }).api, { admitted: true });
+
   // A channel the row is not offered on has no answer; a Code-only row that fails Code is refused as before.
   const codeOnly = channels(link({ channels: ["code"], capabilities: { toolCalling: "basic", structuredOutput: "none" } }));
   assert.equal(codeOnly.api, null);
@@ -445,6 +465,14 @@ test("coding candidates are active, listed chat models of a served usage class n
   // Frontier and apex are coding candidates too (owner decision 2026-11-22).
   for (const usageClass of ["standard", "advanced", "premium", "reasoning", "premium-reasoning", "frontier", "apex"]) {
     assert.equal(codingCandidateExclusion(chat({ usageClass }), none), null, usageClass);
+  }
+  // Frontier and apex only with credits the registry holds: the judge and the
+  // coding API ask the same (chat_credits_missing, hasRegistryCredits).
+  for (const usageClass of ["frontier", "apex"]) {
+    assert.equal(codingCandidateExclusion(chat({ usageClass, registryCredits: false }), none), "chat_credits_missing", usageClass);
+  }
+  for (const usageClass of ["standard", "premium", "premium-reasoning"]) {
+    assert.equal(codingCandidateExclusion(chat({ usageClass, registryCredits: false }), none), null, usageClass);
   }
   assert.equal(codingCandidateExclusion(chat({ id: "bad id with spaces" }), none), "invalid_id");
 });

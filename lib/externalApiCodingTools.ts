@@ -188,7 +188,8 @@ const nativeToolModels = (models: readonly ExternalApiModelCapabilities[], proto
     const fixed = models.filter((model) => model.id !== SMART_ADAPTIVE_MODEL_ID && model.protocols?.includes(protocol));
     const smart = models.find((model) => model.id === SMART_ADAPTIVE_MODEL_ID && model.protocols?.includes(protocol));
     // With only the Smart Adaptive entry to hand (which tools a model serves),
-    // it stands as it is.
+    // it stands as it is. Its default, and whether it is offered at all, leave
+    // frontier and apex models out (routerPickOnly), as the gateway does.
     const native = smart && (fixed.length ? nativeSmartAdaptiveCapabilities(fixed, DEFAULT_MODEL_ID) : smart);
     // Smart Adaptive also routes to models no client names directly (frontier,
     // apex): the most a request costs is over those too, on this protocol only.

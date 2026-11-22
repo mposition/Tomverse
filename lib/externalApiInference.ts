@@ -291,18 +291,24 @@ export async function handleChatCompletions(request: Request, options: { surface
             );
         }
         let entry = picked?.entry;
-        if (parsed.model === SMART_ADAPTIVE_MODEL_ID && runnable.length > 0) {
-            const routed = await routeSmartAdaptive({
-                request: parsed,
-                runnable,
-                keyId: key.keyId,
-                userId: key.userId,
-                requestId,
-                routerAllowed: () => smartAdaptiveRouterAllowed(key),
-                idempotencyKeyDigest,
-                requestDigest,
-                userAgent: request.headers.get("user-agent"),
-            });
+        // Null when no runnable model is one Smart Adaptive may default to (only
+        // frontier or apex models): refused below as not available, before any
+        // router call, reservation or dispatch.
+        const routed =
+            parsed.model === SMART_ADAPTIVE_MODEL_ID
+                ? await routeSmartAdaptive({
+                      request: parsed,
+                      runnable,
+                      keyId: key.keyId,
+                      userId: key.userId,
+                      requestId,
+                      routerAllowed: () => smartAdaptiveRouterAllowed(key),
+                      idempotencyKeyDigest,
+                      requestDigest,
+                      userAgent: request.headers.get("user-agent"),
+                  })
+                : null;
+        if (routed) {
             entry = routed.entry;
             rememberRouted = routed.remember;
             routing = { routedBy: routed.routedBy, held: routed.held ?? false, conversation: routed.conversationDigest };
