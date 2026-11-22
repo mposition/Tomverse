@@ -4,7 +4,8 @@ import { randomUUID } from "node:crypto";
  * Injectable runtime ports for Research engine v2: the clock (so a 60-minute
  * logical run is tested without sleeping), private evidence storage, and the
  * model/search/fetch/funding adapters the executor calls. Production values
- * are installed by lib/researchEngineAdapters.ts; tests install fakes.
+ * are the lazy defaults below and in lib/researchEngineModel.ts,
+ * lib/researchEngineFunding.ts and lib/researchEngineFetch.ts; tests install fakes.
  */
 
 export type ResearchClock = { now(): Date };

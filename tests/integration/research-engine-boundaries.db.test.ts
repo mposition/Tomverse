@@ -211,7 +211,7 @@ test("same URL read twice is two evidence versions; a refresh revision re-locate
   await drainResearchWork("versions", 2);
   const before = await readResearchRunDto(user.id, run.id);
   assert.equal(before.status, "completed");
-  const firstClaims = await prisma.researchClaim.findMany({ where: { revision: { runId: run.id, revision: before.currentReportRevision } } });
+  const firstClaims = await prisma.researchClaim.findMany({ where: { revision: { runId: run.id, revision: before.currentReportRevision } }, orderBy: { claimKey: "asc" } });
   const cited = await prisma.researchSource.findMany({ where: { runId: run.id, versions: { some: { readStatus: "read" } } } });
   for (const source of cited) web.bump(source.canonicalUrl!);
   const callsBefore = fakes.model.calls.length;
@@ -223,7 +223,7 @@ test("same URL read twice is two evidence versions; a refresh revision re-locate
   const versions = await prisma.researchSourceVersion.findMany({ where: { sourceId: cited[0]!.id, readStatus: "read" }, orderBy: { version: "asc" } });
   assert.ok(versions.length >= 2, "the refresh stored a new version instead of overwriting");
   assert.notEqual(versions[0]!.contentDigest, versions.at(-1)!.contentDigest);
-  const oldClaims = await prisma.researchClaim.findMany({ where: { revision: { runId: run.id, revision: before.currentReportRevision } } });
+  const oldClaims = await prisma.researchClaim.findMany({ where: { revision: { runId: run.id, revision: before.currentReportRevision } }, orderBy: { claimKey: "asc" } });
   assert.deepEqual(oldClaims.map((claim) => claim.evidence), firstClaims.map((claim) => claim.evidence), "the old revision still cites what it saw");
   assert.ok(fakes.model.calls.slice(callsBefore).every((call) => call.tool !== "submit_research_turn"), "a refresh does not repeat the research turns");
 });
@@ -283,4 +283,54 @@ test("finishing early writes a report from the evidence already gathered without
   assert.equal(state.status, "completed");
   assert.ok(fakes.model.calls.filter((call) => call.tool === "submit_research_turn").length <= turnsAt + 2, "only already-running research could finish");
   assert.equal(await prisma.researchWorkItem.count({ where: { runId: run.id, kind: "coordinate" } }), 0, "no further coordination round");
+});
+
+test("offer and draft creation never call a model, and a brief far past the Preview's 4,000 characters is accepted whole", async () => {
+  const fakes = installFakes();
+  const web = createFakeWeb();
+  const user = await createUser("no-call");
+  const { researchEngineOffer } = await import("@/lib/researchEngineService");
+  const offer = await researchEngineOffer(user.id);
+  assert.equal(offer.offered, true);
+  const question = `${"Detailed research context sentence. ".repeat(600)}Final question?`;
+  assert.ok(question.length > 20_000);
+  const run = await create(user.id, { brief: brief(question), autoStart: false });
+  assert.equal(run.status, "draft");
+  assert.equal(fakes.model.calls.length, 0, "no paid call before the user asks for a plan");
+  assert.equal(web.searches.length, 0);
+  const stored = await prisma.message.findUniqueOrThrow({ where: { id: (await prisma.researchPreviewRun.findUniqueOrThrow({ where: { id: run.id } })).sourceUserMessageId } });
+  assert.equal(stored.content, question.trim(), "the brief is not truncated");
+});
+
+test("a Project source adapter is used only through the selection, revalidation and load contract", async () => {
+  const fakes = installFakes();
+  createFakeWeb();
+  const { setResearchProjectSourceAdapter } = await import("@/lib/researchEngineSources");
+  const user = await createUser("project");
+  await rejects(create(user.id, { sources: [{ type: "project", projectId: "proj1" }] }), "RESEARCH_PROJECT_UNAVAILABLE");
+  let revoked = false;
+  const calls: string[] = [];
+  setResearchProjectSourceAdapter({
+    available: () => true,
+    resolve: async ({ userId, projectId }) => { calls.push("resolve"); return userId === user.id && projectId === "proj1" ? { revision: "r1", label: "Project notes" } : null; },
+    revalidate: async ({ revision }) => { calls.push("revalidate"); return !revoked && revision === "r1"; },
+    load: async () => { calls.push("load"); return { text: "Project material about tariffs and regional supply chains in detail.", label: "Project notes" }; },
+  });
+  try {
+    const intruder = await createUser("project-intruder");
+    await rejects(create(intruder.id, { sources: [{ type: "project", projectId: "proj1" }] }), "RESEARCH_SOURCE_UNAVAILABLE");
+    const run = await create(user.id, { sources: [{ type: "project", projectId: "proj1" }] });
+    await drainResearchWork("project", 2);
+    assert.ok(calls.includes("resolve") && calls.includes("load") && calls.includes("revalidate"));
+    assert.ok(fakes.model.calls.some((call) => call.tool === "submit_research_private_analysis" && call.text.includes("Project material")));
+    assert.ok(fakes.model.calls.filter((call) => call.tool === "submit_research_turn").every((call) => !call.text.includes("Project material")));
+    revoked = true;
+    const second = await create(user.id, { sources: [{ type: "project", projectId: "proj1" }] });
+    await drainResearchWork("project-revoked", 2);
+    const source = await prisma.researchSource.findFirstOrThrow({ where: { runId: second.id, visibility: "private" } });
+    assert.equal(source.status, "revoked");
+    assert.equal((await readResearchRunDto(user.id, run.id)).status, "completed");
+  } finally {
+    setResearchProjectSourceAdapter(null);
+  }
 });

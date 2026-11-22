@@ -160,7 +160,16 @@ export function ResearchWorkspace({ runId, conversationId, language, accountKey,
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [sources, setSources] = useState<Array<Record<string, unknown>>>([]);
-  const [report, setReport] = useState<{ markdown: string; revision: number; revisions: Array<{ revision: number; author: string }> ; containsPrivate: boolean } | null>(null);
+  const [report, setReport] = useState<{ markdown: string; revision: number; revisions: Array<{ revision: number; author: string }>; containsPrivate: boolean;
+    claims?: Array<{ claimKey: string; text: string; verification: string; evidence: Array<{ sourceKey: string; chunkId?: string; level: string; start: number; end: number }> }> } | null>(null);
+  const [evidence, setEvidence] = useState<{ key: string; text: string; sourceKey: string; highlight: { start: number; end: number }; url: string | null } | null>(null);
+  const openEvidence = async (claimKey: string, span: { sourceKey: string; chunkId?: string; start: number; end: number }) => {
+    if (!span.chunkId) return;
+    try {
+      const value = await api.evidence(runId, span.chunkId, span.start, span.end) as { text: string; sourceKey: string; highlight: { start: number; end: number }; url: string | null };
+      setEvidence({ key: `${claimKey}:${span.chunkId}`, ...value });
+    } catch { setNotice(copy.actionFailed); }
+  };
   const [instruction, setInstruction] = useState("");
   const [scopeQuestion, setScopeQuestion] = useState("");
   const publish = useCallback((incoming: unknown) => {
@@ -299,6 +308,18 @@ export function ResearchWorkspace({ runId, conversationId, language, accountKey,
         {report?.containsPrivate && <p className="text-sm" data-testid="research-report-private">{copy.shareContainsPrivate}</p>}
         <div className="flex flex-wrap gap-2">{(["md", "pdf", "docx", "csv", "xlsx"] as const).map((format) =>
           <button key={format} type="button" className={button} data-testid={`research-export-${format}`} onClick={() => void download(format)}>{copy.exportLabel} {format.toUpperCase()}</button>)}</div>
+        {report?.claims && report.claims.length > 0 && <ol className="mt-3 space-y-2 text-sm" data-testid="research-claims">
+          {report.claims.map((claim) => <li key={claim.claimKey} data-verification={claim.verification}>
+            <span className="font-mono text-xs">{claim.claimKey}</span> {claim.text} <span className="text-xs text-zinc-500">· {copy.report.verification[claim.verification as keyof typeof copy.report.verification] ?? claim.verification}</span>
+            {claim.evidence.filter((span) => span.chunkId).map((span) => <button key={`${claim.claimKey}-${span.chunkId}`} type="button" className="ml-2 min-h-11 text-xs underline"
+              data-testid="research-evidence-open" onClick={() => void openEvidence(claim.claimKey, span)}>{copy.evidenceOpen} ({span.sourceKey})</button>)}
+            {claim.evidence.some((span) => span.level === "snippet") && <span className="ml-2 text-xs">{copy.sourceSnippet}</span>}
+            {evidence?.key.startsWith(`${claim.claimKey}:`) && <blockquote className="mt-1 whitespace-pre-wrap border-l-2 pl-2 text-xs" data-testid="research-evidence-text">
+              {evidence.text.slice(0, evidence.highlight.start)}<mark>{evidence.text.slice(evidence.highlight.start, evidence.highlight.end)}</mark>{evidence.text.slice(evidence.highlight.end)}
+              {evidence.url && <a href={evidence.url} target="_blank" rel="noreferrer noopener" className="ml-2 underline">{evidence.sourceKey}</a>}
+            </blockquote>}
+          </li>)}
+        </ol>}
         {run.actions.canRevise && <div className="mt-3 space-y-2">
           <textarea aria-label={copy.reviseInstruction} placeholder={copy.reviseInstruction} className="w-full rounded-lg border border-zinc-300 p-2 text-sm dark:border-zinc-700" value={instruction} onChange={(event) => setInstruction(event.target.value)} />
           <div className="flex flex-wrap gap-2">
