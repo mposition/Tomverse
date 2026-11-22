@@ -27,6 +27,7 @@ import {
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { sweepPromptRefinerShadowUnknowns } from "@/lib/promptRefinerShadowRunStore";
 import { expirePromptRefinerChatSuggestions } from "@/lib/promptRefinerChatExecutionStore";
+import { recoverStaleResearchPreviewRuns } from "@/lib/researchPreviewRecovery";
 
 /**
  * How long an unapplied cost correction may sit before it is an incident.
@@ -473,6 +474,12 @@ export async function cleanupExpiredData() {
       data: { state: "unknown", argumentsCiphertext: null } });
   });
 
+  // Daily cleanup is a second idempotent caller of the same recovery-only
+  // step used by the fifteen-minute reservation job. Keep it ahead of generic
+  // expiry so Research classifies known usage and unknown dispatches first.
+  const researchPreviewRuns = await step("research_preview_runs", () =>
+    recoverStaleResearchPreviewRuns()
+  );
   const creditReservations = await step("chat_credit_reservations", () =>
     reconcileExpiredChatCreditReservations()
   );
@@ -1149,6 +1156,7 @@ export async function cleanupExpiredData() {
     oauthTokensEncrypted,
     creditLotsExpired,
     creditReservations,
+    researchPreviewRuns,
     promptRefinerChatSuggestions,
     staleRoutingAttempts,
     costAdjustments,

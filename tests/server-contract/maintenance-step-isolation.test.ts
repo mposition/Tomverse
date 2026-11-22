@@ -36,11 +36,13 @@ process.env.NEXTAUTH_SECRET ||= "server-contract-test-secret";
 
 /** Per-test behaviour. Mocks are installed once; these closures vary. */
 let creditReservationBehaviour: () => number = () => 1;
+let researchPreviewRecoveryBehaviour: () => number = () => 3;
 let oauthKeyBehaviour: () => void = () => undefined;
 let deletedAccountIds: string[] = [];
 
 const reset = () => {
   creditReservationBehaviour = () => 1;
+  researchPreviewRecoveryBehaviour = () => 3;
   oauthKeyBehaviour = () => undefined;
   deletedAccountIds = [];
   costAdjustmentBacklogPending = 0;
@@ -134,6 +136,11 @@ mock.module(mod("lib/chatSecurity.ts"), {
   namedExports: {
     reconcileExpiredChatCreditReservations: async () =>
       creditReservationBehaviour(),
+  },
+});
+mock.module(mod("lib/researchPreviewRecovery.ts"), {
+  namedExports: {
+    recoverStaleResearchPreviewRuns: async () => researchPreviewRecoveryBehaviour(),
   },
 });
 
@@ -496,6 +503,23 @@ test("a step that throws does not skip the steps behind it", async () => {
   );
   assert.equal(result.promptRefinerShadowUnknowns?.retryCount, 0);
   assert.equal(result.promptRefinerShadowUnknowns?.redispatched, 0);
+});
+
+test("Research recovery is an isolated step ahead of generic reservation expiry", async () => {
+  reset();
+  researchPreviewRecoveryBehaviour = () => {
+    throw new Error("the Research run table is unhappy");
+  };
+
+  const result = await (await load()).cleanupExpiredData();
+
+  assert.equal(result.researchPreviewRuns, null);
+  assert.equal(result.creditReservations, 1);
+  assert.deepEqual(
+    result.failedSteps.map((failure) => failure.step),
+    ["research_preview_runs"]
+  );
+  assert.equal(result.scheduledAccountsDeleted, 1);
 });
 
 test("a clean run reports no failed steps and every count", async () => {
