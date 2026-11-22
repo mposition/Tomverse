@@ -547,6 +547,9 @@ export async function POST(
             })
           );
         }
+        // Admission refusals are not provider failures or uncertain executions.
+        const refusal = chatErrorResponse(error);
+        if (refusal) return refusal;
         await Promise.allSettled([
           recordProviderFailure(candidate.provider, "QUICK_COMPARISON_FAILED", {
             modelId: candidate.id,

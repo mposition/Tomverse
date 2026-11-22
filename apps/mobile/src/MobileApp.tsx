@@ -485,6 +485,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
       const previous = readDeviceDraft(localStorage, owner, null);
       const next = previous.trim() ? `${previous}\n\n${text}` : text;
       if (next.length > 40000) throw Error("DRAFT_TOO_LARGE");
+      sessionStorage.removeItem(REVIEW_HANDOFF_TARGET); setReviewOpen(undefined); handoffOrigin.current = null; handoffAttempt.current = null;
       requestEpoch.current++; setConversation(null); setPartial(null); setUncertain(false); setProduct("chat"); setView("chat");
       localStorage.removeItem(LAST_CHAT); preserveNativeDraft(owner, "new", next); setDraft(next, null);
     }} newConversationRequest={newReviewRequest} conversationRequest={reviewOpen} extraTools={iosExtraTools} /> : view === "list" ? <ConversationListScreen title={copy.chats} newLabel={copy.newChat} disabled={streaming || loading} onNew={newConversation} footer={accountFooter}>

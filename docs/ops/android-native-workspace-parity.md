@@ -63,3 +63,5 @@ The English and Korean [Google Play copy proposal](google-play-native-workspace-
 - English/Korean store-copy lengths: titles 27/23, short descriptions 80/45, full descriptions 2473/1334 characters.
 
 UI and model responses in these local checks are synthetic. These results do not replace a physical Android check, live provider/billing validation, CI or a release approval.
+
+Independent review follow-up: native quick-summary admission refusals now preserve their 402/403/429 response instead of recording a provider failure and becoming an unknown 502. Provider failures still use the existing fallback/refund path. A new real-handler contract suite covers those refusals, fallback/refunds, ownership and locks; all 58 API/auth checks passed. Fifteen targeted Review/context/handoff UI checks passed after the fix, including changed-source rejection, explicit credit-refusal retry and stale handoff cleanup.

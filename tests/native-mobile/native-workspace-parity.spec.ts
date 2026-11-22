@@ -34,7 +34,7 @@ for (const theme of ["light", "dark"]) test(`approved native home and library in
   await expect(page.locator("article.user")).toHaveCount(0);
 });
 
-async function savedReview(page: Page, changed = false) {
+async function savedReview(page: Page, changed = false, refusal?: number) {
   const fixture = makeReviewReportFixture();
   await page.addInitScript(source => {
     localStorage.setItem("tomverse-native-synthetic-demo", JSON.stringify([{ id: source.conversationId, title: "Saved comparison", surface: "workspace", selectedModels: ["demo", "demo-b"], messages: [
@@ -49,8 +49,8 @@ async function savedReview(page: Page, changed = false) {
       transport.reviewPreview=async()=>({...fixture.setup,estimatedCredits:0.2,assistantMessageIds:["answer-a","answer-b"],storedReview:cached?fixture.review:undefined});
       transport.runComparison=async()=>{paid++;localStorage.setItem('analysis-paid-calls',String(paid));cached=true;return fixture.review;};
       transport.quickSummaryPreview=async()=>({available:true,estimatedCredits:0.1,cached,source:fixture.setup.source,storedSummary:cached?{id:'quick-1',reviewerModelId:'reviewer-a',responseMap:fixture.review.responseMap,result:{commonConclusions:fixture.review.result.primary.result.consensus,importantDifferences:[],modelKeyClaims:[],verificationNeeded:['Check dates.']}}:undefined});
-      transport.runQuickSummary=async()=>{paid++;localStorage.setItem('analysis-paid-calls',String(paid));cached=true;return {};};
-      ${changed ? "const original=transport.quickSummaryPreview;transport.quickSummaryPreview=async()=>{const value=await original();if(cached)value.source={...value.source,question:'Changed question'};return value;};" : ""}
+      transport.runQuickSummary=async()=>{paid++;localStorage.setItem('analysis-paid-calls',String(paid));${refusal ? `throw Object.assign(Error('Refused'),{status:${refusal}});` : "cached=true;return {};"}};
+      ${changed ? "const original=transport.quickSummaryPreview;transport.quickSummaryPreview=async()=>{const value=await original();if(window.reviewSourceChanged)value.source={...value.source,question:'Changed question'};return value;};" : ""}
       `;
     await route.fulfill({ response, body: source.replace("createRoot(container).render(", `${injection}createRoot(container).render(`) });
   });
@@ -73,11 +73,13 @@ test("quick summary requires confirmation and opens an unsent Chat reference wit
   await page.getByRole("button", { name: "차이 요약 실행", exact: true }).click();
   await page.getByRole("button", { name: "채팅에서 이어가기", exact: true }).click();
   await expect(page.getByTestId("native-review-chat-preview")).not.toContainText("PRIVATE_FULL_ANSWER");
+  await page.evaluate(() => sessionStorage.setItem("tomverse-native-review-handoff-target", "stale"));
   await page.getByRole("button", { name: "기존 초안에 추가", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.getByRole("textbox")).toHaveValue(/^Keep my original draft\n\n비교 참고 자료/);
   await expect(page.locator("article.user")).toHaveCount(0);
   expect(await page.evaluate(() => localStorage.getItem("analysis-paid-calls"))).toBe("1");
+  expect(await page.evaluate(() => sessionStorage.getItem("tomverse-native-review-handoff-target"))).toBeNull();
 });
 
 test("cross-review uses the saved result and requires a preview before continuing", async ({ page }) => {
@@ -88,4 +90,28 @@ test("cross-review uses the saved result and requires a preview before continuin
   await expect(page.getByTestId("native-review-chat-preview")).toContainText("선택한 검토자");
   await page.getByRole("button", { name: "취소", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "AI 교차검토", exact: true })).toBeVisible();
+});
+
+test("a source changed after preview cannot overwrite the Chat draft", async ({ page }) => {
+  await savedReview(page, true);
+  await page.getByTestId("native-quick-summary").click();
+  await page.getByRole("button", { name: "차이 요약 실행", exact: true }).click();
+  await page.getByRole("button", { name: "채팅에서 이어가기", exact: true }).click();
+  await page.evaluate(() => { (window as unknown as { reviewSourceChanged: boolean }).reviewSourceChanged = true; });
+  await page.getByRole("button", { name: "기존 초안에 추가", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("접근 권한을 확인하지 못했습니다");
+  await page.getByRole("button", { name: "취소", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "닫기", exact: true }).click();
+  await selectProduct(page, "chat");
+  await expect(page.getByRole("textbox")).toHaveValue("Keep my original draft");
+});
+
+test("an explicit credit refusal clears the pending lock and keeps summary retry available", async ({ page }) => {
+  await savedReview(page, false, 402);
+  await page.getByTestId("native-quick-summary").click();
+  const run = page.getByRole("button", { name: "차이 요약 실행", exact: true });
+  await run.click();
+  await expect(page.getByRole("alert")).toContainText("저장된 응답은 유지됩니다");
+  await expect(run).toBeEnabled();
+  expect(await page.evaluate(() => localStorage.getItem("tomverse-quick-summary-pending:synthetic-demo:qa-conversation"))).toBeNull();
 });

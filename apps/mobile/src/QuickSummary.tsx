@@ -29,8 +29,9 @@ export function QuickSummary({ id, owner, transport, language, onClose, onBusy, 
     try { await transport.runQuickSummary(id); await load(); }
     catch (failure) {
       const status = (failure as { status?: number }).status;
-      if (status && status >= 400 && status < 500 && status !== 408) { localStorage.removeItem(key); setUnknown(false); }
-      setError(reviewCopy.uncertain);
+      const refused = Boolean(status && status >= 400 && status < 500 && status !== 408);
+      if (refused) { localStorage.removeItem(key); setUnknown(false); }
+      setError(refused ? reviewCopy.failed : reviewCopy.uncertain);
     } finally { setBusy(false); }
   }
   const summary: QuickReview | undefined = setup?.storedSummary;
