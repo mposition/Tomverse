@@ -179,21 +179,27 @@ export function ResearchWorkspace({ runId, conversationId, language, accountKey,
     setView((previous) => ({ scopeKey, run: acceptResearchRunUpdate(previous.scopeKey === scopeKey ? previous.run : null, incoming, scope) }));
   }, [scope, scopeKey]);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  /** Starts (or restarts) the poll loop; set by the effect below for the current run. */
+  const poll = useRef<(() => void) | null>(null);
   useLayoutEffect(() => {
     let active = true;
     const controller = new AbortController();
+    let latest = 0;
     const read = async () => {
       clearTimeout(timer.current);
+      // Only the newest read schedules the next one, so a restart never forks the loop.
+      const mine = ++latest;
       try {
         const value = await api.read(runId, controller.signal);
         if (!active) return;
         publish(value);
         const current = acceptResearchRunUpdate(null, value, scope);
-        if (current && researchRunNeedsPolling(current)) timer.current = setTimeout(() => void read(), 4_000);
-      } catch { if (active) timer.current = setTimeout(() => void read(), 10_000); }
+        if (mine === latest && current && researchRunNeedsPolling(current)) timer.current = setTimeout(() => void read(), 4_000);
+      } catch { if (active && mine === latest) timer.current = setTimeout(() => void read(), 10_000); }
     };
+    poll.current = () => void read();
     void read();
-    return () => { active = false; controller.abort(); clearTimeout(timer.current); };
+    return () => { active = false; poll.current = null; controller.abort(); clearTimeout(timer.current); };
   }, [runId, scope, publish, api]);
   const reportChanged = useRef(onReportChanged);
   useLayoutEffect(() => { reportChanged.current = onReportChanged; }, [onReportChanged]);
@@ -212,6 +218,10 @@ export function ResearchWorkspace({ runId, conversationId, language, accountKey,
     publish(result.run);
     if (result.readback) setNotice(copy.actionFailed);
     setBusy(false);
+    // An action can start server-side work (plan, approval, resume, revision) from a
+    // state that was not being polled; a read-back is re-read too.
+    const current = acceptResearchRunUpdate(null, result.run, scope);
+    if (result.readback || (current && researchRunNeedsPolling(current))) poll.current?.();
   };
   useEffect(() => {
     if (tab !== "sources" || !run) return;
