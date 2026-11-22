@@ -111,7 +111,10 @@ export function ResearchPreviewRunCard({ runId, conversationId, assistantMessage
     failed: undefined,
     cancelled: undefined,
   }[reportOutcome]);
-  if (run?.engineVersion === 2) return <ResearchWorkspace runId={runId} conversationId={conversationId} language={language} accountKey="web" />;
+  // The workspace polls the run; when it settles or a revision lands, one read of this
+  // card's transport carries the re-rendered chat answer to onMessage.
+  if (run?.engineVersion === 2) return <ResearchWorkspace runId={runId} conversationId={conversationId} language={language} accountKey="web"
+    onReportChanged={() => controls.current?.refresh()} />;
   return <div className="research-run-card" data-testid="research-run-card" data-run-status={run?.status ?? "loading"}>
     <p role="status"><strong>{copy.researchPreviewTitle}</strong> · {label}</p>
     {reportLabel && <p data-testid="research-preview-result" data-outcome={reportOutcome}>{reportLabel}</p>}
