@@ -532,6 +532,7 @@ test("the reviewer reads the whole diff from its checkout, sees the whole scope 
     assert.match(prompt, /scope-marker/);
     assert.match(prompt, /scope-end/, "the scope note is not cut");
     // The diff is read from the checkout, so no size limit applies to it.
+    assert.match(prompt, /the file \.review-orchestrator\/change\.diff in this checkout/);
     assert.match(prompt, /git diff [0-9a-f]{40} [0-9a-f]{40}/);
     assert.doesNotMatch(prompt, /<<<DIFF/);
     assert.match(prompt, /- a\.txt/);
@@ -539,6 +540,68 @@ test("the reviewer reads the whole diff from its checkout, sees the whole scope 
     delete process.env.REVIEW_ORCH_SECRET_PROBE;
     delete process.env.FAKE_REVIEWER_PROMPT_OUT;
     rmSync(promptOut, { force: true });
+    f.cleanup();
+  }
+});
+
+// 2026-11-22: the Claude and Antigravity reviewers have file tools and no
+// shell, so they could not run `git diff` and rejected every change unread.
+test("a reviewer with file tools only reads the whole diff from the file the server writes", async () => {
+  const f = fixture({ claude: "readdiff" });
+  try {
+    const body = `${Array.from({ length: 5000 }, (_, i) => `line ${i}`).join("\n")}\ndiff-tail-marker\n`;
+    f.commit("big.txt", body);
+    const { jobId } = JSON.parse(f.client("submit", "--author", "codex", "--repo", "demo").stdout);
+    const orchestrator = new Orchestrator(f.config);
+    orchestrator.tick({ claude: { state: "available" }, cursor: { state: "blocked" }, codex: { state: "blocked" } });
+    await orchestrator.idle();
+    const summary = JSON.parse(f.client("wait", jobId).stdout);
+    assert.equal(summary.status, "accept");
+    // Every added line, through the last one: nothing is cut.
+    assert.equal(summary.reviews[0].findings[0].summary,
+      "file=.review-orchestrator/change.diff added=5001 tail=true tracked=absent");
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("the diff file never replaces a path the repository has: it goes beside it", async () => {
+  const f = fixture({ claude: "readdiff" });
+  try {
+    f.commit(".review-orchestrator/tracked.txt", "the repository's own file\n");
+    f.commit("a.txt", "eight\ndiff-tail-marker\n");
+    const { jobId } = JSON.parse(f.client("submit", "--author", "codex", "--repo", "demo").stdout);
+    const orchestrator = new Orchestrator(f.config);
+    orchestrator.tick({ claude: { state: "available" }, cursor: { state: "blocked" }, codex: { state: "blocked" } });
+    await orchestrator.idle();
+    const summary = JSON.parse(f.client("wait", jobId).stdout);
+    assert.equal(summary.status, "accept");
+    // The reviewer still sees the repository's file, and reads the diff from the path the prompt names.
+    assert.equal(summary.reviews[0].findings[0].summary,
+      "file=.review-orchestrator-1/change.diff added=3 tail=true tracked=the repository's own file");
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("a reviewer that says it could not read the change is asked of another vendor, not counted as a reject", async () => {
+  const f = fixture({ claude: "cannot", cursor: "accept" });
+  try {
+    f.commit("a.txt", "seven cannot\n");
+    const { jobId } = JSON.parse(f.client("submit", "--author", "codex", "--repo", "demo").stdout);
+    const store = new Store(f.config.stateDir);
+    const orchestrator = new Orchestrator(f.config);
+    orchestrator.tick({ claude: { state: "available" }, cursor: { state: "blocked" }, codex: { state: "blocked" } });
+    await orchestrator.idle();
+    const queued = store.readSlot(jobId, 0);
+    assert.deepEqual([queued.status, queued.excludeVendors, queued.retriedAfter],
+      ["queued", ["anthropic"], "reviewer_could_not_review"]);
+    orchestrator.tick({ claude: { state: "blocked" }, cursor: { state: "available" }, codex: { state: "blocked" } });
+    await orchestrator.idle();
+    const summary = JSON.parse(f.client("wait", jobId).stdout);
+    assert.equal(summary.status, "accept");
+    assert.equal(summary.reviews[0].vendor, "xai");
+  } finally {
     f.cleanup();
   }
 });
