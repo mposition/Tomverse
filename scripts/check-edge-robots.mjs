@@ -163,8 +163,10 @@ if (canonical) {
   expect(/^Sitemap:/m.test(own), "the canonical site does not name its sitemap");
   expect(/^Host:/m.test(own), "the canonical site does not name its host");
 
-  // Content-Signal is checked across the whole served file, not our half, and
-  // the rule is "one meaning" rather than "one line".
+  // Check our declaration independently, then check agreement across the
+  // served file. The first check ensures Cloudflare cannot mask a missing or
+  // incorrect application policy; the second catches a conflicting managed
+  // declaration while its duplicate-resolution semantics remain undefined.
   //
   // While Cloudflare's managed block cannot be turned off
   // (docs/ops/search-indexing-boundary.md §4a), production
@@ -175,23 +177,28 @@ if (canonical) {
   // the safety here rests on the values being identical, not on a rule saying
   // duplicates are fine. Guard exactly that:
   //
-  //   * zero declarations fails -- the policy would have vanished;
-  //   * duplicates do not fail -- that is the expected state today;
-  //   * declarations that disagree once normalised fail, and so does one that
-  //     disagrees with what we ship.
+  //   * no matching declaration in our half fails -- our policy must stand on
+  //     its own if the managed block is removed;
+  //   * zero served declarations fails -- the policy would have vanished;
+  //   * duplicates do not fail -- they come from the managed block being
+  //     combined with our own groups;
+  //   * served declarations that disagree once normalised fail.
   const normaliseSignal = (value) =>
     value.replace(/\s+/g, "").toLowerCase();
+  const ownDeclared = [...own.matchAll(/^Content-Signal:(.*)$/gim)].map((match) =>
+    normaliseSignal(match[1])
+  );
   const declared = [...served.matchAll(/^Content-Signal:(.*)$/gim)].map((match) =>
     normaliseSignal(match[1])
+  );
+  expect(
+    ownDeclared.length > 0 && ownDeclared.every((value) => value === normaliseSignal(CONTENT_SIGNAL)),
+    `our robots.txt must declare Content-Signal: ${CONTENT_SIGNAL}`
   );
   expect(declared.length > 0, "the canonical site declares no Content-Signal");
   expect(
     new Set(declared).size <= 1,
     `Content-Signal declarations disagree: ${[...new Set(declared)].join(" vs ")}`
-  );
-  expect(
-    declared.every((value) => value === normaliseSignal(CONTENT_SIGNAL)),
-    `a served Content-Signal differs from ${CONTENT_SIGNAL}`
   );
   expect(
     !/noindex/i.test(rootHeaders.get("x-robots-tag") ?? ""),
