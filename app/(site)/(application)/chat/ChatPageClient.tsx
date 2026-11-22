@@ -159,7 +159,13 @@ import { useReviewContinuationDraftAccess, useReviewContinuationHandoff } from "
 import { reviewHandoffReferencesAvailable } from "@/lib/reviewContinuationHandoffClient";
 import { reviewContinuationHandoffCopy } from "@/locales/reviewContinuationHandoff";
 import { useContinuationLauncher } from "@/components/imports/useContinuationLauncher";
-import { reviewPrefillHref } from "@/lib/chatReviewHandoff";
+import {
+  REVIEW_FILE_HANDOFF_PARAM,
+  beginReviewFileHandoff,
+  clearReviewFileHandoffs,
+  reviewPrefillHref,
+  takeReviewFileHandoff,
+} from "@/lib/chatReviewHandoff";
 import {
   clearContinuationFocus,
   continuationFocusSnapshot,
@@ -1264,6 +1270,21 @@ export function ChatPageClient({
     mountedSurface === "chat" ? "chat" : "review",
     isReviewHandoff ? "review-handoff" : "chat"
   );
+  /*
+    Compare in Review from a Chat question sent with one document: the one draft
+    (account + draft key) whose question arrived that way. Keyed, not a flag,
+    so it can only ever describe that draft -- any move to another draft
+    (an account switch, the send creating its conversation, another
+    conversation) retires it for good.
+  */
+  const [fileReattachDraftKey, setFileReattachDraftKey] = useState<string | null>(null);
+  if (fileReattachDraftKey !== null && fileReattachDraftKey !== activeDraftKey) {
+    setFileReattachDraftKey(null);
+  }
+  const fileHandoffContextRef = useRef({ identityKey, activeDraftKey, readDraft, isReview: mountedSurface !== "chat" && !isGuestMode });
+  useLayoutEffect(() => {
+    fileHandoffContextRef.current = { identityKey, activeDraftKey, readDraft, isReview: mountedSurface !== "chat" && !isGuestMode };
+  });
   useEffect(() => {
     observeJourneyWorkspace(connectedDraftScope(mountedSurface, activeDraftKey), currentChatId, identityKey,
       isInitialConversationResolved && (mountedSurface !== "chat" || draftHydrated));
@@ -5822,6 +5843,7 @@ export function ChatPageClient({
         .filter(isEnabledModelId)
     ).slice(0, APP_DEFAULTS.maxSelectedModels);
     const requestedPrompt = (params.get("prompt") || "").trim().slice(0, 1200);
+    const fileHandoffToken = params.get(REVIEW_FILE_HANDOFF_PARAM);
     // Captured before the params are stripped below: the restore effect keys
     // its stand-down on the raw presence of these keys, so readiness has to be
     // handed back on exactly the same condition.
@@ -5877,7 +5899,24 @@ export function ChatPageClient({
           );
         }
       }
-      if (requestedPrompt) {
+      // Taken whether or not it matches, so no later arrival can reuse it.
+      const fileContext = fileHandoffContextRef.current;
+      const fileHandoff = takeReviewFileHandoff(fileHandoffToken, fileContext.identityKey) &&
+        fileContext.isReview;
+      if (requestedPrompt && fileHandoff) {
+        // Draft restore has already run (useConversationDrafts adopts the
+        // staged product-switch snapshot in a layout effect). A draft the
+        // person was writing -- text or files -- is theirs: it is kept as it
+        // is, never merged with the Chat question, and no file prompt is
+        // attached to it.
+        const draft = fileContext.readDraft();
+        if (draft.text.trim() || draft.attachments.length > 0) {
+          showToast(t("chat.compareInReviewDraftKept"), "info");
+        } else {
+          setInputValue(requestedPrompt);
+          setFileReattachDraftKey(fileContext.activeDraftKey);
+        }
+      } else if (requestedPrompt) {
         setInputValue((current) => current || requestedPrompt);
       }
       // The models are applied in this same microtask, so resolving here
@@ -5888,6 +5927,7 @@ export function ChatPageClient({
       params.delete("models");
       params.delete("prompt");
       params.delete("source");
+      params.delete(REVIEW_FILE_HANDOFF_PARAM);
       const nextSearch = params.toString();
       window.history.replaceState(
         null,
@@ -5910,7 +5950,9 @@ export function ChatPageClient({
     isUserSettingsLoaded,
     maxSelectableModels,
     isEnabledModelId,
+    showToast,
     status,
+    t,
   ]);
 
   const researchPreview = useResearchPreview({
@@ -10614,12 +10656,15 @@ export function ChatPageClient({
     while a send, mode write or draft conflict is open -- to a new Review
     draft. Nothing here writes to this conversation or sends anything.
   */
-  const handleCompareChatInReview = (seed: string) => {
+  const handleCompareChatInReview = (seed: string, options?: { reattachFile: boolean }) => {
     if (!handleProductSwitch()) {
       showToast(t("chat.compareInReviewBlocked"), "info");
       return;
     }
-    router.push(reviewPrefillHref(seed));
+    // Only "this question had one document" travels, as a token this tab and this
+    // account can redeem once (lib/chatReviewHandoff.ts) -- never the file.
+    if (!options?.reattachFile) clearReviewFileHandoffs();
+    router.push(reviewPrefillHref(seed, options?.reattachFile ? beginReviewFileHandoff(identityKey) : undefined));
   };
   const beginReviewChatDraft = useCallback(() => {
     conversationSelectionTicketRef.current = allocateConversationSelectionTicket();
@@ -10771,6 +10816,7 @@ export function ChatPageClient({
           isModelSelectionReady={isModelSelectionReady}
           isConversationSelectionResolved={isInitialConversationResolved}
           pendingSubmission={pendingSubmission}
+          fileReattachPrompt={fileReattachDraftKey !== null && fileReattachDraftKey === activeDraftKey}
           durableDraftLocked={
             guestAutoCapabilityPending || reviewHandoffAccess.pending ||
             (isReviewHandoff && !draftHydrated) ||
@@ -10969,6 +11015,7 @@ export function ChatPageClient({
           isModelSelectionReady={isModelSelectionReady}
           isConversationSelectionResolved={isInitialConversationResolved}
           pendingSubmission={pendingSubmission}
+          fileReattachPrompt={fileReattachDraftKey !== null && fileReattachDraftKey === activeDraftKey}
           durableDraftLocked={
             guestAutoCapabilityPending || reviewHandoffAccess.pending ||
             (isReviewHandoff && !draftHydrated) ||

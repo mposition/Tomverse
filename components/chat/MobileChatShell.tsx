@@ -180,7 +180,7 @@ type MobileChatShellProps = {
   transcriptScope?: "model" | "conversation";
   onRestorePrompt?: (prompt: { text: string; attachments: ChatAttachment[]; targetChatId: string }) => void;
   onRetryPrompt?: (prompt: { text: string; attachments: ChatAttachment[]; targetChatId: string }) => void;
-  onCompareInReview?: (seed: string) => void;
+  onCompareInReview?: (seed: string, options?: { reattachFile: boolean }) => void;
   onCompareContinuationInReview?: (assistantMessageId: string) => void;
   conversations: Conversation[];
   currentChatId: string | null;
@@ -236,6 +236,8 @@ type MobileChatShellProps = {
   pendingSubmission: { originConversationId: string | null } | null;
   /** Locks durable Chat draft bytes until its Message transaction accepts. */
   durableDraftLocked: boolean;
+  /** ChatInput `fileReattachPrompt`: this Review draft needs its Chat question's document again. */
+  fileReattachPrompt?: boolean;
   /** Refuses submit while a durable Chat voice transcript is unfinished. */
   blockSubmitWhileVoiceBusy: boolean;
   /** Authenticated durable Chat may compose its next turn during a response. */
@@ -529,6 +531,7 @@ export function MobileChatShell({
   isConversationSelectionResolved,
   pendingSubmission,
   durableDraftLocked,
+  fileReattachPrompt = false,
   blockSubmitWhileVoiceBusy,
   allowEditingWhileSending,
   onNewChat,
@@ -1949,6 +1952,7 @@ export function MobileChatShell({
             onSubmit={onSubmit}
             onCancel={() => setStopSignal((current) => current + 1)}
             draftLocked={durableDraftLocked}
+            fileReattachPrompt={fileReattachPrompt}
             blockSubmitWhileVoiceBusy={blockSubmitWhileVoiceBusy}
             isSending={isAnyModelResponding}
             allowEditingWhileSending={allowEditingWhileSending}

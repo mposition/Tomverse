@@ -51,6 +51,20 @@ durable question draft. It references the same imported snapshot and bounded
 native messages before the question, excluding the clicked answer and later
 turns. The original-source fork above remains a separate action.
 
+In ordinary signed-in web Chat the question is the clicked answer's own user
+turn. A turn that sent only a file offers no comparison and says why, instead
+of comparing an earlier question. When that turn has text and exactly one
+available document the server reads (PDF, OOXML/OpenDocument, legacy
+Office/HWP/RTF; not iWork, images, data or archives), Review opens the question
+with a prompt and a "Choose file" button in its composer: the file is not
+carried, so the person picks it again through the composer's existing picker,
+limits and upload, and any such document that finished uploading there settles
+the prompt. Only a one-shot token travels
+(the URL plus this tab's memory, bound to the account), never a file name, id
+or content; a copied URL, another tab or another account opens the plain
+question. A Review draft that already holds text or files is kept unchanged
+with a short notice, never merged with the question.
+
 The question is not truncated to the URL prefill limit. The notice distinguishes
 recorded source excerpts from legacy reconstruction and explains that every
 selected model receives the same bounded references after Send. Attachment
