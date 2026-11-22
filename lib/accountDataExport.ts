@@ -320,8 +320,9 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       take: EXPORT_ROW_CAP,
     }),
 
-  researchPreviewRun: (userId) =>
-    prisma.researchPreviewRun.findMany({
+  // Private Research sources are re-checked once at the start of buildAccountDataExport.
+  researchPreviewRun: async (userId) => {
+    return prisma.researchPreviewRun.findMany({
       where: { userId },
       select: {
         id: true,
@@ -356,7 +357,8 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       },
       orderBy: { createdAt: "asc" },
       take: EXPORT_ROW_CAP,
-    }),
+    });
+  },
 
   promptRefinerChatScope: (userId) =>
     prisma.$queryRaw<unknown[]>`SELECT "surface", "epoch" FROM "PromptRefinerChatScope"
@@ -1479,6 +1481,12 @@ export const buildAccountDataExport = async (userId: string): Promise<AccountDat
     // Refuse rather than hand out a silently incomplete export.
     throw new Error(`Account export is mis-wired: ${wiringProblems.join("; ")}`);
   }
+
+  // Before any domain is read: private Research copies whose original was deleted,
+  // re-locked or left Memory are revoked, which also rewrites the stored labels in
+  // manifests, report revisions and the chat answers exported below.
+  const { revalidateUserPrivateResearchSources } = await import("@/lib/researchEngineReads");
+  await revalidateUserPrivateResearchSources(userId);
 
   const data: Record<string, unknown[]> = {};
   const includedDomains: string[] = [];

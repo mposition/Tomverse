@@ -561,8 +561,23 @@ export async function revokePrivateSource(run: Pick<RunRow, "id">, sourceId: str
   await prisma.$transaction(async (tx) => {
     await lockResearchRun(tx, run.id);
     // Labels of private sources are copied from the original (a Memory title is its
-    // first words), so they go with the grant.
+    // first words), so every stored copy goes with the grant: the source row, the
+    // manifest entry, each report revision's bibliography and the chat answer.
     const source = await tx.researchSource.update({ where: { id: sourceId }, data: { status: "revoked", title: null, snippet: null } });
+    const runRow = await tx.researchPreviewRun.findUniqueOrThrow({ where: { id: run.id }, select: { inputManifest: true, assistantMessageId: true, currentReportRevision: true } });
+    const manifest = researchInputManifestSchema.parse(runRow.inputManifest);
+    const labels = researchEngineLabels(manifest.brief.outputLanguage ?? manifest.locale);
+    const placeholder = labels.report.privateSource;
+    const entries = manifest.entries.map((entry) => entry.key === source.sourceKey && entry.type !== "url" ? { ...entry, label: placeholder } : entry);
+    await tx.researchPreviewRun.update({ where: { id: run.id }, data: { inputManifest: json({ ...manifest, entries }) } });
+    let currentChanged = false;
+    for (const revision of await tx.researchReportRevision.findMany({ where: { runId: run.id }, select: { id: true, revision: true, document: true } })) {
+      const document = researchReportDocumentSchema.parse(revision.document);
+      if (!document.bibliography.some((entry) => entry.sourceKey === source.sourceKey)) continue;
+      await tx.researchReportRevision.update({ where: { id: revision.id }, data: { document: json({ ...document,
+        bibliography: document.bibliography.map((entry) => entry.sourceKey === source.sourceKey ? { ...entry, title: placeholder } : entry) }) } });
+      if (revision.revision === runRow.currentReportRevision) currentChanged = true;
+    }
     const versions = await tx.researchSourceVersion.findMany({ where: { sourceId }, select: { objectKey: true } });
     for (const version of versions) if (version.objectKey) {
       await tx.researchEvidenceObjectCleanup.upsert({ where: { objectKey: version.objectKey },
@@ -574,6 +589,20 @@ export async function revokePrivateSource(run: Pick<RunRow, "id">, sourceId: str
     for (const claim of claims) {
       if ((claim.evidence as Array<{ sourceKey: string }>).some((evidence) => evidence.sourceKey === source.sourceKey)) {
         await tx.researchClaim.update({ where: { id: claim.id }, data: { verification: "unsupported", checks: json({ revoked: source.sourceKey }) } });
+      }
+    }
+    // The chat answer is re-rendered from the cleaned current revision, so it carries
+    // neither the copied label nor the old verification.
+    if (currentChanged) {
+      const current = await tx.researchReportRevision.findUnique({ where: { runId_revision: { runId: run.id, revision: runRow.currentReportRevision } }, include: { claims: true } });
+      const message = await tx.message.findUnique({ where: { id: runRow.assistantMessageId }, select: { id: true } });
+      if (current && message) {
+        const claimMap = new Map<string, ReportClaim>(current.claims.map((claim) => [claim.claimKey, { claimKey: claim.claimKey, sectionKey: claim.sectionKey,
+          text: claim.text, kind: claim.kind as ReportClaim["kind"], verification: claim.verification as ReportClaim["verification"],
+          privateDerived: claim.privateDerived, evidence: claim.evidence as ReportClaim["evidence"] }]));
+        const markdown = renderReportMarkdown(researchReportDocumentSchema.parse(current.document), claimMap,
+          current.qualityStatus as "complete" | "partial" | "insufficient_evidence", labels.report);
+        await tx.message.update({ where: { id: message.id }, data: { content: markdown } });
       }
     }
     await bumpRunSequence(tx, run.id);

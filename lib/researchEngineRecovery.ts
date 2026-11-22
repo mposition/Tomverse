@@ -200,7 +200,7 @@ export async function advanceIdleResearchRuns(limit = 100) {
  * finished revokes the copy and queues its text for deletion without a model call.
  */
 export async function revalidatePrivateResearchSources(limit = 100) {
-  const sources = await prisma.researchSource.findMany({ where: { visibility: "private", status: "active" },
+  const sources = await prisma.researchSource.findMany({ where: { visibility: "private", status: { not: "revoked" } },
     orderBy: [{ revalidatedAt: { sort: "asc", nulls: "first" } }, { id: "asc" }], take: limit,
     select: { id: true, sourceKey: true, run: { select: { id: true, userId: true, inputManifest: true } } } });
   let revoked = 0;

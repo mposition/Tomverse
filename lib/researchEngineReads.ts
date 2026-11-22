@@ -34,15 +34,24 @@ async function ownedRun(userId: string, runId: string, request?: Request) {
  * a source whose original is gone is revoked before anything about it is returned.
  * Returns the run's revoked private source keys.
  */
-async function revalidateRunPrivateSources(run: Awaited<ReturnType<typeof ownedRun>>) {
+export async function revalidateRunPrivateSources(run: { id: string; userId: string; inputManifest: unknown }) {
   const privateSources = await prisma.researchSource.findMany({ where: { runId: run.id, visibility: "private" }, select: { id: true, sourceKey: true, status: true } });
-  const active = privateSources.filter((source) => source.status === "active");
+  // Every copy that is not already revoked is checked, excluded ones included:
+  // excluding a source from the scope does not stop its label being stored.
+  const live = privateSources.filter((source) => source.status !== "revoked");
   const revoked = new Set(privateSources.filter((source) => source.status === "revoked").map((source) => source.sourceKey));
-  if (active.length) {
+  if (live.length) {
     const { ensureResearchPrivateSourceGranted } = await import("@/lib/researchEngineWorker");
-    for (const source of active) if (!(await ensureResearchPrivateSourceGranted(run, source))) revoked.add(source.sourceKey);
+    for (const source of live) if (!(await ensureResearchPrivateSourceGranted(run as never, source))) revoked.add(source.sourceKey);
   }
   return revoked;
+}
+
+/** Re-checks every private source of a user's v2 runs; used before account export. */
+export async function revalidateUserPrivateResearchSources(userId: string) {
+  const runs = await prisma.researchPreviewRun.findMany({ where: { userId, engineVersion: 2,
+    sources: { some: { visibility: "private", status: { not: "revoked" } } } }, select: { id: true, userId: true, inputManifest: true } });
+  for (const run of runs) await revalidateRunPrivateSources(run);
 }
 
 export async function listResearchSources(input: { userId: string; runId: string; request?: Request; cursor?: string; limit?: number; visibility?: "public" | "private" }) {
@@ -100,9 +109,11 @@ export async function readResearchReport(input: { userId: string; runId: string;
   const run = await ownedRun(input.userId, input.runId, input.request);
   const revisionNumber = input.revision ?? run.currentReportRevision;
   if (!revisionNumber) throw refuse(404, "RESEARCH_REPORT_NOT_READY", "The report is not ready yet.");
+  // Re-check first: a revocation here rewrites the stored report and its claims,
+  // and the response must reflect it.
+  const revokedKeys = await revalidateRunPrivateSources(run);
   const revision = await prisma.researchReportRevision.findUnique({ where: { runId_revision: { runId: run.id, revision: revisionNumber } }, include: { claims: true } });
   if (!revision) throw refuse(404, "RESEARCH_REPORT_NOT_FOUND", "Report revision not found.");
-  const revokedKeys = await revalidateRunPrivateSources(run);
   const manifestForLabels = researchInputManifestSchema.parse(run.inputManifest);
   const privateLabel = researchEngineLabels(manifestForLabels.brief.outputLanguage ?? manifestForLabels.locale).report.privateSource;
   const stored = researchReportDocumentSchema.parse(revision.document);

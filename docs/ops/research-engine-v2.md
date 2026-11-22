@@ -54,7 +54,10 @@ Chat의 Auto/manual 선택은 바꾸지 않습니다. Research 실행 모델은 
   거절되고, 모델 없이 만드는 공개용 redaction revision이 있을 때만 그 버전으로 공유됩니다.
 - run이 끝난 뒤 원본을 지우거나 다시 잠그거나 Memory를 끄면, 근거 조회 시점과 maintenance
   sweep(`revalidatePrivateResearchSources`, 오래 확인 안 한 것부터)이 원본을 다시 확인해 복사본을
-  `revoked`로 바꾸고 정리 큐에 넣습니다. 모델 호출이 없어도 적용됩니다.
+  `revoked`로 바꾸고 정리 큐에 넣습니다. 모델 호출이 없어도 적용됩니다. 범위에서 제외(excluded)한
+  source도 대상이며, source 목록·보고서·export·계정 데이터 내보내기는 응답 전에 먼저 확인합니다.
+  회수하면 원본에서 복사된 라벨(source 제목, manifest label, 모든 revision의 참고문헌 제목)을 일반
+  라벨로 바꾸고, 채팅 답변은 정리된 현재 revision에서 다시 렌더링합니다.
 
 ## 4. 실행·회복
 

@@ -545,8 +545,19 @@ test("a private copy stops being served once its original is deleted after the r
   assert.ok(listedA.sources.every((source) => source.status === "revoked" && source.title === null && source.snippet === null));
   const rereadA = await readResearchReport({ userId: user.id, runId: runA.id });
   assert.ok(!JSON.stringify(rereadA.document.bibliography).includes("Post-run memory one"), "no copied label in the bibliography");
-  // No read at all: the sweep finds the deleted original and queues the copy for deletion.
+  const answerA = await prisma.message.findUniqueOrThrow({ where: { id: (await prisma.researchPreviewRun.findUniqueOrThrow({ where: { id: runA.id } })).assistantMessageId } });
+  assert.ok(!answerA.content.includes("Post-run memory one"), "the chat answer was re-rendered without the copied label");
+  // No read at all, and the source was excluded from scope first: the account export
+  // re-checks it and carries no copied label anywhere.
+  const excludedKey = (await prisma.researchSource.findFirstOrThrow({ where: { runId: runB.id, visibility: "private" } })).sourceKey;
+  await prisma.researchSource.updateMany({ where: { runId: runB.id, sourceKey: excludedKey }, data: { status: "excluded" } });
   await prisma.memoryItem.delete({ where: { id: second.id } });
+  const { buildAccountDataExport } = await import("@/lib/accountDataExport");
+  const exported = JSON.stringify(await buildAccountDataExport(user.id));
+  assert.ok(!exported.includes("Post-run memory two"), "account export carries no label of a deleted private source");
+  assert.equal((await prisma.researchSource.findFirstOrThrow({ where: { runId: runB.id, visibility: "private" } })).status, "revoked");
+  // The sweep also covers excluded sources: reset to excluded and let maintenance find it.
+  await prisma.researchSource.updateMany({ where: { runId: runB.id, sourceKey: excludedKey }, data: { status: "excluded" } });
   const keysB = (await prisma.researchSourceVersion.findMany({ where: { runId: runB.id, source: { visibility: "private" } }, select: { objectKey: true } }))
     .map((row) => row.objectKey!).filter(Boolean);
   assert.ok(keysB.length > 0);
