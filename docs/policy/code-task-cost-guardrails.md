@@ -127,6 +127,36 @@ migration 적용은 별도입니다. 구현한 A1 범위와 확정 값은 10절�
 
 - **코딩 전용 행**(`profile.source`가 없거나 `dedicated`): 채팅에 없는 모델입니다. 위 6절대로
   행이 이름·공급자·단가·능력·출처를 모두 갖고, LLM 초안(`draft`)으로 채웁니다.
+- **전용 행 초안의 두 값은 코드가 정합니다(운영자 결정 2026-11-22).** `codingDraftFromAnswer`
+  (`lib/modelCatalogDraftLlm.ts`)가 LLM 답을 읽을 때:
+  - **최대 출력**: 공식 문서에 최대 출력이 없으면 거절하지 않고 `capabilities.maxOutputTokens`를
+    `CODING_DEFAULT_MAX_OUTPUT_TOKENS`(8,192)로 둡니다. LLM은 문서에 없으면 `null`로 답하고(추정
+    금지), 0·음수·정수 아님도 "없음"으로 읽습니다. 이 사실은 프로필의 `basis.maxOutputTokens: "default"`
+    (문서 값이면 `"documented"`)에 남고, Admin 초안 화면에 "문서에 없어 기본값 8,192 사용"으로 보입니다.
+    Code 관리형 경로(`codingRowRuntime`의 `Math.min(row.capabilities.maxOutputTokens, …)`, 요청마다
+    `CODE_REQUEST_BOUNDS_INVALID`)와 코딩 API(모델 `maxOutputTokens`로 예약·공급자 출력 한도를 묶음)가 이
+    값을 실제 출력 상한으로 보내고, Code 하한(`codingCreditFloor`)과 코딩 API 하한(`codingApiCredit`)도 이
+    값으로 계산하므로 원가가 상한 안에 머뭅니다. 컨텍스트(`maxContextTokens`)를 모르면 지금처럼
+    거절합니다(`capabilities.maxContextTokens`): Code 하한이 컨텍스트 전체를 최악의 입력으로 보기 때문입니다.
+  - **구간 가격**: 요청 하나의 입력 토큰 수가 그 요청 전체의 입력·출력 단가를 정하는 모델은 가장 비싼
+    구간의 입력·출력 단가를 프로필 단가로 씁니다. LLM은 구간표를 `pricing.tiers`로 함께 답하고, 코드는
+    답한 단가와 모든 구간 단가 중 큰 값을 씁니다(싼 구간을 답해도 가장 비싼 구간으로 올림, 그보다 높은
+    답은 그대로). 구간표가 잘못된 형식이면 초안을 거절합니다(`pricing.tiers`). 구간표는
+    `basis.priceTiers`에 남고 초안 화면에 보입니다. 크레딧 하한은 이 단가로 계산됩니다.
+  - `basis`는 저장된 프로필에만 있고 해석된 행·스냅샷 행에는 싣지 않으므로 `canonicalJson`·해시를
+    바꾸지 않습니다. 이전 행에는 없습니다.
+- **구조화 출력은 "지원(`supported`) / 지원 안 함(`none`)" 두 값입니다(운영자 결정 2026-11-22).** 실행이
+  보는 것은 `none`인지뿐입니다(Code 관리형 경로, Code 판정의 `no_structured_output`). JSON 모드(예:
+  `response_format` json_object)·JSON 스키마·strict/강제 tool call·response schema 중 하나라도 문서에
+  있으면 "지원"입니다. JSON 모드만 있는 DeepSeek·GLM도 "지원"이고, LLM 초안과 기능 정보 채우기의
+  프롬프트가 이 기준으로 답하게 합니다. 새로 저장하는 값은
+  `CODING_STRUCTURED_OUTPUT_CHOICES`(두 값)뿐이고, 그 전에 저장한 `json_mode`·`strict_schema`·
+  `forced_tool_use`·`response_schema`는 읽기용으로 계속 받아 "지원"으로 봅니다
+  (`codingStructuredOutputChoice`). 저장된 행과 발행된 스냅샷을 다시 쓰지 않으므로 `canonicalJson`·해시는
+  그대로입니다. 두 값으로 바뀌는 때는 저장할 때뿐입니다: 연결 행 설정 저장(`codingSettingsSchema`는 두 값만
+  받고, 화면은 다른 칸을 바꿔 저장할 때 이전 값을 보이는 선택지로 함께 보냄), 전용 행 초안 적용
+  (`applyCodingDraftEdits`), "LLM으로 기능 정보 채우기". 그 행은 "스냅샷 이후 변경"이 되고 다음 발행에
+  실립니다. LLM 답 스키마(`CODING_SCHEMA`·`CAPABILITY_SCHEMA`)도 두 값만 받습니다.
 - **채팅 모델 연결 행**(`profile.source: "chat"`, `registryModelId` = 행의 `modelId`):
   이름·공급자·API 모델 id·단가·컨텍스트·최대 출력·이미지 입력을 **복사하지 않고 읽을 때마다**
   채팅 레지스트리(`ModelRegistryEntry`)에서 가져옵니다. 단가는 채팅 가격 해석
@@ -138,7 +168,7 @@ migration 적용은 별도입니다. 구현한 A1 범위와 확정 값은 10절�
 - **연결은 채팅 레지스트리만 읽고 즉시 됩니다. 연결에는 LLM 호출도 문서 읽기도 없습니다(운영자
   결정 2026-11-21).** `toolCalling`은 `basic`입니다: 코딩 후보는 외부 API가 내놓는 사용 등급이고, 그 API는 모든 모델을 도구
   호출 가능(`capabilities.tools`, `lib/externalApiCatalogCore.ts`)으로 내놓기 때문입니다. 레지스트리에는
-  구조화 출력 정보가 없으므로 `structuredOutput`은 보수적 기본값 `none`이고, Code 관리형 경로는 `none`
+  구조화 출력 정보가 없으므로 `structuredOutput`은 보수적 기본값 `none`(지원 안 함)이고, Code 관리형 경로는 `none`
   행을 쓰지 않으므로(`CODE_MODEL_UNAVAILABLE`) Code에서 쓰려면 운영자가 행에서 값을 정합니다.
   `evidence`는 `sources: []`(읽은 문서 없음)로 남고, 화면은 이를 "채팅 레지스트리"로 보입니다. 예전에
   LLM 초안으로 만든 행의 `evidence`(문서 주소 있음)는 그대로 읽습니다. 한 번에 연결하는 길은 아래를
@@ -166,7 +196,8 @@ migration 적용은 별도입니다. 구현한 A1 범위와 확정 값은 10절�
   여러 호출을 이어 돌리지 않음). 여러 행은 화면이 행마다 요청을 하나씩 순서대로 보내고 N/M을
   보입니다. 읽는 문서는 공급자별 기본 한 쌍(`DEFAULT_CODING_CAPABILITY_SOURCES`, #4121: Tool calling·
   구조화 출력)이고, 가져오는 주소와 답이 기댄 모든 주소를 `isOfficialSourceUrl`로 검사합니다. 답은
-  `codingCapabilitiesFromAnswer`가 읽습니다(모르는 값은 `none`). 실패는 행을 바꾸지 않고 사유만
+  `codingCapabilitiesFromAnswer`가 읽습니다(모르는 값은 `none`, 구조화 출력은 `supported`·`none` 두 값으로
+  저장). 실패는 행을 바꾸지 않고 사유만
   보입니다. 시간 초과는 비용이 나갔을 수 있는 결과 불명 호출이라 자동으로 다시 하지 않고 화면은 거기서
   멈춥니다. 성공하면 `updateCatalogEntry`(같은 판정, 같은 트랜잭션)로 `capabilities`와 `evidence`(sources,
   draftedAt, note)를 쓰고 `model_catalog.coding_capabilities_filled`를 같은 트랜잭션에 남깁니다.

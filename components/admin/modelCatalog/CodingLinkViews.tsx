@@ -30,6 +30,7 @@ import {
   codingSettingsProblems,
   codingSettingsRequest,
   codingStage,
+  codingStructuredOutputShown,
   effectiveCreditWeight,
   linkAllCodeReasonRows,
   linkAllReasonRows,
@@ -492,11 +493,15 @@ export function CodingLinkDetail({
                   >
                     {CODING_STRUCTURED_OUTPUT_VALUES.map((option) => (
                       <option key={option} value={option}>
-                        {`${option} · ${structuredOutputLabel(option)}`}
+                        {structuredOutputLabel(option)}
                       </option>
                     ))}
                   </select>
-                  <OriginChip c={c} origin={origin} show={link?.evidence?.structuredOutput === value.structuredOutput} />
+                  <OriginChip
+                    c={c}
+                    origin={origin}
+                    show={link?.evidence !== undefined && codingStructuredOutputShown(link.evidence.structuredOutput) === value.structuredOutput}
+                  />
                 </div>
                 <p className={`text-xs ${value.structuredOutput === "none" ? "font-bold text-red-300" : "text-zinc-500"}`}>
                   {c.detail.structuredOutputHelp}

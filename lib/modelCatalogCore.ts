@@ -266,7 +266,62 @@ export type ImageFullProfile = z.infer<typeof imageFullProfileSchema>;
 export const CODING_PLANS = ["Free", "Pro", "Max"] as const;
 export type CodingPlan = (typeof CODING_PLANS)[number];
 export const CODING_TOOL_CALLING = ["none", "basic", "parallel"] as const;
-export const CODING_STRUCTURED_OUTPUT = ["none", "json_mode", "strict_schema", "forced_tool_use", "response_schema"] as const;
+/**
+ * Structured output as a new save writes it: supported or not (owner decision
+ * 2026-11-22). Code's managed path and the Code judge only ask whether it is
+ * "none" (lib/codeManagedService.ts modelPair, `no_structured_output`).
+ */
+export const CODING_STRUCTURED_OUTPUT_CHOICES = ["supported", "none"] as const;
+export type CodingStructuredOutputChoice = (typeof CODING_STRUCTURED_OUTPUT_CHOICES)[number];
+/**
+ * Every value a stored row or a published snapshot may carry. The finer values
+ * written before the two choices still parse, so those rows and snapshots keep
+ * their canonicalJson and content hash; they read as supported. Nothing new
+ * writes them.
+ */
+export const CODING_STRUCTURED_OUTPUT = ["none", "supported", "json_mode", "strict_schema", "forced_tool_use", "response_schema"] as const;
+
+/** A stored or answered value as one of the two choices; anything unknown is the conservative "none". */
+export const codingStructuredOutputChoice = (value: unknown): CodingStructuredOutputChoice =>
+  typeof value === "string" && value !== "none" && (CODING_STRUCTURED_OUTPUT as readonly string[]).includes(value) ? "supported" : "none";
+
+/**
+ * The output cap a dedicated draft uses when the provider's pages state none
+ * (owner decision 2026-11-22). Code's managed path and the coding API send it
+ * as the provider output limit, and the credit floors price it, so the worst
+ * turn stays inside it.
+ */
+export const CODING_DEFAULT_MAX_OUTPUT_TOKENS = 8_192;
+
+const usdPerMTok = z.number().nonnegative().max(1_000);
+
+/**
+ * Where a dedicated draft's values came from, beside its price sources: the
+ * output cap read from the pages or the default above, and the input-size
+ * price tiers the pages list (the profile's prices are the dearest tier's).
+ * Kept in the stored profile only; the resolved and snapshot rows do not carry
+ * it, so it moves no hash.
+ */
+export const codingDraftBasisSchema = z
+  .object({
+    maxOutputTokens: z.enum(["documented", "default"]),
+    priceTiers: z
+      .array(
+        z
+          .object({
+            /** The tier's largest input in tokens; null for the open top tier. */
+            upToInputTokens: z.number().int().positive().nullable(),
+            inputUsdPerMTok: usdPerMTok,
+            outputUsdPerMTok: usdPerMTok,
+          })
+          .strict()
+      )
+      .min(1)
+      .max(8)
+      .optional(),
+  })
+  .strict();
+export type CodingDraftBasis = z.infer<typeof codingDraftBasisSchema>;
 
 /**
  * Where a coding model is offered: Code's managed path ("code") and the coding
@@ -332,6 +387,8 @@ export const codingProfileSchema = z
       .optional(),
     retention: z.object({ url: z.string().url(), checkedAt: isoDate }).strict().optional(),
     processingRegion: z.string().trim().min(2).max(40).optional(),
+    /** A draft's basis for its output cap and prices (absent on rows drafted before it). */
+    basis: codingDraftBasisSchema.optional(),
   })
   .strict();
 export type CodingProfile = z.infer<typeof codingProfileSchema>;
@@ -369,6 +426,8 @@ export const applyCodingDraftEdits = (
       ...draft,
       name: edit.name ?? draft.name,
       minimumPlan: edit.minimumPlan ?? draft.minimumPlan,
+      // Applying is a save: a draft stored before the two choices is written as one of them.
+      capabilities: { ...draft.capabilities, structuredOutput: codingStructuredOutputChoice(draft.capabilities.structuredOutput) },
       pricing: { ...draft.pricing, creditWeight: edit.creditWeight ?? draft.pricing.creditWeight },
     },
     edits,

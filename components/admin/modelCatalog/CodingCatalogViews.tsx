@@ -26,6 +26,7 @@ import {
   codingServing,
   type CodingStage,
   codingStage,
+  codingStructuredOutputShown,
   type ImageNextAction,
   reasonMessage,
 } from "@/lib/adminModelCatalogFlow";
@@ -140,14 +141,61 @@ export function CodingProfileTable({
     },
   ];
   const caps = profile.capabilities;
+  const tiers = profile.basis?.priceTiers;
+  const outputDefault = profile.basis?.maxOutputTokens === "default";
+  const note = (text: string, testId: string) => (
+    <span className="block font-sans text-xs font-bold text-amber-300" data-testid={testId}>
+      {text}
+    </span>
+  );
   const docs: { key: string; label: string; value: ReactNode }[] = [
-    { key: "input", label: c.fields.inputPrice, value: `$${profile.pricing.inputUsdPerMTok}` },
+    {
+      key: "input",
+      label: c.fields.inputPrice,
+      value: (
+        <>
+          {`$${profile.pricing.inputUsdPerMTok}`}
+          {tiers ? note(c.priceTierDearest, "model-catalog-coding-price-dearest") : null}
+        </>
+      ),
+    },
     { key: "output", label: c.fields.outputPrice, value: `$${profile.pricing.outputUsdPerMTok}` },
+    ...(tiers
+      ? [
+          {
+            key: "tiers",
+            label: c.fields.priceTiers,
+            value: (
+              <ul className="flex flex-col gap-0.5" data-testid="model-catalog-coding-price-tiers">
+                {tiers.map((tier, index) => {
+                  const below = index > 0 ? tiers[index - 1].upToInputTokens : null;
+                  const range =
+                    tier.upToInputTokens !== null
+                      ? c.tierUpTo(tier.upToInputTokens.toLocaleString("en-US"))
+                      : below !== null
+                        ? c.tierAbove(below.toLocaleString("en-US"))
+                        : c.tierAll;
+                  return <li key={index}>{`${range} · $${tier.inputUsdPerMTok} / $${tier.outputUsdPerMTok}`}</li>;
+                })}
+              </ul>
+            ),
+          },
+        ]
+      : []),
     { key: "tools", label: c.fields.toolCalling, value: c.toolCalling[caps.toolCalling] ?? caps.toolCalling },
-    { key: "structured", label: c.fields.structuredOutput, value: c.structuredOutput[caps.structuredOutput] ?? caps.structuredOutput },
+    { key: "structured", label: c.fields.structuredOutput, value: c.structuredOutput[codingStructuredOutputShown(caps.structuredOutput)] },
     { key: "image", label: c.fields.imageInput, value: caps.imageInput ? c.yes : c.no },
     { key: "context", label: c.fields.maxContext, value: caps.maxContextTokens.toLocaleString("en-US") },
-    { key: "maxOutput", label: c.fields.maxOutput, value: caps.maxOutputTokens.toLocaleString("en-US") },
+    {
+      key: "maxOutput",
+      label: c.fields.maxOutput,
+      value: (
+        <>
+          {caps.maxOutputTokens.toLocaleString("en-US")}
+          {outputDefault ? note(c.maxOutputDefault(caps.maxOutputTokens.toLocaleString("en-US")), "model-catalog-coding-max-output-default") : null}
+        </>
+      ),
+    },
   ];
 
   return (
