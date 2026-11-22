@@ -257,6 +257,44 @@ test("a coding model is published in an immutable snapshot only once admitted an
   );
 });
 
+test("a PATCH carrying an older structured output value saves it as supported, says so in its audit row, and a row nobody writes keeps its value", async () => {
+  const modelId = "gpt-patch-older-value";
+  const where = { category_modelId: { category: "coding", modelId } };
+  const capabilitiesOf = async () =>
+    ((await prisma.modelCatalogEntry.findUnique({ where }))?.profile as { capabilities: { structuredOutput: string } }).capabilities;
+  try {
+    // A direct PATCH with a value written before the two choices (codingProfile carries "strict_schema").
+    await updateCatalogEntry({ category: "coding", modelId, patch: { profile: codingProfile }, session });
+    assert.equal((await capabilitiesOf()).structuredOutput, "supported");
+    const audit = await prisma.adminAuditLog.findFirst({
+      where: { action: "model_catalog.entry_updated", targetId: `coding:${modelId}` },
+      orderBy: { createdAt: "desc" },
+    });
+    assert.deepEqual((audit?.metadata as { structuredOutputRewritten?: unknown })?.structuredOutputRewritten, [
+      { field: "capabilities.structuredOutput", from: "strict_schema", to: "supported" },
+    ]);
+    // A row stored with the older value and not written since: an enable or hold does not rewrite its profile.
+    await prisma.modelCatalogEntry.update({ where, data: { profile: codingProfile } });
+    await updateCatalogEntry({ category: "coding", modelId, patch: { holdReason: "checking" }, session });
+    assert.equal((await capabilitiesOf()).structuredOutput, "strict_schema");
+    // A PATCH that already writes one of the two choices records nothing extra.
+    await updateCatalogEntry({
+      category: "coding",
+      modelId,
+      patch: { profile: { ...codingProfile, capabilities: { ...codingProfile.capabilities, structuredOutput: "none" } } },
+      session,
+    });
+    assert.equal((await capabilitiesOf()).structuredOutput, "none");
+    const latest = await prisma.adminAuditLog.findFirst({
+      where: { action: "model_catalog.entry_updated", targetId: `coding:${modelId}` },
+      orderBy: { createdAt: "desc" },
+    });
+    assert.equal("structuredOutputRewritten" in ((latest?.metadata as object | null) ?? {}), false);
+  } finally {
+    await prisma.modelCatalogEntry.deleteMany({ where: { category: "coding", modelId } });
+  }
+});
+
 test("the scheduled renewal extends identical content once, as the system, and leaves a change to a person", async () => {
   const day = 24 * 60 * 60 * 1000;
   const renewedAudits = () => auditCount("model_catalog.snapshot_renewed");

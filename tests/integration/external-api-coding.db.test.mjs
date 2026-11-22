@@ -58,9 +58,29 @@ test("the coding API over the real shared credit ledger", { skip: !databaseUrl }
     });
     // No router call is made here; the module is faked so none could be.
     mock.module(mod("lib/autoLlmRouter.ts"), { namedExports: { pickAutoModelWithLlm: async () => null } });
+    // Chat Completions builds its provider model here. Every Chat Completions
+    // request below is refused before that, so building one fails the test
+    // instead of reaching a provider.
+    let chatModelsBuilt = 0;
+    mock.module(mod("lib/activeAiModel.ts"), {
+        namedExports: {
+            getActiveAiModel: () => {
+                chatModelsBuilt += 1;
+                throw new Error("no Chat Completions provider call is expected in this suite");
+            },
+            getComparisonReviewModel: () => {
+                throw new Error("not used here");
+            },
+            QWEN_GROUNDED_THINKING_BUDGET: 128,
+            qwenLookupStep: () => undefined,
+            createCohereResearchFetch: (fetchImpl) => fetchImpl,
+        },
+    });
 
     const { handleNativeGeneration } = await import(mod("lib/externalApiNative.ts"));
+    const { handleChatCompletions } = await import(mod("lib/externalApiInference.ts"));
     const { anthropicMessagesSpec } = await import(mod("lib/externalApiNativeSpecs.ts"));
+    const { GET: codingOpenAiModels } = await import(mod("app/api/code/v1/models/route.ts"));
     const { GET: codingModels } = await import(mod("app/api/code/anthropic/v1/models/route.ts"));
     const { GET: generalModels } = await import(mod("app/api/anthropic/v1/models/route.ts"));
     const { codingCreditFloor, loadCodingCatalog, servableCodingRows } = await import(mod("lib/modelCatalog.ts"));
@@ -337,6 +357,97 @@ test("the coding API over the real shared credit ledger", { skip: !databaseUrl }
         } finally {
             await db.modelCatalogEntry.deleteMany({ where: { category: "coding", modelId: FRONTIER_ID } });
             await db.modelRegistryEntry.deleteMany({ where: { id: FRONTIER_ID } });
+            await publish();
+        }
+    });
+
+    await t.test("a coding catalogue of frontier and apex models only offers no Smart Adaptive, refuses it with nothing held or sent, and still runs a named one", async () => {
+        // Smart Adaptive never defaults to frontier or apex (docs/policy/external-api.md 5.1): with nothing
+        // else on the coding API there is no model to take when the router does not pick.
+        process.env.CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED = "true";
+        const { modelRegistryCreateData } = await import(mod("lib/modelRegistry.ts"));
+        const ONLY_ID = `claude-only-frontier-${randomUUID().slice(0, 8)}`;
+        await db.modelRegistryEntry.create({
+            data: modelRegistryCreateData(
+                {
+                    id: ONLY_ID,
+                    name: "Claude Only Frontier Fixture",
+                    apiModel: "claude-only-frontier",
+                    provider: "anthropic",
+                    icon: "",
+                    bestFor: "",
+                    minimumPlan: "Pro",
+                    usageClass: "frontier",
+                    creditWeight: 41,
+                    enabled: true,
+                    status: "enabled",
+                    contextWindowTokens: 200_000,
+                    maxOutputTokens: 4_000,
+                    inputUsdPerMillionTokens: 5,
+                    outputUsdPerMillionTokens: 25,
+                },
+                { id: null, email: null }
+            ),
+        });
+        const key = { category_modelId: { category: "coding", modelId: MODEL_ID } };
+        try {
+            await db.modelCatalogEntry.create({
+                data: {
+                    category: "coding",
+                    modelId: ONLY_ID,
+                    enabled: true,
+                    profile: { source: "chat", registryModelId: ONLY_ID, capabilities: { toolCalling: "parallel", structuredOutput: "supported" }, channels: ["api"] },
+                },
+            });
+            // The dedicated row leaves the coding API, so the frontier link is all it offers.
+            await db.modelCatalogEntry.update({ where: key, data: { profile: { ...profile, channels: ["code"] } } });
+            const published = await publish();
+            const onApi = published.rows.filter((row) => row.channels.includes("api") || row.channels.includes("cli")).map((row) => row.modelId);
+            assert.deepEqual(onApi, [ONLY_ID], "only the frontier link is on the coding API");
+
+            const userId = await newUser();
+            process.env.EXTERNAL_API_ALLOWED_USER_IDS = userId;
+            const { key: apiKey } = await issueKey(userId);
+            // Neither model list offers Smart Adaptive; the frontier model is listed by name.
+            const listed = await codingOpenAiModels(new Request("http://localhost/api/code/v1/models", { headers: { authorization: `Bearer ${apiKey}` } }));
+            assert.equal(listed.status, 200);
+            assert.deepEqual((await listed.json()).data.map((entry) => entry.id), [ONLY_ID]);
+            assert.deepEqual(await modelIds(codingModels, apiKey), [ONLY_ID]);
+
+            // Smart Adaptive is refused on both protocols before anything is held or sent.
+            const sentBefore = sent.length;
+            const native = await messages("coding", apiKey, body("smart-adaptive"));
+            assert.equal(native.status, 404);
+            const nativeError = await native.json();
+            assert.equal(nativeError.error.type, "not_found_error");
+            assert.equal(nativeError.tomverse.code, "model_not_found");
+            const chat = await handleChatCompletions(
+                new Request("http://localhost/api/code/v1/chat/completions", {
+                    method: "POST",
+                    headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+                    body: JSON.stringify({ model: "smart-adaptive", messages: [{ role: "user", content: "Fix src/sum.ts" }] }),
+                }),
+                { surface: "coding" }
+            );
+            assert.equal(chat.status, 404);
+            assert.equal((await chat.json()).error.code, "model_not_found");
+            assert.equal(sent.length, sentBefore, "nothing dispatched");
+            assert.equal(chatModelsBuilt, 0, "no Chat Completions provider model was built");
+            assert.equal(await db.chatCreditReservation.count({ where: { userId } }), 0, "nothing held");
+
+            // Named directly, the frontier model still runs at its own chat credits.
+            reply = () => new Response(anthropicStream(), { status: 200, headers: { "content-type": "text/event-stream", "request-id": "req_provider_only_frontier" } });
+            const named = await messages("coding", apiKey, body(ONLY_ID));
+            assert.equal(named.status, 200);
+            await named.text();
+            assert.equal(sent.length, sentBefore + 1);
+            const [reservation] = await db.chatCreditReservation.findMany({ where: { userId } });
+            assert.equal(reservation.modelId, ONLY_ID);
+            assert.equal(reservation.settledCredits, 41);
+        } finally {
+            await db.modelCatalogEntry.update({ where: key, data: { profile } });
+            await db.modelCatalogEntry.deleteMany({ where: { category: "coding", modelId: ONLY_ID } });
+            await db.modelRegistryEntry.deleteMany({ where: { id: ONLY_ID } });
             await publish();
         }
     });

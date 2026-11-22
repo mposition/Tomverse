@@ -25,6 +25,7 @@ import {
   type ImageModelPriceVerification,
   type ImageModelProfile,
 } from "@/lib/imageModelRegistry";
+import { isSmartAdaptiveOnlyModel } from "@/lib/externalApiCatalogCore";
 import { confirmedImageBillingTermsSchema } from "@/lib/imageBillingMeasurementCore";
 import { IMAGE_ROUTING_NOTE_MAX_CHARS, IMAGE_USE_CASES, RUNTIME_IMAGE_PROVIDERS } from "@/lib/runtimeImageProviders";
 
@@ -296,11 +297,24 @@ export const CODING_DEFAULT_MAX_OUTPUT_TOKENS = 8_192;
 const usdPerMTok = z.number().nonnegative().max(1_000);
 
 /**
+ * Whether input-size tiers are in the order the pages price them: each tier's
+ * largest input above the one before, and the open top tier (null) only last.
+ */
+const priceTiersAscend = (tiers: readonly { upToInputTokens: number | null }[]) =>
+  tiers.every((tier, index) => {
+    if (tier.upToInputTokens === null) return index === tiers.length - 1;
+    if (index === 0) return true;
+    const below = tiers[index - 1].upToInputTokens;
+    return below !== null && tier.upToInputTokens > below;
+  });
+
+/**
  * Where a dedicated draft's values came from, beside its price sources: the
  * output cap read from the pages or the default above, and the input-size
  * price tiers the pages list (the profile's prices are the dearest tier's).
- * Kept in the stored profile only; the resolved and snapshot rows do not carry
- * it, so it moves no hash.
+ * A tier list out of order is refused, so a draft never keeps or shows ranges
+ * that cannot be meant. Kept in the stored profile only; the resolved and
+ * snapshot rows do not carry it, so it moves no hash.
  */
 export const codingDraftBasisSchema = z
   .object({
@@ -318,6 +332,7 @@ export const codingDraftBasisSchema = z
       )
       .min(1)
       .max(8)
+      .refine(priceTiersAscend, "tiers ascend by upToInputTokens and only the last is open (null)")
       .optional(),
   })
   .strict();
@@ -509,6 +524,33 @@ export const codingStoredProfileSchema = z.union([codingLinkedProfileSchema, cod
 export type CodingStoredProfile = z.infer<typeof codingStoredProfileSchema>;
 
 /**
+ * A stored coding profile as a write saves it: structured output as one of the
+ * two choices. An older value a write still carries (a direct PATCH, or a row
+ * saved for another field) is saved as "supported", the value it reads as, so
+ * changing another field of an older row is never refused for it. Only a write
+ * goes through here: a row nobody writes keeps its value, and reading one and
+ * the snapshot hash are unchanged. `rewritten` names each value changed, for
+ * the audit row.
+ */
+export const codingProfileForWrite = (
+  profile: CodingStoredProfile
+): { profile: CodingStoredProfile; rewritten: { field: string; from: string; to: CodingStructuredOutputChoice }[] } => {
+  const rewritten: { field: string; from: string; to: CodingStructuredOutputChoice }[] = [];
+  const choice = (field: string, value: (typeof CODING_STRUCTURED_OUTPUT)[number]) => {
+    const to = codingStructuredOutputChoice(value);
+    if (to !== value) rewritten.push({ field, from: value, to });
+    return to;
+  };
+  if (profile.source === "chat") {
+    const capabilities = { ...profile.capabilities, structuredOutput: choice("capabilities.structuredOutput", profile.capabilities.structuredOutput) };
+    const evidence = profile.evidence && { ...profile.evidence, structuredOutput: choice("evidence.structuredOutput", profile.evidence.structuredOutput) };
+    return { profile: { ...profile, capabilities, ...(evidence ? { evidence } : {}) }, rewritten };
+  }
+  const capabilities = { ...profile.capabilities, structuredOutput: choice("capabilities.structuredOutput", profile.capabilities.structuredOutput) };
+  return { profile: { ...profile, capabilities }, rewritten };
+};
+
+/**
  * One resolved coding model: what a snapshot carries and what the managed
  * path compares a snapshot row against (canonicalJson). Inherited values are
  * resolved in. A row published before links existed has no `source` or
@@ -582,7 +624,15 @@ export type ChatModelFacts = {
   /** Chat's plan on the coding scale: Guest and Free read as Free. */
   minimumPlan: "Free" | "Pro";
   usageClass: string;
+  /** What chat charges: the registry's own credit weight, or its class default when the registry holds none. */
   creditWeight: number;
+  /**
+   * Whether the chat registry holds a positive whole credit weight for this
+   * model (hasRegistryCredits, lib/externalApiCatalogCore.ts), rather than
+   * `creditWeight` being its class default. A frontier or apex model is a
+   * coding candidate, and served, only with one (chat_credits_missing).
+   */
+  registryCredits: boolean;
   enabled: boolean;
   status: string;
   publiclyListed: boolean;
@@ -668,6 +718,10 @@ export const resolveCodingEntry = (input: {
     if (chat.catalogDeleted) refusals.push("chat_model_deleted");
     else if (!chat.enabled || (chat.status !== "enabled" && chat.status !== "limited")) refusals.push("chat_model_disabled");
     if (!chat.price.verified) refusals.push("chat_price_unverified");
+    // The coding API serves a frontier or apex model only at credits the chat
+    // registry holds for it (isExternalApiServableModel), so the judge refuses
+    // the link on the same condition rather than admit it at a class default.
+    if (chatCreditsMissing(chat)) refusals.push("chat_credits_missing");
     if (chat.price.reasoningBilledSeparately) refusals.push("reasoning_cost_unbounded");
     if (CODE_MANAGED_UNBOUNDED_PROVIDERS.includes(chat.provider)) refusals.push("provider_cost_unbounded");
     return {
@@ -773,8 +827,17 @@ export const registryCodingCapabilities = (): CodingLinkedProfile["capabilities"
 export const CODING_CANDIDATE_USAGE_CLASSES: readonly string[] = ["standard", "advanced", "premium", "reasoning", "premium-reasoning", "frontier", "apex"];
 
 /**
+ * A frontier or apex chat model the chat registry holds no credit weight for:
+ * its `creditWeight` is only the class default nobody set, and the coding API
+ * never serves it (hasRegistryCredits, lib/externalApiCatalogCore.ts).
+ */
+const chatCreditsMissing = (chat: Pick<ChatModelFacts, "usageClass" | "registryCredits">) =>
+  isSmartAdaptiveOnlyModel(chat) && chat.registryCredits !== true;
+
+/**
  * Why a chat model is not a coding candidate, or null when it is one:
- * enabled, listed, not deleted, a usage class the API serves, an id the
+ * enabled, listed, not deleted, a usage class the API serves, credits the
+ * registry holds where the class needs them (frontier, apex), an id the
  * catalogue accepts, and no coding row of that id yet.
  */
 export const codingCandidateExclusion = (chat: ChatModelFacts, codingIds: ReadonlySet<string>): string | null => {
@@ -783,6 +846,7 @@ export const codingCandidateExclusion = (chat: ChatModelFacts, codingIds: Readon
   if (!chat.enabled || (chat.status !== "enabled" && chat.status !== "limited")) return "disabled";
   if (!chat.publiclyListed) return "not_listed";
   if (!CODING_CANDIDATE_USAGE_CLASSES.includes(chat.usageClass)) return `usage_class:${chat.usageClass}`;
+  if (chatCreditsMissing(chat)) return "chat_credits_missing";
   if (!MODEL_ID_PATTERN.test(chat.id)) return "invalid_id";
   return null;
 };

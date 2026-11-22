@@ -300,7 +300,8 @@ catalogue models answers -- Chat's own Smart Adaptive router
 cross-provider choice a single-vendor subscription cannot offer, so the
 response always says which model answered: the `model` field (OpenAI's
 convention), `x-tomverse-routed-model`, and `x-tomverse-routed-by`
-(`router`, `continued` or `default`). It is offered whenever any model is, and
+(`router`, `continued` or `default`). It is offered whenever a model it may
+default to is -- any model that is not `frontier` or `apex` -- and
 it is the id the settings page puts in a copied configuration by default:
 the id stays the same while models are added to or retired from the
 catalogue, so a customer never has to recopy it.
@@ -319,17 +320,30 @@ catalogue, so a customer never has to recopy it.
   one is offered only while the chat registry holds a positive credit weight
   for it (`hasRegistryCredits`, `lib/externalApiCatalogCore.ts`). Being
   nameable there, they no longer need a nameable model of their provider
-  beside them; Smart Adaptive still never defaults to them, and a native
-  protocol still offers Smart Adaptive only over a model a client could have
-  named that is not frontier or apex. The general API and the coding API with
-  the switch off keep the 2026-11-20 rule;
-  that fit the request -- images only to a
+  beside them. The general API and the coding API with the switch off keep
+  the 2026-11-20 rule. Of these, the candidates for one request are those
+  that fit it -- images only to a
   model that reads them, the requested output within the model's limit, a
   rough input estimate plus that output within its window, and the optional
   features the request uses (`strict` tools, image `detail`,
   `reasoning_effort`) by the same rules the request is validated with
   (`modelTakesRequestFeatures`), so the pick never decides whether a request
   succeeds.
+- **Never a frontier or apex default, on either API** (the 2026-11-20 rule,
+  kept on the coding catalogue where they became nameable on 2026-11-22).
+  They are only ever the router's pick: the model a request takes when the
+  router does not pick is chosen among the others (`routerPickOnly` on their
+  capabilities, `isSmartAdaptiveOnlyModel`). Smart Adaptive is offered on a
+  protocol only while a model that is not frontier or apex is there -- Chat
+  Completions over the whole list, a native protocol over its provider's
+  models (`smartAdaptiveCapabilities`) -- so on the coding catalogue, where
+  they can be a provider's only models or the whole list, `/models` and the
+  settings page do not list it there. A request for it there gets 404
+  `model_not_found` before any router call, reservation or dispatch
+  (`routeSmartAdaptive` and `routeNativeSmartAdaptive` answer null). Its
+  credits per request still count the router's frontier and apex picks. A
+  client naming a frontier or apex model on the coding catalogue is served as
+  before.
 - **When the router is called:** it is paid and runs before admission (which
   reserves for the model it picks), so it is skipped -- the default model
   answers and admission gives its own error -- while AI chat is paused, when
@@ -380,7 +394,8 @@ catalogue, so a customer never has to recopy it.
 - **No answer** (router switch off, no router model configured, provider budget
   refused, timeout, invalid output, one candidate left): the default model
   (`DEFAULT_MODEL_ID`) if it fits, otherwise the first candidate in catalogue
-  order, `routed-by: default`. A pick outside the candidates is never taken.
+  order that is not frontier or apex, `routed-by: default`. A pick outside the
+  candidates is never taken.
 - **A model named by its provider id.** Chat Completions, like the native
   protocols, takes the provider's model id (`gpt-5.6-luna`) when exactly one
   offered model uses it, so a coding tool's built-in model name works when it
@@ -855,6 +870,10 @@ providers, so signed or encrypted state is never sent to another provider.
   switch costs the reasoning and the cache, the trade the user's harder
   request asks for. The provider default is never a frontier or apex model,
   and a request only they fit is refused as it was before they were candidates.
+  A provider whose only models here are frontier or apex (possible on the
+  coding catalogue, where a client may name them) has no Smart Adaptive on its
+  protocol: it is not listed, and a request for it gets 404 `model_not_found`
+  before any router call, reservation or dispatch (section 5.1).
   Known limit: one pin per session holds one model. Two different messages
   the user sends on one session at the same moment (pinned or not) pick
   independently, the dearer one admitted first keeps the pin, and the
@@ -886,7 +905,8 @@ providers, so signed or encrypted state is never sent to another provider.
   another fitting model of the provider answers and the pin moves.
 - **Provider default:** the catalogue default (`gpt-6-luna`) when the
   provider has it, otherwise the lower-median model by credits
-  (`nativeSmartAdaptiveDefaultId`). It also answers with the router switch
+  (`nativeSmartAdaptiveDefaultId`), never a frontier or apex model (it leaves
+  them out, and answers none when only they are left). It also answers with the router switch
   off, when the router gives no answer or names a model outside the
   candidates, and for the free `count_tokens` call, which never routes and
   reads the pin only.
@@ -895,10 +915,11 @@ providers, so signed or encrypted state is never sent to another provider.
   admission pauses router calls for the key for two minutes, as in section 5.1.
   Responses carry `x-tomverse-routed-model` and `x-tomverse-routed-by`.
 - **Settings:** Claude Code and Codex offer Smart Adaptive first, scoped to
-  their provider (`nativeSmartAdaptiveCapabilities`): the smallest window
+  their provider (`nativeSmartAdaptiveCapabilities`), and only while that
+  provider has a model other than frontier or apex: the smallest window
   among those models (the conversation keeps its first model, so the tool
-  compacts before the smallest window), the default's output limit, the
-  dearest model's credits. Claude Code's Haiku alias stays on the cheapest
+  compacts before the smallest window), the default's output limit (never a
+  frontier or apex model's), the dearest model's credits. Claude Code's Haiku alias stays on the cheapest
   fixed Anthropic model, so background work makes no router call. Codex 0.146
   given `smart-adaptive` (a slug it does not know) sends its generic function
   tools (`shell_command`, `update_plan`, ...) and no freeform tool, captured

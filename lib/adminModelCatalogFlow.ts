@@ -157,6 +157,7 @@ export type ReasonMessage =
   | { key: "chatModelDeleted" }
   | { key: "chatModelDisabled" }
   | { key: "chatPriceUnverified" }
+  | { key: "chatCreditsMissing" }
   | { key: "reasoningCostUnbounded" }
   | { key: "providerCostUnbounded" }
   | { key: "alreadyInCatalog" }
@@ -276,6 +277,8 @@ export const reasonMessage = (code: string, detail = ""): ReasonMessage => {
       return { key: "chatModelDisabled" };
     case "chat_price_unverified":
       return { key: "chatPriceUnverified" };
+    case "chat_credits_missing":
+      return { key: "chatCreditsMissing" };
     case "reasoning_cost_unbounded":
       return { key: "reasoningCostUnbounded" };
     case "provider_cost_unbounded":

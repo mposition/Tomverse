@@ -38,7 +38,10 @@ import {
   CODING_DEFAULT_MAX_OUTPUT_TOKENS,
   CODING_STRUCTURED_OUTPUT,
   CODING_STRUCTURED_OUTPUT_CHOICES,
+  codingDraftBasisSchema,
+  codingProfileForWrite,
   codingProfileSchema,
+  codingStoredProfileSchema,
   codingStructuredOutputChoice,
 } from "../lib/modelCatalogCore.ts";
 import {
@@ -823,6 +826,100 @@ test("a tiered price drafts at the dearest tier, keeps the tier list, and raises
       (error) => error.code === "draft_rejected" && error.detail === "pricing.tiers"
     );
   }
+});
+
+test("a tier list out of order is refused: upToInputTokens must ascend and only the last tier may be open", () => {
+  const tier = (upToInputTokens, inputUsdPerMTok = 1, outputUsdPerMTok = 5) => ({ upToInputTokens, inputUsdPerMTok, outputUsdPerMTok });
+  const draft = (tiers) =>
+    codingDraftFromAnswer(qwenAnswer({ pricing: { inputUsdPerMTok: 1.6, outputUsdPerMTok: 9.6, tiers } }), "qwen", "qwen3-coder-flash", [QWEN_PRICING], () => 3);
+  for (const [label, tiers] of [
+    ["descending", [tier(128_000), tier(32_000), tier(null)]],
+    ["a repeated bound", [tier(32_000), tier(32_000), tier(null)]],
+    ["an open tier first", [tier(null), tier(32_000)]],
+    ["an open tier in the middle", [tier(32_000), tier(null), tier(256_000)]],
+    ["two open tiers", [tier(32_000), tier(null), tier(null)]],
+  ]) {
+    assert.throws(() => draft(tiers), (error) => error.code === "draft_rejected" && error.detail === "pricing.tiers", label);
+    assert.equal(codingDraftBasisSchema.safeParse({ maxOutputTokens: "default", priceTiers: tiers }).success, false, label);
+  }
+  // In order, with or without an open top tier, and one open tier alone: accepted.
+  for (const tiers of [QWEN_TIERS, [tier(32_000), tier(128_000)], [tier(null)], [tier(1)]]) {
+    assert.equal(codingDraftBasisSchema.safeParse({ maxOutputTokens: "documented", priceTiers: tiers }).success, true);
+  }
+  // A stored profile with such a list does not parse either, so the screen never shows its ranges.
+  const stored = draft(QWEN_TIERS);
+  assert.equal(codingProfileSchema.safeParse({ ...stored, basis: { ...stored.basis, priceTiers: [tier(256_000), tier(32_000)] } }).success, false);
+});
+
+test("with tiers, an answered rate that is not a price is refused, never replaced by a tier's", () => {
+  for (const [field, value] of [
+    ["inputUsdPerMTok", -1],
+    ["outputUsdPerMTok", -0.5],
+    ["inputUsdPerMTok", "1.6"],
+    ["outputUsdPerMTok", null],
+    ["inputUsdPerMTok", Number.NaN],
+  ]) {
+    const pricing = { inputUsdPerMTok: 1.6, outputUsdPerMTok: 9.6, tiers: QWEN_TIERS, [field]: value };
+    assert.throws(
+      () => codingDraftFromAnswer(qwenAnswer({ pricing }), "qwen", "qwen3-coder-flash", [QWEN_PRICING], () => 3),
+      (error) => error.code === "draft_rejected" && error.detail.includes(`pricing.${field}`),
+      `${field}: ${String(value)}`
+    );
+  }
+  // A zero rate is a price: raised to the dearest tier as before.
+  const zero = codingDraftFromAnswer(qwenAnswer({ pricing: { inputUsdPerMTok: 0, outputUsdPerMTok: 0, tiers: QWEN_TIERS } }), "qwen", "qwen3-coder-flash", [QWEN_PRICING], () => 3);
+  assert.deepEqual([zero.pricing.inputUsdPerMTok, zero.pricing.outputUsdPerMTok], [1.6, 9.6]);
+});
+
+const olderDedicatedProfile = () => ({
+  source: "dedicated",
+  name: "Older Coder",
+  provider: "deepseek",
+  apiModelId: "deepseek-coder-older",
+  minimumPlan: "Pro",
+  capabilities: { toolCalling: "parallel", structuredOutput: "json_mode", imageInput: false, maxContextTokens: 128_000, maxOutputTokens: 8_192 },
+  pricing: { inputUsdPerMTok: 0.3, outputUsdPerMTok: 1.2, creditWeight: 4, verifiedAt: "2026-11-01", sources: ["https://api-docs.deepseek.com/quick_start/pricing"] },
+});
+
+test("a write saves an older structured output value as supported and names what it changed; one of the two choices is left alone", () => {
+  const dedicated = codingStoredProfileSchema.parse(olderDedicatedProfile());
+  const written = codingProfileForWrite(dedicated);
+  assert.equal(written.profile.capabilities.structuredOutput, "supported");
+  assert.deepEqual(written.rewritten, [{ field: "capabilities.structuredOutput", from: "json_mode", to: "supported" }]);
+  // Every other field is as it was.
+  assert.deepEqual({ ...written.profile, capabilities: { ...written.profile.capabilities, structuredOutput: "json_mode" } }, dedicated);
+
+  const link = codingStoredProfileSchema.parse({
+    source: "chat",
+    registryModelId: "claude-sonnet-4-6",
+    capabilities: { toolCalling: "parallel", structuredOutput: "forced_tool_use" },
+    channels: ["code", "api"],
+    evidence: { sources: [], draftedAt: "2026-11-01", toolCalling: "parallel", structuredOutput: "strict_schema" },
+  });
+  const linkWritten = codingProfileForWrite(link);
+  assert.equal(linkWritten.profile.capabilities.structuredOutput, "supported");
+  assert.equal(linkWritten.profile.evidence.structuredOutput, "supported");
+  assert.deepEqual(linkWritten.rewritten.map((change) => [change.field, change.from]), [
+    ["capabilities.structuredOutput", "forced_tool_use"],
+    ["evidence.structuredOutput", "strict_schema"],
+  ]);
+  assert.equal(codingStoredProfileSchema.safeParse(linkWritten.profile).success, true);
+
+  // Already one of the two choices, with or without evidence: nothing rewritten, the same content.
+  const withoutEvidence = { ...link };
+  delete withoutEvidence.evidence;
+  for (const structuredOutput of ["supported", "none"]) {
+    for (const current of [
+      { ...withoutEvidence, capabilities: { ...link.capabilities, structuredOutput } },
+      { ...link, capabilities: { ...link.capabilities, structuredOutput }, evidence: { ...link.evidence, structuredOutput } },
+    ]) {
+      const same = codingProfileForWrite(current);
+      assert.deepEqual(same.rewritten, []);
+      assert.equal(canonicalJson(same.profile), canonicalJson(current));
+    }
+  }
+  // Reading is unchanged: the older values still parse as they are stored.
+  assert.equal(link.capabilities.structuredOutput, "forced_tool_use");
 });
 
 test("the draft answer schemas carry the tiers, a nullable output limit and two structured output choices", () => {

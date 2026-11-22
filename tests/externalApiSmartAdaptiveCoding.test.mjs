@@ -10,9 +10,12 @@ import {
     buildAutoLlmRouterSystem,
 } from "../lib/autoLlmRouterCore.ts";
 import {
+    externalApiModelCapabilities,
     hasRegistryCredits,
     isExternalApiServableModel,
     isSmartAdaptiveOnlyModel,
+    nativeSmartAdaptiveCapabilities,
+    nativeSmartAdaptiveDefaultId,
     smartAdaptiveCapabilities,
 } from "../lib/externalApiCatalogCore.ts";
 import { codingToolModels } from "../lib/externalApiCodingTools.ts";
@@ -127,6 +130,61 @@ test("Smart Adaptive states the most a request costs, per protocol", () => {
     assert.equal(tools.claudeCode[0].creditWeight, 80, "Fable is routed to on Claude Code");
     assert.equal(tools.codex[0].creditWeight, 16, "an Anthropic model never sets Codex's ceiling");
     assert.ok(!tools.claudeCode.some((entry) => entry.id === "fable"), "never offered by name");
+});
+
+test("Smart Adaptive is offered only where a model it may default to is; frontier and apex are never its default", () => {
+    // externalApiModelCapabilities marks the classes only the router may pick.
+    const limits = { maxInputTokens: 100_000, maxOutputTokens: 8_000, creditWeight: 40 };
+    assert.equal(externalApiModelCapabilities(model("frontier"), limits).routerPickOnly, true);
+    assert.equal(externalApiModelCapabilities(model("apex"), limits).routerPickOnly, true);
+    assert.equal("routerPickOnly" in externalApiModelCapabilities(model("premium"), limits), false);
+
+    const pick = (entry) => ({ ...entry, routerPickOnly: true });
+    // Only frontier or apex models: no Smart Adaptive at all.
+    assert.equal(smartAdaptiveCapabilities([pick(caps("opus", 40, ["chat_completions", "anthropic_messages"]))]), null);
+    assert.equal(
+        smartAdaptiveCapabilities([pick(caps("opus", 40, ["chat_completions", "anthropic_messages"])), pick(caps("astra", 32, ["chat_completions", "responses"]))]),
+        null
+    );
+    // Anthropic only frontier, OpenAI a standard model: offered on Chat Completions and Responses only.
+    const smart = smartAdaptiveCapabilities(
+        [
+            pick({ ...caps("opus", 40, ["chat_completions", "anthropic_messages"]), maxOutputTokens: 32_000 }),
+            caps("luna", 1, ["chat_completions", "responses"]),
+            pick(caps("astra", 32, ["chat_completions", "responses"])),
+        ],
+        "luna"
+    );
+    assert.deepEqual(smart.protocols, ["chat_completions", "responses"]);
+    assert.deepEqual(smart.creditWeightByProtocol, { chat_completions: 40, responses: 32 }, "routed picks still count toward the most a request costs");
+    assert.equal(smart.creditWeight, 40);
+    assert.equal(smart.maxOutputTokens, 64_000, "the default model's limit");
+    // A default id that names a frontier model is not taken as the default's limit.
+    assert.equal(
+        smartAdaptiveCapabilities([pick({ ...caps("opus", 40, ["chat_completions"]), maxOutputTokens: 128_000 }), caps("luna", 1, ["chat_completions"])], "opus").maxOutputTokens,
+        64_000
+    );
+
+    // The native default skips them too, and is null when only they are left.
+    assert.equal(nativeSmartAdaptiveDefaultId([pick({ id: "opus", creditWeight: 40 }), pick({ id: "fable", creditWeight: 80 })]), null);
+    assert.equal(nativeSmartAdaptiveDefaultId([pick({ id: "opus", creditWeight: 40 }), { id: "sonnet", creditWeight: 16 }, pick({ id: "fable", creditWeight: 80 })]), "sonnet");
+    assert.equal(nativeSmartAdaptiveDefaultId([pick({ id: "luna", creditWeight: 1 }), { id: "sol", creditWeight: 16 }], "luna"), "sol", "never the catalogue default if only the router may pick it");
+    assert.equal(nativeSmartAdaptiveCapabilities([pick(caps("opus", 40, ["chat_completions", "anthropic_messages"]))]), null);
+
+    // The settings page on the coding catalogue, where a frontier model is nameable: Claude
+    // Code lists it by name and no Smart Adaptive; Codex has Smart Adaptive over Luna.
+    const offered = [
+        { ...smart, id: "smart-adaptive" },
+        pick({ ...caps("opus", 40, ["chat_completions", "anthropic_messages"]), maxOutputTokens: 32_000 }),
+        caps("luna", 1, ["chat_completions", "responses"]),
+        pick(caps("astra", 32, ["chat_completions", "responses"])),
+    ];
+    const tools = codingToolModels(offered);
+    assert.deepEqual(tools.claudeCode.map((entry) => entry.id), ["opus"]);
+    assert.equal(tools.codex[0].id, "smart-adaptive");
+    assert.equal(tools.codex[0].maxOutputTokens, 64_000, "Luna's output limit, not a frontier model's");
+    assert.equal(tools.codex[0].creditWeight, 32);
+    assert.equal(tools.cursor[0].id, "smart-adaptive");
 });
 
 test("the coding router has its own head and fixed guidance", () => {
