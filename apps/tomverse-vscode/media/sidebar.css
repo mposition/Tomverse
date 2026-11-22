@@ -7,6 +7,7 @@ body {
     background: var(--vscode-sideBar-background);
     font-family: var(--vscode-font-family);
     font-size: var(--vscode-font-size);
+    overflow-wrap: anywhere;
 }
 main {
     max-width: 760px;
@@ -37,6 +38,7 @@ textarea {
     border-radius: 3px;
 }
 button {
+    max-width: 100%;
     padding: 6px 9px;
     color: var(--vscode-button-secondaryForeground);
     background: var(--vscode-button-secondaryBackground);
