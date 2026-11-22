@@ -210,6 +210,24 @@ migration 적용은 별도입니다. 구현한 A1 범위와 확정 값은 10절�
   draftedAt, note)를 쓰고 `model_catalog.coding_capabilities_filled`를 같은 트랜잭션에 남깁니다.
   **채널은 바꾸지 않습니다.** 값이 채워져 Code 판정을 통과하게 돼도 Code 채널은 운영자가 상세에서
   켭니다. 바뀐 행은 "스냅샷 이후 변경"으로 보이며 다음 발행에 반영됩니다.
+- **코딩 장단점(`codingNotes`, 운영자 결정 2026-11-22).** 채팅 연결 행과 전용 행 모두 저장된 행에
+  `codingNotes: { strengths, weaknesses, sources, draftedAt, editedAt? }`를 둘 수 있습니다(강점·약점 각각 3개까지, 한
+  줄 120자까지, `codingNotesSchema`). JSON 프로필 필드라 migration이 없고, 해석된 행·스냅샷 행에는 싣지 않으므로
+  이 필드가 있든 없든 어떤 행의 `canonicalJson`·해시도 바뀌지 않습니다. 코딩 API의 Smart Adaptive는 후보 설명에
+  채팅의 `bestFor` 대신 이 장단점을 읽고(`withCandidateModels`, `docs/policy/external-api.md` 5.1), 장단점이 없는
+  행은 `bestFor` 그대로입니다. 지금 행에서 읽으므로 발행을 기다리지 않습니다. 채팅의 `bestFor`와 채팅 라우터는 바뀌지
+  않습니다.
+  - **채우기**: "LLM으로 기능 정보 채우기"(`fill_capabilities`)가 같은 호출 한 번으로 장단점도 받습니다(추가 유료 호출
+    없음). LLM은 읽은 문서에 적혀 있거나 그 문서의 벤치마크 결과가 보여 주는 내용만 쓰고, 근거 주소
+    (`sourceUrls`)를 답합니다. 근거 주소가 이번에 읽은 문서가 아니거나 `isOfficialSourceUrl`을 통과하지 못하면 아무것도
+    쓰지 않고 `unofficial_source`로 거절합니다. 근거 주소가 없는 장단점은 쓰지 않습니다. 한 항목이 120자를 넘으면
+    자르지 않고 뺍니다. 채우기는 전용 행에도 됩니다: 전용 행의 기능 값은 초안의 것이므로 장단점만 쓰고, 근거 있는
+    장단점이 없으면 `no_coding_notes`로 아무것도 쓰지 않습니다. 장단점이 비어 있는 행은 채우기 대상
+    (`capabilitiesNeedFilling`)이라, 구조화 출력이 이미 채워진 행도 "모두 채우기"에 들어갑니다. 다시 채울 때 근거 있는
+    장단점이 나오지 않으면 기존 장단점은 그대로 둡니다.
+  - **운영자 입력**: 행 상세(연결 행·전용 행)의 "코딩 장단점" 타일에서 한 줄에 하나씩 고칩니다(`settings` action의
+    `codingNotes`). 고친 장단점은 읽었던 근거 주소를 그대로 두고 `editedAt`을 남기며, 둘 다 비우면 장단점을 지웁니다.
+    전용 행에 새 초안을 적용해도 장단점은 유지됩니다.
 - **"채팅 모델 한 번에 추가"**(코딩 탭 후보 목록, `POST /api/admin/model-catalog/coding`
   `action: "link_all"`). 후보(`codingCandidateExclusion`을 통과한 채팅 모델) 하나마다 트랜잭션 하나로
   연결(`model_catalog.coding_linked`, `metadata.batch: true`)과 활성화(`updateCatalogEntry`, 켤 때와

@@ -23,14 +23,21 @@ import {
   codingApiCreditWeightSchema,
   codingChannelsSchema,
   codingLinkedProfileSchema,
+  codingDedicatedProfileSchema,
+  codingNotesEditSchema,
+  codingNotesOf,
+  codingNotesSchema,
   codingStoredProfileSchema,
   codingStructuredOutputChoice,
+  CODING_EVIDENCE_MAX_SOURCES,
   defaultCodingCapabilitySources,
   isOfficialSourceUrl,
   registryCodingCapabilities,
   type CodingChannel,
   type CodingDedicatedProfile,
   type CodingLinkedProfile,
+  type CodingNotes,
+  type CodingStoredProfile,
 } from "@/lib/modelCatalogCore";
 import type { CatalogDraftLlm, DraftPage } from "@/lib/modelCatalogDraftLlm";
 import { prisma } from "@/lib/prisma";
@@ -228,9 +235,46 @@ export const codingSettingsSchema = z
     channels: codingChannelsSchema.optional(),
     /** A dedicated row's coding API credits; null puts it back on the chat rule's minimum. */
     apiCreditWeight: codingApiCreditWeightSchema.nullable().optional(),
+    /** The row's coding strengths and weaknesses as the operator wrote them; null (or two empty lists) removes them. */
+    codingNotes: codingNotesEditSchema.nullable().optional(),
   })
   .strict();
 export type CodingSettings = z.infer<typeof codingSettingsSchema>;
+
+const todayIso = () => new Date().toISOString().slice(0, 10);
+
+/**
+ * The notes after the operator's edit: undefined when the edit leaves them as
+ * they are (absent, or the same two lists), null when it removes them. Edited
+ * text keeps the pages it was drafted from and is marked with the edit date.
+ */
+const editedCodingNotes = (current: CodingNotes | undefined, edit: CodingSettings["codingNotes"]): CodingNotes | null | undefined => {
+  if (edit === undefined) return undefined;
+  if (edit === null || edit.strengths.length + edit.weaknesses.length === 0) return current ? null : undefined;
+  if (current && canonicalJson([current.strengths, current.weaknesses]) === canonicalJson([edit.strengths, edit.weaknesses])) return undefined;
+  return {
+    strengths: edit.strengths,
+    weaknesses: edit.weaknesses,
+    sources: current?.sources ?? [],
+    draftedAt: current?.draftedAt ?? todayIso(),
+    editedAt: todayIso(),
+  };
+};
+
+/** Write the edited notes into a stored row, and name the change. */
+const withEditedNotes = <T extends { codingNotes?: CodingNotes }>(
+  profile: T,
+  edit: CodingSettings["codingNotes"],
+  changes: { field: string; from: unknown; to: unknown }[]
+): T => {
+  const notes = editedCodingNotes(profile.codingNotes, edit);
+  if (notes === undefined) return profile;
+  const next = { ...profile };
+  if (notes === null) delete next.codingNotes;
+  else next.codingNotes = notes;
+  changes.push({ field: "codingNotes", from: profile.codingNotes ?? null, to: notes });
+  return next;
+};
 
 /** The link with the operator's settings, and each field that changed (for the audit row). */
 export const applyCodingSettings = (
@@ -262,20 +306,21 @@ export const applyCodingSettings = (
   compare("minimumPlan", stored.minimumPlan, next.minimumPlan);
   compare("creditWeight", stored.creditWeight, next.creditWeight);
   compare("channels", stored.channels, next.channels);
-  return { profile: next, changes };
+  return { profile: withEditedNotes(next, settings.codingNotes, changes), changes };
 };
 
 /**
  * A dedicated row's settings here (owner decision 2026-11-21): where it is
  * offered, and its coding API credits when they should be above the chat
- * rule's minimum (null removes the override). Everything else in its profile
- * is what its draft read, so it changes only through a new draft.
+ * rule's minimum (null removes the override), and its coding notes. Everything
+ * else in its profile is what its draft read, so it changes only through a new
+ * draft.
  */
 export const applyDedicatedSettings = (
   stored: CodingDedicatedProfile,
   settings: CodingSettings
 ): { profile: CodingDedicatedProfile; changes: { field: string; from: unknown; to: unknown }[] } | null => {
-  if (Object.keys(settings).some((field) => field !== "channels" && field !== "apiCreditWeight")) return null;
+  if (Object.keys(settings).some((field) => field !== "channels" && field !== "apiCreditWeight" && field !== "codingNotes")) return null;
   const fromChannels = stored.channels ?? ["code"];
   const toChannels = settings.channels ?? fromChannels;
   const profile: CodingDedicatedProfile = { ...stored, channels: toChannels };
@@ -286,7 +331,7 @@ export const applyDedicatedSettings = (
   if ((stored.apiCreditWeight ?? null) !== (profile.apiCreditWeight ?? null)) {
     changes.push({ field: "apiCreditWeight", from: stored.apiCreditWeight ?? null, to: profile.apiCreditWeight ?? null });
   }
-  return { profile, changes };
+  return { profile: withEditedNotes(profile, settings.codingNotes, changes), changes };
 };
 
 /**
@@ -371,23 +416,32 @@ const defaultFillDeps: CapabilityFillDeps = {
   fetchPage: async (provider, url) => (await import("@/lib/modelCatalogDraftLlm")).fetchOfficialPage(provider, url),
 };
 
-/** Whether a link still carries the registry's conservative values rather than what the documentation says. */
-export const capabilitiesNeedFilling = (profile: CodingLinkedProfile): boolean =>
-  profile.capabilities.structuredOutput === "none" || (profile.evidence?.sources.length ?? 0) === 0;
+/**
+ * Whether a row is a fill target: a link still on the registry's conservative
+ * values rather than what the documentation says, or any row with no coding
+ * notes yet (owner decision 2026-11-22), so a run over the whole catalogue
+ * fills the notes of rows whose capabilities are already filled.
+ */
+export const capabilitiesNeedFilling = (profile: CodingStoredProfile): boolean =>
+  codingNotesOf(profile) === null ||
+  (profile.source === "chat" && (profile.capabilities.structuredOutput === "none" || (profile.evidence?.sources.length ?? 0) === 0));
 
 /**
- * Fill one chat link's tool calling and structured output from the provider's
- * own documentation (owner decision 2026-11-21): the one paid call of linking,
- * made on request and for one row only (a caller with many rows sends one
- * request each, so no request outlives the HTTP limit). One LLM call over the
- * provider's default tool calling and structured output pages
- * (defaultCodingCapabilitySources); the answer is read by
- * codingCapabilitiesFromAnswer and every page must be on the provider's own
- * hosts. Any failure leaves the row as it was. A timeout is an unknown outcome
- * (the call may have been charged) and is reported, never retried here. The
- * channels are never touched: Code stays the operator's to tick. Goes through
- * updateCatalogEntry, so a serving row is judged at the new values; the audit
- * rows commit with the write.
+ * Fill one coding row from the provider's own documentation: a chat link's
+ * tool calling and structured output (owner decision 2026-11-21), and any row's
+ * coding strengths and weaknesses (owner decision 2026-11-22) -- a dedicated
+ * row's capabilities are its draft's, so only its notes are written. The one
+ * paid call of linking, made on request and for one row only (a caller with
+ * many rows sends one request each, so no request outlives the HTTP limit).
+ * One LLM call over the provider's default tool calling and structured output
+ * pages (defaultCodingCapabilitySources); the answer is read by
+ * codingCapabilitiesFromAnswer and every page it stands on -- the notes' too --
+ * must be one of those fetched pages on the provider's own hosts. Notes no page
+ * supports are not written. Any failure leaves the row as it was. A timeout is
+ * an unknown outcome (the call may have been charged) and is reported, never
+ * retried here. The channels are never touched: Code stays the operator's to
+ * tick. Goes through updateCatalogEntry, so a serving row is judged at the new
+ * values; the audit rows commit with the write.
  */
 export const fillLinkCapabilities = async (input: {
   modelId: string;
@@ -399,20 +453,27 @@ export const fillLinkCapabilities = async (input: {
   const row = await prisma.modelCatalogEntry.findUnique({ where: { category_modelId: { category: "coding", modelId: input.modelId } } });
   if (!row) throw new CatalogRefusal("unknown_model", [], 404);
   const stored = codingStoredProfileSchema.safeParse(row.profile);
-  if (!stored.success || stored.data.source !== "chat") throw new CatalogRefusal("settings_linked_only", [], 400);
-  const registryModelId = stored.data.registryModelId;
-  const facts = (await loadChatModelFacts()).find((model) => model.id === registryModelId);
+  if (!stored.success) throw new CatalogRefusal("settings_linked_only", [], 400);
+  const source = stored.data.source === "chat" ? "chat" : "dedicated";
+  let facts: { provider: string; apiModelId: string } | undefined;
+  if (stored.data.source === "chat") {
+    const registryModelId = stored.data.registryModelId;
+    facts = (await loadChatModelFacts()).find((model) => model.id === registryModelId);
+  } else {
+    facts = { provider: stored.data.provider, apiModelId: stored.data.apiModelId };
+  }
   if (!facts) throw new CatalogRefusal("chat_model_missing", [], 409);
-  const pages = defaultCodingCapabilitySources(facts.provider);
-  if (!pages) throw new CatalogRefusal("no_capability_source", [facts.provider], 422);
+  const provider = facts.provider;
+  const pages = defaultCodingCapabilitySources(provider);
+  if (!pages) throw new CatalogRefusal("no_capability_source", [provider], 422);
   const llm = await deps.draftLlm();
   if (!llm) throw new CatalogRefusal("draft_llm_not_configured", [], 409);
 
   let draft: Awaited<ReturnType<CatalogDraftLlm["draftCodingCapabilities"]>>;
   try {
     const read: DraftPage[] = [];
-    for (const url of [...new Set([pages.toolCalling, pages.structuredOutput])]) read.push(await deps.fetchPage(facts.provider, url));
-    draft = await llm.draftCodingCapabilities({ provider: facts.provider, apiModelId: facts.apiModelId, pages: read });
+    for (const url of [...new Set([pages.toolCalling, pages.structuredOutput])]) read.push(await deps.fetchPage(provider, url));
+    draft = await llm.draftCodingCapabilities({ provider, apiModelId: facts.apiModelId, pages: read });
   } catch (error) {
     const name = (error as { name?: unknown } | null)?.name;
     if (name === "TimeoutError" || name === "AbortError") throw new CatalogRefusal("timeout_outcome_unknown", [], 504);
@@ -423,8 +484,25 @@ export const fillLinkCapabilities = async (input: {
     throw new CatalogRefusal("draft_failed", [], 502);
   }
   // The one cheap check on what the model answered: every page it stands on is the provider's own.
-  const unofficial = draft.sources.find((url) => !isOfficialSourceUrl(facts.provider, url));
+  const unofficial = draft.sources.find((url) => !isOfficialSourceUrl(provider, url));
   if (unofficial || draft.sources.length === 0) throw new CatalogRefusal("unofficial_source", unofficial ? [unofficial] : [], 422);
+  // The notes stand only on pages fetched here, on the provider's own hosts.
+  const fetched = new Set(draft.sources);
+  const answeredNotes = draft.codingNotes ?? null;
+  const notesSources = answeredNotes?.sourceUrls ?? [];
+  const unread = notesSources.find((url) => !fetched.has(url) || !isOfficialSourceUrl(provider, url));
+  if (unread) throw new CatalogRefusal("unofficial_source", [unread], 422);
+  const notes: CodingNotes | null =
+    answeredNotes && notesSources.length > 0
+      ? codingNotesSchema.parse({
+          strengths: answeredNotes.strengths,
+          weaknesses: answeredNotes.weaknesses,
+          sources: notesSources.slice(0, CODING_EVIDENCE_MAX_SOURCES),
+          draftedAt: draft.draftedAt,
+        })
+      : null;
+  // A dedicated row takes only notes from a fill: with none, there is nothing to write.
+  if (source === "dedicated" && !notes) throw new CatalogRefusal("no_coding_notes", [], 422);
   // A save writes one of the two structured output choices, whatever the draft carries.
   const structuredOutput = codingStructuredOutputChoice(draft.structuredOutput);
 
@@ -433,24 +511,35 @@ export const fillLinkCapabilities = async (input: {
     const before = await tx.modelCatalogEntry.findUnique({ where: { category_modelId: { category: "coding", modelId: input.modelId } } });
     if (!before) throw new CatalogRefusal("unknown_model", [], 404);
     const current = codingStoredProfileSchema.safeParse(before.profile);
-    if (!current.success || current.data.source !== "chat") throw new CatalogRefusal("settings_linked_only", [], 400);
-    const next: CodingLinkedProfile = codingLinkedProfileSchema.parse({
-      ...current.data,
-      capabilities: { toolCalling: draft.toolCalling, structuredOutput },
-      evidence: {
-        sources: draft.sources.slice(0, 3),
-        draftedAt: draft.draftedAt,
-        toolCalling: draft.toolCalling,
-        structuredOutput,
-        ...(draft.note ? { note: draft.note } : {}),
-      },
-    });
-    const changes: { field: string; from: unknown; to: unknown }[] = [];
-    if (current.data.capabilities.toolCalling !== draft.toolCalling) {
-      changes.push({ field: "toolCalling", from: current.data.capabilities.toolCalling, to: draft.toolCalling });
+    if (!current.success || (current.data.source === "chat" ? "chat" : "dedicated") !== source) {
+      throw new CatalogRefusal("settings_linked_only", [], 400);
     }
-    if (current.data.capabilities.structuredOutput !== structuredOutput) {
-      changes.push({ field: "structuredOutput", from: current.data.capabilities.structuredOutput, to: structuredOutput });
+    const changes: { field: string; from: unknown; to: unknown }[] = [];
+    let next: CodingStoredProfile;
+    if (current.data.source === "chat") {
+      next = codingLinkedProfileSchema.parse({
+        ...current.data,
+        capabilities: { toolCalling: draft.toolCalling, structuredOutput },
+        evidence: {
+          sources: draft.sources.slice(0, 3),
+          draftedAt: draft.draftedAt,
+          toolCalling: draft.toolCalling,
+          structuredOutput,
+          ...(draft.note ? { note: draft.note } : {}),
+        },
+        ...(notes ? { codingNotes: notes } : {}),
+      });
+      if (current.data.capabilities.toolCalling !== draft.toolCalling) {
+        changes.push({ field: "toolCalling", from: current.data.capabilities.toolCalling, to: draft.toolCalling });
+      }
+      if (current.data.capabilities.structuredOutput !== structuredOutput) {
+        changes.push({ field: "structuredOutput", from: current.data.capabilities.structuredOutput, to: structuredOutput });
+      }
+    } else {
+      next = codingDedicatedProfileSchema.parse({ ...current.data, ...(notes ? { codingNotes: notes } : {}) });
+    }
+    if (notes && canonicalJson(current.data.codingNotes ?? null) !== canonicalJson(notes)) {
+      changes.push({ field: "codingNotes", from: current.data.codingNotes ?? null, to: notes });
     }
     const updated = await updateCatalogEntry({
       category: "coding",
@@ -467,12 +556,16 @@ export const fillLinkCapabilities = async (input: {
       action: "model_catalog.coding_capabilities_filled",
       targetType: "ModelCatalogEntry",
       targetId: `coding:${input.modelId}`,
-      summary: `Filled the capabilities of coding link ${input.modelId} from ${facts.provider}'s documentation.`,
+      summary:
+        source === "chat"
+          ? `Filled the capabilities of coding link ${input.modelId} from ${provider}'s documentation.`
+          : `Filled the coding notes of dedicated coding row ${input.modelId} from ${provider}'s documentation.`,
       metadata: {
         modelId: input.modelId,
-        toolCalling: draft.toolCalling,
-        structuredOutput,
-        sources: next.evidence?.sources ?? [],
+        source,
+        ...(source === "chat" ? { toolCalling: draft.toolCalling, structuredOutput } : {}),
+        sources: next.source === "chat" ? (next.evidence?.sources ?? []) : [],
+        codingNotes: (notes ?? null) as unknown as Prisma.InputJsonValue,
         changes: changes as unknown as Prisma.InputJsonValue,
       },
       tx,

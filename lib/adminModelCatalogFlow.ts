@@ -148,6 +148,7 @@ export type ReasonMessage =
   | { key: "noToolCalling" }
   | { key: "noStructuredOutput" }
   | { key: "noCapabilitySource" }
+  | { key: "noCodingNotes" }
   | { key: "timeoutUnknown" }
   | { key: "draftFailed" }
   | { key: "noProfile" }
@@ -216,6 +217,8 @@ export const reasonMessage = (code: string, detail = ""): ReasonMessage => {
       return { key: "noStructuredOutput" };
     case "no_capability_source":
       return { key: "noCapabilitySource" };
+    case "no_coding_notes":
+      return { key: "noCodingNotes" };
     case "timeout_outcome_unknown":
       return { key: "timeoutUnknown" };
     case "draft_failed":
@@ -529,6 +532,61 @@ export type ChatFactsView = {
   price: { inputUsdPerMTok: number; outputUsdPerMTok: number; pricingVersion: string; effectiveDate: string; verified: boolean };
 };
 
+/**
+ * A coding row's strengths and weaknesses at coding work (owner decision
+ * 2026-11-22; lib/modelCatalogCore.ts codingNotesSchema): what the coding API's
+ * router reads instead of chat's bestFor. Empty sources: written by the operator.
+ */
+export type CodingNotesView = {
+  strengths: string[];
+  weaknesses: string[];
+  sources: string[];
+  draftedAt: string;
+  editedAt?: string;
+};
+
+/** The limits a note is held to (lib/modelCatalogCore.ts CODING_NOTE_MAX_CHARS, CODING_NOTES_MAX_ITEMS). */
+export const CODING_NOTE_MAX_CHARS = 120;
+export const CODING_NOTES_MAX_ITEMS = 3;
+
+const looksLikeNotes = (value: unknown): value is CodingNotesView => {
+  const v = value as Partial<CodingNotesView> | null;
+  return Boolean(v && Array.isArray(v.strengths) && Array.isArray(v.weaknesses) && Array.isArray(v.sources));
+};
+
+/** A stored row's notes when it has at least one; null when it has none. */
+export const codingNotesFrom = (stored: unknown): CodingNotesView | null => {
+  const notes = (stored as { codingNotes?: unknown } | null)?.codingNotes;
+  return looksLikeNotes(notes) && notes.strengths.length + notes.weaknesses.length > 0 ? notes : null;
+};
+
+/** One list as typed in a textarea: one note per line, blank lines dropped. */
+export const codingNoteLines = (text: string): string[] =>
+  text
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter((line) => line.length > 0);
+
+export type CodingNotesProblem = "too_many" | "too_long";
+
+/** What the typed notes would be refused for (the server holds them to the same limits). */
+export const codingNotesProblems = (value: { strengths: string; weaknesses: string }): Partial<Record<"strengths" | "weaknesses", CodingNotesProblem>> => {
+  const problems: Partial<Record<"strengths" | "weaknesses", CodingNotesProblem>> = {};
+  for (const field of ["strengths", "weaknesses"] as const) {
+    const lines = codingNoteLines(value[field]);
+    if (lines.length > CODING_NOTES_MAX_ITEMS) problems[field] = "too_many";
+    else if (lines.some((line) => line.length > CODING_NOTE_MAX_CHARS)) problems[field] = "too_long";
+  }
+  return problems;
+};
+
+/** The settings request for typed notes: null when both lists are empty (the notes are removed). */
+export const codingNotesRequest = (value: { strengths: string; weaknesses: string }) => {
+  const strengths = codingNoteLines(value.strengths);
+  const weaknesses = codingNoteLines(value.weaknesses);
+  return strengths.length + weaknesses.length === 0 ? null : { strengths, weaknesses };
+};
+
 /** A chat link's own stored values. */
 export type CodingLinkView = {
   registryModelId: string;
@@ -608,6 +666,8 @@ export type CodingCatalogItem = {
   draftCreatedAt: string | null;
   /** The draft's floor and the judge's reasons at the draft's own values. */
   draftReview: { floor: number | null; reasons: string[] } | null;
+  /** The row's coding notes, from the stored row; null when it has none. */
+  codingNotes: CodingNotesView | null;
   raw: unknown;
 };
 
@@ -678,6 +738,7 @@ export const codingCatalogItems = (report: {
       draft,
       draftCreatedAt: row.draftCreatedAt ?? null,
       draftReview: row.draftReview ?? null,
+      codingNotes: codingNotesFrom(row.stored),
       raw: row,
     };
   });
@@ -980,17 +1041,24 @@ export const codingAttentionCounts = (items: readonly CodingCatalogItem[]) => {
 };
 
 /**
- * The chat links that still carry the registry's conservative capability values
- * (structured output None, or no documentation read), split into the ones the
- * LLM can fill (the provider has default pages) and the ones it cannot.
+ * The rows a fill run is for (lib/codingCatalogAdmin.ts capabilitiesNeedFilling):
+ * chat links that still carry the registry's conservative capability values
+ * (structured output None, or no documentation read), and any readable row --
+ * a link or a dedicated row -- with no coding notes yet (owner decision
+ * 2026-11-22), split into the ones the LLM can fill (the provider has default
+ * pages) and the ones it cannot.
  */
 export const capabilityFillTargets = (
   items: readonly CodingCatalogItem[],
   providers: readonly string[]
 ): { targets: CodingCatalogItem[]; unsupported: CodingCatalogItem[] } => {
-  const needing = items.filter(
-    (item) => item.source === "chat" && item.link !== null && (item.link.capabilities.structuredOutput === "none" || capabilityOrigin(item.link) === "registry")
-  );
+  const needing = items.filter((item) => {
+    if (item.source === "chat") {
+      if (item.link === null) return false;
+      return item.link.capabilities.structuredOutput === "none" || capabilityOrigin(item.link) === "registry" || item.codingNotes === null;
+    }
+    return item.source === "dedicated" && item.profile !== null && item.codingNotes === null;
+  });
   return {
     targets: needing.filter((item) => providers.includes(item.provider)),
     unsupported: needing.filter((item) => !providers.includes(item.provider)),

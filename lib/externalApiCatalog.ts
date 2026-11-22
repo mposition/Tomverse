@@ -9,6 +9,7 @@ import {
     type ExternalApiModelCapabilities,
     type ExternalApiSurface,
 } from "@/lib/externalApiCatalogCore";
+import { codingNotesRouterText, type CodingNotes } from "@/lib/modelCatalogCore";
 import { isProviderApiKeyConfigured } from "@/lib/modelRegistryShared";
 import { DEFAULT_MODEL_ID, getModelUsageProfile, resolveModelRequestPricing, type AiModel, type ModelTier } from "@/lib/models";
 import { getRuntimeModels } from "@/lib/modelRegistry";
@@ -36,6 +37,8 @@ export type ExternalApiRunnableEntry = {
     nameable?: boolean;
     /** A dedicated coding row's snapshot pricing, for its reservation (createChatBudget). */
     catalogPricing?: CodingCatalogPricing;
+    /** The coding catalogue row's strengths and weaknesses, for the coding router (withCandidateModels). */
+    codingNotes?: CodingNotes;
 };
 
 /**
@@ -54,7 +57,7 @@ export const externalApiRunnableModels = async (
 ): Promise<ExternalApiRunnableEntry[]> => {
     const runtime = await getRuntimeModels();
     const coding = options.surface === "coding" ? await codingApiModels(plan, { runtime }) : null;
-    const pool: { model: AiModel; pricing?: CodingCatalogPricing }[] = coding ?? runtime.map((model) => ({ model }));
+    const pool: { model: AiModel; pricing?: CodingCatalogPricing; codingNotes?: CodingNotes }[] = coding ?? runtime.map((model) => ({ model }));
     // On the coding catalogue a client may name frontier and apex models too
     // (owner decision 2026-11-22); on the general API, and on the coding API
     // while it serves the general API's models, only Smart Adaptive routes to them.
@@ -74,7 +77,7 @@ export const externalApiRunnableModels = async (
     const nameableProviders = new Set(servable.filter(({ model }) => nameable(model)).map(({ model }) => model.provider));
     return servable
         .filter(({ model }) => nameable(model) || nameableProviders.has(model.provider))
-        .map(({ model, pricing }) => ({
+        .map(({ model, pricing, codingNotes }) => ({
             model,
             nameable: nameable(model),
             capabilities: externalApiModelCapabilities(model, {
@@ -83,6 +86,7 @@ export const externalApiRunnableModels = async (
                 creditWeight: getModelUsageProfile(model).credits,
             }),
             ...(pricing ? { catalogPricing: pricing } : {}),
+            ...(codingNotes ? { codingNotes } : {}),
         }));
 };
 
@@ -90,13 +94,24 @@ export const externalApiRunnableModels = async (
  * The runtime models and any candidate that is not one -- a dedicated coding
  * row on the coding API -- for the router, which describes each candidate from
  * the model list it is given (lib/autoLlmRouterCore.ts autoLlmRouterCandidates).
+ * A candidate with coding notes (a coding catalogue row, owner decision
+ * 2026-11-22) is described by them instead of chat's bestFor, whole; one
+ * without keeps bestFor. Only this copy changes: chat's registry and the chat
+ * router are untouched.
  */
 export const withCandidateModels = (
     runtime: readonly AiModel[],
-    candidates: readonly Pick<ExternalApiRunnableEntry, "model">[]
+    candidates: readonly Pick<ExternalApiRunnableEntry, "model" | "codingNotes">[]
 ): AiModel[] => {
+    const described = new Map(
+        candidates.flatMap((entry) => (entry.codingNotes ? [[entry.model.id, codingNotesRouterText(entry.codingNotes)] as const] : []))
+    );
+    const describe = (model: AiModel): AiModel => {
+        const text = described.get(model.id);
+        return text ? { ...model, bestFor: text } : model;
+    };
     const known = new Set(runtime.map((model) => model.id));
-    return [...runtime, ...candidates.map((entry) => entry.model).filter((model) => !known.has(model.id))];
+    return [...runtime, ...candidates.map((entry) => entry.model).filter((model) => !known.has(model.id))].map(describe);
 };
 
 /**

@@ -470,12 +470,14 @@ export const applyCatalogDraft = async (input: {
       if (floor === null) throw new CatalogRefusal("not_admitted", ["credit_floor_unbounded"]);
       if (edited.profile.pricing.creditWeight < floor) throw new CatalogRefusal("not_admitted", [`credits_below_floor:${floor}`]);
       // A new draft replaces the profile, not the operator's own settings on
-      // it: a dedicated row keeps where it is offered and its coding API credits.
+      // it: a dedicated row keeps where it is offered, its coding API credits
+      // and its coding notes.
       const stored = codingDedicatedProfileSchema.safeParse(rows[0]?.profile);
       const kept = stored.success
         ? {
             ...(stored.data.channels ? { channels: stored.data.channels } : {}),
             ...(stored.data.apiCreditWeight === undefined ? {} : { apiCreditWeight: stored.data.apiCreditWeight }),
+            ...(stored.data.codingNotes ? { codingNotes: stored.data.codingNotes } : {}),
           }
         : {};
       await updateCatalogEntry({

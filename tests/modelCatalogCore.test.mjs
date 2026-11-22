@@ -38,6 +38,8 @@ import {
   CODING_DEFAULT_MAX_OUTPUT_TOKENS,
   CODING_STRUCTURED_OUTPUT,
   CODING_STRUCTURED_OUTPUT_CHOICES,
+  codingNotesSchema,
+  codingNotesRouterText,
   codingProfileSchema,
   codingStructuredOutputChoice,
 } from "../lib/modelCatalogCore.ts";
@@ -1033,4 +1035,56 @@ test("a draft applied again the same day gets the next free version name within 
   const next = freePricingVersion(long, new Set([long]));
   assert.equal(next.length, 80);
   assert.ok(next.endsWith("-2"));
+});
+
+test("coding notes: the answer is read to the limits, never cut, and the router text keeps every item whole", () => {
+  // Owner decision 2026-11-22: two or three each, one line of at most 120 characters, standing on the fetched pages.
+  const pages = ["https://developers.openai.com/api/docs/guides/function-calling"];
+  const long = "x".repeat(121);
+  const draft = codingCapabilitiesFromAnswer(
+    {
+      toolCalling: "parallel",
+      structuredOutput: "supported",
+      note: "",
+      codingNotes: {
+        strengths: ["  Parallel   tool calls ", long, "Strict schemas", "Long context", "Fourth"],
+        weaknesses: ["No vision in tools", 7],
+        sourceUrls: [pages[0], pages[0], 3],
+      },
+    },
+    pages
+  );
+  // The over-long item is left out, not cut; at most three; whitespace folded; URLs as given, once.
+  assert.deepEqual(draft.codingNotes, {
+    strengths: ["Parallel tool calls", "Strict schemas", "Long context"],
+    weaknesses: ["No vision in tools"],
+    sourceUrls: [pages[0]],
+  });
+  for (const codingNotes of [undefined, null, { strengths: [], weaknesses: [], sourceUrls: pages }, { strengths: [long] }]) {
+    assert.equal(codingCapabilitiesFromAnswer({ toolCalling: "basic", structuredOutput: "none", codingNotes }, pages).codingNotes, null);
+  }
+  // The answer schema asks for the notes in the same call.
+  assert.ok(CAPABILITY_SCHEMA.required.includes("codingNotes"));
+  assert.deepEqual(CAPABILITY_SCHEMA.properties.codingNotes.required, ["strengths", "weaknesses", "sourceUrls"]);
+  assert.equal(CAPABILITY_SCHEMA.properties.codingNotes.properties.strengths.maxItems, 3);
+  assert.match(CAPABILITY_TASK, /benchmark result/);
+  assert.match(CAPABILITY_TASK, /never a claim\s+from general knowledge/);
+  assert.match(CAPABILITY_TASK, /at most 120/);
+
+  // The stored shape holds the same limits.
+  const ok = { strengths: ["a".repeat(120)], weaknesses: [], sources: pages, draftedAt: "2026-11-22" };
+  assert.equal(codingNotesSchema.safeParse(ok).success, true);
+  assert.equal(codingNotesSchema.safeParse({ ...ok, strengths: [long] }).success, false);
+  assert.equal(codingNotesSchema.safeParse({ ...ok, strengths: ["a", "b", "c", "d"] }).success, false);
+  assert.equal(codingNotesSchema.safeParse({ ...ok, strengths: ["two\nlines"] }).success, false);
+  assert.equal(codingNotesSchema.safeParse({ ...ok, sources: ["not a url"] }).success, false);
+
+  const full = { strengths: ["s".repeat(120), "t".repeat(120), "u".repeat(120)], weaknesses: ["w".repeat(120), "v".repeat(120), "z".repeat(120)] };
+  const text = codingNotesRouterText(full);
+  for (const item of [...full.strengths, ...full.weaknesses]) assert.ok(text.includes(item), "every item whole");
+  assert.equal(codingNotesRouterText({ strengths: ["Parallel tool calls"], weaknesses: [] }), "Coding strengths: Parallel tool calls.");
+  assert.equal(
+    codingNotesRouterText({ strengths: ["A", "B"], weaknesses: ["C"] }),
+    "Coding strengths: A; B. Coding weaknesses: C."
+  );
 });

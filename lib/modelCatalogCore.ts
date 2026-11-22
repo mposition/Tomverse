@@ -462,17 +462,67 @@ export const CODING_API_CREDIT_WEIGHT_MAX = 1_000;
 
 export const codingApiCreditWeightSchema = z.number().int().positive().max(CODING_API_CREDIT_WEIGHT_MAX);
 
+export const CODING_EVIDENCE_MAX_SOURCES = 3;
+
+// --- coding notes (owner decision 2026-11-22) ---------------------------------
+//
+// A coding row's strengths and weaknesses at coding work, for the coding API's
+// Smart Adaptive router (lib/externalApiCatalog.ts withCandidateModels), which
+// otherwise reads chat's one-line bestFor. Filled by the same LLM call as the
+// capabilities (fill_capabilities), standing only on the provider's own pages,
+// and editable by the operator. Kept in the stored row only: resolved and
+// snapshot rows never carry it, so no row's canonicalJson or hash moves.
+
+export const CODING_NOTE_MAX_CHARS = 120;
+export const CODING_NOTES_MAX_ITEMS = 3;
+
+const codingNoteSchema = z.string().trim().min(1).max(CODING_NOTE_MAX_CHARS).regex(/^[^\r\n]+$/);
+
+export const codingNotesSchema = z
+  .object({
+    strengths: z.array(codingNoteSchema).max(CODING_NOTES_MAX_ITEMS),
+    weaknesses: z.array(codingNoteSchema).max(CODING_NOTES_MAX_ITEMS),
+    /** The provider pages the notes stand on; empty for notes the operator wrote. */
+    sources: z.array(z.string().url()).max(CODING_EVIDENCE_MAX_SOURCES),
+    draftedAt: isoDate,
+    /** Set when the operator last changed the text. */
+    editedAt: isoDate.optional(),
+  })
+  .strict();
+export type CodingNotes = z.infer<typeof codingNotesSchema>;
+
+/** What the operator types: the two lists only. */
+export const codingNotesEditSchema = codingNotesSchema.pick({ strengths: true, weaknesses: true }).strict();
+export type CodingNotesEdit = z.infer<typeof codingNotesEditSchema>;
+
+/** A row's notes when it has at least one; null when it has none (a fill target). */
+export const codingNotesOf = (stored: unknown): CodingNotes | null => {
+  const parsed = codingNotesSchema.safeParse((stored as { codingNotes?: unknown } | null)?.codingNotes);
+  return parsed.success && parsed.data.strengths.length + parsed.data.weaknesses.length > 0 ? parsed.data : null;
+};
+
+/**
+ * The notes as the coding router reads them, in the candidate's bestFor: every
+ * item whole (3 + 3 items of at most 120 characters), never cut.
+ */
+export const codingNotesRouterText = (notes: Pick<CodingNotes, "strengths" | "weaknesses">): string =>
+  [
+    notes.strengths.length ? `Coding strengths: ${notes.strengths.join("; ")}.` : "",
+    notes.weaknesses.length ? `Coding weaknesses: ${notes.weaknesses.join("; ")}.` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
 /** A dedicated row: the whole profile, plus where it is offered (Code only until set). */
 export const codingDedicatedProfileSchema = codingProfileSchema
   .extend({
     source: z.literal("dedicated").optional(),
     channels: codingChannelsSchema.optional(),
     apiCreditWeight: codingApiCreditWeightSchema.optional(),
+    codingNotes: codingNotesSchema.optional(),
   })
   .strict();
 export type CodingDedicatedProfile = z.infer<typeof codingDedicatedProfileSchema>;
-
-export const CODING_EVIDENCE_MAX_SOURCES = 3;
 
 /** A chat link: the registry id and the values chat does not have. */
 export const codingLinkedProfileSchema = z
@@ -501,6 +551,7 @@ export const codingLinkedProfileSchema = z
       })
       .strict()
       .optional(),
+    codingNotes: codingNotesSchema.optional(),
   })
   .strict();
 export type CodingLinkedProfile = z.infer<typeof codingLinkedProfileSchema>;

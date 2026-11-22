@@ -378,3 +378,58 @@ test("on the coding catalogue a frontier model is offered without a nameable mod
     setSwitch(undefined);
   }
 });
+
+// Coding notes for the coding router (owner decision 2026-11-22): a row's notes
+// stand in for chat's bestFor in the router's candidate list, whole; a row
+// without them keeps bestFor; chat's model and router are untouched.
+test("the coding router reads a row's coding notes instead of bestFor, whole, and falls back to bestFor without them", async () => {
+  const { withCandidateModels } = await import(mod("lib/externalApiCatalog.ts"));
+  const { autoLlmRouterCandidates, autoLlmRouterUserMessage } = await import(mod("lib/autoLlmRouterCore.ts"));
+  setSwitch("true");
+  providerTerms = [];
+  runtime = [
+    runtimeModel("gpt-6-luna", { bestFor: "Everyday chat and quick answers" }),
+    runtimeModel("gpt-5-6-terra", { usageClass: "advanced", bestFor: "Careful long-form analysis" }),
+  ];
+  const notes = {
+    strengths: ["Parallel tool calls in one response: " + "p".repeat(80), "Strict JSON schema outputs for plans"],
+    weaknesses: ["Slow on very long contexts: " + "w".repeat(90)],
+    sources: ["https://developers.openai.com/api/docs/guides/function-calling"],
+    draftedAt: "2026-11-22",
+  };
+  try {
+    entries = [entry("gpt-6-luna", ["api"], { codingNotes: notes }), entry("gpt-5-6-terra", ["api"]), dedicatedEntry("coder-x", ["api"], { codingNotes: notes })];
+    await publish(31);
+    // Read from the current rows: the snapshot carries no notes.
+    assert.ok(snapshot.payload.models.every((row) => !("codingNotes" in row)));
+    const runnable = await externalApiRunnableModels("Pro", { surface: "coding", smartAdaptive: true });
+    const byId = new Map(runnable.map((item) => [item.model.id, item]));
+    assert.deepEqual(byId.get("gpt-6-luna").codingNotes, notes);
+    assert.deepEqual(byId.get("coder-x").codingNotes, notes, "a dedicated row's notes too");
+    assert.equal(byId.get("gpt-5-6-terra").codingNotes, undefined);
+
+    const models = withCandidateModels(runtime, runnable);
+    const described = new Map(models.map((model) => [model.id, model.bestFor]));
+    const expected =
+      "Coding strengths: " + notes.strengths.join("; ") + ". Coding weaknesses: " + notes.weaknesses.join("; ") + ".";
+    assert.equal(described.get("gpt-6-luna"), expected);
+    assert.equal(described.get("coder-x"), expected);
+    assert.equal(described.get("gpt-5-6-terra"), "Careful long-form analysis", "no notes: chat's bestFor");
+    // Chat's own model is not changed: only the router's copy.
+    assert.equal(runtime[0].bestFor, "Everyday chat and quick answers");
+
+    // What the router model is sent: the notes whole in the candidate list.
+    const ids = runnable.map((item) => item.model.id);
+    const candidates = autoLlmRouterCandidates(ids, models, Object.fromEntries(runnable.map((item) => [item.model.id, item.capabilities.creditWeight])));
+    const prompt = autoLlmRouterUserMessage("Refactor the billing module", null, candidates);
+    for (const item of [...notes.strengths, ...notes.weaknesses]) assert.ok(prompt.includes(item), "each note whole in the prompt");
+    assert.ok(prompt.includes("Careful long-form analysis"));
+    // The general API reads no coding catalogue, so its router sees bestFor.
+    const general = await externalApiRunnableModels("Pro", { surface: "general", smartAdaptive: true });
+    assert.ok(general.every((item) => item.codingNotes === undefined));
+    assert.equal(withCandidateModels(runtime, general).find((model) => model.id === "gpt-6-luna").bestFor, "Everyday chat and quick answers");
+  } finally {
+    runtime = baseRuntime();
+    setSwitch(undefined);
+  }
+});

@@ -23,11 +23,13 @@ import {
 import {
   canonicalJson,
   codingApiSnapshotRows,
+  codingNotesOf,
   codingCatalogExternalChannelsEnabled,
   codingPlanReaches,
   onCodingApi,
   snapshotIsCurrent,
   type CodingCatalogRow,
+  type CodingNotes,
 } from "@/lib/modelCatalogCore";
 import type { AiModel, ModelTier } from "@/lib/models";
 import { getRuntimeModels } from "@/lib/modelRegistry";
@@ -47,7 +49,12 @@ export type CodingCatalogPricing = {
   creditBasis: { basis: CodingApiCreditBasis; credits: number; floorCredits: number };
 };
 
-export type CodingApiModel = { model: AiModel; pricing?: CodingCatalogPricing };
+export type CodingApiModel = {
+  model: AiModel;
+  pricing?: CodingCatalogPricing;
+  /** The row's coding notes for the coding router, read from the current row (never from the snapshot). */
+  codingNotes?: CodingNotes;
+};
 
 let warnedNoSnapshot = 0;
 let warnedRefusal = 0;
@@ -129,12 +136,21 @@ export const codingApiModels = async (
     activeIds: new Set(current.keys()),
   });
   const chatById = new Map(runtime.map((model) => [model.id, model] as const));
+  // Descriptive only: notes are read from the current row, so they never wait for a publish and never move a hash.
+  const notesById = new Map(entries.flatMap((entry) => {
+    const notes = codingNotesOf(entry.stored);
+    return notes ? [[entry.modelId, notes] as const] : [];
+  }));
+  const withNotes = (modelId: string) => {
+    const notes = notesById.get(modelId);
+    return notes ? { codingNotes: notes } : {};
+  };
   const models: CodingApiModel[] = [];
   const refused: { modelId: string; code: string }[] = [];
   for (const row of published) {
     if (row.source === "chat") {
       const model = chatById.get(row.registryModelId ?? row.modelId);
-      if (model) models.push({ model });
+      if (model) models.push({ model, ...withNotes(row.modelId) });
       continue;
     }
     if (canonicalJson(current.get(row.modelId)) !== canonicalJson(row)) {
@@ -152,7 +168,7 @@ export const codingApiModels = async (
       refused.push({ modelId: row.modelId, code: credit.reason });
       continue;
     }
-    models.push(codingApiDedicatedModel(row, built, snapshot, credit));
+    models.push({ ...codingApiDedicatedModel(row, built, snapshot, credit), ...withNotes(row.modelId) });
   }
   if (refused.length > 0 && now.getTime() - warnedRefusal > 60_000) {
     warnedRefusal = now.getTime();
