@@ -2088,6 +2088,7 @@ model ChatCreditReservation {
   settlementAttempt      ChatAttemptUsage?  @relation("ReservationSettlementAttempt", fields: [id, settlementAttemptIndex], references: [reservationId, attemptIndex], onDelete: NoAction, onUpdate: NoAction, map: "ChatCreditReservation_settlementAttempt_fkey")
   attemptUsage           ChatAttemptUsage[]
   researchPreviewRun     ResearchPreviewRun?
+  researchFundingSegment ResearchFundingSegment?
   externalApiRequest     ExternalApiRequest?
 
   @@index([status, expiresAt])
@@ -2205,6 +2206,34 @@ model ResearchPreviewRun {
   startedAt              DateTime?
   completedAt            DateTime?
   lastErrorCode          String?
+  /// 1 = the fixed three-generation Preview. 2 = the expanded engine, whose
+  /// work lives in ResearchWorkItem rows and whose money lives in
+  /// ResearchFundingSegment rows; v2 rows never use the run-level checkpoint,
+  /// lease or reservation above, so v1 workers and recovery never select them.
+  engineVersion              Int       @default(1)
+  /// v2 only. Server-resolved refs (never content) to everything this run may
+  /// read, with owner/revision digests re-checked before every dispatch.
+  inputManifest              Json?
+  inputRevision              Int       @default(0)
+  planRevision               Int       @default(0)
+  approvedPlanRevision       Int?
+  /// v2 only. Pinned per-role model/provider/API/reasoning/pricing identity.
+  executionProfile           Json?
+  /// v2 only. The user-approved run total; only an explicit user action raises it.
+  approvedCredits            Int?
+  /// v2 only. Room kept back from research work for synthesis or a partial.
+  finalizationReserveCredits Int       @default(0)
+  pauseRequestedAt           DateTime?
+  pausedAt                   DateTime?
+  runDeadlineAt              DateTime?
+  qualityStatus              String?
+  currentReportRevision      Int       @default(0)
+  /// Monotonic per mutation; clients drop responses older than what they hold.
+  eventSequence              Int       @default(0)
+  /// Recovery-only maintenance stops selecting a row it repeatedly cannot
+  /// process (a poison row) instead of retrying it ahead of healthy rows.
+  recoveryFailureCount       Int       @default(0)
+  recoveryQuarantinedAt      DateTime?
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
 
@@ -2214,7 +2243,13 @@ model ResearchPreviewRun {
   message           Message?
   reservation       ChatCreditReservation?       @relation(fields: [reservationId], references: [id], onDelete: SetNull)
   generations       ResearchPreviewGeneration[]
+  planRevisions     ResearchPlanRevision[]
+  workItems         ResearchWorkItem[]
+  fundingSegments   ResearchFundingSegment[]
+  sources           ResearchSource[]
+  reportRevisions   ResearchReportRevision[]
 
+  @@index([engineVersion, status, createdAt])
   @@index([userId, createdAt])
   @@index([conversationId, createdAt])
   @@index([status, leaseExpiresAt, createdAt])
@@ -2242,13 +2277,254 @@ model ResearchPreviewGeneration {
   stopReason              String?
   dispatchStartedAt       DateTime?
   completedAt             DateTime?
+  /// v2 only: this row is a model, search or page/document read dispatch for
+  /// one work item, priced and held by one funding segment.
+  engineVersion           Int       @default(1)
+  kind                    String    @default("model")
+  workItemId              String?
+  fundingSegmentId        String?
+  modelId                 String?
+  provider                String?
+  apiModel                String?
+  reasoning               String?
+  pricingVersion          String?
+  /// Exactly-once key for a dispatch; an unknown outcome blocks the key.
+  dispatchKey             String?
+  searchRequestCount      Int?
   createdAt               DateTime  @default(now())
   updatedAt               DateTime  @updatedAt
 
-  run ResearchPreviewRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  run      ResearchPreviewRun      @relation(fields: [runId], references: [id], onDelete: Cascade)
+  workItem ResearchWorkItem?       @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+  segment  ResearchFundingSegment? @relation(fields: [fundingSegmentId], references: [id], onDelete: SetNull)
 
   @@unique([runId, generationIndex])
+  @@unique([runId, dispatchKey])
+  @@index([workItemId])
   @@index([status, dispatchStartedAt])
+}
+
+/// One immutable revision of a v2 Research plan. Model-authored revisions and
+/// user edits are both kept; a run executes only an approved revision.
+model ResearchPlanRevision {
+  id            String   @id @default(cuid())
+  runId         String
+  revision      Int
+  author        String
+  inputRevision Int
+  plan          Json
+  createdAt     DateTime @default(now())
+
+  run ResearchPreviewRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, revision])
+}
+
+/// A bounded unit of v2 Research work. A model decides what the item does; the
+/// row decides who may run it (lease + epoch fencing), when (dependencies,
+/// pause, budget) and exactly once (idempotency key).
+model ResearchWorkItem {
+  id             String    @id @default(cuid())
+  runId          String
+  kind           String
+  status         String    @default("queued")
+  planRevision   Int
+  inputRevision  Int
+  idempotencyKey String
+  dependsOn      String[]  @default([])
+  priority       Int       @default(0)
+  payload        Json
+  result         Json?
+  attempts       Int       @default(0)
+  notBefore      DateTime?
+  leaseOwner     String?
+  leaseEpoch     Int       @default(0)
+  leaseExpiresAt DateTime?
+  providerKey    String?
+  errorCode      String?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  run         ResearchPreviewRun          @relation(fields: [runId], references: [id], onDelete: Cascade)
+  generations ResearchPreviewGeneration[]
+
+  @@unique([runId, idempotencyKey])
+  @@index([status, notBefore, createdAt])
+  @@index([runId, status])
+  @@index([status, leaseExpiresAt])
+}
+
+/// One Chat credit reservation inside a v2 run's user-approved total.
+/// settled + reserved + unknown + unallocated finalization <= approvedCredits
+/// is enforced under the run row lock before each reservation is requested.
+model ResearchFundingSegment {
+  id              String    @id @default(cuid())
+  /// Null once the run is deleted: the hold and its settlement record outlive the
+  /// run so expiry can never mistake a possibly-dispatched hold for an unused one.
+  runId           String?
+  sequence        Int
+  purpose         String
+  status          String    @default("reserving")
+  reservationId   String?   @unique
+  reservedCredits Int
+  settledCredits  Int?
+  modelId         String
+  provider        String
+  pricingVersion  String
+  /// Web search surcharge held on this reservation; refunded at settlement when no search ran.
+  searchSurchargeCredits Int @default(0)
+  settlementUsage Json?
+  createdAt       DateTime  @default(now())
+  settledAt       DateTime?
+  updatedAt       DateTime  @updatedAt
+
+  run         ResearchPreviewRun?         @relation(fields: [runId], references: [id], onDelete: SetNull)
+  /// Restrict: a Chat reservation is a financial record and is not deleted while a segment names it.
+  reservation ChatCreditReservation?      @relation(fields: [reservationId], references: [id], onDelete: Restrict)
+  generations ResearchPreviewGeneration[]
+
+  @@unique([runId, sequence])
+  @@index([status, createdAt])
+}
+
+/// Identity of something a v2 run considered: a public page, a user URL, a link
+/// found on a read page, or one selected private item. Content lives in
+/// versions; a private source's ownerRef is re-validated before dispatch.
+model ResearchSource {
+  id                  String    @id @default(cuid())
+  runId               String
+  sourceKey           String
+  origin              String
+  visibility          String
+  status              String    @default("active")
+  canonicalUrl        String?
+  title               String?
+  publisher           String?
+  snippet             String?
+  publishedAt         DateTime?
+  ownerRef            Json?
+  /// Same article republished elsewhere; never counted as independent support.
+  duplicateOfSourceId String?
+  firstSeenAt         DateTime
+  /// Last time a private source was re-checked against its original by the maintenance sweep.
+  revalidatedAt       DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  run      ResearchPreviewRun      @relation(fields: [runId], references: [id], onDelete: Cascade)
+  versions ResearchSourceVersion[]
+
+  @@unique([runId, sourceKey])
+  @@index([runId, canonicalUrl])
+  @@index([runId, visibility, status])
+  @@index([visibility, status, revalidatedAt])
+}
+
+/// What was actually obtained from a source at one time. A later read of the
+/// same URL is a new version; an older report keeps citing what it saw.
+model ResearchSourceVersion {
+  id               String    @id @default(cuid())
+  sourceId         String
+  runId            String
+  version          Int
+  readStatus       String
+  extractionMethod String
+  finalUrl         String?
+  contentType      String?
+  retrievedAt      DateTime
+  sourceModifiedAt DateTime?
+  contentDigest    String?
+  byteLength       Int?
+  charLength       Int?
+  truncated        Boolean   @default(false)
+  failureReason    String?
+  /// Exact lead-of-body fingerprint; equal values mean one article republished.
+  leadFingerprint  String?
+  /// Private object holding the extracted text; chunks are offsets into it.
+  objectKey        String?   @unique
+  chunkCount       Int       @default(0)
+  createdAt        DateTime  @default(now())
+
+  source ResearchSource          @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  chunks ResearchEvidenceChunk[]
+
+  @@unique([sourceId, version])
+  @@index([runId])
+}
+
+/// A located range of one source version: page, section, sheet row or span.
+model ResearchEvidenceChunk {
+  id         String @id @default(cuid())
+  versionId  String
+  runId      String
+  chunkIndex Int
+  locator    Json
+  charStart  Int
+  charEnd    Int
+  digest     String
+
+  version ResearchSourceVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@unique([versionId, chunkIndex])
+  @@index([runId])
+}
+
+/// One immutable v2 report revision: model synthesis, user-requested change,
+/// follow-up research, or a public redaction of a private-derived report.
+model ResearchReportRevision {
+  id              String   @id @default(cuid())
+  runId           String
+  revision        Int
+  parentRevision  Int?
+  planRevision    Int
+  inputRevision   Int
+  author          String
+  qualityStatus   String
+  visibility      String   @default("owner")
+  containsPrivate Boolean  @default(false)
+  document        Json
+  createdAt       DateTime @default(now())
+
+  run    ResearchPreviewRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  claims ResearchClaim[]
+
+  @@unique([runId, revision])
+}
+
+/// A report claim and the exact evidence spans it was verified against.
+model ResearchClaim {
+  id             String  @id @default(cuid())
+  revisionId     String
+  runId          String
+  claimKey       String
+  sectionKey     String
+  text           String
+  kind           String
+  verification   String
+  privateDerived Boolean @default(false)
+  evidence       Json
+  checks         Json?
+
+  revision ResearchReportRevision @relation(fields: [revisionId], references: [id], onDelete: Cascade)
+
+  @@unique([revisionId, claimKey])
+  @@index([runId])
+}
+
+/// Private evidence objects whose rows are gone or going. Queued in the same
+/// transaction that removes the rows, then drained by maintenance.
+model ResearchEvidenceObjectCleanup {
+  id        String   @id @default(cuid())
+  objectKey String   @unique
+  reason        String
+  attempts      Int      @default(0)
+  // Failed deletions back off (capped at six hours) and are never given up.
+  nextAttemptAt DateTime @default(now())
+  createdAt     DateTime @default(now())
+
+  @@index([nextAttemptAt])
 }
 
 // What one dispatched attempt cost, at its own provider's rates.

@@ -1,6 +1,9 @@
 "use client";
 
 import { OptimizerEvidenceView, type OptimizerEvidenceSummary } from "@/components/admin/OptimizerEvidenceView";
+import { ChatServingCostView, CostEfficiencyDiagnosticView } from "@/components/admin/CostEfficiencyDiagnosticView";
+import type { CostEfficiencyReport } from "@/lib/autoCostEfficiencyReport";
+import type { ChatServingCostSummary } from "@/lib/autoChatServingCostCore";
 import { formatAestDateTime } from "@/lib/adminUiCore";
 import { ResponseLatencyEvidenceView } from "@/components/admin/ResponseLatencyEvidenceView";
 import type { ResponseLatencyEvidence } from "@/lib/responseLatencyCore";
@@ -57,6 +60,8 @@ type Summary = OptimizerEvidenceSummary & {
   } | null;
   comparisons?: OptimizerAnswerComparison[];
   gate?: { basis: "judged" | "direct"; towardWinner: number; towardLoser: number } | null;
+  /** A diagnostic-only cost-efficiency cycle; absent on every routing cycle. */
+  costEfficiency?: CostEfficiencyReport;
 };
 
 type Cycle = {
@@ -101,11 +106,16 @@ type OptimizerState = {
   settings?: TunableSettingsState;
   /** The coding agent on the Ubuntu runner; absent from an older server. */
   recAgent?: { enabled: boolean };
+  /** The diagnostic's default-off switch; absent from an older server. */
+  costEfficiencyDiagnostic?: { available: boolean };
+  /** Real Auto Chat answer cost; null when unreadable, absent from an older server. */
+  servingCost?: ChatServingCostSummary | null;
 };
 
 type Action =
   | { action: "set_model"; modelId: string | null }
   | { action: "run" }
+  | { action: "run_cost_diagnostic" }
   | { action: "set_automation"; daily: boolean; autoPromote: boolean }
   | { action: "promote"; cycleId: string }
   | { action: "roll_back" }
@@ -311,6 +321,17 @@ export function AdminAutoRouterOptimizerPanel({
           {running || busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
           {running ? m.running : m.run}
         </AdminWriteButton>
+        {state?.costEfficiencyDiagnostic?.available ? (
+          <AdminWriteButton
+            {...writeProps}
+            variant="secondary"
+            onClick={() => void send({ action: "run_cost_diagnostic" })}
+            disabled={!state.optimizerModelId || busy || running}
+            data-testid="admin-auto-router-optimizer-run-cost-diagnostic"
+          >
+            {m.runCostDiagnostic}
+          </AdminWriteButton>
+        ) : null}
       </div>
       <p className="text-xs text-zinc-500">{m.costNote}</p>
       <ResponseLatencyEvidenceView evidence={state?.responseLatency} current refreshing={refreshingLatency} onRefresh={() => void load(true)} />
@@ -372,6 +393,7 @@ export function AdminAutoRouterOptimizerPanel({
       {failure ? <AdminApiFailureNotice failure={failure} onRetry={() => void load()} /> : null}
 
       <AutoRouterTunables settings={state?.settings} busy={busy} send={(action) => void send(action)} />
+      <ChatServingCostView summary={state?.servingCost} />
 
       {state ? (
         <div className="rounded-2xl border border-zinc-800 p-4" data-testid="admin-auto-router-optimizer-active">
@@ -460,6 +482,7 @@ export function AdminAutoRouterOptimizerPanel({
             </div>
             {cycle.status !== "running" && cycle.promotionEligibility?.refusal && !cycle.promotedAt ? <p className="mt-1 text-xs text-amber-300">{reason(cycle.promotionEligibility.refusal)}</p> : null}
             <OptimizerEvidenceView summary={cycle.summary} spentMicroUsd={cycle.spentMicroUsd} />
+            <CostEfficiencyDiagnosticView report={cycle.summary?.costEfficiency} />
             {cycle.failure ? <p className="mt-1 text-xs text-amber-300">{reason(cycle.failure)}</p> : null}
             {cycle.summary ? (
               <p className="mt-1 text-xs text-zinc-400">

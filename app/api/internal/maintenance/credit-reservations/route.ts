@@ -45,6 +45,7 @@ import { runTraceReportAnalysisQuietly } from "@/lib/traceReportAnalysis";
 import { runDevelopCiRepairQuietly } from "@/lib/developCiRepair";
 import { reconcileVoiceConversationsQuietly } from "@/lib/voiceConversationRecovery";
 import { recoverStaleResearchPreviewRuns } from "@/lib/researchPreviewRecovery";
+import { recoverResearchEngine } from "@/lib/researchEngineRecovery";
 
 const isAuthorized = (request: Request) => {
   const configured = process.env.MAINTENANCE_SECRET;
@@ -119,6 +120,12 @@ export async function POST(request: Request) {
         console.warn(JSON.stringify({ event: "research_preview_recovery_deferred" }));
         return { recovered: 0, deferred: 1 };
       });
+    // Research engine v2, same recovery-only contract and the same ordering:
+    // segment holds are classified before generic expiry sees them.
+    const researchEngineRuns = await recoverResearchEngine().catch(() => {
+      console.warn(JSON.stringify({ event: "research_engine_recovery_deferred" }));
+      return null;
+    });
     const result = await reconcileCreditReservationsWithRetry();
     // Code owns independent task/call leases and shares the same credit wallet.
     const codeTasks = await reconcileExpiredCodeTasks().catch(() => {
@@ -267,6 +274,7 @@ export async function POST(request: Request) {
         deepResearchSettlements,
         voiceConversations,
         researchPreviewRuns,
+        researchEngineRuns,
         infrastructureMonitor,
         notificationDeliveries,
         refundRequests,
@@ -292,6 +300,7 @@ export async function POST(request: Request) {
         deepResearchSettlements,
         voiceConversations,
         researchPreviewRuns,
+        researchEngineRuns,
         infrastructureMonitor,
         notificationDeliveries,
         refundRequests,

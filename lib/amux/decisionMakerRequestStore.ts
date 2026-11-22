@@ -1,12 +1,11 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 
 import { takeAuditChainLock } from "@/lib/adminAudit";
 import { dmKeyPeriodOf, dmOptionSetDigest, dmRequestDigestKey } from "@/lib/amux/decisionMakerBodyCore";
-import { DM_TERMS_FIXED_TEXT_ONLY_ENV, dmInstanceForProvider, dmTermsFixedTextOnlyEnabled,
-  routeDmQuestion } from "@/lib/amux/decisionMakerCore";
+import { dmInstanceForProvider, routeDmQuestion } from "@/lib/amux/decisionMakerCore";
 import { decisionMakerPeriodKey, type DmDigestKeyRing } from "@/lib/amux/decisionMakerDigestKeys";
 import {
   DM_CLOSING_EVENT_KINDS,
@@ -739,15 +738,21 @@ export async function recordDecisionMakerRequest(
       r."route", r."instance", r."refusalCodes",
       floor(extract(epoch FROM r."createdAt") * 1000)::bigint AS "createdAtEpochMs",
       floor(extract(epoch FROM r."assignmentDeadlineAt") * 1000)::bigint AS "assignmentDeadlineAtEpochMs",
-      -- AMUXFLOW/B2: a card the app filed itself, proven by the row that
-      -- recorded this local card (no extra statement): an owner settlement,
-      -- and since 2026-11-14 a T2 draft review, whose card now carries the
-      -- draft's patch as evidence. A worker's own question is never one: its
-      -- table is not read here.
+      -- A card the app filed itself, proven by the row that recorded this
+      -- local card (no extra statement): an owner settlement, a T2 draft
+      -- review, and since 2026-11-22 a result review, a refused session
+      -- answer and a card close question. A worker's own question is never
+      -- one: its table is not read here.
       (EXISTS (SELECT 1 FROM "AmuxDmOwnerSettlement" s
         WHERE s."localCardId" = ${binding.cardId})
       OR EXISTS (SELECT 1 FROM "EngineeringAgentDmReview" e
-        WHERE e."localCardId" = ${binding.cardId})) AS "appFiledCard"
+        WHERE e."localCardId" = ${binding.cardId})
+      OR EXISTS (SELECT 1 FROM "AmuxV22ResultReview" v
+        WHERE v."localCardId" = ${binding.cardId})
+      OR EXISTS (SELECT 1 FROM "AmuxIdeaSessionPlanRefusal" f
+        WHERE f."localCardId" = ${binding.cardId})
+      OR EXISTS (SELECT 1 FROM "AmuxIdeaCardCloseQuestion" c
+        WHERE c."localCardId" = ${binding.cardId})) AS "appFiledCard"
     FROM (SELECT 1) AS "probe"
     LEFT JOIN "AmuxDecisionMakerRequest" r
       ON r."cardId" = ${binding.cardId} AND r."questionRevision" = ${binding.questionRevision}
@@ -797,16 +802,14 @@ export async function recordDecisionMakerRequest(
     // §5, §8: an owed latch is the instance off -- the question goes to the operator.
     routingSwitches = dmSwitchInputWithOwedLatch(routingSwitches, owedLatch(switches, instance, load) !== null);
   }
-  // AMUXFLOW/B2: the evidence markers count only on a card the app filed
-  // itself (the routing read above found its settlement row).
-  const evidenceTermsExempt = dmTermsFixedTextOnlyEnabled(process.env[DM_TERMS_FIXED_TEXT_ONLY_ENV]) &&
-    found.appFiledCard === true;
+  // A card the app filed itself (the routing read above found the row that
+  // recorded it) is not read for the section 3-3 terms (decisionMakerCore.ts).
   const decision = routeDmQuestion({
     ...routingSwitches,
     card,
     askingProvider: binding.askingProvider,
     throughput,
-    evidenceTermsExempt,
+    appFiledCard: found.appFiledCard === true,
   });
   const requestId = randomUUID();
   const optionSetDigest = dmOptionSetDigest(dmRequestDigestKey(periodKey, requestId), card.options);
@@ -1336,6 +1339,24 @@ export async function readNextDecisionMakerOpenProposal(
   if (!isDmRequestId(id)) throw new DecisionMakerRequestWriteError("state_unreadable");
   return id;
 }
+
+/**
+ * The newest Decision Maker request of a result review's card (`v`) ended with
+ * nothing for anyone to confirm: routed to the operator, its assignment
+ * discarded, closed stale or by a direct answer, or a result that is not a
+ * proposal (the DM escalated, its answer failed validation, timed out or its
+ * run failed). A pending request, a proposal, a confirmation and an owner's
+ * rejection are not "ended" here. A fragment of the owner queue settlement's
+ * scan (dmOwnerSettlementRead.ts), kept here with this store's tables.
+ */
+export const amuxV22ResultReviewRequestEndedSql = Prisma.sql`(v."localCardId" IS NOT NULL AND EXISTS (
+  SELECT 1 FROM "AmuxDecisionMakerRequest" q
+  WHERE q."cardId" = v."localCardId"
+    AND q."questionRevision" = (SELECT max(q2."questionRevision") FROM "AmuxDecisionMakerRequest" q2
+      WHERE q2."cardId" = v."localCardId")
+    AND (q."route" <> 'dm_proposal' OR EXISTS (SELECT 1 FROM "AmuxDecisionMakerRequestEvent" ev
+      WHERE ev."requestId" = q."id" AND (ev."kind" IN ('assign_discarded', 'stale_close', 'direct_answer_close')
+        OR (ev."kind" = 'result' AND ev."resultKind" IS DISTINCT FROM 'proposal'))))))`;
 
 /**
  * The owner queue's Decision Maker column: the newest request of each given

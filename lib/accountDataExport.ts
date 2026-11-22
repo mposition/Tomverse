@@ -336,8 +336,9 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       take: EXPORT_ROW_CAP,
     }),
 
-  researchPreviewRun: (userId) =>
-    prisma.researchPreviewRun.findMany({
+  // Private Research sources are re-checked once at the start of buildAccountDataExport.
+  researchPreviewRun: async (userId) => {
+    return prisma.researchPreviewRun.findMany({
       where: { userId },
       select: {
         id: true,
@@ -353,10 +354,27 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         completedAt: true,
         createdAt: true,
         updatedAt: true,
+        // Engine v2: the owner's own brief manifest (refs, never private text),
+        // plans, report revisions with claims, and source metadata. Evidence
+        // text, money internals, leases and provider bindings stay withheld.
+        engineVersion: true,
+        inputManifest: true,
+        qualityStatus: true,
+        currentReportRevision: true,
+        approvedCredits: true,
+        planRevisions: { select: { revision: true, author: true, plan: true, createdAt: true }, orderBy: { revision: "asc" } },
+        reportRevisions: { select: { revision: true, parentRevision: true, author: true, qualityStatus: true, visibility: true,
+          containsPrivate: true, document: true, createdAt: true,
+          claims: { select: { claimKey: true, sectionKey: true, text: true, kind: true, verification: true, privateDerived: true } } },
+          orderBy: { revision: "asc" } },
+        sources: { select: { sourceKey: true, origin: true, visibility: true, status: true, canonicalUrl: true, title: true,
+          publishedAt: true, firstSeenAt: true, versions: { select: { version: true, readStatus: true, extractionMethod: true,
+            retrievedAt: true, truncated: true, failureReason: true } } }, take: 5_000 },
       },
       orderBy: { createdAt: "asc" },
       take: EXPORT_ROW_CAP,
-    }),
+    });
+  },
 
   promptRefinerChatScope: (userId) =>
     prisma.$queryRaw<unknown[]>`SELECT "surface", "epoch" FROM "PromptRefinerChatScope"
@@ -1483,6 +1501,12 @@ export const buildAccountDataExport = async (userId: string): Promise<AccountDat
     // Refuse rather than hand out a silently incomplete export.
     throw new Error(`Account export is mis-wired: ${wiringProblems.join("; ")}`);
   }
+
+  // Before any domain is read: private Research copies whose original was deleted,
+  // re-locked or left Memory are revoked, which also rewrites the stored labels in
+  // manifests, report revisions and the chat answers exported below.
+  const { revalidateUserPrivateResearchSources } = await import("@/lib/researchEngineReads");
+  await revalidateUserPrivateResearchSources(userId);
 
   const data: Record<string, unknown[]> = {};
   const includedDomains: string[] = [];

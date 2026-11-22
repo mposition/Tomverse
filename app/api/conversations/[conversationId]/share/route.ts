@@ -1,4 +1,5 @@
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
+import { researchShareContent } from "@/lib/researchEngineReads";
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
@@ -224,15 +225,28 @@ export async function POST(
         content: true,
         modelId: true,
         createdAt: true,
+        researchRunId: true,
       },
     });
 
     for (const message of messages) {
       if (message.role !== "user" && message.role !== "assistant") continue;
+      // A Deep Research (engine v2) report shares only its public projection.
+      let content = message.content;
+      if (message.researchRunId) {
+        const projected = await researchShareContent(message.researchRunId);
+        if (projected && !projected.ok) {
+          return NextResponse.json(
+            { error: "This conversation includes a research report with private sources. Create its shareable version first.", code: projected.code },
+            { status: 409 }
+          );
+        }
+        if (projected?.ok) content = projected.content.slice(0, 100_000);
+      }
       const snapshotMessage: ShareSnapshot["messages"][number] = {
         id: message.id,
         role: message.role,
-        content: message.content,
+        content,
         modelId: message.modelId,
         createdAt: message.createdAt.toISOString(),
       };

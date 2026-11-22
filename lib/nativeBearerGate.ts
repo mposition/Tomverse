@@ -218,6 +218,14 @@ export function nativeParityBearerRoute(path: string, method: string, enabled = 
   // too, because a native send prepares context only for a project
   // conversation; every other native Chat send is unchanged.
   if (process.env.TOMVERSE_NATIVE_PROJECT_WORKSPACE_ENABLED === "true" && nativeProjectWorkspaceBearerRoute(path, method)) return true;
+  // Deep Research engine v2: owner-scoped run API, behind its own default-off Native switch.
+  if (process.env.RESEARCH_ENGINE_ENABLED === "true" && process.env.RESEARCH_ENGINE_NATIVE_ENABLED === "true") {
+    if (path === "/api/chat/research/offer") return method === "GET";
+    if (path === "/api/chat/research/runs") return method === "GET" || method === "POST";
+    if (/^\/api\/chat\/research\/runs\/[A-Za-z0-9_-]{1,100}$/.test(path)) return method === "GET" || method === "DELETE";
+    if (/^\/api\/chat\/research\/runs\/[A-Za-z0-9_-]{1,100}\/(?:plan|plan-edit|approve|pause|resume|cancel|finish|budget|scope|revisions)$/.test(path)) return method === "POST";
+    if (/^\/api\/chat\/research\/runs\/[A-Za-z0-9_-]{1,100}\/(?:sources|evidence|report|export)$/.test(path)) return method === "GET";
+  }
   // Checkout itself restricts bearer requests to complimentary internal passes.
   if (path === "/api/billing/checkout") return method === "POST";
   if (path === "/api/user/usage") return method === "GET";

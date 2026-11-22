@@ -1,12 +1,12 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { ResearchPreviewRunDto } from "../../lib/researchPreviewRunTypes";
 import type { ResearchPreviewMetadata } from "../../lib/researchPreviewMetadata";
 import { researchRunNeedsPolling, type ResearchPreviewRunTransport } from "../../lib/researchPreviewRunClient";
 import { researchPreviewCopy } from "../../locales/researchPreview";
 import type { Language } from "../../lib/language";
-import { ProjectSaveToProject } from "../projects/ProjectSaveToProject";
+import { ResearchWorkspace } from "./DeepResearchEngine";
 
 type RunAction = "resume" | "cancel";
 type RunCardState = {
@@ -17,11 +17,17 @@ type RunCardState = {
   busy?: boolean;
 };
 
-export function ResearchPreviewRunCard({ runId, conversationId, assistantMessageId, language, transport, onMessage, reportOutcome }: {
+export function ResearchPreviewRunCard({ runId, conversationId, assistantMessageId, language, transport, onMessage, reportOutcome, completedAction }: {
   runId: string; conversationId: string; assistantMessageId: string; language: Language;
   transport: ResearchPreviewRunTransport;
   onMessage?: (run: ResearchPreviewRunDto) => void;
   reportOutcome?: ResearchPreviewMetadata["outcome"];
+  /**
+   * Shown once the run is completed. The card is shared by Web and Native, so
+   * a surface-specific action (Web's "save to project") is passed in by that
+   * surface rather than imported here.
+   */
+  completedAction?: ReactNode;
 }) {
   const copy = researchPreviewCopy[language];
   const scopeKey = JSON.stringify([runId, conversationId, assistantMessageId]);
@@ -52,7 +58,8 @@ export function ResearchPreviewRunCard({ runId, conversationId, assistantMessage
         throw new Error("RESEARCH_RUN_SCOPE_MISMATCH");
       }
       update({ run: value, error: false });
-      if (researchRunNeedsPolling(value.status)) timer = setTimeout(read, 5000);
+      // An engine v2 run is rendered and polled by the shared workspace below.
+      if (value.engineVersion !== 2 && researchRunNeedsPolling(value.status)) timer = setTimeout(read, 5000);
       if (value.message) messageCallback.current?.(value);
     }
     async function read() {
@@ -93,10 +100,10 @@ export function ResearchPreviewRunCard({ runId, conversationId, assistantMessage
     };
   }, [runId, conversationId, assistantMessageId, scopeKey, transport]);
 
-  const label = run ? ({ queued: copy.researchRunQueued, running: copy.researchRunRunning,
+  const label = run ? (({ queued: copy.researchRunQueued, running: copy.researchRunRunning,
     checkpointed: copy.researchRunCheckpointed, completed: copy.researchRunCompleted,
     failed: copy.researchPreviewOutcomeFailed, cancelled: copy.researchPreviewOutcomeCancelled,
-    attention: copy.researchRunAttention }[run.status]) : copy.researchRunLoading;
+    attention: copy.researchRunAttention } as Record<string, string>)[run.status] ?? copy.researchRunRunning) : copy.researchRunLoading;
   const reportLabel = reportOutcome && ({
     complete: copy.researchReportComplete,
     partial: copy.researchReportPartial,
@@ -104,6 +111,7 @@ export function ResearchPreviewRunCard({ runId, conversationId, assistantMessage
     failed: undefined,
     cancelled: undefined,
   }[reportOutcome]);
+  if (run?.engineVersion === 2) return <ResearchWorkspace runId={runId} conversationId={conversationId} language={language} accountKey="web" />;
   return <div className="research-run-card" data-testid="research-run-card" data-run-status={run?.status ?? "loading"}>
     <p role="status"><strong>{copy.researchPreviewTitle}</strong> · {label}</p>
     {reportLabel && <p data-testid="research-preview-result" data-outcome={reportOutcome}>{reportLabel}</p>}
@@ -111,7 +119,7 @@ export function ResearchPreviewRunCard({ runId, conversationId, assistantMessage
     {run?.status === "queued" && <p>{copy.researchRunQueueHint}</p>}
     {run?.status === "checkpointed" && run.canResume && <button type="button" disabled={busy || error} data-testid="research-run-resume" onClick={() => void controls.current?.action("resume")}>{copy.researchRunResume}</button>}
     {run && ["queued", "running", "checkpointed"].includes(run.status) && <button type="button" disabled={busy || error} data-testid="research-run-cancel" onClick={() => void controls.current?.action("cancel")}>{copy.researchRunCancel}</button>}
-    {run?.status === "completed" && <ProjectSaveToProject testId="research-save-to-project" source={{ sourceKind: "research_report", runId }} />}
+    {run?.status === "completed" && completedAction}
     {error && <p role="alert">{copy.researchRunReadError} <button type="button" disabled={busy} onClick={() => controls.current?.refresh()}>{copy.researchRunRefresh}</button></p>}
   </div>;
 }

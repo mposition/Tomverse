@@ -1,11 +1,33 @@
 /** Cost observation for the existing optimizer. No reservations or settlement. */
+import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
+
 export type OptimizerCallKind = "synthesize" | "generate" | "route" | "answer" | "judge";
-type Usage = { inputTokens: number; outputTokens: number };
-type Prices = { inputUsdPerMillionTokens: number; outputUsdPerMillionTokens: number };
+type Usage = {
+    inputTokens: number; outputTokens: number;
+    /** Present only where the adapter reported a cache split (observeOptimizerUsageCost). */
+    cachedInputTokens?: number; cacheWriteInputTokens?: number; reasoningTokens?: number;
+};
+type Prices = {
+    inputUsdPerMillionTokens: number; outputUsdPerMillionTokens: number;
+    cachedInputPriceMultiplier?: number; cacheWriteUsdPerMillionTokens?: number | null;
+};
 export type OptimizerCost =
     | { state: "known"; amountMicroUsd: number; usage?: Usage; prices?: Prices }
     | { state: "no_dispatch"; reason: "model_unavailable" | "unpriced" | "pre_dispatch_refusal" }
-    | { state: "unknown"; dispatch: "dispatched" | "unknown"; reason: "missing_usage" | "invalid_usage" | "invalid_price" | "invalid_cost" | "exception" };
+    | { state: "unknown"; dispatch: "dispatched" | "unknown"; reason: "missing_usage" | "invalid_usage" | "invalid_price" | "invalid_cost" | "unpriced_cache_write" | "exception" };
+/**
+ * Which evaluation call this was, so a report can attribute spend to a case,
+ * a model and an arm. Ids and roles only, never message or answer text.
+ */
+export type OptimizerCallIdentity = {
+    objective?: string;
+    caseId?: string;
+    modelId?: string;
+    /** baseline_guidance / candidate_guidance for routes; incumbent / challenger / candidate_pick for answers; direct / replay for judges. */
+    arm?: string;
+    /** 1-based try of the same answer; a retry is a second spend, never a free one. */
+    attempt?: number;
+};
 export type OptimizerCallResult<T> = {
     value: T | null;
     /** Known subtotal only. Null always means unknown, never free. */
@@ -26,7 +48,7 @@ export type OptimizerCostCoverage = {
     noDispatchCalls: number;
     unknownCalls: number;
     usagePricedCalls: number;
-    calls: ({ kind: OptimizerCallKind; provider: string; failed: boolean } & OptimizerCost)[];
+    calls: ({ kind: OptimizerCallKind; provider: string; failed: boolean; identity?: OptimizerCallIdentity } & OptimizerCost)[];
 };
 
 const valid = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0;
@@ -48,6 +70,51 @@ export const observeOptimizerCost = (
         : { state: "unknown", dispatch: "dispatched", reason: "invalid_cost" };
 };
 
+/**
+ * The same observation priced by the existing provider-cost helper, with the
+ * cache-read and cache-write lines the adapter reported. Reasoning tokens are
+ * already inside `outputTokens` (AI SDK usage) and are kept for the record
+ * only. A cache write with no verified rate is understated by a known token
+ * count, so the cost is unknown rather than a silent discount.
+ */
+export const observeOptimizerUsageCost = (
+    usage: {
+        inputTokens?: number; outputTokens?: number;
+        inputTokenDetails?: { cacheReadTokens?: number; cacheWriteTokens?: number };
+        outputTokenDetails?: { reasoningTokens?: number };
+    } | undefined,
+    prices: Prices
+): OptimizerCost => {
+    const plain = observeOptimizerCost(usage, prices);
+    if (plain.state !== "known" || !usage) return plain;
+    const cached = usage.inputTokenDetails?.cacheReadTokens;
+    const written = usage.inputTokenDetails?.cacheWriteTokens;
+    const reasoning = usage.outputTokenDetails?.reasoningTokens;
+    if ([cached, written, reasoning].some(value => value !== undefined && !valid(value)))
+        return { state: "unknown", dispatch: "dispatched", reason: "invalid_usage" };
+    const breakdown = calculateProviderUsageCost({
+        inputTokens: usage.inputTokens!, cachedInputTokens: cached, cacheWriteInputTokens: written,
+        outputTokens: usage.outputTokens!,
+        inputUsdPerMillionTokens: prices.inputUsdPerMillionTokens, outputUsdPerMillionTokens: prices.outputUsdPerMillionTokens,
+        cachedInputPriceMultiplier: prices.cachedInputPriceMultiplier,
+        cacheWriteUsdPerMillionTokens: prices.cacheWriteUsdPerMillionTokens ?? null,
+    });
+    if (breakdown.unpricedCacheWriteTokens > 0) return { state: "unknown", dispatch: "dispatched", reason: "unpriced_cache_write" };
+    if (!valid(breakdown.totalCostMicroUsd)) return { state: "unknown", dispatch: "dispatched", reason: "invalid_cost" };
+    return {
+        state: "known", amountMicroUsd: breakdown.totalCostMicroUsd,
+        usage: {
+            inputTokens: breakdown.inputTokens, outputTokens: breakdown.outputTokens,
+            cachedInputTokens: breakdown.cachedInputTokens, cacheWriteInputTokens: breakdown.cacheWriteInputTokens,
+            ...(reasoning !== undefined ? { reasoningTokens: reasoning } : {}),
+        },
+        prices: {
+            inputUsdPerMillionTokens: breakdown.inputUsdPerMillionTokens, outputUsdPerMillionTokens: breakdown.outputUsdPerMillionTokens,
+            cachedInputPriceMultiplier: breakdown.cachedInputPriceMultiplier, cacheWriteUsdPerMillionTokens: breakdown.cacheWriteUsdPerMillionTokens,
+        },
+    };
+};
+
 export const optimizerCostFields = (cost: OptimizerCost) => ({
     cost, costMicroUsd: cost.state === "known" ? cost.amountMicroUsd : cost.state === "no_dispatch" ? 0 : null,
 });
@@ -65,7 +132,15 @@ export const optimizerSpend = (budgetMicroUsd: number) => {
         knownMicroUsd: 0, started: 0, completed: 0, notStarted: 0, failed: 0,
         knownCalls: 0, noDispatchCalls: 0, unknownCalls: 0, usagePricedCalls: 0, calls: [],
     };
-    const call = async <T>(kind: OptimizerCallKind, run: () => Promise<OptimizerCallResult<T>>): Promise<T | null> => {
+    const call = async <T>(
+        kind: OptimizerCallKind,
+        run: () => Promise<OptimizerCallResult<T>>,
+        meta?: {
+            identity?: OptimizerCallIdentity;
+            /** Told what this started call cost, known or not, once it has ended. */
+            observe?: (entry: { cost: OptimizerCost; failed: boolean }) => void;
+        }
+    ): Promise<T | null> => {
         if (closedReason || spent >= budgetMicroUsd) {
             closedReason ??= "budget_exhausted";
             coverage.notStarted += 1;
@@ -94,7 +169,8 @@ export const optimizerSpend = (budgetMicroUsd: number) => {
         } finally {
             coverage.completed += 1;
             if (failed) coverage.failed += 1;
-            coverage.calls.push({ kind, provider, failed, ...cost });
+            coverage.calls.push({ kind, provider, failed, ...(meta?.identity ? { identity: meta.identity } : {}), ...cost });
+            meta?.observe?.({ cost, failed });
             if (cost.state === "unknown") {
                 coverage.unknownCalls += 1;
                 coverage.complete = false;

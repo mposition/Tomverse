@@ -492,34 +492,13 @@ const cardTextFields = (card: DmCard): Record<string, string> => {
 };
 
 /**
- * Owner decision 2026-11-14 (AMUX process audit bundle 2, AMUXFLOW/B2): the
- * section 3-3 terms judge what the card asks -- its fixed question, options
- * and context -- not the evidence a system card carries for the DM to read (a
- * run's findings, a diff), where words such as "delete" or "token" are code,
- * not a request. A system card wraps that evidence in these markers; with
- * TOMVERSE_AMUX_DM_TERMS_FIXED_TEXT_ONLY=enabled the term check skips it. The
- * secret check still reads the whole card. Off by default.
+ * The markers a card the app files itself wraps its evidence in (a run's
+ * findings, a diff), so the Decision Maker reads where the question ends and
+ * the material begins. Such a card is not read for the section 3-3 terms at
+ * all (owner decision 2026-11-22, below).
  */
 export const DM_EVIDENCE_OPEN = "[evidence]";
 export const DM_EVIDENCE_CLOSE = "[/evidence]";
-export const DM_TERMS_FIXED_TEXT_ONLY_ENV = "TOMVERSE_AMUX_DM_TERMS_FIXED_TEXT_ONLY";
-export const dmTermsFixedTextOnlyEnabled = (value: string | undefined) => value?.trim() === "enabled";
-
-/** The text the term check reads: every evidence block left out, when exempt. */
-export const dmTermCheckText = (text: string, evidenceExempt: boolean) => {
-  if (!evidenceExempt) return text;
-  let out = "";
-  let at = 0;
-  for (;;) {
-    const open = text.indexOf(DM_EVIDENCE_OPEN, at);
-    if (open < 0) return out + text.slice(at);
-    const close = text.indexOf(DM_EVIDENCE_CLOSE, open + DM_EVIDENCE_OPEN.length);
-    // An unclosed block is read whole: nothing hides behind a lone marker.
-    if (close < 0) return out + text.slice(at);
-    out += text.slice(at, open);
-    at = close + DM_EVIDENCE_CLOSE.length;
-  }
-};
 
 export type DmRoutingInput = {
   /** `null` when the setting could not be read. */
@@ -532,11 +511,16 @@ export type DmRoutingInput = {
   /** Requests already routed to the instance in the trailing hour and day. */
   throughput: { lastHour: number; lastDay: number };
   /**
-   * Skip evidence blocks in the term check (AMUXFLOW/B2): true only for a
-   * card the app filed itself (an owner settlement card, by its recorded
-   * local card) while its switch is on. Absent: every word is read.
+   * A card the app filed itself, proven by the row that recorded its local
+   * card (decisionMakerRequestStore.ts): a result review, an owner queue
+   * settlement, a T2 draft review, a refused session answer or a card close
+   * question. Its answers are the app's own fixed, reversible words, and what
+   * stays a person's is held where it is done -- the develop merge's path gate,
+   * main and production for a person, the secret check below -- so its words
+   * are not read for the section 3-3 terms (owner decision 2026-11-22: "DM은
+   * 접근권한 막지 마세요"). Absent: a worker's question, every word read.
    */
-  evidenceTermsExempt?: boolean;
+  appFiledCard?: boolean;
 };
 
 export type DmRoutingRefusal =
@@ -578,13 +562,10 @@ export const routeDmQuestion = (input: DmRoutingInput): DmRoutingDecision => {
   // Section 3-3's inputs. An option's effect class and paths are not among
   // them: they are section 4's declaration, which the router does not route on,
   // and a path is no more prose than a context path, which is not read either.
-  // Only a card the app itself filed earns the exemption (the caller proves
-  // it); a worker's markers are plain text here.
-  const evidenceExempt = input.evidenceTermsExempt === true;
-  const termCategories = irreversibleTermCategories(
-    [card.type, ...card.tags, card.title, dmTermCheckText(card.question, evidenceExempt),
-      ...card.options.map((option) => option.label), card.unblocks,
-      dmTermCheckText(card.context, evidenceExempt)].join("\n"),
+  // A card the app filed is not read for the terms; a worker's every word is.
+  const termCategories = input.appFiledCard === true ? [] : irreversibleTermCategories(
+    [card.type, ...card.tags, card.title, card.question,
+      ...card.options.map((option) => option.label), card.unblocks, card.context].join("\n"),
   );
   if (termCategories.length > 0) refusals.push("irreversible_term");
 
