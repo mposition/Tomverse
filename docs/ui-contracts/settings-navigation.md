@@ -122,8 +122,9 @@ Connection addresses are collapsed by default in a keyboard-accessible native
 `details` disclosure. Expanding it shows general `/api/v1` and `/api/anthropic`,
 coding `/api/code/v1` and `/api/code/anthropic`, the tool names and four copy actions.
 Installation instructions and OS support belong on the linked guides; usage and
-key caps stay on `/settings/api`. The native VS Code guide is distinct from the
-existing VS Code compatible-provider setup and does not claim a public download.
+key caps stay on `/settings/api`. The native VS Code guide links to the versioned
+public preview VSIX and reports Marketplace publication separately from the
+existing VS Code compatible-provider setup.
 The API documentation link opens the localized developer page.
 
 - It reads the key list the API page reads (`GET /api/user/api-keys`) and adds no route.
