@@ -63,3 +63,20 @@ export function amuxExistingHierarchyTargets(
 export const amuxExistingNodeIds = (targets: readonly AmuxPermittedTargetRef[]): Set<string> =>
   new Set(targets.flatMap((target) => target.kind === "node" &&
     Object.hasOwn(target, "title") ? [target.ref] : []));
+
+/** The parent and Feature refs of a session-written plan (an untrusted
+ * object, before any check) that are not its own units: the existing nodes it
+ * attaches to. Only a plan that names one needs the existing hierarchy read. */
+export function amuxPlanExistingRefs(plan: unknown): string[] {
+  const units = plan && typeof plan === "object" && !Array.isArray(plan) &&
+    Array.isArray((plan as { units?: unknown }).units)
+    ? (plan as { units: unknown[] }).units : [];
+  const record = (unit: unknown) => unit && typeof unit === "object" && !Array.isArray(unit)
+    ? unit as Record<string, unknown> : {};
+  const local = new Set(units.map((unit) => record(unit).localId));
+  return [...new Set(units.flatMap((raw) => {
+    const unit = record(raw);
+    const ref = unit.kind === "node" ? unit.parentRef : unit.kind === "card" ? unit.featureRef : null;
+    return typeof ref === "string" && !local.has(ref) ? [ref] : [];
+  }))];
+}

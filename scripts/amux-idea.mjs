@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { AMUX_V4_ANALYSIS_PROMPT_VERSION, amuxAnalysisPromptWithNote,
   buildAmuxIdeaAnalysisPrompt } from "../lib/amux/ideaAnalysisPromptCore.ts";
 import { deriveAmuxFeatureDisplayPrefix } from "../lib/amux/cardDisplayKeyBackfillCore.ts";
+import { amuxPlanExistingRefs } from "../lib/amux/ideaExistingHierarchyCore.ts";
 import { AMUX_SESSION_PAGE_NOTE } from "../lib/amux/ideaSessionAnswerCore.ts";
 import {
   AMUX_SESSION_INTAKE_ORIGIN_ENV,
@@ -164,16 +165,7 @@ export function amuxPlanWarnings(plan) {
         ? unit.title : null) ?? "FEAT<n>" }] : []);
 }
 
-/** The parent and Feature refs of a plan that are not its own units: the
- * existing nodes it attaches to. */
-export function amuxPlanExistingRefs(plan) {
-  const units = Array.isArray(plan?.units) ? plan.units : [];
-  const local = new Set(units.map((unit) => unit?.localId));
-  return [...new Set(units.flatMap((unit) => {
-    const ref = unit?.kind === "node" ? unit.parentRef : unit?.kind === "card" ? unit.featureRef : null;
-    return typeof ref === "string" && !local.has(ref) ? [ref] : [];
-  }))];
-}
+export { amuxPlanExistingRefs };
 
 const intakeEndpoint = (flags, env) => amuxSessionIntakeEndpoint(
   flags["--origin"] ?? env[AMUX_SESSION_INTAKE_ORIGIN_ENV] ?? "");
