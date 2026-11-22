@@ -11,7 +11,7 @@ export { Gateway, GatewayError } from "./gateway.js";
 export type { CatalogModel, Receipt } from "./gateway.js";
 export { Journal, listSessions, deleteSession, canonicalDigest, sha256, writeFileAtomic } from "./session.js";
 export type { JournalIo, SessionState } from "./session.js";
-export { Workspace, normalizeRoot, same } from "./workspace.js";
+export { Workspace, normalizeRoot, same, isSecretPath } from "./workspace.js";
 export { resolveEndpoint, DEFAULT_ENDPOINT } from "./config.js";
 export type { Endpoint } from "./config.js";
 export { ApprovalMemory } from "./approvals.js";

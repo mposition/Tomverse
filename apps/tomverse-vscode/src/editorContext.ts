@@ -1,7 +1,8 @@
 import * as vscode from "vscode";
 import { randomUUID } from "node:crypto";
-import { statSync, readFileSync } from "node:fs";
-import { currentDigest, sha256, Workspace, type PlannedEdit } from "../../tomverse-cli/src/runtime.js";
+import { statSync, readFileSync, realpathSync } from "node:fs";
+import { dirname, basename, join, resolve } from "node:path";
+import { currentDigest, Workspace, isSecretPath, type PlannedEdit } from "../../tomverse-cli/src/runtime.js";
 import { t } from "./i18n.js";
 import type { Dialogs } from "./dialogs.js";
 
@@ -17,11 +18,27 @@ export type Attachment = {
     truncated: boolean;
     text: string;
 };
-type FileStamp = { absolute: string; revision: number; version?: number; preimage: string | null };
-const key = (path: string) => (process.platform === "win32" || process.platform === "darwin" ? path.toLowerCase() : path);
+type FileStamp = { absolute: string; revision: number; versions: string; preimage: string | null };
+const key = (path: string) => {
+    let existing = resolve(path);
+    const missing: string[] = [];
+    for (;;) {
+        try {
+            existing = join(realpathSync.native(existing), ...missing);
+            break;
+        } catch {
+            const parent = dirname(existing);
+            if (parent === existing) break;
+            missing.unshift(basename(existing));
+            existing = parent;
+        }
+    }
+    return process.platform === "win32" || process.platform === "darwin" ? existing.toLowerCase() : existing;
+};
 
 export class EditorContext {
     readonly attachments: Attachment[] = [];
+    private readonly aliases = new Map<string, string>();
     private readonly revisions = new Map<string, number>();
     private readonly approved = new Map<string, FileStamp[]>();
     constructor(
@@ -31,7 +48,10 @@ export class EditorContext {
         private readonly dialogs: Dialogs,
     ) {
         const changed = (uri: vscode.Uri) => {
-            if (uri.scheme === "file") this.revisions.set(key(uri.fsPath), (this.revisions.get(key(uri.fsPath)) ?? 0) + 1);
+            if (uri.scheme !== "file") return;
+            const previous = this.aliases.get(uri.toString());
+            const current = this.identity(uri);
+            for (const name of new Set([previous, current])) if (name) this.revisions.set(name, (this.revisions.get(name) ?? 0) + 1);
         };
         context.subscriptions.push(vscode.workspace.onDidChangeTextDocument((e) => changed(e.document.uri)));
         context.subscriptions.push(vscode.workspace.onDidSaveTextDocument((doc) => changed(doc.uri)));
@@ -52,13 +72,21 @@ export class EditorContext {
     clearApprovals() {
         this.approved.clear();
     }
-    private document(absolute: string) {
-        return vscode.workspace.textDocuments.find((doc) => doc.uri.scheme === "file" && key(doc.uri.fsPath) === key(absolute));
+    private identity(uri: vscode.Uri) {
+        const name = key(uri.fsPath);
+        this.aliases.set(uri.toString(), name);
+        return name;
     }
     private stamp(absolute: string): FileStamp {
-        const doc = this.document(absolute);
-        if (doc?.isDirty) throw new Error(`${absolute}: unsaved changes; approval is no longer valid.`);
-        return { absolute, revision: this.revisions.get(key(absolute)) ?? 0, version: doc?.version, preimage: currentDigest(absolute) };
+        const name = key(absolute);
+        const docs = vscode.workspace.textDocuments.filter((doc) => doc.uri.scheme === "file" && this.identity(doc.uri) === name);
+        if (docs.some((doc) => doc.isDirty)) throw new Error(`${absolute}: unsaved changes; approval is no longer valid.`);
+        return {
+            absolute,
+            revision: this.revisions.get(name) ?? 0,
+            versions: JSON.stringify(docs.map((doc) => [doc.uri.toString(), doc.version]).sort()),
+            preimage: currentDigest(absolute),
+        };
     }
     capture(toolId: string, paths: string[]) {
         this.approved.set(
@@ -75,11 +103,7 @@ export class EditorContext {
     }
     private checkStamp(stamp: FileStamp) {
         const now = this.stamp(stamp.absolute);
-        if (
-            now.revision !== stamp.revision ||
-            (stamp.version !== undefined && now.version !== undefined && now.version !== stamp.version) ||
-            now.preimage !== stamp.preimage
-        )
+        if (now.revision !== stamp.revision || now.versions !== stamp.versions || now.preimage !== stamp.preimage)
             throw new Error(`${stamp.absolute} changed after review. Read it and propose a new patch.`);
     }
     checkWrite(edit: PlannedEdit, toolId: string) {
@@ -89,11 +113,11 @@ export class EditorContext {
         return vscode.workspace.textDocuments.filter((doc) => {
             if (!doc.isDirty || doc.uri.scheme !== "file") return false;
             try {
-                this.workspace().resolve(doc.uri.fsPath, "read");
+                this.workspace().resolve(this.identity(doc.uri), "read");
             } catch {
                 return false;
             }
-            return !paths || paths.some((path) => key(path) === key(doc.uri.fsPath));
+            return !paths || paths.some((path) => key(path) === this.identity(doc.uri));
         });
     }
     async saveDirty(paths?: string[], active: () => boolean = () => true) {
@@ -117,7 +141,7 @@ export class EditorContext {
             .filter((d) => d.uri.scheme === "file")
             .flatMap((d) => {
                 try {
-                    return [this.workspace().resolve(d.uri.fsPath, "read").absolute];
+                    return [this.workspace().resolve(this.identity(d.uri), "read").absolute];
                 } catch {
                     return [];
                 }
@@ -133,8 +157,9 @@ export class EditorContext {
         let path: string;
         if (target.scheme === "untitled" && kind === "selection") path = "[untitled: unsaved snapshot, Ask only]";
         else {
-            if (target.scheme !== "file") throw new Error(t("unsupported"));
-            const resolved = this.workspace().resolve(target.fsPath, "read");
+            if (target.scheme !== "file" || target.authority) throw new Error(t("unsupported"));
+            if (isSecretPath(target.fsPath)) throw new Error("Context path can contain credentials.");
+            const resolved = this.workspace().resolve(this.identity(target), "read");
             const stat = statSync(resolved.absolute);
             if (!stat.isFile() || stat.size > 2 * 1024 * 1024) throw new Error("Context file must be text and at most 2 MiB. Select a smaller file.");
             if (readFileSync(resolved.absolute).subarray(0, 8192).includes(0)) throw new Error("Binary context is not supported.");
@@ -157,7 +182,10 @@ export class EditorContext {
         const original = Buffer.byteLength(text);
         const remaining = Math.min(24_000, 64_000 - this.attachments.reduce((sum, a) => sum + a.bytes, 0));
         if (remaining <= 0) throw new Error("Context limit: 64 KiB per task.");
-        text = Buffer.from(text).subarray(0, remaining).toString("utf8");
+        const bytes = Buffer.from(text);
+        let end = Math.min(bytes.length, remaining);
+        while (end > 0 && end < bytes.length && (bytes[end]! & 0xc0) === 0x80) end -= 1;
+        text = bytes.subarray(0, end).toString("utf8");
         this.attachments.push({
             id: randomUUID(),
             uri: target.toString(),
@@ -178,7 +206,7 @@ export class EditorContext {
             if (uri.scheme === "untitled") {
                 if (mode !== "ask") throw new Error("Save the untitled file inside the root before using Agent.");
             } else {
-                this.workspace().resolve(uri.fsPath, "read");
+                this.workspace().resolve(this.identity(uri), "read");
                 const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === attachment.uri);
                 if (doc && doc.version !== attachment.version) throw new Error(`${attachment.path} changed since attachment. Remove and attach it again.`);
             }

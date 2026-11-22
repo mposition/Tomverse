@@ -13,7 +13,7 @@
   "exportDiagnostics": "Export diagnostics",
   "trustDescription": "Restricted Mode: trust this workspace before using context or running a task.",
   "virtualDescription": "Local desktop only: Windows x64, macOS arm64 or Linux x64, with file workspaces. Remote, virtual and web are unsupported.",
-  "endpointDescription": "Paste your Tomverse API key for",
-  "localhostDescription": "Allow HTTP only on localhost for local development. User scope only.",
-  "persistDescription": "Memory only: no resume or Undo after the window closes."
+  "endpointDescription": "Tomverse coding API base URL. Only user settings are used; workspace settings and environment variables are ignored.",
+  "localhostDescription": "Allow HTTP on localhost for local development only. Disabled by default.",
+  "persistDescription": "Keep sessions and Undo backups in local extension storage. Disable for memory-only sessions without resume after exit."
 }

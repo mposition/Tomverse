@@ -34,6 +34,7 @@ export type ToolContext = {
     signal: () => AbortSignal;
     assertAllowed?: () => void;
     redactText?: (text: string) => string;
+    /** Synchronous, idempotent guard: before backup and again immediately before disk mutation. */
     beforeWrite?: (edit: PlannedEdit, toolCallId: string) => void;
     trackExecution?: (execution: Promise<unknown>) => void;
     beforeCommand?: (plan: CommandPlan, toolCallId: string) => void;

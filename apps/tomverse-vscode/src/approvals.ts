@@ -26,6 +26,7 @@ export class Approvals implements vscode.TextDocumentContentProvider {
     }
     begin() {
         this.cancel();
+        this.documents.clear();
         this.stopped = false;
         this.memory.clear();
         this.rememberedCommands.clear();

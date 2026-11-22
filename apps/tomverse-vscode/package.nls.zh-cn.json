@@ -13,7 +13,7 @@
   "exportDiagnostics": "导出诊断",
   "trustDescription": "受限模式：请先信任此工作区，再收集上下文或运行任务。",
   "virtualDescription": "仅支持本地桌面 Windows x64、macOS arm64、Linux x64 的文件工作区。",
-  "endpointDescription": "输入 Tomverse API 密钥：",
-  "localhostDescription": "Allow HTTP only on localhost for local development. User scope only.",
-  "persistDescription": "仅内存：关闭窗口后无法恢复或撤销。"
+  "endpointDescription": "Tomverse 编程 API 的基础 URL。仅使用用户设置，忽略工作区设置和环境变量。",
+  "localhostDescription": "仅允许本地开发时在 localhost 上使用 HTTP。默认关闭。",
+  "persistDescription": "在扩展的本地存储中保留会话和撤销备份。关闭后仅保存在内存中，退出后无法恢复。"
 }

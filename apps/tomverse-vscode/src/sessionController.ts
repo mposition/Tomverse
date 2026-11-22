@@ -6,7 +6,7 @@ import { EditorContext } from "./editorContext.js";
 import { Approvals } from "./approvals.js";
 import { join } from "node:path";
 import { Credentials } from "./credentials.js";
-import { digest, environmentProblem, namespace, parseMessage, redact } from "./security.js";
+import { digest, environmentProblem, namespace, parseMessage, redact, redactJson } from "./security.js";
 import { labels, t } from "./i18n.js";
 import {
     Gateway,
@@ -169,7 +169,7 @@ export class SessionController implements vscode.WebviewViewProvider {
             this.updateTimer = undefined;
             if (this.disposed) return;
             this.revision += 1;
-            if (this.view) void this.view.webview.postMessage(JSON.parse(this.clean(JSON.stringify(this.snapshot()))));
+            if (this.view) void this.view.webview.postMessage(JSON.parse(redactJson(this.snapshot(), this.key)));
             this.status.text = `$(comment-discussion) Tomverse: ${labels()[this.state as keyof ReturnType<typeof labels>] ?? this.state}`;
             this.status.command = this.busy ? "tomverse.stop" : "tomverse.open";
         }, 40);
@@ -211,6 +211,12 @@ export class SessionController implements vscode.WebviewViewProvider {
         if (!message || message.channel !== this.channel) return false;
         if (message.type === "ready") {
             this.update();
+            return true;
+        }
+        // Stop only reduces authority; an old run envelope must still stop the
+        // active task before the debounced state reaches the view.
+        if (message.type === "action" && message.action === "stop") {
+            this.stop();
             return true;
         }
         if (message.run !== this.run) return false;
@@ -402,7 +408,7 @@ export class SessionController implements vscode.WebviewViewProvider {
                     {
                         writeFileAtomic: (path, data) => {
                             if (Buffer.isBuffer(data) && data.includes(Buffer.from(key))) throw new Error("Refused to persist credential bytes.");
-                            writeFileAtomic(path, typeof data === "string" ? this.clean(data) : data);
+                            writeFileAtomic(path, typeof data === "string" ? redactJson(JSON.parse(data), key) : data);
                         },
                     },
                 );
@@ -418,6 +424,7 @@ export class SessionController implements vscode.WebviewViewProvider {
             this.state = "error";
             this.report(error);
         } finally {
+            if (this.stopped) this.state = this.outcome("cancelled");
             this.approvals.clear();
             this.busy = false;
             this.epoch = randomUUID();
@@ -450,7 +457,7 @@ export class SessionController implements vscode.WebviewViewProvider {
                 this.update();
             },
             event: (event) => {
-                this.log(JSON.stringify(event));
+                this.log(redactJson(event, this.key));
                 if (event.type === "error") this.lastError = this.clean(`${event.code ?? "error"}: ${event.message ?? ""}`);
                 if (event.type === "tool_result" || event.type === "command_output") this.state = "running";
                 this.update();
@@ -516,7 +523,7 @@ export class SessionController implements vscode.WebviewViewProvider {
         if (!selected) return;
         this.closeSession();
         const journal = Journal.open(home, selected.id, {
-            writeFileAtomic: (path, data) => writeFileAtomic(path, typeof data === "string" ? redact(data, key) : data),
+            writeFileAtomic: (path, data) => writeFileAtomic(path, typeof data === "string" ? redactJson(JSON.parse(data), key) : data),
         });
         try {
             this.key = key;
@@ -607,11 +614,13 @@ export class SessionController implements vscode.WebviewViewProvider {
                 const result = await this.runner.loop();
                 this.state = this.outcome(result);
             }
+            if (this.stopped) this.state = this.outcome("cancelled");
             this.cost = await sessionCost(this.gateway, journal);
         } catch (error) {
             this.state = journal.unresolvedGenerations().length ? "unknown_outcome" : "error";
             this.report(error);
         } finally {
+            if (this.stopped) this.state = this.outcome("cancelled");
             this.approvals.clear();
             this.busy = false;
             this.epoch = randomUUID();
@@ -636,6 +645,7 @@ export class SessionController implements vscode.WebviewViewProvider {
     private async deleteCurrent() {
         this.idle();
         if (!this.journal || !this.home) return;
+        const persisted = this.journal.dir !== null;
         const id = this.journal.state.id,
             home = this.home;
         if (
@@ -649,7 +659,7 @@ export class SessionController implements vscode.WebviewViewProvider {
             return;
         this.idle();
         this.closeSession();
-        deleteSession(home, id);
+        if (persisted) deleteSession(home, id);
         this.update();
     }
     private async exportDiagnostics() {
@@ -681,7 +691,7 @@ export class SessionController implements vscode.WebviewViewProvider {
             defaultUri: vscode.Uri.file(join(this.context.globalStorageUri.fsPath, "tomverse-diagnostics.json")),
             filters: { JSON: ["json"] },
         });
-        if (uri?.scheme === "file") writeFileSync(uri.fsPath, this.clean(JSON.stringify(data, null, 2)), { mode: 0o600 });
+        if (uri?.scheme === "file") writeFileSync(uri.fsPath, redactJson(data, this.key), { mode: 0o600 });
     }
     stop() {
         if (!this.busy) return;

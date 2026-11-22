@@ -1,8 +1,8 @@
 import * as vscode from "vscode";
 import assert from "node:assert/strict";
-import { writeFileSync, readFileSync, existsSync } from "node:fs";
+import { writeFileSync, readFileSync, existsSync, mkdirSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
-import { FakeGateway, TEST_KEY, DEFAULT_MODELS, type ScriptedReply } from "../../../tomverse-cli/tests/fakeGateway.js";
+import { FakeGateway, TEST_KEY, DEFAULT_MODELS, lastUserText, toolResultsSinceUser, type ScriptedReply } from "../../../tomverse-cli/tests/fakeGateway.js";
 import { Journal, currentDigest } from "../../../tomverse-cli/src/runtime.js";
 import { t } from "../../src/i18n.js";
 import { digest, namespace } from "../../src/security.js";
@@ -161,6 +161,107 @@ export async function run() {
         await conflictDoc.save();
         record("typing after diff invalidates approval and preserves dirty buffer");
         await fresh();
+        writeFileSync(join(root, "rename.txt"), "before");
+        replies = [
+            {
+                toolCalls: [
+                    { name: "apply_patch", args: { edits: [{ path: "rename.txt", action: "update", replacements: [{ old: "before", new: "after" }] }] } },
+                ],
+            },
+            { text: "rename conflict" },
+        ];
+        const renameRun = send();
+        const renameApproval = await approval();
+        const rename = new vscode.WorkspaceEdit();
+        rename.renameFile(vscode.Uri.file(join(root, "rename.txt")), vscode.Uri.file(join(root, "renamed.txt")));
+        await vscode.workspace.applyEdit(rename);
+        assert.equal(await approve(renameApproval.id), false);
+        await renameRun;
+        assert.equal(readFileSync(join(root, "renamed.txt"), "utf8"), "before");
+        record("native workspace rename after review invalidates patch");
+        await fresh();
+        mkdirSync(join(root, "real-parent"));
+        symlinkSync(join(root, "real-parent"), join(root, "alias-parent"), process.platform === "win32" ? "junction" : "dir");
+        writeFileSync(join(root, "real-parent/linked.txt"), "before");
+        const aliasDoc = await vscode.workspace.openTextDocument(vscode.Uri.file(join(root, "alias-parent/linked.txt")));
+        const aliasEdit = new vscode.WorkspaceEdit();
+        aliasEdit.insert(aliasDoc.uri, new vscode.Position(0, 0), "user ");
+        await vscode.workspace.applyEdit(aliasEdit);
+        const originalChoose = controller.dialogs.choose.bind(controller.dialogs);
+        let dirtyChoices = 0;
+        controller.dialogs.choose = async () => {
+            dirtyChoices++;
+            return t("cancel");
+        };
+        replies = [
+            {
+                toolCalls: [
+                    {
+                        name: "apply_patch",
+                        args: { edits: [{ path: "real-parent/linked.txt", action: "update", replacements: [{ old: "before", new: "after" }] }] },
+                    },
+                ],
+            },
+            { text: "preserved" },
+        ];
+        await send();
+        assert.equal(dirtyChoices, 1);
+        assert.equal(aliasDoc.getText(), "user before");
+        assert.equal(readFileSync(join(root, "real-parent/linked.txt"), "utf8"), "before");
+        controller.dialogs.choose = originalChoose;
+        await aliasDoc.save();
+        record("actual junction alias dirty buffer is detected for a canonical model path");
+        await fresh();
+        replies = [{ text: 'Bearer "quoted" and backslash \\"quoted\\"' }];
+        await send('Explain Bearer "quoted" syntax', "ask");
+        const quotedSession = controller.snapshot().session;
+        assert.ok(Journal.read(join(sessionHome, "sessions", quotedSession)).messages.length);
+        await controller.chooseSession(quotedSession);
+        assert.ok(controller.snapshot().transcript.length);
+        record("quoted Bearer model text survives checkpoint serialization and session reopening");
+        await fresh();
+        const originalCheck = controller.editor.checkWrite.bind(controller.editor);
+        let collided = false;
+        controller.editor.checkWrite = (edit, tool) => {
+            if (edit.path === "partial-b.txt" && !collided) {
+                collided = true;
+                writeFileSync(edit.absolute, "user content");
+            }
+            originalCheck(edit, tool);
+        };
+        replies = [
+            {
+                toolCalls: [
+                    {
+                        name: "apply_patch",
+                        args: {
+                            edits: [
+                                { path: "partial-a.txt", action: "create", content: "generated" },
+                                { path: "partial-b.txt", action: "create", content: "generated" },
+                                { path: "partial-c.txt", action: "create", content: "not attempted" },
+                            ],
+                        },
+                    },
+                ],
+            },
+            { text: "partial result" },
+        ];
+        const partialRun = send();
+        const partialApproval = await approval();
+        assert.equal(partialApproval.files.length, 3);
+        await approve(partialApproval.id);
+        await partialRun;
+        controller.editor.checkWrite = originalCheck;
+        const partialResult = controller.snapshot().toolResults?.[0]?.output as { status: string; files: Array<{ status: string }> };
+        assert.equal(partialResult.status, "partial");
+        assert.deepEqual(
+            partialResult.files.map((f) => f.status),
+            ["applied", "failed", "not_attempted"],
+        );
+        assert.equal(readFileSync(join(root, "partial-b.txt"), "utf8"), "user content");
+        assert.equal(existsSync(join(root, "partial-c.txt")), false);
+        record("actual writer reports partial per-file results and preserves concurrent contents (fault injected at second file guard)");
+        await fresh();
         replies = [
             { toolCalls: [{ name: "apply_patch", args: { edits: [{ path: "denied.txt", action: "create", content: "must not exist" }] } }] },
             { text: "Denied." },
@@ -197,6 +298,31 @@ export async function run() {
         assert.equal(commandResult.exitCode, 7);
         assert.match(commandResult.stdout, /command-output/);
         record("approved actual command output and nonzero exit; no key in child environment", commandResult);
+        await fresh();
+        const exactCommand = process.platform === "win32" ? { command: "Write-Output 'exact command'" } : { argv: ["/bin/echo", "exact command"] };
+        replies = [
+            { toolCalls: [{ name: "run_command", args: exactCommand }] },
+            { toolCalls: [{ name: "run_command", args: exactCommand }] },
+            { toolCalls: [{ name: "run_command", args: { ...exactCommand, timeoutSeconds: 5 } }] },
+            { toolCalls: [{ name: "run_command", args: exactCommand }] },
+            { text: "done" },
+        ];
+        const exactRun = send();
+        const exactApproval = await approval();
+        await approve(exactApproval.id, "run");
+        await until(() => Boolean(controller.snapshot().approval && controller.snapshot().approval!.id !== exactApproval.id), "changed timeout asks again");
+        assert.equal(controller.snapshot().toolResults?.length, 2);
+        assert.equal(controller.snapshot().approval!.command?.timeoutMs, 5000);
+        const changedCommandId = controller.snapshot().approval!.id;
+        await action("clear");
+        await approve(changedCommandId, "deny");
+        await until(
+            () => Boolean(controller.snapshot().approval && controller.snapshot().approval!.id !== changedCommandId),
+            "cleared exact command asks again",
+        );
+        await approve(controller.snapshot().approval!.id, "deny");
+        await exactRun;
+        record("exact command remembered only within run; timeout change and explicit clear ask again");
         await fresh();
         replies = [
             { toolCalls: [{ name: "apply_patch", args: { edits: [{ path: "run-a.txt", action: "create", content: "a" }] } }] },
@@ -320,10 +446,11 @@ export async function run() {
         await fresh();
         replies = [{ fault: "hang" }];
         const hangCount = fake.completions.length;
+        const staleStop = envelope();
         const hang = send("hang", "ask");
         await until(() => fake.completions.length === hangCount + 1, "stream started");
         await sleep(150);
-        controller.stop();
+        assert.equal(await controller.receive({ ...staleStop, type: "action", action: "stop" }), true);
         await hang;
         assert.equal(controller.snapshot().state, "unknown_outcome");
         record("cancelled stream records unknown and never auto retries", controller.snapshot().cost);
@@ -358,6 +485,11 @@ export async function run() {
         assert.equal(existsSync(join(sessionHome, "sessions", controller.snapshot().session)), false);
         await vscode.workspace.getConfiguration("tomverse").update("persistSessions", true, vscode.ConfigurationTarget.Global);
         record("no-persist creates no session directory");
+        controller.dialogs.choose = async () => t("delete");
+        await action("delete");
+        assert.equal(controller.snapshot().session, "");
+        controller.dialogs.choose = nativeChoose;
+        record("deleting a memory-only session clears it without a missing-directory error");
         await fresh();
         await controller.chooseSession(savedSession);
         const loadedCount = fake.completions.length;
@@ -405,6 +537,26 @@ export async function run() {
         record("revoked key disables catalog; eligibility, cap, credits, feature and undeployed API errors remain distinct without fallback/retry");
         assert.ok(fake.requests.every((r) => r.url.startsWith("/api/code/v1/")));
         record("all metadata, inference and receipts stay on coding API");
+        await fresh();
+        const originalScript = fake.options.script;
+        writeFileSync(join(root, "compact.txt"), "가나다 const value = 1; ".repeat(200));
+        fake.options.script = (body) =>
+            /Summarize this session so far/.test(lastUserText(body))
+                ? { text: "SUMMARY: read compact.txt." }
+                : toolResultsSinceUser(body).length < 3
+                  ? { toolCalls: [{ name: "read_file", args: { path: "compact.txt" } }] }
+                  : { text: "done" };
+        fake.options.models = DEFAULT_MODELS.map((m) => (m.id === "fake-small" ? { ...m, tomverse: { ...m.tomverse, context_window_tokens: 9000 } } : m));
+        await send("Read compact.txt a few times", "ask", "fake-small");
+        const compactState = Journal.read(join(sessionHome, "sessions", controller.snapshot().session));
+        assert.ok(compactState.generations.some((g) => g.purpose === "compact"));
+        assert.equal(compactState.tasks[0]!.requests, compactState.generations.length);
+        assert.equal(controller.snapshot().cost?.requests, compactState.generations.length);
+        assert.equal(controller.snapshot().cost?.charged, compactState.generations.length);
+        assert.equal(controller.snapshot().state, "completed");
+        fake.options.script = originalScript;
+        fake.options.models = undefined;
+        record("compaction in actual extension counts requests and receipts at pinned model", controller.snapshot().cost);
     } catch (error) {
         evidence.push({ name: "suite", status: "FAIL", detail: (error as Error).stack });
         throw error;

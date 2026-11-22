@@ -240,8 +240,9 @@
             ...(state.toolResults || []).map((result) => {
                 const box = el("details");
                 const code = result.output?.exitCode;
+                const outcome = typeof code === "number" && code !== 0 ? l.error : result.state;
                 box.append(
-                    el("summary", `${result.tool} · ${result.state}${code !== undefined ? ` · exit ${code}` : ""}`),
+                    el("summary", `${result.tool} · ${outcome}${code !== undefined ? ` · exit ${code}` : ""}`),
                     el("pre", JSON.stringify(result.output, null, 2)),
                 );
                 return box;

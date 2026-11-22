@@ -13,7 +13,7 @@
   "exportDiagnostics": "匯出診斷",
   "trustDescription": "受限模式：請先信任工作區，再收集內容或執行工作。",
   "virtualDescription": "僅支援本機桌面 Windows x64、macOS arm64、Linux x64 的檔案工作區。",
-  "endpointDescription": "輸入 Tomverse API 金鑰：",
-  "localhostDescription": "Allow HTTP only on localhost for local development. User scope only.",
-  "persistDescription": "僅記憶體：關閉視窗後無法繼續或復原。"
+  "endpointDescription": "Tomverse 程式設計 API 的基底 URL。僅使用使用者設定，忽略工作區設定和環境變數。",
+  "localhostDescription": "僅允許本機開發時在 localhost 使用 HTTP。預設關閉。",
+  "persistDescription": "將工作階段和復原備份保留在擴充功能的本機儲存空間。關閉後僅存於記憶體，結束後無法繼續。"
 }

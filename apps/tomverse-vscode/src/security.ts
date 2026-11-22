@@ -55,6 +55,16 @@ export const redact = (text: string, key?: string) => {
     if (key) text = text.split(key).join("[redacted]");
     return text.replace(/\btvk?_[A-Za-z0-9_-]{12,}\b/g, "[redacted]").replace(/Bearer\s+[^\s"']+/gi, "Bearer [redacted]");
 };
+/** Redact string values before serialization, never the JSON syntax itself. */
+export const redactJson = (value: unknown, key?: string) => {
+    const visit = (value: unknown): unknown => {
+        if (typeof value === "string") return redact(value, key);
+        if (Array.isArray(value)) return value.map(visit);
+        if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([name, item]) => [redact(name, key), visit(item)]));
+        return value;
+    };
+    return JSON.stringify(visit(value));
+};
 export const environmentProblem = (env: { trusted: boolean; remote?: string; web: boolean; schemes: string[]; platform: string; arch: string }) => {
     if (env.web || env.remote || env.schemes.some((s) => s !== "file")) return "unsupported";
     if (!(

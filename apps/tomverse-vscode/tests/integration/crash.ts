@@ -36,7 +36,7 @@ export async function run() {
         await until(() => Boolean(controller.snapshot().approval));
         const pending = controller.snapshot();
         await controller.receive({ channel: pending.channel, run: pending.run, type: "approve", id: pending.approval!.id, decision: "once" });
-        await until(() => controller.snapshot().notice.includes("crash-command-started"));
+        await until(() => controller.snapshot().notice.trim() === "crash-command-started");
         writeFileSync(
             join(artifact, "ready.json"),
             JSON.stringify({ session: controller.snapshot().session, hostPid: process.pid, state: controller.snapshot().state }),

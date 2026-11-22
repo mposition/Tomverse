@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { endpointFromUser, environmentProblem, namespace, parseMessage, redact } from "../src/security.js";
+import { endpointFromUser, environmentProblem, namespace, parseMessage, redact, redactJson } from "../src/security.js";
 import { messages, localeFor } from "../src/translations.js";
 
 test("host protocol rejects arbitrary fields, oversized text, forged commands and approval payloads", () => {
@@ -78,4 +78,13 @@ test("webview only uses text nodes, CSP resources and keeps IME composition from
     assert.equal(manifest.capabilities.untrustedWorkspaces.supported, "limited");
     assert.equal(manifest.capabilities.virtualWorkspaces.supported, false);
     assert.equal(manifest.contributes.configuration.properties["tomverse.endpoint"].scope, "application");
+});
+
+test("redaction preserves JSON syntax for quoted Bearer text, slashes, controls and keys", () => {
+    const key = "tv_fixture_1234567890";
+    const values = ['Bearer "token"', 'Bearer \\"token\\"', "Bearer \\n", 'quotes " slash \\ tab\t', key];
+    const result = JSON.parse(redactJson({ messages: values, [key]: key }, key));
+    assert.equal(result.messages.length, values.length);
+    assert.equal(redactJson(result, key).includes(key), false);
+    for (let i = 0; i < values.length; i++) assert.equal(result.messages[i], redact(values[i], key));
 });

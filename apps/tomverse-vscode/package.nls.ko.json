@@ -13,7 +13,7 @@
   "exportDiagnostics": "진단 내보내기",
   "trustDescription": "제한 모드: 문맥 수집과 실행 전에 작업 영역을 신뢰해야 합니다.",
   "virtualDescription": "로컬 Desktop의 Windows x64, macOS arm64, Linux x64 파일 작업 영역만 지원합니다. Remote·가상·웹 환경은 지원하지 않습니다.",
-  "endpointDescription": "Tomverse API 키를 입력하세요:",
-  "localhostDescription": "Allow HTTP only on localhost for local development. User scope only.",
-  "persistDescription": "메모리 전용: 창을 닫으면 재개·Undo할 수 없습니다."
+  "endpointDescription": "Tomverse 코딩 API 기본 URL입니다. 사용자 설정만 사용하며 작업 영역 설정과 환경 변수는 무시합니다.",
+  "localhostDescription": "로컬 개발 시 localhost에서만 HTTP를 허용합니다. 기본값은 꺼짐입니다.",
+  "persistDescription": "세션과 Undo 백업을 확장의 로컬 저장소에 보관합니다. 끄면 메모리에서만 유지되며 종료 후 재개할 수 없습니다."
 }

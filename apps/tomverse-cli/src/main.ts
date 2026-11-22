@@ -533,6 +533,7 @@ const resume = async (ctx: Context, args: string[], interactive: boolean) => {
     try {
         const state = journal.state;
         const { endpoint, key, gateway } = await connect(ctx);
+        // Reject a different endpoint/key before even fetching that key's catalog.
         let root: string;
         try { root = validateSession(journal, endpoint, keyPrefix(key)); }
         catch (error) { throw new UsageError((error as Error).message); }

@@ -82,9 +82,24 @@ try {
     const requests = fake.completions.length;
     if (process.platform === "win32") {
         const kill = spawnSync("taskkill.exe", ["/PID", String(seed.child.pid), "/T", "/F"], { encoding: "utf8", windowsHide: true });
-        if (kill.status !== 0) throw new Error(`Test tree termination failed: ${kill.stderr}`);
+        writeFileSync(
+            join(artifacts, "termination.json"),
+            JSON.stringify({ pid: seed.child.pid, code: kill.status, stdout: kill.stdout, stderr: kill.stderr }, null, 2),
+        );
+        // taskkill can report already-exiting descendants as unsupported. The
+        // owned host must actually exit before recovery is allowed to start.
     } else process.kill(-seed.child.pid, "SIGKILL");
-    await seed.ended;
+    let deadline;
+    try {
+        await Promise.race([
+            seed.ended,
+            new Promise((_, reject) => {
+                deadline = setTimeout(() => reject(new Error("Owned test host did not exit after forced termination")), 15000);
+            }),
+        ]);
+    } finally {
+        clearTimeout(deadline);
+    }
     const resumed = launch("recover");
     if ((await resumed.ended) !== 0) throw new Error("Recovery host failed; see recover.log");
     if (fake.completions.length !== requests) throw new Error("Recovery sent another inference automatically");
