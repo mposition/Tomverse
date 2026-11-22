@@ -83,3 +83,48 @@ test("quick cached read confirms exact result and source in one request", async 
   try { assert.equal(await revalidateReviewChatSource(input), true); assert.equal(calls.length, 1); }
   finally { globalThis.fetch = original; }
 });
+
+// Native builds its copy without the web LanguageProvider; it must still name every
+// section the formatter writes, in each Native language, with the web's labels.
+import { nativeReviewChatCopy, nativeReviewChatSectionKeys } from "../locales/nativeReviewChat.ts";
+import { mobileLanguages } from "../locales/mobile.ts";
+import { en } from "../locales/en.ts"; import { ko } from "../locales/ko.ts"; import { zh } from "../locales/zh.ts"; import { zhHant } from "../locales/zhHant.ts";
+import { de } from "../locales/de.ts"; import { fr } from "../locales/fr.ts"; import { es } from "../locales/es.ts"; import { pt } from "../locales/pt.ts";
+const web = { en, ko, zh, "zh-Hant": zhHant, de, fr, es, pt };
+const webKey = { consensus: "aiReviewConsensus", contradictions: "aiReviewContradictions", differences: "aiReviewDifferences", missingPoints: "aiReviewMissingPoints", verificationNeeded: "aiReviewVerificationNeeded", models: "quickSummaryModelClaims", synthesis: "aiReviewSynthesis", commonConclusions: "quickSummaryCommonConclusions", importantDifferences: "quickSummaryImportantDifferences", none: "aiReviewNoneFound", strengths: "aiReviewStrengths", cautions: "aiReviewCautions" };
+const rawKeys = /^(models|commonConclusions|importantDifferences|consensus|contradictions|differences|missingPoints|verificationNeeded|synthesis|none|strengths|cautions):/m;
+
+test("Native Review→Chat copy matches the web labels in all eight Native languages", () => {
+  assert.equal(mobileLanguages.length, 8);
+  for (const language of mobileLanguages) {
+    const native = nativeReviewChatCopy(language);
+    for (const key of nativeReviewChatSectionKeys) assert.equal(native[key], web[language].chat[webKey[key]], `${language}.${key}`);
+    for (const value of Object.values(native)) assert.ok(typeof value === "string" && value.length > 0, language);
+  }
+});
+test("Native AI Review and Quick projections expose no raw section keys in any language", () => {
+  for (const language of mobileLanguages) {
+    const c = nativeReviewChatCopy(language);
+    const review = formatReviewChat(source(), undefined, "", c);
+    assert.ok(review); assert.doesNotMatch(review.text, rawKeys, language);
+    assert.ok(review.text.includes(c.models) && review.text.includes(c.strengths) && review.text.includes(c.cautions), language);
+    const quick = source(); quick.kind = "quick";
+    quick.review.result = { commonConclusions: [claim], importantDifferences: [claim], modelKeyClaims: [{ responseId: "B", claims: [{ claim: "Check first", quote: "Review first", verified: true }] }], verificationNeeded: [] };
+    const projected = formatReviewChat(quick, undefined, "", c);
+    assert.ok(projected); assert.doesNotMatch(projected.text, rawKeys, language);
+    for (const label of [c.commonConclusions, c.importantDifferences, c.models, c.none]) assert.ok(projected.text.includes(label), `${language}: ${label}`);
+  }
+});
+test("a Native selection projects only that reviewer's item with its question, mapping and limitations", () => {
+  const c = nativeReviewChatCopy("ko");
+  const input = source(); input.reviewer = "secondary";
+  const projected = formatReviewChat(input, { section: "consensus", ordinal: 0, itemId: "server-item" }, "다음 단계", c);
+  assert.ok(projected);
+  for (const value of ["배포 조건은? 😀", "A: Model A (a)", "other-judge (secondary)", "No external checks", c.independent, c.external, "다음 단계", "Only the second reviewer"]) assert.ok(projected.text.includes(value), value);
+  assert.doesNotMatch(projected.text, /Keep the exception/);
+  assert.ok(projected.text.includes(c.omitted.replace("{count}", String(projected.omitted))));
+  const quick = source(); quick.kind = "quick";
+  quick.review.result = { commonConclusions: [claim], importantDifferences: [{ ...claim, text: "Quick difference" }], modelKeyClaims: [], verificationNeeded: ["Unknown dates"] };
+  const item = formatReviewChat(quick, { section: "importantDifferences", ordinal: 0 }, "", c);
+  assert.match(item.text, /Quick difference/); assert.doesNotMatch(item.text, /Keep the exception/); assert.match(item.text, /Unknown dates/);
+});
