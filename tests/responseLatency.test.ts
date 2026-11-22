@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createHmac, randomUUID } from "node:crypto";
-import { clientLatencyBodySchema, latencyDistribution, summarizeResponseLatency, responseLatencyContext, storedResponseLatencyTimings, attributePairedClientLatency, type ResponseLatencySample } from "../lib/responseLatencyCore";
+import { RESPONSE_LATENCY_ANALYSIS_RULE, clientLatencyBodySchema, latencyDistribution, summarizeResponseLatency, responseLatencyContext, storedResponseLatencyTimings, attributePairedClientLatency, type ResponseLatencySample } from "../lib/responseLatencyCore";
 import { createResponseLatencyToken, verifyResponseLatencyToken } from "../lib/responseLatencyToken";
 import { createClientLatency } from "../lib/responseLatencyClient";
 import { createLatencyStages } from "../lib/responseLatencyStages";
@@ -205,4 +205,20 @@ test("browser sends one bounded report without answer text, only after a signed 
     native.headers(new Response(null, { headers: { "X-Response-Latency-Token": "proof" } }));
     assert.doesNotThrow(() => native.finish("failed"));
   } finally { globalThis.fetch = original; }
+});
+
+test("presearch evidence separates tokenless failures from server-completed attempts missing a browser report", async () => {
+  const original = globalThis.fetch;
+  let sent = 0;
+  globalThis.fetch = async () => { sent += 1; return new Response(null, { status: 204 }); };
+  try {
+    // A failed_before_stream response carries no latency token, so its browser pair can never exist.
+    const tokenless = createClientLatency(performance.now() - 50);
+    tokenless.dispatched();
+    tokenless.headers(new Response(null, { status: 500 }));
+    tokenless.finish("failed");
+    assert.equal(sent, 0);
+  } finally { globalThis.fetch = original; }
+  assert.match(RESPONSE_LATENCY_ANALYSIS_RULE, /missingClientNoToken attempts failed before a stream/);
+  assert.match(RESPONSE_LATENCY_ANALYSIS_RULE, /missingClientServerCompleted attempts finished on the server/);
 });

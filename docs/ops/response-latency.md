@@ -28,6 +28,10 @@ successful completions with recorded first content and completion at or below
 10,000 ms by all observed server attempts. Missing browser reports, failures
 and cancellations stay visible. A failed server or client outcome takes
 precedence over cancellation. A server failure can also lack a browser report.
+`missingClientNoToken` counts unpaired attempts that failed before a stream:
+they never receive a browser latency token, so no report can exist.
+`missingClientServerCompleted` counts unpaired attempts the server completed;
+those are the browser reports actually lost.
 Empty windows have null percentiles and rate. `status: unavailable` indicates
 the measurement could not be read.
 
