@@ -22,6 +22,8 @@ import {
 import {
   CONTENT_SIGNAL,
   REFUSED_AI_CRAWLERS,
+  SEARCH_INDEX_CRAWLERS,
+  USER_REQUEST_FETCHERS,
   servesCanonicalSite,
 } from "../lib/robotsPolicyCore.ts";
 import { SITE_ORIGIN } from "../lib/seo.ts";
@@ -142,6 +144,20 @@ if (canonical) {
     expect(
       !isPathAllowed(own, crawler, "/"),
       `${crawler} is not refused by our own robots.txt${managed ? " (only by Cloudflare's block)" : ""}`
+    );
+  }
+  // The invited-by-name groups, also on our half: the `*` access, private
+  // exclusions included. A named group replaces `*` for its crawler, so a
+  // group here that forgot the exclusions would open /admin wider than `*`
+  // ever did -- which is exactly the direction a check should catch.
+  for (const crawler of [...SEARCH_INDEX_CRAWLERS, ...USER_REQUEST_FETCHERS]) {
+    expect(
+      isPathAllowed(own, crawler, "/"),
+      `${crawler} is refused / by our own robots.txt`
+    );
+    expect(
+      !isPathAllowed(own, crawler, "/admin"),
+      `${crawler} may crawl /admin -- its named group is missing the private exclusions`
     );
   }
   expect(/^Sitemap:/m.test(own), "the canonical site does not name its sitemap");

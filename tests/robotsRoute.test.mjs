@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { isPathAllowed } from "../lib/robotsTxtCore.ts";
-import { CONTENT_SIGNAL, REFUSED_AI_CRAWLERS } from "../lib/robotsPolicyCore.ts";
+import {
+  CONTENT_SIGNAL,
+  REFUSED_AI_CRAWLERS,
+  SEARCH_INDEX_CRAWLERS,
+  USER_REQUEST_FETCHERS,
+} from "../lib/robotsPolicyCore.ts";
 
 /**
  * The route's contract, checked against the text it really produces.
@@ -62,6 +67,62 @@ test("every refused AI crawler is refused by our own file", () => {
 /** The other half: the declaration, not the refusal. */
 test("the canonical site declares its content signals", () => {
   assert.match(PRODUCTION(), new RegExp(`^Content-Signal: ${CONTENT_SIGNAL}$`, "m"));
+});
+
+/**
+ * Search indexers and user-triggered fetchers are invited by name, on exactly
+ * the `*` terms. Named, because a named group replaces `*` for that crawler
+ * (RFC 9309 §2.2.1) -- so each of these groups must repeat the private
+ * exclusions itself, or the named crawler would be *more* welcome than
+ * Googlebot, into /admin included.
+ */
+test("search index crawlers and user-request fetchers get the canonical access, by name", () => {
+  const body = PRODUCTION();
+  assert.ok(SEARCH_INDEX_CRAWLERS.length > 0);
+  assert.ok(USER_REQUEST_FETCHERS.length > 0);
+  for (const crawler of [...SEARCH_INDEX_CRAWLERS, ...USER_REQUEST_FETCHERS]) {
+    assert.equal(isPathAllowed(body, crawler, "/"), true, crawler);
+    assert.equal(isPathAllowed(body, crawler, "/compare-ai-models"), true, crawler);
+    for (const path of ["/admin", "/api/health", "/auth/signin", "/e2e", "/chat", "/chat/abc", "/share/x"]) {
+      assert.equal(isPathAllowed(body, crawler, path), false, `${crawler} ${path}`);
+    }
+  }
+});
+
+/**
+ * The other half of what a named group replaces: the Content-Signal line sits
+ * in the `*` group, and a consumer that reads the signal from the group
+ * matching its own token would see nothing there. So every invited named
+ * group repeats the declaration, verbatim.
+ */
+test("every invited named group carries the Content-Signal its crawlers read", () => {
+  const body = PRODUCTION();
+  for (const crawler of [...SEARCH_INDEX_CRAWLERS, ...USER_REQUEST_FETCHERS]) {
+    // resolveRobots renders one blank-line-separated block per rule; the
+    // crawler's block is the one with a User-Agent line naming it.
+    const block = body
+      .split("\n\n")
+      .find((candidate) => candidate.split("\n").includes(`User-Agent: ${crawler}`));
+    assert.ok(block, `${crawler} has no group of its own`);
+    assert.match(
+      block,
+      new RegExp(`^Content-Signal: ${CONTENT_SIGNAL}$`, "m"),
+      `${crawler}'s group does not declare the Content-Signal`
+    );
+  }
+});
+
+/**
+ * Product tokens match exactly. Inviting an operator's search and
+ * user-request bots does nothing for its training crawler, which stays on the
+ * refused list.
+ */
+test("an invited fetcher does not pardon the same operator's training crawler", () => {
+  const body = PRODUCTION();
+  assert.equal(isPathAllowed(body, "GPTBot", "/"), false);
+  assert.equal(isPathAllowed(body, "ChatGPT-User", "/"), true);
+  assert.equal(isPathAllowed(body, "ClaudeBot", "/"), false);
+  assert.equal(isPathAllowed(body, "Claude-User", "/"), true);
 });
 
 test("the canonical site names its sitemap and host", () => {
