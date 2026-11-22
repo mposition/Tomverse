@@ -1021,7 +1021,9 @@ test("no in-conversation image path starts on a continuation route", () => {
     const client = readFileSync("app/(site)/(application)/chat/ChatPageClient.tsx", "utf8");
     assert.match(client, /const inConversationImagesAllowed = routeSurface !== "continuation";/);
     assert.match(client, /const imageIntentRoutedOnSend =\s*inConversationImagesAllowed &&/);
-    assert.match(client, /mountedSurface === "workspace" && inConversationImagesAllowed &&\s*reviewWorkspace\.mode === "professional" &&\s*options === undefined && reviewWorkspace\.imagePromptMode/);
+    // An ordinary composer send is one with no options, or with only a reasoning effort.
+    assert.match(client, /const ordinaryComposerSend = options === undefined \|\| \(options\.reasoningEffort !== undefined && Object\.keys\(options\)\.length === 1\);/);
+    assert.match(client, /mountedSurface === "workspace" && inConversationImagesAllowed &&\s*reviewWorkspace\.mode === "professional" &&\s*ordinaryComposerSend && reviewWorkspace\.imagePromptMode/);
     assert.match(client, /const professionalImageRouting = mountedSurface === "workspace" &&\s*inConversationImagesAllowed &&/);
     // Easy still routes text per question (review round 6); only an image
     // outcome is refused, before anything is saved.

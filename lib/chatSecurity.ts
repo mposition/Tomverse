@@ -1,4 +1,3 @@
-import { isExplicitReasoningEffort } from "@/lib/reasoningEffort";
 import "server-only";
 
 import {
@@ -6383,7 +6382,7 @@ export const validateChatPayload = (body: unknown) => {
             "Invalid guest verification token."
         );
     }
-    if (payload.reasoningEffort !== undefined && !isExplicitReasoningEffort(payload.reasoningEffort)) {
+    if (payload.reasoningEffort !== undefined && payload.reasoningEffort !== "low" && payload.reasoningEffort !== "high") {
         throw new ChatAccessError(400, "INVALID_REASONING_EFFORT", "Invalid reasoning effort.");
     }
 
