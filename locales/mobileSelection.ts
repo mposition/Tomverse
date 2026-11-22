@@ -4,6 +4,7 @@ const en = { reviewTitle: "Choose AI to compare", all: "All", automatic: "Choose
 const copies: Record<MobileLanguage, typeof en> = {
   en,
   ko: { reviewTitle: "비교할 AI 선택", all: "전체", automatic: "질문마다 AI를 골라 품질과 비용을 함께 고려해요.", easy: "공급자를 고르면 질문마다 모델을 골라요.", professional: "비교할 모델을 직접 선택해요.", count: "{count}개 선택", providerAuto: "{provider} 모델 중 자동 선택", empty: "검색 결과가 없어요", none: "모델을 선택해 주세요", done: "완료" },
+  "zh-Hant": {"reviewTitle":"選擇要比較的 AI","all":"全部","automatic":"為每個問題選擇 AI，兼顧回答品質與費用。","easy":"選擇供應商，每個問題會自動選擇模型。","professional":"直接選擇要比較的模型。","count":"已選 {count} 項","providerAuto":"從 {provider} 模型中自動選擇","empty":"沒有符合的模型","none":"請選擇模型","done":"完成"},
   zh: { reviewTitle: "选择对比的 AI", all: "全部", automatic: "为每个问题选择 AI，兼顾回答质量与费用。", easy: "选择提供商，每个问题会自动选择模型。", professional: "直接选择要对比的模型。", count: "已选 {count} 项", providerAuto: "从 {provider} 模型中自动选择", empty: "没有匹配的模型", none: "请选择模型", done: "完成" },
   de: { reviewTitle: "KI zum Vergleichen wählen", all: "Alle", automatic: "KI je Frage wählen und Qualität sowie Kosten abwägen.", easy: "Anbieter wählen. Für jede Frage wird ein Modell ausgewählt.", professional: "Die zu vergleichenden Modelle direkt wählen.", count: "{count} ausgewählt", providerAuto: "Automatische Auswahl aus {provider}-Modellen", empty: "Keine passenden Modelle", none: "Ein Modell wählen", done: "Fertig" },
   fr: { reviewTitle: "Choisir les IA à comparer", all: "Tous", automatic: "Choisir une IA par question en équilibrant qualité et coût.", easy: "Choisissez les fournisseurs. Un modèle est choisi par question.", professional: "Choisissez les modèles précis à comparer.", count: "{count} sélectionné(s)", providerAuto: "Sélection automatique parmi les modèles {provider}", empty: "Aucun modèle correspondant", none: "Choisissez un modèle", done: "Terminé" },
@@ -11,3 +12,7 @@ const copies: Record<MobileLanguage, typeof en> = {
   pt: { reviewTitle: "Escolher IA para comparar", all: "Todos", automatic: "Escolher IA por pergunta, equilibrando qualidade e custo.", easy: "Escolha fornecedores. É escolhido um modelo por pergunta.", professional: "Escolha os modelos exatos a comparar.", count: "{count} selecionados", providerAuto: "Seleção automática dos modelos de {provider}", empty: "Nenhum modelo encontrado", none: "Escolha um modelo", done: "Concluído" },
 };
 export const mobileSelectionCopy = (language: MobileLanguage) => copies[language];
+export const mobileReviewModeLabel = (language: MobileLanguage, mode: "easy" | "professional") => ({
+  en: ["Easy", "Professional"], ko: ["간편", "전문가"], zh: ["简易", "专业"], "zh-Hant": ["簡易", "專業"],
+  de: ["Einfach", "Profi"], fr: ["Simple", "Expert"], es: ["Fácil", "Profesional"], pt: ["Simples", "Profissional"],
+})[language][mode === "easy" ? 0 : 1];

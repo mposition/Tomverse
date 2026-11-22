@@ -48,6 +48,7 @@ const copy = {
     "journey.receiptReason_flag_off": "원문 맥락 기능 꺼짐",
     "journey.receiptReason_unsupported": "이 실행 경로는 원문 전달을 지원하지 않음"
   },
+  "zh-Hant": {"journey.receiptRetrieved":"包含 {count} 則歷史比對","journey.historyNoMatch":"找不到歷史比對","journey.historyBudget":"歷史摘錄受上下文預算限制","journey.chosen":"下一次文字提問：已選 {count} 個片段 + 最近原文","journey.auto":"下一次文字提問：自動擷取最近原文","journey.pickSource":"選擇原文片段","journey.pickHelp":"最多選擇三則訊息。所選片段與最近原文會隨下一次文字提問傳送一次。重新整理後需重新選擇。","journey.previousPart":"上一段","journey.nextPart":"下一段","journey.selected":"已選 {count} 則","journey.useAuto":"使用自動選取的片段","journey.receiptSent":"本次嘗試的輸入包含原文：已選 {selected} 個 + 最近 {recent} 個（去重後 {unique} 則訊息）","journey.receiptNotSent":"本次嘗試未傳送原文","journey.receiptUnknown":"無法確認本次嘗試的原文傳遞情況","journey.receiptPartial":"部分摘錄","journey.receiptOmitted":"部分原文訊息已省略","journey.receiptReason_locked":"原文已鎖定","journey.receiptReason_source_deleted":"原文無法使用","journey.receiptReason_empty_selection":"選擇為空或無效","journey.receiptReason_flag_off":"原文上下文功能已關閉","journey.receiptReason_unsupported":"此執行路徑不支援原文上下文"},
   "zh": {
     "journey.receiptRetrieved": "包含 {count} 条历史匹配",
     "journey.historyNoMatch": "未找到历史匹配",

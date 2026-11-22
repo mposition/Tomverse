@@ -14,6 +14,7 @@ import { WorkspaceWelcome } from "./WorkspaceWelcome";
 import { ImportedTranscript } from "./ImportedTranscript";
 import { mobileCopy, type MobileLanguage } from "../../../locales/mobile";
 import { mobileParityCopy } from "../../../locales/mobileParity";
+import { mobileReviewModeLabel } from "../../../locales/mobileSelection";
 import { mobileErrorText } from "../../../locales/mobileErrors";
 import { canUseModelWithPlan } from "../../../lib/models";
 import type { ChatSummary, ChatTransport, Conversation, MobileAttachment, MobileCapabilities, MobileModel } from "./chatTransport";
@@ -244,7 +245,7 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
     </>}
     {uncertain && conversation && <button className="restore" onClick={() => void (async () => { await open(conversation.id); if (handoff) await durableDraft.reload(); })()}>{copy.restore}</button>}
     <Composer extraTools={extraTools} inputMaxLength={handoff ? 50000 : undefined} product="review" onProductChange={onProductChange} productBusy={loading || streaming || uncertain || actionBusy || draftBlocked} productLoading={loading}
-      selectionControl={<button type="button" className="review-setup-trigger" aria-label={`${c.choose} · ${effectiveMode === "easy" ? (language === "ko" ? "간편" : "Easy") : (language === "ko" ? "전문가" : "Professional")}`} disabled={streaming || uncertain || loading} onClick={() => setPicker(true)}><span>{effectiveMode === "easy" ? (language === "ko" ? "간편" : "Easy") : (language === "ko" ? "전문가" : "Professional")}</span><span className="participant-count">{effectiveMode === "easy" ? providers.length : selected.length}</span><span aria-hidden="true">⌄</span></button>}
+      selectionControl={<button type="button" className="review-setup-trigger" aria-label={`${c.choose} · ${mobileReviewModeLabel(language, effectiveMode)}`} disabled={streaming || uncertain || loading} onClick={() => setPicker(true)}><span>{mobileReviewModeLabel(language, effectiveMode)}</span><span className="participant-count">{effectiveMode === "easy" ? providers.length : selected.length}</span><span aria-hidden="true">⌄</span></button>}
       locationIdentity={owner} copy={copy} language={language} transport={transport} draft={handoff && streaming ? "" : draft} setDraft={setDraft} disabled={loading || !capability || uncertain || Boolean(handoff && !durableDraft.ready && durableDraft.status !== "saving")} offline={!navigator.onLine} streaming={streaming} conversation={conversation} onConfigureTools={configureTools} onSend={send} onStop={() => abort.current?.abort()} />
     {analysis === "cross" && conversation && <CrossReview key={conversation.id} id={conversation.id} owner={owner} transport={transport} language={language} onClose={() => setAnalysis(null)} onBusy={setActionBusy} onContinue={setChatSource} onSource={id => { const message = conversation.messages.find(row => row.id === id); if (message?.modelId) setActiveModel(message.modelId); setAnalysis(null); requestAnimationFrame(() => document.getElementById(`review-message-${id}`)?.scrollIntoView({ block: "center" })); }} />}
     {analysis === "quick" && conversation && <QuickSummary key={conversation.id} id={conversation.id} owner={owner} transport={transport} language={language} onClose={() => setAnalysis(null)} onBusy={setActionBusy} onContinue={setChatSource} />}

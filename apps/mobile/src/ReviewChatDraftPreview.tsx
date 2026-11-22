@@ -14,7 +14,7 @@ export function ReviewChatDraftPreview({ source, transport, language, owner, onC
   owner: string | null;
   onClose: () => void; onConfirm: (text: string) => void;
 }) {
-  const c = { ...mobileReviewCopy(language), ...reviewHandoffCopy[language] };
+  const c = { ...mobileReviewCopy(language), ...reviewHandoffCopy[language === "zh-Hant" ? "zhHant" : language] };
   const [request, setRequest] = useState("");
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const pending = useRef(false), live = useRef(true);

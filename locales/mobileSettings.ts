@@ -70,6 +70,7 @@ const copies = {
     "noAssistants": "아직 저장한 어시스턴트가 없습니다.",
     "open": "열기"
   },
+  "zh-Hant": {"account":"帳戶","preferences":"偏好設定","assistants":"AI 助手","ai":"AI 個人化","data":"資料","plan":"方案","usageAndPlan":"用量與方案","signedAs":"登入帳戶","security":"帳戶安全性","loginMethods":"登入方式","emailNotifications":"電子郵件通知","emailOptional":"選用 · 可隨時關閉","memory":"帳戶長期記憶","memoryDescription":"查看從匯入對話自動整理的記憶及你親自加入的記憶，並設定新對話是否使用這些記憶。","dataManagement":"資料管理","externalImport":"從其他 AI 服務匯入","importDescription":"將 ChatGPT、Claude、Gemini（Google Takeout）或 Perplexity 匯出檔案中的歷史對話儲存至你的 Tomverse 帳戶。匯出檔案只會在你的瀏覽器中讀取。","accountData":"你的帳戶資料","accountDataDescription":"將 Tomverse 儲存的所有帳戶相關內容——對話、記憶、匯入、付款與用量——下載為單一檔案。","newConversationModels":"新對話預設組合","theme":"主題","language":"語言","timeZone":"每日重設時區","timeZoneHint":"每日 AI 點數會在此時區的午夜重設。時區每 30 天可變更一次。","dark":"深色主題","light":"淺色主題","system":"使用系統設定","profilesAndMemory":"帳戶記憶","back":"返回設定","manageOnWeb":"在網站上管理","noAssistants":"尚未儲存助手。","open":"開啟"},
   "zh": {
     "account": "账号",
     "preferences": "偏好设置",

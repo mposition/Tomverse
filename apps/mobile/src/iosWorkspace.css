@@ -1,4 +1,5 @@
 /* Shared native workspace: Android and iOS use the same product layout. */
+:lang(zh-Hant) { --font-ui: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif; }
 .native-chat-body { display: contents; }
 .ios-workspace { --mobile-primary: #285be7; max-width: 1180px; position: relative; }
 .ios-workspace button svg { flex-shrink: 0; }
