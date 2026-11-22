@@ -39,6 +39,7 @@ import { externalApiAdmissionHook } from "@/lib/externalApiAdmission";
 import { pickRequestedModel } from "@/lib/externalApiProtocols";
 import { authenticateExternalApiKey, ExternalApiKeyError } from "@/lib/externalApiKeys";
 import { sha256Hex } from "@/lib/externalApiKeyCore";
+import { modelReasoningEfforts, modelWithReasoningEffort, reasoningEffortEnabled } from "@/lib/reasoningEffort";
 import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
 import {
     buildChatCompletion,
@@ -250,6 +251,11 @@ export async function handleChatCompletions(request: Request, options: { surface
             throw new ProtocolError(400, "invalid_json", "The request body is not valid JSON.");
         }
         const parsed = parseChatCompletionRequest(body);
+        const effort = parsed.tomverse_effort;
+        if (effort && (options.surface !== "coding" || !reasoningEffortEnabled() ||
+            parsed.reasoning_effort != null || parsed.reasoning?.effort != null)) {
+            throw new ProtocolError(400, "unsupported_parameter", "tomverse_effort is available only on the coding API, by itself.", "tomverse_effort");
+        }
 
         // Before anything is routed or reserved: a replay is answered as the
         // original was, with no second router call.
@@ -321,6 +327,7 @@ export async function handleChatCompletions(request: Request, options: { surface
             throw new ProtocolError(404, "model_not_found", `The model '${parsed.model}' is not available to this key.`, "model");
         }
         const { model, capabilities } = entry;
+        const appliedEffort = effort && modelReasoningEfforts(model).includes(effort) ? effort : undefined;
         const view = {
             id: model.id,
             provider: model.provider,
@@ -335,7 +342,7 @@ export async function handleChatCompletions(request: Request, options: { surface
         // The prompt cache marker rides in providerOptions, so only Anthropic
         // models get one (lib/anthropicPromptCaching.ts). The budget below is
         // given the same path, so the write premium is reserved before dispatch.
-        const settings = getModelGenerationSettings(model, {
+        const settings = getModelGenerationSettings(modelWithReasoningEffort(model, appliedEffort), {
             temperature: parsed.temperature ?? undefined,
             promptCachePath: "external_api_chat_completions",
         });
@@ -364,6 +371,7 @@ export async function handleChatCompletions(request: Request, options: { surface
         ];
         const infoHeaders: Record<string, string> = {
             ...routedHeaders,
+            ...(effort ? { "x-tomverse-applied-effort": appliedEffort ?? "default" } : {}),
             ...(ignoredParameters.length ? { "x-tomverse-ignored-parameters": ignoredParameters.join(", ") } : {}),
         };
         // The API is stateless, and OpenAI's Responses API stores requests by

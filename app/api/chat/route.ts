@@ -76,6 +76,7 @@ import {
     isRouterShadowEnabled,
     scheduleRoutingShadowRun,
 } from "@/lib/routingShadow";
+import { modelReasoningEfforts, modelWithReasoningEffort, reasoningEffortEnabled } from "@/lib/reasoningEffort";
 import { applyLlmModelPick, selectAutoModel } from "@/lib/autoModelSelection";
 import { pickAutoModelWithLlm } from "@/lib/autoLlmRouter";
 import { chatRouterLocationFusionEnabled, existingChatRouterLocationFusionEnabled } from "@/lib/chatRouterLocationFusionEnabled";
@@ -1545,6 +1546,7 @@ async function handleChatPost(
             sourceUserMessageId,
             turnstileToken,
             deepResearchDepth,
+            reasoningEffort,
             webSearchMode,
             mcpConnectionId,
             admissionToken,
@@ -1555,6 +1557,9 @@ async function handleChatPost(
             guestClientTurnId,
             researchMode,
         } = validateChatPayload(body);
+        if (reasoningEffort && (!reasoningEffortEnabled() || deepResearchDepth || researchMode === "preview")) {
+            return tracedJsonError("Reasoning effort is unavailable for this request.", "REASONING_EFFORT_UNAVAILABLE", 409, traceId);
+        }
         const isResearchPreview = researchMode === "preview";
         const researchFeatures = researchPreviewFeatures();
         if (isResearchPreview && req.headers.has("authorization") && !researchFeatures.nativeStart) {
@@ -3013,9 +3018,13 @@ async function handleChatPost(
                 timestamp: new Date().toISOString(),
             }));
         }
-        const modelConfig = routedCatalogModel?.enabled && !routedCatalogModel.catalogDeleted
+        const dispatchModel = routedCatalogModel?.enabled && !routedCatalogModel.catalogDeleted
             ? routedCatalogModel
             : requestedModelConfig;
+        const appliedEffortFor = (model: typeof dispatchModel) =>
+            reasoningEffort && modelReasoningEfforts(model).includes(reasoningEffort) ? reasoningEffort : undefined;
+        let appliedEffort = appliedEffortFor(dispatchModel);
+        const modelConfig = modelWithReasoningEffort(dispatchModel, appliedEffort);
         if (hasUnsupportedGeminiPrefill(modelConfig, executionMessages)) {
             return returnKnownUndispatchedGuestAutoRefusal(tracedJsonError(
                 "Gemini 3.6 and later requests must end with a user message.",
@@ -7347,7 +7356,8 @@ async function handleChatPost(
             // actual-token check and manifest. A refusal here is one candidate
             // that did not qualify, not the request failing -- the primary's
             // failure is still what ends the turn.
-            const planned = planAttemptExecution(candidate, {
+            const nextEffort = appliedEffortFor(candidate);
+            const planned = planAttemptExecution(modelWithReasoningEffort(candidate, nextEffort), {
                 accessKind: access.kind,
                 inputBreakdown: inputEstimate.breakdown(),
                 reservationOnlyInputTokens,
@@ -7716,6 +7726,7 @@ async function handleChatPost(
             dispatched.modelId = plan.modelId;
             dispatched.provider = plan.provider;
             dispatched.reasoning = plan.modelConfig.reasoning;
+            appliedEffort = nextEffort;
             dispatched.abortController = nextAttemptAbortController;
             dispatched.stream = nextStream;
             dispatched.reader = faultedReader(
@@ -8581,6 +8592,7 @@ async function handleChatPost(
                             controller,
                             buildChatStreamTrailerChunk({
                                 searchMetadata: webSearchExecution,
+                                ...(reasoningEffort ? { appliedReasoningEffort: appliedEffort ?? "default" } : {}),
                                 ...(continuation.receipt ? { continuationReceipt: deliveryReceipt({ ...continuation.receipt, attempt: dispatched.attemptIndex }) } : {}),
                                 completion: completionOutcome,
                                 // Absent, not empty, on a turn with no files:
