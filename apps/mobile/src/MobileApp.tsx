@@ -448,7 +448,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   const [researchEngineOffer, setResearchEngineOffer] = useState<{ offered: boolean } | null>(null);
   useEffect(() => {
     let active = true;
-    if (!signedIn || !transport.researchEngineEnabled || !transport.researchEngine) { setResearchEngineAvailable(false); return; }
+    if (!signedIn || !transport.researchEngineEnabled || !transport.researchEngine) return;
     void transport.researchEngineEnabled().then(async (enabled) => {
       if (!active) return;
       setResearchEngineAvailable(enabled);
@@ -457,7 +457,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     return () => { active = false; };
   }, [signedIn, owner, transport]);
   const iosExtraTools = [
-    ...(researchEngineAvailable && transport.researchEngine ? [{ label: researchEngineCopy[language].title, onSelect: () => setResearchEngineOpen(true) }] : []),
+    ...(signedIn && researchEngineAvailable && transport.researchEngine ? [{ label: researchEngineCopy[language].title, onSelect: () => setResearchEngineOpen(true) }] : []),
     { label: mobileIosWorkspaceCopy(language).assistants, onSelect: () => openIosPanel("assistants") },
     { label: mobileIosWorkspaceCopy(language).files, onSelect: () => openIosPanel("starters") },
     { label: mobileIosWorkspaceCopy(language).imports, onSelect: () => openIosPanel("imports") },

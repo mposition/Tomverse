@@ -1181,6 +1181,40 @@ docs/policy/external-conversation-continuation.md §4.4, §5.1입니다.
 - **이어가기 전용 USD entitlement나 전용 guardrail을 만들지 않습니다.** §2의 두 층
   구분이 그대로이며, 이어가기는 어느 쪽에도 새 층을 더하지 않습니다.
 
+### Deep Research engine v2: 유료 dispatch마다 Chat 예약, run 총액은 그 위의 상한 (2026-11-23)
+
+자체 Deep Research 확장 엔진(`engineVersion = 2`, 기본 꺼짐 `RESEARCH_ENGINE_ENABLED`)은
+새 credit 층이나 USD entitlement를 만들지 않습니다. 결정과 구현 위치입니다.
+
+- **유료 model dispatch 하나 = 일반 Chat 예약 하나.** 계획·조사·비공개 분석·조정·검증·
+  섹션 작성·repair·합성 모두 `createChatBudget → acquireChatAccess → settleChatUsage`를
+  그대로 거칩니다(`lib/researchEngineFunding.ts`). 사용자 credit, provider 예산, 검색
+  vendor 예산, 만료 reconcile의 의미가 Chat과 같습니다. dispatch마다 model/provider/API
+  ID/reasoning/pricing version을 generation 행에 고정하고, 혼합 모델 run은 호출별 자기
+  단가로 정산합니다. 마지막 작성 모델 단가로 합치지 않습니다.
+- **run 총액 불변식.** `확정 지출 + 실행 중 예약 + 결과 불명 보류 + 미배정 마무리 예산 ≤
+  사용자 승인 총액`을 예약 요청 전에 run 행 lock 아래에서 검사하고 funding segment를
+  먼저 기록합니다(`claimResearchFundingRoom`, `lib/researchEngineStore.ts`). 병렬 work
+  item이 동시에 잔액을 읽어 초과 배정할 수 없습니다. 작업 segment는 마무리 예산을 쓰지
+  못하고, 마무리 segment만 씁니다. segment 기록과 Chat 예약 사이에 crash하면 recovery가
+  traceId로 예약을 찾아 0으로 정산하고 segment를 놓아 줍니다.
+- **총액은 명시적 사용자 동작으로만 오릅니다.** 조사 중 총액에 닿으면 run은
+  `awaiting_input`(budget reached)으로 멈추고 유료 호출을 하지 않습니다. 사용자는 총액을
+  올리거나(`POST …/budget`, expected 값으로 idempotent) 지금까지의 근거로 마무리합니다
+  (`POST …/finish`). run deadline이 지나면 maintenance가 기존 근거로 마무리합니다. 마무리
+  단계에서도 예약이 막히면 모델 호출 없이 작성된 섹션으로 부분 보고서를 조합합니다. 추가
+  결제·credit 구매는 하지 않습니다.
+- **검색 계약은 바뀌지 않습니다.** 검색을 요청하는 조사 dispatch의 예약이 그 dispatch가
+  요청할 수 있는 검색(Chat과 같은 요청당 5회, `APP_MANAGED_SEARCH_LIMITS`)의 vendor 비용과
+  검색 surcharge를 함께 잡고, 자식 search item이 모두 끝난 뒤 실제로 제공된 요청 수로
+  정산합니다. 전역 상수나 Perplexity 가격·정산은 건드리지 않습니다.
+- **unknown은 0원이 아닙니다.** `dispatch_started` 뒤 결과를 확인하지 못한 dispatch는
+  `outcome_unknown`, segment는 `unknown`(보류)이며 같은 dispatch key는 다시 보내지 않습니다.
+  유예 뒤 `usageFromProvider: false`로 보수 정산합니다. 실행 중일 수 있는 dispatch의 예약은
+  만료 reconcile이 환불하지 않습니다(`researchPreviewSettlementForExpiry`의 segment 분기).
+- **계획·offer는 별도입니다.** offer/추정은 결정적 계산이며 모델을 부르지 않습니다. 계획
+  생성은 사용자가 누른 명시적 동작이고 run 총액에서 예약합니다.
+
 ## 5. 시간대와 reset
 
 일일 window는 사용자 IANA timezone 기준(`lib/userTimeZone.ts`)입니다. 모든

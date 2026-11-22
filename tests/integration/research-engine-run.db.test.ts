@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { after, test } from "node:test";
+import { after, before, test } from "node:test";
 import { prisma } from "@/lib/prisma";
 import { createResearchRun, readResearchRunDto } from "@/lib/researchEngineService";
 import { drainResearchWork } from "@/lib/researchEngineWorker";
 import { readResearchRunMoney } from "@/lib/researchEngineStore";
 import { readResearchReport, exportResearchReport, listResearchSources } from "@/lib/researchEngineReads";
 import { createFakeWeb, createUser, fakeRequest, installFakes, users } from "./researchEngineHarness";
+import { researchReviewSheet, researchRunMetrics } from "@/lib/researchEngineEvaluation";
+
+before(async () => { await prisma.researchPreviewRun.deleteMany({ where: { engineVersion: 2 } }); });
 
 after(async () => {
   await prisma.user.deleteMany({ where: { id: { in: users } } });
@@ -48,4 +51,10 @@ test("a small Deep Research run plans, searches, reads, verifies, writes and set
   const md = await exportResearchReport({ userId: user.id, runId: run.id, format: "md" });
   assert.ok(md.bytes.byteLength > 100);
   assert.ok(fakes.model.calls.some((call) => call.tool === "submit_research_plan"));
+  const metrics = await researchRunMetrics(run.id);
+  assert.equal(metrics.engineVersion, 2);
+  assert.ok(metrics.citedSources > 0 && metrics.work.modelGenerations > 0);
+  assert.equal(metrics.money.settledCredits, money.settledCredits);
+  const sheet = await researchReviewSheet(run.id);
+  assert.ok(sheet.some((row) => row.level === "text" && row.quote.length > 10), "the review sheet shows the exact cited span");
 });

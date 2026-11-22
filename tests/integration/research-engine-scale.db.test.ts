@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { after, test } from "node:test";
+import { after, before, test } from "node:test";
 import { prisma } from "@/lib/prisma";
 import { createResearchRun, extendResearchBudget, pauseResearchRun, readResearchRunDto, resumeResearchRun } from "@/lib/researchEngineService";
 import { drainResearchWork, processOneResearchWorkItem } from "@/lib/researchEngineWorker";
@@ -14,6 +14,8 @@ import { createFakeModel, createFakeWeb, createUser, defaultResponse, fakeReques
  * past every Preview bound; they are not production limits, latency or
  * throughput measurements, and they spend nothing.
  */
+
+before(async () => { await prisma.researchPreviewRun.deleteMany({ where: { engineVersion: 2 } }); });
 
 after(async () => {
   await prisma.user.deleteMany({ where: { id: { in: users } } });

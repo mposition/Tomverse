@@ -938,11 +938,15 @@ test("one completed generation checkpoints and resumes the same reservation with
   const exportedRun = (exported.data.research_preview_runs as Array<Record<string, unknown>>)
     .find((entry) => entry.id === row.runId);
   assert.ok(exportedRun);
+  // Engine v2 fields are part of the same export; on a Preview run they are empty.
   assert.deepEqual(Object.keys(exportedRun).sort(), [
-    "assistantMessageId", "completedAt", "conversationId", "createdAt", "id",
-    "modelId", "readCount", "searchCount", "startedAt", "status", "stepCount",
-    "stopReason", "updatedAt",
+    "approvedCredits", "assistantMessageId", "completedAt", "conversationId", "createdAt", "currentReportRevision",
+    "engineVersion", "id", "inputManifest", "modelId", "planRevisions", "qualityStatus", "readCount", "reportRevisions",
+    "searchCount", "sources", "startedAt", "status", "stepCount", "stopReason", "updatedAt",
   ]);
+  assert.equal(exportedRun.engineVersion, 1);
+  assert.equal(exportedRun.inputManifest, null);
+  assert.deepEqual([exportedRun.planRevisions, exportedRun.reportRevisions, exportedRun.sources], [[], [], []]);
   assert.doesNotMatch(
     JSON.stringify(exportedRun),
     /checkpoint|reservation|provider|apiModel|settlement|question/i

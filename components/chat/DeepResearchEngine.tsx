@@ -66,7 +66,6 @@ export function DeepResearchEngineSheet({ open, onClose, language, conversationI
   const [error, setError] = useState<string | null>(null);
   // One identity per attempt: a lost create response is retried with the same ids and returns the same run.
   const ids = useRef(researchStartIds(() => crypto.randomUUID()));
-  useEffect(() => { if (open) setQuestion((current) => current || draft); }, [open, draft]);
   if (!open) return null;
   const max = offer?.features?.maxApprovedCredits ?? 2_000;
   const submit = async () => {

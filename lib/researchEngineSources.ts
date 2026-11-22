@@ -92,7 +92,7 @@ export async function resolveResearchSelections(input: {
       const messages = await prisma.message.findMany({ where: { conversationId: conversation.id, role: { in: ["user", "assistant"] } },
         select: { id: true, content: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: 2_000 });
       let from = selection.fromMessageId ? messages.findIndex((message) => message.id === selection.fromMessageId) : 0;
-      let to = selection.toMessageId ? messages.findIndex((message) => message.id === selection.toMessageId) : messages.length - 1;
+      const to = selection.toMessageId ? messages.findIndex((message) => message.id === selection.toMessageId) : messages.length - 1;
       if (from < 0 || to < 0 || to < from) throw refuse("RESEARCH_SOURCE_UNAVAILABLE", "The selected conversation range is unavailable.");
       if (to - from + 1 > 400) from = to - 399;
       const range = messages.slice(from, to + 1);

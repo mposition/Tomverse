@@ -10,7 +10,7 @@ import {
   type ResearchQualityStatus, type ResearchReportDocument, type ResearchRevisionRequest, type ResearchWorkPayload,
 } from "@/lib/researchEngineContract";
 import {
-  canonicalResearchUrl, chunkEvidenceText, hostMatchesDomain, locateQuote, normalizeEvidenceText, researchUrlHost,
+  chunkEvidenceText, hostMatchesDomain, locateQuote, normalizeEvidenceText, researchUrlHost,
   republicationFingerprint, sha256, unmatchedClaimNumbers,
 } from "@/lib/researchEngineEvidence";
 import { extractResearchDocument } from "@/lib/researchEngineDocuments";
@@ -30,11 +30,10 @@ import { loadResearchPrivateText, revalidateResearchPrivateEntry } from "@/lib/r
 import {
   beginResearchDispatch, bumpRunSequence, claimNextResearchWorkItem, completeResearchDispatch, enqueueResearchWorkItems,
   finishResearchWorkItem, heartbeatResearchWorkItem, latestResearchVersions, lockResearchRun, markResearchDispatchStarted,
-  markResearchDispatchUnknown, recordResearchSourceVersion, refuseResearchDispatch, registerPublicSources,
+  markResearchDispatchUnknown, recordResearchSourceVersion, registerPublicSources,
   requeueResearchWorkItem, type NewResearchWorkItem, type ResearchConcurrencyLimits, type ResearchItemFence,
 } from "@/lib/researchEngineStore";
 import { researchEngineLabels } from "@/locales/researchEngine";
-import { languageFromTag } from "@/lib/language";
 
 const RESEARCH_KINDS = new Set(["investigate", "search", "read", "analyze_private", "coordinate"]);
 const FINAL_KINDS = new Set(["verify", "write_section", "synthesize"]);
@@ -124,7 +123,7 @@ export async function drainResearchWork(ownerPrefix: string, concurrency: number
       // Only a running item can make more work claimable. With none running, a
       // few consecutive empty claims (spanning the advance that follows an item)
       // mean nothing is runnable now: blocked, paused or waiting on time.
-      const running = await prisma.researchWorkItem.count({ where: { status: "running" } });
+      const running = await prisma.researchWorkItem.count({ where: { status: "running", leaseOwner: { startsWith: `${ownerPrefix}:` } } });
       idle = running ? 0 : idle + 1;
       if (idle >= 4) return;
       await new Promise((resolve) => setTimeout(resolve, running ? 5 : 25));
@@ -914,7 +913,7 @@ export async function advanceResearchRun(runId: string) {
       if (blocked && !deadline && !finishRequested) {
         // Research ran out of approved credits. The finalization reserve stays
         // untouched; the user decides: add credits, or finish with what exists.
-        if (run.status !== "awaiting_input") await bumpRunSequence(tx, runId, { status: "awaiting_input", lastErrorCode: "RESEARCH_RUN_BUDGET_REACHED" });
+        await bumpRunSequence(tx, runId, { status: "awaiting_input", lastErrorCode: "RESEARCH_RUN_BUDGET_REACHED" });
         return;
       }
       if (!request && !deadline && !blocked && !finishRequested && coordinates.length < profile.maxCoordinatorRounds &&
@@ -1012,7 +1011,7 @@ async function beginFinalization(tx: Prisma.TransactionClient, run: RunRow, mani
     const findings = ((entry.result as { findings?: StoredFinding[] } | null)?.findings ?? []);
     for (const finding of findings) {
       if (rows.length >= RESEARCH_RESOURCE_LIMITS.maxClaimsPerRevision) break;
-      const evidence = finding.resolved.filter((span) => !excluded.has(span.sourceKey)).map(({ quote: _quote, ...span }) => span);
+      const evidence = finding.resolved.filter((span) => !excluded.has(span.sourceKey)).map((span) => { const { quote, ...stored } = span; void quote; return stored; });
       const sectionKey = finding.privateDerived ? "all" : sectionFor.get(finding.questionKey) ?? outline[0]!.key;
       const key = `C${next++}`;
       rows.push({ claimKey: key, sectionKey, text: finding.text, kind: evidence.length ? finding.kind : "uncertain",

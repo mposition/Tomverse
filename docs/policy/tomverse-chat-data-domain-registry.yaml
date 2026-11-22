@@ -270,7 +270,16 @@ domains:
       lifecycle, selected model, bounded counters and timestamps; it withholds
       the restart checkpoint and page bodies, provider/API binding, reservation,
       lease, digest, settlement usage and internal error fields. Terminal runs
-      purge the checkpoint independently of account deletion.
+      purge the checkpoint independently of account deletion. Engine v2 runs
+      (engineVersion 2) own plan revisions, work items, funding segments,
+      sources, source versions, evidence chunks, report revisions and claims,
+      all cascading from the run; deleting a source version queues its private
+      evidence object for deletion in the same statement (database trigger),
+      drained by maintenance. Export adds the brief manifest (references, never
+      private text), plans, report revisions with claims, the approved total
+      and source metadata; evidence text, funding segments, leases and provider
+      bindings stay withheld. Funding segments reference Chat reservations,
+      which keep their own financial retention.
 
   - domain: conversationProject
     prismaModel: ConversationProject
