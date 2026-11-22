@@ -15,7 +15,8 @@ const feature = node("33333333-cccc-4ccc-8ccc-000000000003", "feature", epic.id,
   { displayPrefix: "AMUX-CRAWL", value: 4 });
 const story = { id: "story-0001", cardType: "story", displayKey: "AMUX-CRAWL-001",
   status: "in_progress", archived: false, title: "Bots can read public pages",
-  parentFeatureNodeId: feature.id, parentStoryCardId: null, metric: 4 };
+  parentFeatureNodeId: feature.id, parentStoryCardId: null, metric: 4,
+  progress: { done: 1, total: 3 } };
 const task = (extra = {}) => ({ id: "task-0002", cardType: "task",
   displayKey: "AMUX-CRAWL-002", status: "todo", archived: false,
   title: "Allow AI search bots in robots.txt", parentFeatureNodeId: feature.id,
@@ -34,8 +35,10 @@ test("a Task under a Story reads all five levels, top down, ending at itself", (
   assert.equal(steps[2].weight, 2);
   assert.deepEqual(steps[3], { kind: "card", level: "story", id: story.id,
     title: story.title, number: "AMUX-CRAWL-001", status: "in_progress",
-    archived: false, metric: 4, current: false });
+    archived: false, metric: 4, current: false, progress: { done: 1, total: 3 } });
   assert.equal(steps[4].current, true);
+  // Progress belongs to the Story step only.
+  assert.equal(steps[4].progress, null);
   assert.equal(steps[4].metric, 3);
 });
 
@@ -98,4 +101,17 @@ test("a Story card ends at itself; legacy and unplaced cards have no line", () =
 test("node numbers: a Feature's prefix, otherwise a short id", () => {
   assert.equal(amuxHierarchyNodeNumber({ id: "7f3a12e0-1111-4111-8111-1", displayPrefix: null }), "#7f3a12");
   assert.equal(amuxHierarchyNodeNumber({ id: "x", displayPrefix: "AMUX-CRAWL" }), "AMUX-CRAWL");
+});
+
+test("owner direction 2026-11-21: a Story off the board shows its Tasks' progress on the line", () => {
+  // A Story card opened from the line ends at itself, with its progress.
+  const own = projectAmuxCardHierarchy({ card: { ...story, progress: { done: 0, total: 0 } },
+    story: null, feature, epic, initiative });
+  assert.deepEqual(own[3].progress, { done: 0, total: 0 });
+  // A Story the reader gave no progress for shows none, never a guess.
+  const bare = projectAmuxCardHierarchy({ card: task(), story: { ...story, progress: undefined },
+    feature, epic, initiative });
+  assert.equal(bare[3].progress, null);
+  // The Story step stays a link: not the current card, so it opens the Story.
+  assert.equal(bare[3].current, false);
 });
