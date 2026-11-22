@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.3
+
+- Redesign the sidebar with a themed conversation, composer, and approval cards.
+- Choose Effort inside the sidebar without a text field. Connect from the Tomverse setup card using VS Code's native password prompt.
+
 ## 1.0.2
 
 - Show Smart Adaptive's credit range from the offered model catalog, or its ceiling when a range is unavailable.

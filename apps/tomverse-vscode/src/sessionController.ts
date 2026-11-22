@@ -52,6 +52,7 @@ export class SessionController implements vscode.WebviewViewProvider {
     private effort: Effort = "default";
     private appliedEffort: Effort | undefined;
     private effortModel = "";
+    private effortPicker?: { id: string; epoch: string; modelId: string; levels: Effort[] };
     private runner?: Runner;
     private journal?: Journal;
     private gateway?: Gateway;
@@ -130,6 +131,7 @@ export class SessionController implements vscode.WebviewViewProvider {
         this.output.appendLine(this.clean(value));
     }
     snapshot() {
+        const picker = this.effortPicker?.epoch === this.epoch && !this.effortLocked() ? this.effortPicker : undefined;
         return {
             type: "state",
             revision: this.revision,
@@ -158,6 +160,7 @@ export class SessionController implements vscode.WebviewViewProvider {
             session: this.journal?.state.id ?? "",
             model: this.journal?.state.model ?? null,
             effort: { level: this.appliedEffort ?? this.effort, requested: this.effort, model: this.effortModel, locked: this.effortLocked() },
+            effortPicker: picker && { id: picker.id, modelId: picker.modelId, levels: picker.levels },
             readOnly: this.journal?.state.readOnly,
             attachments: this.editor.attachments.map(({ id, uri, path, kind, range, version, dirty, bytes, truncated }) =>
                 ({ id, uri, path, kind, range, version, dirty, bytes, truncated })),
@@ -183,6 +186,7 @@ export class SessionController implements vscode.WebviewViewProvider {
     resolveWebviewView(view: vscode.WebviewView) {
         this.view = view;
         this.channel = randomUUID();
+        this.effortPicker = undefined;
         view.webview.options = { enableScripts: true, enableCommandUris: false, localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, "media")] };
         const nonce = randomUUID().replaceAll("-", "");
         const script = view.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media/sidebar.js"));
@@ -246,9 +250,11 @@ export class SessionController implements vscode.WebviewViewProvider {
             return true;
         }
         if (message.type === "chooseEffort") {
-            await this.exclusive(() => this.chooseEffort(message.model));
+            if (this.operation) return false;
+            this.openEffortPicker(message.model);
             return true;
         }
+        if (message.type === "selectEffort") return this.selectEffort(message.id, message.level);
         if (message.type === "action") {
             await this.action(message.action);
             return true;
@@ -291,36 +297,42 @@ export class SessionController implements vscode.WebviewViewProvider {
         this.effort = "default";
         this.appliedEffort = undefined;
         this.effortModel = "";
+        this.effortPicker = undefined;
     }
     private effortLocked() {
         return this.busy || Boolean(this.journal?.state.tasks.length && this.journal.state.status !== "completed");
     }
-    private async chooseEffort(modelId: string) {
+    private effortCatalogModel(modelId: string) {
+        if (this.journal && this.journal.state.model.requested !== modelId) return undefined;
+        return this.catalog.find((model) => model.id === (this.journal?.state.model.pinned ?? modelId));
+    }
+    private openEffortPicker(modelId: string) {
         this.idle();
         this.assertAllowed();
         if (this.effortLocked()) throw new Error(t("effortLocked"));
-        const effectiveId = this.journal?.state.model.pinned ?? modelId;
-        const model = this.catalog.find((model) => model.id === effectiveId);
-        if (!model || (this.journal && this.journal.state.model.requested !== modelId)) throw new Error("Model not offered. Refresh models.");
-        const levels = effortLevels(model);
-        const epoch = this.epoch;
-        const choices = levels.map((level) => ({
-            label: t(`effort_${level}`),
-            description: t(level === "default" ? "effortDefault" : level === "low" ? "effortLow" : "effortHigh"),
-            level,
-        }));
-        const detail = levels.length === 1
-            ? t("effortUnavailable")
-            : choices.map(({ label, description }) => `${label} · ${description}`).join("\n");
-        const selected = await this.dialogs.selectButtons(choices, `${t("effort")} · ${model.name}`, detail);
-        if (!selected || epoch !== this.epoch || this.effortLocked()) return;
-        this.effort = selected.level;
-        this.appliedEffort = undefined;
-        this.effortModel = modelId;
+        const model = this.effortCatalogModel(modelId);
+        if (!model) throw new Error("Model not offered. Refresh models.");
+        this.effortPicker = { id: randomUUID(), epoch: this.epoch, modelId, levels: effortLevels(model) };
         this.update();
+    }
+    private selectEffort(id: string, level?: Effort) {
+        const picker = this.effortPicker;
+        if (!picker || picker.id !== id || picker.epoch !== this.epoch || this.operation || this.effortLocked()) return false;
+        if (level !== undefined) {
+            this.assertAllowed();
+            const model = this.effortCatalogModel(picker.modelId);
+            if (!model || !picker.levels.includes(level) || !effortLevels(model).includes(level)) return false;
+            this.effort = level;
+            this.appliedEffort = undefined;
+            this.effortModel = picker.modelId;
+        }
+        this.effortPicker = undefined;
+        this.update();
+        return true;
     }
     async refresh() {
         this.idle();
+        this.effortPicker = undefined;
         this.key = await this.credentials.get();
         this.catalog = [];
         if (!this.key) {

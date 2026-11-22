@@ -18,8 +18,24 @@
         return node;
     };
     const heading = el("h1", "Tomverse");
+    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    icon.setAttribute("viewBox", "0 0 24 24");
+    icon.setAttribute("aria-hidden", "true");
+    const mark = document.createElementNS(icon.namespaceURI, "path");
+    mark.setAttribute("d", "M3 4h18v4h-7v12h-4V8H3z");
+    mark.setAttribute("fill", "currentColor");
+    icon.append(mark);
+    const connectionBadge = el("span", "", "connection-badge");
+    const header = el("header", "", "sidebar-header");
+    header.append(icon, heading, connectionBadge);
+    const connectCard = el("section", "", "connection-card");
+    const connectTitle = el("h2");
+    const connectHint = el("p", "", "muted");
+    connectCard.append(connectTitle, connectHint);
+    connectCard.hidden = true;
     const onboarding = el("p", "", "muted");
     const toolbar = el("div", "", "toolbar");
+    const contextToolbar = el("div", "", "toolbar context-toolbar");
     const advanced = el("details");
     const advancedTitle = el("summary");
     const advancedToolbar = el("div", "", "toolbar");
@@ -36,24 +52,90 @@
     const models = el("select");
     models.id = "model";
     modelLabel.htmlFor = models.id;
+    modelLabel.className = "visually-hidden";
     const mode = el("select");
     mode.id = "mode";
-    mode.setAttribute("aria-label", "Ask / Agent");
-    const effort = button("", () => post({ type: "chooseEffort", model: models.value }));
+    mode.hidden = true;
+    const modes = el("div", "", "modes");
+    modes.setAttribute("role", "group");
+    modes.setAttribute("aria-label", "Ask / Agent");
+    const modeButtons = ["ask", "agent"].map((value) => ({
+        value,
+        node: button(value === "ask" ? "Ask" : "Agent", () => {
+            mode.value = value;
+            renderModes();
+        }),
+    }));
+    const renderModes = () => {
+        for (const { node, value } of modeButtons) {
+            node.setAttribute("aria-pressed", String(mode.value === value));
+            node.disabled = mode.disabled;
+        }
+    };
+    modes.append(...modeButtons.map(({ node }) => node));
+    const effort = button("", () => {
+        if (!state) return;
+        const picker = state.effortPicker;
+        if (picker && !effortPanel.hidden) post({ type: "selectEffort", id: picker.id });
+        else post({ type: "chooseEffort", model: models.value });
+    });
     effort.id = "effort";
+    effort.setAttribute("aria-controls", "effort-choices");
+    const effortPanel = el("section", "", "effort-panel");
+    effortPanel.id = "effort-choices";
+    effortPanel.hidden = true;
+    effortPanel.addEventListener("keydown", (event) => {
+        if (event.key !== "Escape" || !state?.effortPicker) return;
+        event.preventDefault();
+        post({ type: "selectEffort", id: state.effortPicker.id });
+    });
     const renderEffort = () => {
         if (!state) return;
+        const labels = state.labels;
         const level = state.effort?.model === models.value ? state.effort.level : "default";
-        effort.textContent = `${state.labels.effort}: ${state.labels[`effort_${level}`]}`;
+        effort.textContent = `${labels.effort} · ${labels[`effort_${level}`]}`;
         effort.disabled = state.busy || !!state.problem || !state.connected || !models.value || state.effort?.locked;
-        effort.title = state.effort?.locked ? state.labels.effortLocked : state.labels.effortDefault;
+        effort.title = state.effort?.locked ? labels.effortLocked : labels.effortDefault;
+        const picker = !effort.disabled && state.effortPicker?.modelId === models.value ? state.effortPicker : undefined;
+        const returnFocus = effortPanel.contains(document.activeElement);
+        effort.setAttribute("aria-expanded", String(Boolean(picker)));
+        effortPanel.hidden = !picker;
+        if (!picker) {
+            effortPanel.replaceChildren();
+            delete effortPanel.dataset.picker;
+            if (returnFocus && !effort.disabled) effort.focus();
+            return;
+        }
+        if (effortPanel.dataset.picker === picker.id) return;
+        effortPanel.dataset.picker = picker.id;
+        const title = el("h2", labels.effort);
+        title.id = "effort-title";
+        effortPanel.setAttribute("aria-labelledby", title.id);
+        const choices = picker.levels.map((choice) => {
+            const option = button("", () => post({ type: "selectEffort", id: picker.id, level: choice }));
+            option.setAttribute("aria-pressed", String(level === choice));
+            const detail = choice === "default" ? labels.effortDefault : choice === "low" ? labels.effortLow : labels.effortHigh;
+            option.append(el("strong", labels[`effort_${choice}`]), el("span", detail, "muted"));
+            return option;
+        });
+        effortPanel.replaceChildren(title, ...choices, el("p", picker.levels.length === 1 ? labels.effortUnavailable : labels.effortLocked, "muted"));
+        (choices.find((_, index) => picker.levels[index] === level) ?? choices[0])?.focus();
     };
-    models.addEventListener("change", renderEffort);
+    models.addEventListener("change", () => {
+        if (state?.effortPicker) post({ type: "selectEffort", id: state.effortPicker.id });
+        renderEffort();
+    });
+    const modelPanel = el("div", "", "model-panel");
+    modelPanel.append(modelLabel, models, effort);
+    const controls = el("section", "", "controls");
+    controls.append(modes, mode, modelPanel);
+    controls.hidden = true;
     const promptLabel = el("label");
     const prompt = el("textarea");
     prompt.id = "prompt";
     prompt.rows = 4;
     promptLabel.htmlFor = prompt.id;
+    promptLabel.className = "visually-hidden";
     prompt.value = api.getState()?.draft ?? "";
     prompt.addEventListener("input", () => api.setState({ draft: prompt.value }));
     prompt.addEventListener("compositionstart", () => (composing = true));
@@ -74,35 +156,40 @@
     const send = button("", submit);
     send.id = "send";
     const stop = button("", () => post({ type: "action", action: "stop" }));
-    const attachments = el("section");
+    const attachments = el("section", "", "attachments");
     const approval = el("section");
     const changes = el("section");
     const permissions = el("p", "", "muted");
     const receipts = el("pre");
     receipts.id = "receipts";
+    const receiptDetails = el("details", "", "receipt-details");
+    const receiptTitle = el("summary");
+    const receiptLog = el("pre");
+    receiptDetails.append(receiptTitle, receiptLog);
     const toolResults = el("section");
     const limits = el("p", "", "muted");
+    const composerActions = el("div", "", "composer-actions");
+    composerActions.append(contextToolbar, stop, send);
+    const composer = el("section", "", "composer");
+    composer.append(attachments, promptLabel, prompt, composerActions);
+    composer.hidden = true;
+    const statusRow = el("div", "", "status-row");
+    statusRow.append(status, root);
     app.append(
-        heading,
-        onboarding,
+        header,
         toolbar,
-        status,
-        root,
+        statusRow,
+        connectCard,
         notice,
+        controls,
+        effortPanel,
         history,
-        attachments,
         approval,
         permissions,
         changes,
-        modelLabel,
-        models,
-        effort,
-        mode,
-        promptLabel,
-        prompt,
-        send,
-        stop,
+        composer,
         receipts,
+        receiptDetails,
         toolResults,
         advanced,
         limits,
@@ -126,9 +213,13 @@
     ];
     const buttons = actions.map(([key, action]) => {
         const node = button("", () => post({ type: "action", action }));
-        (["connect", "root", "new", "file", "selection", "diagnostics"].includes(action) ? toolbar : advancedToolbar).append(node);
+        if (action === "connect") connectCard.append(node);
+        else if (["file", "selection", "diagnostics"].includes(action)) contextToolbar.append(node);
+        else if (["root", "new"].includes(action)) toolbar.append(node);
+        else advancedToolbar.append(node);
         return { key, action, node };
     });
+    advanced.append(onboarding);
     window.addEventListener("message", (event) => {
         const next = event.data;
         if (
@@ -153,6 +244,13 @@
         const previousModel = models.value;
         state = next;
         const l = state.labels;
+        connectionBadge.textContent = l.connected;
+        connectionBadge.hidden = !state.connected;
+        connectCard.hidden = state.connected;
+        connectTitle.textContent = l.connectTitle;
+        connectHint.textContent = l.connectHint;
+        controls.hidden = !state.connected;
+        composer.hidden = !state.connected;
         onboarding.textContent = l.onboarding;
         advancedTitle.textContent = `${l.sessions} · ${l.keys}`;
         for (const item of buttons) {
@@ -161,14 +259,14 @@
             item.node.disabled = state.busy && !["logs", "keys", "clear"].includes(item.action);
         }
         attachments.replaceChildren();
-        if (state.attachments?.length) attachments.append(el("h2", l.context));
+        attachments.setAttribute("aria-label", l.context);
         for (const attachment of state.attachments || []) {
-            const row = el("div");
+            const row = el("div", "", "attachment-tag");
+            const name = attachment.path.split(/[\\/]/).at(-1) || attachment.path;
+            const range = attachment.range ? ` · ${attachment.range[0]}–${attachment.range[2]}` : "";
+            row.title = `${attachment.path} · ${attachment.kind} · v${attachment.version} · ${attachment.bytes} B${attachment.dirty ? ` · ${l.unsaved}` : ""}${attachment.truncated ? ` · ${l.truncated}` : ""}${attachment.range ? ` · ${attachment.range.join(":")}` : ""}`;
             row.append(
-                el(
-                    "pre",
-                    `${attachment.path} · ${attachment.kind} · v${attachment.version} · ${attachment.bytes} B${attachment.dirty ? ` · ${l.unsaved}` : ""}${attachment.truncated ? ` · ${l.truncated}` : ""}${attachment.range ? ` · ${attachment.range.join(":")}` : ""}`,
-                ),
+                el("span", `${name}${range}${attachment.dirty ? ` · ${l.unsaved}` : ""}`),
                 button(l.remove, () => post({ type: "removeContext", id: attachment.id })),
             );
             attachments.append(row);
@@ -178,20 +276,29 @@
             const p = state.approval;
             approval.className = "approval";
             approval.setAttribute("aria-label", l.awaiting);
-            approval.append(el("h2", l.awaiting), el("strong", p.tool), el("p", p.explanation));
+            approval.append(el("h2", l.awaiting, "approval-status"), el("strong", p.tool), el("p", p.explanation));
             if (p.command) approval.append(el("pre", JSON.stringify(p.command, null, 2)), el("p", l.onboarding));
             p.files.forEach((file, index) => {
-                const row = el("div");
-                row.append(
-                    el("pre", `${file.action} ${file.path} · ${file.eol} · BOM:${file.bom} · ${file.beforeBytes} → ${file.afterBytes} B`),
+                const row = el("div", "", "approval-file");
+                const reviewActions = el("div", "", "toolbar");
+                reviewActions.append(
                     button(l.diff, () => post({ type: "diff", id: p.id, index, details: false })),
                     button(l.details, () => post({ type: "diff", id: p.id, index, details: true })),
                 );
+                row.append(
+                    el("strong", file.path),
+                    el("pre", `${file.action} · ${file.eol} · BOM:${file.bom} · ${file.beforeBytes} → ${file.afterBytes} B`),
+                    reviewActions,
+                );
                 approval.append(row);
             });
-            approval.append(button(l.once, () => post({ type: "approve", id: p.id, decision: "once" })));
-            if (p.canRemember) approval.append(button(l.run, () => post({ type: "approve", id: p.id, decision: "run" })));
-            approval.append(button(l.deny, () => post({ type: "approve", id: p.id, decision: "deny" })));
+            const allow = button(l.once, () => post({ type: "approve", id: p.id, decision: "once" }));
+            allow.className = "primary";
+            approval.append(allow);
+            const otherDecisions = el("div", "", "other-decisions");
+            if (p.canRemember) otherDecisions.append(button(l.run, () => post({ type: "approve", id: p.id, decision: "run" })));
+            otherDecisions.append(button(l.deny, () => post({ type: "approve", id: p.id, decision: "deny" })));
+            approval.append(otherDecisions);
         } else approval.className = "";
         permissions.textContent = (state.permissions || []).join("\n");
         changes.replaceChildren();
@@ -209,8 +316,9 @@
         const nearBottom = history.scrollHeight - history.scrollTop - history.clientHeight < 50;
         history.replaceChildren(
             ...state.transcript.map((entry) => {
-                const node = el("article");
-                node.append(el("strong", entry.role + (entry.truncated ? ` · ${l.truncated}` : "")), el("pre", entry.text));
+                const node = el("article", "", entry.role === "user" ? "message user" : "message");
+                const author = entry.role === "user" ? l.you : entry.role === "assistant" ? "Tomverse" : entry.role;
+                node.append(el("strong", author + (entry.truncated ? ` · ${l.truncated}` : "")), el("pre", entry.text));
                 return node;
             }),
         );
@@ -250,15 +358,17 @@
         mode.value = state.readOnly === undefined ? oldMode || "ask" : state.readOnly ? "ask" : "agent";
         modelLabel.textContent = l.model;
         promptLabel.textContent = l.prompt;
+        prompt.placeholder = l.prompt;
         send.textContent = l.send;
         stop.textContent = l.stop;
         send.disabled = state.busy || !!state.problem || !state.connected || !state.models.length;
         stop.disabled = !state.busy;
         models.disabled = state.busy || !!state.session;
         mode.disabled = state.busy || !!state.session;
+        renderModes();
         renderEffort();
         receipts.textContent = state.cost
-            ? `${l.cost}: ${state.cost.requests} ${l.requests}\n${state.cost.charged} ${l.credits} ${l.charged} · ${state.cost.held} ${l.held} · ${state.cost.unknown.length} ${l.unknown}`
+            ? `${state.cost.charged} ${l.credits} ${l.charged} · ${state.cost.requests} ${l.requests} · ${state.cost.held} ${l.held} · ${state.cost.unknown.length} ${l.unknown}`
             : "";
         toolResults.replaceChildren(
             ...(state.toolResults || []).map((result) => {
@@ -272,7 +382,9 @@
                 return box;
             }),
         );
-        if (state.receipts?.length) receipts.textContent += "\n" + JSON.stringify(state.receipts, null, 2);
+        receiptTitle.textContent = l.cost;
+        receiptDetails.hidden = !state.receipts?.length;
+        receiptLog.textContent = state.receipts?.length ? JSON.stringify(state.receipts, null, 2) : "";
         limits.textContent = l.limits + (state.persist ? `\n${state.storage}` : `\n${l.noPersist}`);
     });
     post({ type: "ready" });

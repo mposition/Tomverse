@@ -24,9 +24,11 @@ export async function run() {
     await context.secrets.store(`key:${digest(base)}`, TEST_KEY);
     await controller.refresh();
     if (process.env.TOMVERSE_CRASH_PHASE === "seed") {
-        controller.dialogs.pick = async (items) => items.find((item) => item.label === t("effort_high"));
         const initial = controller.snapshot();
         await controller.receive({ channel: initial.channel, run: initial.run, type: "chooseEffort", model: "fake-coder" });
+        const picker = controller.snapshot().effortPicker;
+        assert.ok(picker?.levels.includes("high"));
+        assert.equal(await controller.receive({ channel: initial.channel, run: initial.run, type: "selectEffort", id: picker.id, level: "high" }), true);
         const snapshot = controller.snapshot();
         void controller.receive({
             channel: snapshot.channel,
