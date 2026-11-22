@@ -688,4 +688,25 @@ test("a diagnostic's answer failures never exclude a model from the routing cycl
     },
   });
   assert.deepEqual(await readUnreliableAnswerModels(), []);
+  // A diagnostic that failed (unknown cost, budget) is excluded by its objective, not its status;
+  // an older routing cycle's evidence still decides.
+  const { COST_EFFICIENCY_OBJECTIVE } = await import("@/lib/autoRouterOptimizerCore");
+  await prisma.autoRouterOptimizerCycle.create({
+    data: {
+      optimizerModelId: "optimizer-model", routerModelId: "router-model",
+      incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE, reservedMicroUsd: 0, status: "failed",
+      createdAt: new Date(Date.now() - 60 * 60_000),
+      summary: { evaluated: 12, answerStats: { "routing-model": { answered: 0, failed: 4 } } },
+    },
+  });
+  for (const status of ["failed", "error", "passed"]) {
+    await prisma.autoRouterOptimizerCycle.create({
+      data: {
+        optimizerModelId: "optimizer-model", routerModelId: "router-model",
+        incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE, reservedMicroUsd: 0, status,
+        summary: { evaluated: 12, objective: COST_EFFICIENCY_OBJECTIVE, answerStats: { "cheap-model": { answered: 0, failed: 3 } } },
+      },
+    });
+  }
+  assert.deepEqual(await readUnreliableAnswerModels(), ["routing-model"]);
 });

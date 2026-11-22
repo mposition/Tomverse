@@ -348,6 +348,8 @@ export async function readUnreliableAnswerModels(): Promise<string[]> {
             FROM "AutoRouterOptimizerCycle"
             WHERE "status" IN ('passed', 'failed', 'error')
               AND jsonb_typeof("summary"->'answerStats') = 'object'
+              -- A cost-efficiency diagnostic, finished or failed, never shapes the routing cycle's draws.
+              AND "summary"->'objective' IS NULL
             ORDER BY "createdAt" DESC
             LIMIT 1
         `;
