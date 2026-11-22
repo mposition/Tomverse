@@ -146,9 +146,11 @@ export const adminCodingCatalogMessages = defineAdminMessages({
             ? "not listed"
             : reason === "invalid_id"
               ? "id not accepted"
-              : reason.startsWith("usage_class:")
-                ? `usage class ${reason.slice("usage_class:".length)}`
-                : reason,
+              : reason === "chat_credits_missing"
+                ? "no chat credits set"
+                : reason.startsWith("usage_class:")
+                  ? `usage class ${reason.slice("usage_class:".length)}`
+                  : reason,
       show: "Show",
       hide: "Hide",
       footnote:
@@ -172,7 +174,7 @@ export const adminCodingCatalogMessages = defineAdminMessages({
       reviewBody: (origin: "registry" | "llm", provider: string) =>
         (origin === "llm"
           ? `Tool calling and structured output were drafted by an LLM from ${provider}'s official documentation.`
-          : "Tool calling comes from the chat registry; structured output stays at None until you set it.") +
+          : "Tool calling comes from the chat registry; structured output stays at Not supported until you set it.") +
         " Values inherited from chat cannot be changed here.",
       inheritedTitle: "Inherited from chat",
       readOnly: "read-only",
@@ -195,7 +197,7 @@ export const adminCodingCatalogMessages = defineAdminMessages({
       llmDraft: "LLM draft",
       registryChip: "Chat registry",
       toolCallingHelp: "\"None\" is refused: Code's loop needs tool calls.",
-      structuredOutputHelp: "Code needs one of these to read a plan; \"None\" is not served.",
+      structuredOutputHelp: "Code needs structured output to read a plan; a model set to \"Not supported\" is not served in Code.",
       planFollowChat: (plan: string) => `Same as chat · ${plan}`,
       planHelp: "Without an override it follows chat's plan, and moves when chat's does.",
       weightPlaceholder: (weight: number) => `chat ×${weight}`,
@@ -441,9 +443,11 @@ export const adminCodingCatalogMessages = defineAdminMessages({
             ? "비공개"
             : reason === "invalid_id"
               ? "카탈로그가 받지 않는 id"
-              : reason.startsWith("usage_class:")
-                ? `usageClass ${reason.slice("usage_class:".length)}`
-                : reason,
+              : reason === "chat_credits_missing"
+                ? "채팅 크레딧 미설정"
+                : reason.startsWith("usage_class:")
+                  ? `usageClass ${reason.slice("usage_class:".length)}`
+                  : reason,
       show: "목록 펼치기",
       hide: "접기",
       footnote:
@@ -464,7 +468,7 @@ export const adminCodingCatalogMessages = defineAdminMessages({
       reviewBody: (origin: "registry" | "llm", provider: string) =>
         (origin === "llm"
           ? `Tool calling·구조화 출력은 LLM이 ${provider} 공식 문서에서 읽은 값입니다.`
-          : "Tool calling은 채팅 레지스트리에서 가져왔고, 구조화 출력은 정하기 전까지 없음입니다.") +
+          : "Tool calling은 채팅 레지스트리에서 가져왔고, 구조화 출력은 정하기 전까지 지원 안 함입니다.") +
         " 채팅에서 상속한 값은 이 화면에서 바꿀 수 없습니다.",
       inheritedTitle: "채팅에서 상속",
       readOnly: "읽기 전용",
@@ -487,7 +491,7 @@ export const adminCodingCatalogMessages = defineAdminMessages({
       llmDraft: "LLM 초안",
       registryChip: "채팅 레지스트리",
       toolCallingHelp: "\"없음\"이면 판정에서 거절됩니다 — Code의 작업 루프는 도구 호출이 필요합니다.",
-      structuredOutputHelp: "Code가 계획을 읽으려면 이 중 하나가 필요합니다. \"없음\"이면 Code에서 쓰지 않습니다.",
+      structuredOutputHelp: "Code가 계획을 읽으려면 구조화 출력이 필요합니다. \"지원 안 함\"이면 Code에서 쓰지 않습니다.",
       planFollowChat: (plan: string) => `채팅과 같음 · ${plan}`,
       planHelp: "덮어쓰지 않으면 채팅 최소 플랜을 따릅니다. 채팅에서 플랜이 바뀌면 여기도 따라 바뀝니다.",
       weightPlaceholder: (weight: number) => `채팅 ×${weight}`,

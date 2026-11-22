@@ -114,6 +114,8 @@ const chat = (id, overrides = {}) => ({
   minimumPlan: "Pro",
   usageClass: "standard",
   creditWeight: 2,
+  // The registry sets these credits (chatModelFacts, hasRegistryCredits).
+  registryCredits: true,
   enabled: true,
   status: "enabled",
   publiclyListed: true,
@@ -223,4 +225,29 @@ test("add-all with no candidate does nothing", async () => {
   assert.equal(state.rows.size, 0);
   assert.equal(state.audits.length, 0);
   assert.equal(state.locks, 0);
+});
+
+test("add-all takes frontier and apex models as candidates; research stays out", async () => {
+  // Owner decision 2026-11-22: the coding API's Smart Adaptive sends the hardest work there, and a client may name them.
+  reset([
+    chat("gpt-6-2-astra", { usageClass: "frontier", creditWeight: 32 }),
+    chat("api-only-apex", { usageClass: "apex", creditWeight: 80 }),
+    chat("gpt-research", { usageClass: "research" }),
+    // Its credits are only the class default: the coding API would never serve it (hasRegistryCredits), so it is no candidate.
+    chat("gpt-6-2-unpriced", { usageClass: "frontier", creditWeight: 32, registryCredits: false }),
+  ]);
+  const result = await linkAllChatModels({ session });
+  assert.equal(result.attempted, 2);
+  assert.deepEqual(result.added, ["gpt-6-2-astra", "api-only-apex"]);
+  // Code only where Code's own rules pass (here faked per id); the coding API at chat's credits.
+  assert.deepEqual(result.withCode, ["gpt-6-2-astra"]);
+  for (const id of result.added) assert.equal(state.rows.get(id).profile.creditWeight, undefined, `${id} keeps chat's credits`);
+  assert.equal(state.rows.has("gpt-research"), false);
+  assert.equal(state.rows.has("gpt-6-2-unpriced"), false);
+  assert.ok(!state.probes.some((probe) => probe.id === "gpt-6-2-unpriced"), "never judged as a candidate");
+  // And one at a time it is refused with that reason.
+  await assert.rejects(
+    linkChatModel({ registryModelId: "gpt-6-2-unpriced", session }),
+    (error) => error.code === "not_a_candidate" && error.reasons[0] === "chat_credits_missing"
+  );
 });

@@ -157,6 +157,7 @@ export type ReasonMessage =
   | { key: "chatModelDeleted" }
   | { key: "chatModelDisabled" }
   | { key: "chatPriceUnverified" }
+  | { key: "chatCreditsMissing" }
   | { key: "reasoningCostUnbounded" }
   | { key: "providerCostUnbounded" }
   | { key: "alreadyInCatalog" }
@@ -276,6 +277,8 @@ export const reasonMessage = (code: string, detail = ""): ReasonMessage => {
       return { key: "chatModelDisabled" };
     case "chat_price_unverified":
       return { key: "chatPriceUnverified" };
+    case "chat_credits_missing":
+      return { key: "chatCreditsMissing" };
     case "reasoning_cost_unbounded":
       return { key: "reasoningCostUnbounded" };
     case "provider_cost_unbounded":
@@ -496,6 +499,15 @@ export type CodingProfileView = {
   terms?: { allowsResaleAndCodingAgent: boolean; url: string; checkedAt: string };
   retention?: { url: string; checkedAt: string };
   processingRegion?: string;
+  /**
+   * A dedicated draft's basis (lib/modelCatalogCore.ts codingDraftBasisSchema):
+   * whether the output cap is the pages' or the 8,192 default, and the input-size
+   * price tiers the pages list. Absent on rows drafted before it and on resolved rows.
+   */
+  basis?: {
+    maxOutputTokens: "documented" | "default";
+    priceTiers?: { upToInputTokens: number | null; inputUsdPerMTok: number; outputUsdPerMTok: number }[];
+  };
 };
 
 /** A resolved row reads the same as a profile. */
@@ -540,7 +552,18 @@ export const CODING_CHANNEL_ORDER = ["code", "api"] as const;
 export const codingChannelsShown = (channels: readonly string[]): string[] =>
   CODING_CHANNEL_ORDER.filter((channel) => (channel === "api" ? channels.includes("api") || channels.includes("cli") : channels.includes(channel)));
 export const CODING_TOOL_CALLING_VALUES = ["none", "basic", "parallel"] as const;
-export const CODING_STRUCTURED_OUTPUT_VALUES = ["none", "json_mode", "strict_schema", "forced_tool_use", "response_schema"] as const;
+/**
+ * The two structured output choices the screen shows and saves (owner decision
+ * 2026-11-22; lib/modelCatalogCore.ts CODING_STRUCTURED_OUTPUT_CHOICES).
+ */
+export const CODING_STRUCTURED_OUTPUT_VALUES = ["supported", "none"] as const;
+/**
+ * A stored value as the screen shows it. A finer value stored before the two
+ * choices ("json_mode", "strict_schema", ...) reads as supported and stays
+ * stored as it is until the operator saves the row's settings.
+ */
+export const codingStructuredOutputShown = (value: string): (typeof CODING_STRUCTURED_OUTPUT_VALUES)[number] =>
+  value === "none" ? "none" : "supported";
 
 /**
  * A dedicated row's two credits (owner decision 2026-11-21): Code's
@@ -712,10 +735,14 @@ export type CodingSettingsValue = {
   channels: string[];
 };
 
-/** The settings form's starting values from a link's stored ones. */
+/**
+ * The settings form's starting values from a link's stored ones. Structured
+ * output starts at its shown choice; a finer stored value is written as that
+ * choice only when the operator saves (codingSettingsRequest).
+ */
 export const codingSettingsFrom = (link: CodingLinkView): CodingSettingsValue => ({
   toolCalling: link.capabilities.toolCalling,
-  structuredOutput: link.capabilities.structuredOutput,
+  structuredOutput: codingStructuredOutputShown(link.capabilities.structuredOutput),
   minimumPlan: link.minimumPlan ?? "",
   creditWeight: link.creditWeight === undefined ? "" : String(link.creditWeight),
   channels: codingChannelsShown(link.channels),
@@ -763,6 +790,13 @@ export const codingSettingsRequest = (link: CodingLinkView, value: CodingSetting
   if (value.creditWeight.trim() !== before.creditWeight) out.creditWeight = value.creditWeight.trim() === "" ? null : Number(value.creditWeight);
   const channels = CODING_CHANNEL_ORDER.filter((channel) => value.channels.includes(channel));
   if (channels.join(",") !== before.channels.join(",")) out.channels = channels;
+  // A save of a link stored with a finer structured output value writes it as
+  // the shown choice; with nothing else changed nothing is sent, so the row
+  // (and its snapshot hash) stays as it is.
+  const stored = link.capabilities.structuredOutput;
+  if (Object.keys(out).length > 0 && out.structuredOutput === undefined && !(CODING_STRUCTURED_OUTPUT_VALUES as readonly string[]).includes(stored)) {
+    out.structuredOutput = value.structuredOutput;
+  }
   return out;
 };
 

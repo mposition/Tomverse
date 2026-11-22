@@ -8,8 +8,10 @@ import { adminMessagesFor } from "@/lib/adminLocale";
 import { adminCodingCatalogMessages } from "@/lib/adminMessages/codingCatalog";
 import { adminModelCatalogMessages } from "@/lib/adminMessages/modelCatalog";
 import {
+  CODING_STRUCTURED_OUTPUT_VALUES,
   type CodingLinkAllResult,
   capabilityFillTargets,
+  codingStructuredOutputShown,
   codingCatalogItems,
   codingDedicatedSettings,
   codingSettingsFrom,
@@ -315,8 +317,59 @@ test("a link that cannot be activated says why, and an unsaved change blocks act
   assert.match(html.match(/<button[^>]*data-testid="coding-link-activate"[^>]*>/)?.[0] ?? "", / disabled=""/);
 });
 
+test("structured output is two choices on screen; a finer stored value reads as supported and is written only on a save", () => {
+  // The fixture link was stored with "forced_tool_use", before the two choices (owner decision 2026-11-22).
+  const legacy = sonnet.link!;
+  assert.equal(legacy.capabilities.structuredOutput, "forced_tool_use");
+  assert.deepEqual(CODING_STRUCTURED_OUTPUT_VALUES, ["supported", "none"]);
+  const value = codingSettingsFrom(legacy);
+  assert.equal(value.structuredOutput, "supported");
+  // Opened and left alone: nothing is sent, so the row and its snapshot hash stay as they are.
+  assert.deepEqual(codingSettingsRequest(legacy, value), {});
+  // Saved with another change: the stored value is written as the shown choice.
+  assert.deepEqual(codingSettingsRequest(legacy, { ...value, channels: ["api"] }), { channels: ["api"], structuredOutput: "supported" });
+  assert.deepEqual(codingSettingsRequest(legacy, { ...value, structuredOutput: "none" }), { structuredOutput: "none" });
+  // A link already on a choice sends it only when it changes.
+  const current = { ...legacy, capabilities: { ...legacy.capabilities, structuredOutput: "supported" } };
+  assert.deepEqual(codingSettingsRequest(current, { ...codingSettingsFrom(current), channels: ["api"] }), { channels: ["api"] });
+  for (const stored of ["none", "supported", "json_mode", "strict_schema", "forced_tool_use", "response_schema"]) {
+    assert.equal(codingStructuredOutputShown(stored), stored === "none" ? "none" : "supported", stored);
+  }
+
+  const html = renderToStaticMarkup(
+    <CodingLinkDetail
+      c={c}
+      item={sonnet}
+      value={value}
+      busy={false}
+      reasonText={reason}
+      toolCallingLabel={(entry) => m.codingFlow.toolCalling[entry] ?? entry}
+      structuredOutputLabel={(entry) => m.codingFlow.structuredOutput[entry] ?? entry}
+      stepperLabel={m.stepperLabel}
+      stepStates={m.stepStates}
+      onBack={noop}
+      onChange={noop}
+      onReset={noop}
+      onSave={noop}
+      onActivate={noop}
+      onHold={noop}
+      onUnlink={noop}
+      fill={fillReady}
+    />
+  );
+  const select = html.match(/<select[^>]*data-testid="coding-link-structured"[^>]*>[\s\S]*?<\/select>/)?.[0] ?? "";
+  assert.deepEqual([...select.matchAll(/<option value="([^"]+)"[^>]*>([^<]+)</g)].map((match) => [match[1], match[2]]), [
+    ["supported", "지원"],
+    ["none", "지원 안 함"],
+  ]);
+  assert.match(select, /<option value="supported" selected="">/);
+  assert.doesNotMatch(select, /forced_tool_use|json_mode|strict_schema|response_schema/);
+  // The stored value is still the one the LLM drafted from the pages, so its origin chip stays.
+  assert.match(html, />LLM 초안</);
+});
+
 test("the settings request sends only what changed, and null puts an override back to chat", () => {
-  const link = sonnet.link!;
+  const link = { ...sonnet.link!, capabilities: { ...sonnet.link!.capabilities, structuredOutput: "supported" } };
   const value = codingSettingsFrom(link);
   assert.deepEqual(codingSettingsRequest(link, value), {});
   assert.deepEqual(codingSettingsRequest(link, { ...value, creditWeight: "", channels: ["api"] }), {

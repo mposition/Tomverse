@@ -16,7 +16,7 @@ import { codingLookups, loadChatModelFacts, loadCodingProviderTerms, resolveCodi
 import { CatalogRefusal, updateCatalogEntry } from "@/lib/modelCatalogAdmin";
 import {
   CODING_PLANS,
-  CODING_STRUCTURED_OUTPUT,
+  CODING_STRUCTURED_OUTPUT_CHOICES,
   CODING_TOOL_CALLING,
   canonicalJson,
   codingCandidateExclusion,
@@ -24,6 +24,7 @@ import {
   codingChannelsSchema,
   codingLinkedProfileSchema,
   codingStoredProfileSchema,
+  codingStructuredOutputChoice,
   defaultCodingCapabilitySources,
   isOfficialSourceUrl,
   registryCodingCapabilities,
@@ -220,7 +221,8 @@ export const linkAllChatModels = async (input: { session: Session; request?: Req
 export const codingSettingsSchema = z
   .object({
     toolCalling: z.enum(CODING_TOOL_CALLING).optional(),
-    structuredOutput: z.enum(CODING_STRUCTURED_OUTPUT).optional(),
+    /** A save writes one of the two choices; a link stored with a finer value keeps it until this is saved. */
+    structuredOutput: z.enum(CODING_STRUCTURED_OUTPUT_CHOICES).optional(),
     minimumPlan: z.enum(CODING_PLANS).nullable().optional(),
     creditWeight: z.number().int().positive().max(1_000).nullable().optional(),
     channels: codingChannelsSchema.optional(),
@@ -423,6 +425,8 @@ export const fillLinkCapabilities = async (input: {
   // The one cheap check on what the model answered: every page it stands on is the provider's own.
   const unofficial = draft.sources.find((url) => !isOfficialSourceUrl(facts.provider, url));
   if (unofficial || draft.sources.length === 0) throw new CatalogRefusal("unofficial_source", unofficial ? [unofficial] : [], 422);
+  // A save writes one of the two structured output choices, whatever the draft carries.
+  const structuredOutput = codingStructuredOutputChoice(draft.structuredOutput);
 
   return prisma.$transaction(async (tx) => {
     await takeAuditChainLock(tx);
@@ -432,12 +436,12 @@ export const fillLinkCapabilities = async (input: {
     if (!current.success || current.data.source !== "chat") throw new CatalogRefusal("settings_linked_only", [], 400);
     const next: CodingLinkedProfile = codingLinkedProfileSchema.parse({
       ...current.data,
-      capabilities: { toolCalling: draft.toolCalling, structuredOutput: draft.structuredOutput },
+      capabilities: { toolCalling: draft.toolCalling, structuredOutput },
       evidence: {
         sources: draft.sources.slice(0, 3),
         draftedAt: draft.draftedAt,
         toolCalling: draft.toolCalling,
-        structuredOutput: draft.structuredOutput,
+        structuredOutput,
         ...(draft.note ? { note: draft.note } : {}),
       },
     });
@@ -445,8 +449,8 @@ export const fillLinkCapabilities = async (input: {
     if (current.data.capabilities.toolCalling !== draft.toolCalling) {
       changes.push({ field: "toolCalling", from: current.data.capabilities.toolCalling, to: draft.toolCalling });
     }
-    if (current.data.capabilities.structuredOutput !== draft.structuredOutput) {
-      changes.push({ field: "structuredOutput", from: current.data.capabilities.structuredOutput, to: draft.structuredOutput });
+    if (current.data.capabilities.structuredOutput !== structuredOutput) {
+      changes.push({ field: "structuredOutput", from: current.data.capabilities.structuredOutput, to: structuredOutput });
     }
     const updated = await updateCatalogEntry({
       category: "coding",
@@ -467,7 +471,7 @@ export const fillLinkCapabilities = async (input: {
       metadata: {
         modelId: input.modelId,
         toolCalling: draft.toolCalling,
-        structuredOutput: draft.structuredOutput,
+        structuredOutput,
         sources: next.evidence?.sources ?? [],
         changes: changes as unknown as Prisma.InputJsonValue,
       },

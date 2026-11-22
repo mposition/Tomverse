@@ -169,7 +169,13 @@ test("an applied coding draft changes only the three operator fields, and names 
     { field: "name", from: "Claude Sonnet 5.5", to: "Sonnet" },
     { field: "creditWeight", from: 12, to: 20 },
   ]);
-  assert.deepEqual(applyCodingDraftEdits(profile, {}).profile, profile);
+  // Applying is a save: a draft stored with a finer structured output value
+  // (owner decision 2026-11-22) is written as "supported"; nothing else moves.
+  const supported = { ...profile, capabilities: { ...profile.capabilities, structuredOutput: "supported" } };
+  assert.deepEqual(applyCodingDraftEdits(profile, {}).profile, supported);
+  assert.deepEqual(applyCodingDraftEdits(supported, {}).profile, supported);
+  const none = { ...profile, capabilities: { ...profile.capabilities, structuredOutput: "none" } };
+  assert.deepEqual(applyCodingDraftEdits(none, {}).profile, none);
   // Prices and evidence are not editable through the apply request.
   assert.equal(codingDraftEditSchema.safeParse({ inputUsdPerMTok: 0.01 }).success, false);
   assert.equal(codingDraftEditSchema.safeParse({ creditWeight: 0 }).success, false);

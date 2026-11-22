@@ -59,31 +59,52 @@ const EXPOSABLE_USAGE_CLASSES = new Set<AiModel["usageClass"]>([
 ]);
 
 /**
- * Usage classes Smart Adaptive may route to but no client may name directly
- * (owner decision 2026-11-20): the coding guidance sends only the hardest
- * work to them (AUTO_LLM_ROUTER_CODING_GUIDANCE), each request is charged
- * that model's own credits, and the key's cap and the account's credits still
- * refuse what they do not cover.
+ * Usage classes Smart Adaptive may route to but no client may name directly on
+ * the general API (owner decision 2026-11-20): the coding guidance sends only
+ * the hardest work to them (AUTO_LLM_ROUTER_CODING_GUIDANCE), each request is
+ * charged that model's own credits, and the key's cap and the account's
+ * credits still refuse what they do not cover. On the coding catalogue (the
+ * coding API while CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED is on) a client
+ * may name them too (owner decision 2026-11-22), at the same credits.
  */
 const SMART_ADAPTIVE_ONLY_USAGE_CLASSES = new Set<AiModel["usageClass"]>(["frontier", "apex"]);
 
 /**
- * A model only Smart Adaptive routes to. Never a default: the model a request
- * takes when the router does not pick is chosen among the others.
+ * A model of a class only Smart Adaptive routes to on the general API. Never a
+ * Smart Adaptive default on either API: the model a request takes when the
+ * router does not pick is chosen among the others, and Smart Adaptive is not
+ * offered where there are none (smartAdaptiveCapabilities).
  */
-export const isSmartAdaptiveOnlyModel = (model: Pick<AiModel, "usageClass">) =>
-    SMART_ADAPTIVE_ONLY_USAGE_CLASSES.has(model.usageClass);
+export const isSmartAdaptiveOnlyModel = (model: { usageClass: string }) =>
+    (SMART_ADAPTIVE_ONLY_USAGE_CLASSES as ReadonlySet<string>).has(model.usageClass);
+
+/**
+ * The credits the chat registry holds for a model: a positive whole number,
+ * or none. A frontier or apex model is offered on the coding catalogue only
+ * with them, so a request is never charged a class default nobody set.
+ */
+export const hasRegistryCredits = (model: Pick<AiModel, "creditWeight">) =>
+    Number.isInteger(model.creditWeight) && (model.creditWeight ?? 0) > 0;
 
 export const isExternalApiServableModel = (
     model: AiModel,
     plan: ModelTier,
-    options: { smartAdaptive?: boolean } = {}
+    options: {
+        smartAdaptive?: boolean;
+        /**
+         * The coding catalogue serves this request: the classes only Smart
+         * Adaptive routes to elsewhere may be named too, and are offered only
+         * with their registry credits (owner decision 2026-11-22).
+         */
+        routerClassesNameable?: boolean;
+    } = {}
 ) =>
     model.enabled &&
     !model.catalogDeleted &&
     (model.status === "enabled" || model.status === "limited") &&
     (EXPOSABLE_USAGE_CLASSES.has(model.usageClass) ||
-        (options.smartAdaptive === true && SMART_ADAPTIVE_ONLY_USAGE_CLASSES.has(model.usageClass))) &&
+        (SMART_ADAPTIVE_ONLY_USAGE_CLASSES.has(model.usageClass) &&
+            (options.routerClassesNameable === true ? hasRegistryCredits(model) : options.smartAdaptive === true))) &&
     canUseModelWithPlan(plan, model);
 
 export type ExternalApiModelCapabilities = {
@@ -113,12 +134,19 @@ export type ExternalApiModelCapabilities = {
      * native protocol routes among its own provider's models only.
      */
     creditWeightByProtocol?: Partial<Record<ExternalApiProtocol, number>>;
+    /**
+     * A frontier or apex model (isSmartAdaptiveOnlyModel): Smart Adaptive takes
+     * it only as the router's pick, never as the model a request takes when the
+     * router does not pick, on either API. Absent on every other model.
+     */
+    routerPickOnly?: true;
 };
 
 export const externalApiModelCapabilities = (
     model: AiModel,
     limits: { maxInputTokens: number; maxOutputTokens: number; creditWeight: number }
 ): ExternalApiModelCapabilities => ({
+    ...(isSmartAdaptiveOnlyModel(model) ? { routerPickOnly: true as const } : {}),
     id: model.id,
     name: model.name,
     provider: model.provider,
@@ -143,9 +171,10 @@ export const externalApiModelCapabilities = (
  * picks, per request, which catalogue model answers. The id is stable while
  * the catalogue changes, which is why it is the default configuration.
  *
- * It is always offered while any model is. The paid router call that makes
- * the pick is behind EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED (default off);
- * without it every request goes to the default model.
+ * It is offered while any model it may default to is (one that is not
+ * frontier or apex). The paid router call that makes the pick is behind
+ * EXTERNAL_API_SMART_ADAPTIVE_ROUTER_ENABLED (default off); without it every
+ * request goes to the default model.
  */
 export const SMART_ADAPTIVE_MODEL_ID = "smart-adaptive";
 
@@ -162,56 +191,65 @@ export const smartAdaptiveRouterEnabled = (env: ExternalApiEnv) =>
  * the input). A candidate that cannot give it is only left out of requests
  * that ask for that much. Without the default model, the smallest. Credits are
  * the most a request can cost.
+ *
+ * A frontier or apex model is only ever the router's pick (routerPickOnly), so
+ * Smart Adaptive is offered on a protocol only while a model of another class
+ * speaks it there: without one a request would have nothing to take when the
+ * router does not pick. With none at all it is not offered (null).
  */
 export const smartAdaptiveCapabilities = (
     candidates: readonly ExternalApiModelCapabilities[],
     defaultModelId?: string
-): ExternalApiModelCapabilities | null =>
-    candidates.length === 0
-        ? null
-        : {
-              id: SMART_ADAPTIVE_MODEL_ID,
-              name: "Smart Adaptive",
-              provider: "tomverse",
-              tools: true,
-              vision: candidates.some((candidate) => candidate.vision),
-              reasoning: false,
-              reasoningEfforts: Array.from(new Set(candidates.flatMap(candidate => candidate.reasoningEfforts ?? []))),
-              contextWindowTokens: Math.max(...candidates.map((candidate) => candidate.contextWindowTokens)),
-              maxOutputTokens:
-                  candidates.find((candidate) => candidate.id === defaultModelId)?.maxOutputTokens ??
-                  Math.min(...candidates.map((candidate) => candidate.maxOutputTokens)),
-              creditWeight: Math.max(...candidates.map((candidate) => candidate.creditWeight)),
-              // Every protocol a candidate speaks. Chat Completions routes over
-              // all of them; a native protocol only over its own provider's
-              // models (lib/externalApiNativeSmartAdaptive.ts), so signed or
-              // encrypted state never crosses providers.
-              protocols: EXTERNAL_API_PROTOCOLS.filter((protocol) =>
-                  candidates.some((candidate) => (candidate.protocols ?? ["chat_completions"]).includes(protocol))
-              ),
-              creditWeightByProtocol: Object.fromEntries(
-                  EXTERNAL_API_PROTOCOLS.flatMap((protocol) => {
-                      const weights = candidates
-                          .filter((candidate) => (candidate.protocols ?? ["chat_completions"]).includes(protocol))
-                          .map((candidate) => candidate.creditWeight);
-                      return weights.length ? [[protocol, Math.max(...weights)]] : [];
-                  })
-              ),
-          };
+): ExternalApiModelCapabilities | null => {
+    const defaults = candidates.filter((candidate) => !candidate.routerPickOnly);
+    if (defaults.length === 0) return null;
+    const speaks = (candidate: ExternalApiModelCapabilities, protocol: ExternalApiProtocol) =>
+        (candidate.protocols ?? ["chat_completions"]).includes(protocol);
+    // Chat Completions routes over every candidate; a native protocol only over
+    // its own provider's models (lib/externalApiNativeSmartAdaptive.ts), so
+    // signed or encrypted state never crosses providers.
+    const protocols = EXTERNAL_API_PROTOCOLS.filter((protocol) => defaults.some((candidate) => speaks(candidate, protocol)));
+    return {
+        id: SMART_ADAPTIVE_MODEL_ID,
+        name: "Smart Adaptive",
+        provider: "tomverse",
+        tools: true,
+        vision: candidates.some((candidate) => candidate.vision),
+        reasoning: false,
+        reasoningEfforts: Array.from(new Set(candidates.flatMap((candidate) => candidate.reasoningEfforts ?? []))),
+        contextWindowTokens: Math.max(...candidates.map((candidate) => candidate.contextWindowTokens)),
+        maxOutputTokens:
+            defaults.find((candidate) => candidate.id === defaultModelId)?.maxOutputTokens ??
+            Math.min(...candidates.map((candidate) => candidate.maxOutputTokens)),
+        creditWeight: Math.max(...candidates.map((candidate) => candidate.creditWeight)),
+        protocols,
+        // The most a request costs on each protocol offered, the router's
+        // frontier and apex picks included.
+        creditWeightByProtocol: Object.fromEntries(
+            protocols.map((protocol) => [
+                protocol,
+                Math.max(...candidates.filter((candidate) => speaks(candidate, protocol)).map((candidate) => candidate.creditWeight)),
+            ])
+        ),
+    };
+};
 
 /**
  * The model a native Smart Adaptive request takes when the router does not
  * pick (switch off, no answer, a conversation already under way): the
  * catalogue default when this provider has it, otherwise the lower-median
  * model by credits -- the middle of the line-up, not its cheapest or dearest.
+ * Never a frontier or apex model (routerPickOnly); null when only those are
+ * left.
  */
 export const nativeSmartAdaptiveDefaultId = (
-    candidates: readonly Pick<ExternalApiModelCapabilities, "id" | "creditWeight">[],
+    candidates: readonly Pick<ExternalApiModelCapabilities, "id" | "creditWeight" | "routerPickOnly">[],
     defaultModelId?: string
 ): string | null => {
-    if (candidates.length === 0) return null;
-    if (defaultModelId && candidates.some((candidate) => candidate.id === defaultModelId)) return defaultModelId;
-    const sorted = [...candidates].sort((a, b) => a.creditWeight - b.creditWeight || a.id.localeCompare(b.id));
+    const defaults = candidates.filter((candidate) => !candidate.routerPickOnly);
+    if (defaults.length === 0) return null;
+    if (defaultModelId && defaults.some((candidate) => candidate.id === defaultModelId)) return defaultModelId;
+    const sorted = [...defaults].sort((a, b) => a.creditWeight - b.creditWeight || a.id.localeCompare(b.id));
     return sorted[Math.floor((sorted.length - 1) / 2)].id;
 };
 
