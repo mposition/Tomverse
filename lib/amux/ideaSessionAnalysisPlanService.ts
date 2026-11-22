@@ -226,14 +226,17 @@ export async function commitAmuxSessionAnalysisPlanInTx(tx: Tx, input: {
   const claim = idea.currentSourcePlanRevisionId !== null ? null :
     await tx.amuxIdeaSessionAnalysisBudgetClaim.findUnique({
       where: { id: input.claimId }, select: { createdAt: true } });
-  const claimNodes = claim ? await readAmuxActiveNodeTargetsInTx(tx,
-    { createdAtOrBefore: claim.createdAt }) : null;
+  // The page checks, stores and hands on one list: that set, each node with
+  // its title from the list read before the transaction when it has one.
+  const titled = new Map((input.existingNodes ?? []).map((node) => [node.ref, node]));
+  const claimNodes = claim ? (await readAmuxActiveNodeTargetsInTx(tx,
+    { createdAtOrBefore: claim.createdAt })).map((node) => titled.get(node.ref) ?? node) : null;
   let context: AmuxSessionPageContext;
   try {
     context = await readAmuxSessionPageContextInTx(tx, { ideaId: idea.id,
       actorUserId: idea.actorUserId, planId: idea.currentSourcePlanRevisionId,
       now, keys: input.keys,
-      existingNodes: input.existingNodes ?? claimNodes ?? [] });
+      existingNodes: claimNodes ?? input.existingNodes ?? [] });
   } catch (error) {
     if (error instanceof AmuxSessionAnalysisPlanError &&
         error.code === "continuation_unavailable") {
@@ -246,7 +249,7 @@ export async function commitAmuxSessionAnalysisPlanInTx(tx: Tx, input: {
     raw: input.rawModelOutput, keys: input.keys, unitIds: input.unitIds,
     chunkIndex: context.chunkIndex, revisionChunkIndex: context.chunkIndex,
     permittedSourceRefIds: ["operator_idea"],
-    permittedTargetRefs: claimNodes ?? context.permittedTargetRefs,
+    permittedTargetRefs: context.permittedTargetRefs,
     sourceUnitCount: 1, coveredStartOrdinal: 0, coveredEndOrdinal: 0,
     history: context.history, templateVersion: AMUX_V4_ANALYSIS_PROMPT_VERSION,
     sessionPage: true });
@@ -255,7 +258,7 @@ export async function commitAmuxSessionAnalysisPlanInTx(tx: Tx, input: {
       claimId: input.claimId, chunkIndex: context.chunkIndex, now,
       reason: amuxSessionPageRefusalDetail(input.rawModelOutput, { previewId,
         chunkIndex: context.chunkIndex,
-        permittedTargetRefs: claimNodes ?? context.permittedTargetRefs,
+        permittedTargetRefs: context.permittedTargetRefs,
         history: context.history }) });
     return { state: "plan_refused", reason: "invalid_result" };
   }
