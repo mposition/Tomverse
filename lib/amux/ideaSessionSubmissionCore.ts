@@ -1,4 +1,5 @@
 import { isAmuxIdeaAnalysisProvider } from "./ideaAnalysisChannelCore.ts";
+import type { AmuxPermittedTargetRef } from "./ideaAnalysisChunkCore.ts";
 import { inspectAmuxAnalysisContinuation } from "./ideaAnalysisContinuationCore.ts";
 import { AMUX_V4_ANALYSIS_PROMPT_VERSION } from "./ideaAnalysisPromptCore.ts";
 import type { AmuxIdeaModelSelection } from "./ideaFrontierSelectionCore.ts";
@@ -35,6 +36,9 @@ export type AmuxIdeaSessionPlan = {
   raw: string;
   /** Every unit the plan holds, evidence included: one storage key each. */
   unitCount: number;
+  /** The existing nodes the plan was checked against (owner decision
+   * 2026-11-22). The plan writer checks it again against the same list. */
+  existingNodes: readonly AmuxPermittedTargetRef[];
 };
 
 export type AmuxIdeaSessionSubmissionInspection =
@@ -169,8 +173,9 @@ export function inspectSealedAmuxIdeaSessionInput(value: unknown): AmuxIdeaSessi
 
 /** The page a session-written plan is checked as: the first page of a session
  * analysis, which is exactly the context the plan writer gives it (one
- * operator idea, no history, no inherited references). */
-const SESSION_PLAN_PAGE = { chunkIndex: 0, permittedTargetRefs: [], history: [] } as const;
+ * operator idea, no history, and the existing hierarchy as its only
+ * references). */
+const SESSION_PLAN_PAGE = { chunkIndex: 0, history: [] } as const;
 
 export type AmuxIdeaSessionPlanInspection =
   | { ok: true; plan: AmuxIdeaSessionPlan }
@@ -200,7 +205,10 @@ const planStrings = (value: unknown, found: string[] = []): string[] => {
  * the derived header; the verdict does not depend on it.
  */
 export function inspectAmuxIdeaSessionPlan(value: unknown,
-  previewId: string): AmuxIdeaSessionPlanInspection {
+  previewId: string,
+  /** The existing hierarchy (owner decision 2026-11-22). A ref to a node not
+   * in it is refused as target_ref_unapproved. */
+  existingNodes: readonly AmuxPermittedTargetRef[] = []): AmuxIdeaSessionPlanInspection {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return { ok: false, code: "plan_rejected", reason: "schema" };
   }
@@ -221,11 +229,11 @@ export function inspectAmuxIdeaSessionPlan(value: unknown,
     return { ok: false, code: "plan_rejected", reason: "question" };
   }
   const raw = JSON.stringify(value);
-  const page = { ...SESSION_PLAN_PAGE, previewId };
+  const page = { ...SESSION_PLAN_PAGE, previewId, permittedTargetRefs: existingNodes };
   const inspected = inspectAmuxAnalysisContinuation({
     raw, expectedPreviewId: previewId, expectedChunkIndex: 0,
     expectedRevisionChunkIndex: 0, permittedSourceRefIds: ["operator_idea"],
-    permittedTargetRefs: [], sourceUnitCount: 1, coveredStartOrdinal: 0,
+    permittedTargetRefs: existingNodes, sourceUnitCount: 1, coveredStartOrdinal: 0,
     coveredEndOrdinal: 0, history: [], templateVersion: AMUX_V4_ANALYSIS_PROMPT_VERSION,
     sessionPage: true,
   });
@@ -241,10 +249,11 @@ export function inspectAmuxIdeaSessionPlan(value: unknown,
   if (inspected.cursor.nextCursor !== null) {
     return { ok: false, code: "plan_rejected", reason: "continues" };
   }
-  return { ok: true, plan: { raw, unitCount: chunk.units.length } };
+  return { ok: true, plan: { raw, unitCount: chunk.units.length, existingNodes } };
 }
 
-export function inspectAmuxIdeaSessionSubmission(value: unknown): AmuxIdeaSessionSubmissionInspection {
+export function inspectAmuxIdeaSessionSubmission(value: unknown,
+  existingNodes: readonly AmuxPermittedTargetRef[] = []): AmuxIdeaSessionSubmissionInspection {
   const keys = ["version", "requestId", "input", "source"];
   if (!value || typeof value !== "object" || Array.isArray(value) ||
       !exactKeys(value as Record<string, unknown>,
@@ -263,7 +272,7 @@ export function inspectAmuxIdeaSessionSubmission(value: unknown): AmuxIdeaSessio
   if (!Object.hasOwn(record, "plan")) {
     return { ...inspected, requestId: record.requestId, source: source.source };
   }
-  const plan = inspectAmuxIdeaSessionPlan(record.plan, record.requestId);
+  const plan = inspectAmuxIdeaSessionPlan(record.plan, record.requestId, existingNodes);
   if (!plan.ok) return { ok: false, code: plan.code };
   return { ...inspected, requestId: record.requestId, source: source.source, plan: plan.plan };
 }

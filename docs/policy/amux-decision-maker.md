@@ -325,6 +325,9 @@ DM은 **제안을 쓰는 worker이지 승인자가 아니다.** (되돌릴 수 �
     실행 결과, 검토 서버 거절 횟수, 같은 부모의 형제 카드와 이 카드에 의존하는지)로 만든다. 검토 PR이면 PR 번호와 파일 목록
     전체를 싣는다. 실행 결과, 검토 서버 거절의 findings, patch는 작업 공간의 `evidence/FINDINGS.md`·`evidence/PATCH.diff`로
     통째로 간다(운영자 결정 2026-11-15, §0b. 그 전의 2,000자 질문·4,000자 context 한도와 "들어가는 만큼의 diff"는 없앴다).
+    검토 PR이 아닌 카드 실행의 정산과 결과 검토는 그 실행이 남긴 patch(`AmuxV22TaskPatch`)를 `PATCH.diff`로, 그 base
+    commit을 `repo/`로 싣는다(2026-11-22. 그 전에는 거절 findings만 가고 그 대상인 변경은 가지 않아 DM이 판단하지 못했다).
+    patch를 열 수 없으면 그 파일만 빠지고 요청은 그대로 간다.
     findings는 앱이 attempt별 sealed content unit(`AmuxV52ReviewFindings`, `docs/policy/development-agent-orchestration.md`
     v52)으로 저장한 것을 근거 route가 보낼 때마다 다시 열어, `FINDINGS.md`의 실행 결과 뒤에 그 Task의 모든 reject를 새것부터
     통째로 붙인다(멈춘 Task와 검토 PR 모두. reject 수 상한도, 잘라내기도 없다). 읽을 수 없는 reject(보존 기간 만료, 키 저장소

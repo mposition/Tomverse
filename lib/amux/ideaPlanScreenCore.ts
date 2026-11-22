@@ -131,3 +131,33 @@ export function buildAmuxV4PlanRequest(input: {
     assessments, scoreTaskUnitIds, expectedUnitIds: units.map((unit) => unit.unitId),
   };
 }
+
+/** An existing registered node as the plan screen names it. */
+export type AmuxV4PlanExistingNode = {
+  ref: string; level: "initiative" | "epic" | "feature";
+  title: string; displayPrefix: string | null;
+};
+
+const EXISTING_NODE_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
+
+/**
+ * What a listed unit attaches to (owner decision 2026-11-22): every listed
+ * unit is new, and its parent (a node's parentRef, a card's featureRef) is
+ * either another unit of this plan or an existing registered node, named by
+ * its id. An existing node the screen could not read has a null title.
+ */
+export function amuxV4PlanUnitAttachment(unit: AmuxV4PlanScreenUnit,
+  existing: ReadonlyMap<string, AmuxV4PlanExistingNode>): null | {
+    level: AmuxV4PlanExistingNode["level"]; title: string | null; displayPrefix: string | null;
+  } {
+  const ref = unit.kind === "story" || unit.kind === "task" ? unit.featureRef : unit.parentRef;
+  if (ref === null || !EXISTING_NODE_ID.test(ref)) return null;
+  const node = existing.get(ref);
+  const level = unit.kind === "story" || unit.kind === "task" ? "feature"
+    : unit.kind === "feature" ? "epic" : "initiative";
+  return { level, title: node?.title ?? null, displayPrefix: node?.displayPrefix ?? null };
+}
+
+/** True when some listed unit names an existing node. */
+export const amuxV4PlanNamesExistingNode = (units: readonly AmuxV4PlanScreenUnit[]) =>
+  units.some((unit) => amuxV4PlanUnitAttachment(unit, new Map()) !== null);

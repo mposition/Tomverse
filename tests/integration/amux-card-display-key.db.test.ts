@@ -352,9 +352,17 @@ test("a new Feature takes its proposal or the first free numbered variant, and i
     assert.equal(await chooseAmuxFeatureDisplayPrefix(tx, proposed), `${proposed}2`);
     await addNode("feature", epic, `${proposed}2`);
     assert.equal(await chooseAmuxFeatureDisplayPrefix(tx, proposed), `${proposed}3`);
+    // Owner decision 2026-11-22: with no usable proposal a Feature still gets
+    // a prefix at registration, the title's when it suggests one, else FEAT<n>.
+    const held = await tx.$queryRaw<Array<{ displayPrefix: string }>>`
+      SELECT "displayPrefix" FROM "AmuxPortfolioNode" WHERE "displayPrefix" ~ '^FEAT[0-9]+$'`;
+    const firstFree = Array.from({ length: held.length + 1 }, (_, index) => `FEAT${index + 1}`)
+      .find((candidate) => !held.some((row) => row.displayPrefix === candidate));
     for (const invalid of [undefined, "lower", "ENG"]) {
-      assert.equal(await chooseAmuxFeatureDisplayPrefix(tx, invalid), null);
+      assert.equal(await chooseAmuxFeatureDisplayPrefix(tx, invalid), firstFree);
     }
+    assert.match(await chooseAmuxFeatureDisplayPrefix(tx, undefined, "Pricing scope") ?? "",
+      /^PRICING\d*$/);
 
     assert.equal(await allocateAmuxCardDisplayKey(tx, proposed), `AMUX-${proposed}-001`);
     assert.equal(await allocateAmuxCardDisplayKey(tx, proposed), `AMUX-${proposed}-002`);

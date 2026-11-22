@@ -26,6 +26,9 @@ import { commitAmuxIdeaAnalysisPriceApproval,
   commitAmuxIdeaAnalysisPriceRevocation } from
   "@/lib/amux/ideaAnalysisPriceVersionWrite";
 import { closeAmuxIdeasForOwner } from "@/lib/amux/ideaOwnerCloseService";
+import { archiveAmuxHierarchyNodes } from "@/lib/amux/adminHierarchyArchiveService";
+import { AMUX_HIERARCHY_ARCHIVE_SWITCH } from "@/lib/amux/adminHierarchyCore";
+import { previewAmuxPortfolioNodeEdit, saveAmuxPortfolioNodeEdit } from "@/lib/amux/portfolioNodeEditService";
 import { parkAmuxSessionIdeaInTx } from "@/lib/amux/ideaSessionPlanRefusalService";
 import { AMUX_IDEA_OWNER_CLOSE_ACTION } from "@/lib/amux/ideaOwnerCloseCore";
 import { readAmuxIdeaProgressForOwner, readAmuxIdeaProgressInTx } from "@/lib/amux/ideaProgressRead";
@@ -55,6 +58,7 @@ import { AmuxIdeaSessionSubmissionError,
   commitAmuxIdeaSessionSubmission as commitPinnedSessionSubmission,
   readAmuxIdeaSessionSubmissionRequest, submitAmuxIdeaFromSession } from
   "@/lib/amux/ideaSessionSubmissionService";
+import { loadAmuxExistingHierarchyTargets } from "@/lib/amux/ideaNodeDuplicateScanService";
 import { AmuxV19SystemRegistrationError,
   commitAmuxV19CompletedIdeaSystemRegistrationForTest,
   readAmuxV19SystemRegistration, registerAttachedSessionPlanFromSystem } from
@@ -837,7 +841,7 @@ test("a session plan continues on its next page and registers once complete", as
       select: { actorUserId: true, currentSourcePlanRevisionId: true } });
     return readAmuxSessionPageContextInTx(tx, { ideaId: idea.ideaId,
       actorUserId: row.actorUserId, planId: row.currentSourcePlanRevisionId,
-      now: new Date(), keys });
+      now: new Date(), keys, existingNodes: [] });
   });
   assert.equal(context.chunkIndex, 1);
   assert.equal(context.continuation?.remainingScope,
@@ -884,7 +888,7 @@ test("a mislabelled remainder continues, and an empty last page closes and regis
       select: { actorUserId: true, currentSourcePlanRevisionId: true } });
     return readAmuxSessionPageContextInTx(tx, { ideaId: idea.ideaId,
       actorUserId: row.actorUserId, planId: row.currentSourcePlanRevisionId,
-      now: new Date(), keys });
+      now: new Date(), keys, existingNodes: [] });
   });
   assert.equal(context.continuation?.previousContinuationKind, "output");
   assert.equal(context.continuation?.remainingScope, "A last check may remain.");
@@ -1553,13 +1557,159 @@ test("with its switch on, an attached plan registers through the system registra
   }
 });
 
+// Owner decision 2026-11-22: two ideas that split one goal are merged by
+// moving one's Feature under the other's Epic, then archiving the emptied
+// Epic and Initiative. The moved Feature's Tasks keep a valid approved path.
+test("a registered Feature moves under another idea's Epic and its Task path stays valid", async () => {
+  await approveSyntheticTaskCatalog();
+  process.env[AMUX_SESSION_PLAN_AUTO_REGISTER_ENV] = "enabled";
+  process.env[AMUX_HIERARCHY_ARCHIVE_SWITCH] = "1";
+  try {
+    const register = async (tag: string) => {
+      const fixture = amuxSessionPlanFixture();
+      const plan = { ...fixture, units: fixture.units.map((unit: Record<string, unknown>) =>
+        ({ ...unit, title: `${unit.title as string} ${tag}`,
+          ...(unit.level === "feature" ? { displayPrefix: `MV${tag}` } : {}) })) };
+      const committed = await submitAmuxIdeaFromSession({ inspected: inspectSessionPlanIntake(plan) });
+      assert.deepEqual(committed.plan?.registration, { state: "registered" });
+      const decisions = await prisma.amuxIdeaUnitDecision.findMany({ where: {
+        ideaId: committed.ideaId, state: "consumed" },
+      select: { action: true, resolvedNodeId: true, registeredWorkItemId: true } });
+      const nodes = await prisma.amuxPortfolioNode.findMany({ where: { id: { in: decisions
+        .flatMap((row) => row.action === "create_node" && row.resolvedNodeId ? [row.resolvedNodeId] : []) } },
+      select: { id: true, level: true } });
+      const of = (level: string) => nodes.find((node) => node.level === level)!.id;
+      const task = decisions.find((row) => row.registeredWorkItemId)!.registeredWorkItemId!;
+      return { initiative: of("initiative"), epic: of("epic"), feature: of("feature"), task };
+    };
+    const tag = String(Date.now()).slice(-6);
+    const a = await register(`A${tag}`);
+    const b = await register(`B${tag}`);
+    const keys = loadCurrentAmuxContentKeys(process.env);
+    const latest = await prisma.amuxPortfolioAssessment.findFirstOrThrow({
+      where: { nodeId: b.feature }, orderBy: { assessmentVersion: "desc" },
+      select: { id: true } });
+    const payload = { id: randomUUID(), requestId: randomUUID(), nodeId: b.feature,
+      expectedRevision: 0, expectedAssessmentId: latest.id, content: null,
+      parentId: a.epic, value: 2, uncertainty: "medium" as const,
+      reasonCode: "operator_override" as const,
+      evidenceAsOf: new Date(Date.now() - 60_000).toISOString() };
+    const preview = await previewAmuxPortfolioNodeEdit(session, payload, keys);
+    assert.equal(preview.parentChanged, true);
+    assert.equal(preview.tasks.length, 1);
+    assert.equal(typeof preview.tasks[0]!.projectedScore, "number");
+    const saved = await saveAmuxPortfolioNodeEdit({ session, request, payload,
+      confirmationDigest: preview.confirmationDigest, digestKey: keys });
+    assert.equal(saved.moved, true);
+    assert.deepEqual(saved.tasks.map((task) => task.state), ["scored"]);
+    // A move to an archived parent is refused before anything is written.
+    await archiveAmuxHierarchyNodes({ session, request, nodeIds: [b.epic, b.initiative] });
+    const archived = await prisma.amuxPortfolioNode.findMany({
+      where: { id: { in: [b.epic, b.initiative] } }, select: { state: true } });
+    assert.deepEqual(archived.map((row) => row.state), ["archived", "archived"]);
+    const moved = await prisma.amuxPortfolioNode.findUniqueOrThrow({ where: { id: b.feature },
+      select: { revision: true } });
+    const after = await prisma.amuxPortfolioAssessment.findFirstOrThrow({
+      where: { nodeId: b.feature }, orderBy: { assessmentVersion: "desc" }, select: { id: true } });
+    await assert.rejects(previewAmuxPortfolioNodeEdit(session, { ...payload, id: randomUUID(),
+      requestId: randomUUID(), expectedRevision: moved.revision, expectedAssessmentId: after.id,
+      parentId: b.epic }, keys), { code: "invalid_input" });
+    // The Task under the moved Feature still reads its approved path.
+    const context = await loadAmuxV4TaskReadyContext(b.task);
+    const ready = await inRolledBackTx((tx) => evaluateAmuxV4TaskReadyInTransaction(
+      tx, b.task, context, null));
+    assert.equal(ready.reasons.includes("parent_path_changed"), false,
+      JSON.stringify(ready.reasons));
+  } finally {
+    delete process.env[AMUX_SESSION_PLAN_AUTO_REGISTER_ENV];
+    delete process.env[AMUX_HIERARCHY_ARCHIVE_SWITCH];
+  }
+});
+
+// Owner decision 2026-11-22: a later idea that serves the same goal attaches
+// to the hierarchy an earlier one registered, instead of a second Initiative.
+test("a plan attached to existing nodes registers under them and creates only its new nodes", async () => {
+  await approveSyntheticTaskCatalog();
+  process.env[AMUX_SESSION_PLAN_AUTO_REGISTER_ENV] = "enabled";
+  try {
+    // Titles of their own: the exact-title duplicate scan would hold a repeat.
+    const tag = randomUUID().slice(0, 8);
+    const fixturePlan = amuxSessionPlanFixture();
+    const firstPlan = { ...fixturePlan, units: fixturePlan.units.map((unit: Record<string, unknown>) =>
+      ({ ...unit, title: `${unit.title as string} ${tag}`,
+        ...(unit.level === "feature" ? { displayPrefix: `REUSE${tag.replace(/[^0-9]/g, "").slice(0, 4)}` } : {}) })) };
+    const first = await submitAmuxIdeaFromSession({ inspected: inspectSessionPlanIntake(firstPlan) });
+    assert.deepEqual(first.plan?.registration, { state: "registered" });
+    const created = await prisma.amuxIdeaUnitDecision.findMany({ where: { ideaId: first.ideaId,
+      action: "create_node", state: "consumed" }, select: { resolvedNodeId: true } });
+    const firstNodes = await prisma.amuxPortfolioNode.findMany({ where: {
+      id: { in: created.map((row) => row.resolvedNodeId!) } },
+    select: { id: true, level: true, parentId: true } });
+    const epic = firstNodes.find((node) => node.level === "epic")!;
+    const feature = firstNodes.find((node) => node.level === "feature")!;
+
+    // The existing hierarchy the prompt and the plan check are given.
+    const existing = await loadAmuxExistingHierarchyTargets();
+    assert.ok(existing.some((node) => node.ref === feature.id && node.level === "feature" &&
+      node.title === `Dark mode toggle ${tag}` && node.parentRef === epic.id));
+
+    const fixture = amuxSessionPlanFixture();
+    const task = fixture.units[3] as Record<string, unknown>;
+    const plan = amuxSessionPlanFixture({ coveredScope: "Contrast and a new scope.", units: [
+      // A new Feature under the existing Epic, with no prefix proposed.
+      { kind: "node", localId: "c0:node-0", level: "feature", parentRef: epic.id,
+        title: `Contrast settings ${tag}`, description: "High contrast option.",
+        sourceRefIds: ["operator_idea"], portfolioSignal: fixture.units[2]!.portfolioSignal },
+      { ...task, localId: "c0:card-0", title: `Add the contrast option ${tag}`, featureRef: "c0:node-0" },
+      // A Task on the existing Feature.
+      { ...task, localId: "c0:card-1", title: `Remember the toggle ${tag}`, featureRef: feature.id },
+    ] });
+    // Without the hierarchy the plan cannot be checked; with it, it passes.
+    assert.throws(() => inspectSessionPlanIntake(plan), /plan_rejected/);
+    const requestId = randomUUID();
+    const inspected = inspectAmuxIdeaSessionSubmission({ version: 1, requestId,
+      input: { version: 1, idea: `Dark mode follow-up ${requestId}`, repositories: [],
+        pullRequests: [] },
+      source: { toolName: "Codex", modelProvider: "OpenAI", sessionDisplay: "reuse DB test" },
+      plan }, existing);
+    assert.equal(inspected.ok, true);
+    if (!inspected.ok) return;
+    const second = await submitAmuxIdeaFromSession({ inspected });
+    assert.deepEqual(second.plan?.registration, { state: "registered" });
+
+    const decisions = await prisma.amuxIdeaUnitDecision.findMany({ where: { ideaId: second.ideaId,
+      state: "consumed" }, select: { action: true, resolvedNodeId: true, registeredWorkItemId: true } });
+    const newNodes = decisions.filter((row) => row.action === "create_node");
+    assert.equal(newNodes.length, 1, "only the new Feature is created");
+    const newFeature = await prisma.amuxPortfolioNode.findUniqueOrThrow({
+      where: { id: newNodes[0]!.resolvedNodeId! },
+      select: { level: true, parentId: true, displayPrefix: true } });
+    assert.equal(newFeature.level, "feature");
+    assert.equal(newFeature.parentId, epic.id, "the new Feature sits under the existing Epic");
+    // No prefix was proposed: the title's prefix is taken at registration.
+    assert.match(newFeature.displayPrefix ?? "", /^CONTRAST\d*$/);
+    const cards = await prisma.amuxWorkItem.findMany({ where: { id: { in: decisions
+      .flatMap((row) => row.registeredWorkItemId ? [row.registeredWorkItemId] : []) } },
+    select: { parentFeatureNodeId: true, displayKey: true } });
+    assert.equal(cards.length, 2);
+    assert.deepEqual(cards.map((card) => card.parentFeatureNodeId).sort(),
+      [newNodes[0]!.resolvedNodeId!, feature.id].sort());
+    assert.ok(cards.every((card) => card.displayKey !== null), "every card is numbered");
+    // Registration re-read the stored first page, existing references included.
+    assert.equal(await prisma.amuxIdeaDraftUnit.count({ where: { ideaId: second.ideaId,
+      state: "proposed" } }), 0);
+  } finally {
+    delete process.env[AMUX_SESSION_PLAN_AUTO_REGISTER_ENV];
+  }
+});
+
 test("a plan the writer refuses rolls the whole intake back", async () => {
   const inspected = inspectSessionPlanIntake(amuxSessionPlanFixture());
   // A plan that bypassed the route's check: the same writer refuses it inside
   // the transaction, and the idea and its queue receipt are not written.
   const forged = { ...inspected, plan: { raw: JSON.stringify({ outcome: "propose",
     coverageStatus: "complete", coveredScope: "Nothing.", units: [{ kind: "card" }] }),
-  unitCount: 1 } };
+  unitCount: 1, existingNodes: [] } };
   await assert.rejects(submitAmuxIdeaFromSession({ inspected: forged }),
     (error) => error instanceof AmuxIdeaSessionSubmissionError && error.code === "plan_rejected");
   assert.equal(await prisma.amuxIdeaSubmission.count({

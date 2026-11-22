@@ -17,6 +17,7 @@ import {
   isolateInstructionFiles,
   removeWorktree,
   SHA,
+  writeReviewDiff,
 } from "./git.mjs";
 import { antigravityAnswer, antigravityStdin } from "./antigravity.mjs";
 import { buildPrompt } from "./prompt.mjs";
@@ -232,7 +233,9 @@ export const promptForProvider = (provider, prompt) =>
  * vendor could not answer; the second is a local fault of this host. Both go
  * back to the queue.
  */
-const VENDOR_FAILURES = /^(timeout|output_too_large|reviewer_spawn_failed|reviewer_exit_.+)$/;
+// `reviewer_could_not_review`: the reviewer said it could not read the change
+// (verdict "unknown"), which says nothing about the change either.
+const VENDOR_FAILURES = /^(timeout|output_too_large|reviewer_spawn_failed|reviewer_exit_.+|reviewer_could_not_review)$/;
 const LOCAL_FAILURES = new Set(["worktree_failed", "prompt_file_failed"]);
 
 const RETRY_BASE_MS = 60_000;
@@ -480,7 +483,8 @@ export class Orchestrator {
           const instructions = instructionDiff(repo.mirror, job.base, job.head, allFiles);
           const from = job.focus ?? job.base;
           const files = job.focus ? changedFiles(repo.mirror, from, job.head) : allFiles;
-          return { files, instructions };
+          const diffFile = writeReviewDiff(repo.mirror, workdir, from, job.head);
+          return { files, instructions, diffFile };
         });
       } catch (error) {
         this.finish(job, slot, { verdict: "unknown", reason: "worktree_failed", findings: [] });
@@ -488,7 +492,7 @@ export class Orchestrator {
         return;
       }
       // The instruction-file diff is shown whole in the prompt (the checkout
-      // holds their base version); the rest of the diff is read from the checkout.
+      // holds their base version); the whole diff is a file in the checkout.
       const prompt = buildPrompt({ job, ...prepared });
       const outcome = await this.spawnReviewer(job, slot, provider, workdir, prompt);
       this.finish(job, slot, outcome);

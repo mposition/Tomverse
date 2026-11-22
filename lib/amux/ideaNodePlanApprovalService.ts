@@ -24,6 +24,7 @@ import { AmuxV4NodePlanError, amuxV4NodePlanRound,
 export { AmuxV4NodePlanError } from "./ideaNodePlanCore.ts";
 
 const ID = /^[A-Za-z0-9_-]{8,80}$/;
+const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 /**
  * Plan approval, node part (amux-intake.md v18 item 3): every proposed node
  * unit of an idea (Initiative, Epic, Feature) is prepared and consumed in ONE
@@ -108,6 +109,22 @@ export async function prepareAmuxV4NodePlan(session: Session, request: Request,
     });
     const nodeId = decision?.resolvedNodeId ?? decision?.linkedNodeId ?? null;
     if (unit.localRef && nodeId) existing.set(unit.localRef, nodeId);
+  }
+  // A parent that is an existing active node of the level above, named by its
+  // id (owner decision 2026-11-22), as the system registration accepts it.
+  const externalParentRefs = [...new Set(verified.map((entry) => entry.proposal.parentRef)
+    .filter((ref): ref is string => ref !== null && UUID.test(ref)))];
+  const externalParents = externalParentRefs.length === 0 ? [] :
+    await prisma.amuxPortfolioNode.findMany({ where: { id: { in: externalParentRefs },
+      state: "active", archivedAt: null }, select: { id: true, level: true } });
+  const externalLevel = new Map(externalParents.map((node) => [node.id, node.level]));
+  for (const entry of verified) {
+    const ref = entry.proposal.parentRef;
+    const required = entry.proposal.level === "epic" ? "initiative" :
+      entry.proposal.level === "feature" ? "epic" : null;
+    if (ref && UUID.test(ref) && required && externalLevel.get(ref) === required) {
+      existing.set(ref, ref);
+    }
   }
   const ordered = orderAmuxV4NodePlan(verified.map((entry) => ({
     draftUnitId: entry.unit.id, localRef: entry.unit.localRef ?? "",

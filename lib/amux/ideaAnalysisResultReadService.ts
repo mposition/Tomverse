@@ -8,7 +8,7 @@ import { auditRowActorKind, AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { prisma } from "@/lib/prisma";
 import { amuxAnalysisTextSafe, inspectAmuxAnalysisChunk,
-  inspectAmuxStoredAnalysisUnit } from "./ideaAnalysisChunkCore.ts";
+  inspectAmuxStoredAnalysisUnit, amuxStoredPageExistingNodeTargets } from "./ideaAnalysisChunkCore.ts";
 import { amuxAnalysisFreeformSubjectId } from "./ideaAnalysisDraftSealCore.ts";
 import { matchesAmuxIdeaAnalysisUnitCommitments } from
   "./ideaAnalysisResultReadCore.ts";
@@ -272,7 +272,10 @@ export async function readAmuxFirstIdeaAnalysisResultForDataOwner(
           raw: JSON.stringify({ ...freeformValue, units: proposalUnits }),
           expectedPreviewId: previewId, expectedChunkIndex: 0,
           expectedRevisionChunkIndex: 0, previousContinuationKind: null,
-          permittedSourceRefIds: ["operator_idea"], permittedTargetRefs: [],
+          permittedSourceRefIds: ["operator_idea"],
+          // The existing nodes the page attached to (owner decision 2026-11-22).
+          permittedTargetRefs: amuxStoredPageExistingNodeTargets(
+            proposalUnits as Parameters<typeof amuxStoredPageExistingNodeTargets>[0]),
           // A stored chunk: its schema was fixed when it was admitted.
           requiredSchemaVersion: null,
         });

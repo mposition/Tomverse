@@ -100,6 +100,9 @@ const nodeRead = z.object({ id: z.string(), level: z.enum(["initiative", "epic",
   state: z.string(), revision: z.number().int(), displayPrefix: z.string().nullable(),
   content: z.object({ title: z.string(), description: z.string() }).nullable(),
   editable: z.boolean(), contentEditable: z.boolean(),
+  parentId: z.string().nullable().optional(),
+  parentOptions: z.array(z.object({ id: z.string(), title: z.string().nullable(),
+    displayPrefix: z.string().nullable() })).optional(),
   assessment: z.object({ id: z.string(), version: z.number().int(), value: z.number().int().nullable(),
     uncertainty: z.string(), reasonCode: z.string(), evidenceAsOf: z.string(),
     bound: z.boolean() }).nullable() });
@@ -107,6 +110,7 @@ type NodeRead = z.infer<typeof nodeRead>;
 
 const previewRead = z.object({ confirmationDigest: z.string().regex(/^[a-f0-9]{64}$/),
   contentChanged: z.boolean(), revisionAfter: z.number().int(),
+  parentChanged: z.boolean().optional(),
   priorValue: z.number().nullable(), nextValue: z.number(),
   tasks: z.array(z.object({ taskId: z.string(), displayKey: z.string().nullable(),
     currentScore: z.number().nullable(), projectedScore: z.number().nullable() })) });
@@ -148,7 +152,9 @@ const writePending = (nodeId: string, sent: Sent | null) => {
 };
 
 type Draft = { title: string; description: string; value: number;
-  uncertainty: typeof UNCERTAINTY[number]; reason: string; day: string };
+  uncertainty: typeof UNCERTAINTY[number]; reason: string; day: string;
+  /** The parent the node will sit under (owner decision 2026-11-22). */
+  parentId: string | null };
 
 function AmuxPortfolioNodeSheet({ nodeId, level, m, onClose, onSaved }: {
   nodeId: string; level: AmuxHierarchyNodeLevel; m: Messages;
@@ -188,7 +194,8 @@ function AmuxPortfolioNodeSheet({ nodeId, level, m, onClose, onSaved }: {
           value: parsed.data.assessment?.value ?? 3,
           uncertainty: (UNCERTAINTY as readonly string[]).includes(parsed.data.assessment?.uncertainty ?? "") ?
             parsed.data.assessment!.uncertainty as Draft["uncertainty"] : "medium",
-          reason: parsed.data.assessment ? "operator_override" : "initial", day: today() });
+          reason: parsed.data.assessment ? "operator_override" : "initial", day: today(),
+          parentId: parsed.data.parentId ?? null });
       } catch { if (!cancelled) setLoadFailure("unavailable"); }
     })();
     return () => { cancelled = true; };
@@ -217,6 +224,7 @@ function AmuxPortfolioNodeSheet({ nodeId, level, m, onClose, onSaved }: {
     const payload = { id: crypto.randomUUID(), requestId, nodeId: read.id,
       expectedRevision: read.revision, expectedAssessmentId: read.assessment?.id ?? null,
       content: textChanged ? { title: draft.title.trim(), description: draft.description } : null,
+      ...(draft.parentId && draft.parentId !== (read.parentId ?? null) ? { parentId: draft.parentId } : {}),
       value: draft.value, uncertainty: draft.uncertainty, reasonCode: draft.reason, evidenceAsOf };
     setBusy(true); setError(null);
     try {
@@ -333,6 +341,16 @@ function AmuxPortfolioNodeSheet({ nodeId, level, m, onClose, onSaved }: {
             disabled={locked || !read.contentEditable || busy}
             onChange={(event) => change({ description: event.target.value })} />
           <small id="amux-node-description-note">{read.contentEditable ? m.contentNote : m.contentLocked}</small></div>
+        {level !== "initiative" && (read.parentOptions?.length ?? 0) > 0 &&
+          <label className={styles.field}><span>{m.parentLabel(m.levels[level === "epic" ? "initiative" : "epic"])}</span>
+            <select value={draft.parentId ?? ""} disabled={locked || busy}
+              data-testid="amux-node-parent"
+              onChange={(event) => change({ parentId: event.target.value || null })}>
+              {read.parentOptions!.map((option) => <option key={option.id} value={option.id}>
+                {amuxVisibleInspectionText(option.title ?? `#${option.id.replace(/-/g, "").slice(0, 6)}`)}
+                {option.displayPrefix ? ` (${option.displayPrefix})` : ""}</option>)}
+            </select>
+            <small>{m.parentNote}</small></label>}
         <div className={styles.sectionHead}><strong>{m.scoreHeading}</strong>
           <span>{m.scoreHint(WEIGHT[level])}</span></div>
         <Segments legend={m.valueLabel} name="value" disabled={locked || busy}
@@ -353,7 +371,10 @@ function AmuxPortfolioNodeSheet({ nodeId, level, m, onClose, onSaved }: {
           <small id="amux-node-evidence-note">{m.evidenceNote}</small></div>
         {preview && <div className={styles.impact} data-testid="amux-node-preview">
           <strong>{m.previewHeading(preview.data.tasks.length)}</strong>
-          <p>{preview.data.contentChanged ? m.revision(preview.data.revisionAfter) : m.noRevision}</p>
+          <p>{preview.data.contentChanged ? m.revision(preview.data.revisionAfter) :
+            preview.data.parentChanged ? m.moveRevision(preview.data.revisionAfter) : m.noRevision}</p>
+          {preview.data.contentChanged && preview.data.parentChanged &&
+            <p>{m.moveRevision(preview.data.revisionAfter)}</p>}
           {preview.data.tasks.length > 0 && <ul>{preview.data.tasks.map((task) =>
             <li key={task.taskId}>{m.estimate(task.displayKey ?? task.taskId.slice(0, 8),
               task.currentScore, task.projectedScore)}</li>)}</ul>}
