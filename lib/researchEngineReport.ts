@@ -121,27 +121,35 @@ export function renderReportMarkdown(document: ResearchReportDocument, claims: R
 }
 
 /**
- * A shareable projection: every block, conflict and table citing a
- * private-derived claim is removed, and private sources leave the
- * bibliography. The result carries no private-derived content by construction.
+ * A shareable projection built without any model text that could have seen
+ * private material. Writers and the synthesizer received private claims, so
+ * none of their prose (title, summary, scope note, paragraphs, tables,
+ * conflicts, limitations, next questions, criteria) is reused. The public
+ * version is assembled from: the user's own question as title, the planner's
+ * outline headings (the planner only sees public context), and the text of
+ * claims that are not private-derived and cite no private source (researchers
+ * only see public context, and public claims are verified in batches that
+ * contain no private claim). Each such claim becomes one cited paragraph.
  */
-export function redactReportForPublic(document: ResearchReportDocument, claims: ReadonlyMap<string, ReportClaim>, removedNote: string) {
-  const isPrivate = (keys: readonly string[]) => keys.some((key) => {
-    const claim = claims.get(key);
-    return !claim || claim.privateDerived || claim.evidence.some((evidence) => evidence.sourceKey.startsWith("P"));
-  });
-  let removed = 0;
+export function redactReportForPublic(document: ResearchReportDocument, claims: ReadonlyMap<string, ReportClaim>, input: {
+  title: string; headings: ReadonlyMap<string, string>; summary: string; removedNote: string;
+}) {
+  const publicClaims = [...claims.values()].filter((claim) => !claim.privateDerived &&
+    claim.evidence.length > 0 && claim.evidence.every((evidence) => !evidence.sourceKey.startsWith("P")) && citableClaim(claim));
   const sections = document.sections.map((section) => {
-    const blocks = section.blocks.filter((block) => { const keep = !isPrivate(block.claimKeys); if (!keep) removed += 1; return keep; });
-    return { ...section, blocks, status: blocks.length ? section.status : "missing" as const };
+    const own = publicClaims.filter((claim) => claim.sectionKey === section.key);
+    return { key: section.key, heading: (input.headings.get(section.key) ?? section.key).slice(0, 160),
+      blocks: own.slice(0, 60).map((claim) => ({ type: "paragraph" as const, text: claim.text.slice(0, 4_000), claimKeys: [claim.claimKey] })),
+      status: own.length ? "written" as const : "missing" as const };
   });
-  const conflicts = document.conflicts.filter((conflict) => !isPrivate(conflict.claimKeys));
-  const publicClaims = new Map([...claims].filter(([, claim]) => !claim.privateDerived));
-  const draft = { ...document, sections, conflicts, limitations: removed ? [...document.limitations, removedNote] : document.limitations };
-  const bibliography = document.bibliography.filter((entry) => !entry.private)
-    .filter((entry) => [...publicClaims.values()].some((claim) => claim.evidence.some((evidence) => evidence.sourceKey === entry.sourceKey)))
-    .map((entry, index) => ({ ...entry, n: index + 1 }));
-  return { document: { ...draft, bibliography }, removedBlocks: removed };
+  const used = new Set(publicClaims.flatMap((claim) => claim.evidence.map((evidence) => evidence.sourceKey)));
+  const bibliography = document.bibliography.filter((entry) => !entry.private && used.has(entry.sourceKey)).map((entry, index) => ({ ...entry, n: index + 1 }));
+  const removedBlocks = document.sections.reduce((sum, section) => sum + section.blocks.length, 0);
+  return {
+    document: { ...document, title: input.title.slice(0, 200) || "Research", summary: input.summary,
+      scope: { ...document.scope, note: "" }, sections, conflicts: [], limitations: [input.removedNote], nextQuestions: [], criteria: [], bibliography },
+    removedBlocks,
+  };
 }
 
 /** Tables from a report as CSV text (RFC 4180 quoting). */

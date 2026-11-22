@@ -187,7 +187,12 @@ export async function callResearchModel<T>(input: {
     }
     return { ok: true, value: submitted, usage, generationId, segmentId: segment.id, reservationId: reservation.reservationId };
   } catch (error) {
-    if (!generationId) { await releaseUnused(); throw error; }
+    if (!generationId) {
+      await releaseUnused();
+      // Recovery released this hold as orphaned before any intent existed: nothing was sent; try again later.
+      if ((error as { code?: string }).code === "RESEARCH_FUNDING_NOT_OPEN") return { ok: false, kind: "backpressure", code: "RESEARCH_FUNDING_NOT_OPEN", retryAfterMs: 1_000 };
+      throw error;
+    }
     if (!dispatched) {
       await refuseResearchDispatch(prisma, generationId, "pre_dispatch");
       await releaseUnused();

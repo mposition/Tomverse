@@ -92,6 +92,38 @@ export async function recoverStaleReservingSegments(limit = 100) {
   return recovered;
 }
 
+/**
+ * A bound hold whose worker died before recording any dispatch intent. Released
+ * under the run lock only when still intent-free, so a live worker's later
+ * beginResearchDispatch is refused instead of dispatching on a refunded hold.
+ */
+export async function releaseOrphanedResearchSegments(limit = 100) {
+  const cutoff = new Date(researchNow().getTime() - RESEARCH_SEGMENT_RESERVING_STALE_MS * 2);
+  const segments = await prisma.researchFundingSegment.findMany({ where: { status: "reserved", createdAt: { lte: cutoff },
+    generations: { none: {} }, run: { recoveryQuarantinedAt: null } }, include: { run: { select: { userId: true } } }, take: limit, orderBy: { createdAt: "asc" } });
+  let released = 0;
+  for (const segment of segments) {
+    const ok = await isolate(segment.runId, async () => {
+      const claimed = await prisma.$transaction(async (tx) => {
+        await lockResearchRun(tx, segment.runId);
+        await tx.$queryRaw`SELECT "id" FROM "ResearchFundingSegment" WHERE "id" = ${segment.id} FOR UPDATE`;
+        const current = await tx.researchFundingSegment.findUnique({ where: { id: segment.id }, include: { generations: { select: { id: true } } } });
+        if (!current || current.status !== "reserved" || current.generations.length) return false;
+        await tx.researchFundingSegment.update({ where: { id: segment.id }, data: { status: "released" } });
+        return true;
+      });
+      if (!claimed || !segment.reservationId) return;
+      const funding = await researchFundingAdapter();
+      // Nothing dispatched on this hold; refund it. A failure leaves it to expiry, which reads "released" as zero.
+      await funding.settle({ userId: segment.run.userId, reservationId: segment.reservationId, usage: { inputTokens: 0, outputTokens: 0,
+        cachedInputTokens: 0, cacheWriteInputTokens: 0, reasoningTokens: 0, usageFromProvider: true, outcome: "failed", searchExecuted: false,
+        searchQueryCount: 0, searchBackendRequestCount: 0, searchQueriesObserved: true } }).catch(() => undefined);
+    });
+    if (ok) released += 1;
+  }
+  return released;
+}
+
 /** Settles every segment whose dispatches are terminal; unknown ones only after a grace period. */
 export async function settlePendingResearchSegments(limit = 100) {
   const graceCutoff = new Date(researchNow().getTime() - RESEARCH_UNKNOWN_SETTLEMENT_GRACE_MS);
@@ -127,8 +159,10 @@ export async function drainResearchEvidenceCleanup(limit = 200) {
 /** Re-runs deterministic advancement for active runs with nothing running (e.g. after a crash between commits). */
 export async function advanceIdleResearchRuns(limit = 100) {
   const runs = await prisma.researchPreviewRun.findMany({
-    where: { engineVersion: 2, status: { in: ["planning", "queued", "running", "finalizing"] }, recoveryQuarantinedAt: null,
-      workItems: { none: { status: "running" } } },
+    where: { engineVersion: 2, recoveryQuarantinedAt: null, workItems: { none: { status: "running" } },
+      OR: [{ status: { in: ["planning", "queued", "running", "finalizing"] } },
+        // A budget stop waits for the user; past its deadline it is finished with existing evidence.
+        { status: "awaiting_input", lastErrorCode: "RESEARCH_RUN_BUDGET_REACHED", runDeadlineAt: { lte: researchNow() } }] },
     select: { id: true }, orderBy: { updatedAt: "asc" }, take: limit,
   });
   let advanced = 0;
@@ -140,6 +174,7 @@ export async function recoverResearchEngine(limit = 100) {
   return {
     staleItems: await recoverStaleResearchWorkItems(limit),
     staleSegments: await recoverStaleReservingSegments(limit),
+    orphanedSegments: await releaseOrphanedResearchSegments(limit),
     settledSegments: await settlePendingResearchSegments(limit),
     advancedRuns: await advanceIdleResearchRuns(limit),
     cleanedObjects: await drainResearchEvidenceCleanup(limit * 2),

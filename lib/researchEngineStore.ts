@@ -206,6 +206,14 @@ export async function beginResearchDispatch(fence: ResearchItemFence & { runId: 
   return prisma.$transaction(async (tx) => {
     await lockResearchRun(tx, fence.runId);
     await assertResearchItemFence(tx, fence);
+    if (identity.fundingSegmentId) {
+      // The hold must still be open: recovery may have released an orphaned segment.
+      const segments = await tx.$queryRaw<Array<{ status: string }>>`
+        SELECT "status" FROM "ResearchFundingSegment" WHERE "id" = ${identity.fundingSegmentId} AND "runId" = ${fence.runId} FOR UPDATE`;
+      if (segments[0]?.status !== "reserved") {
+        throw new ResearchPreviewRunError(409, "RESEARCH_FUNDING_NOT_OPEN", "The funding for this dispatch is no longer open.");
+      }
+    }
     const existing = await tx.researchPreviewGeneration.findUnique({
       where: { runId_dispatchKey: { runId: fence.runId, dispatchKey: identity.dispatchKey } },
     });

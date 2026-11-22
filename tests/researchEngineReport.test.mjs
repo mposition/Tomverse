@@ -39,14 +39,22 @@ test("rendering escapes model text, numbers citations against the bibliography a
   assert.ok(!markdown.includes("my-private-file.pdf]("), "private sources are never linked");
 });
 
-test("the public redaction removes every private-derived block and source", () => {
+test("the public redaction reuses no writer or synthesizer prose and no private claim or source", () => {
   const document = doc();
+  document.title = "Title written after reading private notes";
+  document.summary = "Summary that mentions the private salary";
+  document.limitations = ["Limitation derived from the private file"];
+  document.nextQuestions = ["Ask about the private salary"];
   document.bibliography = buildBibliography(document, claims, sources);
-  const { document: shared, removedBlocks } = redactReportForPublic(document, claims, "removed");
-  assert.equal(removedBlocks, 1);
+  const { document: shared } = redactReportForPublic(document, claims, { title: "User question", headings: new Map([["s1", "Planner heading"]]),
+    summary: "public summary note", removedNote: "removed" });
   const json = JSON.stringify(shared);
-  assert.ok(!json.includes("Private paragraph"));
-  assert.ok(!json.includes("my-private-file"));
+  for (const leaked of ["Private paragraph", "Private fact", "my-private-file", "private salary", "private notes", "Public paragraph", "Limitation derived"]) {
+    assert.ok(!json.includes(leaked), leaked);
+  }
+  assert.equal(shared.title, "User question");
+  assert.equal(shared.sections[0].heading, "Planner heading");
+  assert.deepEqual(shared.sections[0].blocks.map((block) => block.claimKeys), [["C1"]], "only the public, citable claim, as its own text");
   assert.ok(shared.bibliography.every((entry) => !entry.private));
 });
 

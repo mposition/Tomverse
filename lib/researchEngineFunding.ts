@@ -135,12 +135,15 @@ export async function settleResearchSegmentIfReady(segmentId: string) {
   });
   if (childSearchesPending) return false;
   const model = generations.find((generation) => generation.kind === "model");
+  // No dispatch intent yet: the worker may be between binding the hold and recording
+  // its intent. Only recovery, under the run lock, may release such a segment.
+  if (!model) return false;
   const searches = generations.filter((generation) => generation.kind === "search");
-  const modelUnknown = !model || model.status === "outcome_unknown";
+  const modelUnknown = model.status === "outcome_unknown";
   const searchUnknown = searches.some((generation) => generation.status === "outcome_unknown");
   const succeeded = searches.filter((generation) => generation.status === "completed" && (generation.searchRequestCount ?? 0) > 0)
     .reduce((sum, generation) => sum + (generation.searchRequestCount ?? 0), 0);
-  const nothingDispatched = !model || model.status === "dispatch_refused";
+  const nothingDispatched = model.status === "dispatch_refused";
   const usage: ResearchSettlementUsage = nothingDispatched ? {
     inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0, reasoningTokens: 0,
     usageFromProvider: true, outcome: "failed", searchExecuted: false, searchQueryCount: 0, searchBackendRequestCount: 0,

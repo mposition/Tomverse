@@ -1026,9 +1026,15 @@ async function beginFinalization(tx: Prisma.TransactionClient, run: RunRow, mani
   if (request?.kind === "refresh") await relocateClaimsToLatestVersions(tx, run.id, created.id);
   const planRevision = run.approvedPlanRevision ?? run.planRevision;
   const verifyItems: NewResearchWorkItem[] = [];
-  for (let index = 0; index < needsVerify.length; index += 30) {
-    verifyItems.push({ kind: "verify", idempotencyKey: `verify:${revisionNumber}:${index / 30}`, planRevision, inputRevision: run.inputRevision,
-      providerKey: providerFor(run, "verifier"), priority: 4, payload: { kind: "verify", batch: index / 30, claimKeys: needsVerify.slice(index, index + 30) } });
+  // Private and public claims are never verified together: a public claim's
+  // revised text must not be written by a call that saw private material.
+  const privateKeys = new Set(rows.filter((row) => row.privateDerived).map((row) => row.claimKey));
+  const groups = [needsVerify.filter((key) => !privateKeys.has(key)), needsVerify.filter((key) => privateKeys.has(key))];
+  let batch = 0;
+  for (const group of groups) for (let index = 0; index < group.length; index += 30) {
+    verifyItems.push({ kind: "verify", idempotencyKey: `verify:${revisionNumber}:${batch}`, planRevision, inputRevision: run.inputRevision,
+      providerKey: providerFor(run, "verifier"), priority: 4, payload: { kind: "verify", batch, claimKeys: group.slice(index, index + 30) } });
+    batch += 1;
   }
   const verifyIds = (await enqueueResearchWorkItems(tx, run.id, verifyItems)).map((entry) => entry.id);
   const writeItems: NewResearchWorkItem[] = outline.filter((section) => targetSections.has(section.key)).map((section) => ({
@@ -1079,7 +1085,10 @@ export async function createPublicRedaction(runId: string, parentRevision: numbe
       text: claim.text, kind: claim.kind as ReportClaim["kind"], verification: claim.verification as ReportClaim["verification"],
       privateDerived: claim.privateDerived, evidence: claim.evidence as ReportClaim["evidence"] }]));
     const labels = researchEngineLabels(manifest.brief.outputLanguage ?? manifest.locale);
-    const { document } = redactReportForPublic(researchReportDocumentSchema.parse(parent.document), claims, labels.redactedNote);
+    const plan = run.approvedPlanRevision ? await tx.researchPlanRevision.findUnique({ where: { runId_revision: { runId, revision: run.approvedPlanRevision } } }) : null;
+    const headings = new Map((plan ? researchPlanSchema.parse(plan.plan).outline : []).map((section) => [section.key, section.heading]));
+    const { document } = redactReportForPublic(researchReportDocumentSchema.parse(parent.document), claims, {
+      title: manifest.publicBrief.slice(0, 200), headings, summary: labels.redactedNote, removedNote: labels.redactedNote });
     const latest = await tx.researchReportRevision.aggregate({ where: { runId }, _max: { revision: true } });
     const revision = (latest._max.revision ?? 0) + 1;
     const created = await tx.researchReportRevision.create({ data: { runId, revision, parentRevision, planRevision: parent.planRevision,

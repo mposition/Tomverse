@@ -334,3 +334,44 @@ test("a Project source adapter is used only through the selection, revalidation 
     setResearchProjectSourceAdapter(null);
   }
 });
+
+test("a hold bound but never dispatched is not settled as zero while a worker may still use it; recovery releases it under the run lock and a late dispatch is refused", async () => {
+  const fakes = installFakes();
+  const user = await createUser("orphan");
+  const run = await create(user.id, { autoStart: false });
+  await prisma.researchWorkItem.create({ data: { runId: run.id, kind: "plan", status: "running", planRevision: 0, inputRevision: 0, idempotencyKey: "probe",
+    payload: { kind: "plan" }, leaseOwner: "late-worker", leaseEpoch: 1, leaseExpiresAt: new Date(fakes.clock.now().getTime() + 3_600_000) } });
+  const item = await prisma.researchWorkItem.findFirstOrThrow({ where: { runId: run.id, idempotencyKey: "probe" } });
+  const segment = await claimResearchFundingRoom({ runId: run.id, purpose: "plan", credits: 10, modelId: "gemini-3-1-pro", provider: "google", pricingVersion: "fake-pricing-v1" });
+  const reservation = await fakes.funding.adapter.reserve({ userId: user.id, segmentId: segment.id, model: {} as never,
+    estimate: { credits: 10, pricingVersion: "fake-pricing-v1", budget: {} }, searchEnabled: false });
+  assert.ok(reservation.ok);
+  await prisma.researchFundingSegment.update({ where: { id: segment.id }, data: { status: "reserved", reservationId: reservation.reservationId } });
+  const { settleResearchSegmentIfReady } = await import("@/lib/researchEngineFunding");
+  assert.equal(await settleResearchSegmentIfReady(segment.id), false, "no intent yet: never settled as an unused hold");
+  assert.equal((await prisma.researchFundingSegment.findUniqueOrThrow({ where: { id: segment.id } })).status, "reserved");
+  await prisma.researchFundingSegment.update({ where: { id: segment.id }, data: { createdAt: new Date(Date.now() - 10 * 60_000) } });
+  fakes.clock.advance(10 * 60_000);
+  await recoverResearchEngine();
+  assert.equal((await prisma.researchFundingSegment.findUniqueOrThrow({ where: { id: segment.id } })).status, "released");
+  await rejects(beginResearchDispatch({ itemId: item.id, ownerId: "late-worker", leaseEpoch: 1, runId: run.id },
+    { kind: "model", dispatchKey: "late", fundingSegmentId: segment.id, modelId: "m", provider: "google", apiModel: "a", pricingVersion: "p" }), "RESEARCH_FUNDING_NOT_OPEN");
+});
+
+test("a budget-stopped run past its deadline is finished by recovery with the evidence it has", async () => {
+  const fakes = installFakes({ model: createFakeModel({ respond: (call) => defaultResponse(call, { subquestions: 3, sections: 1, readsPerTurn: 1 }) }) });
+  createFakeWeb();
+  const user = await createUser("deadline");
+  const run = await create(user.id, { approvedCredits: 120 });
+  await drainResearchWork("deadline", 2);
+  const waiting = await readResearchRunDto(user.id, run.id);
+  assert.equal(waiting.status, "awaiting_input");
+  assert.ok(waiting.budgetReached);
+  fakes.clock.advance(7 * 60 * 60_000);
+  await recoverResearchEngine();
+  await drainResearchWork("deadline-final", 2);
+  const finished = await readResearchRunDto(user.id, run.id);
+  assert.equal(finished.status, "completed", "the deadline finished it instead of waiting forever");
+  const money = await readResearchRunMoney(prisma, run.id);
+  assert.ok(money.settledCredits <= money.approvedCredits);
+});
