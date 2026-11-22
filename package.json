@@ -449,6 +449,7 @@
     "next-auth": "^4.24.15",
     "officeparser": "^8.9.0",
     "openai": "^7.59.0",
+    "parse5": "^8.1.1",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^6.5.438",
     "pg": "^8.23.1",
@@ -480,7 +481,6 @@
     "esbuild": "0.28.2",
     "eslint": "^9",
     "eslint-config-next": "16.4.6",
-    "parse5": "^8.1.1",
     "tailwindcss": "^4",
     "typescript": "^6",
     "vite": "^8.3.8"

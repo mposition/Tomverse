@@ -52,15 +52,31 @@ export async function settleStoredResearchPreviewRun(
   }
 }
 
+/**
+ * A row recovery keeps failing on (an unreadable settlement payload, a run
+ * whose recovery throws) is counted and, after three failures, quarantined so
+ * the oldest-first selection stops returning it ahead of healthy rows. The
+ * reservation itself is untouched; expiry reconciliation still owns it.
+ */
+async function recordResearchPreviewRecoveryFailure(runId: string) {
+  const run = await prisma.researchPreviewRun.update({ where: { id: runId }, data: { recoveryFailureCount: { increment: 1 } },
+    select: { recoveryFailureCount: true } }).catch(() => null);
+  if (run && run.recoveryFailureCount >= 3) {
+    await prisma.researchPreviewRun.update({ where: { id: runId }, data: { recoveryQuarantinedAt: new Date() } }).catch(() => undefined);
+  }
+}
+
 export async function settlePendingResearchPreviewRuns(limit = 50) {
   const runs = await researchPreviewRunsAwaitingSettlement(limit);
   let settled = 0;
   for (const run of runs) {
     try {
+      if (!parseResearchPreviewSettlementUsage(run.settlementUsage)) throw new Error("RESEARCH_SETTLEMENT_UNREADABLE");
       await settleStoredResearchPreviewRun(run);
       settled += 1;
     } catch {
       console.error(JSON.stringify({ event: "research_settlement_deferred", runId: run.id }));
+      await recordResearchPreviewRecoveryFailure(run.id);
     }
   }
   return settled;
@@ -75,14 +91,19 @@ export async function recoverStaleResearchPreviewRuns(limit = 50) {
   const boundedLimit = Math.min(100, Math.max(1, limit));
   const preparing = await stalePreparingResearchPreviewRuns(boundedLimit);
   let recovered = 0;
+  // Each run is isolated: one failing row no longer defers the rest of the batch.
   for (const run of preparing) {
-    const outcome = await recoverStalePreparingResearchPreviewRun(run.id);
-    if (outcome !== "unchanged") recovered += 1;
+    try {
+      const outcome = await recoverStalePreparingResearchPreviewRun(run.id);
+      if (outcome !== "unchanged") recovered += 1;
+    } catch { await recordResearchPreviewRecoveryFailure(run.id); }
   }
   const runs = await staleResearchPreviewRuns(boundedLimit);
   for (const run of runs) {
-    const outcome = await recoverStaleResearchPreviewRun(run.id);
-    if (outcome !== "unchanged") recovered += 1;
+    try {
+      const outcome = await recoverStaleResearchPreviewRun(run.id);
+      if (outcome !== "unchanged") recovered += 1;
+    } catch { await recordResearchPreviewRecoveryFailure(run.id); }
   }
   recovered += await expireResearchPreviewCheckpoints(boundedLimit);
   await settlePendingResearchPreviewRuns(boundedLimit);

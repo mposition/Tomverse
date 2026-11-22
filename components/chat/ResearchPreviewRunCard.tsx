@@ -92,10 +92,10 @@ export function ResearchPreviewRunCard({ runId, conversationId, assistantMessage
     };
   }, [runId, conversationId, assistantMessageId, scopeKey, transport]);
 
-  const label = run ? ({ queued: copy.researchRunQueued, running: copy.researchRunRunning,
+  const label = run ? (({ queued: copy.researchRunQueued, running: copy.researchRunRunning,
     checkpointed: copy.researchRunCheckpointed, completed: copy.researchRunCompleted,
     failed: copy.researchPreviewOutcomeFailed, cancelled: copy.researchPreviewOutcomeCancelled,
-    attention: copy.researchRunAttention }[run.status]) : copy.researchRunLoading;
+    attention: copy.researchRunAttention } as Record<string, string>)[run.status] ?? copy.researchRunRunning) : copy.researchRunLoading;
   const reportLabel = reportOutcome && ({
     complete: copy.researchReportComplete,
     partial: copy.researchReportPartial,

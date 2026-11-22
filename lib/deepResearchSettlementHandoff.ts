@@ -229,7 +229,7 @@ export async function researchPreviewSettlementForExpiry(
 ): Promise<ResearchPreviewSettlementUsage | null> {
   await tx.$queryRaw`SELECT "id" FROM "ResearchPreviewRun" WHERE "reservationId" = ${reservationId} FOR UPDATE`;
   const run = await tx.researchPreviewRun.findFirst({ where: { reservationId } });
-  if (!run) return null;
+  if (!run) return researchEngineSegmentSettlementForExpiry(tx, reservationId, now);
   if (!["completed", "failed", "cancelled", "attention"].includes(run.status)) {
     const neverStarted = run.status === "queued" && run.checkpoint === null && run.stepCount === 0;
     if (!["checkpointed", "queued"].includes(run.status) ||
@@ -246,4 +246,37 @@ export async function researchPreviewSettlementForExpiry(
   }
   return parseResearchPreviewSettlementUsage(run.settlementUsage) ??
     stoppedResearchPreviewUsage(tx, run, "failed");
+}
+
+/**
+ * Research engine v2 holds one Chat reservation per funding segment. Expiry may
+ * settle such a reservation only from facts the segment already records:
+ * a dispatch that may still be running keeps the hold, an unknown outcome is
+ * settled conservatively, and a segment that never dispatched is a zero.
+ * Called under the reservation settlement lock, before any write.
+ */
+async function researchEngineSegmentSettlementForExpiry(
+  tx: Prisma.TransactionClient, reservationId: string, now: Date
+): Promise<ResearchPreviewSettlementUsage | null> {
+  await tx.$queryRaw`SELECT "id" FROM "ResearchFundingSegment" WHERE "reservationId" = ${reservationId} FOR UPDATE`;
+  const segment = await tx.researchFundingSegment.findFirst({ where: { reservationId },
+    include: { generations: { select: { kind: true, status: true } } } });
+  if (!segment) return null;
+  if (segment.status === "settled") return parseResearchPreviewSettlementUsage(segment.settlementUsage);
+  if (segment.status === "unknown") {
+    await tx.researchFundingSegment.update({ where: { id: segment.id }, data: { status: "settled", settledCredits: segment.reservedCredits,
+      settledAt: now, settlementUsage: { usageFromProvider: false, outcome: "failed", searchQueriesObserved: false, settledBy: "expiry" } } });
+    return { usageFromProvider: false, outcome: "failed", searchQueriesObserved: false };
+  }
+  const dispatched = segment.generations.some((generation) => generation.status !== "intent" && generation.status !== "dispatch_refused");
+  if (segment.status === "released" || !dispatched) {
+    if (segment.generations.some((generation) => generation.status === "intent") && segment.status === "reserved") {
+      throw new ResearchPreviewRunError(409, "RESEARCH_RUN_STILL_ACTIVE", "Research owns this reservation until its dispatch is decided.");
+    }
+    await tx.researchFundingSegment.update({ where: { id: segment.id }, data: { status: "released" } });
+    return { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0, reasoningTokens: 0,
+      usageFromProvider: true, outcome: "failed", searchExecuted: false, searchQueryCount: 0, searchBackendRequestCount: 0,
+      searchQueriesObserved: true };
+  }
+  throw new ResearchPreviewRunError(409, "RESEARCH_RUN_STILL_ACTIVE", "Research owns this reservation until its work is settled.");
 }
