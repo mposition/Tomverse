@@ -370,15 +370,67 @@ test("it needs the draft model and pages for the provider, and a row that parses
 test("a serving row the new values would make refused keeps its old values, and nothing is audited", async () => {
   reset(registryLink({ channels: ["code", "api"], capabilities: { toolCalling: "basic", structuredOutput: "json_mode" } }), true);
   const before = structuredClone(state.row);
-  state.refuseUpdate = new CatalogRefusal("not_admitted", ["no_tool_calling"]);
+  state.refuseUpdate = new CatalogRefusal("not_admitted", ["no_structured_output"]);
   await assert.rejects(
     fill({
       draftLlm: async () => ({
-        draftCodingCapabilities: async ({ pages }) => ({ toolCalling: "none", structuredOutput: "json_mode", note: "", sources: pages.map((page) => page.url), draftedAt: "2026-11-21" }),
+        draftCodingCapabilities: async ({ pages }) => ({ toolCalling: "basic", structuredOutput: "none", note: "", sources: pages.map((page) => page.url), draftedAt: "2026-11-21" }),
       }),
     }),
-    (error) => error instanceof CatalogRefusal && error.code === "not_admitted" && error.reasons.includes("no_tool_calling")
+    (error) => error instanceof CatalogRefusal && error.code === "not_admitted" && error.reasons.includes("no_structured_output")
   );
   assert.deepEqual(state.row, before);
   assert.deepEqual(state.audits, []);
+});
+
+test("a documentation answer of no tool calling never lowers a chat link's: it keeps its value, and the rest is still written", async () => {
+  const answerNone = (structuredOutput = "json_mode") => ({
+    draftLlm: async () => ({
+      draftCodingCapabilities: async ({ pages }) => {
+        calls.llm += 1;
+        return {
+          toolCalling: "none",
+          structuredOutput,
+          note: "The pages do not name this model.",
+          sources: pages.map((page) => page.url),
+          draftedAt: "2026-11-22",
+          codingNotes: { strengths: ["JSON mode output"], weaknesses: [], sourceUrls: pages.map((page) => page.url).slice(0, 1) },
+        };
+      },
+    }),
+  });
+  // A serving link on the registry's value: tool calling stays, structured output and the notes are written.
+  reset(registryLink({ channels: ["code", "api"] }), true);
+  const result = await fill(answerNone());
+  assert.equal(calls.llm, 1);
+  const profile = state.row.profile;
+  assert.deepEqual(profile.capabilities, { toolCalling: "basic", structuredOutput: "supported" });
+  // The evidence records what the pages said; the audit row names the answer that was not taken.
+  assert.equal(profile.evidence.toolCalling, "none");
+  assert.equal(profile.evidence.structuredOutput, "supported");
+  assert.deepEqual(profile.codingNotes.strengths, ["JSON mode output"]);
+  assert.ok(!result.changes.some((change) => change.field === "toolCalling"));
+  assert.deepEqual(result.changes.map((change) => change.field), ["structuredOutput", "codingNotes"]);
+  assert.equal(state.audits[0].metadata.toolCalling, "basic");
+  assert.equal(state.audits[0].metadata.answeredToolCalling, "none");
+  // The judge saw a profile that still calls tools.
+  assert.equal(state.updates[0].patch.profile.capabilities.toolCalling, "basic");
+
+  // A link already at parallel keeps parallel.
+  reset(registryLink({ capabilities: { toolCalling: "parallel", structuredOutput: "none" } }));
+  await fill(answerNone());
+  assert.equal(state.row.profile.capabilities.toolCalling, "parallel");
+
+  // A link the operator set to none stays none: a fill neither lowers nor overrides the operator.
+  reset(registryLink({ capabilities: { toolCalling: "none", structuredOutput: "none" } }));
+  const kept = await fill(answerNone());
+  assert.equal(state.row.profile.capabilities.toolCalling, "none");
+  assert.ok(!kept.changes.some((change) => change.field === "toolCalling"));
+  assert.equal(state.audits[0].metadata.answeredToolCalling, undefined);
+
+  // An answer that names support is still taken as it is, and no answered value is recorded.
+  reset();
+  await fill();
+  assert.equal(state.row.profile.capabilities.toolCalling, "parallel");
+  assert.equal(state.audits[0].metadata.answeredToolCalling, undefined);
 });
