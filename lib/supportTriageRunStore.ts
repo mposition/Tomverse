@@ -18,7 +18,7 @@ import { randomUUID } from "node:crypto";
 
 import { writeSystemAuditLog } from "@/lib/adminAudit";
 import type { SupportTriageSystemAuditActor } from "@/lib/adminAuditSystemActors";
-import { amuxRolledBackWriteCode } from "@/lib/amux/readFailureCore";
+import { amuxRolledBackWriteCode, amuxTransientDatabaseCode } from "@/lib/amux/readFailureCore";
 import { prisma } from "@/lib/prisma";
 import {
   LANE_TIMEOUTS,
@@ -41,25 +41,42 @@ export class SupportTriageRunNotRunning extends Error {
 }
 
 /**
- * One more try for a write the database rolled back as a whole.
+ * One more try for a run-row write whose session failed, without ever
+ * writing the row or its audit entry twice.
  *
  * These two transactions run under the lane's timeouts, and the retention
  * lane allows 150 ms idle between statements. On 2026-11-21 (dev) one of them
  * lost its session to 25P03 (idle_in_transaction_session_timeout) and failed
  * the whole run: the batches retry a lost session (supportTriageRetention.ts),
- * but these did not. 25P03, a deadlock and a serialization failure all mean
- * PostgreSQL rolled back everything the transaction wrote -- the run row and
- * its audit entry alike -- so the same write may be asked again once. Any other
- * failure, including an unknown COMMIT outcome, is thrown as before.
+ * but these did not.
+ *
+ * - A failure PostgreSQL rolled back as a whole (25P03 with its code, a
+ *   deadlock, a serialization failure) committed nothing: write again.
+ * - A lost session with no such code -- the usual form of an idle timeout,
+ *   which the pg client reports at the next statement or at COMMIT as a
+ *   closed connection -- may have lost only the COMMIT's answer. `committed`
+ *   reads whether this write took effect, and its result is returned instead
+ *   of writing again; only a write that did not take effect is repeated.
+ *
+ * Any other failure, and a second failure, is thrown as before.
  */
-const onceMoreIfRolledBack = async <T>(write: () => Promise<T>): Promise<T> => {
+export const retryRunWriteOnce = async <T>(input: {
+  readonly write: () => Promise<T>;
+  /** This write's result if it committed, else null. Read after a lost session only. */
+  readonly committed: () => Promise<T | null>;
+}): Promise<T> => {
   try {
-    return await write();
+    return await input.write();
   } catch (error) {
-    const code = amuxRolledBackWriteCode(error);
-    if (!code) throw error;
-    console.warn(JSON.stringify({ event: "support_triage_run_write_retried", code }));
-    return write();
+    const rolledBack = amuxRolledBackWriteCode(error);
+    const lost = rolledBack ? null : amuxTransientDatabaseCode(error);
+    if (!rolledBack && !lost) throw error;
+    console.warn(JSON.stringify({ event: "support_triage_run_write_retried", code: rolledBack ?? lost }));
+    if (!rolledBack) {
+      const done = await input.committed();
+      if (done !== null) return done;
+    }
+    return input.write();
   }
 };
 
@@ -70,14 +87,30 @@ export type StartedRun = {
   readonly deadlineAt: Date;
 };
 
-export const startSupportTriageRun = async (kind: SupportTriageRunKind): Promise<StartedRun> =>
-  onceMoreIfRolledBack(() => prisma.$transaction(
+export const startSupportTriageRun = async (kind: SupportTriageRunKind): Promise<StartedRun> => {
+  // Chosen before the transaction, so a retry after a lost COMMIT answer can
+  // tell whether this run row (and the audit entry in its transaction) exists.
+  const id = randomUUID();
+  return retryRunWriteOnce({
+    write: () => startRunTransaction(kind, id),
+    committed: async () => {
+      const row = await prisma.supportTriageRun.findUnique({
+        where: { id },
+        select: { id: true, createdAt: true, deadlineAt: true },
+      });
+      return row ? { id: row.id, kind, createdAt: row.createdAt, deadlineAt: row.deadlineAt } : null;
+    },
+  });
+};
+
+const startRunTransaction = (kind: SupportTriageRunKind, id: string): Promise<StartedRun> =>
+  prisma.$transaction(
     async (tx) => {
       await armSupportTriageTransaction(tx, kind);
       const run = await tx.supportTriageRun.create({
         // The trigger replaces deadlineAt from the kind; the value here only
         // satisfies the client's type and is never stored.
-        data: { id: randomUUID(), kind, deadlineAt: new Date(0) },
+        data: { id, kind, deadlineAt: new Date(0) },
         select: { id: true, kind: true, createdAt: true, deadlineAt: true },
       });
       await writeSystemAuditLog({
@@ -92,7 +125,7 @@ export const startSupportTriageRun = async (kind: SupportTriageRunKind): Promise
       return { id: run.id, kind, createdAt: run.createdAt, deadlineAt: run.deadlineAt };
     },
     { timeout: LANE_TIMEOUTS[kind].prismaTransactionTimeoutMs }
-  ));
+  );
 
 export type RunCounters = {
   readonly batchesCompleted?: number;
@@ -137,7 +170,33 @@ export const finishSupportTriageRun = async (input: {
     throw new RangeError("a retention run completes at most eight batches");
   }
 
-  return onceMoreIfRolledBack(() => prisma.$transaction(
+  return retryRunWriteOnce({
+    write: () => finishRunTransaction(input, counters),
+    // Finished, and by this writer: only this transaction writes the
+    // run_finished entry, and it commits with the update or not at all.
+    committed: async () => {
+      const [row, audit] = await Promise.all([
+        prisma.supportTriageRun.findFirst({
+          where: { id: input.id, kind: input.kind, outcome: { not: "running" }, finishedAt: { not: null } },
+          select: { id: true, outcome: true, finishedAt: true },
+        }),
+        prisma.adminAuditLog.findFirst({
+          where: { targetType: "SupportTriageRun", targetId: input.id, action: "support_triage.run_finished" },
+          select: { id: true },
+        }),
+      ]);
+      return row?.finishedAt && audit
+        ? { id: row.id, outcome: row.outcome as SupportTriageRunOutcome, finishedAt: row.finishedAt }
+        : null;
+    },
+  });
+};
+
+const finishRunTransaction = (
+  input: { readonly id: string; readonly kind: SupportTriageRunKind; readonly outcome: "success" | "partial" | "failed" },
+  counters: RunCounters
+): Promise<FinishedRun> =>
+  prisma.$transaction(
     async (tx) => {
       await armSupportTriageTransaction(tx, input.kind);
       // The audit entry first; the update below is the last statement, so an
@@ -167,5 +226,4 @@ export const finishSupportTriageRun = async (input: {
       return { id: row.id, outcome: row.outcome as SupportTriageRunOutcome, finishedAt: row.finishedAt };
     },
     { timeout: LANE_TIMEOUTS[input.kind].prismaTransactionTimeoutMs }
-  ));
-};
+  );
