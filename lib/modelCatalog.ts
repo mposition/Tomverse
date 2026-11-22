@@ -44,6 +44,7 @@ import {
   type SnapshotRenewalDecision,
 } from "@/lib/modelCatalogCore";
 import { suggestCreditFloor } from "@/lib/modelAdoptionDraft";
+import { codingApiCreditFloor } from "@/lib/codingRowRuntime";
 import { writeModelCatalogRenewalSystemAudit } from "@/lib/modelCatalogRenewalSystemAudit";
 import { resolveModelPricing } from "@/lib/modelPricing";
 import { isAiProvider } from "@/lib/modelRegistryShared";
@@ -73,14 +74,24 @@ export const judgeImage = (model: ImageModelProfile): ImageAdmission =>
  * Anthropic's cache write premium is the input multiplier there.
  */
 export const codingCreditFloor = (profile: Pick<CodingJudgeInput, "pricing" | "capabilities" | "provider">): number | null => {
+  const worstCaseInputTokens = profile.capabilities.maxContextTokens;
   const floor = suggestCreditFloor({
     inputUsdPerMillionTokens: profile.pricing.inputUsdPerMTok,
     outputUsdPerMillionTokens: profile.pricing.outputUsdPerMTok,
     maxOutputTokens: profile.capabilities.maxOutputTokens,
     inputPriceMultiplier: profile.provider === "anthropic" ? 1.25 : 1,
-    worstCaseInputTokens: profile.capabilities.maxContextTokens,
+    worstCaseInputTokens,
   });
-  return "credits" in floor ? floor.credits : null;
+  if ("credits" in floor) return floor.credits;
+  // Above every chat class (80 credits at most): Code reserves and settles any
+  // whole number of credits (creditWeight x the turn's own input multiplier),
+  // so the floor is worked out directly rather than refused (owner decision
+  // 2026-11-22) -- over every input band up to the whole window, since a short
+  // prompt with a full answer is charged at x1 and an output-heavy model costs
+  // more per credit there (codingApiCreditFloor, the coding API's same rule).
+  // Above CODING_API_CREDIT_WEIGHT_MAX it still cannot be worked out.
+  if (floor.reason !== "above_every_class") return null;
+  return codingApiCreditFloor(profile, profile.capabilities.maxOutputTokens, worstCaseInputTokens);
 };
 
 export const judgeCoding = (row: CodingJudgeInput): CodingAdmission =>
