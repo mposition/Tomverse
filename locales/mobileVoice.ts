@@ -18,6 +18,7 @@ export function mobileVoiceError(language: MobileLanguage, code: string, serverC
 const privacy: Record<MobileLanguage, string> = {
   "en": "Audio is sent to the speech-to-text provider for conversion only. Tomverse does not save the recording, and the text goes into the input box for you to check before sending.",
   "ko": "음성은 변환을 위해서만 음성 인식 제공업체로 전송됩니다. Tomverse는 녹음을 저장하지 않으며, 변환된 문장은 입력창에 들어가 보내기 전에 직접 확인할 수 있습니다.",
+  "zh-Hant": "音訊只會傳送至語音辨識供應商進行轉寫。Tomverse 不會儲存錄音，轉寫結果會填入輸入框，傳送前可自行確認與修改。",
   "zh": "音频仅为转写发送给语音识别服务商。Tomverse 不保存录音，转写结果会填入输入框，发送前可自行确认和修改。",
   "de": "Die Audiodaten gehen ausschließlich zur Umwandlung an den Spracherkennungsanbieter. Tomverse speichert die Aufnahme nicht, und der Text landet im Eingabefeld, damit Sie ihn vor dem Senden prüfen können.",
   "fr": "L'audio est envoyé au prestataire de reconnaissance vocale uniquement pour la conversion. Tomverse ne conserve pas l'enregistrement, et le texte obtenu arrive dans la zone de saisie pour que vous puissiez le vérifier avant l'envoi.",

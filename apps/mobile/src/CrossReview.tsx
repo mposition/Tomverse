@@ -5,9 +5,12 @@ import { mobileReviewCopy } from "../../../locales/mobileReview";
 import { mobileCopy, type MobileLanguage } from "../../../locales/mobile";
 import type { ChatTransport } from "./chatTransport";
 import { Sheet } from "./Sheet";
+import type { ReviewChatSource } from "../../../lib/reviewToChat";
+import { reviewHandoffCopy } from "../../../locales/reviewHandoff";
 
-export function CrossReview({ id, owner, transport, language, onClose, onSource, onBusy }: {
+export function CrossReview({ id, owner, transport, language, onClose, onSource, onBusy, onContinue }: {
   id: string; owner: string | null; transport: ChatTransport; language: MobileLanguage; onClose: () => void; onSource: (id: string) => void; onBusy: (busy: boolean) => void;
+  onContinue?: (source: ReviewChatSource) => void;
 }) {
   const c = mobileReviewCopy(language);
   const [mode, setMode] = useState<ReviewMode>("balanced"); const [synthesis, setSynthesis] = useState(false);
@@ -65,6 +68,7 @@ export function CrossReview({ id, owner, transport, language, onClose, onSource,
     {!review && <><p>{setup?.reason ?? setup?.disclaimer}</p>{setup?.available && <p>{c.cost}: {setup.estimatedCredits ?? "—"}</p>}<button className="primary" disabled={busy || unknown || !setup?.available} onClick={() => void run()}>{busy ? mobileCopy[language].loading : c.run}</button></>}
     {unknown && <><p role="status">{c.uncertain}</p><button disabled={busy} onClick={() => void load()}>{c.refresh}</button></>}
     {review && result && <><p>{review.disclaimer}</p><p>{review.usageCredits} {c.credits}{review.cached ? " · cached" : ""}</p><div className="review-provider-tabs">{(["primary", "secondary"] as const).filter(value => review.result[value]).map(value => <button key={value} aria-pressed={reviewer === value} onClick={() => setReviewer(value)}>{review.result[value]?.reviewerModelId}</button>)}</div>
+    {onContinue && setup?.source && !review.guest && review.persisted !== false && <button disabled={busy} className="primary" onClick={() => onContinue({ kind: "review", conversationId: id, setup, review, mode, includeSynthesis: synthesis, reviewer })}>{reviewHandoffCopy[language === "zh-Hant" ? "zhHant" : language].continue}</button>}
     <p>{grounding?.available ? `${c.grounding}: ${grounding.percent}% (${grounding.matchedQuotes}/${grounding.totalQuotes})` : c.noGrounding}</p><p className="field-hint">{c.groundingHint}</p>
     {(["consensus", "contradictions"] as const).map(section => <section key={section}><h3>{c[section]}</h3>{result[section].map((claim, index) => <article className="review-claim" key={index}><p>{claim.text}</p>{citations(claim.citations)}{actions(section, index, claim.text)}</article>)}</section>)}
     <section><h3>{c.differences}</h3>{result.differences.map((item, index) => <article className="review-claim" key={index}><h4>{item.issue}</h4>{item.positions.map((position, n) => <div key={n}><p>{position.responseId}: {position.position}</p>{citations([position])}</div>)}{actions("differences", index, item.issue)}</article>)}</section>

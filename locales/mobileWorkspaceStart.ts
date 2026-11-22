@@ -9,6 +9,7 @@ type Copy = typeof en;
 const copies: Record<MobileLanguage, Copy> = {
   en,
   ko: { chatFirst: "편하게", chatLast: "물어보세요", chatDescription: "궁금한 점을 물어보고,\n생각을 함께 정리해 보세요.", chatAutomatic: "질문마다 AI를 알아서 골라,\n답변 품질과 비용을 함께 고려해요.", reviewFirst: "같은 질문,", reviewLast: "여러 AI의 답변", reviewDescription: "답변을 나란히 읽고 차이를 비교하세요." },
+  "zh-Hant": {"chatFirst":"隨時提問","chatLast":"輕鬆開始","chatDescription":"提出問題、探索想法，\n一起釐清思路。","chatAutomatic":"為每個問題選擇 AI，\n兼顧回答品質與費用。","reviewFirst":"同一個問題，","reviewLast":"不同 AI 的回答","reviewDescription":"並排閱讀回答，比較彼此的差異。"},
   zh: { chatFirst: "随时提问", chatLast: "轻松开始", chatDescription: "提出问题、探索想法，\n一起理清思路。", chatAutomatic: "为每个问题选择 AI，\n兼顾回答质量和费用。", reviewFirst: "同一个问题，", reviewLast: "不同 AI 的回答", reviewDescription: "并排阅读回答，比较它们的差异。" },
   de: { chatFirst: "Frag, was", chatLast: "dich beschäftigt", chatDescription: "Stelle Fragen, entdecke Ideen\nund ordne deine Gedanken.", chatAutomatic: "Tomverse wählt für jede Frage eine KI\nund berücksichtigt Qualität und Kosten.", reviewFirst: "Eine Frage,", reviewLast: "mehrere KI-Antworten", reviewDescription: "Lies Antworten nebeneinander\nund vergleiche die Unterschiede." },
   fr: { chatFirst: "Posez", chatLast: "vos questions", chatDescription: "Posez une question, explorez une idée\nou clarifiez vos pensées.", chatAutomatic: "Tomverse choisit une IA par question\nen tenant compte de la qualité et du coût.", reviewFirst: "Une question,", reviewLast: "plusieurs réponses", reviewDescription: "Lisez les réponses côte à côte\net comparez leurs différences." },

@@ -105,7 +105,7 @@ test("a draft conflict preserves local edits and blocks navigation until explici
   await draft.fill("My unsaved edit");
   await expect(page.getByRole("alert")).toContainText("changed elsewhere");
   await expect(draft).toHaveValue("My unsaved edit");
-  await expect(page.getByRole("navigation").getByRole("button", { name: "Chat", exact: true })).toBeDisabled();
+  await expect(page.locator(".workspace-navigation").getByRole("button", { name: "Chat", exact: true })).toBeDisabled();
   await page.getByRole("button", { name: "Load saved draft", exact: true }).click();
   await expect(draft).toHaveValue("Edited on another device");
 });
@@ -120,7 +120,7 @@ test("an unknown send never recreates its consumed question and is resolved by r
   await page.evaluate(storage => localStorage.setItem(`${storage}:review-send-unknown`, "true"), storage);
   await page.getByRole("button", { name: "Send message", exact: true }).click();
   await expect(page.locator(".review-workspace .restore")).toBeVisible();
-  await expect(page.getByRole("navigation").getByRole("button", { name: "Chat", exact: true })).toBeDisabled();
+  await expect(page.locator(".workspace-navigation").getByRole("button", { name: "Chat", exact: true })).toBeDisabled();
   await page.locator(".review-workspace .restore").click();
   await expect(draft).toHaveValue("");
   const target = await page.evaluate(storage => JSON.parse(localStorage.getItem(storage)!).find((row: { productKey?: string }) => row.productKey === "review"), storage);

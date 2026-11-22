@@ -106,7 +106,7 @@ test("settings and sign-out remain reachable during an active response", async (
   await expect(page.getByRole("button", { name: "Stop response" })).toBeVisible();
   await page.getByRole("button", { name: "Conversations", exact: true }).click();
   await page.getByTestId("sidebar-account").getByRole("button", { name: "Settings" }).click();
-  await page.getByRole("button", { name: "Account", exact: true }).click();
+  await page.getByTestId("native-settings-tab-account").click();
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
   await expect(page.getByRole("button", { name: "Continue with Tomverse" })).toBeVisible();
 });
@@ -137,7 +137,7 @@ test("a list read completing after sign-out never starts background title genera
   await expect.poll(() => page.evaluate(() => typeof (window as unknown as { finishList?: unknown }).finishList)).toBe("function");
   await page.getByRole("button", { name: "Conversations", exact: true }).click();
   await page.getByTestId("sidebar-account").getByRole("button", { name: "Settings" }).click();
-  await page.getByRole("button", { name: "Account", exact: true }).click();
+  await page.getByTestId("native-settings-tab-account").click();
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
   await page.evaluate(async () => { await (window as unknown as { finishList: () => Promise<void> }).finishList(); });
   await expect(page.getByRole("button", { name: "Continue with Tomverse" })).toBeVisible();
