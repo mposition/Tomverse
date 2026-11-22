@@ -630,3 +630,62 @@ test("the next challenger leaves out models whose answers all failed in the last
   });
   assert.deepEqual(await readUnreliableAnswerModels(), []);
 });
+
+test("a diagnostic cost-efficiency cycle is refused by manual and system promotion and leaves guidance, rollback and audit unchanged", async () => {
+  const { COST_EFFICIENCY_OBJECTIVE } = await import("@/lib/autoRouterOptimizerCore");
+  // Even a row that claims "passed" with a verified summary is refused once it carries an objective.
+  const forged = await seedCycle({ status: "passed", candidateGuidance: PROPOSAL,
+    summary: { ...VERIFIED_SUMMARY, objective: COST_EFFICIENCY_OBJECTIVE, costEfficiency: { version: "auto-cost-efficiency-report-v1" } } });
+  const diagnostic = await seedCycle({ status: "diagnostic", candidateGuidance: PROPOSAL,
+    summary: { ...VERIFIED_SUMMARY, objective: COST_EFFICIENCY_OBJECTIVE } });
+  for (const who of [actor, "system" as const]) {
+    for (const cycle of [forged, diagnostic]) {
+      assert.deepEqual(await promoteAutoRouterOptimizerCycle(cycle.id, who), { refused: "diagnostic_only" });
+    }
+  }
+  assert.equal((await readActiveRouterGuidance()).cycleId, null);
+  assert.equal(await auditFor(forged.id, "auto.llm_router_guidance.promoted"), 0);
+  const state = await readAutoRouterOptimizerState();
+  const shown = state.cycles.find((cycle) => cycle.id === diagnostic.id);
+  assert.deepEqual(shown?.promotionEligibility, { eligible: false, refusal: "diagnostic_only" });
+  assert.equal(state.costEfficiencyDiagnostic.available, false);
+  // The existing routing cycle beside it still promotes and rolls back as before.
+  const valid = await seedCycle({ status: "passed", candidateGuidance: PROPOSAL });
+  assert.deepEqual(await promoteAutoRouterOptimizerCycle(valid.id, actor), { ok: true });
+  assert.deepEqual(await rollBackAutoRouterGuidance(actor), { ok: true });
+});
+
+test("a diagnostic starts only for a person and only with its switch on; a refusal reserves nothing", async () => {
+  const { startAutoRouterOptimizerCycle } = await import("@/lib/autoRouterOptimizer");
+  const before = process.env.AUTO_ROUTER_COST_EFFICIENCY_DIAGNOSTIC;
+  try {
+    delete process.env.AUTO_ROUTER_COST_EFFICIENCY_DIAGNOSTIC;
+    assert.deepEqual(await startAutoRouterOptimizerCycle(actor, { objective: "chat_cost_efficiency" }), { refused: "diagnostic_off" });
+    process.env.AUTO_ROUTER_COST_EFFICIENCY_DIAGNOSTIC = "on";
+    assert.deepEqual(await startAutoRouterOptimizerCycle("system", { objective: "chat_cost_efficiency" }), { refused: "diagnostic_needs_person" });
+    assert.equal(await prisma.autoRouterOptimizerCycle.count(), 0);
+  } finally {
+    if (before === undefined) delete process.env.AUTO_ROUTER_COST_EFFICIENCY_DIAGNOSTIC;
+    else process.env.AUTO_ROUTER_COST_EFFICIENCY_DIAGNOSTIC = before;
+  }
+  // The audit entry of a diagnostic's start names its objective; a routing start does not.
+  const started = await reserveOptimizerCycle({
+    actor, optimizerModelId: "optimizer-model", routerModelId: "router-model",
+    incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE, objective: "chat_cost_efficiency",
+  });
+  assert.ok("cycle" in started);
+  const audit = await prisma.adminAuditLog.findFirstOrThrow({ where: { targetId: started.cycle.id, action: "auto.llm_router_optimizer.cycle_started" } });
+  assert.equal((audit.metadata as { objective?: string }).objective, "chat_cost_efficiency");
+});
+
+test("a finished diagnostic's failed answers count toward the next challenger's reliability", async () => {
+  const { readUnreliableAnswerModels } = await import("@/lib/autoRouterOptimizer");
+  await prisma.autoRouterOptimizerCycle.create({
+    data: {
+      optimizerModelId: "optimizer-model", routerModelId: "router-model",
+      incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE, reservedMicroUsd: 0, status: "diagnostic",
+      summary: { evaluated: 12, answerStats: { "cheap-model": { answered: 0, failed: 3 } } },
+    },
+  });
+  assert.deepEqual(await readUnreliableAnswerModels(), ["cheap-model"]);
+});

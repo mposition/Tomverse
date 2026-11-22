@@ -1185,6 +1185,15 @@ run(
     "tests/integration/auto-router-optimizer-coding-run.db.test.mjs"],
   "Running the coding optimizer cycle's isolation gate, unknown-cost stops and evaluation spend",
 );
+// The cost-efficiency diagnostic's run fakes the model calls with module mocks:
+// its own process, like the coding run above.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1",
+    "tests/integration/auto-router-optimizer-diagnostic-run.db.test.mjs"],
+  "Running the cost-efficiency diagnostic's run: diagnostic-only record, no promotion or setting change",
+);
 // The native protocols (Claude Code Messages, Codex Responses) fake only the
 // one upstream module and run on the same ledger, key cap and receipts.
 run(

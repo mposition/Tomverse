@@ -34,6 +34,8 @@ import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib
 const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("set_model"), modelId: z.string().trim().min(1).max(120).nullable() }).strict(),
   z.object({ action: z.literal("run") }).strict(),
+  // A person's start of the diagnostic-only cost-efficiency cycle; refused while its switch is off.
+  z.object({ action: z.literal("run_cost_diagnostic") }).strict(),
   z.object({ action: z.literal("set_automation"), daily: z.boolean(), autoPromote: z.boolean() }).strict(),
   z.object({ action: z.literal("promote"), cycleId: z.string().trim().min(1).max(64) }).strict(),
   z.object({ action: z.literal("roll_back") }).strict(),
@@ -158,8 +160,8 @@ export async function POST(req: Request) {
       return await stateResponse();
     }
 
-    if (body.action === "run") {
-      const started = await startAutoRouterOptimizerCycle(actor);
+    if (body.action === "run" || body.action === "run_cost_diagnostic") {
+      const started = await startAutoRouterOptimizerCycle(actor, body.action === "run_cost_diagnostic" ? { objective: "chat_cost_efficiency" } : {});
       if ("refused" in started) {
         return NextResponse.json({ error: started.refused, code: started.refused }, { status: 409 });
       }

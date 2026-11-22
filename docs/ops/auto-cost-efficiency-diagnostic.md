@@ -1,0 +1,125 @@
+# Auto cost-efficiency diagnostic
+
+Local implementation on `origin/develop` `dfe689790` (2026-11-23), compared
+with the analysis baseline `origin/main` `5c434da84` (2026-11-22). Between the
+two, the only change in the optimizer files was the synthetic menu's
+signed-in file context in `autoCandidateMenu`, which this change keeps (it
+moved into `buildAutoCandidateMenu`). The P0 behaviour recorded in
+`docs/ops/auto-router-quality-cost-p0-validation.md` is reused, not rebuilt.
+
+This is code behaviour and a run plan. No paid evaluation, provider call,
+live optimizer cycle or production read was made. Nothing here shows that a
+cheaper model is good enough or that total cost falls.
+
+## Implemented behaviour
+
+- **Objective.** `runOptimizerCycle` takes `objective: "chat_cost_efficiency"`.
+  Absent, every target (routing, coding, rewrite) runs the existing
+  routing-quality cycle unchanged. The new objective is
+  `diagnostic_only` (`COST_EFFICIENCY_OBJECTIVE`, candidate policy
+  `auto-cost-challenger-v1`, judge rubric `auto-quality-blind-judge-v1`).
+- **Challenger.** Inside the existing one slot and the offered menu (plan,
+  context, capability, health and unreliable-model filters unchanged):
+  `lower_credit` first, then `lower_estimated_provider_cost` (same credits,
+  lower estimate at the reserved input and 1 000 output tokens for every
+  model; unpriced or fallback-priced estimates are null, never zero), else the
+  existing same/next-higher draw as `quality_comparison`, which is never a
+  savings sample. Ties break by credits, id and case position. No model is a
+  fixed winner.
+- **Judge.** The same two orders and the same ordered-judgement cache, in
+  place of the price-aware judge, never in addition. It reads the bounded
+  message the answering models received (up to 4 000/600 characters, head and
+  tail) instead of the existing 2 000/400 excerpt that drops a long message's
+  middle, and answers up to 16 000 characters with a truncation flag. No
+  credits or model names. Structured `quality` A/B/equal/insufficient plus a
+  constraint failure per answer. Orders combine to a/b/equal only when they
+  agree; insufficient, order disagreement and a missing verdict stay
+  separate. A case with an expected answer is also graded by the existing
+  `router-development-exact-json-v1` grader.
+- **Cost attribution.** Evaluation calls carry objective/case/model/arm/try
+  identity in the existing coverage. Each answer's tries, failed tries and
+  known or unknown spend are kept; a replay that reuses a direct comparison's
+  answer is marked and not paid twice. Routing-cycle calls are priced by
+  `calculateProviderUsageCost` with the reported cache-read and cache-write
+  lines; an unpriced cache write is unknown. Unknown cost still stops new
+  scheduling and drains in-flight work.
+- **Report.** `summary.costEfficiency` (`auto-cost-efficiency-report-v1`):
+  candidate diagnosis (savings samples by basis, quality tally, critical
+  regressions, exact results, credits, observed answer cost pairs with
+  `lower_observed_provider_cost` counts, answer latency), the frozen baseline
+  against the proposal on the same holdout (changed picks only; an unchanged
+  pick is not a second observation), partial serving cost (router per arm and
+  changed answers; Refiner, app search, tools, attachments and Memory
+  excluded), experiment cost (all calls, failed, retried, unknown, not
+  started), `taskCost: unlinked`, and applicability reasons. A credit change
+  or ratio is never reported as a saving.
+- **Real Chat serving cost.** `readAutoChatServingCost` joins
+  `AutoRouterDecision.traceId` → `ChatCreditReservation.traceId` (source
+  `chat`) → `resolvedAttemptCosts`, with `RoutingRun` and the
+  `${traceId}:server` latency sample, for the last 7 days (100 traces).
+  Coverage is `answer_cost_only`: router tokens have no price snapshot,
+  Refiner and app-managed search are unattributed, native search is inside
+  the attempt cost. No new ledger and no daily-bucket inference.
+- **Holdout.** The diagnostic splits by family (conversation id; a synthetic
+  message alone), so a conversation never straddles the halves. Guidance is
+  still frozen before any holdout call, and no current or earlier comparison
+  enters the generator.
+- **Boundaries.** `optimizerPromotionEligibility` refuses any summary with an
+  objective or a cost-efficiency report (`diagnostic_only`), before every
+  other check, for manual and system promotion; the status is `diagnostic`,
+  never `passed`. The run skips `applyCycleTunableChanges` and automatic
+  promotion, and `actionableRecommendations` returns nothing for it, so the
+  recommendation agent and sends cannot act on it. The daily schedule never
+  starts one. A person starts it from Admin › Routing only while
+  `AUTO_ROUTER_COST_EFFICIENCY_DIAGNOSTIC=on` (default off), under the
+  existing optimizer model approval, run/day/month ceilings and audit entry
+  (`metadata.objective`). Legacy cycles, active guidance, CAS and rollback are
+  unchanged. Its failed answers count toward the next challenger's
+  reliability like any finished cycle's.
+- **Admin.** Each diagnostic cycle shows the report block; the routing tile
+  shows the real serving-cost report. Copy is in
+  `lib/adminMessages/costEfficiency.ts` (en/ko).
+
+## Dry run
+
+`npm run benchmark:auto-cost-efficiency:dry-run -- [--output=NEW_PATH]
+[--optimizer-model=ID] [--router-model=ID]` — local PC, PowerShell, this
+repository; no database, credential, network or provider client. It builds
+the manifest from the static catalogue (`lib/models.ts`; a live run's manifest
+uses the runtime registry) and runs the real cycle with deterministic mock
+calls over the tool-free KO/EN fixtures (`tests/fixtures/autoQualityCostCases.mjs`;
+tool, freshness and long-tail delivery cases need Chat E2E) and the
+development corpus (`development-v1.json`, exact answers).
+
+Result on this commit (mock): 40 cases, 21 train / 19 holdout, 11/10
+families; planned calls generate 1, route 38, answer ≤152, judge 76; worst
+case US$100.09, almost all from every answer retried on the dearest model at
+its output cap. The binding limit is the existing US$25 actual-spend run
+ceiling. The mock's wrong calculation on the lowest tier is caught (exact
+11/11 vs 10/11, one critical regression). These numbers describe the code
+path only; mock quality and mock spend are not evidence.
+
+## Run plan (paid, not started)
+
+Proposed: a person-started diagnostic on the **dev** environment's Admin ›
+Routing, with the switch on for that service only, the existing optimizer
+and router models, and the existing caps. Sample: recent picked decisions
+plus synthetic messages to 24, family split. Before the run, the owner fixes
+the criteria; the run records them and their digest; results never change
+them. Proposed values (`auto-cost-efficiency-criteria-v1`, unconfirmed): at
+least 10 savings samples, 0 critical regressions, current pick better in at
+most 10% of judged savings samples, at most 20% undecided, at most 10%
+cheaper-model answer failures, latency reported only, order disagreement
+never counted as equal.
+
+A small sample can report `observed_no_regression`, not non-inferiority.
+After the run: read the report, then decide separately whether a guidance
+change is worth an ordinary routing cycle; nothing is applied automatically.
+
+## What remains unmeasured
+
+Real model quality and cost of cheaper candidates, total serving cost
+(router, Refiner, app search not attributed), task cost across regenerations,
+statistical non-inferiority, invoice reconciliation, tool and attachment
+paths, and any production saving. Signed-in affordability, reservation
+reconciliation, prices, credits and providers are unchanged.
