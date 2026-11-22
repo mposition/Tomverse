@@ -21,7 +21,7 @@ import { readAmuxDmOwnerSettlementPullEvidence } from "@/lib/amux/dmOwnerSettlem
 import { parseAmuxV22Conclusion } from "@/lib/amux/v22ConclusionCore";
 import { parseAmuxV22OwnerQuestion } from "@/lib/amux/v22OwnerQuestionCore";
 import { openCompletionCriteria } from "@/lib/amux/v22ResultReviewService";
-import { openAmuxV22TaskResultRow, v22TaskResultIdeaId } from "@/lib/amux/v22TaskResultStore";
+import { openAmuxV22TaskPatchRow, openAmuxV22TaskResultRow, v22TaskResultIdeaId } from "@/lib/amux/v22TaskResultStore";
 import {
   openAmuxV52RejectedReviewEntries,
   readAmuxV52RejectedReviews,
@@ -38,8 +38,14 @@ import { isSnapshotTargetSha } from "@/lib/amux/decisionMakerCore";
  *
  *   T2 draft (EngineeringAgentDmReview)       PATCH.diff; the commit the draft was made on
  *   owner settlement (AmuxDmOwnerSettlement)  CRITERIA.md, FINDINGS.md (the run's report, then
- *                                             every rejected review's findings), a review PR's PATCH.diff
- *   result review (AmuxV22ResultReview)       CRITERIA.md, FINDINGS.md
+ *                                             every rejected review's findings), a review PR's PATCH.diff,
+ *                                             else the run's own change as PATCH.diff on its base commit
+ *   result review (AmuxV22ResultReview)       CRITERIA.md, FINDINGS.md, the run's change as PATCH.diff
+ *                                             on its base commit
+ *
+ * The run's change (2026-11-22): a settlement of a card run sent the DM the
+ * rejections that named the change but not the change itself, so the DM could
+ * not check one finding ("This workspace lacks the proposed diff").
  *   v22 question (AmuxV22TaskQuestion)        CONTEXT.md: what the worker found, whole; develop's public head
  *   anything else (a worker's own typed ask)   no evidence; develop's public head
  *
@@ -65,19 +71,26 @@ type SealedBody = {
   bodyKeyVersion: number | null; bodyDigest: string | null; bodyDigestKeyId: string | null;
 };
 
+/** The run's captured change (AmuxV22TaskPatch), sealed; opened outside the read. */
+type SealedRunPatch = {
+  ideaId: string; keyId: string | null; keyVersion: number | null; digest: string; digestKeyId: string;
+  bodyPurgedAt: Date | null; patchSha256: string; baseSha: string;
+};
+
 export type DmWorkspaceSource =
   | { kind: "none" }
   | { kind: "t2_draft"; patchBody: string | null; baseSha: string | null }
   | ({ kind: "settlement"; settlementKind: string; pullPatch: string | null;
-      reviews: AmuxV52ReviewHistoryRow[] } & SealedBody & SealedResult)
-  | ({ kind: "result_review" } & SealedBody & SealedResult)
+      reviews: AmuxV52ReviewHistoryRow[]; runPatch?: SealedRunPatch | null } & SealedBody & SealedResult)
+  | ({ kind: "result_review"; runPatch?: SealedRunPatch | null } & SealedBody & SealedResult)
   | ({ kind: "v22_question" } & SealedResult);
 
 /**
  * The request's card and the one row it was filed from. Null for a request
  * that does not exist. At most four statements past the boundary's own: the
- * card id, the source row, then for a settlement its pull request's patch and
- * its Task's rejected reviews.
+ * card id, the source row, then for a settlement its pull request's patch (a
+ * review PR) or its run's change (any other), and its Task's rejected reviews;
+ * for a result review, its run's change.
  */
 export async function readDecisionMakerWorkspaceSource(tx: Prisma.TransactionClient, requestId: string):
   Promise<DmWorkspaceSource | null> {
@@ -134,7 +147,9 @@ export async function readDecisionMakerWorkspaceSource(tx: Prisma.TransactionCli
     keyVersion: row.keyVersion ?? null, digest: row.digest ?? null, digestKeyId: row.digestKeyId ?? null,
     sourceSha256: row.sourceSha256 ?? null, bodyPurgedAt: row.bodyPurgedAt ?? null,
   };
-  if (row.source === "result_review") return { kind: "result_review", ...sealed };
+  if (row.source === "result_review") {
+    return { kind: "result_review", runPatch: await readRunPatch(tx, sealed.attemptId, sealed.taskId), ...sealed };
+  }
   if (row.source === "v22_question") {
     const { attemptId, resultIdeaId, keyId, keyVersion, digest, digestKeyId, sourceSha256, bodyPurgedAt } = sealed;
     return { kind: "v22_question", attemptId, resultIdeaId, keyId, keyVersion, digest, digestKeyId,
@@ -142,11 +157,29 @@ export async function readDecisionMakerWorkspaceSource(tx: Prisma.TransactionCli
   }
   const pulls = row.settlementKind === "t2_pr" && row.bindingId ?
     await readAmuxDmOwnerSettlementPullEvidence(tx, [row.bindingId]) : [];
+  // Not a review PR: the run's own change, the change its rejections are about.
+  const runPatch = row.settlementKind === "t2_pr" ? null : await readRunPatch(tx, sealed.attemptId, sealed.taskId);
   // The card says its rejections' findings are in FINDINGS.md: read every one, as the card's sync did.
   const reviews = await readAmuxV52RejectedReviews(tx, [sealed.taskId]);
   return { kind: "settlement", settlementKind: row.settlementKind ?? "", pullPatch: pulls[0]?.patchBody ?? null,
-    reviews, ...sealed };
+    runPatch, reviews, ...sealed };
 }
+
+/** The run's captured change, sealed (no body: it is read in slices when opened), or null when it left none. */
+async function readRunPatch(tx: Prisma.TransactionClient, attemptId: string | null, taskId: string):
+  Promise<SealedRunPatch | null> {
+  if (!attemptId) return null;
+  const patch = await tx.amuxV22TaskPatch.findUnique({ where: { attemptId }, select: { taskId: true, ideaId: true,
+    keyId: true, keyVersion: true, digest: true, digestKeyId: true, bodyPurgedAt: true, patchSha256: true,
+    baseSha: true } });
+  if (!patch || patch.taskId !== taskId) return null;
+  const { taskId: _taskId, ...sealedPatch } = patch;
+  return sealedPatch;
+}
+
+/** The run's change, or null when it left none or it cannot be opened (purged, or no longer its digest). */
+const openRunPatch = async (attemptId: string | null, patch: SealedRunPatch | null | undefined) =>
+  !attemptId || !patch ? null : openAmuxV22TaskPatchRow(attemptId, patch).catch(() => null);
 
 /** The run's whole result text, or null when it left none or it cannot be opened. */
 const openResultText = async (row: SealedResult) => {
@@ -204,10 +237,22 @@ export async function openDecisionMakerWorkspaceEvidence(
         .catch(() => ({ entries: [], unread: source.reviews.length }));
       files.push({ name: "FINDINGS.md", text: amuxDmOwnerSettlementFindingsText({ report, reviews }),
         missing: reportMissing });
-      files.push({ name: "PATCH.diff", text: source.pullPatch,
-        missing: source.settlementKind === "t2_pr" && !source.pullPatch });
+      if (source.settlementKind === "t2_pr") {
+        files.push({ name: "PATCH.diff", text: source.pullPatch, missing: !source.pullPatch });
+      }
     } else {
       files.push({ name: "FINDINGS.md", text: report, missing: reportMissing });
+    }
+    // The run's change, on the commit it was made on (a commit the worker
+    // fetched, so a public one): repo/ is that commit and repo-patched/ the
+    // change applied. The card does not point at it, so a change that cannot
+    // be opened is left out without stopping the request.
+    if (source.kind === "result_review" || source.settlementKind !== "t2_pr") {
+      const change = await openRunPatch(source.attemptId, source.runPatch);
+      if (change) {
+        files.push({ name: "PATCH.diff", text: change, missing: false });
+        if (source.runPatch && isSnapshotTargetSha(source.runPatch.baseSha)) targetSha = source.runPatch.baseSha;
+      }
     }
   } else if (source.kind === "v22_question") {
     // The question's own line, read again from its run's result: what the

@@ -150,6 +150,7 @@ function verdictOf(value) {
   const name = value.trim().toLowerCase();
   if (["accept", "accepted", "approve", "approved", "pass", "lgtm"].includes(name)) return "accept";
   if (["reject", "rejected", "request_changes", "request-changes", "changes_requested", "fail"].includes(name)) return "reject";
+  if (["unknown", "could_not_review", "cannot_review", "unable_to_review"].includes(name)) return "unknown";
   return null;
 }
 
@@ -184,6 +185,10 @@ export function parseReviewerOutput(text) {
   // A blocker or major finding rejects whatever the reviewer concluded.
   const blocking = findings.some((finding) => BLOCKING.has(finding.severity));
   const stated = verdictOf(parsed.verdict);
+  // The reviewer says it could not read the change: its findings, blocking or
+  // not, are about its own access, not about the change. Never an accept; the
+  // service gives the slot to another reviewer.
+  if (stated === "unknown") return { verdict: "unknown", reason: "reviewer_could_not_review", findings };
   if (blocking) {
     return stated === "reject" ? { verdict: "reject", findings }
       : { verdict: "reject", reason: stated === "accept" ? "blocking_finding_overrides_accept" : "blocking_finding_without_verdict", findings };

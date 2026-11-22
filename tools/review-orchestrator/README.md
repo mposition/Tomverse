@@ -14,13 +14,17 @@
   만큼 살립니다(운영자 결정 2026-11-15). 판정 자체를 읽을 수 없으면 `unknown`이고
   accept로 짐작하지 않습니다. blocker·major 지적이 있으면 reviewer가 accept라고 해도
   reject입니다.
-- reviewer는 diff를 prompt에서 받지 않고 자기 checkout에서 `git diff <base> <head>`로
-  통째로 읽습니다. 그래서 diff 크기와 파일 목록 개수에 서버가 두는 한도가 없고, scope도
+- reviewer는 diff를 prompt에서 받지 않고, 서버가 자기 checkout에 써 둔
+  `.review-orchestrator/change.diff`(검토 범위 전체, `git diff --output`)를 파일 도구로 읽습니다.
+  shell이 있는 reviewer는 `git diff <base> <head>`로 읽어도 됩니다. Claude(`Read`·`Grep`·`Glob`)와
+  Antigravity(`view_file`)는 shell이 없어 2026-11-22까지 diff를 읽지 못하고 "검토할 수 없음"으로
+  reject했습니다. 그래서 diff 크기와 파일 목록 개수에 서버가 두는 한도가 없고, scope도
   서버가 자르지 않습니다. scope는 SSH 명령 인자 하나로 오므로 전송 한계(RPC token 120,000자,
   scope 약 60,000바이트)만 남습니다. AMUX는 20,000자 안에서 보냅니다.
   지침 파일(AGENTS.md 등) 변경만 checkout이 base 판이라 prompt에 통째로 보여 줍니다.
 - **reviewer가 답하지 못한 것은 끝이 아닙니다.** 시간을 넘김(`timeout`)·출력 한도 초과·비정상 종료·실행
-  실패는 그 slot을 이미 실패한 vendor와 이 job의 다른 slot이 쓰는 vendor를 뺀 채 대기열에 되돌려
+  실패, 그리고 reviewer가 변경을 읽을 수 없었다며 `"verdict":"unknown"`으로 답한 것(`reviewer_could_not_review`,
+  지적이 major여도 reject로 세지 않음)은 그 slot을 이미 실패한 vendor와 이 job의 다른 slot이 쓰는 vendor를 뺀 채 대기열에 되돌려
   다른 vendor가 맡게 합니다. 시도할 vendor가 남지 않으면 제외 목록을 비우고 1분, 2분, 4분 …
   최대 30분을 기다린 뒤 다시 돕니다(`unknown`으로 끝내지 않습니다). worktree 준비나 prompt 파일 쓰기처럼
   이 서버의 문제는 vendor를 탓하지 않고 같은 방식으로 기다리기만 합니다. 운영자가 reviewer를 지정한
