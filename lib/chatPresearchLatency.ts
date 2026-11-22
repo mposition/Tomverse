@@ -6,6 +6,8 @@ type PresearchWindow = {
   serverAttempts: number;
   paired: number;
   missingClient: number;
+  missingClientNoToken: number;
+  missingClientServerCompleted: number;
   failed: number;
   cancelled: number;
   completed: number;
@@ -30,7 +32,7 @@ export async function readChatPresearchLatency(now = new Date()) {
       WITH bounds AS (
         SELECT ${asOf}::timestamp AS cutoff
       ), attempts AS (
-        SELECT s."createdAt", c.id IS NOT NULL AS paired,
+        SELECT s."createdAt", c.id IS NOT NULL AS paired, s.outcome AS server_outcome,
                (c.timings->>'firstContentMs')::int AS first_ms,
                (c.timings->>'completionMs')::int AS total_ms,
                (s.timings->>'providerToContentMs')::int AS provider_ms,
@@ -51,6 +53,10 @@ export async function readChatPresearchLatency(now = new Date()) {
       SELECT hours, count(a."createdAt")::int AS "serverAttempts",
              count(*) FILTER (WHERE paired)::int AS paired,
              count(*) FILTER (WHERE a."createdAt" IS NOT NULL AND NOT paired)::int AS "missingClient",
+             -- A turn that failed before its stream is never given a browser
+             -- latency token, so its client pair is absent by design.
+             count(*) FILTER (WHERE NOT paired AND server_outcome = 'failed_before_stream')::int AS "missingClientNoToken",
+             count(*) FILTER (WHERE NOT paired AND server_outcome = 'completed')::int AS "missingClientServerCompleted",
              count(*) FILTER (WHERE outcome = 'failed')::int AS failed,
              count(*) FILTER (WHERE outcome = 'cancelled')::int AS cancelled,
              count(total_ms) FILTER (WHERE outcome = 'completed')::int AS completed,
