@@ -386,7 +386,8 @@ process.stdout.write(${JSON.stringify(JSON.stringify({ type: "result", subtype: 
     assert.equal(dmPayloadDigest(REQUEST_KEY, stdin), broker.fixture.evidence.inputPayloadDigest);
     assert.equal(readFileSync(broker.fixture.at("/observed/cwd"), "utf8"), broker.requestDirectory());
     assert.equal(existsSync(broker.requestDirectory()), false);
-    assert.deepEqual(broker.served, [{ answered: "launched", outcome: "output", cleanup: "verified" }]);
+    // claude's JSON result carries no tool events, so there is nothing to count.
+    assert.deepEqual(broker.served, [{ answered: "launched", requestId: REQUEST_ID, outcome: "output", cleanup: "verified", tools: null }]);
     // The broker's log has codes, not the output, the payload or the key.
     const logged = JSON.stringify(broker.logs);
     assert.equal(broker.logs.length, 1);

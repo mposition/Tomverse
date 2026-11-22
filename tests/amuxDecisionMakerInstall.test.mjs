@@ -318,3 +318,46 @@ test("the release holds exactly what the installer expects, with the launcher's 
     rmSync(out, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------------------
+// Codex's Code Mode host (§5a "함께 두는 파일")
+// ---------------------------------------------------------------------------
+
+const HOST_INSTALLER = "scripts/install-amux-dm-code-mode-host.sh";
+const hostInstaller = read(HOST_INSTALLER);
+const hostConstant = (name) => {
+  const match = hostInstaller.match(new RegExp(`^readonly ${name}=("?)([^"\\n]*)\\1$`, "m"));
+  assert.ok(match, `${name} is a readonly constant of the host installer`);
+  return match[2];
+};
+const hostBash = (script, ...args) =>
+  spawnSync(bashPath, ["-c", `source ${HOST_INSTALLER}\n${script}`, "test", ...args], { cwd: repositoryRoot, encoding: "utf8" });
+
+test("the host installer installs exactly the launcher's pinned Code Mode host, from the pinned release asset", () => {
+  const [host] = DM_LAUNCHER_SPECS["decision-maker-openai"].companions;
+  assert.equal(hostConstant("DM_HOST_DEST"), host.path);
+  assert.equal(hostConstant("DM_HOST_SHA256"), host.sha256);
+  const policy = read("docs/policy/amux-decision-maker.md");
+  assert.ok(policy.includes(`\`${hostConstant("DM_HOST_ASSET_SHA256")}\``), "§5a names the release asset's sha256");
+  assert.ok(hostConstant("DM_HOST_ASSET_URL").endsWith(`/rust-v0.162.1/${hostConstant("DM_HOST_ASSET_MEMBER")}.tar.gz`));
+  assert.ok(hostConstant("DM_HOST_ASSET_URL").startsWith("https://github.com/openai/codex/releases/download/"));
+  // The host sits in the directory codex's permissions profile reads, beside codex.
+  assert.equal(host.path.slice(0, host.path.lastIndexOf("/")), DM_CODEX_EXECUTABLE_PATH.slice(0, DM_CODEX_EXECUTABLE_PATH.lastIndexOf("/")));
+});
+
+test("the host installer is a dry run unless --apply, never runs the host, and refuses unknown arguments", { skip: process.platform === "win32" && !readdirSync(join(bashPath, "..")).includes("bash.exe") && "bash is not installed" }, () => {
+  assert.equal(hostBash("true").status, 0, "sourcing runs nothing");
+  assert.equal(spawnSync(bashPath, ["-n", HOST_INSTALLER], { cwd: repositoryRoot }).status, 0);
+  const usage = hostBash('dm_main "$@"', "--force");
+  assert.equal(usage.status, 1);
+  assert.match(usage.stderr, /usage:/);
+  assert.equal(hostBash('dm_main "$@"', "--rollback").status, 1);
+  assert.match(hostBash('dm_main "$@"', "--rollback", "/tmp/elsewhere").stderr, /run as root|must be under/);
+  const code = hostInstaller.replace(/^\s*#.*$/gm, "");
+  // Nothing that writes runs before the --apply branch, and the host binary is never executed.
+  const dryRunEnd = code.indexOf("if [[ $apply -eq 0 ]]; then");
+  assert.ok(dryRunEnd > 0);
+  const beforeApply = code.slice(code.indexOf("dm_main() {"), dryRunEnd);
+  assert.doesNotMatch(beforeApply, /\/usr\/bin\/install -|\bmv -T|\bdm_place\b|> "\$backup/);
+  assert.doesNotMatch(code, /"\$work\/\$DM_HOST_ASSET_MEMBER"\s*(?:$|[;&|])|"\$DM_HOST_DEST"\s+--/m);
+});
