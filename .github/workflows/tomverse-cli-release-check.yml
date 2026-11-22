@@ -584,7 +584,10 @@ jobs:
     if: vars.CLI_MACOS_SIGNING == 'on'
     runs-on: macos-15
     environment: cli-release
-    timeout-minutes: 60
+    # Apple's first notarizations for a new Developer account can take hours
+    # (run 44904786247 passed 45 minutes on one submission); four submissions
+    # wait up to 3 hours each, so the job gets the hosted runner's 6 hours.
+    timeout-minutes: 360
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -654,11 +657,19 @@ jobs:
           fi
           notarize() {
             # One submission, waited on; a failure prints Apple's log and stops. Never resubmitted here.
-            out="$(xcrun notarytool submit "$1" --key "$key" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" --wait --timeout 45m --output-format json)"
+            # A wait that runs out leaves the outcome unknown: the id is printed so it is
+            # looked up (notarytool info <id>) before anything is submitted again.
+            rc=0
+            out="$(xcrun notarytool submit "$1" --key "$key" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" --wait --timeout 3h --output-format json)" || rc=$?
             echo "$out"
-            status="$(printf '%s' "$out" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).status))")"
+            field() { printf '%s' "$out" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(JSON.parse(s)[process.argv[1]]??'')}catch{console.log('')}})" "$1"; }
+            status="$(field status)"
+            id="$(field id)"
             if [ "$status" != "Accepted" ]; then
-              id="$(printf '%s' "$out" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).id))")"
+              if [ -z "$status" ]; then
+                echo "Notarization outcome unknown (notarytool exit $rc) for submission '${id:-none}'. Look it up before submitting again."
+                exit 1
+              fi
               xcrun notarytool log "$id" --key "$key" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" || true
               exit 1
             fi
