@@ -90,7 +90,7 @@ test("webview only uses text nodes, CSP resources and keeps IME composition from
 });
 
 test("redaction preserves JSON syntax for quoted Bearer text, slashes, controls and keys", () => {
-    const key = "tv_fixture_1234567890";
+    const key = ["tv", "fixture", "1234567890"].join("_");
     const values = ['Bearer "token"', 'Bearer \\"token\\"', "Bearer \\n", 'quotes " slash \\ tab\t', key];
     const result = JSON.parse(redactJson({ messages: values, [key]: key }, key));
     assert.equal(result.messages.length, values.length);
