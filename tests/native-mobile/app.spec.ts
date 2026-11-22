@@ -36,11 +36,11 @@ test("startup stays on new Chat after delayed history restore; saved conversatio
     await route.fulfill({ response, body: source.replace("createRoot(container).render(", injection + "createRoot(container).render(") });
   });
   const reopened = await context.newPage(); await reopened.goto("/");
-  await expect(reopened.locator(".chat-welcome")).toBeVisible();
+  await expect(reopened.locator(".ios-welcome")).toBeVisible();
   await expect.poll(() => reopened.evaluate(() => typeof (window as unknown as { __startupQa: { release: unknown } }).__startupQa.release)).toBe("function");
   await reopened.evaluate(() => (window as unknown as { __startupQa: { release: () => void } }).__startupQa.release());
   await expect(reopened.locator(".header-new-chat")).toBeEnabled();
-  await expect(reopened.locator(".chat-welcome")).toBeVisible();
+  await expect(reopened.locator(".ios-welcome")).toBeVisible();
   await expect(reopened.locator("article")).toHaveCount(0);
   expect(await reopened.evaluate(() => (window as unknown as { __startupQa: { loads: number } }).__startupQa.loads)).toBe(0);
   await reopened.getByRole("button", { name: "대화", exact: true }).click();
@@ -79,8 +79,8 @@ test("Chat draft stays with Chat when viewing Review modes", async ({ page }) =>
   await selectProduct(page, "review");
   await expect(page.getByTestId("workspace-start")).toBeVisible();
   await page.getByRole("button", { name: /참여 모델 선택/ }).click();
-  await page.getByRole("button", { name: "Professional", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Professional", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "전문가", exact: true }).click();
+  await expect(page.getByRole("button", { name: "전문가", exact: true })).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "닫기", exact: true }).click();
   await selectProduct(page, "chat");
   await expect(page.getByRole("textbox")).toHaveValue("Chat에만 남을 초안");
@@ -123,7 +123,7 @@ test("microphone refusal leaves typed input usable", async ({ page }) => {
 
 test("sign-out removes previous account drafts and saved conversations", async ({ page }) => {
   await signIn(page); await send(page, "이전 계정의 질문"); await page.getByRole("textbox").fill("비공개 초안");
-  await page.getByRole("button", { name: "대화", exact: true }).click(); await page.getByRole("button", { name: "설정", exact: true }).click(); await page.getByRole("button", { name: "계정", exact: true }).click(); await page.getByRole("button", { name: "로그아웃", exact: true }).click();
+  await page.getByRole("button", { name: "대화", exact: true }).click(); await page.getByRole("button", { name: "설정", exact: true }).click(); await page.getByTestId("native-settings-tab-account").click(); await page.getByRole("button", { name: "로그아웃", exact: true }).click();
   await page.getByRole("button", { name: "Tomverse로 계속" }).click();
   await expect(page.locator("article")).toHaveCount(0); await expect(page.getByRole("textbox")).toHaveValue("");
 });

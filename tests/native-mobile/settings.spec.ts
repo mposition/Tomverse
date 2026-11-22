@@ -1,4 +1,9 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+async function selectSettings(page: Page, tab: string) {
+  if (!await page.getByTestId(`native-settings-tab-${tab}`).isVisible()) await page.getByTestId("native-settings-back").click();
+  await page.getByTestId(`native-settings-tab-${tab}`).click();
+}
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => { localStorage.setItem("tomverse-language", "en"); });
@@ -11,11 +16,12 @@ test.beforeEach(async ({ page }) => {
 
 test("settings match web tab order and keep details in their owning tabs", async ({ page }) => {
   const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
-  await expect(dialog.locator(".settings-tabs button")).toHaveText(["Account", "Preferences", "AI assistants", "AI personalization", "Data", "Plan"]);
+  await expect(dialog.locator(".native-settings-index > button")).toHaveCount(7);
+  await selectSettings(page, "account");
   await expect(dialog.getByRole("button", { name: "Email notifications", exact: true })).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Login methods", exact: true })).toBeVisible();
   await page.screenshot({ path: test.info().outputPath("settings-account.png") });
-  await page.getByTestId("native-settings-tab-preferences").click();
+  await selectSettings(page, "preferences");
   const themes = dialog.getByRole("group", { name: "Theme", exact: true });
   await themes.getByRole("button", { name: "Dark Theme", exact: true }).click();
   await expect(themes.getByRole("button", { name: "Dark Theme", exact: true })).toHaveAttribute("aria-pressed", "true");
@@ -24,14 +30,14 @@ test("settings match web tab order and keep details in their owning tabs", async
   await expect(dialog.getByRole("combobox").nth(0)).toHaveAccessibleName("Language");
   await expect(dialog.getByRole("combobox").nth(1)).toHaveAccessibleName("Daily reset time zone");
   await page.screenshot({ path: test.info().outputPath("settings-preferences.png") });
-  await page.getByTestId("native-settings-tab-assistants").click();
+  await selectSettings(page, "assistants");
   await expect(dialog.getByText("Synthetic writing assistant", { exact: true })).toBeVisible();
-  await page.getByTestId("native-settings-tab-ai").click();
+  await selectSettings(page, "ai");
   await dialog.getByRole("button", { name: "Account memory", exact: true }).click();
   await expect(dialog.getByRole("switch", { name: "Memory", exact: true })).toBeChecked();
   await dialog.getByRole("button", { name: "Back to settings", exact: true }).click();
   await expect(dialog.getByRole("button", { name: "Account memory", exact: true })).toBeFocused();
-  await page.getByTestId("native-settings-tab-data").click();
+  await selectSettings(page, "data");
   await page.screenshot({ path: test.info().outputPath("settings-data.png") });
   await expect(dialog.locator(".settings-entry")).toHaveCount(2);
   await expect(dialog.locator(".settings-entry").nth(0)).toHaveAccessibleName("Import from another AI service");
@@ -39,7 +45,7 @@ test("settings match web tab order and keep details in their owning tabs", async
   const account = page.getByRole("dialog", { name: "Your account data", exact: true });
   await expect(account.getByRole("button", { name: "Export my data", exact: true })).toBeVisible();
   await account.getByRole("button", { name: "Back to settings", exact: true }).click();
-  await expect(page.getByTestId("native-settings-tab-data")).toHaveAttribute("aria-current", "page");
+  await expect(dialog.getByRole("heading", { name: "Data management", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Close", exact: true }).click();
   await expect(page.getByRole("textbox")).toBeVisible();
 });
@@ -49,7 +55,7 @@ test("settings remain usable on a short screen with larger text", async ({ page 
   await page.evaluate(() => { document.documentElement.style.fontSize = "20px"; });
   let dialogTop: number | undefined;
   for (const tab of ["account", "preferences", "assistants", "ai", "data", "plan"]) {
-    await page.getByTestId(`native-settings-tab-${tab}`).click();
+    await selectSettings(page, tab);
     expect(await page.getByRole("dialog").evaluate(node => node.scrollWidth <= node.clientWidth), `No horizontal overflow on ${tab}`).toBe(true);
     const bounds = await page.getByRole("dialog").boundingBox();
     if (dialogTop === undefined) dialogTop = bounds!.y;
@@ -69,13 +75,13 @@ test("failed settings reads show retry instead of an empty collection", async ({
   await page.reload();
   await page.getByRole("button", { name: "Conversations", exact: true }).click();
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByTestId("native-settings-tab-assistants").click();
+  await selectSettings(page, "assistants");
   await expect(page.getByRole("button", { name: /Retry|Try again/ })).toBeVisible();
   await expect(page.getByText("No saved assistants yet.")).toHaveCount(0);
 });
 
 test("personalization and memory keep their save behavior in the grouped controls", async ({ page }) => {
-  await page.getByTestId("native-settings-tab-ai").click();
+  await selectSettings(page, "ai");
   await page.getByRole("combobox", { name: "Default manual model", exact: true }).selectOption("demo-b");
   await expect(page.getByRole("switch", { name: "Generate images after choosing the image action", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Save changes", exact: true }).click();

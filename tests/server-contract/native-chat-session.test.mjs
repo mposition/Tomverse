@@ -20,6 +20,29 @@ mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: { mobileTokenFamily:
 const { resolveChatRouteSession, resolveAccountRouteSession } = await import("../../lib/chatRouteSession.ts");
 const req = (headers = {}, path = "/api/chat", method = "POST") => new Request(`https://tomverse.app${path}`, { method, headers });
 
+test("quick-summary bearer identity is gated and never inherits an ambient cookie", async () => {
+  const flags = ["TOMVERSE_NATIVE_CHAT_ENABLED", "TOMVERSE_NATIVE_PARITY_ENABLED"];
+  const previous = flags.map(name => process.env[name]), beforeCookies = cookies;
+  const path = "/api/conversations/owned-chat/compare-summary";
+  try {
+    flags.forEach(name => { process.env[name] = "true"; });
+    for (const method of ["GET", "POST"]) {
+      const request = req({ authorization: "Bearer valid-owner", origin: "https://localhost", cookie: "other-user" }, path, method);
+      assert.equal((await resolveChatRouteSession(request)).session.user.id, "bearer-owner");
+      for (const name of flags) {
+        delete process.env[name]; assert.ok((await resolveChatRouteSession(request)).response); process.env[name] = "true";
+      }
+      tokenState = "revoked"; assert.equal((await resolveChatRouteSession(request)).response.status, 401); tokenState = "valid";
+      account = "pending_deletion"; assert.equal((await resolveChatRouteSession(request)).response.status, 401); account = "active";
+    }
+    assert.equal((await resolveChatRouteSession(req({ authorization: "Bearer valid-owner", origin: "https://evil.invalid" }, path))).response.status, 401);
+    assert.equal(cookies, beforeCookies);
+  } finally {
+    tokenState = "valid"; account = "active";
+    flags.forEach((name, index) => { if (previous[index] === undefined) delete process.env[name]; else process.env[name] = previous[index]; });
+  }
+});
+
 test("native location intent has exact POST enrollment and never falls back to a cookie", async () => {
   const prior = process.env.TOMVERSE_NATIVE_CHAT_ENABLED;
   const before = cookies;

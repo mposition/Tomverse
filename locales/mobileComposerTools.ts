@@ -19,6 +19,7 @@ const copy: Record<MobileLanguage, typeof en> = {
     locationNote: "켜면 메시지마다 대략적 위치를 AI 제공자에게 전달해 관련 답변에 사용해요. 백그라운드 추적은 하지 않아요.",
     assistant: "어시스턴트", defaultAssistant: "기본 어시스턴트", applies: "이 대화에 적용",
   },
+  "zh-Hant": {"title":"訊息工具","photos":"照片","files":"檔案","photosAction":"選擇照片","filesAction":"選擇檔案","attachmentsHint":"只會分享你選擇的照片與檔案。","search":"網頁搜尋","searchHint":"在回答中使用最新的網頁資訊","location":"目前位置","locationNote":"開啟後，每則訊息會向 AI 供應商分享大略位置，用於相關回答。不會在背景追蹤位置。","assistant":"助手","defaultAssistant":"預設助手","applies":"套用至此對話"},
   zh: {
     title: "消息工具", photos: "照片", files: "文件", photosAction: "选择照片", filesAction: "选择文件",
     attachmentsHint: "仅分享你选择的照片和文件。",
