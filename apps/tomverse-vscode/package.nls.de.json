@@ -1,0 +1,19 @@
+{
+  "open": "Tomverse öffnen",
+  "connect": "API-Schlüssel verbinden",
+  "disconnect": "Lokal trennen",
+  "selectRoot": "Projektordner wählen",
+  "attachFile": "Datei anhängen",
+  "attachSelection": "Auswahl anhängen",
+  "attachDiagnostics": "Diagnosen anhängen",
+  "stop": "Stoppen",
+  "sessions": "Sitzungen",
+  "newSession": "Neue Sitzung",
+  "clearApprovals": "Berechtigungen zurücksetzen",
+  "exportDiagnostics": "Diagnose exportieren",
+  "trustDescription": "Eingeschränkter Modus: erst dem Arbeitsbereich vertrauen.",
+  "virtualDescription": "Nur lokaler Desktop: Windows x64, macOS arm64 oder Linux x64 mit Dateiordnern.",
+  "endpointDescription": "Tomverse-API-Schlüssel eingeben für",
+  "localhostDescription": "Allow HTTP only on localhost for local development. User scope only.",
+  "persistDescription": "Nur im Speicher: nach dem Schließen kein Fortsetzen oder Rückgängig."
+}

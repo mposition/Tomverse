@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { isSea } from "node:sea";
 import { parseArgs } from "node:util";
@@ -9,13 +9,14 @@ import { UndoError, renderChange, undoChange, viewChanges } from "./changes.js";
 import { userShell } from "./commands.js";
 import { ConfigError, endpointMoveNote, ensureHome, readConfig, resolveEndpoint, tomverseHome, writeConfig, type CliConfig } from "./config.js";
 import { createOutput, safeLine, type Output } from "./display.js";
-import { Gateway, GatewayError, type CatalogModel, type Receipt } from "./gateway.js";
+import { Gateway, GatewayError, type CatalogModel } from "./gateway.js";
 import { askLine, isInteractive, terminalPrompter } from "./interactive.js";
 import { deleteSession, Journal, JournalError, listSessions, SessionLockedError, sessionsDir } from "./session.js";
 import { CLI_VERSION } from "./version.js";
 import { gitAvailable, normalizeRoot, PathError, ripgrepAvailable, same, Workspace } from "./workspace.js";
 
-export const DEFAULTS = { maxRequests: 20, timeoutMinutes: 15, commandTimeoutSeconds: 120 } as const;
+import { DEFAULTS, sessionCost, readInstructions, reconcile, createSession, validateSession } from "./runtime.js";
+export { DEFAULTS, sessionCost, readInstructions } from "./runtime.js";
 
 const HELP = `tomverse ${CLI_VERSION} -- a coding agent for your own folder, on your Tomverse API key.
 
@@ -199,61 +200,6 @@ const models = async (ctx: Context) => {
     return EXIT_CODES.success;
 };
 
-/** This session's own receipts, summed. Never the key's total before and after. */
-export const sessionCost = async (gateway: Gateway, journal: Journal) => {
-    const generations = journal.state.generations;
-    const byId = new Map<string, Receipt>();
-    try {
-        for (const receipt of (await gateway.usage(100)).requests) byId.set(receipt.requestId, receipt);
-    } catch {
-        // fall back to one lookup per request below
-    }
-    // Another key cannot see this session's requests; nothing it answers is recorded.
-    if (gateway.keyPrefix !== journal.state.keyPrefix) {
-        const unknown = generations.filter((g) => !(g.receipt && g.receipt.status !== "held")).map((g) => g.seq);
-        const charged = generations.reduce((sum, g) => sum + (g.receipt && g.receipt.status !== "held" && typeof g.receipt.chargedCredits === "number" ? g.receipt.chargedCredits : 0), 0);
-        return { requests: generations.length, charged, held: 0, unknown };
-    }
-    // Every receipt /usage returned is applied first, whatever its position.
-    for (const g of generations) {
-        if (g.requestId && byId.has(g.requestId)) {
-            g.receipt = byId.get(g.requestId)!;
-            g.lookup = "found";
-        }
-    }
-    // Then single lookups for what is still open, the least recently checked
-    // first, so repeated runs reach every request rather than the same 40.
-    const open = generations
-        .filter((g) => !(g.receipt && g.receipt.status !== "held") && !(g.requestId && byId.has(g.requestId)))
-        .sort((x, y) => (x.lookupAt ?? "").localeCompare(y.lookupAt ?? ""))
-        .slice(0, 40);
-    for (const g of open) {
-        try {
-            const found = await gateway.requestStatus(g.requestId ? { requestId: g.requestId } : { idempotencyKey: g.idempotencyKey });
-            g.lookup = found.found ? "found" : "not_found";
-            g.receipt = found.found ? found.receipt : null;
-            if (found.found) g.requestId = found.receipt.requestId;
-        } catch {
-            // left as it was: unknown
-        }
-        g.lookupAt = new Date().toISOString();
-    }
-    try {
-        journal.commit();
-    } catch {
-        // the totals below are still right for this process
-    }
-    let charged = 0;
-    let held = 0;
-    const unknown: number[] = [];
-    for (const g of generations) {
-        if (g.receipt && g.receipt.status !== "held" && typeof g.receipt.chargedCredits === "number") charged += g.receipt.chargedCredits;
-        else if (g.receipt?.status === "held") held += g.receipt.heldCredits;
-        else unknown.push(g.seq);
-    }
-    return { requests: generations.length, charged, held, unknown };
-};
-
 export const costLine = (cost: Awaited<ReturnType<typeof sessionCost>>) => {
     const open = cost.held > 0 || cost.unknown.length > 0;
     const parts = [`${cost.charged} credits settled`];
@@ -422,21 +368,6 @@ const configCommand = async (ctx: Context, args: string[]) => {
 
 // ---- sessions that talk to the model -----------------------------------------------------
 
-export const readInstructions = (workspace: Workspace) => {
-    // Through the same real-path check as every read: an AGENTS.md that is a
-    // link out of the folder is not sent.
-    let path: string;
-    try {
-        const resolved = workspace.resolve("AGENTS.md", "read");
-        if (!resolved.exists || !statSync(resolved.absolute).isFile()) return null;
-        path = resolved.absolute;
-    } catch {
-        return null;
-    }
-    const text = readFileSync(path, "utf8");
-    return text.length > 32_000 ? `${text.slice(0, 32_000)}\n[AGENTS.md continues; read the file for the rest]` : text;
-};
-
 const ensureTrusted = async (ctx: Context, root: string, prompter: Prompter | null) => {
     if ((ctx.config.trustedRoots ?? []).some((r) => same(r, root))) return true;
     if (!prompter) {
@@ -517,18 +448,8 @@ const startSession = async (ctx: Context, task: string | null, interactive: bool
             );
         }
     }
-    const journal = Journal.create(home, {
-        workspace: { root },
-        endpointOrigin: endpoint.origin,
-        keyPrefix: keyPrefix(key),
-        readOnly: Boolean(ctx.flags["read-only"]),
-        model: {
-            requested: model.id,
-            pinned: model.id === SMART_ADAPTIVE ? null : model.id,
-            pinnedFrom: model.id === SMART_ADAPTIVE ? null : "user",
-            contextWindowTokens: model.contextWindowTokens,
-            maxOutputTokens: model.maxOutputTokens,
-        },
+    const journal = createSession(home, {
+        root, endpoint, keyPrefix: keyPrefix(key), readOnly: Boolean(ctx.flags["read-only"]), model,
         limits: {
             maxRequests: positiveInt(ctx.flags["max-requests"], "max-requests", DEFAULTS.maxRequests),
             timeoutMs: positiveInt(ctx.flags.timeout, "timeout", DEFAULTS.timeoutMinutes) * 60_000,
@@ -611,20 +532,14 @@ const resume = async (ctx: Context, args: string[], interactive: boolean) => {
     const journal = Journal.open(tomverseHome(), id);
     try {
         const state = journal.state;
-        const root = normalizeRoot(state.workspace.root);
-        if (!same(root, state.workspace.root)) throw new UsageError(`The session's folder now resolves to ${root}; not resuming.`);
         const { endpoint, key, gateway } = await connect(ctx);
-        if (endpoint.origin !== state.endpointOrigin) throw new UsageError(`This session used ${state.endpointOrigin}; the endpoint is now ${endpoint.origin}. Not resuming.`);
-        // A session's requests can only be looked up with the key that sent
-        // them, so a session stays on one key.
-        if (state.keyPrefix !== keyPrefix(key)) {
-            throw new UsageError(`This session belongs to key ${state.keyPrefix}; you are using ${keyPrefix(key)}. Resume it with that key, or start a new session.`);
-        }
+        let root: string;
+        try { root = validateSession(journal, endpoint, keyPrefix(key)); }
+        catch (error) { throw new UsageError((error as Error).message); }
         const catalog = toolModels(await gateway.models());
+        try { validateSession(journal, endpoint, keyPrefix(key), catalog); }
+        catch (error) { throw new UsageError((error as Error).message); }
         const modelId = state.model.pinned ?? state.model.requested;
-        if (!catalog.some((m) => m.id === modelId)) {
-            throw new UsageError(`${modelId} is no longer offered to this key, and the CLI does not switch models silently. Start a new session with a model from \`tomverse models\`.`);
-        }
         if (ctx.flags["max-requests"]) {
             const task = state.tasks.at(-1);
             if (task) task.allowance = Math.max(task.allowance, task.requests + positiveInt(ctx.flags["max-requests"], "max-requests", DEFAULTS.maxRequests));
@@ -679,25 +594,6 @@ const resume = async (ctx: Context, args: string[], interactive: boolean) => {
     } finally {
         journal.release();
     }
-};
-
-/**
- * After a crash: what the journal says was under way. A write whose end was
- * not recorded is checked against the file; a command that started and never
- * finished is reported as unknown and is never run again.
- */
-const reconcile = (journal: Journal) => {
-    const notes: string[] = [];
-    for (const change of journal.state.changes.filter((c) => c.state === "writing")) {
-        const view = viewChanges({ ...journal, state: { ...journal.state, changes: [{ ...change, state: "applied" }] } } as Journal)[0];
-        change.state = view?.current === "as_written" ? "applied" : "failed";
-        notes.push(`A write of ${change.path} was under way: it is ${change.state === "applied" ? "complete" : "not complete (the file was left as it is)"}.`);
-    }
-    for (const tool of journal.state.tools.filter((t) => t.state === "started")) {
-        notes.push(`${tool.toolName} (${tool.toolCallId}) had started and its outcome is unknown; it was not run again.`);
-    }
-    if (notes.length) journal.commit();
-    return notes;
 };
 
 // ---- main -------------------------------------------------------------------------------

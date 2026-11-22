@@ -1,0 +1,19 @@
+{
+  "open": "打开 Tomverse",
+  "connect": "连接 API 密钥",
+  "disconnect": "断开本地连接",
+  "selectRoot": "选择工作区根目录",
+  "attachFile": "附加文件",
+  "attachSelection": "附加选区",
+  "attachDiagnostics": "附加诊断",
+  "stop": "停止",
+  "sessions": "会话",
+  "newSession": "新会话",
+  "clearApprovals": "清除本次运行权限",
+  "exportDiagnostics": "导出诊断",
+  "trustDescription": "受限模式：请先信任此工作区，再收集上下文或运行任务。",
+  "virtualDescription": "仅支持本地桌面 Windows x64、macOS arm64、Linux x64 的文件工作区。",
+  "endpointDescription": "输入 Tomverse API 密钥：",
+  "localhostDescription": "Allow HTTP only on localhost for local development. User scope only.",
+  "persistDescription": "仅内存：关闭窗口后无法恢复或撤销。"
+}

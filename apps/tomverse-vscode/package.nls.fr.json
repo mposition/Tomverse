@@ -1,0 +1,19 @@
+{
+  "open": "Ouvrir Tomverse",
+  "connect": "Connecter la clé API",
+  "disconnect": "Déconnecter localement",
+  "selectRoot": "Choisir le dossier de travail",
+  "attachFile": "Joindre un fichier",
+  "attachSelection": "Joindre la sélection",
+  "attachDiagnostics": "Joindre les diagnostics",
+  "stop": "Arrêter",
+  "sessions": "Sessions",
+  "newSession": "Nouvelle session",
+  "clearApprovals": "Effacer les autorisations",
+  "exportDiagnostics": "Exporter les diagnostics",
+  "trustDescription": "Mode restreint : approuvez cet espace avant toute exécution.",
+  "virtualDescription": "Bureau local uniquement : Windows x64, macOS arm64 ou Linux x64, dossiers locaux.",
+  "endpointDescription": "Saisissez votre clé API Tomverse pour",
+  "localhostDescription": "Allow HTTP only on localhost for local development. User scope only.",
+  "persistDescription": "Mémoire uniquement : aucune reprise ni annulation après fermeture."
+}

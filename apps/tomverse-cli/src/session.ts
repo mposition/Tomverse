@@ -126,6 +126,9 @@ export type SessionState = {
     updatedAt: string;
     workspace: { root: string };
     endpointOrigin: string;
+    /** Full API base and non-secret credential identity for embedded hosts. */
+    endpointBase?: string;
+    keyIdentity?: string;
     /** The key's public prefix: lookups are scoped to the key that sent a request. */
     keyPrefix: string;
     readOnly: boolean;

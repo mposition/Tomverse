@@ -1,0 +1,182 @@
+{
+  "name": "tomverse-vscode",
+  "displayName": "Tomverse",
+  "description": "Ask and edit your local workspace with Tomverse. Review every change and command.",
+  "version": "0.1.0",
+  "publisher": "tomverse",
+  "license": "SEE LICENSE IN LICENSE",
+  "engines": {
+    "vscode": "^1.146.0"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "main": "./dist/extension.cjs",
+  "extensionKind": [
+    "ui"
+  ],
+  "activationEvents": [
+    "onView:tomverse.sidebar"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "%trustDescription%",
+      "restrictedConfigurations": [
+        "tomverse.endpoint"
+      ]
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "%virtualDescription%"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mposition/Tomverse",
+    "directory": "apps/tomverse-vscode"
+  },
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "tomverse",
+          "title": "Tomverse",
+          "icon": "media/tomverse.svg"
+        }
+      ]
+    },
+    "views": {
+      "tomverse": [
+        {
+          "type": "webview",
+          "id": "tomverse.sidebar",
+          "name": "Tomverse"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "tomverse.open",
+        "title": "%open%",
+        "category": "Tomverse"
+      },
+      {
+        "command": "tomverse.connect",
+        "title": "%connect%",
+        "category": "Tomverse"
+      },
+      {
+        "command": "tomverse.disconnect",
+        "title": "%disconnect%",
+        "category": "Tomverse"
+      },
+      {
+        "command": "tomverse.selectRoot",
+        "title": "%selectRoot%",
+        "category": "Tomverse"
+      },
+      {
+        "command": "tomverse.attachFile",
+        "title": "%attachFile%",
+        "category": "Tomverse"
+      },
+      {
+        "command": "tomverse.attachSelection",
+        "title": "%attachSelection%",
+        "category": "Tomverse"
+      },
+      {
+        "command": "tomverse.attachDiagnostics",
+        "title": "%attachDiagnostics%",
+        "category": "Tomverse"
+      },
+      {
+        "command": "tomverse.stop",
+        "title": "%stop%",
+        "category": "Tomverse"
+      },
+      {
+        "command": "tomverse.sessions",
+        "title": "%sessions%",
+        "category": "Tomverse"
+      },
+      {
+        "command": "tomverse.newSession",
+        "title": "%newSession%",
+        "category": "Tomverse"
+      },
+      {
+        "command": "tomverse.clearApprovals",
+        "title": "%clearApprovals%",
+        "category": "Tomverse"
+      },
+      {
+        "command": "tomverse.exportDiagnostics",
+        "title": "%exportDiagnostics%",
+        "category": "Tomverse"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "tomverse.attachSelection",
+          "when": "editorHasSelection",
+          "group": "tomverse@1"
+        },
+        {
+          "command": "tomverse.attachFile",
+          "group": "tomverse@2"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "tomverse.attachFile",
+          "when": "resourceScheme == file",
+          "group": "tomverse@1"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Tomverse",
+      "properties": {
+        "tomverse.endpoint": {
+          "type": "string",
+          "default": "https://tomverse.app/api/code/v1",
+          "scope": "application",
+          "description": "%endpointDescription%"
+        },
+        "tomverse.allowInsecureLocalhost": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "description": "%localhostDescription%"
+        },
+        "tomverse.persistSessions": {
+          "type": "boolean",
+          "default": true,
+          "scope": "application",
+          "description": "%persistDescription%"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "node scripts/build.mjs",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "test:integration": "node scripts/integration.mjs",
+    "package": "node scripts/package.mjs",
+    "pack:verify": "node scripts/pack-verify.mjs",
+    "test:installed": "node scripts/install-smoke.mjs",
+    "test:recovery": "node scripts/recovery-smoke.mjs"
+  },
+  "devDependencies": {
+    "@types/vscode": "1.146.0",
+    "@vscode/test-cli": "0.0.15",
+    "@vscode/test-electron": "3.1.0",
+    "@vscode/vsce": "4.1.1",
+    "yauzl": "3.4.0"
+  }
+}

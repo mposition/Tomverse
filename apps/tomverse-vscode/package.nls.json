@@ -1,0 +1,19 @@
+{
+  "open": "Open Tomverse",
+  "connect": "Connect API key",
+  "disconnect": "Disconnect locally",
+  "selectRoot": "Select workspace root",
+  "attachFile": "Attach file",
+  "attachSelection": "Attach selection",
+  "attachDiagnostics": "Attach diagnostics",
+  "stop": "Stop",
+  "sessions": "Sessions",
+  "newSession": "New session",
+  "clearApprovals": "Clear run permissions",
+  "exportDiagnostics": "Export diagnostics",
+  "trustDescription": "Restricted Mode: trust this workspace before using context or running a task.",
+  "virtualDescription": "Local desktop only: Windows x64, macOS arm64 or Linux x64, with file workspaces. Remote, virtual and web are unsupported.",
+  "endpointDescription": "Paste your Tomverse API key for",
+  "localhostDescription": "Allow HTTP only on localhost for local development. User scope only.",
+  "persistDescription": "Memory only: no resume or Undo after the window closes."
+}

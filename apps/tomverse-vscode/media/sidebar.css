@@ -1,0 +1,107 @@
+:root {
+    color-scheme: light dark;
+}
+body {
+    padding: 14px;
+    color: var(--vscode-foreground);
+    background: var(--vscode-sideBar-background);
+    font-family: var(--vscode-font-family);
+    font-size: var(--vscode-font-size);
+}
+main {
+    max-width: 760px;
+    margin: 0 auto;
+}
+h1 {
+    font-size: 21px;
+    font-weight: 600;
+    margin: 3px 0 12px;
+}
+.muted {
+    color: var(--vscode-descriptionForeground);
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+}
+.toolbar {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin: 12px 0;
+}
+button,
+select,
+textarea {
+    font: inherit;
+    border: 1px solid var(--vscode-input-border, var(--vscode-contrastBorder, transparent));
+    border-radius: 3px;
+}
+button {
+    padding: 6px 9px;
+    color: var(--vscode-button-secondaryForeground);
+    background: var(--vscode-button-secondaryBackground);
+    cursor: pointer;
+}
+button:hover {
+    background: var(--vscode-button-secondaryHoverBackground);
+}
+button:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+#send {
+    color: var(--vscode-button-foreground);
+    background: var(--vscode-button-background);
+    margin: 8px 7px 0 0;
+}
+select,
+textarea {
+    box-sizing: border-box;
+    width: 100%;
+    padding: 8px;
+    margin: 5px 0 10px;
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+}
+textarea {
+    resize: vertical;
+    min-height: 85px;
+}
+label {
+    display: block;
+}
+:focus-visible {
+    outline: 2px solid var(--vscode-focusBorder);
+    outline-offset: 2px;
+}
+pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-family: var(--vscode-editor-font-family);
+    font-size: 12px;
+    line-height: 1.5;
+}
+.history {
+    max-height: 46vh;
+    overflow-y: auto;
+    margin: 18px 0;
+}
+article {
+    padding: 12px 0;
+    border-bottom: 1px solid var(--vscode-panel-border);
+}
+.notice {
+    max-height: 150px;
+    overflow: auto;
+    color: var(--vscode-descriptionForeground);
+}
+.approval {
+    border: 1px solid var(--vscode-focusBorder);
+    padding: 12px;
+    margin: 12px 0;
+}
+@media (prefers-reduced-motion: reduce) {
+    * {
+        scroll-behavior: auto;
+    }
+}

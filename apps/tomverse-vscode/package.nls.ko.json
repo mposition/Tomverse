@@ -1,0 +1,19 @@
+{
+  "open": "Tomverse 열기",
+  "connect": "API 키 연결",
+  "disconnect": "로컬 연결 해제",
+  "selectRoot": "작업 폴더 선택",
+  "attachFile": "파일 첨부",
+  "attachSelection": "선택 영역 첨부",
+  "attachDiagnostics": "진단 첨부",
+  "stop": "중단",
+  "sessions": "세션",
+  "newSession": "새 세션",
+  "clearApprovals": "이번 실행 허용 지우기",
+  "exportDiagnostics": "진단 내보내기",
+  "trustDescription": "제한 모드: 문맥 수집과 실행 전에 작업 영역을 신뢰해야 합니다.",
+  "virtualDescription": "로컬 Desktop의 Windows x64, macOS arm64, Linux x64 파일 작업 영역만 지원합니다. Remote·가상·웹 환경은 지원하지 않습니다.",
+  "endpointDescription": "Tomverse API 키를 입력하세요:",
+  "localhostDescription": "Allow HTTP only on localhost for local development. User scope only.",
+  "persistDescription": "메모리 전용: 창을 닫으면 재개·Undo할 수 없습니다."
+}
