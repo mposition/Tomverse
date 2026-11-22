@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { writeFileSync, readFileSync, existsSync, mkdirSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { FakeGateway, TEST_KEY, DEFAULT_MODELS, lastUserText, toolResultsSinceUser, type ScriptedReply } from "../../../tomverse-cli/tests/fakeGateway.js";
-import { Journal, currentDigest } from "../../../tomverse-cli/src/runtime.js";
+import { Journal } from "../../../tomverse-cli/src/runtime.js";
 import { t } from "../../src/i18n.js";
 import { digest, namespace } from "../../src/security.js";
 import type { SessionController } from "../../src/sessionController.js";

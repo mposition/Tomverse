@@ -44,9 +44,10 @@ test("without rg, literal search yields and regex is explicitly unsupported", as
         process.env.Path = "";
         const search = runner.tools.search_text!.execute!;
         const options = { toolCallId: "test", messages: [] };
-        const regex = (await search({ pattern: "(a+)+$", regex: true }, options)) as any;
+        type SearchResult = { status?: string; engine?: string; matches: unknown[] };
+        const regex = (await search({ pattern: "(a+)+$", regex: true }, options)) as SearchResult;
         assert.equal(regex.status, "unsupported");
-        const literal = (await search({ pattern: "needle" }, options)) as any;
+        const literal = (await search({ pattern: "needle" }, options)) as SearchResult;
         assert.equal(literal.engine, "builtin");
         assert.equal(literal.matches.length, 1);
     } finally {

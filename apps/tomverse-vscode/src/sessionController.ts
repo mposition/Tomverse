@@ -159,7 +159,8 @@ export class SessionController implements vscode.WebviewViewProvider {
             model: this.journal?.state.model ?? null,
             effort: { level: this.appliedEffort ?? this.effort, requested: this.effort, model: this.effortModel, locked: this.effortLocked() },
             readOnly: this.journal?.state.readOnly,
-            attachments: this.editor.attachments.map(({ text, ...meta }) => meta),
+            attachments: this.editor.attachments.map(({ id, uri, path, kind, range, version, dirty, bytes, truncated }) =>
+                ({ id, uri, path, kind, range, version, dirty, bytes, truncated })),
             approval: this.approvals.snapshot(),
             permissions: this.approvals.memory.describe(),
             changes: this.journal ? viewChanges(this.journal).map(({ changeId, path, kind, current }) => ({ changeId, path, kind, current })) : [],
