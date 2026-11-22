@@ -163,8 +163,9 @@ if (canonical) {
   expect(/^Sitemap:/m.test(own), "the canonical site does not name its sitemap");
   expect(/^Host:/m.test(own), "the canonical site does not name its host");
 
-  // Content-Signal is checked across the whole served file, not our half, and
-  // the rule is "one meaning" rather than "one line".
+  // Check our declaration on our half: the managed block must not make a
+  // missing or incorrect application policy look healthy. Also check the
+  // merged file, because Cloudflare's declaration can disagree with ours.
   //
   // While Cloudflare's managed block cannot be turned off
   // (docs/ops/search-indexing-boundary.md §4a), production
@@ -175,22 +176,31 @@ if (canonical) {
   // the safety here rests on the values being identical, not on a rule saying
   // duplicates are fine. Guard exactly that:
   //
-  //   * zero declarations fails -- the policy would have vanished;
-  //   * duplicates do not fail -- that is the expected state today;
-  //   * declarations that disagree once normalised fail, and so does one that
-  //     disagrees with what we ship.
+  //   * our half must declare the value we ship;
+  //   * the served file must contain a declaration;
+  //   * duplicates in the served file are expected when Cloudflare's managed
+  //     block is spliced with our half, but they must agree after normalising;
+  //   * every served declaration must match what we ship.
   const normaliseSignal = (value) =>
     value.replace(/\s+/g, "").toLowerCase();
-  const declared = [...served.matchAll(/^Content-Signal:(.*)$/gim)].map((match) =>
+  const ownDeclared = [...own.matchAll(/^Content-Signal:(.*)$/gim)].map((match) =>
     normaliseSignal(match[1])
   );
-  expect(declared.length > 0, "the canonical site declares no Content-Signal");
+  const servedDeclared = [...served.matchAll(/^Content-Signal:(.*)$/gim)].map((match) =>
+    normaliseSignal(match[1])
+  );
+  expect(ownDeclared.length > 0, "our robots.txt declares no Content-Signal");
   expect(
-    new Set(declared).size <= 1,
-    `Content-Signal declarations disagree: ${[...new Set(declared)].join(" vs ")}`
+    ownDeclared.every((value) => value === normaliseSignal(CONTENT_SIGNAL)),
+    `our Content-Signal differs from ${CONTENT_SIGNAL}`
+  );
+  expect(servedDeclared.length > 0, "the canonical site declares no Content-Signal");
+  expect(
+    new Set(servedDeclared).size <= 1,
+    `served Content-Signal declarations disagree: ${[...new Set(servedDeclared)].join(" vs ")}`
   );
   expect(
-    declared.every((value) => value === normaliseSignal(CONTENT_SIGNAL)),
+    servedDeclared.every((value) => value === normaliseSignal(CONTENT_SIGNAL)),
     `a served Content-Signal differs from ${CONTENT_SIGNAL}`
   );
   expect(
