@@ -51,6 +51,9 @@ export const adminAmuxCardHierarchyMessages = defineAdminMessages({
     estimate: (key: string, current: number | null, next: number | null) =>
       `${key} ${current ?? "—"} → ${next ?? "—"} (estimate)`,
     noRevision: "Text unchanged: no new revision.",
+    moveRevision: (next: number) => `Moved under the chosen parent: revision ${next}.`,
+    parentLabel: (level: string) => `Parent ${level}`,
+    parentNote: "Moving keeps every card and child where it is under this node. Archive the emptied node afterwards.",
     revision: (next: number) => `Text changed: revision ${next}.`,
     save: "Save (owner · recent sign-in)",
     cancel: "Cancel",
@@ -121,6 +124,9 @@ export const adminAmuxCardHierarchyMessages = defineAdminMessages({
     estimate: (key: string, current: number | null, next: number | null) =>
       `${key} ${current ?? "—"} → ${next ?? "—"} (예상)`,
     noRevision: "본문 변경 없음: 새 revision을 만들지 않습니다.",
+    moveRevision: (next: number) => `고른 상위 노드 아래로 옮깁니다: revision ${next}이 됩니다.`,
+    parentLabel: (level: string) => `상위 ${level}`,
+    parentNote: "옮겨도 이 노드 아래의 카드와 하위 노드는 그대로 따라옵니다. 비게 된 노드는 그다음 보관하세요.",
     revision: (next: number) => `본문 변경: revision ${next}이 됩니다.`,
     save: "저장 (Owner · 최근 인증)",
     cancel: "취소",

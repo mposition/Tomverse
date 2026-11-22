@@ -26,6 +26,9 @@ import { commitAmuxIdeaAnalysisPriceApproval,
   commitAmuxIdeaAnalysisPriceRevocation } from
   "@/lib/amux/ideaAnalysisPriceVersionWrite";
 import { closeAmuxIdeasForOwner } from "@/lib/amux/ideaOwnerCloseService";
+import { archiveAmuxHierarchyNodes } from "@/lib/amux/adminHierarchyArchiveService";
+import { AMUX_HIERARCHY_ARCHIVE_SWITCH } from "@/lib/amux/adminHierarchyCore";
+import { previewAmuxPortfolioNodeEdit, saveAmuxPortfolioNodeEdit } from "@/lib/amux/portfolioNodeEditService";
 import { parkAmuxSessionIdeaInTx } from "@/lib/amux/ideaSessionPlanRefusalService";
 import { AMUX_IDEA_OWNER_CLOSE_ACTION } from "@/lib/amux/ideaOwnerCloseCore";
 import { readAmuxIdeaProgressForOwner, readAmuxIdeaProgressInTx } from "@/lib/amux/ideaProgressRead";
@@ -1551,6 +1554,75 @@ test("with its switch on, an attached plan registers through the system registra
       state: "proposed" } }), 0);
   } finally {
     delete process.env[AMUX_SESSION_PLAN_AUTO_REGISTER_ENV];
+  }
+});
+
+// Owner decision 2026-11-22: two ideas that split one goal are merged by
+// moving one's Feature under the other's Epic, then archiving the emptied
+// Epic and Initiative. The moved Feature's Tasks keep a valid approved path.
+test("a registered Feature moves under another idea's Epic and its Task path stays valid", async () => {
+  await approveSyntheticTaskCatalog();
+  process.env[AMUX_SESSION_PLAN_AUTO_REGISTER_ENV] = "enabled";
+  process.env[AMUX_HIERARCHY_ARCHIVE_SWITCH] = "1";
+  try {
+    const register = async (tag: string) => {
+      const fixture = amuxSessionPlanFixture();
+      const plan = { ...fixture, units: fixture.units.map((unit: Record<string, unknown>) =>
+        ({ ...unit, title: `${unit.title as string} ${tag}`,
+          ...(unit.level === "feature" ? { displayPrefix: `MV${tag}` } : {}) })) };
+      const committed = await submitAmuxIdeaFromSession({ inspected: inspectSessionPlanIntake(plan) });
+      assert.deepEqual(committed.plan?.registration, { state: "registered" });
+      const decisions = await prisma.amuxIdeaUnitDecision.findMany({ where: {
+        ideaId: committed.ideaId, state: "consumed" },
+      select: { action: true, resolvedNodeId: true, registeredWorkItemId: true } });
+      const nodes = await prisma.amuxPortfolioNode.findMany({ where: { id: { in: decisions
+        .flatMap((row) => row.action === "create_node" && row.resolvedNodeId ? [row.resolvedNodeId] : []) } },
+      select: { id: true, level: true } });
+      const of = (level: string) => nodes.find((node) => node.level === level)!.id;
+      const task = decisions.find((row) => row.registeredWorkItemId)!.registeredWorkItemId!;
+      return { initiative: of("initiative"), epic: of("epic"), feature: of("feature"), task };
+    };
+    const tag = String(Date.now()).slice(-6);
+    const a = await register(`A${tag}`);
+    const b = await register(`B${tag}`);
+    const keys = loadCurrentAmuxContentKeys(process.env);
+    const latest = await prisma.amuxPortfolioAssessment.findFirstOrThrow({
+      where: { nodeId: b.feature }, orderBy: { assessmentVersion: "desc" },
+      select: { id: true } });
+    const payload = { id: randomUUID(), requestId: randomUUID(), nodeId: b.feature,
+      expectedRevision: 0, expectedAssessmentId: latest.id, content: null,
+      parentId: a.epic, value: 2, uncertainty: "medium" as const,
+      reasonCode: "operator_override" as const,
+      evidenceAsOf: new Date(Date.now() - 60_000).toISOString() };
+    const preview = await previewAmuxPortfolioNodeEdit(session, payload, keys);
+    assert.equal(preview.parentChanged, true);
+    assert.equal(preview.tasks.length, 1);
+    assert.equal(typeof preview.tasks[0]!.projectedScore, "number");
+    const saved = await saveAmuxPortfolioNodeEdit({ session, request, payload,
+      confirmationDigest: preview.confirmationDigest, digestKey: keys });
+    assert.equal(saved.moved, true);
+    assert.deepEqual(saved.tasks.map((task) => task.state), ["scored"]);
+    // A move to an archived parent is refused before anything is written.
+    await archiveAmuxHierarchyNodes({ session, request, nodeIds: [b.epic, b.initiative] });
+    const archived = await prisma.amuxPortfolioNode.findMany({
+      where: { id: { in: [b.epic, b.initiative] } }, select: { state: true } });
+    assert.deepEqual(archived.map((row) => row.state), ["archived", "archived"]);
+    const moved = await prisma.amuxPortfolioNode.findUniqueOrThrow({ where: { id: b.feature },
+      select: { revision: true } });
+    const after = await prisma.amuxPortfolioAssessment.findFirstOrThrow({
+      where: { nodeId: b.feature }, orderBy: { assessmentVersion: "desc" }, select: { id: true } });
+    await assert.rejects(previewAmuxPortfolioNodeEdit(session, { ...payload, id: randomUUID(),
+      requestId: randomUUID(), expectedRevision: moved.revision, expectedAssessmentId: after.id,
+      parentId: b.epic }, keys), { code: "invalid_input" });
+    // The Task under the moved Feature still reads its approved path.
+    const context = await loadAmuxV4TaskReadyContext(b.task);
+    const ready = await inRolledBackTx((tx) => evaluateAmuxV4TaskReadyInTransaction(
+      tx, b.task, context, null));
+    assert.equal(ready.reasons.includes("parent_path_changed"), false,
+      JSON.stringify(ready.reasons));
+  } finally {
+    delete process.env[AMUX_SESSION_PLAN_AUTO_REGISTER_ENV];
+    delete process.env[AMUX_HIERARCHY_ARCHIVE_SWITCH];
   }
 });
 
