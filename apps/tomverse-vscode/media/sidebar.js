@@ -18,13 +18,8 @@
         return node;
     };
     const heading = el("h1", "Tomverse");
-    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    icon.setAttribute("viewBox", "0 0 24 24");
+    const icon = el("span", "", "brand-icon");
     icon.setAttribute("aria-hidden", "true");
-    const mark = document.createElementNS(icon.namespaceURI, "path");
-    mark.setAttribute("d", "M3 4h18v4h-7v12h-4V8H3z");
-    mark.setAttribute("fill", "currentColor");
-    icon.append(mark);
     const connectionBadge = el("span", "", "connection-badge");
     const header = el("header", "", "sidebar-header");
     header.append(icon, heading, connectionBadge);

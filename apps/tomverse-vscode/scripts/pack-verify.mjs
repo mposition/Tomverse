@@ -8,7 +8,7 @@ const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 const artifact = join(root, "artifacts", `tomverse-vscode-${manifest.version}.vsix`);
 const files = [];
 const allowed =
-    /^(?:\[Content_Types\]\.xml|extension\.vsixmanifest|extension\/(?:package(?:\.nls(?:\.[\w-]+)?)?\.json|readme\.md|changelog\.md|LICENSE\.txt|THIRD-PARTY-NOTICES\.txt|dist\/extension\.cjs|media\/(?:tomverse\.svg|sidebar\.js|sidebar\.css)))$/;
+    /^(?:\[Content_Types\]\.xml|extension\.vsixmanifest|extension\/(?:package(?:\.nls(?:\.[\w-]+)?)?\.json|readme\.md|changelog\.md|LICENSE\.txt|THIRD-PARTY-NOTICES\.txt|dist\/extension\.cjs|media\/(?:tomverse\.svg|tomverse-logo\.png|sidebar\.js|sidebar\.css)))$/;
 await new Promise((resolve, reject) =>
     open(artifact, { lazyEntries: true }, (error, zip) => {
         if (error) return reject(error);
@@ -40,6 +40,7 @@ for (const name of [
     "extension/LICENSE.txt",
     "extension/THIRD-PARTY-NOTICES.txt",
     "extension/media/sidebar.js",
+    "extension/media/tomverse-logo.png",
 ])
     if (!files.includes(name)) throw new Error(`Missing ${name}`);
 const result = {

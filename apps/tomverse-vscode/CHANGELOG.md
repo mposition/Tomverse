@@ -2,7 +2,7 @@
 
 ## 1.0.3
 
-- Redesign the sidebar with a themed conversation, composer, and approval cards.
+- Redesign the sidebar with the Tomverse brand mark, a themed conversation, composer, and approval cards.
 - Choose Effort inside the sidebar without a text field. Connect from the Tomverse setup card using VS Code's native password prompt.
 
 ## 1.0.2
