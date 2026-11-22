@@ -478,6 +478,45 @@ test("an evidence object written just before a crash is still deleted: its key i
   fakes.clock.advance(61 * 60_000);
   await drainResearchEvidenceCleanup();
   assert.ok(written.every((key) => !fakes.store.objects.has(key)), "orphaned objects are deleted after the grace period");
+  // The fenced row stays for a final sweep, so a write that lands after the first delete is still removed.
+  assert.equal(await prisma.researchEvidenceObjectCleanup.count({ where: { objectKey: { in: written }, reason: "write_abandoned" } }), written.length);
+  for (const key of written) await realPut(key, "a late write that arrived after the first cleanup");
+  fakes.clock.advance(24 * 60 * 60_000 + 60_000);
+  await drainResearchEvidenceCleanup();
+  assert.ok(written.every((key) => !fakes.store.objects.has(key)), "late objects are removed by the final sweep");
+  assert.equal(await prisma.researchEvidenceObjectCleanup.count({ where: { objectKey: { in: written } } }), 0);
+});
+
+test("a private copy stops being served once its original is deleted after the run, by read and by the maintenance sweep", async () => {
+  const fakes = installFakes();
+  createFakeWeb();
+  const user = await createUser("post-run-revoke");
+  const first = await memory(user.id, "Post-run memory one with private detail");
+  const second = await memory(user.id, "Post-run memory two with private detail");
+  const runA = await create(user.id, { sources: [{ type: "memory", memoryItemId: first.id }] });
+  const runB = await create(user.id, { sources: [{ type: "memory", memoryItemId: second.id }] });
+  await drainResearchWork("post-run-revoke", 4);
+  assert.equal((await readResearchRunDto(user.id, runA.id)).status, "completed");
+  // A selected private source marks the report private even if no private claim survived.
+  const reportA = await readResearchReport({ userId: user.id, runId: runA.id });
+  assert.equal(reportA.containsPrivate, true);
+  assert.deepEqual(await researchShareContent(runA.id), { ok: false, code: "RESEARCH_SHARE_PRIVATE" });
+  const chunkA = await prisma.researchEvidenceChunk.findFirstOrThrow({ where: { runId: runA.id, version: { source: { visibility: "private" } } } });
+  await readResearchEvidence({ userId: user.id, runId: runA.id, chunkId: chunkA.id });
+  await prisma.memoryItem.delete({ where: { id: first.id } });
+  await rejects(readResearchEvidence({ userId: user.id, runId: runA.id, chunkId: chunkA.id }), "RESEARCH_EVIDENCE_UNAVAILABLE");
+  assert.equal((await prisma.researchSource.findFirstOrThrow({ where: { runId: runA.id, visibility: "private" } })).status, "revoked");
+  // No read at all: the sweep finds the deleted original and queues the copy for deletion.
+  await prisma.memoryItem.delete({ where: { id: second.id } });
+  const keysB = (await prisma.researchSourceVersion.findMany({ where: { runId: runB.id, source: { visibility: "private" } }, select: { objectKey: true } }))
+    .map((row) => row.objectKey!).filter(Boolean);
+  assert.ok(keysB.length > 0);
+  const result = await recoverResearchEngine();
+  assert.ok(result.revokedPrivateSources >= 1);
+  assert.equal((await prisma.researchSource.findFirstOrThrow({ where: { runId: runB.id, visibility: "private" } })).status, "revoked");
+  await drainResearchEvidenceCleanup();
+  assert.ok(keysB.every((key) => !fakes.store.objects.has(key)), "the swept copy is deleted");
+  assert.equal(await prisma.researchEvidenceObjectCleanup.count({ where: { objectKey: { in: keysB } } }), 0);
 });
 
 test("evidence cleanup backs off through a long storage outage but never gives up", async () => {

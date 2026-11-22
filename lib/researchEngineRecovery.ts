@@ -5,9 +5,9 @@ import { researchFundingAdapter, settleResearchSegmentIfReady } from "@/lib/rese
 import { researchEvidenceStore, researchNow } from "@/lib/researchEngineRuntime";
 import {
   bindResearchFundingReservation, lockResearchRun, markResearchDispatchUnknown, markResearchFundingUnknown,
-  RESEARCH_ITEM_MAX_ATTEMPTS, RESEARCH_SEGMENT_RESERVING_STALE_MS, releaseResearchFundingSegment,
+  RESEARCH_EVIDENCE_ABANDONED_SWEEP_MS, RESEARCH_ITEM_MAX_ATTEMPTS, RESEARCH_SEGMENT_RESERVING_STALE_MS, releaseResearchFundingSegment,
 } from "@/lib/researchEngineStore";
-import { advanceResearchRun } from "@/lib/researchEngineWorker";
+import { advanceResearchRun, ensureResearchPrivateSourceGranted } from "@/lib/researchEngineWorker";
 
 /**
  * Recovery-only maintenance for Research engine v2. It never claims a work
@@ -156,10 +156,18 @@ export async function drainResearchEvidenceCleanup(limit = 200) {
       // The row is held while the object is deleted, so a version write cannot take
       // over a key whose object is being removed (it waits, then finds no row).
       const removed = await prisma.$transaction(async (tx) => {
-        const held = await tx.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "ResearchEvidenceObjectCleanup" WHERE "id" = ${row.id} FOR UPDATE SKIP LOCKED`;
+        const held = await tx.$queryRaw<Array<{ id: string; reason: string }>>`SELECT "id", "reason" FROM "ResearchEvidenceObjectCleanup" WHERE "id" = ${row.id} FOR UPDATE SKIP LOCKED`;
         if (!held.length) return false;
         await store.delete(row.objectKey);
-        await tx.researchEvidenceObjectCleanup.delete({ where: { id: row.id } });
+        if (held[0]!.reason === "write_pending") {
+          // A write past its grace may still land after this delete. The row is
+          // fenced (the writer can no longer take it over) and kept for one final
+          // sweep, so an object that arrives late is still removed.
+          await tx.researchEvidenceObjectCleanup.update({ where: { id: row.id },
+            data: { reason: "write_abandoned", attempts: 0, nextAttemptAt: new Date(now.getTime() + RESEARCH_EVIDENCE_ABANDONED_SWEEP_MS) } });
+        } else {
+          await tx.researchEvidenceObjectCleanup.delete({ where: { id: row.id } });
+        }
         return true;
       }, { timeout: 30_000 });
       if (removed) deleted += 1;
@@ -186,8 +194,29 @@ export async function advanceIdleResearchRuns(limit = 100) {
   return advanced;
 }
 
+/**
+ * Re-checks stored private sources against their originals, oldest check first.
+ * Deleting or re-locking the original, or turning Memory off, after a run has
+ * finished revokes the copy and queues its text for deletion without a model call.
+ */
+export async function revalidatePrivateResearchSources(limit = 100) {
+  const sources = await prisma.researchSource.findMany({ where: { visibility: "private", status: "active" },
+    orderBy: [{ revalidatedAt: { sort: "asc", nulls: "first" } }, { id: "asc" }], take: limit,
+    select: { id: true, sourceKey: true, run: { select: { id: true, userId: true, inputManifest: true } } } });
+  let revoked = 0;
+  for (const source of sources) {
+    await isolate(source.run.id, async () => {
+      if (await ensureResearchPrivateSourceGranted(source.run, source)) {
+        await prisma.researchSource.update({ where: { id: source.id }, data: { revalidatedAt: researchNow() } });
+      } else revoked += 1;
+    });
+  }
+  return revoked;
+}
+
 export async function recoverResearchEngine(limit = 100) {
   return {
+    revokedPrivateSources: await revalidatePrivateResearchSources(limit),
     staleItems: await recoverStaleResearchWorkItems(limit),
     staleSegments: await recoverStaleReservingSegments(limit),
     orphanedSegments: await releaseOrphanedResearchSegments(limit),

@@ -2387,6 +2387,8 @@ model ResearchSource {
   /// Same article republished elsewhere; never counted as independent support.
   duplicateOfSourceId String?
   firstSeenAt         DateTime
+  /// Last time a private source was re-checked against its original by the maintenance sweep.
+  revalidatedAt       DateTime?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
@@ -2396,6 +2398,7 @@ model ResearchSource {
   @@unique([runId, sourceKey])
   @@index([runId, canonicalUrl])
   @@index([runId, visibility, status])
+  @@index([visibility, status, revalidatedAt])
 }
 
 /// What was actually obtained from a source at one time. A later read of the

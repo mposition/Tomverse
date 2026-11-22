@@ -271,6 +271,7 @@ CREATE TABLE "ResearchSource" (
   "ownerRef" JSONB,
   "duplicateOfSourceId" TEXT,
   "firstSeenAt" TIMESTAMP(3) NOT NULL,
+  "revalidatedAt" TIMESTAMP(3),
   "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updatedAt" TIMESTAMP(3) NOT NULL,
   CONSTRAINT "ResearchSource_pkey" PRIMARY KEY ("id"),
@@ -297,6 +298,7 @@ CREATE TABLE "ResearchSource" (
 CREATE UNIQUE INDEX "ResearchSource_runId_sourceKey_key" ON "ResearchSource"("runId", "sourceKey");
 CREATE INDEX "ResearchSource_runId_canonicalUrl_idx" ON "ResearchSource"("runId", "canonicalUrl");
 CREATE INDEX "ResearchSource_runId_visibility_status_idx" ON "ResearchSource"("runId", "visibility", "status");
+CREATE INDEX "ResearchSource_visibility_status_revalidatedAt_idx" ON "ResearchSource"("visibility", "status", "revalidatedAt");
 
 CREATE TABLE "ResearchSourceVersion" (
   "id" TEXT NOT NULL,
@@ -419,7 +421,7 @@ CREATE TABLE "ResearchEvidenceObjectCleanup" (
   CONSTRAINT "ResearchEvidenceObjectCleanup_pkey" PRIMARY KEY ("id"),
   CONSTRAINT "ResearchEvidenceObjectCleanup_attempts_check" CHECK ("attempts" >= 0),
   CONSTRAINT "ResearchEvidenceObjectCleanup_reason_check" CHECK ("reason" IN (
-    'run_deleted', 'conversation_deleted', 'account_deleted', 'source_revoked', 'superseded', 'write_pending'
+    'run_deleted', 'conversation_deleted', 'account_deleted', 'source_revoked', 'superseded', 'write_pending', 'write_abandoned'
   )),
   CONSTRAINT "ResearchEvidenceObjectCleanup_key_check" CHECK ("objectKey" LIKE 'research-evidence/%')
 );

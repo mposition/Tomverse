@@ -445,9 +445,12 @@ async function storeExtractedVersion(run: RunRow, sourceId: string, extracted: {
     return version;
   } catch (error) {
     // Delete now if possible; otherwise the queued row makes maintenance retry it.
+    // If cleanup already fenced or removed the row, a fresh row is queued so a
+    // failed delete here never leaves the object untracked.
     const removed = await store.delete(objectKey).then(() => true, () => false);
     if (removed) await prisma.researchEvidenceObjectCleanup.deleteMany({ where: { objectKey, reason: "write_pending" } }).catch(() => undefined);
-    else await prisma.researchEvidenceObjectCleanup.updateMany({ where: { objectKey }, data: { nextAttemptAt: new Date() } }).catch(() => undefined);
+    else await prisma.researchEvidenceObjectCleanup.upsert({ where: { objectKey },
+      create: { objectKey, reason: "write_abandoned" }, update: { nextAttemptAt: new Date() } }).catch(() => undefined);
     throw error;
   }
 }
@@ -564,6 +567,19 @@ export async function revokePrivateSource(run: Pick<RunRow, "id">, sourceId: str
     }
     await bumpRunSequence(tx, run.id);
   });
+}
+
+/**
+ * Re-checks one stored private source against its original (owner, lock, deletion,
+ * Memory settings) and revokes it when the grant is gone. Used by evidence reads
+ * and the maintenance sweep, so copies stop being served even with no further model call.
+ */
+export async function ensureResearchPrivateSourceGranted(run: Pick<RunRow, "id" | "userId" | "inputManifest">, source: { id: string; sourceKey: string }) {
+  const manifest = parseManifest(run);
+  const entry = manifest.entries.find((candidate) => candidate.key === source.sourceKey && candidate.type !== "url") as ResearchPrivateManifestEntry | undefined;
+  if (entry && await revalidateResearchPrivateEntry(run.userId, entry)) return true;
+  await revokePrivateSource(run, source.id);
+  return false;
 }
 
 /** After a dispatch refused for scope: revoke every private entry that no longer passes re-validation. */
@@ -841,7 +857,10 @@ async function finalizeReport(runId: string, revisionId: string, synthesis: Retu
     const current = await tx.researchPreviewRun.findUniqueOrThrow({ where: { id: runId } });
     if (["completed", "cancelled", "failed"].includes(current.status) && current.currentReportRevision >= revision.revision) return;
     await tx.researchReportRevision.update({ where: { id: revisionId }, data: { document: json(parsed), qualityStatus: quality,
-      containsPrivate: claims.some((claim) => claim.privateDerived) } });
+      // Conservative: once any private source was selected, model-written prose may
+      // carry it even if no private claim survived. Sharing then needs the
+      // model-free public redaction.
+      containsPrivate: claims.some((claim) => claim.privateDerived) || manifest.entries.some((entry) => entry.type !== "url") } });
     const metadata = json({ research: { version: 3, mode: "engine", runId, revision: revision.revision, qualityStatus: quality } });
     const existing = await tx.message.findUnique({ where: { id: run.assistantMessageId }, select: { id: true } });
     if (existing) await tx.message.update({ where: { id: run.assistantMessageId }, data: { content: markdown, searchMetadata: metadata, status: "normal" } });

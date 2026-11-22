@@ -55,10 +55,17 @@ export async function listResearchSources(input: { userId: string; runId: string
 
 /** One located span, returned only to the run's owner. */
 export async function readResearchEvidence(input: { userId: string; runId: string; chunkId: string; request?: Request; start?: number; end?: number }) {
-  await ownedRun(input.userId, input.runId, input.request);
+  const run = await ownedRun(input.userId, input.runId, input.request);
   const chunk = await prisma.researchEvidenceChunk.findFirst({ where: { id: input.chunkId, runId: input.runId },
-    include: { version: { include: { source: { select: { sourceKey: true, status: true, visibility: true, title: true, canonicalUrl: true } } } } } });
-  if (!chunk || chunk.version.source.status === "revoked" || !chunk.version.objectKey) throw refuse(404, "RESEARCH_EVIDENCE_UNAVAILABLE", "This evidence is no longer available.");
+    include: { version: { include: { source: { select: { id: true, sourceKey: true, status: true, visibility: true, title: true, canonicalUrl: true } } } } } });
+  const unavailable = () => refuse(404, "RESEARCH_EVIDENCE_UNAVAILABLE", "This evidence is no longer available.");
+  if (!chunk || chunk.version.source.status === "revoked" || !chunk.version.objectKey) throw unavailable();
+  // A private copy is served only while the original still grants it: deleted,
+  // re-locked or Memory-off material is revoked here and queued for deletion.
+  if (chunk.version.source.visibility === "private") {
+    const { ensureResearchPrivateSourceGranted } = await import("@/lib/researchEngineWorker");
+    if (!(await ensureResearchPrivateSourceGranted(run, chunk.version.source))) throw unavailable();
+  }
   const store = await researchEvidenceStore();
   const text = await store.get(chunk.version.objectKey, 64 * 1024 * 1024);
   const start = Math.max(chunk.charStart, Math.min(chunk.charEnd, input.start ?? chunk.charStart));

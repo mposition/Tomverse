@@ -18,6 +18,8 @@ export const RESEARCH_ITEM_MAX_ATTEMPTS = 4;
 export const RESEARCH_SEGMENT_RESERVING_STALE_MS = 90_000;
 /** How long a written evidence object may wait for its version row before cleanup may delete it. */
 export const RESEARCH_EVIDENCE_WRITE_GRACE_MS = 60 * 60_000;
+/** An abandoned write's key is swept once more this long after its first deletion, far past any storage request timeout. */
+export const RESEARCH_EVIDENCE_ABANDONED_SWEEP_MS = 24 * 60 * 60_000;
 
 export type ResearchConcurrencyLimits = {
   global: number;

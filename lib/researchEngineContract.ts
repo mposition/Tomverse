@@ -42,7 +42,7 @@ export const RESEARCH_PLAN_AUTHORS = ["model", "user"] as const;
 export const RESEARCH_DISPATCH_KINDS = ["model", "search", "read"] as const;
 export const RESEARCH_MODEL_ROLES = ["planner", "researcher", "analyst", "coordinator", "verifier", "writer"] as const;
 export const RESEARCH_CLEANUP_REASONS = [
-  "run_deleted", "conversation_deleted", "account_deleted", "source_revoked", "superseded", "write_pending",
+  "run_deleted", "conversation_deleted", "account_deleted", "source_revoked", "superseded", "write_pending", "write_abandoned",
 ] as const;
 
 export type ResearchWorkItemKind = (typeof RESEARCH_WORK_ITEM_KINDS)[number];

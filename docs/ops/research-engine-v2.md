@@ -50,8 +50,11 @@ Chat의 Auto/manual 선택은 바꾸지 않습니다. Research 실행 모델은 
   원래 질문·objective·constraints, 범위 변경 메모(priorityNote), 형식 수정 instruction은 검색
   역할에 가지 않습니다. 비공개 분석(analyst)·검증·작성
   역할에는 검색·fetch tool이 없습니다. 이 분리가 경계이며 prompt 경고는 보조입니다.
-- 비공개 자료가 들어간 보고서는 공개 공유가 거절되고, 모델 없이 만드는 공개용 redaction
-  revision이 있을 때만 그 버전으로 공유됩니다.
+- 비공개 자료를 하나라도 고른 run의 보고서는(비공개 claim이 남지 않았어도) 공개 공유가
+  거절되고, 모델 없이 만드는 공개용 redaction revision이 있을 때만 그 버전으로 공유됩니다.
+- run이 끝난 뒤 원본을 지우거나 다시 잠그거나 Memory를 끄면, 근거 조회 시점과 maintenance
+  sweep(`revalidatePrivateResearchSources`, 오래 확인 안 한 것부터)이 원본을 다시 확인해 복사본을
+  `revoked`로 바꾸고 정리 큐에 넣습니다. 모델 호출이 없어도 적용됩니다.
 
 ## 4. 실행·회복
 
@@ -69,7 +72,9 @@ Chat의 Auto/manual 선택은 바꾸지 않습니다. Research 실행 모델은 
 
 - run·대화·계정 삭제는 cascade로 행을 지우고, 비공개 증거 객체는 같은 문장의 DB trigger가
   `ResearchEvidenceObjectCleanup`에 넣어 maintenance가 지웁니다(삭제 실패는 최대 6시간 간격으로
-  계속 재시도하며 포기하지 않습니다). funding segment는 사용자 내용이
+  계속 재시도하며 포기하지 않습니다). 증거 객체는 쓰기 전에 키를 큐에 넣고(`write_pending`, 1시간
+  유예) version 기록이 같은 트랜잭션에서 가져갑니다. 유예가 지난 키는 지운 뒤 `write_abandoned`로
+  24시간 더 남겨 늦게 도착한 쓰기까지 한 번 더 지웁니다. funding segment는 사용자 내용이
   없는 금융 기록이라 지우지 않고 run 연결만 끊으며(`runId = NULL`), 만료 reconcile은 이런 segment의
   미정산 hold를 환불하지 않고 결과 불명으로 정산합니다. 직접 run 삭제는 미정산·unknown hold가 있으면
   거절합니다.
