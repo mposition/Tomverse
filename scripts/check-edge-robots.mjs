@@ -163,8 +163,8 @@ if (canonical) {
   expect(/^Sitemap:/m.test(own), "the canonical site does not name its sitemap");
   expect(/^Host:/m.test(own), "the canonical site does not name its host");
 
-  // Content-Signal is checked across the whole served file, not our half, and
-  // the rule is "one meaning" rather than "one line".
+  // Our policy is checked against our half. The served-file check below only
+  // verifies that a managed duplicate does not contradict it.
   //
   // While Cloudflare's managed block cannot be turned off
   // (docs/ops/search-indexing-boundary.md §4a), production
@@ -181,10 +181,26 @@ if (canonical) {
   //     disagrees with what we ship.
   const normaliseSignal = (value) =>
     value.replace(/\s+/g, "").toLowerCase();
+  const ownDeclared = [...own.matchAll(/^Content-Signal:(.*)$/gim)].map((match) =>
+    normaliseSignal(match[1])
+  );
+  expect(ownDeclared.length > 0, "our robots.txt declares no Content-Signal");
+  expect(
+    new Set(ownDeclared).size <= 1,
+    `our Content-Signal declarations disagree: ${[...new Set(ownDeclared)].join(" vs ")}`
+  );
+  expect(
+    ownDeclared.every((value) => value === normaliseSignal(CONTENT_SIGNAL)),
+    `our Content-Signal differs from ${CONTENT_SIGNAL}`
+  );
+
+  // The merged result must also remain internally consistent while the
+  // managed block is present. Duplicate declarations are expected; conflicting
+  // meanings are not.
   const declared = [...served.matchAll(/^Content-Signal:(.*)$/gim)].map((match) =>
     normaliseSignal(match[1])
   );
-  expect(declared.length > 0, "the canonical site declares no Content-Signal");
+  expect(declared.length > 0, "the canonical served file declares no Content-Signal");
   expect(
     new Set(declared).size <= 1,
     `Content-Signal declarations disagree: ${[...new Set(declared)].join(" vs ")}`
