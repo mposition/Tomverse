@@ -65,9 +65,14 @@ export async function createChatResearchFundingAdapter(): Promise<ResearchFundin
       if (searchEnabled) {
         const capability = getWebSearchCapability(model);
         const reservation = reserveTurnSearchCost({ model, capability, appManagedSearchEnabled: true, nativeSearchEnabled: false });
-        if (!reservation.ok) throw Object.assign(new Error("RESEARCH_SEARCH_UNAVAILABLE"), { code: "RESEARCH_SEARCH_UNAVAILABLE" });
-        searchBackend = reservation.searchBackend;
-        surcharge = getWebSearchSurchargeCredits("always", capability, resolveWebSearchBackendReadiness());
+        searchBackend = reservation.ok ? reservation.searchBackend : null;
+        surcharge = reservation.ok ? getWebSearchSurchargeCredits("always", capability, resolveWebSearchBackendReadiness()) : 0;
+        // Research searches always run on Brave (runResearchSearch). Unless that
+        // exact backend is reserved and priced for this model, no search is funded:
+        // an admin turning web search off for the model refuses the turn here.
+        if (searchBackend?.backend !== "brave" || surcharge <= 0) {
+          throw Object.assign(new Error("RESEARCH_SEARCH_UNAVAILABLE"), { code: "RESEARCH_SEARCH_UNAVAILABLE" });
+        }
       }
       const budget = security.createChatBudget("user", model, inputEstimate, {
         appManagedSearchEnabled: searchEnabled, searchBackend, webSearchSurchargeCredits: surcharge,

@@ -10,7 +10,7 @@ import {
   beginResearchDispatch, claimNextResearchWorkItem, claimResearchFundingRoom, readResearchRunMoney, RESEARCH_ITEM_LEASE_MS, ResearchFundingRoomError,
 } from "@/lib/researchEngineStore";
 import { recoverResearchEngine, drainResearchEvidenceCleanup } from "@/lib/researchEngineRecovery";
-import { exportResearchReport, readResearchEvidence, readResearchReport, researchShareContent } from "@/lib/researchEngineReads";
+import { exportResearchReport, listResearchSources, readResearchEvidence, readResearchReport, researchShareContent } from "@/lib/researchEngineReads";
 import { settlePendingResearchPreviewRuns } from "@/lib/researchPreviewRecovery";
 import { createFakeFunding, createFakeModel, createFakeWeb, createUser, defaultResponse, fakeRequest, installFakes, users } from "./researchEngineHarness";
 
@@ -223,6 +223,11 @@ test("same URL read twice is two evidence versions; a refresh revision re-locate
   const versions = await prisma.researchSourceVersion.findMany({ where: { sourceId: cited[0]!.id, readStatus: "read" }, orderBy: { version: "asc" } });
   assert.ok(versions.length >= 2, "the refresh stored a new version instead of overwriting");
   assert.notEqual(versions[0]!.contentDigest, versions.at(-1)!.contentDigest);
+  assert.notEqual(versions[0]!.objectKey, versions.at(-1)!.objectKey, "each version has its own stored object");
+  // The old version's span still reads its own text, not the refreshed page.
+  const oldChunk = await prisma.researchEvidenceChunk.findFirstOrThrow({ where: { versionId: versions[0]!.id }, orderBy: { chunkIndex: "asc" } });
+  const oldText = fakes.store.objects.get(versions[0]!.objectKey!)!;
+  assert.equal((await readResearchEvidence({ userId: user.id, runId: run.id, chunkId: oldChunk.id })).text, oldText.slice(oldChunk.charStart, oldChunk.charEnd));
   const oldClaims = await prisma.researchClaim.findMany({ where: { revision: { runId: run.id, revision: before.currentReportRevision } }, orderBy: { claimKey: "asc" } });
   assert.deepEqual(oldClaims.map((claim) => claim.evidence), firstClaims.map((claim) => claim.evidence), "the old revision still cites what it saw");
   assert.ok(fakes.model.calls.slice(callsBefore).every((call) => call.tool !== "submit_research_turn"), "a refresh does not repeat the research turns");
@@ -487,6 +492,35 @@ test("an evidence object written just before a crash is still deleted: its key i
   assert.equal(await prisma.researchEvidenceObjectCleanup.count({ where: { objectKey: { in: written } } }), 0);
 });
 
+test("when search cannot be reserved for the model (admin turned web search off), no search request is ever sent", async () => {
+  const fakes = installFakes();
+  const web = createFakeWeb();
+  const realEstimate = fakes.funding.adapter.estimate;
+  const searchOff = async (input: Parameters<typeof realEstimate>[0]) => {
+    if (input.searchEnabled) throw Object.assign(new Error("RESEARCH_SEARCH_UNAVAILABLE"), { code: "RESEARCH_SEARCH_UNAVAILABLE" });
+    return realEstimate(input);
+  };
+  const user = await createUser("search-off");
+  try {
+    // Off before the run: creation is refused up front.
+    fakes.funding.adapter.estimate = searchOff;
+    await rejects(create(user.id), "RESEARCH_SEARCH_UNAVAILABLE");
+    // Turned off mid-run: every researcher turn is refused before dispatch, so no search is sent.
+    fakes.funding.adapter.estimate = realEstimate;
+    const run = await create(user.id);
+    fakes.funding.adapter.estimate = searchOff;
+    await drainResearchWork("search-off", 2);
+    assert.equal(web.searches.length, 0, "no paid search without a reserved search surcharge");
+    assert.equal(await prisma.researchPreviewGeneration.count({ where: { runId: run.id, kind: "search" } }), 0);
+    const state = await readResearchRunDto(user.id, run.id);
+    assert.ok(["completed", "failed"].includes(state.status), `terminal, not stuck: ${state.status}`);
+    const money = await readResearchRunMoney(prisma, run.id);
+    assert.ok(money.settledCredits + money.reservedCredits <= money.approvedCredits);
+  } finally {
+    fakes.funding.adapter.estimate = realEstimate;
+  }
+});
+
 test("a private copy stops being served once its original is deleted after the run, by read and by the maintenance sweep", async () => {
   const fakes = installFakes();
   createFakeWeb();
@@ -506,6 +540,11 @@ test("a private copy stops being served once its original is deleted after the r
   await prisma.memoryItem.delete({ where: { id: first.id } });
   await rejects(readResearchEvidence({ userId: user.id, runId: runA.id, chunkId: chunkA.id }), "RESEARCH_EVIDENCE_UNAVAILABLE");
   assert.equal((await prisma.researchSource.findFirstOrThrow({ where: { runId: runA.id, visibility: "private" } })).status, "revoked");
+  // The source list and the report stop showing the label copied from the deleted memory.
+  const listedA = await listResearchSources({ userId: user.id, runId: runA.id, visibility: "private" });
+  assert.ok(listedA.sources.every((source) => source.status === "revoked" && source.title === null && source.snippet === null));
+  const rereadA = await readResearchReport({ userId: user.id, runId: runA.id });
+  assert.ok(!JSON.stringify(rereadA.document.bibliography).includes("Post-run memory one"), "no copied label in the bibliography");
   // No read at all: the sweep finds the deleted original and queues the copy for deletion.
   await prisma.memoryItem.delete({ where: { id: second.id } });
   const keysB = (await prisma.researchSourceVersion.findMany({ where: { runId: runB.id, source: { visibility: "private" } }, select: { objectKey: true } }))

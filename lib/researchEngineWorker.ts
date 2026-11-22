@@ -378,6 +378,15 @@ async function handleInvestigate(run: RunRow, item: ResearchWorkItem, fence: Res
 async function handleSearch(run: RunRow, item: ResearchWorkItem, fence: ResearchItemFence,
   payload: Extract<ResearchWorkPayload, { kind: "search" }>, manifest: ResearchInputManifest, signal: AbortSignal) {
   const fenced = { ...fence, runId: run.id };
+  // A search is paid only from a segment that reserved the search surcharge.
+  const funding = await prisma.researchFundingSegment.findFirst({ where: { id: payload.fundingSegmentId, runId: run.id }, select: { searchSurchargeCredits: true } });
+  if (!funding || funding.searchSurchargeCredits <= 0) {
+    await prisma.$transaction(async (tx) => {
+      await lockResearchRun(tx, run.id);
+      await finishResearchWorkItem(tx, fence, { status: "failed", errorCode: "RESEARCH_SEARCH_NOT_FUNDED" });
+    });
+    return;
+  }
   const begun = await beginResearchDispatch(fenced, { kind: "search", dispatchKey: `${item.id}:search`, fundingSegmentId: payload.fundingSegmentId });
   if (begun.alreadyCompleted) {
     await prisma.$transaction(async (tx) => { await lockResearchRun(tx, run.id); await finishResearchWorkItem(tx, fence, { status: "completed", result: item.result ?? {} }); });
@@ -420,7 +429,7 @@ async function handleSearch(run: RunRow, item: ResearchWorkItem, fence: Research
 async function storeExtractedVersion(run: RunRow, sourceId: string, extracted: { text: string; method: string; truncated: boolean },
   meta: { finalUrl?: string; contentType?: string; byteLength?: number; title?: string; publishedAt?: string; modifiedAt?: string }) {
   const store = await researchEvidenceStore();
-  const objectKey = researchEvidenceObjectKey({ userId: run.userId, runId: run.id, versionId: sourceId });
+  const objectKey = researchEvidenceObjectKey({ userId: run.userId, runId: run.id, sourceId });
   // The key is queued for cleanup before the object exists; recording the version
   // removes that row in the same transaction. A crash or failure in between
   // therefore always leaves the object discoverable and deleted later.
@@ -551,7 +560,9 @@ async function handleAnalyzePrivate(run: RunRow, item: ResearchWorkItem, fence: 
 export async function revokePrivateSource(run: Pick<RunRow, "id">, sourceId: string) {
   await prisma.$transaction(async (tx) => {
     await lockResearchRun(tx, run.id);
-    const source = await tx.researchSource.update({ where: { id: sourceId }, data: { status: "revoked" } });
+    // Labels of private sources are copied from the original (a Memory title is its
+    // first words), so they go with the grant.
+    const source = await tx.researchSource.update({ where: { id: sourceId }, data: { status: "revoked", title: null, snippet: null } });
     const versions = await tx.researchSourceVersion.findMany({ where: { sourceId }, select: { objectKey: true } });
     for (const version of versions) if (version.objectKey) {
       await tx.researchEvidenceObjectCleanup.upsert({ where: { objectKey: version.objectKey },

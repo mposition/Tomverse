@@ -29,9 +29,26 @@ async function ownedRun(userId: string, runId: string, request?: Request) {
   return run;
 }
 
+/**
+ * Private labels and copies are shown only while the original still grants them:
+ * a source whose original is gone is revoked before anything about it is returned.
+ * Returns the run's revoked private source keys.
+ */
+async function revalidateRunPrivateSources(run: Awaited<ReturnType<typeof ownedRun>>) {
+  const privateSources = await prisma.researchSource.findMany({ where: { runId: run.id, visibility: "private" }, select: { id: true, sourceKey: true, status: true } });
+  const active = privateSources.filter((source) => source.status === "active");
+  const revoked = new Set(privateSources.filter((source) => source.status === "revoked").map((source) => source.sourceKey));
+  if (active.length) {
+    const { ensureResearchPrivateSourceGranted } = await import("@/lib/researchEngineWorker");
+    for (const source of active) if (!(await ensureResearchPrivateSourceGranted(run, source))) revoked.add(source.sourceKey);
+  }
+  return revoked;
+}
+
 export async function listResearchSources(input: { userId: string; runId: string; request?: Request; cursor?: string; limit?: number; visibility?: "public" | "private" }) {
-  await ownedRun(input.userId, input.runId, input.request);
+  const run = await ownedRun(input.userId, input.runId, input.request);
   const limit = Math.min(200, Math.max(1, input.limit ?? 50));
+  await revalidateRunPrivateSources(run);
   const rows = await prisma.researchSource.findMany({
     where: { runId: input.runId, ...(input.visibility ? { visibility: input.visibility } : {}) },
     orderBy: [{ firstSeenAt: "asc" }, { id: "asc" }], take: limit + 1, ...(input.cursor ? { cursor: { id: input.cursor }, skip: 1 } : {}),
@@ -44,7 +61,8 @@ export async function listResearchSources(input: { userId: string; runId: string
   return {
     sources: page.map((row) => ({
       id: row.id, sourceKey: row.sourceKey, origin: row.origin, visibility: row.visibility, status: row.status,
-      title: row.title, url: row.visibility === "public" ? row.canonicalUrl : null, snippet: row.snippet,
+      ...(row.visibility === "private" && row.status === "revoked" ? { title: null, snippet: null } : { title: row.title, snippet: row.snippet }),
+      url: row.visibility === "public" ? row.canonicalUrl : null,
       publishedAt: row.publishedAt?.toISOString() ?? null, duplicateOf: row.duplicateOfSourceId ? keyById.get(row.duplicateOfSourceId) ?? null : null,
       versions: row.versions.map((version) => ({ ...version, retrievedAt: version.retrievedAt.toISOString(),
         sourceModifiedAt: version.sourceModifiedAt?.toISOString() ?? null })),
@@ -84,7 +102,13 @@ export async function readResearchReport(input: { userId: string; runId: string;
   if (!revisionNumber) throw refuse(404, "RESEARCH_REPORT_NOT_READY", "The report is not ready yet.");
   const revision = await prisma.researchReportRevision.findUnique({ where: { runId_revision: { runId: run.id, revision: revisionNumber } }, include: { claims: true } });
   if (!revision) throw refuse(404, "RESEARCH_REPORT_NOT_FOUND", "Report revision not found.");
-  const document = researchReportDocumentSchema.parse(revision.document);
+  const revokedKeys = await revalidateRunPrivateSources(run);
+  const manifestForLabels = researchInputManifestSchema.parse(run.inputManifest);
+  const privateLabel = researchEngineLabels(manifestForLabels.brief.outputLanguage ?? manifestForLabels.locale).report.privateSource;
+  const stored = researchReportDocumentSchema.parse(revision.document);
+  // A revoked private source keeps its place in the bibliography but not its copied label.
+  const document = { ...stored, bibliography: stored.bibliography.map((entry) => entry.private && revokedKeys.has(entry.sourceKey)
+    ? { ...entry, title: privateLabel } : entry) };
   const claims = revision.claims.map((claim) => ({ claimKey: claim.claimKey, sectionKey: claim.sectionKey, text: claim.text, kind: claim.kind,
     verification: claim.verification, privateDerived: claim.privateDerived, evidence: claim.evidence, checks: claim.checks }));
   const revisions = await prisma.researchReportRevision.findMany({ where: { runId: run.id }, orderBy: { revision: "asc" },

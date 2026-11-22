@@ -26,11 +26,15 @@ export type ResearchEvidenceStore = {
   delete(key: string): Promise<void>;
 };
 
-export const researchEvidenceObjectKey = (input: { userId: string; runId: string; versionId: string }) => {
-  for (const part of [input.userId, input.runId, input.versionId]) {
+/**
+ * A fresh key for every write: the random suffix means two reads of one source
+ * (a refresh) never share or overwrite an object, so each version keeps its own text.
+ */
+export const researchEvidenceObjectKey = (input: { userId: string; runId: string; sourceId: string }) => {
+  for (const part of [input.userId, input.runId, input.sourceId]) {
     if (!/^[A-Za-z0-9_-]{1,64}$/u.test(part)) throw new Error("RESEARCH_EVIDENCE_KEY_INVALID");
   }
-  return `research-evidence/${input.userId}/${input.runId}/${input.versionId}-${randomUUID()}.txt`;
+  return `research-evidence/${input.userId}/${input.runId}/${input.sourceId}-${randomUUID()}.txt`;
 };
 
 export const researchEvidenceKeyOwner = (key: string) => /^research-evidence\/([A-Za-z0-9_-]{1,64})\/([A-Za-z0-9_-]{1,64})\//u.exec(key);

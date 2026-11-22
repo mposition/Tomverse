@@ -75,7 +75,13 @@ async function pinExecutionProfile(userId: string, profile: "standard" | "deep")
       throw refuse(409, "RESEARCH_ENGINE_UNAVAILABLE", "Deep Research is unavailable.");
     }
     const estimate = await funding.estimate({ userId, model, outputTokenCap: 6_000, searchEnabled: role === "researcher",
-      inputEstimate: createTokenEstimateAccumulator().addText("x".repeat(24_000)).breakdown() });
+      inputEstimate: createTokenEstimateAccumulator().addText("x".repeat(24_000)).breakdown() }).catch((error: unknown) => {
+      // Research without a fundable web search cannot run; say so before anything starts.
+      if ((error as { code?: string })?.code === "RESEARCH_SEARCH_UNAVAILABLE") {
+        throw refuse(409, "RESEARCH_SEARCH_UNAVAILABLE", "Web search is not available for Deep Research right now.");
+      }
+      throw error;
+    });
     perCall = Math.max(perCall, estimate.credits);
     pinned[role] = { modelId: model.id, provider: model.provider, apiModel: model.apiModel,
       reasoning: model.reasoning ?? "provider-default", pricingVersion: estimate.pricingVersion };
