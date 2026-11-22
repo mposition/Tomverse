@@ -18,6 +18,7 @@ import {
   readEligibleResearchPreviewSource,
   readResearchPreviewRunDto,
   listResearchPreviewRunDtos,
+  recoverStalePreparingResearchPreviewRun,
   recoverStaleResearchPreviewRun,
   requestResearchPreviewCancellation,
   releaseResearchPreviewClaimToQueue,
@@ -745,6 +746,45 @@ test("stale preparing runs fail without retry and reconcile a real orphaned hold
   assert.equal(failedAfterHold.generations.length, 0);
   assert.notEqual((await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: held.id } })).status, "reserved");
   assert.equal(activeModel.doGenerateCalls.length, 0);
+});
+
+test("activation wins against stale preparing recovery and preserves its queued hold", async () => {
+  const { user, service, created, held } = await createServiceFixture("activation-recovery-race");
+  await prisma.researchPreviewRun.update({
+    where: { id: created.run.id },
+    data: {
+      status: "preparing",
+      reservationId: null,
+      createdAt: new Date(Date.now() - 120_000),
+    },
+  });
+
+  const barrier = holdResearchPreviewRunRow(created.run.id);
+  const blockerPid = await barrier.held;
+  const activation = activateResearchPreviewRun({
+    runId: created.run.id,
+    userId: user.id,
+    reservationId: held[0]!.id,
+  });
+  await waitForBlockedResearchSessions(blockerPid, 1, [activation]);
+  const recovery = recoverStalePreparingResearchPreviewRun(created.run.id);
+  await waitForBlockedResearchSessions(blockerPid, 2, [activation, recovery]);
+  barrier.release();
+  await barrier.committed;
+
+  await activation;
+  assert.equal(await recovery, "unchanged");
+  const run = await prisma.researchPreviewRun.findUniqueOrThrow({
+    where: { id: created.run.id },
+  });
+  assert.equal(run.status, "queued");
+  assert.equal(run.reservationId, held[0]!.id);
+  assert.equal(
+    (await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: held[0]!.id } })).status,
+    "reserved",
+  );
+  assert.equal(activeModel.doGenerateCalls.length, 0);
+  await service.cancelDurableResearchPreviewRun({ userId: user.id, runId: run.id });
 });
 
 test("a persisted attachment makes the saved source ineligible before reservation", async () => {

@@ -778,7 +778,7 @@ export async function finishResearchPreviewRunWithoutReport(input: {
 export async function staleResearchPreviewRuns(limit = 50) {
   return prisma.researchPreviewRun.findMany({
     where: { status: "running", leaseExpiresAt: { lte: new Date() } },
-    include: { generations: { orderBy: { generationIndex: "desc" }, take: 1 } },
+    select: { id: true },
     orderBy: { leaseExpiresAt: "asc" },
     take: Math.min(100, Math.max(1, limit)),
   });
@@ -801,6 +801,11 @@ export async function stalePreparingResearchPreviewRuns(limit = 50) {
 export async function recoverStalePreparingResearchPreviewRun(runId: string) {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`research-preview-run:${runId}`}))`;
+    // Activation and stale recovery decide ownership of the same hold. Lock
+    // before reading status or reservation identity so an activation that
+    // already queued for this row commits first and recovery then observes the
+    // queued run instead of overwriting it from a preparing snapshot.
+    await tx.$queryRaw`SELECT "id" FROM "ResearchPreviewRun" WHERE "id" = ${runId} FOR UPDATE`;
     const run = await tx.researchPreviewRun.findUnique({ where: { id: runId } });
     const cutoff = new Date(Date.now() - RESEARCH_PREVIEW_PREPARING_STALE_MS);
     if (
