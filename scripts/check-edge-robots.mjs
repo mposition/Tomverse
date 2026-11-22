@@ -163,8 +163,9 @@ if (canonical) {
   expect(/^Sitemap:/m.test(own), "the canonical site does not name its sitemap");
   expect(/^Host:/m.test(own), "the canonical site does not name its host");
 
-  // Content-Signal is checked across the whole served file, not our half, and
-  // the rule is "one meaning" rather than "one line".
+  // Our Content-Signal policy is checked against our own half. The served
+  // declarations are checked separately below for edge-level consistency:
+  // Cloudflare may add another declaration, but it cannot stand in for ours.
   //
   // While Cloudflare's managed block cannot be turned off
   // (docs/ops/search-indexing-boundary.md §4a), production
@@ -181,6 +182,19 @@ if (canonical) {
   //     disagrees with what we ship.
   const normaliseSignal = (value) =>
     value.replace(/\s+/g, "").toLowerCase();
+  const ownDeclared = [...own.matchAll(/^Content-Signal:(.*)$/gim)].map((match) =>
+    normaliseSignal(match[1])
+  );
+  expect(ownDeclared.length > 0, "our canonical robots.txt declares no Content-Signal");
+  expect(
+    new Set(ownDeclared).size === 1,
+    `our Content-Signal declarations disagree: ${[...new Set(ownDeclared)].join(" vs ")}`
+  );
+  expect(
+    ownDeclared.every((value) => value === normaliseSignal(CONTENT_SIGNAL)),
+    `our Content-Signal differs from ${CONTENT_SIGNAL}`
+  );
+
   const declared = [...served.matchAll(/^Content-Signal:(.*)$/gim)].map((match) =>
     normaliseSignal(match[1])
   );
