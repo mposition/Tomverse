@@ -125,3 +125,36 @@ test("MiniMax M3.1 Flash sends explicit effort without raising the output cap", 
   assert.equal(result.text, answer.text);
   assert.equal(result.usage.outputTokens, 32);
 });
+
+// 2026-11-22: as AI Review's secondary reviewer, qwen3.7-plus thought by
+// default and timed out at 45 s on every run seen from 11-20 to 11-22.
+test("an AI Review Qwen reviewer is asked without thinking; chat Qwen is left as it was", async t => {
+  const { getComparisonReviewModel } = await import("../lib/activeAiModel.ts");
+  const previous = process.env.DASHSCOPE_API_KEY;
+  process.env.DASHSCOPE_API_KEY = "isolated-wire-fixture";
+  t.after(() => {
+    if (previous === undefined) delete process.env.DASHSCOPE_API_KEY;
+    else process.env.DASHSCOPE_API_KEY = previous;
+  });
+  const bodies = [];
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    assert.equal(String(url), "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions");
+    bodies.push(JSON.parse(init.body));
+    return Response.json({
+      id: "test-qwen", object: "chat.completion", created: 1, model: "qwen3.7-plus",
+      choices: [{ index: 0, message: { role: "assistant", content: "{\"verdict\":\"similar\"}" }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+    });
+  });
+  const qwen = getModel("qwen3.7-plus");
+  const output = Output.object({ schema: jsonSchema({ type: "object", properties: { verdict: { type: "string" } }, required: ["verdict"], additionalProperties: false }) });
+  const review = await generateText({ model: getComparisonReviewModel(qwen), prompt: "Compare.", output, maxRetries: 0 });
+  assert.deepEqual(review.output, { verdict: "similar" });
+  assert.equal(bodies[0].enable_thinking, false);
+  // The structured-output request itself is unchanged.
+  assert.equal(bodies[0].response_format.type, "json_schema");
+  await generateText({ model: getActiveAiModel(qwen), prompt: "Hello.", maxRetries: 0 });
+  assert.equal("enable_thinking" in bodies[1], false);
+  // Another provider's reviewer is the ordinary model.
+  assert.equal(getComparisonReviewModel(mistral).provider, getActiveAiModel(mistral).provider);
+});

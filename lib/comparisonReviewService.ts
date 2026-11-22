@@ -6,7 +6,7 @@ import {
   shouldRetryReviewGeneration,
 } from "@/lib/comparisonReviewAttempts";
 import { recordResponseLatency } from "@/lib/responseLatencyStore";
-import { getActiveAiModel } from "@/lib/activeAiModel";
+import { getComparisonReviewModel } from "@/lib/activeAiModel";
 import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
 import {
   accessibleComparisonReviewers,
@@ -358,7 +358,8 @@ export const runComparisonReview = async (
       for (let attempt = 0; attempt < 2; attempt += 1) {
         try {
           generated = await generateText({
-            model: getActiveAiModel(candidate),
+            // Qwen reviewers answer without thinking (see getComparisonReviewModel).
+            model: getComparisonReviewModel(candidate),
             system: reviewPrompt.system,
             prompt: reviewPrompt.prompt,
             output: Output.object({ schema: comparisonReviewResultSchema }),

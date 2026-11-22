@@ -50,13 +50,8 @@ function searchReturnedSources(output: unknown): boolean {
 export const QWEN_GROUNDED_THINKING_BUDGET = 128;
 
 /** DashScope accepts enable_thinking and thinking_budget at the top level of Chat Completions. */
-export function qwenLookupStep(model: AiModel, boundedThinking = false) {
-  if (model.provider !== "qwen" || model.apiModel !== "qwen3.8-flash" ||
-      (model.reasoning && (boundedThinking || model.reasoning !== "none"))) return undefined;
-  const thinking = boundedThinking
-    ? { enable_thinking: true, thinking_budget: QWEN_GROUNDED_THINKING_BUDGET }
-    : { enable_thinking: false };
-  const lookup = createOpenAI({ ...runtimeConfiguration(model), fetch: (url, init) => {
+const qwenChatWithThinking = (model: AiModel, thinking: Record<string, unknown>) =>
+  createOpenAI({ ...runtimeConfiguration(model), fetch: (url, init) => {
     // The SDK serializes the body; leave an unfamiliar request untouched.
     if (typeof init?.body !== "string") return fetch(url, init);
     let body;
@@ -64,6 +59,31 @@ export function qwenLookupStep(model: AiModel, boundedThinking = false) {
     if (!body || typeof body !== "object" || Array.isArray(body)) return fetch(url, init);
     return fetch(url, { ...init, body: JSON.stringify({ ...body, ...thinking }) });
   } }).chat(model.apiModel);
+
+/**
+ * The model for a structured AI Review (comparison review) call.
+ *
+ * DashScope's Qwen 3.x models think by default. As the review's secondary
+ * reviewer, qwen3.7-plus timed out at the 45 s limit on every run seen from
+ * 2026-11-20 to 11-22, and each review waited 45 s to fall back to its primary.
+ * One probe of the same call shape (2026-11-22) spent 1,087 of 1,280 output
+ * tokens thinking and took 22 s on a two-line comparison. A reviewer returns
+ * a fixed JSON verdict, so thinking is turned off for that call only; chat is
+ * left as it is.
+ */
+export const getComparisonReviewModel = (model: AiModel) =>
+  // A Qwen row that names a reasoning effort asked for thinking; keep it.
+  model.provider === "qwen" && (!model.reasoning || model.reasoning === "none")
+    ? qwenChatWithThinking(model, { enable_thinking: false })
+    : getActiveAiModel(model);
+
+export function qwenLookupStep(model: AiModel, boundedThinking = false) {
+  if (model.provider !== "qwen" || model.apiModel !== "qwen3.8-flash" ||
+      (model.reasoning && (boundedThinking || model.reasoning !== "none"))) return undefined;
+  const thinking = boundedThinking
+    ? { enable_thinking: true, thinking_budget: QWEN_GROUNDED_THINKING_BUDGET }
+    : { enable_thinking: false };
+  const lookup = qwenChatWithThinking(model, thinking);
   return ({ stepNumber, steps }: { stepNumber: number; steps?: Pick<StepResult<ToolSet>, "toolCalls" | "toolResults">[] }) => {
     if (stepNumber === 0) return { model: lookup };
     if (!boundedThinking) return;
