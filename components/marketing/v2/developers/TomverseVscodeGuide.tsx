@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useLanguage } from "@/components/LanguageProvider";
 import { developerToolsCopy } from "@/locales/developerTools";
 
+const previewDownload = "https://github.com/mposition/Tomverse/releases/download/tomverse-vscode-v0.1.0/tomverse-vscode-0.1.0.vsix";
+
 /** Native extension setup; separate from VS Code's compatible-provider guide. */
 export function TomverseVscodeGuide() {
     const { lang, t } = useLanguage();
@@ -18,9 +20,14 @@ export function TomverseVscodeGuide() {
                         {[copy.installStep, copy.keyStep, copy.taskStep].map((step) => <li key={step}>{step}</li>)}
                     </ol>
                     <p className="mb-5 text-xs leading-5 text-[#b0b2bc]">{copy.scope}</p>
-                    <Link href="/settings/api" className="inline-flex rounded-lg text-sm font-semibold text-[#5b8dff] underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-400">
-                        {t("externalApi.devManageKeys")}
-                    </Link>
+                    <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
+                        <a href={previewDownload} className="inline-flex rounded-lg bg-[#325dbe] px-4 py-2 text-sm font-semibold text-white hover:bg-[#3b6bd5] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-400">
+                            {copy.download}
+                        </a>
+                        <Link href="/settings/api" className="inline-flex rounded-lg text-sm font-semibold text-[#5b8dff] underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-400">
+                            {t("externalApi.devManageKeys")}
+                        </Link>
+                    </div>
                 </div>
             </div>
         </section>
