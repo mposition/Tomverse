@@ -495,23 +495,29 @@ export async function applyNativeSourceDeletion(
 export async function updateConversationWithProjectGrounds<T>(input: {
     userId: string;
     conversationId: string;
-    update: (tx: Prisma.TransactionClient) => Promise<T & { projectId: string | null }>;
-}): Promise<T & { projectId: string | null }> {
+    update: (tx: Prisma.TransactionClient) => Promise<T & { projectId: string | null; password?: string | null }>;
+}): Promise<T & { projectId: string | null; password?: string | null }> {
     return prisma.$transaction(async (tx) => {
         await lockCreditAccount(tx, input.userId);
-        // The project the conversation is in *now*, read under its row lock:
-        // two concurrent moves each re-judge the project they really left.
-        const current = await tx.$queryRaw<Array<{ projectId: string | null }>>`
-            SELECT "projectId" FROM "Conversation"
+        // The conversation as it is *now*, read under its row lock: whether
+        // this request really moved or (un)locked it is decided here, never
+        // from a read taken before the transaction, so concurrent moves each
+        // re-judge the project they really left.
+        const current = await tx.$queryRaw<Array<{ projectId: string | null; locked: boolean }>>`
+            SELECT "projectId", (password IS NOT NULL) AS locked FROM "Conversation"
             WHERE id = ${input.conversationId} AND "userId" = ${input.userId}
             FOR UPDATE
         `;
         const fromProjectId = current[0]?.projectId ?? null;
+        const wasLocked = current[0]?.locked ?? false;
         const updated = await input.update(tx);
+        const moved = fromProjectId !== updated.projectId;
+        const lockChanged = updated.password !== undefined && (updated.password !== null) !== wasLocked;
+        if (!moved && !lockChanged) return updated;
         await cancelNativeExtractionRuns({ userId: input.userId, conversationIds: [input.conversationId], tx });
         await reconcileNativeEvidence(tx, input.userId, {
             conversationIds: [input.conversationId],
-            projectIds: fromProjectId === updated.projectId ? [] : [fromProjectId, updated.projectId],
+            projectIds: moved ? [fromProjectId, updated.projectId] : [],
         });
         return updated;
     });

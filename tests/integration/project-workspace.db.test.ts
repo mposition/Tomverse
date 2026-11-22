@@ -560,3 +560,44 @@ test("concurrent moves each re-judge the project they really left", async () => 
     // B's memory is usable only while the conversation really is in B.
     assert.equal(status, final === b.id ? "active" : "suspended_by_source_delete");
 });
+
+
+// --------------------------------------------- review r-20261122-170725
+
+test("a move back to the project read before a concurrent move still re-judges the project it really left", async () => {
+    const owner = await user();
+    const a = await project(owner.id, "Alpha");
+    const b = await project(owner.id, "Beta");
+    const chat = await conversation(owner.id, a.id);
+    const said = await message(chat.id, "user", "Release notes go out on Mondays");
+    const inB = await seedMemory(owner.id, b.id, "Release notes go out on Mondays", {
+        evidences: { create: { userId: owner.id, sourceType: "tomverse_message", tomverseMessageId: said.id, evidenceDigest: nativeMessageDigest("Release notes go out on Mondays") } },
+    });
+    // Another request moved the conversation to B after this request read A.
+    await prisma.conversation.update({ where: { id: chat.id }, data: { projectId: b.id } });
+    // This request asks for A, which it believes is a no-op; the row lock
+    // shows the conversation is in B, so B's memory is re-judged.
+    await updateConversationWithProjectGrounds({
+        userId: owner.id, conversationId: chat.id,
+        update: (tx) => tx.conversation.update({ where: { id: chat.id }, data: { projectId: a.id } }),
+    });
+    assert.equal((await prisma.memoryItem.findUniqueOrThrow({ where: { id: inB.id } })).status, "suspended_by_source_delete");
+});
+
+test("an update that neither moves nor (un)locks the conversation leaves extraction and memories alone", async () => {
+    const owner = await user();
+    const a = await project(owner.id, "Alpha");
+    const chat = await conversation(owner.id, a.id);
+    const said = await message(chat.id, "user", "Use metric units");
+    const memory = await seedMemory(owner.id, a.id, "Uses metric units", {
+        evidences: { create: { userId: owner.id, sourceType: "tomverse_message", tomverseMessageId: said.id, evidenceDigest: nativeMessageDigest("Use metric units") } },
+    });
+    const before = await prisma.memoryItem.findUniqueOrThrow({ where: { id: memory.id } });
+    await updateConversationWithProjectGrounds({
+        userId: owner.id, conversationId: chat.id,
+        update: (tx) => tx.conversation.update({ where: { id: chat.id }, data: { projectId: a.id } }),
+    });
+    const after = await prisma.memoryItem.findUniqueOrThrow({ where: { id: memory.id } });
+    assert.equal(after.status, "active");
+    assert.equal(after.revision, before.revision);
+});

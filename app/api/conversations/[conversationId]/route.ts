@@ -719,10 +719,10 @@ export async function PATCH(
     // Project workspace: a move or a lock change affects which project
     // memories still have grounds. The change and that re-decision commit
     // together; a move changes only what is used from now on, and the
-    // transcript itself is not touched.
-    const groundsChange =
-      (body.projectId !== undefined && (body.projectId ?? null) !== (existingConv.projectId ?? null)) ||
-      body.password !== undefined;
+    // transcript itself is not touched. Whether anything really moved is
+    // decided under the conversation row lock, not from the read above, so
+    // a concurrent move cannot make this request skip the re-decision.
+    const groundsChange = body.projectId !== undefined || body.password !== undefined;
     const updatedConversation = groundsChange
       ? await updateConversationWithProjectGrounds({
           userId,
