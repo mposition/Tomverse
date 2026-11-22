@@ -208,6 +208,7 @@
     "experiment:ai-review-judged-gate-transition": "node --conditions=react-server --import tsx scripts/experiments/ai-review-judged-gate-transition-experiment.mjs",
     "experiment:ai-review-judged-metric-definitions": "node --conditions=react-server --import tsx scripts/experiments/ai-review-judged-metric-definitions-experiment.mjs",
     "experiment:ai-review-003-revision": "node --conditions=react-server --import tsx scripts/experiments/ai-review-003-revision-demo.mjs",
+    "experiment:ai-review-blind-pilot": "node --conditions=react-server --import tsx scripts/experiments/ai-review-blind-pilot.mjs",
     "make:ai-review-blind-sheet": "node --conditions=react-server --import tsx scripts/make-ai-review-eval-blind-sheet.mjs",
     "report:ai-review-m5-readiness": "node --conditions=react-server --import tsx scripts/report-ai-review-m5-readiness.mjs",
     "report:ai-review-operations": "node --conditions=react-server --import tsx scripts/report-ai-review-operations.mjs",
