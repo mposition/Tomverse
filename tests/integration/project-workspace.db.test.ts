@@ -498,7 +498,7 @@ test("a move and the re-decision of its memories commit together", async () => {
     });
     // A failure after the move rolls back the move too: nothing is left half-applied.
     await assert.rejects(updateConversationWithProjectGrounds({
-        userId: owner.id, conversationId: chat.id, fromProjectId: a.id,
+        userId: owner.id, conversationId: chat.id,
         update: async (tx) => {
             const row = await tx.conversation.update({ where: { id: chat.id }, data: { projectId: b.id } });
             throw Object.assign(new Error("boom"), { row });
@@ -506,9 +506,57 @@ test("a move and the re-decision of its memories commit together", async () => {
     }));
     assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: chat.id } })).projectId, a.id);
     const moved = await updateConversationWithProjectGrounds({
-        userId: owner.id, conversationId: chat.id, fromProjectId: a.id,
+        userId: owner.id, conversationId: chat.id,
         update: (tx) => tx.conversation.update({ where: { id: chat.id }, data: { projectId: b.id } }),
     });
     assert.equal(moved.projectId, b.id);
     assert.equal((await prisma.memoryItem.findUniqueOrThrow({ where: { id: memory.id } })).status, "suspended_by_source_delete");
+});
+
+
+// --------------------------------------------- review r-20261122-170209
+
+test("locking a source suspends a memory the user moved out of its project; a later move does not re-judge it", async () => {
+    const owner = await user();
+    const a = await project(owner.id, "Alpha");
+    const b = await project(owner.id, "Beta");
+    const chat = await conversation(owner.id, a.id);
+    const said = await message(chat.id, "user", "I prefer short answers");
+    const memory = await seedMemory(owner.id, a.id, "Prefers short answers", {
+        kind: "preference",
+        evidences: { create: { userId: owner.id, sourceType: "tomverse_message", tomverseMessageId: said.id, evidenceDigest: nativeMessageDigest("I prefer short answers") } },
+    });
+    await moveMemoryScope({ userId: owner.id, memoryId: memory.id, expectedRevision: memory.revision, targetProjectId: null });
+    // An explicit move to personal is not undone by moving the conversation.
+    await updateConversationWithProjectGrounds({
+        userId: owner.id, conversationId: chat.id,
+        update: (tx) => tx.conversation.update({ where: { id: chat.id }, data: { projectId: b.id } }),
+    });
+    assert.equal((await prisma.memoryItem.findUniqueOrThrow({ where: { id: memory.id } })).status, "active");
+    // A lock reaches it wherever it lives now.
+    await updateConversationWithProjectGrounds({
+        userId: owner.id, conversationId: chat.id,
+        update: (tx) => tx.conversation.update({ where: { id: chat.id }, data: { password: "hash" } }),
+    });
+    assert.equal((await prisma.memoryItem.findUniqueOrThrow({ where: { id: memory.id } })).status, "suspended_by_source_lock");
+});
+
+test("concurrent moves each re-judge the project they really left", async () => {
+    const owner = await user();
+    const a = await project(owner.id, "Alpha");
+    const b = await project(owner.id, "Beta");
+    const c = await project(owner.id, "Gamma");
+    const chat = await conversation(owner.id, a.id);
+    const said = await message(chat.id, "user", "Deploy on Fridays");
+    const evidence = () => ({ create: { userId: owner.id, sourceType: "tomverse_message", tomverseMessageId: said.id, evidenceDigest: nativeMessageDigest("Deploy on Fridays") } });
+    const inB = await seedMemory(owner.id, b.id, "Deploys happen on Fridays", { evidences: evidence() });
+    const move = (to: string) => updateConversationWithProjectGrounds({
+        userId: owner.id, conversationId: chat.id,
+        update: (tx) => tx.conversation.update({ where: { id: chat.id }, data: { projectId: to } }),
+    });
+    await Promise.all([move(b.id), move(c.id)]);
+    const final = (await prisma.conversation.findUniqueOrThrow({ where: { id: chat.id } })).projectId;
+    const status = (await prisma.memoryItem.findUniqueOrThrow({ where: { id: inB.id } })).status;
+    // B's memory is usable only while the conversation really is in B.
+    assert.equal(status, final === b.id ? "active" : "suspended_by_source_delete");
 });

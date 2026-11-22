@@ -354,27 +354,36 @@ export const NATIVE_SOURCE_LOCKED = "native_source_locked";
 export const NATIVE_SOURCE_DELETED = "native_source_deleted";
 
 /**
- * Re-decides every project memory that cites native messages, after a
- * conversation moved, was locked or unlocked. A memory stays usable in its
- * project only while at least one of its grounds is still a user-reachable
- * message of a conversation in the same project (or a manual ground the user
- * wrote). Moving a conversation never widens where a memory is used.
+ * Re-decides the memories grounded in some conversations' native messages,
+ * after those conversations moved, were locked or unlocked.
+ *
+ * Two rules, applied to every memory citing the conversations -- personal,
+ * this project's, or one the user explicitly moved elsewhere:
+ *
+ *  - lock: a memory whose only grounds are in locked conversations is
+ *    suspended, whatever scope it is in now;
+ *  - membership: a memory of a project the conversation moved out of (or
+ *    back into) is usable there only while one of its grounds is still a
+ *    conversation of that same project. A memory the user explicitly moved to
+ *    another scope is not re-judged by a later conversation move.
+ *
+ * A manual ground the user wrote always keeps a memory usable.
  */
 export async function reconcileNativeEvidence(
     tx: Prisma.TransactionClient,
     userId: string,
-    projectIds: readonly (string | null)[],
+    input: { conversationIds: readonly string[]; projectIds: readonly (string | null)[] },
     now = new Date()
 ) {
-    const ids = [...new Set(projectIds.filter((id): id is string => Boolean(id)))];
-    if (ids.length === 0) return { suspended: 0, restored: 0 };
+    const conversationIds = [...new Set(input.conversationIds)];
+    if (conversationIds.length === 0) return { suspended: 0, restored: 0 };
+    const membershipProjects = new Set(input.projectIds.filter((id): id is string => Boolean(id)));
     await lockAccountMemoryItems(tx, userId);
     const rows = await tx.memoryItem.findMany({
         where: {
             userId,
-            projectId: { in: ids },
             status: { in: ["active", "suspended_by_source_lock", "suspended_by_source_delete"] },
-            evidences: { some: { sourceType: "tomverse_message" } },
+            evidences: { some: { tomverseMessage: { conversationId: { in: conversationIds } } } },
         },
         select: {
             id: true,
@@ -393,16 +402,19 @@ export async function reconcileNativeEvidence(
     let suspended = 0;
     let restored = 0;
     for (const row of rows) {
-        const reachable = row.evidences.some((evidence) => {
+        const checkMembership = row.projectId !== null && membershipProjects.has(row.projectId);
+        const grounded = (evidence: (typeof row.evidences)[number], requireMembership: boolean) => {
             if (evidence.sourceType === "manual") return true;
             const conversation = evidence.tomverseMessage?.conversation;
-            return Boolean(conversation && conversation.userId === userId && conversation.projectId === row.projectId && conversation.password === null);
-        });
-        const locked = row.evidences.some((evidence) => evidence.tomverseMessage?.conversation?.password != null);
+            if (!conversation || conversation.userId !== userId || conversation.password !== null) return false;
+            return !requireMembership || conversation.projectId === row.projectId;
+        };
+        const unlocked = row.evidences.some((evidence) => grounded(evidence, false));
+        const reachable = row.evidences.some((evidence) => grounded(evidence, checkMembership));
         if (row.status === "active" && !reachable) {
             await tx.memoryItem.update({
                 where: { id: row.id },
-                data: locked
+                data: !unlocked
                     ? { status: "suspended_by_source_lock", suspendedReason: NATIVE_SOURCE_LOCKED, revision: { increment: 1 } }
                     : { status: "suspended_by_source_delete", suspendedReason: NATIVE_SOURCE_LEFT_PROJECT, revision: { increment: 1 } },
             });
@@ -483,14 +495,24 @@ export async function applyNativeSourceDeletion(
 export async function updateConversationWithProjectGrounds<T>(input: {
     userId: string;
     conversationId: string;
-    fromProjectId: string | null;
     update: (tx: Prisma.TransactionClient) => Promise<T & { projectId: string | null }>;
 }): Promise<T & { projectId: string | null }> {
     return prisma.$transaction(async (tx) => {
         await lockCreditAccount(tx, input.userId);
+        // The project the conversation is in *now*, read under its row lock:
+        // two concurrent moves each re-judge the project they really left.
+        const current = await tx.$queryRaw<Array<{ projectId: string | null }>>`
+            SELECT "projectId" FROM "Conversation"
+            WHERE id = ${input.conversationId} AND "userId" = ${input.userId}
+            FOR UPDATE
+        `;
+        const fromProjectId = current[0]?.projectId ?? null;
         const updated = await input.update(tx);
         await cancelNativeExtractionRuns({ userId: input.userId, conversationIds: [input.conversationId], tx });
-        await reconcileNativeEvidence(tx, input.userId, [input.fromProjectId, updated.projectId]);
+        await reconcileNativeEvidence(tx, input.userId, {
+            conversationIds: [input.conversationId],
+            projectIds: fromProjectId === updated.projectId ? [] : [fromProjectId, updated.projectId],
+        });
         return updated;
     });
 }
@@ -508,7 +530,10 @@ export async function onConversationProjectChanged(input: {
     if (input.fromProjectId === input.toProjectId) return;
     await prisma.$transaction(async (tx) => {
         await cancelNativeExtractionRuns({ userId: input.userId, conversationIds: [input.conversationId], tx });
-        await reconcileNativeEvidence(tx, input.userId, [input.fromProjectId, input.toProjectId]);
+        await reconcileNativeEvidence(tx, input.userId, {
+            conversationIds: [input.conversationId],
+            projectIds: [input.fromProjectId, input.toProjectId],
+        });
     });
 }
 
@@ -517,7 +542,7 @@ export async function onConversationLockChanged(input: { userId: string; convers
     if (!input.projectId) return;
     await prisma.$transaction(async (tx) => {
         await cancelNativeExtractionRuns({ userId: input.userId, conversationIds: [input.conversationId], tx });
-        await reconcileNativeEvidence(tx, input.userId, [input.projectId]);
+        await reconcileNativeEvidence(tx, input.userId, { conversationIds: [input.conversationId], projectIds: [] });
     });
 }
 

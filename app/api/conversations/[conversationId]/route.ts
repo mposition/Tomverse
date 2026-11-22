@@ -727,7 +727,6 @@ export async function PATCH(
       ? await updateConversationWithProjectGrounds({
           userId,
           conversationId,
-          fromProjectId: existingConv.projectId ?? null,
           update: (tx) => tx.conversation.update({ where: { id: conversationId }, data: updateData }),
         })
       : await prisma.conversation.update({
