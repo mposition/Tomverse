@@ -27,4 +27,12 @@ Before claiming support for an OS, record that OS's actual VSIX install, Ask, ap
 
 Real-model tests require a separately authorized environment, key, models, request ceiling and spending ceiling. Check the coding API deployment and receipt readiness first. Never reuse a prior stage's budget or run on a production database. Independent review of changed credential/approval/execution boundaries uses the repository review server after committing the finished diff.
 
-Publication is separate: no Marketplace publisher authorization is assumed by the manifest's local identifier. A new PR targets develop as draft with `ci:hold`. Do not release CI, merge, deploy, publish or enable paid runs without the applicable explicit owner authorization.
+## Publish the preview
+
+From the local repository root in PowerShell, run `npm --workspace tomverse-vscode run package -- --pre-release`, then `npm run vscode:pack:verify`. The flag adds the Marketplace pre-release marker. The resulting universal VSIX can also be installed directly. Build from the release commit and verify the installed package's hash before uploading it.
+
+Publish the VSIX and SHA256 with a versioned GitHub pre-release. Record the source commit, verified environments and remaining checks in the release notes. Verify the public asset without an authenticated session before adding a download link to the website.
+
+Marketplace publication requires an account authorized to manage the `tomverse` publisher in the [Marketplace publisher portal](https://marketplace.visualstudio.com/manage). Register the publisher there if needed and upload the verified pre-release VSIX. For automated publishing, follow the [official Trusted Publishing instructions](https://code.visualstudio.com/api/working-with-extensions/publishing-extension#publish-with-github-actions-and-trusted-publishing). Confirm that `tomverse.tomverse-vscode` and the expected pre-release version are publicly visible before advertising Marketplace availability.
+
+A new PR targets develop as draft with `ci:hold`. CI admission, merge, deployment, publication and paid runs each require the applicable owner authorization.

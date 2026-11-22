@@ -31,9 +31,10 @@ mkdirSync(join(root, "artifacts"), { recursive: true });
 const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 const vsce = join(dirname(require.resolve("@vscode/vsce/package.json")), "vsce");
 const sourceDate = execFileSync("git", ["show", "-s", "--format=%ct", "HEAD"], { cwd: root, encoding: "utf8", windowsHide: true }).trim();
+const releaseOptions = process.argv.includes("--pre-release") ? ["--pre-release"] : [];
 const result = spawnSync(
     process.execPath,
-    [vsce, "package", "--no-dependencies", "--allow-missing-repository", "--out", `artifacts/tomverse-vscode-${manifest.version}.vsix`],
+    [vsce, "package", "--no-dependencies", "--allow-missing-repository", ...releaseOptions, "--out", `artifacts/tomverse-vscode-${manifest.version}.vsix`],
     { cwd: root, stdio: "inherit", windowsHide: true, env: { ...process.env, SOURCE_DATE_EPOCH: sourceDate } },
 );
 if (result.status !== 0) process.exit(result.status ?? 1);

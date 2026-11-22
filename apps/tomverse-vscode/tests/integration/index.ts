@@ -576,7 +576,7 @@ export async function run() {
             );
             return undefined;
         };
-        await chooseEffort();
+        await chooseEffort("fake-small");
         assert.equal(controller.snapshot().effort.level, "default");
         fake.options.models = DEFAULT_MODELS.map((model) => ({ ...model, tomverse: { ...model.tomverse, reasoning_efforts: ["low", "high", "invalid"] } }));
         await controller.refresh();
