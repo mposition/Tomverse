@@ -1,0 +1,131 @@
+{
+  "schema": "ai-review-blind-pilot-output/1",
+  "productName": "모의 제품 Y (합성)",
+  "aliases": ["Mock Review Y", "MOCKY"],
+  "modelIds": ["mock-y-model-2"],
+  "source": "synthetic_mock",
+  "captureMethod": "hand-written test output (free text with operator-marked spans); not a capture of any product",
+  "capturedAt": "2026-11-22T00:00:00.000Z",
+  "conditions": {
+    "fixedAnswersAccepted": true,
+    "documentExposure": "shown_in_question",
+    "toolsOrWeb": "none",
+    "mode": "default",
+    "notes": "Answers were entered in the order 1, 2 and the output calls them A, B. One case failed, one was not collected."
+  },
+  "items": [
+    {
+      "caseId": "qp-notice-1-ko",
+      "status": "ok",
+      "format": "free_text",
+      "displayMap": { "A": "1", "B": "2" },
+      "rawText": "검토 결과\nA는 해지 통지 기간을 14일, B는 30일이라고 합니다. 같은 표준 플랜에 대한 설명이라 두 답변은 서로 모순됩니다.\n— Mock Review Y",
+      "findings": [
+        { "field": "text", "text": "A는 해지 통지 기간을 14일, B는 30일이라고 합니다. 같은 표준 플랜에 대한 설명이라 두 답변은 서로 모순됩니다.", "citations": [] }
+      ]
+    },
+    {
+      "caseId": "qp-notice-1-en",
+      "status": "ok",
+      "format": "free_text",
+      "displayMap": { "A": "1", "B": "2" },
+      "rawText": "Contradiction: A states \"at least 14 days before\" while B states \"at least 30 days before\" for the same Standard plan.",
+      "findings": [
+        {
+          "field": "text",
+          "text": "Contradiction: A states \"at least 14 days before\" while B states \"at least 30 days before\" for the same Standard plan.",
+          "citations": [
+            { "displayLabel": "A", "quote": "at least 14 days before" },
+            { "displayLabel": "B", "quote": "at least 30 days before" }
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "qp-notice-2-ko",
+      "status": "ok",
+      "format": "free_text",
+      "displayMap": { "A": "1", "B": "2" },
+      "rawText": "두 답변은 서로 다른 플랜을 설명합니다. A는 개인 플랜 14일, B는 기업 플랜 30일이며 모순이 아닙니다.",
+      "findings": [
+        { "field": "text", "text": "A는 개인 플랜 14일, B는 기업 플랜 30일이며 모순이 아닙니다.", "citations": [] }
+      ]
+    },
+    {
+      "caseId": "qp-notice-2-en",
+      "status": "failed",
+      "failureReason": "timeout before any output"
+    },
+    {
+      "caseId": "qp-notice-3-ko",
+      "status": "ok",
+      "format": "free_text",
+      "displayMap": { "A": "1", "B": "2" },
+      "rawText": "B는 질문이 요구한 통지 방법(서면 여부)을 빠뜨렸습니다.",
+      "findings": [
+        { "field": "text", "text": "B는 질문이 요구한 통지 방법(서면 여부)을 빠뜨렸습니다.", "citations": [] }
+      ]
+    },
+    {
+      "caseId": "qp-notice-3-en",
+      "status": "ok",
+      "format": "free_text",
+      "displayMap": { "A": "1", "B": "2" },
+      "rawText": "B does not say how notice must be given, which the question asked.",
+      "findings": [
+        { "field": "text", "text": "B does not say how notice must be given, which the question asked.", "citations": [] }
+      ]
+    },
+    {
+      "caseId": "qp-refund-1-ko",
+      "status": "ok",
+      "format": "free_text",
+      "displayMap": { "A": "1", "B": "2" },
+      "rawText": "두 답변 모두 첫해 10% 할인으로 일치합니다.",
+      "findings": [
+        { "field": "text", "text": "두 답변 모두 첫해 10% 할인으로 일치합니다.", "citations": [] }
+      ]
+    },
+    {
+      "caseId": "qp-refund-2-ko",
+      "status": "ok",
+      "format": "free_text",
+      "displayMap": { "A": "1", "B": "2" },
+      "rawText": "두 답변 모두 잔여 기간 요금의 5% 환급이라고 일치합니다.",
+      "findings": [
+        { "field": "text", "text": "두 답변 모두 잔여 기간 요금의 5% 환급이라고 일치합니다.", "citations": [] }
+      ]
+    },
+    {
+      "caseId": "qp-refund-2-en",
+      "status": "ok",
+      "format": "free_text",
+      "displayMap": { "A": "1", "B": "2" },
+      "rawText": "Both answers say 5%. However, Section 9 of the quote says 10% of the remaining-term fees is refunded, so both answers appear to be wrong.",
+      "findings": [
+        { "field": "text", "text": "Both answers say 5%.", "citations": [] },
+        { "field": "text", "text": "However, Section 9 of the quote says 10% of the remaining-term fees is refunded, so both answers appear to be wrong.", "citations": [] }
+      ]
+    },
+    {
+      "caseId": "qp-refund-3-ko",
+      "status": "ok",
+      "format": "free_text",
+      "displayMap": { "A": "1", "B": "2" },
+      "rawText": "두 답변 모두 신청 후 10일 이내 처리라고 말합니다. 표현만 다릅니다.",
+      "findings": [
+        { "field": "text", "text": "두 답변 모두 신청 후 10일 이내 처리라고 말합니다. 표현만 다릅니다.", "citations": [] }
+      ]
+    },
+    {
+      "caseId": "qp-refund-3-en",
+      "status": "ok",
+      "format": "free_text",
+      "displayMap": { "A": "1", "B": "2" },
+      "rawText": "Both answers agree that refunds are processed within 10 days; \"ten days\" and \"10 days\" mean the same.",
+      "findings": [
+        { "field": "text", "text": "Both answers agree that refunds are processed within 10 days; \"ten days\" and \"10 days\" mean the same.", "citations": [] }
+      ]
+    }
+  ]
+}

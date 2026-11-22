@@ -206,3 +206,143 @@ test("valid stages crossing the 30-day cohort boundary are not false orphans", (
   assert.deepEqual(result.groups, []);
   assert.equal(result.diagnostics.orphan, 0);
 });
+
+// --- Attempts without an observed first reply (all inputs synthetic) ---
+const dropNow = new Date("2026-11-22T00:00:00Z");
+const attempt = (actor, entry, startedAgo, steps, extra = {}) => {
+  const kind = entry.startsWith("review_") ? "review_chat" : "import_continuation";
+  const base = { journey_key: extra.journey_key ?? randomUUID(), journey_kind: kind, journey_entry: entry, ...(extra.continuation_kind ? { continuation_kind: extra.continuation_kind } : {}) };
+  return [["started", 0], ...steps].map(([stage, offset, journey_reason, override = {}]) => ({
+    userId: actor, occurredAt: new Date(+dropNow - startedAgo + offset),
+    properties: { ...base, journey_stage: stage, ...(journey_reason ? { journey_reason } : {}), ...override },
+  }));
+};
+const groupOf = (summary, entry, continuation = null) => summary.groups.find(g => g.entry === entry && g.continuation === continuation);
+const assertDropoffSums = summary => {
+  for (const g of summary.groups) {
+    const d = g.dropoff, stageSum = Object.values(d.lastStage).reduce((s, v) => s + (v ?? 0), 0);
+    assert.equal(d.unreplied, g.mature - g.replied, `${g.entry} N`);
+    assert.equal(stageSum, d.unreplied, `${g.entry} last stages sum to N`);
+    assert.equal(d.withReason + d.withoutReason, d.unreplied, `${g.entry} reason split sums to N`);
+    assert.equal(d.withoutReason, g.unobserved, `${g.entry} no-reason equals unobserved`);
+  }
+};
+const studioCase = () => [
+  ...attempt("A", "review_studio", 2 * day, [["preview_ready", 1], ["issue", 2, "draft_conflict"], ["ready", 3], ["send_dispatched", 4], ["reply_observed", 5]]),
+  ...attempt("A", "review_studio", 2 * day, [["preview_ready", 1], ["issue", 2, "draft_conflict"], ["cancelled", 3, "user_cancelled"]]),
+  ...attempt("A", "review_studio", 2 * day, [["preview_ready", 1], ["ready", 2]]),
+  ...attempt("A", "review_studio", 60 * 60 * 1000, [["issue", 1, "source_unavailable"]]),
+];
+
+test("Studio dropoff: M, R, N, last stage and reasons with and without a reply", () => {
+  const summary = summarizeConnectedJourneys(studioCase(), dropNow);
+  const g = groupOf(summary, "review_studio");
+  assert.deepEqual([g.mature, g.replied, g.dropoff.unreplied, g.pending], [3, 1, 2, 1]);
+  assert.deepEqual(g.dropoff.lastStage, { started: 0, preview: 1, ready: 1, sent: 0 });
+  assert.deepEqual(g.dropoff.reasons, [{ reason: "user_cancelled", unreplied: 1, replied: 0 }, { reason: "draft_conflict", unreplied: 1, replied: 1 }]);
+  assert.equal(g.dropoff.withReason, 1); assert.equal(g.dropoff.withoutReason, 1);
+  // The pending attempt's source check stays out of the mature detail but in the existing all-starts issue count.
+  assert.equal(g.issue, 3); assert.equal(g.unobserved, 1);
+  assertDropoffSums(summary);
+});
+
+test("Import dropoff separates new/existing and viewer; a reason swap changes only the reason table", () => {
+  const rows = reason => [
+    ...attempt("B", "import_complete", 2 * day, [["issue", 1, reason]], { continuation_kind: "new" }),
+    ...attempt("B", "import_complete", 2 * day, [["ready", 1], ["send_dispatched", 2]], { continuation_kind: "new" }),
+    ...attempt("B", "import_complete", 2 * day, [["ready", 1], ["send_dispatched", 2], ["reply_observed", 3]], { continuation_kind: "existing" }),
+    ...attempt("B", "import_viewer", 2 * day, [["ready", 1]], { continuation_kind: "new" }),
+    ...attempt("B", "import_viewer", 2 * day, [], { continuation_kind: "existing" }),
+  ];
+  const created = summarizeConnectedJourneys(rows("create_failed"), dropNow);
+  const fresh = groupOf(created, "import_complete", "new"), existing = groupOf(created, "import_complete", "existing"), viewer = groupOf(created, "import_viewer", "new");
+  assert.deepEqual([fresh.mature, fresh.replied, existing.mature, existing.replied], [2, 0, 1, 1]);
+  assert.deepEqual(fresh.dropoff.lastStage, { started: 1, preview: null, ready: 0, sent: 1 });
+  assert.deepEqual(fresh.dropoff.reasons, [{ reason: "create_failed", unreplied: 1, replied: 0 }]);
+  assert.equal(fresh.dropoff.withoutReason, 1);
+  assert.equal(existing.dropoff.unreplied, 0);
+  assert.deepEqual(viewer.dropoff.lastStage, { started: 0, preview: null, ready: 1, sent: 0 });
+  assert.equal(groupOf(created, "import_viewer", "existing"), undefined);
+  assert.equal(created.diagnostics.invalidProperties, 1);
+  const blocked = summarizeConnectedJourneys(rows("navigation_blocked"), dropNow);
+  assert.deepEqual(groupOf(blocked, "import_complete", "new").dropoff.reasons, [{ reason: "navigation_blocked", unreplied: 1, replied: 0 }]);
+  const funnel = s => s.groups.map(({ dropoff, ...rest }) => ({ ...rest, dropoff: { ...dropoff, reasons: [] } }));
+  assert.deepEqual(funnel(blocked), funnel(created));
+  assert.deepEqual(blocked.diagnostics, created.diagnostics);
+  assertDropoffSums(created);
+});
+
+test("dropoff keeps the 24-hour maturity and observation boundaries", () => {
+  const rows = [
+    ...attempt("C", "review_classic", day - 1, [["ready", 0]]),
+    ...attempt("C", "review_classic", day, [["ready", 0]]),
+    ...attempt("C", "review_classic", day + 1, [["ready", 0], ["send_dispatched", 1], ["reply_observed", day]]),
+    ...attempt("C", "review_classic", 3 * day, [["ready", 0], ["send_dispatched", 1], ["reply_observed", day + 1]]),
+  ];
+  const summary = summarizeConnectedJourneys(rows, dropNow);
+  const g = groupOf(summary, "review_classic");
+  assert.deepEqual([g.mature, g.pending, g.replied, g.dropoff.unreplied], [3, 1, 1, 2]);
+  assert.deepEqual(g.dropoff.lastStage, { started: 0, preview: 0, ready: 1, sent: 1 });
+  assert.equal(summary.diagnostics.outsideWindow, 1);
+  assertDropoffSums(summary);
+});
+
+test("Review ready without preview is valid; Quick Summary is its own group", () => {
+  const summary = summarizeConnectedJourneys([
+    ...attempt("D", "review_classic", 2 * day, [["ready", 1], ["send_dispatched", 2], ["reply_observed", 3]]),
+    ...attempt("D", "review_quick_summary", 2 * day, [["ready", 1]]),
+    ...attempt("D", "review_quick_summary", 2 * day, [["preview_ready", 1], ["issue", 2, "source_unavailable"]]),
+  ], dropNow);
+  assert.equal(groupOf(summary, "review_classic").replied, 1);
+  const quick = groupOf(summary, "review_quick_summary");
+  assert.deepEqual(quick.dropoff.lastStage, { started: 0, preview: 1, ready: 1, sent: 0 });
+  assert.deepEqual(quick.dropoff.reasons, [{ reason: "source_unavailable", unreplied: 1, replied: 0 }]);
+  assertDropoffSums(summary);
+});
+
+test("dropoff reuses validity: duplicates, reversal, orphans, mismatch and a shared UUID across accounts", () => {
+  const shared = randomUUID();
+  const summary = summarizeConnectedJourneys([
+    // Same reason sent twice for one stage counts one attempt once.
+    ...attempt("E", "review_studio", 2 * day, [["issue", 1, "response_error"], ["issue", 2, "response_error"]]),
+    // Dispatch before ready is not a valid send; reply without valid send is not success.
+    ...attempt("E", "review_studio", 2 * day, [["ready", 2], ["send_dispatched", 1], ["reply_observed", 3]]),
+    // A mismatched-entry reason does not attach to this attempt.
+    ...attempt("E", "review_studio", 2 * day, [["issue", 1, "draft_conflict", { journey_entry: "review_classic" }]]),
+    // An issue followed by a normal reply is success; the reason is kept in the replied column only.
+    ...attempt("E", "review_studio", 2 * day, [["ready", 1], ["send_dispatched", 2], ["issue", 3, "response_timeout"], ["reply_observed", 4]]),
+    // Same journey key, two accounts: B cannot borrow A's reply.
+    ...attempt("F", "review_studio", 2 * day, [["ready", 1], ["send_dispatched", 2], ["reply_observed", 3]], { journey_key: shared }),
+    ...attempt("G", "review_studio", 2 * day, [["issue", 1, "navigation_blocked"]], { journey_key: shared }),
+    // Stage rows with no start never become attempts or reasons.
+    { userId: "H", occurredAt: new Date(+dropNow - day), properties: { journey_key: randomUUID(), journey_kind: "review_chat", journey_entry: "review_studio", journey_stage: "issue", journey_reason: "empty_response" } },
+  ], dropNow);
+  const g = groupOf(summary, "review_studio");
+  assert.deepEqual([g.mature, g.replied, g.dropoff.unreplied], [6, 2, 4]);
+  assert.deepEqual(g.dropoff.lastStage, { started: 3, preview: 0, ready: 1, sent: 0 });
+  assert.deepEqual(g.dropoff.reasons, [
+    { reason: "navigation_blocked", unreplied: 1, replied: 0 },
+    { reason: "response_error", unreplied: 1, replied: 0 },
+    { reason: "response_timeout", unreplied: 0, replied: 1 },
+  ]);
+  assert.deepEqual([g.dropoff.withReason, g.dropoff.withoutReason], [2, 2]);
+  assert.deepEqual([summary.diagnostics.duplicates, summary.diagnostics.reversed, summary.diagnostics.mismatchedProperties, summary.diagnostics.orphan], [1, 1, 1, 1]);
+  assertDropoffSums(summary);
+  const serialized = JSON.stringify(summary);
+  for (const secret of ["\"E\"", "\"F\"", "\"G\"", "\"H\"", shared]) assert.equal(serialized.includes(secret), false);
+});
+
+test("dropoff copy names every recorded reason and stage in English and Korean", async () => {
+  const { adminProductAnalyticsMessages } = await import("../lib/adminMessages/productAnalytics.ts");
+  const { CONNECTED_JOURNEY_REASONS, CONNECTED_JOURNEY_LAST_STAGES } = await import("../lib/connectedJourneyAggregation.ts");
+  assert.equal(CONNECTED_JOURNEY_REASONS.length, 16);
+  for (const locale of ["en", "ko"]) {
+    const j = adminProductAnalyticsMessages[locale].journeys;
+    assert.deepEqual(Object.keys(j.reasons).sort(), [...CONNECTED_JOURNEY_REASONS].sort());
+    for (const stage of CONNECTED_JOURNEY_LAST_STAGES) assert.ok(j.dropoff.lastStage[stage]);
+    assert.notEqual(j.dropoff.noMature(0), j.dropoff.allReplied(3));
+    assert.notEqual(j.dropoff.noMature(0), j.none);
+    assert.notEqual(j.none, j.unavailable);
+  }
+  assert.match(adminProductAnalyticsMessages.ko.journeys.dropoff.equation(3, 1, 1, 1), /성숙 3 = 정상 답변 1/);
+});

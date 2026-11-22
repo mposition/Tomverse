@@ -84,9 +84,26 @@ export const amuxExactDataKeys = (value: unknown, keys: readonly string[]): bool
   Reflect.ownKeys(value).length === keys.length && keys.every((key) =>
     "value" in (Object.getOwnPropertyDescriptor(value, key) ?? {}));
 
+/** A node target is either a proposal of this package (ref, kind, level) or,
+ * owner decision 2026-11-22, an existing registered Portfolio node, which also
+ * carries what the model needs to reuse it: its title, its parent node id and,
+ * for a Feature, its card number prefix. Those three keys come together. */
+export type AmuxPermittedNodeTarget = {
+  ref: string; kind: "node"; level: "initiative" | "epic" | "feature";
+  title?: string; parentRef?: string | null; displayPrefix?: string | null;
+};
 export type AmuxPermittedTargetRef =
-  | { ref: string; kind: "node"; level: "initiative" | "epic" | "feature" }
+  | AmuxPermittedNodeTarget
   | { ref: string; kind: "card"; cardType: "story" | "task"; storyKind: "general" | "bug" | null; featureRef: string };
+
+export const AMUX_NODE_TARGET_KEYS = ["ref", "kind", "level"] as const;
+export const AMUX_EXISTING_NODE_TARGET_KEYS =
+  ["ref", "kind", "level", "title", "parentRef", "displayPrefix"] as const;
+
+/** True for a node target that names an existing registered node. */
+export const isAmuxExistingNodeTarget = (target: AmuxPermittedTargetRef): target is
+  AmuxPermittedNodeTarget & { title: string; parentRef: string | null; displayPrefix: string | null } =>
+  target.kind === "node" && typeof target.title === "string";
 
 /** One descriptor snapshot feeds both prompt admission and model-output inspection. */
 export const snapshotAmuxPermittedTarget = (value: unknown): AmuxPermittedTargetRef | null => {
@@ -97,8 +114,13 @@ export const snapshotAmuxPermittedTarget = (value: unknown): AmuxPermittedTarget
       Reflect.ownKeys(descriptors).length === keys.length && keys.every((key) =>
         "value" in (descriptors[key] ?? {}));
     const kind = descriptors.kind?.value;
-    if (kind === "node" && hasExact(["ref", "kind", "level"])) {
+    if (kind === "node" && hasExact(AMUX_NODE_TARGET_KEYS)) {
       return { ref: descriptors.ref.value, kind, level: descriptors.level.value };
+    }
+    if (kind === "node" && hasExact(AMUX_EXISTING_NODE_TARGET_KEYS)) {
+      return { ref: descriptors.ref.value, kind, level: descriptors.level.value,
+        title: descriptors.title.value, parentRef: descriptors.parentRef.value,
+        displayPrefix: descriptors.displayPrefix.value };
     }
     if (kind === "card" && hasExact(["ref", "kind", "cardType", "storyKind", "featureRef"])) {
       return { ref: descriptors.ref.value, kind, cardType: descriptors.cardType.value,
@@ -123,7 +145,20 @@ export const amuxPermittedTargetRefSafe = (
   if (priorLocal && (Number(priorLocal[1]) >= expectedChunkIndex || priorLocal[2] !== target.kind)) {
     return false;
   }
-  if (target.kind === "node") return ["initiative", "epic", "feature"].includes(target.level);
+  if (target.kind === "node") {
+    if (!["initiative", "epic", "feature"].includes(target.level)) return false;
+    if (!Object.hasOwn(target, "title")) return true;
+    // An existing node is a database row, never a local proposal id, and its
+    // descriptive fields obey the hierarchy they describe.
+    const { title, parentRef, displayPrefix } = target;
+    return priorLocal === null && typeof title === "string" && title.length > 0 &&
+      title.trim() === title && !/[\r\n]/.test(title) && amuxAnalysisInputTextSafe(title) &&
+      (target.level === "initiative" ? parentRef === null :
+        typeof parentRef === "string" && amuxAnalysisRefSafe(parentRef) &&
+          LOCAL_ID.exec(parentRef) === null) &&
+      (displayPrefix === null || (target.level === "feature" &&
+        isAmuxFeatureDisplayPrefix(displayPrefix)));
+  }
   return target.kind === "card" && ["story", "task"].includes(target.cardType) &&
     (target.cardType === "story" ? ["general", "bug"].includes(target.storyKind as string) :
       target.storyKind === null) && amuxAnalysisRefSafe(target.featureRef);
@@ -541,6 +576,33 @@ export function inspectAmuxStoredAnalysisUnit(input: {
     return { ok: true, unit: parseUnit(JSON.parse(input.raw),
       new Set(input.permittedSourceRefIds), input.chunkIndex) };
   } catch { return { ok: false }; }
+}
+
+/**
+ * The existing nodes a stored first page names, for re-reading that page
+ * after it was admitted: each parent or Feature ref that is not one of the
+ * page's own units, with the level its use requires. Database existence was
+ * checked when the page was admitted and is checked again at registration;
+ * this only lets the structural re-read resolve the reference.
+ */
+export function amuxStoredPageExistingNodeTargets(
+  units: AmuxAnalysisChunk["units"],
+): AmuxPermittedTargetRef[] {
+  const local = new Set(units.flatMap((unit) => unit.kind === "evidence" ? [] : [unit.localId]));
+  const found = new Map<string, AmuxPermittedTargetRef>();
+  const add = (ref: string, level: AmuxPermittedNodeTarget["level"]) => {
+    if (local.has(ref) || found.has(ref)) return;
+    const target: AmuxPermittedTargetRef = { ref, kind: "node", level };
+    if (amuxPermittedTargetRefSafe(target, 0)) found.set(ref, target);
+  };
+  for (const unit of units) {
+    if (unit.kind === "node" && unit.parentRef !== null) {
+      add(unit.parentRef, unit.level === "epic" ? "initiative" : "epic");
+    } else if (unit.kind === "card") {
+      add(unit.featureRef, "feature");
+    }
+  }
+  return [...found.values()];
 }
 
 type TargetRef = AmuxPermittedTargetRef | AmuxAnalysisNode | AmuxAnalysisCard;

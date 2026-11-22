@@ -1524,9 +1524,9 @@ export const RAW_SQL_ALLOWLIST = [
     path: "lib/amux/cardDisplayKeyAllocator.ts",
     table: "AmuxCardDisplayKeyCounter",
     tableMentions: 2,
-    writeVerbs: 2,
+    writeVerbs: 3,
     reason:
-      "The card number counter's single writer (docs/policy/amux-card-display-key.md §3). Its raw SQL is one constant INSERT ... SELECT ... ON CONFLICT DO UPDATE ... RETURNING, led by a CTE that takes the audit chain's advisory lock before the counter row, whose only value, the prefix, is a bound parameter; the two table mentions are the INSERT target and the qualified column in the increment. Its other raw SQL is a read-only SELECT of taken Feature prefixes from AmuxPortfolioNode (docs/policy/amux-intake.md v17 item 3). It never deletes a counter.",
+      "The card number counter's single writer (docs/policy/amux-card-display-key.md §3). Its raw SQL is one constant INSERT ... SELECT ... ON CONFLICT DO UPDATE ... RETURNING, led by a CTE that takes the audit chain's advisory lock before the counter row, whose only value, the prefix, is a bound parameter; the two table mentions are the INSERT target and the qualified column in the increment. Its other raw SQL is a read-only SELECT of taken Feature prefixes from AmuxPortfolioNode (docs/policy/amux-intake.md v17 item 3) and, for a Feature registered without a prefix (docs/policy/amux-intake.md, owner decision 2026-11-22), one constant UPDATE of AmuxPortfolioNode.displayPrefix from NULL with bound values and its read-back SELECT; that UPDATE is the third write verb and never touches the counter. It never deletes a counter.",
   },
   {
     path: "lib/amux/cardDisplayKeyBackfillService.ts",

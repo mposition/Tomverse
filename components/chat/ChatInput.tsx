@@ -87,6 +87,7 @@ import {
   chatAttachmentExtensionsByGroup,
   resolveChatAttachmentFormat,
 } from "@/lib/chatAttachmentFormats";
+import { isReattachableDocument } from "@/lib/chatReviewHandoff";
 import { chatAttachmentErrorCopyKey } from "@/lib/chatAttachmentErrorCopy";
 import {
   CHAT_MAX_ATTACHMENTS_PER_MESSAGE,
@@ -804,6 +805,12 @@ type ChatInputProps = {
    * second full-width border to the same seam.
    */
   hideTopBorder?: boolean;
+  /**
+   * This Review draft came from a Chat answer whose question was sent with
+   * one document (lib/chatReviewHandoff.ts). Files do not follow the question,
+   * so the composer asks for it again until a document is attached here.
+   */
+  fileReattachPrompt?: boolean;
   // MobileChatShell renders its own copy pinned to the true screen bottom
   // (independent of the composer's floating/docked position) instead of
   // this one, which always sits directly under the input box.
@@ -1058,6 +1065,7 @@ export function ChatInput({
   guestPreviewMode = false,
   variant = "bar",
   hideTopBorder = false,
+  fileReattachPrompt = false,
   hideDisclaimer = false,
   webSearchMode = "off",
   memoryMode,
@@ -3563,6 +3571,41 @@ export function ChatInput({
               </button>
             </div>
           )}
+          {/*
+            Compare in Review with the question's document: it is not carried
+            across, so it is picked again through this composer's own picker,
+            limits and upload. Only a readable document (any of the kinds the
+            handoff accepts, not necessarily the original's) that finished
+            uploading here settles it; removing it brings the prompt back. Nothing here claims
+            the picked file is the original -- the person picking it knows.
+          */}
+          {fileReattachPrompt && (attachments.some(isReattachableDocument) ? (
+            <p
+              role="status"
+              data-testid="review-file-reattach-attached"
+              className="mb-2 px-1 text-[12px] font-semibold leading-4 text-zinc-600 dark:text-zinc-300"
+            >
+              {t("chat.compareInReviewFileAttached")}
+            </p>
+          ) : (
+            <div
+              role="status"
+              data-testid="review-file-reattach"
+              className="mb-2 flex flex-col gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-[12px] leading-4 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 sm:flex-row sm:items-center"
+            >
+              <p className="min-w-0 flex-1">{t("chat.compareInReviewFileReattach")}</p>
+              <button
+                type="button"
+                data-testid="review-file-reattach-choose"
+                disabled={draftLocked || !canAttach || attachments.length >= maxAttachments}
+                onClick={() => fileInputRef.current?.click()}
+                className={`inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-2.5 font-bold text-zinc-800 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-800 ${isMobileShell ? "min-h-11" : "py-1.5"}`}
+              >
+                <Paperclip className="h-4 w-4" aria-hidden="true" />
+                {t("chat.compareInReviewFileChoose")}
+              </button>
+            </div>
+          ))}
           {(attachments.length > 0 ||
             scopedPendingAttachments.length > 0 ||
             scopedFailedAttachments.length > 0) && (

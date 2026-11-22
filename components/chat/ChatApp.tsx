@@ -31,7 +31,7 @@ import {
 } from "@/components/chat/ChatMessageList";
 import { VoiceConversationHistory } from "@/components/chat/VoiceConversationHistory";
 import { Message, type ChatAttachment } from "@/components/chat/types";
-import { reviewSeedFromChat } from "@/lib/chatReviewHandoff";
+import { chatReviewHandoffFor } from "@/lib/chatReviewHandoff";
 import { useSession } from "next-auth/react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useGuestVerification } from "@/components/chat/GuestVerificationProvider";
@@ -251,7 +251,8 @@ type ChatAppProps = {
   /** Chat: send a failed reply's question again without touching the draft. */
   onRetryPrompt?: (prompt: ChatRecoveryPrompt) => void;
   /** Chat: open a Review draft prefilled from one answer's question. */
-  onCompareInReview?: (seed: string) => void;
+  /** `reattachFile`: the answer's own turn sent one readable document (lib/chatReviewHandoff.ts). */
+  onCompareInReview?: (seed: string, options?: { reattachFile: boolean }) => void;
   onCompareContinuationInReview?: (assistantMessageId: string) => void;
   initialConversationId?: string | null;
   /**
@@ -3471,8 +3472,11 @@ function ChatAppComponent({
         onCompareInReview={transcriptScope === "conversation" && (onCompareContinuationInReview || onCompareInReview)
           ? (messageId) => {
               if (onCompareContinuationInReview) { onCompareContinuationInReview(messageId); return; }
-              const seed = reviewSeedFromChat(messages, messageId, t("chat.compareInReviewContext"));
-              if (seed) onCompareInReview?.(seed);
+              const handoff = chatReviewHandoffFor(messages, messageId, t("chat.compareInReviewContext"));
+              // A file-only turn has no question of its own; an earlier one
+              // would be compared against a document it was never asked about.
+              if (handoff?.kind === "no-question") dispatchAppToast(t("chat.compareInReviewNeedsQuestion"), "info");
+              else if (handoff) onCompareInReview?.(handoff.seed, { reattachFile: handoff.reattachFile });
             }
           : undefined}
         compareRequiresCompleted={Boolean(onCompareContinuationInReview)}

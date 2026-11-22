@@ -1,0 +1,209 @@
+{
+  "schema": "ai-review-blind-pilot-output/1",
+  "productName": "모의 제품 X (합성)",
+  "aliases": ["Mock Reviewer X", "MOCKX"],
+  "modelIds": ["mock-x-reviewer-v0"],
+  "source": "synthetic_mock",
+  "captureMethod": "hand-written test output (structured, product-shaped); not a capture of any product",
+  "capturedAt": "2026-11-22T00:00:00.000Z",
+  "conditions": {
+    "fixedAnswersAccepted": true,
+    "documentExposure": "shown_in_question",
+    "toolsOrWeb": "none",
+    "mode": "balanced",
+    "notes": "Display labels are shuffled per case, as a product run would; displayMap is the run's own label->answer map."
+  },
+  "items": [
+    {
+      "caseId": "qp-notice-1-ko",
+      "status": "ok",
+      "format": "structured",
+      "displayMap": { "A": "2", "B": "1" },
+      "findings": [
+        {
+          "field": "contradictions",
+          "text": "A와 B가 표준 플랜 해지 통지 기간을 다르게 말합니다(30일 대 14일). 같은 플랜·같은 계약이라 둘 다 참일 수 없습니다.",
+          "citations": [
+            { "displayLabel": "A", "quote": "30일 전까지 서면으로 통지" },
+            { "displayLabel": "B", "quote": "14일 전까지 통지" }
+          ]
+        },
+        {
+          "field": "contradictions",
+          "text": "해지 통지 기간이 답변마다 다릅니다.",
+          "citations": [{ "displayLabel": "B", "quote": "14일 전까지 통지하면" }]
+        },
+        {
+          "field": "consensus",
+          "text": "두 답변 모두 표준 플랜을 다룹니다.",
+          "citations": [{ "displayLabel": "A", "quote": "표준 플랜" }]
+        }
+      ]
+    },
+    {
+      "caseId": "qp-notice-1-en",
+      "status": "ok",
+      "format": "structured",
+      "displayMap": { "A": "1", "B": "2" },
+      "findings": [
+        {
+          "field": "contradictions",
+          "text": "A says 14 days' notice and B says 30 days for the same Standard plan; both cannot hold.",
+          "citations": [
+            { "displayLabel": "A", "quote": "at least 14 days before" },
+            { "displayLabel": "B", "quote": "at least 30 days before" }
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "qp-notice-2-ko",
+      "status": "ok",
+      "format": "structured",
+      "displayMap": { "A": "1", "B": "2" },
+      "findings": [
+        {
+          "field": "contradictions",
+          "text": "A는 14일, B는 30일이라고 해 해지 통지 기간이 서로 모순됩니다.",
+          "citations": [
+            { "displayLabel": "A", "quote": "14일 전까지 통지" },
+            { "displayLabel": "B", "quote": "30일 전까지 통지" }
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "qp-notice-2-en",
+      "status": "ok",
+      "format": "structured",
+      "displayMap": { "A": "2", "B": "1" },
+      "findings": [
+        {
+          "field": "differences",
+          "text": "A covers the Business plan (30 days) while B covers the Personal plan (14 days); these are different conditions.",
+          "citations": [
+            { "displayLabel": "A", "quote": "Business plan" },
+            { "displayLabel": "B", "quote": "Personal plan" }
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "qp-notice-3-ko",
+      "status": "ok",
+      "format": "structured",
+      "displayMap": { "A": "2", "B": "1" },
+      "findings": [
+        { "field": "missingPoints", "text": "A는 질문이 요구한 통지 방법(서면·이메일)을 밝히지 않았습니다.", "citations": [] }
+      ]
+    },
+    {
+      "caseId": "qp-notice-3-en",
+      "status": "ok",
+      "format": "structured",
+      "displayMap": { "A": "1", "B": "2" },
+      "findings": []
+    },
+    {
+      "caseId": "qp-refund-1-ko",
+      "status": "ok",
+      "format": "structured",
+      "displayMap": { "A": "2", "B": "1" },
+      "findings": [
+        {
+          "field": "contradictions",
+          "text": "첫해 10%는 일치하지만 갱신 연도 할인율이 A는 10%, B는 5%로 충돌합니다.",
+          "citations": [
+            { "displayLabel": "A", "quote": "갱신 연도에도 10% 할인" },
+            { "displayLabel": "B", "quote": "갱신 연도부터는 5% 할인" }
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "qp-refund-1-en",
+      "status": "ok",
+      "format": "structured",
+      "displayMap": { "A": "1", "B": "2" },
+      "findings": [
+        {
+          "field": "contradictions",
+          "text": "The two answers give different discount rates.",
+          "citations": [
+            { "displayLabel": "A", "quote": "5% off" },
+            { "displayLabel": "B", "quote": "10% off" }
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "qp-refund-2-ko",
+      "status": "ok",
+      "format": "structured",
+      "displayMap": { "A": "1", "B": "2" },
+      "findings": [
+        {
+          "field": "consensus",
+          "text": "두 답변 모두 잔여 기간 요금의 5% 환급이라고 합니다.",
+          "citations": [
+            { "displayLabel": "A", "quote": "5%를 환급받습니다" },
+            { "displayLabel": "B", "quote": "5%가 환급됩니다" }
+          ]
+        },
+        {
+          "field": "verificationNeeded",
+          "text": "제9조 원문은 잔여 기간 요금의 10% 환급이라 두 답변의 5%와 다릅니다. 원문 확인이 필요합니다.",
+          "citations": []
+        }
+      ]
+    },
+    {
+      "caseId": "qp-refund-2-en",
+      "status": "ok",
+      "format": "structured",
+      "displayMap": { "A": "2", "B": "1" },
+      "findings": [
+        {
+          "field": "contradictions",
+          "text": "A and B conflict on the refund rate for early termination.",
+          "citations": [
+            { "displayLabel": "A", "quote": "5% of the remaining-term fees" },
+            { "displayLabel": "B", "quote": "5% of the fees" }
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "qp-refund-3-ko",
+      "status": "ok",
+      "format": "structured",
+      "displayMap": { "A": "1", "B": "2" },
+      "findings": [
+        {
+          "field": "consensus",
+          "text": "두 답변 모두 신청 후 10일 이내 처리라고 합니다(열흘 = 10일). — Mock Reviewer X",
+          "citations": [
+            { "displayLabel": "A", "quote": "열흘 안에 처리" },
+            { "displayLabel": "B", "quote": "10일 이내에 환급" }
+          ]
+        }
+      ]
+    },
+    {
+      "caseId": "qp-refund-3-en",
+      "status": "ok",
+      "format": "structured",
+      "displayMap": { "A": "2", "B": "1" },
+      "findings": [
+        {
+          "field": "contradictions",
+          "text": "A says ten days while B says 10 days, so the refund timing is inconsistent.",
+          "citations": [
+            { "displayLabel": "A", "quote": "within ten days" },
+            { "displayLabel": "B", "quote": "no later than 10 days" }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,225 @@
+{
+  "schema": "ai-review-blind-pilot-cases/1",
+  "source": "synthetic",
+  "note": "Hypothetical quotes written for this pilot. No real company, customer or contract. Two task families x three variants x ko/en; a translation pair is one task, not two independent samples.",
+  "cases": [
+    {
+      "caseId": "qp-notice-1-ko",
+      "familyId": "qp-notice",
+      "variantId": "1",
+      "translationPairId": "qp-notice-1",
+      "language": "ko",
+      "document": {
+        "version": "Q-1001 r1",
+        "clauses": [
+          { "id": "제1조", "text": "서비스: 표준 플랜, 월 120,000원, 12개월 약정." },
+          { "id": "제7조", "text": "해지: 고객은 해지 희망일 30일 전까지 서면으로 통지하여 계약을 해지할 수 있다." }
+        ]
+      },
+      "question": "가상 견적서 Q-1001 기준으로, 표준 플랜을 해지하려면 며칠 전에 통지해야 하나요?",
+      "answers": [
+        { "id": "1", "content": "표준 플랜은 해지 희망일 14일 전까지 통지하면 해지할 수 있습니다. 약정 기간은 12개월입니다." },
+        { "id": "2", "content": "표준 플랜을 해지하려면 해지 희망일 30일 전까지 서면으로 통지해야 합니다." }
+      ]
+    },
+    {
+      "caseId": "qp-notice-1-en",
+      "familyId": "qp-notice",
+      "variantId": "1",
+      "translationPairId": "qp-notice-1",
+      "language": "en",
+      "document": {
+        "version": "Q-1001 r1",
+        "clauses": [
+          { "id": "Section 1", "text": "Service: Standard plan, KRW 120,000 per month, 12-month term." },
+          { "id": "Section 7", "text": "Termination: the customer may terminate by giving written notice at least 30 days before the intended termination date." }
+        ]
+      },
+      "question": "Under hypothetical quote Q-1001, how many days' notice is needed to cancel the Standard plan?",
+      "answers": [
+        { "id": "1", "content": "The Standard plan can be cancelled by giving notice at least 14 days before the termination date. The term is 12 months." },
+        { "id": "2", "content": "To cancel the Standard plan you must give written notice at least 30 days before the termination date." }
+      ]
+    },
+    {
+      "caseId": "qp-notice-2-ko",
+      "familyId": "qp-notice",
+      "variantId": "2",
+      "translationPairId": "qp-notice-2",
+      "language": "ko",
+      "document": {
+        "version": "Q-1002 r1",
+        "clauses": [
+          { "id": "제7조", "text": "해지 통지: 개인 플랜은 해지 희망일 14일 전, 기업 플랜은 30일 전까지 통지해야 한다." }
+        ]
+      },
+      "question": "가상 견적서 Q-1002에서 해지 통지 기간은 어떻게 되나요?",
+      "answers": [
+        { "id": "1", "content": "개인 플랜은 해지 희망일 14일 전까지 통지하면 됩니다." },
+        { "id": "2", "content": "기업 플랜의 경우 해지 희망일 30일 전까지 통지해야 합니다." }
+      ]
+    },
+    {
+      "caseId": "qp-notice-2-en",
+      "familyId": "qp-notice",
+      "variantId": "2",
+      "translationPairId": "qp-notice-2",
+      "language": "en",
+      "document": {
+        "version": "Q-1002 r1",
+        "clauses": [
+          { "id": "Section 7", "text": "Notice of termination: 14 days for the Personal plan and 30 days for the Business plan before the intended termination date." }
+        ]
+      },
+      "question": "What is the termination notice period in hypothetical quote Q-1002?",
+      "answers": [
+        { "id": "1", "content": "For the Personal plan, notice 14 days before the termination date is enough." },
+        { "id": "2", "content": "On the Business plan you need to give notice 30 days before the termination date." }
+      ]
+    },
+    {
+      "caseId": "qp-notice-3-ko",
+      "familyId": "qp-notice",
+      "variantId": "3",
+      "translationPairId": "qp-notice-3",
+      "language": "ko",
+      "document": {
+        "version": "Q-1003 r1",
+        "clauses": [
+          { "id": "제7조", "text": "해지: 해지 희망일 30일 전까지 서면(이메일 포함)으로 통지해야 한다." }
+        ]
+      },
+      "question": "가상 견적서 Q-1003에서 해지 통지 기간과 통지 방법을 알려 주세요.",
+      "answers": [
+        { "id": "1", "content": "해지 희망일 30일 전까지 이메일을 포함한 서면으로 통지해야 합니다." },
+        { "id": "2", "content": "해지 희망일 30일 전까지 통지하면 해지할 수 있습니다." }
+      ]
+    },
+    {
+      "caseId": "qp-notice-3-en",
+      "familyId": "qp-notice",
+      "variantId": "3",
+      "translationPairId": "qp-notice-3",
+      "language": "en",
+      "document": {
+        "version": "Q-1003 r1",
+        "clauses": [
+          { "id": "Section 7", "text": "Termination: notice must be given in writing (email accepted) at least 30 days before the intended termination date." }
+        ]
+      },
+      "question": "In hypothetical quote Q-1003, what is the notice period and how must notice be given?",
+      "answers": [
+        { "id": "1", "content": "Give notice in writing, email included, at least 30 days before the termination date." },
+        { "id": "2", "content": "You can cancel by giving notice at least 30 days before the termination date." }
+      ]
+    },
+    {
+      "caseId": "qp-refund-1-ko",
+      "familyId": "qp-refund",
+      "variantId": "1",
+      "translationPairId": "qp-refund-1",
+      "language": "ko",
+      "document": {
+        "version": "Q-2001 r1",
+        "clauses": [
+          { "id": "제4조", "text": "할인: 첫해 요금 10% 할인, 갱신 연도부터 5% 할인." }
+        ]
+      },
+      "question": "가상 견적서 Q-2001의 할인 조건을 연도별로 정리해 주세요.",
+      "answers": [
+        { "id": "1", "content": "첫해에는 10% 할인되고, 갱신 연도부터는 5% 할인이 적용됩니다." },
+        { "id": "2", "content": "첫해 10% 할인이 적용되며, 갱신 연도에도 10% 할인이 그대로 유지됩니다." }
+      ]
+    },
+    {
+      "caseId": "qp-refund-1-en",
+      "familyId": "qp-refund",
+      "variantId": "1",
+      "translationPairId": "qp-refund-1",
+      "language": "en",
+      "document": {
+        "version": "Q-2001 r1",
+        "clauses": [
+          { "id": "Section 4", "text": "Discount: 10% off the first year; 5% off from the renewal year onward." }
+        ]
+      },
+      "question": "Summarise the discount in hypothetical quote Q-2001 year by year.",
+      "answers": [
+        { "id": "1", "content": "You get 10% off in the first year, and 5% off from the renewal year onward." },
+        { "id": "2", "content": "The first year is 10% off, and the 10% discount continues in the renewal year." }
+      ]
+    },
+    {
+      "caseId": "qp-refund-2-ko",
+      "familyId": "qp-refund",
+      "variantId": "2",
+      "translationPairId": "qp-refund-2",
+      "language": "ko",
+      "document": {
+        "version": "Q-2002 r1",
+        "clauses": [
+          { "id": "제9조", "text": "중도 해지 환급: 잔여 기간 요금의 10%를 환급한다." }
+        ]
+      },
+      "question": "가상 견적서 Q-2002에서 중도 해지하면 얼마를 환급받나요?",
+      "answers": [
+        { "id": "1", "content": "중도 해지하면 잔여 기간 요금의 5%를 환급받습니다." },
+        { "id": "2", "content": "잔여 기간 요금의 5%가 환급됩니다." }
+      ]
+    },
+    {
+      "caseId": "qp-refund-2-en",
+      "familyId": "qp-refund",
+      "variantId": "2",
+      "translationPairId": "qp-refund-2",
+      "language": "en",
+      "document": {
+        "version": "Q-2002 r1",
+        "clauses": [
+          { "id": "Section 9", "text": "Early termination refund: 10% of the fees for the remaining term is refunded." }
+        ]
+      },
+      "question": "Under hypothetical quote Q-2002, how much is refunded on early termination?",
+      "answers": [
+        { "id": "1", "content": "On early termination you get back 5% of the fees for the remaining term." },
+        { "id": "2", "content": "5% of the remaining-term fees is refunded." }
+      ]
+    },
+    {
+      "caseId": "qp-refund-3-ko",
+      "familyId": "qp-refund",
+      "variantId": "3",
+      "translationPairId": "qp-refund-3",
+      "language": "ko",
+      "document": {
+        "version": "Q-2003 r1",
+        "clauses": [
+          { "id": "제10조", "text": "환급 처리: 환급은 신청일로부터 10일 이내에 처리한다." }
+        ]
+      },
+      "question": "가상 견적서 Q-2003에서 환급은 언제 처리되나요?",
+      "answers": [
+        { "id": "1", "content": "환급은 신청 후 열흘 안에 처리됩니다." },
+        { "id": "2", "content": "신청일로부터 10일 이내에 환급이 처리됩니다." }
+      ]
+    },
+    {
+      "caseId": "qp-refund-3-en",
+      "familyId": "qp-refund",
+      "variantId": "3",
+      "translationPairId": "qp-refund-3",
+      "language": "en",
+      "document": {
+        "version": "Q-2003 r1",
+        "clauses": [
+          { "id": "Section 10", "text": "Refund processing: refunds are processed within 10 days of the request date." }
+        ]
+      },
+      "question": "When are refunds processed under hypothetical quote Q-2003?",
+      "answers": [
+        { "id": "1", "content": "Refunds are processed within ten days of your request." },
+        { "id": "2", "content": "Refunds are handled no later than 10 days after the request date." }
+      ]
+    }
+  ]
+}

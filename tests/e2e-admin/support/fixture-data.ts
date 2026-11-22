@@ -348,6 +348,20 @@ export const FIXTURE_ANALYTICS = {
   count: 4,
 } as const;
 
+/**
+ * Synthetic connected-journey attempts for the product tab's dropoff detail.
+ * Studio: a conflict then a reply, a conflict then an explicit cancel, a ready
+ * with nothing after it, and a one-hour-old source check that stays pending.
+ * Import completed list, new: a create failure. Offsets are minutes after start.
+ */
+export const FIXTURE_CONNECTED_JOURNEYS = [
+  { key: "6f1c2a4e-1b7d-4c2e-9a10-000000000001", entry: "review_studio", startedHoursAgo: 48, steps: [["preview_ready", 1], ["issue", 2, "draft_conflict"], ["ready", 3], ["send_dispatched", 4], ["reply_observed", 5]] },
+  { key: "6f1c2a4e-1b7d-4c2e-9a10-000000000002", entry: "review_studio", startedHoursAgo: 48, steps: [["preview_ready", 1], ["issue", 2, "draft_conflict"], ["cancelled", 3, "user_cancelled"]] },
+  { key: "6f1c2a4e-1b7d-4c2e-9a10-000000000003", entry: "review_studio", startedHoursAgo: 48, steps: [["preview_ready", 1], ["ready", 2]] },
+  { key: "6f1c2a4e-1b7d-4c2e-9a10-000000000004", entry: "review_studio", startedHoursAgo: 1, steps: [["issue", 1, "source_unavailable"]] },
+  { key: "6f1c2a4e-1b7d-4c2e-9a10-000000000005", entry: "import_complete", continuation: "new", startedHoursAgo: 48, steps: [["issue", 1, "create_failed"]] },
+] as const;
+
 export const FIXTURE_PROVIDER_USAGE = {
   provider: "openai",
   estimatedCostMicroUsd: 4_250_000,

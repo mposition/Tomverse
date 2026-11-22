@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 
+import { type AmuxPermittedTargetRef, amuxPermittedTargetRefSafe,
+  isAmuxExistingNodeTarget, snapshotAmuxPermittedTarget } from "./ideaAnalysisChunkCore.ts";
 import { isAmuxIdeaRequestId } from "./ideaRequestIdCore.ts";
 import { isAmuxSessionIntakeClientSecret } from
   "./ideaSessionIntakeReadbackCore.ts";
@@ -28,6 +30,7 @@ const CLOSED_REFUSALS = new Map<string, number>([
   ["outside_scope", 409],
   ["model_not_approved", 409],
   ["key_store_unavailable", 503],
+  ["hierarchy_unavailable", 503],
 ]);
 
 type JsonRecord = Record<string, unknown>;
@@ -113,6 +116,8 @@ const verifiedSecret = (secret: string): string => {
 export function prepareAmuxSessionIntakeSubmission(
   value: unknown,
   createRequestId: () => string = randomUUID,
+  /** The existing hierarchy an attached plan may reference. */
+  existingNodes: readonly AmuxPermittedTargetRef[] = [],
 ): Extract<AmuxIdeaSessionSubmissionInspection, { ok: true }> {
   const requestId = createRequestId();
   const candidate = record(value);
@@ -124,7 +129,7 @@ export function prepareAmuxSessionIntakeSubmission(
   const inspected = inspectAmuxIdeaSessionSubmission({
     ...candidate,
     requestId,
-  });
+  }, existingNodes);
   if (!inspected.ok) throw new Error(inspected.code);
   return inspected;
 }
@@ -155,6 +160,46 @@ const committed = (
     ...(plan ? { plan } : {}),
   };
 };
+
+/** The existing hierarchy route beside the intake route (owner decision 2026-11-22). */
+export const AMUX_SESSION_INTAKE_HIERARCHY_ROUTE = `${AMUX_SESSION_INTAKE_ROUTE}/hierarchy`;
+
+/**
+ * Read the existing Initiative / Epic / Feature nodes once. Every entry must
+ * be a well-formed existing-node target; anything else is
+ * `hierarchy_unavailable`, never a shorter list, because a plan checked
+ * against a partial hierarchy would refuse a real node.
+ */
+export async function readAmuxSessionIntakeHierarchy(input: {
+  endpoint: string;
+  secret: string;
+  fetcher?: AmuxSessionIntakeClientTransport;
+}): Promise<AmuxPermittedTargetRef[]> {
+  const fetcher = input.fetcher ?? fetch;
+  const endpoint = new URL(verifiedEndpoint(input.endpoint));
+  endpoint.pathname = AMUX_SESSION_INTAKE_HIERARCHY_ROUTE;
+  const secret = verifiedSecret(input.secret);
+  let response: Response;
+  try {
+    response = await fetcher(endpoint.toString(), {
+      method: "GET",
+      redirect: "error",
+      headers: { authorization: `Bearer ${secret}`, accept: "application/json" },
+    });
+  } catch {
+    throw new Error("hierarchy_unavailable");
+  }
+  const body = await closedJson(response);
+  const nodes = response.status === 200 && Array.isArray(body?.nodes) ? body.nodes : null;
+  if (!nodes) throw new Error("hierarchy_unavailable");
+  const targets = nodes.map((node) => snapshotAmuxPermittedTarget(node));
+  if (targets.some((target) => target === null || !isAmuxExistingNodeTarget(target) ||
+      !amuxPermittedTargetRefSafe(target, 0)) ||
+      new Set(targets.map((target) => target!.ref)).size !== targets.length) {
+    throw new Error("hierarchy_unavailable");
+  }
+  return targets as AmuxPermittedTargetRef[];
+}
 
 export async function readAmuxSessionIntakeClientRequest(input: {
   endpoint: string;

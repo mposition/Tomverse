@@ -1,0 +1,79 @@
+{
+  "schema": "ai-review-blind-pilot-mock-judging/1",
+  "mock": true,
+  "note": "SYNTHETIC judging for the demo. Written by the same author as the outputs and the gold, so it proves the pipeline and nothing about any reviewer. Never a person's judgement.",
+  "judge": "모의 판정자 (합성 · 사람 아님)",
+  "lockedAt": "2026-11-22T01:00:00.000Z",
+  "adjudicatedBy": "모의 대조자 (합성 · 사람 아님)",
+  "adjudicatedAt": "2026-11-22T02:00:00.000Z",
+  "outputs": {
+    "X/qp-notice-1-ko": [
+      { "segment": "F1", "kind": "contradiction", "targets": ["1", "2"], "statement": "표준 플랜 통지 기간 14일 대 30일, 같은 계약", "support": "supports", "verdict": "matched", "goldId": "qp-g-notice-1-ko-c1" },
+      { "segment": "F2", "kind": "contradiction", "targets": ["1", "2"], "statement": "같은 통지 기간 충돌을 다시 지적", "support": "supports", "verdict": "matched", "goldId": "qp-g-notice-1-ko-c1" },
+      { "segment": "F3", "kind": "agreement", "targets": ["1", "2"], "statement": "둘 다 표준 플랜", "support": null }
+    ],
+    "X/qp-notice-1-en": [
+      { "segment": "F1", "kind": "contradiction", "targets": ["1", "2"], "statement": "Standard plan notice 14 vs 30 days", "support": "supports", "verdict": "matched", "goldId": "qp-g-notice-1-en-c1" }
+    ],
+    "X/qp-notice-2-ko": [
+      { "segment": "F1", "kind": "contradiction", "targets": ["1", "2"], "statement": "통지 기간 14일 대 30일 (플랜 조건을 무시함)", "support": "does_not_support", "verdict": "false_finding" }
+    ],
+    "X/qp-notice-2-en": [
+      { "segment": "F1", "kind": "difference", "targets": ["1", "2"], "statement": "Personal 14 / Business 30 are different conditions", "support": null }
+    ],
+    "X/qp-notice-3-ko": [
+      { "segment": "F1", "kind": "missing", "targets": ["2"], "statement": "답변 2에 통지 방법 없음", "support": null, "verdict": "matched", "goldId": "qp-g-notice-3-ko-m1" }
+    ],
+    "X/qp-notice-3-en": [],
+    "X/qp-refund-1-ko": [
+      { "segment": "F1", "kind": "contradiction", "targets": ["1", "2"], "statement": "갱신 연도 할인 5% 대 10%", "support": "supports", "verdict": "matched", "goldId": "qp-g-refund-1-ko-c1" }
+    ],
+    "X/qp-refund-1-en": [
+      { "segment": "F1", "kind": "contradiction", "targets": ["1", "2"], "statement": "discount rates differ (no year named)", "support": "undeterminable", "verdict": "matched", "goldId": "qp-g-refund-1-en-c1", "sufficiency": "insufficient" }
+    ],
+    "X/qp-refund-2-ko": [
+      { "segment": "F1", "kind": "agreement", "targets": ["1", "2"], "statement": "둘 다 5%", "support": null },
+      { "segment": "F2", "kind": "document_error", "targets": ["1", "2"], "statement": "원문 10%인데 두 답변 모두 5%", "support": null, "verdict": "matched", "goldId": "qp-g-refund-2-ko-d1" }
+    ],
+    "X/qp-refund-2-en": [
+      { "segment": "F1", "kind": "contradiction", "targets": ["1", "2"], "statement": "refund rate conflicts (both quotes say 5%)", "support": "does_not_support", "verdict": "false_finding" }
+    ],
+    "X/qp-refund-3-ko": [
+      { "segment": "F1", "kind": "agreement", "targets": ["1", "2"], "statement": "열흘 = 10일, 합의", "support": null }
+    ],
+    "X/qp-refund-3-en": [
+      { "segment": "F1", "kind": "contradiction", "targets": ["1", "2"], "statement": "ten days vs 10 days is inconsistent", "support": "does_not_support", "verdict": "false_finding" }
+    ],
+    "Y/qp-notice-1-ko": [
+      { "segment": "F1", "kind": "contradiction", "targets": ["1", "2"], "statement": "표준 플랜 통지 기간 14일 대 30일", "support": null, "verdict": "matched", "goldId": "qp-g-notice-1-ko-c1" }
+    ],
+    "Y/qp-notice-1-en": [
+      { "segment": "F1", "kind": "contradiction", "targets": ["1", "2"], "statement": "Standard plan notice 14 vs 30 days", "support": "supports", "verdict": "matched", "goldId": "qp-g-notice-1-en-c1" }
+    ],
+    "Y/qp-notice-2-ko": [
+      { "segment": "F1", "kind": "difference", "targets": ["1", "2"], "statement": "개인 14일·기업 30일, 모순 아님", "support": null }
+    ],
+    "Y/qp-notice-3-ko": [
+      { "segment": "F1", "kind": "missing", "targets": ["2"], "statement": "답변 2에 통지 방법 없음", "support": null, "verdict": "matched", "goldId": "qp-g-notice-3-ko-m1" }
+    ],
+    "Y/qp-notice-3-en": [
+      { "segment": "F1", "kind": "missing", "targets": ["2"], "statement": "answer 2 omits the notice method", "support": null, "verdict": "matched", "goldId": "qp-g-notice-3-en-m1" }
+    ],
+    "Y/qp-refund-1-ko": [
+      { "segment": "F1", "kind": "agreement", "targets": ["1", "2"], "statement": "첫해 10% 일치 (갱신 연도 충돌은 언급 없음)", "support": null }
+    ],
+    "Y/qp-refund-2-ko": [
+      { "segment": "F1", "kind": "agreement", "targets": ["1", "2"], "statement": "둘 다 5%", "support": null }
+    ],
+    "Y/qp-refund-2-en": [
+      { "segment": "F1", "kind": "agreement", "targets": ["1", "2"], "statement": "both say 5%", "support": null },
+      { "segment": "F2", "kind": "document_error", "targets": ["1", "2"], "statement": "document says 10%, both answers 5%", "support": null, "verdict": "matched", "goldId": "qp-g-refund-2-en-d1" }
+    ],
+    "Y/qp-refund-3-ko": [
+      { "segment": "F1", "kind": "agreement", "targets": ["1", "2"], "statement": "10일 이내 합의", "support": null }
+    ],
+    "Y/qp-refund-3-en": [
+      { "segment": "F1", "kind": "agreement", "targets": ["1", "2"], "statement": "10 days agreed", "support": null }
+    ]
+  }
+}

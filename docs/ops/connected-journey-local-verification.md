@@ -72,6 +72,24 @@ Diagnostics describe the bounded read: a stage more than 24 hours after a start
 older than the 31-day lookback can appear as missing-start evidence; it cannot
 enter the mature success numerator.
 
+### Attempts without an observed first reply
+
+Each entry/continuation group in the same tile has a folded detail computed in
+the same pass and with the same validity, de-duplication and window rules. An
+attempt is account + kind + `journey_key`. With M mature starts and R valid
+normal replies, N = M − R. N splits into attempts with at least one recorded
+`journey_reason` and attempts with none (the existing `unobserved`); the two add
+up to N. Each of the N attempts is placed once on its furthest valid stage:
+start only, Review preview (Review only; Import shows not applicable), draft
+ready, or first dispatch. Reasons are listed per group with two counts: mature
+attempts without a reply that carried it, and mature attempts with a reply that
+also carried it. One attempt counts once per reason; different reasons overlap,
+so reason rows do not sum to N. Only one reason per stage is recorded, so a
+second reason at the same stage can be missing. A reason and a reply on one
+attempt do not establish order, recovery or motive. Pending starts, early
+replies and the event-quality diagnostics stay out of this detail. The response
+carries counts only; no account, attempt, conversation or raw error.
+
 ## Local verification
 
 Local PC, PowerShell, repository root; installed dependencies and generated
