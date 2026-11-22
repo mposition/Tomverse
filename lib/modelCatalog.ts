@@ -20,6 +20,7 @@ import {
 } from "@/lib/imageModelRegistry";
 import { resolveImageProviderBudget } from "@/lib/imageProviderBudget";
 import {
+  CODING_API_CREDIT_WEIGHT_MAX,
   SNAPSHOT_RENEWAL_WINDOW_MS,
   catalogContentHash,
   codingCatalogRowSchema,
@@ -44,13 +45,14 @@ import {
   type SnapshotRenewalDecision,
 } from "@/lib/modelCatalogCore";
 import { suggestCreditFloor } from "@/lib/modelAdoptionDraft";
+import { COST_PER_CREDIT_CEILING_MICRO_USD } from "@/lib/chatCostGuardrails";
 import { writeModelCatalogRenewalSystemAudit } from "@/lib/modelCatalogRenewalSystemAudit";
 import { resolveModelPricing } from "@/lib/modelPricing";
 import { isAiProvider } from "@/lib/modelRegistryShared";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { prisma } from "@/lib/prisma";
 import { providerDestinationIsEstablished } from "@/lib/providerDataDestinations";
-import { getModelUsageProfile, type AiModel, type AiProvider } from "@/lib/models";
+import { getInputCreditMultiplier, getModelUsageProfile, type AiModel, type AiProvider } from "@/lib/models";
 
 const IMAGE_CATALOG_TTL_MS = 15_000;
 
@@ -73,14 +75,24 @@ export const judgeImage = (model: ImageModelProfile): ImageAdmission =>
  * Anthropic's cache write premium is the input multiplier there.
  */
 export const codingCreditFloor = (profile: Pick<CodingJudgeInput, "pricing" | "capabilities" | "provider">): number | null => {
+  const worstCaseInputTokens = profile.capabilities.maxContextTokens;
   const floor = suggestCreditFloor({
     inputUsdPerMillionTokens: profile.pricing.inputUsdPerMTok,
     outputUsdPerMillionTokens: profile.pricing.outputUsdPerMTok,
     maxOutputTokens: profile.capabilities.maxOutputTokens,
     inputPriceMultiplier: profile.provider === "anthropic" ? 1.25 : 1,
-    worstCaseInputTokens: profile.capabilities.maxContextTokens,
+    worstCaseInputTokens,
   });
-  return "credits" in floor ? floor.credits : null;
+  if ("credits" in floor) return floor.credits;
+  // Above every chat class (80 credits at most): Code charges any whole number
+  // of credits up to CODING_API_CREDIT_WEIGHT_MAX, so the floor is the same
+  // cover worked out directly -- the fewest credits whose cover at that input
+  // band meets the worst turn -- rather than refused (owner decision
+  // 2026-11-22). Above the maximum it still cannot be worked out.
+  if (floor.reason !== "above_every_class" || floor.worstCaseMicroUsd === null) return null;
+  const coverPerCredit = getInputCreditMultiplier(worstCaseInputTokens) * COST_PER_CREDIT_CEILING_MICRO_USD;
+  const credits = Math.ceil(Math.ceil(floor.worstCaseMicroUsd) / coverPerCredit);
+  return credits > CODING_API_CREDIT_WEIGHT_MAX ? null : credits;
 };
 
 export const judgeCoding = (row: CodingJudgeInput): CodingAdmission =>

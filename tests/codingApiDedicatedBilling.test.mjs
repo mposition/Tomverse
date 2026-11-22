@@ -103,6 +103,33 @@ test("by default a dedicated row's coding API credits are the chat rule's floor,
   assert.ok(credit.credits < codeFloor, `coding API ${credit.credits} below Code ${codeFloor}`);
 });
 
+test("Code's floor above every chat class is worked out directly, up to the 1,000-credit maximum", () => {
+  // US$10/M in, US$40/M out, a 1M window and 32k output: the worst turn is
+  // US$11.28 and the x3 band covers US$0.12 a credit, so 94 credits (above apex's 80).
+  const dear = row({
+    capabilities: { ...row().capabilities, maxContextTokens: 1_000_000, maxOutputTokens: 32_000 },
+    pricing: { ...row().pricing, inputUsdPerMTok: 10, outputUsdPerMTok: 40 },
+  });
+  assert.equal(
+    suggestCreditFloor({ inputUsdPerMillionTokens: 10, outputUsdPerMillionTokens: 40, maxOutputTokens: 32_000, worstCaseInputTokens: 1_000_000 }).reason,
+    "above_every_class"
+  );
+  const floor = codingCreditFloor(dear);
+  assert.equal(floor, 94);
+  const cover = (credits) => credits * getInputCreditMultiplier(1_000_000) * COST_PER_CREDIT_CEILING_MICRO_USD;
+  assert.ok(cover(floor) >= 11_280_000 && cover(floor - 1) < 11_280_000, "the fewest credits that cover the worst turn");
+  // Anthropic's cache write premium is still the input multiplier.
+  assert.equal(codingCreditFloor({ ...dear, provider: "anthropic" }), floorAtInput(10, 40, 32_000, 1_000_000, 1.25));
+  // Above 1,000 credits it cannot be worked out.
+  assert.equal(codingCreditFloor({ ...dear, pricing: { ...dear.pricing, inputUsdPerMTok: 200 } }), null);
+  // Within the chat classes the class credits stand as before.
+  const cheap = { ...dear, pricing: { ...dear.pricing, inputUsdPerMTok: 0.1, outputUsdPerMTok: 0.4 } };
+  assert.equal(
+    codingCreditFloor(cheap),
+    suggestCreditFloor({ inputUsdPerMillionTokens: 0.1, outputUsdPerMillionTokens: 0.4, maxOutputTokens: 32_000, worstCaseInputTokens: 1_000_000 }).credits
+  );
+});
+
 test("the floor covers every input band: an output-heavy model is decided by the short-prompt band", () => {
   // US$1/M in, US$20/M out, 32k output. At the 128k limit (x3) 7 credits
   // cover the worst turn (US$0.768 against US$0.84), but a 16k prompt (x1)
