@@ -32,8 +32,8 @@ Use per-change **Undo** to restore only the extension's change after confirmatio
 
 ## Preview compatibility
 
-The preview requires local VS Code Desktop 1.146.0 or later. A single VSIX serves all desktop targets. Installation and workspace workflows were verified on Windows x64 and on the Linux x64 desktop build in an Ubuntu WSL2 guest. macOS arm64, Linux outside WSL2, and some native Windows accessibility checks still need validation. Remote SSH, Remote WSL, containers, Codespaces, web and virtual workspaces are unsupported. Restricted Mode provides setup/help only.
+The preview requires local VS Code Desktop 1.146.0 or later. A single VSIX serves all desktop targets. This package was verified on Windows x64. An earlier build passed local workspace workflows on Linux x64 VS Code Desktop in Ubuntu WSL2. Verification for this package on Linux and macOS arm64 is pending, along with some native Windows accessibility checks. Remote SSH, Remote WSL, containers, Codespaces, web and virtual workspaces are unsupported. Restricted Mode provides setup/help only.
 
 The UI follows the editor theme and provides English, Korean, German, Spanish, French, Portuguese, Simplified Chinese and Traditional Chinese labels. Ctrl/Cmd+Enter sends; IME composition does not submit. Use Tab to navigate. No prompt/source/key telemetry is collected by this extension.
 
-Ask and Agent were also exercised against a development Tomverse API with real models and settled credit receipts. The release notes describe the verification and distribution status for this preview.
+An earlier build also exercised Ask and Agent against a development Tomverse API with real models and settled credit receipts. The release notes describe the verification and distribution status for this preview.
