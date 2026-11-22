@@ -4,8 +4,7 @@ import { consumeConversationUpdateLimit } from "@/lib/conversationUpdateRateLimi
 
 import {
   applyNativeSourceDeletion,
-  onConversationLockChanged,
-  onConversationProjectChanged,
+  updateConversationWithProjectGrounds,
 } from "@/lib/projectWorkspaceService";
 import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
@@ -717,24 +716,24 @@ export async function PATCH(
       return NextResponse.json({ success: true, message: "No changes." });
     }	
 	
-    const updatedConversation = await prisma.conversation.update({
-      where: { id: conversationId },
-      data: updateData,
-    });
-    // Project workspace: a move changes only what is used from now on. Native
-    // extraction for this conversation stops, and every memory citing it is
-    // re-decided in both projects; the transcript itself is not touched.
-    if (body.projectId !== undefined && (body.projectId ?? null) !== (existingConv.projectId ?? null)) {
-      await onConversationProjectChanged({
-        userId,
-        conversationId,
-        fromProjectId: existingConv.projectId ?? null,
-        toProjectId: updatedConversation.projectId ?? null,
-      });
-    }
-    if (body.password !== undefined) {
-      await onConversationLockChanged({ userId, conversationId, projectId: updatedConversation.projectId ?? null });
-    }
+    // Project workspace: a move or a lock change affects which project
+    // memories still have grounds. The change and that re-decision commit
+    // together; a move changes only what is used from now on, and the
+    // transcript itself is not touched.
+    const groundsChange =
+      (body.projectId !== undefined && (body.projectId ?? null) !== (existingConv.projectId ?? null)) ||
+      body.password !== undefined;
+    const updatedConversation = groundsChange
+      ? await updateConversationWithProjectGrounds({
+          userId,
+          conversationId,
+          fromProjectId: existingConv.projectId ?? null,
+          update: (tx) => tx.conversation.update({ where: { id: conversationId }, data: updateData }),
+        })
+      : await prisma.conversation.update({
+          where: { id: conversationId },
+          data: updateData,
+        });
     if (body.memoryMode !== undefined) {
       // After the write, and never allowed to fail it: the user's choice is
       // already saved, and §22 observation must not be able to undo it.

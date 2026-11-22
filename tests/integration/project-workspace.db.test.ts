@@ -21,6 +21,7 @@ import {
     onConversationLockChanged,
     onConversationProjectChanged,
     resolveConversationProjectScope,
+    updateConversationWithProjectGrounds,
     updateProject,
 } from "@/lib/projectWorkspaceService";
 import { nativeExtractionSourceKey } from "@/lib/projectWorkspaceCore";
@@ -455,4 +456,59 @@ test("retrieval quality fixture: corrections are found next to the original, oth
     const crossLanguage = await searchProjectSources({ userId: owner.id, projectId: a.id, query: "예산", excludeConversationId: current.id });
     assert.equal(crossLanguage.status, "empty");
     assert.equal(crossLanguage.hits.length, 0);
+});
+
+// --------------------------------------------- review r-20261122-165507
+
+test("a material created while a deletion is being confirmed is never deleted unconfirmed", async () => {
+    const owner = await user();
+    const a = await project(owner.id, "Alpha");
+    await seedMemory(owner.id, a.id, "fact");
+    const before = await prisma.conversationProject.findUniqueOrThrow({ where: { id: a.id } });
+    let releaseInsert!: () => void;
+    const insertHeld = new Promise<void>((resolve) => { releaseInsert = resolve; });
+    let inserted!: () => void;
+    const insertDone = new Promise<void>((resolve) => { inserted = resolve; });
+    // A material insert that has taken its FK lock on the project and not committed yet.
+    const writer = prisma.$transaction(async (tx) => {
+        await tx.assistantKnowledgeFile.create({
+            data: { userId: owner.id, projectId: a.id, name: "late.md", mime: "text/markdown", bytes: 10, digest: "d", r2Key: `assistant-knowledge/${randomUUID()}` },
+        });
+        inserted();
+        await insertHeld;
+    }, { timeout: 20_000 });
+    await insertDone;
+    const deletion = deleteProject(owner.id, a.id, { revision: before.revision, materials: 0, memories: 1 });
+    setTimeout(releaseInsert, 300);
+    await writer;
+    await assert.rejects(deletion, (error: { code?: string; details?: { materials?: number } }) =>
+        error.code === "PROJECT_DELETE_STALE" && error.details?.materials === 1);
+    assert.equal(await prisma.assistantKnowledgeFile.count({ where: { projectId: a.id } }), 1);
+    assert.equal(await prisma.conversationProject.count({ where: { id: a.id } }), 1);
+});
+
+test("a move and the re-decision of its memories commit together", async () => {
+    const owner = await user();
+    const a = await project(owner.id, "Alpha");
+    const b = await project(owner.id, "Beta");
+    const chat = await conversation(owner.id, a.id);
+    const said = await message(chat.id, "user", "We chose Kotlin");
+    const memory = await seedMemory(owner.id, a.id, "The app uses Kotlin", {
+        evidences: { create: { userId: owner.id, sourceType: "tomverse_message", tomverseMessageId: said.id, evidenceDigest: nativeMessageDigest("We chose Kotlin") } },
+    });
+    // A failure after the move rolls back the move too: nothing is left half-applied.
+    await assert.rejects(updateConversationWithProjectGrounds({
+        userId: owner.id, conversationId: chat.id, fromProjectId: a.id,
+        update: async (tx) => {
+            const row = await tx.conversation.update({ where: { id: chat.id }, data: { projectId: b.id } });
+            throw Object.assign(new Error("boom"), { row });
+        },
+    }));
+    assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: chat.id } })).projectId, a.id);
+    const moved = await updateConversationWithProjectGrounds({
+        userId: owner.id, conversationId: chat.id, fromProjectId: a.id,
+        update: (tx) => tx.conversation.update({ where: { id: chat.id }, data: { projectId: b.id } }),
+    });
+    assert.equal(moved.projectId, b.id);
+    assert.equal((await prisma.memoryItem.findUniqueOrThrow({ where: { id: memory.id } })).status, "suspended_by_source_delete");
 });

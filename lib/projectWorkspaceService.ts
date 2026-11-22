@@ -312,9 +312,18 @@ export async function deleteProject(
         );
     }
     return prisma.$transaction(async (tx) => {
-        // Lock order: credit account (run cancel refunds), then the memory lock.
+        // Lock order: credit account (run cancel refunds), then the memory lock,
+        // then the project row itself. FOR UPDATE conflicts with the KEY SHARE
+        // lock every insert of a material or memory takes on its project
+        // through the foreign key, so a material created concurrently either
+        // committed before this lock (and is counted below) or waits and then
+        // fails on the deleted row -- it is never deleted unconfirmed.
         await cancelNativeExtractionRuns({ userId, projectId, tx });
         await lockAccountMemoryItems(tx, userId);
+        const locked = await tx.$queryRaw<Array<{ id: string }>>`
+            SELECT id FROM "ConversationProject" WHERE id = ${projectId} AND "userId" = ${userId} FOR UPDATE
+        `;
+        if (locked.length === 0) throw notFound();
         const current = await projectDeletionSummary(userId, projectId, tx);
         if ((current.materials > 0 || current.memories > 0) && (!confirmation || !projectDeletionMatches(confirmation, current))) {
             // Re-checked under the locks: a material or memory added after the
@@ -461,6 +470,29 @@ export async function applyNativeSourceDeletion(
         }
     }
     return { deleted, suspended };
+}
+
+/**
+ * Applies a conversation change that affects project memory grounds -- a
+ * move between projects, a lock or an unlock -- in the same transaction as
+ * the re-decision of every memory citing it, so no request can read a
+ * memory grounded in a conversation that has already moved or been locked.
+ * Lock order matches run creation: credit account, conversation row, runs,
+ * then the memory lock.
+ */
+export async function updateConversationWithProjectGrounds<T>(input: {
+    userId: string;
+    conversationId: string;
+    fromProjectId: string | null;
+    update: (tx: Prisma.TransactionClient) => Promise<T & { projectId: string | null }>;
+}): Promise<T & { projectId: string | null }> {
+    return prisma.$transaction(async (tx) => {
+        await lockCreditAccount(tx, input.userId);
+        const updated = await input.update(tx);
+        await cancelNativeExtractionRuns({ userId: input.userId, conversationIds: [input.conversationId], tx });
+        await reconcileNativeEvidence(tx, input.userId, [input.fromProjectId, updated.projectId]);
+        return updated;
+    });
 }
 
 /**

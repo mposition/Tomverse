@@ -45,7 +45,8 @@ export function projectErrorResponse(error: unknown, fallback: string): Response
     }
     const security = apiSecurityResponse(error);
     if (security) return security;
-    if (typeof error === "object" && error !== null && "name" in error && (error as { name?: string }).name === "ZodError") {
+    if (error instanceof SyntaxError ||
+        (typeof error === "object" && error !== null && "name" in error && (error as { name?: string }).name === "ZodError")) {
         return NextResponse.json({ error: "Invalid request.", code: "INVALID_REQUEST" }, { status: 400, headers: NO_STORE });
     }
     console.error(JSON.stringify({ event: "project_route_failed", route: fallback, errorName: error instanceof Error ? error.name : "UnknownError" }));
