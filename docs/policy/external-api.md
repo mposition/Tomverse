@@ -965,3 +965,14 @@ output contract are in `apps/tomverse-cli/README.md`.
 Verification state, publication and the operating systems actually run are
 reported per change (the PR); package publication and enabling
 `TOMVERSE_CLI_GUIDE_ENABLED` are separate approved steps.
+
+
+### Coding API reasoning effort
+
+When `TOMVERSE_REASONING_EFFORT_ENABLED=true`, the coding Chat Completions
+catalogue advertises model support in `tomverse.reasoning_efforts`. Send
+`tomverse_effort: "low"` or `tomverse_effort: "high"` as part of the request
+body. Omit the field for the configured model default. Smart Adaptive only
+considers compatible candidates for an explicit level. Unsupported levels
+are refused before provider dispatch. Native protocols retain their existing
+effort parameters. The setting uses the existing request and token limits.

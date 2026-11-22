@@ -5,6 +5,8 @@ import type { ResearchPreviewControls } from "./useResearchPreview";
 import { McpChatPicker } from "@/components/plugins/McpChatPicker";
 import { ChatLocationControl } from "./ChatLocationControl";
 import { composerModelCountLabel } from "./composerModelCountLabel";
+import { reasoningEffortCopy } from "@/lib/reasoningEffortCopy";
+import type { ExplicitReasoningEffort, ReasoningEffort } from "@/lib/reasoningEffort";
 import { ReviewModeSwitcher, ReviewParticipants } from "./ReviewStudioChrome";
 import { reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
 import { reviewProviderPreferencesCopy } from "@/lib/reviewProviderPreferencesCopy";
@@ -733,7 +735,7 @@ type ChatInputProps = {
   value: string;
   onChange: (value: string) => void;
   personalizedPrompt?: string | null;
-  onSubmit: () => void;
+  onSubmit: (effort?: ExplicitReasoningEffort) => void;
   onCancel: () => void;
   disabled?: boolean;
   /**
@@ -1107,6 +1109,8 @@ export function ChatInput({
   // every conversation and is deliberately never remounted between them (that
   // would take the portal host, focus and in-flight uploads with it).
   const draftScopeId = draftKeyFor(currentChatId, identityKey);
+  const [effortSelection, setEffortSelection] = useState<{ scope: string; level: ReasoningEffort } | null>(null);
+  const reasoningEffort = effortSelection?.scope === draftScopeId ? effortSelection.level : "default";
   const draftScopeIdRef = useRef(draftScopeId);
   useEffect(() => {
     draftScopeIdRef.current = draftScopeId;
@@ -1964,6 +1968,45 @@ export function ChatInput({
   }, []);
 
   const currentPlan = isGuestMode ? "Guest" : accountUsage?.plan ?? "Free";
+  const effortCopy = reasoningEffortCopy[lang];
+  const showReasoningEffort = Boolean(currentProduct && review?.mode !== "easy" &&
+    !review?.imagePromptMode && !researchPreview?.selected &&
+    AVAILABLE_MODELS.some(model => model.reasoningEfforts !== undefined));
+  const supportsEffort = (level: ExplicitReasoningEffort) => isAutoMode
+    ? PUBLIC_MODELS.some(model => canUseModelWithPlan(currentPlan, model) && model.reasoningEfforts?.includes(level))
+    : activeSelectedModels.length > 0 &&
+      activeSelectedModels.every(id => getCatalogModel(id)?.reasoningEfforts?.includes(level));
+  const explicitEffort = showReasoningEffort && reasoningEffort !== "default" ? reasoningEffort : undefined;
+  const effortUnavailable = explicitEffort !== undefined && !supportsEffort(explicitEffort);
+  const effortSuffix = explicitEffort ? " · " + effortCopy[explicitEffort] : "";
+  const submitWithEffort = () => {
+    if (effortUnavailable) return;
+    onSubmit(explicitEffort);
+    if (explicitEffort) setEffortSelection(null);
+  };
+  const effortLevels = ["low", "default", "high"] as const;
+  const reasoningEffortSlot = showReasoningEffort && (
+    <fieldset className="mx-1 mb-2 rounded-xl bg-zinc-100 p-2 dark:bg-zinc-800" data-testid="model-picker-reasoning-effort">
+      <legend className="px-1 text-sm font-semibold">{effortCopy.title}</legend>
+      <p className="mb-1 px-1 text-xs text-zinc-600 dark:text-zinc-300">
+        {effortCopy.question}{isAutoMode ? " " + effortCopy.auto : ""}
+      </p>
+      <div className="grid grid-cols-3 gap-1">
+        {effortLevels.map(level => (
+          <label key={level} className="flex min-h-11 min-w-0 cursor-pointer items-center justify-center gap-1 rounded-lg bg-white px-1 text-center text-xs has-[:checked]:font-bold has-[:disabled]:cursor-default has-[:disabled]:opacity-50 dark:bg-zinc-900">
+            <input type="radio" name="composer-reasoning-effort" value={level}
+              checked={reasoningEffort === level}
+              disabled={level !== "default" && !supportsEffort(level)}
+              onChange={() => setEffortSelection({ scope: draftScopeId, level })} />
+            <span className="break-words">{effortCopy[level]}</span>
+          </label>
+        ))}
+      </div>
+      {!supportsEffort("low") && !supportsEffort("high") && (
+        <p className="px-1 pt-1 text-xs text-zinc-600 dark:text-zinc-300">{effortCopy.unavailable}</p>
+      )}
+    </fieldset>
+  );
   const deepResearchModel = AVAILABLE_MODELS.find(model => model.id === "perplexity/sonar-deep-research");
   const deepResearchLocked = !deepResearchModel || !canUseModelWithPlan(currentPlan, deepResearchModel);
   const deepResearchReason = !deepResearchModel ? null
@@ -2388,7 +2431,7 @@ export function ChatInput({
     // still active. The visible branch below presents Stop instead of Send.
     if (!isDraftMutationDisabled && !isVoiceSubmissionBlocked && !isSending && !isResearchPreviewBlocked) {
       dismissGuestQuickStart();
-      onSubmit();
+      submitWithEffort();
     }
   };
 
@@ -3143,8 +3186,8 @@ export function ChatInput({
               title={isAutoMode ? `${autoCopy.activeSummary}. ${autoCopy.modeHint}` : activeModelNames.join(", ")}
               aria-label={
                 isAutoMode
-                  ? `${autoCopy.compactLabel}. ${autoCopy.activeSummary}. ${t("chat.modelSelect")}`
-                  : `${t("chat.modelSelect")}. ${modelsSelectedLabel(activeSelectedModels.length)}`
+                  ? `${autoCopy.compactLabel}${effortSuffix}. ${autoCopy.activeSummary}. ${t("chat.modelSelect")}`
+                  : `${t("chat.modelSelect")}. ${modelsSelectedLabel(activeSelectedModels.length)}${effortSuffix}`
               }
               aria-expanded={isMenuOpen && menuView === "models"}
               aria-controls="chat-input-popover"
@@ -3190,8 +3233,9 @@ export function ChatInput({
               >
                 {isAutoMode
                   ? autoCopy.compactLabel
-                  : modelsSelectedLabel(activeSelectedModels.length)}
+                  : explicitEffort && activeModelNames.length === 1 ? activeModelNames[0] : modelsSelectedLabel(activeSelectedModels.length)}
               </span>
+              {explicitEffort && <span className="shrink-0 max-[240px]:sr-only" data-testid="composer-effort-summary">{effortSuffix}</span>}
               <ComposerChevronDownIcon
                 className="text-zinc-400"
                 aria-hidden="true"
@@ -3837,7 +3881,7 @@ export function ChatInput({
         )}
         {review?.imagePromptMode && <div data-testid="review-image-mode" className="my-2 flex items-center gap-2 text-xs text-accent-image-600 dark:text-accent-image-300"><ImagePlus size={16} />{review.imageModelLabel ?? t("chat.imageGenerationTitle")}<button type="button" className="ml-auto grid h-11 w-11 place-items-center rounded-full" onClick={() => review.setImagePromptMode(false)} aria-label={t("auth.cancel")}><X size={16} /></button></div>}
         {review && showProductSwitcher && isStudio && <ReviewModeSwitcher review={review} composer locked={productSwitchDisabled || isSending || draftLocked} />}
-        {review && showReviewModelRow && (review.appearance === "studio" || review.mode === "easy") && <ReviewParticipants review={review} selectedModels={selectedModels}
+        {review && showReviewModelRow && (review.appearance === "studio" || review.mode === "easy") && <ReviewParticipants review={review} selectedModels={selectedModels} effortSuffix={effortSuffix}
           canSelectModel={id => { const model = AVAILABLE_MODELS.find(m => m.id === id); return Boolean(model && canUseModelWithPlan(currentPlan, model)); }} />}
         <div data-testid="composer-textarea-row" className="composer-prompt-surface flex w-full min-w-0">
         {/*
@@ -4006,11 +4050,12 @@ export function ChatInput({
               onClick={() => {
                 if (isVoiceSubmissionBlocked || isResearchPreviewBlocked) return;
                 dismissGuestQuickStart();
-                onSubmit();
+                submitWithEffort();
               }}
               disabled={
                 isDraftMutationDisabled ||
                 Boolean(review?.pending || review?.ready === false) ||
+                effortUnavailable ||
                 Boolean(review?.mode === "easy" && !review.easyAvailable) ||
                 Boolean(noReviewProviders) ||
                 isVoiceSubmissionBlocked ||
@@ -4027,20 +4072,20 @@ export function ChatInput({
               title={t("chat.send")}
               aria-label={t("chat.send")}
               aria-describedby={
-                sendDisabledReason ? "chat-send-disabled-reason" : undefined
+                effortUnavailable || sendDisabledReason ? "chat-send-disabled-reason" : undefined
               }
             >
               {review?.appearance === "studio" && <span className="review-submit-label">{review.pending ? reviewWorkspaceCopy[lang].routing : reviewWorkspaceCopy[lang].compare}</span>}
               <ComposerArrowUpIcon aria-hidden="true" />
             </button>
           ) : null}
-          {sendDisabledReason && (
+          {(effortUnavailable || sendDisabledReason) && (
             <p
               id="chat-send-disabled-reason"
               data-testid="chat-send-disabled-reason"
-              className="sr-only"
+              className={effortUnavailable ? "basis-full text-xs text-zinc-600 dark:text-zinc-300" : "sr-only"}
             >
-              {sendDisabledReason}
+              {effortUnavailable ? effortCopy.unavailable : sendDisabledReason}
             </p>
           )}
         </div>
@@ -4910,6 +4955,7 @@ export function ChatInput({
                         onDone={() => closeMenu(true, "done")}
                         onTrackEvent={trackModelPickerEvent}
                         comboFinderSlot={comboFinderSlot}
+                        reasoningEffortSlot={reasoningEffortSlot}
                         onSelectImageModel={
                           onStartImageDraft
                             ? (modelId) => {

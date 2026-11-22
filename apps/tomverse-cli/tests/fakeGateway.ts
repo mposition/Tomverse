@@ -30,7 +30,7 @@ export const DEFAULT_MODELS = [
     {
         id: "fake-coder",
         object: "model",
-        tomverse: { name: "Fake Coder", provider: "openai", capabilities: { tools: true, vision: false, reasoning: false }, protocols: ["chat_completions", "responses"], context_window_tokens: 200_000, max_output_tokens: 8_000, credits_per_request: 3 },
+        tomverse: { name: "Fake Coder", provider: "openai", reasoning_efforts: ["low", "high"], capabilities: { tools: true, vision: false, reasoning: false }, protocols: ["chat_completions", "responses"], context_window_tokens: 200_000, max_output_tokens: 8_000, credits_per_request: 3 },
     },
     {
         id: "fake-small",

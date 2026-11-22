@@ -1,3 +1,4 @@
+import { modelReasoningEfforts, reasoningEffortEnabled, type ExplicitReasoningEffort } from "@/lib/reasoningEffort";
 import type { AiModel } from "@/lib/models";
 
 /**
@@ -54,6 +55,7 @@ export type PublicCatalogModel = {
     /** Deliberately included; `operationalReason` deliberately is not. */
     userVisibleNote?: string;
     reasoning?: AiModel["reasoning"];
+    reasoningEfforts?: readonly ExplicitReasoningEffort[];
     contextWindowTokens?: number;
     inputCapabilities?: AiModel["inputCapabilities"];
     /**
@@ -115,6 +117,7 @@ export const toPublicCatalogModel = (model: AiModel): PublicCatalogModel => ({
         ? { replacementModelId: model.replacementModelId }
         : {}),
     ...(model.userVisibleNote ? { userVisibleNote: model.userVisibleNote } : {}),
+    ...(reasoningEffortEnabled() ? { reasoningEfforts: modelReasoningEfforts(model) } : {}),
     ...(model.reasoning ? { reasoning: model.reasoning } : {}),
     ...(model.contextWindowTokens
         ? { contextWindowTokens: model.contextWindowTokens }

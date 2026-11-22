@@ -76,6 +76,7 @@ import {
     isRouterShadowEnabled,
     scheduleRoutingShadowRun,
 } from "@/lib/routingShadow";
+import { modelReasoningEfforts, modelWithReasoningEffort, reasoningEffortEnabled } from "@/lib/reasoningEffort";
 import { applyLlmModelPick, selectAutoModel } from "@/lib/autoModelSelection";
 import { pickAutoModelWithLlm } from "@/lib/autoLlmRouter";
 import { chatRouterLocationFusionEnabled, existingChatRouterLocationFusionEnabled } from "@/lib/chatRouterLocationFusionEnabled";
@@ -1545,6 +1546,7 @@ async function handleChatPost(
             sourceUserMessageId,
             turnstileToken,
             deepResearchDepth,
+            reasoningEffort,
             webSearchMode,
             mcpConnectionId,
             admissionToken,
@@ -1555,6 +1557,9 @@ async function handleChatPost(
             guestClientTurnId,
             researchMode,
         } = validateChatPayload(body);
+        if (reasoningEffort && (!reasoningEffortEnabled() || deepResearchDepth || researchMode === "preview")) {
+            return tracedJsonError("Reasoning effort is unavailable for this request.", "REASONING_EFFORT_UNAVAILABLE", 409, traceId);
+        }
         const isResearchPreview = researchMode === "preview";
         const researchFeatures = researchPreviewFeatures();
         if (isResearchPreview && req.headers.has("authorization") && !researchFeatures.nativeStart) {
@@ -1584,7 +1589,7 @@ async function handleChatPost(
         if (wantsFusion && ((existingFusion ? !existingChatRouterLocationFusionEnabled() : !chatRouterLocationFusionEnabled()) ||
             (fusionBody.routerLocationScope !== undefined && !existingFusion) || !process.env.NEXTAUTH_SECRET ||
             !session?.user?.id || !conversationId || !assistantMessageId || !sourceUserMessageId ||
-            (!existingFusion && promptRefinerDecision) || deepResearchDepth || admissionToken || mcpConnectionId || turnstileToken || guestAutoCapability ||
+            (!existingFusion && promptRefinerDecision) || reasoningEffort || deepResearchDepth || admissionToken || mcpConnectionId || turnstileToken || guestAutoCapability ||
             (currentLocation && resumeToken === undefined) || (!existingFusion && requestMessages.length !== 1) ||
             requestMessages.at(-1)?.role !== "user" || turnCarriesAttachments(requestMessages))) return refuseFusion();
         if (mcpConnectionId && (!mcpPreviewEnabled() || !session?.user?.id)) {
@@ -1694,6 +1699,9 @@ async function handleChatPost(
             }),
             session?.user?.id ?? null,
         ) === "entered";
+        if (reasoningEffort && pinnedDeploymentEntered) {
+            return tracedJsonError("Reasoning effort is unavailable for this execution path.", "REASONING_EFFORT_UNAVAILABLE", 409, traceId);
+        }
         if (isResearchPreview && pinnedDeploymentEntered) {
             throw new ChatAccessError(
                 409,
@@ -2397,7 +2405,8 @@ async function handleChatPost(
             // disabled must not be chosen and then refused two lines later by
             // `assertModelRuntimeAvailable`.
             models: runtimeModels.filter(
-                (model) => model.enabled && !model.catalogDeleted
+                (model) => model.enabled && !model.catalogDeleted &&
+                    (!reasoningEffort || modelReasoningEfforts(model).includes(reasoningEffort))
             ),
             // Confirmed unavailable only. `degraded` stays a candidate and
             // loses tie-breaks instead, and `unknown` -- every model nothing
@@ -2420,7 +2429,9 @@ async function handleChatPost(
                   webSearchRequested: webSearchMode === "always",
                   searchBackendReadiness:
                       routerCandidateInputs.searchBackendReadiness,
-                  models: guestReachableModels ?? [],
+                  models: (guestReachableModels ?? []).filter(model =>
+                      !reasoningEffort || modelReasoningEfforts(model).includes(reasoningEffort)
+                  ),
                   reservedInputTokens: preflightInputEstimate(
                       autoRoutingMessages
                   ).estimatedInputTokens,
@@ -2443,7 +2454,7 @@ async function handleChatPost(
             return returnKnownUndispatchedGuestAutoRefusal(
                 tracedJsonError(
                     "No Guest Smart Adaptive model is available for this turn.",
-                    "GUEST_AUTO_NO_CANDIDATE",
+                    reasoningEffort ? "REASONING_EFFORT_UNAVAILABLE" : "GUEST_AUTO_NO_CANDIDATE",
                     409,
                     traceId
                 ),
@@ -3013,9 +3024,17 @@ async function handleChatPost(
                 timestamp: new Date().toISOString(),
             }));
         }
-        const modelConfig = routedCatalogModel?.enabled && !routedCatalogModel.catalogDeleted
+        const dispatchModel = routedCatalogModel?.enabled && !routedCatalogModel.catalogDeleted
             ? routedCatalogModel
             : requestedModelConfig;
+        if (reasoningEffort && (!modelReasoningEfforts(dispatchModel).includes(reasoningEffort) ||
+            (conversationRouting?.selectionMode === "auto" && !autoRouted))) {
+            return returnKnownUndispatchedGuestAutoRefusal(tracedJsonError(
+                "No eligible model can use this reasoning effort for the request.",
+                "REASONING_EFFORT_UNAVAILABLE", 409, traceId
+            ), "router_refused_before_dispatch");
+        }
+        const modelConfig = modelWithReasoningEffort(dispatchModel, reasoningEffort);
         if (hasUnsupportedGeminiPrefill(modelConfig, executionMessages)) {
             return returnKnownUndispatchedGuestAutoRefusal(tracedJsonError(
                 "Gemini 3.6 and later requests must end with a user message.",
@@ -7347,7 +7366,8 @@ async function handleChatPost(
             // actual-token check and manifest. A refusal here is one candidate
             // that did not qualify, not the request failing -- the primary's
             // failure is still what ends the turn.
-            const planned = planAttemptExecution(candidate, {
+            if (reasoningEffort && !modelReasoningEfforts(candidate).includes(reasoningEffort)) return false;
+            const planned = planAttemptExecution(modelWithReasoningEffort(candidate, reasoningEffort), {
                 accessKind: access.kind,
                 inputBreakdown: inputEstimate.breakdown(),
                 reservationOnlyInputTokens,

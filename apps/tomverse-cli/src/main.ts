@@ -1,3 +1,4 @@
+import { isEffort, type Effort } from "./effort.js";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { isSea } from "node:sea";
@@ -34,6 +35,7 @@ Usage:
 
 Options:
   --cwd <folder>            Folder to work in (default: current folder)
+  --effort <level>          Reasoning effort for the next task: low, default, high
   --model <id>              Model from \`tomverse models\` (default: config model)
   --read-only               No file changes or commands: the model can only list, search and read
   --max-requests <n>        Model requests per task (default ${DEFAULTS.maxRequests})
@@ -55,6 +57,7 @@ const parse = (argv: string[]) =>
         options: {
             cwd: { type: "string" },
             model: { type: "string" },
+            effort: { type: "string" },
             "read-only": { type: "boolean" },
             "max-requests": { type: "string" },
             timeout: { type: "string" },
@@ -75,6 +78,12 @@ const positiveInt = (value: string | undefined, name: string, fallback: number) 
     const n = Number(value);
     if (!Number.isFinite(n) || n <= 0 || !Number.isInteger(n)) throw new UsageError(`--${name} must be a positive whole number.`);
     return n;
+};
+
+const parseEffort = (value: string | undefined): Effort => {
+    if (value === undefined) return "default";
+    if (!isEffort(value)) throw new UsageError("Effort must be low, default, or high.");
+    return value;
 };
 
 type Context = { config: CliConfig; output: Output; flags: Flags };
@@ -193,7 +202,7 @@ const models = async (ctx: Context) => {
     }
     for (const m of list) {
         process.stdout.write(
-            `${safeLine(m.id).padEnd(28)} ${safeLine(m.provider).padEnd(10)} ${creditsLabel(m, list).padStart(20)}  context ${m.contextWindowTokens}  output ${m.maxOutputTokens}${m.id === SMART_ADAPTIVE ? "  (picks a model; the session stays on the first one picked and is charged as it)" : ""}\n`
+            `${safeLine(m.id).padEnd(28)} ${safeLine(m.provider).padEnd(10)} ${creditsLabel(m, list).padStart(20)}  context ${m.contextWindowTokens}  output ${m.maxOutputTokens}${m.reasoningEfforts?.length ? "  effort " + ["default", ...m.reasoningEfforts].join("/") : ""}${m.id === SMART_ADAPTIVE ? "  (picks a model; the session stays on the first one picked and is charged as it)" : ""}\n`
         );
     }
     return EXIT_CODES.success;
@@ -544,10 +553,10 @@ const startSession = async (ctx: Context, task: string | null, interactive: bool
     try {
         let outcome: Outcome = "success";
         if (task) {
-            outcome = await runner.runTask(task);
+            outcome = await runner.runTask(task, parseEffort(ctx.flags.effort));
             await finalEvent(ctx, runner, gateway, outcome);
         }
-        if (interactive) outcome = await repl(ctx, runner, gateway, outcome, prompter?.memory ?? null);
+        if (interactive) outcome = await repl(ctx, runner, gateway, outcome, prompter?.memory ?? null, task ? "default" : parseEffort(ctx.flags.effort));
         return exitFor(outcome);
     } finally {
         removeSigint();
@@ -555,7 +564,7 @@ const startSession = async (ctx: Context, task: string | null, interactive: bool
     }
 };
 
-const repl = async (ctx: Context, runner: Runner, gateway: Gateway, initial: Outcome = "success", memory: ApprovalMemory | null = null): Promise<Outcome> => {
+const repl = async (ctx: Context, runner: Runner, gateway: Gateway, initial: Outcome = "success", memory: ApprovalMemory | null = null, effort: Effort = "default"): Promise<Outcome> => {
     // The exit code is the last task's outcome, so `tomverse && …` never goes on after one that failed.
     let last: Outcome = initial;
     ctx.output.info("Type a task, or /help. Ctrl+D or /exit to leave.");
@@ -565,7 +574,7 @@ const repl = async (ctx: Context, runner: Runner, gateway: Gateway, initial: Out
         const text = line.trim();
         if (!text) continue;
         if (text === "/help") {
-            ctx.output.info("/diff  changes this session made   /usage  credits of this session   /compact  summarise history now   /model  current model   /approvals [clear]  what is allowed without asking   /exit");
+            ctx.output.info("/diff  changes this session made   /usage  credits of this session   /compact  summarise history now   /model  current model   /effort [level]  next task   /approvals [clear]  what is allowed without asking   /exit");
             continue;
         }
         if (text === "/diff") {
@@ -579,6 +588,17 @@ const repl = async (ctx: Context, runner: Runner, gateway: Gateway, initial: Out
         if (text === "/model") {
             const m = runner.journal.state.model;
             ctx.output.info(`${m.pinned ?? m.requested}${m.pinnedFrom === "smart_adaptive_first_response" ? " (picked by Smart Adaptive, kept for this session)" : ""}. To use another model, start a new session with --model.`);
+            continue;
+        }
+        if (text === "/effort" || text.startsWith("/effort ")) {
+            try {
+                const next = text === "/effort" ? effort : parseEffort(text.slice("/effort ".length).trim());
+                runner.assertEffort(next);
+                effort = next;
+                ctx.output.info("Next task reasoning effort: " + effort + ".");
+            } catch (error) {
+                ctx.output.info((error as Error).message);
+            }
             continue;
         }
         if (text === "/approvals" || text === "/approvals clear") {
@@ -599,7 +619,14 @@ const repl = async (ctx: Context, runner: Runner, gateway: Gateway, initial: Out
             await runner.maybeCompact(true);
             continue;
         }
-        last = await runner.runTask(text);
+        try {
+            runner.assertEffort(effort);
+        } catch (error) {
+            ctx.output.info((error as Error).message);
+            continue;
+        }
+        last = await runner.runTask(text, effort);
+        effort = "default";
         await finalEvent(ctx, runner, gateway, last);
     }
 };
@@ -607,6 +634,7 @@ const repl = async (ctx: Context, runner: Runner, gateway: Gateway, initial: Out
 const resume = async (ctx: Context, args: string[], interactive: boolean) => {
     const [id, ...rest] = args;
     if (!id) throw new UsageError("resume needs a session id (see `tomverse sessions list`).");
+    if (ctx.flags.effort !== undefined) throw new UsageError("Resume keeps the saved task effort. Use /effort for the next task.");
     const prompter = interactive ? terminalPrompter() : null;
     const journal = Journal.open(tomverseHome(), id);
     try {

@@ -1,3 +1,4 @@
+import type { Effort } from "./effort.js";
 import { generateText, isStepCount, streamText, type ModelMessage, type ToolSet } from "ai";
 import { GatewayError, type CatalogModel, type Gateway, type GenerationHooks } from "./gateway.js";
 import { safeLine, type Output } from "./display.js";
@@ -279,11 +280,22 @@ export class Runner {
         };
     }
 
-    async runTask(prompt: string): Promise<Outcome> {
+    assertEffort(effort: Effort) {
+        if (effort === "default") return;
+        const model = this.model();
+        if (!model.reasoningEfforts?.includes(effort)) {
+            const allowed = ["default", ...(model.reasoningEfforts ?? [])].join(", ");
+            throw new GatewayError("protocol", model.id + " offers these reasoning effort levels: " + allowed + ".");
+        }
+    }
+
+    async runTask(prompt: string, effort: Effort = "default"): Promise<Outcome> {
+        this.assertEffort(effort);
         const { journal } = this;
         journal.state.messages.push({ role: "user", content: prompt });
         journal.state.tasks.push({
             prompt,
+            ...(effort !== "default" ? { effort } : {}),
             startedAt: new Date().toISOString(),
             requests: 0,
             activeMs: 0,
@@ -291,6 +303,10 @@ export class Runner {
             timeAllowanceMs: journal.state.limits.timeoutMs,
         });
         journal.commit();
+        if (effort !== "default") {
+            this.options.output.info("Reasoning effort: " + effort + " (this task).");
+            this.options.output.event({ type: "effort", level: effort });
+        }
         return this.loop();
     }
 
@@ -316,6 +332,7 @@ export class Runner {
     async loop(): Promise<Outcome> {
         const { journal, options } = this;
         const task = this.currentTask();
+        this.assertEffort(task.effort ?? "default");
         this.freshSignal();
         journal.state.status = "running";
         journal.commit();
@@ -398,7 +415,7 @@ export class Runner {
         let streamError: unknown = null;
         let finishReason: string | undefined;
         const result = streamText({
-            model: options.gateway.chatModel(model.id, this.hooks("agent", journal.state.pendingResendOf)),
+            model: options.gateway.chatModel(model.id, this.hooks("agent", journal.state.pendingResendOf), this.currentTask().effort),
             system: this.systemPrompt(),
             messages: journal.state.messages,
             tools: this.tools,
@@ -704,7 +721,7 @@ export class Runner {
         const attemptStart = journal.state.generations.length;
         try {
             const result = await generateText({
-                model: options.gateway.chatModel(model.id, this.hooks("compact")),
+                model: options.gateway.chatModel(model.id, this.hooks("compact"), task.effort),
                 system: "You compress a coding session so it can continue. Keep: the user's goals and constraints, decisions, files examined with the facts that matter, changes made (which files, what), commands run and their results, current state and the next steps. Plain text, at most about 1200 words.",
                 messages: [{ role: "user", content: `Summarize this session so far.\n\n${transcriptFor(head, budgetChars)}` }],
                 maxRetries: 0,

@@ -369,3 +369,66 @@ test.describe("Composer analytics footer", () => {
     });
   }
 });
+
+
+test("Chat Smart Adaptive keeps the chosen effort in the existing model control and sends it once", async ({ page }, info) => {
+  test.skip(info.project.name !== "desktop-chromium", "Explicit mobile viewport.");
+  await page.setViewportSize({ width: 390, height: 900 });
+  await prepareGuestPage(page, "en", "studio", "studio");
+  await mockAuthenticatedApi(page, {
+    productKey: "chat",
+    selectedModels: ["gpt-6-luna"],
+    language: "en",
+    selectionMode: "auto",
+    autoSelectionOffered: true,
+  });
+  await mockUserUsage(page, { plan: "Max", limits: { maxModels: 3, creditsMonth: 10_000 } });
+  await suppressTransientUi(page);
+  await restoreActiveConversation(page);
+  await page.route("**/api/models/catalog", route => route.fulfill({ json: { models: [{
+    id: "gpt-6-luna", name: "GPT 6 Luna", provider: "openai", enabled: true, status: "enabled",
+    minimumPlan: "Guest", usageClass: "standard", reasoning: "medium", reasoningEfforts: ["low", "high"],
+  }] } }));
+  await installChatModelStub(page, { "gpt-6-luna": { kind: "success", chunks: ["Effort answer."] } });
+  await page.route("**/api/chat/context", route => route.fulfill({ json: { ok: true, contextBundle: null, memoryUsedCount: 0 } }));
+  await page.goto("/chat?lang=en");
+  await page.getByTestId("chat-textarea").fill("Compare the two designs.");
+  await page.getByTestId("composer-model-select").click();
+  const picker = page.getByTestId("model-picker-reasoning-effort");
+  await picker.getByRole("radio", { name: "High", exact: true }).check();
+  await page.getByTestId("model-picker-done").click();
+  await expect(page.getByTestId("composer-model-select")).toContainText("High");
+  await expect(page.getByTestId("chat-textarea")).toHaveValue("Compare the two designs.");
+  await page.getByTestId("chat-send-button").click();
+  await expect(page.getByText("Effort answer.", { exact: true })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (window as unknown as {
+    __chatModelStubRequests: Array<{ reasoningEffort?: string }>;
+  }).__chatModelStubRequests.map(body => body.reasoningEffort))).toEqual(["high"]);
+  await expect(page.getByTestId("composer-model-select")).not.toContainText("High");
+});
+
+
+test("Review offers Default when its selected models have no common explicit effort", async ({ page }, info) => {
+  test.skip(info.project.name !== "desktop-chromium", "Explicit desktop viewport.");
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await prepareGuestPage(page, "en", "studio", "studio");
+  await mockAuthenticatedApi(page, {
+    productKey: "review",
+    selectedModels: ["gpt-6-luna", "minimax-m3"],
+    language: "en",
+  });
+  await mockUserUsage(page, { plan: "Max", limits: { maxModels: 3, creditsMonth: 10_000 } });
+  await suppressTransientUi(page);
+  await restoreActiveConversation(page);
+  const base = { enabled: true, status: "enabled", minimumPlan: "Guest", usageClass: "standard" };
+  await page.route("**/api/models/catalog", route => route.fulfill({ json: { models: [
+    { ...base, id: "gpt-6-luna", name: "GPT 6 Luna", provider: "openai", reasoningEfforts: ["low", "high"] },
+    { ...base, id: "minimax-m3", name: "MiniMax M3", provider: "minimax", reasoningEfforts: [] },
+  ] } }));
+  await page.goto("/review?lang=en");
+  await page.getByTestId("composer-model-select").click();
+  const picker = page.getByTestId("model-picker-reasoning-effort");
+  await expect(picker.getByRole("radio", { name: "Default", exact: true })).toBeChecked();
+  await expect(picker.getByRole("radio", { name: "High", exact: true })).toBeDisabled();
+  await expect(picker.getByRole("radio", { name: "Low", exact: true })).toBeDisabled();
+});

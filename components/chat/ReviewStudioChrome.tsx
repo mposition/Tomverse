@@ -182,7 +182,7 @@ export function ReviewNavigation({ sidebar, onNewChat, onChat, onReview, product
   </>;
 }
 
-export function ReviewParticipants({ review, selectedModels, canSelectModel, initialExpanded = false }: { initialExpanded?: boolean; review: ReviewWorkspaceControls; selectedModels: string[]; canSelectModel?: (id: string) => boolean }) {
+export function ReviewParticipants({ review, selectedModels, canSelectModel, initialExpanded = false, effortSuffix = "" }: { effortSuffix?: string; initialExpanded?: boolean; review: ReviewWorkspaceControls; selectedModels: string[]; canSelectModel?: (id: string) => boolean }) {
   const { lang } = useLanguage(); const c = reviewWorkspaceCopy[lang];
   const { models } = useModelCatalog();
   const [expanded, setExpanded] = useState(initialExpanded);
@@ -190,7 +190,7 @@ export function ReviewParticipants({ review, selectedModels, canSelectModel, ini
   const providers = review.providersConfigured || review.providers.length ? review.providers : [...new Set(selectedModels.map(id => models.find(m => m.id === id)?.provider).filter((p): p is NonNullable<typeof p> => Boolean(p)))];
   return <div className="review-participants" data-testid="review-participants">
     <button type="button" data-testid={review.mode === "professional" ? "composer-model-select" : undefined} className="review-participants-heading" onClick={event => review.mode === "easy" ? setExpanded(!expanded) : openChatModelPicker(event.currentTarget)} aria-haspopup={review.mode === "professional" ? "dialog" : undefined} aria-expanded={review.mode === "easy" ? expanded : undefined}>
-      <span>{review.mode === "easy" ? c.providers : c.models}</span><span>{review.mode === "easy" ? providers.length : selectedModels.length} / {review.maxProviders}<ChevronDown size={14} /></span>
+      <span>{review.mode === "easy" ? c.providers : c.models + effortSuffix}</span><span>{review.mode === "easy" ? providers.length : selectedModels.length} / {review.maxProviders}<ChevronDown size={14} /></span>
     </button>
     <div className="review-participant-list">
       {(review.mode === "easy" ? expanded ? options : providers : selectedModels).map(id => {
