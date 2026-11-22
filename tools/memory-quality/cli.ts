@@ -28,6 +28,11 @@ retrieval [--corpus retrieval-ko|development|validation|relevance|all]
 knowledge-retrieval [--scores <json> | --live --max-calls <n> --save-scores <new-json>]
         Knowledge-file retrieval Recall@6 and MRR: lexical, embed-only, rerank-only, embed+rerank.
         Without --scores only lexical is measured.
+followup-eval [--inputs <json> --key <json>] [--out <directory>]
+        [--scores-full-query <json>] [--scores-full-query-history <json>] [--answers <json>] [--verdicts <json>]
+        Follow-up Memory evaluation: lexical, full-query and full-query+history selections, the
+        chat messages each would send, answer import, a blind sheet and verdict import. Files only;
+        no provider call. Defaults to the development fixture. Run with node --conditions=react-server.
 Defaults: mode=mock, out=.tmp/memory-quality, iterations=3, max-calls=1000, timeout-ms=60000,
 corpus=retrieval-ko.
 The run command has no live mode, paid execution, product writes, promotion, network or raw
@@ -40,7 +45,10 @@ const commandOptions: Record<string, string[]> = {
   "export-replay": ["out", "run", "file"],
   retrieval: ["corpus", "semantic", "rerank-scores", "live", "max-calls", "save-scores", "query-mode"],
   "knowledge-retrieval": ["scores", "live", "max-calls", "save-scores"],
+  "followup-eval": ["inputs", "key", "out", "scores-full-query", "scores-full-query-history", "answers", "verdicts"],
 };
+const FOLLOWUP_DEV_INPUTS = fileURLToPath(new URL("./fixtures/followup-dev.inputs.json", import.meta.url));
+const FOLLOWUP_DEV_KEY = fileURLToPath(new URL("./fixtures/followup-dev.key.json", import.meta.url));
 const booleanOptions = new Set(["semantic", "live"]);
 function parse(args: string[]) {
   const command = args[0] ?? "help", options: Record<string, string> = {};
@@ -66,6 +74,20 @@ function parse(args: string[]) {
 export async function main(args: string[], context: LiveContext = {}) {
   const { command, options } = parse(args);
   if (command === "help") return { help: HELP };
+  if (command === "followup-eval") {
+    if (Boolean(options.inputs) !== Boolean(options.key)) throw new QualityStop("followup_inputs_and_key_required");
+    // Imported here: the chat prelude it reuses is server-only, and no other command needs it.
+    const { runFollowupEval } = await import("./followupEval");
+    const { out, report } = await runFollowupEval({
+      inputs: options.inputs ?? FOLLOWUP_DEV_INPUTS, key: options.key ?? FOLLOWUP_DEV_KEY,
+      out: options.out ?? ".tmp/memory-quality/followup-eval",
+      scoresFullQuery: options["scores-full-query"], scoresFullQueryHistory: options["scores-full-query-history"],
+      answers: options.answers, verdicts: options.verdicts,
+    });
+    return { followupEval: { out, bundle: report.bundle.bundleId, status: report.bundle.status,
+      variants: report.bundle.variants, independentScenarios: report.bundle.independentScenarios,
+      conditions: report.conditions, answerQuality: report.answers.answerQuality, paidCalls: report.paidCalls } };
+  }
   if (command === "knowledge-retrieval") {
     const live = options.live === "true";
     if (live && options.scores) throw new QualityStop("live_and_scores_exclusive");

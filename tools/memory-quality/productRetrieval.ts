@@ -101,6 +101,8 @@ export function measureProductRetrievalDetailed(cases: readonly RetrievalCase[],
     const { pool } = testCase.retrieval;
     return {
       ...evaluateRetrieval(testCase, top), tag: testCase.tag, top, historyDisplacedCurrentQuery,
+      // The whole product selection, so an evaluation builds the same prompt the chat route would.
+      selection,
       recalledInjected: relevantIds.filter((id) => injected.some((item) => item.id === id)).length,
       missed: relevantIds.filter((id) => !top.includes(id)),
       // Core and style are never relevance-gated

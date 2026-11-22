@@ -254,6 +254,60 @@ product's `rerankRequestBody` / `embedRequestBody`. Re-run any comparison for fr
 the saved file with `--rerank-scores` / `--scores`. The results are synthetic-corpus
 measurements, not decision grade (`decisionGrade: false`).
 
+## Follow-up Memory evaluation (`followup-eval`)
+
+Measures whether a follow-up question in web Chat gets the right account memory
+and, once answers exist, whether the answer follows the latest correction and keeps
+projects apart. Local PC, PowerShell, quality worktree root; no credentials, no
+network, no provider call:
+
+```powershell
+node --conditions=react-server --import tsx tools/memory-quality/cli.ts followup-eval --out .tmp/memory-quality/followup-dev
+node --conditions=react-server --import tsx tools/memory-quality/cli.ts followup-eval --inputs <inputs.json> --key <key.json> --out <directory> `
+  [--scores-full-query <json>] [--scores-full-query-history <json>] [--answers <json>] [--verdicts <json>]
+```
+
+- **Inputs and key are separate files** (`memory-followup-inputs-v1`, `memory-followup-key-v1`).
+  Inputs hold scenarios, variants, original language, role-ordered conversation, the
+  current query and the account pool. The key holds phenomena, expected behaviour
+  (answer, compare, clarify, insufficient), where the needed fact lives (`memory_only`,
+  `history_only`, `both`, `unavailable`), gold and distractor memory IDs, required,
+  acceptable and forbidden facts. Without arguments the development fixture
+  `fixtures/followup-dev.*.json` runs; it is for plumbing and tests only. Keep a real
+  holdout's text and key out of this repository.
+- **Conditions.** `lexical` always runs. `full-query` and `full-query+history` replay a
+  saved `memory-rerank-scores-v1` file through `compareMemory` (same provenance checks,
+  `corpus` = bundle ID); without a file they are `not_run`, and a refused file is
+  recorded with its reason. `full-query+history` applies the product's current-query
+  displacement fallback. Search history is the last two user messages; the answer
+  messages keep the whole conversation, assistant turns included. `no-memory` sends
+  the same conversation with no memory block.
+- **Messages.** `answer-requests.json` holds, per case and condition, exactly what the
+  chat route would send for that selection: `buildMemoryContextPrompt` rules through
+  `buildProfileSystemPrompt` as system, memory data as user (`buildChatTurnPrelude`),
+  then the conversation and the current query. Profile, knowledge, capability, date
+  and attachment blocks are left out identically for every condition. No key data
+  reaches these messages.
+- **Answers** (`memory-followup-answers-v1`) are accepted only when the bundle's
+  `evalDigest` (inputs, key and annotation version), the case, condition, completed
+  messages digest and prompt version match; one generator (model and settings) per
+  file. Only `generator.kind: provider` answers on measured retrieval count.
+- **Blind judging.** `blind-sheet.md`/`.json` shows the conversation, account memories,
+  key and anonymised answers (equal answers share a label); condition names, model,
+  ranks and IDs stay in `blind-map.json`. Fill `verdicts.template.json`
+  (`memory-followup-verdicts-v1`, with evidence for every verdict) and pass it with
+  `--verdicts`; it binds to `sheetDigest`, so a changed key or answer set refuses it.
+  Condition-level answer metrics appear only after that.
+- **Report.** `report.json` and `report.md`: per-condition retrieval (gold in rerank
+  candidates, top 5 and full recall, irrelevant general injection, distractor
+  injection, correct empty selection, history fallbacks), answer metrics, overall,
+  by language and by phenomenon, with numerators and denominators, `N/A` for zero
+  denominators, and same-case pairs (both right, one side only, both wrong) that skip
+  any case missing a measured side. `answerQuality` is `not_run` without measured
+  answers and `unjudged` without verdicts. Variants are reported next to the number
+  of independent scenarios; `decisionGrade` needs an independently authored,
+  separately reviewed bundle frozen before results.
+
 ## Data isolation and candidate authority
 
 `fixtures/development.json` and `fixtures/validation.json` contain ten synthetic
@@ -322,6 +376,7 @@ node --import tsx --test tests/memoryQualityEvaluator.test.mjs tests/memoryQuali
 node node_modules/typescript/bin/tsc --project tools/memory-quality/tsconfig.json --noEmit
 node node_modules/eslint/bin/eslint.js tools/memory-quality tests/memoryQuality*.test.mjs
 node --conditions=react-server --import tsx --test tests/memoryQualitySemantic.test.mjs
+node --conditions=react-server --import tsx --test tests/memoryQualityFollowupEval.test.mjs
 ```
 
 `tests/memoryQualitySemantic.test.mjs` covers the two semantic comparisons: saved-score

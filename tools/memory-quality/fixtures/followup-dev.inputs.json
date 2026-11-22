@@ -1,0 +1,82 @@
+{
+  "format": "memory-followup-inputs-v1",
+  "bundleId": "followup-dev-v1",
+  "status": "development",
+  "provenance": {
+    "authoredBy": "implementation session (development fixture)",
+    "authoredAt": "2026-11-23T00:00:00.000Z",
+    "independentAuthor": false,
+    "goldReviewedBy": null,
+    "goldReviewedAt": null,
+    "frozenBeforeResults": false,
+    "frozenAt": null,
+    "notes": "Plumbing and scoring-format examples only. Tests tune against these; never count them as an independent evaluation."
+  },
+  "scenarios": [
+    {
+      "scenarioId": "dev-ko-01",
+      "originalLanguage": "ko",
+      "derivedFrom": null,
+      "pool": [
+        { "id": "nuri", "kind": "project", "statement": "누리 학습앱 프로젝트에서 사용자는 QA 리드이고 베타 공개일은 3월 4일이다." },
+        { "id": "parang", "kind": "project", "statement": "파랑 카페 리뉴얼 프로젝트에서 사용자는 메뉴판 디자인을 맡고 오픈일은 4월 18일이다." },
+        { "id": "evening-caffeine", "kind": "preference", "statement": "사용자는 저녁에는 카페인 음료를 마시지 않는다." },
+        { "id": "short-answers", "kind": "verbosity", "statement": "사용자는 답을 세 줄 이내로 받기를 원한다." }
+      ],
+      "variants": [
+        {
+          "variantId": "switch",
+          "contrast": "The user switches from Nuri to Parang before the elliptical question.",
+          "conversation": [
+            { "role": "user", "content": "누리 학습앱 베타 준비 상황을 같이 보자." },
+            { "role": "assistant", "content": "좋아요, 누리 학습앱 기준으로 볼게요." },
+            { "role": "user", "content": "아, 그거 말고 파랑 카페 리뉴얼 이야기로 바꾸자." },
+            { "role": "assistant", "content": "네, 파랑 카페 리뉴얼로 전환할게요." }
+          ],
+          "currentQuery": "그럼 거기서 내 역할이랑 날짜만 알려줘."
+        },
+        {
+          "variantId": "stay",
+          "contrast": "Parang is only deferred; Nuri stays the active project.",
+          "conversation": [
+            { "role": "user", "content": "파랑 카페 리뉴얼은 나중에 보고, 누리 학습앱 베타 준비 상황을 같이 보자." },
+            { "role": "assistant", "content": "좋아요, 누리 학습앱 기준으로 볼게요." }
+          ],
+          "currentQuery": "그럼 거기서 내 역할이랑 날짜만 알려줘."
+        }
+      ]
+    },
+    {
+      "scenarioId": "dev-en-01",
+      "originalLanguage": "en",
+      "derivedFrom": null,
+      "pool": [
+        { "id": "harbor-grant", "kind": "project", "statement": "For the Harbor Library grant, the user writes the budget section and the budget cap is $40,000." },
+        { "id": "riverside-grant", "kind": "project", "statement": "For the Riverside Arts grant, the user coordinates volunteers and the budget cap is $12,500." },
+        { "id": "bullets", "kind": "formatting", "statement": "The user prefers answers as bullet points." }
+      ],
+      "variants": [
+        {
+          "variantId": "compare",
+          "contrast": "The user asks for both grants side by side.",
+          "conversation": [
+            { "role": "user", "content": "I'm juggling two grant applications this month." },
+            { "role": "assistant", "content": "Got it. Which ones are they?" },
+            { "role": "user", "content": "Harbor Library and Riverside Arts." }
+          ],
+          "currentQuery": "Compare the budget caps for both grants."
+        },
+        {
+          "variantId": "single",
+          "contrast": "The user asks about the library grant only.",
+          "conversation": [
+            { "role": "user", "content": "I'm juggling two grant applications this month." },
+            { "role": "assistant", "content": "Got it. Which ones are they?" },
+            { "role": "user", "content": "Harbor Library and Riverside Arts." }
+          ],
+          "currentQuery": "What's the budget cap for the library one?"
+        }
+      ]
+    }
+  ]
+}

@@ -130,6 +130,12 @@ const brief = ({ result }: Measured) => ({
 
 export function compareMemory(corpus: string, cases: readonly RetrievalCase[], scores: MemoryScores,
   mode: MemoryEvaluationQueryMode = "current-query") {
+  return compareMemoryDetailed(corpus, cases, scores, mode).report;
+}
+
+/** `compareMemory` plus the per-case lexical and semantic rows, for evaluations that read each selection. */
+export function compareMemoryDetailed(corpus: string, cases: readonly RetrievalCase[], scores: MemoryScores,
+  mode: MemoryEvaluationQueryMode = "current-query") {
   const unit = scores.provenance?.settings.billingUnit;
   const preparation: EvaluationPreparation | undefined = mode !== "current-query" &&
     (unit === "token" || unit === "search_unit") && scores.provenance
@@ -192,7 +198,7 @@ export function compareMemory(corpus: string, cases: readonly RetrievalCase[], s
   });
   const covered = cases.filter((testCase) => scores.has(testCase.id));
   const requested = cases.filter(hasRerankRequest);
-  return {
+  const report = {
     path: "product:selectMemoryContext+externalRelevance" as const, corpus, k: lexical.result.k, cases: cases.length,
     queryMode: mode, queryVersion: queryVersion(mode),
     requests: Object.fromEntries(cases.map(row => [row.id, {
@@ -234,6 +240,11 @@ export function compareMemory(corpus: string, cases: readonly RetrievalCase[], s
         .map((id) => ({ caseId: testCase.id, id }))),
       scoreCasesNotInCorpus: [...scores.keys()].filter((id) => !cases.some((testCase) => testCase.id === id)),
     },
+  };
+  return {
+    report, lexicalRows: lexical.rows, semanticRows: semantic.rows,
+    usable: (caseId: string) => Boolean(usableScores(cases.find(row => row.id === caseId)!)),
+    historyCount: (caseId: string) => evaluationInput(cases.find(row => row.id === caseId)!, mode, preparation).history.length,
   };
 }
 
