@@ -404,6 +404,7 @@
     "benchmark:router:replay": "node --import tsx scripts/router-development-replay.mjs",
     "benchmark:router:collect": "node --conditions=react-server --import tsx scripts/router-development-collect.mjs",
     "benchmark:router:contract-smoke": "node --conditions=react-server --import tsx scripts/router-development-contract-smoke.mjs",
+    "benchmark:auto-cost-efficiency:dry-run": "node --conditions=react-server --import tsx scripts/auto-cost-efficiency-dry-run.mjs",
     "benchmark:router:v2-bridge": "node --conditions=react-server --import tsx scripts/router-development-v2-bridge.mjs",
     "test:router-development-v2-bridge": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/routerDevelopmentPlanV2.test.mjs tests/routerDevelopmentResultsV2.test.mjs tests/routerDevelopmentBridgeV2.test.mjs",
     "check:router-development-corpus-v2": "node --conditions=react-server --import tsx scripts/router-development-corpus-v2.mjs",

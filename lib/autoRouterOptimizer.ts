@@ -1,5 +1,13 @@
 import "server-only";
-import { observeOptimizerCost, optimizerCostFields } from "@/lib/autoOptimizerCost";
+import { observeOptimizerUsageCost, optimizerCostFields } from "@/lib/autoOptimizerCost";
+import { COST_EFFICIENCY_CRITERIA_PROPOSAL } from "@/lib/autoCostEfficiencyReport";
+import {
+    buildAutoCandidateMenu,
+    buildCostEfficiencyManifest,
+    costEfficiencyCallPlan,
+    estimateAnswerMicroUsd,
+} from "@/lib/autoCostEfficiencyPlan";
+import { readAutoChatServingCost } from "@/lib/autoChatServingCost";
 import { readResponseLatencyEvidence } from "@/lib/responseLatencyStore";
 import { readChatPresearchLatency } from "@/lib/chatPresearchLatency";
 import { readSmartAdaptiveDaily } from "@/lib/dailyProductAgentSmartAdaptive";
@@ -18,16 +26,12 @@ import { callAutoLlmRouter } from "@/lib/autoLlmRouter";
 import {
     AUTO_LLM_ROUTER_REPLAY_TIMEOUT_MS,
     AUTO_LLM_ROUTER_UNREPLAYABLE_CONTEXT,
-    autoLlmRouterCandidates,
     resolveAutoLlmRouterModel,
     type AutoLlmRouterCandidate,
     type AutoLlmRouterSession,
 } from "@/lib/autoLlmRouterCore";
 import { autoCohortConfig } from "@/lib/autoCohort";
-import { preflightInputEstimate } from "@/lib/autoDispatchPreflight";
-import { decideRouterModel } from "@/lib/routerDecision";
 import { getRouterRuntimeSignals } from "@/lib/routerRuntimeSignals";
-import { estimateRequestCredits } from "@/lib/webSearchCredits";
 import { resolveWebSearchBackendReadiness } from "@/lib/webSearchBackendRuntime";
 import {
     DEFAULT_ROUTER_GUIDANCE,
@@ -39,6 +43,12 @@ import { readAutoLlmRouterModelId } from "@/lib/autoLlmRouterSettings";
 import {
     AUTO_ROUTER_GENERATOR_SYSTEM,
     AUTO_ROUTER_JUDGE_SYSTEM,
+    AUTO_ROUTER_QUALITY_JUDGE_SYSTEM,
+    AUTO_ROUTER_OPTIMIZER_TARGET_SAMPLE,
+    autoRouterQualityJudgeSchema,
+    costEfficiencyDiagnosticOn,
+    parseQualityJudgement,
+    type OptimizerObjective,
     AUTO_ROUTER_OPTIMIZER_DAY_CAP_MICRO_USD,
     AUTO_ROUTER_OPTIMIZER_MONTH_CAP_MICRO_USD,
     AUTO_ROUTER_OPTIMIZER_RUN_CAP_MICRO_USD,
@@ -124,7 +134,11 @@ const JUDGE_TIMEOUT_MS = 30_000;
  * one structured verdict. The caller's system prompt ends with
  * AUTO_ROUTER_JUDGE_OUTPUT_RULE.
  */
-export const optimizerJudgeCall = (input: { model: AiModel; system: string; prompt: string; name: string }) =>
+export const optimizerJudgeCall = (input: {
+    model: AiModel; system: string; prompt: string; name: string;
+    /** The price-blind rubric's object; the existing verdict object unless given. */
+    schema?: Record<string, unknown>;
+}) =>
     generateText({
         model: getActiveAiModel(input.model),
         system: input.system,
@@ -134,7 +148,7 @@ export const optimizerJudgeCall = (input: { model: AiModel; system: string; prom
         maxRetries: 0,
         abortSignal: AbortSignal.timeout(JUDGE_TIMEOUT_MS),
         output: Output.object({
-            schema: jsonSchema(autoRouterJudgeSchema() as unknown as JSONSchema7),
+            schema: jsonSchema((input.schema ?? autoRouterJudgeSchema()) as unknown as JSONSchema7),
             name: input.name,
         }),
         providerOptions: { openai: { strictJsonSchema: true } },
@@ -275,6 +289,7 @@ async function loadDecisions(): Promise<OptimizerDecision[]> {
         take: AUTO_ROUTER_OPTIMIZER_SAMPLE_MAX,
         select: {
             id: true,
+            conversationId: true,
             version: true,
             routerInput: true,
             routerContext: true,
@@ -290,6 +305,7 @@ async function loadDecisions(): Promise<OptimizerDecision[]> {
         if (candidates.length < 2) return [];
         return [{
             id: row.id,
+            family: row.conversationId,
             taskKind: row.taskKind,
             inputVersion: row.version,
             routerInput: row.routerInput,
@@ -332,6 +348,8 @@ export async function readUnreliableAnswerModels(): Promise<string[]> {
             FROM "AutoRouterOptimizerCycle"
             WHERE "status" IN ('passed', 'failed', 'error')
               AND jsonb_typeof("summary"->'answerStats') = 'object'
+              -- A cost-efficiency diagnostic, finished or failed, never shapes the routing cycle's draws.
+              AND "summary"->'objective' IS NULL
             ORDER BY "createdAt" DESC
             LIMIT 1
         `;
@@ -426,6 +444,8 @@ export async function reserveOptimizerCycle(input: {
     incumbentGuidance: string;
     /** Which guidance the cycle improves; the lock and caps are shared by both. */
     target?: RouterGuidanceKind;
+    /** Recorded with the start; absent is the existing routing-quality cycle. */
+    objective?: OptimizerObjective;
     now?: Date;
 }): Promise<Reserved> {
     const now = input.now ?? new Date();
@@ -474,7 +494,10 @@ export async function reserveOptimizerCycle(input: {
             action: "auto.llm_router_optimizer.cycle_started",
             targetId: cycle.id,
             summary: "Started an Auto router optimizer cycle.",
-            metadata: { budgetMicroUsd: admitted.budgetMicroUsd, target: input.target ?? "routing" },
+            metadata: {
+                budgetMicroUsd: admitted.budgetMicroUsd, target: input.target ?? "routing",
+                ...(input.objective && input.objective !== "routing_quality" ? { objective: input.objective } : {}),
+            },
         });
         return { cycle: { id: cycle.id, budgetMicroUsd: admitted.budgetMicroUsd } };
     });
@@ -529,7 +552,11 @@ export type OptimizerStartRefusal =
     | "already_running"
     | "daily_done"
     | "day_cap"
-    | "month_cap";
+    | "month_cap"
+    /** The cost-efficiency diagnostic's default-off switch is off. */
+    | "diagnostic_off"
+    /** Only a person starts a diagnostic; no schedule does. */
+    | "diagnostic_needs_person";
 
 const AUTO_PLANS_WIDEST_FIRST: readonly ModelTier[] = ["Max", "Pro", "Free"];
 
@@ -543,43 +570,16 @@ const AUTO_PLANS_WIDEST_FIRST: readonly ModelTier[] = ["Max", "Pro", "Free"];
  * configured), so the menu is the fullest one Auto offers.
  */
 export async function autoCandidateMenu(runtimeModels: readonly AiModel[]) {
-    const models = runtimeModels.filter((model) => model.enabled && !model.catalogDeleted);
     const signals = await getRouterRuntimeSignals();
     const eligiblePlans = autoCohortConfig().eligiblePlans;
-    const plan = AUTO_PLANS_WIDEST_FIRST.find((tier) => eligiblePlans.includes(tier)) ?? "Max";
-    const requested = models.find((model) => model.id === DEFAULT_MODEL_ID) ?? models[0];
-    const requestOutputCapTokens = requested ? resolveModelPricing(requested).maxOutputTokens : 0;
-    const searchBackendReadiness = resolveWebSearchBackendReadiness();
-    return (text: string): AutoLlmRouterCandidate[] => {
-        const reservedInputTokens = preflightInputEstimate([{ role: "user", content: text }])
-            .estimatedInputTokens;
-        const decision = decideRouterModel({
-            text,
-            attachments: [],
-            webSearchRequested: false,
-            searchBackendReadiness,
-            models,
-            plan,
-            reservedInputTokens,
-            requestOutputCapTokens,
-            unhealthyModelIds: signals.unhealthyModelIds,
-            signals: signals.signals,
-            sticky: null,
-        });
-        const estimate = estimateRequestCredits({
-            models,
-            estimatedInputTokens: reservedInputTokens,
-            webSearchMode: "off",
-            backendReadiness: searchBackendReadiness,
-        });
-        return autoLlmRouterCandidates(
-            decision.record.eligibleModelIds,
-            models,
-            Object.fromEntries(estimate.models.map((model) => [model.modelId, model.totalCredits])),
-            // Synthetic menus represent saved, signed-in Chat turns without search.
-            { isAuthenticated: true, canPersist: true, webSearchRequested: false }
-        );
-    };
+    return buildAutoCandidateMenu({
+        models: runtimeModels,
+        plan: AUTO_PLANS_WIDEST_FIRST.find((tier) => eligiblePlans.includes(tier)) ?? "Max",
+        requestedModelId: DEFAULT_MODEL_ID,
+        searchBackendReadiness: resolveWebSearchBackendReadiness(),
+        unhealthyModelIds: signals.unhealthyModelIds,
+        signals: signals.signals,
+    });
 }
 
 /**
@@ -592,8 +592,13 @@ export async function autoCandidateMenu(runtimeModels: readonly AiModel[]) {
  */
 export async function startAutoRouterOptimizerCycle(
     actor: OptimizerActor,
-    options: { waitForCompletion?: boolean } = {}
+    options: { waitForCompletion?: boolean; objective?: OptimizerObjective } = {}
 ): Promise<{ cycleId: string; outcome?: OptimizerRunOutcome } | { refused: OptimizerStartRefusal }> {
+    const objective = options.objective ?? "routing_quality";
+    if (objective === "chat_cost_efficiency") {
+        if (actor === "system") return { refused: "diagnostic_needs_person" };
+        if (!costEfficiencyDiagnosticOn()) return { refused: "diagnostic_off" };
+    }
     const models = await getRuntimeModels();
     const optimizerModel = resolveAutoLlmRouterModel(models, (await readOptimizerModelId()) ?? undefined);
     if (!optimizerModel) return { refused: "optimizer_off" };
@@ -613,10 +618,12 @@ export async function startAutoRouterOptimizerCycle(
         optimizerModelId: optimizerModel.id,
         routerModelId: routerModel.id,
         incumbentGuidance: active.guidance,
+        objective,
     });
     if ("refused" in started) return started;
 
     const run = runInBackground({
+        objective,
         cycleId: started.cycle.id,
         budgetMicroUsd: started.cycle.budgetMicroUsd,
         decisions,
@@ -634,11 +641,63 @@ export async function startAutoRouterOptimizerCycle(
     return { cycleId: started.cycle.id, outcome: await run };
 }
 
+type UsagePrices = Parameters<typeof observeOptimizerUsageCost>[1];
+
+/** The resolved rates with their cache lines, for the routing cycle's usage-priced observations. */
+const usagePricesOf = (model: AiModel): UsagePrices | null => {
+    const prices = pricesOf(model);
+    if (!prices) return null;
+    const pricing = resolveModelPricing(model);
+    return { ...prices, cachedInputPriceMultiplier: pricing.cachedInputPriceMultiplier,
+        cacheWriteUsdPerMillionTokens: pricing.cacheWriteUsdPerMillionTokens ?? null };
+};
+
+/**
+ * The diagnostic's manifest at start: runtime model identities, baseline
+ * guidance, corpus and split, rubric, criteria, the call plan's upper bound
+ * and the ceiling that actually binds.
+ */
+const costEfficiencyRunManifest = (input: {
+    cycleId: string; budgetMicroUsd: number; decisions: OptimizerDecision[]; incumbentGuidance: string;
+    models: readonly AiModel[]; optimizerModel: AiModel; routerModel: AiModel;
+    optimizerPrices: Prices; routerPrices: Prices;
+}, at: Date) => {
+    const real = Math.min(input.decisions.length, AUTO_ROUTER_OPTIMIZER_SAMPLE_MAX);
+    const synthetic = Math.max(0, AUTO_ROUTER_OPTIMIZER_TARGET_SAMPLE - real);
+    const total = real + synthetic;
+    const answerModels = input.models.filter((model) => model.enabled && !model.catalogDeleted);
+    return buildCostEfficiencyManifest({
+        createdAt: at.toISOString(),
+        source: { commit: process.env.RAILWAY_GIT_COMMIT_SHA?.trim() || null, dirty: null },
+        execution: "live",
+        location: process.env.RAILWAY_ENVIRONMENT_NAME?.trim() || "unknown",
+        baselineGuidance: input.incumbentGuidance,
+        optimizerModel: input.optimizerModel,
+        routerModel: input.routerModel,
+        answerModels,
+        corpus: {
+            source: "recent picked AutoRouterDecision rows plus synthetic messages",
+            cases: total, train: null, evaluate: null,
+            split: "family: conversation id; synthetic message alone",
+            families: { train: null, evaluate: null },
+        },
+        criteria: COST_EFFICIENCY_CRITERIA_PROPOSAL,
+        // Upper bound: every case could land in the holdout and every synthetic message train.
+        plan: costEfficiencyCallPlan({
+            evaluate: total, trainRoutes: synthetic, synthesize: synthetic > 0,
+            optimizer: input.optimizerPrices, router: input.routerPrices, answerModels,
+        }),
+        runCapMicroUsd: input.budgetMicroUsd,
+        resultLocation: `AutoRouterOptimizerCycle ${input.cycleId}.summary`,
+    });
+};
+
 /**
  * Runs a reserved cycle's calls and records the result. Never throws: a
  * failure is recorded as run_error and reported in the outcome.
  */
 async function runInBackground(input: {
+    objective: OptimizerObjective;
     cycleId: string;
     budgetMicroUsd: number;
     decisions: OptimizerDecision[];
@@ -676,8 +735,13 @@ async function runInBackground(input: {
             return null;
         }
     };
-    const cost = (prices: Prices, usage: { inputTokens?: number; outputTokens?: number } | undefined) =>
-        optimizerCostFields(observeOptimizerCost(usage, prices));
+    // Reported usage priced by the existing provider-cost helper, cache-read
+    // and cache-write lines included where the adapter reported them.
+    const cost = (prices: UsagePrices, usage: Parameters<typeof observeOptimizerUsageCost>[0]) =>
+        optimizerCostFields(observeOptimizerUsageCost(usage, prices));
+    const optimizerUsagePrices = usagePricesOf(input.optimizerModel) ?? input.optimizerPrices;
+    const routerUsagePrices = usagePricesOf(input.routerModel) ?? input.routerPrices;
+    const costMode = input.objective === "chat_cost_efficiency";
     // Answering models are looked up among the enabled ones only.
     const answerModels = new Map(
         input.models
@@ -706,6 +770,8 @@ async function runInBackground(input: {
             readChatPresearchLatency(measuredAt).catch(() => ({ status: "unavailable" as const })),
         ]);
         const responseLatency = { ...latency, chatPresearchLatency };
+        // The diagnostic's plan, fixed before its first call and stored with its result.
+        const manifest = costMode ? costEfficiencyRunManifest(input, measuredAt) : null;
         const result = await runOptimizerCycle(
             {
                 decisions: input.decisions,
@@ -714,10 +780,34 @@ async function runInBackground(input: {
                 catalogueIds,
                 unreliableModels,
                 responseLatency,
+                ...(costMode ? {
+                    objective: input.objective,
+                    criteria: COST_EFFICIENCY_CRITERIA_PROPOSAL,
+                    // A conversation never straddles the holdout; a synthetic message is its own family.
+                    familyOf: (decision: OptimizerDecision) => decision.family ?? decision.id,
+                } : {}),
             },
             {
                 budgetMicroUsd: input.budgetMicroUsd,
                 candidatesFor,
+                ...(costMode ? {
+                    estimateAnswerMicroUsd: (modelId: string, decision: OptimizerDecision) =>
+                        estimateAnswerMicroUsd(answerModels.get(modelId), decision),
+                    qualityJudge: async (message: string) => {
+                        const generated = await traced("judge", () => optimizerJudgeCall({
+                            model: input.optimizerModel,
+                            system: AUTO_ROUTER_QUALITY_JUDGE_SYSTEM,
+                            prompt: message,
+                            name: "router_quality_judgement",
+                            schema: autoRouterQualityJudgeSchema(),
+                        }));
+                        return {
+                            value: parseQualityJudgement(outputOf("judge", generated)),
+                            ...cost(optimizerUsagePrices, generated.usage),
+                            provider: input.optimizerModel.provider,
+                        };
+                    },
+                } : {}),
                 // A proposal naming a model off the menu or without evidence;
                 // model ids only, never guidance text.
                 guidanceRejected: (rejection) =>
@@ -752,7 +842,7 @@ async function runInBackground(input: {
                     }));
                     return {
                         value: output,
-                        ...cost(input.optimizerPrices, generated.usage),
+                        ...cost(optimizerUsagePrices, generated.usage),
                         provider: input.optimizerModel.provider,
                     };
                 },
@@ -786,7 +876,7 @@ async function runInBackground(input: {
                     }
                     return {
                         value: output,
-                        ...cost(input.optimizerPrices, generated.usage),
+                        ...cost(optimizerUsagePrices, generated.usage),
                         provider: input.optimizerModel.provider,
                     };
                 },
@@ -816,7 +906,7 @@ async function runInBackground(input: {
                     }
                     return {
                         value: routed.pick?.modelId ?? null,
-                        ...cost(input.routerPrices, routed.usage),
+                        ...cost(routerUsagePrices, routed.usage),
                         provider: input.routerModel.provider,
                     };
                 },
@@ -851,7 +941,7 @@ async function runInBackground(input: {
                     }
                     return {
                         value: generated.text,
-                        ...cost(prices, generated.usage),
+                        ...cost(usagePricesOf(model) ?? prices, generated.usage),
                         provider: model.provider,
                     };
                 },
@@ -864,7 +954,7 @@ async function runInBackground(input: {
                     }));
                     return {
                         value: parseJudgeWinner(outputOf("judge", generated)),
-                        ...cost(input.optimizerPrices, generated.usage),
+                        ...cost(optimizerUsagePrices, generated.usage),
                         provider: input.optimizerModel.provider,
                     };
                 },
@@ -894,6 +984,8 @@ async function runInBackground(input: {
                     answerStats: result.answerStats,
                     unreliableModels,
                     responseLatency,
+                    // Present only on a diagnostic: optimizerPromotionEligibility refuses any summary with an objective.
+                    ...(result.objective ? { objective: result.objective, costEfficiency: result.costEfficiency, manifest } : {}),
                 },
                 spentMicroUsd: result.spentMicroUsd,
                 finishedAt: new Date(),
@@ -901,7 +993,8 @@ async function runInBackground(input: {
             spentByProvider,
         });
         // Setting changes only for a cycle it recorded; never fails the cycle.
-        const appliedSettings = recorded
+        // A diagnostic changes no setting and promotes nothing, whatever the switches say.
+        const appliedSettings = recorded && !costMode
             ? await applyCycleTunableChanges({
                   cycleId: input.cycleId,
                   proposed: proposedSettingChanges,
@@ -929,7 +1022,7 @@ async function runInBackground(input: {
             | Awaited<ReturnType<typeof promoteAutoRouterOptimizerCycle>>
             | { refused: "promotion_error" }
             | null = null;
-        if (recorded && result.status === "passed" && (await readOptimizerAutomation()).autoPromote) {
+        if (recorded && !costMode && result.status === "passed" && (await readOptimizerAutomation()).autoPromote) {
             // The cycle is already recorded; a failed promotion leaves it a
             // passed cycle a person can still promote.
             promotion = await promoteAutoRouterOptimizerCycle(input.cycleId, "system").catch(
@@ -939,6 +1032,7 @@ async function runInBackground(input: {
         console.info(JSON.stringify({
             event: "auto_router_optimizer_cycle",
             cycleId: input.cycleId,
+            objective: input.objective,
             recorded,
             autoPromoted: promotion ? ("ok" in promotion ? true : promotion.refused) : false,
             status: result.status,
@@ -1099,7 +1193,7 @@ export type OptimizerCycleView = {
  */
 export async function readAutoRouterOptimizerState() {
     const now = new Date();
-    const [optimizerModelId, automation, active, cycles, monthCycles, smartAdaptiveDaily] = await Promise.all([
+    const [optimizerModelId, automation, active, cycles, monthCycles, smartAdaptiveDaily, servingCost] = await Promise.all([
         readOptimizerModelId(),
         readOptimizerAutomation(),
         readActiveRouterGuidance(),
@@ -1120,11 +1214,15 @@ export async function readAutoRouterOptimizerState() {
             select: { createdAt: true, spentMicroUsd: true, summary: true },
         }),
         readSmartAdaptiveDaily().catch(() => null),
+        readAutoChatServingCost(now),
     ]);
     const implementations = await readDailyImplementations();
     return {
         optimizerModelId,
         smartAdaptiveDaily,
+        // The diagnostic's switch, read so Admin offers the start only when it is on.
+        costEfficiencyDiagnostic: { available: costEfficiencyDiagnosticOn() },
+        servingCost,
         automation,
         active: {
             cycleId: active.cycleId,
