@@ -678,7 +678,7 @@ test("a diagnostic starts only for a person and only with its switch on; a refus
   assert.equal((audit.metadata as { objective?: string }).objective, "chat_cost_efficiency");
 });
 
-test("a finished diagnostic's failed answers count toward the next challenger's reliability", async () => {
+test("a diagnostic's answer failures never exclude a model from the routing cycle's challenger draws", async () => {
   const { readUnreliableAnswerModels } = await import("@/lib/autoRouterOptimizer");
   await prisma.autoRouterOptimizerCycle.create({
     data: {
@@ -687,5 +687,5 @@ test("a finished diagnostic's failed answers count toward the next challenger's 
       summary: { evaluated: 12, answerStats: { "cheap-model": { answered: 0, failed: 3 } } },
     },
   });
-  assert.deepEqual(await readUnreliableAnswerModels(), ["cheap-model"]);
+  assert.deepEqual(await readUnreliableAnswerModels(), []);
 });

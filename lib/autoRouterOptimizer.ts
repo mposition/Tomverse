@@ -346,7 +346,7 @@ export async function readUnreliableAnswerModels(): Promise<string[]> {
         const rows = await prisma.$queryRaw<Array<{ answerStats: unknown }>>`
             SELECT "summary"->'answerStats' AS "answerStats"
             FROM "AutoRouterOptimizerCycle"
-            WHERE "status" IN ('passed', 'failed', 'error', 'diagnostic')
+            WHERE "status" IN ('passed', 'failed', 'error')
               AND jsonb_typeof("summary"->'answerStats') = 'object'
             ORDER BY "createdAt" DESC
             LIMIT 1

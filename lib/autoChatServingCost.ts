@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { resolvedAttemptCosts } from "@/lib/chatAttemptCostLedger";
 import { summarizeChatServingCost, type ServingTraceRecord } from "@/lib/autoChatServingCostCore";
 
-/** Recent picked Auto turns read for the report; reads only, nothing is written. */
+/** Recent Auto router decisions, picked or not (unpicked ones are their own row); reads only, nothing is written. */
 const SERVING_COST_DAYS = 7;
 // Each linked reservation is resolved by the ledger's own reader (two reads), so the window stays small.
 const SERVING_COST_MAX_TRACES = 100;

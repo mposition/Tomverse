@@ -46,7 +46,9 @@ const emptyBucket = (): Bucket => ({
 /** Known only when a settled reservation has attempts and none of them is an unmeasured estimate. */
 export const traceAnswerCost = (record: ServingTraceRecord): { state: "known"; microUsd: number } | { state: "unknown" | "unlinked" } => {
     if (record.reservations.length === 0) return { state: "unlinked" };
-    if (record.attempts.length === 0 || record.attempts.some(attempt => attempt.estimated) ||
+    // Every linked reservation needs its own attempts: one reservation's cost never stands in for another's.
+    if (record.reservations.some(reservation => !record.attempts.some(attempt => attempt.reservationId === reservation.id)) ||
+        record.attempts.some(attempt => attempt.estimated) ||
         record.reservations.some(reservation => reservation.status !== "settled" && reservation.status !== "refunded")) return { state: "unknown" };
     const microUsd = record.attempts.reduce((sum, attempt) => sum + Number(attempt.costMicroUsd), 0);
     return Number.isSafeInteger(microUsd) && microUsd >= 0 ? { state: "known", microUsd } : { state: "unknown" };

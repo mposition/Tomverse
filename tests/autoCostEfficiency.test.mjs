@@ -387,6 +387,10 @@ test("real Chat serving cost links answers by trace and keeps router, Refiner an
   assert.equal(summary.total.answer.retriedTraces, 1);
   assert.equal(summary.total.router.tokenTraces, 3);
   assert.equal(summary.total.firstContentMsP50, 900);
+  // Two reservations on one trace: one with no attempts leaves the trace unknown, not partly known.
+  assert.deepEqual(traceAnswerCost(record({ reservations: [
+    { id: "r1", status: "settled", settledCredits: 2 }, { id: "r2", status: "settled", settledCredits: 1 },
+  ] })), { state: "unknown" });
 });
 
 test("the offline dry run builds a complete manifest and runs the real cycle on mock calls only", async () => {

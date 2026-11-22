@@ -32,7 +32,8 @@ test("a diagnostic cycle's run over the real cycle table", { skip: !databaseUrl 
             callAutoLlmRouter: async (input) => {
                 routed.push(input.guidance);
                 const baseline = input.guidance !== PROPOSAL;
-                return { outcome: "picked", pick: { modelId: byCredits(input.candidates, baseline ? -1 : 1) }, usage: { inputTokens: 900, outputTokens: 30 } };
+                return { outcome: "picked", pick: { modelId: byCredits(input.candidates, baseline ? -1 : 1) },
+                    usage: { inputTokens: 900, outputTokens: 30, inputTokenDetails: { cacheReadTokens: 50 } } };
             },
             pickAutoModelWithLlm: async () => null,
         },
@@ -114,6 +115,9 @@ test("a diagnostic cycle's run over the real cycle table", { skip: !databaseUrl 
             const answerCall = row.summary.costCoverage.calls.find((call) => call.kind === "answer" && call.state === "known");
             assert.equal(answerCall.usage.cachedInputTokens, 100);
             assert.equal(answerCall.identity.objective, "chat_cost_efficiency");
+            // The router's reported cache split reaches the same helper.
+            const routeCall = row.summary.costCoverage.calls.find((call) => call.kind === "route" && call.state === "known");
+            assert.equal(routeCall.usage.cachedInputTokens, 50);
             // No promotion, no setting change, no actionable recommendation, despite every switch being on.
             assert.equal((await readActiveRouterGuidance()).cycleId, null);
             assert.equal(JSON.stringify(await readAutoRouterTunables()), tunablesBefore);

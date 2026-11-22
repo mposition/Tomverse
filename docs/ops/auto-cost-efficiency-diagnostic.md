@@ -39,9 +39,11 @@ cheaper model is good enough or that total cost falls.
 - **Cost attribution.** Evaluation calls carry objective/case/model/arm/try
   identity in the existing coverage. Each answer's tries, failed tries and
   known or unknown spend are kept; a replay that reuses a direct comparison's
-  answer is marked and not paid twice. Routing-cycle calls are priced by
+  answer is marked and not paid twice. Routing-cycle calls (synthesis,
+  generation, router, answers, judges) are priced by
   `calculateProviderUsageCost` with the reported cache-read and cache-write
-  lines; an unpriced cache write is unknown. Unknown cost still stops new
+  lines -- the router call now passes its reported cache split through -- and
+  an unpriced cache write is unknown. Unknown cost still stops new
   scheduling and drains in-flight work.
 - **Report.** `summary.costEfficiency` (`auto-cost-efficiency-report-v1`):
   candidate diagnosis (savings samples by basis, quality tally, critical
@@ -74,8 +76,9 @@ cheaper model is good enough or that total cost falls.
   `AUTO_ROUTER_COST_EFFICIENCY_DIAGNOSTIC=on` (default off), under the
   existing optimizer model approval, run/day/month ceilings and audit entry
   (`metadata.objective`). Legacy cycles, active guidance, CAS and rollback are
-  unchanged. Its failed answers count toward the next challenger's
-  reliability like any finished cycle's.
+  unchanged. Its answer failures do not feed the routing cycle's
+  unreliable-model exclusion, so the existing cycle's challenger draws are
+  unchanged.
 - **Admin.** Each diagnostic cycle shows the report block; the routing tile
   shows the real serving-cost report. Copy is in
   `lib/adminMessages/costEfficiency.ts` (en/ko).
