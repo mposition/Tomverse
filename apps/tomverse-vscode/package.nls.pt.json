@@ -1,0 +1,19 @@
+{
+  "open": "Abrir Tomverse",
+  "connect": "Conectar chave API",
+  "disconnect": "Desconectar localmente",
+  "selectRoot": "Selecionar pasta de trabalho",
+  "attachFile": "Anexar arquivo",
+  "attachSelection": "Anexar seleção",
+  "attachDiagnostics": "Anexar diagnósticos",
+  "stop": "Parar",
+  "sessions": "Sessões",
+  "newSession": "Nova sessão",
+  "clearApprovals": "Limpar permissões",
+  "exportDiagnostics": "Exportar diagnósticos",
+  "trustDescription": "Modo restrito: confie no espaço antes de executar.",
+  "virtualDescription": "Somente desktop local: Windows x64, macOS arm64 ou Linux x64, pastas locais.",
+  "endpointDescription": "URL base da API de programação do Tomverse. Apenas as configurações do usuário são usadas; o espaço de trabalho e as variáveis de ambiente são ignorados.",
+  "localhostDescription": "Permitir HTTP em localhost apenas para desenvolvimento local. Desativado por padrão.",
+  "persistDescription": "Manter sessões e backups para desfazer no armazenamento local. Desative para sessões em memória, sem retomada após sair."
+}

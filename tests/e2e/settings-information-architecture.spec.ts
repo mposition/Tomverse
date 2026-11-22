@@ -184,7 +184,9 @@ async function gotoReviewWithSettings(page: Page) {
   await prepareGuestPage(page, "ko");
   await mockAuthenticatedApi(page);
   await mockSettingsEntryApis(page);
-  await page.goto("/review");
+  // Static chunks bypass the API predicate routes, including in a local dev build.
+  await page.route("**/_next/static/**", route => route.continue());
+  await page.goto("/review", { waitUntil: "domcontentloaded" });
   await expect(page.getByTestId("chat-input")).toBeVisible();
 }
 
@@ -213,17 +215,19 @@ test.describe("settings information architecture", () => {
     await expect(page.getByTestId("settings-account-api-keys")).toHaveCount(0);
   });
 
-  test("the Developer tab shows the key summary, both APIs' addresses and the CLI @ui-risk", async ({
+  test("the Developer tab keeps setup compact with expandable connection addresses @ui-risk", async ({
     page,
-  }) => {
+  }, testInfo) => {
     await mockApiKeys(page, "pro");
     await gotoReviewWithSettings(page);
     await openSettingsTab(page, "developer");
     const tab = page.getByTestId("settings-developer-tab");
-    await expect(tab).toContainText("키 하나로 두 API를 모두 쓸 수 있습니다");
-    // The CLI banner is the first thing in the tab and opens the install page in this language.
-    await expect(page.getByTestId("developer-cli-banner")).toContainText("Tomverse CLI — 터미널의 코딩 에이전트");
-    await expect(page.getByTestId("developer-cli-banner-link")).toHaveAttribute("href", /\/developers\/cli$/);
+    await expect(tab).toContainText("API 키 하나와 공유 크레딧");
+    await expect(page.getByTestId("developer-cli-guide")).toHaveAttribute("href", /\/developers\/cli$/);
+    await expect(page.getByTestId("developer-vscode-guide")).toHaveAttribute("href", /\/developers#tomverse-vscode$/);
+    await expect(page.getByTestId("developer-endpoint-general-openai")).not.toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("developer-settings-compact.png") });
+    await page.getByTestId("developer-endpoints").locator("summary").click();
     await expect(page.getByTestId("developer-keys-summary")).toContainText("사용 중인 키 1개");
     await expect(page.getByTestId("developer-manage-keys")).toHaveAttribute("href", "/settings/api");
     await expect(page.getByTestId("developer-endpoint-general-openai")).toHaveText("https://tomverse.app/api/v1");
@@ -232,12 +236,15 @@ test.describe("settings information architecture", () => {
     await expect(page.getByTestId("developer-endpoint-coding-anthropic")).toHaveText("https://tomverse.app/api/code/anthropic");
     await expect(page.getByTestId("developer-endpoints-general")).toContainText("Brave Leo");
     await expect(page.getByTestId("developer-endpoints-coding")).toContainText("JetBrains");
-    await expect(page.getByTestId("developer-tool-guide")).toHaveAttribute("href", "/settings/api#connect");
-    await expect(page.getByTestId("developer-cli-command")).toHaveText("npm install -g @tomverse/cli && tomverse doctor");
-    await expect(page.getByTestId("developer-cli-guide")).toHaveAttribute("href", "/settings/api?tool=tomverse-cli#connect");
-    await expect(page.getByTestId("developer-footnote")).toContainText("Pro 이상");
+    await expect(page.getByTestId("developer-other-guide")).toHaveAttribute("href", "/settings/api#connect");
+    await expect(page.getByTestId("developer-cli-command")).toHaveCount(0);
     // Nothing runs off the side of a phone-width panel.
-    expect(await tab.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+    const overflow = await tab.evaluate((node) => {
+      const right = node.getBoundingClientRect().right;
+      return [...node.querySelectorAll("*")].filter(child => child.getBoundingClientRect().right > right + 1)
+        .map(child => ({ tag: child.tagName, text: child.textContent?.slice(0, 80), width: child.getBoundingClientRect().width }));
+    });
+    expect(overflow).toEqual([]);
   });
 
   test("a Free account sees the Pro notice instead of the key summary @ui-risk", async ({

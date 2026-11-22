@@ -10,7 +10,8 @@ import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { LOCALIZED_SEO_PATHS, localizedPath } from "@/lib/seo";
 import { statusLinkLabel, statusNewTabCopy } from "./statusLinkCopy";
 import { LocaleSupportNotice } from "./LocaleSupportNotice";
-import { CHAT_PRODUCT_PATH, CLI_DOWNLOAD_PATH, DEVELOPERS_PATH, REVIEW_PRODUCT_PATH } from "@/lib/marketingRoutes";
+import { developerToolsCopy } from "@/locales/developerTools";
+import { CHAT_PRODUCT_PATH, CLI_DOWNLOAD_PATH, DEVELOPERS_PATH, REVIEW_PRODUCT_PATH, VSCODE_GUIDE_PATH } from "@/lib/marketingRoutes";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { useMarketingChatEntry } from "./MarketingChatAvailability";
 
@@ -663,7 +664,12 @@ const navEntries = (lang: Language): NavCopy => {
   return {
     ...c,
     chatItems: c.chatItems.map((item, i) => ({ ...item, href: `${CHAT_PRODUCT_PATH}${["", "#continue", "#create", "#plugins", "#mobile"][i]}` })),
-    developerItems: c.developerItems.map((item, i) => ({ ...item, href: [DEVELOPERS_PATH, `${DEVELOPERS_PATH}#connect`, CLI_DOWNLOAD_PATH][i] })),
+    developerItems: [
+      { ...c.developerItems[0], href: DEVELOPERS_PATH },
+      { ...c.developerItems[2], href: CLI_DOWNLOAD_PATH },
+      { title: "Tomverse for VS Code", body: developerToolsCopy[lang].editor, href: VSCODE_GUIDE_PATH },
+      { ...c.developerItems[1], href: `${DEVELOPERS_PATH}#connect` },
+    ],
   };
 };
 const launchNav: Record<Language, Omit<NavCopy, "chatItems" | "developerItems"> & { chatItems: Array<Omit<NavEntry, "href">>; developerItems: Array<Omit<NavEntry, "href">> }> = {
@@ -857,7 +863,12 @@ function LaunchMarketingHeader({
           </div>
         </div>
         {isMenuOpen && <nav id={menuId} ref={menuRef} aria-label={copy.navigation} className={`mx-auto grid ${maxWidth} gap-1 border-t border-white/10 px-[16px] py-4 lg:hidden`}>
-          {items.map((item) => <Link key={item.key} href={localizedHref(lang, item.href)} data-testid={`mobile-${item.key}-link`} onClick={() => setIsMenuOpen(false)} className={`rounded-lg px-3 py-3 font-semibold hover:bg-zinc-900 ${launchFocus}`}>{item.label}</Link>)}
+          {items.map((item) => <div key={item.key} className="grid">
+            <Link href={localizedHref(lang, item.href)} data-testid={`mobile-${item.key}-link`} onClick={() => setIsMenuOpen(false)} className={`rounded-lg px-3 py-3 font-semibold hover:bg-zinc-900 ${launchFocus}`}>{item.label}</Link>
+            {item.key === "developers" && <div className="grid gap-1 border-l border-zinc-700 pl-3 ml-3" aria-label={nav.developersMenu}>
+              {nav.developerItems.map((child) => <Link key={child.href} href={localizedHref(lang, child.href)} onClick={() => setIsMenuOpen(false)} className={`rounded-lg px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-900 ${launchFocus}`}>{child.title}</Link>)}
+            </div>}
+          </div>)}
           {status !== "authenticated" && <Link href={loginHref} onClick={() => setIsMenuOpen(false)} className={`rounded-lg px-3 py-3 font-semibold hover:bg-zinc-900 ${launchFocus}`}>{copy.login}</Link>}
           <Link href={primaryHref} data-testid="marketing-mobile-app-cta" data-session-state={status} onClick={() => { setIsMenuOpen(false); trackStart("marketing_mobile_menu"); }} className={`mt-3 inline-flex min-h-[44px] items-center justify-center gap-2 rounded-full bg-blue-600 px-5 py-3 text-sm font-bold hover:bg-blue-500 ${launchFocus}`}>
             {appLabel}<ArrowRight className="h-4 w-4 shrink-0" aria-hidden="true" />
@@ -884,7 +895,8 @@ function LaunchMarketingFooter({ maxWidth = "max-w-7xl" }: MarketingFooterProps)
     { title: nav.developers, items: [
       { label: "Tomverse API", href: DEVELOPERS_PATH },
       { label: nav.apiKeys, href: "/settings/api" },
-      { label: nav.developerItems[2].title, href: CLI_DOWNLOAD_PATH },
+      { label: nav.developerItems[1].title, href: CLI_DOWNLOAD_PATH },
+      { label: "Tomverse for VS Code", href: VSCODE_GUIDE_PATH },
     ] },
     { title: copy.help, items: [
       { label: copy.helpCentre, href: "/support/help-centre" }, { label: copy.faq, href: "/faq" },

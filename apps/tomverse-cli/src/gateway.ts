@@ -130,7 +130,8 @@ export class Gateway {
     constructor(
         readonly endpoint: Endpoint,
         private readonly key: string,
-        private readonly fetchImpl: typeof fetch = globalThis.fetch
+        private readonly fetchImpl: typeof fetch = globalThis.fetch,
+        private readonly client = `tomverse-cli/${CLI_VERSION}`
     ) {}
 
     /** The key's public prefix: lookups only find requests of this key. */
@@ -150,7 +151,7 @@ export class Gateway {
     private async send(url: URL, init: RequestInit & { timeoutMs?: number }) {
         const headers = new Headers(init.headers);
         headers.set("authorization", `Bearer ${this.key}`);
-        headers.set("user-agent", `tomverse-cli/${CLI_VERSION}`);
+        headers.set("user-agent", this.client);
         const signals = [init.signal, init.timeoutMs ? AbortSignal.timeout(init.timeoutMs) : undefined].filter(
             (s): s is AbortSignal => Boolean(s)
         );

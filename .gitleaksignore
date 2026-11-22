@@ -1937,3 +1937,8 @@ f3e50cee8ef2da7d8da21a4426eb599813419628:tests/nativeReviewHandoffTransport.test
 # exact findings in the two immutable commits that changed this assertion.
 9ce144dd9343177ee624af852495ed081ebf1732:tests/agentAutoRecRunner.test.mjs:aws-access-token:322
 a6d0bd61229a658169ab90bad312ff209144556c:tests/agentAutoRecRunner.test.mjs:aws-access-token:322
+
+# Synthetic `tv_fixture_` Tomverse key in the VS Code extension redaction test
+# (#4185), never a credential. The current test assembles it at runtime.
+# Suppress only the exact finding in the commit that added the literal.
+b6135529b17f4ef909c8b89a15b5924e38264f8b:apps/tomverse-vscode/tests/security.test.ts:generic-api-key:84
