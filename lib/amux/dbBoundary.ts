@@ -180,6 +180,13 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 10,
     isolation: "mutation",
   },
+  // The registered cards an idea's plan named by local id (planLocalRefRead.ts):
+  // setup + the one read + fence.
+  planLocalRefRead: {
+    operation: "plan_local_ref_read",
+    prismaCallCeiling: 3,
+    isolation: "read",
+  },
   deliveryKeyRead: {
     operation: "delivery_key_read",
     // setup + queued delivery + source metadata + read fence

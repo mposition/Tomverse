@@ -5,6 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
 import { openAmuxContent, verifyAmuxContentDigest } from "./ideaCrypto.ts";
 import { loadAmuxContentUnitKeys } from "./ideaKeyStore.ts";
+import { mentionsAmuxPlanCardRef, resolveAmuxPlanCardRefs } from "./planLocalRefCore.ts";
+import { readAmuxPlanCardRefs } from "./planLocalRefRead.ts";
 import { readAmuxV22TaskResultForOwner } from "./v22TaskResultStore.ts";
 import { readAmuxLegacyCardView } from "./legacyCardOwnerService.ts";
 import { readAmuxV4TaskCeilingReapprovalView } from "./v4TaskCeilingReapprovalService.ts";
@@ -725,6 +727,13 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
       read("card_brief", card.v4BriefCiphertext, card.v4BriefKeyId,
         card.v4BriefKeyVersion, card.v4BriefDigest, card.v4BriefDigestKeyId),
     ]);
+    // Another card the plan named by local id shows as its number
+    // (planLocalRefCore.ts); a number in JSON text needs no escaping.
+    if ([body, brief].some((text) => text !== null && mentionsAmuxPlanCardRef(text))) {
+      const refs = await readAmuxPlanCardRefs(ideaId);
+      body = body === null ? null : resolveAmuxPlanCardRefs(body, refs);
+      brief = brief === null ? null : resolveAmuxPlanCardRefs(brief, refs);
+    }
   }
   // A card the owner can only remake: its idea is built from the readable body
   // read above (a v4 Task's decrypted body), never sent by the browser.

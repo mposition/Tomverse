@@ -6,16 +6,7 @@ import test from "node:test";
 // stopped cards in one place, the Decision Maker first. Every switch is off
 // by default; each test names the switch it turns on.
 
-test("the term check skips evidence blocks only when exempt, and never an unclosed one", async () => {
-  const { dmTermCheckText, DM_EVIDENCE_OPEN, DM_EVIDENCE_CLOSE } = await import("../lib/amux/decisionMakerCore.ts");
-  const text = `Should it run again?\n${DM_EVIDENCE_OPEN}\ndelete the token row\n${DM_EVIDENCE_CLOSE}\nPick one.`;
-  assert.equal(dmTermCheckText(text, false), text);
-  assert.equal(dmTermCheckText(text, true), "Should it run again?\n\nPick one.");
-  const lone = `Ask\n${DM_EVIDENCE_OPEN}\ndeploy to production`;
-  assert.equal(dmTermCheckText(lone, true), lone, "a lone marker hides nothing");
-});
-
-test("routing: evidence words no longer send a system card to the operator, a fixed word still does", async () => {
+test("routing: a card the app filed is not read for the terms; a worker's card is, every word (owner decision 2026-11-22)", async () => {
   const core = await import("../lib/amux/decisionMakerCore.ts");
   const card = (question) => ({
     type: "decision", tags: [], title: "Owner queue: AMUX-X-001", question,
@@ -25,14 +16,21 @@ test("routing: evidence words no longer send a system card to the operator, a fi
     askType: "choice", resolution: "decision_only",
   });
   const evidence = `${core.DM_EVIDENCE_OPEN}\nIts findings: the migration deletes the token\n${core.DM_EVIDENCE_CLOSE}`;
-  const input = (question, exempt) => ({ killSwitch: false, instanceMode: "proposal", card: card(question),
-    askingProvider: "claude", throughput: { lastHour: 0, lastDay: 0 }, evidenceTermsExempt: exempt });
-  const strict = core.routeDmQuestion(input(`A Task stopped.\n${evidence}\nWhat now?`, false));
-  assert.ok(strict.route === "operator" && strict.refusals.includes("irreversible_term"));
-  const exempt = core.routeDmQuestion(input(`A Task stopped.\n${evidence}\nWhat now?`, true));
-  assert.ok(!exempt.refusals?.includes("irreversible_term"), JSON.stringify(exempt));
-  const asked = core.routeDmQuestion(input(`Should we refund the payment?\n${evidence}`, true));
-  assert.ok(asked.refusals.includes("irreversible_term"), "a word in the fixed question still routes");
+  const input = (question, appFiledCard) => ({ killSwitch: false, instanceMode: "proposal", card: card(question),
+    askingProvider: "claude", throughput: { lastHour: 0, lastDay: 0 }, appFiledCard });
+  // A worker's question: the evidence markers are plain text, and every word is read.
+  const worker = core.routeDmQuestion(input(`A Task stopped.\n${evidence}\nWhat now?`, undefined));
+  assert.ok(worker.route === "operator" && worker.refusals.includes("irreversible_term"));
+  // AMUX-CRAWL-003's scope said "deviation 정책 변경"; on a card the app filed, that
+  // and any other word reach the Decision Maker.
+  for (const question of [`A Task stopped.\n${evidence}\nWhat now?`, "Scope out: deviation 정책 변경. What now?",
+    `Should we refund the payment?\n${evidence}`]) {
+    const filed = core.routeDmQuestion(input(question, true));
+    assert.ok(!filed.refusals?.includes("irreversible_term"), JSON.stringify(filed));
+  }
+  // The secret check still reads the whole card the app filed.
+  const secret = core.routeDmQuestion(input("api key sk-ant-api03-" + "A".repeat(90), true));
+  assert.ok(secret.refusals.includes("card_secret_detected"), JSON.stringify(secret));
 });
 
 test("v52: every rejection returns to todo; only a repeated finding blocks", async () => {
@@ -67,7 +65,7 @@ test("DM merge keeps its allow list: lib code and API routes stay a person's", a
   assert.equal(qaReleaseDmMergeAllowed("components/ChatInput.tsx", []), true);
 });
 
-test("only a card the app filed earns the evidence exemption; a worker's markers are plain text", async () => {
+test("only a card the app filed skips the terms, proven by the row that recorded it; no switch holds it", async () => {
   const core = await import("../lib/amux/decisionMakerCore.ts");
   const card = { type: "decision", tags: [], title: "t",
     question: `${core.DM_EVIDENCE_OPEN}deploy to production${core.DM_EVIDENCE_CLOSE}`,
@@ -78,10 +76,13 @@ test("only a card the app filed earns the evidence exemption; a worker's markers
     askingProvider: "claude", throughput: { lastHour: 0, lastDay: 0 } });
   assert.ok(decision.refusals.includes("irreversible_term"), "absent proof: every word is read");
   const store = readFileSync("lib/amux/decisionMakerRequestStore.ts", "utf8");
-  assert.match(store, /dmTermsFixedTextOnlyEnabled\(process\.env\[DM_TERMS_FIXED_TEXT_ONLY_ENV\]\) &&/);
-  assert.ok(store.includes('EXISTS (SELECT 1 FROM "AmuxDmOwnerSettlement" s'),
-    "the exemption needs the settlement row that recorded this local card");
-  assert.ok(store.includes("found.appFiledCard === true"));
+  assert.doesNotMatch(store, /TERMS_FIXED_TEXT_ONLY/, "the 2026-11-14 switch is gone: no switch holds it back");
+  for (const table of ["AmuxDmOwnerSettlement", "EngineeringAgentDmReview", "AmuxV22ResultReview",
+    "AmuxIdeaSessionPlanRefusal", "AmuxIdeaCardCloseQuestion"])
+    assert.ok(store.includes(`EXISTS (SELECT 1 FROM "${table}"`), `the proof reads ${table}`);
+  assert.doesNotMatch(store.slice(store.indexOf("AS \"appFiledCard\"") - 900, store.indexOf("AS \"appFiledCard\"")),
+    /AmuxV22TaskQuestion/, "a worker's own question is never app-filed");
+  assert.ok(store.includes("appFiledCard: found.appFiledCard === true"));
 });
 
 test("a held card is left out of the publisher's queue and refused before its run's AMUX write", () => {
