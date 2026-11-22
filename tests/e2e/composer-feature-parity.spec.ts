@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { buildChatStreamTrailerChunk } from "../../lib/webSearchStreamTrailer";
 import { mockAttachmentUpload, mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
-import { installChatModelStub, mockUserUsage, restoreActiveConversation, suppressTransientUi } from "./support/chat-state-fixtures";
+import { expectThemeApplied, installChatModelStub, mockUserUsage, restoreActiveConversation, setAuthenticatedTheme, setDeterministicTheme, suppressTransientUi } from "./support/chat-state-fixtures";
 import { expectTappableInVisibleViewport, openOnScreenKeyboard } from "./support/ui-audit";
 
 test.describe("Shared Chat and Review composer", () => {
@@ -372,17 +372,19 @@ test.describe("Composer analytics footer", () => {
 });
 
 
-test("Chat Smart Adaptive keeps the chosen effort in the existing model control and sends it once", async ({ page }, info) => {
+test("Chat Smart Adaptive keeps the chosen effort after a model defaults and across follow-up requests", async ({ page }, info) => {
   test.skip(info.project.name !== "desktop-chromium", "Explicit mobile viewport.");
-  await page.setViewportSize({ width: 390, height: 900 });
+  await page.setViewportSize({ width: 320, height: 900 });
+  await setDeterministicTheme(page, "dark");
   await prepareGuestPage(page, "en", "studio", "studio");
-  await mockAuthenticatedApi(page, {
+  const account = await mockAuthenticatedApi(page, {
     productKey: "chat",
     selectedModels: ["gpt-6-luna"],
     language: "en",
     selectionMode: "auto",
     autoSelectionOffered: true,
   });
+  await setAuthenticatedTheme(account, "dark");
   await mockUserUsage(page, { plan: "Max", limits: { maxModels: 3, creditsMonth: 10_000 } });
   await suppressTransientUi(page);
   await restoreActiveConversation(page);
@@ -396,21 +398,44 @@ test("Chat Smart Adaptive keeps the chosen effort in the existing model control 
   await page.getByTestId("chat-textarea").fill("Compare the two designs.");
   await page.getByTestId("composer-model-select").click();
   const picker = page.getByTestId("model-picker-reasoning-effort");
-  await picker.getByRole("radio", { name: "High", exact: true }).check();
+  await expectThemeApplied(page, "dark");
+  await expect(picker.getByRole("radio", { name: "Quick", exact: true })).toHaveAccessibleDescription("Less reasoning for quicker replies");
+  await expect(picker.getByRole("radio", { name: "Balanced", exact: true })).toBeChecked();
+  const deep = picker.getByRole("radio", { name: "Deep", exact: true });
+  await expect(deep).toHaveAccessibleDescription("More time for a thorough answer");
+  await deep.check();
+  const darkCheck = picker.locator('img[src="/reasoning-effort/selected-dark.svg"]');
+  await expect(darkCheck).toBeVisible();
+  await expect(darkCheck).toHaveJSProperty("naturalWidth", 15);
+  await picker.screenshot({ path: info.outputPath("reasoning-effort-chat-dark.png") });
   await page.getByTestId("model-picker-done").click();
-  await expect(page.getByTestId("composer-model-select")).toContainText("High");
+  await expect(page.getByTestId("composer-model-select")).toContainText("Smart Adaptive · Deep");
   await expect(page.getByTestId("chat-textarea")).toHaveValue("Compare the two designs.");
   await page.getByTestId("chat-send-button").click();
   await expect(page.getByText("Effort answer.", { exact: true })).toBeVisible();
   await expect(page.getByTestId("answer-reasoning-effort")).toHaveText("Reasoning effort · Default");
-  await expect.poll(() => page.evaluate(() => (window as unknown as {
+  const requestedEffort = () => page.evaluate(() => (window as unknown as {
     __chatModelStubRequests: Array<{ reasoningEffort?: string }>;
-  }).__chatModelStubRequests.map(body => body.reasoningEffort))).toEqual(["high"]);
-  await expect(page.getByTestId("composer-model-select")).not.toContainText("High");
+  }).__chatModelStubRequests.map(body => body.reasoningEffort));
+  await expect.poll(requestedEffort).toEqual(["high"]);
+  await expect(page.getByTestId("composer-model-select")).toContainText("Smart Adaptive · Deep");
+  await page.getByTestId("chat-textarea").fill("Compare their maintenance costs too.");
+  await page.getByTestId("chat-send-button").click();
+  await expect.poll(requestedEffort).toEqual(["high", "high"]);
+
+  await page.goto("/chat?lang=en");
+  await expect(page.getByTestId("composer-model-select")).toContainText("Smart Adaptive · Deep");
+  await page.getByTestId("composer-model-select").click();
+  await expect(deep).toBeChecked();
+  await deep.focus();
+  await deep.press("ArrowLeft");
+  await expect(picker.getByRole("radio", { name: "Balanced", exact: true })).toBeChecked();
+  await page.getByTestId("model-picker-done").click();
+  await expect(page.getByTestId("composer-model-select")).not.toContainText("Deep");
 });
 
 
-test("Review offers Default when its selected models have no common explicit effort", async ({ page }, info) => {
+test("Review disables effort choices that its selected models do not share", async ({ page }, info) => {
   test.skip(info.project.name !== "desktop-chromium", "Explicit desktop viewport.");
   await page.setViewportSize({ width: 1440, height: 900 });
   await prepareGuestPage(page, "en", "studio", "studio");
@@ -430,7 +455,49 @@ test("Review offers Default when its selected models have no common explicit eff
   await page.goto("/review?lang=en");
   await page.getByTestId("composer-model-select").click();
   const picker = page.getByTestId("model-picker-reasoning-effort");
-  await expect(picker.getByRole("radio", { name: "Default", exact: true })).toBeChecked();
-  await expect(picker.getByRole("radio", { name: "High", exact: true })).toBeDisabled();
-  await expect(picker.getByRole("radio", { name: "Low", exact: true })).toBeDisabled();
+  await expect(picker.getByRole("radio", { name: "Balanced", exact: true })).toBeChecked();
+  await expect(picker.getByRole("radio", { name: "Deep", exact: true })).toBeDisabled();
+  await expect(picker.getByRole("radio", { name: "Quick", exact: true })).toBeDisabled();
+});
+
+test("Review shows the approved Korean effort cards after the selected models", async ({ page }, info) => {
+  test.skip(info.project.name !== "desktop-chromium", "Explicit desktop viewport.");
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await setDeterministicTheme(page, "light");
+  await prepareGuestPage(page, "ko", "studio", "studio");
+  const account = await mockAuthenticatedApi(page, {
+    productKey: "review",
+    selectedModels: ["gpt-6-luna", "claude-haiku-5-5"],
+    language: "ko",
+  });
+  await setAuthenticatedTheme(account, "light");
+  await mockUserUsage(page, { plan: "Max", limits: { maxModels: 3, creditsMonth: 10_000 } });
+  await suppressTransientUi(page);
+  await restoreActiveConversation(page);
+  const common = { enabled: true, status: "enabled", minimumPlan: "Guest", usageClass: "standard", reasoningEfforts: ["low", "high"] };
+  await page.route("**/api/models/catalog", route => route.fulfill({ json: { models: [
+    { ...common, id: "gpt-6-luna", name: "GPT 6 Luna", provider: "openai" },
+    { ...common, id: "claude-haiku-5-5", name: "Claude Haiku 5.5", provider: "anthropic" },
+  ] } }));
+  await page.goto("/review?lang=ko");
+  await page.getByTestId("composer-model-select").click();
+  await expectThemeApplied(page, "light");
+  const picker = page.getByTestId("model-picker-reasoning-effort");
+  await expect(picker.getByText("고른 수준은 다음 질문에도 적용돼요.")).toBeVisible();
+  await expect(picker.getByRole("radio", { name: "빠르게", exact: true })).toHaveAccessibleDescription("가볍게 생각해 빠른 답변");
+  await expect(picker.getByRole("radio", { name: "균형 있게", exact: true })).toHaveAccessibleDescription("모델 기본 속도와 깊이");
+  const deep = picker.getByRole("radio", { name: "깊이 있게", exact: true });
+  await expect(deep).toHaveAccessibleDescription("시간을 들여 꼼꼼한 답변");
+  await expect(page.getByText("선택한 모델 모두에 같은 수준을 요청합니다.")).toBeVisible();
+  const selectedModels = await page.getByTestId("model-picker-selected-list").boundingBox();
+  const effortCards = await picker.boundingBox();
+  expect(effortCards!.y).toBeGreaterThan(selectedModels!.y + selectedModels!.height);
+  await deep.check();
+  const lightCheck = picker.locator('img[src="/reasoning-effort/selected-light.svg"]');
+  await expect(lightCheck).toBeVisible();
+  await expect(lightCheck).toHaveJSProperty("naturalWidth", 15);
+  await picker.screenshot({ path: info.outputPath("reasoning-effort-review-light.png") });
+  await page.reload();
+  await page.getByTestId("composer-model-select").click();
+  await expect(deep).toBeChecked();
 });
