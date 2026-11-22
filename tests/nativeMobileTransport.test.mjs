@@ -466,3 +466,39 @@ test("native cancellation ignores late stream receipts after the known response 
     assert.equal(received.length, 1);
     assert.equal(received[0].status, "unknown");
 });
+
+// Review→Chat ends at an editable draft. Only the user's Send uses the existing
+// create/persistQuestion/stream path, and the edited reference travels exactly once.
+import { formatReviewChat } from "../lib/reviewToChat.ts";
+import { nativeReviewChatCopy } from "../locales/nativeReviewChat.ts";
+import { appendNativeReviewChatDraft } from "../apps/mobile/src/nativeReviewChat.ts";
+import { makeReviewReportFixture } from "./fixtures/reviewAnalysisReport.ts";
+
+for (const [label, prepare] of [
+  ["whole secondary reviewer", source => ({ source: { ...source, reviewer: "secondary" } })],
+  ["one primary item", source => ({ source, selection: { section: "differences", ordinal: 0, itemId: "server-item" } })],
+  ["one Quick Summary item", source => ({ source: { kind: "quick", conversationId: source.conversationId, setup: source.setup, review: { id: "quick-1", reviewerModelId: "quick-judge", responseMap: source.review.responseMap,
+    result: { commonConclusions: [{ text: "Quick common point", citations: [{ responseId: "A", quote: "Do not deploy before approval.", verified: true }], verified: true }], importantDifferences: [{ text: "Quick other point", citations: [], verified: false }], modelKeyClaims: [], verificationNeeded: ["Quick unverified date"] } } },
+    selection: { section: "commonConclusions", ordinal: 0 } })],
+]) test(`native Send carries the edited Review reference once: ${label}`, async () => {
+  const { source, selection } = prepare(makeReviewReportFixture());
+  const reference = formatReviewChat(source, selection, "체크리스트로 만들어줘", nativeReviewChatCopy("ko")).text;
+  const draft = appendNativeReviewChatDraft("Keep my original draft", reference).replace("체크리스트로 만들어줘", "체크리스트로 만들어줘 (edited)");
+  const f = fixture();
+  await f.transport.send(f.conversation, draft, [], new AbortController().signal, () => {});
+  const saved = f.calls.filter(call => call.path.endsWith("/messages"));
+  const chat = f.calls.filter(call => call.path === "/api/chat");
+  assert.equal(saved.length, 1); assert.equal(chat.length, 1);
+  assert.equal(JSON.parse(saved[0].body).messages[0].content, draft);
+  const body = JSON.parse(chat[0].body);
+  assert.equal(body.messages.filter(message => message.role === "user").at(-1).content, draft);
+  assert.equal(chat[0].body.split("비교 참고 자료").length - 1, 1, "reference appears once");
+  assert.ok(body.messages.every(message => message.role === "user" || !String(message.content).includes("비교 참고 자료")), "never promoted to instructions");
+  assert.doesNotMatch(chat[0].body, /PRIVATE_FULL_ANSWER/);
+  if (source.reviewer === "secondary") assert.match(chat[0].body, /두 번째 검토자의 별도 견해/);
+  else assert.doesNotMatch(chat[0].body, /두 번째 검토자의 별도 견해/);
+  if (selection?.section === "differences") assert.doesNotMatch(chat[0].body, /승인 전에는 배포하지 않습니다/);
+  if (source.kind === "quick") { assert.match(chat[0].body, /Quick common point/); assert.doesNotMatch(chat[0].body, /Quick other point/); assert.match(chat[0].body, /Quick unverified date/); }
+  assert.match(chat[0].body, /Keep my original draft/);
+  assert.ok(f.calls.every(call => !/comparison-reviews|compare-summary/.test(call.path)), "Send never re-runs analysis");
+});

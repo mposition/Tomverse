@@ -1,17 +1,34 @@
 import { useCallback, useState } from "react";
-import { readDeviceDraft, writeDeviceDraft, clearDeviceDrafts } from "@tomverse/chat-core/device-draft";
+import { deviceDraftKey, readDeviceDraft, writeDeviceDraft, clearDeviceDrafts } from "@tomverse/chat-core/device-draft";
 
-export const clearNativeDrafts = () => { try { clearDeviceDrafts(localStorage); } catch { /* Storage may be disabled. */ } };
-export const preserveNativeDraft = (owner: string | null, conversation: string, text: string) => { if (owner) { try { writeDeviceDraft(localStorage, owner, conversation, text); } catch { /* Optional persistence. */ } } };
+// The in-memory copy is the source of truth for this app session; device storage
+// is optional persistence (24 h) and may throw, be full or lag behind.
+const memory = new Map<string, string>();
+const remember = (owner: string, conversation: string | null, text: string) => {
+  const key = deviceDraftKey(owner, conversation);
+  if (text) memory.set(key, text); else memory.delete(key);
+};
+export const clearNativeDrafts = () => { memory.clear(); try { clearDeviceDrafts(localStorage); } catch { /* Storage may be disabled. */ } };
+export const preserveNativeDraft = (owner: string | null, conversation: string | null, text: string) => {
+  if (!owner) return;
+  remember(owner, conversation, text);
+  try { writeDeviceDraft(localStorage, owner, conversation, text); } catch { /* Optional persistence. */ }
+};
+/** Memory first, then device storage; never throws. */
+export function readNativeDraftText(owner: string | null, conversation: string | null) {
+  if (!owner) return "";
+  const held = memory.get(deviceDraftKey(owner, conversation));
+  if (held !== undefined) return held;
+  try { return readDeviceDraft(localStorage, owner, conversation); } catch { return ""; }
+}
 export function useDeviceDraft(owner: string | null, conversation: string | null) {
-  const read = () => { try { return owner ? readDeviceDraft(localStorage, owner, conversation) : ""; } catch { return ""; } };
-  const [snapshot, setSnapshot] = useState(() => ({ owner, conversation, text: read() }));
+  const [snapshot, setSnapshot] = useState(() => ({ owner, conversation, text: readNativeDraftText(owner, conversation) }));
   if (snapshot.owner !== owner || snapshot.conversation !== conversation) {
-    setSnapshot({ owner, conversation, text: read() });
+    setSnapshot({ owner, conversation, text: readNativeDraftText(owner, conversation) });
   }
   const update = useCallback((text: string, targetConversation: string | null = conversation) => {
     setSnapshot({ owner, conversation: targetConversation, text });
-    if (owner) { try { writeDeviceDraft(localStorage, owner, targetConversation, text); } catch { /* Input remains in memory. */ } }
+    preserveNativeDraft(owner, targetConversation, text);
   }, [owner, conversation]);
   return [snapshot.text, update] as const;
 }
