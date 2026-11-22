@@ -9,8 +9,8 @@
  * An implementation agent may add `candidate` entries; moving one to
  * `approved` is a human act and never automatic — either the §12.4 procedure
  * (decision-grade eval, blind review, independent re-run, approver sign-off)
- * or the §12.4a owner launch, which is short-lived and keeps the critical
- * checks.
+ * or the §12.4a owner launch, which holds until revoked and keeps the
+ * critical checks.
  *
  * Runtime effectiveness is narrower than register approval on purpose
  * (§12.1): effective = approved here ∧ extraction flag on ∧ verified
