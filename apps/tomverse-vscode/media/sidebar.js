@@ -136,7 +136,7 @@
     prompt.addEventListener("compositionstart", () => (composing = true));
     prompt.addEventListener("compositionend", () => (composing = false));
     const submit = () => {
-        if (!state || state.busy || composing || !prompt.value.trim()) return;
+        if (!state || send.disabled || !models.value || composing || !prompt.value.trim()) return;
         post({ type: "send", epoch: state.epoch, prompt: prompt.value, mode: mode.value, model: models.value });
         prompt.value = "";
         api.setState({ draft: "" });
