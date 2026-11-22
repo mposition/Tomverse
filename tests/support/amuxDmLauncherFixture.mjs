@@ -52,6 +52,8 @@ export const makeLauncherFixture = (
   };
 
   write(spec.executablePath, executable, executableMode);
+  // The test host's executable override stands for every companion too, so they carry the same bytes.
+  for (const companion of spec.companions) write(companion.path, executable, executableMode);
   write(DM_OUTPUT_SCHEMA_PATH, DM_OUTPUT_SCHEMA_JSON);
   directory(spec.home, 0o700);
   for (const keep of spec.stateKeep) write(`${spec.home}/${keep.slice(2)}`, '{"synthetic":"auth"}');

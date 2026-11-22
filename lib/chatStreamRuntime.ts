@@ -107,6 +107,7 @@ export type ChatRuntimeSnapshot = {
 };
 
 export type ChatRuntimeLastPrompt = {
+  reasoningEffort?: import("@/lib/reasoningEffort").ExplicitReasoningEffort;
   text: string;
   targetChatId: string;
   attachments: ChatAttachment[];

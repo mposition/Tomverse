@@ -727,6 +727,7 @@ function ChatShellSkeleton({ label }: { label: string }) {
  * and persistence for itself.
  */
 type GlobalSubmitOptions = {
+  reasoningEffort?: import("@/lib/reasoningEffort").ExplicitReasoningEffort;
   researchDurable?: boolean;
   researchMode?: "preview";
   submittedAtMonotonicMs?: number;
@@ -1881,6 +1882,7 @@ export function ChatPageClient({
      */
     modelIds: string[];
     attachments: ChatAttachment[];
+    reasoningEffort?: GlobalSubmitOptions["reasoningEffort"];
     researchDurable?: boolean;
     researchMode?: "preview";
     deepResearchDepth?: "quick" | "standard" | "deep";
@@ -5946,6 +5948,7 @@ export function ChatPageClient({
       return;
     }
     const submittedAtMonotonicMs = options?.submittedAtMonotonicMs ?? performance.now();
+    const ordinaryComposerSend = options === undefined || (options.reasoningEffort !== undefined && Object.keys(options).length === 1);
     if (promptRefinerMode === "e2e_fixture") {
       // This mode only exercises a no-cost pre-send proposal. It cannot
       // authorize any Chat dispatch, including after conversation switches,
@@ -5955,7 +5958,7 @@ export function ChatPageClient({
     }
     if (mountedSurface === "workspace" && inConversationImagesAllowed &&
       reviewWorkspace.mode === "professional" &&
-      options === undefined && reviewWorkspace.imagePromptMode && reviewImageModelId) {
+      ordinaryComposerSend && reviewWorkspace.imagePromptMode && reviewImageModelId) {
       const model = imageCatalog.getModel(reviewImageModelId);
       if (!model || model.disabledReason || isGuestMode || !imageGenerationEnabled ||
         !planAllowsImageGeneration(accountUsage?.plan ?? "Free")) return;
@@ -5975,7 +5978,7 @@ export function ChatPageClient({
     }
     const professionalImageRouting = mountedSurface === "workspace" &&
       inConversationImagesAllowed &&
-      options === undefined &&
+      ordinaryComposerSend &&
       reviewWorkspace.mode === "professional" && chatImageIntentEnabled && imageGenerationEnabled &&
       !isGuestMode && attachments.length === 0 && planAllowsImageGeneration(accountUsage?.plan ?? "Free");
     if (mountedSurface === "workspace" && (reviewWorkspace.mode === "easy" || professionalImageRouting) &&
@@ -6028,14 +6031,14 @@ export function ChatPageClient({
         reviewWorkspaceRef.current.imagePromptMode !== routeRequestedKind ||
         (liveProviders.length > 0 && !sameStringList(providers, liveProviders))) return;
       if (!decision) {
-        if (professionalImageRouting) return handleGlobalSubmitRef.current({ submittedAtMonotonicMs, reviewRouteChecked: true, imageIntentChecked: true }, submitJourney);
+        if (professionalImageRouting) return handleGlobalSubmitRef.current({ ...options, submittedAtMonotonicMs, reviewRouteChecked: true, imageIntentChecked: true }, submitJourney);
         reviewWorkspace.setError(reviewWorkspaceCopy[lang].failed); return;
       }
       if (decision.kind === "blocked") {
         reviewWorkspace.setError(t(imageGenerationEnabled ? "chat.imageGenerationPlanGateBody" : "chat.imageGenerationDisabledNotice")); return;
       }
       if (professionalImageRouting && decision.kind === "text") {
-        return handleGlobalSubmitRef.current({ submittedAtMonotonicMs, reviewRouteChecked: true, imageIntentChecked: true }, submitJourney);
+        return handleGlobalSubmitRef.current({ ...options, submittedAtMonotonicMs, reviewRouteChecked: true, imageIntentChecked: true }, submitJourney);
       }
       const chosen = decision.choices.flatMap(choice => choice.modelId ? [choice.modelId] : []);
       if (decision.kind === "image") {
@@ -6099,7 +6102,7 @@ export function ChatPageClient({
       falls through to the ordinary text send.
     */
     if (
-      options === undefined &&
+      ordinaryComposerSend &&
       imageIntentRoutedOnSend &&
       // An Auto turn is asked on the server, beside its router call
       // (app/api/chat/route.ts), so it does not wait for this call first.
@@ -6134,6 +6137,7 @@ export function ChatPageClient({
       // decision 2026-10-20: Chat needs no image workspace and asks no
       // confirmation).
       return handleGlobalSubmitRef.current({
+        ...options,
         imageIntentChecked: true,
         submittedAtMonotonicMs,
         imageTurnDecision,
@@ -6227,7 +6231,7 @@ export function ChatPageClient({
           }
           const freshLocation = chatFreshLocationPreparationEnabled && chatLocationIntentEnabled &&
             status === "authenticated" && sessionUserId && identityKey === `account:${sessionUserId}` &&
-            options === undefined && selectionModeRef.current === "auto" &&
+            ordinaryComposerSend && selectionModeRef.current === "auto" &&
             preparedDraftSend.draft.text && preparedDraftSend.draft.attachments.length === 0 &&
             capturedModels.length === 1 && !capturedDisabled.includes(capturedModels[0]) &&
             !(newChatAutoUnknownRef.current?.identityKey === identityKey && newChatAutoUnknownRef.current.selectionTicket === expectedSelectionTicket) &&
@@ -7638,6 +7642,8 @@ export function ChatPageClient({
           ? { webSearchMode: options.webSearchOverride }
           : {}),
         ...(options?.researchMode ? { researchMode: options.researchMode, researchDurable: options.researchDurable === true } : {}),
+        ...(options?.reasoningEffort && !imageTurnSend && !options.researchMode && !options.deepResearchDepth
+          ? { reasoningEffort: options.reasoningEffort } : {}),
         ...(options?.deepResearchDepth
           ? { deepResearchDepth: options.deepResearchDepth }
           : {}),
@@ -9022,7 +9028,7 @@ export function ChatPageClient({
     is the same question and is dropped here. The recursive re-entries inside
     `handleGlobalSubmit` go through its ref and never come back here.
   */
-  const handleComposerSubmit = async () => {
+  const handleComposerSubmit = async (reasoningEffort?: GlobalSubmitOptions["reasoningEffort"]) => {
     if (reviewHandoffAccess.pending || reviewHandoffAccess.failed ||
         (isReviewHandoff && (!draftHydrated || draftConflict || draftSyncFailed))) {
       showToast(reviewContinuationHandoffCopy.draftFailed, "info");
@@ -9050,7 +9056,7 @@ export function ChatPageClient({
       setSendEcho(mine);
     }
     try {
-      await handleGlobalSubmit(researchPreview.selected ? { researchMode: "preview", researchDurable: researchPreview.features?.durableRuns === true, imageIntentChecked: true } : undefined);
+      await handleGlobalSubmit(researchPreview.selected ? { researchMode: "preview", researchDurable: researchPreview.features?.durableRuns === true, imageIntentChecked: true } : reasoningEffort ? { reasoningEffort } : undefined);
     } finally {
       if (mine && sendEchoRef.current === mine) {
         sendEchoRef.current = null;

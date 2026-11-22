@@ -746,9 +746,21 @@ export const dmPreflightRefusals = (
   if (dmExecutionDigest(plan.instance) !== DM_RECORDED_EXECUTION_DIGESTS[plan.instance]) {
     refusals.push("execution_digest_mismatch");
   }
-  const executable = dmFileSha256(dmHostPath(host, plan.executable));
-  if (executable === null) refusals.push("executable_unreadable");
-  else if (executable !== expectedExecutable) refusals.push("executable_sha256_mismatch");
+  // The executable and every companion it runs from beside it (§5a). On the
+  // test host the one override stands for all of them.
+  const fixedFiles = [
+    { path: plan.executable, sha256: expectedExecutable },
+    ...DM_LAUNCHER_SPECS[plan.instance].companions.map((file) => ({
+      path: file.path,
+      sha256: options.expectedExecutableSha256 === undefined ? file.sha256 : expectedExecutable,
+    })),
+  ];
+  for (const file of fixedFiles) {
+    const actual = dmFileSha256(dmHostPath(host, file.path));
+    const refusal: DmLaunchRefusal | null =
+      actual === null ? "executable_unreadable" : actual !== file.sha256 ? "executable_sha256_mismatch" : null;
+    if (refusal !== null && !refusals.includes(refusal)) refusals.push(refusal);
+  }
   const schema = dmFileSha256(dmHostPath(host, DM_OUTPUT_SCHEMA_PATH));
   if (schema === null) refusals.push("schema_unreadable");
   else if (schema !== DM_OUTPUT_SCHEMA_SHA256) refusals.push("schema_sha256_mismatch");

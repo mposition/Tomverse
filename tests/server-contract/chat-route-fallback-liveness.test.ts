@@ -1781,6 +1781,7 @@ const ask = async (
     | "during_record_dispatched"
     | "during_primary_reader_cancel" = "none",
   requestedModelId = REQUESTED_MODEL_ID,
+  reasoningEffort?: "low" | "high",
 ) => {
   activeSession = {
     user: { id: USER_ID, email: "fallback-qa@tomverse.app" },
@@ -1846,6 +1847,7 @@ const ask = async (
         conversationId: CONVERSATION_ID,
         assistantMessageId: ASSISTANT_MESSAGE_ID,
         webSearchMode,
+        ...(reasoningEffort ? { reasoningEffort } : {}),
         ...fusionPayload,
         ...(turnLocation ? { currentLocation: turnLocation } : {}),
         ...(includeSourceUserMessageId
@@ -1956,6 +1958,21 @@ test("a routed turn whose primary dies pre-token is finished by a second model",
   const primaryAbort = attemptLifecycle.indexOf("0:provider_abort");
   assert.ok(primaryAbort >= 0);
   assert.equal(attemptLifecycle[primaryAbort + 1], "0:reader_cancel");
+});
+
+test("reasoning effort preserves Auto model selection and the answering model reports Default", async t => {
+  const original = process.env.TOMVERSE_REASONING_EFFORT_ENABLED;
+  process.env.TOMVERSE_REASONING_EFFORT_ENABLED = "true";
+  t.after(() => {
+    if (original === undefined) delete process.env.TOMVERSE_REASONING_EFFORT_ENABLED;
+    else process.env.TOMVERSE_REASONING_EFFORT_ENABLED = original;
+  });
+  const { body } = await ask(
+    "answers", "claimed", 200, false, undefined, true, true, undefined, "off", "none", REQUESTED_MODEL_ID, "high"
+  );
+  assert.deepEqual(attempts.map(attempt => attempt.modelId), ["command-a-plus", "deepseek-v4-flash"]);
+  const trailer = parseChatStreamTrailer(splitSearchMetadataTrailer(body).searchMetadataJson);
+  assert.equal(trailer?.appliedReasoningEffort, "default");
 });
 
 test("both attempts log a stream error by its metadata, never the model's content", async () => {

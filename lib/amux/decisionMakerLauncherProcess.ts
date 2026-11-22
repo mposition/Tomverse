@@ -5,12 +5,14 @@ import {
   DM_LAUNCH_STDOUT_MAX_BYTES,
   dmClassifyProcess,
   dmExecutionPlan,
+  dmToolSummary,
   isDmLauncherInstance,
   type DmCleanupOutcome,
   type DmCommand,
   type DmExecutionPlan,
   type DmLaunchResult,
   type DmProcessObservation,
+  type DmToolSummary,
 } from "./decisionMakerLauncherCore.ts";
 import {
   DM_SYSTEM_HOST,
@@ -77,7 +79,8 @@ export type DmLaunchInput = {
   payload: Uint8Array;
 };
 
-export type DmLaunchReport = { result: DmLaunchResult; cleanup: DmCleanupOutcome };
+/** `tools`: what the CLI's tools did (counts only); absent when no process ran or the CLI reports none. */
+export type DmLaunchReport = { result: DmLaunchResult; cleanup: DmCleanupOutcome; tools?: DmToolSummary };
 
 export type DmLaunchOptions = {
   host?: DmLauncherHost;
@@ -251,6 +254,7 @@ export async function launchDecisionMaker(
   const { plan } = planned;
   const command: DmCommand = { executable: plan.executable, argv: plan.argv, environment: plan.environment };
   let result: DmLaunchResult;
+  let tools: DmToolSummary | null = null;
   try {
     const refusals = dmPreflightRefusals(
       host,
@@ -260,9 +264,14 @@ export async function launchDecisionMaker(
     if (refusals.length > 0) result = { outcome: "refused", refusals };
     else if (payload === null) result = { outcome: "refused", refusals: ["transmit_intent_mismatch"] };
     else if (!dmCreateTemporaryDirectory(host, plan)) result = { outcome: "refused", refusals: ["request_directories_unusable"] };
-    else result = dmClassifyProcess(plan.cli, await runProcess(host, plan, command, payload, timeoutMs));
+    else {
+      const observation = await runProcess(host, plan, command, payload, timeoutMs);
+      result = dmClassifyProcess(plan.cli, observation);
+      tools = dmToolSummary(plan.cli, observation.stdout);
+    }
   } catch {
     result = { outcome: "unavailable", reason: "launcher_fault" };
   }
-  return { result, cleanup: dmCleanupVendor(host, instance, plan.requestId) };
+  const cleanup = dmCleanupVendor(host, instance, plan.requestId);
+  return tools === null ? { result, cleanup } : { result, cleanup, tools };
 }

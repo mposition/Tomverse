@@ -1,6 +1,12 @@
 .settings-sheet { padding: 12px 20px 20px; height: calc(100dvh - 70px); max-height: calc(100dvh - 70px); }
 .settings-sheet .sheet-header { margin-bottom: 12px; }
 .settings-sheet .sheet-header h2 { font-size: 24px; font-weight: 700; }
+.native-settings-index { display: grid; padding: 4px 2px 24px; }
+.native-settings-index > button { display: flex; align-items: center; gap: 14px; text-align: left; min-height: 56px; padding: 16px 0; border-radius: 0; border-bottom: 1px solid var(--mobile-border); }
+.native-settings-index > button > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.native-settings-index small { display: block; font-size: 12px; line-height: 1.6; margin-top: 6px; color: var(--mobile-muted); }
+.native-settings-index > button:first-child, .native-settings-index > .native-developer-entry { border: 1px solid var(--mobile-border); border-radius: 13px; background: var(--mobile-surface); padding: 20px 16px; margin-block: 8px 16px; }
+.native-settings-index > .native-developer-entry { margin-block: 18px 0; }
 .settings-sheet .settings-workspace-return { margin: 0 0 12px; border: 1px solid transparent; border-radius: 12px; min-height: 44px; }
 .settings-sheet .sheet-navigation::before { content: ""; position: absolute; top: -12px; inset-inline: 0; height: 12px; background: var(--mobile-background); }
 .settings-sheet .settings-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding: 0; margin: 0 0 24px; border: 0; }

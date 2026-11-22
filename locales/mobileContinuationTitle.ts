@@ -4,6 +4,7 @@ import type { MobileLanguage } from "./mobile";
 export const mobileContinuationTitle: Record<MobileLanguage, string> = {
   en: "Continued from {provider} · {date}",
   ko: "{provider}에서 이어온 대화 · {date}",
+  "zh-Hant": "從 {provider} 繼續的對話 · {date}",
   zh: "从 {provider} 继续的对话 · {date}",
   de: "Fortgesetzt aus {provider} · {date}",
   fr: "Suite de {provider} · {date}",

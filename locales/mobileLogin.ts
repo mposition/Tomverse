@@ -75,7 +75,8 @@ export const mobileLoginCopy: Record<MobileLanguage, typeof en> = {
   "refused": "현재 이 계정으로 로그인할 수 없습니다. Tomverse 웹사이트에서 계정 상태를 확인해 주세요."
 },
  // English fallback until the initial email flow's other translations are ready.
- zh: en, de: en, fr: en, es: en, pt: en,
+ "zh-Hant": en,
+  zh: en, de: en, fr: en, es: en, pt: en,
 };
 export function mobileLoginError(error: unknown, language: MobileLanguage, phase: "request" | "verify" | "browser" = "verify") {
  const code = (error as { code?: string })?.code ?? "";

@@ -76,7 +76,7 @@ const CODEX_ARGV = Object.freeze([
   "--json", "--output-schema", DM_ARGV_SCHEMA_FILE,
   "-o", DM_ARGV_OUTPUT_FILE, "-m", "gpt-6-astra", "-C", DM_ARGV_REQUEST_DIRECTORY,
   "--disable", "shell_snapshot",
-  "--disable", "code_mode_host", "--disable", "write_stdin_approval", "--disable", "sleep_tool", "--disable", "browser_use",
+  "--disable", "write_stdin_approval", "--disable", "sleep_tool", "--disable", "browser_use",
   "--disable", "browser_use_external", "--disable", "browser_use_full_cdp_access", "--disable", "browser_annotation_api",
   "--disable", "computer_use", "--disable", "in_app_browser", "--disable", "apps", "--disable", "plugins",
   "--disable", "plugin_sharing", "--disable", "remote_plugin", "--disable", "hooks",
@@ -169,6 +169,22 @@ const CLAUDE_STATE_KEEP = Object.freeze(["~/.claude/.credentials.json"] as const
  */
 export const DM_CODEX_EXECUTABLE_PATH = "/opt/tomverse-amux-dm/codex-cli-0.162.1/codex";
 export const DM_CLAUDE_EXECUTABLE_PATH = "/opt/tomverse-amux-dm/claude-code-2.1.296/claude";
+
+/**
+ * A file the CLI itself runs from beside its executable, held to a sha256 like
+ * the executable (§5a). Codex 0.162 runs every tool call of gpt-6-astra
+ * through Code Mode, whose host is `codex-code-mode-host` in the CLI's own
+ * directory; with the host disabled or missing every command fails closed and
+ * the DM cannot read its workspace (AMUX-CRAWL-002, 2026-11-21). The file is
+ * the release asset `codex-code-mode-host-x86_64-unknown-linux-musl.tar.gz`
+ * of rust-v0.162.1 (asset sha256
+ * 458239ea45c1fc508d89695f180ab352f2834709a8a46929a4466f4f04399ada), whose one
+ * member is this binary.
+ */
+export type DmCompanionFile = { path: string; sha256: string };
+
+export const DM_CODEX_CODE_MODE_HOST_PATH = "/opt/tomverse-amux-dm/codex-cli-0.162.1/codex-code-mode-host";
+export const DM_CODEX_CODE_MODE_HOST_SHA256 = "ec71830690a7c0024916ee0c99fbdc635bc6e747ff665ea4f03a8389bbcb6b30";
 
 /** §5a "<스키마 파일>은 root 소유의 고정 파일": where the installer puts `DM_OUTPUT_SCHEMA_JSON`. */
 export const DM_OUTPUT_SCHEMA_PATH = "/opt/tomverse-amux-dm/dm-output-schema-v1.json";
@@ -284,6 +300,8 @@ export type DmLauncherSpec = {
   /** §5a's table, as the operator reported it on 2026-10-17. */
   executableSha256: string;
   executablePath: string;
+  /** Files the CLI runs from beside the executable, each held to its sha256. */
+  companions: readonly DmCompanionFile[];
   home: string;
   /** After the program name; placeholders unresolved. */
   argv: readonly string[];
@@ -300,6 +318,7 @@ export const DM_LAUNCHER_SPECS: Readonly<Record<DmInstanceScope, DmLauncherSpec>
     cliVersion: "codex-cli 0.162.1",
     executableSha256: "628e35487d888a28f0427fc37501da529dd3d81fcbad7a2c3421c1e8670d92e1",
     executablePath: DM_CODEX_EXECUTABLE_PATH,
+    companions: Object.freeze([Object.freeze({ path: DM_CODEX_CODE_MODE_HOST_PATH, sha256: DM_CODEX_CODE_MODE_HOST_SHA256 })]),
     home: DM_OPENAI_HOME,
     argv: CODEX_ARGV,
     stateDelete: CODEX_STATE_DELETE,
@@ -312,6 +331,7 @@ export const DM_LAUNCHER_SPECS: Readonly<Record<DmInstanceScope, DmLauncherSpec>
     cliVersion: "2.1.296",
     executableSha256: "24972e3bc859fab2b46ed4c1e51f7d6130f06d3bd550811a114640de3370d0de",
     executablePath: DM_CLAUDE_EXECUTABLE_PATH,
+    companions: Object.freeze([]),
     home: DM_ANTHROPIC_HOME,
     argv: CLAUDE_ARGV,
     stateDelete: CLAUDE_STATE_DELETE,
@@ -355,6 +375,10 @@ export const dmExecutionDigestInput = (instance: DmInstanceScope) => {
   return {
     instance: spec.instance,
     executable: { path: spec.executablePath, sha256: spec.executableSha256 },
+    // Only a CLI with companions carries the key, so claude's digest is the one recorded before.
+    ...(spec.companions.length > 0
+      ? { companions: spec.companions.map((file) => ({ path: file.path, sha256: file.sha256 })) }
+      : {}),
     schemaSha256: DM_OUTPUT_SCHEMA_SHA256,
     argv: digestArgv(spec),
     environment: Object.fromEntries(dmFixedEnvironment(instance)),
@@ -374,8 +398,9 @@ export const dmExecutionDigest = (instance: DmInstanceScope): string =>
  * refuses when the computed digest differs.
  */
 export const DM_RECORDED_EXECUTION_DIGESTS: Readonly<Record<DmInstanceScope, string>> = Object.freeze({
-  // Owner decision 2026-11-15: the workspace's read tools and git environment.
-  "decision-maker-openai": "6c865e185fcabebf133d0c4907305c2e06f493b974f4354c140d37fc699f69c6",
+  // Owner decision 2026-11-15: the workspace's read tools and git environment;
+  // 2026-11-22: Code Mode's host on (no `--disable code_mode_host`) and pinned as a companion.
+  "decision-maker-openai": "6a37d7af4afa1d6c749789c723e739f071d18f47aba837d0efa814ef91efb4ba",
   "decision-maker-anthropic": "ada9a76ab70925b6eeac9848c3ebec804d3860312dc19a04225e00c1c6a4f88e",
 });
 
@@ -804,6 +829,45 @@ export const dmClassifyProcess = (cli: DmLauncherCli, observation: DmProcessObse
   if (observation.stdinFailed) return unavailable("stdin_failed");
   if (observation.stdoutTruncated) return unavailable("output_too_large");
   return cli === "codex" ? codexResult(observation) : claudeResult(observation);
+};
+
+/**
+ * What the DM's tools did, for the launcher's log: counts only, never a
+ * command, a path or any text. An escalation because the DM could not read its
+ * workspace is still the DM's answer (§6); this says why, so the next look at
+ * the journal shows a tool that failed for every command (AMUX-CRAWL-002,
+ * 2026-11-21: Code Mode's host was disabled and nothing ran).
+ *
+ * codex: `item.completed` events -- `command_execution` items (failed when the
+ * status is `failed` or the exit code is not 0) and `error` items (the CLI's
+ * own tool errors). Null for claude, whose JSON result carries no tool events,
+ * and for a stream that is not codex's JSON lines.
+ */
+export type DmToolSummary = { commands: number; failedCommands: number; toolErrors: number };
+
+export const dmToolSummary = (cli: DmLauncherCli, stdout: Uint8Array): DmToolSummary | null => {
+  if (cli !== "codex") return null;
+  const stream = decodeUtf8(stdout);
+  if (stream === null) return null;
+  const summary: DmToolSummary = { commands: 0, failedCommands: 0, toolErrors: 0 };
+  for (const line of stream.split("\n")) {
+    if (line.trim() === "") continue;
+    let event: unknown;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      return null;
+    }
+    if (!isPlainObject(event) || event.type !== "item.completed" || !isPlainObject(event.item)) continue;
+    const { item } = event;
+    if (item.type === "command_execution") {
+      summary.commands += 1;
+      if (item.status === "failed" || (typeof item.exit_code === "number" && item.exit_code !== 0)) summary.failedCommands += 1;
+    } else if (item.type === "error") {
+      summary.toolErrors += 1;
+    }
+  }
+  return summary;
 };
 
 // ---------------------------------------------------------------------------

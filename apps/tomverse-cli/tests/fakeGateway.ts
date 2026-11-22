@@ -30,17 +30,17 @@ export const DEFAULT_MODELS = [
     {
         id: "fake-coder",
         object: "model",
-        tomverse: { name: "Fake Coder", provider: "openai", capabilities: { tools: true, vision: false, reasoning: false }, protocols: ["chat_completions", "responses"], context_window_tokens: 200_000, max_output_tokens: 8_000, credits_per_request: 3 },
+        tomverse: { name: "Fake Coder", provider: "openai", reasoning_efforts: ["low", "high"], capabilities: { tools: true, vision: false, reasoning: false }, protocols: ["chat_completions", "responses"], context_window_tokens: 200_000, max_output_tokens: 8_000, credits_per_request: 3 },
     },
     {
         id: "fake-small",
         object: "model",
-        tomverse: { name: "Fake Small", provider: "deepseek", capabilities: { tools: true, vision: false, reasoning: false }, protocols: ["chat_completions"], context_window_tokens: 6_000, max_output_tokens: 1_000, credits_per_request: 1 },
+        tomverse: { name: "Fake Small", provider: "deepseek", reasoning_efforts: [], capabilities: { tools: true, vision: false, reasoning: false }, protocols: ["chat_completions"], context_window_tokens: 6_000, max_output_tokens: 1_000, credits_per_request: 1 },
     },
     {
         id: "smart-adaptive",
         object: "model",
-        tomverse: { name: "Smart Adaptive", provider: "tomverse", capabilities: { tools: true, vision: false, reasoning: false }, protocols: ["chat_completions"], context_window_tokens: 200_000, max_output_tokens: 8_000, credits_per_request: 3 },
+        tomverse: { name: "Smart Adaptive", provider: "tomverse", reasoning_efforts: ["low", "high"], capabilities: { tools: true, vision: false, reasoning: false }, protocols: ["chat_completions"], context_window_tokens: 200_000, max_output_tokens: 8_000, credits_per_request: 3 },
     },
 ];
 

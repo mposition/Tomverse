@@ -118,6 +118,7 @@ const copies: Record<MobileLanguage, typeof en> = {
     notLoaded: "A origem não aparece nesta página",
     use: "Usar esta versão",
   },
+  "zh-Hant": {"revise":"建立修訂版","preparing":"正在準備檔案…","failed":"無法準備檔案。草稿保持不變，請再試一次。","nameConflict":"已附加同名檔案。請先移除附件或重新命名其他輸入檔案，再進行選取。","countConflict":"最多可附加 10 個檔案。","officeNotice":"根據擷取的文字建立新檔案。原始格式、圖片與投影片版面可能改變。","prompt":"請根據附件 {filename} 的內容，依照下列修改要求建立新檔案。請保留原始檔案。","officePrompt":"請根據附件 {filename} 擷取的文字，依照下列修改要求建立新檔案。格式、圖片與投影片版面可能改變。請保留原始檔案。","workbookPrompt":"請根據附件 {filename} 與下列修改要求建立新的 Excel 活頁簿。保留活頁簿結構及未修改的儲存格。請保留原始檔案。","valuesPrompt":"請根據附件 {filename} 與下列修改要求建立新的 Excel 活頁簿。保留工作表名稱、儲存格位置及未修改的值。欄寬與顯示版面可能改變。請保留原始檔案。","versions":"檔案版本","more":"載入更早的版本","noSource":"未記錄來源","unavailable":"來源檔案已無法使用","current":"目前檔案","textConflict":"草稿過長，無法加入此要求。請縮短後再試一次。","source":"修訂來源","notLoaded":"此頁未顯示來源檔案","use":"使用此版本"},
   zh: {
     revise: "创建修订版",
     preparing: "正在准备文件…",

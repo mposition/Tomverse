@@ -462,6 +462,9 @@ run(
     // Feature from a Task card; the database accepts a content revision only
     // in the exact owner shape, and every open Task below is rescored.
     "tests/integration/amux-portfolio-node-edit.db.test.ts",
+    // Owner direction 2026-11-21: the execution board's lanes hold Tasks; a
+    // Story shows on its Tasks' hierarchy line and still counts for archive-all.
+    "tests/integration/amux-execution-board-tasks-only.db.test.ts",
     // Owner decision 2026-11-21: the hierarchy list's rollups, and the owner's
     // one-way hierarchy archive against the node guards and the audit chain.
     "tests/integration/amux-hierarchy-archive.db.test.ts",

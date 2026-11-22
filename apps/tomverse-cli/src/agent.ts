@@ -352,6 +352,7 @@ export class Runner {
     async loop(): Promise<Outcome> {
         const { journal, options } = this;
         const task = this.currentTask();
+        this.assertEffort(task.effort ?? "default");
         this.freshSignal();
         journal.state.status = "running";
         journal.commit();
