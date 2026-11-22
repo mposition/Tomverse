@@ -1599,6 +1599,32 @@ run(
   "Running durable Research Preview service, checkpoint and dispatch CAS scenarios"
 );
 
+// Deep Research engine v2 installs process-wide fakes (model, funding, network,
+// clock, evidence store); each suite runs in its own process.
+run(
+  ["--conditions=react-server", "--import", "tsx", "--test",
+    "--test-concurrency=1", "tests/integration/research-engine-run.db.test.ts"],
+  "Running Deep Research engine v2 end-to-end run"
+);
+
+run(
+  ["--conditions=react-server", "--import", "tsx", "--test",
+    "--test-concurrency=1", "tests/integration/research-engine-boundaries.db.test.ts"],
+  "Running Deep Research engine v2 privacy, money, race and lifecycle boundaries"
+);
+
+run(
+  ["--conditions=react-server", "--import", "tsx", "--test",
+    "--test-concurrency=1", "tests/integration/research-engine-chat-finance.db.test.ts"],
+  "Running Deep Research engine v2 against the real Chat credit ledger"
+);
+
+run(
+  ["--conditions=react-server", "--import", "tsx", "--test",
+    "--test-concurrency=1", "tests/integration/research-engine-scale.db.test.ts"],
+  "Running Deep Research engine v2 synthetic scale, concurrency and 60-minute fake-clock fixtures"
+);
+
 if ([...focusedSuites].some((suite) => !selectedFocusedSuites.has(suite))) {
   fail("a requested DB_INTEGRATION_SUITES path is not registered in this lane.");
 }

@@ -191,6 +191,19 @@ and reload discovery never dispatch model work. Resume and cancel are explicit
 mutations; an unconfirmed outcome is read back before another action. Legacy
 Perplexity jobs retain their separate status path.
 
+## Deep Research engine v2 native entry (default off)
+
+`RESEARCH_ENGINE_NATIVE_ENABLED`, together with `RESEARCH_ENGINE_ENABLED` and the
+native parity switch, enrolls the owner-scoped `/api/chat/research/*` run API for
+bearer callers: offer and list/create reads, run detail and delete, the explicit
+mutations (plan, plan edit, approve, pause, resume, cancel, finish, budget, scope,
+revisions) and the owner reads (sources, evidence, report, export)
+(`lib/nativeBearerGate.ts`). The same bearer, account and conversation unlock
+checks apply; unlock grants travel on these paths as on Research Preview. Every
+mutation is idempotent on an expected revision, and a lost response is read back
+with the shared client (`packages/api-client/src/research.ts`) instead of being
+sent again. The worker holds no session cookie or bearer.
+
 ## Deliberately excluded
 
 - **No password authentication**, on any surface. Adding one to serve the app

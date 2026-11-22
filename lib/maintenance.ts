@@ -28,6 +28,7 @@ import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { sweepPromptRefinerShadowUnknowns } from "@/lib/promptRefinerShadowRunStore";
 import { expirePromptRefinerChatSuggestions } from "@/lib/promptRefinerChatExecutionStore";
 import { recoverStaleResearchPreviewRuns } from "@/lib/researchPreviewRecovery";
+import { recoverResearchEngine } from "@/lib/researchEngineRecovery";
 
 /**
  * How long an unapplied cost correction may sit before it is an incident.
@@ -480,6 +481,9 @@ export async function cleanupExpiredData() {
   const researchPreviewRuns = await step("research_preview_runs", () =>
     recoverStaleResearchPreviewRuns()
   );
+  // Research engine v2: recovery-only (stale leases, unbound holds, settlement,
+  // evidence cleanup); never claims work or calls a provider.
+  const researchEngineRuns = await step("research_engine_runs", () => recoverResearchEngine());
   const creditReservations = await step("chat_credit_reservations", () =>
     reconcileExpiredChatCreditReservations()
   );
@@ -1157,6 +1161,7 @@ export async function cleanupExpiredData() {
     creditLotsExpired,
     creditReservations,
     researchPreviewRuns,
+    researchEngineRuns,
     promptRefinerChatSuggestions,
     staleRoutingAttempts,
     costAdjustments,

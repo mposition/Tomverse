@@ -24,7 +24,7 @@ export const researchPreviewGoogleFetch: typeof fetch = async (url, init) => {
     for (const group of request.tools) {
       if (!group || !Array.isArray(group.functionDeclarations)) continue;
       for (const declaration of group.functionDeclarations) {
-        if (declaration.name === "submit_research_report" && declaration.parametersJsonSchema) {
+        if (typeof declaration.name === "string" && declaration.name.startsWith("submit_research_") && declaration.parametersJsonSchema) {
           declaration.parametersJsonSchema = omitArrayMaximumHints(declaration.parametersJsonSchema);
         }
       }
