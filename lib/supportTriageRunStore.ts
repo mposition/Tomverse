@@ -72,11 +72,20 @@ export const retryRunWriteOnce = async <T>(input: {
     const lost = rolledBack ? null : amuxTransientDatabaseCode(error);
     if (!rolledBack && !lost) throw error;
     console.warn(JSON.stringify({ event: "support_triage_run_write_retried", code: rolledBack ?? lost }));
-    if (!rolledBack) {
-      const done = await input.committed();
-      if (done !== null) return done;
+    if (rolledBack) return input.write();
+    const done = await input.committed();
+    if (done !== null) return done;
+    try {
+      return await input.write();
+    } catch (retryError) {
+      // The first COMMIT may still have been in flight when the read above
+      // found nothing, and landed since: the retry then fails on the same run
+      // id (start) or on a row no longer running (finish). Read once more, so
+      // a write that did take effect is reported as the success it was.
+      const late = await input.committed();
+      if (late !== null) return late;
+      throw retryError;
     }
-    return input.write();
   }
 };
 
@@ -170,10 +179,13 @@ export const finishSupportTriageRun = async (input: {
     throw new RangeError("a retention run completes at most eight batches");
   }
 
+  // Names this call's run_finished entry, so a retry can tell its own commit
+  // from a finish another caller recorded first.
+  const attemptId = randomUUID();
   return retryRunWriteOnce({
-    write: () => finishRunTransaction(input, counters),
-    // Finished, and by this writer: only this transaction writes the
-    // run_finished entry, and it commits with the update or not at all.
+    write: () => finishRunTransaction(input, counters, attemptId),
+    // Finished by this call: its run_finished entry commits with the update
+    // or not at all, and carries this call's attemptId.
     committed: async () => {
       const [row, audit] = await Promise.all([
         prisma.supportTriageRun.findFirst({
@@ -181,7 +193,12 @@ export const finishSupportTriageRun = async (input: {
           select: { id: true, outcome: true, finishedAt: true },
         }),
         prisma.adminAuditLog.findFirst({
-          where: { targetType: "SupportTriageRun", targetId: input.id, action: "support_triage.run_finished" },
+          where: {
+            targetType: "SupportTriageRun",
+            targetId: input.id,
+            action: "support_triage.run_finished",
+            metadata: { path: ["attemptId"], equals: attemptId },
+          },
           select: { id: true },
         }),
       ]);
@@ -194,7 +211,8 @@ export const finishSupportTriageRun = async (input: {
 
 const finishRunTransaction = (
   input: { readonly id: string; readonly kind: SupportTriageRunKind; readonly outcome: "success" | "partial" | "failed" },
-  counters: RunCounters
+  counters: RunCounters,
+  attemptId: string
 ): Promise<FinishedRun> =>
   prisma.$transaction(
     async (tx) => {
@@ -208,7 +226,7 @@ const finishRunTransaction = (
         targetType: "SupportTriageRun",
         targetId: input.id,
         summary: `Support-triage ${input.kind} run finished`,
-        metadata: { kind: input.kind, requestedOutcome: input.outcome },
+        metadata: { kind: input.kind, requestedOutcome: input.outcome, attemptId },
       });
       const updated = await tx.supportTriageRun.updateManyAndReturn({
         where: { id: input.id, kind: input.kind, outcome: "running" },

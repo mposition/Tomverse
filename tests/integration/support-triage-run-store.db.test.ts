@@ -287,3 +287,58 @@ test("after a lost session, a write that did commit is returned, not repeated", 
   assert.equal(reads, 0);
   assert.deepEqual(codes, ["P1017", "P1017", "P2034"]);
 });
+
+// Review r-20261122-015354-13cf07: the first COMMIT may still be in flight
+// when the read finds nothing, and land before the retry, which then fails on
+// the same id or on a finished row. That write did take effect.
+test("a retry that fails because the first commit landed late reports the first commit", async () => {
+  const closed = Object.assign(new Error("Server has closed the connection."), { code: "P1017" });
+  const duplicate = Object.assign(new Error("Unique constraint failed on the fields: (`id`)"), { code: "P2002" });
+  let reads = 0;
+  assert.deepEqual(await retryRunWriteOnce({
+    write: (() => { let n = 0; return async () => { n += 1; throw n === 1 ? closed : duplicate; }; })(),
+    committed: async () => (++reads === 1 ? null : { id: "landed-late" }),
+  }), { id: "landed-late" });
+  assert.equal(reads, 2);
+  // Still nothing committed: the retry's own failure is thrown.
+  await assert.rejects(retryRunWriteOnce({
+    write: (() => { let n = 0; return async () => { n += 1; throw n === 1 ? closed : duplicate; }; })(),
+    committed: async () => null,
+  }), /Unique constraint/);
+});
+
+test("a finish whose session is lost does not report another caller's finish as its own", async (t) => {
+  const codes = retriedCodes(t);
+  const run = await startSupportTriageRun("retention");
+  // Another caller finishes the run first.
+  await finishSupportTriageRun({ id: run.id, kind: "retention", outcome: "failed" });
+  // This call loses its session at its audit entry, before its update.
+  await prisma.$executeRawUnsafe(`DROP SEQUENCE IF EXISTS test_audit_once`);
+  await prisma.$executeRawUnsafe(`CREATE SEQUENCE test_audit_once`);
+  await prisma.$executeRawUnsafe(`
+    CREATE OR REPLACE FUNCTION test_audit_end_session_once() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      IF NEW."action" = 'support_triage.run_finished' AND nextval('test_audit_once') = 1 THEN
+        PERFORM pg_terminate_backend(pg_backend_pid());
+      END IF;
+      RETURN NEW;
+    END $$`);
+  await prisma.$executeRawUnsafe(
+    `CREATE TRIGGER test_audit_end_session_once BEFORE INSERT ON "AdminAuditLog"
+       FOR EACH ROW EXECUTE FUNCTION test_audit_end_session_once()`
+  );
+  try {
+    await assert.rejects(
+      finishSupportTriageRun({ id: run.id, kind: "retention", outcome: "success" }),
+      SupportTriageRunNotRunning
+    );
+    assert.equal(codes.length, 1);
+    const row = await prisma.supportTriageRun.findUniqueOrThrow({ where: { id: run.id } });
+    assert.equal(row.outcome, "failed");
+    assert.deepEqual((await runAudits()).map((a) => a.action), ["support_triage.run_started", "support_triage.run_finished"]);
+  } finally {
+    await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS test_audit_end_session_once ON "AdminAuditLog"`);
+    await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS test_audit_end_session_once()`);
+    await prisma.$executeRawUnsafe(`DROP SEQUENCE IF EXISTS test_audit_once`);
+  }
+});
