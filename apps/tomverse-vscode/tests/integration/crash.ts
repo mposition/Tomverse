@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { readFileSync, writeFileSync } from "node:fs";
 import { TEST_KEY } from "../../../tomverse-cli/tests/fakeGateway.js";
+import { t } from "../../src/i18n.js";
 import { digest } from "../../src/security.js";
 import type { SessionController } from "../../src/sessionController.js";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -51,12 +52,17 @@ export async function run() {
         assert.ok(snapshot.notice.includes("outcome is unknown"));
         assert.equal(snapshot.permissions.length, 0);
         assert.equal(snapshot.approval, null);
+        controller.dialogs.choose = async () => t("cancel");
+        await controller.action("recover");
+        assert.equal(controller.snapshot().state, "unknown_outcome", "declining resume preserves started-tool uncertainty");
+        assert.equal(controller.snapshot().busy, false);
         writeFileSync(
             join(artifact, "recovered.json"),
             JSON.stringify({
                 session: snapshot.session,
                 state: snapshot.state,
                 notice: snapshot.notice,
+                recoveryDeclinedState: controller.snapshot().state,
                 vscode: vscode.version,
                 node: process.versions.node,
                 platform: process.platform,

@@ -405,12 +405,7 @@ export class SessionController implements vscode.WebviewViewProvider {
                             commandTimeoutMs: DEFAULTS.commandTimeoutSeconds * 1000,
                         },
                     },
-                    {
-                        writeFileAtomic: (path, data) => {
-                            if (Buffer.isBuffer(data) && data.includes(Buffer.from(key))) throw new Error("Refused to persist credential bytes.");
-                            writeFileAtomic(path, typeof data === "string" ? redactJson(JSON.parse(data), key) : data);
-                        },
-                    },
+                    this.journalIo(key),
                 );
             this.journal = journal;
             const contextText = this.editor.snapshotPrompt(mode);
@@ -440,6 +435,12 @@ export class SessionController implements vscode.WebviewViewProvider {
         if (uncertain)
             this.notice = "A command or file operation has an unknown outcome; some processes may still be running. Review tool results before continuing.";
         return journal?.unresolvedGenerations().length || uncertain ? "unknown_outcome" : result === "success" ? "completed" : result;
+    }
+    private journalIo(key: string) {
+        return { writeFileAtomic: (path: string, data: string | Buffer) => {
+            if (Buffer.isBuffer(data) && data.includes(Buffer.from(key))) throw new Error("Refused to persist credential bytes.");
+            writeFileAtomic(path, typeof data === "string" ? redactJson(JSON.parse(data), key) : data);
+        } };
     }
     private createRunner(gateway: Gateway, journal: Journal, catalog: CatalogModel[]) {
         const output: Output = {
@@ -522,9 +523,7 @@ export class SessionController implements vscode.WebviewViewProvider {
                   .then((p) => p?.session);
         if (!selected) return;
         this.closeSession();
-        const journal = Journal.open(home, selected.id, {
-            writeFileAtomic: (path, data) => writeFileAtomic(path, typeof data === "string" ? redactJson(JSON.parse(data), key) : data),
-        });
+        const journal = Journal.open(home, selected.id, this.journalIo(key));
         try {
             this.key = key;
             const gateway = new Gateway(endpoint, key, undefined, `tomverse-vscode/${this.context.extension.packageJSON.version}`);
@@ -603,7 +602,7 @@ export class SessionController implements vscode.WebviewViewProvider {
                     `${this.notice}\nContinue with a new model request? It can be charged again. Pending tools are never automatically replayed.`,
                 ))
             ) {
-                this.state = unresolved.length ? "unknown_outcome" : journal.state.status;
+                this.state = this.outcome(journal.state.status);
                 return;
             }
             journal.closeGenerations(unresolved);

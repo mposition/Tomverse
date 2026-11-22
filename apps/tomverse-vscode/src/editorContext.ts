@@ -19,7 +19,7 @@ export type Attachment = {
     text: string;
 };
 type FileStamp = { absolute: string; revision: number; versions: string; preimage: string | null };
-const key = (path: string) => {
+const canonicalPath = (path: string) => {
     let existing = resolve(path);
     const missing: string[] = [];
     for (;;) {
@@ -33,7 +33,11 @@ const key = (path: string) => {
             existing = parent;
         }
     }
-    return process.platform === "win32" || process.platform === "darwin" ? existing.toLowerCase() : existing;
+    return existing;
+};
+const key = (path: string) => {
+    const canonical = canonicalPath(path);
+    return process.platform === "win32" || process.platform === "darwin" ? canonical.toLowerCase() : canonical;
 };
 
 export class EditorContext {
@@ -113,7 +117,7 @@ export class EditorContext {
         return vscode.workspace.textDocuments.filter((doc) => {
             if (!doc.isDirty || doc.uri.scheme !== "file") return false;
             try {
-                this.workspace().resolve(this.identity(doc.uri), "read");
+                this.workspace().resolve(canonicalPath(doc.uri.fsPath), "read");
             } catch {
                 return false;
             }
@@ -141,7 +145,7 @@ export class EditorContext {
             .filter((d) => d.uri.scheme === "file")
             .flatMap((d) => {
                 try {
-                    return [this.workspace().resolve(this.identity(d.uri), "read").absolute];
+                    return [this.workspace().resolve(canonicalPath(d.uri.fsPath), "read").absolute];
                 } catch {
                     return [];
                 }
@@ -159,7 +163,7 @@ export class EditorContext {
         else {
             if (target.scheme !== "file" || target.authority) throw new Error(t("unsupported"));
             if (isSecretPath(target.fsPath)) throw new Error("Context path can contain credentials.");
-            const resolved = this.workspace().resolve(this.identity(target), "read");
+            const resolved = this.workspace().resolve(canonicalPath(target.fsPath), "read");
             const stat = statSync(resolved.absolute);
             if (!stat.isFile() || stat.size > 2 * 1024 * 1024) throw new Error("Context file must be text and at most 2 MiB. Select a smaller file.");
             if (readFileSync(resolved.absolute).subarray(0, 8192).includes(0)) throw new Error("Binary context is not supported.");
@@ -206,7 +210,7 @@ export class EditorContext {
             if (uri.scheme === "untitled") {
                 if (mode !== "ask") throw new Error("Save the untitled file inside the root before using Agent.");
             } else {
-                this.workspace().resolve(this.identity(uri), "read");
+                this.workspace().resolve(canonicalPath(uri.fsPath), "read");
                 const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === attachment.uri);
                 if (doc && doc.version !== attachment.version) throw new Error(`${attachment.path} changed since attachment. Remove and attach it again.`);
             }
