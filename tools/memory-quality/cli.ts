@@ -33,10 +33,14 @@ followup-eval [--inputs <json> --key <json>] [--out <directory>]
         Follow-up Memory evaluation: lexical, full-query and full-query+history selections, the
         chat messages each would send, answer import, a blind sheet and verdict import. Files only;
         no provider call. Defaults to the development fixture. Run with node --conditions=react-server.
+followup-scores --inputs <json> --key <json> --query-mode full-query|full-query+history
+        --live --max-calls <n> --save-scores <new-json>
+        PAID: one rerank request per follow-up case that has relevant candidates, saved in the
+        score file followup-eval replays with --scores-full-query / --scores-full-query-history.
 Defaults: mode=mock, out=.tmp/memory-quality, iterations=3, max-calls=1000, timeout-ms=60000,
 corpus=retrieval-ko.
 The run command has no live mode, paid execution, product writes, promotion, network or raw
-Memory collection. --live (retrieval --semantic, knowledge-retrieval only) makes PAID provider
+Memory collection. --live (retrieval --semantic, knowledge-retrieval, followup-scores) makes PAID provider
 calls: it needs COHERE_API_KEY and the model variables, an explicit --max-calls (0 or absent is
 refused) and a new --save-scores file; run it with node --conditions=react-server.`;
 const commandOptions: Record<string, string[]> = {
@@ -46,6 +50,7 @@ const commandOptions: Record<string, string[]> = {
   retrieval: ["corpus", "semantic", "rerank-scores", "live", "max-calls", "save-scores", "query-mode"],
   "knowledge-retrieval": ["scores", "live", "max-calls", "save-scores"],
   "followup-eval": ["inputs", "key", "out", "scores-full-query", "scores-full-query-history", "answers", "verdicts"],
+  "followup-scores": ["inputs", "key", "query-mode", "live", "max-calls", "save-scores"],
 };
 const FOLLOWUP_DEV_INPUTS = fileURLToPath(new URL("./fixtures/followup-dev.inputs.json", import.meta.url));
 const FOLLOWUP_DEV_KEY = fileURLToPath(new URL("./fixtures/followup-dev.key.json", import.meta.url));
@@ -87,6 +92,21 @@ export async function main(args: string[], context: LiveContext = {}) {
     return { followupEval: { out, bundle: report.bundle.bundleId, status: report.bundle.status,
       variants: report.bundle.variants, independentScenarios: report.bundle.independentScenarios,
       conditions: report.conditions, answerQuality: report.answers.answerQuality, paidCalls: report.paidCalls } };
+  }
+  if (command === "followup-scores") {
+    if (!options.inputs || !options.key) throw new QualityStop("followup_inputs_and_key_required");
+    const mode = options["query-mode"];
+    if (mode !== "full-query" && mode !== "full-query+history") throw new QualityStop("followup_query_mode_required");
+    if (options.live !== "true") throw new QualityStop("live_required");
+    const { followupRetrievalCases, loadFollowupBundle } = await import("./followupSchema");
+    const bundle = await loadFollowupBundle(options.inputs, options.key);
+    // The same cases and corpus name followup-eval replays, so the saved file's provenance matches.
+    const result = await measureSemanticMemory({
+      corpus: bundle.bundleId, cases: followupRetrievalCases(bundle), options, live: true, context,
+    });
+    return { followupScores: { bundle: bundle.bundleId, evalDigest: bundle.evalDigest, queryMode: mode,
+      live: result.live, paidCalls: result.paidCalls },
+      ...("stopReason" in result ? { stopReason: result.stopReason } : {}) };
   }
   if (command === "knowledge-retrieval") {
     const live = options.live === "true";

@@ -307,6 +307,19 @@ node --conditions=react-server --import tsx tools/memory-quality/cli.ts followup
   answers and `unjudged` without verdicts. Variants are reported next to the number
   of independent scenarios; `decisionGrade` needs an independently authored,
   separately reviewed bundle frozen before results.
+- **Collecting the score files (PAID).** `followup-scores` sends one Cohere rerank
+  request per case that has relevant candidates, with the same query plan, corpus name
+  and provenance `followup-eval` checks on replay. It shares the `--live` rules below:
+  `COHERE_API_KEY`, `COHERE_RERANK_MODEL` and the billing variables, an explicit
+  `--max-calls` at or above the plan (refused before the first request otherwise), and
+  a new `--save-scores` file written after every request. Run it once per query mode:
+
+  ```powershell
+  node --conditions=react-server --import tsx tools/memory-quality/cli.ts followup-scores --inputs <inputs.json> --key <key.json> `
+    --query-mode full-query --live --max-calls <n> --save-scores <new-fq.json>
+  node --conditions=react-server --import tsx tools/memory-quality/cli.ts followup-scores --inputs <inputs.json> --key <key.json> `
+    --query-mode full-query+history --live --max-calls <n> --save-scores <new-fqh.json>
+  ```
 
 ## Data isolation and candidate authority
 

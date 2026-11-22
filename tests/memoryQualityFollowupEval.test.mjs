@@ -295,3 +295,57 @@ test("the CLI keeps --corpus all and refuses half a bundle", async () => {
     assert.equal(result.retrieval.relevance.summary.recalled, 6);
     await assert.rejects(main(["followup-eval", "--inputs", "x.json"]), { code: "followup_inputs_and_key_required" });
 });
+
+// followup-scores is exercised only behind a fake fetch and synthetic configuration.
+test("followup-scores collects one rerank request per case into a file followup-eval replays", async () => {
+    await withTemp(async directory => {
+        const files = { inputs: fileURLToPath(fixture("followup-dev.inputs.json")), key: fileURLToPath(fixture("followup-dev.key.json")) };
+        const bundle = buildFollowupBundle(devInputs, devKey);
+        const planned = followupRetrievalCases(bundle).filter(row => rerankDocuments(row.retrieval).length > 0).length;
+        const env = { COHERE_API_KEY: "synthetic-key", COHERE_RERANK_MODEL: "rerank-v5.0-fast",
+            COHERE_RERANK_MICROUSD_PER_MILLION_TOKENS: "1000000" };
+        const requests = [];
+        const fetchImpl = async (_url, init) => {
+            const body = JSON.parse(init.body);
+            requests.push(body);
+            return new Response(JSON.stringify({
+                results: body.documents.map((_doc, index) => ({ index, relevance_score: index === 0 ? 0.9 : 0.05 })),
+                meta: { billed_units: { input_tokens: 50 } },
+            }));
+        };
+        const collect = (mode, save, extra = {}) => main(["followup-scores", "--inputs", files.inputs, "--key", files.key,
+            "--query-mode", mode, "--live", "--max-calls", String(extra.maxCalls ?? planned), "--save-scores", save],
+            { env, fetchImpl });
+
+        // Refused before any request.
+        const base = ["followup-scores", "--inputs", files.inputs, "--key", files.key];
+        await assert.rejects(main([...base, "--query-mode", "full-query"]), { code: "live_required" });
+        await assert.rejects(main([...base, "--query-mode", "current-query", "--live"]), { code: "followup_query_mode_required" });
+        await assert.rejects(main(["followup-scores", "--inputs", files.inputs, "--query-mode", "full-query", "--live"]),
+            { code: "followup_inputs_and_key_required" });
+        await assert.rejects(collect("full-query", join(directory, "never.json"), { maxCalls: planned - 1 }),
+            { code: "max_calls_below_planned" });
+        assert.equal(requests.length, 0);
+
+        const fq = join(directory, "fq.json"), fqh = join(directory, "fqh.json");
+        const first = await collect("full-query", fq);
+        assert.equal(first.followupScores.paidCalls, planned);
+        assert.equal(first.followupScores.evalDigest, bundle.evalDigest);
+        await collect("full-query+history", fqh);
+        assert.equal(requests.length, planned * 2);
+        // History mode carries the earlier user turns; the plain full-query request does not.
+        const withHistory = requests.slice(planned).find(row => row.query.includes("파랑 카페 리뉴얼"));
+        assert.ok(withHistory && withHistory.query.includes("그럼 거기서 내 역할이랑 날짜만 알려줘."));
+        assert.ok(!requests.slice(0, planned).some(row => row.query.includes("파랑 카페 리뉴얼로 바꾸자")));
+        await assert.rejects(collect("full-query", fq), { code: "save_scores_exists" });
+
+        const { report } = await run(directory, files, ["--scores-full-query", fq, "--scores-full-query-history", fqh]);
+        for (const condition of ["full-query", "full-query+history"]) {
+            const row = report.conditions.find(entry => entry.condition === condition);
+            // Accepted as the same request contract, but a fake fetch never counts as a measurement.
+            assert.equal(row.status, "unmeasured", condition);
+            assert.equal(row.evidence, "mock", condition);
+        }
+        assert.equal(report.paidCalls, 0);
+    });
+});
