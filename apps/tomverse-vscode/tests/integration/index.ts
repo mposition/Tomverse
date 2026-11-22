@@ -569,7 +569,7 @@ export async function run() {
         await fresh();
         const modelsWithoutEffort = DEFAULT_MODELS.map((model) => ({
             ...model,
-            tomverse: { ...model.tomverse, reasoning_efforts: [] },
+            tomverse: { ...model.tomverse, reasoning_efforts: undefined },
         }));
         fake.options.models = modelsWithoutEffort;
         await controller.refresh();
@@ -679,12 +679,16 @@ export async function run() {
         await controller.refresh();
         controller.dialogs.pick = async (items) => items.find((item) => item.label === t("effort_high"));
         await chooseEffort();
-        fake.options.models = modelsWithoutEffort;
-        const beforeRefusal = fake.completions.length;
+        fake.options.models = modelsWithoutEffort.map((model) => ({
+            ...model,
+            tomverse: { ...model.tomverse, reasoning_efforts: [] },
+        }));
+        const beforeFallback = fake.completions.length;
         await send("Capability disappeared before starting", "ask");
-        assert.equal(fake.completions.length, beforeRefusal + 1);
-        assert.equal(fake.completions.at(-1)!.body.tomverse_effort, undefined);
+        assert.equal(fake.completions.length, beforeFallback + 1);
+        assert.equal(fake.completions.at(-1)!.body.tomverse_effort, "high");
         assert.equal(controller.snapshot().effort.level, "default");
+        assert.equal(controller.snapshot().effort.requested, "high");
         assert.equal(controller.snapshot().state, "completed");
         controller.dialogs.pick = nativePick;
         fake.options.models = undefined;
