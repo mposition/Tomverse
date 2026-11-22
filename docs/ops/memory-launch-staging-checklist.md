@@ -160,8 +160,8 @@ ORDER BY "createdAt" DESC LIMIT 5;
 | D-3 | 새 대화에서 C-1 | v10 기억은 사용 수에 잡히지 않음(사유 `no_approved_pair`) |
 | D-4 | revoke 해제 | C-1이 다시 memory를 씀 |
 
-만료(2026-11-22)는 Test에서 시간을 옮길 수 없어 여기서 보지 않습니다. 같은 판정 함수를 단위 테스트가
-고정합니다(`tests/memoryExtractionCore.test.mjs` "an approval stops resolving at its expiry, at runtime").
+운영자 출시 승인에는 만료가 없습니다(운영자 결정 2026-11-22). revoke만이 pair를 닫으며, 같은 판정 함수를
+단위 테스트가 고정합니다(`tests/memoryExtractionCore.test.mjs` "an owner launch keeps resolving until it is revoked, at runtime").
 
 ## 7. E — flag off
 
@@ -186,5 +186,4 @@ A~E가 통과하고, 기록 파일에 Test SHA와 크레딧·비용 관측이 �
 (extraction → 확인 → injection)로 켭니다. 프로덕션 flag는 운영자 승인 대상입니다(Tomverse가 내는 유료 호출
 시작). 켜는 순간 이미 import된 대화도 15분 dispatcher가 계정 5개씩 추출하기 시작하므로, provider 예산과
 batch sub-budget(§3)이 그 비용 상한입니다.
-v9·v10 승인은 **2026-11-22**에 만료되며, 그날부터 추출·주입이 닫히고 모든 PR의 register 검사가 실패합니다.
-그 전에 새 `ownerLaunch` 기록으로 연장하거나 다음 버전을 승인합니다.
+v9·v10 승인에는 만료가 없습니다(운영자 결정 2026-11-22). 멈출 때는 Admin의 revoke 패널에서 해당 pair를 revoke합니다.
