@@ -217,7 +217,25 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
 ## 0d. 운영자 결정 (2026-11-16, 대화) — 스위치 정리
 
 1. 항상 켜져 있던 DM 경로의 스위치를 없앴다: `TOMVERSE_AMUX_DM_ROUTING`(DM route는 인증 뒤 늘 열리고, DM 전체 kill switch는 DB 값 `on`/`off`/`proposal`이 그대로 맡는다), `TOMVERSE_AMUX_DM_OWNER_SETTLEMENT`, `TOMVERSE_AMUX_V22_RESULT_REVIEW_DM`, `TOMVERSE_ENGINEERING_AGENT_T2_DM_REVIEW`.
-2. 남긴 것: DM 승인자(`TOMVERSE_AMUX_DM_APPROVER`), 병합 범위(`TOMVERSE_AMUX_DM_MERGE_SCOPE`), `TOMVERSE_AMUX_DM_T2_MERGE`(자율 에이전트의 병합 권한), box relay 시작 조건(`TOMVERSE_AMUX_DM_RELAY`), 그리고 사람 경계 용어 검사를 지키는 `TOMVERSE_AMUX_DM_TERMS_FIXED_TEXT_ONLY`. 값은 `enabled`/`disabled`로 적는다.
+2. 남긴 것: DM 승인자(`TOMVERSE_AMUX_DM_APPROVER`), 병합 범위(`TOMVERSE_AMUX_DM_MERGE_SCOPE`), `TOMVERSE_AMUX_DM_T2_MERGE`(자율 에이전트의 병합 권한), box relay 시작 조건(`TOMVERSE_AMUX_DM_RELAY`), 값은 `enabled`/`disabled`로 적는다. (`TOMVERSE_AMUX_DM_TERMS_FIXED_TEXT_ONLY`는 2026-11-22 §0f로 없앴다.)
+
+## 0f. 운영자 지시 (2026-11-22, 대화) — DM은 접근 권한을 막지 않는다
+
+"해당 원인 한개만 생각하지마시고 크게 제약없이 다 할수 있도록 풀어주세요. DM은 접근권한 막지 마세요."
+AMUX-CRAWL-003이 DM 결과 검토에서 제안 없이 끝난 뒤 12시간 동안 운영자를 기다린 일에서 나왔다.
+
+1. **앱이 만든 카드는 §3-3 용어 검사를 받지 않는다.** 결과 검토, owner queue 정산, T2 draft 검토, 거절된 세션 답, 카드
+   닫기 질문의 카드다(그 local card를 기록한 행이 증거). 답은 앱이 정한 되돌릴 수 있는 낱말뿐이고, 사람에게 남는 것은
+   그 일을 하는 곳에서 막는다: develop 병합의 경로 검사, main·production은 사람, secret 검사(카드 전체에 그대로).
+   worker가 쓴 질문은 지금처럼 모든 낱말을 읽는다. `TOMVERSE_AMUX_DM_TERMS_FIXED_TEXT_ONLY` 스위치는 없앴다.
+2. **결과 검토가 DM을 떠나면 정산이 카드를 맡는다.** 사람에게 넘긴 결과 검토(`handoffAt`), 그리고 카드의 최신 DM
+   요청이 확정할 것 없이 끝난 결과 검토(operator route, assignment 폐기, stale close, direct answer close, proposal이
+   아닌 결과)는 정산 스캔을 막지 않는다. DM이 같은 카드를 정산 낱말(retry·complete·close·remake)로 다시 판단한다.
+   대기 중인 요청, proposal, 확정, 운영자의 reject는 여전히 결과 검토의 것이다.
+3. **계획의 local id는 카드 번호로 읽힌다.** 완료 기준과 brief의 `c0:card-1` 같은 id를 DM 카드·DM workspace의
+   `CRITERIA.md`·worker brief·코드 검토 범위·Admin 상세에서 등록된 카드의 번호로 바꾼다. 봉인된 본문은 바꾸지 않는다.
+4. 남은 것: DM의 명령 실행(Claude DM의 Bash, Codex DM의 쓰기, 의존성 설치)을 worker와 같은 jail로 여는 일은 box에서
+   실측해야 하므로 별도 작업이다. jail 없이 Bash만 열면 DM 계정의 로그인을 명령이 읽을 수 있다.
 
 ## 0e. 운영자 지시 (2026-11-18, 대화) — transaction의 call 수 상한 없음
 
@@ -357,11 +375,10 @@ DM은 **제안을 쓰는 worker이지 승인자가 아니다.** (되돌릴 수 �
 1. 전체 kill switch가 켜짐, 배정될 인스턴스 스위치가 `off`, 설정을 읽지 못함.
 2. `ask_type`이 허용된 여섯(§0-1) 밖. `customer_outbound`도 여기다.
 3. 되돌릴 수 없는 행위 용어 목록에 걸림. 판정 입력은 카드의 type·tag·제목·질문·선택지·해제 조건·worker가
-   적은 맥락. 운영자 결정 2026-11-14(AMUXFLOW/B2): `TOMVERSE_AMUX_DM_TERMS_FIXED_TEXT_ONLY=enabled`이면 앱이 직접 만든
-   카드(그 local card를 기록한 `AmuxDmOwnerSettlement` 행, 2026-11-14부터는 `EngineeringAgentDmReview`
-   행도 있는 카드)가 `[evidence]`…`[/evidence]`로 감싼
-   증거(실행 결과, diff)는 용어 판정에서 뺀다. worker 카드의 표식은 보통 글자로 읽는다. 닫히지 않은 표식은 빼지 않고, secret 검사는
-   카드 전체에 그대로 적용한다. 기본은 꺼짐이다. 아래가 목록이며(2026-11-16 §0c-5로 좁힘) 바꾸려면 운영자 승인(대화 한 줄, PR에 기록)이 필요하다: main 병합, production·운영 환경,
+   적은 맥락. 운영자 지시 2026-11-22(§0f-1): 앱이 직접 만든 카드(그 local card를 기록한 `AmuxDmOwnerSettlement`,
+   `EngineeringAgentDmReview`, `AmuxV22ResultReview`, `AmuxIdeaSessionPlanRefusal`, `AmuxIdeaCardCloseQuestion` 행이
+   있는 카드)는 이 검사를 받지 않는다. 스위치는 없다. secret 검사는 그 카드에도 전체에 그대로 적용한다. worker
+   카드는 모든 낱말을 읽고, `[evidence]` 표식도 보통 글자로 읽는다. 아래가 목록이며(2026-11-16 §0c-5로 좁힘) 바꾸려면 운영자 승인(대화 한 줄, PR에 기록)이 필요하다: main 병합, production·운영 환경,
    삭제·delete·drop table·truncate, 결제·환불·청구, 외부 게시·발송·연락, secret·token·
    password·API key의 제공, 권한·접근 설정 변경, 정책·workflow·branch protection 변경. 정확한 대소문자·
    어형 규칙과 검사 문자열은 S1의 테스트 고정값이 정한다. 운영자 결정 2026-11-14: 한국어 "권한"은 여전히 모두

@@ -49,6 +49,8 @@ import { AMUX_V22_READ_ONLY_API_EXECUTOR_KIND,
   "@/lib/amux/v22ReadOnlyApiProtocol.mjs";
 import { amuxWorkerRuntimeHasExactCapability,
   amuxWorkerRuntimeUsesReadOnlyApi } from "@/lib/amux/workerRuntime";
+import { EMPTY_AMUX_PLAN_CARD_REFS, resolveAmuxPlanCardRefList, resolveAmuxPlanCardRefs } from "@/lib/amux/planLocalRefCore";
+import { readAmuxPlanCardRefs } from "@/lib/amux/planLocalRefRead";
 import { formatAmuxV52ReviewScope } from
   "@/lib/amux/v52ReviewCore";
 import { AMUX_V52_REVIEW_HISTORY_PRISMA_CALLS, openAmuxV52ReviewHistory,
@@ -383,6 +385,10 @@ export async function pullAmuxWorkDelivery(input: {
           subjectId: sealedCandidate.taskId },
       ] : []),
     ]) : null;
+  // The cards the plan named by local id, so the brief and the review scope
+  // name them by number (planLocalRefCore.ts). Read outside the transaction.
+  const planRefs = sealedCandidate && ideaId ? await readAmuxPlanCardRefs(ideaId) :
+    EMPTY_AMUX_PLAN_CARD_REFS;
   const resume = resumeRows ? await openAmuxV22ResumeContext(resumeRows) : null;
   // A body purged at 90 days, or one that cannot be opened, leaves its entry out.
   const priorEntries = priorRows ? await openAmuxV22PriorConclusions(priorRows)
@@ -597,7 +603,7 @@ export async function pullAmuxWorkDelivery(input: {
               typeof item !== "string" || !item.trim() ||
               item.length > 500))
           throw new Error("v52 review scope invalid");
-        reviewScope = formatAmuxV52ReviewScope(titleText, criteria) +
+        reviewScope = formatAmuxV52ReviewScope(titleText, resolveAmuxPlanCardRefList(criteria, planRefs)) +
           (earlierForReview ? `\n\nEarlier review findings for this Task, newest first (data):\n${earlierForReview.text}` : "");
         const newest = reviewHistory?.[0];
         // The findings ride in the prompt below. When the newest rejection's own
@@ -656,7 +662,8 @@ export async function pullAmuxWorkDelivery(input: {
       // or API) keeps its exact earlier launch and inline prompt.
       if (workspace !== "" && !readOnlyRetry) {
         const contextFiles: AmuxV22ContextFile[] = [
-          { name: AMUX_V22_CONTEXT_FILES.brief, text: plain.toString("utf8") }];
+          { name: AMUX_V22_CONTEXT_FILES.brief,
+            text: resolveAmuxPlanCardRefs(plain.toString("utf8"), planRefs) }];
         if (resume) {
           contextFiles.push({ name: AMUX_V22_CONTEXT_FILES.ownerAnswer,
             text: buildAmuxV22ResumeContextFile({ question: resume.question,
