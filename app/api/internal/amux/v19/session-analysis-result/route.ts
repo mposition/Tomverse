@@ -120,7 +120,11 @@ export async function POST(request: Request): Promise<Response> {
   // The existing hierarchy the first page was given (owner decision
   // 2026-11-22). If it cannot be read now, the plan writer checks the page
   // against the active nodes' ids and levels instead.
-  const existingNodes = await loadAmuxExistingHierarchyTargets().catch(() => undefined);
+  const claimedAt = previousPage.length > 0 ? null :
+    (await prisma.amuxIdeaSessionAnalysisBudgetClaim.findUnique({
+      where: { id: body.claimId }, select: { createdAt: true } }).catch(() => null))?.createdAt;
+  const existingNodes = !claimedAt ? undefined :
+    await loadAmuxExistingHierarchyTargets({ createdAtOrBefore: claimedAt }).catch(() => undefined);
   let callbackReturned = false;
   let result: Awaited<ReturnType<typeof commitAmuxMaxSessionResult>>;
   try {

@@ -124,11 +124,18 @@ export async function readAmuxV19MaxPagePrompt(input: {
   let previousPage: AmuxContentKeyIdentity[];
   try { previousPage = await amuxSessionPageKeyIdentities(prisma, input.ideaId); }
   catch { return null; }
-  // The first page is given the existing hierarchy (owner decision
-  // 2026-11-22); a page that cannot be given it is not handed out.
-  let existingNodes: AmuxPermittedTargetRef[];
-  try { existingNodes = await loadAmuxExistingHierarchyTargets(); }
-  catch { return null; }
+  // The first page is given the existing hierarchy as of its claim (owner
+  // decision 2026-11-22); the result check uses the same cutoff. A later page
+  // inherits its targets from the stored prompt and reads none here.
+  let existingNodes: AmuxPermittedTargetRef[] = [];
+  if (previousPage.length === 0) {
+    const claim = await prisma.amuxIdeaSessionAnalysisBudgetClaim.findUnique({
+      where: { id: input.claimId }, select: { createdAt: true } });
+    if (!claim) return null;
+    try {
+      existingNodes = await loadAmuxExistingHierarchyTargets({ createdAtOrBefore: claim.createdAt });
+    } catch { return null; }
+  }
   const keys = await loadAmuxContentKeyRing([{ ideaId: input.ideaId,
     purpose: "idea_raw", subjectId: input.ideaId }, ...previousPage]);
   return prisma.$transaction((tx) =>

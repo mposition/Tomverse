@@ -213,3 +213,19 @@ test("a Feature gets its card number prefix at registration even without a propo
   assert.deepEqual(amuxFeatureDisplayPrefixChoices({ proposed: "bad", title: "가격" }).slice(0, 1),
     ["FEAT1"]);
 });
+
+test("an answer is checked against the hierarchy its stored prompt listed", async () => {
+  const { amuxPromptPermittedTargetRefs } = await import("@/lib/amux/ideaAnalysisPromptCore");
+  const built = buildAmuxIdeaAnalysisPrompt({ previewId: "preview_12345678", chunkIndex: 0,
+    revisionChunkIndex: 0, continuation: null,
+    sourceTexts: [{ refId: "operator_idea", kind: "operator_idea", text: "Align public pricing." }],
+    permittedTargetRefs: existing() });
+  assert.equal(built.status, "prompt_candidate");
+  if (built.status !== "prompt_candidate") return;
+  // The stored prompt names exactly the nodes it showed, not today's hierarchy.
+  assert.deepEqual(amuxPromptPermittedTargetRefs(built.prompt, 0), existing());
+  assert.equal(amuxPromptPermittedTargetRefs(built.prompt, 1), null);
+  assert.equal(amuxPromptPermittedTargetRefs("not a prompt", 0), null);
+  assert.equal(amuxPromptPermittedTargetRefs(built.prompt.replace('"level":"feature"',
+    '"level":"task"'), 0), null);
+});

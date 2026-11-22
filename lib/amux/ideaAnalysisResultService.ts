@@ -16,8 +16,7 @@ import { amuxContentDigest, type AmuxContentKeys } from "./ideaCrypto.ts";
 import { amuxAnalysisChunkMaxBytes } from "./ideaAnalysisChunkCore.ts";
 import { prepareAmuxAnalysisPageDraft } from "./ideaAnalysisPageDraftCore.ts";
 import { commitAmuxFirstIdeaAnalysisDraft } from "./ideaFirstAnalysisDraftService.ts";
-import { readPreviousOutputPage } from "./ideaTransferPreviewService.ts";
-import { readAmuxActiveNodeTargetsInTx } from "./ideaNodeDuplicateScanService.ts";
+import { readAmuxPreviewPromptTargetsInTx, readPreviousOutputPage } from "./ideaTransferPreviewService.ts";
 
 const ID = /^[A-Za-z0-9:_-]{1,128}$/;
 type Outcome = "verified_success" | "invocation_failed" | "outcome_unknown";
@@ -295,10 +294,12 @@ export async function commitAmuxIdeaAnalysisResult(
       unitIds: input.unitIds, chunkIndex: identity.chunkIndex,
       revisionChunkIndex: identity.chunkIndex,
       permittedSourceRefIds: ["operator_idea"],
-      // A first page may attach to any active existing node (owner decision
-      // 2026-11-22); its prompt listed them with their titles.
+      // A first page is checked against the existing hierarchy its stored
+      // prompt listed (owner decision 2026-11-22).
       permittedTargetRefs: previous?.permittedTargetRefs ??
-        await readAmuxActiveNodeTargetsInTx(tx),
+        await readAmuxPreviewPromptTargetsInTx(tx, { ideaId: input.ideaId,
+          previewId: input.previewId, chunkIndex: identity.chunkIndex, keys: input.keys })
+          .catch(() => { throw new AmuxIdeaAnalysisResultError("integrity_unavailable"); }),
       sourceUnitCount: 1, coveredStartOrdinal: 0, coveredEndOrdinal: 0,
       history: earlier.map((row) => ({ chunkIndex: row.chunkIndex,
         coveredStartOrdinal: row.coveredStartOrdinal!,

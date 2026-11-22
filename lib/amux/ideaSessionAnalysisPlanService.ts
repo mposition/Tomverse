@@ -220,7 +220,9 @@ export async function commitAmuxSessionAnalysisPlanInTx(tx: Tx, input: {
     context = await readAmuxSessionPageContextInTx(tx, { ideaId: idea.id,
       actorUserId: idea.actorUserId, planId: idea.currentSourcePlanRevisionId,
       now, keys: input.keys,
-      existingNodes: input.existingNodes ?? await readAmuxActiveNodeTargetsInTx(tx) });
+      existingNodes: input.existingNodes ?? await readAmuxActiveNodeTargetsInTx(tx, {
+        createdAtOrBefore: (await tx.amuxIdeaSessionAnalysisBudgetClaim.findUnique({
+          where: { id: input.claimId }, select: { createdAt: true } }))?.createdAt ?? now }) });
   } catch (error) {
     if (error instanceof AmuxSessionAnalysisPlanError &&
         error.code === "continuation_unavailable") {

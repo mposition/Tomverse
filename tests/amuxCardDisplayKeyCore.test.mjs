@@ -143,10 +143,10 @@ test("the migration is additive and writes no row", () => {
 
 test("the allocator is one bound INSERT ... ON CONFLICT that advances by one, after the audit chain lock", () => {
   const allocator = readFileSync("lib/amux/cardDisplayKeyAllocator.ts", "utf8").replace(/\r\n/g, "\n");
-  // Four statements: the counter's one INSERT, the read-only Feature prefix
-  // lookup, and (owner decision 2026-11-22) the NULL -> prefix update of an
-  // existing Feature with its read-back.
-  assert.equal((allocator.match(/\.\$queryRaw\b/g) ?? []).length, 4);
+  // Five statements: the counter's one INSERT, the read-only Feature prefix
+  // lookup and its FEAT<n> overflow read, and (owner decision 2026-11-22) the
+  // NULL -> prefix update of an existing Feature with its read-back.
+  assert.equal((allocator.match(/\.\$queryRaw\b/g) ?? []).length, 5);
   assert.match(allocator, /UPDATE "AmuxPortfolioNode" SET "displayPrefix" = \$\{prefix\}\n\s+WHERE "id" = \$\{featureNodeId\} AND "level" = 'feature' AND "displayPrefix" IS NULL/);
   assert.equal((allocator.match(/\bINSERT INTO\b/g) ?? []).length, 1);
   assert.match(allocator, /SELECT "displayPrefix" FROM "AmuxPortfolioNode"\n\s+WHERE "displayPrefix" = ANY\(\$\{candidates\}::TEXT\[\]\)/);

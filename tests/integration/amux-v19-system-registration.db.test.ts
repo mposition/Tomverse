@@ -1615,7 +1615,7 @@ test("a plan attached to existing nodes registers under them and creates only it
     assert.equal(newFeature.level, "feature");
     assert.equal(newFeature.parentId, epic.id, "the new Feature sits under the existing Epic");
     // No prefix was proposed: the title's prefix is taken at registration.
-    assert.match(newFeature.displayPrefix ?? "", /^CONTRASTd*$/);
+    assert.match(newFeature.displayPrefix ?? "", /^CONTRAST\d*$/);
     const cards = await prisma.amuxWorkItem.findMany({ where: { id: { in: decisions
       .flatMap((row) => row.registeredWorkItemId ? [row.registeredWorkItemId] : []) } },
     select: { parentFeatureNodeId: true, displayKey: true } });

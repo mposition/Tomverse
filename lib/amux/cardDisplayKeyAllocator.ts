@@ -62,8 +62,9 @@ export async function allocateAmuxCardDisplayKey(tx: AllocatorClient, prefix: st
  * the 2026-11-22 owner decision): the proposal or its first free
  * `<PREFIX>2` .. `<PREFIX>99` variant; with no usable proposal, the prefix
  * its title suggests, then FEAT<n>, as the backfill chooses
- * (amuxFeatureDisplayPrefixChoices). Null only when every choice is taken.
- * One read, inside the caller's transaction; the unique index on
+ * (amuxFeatureDisplayPrefixChoices). When FEAT1..FEAT999 are all held too,
+ * the next FEAT<n> after the highest one, so a Feature always gets one.
+ * Reads inside the caller's transaction; the unique index on
  * `AmuxPortfolioNode.displayPrefix` still refuses a concurrent creation that
  * chose the same one.
  */
@@ -75,7 +76,14 @@ export async function chooseAmuxFeatureDisplayPrefix(
     SELECT "displayPrefix" FROM "AmuxPortfolioNode"
     WHERE "displayPrefix" = ANY(${candidates}::TEXT[])
   `;
-  return pickAmuxFeatureDisplayPrefix(candidates, new Set(taken.map((row) => row.displayPrefix)));
+  const picked = pickAmuxFeatureDisplayPrefix(candidates, new Set(taken.map((row) => row.displayPrefix)));
+  if (picked !== null) return picked;
+  const highest = await tx.$queryRaw<Array<{ highest: bigint | number | null }>>`
+    SELECT MAX(substring("displayPrefix" FROM 5)::BIGINT) AS "highest" FROM "AmuxPortfolioNode"
+    WHERE "displayPrefix" ~ '^FEAT[0-9]{1,12}$'
+  `;
+  const next = `FEAT${BigInt(highest[0]?.highest ?? 0) + BigInt(1)}`;
+  return isAmuxCardDisplayPrefix(next) ? next : null;
 }
 
 /**

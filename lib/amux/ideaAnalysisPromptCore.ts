@@ -265,6 +265,32 @@ function buildCheckedPrompt(
   };
 }
 
+const STORED_DATA = new RegExp(`\\n${DATA_BEGIN}\\n([^\\n]+)\\n${DATA_END}\\n$`);
+
+/** The permitted targets a stored prompt gave the model, read back from its
+ * confirmed data, or null when the prompt is not one this module built. An
+ * answer to that prompt is checked against exactly these (owner decision
+ * 2026-11-22: the existing hierarchy the first page was shown). */
+export function amuxPromptPermittedTargetRefs(prompt: unknown,
+  chunkIndex: number): AmuxPermittedTargetRef[] | null {
+  try {
+    if (typeof prompt !== "string") return null;
+    const match = STORED_DATA.exec(prompt);
+    if (!match) return null;
+    const data: unknown = JSON.parse(match[1]!);
+    const record = data && typeof data === "object" && !Array.isArray(data)
+      ? data as Record<string, unknown> : null;
+    const refs = record?.permittedTargetRefs;
+    if (!Array.isArray(refs) || record?.chunkIndex !== chunkIndex) return null;
+    const targets = refs.map((raw) => snapshotAmuxPermittedTarget(raw));
+    if (targets.some((target) => target === null ||
+        !amuxPermittedTargetRefSafe(target, chunkIndex))) return null;
+    return targets as AmuxPermittedTargetRef[];
+  } catch {
+    return null;
+  }
+}
+
 /** A built prompt with one note just before its confirmed data, which stays
  * the prompt's last block. The data comes after the instructions, so the first
  * marker is always the data's own. */

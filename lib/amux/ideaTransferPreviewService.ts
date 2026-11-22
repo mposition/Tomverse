@@ -30,6 +30,7 @@ import {
   AMUX_V4_ANALYSIS_PROMPT_VERSION,
   buildAmuxIdeaAnalysisPrompt,
   continuationFromAmuxAnalysisChunk,
+  amuxPromptPermittedTargetRefs,
 } from "./ideaAnalysisPromptCore.ts";
 import { matchesInitialPlanSystemAudit } from "./ideaInitialPlanAuditCore.ts";
 import { buildAmuxSourcePlanManifest } from "./ideaSourcePlanManifestCore.ts";
@@ -240,6 +241,44 @@ export async function readPreviousOutputPage(tx: Prisma.TransactionClient, input
     throw new IdeaTransferPreviewError("integrity_unavailable");
   }
   return { continuation, permittedTargetRefs };
+}
+
+/** The permitted targets the stored prompt of one preview gave the model
+ * (owner decision 2026-11-22): an answer is checked against exactly the
+ * existing hierarchy its prompt listed, not the hierarchy at answer time. */
+export async function readAmuxPreviewPromptTargetsInTx(tx: Prisma.TransactionClient, input: {
+  ideaId: string; previewId: string; chunkIndex: number; keys: AmuxContentKeys;
+}): Promise<AmuxPermittedTargetRef[]> {
+  const preview = await tx.amuxIdeaTransferPreview.findUnique({
+    where: { id: input.previewId },
+    select: { ideaId: true, chunkIndex: true, payloadCiphertext: true,
+      payloadKeyId: true, payloadKeyVersion: true, payloadDigest: true,
+      payloadDigestKeyId: true, payloadPurgedAt: true } });
+  if (!preview || preview.ideaId !== input.ideaId || preview.chunkIndex !== input.chunkIndex ||
+      !preview.payloadCiphertext || !preview.payloadKeyId || !preview.payloadKeyVersion ||
+      preview.payloadPurgedAt !== null) {
+    throw new IdeaTransferPreviewError("integrity_unavailable");
+  }
+  let payload: Buffer;
+  try {
+    payload = openAmuxContent({ ciphertext: Buffer.from(preview.payloadCiphertext),
+      keyId: preview.payloadKeyId, keyVersion: preview.payloadKeyVersion },
+    "transfer_payload", input.previewId, input.keys);
+  } catch { throw new IdeaTransferPreviewError("integrity_unavailable"); }
+  try {
+    if (!verifyAmuxContentDigest(payload, "transfer_payload", input.previewId,
+      preview.payloadDigest, preview.payloadDigestKeyId, input.keys)) {
+      throw new IdeaTransferPreviewError("integrity_unavailable");
+    }
+    const parsed: unknown = JSON.parse(payload.toString("utf8"));
+    const targets = parsed && typeof parsed === "object" && !Array.isArray(parsed) &&
+      (parsed as Record<string, unknown>).previewId === input.previewId
+      ? amuxPromptPermittedTargetRefs((parsed as Record<string, unknown>).prompt,
+        input.chunkIndex) : null;
+    if (!targets) throw new IdeaTransferPreviewError("integrity_unavailable");
+    return targets;
+  } catch { throw new IdeaTransferPreviewError("integrity_unavailable"); }
+  finally { payload.fill(0); }
 }
 
 /** One idea-only, non-sending preview. The owner sees the same stored prompt

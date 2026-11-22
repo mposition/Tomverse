@@ -473,6 +473,9 @@ export async function commitAmuxV4CardRegistration(tx: Prisma.TransactionClient,
   let assignedFeaturePrefix: string | null = null;
   if (featureDisplayPrefix === null) {
     featureDisplayPrefix = await assignAmuxFeatureDisplayPrefix(tx, hierarchy[2].id);
+    // A card is never registered unnumbered; one that cannot be numbered is
+    // not registered at all.
+    if (featureDisplayPrefix === null) throw new AmuxV4UnitDecisionError("integrity_unavailable");
     assignedFeaturePrefix = featureDisplayPrefix;
   }
   const displayKey = featureDisplayPrefix === null ? null :

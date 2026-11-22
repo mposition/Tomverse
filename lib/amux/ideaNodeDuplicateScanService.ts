@@ -14,7 +14,7 @@ import { scanAmuxNodeDuplicates, type AmuxDuplicateNode } from
 
 const LIMIT = 1_000;
 const select = { id: true, level: true, parentId: true, state: true,
-  revision: true, archivedAt: true, displayPrefix: true, titleCiphertext: true,
+  revision: true, archivedAt: true, displayPrefix: true, createdAt: true, titleCiphertext: true,
   descriptionCiphertext: true, contentKeyId: true, contentKeyVersion: true,
   contentDigest: true, contentDigestKeyId: true } as const;
 type NodeScanRow = Prisma.AmuxPortfolioNodeGetPayload<{ select: typeof select }>;
@@ -126,10 +126,19 @@ async function readVerifiedNodeCatalog(limit: number | null) {
 /** Owner decision 2026-11-22: the existing hierarchy an analysis page is
  * given as permitted targets, read with no count limit. Read before the
  * transaction that builds the prompt, because each node's key is fetched. */
-export async function loadAmuxExistingHierarchyTargets(): Promise<AmuxPermittedNodeTarget[]> {
+export async function loadAmuxExistingHierarchyTargets(options: {
+  /** A session page's claim time: the prompt handed out for the claim and the
+   * check of its answer then name the same nodes (nodes created later are
+   * left out of both; one archived in between is refused, as registration
+   * would refuse it). */
+  createdAtOrBefore?: Date;
+} = {}): Promise<AmuxPermittedNodeTarget[]> {
   const { rows, catalog } = await readVerifiedNodeCatalog(null);
   const prefixOf = new Map(rows.map((row) => [row.id, row.displayPrefix]));
-  return amuxExistingHierarchyTargets(catalog.map((node) => ({ id: node.id,
+  const cutoff = options.createdAtOrBefore;
+  const kept = new Set(rows.filter((row) => !cutoff || row.createdAt <= cutoff)
+    .map((row) => row.id));
+  return amuxExistingHierarchyTargets(catalog.filter((node) => kept.has(node.id)).map((node) => ({ id: node.id,
     level: node.level, parentId: node.parentId, title: node.title,
     displayPrefix: prefixOf.get(node.id) ?? null, archived: node.archived })));
 }
@@ -139,9 +148,12 @@ export async function loadAmuxExistingHierarchyTargets(): Promise<AmuxPermittedN
  * belong only to the prompt. */
 export async function readAmuxActiveNodeTargetsInTx(
   tx: Prisma.TransactionClient,
+  options: { createdAtOrBefore?: Date } = {},
 ): Promise<AmuxPermittedNodeTarget[]> {
   const rows = await tx.amuxPortfolioNode.findMany({
-    where: { state: "active", archivedAt: null }, orderBy: { id: "asc" },
+    where: { state: "active", archivedAt: null,
+      ...(options.createdAtOrBefore ? { createdAt: { lte: options.createdAtOrBefore } } : {}) },
+    orderBy: { id: "asc" },
     select: { id: true, level: true } });
   return rows.flatMap((row) => ["initiative", "epic", "feature"].includes(row.level)
     ? [{ ref: row.id, kind: "node" as const,
