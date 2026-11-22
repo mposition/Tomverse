@@ -117,7 +117,9 @@ export async function releaseOrphanedResearchSegments(limit = 100) {
       // Nothing dispatched on this hold; refund it. A failure leaves it to expiry, which reads "released" as zero.
       await funding.settle({ userId: segment.run.userId, reservationId: segment.reservationId, usage: { inputTokens: 0, outputTokens: 0,
         cachedInputTokens: 0, cacheWriteInputTokens: 0, reasoningTokens: 0, usageFromProvider: true, outcome: "failed", searchExecuted: false,
-        searchQueryCount: 0, searchBackendRequestCount: 0, searchQueriesObserved: true } }).catch(() => undefined);
+        searchQueryCount: 0, searchBackendRequestCount: 0, searchQueriesObserved: true } }).catch((error: unknown) => {
+        console.error(JSON.stringify({ event: "research_engine_orphan_settle_deferred", segmentId: segment.id, code: (error as { code?: string }).code ?? "unknown" }));
+      });
     });
     if (ok) released += 1;
   }

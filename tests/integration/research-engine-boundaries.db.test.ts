@@ -375,3 +375,38 @@ test("a budget-stopped run past its deadline is finished by recovery with the ev
   const money = await readResearchRunMoney(prisma, run.id);
   assert.ok(money.settledCredits <= money.approvedCredits);
 });
+
+test("a run with an unsettled unknown dispatch cannot be deleted; synthesis re-checks private sources before sending private-derived sections", async () => {
+  let turns = 0;
+  const model = createFakeModel({ respond: (call) => {
+    if (call.tool === "submit_research_turn" && turns++ === 0) return { usage: "unknown" };
+    return defaultResponse(call, { subquestions: 1, sections: 1, readsPerTurn: 1 });
+  } });
+  installFakes({ model });
+  createFakeWeb();
+  const user = await createUser("unknown-delete");
+  const run = await create(user.id);
+  await drainResearchWork("unknown-delete", 2);
+  assert.ok(await prisma.researchFundingSegment.count({ where: { runId: run.id, status: "unknown" } }));
+  const state = await readResearchRunDto(user.id, run.id);
+  assert.equal(state.actions.canDelete, false);
+  await rejects(deleteResearchRun({ request: fakeRequest(), userId: user.id, runId: run.id }), "RESEARCH_RUN_ACTIVE");
+
+  // Synthesis: lock the private conversation after sections exist; the synthesis call must not be sent.
+  const fakes = installFakes();
+  createFakeWeb();
+  const owner = await createUser("synth-revalidate");
+  const conversation = await prisma.conversation.create({ data: { userId: owner.id, title: "Notes", kind: "chat", productKey: "chat", selectionMode: "manual", selectedModels: "[]" } });
+  await prisma.message.create({ data: { id: randomUUID(), role: "user", content: "Private planning notes that only the analyst may read in full detail.", conversationId: conversation.id } });
+  const privateRun = await create(owner.id, { sources: [{ type: "conversation", conversationId: conversation.id }] });
+  for (let slice = 0; slice < 200; slice++) {
+    const pending = await prisma.researchWorkItem.findFirst({ where: { runId: privateRun.id, kind: "synthesize", status: "queued" } });
+    if (pending && !(await prisma.researchWorkItem.count({ where: { runId: privateRun.id, kind: { in: ["write_section", "verify"] }, status: { in: ["queued", "running"] } } }))) break;
+    if (!(await processOneResearchWorkItem("synth-a"))) break;
+  }
+  await prisma.conversation.update({ where: { id: conversation.id }, data: { password: "hashed-placeholder", passwordVersion: { increment: 1 } } });
+  const before = fakes.model.calls.filter((call) => call.tool === "submit_research_synthesis").length;
+  await drainResearchWork("synth-b", 2);
+  assert.equal(fakes.model.calls.filter((call) => call.tool === "submit_research_synthesis").length, before, "synthesis was not sent after the source was re-locked");
+  assert.equal((await readResearchRunDto(owner.id, privateRun.id)).status, "completed", "a model-free partial report was kept");
+});

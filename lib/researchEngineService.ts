@@ -438,7 +438,8 @@ export async function requestResearchRevision(input: { request: Request; userId:
 export async function deleteResearchRun(input: { request: Request; userId: string; runId: string }) {
   await prisma.$transaction(async (tx) => {
     const run = await ownedRunForMutation(tx, input.userId, input.runId, input.request);
-    const inFlight = await tx.researchFundingSegment.count({ where: { runId: run.id, status: { in: ["reserving", "reserved"] } } });
+    // An unknown outcome keeps its record until settled; deleting it would let expiry refund a request that may have run.
+    const inFlight = await tx.researchFundingSegment.count({ where: { runId: run.id, status: { in: ["reserving", "reserved", "unknown"] } } });
     const dispatching = await tx.researchPreviewGeneration.count({ where: { runId: run.id, status: "dispatch_started" } });
     const running = await tx.researchWorkItem.count({ where: { runId: run.id, status: "running" } });
     if (inFlight || dispatching || running) throw refuse(409, "RESEARCH_RUN_ACTIVE", "Cancel the research and wait for in-flight work to finish before deleting.");
@@ -463,13 +464,14 @@ async function readableRun(userId: string, runId: string, request?: Request) {
 
 export async function readResearchRunDto(userId: string, runId: string, request?: Request): Promise<ResearchRunV2Dto> {
   const run = await readableRun(userId, runId, request);
-  const [plan, items, money, sourceCounts, readCount, unknownGenerations] = await Promise.all([
+  const [plan, items, money, sourceCounts, readCount, unknownGenerations, heldUnknown] = await Promise.all([
     run.planRevision ? prisma.researchPlanRevision.findUnique({ where: { runId_revision: { runId, revision: run.planRevision } } }) : null,
     prisma.researchWorkItem.findMany({ where: { runId }, select: { kind: true, status: true, payload: true, result: true } }),
     readResearchRunMoney(prisma, runId),
     prisma.researchSource.groupBy({ by: ["visibility"], where: { runId }, _count: true }),
     prisma.researchSourceVersion.count({ where: { runId, readStatus: "read" } }),
     prisma.researchPreviewGeneration.count({ where: { runId, status: { in: ["outcome_unknown"] } } }),
+    prisma.researchFundingSegment.count({ where: { runId, status: "unknown" } }),
   ]);
   const counts = { queued: 0, running: 0, completed: 0, failed: 0, attention: 0, blocked: 0, cancelled: 0 };
   for (const item of items) {
@@ -513,7 +515,7 @@ export async function readResearchRunDto(userId: string, runId: string, request?
       canApprovePlan: run.status === "awaiting_input" && !run.approvedPlanRevision && Boolean(parsedPlan?.success),
       canEditPlan: run.status === "awaiting_input" && !run.approvedPlanRevision,
       canRevise: run.status === "completed" && run.currentReportRevision > 0,
-      canDelete: (terminal || ["draft", "awaiting_input"].includes(run.status)) && !inFlight,
+      canDelete: (terminal || ["draft", "awaiting_input"].includes(run.status)) && !inFlight && !heldUnknown,
       canFinish: Boolean(run.approvedPlanRevision) && !run.cancelRequestedAt && run.lastErrorCode !== "RESEARCH_FINALIZE_REQUESTED" &&
         ((run.status === "awaiting_input" && run.lastErrorCode === "RESEARCH_RUN_BUDGET_REACHED") || ["queued", "running"].includes(run.status)),
     },

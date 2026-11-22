@@ -387,7 +387,11 @@ async function handleSearch(run: RunRow, item: ResearchWorkItem, fence: Research
     includeDomains: manifest.brief.includeDomains, excludeDomains: excludedDomains(manifest) };
   let outcome: Awaited<ReturnType<typeof runResearchSearch>>;
   try { outcome = await runResearchSearch(payload.query, filters, signal); }
-  catch { outcome = { ok: false, reason: "backend_timeout", dispatched: true }; }
+  catch (error) {
+    // The request may have reached the vendor: treated as unknown (conservative for money), but logged by type.
+    console.error(JSON.stringify({ event: "research_engine_search_threw", name: error instanceof Error ? error.name : "unknown", aborted: signal.aborted }));
+    outcome = { ok: false, reason: "backend_timeout", dispatched: true };
+  }
   if (!outcome.ok) {
     const knownNotServed = !outcome.dispatched || ["backend_rate_limited", "backend_unauthorized"].includes(outcome.reason);
     await prisma.$transaction(async (tx) => {
@@ -715,7 +719,15 @@ async function handleSynthesize(run: RunRow, item: ResearchWorkItem, fence: Rese
   const claims = await prisma.researchClaim.findMany({ where: { revisionId: revision.id } });
   const plan = await approvedPlan(run, true);
   const limitations = await deterministicLimitations(run.id, manifest);
+  // Sections and claims may carry private-derived content: re-check every private
+  // source they cite immediately before sending them to the provider.
+  const citedPrivate = new Set(claims.flatMap((claim) => (claim.evidence as Array<{ sourceKey: string }>).map((evidence) => evidence.sourceKey))
+    .filter((key) => key.startsWith("P")));
+  const privateEntries = manifest.entries.filter((entry) => entry.type !== "url" &&
+    (citedPrivate.has(entry.key) || claims.some((claim) => claim.privateDerived))) as ResearchPrivateManifestEntry[];
   const result = await callResearchModel({ run, fence, role: "writer", purpose: "finalization", dispatchKey: dispatchKeyFor(item),
+    ...(privateEntries.length ? { revalidate: async () =>
+      (await Promise.all(privateEntries.map((entry) => revalidateResearchPrivateEntry(run.userId, entry)))).every(Boolean) } : {}),
     ...writerSynthesisPrompt({ question: manifest.brief.question, locale: manifest.brief.outputLanguage ?? manifest.locale,
       sections: document.sections.map((section) => `## ${section.heading}\n${section.blocks.map((block) => block.type === "paragraph" ? block.text : block.caption).join("\n").slice(0, 3_000)}`),
       criteria: plan?.completionCriteria ?? [], claims: claims.filter((claim) => ["conflicting", "unverified", "partial"].includes(claim.verification))
@@ -1088,7 +1100,7 @@ export async function createPublicRedaction(runId: string, parentRevision: numbe
     const plan = run.approvedPlanRevision ? await tx.researchPlanRevision.findUnique({ where: { runId_revision: { runId, revision: run.approvedPlanRevision } } }) : null;
     const headings = new Map((plan ? researchPlanSchema.parse(plan.plan).outline : []).map((section) => [section.key, section.heading]));
     const { document } = redactReportForPublic(researchReportDocumentSchema.parse(parent.document), claims, {
-      title: manifest.publicBrief.slice(0, 200), headings, summary: labels.redactedNote, removedNote: labels.redactedNote });
+      title: manifest.publicBrief.slice(0, 200), headings, summary: labels.redactedNote, removedNote: labels.redactedNote, publicQuestion: manifest.publicBrief });
     const latest = await tx.researchReportRevision.aggregate({ where: { runId }, _max: { revision: true } });
     const revision = (latest._max.revision ?? 0) + 1;
     const created = await tx.researchReportRevision.create({ data: { runId, revision, parentRevision, planRevision: parent.planRevision,

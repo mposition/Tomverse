@@ -47,12 +47,14 @@ test("the public redaction reuses no writer or synthesizer prose and no private 
   document.nextQuestions = ["Ask about the private salary"];
   document.bibliography = buildBibliography(document, claims, sources);
   const { document: shared } = redactReportForPublic(document, claims, { title: "User question", headings: new Map([["s1", "Planner heading"]]),
-    summary: "public summary note", removedNote: "removed" });
+    summary: "public summary note", removedNote: "removed", publicQuestion: "Public question only" });
   const json = JSON.stringify(shared);
   for (const leaked of ["Private paragraph", "Private fact", "my-private-file", "private salary", "private notes", "Public paragraph", "Limitation derived"]) {
     assert.ok(!json.includes(leaked), leaked);
   }
   assert.equal(shared.title, "User question");
+  assert.equal(shared.scope.question, "Public question only");
+  assert.deepEqual(shared.scope.assumptions, []);
   assert.equal(shared.sections[0].heading, "Planner heading");
   assert.deepEqual(shared.sections[0].blocks.map((block) => block.claimKeys), [["C1"]], "only the public, citable claim, as its own text");
   assert.ok(shared.bibliography.every((entry) => !entry.private));

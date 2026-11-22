@@ -133,6 +133,8 @@ export function renderReportMarkdown(document: ResearchReportDocument, claims: R
  */
 export function redactReportForPublic(document: ResearchReportDocument, claims: ReadonlyMap<string, ReportClaim>, input: {
   title: string; headings: ReadonlyMap<string, string>; summary: string; removedNote: string;
+  /** The text the user approved for public search; the only question a public version may show. */
+  publicQuestion: string;
 }) {
   const publicClaims = [...claims.values()].filter((claim) => !claim.privateDerived &&
     claim.evidence.length > 0 && claim.evidence.every((evidence) => !evidence.sourceKey.startsWith("P")) && citableClaim(claim));
@@ -147,7 +149,8 @@ export function redactReportForPublic(document: ResearchReportDocument, claims: 
   const removedBlocks = document.sections.reduce((sum, section) => sum + section.blocks.length, 0);
   return {
     document: { ...document, title: input.title.slice(0, 200) || "Research", summary: input.summary,
-      scope: { ...document.scope, note: "" }, sections, conflicts: [], limitations: [input.removedNote], nextQuestions: [], criteria: [], bibliography },
+      // Scope is rebuilt from approved public input only: no assumptions (a user plan edit could hold private text).
+      scope: { question: input.publicQuestion, assumptions: [], note: "", currentDate: document.scope.currentDate }, sections, conflicts: [], limitations: [input.removedNote], nextQuestions: [], criteria: [], bibliography },
     removedBlocks,
   };
 }
