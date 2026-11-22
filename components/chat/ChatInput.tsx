@@ -6,7 +6,9 @@ import { McpChatPicker } from "@/components/plugins/McpChatPicker";
 import { ChatLocationControl } from "./ChatLocationControl";
 import { composerModelCountLabel } from "./composerModelCountLabel";
 import { reasoningEffortCopy } from "@/lib/reasoningEffortCopy";
-import type { ExplicitReasoningEffort, ReasoningEffort } from "@/lib/reasoningEffort";
+import type { ExplicitReasoningEffort } from "@/lib/reasoningEffort";
+import { ReasoningEffortPicker } from "./ReasoningEffortPicker";
+import { useReasoningEffortPreference } from "./useReasoningEffortPreference";
 import { ReviewModeSwitcher, ReviewParticipants } from "./ReviewStudioChrome";
 import { reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
 import { reviewProviderPreferencesCopy } from "@/lib/reviewProviderPreferencesCopy";
@@ -1109,8 +1111,7 @@ export function ChatInput({
   // every conversation and is deliberately never remounted between them (that
   // would take the portal host, focus and in-flight uploads with it).
   const draftScopeId = draftKeyFor(currentChatId, identityKey);
-  const [effortSelection, setEffortSelection] = useState<{ scope: string; level: ReasoningEffort } | null>(null);
-  const reasoningEffort = effortSelection?.scope === draftScopeId ? effortSelection.level : "default";
+  const [reasoningEffort, setReasoningEffort] = useReasoningEffortPreference(currentProduct, identityKey);
   const draftScopeIdRef = useRef(draftScopeId);
   useEffect(() => {
     draftScopeIdRef.current = draftScopeId;
@@ -1976,34 +1977,20 @@ export function ChatInput({
       activeSelectedModels.every(id => getCatalogModel(id)?.reasoningEfforts?.includes(level)));
   const explicitEffort = showReasoningEffort && reasoningEffort !== "default" ? reasoningEffort : undefined;
   const effortUnavailable = explicitEffort !== undefined && !supportsEffort(explicitEffort);
-  const effortSuffix = explicitEffort ? " · " + effortCopy[explicitEffort] : "";
+  const effortSuffix = explicitEffort ? " · " + effortCopy.options[explicitEffort][0] : "";
+  const autoPickerLabel = explicitEffort ? autoCopy.label : autoCopy.compactLabel;
   const submitWithEffort = () => {
     if (effortUnavailable) return;
     onSubmit(explicitEffort);
-    if (explicitEffort) setEffortSelection(null);
   };
-  const effortLevels = ["low", "default", "high"] as const;
   const reasoningEffortSlot = showReasoningEffort && (
-    <fieldset className="mx-1 mb-2 rounded-xl bg-zinc-100 p-2 dark:bg-zinc-800" data-testid="model-picker-reasoning-effort">
-      <legend className="px-1 text-sm font-semibold">{effortCopy.title}</legend>
-      <p className="mb-1 px-1 text-xs text-zinc-600 dark:text-zinc-300">
-        {effortCopy.question}{isAutoMode ? " " + effortCopy.auto : ""}
-      </p>
-      <div className="grid grid-cols-3 gap-1">
-        {effortLevels.map(level => (
-          <label key={level} className="flex min-h-11 min-w-0 cursor-pointer items-center justify-center gap-1 rounded-lg bg-white px-1 text-center text-xs has-[:checked]:font-bold has-[:disabled]:cursor-default has-[:disabled]:opacity-50 dark:bg-zinc-900">
-            <input type="radio" name="composer-reasoning-effort" value={level}
-              checked={reasoningEffort === level}
-              disabled={level !== "default" && !supportsEffort(level)}
-              onChange={() => setEffortSelection({ scope: draftScopeId, level })} />
-            <span className="break-words">{effortCopy[level]}</span>
-          </label>
-        ))}
-      </div>
-      {!supportsEffort("low") && !supportsEffort("high") && (
-        <p className="px-1 pt-1 text-xs text-zinc-600 dark:text-zinc-300">{effortCopy.unavailable}</p>
-      )}
-    </fieldset>
+    <ReasoningEffortPicker
+      copy={effortCopy}
+      value={reasoningEffort}
+      onChange={setReasoningEffort}
+      supportsEffort={supportsEffort}
+      note={isAutoMode ? effortCopy.auto : currentProduct === "review" ? effortCopy.review : undefined}
+    />
   );
   const deepResearchModel = AVAILABLE_MODELS.find(model => model.id === "perplexity/sonar-deep-research");
   const deepResearchLocked = !deepResearchModel || !canUseModelWithPlan(currentPlan, deepResearchModel);
@@ -3179,12 +3166,14 @@ export function ChatInput({
               ref={modelMenuButtonRef}
               type="button"
               onClick={(event) => toggleModelPicker(event.currentTarget)}
-              className="flex h-11 min-w-0 max-w-[6.5rem] touch-manipulation items-center gap-1 overflow-hidden rounded-xl px-2 text-xs font-medium text-zinc-800 transition hover:bg-zinc-100 max-[240px]:w-11 max-[240px]:max-w-11 max-[240px]:shrink-0 max-[240px]:justify-center max-[240px]:px-0 dark:text-zinc-100 dark:hover:bg-zinc-800 md:max-w-[8.5rem] md:[@media(pointer:fine)]:h-9"
+              className={`flex h-11 min-w-0 touch-manipulation items-center gap-1 overflow-hidden rounded-xl px-2 text-xs font-medium text-zinc-800 transition hover:bg-zinc-100 max-[240px]:w-11 max-[240px]:max-w-11 max-[240px]:shrink-0 max-[240px]:justify-center max-[240px]:px-0 dark:text-zinc-100 dark:hover:bg-zinc-800 md:[@media(pointer:fine)]:h-9 ${
+                explicitEffort ? "max-w-[9.5rem] md:max-w-[12rem]" : "max-w-[6.5rem] md:max-w-[8.5rem]"
+              }`}
               data-testid="composer-model-select"
               title={isAutoMode ? `${autoCopy.activeSummary}. ${autoCopy.modeHint}` : activeModelNames.join(", ")}
               aria-label={
                 isAutoMode
-                  ? `${autoCopy.compactLabel}${effortSuffix}. ${autoCopy.activeSummary}. ${t("chat.modelSelect")}`
+                  ? `${autoPickerLabel}${effortSuffix}. ${autoCopy.activeSummary}. ${t("chat.modelSelect")}`
                   : `${t("chat.modelSelect")}. ${modelsSelectedLabel(activeSelectedModels.length)}${effortSuffix}`
               }
               aria-expanded={isMenuOpen && menuView === "models"}
@@ -3230,7 +3219,7 @@ export function ChatInput({
                 }`}
               >
                 {isAutoMode
-                  ? autoCopy.compactLabel
+                  ? autoPickerLabel
                   : explicitEffort && activeModelNames.length === 1 ? activeModelNames[0] : modelsSelectedLabel(activeSelectedModels.length)}
               </span>
               {explicitEffort && <span className="shrink-0 max-[240px]:sr-only" data-testid="composer-effort-summary">{effortSuffix}</span>}
