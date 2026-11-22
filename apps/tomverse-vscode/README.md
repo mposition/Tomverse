@@ -4,7 +4,7 @@ Ask about a local project, or select **Agent** to propose edits and commands. Re
 
 ## Install and connect
 
-In local VS Code Desktop, run **Extensions: Install from VSIX** and select the supplied `tomverse-vscode-0.1.0.vsix`. Open **Tomverse** in the Activity Bar, choose **Connect API key**, and enter your Tomverse API key in the native password input. The key stays in VS Code SecretStorage. Connection refresh only fetches metadata; it does not generate a paid answer. Disconnect removes the local key; revoke it in Tomverse account settings if needed.
+Use the supplied VSIX or download a published version from [GitHub Releases](https://github.com/mposition/Tomverse/releases). In local VS Code Desktop, run **Extensions: Install from VSIX** and select the file. Open **Tomverse** in the Activity Bar, choose **Connect API key** in the setup card, and enter your key in the native password input. The key stays in VS Code SecretStorage. Connection refresh only fetches metadata; it does not generate a paid answer. Disconnect removes the local key; revoke it in Tomverse account settings if needed.
 
 The default API base is `https://tomverse.app/api/code/v1`. Only the user's application settings can change it. Workspace settings, environment variables and project instructions cannot select the key or endpoint. The extension never falls back to the general API. A 404/503 can indicate that the selected server's coding API is not deployed/enabled. API eligibility, shared credits and the key's cap are enforced by Tomverse. Use the server-provided catalog; models cannot be added by typing arbitrary IDs.
 
@@ -20,7 +20,7 @@ Commands show their executable, arguments, working folder, environment names and
 
 ## Sessions, costs and recovery
 
-**Effort** opens a native picker beside the model selector. Low and High appear only when the server catalog offers them; Default preserves the model's existing settings and sends no override. An explicit choice is fixed for the task, including tools, compaction and resume. Smart Adaptive pins its chosen model as usual. Effort does not filter or rank routing candidates. When the selected model cannot apply the requested level, the server uses Default and the sidebar shows that actual applied level. The original request and per-generation applied levels remain in the journal. A completed task can use a different level for its next prompt. Effort can change latency and credit usage; existing request limits and server caps still apply.
+**Effort** beside the model selector shows buttons for the available levels directly in the sidebar. Low and High appear only when the server catalog offers them; Default preserves the model's existing settings and sends no override. An explicit choice is fixed for the task, including tools, compaction and resume. Smart Adaptive pins its chosen model as usual and the model selector displays the advertised credit range or ceiling. Effort does not filter or rank routing candidates. When the selected model cannot apply the requested level, the server uses Default and the sidebar shows that actual applied level. The original request and per-generation applied levels remain in the journal. A completed task can use a different level for its next prompt. Effort can change latency and credit usage; existing request limits and server caps still apply.
 
 Sessions live outside the project in this extension's local storage, separately for the root, complete API base and credential identity. They include prompts, context, model output and Undo backups. They do not sync to other devices. Turn off the user setting `tomverse.persistSessions` for memory-only sessions; reopening and Undo after exit are then unavailable. **Delete local session** confirms deletion of that conversation and its backups, leaving workspace files and server receipts intact.
 
@@ -30,10 +30,10 @@ Costs come only from this session's request receipts, including compaction, with
 
 Use per-change **Undo** to restore only the extension's change after confirmation. Dirty files, later user edits and subsequent changes cause it to stop. It does not roll back arbitrary command effects or promise normal editor Ctrl+Z integration. Diagnostics export contains redacted metadata, not source, prompts or raw logs. Output can contain project content; review it before sharing.
 
-## Compatibility and verification
+## Compatibility
 
-P0 targets local VS Code Desktop 1.146.0 or later on Windows x64, macOS arm64 and Linux x64. Windows is the local validation environment. **macOS and Linux execution remain NOT RUN until their recorded smoke tests are supplied.** The current local host embeds Node 24.22.1. Remote SSH, WSL, containers, Codespaces, web and virtual workspaces are unsupported and blocked before tasks. Restricted Mode provides setup/help only.
+The extension requires local VS Code Desktop 1.146.0 or later. A single VSIX serves all desktop targets. This package was verified on Windows x64. An earlier build passed local workspace workflows on Linux x64 VS Code Desktop in Ubuntu WSL2. Verification for this package on Linux and macOS arm64 is pending, along with some native Windows accessibility checks. Remote SSH, Remote WSL, containers, Codespaces, web and virtual workspaces are unsupported. Restricted Mode provides setup/help only.
 
 The UI follows the editor theme and provides English, Korean, German, Spanish, French, Portuguese, Simplified Chinese and Traditional Chinese labels. Ctrl/Cmd+Enter sends; IME composition does not submit. Use Tab to navigate. No prompt/source/key telemetry is collected by this extension.
 
-See `RELEASING.md` for builds, actual Extension Host testing, packaging and the separate publication gate. This VSIX is a local development artifact; Marketplace publication, operational deployment and real-model verification are separate statuses.
+An earlier build also exercised Ask and Agent against a development Tomverse API with real models and settled credit receipts. The release notes describe the verification and distribution status for this release.

@@ -9,12 +9,15 @@ test("host protocol rejects arbitrary fields, oversized text, forged commands an
     const base = { channel: "host", run: "run" };
     assert.ok(parseMessage({ ...base, type: "approve", id: "id", decision: "once" }));
     assert.ok(parseMessage({ ...base, type: "chooseEffort", model: "offered-model" }));
+    assert.ok(parseMessage({ ...base, type: "selectEffort", id: "host-selection", level: "low" }));
     for (const value of [
         null,
         {},
         { ...base, type: "approve", id: "id", decision: "once", input: { argv: ["evil"] } },
         { ...base, type: "action", action: "openExternal", url: "https://evil.test" },
         { ...base, type: "chooseEffort", model: "offered-model", level: "high" },
+        { ...base, type: "selectEffort", id: "host-selection", level: "high", model: "other-model" },
+        { ...base, type: "selectEffort", id: "host-selection", level: "unknown" },
         { ...base, type: "send", epoch: "x", prompt: "x".repeat(40_001), mode: "agent", model: "x" },
     ])
         assert.equal(parseMessage(value), null);
