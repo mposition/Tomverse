@@ -216,7 +216,8 @@ test("the shipped register has no problems and two approved pairs, both on owner
     );
     for (const entry of approved) {
         assert.equal(entry.evaluation, null);
-        assert.equal(entry.ownerLaunch.expiresAt, "2026-11-22");
+        // No expiry: an owner launch holds until it is revoked.
+        assert.equal("expiresAt" in entry.ownerLaunch, false);
     }
 });
 
@@ -231,7 +232,6 @@ const ownerLaunchEntry = (launch = {}) => ({
     ownerLaunch: {
         approver: "@qa",
         approvedAt: "2026-10-23",
-        expiresAt: "2026-11-22",
         decisionRef: "chat",
         knownLimitations: "unmeasured",
         ...launch,
@@ -243,18 +243,12 @@ test("an owner launch needs neither a budget nor metrics", () => {
     assert.deepEqual(findEvalRegisterProblems([ownerLaunchEntry()], DURING_LAUNCH), []);
 });
 
-test("an owner launch must expire within thirty days and before it is used", () => {
+test("an owner launch has no expiry, and its approval date must be an ISO date", () => {
+    // Owner decision 2026-11-22: a calendar date no longer fails the register.
+    assert.deepEqual(findEvalRegisterProblems([ownerLaunchEntry()], new Date("2099-01-01T00:00:00Z")), []);
     assert.match(
-        findEvalRegisterProblems([ownerLaunchEntry({ expiresAt: "2026-11-23" })], DURING_LAUNCH)[0],
-        /expire within 30 days/
-    );
-    assert.match(
-        findEvalRegisterProblems([ownerLaunchEntry()], new Date("2026-11-22T00:00:00Z"))[0],
-        /expired/
-    );
-    assert.match(
-        findEvalRegisterProblems([ownerLaunchEntry({ expiresAt: "soon" })], DURING_LAUNCH)[0],
-        /ISO dates/
+        findEvalRegisterProblems([ownerLaunchEntry({ approvedAt: "soon" })], DURING_LAUNCH)[0],
+        /ISO date/
     );
 });
 
@@ -276,15 +270,14 @@ test("every critical validator probe still holds", () => {
     assert.deepEqual(findCriticalProbeFailures(), []);
 });
 
-test("an approval stops resolving at its expiry, at runtime", () => {
+test("an owner launch keeps resolving until it is revoked, at runtime", () => {
     const pair = { extractionModelId: "gpt-5-6-luna", promptVersion: "mem-extract-v9" };
     const register = [ownerLaunchEntry()];
     assert.ok(findApprovedEvalPair(pair, { kind: "none" }, register, DURING_LAUNCH));
-    assert.equal(
-        findApprovedEvalPair(pair, { kind: "none" }, register, new Date("2026-11-22T00:00:00Z")),
-        null
-    );
-    // An approved entry that names no expiry resolves to nothing.
+    assert.ok(findApprovedEvalPair(pair, { kind: "none" }, register, new Date("2099-01-01T00:00:00Z")));
+    // Revoking is what closes it.
+    assert.equal(findApprovedEvalPair(pair, { kind: "revoked", pairs: [pair] }, register, DURING_LAUNCH), null);
+    // An approved entry with neither an evaluation nor an owner launch resolves to nothing.
     assert.equal(
         findApprovedEvalPair(pair, { kind: "none" }, [{ ...ownerLaunchEntry(), ownerLaunch: null }], DURING_LAUNCH),
         null
