@@ -659,3 +659,19 @@ test("concurrent project creates cannot pass the per-account limit together", as
     assert.equal(results.filter((r) => r.status === "fulfilled").length, 1);
     assert.equal(await prisma.conversationProject.count({ where: { userId: owner.id } }), PROJECT_LIMITS.maxProjectsPerAccount);
 });
+
+test("a move into a project archived before the move commits is refused inside the transaction", async () => {
+    const owner = await user();
+    const a = await project(owner.id, "Alpha");
+    const b = await project(owner.id, "Beta");
+    const chat = await conversation(owner.id, a.id);
+    await prisma.conversationProject.update({ where: { id: b.id }, data: { archivedAt: new Date() } });
+    await assert.rejects(
+        updateConversationWithProjectGrounds({
+            userId: owner.id, conversationId: chat.id,
+            update: (tx) => tx.conversation.update({ where: { id: chat.id }, data: { projectId: b.id } }),
+        }),
+        (error: unknown) => (error as { code?: string }).code === "PROJECT_ARCHIVED",
+    );
+    assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: chat.id } })).projectId, a.id);
+});

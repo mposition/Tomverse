@@ -444,7 +444,7 @@ export async function reconcileNativeEvidence(
                     ? { status: "expired", suspendedReason: null, revision: { increment: 1 } }
                     : { status: "active", suspendedReason: null, revision: { increment: 1 } },
             });
-            restored += 1;
+            if (!expired) restored += 1;
         }
     }
     return { suspended, restored };
@@ -526,6 +526,17 @@ export async function updateConversationWithProjectGrounds<T>(input: {
         const wasLocked = current[0]?.locked ?? false;
         const updated = await input.update(tx);
         const moved = fromProjectId !== updated.projectId;
+        if (moved && updated.projectId !== null) {
+            // Re-checked under the target project's row lock: a project
+            // archived concurrently with this move cannot receive it.
+            const target = await tx.$queryRaw<Array<{ archivedAt: Date | null }>>`
+                SELECT "archivedAt" FROM "ConversationProject"
+                WHERE id = ${updated.projectId} AND "userId" = ${input.userId}
+                FOR SHARE
+            `;
+            if (target.length === 0) throw new ApiSecurityError(404, "PROJECT_NOT_FOUND", "Project not found.");
+            if (target[0].archivedAt) throw new ApiSecurityError(409, "PROJECT_ARCHIVED", "Restore the project first.");
+        }
         const lockChanged = updated.password !== undefined && (updated.password !== null) !== wasLocked;
         if (!moved && !lockChanged) return updated;
         await cancelNativeExtractionRuns({ userId: input.userId, conversationIds: [input.conversationId], tx });
