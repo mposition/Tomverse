@@ -215,11 +215,21 @@
             }),
         );
         if (nearBottom) history.scrollTop = history.scrollHeight;
+        // The coding catalog advertises a ceiling for Smart Adaptive. Its actual
+        // cost is settled for the model that answers the request.
+        const adaptiveFloor = Math.min(...state.models
+            .filter((model) => model.id !== "smart-adaptive" && model.creditsPerRequest > 0)
+            .map((model) => model.creditsPerRequest));
         models.replaceChildren(
             ...state.models.map((model) => {
                 const selectedEffort =
                     state.effort?.model === model.id && state.effort.level !== "default" ? ` · ${l.effort}: ${l[`effort_${state.effort.level}`]}` : "";
-                const option = el("option", `${model.name}${selectedEffort} · ${model.creditsPerRequest} ${l.credits}`);
+                const maximum = model.creditsPerRequest;
+                let credits = String(maximum);
+                if (model.id === "smart-adaptive") {
+                    credits = adaptiveFloor < maximum ? `${adaptiveFloor}–${maximum}` : `≤${maximum}`;
+                }
+                const option = el("option", `${model.name}${selectedEffort} · ${credits} ${l.credits}`);
                 option.value = model.id;
                 return option;
             }),

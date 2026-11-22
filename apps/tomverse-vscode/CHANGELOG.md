@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.2
+
+- Show Smart Adaptive's credit range from the offered model catalog, or its ceiling when a range is unavailable.
+- Choose a reasoning effort with native buttons and no search field.
+
 ## 1.0.1
 
 - Package the first stable release with the same workspace features and approval flow.

@@ -550,10 +550,10 @@ export async function run() {
             m.id === "fake-small" ? { ...m, tomverse: { ...m.tomverse, context_window_tokens: 9000, reasoning_efforts: ["high"] } } : m,
         );
         await controller.refresh();
-        const originalPick = controller.dialogs.pick.bind(controller.dialogs);
-        controller.dialogs.pick = async (items) => items.find((item) => item.label === t("effort_high"));
+        const originalSelectButtons = controller.dialogs.selectButtons.bind(controller.dialogs);
+        controller.dialogs.selectButtons = async (items) => items.find((item) => item.label === t("effort_high"));
         await controller.receive({ ...envelope(), type: "chooseEffort", model: "fake-small" });
-        controller.dialogs.pick = originalPick;
+        controller.dialogs.selectButtons = originalSelectButtons;
         const beforeCompact = fake.completions.length;
         await send("Read compact.txt a few times", "ask", "fake-small");
         const compactState = Journal.read(join(sessionHome, "sessions", controller.snapshot().session));
@@ -573,9 +573,9 @@ export async function run() {
         }));
         fake.options.models = modelsWithoutEffort;
         await controller.refresh();
-        const nativePick = controller.dialogs.pick.bind(controller.dialogs);
+        const nativeSelectButtons = controller.dialogs.selectButtons.bind(controller.dialogs);
         const chooseEffort = (model = "fake-coder") => controller.receive({ ...envelope(), type: "chooseEffort", model });
-        controller.dialogs.pick = async (items) => {
+        controller.dialogs.selectButtons = async (items) => {
             assert.deepEqual(
                 items.map((item) => item.label),
                 [t("effort_default")],
@@ -586,7 +586,7 @@ export async function run() {
         assert.equal(controller.snapshot().effort.level, "default");
         fake.options.models = DEFAULT_MODELS.map((model) => ({ ...model, tomverse: { ...model.tomverse, reasoning_efforts: ["low", "high", "invalid"] } }));
         await controller.refresh();
-        controller.dialogs.pick = async (items) => {
+        controller.dialogs.selectButtons = async (items) => {
             assert.deepEqual(
                 items.map((item) => item.label),
                 [t("effort_low"), t("effort_default"), t("effort_high")],
@@ -601,14 +601,14 @@ export async function run() {
         assert.equal(fake.completions.at(-1)!.body.tomverse_effort, "high");
         assert.equal(Journal.read(join(sessionHome, "sessions", controller.snapshot().session)).tasks.at(-1)!.effort, "high");
         assert.equal(JSON.stringify(fake.completions.at(-1)!.body.tools).includes("apply_patch"), false);
-        controller.dialogs.pick = async (items) => items.find((item) => item.label === t("effort_default"));
+        controller.dialogs.selectButtons = async (items) => items.find((item) => item.label === t("effort_default"));
         await chooseEffort();
         replies = [{ text: "Model defaults" }];
         await send("Use defaults for the next task", "ask");
         assert.equal(fake.completions.at(-1)!.body.tomverse_effort, undefined);
-        record("native effort picker follows catalog, rejects webview level injection, preserves Ask and omits default wire override");
+        record("native effort buttons follow the catalog, rejects webview level injection, preserves Ask and omits default wire override");
         await fresh();
-        controller.dialogs.pick = async (items) => items.find((item) => item.label === t("effort_high"));
+        controller.dialogs.selectButtons = async (items) => items.find((item) => item.label === t("effort_high"));
         await chooseEffort("smart-adaptive");
         replies = [
             { toolCalls: [{ name: "apply_patch", args: { edits: [{ path: "effort.txt", action: "create", content: "fixture" }] } }] },
@@ -635,13 +635,13 @@ export async function run() {
         assert.equal(fake.completions.at(-1)!.body.tomverse_effort, undefined);
         assert.equal(controller.snapshot().effort.level, "default");
         assert.equal(controller.snapshot().effort.requested, "high");
-        controller.dialogs.pick = nativePick;
+        controller.dialogs.selectButtons = nativeSelectButtons;
         fake.options.models = undefined;
         record("effort is fixed through Agent approval and reload; removed capability uses Default without changing the pinned model");
         await fresh();
         fake.options.models = DEFAULT_MODELS.map((model) => ({ ...model, tomverse: { ...model.tomverse, reasoning_efforts: ["high"] } }));
         await controller.refresh();
-        controller.dialogs.pick = async (items) => items.find((item) => item.label === t("effort_high"));
+        controller.dialogs.selectButtons = async (items) => items.find((item) => item.label === t("effort_high"));
         await chooseEffort();
         replies = [{ fault: "hang" }];
         const beforeInterrupted = fake.completions.length;
@@ -671,13 +671,13 @@ export async function run() {
         assert.equal(controller.snapshot().effort.level, "default");
         assert.equal(controller.snapshot().effort.requested, "high");
         controller.dialogs.choose = nativeDecision;
-        controller.dialogs.pick = nativePick;
+        controller.dialogs.selectButtons = nativeSelectButtons;
         fake.options.models = undefined;
         record("confirmed recovery preserves the requested effort and records Default fallback across reload when capability is removed");
         await fresh();
         fake.options.models = DEFAULT_MODELS.map((model) => ({ ...model, tomverse: { ...model.tomverse, reasoning_efforts: ["high"] } }));
         await controller.refresh();
-        controller.dialogs.pick = async (items) => items.find((item) => item.label === t("effort_high"));
+        controller.dialogs.selectButtons = async (items) => items.find((item) => item.label === t("effort_high"));
         await chooseEffort();
         fake.options.models = modelsWithoutEffort.map((model) => ({
             ...model,
@@ -690,7 +690,7 @@ export async function run() {
         assert.equal(controller.snapshot().effort.level, "default");
         assert.equal(controller.snapshot().effort.requested, "high");
         assert.equal(controller.snapshot().state, "completed");
-        controller.dialogs.pick = nativePick;
+        controller.dialogs.selectButtons = nativeSelectButtons;
         fake.options.models = undefined;
         record("removed capability uses model defaults for a new task without rejecting the task");
     } catch (error) {

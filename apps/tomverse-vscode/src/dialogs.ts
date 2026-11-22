@@ -6,6 +6,10 @@ export class Dialogs {
     pick<T extends vscode.QuickPickItem>(items: readonly T[], options: vscode.QuickPickOptions): Thenable<T | undefined> {
         return vscode.window.showQuickPick(items, options);
     }
+    selectButtons<T extends { label: string }>(items: readonly T[], message: string, detail: string): Thenable<T | undefined> {
+        const buttons = items.map((item) => ({ title: item.label, item }));
+        return vscode.window.showInformationMessage(message, { modal: true, detail }, ...buttons).then((answer) => answer?.item);
+    }
     choose(message: string, options: vscode.MessageOptions, ...items: string[]): Thenable<string | undefined> {
         const choices: vscode.MessageItem[] = items.map((title) => ({ title, isCloseAffordance: options.modal === true && title === t("cancel") }));
         return vscode.window.showWarningMessage(message, options, ...choices).then((item) => item?.title);

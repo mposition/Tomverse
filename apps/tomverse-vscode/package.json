@@ -2,7 +2,7 @@
   "name": "tomverse-vscode",
   "displayName": "Tomverse",
   "description": "Ask and edit your local workspace with Tomverse. Review every change and command.",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "publisher": "tomverse",
   "license": "SEE LICENSE IN LICENSE",
   "engines": {

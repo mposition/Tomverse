@@ -304,14 +304,15 @@ export class SessionController implements vscode.WebviewViewProvider {
         if (!model || (this.journal && this.journal.state.model.requested !== modelId)) throw new Error("Model not offered. Refresh models.");
         const levels = effortLevels(model);
         const epoch = this.epoch;
-        const selected = await this.dialogs.pick(
-            levels.map((level) => ({
-                label: t(`effort_${level}`),
-                description: t(level === "default" ? "effortDefault" : level === "low" ? "effortLow" : "effortHigh"),
-                level,
-            })),
-            { title: t("effort"), placeHolder: levels.length === 1 ? t("effortUnavailable") : model.name },
-        );
+        const choices = levels.map((level) => ({
+            label: t(`effort_${level}`),
+            description: t(level === "default" ? "effortDefault" : level === "low" ? "effortLow" : "effortHigh"),
+            level,
+        }));
+        const detail = levels.length === 1
+            ? t("effortUnavailable")
+            : choices.map(({ label, description }) => `${label} · ${description}`).join("\n");
+        const selected = await this.dialogs.selectButtons(choices, `${t("effort")} · ${model.name}`, detail);
         if (!selected || epoch !== this.epoch || this.effortLocked()) return;
         this.effort = selected.level;
         this.appliedEffort = undefined;
