@@ -50,13 +50,8 @@ function searchReturnedSources(output: unknown): boolean {
 export const QWEN_GROUNDED_THINKING_BUDGET = 128;
 
 /** DashScope accepts enable_thinking and thinking_budget at the top level of Chat Completions. */
-export function qwenLookupStep(model: AiModel, boundedThinking = false) {
-  if (model.provider !== "qwen" || model.apiModel !== "qwen3.8-flash" ||
-      (model.reasoning && (boundedThinking || model.reasoning !== "none"))) return undefined;
-  const thinking = boundedThinking
-    ? { enable_thinking: true, thinking_budget: QWEN_GROUNDED_THINKING_BUDGET }
-    : { enable_thinking: false };
-  const lookup = createOpenAI({ ...runtimeConfiguration(model), fetch: (url, init) => {
+const qwenChatWithThinking = (model: AiModel, thinking: Record<string, unknown>) =>
+  createOpenAI({ ...runtimeConfiguration(model), fetch: (url, init) => {
     // The SDK serializes the body; leave an unfamiliar request untouched.
     if (typeof init?.body !== "string") return fetch(url, init);
     let body;
@@ -64,6 +59,31 @@ export function qwenLookupStep(model: AiModel, boundedThinking = false) {
     if (!body || typeof body !== "object" || Array.isArray(body)) return fetch(url, init);
     return fetch(url, { ...init, body: JSON.stringify({ ...body, ...thinking }) });
   } }).chat(model.apiModel);
+
+/**
+ * The model for a structured AI Review (comparison review) call.
+ *
+ * DashScope's Qwen 3.x models think by default. As the review's secondary
+ * reviewer, qwen3.7-plus timed out at the 45 s limit on every run seen from
+ * 2026-11-20 to 11-22, and each review waited 45 s to fall back to its primary.
+ * One probe of the same call shape (2026-11-22) spent 1,087 of 1,280 output
+ * tokens thinking and took 22 s on a two-line comparison. A reviewer returns
+ * a fixed JSON verdict, so thinking is turned off for that call only; chat is
+ * left as it is.
+ */
+export const getComparisonReviewModel = (model: AiModel) =>
+  // A Qwen row that names a reasoning effort asked for thinking; keep it.
+  model.provider === "qwen" && (!model.reasoning || model.reasoning === "none")
+    ? qwenChatWithThinking(model, { enable_thinking: false })
+    : getActiveAiModel(model);
+
+export function qwenLookupStep(model: AiModel, boundedThinking = false) {
+  if (model.provider !== "qwen" || model.apiModel !== "qwen3.8-flash" ||
+      (model.reasoning && (boundedThinking || model.reasoning !== "none"))) return undefined;
+  const thinking = boundedThinking
+    ? { enable_thinking: true, thinking_budget: QWEN_GROUNDED_THINKING_BUDGET }
+    : { enable_thinking: false };
+  const lookup = qwenChatWithThinking(model, thinking);
   return ({ stepNumber, steps }: { stepNumber: number; steps?: Pick<StepResult<ToolSet>, "toolCalls" | "toolResults">[] }) => {
     if (stepNumber === 0) return { model: lookup };
     if (!boundedThinking) return;
@@ -157,18 +177,30 @@ export const getActiveAiModel = (
 
 /** Cohere's SDK does not yet expose strict_tools. Keep it scoped to Research's report phase. */
 export function createCohereResearchFetch(fetchImpl: typeof fetch = fetch): typeof fetch {
-  return (url, init) => {
-    if (typeof init?.body !== "string") return fetchImpl(url, init);
-    let body: unknown;
-    try { body = JSON.parse(init.body); } catch { return fetchImpl(url, init); }
-    if (!body || typeof body !== "object" || Array.isArray(body)) return fetchImpl(url, init);
-    const request = body as Record<string, unknown>;
-    const reportPhase = Array.isArray(request.tools) && request.tools.some((tool) =>
-      tool?.type === "function" && tool.function?.name === "submit_research_report");
-    if (!reportPhase) return fetchImpl(url, init);
-    if (request.response_format !== undefined) {
-      throw new Error("COHERE_RESEARCH_RESPONSE_FORMAT_WITH_TOOLS");
-    }
-    return fetchImpl(url, { ...init, body: JSON.stringify({ ...request, strict_tools: true }) });
-  };
+  return (url, init) => dispatchCohere(fetchImpl, url, init).then(requireCohereRawUsage);
+}
+
+/** The SDK treats missing usage as null; billing needs the raw token counts, so a reply without them is refused. */
+async function requireCohereRawUsage(response: Response): Promise<Response> {
+  if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) return response;
+  const tokens = (await response.clone().json().catch(() => undefined))?.usage?.tokens;
+  if (typeof tokens?.input_tokens !== "number" || typeof tokens?.output_tokens !== "number") {
+    throw new Error("COHERE_RAW_USAGE_MISSING");
+  }
+  return response;
+}
+
+function dispatchCohere(fetchImpl: typeof fetch, url: Parameters<typeof fetch>[0], init: RequestInit | undefined): Promise<Response> {
+  if (typeof init?.body !== "string") return fetchImpl(url, init);
+  let body: unknown;
+  try { body = JSON.parse(init.body); } catch { return fetchImpl(url, init); }
+  if (!body || typeof body !== "object" || Array.isArray(body)) return fetchImpl(url, init);
+  const request = body as Record<string, unknown>;
+  const reportPhase = Array.isArray(request.tools) && request.tools.some((tool) =>
+    tool?.type === "function" && tool.function?.name === "submit_research_report");
+  if (!reportPhase) return fetchImpl(url, init);
+  if (request.response_format !== undefined) {
+    throw new Error("COHERE_RESEARCH_RESPONSE_FORMAT_WITH_TOOLS");
+  }
+  return fetchImpl(url, { ...init, body: JSON.stringify({ ...request, strict_tools: true }) });
 }

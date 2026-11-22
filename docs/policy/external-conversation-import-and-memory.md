@@ -1194,18 +1194,22 @@ zh/fr/de/es/pt는 첫 decision-grade eval 범위 밖의 known limitation으로
 ### 12.4a 운영자 출시 승인 — [확정 · 2026-10-23 @mposition]
 
 운영자는 eval 없이 현재 품질로 pair를 승인할 수 있습니다. register 항목에
-`evaluation` 대신 `ownerLaunch`(승인자, 승인일, 만료일, 결정 출처, 알려진 한계)를
+`evaluation` 대신 `ownerLaunch`(승인자, 승인일, 결정 출처, 알려진 한계)를
 적고 `status: approved`로 둡니다. 첫 대상은 `gpt-5-6-luna × mem-extract-v9`입니다.
 두 번째는 `gpt-5-6-luna × mem-extract-v10`(2026-10-24, 건강 정보는 이유를 뺀 행동만
 쓰고 그래도 드러나면 추출하지 않는 프롬프트)이며, 자동 추출(§11)이 씁니다. v9
 승인은 이미 저장된 기억의 주입을 위해 유지합니다. 이후 품질은 메모리 개선
 에이전트로 매일 올립니다.
 
+운영자 출시 승인에는 만료가 없습니다(운영자 결정 2026-11-22). 운영자가 revoke할
+때까지 유효하며, 달력 날짜 때문에 production 추출이 멈추거나 모든 PR의 register
+검사가 실패하지 않습니다. 유료 eval로 받은 승인(`evaluation`)의 재평가 기한은
+그대로입니다.
+
 이 경로에서도 그대로 남는 것:
 
-- **만료**: 승인일로부터 최대 30일(`MEMORY_OWNER_LAUNCH_MAX_DAYS`)입니다. CI의
-  register 검사뿐 아니라 runtime(`findApprovedEvalPair`)도 만료일을 읽으므로,
-  만료되면 배포 없이도 추출·주입이 닫힙니다. 연장은 새 승인 기록입니다.
+- **revoke**: Admin의 운영 revoke 목록이 runtime(`findApprovedEvalPair`)에서 pair를
+  바로 닫습니다. 배포 없이 추출·주입을 멈추는 길은 이것입니다.
 - **치명 안전 검사**: register 검사가 결정적 validator probe(`MUST_REJECT`,
   `MUST_REQUIRE_SENSITIVE_REVIEW`)를 다시 돌려, 하나라도 bulk-safe면 승인을
   거부합니다. 2026-10-24부터 검토 단계가 없어(§8.3) validator를 통과한 standard
@@ -2314,7 +2318,7 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
 - **릴리스 B 코드 완료는 위 두 항목과 분리해 판단합니다.** 두 항목 중 어느 것도
   코드 계약의 결함이 아닙니다. feedback 신호는 §22의 소유권 확인과 명시적 평가를 거쳐 집계하며, 분모가 없으면 null로 표시합니다.
 - **extraction·injection 운영 활성화는 승인된 pair가 있어야 합니다.** 승인은
-  eval 데이터셋과 §12.4 절차를 거치거나, §12.4a의 운영자 출시 승인(최대 30일)으로
+  eval 데이터셋과 §12.4 절차를 거치거나, §12.4a의 운영자 출시 승인(만료 없음, revoke할 때까지)으로
   받습니다. 코드 완료만으로는 대체되지 않습니다.
 - **production 효과 판정 시에는** 실제 배포 버전과 계측 가능 여부를 기록하고, 확대 여부를 사람에게 확인합니다.
 
