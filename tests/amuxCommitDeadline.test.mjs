@@ -462,6 +462,9 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // The retention hold insert guard's 90-day bound goes with its CHECK's; one
   // guard body, no commit-deadline marker, classifier or deferred trigger change.
   "20261116120700_amux_v4_retention_hold_long_guard",
+  // Owner decision 2026-11-21: an audited portfolio node content revision;
+  // one parent guard body, no commit-deadline marker or trigger changes.
+  "20261121130000_amux_portfolio_node_content_revision",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

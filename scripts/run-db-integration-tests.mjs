@@ -458,6 +458,16 @@ run(
     // Owner decision 2026-11-14: an unchanged score's active window is
     // extended by the system refresher, up to its baseline, never past it.
     "tests/integration/amux-portfolio-score-refresh.db.test.ts",
+    // Owner decision 2026-11-21: the owner edits an Initiative, Epic or
+    // Feature from a Task card; the database accepts a content revision only
+    // in the exact owner shape, and every open Task below is rescored.
+    "tests/integration/amux-portfolio-node-edit.db.test.ts",
+    // Owner direction 2026-11-21: the execution board's lanes hold Tasks; a
+    // Story shows on its Tasks' hierarchy line and still counts for archive-all.
+    "tests/integration/amux-execution-board-tasks-only.db.test.ts",
+    // Owner decision 2026-11-21: the hierarchy list's rollups, and the owner's
+    // one-way hierarchy archive against the node guards and the audit chain.
+    "tests/integration/amux-hierarchy-archive.db.test.ts",
     // AMUX-FILEREQ-004 (2026-11-09): the owner closes the escalation an
     // earlier attempt left open on a done or todo card, with one chained
     // audit entry; review, blocked and running cards refuse.
@@ -595,7 +605,8 @@ run(
     "tests/integration/amux-v20-registration-refusal.db.test.ts",
     // v19 unattended registration turns one completed session analysis into
     // nodes, cards, assessments and scores under exact system evidence, or
-    // leaves the backlog untouched and records one durable refusal.
+    // leaves the backlog untouched and records one durable refusal. It also
+    // holds the session-attached plan cases (owner decision 2026-11-21).
     "tests/integration/amux-v19-system-registration.db.test.ts",
     // Retention must clear due bodies, preserve the audit trail and retire
     // external unit keys without silently extending a legal hold.

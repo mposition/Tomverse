@@ -362,6 +362,38 @@ test("an allowlisted raw SQL file that gains a statement fails", () => {
   assert.equal(extended[0].rule, "raw-sql");
 });
 
+test("the portfolio node content guard only reads audit evidence and rejects added audit writes", () => {
+  const path = "prisma/migrations/20261121130000_amux_portfolio_node_content_revision/migration.sql";
+  const source = readFileSync(resolve(ROOT, path), "utf8");
+  const findingsFor = (text) => checkProtectedTableWriters({
+    sources: [{ path, text }],
+  }).filter((finding) => finding.path === path);
+
+  assert.deepEqual(
+    RAW_SQL_ALLOWLIST.filter((entry) => entry.path === path)
+      .map(({ table, tableMentions, writeVerbs }) => ({ table, tableMentions, writeVerbs })),
+    [{ table: "AdminAuditLog", tableMentions: 1, writeVerbs: 1 }]
+  );
+  assert.match(source, /SELECT 1 FROM public\."AdminAuditLog" audit/);
+  assert.doesNotMatch(
+    sqlWithoutComments(source),
+    /\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:(?:"[^"]+"|\w+)\.)?"?AdminAuditLog"?/i,
+    "the guard may read audit evidence but must never write it"
+  );
+  assert.deepEqual(findingsFor(source), []);
+
+  for (const statement of [
+    'INSERT INTO public."AdminAuditLog" ("id") VALUES (\'unexpected\');',
+    'UPDATE public."AdminAuditLog" SET "summary" = \'unexpected\';',
+    'DELETE FROM public."AdminAuditLog";',
+  ]) {
+    const findings = findingsFor(`${source}\n${statement}\n`);
+    assert.equal(findings.length, 1, statement);
+    assert.equal(findings[0].rule, "raw-sql", statement);
+    assert.match(findings[0].detail, /^AdminAuditLog:/, statement);
+  }
+});
+
 test("the monthly budget migration rejects added writes for both protected tables", () => {
   const path = "prisma/migrations/20261011070000_amux_v4_owner_monthly_budget/migration.sql";
   const original = readFileSync(resolve(ROOT, path), "utf8");

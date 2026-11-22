@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
-  AMUX_EXECUTION_LANES, AMUX_EXECUTION_VISIBLE_LANES,
+  AMUX_EXECUTION_BOARD_CARD_WHERE, AMUX_EXECUTION_LANES, AMUX_EXECUTION_VISIBLE_LANES,
   amuxExecutionLaneWhere, parseAmuxExecutionLane,
   parseAmuxExecutionPage, amuxVisibleInspectionText,
   amuxVisibleUntrustedText,
@@ -19,14 +19,25 @@ test("six board lanes and archive are separate projections", () => {
   assert.equal(parseAmuxExecutionPage("10001"), null);
   assert.equal(parseAmuxExecutionPage("01"), null);
   assert.equal(parseAmuxExecutionPage("-1"), null);
-  assert.deepEqual(amuxExecutionLaneWhere("amux_backlog").AND[2],
+  assert.deepEqual(amuxExecutionLaneWhere("amux_backlog").AND[0].AND[2],
     { status: "todo", v22AssignmentId: null });
-  assert.deepEqual(amuxExecutionLaneWhere("todo").AND[2],
+  assert.deepEqual(amuxExecutionLaneWhere("todo").AND[0].AND[2],
     { status: "todo", v22AssignmentId: { not: null } });
   assert.equal(JSON.stringify(amuxExecutionLaneWhere("attention")).includes("humanEscalations"), true);
   assert.equal(JSON.stringify(amuxExecutionLaneWhere("in_review")).includes('"status":"review"'), true);
-  assert.deepEqual(amuxExecutionLaneWhere("archive").OR[1].AND[2],
+  assert.deepEqual(amuxExecutionLaneWhere("archive").AND[0].OR[1].AND[2],
     { status: { in: ["done", "cancelled"] } });
+});
+
+test("owner direction 2026-11-21: every lane holds Tasks and untyped cards, never a Story", () => {
+  for (const lane of AMUX_EXECUTION_LANES) {
+    const where = amuxExecutionLaneWhere(lane);
+    assert.equal(where.AND.length, 2, lane);
+    assert.deepEqual(where.AND[1], AMUX_EXECUTION_BOARD_CARD_WHERE, lane);
+  }
+  // A NULL cardType never compares, so it is named on its own and kept.
+  assert.deepEqual(AMUX_EXECUTION_BOARD_CARD_WHERE,
+    { OR: [{ cardType: null }, { cardType: { not: "story" } }] });
 });
 
 test("worker text renders controls visibly without conflating literal escapes", () => {
@@ -47,6 +58,8 @@ test("execution UI reads the same DB through bounded owner-only read routes", as
   const route = await readFile(new URL("../app/api/admin/amux/execution-view/route.ts", import.meta.url), "utf8");
   const service = await readFile(new URL("../lib/amux/adminExecutionRead.ts", import.meta.url), "utf8");
   const ui = await readFile(new URL("../components/admin/AmuxExecutionWorkspace.tsx", import.meta.url), "utf8");
+  // The hierarchy tree lives in its own read-only component.
+  const tree = await readFile(new URL("../components/admin/AmuxHierarchyGrid.tsx", import.meta.url), "utf8");
   assert.match(route, /getAdminRole\(session\) !== "owner"/);
   assert.match(route, /assertRecentAdminAuthentication\(session\)/);
   assert.match(route, /private, no-store, max-age=0/);
@@ -54,7 +67,7 @@ test("execution UI reads the same DB through bounded owner-only read routes", as
   assert.match(service, /loadAmuxContentUnitKeys/);
   assert.match(service, /verifyAmuxContentDigest/);
   assert.match(service, /readAmuxV22TaskResultForOwner/);
-  assert.match(ui, /aria-expanded=/);
+  assert.match(tree, /aria-expanded=/);
   assert.match(ui, /m\.loadMore\(/);
   assert.match(ui, /selected\.reviews/);
   assert.match(ui, /selected\.result\.text/);
@@ -64,6 +77,7 @@ test("execution UI reads the same DB through bounded owner-only read routes", as
   assert.match(ui, /currentRevision/);
   assert.doesNotMatch(route, /export async function (POST|PUT|PATCH|DELETE)/);
   assert.doesNotMatch(ui, /method: "(POST|PUT|PATCH|DELETE)"/);
+  assert.doesNotMatch(tree, /method: "(POST|PUT|PATCH|DELETE)"/);
 });
 
 test("a card waiting on the owner opens on the same owner review Assignment hosts", async () => {

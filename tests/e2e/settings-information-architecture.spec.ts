@@ -170,6 +170,7 @@ async function mockApiKeys(page: Page, plan: "pro" | "free") {
                 ],
                 tomverseCli: {
                   install: "npm install -g @tomverse/cli",
+                  installWindows: "winget install Tomverse.CLI",
                   powershell: "tomverse doctor",
                   posix: "tomverse doctor",
                 },
@@ -220,6 +221,9 @@ test.describe("settings information architecture", () => {
     await openSettingsTab(page, "developer");
     const tab = page.getByTestId("settings-developer-tab");
     await expect(tab).toContainText("키 하나로 두 API를 모두 쓸 수 있습니다");
+    // The CLI banner is the first thing in the tab and opens the install page in this language.
+    await expect(page.getByTestId("developer-cli-banner")).toContainText("Tomverse CLI — 터미널의 코딩 에이전트");
+    await expect(page.getByTestId("developer-cli-banner-link")).toHaveAttribute("href", /\/developers\/cli$/);
     await expect(page.getByTestId("developer-keys-summary")).toContainText("사용 중인 키 1개");
     await expect(page.getByTestId("developer-manage-keys")).toHaveAttribute("href", "/settings/api");
     await expect(page.getByTestId("developer-endpoint-general-openai")).toHaveText("https://tomverse.app/api/v1");

@@ -38,8 +38,14 @@ import {
 } from "./ideaSessionAnalysisReservationCore.ts";
 import { commitAmuxSessionAnalysisReservation } from
   "./ideaSessionAnalysisReservationStore.ts";
+import { amuxSessionAnswerUnitCount } from "./ideaSessionAnswerCore.ts";
+import { AmuxSessionPlanAttachError, amuxSessionPlanKeyIdentities,
+  attachAmuxSessionPlanInTx, registerAttachedAmuxSessionPlan } from
+  "./ideaSessionPlanAttachService.ts";
+import type { AmuxSessionPlanRegistration } from "./ideaSessionPlanCore.ts";
 import {
   sameAmuxOperatingScopeAuthority,
+  type AmuxIdeaSessionPlan,
   type AmuxIdeaSessionSubmissionInspection,
 } from "./ideaSessionSubmissionCore.ts";
 import { prepareIdeaSubmissionStorage } from "./ideaSubmissionService.ts";
@@ -59,6 +65,7 @@ export class AmuxIdeaSessionSubmissionError extends Error {
       | "reference_snapshot_unavailable"
       | "key_store_unavailable"
       | "request_already_seen"
+      | "plan_rejected"
       | "outcome_unknown",
     readonly readBack?: "committed" | "partial" | "unavailable",
     readonly ideaId?: string,
@@ -79,7 +86,14 @@ export type CommittedAmuxIdeaSessionIntake =
   CommittedAmuxIdeaSessionSubmission & {
     reservationId: string;
     reservationAuditId: string;
+    /** Present when the session attached its own plan (owner decision 2026-11-21). */
+    plan?: { auditId: string; planId: string; unitCount: number;
+      registration?: AmuxSessionPlanRegistration };
   };
+
+/** The attached plan's page identities, fixed before its keys are created. */
+type AttachedPlanInput = { plan: AmuxIdeaSessionPlan; previewId: string;
+  unitIds: readonly string[] };
 
 const databaseNow = async (tx: Prisma.TransactionClient): Promise<Date> => {
   const rows = await tx.$queryRaw<Array<{ now: Date }>>`
@@ -360,7 +374,12 @@ export async function commitAmuxIdeaSessionIntake(tx: Prisma.TransactionClient, 
   keys: AmuxContentKeys;
   pinnedCommitShas: readonly string[];
   guard?: AmuxIdeaSessionSubmissionGuard;
+  attachedPlan?: AttachedPlanInput;
 }): Promise<CommittedAmuxIdeaSessionIntake> {
+  if (!input.inspected.plan !== !input.attachedPlan ||
+      (input.attachedPlan && input.attachedPlan.plan !== input.inspected.plan)) {
+    throw new AmuxIdeaSessionSubmissionError("plan_rejected");
+  }
   if (input.guard) {
     const verdict = await input.guard.check(tx);
     if (verdict !== true) throw new AmuxIdeaSessionGuardRefused(verdict);
@@ -376,9 +395,23 @@ export async function commitAmuxIdeaSessionIntake(tx: Prisma.TransactionClient, 
     authority: input.expectedAuthority,
     model: analysisModel(input.expectedAuthority, input.model),
   });
+  let plan: CommittedAmuxIdeaSessionIntake["plan"];
+  if (input.attachedPlan) {
+    try {
+      plan = await attachAmuxSessionPlanInTx(tx, { ideaId: committed.ideaId,
+        requestId: committed.requestId, submissionAuditId: committed.auditId,
+        previewId: input.attachedPlan.previewId, plan: input.attachedPlan.plan,
+        unitIds: input.attachedPlan.unitIds, keys: input.keys });
+    } catch (error) {
+      if (error instanceof AmuxSessionPlanAttachError && error.code === "plan_rejected") {
+        throw new AmuxIdeaSessionSubmissionError("plan_rejected");
+      }
+      throw error;
+    }
+  }
   await input.guard?.committed?.(tx, committed.ideaId);
   return { ...committed, reservationId: reservation.reservationId,
-    reservationAuditId: reservation.reservationAuditId };
+    reservationAuditId: reservation.reservationAuditId, ...(plan ? { plan } : {}) };
 }
 
 /** Write service. It atomically stores the encrypted submission
@@ -417,23 +450,35 @@ export async function submitAmuxIdeaFromSession(input: {
   const global = loadCurrentAmuxContentKeys(process.env);
   const ideaId = randomUUID();
   const keyIdentity = { ideaId, purpose: "idea_raw" as const, subjectId: ideaId };
+  // An attached plan's page is written in the same transaction, so its keys
+  // are created here with the idea's, one per unit as the box result route does.
+  const attachedPlan: AttachedPlanInput | undefined = input.inspected.plan ? {
+    plan: input.inspected.plan, previewId: randomUUID(),
+    unitIds: Array.from({ length: amuxSessionAnswerUnitCount(input.inspected.plan.raw) },
+      () => randomUUID()),
+  } : undefined;
   let keys: AmuxContentKeys;
   try {
-    const unit = await createAmuxContentUnitKeys(keyIdentity);
-    keys = amuxContentKeyRing(global, [{ identity: keyIdentity, keys: unit }]);
+    const units = [];
+    for (const identity of [keyIdentity, ...(attachedPlan ?
+      amuxSessionPlanKeyIdentities({ ideaId, ...attachedPlan }) : [])]) {
+      units.push({ identity, keys: await createAmuxContentUnitKeys(identity) });
+    }
+    keys = amuxContentKeyRing(global, units);
   } catch {
     throw new AmuxIdeaSessionSubmissionError("key_store_unavailable");
   }
   let callbackReturned = false;
+  let committed: CommittedAmuxIdeaSessionIntake;
   try {
-    return await prisma.$transaction(async (tx) => {
+    committed = await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('statement_timeout', ${STATEMENT_TIMEOUT}, true)`;
-      const committed = await commitAmuxIdeaSessionIntake(tx, {
+      const written = await commitAmuxIdeaSessionIntake(tx, {
         inspected: input.inspected, model: input.model, guard: input.guard,
-        expectedAuthority, ideaId, keys, pinnedCommitShas,
+        expectedAuthority, ideaId, keys, pinnedCommitShas, attachedPlan,
       });
       callbackReturned = true;
-      return committed;
+      return written;
     }, { ...AMUX_IDEA_STANDARD_TRANSACTION });
   } catch (error) {
     // Refused inside the commit transaction, before it wrote anything.
@@ -462,4 +507,7 @@ export async function submitAmuxIdeaFromSession(input: {
     }
     throw new AmuxIdeaSessionSubmissionError("outcome_unknown", readBack, seenIdeaId);
   }
+  if (!committed.plan) return committed;
+  return { ...committed, plan: { ...committed.plan,
+    registration: await registerAttachedAmuxSessionPlan(committed.ideaId) } };
 }

@@ -10,6 +10,7 @@ import { AmuxCardOwnerReview } from "./AdminAmuxRoutingPanel";
 import { AmuxBoardAttentionLane, AMUX_ATTENTION_LANE_ROWS, type AmuxBoardOwnerQueue } from "./AmuxBoardAttentionLane";
 import { AmuxBoardPastWork } from "./AmuxBoardPastWork";
 import { AmuxCardListPanel } from "./AmuxCardListPanel";
+import { AmuxHierarchyGrid } from "./AmuxHierarchyGrid";
 import { AmuxTaskQuestionSection } from "./AmuxWorkerQuestion";
 import { AmuxLegacyCardPanel, type AmuxLegacyCardView, isAmuxRemakeOnlyCardKind } from "./AmuxLegacyCardPanel";
 import { AmuxSettledCardEscalationPanel } from "./AmuxSettledCardEscalationPanel";
@@ -17,6 +18,8 @@ import { AmuxTaskCeilingPanel, type AmuxTaskCeilingView } from "./AmuxTaskCeilin
 import { isAmuxSettledCardWithOpenEscalation } from "@/lib/amux/settledCardEscalationCore";
 import { AmuxCardIdentity, AmuxSourceKeySuffix, amuxCardLabel, amuxDistinctSourceKey } from "./AmuxCardIdentity";
 import styles from "./AmuxExecutionWorkspace.module.css";
+import { AmuxCardHierarchy } from "./AmuxCardHierarchy";
+import type { AmuxHierarchyStep } from "@/lib/amux/cardHierarchyCore";
 import { useCallback, useEffect, useRef, useState, type DragEvent as ReactDragEvent, type PointerEvent } from "react";
 
 import { AdminChannelIcon, adminChannelName } from "@/components/admin/ui/AdminChannelIcon";
@@ -74,21 +77,9 @@ type Card = {
 };
 type BoardSnapshot = { pageSize: number;
   counts: Record<AmuxExecutionLane, number>;
+  /** Active Stories: off the lanes (Tasks only), still archived by archive-all. */
+  activeStories?: number;
   lanes: Array<{ lane: AmuxExecutionLane; cards: Card[] }> };
-type HierarchyItem = ({ type: "node"; id: string; title: string | null;
-  level: string; parentId: string | null; state: string;
-  assessment: unknown; progress: { done: number; total: number } } |
-  { type: "card" } & Card);
-type HierarchyPage = { page: number; pageSize: number; total: number;
-  items: HierarchyItem[] };
-type FeedbackRollup = { complete: boolean; reason: string | null;
-  rollup: { taskCount: number; doneCount: number; attemptCount: number;
-    executionMs: number | null; cycleMs: number | null;
-    estimatedCostMicrousd: string | null;
-    approvedCeilingMicrousd: string | null;
-    settledCostMicrousd: string | null; incompleteUsageCount: number;
-    checkFindings: number | null; independentReviewFindings: number | null;
-    subjectiveOutcomeMissingCount: number } | null };
 type Detail = Omit<Card, "score"> & { revision: number; body: string | null;
   brief: string | null;
   feedback: AmuxTaskFeedbackProjection | null;
@@ -96,6 +87,8 @@ type Detail = Omit<Card, "score"> & { revision: number; body: string | null;
   legacyCard?: AmuxLegacyCardView | null;
   /** The owner's re-approval of a waiting Task's cost ceiling; null or absent when none is read. */
   ceilingReapproval?: AmuxTaskCeilingView | null;
+  /** Initiative > Epic > Feature > Story > Task; null for a card with no v4 place. */
+  hierarchy?: AmuxHierarchyStep[] | null;
   result: { attemptId: string; state: "available" | "purged";
     createdAt: string; text: string | null; sha256: string | null;
     patch: { state: "available"; baseSha: string; sha256: string } |
@@ -131,17 +124,9 @@ type Detail = Omit<Card, "score"> & { revision: number; body: string | null;
       id: string; prNumber: number; headSha: string;
       verifiedHeadSha: string; state: string;
       supersededAt: string | null; createdAt: string }> }> };
-type Parent = { kind: "root" } | { kind: "unassigned" } |
-  { kind: "node" | "story"; id: string };
-const keyOf = (parent: Parent) => parent.kind === "root" || parent.kind === "unassigned" ?
-  parent.kind :
-  `${parent.kind}:${parent.id}`;
 const date = (value: string) => formatAestDateTime(value, { seconds: true }) ?? "-";
 const USD = (micro: string | null) => micro === null ? null :
   (Number(micro) / 1_000_000).toFixed(4);
-const assessmentValue = (value: unknown) => value && typeof value === "object" &&
-  !Array.isArray(value) && "value" in value && typeof value.value === "number" ?
-  value.value : null;
 function cardBody(raw: string | null): { problem: string; scopeIn: string[];
   scopeOut: string[]; completionCriteria: string[] } | null {
   if (!raw) return null;
@@ -287,11 +272,6 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, initialView = "bo
   const [boardPages, setBoardPages] = useState<Partial<Record<AmuxExecutionLane, number>>>({});
   const [boardBusy, setBoardBusy] = useState<AmuxExecutionLane | null>(null);
   const [archive, setArchive] = useState<Card[]>([]);
-  const [tree, setTree] = useState<Record<string, HierarchyPage>>({});
-  const [feedbackByParent, setFeedbackByParent] = useState<Record<string, FeedbackRollup>>({});
-  const [feedbackBusy, setFeedbackBusy] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({ root: true });
-  const [treeBusy, setTreeBusy] = useState<string | null>(null);
   const [selected, setSelected] = useState<Detail | null>(null);
   const [detailBusy, setDetailBusy] = useState(false);
   const [moveTarget, setMoveTarget] = useState<AmuxBoardMove | null>(null);
@@ -338,51 +318,12 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, initialView = "bo
   const activeCardCount = board ? AMUX_EXECUTION_VISIBLE_LANES.reduce(
     (total, lane) => total + board.counts[lane], 0) : 0;
   const archiveAll = async () => {
-    if (!window.confirm(m.archiveAllConfirm(activeCardCount))) return;
+    if (!window.confirm(m.archiveAllConfirm(activeCardCount, board?.activeStories ?? 0))) return;
     setBoardLoading(true); setError(null);
     try {
       await requestArchiveAllActiveCards();
     } catch (reason) { showError(reason); setBoardLoading(false); return; }
     await refreshBoard();
-  };
-  const loadHierarchy = useCallback(async (parent: Parent, page = 0) => {
-    const key = keyOf(parent);
-    setTreeBusy(key); setError(null);
-    const params = new URLSearchParams({ view: "hierarchy", parentKind: parent.kind,
-      page: String(page) });
-    if (parent.kind === "node" || parent.kind === "story")
-      params.set("parentId", parent.id);
-    try {
-      const result = await getJson<HierarchyPage>(
-        `/api/admin/amux/execution-view?${params}`);
-      setTree((current) => ({ ...current, [key]: page === 0 ? result : {
-        ...result, items: [...(current[key]?.items ?? []), ...result.items],
-      } }));
-    } catch (reason) { showError(reason); }
-    finally { setTreeBusy(null); }
-  }, [showError]);
-
-  const openHierarchy = () => {
-    setView("hierarchy");
-    if (!tree.root) void loadHierarchy({ kind: "root" });
-  };
-  const loadFeedback = async (parent: { kind: "node" | "story"; id: string }) => {
-    const key = keyOf(parent);
-    setFeedbackBusy(key); setError(null);
-    try {
-      const params = new URLSearchParams({ view: "feedback",
-        parentKind: parent.kind, parentId: parent.id });
-      const result = await getJson<FeedbackRollup>(
-        `/api/admin/amux/execution-view?${params}`);
-      setFeedbackByParent((current) => ({ ...current, [key]: result }));
-    } catch (reason) { showError(reason); }
-    finally { setFeedbackBusy(null); }
-  };
-  const toggle = (parent: Parent) => {
-    const key = keyOf(parent);
-    const next = !expanded[key];
-    setExpanded((current) => ({ ...current, [key]: next }));
-    if (next && !tree[key]) void loadHierarchy(parent);
   };
   /** true: a page was added; false: the read failed; null: nothing was read (busy, or the board was reloaded meanwhile). */
   const loadBoardPage = async (lane: AmuxExecutionLane): Promise<boolean | null> => {
@@ -594,73 +535,6 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, initialView = "bo
         activeMoveTarget.current = target; closeCard(false); setMoveTarget(target); });
   }, [closeCard]);
 
-  const renderTree = (parent: Parent, depth: number): React.ReactNode => {
-    const key = keyOf(parent);
-    const page = tree[key];
-    if (!expanded[key]) return null;
-    return <ul className={depth > 0 ? "ml-4 border-l pl-3 border-zinc-700" : ""}>
-      {page?.items.map((item) => {
-        const child: Parent = item.type === "node" ? { kind: "node", id: item.id } :
-          { kind: "story", id: item.id };
-        const canExpand = item.type === "node" || item.cardType === "story";
-        return <li key={item.id} className="py-1">
-          <div className="flex flex-wrap items-center gap-2 text-sm">
-            {canExpand ? <button type="button" aria-expanded={Boolean(expanded[keyOf(child)])}
-              aria-label={m.expand(amuxVisibleInspectionText(item.title ?? item.id))}
-              onClick={() => toggle(child)} className="rounded border px-2 py-0.5">
-              {expanded[keyOf(child)] ? "−" : "+"}
-            </button> : <span className="w-7" aria-hidden="true" />}
-            <span className="text-xs uppercase text-zinc-500">{item.type === "node" ?
-              item.level : item.storyKind === "bug" ? "Bug" : item.cardType ?? "Task"}</span>
-            {item.type === "card" && <span className="font-mono text-xs" data-testid="amux-tree-card-label">
-              {amuxVisibleInspectionText(amuxCardLabel(item))}
-              <AmuxSourceKeySuffix id={item.id} displayKey={item.displayKey} sourceKey={item.sourceKey} m={m} /></span>}
-            {item.type === "card" ? <button type="button" className="text-left underline"
-              onClick={(event) => { returnFocusRef.current = event.currentTarget; void openCard(item.id); }}>{amuxVisibleInspectionText(item.title ?? m.protectedTitle)}</button> :
-              <span>{amuxVisibleInspectionText(item.title ?? m.protectedTitle)}</span>}
-            {item.type === "card" && <span className="text-xs text-zinc-500">
-              {item.status} · {item.taskRole ?? m.noRole} · {item.executionGrade ?? m.noGrade}
-              {item.worker ? ` · ${item.worker}` : ""}
-              {item.sev1 ? " · SEV1" : ""}
-              {item.score !== null ? ` · ${m.score} ${item.score}${item.scoreFresh ? "" : ` (${m.stale})`}` : ""}
-              {item.dependencyCount > 0 ? ` · ${m.dependencyCount(item.dependencyCount)}` : ""}
-            </span>}
-            {item.progress && item.progress.total > 0 && <span className="text-xs text-zinc-500">
-              {m.progress(item.progress.done, item.progress.total)}
-            </span>}
-            {item.type === "node" && item.assessment !== null &&
-              <span className="text-xs text-zinc-500">{m.assessed}
-                {assessmentValue(item.assessment) !== null ?
-                  ` · ${m.strategicValue} ${assessmentValue(item.assessment)}` : ""}
-              </span>}
-            {canExpand && <button type="button" className="text-xs underline"
-              disabled={feedbackBusy !== null}
-              onClick={() => void loadFeedback(child)}>{m.feedback}</button>}
-          </div>
-          {feedbackByParent[keyOf(child)] && <p className="ml-8 text-xs text-zinc-300">
-            {feedbackByParent[keyOf(child)].rollup ? (() => {
-              const summary = feedbackByParent[keyOf(child)].rollup!;
-              return `${m.progress(summary.doneCount, summary.taskCount)} · ${m.attempts} ${summary.attemptCount} · ` +
-                `${m.approvedCeiling} ${summary.approvedCeilingMicrousd === null ? m.unknown : `$${USD(summary.approvedCeilingMicrousd)}`} · ` +
-                `${m.internalCost} ${summary.settledCostMicrousd === null ? m.unknown : `$${USD(summary.settledCostMicrousd)}`} · ` +
-                `${m.incompleteUsage} ${summary.incompleteUsageCount} · ` +
-                `${m.checkFindings} ${summary.checkFindings ?? m.unknown} · ` +
-                `${m.reviewFindings} ${summary.independentReviewFindings ?? m.unknown}`;
-            })() : m.feedbackTooLarge}
-          </p>}
-          {canExpand && renderTree(child, depth + 1)}
-        </li>;
-      })}
-      {treeBusy === key && <li className="text-sm">{m.loading}</li>}
-      {page && page.items.length < page.total && <li className="py-2 text-sm">
-        <button type="button" className="underline" disabled={treeBusy !== null}
-          onClick={() => void loadHierarchy(parent, page.page + 1)}>
-          {m.loadMore(page.items.length, page.total)}
-        </button>
-      </li>}
-    </ul>;
-  };
-
   const elapsedText = (iso: string) => {
     const elapsed = nowMs === null ? null : amuxElapsed(Date.parse(iso), nowMs);
     return elapsed === null ? null :
@@ -786,7 +660,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, initialView = "bo
           aria-label={views.views.label} data-testid="amux-view-switch">
           {([["board", views.views.board, Columns3, () => setView("board")],
             ...(cardList === undefined ? [] : [["list", views.views.list, List, () => setView("list")] as const]),
-            ["hierarchy", views.views.hierarchy, Network, openHierarchy]] as const).map(([id, label, Icon, go]) =>
+            ["hierarchy", views.views.hierarchy, Network, () => setView("hierarchy")]] as const).map(([id, label, Icon, go]) =>
             <button key={id} type="button" aria-pressed={view === id} onClick={go} data-testid={"amux-view-" + id}
               className={"inline-flex min-h-9 items-center gap-1.5 rounded-xl px-3 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400 " +
                 (view === id ? "bg-zinc-100 font-bold text-zinc-900" : "font-medium text-zinc-400 hover:text-white")}>
@@ -893,18 +767,8 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, initialView = "bo
       <AmuxCardListPanel rows={cardList.rows} total={cardList.total} limit={cardList.limit} nextLimit={cardList.nextLimit} nowMs={nowMs}
         workerChannels={workerChannels}
         onOpen={(taskId, opener) => { returnFocusRef.current = opener; void openCard(taskId); }} />)}
-    {view === "hierarchy" && <section className="rounded-lg border p-4 border-zinc-700">
-      <h3 className="font-semibold">{m.hierarchy}</h3>
-      <p className="text-xs text-zinc-500">{m.hierarchyHelp}</p>
-      {renderTree({ kind: "root" }, 0)}
-      <div className="mt-3 border-t pt-3 border-zinc-700">
-        <button type="button" aria-expanded={Boolean(expanded.unassigned)}
-          className="text-sm font-semibold underline"
-          onClick={() => toggle({ kind: "unassigned" })}>
-          {m.unassignedHierarchy}</button>
-        {renderTree({ kind: "unassigned" }, 1)}
-      </div>
-    </section>}
+    {view === "hierarchy" && <AmuxHierarchyGrid canArchive={canMoveCards}
+      onOpenCard={(taskId, opener) => { returnFocusRef.current = opener; void openCard(taskId); }} />}
     {moveTarget && <AmuxExecutionDialog title={m.moveTitle} closeLabel={m.close}
       onClose={closeMove} returnFocusRef={returnFocusRef}>
       <AmuxExecutionMovePanel key={moveTarget.requestId} move={moveTarget}
@@ -959,6 +823,9 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, initialView = "bo
             <Copy size={14} aria-hidden="true" />{m.copyLink}</button>
           {copyNotice && <p role="status">{copyNotice}</p>}
         </header>
+        {selected.hierarchy && <AmuxCardHierarchy key={selected.id} steps={selected.hierarchy}
+          onOpenCard={(id) => void openCard(id)}
+          onSaved={() => { void refreshBoard(); void openCard(selected.id, false); }} />}
         <div className={styles.detailLayout}>
           <div className={styles.detailMain}>
             <div className={styles.tabs} role="tablist" aria-label={m.detail}>
