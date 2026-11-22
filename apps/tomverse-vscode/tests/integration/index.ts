@@ -567,6 +567,12 @@ export async function run() {
         fake.options.models = undefined;
         record("compaction in actual extension preserves effort and counts requests and receipts at pinned model", controller.snapshot().cost);
         await fresh();
+        const modelsWithoutEffort = DEFAULT_MODELS.map((model) => ({
+            ...model,
+            tomverse: { ...model.tomverse, reasoning_efforts: [] },
+        }));
+        fake.options.models = modelsWithoutEffort;
+        await controller.refresh();
         const nativePick = controller.dialogs.pick.bind(controller.dialogs);
         const chooseEffort = (model = "fake-coder") => controller.receive({ ...envelope(), type: "chooseEffort", model });
         controller.dialogs.pick = async (items) => {
@@ -576,7 +582,7 @@ export async function run() {
             );
             return undefined;
         };
-        await chooseEffort("fake-small");
+        await chooseEffort();
         assert.equal(controller.snapshot().effort.level, "default");
         fake.options.models = DEFAULT_MODELS.map((model) => ({ ...model, tomverse: { ...model.tomverse, reasoning_efforts: ["low", "high", "invalid"] } }));
         await controller.refresh();
@@ -622,7 +628,7 @@ export async function run() {
         await controller.chooseSession(effortSession);
         assert.equal(controller.snapshot().effort.level, "high");
         const beforeUnavailable = fake.completions.length;
-        fake.options.models = DEFAULT_MODELS;
+        fake.options.models = modelsWithoutEffort;
         await send("Use the routed model defaults", "agent", "smart-adaptive");
         assert.equal(fake.completions.length, beforeUnavailable + 1);
         assert.equal(fake.completions.at(-1)!.body.model, "fake-coder");
@@ -652,7 +658,7 @@ export async function run() {
         assert.equal(fake.completions.at(-1)!.body.tomverse_effort, "high");
         assert.equal(controller.snapshot().state, "completed");
         await fresh();
-        fake.options.models = DEFAULT_MODELS;
+        fake.options.models = modelsWithoutEffort;
         await controller.chooseSession(resumeSession);
         const beforeRemovedResume = fake.completions.length;
         await action("recover");
@@ -673,7 +679,7 @@ export async function run() {
         await controller.refresh();
         controller.dialogs.pick = async (items) => items.find((item) => item.label === t("effort_high"));
         await chooseEffort();
-        fake.options.models = DEFAULT_MODELS;
+        fake.options.models = modelsWithoutEffort;
         const beforeRefusal = fake.completions.length;
         await send("Capability disappeared before starting", "ask");
         assert.equal(fake.completions.length, beforeRefusal + 1);
