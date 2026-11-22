@@ -126,3 +126,100 @@ test("malformed counters are refused before anything is written", async () => {
   const row = await prisma.supportTriageRun.findUniqueOrThrow({ where: { id: run.id } });
   assert.equal(row.outcome, "running");
 });
+
+// 2026-11-21 (dev): a run-row transaction lost its session to 25P03 and the
+// whole retention run failed. A failure PostgreSQL rolled back as a whole is
+// asked once more; anything else is thrown as before.
+const failOnce = async (timing: "INSERT" | "UPDATE", sqlstate: string) => {
+  await prisma.$executeRawUnsafe(`DROP SEQUENCE IF EXISTS test_run_write_once`);
+  await prisma.$executeRawUnsafe(`CREATE SEQUENCE test_run_write_once`);
+  await prisma.$executeRawUnsafe(`
+    CREATE OR REPLACE FUNCTION test_run_write_fail_once() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      IF nextval('test_run_write_once') = 1 THEN
+        RAISE EXCEPTION 'injected' USING ERRCODE = '${sqlstate}';
+      END IF;
+      RETURN NEW;
+    END $$`);
+  await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS test_run_write_fail_once ON "SupportTriageRun"`);
+  await prisma.$executeRawUnsafe(
+    `CREATE TRIGGER test_run_write_fail_once BEFORE ${timing} ON "SupportTriageRun"
+       FOR EACH ROW EXECUTE FUNCTION test_run_write_fail_once()`
+  );
+};
+const clearFailOnce = async () => {
+  await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS test_run_write_fail_once ON "SupportTriageRun"`);
+  await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS test_run_write_fail_once()`);
+  await prisma.$executeRawUnsafe(`DROP SEQUENCE IF EXISTS test_run_write_once`);
+};
+const warnings = (t: { mock: { method: (o: object, m: string, f: (...a: unknown[]) => void) => unknown } }) => {
+  const lines: string[] = [];
+  t.mock.method(console, "warn", (line: unknown) => { lines.push(String(line)); });
+  return lines;
+};
+
+test("a start the database rolled back is asked once more and leaves one row and one audit entry", async (t) => {
+  for (const sqlstate of ["25P03", "40001", "40P01"]) {
+    await reset();
+    const lines = warnings(t);
+    await failOnce("INSERT", sqlstate);
+    try {
+      const run = await startSupportTriageRun("retention");
+      assert.equal((await prisma.supportTriageRun.count()), 1, sqlstate);
+      const audits = await runAudits();
+      assert.deepEqual(audits.map((a) => [a.action, a.targetId]), [["support_triage.run_started", run.id]], sqlstate);
+      // Prisma reports a deadlock or serialization failure as P2034.
+      const retried = lines.map((line) => { try { return JSON.parse(line); } catch { return null; } })
+        .find((line) => line?.event === "support_triage_run_write_retried");
+      assert.ok([sqlstate, "P2034"].includes(retried?.code), `${sqlstate}: ${retried?.code}`);
+    } finally {
+      await clearFailOnce();
+      t.mock.restoreAll();
+    }
+  }
+});
+
+test("a finish the database rolled back is asked once more and records the outcome once", async (t) => {
+  const run = await startSupportTriageRun("retention");
+  const lines = warnings(t);
+  await failOnce("UPDATE", "25P03");
+  try {
+    const finished = await finishSupportTriageRun({ id: run.id, kind: "retention", outcome: "success",
+      counters: { batchesCompleted: 1, overdueRemaining: 0, oldestOverdueAgeSeconds: 0, blocked: 0 } });
+    assert.equal(finished.outcome, "success");
+    assert.deepEqual((await runAudits()).map((a) => a.action), ["support_triage.run_started", "support_triage.run_finished"]);
+    assert.ok(lines.some((line) => line.includes("support_triage_run_write_retried")));
+  } finally {
+    await clearFailOnce();
+  }
+});
+
+test("a failure that is not a rollback is thrown without a second try", async (t) => {
+  const lines = warnings(t);
+  await failOnce("INSERT", "23514");
+  try {
+    await assert.rejects(startSupportTriageRun("retention"));
+    assert.equal(await prisma.supportTriageRun.count(), 0);
+    assert.equal((await runAudits()).length, 0);
+    assert.equal(lines.some((line) => line.includes("support_triage_run_write_retried")), false);
+  } finally {
+    await clearFailOnce();
+  }
+});
+
+test("a write that is rolled back twice is thrown after the second try", async () => {
+  await prisma.$executeRawUnsafe(`
+    CREATE OR REPLACE FUNCTION test_run_write_fail_always() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN RAISE EXCEPTION 'injected' USING ERRCODE = '40001'; END $$`);
+  await prisma.$executeRawUnsafe(
+    `CREATE TRIGGER test_run_write_fail_always BEFORE INSERT ON "SupportTriageRun"
+       FOR EACH ROW EXECUTE FUNCTION test_run_write_fail_always()`
+  );
+  try {
+    await assert.rejects(startSupportTriageRun("retention"));
+    assert.equal((await runAudits()).length, 0);
+  } finally {
+    await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS test_run_write_fail_always ON "SupportTriageRun"`);
+    await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS test_run_write_fail_always()`);
+  }
+});

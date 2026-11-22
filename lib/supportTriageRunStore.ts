@@ -18,6 +18,7 @@ import { randomUUID } from "node:crypto";
 
 import { writeSystemAuditLog } from "@/lib/adminAudit";
 import type { SupportTriageSystemAuditActor } from "@/lib/adminAuditSystemActors";
+import { amuxRolledBackWriteCode } from "@/lib/amux/readFailureCore";
 import { prisma } from "@/lib/prisma";
 import {
   LANE_TIMEOUTS,
@@ -39,6 +40,29 @@ export class SupportTriageRunNotRunning extends Error {
   }
 }
 
+/**
+ * One more try for a write the database rolled back as a whole.
+ *
+ * These two transactions run under the lane's timeouts, and the retention
+ * lane allows 150 ms idle between statements. On 2026-11-21 (dev) one of them
+ * lost its session to 25P03 (idle_in_transaction_session_timeout) and failed
+ * the whole run: the batches retry a lost session (supportTriageRetention.ts),
+ * but these did not. 25P03, a deadlock and a serialization failure all mean
+ * PostgreSQL rolled back everything the transaction wrote -- the run row and
+ * its audit entry alike -- so the same write may be asked again once. Any other
+ * failure, including an unknown COMMIT outcome, is thrown as before.
+ */
+const onceMoreIfRolledBack = async <T>(write: () => Promise<T>): Promise<T> => {
+  try {
+    return await write();
+  } catch (error) {
+    const code = amuxRolledBackWriteCode(error);
+    if (!code) throw error;
+    console.warn(JSON.stringify({ event: "support_triage_run_write_retried", code }));
+    return write();
+  }
+};
+
 export type StartedRun = {
   readonly id: string;
   readonly kind: SupportTriageRunKind;
@@ -47,7 +71,7 @@ export type StartedRun = {
 };
 
 export const startSupportTriageRun = async (kind: SupportTriageRunKind): Promise<StartedRun> =>
-  prisma.$transaction(
+  onceMoreIfRolledBack(() => prisma.$transaction(
     async (tx) => {
       await armSupportTriageTransaction(tx, kind);
       const run = await tx.supportTriageRun.create({
@@ -68,7 +92,7 @@ export const startSupportTriageRun = async (kind: SupportTriageRunKind): Promise
       return { id: run.id, kind, createdAt: run.createdAt, deadlineAt: run.deadlineAt };
     },
     { timeout: LANE_TIMEOUTS[kind].prismaTransactionTimeoutMs }
-  );
+  ));
 
 export type RunCounters = {
   readonly batchesCompleted?: number;
@@ -113,7 +137,7 @@ export const finishSupportTriageRun = async (input: {
     throw new RangeError("a retention run completes at most eight batches");
   }
 
-  return prisma.$transaction(
+  return onceMoreIfRolledBack(() => prisma.$transaction(
     async (tx) => {
       await armSupportTriageTransaction(tx, input.kind);
       // The audit entry first; the update below is the last statement, so an
@@ -143,5 +167,5 @@ export const finishSupportTriageRun = async (input: {
       return { id: row.id, outcome: row.outcome as SupportTriageRunOutcome, finishedAt: row.finishedAt };
     },
     { timeout: LANE_TIMEOUTS[input.kind].prismaTransactionTimeoutMs }
-  );
+  ));
 };
