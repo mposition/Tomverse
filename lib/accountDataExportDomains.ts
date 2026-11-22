@@ -75,6 +75,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "included",
   },
   { domain: "memoryItem", publicName: "memories", prismaModel: "MemoryItem", state: "included" },
+  // Owner-only receipts of the project sources an answer was given (refs and
+  // titles, never source text).
+  {
+    domain: "projectAnswerReceipt",
+    publicName: "project_answer_sources",
+    prismaModel: "ProjectAnswerReceipt",
+    state: "included",
+  },
   {
     domain: "creditPurchase",
     publicName: "credit_purchases",

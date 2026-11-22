@@ -1,0 +1,43 @@
+/* Project workspace: sheets, tabs, rows and the chat bar. Uses the native shell tokens only. */
+.native-sheet.project-sheet { display: flex; flex-direction: column; height: min(92dvh, 820px); }
+.project-sheet > .project-panel { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 2px 12px; }
+.project-sheet p { margin: 0 0 10px; }
+.project-note { color: var(--mobile-muted); font-size: 13px; line-height: 1.6; }
+.project-tabs { display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid var(--mobile-border); margin-bottom: 8px; flex-shrink: 0; }
+.project-tabs > button { flex: 0 0 auto; min-height: 44px; padding: 8px 12px; font-size: 14px; color: var(--mobile-muted); border-bottom: 2px solid transparent; border-radius: 0; }
+.project-tabs > button[aria-selected="true"] { color: var(--mobile-action); border-bottom-color: var(--mobile-action); font-weight: 600; }
+.project-context { font-size: 13px; font-weight: 600; }
+.project-context[data-context="off"] { color: var(--mobile-muted); }
+.project-counts { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 4px; font-size: 14px; }
+.project-instructions { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 14em; overflow-y: auto; color: var(--mobile-ink); font-size: 14px; }
+.project-list, .project-form { display: grid; gap: 10px; }
+.project-form label { display: grid; gap: 4px; font-size: 13px; color: var(--mobile-muted); }
+.project-form input:not([type="checkbox"]), .project-form textarea, .project-form select, .project-search input { min-width: 0; width: 100%; min-height: 44px; padding: 8px 12px; font: inherit; font-size: 16px; color: var(--mobile-ink); background: var(--mobile-paper); border: 1px solid var(--mobile-border); border-radius: 12px; }
+.project-form label.project-check { display: flex; align-items: center; gap: 10px; color: var(--mobile-ink); font-size: 14px; }
+.project-form label.project-check input { width: 22px; height: 22px; flex-shrink: 0; accent-color: var(--mobile-action); }
+.project-row { display: flex; align-items: stretch; gap: 6px; border-bottom: 1px solid var(--mobile-border); }
+.project-row-main { flex: 1; min-width: 0; min-height: 48px; text-align: left; display: grid; }
+.project-row-main > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-row-main small, .project-card small { color: var(--mobile-muted); font-size: 12px; }
+.project-card { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--mobile-border); border-radius: 14px; background: var(--mobile-paper); list-style: none; }
+.project-card[data-status="failed"] { border-color: currentColor; }
+.project-card[data-pinned] { border-color: var(--mobile-action); }
+.project-card p { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+.project-source-text { white-space: pre-wrap; max-height: 16em; overflow-y: auto; }
+.project-status { font-size: 12px; color: var(--mobile-muted); }
+.project-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.project-actions > button, .project-confirm > button, .project-form > button, .project-list > button { min-height: 44px; padding: 8px 14px; border: 1px solid var(--mobile-border); border-radius: 12px; font-size: 14px; }
+.project-form > .primary, .project-confirm > .primary { border-color: transparent; margin-top: 0; }
+.project-danger { color: var(--mobile-ink); border: 1px solid currentColor; min-height: 44px; border-radius: 12px; }
+.project-confirm { display: grid; gap: 8px; padding: 14px; border: 1px solid var(--mobile-border); border-radius: 14px; background: var(--mobile-soft); }
+.project-hits { display: grid; gap: 10px; padding: 0; margin: 0; }
+.project-search { display: flex; gap: 8px; margin-bottom: 8px; }
+.project-search > button { min-height: 44px; padding: 8px 14px; border: 1px solid var(--mobile-border); border-radius: 12px; }
+.project-chat-bar { flex-shrink: 0; padding: 4px 16px 0; }
+.project-chat-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.project-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; max-width: 100%; padding: 4px 12px; font-size: 13px; color: var(--mobile-muted); border: 1px solid var(--mobile-border); border-radius: 999px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-chat-bar .project-note { margin: 6px 0 0; font-size: 12px; }
+.project-refs ul { list-style: none; display: flex; flex-wrap: wrap; gap: 6px; padding: 0; margin: 4px 0 0; }
+.project-refs li { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 2px 4px 2px 10px; font-size: 12px; background: var(--mobile-soft); border-radius: 999px; }
+.project-refs li > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-refs li > button { min-width: 32px; min-height: 32px; padding: 0; }

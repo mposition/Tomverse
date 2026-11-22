@@ -3,6 +3,7 @@ import { externalApiCopy } from "./externalApi";
 import { reviewHandoffCopy } from "./reviewHandoff";
 import { researchPreviewCopy } from "./researchPreview";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
+import { projectWorkspaceCopy } from "./projectWorkspace";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
 
@@ -2317,6 +2318,7 @@ export const zhHant = {
     // text, which is also the version the page says governs.
     privacyPolicy: en.privacyPolicy,
     chatStarter: workspaceWelcomeCopy["zh-Hant"].starter,
+    projectWorkspace: projectWorkspaceCopy["zh-Hant"],
     // HELP-NAV-01 guided help: pick a task, see where it is done. Directions only.
     helpGuide: {
         menuItem: "尋找操作方法",

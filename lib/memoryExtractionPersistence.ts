@@ -18,6 +18,7 @@ import {
 import { encodeVector } from "@/lib/semanticRetrievalCore";
 import { activeMemoryConflicts } from "@/lib/memoryService";
 import { memoryStatementKey } from "@/lib/memoryValidatorCore";
+import { verifyNativeMessageEvidence } from "@/lib/nativeMemoryEvidence";
 
 /**
  * The storage step of an extraction chunk
@@ -123,6 +124,11 @@ async function evidenceTimes(
     messageIds: readonly string[]
 ): Promise<Map<string, number>> {
     if (messageIds.length === 0) return new Map();
+    // Native (Tomverse) messages are timed by when they were written.
+    const native = await tx.message.findMany({
+        where: { id: { in: [...new Set(messageIds)] }, conversation: { userId } },
+        select: { id: true, createdAt: true },
+    });
     const rows = await tx.externalMessage.findMany({
         where: { id: { in: [...new Set(messageIds)] }, userId },
         select: {
@@ -137,8 +143,8 @@ async function evidenceTimes(
             },
         },
     });
-    return new Map(
-        rows.map((row) => [
+    return new Map([
+        ...rows.map((row): [string, number] => [
             row.id,
             (
                 row.sourceTimestamp ??
@@ -146,8 +152,9 @@ async function evidenceTimes(
                 row.conversation.sourceCreatedAt ??
                 row.conversation.importedAt
             ).getTime(),
-        ])
-    );
+        ]),
+        ...native.map((row): [string, number] => [row.id, row.createdAt.getTime()]),
+    ]);
 }
 
 const newest = (ids: readonly string[], times: Map<string, number>) =>
@@ -185,12 +192,12 @@ async function candidateWinsTopic(
     const cited = await tx.memoryEvidence.findMany({
         where: {
             memoryItemId: { in: conflictIds },
-            externalMessageId: { not: null },
+            OR: [{ externalMessageId: { not: null } }, { tomverseMessageId: { not: null } }],
         },
-        select: { externalMessageId: true },
+        select: { externalMessageId: true, tomverseMessageId: true },
     });
     const citedIds = cited.flatMap((row) =>
-        row.externalMessageId ? [row.externalMessageId] : []
+        row.externalMessageId ? [row.externalMessageId] : row.tomverseMessageId ? [row.tomverseMessageId] : []
     );
     const times = await evidenceTimes(tx, userId, [
         ...candidate.messageIds,
@@ -227,10 +234,31 @@ export async function persistExtractionChunkDecisions(
             outranked: 0,
         };
     }
-    const keep = input.decisions.filter(
-        (decision) =>
-            decision.outcome === "store_candidate" && decision.validation.bulkSafe
-    );
+    // The run's own record decides its source and scope, never the caller.
+    const run = await tx.memoryExtractionRun.findUnique({
+        where: { id: input.runId },
+        select: { sourceKind: true, projectId: true },
+    });
+    const native = run?.sourceKind === "native";
+    const projectId = native ? (run?.projectId ?? null) : null;
+    let nativeAllowed = true;
+    if (native) {
+        const project = projectId
+            ? await tx.conversationProject.findFirst({
+                  where: { id: projectId, userId: input.userId },
+                  select: { contextEnabled: true, autoMemoryEnabled: true, archivedAt: true },
+              })
+            : null;
+        // Re-read under the memory lock: a project switched off, archived or
+        // deleted while the provider answered stores nothing.
+        nativeAllowed = Boolean(project && project.contextEnabled && project.autoMemoryEnabled && !project.archivedAt);
+    }
+    const keep = nativeAllowed
+        ? input.decisions.filter(
+              (decision) =>
+                  decision.outcome === "store_candidate" && decision.validation.bulkSafe
+          )
+        : [];
     const discarded = input.decisions.filter(
         (decision) => decision.outcome === "discard"
     ).length;
@@ -270,7 +298,14 @@ export async function persistExtractionChunkDecisions(
                 ])
         ).values(),
     ];
-    const outcomes = await verifyExternalMessageEvidence(input.userId, refs, tx);
+    // A native run cites Tomverse messages, an external run imported ones;
+    // each is verified against its own store, and a native citation must still
+    // sit in the run's project, unlocked, with the same content digest.
+    const outcomes: ReadonlyArray<{ outcome: string }> = native
+        ? projectId
+            ? await verifyNativeMessageEvidence(input.userId, projectId, refs, tx)
+            : refs.map(() => ({ outcome: "not_found" }))
+        : await verifyExternalMessageEvidence(input.userId, refs, tx);
     // Keyed by the pair rather than by the id: a digest mismatch and a missing
     // message are different outcomes, and a set of ids alone could not carry
     // the difference.
@@ -284,7 +319,7 @@ export async function persistExtractionChunkDecisions(
     // Grows as this chunk stores memories, so two paraphrases in one chunk
     // meet each other as well as what was already there.
     const embeddedMemories = semantic
-        ? await loadEmbeddedActiveMemories(tx, input.userId, semantic.modelLabel)
+        ? await loadEmbeddedActiveMemories(tx, input.userId, semantic.modelLabel, projectId)
         : [];
 
     let stored = 0;
@@ -320,6 +355,7 @@ export async function persistExtractionChunkDecisions(
             kind,
             statement,
             conflictKey,
+            projectId,
         });
         const vector = semantic?.vectors.get(statement);
         const known = new Set(exactConflicts.map((row) => row.id));
@@ -368,6 +404,7 @@ export async function persistExtractionChunkDecisions(
         const item = await tx.memoryItem.create({
             data: {
                 userId: input.userId,
+                projectId,
                 kind,
                 statement,
                 status: "active",
@@ -406,8 +443,9 @@ export async function persistExtractionChunkDecisions(
             data: evidence.map((reference) => ({
                 memoryItemId: item.id,
                 userId: input.userId,
-                sourceType: "external_message",
-                externalMessageId: reference.externalMessageId,
+                ...(native
+                    ? { sourceType: "tomverse_message", tomverseMessageId: reference.externalMessageId }
+                    : { sourceType: "external_message", externalMessageId: reference.externalMessageId }),
                 // The server's own digest of the stored message, re-checked
                 // against the row just above. A digest the model supplied
                 // would attest to nothing.
@@ -421,7 +459,7 @@ export async function persistExtractionChunkDecisions(
         memoryOff: false,
         stored,
         superseded,
-        withheld: input.decisions.length - keep.length - discarded,
+        withheld: Math.max(0, input.decisions.length - keep.length - discarded),
         discarded,
         unsourced,
         outranked,

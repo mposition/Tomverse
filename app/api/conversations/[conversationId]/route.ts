@@ -2,6 +2,11 @@ import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { consumeConversationUpdateLimit } from "@/lib/conversationUpdateRateLimit";
 ﻿export const dynamic = "force-dynamic";
 
+import {
+  applyNativeSourceDeletion,
+  onConversationLockChanged,
+  onConversationProjectChanged,
+} from "@/lib/projectWorkspaceService";
 import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { enqueueImageAssetCleanupForConversations } from "@/lib/imageAssetLifecycle";
@@ -404,6 +409,7 @@ export async function PATCH(
                 selectedModels: true,
                 password: true, passwordVersion: true,
                 memoryMode: true,
+                projectId: true,
                 // The stored product is the authority for a PATCH: the request
                 // body cannot carry one, and §3 does not offer a PATCH that
                 // changes it. Turning a Review conversation into a Chat one is
@@ -689,12 +695,18 @@ export async function PATCH(
       } else {
         const project = await prisma.conversationProject.findFirst({
           where: { id: body.projectId, userId },
-          select: { id: true },
+          select: { id: true, archivedAt: true },
         });
         if (!project) {
           return NextResponse.json(
             { error: "Project not found." },
             { status: 404 }
+          );
+        }
+        if (project.archivedAt) {
+          return NextResponse.json(
+            { error: "Restore the project before adding conversations.", code: "PROJECT_ARCHIVED" },
+            { status: 409 }
           );
         }
         updateData.project = { connect: { id: project.id } };
@@ -709,6 +721,20 @@ export async function PATCH(
       where: { id: conversationId },
       data: updateData,
     });
+    // Project workspace: a move changes only what is used from now on. Native
+    // extraction for this conversation stops, and every memory citing it is
+    // re-decided in both projects; the transcript itself is not touched.
+    if (body.projectId !== undefined && (body.projectId ?? null) !== (existingConv.projectId ?? null)) {
+      await onConversationProjectChanged({
+        userId,
+        conversationId,
+        fromProjectId: existingConv.projectId ?? null,
+        toProjectId: updatedConversation.projectId ?? null,
+      });
+    }
+    if (body.password !== undefined) {
+      await onConversationLockChanged({ userId, conversationId, projectId: updatedConversation.projectId ?? null });
+    }
     if (body.memoryMode !== undefined) {
       // After the write, and never allowed to fail it: the user's choice is
       // already saved, and §22 observation must not be able to undo it.
@@ -857,6 +883,9 @@ export async function DELETE(req: Request, { params }: Params) {
       // (docs/policy/user-attachment-persistence.md).
       await enqueueMessageAttachmentCleanupForConversations(tx, [conversationId]);
       await deleteDeepResearchJobsForConversations(tx, [conversationId]);
+      // Project memories grounded only in this conversation are deleted
+      // (derived) or suspended (user-edited/pinned) before the cascade.
+      await applyNativeSourceDeletion(tx, userId, [conversationId]);
       await tx.conversation.delete({
         where: { id: conversationId },
       });

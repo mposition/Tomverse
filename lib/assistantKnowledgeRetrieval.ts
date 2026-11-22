@@ -64,6 +64,12 @@ export type KnowledgeRetrievalInput = {
      * the bundle used and "off" for the rest. Defaults to "allow".
      */
     semantic?: SemanticCallMode | { neighbours: SemanticCallMode; rerank: SemanticCallMode };
+    /**
+     * The container the server decided this turn reads from. Checked in the
+     * query itself, so a manifest that names another container's file id (a
+     * profile manifest naming a project file, or the reverse) reads nothing.
+     */
+    container?: { profileId: string } | { projectId: string };
 };
 
 export const KNOWLEDGE_CANDIDATE_LIMIT = 60;
@@ -118,7 +124,7 @@ export const retrieveKnowledgeContext = async (
         // constraint makes this true already; asking for it here means a
         // future path that loosens the constraint does not silently start
         // retrieving from half-processed files.
-        file: { processingStatus: "ready" },
+        file: { processingStatus: "ready", ...(input.container ?? {}) },
     };
 
     const lexicalRows = await prisma.assistantKnowledgeChunk.findMany({

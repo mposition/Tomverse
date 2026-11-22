@@ -26,6 +26,7 @@ import {
     isRetryableDatabaseError,
 } from "@/lib/databaseError";
 import { prisma } from "@/lib/prisma";
+import { resolveProjectScopeById } from "@/lib/projectWorkspaceService";
 
 /**
  * Policy: docs/policy/external-conversation-import-and-memory.md.
@@ -58,6 +59,8 @@ const contextSchema = z
         modelIds: z.array(z.string().min(1).max(100)).min(1).max(3),
         prompt: z.string().max(CHAT_MAX_MESSAGE_CHARACTERS),
         previousContextBundle: z.string().min(1).max(8_192).optional(),
+        /** Project locations the user picked; re-read and re-checked by the server. */
+        projectReferences: z.array(z.string().min(3).max(200)).max(8).optional(),
     })
     .strict();
 
@@ -113,6 +116,7 @@ export async function POST(request: Request) {
         // every message, not occasionally.
         let conversationMemoryMode: string | null = null;
         let profileVersionId: string | null = null;
+        let conversationProjectId: string | null = null;
         if (conversationId) {
             const conversation = await prisma.conversation.findUnique({
                 where: { id: conversationId },
@@ -122,6 +126,7 @@ export async function POST(request: Request) {
                     kind: true,
                     memoryMode: true,
                     assistantProfileVersionId: true,
+                    projectId: true,
                 },
             });
             if (!conversation || conversation.userId !== userId) {
@@ -149,8 +154,17 @@ export async function POST(request: Request) {
             }
             conversationMemoryMode = conversation.memoryMode;
             profileVersionId = conversation.assistantProfileVersionId;
+            conversationProjectId = conversation.projectId ?? null;
         }
 
+        // The conversation's project, read here. A request never names it.
+        const project = conversationProjectId ? await resolveProjectScopeById(userId, conversationProjectId) : null;
+        if (project?.contextEnabled && project.archived) {
+            return Response.json(
+                { error: "This project is archived. Restore it to continue here.", code: "PROJECT_ARCHIVED", traceId },
+                { status: 409, headers }
+            );
+        }
         const context = await buildChatTurnContext({
             userId,
             query: payload.prompt,
@@ -162,6 +176,8 @@ export async function POST(request: Request) {
             profileVersionId,
             // Only a bound profile uses the tier to check its model entitlement.
             plan: profileVersionId ? (await getUserBillingPlan(userId))?.tier ?? null : null,
+            project,
+            projectReferences: payload.projectReferences,
         });
 
         // Nothing to bind: issuing a bundle for an empty context would make
@@ -173,7 +189,9 @@ export async function POST(request: Request) {
         // still carry a profile's instructions and its retrieved knowledge,
         // and those are priced input tokens: skipping the bundle for one of
         // them would send a block nothing reserved against.
-        if (!context.memory.decision.allowed && context.profileTokens === 0) {
+        // A project with context on always gets a bundle: the send refuses to
+        // answer such a conversation without one.
+        if (!context.memory.decision.allowed && context.profileTokens === 0 && !context.project?.project) {
             return Response.json(
                 {
                     ok: true,
@@ -202,6 +220,16 @@ export async function POST(request: Request) {
                 // Server-computed (§13.4). The client never counts this
                 // itself, and never sends a count back.
                 memoryUsedCount: bundle.memoryUsedCount,
+                // Content-free: which project context was prepared, for the composer status.
+                project: context.project?.project
+                    ? {
+                          projectId: context.project.project.projectId,
+                          revision: context.project.project.revision,
+                          materialExcerpts: context.project.materialChunkCount,
+                          materialsAvailable: context.project.materialSources.length > 0,
+                          references: context.project.references,
+                      }
+                    : null,
             },
             { headers }
         );

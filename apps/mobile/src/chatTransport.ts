@@ -65,6 +65,8 @@ export type Conversation = {
   productKey?: string | null;
   imported?: ImportedTranscript;
   reviewHandoff?: true | ReviewHandoffSummary;
+  /** The project this conversation belongs to (server-owned). */
+  projectId?: string | null;
 };
 export type MobileImageGroup = {
   status: string;
@@ -72,7 +74,7 @@ export type MobileImageGroup = {
   generations: Array<{ generationId: string; status: string; prompt: string; quality?: string; preset?: string; assets: Array<{ role: string; url: string; urlExpiresAt?: string }> }>;
 };
 export type MobileImageModel = { id: string; name: string; provider: string; pricingVersion: string; prices: Array<{ quality: "low" | "medium" | "high"; size: "1024x1024" | "1536x1024" | "1024x1536"; credits: number }> };
-export type MobileCapabilities = { reviewAnalysis?: { crossReview: boolean; quickSummary: boolean }; researchPreview?: { enabled: boolean; pageReading: boolean; durableRuns: boolean }; generatedFileRevisions?: boolean; workspace?: import("./iosWorkspaceContract").WorkspaceFeatures; historyFeatures?: { sharing: boolean; downloads: boolean }; historyActions?: boolean; conversationTitles?: boolean; accountUsage?: boolean; chatImageTurns?: boolean; chatImageEdits?: boolean; reviewEasy: boolean; maxModels: number; assistants: boolean; images?: { enabled: boolean; maxModels: number; models: MobileImageModel[] }; plan: import("../../../lib/models").ModelTier | "Guest" };
+export type MobileCapabilities = { reviewAnalysis?: { crossReview: boolean; quickSummary: boolean }; researchPreview?: { enabled: boolean; pageReading: boolean; durableRuns: boolean }; generatedFileRevisions?: boolean; workspace?: import("./iosWorkspaceContract").WorkspaceFeatures; historyFeatures?: { sharing: boolean; downloads: boolean }; historyActions?: boolean; projectWorkspace?: boolean; conversationTitles?: boolean; accountUsage?: boolean; chatImageTurns?: boolean; chatImageEdits?: boolean; reviewEasy: boolean; maxModels: number; assistants: boolean; images?: { enabled: boolean; maxModels: number; models: MobileImageModel[] }; plan: import("../../../lib/models").ModelTier | "Guest" };
 export type AccountUsage = { plan: string; usage: { creditsMonth: number }; limits: { creditsMonth: number } };
 export type UserPreferences = { reviewEasyEffectiveProviders?: string[]; reviewEasyProviderOptions?: string[]; reviewEasyMaxProviders?: number; theme: "system" | "light" | "dark"; language: string; defaultModel: string; timeZone: string; timeZoneChangeAllowedAt?: string | null; imageHandoffAutoGenerate: boolean };
 export type MemoryPreferences = { masterEnabled: boolean; styleEnabled: boolean; defaultConversationMode: "on" | "off" };
@@ -98,6 +100,8 @@ export interface HistoryTransport {
 }
 export type MobileAttachment = { uploadId: string; name: string; mediaType: string; size: number };
 export type ContinuationTurnContext = {
+  /** Project locations the user picked for this question; the server re-reads them. */
+  projectReferences?: readonly string[];
   sourcePassages?: readonly import("../../../lib/continuationPassages").Passage[];
   onReceipt?: (receipt: import("../../../lib/continuationReceipt").ContinuationReceipt) => void;
 };
@@ -167,7 +171,8 @@ export interface ChatTransport {
   list(): Promise<ChatSummary[]>;
   load(id: string): Promise<Conversation>;
   continuationSource?(id: string, offset?: number): Promise<ImportedTranscript>;
-  create(title?: string, assistantProfileId?: string): Promise<Conversation>;
+  create(title?: string, assistantProfileId?: string, projectId?: string): Promise<Conversation>;
+  projects?: import("./projectWorkspaceTransport").ProjectWorkspaceTransport;
   models(): Promise<MobileModel[]>;
   capabilities(): Promise<{ offered: boolean }>;
   configure(id: string, modelId: string, auto: boolean): Promise<Conversation>;

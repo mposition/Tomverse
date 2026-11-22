@@ -3,6 +3,7 @@ import { externalApiCopy } from "./externalApi";
 import { reviewHandoffCopy } from "./reviewHandoff";
 import { researchPreviewCopy } from "./researchPreview";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
+import { projectWorkspaceCopy } from "./projectWorkspace";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
 
@@ -2463,6 +2464,7 @@ export const ko = {
         back: "Tomverse로 돌아가기",
     },
     chatStarter: workspaceWelcomeCopy.ko.starter,
+    projectWorkspace: projectWorkspaceCopy["ko"],
     // HELP-NAV-01 guided help: pick a task, see where it is done. Directions only.
     helpGuide: {
         menuItem: "하고 싶은 작업 찾기",

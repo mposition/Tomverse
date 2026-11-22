@@ -1,7 +1,7 @@
 import { researchRunMessage } from "../../../lib/researchPreviewRunClient";
 import type { ResearchPreviewRunDto } from "../../../lib/researchPreviewRunTypes";
 import { createWorkspaceTransport } from "./workspaceTransport";
-import { createApiClient, ApiClientError, requestChatLocationIntent } from "@tomverse/api-client";
+import { createApiClient, ApiClientError, requestChatLocationIntent, createProjectWorkspaceClient } from "@tomverse/api-client";
 import { CONTINUATION_RECEIPT_HEADER, receiptForAttempt, type ContinuationReceipt } from "../../../lib/continuationReceipt";
 import { PASSAGE_HEADER, encodePassages } from "../../../lib/continuationPassages";
 import { parseChatStreamTrailer } from "../../../lib/webSearchStreamTrailer";
@@ -43,10 +43,10 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
   const sourceReceiptByMessage = new Map<string, ContinuationReceipt>();
   const clearSessionState = () => { sessionRevision++; locationIdentity = null; location.setIdentity(null); capabilityCache = null; capabilityRequest = null; unlockGrants.clear(); pinSequences.clear(); routedModelByMessage.clear(); sourceReceiptByMessage.clear(); };
   const notifySessionLost = () => { clearSessionState(); for (const listener of listeners) listener(); };
-  const run = async (path: string, init?: MobileRequestInit): Promise<Response> => {
+  const run = async (path: string, init?: MobileRequestInit, softAuth = false): Promise<Response> => {
     try {
       for (const [id, token] of unlockGrants) if (Number(token.split(".")[0]) <= Date.now() / 1000) unlockGrants.delete(id);
-      if (unlockGrants.size && (/^\/api\/(?:conversations|artifacts)(?:\/|\?)/.test(path) || path.startsWith("/api/chat/research-preview/") || path === "/api/chat" || path === "/api/chat/preflight")) {
+      if (unlockGrants.size && (/^\/api\/(?:conversations|artifacts)(?:\/|\?)/.test(path) || path.startsWith("/api/chat/research-preview/") || path === "/api/chat" || path === "/api/chat/preflight" || path === "/api/chat/context")) {
         const grantHeaders = (value?: RequestInit) => {
           const headers = new Headers(value?.headers);
           headers.set("X-Tomverse-Conversation-Unlocks", [...unlockGrants].map(([id, token]) => `${id}=${token}`).join("; "));
@@ -56,7 +56,17 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
         init = typeof original === "function" ? () => grantHeaders(original()) : grantHeaders(original);
       }
       const response = await source(path, init);
-      if (response.status === 401) notifySessionLost();
+      if (response.status === 401) {
+        // A route the server has not switched on for this device refuses with the
+        // same 401 a revoked sign-in gets. For those routes, ask an enrolled one
+        // before concluding the session is gone, so a switched-off project
+        // workspace never signs the user out.
+        if (softAuth) {
+          const probe = await run("/api/user/account");
+          return probe.status === 401 ? response : Response.json({ code: "NATIVE_ROUTE_UNAVAILABLE" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+        }
+        notifySessionLost();
+      }
       if (response.status === 423) { const id = path.match(/^\/api\/conversations\/([A-Za-z0-9_-]+)/)?.[1]; if (id) unlockGrants.delete(id); }
       return response;
     }
@@ -232,17 +242,51 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
         })),
       });
       controller.signal.throwIfAborted();
+      // An ordinary Chat send prepares its own context, as the web does: a
+      // conversation in a project with context on is refused without one, and
+      // memory and profile context ride in the same signed bundle. Review and
+      // Research arrive with their own admission (or none) and are unchanged.
+      const ownsContext = !admission && !research && !review;
+      const projectReferences = ownsContext ? continuation?.projectReferences : undefined;
+      const prepareContext = async (previous?: string) => {
+        if (revision !== sessionRevision) throw new DOMException("Session changed", "AbortError");
+        const prompt = String(persisted.messages.find(message => message.id === sourceId && message.role === "user")?.content ?? "");
+        const prepared = await request<{ contextBundle?: string | null }>("/api/chat/context", {
+          ...json("POST", { conversationId: persisted.id, modelIds: [modelId], prompt,
+            ...(previous ? { previousContextBundle: previous } : {}),
+            ...(projectReferences?.length ? { projectReferences } : {}) }), signal: controller.signal,
+        });
+        controller.signal.throwIfAborted();
+        if (revision !== sessionRevision) throw new DOMException("Session changed", "AbortError");
+        return typeof prepared.contextBundle === "string" ? prepared.contextBundle : undefined;
+      };
+      let contextBundle = ownsContext && persisted.projectId ? await prepareContext() : undefined;
       watchdog = createChatLivenessWatchdog({ onExpire: abort });
-      const response = await run("/api/chat", () => {
+      const dispatch = () => run("/api/chat", () => {
         controller.signal.throwIfAborted();
         if (revision !== sessionRevision) throw new DOMException("Session changed", "AbortError");
         return { ...json("POST", { messages, modelId, webSearchMode: research ? "always" : persisted.webSearchMode ?? "off", conversationId: persisted.id,
           ...(research ? { researchMode: "preview" } : {}),
           assistantMessageId, sourceUserMessageId: sourceId, ...(admission ?? {}),
+          ...(contextBundle ? { contextBundle } : {}),
+          ...(projectReferences?.length ? { projectReferences } : {}),
           ...(fix && location.canShare(fix, scope) ? { currentLocation: fix } : {}) }),
           ...(continuation?.sourcePassages !== undefined && !review && !research ? { headers: { "Content-Type": "application/json",
             [PASSAGE_HEADER]: encodePassages(continuation.sourcePassages) } } : {}), ...(research ? { headers: { "Content-Type": "application/json", "Accept-Language": research.locale } } : {}), signal: controller.signal };
       });
+      let response = await dispatch();
+      // One automatic re-preparation when the context drifted before anything
+      // streamed (the web's decideBundleStaleRecovery rule for a single send).
+      if (ownsContext && response.status === 409) {
+        const refusal = await response.clone().json().catch(() => null) as { code?: string; details?: { refusalReason?: string } } | null;
+        if (refusal?.code === "CHAT_CONTEXT_BUNDLE_STALE" && refusal.details?.refusalReason !== "already_consumed") {
+          const refreshed = await prepareContext(contextBundle);
+          if (refreshed) {
+            contextBundle = refreshed;
+            response = await dispatch();
+          }
+        }
+      }
       watchdog.noteHeaders();
       const traceId = response.headers.get("X-Request-ID");
       publishReceipt(receiptForAttempt(response.headers.get(CONTINUATION_RECEIPT_HEADER), traceId, assistantMessageId));
@@ -310,6 +354,16 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       }, async () => { assertScope(); const value = await requireParity(); assertScope(); return value; }, async (url, headers, file) => { assertScope(); await uploadFile(url, headers, file); assertScope(); });
     },
     location,
+    // Project workspace: bound to this sign-in. A request issued under an
+    // earlier session (logout, another account) is refused before it leaves
+    // and its answer is discarded after it returns.
+    get projects() {
+      const revision = sessionRevision;
+      const assertScope = () => { if (revision !== sessionRevision) throw new DOMException("Session changed", "AbortError"); };
+      return createProjectWorkspaceClient(async (path, init) => {
+        assertScope(); const response = await run(path, init, true); assertScope(); return response;
+      }, async (url, headers, file) => { assertScope(); await uploadFile(url, headers, file as File); assertScope(); });
+    },
     researchPreviewOffer: async (input, signal, locale) => {
       if (!(await requireParity()).researchPreview?.enabled) return { offered: false, reason: "disabled" };
       return request("/api/chat/research-preview/offer", { ...json("POST", input), ...(locale ? { headers: { "Content-Type": "application/json", "Accept-Language": locale } } : {}), signal });
@@ -535,8 +589,10 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     models: async () => (await request<{ models: PublicCatalogModel[] }>("/api/models/catalog")).models.filter(isPubliclySelectableModel),
     capabilities: async () => ({ offered: (await request<{ autoSelection: { offered: boolean } }>("/api/products/chat/capabilities")).autoSelection.offered }),
     configure,
-    create: async (title, assistantProfileId) => {
-      const item = await request<{ id: string }>("/api/products/chat/conversations", json("POST", { webSearchMode: "always", ...(assistantProfileId ? { assistantProfileId } : {}), ...(title ? { title: title.slice(0, 30) } : {}) }));
+    create: async (title, assistantProfileId, projectId) => {
+      // The project is fixed by the create call itself, before the first send,
+      // so the first answer already runs in the project's context.
+      const item = await request<{ id: string }>("/api/products/chat/conversations", json("POST", { webSearchMode: "always", ...(assistantProfileId ? { assistantProfileId } : {}), ...(projectId ? { projectId } : {}), ...(title ? { title: title.slice(0, 30) } : {}) }));
       const detail = await load(item.id);
       return !assistantProfileId && detail.autoSelection?.offered ? configure(item.id, "", true) : detail;
     },

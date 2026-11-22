@@ -74,6 +74,8 @@ export type IssuedContextBundle = {
     memoryTokens: number;
     /** Release C: the profile's own blocks, priced apart from memory's. */
     profileTokens: number;
+    /** Project workspace: the project's own blocks. */
+    projectTokens: number;
 };
 
 /**
@@ -103,6 +105,7 @@ export function issueChatContextBundle(input: {
             modelIds: input.modelIds,
             memoryTokens: input.context.memoryTokens,
             profileTokens: input.context.profileTokens,
+            projectTokens: input.context.projectTokens ?? 0,
             expiresAtMs,
             semanticSteps: input.context.semanticSteps,
             memoryQueryPolicy: input.context.memory.memoryQueryPolicy,
@@ -122,6 +125,7 @@ export function issueChatContextBundle(input: {
         memoryUsedCount: input.context.memory.prompt.usedCount,
         memoryTokens: input.context.memoryTokens,
         profileTokens: input.context.profileTokens,
+        projectTokens: input.context.projectTokens ?? 0,
     };
 }
 

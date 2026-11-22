@@ -186,6 +186,24 @@ export function nativeWorkspaceBearerRoute(path: string, method: string, enabled
   return false;
 }
 
+/** Exact project workspace calls consumed by the bundled client. */
+export function nativeProjectWorkspaceBearerRoute(path: string, method: string): boolean {
+  const id = "[A-Za-z0-9_-]{1,100}";
+  if (path === "/api/chat/context") return method === "POST";
+  if (path === "/api/projects") return ["GET", "POST"].includes(method);
+  if (new RegExp(`^/api/projects/${id}$`).test(path)) return ["GET", "PATCH", "DELETE"].includes(method);
+  if (new RegExp(`^/api/projects/${id}/conversations$`).test(path)) return method === "GET";
+  if (new RegExp(`^/api/projects/${id}/materials$`).test(path)) return ["GET", "POST"].includes(method);
+  if (new RegExp(`^/api/projects/${id}/materials/from-source$`).test(path)) return method === "POST";
+  if (new RegExp(`^/api/projects/${id}/materials/${id}$`).test(path)) return ["GET", "POST", "DELETE"].includes(method);
+  if (new RegExp(`^/api/projects/${id}/memories$`).test(path)) return ["GET", "POST"].includes(method);
+  if (new RegExp(`^/api/projects/${id}/memories/${id}$`).test(path)) return ["GET", "PATCH", "DELETE"].includes(method);
+  if (new RegExp(`^/api/memories/${id}/scope$`).test(path)) return method === "POST";
+  if (new RegExp(`^/api/projects/${id}/(?:search|sources)$`).test(path)) return method === "POST";
+  if (new RegExp(`^/api/projects/receipts/${id}$`).test(path)) return method === "GET";
+  return false;
+}
+
 /** Native web-parity additions require their own reviewed operational activation. */
 export function nativeParityBearerRoute(path: string, method: string, enabled = false, workspaceEnabled = false): boolean {
   if (!enabled) return false;
@@ -195,6 +213,11 @@ export function nativeParityBearerRoute(path: string, method: string, enabled = 
     if (/^\/api\/chat\/research-preview\/runs\/[A-Za-z0-9_-]{1,100}$/.test(path)) return method === "GET";
     if (/^\/api\/chat\/research-preview\/runs\/[A-Za-z0-9_-]{1,100}\/(?:resume|cancel)$/.test(path)) return method === "POST";
   }
+  // Project workspace in the native app: its own default-off switch, so
+  // enabling parity does not enable it. The context preparation route is here
+  // too, because a native send prepares context only for a project
+  // conversation; every other native Chat send is unchanged.
+  if (process.env.TOMVERSE_NATIVE_PROJECT_WORKSPACE_ENABLED === "true" && nativeProjectWorkspaceBearerRoute(path, method)) return true;
   // Checkout itself restricts bearer requests to complimentary internal passes.
   if (path === "/api/billing/checkout") return method === "POST";
   if (path === "/api/user/usage") return method === "GET";

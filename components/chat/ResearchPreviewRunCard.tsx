@@ -6,6 +6,7 @@ import type { ResearchPreviewMetadata } from "../../lib/researchPreviewMetadata"
 import { researchRunNeedsPolling, type ResearchPreviewRunTransport } from "../../lib/researchPreviewRunClient";
 import { researchPreviewCopy } from "../../locales/researchPreview";
 import type { Language } from "../../lib/language";
+import { ProjectSaveToProject } from "../projects/ProjectSaveToProject";
 
 type RunAction = "resume" | "cancel";
 type RunCardState = {
@@ -110,6 +111,7 @@ export function ResearchPreviewRunCard({ runId, conversationId, assistantMessage
     {run?.status === "queued" && <p>{copy.researchRunQueueHint}</p>}
     {run?.status === "checkpointed" && run.canResume && <button type="button" disabled={busy || error} data-testid="research-run-resume" onClick={() => void controls.current?.action("resume")}>{copy.researchRunResume}</button>}
     {run && ["queued", "running", "checkpointed"].includes(run.status) && <button type="button" disabled={busy || error} data-testid="research-run-cancel" onClick={() => void controls.current?.action("cancel")}>{copy.researchRunCancel}</button>}
+    {run?.status === "completed" && <ProjectSaveToProject testId="research-save-to-project" source={{ sourceKind: "research_report", runId }} />}
     {error && <p role="alert">{copy.researchRunReadError} <button type="button" disabled={busy} onClick={() => controls.current?.refresh()}>{copy.researchRunRefresh}</button></p>}
   </div>;
 }

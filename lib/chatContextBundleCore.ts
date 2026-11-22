@@ -66,6 +66,14 @@ export type ContextBundleFingerprintInput = {
      * indistinguishable in a stale bundle's own record.
      */
     knowledgeHash: string;
+    /**
+     * Project workspace: identity of the turn's project context -- project id,
+     * settings revision, memory scope, which material excerpts were selected
+     * and the prompt shape (lib/projectWorkspaceCore.ts projectContextHash).
+     * `"none"` (or absent) for every turn without project context; that value
+     * is left out of the fingerprint so every pre-project bundle keeps verifying.
+     */
+    projectHash?: string;
 };
 
 /**
@@ -85,6 +93,9 @@ export type SemanticStepsUsed = {
     memoryRerank: boolean;
     knowledgeNeighbours: boolean;
     knowledgeRerank: boolean;
+    /** Project material retrieval (absent = not used). */
+    projectNeighbours?: boolean;
+    projectRerank?: boolean;
 };
 
 export const NO_SEMANTIC_STEPS: SemanticStepsUsed = {
@@ -97,7 +108,9 @@ export const NO_SEMANTIC_STEPS: SemanticStepsUsed = {
 const encodeSemanticSteps = (steps: SemanticStepsUsed) =>
     (steps.memoryRerank ? "m" : "") +
     (steps.knowledgeNeighbours ? "n" : "") +
-    (steps.knowledgeRerank ? "r" : "");
+    (steps.knowledgeRerank ? "r" : "") +
+    (steps.projectNeighbours ? "p" : "") +
+    (steps.projectRerank ? "q" : "");
 
 /**
  * Absent is "no step used", which is what every bundle issued before the
@@ -105,11 +118,13 @@ const encodeSemanticSteps = (steps: SemanticStepsUsed) =>
  */
 const decodeSemanticSteps = (value: unknown): SemanticStepsUsed | null => {
     if (value === undefined) return NO_SEMANTIC_STEPS;
-    if (typeof value !== "string" || !/^m?n?r?$/.test(value)) return null;
+    if (typeof value !== "string" || !/^m?n?r?p?q?$/.test(value)) return null;
     return {
         memoryRerank: value.includes("m"),
         knowledgeNeighbours: value.includes("n"),
         knowledgeRerank: value.includes("r"),
+        ...(value.includes("p") ? { projectNeighbours: true } : {}),
+        ...(value.includes("q") ? { projectRerank: true } : {}),
     };
 };
 
@@ -139,6 +154,12 @@ export type ContextBundlePayload = ContextBundleFingerprintInput & {
      * same builder but are not the same charge.
      */
     profileTokens: number;
+    /**
+     * Project workspace: input tokens the project's own blocks contributed
+     * (instructions and retrieved material), priced apart from memory's and
+     * the profile's so each booked figure says what it paid for.
+     */
+    projectTokens?: number;
     expiresAtMs: number;
     /** See `SemanticStepsUsed`. Signed, never compared as content. */
     semanticSteps: SemanticStepsUsed;
@@ -207,6 +228,9 @@ export function contextFingerprint(
                 String(input.retrievalVersion),
                 input.promptVersion,
                 input.knowledgeHash,
+                // Appended only when present, so a turn without project context
+                // fingerprints exactly as it did before projects existed.
+                ...(input.projectHash && input.projectHash !== "none" ? [`project:${input.projectHash}`] : []),
             ].join("\n"),
             "utf8"
         )
@@ -231,6 +255,8 @@ const encode = (payload: ContextBundlePayload) =>
             kh: payload.knowledgeHash,
             t: payload.memoryTokens,
             pt: payload.profileTokens,
+            ...(payload.projectHash && payload.projectHash !== "none" ? { ph: payload.projectHash } : {}),
+            ...(payload.projectTokens ? { pj: payload.projectTokens } : {}),
             e: payload.expiresAtMs,
             ss: encodeSemanticSteps(payload.semanticSteps),
             mq: payload.memoryQueryPolicy,
@@ -311,6 +337,13 @@ const decode = (body: string): ContextBundlePayload | null => {
     ) {
         return null;
     }
+    if (record.ph !== undefined && typeof record.ph !== "string") return null;
+    if (
+        record.pj !== undefined &&
+        (typeof record.pj !== "number" || !Number.isSafeInteger(record.pj) || record.pj < 0)
+    ) {
+        return null;
+    }
     if (record.mq !== undefined && record.mq !== "full" && record.mq !== "legacy") return null;
     if (record.mh !== undefined && (!isMemoryHistoryAnchor(record.mh) || record.mq !== "full")) return null;
     const semanticSteps = decodeSemanticSteps(record.ss);
@@ -332,6 +365,8 @@ const decode = (body: string): ContextBundlePayload | null => {
         knowledgeHash: typeof record.kh === "string" ? record.kh : "none",
         memoryTokens: record.t,
         profileTokens: typeof record.pt === "number" ? record.pt : 0,
+        projectHash: typeof record.ph === "string" ? record.ph : "none",
+        projectTokens: typeof record.pj === "number" ? record.pj : 0,
         expiresAtMs: record.e,
         semanticSteps,
         ...(record.mq !== undefined ? { memoryQueryPolicy: record.mq as "full" | "legacy" } : {}),

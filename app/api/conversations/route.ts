@@ -1,6 +1,7 @@
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 ﻿export const dynamic = "force-dynamic";
 
+import { applyNativeSourceDeletion } from "@/lib/projectWorkspaceService";
 import { NextResponse } from "next/server";
 import { enqueueImageAssetCleanupForConversations } from "@/lib/imageAssetLifecycle";
 import { enqueueArtifactCleanupForConversations } from "@/lib/generatedArtifactStorage";
@@ -305,6 +306,7 @@ export async function DELETE(req: Request) {
       await enqueueArtifactCleanupForConversations(tx, conversationIds);
       await enqueueMessageAttachmentCleanupForConversations(tx, conversationIds);
       await deleteDeepResearchJobsForConversations(tx, conversationIds);
+      await applyNativeSourceDeletion(tx, userId, conversationIds);
       return tx.conversation.deleteMany({
         where: {
           userId,

@@ -1,4 +1,5 @@
 import "server-only";
+import { enqueueKnowledgeCleanupForFiles } from "@/lib/assistantKnowledgeLifecycle";
 
 import { prisma } from "@/lib/prisma";
 import { anonymiseAccountData } from "@/lib/accountDataAnonymisation";
@@ -281,6 +282,16 @@ export async function deleteTomverseAccount(
 
     await tx.conversation.deleteMany({
       where: { userId: user.id },
+    });
+
+    // Every knowledge file the account holds -- assistant profiles' and
+    // projects' -- gets its object tombstone before the rows go
+    // (`account_deleted` was a declared reason nothing wrote). Project files
+    // are then deleted explicitly: their project FK is NO ACTION so a bare
+    // project delete can never orphan their private objects.
+    await enqueueKnowledgeCleanupForFiles(tx, { userId: user.id }, "account_deleted");
+    await tx.assistantKnowledgeFile.deleteMany({
+      where: { userId: user.id, projectId: { not: null } },
     });
 
     await tx.conversationProject.deleteMany({

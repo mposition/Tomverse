@@ -134,10 +134,24 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       messages: conversation.messages.map(toAccountExportMessage),
     })),
 
+  // Owner-only record of which project sources an answer was given; refs only.
+  projectAnswerReceipt: (userId) =>
+    prisma.projectAnswerReceipt.findMany({
+      where: { userId },
+      select: { id: true, messageId: true, projectId: true, sources: true, createdAt: true },
+      take: EXPORT_ROW_CAP,
+    }),
+
   conversationProject: (userId) =>
     prisma.conversationProject.findMany({
       where: { userId },
-      select: { id: true, name: true, createdAt: true, updatedAt: true },
+      // The workspace settings too: what a project tells the model and which
+      // memories it may use are the owner's data.
+      select: {
+        id: true, name: true, description: true, instructions: true,
+        contextEnabled: true, memoryScope: true, autoMemoryEnabled: true,
+        revision: true, archivedAt: true, createdAt: true, updatedAt: true,
+      },
       take: EXPORT_ROW_CAP,
     }),
 
@@ -146,6 +160,8 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       where: { userId },
       select: {
         id: true,
+        // null = personal memory; otherwise used only in that project.
+        projectId: true,
         kind: true,
         statement: true,
         status: true,
@@ -1219,6 +1235,10 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       select: {
         id: true,
         profileId: true,
+        // Exactly one of profileId / projectId names the file's owner container.
+        projectId: true,
+        sourceKind: true,
+        sourceRef: true,
         name: true,
         mime: true,
         bytes: true,

@@ -164,8 +164,19 @@ export async function searchConversationMessages(input: {
     query: string;
     displayTimeZone: string;
     sourceTimeoutMs?: number;
+    /**
+     * Project workspace: search only this project's conversations (and the
+     * imported sources bridged to them). Applied inside every query, before
+     * the window, the caps and the source time budget -- never as a filter on
+     * an account-wide answer.
+     */
+    projectId?: string;
+    /** The current conversation, whose transcript the model already has. */
+    excludeConversationId?: string;
 }): Promise<ConversationSearchAnswer> {
     const { request, userId, query, displayTimeZone } = input;
+    const projectScope = input.projectId ?? null;
+    const excluded = input.excludeConversationId ?? "";
     const sourceTimeoutMs = input.sourceTimeoutMs ?? SOURCE_SEARCH_TIMEOUT_MS;
     const pattern = escapeLikePattern(query);
 
@@ -173,7 +184,7 @@ export async function searchConversationMessages(input: {
         async (tx) => {
             /* ---- 1. authorisation ------------------------------------ */
             const lockedConversations = await tx.conversation.findMany({
-                where: { userId, password: { not: null } },
+                where: { userId, password: { not: null }, ...(projectScope ? { projectId: projectScope } : {}) },
                 select: { id: true, password: true, passwordVersion: true },
             });
             /*
@@ -207,7 +218,11 @@ export async function searchConversationMessages(input: {
                 where: {
                     userId,
                     externalConversationId: { not: null },
-                    conversation: { userId },
+                    conversation: {
+                        userId,
+                        ...(projectScope ? { projectId: projectScope } : {}),
+                        ...(excluded ? { id: { not: excluded } } : {}),
+                    },
                     externalConversation: { userId, finalized: true },
                 },
                 select: {
@@ -286,6 +301,8 @@ export async function searchConversationMessages(input: {
                     LEFT JOIN "ConversationContinuationBridge" b ON b."conversationId" = c.id
                     LEFT JOIN "ExternalConversation" e ON e.id = b."externalConversationId"
                     WHERE c."userId" = ${userId}
+                      AND (${projectScope}::text IS NULL OR c."projectId" = ${projectScope})
+                      AND c.id <> ${excluded}
                       AND NOT (c.id = ANY(${deniedConversationIds}::text[]))
                       -- A conversation whose bridge or source is not this
                       -- account's is dropped here, before the window and the

@@ -15,6 +15,7 @@
  */
 
 import { discardResponseBody } from "./discardResponseBody";
+import { projectReferenceFields } from "./projectReferences";
 export type ChatContextPreparationInput = {
     /** Null for a guest, or for a conversation that does not exist yet. */
     conversationId: string | null;
@@ -22,6 +23,12 @@ export type ChatContextPreparationInput = {
     prompt: string;
     /** Reuse this signed source subset after the current question was saved. */
     previousContextBundle?: string;
+    /**
+     * Search-hit refs the user attached to this question (at most 8). The
+     * server re-validates each against the conversation's project; a ref that
+     * no longer opens is dropped there, never trusted here.
+     */
+    projectReferences?: readonly string[];
 };
 
 export async function prepareChatContextBundle(input: ChatContextPreparationInput): Promise<string | null> {
@@ -36,6 +43,7 @@ export async function prepareChatContextBundle(input: ChatContextPreparationInpu
                 ...(input.previousContextBundle
                     ? { previousContextBundle: input.previousContextBundle }
                     : {}),
+                ...projectReferenceFields(input.projectReferences),
             }),
         });
         if (!response.ok) {

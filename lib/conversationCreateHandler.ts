@@ -202,12 +202,19 @@ export const createConversationForProduct = async (
     if (body.projectId) {
       const project = await prisma.conversationProject.findFirst({
         where: { id: body.projectId, userId },
-        select: { id: true },
+        select: { id: true, archivedAt: true },
       });
       if (!project) {
         return NextResponse.json(
           { error: "Project not found." },
           { status: 404 }
+        );
+      }
+      // An archived project takes no new work until it is restored.
+      if (project.archivedAt) {
+        return NextResponse.json(
+          { error: "Restore the project before starting a conversation in it.", code: "PROJECT_ARCHIVED" },
+          { status: 409 }
         );
       }
     }
