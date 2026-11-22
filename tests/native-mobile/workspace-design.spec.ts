@@ -35,7 +35,7 @@ for (const width of [320, 390]) for (const theme of ["light", "dark"]) {
       const dock = node.getBoundingClientRect();
       const input = node.querySelector("textarea")!.getBoundingClientRect();
       const controls = node.querySelector(".composer-toolbar")!.getBoundingClientRect();
-      return { height: dock.height, inputWidth: input.width, available: dock.width, below: controls.top >= input.bottom, overflow: document.documentElement.scrollWidth > innerWidth };
+      return { height: dock.height, inputWidth: input.width, available: node.querySelector(".compact-composer")!.getBoundingClientRect().width, below: controls.top >= input.bottom, overflow: document.documentElement.scrollWidth > innerWidth };
     });
     expect(geometry.height).toBeLessThanOrEqual(164);
     expect(geometry.inputWidth).toBeGreaterThan(geometry.available - 40);
@@ -63,16 +63,16 @@ test("empty workspaces and model controls preserve separate drafts without creat
   await page.locator(".model-trigger").click();
   await expect(page.getByRole("dialog", { name: "모델 선택", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "닫기", exact: true }).click();
-  await page.getByRole("navigation").getByRole("button", { name: "Review", exact: true }).click();
+  await page.locator(".workspace-navigation").getByRole("button", { name: "Review", exact: true }).click();
   await expect(page.getByTestId("workspace-start")).toHaveAttribute("data-product", "review");
   await expect(page.getByRole("textbox")).toHaveValue("");
   await page.getByRole("textbox").fill("My Review draft");
   await page.locator(".review-setup-trigger").click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.getByRole("button", { name: "닫기", exact: true }).click();
-  await page.getByRole("navigation").getByRole("button", { name: "Chat", exact: true }).click();
+  await page.locator(".workspace-navigation").getByRole("button", { name: "Chat", exact: true }).click();
   await expect(page.getByRole("textbox")).toHaveValue("My Chat draft");
-  await page.getByRole("navigation").getByRole("button", { name: "Review", exact: true }).click();
+  await page.locator(".workspace-navigation").getByRole("button", { name: "Review", exact: true }).click();
   await expect(page.getByRole("textbox")).toHaveValue("My Review draft");
   await expect(page.locator("article.user")).toHaveCount(0);
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem("tomverse-native-synthetic-demo") ?? "[]").length)).toBe(0);
@@ -86,7 +86,7 @@ test("Review loading stays inside product navigation without a floating loading 
   });
   await signIn(page);
   const before = await page.locator(".composer-area").evaluate(node => node.getBoundingClientRect().height);
-  await page.getByRole("navigation").getByRole("button", { name: "Review", exact: true }).click();
+  await page.locator(".workspace-navigation").getByRole("button", { name: "Review", exact: true }).click();
   await expect(page.locator(".workspace-navigation .workspace-loading")).toBeVisible();
   await expect(page.locator(".review-workspace > p[role=status]")).toHaveCount(0);
   expect(await page.locator(".composer-area").evaluate(node => node.getBoundingClientRect().height)).toBe(before);
@@ -118,6 +118,6 @@ test("a new Chat starts at the empty workspace instead of inheriting the previou
   await page.getByRole("button", { name: "메시지 보내기", exact: true }).click();
   await expect(page.locator("article.assistant").getByRole("button", { name: "복사", exact: true })).toBeVisible();
   await page.locator(".header-new-chat").click();
-  await expect(page.locator(".workspace-welcome h1")).toBeInViewport();
+  await expect(page.getByTestId("workspace-start").locator("h1")).toBeInViewport();
   expect(await page.locator(".transcript").evaluate(node => node.scrollTop)).toBe(0);
 });

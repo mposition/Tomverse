@@ -60,6 +60,8 @@ const world: World = {
   completedResult: null,
 };
 let codeSweepFailure=false;
+let researchRecoveryFailure = false;
+let researchRecoveryCalls = 0;
 
 const resetWorld = () => {
   world.reconcileErrors = [];
@@ -69,6 +71,8 @@ const resetWorld = () => {
   world.completedRuns = 0;
   world.completedResult = null;
   codeSweepFailure=false;
+  researchRecoveryFailure = false;
+  researchRecoveryCalls = 0;
 };
 
 /**
@@ -99,6 +103,13 @@ const loadRoute = () => {
     mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {} } });
     mock.module(mod("lib/deepResearchSettlement.ts"), { namedExports: {
       reconcileUnsettledDeepResearchSettlementsQuietly: async () => ({ settled: 0 }),
+    } });
+    mock.module(mod("lib/researchPreviewRecovery.ts"), { namedExports: {
+      recoverStaleResearchPreviewRuns: async () => {
+        researchRecoveryCalls += 1;
+        if (researchRecoveryFailure) throw new Error("synthetic Research recovery failure");
+        return 7;
+      },
     } });
     mock.module(mod("lib/codeManagedService.ts"), { namedExports: {
       reconcileExpiredCodeTasks: async () => {if(codeSweepFailure)throw new Error("synthetic Code sweep failure");return { interrupted: 0 };},
@@ -406,6 +417,26 @@ test("a failed Code sweep defers without blocking later maintenance or its job r
   }finally{warning.mock.restore();}
 });
 
+test("a failed Research recovery does not block generic expiry reconciliation", async () => {
+  resetWorld();
+  researchRecoveryFailure = true;
+  const warning = mock.method(console, "warn", () => {});
+  try {
+    const response = await post();
+    const body = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(researchRecoveryCalls, 1);
+    assert.equal(world.reconcileCalls, 1);
+    assert.deepEqual(body.researchPreviewRuns, { recovered: 0, deferred: 1 });
+    assert.deepEqual(world.completedResult?.researchPreviewRuns, body.researchPreviewRuns);
+    assert.ok(warning.mock.calls.some((call) =>
+      call.arguments[0] === '{"event":"research_preview_recovery_deferred"}'
+    ));
+  } finally {
+    warning.mock.restore();
+  }
+});
+
 test("every ride-along sweep's result reaches the response body and the run row", async () => {
   // What a sweep deleted was computed, returned, written to a JSON column, and
   // read by nobody: the cron script logged only `result.result` (the credit
@@ -437,6 +468,7 @@ test("every ride-along sweep's result reaches the response body and the run row"
   assert.deepEqual(body.notificationDeliveries, { delivered: 13 });
   assert.deepEqual(body.refundRequests, { reconciled: 14 });
   assert.deepEqual(body.requestLeases, { removed: 15 });
+  assert.deepEqual(body.researchPreviewRuns, { recovered: 7, deferred: 0 });
   assert.equal(body.imageAssets.cleanup.examined, 16);
   assert.equal(body.imageAssets.cleanup.deleted, 17);
   assert.equal(body.knowledge.cleanup.examined, 18);
@@ -471,6 +503,7 @@ test("every ride-along sweep's result reaches the response body and the run row"
   const stored = world.completedResult ?? {};
   for (const key of [
     "codeTasks",
+    "researchPreviewRuns",
     "infrastructureMonitor",
     "notificationDeliveries",
     "refundRequests",

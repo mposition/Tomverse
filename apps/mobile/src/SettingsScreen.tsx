@@ -9,11 +9,11 @@ import { mobileSettingsCopy } from "../../../locales/mobileSettings";
 import { NativeBillingPanel } from "./NativeBillingPanel";
 import { Browser } from "@capacitor/browser";
 import { TOMVERSE_API_ORIGIN } from "./authBridge";
-import { Bot, Brain, ChevronDown, ChevronRight, Clock3, CreditCard, Database, ExternalLink, Globe2, KeyRound, LockKeyhole, LogOut, Mail, MessageSquare, Settings2, Sun, UserRound, type LucideIcon } from "lucide-react";
+import { Bot, Brain, Code2, ChevronDown, ChevronRight, Clock3, CreditCard, Database, ExternalLink, Globe2, KeyRound, LockKeyhole, LogOut, Mail, MessageSquare, Settings2, Sun, UserRound, type LucideIcon } from "lucide-react";
 import { mobileSettingsDesignCopy } from "../../../locales/mobileSettingsDesign";
 import "./settings.css";
 
-// The web settings panel has a Developer tab (API keys, addresses, CLI); the native app does not, so it is left out of the strip.
+// Developer tools retain the existing web credential-management flow.
 type NativeSettingsTab = Exclude<AccountSettingsTab, "developer">;
 const NATIVE_SETTINGS_TABS = ACCOUNT_SETTINGS_TABS.filter((item): item is NativeSettingsTab => item !== "developer");
 const tabIcons: Record<NativeSettingsTab, LucideIcon> = { account: UserRound, preferences: Settings2, assistants: Bot, ai: Brain, data: Database, plan: CreditCard };
@@ -28,7 +28,8 @@ export function SettingsScreen({ transport, signedIn, language, theme, onLanguag
   const copy = mobileCopy[language]; const c = mobileParityCopy(language); const navigation = mobileSettingsCopy(language);
   const design = mobileSettingsDesignCopy(language);
   const [now, setNow] = useState(() => Date.now());
-  const [tab, setTab] = useState<AccountSettingsTab>(initialTab === "developer" ? "account" : initialTab);
+  const [tab, setTab] = useState<NativeSettingsTab>(initialTab === "developer" ? "account" : initialTab);
+  const [overview, setOverview] = useState(initialTab === "account");
   const [detail, setDetail] = useState<"memory" | null>(null);
   const entryPrefix = useId();
   const memoryEntry = useRef<HTMLButtonElement>(null);
@@ -97,7 +98,12 @@ export function SettingsScreen({ transport, signedIn, language, theme, onLanguag
   const readFailed = detail === "memory" ? failedReads.includes("memory") : ({ account: ["account", "security"], preferences: ["preferences"], assistants: ["assistants"], ai: ["preferences", "models"], data: [], plan: [] }[tab]).some(key => failedReads.includes(key));
   const toggle = (Icon: LucideIcon, title: string, checked: boolean, disabled: boolean, onChange: (value: boolean) => void) => <label className="settings-toggle-row"><Icon size={21} aria-hidden="true" /><span>{title}</span><input type="checkbox" role="switch" checked={checked} disabled={disabled} onChange={event => onChange(event.target.checked)} /></label>;
   return <div className="native-settings">
-    {detail ? <button type="button" className="settings-detail-back" onClick={() => { setDetail(null); setMessage(""); }}><span aria-hidden="true">← </span>{navigation.back}</button> : <nav className="settings-tabs" aria-label={c.settings}>{NATIVE_SETTINGS_TABS.map(item => { const Icon = tabIcons[item]; return <button key={item} data-testid={`native-settings-tab-${item}`} aria-current={tab === item ? "page" : undefined} onClick={() => { setTab(item); setMessage(""); }}><Icon size={18} aria-hidden="true" /><span>{navigation[item]}</span></button>; })}</nav>}
+    {overview ? <nav className="native-settings-index" aria-label={c.settings}>
+      {NATIVE_SETTINGS_TABS.map(item => { const Icon = tabIcons[item]; return <button key={item} data-testid={`native-settings-tab-${item}`} onClick={() => { setTab(item); setOverview(false); setMessage(""); }}><Icon size={21} aria-hidden="true" /><span>{item === "account" ? account?.name || account?.email || navigation.account : navigation[item]}{item === "account" && <small>{design.accountInformation}</small>}</span><ChevronRight size={18} aria-hidden="true" /></button>; })}
+      <button type="button" className="native-developer-entry" data-testid="native-developer-tools" onClick={() => website("/chat?settings=developer")}><Code2 size={21} aria-hidden="true" /><span>{language === "ko" ? "개발자 도구" : "Developer tools"}<small>{language === "ko" ? "API · Cursor · Tomverse CLI · 웹에서 관리" : "API · Cursor · Tomverse CLI · Manage on the web"}</small></span><ExternalLink size={17} aria-hidden="true" /></button>
+    </nav> : <button type="button" className="settings-detail-back" data-testid="native-settings-back" onClick={() => { if (detail) setDetail(null); else setOverview(true); setMessage(""); }}><span aria-hidden="true">← </span>{detail ? navigation.back : c.settings}</button>}
+    {!overview && <>
+
     {loading && <p role="status">{copy.loading}</p>}
     {message && <p role="status" className="notice">{message}</p>}
     {readFailed && <p role="status" className="notice">{c.unavailable}</p>}
@@ -118,7 +124,7 @@ export function SettingsScreen({ transport, signedIn, language, theme, onLanguag
     {!detail && tab === "preferences" && <section className="settings-fields">
       <h3>{design.appearance}</h3><div className="settings-group settings-appearance"><div className="settings-control-title"><Sun size={21} aria-hidden="true" /><strong>{navigation.theme}</strong></div><div className="settings-theme-options" role="group" aria-label={navigation.theme}>{(["light", "dark", "system"] as const).map(value => <button key={value} type="button" aria-pressed={theme === value} onClick={() => onTheme(value)}><span>{navigation[value]}</span></button>)}</div></div>
       <h3>{design.languageAndTime}</h3><div className="settings-group">
-      <label className="settings-value-row"><Globe2 className="settings-row-icon" size={21} aria-hidden="true" /><span>{navigation.language}</span><select aria-label={navigation.language} value={language} onChange={event => onLanguage(event.target.value as MobileLanguage)}>{["en", "zh", "ko", "fr", "de", "es", "pt"].filter(value => mobileLanguages.includes(value as MobileLanguage)).map(value => <option value={value} key={value}>{({ en: "English", ko: "한국어", zh: "中文", de: "Deutsch", fr: "Français", es: "Español", pt: "Português" })[value as MobileLanguage]}</option>)}</select><ChevronRight size={17} aria-hidden="true" /></label>
+      <label className="settings-value-row"><Globe2 className="settings-row-icon" size={21} aria-hidden="true" /><span>{navigation.language}</span><select aria-label={navigation.language} value={language} onChange={event => onLanguage(event.target.value as MobileLanguage)}>{mobileLanguages.map(value => <option value={value} key={value}>{({ en: "English", ko: "한국어", zh: "简体中文", "zh-Hant": "繁體中文", de: "Deutsch", fr: "Français", es: "Español", pt: "Português" })[value]}</option>)}</select><ChevronRight size={17} aria-hidden="true" /></label>
       {preferences && <div className="settings-time-zone"><label className="settings-value-row"><Clock3 className="settings-row-icon" size={21} aria-hidden="true" /><span>{navigation.timeZone}</span><select aria-label={navigation.timeZone} value={preferences.timeZone} disabled={busy || changeLocked} onChange={event => setPreferences({ ...preferences, timeZone: event.target.value })}>{timeZoneOptions.map(zone => <option key={zone} value={zone}>{zone}</option>)}</select><ChevronRight size={17} aria-hidden="true" /></label><p className="field-hint">{navigation.timeZoneHint}</p></div>}
       </div>
     </section>}
@@ -147,6 +153,7 @@ export function SettingsScreen({ transport, signedIn, language, theme, onLanguag
     {!detail && tab === "plan" && (import.meta.env.VITE_NATIVE_BILLING_ENABLED === "true" && signedIn ? <NativeBillingPanel language={language} /> : <p>{signedIn ? c.unavailable : loginCopyForPlan(language)}</p>)}
     {(uncertain || readFailed) && <button disabled={busy || loading} onClick={() => void refresh()}>{c.retry}</button>}
     {(preferences && ["preferences", "ai"].includes(tab) || detail === "memory" && memory) && <footer className="sheet-footer"><button className="primary" disabled={loading || busy || uncertain || detail === "memory" && !memoryDirty} onClick={() => void save()}>{busy ? copy.loading : c.save}</button></footer>}
+    </>}
   </div>;
 }
 

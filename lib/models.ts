@@ -150,6 +150,8 @@ export type AiModel = {
      * never a user-controlled arbitrary request parameter.
      */
     reasoning?: "none" | "low" | "medium" | "high";
+    /** User-selectable overrides supplied by the public catalogue. */
+    reasoningEfforts?: readonly ("low" | "high")[];
     /** Published context window for catalogue metadata and request validation. */
     contextWindowTokens?: number;
     /** Explicit per-model native input support. Omitted means text-only. */

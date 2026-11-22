@@ -116,6 +116,7 @@ type PromptPayload = {
   attachments: ChatAttachment[];
   researchDurable?: boolean;
     researchMode?: "preview";
+  reasoningEffort?: import("@/lib/reasoningEffort").ExplicitReasoningEffort;
   deepResearchDepth?: "quick" | "standard" | "deep";
   admissionToken?: string | null;
   contextBundle?: string | null;
@@ -387,7 +388,7 @@ export type DesktopChatShellProps = {
     state: WebSearchSuggestionState;
     reason: WebSearchTopicSignal | null;
   }) => void;
-  onSubmit: () => void;
+  onSubmit: (effort?: import("@/lib/reasoningEffort").ExplicitReasoningEffort) => void;
   onBeforeModelSend: (chatId: string) => Promise<boolean>;
   chatLocationIntentEnabled?: boolean;
   conversationSelectionTicket: number;

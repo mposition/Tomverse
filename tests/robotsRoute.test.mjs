@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { isPathAllowed } from "../lib/robotsTxtCore.ts";
 import {
+  CANONICAL_PRIVATE_DISALLOW,
   CONTENT_SIGNAL,
   REFUSED_AI_CRAWLERS,
   SEARCH_INDEX_CRAWLERS,
@@ -40,14 +41,23 @@ const STAGING = () => render("https://staging.tomverse.app");
 
 test("the canonical site invites search engines in", () => {
   const body = PRODUCTION();
-  assert.equal(isPathAllowed(body, "Googlebot", "/"), true);
-  assert.equal(isPathAllowed(body, "Googlebot", "/compare-ai-models"), true);
+  assert.equal(isPathAllowed(body, "UnlistedCrawler", "/"), true);
+  assert.equal(isPathAllowed(body, "UnlistedCrawler", "/compare-ai-models"), true);
 });
 
 test("the canonical site still keeps crawlers out of the private surfaces", () => {
   const body = PRODUCTION();
-  for (const path of ["/admin", "/api/health", "/auth/signin", "/e2e", "/chat", "/chat/abc", "/share/x"]) {
-    assert.equal(isPathAllowed(body, "Googlebot", path), false, path);
+  const paths = [
+    ...CANONICAL_PRIVATE_DISALLOW.map((path) =>
+      path.endsWith("$") ? path.slice(0, -1) : path
+    ),
+    "/api/health",
+    "/auth/signin",
+    "/chat/abc",
+    "/share/x",
+  ];
+  for (const path of paths) {
+    assert.equal(isPathAllowed(body, "UnlistedCrawler", path), false, path);
   }
 });
 
@@ -83,7 +93,15 @@ test("search index crawlers and user-request fetchers get the canonical access, 
   for (const crawler of [...SEARCH_INDEX_CRAWLERS, ...USER_REQUEST_FETCHERS]) {
     assert.equal(isPathAllowed(body, crawler, "/"), true, crawler);
     assert.equal(isPathAllowed(body, crawler, "/compare-ai-models"), true, crawler);
-    for (const path of ["/admin", "/api/health", "/auth/signin", "/e2e", "/chat", "/chat/abc", "/share/x"]) {
+    for (const path of [
+      ...CANONICAL_PRIVATE_DISALLOW.map((path) =>
+        path.endsWith("$") ? path.slice(0, -1) : path
+      ),
+      "/api/health",
+      "/auth/signin",
+      "/chat/abc",
+      "/share/x",
+    ]) {
       assert.equal(isPathAllowed(body, crawler, path), false, `${crawler} ${path}`);
     }
   }
@@ -119,10 +137,14 @@ test("every invited named group carries the Content-Signal its crawlers read", (
  */
 test("an invited fetcher does not pardon the same operator's training crawler", () => {
   const body = PRODUCTION();
-  assert.equal(isPathAllowed(body, "GPTBot", "/"), false);
-  assert.equal(isPathAllowed(body, "ChatGPT-User", "/"), true);
+  for (const crawler of REFUSED_AI_CRAWLERS) {
+    assert.equal(isPathAllowed(body, crawler, "/"), false, crawler);
+  }
+  for (const crawler of USER_REQUEST_FETCHERS) {
+    assert.equal(isPathAllowed(body, crawler, "/"), true, crawler);
+  }
   assert.equal(isPathAllowed(body, "ClaudeBot", "/"), false);
-  assert.equal(isPathAllowed(body, "Claude-User", "/"), true);
+  assert.equal(isPathAllowed(body, "Google-Extended", "/"), false);
 });
 
 test("the canonical site names its sitemap and host", () => {
@@ -133,7 +155,12 @@ test("the canonical site names its sitemap and host", () => {
 
 test("a non-canonical deployment refuses every crawler, for every path", () => {
   const body = STAGING();
-  for (const crawler of ["Googlebot", "Bingbot", "GPTBot", "SomethingNew"]) {
+  for (const crawler of [
+    ...REFUSED_AI_CRAWLERS,
+    ...SEARCH_INDEX_CRAWLERS,
+    ...USER_REQUEST_FETCHERS,
+    "UnlistedCrawler",
+  ]) {
     assert.equal(isPathAllowed(body, crawler, "/"), false, crawler);
     assert.equal(isPathAllowed(body, crawler, "/safety"), false, crawler);
   }

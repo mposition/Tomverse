@@ -41,6 +41,7 @@ import {
   dmExecutionDigest,
   dmExecutionDigestCanonical,
   dmExecutionDigestInput,
+  dmToolSummary,
   dmExecutionPlan,
   dmFixedEnvironment,
   dmForbiddenArgv,
@@ -95,6 +96,45 @@ test("§5a fixed argv: each CLI's argv is the policy's tokens, in order", () => 
   assert.deepEqual(tokens.slice(claudeAt), ["claude", ...DM_LAUNCHER_SPECS[ANTHROPIC].argv]);
   // The question goes on stdin only: codex reads `-`, claude's `-p` has no prompt argument.
   assert.equal(DM_LAUNCHER_SPECS[OPENAI].argv.at(-1), "-");
+});
+
+test("§5a companions: Code Mode's host is on and pinned, the policy names it with its sha256", () => {
+  // AMUX-CRAWL-002 (2026-11-21): with the host disabled every codex command failed closed.
+  assert.ok(!DM_LAUNCHER_SPECS[OPENAI].argv.includes("code_mode_host"));
+  const [host] = DM_LAUNCHER_SPECS[OPENAI].companions;
+  assert.equal(DM_LAUNCHER_SPECS[OPENAI].companions.length, 1);
+  assert.equal(host.path, `${DM_LAUNCHER_SPECS[OPENAI].executablePath.replace(/\/codex$/, "")}/codex-code-mode-host`);
+  assert.ok(section5a.includes(`\`${host.path}\``), "§5a names the host's path");
+  assert.ok(section5a.includes(`\`${host.sha256}\``), "§5a names the host's sha256");
+  assert.deepEqual(DM_LAUNCHER_SPECS[ANTHROPIC].companions, []);
+});
+
+test("the tool summary counts codex's commands, failed commands and tool errors, and nothing else", () => {
+  const lines = (...events) => Buffer.from(events.map((event) => JSON.stringify(event)).join("\n") + "\n");
+  // What the DM saw on 2026-11-21: one tool error, no command ran.
+  assert.deepEqual(
+    dmToolSummary("codex", lines(
+      { type: "thread.started", thread_id: "t" },
+      { type: "item.completed", item: { id: "item_0", type: "error", message: "Code Mode is unavailable because code-mode host is disabled." } },
+      { type: "item.completed", item: { id: "item_1", type: "agent_message", text: "{}" } },
+      { type: "turn.completed" },
+    )),
+    { commands: 0, failedCommands: 0, toolErrors: 1 },
+  );
+  assert.deepEqual(
+    dmToolSummary("codex", lines(
+      { type: "item.started", item: { id: "a", type: "command_execution", status: "in_progress" } },
+      { type: "item.completed", item: { id: "a", type: "command_execution", exit_code: 0, status: "completed" } },
+      { type: "item.completed", item: { id: "b", type: "command_execution", exit_code: 6, status: "failed" } },
+      { type: "item.completed", item: { id: "c", type: "command_execution", exit_code: 1, status: "completed" } },
+    )),
+    { commands: 3, failedCommands: 2, toolErrors: 0 },
+  );
+  assert.deepEqual(dmToolSummary("codex", Buffer.from("")), { commands: 0, failedCommands: 0, toolErrors: 0 });
+  // Not codex's JSON lines, or claude: nothing to count.
+  assert.equal(dmToolSummary("codex", Buffer.from("not json\n")), null);
+  assert.equal(dmToolSummary("codex", Buffer.from([0xff, 0xfe])), null);
+  assert.equal(dmToolSummary("claude", lines({ type: "result", is_error: false })), null);
 });
 
 test("§5a executables: instance, CLI version and sha256 are the policy table's", () => {
@@ -425,7 +465,7 @@ test("§5a: an environment other than the eight fixed values is refused", () => 
 
 test("§5a execution digest: the recorded values are fixed here, and the code computes them", () => {
   assert.deepEqual(DM_RECORDED_EXECUTION_DIGESTS, {
-    "decision-maker-openai": "6c865e185fcabebf133d0c4907305c2e06f493b974f4354c140d37fc699f69c6",
+    "decision-maker-openai": "6a37d7af4afa1d6c749789c723e739f071d18f47aba837d0efa814ef91efb4ba",
     "decision-maker-anthropic": "ada9a76ab70925b6eeac9848c3ebec804d3860312dc19a04225e00c1c6a4f88e",
   });
   for (const instance of DM_INSTANCE_SCOPES) {
@@ -439,11 +479,18 @@ test("§5a execution digest: the recorded values are fixed here, and the code co
 
 test("§5a execution digest input: exactly the policy's six values, with the two per-request paths as placeholders", () => {
   const input = dmExecutionDigestInput(OPENAI);
-  assert.deepEqual(Object.keys(input).sort(), ["argv", "environment", "executable", "instance", "schemaSha256", "stateDeletion"]);
+  assert.deepEqual(Object.keys(input).sort(), ["argv", "companions", "environment", "executable", "instance", "schemaSha256", "stateDeletion"]);
   assert.deepEqual(input.executable, {
     path: "/opt/tomverse-amux-dm/codex-cli-0.162.1/codex",
     sha256: "628e35487d888a28f0427fc37501da529dd3d81fcbad7a2c3421c1e8670d92e1",
   });
+  // Code Mode's host, beside codex in the root-owned directory the profile reads.
+  assert.deepEqual(input.companions, [{
+    path: "/opt/tomverse-amux-dm/codex-cli-0.162.1/codex-code-mode-host",
+    sha256: "ec71830690a7c0024916ee0c99fbdc635bc6e747ff665ea4f03a8389bbcb6b30",
+  }]);
+  // claude runs nothing from beside itself, so its digest input keeps the six keys it was recorded with.
+  assert.ok(!Object.hasOwn(dmExecutionDigestInput(ANTHROPIC), "companions"));
   assert.equal(input.schemaSha256, DM_OUTPUT_SCHEMA_SHA256);
   assert.ok(input.argv.includes(DM_ARGV_REQUEST_DIRECTORY));
   assert.ok(input.argv.includes(DM_ARGV_OUTPUT_FILE));

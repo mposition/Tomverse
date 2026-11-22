@@ -1,5 +1,6 @@
 import type { AiModel, ModelTier } from "@/lib/models";
 import { canUseModelWithPlan } from "@/lib/models";
+import { modelReasoningEfforts, type ExplicitReasoningEffort } from "@/lib/reasoningEffort";
 import { EXTERNAL_API_PROTOCOLS, protocolsForProvider, type ExternalApiProtocol } from "@/lib/externalApiProtocols";
 
 /**
@@ -113,6 +114,7 @@ export type ExternalApiModelCapabilities = {
     tools: true;
     vision: boolean;
     reasoning: boolean;
+    reasoningEfforts?: readonly ExplicitReasoningEffort[];
     contextWindowTokens: number;
     maxOutputTokens: number;
     creditWeight: number;
@@ -151,6 +153,7 @@ export const externalApiModelCapabilities = (
     tools: true,
     vision: model.inputCapabilities?.image === true,
     reasoning: Boolean(model.reasoning && model.reasoning !== "none"),
+    reasoningEfforts: modelReasoningEfforts(model),
     // What this API will accept, which can be less than the provider's own
     // window: the account input ceiling applies here as it does in Chat.
     contextWindowTokens: Math.min(
@@ -213,6 +216,7 @@ export const smartAdaptiveCapabilities = (
         tools: true,
         vision: candidates.some((candidate) => candidate.vision),
         reasoning: false,
+        reasoningEfforts: Array.from(new Set(candidates.flatMap((candidate) => candidate.reasoningEfforts ?? []))),
         contextWindowTokens: Math.max(...candidates.map((candidate) => candidate.contextWindowTokens)),
         maxOutputTokens:
             defaults.find((candidate) => candidate.id === defaultModelId)?.maxOutputTokens ??
@@ -266,7 +270,7 @@ export const nativeSmartAdaptiveCapabilities = (
 };
 
 /** OpenAI-shaped `GET /models` entry. Tomverse fields sit under `tomverse`. */
-export const toOpenAiModelEntry = (model: ExternalApiModelCapabilities) => ({
+export const toOpenAiModelEntry = (model: ExternalApiModelCapabilities, advertiseEffort = false) => ({
     id: model.id,
     object: "model" as const,
     created: 0,
@@ -275,6 +279,7 @@ export const toOpenAiModelEntry = (model: ExternalApiModelCapabilities) => ({
         name: model.name,
         provider: model.provider,
         capabilities: { tools: model.tools, vision: model.vision, reasoning: model.reasoning },
+        ...(advertiseEffort ? { reasoning_efforts: model.reasoningEfforts ?? [] } : {}),
         protocols: model.protocols,
         context_window_tokens: model.contextWindowTokens,
         max_output_tokens: model.maxOutputTokens,

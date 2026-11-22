@@ -35,7 +35,7 @@ test("settings and account details have a global exit that preserves the draft",
   const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
   await page.getByTestId("native-settings-tab-ai").click();
   await dialog.getByRole("button", { name: "Account memory", exact: true }).click();
-  await dialog.getByRole("button", { name: "Return to conversation", exact: true }).click();
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.getByRole("textbox")).toHaveValue("Keep my draft while changing settings");
   await page.getByRole("button", { name: "Conversations", exact: true }).click();
