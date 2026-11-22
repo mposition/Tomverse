@@ -273,8 +273,9 @@ export async function handleChatCompletions(request: Request, options: { surface
         const { plan } = account;
         // This API's models: the chat registry's, or on the coding API the
         // coding catalogue's while it is switched on. Smart Adaptive's pool also
-        // holds the classes only it routes to (frontier, apex); a model named
-        // directly comes from the narrower list.
+        // holds the classes only it routes to on the general API (frontier,
+        // apex); a model named directly comes from the narrower list, which on
+        // the coding catalogue holds those classes too (owner decision 2026-11-22).
         const runnable = await externalApiRunnableModels(plan.tier, {
             surface: options.surface,
             smartAdaptive: parsed.model === SMART_ADAPTIVE_MODEL_ID,
@@ -296,18 +297,24 @@ export async function handleChatCompletions(request: Request, options: { surface
             );
         }
         let entry = picked?.entry;
-        if (parsed.model === SMART_ADAPTIVE_MODEL_ID && runnable.length > 0) {
-            const routed = await routeSmartAdaptive({
-                request: parsed,
-                runnable,
-                keyId: key.keyId,
-                userId: key.userId,
-                requestId,
-                routerAllowed: () => smartAdaptiveRouterAllowed(key),
-                idempotencyKeyDigest,
-                requestDigest,
-                userAgent: request.headers.get("user-agent"),
-            });
+        // Null when no runnable model is one Smart Adaptive may default to (only
+        // frontier or apex models): refused below as not available, before any
+        // router call, reservation or dispatch.
+        const routed =
+            parsed.model === SMART_ADAPTIVE_MODEL_ID
+                ? await routeSmartAdaptive({
+                      request: parsed,
+                      runnable,
+                      keyId: key.keyId,
+                      userId: key.userId,
+                      requestId,
+                      routerAllowed: () => smartAdaptiveRouterAllowed(key),
+                      idempotencyKeyDigest,
+                      requestDigest,
+                      userAgent: request.headers.get("user-agent"),
+                  })
+                : null;
+        if (routed) {
             entry = routed.entry;
             rememberRouted = routed.remember;
             routing = { routedBy: routed.routedBy, held: routed.held ?? false, conversation: routed.conversationDigest };

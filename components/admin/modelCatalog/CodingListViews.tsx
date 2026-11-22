@@ -20,6 +20,7 @@ import {
   codingListState,
   codingRefusals,
   codingStage,
+  codingStructuredOutputShown,
 } from "@/lib/adminModelCatalogFlow";
 import type { AdminTone } from "@/lib/adminUiCore";
 
@@ -373,7 +374,11 @@ export function CodingModelTable({
     {
       key: "structured",
       header: col.structuredOutput,
-      render: (item) => <span className="font-mono text-xs text-zinc-200">{item.profile?.capabilities.structuredOutput ?? "—"}</span>,
+      render: (item) => (
+        <span className="font-mono text-xs text-zinc-200">
+          {item.profile ? codingStructuredOutputShown(item.profile.capabilities.structuredOutput) : "—"}
+        </span>
+      ),
     },
     {
       key: "limits",

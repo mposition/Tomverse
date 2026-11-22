@@ -41,7 +41,11 @@ type RunnableEntry = Awaited<ReturnType<typeof externalApiRunnableModels>>[numbe
  * that call and takes the same model. The gate's checks run only when a
  * router call is next.
  * Without the router switch, or when the router gives no answer, the default
- * model answers if it fits, otherwise the first candidate.
+ * model answers if it fits, otherwise the first candidate that is not frontier
+ * or apex: those are only ever the router's pick. With no such model runnable
+ * there is no Smart Adaptive here (routeSmartAdaptive answers null): the
+ * request is refused as a model this key does not have, before any router
+ * call, reservation or dispatch.
  *
  * A coding client sends every tool round as a new request, so routing each one
  * afresh would let the model change half-way through a task. A request that
@@ -221,11 +225,16 @@ export const routeSmartAdaptive = async (input: {
     /** The client's User-Agent, for the router and the log. */
     userAgent?: string | null;
     now?: number;
-}): Promise<SmartAdaptiveDecision> => {
+}): Promise<SmartAdaptiveDecision | null> => {
+    // The models a request may take when the router does not pick: never a
+    // frontier or apex model, on either API. Without one, Smart Adaptive is
+    // not offered here (smartAdaptiveCapabilities) and nothing is decided.
+    const defaults = input.runnable.filter((entry) => !isSmartAdaptiveOnlyModel(entry.model));
+    if (defaults.length === 0) return null;
     const now = input.now ?? Date.now();
     const conversation = smartAdaptiveConversationKey(input.keyId, input.request);
     const known = conversations.get(conversation);
-    const decision = await decideSmartAdaptive(input, conversation, now);
+    const decision = await decideSmartAdaptive(input, defaults, conversation, now);
     // The remembered model may only be lowered when it no longer fits this
     // request (window, retirement) and something else answered.
     const knownFresh = known !== undefined && now - known.at < CONVERSATION_MS;
@@ -252,6 +261,8 @@ export const routeSmartAdaptive = async (input: {
 
 const decideSmartAdaptive = async (
     input: Parameters<typeof routeSmartAdaptive>[0],
+    /** The runnable models that are not frontier or apex; never empty. */
+    defaults: readonly RunnableEntry[],
     conversation: string,
     now: number
 ): Promise<Omit<SmartAdaptiveDecision, "remember" | "conversationDigest">> => {
@@ -259,13 +270,12 @@ const decideSmartAdaptive = async (
     // Nothing fits: the default model answers, and its own limits refuse the
     // request with the usual error.
     const pool = eligible.length > 0 ? eligible : input.runnable;
-    // When none of the models a client could name fits, the default model
-    // answers and its own limits refuse the request: a frontier or apex model
-    // is only ever the router's pick beside them.
-    const nameable = pool.filter((entry) => !isSmartAdaptiveOnlyModel(entry.model));
-    const fallbackPool = nameable.length > 0 ? nameable : input.runnable.filter((entry) => !isSmartAdaptiveOnlyModel(entry.model));
-    const fallback =
-        fallbackPool.find((entry) => entry.model.id === DEFAULT_MODEL_ID) ?? fallbackPool[0] ?? input.runnable[0];
+    // When none of the models Smart Adaptive may default to fits, the default
+    // model answers and its own limits refuse the request: a frontier or apex
+    // model is only ever the router's pick beside them.
+    const fitDefaults = pool.filter((entry) => !isSmartAdaptiveOnlyModel(entry.model));
+    const fallbackPool = fitDefaults.length > 0 ? fitDefaults : defaults;
+    const fallback = fallbackPool.find((entry) => entry.model.id === DEFAULT_MODEL_ID) ?? fallbackPool[0];
     const turn = latestTurn(input.request);
 
     // A tool round goes to the model that made the calls it answers, before
@@ -290,7 +300,7 @@ const decideSmartAdaptive = async (
     // Nothing for the router to read, one candidate, or only router-only
     // models fit: no router call, and the conversation keeps its model (even
     // one only the router could have picked) or takes the default.
-    if (!turn || !turn.prompt.trim() || eligible.length < 2 || nameable.length === 0) {
+    if (!turn || !turn.prompt.trim() || eligible.length < 2 || fitDefaults.length === 0) {
         return current ? { entry: current, routedBy: "continued" } : { entry: fallback, routedBy: "default" };
     }
     const coding = smartAdaptiveCodingContext(input.request, input.userAgent ?? null, current?.model.id ?? null);

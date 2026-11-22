@@ -125,6 +125,7 @@ const deps = (overrides = {}) => ({
       calls.llm += 1;
       return {
         toolCalling: "parallel",
+        // A finer value than the two choices: the save writes "supported" (owner decision 2026-11-22).
         structuredOutput: "strict_schema",
         note: "Both stated on the pages.",
         sources: pages.map((page) => page.url),
@@ -155,7 +156,8 @@ test("one call over the provider's two pages fills the capabilities and sources,
   assert.equal(calls.llm, 1);
   assert.deepEqual(calls.pages, pagesOf("openai"));
   const profile = state.row.profile;
-  assert.deepEqual(profile.capabilities, { toolCalling: "parallel", structuredOutput: "strict_schema" });
+  assert.deepEqual(profile.capabilities, { toolCalling: "parallel", structuredOutput: "supported" });
+  assert.equal(profile.evidence.structuredOutput, "supported");
   assert.deepEqual(profile.evidence.sources, pagesOf("openai"));
   assert.equal(profile.evidence.draftedAt, "2026-11-21");
   assert.equal(profile.evidence.note, "Both stated on the pages.");
@@ -163,7 +165,7 @@ test("one call over the provider's two pages fills the capabilities and sources,
   assert.deepEqual(profile.channels, ["api"]);
   assert.deepEqual(result.changes, [
     { field: "toolCalling", from: "basic", to: "parallel" },
-    { field: "structuredOutput", from: "none", to: "strict_schema" },
+    { field: "structuredOutput", from: "none", to: "supported" },
   ]);
   // The write goes through the one judge's door (updateCatalogEntry), naming the changed fields.
   assert.equal(state.updates.length, 1);
@@ -171,7 +173,7 @@ test("one call over the provider's two pages fills the capabilities and sources,
   assert.equal(state.audits.length, 1);
   assert.equal(state.audits[0].action, "model_catalog.coding_capabilities_filled");
   assert.deepEqual(state.audits[0].metadata.sources, pagesOf("openai"));
-  assert.equal(state.audits[0].metadata.structuredOutput, "strict_schema");
+  assert.equal(state.audits[0].metadata.structuredOutput, "supported");
   // The row no longer needs filling for the registry's sake.
   assert.equal(capabilitiesNeedFilling(profile), false);
 });
@@ -182,6 +184,25 @@ test("what needs filling: structured output none, or no page read", () => {
   const read = { sources: ["https://developers.openai.com/api/docs/guides/function-calling"], draftedAt: "2026-11-20", toolCalling: "basic", structuredOutput: "json_mode" };
   assert.equal(capabilitiesNeedFilling(registryLink({ capabilities: { toolCalling: "basic", structuredOutput: "json_mode" }, evidence: read })), false);
   assert.equal(capabilitiesNeedFilling(registryLink({ capabilities: { toolCalling: "basic", structuredOutput: "none" }, evidence: read })), true);
+});
+
+test("a provider with JSON mode only (DeepSeek) is filled as supported structured output", async () => {
+  // DeepSeek documents response_format json_object and no schema; JSON mode counts (owner decision 2026-11-22).
+  reset();
+  state.facts = [facts({ provider: "deepseek", apiModelId: "deepseek-chat" })];
+  const pages = pagesOf("deepseek");
+  const result = await fill({
+    draftLlm: async () => ({
+      draftCodingCapabilities: async () => {
+        calls.llm += 1;
+        return { toolCalling: "parallel", structuredOutput: "json_mode", note: "JSON mode: response_format json_object.", sources: pages, draftedAt: "2026-11-22" };
+      },
+    }),
+  });
+  assert.equal(calls.llm, 1);
+  assert.deepEqual(calls.pages, pages);
+  assert.deepEqual(state.row.profile.capabilities, { toolCalling: "parallel", structuredOutput: "supported" });
+  assert.deepEqual(result.changes.find((change) => change.field === "structuredOutput"), { field: "structuredOutput", from: "none", to: "supported" });
 });
 
 test("a timeout is an unknown outcome: reported, never retried, the row unchanged and nothing audited", async () => {

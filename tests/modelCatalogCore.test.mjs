@@ -35,8 +35,21 @@ import {
   freePricingVersion,
   imageCreditOverrideSchema,
   reviewImageDraft,
+  CODING_DEFAULT_MAX_OUTPUT_TOKENS,
+  CODING_STRUCTURED_OUTPUT,
+  CODING_STRUCTURED_OUTPUT_CHOICES,
+  codingDraftBasisSchema,
+  codingPriceTiersSchema,
+  codingProfileForWrite,
+  codingProfileSchema,
+  codingStoredProfileSchema,
+  codingStructuredOutputChoice,
 } from "../lib/modelCatalogCore.ts";
 import {
+  CAPABILITY_SCHEMA,
+  CAPABILITY_TASK,
+  CODING_SCHEMA,
+  CODING_TASK,
   codingCapabilitiesFromAnswer,
   codingDraftFromAnswer,
   draftPricingVersion,
@@ -684,6 +697,290 @@ test("an LLM coding answer from the price page alone becomes a draft with no pro
     () => codingDraftFromAnswer(answer, "openai", "gpt-coding", sources, () => null),
     (error) => error.detail === "credit_floor_unbounded"
   );
+});
+
+// Qwen3 Coder Flash (owner decisions 2026-11-22): the pages state a 1M context
+// and tool calling, no output limit, and price by input-size tier -- one
+// request's input tokens set the rate of its whole input and output.
+const QWEN_PRICING = "https://www.alibabacloud.com/help/en/model-studio/model-pricing";
+const QWEN_TIERS = [
+  { upToInputTokens: 32_000, inputUsdPerMTok: 0.3, outputUsdPerMTok: 1.5 },
+  { upToInputTokens: 128_000, inputUsdPerMTok: 0.5, outputUsdPerMTok: 2.5 },
+  { upToInputTokens: 256_000, inputUsdPerMTok: 0.8, outputUsdPerMTok: 4 },
+  { upToInputTokens: null, inputUsdPerMTok: 1.6, outputUsdPerMTok: 9.6 },
+];
+const qwenAnswer = (overrides = {}) => ({
+  name: "Qwen3 Coder Flash",
+  minimumPlan: "Pro",
+  capabilities: { toolCalling: "parallel", structuredOutput: "supported", imageInput: false, maxContextTokens: 1_000_000, maxOutputTokens: null },
+  pricing: { inputUsdPerMTok: 1.6, outputUsdPerMTok: 9.6, tiers: QWEN_TIERS },
+  ...overrides,
+});
+
+test("an output limit the pages do not state drafts at the 8,192 default, says so, and is what the floor prices", () => {
+  const priced = [];
+  const floor = (profile) => {
+    priced.push(profile.capabilities.maxOutputTokens);
+    return 3;
+  };
+  const draft = codingDraftFromAnswer(qwenAnswer(), "qwen", "qwen3-coder-flash", [QWEN_PRICING], floor);
+  assert.equal(CODING_DEFAULT_MAX_OUTPUT_TOKENS, 8_192);
+  assert.equal(draft.capabilities.maxOutputTokens, 8_192);
+  assert.equal(draft.basis.maxOutputTokens, "default");
+  assert.deepEqual(priced, [8_192], "the credit floor is worked out at the default cap");
+  assert.equal(draft.pricing.creditWeight, 3);
+  // A zero or malformed answer is "not stated" too: never a refusal, never a larger guess.
+  for (const stated of [0, -1, 1.5, "64k", undefined]) {
+    const read = codingDraftFromAnswer(
+      qwenAnswer({ capabilities: { ...qwenAnswer().capabilities, maxOutputTokens: stated } }),
+      "qwen",
+      "qwen3-coder-flash",
+      [QWEN_PRICING],
+      () => 3
+    );
+    assert.equal(read.capabilities.maxOutputTokens, 8_192, String(stated));
+    assert.equal(read.basis.maxOutputTokens, "default", String(stated));
+  }
+  // A stated limit stands and is marked as the pages'.
+  const stated = codingDraftFromAnswer(
+    qwenAnswer({ capabilities: { ...qwenAnswer().capabilities, maxOutputTokens: 65_536 } }),
+    "qwen",
+    "qwen3-coder-flash",
+    [QWEN_PRICING],
+    () => 3
+  );
+  assert.equal(stated.capabilities.maxOutputTokens, 65_536);
+  assert.equal(stated.basis.maxOutputTokens, "documented");
+  // An unknown context window is still refused: the Code floor assumes the whole window as input.
+  assert.throws(
+    () =>
+      codingDraftFromAnswer(
+        qwenAnswer({ capabilities: { ...qwenAnswer().capabilities, maxContextTokens: null } }),
+        "qwen",
+        "qwen3-coder-flash",
+        [QWEN_PRICING],
+        () => 3
+      ),
+    (error) => error.code === "draft_rejected" && error.detail === "capabilities.maxContextTokens"
+  );
+  assert.equal(codingProfileSchema.safeParse(draft).success, true);
+});
+
+test("a tiered price drafts at the dearest tier, keeps the tier list, and raises an answer that gave a cheaper tier", () => {
+  const draft = codingDraftFromAnswer(qwenAnswer(), "qwen", "qwen3-coder-flash", [QWEN_PRICING], () => 3);
+  assert.equal(draft.pricing.inputUsdPerMTok, 1.6);
+  assert.equal(draft.pricing.outputUsdPerMTok, 9.6);
+  assert.deepEqual(draft.basis.priceTiers, QWEN_TIERS);
+  // The model gave the cheapest tier's rates: code takes the dearest listed, never below a tier.
+  const cheap = codingDraftFromAnswer(
+    qwenAnswer({ pricing: { inputUsdPerMTok: 0.3, outputUsdPerMTok: 1.5, tiers: QWEN_TIERS } }),
+    "qwen",
+    "qwen3-coder-flash",
+    [QWEN_PRICING],
+    () => 3
+  );
+  assert.equal(cheap.pricing.inputUsdPerMTok, 1.6);
+  assert.equal(cheap.pricing.outputUsdPerMTok, 9.6);
+  // The floor is worked out at those rates.
+  const rates = [];
+  codingDraftFromAnswer(
+    qwenAnswer({ pricing: { inputUsdPerMTok: 0.5, outputUsdPerMTok: 2.5, tiers: QWEN_TIERS } }),
+    "qwen",
+    "qwen3-coder-flash",
+    [QWEN_PRICING],
+    (profile) => {
+      rates.push([profile.pricing.inputUsdPerMTok, profile.pricing.outputUsdPerMTok]);
+      return 3;
+    }
+  );
+  assert.deepEqual(rates, [[1.6, 9.6]]);
+  // An answered rate above every tier is not lowered.
+  const above = codingDraftFromAnswer(
+    qwenAnswer({ pricing: { inputUsdPerMTok: 2, outputUsdPerMTok: 12, tiers: QWEN_TIERS } }),
+    "qwen",
+    "qwen3-coder-flash",
+    [QWEN_PRICING],
+    () => 3
+  );
+  assert.deepEqual([above.pricing.inputUsdPerMTok, above.pricing.outputUsdPerMTok], [2, 12]);
+  // One flat price: no tiers in the basis.
+  const flat = codingDraftFromAnswer(
+    qwenAnswer({ pricing: { inputUsdPerMTok: 1, outputUsdPerMTok: 5, tiers: [] } }),
+    "qwen",
+    "qwen3-coder-flash",
+    [QWEN_PRICING],
+    () => 3
+  );
+  assert.deepEqual([flat.pricing.inputUsdPerMTok, flat.pricing.outputUsdPerMTok], [1, 5]);
+  assert.equal("priceTiers" in flat.basis, false);
+  // A malformed tier list is refused, not priced from part of it.
+  for (const tiers of [[{ upToInputTokens: 32_000, inputUsdPerMTok: -1, outputUsdPerMTok: 1.5 }], [{ inputUsdPerMTok: 1 }], "tiers"]) {
+    assert.throws(
+      () =>
+        codingDraftFromAnswer(
+          qwenAnswer({ pricing: { inputUsdPerMTok: 1.6, outputUsdPerMTok: 9.6, tiers } }),
+          "qwen",
+          "qwen3-coder-flash",
+          [QWEN_PRICING],
+          () => 3
+        ),
+      (error) => error.code === "draft_rejected" && error.detail === "pricing.tiers"
+    );
+  }
+});
+
+test("a tier list out of order is refused: upToInputTokens must ascend and only the last tier may be open", () => {
+  const tier = (upToInputTokens, inputUsdPerMTok = 1, outputUsdPerMTok = 5) => ({ upToInputTokens, inputUsdPerMTok, outputUsdPerMTok });
+  const draft = (tiers) =>
+    codingDraftFromAnswer(qwenAnswer({ pricing: { inputUsdPerMTok: 1.6, outputUsdPerMTok: 9.6, tiers } }), "qwen", "qwen3-coder-flash", [QWEN_PRICING], () => 3);
+  for (const [label, tiers] of [
+    ["descending", [tier(128_000), tier(32_000), tier(null)]],
+    ["a repeated bound", [tier(32_000), tier(32_000), tier(null)]],
+    ["an open tier first", [tier(null), tier(32_000)]],
+    ["an open tier in the middle", [tier(32_000), tier(null), tier(256_000)]],
+    ["two open tiers", [tier(32_000), tier(null), tier(null)]],
+  ]) {
+    assert.throws(() => draft(tiers), (error) => error.code === "draft_rejected" && error.detail === "pricing.tiers", label);
+    assert.equal(codingPriceTiersSchema.safeParse(tiers).success, false, label);
+  }
+  // In order, with or without an open top tier, and one open tier alone: accepted.
+  for (const tiers of [QWEN_TIERS, [tier(32_000), tier(128_000)], [tier(null)], [tier(1)]]) {
+    assert.equal(codingPriceTiersSchema.safeParse(tiers).success, true);
+  }
+  // The order is a drafting check only: a stored profile whose list is out of
+  // order still reads, so no serving row is dropped by a later, stricter rule.
+  const stored = draft(QWEN_TIERS);
+  const unordered = { ...stored, basis: { ...stored.basis, priceTiers: [tier(256_000), tier(32_000)] } };
+  assert.equal(codingProfileSchema.safeParse(unordered).success, true);
+  assert.equal(codingDraftBasisSchema.safeParse(unordered.basis).success, true);
+});
+
+test("with tiers, an answered rate that is not a price is refused, never replaced by a tier's", () => {
+  for (const [field, value] of [
+    ["inputUsdPerMTok", -1],
+    ["outputUsdPerMTok", -0.5],
+    ["inputUsdPerMTok", "1.6"],
+    ["outputUsdPerMTok", null],
+    ["inputUsdPerMTok", Number.NaN],
+  ]) {
+    const pricing = { inputUsdPerMTok: 1.6, outputUsdPerMTok: 9.6, tiers: QWEN_TIERS, [field]: value };
+    assert.throws(
+      () => codingDraftFromAnswer(qwenAnswer({ pricing }), "qwen", "qwen3-coder-flash", [QWEN_PRICING], () => 3),
+      (error) => error.code === "draft_rejected" && error.detail.includes(`pricing.${field}`),
+      `${field}: ${String(value)}`
+    );
+  }
+  // A zero rate is a price: raised to the dearest tier as before.
+  const zero = codingDraftFromAnswer(qwenAnswer({ pricing: { inputUsdPerMTok: 0, outputUsdPerMTok: 0, tiers: QWEN_TIERS } }), "qwen", "qwen3-coder-flash", [QWEN_PRICING], () => 3);
+  assert.deepEqual([zero.pricing.inputUsdPerMTok, zero.pricing.outputUsdPerMTok], [1.6, 9.6]);
+});
+
+const olderDedicatedProfile = () => ({
+  source: "dedicated",
+  name: "Older Coder",
+  provider: "deepseek",
+  apiModelId: "deepseek-coder-older",
+  minimumPlan: "Pro",
+  capabilities: { toolCalling: "parallel", structuredOutput: "json_mode", imageInput: false, maxContextTokens: 128_000, maxOutputTokens: 8_192 },
+  pricing: { inputUsdPerMTok: 0.3, outputUsdPerMTok: 1.2, creditWeight: 4, verifiedAt: "2026-11-01", sources: ["https://api-docs.deepseek.com/quick_start/pricing"] },
+});
+
+test("a write saves an older structured output value as supported and names what it changed; one of the two choices is left alone", () => {
+  const dedicated = codingStoredProfileSchema.parse(olderDedicatedProfile());
+  const written = codingProfileForWrite(dedicated);
+  assert.equal(written.profile.capabilities.structuredOutput, "supported");
+  assert.deepEqual(written.rewritten, [{ field: "capabilities.structuredOutput", from: "json_mode", to: "supported" }]);
+  // Every other field is as it was.
+  assert.deepEqual({ ...written.profile, capabilities: { ...written.profile.capabilities, structuredOutput: "json_mode" } }, dedicated);
+
+  const link = codingStoredProfileSchema.parse({
+    source: "chat",
+    registryModelId: "claude-sonnet-4-6",
+    capabilities: { toolCalling: "parallel", structuredOutput: "forced_tool_use" },
+    channels: ["code", "api"],
+    evidence: { sources: [], draftedAt: "2026-11-01", toolCalling: "parallel", structuredOutput: "strict_schema" },
+  });
+  const linkWritten = codingProfileForWrite(link);
+  assert.equal(linkWritten.profile.capabilities.structuredOutput, "supported");
+  assert.equal(linkWritten.profile.evidence.structuredOutput, "supported");
+  assert.deepEqual(linkWritten.rewritten.map((change) => [change.field, change.from]), [
+    ["capabilities.structuredOutput", "forced_tool_use"],
+    ["evidence.structuredOutput", "strict_schema"],
+  ]);
+  assert.equal(codingStoredProfileSchema.safeParse(linkWritten.profile).success, true);
+
+  // Already one of the two choices, with or without evidence: nothing rewritten, the same content.
+  const withoutEvidence = { ...link };
+  delete withoutEvidence.evidence;
+  for (const structuredOutput of ["supported", "none"]) {
+    for (const current of [
+      { ...withoutEvidence, capabilities: { ...link.capabilities, structuredOutput } },
+      { ...link, capabilities: { ...link.capabilities, structuredOutput }, evidence: { ...link.evidence, structuredOutput } },
+    ]) {
+      const same = codingProfileForWrite(current);
+      assert.deepEqual(same.rewritten, []);
+      assert.equal(canonicalJson(same.profile), canonicalJson(current));
+    }
+  }
+  // Reading is unchanged: the older values still parse as they are stored.
+  assert.equal(link.capabilities.structuredOutput, "forced_tool_use");
+});
+
+test("the draft answer schemas carry the tiers, a nullable output limit and two structured output choices", () => {
+  assert.deepEqual(CODING_STRUCTURED_OUTPUT_CHOICES, ["supported", "none"]);
+  const caps = CODING_SCHEMA.properties.capabilities.properties;
+  assert.deepEqual(caps.structuredOutput.enum, ["supported", "none"]);
+  assert.deepEqual(caps.maxOutputTokens.type, ["integer", "null"]);
+  assert.deepEqual(caps.maxContextTokens.type, ["integer", "null"]);
+  assert.ok(CODING_SCHEMA.properties.pricing.required.includes("tiers"));
+  assert.deepEqual(CODING_SCHEMA.properties.pricing.properties.tiers.items.required, ["upToInputTokens", "inputUsdPerMTok", "outputUsdPerMTok"]);
+  assert.match(CODING_TASK, /pricing\.tiers/);
+  assert.match(CODING_TASK, /dearest tier/);
+  assert.deepEqual(CAPABILITY_SCHEMA.properties.structuredOutput.enum, ["supported", "none"]);
+});
+
+test("JSON mode alone is structured output support: the prompts say so, and a JSON-mode-only answer is saved as supported", () => {
+  // DeepSeek and GLM state JSON mode (response_format json_object) and no schema (owner decision 2026-11-22).
+  for (const task of [CODING_TASK, CAPABILITY_TASK]) {
+    assert.match(task, /JSON mode \(for example\s+response_format json_object\)/);
+    assert.match(task, /JSON mode alone is\s+"supported"/);
+  }
+  const deepseekPages = ["https://api-docs.deepseek.com/guides/json_mode/"];
+  // The answer as the schema allows it, and as a model that ignores the schema might give it.
+  for (const structuredOutput of ["supported", "json_mode"]) {
+    const draft = codingCapabilitiesFromAnswer({ toolCalling: "parallel", structuredOutput, note: "JSON mode: response_format json_object." }, deepseekPages);
+    assert.equal(draft.structuredOutput, "supported", structuredOutput);
+  }
+  const dedicated = codingDraftFromAnswer(
+    qwenAnswer({ capabilities: { ...qwenAnswer().capabilities, structuredOutput: "json_mode" } }),
+    "deepseek",
+    "deepseek-coder-x",
+    ["https://api-docs.deepseek.com/quick_start/pricing"],
+    () => 3
+  );
+  assert.equal(dedicated.capabilities.structuredOutput, "supported");
+});
+
+test("structured output is saved as one of two choices, and every older value still reads as supported", () => {
+  for (const legacy of ["json_mode", "strict_schema", "forced_tool_use", "response_schema", "supported"]) {
+    assert.equal(codingStructuredOutputChoice(legacy), "supported", legacy);
+    const draft = codingDraftFromAnswer(
+      qwenAnswer({ capabilities: { ...qwenAnswer().capabilities, structuredOutput: legacy } }),
+      "qwen",
+      "qwen3-coder-flash",
+      [QWEN_PRICING],
+      () => 3
+    );
+    assert.equal(draft.capabilities.structuredOutput, "supported", legacy);
+    assert.equal(codingCapabilitiesFromAnswer({ toolCalling: "basic", structuredOutput: legacy }, []).structuredOutput, "supported", legacy);
+  }
+  for (const unknown of ["none", "made_up", null, 3]) {
+    assert.equal(codingStructuredOutputChoice(unknown), "none", String(unknown));
+  }
+  // Every stored value still parses: the read list keeps the older ones.
+  for (const value of CODING_STRUCTURED_OUTPUT) {
+    assert.equal(codingProfileSchema.safeParse({ ...codingProfile(), capabilities: { ...codingProfile().capabilities, structuredOutput: value } }).success, true, value);
+  }
 });
 
 test("a reserved image request runs only with the profile it was priced with", () => {

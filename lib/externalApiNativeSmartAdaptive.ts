@@ -173,7 +173,12 @@ const decideNativeSmartAdaptive = async (input: {
     const pool = input.runnable.filter(
         (entry) => entry.model.provider === provider && entry.capabilities.protocols.includes(input.protocol)
     );
-    if (pool.length === 0) return null;
+    // Smart Adaptive is offered here only beside a model of this provider it
+    // may default to, one that is not frontier or apex (smartAdaptiveCapabilities):
+    // with only those there is nothing to take when the router does not pick,
+    // so the request is refused as for a provider with no model here, before
+    // any router call, reservation or dispatch.
+    if (!pool.some((entry) => !isSmartAdaptiveOnlyModel(entry.model))) return null;
     // A candidate is a model this request passes on, exactly as it would be
     // sent: its own validation, then the estimate of the rewritten body plus
     // the output the gateway would reserve on it within its window.
@@ -194,9 +199,9 @@ const decideNativeSmartAdaptive = async (input: {
         }
         return estimate.breakdown.rawTotal + prepared.outputLimit <= capabilities.contextWindowTokens;
     });
-    // Nothing of this provider a client could name can take the request:
-    // refused here, before any router call, reservation or dispatch. A
-    // frontier or apex model is only ever the router's pick beside them,
+    // Nothing of this provider Smart Adaptive may default to can take the
+    // request: refused here, before any router call, reservation or dispatch.
+    // A frontier or apex model is only ever the router's pick beside them,
     // never the one model left (it would answer, and charge, without a pick).
     if (!fits.some((entry) => !isSmartAdaptiveOnlyModel(entry.model))) {
         if (refusal) throw refusal;
@@ -210,14 +215,14 @@ const decideNativeSmartAdaptive = async (input: {
               );
     }
     const candidates = fits;
-    // The default is chosen among the models a client can name, never a
-    // frontier or apex model only the router may pick.
-    const nameable = candidates.filter((entry) => !isSmartAdaptiveOnlyModel(entry.model));
+    // The default is never a frontier or apex model, which only the router may
+    // pick (nativeSmartAdaptiveDefaultId leaves them out too).
+    const defaults = candidates.filter((entry) => !isSmartAdaptiveOnlyModel(entry.model));
     const defaultId = nativeSmartAdaptiveDefaultId(
-        nameable.map((entry) => entry.capabilities),
+        defaults.map((entry) => entry.capabilities),
         DEFAULT_MODEL_ID
     );
-    const fallback = nameable.find((entry) => entry.model.id === defaultId) ?? nameable[0];
+    const fallback = defaults.find((entry) => entry.model.id === defaultId) ?? defaults[0];
     const now = input.now ?? Date.now();
     const pinKey = nativePinKey(input);
 
