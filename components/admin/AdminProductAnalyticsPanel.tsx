@@ -4,7 +4,9 @@ import { AdminShareList } from "@/components/admin/ui/AdminShareList";
 import { AdminStateBlock } from "@/components/admin/ui/AdminStateBlock";
 import { AdminStatusChip } from "@/components/admin/ui/AdminStatusChip";
 import { AdminTile } from "@/components/admin/ui/AdminTile";
+import type { AdminMessageShape } from "@/lib/adminLocale";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
+import { CONNECTED_JOURNEY_LAST_STAGES, type ConnectedJourneyGroup } from "@/lib/connectedJourneyAggregation";
 import { adminHomeMessages } from "@/lib/adminMessages/home";
 import { adminProductAnalyticsMessages } from "@/lib/adminMessages/productAnalytics";
 import { adminRiskPanelsMessages } from "@/lib/adminMessages/riskPanels";
@@ -57,6 +59,64 @@ function Stat({ label, value, detail }: { label: string; value: string; detail: 
       <p className="text-xs font-medium text-zinc-500">{label}</p>
       <p className="mt-1 text-xl font-bold tabular-nums text-white">{value}</p>
       <p className="text-xs leading-5 text-zinc-500">{detail}</p>
+    </div>
+  );
+}
+
+type JourneyMessages = AdminMessageShape<typeof adminProductAnalyticsMessages.en>["journeys"];
+
+/**
+ * Per-entry detail of mature attempts without an observed first reply: where
+ * each one last validly got to, and which recorded reasons appeared with and
+ * without a reply. Counts only; no attempt, account or conversation is shown.
+ */
+function JourneyDropoff({ groups, m, number }: { groups: ConnectedJourneyGroup[]; m: JourneyMessages; number: Intl.NumberFormat }) {
+  const d = m.dropoff;
+  return (
+    <div data-testid="connected-journey-dropoff" className="space-y-2 border-t border-zinc-800 pt-3">
+      <h3 className="text-sm font-bold text-zinc-100">{d.title}</h3>
+      <p className="text-xs leading-5 text-zinc-500">{d.description}</p>
+      {groups.map(group => {
+        const drop = group.dropoff;
+        const id = `${group.entry}-${group.continuation ?? "none"}`;
+        return (
+          <details key={id} data-testid={`connected-journey-dropoff-${id}`} className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3" open={drop.unreplied > 0}>
+            <summary className="cursor-pointer text-sm text-zinc-200">
+              {m[group.entry]}{group.continuation ? ` · ${m[group.continuation]}` : ""} — {d.summary(drop.unreplied, group.mature, group.replied)}
+            </summary>
+            <div className="mt-3 space-y-3 text-sm">
+              {group.mature === 0 ? <p role="status">{d.noMature(group.pending)}</p>
+                : drop.unreplied === 0 ? <p role="status">{d.allReplied(group.mature)}</p>
+                : <>
+                  <p className="tabular-nums">{d.equation(group.mature, group.replied, drop.withReason, drop.withoutReason)}</p>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left"><caption className="text-left text-xs font-medium text-zinc-400">{d.lastStageTitle}</caption>
+                      <thead><tr>{CONNECTED_JOURNEY_LAST_STAGES.map(stage => <th key={stage} className="p-2">{d.lastStage[stage]}</th>)}</tr></thead>
+                      <tbody><tr>{CONNECTED_JOURNEY_LAST_STAGES.map(stage => {
+                        const value = drop.lastStage[stage];
+                        return <td key={stage} data-testid={`journey-last-stage-${stage}`} className="p-2 tabular-nums">{value === null ? d.notApplicable : number.format(value)}</td>;
+                      })}</tr></tbody>
+                    </table>
+                  </div>
+                </>}
+              {group.mature > 0 && <div className="space-y-1">
+                <p className="text-xs font-medium text-zinc-400">{d.reasonsTitle}</p>
+                {!drop.reasons.length ? <p>{d.noReasons}</p> : <div className="overflow-x-auto">
+                  <table className="w-full text-left"><thead><tr>
+                    <th className="p-2">{d.reason}</th><th className="p-2">{d.reasonUnreplied}</th><th className="p-2">{d.reasonReplied}</th>
+                  </tr></thead><tbody>{drop.reasons.map(row => <tr key={row.reason} data-testid={`journey-reason-${row.reason}`}>
+                    <td className="p-2">{m.reasons[row.reason]} <code className="text-xs text-zinc-500">{row.reason}</code></td>
+                    <td className="p-2 tabular-nums">{number.format(row.unreplied)}</td>
+                    <td className="p-2 tabular-nums">{number.format(row.replied)}</td>
+                  </tr>)}</tbody></table>
+                </div>}
+                <p className="text-xs text-zinc-500">{d.sample(drop.unreplied, group.replied)}</p>
+              </div>}
+            </div>
+          </details>
+        );
+      })}
+      <p className="text-xs leading-5 text-zinc-500">{d.reasonNote}</p>
     </div>
   );
 }
@@ -150,6 +210,7 @@ export async function AdminProductAnalyticsPanel({
               ...(["cancelled", "invalidated", "issue", "unobserved"] as const).map(key => `${m.journeys[key]}: ${dashboard.connectedJourneys!.groups.reduce((sum, row) => sum + row[key], 0)}`),
               ...Object.entries(dashboard.connectedJourneys.diagnostics).map(([key, value]) => `${m.journeys[key as keyof typeof dashboard.connectedJourneys.diagnostics]}: ${value}`),
             ].join(" · ")}</p>
+            {dashboard.connectedJourneys.groups.length > 0 && <JourneyDropoff groups={dashboard.connectedJourneys.groups} m={m.journeys} number={number} />}
           </>}
           <p className="text-xs leading-5 text-zinc-500">{m.journeys.note}</p>
         </div>
