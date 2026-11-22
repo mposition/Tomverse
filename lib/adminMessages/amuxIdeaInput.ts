@@ -167,6 +167,10 @@ export const adminAmuxIdeaInputMessages = defineAdminMessages({
     analysisRunning: "Analysis is running. The plan approval opens here by itself when the result arrives; you do not need to refresh.",
     analysisWatchEnded: "Automatic checking stopped. Use the button to read the result again.",
     planApprovalNextRound: "Approved in a later round",
+    planApprovalNewUnit: "New",
+    planApprovalAttachesExisting: (level: string, title: string | null, prefix: string | null) =>
+      `Attaches to the existing ${level}: ${title ?? "(title not readable)"}${prefix ? ` (${prefix})` : ""}`,
+    planApprovalUnderPlanned: "Under a new node of this plan",
     planApprovalLoading: "Reading every analysis page…",
     planApprovalLoadFailed: "The analysis pages could not all be read, so the plan cannot be approved yet.",
     analysisResultLoading: "Checking the stored result…",
@@ -587,6 +591,10 @@ export const adminAmuxIdeaInputMessages = defineAdminMessages({
     analysisRunning: "분석 중입니다. 결과가 나오면 계획 승인 화면이 여기에 자동으로 열립니다. 새로고침하지 않아도 됩니다.",
     analysisWatchEnded: "자동 확인을 멈췄습니다. 버튼으로 결과를 다시 읽으세요.",
     planApprovalNextRound: "다음 회차에 승인",
+    planApprovalNewUnit: "새로 만듦",
+    planApprovalAttachesExisting: (level: string, title: string | null, prefix: string | null) =>
+      `기존 ${level}에 붙음: ${title ?? "(제목을 읽지 못함)"}${prefix ? ` (${prefix})` : ""}`,
+    planApprovalUnderPlanned: "이 계획의 새 노드 아래",
     planApprovalLoading: "모든 분석 페이지를 읽는 중…",
     planApprovalLoadFailed: "분석 페이지를 모두 읽지 못해 아직 계획을 승인할 수 없습니다.",
     analysisResultLoading: "저장된 결과 확인 중…",

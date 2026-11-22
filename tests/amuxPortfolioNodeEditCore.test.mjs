@@ -50,6 +50,7 @@ test("the binding holds digests and the inputs the owner saw, never text", () =>
   const binding = amuxNodeEditBinding({ actorUserId: "owner", level: "feature",
     payload: amuxPortfolioNodeEditPayloadSchema.parse(payload()),
     priorContentDigest: "a".repeat(64), nextContentDigest: "b".repeat(64),
+    priorParentId: "epic-1", nextParentId: "epic-2",
     priorAssessmentId: "assessment-1",
     affectedTasks: [{ taskId: "task-b", scoreId: "score-b", inputs: [
       { subjectId: "epic-1", revision: 0, assessmentId: "assessment-e" },
@@ -63,6 +64,10 @@ test("the binding holds digests and the inputs the owner saw, never text", () =>
     ["epic-1", "task-b"]);
   assert.equal(JSON.stringify(binding).includes("crawl policy"), false);
   assert.equal(binding.nextContentDigest, "b".repeat(64));
+  // Owner decision 2026-11-22: a move binds both parents.
+  assert.deepEqual([binding.priorParentId, binding.nextParentId], ["epic-1", "epic-2"]);
+  assert.equal(amuxPortfolioNodeEditPayloadSchema.safeParse({ ...payload(), parentId: "bad id" }).success, false);
+  assert.equal(amuxPortfolioNodeEditPayloadSchema.safeParse({ ...payload(), parentId: null }).success, true);
 });
 
 test("the estimate moves only this level's weighted value", () => {

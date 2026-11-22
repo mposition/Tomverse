@@ -17,6 +17,7 @@ import {
   FIXTURE_ALERT_POLICY,
   FIXTURE_ANALYTICS,
   FIXTURE_APP_SETTINGS,
+  FIXTURE_CONNECTED_JOURNEYS,
   FIXTURE_AUDIT_LOG,
   FIXTURE_CONVERSATION,
   FIXTURE_CREDIT,
@@ -1070,6 +1071,38 @@ const writeAdminFixtures = async (prisma: Prisma.TransactionClient) => {
       plan: "Pro",
       occurredAt: at(-(index + 1) * HOUR),
     })),
+  });
+
+  await prisma.productAnalyticsEvent.createMany({
+    data: FIXTURE_CONNECTED_JOURNEYS.flatMap((journey) =>
+      ([["started", 0], ...journey.steps] as ReadonlyArray<readonly [string, number, string?]>).map(
+        ([stage, minutes, reason]) => ({
+          id: `e2e-journey-${journey.key.slice(-2)}-${stage}`,
+          dedupeKey: `e2e-journey-dedupe-${journey.key.slice(-2)}-${stage}`,
+          eventName: "connected_journey_step",
+          source: "client",
+          userId: FIXTURE_CUSTOMERS.activePro.id,
+          anonymousIdHash: "e2e-journey-anon",
+          sessionIdHash: "e2e-journey-session",
+          utmSource: "direct",
+          utmMedium: "none",
+          utmCampaign: "none",
+          language: "en",
+          country: "AU",
+          modelCount: 0,
+          plan: "Pro",
+          properties: {
+            journey_key: journey.key,
+            journey_kind: journey.entry.startsWith("review_") ? "review_chat" : "import_continuation",
+            journey_entry: journey.entry,
+            ...("continuation" in journey ? { continuation_kind: journey.continuation } : {}),
+            journey_stage: stage,
+            ...(reason ? { journey_reason: reason } : {}),
+          },
+          occurredAt: at(-journey.startedHoursAgo * HOUR + minutes * MINUTE),
+        })
+      )
+    ),
   });
 
   // Marketing rows, written the way the migration allows: a slug of the

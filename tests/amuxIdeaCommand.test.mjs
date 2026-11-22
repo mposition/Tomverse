@@ -178,3 +178,80 @@ test("the entrypoint prints closed codes only, never the secret or the plan", ()
   const packageJson = JSON.parse(readFileSync(resolve(import.meta.dirname, "..", "package.json"), "utf8"));
   assert.equal(packageJson.scripts["amux:idea"], "node --import tsx scripts/amux-idea.mjs");
 });
+
+// Owner decision 2026-11-22: a session plan reuses the existing hierarchy.
+const EPIC = "6a1d0e2f-5c7b-4d4e-9f30-2b3c4d5e6f70";
+const FEATURE = "7b2e1f30-6d8c-4e5f-a041-3c4d5e6f7081";
+const hierarchy = () => new Response(JSON.stringify({ nodes: [
+  { ref: "5f0c9d1e-4b6a-4c3d-8e2f-1a2b3c4d5e6f", kind: "node", level: "initiative",
+    title: "AEO", parentRef: null, displayPrefix: null },
+  { ref: EPIC, kind: "node", level: "epic", title: "Answer engine visibility",
+    parentRef: "5f0c9d1e-4b6a-4c3d-8e2f-1a2b3c4d5e6f", displayPrefix: null },
+  { ref: FEATURE, kind: "node", level: "feature", title: "Crawler access policy",
+    parentRef: EPIC, displayPrefix: "CRAWL" },
+] }), { status: 200, headers: { "content-type": "application/json" } });
+const attachedPlan = (featureRef) => {
+  const plan = amuxSessionPlanFixture();
+  plan.units = [{ ...plan.units[3], featureRef }];
+  return plan;
+};
+
+test("prompt lists the existing hierarchy when the credential is set, and says so when not", async () => {
+  const urls = [];
+  const prompt = await runAmuxIdeaCommand(["prompt", "--title", "Align public pricing"], env, {
+    fetcher: async (url, init) => { urls.push([url, init.method]); return hierarchy(); } });
+  assert.deepEqual(urls, [[`https://tomverse.test${AMUX_SESSION_INTAKE_ROUTE}/hierarchy`, "GET"]]);
+  assert.match(prompt.text, /This prompt lists 3 existing Initiative\/Epic\/Feature nodes/);
+  assert.match(prompt.text, /"title":"Crawler access policy"/);
+  assert.match(prompt.text, /"displayPrefix":"CRAWL"/);
+  const offline = await runAmuxIdeaCommand(["prompt", "--title", "Align public pricing"], {});
+  assert.match(offline.text, /^Existing hierarchy not loaded/);
+  // A configured client that cannot read the hierarchy stops instead of hiding it.
+  const failed = await runAmuxIdeaCommand(["prompt", "--title", "t"], env, {
+    fetcher: async () => new Response("{}", { status: 503 }) }).catch((error) => error);
+  assert.deepEqual(amuxIdeaErrorReport(failed), { error: "hierarchy_unavailable" });
+  const malformed = await runAmuxIdeaCommand(["prompt", "--title", "t"], env, {
+    fetcher: async () => new Response(JSON.stringify({ nodes: [{ ref: "x", kind: "node",
+      level: "feature" }] }), { status: 200 }) }).catch((error) => error);
+  assert.deepEqual(amuxIdeaErrorReport(malformed), { error: "hierarchy_unavailable" });
+});
+
+test("check admits a plan attached to an existing node and refuses an unknown one", async () => {
+  const run = (plan, runEnv = env) => runAmuxIdeaCommand(["check", "--plan", "plan.json"], runEnv, {
+    ...files({ "plan.json": JSON.stringify(plan) }), fetcher: async () => hierarchy() });
+  assert.deepEqual((await run(attachedPlan(FEATURE))).value,
+    { status: "plan_ok", unitCount: 1, attachedToExisting: 1 });
+  const unknown = await run(attachedPlan("9d403152-8f0e-4071-8263-5e6f708192a3"))
+    .catch((error) => error);
+  assert.equal(amuxIdeaErrorReport(unknown).error, "plan_rejected");
+  assert.equal(amuxIdeaErrorReport(unknown).detail.detail, "chunk_target_ref_unapproved");
+  // An Epic is not a Feature.
+  assert.equal(amuxIdeaErrorReport(await run(attachedPlan(EPIC)).catch((error) => error)).error,
+    "plan_rejected");
+  // Without the credential an existing ref cannot be confirmed, so it is refused.
+  assert.equal(amuxIdeaErrorReport(await run(attachedPlan(FEATURE), {}).catch((error) => error))
+    .error, "plan_rejected");
+});
+
+test("check warns when a new Feature has no card number prefix", async () => {
+  const plan = amuxSessionPlanFixture();
+  delete plan.units[2].displayPrefix;
+  const checked = await runAmuxIdeaCommand(["check", "--plan", "plan.json"], {},
+    files({ "plan.json": JSON.stringify(plan) }));
+  assert.deepEqual(checked.value, { status: "plan_ok", unitCount: 4, warnings: [
+    { rule: "feature_display_prefix_missing", localId: "c0:node-2", registeredAs: "DARK" }] });
+});
+
+test("submit with a plan attached to an existing node reads the hierarchy, then sends once", async () => {
+  const calls = [];
+  const result = await runAmuxIdeaCommand([...submitArgs, "--plan", "plan.json", "--no-repo"], env, {
+    ...files({ "idea.md": "x", "plan.json": JSON.stringify(attachedPlan(FEATURE)) }),
+    createRequestId: () => requestId, onPrepared: () => {},
+    fetcher: async (url, init) => {
+      calls.push(init.method);
+      return url.endsWith("/hierarchy") ? hierarchy() : committed({ plan: { state: "awaiting_approval",
+        unitCount: 1 } });
+    } });
+  assert.deepEqual(calls, ["GET", "POST"]);
+  assert.equal(result.value.state, "committed");
+});
