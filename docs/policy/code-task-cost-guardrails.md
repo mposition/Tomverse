@@ -368,12 +368,15 @@ User-Agent로 채널을 나누지 않습니다.
   (`pricing.creditWeight`)이 Code 하한 아래인 행은 판정이 이미 거절합니다.
 - **Code 하한이 채팅 등급 위일 때**(운영자 결정 2026-11-22): `codingCreditFloor`는 채팅 등급 탐색
   (`suggestCreditFloor`, 최대 apex 80)으로 덮이는 행은 그 등급 크레딧을 그대로 쓰고, 어느 등급으로도 안
-  덮이면(`above_every_class`) 같은 산식을 직접 계산합니다: 컨텍스트 전체를 입력으로 본 최악 비용을
-  `ceil(최악 비용 / (그 입력의 배수 × COST_PER_CREDIT_CEILING_MICRO_USD))`로 나눈 값. Code 예약은
-  `creditWeight × 입력 배수`라 81~1,000 정수를 그대로 받습니다. 1,000(`CODING_API_CREDIT_WEIGHT_MAX`)을
-  넘거나 가격·출력 상한을 모르면 여전히 `credit_floor_unbounded`입니다. 채팅의 `suggestCreditFloor`
-  자체는 바꾸지 않았습니다. 그래서 Fable·Astra처럼 80으로 안 덮이던 행도 Code 크레딧을 하한 이상으로
-  올리면 Code에 켤 수 있습니다.
+  덮이면(`above_every_class`) 직접 계산합니다. Code는 한 턴을 `creditWeight × 그 턴의 입력 배수`로
+  예약·정산하므로, 코딩 API 하한(`codingApiCreditFloor`)과 같은 규칙으로 입력 배수 구간(16k ×1, 50k ×1.5,
+  100k ×2, 그 위 ×3)마다 그 구간의 가장 큰 입력(컨텍스트 전체까지)과 최대 출력의 최악 비용을
+  `ceil(최악 비용 / (구간 배수 × COST_PER_CREDIT_CEILING_MICRO_USD))`로 나눈 값 중 가장 큰 것입니다.
+  출력 단가가 큰 모델은 짧은 입력 구간(×1)에서 정해집니다(검토 r-20261122-123236-1d3fb2).
+  81~1,000 정수를 그대로 받고, 1,000(`CODING_API_CREDIT_WEIGHT_MAX`)을 넘거나 가격·출력 상한을 모르면
+  여전히 `credit_floor_unbounded`입니다. 채팅 등급으로 덮이는 행(80 이하)의 계산과 채팅의
+  `suggestCreditFloor`는 바꾸지 않았습니다(그 경로가 가장 큰 입력 구간만 보는지는 운영자 결정 대기).
+  그래서 Fable·Astra처럼 80으로 안 덮이던 행도 Code 크레딧을 하한 이상으로 올리면 Code에 켤 수 있습니다.
 - 플랜 검사(Free는 API·CLI 불가)는 두 API 모두 그대로입니다.
 - 스냅샷이 없거나 coverage가 지났으면 코딩 API는 아무 모델도 내놓지 않습니다(채팅 레지스트리
   전체로 되돌아가지 않음). 로그 `coding_catalog_external_channels_no_snapshot`을 남깁니다. 발행 뒤

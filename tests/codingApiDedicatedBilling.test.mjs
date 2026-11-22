@@ -103,9 +103,10 @@ test("by default a dedicated row's coding API credits are the chat rule's floor,
   assert.ok(credit.credits < codeFloor, `coding API ${credit.credits} below Code ${codeFloor}`);
 });
 
-test("Code's floor above every chat class is worked out directly, up to the 1,000-credit maximum", () => {
+test("Code's floor above every chat class is worked out directly over every input band, up to the 1,000-credit maximum", () => {
   // US$10/M in, US$40/M out, a 1M window and 32k output: the worst turn is
-  // US$11.28 and the x3 band covers US$0.12 a credit, so 94 credits (above apex's 80).
+  // US$11.28 and the x3 band covers US$0.12 a credit, so 94 credits (above
+  // apex's 80); every shorter band needs fewer.
   const dear = row({
     capabilities: { ...row().capabilities, maxContextTokens: 1_000_000, maxOutputTokens: 32_000 },
     pricing: { ...row().pricing, inputUsdPerMTok: 10, outputUsdPerMTok: 40 },
@@ -122,6 +123,24 @@ test("Code's floor above every chat class is worked out directly, up to the 1,00
   assert.equal(codingCreditFloor({ ...dear, provider: "anthropic" }), floorAtInput(10, 40, 32_000, 1_000_000, 1.25));
   // Above 1,000 credits it cannot be worked out.
   assert.equal(codingCreditFloor({ ...dear, pricing: { ...dear.pricing, inputUsdPerMTok: 200 } }), null);
+
+  // An output-heavy model is decided by the short-prompt band, as Code charges a
+  // 16k prompt at x1: US$1/M in, US$1,000/M out, 32k output costs US$32.016 at
+  // 16k (801 credits at x1), more per credit than the whole window (275 at x3).
+  const outputHeavy = { ...dear, pricing: { ...dear.pricing, inputUsdPerMTok: 1, outputUsdPerMTok: 1_000 } };
+  assert.equal(floorAtInput(1, 1_000, 32_000, 1_000_000), 275);
+  assert.equal(codingCreditFloor(outputHeavy), 801);
+  assert.equal(codingCreditFloor(outputHeavy), floorAtInput(1, 1_000, 32_000, 16_000));
+  // A smaller window is banded up to that window only.
+  const smallWindow = { ...outputHeavy, capabilities: { ...outputHeavy.capabilities, maxContextTokens: 64_000 } };
+  assert.equal(
+    codingCreditFloor(smallWindow),
+    Math.max(...[16_000, 50_000, 64_000].map((tokens) => floorAtInput(1, 1_000, 32_000, tokens)))
+  );
+  // The 1,000-credit edge: 16k at US$2.50/M plus 40k at US$999/M is exactly 1,000 credits at x1; a touch more is refused.
+  const edge = (output) => ({ ...dear, capabilities: { ...dear.capabilities, maxOutputTokens: 40_000 }, pricing: { ...dear.pricing, inputUsdPerMTok: 2.5, outputUsdPerMTok: output } });
+  assert.equal(codingCreditFloor(edge(999)), 1_000);
+  assert.equal(codingCreditFloor(edge(999.001)), null);
   // Within the chat classes the class credits stand as before.
   const cheap = { ...dear, pricing: { ...dear.pricing, inputUsdPerMTok: 0.1, outputUsdPerMTok: 0.4 } };
   assert.equal(
