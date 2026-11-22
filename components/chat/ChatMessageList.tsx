@@ -1403,7 +1403,8 @@ export function ChatMessageList({
                   {!isUser && msg.researchRunId && currentChatId && <ResearchPreviewRunCard
                     runId={msg.researchRunId} conversationId={currentChatId} assistantMessageId={msg.id}
                     language={lang} transport={webResearchPreviewRuns}
-                    onMessage={run => onResearchMessage?.(researchRunMessage(run))} />}
+                    onMessage={run => onResearchMessage?.(researchRunMessage(run))}
+                    completedAction={<ProjectSaveToProject testId="research-save-to-project" source={{ sourceKind: "research_report", runId: msg.researchRunId }} />} />}
                   {msg.role === "assistant" && msg.researchRunId && !msg.content ? null : msg.role === "assistant" && msg.imageTurn && msg.status !== "error" ? (
                     // An image turn's answer is the picture; its text is only
                     // the record kept for later turns and exports.

@@ -13,9 +13,11 @@ mock.module(mod('lib/prisma.ts'),{namedExports:{prisma:{
   conversationProject:{findUnique:async()=>({id:'p1',userId:'another-owner'}),findFirst:async()=>null,updateMany:async({where})=>{assert.equal(where.userId,'bearer-owner');return{count:0};},deleteMany:async({where})=>{assert.equal(where.userId,'bearer-owner');return{count:0};}},
   $queryRaw:async(_strings,...values)=>{reads++;assert.ok(values.includes('bearer-owner'));assert.ok(!values.includes('cookie-owner'));return[];},
 }}});
-mock.module(mod('lib/apiSecurity.ts'),{namedExports:{apiSecurityResponse:()=>null,consumeApiRateLimit:async(_req,user)=>assert.equal(user,'bearer-owner'),readLimitedJson:async(req,_size,schema)=>schema.parse(await req.json())}});
+const security=await import('../../lib/apiSecurity.ts');
+mock.module(mod('lib/apiSecurity.ts'),{namedExports:{...security,apiSecurityResponse:()=>null,consumeApiRateLimit:async(_req,user)=>assert.equal(user,'bearer-owner'),readLimitedJson:async(req,_size,schema)=>schema.parse(await req.json())}});
 mock.module(mod('lib/billingEntitlements.ts'),{namedExports:{getUserBillingPlan:async user=>{assert.equal(user,'bearer-owner');return{allowSharing:true,allowDownloads:true};},featureNotIncludedResponse:()=>Response.json({},{status:403}),effectivePlanModelLimit:()=>3,planAllowsFeature:()=>true}});
-mock.module(mod('lib/appSettings.ts'),{namedExports:{getOperationalFeatureFlags:async()=>new Proxy({},{get:()=>true}),isMemoryInjectionEnabled:async()=>false,isAssistantProfilesEnabled:async()=>false}});
+const settings=await import('../../lib/appSettings.ts');
+mock.module(mod('lib/appSettings.ts'),{namedExports:{...settings,getOperationalFeatureFlags:async()=>new Proxy({},{get:()=>true}),isMemoryInjectionEnabled:async()=>false,isAssistantProfilesEnabled:async()=>false}});
 mock.module(mod('lib/securityAudit.ts'),{namedExports:{logSecurityAuditEvent:()=>{}}});
 mock.module(mod('lib/conversationSearch.ts'),{namedExports:{searchConversationMessages:async({userId})=>{reads++;assert.equal(userId,'bearer-owner');return{results:[],truncated:false,sourceSearch:'ok',validUntil:null};}}});
 process.env.NEXTAUTH_SECRET='native-history-route-fixture';

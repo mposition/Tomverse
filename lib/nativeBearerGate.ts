@@ -186,6 +186,16 @@ export function nativeWorkspaceBearerRoute(path: string, method: string, enabled
   return false;
 }
 
+/**
+ * The folder-era history calls (list, create, rename, delete) that parity has
+ * always allowed. They stay open with the project workspace switch off.
+ */
+export function nativeHistoryFolderBearerRoute(path: string, method: string): boolean {
+  if (path === "/api/projects") return ["GET", "POST"].includes(method);
+  if (/^\/api\/projects\/[A-Za-z0-9_-]{1,100}$/.test(path)) return ["PATCH", "DELETE"].includes(method);
+  return false;
+}
+
 /** Exact project workspace calls consumed by the bundled client. */
 export function nativeProjectWorkspaceBearerRoute(path: string, method: string): boolean {
   const id = "[A-Za-z0-9_-]{1,100}";

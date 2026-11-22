@@ -8,6 +8,7 @@ import { webProjectWorkspaceClient } from "@/lib/projectWorkspaceWeb";
 import { memoryEvidenceText, memoryMoveWarning } from "@/lib/projectWorkspaceUi";
 import { ConfirmDialog, EmptyState, ErrorLine, Spinner, projectUi, useCopy, useProjectResource } from "./projectUi";
 import type { ProjectTabProps } from "./ProjectWorkspaceScreen";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 
 type MoveRequest = { memory: ProjectMemory; target: string | null };
 
@@ -37,7 +38,10 @@ export function ProjectMemoriesTab({ project, archived, onProjectChanged }: Proj
         async () => {
             if (!showPersonal) return [];
             const response = await fetch("/api/memories?status=active&limit=100", { cache: "no-store" });
-            if (!response.ok) throw new Error("PERSONAL_MEMORIES_FAILED");
+            if (!response.ok) {
+                await discardResponseBody(response);
+                throw new Error("PERSONAL_MEMORIES_FAILED");
+            }
             const body = (await response.json()) as { memories?: ProjectMemory[] };
             return (body.memories ?? []).filter((item) => item.projectId === null);
         },

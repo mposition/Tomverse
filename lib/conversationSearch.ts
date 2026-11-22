@@ -184,7 +184,10 @@ export async function searchConversationMessages(input: {
         async (tx) => {
             /* ---- 1. authorisation ------------------------------------ */
             const lockedConversations = await tx.conversation.findMany({
-                where: { userId, password: { not: null }, ...(projectScope ? { projectId: projectScope } : {}) },
+                // Account-wide even in a project search: a locked conversation of
+                // another project is denied here too, which only widens the
+                // exclusion, and the grant expiry stays the conservative one.
+                where: { userId, password: { not: null } },
                 select: { id: true, password: true, passwordVersion: true },
             });
             /*
