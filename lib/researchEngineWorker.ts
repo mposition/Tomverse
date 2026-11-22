@@ -30,7 +30,7 @@ import { loadResearchPrivateText, revalidateResearchPrivateEntry } from "@/lib/r
 import {
   beginResearchDispatch, bumpRunSequence, claimNextResearchWorkItem, completeResearchDispatch, enqueueResearchWorkItems,
   finishResearchWorkItem, heartbeatResearchWorkItem, latestResearchVersions, lockResearchRun, markResearchDispatchStarted,
-  markResearchDispatchUnknown, recordResearchSourceVersion, registerPublicSources,
+  markResearchDispatchUnknown, recordResearchSourceVersion, registerPublicSources, RESEARCH_EVIDENCE_WRITE_GRACE_MS,
   requeueResearchWorkItem, type NewResearchWorkItem, type ResearchConcurrencyLimits, type ResearchItemFence,
 } from "@/lib/researchEngineStore";
 import { researchEngineLabels } from "@/locales/researchEngine";
@@ -59,14 +59,16 @@ async function approvedPlan(run: Pick<RunRow, "id" | "approvedPlanRevision" | "p
 export function publicContextOf(manifest: ResearchInputManifest): PublicResearchContext {
   return {
     kind: "public", publicBrief: manifest.publicBrief,
-    brief: { objective: manifest.brief.objective, deliverable: manifest.brief.deliverable, searchLanguages: manifest.brief.searchLanguages,
+    // Objective, constraints and priority notes are free text that may be private:
+    // they reach search-capable roles only through the user's publicBrief.
+    brief: { deliverable: manifest.brief.deliverable, searchLanguages: manifest.brief.searchLanguages,
       regions: manifest.brief.regions, period: manifest.brief.period, freshness: manifest.brief.freshness,
       includeDomains: manifest.brief.includeDomains,
-      excludeDomains: [...manifest.brief.excludeDomains, ...manifest.amendments.flatMap((amendment) => amendment.excludeDomains)],
-      constraints: manifest.brief.constraints },
+      excludeDomains: [...manifest.brief.excludeDomains, ...manifest.amendments.flatMap((amendment) => amendment.excludeDomains)] },
     privateSourceCount: manifest.entries.filter((entry) => entry.type !== "url").length,
     currentDate: manifest.currentDate, locale: manifest.brief.outputLanguage ?? manifest.locale,
-    amendments: manifest.amendments.flatMap((amendment) => [...amendment.addQuestions, ...(amendment.priorityNote ? [amendment.priorityNote] : [])]),
+    // Added questions are, by the amendment contract, public research questions (like the question itself).
+    addedQuestions: manifest.amendments.flatMap((amendment) => amendment.addQuestions),
   };
 }
 
@@ -419,6 +421,11 @@ async function storeExtractedVersion(run: RunRow, sourceId: string, extracted: {
   meta: { finalUrl?: string; contentType?: string; byteLength?: number; title?: string; publishedAt?: string; modifiedAt?: string }) {
   const store = await researchEvidenceStore();
   const objectKey = researchEvidenceObjectKey({ userId: run.userId, runId: run.id, versionId: sourceId });
+  // The key is queued for cleanup before the object exists; recording the version
+  // removes that row in the same transaction. A crash or failure in between
+  // therefore always leaves the object discoverable and deleted later.
+  await prisma.researchEvidenceObjectCleanup.create({ data: { objectKey, reason: "write_pending",
+    nextAttemptAt: new Date(Math.max(researchNow().getTime(), Date.now()) + RESEARCH_EVIDENCE_WRITE_GRACE_MS) } });
   await store.put(objectKey, extracted.text);
   const chunks = chunkEvidenceText(extracted.text, extracted.method);
   const fingerprint = republicationFingerprint(extracted.text);
@@ -437,7 +444,10 @@ async function storeExtractedVersion(run: RunRow, sourceId: string, extracted: {
     if (fingerprint) await prisma.researchSourceVersion.update({ where: { id: version.id }, data: { leadFingerprint: fingerprint } });
     return version;
   } catch (error) {
-    await store.delete(objectKey).catch(() => undefined);
+    // Delete now if possible; otherwise the queued row makes maintenance retry it.
+    const removed = await store.delete(objectKey).then(() => true, () => false);
+    if (removed) await prisma.researchEvidenceObjectCleanup.deleteMany({ where: { objectKey, reason: "write_pending" } }).catch(() => undefined);
+    else await prisma.researchEvidenceObjectCleanup.updateMany({ where: { objectKey }, data: { nextAttemptAt: new Date() } }).catch(() => undefined);
     throw error;
   }
 }

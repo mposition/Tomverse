@@ -112,6 +112,8 @@ export async function createChatResearchFundingAdapter(): Promise<ResearchFundin
         if (!durable || durable.status === "reserved") {
           throw Object.assign(new Error("RESEARCH_SETTLEMENT_PENDING"), { code: "RESEARCH_SETTLEMENT_PENDING" });
         }
+        // A released hold charged nothing; otherwise trust the durable figure.
+        if (durable.status === "released") return { settledCredits: durable.settledCredits ?? 0 };
         return { settledCredits: durable.settledCredits ?? (usage.usageFromProvider ? 0 : durable.reservedCredits) };
       }
       return { settledCredits: result.settledCredits };

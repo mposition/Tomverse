@@ -16,6 +16,8 @@ import { researchNow } from "@/lib/researchEngineRuntime";
 export const RESEARCH_ITEM_LEASE_MS = 90_000;
 export const RESEARCH_ITEM_MAX_ATTEMPTS = 4;
 export const RESEARCH_SEGMENT_RESERVING_STALE_MS = 90_000;
+/** How long a written evidence object may wait for its version row before cleanup may delete it. */
+export const RESEARCH_EVIDENCE_WRITE_GRACE_MS = 60 * 60_000;
 
 export type ResearchConcurrencyLimits = {
   global: number;
@@ -434,6 +436,12 @@ export async function recordResearchSourceVersion(input: {
 }) {
   return prisma.$transaction(async (tx) => {
     await lockResearchRun(tx, input.runId);
+    if (input.objectKey) {
+      // Take the object over from the cleanup queue. Missing means cleanup already
+      // claimed it (the grace passed), so the object cannot be relied on.
+      const taken = await tx.researchEvidenceObjectCleanup.deleteMany({ where: { objectKey: input.objectKey, reason: "write_pending" } });
+      if (taken.count !== 1) throw Object.assign(new Error("RESEARCH_EVIDENCE_WRITE_EXPIRED"), { code: "RESEARCH_EVIDENCE_WRITE_EXPIRED" });
+    }
     const max = await tx.researchSourceVersion.aggregate({ where: { sourceId: input.sourceId }, _max: { version: true } });
     const version = await tx.researchSourceVersion.create({ data: {
       sourceId: input.sourceId, runId: input.runId, version: (max._max.version ?? 0) + 1, readStatus: input.readStatus,

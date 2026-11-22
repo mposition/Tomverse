@@ -124,7 +124,11 @@ export const researchRunCreateSchema = z.object({
   userMessageId: z.string().uuid(),
   assistantMessageId: z.string().uuid(),
   brief: researchBriefSchema,
-  /** Optional narrower text for public search; defaults to the question. */
+  /**
+   * The only free text search-capable roles see. When the user gives it, nothing
+   * else they typed (objective, constraints) is sent toward web search; when
+   * absent it defaults to the question with the objective and constraints.
+   */
   publicBrief: z.string().trim().min(1).max(RESEARCH_RESOURCE_LIMITS.maxBriefCharacters).optional(),
   sources: z.array(researchSourceSelectionSchema).max(RESEARCH_RESOURCE_LIMITS.maxManifestEntries).default([]),
   profile: z.enum(["standard", "deep"]).default("standard"),
@@ -133,6 +137,14 @@ export const researchRunCreateSchema = z.object({
   locale: z.string().trim().min(2).max(35).optional(),
 }).strict();
 export type ResearchRunCreateInput = z.infer<typeof researchRunCreateSchema>;
+
+/** Without an explicit public text the whole typed brief is public, as the question itself is. */
+function defaultPublicBrief(brief: ResearchRunCreateInput["brief"]) {
+  const extra = [brief.objective ? `Objective: ${brief.objective}` : "", ...brief.constraints.map((constraint) => `Constraint: ${constraint}`)]
+    .filter(Boolean).join("\n");
+  const room = RESEARCH_RESOURCE_LIMITS.maxBriefCharacters - brief.question.length - 2;
+  return extra && room > 0 ? `${brief.question}\n\n${extra.slice(0, room)}`.trim() : brief.question;
+}
 
 export async function createResearchRun(input: { request: Request; userId: string; payload: ResearchRunCreateInput }) {
   const { features } = await assertEligible(input.userId);
@@ -152,7 +164,7 @@ export async function createResearchRun(input: { request: Request; userId: strin
   const locale = researchPreviewLocale(payload.locale ?? input.request.headers.get("accept-language"));
   const now = researchNow();
   const manifest: ResearchInputManifest = researchInputManifestSchema.parse({
-    version: 1, brief: payload.brief, publicBrief: payload.publicBrief ?? payload.brief.question, entries, profile: payload.profile,
+    version: 1, brief: payload.brief, publicBrief: payload.publicBrief ?? defaultPublicBrief(payload.brief), entries, profile: payload.profile,
     locale, currentDate: now.toISOString().slice(0, 10), amendments: [], autoStart: payload.autoStart, revisionRequests: [],
   });
   const finalizationReserve = Math.min(payload.approvedCredits, Math.max(pinned.perCall * 3, Math.ceil(payload.approvedCredits * 0.2)));
@@ -334,7 +346,9 @@ export async function finishResearchNow(input: { request: Request; userId: strin
 
 export const researchScopeAmendmentSchema = z.object({
   expectedInputRevision: z.number().int().min(0),
+  /** Public research text: each question is researched on the web like the public brief. */
   addQuestions: z.array(z.string().trim().min(1).max(2_000)).max(10).default([]),
+  /** Private note: kept in the manifest, never sent to a search-capable role. */
   excludeSourceKeys: z.array(researchSourceKeySchema).max(100).default([]),
   excludeDomains: z.array(z.string().trim().toLowerCase().max(253)).max(30).default([]),
   priorityNote: z.string().trim().min(1).max(1_000).optional(),
@@ -375,6 +389,11 @@ export const researchRevisionRequestInputSchema = z.object({
   expectedReportRevision: z.number().int().min(1),
   kind: z.enum(["format", "section_research", "conditions", "refresh", "redact_public"]),
   sectionKeys: z.array(researchSectionKeySchema).max(20).default([]),
+  /**
+   * For section_research and conditions this is public research text (it directs
+   * the new web research); for format, refresh and redact_public it reaches only
+   * the writer, which has no search tool.
+   */
   instruction: z.string().trim().max(4_000).optional(),
 }).strict();
 

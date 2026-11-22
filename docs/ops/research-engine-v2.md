@@ -44,7 +44,11 @@ Chat의 Auto/manual 선택은 바꾸지 않습니다. Research 실행 모델은 
 - 비공개 텍스트를 읽는 모든 dispatch 직전에 다시 검증합니다. 삭제·재잠금·Memory 끄기 뒤에는
   모델에 보내지 않고 source를 `revoked`로 바꾸며 저장된 텍스트를 정리 큐에 넣습니다.
 - 검색할 수 있는 역할(planner, researcher, coordinator)의 prompt는 `PublicResearchContext`
-  타입으로 공개 brief와 공개 source 행에서만 만들어집니다. 비공개 분석(analyst)·검증·작성
+  타입으로 공개 brief와 공개 source 행에서만 만들어집니다. 이 역할에 가는 자유 텍스트는 공개 조사
+  텍스트로 정한 것뿐입니다: `publicBrief`(따로 주지 않으면 질문·objective·constraints), 추가 질문,
+  section_research·conditions revision의 instruction, 계획 재작성 의견. 공개용 brief를 따로 주면
+  원래 질문·objective·constraints, 범위 변경 메모(priorityNote), 형식 수정 instruction은 검색
+  역할에 가지 않습니다. 비공개 분석(analyst)·검증·작성
   역할에는 검색·fetch tool이 없습니다. 이 분리가 경계이며 prompt 경고는 보조입니다.
 - 비공개 자료가 들어간 보고서는 공개 공유가 거절되고, 모델 없이 만드는 공개용 redaction
   revision이 있을 때만 그 버전으로 공유됩니다.

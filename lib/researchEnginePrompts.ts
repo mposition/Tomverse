@@ -20,20 +20,25 @@ export type PublicSourceLine = { sourceKey: string; title?: string | null; host:
 export type PublicEvidenceBlock = { sourceKey: string; fromChunk: number; toChunk: number; totalChunks: number;
   locator: string; text: string; truncated: boolean };
 
+/**
+ * The only free text here is `publicBrief` (the user's public research text)
+ * and `addedQuestions` (questions the user added to be researched). Objective,
+ * constraints and other notes reach a search-capable role only through the
+ * publicBrief the user approved; everything else is structured conditions.
+ */
 export type PublicResearchContext = {
   readonly kind: "public";
   publicBrief: string;
-  brief: Pick<ResearchBrief, "objective" | "deliverable" | "searchLanguages" | "regions" | "period" | "freshness" | "includeDomains" | "excludeDomains" | "constraints">;
+  brief: Pick<ResearchBrief, "deliverable" | "searchLanguages" | "regions" | "period" | "freshness" | "includeDomains" | "excludeDomains">;
   privateSourceCount: number;
   currentDate: string;
   locale: string;
-  amendments: string[];
+  addedQuestions: string[];
 };
 
 const briefLines = (context: PublicResearchContext) => [
   `Current date: ${context.currentDate}. Output language: ${context.locale}.`,
   `Research question (public):\n<question>\n${context.publicBrief}\n</question>`,
-  context.brief.objective ? `Objective: ${context.brief.objective}` : "",
   `Deliverable: ${context.brief.deliverable}.`,
   context.brief.searchLanguages.length ? `Search languages: ${context.brief.searchLanguages.join(", ")}.` : "",
   context.brief.regions.length ? `Regions: ${context.brief.regions.join(", ")}.` : "",
@@ -41,9 +46,8 @@ const briefLines = (context: PublicResearchContext) => [
   context.brief.freshness ? `Prefer results from the past ${context.brief.freshness}.` : "",
   context.brief.includeDomains.length ? `Only these domains are in scope: ${context.brief.includeDomains.join(", ")}.` : "",
   context.brief.excludeDomains.length ? `Excluded domains: ${context.brief.excludeDomains.join(", ")}.` : "",
-  ...context.brief.constraints.map((constraint) => `Constraint: ${constraint}`),
   context.privateSourceCount ? `The user also selected ${context.privateSourceCount} private source(s). They are analysed separately and are never visible to you or to web search.` : "",
-  ...context.amendments.map((amendment) => `Scope change from the user: ${amendment}`),
+  ...context.addedQuestions.map((question) => `Question the user added to the research: ${question}`),
 ].filter(Boolean).join("\n");
 
 export const plannerPrompt = (context: PublicResearchContext, feedback?: string) => ({

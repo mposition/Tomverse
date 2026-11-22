@@ -420,6 +420,66 @@ test("a run with an unsettled unknown dispatch cannot be deleted; synthesis re-c
   assert.equal(await prisma.researchEvidenceObjectCleanup.count({ where: { objectKey: { in: privateKeys } } }), privateKeys.length);
 });
 
+test("with an explicit public brief, the objective, constraints and priority notes never reach web search or a search-capable role", async () => {
+  const fakes = installFakes();
+  const web = createFakeWeb();
+  const user = await createUser("public-brief");
+  const run = await create(user.id, {
+    brief: { ...brief("Private framing: KESTREL-77 internal merger plan. What do public sources say about regional tariffs?"),
+      objective: "Decide on the KESTREL-77 acquisition", constraints: ["Budget KESTREL-77 is confidential"] },
+    publicBrief: "What do public sources say about regional tariffs?",
+  });
+  await drainResearchWork("public-brief", 4);
+  const mid = await readResearchRunDto(user.id, run.id);
+  assert.equal(mid.status, "completed");
+  assert.ok(web.searches.length > 0);
+  assert.ok(web.searches.every((query) => !query.includes("KESTREL")), "no private framing in any search query");
+  for (const call of fakes.model.calls) {
+    if (["submit_research_plan", "submit_research_turn", "submit_research_coverage"].includes(call.tool)) assert.ok(!call.text.includes("KESTREL"), `${call.tool} saw private framing`);
+  }
+  // A private scope note and a format instruction never reach search-capable roles.
+  await requestResearchRevision({ request: fakeRequest(), userId: user.id, runId: run.id,
+    revision: { expectedReportRevision: mid.currentReportRevision, kind: "format", sectionKeys: [], instruction: "Frame it for the KESTREL-77 board" } });
+  await drainResearchWork("public-brief-b", 4);
+  assert.equal((await readResearchRunDto(user.id, run.id)).currentReportRevision, mid.currentReportRevision + 1);
+  for (const call of fakes.model.calls) {
+    if (["submit_research_plan", "submit_research_turn", "submit_research_coverage"].includes(call.tool)) assert.ok(!call.text.includes("KESTREL"), `${call.tool} saw a private note`);
+  }
+  assert.ok(fakes.model.calls.some((call) => call.tool === "submit_research_section" && call.text.includes("KESTREL-77 board")), "the writer did get the format instruction");
+  assert.ok(web.searches.every((query) => !query.includes("KESTREL")));
+  assert.equal(await prisma.researchEvidenceObjectCleanup.count({ where: { reason: "write_pending", objectKey: { contains: run.id } } }), 0,
+    "every written object was taken over by its version row");
+  // Without an explicit public text, the typed brief (question, objective, constraints) is the public text.
+  const open = await create(user.id, { brief: { ...brief("Open question about tariffs?"), objective: "Compare regions", constraints: ["Use 2026 data"] } });
+  const manifest = (await prisma.researchPreviewRun.findUniqueOrThrow({ where: { id: open.id } })).inputManifest as { publicBrief: string };
+  assert.ok(manifest.publicBrief.includes("Compare regions") && manifest.publicBrief.includes("Use 2026 data"));
+});
+
+test("an evidence object written just before a crash is still deleted: its key is queued before the write", async () => {
+  const fakes = installFakes({ model: createFakeModel({ respond: (call) => defaultResponse(call, { subquestions: 1, sections: 1, readsPerTurn: 1 }) }) });
+  createFakeWeb();
+  const user = await createUser("write-crash");
+  const realPut = fakes.store.put;
+  const written: string[] = [];
+  // The process "dies" right after the object is stored: nothing after put runs.
+  fakes.store.put = async (key, value) => { await realPut(key, value); written.push(key); throw new Error("process died after write"); };
+  try {
+    const run = await create(user.id);
+    await drainResearchWork("write-crash", 2);
+    assert.ok(written.length > 0, "at least one object was written");
+    assert.equal(await prisma.researchSourceVersion.count({ where: { runId: run.id, objectKey: { in: written } } }), 0, "no version row recorded the key");
+  } finally {
+    fakes.store.put = realPut;
+  }
+  assert.ok(written.every((key) => fakes.store.objects.has(key)));
+  assert.equal(await prisma.researchEvidenceObjectCleanup.count({ where: { objectKey: { in: written } } }), written.length, "every orphan is queued");
+  await drainResearchEvidenceCleanup();
+  assert.ok(written.every((key) => fakes.store.objects.has(key)), "inside the grace period the write may still be in flight");
+  fakes.clock.advance(61 * 60_000);
+  await drainResearchEvidenceCleanup();
+  assert.ok(written.every((key) => !fakes.store.objects.has(key)), "orphaned objects are deleted after the grace period");
+});
+
 test("evidence cleanup backs off through a long storage outage but never gives up", async () => {
   const fakes = installFakes();
   const objectKey = `research-evidence/outage/${randomUUID()}`;

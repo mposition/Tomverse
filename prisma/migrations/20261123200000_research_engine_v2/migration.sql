@@ -419,7 +419,7 @@ CREATE TABLE "ResearchEvidenceObjectCleanup" (
   CONSTRAINT "ResearchEvidenceObjectCleanup_pkey" PRIMARY KEY ("id"),
   CONSTRAINT "ResearchEvidenceObjectCleanup_attempts_check" CHECK ("attempts" >= 0),
   CONSTRAINT "ResearchEvidenceObjectCleanup_reason_check" CHECK ("reason" IN (
-    'run_deleted', 'conversation_deleted', 'account_deleted', 'source_revoked', 'superseded'
+    'run_deleted', 'conversation_deleted', 'account_deleted', 'source_revoked', 'superseded', 'write_pending'
   )),
   CONSTRAINT "ResearchEvidenceObjectCleanup_key_check" CHECK ("objectKey" LIKE 'research-evidence/%')
 );

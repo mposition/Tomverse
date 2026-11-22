@@ -153,9 +153,16 @@ export async function drainResearchEvidenceCleanup(limit = 200) {
   let deleted = 0;
   for (const row of rows) {
     try {
-      await store.delete(row.objectKey);
-      await prisma.researchEvidenceObjectCleanup.delete({ where: { id: row.id } });
-      deleted += 1;
+      // The row is held while the object is deleted, so a version write cannot take
+      // over a key whose object is being removed (it waits, then finds no row).
+      const removed = await prisma.$transaction(async (tx) => {
+        const held = await tx.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "ResearchEvidenceObjectCleanup" WHERE "id" = ${row.id} FOR UPDATE SKIP LOCKED`;
+        if (!held.length) return false;
+        await store.delete(row.objectKey);
+        await tx.researchEvidenceObjectCleanup.delete({ where: { id: row.id } });
+        return true;
+      }, { timeout: 30_000 });
+      if (removed) deleted += 1;
     } catch {
       const backoffMs = Math.min(6 * 60 * 60_000, 60_000 * 2 ** Math.min(row.attempts, 12));
       await prisma.researchEvidenceObjectCleanup.update({ where: { id: row.id },
