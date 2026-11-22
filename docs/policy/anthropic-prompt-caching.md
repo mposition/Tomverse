@@ -40,6 +40,7 @@ Anthropic이 Tomverse의 direct API 트래픽에서 prompt cache hit rate가 낮
 | `provider_verification` | X | 고정된 짧은 일회성 요청 |
 | `memory_extraction` | X | 대화당 1회, 매번 다른 transcript |
 | `external_api_messages` | **O** (client marker) | Claude Code가 자기 marker를 붙여 system·tools·history를 매 turn 재전송 — §2.4 |
+| `external_api_chat_completions` | **O** | OpenAI 호환 coding client가 Anthropic 모델로 같은 system·tools·history를 매 요청 재전송. marker는 Tomverse가 붙임 — §2.5 |
 
 ## 2.2 1차 출시 범위는 `chat_turn` 하나입니다
 
@@ -101,6 +102,27 @@ breakpoint를 둔 요청이고, marker를 지우면 매 turn이 uncached로 청�
 
 server tool(웹 검색 등)은 이 경로에서 dispatch 전에 거절되므로 §2.3의 반복 write 문제는
 생기지 않습니다.
+
+## 2.5 외부 API의 Chat Completions — marker는 Tomverse가 붙입니다
+
+`external_api_chat_completions`는 Cursor·VS Code·JetBrains·Raycast 같은 OpenAI 호환
+client가 `/v1/chat/completions`로 보낸 요청 중 Anthropic 모델로 가는 것입니다.
+API가 stateless라 client는 system·tools·history 전체를 매 요청 다시 보내고, 한
+작업 안에서 분 단위로 여러 번 보냅니다. Chat Completions 형식에는 cache marker가
+없으므로 2026-11-21 이전에는 이 요청이 모두 uncached로 청구됐습니다. Anthropic의
+두 번째 "prompt cache hit rate가 낮다" 안내의 가장 큰 원인으로 판단했습니다.
+
+세 부분은 모두 `lib/externalApiInference.ts`에 있습니다.
+
+1. budget — `createChatBudget(..., { promptCachePath: "external_api_chat_completions" })`가
+   Anthropic 모델일 때 5분 write premium을 dispatch 전에 예약
+2. request — `getModelGenerationSettings`가 같은 path로 top-level automatic
+   `cacheControl`을 붙임. `provider === "anthropic"`에서만 붙으므로 OpenAI·Google·
+   MiniMax 등으로 라우팅된 요청은 바뀌지 않습니다
+3. settlement — 기존 정산이 `cacheWriteTokens`를 write로 정산
+
+client가 보낸 `cache_control` 필드는 이 형식에서 여전히 `unsupported_parameter`로
+거절합니다. marker를 정하는 쪽은 Tomverse 하나입니다.
 
 ## 2.3 native web search turn은 예약이 안전하지 않습니다
 

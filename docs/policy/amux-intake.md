@@ -1,5 +1,40 @@
 # AMUX intake
 
+## 운영자 결정 2026-11-21 (대화) — 세션 계획 첨부 접수와 원클릭 승인
+
+운영자 결정(2026-11-21, 대화): Codex, Claude Code, Cursor, Antigravity 어디서든 같은 한 줄로 아이디어와
+그 세션이 쓴 계획을 올린다. 세션 계획 첨부 접수, 기존 계획 승인 한 번으로 등록, 승인 없는 자동 등록은
+기본 꺼짐. 아이디어를 넣는 입구는 운영자 GitHub 계정으로 코드를 바꾸는 입구이므로 기본은 사람의 승인
+한 번이다. 새 table·migration은 없고 버전 번호는 올리지 않는다.
+
+1. **공용 명령.** `npm run amux:idea -- submit --tool <도구> --provider <모델 공급사> --title <한 줄>
+   [--body <md 파일>|-] [--plan <계획 JSON>|-] [--repo owner/name]... [--pr owner/name#번호]...`.
+   `--repo`가 없으면 이 checkout의 GitHub origin을 참조로 넣는다(`--no-repo`로 끈다). `prompt`는 box가
+   이 아이디어에 쓸 분석 프롬프트를 그대로 출력하고, `check`는 네트워크 없이 계획을 같은 검사로 확인한다.
+   접수 비밀값(`TOMVERSE_AMUX_SESSION_INTAKE_CLIENT_SECRET`)과 origin(`TOMVERSE_AMUX_SESSION_INTAKE_ORIGIN`)은
+   환경 변수로만 읽고 출력하지 않는다. 기존 `local:amux-session-intake`와 같은 route·자격증명·read-back이다.
+2. **선택 필드 `plan`.** 형식은 box 분석 답과 같다(Story·Task·노드·증거 단위). 페이지 머리 필드는 앱이
+   세션 분석과 같은 방식으로 채운다. 검사는 새로 만들지 않고 둘을 그대로 쓴다. 계획 안의 모든 글에 접수
+   내용 검사(비밀값·개인정보·절대 경로·사설 URL)를 하고, 세션 분석 계획 writer의 parser로 첫 페이지 검사를
+   한다. 닫힌 제안이어야 한다(노드나 카드가 하나 이상, 남은 범위 없음, 질문 없음). route가 한 번, 같은
+   transaction 안에서 한 번 더 검사하고, 통과하지 못하면 아무것도 쓰지 않는다(`plan_rejected`·
+   `content_refused`).
+3. **box 분석을 건너뛴다.** 통과하면 접수와 같은 transaction에서 내용 없는 시스템 감사
+   `amux.idea.session_plan_attached`(작성자 session, 읽은 근거 없음)를 남기고, box 결과 route와 같은 계획
+   writer가 같은 source plan·페이지·제안 단위를 쓴다. 아이디어는 `awaiting_owner`가 된다. 대기열
+   receipt(예약 행)는 read-back 계약 때문에 그대로 쓰지만, box 대기열은 `submitted`·`analyzing` 아이디어만
+   집으므로 이 아이디어를 분석하지 않는다. 페이지 미리보기의 모델 표시는 `session-written-plan`이다.
+4. **원클릭 승인.** 승인은 기존 계획 승인 한 번이다(이 문서 v18 절 3항). 이후 점수·승격·실행은 같다.
+   Admin 아이디어 상세는 "코딩 세션이 작성한 계획, box 분석 없음, 읽은 파일 기록 없음"을 표시한다. 출처의
+   세 표시(도구 이름·모델 공급사·세션 표시)는 다른 세션 아이디어처럼 아이디어와 함께 암호화해 보관한다.
+5. **자동 등록 스위치.** `TOMVERSE_AMUX_SESSION_PLAN_AUTO_REGISTER`가 정확히 `enabled`일 때만 승인 없이
+   기존 시스템 등록 Guard로 바로 등록한다. 기본은 없음(꺼짐)이고 box 분석 자동 등록
+   (`TOMVERSE_AMUX_V19_SYSTEM_REGISTRATION`)과 별개다. 이 스위치는 미리보기에 세션 계획 표시가 있는 아이디어만
+   등록한다. 결과는 접수 응답의 `plan.state`(`awaiting_approval`·`registered`·`registration_incomplete`)로
+   돌아오고, 등록이 끝나지 않아도 접수는 그대로이며 다시 시도하지 않는다. 켜는 것은 자율 Agent에 권한을 주는
+   일이므로 운영자의 한 줄 승인이 필요하다.
+6. **대체 경로.** `plan`이 없는 접수는 이전과 똑같다(box 무인 분석 대기열).
+
 ## 운영자 결정 2026-11-16 (대화) — 아이디어 분석·등록의 스위치 정리
 
 운영자 결정(2026-11-16, 대화): "v19, v22 같은 불명확한 용어가 혼동을 주고, 쓸데없는 플래그 variable이
@@ -874,6 +909,7 @@ canonical JSON은 기존 AMUX canonicalizer의 정렬 규칙을 쓴다. package 
 - 모델은 Initiative/Epic의 전략적 가치와 하위 카드의 기여·긴급성·의존성·예상 노력·가용 worker를 **근거와 불확실성**과 함께 평가한다. 점수 계산과 자격·용량 Guard는 버전 있는 결정적 코드가 맡고, 모델 출력만으로 SEV1 선언·승격·worker claim을 결정하지 않는다. 운영자의 수정·거절도 근거를 남긴다. 활성 포트폴리오는 7일, 전체 기준선은 28일마다 재평가하고 중대 사건에서는 조건부 조기 검토한다. 저장된 근거의 결정적 재계산은 예약 실행할 수 있지만 **근거 수집 시각은 갱신하지 않으며**, 해당 범위의 마지막 확인 근거가 28일을 넘으면 stale이다. 7일 활성 기한은 운영자 결정(2026-11-14)으로 입력 평가·Task revision·source 승인·계산이 그대로인 backlog Task에 한해 시스템(`amux-portfolio-scorer`)이 감사 체인에 기록하며 연장한다. 2026-11-15 운영자 지시로 이 연장은 활성 창(지금부터 7일)과 기준선(지금부터 28일)을 함께 옮겨, 입력이 그대로인 점수는 기준선 때문에 사람 재확인을 기다리지 않는다. 항상 켜짐(2026-11-16 대화 결정: 끄는 스위치를 없앴다)이고 tick당 개수 제한 없이 tick 시간 예산 안에서 처리한다. 평가가 바뀌면 지금처럼 운영자가 점수를 확인한다. **새 외부 자료를 모델에 보내는 재평가**는 이번 회차 전송 preview·모델 선택과 `agent/amux-intake` 예산 검사를 다시 거친다. 입력이 바뀌어 운영자 확인이 필요한데 받지 못하면 자동 승격을 보류한다. 승인된 `backlog` 카드의 점수와 실행 후보 선정은 별개다.
 - 포트폴리오 점수 v1의 승인 기록: `mposition`, 2026-10-05. 각 0~5 평가에 Initiative 최대 20, Epic 15, Feature 10, Story 영향 10, Task 기여 20, 긴급성 10, 의존성 해소 5, worker 적합도 5를 배분한다. Story 없는 Feature 직속 Task에는 Story 10점을 Task 기여 가중치로 옮긴다. 예상 노력·실행 위험·불확실성은 감점한다. 모델의 수치는 출처가 제한된 제안일 뿐이며, 운영자 근거 확인과 결정적 재계산 없이는 저장 점수로 쓰지 않는다. 이 승인만으로 라이브 쓰기·승격·SEV1·worker claim을 열지 않는다.
 - Admin은 아이디어 입력, 분석 진행·입력 범위·토큰, 계층/중복 제안, **노드별 승인**, **카드별 승인**, 포트폴리오 점수 근거, Kanban, DevOps형 계층 목록, 카드 상세/실행/PR 근거, 운영자 주의, 완료 판정, 결과 환류를 하나의 연결 흐름으로 제공한다. 미확인·미분석·`outcome_unknown`을 완료처럼 표시하지 않는다. 목록과 Kanban은 같은 앱 DB의 두 projection이며, 큰 계층을 위해 서버 페이지네이션과 지연 로딩을 사용한다.
+- 운영자 결정(2026-11-21): Task·Story 카드 상세는 소속 계층(Initiative › Epic › Feature › Story › Task)을 이름·번호·상태·가치와 함께 보이고, Owner는 그 줄에서 활성 Initiative·Epic·Feature의 제목·설명과 가치·불확실성·근거 확인일을 편집한다. 저장 한 번은 본문이 바뀐 경우의 새 node revision(같은 생성 결정의 키로 재암호화, `amux.v4.portfolio.node.revise` 감사), 그 revision에 묶인 새 평가, 그 아래 열린 Task 점수의 재계산을 한 트랜잭션에서 기존 평가·점수 writer로 남긴다. DB guard는 이 모양의 revision만 받는다. 보관된 노드는 읽기 전용이며 재활성화 경로는 여전히 닫혀 있다. 자동화가 노드를 조용히 바꾸지 않는다는 v11 5항은 그대로다.
 
 ### 비용·실패·보존
 
@@ -946,7 +982,9 @@ v6에서 열린 결정은 다음과 같이 닫는다. 분석 완료 시각에서
 
 제목·설명 본문은 암호화된 전용 필드에만 두고, 일반 카드 필드·source snapshot·승인 receipt·canonical 감사·7년 이력에 복제하지 않는다. 현행 v4 카드의 일반 `title`은 비본문 placeholder이고 `description`은 `NULL`이다. 삭제 뒤에도 계층/카드의 식별자·revision **번호·ID만**·keyed digest·결정 metadata·canonical 감사는 기존 **7년** 기준으로 남긴다. revision snapshot에 제목·설명 본문을 넣지 않는다. 따라서 삭제된 항목은 본문이 없는 상태로 명확히 표시하며, digest에서 제목을 복구하거나 빈 제목을 원래 제목처럼 표시하지 않는다. 유효한 legal hold만 v5·v6 조건으로 삭제를 일시 정지할 수 있다.
 
-현행 노드 schema에는 보관 시각과 본문 정리 상태가 없고, 카드의 표시 설명을 암호화해 보존·삭제하는 경로도 완성되지 않았다. 종료 뒤 재활성화와 이미 삭제된 본문의 복원·새 revision 절차를 별도 계약으로 정하기 전에는 그 전이를 허용하지 않는다. 이 수치 승인은 구현·migration **파일 작성**의 근거일 뿐, migration 적용·비합성 쓰기·정리 worker·staging/live 전환을 열지 않는다. 백업과 키 수명까지 포함한 삭제 증거를 별도 gate로 확인한다.
+노드 schema는 DB가 처음 보관할 때 쓰는 보관 시각(`archivedAt`)과 90일 기한(`contentPurgeAfter`)을 가지지만, 본문 정리 상태와 정리 worker는 없고, 카드의 표시 설명을 암호화해 보존·삭제하는 경로도 완성되지 않았다. 종료 뒤 재활성화와 이미 삭제된 본문의 복원·새 revision 절차를 별도 계약으로 정하기 전에는 그 전이를 허용하지 않는다. 이 수치 승인은 구현·migration **파일 작성**의 근거일 뿐, migration 적용·비합성 쓰기·정리 worker·staging/live 전환을 열지 않는다. 백업과 키 수명까지 포함한 삭제 증거를 별도 gate로 확인한다.
+
+2026-11-21 운영자 결정: Admin › 실행 보드의 계층 목록에서 owner가 남은 작업이 없는 계층(완료 또는 작업 0개)을 하위 Epic·Feature와 함께 보관할 수 있다(`app/api/admin/amux/hierarchy-archive`). 최근 재인증한 owner만, 같은 transaction의 감사 체인 기록과 함께, 기본 꺼짐 스위치 `AMUX_HIERARCHY_ARCHIVE_ENABLED=1`일 때만 쓴다. 보관 시각과 90일 기한은 DB가 쓰고, 재활성화는 위 문장대로 계속 막는다. 본문 정리 worker는 이 결정에 포함되지 않는다.
 
 ## v9 — 카드 작업 본문 보존 [결정, 운영자 mposition 2026-10-01]
 

@@ -31,7 +31,9 @@ import {
     type ExternalApiGuideSurface,
     type ExternalApiPlatform,
 } from "@/lib/externalApiAppGuides";
-import { CURSOR_GUIDE_PATH } from "@/lib/marketingRoutes";
+import { CLI_OS_NAMES, type CliOs } from "@/components/marketing/v2/cli/cliRelease";
+import { useCliPlatform } from "@/components/marketing/v2/cli/useCliPlatform";
+import { CLI_DOWNLOAD_PATH, CURSOR_GUIDE_PATH } from "@/lib/marketingRoutes";
 import { localizedPath } from "@/lib/seo";
 
 /**
@@ -60,8 +62,11 @@ type KeySummary = {
 
 type ModelSummary = ExternalApiModelCapabilities;
 
-/** Install and connect lines for the Tomverse CLI; absent until the package is published. */
-type TomverseCliGuide = { install: string; powershell: string; posix: string };
+/**
+ * Install and connect lines for the Tomverse CLI; absent until the CLI is published.
+ * `install` is the npm command, `installWindows` the winget one.
+ */
+type TomverseCliGuide = { install: string; installWindows?: string; powershell: string; posix: string };
 
 type Overview =
     // `plan_not_eligible`: a Free account; the API needs a paid plan.
@@ -650,6 +655,12 @@ const SHELLS: [Shell, string][] = [
     ["powershell", "Windows (PowerShell)"],
     ["posix", "macOS / Linux"],
 ];
+/** The Tomverse CLI's install choice: the operating system, which also picks the shell of the connect lines. */
+const CLI_OS_OPTIONS: [CliOs, string][] = [
+    ["windows", CLI_OS_NAMES.windows],
+    ["macos", CLI_OS_NAMES.macos],
+    ["linux", CLI_OS_NAMES.linux],
+];
 
 /** The models an OpenAI Chat Completions app can name. */
 const chatModels = (models: ModelSummary[]) => models.filter((model) => model.protocols?.includes("chat_completions") ?? true);
@@ -703,6 +714,10 @@ export function ConnectSection({
     const [platform, setPlatform] = useState<ExternalApiPlatform | null>(startTool);
     const [shell, setShell] = useState<Shell>("powershell");
     const [surface, setSurface] = useState<Surface>("terminal");
+    // The Tomverse CLI's install: this computer's operating system until the person picks another.
+    const detectedPlatform = useCliPlatform();
+    const [cliOsChoice, setCliOsChoice] = useState<CliOs | null>(null);
+    const cliOs: CliOs = cliOsChoice ?? detectedPlatform?.os ?? "windows";
     const lists = useMemo(() => codingToolModels(codingModels), [codingModels]);
     const [claudeId, setClaudeId] = useState<string | undefined>();
     const [codexId, setCodexId] = useState<string | undefined>();
@@ -766,14 +781,28 @@ export function ConnectSection({
                 return (
                     <div data-testid="external-api-tool-tomverse-cli">
                         <p className="text-xs text-zinc-500">{t("externalApi.tomverseCliHint")}</p>
-                        <CopyBlock label={t("externalApi.tomverseCliInstall")} value={tomverseCli.install} testId="external-api-tomverse-cli-install" />
                         <div className="mt-3 flex flex-wrap gap-2">
-                            <Segmented options={SHELLS} value={shell} onChange={setShell} testId="external-api-shell" />
+                            <Segmented options={CLI_OS_OPTIONS} value={cliOs} onChange={setCliOsChoice} testId="external-api-cli-os" />
                         </div>
                         <CopyBlock
+                            label={t("externalApi.tomverseCliInstall")}
+                            value={cliOs === "windows" ? (tomverseCli.installWindows ?? tomverseCli.install) : tomverseCli.install}
+                            testId="external-api-tomverse-cli-install"
+                        />
+                        <p className="mt-2 text-xs leading-5 text-zinc-500">
+                            {t("externalApi.tomverseCliInstallGuide")}{" "}
+                            <Link
+                                href={`${localizedPath(lang, CLI_DOWNLOAD_PATH)}#install`}
+                                className="font-semibold text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
+                                data-testid="external-api-cli-install-guide"
+                            >
+                                {t("externalApi.tomverseCliInstallGuideLink")}
+                            </Link>
+                        </p>
+                        <CopyBlock
                             label={t("externalApi.tomverseCliConnect")}
-                            value={(shell === "powershell" ? tomverseCli.powershell : tomverseCli.posix).replace(KEY_PLACEHOLDER, key)}
-                            testId={`external-api-tomverse-cli-${shell}`}
+                            value={(cliOs === "windows" ? tomverseCli.powershell : tomverseCli.posix).replace(KEY_PLACEHOLDER, key)}
+                            testId={`external-api-tomverse-cli-${cliOs === "windows" ? "powershell" : "posix"}`}
                         />
                         <Notes>
                             <p>{t("externalApi.tomverseCliNotes")}</p>

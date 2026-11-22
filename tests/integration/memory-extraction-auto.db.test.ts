@@ -52,7 +52,6 @@ const launch = (promptVersion: string): MemoryExtractionEvalEntry => ({
     ownerLaunch: {
         approver: "@qa",
         approvedAt: "2026-10-24",
-        expiresAt: "2099-01-01",
         decisionRef: "test fixture",
         knownLimitations: "test fixture",
     },
@@ -70,7 +69,6 @@ const REGISTER: readonly MemoryExtractionEvalEntry[] = [
         ownerLaunch: {
             approver: "@qa",
             approvedAt: "2026-10-24",
-            expiresAt: "2099-01-01",
             decisionRef: "test fixture",
             knownLimitations: "test fixture",
         },

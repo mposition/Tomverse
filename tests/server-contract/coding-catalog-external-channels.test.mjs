@@ -233,7 +233,7 @@ test("a row saved with the CLI's own channel is on the coding API", async () => 
   setSwitch(undefined);
 });
 
-test("a hold, an untick or a provider re-check that refuses a model takes it off at once, before any new publish", async () => {
+test("a hold or an untick takes a model off at once, before any new publish; provider terms never do", async () => {
   setSwitch("true");
   providerTerms = [termsRow()];
   entries = [entry("gpt-6-luna", ["code", "api"])];
@@ -248,8 +248,12 @@ test("a hold, an untick or a provider re-check that refuses a model takes it off
   entries = [entry("gpt-6-luna", ["code"])];
   assert.deepEqual(await ids("Pro", "coding"), []);
   entries = [entry("gpt-6-luna", ["code", "api"])];
+  // A provider record that denies resale no longer refuses a model (owner decision 2026-11-21).
   providerTerms = [termsRow({ allowsResaleAndCodingAgent: false })];
-  assert.deepEqual(await ids("Pro", "coding"), []);
+  assert.deepEqual(await ids("Pro", "coding"), ["gpt-6-luna"]);
+  // And a provider with no record at all is offered the same.
+  providerTerms = [];
+  assert.deepEqual(await ids("Pro", "coding"), ["gpt-6-luna"]);
   // An unpublished channel is not offered either: publishing is what exposes it.
   providerTerms = [termsRow()];
   entries = [entry("gpt-6-luna", ["code"])];

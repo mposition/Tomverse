@@ -17,10 +17,9 @@
  * Bounds, all deterministic and all before the paid call:
  * - at most CODING_AUTO_DRAFT_MAX_PER_RUN model calls per scan;
  * - only newly filed items (never a retry of an earlier day's item);
- * - only providers a draft can read, and only when the coding catalogue already
- *   holds that provider's confirmed terms and retention pages (a draft without
- *   a retention page is refused by codingDraftFromAnswer, so the call would be
- *   spent for nothing) and a default price page exists;
+ * - only providers a draft can read, and only when a default price page exists
+ *   (the draft reads that page alone: provider terms and retention pages are
+ *   no longer part of a coding draft, owner decision 2026-11-21);
  * - never a model the coding catalogue already has a row or draft for, checked
  *   before the call and again when the draft is stored (create-only: an
  *   operator's own draft made meanwhile is never overwritten);
@@ -40,7 +39,6 @@ import "server-only";
 
 import { codingDraftSighting } from "@/lib/codingCatalogDraftLink";
 import { codingDraftSources } from "@/lib/adminModelCatalogFlow";
-import { loadCodingProviderTerms, type CodingProviderTermsRecord } from "@/lib/modelCatalog";
 import { storeCatalogDraft } from "@/lib/modelCatalogAdmin";
 import { defaultPriceSources, MODEL_ID_PATTERN } from "@/lib/modelCatalogCore";
 import {
@@ -87,7 +85,6 @@ export const codingAutoDraftCandidates = (input: {
 export type CodingAutoDraftSkipReason =
   | "not_draft_provider"
   | "invalid_model_id"
-  | "provider_terms_missing"
   | "no_default_source"
   | "already_in_catalogue"
   | "duplicate";
@@ -106,7 +103,6 @@ export type CodingAutoDraftSummary = {
 
 export type CodingAutoDraftDeps = {
   draftLlm: () => Promise<CatalogDraftLlm | null>;
-  providerTerms: () => Promise<CodingProviderTermsRecord[]>;
   entryExists: (modelId: string) => Promise<boolean>;
   /** `maxMs` caps the read inside what is left of the deadline. */
   fetchPage: (provider: string, url: string, maxMs: number) => Promise<DraftPage>;
@@ -117,7 +113,6 @@ export type CodingAutoDraftDeps = {
 
 const defaultDeps: CodingAutoDraftDeps = {
   draftLlm: () => catalogDraftLlmFromEnv(),
-  providerTerms: () => loadCodingProviderTerms(),
   entryExists: async (modelId) =>
     (await prisma.modelCatalogEntry.count({ where: { category: "coding", modelId } })) > 0,
   fetchPage: (provider, url, maxMs) => fetchOfficialPage(provider, url, maxMs),
@@ -150,9 +145,6 @@ export async function runCodingAutoDraft(input: {
   if (!llm) return emptySummary("draft_llm_not_configured", candidates.length);
 
   const summary = emptySummary("ran", candidates.length);
-  const termsByProvider = new Map(
-    (await deps.providerTerms()).flatMap((record) => (record.terms ? [[record.provider, record.terms] as const] : []))
-  );
   const deadlineAt = input.deadlineAt ?? deps.now() + DEFAULT_WINDOW_MS;
   const seen = new Set<string>();
   let attempts = 0;
@@ -175,11 +167,6 @@ export async function runCodingAutoDraft(input: {
       continue;
     }
     seen.add(key);
-    const terms = termsByProvider.get(sighting.provider);
-    if (!terms) {
-      skip("provider_terms_missing");
-      continue;
-    }
     const price = defaultPriceSources(sighting.provider)[0];
     if (!price) {
       skip("no_default_source");
@@ -200,13 +187,9 @@ export async function runCodingAutoDraft(input: {
       break;
     }
 
-    // The same three pages the manual form reads: price, terms, retention. One
-    // await after another, each checked against what is left; no step is left
-    // running behind a deadline.
-    const sources = codingDraftSources(
-      { priceUrl: price, termsUrl: terms.termsUrl, retentionUrl: terms.retentionUrl },
-      defaultPriceSources(sighting.provider)
-    );
+    // The same page the manual form reads: the price page. Each step is checked
+    // against what is left; no step is left running behind a deadline.
+    const sources = codingDraftSources({ priceUrl: price }, defaultPriceSources(sighting.provider));
     const pages: DraftPage[] = [];
     let pageFailure: string | null = null;
     for (const url of sources) {

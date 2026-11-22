@@ -164,6 +164,8 @@ test("Tomverse CLI guide: off until published; key in the shell only; endpoint o
     // The CLI's default endpoint is the coding API.
     const guide = tomverseCliGuide({ TOMVERSE_CLI_GUIDE_ENABLED: "true" }, "https://tomverse.app/api/code/v1");
     assert.equal(guide.install, "npm install -g @tomverse/cli");
+    // Windows installs with winget (the .msi and the other installers are on the install page).
+    assert.equal(guide.installWindows, "winget install Tomverse.CLI");
     assert.equal(guide.powershell, `$env:TOMVERSE_API_KEY = "${KEY_PLACEHOLDER}"\ntomverse doctor`);
     assert.equal(guide.posix, `export TOMVERSE_API_KEY="${KEY_PLACEHOLDER}"\ntomverse doctor`);
     const staging = tomverseCliGuide({ TOMVERSE_CLI_GUIDE_ENABLED: "true" }, "https://dev.tomverse.app/api/code/v1");

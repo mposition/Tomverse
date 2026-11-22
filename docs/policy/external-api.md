@@ -670,7 +670,10 @@ are the deployment's own (`lib/externalApiNativeUpstream.ts`, no redirects).
   the ledger's input is uncached + cache read + cache write. A request carrying
   a client `cache_control` marker reserves the 5-minute write premium
   (caching path `external_api_messages`, `lib/anthropicPromptCaching.ts`) and
-  settles writes at the write rate. Responses usage: `input_tokens` includes
+  settles writes at the write rate. A Chat Completions request that resolves to
+  an Anthropic model gets Tomverse's automatic 5-minute marker (caching path
+  `external_api_chat_completions`) with the same reservation and settlement.
+  Responses usage: `input_tokens` includes
   cached tokens, output includes reasoning.
 - Settlement follows section 4: provider usage when reported; zero when the
   provider refused with a 4xx (not 408) or no credential existed; a cancelled
@@ -937,6 +940,12 @@ output contract are in `apps/tomverse-cli/README.md`.
   own permissions; the CLI does not claim a sandbox.
 - **Smart Adaptive.** The first answer's `x-tomverse-routed-model` is pinned for
   the session before any tool of that answer runs; later requests name it.
+- **Install page.** Settings > Developer (a banner at the top of the tab) and the CLI
+  card in Settings > API keys link to the public install page `/developers/cli`
+  (installers, winget, npm; every download URL is built in
+  `components/marketing/v2/cli/cliRelease.ts` for the GitHub Release
+  `cli-v<version>`, and its version must equal `apps/tomverse-cli/package.json`).
+  Both Settings surfaces stay behind `TOMVERSE_CLI_GUIDE_ENABLED`.
 - **Tomverse Code.** Its Rust host is not embedded in v1 (a Windows desktop
   runtime with its own providers and store). The CLI follows its contracts --
   tool names, result states, the credential path list, argv-first commands --
@@ -946,9 +955,13 @@ output contract are in `apps/tomverse-cli/README.md`.
   `@tomverse/cli` (Node.js 22 or later) under a proprietary use-only license
   (`apps/tomverse-cli/LICENSE`), plus standalone executables (Node.js single
   executable applications) for Windows, macOS and Linux on x64 and arm64,
-  attached to a GitHub Release `cli-v<version>`. The workflow
-  `tomverse-cli-release-check.yml` (run by hand) builds and tests all of them
-  and publishes nothing. The steps are in `apps/tomverse-cli/RELEASING.md`.
+  shipped as native installers (owner decision 2026-11-21: Windows `.msi`,
+  macOS `.pkg`, Linux `.deb`/`.rpm`) and plain archives, attached to a GitHub
+  Release `cli-v<version>`, and on Windows through winget (`Tomverse.CLI`, a
+  pull request to `microsoft/winget-pkgs` per version, submitted by the
+  operator). The workflow `tomverse-cli-release-check.yml` (run
+  by hand) builds and tests all of them, installing and removing each
+  installer, and publishes nothing. The steps are in `apps/tomverse-cli/RELEASING.md`.
 
 Verification state, publication and the operating systems actually run are
 reported per change (the PR); package publication and enabling

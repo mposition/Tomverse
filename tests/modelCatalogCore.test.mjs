@@ -37,6 +37,7 @@ import {
   reviewImageDraft,
 } from "../lib/modelCatalogCore.ts";
 import {
+  codingCapabilitiesFromAnswer,
   codingDraftFromAnswer,
   draftPricingVersion,
   imageDraftFromAnswer,
@@ -468,8 +469,30 @@ test("every chat draft provider has an official tool calling and structured outp
   }
   assert.equal(defaultCodingCapabilitySources("toString"), null);
   assert.equal(defaultCodingCapabilitySources("openrouter"), null);
+  // The hosts the capability pages need: the Claude docs path and Cohere's docs host.
+  assert.equal(isOfficialSourceUrl("anthropic", "https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview.md"), true);
+  assert.equal(isOfficialSourceUrl("cohere", "https://docs.cohere.com/docs/tool-use-overview"), true);
+});
+
+test("a capability answer is read conservatively: an unknown value is none, and the sources are the pages that were fetched", () => {
+  const sources = ["https://developers.openai.com/api/docs/guides/function-calling"];
+  const draft = codingCapabilitiesFromAnswer({ toolCalling: "parallel", structuredOutput: "made_up", note: " a  b " }, sources);
+  assert.equal(draft.toolCalling, "parallel");
+  assert.equal(draft.structuredOutput, "none");
+  assert.equal(draft.note, "a b");
+  assert.deepEqual(draft.sources, sources);
+  assert.deepEqual(
+    [codingCapabilitiesFromAnswer(null, sources).toolCalling, codingCapabilitiesFromAnswer({ toolCalling: 5 }, sources).toolCalling],
+    ["none", "none"]
+  );
+  assert.match(draft.draftedAt, /^\d{4}-\d{2}-\d{2}$/);
+});
+
+test("only documentation on a provider's own host is official", () => {
   // platform.claude.com also serves the Console; only /docs/ there is documentation.
   assert.equal(isOfficialSourceUrl("anthropic", "https://platform.claude.com/settings/keys"), false);
+  assert.equal(isOfficialSourceUrl("anthropic", "https://platform.claude.com/docs/en/about-claude/pricing"), true);
+  assert.equal(AI_PROVIDERS.some((provider) => Object.hasOwn(OFFICIAL_SOURCE_HOSTS, provider)), true);
 });
 
 test("the registry lookups read the active catalogue and fall back to the seed", () => {
@@ -490,9 +513,6 @@ const codingProfile = (overrides = {}) => ({
   minimumPlan: "Pro",
   capabilities: { toolCalling: "parallel", structuredOutput: "strict_schema", imageInput: true, maxContextTokens: 400_000, maxOutputTokens: 64_000 },
   pricing: { inputUsdPerMTok: 1, outputUsdPerMTok: 8, creditWeight: 4, verifiedAt: "2026-10-19", sources: ["https://developers.openai.com/pricing"] },
-  terms: { allowsResaleAndCodingAgent: true, url: "https://openai.com/policies/services-agreement", checkedAt: "2026-10-19" },
-  retention: { url: "https://platform.openai.com/docs/guides/your-data", checkedAt: "2026-10-19" },
-  processingRegion: "US",
   ...overrides,
 });
 
@@ -502,19 +522,23 @@ const codingDeps = (established = true, floor = 1) => ({
   creditFloor: () => floor,
 });
 
-test("a coding model needs terms, retention and an established data destination", () => {
+test("a coding model needs an established data destination, official prices and a credit floor, and no provider conditions", () => {
   assert.deepEqual(judgeCodingModel(codingProfile(), codingDeps()), { admitted: true });
-  const noTerms = judgeCodingModel(
-    codingProfile({ terms: { allowsResaleAndCodingAgent: false, url: "https://openai.com/terms", checkedAt: "2026-10-19" } }),
-    codingDeps()
-  );
-  assert.ok(noTerms.reasons.includes("terms_do_not_allow"));
+  // Terms that deny, or pages that are not the provider's, are not looked at (owner decision 2026-11-21).
+  const withTerms = codingProfile({
+    terms: { allowsResaleAndCodingAgent: false, url: "https://someblog.example/terms", checkedAt: "2026-10-19" },
+    retention: { url: "https://someblog.example/openai", checkedAt: "2026-10-19" },
+    processingRegion: "US",
+  });
+  assert.deepEqual(judgeCodingModel(withTerms, codingDeps()), { admitted: true });
   assert.ok(judgeCodingModel(codingProfile(), codingDeps(false)).reasons.includes("provider_destination_unproven"));
+  assert.ok(judgeCodingModel(codingProfile(), { ...codingDeps(), knownProvider: () => false }).reasons.includes("unknown_provider"));
   const blog = judgeCodingModel(
-    codingProfile({ retention: { url: "https://someblog.example/openai", checkedAt: "2026-10-19" } }),
+    codingProfile({ pricing: { ...codingProfile().pricing, sources: ["https://someblog.example/openai"] } }),
     codingDeps()
   );
-  assert.ok(blog.reasons.includes("retention_source_unofficial"));
+  assert.ok(blog.reasons.includes("unofficial_price_source:https://someblog.example/openai"));
+  assert.ok(judgeCodingModel(codingProfile({ capabilities: { ...codingProfile().capabilities, toolCalling: "none" } }), codingDeps()).reasons.includes("no_tool_calling"));
   // A credit weight below what the worst turn costs is refused.
   assert.ok(judgeCodingModel(codingProfile(), codingDeps(true, 9)).reasons.includes("credits_below_floor:9"));
   assert.ok(judgeCodingModel(codingProfile(), codingDeps(true, null)).reasons.includes("credit_floor_unbounded"));
@@ -630,31 +654,36 @@ test("an image answer without a usable price says why", () => {
   );
 });
 
-test("an LLM coding answer cannot cite a page it did not fetch", () => {
-  const sources = ["https://developers.openai.com/pricing", "https://platform.openai.com/docs/guides/your-data"];
+test("an LLM coding answer from the price page alone becomes a draft with no provider conditions", () => {
+  // A draft reads the price page only: no terms or retention page is required (owner decision 2026-11-21).
+  const sources = ["https://developers.openai.com/pricing"];
   const answer = {
     name: "GPT Coding",
     minimumPlan: "Pro",
     capabilities: codingProfile().capabilities,
     pricing: { inputUsdPerMTok: 1, outputUsdPerMTok: 8 },
-    terms: { allowsResaleAndCodingAgent: true, url: "https://openai.com/not-fetched" },
-    retentionUrl: sources[1],
-    processingRegion: "US",
   };
   const draft = codingDraftFromAnswer(answer, "openai", "gpt-coding", sources, () => 7);
-  assert.equal(draft.terms.allowsResaleAndCodingAgent, false);
-  assert.equal(draft.terms.url, sources[0]);
-  assert.equal(draft.retention.url, sources[1]);
   assert.equal(draft.pricing.creditWeight, 7);
-
-  // No fetched retention page: refused, not filled in with the price page
-  // (review finding 2026-10-19).
-  for (const retentionUrl of ["https://openai.com/also-not-fetched", undefined]) {
-    assert.throws(
-      () => codingDraftFromAnswer({ ...answer, retentionUrl }, "openai", "gpt-coding", sources, () => 7),
-      (error) => error.detail === "retention_source_missing"
-    );
-  }
+  assert.deepEqual(draft.pricing.sources, sources);
+  assert.equal("terms" in draft, false);
+  assert.equal("retention" in draft, false);
+  assert.equal("processingRegion" in draft, false);
+  assert.deepEqual(judgeCodingModel(draft, codingDeps(true, 7)), { admitted: true });
+  // An answer that still carries the old fields is ignored, not trusted.
+  const stale = codingDraftFromAnswer(
+    { ...answer, terms: { allowsResaleAndCodingAgent: true, url: "https://openai.com/not-fetched" }, retentionUrl: sources[0], processingRegion: "US" },
+    "openai",
+    "gpt-coding",
+    sources,
+    () => 7
+  );
+  assert.equal("terms" in stale, false);
+  // The floor still bounds the draft.
+  assert.throws(
+    () => codingDraftFromAnswer(answer, "openai", "gpt-coding", sources, () => null),
+    (error) => error.detail === "credit_floor_unbounded"
+  );
 });
 
 test("a reserved image request runs only with the profile it was priced with", () => {

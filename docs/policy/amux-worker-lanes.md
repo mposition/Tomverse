@@ -60,6 +60,11 @@ box: bridge → sidecar → worker CLI (worker checkout, develop 기준, 로컬 
 - PR은 develop으로만 연다. develop 병합은 merge lane과 DM 병합 권한(`amux-decision-maker.md` §0a 5항),
   main 병합과 배포는 사람이 한다.
 - 인프라 실패(로그인 거부, 사용량 소진, 네트워크 등)는 card의 시도로 세지 않고 대기 후 다시 배정된다.
+- worker CLI의 출력 검사는 보안상 의미 있는 것만 엄격하게 본다(운영자 지시 2026-11-21). 실패로 보는 것은 허용 밖 도구,
+  하위 agent, 권한 모드 불일치, 결과 없음·깨진 결과, JSON이 아닌 줄이다. 처음 보는 이벤트·단계 종류는 이름과
+  어떤 키에도 도구·명령·파일·경로·URL·권한을 뜻하는 말이 없으면 통과시키고, journal에 이름과 개수만 남긴다
+  (`amux v22 unrecognized_events`, `lib/amux/cliStreamUnknownKind.mjs`). 같은 규칙을 v19 채널 검사와 검토 서버의
+  Antigravity 검사에도 쓴다.
 
 ## 2. 질문은 DM에게
 

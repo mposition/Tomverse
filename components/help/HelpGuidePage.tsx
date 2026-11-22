@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { ArrowLeft, ArrowRight, ArrowUpRight, Check, ChevronDown, Sparkles } from "lucide-react";
 import { MarketingFooter, MarketingHeader } from "@/components/marketing/MarketingChrome";
@@ -47,6 +48,7 @@ function AttachmentFormatList({ ui }: { ui: HelpLocaleCopy["ui"] }) {
 }
 
 export function HelpGuidePage({ lang, copy, guideId }: { lang: Language; copy: HelpLocaleCopy; guideId: string }) {
+  const router = useRouter();
   const ui = copy.ui;
   const meta = helpGuideMeta(guideId)!;
   const words = copy.guides[guideId];
@@ -72,7 +74,8 @@ export function HelpGuidePage({ lang, copy, guideId }: { lang: Language; copy: H
 
   const go = (index: number) => {
     setActive(index);
-    window.history.replaceState(null, "", `#step-${index + 1}`);
+    // Let the router commit the hash before the new URL becomes visible.
+    router.replace(`#step-${index + 1}`, { scroll: false });
   };
   const ask = (event: FormEvent) => {
     event.preventDefault();

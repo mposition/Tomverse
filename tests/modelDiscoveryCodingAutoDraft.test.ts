@@ -12,23 +12,6 @@ import {
 import { DraftRefusal } from "../lib/modelCatalogDraftLlm.ts";
 
 const ON = { [MODEL_DISCOVERY_CODING_AUTO_DRAFT_ENV]: "true" };
-const TERMS = {
-  allowsResaleAndCodingAgent: true,
-  termsUrl: "https://www.alibabacloud.com/help/en/legal/terms",
-  retentionUrl: "https://www.alibabacloud.com/help/en/legal/retention",
-  processingRegion: "sg",
-  checkedAt: "2026-11-01",
-  sources: ["https://www.alibabacloud.com/help/en/legal/terms"],
-};
-const record = (provider: string, terms: typeof TERMS | null) => ({
-  provider,
-  terms,
-  invalid: false,
-  draft: null,
-  draftCreatedAt: null,
-  updatedByEmail: null,
-  updatedAt: new Date(0),
-});
 
 type Llm = Awaited<ReturnType<CodingAutoDraftDeps["draftLlm"]>>;
 
@@ -36,7 +19,6 @@ type Llm = Awaited<ReturnType<CodingAutoDraftDeps["draftLlm"]>>;
 const harness = (overrides: Partial<CodingAutoDraftDeps> & { existing?: string[]; profile?: () => Promise<unknown> } = {}) => {
   const calls = {
     draftLlm: 0,
-    providerTerms: 0,
     entryExists: 0,
     pages: [] as string[],
     pageCaps: [] as number[],
@@ -56,17 +38,7 @@ const harness = (overrides: Partial<CodingAutoDraftDeps> & { existing?: string[]
           calls.llm.push(apiModelId);
           return profile ? profile() : { name: apiModelId };
         },
-        draftCodingCapabilities: async () => {
-          throw new Error("not used");
-        },
-        draftProviderTerms: async () => {
-          throw new Error("not used");
-        },
       } as unknown as Llm;
-    },
-    providerTerms: async () => {
-      calls.providerTerms += 1;
-      return [record("qwen", TERMS)];
     },
     entryExists: async (modelId) => {
       calls.entryExists += 1;
@@ -98,8 +70,8 @@ test("the switch is off unless it is exactly the string true, and off makes no c
   const summary = await runCodingAutoDraft({ candidates: [qwen("qwen3-coder-flash")], env: {}, deps });
   assert.equal(summary.status, "off");
   assert.deepEqual(
-    [calls.draftLlm, calls.providerTerms, calls.entryExists, calls.pages.length, calls.llm.length, calls.stored.length],
-    [0, 0, 0, 0, 0, 0]
+    [calls.draftLlm, calls.entryExists, calls.pages.length, calls.llm.length, calls.stored.length],
+    [0, 0, 0, 0, 0]
   );
 });
 
@@ -110,16 +82,13 @@ test("no configured draft model means no call, and the summary says why", async 
   assert.equal(calls.pages.length + calls.llm.length + calls.stored.length, 0);
 });
 
-test("a new coding model is drafted from its price page and the provider's confirmed terms pages", async () => {
+test("a new coding model is drafted from its price page alone, with no provider terms or retention pages", async () => {
   const { calls, deps } = harness();
   const summary = await runCodingAutoDraft({ candidates: [qwen("qwen3-coder-flash")], env: ON, deps });
   assert.deepEqual(summary.drafted, ["qwen3-coder-flash"]);
+  assert.deepEqual(summary.skipped, []);
   assert.deepEqual(calls.llm, ["qwen3-coder-flash"]);
-  assert.deepEqual(calls.pages, [
-    "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
-    TERMS.termsUrl,
-    TERMS.retentionUrl,
-  ]);
+  assert.deepEqual(calls.pages, ["https://www.alibabacloud.com/help/en/model-studio/model-pricing"]);
   assert.equal(calls.stored.length, 1);
   assert.equal(calls.stored[0].modelId, "qwen3-coder-flash");
 });
@@ -137,7 +106,7 @@ test("at most five paid calls per run, and the rest stay for the operator's butt
 test("a failed call counts against the cap and is not retried", async () => {
   const { calls, deps } = harness({
     profile: async () => {
-      throw new DraftRefusal("draft_rejected", "retention_source_missing");
+      throw new DraftRefusal("draft_rejected", "credit_floor_unbounded");
     },
   });
   const candidates = Array.from({ length: 7 }, (_, index) => qwen(`qwen3-coder-${index}`));
@@ -188,22 +157,17 @@ test("a provider a draft cannot read is skipped without a call", async () => {
   assert.equal(calls.llm.length + calls.pages.length, 0);
 });
 
-test("a draft provider with no confirmed terms or no default price page is skipped before the paid call", async () => {
-  const noTerms = harness({ providerTerms: async () => [record("qwen", null)] });
-  const first = await runCodingAutoDraft({ candidates: [qwen("qwen3-coder-flash")], env: ON, deps: noTerms.deps });
-  assert.deepEqual(first.skipped, [{ apiModel: "qwen3-coder-flash", reason: "provider_terms_missing" }]);
-  assert.equal(noTerms.calls.llm.length + noTerms.calls.pages.length, 0);
-
-  // Moonshot has confirmed terms here but no default price page in the code.
-  const noPrice = harness({ providerTerms: async () => [record("moonshot", TERMS)] });
-  const second = await runCodingAutoDraft({
+test("a draft provider with no default price page is skipped before the paid call", async () => {
+  // Moonshot has no default price page in the code.
+  const noPrice = harness();
+  const summary = await runCodingAutoDraft({
     candidates: [
       { provider: "moonshot", apiModel: "kimi-k3-coder", observedVia: [{ provider: "moonshot", apiModel: "kimi-k3-coder" }] },
     ],
     env: ON,
     deps: noPrice.deps,
   });
-  assert.deepEqual(second.skipped, [{ apiModel: "kimi-k3-coder", reason: "no_default_source" }]);
+  assert.deepEqual(summary.skipped, [{ apiModel: "kimi-k3-coder", reason: "no_default_source" }]);
   assert.equal(noPrice.calls.llm.length + noPrice.calls.pages.length, 0);
 });
 
@@ -261,7 +225,7 @@ test("a page read is capped inside what is left once the model call window is re
     deps,
   });
   // 130 s left, 95 s kept for the model call (90 s timeout plus the store margin).
-  assert.equal(calls.pageCaps.length, 3);
+  assert.equal(calls.pageCaps.length, 1);
   for (const cap of calls.pageCaps) assert.equal(cap, 35_000);
   assert.equal(calls.llm.length, 1);
 });

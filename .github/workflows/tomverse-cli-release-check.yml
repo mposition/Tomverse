@@ -8,11 +8,14 @@ name: Tomverse CLI release check
 #   the installed copy) on Windows, macOS and Linux with Node 22 and 24.
 # - standalone executables: one Node.js single executable application per
 #   OS and architecture (a SEA is built on the platform it targets), each run
-#   through the same process suite with no Node.js on PATH, then kept as a
-#   workflow artifact with its .sha256.
+#   through the same process suite with no Node.js on PATH; then its native
+#   installer (Windows .msi, macOS .pkg, Linux .deb and .rpm) is built,
+#   installed, run and removed again on that machine. Archives and installers
+#   are kept as workflow artifacts, each with its .sha256.
 #
 # It only builds and tests. It publishes nothing: no npm publish, no GitHub
-# Release, no signing identity. The operator runs it by hand before a release
+# Release. The one job with credentials is `sign-macos` (default off, at the
+# end). The operator runs it by hand before a release
 # (Actions > Tomverse CLI release check > Run workflow) and publishes from the
 # result -- apps/tomverse-cli/RELEASING.md.
 
@@ -174,13 +177,47 @@ jobs:
           exe="$(node -e "const p=require('path'),v=require('./package.json').version;console.log(p.resolve('release','tomverse-'+v+'-'+process.env.TARGET,process.platform==='win32'?'tomverse.exe':'tomverse'))")"
           TOMVERSE_CLI_BIN="$exe" node --import tsx --test --test-concurrency=1 tests/cli.process.test.ts
 
-      - name: Keep the archive
+      # WiX runs on .NET; not every Windows image ships the SDK (Arm).
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 8.0.x
+
+      # WiX v5 (MS-RL); v6 adds the Open Source Maintenance Fee terms.
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          dotnet tool install wix --version 5.0.2 --tool-path "$env:RUNNER_TEMP\wix"
+          $env:WIX = "$env:RUNNER_TEMP\wix\wix.exe"
+          node apps/tomverse-cli/scripts/build-installer.mjs
+
+      - name: Install, run and remove the MSI
+        shell: pwsh
+        run: |
+          $msi = Get-Item "apps/tomverse-cli/release/tomverse-*-$env:TARGET.msi"
+          $p = Start-Process msiexec -ArgumentList "/i `"$($msi.FullName)`" /qn /l*v `"$env:RUNNER_TEMP\install.log`"" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\install.log" -Tail 50; throw "msiexec /i exited $($p.ExitCode)" }
+          $exe = Join-Path $env:LOCALAPPDATA "Programs\Tomverse CLI\tomverse.exe"
+          $version = & $exe --version
+          if ($version -ne (Get-Content apps/tomverse-cli/package.json | ConvertFrom-Json).version) { throw "installed tomverse --version printed '$version'" }
+          $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+          if ($userPath -notlike "*Tomverse CLI*") { throw "the user PATH does not name the install folder: $userPath" }
+          $p = Start-Process msiexec -ArgumentList "/x `"$($msi.FullName)`" /qn" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "msiexec /x exited $($p.ExitCode)" }
+          if (Test-Path $exe) { throw "tomverse.exe is still there after uninstall" }
+          if ([Environment]::GetEnvironmentVariable("Path", "User") -like "*Tomverse CLI*") { throw "the user PATH still names the install folder" }
+
+      - name: Keep the archive and installers
         uses: actions/upload-artifact@v7
         with:
           name: tomverse-cli-windows-x64
           path: |
             apps/tomverse-cli/release/*.zip
             apps/tomverse-cli/release/*.tar.gz
+            apps/tomverse-cli/release/*.msi
+            apps/tomverse-cli/release/*.pkg
+            apps/tomverse-cli/release/*.deb
+            apps/tomverse-cli/release/*.rpm
             apps/tomverse-cli/release/*.sha256
           if-no-files-found: error
           retention-days: 14
@@ -220,13 +257,47 @@ jobs:
           exe="$(node -e "const p=require('path'),v=require('./package.json').version;console.log(p.resolve('release','tomverse-'+v+'-'+process.env.TARGET,process.platform==='win32'?'tomverse.exe':'tomverse'))")"
           TOMVERSE_CLI_BIN="$exe" node --import tsx --test --test-concurrency=1 tests/cli.process.test.ts
 
-      - name: Keep the archive
+      # WiX runs on .NET; not every Windows image ships the SDK (Arm).
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 8.0.x
+
+      # WiX v5 (MS-RL); v6 adds the Open Source Maintenance Fee terms.
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          dotnet tool install wix --version 5.0.2 --tool-path "$env:RUNNER_TEMP\wix"
+          $env:WIX = "$env:RUNNER_TEMP\wix\wix.exe"
+          node apps/tomverse-cli/scripts/build-installer.mjs
+
+      - name: Install, run and remove the MSI
+        shell: pwsh
+        run: |
+          $msi = Get-Item "apps/tomverse-cli/release/tomverse-*-$env:TARGET.msi"
+          $p = Start-Process msiexec -ArgumentList "/i `"$($msi.FullName)`" /qn /l*v `"$env:RUNNER_TEMP\install.log`"" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\install.log" -Tail 50; throw "msiexec /i exited $($p.ExitCode)" }
+          $exe = Join-Path $env:LOCALAPPDATA "Programs\Tomverse CLI\tomverse.exe"
+          $version = & $exe --version
+          if ($version -ne (Get-Content apps/tomverse-cli/package.json | ConvertFrom-Json).version) { throw "installed tomverse --version printed '$version'" }
+          $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+          if ($userPath -notlike "*Tomverse CLI*") { throw "the user PATH does not name the install folder: $userPath" }
+          $p = Start-Process msiexec -ArgumentList "/x `"$($msi.FullName)`" /qn" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "msiexec /x exited $($p.ExitCode)" }
+          if (Test-Path $exe) { throw "tomverse.exe is still there after uninstall" }
+          if ([Environment]::GetEnvironmentVariable("Path", "User") -like "*Tomverse CLI*") { throw "the user PATH still names the install folder" }
+
+      - name: Keep the archive and installers
         uses: actions/upload-artifact@v7
         with:
           name: tomverse-cli-windows-arm64
           path: |
             apps/tomverse-cli/release/*.zip
             apps/tomverse-cli/release/*.tar.gz
+            apps/tomverse-cli/release/*.msi
+            apps/tomverse-cli/release/*.pkg
+            apps/tomverse-cli/release/*.deb
+            apps/tomverse-cli/release/*.rpm
             apps/tomverse-cli/release/*.sha256
           if-no-files-found: error
           retention-days: 14
@@ -266,13 +337,31 @@ jobs:
           exe="$(node -e "const p=require('path'),v=require('./package.json').version;console.log(p.resolve('release','tomverse-'+v+'-'+process.env.TARGET,process.platform==='win32'?'tomverse.exe':'tomverse'))")"
           TOMVERSE_CLI_BIN="$exe" node --import tsx --test --test-concurrency=1 tests/cli.process.test.ts
 
-      - name: Keep the archive
+      - name: Build the installer
+        run: node apps/tomverse-cli/scripts/build-installer.mjs
+
+      - name: Install, run and remove the PKG
+        run: |
+          pkg="$(ls apps/tomverse-cli/release/tomverse-*-$TARGET.pkg)"
+          sudo installer -pkg "$pkg" -target /
+          test "$(/usr/local/bin/tomverse --version)" = "$(node -p "require('./apps/tomverse-cli/package.json').version")"
+          pkgutil --pkg-info app.tomverse.cli
+          sudo rm /usr/local/bin/tomverse
+          sudo rm -rf /usr/local/share/doc/tomverse-cli
+          sudo pkgutil --forget app.tomverse.cli
+          test ! -e /usr/local/bin/tomverse
+
+      - name: Keep the archive and installers
         uses: actions/upload-artifact@v7
         with:
           name: tomverse-cli-macos-arm64
           path: |
             apps/tomverse-cli/release/*.zip
             apps/tomverse-cli/release/*.tar.gz
+            apps/tomverse-cli/release/*.msi
+            apps/tomverse-cli/release/*.pkg
+            apps/tomverse-cli/release/*.deb
+            apps/tomverse-cli/release/*.rpm
             apps/tomverse-cli/release/*.sha256
           if-no-files-found: error
           retention-days: 14
@@ -312,13 +401,31 @@ jobs:
           exe="$(node -e "const p=require('path'),v=require('./package.json').version;console.log(p.resolve('release','tomverse-'+v+'-'+process.env.TARGET,process.platform==='win32'?'tomverse.exe':'tomverse'))")"
           TOMVERSE_CLI_BIN="$exe" node --import tsx --test --test-concurrency=1 tests/cli.process.test.ts
 
-      - name: Keep the archive
+      - name: Build the installer
+        run: node apps/tomverse-cli/scripts/build-installer.mjs
+
+      - name: Install, run and remove the PKG
+        run: |
+          pkg="$(ls apps/tomverse-cli/release/tomverse-*-$TARGET.pkg)"
+          sudo installer -pkg "$pkg" -target /
+          test "$(/usr/local/bin/tomverse --version)" = "$(node -p "require('./apps/tomverse-cli/package.json').version")"
+          pkgutil --pkg-info app.tomverse.cli
+          sudo rm /usr/local/bin/tomverse
+          sudo rm -rf /usr/local/share/doc/tomverse-cli
+          sudo pkgutil --forget app.tomverse.cli
+          test ! -e /usr/local/bin/tomverse
+
+      - name: Keep the archive and installers
         uses: actions/upload-artifact@v7
         with:
           name: tomverse-cli-macos-x64
           path: |
             apps/tomverse-cli/release/*.zip
             apps/tomverse-cli/release/*.tar.gz
+            apps/tomverse-cli/release/*.msi
+            apps/tomverse-cli/release/*.pkg
+            apps/tomverse-cli/release/*.deb
+            apps/tomverse-cli/release/*.rpm
             apps/tomverse-cli/release/*.sha256
           if-no-files-found: error
           retention-days: 14
@@ -358,13 +465,36 @@ jobs:
           exe="$(node -e "const p=require('path'),v=require('./package.json').version;console.log(p.resolve('release','tomverse-'+v+'-'+process.env.TARGET,process.platform==='win32'?'tomverse.exe':'tomverse'))")"
           TOMVERSE_CLI_BIN="$exe" node --import tsx --test --test-concurrency=1 tests/cli.process.test.ts
 
-      - name: Keep the archive
+      - name: Build the installers
+        run: |
+          command -v rpmbuild || { sudo apt-get update && sudo apt-get install -y rpm; }
+          node apps/tomverse-cli/scripts/build-installer.mjs
+
+      - name: Install, run and remove the DEB
+        run: |
+          deb="$(ls apps/tomverse-cli/release/tomverse-*-$TARGET.deb)"
+          sudo dpkg -i "$deb"
+          test "$(/usr/bin/tomverse --version)" = "$(node -p "require('./apps/tomverse-cli/package.json').version")"
+          sudo dpkg -r tomverse-cli
+          test ! -e /usr/bin/tomverse
+
+      - name: Install, run and remove the RPM (Fedora container)
+        run: |
+          rpm="$(basename "$(ls apps/tomverse-cli/release/tomverse-*-$TARGET.rpm)")"
+          want="$(node -p "require('./apps/tomverse-cli/package.json').version")"
+          docker run --rm -v "$PWD/apps/tomverse-cli/release:/release:ro" fedora:41 sh -ec             "dnf -y -q install /release/$rpm && test \"\$(tomverse --version)\" = '$want' && dnf -y -q remove tomverse-cli && test ! -e /usr/bin/tomverse"
+
+      - name: Keep the archive and installers
         uses: actions/upload-artifact@v7
         with:
           name: tomverse-cli-linux-x64
           path: |
             apps/tomverse-cli/release/*.zip
             apps/tomverse-cli/release/*.tar.gz
+            apps/tomverse-cli/release/*.msi
+            apps/tomverse-cli/release/*.pkg
+            apps/tomverse-cli/release/*.deb
+            apps/tomverse-cli/release/*.rpm
             apps/tomverse-cli/release/*.sha256
           if-no-files-found: error
           retention-days: 14
@@ -404,13 +534,184 @@ jobs:
           exe="$(node -e "const p=require('path'),v=require('./package.json').version;console.log(p.resolve('release','tomverse-'+v+'-'+process.env.TARGET,process.platform==='win32'?'tomverse.exe':'tomverse'))")"
           TOMVERSE_CLI_BIN="$exe" node --import tsx --test --test-concurrency=1 tests/cli.process.test.ts
 
-      - name: Keep the archive
+      - name: Build the installers
+        run: |
+          command -v rpmbuild || { sudo apt-get update && sudo apt-get install -y rpm; }
+          node apps/tomverse-cli/scripts/build-installer.mjs
+
+      - name: Install, run and remove the DEB
+        run: |
+          deb="$(ls apps/tomverse-cli/release/tomverse-*-$TARGET.deb)"
+          sudo dpkg -i "$deb"
+          test "$(/usr/bin/tomverse --version)" = "$(node -p "require('./apps/tomverse-cli/package.json').version")"
+          sudo dpkg -r tomverse-cli
+          test ! -e /usr/bin/tomverse
+
+      - name: Install, run and remove the RPM (Fedora container)
+        run: |
+          rpm="$(basename "$(ls apps/tomverse-cli/release/tomverse-*-$TARGET.rpm)")"
+          want="$(node -p "require('./apps/tomverse-cli/package.json').version")"
+          docker run --rm -v "$PWD/apps/tomverse-cli/release:/release:ro" fedora:41 sh -ec             "dnf -y -q install /release/$rpm && test \"\$(tomverse --version)\" = '$want' && dnf -y -q remove tomverse-cli && test ! -e /usr/bin/tomverse"
+
+      - name: Keep the archive and installers
         uses: actions/upload-artifact@v7
         with:
           name: tomverse-cli-linux-arm64
           path: |
             apps/tomverse-cli/release/*.zip
             apps/tomverse-cli/release/*.tar.gz
+            apps/tomverse-cli/release/*.msi
+            apps/tomverse-cli/release/*.pkg
+            apps/tomverse-cli/release/*.deb
+            apps/tomverse-cli/release/*.rpm
             apps/tomverse-cli/release/*.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  # macOS Developer ID signing and notarization (owner decision 2026-11-21).
+  # Off unless the repository variable CLI_MACOS_SIGNING is exactly `on`. The
+  # only job here that holds credentials: the `cli-release` environment's
+  # secrets, which the owner creates with required reviewers and a branch
+  # policy, so each run waits for the owner's approval before any secret is
+  # read. It re-signs the two macOS executables the jobs above built and
+  # tested (hardened runtime), rebuilds each .pkg signed with the installer
+  # identity, sends both to Apple's notary service, staples the ticket to the
+  # .pkg, checks Gatekeeper's verdict, and keeps the result as an artifact.
+  # It uploads nothing to a release.
+  sign-macos:
+    name: sign and notarize macOS
+    needs: [standalone-macos-arm64, standalone-macos-x64]
+    if: vars.CLI_MACOS_SIGNING == 'on'
+    runs-on: macos-15
+    environment: cli-release
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Download the tested macOS builds
+        uses: actions/download-artifact@v8
+        with:
+          pattern: tomverse-cli-macos-*
+          path: unsigned
+          merge-multiple: true
+
+      - name: Import the Developer ID certificates
+        env:
+          APP_P12: ${{ secrets.APPLE_DEVID_APP_P12_BASE64 }}
+          INSTALLER_P12: ${{ secrets.APPLE_DEVID_INSTALLER_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.APPLE_P12_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/tomverse-signing.keychain-db"
+          keychain_password="$(openssl rand -hex 24)"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          umask 077
+          printf '%s' "$APP_P12" | base64 --decode > "$RUNNER_TEMP/app.p12"
+          printf '%s' "$INSTALLER_P12" | base64 --decode > "$RUNNER_TEMP/installer.p12"
+          umask 022
+          security import "$RUNNER_TEMP/app.p12" -k "$keychain" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          security import "$RUNNER_TEMP/installer.p12" -k "$keychain" -P "$P12_PASSWORD" -T /usr/bin/pkgbuild -T /usr/bin/productsign
+          rm -f "$RUNNER_TEMP/app.p12" "$RUNNER_TEMP/installer.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          echo "KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+
+      - name: Sign, package and notarize
+        env:
+          NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY_P8_BASE64 }}
+          NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./apps/tomverse-cli/package.json').version")"
+          app_identity="$(security find-identity -v -p codesigning "$KEYCHAIN" | awk -v t="($TEAM_ID)" '/Developer ID Application/ && index($0, t) { print $2; exit }')"
+          installer_identity="$(security find-identity -v "$KEYCHAIN" | awk -v t="($TEAM_ID)" '/Developer ID Installer/ && index($0, t) { print $2; exit }')"
+          test -n "$app_identity" || { echo "no Developer ID Application identity for team $TEAM_ID"; exit 1; }
+          test -n "$installer_identity" || { echo "no Developer ID Installer identity for team $TEAM_ID"; exit 1; }
+          key="$RUNNER_TEMP/notary.p8"
+          private_key_header='-----BEGIN PRIVATE KEY-----'
+          # Owner-only for the key file alone; the package payload below keeps normal modes.
+          # The secret may hold the .p8 file base64-encoded or as its PEM text.
+          (
+            umask 077
+            if printf '%s' "$NOTARY_KEY" | grep -q -- "$private_key_header"; then
+              printf '%s\n' "$NOTARY_KEY" | tr -d '\r' > "$key"
+            else
+              printf '%s' "$NOTARY_KEY" | tr -d ' \r\n\t' | base64 --decode > "$key"
+            fi
+          )
+          umask 022
+          # Checked before anything is sent to Apple; says what arrived, never its content.
+          if ! head -1 "$key" | grep -q -- "$private_key_header" || ! openssl pkey -in "$key" -noout 2> /dev/null; then
+            echo "APPLE_NOTARY_KEY_P8_BASE64 does not decode to a .p8 private key:"
+            echo "  $(wc -c < "$key" | tr -d ' ') bytes; first line is $(head -1 "$key" | grep -q -- '-----BEGIN' && echo 'a PEM header' || echo 'not a PEM header')."
+            echo "  Put the content of AuthKey_<KEY ID>.p8.base64.txt (or of the .p8 file itself) in the cli-release environment secret."
+            exit 1
+          fi
+          notarize() {
+            # One submission, waited on; a failure prints Apple's log and stops. Never resubmitted here.
+            out="$(xcrun notarytool submit "$1" --key "$key" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" --wait --timeout 45m --output-format json)"
+            echo "$out"
+            status="$(printf '%s' "$out" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).status))")"
+            if [ "$status" != "Accepted" ]; then
+              id="$(printf '%s' "$out" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).id))")"
+              xcrun notarytool log "$id" --key "$key" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" || true
+              exit 1
+            fi
+          }
+          mkdir -p signed
+          for arch in arm64 x64; do
+            base="tomverse-$version-macos-$arch"
+            work="$RUNNER_TEMP/$base"
+            mkdir -p "$work/stage" "$work/root/usr/local/bin" "$work/root/usr/local/share/doc/tomverse-cli"
+            tar -xzf "unsigned/$base.tar.gz" -C "$work/stage"
+            codesign --force --options runtime --timestamp --keychain "$KEYCHAIN" \
+              --entitlements apps/tomverse-cli/installer/macos-entitlements.plist \
+              --sign "$app_identity" "$work/stage/tomverse"
+            codesign --verify --strict --verbose=2 "$work/stage/tomverse"
+            if [ "$arch" = arm64 ] || arch -x86_64 /usr/bin/true 2>/dev/null; then
+              test "$("$work/stage/tomverse" --version)" = "$version"
+            fi
+            # The executable alone, for the archive (a bare binary cannot be stapled; Gatekeeper checks online).
+            ditto -c -k --keepParent "$work/stage/tomverse" "$work/tomverse.zip"
+            notarize "$work/tomverse.zip"
+            # What every user of the Mac must be able to run and read, whatever the extraction left.
+            chmod 755 "$work/stage/tomverse"
+            chmod 644 "$work/stage/LICENSE" "$work/stage/README.md" "$work/stage/THIRD_PARTY_NOTICES.txt"
+            tar -czf "signed/$base.tar.gz" -C "$work/stage" tomverse LICENSE README.md THIRD_PARTY_NOTICES.txt
+            cp "$work/stage/tomverse" "$work/root/usr/local/bin/tomverse"
+            for doc in LICENSE README.md THIRD_PARTY_NOTICES.txt; do cp "$work/stage/$doc" "$work/root/usr/local/share/doc/tomverse-cli/$doc"; done
+            chmod -R u=rwX,go=rX "$work/root"
+            chmod 755 "$work/root/usr/local/bin/tomverse"
+            pkgbuild --root "$work/root" --identifier app.tomverse.cli --version "$version" --install-location / \
+              --sign "$installer_identity" --keychain "$KEYCHAIN" --timestamp "signed/$base.pkg"
+            pkgutil --expand-full "signed/$base.pkg" "$work/expanded"
+            mode="$(stat -f %Lp "$work/expanded/Payload/usr/local/bin/tomverse")"
+            test "$mode" = 755 || { echo "the packaged tomverse has mode $mode, not 755"; exit 1; }
+            notarize "signed/$base.pkg"
+            xcrun stapler staple "signed/$base.pkg"
+            xcrun stapler validate "signed/$base.pkg"
+            spctl --assess --type install --verbose=4 "signed/$base.pkg"
+            for f in "signed/$base.pkg" "signed/$base.tar.gz"; do
+              (cd signed && shasum -a 256 "$(basename "$f")" > "$(basename "$f").sha256")
+            done
+          done
+          rm -f "$key"
+          ls -la signed
+
+      - name: Remove the signing keychain
+        if: always()
+        run: security delete-keychain "$KEYCHAIN" 2>/dev/null || true
+
+      - name: Keep the signed macOS builds
+        uses: actions/upload-artifact@v7
+        with:
+          name: tomverse-cli-macos-signed
+          path: signed/*
           if-no-files-found: error
           retention-days: 14

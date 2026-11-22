@@ -31,7 +31,6 @@ import { buildBatchPayloads } from "@/lib/externalImportPipeline";
 import { externalImportSelectionDigest } from "@/lib/externalImportSelectionDigest";
 import {
     analyticsStepFor,
-    canGoBack,
     classifyExternalImportFailure,
     externalImportWizardReducer,
     initialExternalImportWizardState,
@@ -877,13 +876,18 @@ export function ExternalImportWizard() {
                     </div>
                 )}
 
+                {/* Only while conversations are being sent or saved; inside the
+                    section so it stays in the content column of the two-column grid. */}
+                {(state.status.kind === "preparing_review" ||
+                    state.status.kind === "finalizing") && (
+                    <p
+                        className="mt-4 px-1 text-xs leading-5 text-zinc-400"
+                        data-testid="external-import-finalizing-notice"
+                    >
+                        {t("externalImport.finalizingNotice")}
+                    </p>
+                )}
             </section>
-
-            {!canGoBack(state) && state.status.kind !== "completed" && (
-                <p className="px-1 text-xs leading-5 text-zinc-400">
-                    {t("externalImport.finalizingNotice")}
-                </p>
-            )}
         </WizardShell>
     );
 }

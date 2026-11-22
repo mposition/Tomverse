@@ -403,7 +403,6 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       "guest lineup",
       "fallback model",
       "coding catalog",
-      "provider conditions",
     ],
     tabs: [
       {
@@ -430,7 +429,7 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       {
         id: "coding",
         label: "Coding catalog",
-        description: "Coding models for Code, the API and the CLI, chat links, provider conditions, the Code snapshot",
+        description: "Coding models for Code, the API and the CLI, chat links, the Code snapshot",
       },
     ],
   },

@@ -48,7 +48,7 @@ async function DefaultModelsTab() {
  * on the Models page. It is the same panel, drawing that part of it.
  *
  * The coding catalogue (2026-11-20) split from the image one: it reads chat
- * models and per-provider conditions the image catalogue has no use for, and
+ * models the image catalogue has no use for, and
  * `?tab=catalog` keeps meaning the image catalogue so old links still land.
  *
  * The registry, discovery and catalogue panels fetch their own rows, so the

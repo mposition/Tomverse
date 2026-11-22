@@ -29,7 +29,7 @@ export const es = {
         imported: "Chats importados",
         lastMessage: "Último mensaje",
         entry: "Continuar un chat de otra IA",
-        entryHint: "Trae una conversación de ChatGPT, Claude o Gemini.",
+        entryHint: "Trae una conversación de ChatGPT, Claude, Gemini o Perplexity.",
         where: "¿Dónde está tu conversación?",
         official: "Abrir la guía oficial",
         returnGuide: "Cuando recibas el archivo, vuelve a Configuración → Datos → Importar conversaciones.",

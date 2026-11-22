@@ -248,6 +248,27 @@ export function buildHaltBody({ runId, reason, attempted, prOpened, lastPrUrl = 
   return { runId, reason, attempted, prOpened, lastPrUrl };
 }
 
+/**
+ * Whether the autorec Claude login can carry a daily task, from the stored
+ * login's non-secret fields only (never a token).
+ *
+ * 2026-11-21: the login had expired and could not be refreshed; the first
+ * task was claimed, Claude exited 1 after one turn ("OAuth session expired"),
+ * and the alert said only agent_error. A long-lived CLAUDE_CODE_OAUTH_TOKEN
+ * (`claude setup-token`, README step 5) is used instead of the stored login
+ * and is not judged here.
+ */
+export function claudeLoginState({ envToken, credentialsText, now }) {
+  if (typeof envToken === "string" && envToken.trim()) return "env_token";
+  if (typeof credentialsText !== "string") return "login_required";
+  let auth;
+  try { auth = JSON.parse(credentialsText)?.claudeAiOauth; } catch { return "login_required"; }
+  if (!auth || typeof auth.refreshToken !== "string" || !auth.refreshToken) return "login_required";
+  const refreshEnds = Number.isSafeInteger(auth.refreshTokenExpiresAt) ? auth.refreshTokenExpiresAt : null;
+  if (refreshEnds !== null && refreshEnds - now < LIMITS.loginMinimumMs) return "login_required";
+  return "usable";
+}
+
 /** Publishing starts only while the lease has `leaseMarginMs` left. */
 export const leaseAllowsPublish = (leaseUntil, now) => Date.parse(leaseUntil) - now >= LIMITS.leaseMarginMs;
 

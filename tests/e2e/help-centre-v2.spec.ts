@@ -48,6 +48,7 @@ test("a guide page steps through and keeps the step in the address", async ({ pa
   await expect(page).toHaveURL(/#step-2$/);
   await expect(steps.nth(1)).toHaveAttribute("aria-current", "step");
   await page.goto("/support/help-centre/guides/delete-account?lang=en#step-4");
+  await expect(page).toHaveURL(/#step-4$/);
   await expect(steps.nth(3)).toHaveAttribute("aria-current", "step");
   expect((await page.request.get("/support/help-centre/guides/not-a-guide?lang=en")).status()).toBe(404);
 });
