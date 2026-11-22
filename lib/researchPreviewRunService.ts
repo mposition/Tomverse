@@ -10,7 +10,6 @@ import {
   heartbeatChatAccess,
   identifyChatCaller,
   readOpenChatUsageReservation,
-  readChatUsageReservationForSettlement,
   releaseChatAccess,
   settleChatUsage,
   type ChatUsageReservation,
@@ -53,28 +52,28 @@ import {
   completeResearchPreviewGeneration,
   createPreparingResearchPreviewRun,
   failPreparingResearchPreviewRun,
-  expireResearchPreviewCheckpoints,
   finishResearchPreviewRunWithoutReport,
   heartbeatResearchPreviewRun,
   listResearchPreviewRunDtos,
   markResearchPreviewDispatchStarted,
-  markResearchPreviewRunSettled,
-  parseResearchPreviewSettlementUsage,
   readEligibleResearchPreviewSource,
   requestResearchPreviewCancellation,
   readResearchPreviewRunDto,
   readResearchPreviewRunForWorker,
-  recoverStalePreparingResearchPreviewRun,
-  recoverStaleResearchPreviewRun,
   releaseResearchPreviewClaimToQueue,
   resumeResearchPreviewRun,
   researchPreviewQuestionDigest,
-  researchPreviewRunsAwaitingSettlement,
   researchPreviewWorkerId,
-  staleResearchPreviewRuns,
-  stalePreparingResearchPreviewRuns,
   type ResearchPreviewSettlementUsage,
 } from "@/lib/researchPreviewRunStore";
+import {
+  recoverStaleResearchPreviewRuns,
+  settleStoredResearchPreviewRun,
+} from "@/lib/researchPreviewRecovery";
+export {
+  recoverStaleResearchPreviewRuns,
+  settlePendingResearchPreviewRuns,
+} from "@/lib/researchPreviewRecovery";
 import type { ResearchPreviewRunCreateInput } from "@/lib/researchPreviewRunTypes";
 import { getWebSearchCapability } from "@/lib/webSearchCapability";
 import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
@@ -434,68 +433,6 @@ const unknownSettlement = (run: {
   searchSurchargeCredits: run.searchSurchargeCredits,
   searchQueriesObserved: false,
 });
-
-async function settleStoredResearchPreviewRun(
-  run: {
-    id: string;
-    userId: string;
-    reservationId: string | null;
-    settlementUsage: unknown;
-  } | null
-) {
-  if (!run?.reservationId) return;
-  const usage = parseResearchPreviewSettlementUsage(run.settlementUsage);
-  if (!usage) return;
-  try {
-    const reservation = await readChatUsageReservationForSettlement(
-      run.reservationId,
-      run.userId
-    );
-    await settleChatUsage(reservation, usage);
-    await markResearchPreviewRunSettled(run.id);
-  } catch (error) {
-    const durable = await prisma.chatCreditReservation.findUnique({
-      where: { id: run.reservationId },
-      select: { status: true },
-    });
-    if (durable && durable.status !== "reserved") {
-      await markResearchPreviewRunSettled(run.id);
-      return;
-    }
-    throw error;
-  }
-}
-
-export async function settlePendingResearchPreviewRuns(limit = 50) {
-  const runs = await researchPreviewRunsAwaitingSettlement(limit);
-  let settled = 0;
-  for (const run of runs) {
-    try {
-      await settleStoredResearchPreviewRun(run);
-      settled += 1;
-    } catch {
-      console.error(JSON.stringify({ event: "research_settlement_deferred", runId: run.id }));
-    }
-  }
-  return settled;
-}
-
-export async function recoverStaleResearchPreviewRuns(limit = 50) {
-  const preparing = await stalePreparingResearchPreviewRuns(limit);
-  let recovered = 0;
-  for (const run of preparing) {
-    const outcome = await recoverStalePreparingResearchPreviewRun(run.id);
-    if (outcome !== "unchanged") recovered += 1;
-  }
-  const runs = await staleResearchPreviewRuns(limit);
-  for (const run of runs) {
-    const outcome = await recoverStaleResearchPreviewRun(run.id);
-    if (outcome !== "unchanged") recovered += 1;
-  }
-  recovered += await expireResearchPreviewCheckpoints(limit);
-  await settlePendingResearchPreviewRuns(limit);
-  return recovered;
-}
 
 export async function processOneResearchPreviewRun(
   ownerId = researchPreviewWorkerId(),

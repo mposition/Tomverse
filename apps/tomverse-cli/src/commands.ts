@@ -1,4 +1,7 @@
-import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
+import { commandEnv } from "./env.js";
+export { commandEnv } from "./env.js";
+import { readProcess } from "./readprocess.js";
 import { accessSync, constants as fsConstants, existsSync, statSync } from "node:fs";
 import { basename, delimiter, extname, isAbsolute, join } from "node:path";
 
@@ -51,28 +54,6 @@ const MAX_TIMEOUT_MS = 30 * 60_000;
 
 /** As for patches: what the approval cannot show as it is never reaches a command. Tab is allowed. */
 const UNSHOWABLE_IN_COMMAND = /[\u0000-\u0008\u000a-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u206f\ufeff]/;
-
-/** Variables an approved command gets. Never a Tomverse key, whatever the config says. */
-const BASE_ENV = [
-    "PATH", "Path", "PATHEXT", "SystemRoot", "SYSTEMROOT", "windir", "WINDIR", "COMSPEC", "ComSpec", "TEMP", "TMP", "TMPDIR",
-    "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "APPDATA", "LOCALAPPDATA", "ProgramData", "ProgramFiles", "ProgramFiles(x86)",
-    "CommonProgramFiles", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE", "OS", "LANG", "LC_ALL", "LC_CTYPE", "USER", "LOGNAME", "SHELL",
-];
-
-export const commandEnv = (extraNames: string[] = [], env: NodeJS.ProcessEnv = process.env) => {
-    const out: Record<string, string> = {};
-    for (const name of [...BASE_ENV, ...extraNames]) {
-        if (/^TOMVERSE_/i.test(name)) continue;
-        const value = env[name];
-        if (typeof value === "string") out[name] = value;
-    }
-    out.NO_COLOR = "1";
-    out.FORCE_COLOR = "0";
-    out.TERM = "dumb";
-    out.CI = env.CI ?? "";
-    if (!out.CI) delete out.CI;
-    return out;
-};
 
 export const userShell = (env: NodeJS.ProcessEnv = process.env) => {
     if (process.platform === "win32") {
@@ -193,11 +174,15 @@ class BoundedCapture {
     }
 }
 
+const controlProcess = (file: string, args: string[], timeoutMs: number) => readProcess(file, args, {
+    cwd: process.cwd(), env: commandEnv(), signal: new AbortController().signal, timeoutMs,
+}).catch(() => ({ code: null, stdout: "", stderr: "", missing: false }));
+
 /** Every process recorded below `pid`, including orphans whose parent is gone. */
-const windowsDescendants = (pid: number): number[] | null => {
+const windowsDescendants = async (pid: number): Promise<number[] | null> => {
     const script = `$all = Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId; $seen = @(${pid}); $out = @(); do { $next = @($all | Where-Object { $seen -contains $_.ParentProcessId -and -not ($seen -contains $_.ProcessId) } | ForEach-Object { $_.ProcessId }); $seen += $next; $out += $next } while ($next.Count -gt 0); $out -join ','`;
-    const result = spawnSync(userShell(), ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], { encoding: "utf8", windowsHide: true, timeout: 15_000, env: commandEnv() });
-    if (result.status !== 0 || typeof result.stdout !== "string") return null;
+    const result = await controlProcess(userShell(), ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], 15_000);
+    if (result.code !== 0 || typeof result.stdout !== "string") return null;
     return result.stdout.trim().split(",").filter(Boolean).map(Number).filter(Number.isFinite);
 };
 
@@ -231,19 +216,19 @@ export const killTree = async (child: ChildProcess): Promise<{ residual: number[
     if (process.platform === "win32") {
         // End the tree at once; listing it first can take seconds, and the
         // tree keeps running meanwhile.
-        spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true, timeout: 15_000, env: commandEnv() });
+        await controlProcess("taskkill", ["/PID", String(pid), "/T", "/F"], 15_000);
         // Then look for anything below it that survived (an orphan keeps its
         // recorded parent id) and end that too.
-        const listed = windowsDescendants(pid);
+        const listed = await windowsDescendants(pid);
         const descendants = (listed ?? []).filter(alive);
-        for (const d of descendants) spawnSync("taskkill", ["/PID", String(d), "/T", "/F"], { windowsHide: true, timeout: 15_000, env: commandEnv() });
+        await Promise.all(descendants.map((d) => controlProcess("taskkill", ["/PID", String(d), "/T", "/F"], 15_000)));
         await new Promise((r) => setTimeout(r, 300));
         return { residual: [pid, ...descendants].filter(alive), treeChecked: listed !== null };
     }
     // The group covers everything that did not leave it; a descendant that
     // made its own session (setsid) is found through the parent links, listed
     // before anything is signalled, while those links still exist.
-    const listed = posixDescendants(pid);
+    const listed = await posixDescendants(pid);
     const descendants = listed ?? [];
     const signalAll = (sig: NodeJS.Signals) => {
         try {
@@ -271,9 +256,9 @@ export const killTree = async (child: ChildProcess): Promise<{ residual: number[
 };
 
 /** Processes below `pid` by parent links (`ps`), including ones in other sessions. */
-const posixDescendants = (pid: number): number[] | null => {
-    const result = spawnSync("ps", ["-A", "-o", "pid=,ppid="], { encoding: "utf8", timeout: 10_000, env: commandEnv() });
-    if (result.status !== 0 || typeof result.stdout !== "string") return null;
+const posixDescendants = async (pid: number): Promise<number[] | null> => {
+    const result = await controlProcess("ps", ["-A", "-o", "pid=,ppid="], 10_000);
+    if (result.code !== 0 || typeof result.stdout !== "string") return null;
     const children = new Map<number, number[]>();
     for (const line of result.stdout.split("\n")) {
         const [p, pp] = line.trim().split(/\s+/).map(Number);

@@ -51,6 +51,7 @@ export type GenerationRecord = {
     httpStatus?: number;
     requestId?: string | null;
     routedModel?: string | null;
+    appliedEffort?: import("./effort.js").Effort;
     error?: { kind: string; code?: string; message: string };
     receipt?: Receipt | null;
     lookup?: "found" | "not_found";
@@ -126,6 +127,9 @@ export type SessionState = {
     updatedAt: string;
     workspace: { root: string };
     endpointOrigin: string;
+    /** Full API base and non-secret credential identity for embedded hosts. */
+    endpointBase?: string;
+    keyIdentity?: string;
     /** The key's public prefix: lookups are scoped to the key that sent a request. */
     keyPrefix: string;
     readOnly: boolean;
@@ -152,6 +156,7 @@ export type SessionState = {
      * user agrees to continue past a limit.
      */
     tasks: Array<{
+        effort?: import("./effort.js").Effort;
         prompt: string;
         startedAt: string;
         endedAt?: string;

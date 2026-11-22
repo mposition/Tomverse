@@ -29,6 +29,6 @@ export async function GET(request: Request) {
   })) };
   const researchFeatures = researchPreviewFeatures();
   const researchPreview = { enabled: researchFeatures.nativeStart, pageReading: researchFeatures.pageReading, durableRuns: researchFeatures.durableRuns };
-  return Response.json({ researchPreview, generatedFileRevisions: generatedArtifactRevisionEnabled() && flags.attachmentsEnabled && plan.allowAttachments, historyFeatures: { sharing: plan.allowSharing, downloads: plan.allowDownloads }, historyActions: true, conversationTitles: true, accountUsage: true, chatImageTurns: true, chatImageEdits,reviewEasy: reviewEasyEnabled(), maxModels: effectivePlanModelLimit(plan), assistants, workspace, plan: plan.tier, images }, { headers: { "Cache-Control": "private, no-store" } });
+  return Response.json({ reviewAnalysis: { crossReview: true, quickSummary: true }, researchPreview, generatedFileRevisions: generatedArtifactRevisionEnabled() && flags.attachmentsEnabled && plan.allowAttachments, historyFeatures: { sharing: plan.allowSharing, downloads: plan.allowDownloads }, historyActions: true, conversationTitles: true, accountUsage: true, chatImageTurns: true, chatImageEdits,reviewEasy: reviewEasyEnabled(), maxModels: effectivePlanModelLimit(plan), assistants, workspace, plan: plan.tier, images }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) { return apiSecurityResponse(error) ?? Response.json({ code: "NATIVE_PARITY_UNAVAILABLE" }, { status: 503, headers: { "Cache-Control": "no-store" } }); }
 }

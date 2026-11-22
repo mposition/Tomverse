@@ -198,7 +198,7 @@ export const adminAmuxExecutionMessages = defineAdminMessages({
       recentMerged: (count: number) => "Idea lane merged in the last 7 days · " + count,
       unavailable: "Idea lane work could not be read. Backlog › Ideas lists it.",
     },
-    archiveAllConfirm: (count: number) => `Archive all ${count} cards on the board? They move to the Archive drawer with their status and history kept.`,
+    archiveAllConfirm: (count: number, stories = 0) => `Archive all ${count} cards on the board${stories ? ` and ${stories} Stor${stories === 1 ? "y" : "ies"} kept off it` : ""}? They move to the Archive drawer with their status and history kept.`,
   },
   ko: {
     moveTitle: "이동 처리 내역", moveToQueue: "AMUX 대기열로 이동", dragToQueue: "카드를 AMUX 대기열로 드래그",
@@ -397,6 +397,6 @@ export const adminAmuxExecutionMessages = defineAdminMessages({
       recentMerged: (count: number) => `최근 7일 병합된 레인 아이디어 · ${count}건`,
       unavailable: "아이디어 레인 작업을 읽지 못했습니다. 백로그 › 아이디어에서 볼 수 있습니다.",
     },
-    archiveAllConfirm: (count: number) => `보드의 카드 ${count}건을 모두 보관할까요? 상태와 기록은 그대로 두고 보관함으로 옮깁니다.`,
+    archiveAllConfirm: (count: number, stories = 0) => `보드의 카드 ${count}건${stories ? `과 보드에 표시하지 않는 Story ${stories}건` : ""}을 모두 보관할까요? 상태와 기록은 그대로 두고 보관함으로 옮깁니다.`,
   },
 });

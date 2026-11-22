@@ -7,14 +7,18 @@ import { codingApiDedicatedModel } from "../lib/codingCatalogChannels.ts";
 import { codingApiCredit, codingApiCreditFloor, codingApiCreditView, codingRowRuntime, registryPricesFor } from "../lib/codingRowRuntime.ts";
 import { codingCreditFloor } from "../lib/modelCatalog.ts";
 import { isCreditFloor, suggestCreditFloor } from "../lib/modelAdoptionDraft.ts";
+import { CODE_MAX_OUTPUT_TOKENS, codeSchemaAndPrompt } from "../lib/codeManagedCore.ts";
 import {
   canonicalJson,
   catalogContentHash,
+  CODING_DEFAULT_MAX_OUTPUT_TOKENS,
   codingCatalogRowSchema,
   codingStoredProfileSchema,
+  normalizedSnapshotContentHash,
   resolveCodingEntry,
 } from "../lib/modelCatalogCore.ts";
-import { getInputCreditMultiplier, getModelUsageProfile, getWeightedUsageCredits } from "../lib/models.ts";
+import { codingDraftFromAnswer } from "../lib/modelCatalogDraftLlm.ts";
+import { getInputCreditMultiplier, getModelUsageProfile, getWeightedUsageCredits, resolveModelRequestPricing } from "../lib/models.ts";
 import { COST_PER_CREDIT_CEILING_MICRO_USD } from "../lib/chatCostGuardrails.ts";
 import { ChatAccessError } from "../lib/chatSecurity.ts";
 
@@ -342,4 +346,146 @@ test("a chat model's reservation is unchanged without catalogue pricing", () => 
   assert.notEqual(plain.costSource, "coding_catalog_snapshot");
   assert.equal(plain.creditBasis, undefined);
   assert.ok(!String(plain.pricingVersion).startsWith("coding_catalog_snapshot"));
+});
+
+// Qwen3 Coder Flash drafted from pages with no output limit (owner decision
+// 2026-11-22): the draft's 8,192 default is the output limit both paths send,
+// so the worst turn the credit floors price is the worst turn that can run.
+const QWEN_PRICING = "https://www.alibabacloud.com/help/en/model-studio/model-pricing";
+const draftedFlash = () =>
+  codingDraftFromAnswer(
+    {
+      name: "Qwen3 Coder Flash",
+      minimumPlan: "Pro",
+      capabilities: { toolCalling: "parallel", structuredOutput: "supported", imageInput: false, maxContextTokens: 1_000_000, maxOutputTokens: null },
+      pricing: {
+        inputUsdPerMTok: 0.3,
+        outputUsdPerMTok: 1.5,
+        tiers: [
+          { upToInputTokens: 32_000, inputUsdPerMTok: 0.3, outputUsdPerMTok: 1.5 },
+          { upToInputTokens: 128_000, inputUsdPerMTok: 0.5, outputUsdPerMTok: 2.5 },
+          { upToInputTokens: 256_000, inputUsdPerMTok: 0.8, outputUsdPerMTok: 4 },
+          { upToInputTokens: null, inputUsdPerMTok: 1.6, outputUsdPerMTok: 9.6 },
+        ],
+      },
+    },
+    "qwen",
+    "qwen3-coder-flash",
+    [QWEN_PRICING],
+    codingCreditFloor
+  );
+
+test("a draft at the default output cap runs at that cap on the coding API and in Code, at the dearest tier's prices", () => {
+  const profile = draftedFlash();
+  assert.equal(profile.capabilities.maxOutputTokens, CODING_DEFAULT_MAX_OUTPUT_TOKENS);
+  assert.equal(profile.basis.maxOutputTokens, "default");
+  // The Code floor: the whole 1M window at the dearest input rate plus the default output at the dearest output rate.
+  assert.equal(
+    profile.pricing.creditWeight,
+    suggestCreditFloor({ inputUsdPerMillionTokens: 1.6, outputUsdPerMillionTokens: 9.6, maxOutputTokens: 8_192, worstCaseInputTokens: 1_000_000 }).credits
+  );
+  const resolved = resolveCodingEntry({ modelId: "qwen3-coder-flash", profile: { ...profile, channels: ["code", "api"] }, chat: () => null, providerTerms: () => null }).row;
+  // The basis stays in the stored profile: the snapshot row does not carry it.
+  assert.equal("basis" in resolved, false);
+  const withoutBasis = { ...profile };
+  delete withoutBasis.basis;
+  const plain = resolveCodingEntry({ modelId: "qwen3-coder-flash", profile: { ...withoutBasis, channels: ["code", "api"] }, chat: () => null, providerTerms: () => null }).row;
+  assert.equal(catalogContentHash([resolved]), catalogContentHash([plain]));
+  const published = codingCatalogRowSchema.parse(JSON.parse(JSON.stringify(resolved)));
+
+  const built = codingRowRuntime(published, SNAPSHOT);
+  assert.equal(built.ok, true);
+  assert.equal(built.price.maxOutputTokens, 8_192);
+  assert.equal(built.price.inputUsdPerMillionTokens, 1.6);
+  assert.equal(built.price.outputUsdPerMillionTokens, 9.6);
+
+  // The coding API: the model's output limit, what /models reports, and what a request may reserve and send.
+  const credit = codingApiCredit(published, built.price.maxOutputTokens);
+  assert.equal(credit.ok, true);
+  assert.equal(credit.floorCredits, bandFloor(1.6, 9.6, 8_192));
+  const { model, pricing } = codingApiDedicatedModel(published, built, SNAPSHOT, credit);
+  assert.equal(model.maxOutputTokens, 8_192);
+  assert.equal(resolveModelRequestPricing(model, { estimatedPromptTokens: 1 }).maxOutputTokens, 8_192);
+  const asked = createChatBudget("user", model, 2_000, { totalOutputTokenCap: 100_000, catalogPricing: pricing });
+  assert.equal(asked.maxOutputTokens, 8_192, "a client asking for more output is held to the cap");
+  assert.equal(asked.reservedOutputTokens, 8_192);
+  assert.equal(asked.outputUsdPerMillionTokens, 9.6);
+
+  // Code's managed path: the request is refused above the row's cap before any dispatch.
+  const request = (maxOutputTokens) => ({
+    action: "complete",
+    reservationId: "00000000-0000-4000-8000-000000000001",
+    callId: "00000000-0000-4000-8000-000000000002",
+    role: "executor",
+    modelId: "qwen3-coder-flash",
+    prompt: { system: "fixture", user: "fixture" },
+    schema: { type: "object", properties: {}, additionalProperties: false },
+    maxOutputTokens,
+  });
+  assert.ok(codeSchemaAndPrompt(request(8_192), published) > 0);
+  assert.throws(() => codeSchemaAndPrompt(request(8_193), published), /exceeds the selected model's bounds/);
+  assert.equal(Math.min(built.price.maxOutputTokens, CODE_MAX_OUTPUT_TOKENS), 8_192);
+});
+
+test("rows and snapshots stored with the older structured output values parse and hash as they did", () => {
+  const base = row();
+  for (const value of ["json_mode", "strict_schema", "forced_tool_use", "response_schema", "none"]) {
+    const stored = JSON.parse(JSON.stringify({ ...base, capabilities: { ...base.capabilities, structuredOutput: value } }));
+    const parsed = codingCatalogRowSchema.parse(stored);
+    assert.equal(parsed.capabilities.structuredOutput, value, "read as stored, not rewritten");
+    assert.equal(canonicalJson(parsed), canonicalJson(stored));
+    // A published snapshot's hash, read back through today's schema, is the hash it was published with.
+    assert.equal(normalizedSnapshotContentHash({ models: [stored] }), catalogContentHash([stored]));
+    const { modelId, ...profile } = stored;
+    delete profile.source;
+    const resolved = resolveCodingEntry({ modelId, profile, chat: () => null, providerTerms: () => null }).row;
+    assert.equal(canonicalJson(resolved), canonicalJson(stored));
+  }
+  // "supported" is a value a row may now carry, and it is offered to Code (only "none" is not).
+  const supported = codingCatalogRowSchema.parse({ ...base, capabilities: { ...base.capabilities, structuredOutput: "supported" } });
+  assert.equal(codingRowRuntime(supported, SNAPSHOT).ok, true);
+});
+
+test("coding notes stay in the stored row: a link or a dedicated row with them resolves and hashes as one without", () => {
+  // Owner decision 2026-11-22.
+  const notes = { strengths: ["Parallel tool calls"], weaknesses: ["Weak at long contexts"], sources: [QWEN_PRICING], draftedAt: "2026-11-22" };
+  const dedicated = draftedFlash();
+  const plainDedicated = resolveCodingEntry({ modelId: "qwen3-coder-flash", profile: { ...dedicated, channels: ["code", "api"] }, chat: () => null, providerTerms: () => null }).row;
+  const notedDedicated = resolveCodingEntry({
+    modelId: "qwen3-coder-flash",
+    profile: { ...dedicated, channels: ["code", "api"], codingNotes: notes },
+    chat: () => null,
+    providerTerms: () => null,
+  });
+  assert.equal(codingStoredProfileSchema.safeParse({ ...dedicated, codingNotes: notes }).success, true);
+  assert.equal("codingNotes" in notedDedicated.row, false);
+  assert.equal(canonicalJson(notedDedicated.row), canonicalJson(plainDedicated));
+  assert.equal(catalogContentHash([notedDedicated.row]), catalogContentHash([plainDedicated]));
+  assert.deepEqual(notedDedicated.stored.codingNotes, notes, "the stored row keeps them for the router and the screen");
+
+  const chat = {
+    id: "gpt-6-luna",
+    name: "GPT 6 Luna",
+    provider: "openai",
+    apiModelId: "gpt-6-luna",
+    minimumPlan: "Free",
+    usageClass: "standard",
+    creditWeight: 2,
+    enabled: true,
+    status: "enabled",
+    publiclyListed: true,
+    catalogDeleted: false,
+    contextWindowTokens: 400_000,
+    maxOutputTokens: 32_000,
+    imageInput: true,
+    price: { inputUsdPerMTok: 1, outputUsdPerMTok: 8, pricingVersion: "v1", effectiveDate: "2026-11-01", verified: true, reasoningBilledSeparately: false },
+  };
+  const link = { source: "chat", registryModelId: "gpt-6-luna", capabilities: { toolCalling: "basic", structuredOutput: "supported" }, channels: ["api"] };
+  const resolveLink = (profile) => resolveCodingEntry({ modelId: "gpt-6-luna", profile, chat: () => chat, providerTerms: () => null });
+  const notedLink = resolveLink({ ...link, codingNotes: notes });
+  assert.equal(notedLink.problem, null);
+  assert.equal(canonicalJson(notedLink.row), canonicalJson(resolveLink(link).row));
+  assert.equal(catalogContentHash([notedLink.row]), catalogContentHash([resolveLink(link).row]));
+  // A snapshot row never carries them; one that somehow did would not parse as a snapshot row.
+  assert.equal(codingCatalogRowSchema.safeParse({ ...notedLink.row, codingNotes: notes }).success, false);
 });

@@ -56,6 +56,7 @@ test('a Chat continuation is listed with Chat and opens with its original above 
   await page.getByPlaceholder('대화 검색').fill('');
 
   await page.locator('.conversation-row', { hasText: 'Imported trip plan' }).click();
+  if (!await page.locator('.ios-source-panel').evaluate(node => (node as HTMLDetailsElement).open)) await page.locator('.ios-source-panel > summary').click();
   await expect(page.getByTestId('continuation-provenance')).toContainText('ChatGPT에서 가져온 대화');
   await expect(page.getByTestId('continuation-provenance')).toContainText('읽기 전용');
   const imported = page.locator('[data-message-source="imported"]');
@@ -77,6 +78,7 @@ test('a Chat continuation is listed with Chat and opens with its original above 
   await page.getByRole('button', { name: '대화', exact: true }).click();
   await expect(page.locator('.history-more[aria-label$="Imported trip plan"]')).toBeVisible();
   await page.locator('.conversation-row', { hasText: 'Imported trip plan' }).click();
+  if (!await page.locator('.ios-source-panel').evaluate(node => (node as HTMLDetailsElement).open)) await page.locator('.ios-source-panel > summary').click();
   await expect(page.locator('[data-message-source="imported"]', { hasText: 'Imported ext-2' })).toBeVisible();
   await expect(page.getByTestId('continuation-divider')).toBeVisible();
   await expect(page.locator('.email-login')).toHaveCount(0);
@@ -97,6 +99,7 @@ test('a Review continuation is listed with Review and shows its original', async
 test('a deleted original says so in place, and the Tomverse turns stay', async ({ page }) => {
   await page.getByRole('button', { name: '대화', exact: true }).click();
   await page.locator('.conversation-row', { hasText: 'Deleted original' }).click();
+  if (!await page.locator('.ios-source-panel').evaluate(node => (node as HTMLDetailsElement).open)) await page.locator('.ios-source-panel > summary').click();
   await expect(page.getByTestId('continuation-source-tombstone')).toBeVisible();
   await expect(page.locator('[data-message-source="imported"]')).toHaveCount(0);
   await expect(page.getByTestId('continuation-divider')).toBeVisible();
@@ -106,6 +109,7 @@ test('a deleted original says so in place, and the Tomverse turns stay', async (
 test('native source selection is consumed once and actual-attempt receipts stay out of storage', async ({ page }) => {
   await page.getByRole('button', { name: '대화', exact: true }).click();
   await page.locator('.conversation-row', { hasText: 'Imported trip plan' }).click();
+  if (!await page.locator('.ios-source-panel').evaluate(node => (node as HTMLDetailsElement).open)) await page.locator('.ios-source-panel > summary').click();
   const context = page.getByTestId('native-continuation-context');
   await context.locator('summary').click();
   await context.getByRole('checkbox').first().check();

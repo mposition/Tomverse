@@ -3,6 +3,7 @@ import type { MobileLanguage } from "./mobile";
 const copy: Record<MobileLanguage, { unsupported: string; size: string; file: string; plan: string; limited: string }> = {
   en: { unsupported: "This file format is not supported. Choose another file.", size: "This file is too large. Choose a smaller file.", file: "This file could not be read. Check its format and password protection.", plan: "This model or feature is not available with your current plan.", limited: "Too many requests. Wait a moment before trying again." },
   ko: { unsupported: "지원하지 않는 파일 형식입니다. 다른 파일을 선택하세요.", size: "파일이 너무 큽니다. 더 작은 파일을 선택하세요.", file: "파일을 읽지 못했습니다. 파일 형식과 암호 설정을 확인하세요.", plan: "현재 플랜에서는 이 모델 또는 기능을 사용할 수 없습니다.", limited: "요청이 너무 많습니다. 잠시 후 다시 시도하세요." },
+  "zh-Hant": {"unsupported":"不支援此檔案格式，請選擇其他檔案。","size":"檔案過大，請選擇較小的檔案。","file":"無法讀取檔案，請檢查格式與密碼保護。","plan":"目前方案無法使用此模型或功能。","limited":"要求過多，請稍後再試。"},
   zh: { unsupported: "不支持此文件格式，请选择其他文件。", size: "文件过大，请选择较小的文件。", file: "无法读取文件，请检查格式和密码保护。", plan: "当前套餐无法使用此模型或功能。", limited: "请求过多，请稍后重试。" },
   de: { unsupported: "Dieses Dateiformat wird nicht unterstützt. Wähle eine andere Datei.", size: "Die Datei ist zu groß. Wähle eine kleinere Datei.", file: "Datei nicht lesbar. Prüfe Format und Passwortschutz.", plan: "Dieses Modell oder diese Funktion ist in deinem Tarif nicht verfügbar.", limited: "Zu viele Anfragen. Bitte versuche es später erneut." },
   fr: { unsupported: "Ce format n’est pas pris en charge. Choisissez un autre fichier.", size: "Ce fichier est trop volumineux. Choisissez un fichier plus petit.", file: "Fichier illisible. Vérifiez le format et la protection par mot de passe.", plan: "Ce modèle ou cette fonction n’est pas disponible avec votre forfait.", limited: "Trop de demandes. Réessayez dans un instant." },
@@ -12,6 +13,7 @@ const copy: Record<MobileLanguage, { unsupported: string; size: string; file: st
 const retry: Record<MobileLanguage, string> = {
   en: "Requests are being sent too quickly. Please try again in {seconds} seconds.",
   ko: "요청이 너무 빠르게 전송되었습니다. {seconds}초 후 다시 시도해 주세요.",
+  "zh-Hant": "要求傳送過快，請在 {seconds} 秒後再試。",
   zh: "请求发送过快，请在 {seconds} 秒后重试。",
   de: "Anfragen werden zu schnell gesendet. Bitte versuchen Sie es in {seconds} Sekunden erneut.",
   fr: "Les requêtes sont envoyées trop rapidement. Réessayez dans {seconds} secondes.",
@@ -21,6 +23,7 @@ const retry: Record<MobileLanguage, string> = {
 const credits: Record<MobileLanguage, { balance: string; daily: string }> = {
   en: { balance: "You do not have enough credits for this request. Check your balance in Settings > Plan.", daily: "This request exceeds your remaining daily plan credits. Try a lower-cost option or wait for the daily reset." },
   ko: { balance: "이 요청에 필요한 크레딧이 부족합니다. 설정 > 플랜에서 잔액을 확인해 주세요.", daily: "이 요청은 오늘 남은 플랜 크레딧 한도를 초과합니다. 비용이 낮은 옵션을 선택하거나 일일 한도가 초기화된 뒤 다시 시도해 주세요." },
+  "zh-Hant": {"balance":"點數不足以完成此要求，請至設定 > 方案查看餘額。","daily":"此要求超出今日剩餘方案點數，請選擇費用較低的選項，或等待每日額度重設。"},
   zh: { balance: "积分不足以完成此请求，请在设置 > 套餐中查看余额。", daily: "此请求超出今日剩余套餐积分，请选择费用更低的选项或等待每日额度重置。" },
   de: { balance: "Deine Credits reichen für diese Anfrage nicht aus. Prüfe dein Guthaben unter Einstellungen > Tarif.", daily: "Diese Anfrage übersteigt deine verbleibenden täglichen Tarif-Credits. Wähle eine günstigere Option oder warte auf die tägliche Zurücksetzung." },
   fr: { balance: "Vos crédits sont insuffisants pour cette demande. Vérifiez votre solde dans Paramètres > Forfait.", daily: "Cette demande dépasse vos crédits quotidiens restants. Choisissez une option moins coûteuse ou attendez la réinitialisation quotidienne." },

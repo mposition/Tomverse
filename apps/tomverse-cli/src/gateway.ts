@@ -1,4 +1,5 @@
 import { createOpenAI } from "@ai-sdk/openai";
+import { isEffort, isExplicitEffort, type Effort } from "./effort.js";
 import type { LanguageModel } from "ai";
 import type { Endpoint } from "./config.js";
 import { CLI_VERSION } from "./version.js";
@@ -18,6 +19,7 @@ export type CatalogModel = {
     tools: boolean;
     vision: boolean;
     reasoning: boolean;
+    reasoningEfforts?: Array<Exclude<Effort, "default">>;
     protocols: string[];
     contextWindowTokens: number;
     maxOutputTokens: number;
@@ -30,6 +32,7 @@ type CatalogEntry = {
         name?: unknown;
         provider?: unknown;
         capabilities?: { tools?: unknown; vision?: unknown; reasoning?: unknown };
+        reasoning_efforts?: unknown;
         protocols?: unknown;
         context_window_tokens?: unknown;
         max_output_tokens?: unknown;
@@ -118,7 +121,7 @@ export type GenerationIntent = {
  */
 export type GenerationHooks = {
     before(): Promise<GenerationIntent>;
-    headers(intent: GenerationIntent, info: { status: number; requestId: string | null; routedModel: string | null }): Promise<void>;
+    headers(intent: GenerationIntent, info: { status: number; requestId: string | null; routedModel: string | null; appliedEffort?: Effort }): Promise<void>;
     failed(intent: GenerationIntent, error: GatewayError): Promise<void>;
     ended(intent: GenerationIntent, how: "complete" | "interrupted"): Promise<void>;
 };
@@ -127,7 +130,8 @@ export class Gateway {
     constructor(
         readonly endpoint: Endpoint,
         private readonly key: string,
-        private readonly fetchImpl: typeof fetch = globalThis.fetch
+        private readonly fetchImpl: typeof fetch = globalThis.fetch,
+        private readonly client = `tomverse-cli/${CLI_VERSION}`
     ) {}
 
     /** The key's public prefix: lookups only find requests of this key. */
@@ -147,7 +151,7 @@ export class Gateway {
     private async send(url: URL, init: RequestInit & { timeoutMs?: number }) {
         const headers = new Headers(init.headers);
         headers.set("authorization", `Bearer ${this.key}`);
-        headers.set("user-agent", `tomverse-cli/${CLI_VERSION}`);
+        headers.set("user-agent", this.client);
         const signals = [init.signal, init.timeoutMs ? AbortSignal.timeout(init.timeoutMs) : undefined].filter(
             (s): s is AbortSignal => Boolean(s)
         );
@@ -193,6 +197,8 @@ export class Gateway {
             tools: entry.tomverse?.capabilities?.tools === true,
             vision: entry.tomverse?.capabilities?.vision === true,
             reasoning: entry.tomverse?.capabilities?.reasoning === true,
+            reasoningEfforts: Array.isArray(entry.tomverse?.reasoning_efforts)
+                ? entry.tomverse.reasoning_efforts.filter(isExplicitEffort) : undefined,
             protocols: Array.isArray(entry.tomverse?.protocols) ? (entry.tomverse.protocols as unknown[]).map(String) : [],
             contextWindowTokens: Number(entry.tomverse?.context_window_tokens ?? 0),
             maxOutputTokens: Number(entry.tomverse?.max_output_tokens ?? 0),
@@ -237,13 +243,16 @@ export class Gateway {
      * is allowed; each call gets its own durable intent and Idempotency-Key
      * before anything is sent, and the outcome is reported back.
      */
-    generationFetch(hooks: GenerationHooks): typeof fetch {
+    generationFetch(hooks: GenerationHooks, effort?: Effort): typeof fetch {
         const allowed = this.url("/chat/completions").href;
         return (async (input: string | URL | Request, init?: RequestInit) => {
             const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
             if (href !== allowed || (init?.method ?? "GET").toUpperCase() !== "POST") {
                 throw new GatewayError("protocol", "Refused a model request outside POST /chat/completions.");
             }
+            const requestBody = isExplicitEffort(effort)
+                ? JSON.stringify({ ...JSON.parse(String(init?.body)), tomverse_effort: effort })
+                : init?.body;
             const intent = await hooks.before();
             const headers = new Headers(init?.headers);
             // The SDK's own key header is replaced by send(); one source of truth.
@@ -251,16 +260,18 @@ export class Gateway {
             headers.set("idempotency-key", intent.idempotencyKey);
             let response: Response;
             try {
-                response = await this.send(new URL(allowed), { ...init, headers });
+                response = await this.send(new URL(allowed), { ...init, headers, body: requestBody });
             } catch (error) {
                 const failure = error instanceof GatewayError ? error : describeFetchFailure(error, this.endpoint.origin);
                 await hooks.failed(intent, failure);
                 throw failure;
             }
+            const appliedEffort = response.headers.get("x-tomverse-applied-effort");
             await hooks.headers(intent, {
                 status: response.status,
                 requestId: response.headers.get("x-request-id"),
                 routedModel: response.headers.get("x-tomverse-routed-model"),
+                ...(isEffort(appliedEffort) ? { appliedEffort } : {}),
             });
             if (!response.body) {
                 await hooks.ended(intent, "complete");
@@ -296,13 +307,13 @@ export class Gateway {
     }
 
     /** The explicit Chat Completions model; never a model string or default provider. */
-    chatModel(modelId: string, hooks: GenerationHooks): LanguageModel {
+    chatModel(modelId: string, hooks: GenerationHooks, effort?: Effort): LanguageModel {
         const provider = createOpenAI({
             baseURL: this.endpoint.base,
             // Sent by send(), not by the SDK; set so the SDK never reads OPENAI_API_KEY.
             apiKey: "tomverse-cli-key-is-added-by-the-transport",
             name: "tomverse",
-            fetch: this.generationFetch(hooks),
+            fetch: this.generationFetch(hooks, effort),
         });
         return provider.chat(modelId);
     }

@@ -1,3 +1,4 @@
+import { isEffort, type Effort } from "./effort.js";
 import { generateText, isStepCount, streamText, type ModelMessage, type ToolSet } from "ai";
 import { GatewayError, type CatalogModel, type Gateway, type GenerationHooks } from "./gateway.js";
 import { safeLine, type Output } from "./display.js";
@@ -45,10 +46,10 @@ export type ApprovalView = {
  * The person's answer. `remembered`: given without asking, by an earlier
  * "always" answer in this process. `remember`: this answer was "always".
  */
-export type ApprovalDecision = { approved: boolean; remembered?: RememberedRule; remember?: RememberedRule };
+export type ApprovalDecision = { approved: boolean; reason?: string; remembered?: RememberedRule; remember?: RememberedRule };
 
 export type Prompter = {
-    /** Asks the person at the terminal. Only ever a TTY; model text never answers it. */
+    /** Asks the person through the host UI. Model text never answers it. */
     approve(view: ApprovalView): Promise<boolean | ApprovalDecision>;
     confirm(question: string): Promise<boolean>;
 };
@@ -62,6 +63,11 @@ export type RunnerOptions = {
     catalog: CatalogModel[];
     commandEnv: string[];
     instructions: string | null;
+    productName?: string;
+    assertAllowed?: () => void;
+    redactText?: (text: string) => string;
+    beforeWrite?: ToolContext["beforeWrite"];
+    beforeCommand?: ToolContext["beforeCommand"];
 };
 
 const MAX_OUTPUT_TOKENS = 16_384;
@@ -153,6 +159,7 @@ export class Runner {
     private controller = new AbortController();
     readonly tools: ToolSet;
     private readonly toolContext: ToolContext;
+    private readonly executions = new Set<Promise<unknown>>();
 
     constructor(private readonly options: RunnerOptions) {
         const window = options.journal.state.model.contextWindowTokens || 128_000;
@@ -160,14 +167,23 @@ export class Runner {
             // One read may use at most about a quarter of the model's window.
             readByteLimit: Math.max(8 * 1024, Math.min(100 * 1024, Math.floor(window * 0.25 * 3))),
             workspace: options.workspace,
+            assertAllowed: options.assertAllowed,
+            redactText: options.redactText,
+            beforeWrite: options.beforeWrite,
+            beforeCommand: options.beforeCommand,
             journal: options.journal,
             commandTimeoutMs: options.journal.state.limits.commandTimeoutMs,
             commandEnv: options.commandEnv,
             signal: () => this.controller.signal,
+            trackExecution: (execution) => {
+                this.executions.add(execution);
+                void execution.then(() => this.executions.delete(execution), () => this.executions.delete(execution));
+            },
             onActivity: (line) => {
                 options.output.info(`  · ${line}`);
             },
             onCommandOutput: (_stream, text) => {
+                options.output.event({ type: "command_output", stream: _stream, text });
                 if (!options.output.json) options.output.info(`    ${safeLine(text.replace(/\r?\n$/, "")).slice(0, 2000)}`);
             },
         };
@@ -202,7 +218,7 @@ export class Runner {
         const readOnly = this.journal.state.readOnly;
         const shellNote = process.platform === "win32" ? "Windows; run_command `command` runs in Windows PowerShell" : `${process.platform}; run_command \`command\` runs in the user's shell`;
         return [
-            "You are Tomverse CLI, a coding agent working in the user's folder through tools.",
+            `You are ${this.options.productName ?? "Tomverse CLI"}, a coding agent working in the user's folder through tools.`,
             `Workspace root: ${workspace.root} (${shellNote}).`,
             readOnly
                 ? "This session is read-only: you can list, search and read files, but you cannot change files or run commands. Explain what you would change."
@@ -230,6 +246,7 @@ export class Runner {
         let first = true;
         return {
             before: async () => {
+                this.options.assertAllowed?.();
                 const task = this.currentTask();
                 if (task.requests >= task.allowance) {
                     throw new GatewayError("limit", "The request limit for this task is reached; nothing was sent.");
@@ -247,6 +264,15 @@ export class Runner {
                 record.httpStatus = info.status;
                 record.requestId = info.requestId;
                 record.routedModel = info.routedModel;
+                const requestedEffort = this.currentTask().effort;
+                const appliedEffort = info.appliedEffort ?? (
+                    info.status < 400 && requestedEffort && this.model().reasoningEfforts === undefined
+                        ? "default" : undefined
+                );
+                record.appliedEffort = appliedEffort;
+                if (appliedEffort === "default" && requestedEffort) {
+                    output.info("Applied reasoning effort: default.");
+                }
                 record.updatedAt = new Date().toISOString();
                 const model = journal.state.model;
                 if (info.status < 400 && model.requested === SMART_ADAPTIVE && !model.pinned) {
@@ -261,7 +287,7 @@ export class Runner {
                     output.info(`Smart Adaptive picked ${info.routedModel}; this session stays on it.`);
                 }
                 journal.commit();
-                output.event({ type: "response", seq: record.seq, status: info.status, request_id: info.requestId, routed_model: info.routedModel });
+                output.event({ type: "response", seq: record.seq, status: info.status, request_id: info.requestId, routed_model: info.routedModel, ...(appliedEffort ? { applied_effort: appliedEffort } : {}) });
             },
             failed: async (intent, error) => {
                 const record = journal.generation(intent.idempotencyKey);
@@ -279,11 +305,17 @@ export class Runner {
         };
     }
 
-    async runTask(prompt: string): Promise<Outcome> {
+    assertEffort(effort: Effort) {
+        if (!isEffort(effort)) throw new GatewayError("protocol", "Effort must be low, default, or high.");
+    }
+
+    async runTask(prompt: string, effort: Effort = "default"): Promise<Outcome> {
+        this.assertEffort(effort);
         const { journal } = this;
         journal.state.messages.push({ role: "user", content: prompt });
         journal.state.tasks.push({
             prompt,
+            ...(effort !== "default" ? { effort } : {}),
             startedAt: new Date().toISOString(),
             requests: 0,
             activeMs: 0,
@@ -291,6 +323,10 @@ export class Runner {
             timeAllowanceMs: journal.state.limits.timeoutMs,
         });
         journal.commit();
+        if (effort !== "default") {
+            this.options.output.info("Requested reasoning effort: " + effort + " (this task).");
+            this.options.output.event({ type: "effort", level: effort });
+        }
         return this.loop();
     }
 
@@ -316,12 +352,14 @@ export class Runner {
     async loop(): Promise<Outcome> {
         const { journal, options } = this;
         const task = this.currentTask();
+        this.assertEffort(task.effort ?? "default");
         this.freshSignal();
         journal.state.status = "running";
         journal.commit();
         try {
             for (;;) {
                 if (this.controller.signal.aborted) return this.finish("cancelled");
+                this.assertEffort(task.effort ?? "default");
                 const allowance = task.allowance;
                 const timeAllowance = task.timeAllowanceMs;
                 if (task.requests >= allowance || task.activeMs >= timeAllowance) {
@@ -391,6 +429,7 @@ export class Runner {
     > {
         const { journal, options } = this;
         const model = this.model();
+        this.assertEffort(this.currentTask().effort ?? "default");
         const before = journal.state.generations.length;
         const signal = AbortSignal.any([this.controller.signal, AbortSignal.timeout(Math.max(1000, remainingMs))]);
         const pending: PendingApproval[] = [];
@@ -398,7 +437,7 @@ export class Runner {
         let streamError: unknown = null;
         let finishReason: string | undefined;
         const result = streamText({
-            model: options.gateway.chatModel(model.id, this.hooks("agent", journal.state.pendingResendOf)),
+            model: options.gateway.chatModel(model.id, this.hooks("agent", journal.state.pendingResendOf), model.reasoningEfforts === undefined ? undefined : this.currentTask().effort),
             system: this.systemPrompt(),
             messages: journal.state.messages,
             tools: this.tools,
@@ -418,7 +457,7 @@ export class Runner {
                 } else if (part.type === "tool-approval-request" && !part.isAutomatic) {
                     pending.push({ approvalId: part.approvalId!, toolCallId: part.toolCall!.toolCallId, toolName: part.toolCall!.toolName, input: part.toolCall!.input });
                 } else if (part.type === "tool-result") {
-                    options.output.event({ type: "tool_result", tool: part.toolName, tool_call_id: part.toolCallId, status: (part.output as { status?: string })?.status ?? null });
+                    options.output.event({ type: "tool_result", tool: part.toolName, tool_call_id: part.toolCallId, status: (part.output as { status?: string })?.status ?? null, output: part.output });
                 } else if (part.type === "tool-error") {
                     options.output.event({ type: "tool_result", tool: part.toolName, tool_call_id: part.toolCallId, status: "error" });
                 } else if (part.type === "error") {
@@ -430,6 +469,9 @@ export class Runner {
         } catch (error) {
             streamError = error;
         }
+        // SDK abort may close the model stream before a local tool has settled.
+        // Keep the run and journal lock until process-tree cleanup is recorded.
+        await Promise.allSettled([...this.executions]);
         if (text && !options.output.json) options.output.stream("\n");
         if (text) options.output.event({ type: "assistant", text });
         delete journal.state.pendingResendOf;
@@ -641,7 +683,7 @@ export class Runner {
                 const answer = await options.prompter!.approve(view);
                 decision = typeof answer === "boolean" ? { approved: answer } : answer;
                 approved = decision.approved;
-                reason = approved ? undefined : "The user declined.";
+                reason = approved ? undefined : decision.reason ?? "The user declined.";
             }
             journal.state.approvals.push({
                 approvalId: view.approvalId,
@@ -697,6 +739,7 @@ export class Runner {
         }
         const task = this.currentTask();
         if (task.requests >= task.allowance) return "skipped";
+        this.assertEffort(task.effort ?? "default");
         const head = journal.state.messages.slice(0, cut);
         const tail = journal.state.messages.slice(cut);
         const budgetChars = Math.max(20_000, Math.floor((window - reserve) * 0.6 * 3));
@@ -704,7 +747,7 @@ export class Runner {
         const attemptStart = journal.state.generations.length;
         try {
             const result = await generateText({
-                model: options.gateway.chatModel(model.id, this.hooks("compact")),
+                model: options.gateway.chatModel(model.id, this.hooks("compact"), model.reasoningEfforts === undefined ? undefined : task.effort),
                 system: "You compress a coding session so it can continue. Keep: the user's goals and constraints, decisions, files examined with the facts that matter, changes made (which files, what), commands run and their results, current state and the next steps. Plain text, at most about 1200 words.",
                 messages: [{ role: "user", content: `Summarize this session so far.\n\n${transcriptFor(head, budgetChars)}` }],
                 maxRetries: 0,

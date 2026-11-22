@@ -77,6 +77,8 @@ type Card = {
 };
 type BoardSnapshot = { pageSize: number;
   counts: Record<AmuxExecutionLane, number>;
+  /** Active Stories: off the lanes (Tasks only), still archived by archive-all. */
+  activeStories?: number;
   lanes: Array<{ lane: AmuxExecutionLane; cards: Card[] }> };
 type Detail = Omit<Card, "score"> & { revision: number; body: string | null;
   brief: string | null;
@@ -316,7 +318,7 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, initialView = "bo
   const activeCardCount = board ? AMUX_EXECUTION_VISIBLE_LANES.reduce(
     (total, lane) => total + board.counts[lane], 0) : 0;
   const archiveAll = async () => {
-    if (!window.confirm(m.archiveAllConfirm(activeCardCount))) return;
+    if (!window.confirm(m.archiveAllConfirm(activeCardCount, board?.activeStories ?? 0))) return;
     setBoardLoading(true); setError(null);
     try {
       await requestArchiveAllActiveCards();

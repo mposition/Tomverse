@@ -1,0 +1,54 @@
+Tomverse for VS Code License
+
+Copyright (c) 2026 Tomverse. All rights reserved.
+
+This license covers Tomverse for VS Code ("the Software"), including its
+bundled Tomverse CLI runtime, code, documentation and updates.
+
+1. Permission to use. Subject to these terms, you may install and run the
+   Software on any number of your own devices, for personal or commercial
+   work, to use your Tomverse account and the Tomverse API
+   (https://tomverse.app). Your use of the Tomverse service itself is governed
+   by the Tomverse Terms of Service (https://tomverse.app/terms).
+
+2. Restrictions. Except where the law allows it despite this restriction, you
+   may not:
+   a. copy, modify, adapt or create derivative works of the Software, other
+      than copies made by installing and running it as described above;
+   b. distribute, sublicense, sell, rent, lend, host or otherwise make the
+      Software available to others, other than by pointing them to the
+      official package or download location;
+   c. use the Software to access a service other than Tomverse, or remove or
+      bypass its security, approval or credit-limit protections;
+   d. remove or change this license or any copyright notice.
+
+3. Ownership. The Software is licensed, not sold. Tomverse keeps all rights
+   not expressly granted here.
+
+4. Your content. Files, code, prompts and outputs you work on with the
+   Software remain yours. The Software runs on your device with your own
+   operating-system permissions; you are responsible for the actions and
+   commands you approve.
+
+5. Third-party components. The Software includes open-source components under
+   their own licenses (for example MIT and Apache-2.0). Those licenses apply to
+   those components, and nothing here limits your rights under them. The extension runs in the Node.js runtime supplied by VS Code.
+   Bundled dependency notices are in THIRD-PARTY-NOTICES.txt.
+
+6. No warranty. To the extent permitted by law, the Software is provided "as
+   is", without warranty of any kind. Nothing in this license excludes,
+   restricts or modifies any consumer guarantee, right or remedy you have under
+   the Australian Consumer Law or other law that cannot lawfully be excluded.
+
+7. Limitation of liability. To the extent permitted by law, Tomverse is not
+   liable for any indirect or consequential loss, or for loss of data, profit
+   or revenue, arising from the Software. Where liability for a failure to
+   comply with a consumer guarantee cannot be excluded but can be limited,
+   Tomverse's liability is limited, at its option, to supplying the Software
+   again or paying the cost of having it supplied again.
+
+8. Termination. This license ends automatically if you breach it. When it
+   ends, you must stop using the Software and delete your copies.
+
+9. Governing law. This license is governed by the laws in force in Australia
+   and in the Australian state or territory where Tomverse is registered.

@@ -20,6 +20,17 @@ let entries = [];
 let providerTerms = [];
 
 mock.module(mod("lib/activeAiModel.ts"), { namedExports: { getActiveAiModel: () => null } });
+// Smart Adaptive's router is a paid call: here it answers what a test says and records each call.
+const routerCalls = [];
+let routerPick = null;
+mock.module(mod("lib/autoLlmRouter.ts"), {
+  namedExports: {
+    pickAutoModelWithLlm: async (input) => {
+      routerCalls.push(input);
+      return routerPick ? { modelId: routerPick, rewrite: null } : null;
+    },
+  },
+});
 mock.module(mod("lib/prisma.ts"), {
   namedExports: {
     prisma: {
@@ -64,9 +75,11 @@ const runtimeModel = (id, extra = {}) => ({
   ...extra,
 });
 
+const baseRuntime = () => [runtimeModel("gpt-6-luna"), runtimeModel("gpt-5-6-terra", { usageClass: "advanced" })];
+let runtime = baseRuntime();
 mock.module(mod("lib/modelRegistry.ts"), {
   namedExports: {
-    getRuntimeModels: async () => [runtimeModel("gpt-6-luna"), runtimeModel("gpt-5-6-terra", { usageClass: "advanced" })],
+    getRuntimeModels: async () => runtime,
   },
 });
 
@@ -292,4 +305,301 @@ test("switched on with no snapshot, or one past its coverage, the coding API off
   snapshot = { ...snapshot, coverageUntil: new Date(Date.now() - 1_000) };
   assert.deepEqual(await ids("Pro", "coding"), []);
   setSwitch(undefined);
+});
+
+// Frontier and apex on the coding catalogue (owner decision 2026-11-22): coding
+// candidates, listed by /models, nameable on the coding API at their own chat
+// credits, offered only with credits the registry holds; the general API keeps
+// the rule that only Smart Adaptive routes to them.
+test("frontier and apex links are listed and nameable on the coding API at their chat credits, and still router-only on the general API", async () => {
+  const { codingCandidateExclusion } = await import(mod("lib/modelCatalogCore.ts"));
+  const { chatModelFacts } = await import(mod("lib/modelCatalog.ts"));
+  setSwitch("true");
+  providerTerms = [];
+  runtime = [
+    ...baseRuntime(),
+    runtimeModel("gpt-6-2-astra", { usageClass: "frontier", minimumPlan: "Pro", creditWeight: 32 }),
+    runtimeModel("gpt-6-2-apex", { usageClass: "apex", minimumPlan: "Pro", creditWeight: 80 }),
+    // The registry holds no credits for this one: never offered on the coding API.
+    runtimeModel("gpt-6-2-unpriced", { usageClass: "frontier", minimumPlan: "Pro", creditWeight: 0 }),
+  ];
+  try {
+    for (const id of ["gpt-6-2-astra", "gpt-6-2-apex"]) {
+      assert.equal(codingCandidateExclusion(chatModelFacts(runtime.find((model) => model.id === id)), new Set()), null, id);
+    }
+    // No registry credits: the facts say so, and the candidate list and the judge
+    // refuse it on the condition the coding API serves it on (hasRegistryCredits).
+    const unpricedFacts = chatModelFacts(runtime.find((model) => model.id === "gpt-6-2-unpriced"));
+    assert.equal(unpricedFacts.registryCredits, false);
+    assert.equal(unpricedFacts.creditWeight, 32, "chat's class default, which nobody set");
+    assert.equal(codingCandidateExclusion(unpricedFacts, new Set()), "chat_credits_missing");
+    assert.equal(chatModelFacts(runtime.find((model) => model.id === "gpt-6-2-astra")).registryCredits, true);
+    entries = [
+      entry("gpt-6-luna", ["api"]),
+      entry("gpt-6-2-astra", ["api"]),
+      entry("gpt-6-2-apex", ["api"]),
+      entry("gpt-6-2-unpriced", ["api"]),
+    ];
+    const published = await publish(21);
+    assert.ok(published.some((row) => row.modelId === "gpt-6-2-astra"), "a frontier link is admitted on the coding API");
+    // The link to the unpriced one is refused by the judge, so it is never published.
+    assert.ok(!published.some((row) => row.modelId === "gpt-6-2-unpriced"));
+    const refusedLink = (await loadCodingCatalog()).find((entry) => entry.modelId === "gpt-6-2-unpriced");
+    assert.equal(refusedLink.admission.admitted, false);
+    assert.ok(refusedLink.channelAdmission.api.reasons.includes("chat_credits_missing"));
+
+    // Named directly on the coding API (the list a named request is validated against).
+    const named = await externalApiRunnableModels("Pro", { surface: "coding" });
+    assert.deepEqual(named.map((item) => item.model.id), ["gpt-6-luna", "gpt-6-2-astra", "gpt-6-2-apex"]);
+    assert.ok(named.every((item) => item.nameable === true));
+    const astra = named.find((item) => item.model.id === "gpt-6-2-astra");
+    assert.equal(astra.capabilities.creditWeight, 32, "its own chat credits");
+    assert.equal(astra.catalogPricing, undefined, "a chat link runs and bills as its chat model");
+    assert.equal(named.find((item) => item.model.id === "gpt-6-2-apex").capabilities.creditWeight, 80);
+    // /api/code/v1/models lists them, at those credits.
+    const offered = await externalApiOfferedModels("Pro", { surface: "coding" });
+    assert.deepEqual(offered.map((model) => model.id), ["smart-adaptive", "gpt-6-luna", "gpt-6-2-astra", "gpt-6-2-apex"]);
+    assert.equal(toOpenAiModelEntry(offered.find((model) => model.id === "gpt-6-2-astra")).tomverse.credits_per_request, 32);
+    // Smart Adaptive routes over them too, and the unpriced one is not offered there either.
+    const routed = await externalApiRunnableModels("Pro", { surface: "coding", smartAdaptive: true });
+    assert.deepEqual(routed.map((item) => item.model.id), ["gpt-6-luna", "gpt-6-2-astra", "gpt-6-2-apex"]);
+    // The plan still applies.
+    assert.deepEqual((await externalApiRunnableModels("Free", { surface: "coding" })).map((item) => item.model.id), ["gpt-6-luna"]);
+
+    // The general API: never named, only routed to by Smart Adaptive (owner decision 2026-11-20).
+    assert.deepEqual(await ids("Pro", "general"), ["gpt-6-luna", "gpt-5-6-terra"]);
+    assert.deepEqual((await externalApiOfferedModels("Pro", { surface: "general" })).map((model) => model.id), ["smart-adaptive", "gpt-6-luna", "gpt-5-6-terra"]);
+    const generalRouted = await externalApiRunnableModels("Pro", { surface: "general", smartAdaptive: true });
+    assert.ok(generalRouted.some((item) => item.model.id === "gpt-6-2-astra" && item.nameable === false));
+    // The coding API with its switch off serves the general API's models, by the general rule.
+    setSwitch(undefined);
+    assert.deepEqual(await ids("Pro", "coding"), ["gpt-6-luna", "gpt-5-6-terra"]);
+  } finally {
+    runtime = baseRuntime();
+    setSwitch(undefined);
+  }
+});
+
+test("on the coding catalogue a frontier model is offered without a nameable model of its provider beside it", async () => {
+  setSwitch("true");
+  providerTerms = [];
+  process.env.ANTHROPIC_API_KEY = "test-anthropic-key-not-real";
+  runtime = [
+    ...baseRuntime(),
+    runtimeModel("claude-opus-fixture", { provider: "anthropic", usageClass: "frontier", minimumPlan: "Pro", creditWeight: 40 }),
+  ];
+  try {
+    entries = [entry("gpt-6-luna", ["api"]), entry("claude-opus-fixture", ["api"])];
+    await publish(22);
+    // Named directly there, it is the only Anthropic model on the coding API.
+    assert.deepEqual(await ids("Pro", "coding"), ["gpt-6-luna", "claude-opus-fixture"]);
+    // On the general API, alone for its provider, it is not even a Smart Adaptive candidate.
+    assert.ok(!(await externalApiRunnableModels("Pro", { surface: "general", smartAdaptive: true })).some((item) => item.model.id === "claude-opus-fixture"));
+  } finally {
+    delete process.env.ANTHROPIC_API_KEY;
+    runtime = baseRuntime();
+    setSwitch(undefined);
+  }
+});
+
+// Coding notes for the coding router (owner decision 2026-11-22): a row's notes
+// stand in for chat's bestFor in the router's candidate list, whole; a row
+// without them keeps bestFor; chat's model and router are untouched.
+test("the coding router reads a row's coding notes instead of bestFor, whole, and falls back to bestFor without them", async () => {
+  const { withCandidateModels } = await import(mod("lib/externalApiCatalog.ts"));
+  const { autoLlmRouterCandidates, autoLlmRouterUserMessage } = await import(mod("lib/autoLlmRouterCore.ts"));
+  setSwitch("true");
+  providerTerms = [];
+  runtime = [
+    runtimeModel("gpt-6-luna", { bestFor: "Everyday chat and quick answers" }),
+    runtimeModel("gpt-5-6-terra", { usageClass: "advanced", bestFor: "Careful long-form analysis" }),
+  ];
+  const notes = {
+    strengths: ["Parallel tool calls in one response: " + "p".repeat(80), "Strict JSON schema outputs for plans"],
+    weaknesses: ["Slow on very long contexts: " + "w".repeat(90)],
+    sources: ["https://developers.openai.com/api/docs/guides/function-calling"],
+    draftedAt: "2026-11-22",
+  };
+  try {
+    entries = [entry("gpt-6-luna", ["api"], { codingNotes: notes }), entry("gpt-5-6-terra", ["api"]), dedicatedEntry("coder-x", ["api"], { codingNotes: notes })];
+    await publish(31);
+    // Read from the current rows: the snapshot carries no notes.
+    assert.ok(snapshot.payload.models.every((row) => !("codingNotes" in row)));
+    const runnable = await externalApiRunnableModels("Pro", { surface: "coding", smartAdaptive: true });
+    const byId = new Map(runnable.map((item) => [item.model.id, item]));
+    assert.deepEqual(byId.get("gpt-6-luna").codingNotes, notes);
+    assert.deepEqual(byId.get("coder-x").codingNotes, notes, "a dedicated row's notes too");
+    assert.equal(byId.get("gpt-5-6-terra").codingNotes, undefined);
+
+    const models = withCandidateModels(runtime, runnable);
+    const described = new Map(models.map((model) => [model.id, model.bestFor]));
+    const expected =
+      "Coding strengths: " + notes.strengths.join("; ") + ". Coding weaknesses: " + notes.weaknesses.join("; ") + ".";
+    assert.equal(described.get("gpt-6-luna"), expected);
+    assert.equal(described.get("coder-x"), expected);
+    assert.equal(described.get("gpt-5-6-terra"), "Careful long-form analysis", "no notes: chat's bestFor");
+    // Chat's own model is not changed: only the router's copy.
+    assert.equal(runtime[0].bestFor, "Everyday chat and quick answers");
+
+    // What the router model is sent: the notes whole in the candidate list.
+    const ids = runnable.map((item) => item.model.id);
+    const candidates = autoLlmRouterCandidates(ids, models, Object.fromEntries(runnable.map((item) => [item.model.id, item.capabilities.creditWeight])));
+    const prompt = autoLlmRouterUserMessage("Refactor the billing module", null, candidates);
+    for (const item of [...notes.strengths, ...notes.weaknesses]) assert.ok(prompt.includes(item), "each note whole in the prompt");
+    assert.ok(prompt.includes("Careful long-form analysis"));
+    // The general API reads no coding catalogue, so its router sees bestFor.
+    const general = await externalApiRunnableModels("Pro", { surface: "general", smartAdaptive: true });
+    assert.ok(general.every((item) => item.codingNotes === undefined));
+    assert.equal(withCandidateModels(runtime, general).find((model) => model.id === "gpt-6-luna").bestFor, "Everyday chat and quick answers");
+  } finally {
+    runtime = baseRuntime();
+    setSwitch(undefined);
+  }
+});
+
+// Smart Adaptive never defaults to frontier or apex, on either API
+// (docs/policy/external-api.md 5.1). Nameable on the coding catalogue, they
+// can be the only models of a provider or of the whole list there: Smart
+// Adaptive is then not offered on that protocol or list, and a request for it
+// is refused before any router call, reservation or dispatch.
+const smartRouting = async () => {
+  const { routeSmartAdaptive } = await import(mod("lib/externalApiSmartAdaptive.ts"));
+  const { routeNativeSmartAdaptive } = await import(mod("lib/externalApiNativeSmartAdaptive.ts"));
+  const gateAsked = { count: 0 };
+  const gate = (allowed) => async () => {
+    gateAsked.count += 1;
+    return allowed;
+  };
+  const chatCompletions = (runnable, { keyId = "key-chat", allowed = false, content = "Refactor the parser and add tests" } = {}) =>
+    routeSmartAdaptive({
+      request: { model: "smart-adaptive", messages: [{ role: "user", content }] },
+      runnable,
+      keyId,
+      userId: "user-smart",
+      requestId: `req-${keyId}`,
+      routerAllowed: gate(allowed),
+      idempotencyKeyDigest: null,
+      requestDigest: `digest-${keyId}`,
+      userAgent: "contract-test",
+    });
+  const bodies = {
+    anthropic_messages: { model: "smart-adaptive", max_tokens: 1_000, messages: [{ role: "user", content: [{ type: "text", text: "Fix src/sum.ts" }] }] },
+    responses: { model: "smart-adaptive", max_output_tokens: 1_000, input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Add tests" }] }] },
+  };
+  const native = (protocol, runnable, keyId = `key-${protocol}`) =>
+    routeNativeSmartAdaptive({
+      protocol,
+      request: new Request("http://localhost/native", { method: "POST" }),
+      body: bodies[protocol],
+      runnable,
+      keyId,
+      userId: "user-smart",
+      requestId: `req-${keyId}`,
+      routerAllowed: gate(false),
+      prepare: ({ maxOutputTokens }) => ({ payload: bodies[protocol], outputLimit: Math.min(1_000, maxOutputTokens) }),
+    });
+  return { chatCompletions, native, gateAsked };
+};
+
+test("on the coding catalogue Smart Adaptive is offered only on a protocol with a model it may default to, and never defaults to frontier or apex", async () => {
+  const { codingToolModels } = await import(mod("lib/externalApiCodingTools.ts"));
+  setSwitch("true");
+  providerTerms = [];
+  process.env.ANTHROPIC_API_KEY = "test-anthropic-key-not-real";
+  runtime = [
+    ...baseRuntime(),
+    runtimeModel("claude-opus-fixture", { provider: "anthropic", usageClass: "frontier", minimumPlan: "Pro", creditWeight: 40 }),
+    runtimeModel("gpt-6-2-astra", { usageClass: "frontier", minimumPlan: "Pro", creditWeight: 32 }),
+  ];
+  try {
+    entries = [entry("gpt-6-luna", ["api"]), entry("claude-opus-fixture", ["api"]), entry("gpt-6-2-astra", ["api"])];
+    await publish(23);
+    const offered = await externalApiOfferedModels("Pro", { surface: "coding" });
+    const smart = offered.find((model) => model.id === "smart-adaptive");
+    assert.ok(smart, "offered beside GPT 6 Luna");
+    // Anthropic has only a frontier model here: no Smart Adaptive on Anthropic Messages.
+    assert.deepEqual(smart.protocols, ["chat_completions", "responses"]);
+    assert.deepEqual(Object.keys(smart.creditWeightByProtocol).sort(), ["chat_completions", "responses"]);
+    assert.equal(smart.creditWeight, 40, "the most a request can cost, the router's frontier picks included");
+    assert.equal(smart.creditWeightByProtocol.responses, 32);
+    assert.equal(offered.find((model) => model.id === "claude-opus-fixture").routerPickOnly, true);
+    assert.equal(offered.find((model) => model.id === "gpt-6-luna").routerPickOnly, undefined);
+    // The settings page: Claude Code lists the frontier model by name and no Smart Adaptive.
+    const tools = codingToolModels(offered);
+    assert.deepEqual(tools.claudeCode.map((model) => model.id), ["claude-opus-fixture"]);
+    assert.equal(tools.codex[0].id, "smart-adaptive");
+    assert.equal(
+      tools.codex[0].maxOutputTokens,
+      offered.find((model) => model.id === "gpt-6-luna").maxOutputTokens,
+      "the default's output limit, not the frontier model's"
+    );
+
+    const runnable = await externalApiRunnableModels("Pro", { surface: "coding", smartAdaptive: true });
+    const { chatCompletions, native, gateAsked } = await smartRouting();
+    // Chat Completions with no router answer: GPT 6 Luna, never a frontier model.
+    const plain = await chatCompletions(runnable, { keyId: "key-default" });
+    assert.equal(plain.entry.model.id, "gpt-6-luna");
+    assert.equal(plain.routedBy, "default");
+    // The router may still pick a frontier model; it is charged that model's own credits.
+    routerPick = "claude-opus-fixture";
+    const picked = await chatCompletions(runnable, { keyId: "key-router", allowed: true });
+    assert.equal(picked.entry.model.id, "claude-opus-fixture");
+    assert.equal(picked.routedBy, "router");
+    assert.equal(picked.entry.capabilities.creditWeight, 40);
+    routerPick = null;
+    // Responses (Codex) defaults to GPT 6 Luna; Anthropic Messages has nothing to default to and is not offered.
+    const codex = await native("responses", runnable);
+    assert.equal(codex.entry.model.id, "gpt-6-luna");
+    assert.equal(codex.routedBy, "default");
+    const asked = gateAsked.count;
+    const calls = routerCalls.length;
+    assert.equal(await native("anthropic_messages", runnable), null);
+    assert.equal(gateAsked.count, asked, "no router gate asked");
+    assert.equal(routerCalls.length, calls, "no router call");
+    // Naming the frontier model directly still runs on the coding catalogue.
+    assert.ok((await externalApiRunnableModels("Pro", { surface: "coding" })).some((item) => item.model.id === "claude-opus-fixture"));
+  } finally {
+    routerPick = null;
+    delete process.env.ANTHROPIC_API_KEY;
+    runtime = baseRuntime();
+    setSwitch(undefined);
+  }
+});
+
+test("a coding catalogue of frontier and apex models only lists no Smart Adaptive and refuses it before any router call; naming one still runs", async () => {
+  setSwitch("true");
+  providerTerms = [];
+  process.env.ANTHROPIC_API_KEY = "test-anthropic-key-not-real";
+  runtime = [
+    ...baseRuntime(),
+    runtimeModel("claude-opus-fixture", { provider: "anthropic", usageClass: "frontier", minimumPlan: "Pro", creditWeight: 40 }),
+    runtimeModel("gpt-6-2-apex", { usageClass: "apex", minimumPlan: "Pro", creditWeight: 80 }),
+  ];
+  try {
+    entries = [entry("claude-opus-fixture", ["api"]), entry("gpt-6-2-apex", ["api"])];
+    await publish(24);
+    const offered = await externalApiOfferedModels("Pro", { surface: "coding" });
+    assert.deepEqual(offered.map((model) => model.id).sort(), ["claude-opus-fixture", "gpt-6-2-apex"], "no smart-adaptive");
+    const runnable = await externalApiRunnableModels("Pro", { surface: "coding", smartAdaptive: true });
+    assert.equal(runnable.length, 2);
+    const { chatCompletions, native, gateAsked } = await smartRouting();
+    const calls = routerCalls.length;
+    routerPick = "gpt-6-2-apex";
+    // Refused (null: the caller answers 404 model_not_found) with no gate asked and no router call.
+    assert.equal(await chatCompletions(runnable, { keyId: "key-only-frontier", allowed: true }), null);
+    assert.equal(await native("anthropic_messages", runnable), null);
+    assert.equal(await native("responses", runnable), null);
+    assert.equal(gateAsked.count, 0);
+    assert.equal(routerCalls.length, calls);
+    // A client naming one of them is served from the list a named request is validated against.
+    assert.deepEqual(
+      (await externalApiRunnableModels("Pro", { surface: "coding" })).map((item) => item.model.id).sort(),
+      ["claude-opus-fixture", "gpt-6-2-apex"]
+    );
+  } finally {
+    routerPick = null;
+    delete process.env.ANTHROPIC_API_KEY;
+    runtime = baseRuntime();
+    setSwitch(undefined);
+  }
 });

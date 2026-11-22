@@ -2,16 +2,20 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { CodingCandidates, CodingChannelsTile, CodingLinkDetail } from "@/components/admin/modelCatalog/CodingLinkViews";
+import { CodingCandidates, CodingChannelsTile, CodingLinkDetail, CodingNotesTile } from "@/components/admin/modelCatalog/CodingLinkViews";
 import { CapabilityFillBar, CodingChannelBanner, CodingModelTable, CodingSummary } from "@/components/admin/modelCatalog/CodingListViews";
 import { adminMessagesFor } from "@/lib/adminLocale";
 import { adminCodingCatalogMessages } from "@/lib/adminMessages/codingCatalog";
 import { adminModelCatalogMessages } from "@/lib/adminMessages/modelCatalog";
 import {
+  CODING_STRUCTURED_OUTPUT_VALUES,
   type CodingLinkAllResult,
   capabilityFillTargets,
+  codingStructuredOutputShown,
   codingCatalogItems,
   codingDedicatedSettings,
+  codingNotesProblems,
+  codingNotesRequest,
   codingSettingsFrom,
   codingSettingsProblems,
   codingSettingsRequest,
@@ -315,8 +319,59 @@ test("a link that cannot be activated says why, and an unsaved change blocks act
   assert.match(html.match(/<button[^>]*data-testid="coding-link-activate"[^>]*>/)?.[0] ?? "", / disabled=""/);
 });
 
+test("structured output is two choices on screen; a finer stored value reads as supported and is written only on a save", () => {
+  // The fixture link was stored with "forced_tool_use", before the two choices (owner decision 2026-11-22).
+  const legacy = sonnet.link!;
+  assert.equal(legacy.capabilities.structuredOutput, "forced_tool_use");
+  assert.deepEqual(CODING_STRUCTURED_OUTPUT_VALUES, ["supported", "none"]);
+  const value = codingSettingsFrom(legacy);
+  assert.equal(value.structuredOutput, "supported");
+  // Opened and left alone: nothing is sent, so the row and its snapshot hash stay as they are.
+  assert.deepEqual(codingSettingsRequest(legacy, value), {});
+  // Saved with another change: the stored value is written as the shown choice.
+  assert.deepEqual(codingSettingsRequest(legacy, { ...value, channels: ["api"] }), { channels: ["api"], structuredOutput: "supported" });
+  assert.deepEqual(codingSettingsRequest(legacy, { ...value, structuredOutput: "none" }), { structuredOutput: "none" });
+  // A link already on a choice sends it only when it changes.
+  const current = { ...legacy, capabilities: { ...legacy.capabilities, structuredOutput: "supported" } };
+  assert.deepEqual(codingSettingsRequest(current, { ...codingSettingsFrom(current), channels: ["api"] }), { channels: ["api"] });
+  for (const stored of ["none", "supported", "json_mode", "strict_schema", "forced_tool_use", "response_schema"]) {
+    assert.equal(codingStructuredOutputShown(stored), stored === "none" ? "none" : "supported", stored);
+  }
+
+  const html = renderToStaticMarkup(
+    <CodingLinkDetail
+      c={c}
+      item={sonnet}
+      value={value}
+      busy={false}
+      reasonText={reason}
+      toolCallingLabel={(entry) => m.codingFlow.toolCalling[entry] ?? entry}
+      structuredOutputLabel={(entry) => m.codingFlow.structuredOutput[entry] ?? entry}
+      stepperLabel={m.stepperLabel}
+      stepStates={m.stepStates}
+      onBack={noop}
+      onChange={noop}
+      onReset={noop}
+      onSave={noop}
+      onActivate={noop}
+      onHold={noop}
+      onUnlink={noop}
+      fill={fillReady}
+    />
+  );
+  const select = html.match(/<select[^>]*data-testid="coding-link-structured"[^>]*>[\s\S]*?<\/select>/)?.[0] ?? "";
+  assert.deepEqual([...select.matchAll(/<option value="([^"]+)"[^>]*>([^<]+)</g)].map((match) => [match[1], match[2]]), [
+    ["supported", "지원"],
+    ["none", "지원 안 함"],
+  ]);
+  assert.match(select, /<option value="supported" selected="">/);
+  assert.doesNotMatch(select, /forced_tool_use|json_mode|strict_schema|response_schema/);
+  // The stored value is still the one the LLM drafted from the pages, so its origin chip stays.
+  assert.match(html, />LLM 초안</);
+});
+
 test("the settings request sends only what changed, and null puts an override back to chat", () => {
-  const link = sonnet.link!;
+  const link = { ...sonnet.link!, capabilities: { ...sonnet.link!.capabilities, structuredOutput: "supported" } };
   const value = codingSettingsFrom(link);
   assert.deepEqual(codingSettingsRequest(link, value), {});
   assert.deepEqual(codingSettingsRequest(link, { ...value, creditWeight: "", channels: ["api"] }), {
@@ -577,14 +632,28 @@ test("the fill bar counts the rows to fill, shows N/M while it runs, and lists w
     [apiOnlyItem, ...items],
     ["openai"]
   );
-  // The registry-made link of a provider with pages is a target; the drafted ones (with pages read) are not.
+  // The registry-made link of a provider with pages is a target. The drafted
+  // links (pages read) and the dedicated row have no coding notes yet, so they
+  // are fill targets too (owner decision 2026-11-22), here of providers without pages.
   assert.deepEqual(targets.map((item) => item.id), ["gpt-6-luna"]);
   assert.deepEqual(capabilityFillTargets([apiOnlyItem], []).unsupported.map((item) => item.id), ["gpt-6-luna"]);
-  assert.equal(unsupported.length, 0);
+  assert.deepEqual(unsupported.map((item) => item.id), ["claude-sonnet-4-6", "kimi-k3", "devstral-2"]);
+  assert.deepEqual(
+    capabilityFillTargets(items, ["anthropic", "moonshot", "mistral"]).targets.map((item) => item.id),
+    ["claude-sonnet-4-6", "kimi-k3", "devstral-2"]
+  );
+  // With notes, a row whose capabilities came from the pages is no longer a target; a dedicated row neither.
+  const noted = codingCatalogItems({
+    models: report.models.map((row) => ({
+      ...row,
+      stored: { ...(row.stored ?? {}), codingNotes: { strengths: ["Parallel tool calls"], weaknesses: [], sources: [], draftedAt: "2026-11-22" } },
+    })),
+  });
+  assert.deepEqual(capabilityFillTargets(noted, ["anthropic", "moonshot", "mistral"]).targets, []);
 
   const barProps = { c, count: 3, skipped: 1, configured: true, env: "MODEL_CATALOG_DRAFT_LLM_MODEL_ID", progress: null, result: null, reasonText: reason, onFillAll: noop, onClose: noop };
   const idle = renderToStaticMarkup(<CapabilityFillBar {...barProps} />);
-  assert.match(idle, />정보 없는 행 3개 모두 채우기</);
+  assert.match(idle, />기능 정보나 장단점이 없는 행 3개 모두 채우기</);
   assert.doesNotMatch(idle.match(/<button[^>]*data-testid="coding-fill-all"[^>]*>/)?.[0] ?? "", / disabled=""/);
   const running = renderToStaticMarkup(<CapabilityFillBar {...barProps} progress={{ done: 1, total: 3 }} />);
   assert.match(running, /data-testid="coding-fill-progress" data-done="1" data-total="3"/);
@@ -606,4 +675,43 @@ test("the fill bar counts the rows to fill, shows N/M while it runs, and lists w
   assert.match(done, /시간 초과 뒤 멈췄습니다/);
   // Nothing to fill and nothing running: the bar is not drawn.
   assert.equal(renderToStaticMarkup(<CapabilityFillBar {...barProps} count={0} />), "");
+});
+
+test("the coding notes tile shows the notes and the pages they stand on, takes one note per line, and holds the limits", () => {
+  // Owner decision 2026-11-22: what the coding API's router reads instead of chat's bestFor.
+  const notesOn = (codingNotes: unknown) =>
+    codingCatalogItems({ models: [{ ...report.models[0], stored: { ...stored, codingNotes } }] })[0];
+  const drafted = notesOn({
+    strengths: ["Parallel tool calls in one response", "Strict tool schemas"],
+    weaknesses: ["No JSON schema on the batch API"],
+    sources: ["https://docs.anthropic.com/en/docs/build-with-claude/tool-use"],
+    draftedAt: "2026-11-22",
+  });
+  const html = renderToStaticMarkup(<CodingNotesTile c={c} item={drafted} busy={false} onSave={noop} />);
+  assert.match(html, /data-testid="coding-notes"/);
+  assert.match(html, /<ul[^>]*data-testid="coding-notes-strengths"[^>]*><li>Parallel tool calls in one response<\/li><li>Strict tool schemas<\/li><\/ul>/);
+  assert.match(html, /<ul[^>]*data-testid="coding-notes-weaknesses"[^>]*><li>No JSON schema on the batch API<\/li><\/ul>/);
+  assert.match(html, /docs\.anthropic\.com\/en\/docs\/build-with-claude\/tool-use/);
+  assert.match(html, /2026-11-22 작성/);
+  // The edit fields start at the stored notes, one per line; nothing changed, so nothing to save.
+  assert.match(html, /<textarea[^>]*data-testid="coding-notes-strengths-input"[^>]*>Parallel tool calls in one response\nStrict tool schemas<\/textarea>/);
+  assert.match(html.match(/<button[^>]*data-testid="coding-notes-save"[^>]*>/)?.[0] ?? "", / disabled=""/);
+  // Written by the operator: no page, and the edit date.
+  const own = renderToStaticMarkup(
+    <CodingNotesTile c={c} item={notesOn({ strengths: ["Fast on short edits"], weaknesses: [], sources: [], draftedAt: "2026-11-20", editedAt: "2026-11-22" })} busy={false} onSave={noop} />
+  );
+  assert.match(own, /운영자 입력/);
+  assert.match(own, /2026-11-20 작성 · 2026-11-22 수정/);
+  // None yet.
+  const empty = renderToStaticMarkup(<CodingNotesTile c={c} item={items[0]} busy={false} onSave={noop} />);
+  assert.match(empty, /data-testid="coding-notes-empty"/);
+
+  // The typed lines, the limits the server holds them to, and an empty pair removing them.
+  assert.deepEqual(codingNotesRequest({ strengths: " Parallel tool calls \n\n Strict schemas ", weaknesses: "" }), {
+    strengths: ["Parallel tool calls", "Strict schemas"],
+    weaknesses: [],
+  });
+  assert.equal(codingNotesRequest({ strengths: "\n ", weaknesses: "" }), null);
+  assert.deepEqual(codingNotesProblems({ strengths: "a\nb\nc\nd", weaknesses: "x".repeat(121) }), { strengths: "too_many", weaknesses: "too_long" });
+  assert.deepEqual(codingNotesProblems({ strengths: "a\nb\nc", weaknesses: "x".repeat(120) }), {});
 });

@@ -24,7 +24,7 @@ Sentry.init({
   // under production while the same process answered "staging".
   environment: resolveSentryEnvironmentTag(),
   release: process.env.SENTRY_RELEASE || process.env.RAILWAY_GIT_COMMIT_SHA,
-  // VercelAI locks streamed OpenAI model calls; see lib/sentryServerIntegrations.ts.
+  // Keep the VercelAI subscriber off the model stream.
   integrations: withoutDisabledServerIntegrations,
   // Sentry 11 replaced `sendDefaultPii: false` with `dataCollection`, and an
   // unset `dataCollection` collects user info, cookies, bodies and AI/MCP

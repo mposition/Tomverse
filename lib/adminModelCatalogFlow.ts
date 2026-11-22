@@ -148,6 +148,7 @@ export type ReasonMessage =
   | { key: "noToolCalling" }
   | { key: "noStructuredOutput" }
   | { key: "noCapabilitySource" }
+  | { key: "noCodingNotes" }
   | { key: "timeoutUnknown" }
   | { key: "draftFailed" }
   | { key: "noProfile" }
@@ -157,6 +158,7 @@ export type ReasonMessage =
   | { key: "chatModelDeleted" }
   | { key: "chatModelDisabled" }
   | { key: "chatPriceUnverified" }
+  | { key: "chatCreditsMissing" }
   | { key: "reasoningCostUnbounded" }
   | { key: "providerCostUnbounded" }
   | { key: "alreadyInCatalog" }
@@ -216,6 +218,8 @@ export const reasonMessage = (code: string, detail = ""): ReasonMessage => {
       return { key: "noStructuredOutput" };
     case "no_capability_source":
       return { key: "noCapabilitySource" };
+    case "no_coding_notes":
+      return { key: "noCodingNotes" };
     case "timeout_outcome_unknown":
       return { key: "timeoutUnknown" };
     case "draft_failed":
@@ -276,6 +280,8 @@ export const reasonMessage = (code: string, detail = ""): ReasonMessage => {
       return { key: "chatModelDisabled" };
     case "chat_price_unverified":
       return { key: "chatPriceUnverified" };
+    case "chat_credits_missing":
+      return { key: "chatCreditsMissing" };
     case "reasoning_cost_unbounded":
       return { key: "reasoningCostUnbounded" };
     case "provider_cost_unbounded":
@@ -496,6 +502,15 @@ export type CodingProfileView = {
   terms?: { allowsResaleAndCodingAgent: boolean; url: string; checkedAt: string };
   retention?: { url: string; checkedAt: string };
   processingRegion?: string;
+  /**
+   * A dedicated draft's basis (lib/modelCatalogCore.ts codingDraftBasisSchema):
+   * whether the output cap is the pages' or the 8,192 default, and the input-size
+   * price tiers the pages list. Absent on rows drafted before it and on resolved rows.
+   */
+  basis?: {
+    maxOutputTokens: "documented" | "default";
+    priceTiers?: { upToInputTokens: number | null; inputUsdPerMTok: number; outputUsdPerMTok: number }[];
+  };
 };
 
 /** A resolved row reads the same as a profile. */
@@ -520,6 +535,61 @@ export type ChatFactsView = {
   price: { inputUsdPerMTok: number; outputUsdPerMTok: number; pricingVersion: string; effectiveDate: string; verified: boolean };
 };
 
+/**
+ * A coding row's strengths and weaknesses at coding work (owner decision
+ * 2026-11-22; lib/modelCatalogCore.ts codingNotesSchema): what the coding API's
+ * router reads instead of chat's bestFor. Empty sources: written by the operator.
+ */
+export type CodingNotesView = {
+  strengths: string[];
+  weaknesses: string[];
+  sources: string[];
+  draftedAt: string;
+  editedAt?: string;
+};
+
+/** The limits a note is held to (lib/modelCatalogCore.ts CODING_NOTE_MAX_CHARS, CODING_NOTES_MAX_ITEMS). */
+export const CODING_NOTE_MAX_CHARS = 120;
+export const CODING_NOTES_MAX_ITEMS = 3;
+
+const looksLikeNotes = (value: unknown): value is CodingNotesView => {
+  const v = value as Partial<CodingNotesView> | null;
+  return Boolean(v && Array.isArray(v.strengths) && Array.isArray(v.weaknesses) && Array.isArray(v.sources));
+};
+
+/** A stored row's notes when it has at least one; null when it has none. */
+export const codingNotesFrom = (stored: unknown): CodingNotesView | null => {
+  const notes = (stored as { codingNotes?: unknown } | null)?.codingNotes;
+  return looksLikeNotes(notes) && notes.strengths.length + notes.weaknesses.length > 0 ? notes : null;
+};
+
+/** One list as typed in a textarea: one note per line, blank lines dropped. */
+export const codingNoteLines = (text: string): string[] =>
+  text
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter((line) => line.length > 0);
+
+export type CodingNotesProblem = "too_many" | "too_long";
+
+/** What the typed notes would be refused for (the server holds them to the same limits). */
+export const codingNotesProblems = (value: { strengths: string; weaknesses: string }): Partial<Record<"strengths" | "weaknesses", CodingNotesProblem>> => {
+  const problems: Partial<Record<"strengths" | "weaknesses", CodingNotesProblem>> = {};
+  for (const field of ["strengths", "weaknesses"] as const) {
+    const lines = codingNoteLines(value[field]);
+    if (lines.length > CODING_NOTES_MAX_ITEMS) problems[field] = "too_many";
+    else if (lines.some((line) => line.length > CODING_NOTE_MAX_CHARS)) problems[field] = "too_long";
+  }
+  return problems;
+};
+
+/** The settings request for typed notes: null when both lists are empty (the notes are removed). */
+export const codingNotesRequest = (value: { strengths: string; weaknesses: string }) => {
+  const strengths = codingNoteLines(value.strengths);
+  const weaknesses = codingNoteLines(value.weaknesses);
+  return strengths.length + weaknesses.length === 0 ? null : { strengths, weaknesses };
+};
+
 /** A chat link's own stored values. */
 export type CodingLinkView = {
   registryModelId: string;
@@ -540,7 +610,18 @@ export const CODING_CHANNEL_ORDER = ["code", "api"] as const;
 export const codingChannelsShown = (channels: readonly string[]): string[] =>
   CODING_CHANNEL_ORDER.filter((channel) => (channel === "api" ? channels.includes("api") || channels.includes("cli") : channels.includes(channel)));
 export const CODING_TOOL_CALLING_VALUES = ["none", "basic", "parallel"] as const;
-export const CODING_STRUCTURED_OUTPUT_VALUES = ["none", "json_mode", "strict_schema", "forced_tool_use", "response_schema"] as const;
+/**
+ * The two structured output choices the screen shows and saves (owner decision
+ * 2026-11-22; lib/modelCatalogCore.ts CODING_STRUCTURED_OUTPUT_CHOICES).
+ */
+export const CODING_STRUCTURED_OUTPUT_VALUES = ["supported", "none"] as const;
+/**
+ * A stored value as the screen shows it. A finer value stored before the two
+ * choices ("json_mode", "strict_schema", ...) reads as supported and stays
+ * stored as it is until the operator saves the row's settings.
+ */
+export const codingStructuredOutputShown = (value: string): (typeof CODING_STRUCTURED_OUTPUT_VALUES)[number] =>
+  value === "none" ? "none" : "supported";
 
 /**
  * A dedicated row's two credits (owner decision 2026-11-21): Code's
@@ -588,6 +669,8 @@ export type CodingCatalogItem = {
   draftCreatedAt: string | null;
   /** The draft's floor and the judge's reasons at the draft's own values. */
   draftReview: { floor: number | null; reasons: string[] } | null;
+  /** The row's coding notes, from the stored row; null when it has none. */
+  codingNotes: CodingNotesView | null;
   raw: unknown;
 };
 
@@ -658,6 +741,7 @@ export const codingCatalogItems = (report: {
       draft,
       draftCreatedAt: row.draftCreatedAt ?? null,
       draftReview: row.draftReview ?? null,
+      codingNotes: codingNotesFrom(row.stored),
       raw: row,
     };
   });
@@ -712,10 +796,14 @@ export type CodingSettingsValue = {
   channels: string[];
 };
 
-/** The settings form's starting values from a link's stored ones. */
+/**
+ * The settings form's starting values from a link's stored ones. Structured
+ * output starts at its shown choice; a finer stored value is written as that
+ * choice only when the operator saves (codingSettingsRequest).
+ */
 export const codingSettingsFrom = (link: CodingLinkView): CodingSettingsValue => ({
   toolCalling: link.capabilities.toolCalling,
-  structuredOutput: link.capabilities.structuredOutput,
+  structuredOutput: codingStructuredOutputShown(link.capabilities.structuredOutput),
   minimumPlan: link.minimumPlan ?? "",
   creditWeight: link.creditWeight === undefined ? "" : String(link.creditWeight),
   channels: codingChannelsShown(link.channels),
@@ -763,6 +851,13 @@ export const codingSettingsRequest = (link: CodingLinkView, value: CodingSetting
   if (value.creditWeight.trim() !== before.creditWeight) out.creditWeight = value.creditWeight.trim() === "" ? null : Number(value.creditWeight);
   const channels = CODING_CHANNEL_ORDER.filter((channel) => value.channels.includes(channel));
   if (channels.join(",") !== before.channels.join(",")) out.channels = channels;
+  // A save of a link stored with a finer structured output value writes it as
+  // the shown choice; with nothing else changed nothing is sent, so the row
+  // (and its snapshot hash) stays as it is.
+  const stored = link.capabilities.structuredOutput;
+  if (Object.keys(out).length > 0 && out.structuredOutput === undefined && !(CODING_STRUCTURED_OUTPUT_VALUES as readonly string[]).includes(stored)) {
+    out.structuredOutput = value.structuredOutput;
+  }
   return out;
 };
 
@@ -949,17 +1044,24 @@ export const codingAttentionCounts = (items: readonly CodingCatalogItem[]) => {
 };
 
 /**
- * The chat links that still carry the registry's conservative capability values
- * (structured output None, or no documentation read), split into the ones the
- * LLM can fill (the provider has default pages) and the ones it cannot.
+ * The rows a fill run is for (lib/codingCatalogAdmin.ts capabilitiesNeedFilling):
+ * chat links that still carry the registry's conservative capability values
+ * (structured output None, or no documentation read), and any readable row --
+ * a link or a dedicated row -- with no coding notes yet (owner decision
+ * 2026-11-22), split into the ones the LLM can fill (the provider has default
+ * pages) and the ones it cannot.
  */
 export const capabilityFillTargets = (
   items: readonly CodingCatalogItem[],
   providers: readonly string[]
 ): { targets: CodingCatalogItem[]; unsupported: CodingCatalogItem[] } => {
-  const needing = items.filter(
-    (item) => item.source === "chat" && item.link !== null && (item.link.capabilities.structuredOutput === "none" || capabilityOrigin(item.link) === "registry")
-  );
+  const needing = items.filter((item) => {
+    if (item.source === "chat") {
+      if (item.link === null) return false;
+      return item.link.capabilities.structuredOutput === "none" || capabilityOrigin(item.link) === "registry" || item.codingNotes === null;
+    }
+    return item.source === "dedicated" && item.profile !== null && item.codingNotes === null;
+  });
   return {
     targets: needing.filter((item) => providers.includes(item.provider)),
     unsupported: needing.filter((item) => !providers.includes(item.provider)),

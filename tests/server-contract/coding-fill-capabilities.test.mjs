@@ -115,6 +115,8 @@ const registryLink = (overrides = {}) => ({
 });
 
 const calls = { llm: 0, pages: [] };
+/** What the default answer gives as coding notes; null leaves the default. */
+let notesAnswer = null;
 const pagesOf = (provider) => {
   const sources = defaultCodingCapabilitySources(provider);
   return [sources.toolCalling, sources.structuredOutput];
@@ -125,10 +127,16 @@ const deps = (overrides = {}) => ({
       calls.llm += 1;
       return {
         toolCalling: "parallel",
+        // A finer value than the two choices: the save writes "supported" (owner decision 2026-11-22).
         structuredOutput: "strict_schema",
         note: "Both stated on the pages.",
         sources: pages.map((page) => page.url),
         draftedAt: "2026-11-21",
+        codingNotes: notesAnswer ?? {
+          strengths: ["Parallel tool calls in one response", "Strict JSON schema outputs"],
+          weaknesses: ["No structured output with some tools"],
+          sourceUrls: pages.map((page) => page.url),
+        },
       };
     },
   }),
@@ -146,6 +154,7 @@ const reset = (profile = registryLink(), enabled = null) => {
   state.facts = [facts()];
   calls.llm = 0;
   calls.pages = [];
+  notesAnswer = null;
 };
 const fill = (overrides) => fillLinkCapabilities({ modelId: "gpt-a", session, deps: deps(overrides) });
 
@@ -155,7 +164,8 @@ test("one call over the provider's two pages fills the capabilities and sources,
   assert.equal(calls.llm, 1);
   assert.deepEqual(calls.pages, pagesOf("openai"));
   const profile = state.row.profile;
-  assert.deepEqual(profile.capabilities, { toolCalling: "parallel", structuredOutput: "strict_schema" });
+  assert.deepEqual(profile.capabilities, { toolCalling: "parallel", structuredOutput: "supported" });
+  assert.equal(profile.evidence.structuredOutput, "supported");
   assert.deepEqual(profile.evidence.sources, pagesOf("openai"));
   assert.equal(profile.evidence.draftedAt, "2026-11-21");
   assert.equal(profile.evidence.note, "Both stated on the pages.");
@@ -163,25 +173,125 @@ test("one call over the provider's two pages fills the capabilities and sources,
   assert.deepEqual(profile.channels, ["api"]);
   assert.deepEqual(result.changes, [
     { field: "toolCalling", from: "basic", to: "parallel" },
-    { field: "structuredOutput", from: "none", to: "strict_schema" },
+    { field: "structuredOutput", from: "none", to: "supported" },
+    {
+      field: "codingNotes",
+      from: null,
+      to: {
+        strengths: ["Parallel tool calls in one response", "Strict JSON schema outputs"],
+        weaknesses: ["No structured output with some tools"],
+        sources: pagesOf("openai"),
+        draftedAt: "2026-11-21",
+      },
+    },
   ]);
+  // The same call wrote the coding notes, standing on the pages it read (owner decision 2026-11-22).
+  assert.deepEqual(profile.codingNotes, result.changes.at(-1).to);
+  assert.deepEqual(state.audits[0].metadata.codingNotes, profile.codingNotes);
   // The write goes through the one judge's door (updateCatalogEntry), naming the changed fields.
   assert.equal(state.updates.length, 1);
   assert.deepEqual(state.updates[0].provenance, { codingSettings: result.changes });
   assert.equal(state.audits.length, 1);
   assert.equal(state.audits[0].action, "model_catalog.coding_capabilities_filled");
   assert.deepEqual(state.audits[0].metadata.sources, pagesOf("openai"));
-  assert.equal(state.audits[0].metadata.structuredOutput, "strict_schema");
+  assert.equal(state.audits[0].metadata.structuredOutput, "supported");
   // The row no longer needs filling for the registry's sake.
   assert.equal(capabilitiesNeedFilling(profile), false);
 });
 
-test("what needs filling: structured output none, or no page read", () => {
+test("what needs filling: structured output none, no page read, or no coding notes", () => {
   assert.equal(capabilitiesNeedFilling(registryLink()), true);
   assert.equal(capabilitiesNeedFilling(registryLink({ capabilities: { toolCalling: "basic", structuredOutput: "json_mode" } })), true);
   const read = { sources: ["https://developers.openai.com/api/docs/guides/function-calling"], draftedAt: "2026-11-20", toolCalling: "basic", structuredOutput: "json_mode" };
-  assert.equal(capabilitiesNeedFilling(registryLink({ capabilities: { toolCalling: "basic", structuredOutput: "json_mode" }, evidence: read })), false);
-  assert.equal(capabilitiesNeedFilling(registryLink({ capabilities: { toolCalling: "basic", structuredOutput: "none" }, evidence: read })), true);
+  const notes = { strengths: ["Parallel tool calls"], weaknesses: [], sources: [read.sources[0]], draftedAt: "2026-11-22" };
+  // Capabilities read from the pages but no notes yet: still a target (owner decision 2026-11-22).
+  assert.equal(capabilitiesNeedFilling(registryLink({ capabilities: { toolCalling: "basic", structuredOutput: "json_mode" }, evidence: read })), true);
+  assert.equal(capabilitiesNeedFilling(registryLink({ capabilities: { toolCalling: "basic", structuredOutput: "json_mode" }, evidence: read, codingNotes: notes })), false);
+  assert.equal(capabilitiesNeedFilling(registryLink({ capabilities: { toolCalling: "basic", structuredOutput: "none" }, evidence: read, codingNotes: notes })), true);
+  // Two empty lists are no notes.
+  assert.equal(
+    capabilitiesNeedFilling(registryLink({ capabilities: { toolCalling: "basic", structuredOutput: "json_mode" }, evidence: read, codingNotes: { ...notes, strengths: [] } })),
+    true
+  );
+});
+
+test("coding notes that stand on a page that is not the provider's, or was not read, are refused with nothing written", async () => {
+  for (const sourceUrls of [["https://blog.example/claude-is-great"], ["https://developers.openai.com/api/docs/models/gpt-a"]]) {
+    reset();
+    notesAnswer = { strengths: ["Best coder ever"], weaknesses: [], sourceUrls };
+    const before = structuredClone(state.row);
+    await assert.rejects(fill(), (error) => error instanceof CatalogRefusal && error.code === "unofficial_source" && error.reasons[0] === sourceUrls[0]);
+    assert.equal(calls.llm, 1, "one call, refused after it");
+    assert.deepEqual(state.row, before);
+    assert.deepEqual(state.audits, []);
+    assert.deepEqual(state.updates, []);
+  }
+});
+
+test("notes with no page to stand on are not written; the capabilities still are", async () => {
+  reset();
+  notesAnswer = { strengths: ["Fast"], weaknesses: ["Weak at long contexts"], sourceUrls: [] };
+  const result = await fill();
+  assert.equal(state.row.profile.codingNotes, undefined);
+  assert.ok(!result.changes.some((change) => change.field === "codingNotes"));
+  assert.deepEqual(state.row.profile.capabilities, { toolCalling: "parallel", structuredOutput: "supported" });
+  // A row that already has notes keeps them when a fill finds none.
+  const kept = { strengths: ["Parallel tool calls"], weaknesses: [], sources: pagesOf("openai").slice(0, 1), draftedAt: "2026-11-20" };
+  reset(registryLink({ codingNotes: kept }));
+  notesAnswer = { strengths: [], weaknesses: [], sourceUrls: [] };
+  await fill();
+  assert.deepEqual(state.row.profile.codingNotes, kept);
+});
+
+test("a dedicated row is filled with its coding notes only; with none on the pages nothing is written", async () => {
+  const dedicated = {
+    source: "dedicated",
+    name: "Coder X",
+    provider: "openai",
+    apiModelId: "coder-x",
+    minimumPlan: "Pro",
+    capabilities: { toolCalling: "parallel", structuredOutput: "supported", imageInput: false, maxContextTokens: 64_000, maxOutputTokens: 8_192 },
+    pricing: { inputUsdPerMTok: 0.2, outputUsdPerMTok: 0.8, creditWeight: 7, verifiedAt: "2026-11-22", sources: ["https://developers.openai.com/api/docs/pricing"] },
+    channels: ["code", "api"],
+  };
+  reset(dedicated);
+  const result = await fill();
+  assert.equal(calls.llm, 1);
+  assert.deepEqual(calls.pages, pagesOf("openai"));
+  const profile = state.row.profile;
+  // The draft's capabilities and everything else stay; only the notes are added.
+  const { codingNotes, ...rest } = profile;
+  assert.deepEqual(rest, dedicated);
+  assert.deepEqual(codingNotes.strengths, ["Parallel tool calls in one response", "Strict JSON schema outputs"]);
+  assert.deepEqual(codingNotes.sources, pagesOf("openai"));
+  assert.deepEqual(result.changes.map((change) => change.field), ["codingNotes"]);
+  assert.equal(state.audits[0].metadata.source, "dedicated");
+
+  reset(dedicated);
+  notesAnswer = { strengths: [], weaknesses: [], sourceUrls: [] };
+  const before = structuredClone(state.row);
+  await assert.rejects(fill(), (error) => error instanceof CatalogRefusal && error.code === "no_coding_notes");
+  assert.deepEqual(state.row, before);
+  assert.deepEqual(state.audits, []);
+});
+
+test("a provider with JSON mode only (DeepSeek) is filled as supported structured output", async () => {
+  // DeepSeek documents response_format json_object and no schema; JSON mode counts (owner decision 2026-11-22).
+  reset();
+  state.facts = [facts({ provider: "deepseek", apiModelId: "deepseek-chat" })];
+  const pages = pagesOf("deepseek");
+  const result = await fill({
+    draftLlm: async () => ({
+      draftCodingCapabilities: async () => {
+        calls.llm += 1;
+        return { toolCalling: "parallel", structuredOutput: "json_mode", note: "JSON mode: response_format json_object.", sources: pages, draftedAt: "2026-11-22" };
+      },
+    }),
+  });
+  assert.equal(calls.llm, 1);
+  assert.deepEqual(calls.pages, pages);
+  assert.deepEqual(state.row.profile.capabilities, { toolCalling: "parallel", structuredOutput: "supported" });
+  assert.deepEqual(result.changes.find((change) => change.field === "structuredOutput"), { field: "structuredOutput", from: "none", to: "supported" });
 });
 
 test("a timeout is an unknown outcome: reported, never retried, the row unchanged and nothing audited", async () => {
@@ -237,7 +347,7 @@ test("every page the answer stands on must be the provider's own, or nothing is 
   assert.deepEqual(state.audits, []);
 });
 
-test("it needs the draft model and pages for the provider, and only a chat link is filled", async () => {
+test("it needs the draft model and pages for the provider, and a row that parses", async () => {
   reset();
   await assert.rejects(fill({ draftLlm: async () => null }), (error) => error.code === "draft_llm_not_configured" && error.status === 409);
   assert.deepEqual(calls.pages, [], "nothing is fetched while the draft model is off");
@@ -245,6 +355,7 @@ test("it needs the draft model and pages for the provider, and only a chat link 
   state.facts = [facts({ provider: "openrouter" })];
   await assert.rejects(fill(), (error) => error.code === "no_capability_source");
   assert.equal(calls.llm, 0);
+  // A row whose stored profile does not parse is refused (a dedicated row that parses takes its notes, above).
   reset({ name: "Dedicated", provider: "qwen" });
   await assert.rejects(fill(), (error) => error.code === "settings_linked_only");
   reset();

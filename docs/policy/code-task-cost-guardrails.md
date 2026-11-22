@@ -127,6 +127,45 @@ migration 적용은 별도입니다. 구현한 A1 범위와 확정 값은 10절�
 
 - **코딩 전용 행**(`profile.source`가 없거나 `dedicated`): 채팅에 없는 모델입니다. 위 6절대로
   행이 이름·공급자·단가·능력·출처를 모두 갖고, LLM 초안(`draft`)으로 채웁니다.
+- **전용 행 초안의 두 값은 코드가 정합니다(운영자 결정 2026-11-22).** `codingDraftFromAnswer`
+  (`lib/modelCatalogDraftLlm.ts`)가 LLM 답을 읽을 때:
+  - **최대 출력**: 공식 문서에 최대 출력이 없으면 거절하지 않고 `capabilities.maxOutputTokens`를
+    `CODING_DEFAULT_MAX_OUTPUT_TOKENS`(8,192)로 둡니다. LLM은 문서에 없으면 `null`로 답하고(추정
+    금지), 0·음수·정수 아님도 "없음"으로 읽습니다. 이 사실은 프로필의 `basis.maxOutputTokens: "default"`
+    (문서 값이면 `"documented"`)에 남고, Admin 초안 화면에 "문서에 없어 기본값 8,192 사용"으로 보입니다.
+    Code 관리형 경로(`codingRowRuntime`의 `Math.min(row.capabilities.maxOutputTokens, …)`, 요청마다
+    `CODE_REQUEST_BOUNDS_INVALID`)와 코딩 API(모델 `maxOutputTokens`로 예약·공급자 출력 한도를 묶음)가 이
+    값을 실제 출력 상한으로 보내고, Code 하한(`codingCreditFloor`)과 코딩 API 하한(`codingApiCredit`)도 이
+    값으로 계산하므로 원가가 상한 안에 머뭅니다. 컨텍스트(`maxContextTokens`)를 모르면 지금처럼
+    거절합니다(`capabilities.maxContextTokens`): Code 하한이 컨텍스트 전체를 최악의 입력으로 보기 때문입니다.
+  - **구간 가격**: 요청 하나의 입력 토큰 수가 그 요청 전체의 입력·출력 단가를 정하는 모델은 가장 비싼
+    구간의 입력·출력 단가를 프로필 단가로 씁니다. LLM은 구간표를 `pricing.tiers`로 함께 답하고, 코드는
+    답한 단가와 모든 구간 단가 중 큰 값을 씁니다(싼 구간을 답해도 가장 비싼 구간으로 올림, 그보다 높은
+    답은 그대로). 구간표가 잘못된 형식이면 초안을 거절합니다(`pricing.tiers`): 단가가 음수이거나 숫자가
+    아닌 구간, `upToInputTokens`가 오름차순이 아닌 구간표(같은 값 반복 포함), 상한 없음(`null`)이 마지막이
+    아닌 구간표입니다(`codingPriceTiersSchema`). 이 순서 검사는 초안을 만들 때만 합니다. 이미 저장된
+    프로필을 읽을 때는 하지 않아, 나중에 엄격해진 검사 때문에 서비스 중인 행이 빠지지 않습니다. 구간이 있을 때 답한 기본 단가가 음수이거나 숫자가 아니면
+    구간 단가로 메우지 않고 그대로 넘겨 프로필 스키마가 거절합니다(`pricing.inputUsdPerMTok` 등). 구간표는
+    `basis.priceTiers`에 남고 초안 화면에 보입니다. 화면의 구간 범위는 이 검사를 통과한 값만 보입니다.
+    크레딧 하한은 이 단가로 계산됩니다.
+  - `basis`는 저장된 프로필에만 있고 해석된 행·스냅샷 행에는 싣지 않으므로 `canonicalJson`·해시를
+    바꾸지 않습니다. 이전 행에는 없습니다.
+- **구조화 출력은 "지원(`supported`) / 지원 안 함(`none`)" 두 값입니다(운영자 결정 2026-11-22).** 실행이
+  보는 것은 `none`인지뿐입니다(Code 관리형 경로, Code 판정의 `no_structured_output`). JSON 모드(예:
+  `response_format` json_object)·JSON 스키마·strict/강제 tool call·response schema 중 하나라도 문서에
+  있으면 "지원"입니다. JSON 모드만 있는 DeepSeek·GLM도 "지원"이고, LLM 초안과 기능 정보 채우기의
+  프롬프트가 이 기준으로 답하게 합니다. 새로 저장하는 값은
+  `CODING_STRUCTURED_OUTPUT_CHOICES`(두 값)뿐이고, 그 전에 저장한 `json_mode`·`strict_schema`·
+  `forced_tool_use`·`response_schema`는 읽기용으로 계속 받아 "지원"으로 봅니다
+  (`codingStructuredOutputChoice`). 저장된 행과 발행된 스냅샷을 다시 쓰지 않으므로 `canonicalJson`·해시는
+  그대로입니다. 두 값으로 바뀌는 때는 저장할 때뿐입니다: 연결 행 설정 저장(`codingSettingsSchema`는 두 값만
+  받고, 화면은 다른 칸을 바꿔 저장할 때 이전 값을 보이는 선택지로 함께 보냄), 전용 행 초안 적용
+  (`applyCodingDraftEdits`), "LLM으로 기능 정보 채우기". 그 밖의 프로필 쓰기도 마찬가지입니다: 프로필을
+  싣는 모든 쓰기(직접 PATCH 포함, `updateCatalogEntry`)는 이전 값을 거절하지 않고 `supported`로 바꿔
+  저장하고(`codingProfileForWrite`, 연결 행의 `evidence.structuredOutput` 포함), 바꾼 값을 감사 행의
+  `structuredOutputRewritten`에 남깁니다. 다른 칸만 고쳐도 이전 행 저장이 막히지 않게 하려는 것입니다.
+  켜기·보류처럼 프로필을 싣지 않는 쓰기는 프로필을 다시 쓰지 않습니다. 그 행은 "스냅샷 이후 변경"이
+  되고 다음 발행에 실립니다. LLM 답 스키마(`CODING_SCHEMA`·`CAPABILITY_SCHEMA`)도 두 값만 받습니다.
 - **채팅 모델 연결 행**(`profile.source: "chat"`, `registryModelId` = 행의 `modelId`):
   이름·공급자·API 모델 id·단가·컨텍스트·최대 출력·이미지 입력을 **복사하지 않고 읽을 때마다**
   채팅 레지스트리(`ModelRegistryEntry`)에서 가져옵니다. 단가는 채팅 가격 해석
@@ -138,11 +177,23 @@ migration 적용은 별도입니다. 구현한 A1 범위와 확정 값은 10절�
 - **연결은 채팅 레지스트리만 읽고 즉시 됩니다. 연결에는 LLM 호출도 문서 읽기도 없습니다(운영자
   결정 2026-11-21).** `toolCalling`은 `basic`입니다: 코딩 후보는 외부 API가 내놓는 사용 등급이고, 그 API는 모든 모델을 도구
   호출 가능(`capabilities.tools`, `lib/externalApiCatalogCore.ts`)으로 내놓기 때문입니다. 레지스트리에는
-  구조화 출력 정보가 없으므로 `structuredOutput`은 보수적 기본값 `none`이고, Code 관리형 경로는 `none`
+  구조화 출력 정보가 없으므로 `structuredOutput`은 보수적 기본값 `none`(지원 안 함)이고, Code 관리형 경로는 `none`
   행을 쓰지 않으므로(`CODE_MODEL_UNAVAILABLE`) Code에서 쓰려면 운영자가 행에서 값을 정합니다.
   `evidence`는 `sources: []`(읽은 문서 없음)로 남고, 화면은 이를 "채팅 레지스트리"로 보입니다. 예전에
   LLM 초안으로 만든 행의 `evidence`(문서 주소 있음)는 그대로 읽습니다. 한 번에 연결하는 길은 아래를
   보십시오.
+- **코딩 후보 사용 등급**(`CODING_CANDIDATE_USAGE_CLASSES`)은 외부 API가 내놓는 등급에 `frontier`·`apex`를
+  더한 것입니다(운영자 결정 2026-11-22). 코딩 API의 Smart Adaptive가 가장 어려운 작업을 이 등급으로 보내고
+  (`AUTO_LLM_ROUTER_CODING_GUIDANCE`), 코딩 카탈로그에서는 클라이언트가 이 등급을 직접 고를 수도 있습니다
+  (`docs/policy/external-api.md` 5.1). 한 번에 추가(`link_all`)에도 들어갑니다. 연결 행이므로 코딩 API는
+  채팅 크레딧 그대로이고, 채팅 레지스트리의 크레딧이 양의 정수가 아니면 코딩 API에 노출하지 않습니다
+  (`hasRegistryCredits`). 후보 목록·한 번에 추가·판정도 같은 조건을 씁니다: 레지스트리에 크레딧이 없는
+  `frontier`·`apex` 모델은 등급 기본값(32·80)이 아무도 정하지 않은 값이므로 후보에서 빠지고
+  (`codingCandidateExclusion`, 사유 `chat_credits_missing`), 이미 연결된 행은 두 채널 모두에서 같은 사유로
+  거절되어 발행되지 않습니다(`resolveCodingEntry`; 링크에 Code 크레딧을 따로 적어도 마찬가지). 그래서 Admin에서
+  통과로 보인 행이 실행 단계에서 조용히 빠지는 일이 없습니다(`ChatModelFacts.registryCredits`). Code 채널은
+  그 밖에 Code 하한 규칙 그대로입니다. 예약·정산 경로는 바뀌지 않습니다. research 등급은 여전히 후보가
+  아닙니다.
 - **채널별 판정(운영자 결정 2026-11-21).** 채팅 연결 행은 코딩 API에서 채팅 모델 그대로(채팅 입력 한도·
   채팅 크레딧)로 실행되므로 Code 기준이 코딩 API 노출을 막지 않습니다. `judgeCodingChannels`
   (`lib/modelCatalogCore.ts`)가 채널마다 답합니다. **코딩 API**: 채팅 쪽 통과(활성·공개·삭제 아님·가격
@@ -166,12 +217,31 @@ migration 적용은 별도입니다. 구현한 A1 범위와 확정 값은 10절�
   여러 호출을 이어 돌리지 않음). 여러 행은 화면이 행마다 요청을 하나씩 순서대로 보내고 N/M을
   보입니다. 읽는 문서는 공급자별 기본 한 쌍(`DEFAULT_CODING_CAPABILITY_SOURCES`, #4121: Tool calling·
   구조화 출력)이고, 가져오는 주소와 답이 기댄 모든 주소를 `isOfficialSourceUrl`로 검사합니다. 답은
-  `codingCapabilitiesFromAnswer`가 읽습니다(모르는 값은 `none`). 실패는 행을 바꾸지 않고 사유만
+  `codingCapabilitiesFromAnswer`가 읽습니다(모르는 값은 `none`, 구조화 출력은 `supported`·`none` 두 값으로
+  저장). 실패는 행을 바꾸지 않고 사유만
   보입니다. 시간 초과는 비용이 나갔을 수 있는 결과 불명 호출이라 자동으로 다시 하지 않고 화면은 거기서
   멈춥니다. 성공하면 `updateCatalogEntry`(같은 판정, 같은 트랜잭션)로 `capabilities`와 `evidence`(sources,
   draftedAt, note)를 쓰고 `model_catalog.coding_capabilities_filled`를 같은 트랜잭션에 남깁니다.
   **채널은 바꾸지 않습니다.** 값이 채워져 Code 판정을 통과하게 돼도 Code 채널은 운영자가 상세에서
   켭니다. 바뀐 행은 "스냅샷 이후 변경"으로 보이며 다음 발행에 반영됩니다.
+- **코딩 장단점(`codingNotes`, 운영자 결정 2026-11-22).** 채팅 연결 행과 전용 행 모두 저장된 행에
+  `codingNotes: { strengths, weaknesses, sources, draftedAt, editedAt? }`를 둘 수 있습니다(강점·약점 각각 3개까지, 한
+  줄 120자까지, `codingNotesSchema`). JSON 프로필 필드라 migration이 없고, 해석된 행·스냅샷 행에는 싣지 않으므로
+  이 필드가 있든 없든 어떤 행의 `canonicalJson`·해시도 바뀌지 않습니다. 코딩 API의 Smart Adaptive는 후보 설명에
+  채팅의 `bestFor` 대신 이 장단점을 읽고(`withCandidateModels`, `docs/policy/external-api.md` 5.1), 장단점이 없는
+  행은 `bestFor` 그대로입니다. 지금 행에서 읽으므로 발행을 기다리지 않습니다. 채팅의 `bestFor`와 채팅 라우터는 바뀌지
+  않습니다.
+  - **채우기**: "LLM으로 기능 정보 채우기"(`fill_capabilities`)가 같은 호출 한 번으로 장단점도 받습니다(추가 유료 호출
+    없음). LLM은 읽은 문서에 적혀 있거나 그 문서의 벤치마크 결과가 보여 주는 내용만 쓰고, 근거 주소
+    (`sourceUrls`)를 답합니다. 근거 주소가 이번에 읽은 문서가 아니거나 `isOfficialSourceUrl`을 통과하지 못하면 아무것도
+    쓰지 않고 `unofficial_source`로 거절합니다. 근거 주소가 없는 장단점은 쓰지 않습니다. 한 항목이 120자를 넘으면
+    자르지 않고 뺍니다. 채우기는 전용 행에도 됩니다: 전용 행의 기능 값은 초안의 것이므로 장단점만 쓰고, 근거 있는
+    장단점이 없으면 `no_coding_notes`로 아무것도 쓰지 않습니다. 장단점이 비어 있는 행은 채우기 대상
+    (`capabilitiesNeedFilling`)이라, 구조화 출력이 이미 채워진 행도 "모두 채우기"에 들어갑니다. 다시 채울 때 근거 있는
+    장단점이 나오지 않으면 기존 장단점은 그대로 둡니다.
+  - **운영자 입력**: 행 상세(연결 행·전용 행)의 "코딩 장단점" 타일에서 한 줄에 하나씩 고칩니다(`settings` action의
+    `codingNotes`). 고친 장단점은 읽었던 근거 주소를 그대로 두고 `editedAt`을 남기며, 둘 다 비우면 장단점을 지웁니다.
+    전용 행에 새 초안을 적용해도 장단점은 유지됩니다.
 - **"채팅 모델 한 번에 추가"**(코딩 탭 후보 목록, `POST /api/admin/model-catalog/coding`
   `action: "link_all"`). 후보(`codingCandidateExclusion`을 통과한 채팅 모델) 하나마다 트랜잭션 하나로
   연결(`model_catalog.coding_linked`, `metadata.batch: true`)과 활성화(`updateCatalogEntry`, 켤 때와

@@ -26,6 +26,7 @@ import {
   canonicalJson,
   type CodingDraftEdit,
   codingDedicatedProfileSchema,
+  codingProfileForWrite,
   codingProfileSchema,
   codingStoredProfileSchema,
   freePricingVersion,
@@ -88,8 +89,17 @@ export const catalogPatchBodySchema = catalogEntryPatchSchema.extend({
   modelId: z.string().regex(MODEL_ID_PATTERN),
 });
 
-const validateProfile = (category: StoredCatalogCategory, modelId: string, profile: unknown) => {
-  if (profile === null || profile === undefined) return profile;
+/**
+ * The profile a write saves, and each value it saved differently from what the
+ * write carried (for the audit row): a coding profile's older structured
+ * output value is saved as "supported" (codingProfileForWrite).
+ */
+const validateProfile = (
+  category: StoredCatalogCategory,
+  modelId: string,
+  profile: unknown
+): { profile: unknown; rewritten: { field: string; from: string; to: string }[] } => {
+  if (profile === null || profile === undefined) return { profile, rewritten: [] };
   if (category === "coding") {
     const parsed = codingStoredProfileSchema.safeParse(profile);
     if (!parsed.success) throw new CatalogRefusal("invalid_profile", parsed.error.issues.map((i) => i.path.join(".")), 400);
@@ -99,12 +109,12 @@ const validateProfile = (category: StoredCatalogCategory, modelId: string, profi
     if (parsed.data.source === "chat" && parsed.data.registryModelId !== modelId) {
       throw new CatalogRefusal("invalid_profile", ["registryModelId_must_equal_modelId"], 400);
     }
-    return parsed.data;
+    return codingProfileForWrite(parsed.data);
   }
   const hasSeed = IMAGE_MODEL_REGISTRY.some((model) => model.id === modelId);
   const parsed = (hasSeed ? imageProfileOverrideSchema : imageFullProfileSchema).safeParse(profile);
   if (!parsed.success) throw new CatalogRefusal("invalid_profile", parsed.error.issues.map((i) => i.path.join(".")), 400);
-  return parsed.data;
+  return { profile: parsed.data, rewritten: [] };
 };
 
 /**
@@ -132,11 +142,11 @@ const relabelledImageProfile = (
     const current = stored === null || stored === undefined ? {} : stored;
     const parsed = imageProfileOverrideSchema.safeParse(current);
     if (!parsed.success) throw new CatalogRefusal("invalid_profile", ["stored_override"], 409);
-    return validateProfile("image", modelId, apply(parsed.data));
+    return validateProfile("image", modelId, apply(parsed.data)).profile;
   }
   const parsed = imageFullProfileSchema.safeParse(stored);
   if (!parsed.success) throw new CatalogRefusal("invalid_profile", ["no_saved_profile"], 409);
-  return validateProfile("image", modelId, apply(parsed.data));
+  return validateProfile("image", modelId, apply(parsed.data)).profile;
 };
 
 /** Would this image model serve if `enabled: true` were written? */
@@ -189,7 +199,8 @@ export const updateCatalogEntry = async (input: {
   if (relabels && (category !== "image" || "profile" in patch)) {
     throw new CatalogRefusal("invalid_patch", [category !== "image" ? "name_is_image_only" : "name_with_profile"], 400);
   }
-  const profileInput = "profile" in patch ? validateProfile(category, modelId, patch.profile) : undefined;
+  const validated = "profile" in patch ? validateProfile(category, modelId, patch.profile) : undefined;
+  const profileInput = validated?.profile;
 
   const run = (body: (tx: Prisma.TransactionClient) => Promise<Awaited<ReturnType<typeof prisma.modelCatalogEntry.upsert>>>) =>
     input.tx ? body(input.tx) : prisma.$transaction(body);
@@ -280,6 +291,8 @@ export const updateCatalogEntry = async (input: {
         before: before ? { enabled: before.enabled, holdReason: before.holdReason, sortOrder: before.sortOrder } : null,
         after: { enabled: next.enabled, holdReason: next.holdReason, sortOrder: next.sortOrder },
         profileChanged: profile !== undefined,
+        // An older structured output value the write carried, saved as "supported".
+        ...(validated && validated.rewritten.length > 0 ? { structuredOutputRewritten: validated.rewritten } : {}),
         ...(patch.name !== undefined ? { renamedTo: patch.name } : {}),
         // Plain JSON: names, numbers, plans and channel lists.
         ...(input.provenance ? { provenance: input.provenance as Prisma.InputJsonValue } : {}),
@@ -470,12 +483,14 @@ export const applyCatalogDraft = async (input: {
       if (floor === null) throw new CatalogRefusal("not_admitted", ["credit_floor_unbounded"]);
       if (edited.profile.pricing.creditWeight < floor) throw new CatalogRefusal("not_admitted", [`credits_below_floor:${floor}`]);
       // A new draft replaces the profile, not the operator's own settings on
-      // it: a dedicated row keeps where it is offered and its coding API credits.
+      // it: a dedicated row keeps where it is offered, its coding API credits
+      // and its coding notes.
       const stored = codingDedicatedProfileSchema.safeParse(rows[0]?.profile);
       const kept = stored.success
         ? {
             ...(stored.data.channels ? { channels: stored.data.channels } : {}),
             ...(stored.data.apiCreditWeight === undefined ? {} : { apiCreditWeight: stored.data.apiCreditWeight }),
+            ...(stored.data.codingNotes ? { codingNotes: stored.data.codingNotes } : {}),
           }
         : {};
       await updateCatalogEntry({

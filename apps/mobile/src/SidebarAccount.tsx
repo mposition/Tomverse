@@ -28,9 +28,9 @@ export function SidebarAccount({ transport, language, onSettings, onPlan }: {
   }, [transport, revision]);
   const name = profile?.name || profile?.email || "Tomverse";
   const percent = usage ? usagePercent(usage.usage.creditsMonth, usage.limits.creditsMonth) : null;
-  const label = { en: "Current usage", ko: "현재 사용량", zh: "当前用量", de: "Aktuelle Nutzung", fr: "Utilisation actuelle", es: "Uso actual", pt: "Uso atual" }[language];
-  const retry = { en: "Retry usage", ko: "사용량 다시 불러오기", zh: "重试用量", de: "Nutzung erneut laden", fr: "Recharger l’utilisation", es: "Reintentar uso", pt: "Recarregar uso" }[language];
-  const unavailableLabel = { en: "Usage is temporarily unavailable", ko: "사용량을 일시적으로 불러올 수 없습니다", zh: "用量暂时不可用", de: "Nutzung vorübergehend nicht verfügbar", fr: "Utilisation temporairement indisponible", es: "Uso temporalmente no disponible", pt: "Uso temporariamente indisponível" }[language];
+  const label = { en: "Current usage", ko: "현재 사용량", zh: "当前用量", "zh-Hant": "目前用量", de: "Aktuelle Nutzung", fr: "Utilisation actuelle", es: "Uso actual", pt: "Uso atual" }[language];
+  const retry = { en: "Retry usage", ko: "사용량 다시 불러오기", zh: "重试用量", "zh-Hant": "重新載入用量", de: "Nutzung erneut laden", fr: "Recharger l’utilisation", es: "Reintentar uso", pt: "Recarregar uso" }[language];
+  const unavailableLabel = { en: "Usage is temporarily unavailable", ko: "사용량을 일시적으로 불러올 수 없습니다", zh: "用量暂时不可用", "zh-Hant": "暫時無法取得用量", de: "Nutzung vorübergehend nicht verfügbar", fr: "Utilisation temporairement indisponible", es: "Uso temporalmente no disponible", pt: "Uso temporariamente indisponível" }[language];
   return <footer className="sidebar-account" data-testid="sidebar-account">
     <span className="account-avatar" aria-hidden="true">{name[0].toUpperCase()}</span>
     <div className="account-summary">

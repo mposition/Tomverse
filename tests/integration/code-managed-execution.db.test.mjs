@@ -42,14 +42,14 @@ test('Code managed inference with migrated local schema and real shared credit l
     const price=resolveModelPricing(m,{estimatedPromptTokens:10000});
     return {modelId:m.id,name:m.name,provider:m.provider,apiModelId:m.apiModel,minimumPlan:'Pro',capabilities:{toolCalling:'parallel',structuredOutput:'json_mode',imageInput:false,maxContextTokens:10000,maxOutputTokens:1000},pricing:{inputUsdPerMTok:price.inputUsdPerMillionTokens,outputUsdPerMTok:price.outputUsdPerMillionTokens,creditWeight:1,verifiedAt:'2026-10-22',sources:['https://openai.com/fixture']},terms:{allowsResaleAndCodingAgent:true,url:'https://openai.com/fixture',checkedAt:'2026-10-22'},retention:{url:'https://openai.com/fixture',checkedAt:'2026-10-22'},processingRegion:'global'};
   });
-  const originalRows=structuredClone(rows);let keyReady=true,dispatches=0,mode='success',pending=[],lastPrepared,dynamicDbMode=false;
+  const originalRows=structuredClone(rows);let keyReady=true,dispatches=0,mode='success',pending=[],lastPrepared,lastRequest,dynamicDbMode=false;
   const realCatalog=await import(mod('lib/modelCatalog.ts'));
   mock.module(mod('lib/modelCatalog.ts'),{namedExports:{loadCodingCatalog:async()=>dynamicDbMode?realCatalog.servableCodingRows(await realCatalog.loadCodingCatalog()):rows,
     // The real servableCodingRows resolves every row into the snapshot row
     // shape (source, channels); the fixture rows are the pre-link shape, which
     // the published snapshot keeps so legacy snapshots stay covered.
     servableCodingRows:x=>x.map(row=>codingCatalogRowSchema.parse(row))}});
-  mock.module(mod('lib/codeManagedProvider.ts'),{namedExports:{codeProviderCredentialReady:()=>keyReady,prepareCodeProvider:model=>{lastPrepared=model;return async()=>{
+  mock.module(mod('lib/codeManagedProvider.ts'),{namedExports:{codeProviderCredentialReady:()=>keyReady,prepareCodeProvider:(model,request)=>{lastPrepared=model;lastRequest=request;return async()=>{
     dispatches++;
     if(mode==='pending')await new Promise(resolve=>pending.push(resolve));
     if(mode==='settlement-failure')failNextSettlement=true;
@@ -170,6 +170,28 @@ test('Code managed inference with migrated local schema and real shared credit l
         const held=await service.handleCodeManaged(user,{action:'reserve',taskId:randomUUID(),catalogVersion:published.version,contentHash:published.contentHash,executorModelId:modelId,reviewerModelId:reviewer.modelId,approvedCredits:1});const req=call(held.reservationId,{modelId});
         await service.handleCodeManaged(user,req);const row=await db.codeManagedCall.findUnique({where:{id:req.callId}});assert.ok(row.pricingSnapshot.maxInput<10000);assert.ok(row.reservedCostMicroUsd<40000n);assert.equal(row.reservedCredits,1);
         await rejectCode(()=>service.handleCodeManaged(user,call(held.reservationId,{modelId})),'CODE_TASK_CAP_EXCEEDED');await release(user,held.reservationId);
+      }finally{dynamicDbMode=false;}
+    });
+    await t.test('a drafted row at the default output cap with supported structured output serves and holds each call to that cap',async()=>{
+      // Owner decisions 2026-11-22: pages that state no output limit draft at 8,192, and structured
+      // output is saved as "supported" or "none". The reviewer row keeps an older value ("json_mode").
+      const capped={...structuredClone(originalRows[0]),modelId:'code-default-output-cap',apiModelId:'gpt-fixture-default-cap',capabilities:{...originalRows[0].capabilities,structuredOutput:'supported',maxContextTokens:20000,maxOutputTokens:8192},pricing:{...originalRows[0].pricing,inputUsdPerMTok:0.1,outputUsdPerMTok:0.5}};
+      capped.pricing.creditWeight=realCatalog.codingCreditFloor(capped);
+      const reviewer=structuredClone(originalRows[1]);reviewer.pricing.sources=['https://anthropic.com/fixture'];reviewer.terms.url='https://anthropic.com/fixture';reviewer.retention.url='https://anthropic.com/fixture';
+      assert.equal(reviewer.capabilities.structuredOutput,'json_mode');
+      const {modelId,...profile}=capped;await db.modelCatalogEntry.create({data:{category:'coding',modelId,enabled:true,profile}});
+      const published=await db.modelCatalogSnapshot.create({data:{category:'coding',contentHash:catalogContentHash([capped,reviewer]),payload:{models:[capped,reviewer]},coverageUntil:new Date(Date.now()+3600000)}});
+      const user=await newUser();dynamicDbMode=true;
+      try{
+        const held=await service.handleCodeManaged(user,{action:'reserve',taskId:randomUUID(),catalogVersion:published.version,contentHash:published.contentHash,executorModelId:modelId,reviewerModelId:reviewer.modelId,approvedCredits:20});
+        const before=dispatches;
+        await rejectCode(()=>service.handleCodeManaged(user,call(held.reservationId,{modelId,maxOutputTokens:8193})),'CODE_REQUEST_BOUNDS_INVALID');
+        assert.equal(dispatches,before,'a call above the cap is refused before dispatch');
+        const req=call(held.reservationId,{modelId,maxOutputTokens:8192});await service.handleCodeManaged(user,req);
+        assert.equal(dispatches,before+1);assert.equal(lastPrepared.apiModel,capped.apiModelId);assert.equal(lastRequest.maxOutputTokens,8192,'the provider call is sent the cap');
+        const row=await db.codeManagedCall.findUnique({where:{id:req.callId}});assert.equal(row.maxOutputTokens,8192);
+        assert.ok(row.reservedCostMicroUsd>=BigInt(Math.ceil(8192*0.5)),'the hold prices the whole capped output');
+        await release(user,held.reservationId);
       }finally{dynamicDbMode=false;}
     });
     await t.test('catalogue field order cannot spuriously revoke an unchanged model',async()=>{

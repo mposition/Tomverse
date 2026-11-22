@@ -24,12 +24,15 @@ import {
   type CodingSettingsValue,
   capabilityOrigin,
   codingDedicatedSettings,
+  codingNotesProblems,
+  codingNotesRequest,
   codingRefusals,
   codingServing,
   codingSettingsFrom,
   codingSettingsProblems,
   codingSettingsRequest,
   codingStage,
+  codingStructuredOutputShown,
   effectiveCreditWeight,
   linkAllCodeReasonRows,
   linkAllReasonRows,
@@ -325,9 +328,12 @@ export function CodingLinkDetail({
   onHold,
   onUnlink,
   fill,
+  notes,
 }: {
   c: CodingMessages;
   item: CodingCatalogItem;
+  /** The row's coding notes tile (CodingNotesTile), shown beside its settings. */
+  notes?: React.ReactNode;
   /** "Fill capabilities with the LLM" for this link: whether it can run, why not, and the run. */
   fill: { configured: boolean; env: string; supported: boolean; running: boolean; busy: boolean; onFill: () => void };
   /** The settings form, as edited. */
@@ -492,11 +498,15 @@ export function CodingLinkDetail({
                   >
                     {CODING_STRUCTURED_OUTPUT_VALUES.map((option) => (
                       <option key={option} value={option}>
-                        {`${option} · ${structuredOutputLabel(option)}`}
+                        {structuredOutputLabel(option)}
                       </option>
                     ))}
                   </select>
-                  <OriginChip c={c} origin={origin} show={link?.evidence?.structuredOutput === value.structuredOutput} />
+                  <OriginChip
+                    c={c}
+                    origin={origin}
+                    show={link?.evidence !== undefined && codingStructuredOutputShown(link.evidence.structuredOutput) === value.structuredOutput}
+                  />
                 </div>
                 <p className={`text-xs ${value.structuredOutput === "none" ? "font-bold text-red-300" : "text-zinc-500"}`}>
                   {c.detail.structuredOutputHelp}
@@ -571,6 +581,7 @@ export function CodingLinkDetail({
               </AdminWriteButton>
             </div>
           </AdminTile>
+          {notes}
         </div>
 
         <div className="flex min-w-0 flex-col gap-4">
@@ -765,6 +776,98 @@ export function CodingChannelsTile({
       >
         {c.detail.save}
       </AdminWriteButton>
+    </AdminTile>
+  );
+}
+
+/**
+ * A coding row's strengths and weaknesses (owner decision 2026-11-22): what
+ * the coding API's router reads instead of chat's bestFor, the pages they
+ * stand on, and the operator's own edit (one note per line).
+ */
+export function CodingNotesTile({
+  c,
+  item,
+  busy,
+  onSave,
+}: {
+  c: CodingMessages;
+  item: CodingCatalogItem;
+  busy: boolean;
+  onSave: (codingNotes: { strengths: string[]; weaknesses: string[] } | null) => void;
+}) {
+  const notes = item.codingNotes;
+  const initial = { strengths: (notes?.strengths ?? []).join("\n"), weaknesses: (notes?.weaknesses ?? []).join("\n") };
+  const [value, setValue] = useState(initial);
+  const problems = codingNotesProblems(value);
+  const changed = value.strengths !== initial.strengths || value.weaknesses !== initial.weaknesses;
+  const canSave = changed && Object.keys(problems).length === 0 && !busy;
+  const list = (items: readonly string[], testId: string) => (
+    <ul className="list-disc pl-4 text-sm text-zinc-200" data-testid={testId}>
+      {items.map((entry) => (
+        <li key={entry}>{entry}</li>
+      ))}
+    </ul>
+  );
+  const field = (key: "strengths" | "weaknesses") => (
+    <label className="flex flex-col gap-1 text-xs font-bold text-zinc-300">
+      {c.notes[key]}
+      <textarea
+        rows={3}
+        value={value[key]}
+        onChange={(event) => setValue({ ...value, [key]: event.target.value })}
+        aria-invalid={problems[key] ? true : undefined}
+        data-testid={`coding-notes-${key}-input`}
+        className={`w-full rounded-lg border bg-zinc-950 px-2 py-1.5 text-sm font-normal text-zinc-100 outline-none focus:border-blue-500 ${
+          problems[key] ? "border-red-500" : "border-zinc-700"
+        }`}
+      />
+      {problems[key] ? <span className="font-bold text-red-300">{c.notes.problem[problems[key]]}</span> : null}
+    </label>
+  );
+  return (
+    <AdminTile title={c.notes.title} description={c.notes.description}>
+      <div className="flex flex-col gap-3" data-testid="coding-notes">
+        {notes ? (
+          <>
+            <div>
+              <p className="text-xs font-bold text-emerald-300">{c.notes.strengths}</p>
+              {notes.strengths.length ? list(notes.strengths, "coding-notes-strengths") : <p className="text-xs text-zinc-500">—</p>}
+            </div>
+            <div>
+              <p className="text-xs font-bold text-amber-300">{c.notes.weaknesses}</p>
+              {notes.weaknesses.length ? list(notes.weaknesses, "coding-notes-weaknesses") : <p className="text-xs text-zinc-500">—</p>}
+            </div>
+            <div className="text-xs text-zinc-400" data-testid="coding-notes-sources">
+              {notes.sources.length ? (
+                <>
+                  <span className="font-bold text-zinc-300">{c.notes.sources}</span>
+                  {notes.sources.map((url) => (
+                    <a key={url} href={url} target="_blank" rel="noreferrer" className="block break-all font-mono text-blue-300 underline">
+                      {url.replace(/^https:\/\//, "")}
+                    </a>
+                  ))}
+                </>
+              ) : (
+                <span>{c.notes.byOperator}</span>
+              )}
+              <span className="block">{c.notes.dated(notes.draftedAt, notes.editedAt ?? null)}</span>
+            </div>
+          </>
+        ) : (
+          <p className="text-sm text-zinc-400" data-testid="coding-notes-empty">
+            {c.notes.empty}
+          </p>
+        )}
+        <div className="flex flex-col gap-2 border-t border-zinc-800 pt-3">
+          <p className="text-xs text-zinc-500">{c.notes.editHelp}</p>
+          {field("strengths")}
+          {field("weaknesses")}
+          <AdminWriteButton size="sm" disabled={!canSave} onClick={() => onSave(codingNotesRequest(value))} data-testid="coding-notes-save">
+            {c.notes.save}
+          </AdminWriteButton>
+        </div>
+      </div>
     </AdminTile>
   );
 }

@@ -3,7 +3,7 @@ import { after, before, test } from "node:test";
 import type { Session } from "next-auth";
 
 import { takeAuditChainLock } from "@/lib/adminAudit";
-import { fillLinkCapabilities, linkAllChatModels, linkChatModel, saveCodingSettings, unlinkCodingModel } from "@/lib/codingCatalogAdmin";
+import { codingSettingsSchema, fillLinkCapabilities, linkAllChatModels, linkChatModel, saveCodingSettings, unlinkCodingModel } from "@/lib/codingCatalogAdmin";
 import { getImageModel, IMAGE_MODEL_REGISTRY, resetActiveImageModelCatalog } from "@/lib/imageModelRegistry";
 import {
   codingCreditFloor,
@@ -23,6 +23,7 @@ import {
   storeCatalogDraft,
   updateCatalogEntry,
 } from "@/lib/modelCatalogAdmin";
+import { codingDraftFromAnswer } from "@/lib/modelCatalogDraftLlm";
 import { prisma } from "@/lib/prisma";
 
 // The dynamic model catalogue against a real database: a refused enable writes
@@ -256,6 +257,44 @@ test("a coding model is published in an immutable snapshot only once admitted an
   );
 });
 
+test("a PATCH carrying an older structured output value saves it as supported, says so in its audit row, and a row nobody writes keeps its value", async () => {
+  const modelId = "gpt-patch-older-value";
+  const where = { category_modelId: { category: "coding", modelId } };
+  const capabilitiesOf = async () =>
+    ((await prisma.modelCatalogEntry.findUnique({ where }))?.profile as { capabilities: { structuredOutput: string } }).capabilities;
+  try {
+    // A direct PATCH with a value written before the two choices (codingProfile carries "strict_schema").
+    await updateCatalogEntry({ category: "coding", modelId, patch: { profile: codingProfile }, session });
+    assert.equal((await capabilitiesOf()).structuredOutput, "supported");
+    const audit = await prisma.adminAuditLog.findFirst({
+      where: { action: "model_catalog.entry_updated", targetId: `coding:${modelId}` },
+      orderBy: { createdAt: "desc" },
+    });
+    assert.deepEqual((audit?.metadata as { structuredOutputRewritten?: unknown })?.structuredOutputRewritten, [
+      { field: "capabilities.structuredOutput", from: "strict_schema", to: "supported" },
+    ]);
+    // A row stored with the older value and not written since: an enable or hold does not rewrite its profile.
+    await prisma.modelCatalogEntry.update({ where, data: { profile: codingProfile } });
+    await updateCatalogEntry({ category: "coding", modelId, patch: { holdReason: "checking" }, session });
+    assert.equal((await capabilitiesOf()).structuredOutput, "strict_schema");
+    // A PATCH that already writes one of the two choices records nothing extra.
+    await updateCatalogEntry({
+      category: "coding",
+      modelId,
+      patch: { profile: { ...codingProfile, capabilities: { ...codingProfile.capabilities, structuredOutput: "none" } } },
+      session,
+    });
+    assert.equal((await capabilitiesOf()).structuredOutput, "none");
+    const latest = await prisma.adminAuditLog.findFirst({
+      where: { action: "model_catalog.entry_updated", targetId: `coding:${modelId}` },
+      orderBy: { createdAt: "desc" },
+    });
+    assert.equal("structuredOutputRewritten" in ((latest?.metadata as object | null) ?? {}), false);
+  } finally {
+    await prisma.modelCatalogEntry.deleteMany({ where: { category: "coding", modelId } });
+  }
+});
+
 test("the scheduled renewal extends identical content once, as the system, and leaves a change to a person", async () => {
   const day = 24 * 60 * 60 * 1000;
   const renewedAudits = () => auditCount("model_catalog.snapshot_renewed");
@@ -359,6 +398,8 @@ test("a stored draft is audited, applied in one step, and cleared", async () => 
   });
   assert.equal(row?.draft, null);
   assert.equal((row?.profile as { apiModelId?: string } | null)?.apiModelId, "gpt-catalog-test");
+  // The draft carried a finer structured output value; applying is a save, so it is written as "supported".
+  assert.equal((row?.profile as { capabilities?: { structuredOutput?: string } } | null)?.capabilities?.structuredOutput, "supported");
   await assert.rejects(
     applyCatalogDraft({ category: "coding", modelId: "gpt-draft-test", session }),
     (error: unknown) => error instanceof CatalogRefusal && error.code === "no_draft"
@@ -806,6 +847,54 @@ test("a dedicated profile with no provider conditions is stored, turned on and p
   await updateCatalogEntry({ category: "coding", modelId, patch: { enabled: false }, session });
 });
 
+test("a draft from pages with no output limit and tiered prices applies at 8,192 and the dearest tier, and publishes without its basis", async () => {
+  // Owner decisions 2026-11-22 (the Qwen3 Coder Flash case): no output limit stated, priced by input-size tier.
+  const modelId = "gpt-tiered-default-cap";
+  const draft = codingDraftFromAnswer(
+    {
+      name: "Tiered Default Cap Coder",
+      minimumPlan: "Pro",
+      capabilities: { toolCalling: "parallel", structuredOutput: "supported", imageInput: false, maxContextTokens: 200_000, maxOutputTokens: null },
+      pricing: {
+        inputUsdPerMTok: 0.3,
+        outputUsdPerMTok: 1.5,
+        tiers: [
+          { upToInputTokens: 32_000, inputUsdPerMTok: 0.3, outputUsdPerMTok: 1.5 },
+          { upToInputTokens: null, inputUsdPerMTok: 1.6, outputUsdPerMTok: 9.6 },
+        ],
+      },
+    },
+    "openai",
+    modelId,
+    ["https://developers.openai.com/api/docs/pricing"],
+    codingCreditFloor
+  );
+  await storeCatalogDraft({ category: "coding", modelId, draft, session });
+  await applyCatalogDraft({ category: "coding", modelId, session });
+  const stored = (await prisma.modelCatalogEntry.findUniqueOrThrow({ where: { category_modelId: { category: "coding", modelId } } })).profile as {
+    capabilities: { maxOutputTokens: number; structuredOutput: string };
+    pricing: { inputUsdPerMTok: number; outputUsdPerMTok: number; creditWeight: number };
+    basis: { maxOutputTokens: string; priceTiers: unknown[] };
+  };
+  assert.equal(stored.capabilities.maxOutputTokens, 8_192);
+  assert.equal(stored.capabilities.structuredOutput, "supported");
+  assert.deepEqual([stored.pricing.inputUsdPerMTok, stored.pricing.outputUsdPerMTok], [1.6, 9.6]);
+  assert.equal(stored.basis.maxOutputTokens, "default");
+  assert.equal(stored.basis.priceTiers.length, 2);
+  assert.equal(stored.pricing.creditWeight, codingCreditFloor(stored as never));
+  await updateCatalogEntry({ category: "coding", modelId, patch: { enabled: true }, session });
+  const published = await publishCodingSnapshot({ session });
+  const row = published.snapshot.models.find((model) => model.modelId === modelId)!;
+  assert.equal(row.capabilities.maxOutputTokens, 8_192);
+  assert.equal(row.capabilities.structuredOutput, "supported");
+  assert.equal("basis" in row, false, "the basis stays in the stored profile; the snapshot row does not carry it");
+  // A link's settings save writes one of the two choices; a finer value is refused at the door.
+  assert.equal(codingSettingsSchema.safeParse({ structuredOutput: "json_mode" }).success, false);
+  assert.equal(codingSettingsSchema.safeParse({ structuredOutput: "supported" }).success, true);
+  assert.equal(codingSettingsSchema.safeParse({ structuredOutput: "none" }).success, true);
+  await updateCatalogEntry({ category: "coding", modelId, patch: { enabled: false }, session });
+});
+
 // --- chat links (owner decision 2026-11-20); provider conditions are not collected or judged (owner decision 2026-11-21) ---
 
 const LINKED = "gpt-6-luna";
@@ -857,7 +946,7 @@ test("a weight at the floor lets the link turn on with no provider record, and t
   const floor = codingCreditFloor((await linkedEntry()).profile!);
   assert.ok(floor !== null);
   // Code reads a plan through a structured output: the registry has none, so the operator sets one.
-  await saveCodingSettings({ modelId: LINKED, settings: { creditWeight: floor, structuredOutput: "json_mode", channels: ["api", "code"] }, session });
+  await saveCodingSettings({ modelId: LINKED, settings: { creditWeight: floor, structuredOutput: "supported", channels: ["api", "code"] }, session });
   const entry = await linkedEntry();
   assert.deepEqual(entry.admission, { admitted: true });
   assert.deepEqual(entry.effectiveChannels, ["code", "api"]);
@@ -983,7 +1072,7 @@ test("a link that passes the coding API and fails Code is published for the codi
   await linkChatModel({ registryModelId: LINKED, session });
   const floor = codingCreditFloor((await linkedEntry()).profile!)!;
   // Both channels, structured output set, but chat's own credits below Code's floor.
-  await saveCodingSettings({ modelId: LINKED, settings: { structuredOutput: "json_mode", channels: ["api", "code"] }, session });
+  await saveCodingSettings({ modelId: LINKED, settings: { structuredOutput: "supported", channels: ["api", "code"] }, session });
   const entry = await linkedEntry();
   const chatCredits = entry.profile!.pricing.creditWeight;
   assert.ok(chatCredits < floor, "this registry model's chat credits are below Code's floor");
@@ -1024,7 +1113,8 @@ test("filling a link's capabilities from the documentation changes only its capa
       },
       draftCodingCapabilities: async ({ pages }: { pages: { url: string }[] }) => {
         llmCalls += 1;
-        return { toolCalling: "parallel" as const, structuredOutput: "strict_schema" as const, note: "Stated on the pages.", sources: pages.map((page) => page.url), draftedAt: today() };
+        // A finer value than the two choices: the save writes "supported" (owner decision 2026-11-22).
+        return { toolCalling: "parallel" as const, structuredOutput: "strict_schema", note: "Stated on the pages.", sources: pages.map((page) => page.url), draftedAt: today() };
       },
     }),
     fetchPage: async (_provider: string, url: string) => ({ url, text: "page" }),
@@ -1034,7 +1124,7 @@ test("filling a link's capabilities from the documentation changes only its capa
   assert.deepEqual(result.changes.map((change) => change.field), ["toolCalling", "structuredOutput"]);
   const row = await prisma.modelCatalogEntry.findUniqueOrThrow({ where: { category_modelId: { category: "coding", modelId: LINKED } } });
   const stored = row.profile as { capabilities: unknown; channels: string[]; evidence: { sources: string[]; note?: string } };
-  assert.deepEqual(stored.capabilities, { toolCalling: "parallel", structuredOutput: "strict_schema" });
+  assert.deepEqual(stored.capabilities, { toolCalling: "parallel", structuredOutput: "supported" });
   assert.deepEqual(stored.evidence.sources, sources);
   assert.equal(stored.evidence.note, "Stated on the pages.");
   assert.deepEqual(stored.channels, ["api"], "Code stays the operator's to tick");
@@ -1049,4 +1139,116 @@ test("filling a link's capabilities from the documentation changes only its capa
   );
   assert.deepEqual((await prisma.modelCatalogEntry.findUniqueOrThrow({ where: { category_modelId: { category: "coding", modelId: LINKED } } })).profile, row.profile);
   assert.equal(await auditCount("model_catalog.coding_capabilities_filled"), filledBefore + 1);
+});
+
+// Coding notes (owner decision 2026-11-22): filled by the same call as the
+// capabilities, standing on the fetched official pages, edited by the
+// operator, kept through a new draft, and never part of a published row.
+test("coding notes are filled with the capabilities, edited by the operator, and leave the published content as it was", async () => {
+  await cleanup();
+  await linkChatModel({ registryModelId: LINKED, session });
+  const floor = codingCreditFloor((await linkedEntry()).profile!)!;
+  await saveCodingSettings({ modelId: LINKED, settings: { creditWeight: floor, structuredOutput: "supported", channels: ["api", "code"] }, session });
+  await updateCatalogEntry({ category: "coding", modelId: LINKED, patch: { enabled: true }, session });
+  const first = await publishCodingSnapshot({ session });
+  const key = { category_modelId: { category: "coding", modelId: LINKED } };
+  const stored = async () => (await prisma.modelCatalogEntry.findUniqueOrThrow({ where: key })).profile as { codingNotes?: { strengths: string[]; weaknesses: string[]; sources: string[]; editedAt?: string } };
+
+  let answer: { strengths: string[]; weaknesses: string[]; sourceUrls: string[] } = { strengths: [], weaknesses: [], sourceUrls: [] };
+  const deps = {
+    draftLlm: async () => ({
+      draftImagePrices: async () => {
+        throw new Error("not used");
+      },
+      draftCodingProfile: async () => {
+        throw new Error("not used");
+      },
+      draftCodingCapabilities: async ({ pages }: { pages: { url: string }[] }) => ({
+        toolCalling: "basic" as const,
+        structuredOutput: "supported" as const,
+        note: "",
+        sources: pages.map((page) => page.url),
+        draftedAt: today(),
+        codingNotes: answer,
+      }),
+    }),
+    fetchPage: async (_provider: string, url: string) => ({ url, text: "page" }),
+  };
+  const pages = ["https://developers.openai.com/api/docs/guides/function-calling", "https://developers.openai.com/api/docs/guides/structured-outputs"];
+
+  // A page that is not the provider's: refused, nothing written.
+  answer = { strengths: ["Best coder"], weaknesses: [], sourceUrls: ["https://blog.example/gpt"] };
+  const before = await stored();
+  await assert.rejects(
+    fillLinkCapabilities({ modelId: LINKED, session, deps: deps as never }),
+    (error: unknown) => error instanceof CatalogRefusal && error.code === "unofficial_source"
+  );
+  assert.deepEqual(await stored(), before);
+
+  // Notes on the fetched pages: written with the capabilities.
+  answer = { strengths: ["Parallel tool calls in one response", "Strict schema outputs"], weaknesses: ["No schema on JSON mode"], sourceUrls: [pages[0]] };
+  await fillLinkCapabilities({ modelId: LINKED, session, deps: deps as never });
+  const filled = await stored();
+  assert.deepEqual(filled.codingNotes?.strengths, answer.strengths);
+  assert.deepEqual(filled.codingNotes?.sources, [pages[0]]);
+  // The published content is the same: notes are not part of a resolved or snapshot row.
+  const servable = servableCodingRows(await loadCodingCatalog());
+  assert.ok(servable.every((row) => !("codingNotes" in row)));
+  const again = await publishCodingSnapshot({ session });
+  assert.equal(again.created, false, "nothing to publish: the content hash did not move");
+  assert.equal(again.snapshot.contentHash, first.snapshot.contentHash);
+
+  // The operator edits them: kept sources, an edit date; an empty pair removes them.
+  const edited = await saveCodingSettings({ modelId: LINKED, settings: { codingNotes: { strengths: ["Parallel tool calls"], weaknesses: [] } }, session });
+  assert.deepEqual(edited.changes.map((change) => change.field), ["codingNotes"]);
+  assert.deepEqual((await stored()).codingNotes?.sources, [pages[0]]);
+  assert.equal((await stored()).codingNotes?.editedAt, today());
+  // The same text again changes nothing.
+  assert.deepEqual((await saveCodingSettings({ modelId: LINKED, settings: { codingNotes: { strengths: ["Parallel tool calls"], weaknesses: [] } }, session })).changes, []);
+  assert.equal(codingSettingsSchema.safeParse({ codingNotes: { strengths: ["x".repeat(121)], weaknesses: [] } }).success, false);
+  assert.equal(codingSettingsSchema.safeParse({ codingNotes: { strengths: ["a", "b", "c", "d"], weaknesses: [] } }).success, false);
+  await saveCodingSettings({ modelId: LINKED, settings: { codingNotes: null }, session });
+  assert.equal((await stored()).codingNotes, undefined);
+  assert.equal((await publishCodingSnapshot({ session })).created, false);
+  await updateCatalogEntry({ category: "coding", modelId: LINKED, patch: { enabled: false }, session });
+});
+
+test("a dedicated row takes coding notes from the operator and from a fill, and keeps them through a new draft", async () => {
+  const modelId = "gpt-notes-dedicated";
+  await storeCatalogDraft({ category: "coding", modelId, draft: { ...codingProfile, apiModelId: modelId }, session });
+  await applyCatalogDraft({ category: "coding", modelId, session });
+  const key = { category_modelId: { category: "coding", modelId } };
+  const notesOf = async () => ((await prisma.modelCatalogEntry.findUniqueOrThrow({ where: key })).profile as { codingNotes?: { strengths: string[]; sources: string[] } }).codingNotes;
+  await saveCodingSettings({ modelId, settings: { codingNotes: { strengths: ["Fast on short edits"], weaknesses: ["Weak at long plans"] } }, session });
+  assert.deepEqual((await notesOf())?.strengths, ["Fast on short edits"]);
+  assert.deepEqual((await notesOf())?.sources, [], "written by the operator");
+  // Anything else on a dedicated row still changes only through a draft.
+  await assert.rejects(
+    saveCodingSettings({ modelId, settings: { creditWeight: 9 }, session }),
+    (error: unknown) => error instanceof CatalogRefusal && error.code === "settings_linked_only"
+  );
+  // A new draft keeps them.
+  await storeCatalogDraft({ category: "coding", modelId, draft: { ...codingProfile, apiModelId: modelId }, session });
+  await applyCatalogDraft({ category: "coding", modelId, session });
+  assert.deepEqual((await notesOf())?.strengths, ["Fast on short edits"]);
+  // A fill writes the notes only, standing on the fetched page.
+  const page = "https://developers.openai.com/api/docs/guides/function-calling";
+  const deps = {
+    draftLlm: async () => ({
+      draftCodingCapabilities: async ({ pages }: { pages: { url: string }[] }) => ({
+        toolCalling: "none" as const,
+        structuredOutput: "none" as const,
+        note: "",
+        sources: pages.map((entry) => entry.url),
+        draftedAt: today(),
+        codingNotes: { strengths: ["Parallel tool calls"], weaknesses: [], sourceUrls: [page] },
+      }),
+    }),
+    fetchPage: async (_provider: string, url: string) => ({ url, text: "page" }),
+  };
+  const capabilitiesBefore = ((await prisma.modelCatalogEntry.findUniqueOrThrow({ where: key })).profile as { capabilities: unknown }).capabilities;
+  await fillLinkCapabilities({ modelId, session, deps: deps as never });
+  assert.deepEqual((await notesOf())?.strengths, ["Parallel tool calls"]);
+  assert.deepEqual((await notesOf())?.sources, [page]);
+  assert.deepEqual(((await prisma.modelCatalogEntry.findUniqueOrThrow({ where: key })).profile as { capabilities: unknown }).capabilities, capabilitiesBefore, "a dedicated row's capabilities are its draft's");
 });

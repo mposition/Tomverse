@@ -113,3 +113,41 @@ test("without a terminal an approval stops the run as needs_approval; nothing is
         await gateway.stop();
     }
 });
+
+test("the chosen effort reaches every model call for a task and defaults on the next task", async () => {
+    const gateway = await new FakeGateway({
+        script: body => toolResultsSinceUser(body).length
+            ? { text: "Done." }
+            : { toolCalls: [{ name: "read_file", args: { path: "sum.js" } }] },
+    }).start();
+    try {
+        const { runner, journal } = await makeRunner(gateway, makeRepo(), { readOnly: true });
+        assert.equal(await runner.runTask("Explain sum.js.", "high"), "success");
+        assert.equal(journal.state.tasks[0].effort, "high");
+        assert.deepEqual(gateway.completions.map(item => item.body.tomverse_effort), ["high", "high"]);
+        assert.deepEqual(journal.state.generations.map(item => item.appliedEffort), ["high", "high"]);
+        assert.equal(await runner.runTask("Explain it again."), "success");
+        assert.equal(gateway.completions.at(-1)?.body.tomverse_effort, undefined);
+    } finally {
+        await gateway.stop();
+    }
+});
+
+test("Smart Adaptive keeps its chosen model and records Default across tool calls", async () => {
+    const gateway = await new FakeGateway({
+        routedModel: "fake-small",
+        script: body => toolResultsSinceUser(body).length
+            ? { text: "Done." }
+            : { toolCalls: [{ name: "read_file", args: { path: "sum.js" } }] },
+    }).start();
+    try {
+        const { runner, journal } = await makeRunner(gateway, makeRepo(), { model: "smart-adaptive", readOnly: true });
+        assert.equal(await runner.runTask("Explain sum.js.", "high"), "success");
+        assert.equal(journal.state.model.pinned, "fake-small");
+        assert.deepEqual(gateway.completions.map(item => item.body.model), ["smart-adaptive", "fake-small"]);
+        assert.deepEqual(journal.state.generations.map(item => item.appliedEffort), ["default", "default"]);
+        assert.equal(journal.state.tasks[0].effort, "high");
+    } finally {
+        await gateway.stop();
+    }
+});

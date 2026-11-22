@@ -81,6 +81,9 @@ function HierarchyStep({ step, m, onOpen }: { step: AmuxHierarchyStep; m: Messag
         step.metric === null ? null : step.level === "story" ? m.impact(step.metric) :
           m.contribution(step.metric)}
     </span>
+    {step.kind === "card" && step.progress && <span className={styles.stepMeta}
+      data-testid={`amux-hierarchy-${step.level}-progress`}>
+      {m.storyProgress(step.progress.done, step.progress.total)}</span>}
     {step.kind === "node" && step.archived && <span className={styles.note}>{m.archivedNote}</span>}
   </>;
   if (step.kind === "card" && step.current) {

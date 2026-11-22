@@ -1,5 +1,6 @@
 ﻿"use client";
 
+import { reasoningEffortCopy } from "@/lib/reasoningEffortCopy";
 import { ContinuationReceipt } from "@/components/continuations/ContinuationReceipt";
 import {
   Fragment,
@@ -1195,6 +1196,11 @@ export function ChatMessageList({
                     >
                       {headerName}
                     </span>
+                    {msg.appliedReasoningEffort && (
+                      <span data-testid="answer-reasoning-effort" className="shrink-0 text-[11px] text-zinc-500 dark:text-zinc-400">
+                        {reasoningEffortCopy[lang].title} · {reasoningEffortCopy[lang][msg.appliedReasoningEffort]}
+                      </span>
+                    )}
                     {msg.content && msg.status !== "error" && msg.status !== "pending" && (() => {
                       // The badge reports web search and nothing else. Why it
                       // no longer says "training knowledge", and why a message

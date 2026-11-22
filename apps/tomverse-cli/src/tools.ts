@@ -1,4 +1,5 @@
-import { spawnSync } from "node:child_process";
+import { setImmediate as yieldTurn } from "node:timers/promises";
+import { readProcess } from "./readprocess.js";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { tool, type ToolSet } from "ai";
@@ -6,7 +7,7 @@ import { z } from "zod";
 import { commandEnv, planCommand, runCommand, CommandError, type CommandPlan } from "./commands.js";
 import { currentDigest, planPatch, PatchError, removeFile, writeFileReplacing, type PatchEdit, type PlannedEdit } from "./patch.js";
 import { canonicalDigest, JournalError, sha256, type Journal } from "./session.js";
-import { PathError, ripgrepAvailable, type Workspace } from "./workspace.js";
+import { PathError, type Workspace } from "./workspace.js";
 
 /**
  * The tools the model can call. list_files, search_text and read_file only
@@ -31,6 +32,12 @@ export type ToolContext = {
     commandTimeoutMs: number;
     commandEnv: string[];
     signal: () => AbortSignal;
+    assertAllowed?: () => void;
+    redactText?: (text: string) => string;
+    /** Synchronous, idempotent guard: before backup and again immediately before disk mutation. */
+    beforeWrite?: (edit: PlannedEdit, toolCallId: string) => void;
+    trackExecution?: (execution: Promise<unknown>) => void;
+    beforeCommand?: (plan: CommandPlan, toolCallId: string) => void;
     onActivity: (line: string) => void;
     onCommandOutput: (stream: "stdout" | "stderr", text: string) => void;
 };
@@ -148,7 +155,7 @@ const readFileTool = (ctx: ToolContext, input: { path: string; startLine?: numbe
         truncated,
         lineEndings: text.includes("\r\n") ? "crlf" : "lf",
         sha256: sha256(bytes),
-        text: body,
+        text: ctx.redactText?.(body) ?? body,
     };
 };
 
@@ -156,9 +163,8 @@ const NEWLINE = "\n";
 const BACKSLASH = "\\";
 const LEADING_DOT_SLASH = /^\.[\\/]/;
 const TRAILING_EOL = /\r?\n$/;
-const REGEX_SPECIALS = /[.*+?^${}()|[\]\\]/g;
 
-const searchTool = (ctx: ToolContext, input: { pattern: string; path?: string; regex?: boolean; caseSensitive?: boolean; maxResults?: number }) => {
+const searchTool = async (ctx: ToolContext, input: { pattern: string; path?: string; regex?: boolean; caseSensitive?: boolean; maxResults?: number }) => {
     const where = ctx.workspace.resolve(input.path ?? ".", "read");
     const max = Math.min(500, Math.max(1, input.maxResults ?? 100));
     const matches: string[] = [];
@@ -166,8 +172,9 @@ const searchTool = (ctx: ToolContext, input: { pattern: string; path?: string; r
     // One list for both engines: the workspace listing, which already leaves out
     // credential files, the CLI home and links out of the folder. Nothing else is
     // opened -- ripgrep is given exactly these files, never a folder to walk.
-    const listed = ctx.workspace.listFiles(where.relative, 20_000);
-    if (ripgrepAvailable()) {
+    const listed = await ctx.workspace.listFilesAsync(where.relative, 20_000, ctx.signal());
+    let missingRg = false;
+    {
         // --json gives each match's path and line as separate fields, so no
         // character in a file name can make one path look like another.
         const base = ["--no-config", "--json", "--no-ignore", "--hidden", "--max-columns", "300", "--max-columns-preview", "--max-filesize", "1M"];
@@ -190,8 +197,12 @@ const searchTool = (ctx: ToolContext, input: { pattern: string; path?: string; r
         if (batch.length) batches.push(batch);
         const started = Date.now();
         outer: for (const files of batches) {
-            const result = spawnSync("rg", [...base, ...files], { cwd: ctx.workspace.root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, windowsHide: true, shell: false, timeout: Math.max(1000, 30_000 - (Date.now() - started)), env: commandEnv() });
-            if (result.status !== 0 && result.status !== 1) return { status: "error", error: (result.stderr || "search failed").slice(0, 500) };
+            const remaining = 30_000 - (Date.now() - started);
+            if (remaining <= 0) throw new Error("Search time limit reached.");
+            ctx.assertAllowed?.();
+            const result = await readProcess("rg", [...base, ...files], { cwd: ctx.workspace.root, env: commandEnv(), signal: ctx.signal(), timeoutMs: remaining });
+            if (result.missing) { missingRg = true; break; }
+            if (result.code !== 0 && result.code !== 1) return { status: "error", error: (result.stderr || "search failed").slice(0, 500) };
             for (const line of (result.stdout ?? "").split(NEWLINE)) {
                 if (!line) continue;
                 let event: { type?: string; data?: { path?: { text?: string }; line_number?: number; lines?: { text?: string } } };
@@ -213,18 +224,16 @@ const searchTool = (ctx: ToolContext, input: { pattern: string; path?: string; r
                 matches.push(`${file}:${event.data?.line_number ?? "?"}:${text.replace(TRAILING_EOL, "")}`);
             }
         }
-        return { status: "ok", engine: "ripgrep", matches, truncated: truncated || listed.truncated };
+        if (!missingRg) return { status: "ok", engine: "ripgrep", matches, truncated: truncated || listed.truncated };
     }
-    let re: RegExp;
-    try {
-        re = input.regex ? new RegExp(input.pattern, input.caseSensitive ? "" : "i") : new RegExp(input.pattern.replace(REGEX_SPECIALS, "\\$&"), input.caseSensitive ? "" : "i");
-    } catch (error) {
-        return { status: "error", error: `Invalid pattern: ${(error as Error).message}` };
-    }
-    // The same 30-second budget as ripgrep; lines are tested at most 2,000
-    // characters long, which bounds a slow regular expression too.
+    if (input.regex) return { status: "unsupported", error: "Regex search requires ripgrep (rg). Install rg or use a literal search." };
+    const pattern = input.caseSensitive ? input.pattern : input.pattern.toLowerCase();
+    // Literal matching only; yielding between bounded files makes Stop responsive.
     const started = Date.now();
     outer: for (const file of listed.files) {
+        await yieldTurn();
+        ctx.signal().throwIfAborted();
+        ctx.assertAllowed?.();
         if (Date.now() - started > 30_000) {
             truncated = true;
             break;
@@ -240,7 +249,8 @@ const searchTool = (ctx: ToolContext, input: { pattern: string; path?: string; r
         if (bytes.subarray(0, 8192).includes(0)) continue;
         const lines = bytes.toString("utf8").split(/\r?\n/);
         for (const [index, line] of lines.entries()) {
-            if (!re.test(line.slice(0, 2000))) continue;
+            const bounded = line.slice(0, 2000);
+            if (!(input.caseSensitive ? bounded : bounded.toLowerCase()).includes(pattern)) continue;
             if (matches.length >= max) {
                 truncated = true;
                 break outer;
@@ -261,6 +271,9 @@ export const applyPlannedPatch = (ctx: ToolContext, toolCallId: string, planned:
         }
         const changeId = `c${ctx.journal.state.changes.length + 1}-${randomBytes(3).toString("hex")}`;
         try {
+            ctx.assertAllowed?.();
+            ctx.signal().throwIfAborted();
+            ctx.beforeWrite?.(edit, toolCallId);
             // Last look before the write: the path still resolves to the same place...
             if (ctx.workspace.resolve(edit.path, "write").absolute !== edit.absolute) throw new PatchError(`${edit.path} resolves somewhere else now; it was not written.`);
             // ...and the file must still be what was approved.
@@ -276,6 +289,7 @@ export const applyPlannedPatch = (ctx: ToolContext, toolCallId: string, planned:
                 state: "writing",
             });
             ctx.journal.commit();
+            ctx.beforeWrite?.(edit, toolCallId);
             if (edit.action === "delete") removeFile(edit.absolute);
             else writeFileReplacing(edit.absolute, edit.afterBytes!);
             const record = ctx.journal.state.changes.find((c) => c.changeId === changeId)!;
@@ -314,8 +328,10 @@ export const createTools = (ctx: ToolContext, readOnly: boolean): ToolSet => {
             inputSchema: z.object({ path: z.string().optional(), limit: z.number().optional() }),
             execute: async (input) => {
                 try {
+                    ctx.assertAllowed?.();
+                    ctx.signal().throwIfAborted();
                     ctx.onActivity(`list_files ${input.path ?? "."}`);
-                    const listed = ctx.workspace.listFiles(input.path ?? ".", Math.min(2000, Math.max(1, input.limit ?? 500)));
+                    const listed = await ctx.workspace.listFilesAsync(input.path ?? ".", Math.min(2000, Math.max(1, input.limit ?? 500)), ctx.signal());
                     return { status: "ok", ...listed };
                 } catch (error) {
                     return toolError(error);
@@ -327,8 +343,12 @@ export const createTools = (ctx: ToolContext, readOnly: boolean): ToolSet => {
             inputSchema: z.object({ pattern: z.string(), path: z.string().optional(), regex: z.boolean().optional(), caseSensitive: z.boolean().optional(), maxResults: z.number().optional() }),
             execute: async (input) => {
                 try {
+                    ctx.assertAllowed?.();
+                    ctx.signal().throwIfAborted();
                     ctx.onActivity(`search_text ${JSON.stringify(input.pattern)}${input.path ? ` in ${input.path}` : ""}`);
-                    return searchTool(ctx, input);
+                    const result = await searchTool(ctx, input);
+                    if (result.matches && ctx.redactText) result.matches = result.matches.map(ctx.redactText);
+                    return result;
                 } catch (error) {
                     return toolError(error);
                 }
@@ -339,6 +359,8 @@ export const createTools = (ctx: ToolContext, readOnly: boolean): ToolSet => {
             inputSchema: z.object({ path: z.string(), startLine: z.number().optional(), endLine: z.number().optional() }),
             execute: async (input) => {
                 try {
+                    ctx.assertAllowed?.();
+                    ctx.signal().throwIfAborted();
                     ctx.onActivity(`read_file ${input.path}${input.startLine ? `:${input.startLine}-${input.endLine ?? ""}` : ""}`);
                     return readFileTool(ctx, input);
                 } catch (error) {
@@ -391,22 +413,26 @@ export const createTools = (ctx: ToolContext, readOnly: boolean): ToolSet => {
             if (decision.approval.binding.program !== undefined && decision.approval.binding.program !== plan.file) {
                 return { status: "error", error: `The program now resolves to ${plan.file}, not the ${decision.approval.binding.program} that was approved; not run.` };
             }
+            try { ctx.assertAllowed?.(); ctx.signal().throwIfAborted(); ctx.beforeCommand?.(plan, toolCallId); } catch (error) { return toolError(error); }
             startTool(ctx, "run_command", toolCallId, decision.digest);
             ctx.onActivity(`run ${plan.display}`);
-            const result = await runCommand(plan, ctx.signal(), ctx.onCommandOutput, ctx.commandEnv);
-            const output = {
-                status: result.spawnError ? "error" : result.cancelled ? "cancelled" : result.timedOut ? "timeout" : "ok",
-                exitCode: result.exitCode,
-                signal: result.signal,
-                durationMs: result.durationMs,
-                stdout: result.stdout,
-                stderr: result.stderr,
-                ...(result.stdoutOmittedBytes || result.stderrOmittedBytes ? { omittedBytes: { stdout: result.stdoutOmittedBytes, stderr: result.stderrOmittedBytes } } : {}),
-                ...(result.residualProcesses.length ? { residualProcesses: result.residualProcesses } : {}),
-                ...(result.processTreeChecked ? {} : { processTreeChecked: false, note: "The command's child processes could not be listed; some may still be running." }),
-                ...(result.spawnError ? { error: result.spawnError } : {}),
-            };
-            return endTool(ctx, toolCallId, result.spawnError ? "failed" : "completed", output);
+            const execution = runCommand(plan, ctx.signal(), ctx.onCommandOutput, ctx.commandEnv).then((result) => {
+                const output = {
+                    status: result.spawnError ? "error" : result.cancelled ? "cancelled" : result.timedOut ? "timeout" : "ok",
+                    exitCode: result.exitCode,
+                    signal: result.signal,
+                    durationMs: result.durationMs,
+                    stdout: ctx.redactText?.(result.stdout) ?? result.stdout,
+                    stderr: ctx.redactText?.(result.stderr) ?? result.stderr,
+                    ...(result.stdoutOmittedBytes || result.stderrOmittedBytes ? { omittedBytes: { stdout: result.stdoutOmittedBytes, stderr: result.stderrOmittedBytes } } : {}),
+                    ...(result.residualProcesses.length ? { residualProcesses: result.residualProcesses } : {}),
+                    ...(result.processTreeChecked ? {} : { processTreeChecked: false, note: "The command's child processes could not be listed; some may still be running." }),
+                    ...(result.spawnError ? { error: result.spawnError } : {}),
+                };
+                return endTool(ctx, toolCallId, result.spawnError ? "failed" : "completed", output);
+            });
+            ctx.trackExecution?.(execution);
+            return execution;
         },
     });
     return tools;

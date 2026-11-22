@@ -96,7 +96,7 @@ tomverse exec --json "explain src/index.ts" --read-only
 
 | Command | What it does |
 |---|---|
-| `tomverse [task]` | Interactive session. `/help`, `/diff`, `/usage`, `/compact`, `/model`, `/approvals [clear]`, `/exit` inside. |
+| `tomverse [task]` | Interactive session. `/help`, `/diff`, `/usage`, `/compact`, `/model`, `/effort [level]`, `/approvals [clear]`, `/exit` inside. |
 | `tomverse exec <task> [--json]` | One task, no prompts. Stops with exit code 3 at the first action that needs approval. |
 | `tomverse resume <session> [task]` | Continue a saved session (and answer pending approvals in a terminal). |
 | `tomverse models` | Models this key can use. |
@@ -108,7 +108,7 @@ tomverse exec --json "explain src/index.ts" --read-only
 | `tomverse trust [folder]` | Allow the CLI to work in a folder (asked once in interactive mode). |
 | `tomverse config show/set/unset` | `endpoint`, `model`, `allow-insecure-localhost`, `command-env`. |
 
-Options: `--cwd`, `--model`, `--read-only`, `--max-requests <n>`,
+Options: `--cwd`, `--model`, `--effort low|default|high`, `--read-only`, `--max-requests <n>`,
 `--timeout <minutes>`, `--command-timeout <seconds>`, `--no-persist`, `--json`.
 
 ### Limits
@@ -118,6 +118,12 @@ Options: `--cwd`, `--model`, `--read-only`, `--max-requests <n>`,
 | Model requests per task | 20 (`--max-requests`) | Every model request counts, including a compaction. Approvals, compaction and resume never reset it. At the limit the session is saved; interactively you can allow one more round of the same size. |
 | Active time per task | 15 min (`--timeout`) | Time spent waiting for your approval does not count. |
 | Per command | 120 s (`--command-timeout`) | The model can ask for another value; the approval shows it. Maximum 30 min. |
+
+Use `--effort high` for one task or `/effort low` to set the next interactive task.
+`default` uses the model's existing setting. The coding API advertises the
+available levels for each model. A task keeps its requested level across steps
+and resume. Each response records the applied level. A model that does not
+support the request uses its own default.
 
 These are CLI limits, not a credit budget. The only hard credit limit is the
 cap you set on the key in Settings; the CLI does not promise "at most N credits

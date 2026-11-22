@@ -1,5 +1,7 @@
 "use client";
 
+import { reasoningEffortCopy } from "@/lib/reasoningEffortCopy";
+import type { ExplicitReasoningEffort } from "@/lib/reasoningEffort";
 import { hasJourneySource, journeyObservationEpoch, observeJourneyDispatch, observeJourneyReply } from "@/lib/connectedJourneyAnalytics";
 
 import { CONTINUATION_RECEIPT_HEADER, receiptForAttempt, type ContinuationReceipt } from "@/lib/continuationReceipt";
@@ -286,6 +288,7 @@ type ChatAppProps = {
     attachments: ChatAttachment[];
     researchDurable?: boolean;
     researchMode?: "preview";
+    reasoningEffort?: import("@/lib/reasoningEffort").ExplicitReasoningEffort;
     deepResearchDepth?: "quick" | "standard" | "deep";
     /**
      * Web search for this send only, when the send was made by the web-search
@@ -1531,7 +1534,7 @@ function ChatAppComponent({
      * request rather than through `updateWebSearchMode`, and the next send
      * from the composer is back on whatever the switch says.
      */
-    webSearchModeOverride?: WebSearchToggleMode,
+    requestOptions?: { webSearchMode?: WebSearchToggleMode; reasoningEffort?: ExplicitReasoningEffort },
     /*
       Stored files this send has been told are gone and may proceed without.
 
@@ -1631,6 +1634,7 @@ function ChatAppComponent({
       and the conversation's own mode is used everywhere else, so an ordinary
       send is identical to what it was before the override existed.
     */
+    const { webSearchMode: webSearchModeOverride, reasoningEffort } = requestOptions ?? {};
     const effectiveWebSearchMode: WebSearchMode | undefined =
       researchMode ? "always" : webSearchModeOverride ?? webSearchMode;
     const mcpConnectionId = !researchMode && currentProduct === "chat" ? selectedMcpConnection(initialConversationId) : undefined;
@@ -1645,6 +1649,7 @@ function ChatAppComponent({
       // Only when this send carried one; a composer send records nothing here
       // and its retry reads the conversation's mode exactly as before.
       ...(webSearchModeOverride ? { webSearchMode: webSearchModeOverride } : {}),
+      ...(reasoningEffort ? { reasoningEffort } : {}),
       // A Guest Auto authority and logical turn are one-shot. Keeping this
       // content-free marker with the retry source lets a remounted panel hide
       // and reject the generic manual retry rather than silently sending the
@@ -2076,6 +2081,7 @@ function ChatAppComponent({
             : {}),
           ...(researchMode ? { researchMode } : {}),
           ...(deepResearchDepth ? { deepResearchDepth } : {}),
+          ...(reasoningEffort ? { reasoningEffort } : {}),
           ...(mcpConnectionId ? { mcpConnectionId } : {}),
           ...(admissionToken ? { admissionToken } : {}),
           ...(activeContextBundle ? { contextBundle: activeContextBundle } : {}),
@@ -2567,6 +2573,7 @@ function ChatAppComponent({
           undefined,
           {
             searchMetadata,
+            appliedReasoningEffort: trailer?.appliedReasoningEffort,
             // Always written, so a retry that produces no file clears the
             // cards the previous attempt left behind.
             artifacts,
@@ -2728,7 +2735,9 @@ function ChatAppComponent({
           // server's English sentence must never reach the panel raw -- the
           // guest reads the same localized verification copy as everywhere
           // else, and the trace id below keeps it diagnosable.
-          errorCode === "TURNSTILE_REQUIRED" || errorCode === "TURNSTILE_FAILED"
+          errorCode === "REASONING_EFFORT_UNAVAILABLE"
+            ? reasoningEffortCopy[lang].unavailable
+          : errorCode === "TURNSTILE_REQUIRED" || errorCode === "TURNSTILE_FAILED"
             ? t("chat.guestVerificationFailed")
           : errorCode === "TURNSTILE_UNAVAILABLE" ||
               errorCode === "TURNSTILE_NOT_CONFIGURED" ||
@@ -2957,7 +2966,7 @@ function ChatAppComponent({
           undefined,
           undefined,
           "single",
-          lastPrompt.webSearchMode,
+          lastPrompt,
           [],
           lastPrompt.sourceUserMessageId
         );
@@ -2999,7 +3008,7 @@ function ChatAppComponent({
           // Repeats the request that was made. A turn the web-search offer sent
           // searched without changing the conversation's switch, so retrying it
           // through the stored mode would quietly send it with search off.
-          lastPrompt.webSearchMode,
+          lastPrompt,
           [],
           lastPrompt.sourceUserMessageId,
           undefined,
@@ -3049,7 +3058,7 @@ function ChatAppComponent({
             null,
             null,
             "single",
-            undefined,
+            { reasoningEffort: lastPrompt.reasoningEffort },
             attachmentIds,
             lastPrompt.sourceUserMessageId
           );
@@ -3112,7 +3121,7 @@ function ChatAppComponent({
           undefined,
           undefined,
           "single",
-          lastPrompt.webSearchMode,
+          lastPrompt,
           [],
           retrySourceUserMessageId
         );
@@ -3237,7 +3246,7 @@ function ChatAppComponent({
           promptPayload.admissionToken,
           promptPayload.contextBundle,
           promptPayload.contextLayout,
-          promptPayload.webSearchMode,
+          promptPayload,
           [],
           promptPayload.userMessageId,
           () => {

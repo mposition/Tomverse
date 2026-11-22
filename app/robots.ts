@@ -1,8 +1,11 @@
 import type { MetadataRoute } from "next";
 import { SITE_ORIGIN } from "@/lib/seo";
 import {
+  CANONICAL_PRIVATE_DISALLOW,
   CONTENT_SIGNAL,
   REFUSED_AI_CRAWLERS,
+  SEARCH_INDEX_CRAWLERS,
+  USER_REQUEST_FETCHERS,
   robotsDecision,
 } from "@/lib/robotsPolicyCore";
 
@@ -23,26 +26,27 @@ export default function robots(): MetadataRoute.Robots {
     return { rules: { userAgent: "*", disallow: "/" } };
   }
 
+  // The access every invited crawler gets. A group that names a crawler
+  // replaces the `*` group for it outright (RFC 9309 §2.2.1), so every named
+  // group has to carry the private exclusions and the Content-Signal line
+  // itself -- without them the named crawler would gain /admin and lose the
+  // declaration the moment its name appeared in the file.
+  const invitedGroup = (userAgent: readonly string[]) => ({
+    userAgent: [...userAgent],
+    // Emitted as a verbatim `Content-Signal:` line inside this group.
+    other: { "Content-Signal": CONTENT_SIGNAL },
+    allow: "/",
+    disallow: [...CANONICAL_PRIVATE_DISALLOW],
+  });
+
   return {
     rules: [
-      {
-        userAgent: "*",
-        // Emitted as a verbatim `Content-Signal:` line inside this group.
-        other: { "Content-Signal": CONTENT_SIGNAL },
-        allow: "/",
-        disallow: [
-          "/admin",
-          "/api",
-          "/auth",
-          // The Playwright fixture mount. It is a 404 on any real deployment
-          // (lib/e2eTestMode.ts), so this is belt-and-braces rather than the
-          // control -- but it also keeps the path out of any crawler's history.
-          "/e2e",
-          "/chat$",
-          "/chat/",
-          "/share",
-        ],
-      },
+      invitedGroup(["*"]),
+      // Search indexers and user-triggered fetchers get exactly the `*`
+      // access, said to them by name (lib/robotsPolicyCore.ts has the who and
+      // why). Googlebot and Bingbot stay on `*` deliberately.
+      invitedGroup(SEARCH_INDEX_CRAWLERS),
+      invitedGroup(USER_REQUEST_FETCHERS),
       // One group per crawler rather than one group naming all of them: a
       // group that listed several would still be a single rule set, and these
       // need to differ from the `*` rules above, not extend them.

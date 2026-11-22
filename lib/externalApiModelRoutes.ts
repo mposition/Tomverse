@@ -2,6 +2,7 @@ import "server-only";
 import { toAnthropicModelList } from "@/lib/anthropicMessagesProtocol";
 import { getUserBillingPlan } from "@/lib/billingEntitlements";
 import { externalApiOfferedModels, externalApiProtocolModels, type ExternalApiSurface } from "@/lib/externalApiCatalog";
+import { reasoningEffortEnabled } from "@/lib/reasoningEffort";
 import { toOpenAiModelEntry } from "@/lib/externalApiCatalogCore";
 import { authenticateNative, nativeRefusal } from "@/lib/externalApiNative";
 import { anthropicMessagesSpec } from "@/lib/externalApiNativeSpecs";
@@ -19,7 +20,7 @@ export const handleOpenAiModelList = (request: Request, surface: ExternalApiSurf
     withBearerKey(request, async (key) => {
         const plan = await getUserBillingPlan(key.userId);
         const models = await externalApiOfferedModels(plan.tier, { surface });
-        return Response.json({ object: "list", data: models.map(toOpenAiModelEntry) }, { headers: NO_STORE_HEADERS });
+        return Response.json({ object: "list", data: models.map(model => toOpenAiModelEntry(model, surface === "coding" && reasoningEffortEnabled())) }, { headers: NO_STORE_HEADERS });
     });
 
 /** Claude Code's model discovery: the models this key can run natively, in Anthropic's list shape. */

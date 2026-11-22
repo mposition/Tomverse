@@ -48,7 +48,7 @@ export const renderChange = (journal: Journal, change: ChangeRecord) => {
 
 export class UndoError extends Error {}
 
-export const undoChange = (journal: Journal, changeId: string) => {
+export const undoChange = (journal: Journal, changeId: string, beforeWrite?: (absolute: string) => void) => {
     const change = journal.state.changes.find((c) => c.changeId === changeId);
     if (!change) throw new UndoError(`No change ${changeId} in this session.`);
     if (change.state === "undone") throw new UndoError(`${changeId} is already undone.`);
@@ -65,6 +65,7 @@ export const undoChange = (journal: Journal, changeId: string) => {
             `${change.path} is not what the CLI left there (it was changed afterwards${digest === null ? " or removed" : ""}). Undo stopped and changed nothing.`
         );
     }
+    beforeWrite?.(absolute);
     if (change.kind === "create") {
         removeFile(absolute);
     } else {

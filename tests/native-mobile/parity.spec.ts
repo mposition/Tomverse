@@ -37,14 +37,14 @@ test("Smart Adaptive, settings and composer tools use the existing account and c
 
 test("Review provider tabs never resubmit, follow-ups and reopening restore the same comparison", async ({ page }) => {
   await signIn(page); await selectProduct(page, "review");
-  await expect(page.getByRole("button", { name: /참여 모델 선택 · Easy/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /참여 모델 선택 · 간편/ })).toBeVisible();
   await send(page, "여러 관점으로 비교해주세요");
   await expect(page.locator("article.user")).toHaveCount(1); await expect(page.getByRole("heading", { name: "Local demo A", exact: true })).toBeVisible();
-  await page.getByRole("combobox", { name: "모델", exact: true }).selectOption("demo-b");
+  await page.getByRole("tab", { name: /Local demo B/ }).click();
   await expect(page.getByRole("heading", { name: "Local demo B", exact: true })).toBeVisible();
   let saved = await page.evaluate(() => JSON.parse(localStorage.getItem("tomverse-native-synthetic-demo")!)[0]); expect(saved.messages).toHaveLength(4);
   await send(page, "다음 질문입니다"); await expect(page.locator("article.user")).toHaveCount(2);
-  const geometry = await page.evaluate(() => ({ height: innerHeight, conversation: document.querySelector(".review-transcript")!.getBoundingClientRect().height, composer: document.querySelector(".composer-area")!.getBoundingClientRect().height }));
+  const geometry = await page.evaluate(() => ({ height: document.querySelector(".review-workspace")!.getBoundingClientRect().height, conversation: document.querySelector(".review-transcript")!.getBoundingClientRect().height, composer: document.querySelector(".composer-area")!.getBoundingClientRect().height }));
   expect(geometry.conversation / geometry.height).toBeGreaterThan(0.72);
   expect(geometry.composer).toBeLessThanOrEqual(164);
   await page.screenshot({ path: resolve(output, "review-conversation-dark-v2.png") });
@@ -94,7 +94,7 @@ test("image quotes require fresh consent after a price change and never run auto
     await route.fulfill({ response, body: source.replace("createRoot(container).render(", injection + "createRoot(container).render(") });
   });
   await signIn(page); await selectProduct(page, "review");
-  await expect(page.getByRole("button", { name: /참여 모델 선택 · Easy/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /참여 모델 선택 · 간편/ })).toBeVisible();
   await page.getByRole("textbox").fill("Synthetic image prompt");
   await page.getByRole("button", { name: "메시지 보내기", exact: true }).click();
   await page.getByLabel("이미지 설명").fill("Synthetic prompt");
@@ -170,7 +170,7 @@ for (const mode of ["Easy", "Professional"] as const) test(`missing ${mode} Revi
   await expect(page.getByRole("button",{name:"첨부파일 제거: keep.txt"})).toBeVisible();
   await page.getByRole("textbox").fill("Keep my question");await page.getByRole("button",{name:/참여 모델 선택/}).click();
   const picker = page.getByRole("dialog");
-  await picker.getByRole("button", { name: mode, exact: true }).click();
+  await picker.getByRole("button", { name: mode === "Easy" ? "간편" : "전문가", exact: true }).click();
   const options = picker.getByRole("checkbox");
   await expect(options).toHaveCount(3);
   for (const checkbox of await options.all()) { await checkbox.uncheck(); await expect(checkbox).not.toBeChecked(); }

@@ -37,6 +37,7 @@ const ko: typeof en = {
   imageDecision: "이미지 생성이 필요한 질문입니다. Review 이미지 생성은 별도 가격 확인이 필요합니다.",
 };
 const otherLanguages: Record<Exclude<MobileLanguage, "en" | "ko">, typeof en> = {
+  "zh-Hant": { ...en, "review":"比較觀點","copy":"複製","copied":"已複製","copyFailed":"複製失敗"},
   zh: { ...en, review: "对比观点", copy: "复制", copied: "已复制", copyFailed: "复制失败" },
   de: { ...en, review: "Perspektiven vergleichen", copy: "Kopieren", copied: "Kopiert", copyFailed: "Kopieren fehlgeschlagen" },
   fr: { ...en, review: "Comparer les points de vue", copy: "Copier", copied: "Copié", copyFailed: "Échec de la copie" },

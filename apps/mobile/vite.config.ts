@@ -15,7 +15,12 @@ import { fileURLToPath } from "node:url";
  * and in `vite preview`.
  */
 export default defineConfig({
-  resolve: { alias: { "@": fileURLToPath(new URL("../../", import.meta.url)) } },
+  resolve: { alias: {
+    "@": fileURLToPath(new URL("../../", import.meta.url)),
+    "@tomverse/api-client": fileURLToPath(new URL("../../packages/api-client/src/index.ts", import.meta.url)),
+    "@tomverse/chat-core/device-draft": fileURLToPath(new URL("../../packages/chat-core/src/deviceDraft.ts", import.meta.url)),
+    "@tomverse/chat-core": fileURLToPath(new URL("../../packages/chat-core/src/index.ts", import.meta.url)),
+  } },
   base: "./",
   build: {
     outDir: "dist",

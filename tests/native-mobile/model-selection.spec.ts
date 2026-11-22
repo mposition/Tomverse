@@ -43,7 +43,7 @@ test("Review provider and model limits stay intact through filtering and Done", 
   await sheet.getByRole("checkbox", { name: "Synthetic A", exact: true }).uncheck();
   await sheet.getByRole("checkbox", { name: "Synthetic C", exact: true }).check();
   await expect(sheet.locator(".selection-summary")).toContainText("2개 선택");
-  await sheet.getByRole("button", { name: "Professional", exact: true }).click();
+  await sheet.getByRole("button", { name: "전문가", exact: true }).click();
   await expect(sheet.getByRole("checkbox", { name: "Local demo C", exact: true })).toBeDisabled();
   await sheet.getByRole("searchbox").fill("C");
   await expect(sheet.locator(".selection-summary")).toContainText("Local demo A");
@@ -73,7 +73,7 @@ for (const theme of ["light", "dark"]) test(`selection sheets stay readable with
   await page.evaluate(() => { document.documentElement.style.fontSize = "100%"; });
   await selectProduct(page, "review"); await page.getByRole("button", { name: /참여 모델 선택/ }).click();
   await page.screenshot({ path: resolve(output, `easy-${theme}.png`) });
-  await page.getByRole("button", { name: "Professional", exact: true }).click();
+  await page.getByRole("button", { name: "전문가", exact: true }).click();
   await page.screenshot({ path: resolve(output, `professional-${theme}.png`) });
 });
 
@@ -107,7 +107,7 @@ for (const theme of ["light", "dark"]) test(`selected design reference states re
   const logoState = await page.locator(".selection-providers .provider-mark img").evaluateAll(images => images.map(image => ({ loaded: (image as HTMLImageElement).complete && (image as HTMLImageElement).naturalWidth > 0, width: image.getBoundingClientRect().width })));
   expect(logoState).toHaveLength(3); expect(logoState.every(image => image.loaded && image.width > 0)).toBe(true);
   await page.screenshot({ path: resolve(output, `reference-easy-${theme}.png`) });
-  await page.getByRole("button", { name: "Professional", exact: true }).click();
+  await page.getByRole("button", { name: "전문가", exact: true }).click();
   await page.screenshot({ path: resolve(output, `reference-professional-${theme}.png`) });
   expect(errors).toEqual([]);
 });

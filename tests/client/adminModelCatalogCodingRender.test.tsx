@@ -83,6 +83,53 @@ test("the profile check shows prices and evidence read-only and the operator's t
   assert.doesNotMatch(below, /Expected check: passes/);
 });
 
+test("a draft whose pages state no output limit says it uses the 8,192 default, and a tiered price lists its tiers", () => {
+  // Qwen3 Coder Flash (owner decisions 2026-11-22): no output limit on the pages, priced by input-size tier.
+  const flash = {
+    ...profile,
+    name: "Qwen3 Coder Flash",
+    provider: "qwen",
+    apiModelId: "qwen3-coder-flash",
+    capabilities: { toolCalling: "parallel", structuredOutput: "supported", imageInput: false, maxContextTokens: 1_000_000, maxOutputTokens: 8_192 },
+    pricing: { ...profile.pricing, inputUsdPerMTok: 1.6, outputUsdPerMTok: 9.6, sources: ["https://www.alibabacloud.com/help/en/model-studio/model-pricing"] },
+    basis: {
+      maxOutputTokens: "default" as const,
+      priceTiers: [
+        { upToInputTokens: 32_000, inputUsdPerMTok: 0.3, outputUsdPerMTok: 1.5 },
+        { upToInputTokens: 128_000, inputUsdPerMTok: 0.5, outputUsdPerMTok: 2.5 },
+        { upToInputTokens: 256_000, inputUsdPerMTok: 0.8, outputUsdPerMTok: 4 },
+        { upToInputTokens: null, inputUsdPerMTok: 1.6, outputUsdPerMTok: 9.6 },
+      ],
+    },
+  };
+  const [item] = codingCatalogItems({
+    models: [{ modelId: "qwen3-coder-flash", enabled: null, holdReason: null, profile: null, problem: "no_profile", admission: null, draft: flash, draftReview: { floor: 9, reasons: [] } }],
+  });
+  const html = renderToStaticMarkup(
+    <CodingModelDetail m={ko} item={item} edits={{}} drafting={null} onBack={noop} onEdit={noop} onResetEdits={noop} onApply={noop} onAction={noop} onHold={noop} />
+  );
+  assert.match(html, />8,192</);
+  assert.match(html, /data-testid="model-catalog-coding-max-output-default"[^>]*>문서에 없어 기본값 8,192 사용</);
+  assert.match(html, />\$1\.6</);
+  assert.match(html, />\$9\.6</);
+  assert.match(html, /data-testid="model-catalog-coding-price-dearest"[^>]*>입력 크기별 구간 가격: 가장 비싼 구간 단가를 씁니다</);
+  const tiers = html.match(/<ul[^>]*data-testid="model-catalog-coding-price-tiers"[^>]*>[\s\S]*?<\/ul>/)?.[0] ?? "";
+  assert.deepEqual(
+    [...tiers.matchAll(/<li>([^<]+)<\/li>/g)].map((match) => match[1]),
+    ["32,000까지 · $0.3 / $1.5", "128,000까지 · $0.5 / $2.5", "256,000까지 · $0.8 / $4", "256,000 초과 · $1.6 / $9.6"]
+  );
+  assert.match(html, />지원</);
+
+  // A stated limit and one flat price: no default note, no tier list.
+  const plain = renderToStaticMarkup(
+    <CodingModelDetail m={ko} item={sonnet} edits={{}} drafting={null} onBack={noop} onEdit={noop} onResetEdits={noop} onApply={noop} onAction={noop} onHold={noop} />
+  );
+  assert.doesNotMatch(plain, /model-catalog-coding-max-output-default|model-catalog-coding-price-tiers|model-catalog-coding-price-dearest/);
+  // A draft stored with a finer structured output value reads as supported.
+  assert.match(plain, />지원</);
+  assert.doesNotMatch(plain, /도구 호출 강제|forced_tool_use<\/dd/);
+});
+
 test("a coding draft the judge refuses for its evidence offers only a new draft, in words", () => {
   const refused = { ...sonnet, draftReview: { floor: 9, reasons: ["unofficial_price_source:https://blog.example.com/x", "provider_destination_unproven"] } };
   const html = renderToStaticMarkup(
