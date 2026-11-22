@@ -25,6 +25,7 @@ import {
 import { readCurrentAmuxIdeaFrontierSelection } from "./ideaFrontierCatalogRead.ts";
 import { createAmuxContentKeyRing, loadAmuxContentKeyRing } from "./ideaKeyStore.ts";
 import { inspectAmuxIdeaInput } from "./ideaInputCore.ts";
+import { loadAmuxExistingHierarchyTargets } from "./ideaNodeDuplicateScanService.ts";
 import {
   AMUX_V4_ANALYSIS_PROMPT_VERSION,
   buildAmuxIdeaAnalysisPrompt,
@@ -246,6 +247,9 @@ export async function readPreviousOutputPage(tx: Prisma.TransactionClient, input
 export async function commitIdeaOnlyTransferPreview(tx: Prisma.TransactionClient, input: {
   session: Session; request: Request; choice: IdeaOnlyTransferPreviewRequest;
   keys: AmuxContentKeys; browserNonce: string;
+  /** The existing hierarchy, read before the transaction; the first page's
+   * permitted targets (owner decision 2026-11-22). */
+  existingNodes?: readonly AmuxPermittedTargetRef[];
 }): Promise<{ previewId: string; expiresAt: Date; payload: PreviewPayload;
   payloadDigest: string; payloadDigestKeyId: string }> {
   const actorUserId = ownerId(input.session);
@@ -383,7 +387,7 @@ export async function commitIdeaOnlyTransferPreview(tx: Prisma.TransactionClient
       revisionChunkIndex: chunkIndex,
       continuation: previous?.continuation ?? null,
       sourceTexts: [{ refId: "operator_idea", kind: "operator_idea", text: parsed.input.idea }],
-      permittedTargetRefs: previous?.permittedTargetRefs ?? [],
+      permittedTargetRefs: previous?.permittedTargetRefs ?? [...(input.existingNodes ?? [])],
     });
     if (prompt.status !== "prompt_candidate") {
       throw new IdeaTransferPreviewError("not_ready");
@@ -585,12 +589,18 @@ export async function prepareIdeaOnlyTransferPreview(
     ], [{ ideaId: choice.ideaId, purpose: "transfer_payload",
       subjectId: choice.previewId }]);
   } catch { throw new IdeaTransferPreviewError("integrity_unavailable"); }
+  // The first page is given the existing hierarchy (owner decision 2026-11-22).
+  let existingNodes: AmuxPermittedTargetRef[] = [];
+  if (chunkIndex === 0) {
+    try { existingNodes = await loadAmuxExistingHierarchyTargets(); }
+    catch { throw new IdeaTransferPreviewError("integrity_unavailable"); }
+  }
   let callbackReturned = false;
   try {
     return await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('statement_timeout', '5000', true)`;
       const result = await commitIdeaOnlyTransferPreview(tx, {
-        session, request, choice, keys, browserNonce,
+        session, request, choice, keys, browserNonce, existingNodes,
       });
       callbackReturned = true;
       return result;

@@ -13,6 +13,7 @@ import { AMUX_V4_ANALYSIS_NAMESPACE } from "./ideaAnalysisBudgetCore.ts";
 import { amuxAnalysisChunkMaxBytes } from "./ideaAnalysisChunkCore.ts";
 import { prepareAmuxAnalysisPageDraft } from "./ideaAnalysisPageDraftCore.ts";
 import { readPreviousOutputPage } from "./ideaTransferPreviewService.ts";
+import { readAmuxActiveNodeTargetsInTx } from "./ideaNodeDuplicateScanService.ts";
 import { openAmuxContent, verifyAmuxContentDigest } from "./ideaCrypto.ts";
 import type { AmuxContentKeys } from "./ideaCrypto.ts";
 import type { AmuxAnalysisOutputPage } from "./ideaOutputCursorCore.ts";
@@ -196,7 +197,10 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
     keys: input.keys, unitIds: input.unitIds,
     chunkIndex, revisionChunkIndex: chunkIndex,
     permittedSourceRefIds: ["operator_idea"],
-    permittedTargetRefs: previous?.permittedTargetRefs ?? [],
+    // A first page may attach to any active existing node (owner decision
+    // 2026-11-22); its prompt listed them with their titles.
+    permittedTargetRefs: previous?.permittedTargetRefs ??
+      await readAmuxActiveNodeTargetsInTx(tx),
     sourceUnitCount: 1, coveredStartOrdinal: 0, coveredEndOrdinal: 0,
     history, templateVersion: preview.templateVersion,
   });

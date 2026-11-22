@@ -1,6 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
+import { loadAmuxExistingHierarchyTargets } from "@/lib/amux/ideaNodeDuplicateScanService";
 import { inspectAmuxIdeaSessionSubmission } from "@/lib/amux/ideaSessionSubmissionCore";
 import {
   AMUX_SESSION_INTAKE_CLIENT_SECRET_ENV,
@@ -81,7 +82,16 @@ export async function POST(request: Request): Promise<Response> {
   } catch {
     return amuxJsonNoStore({ error: "schema_rejected", retryWrite: false }, 400);
   }
-  const inspected = inspectAmuxIdeaSessionSubmission(body);
+  // A session-written plan may attach to the existing hierarchy (owner
+  // decision 2026-11-22), so it is checked against that hierarchy.
+  let existingNodes: Awaited<ReturnType<typeof loadAmuxExistingHierarchyTargets>> = [];
+  if (body && typeof body === "object" && Object.hasOwn(body, "plan")) {
+    try { existingNodes = await loadAmuxExistingHierarchyTargets(); }
+    catch {
+      return amuxJsonNoStore({ error: "hierarchy_unavailable", retryWrite: false }, 503);
+    }
+  }
+  const inspected = inspectAmuxIdeaSessionSubmission(body, existingNodes);
   if (!inspected.ok) {
     return amuxJsonNoStore({ error: inspected.code, retryWrite: false }, 400);
   }

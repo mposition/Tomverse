@@ -2,8 +2,8 @@ import "server-only";
 
 import type { Prisma } from "@prisma/client";
 
+import { amuxFeatureDisplayPrefixChoices } from "@/lib/amux/cardDisplayKeyBackfillCore";
 import {
-  amuxFeatureDisplayPrefixCandidates,
   formatAmuxCardDisplayKey,
   isAmuxCardDisplayPrefix,
   pickAmuxFeatureDisplayPrefix,
@@ -58,21 +58,46 @@ export async function allocateAmuxCardDisplayKey(tx: AllocatorClient, prefix: st
 }
 
 /**
- * The prefix a new Feature takes (docs/policy/amux-intake.md v17 item 3): the
- * proposal, or the first `<PREFIX>2` .. `<PREFIX>99` variant no Feature holds
- * yet; null when there is no valid proposal or every variant is taken. One
- * read, inside the caller's transaction; the unique index on
+ * The prefix a new Feature takes (docs/policy/amux-intake.md v17 item 3 and
+ * the 2026-11-22 owner decision): the proposal or its first free
+ * `<PREFIX>2` .. `<PREFIX>99` variant; with no usable proposal, the prefix
+ * its title suggests, then FEAT<n>, as the backfill chooses
+ * (amuxFeatureDisplayPrefixChoices). Null only when every choice is taken.
+ * One read, inside the caller's transaction; the unique index on
  * `AmuxPortfolioNode.displayPrefix` still refuses a concurrent creation that
  * chose the same one.
  */
 export async function chooseAmuxFeatureDisplayPrefix(
-  tx: AllocatorClient, proposed: unknown,
+  tx: AllocatorClient, proposed: unknown, title: string | null = null,
 ): Promise<string | null> {
-  const candidates = amuxFeatureDisplayPrefixCandidates(proposed);
-  if (candidates.length === 0) return null;
+  const candidates = amuxFeatureDisplayPrefixChoices({ proposed, title });
   const taken = await tx.$queryRaw<Array<{ displayPrefix: string }>>`
     SELECT "displayPrefix" FROM "AmuxPortfolioNode"
     WHERE "displayPrefix" = ANY(${candidates}::TEXT[])
   `;
   return pickAmuxFeatureDisplayPrefix(candidates, new Set(taken.map((row) => row.displayPrefix)));
+}
+
+/**
+ * Gives an existing Feature that has no prefix one now, so the card being
+ * registered under it is numbered (owner decision 2026-11-22). Its title is
+ * not readable here, so the choice is FEAT<n> unless a title is supplied.
+ * NULL -> value is the one change the immutability trigger allows; a
+ * concurrent writer that set it first wins and its prefix is returned.
+ */
+export async function assignAmuxFeatureDisplayPrefix(
+  tx: AllocatorClient, featureNodeId: string, title: string | null = null,
+): Promise<string | null> {
+  const prefix = await chooseAmuxFeatureDisplayPrefix(tx, null, title);
+  if (prefix !== null) {
+    await tx.$queryRaw`
+      UPDATE "AmuxPortfolioNode" SET "displayPrefix" = ${prefix}
+      WHERE "id" = ${featureNodeId} AND "level" = 'feature' AND "displayPrefix" IS NULL
+      RETURNING "id"
+    `;
+  }
+  const rows = await tx.$queryRaw<Array<{ displayPrefix: string | null }>>`
+    SELECT "displayPrefix" FROM "AmuxPortfolioNode" WHERE "id" = ${featureNodeId}
+  `;
+  return rows[0]?.displayPrefix ?? null;
 }

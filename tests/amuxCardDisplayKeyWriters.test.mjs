@@ -72,7 +72,8 @@ test("the v4 node commit writes the chosen Feature prefix and audits both values
   const source = read("lib/amux/ideaUnitDecisionStore.ts");
   const commit = source.slice(source.indexOf("export async function commitAmuxV4NodeCreation"),
     source.indexOf("export async function commitAmuxV4UnitRejection"));
-  const chooseAt = commit.indexOf("await chooseAmuxFeatureDisplayPrefix(tx, plan.displayPrefix)");
+  // With no proposal the title's prefix, then FEAT<n> (owner decision 2026-11-22).
+  const chooseAt = commit.indexOf("await chooseAmuxFeatureDisplayPrefix(tx, plan.displayPrefix, plan.title)");
   const auditAt = commit.indexOf("await writeAmuxRegistrationAudit(");
   const createAt = commit.indexOf("await tx.amuxPortfolioNode.create(");
   assert.ok(chooseAt > 0 && chooseAt < auditAt && auditAt < createAt, "choose, then audit, then create");
@@ -87,6 +88,12 @@ test("the v4 node commit writes the chosen Feature prefix and audits both values
     source.indexOf("export async function commitAmuxV4NodeCreation"));
   assert.match(register, /"contentDigest", "contentDigestKeyId", "displayPrefix"\n\s+FROM "AmuxPortfolioNode" WHERE "id" = \$\{target\.id\} FOR SHARE/);
   assert.match(register, /if \(target\.level === "feature"\) featureDisplayPrefix = current\?\.displayPrefix \?\? null;/);
+  // Owner decision 2026-11-22: a Feature with no prefix gets one before the
+  // card's number is allocated, and the card audit records it.
+  const assignAt = register.indexOf("await assignAmuxFeatureDisplayPrefix(tx, hierarchy[2].id)");
+  assert.ok(assignAt > 0 &&
+    assignAt < register.indexOf("await allocateAmuxCardDisplayKey(tx, featureDisplayPrefix)"));
+  assert.match(register, /featureDisplayPrefixAssigned: assignedFeaturePrefix/);
 });
 
 test("no writer spends a number on a skipped upsert", () => {

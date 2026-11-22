@@ -17,6 +17,7 @@ import { amuxAnalysisChunkMaxBytes } from "./ideaAnalysisChunkCore.ts";
 import { prepareAmuxAnalysisPageDraft } from "./ideaAnalysisPageDraftCore.ts";
 import { commitAmuxFirstIdeaAnalysisDraft } from "./ideaFirstAnalysisDraftService.ts";
 import { readPreviousOutputPage } from "./ideaTransferPreviewService.ts";
+import { readAmuxActiveNodeTargetsInTx } from "./ideaNodeDuplicateScanService.ts";
 
 const ID = /^[A-Za-z0-9:_-]{1,128}$/;
 type Outcome = "verified_success" | "invocation_failed" | "outcome_unknown";
@@ -294,7 +295,10 @@ export async function commitAmuxIdeaAnalysisResult(
       unitIds: input.unitIds, chunkIndex: identity.chunkIndex,
       revisionChunkIndex: identity.chunkIndex,
       permittedSourceRefIds: ["operator_idea"],
-      permittedTargetRefs: previous?.permittedTargetRefs ?? [],
+      // A first page may attach to any active existing node (owner decision
+      // 2026-11-22); its prompt listed them with their titles.
+      permittedTargetRefs: previous?.permittedTargetRefs ??
+        await readAmuxActiveNodeTargetsInTx(tx),
       sourceUnitCount: 1, coveredStartOrdinal: 0, coveredEndOrdinal: 0,
       history: earlier.map((row) => ({ chunkIndex: row.chunkIndex,
         coveredStartOrdinal: row.coveredStartOrdinal!,

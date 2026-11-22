@@ -31,7 +31,7 @@ import { checkAmuxIdeaUnitConsume,
 import type { V4TaskCostCeilingResult } from "./v4TaskCostCeilingCore.ts";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
 import { allocateAmuxCardDisplayKey,
-  chooseAmuxFeatureDisplayPrefix } from "./cardDisplayKeyAllocator.ts";
+  assignAmuxFeatureDisplayPrefix, chooseAmuxFeatureDisplayPrefix } from "./cardDisplayKeyAllocator.ts";
 import { AmuxV20RegistrationRefusalDetected } from
   "./ideaRegistrationRefusalDetectionCore.ts";
 import { AMUX_UNIT_DECISION_AUDIT_SELECT, type AmuxUnitDecisionAuditRow,
@@ -468,7 +468,13 @@ export async function commitAmuxV4CardRegistration(tx: Prisma.TransactionClient,
   const brief = plan.executionBrief === null ? null : sealAmuxContent(
     Buffer.from(plan.executionBrief, "utf8"), "card_brief", input.cardId, input.keys);
   // A Feature without a prefix (made before amux-intake v17, or whose
-  // proposal had none) leaves the card unnumbered for the backfill.
+  // proposal had none) gets one now, so no card is registered unnumbered
+  // (owner decision 2026-11-22). Its title is not readable here: FEAT<n>.
+  let assignedFeaturePrefix: string | null = null;
+  if (featureDisplayPrefix === null) {
+    featureDisplayPrefix = await assignAmuxFeatureDisplayPrefix(tx, hierarchy[2].id);
+    assignedFeaturePrefix = featureDisplayPrefix;
+  }
   const displayKey = featureDisplayPrefix === null ? null :
     await allocateAmuxCardDisplayKey(tx, featureDisplayPrefix);
   await tx.amuxWorkItem.create({ data: {
@@ -516,6 +522,7 @@ export async function commitAmuxV4CardRegistration(tx: Prisma.TransactionClient,
       cardId: input.cardId, action: "register_card", status: "backlog",
       confirmationDigest: prepared.confirmationDigest,
       registrationAuthority: authorityKind,
+      ...(assignedFeaturePrefix !== null ? { featureDisplayPrefixAssigned: assignedFeaturePrefix } : {}),
       ...(plan.cardType === "task" ? {
         proposedExecutionGrade: plan.proposedExecutionGrade,
         finalExecutionGrade: plan.executionGrade,
@@ -642,8 +649,10 @@ export async function commitAmuxV4NodeCreation(tx: Prisma.TransactionClient,
   // docs/policy/amux-intake.md v17 item 3: the proposed Feature prefix, or the first of its
   // numbered alternatives no Feature holds yet. The unique index still
   // refuses a concurrent creation that took the same one.
+  // With no usable proposal the title's prefix, then FEAT<n> (owner decision
+  // 2026-11-22: a Feature gets its prefix when it is registered).
   const displayPrefix = plan.level === "feature" ?
-    await chooseAmuxFeatureDisplayPrefix(tx, plan.displayPrefix) : null;
+    await chooseAmuxFeatureDisplayPrefix(tx, plan.displayPrefix, plan.title) : null;
   const auditId = await writeAmuxRegistrationAudit({ tx, authority: input,
     action: "amux.v4.unit.consume",
     targetType: "AmuxIdeaUnitDecision", targetId: plan.decisionId,
@@ -653,7 +662,7 @@ export async function commitAmuxV4NodeCreation(tx: Prisma.TransactionClient,
       confirmationDigest: prepared.confirmationDigest,
       registrationAuthority: authorityKind,
       ...(plan.displayPrefix ? { proposedDisplayPrefix: plan.displayPrefix,
-        displayPrefix } : {}),
+        displayPrefix } : displayPrefix !== null ? { displayPrefix } : {}),
       executionAttempted: false },
   });
   await tx.amuxPortfolioNode.create({ data: {

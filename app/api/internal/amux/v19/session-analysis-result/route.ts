@@ -21,6 +21,7 @@ import { amuxAnalysisFreeformSubjectId } from
 import { createAmuxContentKeyRing } from "@/lib/amux/ideaKeyStore";
 import { reportAmuxSessionIdeaNeedsOperator } from
   "@/lib/amux/ideaSessionAnalysisAlert";
+import { loadAmuxExistingHierarchyTargets } from "@/lib/amux/ideaNodeDuplicateScanService";
 import { amuxSessionPageKeyIdentities } from
   "@/lib/amux/ideaSessionAnalysisPlanService";
 import { amuxSessionAnswerUnitCount } from "@/lib/amux/ideaSessionAnswerCore";
@@ -116,12 +117,16 @@ export async function POST(request: Request): Promise<Response> {
       ...unitIds.map((id) => ({ ideaId: body.ideaId,
         purpose: "analysis_draft" as const, subjectId: id }))]);
   } catch { return amuxJsonNoStore({ error: "key_outcome_unknown" }, 503); }
+  // The existing hierarchy the first page was given (owner decision
+  // 2026-11-22). If it cannot be read now, the plan writer checks the page
+  // against the active nodes' ids and levels instead.
+  const existingNodes = await loadAmuxExistingHierarchyTargets().catch(() => undefined);
   let callbackReturned = false;
   let result: Awaited<ReturnType<typeof commitAmuxMaxSessionResult>>;
   try {
     result = await prisma.$transaction(async (tx) => {
       const saved = await commitAmuxMaxSessionResult(tx, { ...body, keys,
-        unitIds });
+        unitIds, existingNodes });
       callbackReturned = true;
       return saved;
     }, { maxWait: 5_000, timeout: 15_000 });

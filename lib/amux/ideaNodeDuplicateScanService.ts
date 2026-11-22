@@ -7,12 +7,14 @@ import { prisma } from "@/lib/prisma";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
 import { openAmuxContent, verifyAmuxContentDigest } from "./ideaCrypto.ts";
 import { loadAmuxContentKeyRing } from "./ideaKeyStore.ts";
+import type { AmuxPermittedNodeTarget } from "./ideaAnalysisChunkCore.ts";
+import { amuxExistingHierarchyTargets } from "./ideaExistingHierarchyCore.ts";
 import { scanAmuxNodeDuplicates, type AmuxDuplicateNode } from
   "./ideaNodeDuplicateScanCore.ts";
 
 const LIMIT = 1_000;
 const select = { id: true, level: true, parentId: true, state: true,
-  revision: true, archivedAt: true, titleCiphertext: true,
+  revision: true, archivedAt: true, displayPrefix: true, titleCiphertext: true,
   descriptionCiphertext: true, contentKeyId: true, contentKeyVersion: true,
   contentDigest: true, contentDigestKeyId: true } as const;
 type NodeScanRow = Prisma.AmuxPortfolioNodeGetPayload<{ select: typeof select }>;
@@ -36,13 +38,15 @@ export class AmuxNodeDuplicateScanError extends Error {
   }
 }
 
-/** Load only approved v4 nodes. Per-node keys are fetched before the DB
- * transaction, then the complete catalog is compared in SERIALIZABLE. */
-export async function loadAmuxNodeDuplicateScanner() {
+/** Every approved v4 node, each active title decrypted and digest-verified.
+ * With a limit, a larger catalog is incomplete. */
+async function readVerifiedNodeCatalog(limit: number | null) {
   const rows = await prisma.amuxPortfolioNode.findMany({
-    take: LIMIT + 1, orderBy: { id: "asc" }, select,
+    ...(limit === null ? {} : { take: limit + 1 }), orderBy: { id: "asc" }, select,
   });
-  if (rows.length > LIMIT) throw new AmuxNodeDuplicateScanError("catalog_incomplete");
+  if (limit !== null && rows.length > limit) {
+    throw new AmuxNodeDuplicateScanError("catalog_incomplete");
+  }
   const revisions = await prisma.amuxPortfolioNodeRevision.findMany({
     where: { nodeId: { in: rows.map((row) => row.id) } },
     select: { nodeId: true, revision: true, decisionId: true,
@@ -116,6 +120,38 @@ export async function loadAmuxNodeDuplicateScanner() {
     if (error instanceof AmuxNodeDuplicateScanError) throw error;
     throw new AmuxNodeDuplicateScanError("integrity_unavailable");
   }
+  return { rows, catalog, keys };
+}
+
+/** Owner decision 2026-11-22: the existing hierarchy an analysis page is
+ * given as permitted targets, read with no count limit. Read before the
+ * transaction that builds the prompt, because each node's key is fetched. */
+export async function loadAmuxExistingHierarchyTargets(): Promise<AmuxPermittedNodeTarget[]> {
+  const { rows, catalog } = await readVerifiedNodeCatalog(null);
+  const prefixOf = new Map(rows.map((row) => [row.id, row.displayPrefix]));
+  return amuxExistingHierarchyTargets(catalog.map((node) => ({ id: node.id,
+    level: node.level, parentId: node.parentId, title: node.title,
+    displayPrefix: prefixOf.get(node.id) ?? null, archived: node.archived })));
+}
+
+/** The id and level of every active node, read in the caller's transaction.
+ * This is what checking an answer against existing nodes needs; their titles
+ * belong only to the prompt. */
+export async function readAmuxActiveNodeTargetsInTx(
+  tx: Prisma.TransactionClient,
+): Promise<AmuxPermittedNodeTarget[]> {
+  const rows = await tx.amuxPortfolioNode.findMany({
+    where: { state: "active", archivedAt: null }, orderBy: { id: "asc" },
+    select: { id: true, level: true } });
+  return rows.flatMap((row) => ["initiative", "epic", "feature"].includes(row.level)
+    ? [{ ref: row.id, kind: "node" as const,
+      level: row.level as AmuxPermittedNodeTarget["level"] }] : []);
+}
+
+/** Load only approved v4 nodes. Per-node keys are fetched before the DB
+ * transaction, then the complete catalog is compared in SERIALIZABLE. */
+export async function loadAmuxNodeDuplicateScanner() {
+  const { rows, catalog, keys } = await readVerifiedNodeCatalog(LIMIT);
   // Compared by id, not by position: the catalog is a set.
   const baseline = new Map(rows.map((row) => [row.id, signature(row)]));
   const scan = async (tx: Prisma.TransactionClient, input: {
