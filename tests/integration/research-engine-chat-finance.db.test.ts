@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
 import { prisma } from "@/lib/prisma";
 import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
-import { setResearchFundingAdapter } from "@/lib/researchEngineFunding";
+import { researchFundingAdapter, setResearchFundingAdapter } from "@/lib/researchEngineFunding";
 import { createResearchRun, readResearchRunDto } from "@/lib/researchEngineService";
 import { drainResearchWork, processOneResearchWorkItem } from "@/lib/researchEngineWorker";
 import { bindResearchFundingReservation, readResearchRunMoney, RESEARCH_SEGMENT_RESERVING_STALE_MS, claimResearchFundingRoom } from "@/lib/researchEngineStore";
@@ -160,4 +160,52 @@ test("stale reserving recovery that saw no reservation never releases a segment 
 
 test("stale reserving recovery that saw a reservation leaves it to the worker that bound it first", async () => {
   await raceWorkerBindDuringRecovery("finance-race-seen", true);
+});
+
+test("a hold that expires between its creation and its bind is refunded only after the segment is fenced, and nothing dispatches on it", async () => {
+  installFakes();
+  setResearchFundingAdapter(null);
+  createFakeWeb();
+  const real = await researchFundingAdapter();
+  const expired: Array<{ segmentId: string; reservationId: string }> = [];
+  setResearchFundingAdapter({ ...real, async reserve(input) {
+    const reservation = await real.reserve(input);
+    if (reservation.ok && !expired.length) {
+      // The worker stalls here past the hold's expiry; reconciliation runs before its bind.
+      expired.push({ segmentId: input.segmentId, reservationId: reservation.reservationId });
+      await prisma.chatCreditReservation.update({ where: { id: reservation.reservationId }, data: { expiresAt: new Date(Date.now() - 60 * 60_000) } });
+      await reconcileExpiredChatCreditReservations();
+    }
+    return reservation;
+  } });
+  try {
+    const user = await createUser("finance-expiry-unbound");
+    const { run } = await createResearchRun({ request: fakeRequest(), userId: user.id, payload: { userMessageId: randomUUID(), assistantMessageId: randomUUID(),
+      brief: brief("Unbound expiry question"), sources: [], profile: "standard", approvedCredits: 5_000, autoStart: true } });
+    await processOneResearchWorkItem("unbound-expiry-worker");
+    assert.equal(expired.length, 1);
+    const segment = await prisma.researchFundingSegment.findUniqueOrThrow({ where: { id: expired[0]!.segmentId }, include: { generations: true } });
+    assert.equal(segment.status, "released", "expiry fenced the unbound segment");
+    assert.equal(segment.reservationId, null, "the refunded hold was never bound");
+    assert.equal(segment.generations.length, 0, "nothing was dispatched on a refunded hold");
+    const reservation = await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id: expired[0]!.reservationId } });
+    assert.notEqual(reservation.status, "reserved");
+    assert.equal((await readResearchRunMoney(prisma, run.id)).reservedCredits, 0);
+  } finally {
+    setResearchFundingAdapter(null);
+  }
+});
+
+test("a hold that is no longer reserved cannot be bound to its segment", async () => {
+  const fakes = installFakes();
+  const user = await createUser("finance-bind-settled");
+  const { run } = await createResearchRun({ request: fakeRequest(), userId: user.id, payload: { userMessageId: randomUUID(), assistantMessageId: randomUUID(),
+    brief: brief("Bind question"), sources: [], profile: "standard", approvedCredits: 500, autoStart: false } });
+  const segment = await claimResearchFundingRoom({ runId: run.id, purpose: "work", credits: 20, modelId: "gemini-3-1-pro", provider: "google", pricingVersion: "p" });
+  const reservation = await fakes.funding.adapter.reserve({ userId: user.id, segmentId: segment.id, model: {} as never, searchEnabled: false,
+    estimate: { credits: 20, pricingVersion: "p", searchSurchargeCredits: 0, budget: {} } as never });
+  assert.ok(reservation.ok);
+  await prisma.chatCreditReservation.update({ where: { id: reservation.reservationId }, data: { status: "released" } });
+  await assert.rejects(bindResearchFundingReservation(segment.id, reservation.reservationId, reservation.reservedCredits), { code: "RESEARCH_FUNDING_BIND_CONFLICT" });
+  assert.equal((await prisma.researchFundingSegment.findUniqueOrThrow({ where: { id: segment.id } })).status, "reserving");
 });

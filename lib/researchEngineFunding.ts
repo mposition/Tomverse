@@ -16,6 +16,11 @@ import { recordResearchFundingSettled } from "@/lib/researchEngineStore";
 
 export type ResearchFundingEstimate = { credits: number; pricingVersion: string; searchSurchargeCredits: number; budget: unknown };
 
+/** Settles a hold on which nothing was dispatched. */
+export const RESEARCH_ZERO_SETTLEMENT_USAGE = Object.freeze({ inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0,
+  reasoningTokens: 0, usageFromProvider: true, outcome: "failed", searchExecuted: false, searchQueryCount: 0,
+  searchBackendRequestCount: 0, searchQueriesObserved: true }) satisfies ResearchSettlementUsage;
+
 export type ResearchSettlementUsage = {
   inputTokens?: number; cachedInputTokens?: number; cacheWriteInputTokens?: number;
   outputTokens?: number; reasoningTokens?: number;

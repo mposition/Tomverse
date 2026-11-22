@@ -9,7 +9,7 @@ import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
 import { fitChatOutputToContextWindow } from "@/lib/chatContextWindow";
 import { usedResearchOutputTokens } from "@/lib/researchPreviewExecution";
 import { researchExecutionProfileSchema, type ResearchModelRole } from "@/lib/researchEngineContract";
-import { researchFundingAdapter, type ResearchSettlementUsage } from "@/lib/researchEngineFunding";
+import { RESEARCH_ZERO_SETTLEMENT_USAGE, researchFundingAdapter } from "@/lib/researchEngineFunding";
 import {
   beginResearchDispatch, bindResearchFundingReservation, claimResearchFundingRoom, markResearchDispatchStarted,
   markResearchDispatchUnknown, markResearchFundingUnknown, refuseResearchDispatch, releaseResearchFundingSegment,
@@ -121,17 +121,17 @@ export async function callResearchModel<T>(input: {
     await releaseResearchFundingSegment(segment.id);
     return { ok: false, kind: reservation.kind, code: reservation.code, retryAfterMs: reservation.retryAfterMs };
   }
-  const zeroUsage: ResearchSettlementUsage = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0,
-    reasoningTokens: 0, usageFromProvider: true, outcome: "failed", searchExecuted: false, searchQueryCount: 0,
-    searchBackendRequestCount: 0, searchQueriesObserved: true };
   const releaseUnused = async () => {
-    await funding.settle({ userId: input.run.userId, reservationId: reservation.reservationId, usage: zeroUsage }).catch(() => undefined);
+    await funding.settle({ userId: input.run.userId, reservationId: reservation.reservationId, usage: RESEARCH_ZERO_SETTLEMENT_USAGE }).catch(() => undefined);
     await releaseResearchFundingSegment(segment.id);
   };
   try {
     await bindResearchFundingReservation(segment.id, reservation.reservationId, reservation.reservedCredits);
   } catch (error) {
     await releaseUnused();
+    await funding.releaseLease({ userId: input.run.userId, leaseId: reservation.leaseId, segmentId: segment.id }).catch(() => undefined);
+    // Recovery or expiry took this hold before the bind: nothing was sent; try again later.
+    if ((error as { code?: string }).code === "RESEARCH_FUNDING_BIND_CONFLICT") return { ok: false, kind: "backpressure", code: "RESEARCH_FUNDING_BIND_CONFLICT", retryAfterMs: 1_000 };
     throw error;
   }
 

@@ -353,12 +353,23 @@ export async function claimResearchFundingRoom(input: {
   });
 }
 
+/**
+ * Binds a Chat hold to its segment. Taken under the reservation's settlement
+ * lock (the one expiry reconciliation holds), so a hold that expiry already
+ * refunded, or is refunding, can never be bound and dispatched on.
+ */
 export async function bindResearchFundingReservation(segmentId: string, reservationId: string, reservedCredits: number) {
-  const changed = await prisma.researchFundingSegment.updateMany({
-    where: { id: segmentId, status: "reserving", reservationId: null, reservedCredits: { gte: reservedCredits } },
-    data: { status: "reserved", reservationId, reservedCredits },
+  const bound = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`chat-credit-reservation:${reservationId}`}))`;
+    const reservation = await tx.chatCreditReservation.findUnique({ where: { id: reservationId }, select: { status: true, traceId: true } });
+    if (!reservation || reservation.status !== "reserved" || reservation.traceId !== segmentId) return false;
+    const changed = await tx.researchFundingSegment.updateMany({
+      where: { id: segmentId, status: "reserving", reservationId: null, reservedCredits: { gte: reservedCredits } },
+      data: { status: "reserved", reservationId, reservedCredits },
+    });
+    return changed.count === 1;
   });
-  if (changed.count !== 1) throw new ResearchPreviewRunError(409, "RESEARCH_FUNDING_BIND_CONFLICT", "The Research funding segment could not be bound.");
+  if (!bound) throw new ResearchPreviewRunError(409, "RESEARCH_FUNDING_BIND_CONFLICT", "The Research funding segment could not be bound.");
 }
 
 /**

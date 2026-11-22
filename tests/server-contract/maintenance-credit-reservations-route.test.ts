@@ -111,6 +111,10 @@ const loadRoute = () => {
         return 7;
       },
     } });
+    // Research engine v2 recovery is DB-only; the route forwards its counts and survives its failure.
+    mock.module(mod("lib/researchEngineRecovery.ts"), { namedExports: {
+      recoverResearchEngine: async () => ({ revokedPrivateSources: 0, staleItems: 0 }),
+    } });
     mock.module(mod("lib/codeManagedService.ts"), { namedExports: {
       reconcileExpiredCodeTasks: async () => {if(codeSweepFailure)throw new Error("synthetic Code sweep failure");return { interrupted: 0 };},
     } });

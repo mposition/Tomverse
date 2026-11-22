@@ -1,7 +1,7 @@
 import "server-only";
 
 import { prisma } from "@/lib/prisma";
-import { researchFundingAdapter, settleResearchSegmentIfReady } from "@/lib/researchEngineFunding";
+import { RESEARCH_ZERO_SETTLEMENT_USAGE, researchFundingAdapter, settleResearchSegmentIfReady } from "@/lib/researchEngineFunding";
 import { researchEvidenceStore, researchNow } from "@/lib/researchEngineRuntime";
 import {
   bindResearchFundingReservation, lockResearchRun, markResearchDispatchUnknown, markResearchFundingUnknown,
@@ -94,9 +94,7 @@ export async function recoverStaleReservingSegments(limit = 100) {
       }
       // Recovery owns the hold now: the worker's own bind is refused, so nothing dispatches on it.
       const funding = await researchFundingAdapter();
-      await funding.settle({ userId: segment.run!.userId, reservationId: reservation.id, usage: { inputTokens: 0, outputTokens: 0,
-        cachedInputTokens: 0, cacheWriteInputTokens: 0, reasoningTokens: 0, usageFromProvider: true, outcome: "failed", searchExecuted: false,
-        searchQueryCount: 0, searchBackendRequestCount: 0, searchQueriesObserved: true } });
+      await funding.settle({ userId: segment.run!.userId, reservationId: reservation.id, usage: RESEARCH_ZERO_SETTLEMENT_USAGE });
       await prisma.researchFundingSegment.updateMany({ where: { id: segment.id, status: "reserved", reservationId: reservation.id },
         data: { status: "released", settledAt: null } });
     });
@@ -128,9 +126,7 @@ export async function releaseOrphanedResearchSegments(limit = 100) {
       if (!claimed || !segment.reservationId) return;
       const funding = await researchFundingAdapter();
       // Nothing dispatched on this hold; refund it. A failure leaves it to expiry, which reads "released" as zero.
-      await funding.settle({ userId: segment.run!.userId, reservationId: segment.reservationId, usage: { inputTokens: 0, outputTokens: 0,
-        cachedInputTokens: 0, cacheWriteInputTokens: 0, reasoningTokens: 0, usageFromProvider: true, outcome: "failed", searchExecuted: false,
-        searchQueryCount: 0, searchBackendRequestCount: 0, searchQueriesObserved: true } }).catch((error: unknown) => {
+      await funding.settle({ userId: segment.run!.userId, reservationId: segment.reservationId, usage: RESEARCH_ZERO_SETTLEMENT_USAGE }).catch((error: unknown) => {
         console.error(JSON.stringify({ event: "research_engine_orphan_settle_deferred", segmentId: segment.id, code: (error as { code?: string }).code ?? "unknown" }));
       });
     });
