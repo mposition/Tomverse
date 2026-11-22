@@ -24,6 +24,7 @@ import {
   type CodingSettingsValue,
   capabilityOrigin,
   codingDedicatedSettings,
+  codingNotesChanged,
   codingNotesProblems,
   codingNotesRequest,
   codingRefusals,
@@ -800,12 +801,12 @@ export function CodingNotesTile({
   const initial = { strengths: (notes?.strengths ?? []).join("\n"), weaknesses: (notes?.weaknesses ?? []).join("\n") };
   const [value, setValue] = useState(initial);
   const problems = codingNotesProblems(value);
-  const changed = value.strengths !== initial.strengths || value.weaknesses !== initial.weaknesses;
+  const changed = codingNotesChanged(value, notes);
   const canSave = changed && Object.keys(problems).length === 0 && !busy;
   const list = (items: readonly string[], testId: string) => (
     <ul className="list-disc pl-4 text-sm text-zinc-200" data-testid={testId}>
-      {items.map((entry) => (
-        <li key={entry}>{entry}</li>
+      {items.map((entry, index) => (
+        <li key={`${index}:${entry}`}>{entry}</li>
       ))}
     </ul>
   );
@@ -842,8 +843,8 @@ export function CodingNotesTile({
               {notes.sources.length ? (
                 <>
                   <span className="font-bold text-zinc-300">{c.notes.sources}</span>
-                  {notes.sources.map((url) => (
-                    <a key={url} href={url} target="_blank" rel="noreferrer" className="block break-all font-mono text-blue-300 underline">
+                  {notes.sources.map((url, index) => (
+                    <a key={`${index}:${url}`} href={url} target="_blank" rel="noreferrer" className="block break-all font-mono text-blue-300 underline">
                       {url.replace(/^https:\/\//, "")}
                     </a>
                   ))}
