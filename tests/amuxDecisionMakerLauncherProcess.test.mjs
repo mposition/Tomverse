@@ -55,7 +55,11 @@ touch(process.env.HOME + "/.local/state/claude/locks/2.1.296.lock", "");`;
 
 const writeOutput = (value) => `touch(argv[argv.indexOf("-o") + 1], ${JSON.stringify(JSON.stringify(value))});`;
 /** The result and cleanup alone: the tool summary has its own test. */
-const withoutTools = ({ tools: _tools, ...rest }) => rest;
+const withoutTools = (value) => {
+  const rest = { ...value };
+  delete rest.tools;
+  return rest;
+};
 const events = (...list) => `process.stdout.write(${JSON.stringify(list.map((event) => JSON.stringify(event)).join("\n") + "\n")});`;
 const claudeResult = (overrides = {}) =>
   `process.stdout.write(${JSON.stringify(
