@@ -17,6 +17,7 @@ import { readAmuxPortfolioClock } from "./portfolioClock.ts";
 import { amuxPortfolioOwnerId, AmuxPortfolioError,
   writeAmuxPortfolioAssessmentInTx } from "./portfolioAssessmentService.ts";
 import { AMUX_NODE_PARENT_LEVEL, AMUX_NODE_REVISE_ACTION, AMUX_NODE_REVISE_TARGET,
+  amuxProjectedMoveTaskScore,
   amuxNodeEditBinding, amuxNodeEditEvidenceRef, amuxNodeEditReasonFits,
   amuxProjectedTaskScore, type AmuxNodeEditTaskInputs, type AmuxPortfolioNodeEditPayload,
   type AmuxPortfolioNodeLevel } from "./portfolioNodeEditCore.ts";
@@ -137,11 +138,40 @@ async function taskScoreInputs(db: Db,
 const contentBody = (title: string, description: string) =>
   Buffer.from(amuxCanonicalJson({ title, description }), "utf8");
 
+/** A move's new ancestors, parent first (owner decision 2026-11-22): each
+ * active with a latest assessment bound to its current revision, or the move
+ * is not ready, so no Task keeps a score from its old hierarchy. */
+async function parentPath(db: Db, parentId: string) {
+  const path: Array<{ subjectId: string; level: AmuxPortfolioNodeLevel; revision: number;
+    assessmentId: string; value: number }> = [];
+  for (let id: string | null = parentId; id && path.length < 2;) {
+    const node: { id: string; level: string; parentId: string | null; state: string;
+      revision: number; archivedAt: Date | null } | null = await db.amuxPortfolioNode.findUnique({
+      where: { id }, select: { id: true, level: true, parentId: true, state: true,
+        revision: true, archivedAt: true } });
+    if (!node || node.state !== "active" || node.archivedAt !== null) {
+      throw new AmuxPortfolioError("not_ready");
+    }
+    const latest = await db.amuxPortfolioAssessment.findFirst({ where: { nodeId: node.id },
+      orderBy: { assessmentVersion: "desc" },
+      select: { id: true, subjectRevision: true, metrics: true } });
+    const value = (latest?.metrics as Record<string, unknown> | undefined)?.value;
+    if (!latest || latest.subjectRevision !== node.revision || typeof value !== "number") {
+      throw new AmuxPortfolioError("not_ready");
+    }
+    path.push({ subjectId: node.id, level: node.level as AmuxPortfolioNodeLevel,
+      revision: node.revision, assessmentId: latest.id, value });
+    id = node.parentId;
+  }
+  return path;
+}
+
 type Plan = {
   level: AmuxPortfolioNodeLevel; node: NodeRow; decisionId: string;
   nextContent: { digest: string; digestKeyId: string } | null;
   /** The active node one level up the node moves under, or null when it stays. */
   nextParentId: string | null;
+  nextParentPath: Awaited<ReturnType<typeof parentPath>>;
   priorValue: number | null; tasks: Array<{ id: string; displayKey: string | null }>;
   latestScore: Map<string, { scoreTotal: number; components: unknown }>;
   confirmationDigest: string;
@@ -182,6 +212,7 @@ async function buildPlan(db: Db, actorUserId: string,
     }
     nextParentId = payload.parentId;
   }
+  const nextParentPath = nextParentId ? await parentPath(db, nextParentId) : [];
   const prior = await db.amuxPortfolioAssessment.findFirst({
     where: { nodeId: node.id }, orderBy: { assessmentVersion: "desc" },
     select: { id: true, metrics: true } });
@@ -196,13 +227,13 @@ async function buildPlan(db: Db, actorUserId: string,
   const canonical = Buffer.from(amuxCanonicalJson(amuxNodeEditBinding({
     actorUserId, payload, level, priorContentDigest: node.contentDigest,
     nextContentDigest: nextContent?.digest ?? null,
-    priorParentId: node.parentId, nextParentId,
+    priorParentId: node.parentId, nextParentId, nextParentPath,
     priorAssessmentId: prior?.id ?? null, affectedTasks: inputs })), "utf8");
   try {
     const digest = amuxContentDigest(canonical, "portfolio_assessment",
       payload.id, digestKey);
-    return { level, node, decisionId, nextContent, nextParentId, priorValue, tasks,
-      latestScore, confirmationDigest: digest.digest };
+    return { level, node, decisionId, nextContent, nextParentId, nextParentPath, priorValue,
+      tasks, latestScore, confirmationDigest: digest.digest };
   } finally { canonical.fill(0); }
 }
 
@@ -235,9 +266,15 @@ export async function previewAmuxPortfolioNodeEdit(session: Session,
         const current = latest.get(task.id) ?? null;
         return { taskId: task.id, displayKey: task.displayKey,
           currentScore: current?.scoreTotal ?? null,
-          projectedScore: amuxProjectedTaskScore({ level: plan.level,
-            nextValue: payload.value, currentTotal: current?.scoreTotal ?? null,
-            currentComponents: current?.components ?? null }) };
+          projectedScore: plan.nextParentId
+            ? amuxProjectedMoveTaskScore({ level: plan.level, nextValue: payload.value,
+              ancestors: Object.fromEntries(plan.nextParentPath.map((item) =>
+                [item.level, item.value])),
+              currentTotal: current?.scoreTotal ?? null,
+              currentComponents: current?.components ?? null })
+            : amuxProjectedTaskScore({ level: plan.level,
+              nextValue: payload.value, currentTotal: current?.scoreTotal ?? null,
+              currentComponents: current?.components ?? null }) };
       }),
     };
   } finally { keys?.masterKey.fill(0); }
@@ -346,7 +383,10 @@ export async function saveAmuxPortfolioNodeEdit(input: {
           tasks.push({ taskId: task.id, state: "scored",
             scoreTotal: written.score.total });
         } catch (error) {
-          if (error instanceof AmuxPortfolioError && error.code === "not_ready") {
+          // A moved node's Task must not keep a score from its old hierarchy,
+          // so a move saves only when every Task under it is rescored.
+          if (error instanceof AmuxPortfolioError && error.code === "not_ready" &&
+              !plan.nextParentId) {
             tasks.push({ taskId: task.id, state: "skipped" });
             continue;
           }

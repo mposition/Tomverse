@@ -456,3 +456,72 @@ test("a move to a node of the wrong level, an Initiative move or a bare parent u
     assert.match(initiative ?? "", /closed|initiative/);
   }));
 });
+
+test("an Epic moves under another Initiative, and a revision naming another parent is refused", async () => {
+  const { previewAmuxPortfolioNodeEdit, saveAmuxPortfolioNodeEdit } = await services();
+  await lifecycle(async (tx) => scoredFeature(tx, async (ids) => {
+    const owner = session();
+    const initiative = randomUUID();
+    await tx.$executeRaw`INSERT INTO "AmuxPortfolioNode"
+      ("id", "level", "parentId", "state", "revision", "titleCiphertext",
+       "descriptionCiphertext", "contentKeyId", "contentKeyVersion", "contentDigest",
+       "contentDigestKeyId", "approvedByUserId", "authorizationAuditLogId", "updatedAt")
+      VALUES (${initiative}, 'initiative', NULL, 'active', 0, ${Buffer.from("x")},
+        ${Buffer.from("y")}, 'synthetic', 1, ${"e".repeat(64)}, 'synthetic',
+        'synthetic-owner', ${randomUUID()}, CURRENT_TIMESTAMP)`;
+    const assessmentId = randomUUID();
+    const auditId = await appendSyntheticAdminAudit(queryAdapter(tx), {
+      actorUserId: "synthetic-owner", action: "amux.v4.portfolio.assessment.approve",
+      targetType: "AmuxPortfolioAssessment", targetId: assessmentId, summary: "synthetic assessment" });
+    await tx.$executeRaw`INSERT INTO "AmuxPortfolioAssessment"
+      ("id", "requestId", "nodeId", "subjectKind", "subjectRevision", "subjectDigest",
+       "subjectDigestKeyId", "assessmentVersion", "metrics", "uncertainty", "evidenceRefs",
+       "evidenceAsOf", "reasonCode", "confirmationDigest", "confirmationDigestKeyId",
+       "approvedByUserId", "approvalAuditLogId", "approvedAt")
+      VALUES (${assessmentId}, ${randomUUID()}, ${initiative}, 'initiative', 0, ${"e".repeat(64)},
+        'synthetic', 1, '{"value": 2}'::jsonb, 'low', '["proof_0001"]'::jsonb,
+        CURRENT_TIMESTAMP - INTERVAL '1 day', 'initial', ${"c".repeat(64)}, 'synthetic',
+        'synthetic-owner', ${auditId}, CURRENT_TIMESTAMP)`;
+    // The Epic's text first, as every real node has its description sealed.
+    const first = payload(ids, { nodeId: ids.epic });
+    const firstPreview = await previewAmuxPortfolioNodeEdit(owner, first, digestKey, { loadKeys });
+    await saveAmuxPortfolioNodeEdit({ session: owner, request: request(), payload: first,
+      confirmationDigest: firstPreview.confirmationDigest, digestKey, deps: { loadKeys } });
+
+    // The database refuses a revision whose recorded parent is not the new one.
+    const [epic] = await tx.$queryRaw<Array<{ contentDigest: string; contentDigestKeyId: string }>>`
+      SELECT "contentDigest", "contentDigestKeyId" FROM "AmuxPortfolioNode" WHERE "id" = ${ids.epic}`;
+    const mismatch = await refused(tx, async () => {
+      const audit = await appendSyntheticAdminAudit(queryAdapter(tx), {
+        actorUserId: owner.user!.id!, action: "amux.v4.portfolio.node.revise",
+        targetType: "AmuxPortfolioNode", targetId: ids.epic, summary: "forged move" });
+      await tx.$executeRaw`INSERT INTO "AmuxPortfolioNodeRevision"
+        ("id", "nodeId", "revision", "priorRevision", "parentIdAtApproval", "contentDigest",
+         "contentDigestKeyId", "decisionId", "authorizationAuditLogId", "approvedAt")
+        VALUES (${randomUUID()}, ${ids.epic}, 2, 1, ${ids.initiative}, ${epic.contentDigest},
+          ${epic.contentDigestKeyId}, ${ids.sourceApproval}, ${audit}, CURRENT_TIMESTAMP)`;
+      await tx.$executeRaw`UPDATE "AmuxPortfolioNode" SET "revision" = 2, "parentId" = ${initiative},
+        "authorizationAuditLogId" = ${audit}, "approvedByUserId" = ${owner.user!.id!}
+        WHERE "id" = ${ids.epic}`;
+    });
+    assert.match(mismatch ?? "", /portfolio content and identity revision path is closed/);
+
+    const move = payload(ids, { nodeId: ids.epic, expectedRevision: 1,
+      expectedAssessmentId: first.id, content: null, parentId: initiative });
+    const preview = await previewAmuxPortfolioNodeEdit(owner, move, digestKey, { loadKeys });
+    assert.equal(preview.parentChanged, true);
+    const saved = await saveAmuxPortfolioNodeEdit({ session: owner, request: request(),
+      payload: move, confirmationDigest: preview.confirmationDigest, digestKey,
+      deps: { loadKeys } });
+    assert.equal(saved.moved, true);
+    assert.deepEqual(saved.tasks.map((task) => task.state), ["scored"]);
+    const [moved] = await tx.$queryRaw<Array<{ parentId: string }>>`
+      SELECT "parentId" FROM "AmuxPortfolioNode" WHERE "id" = ${ids.epic}`;
+    assert.equal(moved.parentId, initiative);
+    const [score] = await tx.$queryRaw<Array<{ initiativeAssessmentId: string }>>`
+      SELECT "initiativeAssessmentId"::text AS "initiativeAssessmentId"
+      FROM "AmuxPortfolioScoreSnapshot" WHERE "taskId" = ${ids.task}
+      ORDER BY "computedAt" DESC, "id" DESC LIMIT 1`;
+    assert.equal(score.initiativeAssessmentId, assessmentId);
+  }));
+});

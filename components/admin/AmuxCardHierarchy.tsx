@@ -373,6 +373,8 @@ function AmuxPortfolioNodeSheet({ nodeId, level, m, onClose, onSaved }: {
           <strong>{m.previewHeading(preview.data.tasks.length)}</strong>
           <p>{preview.data.contentChanged ? m.revision(preview.data.revisionAfter) :
             preview.data.parentChanged ? m.moveRevision(preview.data.revisionAfter) : m.noRevision}</p>
+          {preview.data.contentChanged && preview.data.parentChanged &&
+            <p>{m.moveRevision(preview.data.revisionAfter)}</p>}
           {preview.data.tasks.length > 0 && <ul>{preview.data.tasks.map((task) =>
             <li key={task.taskId}>{m.estimate(task.displayKey ?? task.taskId.slice(0, 8),
               task.currentScore, task.projectedScore)}</li>)}</ul>}
