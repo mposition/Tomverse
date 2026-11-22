@@ -51,6 +51,7 @@ export type GenerationRecord = {
     httpStatus?: number;
     requestId?: string | null;
     routedModel?: string | null;
+    appliedEffort?: import("./effort.js").Effort;
     error?: { kind: string; code?: string; message: string };
     receipt?: Receipt | null;
     lookup?: "found" | "not_found";

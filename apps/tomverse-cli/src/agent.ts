@@ -1,4 +1,4 @@
-import type { Effort } from "./effort.js";
+import { isEffort, type Effort } from "./effort.js";
 import { generateText, isStepCount, streamText, type ModelMessage, type ToolSet } from "ai";
 import { GatewayError, type CatalogModel, type Gateway, type GenerationHooks } from "./gateway.js";
 import { safeLine, type Output } from "./display.js";
@@ -264,6 +264,15 @@ export class Runner {
                 record.httpStatus = info.status;
                 record.requestId = info.requestId;
                 record.routedModel = info.routedModel;
+                const requestedEffort = this.currentTask().effort;
+                const appliedEffort = info.appliedEffort ?? (
+                    info.status < 400 && requestedEffort && this.model().reasoningEfforts === undefined
+                        ? "default" : undefined
+                );
+                record.appliedEffort = appliedEffort;
+                if (appliedEffort === "default" && requestedEffort) {
+                    output.info("Applied reasoning effort: default.");
+                }
                 record.updatedAt = new Date().toISOString();
                 const model = journal.state.model;
                 if (info.status < 400 && model.requested === SMART_ADAPTIVE && !model.pinned) {
@@ -278,7 +287,7 @@ export class Runner {
                     output.info(`Smart Adaptive picked ${info.routedModel}; this session stays on it.`);
                 }
                 journal.commit();
-                output.event({ type: "response", seq: record.seq, status: info.status, request_id: info.requestId, routed_model: info.routedModel });
+                output.event({ type: "response", seq: record.seq, status: info.status, request_id: info.requestId, routed_model: info.routedModel, ...(appliedEffort ? { applied_effort: appliedEffort } : {}) });
             },
             failed: async (intent, error) => {
                 const record = journal.generation(intent.idempotencyKey);
@@ -297,12 +306,7 @@ export class Runner {
     }
 
     assertEffort(effort: Effort) {
-        if (effort === "default") return;
-        const model = this.model();
-        if (!model.reasoningEfforts?.includes(effort)) {
-            const allowed = ["default", ...(model.reasoningEfforts ?? [])].join(", ");
-            throw new GatewayError("protocol", model.id + " offers these reasoning effort levels: " + allowed + ".");
-        }
+        if (!isEffort(effort)) throw new GatewayError("protocol", "Effort must be low, default, or high.");
     }
 
     async runTask(prompt: string, effort: Effort = "default"): Promise<Outcome> {
@@ -320,7 +324,7 @@ export class Runner {
         });
         journal.commit();
         if (effort !== "default") {
-            this.options.output.info("Reasoning effort: " + effort + " (this task).");
+            this.options.output.info("Requested reasoning effort: " + effort + " (this task).");
             this.options.output.event({ type: "effort", level: effort });
         }
         return this.loop();
@@ -348,13 +352,13 @@ export class Runner {
     async loop(): Promise<Outcome> {
         const { journal, options } = this;
         const task = this.currentTask();
-        this.assertEffort(task.effort ?? "default");
         this.freshSignal();
         journal.state.status = "running";
         journal.commit();
         try {
             for (;;) {
                 if (this.controller.signal.aborted) return this.finish("cancelled");
+                this.assertEffort(task.effort ?? "default");
                 const allowance = task.allowance;
                 const timeAllowance = task.timeAllowanceMs;
                 if (task.requests >= allowance || task.activeMs >= timeAllowance) {
@@ -424,6 +428,7 @@ export class Runner {
     > {
         const { journal, options } = this;
         const model = this.model();
+        this.assertEffort(this.currentTask().effort ?? "default");
         const before = journal.state.generations.length;
         const signal = AbortSignal.any([this.controller.signal, AbortSignal.timeout(Math.max(1000, remainingMs))]);
         const pending: PendingApproval[] = [];
@@ -431,7 +436,7 @@ export class Runner {
         let streamError: unknown = null;
         let finishReason: string | undefined;
         const result = streamText({
-            model: options.gateway.chatModel(model.id, this.hooks("agent", journal.state.pendingResendOf), this.currentTask().effort),
+            model: options.gateway.chatModel(model.id, this.hooks("agent", journal.state.pendingResendOf), model.reasoningEfforts === undefined ? undefined : this.currentTask().effort),
             system: this.systemPrompt(),
             messages: journal.state.messages,
             tools: this.tools,
@@ -733,6 +738,7 @@ export class Runner {
         }
         const task = this.currentTask();
         if (task.requests >= task.allowance) return "skipped";
+        this.assertEffort(task.effort ?? "default");
         const head = journal.state.messages.slice(0, cut);
         const tail = journal.state.messages.slice(cut);
         const budgetChars = Math.max(20_000, Math.floor((window - reserve) * 0.6 * 3));
@@ -740,7 +746,7 @@ export class Runner {
         const attemptStart = journal.state.generations.length;
         try {
             const result = await generateText({
-                model: options.gateway.chatModel(model.id, this.hooks("compact"), task.effort),
+                model: options.gateway.chatModel(model.id, this.hooks("compact"), model.reasoningEfforts === undefined ? undefined : task.effort),
                 system: "You compress a coding session so it can continue. Keep: the user's goals and constraints, decisions, files examined with the facts that matter, changes made (which files, what), commands run and their results, current state and the next steps. Plain text, at most about 1200 words.",
                 messages: [{ role: "user", content: `Summarize this session so far.\n\n${transcriptFor(head, budgetChars)}` }],
                 maxRetries: 0,

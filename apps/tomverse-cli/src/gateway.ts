@@ -1,5 +1,5 @@
 import { createOpenAI } from "@ai-sdk/openai";
-import { isExplicitEffort, type Effort } from "./effort.js";
+import { isEffort, isExplicitEffort, type Effort } from "./effort.js";
 import type { LanguageModel } from "ai";
 import type { Endpoint } from "./config.js";
 import { CLI_VERSION } from "./version.js";
@@ -121,7 +121,7 @@ export type GenerationIntent = {
  */
 export type GenerationHooks = {
     before(): Promise<GenerationIntent>;
-    headers(intent: GenerationIntent, info: { status: number; requestId: string | null; routedModel: string | null }): Promise<void>;
+    headers(intent: GenerationIntent, info: { status: number; requestId: string | null; routedModel: string | null; appliedEffort?: Effort }): Promise<void>;
     failed(intent: GenerationIntent, error: GatewayError): Promise<void>;
     ended(intent: GenerationIntent, how: "complete" | "interrupted"): Promise<void>;
 };
@@ -198,7 +198,7 @@ export class Gateway {
             vision: entry.tomverse?.capabilities?.vision === true,
             reasoning: entry.tomverse?.capabilities?.reasoning === true,
             reasoningEfforts: Array.isArray(entry.tomverse?.reasoning_efforts)
-                ? entry.tomverse.reasoning_efforts.filter(isExplicitEffort) : [],
+                ? entry.tomverse.reasoning_efforts.filter(isExplicitEffort) : undefined,
             protocols: Array.isArray(entry.tomverse?.protocols) ? (entry.tomverse.protocols as unknown[]).map(String) : [],
             contextWindowTokens: Number(entry.tomverse?.context_window_tokens ?? 0),
             maxOutputTokens: Number(entry.tomverse?.max_output_tokens ?? 0),
@@ -266,10 +266,12 @@ export class Gateway {
                 await hooks.failed(intent, failure);
                 throw failure;
             }
+            const appliedEffort = response.headers.get("x-tomverse-applied-effort");
             await hooks.headers(intent, {
                 status: response.status,
                 requestId: response.headers.get("x-request-id"),
                 routedModel: response.headers.get("x-tomverse-routed-model"),
+                ...(isEffort(appliedEffort) ? { appliedEffort } : {}),
             });
             if (!response.body) {
                 await hooks.ended(intent, "complete");

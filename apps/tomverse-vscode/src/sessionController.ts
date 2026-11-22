@@ -50,6 +50,7 @@ export class SessionController implements vscode.WebviewViewProvider {
     private key?: string;
     private catalog: CatalogModel[] = [];
     private effort: Effort = "default";
+    private appliedEffort: Effort | undefined;
     private effortModel = "";
     private runner?: Runner;
     private journal?: Journal;
@@ -156,7 +157,7 @@ export class SessionController implements vscode.WebviewViewProvider {
             cost: this.cost,
             session: this.journal?.state.id ?? "",
             model: this.journal?.state.model ?? null,
-            effort: { level: this.effort, model: this.effortModel, locked: this.effortLocked() },
+            effort: { level: this.appliedEffort ?? this.effort, requested: this.effort, model: this.effortModel, locked: this.effortLocked() },
             readOnly: this.journal?.state.readOnly,
             attachments: this.editor.attachments.map(({ text, ...meta }) => meta),
             approval: this.approvals.snapshot(),
@@ -287,6 +288,7 @@ export class SessionController implements vscode.WebviewViewProvider {
         this.state = "idle";
         this.lastError = "";
         this.effort = "default";
+        this.appliedEffort = undefined;
         this.effortModel = "";
     }
     private effortLocked() {
@@ -311,6 +313,7 @@ export class SessionController implements vscode.WebviewViewProvider {
         );
         if (!selected || epoch !== this.epoch || this.effortLocked()) return;
         this.effort = selected.level;
+        this.appliedEffort = undefined;
         this.effortModel = modelId;
         this.update();
     }
@@ -407,6 +410,7 @@ export class SessionController implements vscode.WebviewViewProvider {
             if (!model) throw new Error("Model not offered. Refresh models.");
             this.catalog = catalog;
             this.gateway = gateway;
+            const effort = this.effortModel === modelId ? this.effort : "default";
             const persist = vscode.workspace.getConfiguration("tomverse").inspect<boolean>("persistSessions")?.globalValue !== false;
             const home = join(this.context.globalStorageUri.fsPath, namespace(this.root, endpoint.base, key));
             if (this.journal && (this.journal.state.readOnly !== (mode === "ask") || this.journal.state.model.requested !== model.id))
@@ -444,9 +448,9 @@ export class SessionController implements vscode.WebviewViewProvider {
                 );
             this.journal = journal;
             this.runner = this.createRunner(gateway, journal, catalog);
-            const effort = this.effortModel === modelId ? this.effort : "default";
             this.runner.assertEffort(effort);
             this.effort = effort;
+            this.appliedEffort = undefined;
             this.effortModel = modelId;
             const contextText = this.editor.snapshotPrompt(mode);
             this.editor.attachments.length = 0;
@@ -500,6 +504,9 @@ export class SessionController implements vscode.WebviewViewProvider {
             },
             event: (event) => {
                 this.log(redactJson(event, this.key));
+                if (event.type === "response" && ["low", "default", "high"].includes(String(event.applied_effort))) {
+                    this.appliedEffort = event.applied_effort as Effort;
+                }
                 if (event.type === "error") this.lastError = this.clean(`${event.code ?? "error"}: ${event.message ?? ""}`);
                 if (event.type === "tool_result" || event.type === "command_output") this.state = "running";
                 this.update();
@@ -577,6 +584,7 @@ export class SessionController implements vscode.WebviewViewProvider {
             this.home = home;
             this.root = journal.state.workspace.root;
             this.effort = journal.state.tasks.at(-1)?.effort ?? "default";
+            this.appliedEffort = journal.state.generations.at(-1)?.appliedEffort;
             this.effortModel = journal.state.model.requested;
             this.run = randomUUID();
             this.notice = reconcile(journal).join("\n");

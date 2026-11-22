@@ -144,7 +144,7 @@ export class FakeGateway {
         const idempotencyKey = (req.headers["idempotency-key"] as string | undefined) ?? null;
         const requestId = `req_${randomBytes(16).toString("hex")}`;
         const modelId = recorded.body.model === "smart-adaptive" ? (this.options.routedModel ?? "fake-coder") : recorded.body.model;
-        const entry = (this.options.models ?? DEFAULT_MODELS).find((m) => m.id === modelId) as { tomverse?: { credits_per_request?: number } } | undefined;
+        const entry = (this.options.models ?? DEFAULT_MODELS).find((m) => m.id === modelId) as { tomverse?: { credits_per_request?: number; reasoning_efforts?: string[] } } | undefined;
         const credits = entry?.tomverse?.credits_per_request ?? 3;
         if ("fault" in reply) {
             if (reply.fault === "drop_before_headers") {
@@ -170,6 +170,10 @@ export class FakeGateway {
         }
         this.receipts.set(requestId, { requestId, idempotencyKey, status: "settled", chargedCredits: credits, heldCredits: 0, modelId });
         const headers: Record<string, string> = { "content-type": "text/event-stream", "x-request-id": requestId };
+        if (recorded.body.tomverse_effort) {
+            headers["x-tomverse-applied-effort"] = entry?.tomverse?.reasoning_efforts?.includes(recorded.body.tomverse_effort)
+                ? recorded.body.tomverse_effort : "default";
+        }
         if (recorded.body.model === "smart-adaptive") {
             headers["x-tomverse-routed-model"] = modelId;
             headers["x-tomverse-routed-by"] = "router";
