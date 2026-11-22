@@ -17,7 +17,7 @@ export function ReviewModelPicker({ language, mode, onMode, easyOffered, busy, m
   const names = mode === "easy" ? providers.map(providerName).join(", ") : selected.map(id => models.find(model => model.id === id)?.name ?? id).join(", ");
   return <Sheet className="selection-sheet" maxHeight={visibleHeight > 0 ? Math.min(640, visibleHeight - 16) : 640} title={c.reviewTitle} closeLabel={mobileCopy[language].close} onClose={onClose}>
     <div className="selection-body"><div className="selection-controls">
-      <div className="selection-modes" role="group" aria-label="Review mode">{(["easy", "professional"] as const).map(value => <button type="button" key={value} aria-pressed={mode === value} disabled={busy || value === "easy" && !easyOffered} onClick={() => onMode(value)}>{value === "easy" ? "Easy" : "Professional"}</button>)}</div>
+      <div className="selection-modes" role="group" aria-label="Review mode">{(["easy", "professional"] as const).map(value => <button type="button" key={value} aria-pressed={mode === value} disabled={busy || value === "easy" && !easyOffered} onClick={() => onMode(value)}>{value === "easy" ? (language === "ko" ? "간편" : "Easy") : (language === "ko" ? "전문가" : "Professional")}</button>)}</div>
       <p className="selection-hint">{mode === "easy" ? c.easy : c.professional}</p>
       {mode === "professional" && <ModelFilters models={models} language={language} query={query} provider={provider} onQuery={setQuery} onProvider={setProvider} />}
     </div>

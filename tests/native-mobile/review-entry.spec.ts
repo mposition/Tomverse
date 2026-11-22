@@ -21,7 +21,7 @@ async function signIn(page: Page) {
 }
 async function reviewHome(page: Page) {
   await selectProduct(page, "review");
-  await expect(page.getByRole("button", { name: /참여 모델 선택 · Easy/ })).toBeEnabled();
+  await expect(page.getByRole("button", { name: /참여 모델 선택 · 간편/ })).toBeEnabled();
   await expect(page.getByTestId("review-landing")).toBeVisible();
 }
 
@@ -39,7 +39,7 @@ test("Review entry stays on its landing page; only a history selection restores 
   await page.getByRole("button", { name: "Saved comparison", exact: true }).click();
   await expect(page.locator("article.user")).toContainText("Previous Review question");
   await selectProduct(page, "chat");
-  await expect(page.locator(".chat-welcome")).toBeVisible(); await expect(page.locator("article.user")).toHaveCount(0);
+  await expect(page.locator(".ios-welcome")).toBeVisible(); await expect(page.locator("article.user")).toHaveCount(0);
   await reviewHome(page);
   await expect(page.locator("article.user")).toHaveCount(0);
   await page.reload(); await reviewHome(page);
@@ -78,7 +78,7 @@ test("Review landing scrolls above a compact composer on a narrow, keyboard-size
   await page.addStyleTag({ content: ".review-intro h1{font-size:36px}.review-intro p{font-size:18px}" });
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
   await expect(page.getByRole("textbox")).toBeInViewport();
-  await expect(page.getByRole("button", { name: /참여 모델 선택 · Easy/ })).toBeInViewport();
+  await expect(page.getByRole("button", { name: /참여 모델 선택 · 간편/ })).toBeInViewport();
   await page.getByRole("textbox").fill("My narrow-screen draft");
   await expect(page.getByRole("textbox")).toHaveValue("My narrow-screen draft");
 });

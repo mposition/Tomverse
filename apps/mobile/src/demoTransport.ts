@@ -38,7 +38,7 @@ export function createDemoTransport(): ChatTransport {
       password: async (id, password, currentPassword) => { if (password === null && passwords.get(id) !== currentPassword) throw { status: 403 }; if (password) passwords.set(id, password); else passwords.delete(id); unlocked.delete(id); await patch(id, { isLocked: password !== null }); },
       unlock: async (id, password) => { if (passwords.get(id) !== password) throw { status: 403 }; unlocked.add(id); }, unlocked: id => unlocked.has(id),
     },
-    mobileCapabilities: async () => ({ workspace: { assistantEditing: true, assistantKnowledge: true, externalImport: true }, historyActions: true, historyFeatures: { sharing: true, downloads: true }, reviewEasy: true, maxModels: 3, assistants: true, plan: "Max" }),
+    mobileCapabilities: async () => ({ reviewAnalysis: { crossReview: true, quickSummary: true }, chatImageTurns: true, images: { enabled: true, maxModels: 1, models: [] }, workspace: { assistantEditing: true, assistantKnowledge: true, externalImport: true }, historyActions: true, historyFeatures: { sharing: true, downloads: true }, reviewEasy: true, maxModels: 3, assistants: true, plan: "Max" }),
     preferences: async () => preferences(),
     savePreferences: async input => { localStorage.setItem(key + ":preferences", JSON.stringify({ ...preferences(), ...input })); },
     reportAnswer: async input => { const reports = [...JSON.parse(localStorage.getItem(key + ":reports") ?? "[]"), input]; localStorage.setItem(key + ":reports", JSON.stringify(reports)); return { reference: `TV-DEMO-${reports.length}` }; },

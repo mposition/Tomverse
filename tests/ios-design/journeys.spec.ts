@@ -10,7 +10,7 @@ test.beforeEach(async ({ page }) => {
 
 test("welcome keeps its import and assistant entries above the composer", async ({ page }) => {
   const welcome = page.getByTestId("workspace-start");
-  await expect(welcome.getByRole("button", { name: "다른 AI의 대화 이어가기 ChatGPT · Claude · Gemini", exact: true })).toBeInViewport({ ratio: 1 });
+  await expect(welcome.getByRole("button", { name: "다른 AI의 대화 이어가기 ChatGPT · Claude · Gemini · Perplexity", exact: true })).toBeInViewport({ ratio: 1 });
   await expect(welcome.getByRole("button", { name: "내 어시스턴트", exact: true })).toBeInViewport({ ratio: 1 });
   const text = await page.getByRole("textbox").boundingBox();
   const tools = await page.locator(".composer-toolbar").boundingBox();
@@ -82,7 +82,7 @@ test("starter seeds a draft without creating or sending a conversation", async (
   await expect(page.getByRole("textbox")).toHaveValue("첨부 자료를 읽고 할 일, 담당자와 기한을 정리해줘.");
   expect(await page.evaluate(() => localStorage.getItem("tomverse-native-synthetic-demo"))).toBeNull();
   await page.locator(".ios-navigation").getByRole("button", { name: "보관함", exact: true }).click();
-  await page.getByRole("dialog").getByRole("button", { name: "Chat으로 돌아가기", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "닫기", exact: true }).click();
   await expect(page.getByRole("textbox")).toHaveValue("첨부 자료를 읽고 할 일, 담당자와 기한을 정리해줘.");
 });
 
@@ -102,7 +102,7 @@ test("a provider export is parsed locally and only selected text is imported", a
     q: { id: "q", parent: null, children: ["a"], message: { id: "q", author: { role: "user" }, content: { content_type: "text", parts: ["Plan my launch."] } } },
     a: { id: "a", parent: "q", children: [], message: { id: "a", author: { role: "assistant" }, content: { content_type: "text", parts: ["Interview twenty people first."] } } },
   } }];
-  await page.getByRole("button", { name: "다른 AI의 대화 이어가기 ChatGPT · Claude · Gemini", exact: true }).click();
+  await page.getByRole("button", { name: "다른 AI의 대화 이어가기 ChatGPT · Claude · Gemini · Perplexity", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("button", { name: "대화 가져오기", exact: true }).click();
   await expect(dialog.getByText(/남은 용량: 대화/)).toBeVisible();
@@ -120,7 +120,7 @@ test("a provider export is parsed locally and only selected text is imported", a
 
 test("existing imported source stays distinct from the continuing Chat on iPad and iPhone", async ({ page }, info) => {
   await page.evaluate(() => localStorage.setItem("tomverse-native-synthetic-demo:imports", JSON.stringify([{ id: "source-1", provider: "chatgpt", title: "Launch plan", locked: false, messageCount: 2, messages: [{ id: "q1", role: "user", content: "Plan a small launch." }, { id: "a1", role: "assistant", content: "Start with twenty interviews." }] }])));
-  await page.getByRole("button", { name: "다른 AI의 대화 이어가기 ChatGPT · Claude · Gemini", exact: true }).click();
+  await page.getByRole("button", { name: "다른 AI의 대화 이어가기 ChatGPT · Claude · Gemini · Perplexity", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("button", { name: "Launch plan chatgpt · 2", exact: true }).click();
   await expect(dialog.getByText("Start with twenty interviews.", { exact: true })).toBeVisible();
@@ -128,7 +128,7 @@ test("existing imported source stays distinct from the continuing Chat on iPad a
   expect(await page.evaluate(() => localStorage.getItem("tomverse-native-synthetic-demo"))).toBeNull();
   await dialog.getByRole("button", { name: "확인하고 Chat 열기", exact: true }).click();
   await expect(dialog).toHaveCount(0);
-  await expect(page.locator(".ios-source-panel summary")).toBeVisible();
+  await expect(page.locator(".ios-source-panel > summary")).toBeVisible();
   await expect(page.getByRole("textbox")).toBeEnabled();
   const rows = await page.evaluate(() => JSON.parse(localStorage.getItem("tomverse-native-synthetic-demo") ?? "[]"));
   expect(rows[0].productKey).toBe("chat"); expect(rows[0].messages).toHaveLength(0);

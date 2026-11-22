@@ -1,8 +1,8 @@
-/* iOS-only presentation; Android keeps the existing workspace. */
+/* Shared native workspace: Android and iOS use the same product layout. */
 .native-chat-body { display: contents; }
 .ios-workspace { --mobile-primary: #285be7; max-width: 1180px; position: relative; }
 .ios-workspace button svg { flex-shrink: 0; }
-.ios-workspace .ios-welcome { width: 100%; max-width: 520px; padding: 24px 22px; margin: auto; }
+.ios-workspace .ios-welcome { width: 100%; max-width: 520px; padding: 38px 24px 24px; margin: 0 auto; }
 .ios-workspace .transcript:has(.ios-welcome) { padding: 0; }
 .ios-workspace .ios-welcome h1 { font-family: var(--font-ui); font-size: clamp(26px, 7vw, 32px); line-height: 1.3; font-weight: 650; letter-spacing: -.8px; margin: 17px 0 13px; }
 .ios-workspace .ios-welcome > p { font-size: 14px; line-height: 1.7; margin-bottom: 20px; }
@@ -10,7 +10,7 @@
 .ios-assistant-badge { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; padding: 8px 12px; border-radius: 9px; color: var(--mobile-primary); background: var(--mobile-surface); margin: 7px 18px; }
 .ios-workspace .review-welcome .welcome-art { display: none; }
 .ios-workspace .review-welcome h1 { font-family: var(--font-ui); font-size: 28px; font-weight: 650; line-height: 1.3; }
-.ios-workspace .compact-composer { border: 1px solid var(--mobile-border); background: var(--mobile-soft); padding: 9px; border-radius: 18px; }
+.ios-workspace .compact-composer { border: 1px solid var(--mobile-border); background: var(--mobile-soft); padding: 4px 9px; border-radius: 18px; }
 .ios-workspace .compact-composer textarea { border: 0; border-radius: 0; background: transparent; padding: 6px 3px; }
 .ios-workspace .composer-tool-controls { border: 0; padding-inline: 0; }
 .ios-workspace .compact-composer .composer-add > span { display: none; }
@@ -19,8 +19,8 @@
 .ios-starters { display: grid; }
 .ios-starters > button { display: flex; align-items: center; gap: 11px; min-height: 54px; padding: 12px 0; text-align: left; border-bottom: 1px solid var(--mobile-border); border-radius: 0; font-size: 14px; }
 .ios-starters > button > span { flex: 1; }
-.ios-starters svg { color: var(--mobile-muted); }
-.ios-import-entry { display: flex; align-items: center; gap: 12px; width: 100%; padding: 16px 13px; margin: 24px 0 7px; border-radius: 13px; background: var(--mobile-surface); text-align: left; color: var(--mobile-primary); font-size: 14px; line-height: 1.6; }
+.ios-starters svg { color: var(--mobile-ink); }
+.ios-import-entry { display: flex; align-items: center; gap: 12px; width: 100%; padding: 18px 16px; margin: 16px 0 10px; border: 1px solid var(--mobile-border); border-radius: 13px; background: var(--mobile-surface); text-align: left; color: var(--mobile-ink); font-size: 14px; line-height: 1.6; }
 .ios-import-entry > span { flex: 1; }
 .ios-import-entry small { display: block; color: var(--mobile-muted); font-size: 12px; margin-top: 3px; }
 .ios-welcome-links { display: flex; flex-wrap: wrap; gap: 5px 14px; }
@@ -35,9 +35,22 @@
 .ios-source-panel > .imported-transcript { padding: 0 18px 14px; }
 .ios-workspace .message.assistant { border: 0; padding: 13px 5px; box-shadow: none; background: transparent; }
 .ios-workspace .message.user { background: var(--mobile-surface); color: var(--mobile-ink); border-radius: 14px 14px 3px 14px; }
-.ios-workspace .composer-area { padding: 9px 16px 13px; border-top: 1px solid var(--mobile-border); }
+.ios-workspace .composer-area { padding: 0 16px 12px; }
 .ios-workspace .composer { border-radius: 18px; }
 .ios-workspace .model-trigger { min-width: 0; }
+.native-file-starters { grid-template-columns: 1fr 1fr; gap: 10px; }
+.native-file-starters > button { padding: 14px 10px; border: 1px solid var(--mobile-border); border-radius: 12px; background: var(--mobile-surface); }
+.native-file-starters > button > svg:last-child { display: none; }
+.native-plan-entry { display: flex; gap: 12px; align-items: center; width: 100%; background: var(--mobile-soft); color: var(--mobile-primary); margin-top: 22px; padding: 18px 14px; border-radius: 12px; }
+.native-plan-entry > span { flex: 1; text-align: left; }
+.native-workspace[data-compact=true] .ios-navigation { display: none; }
+.native-workspace .review-provider-tabs { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px; }
+.native-workspace .review-provider-tabs > button { flex: 0 0 auto; border: 1px solid var(--mobile-border); border-radius: 12px; min-width: 110px; text-align: left; }
+.native-workspace .review-provider-tabs > button[aria-selected=true] { background: var(--mobile-soft); border-color: var(--mobile-primary); }
+.native-workspace .review-provider-tabs strong, .native-workspace .review-provider-tabs small { display: block; }
+.native-workspace .review-provider-tabs small { color: var(--mobile-muted); font-size: 11px; margin-top: 4px; }
+.native-review-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 0 16px; }
+.native-review-actions > button { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; border: 1px solid var(--mobile-border); border-radius: 10px; }
 .ios-continuation-start { max-width: 500px; padding: 22px 5px; }
 .ios-continuation-start h2 { font-size: 24px; line-height: 1.4; margin: 0 0 13px; }
 .ios-continuation-start button { color: var(--mobile-primary); padding-left: 0; text-align: left; }
@@ -86,15 +99,23 @@
 }
 @media(max-height: 640px) { .ios-workspace .ios-welcome { padding-top: 10px; } .ios-workspace .ios-welcome h1 { font-size: 24px; } .ios-navigation { padding-top: 0; padding-bottom: 0; } .ios-navigation > button { min-height: 44px; } }
 @media(max-width: 899px) {
-  .ios-workspace .ios-welcome { padding: 10px 22px 12px; }
+  .ios-workspace .ios-welcome { padding: 30px 24px 18px; }
   .ios-workspace .ios-welcome > .ios-eyebrow { display: none; }
   .ios-workspace .ios-welcome h1 { font-size: 26px; margin: 0 0 11px; }
-  .ios-workspace .ios-welcome > p { margin: 0 0 10px; }
+  .ios-workspace .ios-welcome > p { margin: 0 0 22px; }
   .ios-workspace .ios-welcome .ios-starters > button { min-height: 44px; padding: 9px 0; }
-  .ios-workspace .ios-import-entry { margin-top: 13px; padding: 12px; }
+  .ios-workspace .ios-import-entry { margin-top: 16px; padding: 18px 16px; }
   .ios-workspace .ios-welcome-links { gap: 3px 12px; }
   .ios-workspace .ios-welcome-links > button { font-size: 12px; }
 }
 @media(max-width: 899px) and (max-height: 850px) {
+  .ios-workspace .ios-welcome { padding-top: 12px; padding-bottom: 10px; }
+  .ios-workspace .ios-welcome > p { margin-bottom: 10px; }
+  .ios-workspace .ios-import-entry { padding-block: 12px; }
+  /* Keep import and assistant setup reachable; all starters remain in More. */
   .ios-workspace .ios-welcome .ios-starters > button:nth-child(3) { display: none; }
 }
+
+.native-review-draft-preview { max-height: 40dvh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--mobile-soft); border: 1px solid var(--mobile-border); padding: 14px; border-radius: 12px; font: inherit; font-size: 13px; }
+.native-workspace .ios-navigation > button[aria-current=page], .native-workspace .ios-welcome-links > button, .native-workspace .ios-assistant-badge, .native-workspace .native-plan-entry { color: var(--mobile-action); }
+.native-workspace .ios-navigation { padding-bottom: calc(4px + env(safe-area-inset-bottom)); }

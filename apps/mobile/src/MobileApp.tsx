@@ -1,3 +1,4 @@
+import { readDeviceDraft } from "@tomverse/chat-core/device-draft";
 import { ContinuationReceipt } from "../../../components/continuations/ContinuationReceipt";
 import type { ContinuationReceipt as SourceReceipt } from "../../../lib/continuationReceipt";
 import type { Passage } from "../../../lib/continuationPassages";
@@ -6,7 +7,7 @@ import { useResearchPreview } from "../../../components/chat/useResearchPreview"
 import { ResearchPreviewRunCard } from "../../../components/chat/ResearchPreviewRunCard";
 import { researchRunMessage } from "../../../lib/researchPreviewRunClient";
 import { providerName } from "./ModelChoices";
-import { isIosWorkspace, type AssistantEntry, type IosPanel } from "./iosWorkspaceContract";
+import { type AssistantEntry, type IosPanel } from "./iosWorkspaceContract";
 import { IosNavigation, IosWelcome, IosWorkspacePanel, IosAssistantBadge } from "./IosWorkspace";
 import { mobileIosWorkspaceCopy } from "../../../locales/mobileIosWorkspace";
 import { canUseModelWithPlan } from "../../../lib/models";
@@ -18,7 +19,6 @@ import type { ChatSummary, ChatTransport, Conversation, MobileAttachment, ChatMe
 import { SidebarAccount } from "./SidebarAccount";
 import { ConversationHistory } from "./ConversationHistory";
 import { ConversationListScreen } from "./ConversationListScreen";
-import { WorkspaceWelcome } from "./WorkspaceWelcome";
 import { Composer } from "./Composer";
 import { VoiceConversation, VoiceHistory } from "./VoiceConversation";
 import type { ToolChange } from "./ComposerTools";
@@ -56,7 +56,7 @@ function AnswerAttribution({ message, language }: { message: ChatMessage; langua
   if (!modelId) return null;
   const model = getModel(modelId);
   const name = model?.name ?? modelId;
-  const attribution = isIosWorkspace && model ? `${name} · ${providerName(model.provider)}` : name;
+  const attribution = model ? `${name} · ${providerName(model.provider)}` : name;
   return <span className="routed-badge" data-testid={message.routedModelId ? "auto-routed-by" : "answered-by"} title={name}>
     {message.routedModelId && <AppIcon name="spark" />}<span>{message.routedModelId ? `${autoRoutingCopy[language].answeredBy} · ${attribution}` : attribution}</span>
   </span>;
@@ -160,7 +160,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     let live = true;
     void transport.mobileCapabilities?.(true).then(value => { if (live) {
       setFileRevisionOffer({ owner, enabled: value.generatedFileRevisions === true });
-      if (isIosWorkspace) { setIosImageEnabled(value.chatImageTurns === true); setIosImportsEnabled(value.workspace?.externalImport === true); }
+      setIosImageEnabled(value.chatImageTurns === true && value.images?.enabled === true); setIosImportsEnabled(value.workspace?.externalImport === true);
     } }).catch(() => { if (live) setFileRevisionOffer({ owner, enabled: false }); });
     return () => { live = false; };
   }, [owner, signedIn, transport]);
@@ -441,15 +441,15 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     const target = conversation?.id ?? "new";
     preserveNativeDraft(owner, target, text); setDraft(text, target);
   }
-  const iosExtraTools = isIosWorkspace ? [
+  const iosExtraTools = [
     { label: mobileIosWorkspaceCopy(language).assistants, onSelect: () => openIosPanel("assistants") },
     { label: mobileIosWorkspaceCopy(language).files, onSelect: () => openIosPanel("starters") },
     { label: mobileIosWorkspaceCopy(language).imports, onSelect: () => openIosPanel("imports") },
-  ] : undefined;
+  ];
 
   const productSelector = <select data-testid="product-switcher" className="product-switcher" aria-label={workspaceCopy.product} value={product} disabled={streaming || reviewBusy || handoffBusy || uncertain} onChange={event => switchProduct(event.target.value as "chat" | "review")}><option value="chat">Chat</option><option value="review">Review</option></select>;
 
-  return <main className={`mobile-app${isIosWorkspace ? " ios-workspace" : ""}`} data-compact={compact || undefined} style={visibleHeight ? { height: visibleHeight } : undefined}>
+  return <main className="mobile-app ios-workspace native-workspace" data-compact={compact || undefined} style={visibleHeight ? { height: visibleHeight } : undefined}>
     <header className="app-header" data-product-control={signedIn && compact && view === "chat" || undefined}>
       <button className="menu-button" aria-label={view === "list" ? navigationCopy.returnToChat : copy.chats} onClick={() => view === "list" ? returnToWorkspace() : setView("list")} disabled={!signedIn}>{view === "list" ? <ArrowLeft size={22} aria-hidden="true" /> : <><AppIcon name="menu" /><AppIcon name="menuDark" /></>}</button>
       <button type="button" className="brand-lockup" aria-label={navigationCopy.home} onClick={returnToWorkspace}><AppIcon name="logo" /><span className="wordmark tomverse-wordmark">tomverse<span className="tomverse-wordmark-dot">.</span></span></button>
@@ -457,7 +457,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
       {compact && (loading || reviewLoading) && <span className="workspace-loading" role="status"><span className="sr-only">{copy.loading}</span></span>}
       {signedIn ? <button className="header-new-chat" aria-label={copy.newChat} disabled={streaming || reviewBusy || loading} onClick={newConversation}><AppIcon name="newChat" /></button> : <button className="account-button" aria-label={copy.settings} onClick={() => openSettings()}><AppIcon name="settings" /></button>}
     </header>
-    {isIosWorkspace && signedIn && <IosNavigation importsEnabled={iosImportsEnabled} language={language} product={product} busy={streaming || loading || reviewBusy || uncertain} onProduct={switchProduct} onPanel={openIosPanel} />}
+    {signedIn && <IosNavigation importsEnabled={iosImportsEnabled} language={language} product={product} busy={streaming || loading || reviewBusy || uncertain} onProduct={next => { returnToWorkspace(); switchProduct(next); }} onPanel={openIosPanel} />}
     <NativeAppUpdate language={language} paused={loading || streaming || reviewBusy} />
     {demo && <div className="demo-label">{copy.demo}</div>}
     {offline && <p role="status" className="notice">{mobileCompletionCopy(language).offline}</p>}
@@ -480,7 +480,14 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
       <button className="primary" onClick={() => void signIn()} disabled={loading} aria-describedby="browser-sign-in-note">{copy.signIn} <span aria-hidden="true">→</span></button>
       <p id="browser-sign-in-note" className="browser-sign-in-note">{loginCopy.browserIntro}</p>
       {transport.requestEmailCode && transport.verifyEmailCode && <button type="button" className="sign-in-email" disabled={loading} onClick={() => { setError(""); setEmailLogin(true); }}>{loginCopy.inAppEmail}</button>}
-    </section> : product === "review" ? <ReviewWorkspace key={owner} transport={transport} language={language} owner={owner} historyOpen={view === "list"} onCloseHistory={returnToWorkspace} onBusyChange={setReviewBusy} onLoadingChange={setReviewLoading} onProductChange={switchProduct} historyFooter={accountFooter} newConversationRequest={newReviewRequest} conversationRequest={reviewOpen} extraTools={iosExtraTools} /> : view === "list" ? <ConversationListScreen title={copy.chats} newLabel={copy.newChat} disabled={streaming || loading} onNew={newConversation} footer={accountFooter}>
+    </section> : product === "review" ? <ReviewWorkspace key={`review:${owner}`} transport={transport} language={language} owner={owner} historyOpen={view === "list"} onCloseHistory={returnToWorkspace} onBusyChange={setReviewBusy} onLoadingChange={setReviewLoading} onProductChange={switchProduct} historyFooter={accountFooter} onContinueInChat={text => {
+      if (!owner) return;
+      const previous = readDeviceDraft(localStorage, owner, null);
+      const next = previous.trim() ? `${previous}\n\n${text}` : text;
+      if (next.length > 40000) throw Error("DRAFT_TOO_LARGE");
+      requestEpoch.current++; setConversation(null); setPartial(null); setUncertain(false); setProduct("chat"); setView("chat");
+      localStorage.removeItem(LAST_CHAT); preserveNativeDraft(owner, "new", next); setDraft(next, null);
+    }} newConversationRequest={newReviewRequest} conversationRequest={reviewOpen} extraTools={iosExtraTools} /> : view === "list" ? <ConversationListScreen title={copy.chats} newLabel={copy.newChat} disabled={streaming || loading} onNew={newConversation} footer={accountFooter}>
       <ConversationHistory transport={transport} language={language} owner={owner} chats={chats} currentId={conversation?.id} disabled={streaming || loading} onOpen={id => void open(id)} onRefresh={async () => {
         const scope = epoch.current; const rows = await transport.list();
         if (scope !== epoch.current) throw Error("SIGN_IN_REQUIRED");
@@ -488,13 +495,12 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
       }} onChanged={(id, deleted, locked) => { if ((deleted || locked) && conversation?.id === id) { requestEpoch.current++; setConversation(null); setPartial(null); setUncertain(false); localStorage.removeItem(LAST_CHAT); } }} />
     </ConversationListScreen> : <>
       <div className="native-chat-body">
-      {isIosWorkspace && conversation?.surface === "continuation" && <details className="ios-source-panel" open={sourceExpanded} onToggle={event => setSourceExpanded(event.currentTarget.open)}><summary>{mobileIosWorkspaceCopy(language).source}</summary><ImportedTranscript key={conversation.id} conversationId={conversation.id} imported={conversation.imported} transport={transport} language={language} selection={sourceSelection} /></details>}
+      {conversation?.surface === "continuation" && <details className="ios-source-panel" open={sourceExpanded} onToggle={event => setSourceExpanded(event.currentTarget.open)}><summary>{mobileIosWorkspaceCopy(language).source}</summary><ImportedTranscript key={conversation.id} conversationId={conversation.id} imported={conversation.imported} transport={transport} language={language} selection={sourceSelection} /></details>}
       <section className="transcript" aria-label={conversation?.title ?? copy.newChat} aria-busy={streaming}>
         {/* A continuation is never a blank new chat: its original is its start. */}
-        {!isIosWorkspace && conversation?.surface === "continuation" && <ImportedTranscript key={conversation.id} conversationId={conversation.id} imported={conversation.imported} transport={transport} language={language} selection={sourceSelection} />}
-        {isIosWorkspace && conversation?.assistantProfileId && <IosAssistantBadge id={conversation.assistantProfileId} transport={transport} />}
-        {!conversation?.messages.length && !streaming && conversation?.surface !== "continuation" && (isIosWorkspace ? <IosWelcome importsEnabled={iosImportsEnabled} language={language} automatic={conversation ? conversation.selectionMode === "auto" && conversation.autoSelection?.offered === true : draftAutoOffered} imageEnabled={iosImageEnabled} onPanel={openIosPanel} onSeed={seedIosWorkspace} /> : <WorkspaceWelcome product="chat" language={language} automatic={conversation ? conversation.selectionMode === "auto" && conversation.autoSelection?.offered === true : draftAutoOffered} />)}
-        {isIosWorkspace && conversation?.surface === "continuation" && !conversation.messages.length && !streaming && <div className="ios-continuation-start"><h2>{mobileIosWorkspaceCopy(language).disclosure}</h2><p>{mobileIosWorkspaceCopy(language).readOnly}</p><button onClick={() => setDraft(language === "ko" ? "지난 대화를 바탕으로 다음 할 일을 정리해줘." : "Based on our previous conversation, help me plan the next steps.")}>{language === "ko" ? "다음 할 일부터 정리해줘" : "Help me plan the next steps"}</button></div>}
+        {conversation?.assistantProfileId && <IosAssistantBadge id={conversation.assistantProfileId} transport={transport} />}
+        {!conversation?.messages.length && !streaming && conversation?.surface !== "continuation" && <IosWelcome importsEnabled={iosImportsEnabled} language={language} automatic={conversation ? conversation.selectionMode === "auto" && conversation.autoSelection?.offered === true : draftAutoOffered} imageEnabled={iosImageEnabled} onPanel={openIosPanel} onSeed={seedIosWorkspace} />}
+        {conversation?.surface === "continuation" && !conversation.messages.length && !streaming && <div className="ios-continuation-start"><h2>{mobileIosWorkspaceCopy(language).disclosure}</h2><p>{mobileIosWorkspaceCopy(language).readOnly}</p><button onClick={() => setDraft(language === "ko" ? "지난 대화를 바탕으로 다음 할 일을 정리해줘." : "Based on our previous conversation, help me plan the next steps.")}>{language === "ko" ? "다음 할 일부터 정리해줘" : "Help me plan the next steps"}</button></div>}
         {pendingQuestion !== null && <article className="message user"><AnswerContent content={pendingQuestion} transport={transport} language={language} /></article>}
         {conversation?.messages.map((message) => <article key={message.id} className={`message ${message.role}`}>{message.role === "assistant" && <span className="message-label response-identity"><AppIcon name="logo" />Tomverse</span>}{message.researchRunId && conversation && transport.researchRuns && <ResearchPreviewRunCard
           runId={message.researchRunId} conversationId={conversation.id} assistantMessageId={message.id} language={language} transport={transport.researchRuns}
@@ -511,12 +517,12 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
         selectionControl={<button type="button" className="model-trigger" disabled={streaming || loading || uncertain} onClick={() => setModelPicker(true)}><span>{conversation?.selectionMode === "auto" || (!conversation && draftAutoOffered) ? "Smart Adaptive" : getModel(conversation?.selectedModels[0] ?? "")?.name ?? workspaceCopy.model}</span><span aria-hidden="true">⌄</span></button>}
         locationIdentity={owner} files={revisionDraft.files} onFilesChange={revisionDraft.setFiles} onRemoveFile={revisionDraft.removeFile} onFileUploaded={revisionDraft.addFile} copy={copy} language={language} transport={transport} draft={draft} setDraft={setDraft} disabled={loading || handoffBusy || uncertain} offline={offline} streaming={streaming} conversation={conversation} onConfigureTools={configureTools} onSend={(text, files) => send(text, files, false, researchPreview.selected).then(result => result === false ? false : undefined)} onStop={() => abort.current?.abort()} voiceConversation={disabled => <VoiceConversation transport={transport} language={language} conversationId={conversation?.id ?? null} scopeKey={`${owner}:${signedIn}:${product}`} disabled={disabled} selectionLabel={conversation?.selectionMode === "auto" || (!conversation && draftAutoOffered) ? "Smart Adaptive" : conversation?.selectedModels[0] ?? "Tomverse"} searchEnabled={conversation ? conversation.webSearchMode === "always" : true} onSessionEnded={() => setVoiceRevision(value => value + 1)} onRequest={async text => { const receipt = await send(text, [], true); if (!receipt) throw Error("VOICE_ANSWER_FAILED"); return receipt; }} />} />
     </>}
-    {iosEntry && signedIn && <IosWorkspacePanel key={owner} entry={iosEntry} language={language} transport={transport} imageEnabled={iosImageEnabled} onClose={() => setIosEntry(null)} onStartAssistant={startIosAssistant} onContinue={async id => { if (await open(id)) { setProduct("chat"); setIosEntry(null); } else throw Error("CONVERSATION_OPEN_FAILED"); }} onSeed={seedIosWorkspace} onSettings={() => { setIosEntry(null); openSettings(); }} />}
+    {iosEntry && signedIn && <IosWorkspacePanel key={`workspace:${owner}`} entry={iosEntry} language={language} transport={transport} imageEnabled={iosImageEnabled} onClose={() => setIosEntry(null)} onStartAssistant={startIosAssistant} onContinue={async id => { if (await open(id)) { setProduct("chat"); setIosEntry(null); } else throw Error("CONVERSATION_OPEN_FAILED"); }} onSeed={seedIosWorkspace} onSettings={tab => { setIosEntry(null); openSettings(tab); }} />}
     {modelPicker && <ModelSheet transport={transport} conversation={conversation} language={language} onClose={() => setModelPicker(false)} onApply={configureModel} />}
     {accountOpen && <Sheet title={mobileSettingsCopy(language).accountData} closeLabel={copy.close} onClose={() => setAccountOpen(false)} exitLabel={navigationCopy.returnToChat} onExit={returnToWorkspace}><button type="button" className="settings-detail-back" onClick={() => { setAccountOpen(false); openSettings("data"); }}><span aria-hidden="true">← </span>{mobileSettingsCopy(language).back}</button><AccountScreen transport={transport} language={language} onReauthenticate={() => void reauthenticate()} onDeleted={() => { setAccountOpen(false); clearNativeDrafts(); setOwner(null); setSignedIn(false); setConversation(null); setChats([]); localStorage.removeItem(LAST_CHAT); }} /></Sheet>}
     {!demo && <NativeLocationOnboarding language={language} />}
     {reportFor && signedIn && <Sheet title={workspaceCopy.report} closeLabel={copy.close} onClose={() => setReportFor(null)}><AnswerReport transport={transport} language={language} messageId={reportFor.messageId} modelId={reportFor.modelId} /></Sheet>}
-    {settings && <Sheet className="settings-sheet" title={copy.settings} closeLabel={copy.close} onClose={() => setSettings(false)} exitLabel={navigationCopy.returnToChat} onExit={returnToWorkspace}><SettingsScreen transport={transport} signedIn={signedIn} language={language} theme={theme} initialTab={settingsTab} onLanguage={setLanguage} onTheme={setTheme} onAssistants={isIosWorkspace ? () => { setSettings(false); openIosPanel("assistants"); } : undefined} onImports={isIosWorkspace && iosImportsEnabled ? () => { setSettings(false); openIosPanel("imports"); } : undefined} onAccount={() => { setSettings(false); setAccountOpen(true); }} onSignOut={() => void signOut()} /></Sheet>}
+    {settings && <Sheet className="settings-sheet" title={copy.settings} closeLabel={copy.close} onClose={() => setSettings(false)}><SettingsScreen transport={transport} signedIn={signedIn} language={language} theme={theme} initialTab={settingsTab} onLanguage={setLanguage} onTheme={setTheme} onAssistants={() => { setSettings(false); openIosPanel("assistants"); }} onImports={iosImportsEnabled ? () => { setSettings(false); openIosPanel("imports"); } : undefined} onAccount={() => { setSettings(false); setAccountOpen(true); }} onSignOut={() => void signOut()} /></Sheet>}
 
   </main>;
 }

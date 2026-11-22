@@ -1,7 +1,9 @@
 import { ASSISTANT_PROFILE_LIMITS } from "../../../lib/assistantProfileVersioning";
 import { canUseModelWithPlan } from "../../../lib/models";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, Brain, ChevronRight, FileText, Files, Globe, Image as ImageIcon, Library, MessagesSquare, Plus, ArrowLeft, BookOpen, LockKeyhole } from "lucide-react";
+import { Bot, Brain, ChevronRight, CreditCard, FileText, Files, Globe, Image as ImageIcon, Library, MessagesSquare, Plus, ArrowLeft, BookOpen, LockKeyhole } from "lucide-react";
+import type { AccountSettingsTab } from "../../../lib/accountSettingsEvents";
+import { mobileSettingsCopy } from "../../../locales/mobileSettings";
 import type { MobileLanguage } from "../../../locales/mobile";
 import { mobileIosWorkspaceCopy } from "../../../locales/mobileIosWorkspace";
 import { Sheet } from "./Sheet";
@@ -45,8 +47,9 @@ function ImportWarnings({ preview, language }: { preview: ImportPreview; languag
   const visible = rows.filter(([, count]) => count > 0);
   return visible.length ? <details><summary>{c.warnings}</summary><dl>{visible.map(([label, count]) => <div key={label}><dt>{label}</dt><dd>{count}</dd></div>)}</dl></details> : null;
 }
-export function IosStarters({ language, imageEnabled, onSeed, all = false }: { language: MobileLanguage; imageEnabled: boolean; onSeed: (text: string) => void; all?: boolean }) {
-  return <div className="ios-starters">{starterRows.filter(row => row[0] !== "image" || imageEnabled).slice(0, all ? undefined : 3).map(([key, en, ko, seedEn, seedKo]) => <button type="button" key={key} data-testid={`ios-starter-${key}`} onClick={() => onSeed(language === "ko" ? seedKo : seedEn)}>{key === "image" ? <ImageIcon size={18} /> : key === "search" ? <Globe size={18} /> : <FileText size={18} />}<span>{language === "ko" ? ko : en}</span><ChevronRight size={16} /></button>)}</div>;
+export function IosStarters({ language, imageEnabled, onSeed, all = false, filesOnly = false }: { language: MobileLanguage; imageEnabled: boolean; onSeed: (text: string) => void; all?: boolean; filesOnly?: boolean }) {
+  const rows = starterRows.filter(row => filesOnly ? ["xlsx", "docx", "pptx", "pdf"].includes(row[0]) : row[0] !== "image" || imageEnabled).slice(0, all || filesOnly ? undefined : 3);
+  return <div className={`ios-starters${filesOnly ? " native-file-starters" : ""}`}>{rows.map(([key, en, ko, seedEn, seedKo]) => <button type="button" key={key} data-testid={`ios-starter-${key}`} onClick={() => onSeed(language === "ko" ? seedKo : seedEn)}>{key === "image" ? <ImageIcon size={18} /> : key === "search" ? <Globe size={18} /> : <FileText size={18} />}<span>{language === "ko" ? ko : en}</span><ChevronRight size={16} /></button>)}</div>;
 }
 export function IosWelcome({ language, automatic, imageEnabled, importsEnabled, onPanel, onSeed }: { importsEnabled: boolean; language: MobileLanguage; automatic: boolean; imageEnabled: boolean; onPanel: (panel: IosPanel) => void; onSeed: (text: string) => void }) {
   const c = mobileIosWorkspaceCopy(language);
@@ -59,7 +62,7 @@ export function IosNavigation({ language, product, busy, importsEnabled, onProdu
 
 export function IosWorkspacePanel({ entry, language, transport, imageEnabled, onClose, onStartAssistant, onContinue, onSeed, onSettings }: {
   entry: AssistantEntry; language: MobileLanguage; transport: ChatTransport; imageEnabled: boolean;
-  onClose: () => void; onStartAssistant: (profile: AssistantSummary) => Promise<void>; onContinue: (id: string) => Promise<void>; onSeed: (text: string) => void; onSettings: () => void;
+  onClose: () => void; onStartAssistant: (profile: AssistantSummary) => Promise<void>; onContinue: (id: string) => Promise<void>; onSeed: (text: string) => void; onSettings: (tab?: AccountSettingsTab) => void;
 }) {
   const c = mobileIosWorkspaceCopy(language), productName = entry.product === "review" ? "Review" : "Chat";
   const workspace = useMemo(() => transport.workspace, [transport]);
@@ -138,11 +141,11 @@ export function IosWorkspacePanel({ entry, language, transport, imageEnabled, on
   function chooseSource(item: ExternalSnapshot) { void action(async () => { const value = await workspace!.source(item.id); if (live.current) { setSource(value); setDisclosure(false); continuationKey.current = { id: item.id, key: crypto.randomUUID() }; } }); }
   const disabled = busy || loading || uncertain;
   const back = <button type="button" className="ios-back" disabled={busy} onClick={() => { setPanel(entry.panel); setEditing(false); setProfile(null); setSource(null); setGuide(false); setPreview(null); setSaved(false); }}><ArrowLeft size={17} />{c.back}</button>;
-  return <Sheet className="ios-workspace-sheet" title={panel === "assistants" ? c.assistants : panel === "imports" ? c.imports : panel === "memory" ? c.memory : panel === "starters" ? c.starters : c.library} closeLabel={c.close} onClose={() => { if (!busy) onClose(); }} exitLabel={c.return.replace("{product}", productName)} onExit={() => { if (!busy) onClose(); }}>
+  return <Sheet className="ios-workspace-sheet" title={panel === "assistants" ? c.assistants : panel === "imports" ? c.imports : panel === "memory" ? c.memory : panel === "starters" ? c.starters : c.library} closeLabel={c.close} onClose={() => { if (!busy) onClose(); }}>
     <div className="ios-panel-content" aria-busy={busy || loading}>
       {error && <p role="alert">{error}</p>}{status && <p role="status">{status}</p>}{loading && <p role="status">{c.working}</p>}
       {uncertain && <button disabled={busy} onClick={() => { setLoading(true); setError(""); void reload(); }}>{c.reload}</button>}
-      {panel === "library" && <div className="ios-library">{([["imports", MessagesSquare, c.imports], ["assistants", Bot, c.assistants], ["memory", Brain, c.memory]] as const).filter(([value]) => value !== "imports" || features.externalImport).map(([value, Icon, label]) => <button key={value} disabled={disabled} onClick={() => setPanel(value)}><Icon size={21} /><span>{label}</span><ChevronRight size={17} /></button>)}<button onClick={onSettings}><Library size={21} /><span>{c.settings}</span><ChevronRight size={17} /></button></div>}
+      {panel === "library" && <><div className="ios-library">{([["imports", MessagesSquare, c.imports], ["assistants", Bot, c.assistants], ["memory", Brain, c.memory]] as const).filter(([value]) => value !== "imports" || features.externalImport).map(([value, Icon, label]) => <button key={value} disabled={disabled} onClick={() => setPanel(value)}><Icon size={21} /><span>{label}</span><ChevronRight size={17} /></button>)}<button onClick={() => onSettings()}><Library size={21} /><span>{c.settings}</span><ChevronRight size={17} /></button></div><h3>{c.files}</h3><IosStarters language={language} imageEnabled={imageEnabled} filesOnly onSeed={onSeed} /><button className="native-plan-entry" onClick={() => onSettings("plan")}><CreditCard size={21} /><span>{mobileSettingsCopy(language).plan}</span><ChevronRight size={17} /></button></>}
       {panel === "starters" && <IosStarters language={language} imageEnabled={imageEnabled} all onSeed={onSeed} />}
       {panel === "memory" && <>{back}<p>{memory ? memory.masterEnabled ? c.memoryOn : c.memoryOff : c.sourceUnavailable}</p>{memory && <><label className="ios-checkbox"><input type="checkbox" checked={memory.masterEnabled} disabled={disabled} onChange={event => setMemory({ ...memory, masterEnabled: event.target.checked })} />{c.useMemory}</label><button className="primary" disabled={disabled || !transport.saveMemoryPreferences} onClick={() => void action(async () => { await transport.saveMemoryPreferences!(memory); if (live.current) setStatus(c.saved); }, true)}>{c.save}</button></>}</>}
       {panel === "assistants" && <><p className="ios-entry-product" data-testid="ios-assistant-origin">{c.entry.replace("{product}", productName)}</p>

@@ -29,7 +29,7 @@ for (const theme of ["light", "dark"]) {
     await page.locator(".review-setup-trigger").click();
     const selection = page.getByRole("dialog");
     await expect(selection.locator(".selection-body")).toBeVisible();
-    await selection.getByRole("button", { name: "Professional", exact: true }).click();
+    await selection.getByRole("button", { name: "전문가", exact: true }).click();
     await expect(selection.getByRole("button", { name: "완료", exact: true })).toBeInViewport();
     await capture("review-models");
     await selection.getByRole("button", { name: copy.close, exact: true }).click();
@@ -50,8 +50,9 @@ for (const theme of ["light", "dark"]) {
       expect(await settings.evaluate(node => node.scrollWidth <= node.clientWidth + 1), `${tab}: sheet overflow`).toBe(true);
       await expect(settings.getByRole("button", { name: copy.close, exact: true })).toBeInViewport();
       await capture(`settings-${tab}`);
+      await page.getByTestId("native-settings-back").click();
     }
-    await settings.locator(".settings-workspace-return").click();
+    await settings.getByRole("button", { name: copy.close, exact: true }).click();
     await expect(settings).toHaveCount(0);
     await expect(page.getByRole("textbox")).toBeInViewport();
     await expect(page.locator("article.user")).toHaveCount(0);
