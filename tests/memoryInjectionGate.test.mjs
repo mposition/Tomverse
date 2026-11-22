@@ -16,17 +16,17 @@ const CANDIDATE = {
   promptVersion: MEMORY_EXTRACTION_PROMPT_VERSION,
 };
 
-/** Runtime resolution reads the approval's expiry, so an approved fixture carries one. */
-const UNEXPIRED = {
+/** Runtime resolution needs an approval basis, so an approved fixture carries an owner launch. */
+const LAUNCHED = {
   ownerLaunch: {
-    approver: "@qa", approvedAt: "2026-10-23", expiresAt: "2999-01-01",
+    approver: "@qa", approvedAt: "2026-10-23",
     decisionRef: "fixture", knownLimitations: "fixture",
   },
 };
 
 /** A register that does not depend on the shipped one's current contents. */
 const REGISTER = [
-  { ...APPROVED, status: "approved", ...UNEXPIRED },
+  { ...APPROVED, status: "approved", ...LAUNCHED },
   { ...CANDIDATE, status: "candidate" },
 ];
 
@@ -137,16 +137,16 @@ test("revoking one pair leaves the other pairs' memories injectable", () => {
     extractionModelId: "qa-second-model",
     promptVersion: MEMORY_EXTRACTION_PROMPT_VERSION,
   };
-  const register = [...REGISTER, { ...second, status: "approved", ...UNEXPIRED }];
+  const register = [...REGISTER, { ...second, status: "approved", ...LAUNCHED }];
   const revoked = { kind: "revoked", pairs: [APPROVED] };
   assert.equal(hasApprovedExtractionPair(revoked, register), true);
   assert.deepEqual(injectableExtractionPairs(revoked, register), [second]);
 });
 
-test("an expired approval closes the gate", () => {
-  const expired = [{ ...APPROVED, status: "approved", ownerLaunch: { ...UNEXPIRED.ownerLaunch, expiresAt: "2026-01-01" } }];
-  assert.equal(hasApprovedExtractionPair(NONE, expired), false);
-  assert.deepEqual(injectableExtractionPairs(NONE, expired), []);
+test("an approved entry with no approval basis closes the gate", () => {
+  const baseless = [{ ...APPROVED, status: "approved", ownerLaunch: null, evaluation: null }];
+  assert.equal(hasApprovedExtractionPair(NONE, baseless), false);
+  assert.deepEqual(injectableExtractionPairs(NONE, baseless), []);
 });
 
 test("revoke-all admits no pair at all", () => {
