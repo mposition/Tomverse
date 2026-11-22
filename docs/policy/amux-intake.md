@@ -1,5 +1,46 @@
 # AMUX intake
 
+## 운영자 결정 2026-11-22 (대화) — 분석은 기존 계층을 먼저 재사용
+
+운영자 결정(2026-11-22, 대화): 같은 목표를 나눈 두 아이디어(AEO-01 검색봇 접근·크롤 정책, AEO-02 공개 가격과
+무료/유료 범위)가 각각 Initiative부터 새 계층을 만들었다. 분석은 기존 Initiative·Epic·Feature를 먼저 재사용하고,
+Feature의 카드 번호 앞부분은 등록 때 자동으로 정한다. 새 table·migration·스위치는 없고 버전 번호는 올리지 않는다.
+
+1. **기존 계층을 참조 목록으로.** 무인(세션) 분석과 owner 분석의 첫 페이지는 보관되지 않은 기존 노드 전부를
+   permitted target으로 받는다. 노드마다 id, 단계, 제목, 상위 노드 id, Feature의 번호 앞부분(`displayPrefix`)이
+   있다(`lib/amux/ideaExistingHierarchyCore.ts`). 같은 목록이 prompt의 confirmed data에 보이고, 지시문은 같은
+   목표면 기존 Feature에 Story·Task를 붙이거나 기존 Epic 아래 새 Feature를 만들라고 한다. 맞는지 판단은 모델이
+   하며 손으로 쓴 유사도 규칙은 없다. 목록 개수 상한은 없고(2026-11-15 절), 남는 상한은 prompt 데이터 4 MiB
+   하나다. 저장할 수 없는 글(내용 검사 거절)이 든 노드나 계층 모양이 어긋난 행만 목록에서 빠진다. 다음 페이지는
+   이전 페이지의 저장된 prompt에서 이 목록을 물려받는다. 제목은 transaction 밖에서 복호화한다. 답은 모델이 받은
+   목록으로 검사한다. owner 분석은 그 미리보기에 저장된 prompt의 목록을 쓰고, 세션 분석의 prompt는 claim 시각까지
+   만들어진 노드를 보이고, 답은 transaction 안에서 읽은 "claim 시각까지 만들어진 active 노드의 id·단계"로
+   검사한다. 그래서 검사가 제목이나 결과가 도착한 시각에 좌우되지 않는다(그 사이 보관된 노드를 참조한 답은 등록할
+   수 없으므로 거절된다). 세션이 쓴 계획은 접수 때 검사한 목록을 그대로 쓴다. 기존 노드에
+   붙은 Task의 상위 노드에 현재 평가가 없으면 시스템 등록은 결과 불명이 아니라 기록되는 계획 거절
+   (`plan_score_invalid`)로 멈춘다.
+2. **등록.** 기존 노드 id를 부모·Feature로 쓴 계획은 그 노드를 그대로 쓰고 새 노드를 만들지 않는다. 시스템
+   등록은 이미 active 노드만 받았고, owner의 계획 승인도 같은 규칙(바로 위 단계의 active 노드)으로 받는다.
+   형식 검증·권한·hash-chained 감사는 기존 writer 그대로다. 저장된 첫 페이지를 다시 읽을 때는 페이지가 이름 붙인
+   기존 노드만 허용한다.
+3. **공용 명령.** `npm run amux:idea -- prompt`는 접수 자격증명과 origin이 있으면 같은 기존 노드 목록을 prompt에
+   넣는다(`GET /api/internal/amux/ideas/session-intake/hierarchy`, 접수 전용 자격증명, 읽기 전용, active 노드의
+   id·단계·제목·상위 id·앞부분만). 없으면 "목록 없음"이라고 첫 줄에 적는다. `check`·`submit`은 계획이 기존 노드를
+   참조할 때만 목록을 읽고, 목록에 없는 노드(없거나 보관됐거나 단계가 다른 노드) 참조를 거절한다. 기존 노드를
+   참조하지 않는 계획은 이전처럼 네트워크 없이 검사한다. 접수 route도 계획이 있으면 같은 목록으로 검사한다.
+4. **승인 화면.** 계획 승인 화면은 단위마다 "새로 만듦"을 보이고, 부모나 Feature가 기존 노드면 "기존 Feature에
+   붙음: 제목 (앞부분)"처럼 표시한다(owner 전용 읽기 `/api/admin/amux/ideas/existing-hierarchy`).
+5. **번호 앞부분은 등록 때 정한다.** 새 Feature는 제안된 앞부분과 그 변형, 없거나 다 쓰였으면 제목에서 고른 앞부분과
+   그 변형, 그다음 `FEAT1`~`FEAT999` 중 처음 비어 있는 값을 받는다(backfill과 같은 규칙,
+   `amuxFeatureDisplayPrefixChoices`). 앞부분 없이 남은 기존 Feature에 카드가 등록되면 같은 트랜잭션에서
+   `FEAT<n>`을 정하고 감사 기록에 `featureDisplayPrefixAssigned`로 남긴다. 그래서 번호 없는 카드가 생기지 않는다.
+   `amux:idea check`는 앞부분 없는 새 Feature를 경고(`feature_display_prefix_missing`)로 미리 알려 준다. 이 항목은
+   아래 v17 3항의 "다 차 있으면 PREFIX 없이"와 5항을 대신한다.
+6. **이미 갈라진 계층.** 등록된 카드의 Feature(`parentFeatureNodeId`)는 DB 트리거가 바꾸지 못하게 막는다. 이미
+   따로 생긴 계층은 Owner가 노드 편집 시트에서 Epic이나 Feature를 다른 부모 아래로 옮기고(같은 날 결정, 노드 이동),
+   비게 된 노드를 계층 보관으로 정리한다. 아직 제안 상태인 단위는 기존 노드 선택(`select_existing_node`)과 기존
+   카드 연결(`link_existing_card`)로 기존 계층에 붙일 수 있다.
+
 ## 운영자 결정 2026-11-21 (대화) — 세션 계획 첨부 접수와 원클릭 승인
 
 운영자 결정(2026-11-21, 대화): Codex, Claude Code, Cursor, Antigravity 어디서든 같은 한 줄로 아이디어와
@@ -10,7 +51,8 @@
 1. **공용 명령.** `npm run amux:idea -- submit --tool <도구> --provider <모델 공급사> --title <한 줄>
    [--body <md 파일>|-] [--plan <계획 JSON>|-] [--repo owner/name]... [--pr owner/name#번호]...`.
    `--repo`가 없으면 이 checkout의 GitHub origin을 참조로 넣는다(`--no-repo`로 끈다). `prompt`는 box가
-   이 아이디어에 쓸 분석 프롬프트를 그대로 출력하고, `check`는 네트워크 없이 계획을 같은 검사로 확인한다.
+   이 아이디어에 쓸 분석 프롬프트를 그대로 출력하고, `check`는 계획을 같은 검사로 확인한다(기존 노드를 참조한
+   계획만 기존 계층을 읽는다, 2026-11-22 절 3항).
    접수 비밀값(`TOMVERSE_AMUX_SESSION_INTAKE_CLIENT_SECRET`)과 origin(`TOMVERSE_AMUX_SESSION_INTAKE_ORIGIN`)은
    환경 변수로만 읽고 출력하지 않는다. 기존 `local:amux-session-intake`와 같은 route·자격증명·read-back이다.
 2. **선택 필드 `plan`.** 형식은 box 분석 답과 같다(Story·Task·노드·증거 단위). 페이지 머리 필드는 앱이
@@ -579,10 +621,10 @@ approvedBy: mposition · approvedAt: 2026-10-14 · policy version: 17
 3. **기록.** `create_node`가 Feature를 만드는 같은 트랜잭션에서 PREFIX를 Feature 행에 쓴다. 다른 Feature가
    이미 그 PREFIX를 쓰고 있으면, 등록 주체(서버)가 결정적으로 `<PREFIX>2`부터 `<PREFIX>99`까지 중 처음 비어
    있는 값을 고른다(16자를 넘으면 앞부분을 잘라 맞춘다). 실제로 쓴 PREFIX는 같은 트랜잭션의 감사 기록에 남긴다.
-   다 차 있으면 PREFIX 없이 Feature를 만든다.
+   다 차 있거나 제안이 없을 때는 2026-11-22 절 5항이 정한다.
 4. **카드 번호.** v4 Story·Task 카드는 등록 트랜잭션에서 이미 잠근 Feature 행의 PREFIX로 같은 트랜잭션에서
    번호를 받는다. v4 카드는 항상 Feature 아래에 있으므로(계층 3단 필수) `IDEA` PREFIX는 backfill 예비로만 남는다.
-5. **PREFIX 없는 Feature.** schema 3 이하로 이미 봉인된 draft의 Feature, 이 개정 전에 만든 Feature,
+5. **PREFIX 없는 Feature.** (2026-11-22 절 5항이 대신한다: 등록 때 정한다.) schema 3 이하로 이미 봉인된 draft의 Feature, 이 개정 전에 만든 Feature,
    `select_existing_node`로 연결한 PREFIX 없는 Feature는 PREFIX를 비워 둔다. 그 아래 카드는 번호 없이
    등록되고, `docs/policy/amux-card-display-key.md §5`의 backfill이 운영자 승인 뒤 채운다. 이 절은 기존
    Feature의 PREFIX를 쓰는 별도 경로를 만들지 않는다.

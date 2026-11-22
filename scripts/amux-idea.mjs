@@ -5,12 +5,15 @@ import { fileURLToPath } from "node:url";
 
 import { AMUX_V4_ANALYSIS_PROMPT_VERSION, amuxAnalysisPromptWithNote,
   buildAmuxIdeaAnalysisPrompt } from "../lib/amux/ideaAnalysisPromptCore.ts";
+import { deriveAmuxFeatureDisplayPrefix } from "../lib/amux/cardDisplayKeyBackfillCore.ts";
+import { amuxPlanExistingRefs } from "../lib/amux/ideaExistingHierarchyCore.ts";
 import { AMUX_SESSION_PAGE_NOTE } from "../lib/amux/ideaSessionAnswerCore.ts";
 import {
   AMUX_SESSION_INTAKE_ORIGIN_ENV,
   amuxSessionIntakeEndpoint,
   prepareAmuxSessionIntakeSubmission,
   readAmuxSessionIntakeClientRequest,
+  readAmuxSessionIntakeHierarchy,
   submitAmuxSessionIntakeClientRequest,
 } from "../lib/amux/ideaSessionIntakeClientCore.ts";
 import {
@@ -33,7 +36,13 @@ import { inspectAmuxIdeaSessionPlan } from "../lib/amux/ideaSessionSubmissionCor
  *
  * `prompt` prints the analysis prompt the box would run for this idea; a
  * session that writes its own plan answers it with one JSON object. `check`
- * runs the same parser and content checks locally with no network. `submit`
+ * runs the same parser and content checks locally. With the credential and
+ * origin set, `prompt`, `check` and `submit` first read the existing
+ * Initiative / Epic / Feature nodes (owner decision 2026-11-22), so the prompt
+ * lists them and a plan may attach to them; a ref to any other node is
+ * refused. `check` and `submit` read them only for a plan that names an
+ * existing node. Without them `prompt` runs offline with no existing nodes
+ * and says so. `submit`
  * sends the idea (and plan) once; without --repo it names this checkout's
  * GitHub origin, and refuses (repository_unavailable) when there is none.
  * The client secret and the origin come from the environment only
@@ -130,11 +139,33 @@ class PlanRefusal extends Error {
   }
 }
 
-const checkedPlan = (plan) => {
-  const inspected = inspectAmuxIdeaSessionPlan(plan, PLAN_CHECK_ID);
+const checkedPlan = (plan, existingNodes = []) => {
+  const inspected = inspectAmuxIdeaSessionPlan(plan, PLAN_CHECK_ID, existingNodes);
   if (!inspected.ok) throw new PlanRefusal(inspected);
   return inspected.plan;
 };
+
+/** The existing hierarchy, or null when no credential and origin are set. A
+ * configured client that cannot read it stops rather than check against none. */
+async function existingHierarchy(flags, env, dependencies, required) {
+  const secret = env[AMUX_SESSION_INTAKE_CLIENT_SECRET_ENV];
+  const origin = flags["--origin"] ?? env[AMUX_SESSION_INTAKE_ORIGIN_ENV];
+  if (!required && (!isAmuxSessionIntakeClientSecret(secret) || !origin)) return null;
+  return readAmuxSessionIntakeHierarchy({ endpoint: intakeEndpoint(flags, env),
+    secret: intakeSecret(env), fetcher: dependencies.fetcher });
+}
+
+/** A new Feature with no displayPrefix still gets one when it is registered
+ * (from its title, as the backfill does); check says so beforehand. */
+export function amuxPlanWarnings(plan) {
+  const units = Array.isArray(plan?.units) ? plan.units : [];
+  return units.flatMap((unit) => unit?.kind === "node" && unit.level === "feature" &&
+    !unit.displayPrefix ? [{ rule: "feature_display_prefix_missing", localId: unit.localId,
+      registeredAs: deriveAmuxFeatureDisplayPrefix(typeof unit.title === "string"
+        ? unit.title : null) ?? "FEAT<n>" }] : []);
+}
+
+export { amuxPlanExistingRefs };
 
 const intakeEndpoint = (flags, env) => amuxSessionIntakeEndpoint(
   flags["--origin"] ?? env[AMUX_SESSION_INTAKE_ORIGIN_ENV] ?? "");
@@ -148,13 +179,18 @@ const intakeSecret = (env) => {
 export async function runAmuxIdeaCommand(args, env = process.env, dependencies = {}) {
   const { command, flags } = parseAmuxIdeaArgs(args);
   if (command === "prompt") {
+    const text = amuxIdeaText(flags, dependencies);
+    const existingNodes = await existingHierarchy(flags, env, dependencies, false);
     const built = buildAmuxIdeaAnalysisPrompt({ previewId: PLAN_CHECK_ID, chunkIndex: 0,
       revisionChunkIndex: 0, continuation: null,
-      sourceTexts: [{ refId: "operator_idea", kind: "operator_idea",
-        text: amuxIdeaText(flags, dependencies) }],
-      permittedTargetRefs: [] });
+      sourceTexts: [{ refId: "operator_idea", kind: "operator_idea", text }],
+      permittedTargetRefs: existingNodes ?? [] });
     if (built.status !== "prompt_candidate") throw new Error("content_refused");
     return { output: "text", text: [
+      existingNodes === null
+        ? `Existing hierarchy not loaded: set ${AMUX_SESSION_INTAKE_CLIENT_SECRET_ENV} and ${
+          AMUX_SESSION_INTAKE_ORIGIN_ENV} so this prompt lists the existing Initiative/Epic/Feature nodes.`
+        : `This prompt lists ${existingNodes.length} existing Initiative/Epic/Feature nodes; attach to them where the idea serves the same goal.`,
       "A coding session writes this plan itself: read the repository as the work needs,",
       "then answer the prompt below with exactly one JSON object and pass it as --plan.",
       `AMUX checks it with the parser and content rules of a box analysis answer (${
@@ -167,8 +203,18 @@ export async function runAmuxIdeaCommand(args, env = process.env, dependencies =
   }
   if (command === "check") {
     if (!flags["--plan"]) throw new Error("command_invalid");
-    const plan = checkedPlan(readPlan(flags["--plan"], dependencies));
-    return { output: "json", value: { status: "plan_ok", unitCount: plan.unitCount } };
+    const raw = readPlan(flags["--plan"], dependencies);
+    // A plan that names no existing node is checked offline, as before; one
+    // that does is checked against the hierarchy, and without a credential
+    // every such ref is refused as unconfirmed.
+    const existingRefs = amuxPlanExistingRefs(raw);
+    const existingNodes = existingRefs.length === 0 ? null
+      : await existingHierarchy(flags, env, dependencies, false);
+    const plan = checkedPlan(raw, existingNodes ?? []);
+    const warnings = amuxPlanWarnings(raw);
+    return { output: "json", value: { status: "plan_ok", unitCount: plan.unitCount,
+      ...(existingRefs.length ? { attachedToExisting: existingRefs.length } : {}),
+      ...(warnings.length ? { warnings } : {}) } };
   }
   const secret = intakeSecret(env);
   const endpoint = intakeEndpoint(flags, env);
@@ -196,9 +242,13 @@ export async function runAmuxIdeaCommand(args, env = process.env, dependencies =
     return { repository: match[1], number: Number(match[2]) };
   });
   let plan;
+  let existingNodes = [];
   if (flags["--plan"]) {
     plan = readPlan(flags["--plan"], dependencies);
-    checkedPlan(plan);
+    if (amuxPlanExistingRefs(plan).length > 0) {
+      existingNodes = await existingHierarchy(flags, env, dependencies, true);
+    }
+    checkedPlan(plan, existingNodes);
   }
   const inspected = prepareAmuxSessionIntakeSubmission({
     version: 1,
@@ -206,7 +256,7 @@ export async function runAmuxIdeaCommand(args, env = process.env, dependencies =
     source: { toolName: tool, modelProvider: provider,
       sessionDisplay: flags["--session"]?.trim() || `${tool} session` },
     ...(plan === undefined ? {} : { plan }),
-  }, dependencies.createRequestId);
+  }, dependencies.createRequestId, existingNodes);
   // The request ID is known before the sole POST, so a lost reply is read back.
   await (dependencies.onPrepared ?? print)({ status: "dispatching",
     requestId: inspected.requestId, plan: inspected.plan ? "attached" : "none" });
@@ -221,7 +271,7 @@ const print = (value) => new Promise((resolvePrint, reject) => {
 
 const CLOSED_ERRORS = new Set(["command_invalid", "credential_unavailable", "origin_invalid",
   "request_id_invalid", "input_unavailable", "schema_rejected", "content_refused",
-  "metadata_incomplete", "plan_rejected", "repository_unavailable"]);
+  "metadata_incomplete", "plan_rejected", "repository_unavailable", "hierarchy_unavailable"]);
 
 /** What a failure may print: a closed code, and for a refused plan the
  * parser's own closed rule, field and unit position. Never input or secret. */

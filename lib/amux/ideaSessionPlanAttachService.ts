@@ -65,7 +65,8 @@ export async function attachAmuxSessionPlanInTx(tx: Prisma.TransactionClient,
   let parsed: unknown;
   try { parsed = JSON.parse(input.plan.raw); }
   catch { throw new AmuxSessionPlanAttachError("plan_rejected"); }
-  const checked = inspectAmuxIdeaSessionPlan(parsed, input.previewId);
+  const checked = inspectAmuxIdeaSessionPlan(parsed, input.previewId,
+    input.plan.existingNodes);
   if (!checked.ok || checked.plan.raw !== input.plan.raw ||
       checked.plan.unitCount !== input.plan.unitCount) {
     throw new AmuxSessionPlanAttachError("plan_rejected");
@@ -90,7 +91,8 @@ export async function attachAmuxSessionPlanInTx(tx: Prisma.TransactionClient,
   const planned = await commitAmuxSessionAnalysisPlanInTx(tx, { ideaId: input.ideaId,
     claimId: input.previewId, resultAuditId: auditId,
     modelId: AMUX_SESSION_PLAN_MODEL_ID, rawModelOutput: input.plan.raw,
-    keys: input.keys, unitIds: input.unitIds });
+    keys: input.keys, unitIds: input.unitIds,
+    existingNodes: input.plan.existingNodes });
   if (planned.state !== "plan_ready") throw new AmuxSessionPlanAttachError("plan_rejected");
   return { auditId, planId: planned.planId, unitCount: planned.unitCount };
 }

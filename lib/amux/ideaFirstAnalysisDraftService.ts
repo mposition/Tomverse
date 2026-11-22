@@ -13,6 +13,8 @@ import { AMUX_V4_ANALYSIS_NAMESPACE } from "./ideaAnalysisBudgetCore.ts";
 import { amuxAnalysisChunkMaxBytes } from "./ideaAnalysisChunkCore.ts";
 import { prepareAmuxAnalysisPageDraft } from "./ideaAnalysisPageDraftCore.ts";
 import { readPreviousOutputPage } from "./ideaTransferPreviewService.ts";
+import type { AmuxPermittedTargetRef } from "./ideaAnalysisChunkCore.ts";
+import { amuxPromptPermittedTargetRefs } from "./ideaAnalysisPromptCore.ts";
 import { openAmuxContent, verifyAmuxContentDigest } from "./ideaCrypto.ts";
 import type { AmuxContentKeys } from "./ideaCrypto.ts";
 import type { AmuxAnalysisOutputPage } from "./ideaOutputCursorCore.ts";
@@ -149,6 +151,9 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
       keyId: preview.payloadKeyId, keyVersion: preview.payloadKeyVersion },
     "transfer_payload", preview.id, input.keys);
   } catch { throw new AmuxFirstAnalysisDraftError("integrity_unavailable"); }
+  // The targets the stored prompt gave the model: a first page is checked
+  // against exactly the existing hierarchy it was shown (owner decision 2026-11-22).
+  let promptTargets: AmuxPermittedTargetRef[] | null = null;
   try {
     if (!verifyAmuxContentDigest(payload, "transfer_payload", preview.id,
       preview.payloadDigest, preview.payloadDigestKeyId, input.keys)) {
@@ -167,6 +172,9 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
           hold.provider) {
       throw new AmuxFirstAnalysisDraftError("integrity_unavailable");
     }
+    promptTargets = amuxPromptPermittedTargetRefs(
+      (parsed as Record<string, unknown>).prompt, chunkIndex);
+    if (!promptTargets) throw new AmuxFirstAnalysisDraftError("integrity_unavailable");
   } catch { throw new AmuxFirstAnalysisDraftError("integrity_unavailable"); }
   finally { payload.fill(0); }
   const preceding = chunkIndex > 0 ? await tx.amuxIdeaAnalysisChunk.findMany({
@@ -196,7 +204,7 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
     keys: input.keys, unitIds: input.unitIds,
     chunkIndex, revisionChunkIndex: chunkIndex,
     permittedSourceRefIds: ["operator_idea"],
-    permittedTargetRefs: previous?.permittedTargetRefs ?? [],
+    permittedTargetRefs: previous?.permittedTargetRefs ?? promptTargets!,
     sourceUnitCount: 1, coveredStartOrdinal: 0, coveredEndOrdinal: 0,
     history, templateVersion: preview.templateVersion,
   });

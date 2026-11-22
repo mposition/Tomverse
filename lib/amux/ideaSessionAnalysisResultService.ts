@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { Prisma } from "@prisma/client";
+import type { AmuxPermittedTargetRef } from "./ideaAnalysisChunkCore.ts";
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_V4_IDEA_SYSTEM_ACTOR,
   AMUX_SESSION_IDEA_SUBMITTED_ACTION,
@@ -39,6 +40,8 @@ type ResultInput = AmuxMaxSessionResultIdentity & {
   rawModelOutput: string; inputTokens: number; outputTokens: number;
   cliAttestation: AmuxMaxSessionCliAttestation;
   keys: AmuxContentKeys; unitIds?: readonly string[];
+  /** The existing hierarchy, read before the transaction when it could be. */
+  existingNodes?: readonly AmuxPermittedTargetRef[];
 };
 
 /** A key ring must carry the claim-scoped result key; a bare key is that key. */
@@ -225,7 +228,8 @@ export async function commitAmuxMaxSessionResult(tx: Tx,
     const planned = await commitAmuxSessionAnalysisPlanInTx(tx, {
       ideaId: input.ideaId, claimId: input.claimId, resultAuditId,
       modelId: claim.modelId, rawModelOutput: input.rawModelOutput,
-      keys: input.keys, unitIds: input.unitIds });
+      keys: input.keys, unitIds: input.unitIds,
+      existingNodes: input.existingNodes });
     return { claimId: input.claimId, resultAuditId,
       settlementAuditId: settlement.auditId,
       digest: sealed.digest, digestKeyId: sealed.digestKeyId,

@@ -26,6 +26,7 @@ import { parkAmuxSessionIdeaInTx, recordAmuxSessionPlanRefusalInTx } from
 import { amuxSessionPageRefusalDetail } from "./ideaSessionReviewDetailCore.ts";
 import { inspectSealedAmuxIdeaSessionInput } from "./ideaSessionSubmissionCore.ts";
 import { buildAmuxSourcePlanManifest } from "./ideaSourcePlanManifestCore.ts";
+import { readAmuxActiveNodeTargetsInTx } from "./ideaNodeDuplicateScanService.ts";
 import { readPreviousOutputPage } from "./ideaTransferPreviewService.ts";
 
 type Tx = Prisma.TransactionClient;
@@ -101,13 +102,17 @@ export async function amuxSessionPageKeyIdentities(db: Db,
   ];
 }
 
+/** `existingNodes` is the existing hierarchy (loadAmuxExistingHierarchyTargets),
+ * read before the transaction. The first page is given it as its permitted
+ * targets (owner decision 2026-11-22); a later page inherits it, with every
+ * earlier proposal, from the previous page's stored prompt. */
 export async function readAmuxSessionPageContextInTx(tx: Tx, input: {
   ideaId: string; actorUserId: string; planId: string | null; now: Date;
-  keys: AmuxContentKeys;
+  keys: AmuxContentKeys; existingNodes: readonly AmuxPermittedTargetRef[];
 }): Promise<AmuxSessionPageContext> {
   if (input.planId === null) {
     return { chunkIndex: 0, planId: null, continuation: null,
-      permittedTargetRefs: [], history: [] };
+      permittedTargetRefs: [...input.existingNodes], history: [] };
   }
   const chunkIndex = await pendingPage(tx, input.ideaId, input.planId);
   const earlier = await tx.amuxIdeaAnalysisChunk.findMany({ where: {
@@ -181,6 +186,11 @@ async function databaseNow(tx: Tx): Promise<Date> {
 export async function commitAmuxSessionAnalysisPlanInTx(tx: Tx, input: {
   ideaId: string; claimId: string; resultAuditId: string; modelId: string;
   rawModelOutput: string; keys: AmuxContentKeys; unitIds?: readonly string[];
+  /** The existing hierarchy with titles, read before the transaction, for
+   * the first page's stored prompt (a box claim's answer is checked against
+   * the claim-time ids and levels read inside; a session-written plan's
+   * against this list). Without it the stored prompt carries no titles. */
+  existingNodes?: readonly AmuxPermittedTargetRef[];
 }): Promise<AmuxSessionPlanOutcome> {
   const locked = await tx.$queryRaw<Array<{ id: string }>>`
     SELECT "id" FROM "AmuxIdeaSubmission" WHERE "id" = ${input.ideaId} FOR UPDATE
@@ -206,11 +216,27 @@ export async function commitAmuxSessionAnalysisPlanInTx(tx: Tx, input: {
     }
     return { state: "plan_refused" as const, reason };
   };
+  // A box claim's first page (owner decision 2026-11-22): its prompt listed
+  // the existing nodes created by the claim time. The answer is checked
+  // against the ids and levels of every active node created by that time,
+  // read here, so the check does not depend on titles or on when the result
+  // arrives; a node archived since is refused, as registration would refuse
+  // it. A session-written plan has no claim and keeps the list it was
+  // checked against at intake.
+  const claim = idea.currentSourcePlanRevisionId !== null ? null :
+    await tx.amuxIdeaSessionAnalysisBudgetClaim.findUnique({
+      where: { id: input.claimId }, select: { createdAt: true } });
+  // The page checks, stores and hands on one list: that set, each node with
+  // its title from the list read before the transaction when it has one.
+  const titled = new Map((input.existingNodes ?? []).map((node) => [node.ref, node]));
+  const claimNodes = claim ? (await readAmuxActiveNodeTargetsInTx(tx,
+    { createdAtOrBefore: claim.createdAt })).map((node) => titled.get(node.ref) ?? node) : null;
   let context: AmuxSessionPageContext;
   try {
     context = await readAmuxSessionPageContextInTx(tx, { ideaId: idea.id,
       actorUserId: idea.actorUserId, planId: idea.currentSourcePlanRevisionId,
-      now, keys: input.keys });
+      now, keys: input.keys,
+      existingNodes: claimNodes ?? input.existingNodes ?? [] });
   } catch (error) {
     if (error instanceof AmuxSessionAnalysisPlanError &&
         error.code === "continuation_unavailable") {
