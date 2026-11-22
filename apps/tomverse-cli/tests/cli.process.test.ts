@@ -59,10 +59,10 @@ test("exec --json: read-only task, JSON lines only on stdout, exit 0, receipts s
     const gateway = await new FakeGateway({ script: (body) => (toolResultsSinceUser(body).length ? { text: "sum subtracts" } : { toolCalls: [{ name: "read_file", args: { path: "sum.js" } }] }) }).start();
     try {
         const { home, root, env } = setup(gateway);
-        const result = await run(["exec", "--json", "--read-only", "What does sum do?"], { cwd: root, home, env });
+        const result = await run(["exec", "--json", "--read-only", "--effort", "high", "What does sum do?"], { cwd: root, home, env });
         assert.equal(result.code, 0, result.stderr);
         const events = jsonl(result.stdout);
-        assert.deepEqual([...new Set(events.map((e) => e.type))].sort(), ["assistant", "final", "request", "response", "session", "tool_result"].sort());
+        assert.deepEqual([...new Set(events.map((e) => e.type))].sort(), ["assistant", "effort", "final", "request", "response", "session", "tool_result"].sort());
         const final = events.at(-1);
         assert.equal(final.type, "final");
         assert.equal(final.status, "success");
@@ -71,6 +71,7 @@ test("exec --json: read-only task, JSON lines only on stdout, exit 0, receipts s
         assert.equal(final.cost.charged, 6, "two requests at 3 credits each, from the server's receipts");
         assert.ok(!result.stdout.includes(TEST_KEY) && !result.stderr.includes(TEST_KEY.slice(13)));
         assert.deepEqual(gateway.completions.map((c) => c.body.tools.length), [3, 3]);
+        assert.deepEqual(gateway.completions.map((c) => c.body.tomverse_effort), ["high", "high"]);
     } finally {
         await gateway.stop();
     }

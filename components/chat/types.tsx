@@ -134,6 +134,7 @@ export type Message = {
   createdAt?: string;
   pendingJobId?: string | null;
   searchMetadata?: WebSearchExecution | null;
+  appliedReasoningEffort?: import("@/lib/reasoningEffort").ReasoningEffort;
   /**
    * How many account memories this answer was given (§13.4). Server-computed
    * and read from the response header -- never counted here, and never sent

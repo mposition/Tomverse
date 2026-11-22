@@ -162,6 +162,7 @@ export type ModelPickerPanelProps = {
    * with a context window, a price and a provider, and the footer's credit
    * estimate would have nothing to show for it.
    */
+  reasoningEffortSlot?: React.ReactNode;
   autoSelectionOffered?: boolean;
   selectionMode?: "manual" | "auto";
   selectionModePending?: boolean;
@@ -203,6 +204,7 @@ export function ModelPickerPanel({
   onBackToActions,
   onDone,
   onTrackEvent,
+  reasoningEffortSlot,
   autoSelectionOffered = false,
   selectionMode = "manual",
   selectionModePending = false,
@@ -753,6 +755,7 @@ export function ModelPickerPanel({
           />
         </div>
       )}
+      {reasoningEffortSlot}
       {selectedModelIds.length > 0 && (
         <div className="mb-2 shrink-0 px-1">
           <p className="mb-1 px-1 text-[11px] font-bold uppercase tracking-wide text-zinc-400">
