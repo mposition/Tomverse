@@ -83,10 +83,10 @@ test("the Account tab no longer has an API keys row; the panel renders the Devel
     assert.ok(order[0] > 0 && order[0] < order[1] && order[1] < order[2], "tab order is data, developer, plan");
 });
 
-test("a Pro account sees the key summary, all four addresses, the tool names and the CLI card", () => {
+test("a Pro account sees compact setup links and collapsed copyable connection addresses", () => {
     const markup = render(element(DeveloperSettingsView, { overview: ready() }), "en");
     const body = text(markup);
-    assert.match(body, /Use Tomverse models and credits in other apps and coding tools\. One key works with both APIs\./);
+    assert.match(body, /Connect your tools with one API key and shared credits\./);
     assert.match(body, /2 keys in use/);
     assert.match(body, /Last used/);
     assert.match(markup, /data-testid="developer-manage-keys"/);
@@ -104,18 +104,21 @@ test("a Pro account sees the key summary, all four addresses, the tool names and
     assert.match(body, /Aside · Brave Leo · Raycast · BrowserOS · Other/);
     assert.match(body, /Tomverse CLI · Claude Code · Codex · Cursor · VS Code · JetBrains/);
     assert.match(markup, /href="\/settings\/api#connect"/);
-    assert.match(markup, /href="\/settings\/api\?tool=tomverse-cli#connect"/);
-    assert.ok(markup.includes("npm install -g @tomverse/cli &amp;&amp; tomverse doctor"));
-    assert.match(body, /available on Pro and above\. Requests use the same account credits as Chat\./);
+    assert.match(markup, /href="\/en\/developers\/cli"/);
+    assert.match(markup, /href="\/en\/developers#tomverse-vscode"/);
+    assert.doesNotMatch(markup, /developer-cli-command|developer-cli-banner/);
+    const disclosure = markup.match(/<details[^>]*data-testid="developer-endpoints"[^>]*>/)?.[0];
+    assert.ok(disclosure);
+    assert.doesNotMatch(disclosure, /\bopen(?:=|\s|>)/);
 });
 
 test("the Korean tab reads as designed", () => {
     const body = text(render(element(DeveloperSettingsView, { overview: ready({ keys: [] }) })));
     assert.match(body, /개발자/);
-    assert.match(body, /다른 앱과 코딩 도구에서 Tomverse 모델과 크레딧을 씁니다\. 키 하나로 두 API를 모두 쓸 수 있습니다\./);
+    assert.match(body, /API 키 하나와 공유 크레딧으로 개발 도구를 연결하세요\./);
     assert.match(body, /사용 중인 키 없음/);
-    assert.match(body, /도구별 설정 방법/);
-    assert.match(body, /API와 CLI는 Pro 이상에서 쓸 수 있습니다\. 요청은 Chat과 같은 계정 크레딧을 씁니다\./);
+    assert.match(body, /연결 안내/);
+    assert.match(body, /사용량과 키별 한도는 API 키 관리에서 확인합니다/);
 });
 
 test("the CLI card and banner stay hidden until the install guide is published", () => {
@@ -126,19 +129,15 @@ test("the CLI card and banner stay hidden until the install guide is published",
 // The anchor tag of one link, so attribute order never matters.
 const hrefOf = (markup: string, testId: string) => new RegExp(`<a[^>]*data-testid="${testId}"[^>]*>`).exec(markup)?.[0].match(/href="([^"]*)"/)?.[1] ?? null;
 
-test("the CLI banner opens the tab and links to the install page in the current language", () => {
-    const en = render(element(DeveloperSettingsView, { overview: ready() }), "en");
-    assert.match(text(en), /Tomverse CLI — a coding agent in your terminal/);
-    assert.match(text(en), /Installers for Windows, macOS and Linux, winget and npm./);
-    assert.match(text(en), /See install instructions/);
-    assert.equal(hrefOf(en, "developer-cli-banner-link"), "/en/developers/cli");
-    // Above the key summary: the first thing in the tab.
-    assert.ok(en.indexOf('data-testid="developer-cli-banner"') < en.indexOf('data-testid="developer-keys"'));
-
-    const ko = render(element(DeveloperSettingsView, { overview: ready() }), "ko");
-    assert.match(text(ko), /Tomverse CLI — 터미널의 코딩 에이전트/);
-    assert.match(text(ko), /설치 안내 보기/);
-    assert.equal(hrefOf(ko, "developer-cli-banner-link"), "/ko/developers/cli");
+test("compact tool rows preserve localized guides, key focus and preview distinction", () => {
+    for (const lang of ["en", "ko"] as const) {
+        const markup = render(element(DeveloperSettingsView, { overview: ready() }), lang);
+        assert.equal(hrefOf(markup, "developer-cli-guide"), `/${lang}/developers/cli`);
+        assert.equal(hrefOf(markup, "developer-vscode-guide"), `/${lang}/developers#tomverse-vscode`);
+        assert.equal(hrefOf(markup, "developer-other-guide"), "/settings/api#connect");
+        assert.ok(markup.indexOf('data-testid="developer-keys"') < markup.indexOf('data-testid="developer-tools"'));
+        assert.match(markup, /id="settings-entry-api-keys"/);
+    }
 });
 
 test("a Free account sees the Pro notice and an upgrade button, no keys and no addresses", () => {
