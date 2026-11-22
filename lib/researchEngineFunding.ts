@@ -101,7 +101,12 @@ export async function createChatResearchFundingAdapter(): Promise<ResearchFundin
       const result = await security.settleChatUsage(reservation, usage);
       if (result.settledCredits === null || result.settledCredits === undefined) {
         const durable = await prisma.chatCreditReservation.findUnique({ where: { id: reservationId }, select: { reservedCredits: true, settledCredits: true, status: true } });
-        return { settledCredits: durable?.status === "reserved" ? 0 : durable?.settledCredits ?? (usage.usageFromProvider ? 0 : durable?.reservedCredits ?? 0) };
+        // Never report a segment settled while its Chat hold is still open: the
+        // segment stays reserved and the next maintenance pass retries.
+        if (!durable || durable.status === "reserved") {
+          throw Object.assign(new Error("RESEARCH_SETTLEMENT_PENDING"), { code: "RESEARCH_SETTLEMENT_PENDING" });
+        }
+        return { settledCredits: durable.settledCredits ?? (usage.usageFromProvider ? 0 : durable.reservedCredits) };
       }
       return { settledCredits: result.settledCredits };
     },
@@ -160,7 +165,13 @@ export async function settleResearchSegmentIfReady(segmentId: string) {
     searchQueriesObserved: !searchUnknown,
   };
   const funding = await researchFundingAdapter();
-  const { settledCredits } = await funding.settle({ userId: segment.run.userId, reservationId: segment.reservationId, usage });
+  let settledCredits: number;
+  try {
+    ({ settledCredits } = await funding.settle({ userId: segment.run.userId, reservationId: segment.reservationId, usage }));
+  } catch (error) {
+    if ((error as { code?: string }).code === "RESEARCH_SETTLEMENT_PENDING") return false;
+    throw error;
+  }
   await recordResearchFundingSettled(segment.id, Math.min(settledCredits, segment.reservedCredits), { ...usage, settledAt: researchNow().toISOString() });
   return true;
 }

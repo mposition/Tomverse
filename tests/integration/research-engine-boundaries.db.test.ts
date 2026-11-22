@@ -404,11 +404,52 @@ test("a run with an unsettled unknown dispatch cannot be deleted; synthesis re-c
     if (pending && !(await prisma.researchWorkItem.count({ where: { runId: privateRun.id, kind: { in: ["write_section", "verify"] }, status: { in: ["queued", "running"] } } }))) break;
     if (!(await processOneResearchWorkItem("synth-a"))) break;
   }
+  const privateChunk = await prisma.researchEvidenceChunk.findFirstOrThrow({ where: { runId: privateRun.id, version: { source: { visibility: "private" } } } });
+  const privateKeys = (await prisma.researchSourceVersion.findMany({ where: { runId: privateRun.id, source: { visibility: "private" }, objectKey: { not: null } },
+    select: { objectKey: true } })).map((row) => row.objectKey!);
   await prisma.conversation.update({ where: { id: conversation.id }, data: { password: "hashed-placeholder", passwordVersion: { increment: 1 } } });
   const before = fakes.model.calls.filter((call) => call.tool === "submit_research_synthesis").length;
   await drainResearchWork("synth-b", 2);
   assert.equal(fakes.model.calls.filter((call) => call.tool === "submit_research_synthesis").length, before, "synthesis was not sent after the source was re-locked");
   assert.equal((await readResearchRunDto(owner.id, privateRun.id)).status, "completed", "a model-free partial report was kept");
+  // The refused dispatch also revokes the source: its stored text is queued for cleanup and no longer served.
+  const revokedSource = await prisma.researchSource.findFirstOrThrow({ where: { runId: privateRun.id, visibility: "private" } });
+  assert.equal(revokedSource.status, "revoked");
+  await rejects(readResearchEvidence({ userId: owner.id, runId: privateRun.id, chunkId: privateChunk.id }), "RESEARCH_EVIDENCE_UNAVAILABLE");
+  assert.ok(privateKeys.length > 0);
+  assert.equal(await prisma.researchEvidenceObjectCleanup.count({ where: { objectKey: { in: privateKeys } } }), privateKeys.length);
+});
+
+test("a section revision keeps the parent's claim keys so kept sections still cite valid claims", async () => {
+  installFakes({ model: createFakeModel({ respond: (call) => defaultResponse(call, { subquestions: 2, sections: 2 }) }) });
+  createFakeWeb();
+  const user = await createUser("revision-keys");
+  const run = await create(user.id);
+  await drainResearchWork("revision-keys-a", 2);
+  const done = await readResearchRunDto(user.id, run.id);
+  assert.equal(done.status, "completed");
+  const parent = await prisma.researchReportRevision.findFirstOrThrow({ where: { runId: run.id, revision: done.currentReportRevision }, include: { claims: true } });
+  const parentDocument = parent.document as { sections: Array<{ key: string; status: string }> };
+  const written = parentDocument.sections.filter((section) => section.status === "written");
+  assert.ok(written.length >= 2, "two written sections to keep one and revise the other");
+  await requestResearchRevision({ request: fakeRequest(), userId: user.id, runId: run.id,
+    revision: { expectedReportRevision: done.currentReportRevision, kind: "format", sectionKeys: [written[1]!.key], instruction: "Rewrite this section as a table" } });
+  await drainResearchWork("revision-keys-b", 2);
+  const revised = await readResearchRunDto(user.id, run.id);
+  assert.equal(revised.currentReportRevision, done.currentReportRevision + 1);
+  const child = await prisma.researchReportRevision.findFirstOrThrow({ where: { runId: run.id, revision: revised.currentReportRevision }, include: { claims: true } });
+  const parentByKey = new Map(parent.claims.map((claim) => [claim.claimKey, claim.text]));
+  for (const [key] of parentByKey) assert.ok(child.claims.some((claim) => claim.claimKey === key), `parent claim ${key} kept its key`);
+  assert.equal(new Set(child.claims.map((claim) => claim.claimKey)).size, child.claims.length, "claim keys stay unique");
+  // Every citation in the kept section resolves to a claim of the new revision with the same text.
+  const kept = (child.document as { sections: Array<{ key: string; blocks: Array<{ claimKeys?: string[] }> }> }).sections.find((section) => section.key === written[0]!.key)!;
+  const cited = kept.blocks.flatMap((block) => block.claimKeys ?? []);
+  assert.ok(cited.length > 0, "the kept section cites claims");
+  for (const key of cited) {
+    const claim = child.claims.find((entry) => entry.claimKey === key);
+    assert.ok(claim, `cited ${key} exists in the new revision`);
+    assert.equal(claim.text, parentByKey.get(key), `cited ${key} is the same claim`);
+  }
 });
 
 test("deleting the conversation of a run with an open or unknown hold keeps the hold's record, and expiry charges it instead of refunding", async () => {

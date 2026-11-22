@@ -544,7 +544,8 @@ export async function revokePrivateSource(run: Pick<RunRow, "id">, sourceId: str
       await tx.researchEvidenceObjectCleanup.upsert({ where: { objectKey: version.objectKey },
         create: { objectKey: version.objectKey, reason: "source_revoked" }, update: {} });
     }
-    await tx.researchSourceVersion.updateMany({ where: { sourceId }, data: { objectKey: null } }).catch(() => undefined);
+    // Version rows stay (a read version must keep its key); reads refuse a revoked
+    // source and the queued cleanup deletes the stored object.
     const claims = await tx.researchClaim.findMany({ where: { runId: run.id } });
     for (const claim of claims) {
       if ((claim.evidence as Array<{ sourceKey: string }>).some((evidence) => evidence.sourceKey === source.sourceKey)) {
@@ -553,6 +554,15 @@ export async function revokePrivateSource(run: Pick<RunRow, "id">, sourceId: str
     }
     await bumpRunSequence(tx, run.id);
   });
+}
+
+/** After a dispatch refused for scope: revoke every private entry that no longer passes re-validation. */
+async function revokeFailedPrivateEntries(run: RunRow, entries: ResearchPrivateManifestEntry[]) {
+  for (const entry of entries) {
+    if (await revalidateResearchPrivateEntry(run.userId, entry)) continue;
+    const source = await prisma.researchSource.findFirst({ where: { runId: run.id, sourceKey: entry.key, status: { not: "revoked" } }, select: { id: true } });
+    if (source) await revokePrivateSource(run, source.id);
+  }
 }
 
 async function handleCoordinate(run: RunRow, item: ResearchWorkItem, fence: ResearchItemFence,
@@ -598,7 +608,8 @@ async function handleCoordinate(run: RunRow, item: ResearchWorkItem, fence: Rese
 async function claimContext(runId: string, claims: Array<{ evidence: unknown }>) {
   const spans = claims.flatMap((claim) => claim.evidence as StoredFinding["resolved"]);
   const versionIds = [...new Set(spans.map((span) => span.versionId).filter(Boolean))] as string[];
-  const versions = await prisma.researchSourceVersion.findMany({ where: { runId, id: { in: versionIds } }, select: { id: true, objectKey: true } });
+  const versions = await prisma.researchSourceVersion.findMany({ where: { runId, id: { in: versionIds }, source: { status: { not: "revoked" } } },
+    select: { id: true, objectKey: true } });
   const sources = await prisma.researchSource.findMany({ where: { runId, sourceKey: { in: [...new Set(spans.map((span) => span.sourceKey))] } },
     select: { sourceKey: true, snippet: true, duplicateOfSourceId: true, id: true } });
   const cache = new Map<string, string>();
@@ -629,7 +640,10 @@ async function handleVerify(run: RunRow, item: ResearchWorkItem, fence: Research
   const result = await callResearchModel({ run, fence, role: "verifier", purpose: "finalization", dispatchKey: dispatchKeyFor(item), ...verifierPrompt({ claims: verifierClaims }),
     toolName: "submit_research_verification", toolDescription: "Return a verdict for each claim.", schema: researchVerificationSchema,
     outputTokenCap: 6_000, signal, ...(entries.length ? { revalidate } : {}) });
-  if (!result.ok) return settleModelRefusal(item, fence, result);
+  if (!result.ok) {
+    if (result.kind === "scope_revoked") await revokeFailedPrivateEntries(run, entries);
+    return settleModelRefusal(item, fence, result);
+  }
   await prisma.$transaction(async (tx) => {
     await lockResearchRun(tx, run.id);
     await completeResearchDispatch(tx, result.generationId, result.usage);
@@ -680,7 +694,10 @@ async function handleWriteSection(run: RunRow, item: ResearchWorkItem, fence: Re
     toolName: "submit_research_section", toolDescription: "Submit this report section.", schema: researchSectionDraftSchema,
     outputTokenCap: 8_000, signal, ...(privateEntries.length ? { revalidate: async () =>
       (await Promise.all(privateEntries.map((entry) => revalidateResearchPrivateEntry(run.userId, entry)))).every(Boolean) } : {}) });
-  if (!result.ok) return settleModelRefusal(item, fence, result);
+  if (!result.ok) {
+    if (result.kind === "scope_revoked") await revokeFailedPrivateEntries(run, privateEntries);
+    return settleModelRefusal(item, fence, result);
+  }
   const claimMap = new Map(claims.map((claim) => [claim.claimKey, { verification: claim.verification as ReportClaim["verification"] }]));
   const problems = validateSectionDraft(result.value, claimMap, citable.length > 0);
   const profile = RESEARCH_PROFILES[manifest.profile];
@@ -736,6 +753,7 @@ async function handleSynthesize(run: RunRow, item: ResearchWorkItem, fence: Rese
     toolName: "submit_research_synthesis", toolDescription: "Submit the report summary and closing sections.", schema: researchSynthesisSchema,
     outputTokenCap: 6_000, signal });
   if (!result.ok) {
+    if (result.kind === "scope_revoked") await revokeFailedPrivateEntries(run, privateEntries);
     if (result.kind === "budget" || result.kind === "unknown" || result.kind === "refused" || result.kind === "profile_changed" || result.kind === "scope_revoked" ||
         (result.kind === "invalid_output" && item.attempts >= 3)) {
       // Never lose the written sections: assemble a model-free partial report.
@@ -1012,9 +1030,13 @@ async function beginFinalization(tx: Prisma.TransactionClient, run: RunRow, mani
   type ClaimRow = { claimKey: string; sectionKey: string; text: string; kind: string; verification: string; privateDerived: boolean; evidence: unknown; checks?: unknown };
   const rows: ClaimRow[] = [];
   const needsVerify: string[] = [];
-  let next = 1;
-  for (const claim of parent?.claims ?? []) {
-    rows.push({ claimKey: `C${next++}`, sectionKey: claim.sectionKey, text: claim.text, kind: claim.kind, verification: claim.verification,
+  // Parent claims keep their keys: kept sections still cite them. New findings
+  // continue after the highest parent key.
+  const claimNumber = (key: string) => Number(key.replace(/^C/, "")) || 0;
+  const parentClaims = [...(parent?.claims ?? [])].sort((a, b) => claimNumber(a.claimKey) - claimNumber(b.claimKey));
+  let next = parentClaims.reduce((max, claim) => Math.max(max, claimNumber(claim.claimKey)), 0) + 1;
+  for (const claim of parentClaims) {
+    rows.push({ claimKey: claim.claimKey, sectionKey: claim.sectionKey, text: claim.text, kind: claim.kind, verification: claim.verification,
       privateDerived: claim.privateDerived, evidence: claim.evidence, checks: claim.checks ?? undefined });
     if (request?.kind === "refresh" || request?.kind === "conditions") needsVerify.push(rows.at(-1)!.claimKey);
   }
