@@ -9,6 +9,8 @@ import { BoardImportError } from "@/lib/amux/boardImportCore";
 import { openAmuxContent, verifyAmuxContentDigest } from "@/lib/amux/ideaCrypto";
 import { loadAmuxContentKeyRing } from "@/lib/amux/ideaKeyStore";
 import { readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitchStore";
+import { mentionsAmuxPlanCardRef, resolveAmuxPlanCardRefList } from "@/lib/amux/planLocalRefCore";
+import { readAmuxPlanCardRefs } from "@/lib/amux/planLocalRefRead";
 import { parseAmuxV22Conclusion } from "@/lib/amux/v22ConclusionCore";
 import { amuxV22ResultReviewRelayCard, amuxV22ResultReviewTarget,
   type AmuxV22ResultReviewDecision, type AmuxV22ResultReviewKind } from
@@ -94,9 +96,13 @@ export async function openCompletionCriteria(row: Pick<PendingReview, "ideaId" |
       row.bodyDigestKeyId, keys)) return null;
     const criteria = (JSON.parse(plain.toString("utf8")) as
       { completionCriteria?: unknown }).completionCriteria;
-    return Array.isArray(criteria) && criteria.length > 0 &&
-      criteria.every((item) => typeof item === "string" && item.trim().length > 0) ?
-      criteria as string[] : null;
+    if (!Array.isArray(criteria) || criteria.length === 0 ||
+        !criteria.every((item) => typeof item === "string" && item.trim().length > 0)) return null;
+    // A criterion that names another card by its plan id reaches the
+    // Decision Maker with that card's number (planLocalRefCore.ts).
+    const texts = criteria as string[];
+    return texts.some(mentionsAmuxPlanCardRef) ?
+      resolveAmuxPlanCardRefList(texts, await readAmuxPlanCardRefs(row.ideaId)) : texts;
   } finally { plain?.fill(0); }
 }
 

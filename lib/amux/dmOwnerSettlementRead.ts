@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client";
 
 import { ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX } from "@/lib/engineeringAgentCore";
 import { PULL_DIGEST_PATTERN } from "@/lib/pullDiffDigestCore";
+import { amuxV22ResultReviewRequestEndedSql } from "./decisionMakerRequestStore.ts";
 import { AMUX_OWNER_QUEUE_DM_REQUESTED_ACTION, AMUX_OWNER_QUEUE_DM_RESENT_ACTION } from "./ownerQueueDmRequestCore.ts";
 import { amuxV22KeptResultPublicationEnabled } from "./v22KeptResultCore.ts";
 import { amuxV22KeptResultExistsSql, amuxV22ReviewAttemptLateralSql } from "./v22KeptResultRead.ts";
@@ -29,8 +30,8 @@ export type AmuxDmOwnerSettlementCandidate = {
  * Stopped v22 Tasks to file: an admin-idea-v4 Task in review or blocked, not
  * archived, holding its v22 receipt, role and grade, with an open or
  * acknowledged human escalation that has no settlement yet, nothing running,
- * and no other Decision Maker path holding it -- no open result review (and
- * none the Decision Maker blocked for a person on this run), no worker question
+ * and no other Decision Maker path holding it -- no result review the Decision
+ * Maker still holds (and none it blocked for a person on this run), no worker question
  * waiting, no open refused session answer or card close question on its idea.
  * The engineering side must be done with it: no work item still in flight for
  * any of its runs, and no open pull request but the review draft the
@@ -84,8 +85,17 @@ export async function scanAmuxDmOwnerSettlementCandidates(tx: Prisma.Transaction
         WHERE x."taskId" = w."id" AND x."endedAt" IS NULL)
       AND NOT EXISTS (SELECT 1 FROM "AmuxWorkDelivery" d
         WHERE d."taskId" = w."id" AND d."status" IN ('queued', 'leased'))
+      -- A result review holds the card only while the Decision Maker holds the
+      -- review (owner decision 2026-11-22: "DM은 접근권한 막지 마세요"). One
+      -- handed to a person, or whose newest request ended with nothing for
+      -- anyone to confirm -- routed to the operator, discarded, closed stale or
+      -- answered directly, or a result that is no proposal -- is settled here
+      -- instead, so the card is put to the Decision Maker again rather than
+      -- waiting on the owner (AMUX-CRAWL-003 waited 12 hours). A proposal, a
+      -- confirmation on its way to the walk, or an owner's rejection still holds it.
       AND NOT EXISTS (SELECT 1 FROM "AmuxV22ResultReview" v WHERE v."taskId" = w."id"
-        AND (v."state" = 'open' OR (v."attemptId" = a."id" AND v."decision" = 'block')))
+        AND ((v."state" = 'open' AND v."handoffAt" IS NULL AND NOT ${amuxV22ResultReviewRequestEndedSql})
+          OR (v."attemptId" = a."id" AND v."decision" = 'block')))
       AND NOT EXISTS (SELECT 1 FROM "AmuxV22TaskQuestion" q
         WHERE q."taskId" = w."id" AND q."state" IN ('open', 'answered'))
       AND NOT EXISTS (SELECT 1 FROM "AmuxIdeaUnitDecision" u

@@ -76,7 +76,8 @@ test("only a review draft pull request is t2_pr; an ordinary open pull request o
   assert.equal(amuxDmOwnerSettlementKind({ openBinding: "other", engineeringInFlight: false }), null);
   assert.equal(amuxDmOwnerSettlementKind({ openBinding: null, engineeringInFlight: true }), null);
   const scan = read("lib/amux/dmOwnerSettlementRead.ts");
-  for (const held of [/"AmuxV22ResultReview" v WHERE v\."taskId" = w\."id"\s+AND \(v\."state" = 'open'/,
+  // A result review holds the card only while the Decision Maker holds it (2026-11-22).
+  for (const held of [/"AmuxV22ResultReview" v WHERE v\."taskId" = w\."id"\s+AND \(\(v\."state" = 'open' AND v\."handoffAt" IS NULL AND NOT \$\{amuxV22ResultReviewRequestEndedSql\}\)/,
     /"AmuxV22TaskQuestion" q\s+WHERE q\."taskId" = w\."id" AND q\."state" IN \('open', 'answered'\)/,
     /"AmuxIdeaSessionPlanRefusal" f ON f\."ideaId" = u\."ideaId"/,
     /"AmuxIdeaCardCloseQuestion" c ON c\."ideaId" = u\."ideaId"/,
