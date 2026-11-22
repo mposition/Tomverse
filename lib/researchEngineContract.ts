@@ -411,7 +411,9 @@ export type ResearchRunV2Dto = {
     settlement: "settled" | "pending" | "unknown";
   };
   actions: { canPause: boolean; canResume: boolean; canCancel: boolean; canExtendBudget: boolean;
-    canApprovePlan: boolean; canEditPlan: boolean; canRevise: boolean; canDelete: boolean };
+    canApprovePlan: boolean; canEditPlan: boolean; canRevise: boolean; canDelete: boolean; canFinish: boolean };
+  /** Research stopped at the approved total and waits for the user: add credits or finish now. */
+  budgetReached: boolean;
   createdAt: string;
   updatedAt: string;
 };

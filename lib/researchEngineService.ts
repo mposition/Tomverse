@@ -308,7 +308,25 @@ export async function extendResearchBudget(input: { request: Request; userId: st
     if (RESEARCH_RUN_TERMINAL_STATUSES.has(run.status) || run.cancelRequestedAt) throw refuse(409, "RESEARCH_RUN_FINISHED", "This research has finished.");
     await tx.researchWorkItem.updateMany({ where: { runId: run.id, status: "blocked" }, data: { status: "queued", errorCode: null } });
     await bumpRunSequence(tx, run.id, { approvedCredits: input.approvedCredits,
-      ...(run.status === "awaiting_input" && run.lastErrorCode === "RESEARCH_RUN_BUDGET_REACHED" ? { status: "planning" } : {}) });
+      ...(run.status === "awaiting_input" && run.lastErrorCode === "RESEARCH_RUN_BUDGET_REACHED"
+        ? { status: run.approvedPlanRevision ? "queued" : "planning", lastErrorCode: null } : {}) });
+  });
+  await advanceResearchRun(input.runId);
+  return readResearchRunDto(input.userId, input.runId, input.request);
+}
+
+/** Stops further research and writes the report from the evidence already gathered. */
+export async function finishResearchNow(input: { request: Request; userId: string; runId: string }) {
+  await prisma.$transaction(async (tx) => {
+    const run = await ownedRunForMutation(tx, input.userId, input.runId, input.request);
+    if (run.lastErrorCode === "RESEARCH_FINALIZE_REQUESTED" || run.status === "finalizing") return; // readback
+    const waiting = run.status === "awaiting_input" && run.lastErrorCode === "RESEARCH_RUN_BUDGET_REACHED";
+    if (!run.approvedPlanRevision || !(waiting || ["queued", "running"].includes(run.status)) || run.cancelRequestedAt) {
+      throw refuse(409, "RESEARCH_FINISH_NOT_ALLOWED", "This research cannot be finished now.");
+    }
+    await tx.researchWorkItem.updateMany({ where: { runId: run.id, status: { in: ["queued", "blocked"] },
+      kind: { in: ["investigate", "search", "read", "analyze_private", "coordinate"] } }, data: { status: "superseded", errorCode: "RESEARCH_FINALIZE_REQUESTED" } });
+    await bumpRunSequence(tx, run.id, { status: "running", lastErrorCode: "RESEARCH_FINALIZE_REQUESTED" });
   });
   await advanceResearchRun(input.runId);
   return readResearchRunDto(input.userId, input.runId, input.request);
@@ -496,7 +514,10 @@ export async function readResearchRunDto(userId: string, runId: string, request?
       canEditPlan: run.status === "awaiting_input" && !run.approvedPlanRevision,
       canRevise: run.status === "completed" && run.currentReportRevision > 0,
       canDelete: (terminal || ["draft", "awaiting_input"].includes(run.status)) && !inFlight,
+      canFinish: Boolean(run.approvedPlanRevision) && !run.cancelRequestedAt && run.lastErrorCode !== "RESEARCH_FINALIZE_REQUESTED" &&
+        ((run.status === "awaiting_input" && run.lastErrorCode === "RESEARCH_RUN_BUDGET_REACHED") || ["queued", "running"].includes(run.status)),
     },
+    budgetReached: run.status === "awaiting_input" && run.lastErrorCode === "RESEARCH_RUN_BUDGET_REACHED",
     createdAt: run.createdAt.toISOString(), updatedAt: run.updatedAt.toISOString(),
   };
   return dto;

@@ -2,6 +2,7 @@
 
 import type { ReviewWorkspaceControls } from "./useReviewWorkspace";
 import type { ResearchPreviewControls } from "./useResearchPreview";
+import { DeepResearchEngineRow, DeepResearchEngineSheet, useDeepResearchEngineOffer } from "./DeepResearchEngine";
 import { McpChatPicker } from "@/components/plugins/McpChatPicker";
 import { ChatLocationControl } from "./ChatLocationControl";
 import { composerModelCountLabel } from "./composerModelCountLabel";
@@ -2005,6 +2006,10 @@ export function ChatInput({
   const deepResearchReason = !deepResearchModel ? null
     : isGuestMode ? t("modelStatusReasons.loginRequired")
       : deepResearchLocked ? t("modelStatusReasons.upgradeRequired") : null;
+  // Deep Research engine v2: one deterministic offer read per account; never a model call.
+  const deepResearchEngineOffer = useDeepResearchEngineOffer(identityKey, !isGuestMode && currentProduct === "chat");
+  const [deepResearchEngineOpen, setDeepResearchEngineOpen] = useState(false);
+  const deepResearchEngineDefault = Boolean(deepResearchEngineOffer?.offered && deepResearchEngineOffer.features?.defaultEntry);
   const openDeepResearchSetup = () => {
     closeMenu(false);
     if (deepResearchLocked) {
@@ -3966,6 +3971,8 @@ export function ChatInput({
             useCompactMobileReviewSpacing ? "gap-x-1.5 gap-y-1" : "gap-1.5"
           } max-[360px]:gap-x-0.5 max-[240px]:contents`}
         >
+          {deepResearchEngineOpen && <DeepResearchEngineSheet open language={lang} conversationId={currentChatId} draft={value}
+            offer={deepResearchEngineOffer} onClose={() => setDeepResearchEngineOpen(false)} />}
           {currentProduct === "chat" && !isGuestMode && !researchPreview?.selected && <McpChatPicker conversationId={currentChatId} disabled={draftLocked || isSending} />}
           <button
             ref={actionMenuButtonRef}
@@ -4415,7 +4422,11 @@ export function ChatInput({
                       </span>
                     </button>
                   )}
-                  {review?.mode !== "easy" && (
+                  {deepResearchEngineOffer?.offered && (
+                    <DeepResearchEngineRow language={lang} disabled={isDraftMutationDisabled || isSending}
+                      onOpen={() => { closeMenu(false); setDeepResearchEngineOpen(true); }} />
+                  )}
+                  {review?.mode !== "easy" && !deepResearchEngineDefault && (
                       <button
                         type="button"
                         data-testid="tools-deep-research-row"

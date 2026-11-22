@@ -9,6 +9,7 @@ import { imageGroupMaxModels } from "@/lib/imageGroupLimits";
 import { imageEditEnabled } from "@/lib/imageEditSource";
 import { chatImageTriageModelId } from "@/lib/chatImageIntent";
 import { researchPreviewFeatures } from "@/lib/researchPreviewFeatures";
+import { researchEngineFeatures } from "@/lib/researchEngineService";
 import { reviewEasyEnabled } from "@/lib/reviewRouting";
 import { consumeApiRateLimit, apiSecurityResponse } from "@/lib/apiSecurity";
 
@@ -29,6 +30,7 @@ export async function GET(request: Request) {
   })) };
   const researchFeatures = researchPreviewFeatures();
   const researchPreview = { enabled: researchFeatures.nativeStart, pageReading: researchFeatures.pageReading, durableRuns: researchFeatures.durableRuns };
-  return Response.json({ reviewAnalysis: { crossReview: true, quickSummary: true }, researchPreview, generatedFileRevisions: generatedArtifactRevisionEnabled() && flags.attachmentsEnabled && plan.allowAttachments, historyFeatures: { sharing: plan.allowSharing, downloads: plan.allowDownloads }, historyActions: true, conversationTitles: true, accountUsage: true, chatImageTurns: true, chatImageEdits,reviewEasy: reviewEasyEnabled(), maxModels: effectivePlanModelLimit(plan), assistants, workspace, plan: plan.tier, images }, { headers: { "Cache-Control": "private, no-store" } });
+  const researchEngine = { enabled: researchEngineFeatures().nativeEnabled };
+  return Response.json({ reviewAnalysis: { crossReview: true, quickSummary: true }, researchPreview, researchEngine, generatedFileRevisions: generatedArtifactRevisionEnabled() && flags.attachmentsEnabled && plan.allowAttachments, historyFeatures: { sharing: plan.allowSharing, downloads: plan.allowDownloads }, historyActions: true, conversationTitles: true, accountUsage: true, chatImageTurns: true, chatImageEdits,reviewEasy: reviewEasyEnabled(), maxModels: effectivePlanModelLimit(plan), assistants, workspace, plan: plan.tier, images }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) { return apiSecurityResponse(error) ?? Response.json({ code: "NATIVE_PARITY_UNAVAILABLE" }, { status: 503, headers: { "Cache-Control": "no-store" } }); }
 }

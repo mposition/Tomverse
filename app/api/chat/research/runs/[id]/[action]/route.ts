@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import {
-  amendResearchScope, approveResearchPlan, cancelResearchRun, editResearchPlan, extendResearchBudget, pauseResearchRun,
+  amendResearchScope, approveResearchPlan, cancelResearchRun, editResearchPlan, extendResearchBudget, finishResearchNow, pauseResearchRun,
   requestResearchPlan, requestResearchRevision, researchRevisionRequestInputSchema, researchScopeAmendmentSchema, resumeResearchRun,
 } from "@/lib/researchEngineService";
 import { exportResearchReport, listResearchSources, readResearchEvidence, readResearchReport } from "@/lib/researchEngineReads";
@@ -32,6 +32,7 @@ export async function POST(request: Request, { params }: Context) {
       case "pause": await readLimitedJson(request, 1024, emptySchema); run = await pauseResearchRun(base); break;
       case "resume": await readLimitedJson(request, 1024, emptySchema); run = await resumeResearchRun(base); break;
       case "cancel": await readLimitedJson(request, 1024, emptySchema); run = await cancelResearchRun(base); break;
+      case "finish": await readLimitedJson(request, 1024, emptySchema); run = await finishResearchNow(base); break;
       case "budget": { const body = await readLimitedJson(request, 4 * 1024, budgetSchema); run = await extendResearchBudget({ ...base, ...body }); break; }
       case "scope": { const amendment = await readLimitedJson(request, 64 * 1024, researchScopeAmendmentSchema); run = await amendResearchScope({ ...base, amendment }); break; }
       case "revisions": { const revision = await readLimitedJson(request, 16 * 1024, researchRevisionRequestInputSchema); run = await requestResearchRevision({ ...base, revision }); break; }

@@ -5,6 +5,8 @@ import type { Passage } from "../../../lib/continuationPassages";
 import { mobileSourceContextCopy } from "../../../locales/mobileSourceContext";
 import { useResearchPreview } from "../../../components/chat/useResearchPreview";
 import { ResearchPreviewRunCard } from "../../../components/chat/ResearchPreviewRunCard";
+import { DeepResearchEngineSheet, ResearchWorkspace } from "../../../components/chat/DeepResearchEngine";
+import { researchEngineCopy } from "../../../locales/researchEngine";
 import { researchRunMessage } from "../../../lib/researchPreviewRunClient";
 import { providerName } from "./ModelChoices";
 import { type AssistantEntry, type IosPanel } from "./iosWorkspaceContract";
@@ -441,7 +443,21 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     const target = conversation?.id ?? "new";
     preserveNativeDraft(owner, target, text); setDraft(text, target);
   }
+  const [researchEngineOpen, setResearchEngineOpen] = useState(false);
+  const [researchEngineAvailable, setResearchEngineAvailable] = useState(false);
+  const [researchEngineOffer, setResearchEngineOffer] = useState<{ offered: boolean } | null>(null);
+  useEffect(() => {
+    let active = true;
+    if (!signedIn || !transport.researchEngineEnabled || !transport.researchEngine) { setResearchEngineAvailable(false); return; }
+    void transport.researchEngineEnabled().then(async (enabled) => {
+      if (!active) return;
+      setResearchEngineAvailable(enabled);
+      if (enabled) { const value = await transport.researchEngine!.offer().catch(() => null); if (active) setResearchEngineOffer(value as never); }
+    }).catch(() => { if (active) setResearchEngineAvailable(false); });
+    return () => { active = false; };
+  }, [signedIn, owner, transport]);
   const iosExtraTools = [
+    ...(researchEngineAvailable && transport.researchEngine ? [{ label: researchEngineCopy[language].title, onSelect: () => setResearchEngineOpen(true) }] : []),
     { label: mobileIosWorkspaceCopy(language).assistants, onSelect: () => openIosPanel("assistants") },
     { label: mobileIosWorkspaceCopy(language).files, onSelect: () => openIosPanel("starters") },
     { label: mobileIosWorkspaceCopy(language).imports, onSelect: () => openIosPanel("imports") },
@@ -449,7 +465,12 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
 
   const productSelector = <select data-testid="product-switcher" className="product-switcher" aria-label={workspaceCopy.product} value={product} disabled={streaming || reviewBusy || handoffBusy || uncertain} onChange={event => switchProduct(event.target.value as "chat" | "review")}><option value="chat">Chat</option><option value="review">Review</option></select>;
 
+  const researchEngineSheet = researchEngineOpen && transport.researchEngine ? <DeepResearchEngineSheet open api={transport.researchEngine} language={language}
+    conversationId={conversation?.id ?? null} draft={draft} offer={researchEngineOffer} onClose={() => setResearchEngineOpen(false)}
+    onStarted={(id) => { setResearchEngineOpen(false); void open(id); }} /> : null;
+
   return <main className="mobile-app ios-workspace native-workspace" data-compact={compact || undefined} style={visibleHeight ? { height: visibleHeight } : undefined}>
+    {researchEngineSheet}
     <header className="app-header" data-product-control={signedIn && compact && view === "chat" || undefined}>
       <button className="menu-button" aria-label={view === "list" ? navigationCopy.returnToChat : copy.chats} onClick={() => view === "list" ? returnToWorkspace() : setView("list")} disabled={!signedIn}>{view === "list" ? <ArrowLeft size={22} aria-hidden="true" /> : <><AppIcon name="menu" /><AppIcon name="menuDark" /></>}</button>
       <button type="button" className="brand-lockup" aria-label={navigationCopy.home} onClick={returnToWorkspace}><AppIcon name="logo" /><span className="wordmark tomverse-wordmark">tomverse<span className="tomverse-wordmark-dot">.</span></span></button>
@@ -503,7 +524,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
         {!conversation?.messages.length && !streaming && conversation?.surface !== "continuation" && <IosWelcome importsEnabled={iosImportsEnabled} language={language} automatic={conversation ? conversation.selectionMode === "auto" && conversation.autoSelection?.offered === true : draftAutoOffered} imageEnabled={iosImageEnabled} onPanel={openIosPanel} onSeed={seedIosWorkspace} />}
         {conversation?.surface === "continuation" && !conversation.messages.length && !streaming && <div className="ios-continuation-start"><h2>{mobileIosWorkspaceCopy(language).disclosure}</h2><p>{mobileIosWorkspaceCopy(language).readOnly}</p><button onClick={() => setDraft(language === "ko" ? "지난 대화를 바탕으로 다음 할 일을 정리해줘." : "Based on our previous conversation, help me plan the next steps.")}>{language === "ko" ? "다음 할 일부터 정리해줘" : "Help me plan the next steps"}</button></div>}
         {pendingQuestion !== null && <article className="message user"><AnswerContent content={pendingQuestion} transport={transport} language={language} /></article>}
-        {conversation?.messages.map((message) => <article key={message.id} className={`message ${message.role}`}>{message.role === "assistant" && <span className="message-label response-identity"><AppIcon name="logo" />Tomverse</span>}{message.researchRunId && conversation && transport.researchRuns && <ResearchPreviewRunCard
+        {conversation?.messages.map((message) => <article key={message.id} className={`message ${message.role}`}>{message.role === "assistant" && <span className="message-label response-identity"><AppIcon name="logo" />Tomverse</span>}{message.researchEngineRun && message.researchRunId && conversation && transport.researchEngine ? <ResearchWorkspace api={transport.researchEngine} runId={message.researchRunId} conversationId={conversation.id} language={language} accountKey={owner ?? "native"} /> : message.researchRunId && conversation && transport.researchRuns && <ResearchPreviewRunCard
           runId={message.researchRunId} conversationId={conversation.id} assistantMessageId={message.id} language={language} transport={transport.researchRuns}
           reportOutcome={message.searchMetadata?.research?.outcome}
           onMessage={run => setConversation(item => item?.id === run.conversationId ? { ...item, messages: item.messages.map(existing => existing.id === run.assistantMessageId ? researchRunMessage(run) : existing) } : item)} />}

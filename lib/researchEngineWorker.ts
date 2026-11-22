@@ -114,11 +114,20 @@ export async function processOneResearchWorkItem(ownerId: string, options: Resea
 /** Runs up to `concurrency` slices in parallel until nothing is runnable. Used by the worker CLI and scale tests. */
 export async function drainResearchWork(ownerPrefix: string, concurrency: number, options: ResearchWorkerOptions & { maxSlices?: number } = {}) {
   let slices = 0;
+  // A lane that finds nothing claimable keeps waiting while other lanes are
+  // still running items that may enqueue more; it stops when no work is open.
   const lane = async (index: number) => {
+    let idle = 0;
     while (options.maxSlices === undefined || slices < options.maxSlices) {
       const processed = await processOneResearchWorkItem(`${ownerPrefix}:${index}`, options);
-      if (!processed) return;
-      slices += 1;
+      if (processed) { slices += 1; idle = 0; continue; }
+      // Only a running item can make more work claimable. With none running, a
+      // few consecutive empty claims (spanning the advance that follows an item)
+      // mean nothing is runnable now: blocked, paused or waiting on time.
+      const running = await prisma.researchWorkItem.count({ where: { status: "running" } });
+      idle = running ? 0 : idle + 1;
+      if (idle >= 4) return;
+      await new Promise((resolve) => setTimeout(resolve, running ? 5 : 25));
     }
   };
   await Promise.all(Array.from({ length: Math.max(1, concurrency) }, (_, index) => lane(index)));
@@ -289,15 +298,22 @@ async function handleInvestigate(run: RunRow, item: ResearchWorkItem, fence: Res
   const relatedKeys = new Set(searchItems.flatMap((entry) => (entry.result as { sourceKeys?: string[] } | null)?.sourceKeys ?? []));
   for (const entry of manifest.entries) if (entry.type === "url") relatedKeys.add(entry.key);
   for (const read of previousResult?.reads ?? []) relatedKeys.add(read.sourceKey);
+  // Links found on pages this sub-question read are candidates for it; links from
+  // other sub-questions' pages are not shown here.
+  const questionItems = await prisma.researchWorkItem.findMany({ where: { runId: run.id, kind: "investigate",
+    payload: { path: ["questionKey"], equals: payload.questionKey } }, select: { id: true } });
+  const readItems = questionItems.length ? await prisma.researchWorkItem.findMany({ where: { runId: run.id, kind: "read", status: "completed",
+    OR: questionItems.map((entry) => ({ payload: { path: ["parentItemId"], equals: entry.id } })) }, select: { result: true } }) : [];
+  for (const entry of readItems) for (const key of (entry.result as { discovered?: string[] } | null)?.discovered ?? []) relatedKeys.add(key);
   const sources = await prisma.researchSource.findMany({ where: { runId: run.id, visibility: "public", status: "active",
-    OR: [{ sourceKey: { in: [...relatedKeys] } }, { origin: "discovered_link", versions: { none: {} } }] },
-    orderBy: { firstSeenAt: "desc" }, take: 80 });
+    sourceKey: { in: [...relatedKeys] } }, orderBy: { firstSeenAt: "desc" }, take: 80 });
   const versions = await latestResearchVersions(run.id, sources.map((source) => source.id));
   const keyById = new Map(sources.map((source) => [source.id, source.sourceKey]));
   const lines: PublicSourceLine[] = sources.filter((source) => !excluded.has(source.sourceKey)).map((source) => {
     const version = versions.get(source.id);
     return { sourceKey: source.sourceKey, title: source.title, host: researchUrlHost(source.canonicalUrl ?? ""), snippet: source.snippet,
-      readStatus: version?.readStatus ?? "snippet_only", publishedAt: source.publishedAt?.toISOString() ?? null,
+      readStatus: version?.readStatus ?? (source.origin === "discovered_link" || source.origin === "user_url" ? "link_only" : "snippet_only"),
+      publishedAt: source.publishedAt?.toISOString() ?? null,
       chunkCount: version?.readStatus === "read" ? version.chunkCount : 0,
       duplicateOf: source.duplicateOfSourceId ? keyById.get(source.duplicateOfSourceId) ?? null : null };
   });
@@ -847,8 +863,18 @@ export async function advanceResearchRun(runId: string) {
       if (!running && run.status !== "paused") await bumpRunSequence(tx, runId, { status: "paused", pausedAt: now });
       return;
     }
-    if (!["planning", "queued", "running", "finalizing"].includes(run.status)) return;
+    const budgetWait = run.status === "awaiting_input" && run.lastErrorCode === "RESEARCH_RUN_BUDGET_REACHED" && Boolean(run.approvedPlanRevision);
+    if (!["planning", "queued", "running", "finalizing"].includes(run.status) && !budgetWait) return;
     const manifest = researchInputManifestSchema.parse(run.inputManifest);
+    if (budgetWait) {
+      // Waiting for the user to add credits or finish now; the run deadline finishes it with what exists.
+      if (!(run.runDeadlineAt && run.runDeadlineAt <= researchNow())) return;
+      await tx.researchWorkItem.updateMany({ where: { runId, status: { in: ["blocked", "queued"] }, kind: { in: [...RESEARCH_KINDS] } }, data: { status: "superseded", errorCode: "RESEARCH_RUN_DEADLINE" } });
+      const finalized = await tx.researchReportRevision.findFirst({ where: { runId, revision: run.currentReportRevision }, select: { inputRevision: true } });
+      const scopedRequest = run.currentReportRevision ? openRequest(manifest, finalized?.inputRevision ?? 0) : null;
+      await beginFinalization(tx, run, manifest, items.filter((entry) => scopedRequest ? entry.inputRevision >= scopedRequest.inputRevision : true), scopedRequest);
+      return;
+    }
     if (run.status === "planning") {
       const plan = items.filter((entry) => entry.kind === "plan").at(-1);
       if (!plan || OPEN.has(plan.status)) {
@@ -884,7 +910,14 @@ export async function advanceResearchRun(runId: string) {
       const last = coordinates.at(-1);
       const profile = RESEARCH_PROFILES[manifest.profile];
       const lastDecision = (last?.result as { decision?: string } | null)?.decision;
-      if (!request && !deadline && !blocked && coordinates.length < profile.maxCoordinatorRounds &&
+      const finishRequested = run.lastErrorCode === "RESEARCH_FINALIZE_REQUESTED";
+      if (blocked && !deadline && !finishRequested) {
+        // Research ran out of approved credits. The finalization reserve stays
+        // untouched; the user decides: add credits, or finish with what exists.
+        if (run.status !== "awaiting_input") await bumpRunSequence(tx, runId, { status: "awaiting_input", lastErrorCode: "RESEARCH_RUN_BUDGET_REACHED" });
+        return;
+      }
+      if (!request && !deadline && !blocked && !finishRequested && coordinates.length < profile.maxCoordinatorRounds &&
           (!last || (last.status === "completed" && lastDecision === "continue"))) {
         const round = coordinates.length + 1;
         const providerKey = providerFor(run, "coordinator");

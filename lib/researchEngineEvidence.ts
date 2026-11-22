@@ -55,7 +55,10 @@ export const normalizeEvidenceText = (value: string) => value
  * while two different reports on one event do not. Not a similarity score.
  */
 export function republicationFingerprint(text: string): string | null {
-  const normalized = normalizeEvidenceText(text).replace(/[^\p{L}\p{N} ]/gu, "");
+  // Body prose only: headings, titles, bylines and navigation differ between
+  // outlets carrying one story, so heading lines and lines under eight words are skipped.
+  const body = text.split("\n").filter((line) => !/^#{1,6} /u.test(line) && line.trim().split(/\s+/u).length >= 8).join(" ");
+  const normalized = normalizeEvidenceText(body).replace(/[^\p{L}\p{N} ]/gu, "");
   const words = normalized.split(" ").filter(Boolean);
   if (words.length < 60) return null;
   return sha256(words.slice(0, 120).join(" "));

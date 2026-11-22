@@ -6,6 +6,7 @@ import type { ResearchPreviewMetadata } from "../../lib/researchPreviewMetadata"
 import { researchRunNeedsPolling, type ResearchPreviewRunTransport } from "../../lib/researchPreviewRunClient";
 import { researchPreviewCopy } from "../../locales/researchPreview";
 import type { Language } from "../../lib/language";
+import { ResearchWorkspace } from "./DeepResearchEngine";
 
 type RunAction = "resume" | "cancel";
 type RunCardState = {
@@ -51,7 +52,8 @@ export function ResearchPreviewRunCard({ runId, conversationId, assistantMessage
         throw new Error("RESEARCH_RUN_SCOPE_MISMATCH");
       }
       update({ run: value, error: false });
-      if (researchRunNeedsPolling(value.status)) timer = setTimeout(read, 5000);
+      // An engine v2 run is rendered and polled by the shared workspace below.
+      if (value.engineVersion !== 2 && researchRunNeedsPolling(value.status)) timer = setTimeout(read, 5000);
       if (value.message) messageCallback.current?.(value);
     }
     async function read() {
@@ -103,6 +105,7 @@ export function ResearchPreviewRunCard({ runId, conversationId, assistantMessage
     failed: undefined,
     cancelled: undefined,
   }[reportOutcome]);
+  if (run?.engineVersion === 2) return <ResearchWorkspace runId={runId} conversationId={conversationId} language={language} accountKey="web" />;
   return <div className="research-run-card" data-testid="research-run-card" data-run-status={run?.status ?? "loading"}>
     <p role="status"><strong>{copy.researchPreviewTitle}</strong> · {label}</p>
     {reportLabel && <p data-testid="research-preview-result" data-outcome={reportOutcome}>{reportLabel}</p>}

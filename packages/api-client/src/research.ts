@@ -14,7 +14,7 @@ export type ResearchAction =
   | { kind: "plan"; expectedPlanRevision: number; feedback?: string }
   | { kind: "plan-edit"; expectedPlanRevision: number; plan: unknown }
   | { kind: "approve"; planRevision: number }
-  | { kind: "pause" } | { kind: "resume" } | { kind: "cancel" }
+  | { kind: "pause" } | { kind: "resume" } | { kind: "cancel" } | { kind: "finish" }
   | { kind: "budget"; expectedApprovedCredits: number; approvedCredits: number }
   | { kind: "scope"; expectedInputRevision: number; addQuestions?: string[]; excludeSourceKeys?: string[]; excludeDomains?: string[]; priorityNote?: string }
   | { kind: "revisions"; expectedReportRevision: number; revisionKind: "format" | "section_research" | "conditions" | "refresh" | "redact_public"; sectionKeys?: string[]; instruction?: string };

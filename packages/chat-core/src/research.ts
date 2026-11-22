@@ -44,7 +44,8 @@ export type ResearchRunView = {
   money: { approvedCredits: number; settledCredits: number; reservedCredits: number; unknownCredits: number;
     finalizationReserveCredits: number; settlement: "settled" | "pending" | "unknown" };
   actions: { canPause: boolean; canResume: boolean; canCancel: boolean; canExtendBudget: boolean;
-    canApprovePlan: boolean; canEditPlan: boolean; canRevise: boolean; canDelete: boolean };
+    canApprovePlan: boolean; canEditPlan: boolean; canRevise: boolean; canDelete: boolean; canFinish: boolean };
+  budgetReached: boolean;
   createdAt: string;
   updatedAt: string;
 };

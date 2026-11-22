@@ -3,6 +3,8 @@ import { languageFromTag, type Language } from "../lib/language";
 /** Research engine v2 copy: report labels and the shared Web/Native workspace. */
 const en = {
   title: "Deep Research",
+  finishNow: "Finish with current evidence",
+  budgetReached: "Research reached its credit maximum. Add credits to continue, or finish the report with what was found.",
   start: "Start Deep Research",
   briefQuestion: "What should be researched?",
   briefObjective: "Purpose (optional)",
@@ -101,6 +103,8 @@ type Copy = typeof en;
 
 const ko: Copy = {
   title: "딥 리서치",
+  finishNow: "지금까지의 근거로 마무리",
+  budgetReached: "조사가 최대 크레딧에 도달했습니다. 크레딧을 추가해 계속하거나 지금까지 찾은 내용으로 보고서를 마무리하세요.",
   start: "딥 리서치 시작",
   briefQuestion: "무엇을 조사할까요?",
   briefObjective: "목적(선택)",
@@ -198,6 +202,7 @@ const ko: Copy = {
 const translated = (base: Copy, overrides: Partial<Omit<Copy, "report">> & { report: Copy["report"] }): Copy => ({ ...base, ...overrides });
 
 const zh = translated(en, {
+  finishNow: "用现有依据完成", budgetReached: "研究已达到积分上限。增加积分以继续，或用已找到的内容完成报告。",
   title: "深度研究", start: "开始深度研究", briefQuestion: "要研究什么？", briefObjective: "目的（可选）",
   briefConditions: "条件：时间段、地区、语言、包含或排除的网站", briefSources: "本次研究的资料",
   briefSourcesHint: "所选文件、对话和记忆仅私下分析，绝不发送到网络搜索。", briefPublicNote: "您的问题文字会用于公开网络搜索。",
@@ -230,6 +235,7 @@ const zh = translated(en, {
 });
 
 const zhHant = translated(zh, {
+  finishNow: "以現有依據完成", budgetReached: "研究已達到點數上限。增加點數以繼續，或以已找到的內容完成報告。",
   title: "深度研究", start: "開始深度研究", briefQuestion: "要研究什麼？", briefObjective: "目的（選填）",
   briefConditions: "條件：時間範圍、地區、語言、包含或排除的網站", briefSources: "本次研究的資料",
   briefSourcesHint: "所選檔案、對話與記憶僅私下分析，絕不傳送到網路搜尋。", briefPublicNote: "您的問題文字會用於公開網路搜尋。",
@@ -259,6 +265,7 @@ const zhHant = translated(zh, {
 });
 
 const fr = translated(en, {
+  finishNow: "Terminer avec les preuves actuelles", budgetReached: "La recherche a atteint son maximum de crédits. Ajoutez des crédits pour continuer, ou terminez le rapport avec ce qui a été trouvé.",
   title: "Recherche approfondie", start: "Lancer la recherche approfondie", briefQuestion: "Que faut-il rechercher ?", briefObjective: "Objectif (facultatif)",
   briefConditions: "Conditions : période, régions, langues, sites à inclure ou exclure", briefSources: "Sources de cette recherche",
   briefSourcesHint: "Les fichiers, conversations et la Mémoire sélectionnés sont analysés en privé et jamais envoyés à la recherche web.",
@@ -300,6 +307,7 @@ const fr = translated(en, {
 });
 
 const de = translated(en, {
+  finishNow: "Mit vorhandenen Belegen abschließen", budgetReached: "Die Recherche hat ihr Credit-Maximum erreicht. Fügen Sie Credits hinzu oder schließen Sie den Bericht mit den Funden ab.",
   title: "Tiefenrecherche", start: "Tiefenrecherche starten", briefQuestion: "Was soll recherchiert werden?", briefObjective: "Zweck (optional)",
   briefConditions: "Bedingungen: Zeitraum, Regionen, Sprachen, ein- oder auszuschließende Websites", briefSources: "Quellen für diese Recherche",
   briefSourcesHint: "Ausgewählte Dateien, Unterhaltungen und Memory werden privat ausgewertet und nie an die Websuche gesendet.",
@@ -341,6 +349,7 @@ const de = translated(en, {
 });
 
 const es = translated(en, {
+  finishNow: "Terminar con la evidencia actual", budgetReached: "La investigación alcanzó su máximo de créditos. Añade créditos para continuar o termina el informe con lo encontrado.",
   title: "Investigación profunda", start: "Iniciar investigación profunda", briefQuestion: "¿Qué hay que investigar?", briefObjective: "Propósito (opcional)",
   briefConditions: "Condiciones: periodo, regiones, idiomas, sitios a incluir o excluir", briefSources: "Fuentes para esta investigación",
   briefSourcesHint: "Los archivos, conversaciones y la Memoria seleccionados se analizan en privado y nunca se envían a la búsqueda web.",
@@ -382,6 +391,7 @@ const es = translated(en, {
 });
 
 const pt = translated(en, {
+  finishNow: "Concluir com as evidências atuais", budgetReached: "A pesquisa atingiu o máximo de créditos. Adicione créditos para continuar ou conclua o relatório com o que foi encontrado.",
   title: "Pesquisa aprofundada", start: "Iniciar pesquisa aprofundada", briefQuestion: "O que deve ser pesquisado?", briefObjective: "Objetivo (opcional)",
   briefConditions: "Condições: período, regiões, idiomas, sites a incluir ou excluir", briefSources: "Fontes desta pesquisa",
   briefSourcesHint: "Arquivos, conversas e Memória selecionados são analisados de forma privada e nunca enviados à pesquisa na web.",
