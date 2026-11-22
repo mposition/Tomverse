@@ -71,10 +71,10 @@ test("daily presearch percentiles pair successful attempts and keep missing or f
     const slowStages = { timedSlowCompleted: 1, slowBeforeProviderEstimateP50Ms: 9_000,
       slowProviderToContentP50Ms: 4_000, slowContentToEndP50Ms: 6_000 };
     assert.deepEqual(daily.windows, [
-      { hours: 24, serverAttempts: 7, paired: 4, missingClient: 3, failed: 1, cancelled: 1,
+      { hours: 24, serverAttempts: 7, paired: 4, missingClient: 3, missingClientNoToken: 1, missingClientServerCompleted: 2, failed: 1, cancelled: 1,
         completed: 3, completedWithFirstContent: 2, withinTenSeconds: 1, withinTenSecondsRate: 1 / 7,
         firstP50Ms: 3900, firstP95Ms: 13000, completionP50Ms: 10000, completionP95Ms: 19000, ...slowStages },
-      { hours: 168, serverAttempts: 8, paired: 5, missingClient: 3, failed: 1, cancelled: 1,
+      { hours: 168, serverAttempts: 8, paired: 5, missingClient: 3, missingClientNoToken: 1, missingClientServerCompleted: 2, failed: 1, cancelled: 1,
         completed: 4, completedWithFirstContent: 3, withinTenSeconds: 2, withinTenSecondsRate: 2 / 8,
         firstP50Ms: 3900, firstP95Ms: 13000, completionP50Ms: 5000, completionP95Ms: 19000, ...slowStages },
     ]);

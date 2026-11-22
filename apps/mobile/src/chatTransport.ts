@@ -10,7 +10,10 @@ export type ChatMessage = {
   status?: string;
   pendingJobId?: string | null;
   artifacts?: import("../../../lib/generatedArtifactCore").ChatStreamArtifact[];
-  searchMetadata?: { citations: Array<{ url: string; title?: string }> } | null;
+  searchMetadata?: {
+    citations: Array<{ url: string; title?: string }>;
+    research?: import("../../../lib/researchPreviewMetadata").ResearchPreviewMetadata;
+  } | null;
   attachments?: import("../../../components/chat/types").ChatAttachment[];
   imageTurn?: { groupId: string; modelIds: string[] };
 };

@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
-  AMUX_EXECUTION_LANES, AMUX_EXECUTION_VISIBLE_LANES,
+  AMUX_EXECUTION_BOARD_CARD_WHERE, AMUX_EXECUTION_LANES, AMUX_EXECUTION_VISIBLE_LANES,
   amuxExecutionLaneWhere, parseAmuxExecutionLane,
   parseAmuxExecutionPage, amuxVisibleInspectionText,
   amuxVisibleUntrustedText,
@@ -19,14 +19,25 @@ test("six board lanes and archive are separate projections", () => {
   assert.equal(parseAmuxExecutionPage("10001"), null);
   assert.equal(parseAmuxExecutionPage("01"), null);
   assert.equal(parseAmuxExecutionPage("-1"), null);
-  assert.deepEqual(amuxExecutionLaneWhere("amux_backlog").AND[2],
+  assert.deepEqual(amuxExecutionLaneWhere("amux_backlog").AND[0].AND[2],
     { status: "todo", v22AssignmentId: null });
-  assert.deepEqual(amuxExecutionLaneWhere("todo").AND[2],
+  assert.deepEqual(amuxExecutionLaneWhere("todo").AND[0].AND[2],
     { status: "todo", v22AssignmentId: { not: null } });
   assert.equal(JSON.stringify(amuxExecutionLaneWhere("attention")).includes("humanEscalations"), true);
   assert.equal(JSON.stringify(amuxExecutionLaneWhere("in_review")).includes('"status":"review"'), true);
-  assert.deepEqual(amuxExecutionLaneWhere("archive").OR[1].AND[2],
+  assert.deepEqual(amuxExecutionLaneWhere("archive").AND[0].OR[1].AND[2],
     { status: { in: ["done", "cancelled"] } });
+});
+
+test("owner direction 2026-11-21: every lane holds Tasks and untyped cards, never a Story", () => {
+  for (const lane of AMUX_EXECUTION_LANES) {
+    const where = amuxExecutionLaneWhere(lane);
+    assert.equal(where.AND.length, 2, lane);
+    assert.deepEqual(where.AND[1], AMUX_EXECUTION_BOARD_CARD_WHERE, lane);
+  }
+  // A NULL cardType never compares, so it is named on its own and kept.
+  assert.deepEqual(AMUX_EXECUTION_BOARD_CARD_WHERE,
+    { OR: [{ cardType: null }, { cardType: { not: "story" } }] });
 });
 
 test("worker text renders controls visibly without conflating literal escapes", () => {
