@@ -215,7 +215,7 @@ if (canonical) {
     expectOrDeviate(
       !isPathAllowed(served, crawler, "/"),
       `${crawler} may crawl / — Cloudflare's managed block supplies an Allow: / group that outranks ours`,
-      managed
+      !canonical && managed
     );
   }
   expect(!/^Sitemap:/m.test(own), "a non-canonical origin advertises a sitemap");
