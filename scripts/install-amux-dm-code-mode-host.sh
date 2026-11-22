@@ -86,7 +86,9 @@ dm_place() {
 dm_rollback() {
   local backup=$1 recorded
   [[ $EUID -eq 0 ]] || dm_fail "run as root"
+  # One directory directly under the backup root: no `..`, no further slash, no trailing slash.
   [[ $backup == "$DM_HOST_BACKUP_ROOT"/* ]] || dm_fail "the backup must be under $DM_HOST_BACKUP_ROOT"
+  [[ ${backup#"$DM_HOST_BACKUP_ROOT"/} =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || dm_fail "the backup must be one $DM_HOST_BACKUP_ROOT/<UTC time> directory"
   dm_directory_safe "$backup" || dm_fail "$backup is not root's directory closed to others"
   recorded=$(cat -- "$backup/state" 2>/dev/null) || dm_fail "$backup has no state file"
   case $recorded in
@@ -160,7 +162,7 @@ dm_main() {
   else
     # The bytes, and the owner, group and mode --rollback puts back.
     /usr/bin/install -o root -g root -m 0400 -- "$DM_HOST_DEST" "$backup/codex-code-mode-host"
-    /usr/bin/stat -c '%u %g %a' -- "$DM_HOST_DEST" > "$backup/meta"
+    /usr/bin/stat -c '%u %g %04a' -- "$DM_HOST_DEST" > "$backup/meta"
     printf 'file\n' > "$backup/state"
   fi
   dm_place "$work/$DM_HOST_ASSET_MEMBER" "$DM_HOST_SHA256"
