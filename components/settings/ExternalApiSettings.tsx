@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { Check, Copy, KeyRound } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
@@ -288,7 +288,19 @@ function KeyRow({
     const [error, setError] = useState<string | null>(null);
     const [showUsage, setShowUsage] = useState(false);
     const [menuOpen, setMenuOpen] = useState(false);
+    const menuAnchor = useRef<HTMLDivElement>(null);
     const active = entry.state === "active" && !revokeOnly;
+
+    useEffect(() => {
+        if (!menuOpen) return;
+        const closeOnOutsidePress = (event: PointerEvent) => {
+            if (event.target instanceof Node && !menuAnchor.current?.contains(event.target)) {
+                setMenuOpen(false);
+            }
+        };
+        document.addEventListener("pointerdown", closeOnOutsidePress, true);
+        return () => document.removeEventListener("pointerdown", closeOnOutsidePress, true);
+    }, [menuOpen]);
 
     const patch = async (payload: Record<string, unknown>) => {
         setError(null);
@@ -386,7 +398,7 @@ function KeyRow({
                         </dd>
                     </div>
                 </dl>
-                <div className="relative mt-2 flex justify-end sm:col-start-5 sm:row-start-1 sm:mt-0">
+                <div ref={menuAnchor} className="relative mt-2 flex justify-end sm:col-start-5 sm:row-start-1 sm:mt-0">
                     <button
                         type="button"
                         aria-label={`${t("externalApi.keyActions")}: ${entry.name}`}

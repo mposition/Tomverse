@@ -932,7 +932,12 @@ output contract are in `apps/tomverse-cli/README.md`.
   execute, no re-run of a call that started, credential paths and `.git/`
   never read, commands get a fixed short list of environment variables (PATH,
   HOME, temp, locale, …) plus names the user adds, never a Tomverse one, and no
-  approval without a terminal. At the terminal the user can answer "always"
+  approval in headless CLI use without a terminal. The dedicated VS Code
+  extension bundles the same headless runtime and supplies a host-owned approval
+  adapter: native full diffs, strict messages and editor-state checks immediately
+  before the shared disk writer. In VS Code, remembered permission lasts only
+  for the current task/run and expires on resume or reload; deletes always ask.
+  At the terminal the user can answer "always"
   for the rest of that process: all file creates and updates (a delete is
   always asked), or one exact command (program, arguments, folder,
   environment names). It is not saved, so a resumed session asks again, and

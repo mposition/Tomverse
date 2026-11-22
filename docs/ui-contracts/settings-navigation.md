@@ -115,14 +115,16 @@ off at any time; it never changes consent by navigation alone.
 ## 2.3 Developer tab
 
 The Developer tab (`developer`, `components/settings/DeveloperSettingsTab.tsx`, owner
-decision 2026-11-21) holds what a person sets up once to use the account from other
-apps: a title and one sentence, then, in order, the API key summary card (active key
-count, last use, "Manage keys" to `/settings/api`), the connection addresses card
-(general API `/api/v1` and `/api/anthropic`, coding API `/api/code/v1` and
-`/api/code/anthropic`, each line with a copy button and each group naming its tools,
-ending in a link to the per-tool setup on `/settings/api#connect`), the Tomverse CLI card
-(only while the install guide is published, `tomverseCli` in the key list), and a footnote
-that the API and CLI need Pro or above and use the same credits as Chat.
+approval 2026-11-22) keeps setup compact: title and one sentence, active key count
+and last use with "Manage keys", then concise CLI, native VS Code preview and
+other-tool guide rows. The CLI row appears only while its guide is published.
+Connection addresses are collapsed by default in a keyboard-accessible native
+`details` disclosure. Expanding it shows general `/api/v1` and `/api/anthropic`,
+coding `/api/code/v1` and `/api/code/anthropic`, the tool names and four copy actions.
+Installation instructions and OS support belong on the linked guides; usage and
+key caps stay on `/settings/api`. The native VS Code guide is distinct from the
+existing VS Code compatible-provider setup and does not claim a public download.
+The API documentation link opens the localized developer page.
 
 - It reads the key list the API page reads (`GET /api/user/api-keys`) and adds no route.
   The addresses come from that response, so the tab and the page cannot disagree.

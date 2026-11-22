@@ -6,6 +6,25 @@ import { developersPageContent } from "@/components/marketing/v2/developers/deve
 // primary action, does not overflow a 320px phone, and the tool tabs work from the keyboard.
 test.setTimeout(90_000);
 
+test("the existing Developers submenu orders API, CLI, native VS Code and integrations", async ({ page }, testInfo) => {
+  await prepareGuestPage(page, "en");
+  // Static chunks bypass the API predicate routes, including in a local dev build.
+  await page.route("**/_next/static/**", route => route.continue());
+  await page.goto("/developers", { waitUntil: "load" });
+  const mobile = testInfo.project.name.startsWith("mobile");
+  if (mobile) await page.getByTestId("marketing-menu-button").click();
+  else await page.getByTestId("header-developers-link").focus();
+  const menu = page.locator('[aria-label="Developer menu"]:visible');
+  await expect(menu.locator("a")).toContainText(["Tomverse API", "Install Tomverse CLI", "Tomverse for VS Code", "Connect coding tools"], { useInnerText: true });
+  await page.screenshot({ path: testInfo.outputPath("developers-menu.png") });
+  const links = await menu.locator("a").evaluateAll(nodes => nodes.map(node => node.getAttribute("href")));
+  expect(links).toEqual(["/developers", "/developers/cli", "/developers#tomverse-vscode", "/developers#connect"]);
+  await menu.getByRole("link", { name: /Tomverse for VS Code/ }).click();
+  await expect(page).toHaveURL(/#tomverse-vscode$/);
+  await expect(page.getByTestId("tomverse-vscode-guide")).toContainText("Public download and Marketplace publication are not available yet");
+  await expectNoHorizontalOverflow(page);
+});
+
 const pages = [
   { lang: "en", path: "/developers" },
   { lang: "ko", path: "/ko/developers" },

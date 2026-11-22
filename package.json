@@ -394,7 +394,15 @@
     "test:router-development-collector": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/routerDevelopmentCollector.test.mjs tests/routerDevelopmentCollectorProvider.test.mjs tests/routerDevelopmentCollectorCli.test.mjs tests/routerDevelopmentCollectorAdversarial.test.mjs",
     "test:router-development-benchmark": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/routerDevelopmentBenchmark.test.mjs tests/routerDevelopmentBenchmarkCli.test.mjs tests/routerDevelopmentBenchmarkCorpus.test.mjs",
     "cross-review": "node --import tsx scripts/cross-review.mjs",
-    "voice:watchdog": "node --conditions=react-server --import tsx scripts/voice-conversation-watchdog.mjs"
+    "voice:watchdog": "node --conditions=react-server --import tsx scripts/voice-conversation-watchdog.mjs",
+    "vscode:typecheck": "npm --workspace tomverse-vscode run typecheck",
+    "vscode:build": "npm --workspace tomverse-vscode run build",
+    "vscode:test": "npm --workspace tomverse-vscode run test",
+    "vscode:test:integration": "npm --workspace tomverse-vscode run test:integration",
+    "vscode:package": "npm --workspace tomverse-vscode run package",
+    "vscode:pack:verify": "npm --workspace tomverse-vscode run pack:verify",
+    "vscode:test:installed": "npm --workspace tomverse-vscode run test:installed",
+    "vscode:test:recovery": "npm --workspace tomverse-vscode run test:recovery"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.106",

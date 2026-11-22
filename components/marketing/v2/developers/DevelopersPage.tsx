@@ -9,6 +9,7 @@ import { homeV2Content, type HomeV2Copy } from "@/components/marketing/home/home
 import { CURSOR_GUIDE_PATH } from "@/lib/marketingRoutes";
 import { localizedPath } from "@/lib/seo";
 import { developersPageContent, type DevelopersPageCopy } from "./developersPageContent";
+import { TomverseVscodeGuide } from "./TomverseVscodeGuide";
 import "../v2-pages.css";
 import "./developers-page.css";
 
@@ -408,6 +409,8 @@ export function DevelopersPage() {
           <div className="dev-cli-link"><Link className="btn ghost" href={localizedPath(lang, "/developers/cli")} data-testid="developers-cli-link"><span>{copy.cli.cta}</span><Arrow /></Link></div>
         </div>
       </section>
+
+      <TomverseVscodeGuide />
 
       <section className="chapter" style={{ paddingTop: 24 }} aria-labelledby="dfaq-title">
         <div className="wrap">

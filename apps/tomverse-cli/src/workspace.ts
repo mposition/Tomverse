@@ -1,3 +1,6 @@
+import { opendir } from "node:fs/promises";
+import { setImmediate as yieldTurn } from "node:timers/promises";
+import { readProcess } from "./readprocess.js";
 import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
@@ -147,6 +150,55 @@ export class Workspace {
             throw new PathError(`${rel} is a link; the CLI does not write through links.`);
         }
         return { absolute, relative: rel || ".", exists };
+    }
+
+    /** Editor-safe listing: bounded Git subprocess, then a yielding directory walk. */
+    async listFilesAsync(dir: string, limit: number, signal: AbortSignal): Promise<{ files: string[]; truncated: boolean; source: "git" | "walk" }> {
+        const start = this.resolve(dir || ".", "read");
+        const deadline = Date.now() + 30_000;
+        const files: string[] = [];
+        const check = async () => { signal.throwIfAborted(); await yieldTurn(); signal.throwIfAborted(); };
+        if (this.isGitRepo()) {
+            const result = await readProcess("git", ["-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false", "ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", start.relative], { cwd: this.root, env: gitEnv(), signal, timeoutMs: 30_000 });
+            if (result.code === 0) {
+                const seen = new Set<string>();
+                let scanned = 0;
+                for (const name of result.stdout.split("\0")) {
+                    if (++scanned % 64 === 0) await check();
+                    if (Date.now() > deadline) return { files, truncated: true, source: "git" };
+                    if (!name || seen.has(name)) continue;
+                    seen.add(name);
+                    try { if (!statSync(this.resolve(name, "read").absolute).isFile()) continue; } catch { continue; }
+                    if (files.length >= limit) return { files, truncated: true, source: "git" };
+                    files.push(name);
+                }
+                return { files, truncated: false, source: "git" };
+            }
+        }
+        if (statSync(start.absolute).isFile()) return { files: [start.relative], truncated: false, source: "walk" };
+        const stack = [start.absolute];
+        let scanned = 0;
+        while (stack.length) {
+            await check();
+            const current = stack.pop()!;
+            const directory = await opendir(current).catch(() => null);
+            if (!directory) continue;
+            for await (const entry of directory) {
+                if (++scanned % 64 === 0) await check();
+                if (Date.now() > deadline || scanned > 100_000) return { files, truncated: true, source: "walk" };
+                if (entry.isSymbolicLink()) continue;
+                const abs = join(current, entry.name);
+                let resolved: ResolvedPath;
+                try { resolved = this.resolve(abs, "read"); } catch { continue; }
+                if (!same(resolved.absolute, abs)) continue;
+                if (entry.isDirectory()) { if (!SKIPPED_DIRS.has(entry.name)) stack.push(abs); }
+                else if (entry.isFile()) {
+                    if (files.length >= limit) return { files, truncated: true, source: "walk" };
+                    files.push(resolved.relative);
+                }
+            }
+        }
+        return { files: files.sort(), truncated: false, source: "walk" };
     }
 
     isGitRepo() {
