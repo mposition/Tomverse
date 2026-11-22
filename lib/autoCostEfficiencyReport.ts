@@ -217,7 +217,9 @@ export const costEfficiencyReport = (input: {
     };
 
     // 3. Serving cost of each arm, as far as this tool-free cycle can attribute it.
-    const servingComplete = router.baseline.unknownCalls === 0 && router.candidate.unknownCalls === 0 && changedCost.pairsUnknown === 0;
+    // Complete only for a finished cycle whose two arms were both routed: zero calls is unmeasured, not free.
+    const servingComplete = input.failure === null && router.baseline.calls > 0 && router.candidate.calls > 0 &&
+        router.baseline.unknownCalls === 0 && router.candidate.unknownCalls === 0 && changedCost.pairsUnknown === 0;
     const servingCost = {
         coverage: "partial_serving_cost" as const,
         includes: ["router", "answer_changed_picks"] as const,

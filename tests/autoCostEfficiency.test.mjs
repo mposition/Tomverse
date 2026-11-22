@@ -197,6 +197,8 @@ test("a cost-efficiency cycle compares cheaper candidates in the one slot, keeps
     .every((call) => call.identity?.objective === "chat_cost_efficiency" && call.identity.caseId));
   assert.equal(report.experimentCost.knownMicroUsd, result.spentMicroUsd);
   assert.equal(report.servingCost.coverage, "partial_serving_cost");
+  assert.equal(report.servingCost.complete, true);
+  assert.ok(report.servingCost.router.baseline.calls === 12 && report.servingCost.router.candidate.calls === 12);
   assert.equal(report.taskCost.status, "unlinked");
   assert.equal(report.applicability.applicable, false);
   assert.ok(report.applicability.reasons.includes("diagnostic_only"));
@@ -325,6 +327,9 @@ test("fewer credits with a higher observed answer cost is not a saving", () => {
   assert.ok(report.applicability.reasons.includes("no_observed_saving"));
   assert.ok(report.applicability.reasons.includes("guidance_not_cheaper"));
   assert.equal(report.applicability.measuredWithinCriteria, false);
+  // No routed arm, or a cycle that did not finish: the serving cost is unmeasured, never a complete US$0.
+  assert.equal(report.servingCost.complete, false);
+  assert.equal(report.servingCost.baselineKnownMicroUsd, 0);
 });
 
 test("usage priced by the existing helper counts cache reads once and refuses an unpriced cache write", () => {

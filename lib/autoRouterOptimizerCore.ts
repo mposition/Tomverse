@@ -705,11 +705,7 @@ export const splitOptimizerDecisions = <T>(decisions: readonly T[]) => {
  */
 export const splitOptimizerDecisionsByFamily = <T>(decisions: readonly T[], familyOf: (decision: T) => string) => {
     const sample = decisions.slice(0, AUTO_ROUTER_OPTIMIZER_SAMPLE_MAX);
-    const order: string[] = [];
-    for (const decision of sample) {
-        const family = familyOf(decision);
-        if (!order.includes(family)) order.push(family);
-    }
+    const order = [...new Set(sample.map(familyOf))];
     const trainFamilies = new Set(order.filter((_, index) => index % 2 === 0));
     return {
         train: sample.filter((decision) => trainFamilies.has(familyOf(decision))),
