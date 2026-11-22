@@ -21,10 +21,10 @@ const steps = (story = true) => [
     number: "AMUX-CRAWL", archived: false, value: 4, weight: 2, editable: true },
   story ? { kind: "card", level: "story", id: "qa-story-crawl-001",
     title: "Bots can read public pages", number: "AMUX-CRAWL-001", status: "in_progress",
-    archived: false, metric: 4, current: false } :
+    archived: false, metric: 4, current: false, progress: { done: 1, total: 3 } } :
     { kind: "missing", level: "story", reason: "no_story" },
   { kind: "card", level: "task", id: card.id, title: card.title, number: card.displayKey,
-    status: "todo", archived: false, metric: 3, current: true },
+    status: "todo", archived: false, metric: 3, current: true, progress: null },
 ];
 const detail = (story: boolean) => ({ ...card, revision: 3, body: null, brief: null,
   feedback: null, result: null, dependencies: [], dependents: [], attempts: [],
@@ -39,7 +39,7 @@ async function setup(page: Page, story = true) {
     if (p.get("view") === "detail") { details++; return route.fulfill({ json: detail(story) }); }
     if (p.get("view") === "board_snapshot") return route.fulfill({ json: { pageSize: 8,
       counts: { tomverse_backlog: 1, amux_backlog: 0, todo: 0, in_progress: 0, in_review: 0,
-        attention: 0, archive: 0 },
+        attention: 0, archive: 0 }, activeStories: 2,
       lanes: ["tomverse_backlog", "amux_backlog", "todo", "in_progress", "in_review", "attention"]
         .map((lane) => ({ lane, cards: lane === "tomverse_backlog" ? [card] : [] })) } });
     return route.fulfill({ json: { cards: [], counts: {} } });
@@ -121,4 +121,20 @@ test("the Feature step opens the edit sheet; review then save goes through the p
 test("an archived step opens read-only", async ({ page }) => {
   await setup(page);
   await expect(page.getByTestId("amux-hierarchy-epic")).toHaveAccessibleName(/^Epic details/);
+});
+
+test("owner direction 2026-11-21: the Story off the board shows its Task progress on the line", async ({ page }) => {
+  await setup(page);
+  await expect(page.getByTestId("amux-hierarchy-story-progress")).toHaveText("Tasks 1/3 done");
+  // The Story step still opens the Story card.
+  await expect(page.getByTestId("amux-hierarchy-story")).toHaveAccessibleName(/^Story details/);
+});
+
+test("archive-all names the Stories it archives though the board shows none", async ({ page }) => {
+  await setup(page);
+  await page.keyboard.press("Escape");
+  let message = "";
+  page.once("dialog", async (dialog) => { message = dialog.message(); await dialog.dismiss(); });
+  await page.getByRole("button", { name: "Archive all cards", exact: true }).click();
+  await expect.poll(() => message).toContain("1 cards on the board and 2 Stories kept off it");
 });

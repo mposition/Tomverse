@@ -19,6 +19,9 @@ export type AmuxHierarchyCardInput = {
   parentFeatureNodeId: string | null; parentStoryCardId: string | null;
   /** Story impact or Task contribution, bound to the card's revision. */
   metric: number | null;
+  /** A Story's open Tasks: done of total. Stories are off the board's lanes
+   * (owner direction 2026-11-21), so their progress shows here. */
+  progress?: { done: number; total: number } | null;
 };
 
 export type AmuxHierarchyStep =
@@ -27,7 +30,8 @@ export type AmuxHierarchyStep =
       value: number | null; weight: number; editable: boolean }
   | { kind: "card"; level: AmuxHierarchyCardLevel; id: string;
       title: string | null; number: string | null; status: string;
-      archived: boolean; metric: number | null; current: boolean }
+      archived: boolean; metric: number | null; current: boolean;
+      progress: { done: number; total: number } | null }
   | { kind: "missing"; level: AmuxHierarchyNodeLevel | AmuxHierarchyCardLevel;
       reason: "no_story" | "unavailable" };
 
@@ -52,7 +56,8 @@ function cardStep(level: AmuxHierarchyCardLevel, card: AmuxHierarchyCardInput,
   current: boolean): AmuxHierarchyStep {
   return { kind: "card", level, id: card.id, title: card.title,
     number: card.displayKey, status: card.status,
-    archived: card.archived, metric: card.metric, current };
+    archived: card.archived, metric: card.metric, current,
+    progress: level === "story" ? card.progress ?? null : null };
 }
 
 /** Steps from the top down, ending at the card itself. Null for a card with
