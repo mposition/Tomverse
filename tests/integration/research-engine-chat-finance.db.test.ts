@@ -8,7 +8,8 @@ import { createResearchRun, readResearchRunDto } from "@/lib/researchEngineServi
 import { drainResearchWork, processOneResearchWorkItem } from "@/lib/researchEngineWorker";
 import { bindResearchFundingReservation, readResearchRunMoney, RESEARCH_SEGMENT_RESERVING_STALE_MS, claimResearchFundingRoom } from "@/lib/researchEngineStore";
 import { recoverResearchEngine, recoverStaleReservingSegments } from "@/lib/researchEngineRecovery";
-import { createFakeModel, createFakeWeb, createUser, defaultResponse, fakeRequest, installFakes, users } from "./researchEngineHarness";
+import { createFakeModel, createFakeWeb, createUser, defaultResponse, fakeRequest, installFakes, MODEL_ID, modelConfig, users } from "./researchEngineHarness";
+import { setResearchModelResolver } from "@/lib/researchEngineModel";
 
 /**
  * Engine v2 against the real Chat credit layer: each paid dispatch is an
@@ -208,4 +209,22 @@ test("a hold that is no longer reserved cannot be bound to its segment", async (
   await prisma.chatCreditReservation.update({ where: { id: reservation.reservationId }, data: { status: "released" } });
   await assert.rejects(bindResearchFundingReservation(segment.id, reservation.reservationId, reservation.reservedCredits), { code: "RESEARCH_FUNDING_BIND_CONFLICT" });
   assert.equal((await prisma.researchFundingSegment.findUniqueOrThrow({ where: { id: segment.id } })).status, "reserving");
+});
+
+test("a request whose input fits the context window but whose output cap does not is refused before dispatch", async () => {
+  // Earlier tests leave queued items behind; this worker must pick this run's plan.
+  await prisma.researchPreviewRun.deleteMany({ where: { engineVersion: 2 } });
+  const fakes = installFakes();
+  // The plan asks for 6,000 output tokens; a 6,000-token window holds its input but not input plus output.
+  setResearchModelResolver(async (id) => (id === MODEL_ID ? { ...modelConfig, contextWindowTokens: 6_000 } : null));
+  const user = await createUser("finance-context-window");
+  const { run } = await createResearchRun({ request: fakeRequest(), userId: user.id, payload: { userMessageId: randomUUID(), assistantMessageId: randomUUID(),
+    brief: brief("Context window question"), sources: [], profile: "standard", approvedCredits: 5_000, autoStart: true } });
+  await processOneResearchWorkItem("context-window-worker");
+  assert.equal(fakes.model.calls.length, 0, "nothing was sent to the provider");
+  const generations = await prisma.researchPreviewGeneration.findMany({ where: { runId: run.id, kind: "model" } });
+  assert.ok(generations.length > 0 && generations.every((generation) => generation.status === "dispatch_refused"));
+  const money = await readResearchRunMoney(prisma, run.id);
+  assert.equal(money.reservedCredits, 0);
+  assert.equal(money.settledCredits, 0, "a refused request costs nothing");
 });
