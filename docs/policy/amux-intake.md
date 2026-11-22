@@ -36,9 +36,10 @@ Feature의 카드 번호 앞부분은 등록 때 자동으로 정한다. 새 tab
    `FEAT<n>`을 정하고 감사 기록에 `featureDisplayPrefixAssigned`로 남긴다. 그래서 번호 없는 카드가 생기지 않는다.
    `amux:idea check`는 앞부분 없는 새 Feature를 경고(`feature_display_prefix_missing`)로 미리 알려 준다. 이 항목은
    아래 v17 3항의 "다 차 있으면 PREFIX 없이"와 5항을 대신한다.
-6. **이미 갈라진 계층.** 등록된 카드의 Feature(`parentFeatureNodeId`)와 노드의 부모(`parentId`)는 DB 트리거가
-   바꾸지 못하게 막는다. 그래서 등록 뒤에는 카드를 다른 Feature로 옮기거나 노드를 합칠 수 없다. 아직 제안 상태인
-   단위는 기존 노드 선택(`select_existing_node`)과 기존 카드 연결(`link_existing_card`)로 기존 계층에 붙일 수 있다.
+6. **이미 갈라진 계층.** 등록된 카드의 Feature(`parentFeatureNodeId`)는 DB 트리거가 바꾸지 못하게 막는다. 이미
+   따로 생긴 계층은 Owner가 노드 편집 시트에서 Epic이나 Feature를 다른 부모 아래로 옮기고(같은 날 결정, 노드 이동),
+   비게 된 노드를 계층 보관으로 정리한다. 아직 제안 상태인 단위는 기존 노드 선택(`select_existing_node`)과 기존
+   카드 연결(`link_existing_card`)로 기존 계층에 붙일 수 있다.
 
 ## 운영자 결정 2026-11-21 (대화) — 세션 계획 첨부 접수와 원클릭 승인
 
