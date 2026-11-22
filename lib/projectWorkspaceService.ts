@@ -173,12 +173,16 @@ const assertSettingLengths = (input: ProjectSettingsInput) => {
  */
 export async function createProject(userId: string, input: ProjectSettingsInput & { name: string }) {
     assertSettingLengths(input);
-    const count = await prisma.conversationProject.count({ where: { userId } });
-    if (count >= PROJECT_LIMITS.maxProjectsPerAccount) {
-        throw new ApiSecurityError(409, "PROJECT_LIMIT_REACHED", "Project limit reached.");
-    }
     try {
-        const row = await prisma.conversationProject.create({
+        // The count and the insert share one transaction under the account's
+        // memory lock, so concurrent creates cannot both pass the limit.
+        const row = await prisma.$transaction(async (tx) => {
+            await lockAccountMemoryItems(tx, userId);
+            const count = await tx.conversationProject.count({ where: { userId } });
+            if (count >= PROJECT_LIMITS.maxProjectsPerAccount) {
+                throw new ApiSecurityError(409, "PROJECT_LIMIT_REACHED", "Project limit reached.");
+            }
+            return tx.conversationProject.create({
             data: {
                 userId,
                 name: input.name.trim(),
@@ -189,6 +193,7 @@ export async function createProject(userId: string, input: ProjectSettingsInput 
                 autoMemoryEnabled: input.autoMemoryEnabled ?? false,
             },
             select: PROJECT_SELECT,
+            });
         });
         return serializeProject(row, { conversations: 0 });
     } catch (error) {
@@ -402,27 +407,36 @@ export async function reconcileNativeEvidence(
     let suspended = 0;
     let restored = 0;
     for (const row of rows) {
-        const checkMembership = row.projectId !== null && membershipProjects.has(row.projectId);
-        const grounded = (evidence: (typeof row.evidences)[number], requireMembership: boolean) => {
-            if (evidence.sourceType === "manual") return true;
+        const ours = row.suspendedReason === NATIVE_SOURCE_LOCKED || row.suspendedReason === NATIVE_SOURCE_LEFT_PROJECT;
+        if (row.status !== "active" && !ours) continue;
+        // Membership is judged for the projects this change touched, and
+        // always for a memory already suspended because its grounds left its
+        // project: an unlock alone never brings that one back.
+        const checkMembership = row.projectId !== null &&
+            (membershipProjects.has(row.projectId) || row.suspendedReason === NATIVE_SOURCE_LEFT_PROJECT);
+        const owned = (evidence: (typeof row.evidences)[number]) => {
             const conversation = evidence.tomverseMessage?.conversation;
-            if (!conversation || conversation.userId !== userId || conversation.password !== null) return false;
-            return !requireMembership || conversation.projectId === row.projectId;
+            return conversation && conversation.userId === userId ? conversation : null;
         };
-        const unlocked = row.evidences.some((evidence) => grounded(evidence, false));
-        const reachable = row.evidences.some((evidence) => grounded(evidence, checkMembership));
-        if (row.status === "active" && !reachable) {
+        const isUnlocked = (evidence: (typeof row.evidences)[number]) =>
+            evidence.sourceType === "manual" || owned(evidence)?.password === null;
+        const inProject = (evidence: (typeof row.evidences)[number]) =>
+            evidence.sourceType === "manual" || (owned(evidence) !== null && owned(evidence)?.projectId === row.projectId);
+        const unlocked = row.evidences.some(isUnlocked);
+        const reachable = row.evidences.some((evidence) => isUnlocked(evidence) && (!checkMembership || inProject(evidence)));
+        if (!reachable) {
+            // Left the project wins over locked: the reason decides whether a
+            // later unlock alone may restore the memory.
+            const leftProject = checkMembership && !row.evidences.some(inProject);
+            const status = unlocked ? "suspended_by_source_delete" : "suspended_by_source_lock";
+            const reason = leftProject ? NATIVE_SOURCE_LEFT_PROJECT : NATIVE_SOURCE_LOCKED;
+            if (row.status === status && row.suspendedReason === reason) continue;
             await tx.memoryItem.update({
                 where: { id: row.id },
-                data: !unlocked
-                    ? { status: "suspended_by_source_lock", suspendedReason: NATIVE_SOURCE_LOCKED, revision: { increment: 1 } }
-                    : { status: "suspended_by_source_delete", suspendedReason: NATIVE_SOURCE_LEFT_PROJECT, revision: { increment: 1 } },
+                data: { status, suspendedReason: reason, revision: { increment: 1 } },
             });
-            suspended += 1;
-        } else if (
-            row.status !== "active" && reachable &&
-            (row.suspendedReason === NATIVE_SOURCE_LOCKED || row.suspendedReason === NATIVE_SOURCE_LEFT_PROJECT)
-        ) {
+            if (row.status === "active") suspended += 1;
+        } else if (row.status !== "active") {
             const expired = row.expiresAt !== null && row.expiresAt.getTime() <= now.getTime();
             await tx.memoryItem.update({
                 where: { id: row.id },

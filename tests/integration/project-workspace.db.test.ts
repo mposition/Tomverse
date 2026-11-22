@@ -24,7 +24,7 @@ import {
     updateConversationWithProjectGrounds,
     updateProject,
 } from "@/lib/projectWorkspaceService";
-import { nativeExtractionSourceKey } from "@/lib/projectWorkspaceCore";
+import { PROJECT_LIMITS, nativeExtractionSourceKey } from "@/lib/projectWorkspaceCore";
 
 /**
  * Project workspace against a real database: scope isolation (A / B /
@@ -600,4 +600,62 @@ test("an update that neither moves nor (un)locks the conversation leaves extract
     const after = await prisma.memoryItem.findUniqueOrThrow({ where: { id: memory.id } });
     assert.equal(after.status, "active");
     assert.equal(after.revision, before.revision);
+});
+
+
+// --------------------------------------------- review r-20261122-183413
+
+test("locking and unlocking does not restore a memory whose grounds left its project", async () => {
+    const owner = await user();
+    const a = await project(owner.id, "Alpha");
+    const b = await project(owner.id, "Beta");
+    const chat = await conversation(owner.id, a.id);
+    const said = await message(chat.id, "user", "Invoices are due in 14 days");
+    const inA = await seedMemory(owner.id, a.id, "Invoices are due in 14 days", {
+        evidences: { create: { userId: owner.id, sourceType: "tomverse_message", tomverseMessageId: said.id, evidenceDigest: nativeMessageDigest("Invoices are due in 14 days") } },
+    });
+    const patch = (data: { projectId?: string; password?: string | null }) => updateConversationWithProjectGrounds({
+        userId: owner.id, conversationId: chat.id,
+        update: (tx) => tx.conversation.update({ where: { id: chat.id }, data }),
+    });
+    await patch({ projectId: b.id });
+    assert.equal((await prisma.memoryItem.findUniqueOrThrow({ where: { id: inA.id } })).status, "suspended_by_source_delete");
+    await patch({ password: "hash" });
+    await patch({ password: null });
+    assert.equal((await prisma.memoryItem.findUniqueOrThrow({ where: { id: inA.id } })).status, "suspended_by_source_delete");
+    // Back in A, it is usable again.
+    await patch({ projectId: a.id });
+    assert.equal((await prisma.memoryItem.findUniqueOrThrow({ where: { id: inA.id } })).status, "active");
+});
+
+test("a memory locked in its project and then moved out while locked is not restored by the unlock", async () => {
+    const owner = await user();
+    const a = await project(owner.id, "Alpha");
+    const b = await project(owner.id, "Beta");
+    const chat = await conversation(owner.id, a.id);
+    const said = await message(chat.id, "user", "Standup is at nine");
+    const inA = await seedMemory(owner.id, a.id, "Standup is at nine", {
+        evidences: { create: { userId: owner.id, sourceType: "tomverse_message", tomverseMessageId: said.id, evidenceDigest: nativeMessageDigest("Standup is at nine") } },
+    });
+    const patch = (data: { projectId?: string; password?: string | null }) => updateConversationWithProjectGrounds({
+        userId: owner.id, conversationId: chat.id,
+        update: (tx) => tx.conversation.update({ where: { id: chat.id }, data }),
+    });
+    await patch({ password: "hash" });
+    assert.equal((await prisma.memoryItem.findUniqueOrThrow({ where: { id: inA.id } })).status, "suspended_by_source_lock");
+    await patch({ projectId: b.id });
+    await patch({ password: null });
+    const after = await prisma.memoryItem.findUniqueOrThrow({ where: { id: inA.id } });
+    assert.equal(after.status, "suspended_by_source_delete");
+});
+
+test("concurrent project creates cannot pass the per-account limit together", async () => {
+    const owner = await user();
+    for (let i = 0; i < PROJECT_LIMITS.maxProjectsPerAccount - 1; i += 1) await project(owner.id, `Seed ${i}`);
+    const results = await Promise.allSettled([
+        createProject(owner.id, { name: "Race one" }),
+        createProject(owner.id, { name: "Race two" }),
+    ]);
+    assert.equal(results.filter((r) => r.status === "fulfilled").length, 1);
+    assert.equal(await prisma.conversationProject.count({ where: { userId: owner.id } }), PROJECT_LIMITS.maxProjectsPerAccount);
 });
