@@ -4,7 +4,7 @@ Ask about a local project, or select **Agent** to propose edits and commands. Re
 
 ## Install and connect
 
-Get `tomverse-vscode-1.0.0.vsix` from the [public preview release](https://github.com/mposition/Tomverse/releases/tag/tomverse-vscode-v1.0.0). In local VS Code Desktop, run **Extensions: Install from VSIX** and select the downloaded file. Open **Tomverse** in the Activity Bar, choose **Connect API key**, and enter your Tomverse API key in the native password input. The key stays in VS Code SecretStorage. Connection refresh only fetches metadata; it does not generate a paid answer. Disconnect removes the local key; revoke it in Tomverse account settings if needed.
+Get `tomverse-vscode-1.0.1.vsix` from the [GitHub release](https://github.com/mposition/Tomverse/releases/tag/tomverse-vscode-v1.0.1). In local VS Code Desktop, run **Extensions: Install from VSIX** and select the downloaded file. Open **Tomverse** in the Activity Bar, choose **Connect API key**, and enter your Tomverse API key in the native password input. The key stays in VS Code SecretStorage. Connection refresh only fetches metadata; it does not generate a paid answer. Disconnect removes the local key; revoke it in Tomverse account settings if needed.
 
 The default API base is `https://tomverse.app/api/code/v1`. Only the user's application settings can change it. Workspace settings, environment variables and project instructions cannot select the key or endpoint. The extension never falls back to the general API. A 404/503 can indicate that the selected server's coding API is not deployed/enabled. API eligibility, shared credits and the key's cap are enforced by Tomverse. Use the server-provided catalog; models cannot be added by typing arbitrary IDs.
 
@@ -30,10 +30,10 @@ Costs come only from this session's request receipts, including compaction, with
 
 Use per-change **Undo** to restore only the extension's change after confirmation. Dirty files, later user edits and subsequent changes cause it to stop. It does not roll back arbitrary command effects or promise normal editor Ctrl+Z integration. Diagnostics export contains redacted metadata, not source, prompts or raw logs. Output can contain project content; review it before sharing.
 
-## Preview compatibility
+## Compatibility
 
-The preview requires local VS Code Desktop 1.146.0 or later. A single VSIX serves all desktop targets. This package was verified on Windows x64. An earlier build passed local workspace workflows on Linux x64 VS Code Desktop in Ubuntu WSL2. Verification for this package on Linux and macOS arm64 is pending, along with some native Windows accessibility checks. Remote SSH, Remote WSL, containers, Codespaces, web and virtual workspaces are unsupported. Restricted Mode provides setup/help only.
+The extension requires local VS Code Desktop 1.146.0 or later. A single VSIX serves all desktop targets. This package was verified on Windows x64. An earlier build passed local workspace workflows on Linux x64 VS Code Desktop in Ubuntu WSL2. Verification for this package on Linux and macOS arm64 is pending, along with some native Windows accessibility checks. Remote SSH, Remote WSL, containers, Codespaces, web and virtual workspaces are unsupported. Restricted Mode provides setup/help only.
 
 The UI follows the editor theme and provides English, Korean, German, Spanish, French, Portuguese, Simplified Chinese and Traditional Chinese labels. Ctrl/Cmd+Enter sends; IME composition does not submit. Use Tab to navigate. No prompt/source/key telemetry is collected by this extension.
 
-An earlier build also exercised Ask and Agent against a development Tomverse API with real models and settled credit receipts. The release notes describe the verification and distribution status for this preview.
+An earlier build also exercised Ask and Agent against a development Tomverse API with real models and settled credit receipts. The release notes describe the verification and distribution status for this release.

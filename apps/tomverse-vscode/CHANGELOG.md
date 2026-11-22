@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.1
+
+- Package the first stable release with the same workspace features and approval flow.
+
 ## 1.0.0
 
 - Release the public preview as version 1.0.0. It can update an existing 0.1.0 installation.
