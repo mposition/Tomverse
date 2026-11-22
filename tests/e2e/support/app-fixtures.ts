@@ -1632,8 +1632,12 @@ export function createQaXlsxBuffer() {
   ]);
 }
 
-export function createQaPdfBuffer() {
-  const stream = "BT /F1 12 Tf 20 100 Td (QA PDF) Tj ET";
+/**
+ * A one-page PDF. `text` lets a spec tell two files with the same name apart
+ * by their bytes (ASCII without parentheses, which PDF strings would escape).
+ */
+export function createQaPdfBuffer(text = "QA PDF") {
+  const stream = `BT /F1 12 Tf 20 100 Td (${text}) Tj ET`;
   const objects = [
     "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
     "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
