@@ -11,6 +11,8 @@ import { amuxAnalysisPromptWithNote } from "./ideaAnalysisPromptCore.ts";
 import { readAmuxSessionPlanRetriesInTx } from "./ideaSessionPlanRefusalService.ts";
 import { amuxSessionPageKeyIdentities, buildAmuxSessionPagePrompt,
   readAmuxSessionPageContextInTx } from "./ideaSessionAnalysisPlanService.ts";
+import { loadAmuxExistingHierarchyTargets } from "./ideaNodeDuplicateScanService.ts";
+import type { AmuxPermittedTargetRef } from "./ideaAnalysisChunkCore.ts";
 import { readAmuxSessionReferencePin } from
   "./ideaSessionReferencePinRead.ts";
 import { inspectSealedAmuxIdeaSessionInput } from
@@ -122,10 +124,22 @@ export async function readAmuxV19MaxPagePrompt(input: {
   let previousPage: AmuxContentKeyIdentity[];
   try { previousPage = await amuxSessionPageKeyIdentities(prisma, input.ideaId); }
   catch { return null; }
+  // The first page is given the existing hierarchy as of its claim (owner
+  // decision 2026-11-22); the result check uses the same cutoff. A later page
+  // inherits its targets from the stored prompt and reads none here.
+  let existingNodes: AmuxPermittedTargetRef[] = [];
+  if (previousPage.length === 0) {
+    const claim = await prisma.amuxIdeaSessionAnalysisBudgetClaim.findUnique({
+      where: { id: input.claimId }, select: { createdAt: true } });
+    if (!claim) return null;
+    try {
+      existingNodes = await loadAmuxExistingHierarchyTargets({ createdAtOrBefore: claim.createdAt });
+    } catch { return null; }
+  }
   const keys = await loadAmuxContentKeyRing([{ ideaId: input.ideaId,
     purpose: "idea_raw", subjectId: input.ideaId }, ...previousPage]);
   return prisma.$transaction((tx) =>
-    readAmuxV19MaxPagePromptInTx(tx, input, keys),
+    readAmuxV19MaxPagePromptInTx(tx, input, keys, existingNodes),
   { maxWait: 2_000, timeout: 5_000 });
 }
 
@@ -133,6 +147,7 @@ export async function readAmuxV19MaxPagePromptInTx(
   tx: Prisma.TransactionClient,
   input: { reservationId: string; ideaId: string; claimId: string },
   keys: AmuxContentKeys,
+  existingNodes: readonly AmuxPermittedTargetRef[] = [],
 ): Promise<{ prompt: string } | null> {
   const read = await readAmuxV19MaxIdeaInTx(tx, input, keys);
   if (!read) return null;
@@ -151,7 +166,7 @@ export async function readAmuxV19MaxPagePromptInTx(
   try {
     context = await readAmuxSessionPageContextInTx(tx, { ideaId: input.ideaId,
       actorUserId: idea.actorUserId, planId: idea.currentSourcePlanRevisionId,
-      now, keys });
+      now, keys, existingNodes });
   } catch { return null; }
   const retries = await readAmuxSessionPlanRetriesInTx(tx, input.ideaId);
   // Each earlier claim that ended without a result was asked again with the

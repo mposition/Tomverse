@@ -1,5 +1,46 @@
 # AMUX intake
 
+## 운영자 결정 2026-11-22 (대화) — 분석은 기존 계층을 먼저 재사용
+
+운영자 결정(2026-11-22, 대화): 같은 목표를 나눈 두 아이디어(AEO-01 검색봇 접근·크롤 정책, AEO-02 공개 가격과
+무료/유료 범위)가 각각 Initiative부터 새 계층을 만들었다. 분석은 기존 Initiative·Epic·Feature를 먼저 재사용하고,
+Feature의 카드 번호 앞부분은 등록 때 자동으로 정한다. 새 table·migration·스위치는 없고 버전 번호는 올리지 않는다.
+
+1. **기존 계층을 참조 목록으로.** 무인(세션) 분석과 owner 분석의 첫 페이지는 보관되지 않은 기존 노드 전부를
+   permitted target으로 받는다. 노드마다 id, 단계, 제목, 상위 노드 id, Feature의 번호 앞부분(`displayPrefix`)이
+   있다(`lib/amux/ideaExistingHierarchyCore.ts`). 같은 목록이 prompt의 confirmed data에 보이고, 지시문은 같은
+   목표면 기존 Feature에 Story·Task를 붙이거나 기존 Epic 아래 새 Feature를 만들라고 한다. 맞는지 판단은 모델이
+   하며 손으로 쓴 유사도 규칙은 없다. 목록 개수 상한은 없고(2026-11-15 절), 남는 상한은 prompt 데이터 4 MiB
+   하나다. 저장할 수 없는 글(내용 검사 거절)이 든 노드나 계층 모양이 어긋난 행만 목록에서 빠진다. 다음 페이지는
+   이전 페이지의 저장된 prompt에서 이 목록을 물려받는다. 제목은 transaction 밖에서 복호화한다. 답은 모델이 받은
+   목록으로 검사한다. owner 분석은 그 미리보기에 저장된 prompt의 목록을 쓰고, 세션 분석의 prompt는 claim 시각까지
+   만들어진 노드를 보이고, 답은 transaction 안에서 읽은 "claim 시각까지 만들어진 active 노드의 id·단계"로
+   검사한다. 그래서 검사가 제목이나 결과가 도착한 시각에 좌우되지 않는다(그 사이 보관된 노드를 참조한 답은 등록할
+   수 없으므로 거절된다). 세션이 쓴 계획은 접수 때 검사한 목록을 그대로 쓴다. 기존 노드에
+   붙은 Task의 상위 노드에 현재 평가가 없으면 시스템 등록은 결과 불명이 아니라 기록되는 계획 거절
+   (`plan_score_invalid`)로 멈춘다.
+2. **등록.** 기존 노드 id를 부모·Feature로 쓴 계획은 그 노드를 그대로 쓰고 새 노드를 만들지 않는다. 시스템
+   등록은 이미 active 노드만 받았고, owner의 계획 승인도 같은 규칙(바로 위 단계의 active 노드)으로 받는다.
+   형식 검증·권한·hash-chained 감사는 기존 writer 그대로다. 저장된 첫 페이지를 다시 읽을 때는 페이지가 이름 붙인
+   기존 노드만 허용한다.
+3. **공용 명령.** `npm run amux:idea -- prompt`는 접수 자격증명과 origin이 있으면 같은 기존 노드 목록을 prompt에
+   넣는다(`GET /api/internal/amux/ideas/session-intake/hierarchy`, 접수 전용 자격증명, 읽기 전용, active 노드의
+   id·단계·제목·상위 id·앞부분만). 없으면 "목록 없음"이라고 첫 줄에 적는다. `check`·`submit`은 계획이 기존 노드를
+   참조할 때만 목록을 읽고, 목록에 없는 노드(없거나 보관됐거나 단계가 다른 노드) 참조를 거절한다. 기존 노드를
+   참조하지 않는 계획은 이전처럼 네트워크 없이 검사한다. 접수 route도 계획이 있으면 같은 목록으로 검사한다.
+4. **승인 화면.** 계획 승인 화면은 단위마다 "새로 만듦"을 보이고, 부모나 Feature가 기존 노드면 "기존 Feature에
+   붙음: 제목 (앞부분)"처럼 표시한다(owner 전용 읽기 `/api/admin/amux/ideas/existing-hierarchy`).
+5. **번호 앞부분은 등록 때 정한다.** 새 Feature는 제안된 앞부분과 그 변형, 없거나 다 쓰였으면 제목에서 고른 앞부분과
+   그 변형, 그다음 `FEAT1`~`FEAT999` 중 처음 비어 있는 값을 받는다(backfill과 같은 규칙,
+   `amuxFeatureDisplayPrefixChoices`). 앞부분 없이 남은 기존 Feature에 카드가 등록되면 같은 트랜잭션에서
+   `FEAT<n>`을 정하고 감사 기록에 `featureDisplayPrefixAssigned`로 남긴다. 그래서 번호 없는 카드가 생기지 않는다.
+   `amux:idea check`는 앞부분 없는 새 Feature를 경고(`feature_display_prefix_missing`)로 미리 알려 준다. 이 항목은
+   아래 v17 3항의 "다 차 있으면 PREFIX 없이"와 5항을 대신한다.
+6. **이미 갈라진 계층.** 등록된 카드의 Feature(`parentFeatureNodeId`)는 DB 트리거가 바꾸지 못하게 막는다. 이미
+   따로 생긴 계층은 Owner가 노드 편집 시트에서 Epic이나 Feature를 다른 부모 아래로 옮기고(같은 날 결정, 노드 이동),
+   비게 된 노드를 계층 보관으로 정리한다. 아직 제안 상태인 단위는 기존 노드 선택(`select_existing_node`)과 기존
+   카드 연결(`link_existing_card`)로 기존 계층에 붙일 수 있다.
+
 ## 운영자 결정 2026-11-21 (대화) — 세션 계획 첨부 접수와 원클릭 승인
 
 운영자 결정(2026-11-21, 대화): Codex, Claude Code, Cursor, Antigravity 어디서든 같은 한 줄로 아이디어와
@@ -10,7 +51,8 @@
 1. **공용 명령.** `npm run amux:idea -- submit --tool <도구> --provider <모델 공급사> --title <한 줄>
    [--body <md 파일>|-] [--plan <계획 JSON>|-] [--repo owner/name]... [--pr owner/name#번호]...`.
    `--repo`가 없으면 이 checkout의 GitHub origin을 참조로 넣는다(`--no-repo`로 끈다). `prompt`는 box가
-   이 아이디어에 쓸 분석 프롬프트를 그대로 출력하고, `check`는 네트워크 없이 계획을 같은 검사로 확인한다.
+   이 아이디어에 쓸 분석 프롬프트를 그대로 출력하고, `check`는 계획을 같은 검사로 확인한다(기존 노드를 참조한
+   계획만 기존 계층을 읽는다, 2026-11-22 절 3항).
    접수 비밀값(`TOMVERSE_AMUX_SESSION_INTAKE_CLIENT_SECRET`)과 origin(`TOMVERSE_AMUX_SESSION_INTAKE_ORIGIN`)은
    환경 변수로만 읽고 출력하지 않는다. 기존 `local:amux-session-intake`와 같은 route·자격증명·read-back이다.
 2. **선택 필드 `plan`.** 형식은 box 분석 답과 같다(Story·Task·노드·증거 단위). 페이지 머리 필드는 앱이
@@ -579,10 +621,10 @@ approvedBy: mposition · approvedAt: 2026-10-14 · policy version: 17
 3. **기록.** `create_node`가 Feature를 만드는 같은 트랜잭션에서 PREFIX를 Feature 행에 쓴다. 다른 Feature가
    이미 그 PREFIX를 쓰고 있으면, 등록 주체(서버)가 결정적으로 `<PREFIX>2`부터 `<PREFIX>99`까지 중 처음 비어
    있는 값을 고른다(16자를 넘으면 앞부분을 잘라 맞춘다). 실제로 쓴 PREFIX는 같은 트랜잭션의 감사 기록에 남긴다.
-   다 차 있으면 PREFIX 없이 Feature를 만든다.
+   다 차 있거나 제안이 없을 때는 2026-11-22 절 5항이 정한다.
 4. **카드 번호.** v4 Story·Task 카드는 등록 트랜잭션에서 이미 잠근 Feature 행의 PREFIX로 같은 트랜잭션에서
    번호를 받는다. v4 카드는 항상 Feature 아래에 있으므로(계층 3단 필수) `IDEA` PREFIX는 backfill 예비로만 남는다.
-5. **PREFIX 없는 Feature.** schema 3 이하로 이미 봉인된 draft의 Feature, 이 개정 전에 만든 Feature,
+5. **PREFIX 없는 Feature.** (2026-11-22 절 5항이 대신한다: 등록 때 정한다.) schema 3 이하로 이미 봉인된 draft의 Feature, 이 개정 전에 만든 Feature,
    `select_existing_node`로 연결한 PREFIX 없는 Feature는 PREFIX를 비워 둔다. 그 아래 카드는 번호 없이
    등록되고, `docs/policy/amux-card-display-key.md §5`의 backfill이 운영자 승인 뒤 채운다. 이 절은 기존
    Feature의 PREFIX를 쓰는 별도 경로를 만들지 않는다.
@@ -910,6 +952,7 @@ canonical JSON은 기존 AMUX canonicalizer의 정렬 규칙을 쓴다. package 
 - 포트폴리오 점수 v1의 승인 기록: `mposition`, 2026-10-05. 각 0~5 평가에 Initiative 최대 20, Epic 15, Feature 10, Story 영향 10, Task 기여 20, 긴급성 10, 의존성 해소 5, worker 적합도 5를 배분한다. Story 없는 Feature 직속 Task에는 Story 10점을 Task 기여 가중치로 옮긴다. 예상 노력·실행 위험·불확실성은 감점한다. 모델의 수치는 출처가 제한된 제안일 뿐이며, 운영자 근거 확인과 결정적 재계산 없이는 저장 점수로 쓰지 않는다. 이 승인만으로 라이브 쓰기·승격·SEV1·worker claim을 열지 않는다.
 - Admin은 아이디어 입력, 분석 진행·입력 범위·토큰, 계층/중복 제안, **노드별 승인**, **카드별 승인**, 포트폴리오 점수 근거, Kanban, DevOps형 계층 목록, 카드 상세/실행/PR 근거, 운영자 주의, 완료 판정, 결과 환류를 하나의 연결 흐름으로 제공한다. 미확인·미분석·`outcome_unknown`을 완료처럼 표시하지 않는다. 목록과 Kanban은 같은 앱 DB의 두 projection이며, 큰 계층을 위해 서버 페이지네이션과 지연 로딩을 사용한다.
 - 운영자 결정(2026-11-21): Task·Story 카드 상세는 소속 계층(Initiative › Epic › Feature › Story › Task)을 이름·번호·상태·가치와 함께 보이고, Owner는 그 줄에서 활성 Initiative·Epic·Feature의 제목·설명과 가치·불확실성·근거 확인일을 편집한다. 저장 한 번은 본문이 바뀐 경우의 새 node revision(같은 생성 결정의 키로 재암호화, `amux.v4.portfolio.node.revise` 감사), 그 revision에 묶인 새 평가, 그 아래 열린 Task 점수의 재계산을 한 트랜잭션에서 기존 평가·점수 writer로 남긴다. DB guard는 이 모양의 revision만 받는다. 보관된 노드는 읽기 전용이며 재활성화 경로는 여전히 닫혀 있다. 자동화가 노드를 조용히 바꾸지 않는다는 v11 5항은 그대로다. 같은 날 결정으로 실행 보드의 열(backlog·todo·doing·review·done·주의·보관함)에는 실행되는 Task(와 유형 없는 옛 카드)만 두고, Story는 그 Task들의 계층 줄과 계층 화면에서 하위 Task 진행도와 함께 보인다. 전체 보관은 Story도 보관하며 확인 문구가 그 수를 따로 말한다.
+- 운영자 결정(2026-11-22): 같은 목표를 나눈 아이디어(AEO-01, AEO-02)가 따로 만든 계층을 하나로 모으도록, Owner는 같은 편집 시트에서 활성 Epic을 다른 활성 Initiative 아래로, 활성 Feature를 다른 활성 Epic 아래로 옮긴다. 이동은 본문 개정과 같은 모양의 node revision이다(revision +1, 새 부모를 `parentIdAtApproval`에 적은 개정 행, `amux.v4.portfolio.node.revise` 감사에 `priorParentId`·`parentId`, 같은 트랜잭션의 새 평가와 아래 열린 Task 점수 재계산). Initiative는 옮기지 않고, 새 부모는 바로 위 단계의 활성 노드여야 한다(DB guard, migration `20261122150000_amux_portfolio_node_move`). 카드는 자기 Feature에 그대로 남는다(`parentFeatureNodeId`는 계속 닫힘). 비게 된 노드는 기존 계층 보관으로 정리한다.
 
 ### 비용·실패·보존
 

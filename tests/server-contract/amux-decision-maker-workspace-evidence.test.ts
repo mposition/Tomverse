@@ -17,8 +17,10 @@ const PATCH = `diff --git a/a.ts b/a.ts\n${"+x\n".repeat(4_000)}`;
 let resultText: string | null = "The run's whole report.";
 let criteria: string[] | null = ["The copy names the plan."];
 
+let runPatchText: string | null = PATCH;
 mock.module(mod("lib/amux/v22TaskResultStore.ts"), { namedExports: {
   openAmuxV22TaskResultRow: async () => resultText,
+  openAmuxV22TaskPatchRow: async () => runPatchText,
   v22TaskResultIdeaId: () => "idea-1",
 } });
 mock.module(mod("lib/amux/v22ResultReviewService.ts"), { namedExports: {
@@ -131,6 +133,42 @@ test("a settlement's FINDINGS.md is the run's report, then every rejected review
   } finally {
     reviewed = { entries: [], unread: 0 };
     resultText = "The run's whole report.";
+  }
+});
+
+// 2026-11-22 (AMUX-PUBLIC-004): a card run's settlement carried the rejections
+// but not the change they were about, so the DM could not check them.
+test("a card run's settlement and result review carry the run's change on the commit it was made on", async () => {
+  const { openDecisionMakerWorkspaceEvidence } = await service;
+  const BASE = "89abcdef0123456789abcdef0123456789abcdef";
+  const runPatch = { ideaId: "idea-1", keyId: "k", keyVersion: 1, digest: "d", digestKeyId: "dk",
+    bodyPurgedAt: null, patchSha256: "p", baseSha: BASE };
+  const stopped = (await openDecisionMakerWorkspaceEvidence({ kind: "settlement", settlementKind: "stopped",
+    pullPatch: null, runPatch, reviews: [], ...sealed }))!;
+  assert.deepEqual(stopped.files.map((file: { name: string }) => file.name), ["CRITERIA.md", "FINDINGS.md", "PATCH.diff"]);
+  assert.equal(stopped.files[2].text, PATCH, "whole");
+  assert.equal(stopped.targetSha, BASE, "repo/ is the commit the change was made on, so repo-patched/ applies");
+  assert.deepEqual(stopped.excluded, {});
+  const review = (await openDecisionMakerWorkspaceEvidence({ kind: "result_review", runPatch, ...sealed }))!;
+  assert.deepEqual(review.files.map((file: { name: string }) => file.name), ["CRITERIA.md", "FINDINGS.md", "PATCH.diff"]);
+  assert.equal(review.targetSha, BASE);
+  // A review PR's settlement keeps its pull request's patch and nothing else.
+  const pr = (await openDecisionMakerWorkspaceEvidence({ kind: "settlement", settlementKind: "t2_pr", pullPatch: "pull",
+    runPatch, reviews: [], ...sealed }))!;
+  assert.deepEqual(pr.files.filter((file: { name: string }) => file.name === "PATCH.diff").map((file: { text: string }) => file.text), ["pull"]);
+  assert.equal(pr.targetSha, null);
+  // A run that left no change, or one that can no longer be opened: no file, develop's head, and the request still goes.
+  const none = (await openDecisionMakerWorkspaceEvidence({ kind: "settlement", settlementKind: "stopped",
+    pullPatch: null, runPatch: null, reviews: [], ...sealed }))!;
+  assert.deepEqual([none.files.map((file: { name: string }) => file.name), none.targetSha, none.excluded],
+    [["CRITERIA.md", "FINDINGS.md"], null, {}]);
+  runPatchText = null;
+  try {
+    const purged = (await openDecisionMakerWorkspaceEvidence({ kind: "result_review", runPatch, ...sealed }))!;
+    assert.deepEqual([purged.files.map((file: { name: string }) => file.name), purged.targetSha, purged.excluded],
+      [["CRITERIA.md", "FINDINGS.md"], null, {}]);
+  } finally {
+    runPatchText = PATCH;
   }
 });
 

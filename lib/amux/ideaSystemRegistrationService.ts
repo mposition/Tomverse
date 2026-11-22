@@ -691,8 +691,13 @@ async function commitAmuxV19CompletedIdeaSystemRegistration(
               taskId: entry.cardId },
           });
         } catch (error) {
+          // Every node this plan creates was assessed above in this
+          // transaction, so not_ready here means an existing ancestor the
+          // plan attached to (owner decision 2026-11-22) has no current
+          // assessment. The receipt guard needs a score for every Task, so the
+          // plan is refused durably for the owner rather than left unknown.
           if (!(error instanceof AmuxPortfolioError) ||
-              error.code !== "invalid_input") throw error;
+              (error.code !== "invalid_input" && error.code !== "not_ready")) throw error;
           throw new AmuxV19PlanRegistrationRefusalDetected(
             "plan_score_invalid", { ideaId: plan.ideaId,
               draftUnitId: entry.draftUnitId,

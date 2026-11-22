@@ -74,6 +74,22 @@ export function deriveAmuxFeatureDisplayPrefix(title: string | null): string | n
   return null;
 }
 
+/**
+ * Every prefix a Feature may take, in preference order (owner decision
+ * 2026-11-22: a Feature gets its prefix when it is registered, by the
+ * backfill's rule): the proposal and its numbered variants, then the prefix
+ * its title suggests and its variants, then FEAT1..FEAT999. The caller takes
+ * the first one no node holds.
+ */
+export function amuxFeatureDisplayPrefixChoices(input: {
+  proposed?: unknown; title: string | null;
+}): string[] {
+  const derived = deriveAmuxFeatureDisplayPrefix(input.title);
+  return [...new Set([...amuxFeatureDisplayPrefixCandidates(input.proposed),
+    ...(derived === null ? [] : amuxFeatureDisplayPrefixCandidates(derived)),
+    ...FALLBACK_PREFIXES])];
+}
+
 const byCreation = <T extends { id: string; createdAt: string }>(left: T, right: T) =>
   left.createdAt < right.createdAt ? -1 : left.createdAt > right.createdAt ? 1 :
     left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
@@ -97,8 +113,8 @@ export function planAmuxCardDisplayKeyBackfill(input: {
     if (feature.displayPrefix !== null) continue;
     const derived = deriveAmuxFeatureDisplayPrefix(feature.title);
     const candidates = derived === null ? FALLBACK_PREFIXES : amuxFeatureDisplayPrefixCandidates(derived);
-    const prefix = candidates.find((candidate) => !taken.has(candidate)) ??
-      FALLBACK_PREFIXES.find((candidate) => !taken.has(candidate));
+    const prefix = amuxFeatureDisplayPrefixChoices({ title: feature.title })
+      .find((candidate) => !taken.has(candidate));
     // Deliberate: with every variant and FEAT1..FEAT999 taken the Feature gets
     // no prefix here, and its cards are reported as feature_without_prefix.
     if (prefix === undefined) continue;
