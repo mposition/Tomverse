@@ -208,7 +208,7 @@ staging을 다시 가져가더라도 `noindex`를 읽고 색인하지 않습니�
 ## 5. bot 목록의 정본과 갱신 책임
 
 `lib/robotsPolicyCore.ts`의 `REFUSED_AI_CRAWLERS`가 **애플리케이션 절반의**
-정본입니다. 관리 블록을 끌 수 없으므로 **edge가 내는 거부는 지금 두 곳에서
+거부 목록 정본입니다. 관리 블록을 끌 수 없으므로 **edge가 내는 거부는 지금 두 곳에서
 옵니다** — Cloudflare 목록과 우리 목록. 우리 것은 그 블록이 사라지는 날을 위한
 보존본이고, 그때까지는 같은 거부를 두 번 말합니다. **2026-08-25 Cloudflare 관리
 블록의 스냅샷이며, 자동으로 갱신되지 않습니다.** Cloudflare가
@@ -216,6 +216,25 @@ staging을 다시 가져가더라도 `noindex`를 읽고 색인하지 않습니�
 비교 대상은 Cloudflare의 공개 목록
 (https://developers.cloudflare.com/bots/additional-configurations/managed-robots-txt/)
 입니다.
+
+### 초대된 봇은 이름으로 말합니다 (2026-11-21)
+
+거부 목록 옆에 초대 목록 두 개가 같은 파일에 있습니다.
+`SEARCH_INDEX_CRAWLERS`(검색 색인 봇: OAI-SearchBot, Claude-SearchBot,
+PerplexityBot)와 `USER_REQUEST_FETCHERS`(사용자 요청 fetcher: ChatGPT-User,
+Claude-User, Perplexity-User). 둘 다 `*`와 **정확히 같은 접근**을 받습니다 —
+이름을 붙이기 전에도 `*` fallback으로 같았고, 그룹이 바꾸는 것은 접근이 아니라
+선언의 도달입니다.
+
+named group은 RFC 9309 §2.2.1에 따라 그 크롤러의 `*` 그룹을 **대체**합니다.
+그래서 두 그룹은 각각 비공개 제외 목록(`CANONICAL_PRIVATE_DISALLOW`, `*` 그룹과
+한 사본을 공유)과 `Content-Signal` 줄을 **함께** 싣습니다. 제외 목록을 빼면 그
+크롤러에게 `/admin`이 열리고, signal을 빼면 자기 그룹에서 signal을 읽는
+소비자에게 선언이 사라집니다. product token은 정확히 일치해야 하므로 같은
+사업자의 학습 크롤러(ClaudeBot, GPTBot)는 여전히 거부 목록에 남습니다.
+
+**Googlebot·Bingbot에는 named group을 두지 않습니다.** `*`가 이미 할 말을 다
+하고 있고, named group은 `*`와 어긋날 가능성만 추가합니다.
 
 솔직히 말해 이것이 사는 것은 크지 않습니다. `robots.txt`는 요청이지 경계가
 아니고, Cloudflare도 자기 기능에 대해 같은 말을 합니다. 무시하는 사업자에게는
@@ -229,15 +248,17 @@ Control을 끄는 것은 아닙니다.**
 이것은 **두 정책 소유자**가 아니라 **Cloudflare 선언 + 애플리케이션의 비상
 보존본**입니다.
 
-production은 지금 이 줄을 **두 번** 냅니다 — 관리 블록에서 한 번,
-`app/robots.ts`에서 한 번. 값은 같고 공백만 다릅니다.
+production은 이 줄을 **여러 번** 냅니다 — 관리 블록에서 한 번, 우리 절반의
+초대된 그룹마다 한 번씩(`*`, 검색 색인 봇, 사용자 요청 봇 — §5. named group은
+`*`를 대체하므로 각 그룹이 signal을 직접 실어야 합니다). 값은 전부 같고 공백만
+다릅니다.
 
 유지하는 이유:
 
 - 관리 블록이 사라져도 선언이 남습니다.
-- 두 줄의 값이 완전히 같아 **현재 정책 모순이 없습니다.**
+- 모든 선언의 값이 완전히 같아 **현재 정책 모순이 없습니다.**
 - Cloudflare 설정·플랜 변경에 대한 복구력이 빼는 쪽보다 높습니다.
-- 비용은 robots.txt의 중복 한 줄뿐입니다.
+- 비용은 robots.txt의 중복 몇 줄뿐입니다.
 
 **중복의 안전성은 "문제없음"이 아니라 "관측된 충돌 없음"으로 적습니다.** Google은
 `Content-Signal`을 robots 표준 규칙으로 해석하지 않고, Cloudflare 계열 소비자도

@@ -2178,6 +2178,13 @@ const checks = [
     file: "app/robots.ts",
     test: (source) =>
       source.includes('sitemap: `${SITE_ORIGIN}/sitemap.xml`') &&
+      source.includes("disallow: [...CANONICAL_PRIVATE_DISALLOW]"),
+  },
+  {
+    name: "Robots policy private route list blocks private application routes",
+    file: "lib/robotsPolicyCore.ts",
+    test: (source) =>
+      source.includes("export const CANONICAL_PRIVATE_DISALLOW") &&
       source.includes('"/admin"') &&
       source.includes('"/api"') &&
       source.includes('"/auth"') &&
