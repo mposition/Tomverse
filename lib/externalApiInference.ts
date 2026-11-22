@@ -267,8 +267,9 @@ export async function handleChatCompletions(request: Request, options: { surface
         const { plan } = account;
         // This API's models: the chat registry's, or on the coding API the
         // coding catalogue's while it is switched on. Smart Adaptive's pool also
-        // holds the classes only it routes to (frontier, apex); a model named
-        // directly comes from the narrower list.
+        // holds the classes only it routes to on the general API (frontier,
+        // apex); a model named directly comes from the narrower list, which on
+        // the coding catalogue holds those classes too (owner decision 2026-11-22).
         const runnable = await externalApiRunnableModels(plan.tier, {
             surface: options.surface,
             smartAdaptive: parsed.model === SMART_ADAPTIVE_MODEL_ID,

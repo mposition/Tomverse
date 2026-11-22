@@ -763,8 +763,14 @@ export const registryCodingCapabilities = (): CodingLinkedProfile["capabilities"
   structuredOutput: "none",
 });
 
-/** Usage classes a chat model may have to be offered as a coding candidate (the external API's servable classes). */
-export const CODING_CANDIDATE_USAGE_CLASSES: readonly string[] = ["standard", "advanced", "premium", "reasoning", "premium-reasoning"];
+/**
+ * Usage classes a chat model may have to be offered as a coding candidate: the
+ * external API's servable classes, and frontier and apex (owner decision
+ * 2026-11-22), which the coding API's Smart Adaptive sends the hardest work to
+ * and a client may name there. Research classes need the application's own
+ * search loop and are never candidates.
+ */
+export const CODING_CANDIDATE_USAGE_CLASSES: readonly string[] = ["standard", "advanced", "premium", "reasoning", "premium-reasoning", "frontier", "apex"];
 
 /**
  * Why a chat model is not a coding candidate, or null when it is one:

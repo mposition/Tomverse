@@ -10,6 +10,7 @@ import {
     buildAutoLlmRouterSystem,
 } from "../lib/autoLlmRouterCore.ts";
 import {
+    hasRegistryCredits,
     isExternalApiServableModel,
     isSmartAdaptiveOnlyModel,
     smartAdaptiveCapabilities,
@@ -65,6 +66,30 @@ test("frontier and apex models are Smart Adaptive candidates only", () => {
     assert.equal(isSmartAdaptiveOnlyModel(model("frontier")), true);
     assert.equal(isSmartAdaptiveOnlyModel(model("apex")), true);
     assert.equal(isSmartAdaptiveOnlyModel(model("premium")), false);
+});
+
+test("on the coding catalogue frontier and apex may be named, only with credits the registry holds", () => {
+    // Owner decision 2026-11-22: the coding API with its catalogue on.
+    const coding = { routerClassesNameable: true };
+    for (const usageClass of ["frontier", "apex"]) {
+        const priced = model(usageClass, { creditWeight: 32 });
+        assert.equal(isExternalApiServableModel(priced, "Pro", coding), true, `${usageClass} can be named on the coding catalogue`);
+        assert.equal(isExternalApiServableModel(priced, "Pro", { ...coding, smartAdaptive: true }), true, `${usageClass} still routes`);
+        assert.equal(isExternalApiServableModel(priced, "Free", coding), false, "the plan still applies");
+        // No registry credits, or zero: not offered at all there, named or routed.
+        for (const creditWeight of [undefined, 0, -1, 1.5]) {
+            const unpriced = model(usageClass, { creditWeight });
+            assert.equal(hasRegistryCredits(unpriced), false, String(creditWeight));
+            assert.equal(isExternalApiServableModel(unpriced, "Pro", coding), false, String(creditWeight));
+            assert.equal(isExternalApiServableModel(unpriced, "Pro", { ...coding, smartAdaptive: true }), false, String(creditWeight));
+        }
+        // The general API keeps the 2026-11-20 rule.
+        assert.equal(isExternalApiServableModel(priced, "Pro"), false, `${usageClass} is not named on the general API`);
+        assert.equal(isExternalApiServableModel(priced, "Pro", { smartAdaptive: true }), true);
+    }
+    // Other classes are unchanged by the option; research never serves.
+    assert.equal(isExternalApiServableModel(model("premium"), "Pro", coding), true);
+    assert.equal(isExternalApiServableModel(model("research", { creditWeight: 5 }), "Max", coding), false);
 });
 
 const caps = (id, creditWeight, protocols) => ({

@@ -173,6 +173,13 @@ migration 적용은 별도입니다. 구현한 A1 범위와 확정 값은 10절�
   `evidence`는 `sources: []`(읽은 문서 없음)로 남고, 화면은 이를 "채팅 레지스트리"로 보입니다. 예전에
   LLM 초안으로 만든 행의 `evidence`(문서 주소 있음)는 그대로 읽습니다. 한 번에 연결하는 길은 아래를
   보십시오.
+- **코딩 후보 사용 등급**(`CODING_CANDIDATE_USAGE_CLASSES`)은 외부 API가 내놓는 등급에 `frontier`·`apex`를
+  더한 것입니다(운영자 결정 2026-11-22). 코딩 API의 Smart Adaptive가 가장 어려운 작업을 이 등급으로 보내고
+  (`AUTO_LLM_ROUTER_CODING_GUIDANCE`), 코딩 카탈로그에서는 클라이언트가 이 등급을 직접 고를 수도 있습니다
+  (`docs/policy/external-api.md` 5.1). 한 번에 추가(`link_all`)에도 들어갑니다. 연결 행이므로 코딩 API는
+  채팅 크레딧 그대로이고, 채팅 레지스트리의 크레딧이 양의 정수가 아니면 코딩 API에 노출하지 않습니다
+  (`hasRegistryCredits`). Code 채널은 Code 하한 규칙 그대로입니다. 예약·정산 경로는 바뀌지 않습니다.
+  research 등급은 여전히 후보가 아닙니다.
 - **채널별 판정(운영자 결정 2026-11-21).** 채팅 연결 행은 코딩 API에서 채팅 모델 그대로(채팅 입력 한도·
   채팅 크레딧)로 실행되므로 Code 기준이 코딩 API 노출을 막지 않습니다. `judgeCodingChannels`
   (`lib/modelCatalogCore.ts`)가 채널마다 답합니다. **코딩 API**: 채팅 쪽 통과(활성·공개·삭제 아님·가격

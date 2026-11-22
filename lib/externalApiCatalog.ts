@@ -29,6 +29,11 @@ export type { ExternalApiSurface };
 export type ExternalApiRunnableEntry = {
     model: AiModel;
     capabilities: ExternalApiModelCapabilities;
+    /**
+     * Whether a client may name this model (it is not one only Smart Adaptive
+     * routes to here). Absent reads as nameable.
+     */
+    nameable?: boolean;
     /** A dedicated coding row's snapshot pricing, for its reservation (createChatBudget). */
     catalogPricing?: CodingCatalogPricing;
 };
@@ -50,21 +55,28 @@ export const externalApiRunnableModels = async (
     const runtime = await getRuntimeModels();
     const coding = options.surface === "coding" ? await codingApiModels(plan, { runtime }) : null;
     const pool: { model: AiModel; pricing?: CodingCatalogPricing }[] = coding ?? runtime.map((model) => ({ model }));
+    // On the coding catalogue a client may name frontier and apex models too
+    // (owner decision 2026-11-22); on the general API, and on the coding API
+    // while it serves the general API's models, only Smart Adaptive routes to them.
+    const routerClassesNameable = coding !== null;
+    const nameable = (model: AiModel) => routerClassesNameable || !isSmartAdaptiveOnlyModel(model);
     const servable = pool.filter(
         ({ model }) =>
-            isExternalApiServableModel(model, plan, { smartAdaptive: options.smartAdaptive }) &&
+            isExternalApiServableModel(model, plan, { smartAdaptive: options.smartAdaptive, routerClassesNameable }) &&
             isProviderApiKeyConfigured(model.provider)
     );
     // A router-only model joins only beside a model of its provider a client
-    // can name, so it is never the default, never the one model left, and a
-    // native protocol never offers Smart Adaptive over router-only models alone.
-    const nameableProviders = new Set(
-        servable.filter(({ model }) => !isSmartAdaptiveOnlyModel(model)).map(({ model }) => model.provider)
-    );
+    // can name, so it is never the one model left, and a native protocol never
+    // offers Smart Adaptive over router-only models alone. A model a client can
+    // name is offered on its own; Smart Adaptive still never defaults to the
+    // frontier and apex classes (lib/externalApiSmartAdaptive.ts,
+    // lib/externalApiNativeSmartAdaptive.ts).
+    const nameableProviders = new Set(servable.filter(({ model }) => nameable(model)).map(({ model }) => model.provider));
     return servable
-        .filter(({ model }) => !isSmartAdaptiveOnlyModel(model) || nameableProviders.has(model.provider))
+        .filter(({ model }) => nameable(model) || nameableProviders.has(model.provider))
         .map(({ model, pricing }) => ({
             model,
+            nameable: nameable(model),
             capabilities: externalApiModelCapabilities(model, {
                 maxInputTokens: chatUserMaxInputTokens(),
                 maxOutputTokens: resolveModelRequestPricing(model, { estimatedPromptTokens: 1 }).maxOutputTokens,
@@ -97,9 +109,7 @@ export const externalApiOfferedModels = async (
     options: { surface: ExternalApiSurface }
 ): Promise<ExternalApiModelCapabilities[]> => {
     const pool = await externalApiRunnableModels(plan, { ...options, smartAdaptive: true });
-    const runnable = pool
-        .filter((entry) => isExternalApiServableModel(entry.model, plan))
-        .map((entry) => entry.capabilities);
+    const runnable = pool.filter((entry) => entry.nameable !== false).map((entry) => entry.capabilities);
     const smart = smartAdaptiveCapabilities(
         pool.map((entry) => entry.capabilities),
         DEFAULT_MODEL_ID

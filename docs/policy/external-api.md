@@ -307,10 +307,22 @@ catalogue, so a customer never has to recopy it.
 
 - **Candidates:** the offered models, plus the `frontier` and `apex` models
   this plan reaches (owner decision 2026-11-20: Smart Adaptive may route to
-  them, no client may name them, and each request is charged that model's own
-  credits under the key's cap; they join only beside a model of their
-  provider a client can name, and are only ever the router's pick, never the
-  default and never the one model left),
+  them, no client may name them on the general API, and each request is
+  charged that model's own credits under the key's cap; there they join only
+  beside a model of their provider a client can name, and are only ever the
+  router's pick, never the default and never the one model left).
+  On the coding catalogue (the coding API while
+  `CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED` is on) they are coding catalogue
+  rows like any other chat link, and a client may name them directly (owner
+  decision 2026-11-22): `/models` lists them, a named request is charged that
+  model's own chat credits under the key's cap and the account's credits, and
+  one is offered only while the chat registry holds a positive credit weight
+  for it (`hasRegistryCredits`, `lib/externalApiCatalogCore.ts`). Being
+  nameable there, they no longer need a nameable model of their provider
+  beside them; Smart Adaptive still never defaults to them, and a native
+  protocol still offers Smart Adaptive only over a model a client could have
+  named that is not frontier or apex. The general API and the coding API with
+  the switch off keep the 2026-11-20 rule;
   that fit the request -- images only to a
   model that reads them, the requested output within the model's limit, a
   rough input estimate plus that output within its window, and the optional

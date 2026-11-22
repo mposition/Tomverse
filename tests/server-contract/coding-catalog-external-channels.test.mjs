@@ -64,9 +64,11 @@ const runtimeModel = (id, extra = {}) => ({
   ...extra,
 });
 
+const baseRuntime = () => [runtimeModel("gpt-6-luna"), runtimeModel("gpt-5-6-terra", { usageClass: "advanced" })];
+let runtime = baseRuntime();
 mock.module(mod("lib/modelRegistry.ts"), {
   namedExports: {
-    getRuntimeModels: async () => [runtimeModel("gpt-6-luna"), runtimeModel("gpt-5-6-terra", { usageClass: "advanced" })],
+    getRuntimeModels: async () => runtime,
   },
 });
 
@@ -292,4 +294,87 @@ test("switched on with no snapshot, or one past its coverage, the coding API off
   snapshot = { ...snapshot, coverageUntil: new Date(Date.now() - 1_000) };
   assert.deepEqual(await ids("Pro", "coding"), []);
   setSwitch(undefined);
+});
+
+// Frontier and apex on the coding catalogue (owner decision 2026-11-22): coding
+// candidates, listed by /models, nameable on the coding API at their own chat
+// credits, offered only with credits the registry holds; the general API keeps
+// the rule that only Smart Adaptive routes to them.
+test("frontier and apex links are listed and nameable on the coding API at their chat credits, and still router-only on the general API", async () => {
+  const { codingCandidateExclusion } = await import(mod("lib/modelCatalogCore.ts"));
+  const { chatModelFacts } = await import(mod("lib/modelCatalog.ts"));
+  setSwitch("true");
+  providerTerms = [];
+  runtime = [
+    ...baseRuntime(),
+    runtimeModel("gpt-6-2-astra", { usageClass: "frontier", minimumPlan: "Pro", creditWeight: 32 }),
+    runtimeModel("gpt-6-2-apex", { usageClass: "apex", minimumPlan: "Pro", creditWeight: 80 }),
+    // The registry holds no credits for this one: never offered on the coding API.
+    runtimeModel("gpt-6-2-unpriced", { usageClass: "frontier", minimumPlan: "Pro", creditWeight: 0 }),
+  ];
+  try {
+    for (const id of ["gpt-6-2-astra", "gpt-6-2-apex"]) {
+      assert.equal(codingCandidateExclusion(chatModelFacts(runtime.find((model) => model.id === id)), new Set()), null, id);
+    }
+    entries = [
+      entry("gpt-6-luna", ["api"]),
+      entry("gpt-6-2-astra", ["api"]),
+      entry("gpt-6-2-apex", ["api"]),
+      entry("gpt-6-2-unpriced", ["api"]),
+    ];
+    const published = await publish(21);
+    assert.ok(published.some((row) => row.modelId === "gpt-6-2-astra"), "a frontier link is admitted on the coding API");
+
+    // Named directly on the coding API (the list a named request is validated against).
+    const named = await externalApiRunnableModels("Pro", { surface: "coding" });
+    assert.deepEqual(named.map((item) => item.model.id), ["gpt-6-luna", "gpt-6-2-astra", "gpt-6-2-apex"]);
+    assert.ok(named.every((item) => item.nameable === true));
+    const astra = named.find((item) => item.model.id === "gpt-6-2-astra");
+    assert.equal(astra.capabilities.creditWeight, 32, "its own chat credits");
+    assert.equal(astra.catalogPricing, undefined, "a chat link runs and bills as its chat model");
+    assert.equal(named.find((item) => item.model.id === "gpt-6-2-apex").capabilities.creditWeight, 80);
+    // /api/code/v1/models lists them, at those credits.
+    const offered = await externalApiOfferedModels("Pro", { surface: "coding" });
+    assert.deepEqual(offered.map((model) => model.id), ["smart-adaptive", "gpt-6-luna", "gpt-6-2-astra", "gpt-6-2-apex"]);
+    assert.equal(toOpenAiModelEntry(offered.find((model) => model.id === "gpt-6-2-astra")).tomverse.credits_per_request, 32);
+    // Smart Adaptive routes over them too, and the unpriced one is not offered there either.
+    const routed = await externalApiRunnableModels("Pro", { surface: "coding", smartAdaptive: true });
+    assert.deepEqual(routed.map((item) => item.model.id), ["gpt-6-luna", "gpt-6-2-astra", "gpt-6-2-apex"]);
+    // The plan still applies.
+    assert.deepEqual((await externalApiRunnableModels("Free", { surface: "coding" })).map((item) => item.model.id), ["gpt-6-luna"]);
+
+    // The general API: never named, only routed to by Smart Adaptive (owner decision 2026-11-20).
+    assert.deepEqual(await ids("Pro", "general"), ["gpt-6-luna", "gpt-5-6-terra"]);
+    assert.deepEqual((await externalApiOfferedModels("Pro", { surface: "general" })).map((model) => model.id), ["smart-adaptive", "gpt-6-luna", "gpt-5-6-terra"]);
+    const generalRouted = await externalApiRunnableModels("Pro", { surface: "general", smartAdaptive: true });
+    assert.ok(generalRouted.some((item) => item.model.id === "gpt-6-2-astra" && item.nameable === false));
+    // The coding API with its switch off serves the general API's models, by the general rule.
+    setSwitch(undefined);
+    assert.deepEqual(await ids("Pro", "coding"), ["gpt-6-luna", "gpt-5-6-terra"]);
+  } finally {
+    runtime = baseRuntime();
+    setSwitch(undefined);
+  }
+});
+
+test("on the coding catalogue a frontier model is offered without a nameable model of its provider beside it", async () => {
+  setSwitch("true");
+  providerTerms = [];
+  process.env.ANTHROPIC_API_KEY = "test-anthropic-key-not-real";
+  runtime = [
+    ...baseRuntime(),
+    runtimeModel("claude-opus-fixture", { provider: "anthropic", usageClass: "frontier", minimumPlan: "Pro", creditWeight: 40 }),
+  ];
+  try {
+    entries = [entry("gpt-6-luna", ["api"]), entry("claude-opus-fixture", ["api"])];
+    await publish(22);
+    // Named directly there, it is the only Anthropic model on the coding API.
+    assert.deepEqual(await ids("Pro", "coding"), ["gpt-6-luna", "claude-opus-fixture"]);
+    // On the general API, alone for its provider, it is not even a Smart Adaptive candidate.
+    assert.ok(!(await externalApiRunnableModels("Pro", { surface: "general", smartAdaptive: true })).some((item) => item.model.id === "claude-opus-fixture"));
+  } finally {
+    delete process.env.ANTHROPIC_API_KEY;
+    runtime = baseRuntime();
+    setSwitch(undefined);
+  }
 });

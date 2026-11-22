@@ -58,31 +58,51 @@ const EXPOSABLE_USAGE_CLASSES = new Set<AiModel["usageClass"]>([
 ]);
 
 /**
- * Usage classes Smart Adaptive may route to but no client may name directly
- * (owner decision 2026-11-20): the coding guidance sends only the hardest
- * work to them (AUTO_LLM_ROUTER_CODING_GUIDANCE), each request is charged
- * that model's own credits, and the key's cap and the account's credits still
- * refuse what they do not cover.
+ * Usage classes Smart Adaptive may route to but no client may name directly on
+ * the general API (owner decision 2026-11-20): the coding guidance sends only
+ * the hardest work to them (AUTO_LLM_ROUTER_CODING_GUIDANCE), each request is
+ * charged that model's own credits, and the key's cap and the account's
+ * credits still refuse what they do not cover. On the coding catalogue (the
+ * coding API while CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED is on) a client
+ * may name them too (owner decision 2026-11-22), at the same credits.
  */
 const SMART_ADAPTIVE_ONLY_USAGE_CLASSES = new Set<AiModel["usageClass"]>(["frontier", "apex"]);
 
 /**
- * A model only Smart Adaptive routes to. Never a default: the model a request
- * takes when the router does not pick is chosen among the others.
+ * A model of a class only Smart Adaptive routes to on the general API. Never a
+ * Smart Adaptive default on either API: the model a request takes when the
+ * router does not pick is chosen among the others.
  */
 export const isSmartAdaptiveOnlyModel = (model: Pick<AiModel, "usageClass">) =>
     SMART_ADAPTIVE_ONLY_USAGE_CLASSES.has(model.usageClass);
 
+/**
+ * The credits the chat registry holds for a model: a positive whole number,
+ * or none. A frontier or apex model is offered on the coding catalogue only
+ * with them, so a request is never charged a class default nobody set.
+ */
+export const hasRegistryCredits = (model: Pick<AiModel, "creditWeight">) =>
+    Number.isInteger(model.creditWeight) && (model.creditWeight ?? 0) > 0;
+
 export const isExternalApiServableModel = (
     model: AiModel,
     plan: ModelTier,
-    options: { smartAdaptive?: boolean } = {}
+    options: {
+        smartAdaptive?: boolean;
+        /**
+         * The coding catalogue serves this request: the classes only Smart
+         * Adaptive routes to elsewhere may be named too, and are offered only
+         * with their registry credits (owner decision 2026-11-22).
+         */
+        routerClassesNameable?: boolean;
+    } = {}
 ) =>
     model.enabled &&
     !model.catalogDeleted &&
     (model.status === "enabled" || model.status === "limited") &&
     (EXPOSABLE_USAGE_CLASSES.has(model.usageClass) ||
-        (options.smartAdaptive === true && SMART_ADAPTIVE_ONLY_USAGE_CLASSES.has(model.usageClass))) &&
+        (SMART_ADAPTIVE_ONLY_USAGE_CLASSES.has(model.usageClass) &&
+            (options.routerClassesNameable === true ? hasRegistryCredits(model) : options.smartAdaptive === true))) &&
     canUseModelWithPlan(plan, model);
 
 export type ExternalApiModelCapabilities = {

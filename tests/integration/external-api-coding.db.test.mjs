@@ -267,6 +267,80 @@ test("the coding API over the real shared credit ledger", { skip: !databaseUrl }
         assert.equal(await db.chatCreditReservation.count({ where: { userId } }), 0);
     });
 
+    await t.test("a frontier chat link is listed and named directly on the coding API at its own chat credits; the general API still refuses it by name", async () => {
+        // Owner decision 2026-11-22: frontier and apex are coding candidates, and a client may name them on the coding API.
+        process.env.CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED = "true";
+        const { modelRegistryCreateData } = await import(mod("lib/modelRegistry.ts"));
+        const { getWeightedUsageCredits } = await import(mod("lib/models.ts"));
+        const FRONTIER_ID = `claude-frontier-fixture-${randomUUID().slice(0, 8)}`;
+        const frontier = {
+            id: FRONTIER_ID,
+            name: "Claude Frontier Fixture",
+            apiModel: "claude-frontier-fixture",
+            provider: "anthropic",
+            icon: "",
+            bestFor: "",
+            minimumPlan: "Pro",
+            usageClass: "frontier",
+            creditWeight: 37,
+            enabled: true,
+            status: "enabled",
+            contextWindowTokens: 200_000,
+            maxOutputTokens: 4_000,
+            inputUsdPerMillionTokens: 5,
+            outputUsdPerMillionTokens: 25,
+        };
+        await db.modelRegistryEntry.create({ data: modelRegistryCreateData(frontier, { id: null, email: null }) });
+        // Other suites share this database: the fixture model leaves no row behind, pass or fail.
+        try {
+            await db.modelCatalogEntry.create({
+                data: {
+                    category: "coding",
+                    modelId: FRONTIER_ID,
+                    enabled: true,
+                    profile: { source: "chat", registryModelId: FRONTIER_ID, capabilities: { toolCalling: "parallel", structuredOutput: "supported" }, channels: ["api"] },
+                },
+            });
+            const published = await publish();
+            assert.ok(published.rows.some((row) => row.modelId === FRONTIER_ID), "the frontier link is admitted on the coding API");
+            const userId = await newUser();
+            process.env.EXTERNAL_API_ALLOWED_USER_IDS = userId;
+            const { key } = await issueKey(userId);
+            assert.ok((await modelIds(codingModels, key)).includes(FRONTIER_ID), "the coding API's /models lists it");
+            assert.ok(!(await modelIds(generalModels, key)).includes(FRONTIER_ID), "the general API does not");
+
+            reply = () => new Response(anthropicStream(), { status: 200, headers: { "content-type": "text/event-stream", "request-id": "req_provider_frontier" } });
+            const before = sent.length;
+            const response = await messages("coding", key, body(FRONTIER_ID));
+            assert.equal(response.status, 200);
+            await response.text();
+            assert.equal(sent.length, before + 1, "exactly one dispatch");
+            assert.equal(sent.at(-1).body.model, "claude-frontier-fixture");
+            const [reservation] = await db.chatCreditReservation.findMany({ where: { userId } });
+            assert.equal(reservation.modelId, FRONTIER_ID);
+            // The chat model's own credits through the usual reservation: no coding catalogue price on a chat link.
+            const expected = getWeightedUsageCredits({ usageClass: "frontier", creditWeight: 37 }, 1);
+            assert.equal(expected, 37);
+            assert.equal(reservation.reservedCredits, expected);
+            assert.equal(reservation.settledCredits, expected);
+            assert.notEqual(reservation.reservationPayload.costSource, "coding_catalog_snapshot");
+
+            // The general API refuses it by name: nothing sent, nothing held.
+            const other = await newUser();
+            process.env.EXTERNAL_API_ALLOWED_USER_IDS = other;
+            const { key: otherKey } = await issueKey(other);
+            const sentBefore = sent.length;
+            const refused = await messages("general", otherKey, body(FRONTIER_ID));
+            assert.equal(refused.status, 404);
+            assert.equal(sent.length, sentBefore);
+            assert.equal(await db.chatCreditReservation.count({ where: { userId: other } }), 0);
+        } finally {
+            await db.modelCatalogEntry.deleteMany({ where: { category: "coding", modelId: FRONTIER_ID } });
+            await db.modelRegistryEntry.deleteMany({ where: { id: FRONTIER_ID } });
+            await publish();
+        }
+    });
+
     await t.test("an apiCreditWeight above the floor is charged once published, and recorded as the override", async () => {
         process.env.CODING_CATALOG_EXTERNAL_CHANNELS_ENABLED = "true";
         const override = apiFloor + 3;

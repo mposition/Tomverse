@@ -441,7 +441,9 @@ test("coding candidates are active, listed chat models of a served usage class n
   assert.equal(codingCandidateExclusion(chat({ publiclyListed: false }), none), "not_listed");
   assert.equal(codingCandidateExclusion(chat({ catalogDeleted: true }), none), "deleted");
   assert.equal(codingCandidateExclusion(chat({ usageClass: "research" }), none), "usage_class:research");
-  for (const usageClass of ["standard", "advanced", "premium", "reasoning", "premium-reasoning"]) {
+  assert.equal(codingCandidateExclusion(chat({ usageClass: "deep-research" }), none), "usage_class:deep-research");
+  // Frontier and apex are coding candidates too (owner decision 2026-11-22).
+  for (const usageClass of ["standard", "advanced", "premium", "reasoning", "premium-reasoning", "frontier", "apex"]) {
     assert.equal(codingCandidateExclusion(chat({ usageClass }), none), null, usageClass);
   }
   assert.equal(codingCandidateExclusion(chat({ id: "bad id with spaces" }), none), "invalid_id");
