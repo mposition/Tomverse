@@ -16,6 +16,7 @@
   reject입니다.
 - reviewer는 diff를 prompt에서 받지 않고, 서버가 자기 checkout에 써 둔
   `.review-orchestrator/change.diff`(검토 범위 전체, `git diff --output`)를 파일 도구로 읽습니다.
+  저장소에 그 경로가 이미 있으면 지우지 않고 `.review-orchestrator-1/`처럼 빈 이름에 쓰며, prompt가 쓴 경로를 알려 줍니다.
   shell이 있는 reviewer는 `git diff <base> <head>`로 읽어도 됩니다. Claude(`Read`·`Grep`·`Glob`)와
   Antigravity(`view_file`)는 shell이 없어 2026-11-22까지 diff를 읽지 못하고 "검토할 수 없음"으로
   reject했습니다. 그래서 diff 크기와 파일 목록 개수에 서버가 두는 한도가 없고, scope도

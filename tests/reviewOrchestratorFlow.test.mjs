@@ -558,7 +558,27 @@ test("a reviewer with file tools only reads the whole diff from the file the ser
     const summary = JSON.parse(f.client("wait", jobId).stdout);
     assert.equal(summary.status, "accept");
     // Every added line, through the last one: nothing is cut.
-    assert.equal(summary.reviews[0].findings[0].summary, "added=5001 tail=true");
+    assert.equal(summary.reviews[0].findings[0].summary,
+      "file=.review-orchestrator/change.diff added=5001 tail=true tracked=absent");
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("the diff file never replaces a path the repository has: it goes beside it", async () => {
+  const f = fixture({ claude: "readdiff" });
+  try {
+    f.commit(".review-orchestrator/tracked.txt", "the repository's own file\n");
+    f.commit("a.txt", "eight\ndiff-tail-marker\n");
+    const { jobId } = JSON.parse(f.client("submit", "--author", "codex", "--repo", "demo").stdout);
+    const orchestrator = new Orchestrator(f.config);
+    orchestrator.tick({ claude: { state: "available" }, cursor: { state: "blocked" }, codex: { state: "blocked" } });
+    await orchestrator.idle();
+    const summary = JSON.parse(f.client("wait", jobId).stdout);
+    assert.equal(summary.status, "accept");
+    // The reviewer still sees the repository's file, and reads the diff from the path the prompt names.
+    assert.equal(summary.reviews[0].findings[0].summary,
+      "file=.review-orchestrator-1/change.diff added=3 tail=true tracked=the repository's own file");
   } finally {
     f.cleanup();
   }
