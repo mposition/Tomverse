@@ -21,7 +21,7 @@ The source audit is a feature inventory, not a claim that every operational flag
 | Model catalogue | Existing live provider/model availability and plan limits; no hard-coded list of paid models. |
 | Review | Easy/Professional selection and model/provider answer tabs; changing tabs never sends a question. Korean mode labels are localized. |
 | Review analysis | Cross-review and quick differences are separate result actions, outside Composer tools. Estimates precede explicit execution. Unknown executions require readback. |
-| Chat/Review connections | Existing Chat-to-Review context handoff. Saved analysis can become a previewed, revalidated Chat reference; an existing new-Chat draft is preserved and explicitly appended to. Nothing auto-sends. |
+| Chat/Review connections | Existing Chat-to-Review context handoff. Saved analysis — a whole reviewer result or one item — can become a previewed, revalidated (cancellable, bearer-only) Chat reference for a workspace Review; an existing new-Chat draft, text or attachments, is preserved and explicitly appended to, and a changed draft asks again. Nothing auto-sends. |
 | History | Existing source titles, sorting, projects, search, locks, sharing/download gates and new-chat/history close behavior. |
 | Image generation | Existing server image routing, model/quality catalogue, progress animation and quality guidance. The image starter is capability-gated. |
 | Image input | Existing supported photo-edit routing, thumbnails, pending-result recovery and per-model eligibility. |
