@@ -135,11 +135,11 @@ const own = applicationServedBody(body);
 const managed = carriesManagedBlock(body);
 
 if (canonical) {
-  // Effective, on the whole file.
-  expect(isPathAllowed(served, "Googlebot", "/"), "Googlebot is refused / on the canonical site");
-  expect(!isPathAllowed(served, "Googlebot", "/admin"), "/admin is not refused");
-  expect(!isPathAllowed(served, "Googlebot", "/share/x"), "/share is not refused");
-  // Ours, on our half only.
+  // Our policy, on our half only. The managed block can change the merged
+  // result, but it must never mask a mistake in the body we own.
+  expect(isPathAllowed(own, "Googlebot", "/"), "Googlebot is refused / by our own robots.txt");
+  expect(!isPathAllowed(own, "Googlebot", "/admin"), "/admin is not refused by our own robots.txt");
+  expect(!isPathAllowed(own, "Googlebot", "/share/x"), "/share is not refused by our own robots.txt");
   for (const crawler of REFUSED_AI_CRAWLERS) {
     expect(
       !isPathAllowed(own, crawler, "/"),
