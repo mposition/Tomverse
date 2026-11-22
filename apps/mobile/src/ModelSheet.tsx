@@ -9,10 +9,13 @@ import { mobileModelsCopy } from "../../../locales/mobileModels";
 import { mobileSelectionCopy } from "../../../locales/mobileSelection";
 import { ModelChoices, ModelFilters, SelectionFooter } from "./ModelChoices";
 import { useVisibleViewportHeight } from "../../../components/chat/useVisualViewport";
+import { reasoningEffortCopy } from "../../../lib/reasoningEffortCopy";
+import type { ReasoningEffort } from "../../../lib/reasoningEffort";
 
-export function ModelSheet({ transport, conversation, language, onClose, onApply }: {
+export function ModelSheet({ transport, conversation, language, effortEnabled = false, initialEffort = "default", onClose, onApply }: {
   transport: ChatTransport; conversation: Conversation | null; language: MobileLanguage;
-  onClose: () => void; onApply: (modelId: string, auto: boolean) => Promise<void>;
+  effortEnabled?: boolean; initialEffort?: ReasoningEffort;
+  onClose: () => void; onApply: (modelId: string, auto: boolean, effort: ReasoningEffort) => Promise<void>;
 }) {
   const c = mobileWorkspaceCopy[language];
   const feedback = mobileModelsCopy(language);
@@ -22,6 +25,7 @@ export function ModelSheet({ transport, conversation, language, onClose, onApply
   const [offered, setOffered] = useState(conversation?.autoSelection?.offered === true);
   const [selected, setSelected] = useState(conversation?.selectedModels[0] ?? "");
   const [auto, setAuto] = useState(!conversation || conversation.selectionMode === "auto");
+  const [effort, setEffort] = useState(initialEffort);
   const [query, setQuery] = useState(""); const [provider, setProvider] = useState("");
   const [loading, setLoading] = useState(true); const [pending, setPending] = useState(false); const [error, setError] = useState("");
   const [loadFailed, setLoadFailed] = useState(false); const [capabilityFailed, setCapabilityFailed] = useState(false);
@@ -39,9 +43,12 @@ export function ModelSheet({ transport, conversation, language, onClose, onApply
       }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [transport, conversation, reload]);
+  const effortCopy = reasoningEffortCopy[language];
+  const supportedEfforts = !auto && effortEnabled ? models.find(model => model.id === selected)?.reasoningEfforts : undefined;
+  const selectedEffort = effort !== "default" && supportedEfforts?.includes(effort) ? effort : "default";
   return <Sheet className="selection-sheet" maxHeight={visibleHeight > 0 ? Math.min(640, visibleHeight - 16) : 640} title={c.model} closeLabel={mobileCopy[language].close} onClose={() => { if (!pending) onClose(); }}>
     <div className="selection-body"><div className="selection-controls">
-      {offered && <label className="selection-adaptive"><span><strong>Smart Adaptive</strong><small>{selectionCopy.automatic}</small></span><input className="selection-switch" type="checkbox" role="switch" aria-label="Smart Adaptive" checked={auto} disabled={pending} onChange={(e) => setAuto(e.target.checked)} /></label>}
+      {offered && <label className="selection-adaptive"><span><strong>Smart Adaptive</strong><small>{selectionCopy.automatic}</small></span><input className="selection-switch" type="checkbox" role="switch" aria-label="Smart Adaptive" checked={auto} disabled={pending} onChange={(e) => { setAuto(e.target.checked); setEffort("default"); }} /></label>}
       <ModelFilters models={models} language={language} query={query} provider={provider} onQuery={setQuery} onProvider={setProvider} />
     </div>
     <div className="selection-results">
@@ -50,12 +57,19 @@ export function ModelSheet({ transport, conversation, language, onClose, onApply
     {capabilityFailed && <p role="status" className="notice">{feedback.capabilityFailed}</p>}
     {(loadFailed || capabilityFailed) && <button type="button" disabled={loading || pending} onClick={() => { setLoading(true); setError(""); setLoadFailed(false); setCapabilityFailed(false); setReload(value => value + 1); }}>{feedback.retry}</button>}
     {loading && <p role="status">{c.loading}</p>}
-    {!loading && !loadFailed && <ModelChoices models={models} language={language} query={query} provider={provider} selected={[selected]} disabled={() => pending || auto} onChange={id => setSelected(id)} />}
+    {!loading && !loadFailed && <ModelChoices models={models} language={language} query={query} provider={provider} selected={[selected]} disabled={() => pending || auto} onChange={id => { setSelected(id); setEffort("default"); }} />}
     </div>
+    {!!supportedEfforts?.length && !loading && <fieldset className="native-reasoning-effort" disabled={pending}>
+      <legend>{effortCopy.title}</legend>
+      <div>{(["low", "default", "high"] as const).filter(level => level === "default" || supportedEfforts.includes(level)).map(level => (
+        <label key={level}><input type="radio" name="native-reasoning-effort" value={level} checked={selectedEffort === level} onChange={() => setEffort(level)} />{effortCopy[level]}</label>
+      ))}</div>
+      <small>{effortCopy.question}</small>
+    </fieldset>}
     </div>
     <SelectionFooter count={auto || selected ? 1 : 0} names={auto ? "Smart Adaptive" : models.find(model => model.id === selected)?.name ?? selectionCopy.none} language={language} action={pending ? mobileCopy[language].loading : c.apply} disabled={pending || loading || loadFailed || (auto && !offered) || (!selected && !auto)} onClick={() => {
       setPending(true); setError("");
-      void onApply(selected, auto).catch((error) => { setError(mobileErrorText(error, language, mobileCopy[language].error)); setPending(false); });
+      void onApply(selected, auto, selectedEffort).catch((error) => { setError(mobileErrorText(error, language, mobileCopy[language].error)); setPending(false); });
     }} />
   </Sheet>;
 }

@@ -84,6 +84,19 @@
 .ios-source-messages article { border-left: 2px solid var(--mobile-border); padding-left: 12px; margin: 18px 0; }
 .ios-source-messages small { display: block; color: var(--mobile-muted); margin-bottom: 8px; }
 .ios-continuation-disclosure { padding: 14px; background: var(--mobile-surface); border-radius: 12px; margin: 16px 0; }
+[data-ios-refresh] .ios-welcome > .ios-eyebrow { display: block; color: var(--mobile-primary); font-weight: 600; margin-bottom: 12px; }
+[data-ios-refresh] .ios-import-entry { color: var(--mobile-primary); min-height: 48px; }
+[data-ios-refresh] .ios-library-recent { margin-bottom: 18px; }
+[data-ios-refresh] .ios-saved-instructions { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--mobile-soft); padding: 16px; border-radius: 12px; }
+[data-ios-refresh] .ios-ready-reference { display: flex; align-items: center; gap: 8px; color: var(--mobile-primary); overflow-wrap: anywhere; }
+[data-ios-refresh] .ios-source-messages { padding: 0 14px; background: var(--mobile-background); border-radius: 12px; }
+[data-ios-refresh] .native-review-summary h3 { color: var(--tomverse-review-selected-text); }
+[data-ios-refresh] .native-review-summary blockquote { margin: 8px 0; padding: 10px 14px; background: var(--tomverse-review-surface); border-radius: 10px; }
+[data-ios-refresh] .generated-file:has(.artifact-versions) { background: var(--mobile-soft); }
+.native-reasoning-effort { border: 1px solid var(--mobile-border); border-radius: 12px; padding: 8px 12px; margin: 8px 0; min-width: 0; }
+.native-reasoning-effort > div { display: flex; gap: 8px 14px; flex-wrap: wrap; }
+.native-reasoning-effort label { min-height: 44px; display: inline-flex; gap: 6px; align-items: center; }
+.native-reasoning-effort small { color: var(--mobile-muted); }
 @media (min-width: 900px) {
   .ios-workspace { padding-left: calc(155px + env(safe-area-inset-left)); }
   .ios-workspace .app-header { margin-left: -155px; }

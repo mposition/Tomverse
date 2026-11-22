@@ -136,3 +136,65 @@ test("existing imported source stays distinct from the continuing Chat on iPad a
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
   await page.screenshot({ path: info.outputPath("continued-chat.png") });
 });
+
+test("Library opens saved Chat and Review in place and omits locked or image conversations", async ({ page }) => {
+  await page.evaluate(() => {
+    const base = { selectedModels: ["demo"], selectionMode: "manual", messages: [] };
+    localStorage.setItem("tomverse-native-synthetic-demo", JSON.stringify([
+      { ...base, id: "chat-saved", title: "Saved Chat", surface: "chat", updatedAt: "2026-11-22T03:00:00Z" },
+      { ...base, id: "review-saved", title: "Saved Review", surface: "workspace", messages: [{ id: "review-question", role: "user", content: "Saved comparison question" }], updatedAt: "2026-11-22T04:00:00Z" },
+      { ...base, id: "private-chat", title: "Locked Chat", surface: "chat", isLocked: true },
+      { ...base, id: "image-review", title: "Saved image", surface: "workspace", kind: "image" },
+    ]));
+  });
+  const navigation = page.locator(".ios-navigation");
+  const library = navigation.getByRole("button", { name: "보관함", exact: true });
+  await library.click();
+  const dialog = page.getByRole("dialog");
+  const recent = dialog.locator(".ios-library-recent");
+  await expect(recent.getByRole("button")).toHaveCount(2);
+  await expect(recent.getByRole("button").first()).toContainText("Saved Review");
+  await recent.getByRole("button", { name: "Saved Review Review", exact: true }).click();
+  await expect(page.locator(".review-workspace")).toBeVisible();
+  await expect(page.locator(".review-workspace").getByText("Saved comparison question", { exact: true })).toBeVisible();
+  await library.click();
+  await recent.getByRole("button", { name: "Saved Chat Chat", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(navigation.getByRole("button", { name: "Chat", exact: true })).toHaveAttribute("aria-current", "page");
+});
+
+test("iOS manual reasoning level applies only to the next supported Chat question", async ({ page }, info) => {
+  test.skip(info.project.name !== "ios-iphone", "The same transport supports all iOS viewports.");
+  await page.route("**/src/main.tsx", async route => {
+    const response = await route.fetch();
+    const source = await response.text();
+    const injection = `
+      const nativeModels = transport.models;
+      transport.models = async () => (await nativeModels()).map(model => model.id === "demo" ? {...model, reasoningEfforts: ["low", "high"]} : model);
+      const sendNativeChat = transport.send;
+      transport.send = (...args) => {
+        const sent = JSON.parse(localStorage.getItem("ios-test-efforts") ?? "[]");
+        localStorage.setItem("ios-test-efforts", JSON.stringify([...sent, args[6] ?? null]));
+        return sendNativeChat(...args);
+      };`;
+    await route.fulfill({ response, body: source.replace("createRoot(container).render(", `${injection}createRoot(container).render(`) });
+  });
+  await page.reload();
+  await page.locator(".model-trigger").click();
+  const picker = page.getByRole("dialog");
+  await picker.getByRole("switch", { name: "Smart Adaptive" }).uncheck();
+  await picker.getByRole("radio", { name: /Local demo A/ }).check();
+  const effort = picker.locator(".native-reasoning-effort");
+  await effort.getByRole("radio").last().check();
+  await picker.locator(".selection-footer").getByRole("button").last().click();
+  await expect(picker).toHaveCount(0);
+  const prompt = page.getByRole("textbox");
+  const send = page.getByRole("button", { name: "메시지 보내기", exact: true });
+  await prompt.fill("첫 번째 질문");
+  await send.click();
+  await expect(page.locator("article.assistant")).toHaveCount(1);
+  await prompt.fill("두 번째 질문");
+  await send.click();
+  await expect(page.locator("article.assistant")).toHaveCount(2);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("ios-test-efforts") ?? "[]"))).toEqual(["high", null]);
+});

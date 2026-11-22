@@ -10,6 +10,7 @@ import { fitChatRequestTranscript } from "../../../lib/chatRequestLimits";
 import { toChatRequestMessage } from "../../../lib/chatMessageSerialization";
 import { resolveChatAttachmentFormat } from "../../../lib/chatAttachmentFormats";
 import { createChatLivenessWatchdog } from "../../../lib/chatStreamLiveness";
+import type { ExplicitReasoningEffort } from "../../../lib/reasoningEffort";
 import { isPubliclySelectableModel } from "../../../lib/models";
 import type { PublicCatalogModel } from "../../../lib/publicModelCatalog";
 import { mobileApiFetch, MobileAuth } from "./authBridge";
@@ -199,7 +200,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       ? { modelIds: decision.modelId ? [decision.modelId] : [], preset: decision.preset, edit: true }
       : null;
   }
-  async function streamModel(persisted: Conversation, sourceId: string, modelId: string, signal: AbortSignal, progress: (text: string) => void, review = false, admission?: { admissionToken: string; contextBundle?: string }, continuation?: ContinuationTurnContext, research?: { locale: string }) {
+  async function streamModel(persisted: Conversation, sourceId: string, modelId: string, signal: AbortSignal, progress: (text: string) => void, review = false, admission?: { admissionToken: string; contextBundle?: string }, continuation?: ContinuationTurnContext, research?: { locale: string }, reasoningEffort?: ExplicitReasoningEffort) {
     // A prepared Review binds the saved authored question. Concurrent appends
     // cannot become its current query or alter the transcript being verified.
     const sourceIndex = admission?.contextBundle ? persisted.messages.findIndex(message => message.id === sourceId) : -1;
@@ -238,6 +239,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
         if (revision !== sessionRevision) throw new DOMException("Session changed", "AbortError");
         return { ...json("POST", { messages, modelId, webSearchMode: research ? "always" : persisted.webSearchMode ?? "off", conversationId: persisted.id,
           ...(research ? { researchMode: "preview" } : {}),
+          ...(reasoningEffort ? { reasoningEffort } : {}),
           assistantMessageId, sourceUserMessageId: sourceId, ...(admission ?? {}),
           ...(fix && location.canShare(fix, scope) ? { currentLocation: fix } : {}) }),
           ...(continuation?.sourcePassages !== undefined && !review && !research ? { headers: { "Content-Type": "application/json",
@@ -540,14 +542,16 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       const detail = await load(item.id);
       return !assistantProfileId && detail.autoSelection?.offered ? configure(item.id, "", true) : detail;
     },
-    send: async (conversation, text, files, signal, onProgress, continuation) => {
+    send: async (conversation, text, files, signal, onProgress, continuation, reasoningEffort) => {
       const { persisted, sourceId } = await persistQuestion(conversation, text, files, signal);
       const edit = await manualPhotoEdit(persisted, text, files, signal);
       if (edit) {
         await postImageTurn(persisted.id, sourceId, crypto.randomUUID(), persisted.selectedModels[0], edit, signal);
         return;
       }
-      await streamModel(persisted, sourceId, persisted.selectedModels[0], signal, onProgress, false, undefined, continuation);
+      const modelId = persisted.selectedModels[0];
+      const effort = persisted.selectionMode !== "auto" && modelId === conversation.selectedModels[0] ? reasoningEffort : undefined;
+      await streamModel(persisted, sourceId, modelId, signal, onProgress, false, undefined, continuation, undefined, effort);
     },
     sendReview: async (conversation, text, files, signal, progress, draft) => {
       // Match the ordinary message persistence route before pricing its query.

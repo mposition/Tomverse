@@ -102,7 +102,7 @@ export type ContinuationTurnContext = {
   onReceipt?: (receipt: import("../../../lib/continuationReceipt").ContinuationReceipt) => void;
 };
 export type PreparedArtifactRevision = MobileAttachment & { revisionMode?: "workbook" | "workbook-values" };
-export type MobileModel = { id: string; name: string; provider: string; minimumPlan: import("../../../lib/models").AiModel["minimumPlan"] };
+export type MobileModel = { id: string; name: string; provider: string; minimumPlan: import("../../../lib/models").AiModel["minimumPlan"]; reasoningEfforts?: readonly import("../../../lib/reasoningEffort").ExplicitReasoningEffort[] };
 export interface ChatTransport {
   researchPreviewOffer?(input: import("../../../components/chat/useResearchPreview").ResearchPreviewOfferInput, signal?: AbortSignal, locale?: string): Promise<unknown>;
   researchRuns?: import("../../../lib/researchPreviewRunClient").ResearchPreviewRunTransport;
@@ -172,7 +172,7 @@ export interface ChatTransport {
   capabilities(): Promise<{ offered: boolean }>;
   configure(id: string, modelId: string, auto: boolean): Promise<Conversation>;
   send(conversation: Conversation, text: string, files: MobileAttachment[], signal: AbortSignal,
-    progress: (text: string) => void, continuation?: ContinuationTurnContext): Promise<void>;
+    progress: (text: string) => void, continuation?: ContinuationTurnContext, reasoningEffort?: import("../../../lib/reasoningEffort").ExplicitReasoningEffort): Promise<void>;
   upload(file: File): Promise<MobileAttachment>;
   transcribe(clip: Blob, signal?: AbortSignal): Promise<string>;
 }

@@ -35,7 +35,7 @@ export function QuickSummary({ id, owner, transport, language, onClose, onBusy, 
     } finally { setBusy(false); }
   }
   const summary: QuickReview | undefined = setup?.storedSummary;
-  return <Sheet title={c.quickSummary} closeLabel={c.close} onClose={() => { if (!busy) onClose(); }}>
+  return <Sheet className="native-review-summary" title={c.quickSummary} closeLabel={c.close} onClose={() => { if (!busy) onClose(); }}>
     <div className="cross-review">
       {error && <p role="alert">{error}</p>}
       {summary ? <><p>{reviewCopy.groundingHint}</p>

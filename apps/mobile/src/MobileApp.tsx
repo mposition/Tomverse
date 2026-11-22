@@ -7,7 +7,9 @@ import { useResearchPreview } from "../../../components/chat/useResearchPreview"
 import { ResearchPreviewRunCard } from "../../../components/chat/ResearchPreviewRunCard";
 import { researchRunMessage } from "../../../lib/researchPreviewRunClient";
 import { providerName } from "./ModelChoices";
-import { type AssistantEntry, type IosPanel } from "./iosWorkspaceContract";
+import { isIosWorkspace, type AssistantEntry, type IosPanel } from "./iosWorkspaceContract";
+import type { ExplicitReasoningEffort, ReasoningEffort } from "../../../lib/reasoningEffort";
+import { reasoningEffortCopy } from "../../../lib/reasoningEffortCopy";
 import { IosNavigation, IosWelcome, IosWorkspacePanel, IosAssistantBadge } from "./IosWorkspace";
 import { mobileIosWorkspaceCopy } from "../../../locales/mobileIosWorkspace";
 import { canUseModelWithPlan } from "../../../lib/models";
@@ -85,6 +87,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   const [settings, setSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState<AccountSettingsTab>("account");
   const [modelPicker, setModelPicker] = useState(false);
+  const [turnEffort, setTurnEffort] = useState<{ owner: string | null; conversationId: string; modelId: string; level: ExplicitReasoningEffort } | null>(null);
   const [draftAutoOffered, setDraftAutoOffered] = useState(false);
   const [draftModelId, setDraftModelId] = useState<string>();
   const [draftCapabilityReady, setDraftCapabilityReady] = useState(false);
@@ -183,7 +186,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   }, [transport, signedIn, conversation]);
   useEffect(() => transport.onSessionLost?.(() => {
     epoch.current++; requestEpoch.current++; abort.current?.abort();
-    clearNativeDrafts(); handoffAttempt.current = null; handoffOrigin.current = null; setHandoffBusy(false); setConfigurationBusy(false); sessionStorage.removeItem(REVIEW_HANDOFF_TARGET); setOwner(null); setSignedIn(false); setConversation(null); setChats([]); setPartial(null); setPendingQuestion(null); setReportFor(null);
+    clearNativeDrafts(); setTurnEffort(null); handoffAttempt.current = null; handoffOrigin.current = null; setHandoffBusy(false); setConfigurationBusy(false); sessionStorage.removeItem(REVIEW_HANDOFF_TARGET); setOwner(null); setSignedIn(false); setConversation(null); setChats([]); setPartial(null); setPendingQuestion(null); setReportFor(null);
     setIosEntry(null); setReviewOpen(undefined); setUncertain(false); setStreaming(false); setModelPicker(false); setSettings(false); setAccountOpen(false); setProduct("chat");
     localStorage.removeItem(LAST_CHAT); setLoading(false);
   }), [transport]);
@@ -266,7 +269,9 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     } catch { if (current === requestEpoch.current) setError(copy.unavailable); return false; }
     finally { if (current === requestEpoch.current) setLoading(false); }
   }
-  async function configureModel(modelId: string, auto: boolean) {
+  const selectedEffort = turnEffort && turnEffort.owner === owner && turnEffort.conversationId === conversation?.id &&
+    turnEffort.modelId === conversation.selectedModels[0] && conversation.selectionMode !== "auto" ? turnEffort.level : undefined;
+  async function configureModel(modelId: string, auto: boolean, effort: ReasoningEffort) {
     const current = ++requestEpoch.current;
     setConfigurationBusy(true);
     try {
@@ -277,6 +282,8 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
       const updated = await transport.configure(item.id, modelId, auto);
       if (current !== requestEpoch.current) return;
       setConversation(updated); setModelPicker(false);
+      setTurnEffort(isIosWorkspace && !auto && effort !== "default" && updated.selectionMode !== "auto" && updated.selectedModels[0] === modelId
+        ? { owner, conversationId: updated.id, modelId, level: effort } : null);
     } catch (error) {
       if (current !== requestEpoch.current) return;
       setUncertain(true); setError(mobileErrorText(error, language, copy.disconnected)); setModelPicker(false); throw error;
@@ -316,6 +323,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
       setDraft("", item.id);
       dispatched = true;
       if (!fromVoice) setSourcePick(null);
+      if (!fromVoice && !research) setTurnEffort(null);
       const receipt = fromVoice ? await transport.sendVoice!(item, text, controller.signal, (value) => {
         if (current === requestEpoch.current) setPartial(value);
       }) : research ? await transport.sendResearchPreview!(item, text, files, controller.signal, value => {
@@ -324,7 +332,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
         if (current === requestEpoch.current) setPartial(value);
       }, { ...(picked ? { sourcePassages: picked } : {}), onReceipt: receipt => {
         if (current === requestEpoch.current && !controller.signal.aborted) setSourceDelivery({ owner, id: item!.id, receipt });
-      } });
+      } }, selectedEffort);
       if (research) researchPreview.onSelectedChange(false);
       const restored = await transport.load(item.id);
       if (current !== requestEpoch.current) return;
@@ -354,7 +362,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     if (streaming || reviewBusy || handoffBusy || configurationBusy || loading) return;
     setSourcePick(null); setSourceDelivery(null);
     if (product === "review") { sessionStorage.removeItem(REVIEW_HANDOFF_TARGET); setReviewOpen(undefined); setNewReviewRequest(value => value + 1); }
-    else { requestEpoch.current++; setConversation(null); setPartial(null); setError(""); setUncertain(false); localStorage.removeItem(LAST_CHAT); }
+    else { requestEpoch.current++; setConversation(null); setTurnEffort(null); setPartial(null); setError(""); setUncertain(false); localStorage.removeItem(LAST_CHAT); }
     setView("chat");
   }
   async function compareInReview(messageId: string) {
@@ -411,6 +419,19 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     if (streaming || loading || reviewBusy || uncertain) return;
     setIosEntry({ product, panel });
   }
+  async function openSavedWorkspace(id: string, origin: "chat" | "review") {
+    sessionStorage.removeItem(REVIEW_HANDOFF_TARGET);
+    handoffOrigin.current = null;
+    if (origin === "review") {
+      setReviewOpen({ id, nonce: ++reviewRequestSequence.current });
+      setProduct("review");
+      setView("chat");
+    } else {
+      if (!await open(id)) throw Error("CONVERSATION_OPEN_FAILED");
+      setProduct("chat");
+    }
+    setIosEntry(null);
+  }
   async function startIosAssistant(profile: { id: string }) {
     if (!iosEntry) throw Error("NATIVE_TOOLS_UNAVAILABLE");
     const origin = iosEntry.product, scope = requestEpoch.current;
@@ -449,7 +470,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
 
   const productSelector = <select data-testid="product-switcher" className="product-switcher" aria-label={workspaceCopy.product} value={product} disabled={streaming || reviewBusy || handoffBusy || uncertain} onChange={event => switchProduct(event.target.value as "chat" | "review")}><option value="chat">Chat</option><option value="review">Review</option></select>;
 
-  return <main className="mobile-app ios-workspace native-workspace" data-compact={compact || undefined} style={visibleHeight ? { height: visibleHeight } : undefined}>
+  return <main className="mobile-app ios-workspace native-workspace" data-ios-refresh={isIosWorkspace || undefined} data-compact={compact || undefined} style={visibleHeight ? { height: visibleHeight } : undefined}>
     <header className="app-header" data-product-control={signedIn && compact && view === "chat" || undefined}>
       <button className="menu-button" aria-label={view === "list" ? navigationCopy.returnToChat : copy.chats} onClick={() => view === "list" ? returnToWorkspace() : setView("list")} disabled={!signedIn}>{view === "list" ? <ArrowLeft size={22} aria-hidden="true" /> : <><AppIcon name="menu" /><AppIcon name="menuDark" /></>}</button>
       <button type="button" className="brand-lockup" aria-label={navigationCopy.home} onClick={returnToWorkspace}><AppIcon name="logo" /><span className="wordmark tomverse-wordmark">tomverse<span className="tomverse-wordmark-dot">.</span></span></button>
@@ -501,7 +522,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
         {/* A continuation is never a blank new chat: its original is its start. */}
         {conversation?.assistantProfileId && <IosAssistantBadge id={conversation.assistantProfileId} transport={transport} />}
         {!conversation?.messages.length && !streaming && conversation?.surface !== "continuation" && <IosWelcome importsEnabled={iosImportsEnabled} language={language} automatic={conversation ? conversation.selectionMode === "auto" && conversation.autoSelection?.offered === true : draftAutoOffered} imageEnabled={iosImageEnabled} onPanel={openIosPanel} onSeed={seedIosWorkspace} />}
-        {conversation?.surface === "continuation" && !conversation.messages.length && !streaming && <div className="ios-continuation-start"><h2>{mobileIosWorkspaceCopy(language).disclosure}</h2><p>{mobileIosWorkspaceCopy(language).readOnly}</p><button onClick={() => setDraft(language === "ko" ? "지난 대화를 바탕으로 다음 할 일을 정리해줘." : "Based on our previous conversation, help me plan the next steps.")}>{language === "ko" ? "다음 할 일부터 정리해줘" : "Help me plan the next steps"}</button></div>}
+        {conversation?.surface === "continuation" && !conversation.messages.length && !streaming && <div className="ios-continuation-start"><h2>{mobileIosWorkspaceCopy(language).disclosure}</h2><p>{mobileIosWorkspaceCopy(language).readOnly}</p><button onClick={() => setDraft(mobileIosWorkspaceCopy(language).nextStepsPrompt)}>{mobileIosWorkspaceCopy(language).nextSteps}</button></div>}
         {pendingQuestion !== null && <article className="message user"><AnswerContent content={pendingQuestion} transport={transport} language={language} /></article>}
         {conversation?.messages.map((message) => <article key={message.id} className={`message ${message.role}`}>{message.role === "assistant" && <span className="message-label response-identity"><AppIcon name="logo" />Tomverse</span>}{message.researchRunId && conversation && transport.researchRuns && <ResearchPreviewRunCard
           runId={message.researchRunId} conversationId={conversation.id} assistantMessageId={message.id} language={language} transport={transport.researchRuns}
@@ -516,11 +537,11 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
       </div>
       {uncertain && conversation && <button className="restore" onClick={() => void open(conversation.id)}>{copy.restore} ↻</button>}
       <Composer researchPreview={researchPreview} extraTools={iosExtraTools} product="chat" onProductChange={switchProduct} productBusy={streaming || loading || handoffBusy || uncertain} productLoading={loading}
-        selectionControl={<button type="button" className="model-trigger" disabled={streaming || loading || uncertain} onClick={() => setModelPicker(true)}><span>{conversation?.selectionMode === "auto" || (!conversation && draftAutoOffered) ? "Smart Adaptive" : getModel(conversation?.selectedModels[0] ?? "")?.name ?? workspaceCopy.model}</span><span aria-hidden="true">⌄</span></button>}
+        selectionControl={<button type="button" className="model-trigger" disabled={streaming || loading || uncertain} onClick={() => setModelPicker(true)}><span>{conversation?.selectionMode === "auto" || (!conversation && draftAutoOffered) ? "Smart Adaptive" : getModel(conversation?.selectedModels[0] ?? "")?.name ?? workspaceCopy.model}{selectedEffort && !researchPreview.selected ? ` · ${reasoningEffortCopy[language][selectedEffort]}` : ""}</span><span aria-hidden="true">⌄</span></button>}
         locationIdentity={owner} files={revisionDraft.files} onFilesChange={revisionDraft.setFiles} onRemoveFile={revisionDraft.removeFile} onFileUploaded={revisionDraft.addFile} copy={copy} language={language} transport={transport} draft={draft} setDraft={setDraft} disabled={loading || handoffBusy || uncertain} offline={offline} streaming={streaming} conversation={conversation} onConfigureTools={configureTools} onSend={(text, files) => send(text, files, false, researchPreview.selected).then(result => result === false ? false : undefined)} onStop={() => abort.current?.abort()} voiceConversation={disabled => <VoiceConversation transport={transport} language={language} conversationId={conversation?.id ?? null} scopeKey={`${owner}:${signedIn}:${product}`} disabled={disabled} selectionLabel={conversation?.selectionMode === "auto" || (!conversation && draftAutoOffered) ? "Smart Adaptive" : conversation?.selectedModels[0] ?? "Tomverse"} searchEnabled={conversation ? conversation.webSearchMode === "always" : true} onSessionEnded={() => setVoiceRevision(value => value + 1)} onRequest={async text => { const receipt = await send(text, [], true); if (!receipt) throw Error("VOICE_ANSWER_FAILED"); return receipt; }} />} />
     </>}
-    {iosEntry && signedIn && <IosWorkspacePanel key={`workspace:${owner}`} entry={iosEntry} language={language} transport={transport} imageEnabled={iosImageEnabled} onClose={() => setIosEntry(null)} onStartAssistant={startIosAssistant} onContinue={async id => { if (await open(id)) { setProduct("chat"); setIosEntry(null); } else throw Error("CONVERSATION_OPEN_FAILED"); }} onSeed={seedIosWorkspace} onSettings={tab => { setIosEntry(null); openSettings(tab); }} />}
-    {modelPicker && <ModelSheet transport={transport} conversation={conversation} language={language} onClose={() => setModelPicker(false)} onApply={configureModel} />}
+    {iosEntry && signedIn && <IosWorkspacePanel key={`workspace:${owner}`} entry={iosEntry} language={language} transport={transport} imageEnabled={iosImageEnabled} onClose={() => setIosEntry(null)} onStartAssistant={startIosAssistant} onContinue={id => openSavedWorkspace(id, "chat")} onOpenSaved={isIosWorkspace ? openSavedWorkspace : undefined} onSeed={seedIosWorkspace} onSettings={tab => { setIosEntry(null); openSettings(tab); }} />}
+    {modelPicker && <ModelSheet transport={transport} conversation={conversation} language={language} effortEnabled={isIosWorkspace && !researchPreview.selected} initialEffort={selectedEffort} onClose={() => setModelPicker(false)} onApply={configureModel} />}
     {accountOpen && <Sheet title={mobileSettingsCopy(language).accountData} closeLabel={copy.close} onClose={() => setAccountOpen(false)} exitLabel={navigationCopy.returnToChat} onExit={returnToWorkspace}><button type="button" className="settings-detail-back" onClick={() => { setAccountOpen(false); openSettings("data"); }}><span aria-hidden="true">← </span>{mobileSettingsCopy(language).back}</button><AccountScreen transport={transport} language={language} onReauthenticate={() => void reauthenticate()} onDeleted={() => { setAccountOpen(false); clearNativeDrafts(); setOwner(null); setSignedIn(false); setConversation(null); setChats([]); localStorage.removeItem(LAST_CHAT); }} /></Sheet>}
     {!demo && <NativeLocationOnboarding language={language} />}
     {reportFor && signedIn && <Sheet title={workspaceCopy.report} closeLabel={copy.close} onClose={() => setReportFor(null)}><AnswerReport transport={transport} language={language} messageId={reportFor.messageId} modelId={reportFor.modelId} /></Sheet>}
