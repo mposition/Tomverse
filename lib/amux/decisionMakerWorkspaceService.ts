@@ -173,8 +173,9 @@ async function readRunPatch(tx: Prisma.TransactionClient, attemptId: string | nu
     keyId: true, keyVersion: true, digest: true, digestKeyId: true, bodyPurgedAt: true, patchSha256: true,
     baseSha: true } });
   if (!patch || patch.taskId !== taskId) return null;
-  const { taskId: _taskId, ...sealedPatch } = patch;
-  return sealedPatch;
+  return { ideaId: patch.ideaId, keyId: patch.keyId, keyVersion: patch.keyVersion, digest: patch.digest,
+    digestKeyId: patch.digestKeyId, bodyPurgedAt: patch.bodyPurgedAt, patchSha256: patch.patchSha256,
+    baseSha: patch.baseSha };
 }
 
 /** The run's change, or null when it left none or it cannot be opened (purged, or no longer its digest). */
