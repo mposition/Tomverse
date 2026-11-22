@@ -11,6 +11,7 @@ import {
   dmParseLaunchRequest,
   type DmLauncherProtocolError,
 } from "./decisionMakerBrokerCore.ts";
+import type { DmToolSummary } from "./decisionMakerLauncherCore.ts";
 import { DM_SYSTEM_HOST, dmCleanupVendor, type DmLauncherHost } from "./decisionMakerLauncherFs.ts";
 import { launchDecisionMaker, type DmLaunchOptions } from "./decisionMakerLauncherProcess.ts";
 import { dmCloseStream, dmReadLine, dmWriteLine } from "./decisionMakerSocketLine.ts";
@@ -52,9 +53,13 @@ export type DmLauncherServeOptions = {
   requestReadTimeoutMs?: number;
 };
 
-/** What the connection came to, for the caller's log: codes only. */
+/**
+ * What the connection came to, for the caller's log: codes and counts only.
+ * `requestId` joins the line to the broker's; `tools` says what the DM's tools
+ * did (lib/amux/decisionMakerLauncherCore.ts `dmToolSummary`).
+ */
 export type DmLauncherServed =
-  | { answered: "launched"; outcome: string; cleanup: string }
+  | { answered: "launched"; requestId: string; outcome: string; cleanup: string; tools: DmToolSummary | null }
   | { answered: "rejected"; error: DmLauncherProtocolError; cleanup: string }
   | { answered: "not_ready" };
 
@@ -93,7 +98,13 @@ export async function serveDecisionMakerLauncherConnection(
       { ...options.launch, host },
     );
     await dmWriteLine(stream, dmEncodeLauncherLaunched(request, report.result, report.cleanup), DM_LINE_WRITE_TIMEOUT_MS);
-    return { answered: "launched", outcome: report.result.outcome, cleanup: report.cleanup.status };
+    return {
+      answered: "launched",
+      requestId: request.requestId,
+      outcome: report.result.outcome,
+      cleanup: report.cleanup.status,
+      tools: report.tools ?? null,
+    };
   } finally {
     await dmCloseStream(stream, DM_LINE_WRITE_TIMEOUT_MS);
   }

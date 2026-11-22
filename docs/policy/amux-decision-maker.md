@@ -509,6 +509,16 @@ sha256을 아래 값과 대조한다. 다르면 시작을 거부하고, 새 버�
 `~/.local/share/claude/versions/2.1.296`이다(둘 다 그 계정 홈 안). root 소유 경로로 옮긴 사본의 sha256이 이 값과 같아야
 한다.
 
+**함께 두는 파일(2026-11-22, 운영자 승인은 PR에 기록).** codex 0.162는 gpt-6-astra의 도구 호출을 모두 Code Mode로 돌리고, 그 host는
+실행 파일 옆의 `codex-code-mode-host`다. host를 끄거나 없으면 모든 명령이 닫힌 채 실패해 DM이 작업 공간을 읽지 못한다
+(AMUX-CRAWL-002, 2026-11-21). 그래서 host를 켜고(고정 argv에 `--disable code_mode_host`가 없다) 실행 파일처럼 root 소유
+경로 `/opt/tomverse-amux-dm/codex-cli-0.162.1/codex-code-mode-host`에 두며, broker는 시작마다 그 sha256
+`ec71830690a7c0024916ee0c99fbdc635bc6e747ff665ea4f03a8389bbcb6b30`을 대조한다(실행 digest에 들어간다). 파일은 rust-v0.162.1
+release 자산 `codex-code-mode-host-x86_64-unknown-linux-musl.tar.gz`(자산 sha256
+`458239ea45c1fc508d89695f180ab352f2834709a8a46929a4466f4f04399ada`)의 유일한 파일이다. host는 도구 호출을 codex에 되돌려
+보낼 뿐이고, 명령은 그대로 권한 profile `dm` 안에서 돈다. 2026-11-22 box에서 같은 argv로 요청 디렉터리 읽기는 되고, 쓰기·
+네트워크·요청 디렉터리 밖 파일은 막히는 것을 확인했다. claude는 함께 두는 파일이 없다.
+
 **고정 argv.** 질문은 stdin으로만 넘기고 argv에는 질문 내용이 없다. 요청마다 바뀌는 것은 `<요청 디렉터리>`와
 `<요청별 출력 파일>` 두 경로뿐이고 broker가 만든다. `<스키마 파일>`은 root 소유의 고정 파일이고 `<스키마 JSON>`은 그
 파일의 바이트 그대로다(§6의 출력 스키마. 내용은 S2-3 launcher의 상수이며 그 sha256이 실행 digest에 들어간다). 그 밖의
@@ -520,7 +530,7 @@ codex -a never --no-daemon exec --ephemeral --ignore-user-config --ignore-rules 
   -c permissions.dm.filesystem={":minimal"="read","<요청 디렉터리>"="read","/opt/tomverse-amux-dm/codex-cli-0.162.1"="read"}
   --json --output-schema <스키마 파일> -o <요청별 출력 파일> -m gpt-6-astra -C <요청 디렉터리>
   --disable shell_snapshot
-  --disable code_mode_host --disable write_stdin_approval --disable sleep_tool --disable browser_use
+  --disable write_stdin_approval --disable sleep_tool --disable browser_use
   --disable browser_use_external --disable browser_use_full_cdp_access --disable browser_annotation_api
   --disable computer_use --disable in_app_browser --disable apps --disable plugins --disable plugin_sharing
   --disable remote_plugin --disable hooks --disable skill_mcp_dependency_install --disable skill_search

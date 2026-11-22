@@ -54,6 +54,12 @@ touch(process.env.HOME + "/.cache/claude/model-catalog/x.json", "{}");
 touch(process.env.HOME + "/.local/state/claude/locks/2.1.296.lock", "");`;
 
 const writeOutput = (value) => `touch(argv[argv.indexOf("-o") + 1], ${JSON.stringify(JSON.stringify(value))});`;
+/** The result and cleanup alone: the tool summary has its own test. */
+const withoutTools = (value) => {
+  const rest = { ...value };
+  delete rest.tools;
+  return rest;
+};
 const events = (...list) => `process.stdout.write(${JSON.stringify(list.map((event) => JSON.stringify(event)).join("\n") + "\n")});`;
 const claudeResult = (overrides = {}) =>
   `process.stdout.write(${JSON.stringify(
@@ -249,8 +255,18 @@ test("finding 2: bytes the caller changes right after the call are not what is s
 // ---------------------------------------------------------------------------
 
 test("codex: the planned command runs with the fixed environment and the question on stdin; -o is the result", { skip: !posix }, async () => {
-  const result = await run(OPENAI, recording(`${CODEX_STATE}\n${writeOutput({ output: select })}\n${events({ type: "thread.started" }, { type: "turn.completed" })}`));
-  assert.deepEqual(result.report, { result: { outcome: "output", raw: JSON.stringify(select) }, cleanup: VERIFIED });
+  const result = await run(OPENAI, recording(`${CODEX_STATE}\n${writeOutput({ output: select })}\n${events(
+    { type: "thread.started" },
+    { type: "item.completed", item: { id: "item_0", type: "error", message: "synthetic tool error" } },
+    { type: "item.completed", item: { id: "item_1", type: "command_execution", exit_code: 0, status: "completed" } },
+    { type: "turn.completed" },
+  )}`));
+  // The tool summary is counts only, for the launcher's log; the result is still the -o file.
+  assert.deepEqual(result.report, {
+    result: { outcome: "output", raw: JSON.stringify(select) },
+    cleanup: VERIFIED,
+    tools: { commands: 1, failedCommands: 0, toolErrors: 1 },
+  });
   assert.deepEqual(result.requestCleanup, VERIFIED);
   const planned = dmExecutionPlan(OPENAI, REQUEST_ID);
   assert.deepEqual(JSON.parse(result.observed("argv.json")), planned.plan.argv.slice(1));
@@ -272,7 +288,7 @@ test("codex: the planned command runs with the fixed environment and the questio
 
 test("claude: structured_output is the result; the account's state is gone afterwards", { skip: !posix }, async () => {
   const result = await run(ANTHROPIC, recording(`${CLAUDE_STATE}\n${claudeResult()}`));
-  assert.deepEqual(result.report, { result: { outcome: "output", raw: JSON.stringify(select) }, cleanup: VERIFIED });
+  assert.deepEqual(withoutTools(result.report), { result: { outcome: "output", raw: JSON.stringify(select) }, cleanup: VERIFIED });
   assert.deepEqual(JSON.parse(result.observed("argv.json")), dmExecutionPlan(ANTHROPIC, REQUEST_ID).plan.argv.slice(1));
   // §5a: claude's working directory is the request directory.
   assert.equal(result.observed("cwd").toString().endsWith(`/var/lib/amux-dm/requests/${REQUEST_ID}`), true);
@@ -291,7 +307,7 @@ test("§5a failure signals are no result, and cleanup runs after each", { skip: 
   ];
   for (const [instance, body, reason] of cases) {
     const result = await run(instance, recording(body));
-    assert.deepEqual(result.report, { result: { outcome: "unavailable", reason }, cleanup: VERIFIED }, reason);
+    assert.deepEqual(withoutTools(result.report), { result: { outcome: "unavailable", reason }, cleanup: VERIFIED }, reason);
     assert.deepEqual(result.requestCleanup, VERIFIED, reason);
     assert.equal(result.requestGone && result.temporaryGone, true);
   }
@@ -300,7 +316,7 @@ test("§5a failure signals are no result, and cleanup runs after each", { skip: 
 test("codex: an -o that links to another file is never read", { skip: !posix }, async () => {
   const body = `fs.symlinkSync(at(process.env.HOME + "/.codex/auth.json"), at(argv[argv.indexOf("-o") + 1]));`;
   const result = await run(OPENAI, recording(body));
-  assert.deepEqual(result.report, { result: { outcome: "unavailable", reason: "result_unreadable" }, cleanup: VERIFIED });
+  assert.deepEqual(withoutTools(result.report), { result: { outcome: "unavailable", reason: "result_unreadable" }, cleanup: VERIFIED });
 });
 
 test("§5: the hard timeout kills the whole process group; it is a timeout and cleanup runs", { skip: !posix }, async () => {
@@ -312,7 +328,7 @@ touch("/observed/self.pid", String(process.pid));
 setTimeout(() => {}, 60000);`;
   const started = Date.now();
   const result = await run(OPENAI, recording(body), { options: { timeoutMs: 1_500 } });
-  assert.deepEqual(result.report, { result: { outcome: "timeout" }, cleanup: VERIFIED });
+  assert.deepEqual(withoutTools(result.report), { result: { outcome: "timeout" }, cleanup: VERIFIED });
   assert.deepEqual(result.requestCleanup, VERIFIED);
   assert.ok(Date.now() - started < 15_000);
   assert.equal(await settle(result.pidOf("self.pid")), false);
@@ -327,13 +343,13 @@ const child = spawn("/bin/sleep", ["60"], { stdio: ["ignore", "inherit", "ignore
 touch("/observed/grandchild.pid", String(child.pid));
 child.unref();`;
   const result = await run(OPENAI, recording(body));
-  assert.deepEqual(result.report, { result: { outcome: "output", raw: JSON.stringify(select) }, cleanup: VERIFIED });
+  assert.deepEqual(withoutTools(result.report), { result: { outcome: "output", raw: JSON.stringify(select) }, cleanup: VERIFIED });
   assert.equal(await settle(result.pidOf("grandchild.pid")), false);
 });
 
 test("an executable the account cannot run is spawn_failed, and cleanup runs", { skip: !posix }, async () => {
   const result = await run(ANTHROPIC, recording(claudeResult()), { mode: 0o644 });
-  assert.deepEqual(result.report, { result: { outcome: "unavailable", reason: "spawn_failed" }, cleanup: VERIFIED });
+  assert.deepEqual(withoutTools(result.report), { result: { outcome: "unavailable", reason: "spawn_failed" }, cleanup: VERIFIED });
   assert.equal(result.started, false);
   assert.equal(result.requestGone && result.temporaryGone, true);
 });
