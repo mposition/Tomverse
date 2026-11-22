@@ -28,7 +28,7 @@ export function SettingsScreen({ transport, signedIn, language, theme, onLanguag
   const copy = mobileCopy[language]; const c = mobileParityCopy(language); const navigation = mobileSettingsCopy(language);
   const design = mobileSettingsDesignCopy(language);
   const [now, setNow] = useState(() => Date.now());
-  const [tab, setTab] = useState<AccountSettingsTab>(initialTab === "developer" ? "account" : initialTab);
+  const [tab, setTab] = useState<NativeSettingsTab>(initialTab === "developer" ? "account" : initialTab);
   const [detail, setDetail] = useState<"memory" | null>(null);
   const entryPrefix = useId();
   const memoryEntry = useRef<HTMLButtonElement>(null);
