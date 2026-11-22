@@ -75,13 +75,13 @@ export async function recoverStaleReservingSegments(limit = 100) {
     include: { run: { select: { userId: true, recoveryQuarantinedAt: true } } }, take: limit, orderBy: { createdAt: "asc" } });
   let recovered = 0;
   for (const segment of segments) {
-    if (segment.run.recoveryQuarantinedAt) continue;
+    if (!segment.run || !segment.runId || segment.run.recoveryQuarantinedAt) continue;
     const ok = await isolate(segment.runId, async () => {
       const reservation = await prisma.chatCreditReservation.findFirst({ where: { traceId: segment.id, status: "reserved" }, select: { id: true, reservedCredits: true } });
       if (reservation) {
         await bindResearchFundingReservation(segment.id, reservation.id, Math.min(reservation.reservedCredits, segment.reservedCredits));
         const funding = await researchFundingAdapter();
-        await funding.settle({ userId: segment.run.userId, reservationId: reservation.id, usage: { inputTokens: 0, outputTokens: 0,
+        await funding.settle({ userId: segment.run!.userId, reservationId: reservation.id, usage: { inputTokens: 0, outputTokens: 0,
           cachedInputTokens: 0, cacheWriteInputTokens: 0, reasoningTokens: 0, usageFromProvider: true, outcome: "failed", searchExecuted: false,
           searchQueryCount: 0, searchBackendRequestCount: 0, searchQueriesObserved: true } });
       }
@@ -105,7 +105,7 @@ export async function releaseOrphanedResearchSegments(limit = 100) {
   for (const segment of segments) {
     const ok = await isolate(segment.runId, async () => {
       const claimed = await prisma.$transaction(async (tx) => {
-        await lockResearchRun(tx, segment.runId);
+        await lockResearchRun(tx, segment.runId!);
         await tx.$queryRaw`SELECT "id" FROM "ResearchFundingSegment" WHERE "id" = ${segment.id} FOR UPDATE`;
         const current = await tx.researchFundingSegment.findUnique({ where: { id: segment.id }, include: { generations: { select: { id: true } } } });
         if (!current || current.status !== "reserved" || current.generations.length) return false;
@@ -115,7 +115,7 @@ export async function releaseOrphanedResearchSegments(limit = 100) {
       if (!claimed || !segment.reservationId) return;
       const funding = await researchFundingAdapter();
       // Nothing dispatched on this hold; refund it. A failure leaves it to expiry, which reads "released" as zero.
-      await funding.settle({ userId: segment.run.userId, reservationId: segment.reservationId, usage: { inputTokens: 0, outputTokens: 0,
+      await funding.settle({ userId: segment.run!.userId, reservationId: segment.reservationId, usage: { inputTokens: 0, outputTokens: 0,
         cachedInputTokens: 0, cacheWriteInputTokens: 0, reasoningTokens: 0, usageFromProvider: true, outcome: "failed", searchExecuted: false,
         searchQueryCount: 0, searchBackendRequestCount: 0, searchQueriesObserved: true } }).catch((error: unknown) => {
         console.error(JSON.stringify({ event: "research_engine_orphan_settle_deferred", segmentId: segment.id, code: (error as { code?: string }).code ?? "unknown" }));

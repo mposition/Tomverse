@@ -24,7 +24,9 @@ process.env.CHAT_PROVIDER_GOOGLE_COST_MICROUSD_PER_MONTH = "1000000000";
 before(async () => { await prisma.researchPreviewRun.deleteMany({ where: { engineVersion: 2 } }); });
 after(async () => {
   const segments = await prisma.researchFundingSegment.findMany({ where: { run: { userId: { in: users } } }, select: { reservationId: true } });
+  const reservationIds = segments.map((segment) => segment.reservationId).filter(Boolean) as string[];
   await prisma.user.deleteMany({ where: { id: { in: users } } });
+  await prisma.researchFundingSegment.deleteMany({ where: { reservationId: { in: reservationIds } } });
   await prisma.chatCreditReservation.deleteMany({ where: { id: { in: segments.map((segment) => segment.reservationId).filter(Boolean) as string[] } } });
   await prisma.$disconnect();
 });
@@ -51,6 +53,11 @@ test("every paid dispatch is one Chat reservation, settled at or below its hold,
     assert.ok((segment.settledCredits ?? 0) <= segment.reservedCredits);
     assert.equal(segment.reservation!.settledCredits, segment.settledCredits);
   }
+  // A search-enabled dispatch that served no search gets its reserved surcharge back.
+  const noSearch = segments.filter((segment) => segment.status === "settled" && segment.searchSurchargeCredits > 0 &&
+    (segment.settlementUsage as { searchExecuted?: boolean } | null)?.searchExecuted === false);
+  assert.ok(noSearch.length > 0, "the fixture has a researcher turn without searches");
+  for (const segment of noSearch) assert.ok((segment.settledCredits ?? 0) <= segment.reservedCredits - segment.searchSurchargeCredits, "surcharge refunded");
   const money = await readResearchRunMoney(prisma, run.id);
   assert.equal(money.reservedCredits, 0);
   assert.equal(money.settledCredits, segments.reduce((sum, segment) => sum + (segment.settledCredits ?? 0), 0));

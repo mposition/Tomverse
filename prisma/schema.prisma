@@ -2340,7 +2340,9 @@ model ResearchWorkItem {
 /// is enforced under the run row lock before each reservation is requested.
 model ResearchFundingSegment {
   id              String    @id @default(cuid())
-  runId           String
+  /// Null once the run is deleted: the hold and its settlement record outlive the
+  /// run so expiry can never mistake a possibly-dispatched hold for an unused one.
+  runId           String?
   sequence        Int
   purpose         String
   status          String    @default("reserving")
@@ -2350,13 +2352,16 @@ model ResearchFundingSegment {
   modelId         String
   provider        String
   pricingVersion  String
+  /// Web search surcharge held on this reservation; refunded at settlement when no search ran.
+  searchSurchargeCredits Int @default(0)
   settlementUsage Json?
   createdAt       DateTime  @default(now())
   settledAt       DateTime?
   updatedAt       DateTime  @updatedAt
 
-  run         ResearchPreviewRun          @relation(fields: [runId], references: [id], onDelete: Cascade)
-  reservation ChatCreditReservation?      @relation(fields: [reservationId], references: [id], onDelete: SetNull)
+  run         ResearchPreviewRun?         @relation(fields: [runId], references: [id], onDelete: SetNull)
+  /// Restrict: a Chat reservation is a financial record and is not deleted while a segment names it.
+  reservation ChatCreditReservation?      @relation(fields: [reservationId], references: [id], onDelete: Restrict)
   generations ResearchPreviewGeneration[]
 
   @@unique([runId, sequence])

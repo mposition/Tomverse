@@ -37,7 +37,7 @@ export function createFakeFunding(options: { creditsPerCall?: number; searchSurc
   let refuseNext: null | { kind: "budget" | "backpressure"; code: string } = null;
   const adapter: ResearchFundingAdapter = {
     async estimate({ searchEnabled }) {
-      return { credits: perCall + (searchEnabled ? surcharge : 0), pricingVersion: "fake-pricing-v1", budget: { fake: true } };
+      return { credits: perCall + (searchEnabled ? surcharge : 0), pricingVersion: "fake-pricing-v1", searchSurchargeCredits: searchEnabled ? surcharge : 0, budget: { fake: true } };
     },
     async reserve({ userId, estimate, segmentId }) {
       if (refuseNext) { const refusal = refuseNext; refuseNext = null; return { ok: false, ...refusal }; }

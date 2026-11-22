@@ -41,12 +41,13 @@ test("rendering escapes model text, numbers citations against the bibliography a
 
 test("the public redaction reuses no writer or synthesizer prose and no private claim or source", () => {
   const document = doc();
+  document.sections[0].heading = "Heading edited with private salary";
   document.title = "Title written after reading private notes";
   document.summary = "Summary that mentions the private salary";
   document.limitations = ["Limitation derived from the private file"];
   document.nextQuestions = ["Ask about the private salary"];
   document.bibliography = buildBibliography(document, claims, sources);
-  const { document: shared } = redactReportForPublic(document, claims, { title: "User question", headings: new Map([["s1", "Planner heading"]]),
+  const { document: shared } = redactReportForPublic(document, claims, { title: "User question",
     summary: "public summary note", removedNote: "removed", publicQuestion: "Public question only" });
   const json = JSON.stringify(shared);
   for (const leaked of ["Private paragraph", "Private fact", "my-private-file", "private salary", "private notes", "Public paragraph", "Limitation derived"]) {
@@ -55,7 +56,7 @@ test("the public redaction reuses no writer or synthesizer prose and no private 
   assert.equal(shared.title, "User question");
   assert.equal(shared.scope.question, "Public question only");
   assert.deepEqual(shared.scope.assumptions, []);
-  assert.equal(shared.sections[0].heading, "Planner heading");
+  assert.equal(shared.sections[0].heading, "§ 1");
   assert.deepEqual(shared.sections[0].blocks.map((block) => block.claimKeys), [["C1"]], "only the public, citable claim, as its own text");
   assert.ok(shared.bibliography.every((entry) => !entry.private));
 });

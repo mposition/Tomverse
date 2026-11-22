@@ -328,7 +328,7 @@ export class ResearchFundingRoomError extends Error {
  */
 export async function claimResearchFundingRoom(input: {
   runId: string; purpose: "plan" | "work" | "finalization"; credits: number;
-  modelId: string; provider: string; pricingVersion: string; fence?: ResearchItemFence;
+  modelId: string; provider: string; pricingVersion: string; fence?: ResearchItemFence; searchSurchargeCredits?: number;
 }) {
   if (!Number.isSafeInteger(input.credits) || input.credits < 0) throw new Error("RESEARCH_FUNDING_CREDITS_INVALID");
   return prisma.$transaction(async (tx) => {
@@ -344,6 +344,7 @@ export async function claimResearchFundingRoom(input: {
     return tx.researchFundingSegment.create({ data: {
       runId: input.runId, sequence: (max._max.sequence ?? 0) + 1, purpose: input.purpose, status: "reserving",
       reservedCredits: input.credits, modelId: input.modelId, provider: input.provider, pricingVersion: input.pricingVersion,
+      searchSurchargeCredits: Math.max(0, Math.min(input.credits, input.searchSurchargeCredits ?? 0)),
     } });
   });
 }

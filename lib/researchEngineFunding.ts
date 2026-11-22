@@ -14,7 +14,7 @@ import { recordResearchFundingSettled } from "@/lib/researchEngineStore";
  * is enforced separately in lib/researchEngineStore.ts before each hold.
  */
 
-export type ResearchFundingEstimate = { credits: number; pricingVersion: string; budget: unknown };
+export type ResearchFundingEstimate = { credits: number; pricingVersion: string; searchSurchargeCredits: number; budget: unknown };
 
 export type ResearchSettlementUsage = {
   inputTokens?: number; cachedInputTokens?: number; cacheWriteInputTokens?: number;
@@ -73,7 +73,7 @@ export async function createChatResearchFundingAdapter(): Promise<ResearchFundin
         appManagedSearchEnabled: searchEnabled, searchBackend, webSearchSurchargeCredits: surcharge,
         toolInputPasses: 1, toolInputAboveAuthoredLimit: true, totalOutputTokenCap: outputTokenCap,
       });
-      return { credits: budget.usageCredits, pricingVersion: budget.pricingVersion, budget };
+      return { credits: budget.usageCredits, pricingVersion: budget.pricingVersion, searchSurchargeCredits: surcharge, budget };
     },
     async reserve({ userId, segmentId, estimate, searchEnabled }) {
       const plan = await getUserBillingPlan(userId);
@@ -126,11 +126,12 @@ export async function settleResearchSegmentIfReady(segmentId: string) {
     where: { id: segmentId },
     include: { run: { select: { userId: true, searchSurchargeCredits: true } }, generations: true },
   });
-  if (!segment || !segment.reservationId || !["reserved", "unknown"].includes(segment.status)) return false;
+  // A segment whose run is gone is left to expiry reconciliation (charged as unknown).
+  if (!segment || !segment.run || !segment.reservationId || !["reserved", "unknown"].includes(segment.status)) return false;
   const generations = segment.generations;
   if (generations.some((generation) => generation.status === "intent" || generation.status === "dispatch_started")) return false;
   const childSearchesPending = await prisma.researchWorkItem.count({
-    where: { runId: segment.runId, kind: "search", status: { in: ["queued", "running", "blocked"] },
+    where: { runId: segment.runId!, kind: "search", status: { in: ["queued", "running", "blocked"] },
       payload: { path: ["fundingSegmentId"], equals: segment.id } },
   });
   if (childSearchesPending) return false;
@@ -146,15 +147,16 @@ export async function settleResearchSegmentIfReady(segmentId: string) {
   const nothingDispatched = model.status === "dispatch_refused";
   const usage: ResearchSettlementUsage = nothingDispatched ? {
     inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0, reasoningTokens: 0,
-    usageFromProvider: true, outcome: "failed", searchExecuted: false, searchQueryCount: 0, searchBackendRequestCount: 0,
-    searchQueriesObserved: true,
+    usageFromProvider: true, outcome: "failed", searchSurchargeCredits: segment.searchSurchargeCredits, searchExecuted: false, searchQueryCount: 0,
+    searchBackendRequestCount: 0, searchQueriesObserved: true,
   } : modelUnknown ? {
-    usageFromProvider: false, outcome: "failed", searchQueriesObserved: false,
+    usageFromProvider: false, outcome: "failed", searchSurchargeCredits: segment.searchSurchargeCredits, searchQueriesObserved: false,
   } : {
     inputTokens: model.inputTokens ?? 0, cachedInputTokens: model.cachedInputTokens ?? 0,
     cacheWriteInputTokens: model.cacheWriteInputTokens ?? 0, outputTokens: model.outputTokens ?? 0,
     reasoningTokens: model.reasoningTokens ?? 0, usageFromProvider: true, outcome: "completed",
-    searchExecuted: succeeded > 0, searchQueryCount: succeeded, searchBackendRequestCount: succeeded,
+    // The reserved surcharge is passed so Chat settlement refunds it when no search was served.
+    searchSurchargeCredits: segment.searchSurchargeCredits, searchExecuted: succeeded > 0, searchQueryCount: succeeded, searchBackendRequestCount: succeeded,
     searchQueriesObserved: !searchUnknown,
   };
   const funding = await researchFundingAdapter();

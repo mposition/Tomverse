@@ -1211,7 +1211,9 @@ docs/policy/external-conversation-continuation.md §4.4, §5.1입니다.
 - **unknown은 0원이 아닙니다.** `dispatch_started` 뒤 결과를 확인하지 못한 dispatch는
   `outcome_unknown`, segment는 `unknown`(보류)이며 같은 dispatch key는 다시 보내지 않습니다.
   유예 뒤 `usageFromProvider: false`로 보수 정산합니다. 실행 중일 수 있는 dispatch의 예약은
-  만료 reconcile이 환불하지 않습니다(`researchPreviewSettlementForExpiry`의 segment 분기).
+  만료 reconcile이 환불하지 않습니다(`researchPreviewSettlementForExpiry`의 segment 분기). 대화·계정
+  삭제로 run이 사라져도 segment는 남고(`runId = NULL`), 그 미정산 hold는 결과 불명으로 정산됩니다.
+  검색 surcharge는 segment에 기록되어 검색이 제공되지 않은 dispatch에서는 Chat 정산이 환불합니다.
 - **계획·offer는 별도입니다.** offer/추정은 결정적 계산이며 모델을 부르지 않습니다. 계획
   생성은 사용자가 누른 명시적 동작이고 run 총액에서 예약합니다.
 

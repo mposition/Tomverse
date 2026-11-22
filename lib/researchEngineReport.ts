@@ -125,22 +125,23 @@ export function renderReportMarkdown(document: ResearchReportDocument, claims: R
  * private material. Writers and the synthesizer received private claims, so
  * none of their prose (title, summary, scope note, paragraphs, tables,
  * conflicts, limitations, next questions, criteria) is reused. The public
- * version is assembled from: the user's own question as title, the planner's
- * outline headings (the planner only sees public context), and the text of
+ * version is assembled from: the approved public brief as title and question,
+ * neutral numbered headings, and the text of
  * claims that are not private-derived and cite no private source (researchers
  * only see public context, and public claims are verified in batches that
  * contain no private claim). Each such claim becomes one cited paragraph.
  */
 export function redactReportForPublic(document: ResearchReportDocument, claims: ReadonlyMap<string, ReportClaim>, input: {
-  title: string; headings: ReadonlyMap<string, string>; summary: string; removedNote: string;
+  title: string; summary: string; removedNote: string;
   /** The text the user approved for public search; the only question a public version may show. */
   publicQuestion: string;
 }) {
   const publicClaims = [...claims.values()].filter((claim) => !claim.privateDerived &&
     claim.evidence.length > 0 && claim.evidence.every((evidence) => !evidence.sourceKey.startsWith("P")) && citableClaim(claim));
-  const sections = document.sections.map((section) => {
+  // Headings are neutral numbers: plan headings and keys are user-editable and may hold private text.
+  const sections = document.sections.map((section, index) => {
     const own = publicClaims.filter((claim) => claim.sectionKey === section.key);
-    return { key: section.key, heading: (input.headings.get(section.key) ?? section.key).slice(0, 160),
+    return { key: `s${index + 1}`, heading: `§ ${index + 1}`,
       blocks: own.slice(0, 60).map((claim) => ({ type: "paragraph" as const, text: claim.text.slice(0, 4_000), claimKeys: [claim.claimKey] })),
       status: own.length ? "written" as const : "missing" as const };
   });

@@ -219,7 +219,9 @@ CREATE INDEX "ResearchWorkItem_status_leaseExpiresAt_idx" ON "ResearchWorkItem"(
 
 CREATE TABLE "ResearchFundingSegment" (
   "id" TEXT NOT NULL,
-  "runId" TEXT NOT NULL,
+  -- Nullable: a segment outlives its run (conversation, message or account deletion)
+  -- so an unsettled or unknown hold keeps the facts expiry reconciliation needs.
+  "runId" TEXT,
   "sequence" INTEGER NOT NULL,
   "purpose" TEXT NOT NULL,
   "status" TEXT NOT NULL DEFAULT 'reserving',
@@ -229,6 +231,7 @@ CREATE TABLE "ResearchFundingSegment" (
   "modelId" TEXT NOT NULL,
   "provider" TEXT NOT NULL,
   "pricingVersion" TEXT NOT NULL,
+  "searchSurchargeCredits" INTEGER NOT NULL DEFAULT 0,
   "settlementUsage" JSONB,
   "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "settledAt" TIMESTAMP(3),
@@ -239,7 +242,7 @@ CREATE TABLE "ResearchFundingSegment" (
     'reserving', 'reserved', 'settled', 'released', 'unknown'
   )),
   CONSTRAINT "ResearchFundingSegment_credits_check" CHECK (
-    "sequence" >= 1 AND "reservedCredits" >= 0 AND
+    "sequence" >= 1 AND "reservedCredits" >= 0 AND "searchSurchargeCredits" >= 0 AND
     ("settledCredits" IS NULL OR ("settledCredits" >= 0 AND "settledCredits" <= "reservedCredits"))
   ),
   CONSTRAINT "ResearchFundingSegment_settled_check" CHECK (
@@ -429,9 +432,9 @@ ALTER TABLE "ResearchPlanRevision" ADD CONSTRAINT "ResearchPlanRevision_runId_fk
 ALTER TABLE "ResearchWorkItem" ADD CONSTRAINT "ResearchWorkItem_runId_fkey"
   FOREIGN KEY ("runId") REFERENCES "ResearchPreviewRun"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE "ResearchFundingSegment" ADD CONSTRAINT "ResearchFundingSegment_runId_fkey"
-  FOREIGN KEY ("runId") REFERENCES "ResearchPreviewRun"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  FOREIGN KEY ("runId") REFERENCES "ResearchPreviewRun"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 ALTER TABLE "ResearchFundingSegment" ADD CONSTRAINT "ResearchFundingSegment_reservationId_fkey"
-  FOREIGN KEY ("reservationId") REFERENCES "ChatCreditReservation"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+  FOREIGN KEY ("reservationId") REFERENCES "ChatCreditReservation"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 ALTER TABLE "ResearchSource" ADD CONSTRAINT "ResearchSource_runId_fkey"
   FOREIGN KEY ("runId") REFERENCES "ResearchPreviewRun"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE "ResearchSourceVersion" ADD CONSTRAINT "ResearchSourceVersion_sourceId_fkey"

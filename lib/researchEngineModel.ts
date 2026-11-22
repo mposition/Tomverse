@@ -109,7 +109,8 @@ export async function callResearchModel<T>(input: {
   let segment;
   try {
     segment = await claimResearchFundingRoom({ runId: input.run.id, purpose: input.purpose, credits: estimate.credits,
-      modelId: model.id, provider: model.provider, pricingVersion: estimate.pricingVersion, fence: input.fence });
+      modelId: model.id, provider: model.provider, pricingVersion: estimate.pricingVersion, fence: input.fence,
+      searchSurchargeCredits: estimate.searchSurchargeCredits });
   } catch (error) {
     if (error instanceof ResearchFundingRoomError) return { ok: false, kind: "budget", code: "RESEARCH_RUN_BUDGET_REACHED" };
     throw error;

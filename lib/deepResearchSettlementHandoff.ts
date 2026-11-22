@@ -263,6 +263,13 @@ async function researchEngineSegmentSettlementForExpiry(
     include: { generations: { select: { kind: true, status: true } } } });
   if (!segment) return null;
   if (segment.status === "settled") return parseResearchPreviewSettlementUsage(segment.settlementUsage);
+  if (segment.runId === null && segment.status !== "released") {
+    // The run (and its dispatch rows) was deleted with its conversation or account.
+    // Whether the hold was dispatched can no longer be shown, so it is charged as unknown, never refunded.
+    await tx.researchFundingSegment.update({ where: { id: segment.id }, data: { status: "settled", settledCredits: segment.reservedCredits,
+      settledAt: now, settlementUsage: { usageFromProvider: false, outcome: "failed", searchQueriesObserved: false, settledBy: "expiry_orphaned" } } });
+    return { usageFromProvider: false, outcome: "failed", searchQueriesObserved: false };
+  }
   if (segment.status === "unknown") {
     await tx.researchFundingSegment.update({ where: { id: segment.id }, data: { status: "settled", settledCredits: segment.reservedCredits,
       settledAt: now, settlementUsage: { usageFromProvider: false, outcome: "failed", searchQueriesObserved: false, settledBy: "expiry" } } });

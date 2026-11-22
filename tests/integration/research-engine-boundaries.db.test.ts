@@ -344,7 +344,7 @@ test("a hold bound but never dispatched is not settled as zero while a worker ma
   const item = await prisma.researchWorkItem.findFirstOrThrow({ where: { runId: run.id, idempotencyKey: "probe" } });
   const segment = await claimResearchFundingRoom({ runId: run.id, purpose: "plan", credits: 10, modelId: "gemini-3-1-pro", provider: "google", pricingVersion: "fake-pricing-v1" });
   const reservation = await fakes.funding.adapter.reserve({ userId: user.id, segmentId: segment.id, model: {} as never,
-    estimate: { credits: 10, pricingVersion: "fake-pricing-v1", budget: {} }, searchEnabled: false });
+    estimate: { credits: 10, pricingVersion: "fake-pricing-v1", searchSurchargeCredits: 0, budget: {} }, searchEnabled: false });
   assert.ok(reservation.ok);
   await prisma.researchFundingSegment.update({ where: { id: segment.id }, data: { status: "reserved", reservationId: reservation.reservationId } });
   const { settleResearchSegmentIfReady } = await import("@/lib/researchEngineFunding");
@@ -409,4 +409,27 @@ test("a run with an unsettled unknown dispatch cannot be deleted; synthesis re-c
   await drainResearchWork("synth-b", 2);
   assert.equal(fakes.model.calls.filter((call) => call.tool === "submit_research_synthesis").length, before, "synthesis was not sent after the source was re-locked");
   assert.equal((await readResearchRunDto(owner.id, privateRun.id)).status, "completed", "a model-free partial report was kept");
+});
+
+test("deleting the conversation of a run with an open or unknown hold keeps the hold's record, and expiry charges it instead of refunding", async () => {
+  let turns = 0;
+  const model = createFakeModel({ respond: (call) => {
+    if (call.tool === "submit_research_turn" && turns++ === 0) return { usage: "unknown" };
+    return defaultResponse(call, { subquestions: 1, sections: 1 });
+  } });
+  installFakes({ model });
+  createFakeWeb();
+  const user = await createUser("cascade");
+  const run = await create(user.id);
+  await drainResearchWork("cascade", 1, { maxSlices: 2 });
+  const unknown = await prisma.researchFundingSegment.findFirstOrThrow({ where: { runId: run.id, status: "unknown" } });
+  await prisma.conversation.delete({ where: { id: run.conversationId } });
+  const orphan = await prisma.researchFundingSegment.findUniqueOrThrow({ where: { id: unknown.id } });
+  assert.equal(orphan.runId, null, "the segment outlives its run");
+  const { researchPreviewSettlementForExpiry } = await import("@/lib/deepResearchSettlementHandoff");
+  const usage = await prisma.$transaction((tx) => researchPreviewSettlementForExpiry(tx, orphan.reservationId!));
+  assert.equal(usage?.usageFromProvider, false, "charged conservatively, not refunded");
+  const settled = await prisma.researchFundingSegment.findUniqueOrThrow({ where: { id: unknown.id } });
+  assert.equal(settled.status, "settled");
+  assert.equal(settled.settledCredits, settled.reservedCredits);
 });

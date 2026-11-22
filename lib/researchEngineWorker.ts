@@ -1097,10 +1097,8 @@ export async function createPublicRedaction(runId: string, parentRevision: numbe
       text: claim.text, kind: claim.kind as ReportClaim["kind"], verification: claim.verification as ReportClaim["verification"],
       privateDerived: claim.privateDerived, evidence: claim.evidence as ReportClaim["evidence"] }]));
     const labels = researchEngineLabels(manifest.brief.outputLanguage ?? manifest.locale);
-    const plan = run.approvedPlanRevision ? await tx.researchPlanRevision.findUnique({ where: { runId_revision: { runId, revision: run.approvedPlanRevision } } }) : null;
-    const headings = new Map((plan ? researchPlanSchema.parse(plan.plan).outline : []).map((section) => [section.key, section.heading]));
     const { document } = redactReportForPublic(researchReportDocumentSchema.parse(parent.document), claims, {
-      title: manifest.publicBrief.slice(0, 200), headings, summary: labels.redactedNote, removedNote: labels.redactedNote, publicQuestion: manifest.publicBrief });
+      title: manifest.publicBrief.slice(0, 200), summary: labels.redactedNote, removedNote: labels.redactedNote, publicQuestion: manifest.publicBrief });
     const latest = await tx.researchReportRevision.aggregate({ where: { runId }, _max: { revision: true } });
     const revision = (latest._max.revision ?? 0) + 1;
     const created = await tx.researchReportRevision.create({ data: { runId, revision, parentRevision, planRevision: parent.planRevision,
