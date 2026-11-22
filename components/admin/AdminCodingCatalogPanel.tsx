@@ -5,7 +5,7 @@ import { Plus, RefreshCw } from "lucide-react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { CodingModelDetail, CodingModelForm, type CodingModelFormValue } from "@/components/admin/modelCatalog/CodingCatalogViews";
-import { CodingCandidates, CodingChannelsTile, CodingLinkDetail } from "@/components/admin/modelCatalog/CodingLinkViews";
+import { CodingCandidates, CodingChannelsTile, CodingLinkDetail, CodingNotesTile } from "@/components/admin/modelCatalog/CodingLinkViews";
 import {
   CandidateSummary,
   CapabilityFillBar,
@@ -338,7 +338,10 @@ export function AdminCodingCatalogPanel() {
   };
 
   // A dedicated row's settings here: where it is offered, and its coding API credits.
-  const saveChannels = async (item: CodingCatalogItem, settings: { channels?: string[]; apiCreditWeight?: number | null }) => {
+  const saveChannels = async (
+    item: CodingCatalogItem,
+    settings: { channels?: string[]; apiCreditWeight?: number | null; codingNotes?: { strengths: string[]; weaknesses: string[] } | null }
+  ) => {
     setBusy(true);
     const result = await send(CODING_API, "POST", { action: "settings", modelId: item.id, settings });
     setBusy(false);
@@ -526,6 +529,15 @@ export function AdminCodingCatalogPanel() {
             setHold({ modelId: openItem.id, name: openItem.name });
           }}
           onUnlink={() => setUnlink(openItem)}
+          notes={
+            <CodingNotesTile
+              key={`${openItem.id}:notes:${JSON.stringify(openItem.codingNotes)}`}
+              c={c}
+              item={openItem}
+              busy={busy}
+              onSave={(codingNotes) => void saveChannels(openItem, { codingNotes })}
+            />
+          }
         />
       ) : openItem ? (
         <CodingModelDetail
@@ -551,6 +563,15 @@ export function AdminCodingCatalogPanel() {
               item={openItem}
               busy={busy}
               onSave={(settings) => void saveChannels(openItem, settings)}
+            />
+          }
+          notes={
+            <CodingNotesTile
+              key={`${openItem.id}:notes:${JSON.stringify(openItem.codingNotes)}`}
+              c={c}
+              item={openItem}
+              busy={busy}
+              onSave={(codingNotes) => void saveChannels(openItem, { codingNotes })}
             />
           }
         />

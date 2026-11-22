@@ -445,3 +445,47 @@ test("rows and snapshots stored with the older structured output values parse an
   const supported = codingCatalogRowSchema.parse({ ...base, capabilities: { ...base.capabilities, structuredOutput: "supported" } });
   assert.equal(codingRowRuntime(supported, SNAPSHOT).ok, true);
 });
+
+test("coding notes stay in the stored row: a link or a dedicated row with them resolves and hashes as one without", () => {
+  // Owner decision 2026-11-22.
+  const notes = { strengths: ["Parallel tool calls"], weaknesses: ["Weak at long contexts"], sources: [QWEN_PRICING], draftedAt: "2026-11-22" };
+  const dedicated = draftedFlash();
+  const plainDedicated = resolveCodingEntry({ modelId: "qwen3-coder-flash", profile: { ...dedicated, channels: ["code", "api"] }, chat: () => null, providerTerms: () => null }).row;
+  const notedDedicated = resolveCodingEntry({
+    modelId: "qwen3-coder-flash",
+    profile: { ...dedicated, channels: ["code", "api"], codingNotes: notes },
+    chat: () => null,
+    providerTerms: () => null,
+  });
+  assert.equal(codingStoredProfileSchema.safeParse({ ...dedicated, codingNotes: notes }).success, true);
+  assert.equal("codingNotes" in notedDedicated.row, false);
+  assert.equal(canonicalJson(notedDedicated.row), canonicalJson(plainDedicated));
+  assert.equal(catalogContentHash([notedDedicated.row]), catalogContentHash([plainDedicated]));
+  assert.deepEqual(notedDedicated.stored.codingNotes, notes, "the stored row keeps them for the router and the screen");
+
+  const chat = {
+    id: "gpt-6-luna",
+    name: "GPT 6 Luna",
+    provider: "openai",
+    apiModelId: "gpt-6-luna",
+    minimumPlan: "Free",
+    usageClass: "standard",
+    creditWeight: 2,
+    enabled: true,
+    status: "enabled",
+    publiclyListed: true,
+    catalogDeleted: false,
+    contextWindowTokens: 400_000,
+    maxOutputTokens: 32_000,
+    imageInput: true,
+    price: { inputUsdPerMTok: 1, outputUsdPerMTok: 8, pricingVersion: "v1", effectiveDate: "2026-11-01", verified: true, reasoningBilledSeparately: false },
+  };
+  const link = { source: "chat", registryModelId: "gpt-6-luna", capabilities: { toolCalling: "basic", structuredOutput: "supported" }, channels: ["api"] };
+  const resolveLink = (profile) => resolveCodingEntry({ modelId: "gpt-6-luna", profile, chat: () => chat, providerTerms: () => null });
+  const notedLink = resolveLink({ ...link, codingNotes: notes });
+  assert.equal(notedLink.problem, null);
+  assert.equal(canonicalJson(notedLink.row), canonicalJson(resolveLink(link).row));
+  assert.equal(catalogContentHash([notedLink.row]), catalogContentHash([resolveLink(link).row]));
+  // A snapshot row never carries them; one that somehow did would not parse as a snapshot row.
+  assert.equal(codingCatalogRowSchema.safeParse({ ...notedLink.row, codingNotes: notes }).success, false);
+});
