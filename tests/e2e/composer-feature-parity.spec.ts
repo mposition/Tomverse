@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { buildChatStreamTrailerChunk } from "../../lib/webSearchStreamTrailer";
 import { mockAttachmentUpload, mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
 import { installChatModelStub, mockUserUsage, restoreActiveConversation, suppressTransientUi } from "./support/chat-state-fixtures";
 import { expectTappableInVisibleViewport, openOnScreenKeyboard } from "./support/ui-audit";
@@ -389,7 +390,7 @@ test("Chat Smart Adaptive keeps the chosen effort in the existing model control 
     id: "gpt-6-luna", name: "GPT 6 Luna", provider: "openai", enabled: true, status: "enabled",
     minimumPlan: "Guest", usageClass: "standard", reasoning: "medium", reasoningEfforts: ["low", "high"],
   }] } }));
-  await installChatModelStub(page, { "gpt-6-luna": { kind: "success", chunks: ["Effort answer."] } });
+  await installChatModelStub(page, { "gpt-6-luna": { kind: "success", chunks: ["Effort answer.", buildChatStreamTrailerChunk({ searchMetadata: null, appliedReasoningEffort: "default" })] } });
   await page.route("**/api/chat/context", route => route.fulfill({ json: { ok: true, contextBundle: null, memoryUsedCount: 0 } }));
   await page.goto("/chat?lang=en");
   await page.getByTestId("chat-textarea").fill("Compare the two designs.");
@@ -401,6 +402,7 @@ test("Chat Smart Adaptive keeps the chosen effort in the existing model control 
   await expect(page.getByTestId("chat-textarea")).toHaveValue("Compare the two designs.");
   await page.getByTestId("chat-send-button").click();
   await expect(page.getByText("Effort answer.", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("answer-reasoning-effort")).toHaveText("Reasoning effort · Default");
   await expect.poll(() => page.evaluate(() => (window as unknown as {
     __chatModelStubRequests: Array<{ reasoningEffort?: string }>;
   }).__chatModelStubRequests.map(body => body.reasoningEffort))).toEqual(["high"]);

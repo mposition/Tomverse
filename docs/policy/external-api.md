@@ -972,7 +972,8 @@ reported per change (the PR); package publication and enabling
 When `TOMVERSE_REASONING_EFFORT_ENABLED=true`, the coding Chat Completions
 catalogue advertises model support in `tomverse.reasoning_efforts`. Send
 `tomverse_effort: "low"` or `tomverse_effort: "high"` as part of the request
-body. Omit the field for the configured model default. Smart Adaptive only
-considers compatible candidates for an explicit level. Unsupported levels
-are refused before provider dispatch. Native protocols retain their existing
+body. Omit the field for the configured model default. Smart Adaptive routes
+on the task as usual. If the selected model does not support the requested
+level, it uses its configured default. The successful response reports the
+applied level in `x-tomverse-applied-effort` for explicit requests. Native protocols retain their existing
 effort parameters. The setting uses the existing request and token limits.

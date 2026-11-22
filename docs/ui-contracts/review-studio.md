@@ -232,7 +232,9 @@ The owner requested consistent Chat/Review controls. The editable proposal is
 - The model picker presents Low, Default and High when the server offers
   reasoning effort. An explicit choice is shown beside the model or Smart
   Adaptive in the existing composer control and applies to the next text
-  question. Review Professional offers a common level only when every active
+  question. Smart Adaptive selects the model for the question and uses its
+  default effort if the chosen level is unsupported. The answer shows the
+  applied level. Review Professional offers a common level only when every active
   model supports it. Review Easy uses the routed models' default settings.
 - The prompt uses an inset neutral focus underline, including forced colors,
   instead of outlining the whole composer in blue.

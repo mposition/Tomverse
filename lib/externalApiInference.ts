@@ -275,17 +275,10 @@ export async function handleChatCompletions(request: Request, options: { surface
         // coding catalogue's while it is switched on. Smart Adaptive's pool also
         // holds the classes only it routes to (frontier, apex); a model named
         // directly comes from the narrower list.
-        const available = await externalApiRunnableModels(plan.tier, {
+        const runnable = await externalApiRunnableModels(plan.tier, {
             surface: options.surface,
             smartAdaptive: parsed.model === SMART_ADAPTIVE_MODEL_ID,
         });
-        const supportsEffort = (model: (typeof available)[number]["model"]) =>
-            !effort || modelReasoningEfforts(model).includes(effort);
-        const runnable = parsed.model === SMART_ADAPTIVE_MODEL_ID
-            ? available.filter(entry => supportsEffort(entry.model)) : available;
-        if (effort && parsed.model === SMART_ADAPTIVE_MODEL_ID && runnable.length === 0) {
-            throw new ProtocolError(400, "reasoning_effort_unavailable", "No offered model supports this reasoning effort.", "tomverse_effort");
-        }
         // Smart Adaptive: Tomverse picks one of the runnable models, and the
         // response says which one answered (the `model` field and a header).
         let routedHeaders: Record<string, string> = {};
@@ -303,9 +296,6 @@ export async function handleChatCompletions(request: Request, options: { surface
             );
         }
         let entry = picked?.entry;
-        if (entry && !supportsEffort(entry.model)) {
-            throw new ProtocolError(400, "reasoning_effort_unavailable", "The selected model does not support this reasoning effort.", "tomverse_effort");
-        }
         if (parsed.model === SMART_ADAPTIVE_MODEL_ID && runnable.length > 0) {
             const routed = await routeSmartAdaptive({
                 request: parsed,
@@ -337,6 +327,7 @@ export async function handleChatCompletions(request: Request, options: { surface
             throw new ProtocolError(404, "model_not_found", `The model '${parsed.model}' is not available to this key.`, "model");
         }
         const { model, capabilities } = entry;
+        const appliedEffort = effort && modelReasoningEfforts(model).includes(effort) ? effort : undefined;
         const view = {
             id: model.id,
             provider: model.provider,
@@ -351,7 +342,7 @@ export async function handleChatCompletions(request: Request, options: { surface
         // The prompt cache marker rides in providerOptions, so only Anthropic
         // models get one (lib/anthropicPromptCaching.ts). The budget below is
         // given the same path, so the write premium is reserved before dispatch.
-        const settings = getModelGenerationSettings(modelWithReasoningEffort(model, effort), {
+        const settings = getModelGenerationSettings(modelWithReasoningEffort(model, appliedEffort), {
             temperature: parsed.temperature ?? undefined,
             promptCachePath: "external_api_chat_completions",
         });
@@ -380,6 +371,7 @@ export async function handleChatCompletions(request: Request, options: { surface
         ];
         const infoHeaders: Record<string, string> = {
             ...routedHeaders,
+            ...(effort ? { "x-tomverse-applied-effort": appliedEffort ?? "default" } : {}),
             ...(ignoredParameters.length ? { "x-tomverse-ignored-parameters": ignoredParameters.join(", ") } : {}),
         };
         // The API is stateless, and OpenAI's Responses API stores requests by

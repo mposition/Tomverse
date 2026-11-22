@@ -2004,7 +2004,7 @@ function ChatAppComponent({
         // Human permission and guest verification happen before provider wait
         // time starts. The same source turn is continued after either prompt.
         liveness.stop();
-        const fuseLocation = !reasoningEffort && !researchMode && !turnPassages && !recoverWithSavedLocation && routerLocationTurn && !preparedLocationIntent && !mcpConnectionId && !admissionToken &&
+        const fuseLocation = !researchMode && !turnPassages && !recoverWithSavedLocation && routerLocationTurn && !preparedLocationIntent && !mcpConnectionId && !admissionToken &&
           !deepResearchDepth && !reviewProvider && !isGuestMode && chatLocationIntentEnabled &&
           chatLocationSession.canPrepareIntent(panelIdentityKey);
         const checkLocationTurn = () => {
@@ -2569,6 +2569,7 @@ function ChatAppComponent({
           undefined,
           {
             searchMetadata,
+            appliedReasoningEffort: trailer?.appliedReasoningEffort,
             // Always written, so a retry that produces no file clears the
             // cards the previous attempt left behind.
             artifacts,

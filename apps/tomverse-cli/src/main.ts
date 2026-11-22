@@ -280,13 +280,13 @@ const usage = async (ctx: Context) => {
         const cost = await sessionCost(gateway, journal);
         journal.release();
         if (ctx.output.json) {
-            for (const g of journal.state.generations) ctx.output.event({ type: "request", seq: g.seq, purpose: g.purpose, request_id: g.requestId ?? null, state: g.state, lookup: g.lookup ?? null, receipt: g.receipt ?? null });
+            for (const g of journal.state.generations) ctx.output.event({ type: "request", seq: g.seq, purpose: g.purpose, request_id: g.requestId ?? null, state: g.state, lookup: g.lookup ?? null, receipt: g.receipt ?? null, ...(g.appliedEffort ? { applied_effort: g.appliedEffort } : {}) });
             ctx.output.event({ type: "session_cost", session_id: journal.state.id, ...cost });
         } else {
             for (const g of journal.state.generations) {
                 const r = g.receipt;
                 process.stdout.write(
-                    `#${g.seq} ${g.purpose.padEnd(7)} ${(g.requestId ?? "-").padEnd(36)} ${r ? `${r.status}${r.chargedCredits !== null ? ` ${r.chargedCredits} credits` : ` ${r.heldCredits} held`}` : g.lookup === "not_found" ? "not found (not proof of no charge)" : "unknown"}\n`
+                    `#${g.seq} ${g.purpose.padEnd(7)} ${(g.requestId ?? "-").padEnd(36)} ${r ? `${r.status}${r.chargedCredits !== null ? ` ${r.chargedCredits} credits` : ` ${r.heldCredits} held`}` : g.lookup === "not_found" ? "not found (not proof of no charge)" : "unknown"}${g.appliedEffort ? " · effort " + g.appliedEffort : ""}\n`
                 );
             }
             process.stdout.write(`${costLine(cost)}\nCredits are the server's receipts for this session's own requests; held amounts are not final.\n`);

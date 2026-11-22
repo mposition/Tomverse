@@ -121,7 +121,9 @@ Options: `--cwd`, `--model`, `--effort low|default|high`, `--read-only`, `--max-
 
 Use `--effort high` for one task or `/effort low` to set the next interactive task.
 `default` uses the model's existing setting. The coding API advertises the
-available levels for each model. A running or resumed task keeps its saved level.
+available levels for each model. A task keeps its requested level across steps
+and resume. Each response records the applied level. A model that does not
+support the request uses its own default.
 
 These are CLI limits, not a credit budget. The only hard credit limit is the
 cap you set on the key in Settings; the CLI does not promise "at most N credits

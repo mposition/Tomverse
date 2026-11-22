@@ -1589,7 +1589,7 @@ async function handleChatPost(
         if (wantsFusion && ((existingFusion ? !existingChatRouterLocationFusionEnabled() : !chatRouterLocationFusionEnabled()) ||
             (fusionBody.routerLocationScope !== undefined && !existingFusion) || !process.env.NEXTAUTH_SECRET ||
             !session?.user?.id || !conversationId || !assistantMessageId || !sourceUserMessageId ||
-            (!existingFusion && promptRefinerDecision) || reasoningEffort || deepResearchDepth || admissionToken || mcpConnectionId || turnstileToken || guestAutoCapability ||
+            (!existingFusion && promptRefinerDecision) || deepResearchDepth || admissionToken || mcpConnectionId || turnstileToken || guestAutoCapability ||
             (currentLocation && resumeToken === undefined) || (!existingFusion && requestMessages.length !== 1) ||
             requestMessages.at(-1)?.role !== "user" || turnCarriesAttachments(requestMessages))) return refuseFusion();
         if (mcpConnectionId && (!mcpPreviewEnabled() || !session?.user?.id)) {
@@ -1699,9 +1699,6 @@ async function handleChatPost(
             }),
             session?.user?.id ?? null,
         ) === "entered";
-        if (reasoningEffort && pinnedDeploymentEntered) {
-            return tracedJsonError("Reasoning effort is unavailable for this execution path.", "REASONING_EFFORT_UNAVAILABLE", 409, traceId);
-        }
         if (isResearchPreview && pinnedDeploymentEntered) {
             throw new ChatAccessError(
                 409,
@@ -2405,8 +2402,7 @@ async function handleChatPost(
             // disabled must not be chosen and then refused two lines later by
             // `assertModelRuntimeAvailable`.
             models: runtimeModels.filter(
-                (model) => model.enabled && !model.catalogDeleted &&
-                    (!reasoningEffort || modelReasoningEfforts(model).includes(reasoningEffort))
+                (model) => model.enabled && !model.catalogDeleted
             ),
             // Confirmed unavailable only. `degraded` stays a candidate and
             // loses tie-breaks instead, and `unknown` -- every model nothing
@@ -2429,9 +2425,7 @@ async function handleChatPost(
                   webSearchRequested: webSearchMode === "always",
                   searchBackendReadiness:
                       routerCandidateInputs.searchBackendReadiness,
-                  models: (guestReachableModels ?? []).filter(model =>
-                      !reasoningEffort || modelReasoningEfforts(model).includes(reasoningEffort)
-                  ),
+                  models: guestReachableModels ?? [],
                   reservedInputTokens: preflightInputEstimate(
                       autoRoutingMessages
                   ).estimatedInputTokens,
@@ -2454,7 +2448,7 @@ async function handleChatPost(
             return returnKnownUndispatchedGuestAutoRefusal(
                 tracedJsonError(
                     "No Guest Smart Adaptive model is available for this turn.",
-                    reasoningEffort ? "REASONING_EFFORT_UNAVAILABLE" : "GUEST_AUTO_NO_CANDIDATE",
+                    "GUEST_AUTO_NO_CANDIDATE",
                     409,
                     traceId
                 ),
@@ -3027,14 +3021,10 @@ async function handleChatPost(
         const dispatchModel = routedCatalogModel?.enabled && !routedCatalogModel.catalogDeleted
             ? routedCatalogModel
             : requestedModelConfig;
-        if (reasoningEffort && (!modelReasoningEfforts(dispatchModel).includes(reasoningEffort) ||
-            (conversationRouting?.selectionMode === "auto" && !autoRouted))) {
-            return returnKnownUndispatchedGuestAutoRefusal(tracedJsonError(
-                "No eligible model can use this reasoning effort for the request.",
-                "REASONING_EFFORT_UNAVAILABLE", 409, traceId
-            ), "router_refused_before_dispatch");
-        }
-        const modelConfig = modelWithReasoningEffort(dispatchModel, reasoningEffort);
+        const appliedEffortFor = (model: typeof dispatchModel) =>
+            reasoningEffort && modelReasoningEfforts(model).includes(reasoningEffort) ? reasoningEffort : undefined;
+        let appliedEffort = appliedEffortFor(dispatchModel);
+        const modelConfig = modelWithReasoningEffort(dispatchModel, appliedEffort);
         if (hasUnsupportedGeminiPrefill(modelConfig, executionMessages)) {
             return returnKnownUndispatchedGuestAutoRefusal(tracedJsonError(
                 "Gemini 3.6 and later requests must end with a user message.",
@@ -7366,8 +7356,8 @@ async function handleChatPost(
             // actual-token check and manifest. A refusal here is one candidate
             // that did not qualify, not the request failing -- the primary's
             // failure is still what ends the turn.
-            if (reasoningEffort && !modelReasoningEfforts(candidate).includes(reasoningEffort)) return false;
-            const planned = planAttemptExecution(modelWithReasoningEffort(candidate, reasoningEffort), {
+            const nextEffort = appliedEffortFor(candidate);
+            const planned = planAttemptExecution(modelWithReasoningEffort(candidate, nextEffort), {
                 accessKind: access.kind,
                 inputBreakdown: inputEstimate.breakdown(),
                 reservationOnlyInputTokens,
@@ -7736,6 +7726,7 @@ async function handleChatPost(
             dispatched.modelId = plan.modelId;
             dispatched.provider = plan.provider;
             dispatched.reasoning = plan.modelConfig.reasoning;
+            appliedEffort = nextEffort;
             dispatched.abortController = nextAttemptAbortController;
             dispatched.stream = nextStream;
             dispatched.reader = faultedReader(
@@ -8601,6 +8592,7 @@ async function handleChatPost(
                             controller,
                             buildChatStreamTrailerChunk({
                                 searchMetadata: webSearchExecution,
+                                ...(reasoningEffort ? { appliedReasoningEffort: appliedEffort ?? "default" } : {}),
                                 ...(continuation.receipt ? { continuationReceipt: deliveryReceipt({ ...continuation.receipt, attempt: dispatched.attemptIndex }) } : {}),
                                 completion: completionOutcome,
                                 // Absent, not empty, on a turn with no files:

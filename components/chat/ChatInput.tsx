@@ -1972,10 +1972,8 @@ export function ChatInput({
   const showReasoningEffort = Boolean(currentProduct && review?.mode !== "easy" &&
     !review?.imagePromptMode && !researchPreview?.selected &&
     AVAILABLE_MODELS.some(model => model.reasoningEfforts !== undefined));
-  const supportsEffort = (level: ExplicitReasoningEffort) => isAutoMode
-    ? PUBLIC_MODELS.some(model => canUseModelWithPlan(currentPlan, model) && model.reasoningEfforts?.includes(level))
-    : activeSelectedModels.length > 0 &&
-      activeSelectedModels.every(id => getCatalogModel(id)?.reasoningEfforts?.includes(level));
+  const supportsEffort = (level: ExplicitReasoningEffort) => isAutoMode || (activeSelectedModels.length > 0 &&
+      activeSelectedModels.every(id => getCatalogModel(id)?.reasoningEfforts?.includes(level)));
   const explicitEffort = showReasoningEffort && reasoningEffort !== "default" ? reasoningEffort : undefined;
   const effortUnavailable = explicitEffort !== undefined && !supportsEffort(explicitEffort);
   const effortSuffix = explicitEffort ? " · " + effortCopy[explicitEffort] : "";

@@ -7076,7 +7076,7 @@ export function ChatPageClient({
       // Only the semantic call overlaps Refiner. Device permission and GPS
       // stay in ChatApp, after the question is durably saved. Guests retain
       // their existing single-use verification sequence.
-      const canFuseLocation = !options?.reasoningEffort && !options?.researchMode && !freshLocation && chatLocationIntentEnabled && identityKey && status === "authenticated" &&
+      const canFuseLocation = !options?.researchMode && !freshLocation && chatLocationIntentEnabled && identityKey && status === "authenticated" &&
         mountedSurface === "chat" && selectionMode === "auto" && !isOverrideSend && !imageTurnSend &&
         promptAttachments.length === 0 && activeModelIds.length === 1;
       const existingFusion = canFuseLocation && existingChatRouterLocationFusion && autoSelectionOffered && submitOwner.originConversationId === activeChatId &&
