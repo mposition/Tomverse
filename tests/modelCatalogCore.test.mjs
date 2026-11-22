@@ -41,6 +41,7 @@ import {
   codingNotesSchema,
   codingNotesRouterText,
   codingDraftBasisSchema,
+  codingPriceTiersSchema,
   codingProfileForWrite,
   codingProfileSchema,
   codingStoredProfileSchema,
@@ -842,15 +843,18 @@ test("a tier list out of order is refused: upToInputTokens must ascend and only 
     ["two open tiers", [tier(32_000), tier(null), tier(null)]],
   ]) {
     assert.throws(() => draft(tiers), (error) => error.code === "draft_rejected" && error.detail === "pricing.tiers", label);
-    assert.equal(codingDraftBasisSchema.safeParse({ maxOutputTokens: "default", priceTiers: tiers }).success, false, label);
+    assert.equal(codingPriceTiersSchema.safeParse(tiers).success, false, label);
   }
   // In order, with or without an open top tier, and one open tier alone: accepted.
   for (const tiers of [QWEN_TIERS, [tier(32_000), tier(128_000)], [tier(null)], [tier(1)]]) {
-    assert.equal(codingDraftBasisSchema.safeParse({ maxOutputTokens: "documented", priceTiers: tiers }).success, true);
+    assert.equal(codingPriceTiersSchema.safeParse(tiers).success, true);
   }
-  // A stored profile with such a list does not parse either, so the screen never shows its ranges.
+  // The order is a drafting check only: a stored profile whose list is out of
+  // order still reads, so no serving row is dropped by a later, stricter rule.
   const stored = draft(QWEN_TIERS);
-  assert.equal(codingProfileSchema.safeParse({ ...stored, basis: { ...stored.basis, priceTiers: [tier(256_000), tier(32_000)] } }).success, false);
+  const unordered = { ...stored, basis: { ...stored.basis, priceTiers: [tier(256_000), tier(32_000)] } };
+  assert.equal(codingProfileSchema.safeParse(unordered).success, true);
+  assert.equal(codingDraftBasisSchema.safeParse(unordered.basis).success, true);
 });
 
 test("with tiers, an answered rate that is not a price is refused, never replaced by a tier's", () => {

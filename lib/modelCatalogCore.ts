@@ -308,32 +308,43 @@ const priceTiersAscend = (tiers: readonly { upToInputTokens: number | null }[]) 
     return below !== null && tier.upToInputTokens > below;
   });
 
+const priceTierListSchema = z
+  .array(
+    z
+      .object({
+        /** The tier's largest input in tokens; null for the open top tier. */
+        upToInputTokens: z.number().int().positive().nullable(),
+        inputUsdPerMTok: usdPerMTok,
+        outputUsdPerMTok: usdPerMTok,
+      })
+      .strict()
+  )
+  .min(1)
+  .max(8);
+
+/**
+ * The tier list a draft may write: in the order the pages price them. A list
+ * out of order is refused at drafting, so no draft keeps or shows ranges that
+ * cannot be meant. Write side only: a stored profile is read with the plain
+ * list, so a row is never dropped from serving by a later, stricter check.
+ */
+export const codingPriceTiersSchema = priceTierListSchema.refine(
+  priceTiersAscend,
+  "tiers ascend by upToInputTokens and only the last is open (null)"
+);
+
 /**
  * Where a dedicated draft's values came from, beside its price sources: the
  * output cap read from the pages or the default above, and the input-size
  * price tiers the pages list (the profile's prices are the dearest tier's).
- * A tier list out of order is refused, so a draft never keeps or shows ranges
- * that cannot be meant. Kept in the stored profile only; the resolved and
- * snapshot rows do not carry it, so it moves no hash.
+ * Kept in the stored profile only; the resolved and snapshot rows do not carry
+ * it, so it moves no hash. The tier order is checked where a draft is made
+ * (codingPriceTiersSchema), not when a stored profile is read.
  */
 export const codingDraftBasisSchema = z
   .object({
     maxOutputTokens: z.enum(["documented", "default"]),
-    priceTiers: z
-      .array(
-        z
-          .object({
-            /** The tier's largest input in tokens; null for the open top tier. */
-            upToInputTokens: z.number().int().positive().nullable(),
-            inputUsdPerMTok: usdPerMTok,
-            outputUsdPerMTok: usdPerMTok,
-          })
-          .strict()
-      )
-      .min(1)
-      .max(8)
-      .refine(priceTiersAscend, "tiers ascend by upToInputTokens and only the last is open (null)")
-      .optional(),
+    priceTiers: priceTierListSchema.optional(),
   })
   .strict();
 export type CodingDraftBasis = z.infer<typeof codingDraftBasisSchema>;

@@ -32,7 +32,7 @@ import {
   CODING_NOTES_MAX_ITEMS,
   CODING_STRUCTURED_OUTPUT_CHOICES,
   CODING_TOOL_CALLING,
-  codingDraftBasisSchema,
+  codingPriceTiersSchema,
   codingProfileSchema,
   codingStructuredOutputChoice,
   type CodingDraftBasis,
@@ -454,12 +454,12 @@ export const draftPricingVersion = (apiModelId: string, day: string) => {
   return base.slice(0, 80 - suffix.length) + suffix;
 };
 
-const tierListSchema = codingDraftBasisSchema.shape.priceTiers.unwrap();
+const tierListSchema = codingPriceTiersSchema;
 
 /**
  * The price tiers an answer lists: [] for one flat price, null when the list is
  * malformed or out of order -- upToInputTokens not ascending, or an open (null)
- * tier before the last (codingDraftBasisSchema) -- so the draft is refused, not
+ * tier before the last (codingPriceTiersSchema) -- so the draft is refused, not
  * priced from part of it.
  */
 type PriceTier = NonNullable<CodingDraftBasis["priceTiers"]>[number];
