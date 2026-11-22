@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { Credentials } from "./credentials.js";
 import { digest, environmentProblem, namespace, parseMessage, redact, redactJson } from "./security.js";
 import { labels, t } from "./i18n.js";
+import { effortLevels, type Effort } from "./effort.js";
 import {
     Gateway,
     GatewayError,
@@ -48,6 +49,8 @@ export class SessionController implements vscode.WebviewViewProvider {
     private root?: string;
     private key?: string;
     private catalog: CatalogModel[] = [];
+    private effort: Effort = "default";
+    private effortModel = "";
     private runner?: Runner;
     private journal?: Journal;
     private gateway?: Gateway;
@@ -153,6 +156,7 @@ export class SessionController implements vscode.WebviewViewProvider {
             cost: this.cost,
             session: this.journal?.state.id ?? "",
             model: this.journal?.state.model ?? null,
+            effort: { level: this.effort, model: this.effortModel, locked: this.effortLocked() },
             readOnly: this.journal?.state.readOnly,
             attachments: this.editor.attachments.map(({ text, ...meta }) => meta),
             approval: this.approvals.snapshot(),
@@ -239,6 +243,10 @@ export class SessionController implements vscode.WebviewViewProvider {
             await this.exclusive(() => this.undo(message.id));
             return true;
         }
+        if (message.type === "chooseEffort") {
+            await this.exclusive(() => this.chooseEffort(message.model));
+            return true;
+        }
         if (message.type === "action") {
             await this.action(message.action);
             return true;
@@ -278,6 +286,33 @@ export class SessionController implements vscode.WebviewViewProvider {
         this.epoch = randomUUID();
         this.state = "idle";
         this.lastError = "";
+        this.effort = "default";
+        this.effortModel = "";
+    }
+    private effortLocked() {
+        return this.busy || Boolean(this.journal?.state.tasks.length && this.journal.state.status !== "completed");
+    }
+    private async chooseEffort(modelId: string) {
+        this.idle();
+        this.assertAllowed();
+        if (this.effortLocked()) throw new Error(t("effortLocked"));
+        const effectiveId = this.journal?.state.model.pinned ?? modelId;
+        const model = this.catalog.find((model) => model.id === effectiveId);
+        if (!model || (this.journal && this.journal.state.model.requested !== modelId)) throw new Error("Model not offered. Refresh models.");
+        const levels = effortLevels(model);
+        const epoch = this.epoch;
+        const selected = await this.dialogs.pick(
+            levels.map((level) => ({
+                label: t(`effort_${level}`),
+                description: t(level === "default" ? "effortDefault" : level === "low" ? "effortLow" : "effortHigh"),
+                level,
+            })),
+            { title: t("effort"), placeHolder: levels.length === 1 ? t("effortUnavailable") : model.name },
+        );
+        if (!selected || epoch !== this.epoch || this.effortLocked()) return;
+        this.effort = selected.level;
+        this.effortModel = modelId;
+        this.update();
     }
     async refresh() {
         this.idle();
@@ -408,11 +443,15 @@ export class SessionController implements vscode.WebviewViewProvider {
                     this.journalIo(key),
                 );
             this.journal = journal;
+            this.runner = this.createRunner(gateway, journal, catalog);
+            const effort = this.effortModel === modelId ? this.effort : "default";
+            this.runner.assertEffort(effort);
+            this.effort = effort;
+            this.effortModel = modelId;
             const contextText = this.editor.snapshotPrompt(mode);
             this.editor.attachments.length = 0;
             this.transcript.push({ role: "user", text: this.clean(prompt) }, { role: "assistant", text: "" });
-            this.runner = this.createRunner(gateway, journal, catalog);
-            const result = await this.runner.runTask(this.clean(prompt + contextText));
+            const result = await this.runner.runTask(this.clean(prompt + contextText), effort);
             this.state = this.outcome(result);
             this.cost = await sessionCost(gateway, journal);
         } catch (error) {
@@ -437,10 +476,12 @@ export class SessionController implements vscode.WebviewViewProvider {
         return journal?.unresolvedGenerations().length || uncertain ? "unknown_outcome" : result === "success" ? "completed" : result;
     }
     private journalIo(key: string) {
-        return { writeFileAtomic: (path: string, data: string | Buffer) => {
-            if (Buffer.isBuffer(data) && data.includes(Buffer.from(key))) throw new Error("Refused to persist credential bytes.");
-            writeFileAtomic(path, typeof data === "string" ? redactJson(JSON.parse(data), key) : data);
-        } };
+        return {
+            writeFileAtomic: (path: string, data: string | Buffer) => {
+                if (Buffer.isBuffer(data) && data.includes(Buffer.from(key))) throw new Error("Refused to persist credential bytes.");
+                writeFileAtomic(path, typeof data === "string" ? redactJson(JSON.parse(data), key) : data);
+            },
+        };
     }
     private createRunner(gateway: Gateway, journal: Journal, catalog: CatalogModel[]) {
         const output: Output = {
@@ -535,6 +576,8 @@ export class SessionController implements vscode.WebviewViewProvider {
             this.catalog = catalog;
             this.home = home;
             this.root = journal.state.workspace.root;
+            this.effort = journal.state.tasks.at(-1)?.effort ?? "default";
+            this.effortModel = journal.state.model.requested;
             this.run = randomUUID();
             this.notice = reconcile(journal).join("\n");
             // Decisions not yet executed expire with their run. The model must propose again.

@@ -28,12 +28,15 @@ await build({
     platform: "node",
     format: "cjs",
 });
-const { FakeGateway } = createRequire(import.meta.url)(join(root, "dist/fake-gateway.cjs"));
+const { FakeGateway, DEFAULT_MODELS } = createRequire(import.meta.url)(join(root, "dist/fake-gateway.cjs"));
 const command =
     process.platform === "win32"
         ? { command: "Write-Output 'crash-command-started'; Start-Sleep -Seconds 60" }
         : { argv: ["/bin/sh", "-c", "echo crash-command-started; sleep 60"] };
-const fake = await new FakeGateway({ script: () => ({ toolCalls: [{ name: "run_command", args: command }] }) }).start();
+const fake = await new FakeGateway({
+    models: DEFAULT_MODELS.map((model) => ({ ...model, tomverse: { ...model.tomverse, reasoning_efforts: ["low", "high"] } })),
+    script: () => ({ toolCalls: [{ name: "run_command", args: command }] }),
+}).start();
 const installed = process.env.TOMVERSE_TEST_EXTENSION_PATH || JSON.parse(readFileSync(join(root, "artifacts/install-smoke.json"), "utf8")).installed;
 const launch = (phase) => {
     const child = spawn(

@@ -20,6 +20,8 @@ Commands show their executable, arguments, working folder, environment names and
 
 ## Sessions, costs and recovery
 
+**Effort** opens a native picker beside the model selector. Low and High appear only when the server catalog offers them; Default preserves the model's existing settings and sends no override. An explicit choice is fixed for the task, including tools, compaction and resume. Smart Adaptive pins its chosen model as usual. If the pinned model no longer supports the selected level, the task stops rather than silently downgrading. A completed task can use a different level for its next prompt. Effort can change latency and credit usage; existing request limits and server caps still apply.
+
 Sessions live outside the project in this extension's local storage, separately for the root, complete API base and credential identity. They include prompts, context, model output and Undo backups. They do not sync to other devices. Turn off the user setting `tomverse.persistSessions` for memory-only sessions; reopening and Undo after exit are then unavailable. **Delete local session** confirms deletion of that conversation and its backups, leaving workspace files and server receipts intact.
 
 One active run is allowed per window. A lock prevents opening the same session in another window. Hiding/recreating the sidebar does not restart a request. Reload/crash recovery never replays a started command or patch automatically. **Sessions** loads history without inference. **Review recovery / resume** looks up unfinished intents and asks explicitly before a new paid request. A missing receipt is unknown, not free. Never automatically retry an unknown request.

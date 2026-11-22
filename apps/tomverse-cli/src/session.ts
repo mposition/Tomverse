@@ -155,6 +155,7 @@ export type SessionState = {
      * user agrees to continue past a limit.
      */
     tasks: Array<{
+        effort?: import("./effort.js").Effort;
         prompt: string;
         startedAt: string;
         endedAt?: string;

@@ -546,7 +546,15 @@ export async function run() {
                 : toolResultsSinceUser(body).length < 3
                   ? { toolCalls: [{ name: "read_file", args: { path: "compact.txt" } }] }
                   : { text: "done" };
-        fake.options.models = DEFAULT_MODELS.map((m) => (m.id === "fake-small" ? { ...m, tomverse: { ...m.tomverse, context_window_tokens: 9000 } } : m));
+        fake.options.models = DEFAULT_MODELS.map((m) =>
+            m.id === "fake-small" ? { ...m, tomverse: { ...m.tomverse, context_window_tokens: 9000, reasoning_efforts: ["high"] } } : m,
+        );
+        await controller.refresh();
+        const originalPick = controller.dialogs.pick.bind(controller.dialogs);
+        controller.dialogs.pick = async (items) => items.find((item) => item.label === t("effort_high"));
+        await controller.receive({ ...envelope(), type: "chooseEffort", model: "fake-small" });
+        controller.dialogs.pick = originalPick;
+        const beforeCompact = fake.completions.length;
         await send("Read compact.txt a few times", "ask", "fake-small");
         const compactState = Journal.read(join(sessionHome, "sessions", controller.snapshot().session));
         assert.ok(compactState.generations.some((g) => g.purpose === "compact"));
@@ -554,9 +562,73 @@ export async function run() {
         assert.equal(controller.snapshot().cost?.requests, compactState.generations.length);
         assert.equal(controller.snapshot().cost?.charged, compactState.generations.length);
         assert.equal(controller.snapshot().state, "completed");
+        assert.ok(fake.completions.slice(beforeCompact).every((request) => request.body.tomverse_effort === "high"));
         fake.options.script = originalScript;
         fake.options.models = undefined;
-        record("compaction in actual extension counts requests and receipts at pinned model", controller.snapshot().cost);
+        record("compaction in actual extension preserves effort and counts requests and receipts at pinned model", controller.snapshot().cost);
+        await fresh();
+        const nativePick = controller.dialogs.pick.bind(controller.dialogs);
+        const chooseEffort = (model = "fake-coder") => controller.receive({ ...envelope(), type: "chooseEffort", model });
+        controller.dialogs.pick = async (items) => {
+            assert.deepEqual(
+                items.map((item) => item.label),
+                [t("effort_default")],
+            );
+            return undefined;
+        };
+        await chooseEffort();
+        assert.equal(controller.snapshot().effort.level, "default");
+        fake.options.models = DEFAULT_MODELS.map((model) => ({ ...model, tomverse: { ...model.tomverse, reasoning_efforts: ["low", "high", "invalid"] } }));
+        await controller.refresh();
+        controller.dialogs.pick = async (items) => {
+            assert.deepEqual(
+                items.map((item) => item.label),
+                [t("effort_low"), t("effort_default"), t("effort_high")],
+            );
+            return items.find((item) => item.label === t("effort_high"));
+        };
+        await chooseEffort();
+        assert.equal(controller.snapshot().effort.level, "high");
+        assert.equal(await controller.receive({ ...envelope(), type: "chooseEffort", model: "fake-coder", level: "low" }), false);
+        replies = [{ text: "Effort high" }];
+        await send("Explain with the chosen effort", "ask");
+        assert.equal(fake.completions.at(-1)!.body.tomverse_effort, "high");
+        assert.equal(Journal.read(join(sessionHome, "sessions", controller.snapshot().session)).tasks.at(-1)!.effort, "high");
+        assert.equal(JSON.stringify(fake.completions.at(-1)!.body.tools).includes("apply_patch"), false);
+        controller.dialogs.pick = async (items) => items.find((item) => item.label === t("effort_default"));
+        await chooseEffort();
+        replies = [{ text: "Model defaults" }];
+        await send("Use defaults for the next task", "ask");
+        assert.equal(fake.completions.at(-1)!.body.tomverse_effort, undefined);
+        record("native effort picker follows catalog, rejects webview level injection, preserves Ask and omits default wire override");
+        await fresh();
+        controller.dialogs.pick = async (items) => items.find((item) => item.label === t("effort_high"));
+        await chooseEffort("smart-adaptive");
+        replies = [
+            { toolCalls: [{ name: "apply_patch", args: { edits: [{ path: "effort.txt", action: "create", content: "fixture" }] } }] },
+            { text: "Denied" },
+        ];
+        const effortRun = send("Effort stays fixed through approval", "agent", "smart-adaptive");
+        const effortApproval = await approval();
+        assert.equal(controller.snapshot().effort.locked, true);
+        await assert.rejects(chooseEffort("smart-adaptive"), /Stop the active run/);
+        await approve(effortApproval.id, "deny");
+        await effortRun;
+        const effortSession = controller.snapshot().session;
+        assert.equal(controller.snapshot().model?.pinned, "fake-coder");
+        assert.equal(fake.completions.at(-1)!.body.model, "fake-coder");
+        assert.equal(fake.completions.at(-1)!.body.tomverse_effort, "high");
+        await fresh();
+        await controller.chooseSession(effortSession);
+        assert.equal(controller.snapshot().effort.level, "high");
+        const beforeUnavailable = fake.completions.length;
+        fake.options.models = DEFAULT_MODELS;
+        await send("No silent effort downgrade", "agent", "smart-adaptive");
+        assert.equal(fake.completions.length, beforeUnavailable);
+        assert.match(controller.snapshot().notice, /offers these reasoning effort levels/);
+        controller.dialogs.pick = nativePick;
+        fake.options.models = undefined;
+        record("effort is fixed through Agent approval and Smart Adaptive pin, survives session reload and fails closed when capability is removed");
     } catch (error) {
         evidence.push({ name: "suite", status: "FAIL", detail: (error as Error).stack });
         throw error;

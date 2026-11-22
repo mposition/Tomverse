@@ -24,6 +24,9 @@ export async function run() {
     await context.secrets.store(`key:${digest(base)}`, TEST_KEY);
     await controller.refresh();
     if (process.env.TOMVERSE_CRASH_PHASE === "seed") {
+        controller.dialogs.pick = async (items) => items.find((item) => item.label === t("effort_high"));
+        const initial = controller.snapshot();
+        await controller.receive({ channel: initial.channel, run: initial.run, type: "chooseEffort", model: "fake-coder" });
         const snapshot = controller.snapshot();
         void controller.receive({
             channel: snapshot.channel,
@@ -52,6 +55,12 @@ export async function run() {
         assert.ok(snapshot.notice.includes("outcome is unknown"));
         assert.equal(snapshot.permissions.length, 0);
         assert.equal(snapshot.approval, null);
+        assert.equal(snapshot.effort.level, "high");
+        assert.equal(snapshot.effort.locked, true);
+        await assert.rejects(
+            controller.receive({ channel: snapshot.channel, run: snapshot.run, type: "chooseEffort", model: "fake-coder" }),
+            /Fixed for this task/,
+        );
         controller.dialogs.choose = async () => t("cancel");
         await controller.action("recover");
         assert.equal(controller.snapshot().state, "unknown_outcome", "declining resume preserves started-tool uncertainty");
@@ -63,6 +72,7 @@ export async function run() {
                 state: snapshot.state,
                 notice: snapshot.notice,
                 recoveryDeclinedState: controller.snapshot().state,
+                effort: controller.snapshot().effort,
                 vscode: vscode.version,
                 node: process.versions.node,
                 platform: process.platform,

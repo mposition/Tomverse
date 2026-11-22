@@ -12,6 +12,7 @@ export const messageSchema = z.discriminatedUnion("type", [
     z.object({ ...envelope, type: z.literal("approve"), id, decision: z.enum(["once", "run", "deny"]) }).strict(),
     z.object({ ...envelope, type: z.literal("diff"), id, index: z.number().int().min(0).max(100), details: z.boolean() }).strict(),
     z.object({ ...envelope, type: z.literal("removeContext"), id }).strict(),
+    z.object({ ...envelope, type: z.literal("chooseEffort"), model: id }).strict(),
     z.object({ ...envelope, type: z.literal("undo"), id }).strict(),
     z
         .object({

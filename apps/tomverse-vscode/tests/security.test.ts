@@ -3,18 +3,27 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { endpointFromUser, environmentProblem, namespace, parseMessage, redact, redactJson } from "../src/security.js";
 import { messages, localeFor } from "../src/translations.js";
+import { effortLevels } from "../src/effort.js";
 
 test("host protocol rejects arbitrary fields, oversized text, forged commands and approval payloads", () => {
     const base = { channel: "host", run: "run" };
     assert.ok(parseMessage({ ...base, type: "approve", id: "id", decision: "once" }));
+    assert.ok(parseMessage({ ...base, type: "chooseEffort", model: "offered-model" }));
     for (const value of [
         null,
         {},
         { ...base, type: "approve", id: "id", decision: "once", input: { argv: ["evil"] } },
         { ...base, type: "action", action: "openExternal", url: "https://evil.test" },
+        { ...base, type: "chooseEffort", model: "offered-model", level: "high" },
         { ...base, type: "send", epoch: "x", prompt: "x".repeat(40_001), mode: "agent", model: "x" },
     ])
         assert.equal(parseMessage(value), null);
+});
+test("effort choices follow explicit server capabilities and preserve model defaults", () => {
+    assert.deepEqual(effortLevels(undefined), ["default"]);
+    assert.deepEqual(effortLevels({}), ["default"]);
+    assert.deepEqual(effortLevels({ reasoningEfforts: ["high"] }), ["default", "high"]);
+    assert.deepEqual(effortLevels({ reasoningEfforts: ["high", "low", "xhigh", "none"] }), ["low", "default", "high"]);
 });
 test("endpoint reads only explicit user values, rejects redirect destinations and secret URL components", () => {
     const old = process.env.TOMVERSE_ENDPOINT;

@@ -1,5 +1,7 @@
 # Changelog
 
+- Added native Effort selection from server capabilities, fixed per task and preserved through tools, compaction and resume.
+
 ## 0.1.0
 
 - Dedicated local sidebar with Ask/Agent, explicit editor context and server catalog.

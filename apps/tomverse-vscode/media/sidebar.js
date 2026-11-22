@@ -39,6 +39,16 @@
     const mode = el("select");
     mode.id = "mode";
     mode.setAttribute("aria-label", "Ask / Agent");
+    const effort = button("", () => post({ type: "chooseEffort", model: models.value }));
+    effort.id = "effort";
+    const renderEffort = () => {
+        if (!state) return;
+        const level = state.effort?.model === models.value ? state.effort.level : "default";
+        effort.textContent = `${state.labels.effort}: ${state.labels[`effort_${level}`]}`;
+        effort.disabled = state.busy || !!state.problem || !state.connected || !models.value || state.effort?.locked;
+        effort.title = state.effort?.locked ? state.labels.effortLocked : state.labels.effortDefault;
+    };
+    models.addEventListener("change", renderEffort);
     const promptLabel = el("label");
     const prompt = el("textarea");
     prompt.id = "prompt";
@@ -86,6 +96,7 @@
         changes,
         modelLabel,
         models,
+        effort,
         mode,
         promptLabel,
         prompt,
@@ -206,7 +217,9 @@
         if (nearBottom) history.scrollTop = history.scrollHeight;
         models.replaceChildren(
             ...state.models.map((model) => {
-                const option = el("option", `${model.name} · ${model.creditsPerRequest} ${l.credits}`);
+                const selectedEffort =
+                    state.effort?.model === model.id && state.effort.level !== "default" ? ` · ${l.effort}: ${l[`effort_${state.effort.level}`]}` : "";
+                const option = el("option", `${model.name}${selectedEffort} · ${model.creditsPerRequest} ${l.credits}`);
                 option.value = model.id;
                 return option;
             }),
@@ -233,6 +246,7 @@
         stop.disabled = !state.busy;
         models.disabled = state.busy || !!state.session;
         mode.disabled = state.busy || !!state.session;
+        renderEffort();
         receipts.textContent = state.cost
             ? `${l.cost}: ${state.cost.requests} ${l.requests}\n${state.cost.charged} ${l.credits} ${l.charged} · ${state.cost.held} ${l.held} · ${state.cost.unknown.length} ${l.unknown}`
             : "";
