@@ -112,6 +112,42 @@ export function diffText(mirror, base, head) {
   return git(["diff", "--no-renames", "--no-color", "--no-ext-diff", base, head], { cwd: mirror }).stdout;
 }
 
+/**
+ * The file in the reviewer's checkout that holds the whole diff under review.
+ * Not a path of the repository: the server writes it after the checkout, so a
+ * reviewer with file tools only (no shell, so no `git diff`) still reads the
+ * change whole.
+ */
+export const REVIEW_DIFF_DIR = ".review-orchestrator";
+export const REVIEW_DIFF_FILE = `${REVIEW_DIFF_DIR}/change.diff`;
+
+/** Anything at `path`, a dangling link included. */
+const occupied = (path) => {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Writes `base..head` whole into the worktree and returns its path there. git
+ * writes the file itself (`--output`), so no size of ours bounds it. Nothing of
+ * the checkout is touched: when the repository has something at
+ * `REVIEW_DIFF_DIR`, the next free `REVIEW_DIFF_DIR-<n>` holds the diff instead,
+ * and the prompt names the path used (review r-20261122-134911-2e4125).
+ */
+export function writeReviewDiff(mirror, worktree, base, head) {
+  let dir = REVIEW_DIFF_DIR;
+  for (let n = 1; occupied(join(worktree, dir)); n += 1) dir = `${REVIEW_DIFF_DIR}-${n}`;
+  // Not recursive: the directory is new, directly under the worktree root.
+  mkdirSync(join(worktree, dir));
+  const file = `${dir}/change.diff`;
+  git(["diff", "--no-renames", "--no-color", "--no-ext-diff", `--output=${join(worktree, file)}`, base, head], { cwd: mirror });
+  return file;
+}
+
 export function addWorktree(mirror, dir, head) {
   git(["worktree", "add", "--detach", "--quiet", dir, head], { cwd: mirror });
 }
