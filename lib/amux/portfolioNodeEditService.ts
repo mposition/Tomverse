@@ -16,7 +16,7 @@ import { loadAmuxContentUnitKeys } from "./ideaKeyStore.ts";
 import { readAmuxPortfolioClock } from "./portfolioClock.ts";
 import { amuxPortfolioOwnerId, AmuxPortfolioError,
   writeAmuxPortfolioAssessmentInTx } from "./portfolioAssessmentService.ts";
-import { AMUX_NODE_REVISE_ACTION, AMUX_NODE_REVISE_TARGET,
+import { AMUX_NODE_PARENT_LEVEL, AMUX_NODE_REVISE_ACTION, AMUX_NODE_REVISE_TARGET,
   amuxNodeEditBinding, amuxNodeEditEvidenceRef, amuxNodeEditReasonFits,
   amuxProjectedTaskScore, type AmuxNodeEditTaskInputs, type AmuxPortfolioNodeEditPayload,
   type AmuxPortfolioNodeLevel } from "./portfolioNodeEditCore.ts";
@@ -140,6 +140,8 @@ const contentBody = (title: string, description: string) =>
 type Plan = {
   level: AmuxPortfolioNodeLevel; node: NodeRow; decisionId: string;
   nextContent: { digest: string; digestKeyId: string } | null;
+  /** The active node one level up the node moves under, or null when it stays. */
+  nextParentId: string | null;
   priorValue: number | null; tasks: Array<{ id: string; displayKey: string | null }>;
   latestScore: Map<string, { scoreTotal: number; components: unknown }>;
   confirmationDigest: string;
@@ -167,6 +169,19 @@ async function buildPlan(db: Db, actorUserId: string,
         digest.digestKeyId === node.contentDigestKeyId ? null : digest;
     } finally { body.fill(0); }
   }
+  // Owner decision 2026-11-22: a move under another active node one level up.
+  let nextParentId: string | null = null;
+  if (payload.parentId && payload.parentId !== node.parentId) {
+    const parentLevel = AMUX_NODE_PARENT_LEVEL[level];
+    const parent = parentLevel ? await db.amuxPortfolioNode.findUnique({
+      where: { id: payload.parentId },
+      select: { level: true, state: true, archivedAt: true } }) : null;
+    if (!parent || parent.level !== parentLevel || parent.state !== "active" ||
+        parent.archivedAt !== null) {
+      throw new AmuxPortfolioError("invalid_input");
+    }
+    nextParentId = payload.parentId;
+  }
   const prior = await db.amuxPortfolioAssessment.findFirst({
     where: { nodeId: node.id }, orderBy: { assessmentVersion: "desc" },
     select: { id: true, metrics: true } });
@@ -181,12 +196,13 @@ async function buildPlan(db: Db, actorUserId: string,
   const canonical = Buffer.from(amuxCanonicalJson(amuxNodeEditBinding({
     actorUserId, payload, level, priorContentDigest: node.contentDigest,
     nextContentDigest: nextContent?.digest ?? null,
+    priorParentId: node.parentId, nextParentId,
     priorAssessmentId: prior?.id ?? null, affectedTasks: inputs })), "utf8");
   try {
     const digest = amuxContentDigest(canonical, "portfolio_assessment",
       payload.id, digestKey);
-    return { level, node, decisionId, nextContent, priorValue, tasks, latestScore,
-      confirmationDigest: digest.digest };
+    return { level, node, decisionId, nextContent, nextParentId, priorValue, tasks,
+      latestScore, confirmationDigest: digest.digest };
   } finally { canonical.fill(0); }
 }
 
@@ -211,7 +227,9 @@ export async function previewAmuxPortfolioNodeEdit(session: Session,
     return {
       confirmationDigest: plan.confirmationDigest, level: plan.level,
       contentChanged: plan.nextContent !== null,
-      revisionAfter: plan.node.revision + (plan.nextContent ? 1 : 0),
+      parentChanged: plan.nextParentId !== null,
+      priorParentId: plan.node.parentId, nextParentId: plan.nextParentId,
+      revisionAfter: plan.node.revision + (plan.nextContent || plan.nextParentId ? 1 : 0),
       priorValue: plan.priorValue, nextValue: payload.value,
       tasks: plan.tasks.map((task) => {
         const current = latest.get(task.id) ?? null;
@@ -262,38 +280,49 @@ export async function saveAmuxPortfolioNodeEdit(input: {
       }
       let revision = plan.node.revision;
       let revisionAuditId: string | null = null;
-      if (plan.nextContent && payload.content && keys) {
-        const title = sealAmuxContent(Buffer.from(payload.content.title, "utf8"),
-          "node_content", plan.node.id, keys);
-        const description = sealAmuxContent(
-          Buffer.from(payload.content.description, "utf8"),
-          "node_content", plan.node.id, keys);
+      const contentChange = plan.nextContent && payload.content && keys ? {
+        digest: plan.nextContent,
+        title: sealAmuxContent(Buffer.from(payload.content.title, "utf8"),
+          "node_content", plan.node.id, keys),
+        description: sealAmuxContent(Buffer.from(payload.content.description, "utf8"),
+          "node_content", plan.node.id, keys) } : null;
+      if (contentChange || plan.nextParentId) {
+        // A content change, a move, or both: one node revision under the
+        // owner's revise audit (the guard accepts no other shape).
+        const parentId = plan.nextParentId ?? plan.node.parentId;
+        const digest = contentChange?.digest ?? { digest: plan.node.contentDigest,
+          digestKeyId: plan.node.contentDigestKeyId };
         revision = plan.node.revision + 1;
         revisionAuditId = await writeAdminAuditLog({ tx, session: input.session,
           request: input.request, action: AMUX_NODE_REVISE_ACTION,
           targetType: AMUX_NODE_REVISE_TARGET, targetId: plan.node.id,
-          summary: "Revised one AMUX portfolio node's title and description.",
+          summary: contentChange && plan.nextParentId
+            ? "Revised one AMUX portfolio node's title and description and moved it under another parent."
+            : contentChange ? "Revised one AMUX portfolio node's title and description."
+              : "Moved one AMUX portfolio node under another parent.",
           metadata: { level: plan.level, priorRevision: plan.node.revision,
             revision, requestId: payload.requestId,
             priorContentDigest: plan.node.contentDigest,
-            contentDigest: plan.nextContent.digest,
-            contentDigestKeyId: plan.nextContent.digestKeyId } });
+            contentDigest: digest.digest, contentDigestKeyId: digest.digestKeyId,
+            ...(plan.nextParentId ? { priorParentId: plan.node.parentId,
+              parentId: plan.nextParentId } : {}) } });
         if (!revisionAuditId) throw new AmuxPortfolioError("integrity_unavailable");
         await tx.amuxPortfolioNodeRevision.create({ data: {
           id: randomUUID(), nodeId: plan.node.id, revision,
-          priorRevision: plan.node.revision, parentIdAtApproval: plan.node.parentId,
-          contentDigest: plan.nextContent.digest,
-          contentDigestKeyId: plan.nextContent.digestKeyId,
+          priorRevision: plan.node.revision, parentIdAtApproval: parentId,
+          contentDigest: digest.digest, contentDigestKeyId: digest.digestKeyId,
           decisionId: plan.decisionId, authorizationAuditLogId: revisionAuditId,
           approvedAt: await readAmuxPortfolioClock(tx) } });
         const updated = await tx.amuxPortfolioNode.updateMany({
-          where: { id: plan.node.id, revision: plan.node.revision, state: "active" },
-          data: { revision,
-            titleCiphertext: new Uint8Array(title.ciphertext),
-            descriptionCiphertext: new Uint8Array(description.ciphertext),
-            contentKeyId: title.keyId, contentKeyVersion: title.keyVersion,
-            contentDigest: plan.nextContent.digest,
-            contentDigestKeyId: plan.nextContent.digestKeyId,
+          where: { id: plan.node.id, revision: plan.node.revision, state: "active",
+            parentId: plan.node.parentId },
+          data: { revision, parentId,
+            ...(contentChange ? {
+              titleCiphertext: new Uint8Array(contentChange.title.ciphertext),
+              descriptionCiphertext: new Uint8Array(contentChange.description.ciphertext),
+              contentKeyId: contentChange.title.keyId,
+              contentKeyVersion: contentChange.title.keyVersion,
+              contentDigest: digest.digest, contentDigestKeyId: digest.digestKeyId } : {}),
             approvedByUserId: actorUserId,
             authorizationAuditLogId: revisionAuditId } });
         if (updated.count !== 1) throw new AmuxPortfolioError("reconfirm");
@@ -325,12 +354,53 @@ export async function saveAmuxPortfolioNodeEdit(input: {
         }
       }
       return { state: "saved" as const, nodeId: plan.node.id, revision,
-        contentRevised: revisionAuditId !== null, revisionAuditId,
+        contentRevised: contentChange !== null, moved: plan.nextParentId !== null,
+        revisionAuditId,
         assessmentId: assessment.assessmentId,
         assessmentVersion: assessment.assessmentVersion,
         assessmentAuditId: assessment.auditId, tasks };
     }, { isolationLevel: "Serializable", maxWait: 5_000, timeout: 60_000 });
   } finally { keys?.masterKey.fill(0); }
+}
+
+/** One active node's decrypted, digest-verified title, or null. */
+async function readableTitle(nodeId: string, deps: AmuxNodeEditDeps): Promise<string | null> {
+  let keys: AmuxContentKeys | null = null;
+  try {
+    const { node, ideaId } = await nodeContext(prisma, nodeId);
+    if (node.state !== "active" || !node.titleCiphertext || !node.descriptionCiphertext ||
+        !node.contentKeyId || !node.contentKeyVersion) return null;
+    keys = await (deps.loadKeys ?? defaultLoader)({ ideaId, purpose: "node_content",
+      subjectId: node.id });
+    const envelope = { keyId: node.contentKeyId, keyVersion: node.contentKeyVersion };
+    const title = openAmuxContent({ ...envelope,
+      ciphertext: Buffer.from(node.titleCiphertext) }, "node_content", node.id, keys);
+    const description = openAmuxContent({ ...envelope,
+      ciphertext: Buffer.from(node.descriptionCiphertext) }, "node_content", node.id, keys);
+    try {
+      const body = contentBody(title.toString("utf8"), description.toString("utf8"));
+      try {
+        return verifyAmuxContentDigest(body, "node_content", node.id,
+          node.contentDigest, node.contentDigestKeyId, keys) ? title.toString("utf8") : null;
+      } finally { body.fill(0); }
+    } finally { title.fill(0); description.fill(0); }
+  } catch { return null; } finally { keys?.masterKey.fill(0); }
+}
+
+/** Owner decision 2026-11-22: the active nodes one level up an Epic or
+ * Feature may move under, with their titles (null when unreadable). */
+async function parentOptions(level: AmuxPortfolioNodeLevel, deps: AmuxNodeEditDeps) {
+  const parentLevel = AMUX_NODE_PARENT_LEVEL[level];
+  if (!parentLevel) return [];
+  const rows = await prisma.amuxPortfolioNode.findMany({
+    where: { level: parentLevel, state: "active", archivedAt: null },
+    select: { id: true, displayPrefix: true }, orderBy: { createdAt: "asc" } });
+  const options = [];
+  for (const row of rows) {
+    options.push({ id: row.id, title: await readableTitle(row.id, deps),
+      displayPrefix: row.displayPrefix });
+  }
+  return options;
 }
 
 /** The edit panel's read: decrypted title and description, the latest value
@@ -373,6 +443,8 @@ export async function readAmuxPortfolioNodeForEdit(session: Session,
     (latest.metrics as Record<string, number>).value : null;
   return { id: node.id, level: context.level, state: node.state,
     revision: node.revision, displayPrefix: node.displayPrefix, content,
+    parentId: node.parentId,
+    parentOptions: node.state === "active" ? await parentOptions(context.level, deps) : [],
     // An archived node is read-only. An unreadable body keeps the value
     // editable but never offers a text field to overwrite unseen text.
     editable: node.state === "active", contentEditable: content !== null,

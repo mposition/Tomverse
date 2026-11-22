@@ -13,6 +13,13 @@ export const AMUX_NODE_DESCRIPTION_MAX = 4_000;
 
 export type AmuxPortfolioNodeLevel = "initiative" | "epic" | "feature";
 
+/** Owner decision 2026-11-22: an Epic may move under another active
+ * Initiative and a Feature under another active Epic; an Initiative never
+ * moves. The move is a node revision like a content revision. */
+export const AMUX_NODE_PARENT_LEVEL: Readonly<Record<AmuxPortfolioNodeLevel, AmuxPortfolioNodeLevel | null>> = {
+  initiative: null, epic: "initiative", feature: "epic",
+};
+
 /** The weight each level's value carries in the Task score
  * (portfolioScoreCore.ts): Initiative x4, Epic x3, Feature x2. */
 export const AMUX_NODE_VALUE_WEIGHT: Record<AmuxPortfolioNodeLevel, number> = {
@@ -39,6 +46,8 @@ export const amuxPortfolioNodeEditPayloadSchema = z.object({
   /** Null keeps the current title and description. */
   content: z.object({ title: singleLine(AMUX_NODE_TITLE_MAX),
     description: multiLine(AMUX_NODE_DESCRIPTION_MAX) }).strict().nullable(),
+  /** The new parent (owner decision 2026-11-22); absent or null keeps it. */
+  parentId: nodeId.nullable().optional(),
   value: rating,
   uncertainty: z.enum(["low", "medium", "high"]),
   reasonCode: z.enum(["initial", "new_evidence", "operator_override", "major_event"]),
@@ -65,6 +74,8 @@ export function amuxNodeEditBinding(input: {
   actorUserId: string; payload: AmuxPortfolioNodeEditPayload;
   level: AmuxPortfolioNodeLevel; priorContentDigest: string;
   nextContentDigest: string | null;
+  /** The parent before the save and the one it moves to, or null when it stays. */
+  priorParentId: string | null; nextParentId: string | null;
   /** The node's latest assessment the owner saw, or null for a first one. */
   priorAssessmentId: string | null;
   /** Each open Task with its latest score and, for every subject its score
@@ -75,12 +86,13 @@ export function amuxNodeEditBinding(input: {
 }) {
   const { payload } = input;
   return {
-    schemaVersion: 2, actorUserId: input.actorUserId,
+    schemaVersion: 3, actorUserId: input.actorUserId,
     id: payload.id, requestId: payload.requestId,
     nodeId: payload.nodeId, level: input.level,
     expectedRevision: payload.expectedRevision,
     priorContentDigest: input.priorContentDigest,
     nextContentDigest: input.nextContentDigest,
+    priorParentId: input.priorParentId, nextParentId: input.nextParentId,
     priorAssessmentId: input.priorAssessmentId,
     value: payload.value, uncertainty: payload.uncertainty,
     reasonCode: payload.reasonCode,

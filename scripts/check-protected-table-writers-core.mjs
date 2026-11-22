@@ -751,6 +751,13 @@ export const DELEGATE_NAME_ALLOWLIST = [
  */
 export const RAW_SQL_ALLOWLIST = [
   {
+    path: "prisma/migrations/20261122150000_amux_portfolio_node_move/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 1,
+    reason: "The portfolio parent guard (owner decision 2026-11-22: a node move is an owner revision) reads the owner's node.revise audit row in SELECT EXISTS; its only write-verb token is the TG_OP = 'UPDATE' comparison. It writes no audit row.",
+  },
+  {
     path: "prisma/migrations/20261121130000_amux_portfolio_node_content_revision/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 1,

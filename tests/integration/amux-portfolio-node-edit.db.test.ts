@@ -332,3 +332,127 @@ test("the database accepts a content revision only in the exact owner shape", as
     /revision path is closed/);
   }));
 });
+
+// Owner decision 2026-11-22: ideas that split one goal (AEO-01, AEO-02) are
+// brought under one hierarchy by moving a node under another parent. A move
+// is a node revision in the same owner shape; cards stay with their Feature.
+async function secondEpic(tx: LifecycleTx, ids: Ids) {
+  const epic = randomUUID();
+  await tx.$executeRaw`INSERT INTO "AmuxPortfolioNode"
+    ("id", "level", "parentId", "state", "revision", "titleCiphertext",
+     "descriptionCiphertext", "contentKeyId", "contentKeyVersion", "contentDigest",
+     "contentDigestKeyId", "approvedByUserId", "authorizationAuditLogId", "updatedAt")
+    VALUES (${epic}, 'epic', ${ids.initiative}, 'active', 0, ${Buffer.from("x")},
+      ${Buffer.from("y")}, 'synthetic', 1, ${"d".repeat(64)}, 'synthetic',
+      'synthetic-owner', ${randomUUID()}, CURRENT_TIMESTAMP)`;
+  await tx.$executeRaw`INSERT INTO "AmuxPortfolioNodeRevision"
+    ("id", "nodeId", "revision", "priorRevision", "parentIdAtApproval",
+     "contentDigest", "contentDigestKeyId", "decisionId", "authorizationAuditLogId", "approvedAt")
+    SELECT ${randomUUID()}, "id", 0, NULL, "parentId", "contentDigest", "contentDigestKeyId",
+      ${ids.sourceApproval}, "authorizationAuditLogId", CURRENT_TIMESTAMP
+    FROM "AmuxPortfolioNode" WHERE "id" = ${epic}`;
+  const assessmentId = randomUUID();
+  const auditId = await appendSyntheticAdminAudit(queryAdapter(tx), {
+    actorUserId: "synthetic-owner", action: "amux.v4.portfolio.assessment.approve",
+    targetType: "AmuxPortfolioAssessment", targetId: assessmentId,
+    summary: "synthetic assessment" });
+  await tx.$executeRaw`INSERT INTO "AmuxPortfolioAssessment"
+    ("id", "requestId", "nodeId", "subjectKind", "subjectRevision", "subjectDigest",
+     "subjectDigestKeyId", "assessmentVersion", "metrics", "uncertainty", "evidenceRefs",
+     "evidenceAsOf", "reasonCode", "confirmationDigest", "confirmationDigestKeyId",
+     "approvedByUserId", "approvalAuditLogId", "approvedAt")
+    VALUES (${assessmentId}, ${randomUUID()}, ${epic}, 'epic', 0, ${"d".repeat(64)},
+      'synthetic', 1, '{"value": 1}'::jsonb, 'low', '["proof_0001"]'::jsonb,
+      CURRENT_TIMESTAMP - INTERVAL '1 day', 'initial', ${"c".repeat(64)}, 'synthetic',
+      'synthetic-owner', ${auditId}, CURRENT_TIMESTAMP)`;
+  return epic;
+}
+
+test("a Feature moves under another Epic as one owner revision, with its Task rescored", async () => {
+  const { previewAmuxPortfolioNodeEdit, saveAmuxPortfolioNodeEdit,
+    readAmuxPortfolioNodeForEdit } = await services();
+  await lifecycle(async (tx) => scoredFeature(tx, async (ids) => {
+    const owner = session();
+    const target = await secondEpic(tx, ids);
+    // A text revision first, as every real node has its description sealed.
+    const first = payload(ids);
+    const firstPreview = await previewAmuxPortfolioNodeEdit(owner, first, digestKey, { loadKeys });
+    await saveAmuxPortfolioNodeEdit({ session: owner, request: request(), payload: first,
+      confirmationDigest: firstPreview.confirmationDigest, digestKey, deps: { loadKeys } });
+
+    // The sheet offers the active Epics, with the current one selected.
+    const read = await readAmuxPortfolioNodeForEdit(owner, ids.feature, { loadKeys });
+    assert.equal(read.parentId, ids.epic);
+    assert.deepEqual(read.parentOptions.map((option) => option.id).sort(), [ids.epic, target].sort());
+
+    const move = payload(ids, { expectedRevision: 1, expectedAssessmentId: first.id,
+      content: null, parentId: target });
+    const preview = await previewAmuxPortfolioNodeEdit(owner, move, digestKey, { loadKeys });
+    assert.equal(preview.parentChanged, true);
+    assert.equal(preview.contentChanged, false);
+    assert.equal(preview.revisionAfter, 2);
+    assert.deepEqual(preview.tasks.map((task) => task.taskId), [ids.task]);
+    const saved = await saveAmuxPortfolioNodeEdit({ session: owner, request: request(),
+      payload: move, confirmationDigest: preview.confirmationDigest, digestKey,
+      deps: { loadKeys } });
+    assert.equal(saved.moved, true);
+    assert.equal(saved.contentRevised, false);
+    assert.equal(saved.revision, 2);
+    assert.deepEqual(saved.tasks.map((task) => task.state), ["scored"]);
+
+    const [node] = await tx.$queryRaw<Array<{ parentId: string; revision: number;
+      authorizationAuditLogId: string }>>`
+      SELECT "parentId", "revision", "authorizationAuditLogId" FROM "AmuxPortfolioNode"
+      WHERE "id" = ${ids.feature}`;
+    assert.deepEqual({ parentId: node.parentId, revision: node.revision },
+      { parentId: target, revision: 2 });
+    const [revision] = await tx.$queryRaw<Array<{ parentIdAtApproval: string }>>`
+      SELECT "parentIdAtApproval" FROM "AmuxPortfolioNodeRevision"
+      WHERE "nodeId" = ${ids.feature} AND "revision" = 2`;
+    assert.equal(revision.parentIdAtApproval, target);
+    const [audit] = await tx.$queryRaw<Array<{ action: string; metadata: Record<string, unknown> }>>`
+      SELECT "action", "metadata" FROM "AdminAuditLog" WHERE "id" = ${node.authorizationAuditLogId}`;
+    assert.equal(audit.action, "amux.v4.portfolio.node.revise");
+    assert.equal(audit.metadata.priorParentId, ids.epic);
+    assert.equal(audit.metadata.parentId, target);
+    // The card stays with its Feature; its score now reads the new Epic.
+    const [card] = await tx.$queryRaw<Array<{ parentFeatureNodeId: string }>>`
+      SELECT "parentFeatureNodeId" FROM "AmuxWorkItem" WHERE "id" = ${ids.task}`;
+    assert.equal(card.parentFeatureNodeId, ids.feature);
+    const [score] = await tx.$queryRaw<Array<{ epicAssessmentId: string; components: { epic: number } }>>`
+      SELECT "epicAssessmentId"::text AS "epicAssessmentId", "components"
+      FROM "AmuxPortfolioScoreSnapshot" WHERE "taskId" = ${ids.task}
+      ORDER BY "computedAt" DESC, "id" DESC LIMIT 1`;
+    const [targetAssessment] = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "id"::text AS "id" FROM "AmuxPortfolioAssessment" WHERE "nodeId" = ${target}`;
+    assert.equal(score.epicAssessmentId, targetAssessment.id);
+    assert.equal(score.components.epic, 3);
+
+    // The emptied Epic can now be archived by the existing clean-up.
+    const [children] = await tx.$queryRaw<Array<{ count: number }>>`
+      SELECT count(*)::int AS "count" FROM "AmuxPortfolioNode"
+      WHERE "parentId" = ${ids.epic} AND "state" = 'active'`;
+    assert.equal(children.count, 0);
+  }));
+});
+
+test("a move to a node of the wrong level, an Initiative move or a bare parent update is refused", async () => {
+  const { previewAmuxPortfolioNodeEdit } = await services();
+  await lifecycle(async (tx) => scoredFeature(tx, async (ids) => {
+    const owner = session();
+    const target = await secondEpic(tx, ids);
+    // A Feature under an Initiative, and an Initiative under anything.
+    await assert.rejects(previewAmuxPortfolioNodeEdit(owner,
+      payload(ids, { parentId: ids.initiative }), digestKey, { loadKeys }), { code: "invalid_input" });
+    await assert.rejects(previewAmuxPortfolioNodeEdit(owner,
+      payload(ids, { nodeId: ids.initiative, parentId: target }), digestKey, { loadKeys }),
+    { code: "invalid_input" });
+    // The database refuses any parent change outside the owner revision shape.
+    const bare = await refused(tx, () => tx.$executeRaw`
+      UPDATE "AmuxPortfolioNode" SET "parentId" = ${target} WHERE "id" = ${ids.feature}`);
+    assert.match(bare ?? "", /portfolio content and identity revision path is closed/);
+    const initiative = await refused(tx, () => tx.$executeRaw`
+      UPDATE "AmuxPortfolioNode" SET "parentId" = ${target} WHERE "id" = ${ids.initiative}`);
+    assert.match(initiative ?? "", /closed|initiative/);
+  }));
+});
