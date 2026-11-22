@@ -100,3 +100,5 @@ export function createApiClient(transport: ApiFetch) {
     },
   };
 }
+
+export { createResearchApi, ResearchApiError, type ResearchAction, type ResearchApi } from "./research";

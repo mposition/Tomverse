@@ -73,6 +73,7 @@ export async function readEligibleResearchPreviewSource(input: {
 
 const CHECKPOINTED_SELECT = {
   id: true,
+  engineVersion: true,
   conversationId: true,
   assistantMessageId: true,
   modelId: true,
@@ -118,6 +119,7 @@ export const toResearchPreviewRunDto = (
     row.generations.length === 0;
   return {
     id: row.id,
+    engineVersion: row.engineVersion === 2 ? 2 : 1,
     conversationId: row.conversationId,
     assistantMessageId: row.assistantMessageId,
     modelId: row.modelId,
@@ -261,6 +263,7 @@ export async function claimNextResearchPreviewRun(ownerId: string) {
     const rows = await tx.$queryRaw<Array<{ id: string; startedAt: Date | null }>>`
       SELECT "id", "startedAt" FROM "ResearchPreviewRun"
       WHERE "status" = 'queued'
+        AND "engineVersion" = 1
         AND "cancelRequestedAt" IS NULL
         AND "reservationId" IS NOT NULL
       ORDER BY "createdAt", "id"
@@ -777,7 +780,7 @@ export async function finishResearchPreviewRunWithoutReport(input: {
 
 export async function staleResearchPreviewRuns(limit = 50) {
   return prisma.researchPreviewRun.findMany({
-    where: { status: "running", leaseExpiresAt: { lte: new Date() } },
+    where: { engineVersion: 1, status: "running", leaseExpiresAt: { lte: new Date() }, recoveryQuarantinedAt: null },
     select: { id: true },
     orderBy: { leaseExpiresAt: "asc" },
     take: Math.min(100, Math.max(1, limit)),
@@ -787,7 +790,9 @@ export async function staleResearchPreviewRuns(limit = 50) {
 export async function stalePreparingResearchPreviewRuns(limit = 50) {
   return prisma.researchPreviewRun.findMany({
     where: {
+      engineVersion: 1,
       status: "preparing",
+      recoveryQuarantinedAt: null,
       createdAt: {
         lte: new Date(Date.now() - RESEARCH_PREVIEW_PREPARING_STALE_MS),
       },
@@ -946,9 +951,11 @@ export async function readResearchPreviewRunForWorker(id: string) {
 export async function researchPreviewRunsAwaitingSettlement(limit = 50) {
   return prisma.researchPreviewRun.findMany({
     where: {
+      engineVersion: 1,
       status: { in: ["completed", "failed", "cancelled", "attention"] },
       reservationId: { not: null },
       settlementUsage: { not: Prisma.DbNull },
+      recoveryQuarantinedAt: null,
     },
     orderBy: { completedAt: "asc" },
     take: Math.min(100, Math.max(1, limit)),

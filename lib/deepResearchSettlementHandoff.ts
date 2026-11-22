@@ -229,7 +229,7 @@ export async function researchPreviewSettlementForExpiry(
 ): Promise<ResearchPreviewSettlementUsage | null> {
   await tx.$queryRaw`SELECT "id" FROM "ResearchPreviewRun" WHERE "reservationId" = ${reservationId} FOR UPDATE`;
   const run = await tx.researchPreviewRun.findFirst({ where: { reservationId } });
-  if (!run) return null;
+  if (!run) return researchEngineSegmentSettlementForExpiry(tx, reservationId, now);
   if (!["completed", "failed", "cancelled", "attention"].includes(run.status)) {
     const neverStarted = run.status === "queued" && run.checkpoint === null && run.stepCount === 0;
     if (!["checkpointed", "queued"].includes(run.status) ||
@@ -246,4 +246,65 @@ export async function researchPreviewSettlementForExpiry(
   }
   return parseResearchPreviewSettlementUsage(run.settlementUsage) ??
     stoppedResearchPreviewUsage(tx, run, "failed");
+}
+
+const ZERO_RESEARCH_SEGMENT_USAGE: ResearchPreviewSettlementUsage = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0,
+  cacheWriteInputTokens: 0, reasoningTokens: 0, usageFromProvider: true, outcome: "failed", searchExecuted: false, searchQueryCount: 0,
+  searchBackendRequestCount: 0, searchQueriesObserved: true };
+
+/**
+ * A hold that expires between its creation and its bind (the reservation's
+ * traceId names the segment, but the segment names no reservation yet). Nothing
+ * can have dispatched on it, since dispatch needs a bound segment. The segment is
+ * fenced as released under the settlement lock, so the worker's later bind is
+ * refused and the zero refund can never cover a model call.
+ */
+async function unboundResearchSegmentSettlementForExpiry(
+  tx: Prisma.TransactionClient, reservationId: string
+): Promise<ResearchPreviewSettlementUsage | null> {
+  const reservation = await tx.chatCreditReservation.findUnique({ where: { id: reservationId }, select: { traceId: true } });
+  if (!reservation?.traceId) return null;
+  await tx.$queryRaw`SELECT "id" FROM "ResearchFundingSegment" WHERE "id" = ${reservation.traceId} FOR UPDATE`;
+  const segment = await tx.researchFundingSegment.findUnique({ where: { id: reservation.traceId }, select: { id: true, status: true, reservationId: true } });
+  if (!segment || segment.reservationId !== null) return null;
+  if (segment.status === "reserving") await tx.researchFundingSegment.update({ where: { id: segment.id }, data: { status: "released" } });
+  return ZERO_RESEARCH_SEGMENT_USAGE;
+}
+
+/**
+ * Research engine v2 holds one Chat reservation per funding segment. Expiry may
+ * settle such a reservation only from facts the segment already records:
+ * a dispatch that may still be running keeps the hold, an unknown outcome is
+ * settled conservatively, and a segment that never dispatched is a zero.
+ * Called under the reservation settlement lock, before any write.
+ */
+async function researchEngineSegmentSettlementForExpiry(
+  tx: Prisma.TransactionClient, reservationId: string, now: Date
+): Promise<ResearchPreviewSettlementUsage | null> {
+  await tx.$queryRaw`SELECT "id" FROM "ResearchFundingSegment" WHERE "reservationId" = ${reservationId} FOR UPDATE`;
+  const segment = await tx.researchFundingSegment.findFirst({ where: { reservationId },
+    include: { generations: { select: { kind: true, status: true } } } });
+  if (!segment) return unboundResearchSegmentSettlementForExpiry(tx, reservationId);
+  if (segment.status === "settled") return parseResearchPreviewSettlementUsage(segment.settlementUsage);
+  if (segment.runId === null && segment.status !== "released") {
+    // The run (and its dispatch rows) was deleted with its conversation or account.
+    // Whether the hold was dispatched can no longer be shown, so it is charged as unknown, never refunded.
+    await tx.researchFundingSegment.update({ where: { id: segment.id }, data: { status: "settled", settledCredits: segment.reservedCredits,
+      settledAt: now, settlementUsage: { usageFromProvider: false, outcome: "failed", searchQueriesObserved: false, settledBy: "expiry_orphaned" } } });
+    return { usageFromProvider: false, outcome: "failed", searchQueriesObserved: false };
+  }
+  if (segment.status === "unknown") {
+    await tx.researchFundingSegment.update({ where: { id: segment.id }, data: { status: "settled", settledCredits: segment.reservedCredits,
+      settledAt: now, settlementUsage: { usageFromProvider: false, outcome: "failed", searchQueriesObserved: false, settledBy: "expiry" } } });
+    return { usageFromProvider: false, outcome: "failed", searchQueriesObserved: false };
+  }
+  const dispatched = segment.generations.some((generation) => generation.status !== "intent" && generation.status !== "dispatch_refused");
+  if (segment.status === "released" || !dispatched) {
+    if (segment.generations.some((generation) => generation.status === "intent") && segment.status === "reserved") {
+      throw new ResearchPreviewRunError(409, "RESEARCH_RUN_STILL_ACTIVE", "Research owns this reservation until its dispatch is decided.");
+    }
+    await tx.researchFundingSegment.update({ where: { id: segment.id }, data: { status: "released" } });
+    return ZERO_RESEARCH_SEGMENT_USAGE;
+  }
+  throw new ResearchPreviewRunError(409, "RESEARCH_RUN_STILL_ACTIVE", "Research owns this reservation until its work is settled.");
 }

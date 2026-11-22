@@ -1,4 +1,5 @@
 import { researchRunMessage } from "../../../lib/researchPreviewRunClient";
+import { createResearchApi } from "@tomverse/api-client";
 import type { ResearchPreviewRunDto } from "../../../lib/researchPreviewRunTypes";
 import { createWorkspaceTransport } from "./workspaceTransport";
 import { createApiClient, ApiClientError, requestChatLocationIntent } from "@tomverse/api-client";
@@ -46,7 +47,7 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
   const run = async (path: string, init?: MobileRequestInit): Promise<Response> => {
     try {
       for (const [id, token] of unlockGrants) if (Number(token.split(".")[0]) <= Date.now() / 1000) unlockGrants.delete(id);
-      if (unlockGrants.size && (/^\/api\/(?:conversations|artifacts)(?:\/|\?)/.test(path) || path.startsWith("/api/chat/research-preview/") || path === "/api/chat" || path === "/api/chat/preflight")) {
+      if (unlockGrants.size && (/^\/api\/(?:conversations|artifacts)(?:\/|\?)/.test(path) || path.startsWith("/api/chat/research-preview/") || path.startsWith("/api/chat/research/") || path === "/api/chat" || path === "/api/chat/preflight")) {
         const grantHeaders = (value?: RequestInit) => {
           const headers = new Headers(value?.headers);
           headers.set("X-Tomverse-Conversation-Unlocks", [...unlockGrants].map(([id, token]) => `${id}=${token}`).join("; "));
@@ -125,6 +126,17 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
         if (index >= 0) messages[index] = { ...messages[index], researchRunId: run.id };
         else messages.push(researchRunMessage(run));
       }
+      } catch (error) { if ((error as { status?: number }).status === 401) throw error; }
+    }
+    if (capabilityCache?.value.researchEngine?.enabled) {
+      try {
+        const result = await request<{ runs: Array<{ id: string; conversationId: string; assistantMessageId: string; createdAt: string; status: string }> }>(`/api/chat/research/runs?conversationId=${encodeURIComponent(id)}`, { cache: "no-store" });
+        for (const run of result.runs) {
+          if (run.conversationId !== id) continue;
+          const index = messages.findIndex(message => message.id === run.assistantMessageId);
+          if (index >= 0) messages[index] = { ...messages[index], researchRunId: run.id, researchEngineRun: true };
+          else messages.push({ id: run.assistantMessageId, role: "assistant", content: "", researchRunId: run.id, researchEngineRun: true, status: "pending", createdAt: run.createdAt } as never);
+        }
       } catch (error) { if ((error as { status?: number }).status === 401) throw error; }
     }
     for (const attempt of item.responseAttempts ?? []) {
@@ -314,6 +326,8 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       if (!(await requireParity()).researchPreview?.enabled) return { offered: false, reason: "disabled" };
       return request("/api/chat/research-preview/offer", { ...json("POST", input), ...(locale ? { headers: { "Content-Type": "application/json", "Accept-Language": locale } } : {}), signal });
     },
+    researchEngine: createResearchApi((path, init) => run(path, init)),
+    researchEngineEnabled: async () => Boolean((await requireParity()).researchEngine?.enabled),
     researchRuns: {
       read: async (id, signal) => { if (!(await requireParity()).researchPreview?.enabled) throw Error("NATIVE_RESEARCH_UNAVAILABLE"); return (await request<{ run: ResearchPreviewRunDto }>(`/api/chat/research-preview/runs/${encodeURIComponent(id)}`, { cache: "no-store", signal })).run; },
       resume: async id => { if (!(await requireParity()).researchPreview?.enabled) throw Error("NATIVE_RESEARCH_UNAVAILABLE"); return (await request<{ run: ResearchPreviewRunDto }>(`/api/chat/research-preview/runs/${encodeURIComponent(id)}/resume`, { method: "POST" })).run; },
