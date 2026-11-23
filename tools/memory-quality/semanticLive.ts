@@ -2,6 +2,9 @@ import { access, open, rename, unlink } from "node:fs/promises";
 import { SEMANTIC_RETRIEVAL_ENV, SEMANTIC_RETRIEVAL_LIMITS, type RerankQueryPolicy } from "../../lib/semanticRetrievalCore";
 import { QualityStop } from "./runner";
 
+/** Tries of a snapshot rename a transient Windows file lock may refuse (about 1.5 s in all). */
+const RENAME_ATTEMPTS = 6;
+
 /**
  * Shared guards for the paid `--live` path of the semantic comparisons.
  *
@@ -143,11 +146,21 @@ export class SaveTarget {
     } catch {
       throw new QualityStop("save_scores_failed");
     }
-    try {
-      await rename(temporary, this.path);
-    } catch {
-      await unlink(temporary).catch(() => undefined);
-      throw new QualityStop("save_scores_failed");
+    // A local rename is safe to repeat. On Windows an antivirus or indexer briefly holding the
+    // file just written makes it fail with EPERM/EBUSY/EACCES; wait and try again before stopping.
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        await rename(temporary, this.path);
+        return;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (attempt < RENAME_ATTEMPTS && (code === "EPERM" || code === "EBUSY" || code === "EACCES")) {
+          await new Promise((done) => setTimeout(done, 100 * attempt));
+          continue;
+        }
+        await unlink(temporary).catch(() => undefined);
+        throw new QualityStop("save_scores_failed");
+      }
     }
   }
 
