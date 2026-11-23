@@ -614,13 +614,9 @@ export async function withholdRevokedSources(tx: Prisma.TransactionClient, runId
     const own = claims.filter((claim) => claim.revisionId === revision.id).map((claim) => ({ claimKey: claim.claimKey, sectionKey: claim.sectionKey,
       text: claim.text, verification: claim.verification as ReportClaim["verification"], evidence: claim.evidence as ReportClaim["evidence"] }));
     const before = researchReportDocumentSchema.parse(revision.document);
-    let document = before;
-    for (const key of revoked) {
-      const withheld = withholdRevokedSource(document, own, key,
-        { note: labels.redactedNote, privateSource: placeholder, title: manifest.brief.question, headings: planHeadings.get(revision.planRevision) });
-      if (withheld) document = withheld.document;
-    }
-    if (JSON.stringify(document) === JSON.stringify(before)) continue;
+    const document = withholdRevokedSource(before, own, revoked,
+      { note: labels.redactedNote, privateSource: placeholder, title: manifest.brief.question, headings: planHeadings.get(revision.planRevision) })?.document;
+    if (!document || JSON.stringify(document) === JSON.stringify(before)) continue;
     await tx.researchReportRevision.update({ where: { id: revision.id }, data: { document: json(document) } });
     if (revision.revision === runRow.currentReportRevision) currentChanged = true;
   }

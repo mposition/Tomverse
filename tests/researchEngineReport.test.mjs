@@ -99,7 +99,7 @@ test("a revoked private source withholds everything a model wrote after reading 
     criteria: [{ criterion: "Criterion naming the private fact", met: true }],
     conflicts: [{ text: "Private fact disagrees with public fact", claimKeys: ["C1", "C2"] }, { text: "Public only", claimKeys: ["C1"] }] });
   document.bibliography = buildBibliography(document, claims, sources);
-  const withheld = withholdRevokedSource(document, [...claims.values()], "P1",
+  const withheld = withholdRevokedSource(document, [...claims.values()], ["P1"],
     { note: "removed", privateSource: "private source", title: "User question", headings: new Map([["s1", "Plan heading"]]) });
   assert.deepEqual([...withheld.affected], ["C2"]);
   const json = JSON.stringify(withheld.document);
@@ -110,7 +110,7 @@ test("a revoked private source withholds everything a model wrote after reading 
     { type: "paragraph", text: "Public fact", claimKeys: ["C1"] }], "the section is rebuilt from its remaining citable claims");
   assert.deepEqual(withheld.document.sections[1].blocks, [{ type: "paragraph", text: "Second section prose", claimKeys: ["C1"] }]);
   assert.deepEqual(withheld.document.conflicts, [], "conflicts are synthesis text over every claim");
-  const again = withholdRevokedSource(withheld.document, [...claims.values()], "P1",
+  const again = withholdRevokedSource(withheld.document, [...claims.values()], ["P1"],
     { note: "removed", privateSource: "private source", title: "User question", headings: new Map([["s1", "Plan heading"]]) });
   assert.deepEqual(again.document, withheld.document, "applying it again changes nothing");
   assert.equal(withheld.document.title, "User question");
@@ -119,8 +119,20 @@ test("a revoked private source withholds everything a model wrote after reading 
   assert.deepEqual(withheld.document.limitations, ["removed"]);
   assert.deepEqual(withheld.document.nextQuestions, []);
   assert.deepEqual(withheld.document.criteria, []);
-  const noPlan = withholdRevokedSource(document, [...claims.values()], "P1", { note: "removed", privateSource: "private source", title: "User question" });
+  const noPlan = withholdRevokedSource(document, [...claims.values()], ["P1"], { note: "removed", privateSource: "private source", title: "User question" });
   assert.equal(noPlan.document.sections[0].heading, "§ 1");
   assert.equal(researchReportDocumentSchema.safeParse(withheld.document).success, true);
-  assert.equal(withholdRevokedSource(document, [...claims.values()], "P9", { note: "removed", privateSource: "private source", title: "User question" }), null);
+  assert.equal(withholdRevokedSource(document, [...claims.values()], ["P9"], { note: "removed", privateSource: "private source", title: "User question" }), null);
+});
+
+test("two revoked sources are withheld in one pass, so rebuilding for one never brings back the other's claim", () => {
+  const both = new Map([...claims, ["C4", { claimKey: "C4", sectionKey: "s1", text: "Second private fact", kind: "fact", verification: "supported",
+    privateDerived: true, evidence: [{ sourceKey: "P2", versionId: "v3", chunkId: "c3", level: "text" }] }]]);
+  const document = doc();
+  const withheld = withholdRevokedSource(document, [...both.values()], ["P1", "P2"], { note: "removed", privateSource: "private source", title: "Q" });
+  assert.deepEqual([...withheld.affected].sort(), ["C2", "C4"]);
+  assert.deepEqual(withheld.document.sections[0].blocks, [{ type: "paragraph", text: "removed", claimKeys: [] },
+    { type: "paragraph", text: "Public fact", claimKeys: ["C1"] }]);
+  const json = JSON.stringify(withheld.document);
+  for (const leaked of ["Private fact", "Second private fact"]) assert.ok(!json.includes(leaked), leaked);
 });

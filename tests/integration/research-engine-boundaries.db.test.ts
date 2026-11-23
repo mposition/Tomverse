@@ -693,6 +693,28 @@ test("a private finding whose quote cannot be verified is never kept as a claim,
   assert.ok(!JSON.stringify(await buildAccountDataExport(user.id)).includes("ZETA-44"), "nor in the account export");
 });
 
+test("revoking two private sources of one report leaves neither source's text in the report or the chat answer", async () => {
+  installFakes();
+  createFakeWeb();
+  const user = await createUser("two-revoked");
+  const one = await memory(user.id, "Two-revoke memory one with private detail");
+  const two = await memory(user.id, "Two-revoke memory two with private detail");
+  const run = await create(user.id, { sources: [{ type: "memory", memoryItemId: one.id }, { type: "memory", memoryItemId: two.id }] });
+  await drainResearchWork("two-revoked", 4);
+  assert.equal((await readResearchRunDto(user.id, run.id)).status, "completed");
+  const derived = (await prisma.researchClaim.findMany({ where: { runId: run.id, privateDerived: true } })).map((claim) => claim.text);
+  assert.ok(derived.length >= 2, "both private sources produced claims");
+  await prisma.memoryItem.deleteMany({ where: { id: { in: [one.id, two.id] } } });
+  await recoverResearchEngine();
+  assert.equal(await prisma.researchSource.count({ where: { runId: run.id, visibility: "private", status: "revoked" } }), 2);
+  const report = JSON.stringify(await readResearchReport({ userId: user.id, runId: run.id }));
+  const answer = (await prisma.message.findUniqueOrThrow({ where: { id: (await prisma.researchPreviewRun.findUniqueOrThrow({ where: { id: run.id } })).assistantMessageId } })).content;
+  for (const text of derived) {
+    assert.ok(!report.includes(text), `report keeps: ${text}`);
+    assert.ok(!answer.includes(text), `answer keeps: ${text}`);
+  }
+});
+
 test("evidence cleanup backs off through a long storage outage but never gives up", async () => {
   const fakes = installFakes();
   const objectKey = `research-evidence/outage/${randomUUID()}`;

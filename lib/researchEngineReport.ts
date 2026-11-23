@@ -168,14 +168,16 @@ export function redactReportForPublic(document: ResearchReportDocument, claims: 
  *   next questions, criteria) and every section heading become text that does
  *   not come from the source: the user's question, the approved plan's headings
  *   (or a neutral number) and the removal note.
- * Applying it again to its own output changes nothing. Returns null when this
- * revision never used the source.
+ * All revoked sources are handled in one pass. Applying it again to its own
+ * output changes nothing. Returns null when this revision never used any of them.
  */
 export function withholdRevokedSource(document: ResearchReportDocument,
   claims: ReadonlyArray<Pick<ReportClaim, "claimKey" | "sectionKey" | "text" | "verification" | "evidence">>,
-  sourceKey: string, labels: { note: string; privateSource: string; title: string; headings?: ReadonlyMap<string, string> }) {
-  const affected = new Set(claims.filter((claim) => claim.evidence.some((evidence) => evidence.sourceKey === sourceKey)).map((claim) => claim.claimKey));
-  if (!affected.size && !document.bibliography.some((entry) => entry.sourceKey === sourceKey)) return null;
+  sourceKeys: readonly string[], labels: { note: string; privateSource: string; title: string; headings?: ReadonlyMap<string, string> }) {
+  // Every revoked source at once: a rebuilt section must not bring back a claim withheld for another source.
+  const revoked = new Set(sourceKeys);
+  const affected = new Set(claims.filter((claim) => claim.evidence.some((evidence) => revoked.has(evidence.sourceKey))).map((claim) => claim.claimKey));
+  if (!affected.size && !document.bibliography.some((entry) => revoked.has(entry.sourceKey))) return null;
   const rests = (keys: string[]) => keys.some((key) => affected.has(key));
   const seenEverywhere = claims.some((claim) => affected.has(claim.claimKey) && claim.sectionKey === "all");
   const sawWithheld = (sectionKey: string) => seenEverywhere || claims.some((claim) => affected.has(claim.claimKey) && claim.sectionKey === sectionKey);
@@ -197,7 +199,7 @@ export function withholdRevokedSource(document: ResearchReportDocument,
     limitations: [labels.note],
     nextQuestions: [],
     criteria: [],
-    bibliography: document.bibliography.map((entry) => entry.sourceKey === sourceKey ? { ...entry, title: labels.privateSource } : entry),
+    bibliography: document.bibliography.map((entry) => revoked.has(entry.sourceKey) ? { ...entry, title: labels.privateSource } : entry),
   };
   return { affected, document: withheld };
 }
