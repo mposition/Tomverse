@@ -249,6 +249,27 @@ const REGISTRY = {
     reason:
       "pending or finalizing. Whether an upload key is currently claimed by a finalize in flight; the compare-and-set that takes a claim and the sweep that reclaims a stale one both read it.",
   },
+  AssistantKnowledgeFile_sourceKind_allowed: {
+    owner: "list",
+    module: "lib/projectWorkspaceCore.ts",
+    list: "PROJECT_MATERIAL_SOURCE_KINDS",
+    reason:
+      "Where a knowledge file came from, decided by the server: an upload, a project note, or a project-owned duplicate of a source the server read itself; clients name a source, never this value.",
+  },
+  ConversationProject_memoryScope_allowed: {
+    owner: "list",
+    module: "lib/projectWorkspaceCore.ts",
+    list: "PROJECT_MEMORY_SCOPES",
+    reason:
+      "Which stored memories a project turn may use. The settings route validates the same enum, so an unknown value is a 400 before it reaches the constraint.",
+  },
+  MemoryExtractionRun_sourceKind_allowed: {
+    owner: "list",
+    module: "lib/projectWorkspaceCore.ts",
+    list: "MEMORY_EXTRACTION_SOURCE_KINDS",
+    reason:
+      "Whether a run reads imported conversations or one project conversation's native window. Decided by the server when the run is created, never chosen by a client.",
+  },
   AssistantKnowledgeCleanup_reason_allowed: {
     owner: "list",
     module: "lib/assistantKnowledgeLimits.ts",

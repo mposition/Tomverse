@@ -30,6 +30,7 @@ import { getMemorySettings } from "@/lib/memoryService";
 import { STYLE_MEMORY_KINDS } from "@/lib/memoryValidatorCore";
 import { prisma } from "@/lib/prisma";
 import type { SemanticCallMode } from "@/lib/semanticRetrievalCore";
+import { memoryScopeKey, memoryScopeWhere, PERSONAL_MEMORY_SCOPE, type MemoryScope } from "@/lib/projectWorkspaceCore";
 
 /**
  * Policy: docs/policy/external-conversation-import-and-memory.md.
@@ -135,20 +136,23 @@ const buildEmpty = (decision: MemoryInjectionDecision): ChatMemoryContext => {
     };
 };
 
-const stateVersion = async (userId: string, kinds?: readonly string[]) => {
+const stateVersion = async (userId: string, scope: MemoryScope, kinds?: readonly string[]) => {
     const aggregate = await prisma.memoryItem.aggregate({
         where: {
             userId,
             status: "active",
+            ...memoryScopeWhere(scope),
             ...(kinds ? { kind: { in: [...kinds] } } : {}),
         },
         _count: { _all: true },
         _max: { updatedAt: true },
     });
-    return memoryStateFingerprint({
+    const base = memoryStateFingerprint({
         activeCount: aggregate._count._all,
         latestUpdatedAtMs: aggregate._max.updatedAt?.getTime() ?? 0,
     });
+    // Personal scope keeps the pre-project value so existing bundles verify.
+    return scope.projectId === null ? base : `${memoryScopeKey(scope)}|${base}`;
 };
 
 export async function buildChatMemoryContext(input: {
@@ -179,7 +183,10 @@ export async function buildChatMemoryContext(input: {
     semantic?: SemanticCallMode;
     memorySemanticContext?: MemorySemanticContextInput;
     now?: Date;
+    /** Personal memory unless the turn's project context decided otherwise. */
+    scope?: MemoryScope;
 }): Promise<ChatMemoryContext> {
+    const scope = input.scope ?? PERSONAL_MEMORY_SCOPE;
     if (!input.userId) {
         return buildEmpty({ allowed: false, reason: "guest" });
     }
@@ -232,9 +239,10 @@ export async function buildChatMemoryContext(input: {
             approvedPairs,
             semantic: input.semantic,
             memorySemanticContext,
+            scope,
         }),
-        stateVersion(input.userId),
-        stateVersion(input.userId, STYLE_MEMORY_KINDS),
+        stateVersion(input.userId, scope),
+        stateVersion(input.userId, scope, STYLE_MEMORY_KINDS),
     ]);
 
     const prompt = buildMemoryContextPrompt(retrieval);

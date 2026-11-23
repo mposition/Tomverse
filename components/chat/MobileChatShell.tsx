@@ -34,6 +34,7 @@ import { useComposerPortalHost } from "@/components/chat/useComposerPortalHost";
 import { ChatWelcomeScreen } from "@/components/chat/ChatWelcomeScreen";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
+import type { ProjectWorkspaceRoute } from "@/lib/projectWorkspaceRoute";
 import { TomverseWordmark } from "@/components/chat/TomverseWordmark";
 import { ProviderStatusBanner } from "@/components/chat/ProviderStatusBanner";
 import {
@@ -253,6 +254,12 @@ type MobileChatShellProps = {
     options?: { fromImageRequest?: boolean }
   ) => void;
   imageWorkspace?: ReactNode;
+  /** The Project workspace pane; replaces the chat surface like `imageWorkspace`. */
+  projectWorkspace?: ReactNode;
+  /** A strip above the composer for a conversation inside a project. */
+  projectComposerBar?: ReactNode;
+  onOpenProjectWorkspace?: (route: ProjectWorkspaceRoute | null) => void;
+  activeProjectWorkspaceId?: string | null;
   /**
    * A read-only block above the panel row -- see DesktopChatShell for why it
    * lives in the shell and not in `ChatApp`. Both shells take it so the two
@@ -540,6 +547,10 @@ export function MobileChatShell({
   onLockedImageClick,
   onStartImageDraft,
   imageWorkspace,
+  projectWorkspace,
+  projectComposerBar,
+  onOpenProjectWorkspace,
+  activeProjectWorkspaceId,
   hasImportedTranscript = false,
   importedMessages,
   importedTranscript,
@@ -1519,7 +1530,14 @@ export function MobileChatShell({
         (docs/policy/image-generation.md §1). The header and the drawer stay,
         so navigation is unchanged.
       */}
-      {imageWorkspace ? (
+      {projectWorkspace ? (
+        <div
+          data-testid="mobile-project-workspace"
+          className="flex min-h-0 w-full flex-1 flex-col overflow-hidden"
+        >
+          {projectWorkspace}
+        </div>
+      ) : imageWorkspace ? (
         <div
           data-testid="mobile-image-workspace"
           className="flex min-h-0 w-full flex-1 flex-col overflow-hidden"
@@ -1933,6 +1951,7 @@ export function MobileChatShell({
         onGuestSignInPrompt={onGuestSignInPrompt}
       />}
 
+      {projectComposerBar}
       <div ref={setBottomInputSlot} />
       {composerPortalHost &&
         createPortal(
@@ -2101,6 +2120,16 @@ export function MobileChatShell({
               currentModelId={resolvedActiveModelId}
               attachmentCount={attachments.length}
               isMobileDrawer
+              onOpenProjectWorkspace={
+                onOpenProjectWorkspace
+                  ? (route) => {
+                      setIsDrawerOpen(false);
+                      drawerReturnFocusRef.current = null;
+                      onOpenProjectWorkspace(route);
+                    }
+                  : undefined
+              }
+              activeProjectWorkspaceId={activeProjectWorkspaceId}
               mobileProductSwitcher={currentProduct ? (
                 <>
                   <ChatProductSwitcher

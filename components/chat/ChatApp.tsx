@@ -50,6 +50,7 @@ import {
 } from "@/lib/chatKeyboardPolicy";
 import type { WebSearchMode, WebSearchToggleMode } from "@/lib/appDefaults";
 import { prepareChatContextBundle } from "@/lib/chatContextBundleClient";
+import { projectReferenceFields } from "@/lib/projectReferences";
 import { createClientLatency } from "@/lib/responseLatencyClient";
 import { boundedLatencyMs } from "@/lib/responseLatencyStages";
 import type { ClientLatencyStages } from "@/lib/responseLatencyCore";
@@ -312,6 +313,8 @@ type ChatAppProps = {
      * with no memory context, and the server then sends none.
      */
     contextBundle?: string | null;
+    /** Project search-hit refs attached to this question (at most 8). */
+    projectReferences?: string[];
     /**
      * Whether that bundle covers this panel alone or a whole comparison.
      * It decides what a stale bundle may do about itself, and only the step
@@ -1535,7 +1538,12 @@ function ChatAppComponent({
      * request rather than through `updateWebSearchMode`, and the next send
      * from the composer is back on whatever the switch says.
      */
-    requestOptions?: { webSearchMode?: WebSearchToggleMode; reasoningEffort?: ExplicitReasoningEffort },
+    requestOptions?: {
+      webSearchMode?: WebSearchToggleMode;
+      reasoningEffort?: ExplicitReasoningEffort;
+      /** Project search-hit refs the user attached to this one question. */
+      projectReferences?: readonly string[];
+    },
     /*
       Stored files this send has been told are gone and may proceed without.
 
@@ -1635,7 +1643,7 @@ function ChatAppComponent({
       and the conversation's own mode is used everywhere else, so an ordinary
       send is identical to what it was before the override existed.
     */
-    const { webSearchMode: webSearchModeOverride, reasoningEffort } = requestOptions ?? {};
+    const { webSearchMode: webSearchModeOverride, reasoningEffort, projectReferences } = requestOptions ?? {};
     const effectiveWebSearchMode: WebSearchMode | undefined =
       researchMode ? "always" : webSearchModeOverride ?? webSearchMode;
     const mcpConnectionId = !researchMode && currentProduct === "chat" ? selectedMcpConnection(initialConversationId) : undefined;
@@ -2086,6 +2094,9 @@ function ChatAppComponent({
           ...(mcpConnectionId ? { mcpConnectionId } : {}),
           ...(admissionToken ? { admissionToken } : {}),
           ...(activeContextBundle ? { contextBundle: activeContextBundle } : {}),
+          // Explicit references ride on the send itself, beside the signed
+          // bundle: the server re-validates every ref against the project.
+          ...projectReferenceFields(projectReferences),
           ...(effectiveWebSearchMode && effectiveWebSearchMode !== "off"
             ? { webSearchMode: effectiveWebSearchMode }
             : {}),
@@ -2264,6 +2275,7 @@ function ChatAppComponent({
                   modelIds: [modelId],
                   prompt: text,
                   ...(activeContextBundle ? { previousContextBundle: activeContextBundle } : {}),
+                  projectReferences,
                 })
               : null;
           // Nothing to retry with. Re-sending the bundle that was just
@@ -2300,6 +2312,7 @@ function ChatAppComponent({
                   modelIds: [modelId],
                   prompt: text,
                   ...(activeContextBundle ? { previousContextBundle: activeContextBundle } : {}),
+                  projectReferences,
                 })
               : null;
           if (!refreshed) throw error;

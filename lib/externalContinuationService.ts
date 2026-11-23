@@ -240,6 +240,8 @@ export async function createExternalContinuation(input: {
     idempotencyKey: string;
     request: Request;
     productKey: ContinuationProductKey;
+    /** The caller's own project; checked for owner and archive inside the create transaction. */
+    projectId?: string;
 }): Promise<CreatedContinuation> {
     const existing = await readContinuationByKey(
         input.userId,
@@ -356,6 +358,7 @@ async function createContinuationRows(input: {
     request: Request;
     productKey: ContinuationProductKey;
     selectedModels: string[];
+    projectId?: string;
 }): Promise<CreatedContinuation> {
     return prisma.$transaction(async (tx) => {
         const snapshot = await loadUnlockedSnapshot(
@@ -369,6 +372,14 @@ async function createContinuationRows(input: {
             snapshot.id,
             snapshot.messageCount
         );
+        if (input.projectId) {
+            const project = await tx.conversationProject.findFirst({
+                where: { id: input.projectId, userId: input.userId },
+                select: { archivedAt: true },
+            });
+            if (!project) throw new ApiSecurityError(404, "PROJECT_NOT_FOUND", "Project not found.");
+            if (project.archivedAt) throw new ApiSecurityError(409, "PROJECT_ARCHIVED", "Restore the project first.");
+        }
 
         // The shared creation service, not `conversation.create`. It is what
         // writes `productKey` in the same statement as the row, so a
@@ -383,6 +394,7 @@ async function createContinuationRows(input: {
                 // (docs/policy/external-conversation-continuation.md §3.1):
                 // Chat by default, Review when the owner asks to compare.
                 productKey: input.productKey,
+                ...(input.projectId ? { projectId: input.projectId } : {}),
                 // A Chat continuation opens in Smart Adaptive, the mode the
                 // continuations route only chooses for an account Auto is
                 // offered to. Auto is Chat-only (`AUTO_SELECTION_PRODUCT`), so

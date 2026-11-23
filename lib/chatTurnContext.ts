@@ -21,6 +21,9 @@ import {
     type ChatProfileContext,
 } from "@/lib/chatProfileContext";
 import type { ModelTier } from "@/lib/models";
+import { buildChatProjectContext, NO_PROJECT_CONTEXT, type ChatProjectContext } from "@/lib/chatProjectContext";
+import { turnMemoryScope, type ProjectTurnScope } from "@/lib/projectWorkspaceCore";
+import { prisma } from "@/lib/prisma";
 import type { MemorySemanticContextInput } from "@/lib/memoryQueryPlan";
 import type { SemanticStepsUsed } from "@/lib/chatContextBundleCore";
 import type { SemanticCallMode, SemanticStepModes } from "@/lib/semanticRetrievalCore";
@@ -55,12 +58,16 @@ import type { SemanticCallMode, SemanticStepModes } from "@/lib/semanticRetrieva
 export type ChatTurnContext = {
     memory: ChatMemoryContext;
     profile: ChatProfileContext;
+    /** Project workspace: instructions and material for this turn, or none. */
+    project: ChatProjectContext;
     /** The §9.1 system message, or null when there is nothing to say. */
     systemPrompt: string | null;
     /** Priced by preflight, booked by chat. Zero when memory did not run. */
     memoryTokens: number;
     /** The profile's own blocks, counted apart from memory's. */
     profileTokens: number;
+    /** The project's own blocks, counted apart from memory's and the profile's. */
+    projectTokens: number;
     /** Everything the §10 bundle binds. */
     fingerprintInput: ContextBundleFingerprintInput;
     fingerprint: string;
@@ -98,6 +105,14 @@ export async function buildChatTurnContext(input: {
     semantic?: SemanticCallMode | SemanticStepModes;
     /** Memory-only server context; profile knowledge continues to use `query`. */
     memorySemanticContext?: MemorySemanticContextInput;
+    /**
+     * The conversation's project, as the server read it (never a request
+     * field). Null for no project; a project with context off is a folder and
+     * contributes nothing.
+     */
+    project?: ProjectTurnScope | null;
+    /** Explicit project references the user picked for this question. */
+    projectReferences?: readonly string[];
 }): Promise<ChatTurnContext> {
     const semantic: SemanticStepModes =
         typeof input.semantic === "object"
@@ -106,6 +121,8 @@ export async function buildChatTurnContext(input: {
                   memoryRerank: input.semantic ?? "allow",
                   knowledgeNeighbours: input.semantic ?? "allow",
                   knowledgeRerank: input.semantic ?? "allow",
+                  projectNeighbours: input.semantic ?? "allow",
+                  projectRerank: input.semantic ?? "allow",
               };
     const profile = input.profileVersionId
         ? await buildChatProfileContext({
@@ -133,31 +150,63 @@ export async function buildChatTurnContext(input: {
         now: input.now,
         semantic: semantic.memoryRerank,
         memorySemanticContext: input.memorySemanticContext,
+        // A project with context on decides which stored memories are in
+        // reach: its own, plus personal ones only when the owner chose that.
+        scope: turnMemoryScope(input.project ?? null),
     });
 
+    // The profile's own documents are not sent a second time as project material.
+    const profileKnowledgeDigests = profile.version && profile.version.knowledgeFileIds.length && input.userId && input.project?.contextEnabled
+        ? new Set((await prisma.assistantKnowledgeFile.findMany({
+              where: { userId: input.userId, id: { in: profile.version.knowledgeFileIds } },
+              select: { digest: true },
+          })).map((row) => row.digest))
+        : undefined;
+    const project = input.project?.contextEnabled
+        ? await buildChatProjectContext({
+              userId: input.userId,
+              project: input.project,
+              query: input.query,
+              profileKnowledgeDigests,
+              references: input.projectReferences,
+              semantic: {
+                  neighbours: semantic.projectNeighbours ?? "off",
+                  rerank: semantic.projectRerank ?? "off",
+              },
+          })
+        : NO_PROJECT_CONTEXT;
+
     const systemPrompt = buildProfileSystemPrompt({
-        instructions: profile.instructionsPrompt,
+        // Profile instructions first, then the project's: both are owner-written.
+        instructions: [profile.instructionsPrompt, project.instructionsPrompt]
+            .filter((part): part is string => Boolean(part)).join("\n\n") || null,
         memory: memory.prompt.rules,
-        knowledge: profile.knowledgePrompt,
+        knowledge: [profile.knowledgePrompt, project.materialPrompt]
+            .filter((part): part is string => Boolean(part)).join("\n\n") || null,
     });
 
     const fingerprintInput: ContextBundleFingerprintInput = {
         ...memory.fingerprintInput,
         profileVersion: profile.profileVersion,
         knowledgeHash: profile.knowledgeHash,
+        ...(project.projectHash !== "none" ? { projectHash: project.projectHash } : {}),
     };
 
     return {
         memory,
         profile,
+        project,
         semanticSteps: {
             memoryRerank: memory.semanticRerank,
             knowledgeNeighbours: profile.knowledgeSemanticSteps.neighbours,
             knowledgeRerank: profile.knowledgeSemanticSteps.rerank,
+            ...(project.semanticSteps.neighbours ? { projectNeighbours: true } : {}),
+            ...(project.semanticSteps.rerank ? { projectRerank: true } : {}),
         },
         systemPrompt,
         memoryTokens: memory.memoryTokens,
         profileTokens: profile.profileTokens,
+        projectTokens: project.projectTokens,
         fingerprintInput,
         fingerprint: contextFingerprint(fingerprintInput),
         binding: profile.version

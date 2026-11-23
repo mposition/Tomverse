@@ -115,6 +115,7 @@ export const KNOWLEDGE_CLEANUP_REASONS = [
     "profile_deleted",
     "account_deleted",
     "upload_abandoned",
+    "project_deleted",
 ] as const;
 
 export type KnowledgeCleanupReason = (typeof KNOWLEDGE_CLEANUP_REASONS)[number];

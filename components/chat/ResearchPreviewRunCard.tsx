@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { ResearchPreviewRunDto } from "../../lib/researchPreviewRunTypes";
 import type { ResearchPreviewMetadata } from "../../lib/researchPreviewMetadata";
 import { researchRunNeedsPolling, type ResearchPreviewRunTransport } from "../../lib/researchPreviewRunClient";
@@ -17,11 +17,17 @@ type RunCardState = {
   busy?: boolean;
 };
 
-export function ResearchPreviewRunCard({ runId, conversationId, assistantMessageId, language, transport, onMessage, reportOutcome }: {
+export function ResearchPreviewRunCard({ runId, conversationId, assistantMessageId, language, transport, onMessage, reportOutcome, completedAction }: {
   runId: string; conversationId: string; assistantMessageId: string; language: Language;
   transport: ResearchPreviewRunTransport;
   onMessage?: (run: ResearchPreviewRunDto) => void;
   reportOutcome?: ResearchPreviewMetadata["outcome"];
+  /**
+   * Shown once the run is completed. The card is shared by Web and Native, so
+   * a surface-specific action (Web's "save to project") is passed in by that
+   * surface rather than imported here.
+   */
+  completedAction?: ReactNode;
 }) {
   const copy = researchPreviewCopy[language];
   const scopeKey = JSON.stringify([runId, conversationId, assistantMessageId]);
@@ -113,6 +119,7 @@ export function ResearchPreviewRunCard({ runId, conversationId, assistantMessage
     {run?.status === "queued" && <p>{copy.researchRunQueueHint}</p>}
     {run?.status === "checkpointed" && run.canResume && <button type="button" disabled={busy || error} data-testid="research-run-resume" onClick={() => void controls.current?.action("resume")}>{copy.researchRunResume}</button>}
     {run && ["queued", "running", "checkpointed"].includes(run.status) && <button type="button" disabled={busy || error} data-testid="research-run-cancel" onClick={() => void controls.current?.action("cancel")}>{copy.researchRunCancel}</button>}
+    {run?.status === "completed" && completedAction}
     {error && <p role="alert">{copy.researchRunReadError} <button type="button" disabled={busy} onClick={() => controls.current?.refresh()}>{copy.researchRunRefresh}</button></p>}
   </div>;
 }

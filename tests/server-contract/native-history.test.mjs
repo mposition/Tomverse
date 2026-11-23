@@ -13,9 +13,11 @@ mock.module(mod('lib/prisma.ts'),{namedExports:{prisma:{
   conversationProject:{findUnique:async()=>({id:'p1',userId:'another-owner'}),findFirst:async()=>null,updateMany:async({where})=>{assert.equal(where.userId,'bearer-owner');return{count:0};},deleteMany:async({where})=>{assert.equal(where.userId,'bearer-owner');return{count:0};}},
   $queryRaw:async(_strings,...values)=>{reads++;assert.ok(values.includes('bearer-owner'));assert.ok(!values.includes('cookie-owner'));return[];},
 }}});
-mock.module(mod('lib/apiSecurity.ts'),{namedExports:{apiSecurityResponse:()=>null,consumeApiRateLimit:async(_req,user)=>assert.equal(user,'bearer-owner'),readLimitedJson:async(req,_size,schema)=>schema.parse(await req.json())}});
+const security=await import('../../lib/apiSecurity.ts');
+mock.module(mod('lib/apiSecurity.ts'),{namedExports:{...security,apiSecurityResponse:()=>null,consumeApiRateLimit:async(_req,user)=>assert.equal(user,'bearer-owner'),readLimitedJson:async(req,_size,schema)=>schema.parse(await req.json())}});
 mock.module(mod('lib/billingEntitlements.ts'),{namedExports:{getUserBillingPlan:async user=>{assert.equal(user,'bearer-owner');return{allowSharing:true,allowDownloads:true};},featureNotIncludedResponse:()=>Response.json({},{status:403}),effectivePlanModelLimit:()=>3,planAllowsFeature:()=>true}});
-mock.module(mod('lib/appSettings.ts'),{namedExports:{getOperationalFeatureFlags:async()=>new Proxy({},{get:()=>true}),isMemoryInjectionEnabled:async()=>false,isAssistantProfilesEnabled:async()=>false}});
+const settings=await import('../../lib/appSettings.ts');
+mock.module(mod('lib/appSettings.ts'),{namedExports:{...settings,getOperationalFeatureFlags:async()=>new Proxy({},{get:()=>true}),isMemoryInjectionEnabled:async()=>false,isAssistantProfilesEnabled:async()=>false}});
 mock.module(mod('lib/securityAudit.ts'),{namedExports:{logSecurityAuditEvent:()=>{}}});
 mock.module(mod('lib/conversationSearch.ts'),{namedExports:{searchConversationMessages:async({userId})=>{reads++;assert.equal(userId,'bearer-owner');return{results:[],truncated:false,sourceSearch:'ok',validUntil:null};}}});
 process.env.NEXTAUTH_SECRET='native-history-route-fixture';
@@ -48,4 +50,39 @@ test('successful native password verification issues an in-memory grant and no b
   owner='bearer-owner';const response=await verify.POST(request('/api/conversations/c1/verify','POST','valid','https://localhost',{password:'password'}),context);
   assert.equal(response.status,200);assert.equal(response.headers.get('set-cookie'),null);assert.equal(response.headers.get('cache-control'),'no-store');const body=await response.json();assert.equal(typeof body.unlockToken,'string');
   const proof=new Request('https://tomverse.app',{headers:{authorization:'Bearer valid','X-Tomverse-Conversation-Unlocks':`c1=${body.unlockToken}`}});assert.equal(locks.hasConversationUnlockGrant(proof,'bearer-owner','c1',0),true);assert.equal(locks.hasConversationUnlockGrant(proof,'cookie-owner','c1',0),false);assert.equal(locks.hasConversationUnlockGrant(proof,'bearer-owner','c1',1),false);assert.equal(cookies,0);
+});
+
+test('with the project workspace switch off, a native folder call may set the name and nothing else', async () => {
+  const previous = process.env.TOMVERSE_NATIVE_PROJECT_WORKSPACE_ENABLED;
+  delete process.env.TOMVERSE_NATIVE_PROJECT_WORKSPACE_ENABLED;
+  try {
+    for (const extra of [{ contextEnabled: true }, { instructions: 'Always answer in French.' }, { autoMemoryEnabled: true }, { memoryScope: 'project' }]) {
+      const created = await projects.POST(request('/api/projects', 'POST', 'valid', 'https://localhost', { name: 'Folder', ...extra }));
+      assert.equal(created.status, 400, `POST ${JSON.stringify(extra)}`);
+      const updated = await project.PATCH(request('/api/projects/p1', 'PATCH', 'valid', 'https://localhost', { name: 'Folder', ...extra }), context);
+      assert.equal(updated.status, 400, `PATCH ${JSON.stringify(extra)}`);
+    }
+    const archived = await project.PATCH(request('/api/projects/p1', 'PATCH', 'valid', 'https://localhost', { archived: true }), context);
+    assert.equal(archived.status, 400);
+    const renamed = await project.PATCH(request('/api/projects/p1', 'PATCH', 'valid', 'https://localhost', { name: 'Renamed' }), context);
+    // Past the schema: the fixture's project belongs to another owner, so the rename is not found.
+    assert.equal(renamed.status, 404);
+  } finally {
+    if (previous === undefined) delete process.env.TOMVERSE_NATIVE_PROJECT_WORKSPACE_ENABLED; else process.env.TOMVERSE_NATIVE_PROJECT_WORKSPACE_ENABLED = previous;
+  }
+});
+
+test('context preparation reads the native bearer, never a guest or the cookie beside it', async () => {
+  const chatContext = await import('../../app/api/chat/context/route.ts');
+  const body = { conversationId: 'c1', modelIds: ['fixture-model'], prompt: 'Question' };
+  const previous = process.env.TOMVERSE_NATIVE_PROJECT_WORKSPACE_ENABLED;
+  try {
+    delete process.env.TOMVERSE_NATIVE_PROJECT_WORKSPACE_ENABLED;
+    assert.equal((await chatContext.POST(request('/api/chat/context', 'POST', 'valid', 'https://localhost', body))).status, 503);
+    process.env.TOMVERSE_NATIVE_PROJECT_WORKSPACE_ENABLED = 'true';
+    // An invalid bearer is a refused sign-in, not a guest with no context.
+    assert.equal((await chatContext.POST(request('/api/chat/context', 'POST', 'invalid', 'https://localhost', body))).status, 401);
+  } finally {
+    if (previous === undefined) delete process.env.TOMVERSE_NATIVE_PROJECT_WORKSPACE_ENABLED; else process.env.TOMVERSE_NATIVE_PROJECT_WORKSPACE_ENABLED = previous;
+  }
 });

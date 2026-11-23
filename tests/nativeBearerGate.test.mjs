@@ -8,6 +8,8 @@ import {
   nativeBearerVerdict,
   nativeArtifactRevisionBearerRoute,
   nativeParityBearerRoute,
+  nativeHistoryFolderBearerRoute,
+  nativeProjectWorkspaceBearerRoute,
   stripInternalAuthHeaders,
 } from "../lib/nativeBearerGate.ts";
 import { N1B_BEARER_ROUTES } from "../lib/mobileAuthContract.ts";
@@ -240,5 +242,23 @@ test("Review handoff enrollment refuses disabled flags and every unregistered me
       assert.equal(nativeParityBearerRoute(`${path}/extra`, method, true), false);
       assert.equal(nativeParityBearerRoute(path.replace("target", "%2Fadmin"), method, true), false);
     }
+  }
+});
+
+test("the folder-era history calls stay open to parity while the project workspace switch is off", () => {
+  // A workspace route that is also a folder call is not refused as "workspace
+  // unavailable": Native history list, create, rename and delete predate the
+  // workspace and are opened by parity alone.
+  const folders = [["/api/projects", ["GET", "POST"]], ["/api/projects/p1", ["PATCH", "DELETE"]]];
+  for (const [path, allowed] of folders) {
+    for (const method of ["GET", "POST", "PUT", "PATCH", "DELETE"]) {
+      assert.equal(nativeHistoryFolderBearerRoute(path, method), allowed.includes(method), `${method} ${path}`);
+      if (allowed.includes(method)) assert.equal(nativeParityBearerRoute(path, method, true), true, `${method} ${path}`);
+    }
+  }
+  // Workspace-only calls are not folder calls.
+  for (const [path, method] of [["/api/projects/p1", "GET"], ["/api/projects/p1/materials", "GET"], ["/api/projects/p1/memories", "POST"], ["/api/chat/context", "POST"]]) {
+    assert.equal(nativeProjectWorkspaceBearerRoute(path, method), true, `${method} ${path}`);
+    assert.equal(nativeHistoryFolderBearerRoute(path, method), false, `${method} ${path}`);
   }
 });

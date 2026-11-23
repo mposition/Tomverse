@@ -990,6 +990,10 @@ run(
     // rule instead of becoming a second memory.
     "tests/integration/memory-semantic-retrieval.db.test.ts",
     "tests/integration/memory-source-deletion.db.test.ts",
+    // Project workspace: A/B/personal memory scope, native evidence and its
+    // move/lock/delete lifecycle, explicit scope moves, confirmed project
+    // deletion, the knowledge owner container and the turn context identity.
+    "tests/integration/project-workspace.db.test.ts",
     "tests/integration/external-conversation-lock.db.test.ts",
     "tests/integration/memory-expiry.db.test.ts",
     "tests/integration/chat-context-bundle.db.test.ts",

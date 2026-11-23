@@ -155,6 +155,7 @@ model User {
   @@index([aiUsageRestricted, aiUsageRestrictedUntil])
   @@index([creditDebtCredits])
   @@index([creditDebtCostMicroUsd])
+  projectAnswerReceipts ProjectAnswerReceipt[]
 }
 
 // Human-selected remote MCP connections. Credentials and pending arguments are
@@ -571,6 +572,24 @@ model ConversationProject {
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
+  /// Project workspace (migration 20261123100000_project_workspace_context).
+  /// Existing rows keep contextEnabled = false and behave as plain folders.
+  description       String    @default("")
+  /// Owner-authored working instructions, sent as instructions (never as data).
+  instructions      String    @default("")
+  contextEnabled    Boolean   @default(false)
+  /// "project_only" | "project_and_personal" -- which stored memories a turn may use.
+  memoryScope       String    @default("project_only")
+  autoMemoryEnabled Boolean   @default(false)
+  /// Optimistic concurrency for settings and the prepared-context identity.
+  revision          Int       @default(1)
+  archivedAt        DateTime?
+
+  knowledgeFiles AssistantKnowledgeFile[]
+  memoryItems    MemoryItem[]
+  extractionRuns MemoryExtractionRun[]
+  answerReceipts ProjectAnswerReceipt[]
+
   @@unique([userId, name])
   @@index([userId, updatedAt])
 }
@@ -586,6 +605,8 @@ model Message {
   researchRunId   String?                 @unique
   searchMetadata  Json?
   providerContext MessageProviderContext?
+  memoryEvidences      MemoryEvidence[]
+  projectAnswerReceipt ProjectAnswerReceipt?
   researchRun     ResearchPreviewRun?     @relation(fields: [researchRunId], references: [id], onDelete: SetNull)
   researchSourceRuns ResearchPreviewRun[] @relation("ResearchPreviewSourceMessage")
 
@@ -4121,6 +4142,11 @@ model MemoryItem {
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  /// NULL = personal memory. A value = used only inside that project.
+  /// CASCADE, never SetNull: a deleted project's memories never become personal.
+  projectId String?
+  project   ConversationProject? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
   /// Factual or style kind (§8.2) — allowlist CHECK lives in the migration.
   kind String
 
@@ -4189,6 +4215,7 @@ model MemoryItem {
   evidences MemoryEvidence[]
 
   @@index([userId, status])
+  @@index([userId, projectId, status])
   @@index([userId, conflictKey])
   /// The idempotent replace in the extraction persistence step reads exactly
   /// this pair.
@@ -4222,8 +4249,9 @@ model MemoryEvidence {
   /// suspended_by_source_delete on an explicit keep).
   externalMessage   ExternalMessage? @relation(fields: [externalMessageId], references: [id], onDelete: Cascade)
 
-  /// Reserved (§8.5): no relation until a release actually uses it.
+  /// A Tomverse (native) message of a project conversation (project workspace).
   tomverseMessageId String?
+  tomverseMessage   Message? @relation(fields: [tomverseMessageId], references: [id], onDelete: Cascade)
 
   /// Manual evidence body (sourceType=manual only): the user-entered grounds
   /// text. Subject to the same validator and length rules as statements.
@@ -4234,6 +4262,7 @@ model MemoryEvidence {
 
   @@index([memoryItemId])
   @@index([externalMessageId])
+  @@index([tomverseMessageId])
   @@index([userId])
 }
 
@@ -4254,6 +4283,15 @@ model MemoryExtractionRun {
 
   /// Selected ExternalConversation IDs (owner-verified at run creation).
   sourceSelection Json
+
+  /// "external" | "native". A native run reads Tomverse messages of one project conversation.
+  sourceKind           String  @default("external")
+  /// SetNull keeps the run's provider-cost rows; persistence refuses a native run without it.
+  projectId            String?
+  project              ConversationProject? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  sourceConversationId String?
+  /// One extraction per native source snapshot: native:v1:{conversationId}:{throughMessageId}
+  sourceKey            String? @unique
 
   chunkTotal     Int
   /// Derived from the chunk rows on every write — never incremented on its
@@ -4283,6 +4321,7 @@ model MemoryExtractionRun {
   /// Orphan reconciliation (§11): expired leases are found by status +
   /// lease deadline, mirroring the chat lease sweep.
   @@index([status, leaseExpiresAt])
+  @@index([sourceConversationId, createdAt])
 }
 
 /// The credit reservation for one extraction run (§11).
@@ -4597,9 +4636,19 @@ model AssistantProfileVersion {
 /// `AssistantKnowledgeChunk.searchTerms` (§14). Adding one later is a separate
 /// policy, privacy, cost and eval decision, not a migration.
 model AssistantKnowledgeFile {
-  id        String           @id @default(cuid())
-  profileId String
-  profile   AssistantProfile @relation("AssistantProfileKnowledge", fields: [profileId], references: [id], onDelete: Cascade)
+  id        String            @id @default(cuid())
+  /// Exactly one of profileId / projectId is set (CHECK AssistantKnowledgeFile_one_container).
+  profileId String?
+  profile   AssistantProfile? @relation("AssistantProfileKnowledge", fields: [profileId], references: [id], onDelete: Cascade)
+  /// NO ACTION: project deletion enqueues the object tombstones itself.
+  projectId String?
+  project   ConversationProject? @relation(fields: [projectId], references: [id], onDelete: NoAction)
+  /// "upload" | "note" | "message_attachment" | "generated_artifact" | "review_result" | "research_report"
+  sourceKind String @default("upload")
+  /// Server-captured provenance of a project copy. Not an access grant.
+  sourceRef  Json?
+  /// Client retry identity, unique per project.
+  requestKey String?
 
   /// Ownership as a column rather than a join, for the same reason
   /// AssistantProfileVersion carries one: the account export and the deletion
@@ -4676,7 +4725,9 @@ model AssistantKnowledgeFile {
 
   chunks AssistantKnowledgeChunk[]
 
+  @@unique([projectId, requestKey])
   @@index([profileId, createdAt])
+  @@index([projectId, createdAt])
   @@index([userId, createdAt])
   /// The processing worker's claim query reads exactly this pair.
   @@index([processingStatus, createdAt])
@@ -4955,6 +5006,22 @@ model AssistantKnowledgeCleanup {
 /// Per (bundle, model) rather than per bundle, because a comparison's three
 /// requests legitimately present the same bundle
 /// (`bundleConsumptionKey()`, policy §10).
+/// Owner-only record of the project sources an answer was given. Never in a
+/// share snapshot or conversation export; opening a source re-checks access.
+model ProjectAnswerReceipt {
+  id        String               @id @default(cuid())
+  messageId String               @unique
+  message   Message              @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectId String?
+  project   ConversationProject? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sources   Json
+  createdAt DateTime             @default(now())
+
+  @@index([userId, createdAt])
+}
+
 model ChatContextBundleConsumption {
   id String @id @default(cuid())
 

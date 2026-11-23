@@ -134,6 +134,7 @@ const MEMORY_WRITER_FILES = [
   "lib/externalConversationLockService.ts",
   "lib/memoryExpiryService.ts",
   "lib/memorySemanticDuplicates.ts",
+  "lib/projectWorkspaceService.ts",
   "scripts/backfill-memory-search-terms.mjs",
 ];
 const WRITE_VERBS = "create|createMany|update|updateMany|upsert|delete|deleteMany";

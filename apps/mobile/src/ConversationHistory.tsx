@@ -5,13 +5,19 @@ import type { ChatSummary, ChatTransport, HistoryProject, HistorySearch } from '
 import { historyCopy } from './historyCopy';
 import { Sheet } from './Sheet';
 import { nativeConversationTitle } from './conversationTitle';
+import { mobileProjectsCopy } from '../../../locales/mobileProjects';
+import { ProjectDelete } from './ProjectDelete';
 
 type Action = 'menu' | 'rename' | 'move' | 'share' | 'remove' | 'lock' | 'unlock' | 'open' | 'sourceDownload';
-export function ConversationHistory({ transport, language, owner, chats, currentId, disabled, onOpen, onRefresh, onChanged }: {
+export function ConversationHistory({ transport, language, owner, chats, currentId, disabled, onOpen, onRefresh, onChanged, onOpenProject, onNewProject, projectRevision = 0, projectsEnabled = true }: {
   transport: ChatTransport; language: MobileLanguage; owner: string | null; chats: ChatSummary[]; currentId?: string;
   disabled: boolean; onOpen: (id: string) => void; onRefresh: () => Promise<ChatSummary[]>; onChanged: (id: string, deleted?: boolean, locked?: boolean) => void;
+  /** Opens the project workspace; the project list refreshes when `projectRevision` changes. */
+  onOpenProject?: (id: string) => void; onNewProject?: () => void; projectRevision?: number;
+  /** False when the server has not switched the project workspace on: folders keep working, workspaces are not offered. */
+  projectsEnabled?: boolean;
 }) {
-  const c = historyCopy(language), history = transport.history;
+  const c = historyCopy(language), p = mobileProjectsCopy[language], history = transport.history;
   const [query, setQuery] = useState(''), [filter, setFilter] = useState('all'), [filterOpen, setFilterOpen] = useState(false);
   const [projects, setProjects] = useState<HistoryProject[]>([]), [search, setSearch] = useState<HistorySearch | null>(null);
   const [searchFailed, setSearchFailed] = useState(false), [searching, setSearching] = useState(false), [revision, setRevision] = useState(0);
@@ -26,7 +32,7 @@ export function ConversationHistory({ transport, language, owner, chats, current
   useEffect(() => { setUnknown(Boolean(localStorage.getItem(marker))); }, [marker]);
   useEffect(() => { let active = true; void transport.models().then(models => { if (active) setModelNames(Object.fromEntries(models.map(model => [model.id, model.name]))); }).catch(() => {}); return () => { active = false; }; }, [transport]);
   useEffect(() => { let active = true; void transport.mobileCapabilities?.().then(capability => { if (active) setFeatures(capability.historyFeatures ?? { sharing: false, downloads: false }); }).catch(() => {}); return () => { active = false; }; }, [transport, revision]);
-  useEffect(() => { let active = true; void history?.projects().then(items => { if (active) setProjects(items); }).catch(() => {}); return () => { active = false; }; }, [history, revision]);
+  useEffect(() => { let active = true; void history?.projects().then(items => { if (active) setProjects(items); }).catch(() => {}); return () => { active = false; }; }, [history, revision, projectRevision]);
   useEffect(() => {
     const controller = new AbortController(); let live = true; let expiry: ReturnType<typeof setTimeout> | undefined;
     setSearch(null); setSearchFailed(false); setSearching(false);
@@ -95,10 +101,14 @@ export function ConversationHistory({ transport, language, owner, chats, current
     {filterOpen && <Sheet title={c.filter} closeLabel={c.cancel} onClose={() => { if (!busy) setFilterOpen(false); }}><div className="history-menu">
       {(['all', 'locked', 'shared', 'comparison'] as const).map(key => <button key={key} aria-pressed={filter === key} onClick={() => { setFilter(key); setFilterOpen(false); }}>{c[key]}</button>)}
       <h3>{c.models}</h3>{models.map(model => <button key={model} aria-pressed={filter === `model:${model}`} onClick={() => { setFilter(`model:${model}`); setFilterOpen(false); }}>{modelNames[model] ?? model}</button>)}
-      <h3>{c.projects}</h3>{projects.map(project => <div className="history-project" key={project.id}><button aria-pressed={filter === `project:${project.id}`} onClick={() => { setFilter(`project:${project.id}`); setFilterOpen(false); }}>{project.name}</button><button aria-label={`${c.renameProject}: ${project.name}`} onClick={() => { setProjectEditor(project); setValue(project.name); setProjectDelete(false); }}>✎</button><button aria-label={`${c.deleteProject}: ${project.name}`} onClick={() => { setProjectEditor(project); setProjectDelete(true); setValue(''); }}>×</button></div>)}
-      <button disabled={!history || busy} onClick={() => { setProjectEditor('new'); setProjectDelete(false); setValue(''); }}>{c.newProject}</button>
+      <h3>{c.projects}</h3>{projects.map(project => <div className="history-project" key={project.id}><button aria-pressed={filter === `project:${project.id}`} onClick={() => { setFilter(`project:${project.id}`); setFilterOpen(false); }}>{project.name}</button>{projectsEnabled && onOpenProject && <button aria-label={`${p.openWorkspace}: ${project.name}`} onClick={() => { setFilterOpen(false); onOpenProject(project.id); }}>▸</button>}<button aria-label={`${c.renameProject}: ${project.name}`} onClick={() => { setProjectEditor(project); setValue(project.name); setProjectDelete(false); }}>✎</button><button aria-label={`${c.deleteProject}: ${project.name}`} onClick={() => { setProjectEditor(project); setProjectDelete(true); setValue(''); }}>×</button></div>)}
+      {!projectsEnabled && <p className="history-notice">{p.unavailable}</p>}
+      <button disabled={busy || (projectsEnabled && !onNewProject)} onClick={() => { setFilterOpen(false); if (projectsEnabled) onNewProject?.(); else { setProjectEditor('new'); setProjectDelete(false); setValue(''); } }}>{c.newProject}</button>
     </div></Sheet>}
-    {projectEditor && <Sheet title={projectDelete ? c.deleteProject : projectEditor === 'new' ? c.newProject : c.renameProject} closeLabel={c.cancel} onClose={() => { if (!busy) setProjectEditor(null); }}>{report}{form(projectDelete ? <p>{c.deleteProjectNotice}</p> : <label>{c.projectName}<input value={value} maxLength={32} onChange={event => setValue(event.target.value)} /></label>, () => projectDelete && projectEditor !== 'new' ? history!.deleteProject(projectEditor.id) : history!.saveProject(projectEditor === 'new' ? null : projectEditor.id, value.trim()), projectDelete || Boolean(value.trim()), true, () => { if (projectDelete && projectEditor !== 'new' && filter === `project:${projectEditor.id}`) setFilter('all'); setProjectEditor(null); setValue(''); })}</Sheet>}
+    {projectEditor && projectEditor !== 'new' && projectDelete && projectsEnabled && transport.projects && <ProjectDelete api={() => transport.projects!} language={language} projectId={projectEditor.id} name={projectEditor.name} onClose={() => setProjectEditor(null)}
+      onDeleted={() => { if (filter === `project:${projectEditor.id}`) setFilter('all'); setProjectEditor(null); void refresh().catch(() => setError(c.error)); }} />}
+    {/* Without the workspace, a project stays the folder it always was: create, rename and a plain delete. */}
+    {projectEditor && (!projectDelete || !projectsEnabled) && <Sheet title={projectDelete ? c.deleteProject : projectEditor === 'new' ? c.newProject : c.renameProject} closeLabel={c.cancel} onClose={() => { if (!busy) setProjectEditor(null); }}>{report}{form(projectDelete ? <p>{c.deleteProjectNotice}</p> : <label>{c.projectName}<input value={value} maxLength={32} onChange={event => setValue(event.target.value)} /></label>, () => projectDelete && projectEditor !== 'new' ? history!.deleteProject(projectEditor.id) : history!.saveProject(projectEditor === 'new' ? null : projectEditor.id, value.trim()), projectDelete || Boolean(value.trim()), true, () => { if (projectDelete && projectEditor !== 'new' && filter === `project:${projectEditor.id}`) setFilter('all'); setProjectEditor(null); setValue(''); })}</Sheet>}
     {selected && <Sheet title={action === 'menu' ? selected.title : c[action === 'sourceDownload' ? 'sourceDownload' : action]} closeLabel={c.cancel} onClose={close}><div className="history-menu">{report}
       {action === 'menu' ? <>
         {item(c.rename, () => { setAction('rename'); setValue(selected.title); })}
@@ -113,7 +123,7 @@ export function ConversationHistory({ transport, language, owner, chats, current
         {item(c.remove, () => setAction('remove'))}
         {item(selected.isLocked ? c.unlock : c.lock, () => { setAction(selected.isLocked ? 'unlock' : 'lock'); setValue(''); })}
       </> : action === 'rename' ? form(<label>{c.title}<input value={value} maxLength={100} onChange={event => setValue(event.target.value)} /></label>, () => history!.rename(selected.id, value.trim()), Boolean(value.trim()), true, () => { onChanged(selected.id); close(); })
-        : action === 'move' ? form(<label>{c.projects}<select aria-label={c.projects} value={projectId} onChange={event => setProjectId(event.target.value)}><option value="">{c.noProject}</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>, () => history!.move(selected.id, projectId || null), true, true, close)
+        : action === 'move' ? form(<><label>{c.projects}<select aria-label={c.projects} value={projectId} onChange={event => setProjectId(event.target.value)}><option value="">{c.noProject}</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label><p>{p.moveNotice}</p></>, () => history!.move(selected.id, projectId || null), true, true, close)
         : action === 'share' ? link ? <><label>{c.link}<input className="history-share-link" value={link} readOnly /></label><button onClick={() => void copyLink()}>{copied ? c.copied : c.copy}</button></> : form(<p>{c.shareNotice}</p>, async () => { const result = await history!.share(selected.id); setLink(result.url); })
         : action === 'remove' ? form(<p>{c.deleteNotice}</p>, () => history!.remove(selected.id), true, true, () => { onChanged(selected.id, true); close(); })
         : action === 'sourceDownload' ? form(<p>{c.sourceNotice}</p>, () => history!.export(selected.id, selected.title, true), true, false)

@@ -54,11 +54,16 @@ test('rename and pin persist; the full row still opens the conversation', async 
 });
 test('project creation, rename, move and removal reuse a single conversation', async ({ page }) => {
   await page.getByRole('button', { name: 'Filter conversations' }).click(); await page.getByRole('button', { name: 'New project', exact: true }).click();
-  await page.getByLabel('Project name').fill('Trips'); await page.getByRole('button', { name: 'Confirm', exact: true }).click(); await expect(page.getByRole('button', { name: 'Rename project: Trips' })).toBeVisible();
+  await page.getByLabel('Name', { exact: true }).fill('Trips'); await page.getByRole('button', { name: 'Create project', exact: true }).click();
+  const workspace = page.getByRole('dialog', { name: 'Trips' }); await expect(workspace).toBeVisible(); await workspace.getByRole('button', { name: 'Close', exact: true }).click();
+  await page.getByRole('button', { name: 'Filter conversations' }).click(); await expect(page.getByRole('button', { name: 'Rename project: Trips' })).toBeVisible();
   await page.getByRole('button', { name: 'Rename project: Trips' }).click(); await page.getByLabel('Project name').fill('Holidays'); await page.getByRole('button', { name: 'Confirm', exact: true }).click(); await close(page);
-  await menu(page); await page.getByRole('button', { name: 'Move to project', exact: true }).click(); await page.getByLabel('Projects', { exact: true }).selectOption({ label: 'Holidays' }); await page.getByRole('button', { name: 'Confirm' }).click();
+  await menu(page); await page.getByRole('button', { name: 'Move to project', exact: true }).click(); await page.getByLabel('Projects', { exact: true }).selectOption({ label: 'Holidays' });
+  await expect(page.getByText('Only future answers change')).toBeVisible(); await page.getByRole('button', { name: 'Confirm' }).click();
   await filter(page, 'Holidays'); await expect(page.locator('.conversation-row')).toHaveCount(1);
-  await page.getByRole('button', { name: 'Filter conversations' }).click(); await page.getByRole('button', { name: 'Delete project: Holidays' }).click(); await page.getByRole('button', { name: 'Confirm' }).click(); await close(page);
+  await page.getByRole('button', { name: 'Filter conversations' }).click(); await page.getByRole('button', { name: 'Delete project: Holidays' }).click();
+  const removal = page.getByRole('dialog', { name: 'Delete project: Holidays' }); await expect(removal.getByTestId('project-delete-summary')).toContainText('Conversations that stay: 1');
+  await removal.getByRole('button', { name: 'Delete project', exact: true }).click(); await expect(removal).toBeHidden(); await close(page);
   await filter(page, 'All conversations'); await expect(page.locator('.conversation-row')).toHaveCount(5);
 });
 test('sharing and deletion wait for confirmation; TXT uses a real browser download', async ({ page }) => {

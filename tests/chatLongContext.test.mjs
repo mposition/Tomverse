@@ -649,7 +649,7 @@ test("a long-context tool loop shares its output budget and answers within its c
     assert.match(route, /longContextLoopStep\.outputSpent,/);
     // Only where this application runs a tool loop: a native-search-only turn
     // keeps its one call and its own tool choice.
-    assert.match(route, /\(artifactToolConfig \|\| appManagedSearchTool\) &&[\s\S]{0,200}toolLoopStepCap > 1 &&/);
+    assert.match(route, /\(artifactToolConfig \|\| appManagedSearchTool \|\| projectTools\) &&[\s\S]{0,200}toolLoopStepCap > 1 &&/);
     // A turn stopped at a limit records the calls it already made.
     assert.match(route, /const spent = longContextLoopStep\.settlementUsage\(\s*longContextLoopStep\.spent\(\)\.outputTokens\s*\);\s*researchFailureUsage = \{\s*inputTokens: spent\.inputTokens,\s*cachedInputTokens: spent\.cachedInputTokens,\s*cacheWriteInputTokens: spent\.cacheWriteInputTokens,\s*outputTokens: spent\.outputTokens,\s*providerCalls: spent\.providerCalls,[\s\S]{0,300}usageFromProvider: spent\.measured,/);
     // The MCP loop counts an unreported step's output as the budget spent.
@@ -700,7 +700,8 @@ test("a cancelled or unreported multi-call turn settles on the input it sent", a
     assert.equal(blind.settlementUsage(0).measured, false);
     const route = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
     assert.match(route, /longContextLoopStep\.settlementUsage\(\s*usage\?\.outputTokens \?\? estimatedGeneratedOutputTokens\(\)\s*\)/);
-    assert.match(route, /mcpConnector\?\.observedInputTokens\(\) \?\? 0/);
+    // The flat-budget tool owners (MCP, then project tools) report what their calls sent.
+    assert.match(route, /mcpConnector\?\.observedInputTokens\(\) \?\? projectTools\?\.observedInputTokens\(\) \?\? 0/);
     assert.match(route, /usage\?\.providerCalls \?\? \(loopFits \? loopUsage!\.providerCalls : undefined\)/);
     assert.match(route, /cachedInputTokens: settledCachedInputTokens,\s*cacheWriteInputTokens: settledCacheWriteInputTokens,/);
     assert.match(route, /\(error instanceof LongContextToolLoopLimitError \|\|[\s\S]{0,120}LongContextToolLoopLimitError\) &&\s*longContextLoopStep &&/);
@@ -813,10 +814,10 @@ test("a long-context turn reserves every call of its tool loop, and only then", 
     assert.equal(ordinary.providerCallPasses, undefined);
     assert.equal(ordinary.usageCredits, createChatBudget("user", luna, 1_000).usageCredits);
     const route = readFileSync(new URL("../app/api/chat/route.ts", import.meta.url), "utf8");
-    assert.match(route, /longContextToolInputPasses: Math\.max\(\s*artifactToolPlan\?\.registerTool \? GENERATED_ARTIFACT_MAX_STEPS : 1,\s*appManagedSearchEnabled && webSearchCapability\.searchBackend\s*\? APP_MANAGED_SEARCH_MAX_STEPS\s*: 1\s*\)/);
+    assert.match(route, /longContextToolInputPasses: Math\.max\(\s*artifactToolPlan\?\.registerTool \? GENERATED_ARTIFACT_MAX_STEPS : 1,\s*appManagedSearchEnabled && webSearchCapability\.searchBackend\s*\? APP_MANAGED_SEARCH_MAX_STEPS\s*: 1,\s*projectTools \? PROJECT_TOOL_MAX_STEPS : 1\s*\)/);
     assert.match(route, /budget\.longContextSettlement && !isResearchPreview\s*\? \(budget\.providerCallPasses \?\? 1\)\s*: Number\.POSITIVE_INFINITY/);
-    assert.match(route, /stepCountIs\(\s*Math\.min\(APP_MANAGED_SEARCH_MAX_STEPS, toolLoopStepCap\)\s*\)/);
-    assert.match(route, /: GENERATED_ARTIFACT_MAX_STEPS,\s*toolLoopStepCap\s*\)\s*\)/);
+    assert.match(route, /stepCountIs\(\s*Math\.min\(\s*Math\.max\(\s*appManagedSearchTool \? APP_MANAGED_SEARCH_MAX_STEPS : 1,\s*projectTools \? PROJECT_TOOL_MAX_STEPS : 1\s*\),\s*toolLoopStepCap\s*\)\s*\)/);
+    assert.match(route, /: Math\.max\(\s*GENERATED_ARTIFACT_MAX_STEPS,\s*projectTools \? PROJECT_TOOL_MAX_STEPS : 1\s*\),\s*toolLoopStepCap\s*\)\s*\)/);
 });
 
 test("the call count travels from the budget to every settlement path", () => {

@@ -16,10 +16,13 @@ import {
     type KnowledgeUsage,
 } from "@/lib/assistantKnowledgeLimits";
 import { enqueueKnowledgeCleanupForFiles } from "@/lib/assistantKnowledgeLifecycle";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
+    createR2ReadUrl,
     createR2UploadUrl,
     deleteR2Object,
+    writeR2Object,
     readOwnR2ObjectBytes,
     validateR2ObjectMetadata,
 } from "@/lib/r2";
@@ -84,6 +87,50 @@ const refuse = (refusal: KnowledgeRefusal): never => {
  * route's path: a profile id is not a capability, and §19's IDOR line is that
  * knowing an id must never be enough.
  */
+/**
+ * Where a knowledge file lives: an assistant profile (every file before the
+ * project workspace) or a project. Exactly one, enforced by a DB CHECK.
+ * Account-level quotas count both together.
+ */
+export type KnowledgeContainer =
+    | { kind: "profile"; profileId: string }
+    | { kind: "project"; projectId: string };
+
+export const containerWhere = (container: KnowledgeContainer) =>
+    container.kind === "profile"
+        ? { profileId: container.profileId }
+        : { projectId: container.projectId };
+
+export const containerOfFile = (file: { profileId: string | null; projectId: string | null }): KnowledgeContainer | null =>
+    file.profileId ? { kind: "profile", profileId: file.profileId }
+        : file.projectId ? { kind: "project", projectId: file.projectId } : null;
+
+const sameContainer = (container: KnowledgeContainer, file: { profileId: string | null; projectId: string | null }) =>
+    container.kind === "profile" ? file.profileId === container.profileId : file.projectId === container.projectId;
+
+/**
+ * The container, if this account owns it. An archived project accepts no new
+ * material; reading and deleting stay possible.
+ */
+export const ownedContainer = async (
+    container: KnowledgeContainer,
+    userId: string,
+    intent: "read" | "write" = "read"
+) => {
+    if (container.kind === "profile") return ownedProfile(container.profileId, userId);
+    const project = await prisma.conversationProject.findFirst({
+        where: { id: container.projectId, userId },
+        select: { id: true, archivedAt: true },
+    });
+    if (!project) {
+        throw new AssistantKnowledgeError(404, "PROJECT_NOT_FOUND", "No such project.");
+    }
+    if (intent === "write" && project.archivedAt) {
+        throw new AssistantKnowledgeError(409, "PROJECT_ARCHIVED", "Restore the project before adding materials.");
+    }
+    return project;
+};
+
 const ownedProfile = async (profileId: string, userId: string) => {
     const profile = await prisma.assistantProfile.findFirst({
         where: { id: profileId, userId },
@@ -115,11 +162,16 @@ const ownedProfile = async (profileId: string, userId: string) => {
  */
 export const knowledgeUsage = async (
     userId: string,
-    profileId: string
+    container: KnowledgeContainer | string | null
 ): Promise<KnowledgeUsage> => {
+    const scoped: KnowledgeContainer | null =
+        typeof container === "string" ? { kind: "profile", profileId: container } : container;
     const [filesInProfile, filesInAccount, objectBytes, extracted] =
         await Promise.all([
-            prisma.assistantKnowledgeFile.count({ where: { userId, profileId } }),
+            // Per container (a profile or a project); the same per-container limit.
+            scoped
+                ? prisma.assistantKnowledgeFile.count({ where: { userId, ...containerWhere(scoped) } })
+                : Promise.resolve(0),
             prisma.assistantKnowledgeFile.count({ where: { userId } }),
             prisma.assistantKnowledgeFile.aggregate({
                 where: { userId },
@@ -152,9 +204,11 @@ export const knowledgeUsage = async (
     };
 };
 
-export const knowledgeCapacity = async (userId: string, profileId: string) => {
-    await ownedProfile(profileId, userId);
-    const usage = await knowledgeUsage(userId, profileId);
+export const knowledgeCapacity = async (userId: string, profileOrContainer: string | KnowledgeContainer) => {
+    const container: KnowledgeContainer = typeof profileOrContainer === "string"
+        ? { kind: "profile", profileId: profileOrContainer } : profileOrContainer;
+    await ownedContainer(container, userId);
+    const usage = await knowledgeUsage(userId, container);
     return {
         limits: {
             maxFileBytes: ASSISTANT_KNOWLEDGE_LIMITS.maxFileBytes,
@@ -190,14 +244,21 @@ export type PreparedKnowledgeUpload = {
     uploadHeaders: Record<string, string>;
 };
 
+type ContainerInput =
+    | { profileId: string; container?: undefined }
+    | { profileId?: undefined; container: KnowledgeContainer };
+
+const inputContainer = (input: ContainerInput): KnowledgeContainer =>
+    input.container ?? { kind: "profile", profileId: input.profileId as string };
+
 export const prepareKnowledgeUpload = async (input: {
     userId: string;
-    profileId: string;
     filename: string;
     mime: string;
     bytes: number;
-}): Promise<PreparedKnowledgeUpload> => {
-    await ownedProfile(input.profileId, input.userId);
+} & ContainerInput): Promise<PreparedKnowledgeUpload> => {
+    const container = inputContainer(input);
+    await ownedContainer(container, input.userId, "write");
 
     const claimRefusal = knowledgeFileRefusal({
         filename: input.filename,
@@ -206,7 +267,7 @@ export const prepareKnowledgeUpload = async (input: {
     });
     if (claimRefusal) refuse(claimRefusal);
 
-    const usage = await knowledgeUsage(input.userId, input.profileId);
+    const usage = await knowledgeUsage(input.userId, container);
     const quotaRefusal = knowledgeQuotaRefusal({
         usage,
         incomingBytes: input.bytes,
@@ -231,12 +292,12 @@ export const prepareKnowledgeUpload = async (input: {
  */
 export const finalizeKnowledgeUpload = async (input: {
     userId: string;
-    profileId: string;
     uploadKey: string;
     filename: string;
     mime: string;
-}) => {
-    await ownedProfile(input.profileId, input.userId);
+} & ContainerInput) => {
+    const container = inputContainer(input);
+    await ownedContainer(container, input.userId, "write");
 
     if (!input.uploadKey.startsWith(ASSISTANT_KNOWLEDGE_KEY_PREFIX)) {
         throw new AssistantKnowledgeError(
@@ -285,7 +346,7 @@ export const finalizeKnowledgeUpload = async (input: {
 
     const existing = await prisma.assistantKnowledgeFile.findUnique({
         where: { r2Key: input.uploadKey },
-        select: { id: true, userId: true, importId: true },
+        select: { id: true, userId: true, importId: true, profileId: true, projectId: true },
     });
     if (existing) {
         // A retried finalize of the caller's own upload is the same request
@@ -306,6 +367,16 @@ export const finalizeKnowledgeUpload = async (input: {
                 409,
                 "ASSISTANT_KNOWLEDGE_KEY_RESERVED_FOR_IMPORT",
                 "That upload belongs to an import you are still reviewing."
+            );
+        }
+        // The same key finalised into another profile or project is not a
+        // retry of this request: answering with that row would hand one
+        // container's file to another.
+        if (!sameContainer(container, existing)) {
+            throw new AssistantKnowledgeError(
+                409,
+                "ASSISTANT_KNOWLEDGE_KEY_OTHER_CONTAINER",
+                "That upload already belongs to another assistant or project."
             );
         }
         return prisma.assistantKnowledgeFile.findUniqueOrThrow({
@@ -361,7 +432,7 @@ export const finalizeKnowledgeUpload = async (input: {
     // Re-checked against the object's real size, which `prepare` only had a
     // claim about. Two uploads racing on the last of a quota both pass
     // `prepare`; this is where the second one loses.
-    const usage = await knowledgeUsage(input.userId, input.profileId);
+    const usage = await knowledgeUsage(input.userId, container);
     const quotaRefusal = knowledgeQuotaRefusal({
         usage,
         incomingBytes: metadata.size,
@@ -372,7 +443,7 @@ export const finalizeKnowledgeUpload = async (input: {
 
     return prisma.assistantKnowledgeFile.create({
         data: {
-            profileId: input.profileId,
+            ...containerWhere(container),
             userId: input.userId,
             name: input.filename,
             mime: input.mime,
@@ -393,10 +464,12 @@ export const finalizeKnowledgeUpload = async (input: {
  * would put a file into a version before the owner had approved the import it
  * came from.
  */
-export const listKnowledgeFiles = async (userId: string, profileId: string) => {
-    await ownedProfile(profileId, userId);
+export const listKnowledgeFiles = async (userId: string, profileOrContainer: string | KnowledgeContainer) => {
+    const container: KnowledgeContainer = typeof profileOrContainer === "string"
+        ? { kind: "profile", profileId: profileOrContainer } : profileOrContainer;
+    await ownedContainer(container, userId);
     return prisma.assistantKnowledgeFile.findMany({
-        where: { userId, profileId, importId: null },
+        where: { userId, ...containerWhere(container), importId: null },
         orderBy: { createdAt: "asc" },
         select: {
             id: true,
@@ -409,6 +482,8 @@ export const listKnowledgeFiles = async (userId: string, profileId: string) => {
             chunkCount: true,
             createdAt: true,
             processedAt: true,
+            sourceKind: true,
+            sourceRef: true,
         },
     });
 };
@@ -423,15 +498,15 @@ export const listKnowledgeFiles = async (userId: string, profileId: string) => {
  */
 export const deleteKnowledgeFile = async (input: {
     userId: string;
-    profileId: string;
     fileId: string;
-}) => {
-    await ownedProfile(input.profileId, input.userId);
+} & ContainerInput) => {
+    const container = inputContainer(input);
+    await ownedContainer(container, input.userId);
     const file = await prisma.assistantKnowledgeFile.findFirst({
         where: {
             id: input.fileId,
             userId: input.userId,
-            profileId: input.profileId,
+            ...containerWhere(container),
             // The same isolation the list applies. A staged file belongs to
             // the import that is holding it: removing it from here would leave
             // that import's manifest naming a file that no longer exists, and
@@ -458,4 +533,112 @@ export const deleteKnowledgeFile = async (input: {
     });
 
     return { deleted: true };
+};
+
+/** A failed file goes back to the worker's queue. Ready files are left alone. */
+export const retryKnowledgeFile = async (input: { userId: string; container: KnowledgeContainer; fileId: string }) => {
+    await ownedContainer(input.container, input.userId, "write");
+    const retried = await prisma.assistantKnowledgeFile.updateMany({
+        where: {
+            id: input.fileId,
+            userId: input.userId,
+            ...containerWhere(input.container),
+            importId: null,
+            processingStatus: "failed",
+        },
+        data: { processingStatus: "pending", failureCode: null },
+    });
+    if (retried.count === 0) {
+        const exists = await prisma.assistantKnowledgeFile.count({
+            where: { id: input.fileId, userId: input.userId, ...containerWhere(input.container), importId: null },
+        });
+        if (!exists) throw new AssistantKnowledgeError(404, "ASSISTANT_KNOWLEDGE_FILE_NOT_FOUND", "No such knowledge file.");
+        throw new AssistantKnowledgeError(409, "ASSISTANT_KNOWLEDGE_NOT_FAILED", "Only a failed file can be retried.");
+    }
+    return { retried: true };
+};
+
+const downloadName = (name: string) => name.replace(/[\u0000-\u001f\u007f"\\/]/g, "_").slice(0, 180) || "material";
+
+/** A short-lived read URL for the owner's own file. */
+export const knowledgeFileReadUrl = async (input: { userId: string; container: KnowledgeContainer; fileId: string }) => {
+    await ownedContainer(input.container, input.userId);
+    const file = await prisma.assistantKnowledgeFile.findFirst({
+        where: { id: input.fileId, userId: input.userId, ...containerWhere(input.container), importId: null },
+        select: { r2Key: true, name: true, mime: true },
+    });
+    if (!file) throw new AssistantKnowledgeError(404, "ASSISTANT_KNOWLEDGE_FILE_NOT_FOUND", "No such knowledge file.");
+    return {
+        url: await createR2ReadUrl(file.r2Key, 300, { attachmentName: downloadName(file.name) }),
+        name: file.name,
+        mime: file.mime,
+    };
+};
+
+export type ProjectCopySourceKind = "note" | "message_attachment" | "generated_artifact" | "review_result" | "research_report";
+
+/**
+ * A server-made project file: a text note, or a copy of a source the server
+ * itself read. Idempotent on (project, requestKey): a retry answers with the
+ * row the first request made, and the same request key in another project is
+ * a different request there.
+ */
+export const createProjectKnowledgeFileFromBytes = async (input: {
+    userId: string;
+    projectId: string;
+    name: string;
+    mime: string;
+    bytes: Buffer;
+    sourceKind: ProjectCopySourceKind;
+    sourceRef: Prisma.InputJsonValue | null;
+    requestKey: string;
+}) => {
+    const container: KnowledgeContainer = { kind: "project", projectId: input.projectId };
+    await ownedContainer(container, input.userId, "write");
+    const findExisting = () => prisma.assistantKnowledgeFile.findUnique({
+        where: { projectId_requestKey: { projectId: input.projectId, requestKey: input.requestKey } },
+    });
+    const existing = await findExisting();
+    if (existing) {
+        if (existing.userId !== input.userId) {
+            throw new AssistantKnowledgeError(404, "PROJECT_NOT_FOUND", "No such project.");
+        }
+        return { file: existing, created: false as const };
+    }
+    const claimRefusal = knowledgeFileRefusal({
+        filename: input.name,
+        mime: input.mime,
+        bytes: input.bytes.length,
+        leadingBytes: input.bytes.subarray(0, KNOWLEDGE_SIGNATURE_SCAN_BYTES),
+    });
+    if (claimRefusal) refuse(claimRefusal);
+    const usage = await knowledgeUsage(input.userId, container);
+    const quotaRefusal = knowledgeQuotaRefusal({ usage, incomingBytes: input.bytes.length });
+    if (quotaRefusal) refuse(quotaRefusal);
+
+    const r2Key = knowledgeKey();
+    await writeR2Object(r2Key, input.bytes, input.mime);
+    try {
+        const file = await prisma.assistantKnowledgeFile.create({
+            data: {
+                projectId: input.projectId,
+                userId: input.userId,
+                name: input.name,
+                mime: input.mime,
+                bytes: input.bytes.length,
+                digest: createHash("sha256").update(input.bytes).digest("hex"),
+                r2Key,
+                processingStatus: "pending",
+                sourceKind: input.sourceKind,
+                ...(input.sourceRef !== null ? { sourceRef: input.sourceRef } : {}),
+                requestKey: input.requestKey,
+            },
+        });
+        return { file, created: true as const };
+    } catch (error) {
+        await deleteR2Object(r2Key).catch(() => undefined);
+        const raced = await findExisting();
+        if (raced && raced.userId === input.userId) return { file: raced, created: false as const };
+        throw error;
+    }
 };
