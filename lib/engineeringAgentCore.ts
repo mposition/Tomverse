@@ -509,12 +509,23 @@ export const publisherReadsPatchChunks = (header: string | null) =>
  * digest it knows.
  */
 export const ENGINEERING_AGENT_CHANGE_DIGEST_V2_FEATURE = "change_digest_v2";
+/**
+ * A publisher that closes its own review draft pull requests a newer pull
+ * request of the same card replaced (owner decision 2026-11-23, from
+ * AMUX-CRAWL-003: each retry of a T2 card opened one more draft and left the
+ * earlier ones open). Only such a publisher is sent the list
+ * (`closeReviewDrafts` in the claim answer); one deployed before it never is.
+ */
+export const ENGINEERING_PUBLISHER_CLOSE_REVIEW_DRAFTS_FEATURE = "close_superseded_review_drafts";
+export const publisherClosesSupersededReviewDrafts = (header: string | null) =>
+  publisherNames(header, ENGINEERING_PUBLISHER_CLOSE_REVIEW_DRAFTS_FEATURE);
 /** Every feature this publisher names, in the header's form. */
 export const ENGINEERING_PUBLISHER_FEATURES = [
   ENGINEERING_PUBLISHER_REVIEW_DRAFT_FEATURE,
   ENGINEERING_PUBLISHER_PR_RESUME_FEATURE,
   ENGINEERING_PUBLISHER_PATCH_CHUNKS_FEATURE,
   ENGINEERING_AGENT_CHANGE_DIGEST_V2_FEATURE,
+  ENGINEERING_PUBLISHER_CLOSE_REVIEW_DRAFTS_FEATURE,
 ].join(",");
 /**
  * What the app can do for a publisher, named at the top of its claim answer

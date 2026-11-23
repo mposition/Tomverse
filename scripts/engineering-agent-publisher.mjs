@@ -251,6 +251,9 @@ const pullOf = (value) => ({
   headRef: value?.head?.ref,
   headSha: value?.head?.sha,
   body: typeof value?.body === "string" ? value.body : "",
+  draft: value?.draft === true,
+  headRepo: value?.head?.repo?.full_name ?? null,
+  authorType: value?.user?.type ?? null,
 });
 
 const githubPorts = (token) => ({
@@ -333,6 +336,21 @@ const githubPorts = (token) => ({
     }
     // A 4xx is a definite refusal (§10); anything else is not known.
     return response.status >= 400 && response.status < 500 ? { status: "rejected" } : { status: "unknown" };
+  },
+  // A review draft a newer pull request of its card replaced (owner decision
+  // 2026-11-23): read it, and close it only after the core's check.
+  pullByNumber: async (number) => {
+    const response = await githubRequest(token, "GET", `/repos/${OWNER}/${REPOSITORY}/pulls/${number}`);
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error("github_read_failed");
+    return pullOf(await response.json());
+  },
+  closePull: async (number) => {
+    const response = await githubRequest(token, "PATCH", `/repos/${OWNER}/${REPOSITORY}/pulls/${number}`, {
+      body: { state: "closed" },
+    }).catch(() => null);
+    await response?.body?.cancel().catch(() => undefined);
+    return response?.status === 200;
   },
 });
 
@@ -483,7 +501,8 @@ async function main() {
     signal: AbortSignal.timeout(10_000),
   }).catch(() => undefined);
   console.log(
-    JSON.stringify({ event: "engineering_publisher_cycle", finishedNormally: result.finishedNormally, halt: result.halt, reason: result.reason }),
+    JSON.stringify({ event: "engineering_publisher_cycle", finishedNormally: result.finishedNormally, halt: result.halt, reason: result.reason,
+      ...(Array.isArray(result.closedReviewDrafts) ? { closedReviewDrafts: result.closedReviewDrafts } : {}) }),
   );
   process.exit(result.finishedNormally ? 0 : 1);
 }

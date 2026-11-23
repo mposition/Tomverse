@@ -584,8 +584,72 @@ test("a review pull request's approval is recorded with its verified head and di
     assert.equal(mine?.bindingId, bindingId);
     assert.deepEqual(rows.pulls.find((row) => row.bindingId === bindingId),
       { bindingId, prNumber, patchBody: patch }, "the pull request's patch is the card's evidence");
-    assert.deepEqual(await apply(card.settlementId, { decision: "complete" }), { applied: false, outcome: "handed_off" },
-      "a pull request is never just marked done");
+    // Owner decision 2026-11-23 (AMUX-CRAWL-003): a review pull request's Task
+    // whose work is already in may be marked done; running it again was the only way out.
+    // Its draft is then one the publisher closes, as is a draft a newer run of the card replaced.
+    const { readEngineeringAgentSupersededReviewDrafts } = await import("@/lib/engineeringAgentStore");
+    for (const [key, value] of [["feature.engineeringAgentMode", "t1"]] as const) {
+      await tx.appSetting.upsert({ where: { key }, create: { key, value }, update: { value } });
+    }
+    await tx.appSetting.deleteMany({ where: { key: "feature.engineeringAgentFreeze" } });
+    const mineToClose = async () => (await readEngineeringAgentSupersededReviewDrafts(tx, {}))
+      .filter((draft) => draft.runId === runId);
+    assert.deepEqual(await mineToClose(), [], "the card's only pull request, waiting for its review, stays");
+    assert.deepEqual(await apply(card.settlementId, { decision: "complete" }), { applied: true, outcome: "done" });
+    assert.equal((await taskRow(tx, card.taskId)).status, "done");
+    assert.equal((await settlementRow(tx, card.settlementId))?.decision, "complete");
+    assert.deepEqual(await mineToClose(), [{ prNumber, runId, branch: `agent/engineering/${runId}` }]);
+    assert.deepEqual(await readEngineeringAgentSupersededReviewDrafts(tx, { ENGINEERING_AGENT_V22_REVIEW_PR: "off" }), [],
+      "review drafts switched off: nothing is closed");
+  });
+  // AMUX-CRAWL-003: each retry's run opened one more review draft. A draft a
+  // newer run of the same card replaced is closed; the newest stays, and an
+  // approved one or a ready one (checked on GitHub by the publisher) stays too.
+  await lifecycle(async (tx) => {
+    const { readEngineeringAgentSupersededReviewDrafts } = await import("@/lib/engineeringAgentStore");
+    await tx.appSetting.upsert({ where: { key: "feature.engineeringAgentMode" },
+      create: { key: "feature.engineeringAgentMode", value: "t1" }, update: { value: "t1" } });
+    await tx.appSetting.deleteMany({ where: { key: "feature.engineeringAgentFreeze" } });
+    const card = await stoppedTask(tx, { status: "review", reason: "human_review_required" });
+    const [first] = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "id" FROM "AmuxExecutionAttempt" WHERE "taskId" = ${card.taskId}`;
+    const base = 840_000_000 + Math.floor(Math.random() * 50_000_000);
+    const runs = [0, 1, 2].map((index) => ({ runId: String(base + index), prNumber: 930_000 + (base % 50_000) + index,
+      attemptId: index === 0 ? first!.id : randomUUID(), bindingId: randomUUID() }));
+    await withoutTriggers(tx, async () => {
+      for (const [index, run] of runs.entries()) {
+        if (index > 0) await tx.$executeRaw`INSERT INTO "AmuxExecutionAttempt"
+          ("id", "taskId", "worker", "workerInstanceId", "workerGeneration", "taskRevision", "attemptNumber",
+           "heartbeatAt", "startedAt", "endedAt", "outcome", "toStatus", "endedBy", "updatedAt")
+          VALUES (${run.attemptId}, ${card.taskId}, 'synthetic', 'synthetic', 1, 1, ${index + 10},
+            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'succeeded', 'review', 'synthetic',
+            CURRENT_TIMESTAMP)`;
+        await tx.$executeRaw`INSERT INTO "EngineeringAgentRun"
+          ("id", "amuxAttemptId", "cardId", "cardKind", "baseSha", "status", "outcome", "halt", "modeAtStart",
+           "startedAt", "endedAt", "leaseExpiresAt")
+          VALUES (${run.runId}, ${run.attemptId}, ${card.taskId}, 'task', ${BASE}, 'finished', 't2_draft', 'none', 't1',
+            CURRENT_TIMESTAMP + make_interval(mins => ${index}), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`;
+        await tx.$executeRaw`INSERT INTO "EngineeringAgentWorkItem"
+          ("id", "kind", "state", "causeKey", "runId", "patchBody", "patchDigest", "baseSha", "expectedTreeId",
+           "updatedAt", "closedAt")
+          VALUES (${randomUUID()}, 'publish', 'published', ${`publish_review:${run.runId}`}, ${run.runId}, 'p',
+            ${createHash("sha256").update("p", "utf8").digest("hex")}, ${BASE}, ${"f".repeat(40)},
+            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`;
+        await tx.$executeRaw`INSERT INTO "EngineeringAgentBinding"
+          ("id", "runId", "prNumber", "headSha", "verifiedHeadSha", "ref", "snapshot", "currentPrNumber", "updatedAt")
+          VALUES (${run.bindingId}, ${run.runId}, ${run.prNumber}, ${HEAD}, ${HEAD}, ${`agent/engineering/${run.runId}`},
+            ${JSON.stringify({ baseSha: BASE, diffDigest: DIFF, treeId: "f".repeat(40),
+              invalidatedReviewIds: [] })}::jsonb, ${run.prNumber}, CURRENT_TIMESTAMP)`;
+      }
+    });
+    const listed = async () => (await readEngineeringAgentSupersededReviewDrafts(tx, {}))
+      .filter((draft) => runs.some((run) => run.runId === draft.runId));
+    assert.deepEqual(await listed(), runs.slice(0, 2).map((run) => ({ prNumber: run.prNumber, runId: run.runId,
+      branch: `agent/engineering/${run.runId}` })), "the drafts newer runs replaced; never the newest");
+    // A binding the observer already moved to closed is not one to close again.
+    await withoutTriggers(tx, () => tx.$executeRaw`UPDATE "EngineeringAgentBinding" SET "state" = 'closed'
+      WHERE "id" = ${runs[0]!.bindingId}`);
+    assert.deepEqual((await listed()).map((draft) => draft.runId), [runs[1]!.runId], "a closed binding is left alone");
   });
   await lifecycle(async (tx) => {
     const runId = String(830_000_000 + Math.floor(Math.random() * 90_000_000));

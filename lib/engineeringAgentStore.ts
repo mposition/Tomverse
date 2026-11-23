@@ -2584,6 +2584,51 @@ export async function replaceEngineeringAgentBinding(
   return { bindingId: created.id };
 }
 
+/** A review draft pull request a newer pull request of its card replaced, for the publisher to close. */
+export type EngineeringAgentSupersededReviewDraft = { prNumber: number; runId: string; branch: string };
+
+/**
+ * The review draft pull requests the publisher closes (owner decision
+ * 2026-11-23, from AMUX-CRAWL-003: every retry of a T2 card opened one more
+ * draft and left the earlier ones open, seventeen in nine hours). One is the
+ * open, current binding of a run whose publish item was an owner review
+ * draft, with no approval or merge observed, while a later run of the same
+ * card holds a pull request of its own -- the card's newer pull request
+ * replaced it; the newest stays open for a person -- or while its card is
+ * done: its work is in without this draft (a settlement's `complete`). A
+ * closed card's draft stays, as that answer says.
+ *
+ * Only while publishing is allowed (the switches, no halt) and review drafts
+ * are on: closing is a write on the public repository. Read-only; the
+ * publisher checks each pull request again on GitHub (a draft, our branch and
+ * marker, into develop) and closes nothing else. The binding then moves to
+ * `closed` through the observer's ordinary release
+ * (lib/engineeringAgentBindingRelease.ts).
+ */
+export async function readEngineeringAgentSupersededReviewDrafts(
+  db: PrismaClient | Prisma.TransactionClient,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): Promise<EngineeringAgentSupersededReviewDraft[]> {
+  if (!engineeringAgentV22ReviewPrEnabled(env[ENGINEERING_AGENT_V22_REVIEW_PR_ENV])) return [];
+  const switches = await readEngineeringAgentSwitches(db, env);
+  if (!switches.publishAllowed || engineeringAgentHalted(await readEngineeringAgentHaltState(db))) return [];
+  const rows = await db.$queryRaw<Array<{ prNumber: number; runId: string }>>`
+    SELECT coalesce(b."currentPrNumber", b."prNumber") AS "prNumber", b."runId"
+    FROM "EngineeringAgentBinding" b
+    JOIN "EngineeringAgentRun" r ON r."id" = b."runId"
+    WHERE b."state" = 'open' AND b."supersededAt" IS NULL
+      AND b."approvalObservation" IS NULL AND b."mergeObservation" IS NULL
+      AND EXISTS (SELECT 1 FROM "EngineeringAgentWorkItem" w
+        WHERE w."kind" = 'publish' AND w."causeKey" = ${ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX} || b."runId")
+      AND (EXISTS (SELECT 1 FROM "EngineeringAgentBinding" nb
+          JOIN "EngineeringAgentRun" nr ON nr."id" = nb."runId"
+          WHERE nr."cardId" = r."cardId" AND nr."id" <> r."id" AND nr."startedAt" > r."startedAt")
+        OR EXISTS (SELECT 1 FROM "AmuxWorkItem" card WHERE card."id" = r."cardId" AND card."status" = 'done'))
+    ORDER BY b."createdAt", b."id"`;
+  return rows.filter((row) => isRunId(row.runId) && Number.isSafeInteger(row.prNumber) && row.prNumber > 0)
+    .map((row) => ({ prNumber: row.prNumber, runId: row.runId, branch: engineeringBranchName(row.runId) }));
+}
+
 /** `open -> closed` when the pull request closes; `closed -> pruned` when its branch is gone. */
 export async function moveEngineeringAgentBinding(
   tx: EngineeringAgentTransaction,
