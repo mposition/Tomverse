@@ -44,7 +44,9 @@ cheaper model is good enough or that total cost falls.
   `calculateProviderUsageCost` with the reported cache-read and cache-write
   lines -- the router call now passes its reported cache split through -- and
   an unpriced cache write is unknown. Unknown cost still stops new
-  scheduling and drains in-flight work.
+  scheduling and drains in-flight work. An answer that ends in an exception
+  is counted at its upper bound (`bounded`) and the run goes on; the report
+  shows bounded calls and their total apart from known spend.
 - **Report.** `summary.costEfficiency` (`auto-cost-efficiency-report-v1`):
   candidate diagnosis (savings samples by basis, quality tally, critical
   regressions, exact results, credits, observed answer cost pairs with
@@ -139,6 +141,14 @@ US$0.157, no unknown cost. Only 1 savings sample, so nothing was measured
 against the criteria. The replayed-menu filter above is the fix. The owner
 chose production, where the routing switch is live, for the next run; that
 run needs its own approval.
+
+**Dev run 2, 2026-11-23 22:18 AEST: not evidence.** After the replayed-menu
+filter: no unsent answers, 10 savings samples (all same-credit, lower
+estimated provider cost), the price-blind judge returned real verdicts. It
+stopped as `cost_unknown` when two `deepseek-v4-pro` answers failed (an
+`AI_APICallError` with no status after about 48 s, and the 120 s reasoning
+timeout), before the guidance comparison. US$0.244. The bounded answer cost
+above is the fix; deepseek-v4-pro Chat itself works in production (streamed).
 
 ## What remains unmeasured
 

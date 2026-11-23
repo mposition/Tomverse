@@ -42,7 +42,8 @@ export function CostEfficiencyDiagnosticView({ report }: { report: CostEfficienc
       <p>{q(g.quality)}</p>
       <p>{m.serving(usd(report.servingCost.baselineKnownMicroUsd), usd(report.servingCost.candidateKnownMicroUsd), report.servingCost.complete)}</p>
       <p className="mt-2">{m.experiment(usd(report.experimentCost.knownMicroUsd), report.experimentCost.unknownCalls, report.experimentCost.failed,
-        report.experimentCost.answerRetries, report.experimentCost.notStarted)}</p>
+        report.experimentCost.answerRetries, report.experimentCost.notStarted,
+        report.experimentCost.boundedCalls ?? 0, usd(report.experimentCost.boundedMicroUsd ?? 0))}</p>
       <p>{m.taskUnlinked}</p>
       <p>{m.criteria(report.criteria.version, report.criteria.status)}</p>
       <p className="mt-1 text-amber-300" data-testid="admin-cost-efficiency-applicability">

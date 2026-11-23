@@ -42,6 +42,9 @@ test("a diagnostic cycle's run over the real cycle table", { skip: !databaseUrl 
     });
     const PROPOSAL = "Send greetings and small talk to a lower-credit model.\nKeep hard reasoning on a higher tier.";
     const prompts = { synthesize: 0, generate: 0, answer: 0, quality: 0, legacyJudge: 0 };
+    // When on, each answer prompt times out on its first try (as AbortSignal.timeout throws), then answers.
+    let timeoutFirstTry = false;
+    const timedOut = new Set();
     const real = await import("ai");
     mock.module("ai", {
         namedExports: {
@@ -68,6 +71,10 @@ test("a diagnostic cycle's run over the real cycle table", { skip: !databaseUrl 
                     return { output: { winner: "equal" }, finishReason: "stop", usage };
                 }
                 prompts.answer += 1;
+                if (timeoutFirstTry && !timedOut.has(input.prompt)) {
+                    timedOut.add(input.prompt);
+                    throw Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+                }
                 return { text: "an answer", finishReason: "stop", usage };
             },
         },
@@ -133,6 +140,30 @@ test("a diagnostic cycle's run over the real cycle table", { skip: !databaseUrl 
             assert.notEqual(state.servingCost, undefined);
             // Spend reached the provider buckets like any cycle's.
             assert.ok(row.spentMicroUsd > 0);
+        });
+        await t.test("an answer that times out is counted at its upper bound and the diagnostic finishes", async () => {
+            timeoutFirstTry = true;
+            timedOut.clear();
+            try {
+                const started = await optimizer.startAutoRouterOptimizerCycle(actor, { waitForCompletion: true, objective: "chat_cost_efficiency" });
+                assert.ok("cycleId" in started, JSON.stringify(started));
+                assert.deepEqual(started.outcome, { recorded: true, status: "diagnostic", failure: null });
+                const row = await prisma.autoRouterOptimizerCycle.findUniqueOrThrow({ where: { id: started.cycleId } });
+                const coverage = row.summary.costCoverage;
+                assert.ok(timedOut.size > 0);
+                assert.equal(coverage.unknownCalls, 0);
+                assert.equal(coverage.boundedCalls, timedOut.size);
+                assert.ok(coverage.boundedMicroUsd > 0);
+                const boundedCall = coverage.calls.find((call) => call.state === "bounded");
+                assert.equal(boundedCall.kind, "answer");
+                assert.equal(boundedCall.failed, true);
+                assert.ok(boundedCall.bound.outputTokens > 0 && boundedCall.bound.inputTokens > 0);
+                // The cycle's recorded spend carries the bounds; the known total does not.
+                assert.equal(row.spentMicroUsd, coverage.knownMicroUsd + coverage.boundedMicroUsd);
+                assert.equal(row.summary.costEfficiency.experimentCost.boundedCalls, timedOut.size);
+            } finally {
+                timeoutFirstTry = false;
+            }
         });
         await t.test("a recorded menu's retired model is never picked, drawn or answered", async () => {
             const live = models.filter((item) => item.enabled && !item.catalogDeleted && optimizer.pricesOf(item)).slice(0, 2);

@@ -68,6 +68,7 @@ import {
     rolledBackRouterGuidance,
     runOptimizerCycle,
     guidanceRejection,
+    optimizerAnswerOrBound,
     optimizerAnswerOptions,
     optimizerCallFailureDetail,
     traceOptimizerCall,
@@ -936,11 +937,16 @@ async function runInBackground(input: {
                     }
                     // Shared with the rewrite cycle (lib/autoRewriteOptimizer.ts).
                     const { timeoutMs, ...options } = optimizerAnswerOptions(model, turn);
-                    const generated = await traced("answer", () => generateText({
+                    // An exception (timeout, dropped connection, provider error) may
+                    // come after the request was sent and billed, with no usage:
+                    // counted at its upper bound so the run goes on (optimizerAnswerBound).
+                    const attempt = await optimizerAnswerOrBound(() => traced("answer", () => generateText({
                         model: getActiveAiModel(model),
                         abortSignal: AbortSignal.timeout(timeoutMs),
                         ...options,
-                    }), model);
+                    }), model), options, prices, model.provider);
+                    if ("failed" in attempt) return attempt.failed;
+                    const generated = attempt.generated;
                     if (!generated.text.trim()) {
                         console.warn(JSON.stringify({
                             event: "auto_router_optimizer_answer_empty",
