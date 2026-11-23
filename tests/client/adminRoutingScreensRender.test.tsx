@@ -12,7 +12,7 @@ import { adminRoutingScreensMessages } from "@/lib/adminMessages/routingScreens"
 import { OptimizerEvidenceView } from "@/components/admin/OptimizerEvidenceView";
 import { verifiedOptimizerSummary } from "../fixtures/optimizerVerifiedSummary";
 import { ChatServingCostView, CostEfficiencyDiagnosticView } from "@/components/admin/CostEfficiencyDiagnosticView";
-import { COST_EFFICIENCY_CRITERIA_PROPOSAL, costEfficiencyReport } from "@/lib/autoCostEfficiencyReport";
+import { COST_EFFICIENCY_CRITERIA, costEfficiencyReport } from "@/lib/autoCostEfficiencyReport";
 import { summarizeChatServingCost } from "@/lib/autoChatServingCostCore";
 import { optimizerSpend } from "@/lib/autoOptimizerCost";
 import { costEfficiencyMessages } from "@/lib/adminMessages/costEfficiency";
@@ -179,7 +179,7 @@ test("a cost-efficiency diagnostic shows price-blind quality, credits, observed 
       },
     }, { kind: "hard", a: "cheap", b: null, verdict: "no_alternative" }],
     cases: [], coverage: spend.costCoverage, spentByKind: spend.spentByKind,
-    criteria: COST_EFFICIENCY_CRITERIA_PROPOSAL, failure: null, summary: undefined,
+    criteria: { ...COST_EFFICIENCY_CRITERIA, status: "proposed_unconfirmed" }, failure: null, summary: undefined,
   });
   const html = renderToStaticMarkup(<CostEfficiencyDiagnosticView report={report} />);
   assert.ok(html.includes("Cost-efficiency diagnostic (diagnostic only)"));
@@ -191,6 +191,16 @@ test("a cost-efficiency diagnostic shows price-blind quality, credits, observed 
   // Model-free totals: no model id reaches the diagnostic block.
   assert.doesNotMatch(html, /\bpremium\b|\bcheap\b/);
   assert.equal(renderToStaticMarkup(<CostEfficiencyDiagnosticView report={undefined} />), "");
+  // The owner-confirmed set no longer adds the unconfirmed reason.
+  const confirmed = renderToStaticMarkup(<CostEfficiencyDiagnosticView report={{
+    ...report, applicability: costEfficiencyReport({
+      comparisons: [], cases: [], coverage: spend.costCoverage, spentByKind: spend.spentByKind,
+      criteria: COST_EFFICIENCY_CRITERIA, failure: null, summary: undefined,
+    }).applicability,
+  }} />);
+  assert.equal(COST_EFFICIENCY_CRITERIA.status, "confirmed");
+  assert.doesNotMatch(confirmed, /criteria not yet confirmed/);
+  assert.match(confirmed, /Not applicable as guidance:.*diagnostic only/);
   const serving = summarizeChatServingCost([], { since: "s", until: "u" });
   assert.match(renderToStaticMarkup(<ChatServingCostView summary={serving} />), /answer cost only[\s\S]*unknown, not zero/);
   assert.match(renderToStaticMarkup(<ChatServingCostView summary={null} />), /could not be read/);

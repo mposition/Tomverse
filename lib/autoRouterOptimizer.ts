@@ -1,6 +1,6 @@
 import "server-only";
 import { observeOptimizerUsageCost, optimizerCostFields } from "@/lib/autoOptimizerCost";
-import { COST_EFFICIENCY_CRITERIA_PROPOSAL } from "@/lib/autoCostEfficiencyReport";
+import { COST_EFFICIENCY_CRITERIA } from "@/lib/autoCostEfficiencyReport";
 import {
     buildAutoCandidateMenu,
     buildCostEfficiencyManifest,
@@ -681,7 +681,7 @@ const costEfficiencyRunManifest = (input: {
             split: "family: conversation id; synthetic message alone",
             families: { train: null, evaluate: null },
         },
-        criteria: COST_EFFICIENCY_CRITERIA_PROPOSAL,
+        criteria: COST_EFFICIENCY_CRITERIA,
         // Upper bound: every case could land in the holdout and every synthetic message train.
         plan: costEfficiencyCallPlan({
             evaluate: total, trainRoutes: synthetic, synthesize: synthetic > 0,
@@ -782,7 +782,7 @@ async function runInBackground(input: {
                 responseLatency,
                 ...(costMode ? {
                     objective: input.objective,
-                    criteria: COST_EFFICIENCY_CRITERIA_PROPOSAL,
+                    criteria: COST_EFFICIENCY_CRITERIA,
                     // A conversation never straddles the holdout; a synthetic message is its own family.
                     familyOf: (decision: OptimizerDecision) => decision.family ?? decision.id,
                 } : {}),
