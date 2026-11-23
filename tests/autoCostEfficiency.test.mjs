@@ -330,6 +330,42 @@ test("an answer that was never sent is not asked for again, and its pair is no a
   assert.equal(observed.challengerLower, observed.pairsKnown);
 });
 
+test("an answer that times out is counted at its upper bound, retried, and the cycle finishes", async () => {
+  const bounded = { state: "bounded", amountMicroUsd: 1_500, reason: "exception", bound: { inputTokens: 80, outputTokens: 1_000, prices: { inputUsdPerMillionTokens: 1, outputUsdPerMillionTokens: 1.5 } } };
+  const tries = new Map();
+  const { deps } = costDeps({
+    answer: async (modelId, turn) => {
+      const key = `${modelId}/${turn.message}`;
+      tries.set(key, (tries.get(key) ?? 0) + 1);
+      // The cheap model times out on its first try (as an adapter returns it), then answers.
+      return modelId === "cheap" && tries.get(key) === 1
+        ? { value: null, costMicroUsd: null, cost: bounded, provider: "cheap-co" }
+        : { value: `${modelId} answer`, ...known(ANSWER_COST[modelId]), provider: `${modelId}-co` };
+    },
+  });
+  const result = await runOptimizerCycle(costInput(), deps);
+  assert.equal(result.status, "diagnostic");
+  assert.equal(result.failure, null, "a timeout no longer stops the cycle as cost_unknown");
+  const cheapPairs = result.comparisons.filter((item) => item.b === "cheap");
+  assert.ok(cheapPairs.length > 0);
+  assert.ok(cheapPairs.every((item) => item.costEfficiency.answerCost.b.state === "bounded"
+    && item.costEfficiency.answerCost.b.attempts === 2 && item.costEfficiency.answerCost.b.microUsd === 1_500 + ANSWER_COST.cheap));
+  assert.ok(cheapPairs.every((item) => item.costEfficiency.quality === "equal"), "the retried answer was judged");
+  const experiment = result.costEfficiency.experimentCost;
+  // Each cheap answer (direct and guidance comparisons alike) timed out once.
+  const cheapAnswers = [...tries.keys()].filter((key) => key.startsWith("cheap/")).length;
+  assert.ok(cheapAnswers >= cheapPairs.length);
+  assert.equal(experiment.boundedCalls, cheapAnswers);
+  assert.equal(experiment.boundedMicroUsd, cheapAnswers * 1_500);
+  assert.equal(experiment.unknownCalls, 0);
+  assert.equal(experiment.complete, true);
+  // The run's spend includes every bound; the known figure does not.
+  assert.equal(result.spentMicroUsd, experiment.knownMicroUsd + experiment.boundedMicroUsd);
+  // A bounded answer cost is not exact, so the pair is not a known cost pair.
+  assert.equal(result.costEfficiency.candidateDiagnosis.observedAnswerCost.pairsKnown + result.costEfficiency.candidateDiagnosis.observedAnswerCost.pairsUnknown,
+    result.costEfficiency.candidateDiagnosis.savingsSamples);
+});
+
 test("fewer credits with a higher observed answer cost is not a saving", () => {
   const unknownView = { state: "unknown", microUsd: null, attempts: 1, failedAttempts: 0 };
   const view = (microUsd) => ({ state: "known", microUsd, attempts: 1, failedAttempts: 0 });

@@ -41,6 +41,7 @@ import {
     optimizerPromotionEligibility,
     optimizerVerificationSummary,
     type OptimizerPromotionRefusal,
+    optimizerAnswerBound,
     optimizerAnswerOptions,
     optimizerCallFailureDetail,
     traceOptimizerCall,
@@ -389,11 +390,15 @@ async function runInBackground(input: {
                     // The routing cycle's answer request: the model's own generation
                     // settings, as a chat turn gets them.
                     const { timeoutMs, ...options } = optimizerAnswerOptions(model, turn);
+                    // An exception (timeout, dropped connection, provider error) may
+                    // come after the request was sent and billed, with no usage:
+                    // counted at its upper bound so the run goes on (optimizerAnswerBound).
                     const generated = await traced("answer", () => generateText({
                         model: getActiveAiModel(model),
                         abortSignal: AbortSignal.timeout(timeoutMs),
                         ...options,
-                    }), model);
+                    }), model).catch(() => null);
+                    if (!generated) return { value: null, ...optimizerCostFields(optimizerAnswerBound(options, prices)), provider: model.provider };
                     return {
                         value: generated.text,
                         ...cost(prices, generated.usage),

@@ -33,7 +33,7 @@ import type { AiModel } from "@/lib/models";
 import { providerStatusClass, type ProviderStatusClass } from "@/lib/autoLlmRouterDiagnostics";
 import { TUNABLE_GENERATOR_RULE, tunableChangesSchema } from "@/lib/autoRouterTunablesCore";
 
-import { optimizerSpend, type OptimizerCallIdentity, type OptimizerCost, type OptimizerCostCoverage, type OptimizerCallKind, type OptimizerCallResult } from "@/lib/autoOptimizerCost";
+import { optimizerBoundedCost, optimizerSpend, type OptimizerCallIdentity, type OptimizerCost, type OptimizerCostCoverage, type OptimizerCallKind, type OptimizerCallResult } from "@/lib/autoOptimizerCost";
 import { costEfficiencyReport, COST_EFFICIENCY_CRITERIA, type CostEfficiencyCriteria, type CostEfficiencyReport } from "@/lib/autoCostEfficiencyReport";
 export { optimizerSpend } from "@/lib/autoOptimizerCost";
 export type { OptimizerCallKind, OptimizerCallResult } from "@/lib/autoOptimizerCost";
@@ -143,8 +143,9 @@ export type ChallengerBasis = "lower_credit" | "lower_estimated_provider_cost" |
 
 /** One answer's spend across its tries; unknown when any try's cost is. */
 export type AnswerCostView = {
-    state: "known" | "unknown" | "not_started";
-    /** Known subtotal; null when unknown or never started. */
+    /** bounded: at least one try ended in an exception and is counted at its upper bound. */
+    state: "known" | "bounded" | "unknown" | "not_started";
+    /** Known subtotal, plus upper bounds when bounded; null when unknown or never started. */
     microUsd: number | null;
     attempts: number;
     failedAttempts: number;
@@ -381,9 +382,11 @@ export const optimizerPromotionEligibility = (cycle: {
         cost.complete !== true || cost.unknownCalls !== 0 ||
         [cost.started, cost.completed, cost.knownCalls, cost.noDispatchCalls, cost.usagePricedCalls]
             .some(value => !Number.isSafeInteger(value) || value < 0) ||
-        !(cost.started > 0) || cost.started !== cost.completed || cost.started !== cost.knownCalls + cost.noDispatchCalls ||
+        !(cost.started > 0) || cost.started !== cost.completed ||
+        cost.started !== cost.knownCalls + cost.noDispatchCalls + (cost.boundedCalls ?? 0) ||
         cost.usagePricedCalls !== cost.knownCalls ||
-        !Number.isFinite(cost.knownMicroUsd) || cost.knownMicroUsd < 0) return refuse("cost_unconfirmed");
+        !Number.isFinite(cost.knownMicroUsd) || cost.knownMicroUsd < 0 ||
+        [cost.boundedCalls ?? 0, cost.boundedMicroUsd ?? 0].some(value => !Number.isFinite(value) || value < 0)) return refuse("cost_unconfirmed");
     if (!summary.evaluation.independentHoldout || !summary.evaluation.guidanceFrozenBeforeEvaluation ||
         summary.evaluation.inputVersion !== AUTO_LLM_ROUTER_INPUT_VERSION) return refuse("holdout_unverified");
     const counts = [summary.evaluated, summary.unchanged, summary.decided, summary.candidateWins,
@@ -1327,6 +1330,25 @@ export const optimizerAnswerOptions = (model: AiModel, turn: OptimizerAnswerTurn
     ...getModelGenerationSettings(model),
 });
 
+/** Tokens a request's role and message framing can add beyond its text; generous on purpose. */
+export const OPTIMIZER_ANSWER_FRAMING_TOKENS = 64;
+
+/**
+ * The most an optimizer answer request can have cost when it ended in an
+ * exception with no reported usage: each UTF-8 byte of the system text and
+ * message as a token (a token is never smaller than a byte), plus framing,
+ * and the whole output cap sent with the request (thinking included, as the
+ * providers count it), all at full uncached price.
+ */
+export const optimizerAnswerBound = (
+    options: { system?: string; prompt: string; maxOutputTokens: number },
+    prices: { inputUsdPerMillionTokens: number; outputUsdPerMillionTokens: number }
+): OptimizerCost => optimizerBoundedCost({
+    inputTokens: new TextEncoder().encode((options.system ?? "") + options.prompt).length + OPTIMIZER_ANSWER_FRAMING_TOKENS,
+    outputTokens: options.maxOutputTokens,
+    prices,
+});
+
 /** An answer the judge can read, or null: an empty answer is no answer. */
 export const admitOptimizerAnswer = (raw: unknown): string | null =>
     typeof raw === "string" && raw.trim() ? raw.trim() : null;
@@ -1712,20 +1734,24 @@ export async function runOptimizerCycle(
     };
     // Each answer's own spend across its tries, and which phase first asked
     // for it: a later phase that reuses it pays nothing and says so.
-    const answerSpend = new Map<string, { attempts: number; failed: number; knownMicroUsd: number; unknown: boolean }>();
+    const answerSpend = new Map<string, { attempts: number; failed: number; knownMicroUsd: number; unknown: boolean; bounded: boolean }>();
     const answerOrigin = new Map<string, "direct" | "replay">();
     const answerCostOf = (decision: OptimizerDecision, modelId: string): AnswerCostView => {
         const spent = answerSpend.get(JSON.stringify([decision.id, modelId]));
         if (!spent) return { state: "not_started", microUsd: null, attempts: 0, failedAttempts: 0 };
-        return { state: spent.unknown ? "unknown" : "known", microUsd: spent.unknown ? null : spent.knownMicroUsd,
+        return { state: spent.unknown ? "unknown" : spent.bounded ? "bounded" : "known", microUsd: spent.unknown ? null : spent.knownMicroUsd,
             attempts: spent.attempts, failedAttempts: spent.failed };
     };
     const noteAnswerSpend = (key: string, cost: OptimizerCost, failed: boolean) => {
-        const spent = answerSpend.get(key) ?? { attempts: 0, failed: 0, knownMicroUsd: 0, unknown: false };
+        const spent = answerSpend.get(key) ?? { attempts: 0, failed: 0, knownMicroUsd: 0, unknown: false, bounded: false };
         spent.attempts += 1;
         if (failed) spent.failed += 1;
         if (cost.state === "unknown") spent.unknown = true;
-        else if (cost.state === "known") spent.knownMicroUsd += cost.amountMicroUsd;
+        else if (cost.state === "known" || cost.state === "bounded") {
+            // An upper bound is added in: the answer's cost is then at most this, never less.
+            spent.knownMicroUsd += cost.amountMicroUsd;
+            if (cost.state === "bounded") spent.bounded = true;
+        }
         answerSpend.set(key, spent);
     };
     const answerOf = (decision: OptimizerDecision, modelId: string, phase: "direct" | "replay" = "direct", arm?: string) => {

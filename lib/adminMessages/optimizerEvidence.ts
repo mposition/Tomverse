@@ -2,11 +2,12 @@ import { defineAdminMessages } from "@/lib/adminLocale";
 
 export const optimizerEvidenceMessages = defineAdminMessages({
   en: {
-    knownCost: "Recorded known optimizer cost",
+    knownCost: "Recorded optimizer cost",
     costBasis: "Calculated from reported token usage and configured prices. Full Chat request cost is unmeasured.",
     incomplete: "Total optimizer cost unconfirmed",
     legacy: "Holdout and cost coverage unverified",
     coverage: (known: number, noDispatch: number, unknown: number) => `${known} known · ${noDispatch} verified no-dispatch · ${unknown} unknown`,
+    bounded: (count: number, usd: string) => `${count} calls ended in an exception and are counted at their upper bound, US$${usd}, included in the cost above`,
     calls: (started: number, completed: number, skipped: number, failed: number) => `${started} started · ${completed} completed · ${skipped} not started · ${failed} failed`,
     creditRatio: "Catalog credit ratio (proposal/current)",
     creditLimit: "The existing gate permits up to a 10% credit increase.",
@@ -19,11 +20,12 @@ export const optimizerEvidenceMessages = defineAdminMessages({
     legacySamples: (count: number) => `${count} stored legacy input samples; missing text remains unavailable`,
   },
   ko: {
-    knownCost: "기록된 optimizer 확인 비용",
+    knownCost: "기록된 optimizer 비용",
     costBasis: "관측 토큰 사용량과 설정 단가로 계산한 값입니다. 전체 Chat 요청 비용은 미측정입니다.",
     incomplete: "optimizer 전체 비용 미확정",
     legacy: "holdout·비용 coverage 미검증",
     coverage: (known: number, noDispatch: number, unknown: number) => `${known}건 비용 확인 · ${noDispatch}건 미호출 확인 · ${unknown}건 비용 불명`,
+    bounded: (count: number, usd: string) => `예외로 끝난 호출 ${count}건은 최악 비용 상한 US$${usd}로 세어 위 비용에 포함`,
     calls: (started: number, completed: number, skipped: number, failed: number) => `${started}건 시작 · ${completed}건 완료 · ${skipped}건 미시작 · ${failed}건 실패`,
     creditRatio: "카탈로그 credit 비율 (제안/현재)",
     creditLimit: "기존 게이트는 최대 10% credit 증가를 허용합니다.",

@@ -68,7 +68,7 @@ export type QualityTally = {
 export type ObservedPairCost = {
     /** Pairs whose two answers both have a known cost. */
     pairsKnown: number;
-    /** Pairs where either answer's cost is unknown or never started. */
+    /** Pairs where either answer's cost is not exact: unknown, an upper bound, or never started. */
     pairsUnknown: number;
     /** Pairs where either side gave no answer: nothing was compared, so no cost pair. */
     pairsUnanswered: number;
@@ -250,6 +250,9 @@ export const costEfficiencyReport = (input: {
         failed: coverage.failed,
         notStarted: coverage.notStarted,
         unknownCalls: coverage.unknownCalls,
+        /** Calls that ended in an exception, counted at their upper bound (included in the run's spend, not in knownMicroUsd). */
+        boundedCalls: coverage.boundedCalls ?? 0,
+        boundedMicroUsd: coverage.boundedMicroUsd ?? 0,
         noDispatchCalls: coverage.noDispatchCalls,
         answerRetries: coverage.calls.filter(call => call.kind === "answer" && (call.identity?.attempt ?? 1) > 1).length,
     };

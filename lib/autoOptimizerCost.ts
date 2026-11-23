@@ -14,7 +14,16 @@ type Prices = {
 export type OptimizerCost =
     | { state: "known"; amountMicroUsd: number; usage?: Usage; prices?: Prices }
     | { state: "no_dispatch"; reason: "model_unavailable" | "unpriced" | "pre_dispatch_refusal" }
-    | { state: "unknown"; dispatch: "dispatched" | "unknown"; reason: "missing_usage" | "invalid_usage" | "invalid_price" | "invalid_cost" | "unpriced_cache_write" | "exception" };
+    | { state: "unknown"; dispatch: "dispatched" | "unknown"; reason: "missing_usage" | "invalid_usage" | "invalid_price" | "invalid_cost" | "unpriced_cache_write" | "exception" }
+    /**
+     * A call that ended in an exception (a timeout, a dropped connection, a
+     * provider error) after it may have been sent, with no reported usage.
+     * Counted at the most it could have cost -- every input byte as a token
+     * and the whole output cap, at full price -- against the run, the caps
+     * and the provider's bucket, so the run can go on without understating
+     * spend. Never "known": the report shows it as an upper bound.
+     */
+    | { state: "bounded"; amountMicroUsd: number; reason: "exception"; bound: { inputTokens: number; outputTokens: number; prices: Prices } };
 /**
  * Which evaluation call this was, so a report can attribute spend to a case,
  * a model and an arm. Ids and roles only, never message or answer text.
@@ -39,7 +48,10 @@ export type OptimizerCostCoverage = {
     version: "optimizer-cost-v1";
     basis: "reported_usage_configured_prices";
     complete: boolean;
+    /** Spend from reported usage only. */
     knownMicroUsd: number;
+    /** Upper bounds counted for calls that ended in an exception (state "bounded"); absent on older records. */
+    boundedMicroUsd?: number;
     started: number;
     completed: number;
     notStarted: number;
@@ -47,6 +59,8 @@ export type OptimizerCostCoverage = {
     knownCalls: number;
     noDispatchCalls: number;
     unknownCalls: number;
+    /** Absent on older records, which had none. */
+    boundedCalls?: number;
     usagePricedCalls: number;
     calls: ({ kind: OptimizerCallKind; provider: string; failed: boolean; identity?: OptimizerCallIdentity } & OptimizerCost)[];
 };
@@ -115,22 +129,43 @@ export const observeOptimizerUsageCost = (
     };
 };
 
+/**
+ * The most a call could have cost: input and output token counts that cannot
+ * be exceeded, at full (uncached) price. Unknown when a price is invalid.
+ */
+export const optimizerBoundedCost = (bound: { inputTokens: number; outputTokens: number; prices: Prices }): OptimizerCost => {
+    const { inputTokens, outputTokens, prices } = bound;
+    if (![inputTokens, outputTokens, prices.inputUsdPerMillionTokens, prices.outputUsdPerMillionTokens].every(valid))
+        return { state: "unknown", dispatch: "unknown", reason: "exception" };
+    const amountMicroUsd = Math.ceil(inputTokens * prices.inputUsdPerMillionTokens + outputTokens * prices.outputUsdPerMillionTokens);
+    return valid(amountMicroUsd)
+        ? { state: "bounded", amountMicroUsd, reason: "exception",
+            bound: { inputTokens, outputTokens, prices: { inputUsdPerMillionTokens: prices.inputUsdPerMillionTokens, outputUsdPerMillionTokens: prices.outputUsdPerMillionTokens } } }
+        : { state: "unknown", dispatch: "unknown", reason: "exception" };
+};
+
 export const optimizerCostFields = (cost: OptimizerCost) => ({
     cost, costMicroUsd: cost.state === "known" ? cost.amountMicroUsd : cost.state === "no_dispatch" ? 0 : null,
 });
 
 const zeroByKind = (): Record<OptimizerCallKind, number> => ({ synthesize: 0, generate: 0, route: 0, answer: 0, judge: 0 });
 
-/** Existing actual-spend admission; unknown stops new calls and drains in-flight work. */
+/**
+ * Existing actual-spend admission; unknown stops new calls and drains
+ * in-flight work. A bounded call counts at its upper bound toward the budget,
+ * the kind and the provider, and does not stop the run.
+ */
 export const optimizerSpend = (budgetMicroUsd: number) => {
     let spent = 0;
+    let known = 0;
+    let bounded = 0;
     let closedReason: "budget_exhausted" | "cost_unknown" | null = null;
     const spentByKind = zeroByKind(), failedByKind = zeroByKind();
     const spentByProvider = new Map<string, number>();
     const coverage: OptimizerCostCoverage = {
         version: "optimizer-cost-v1", basis: "reported_usage_configured_prices", complete: true,
-        knownMicroUsd: 0, started: 0, completed: 0, notStarted: 0, failed: 0,
-        knownCalls: 0, noDispatchCalls: 0, unknownCalls: 0, usagePricedCalls: 0, calls: [],
+        knownMicroUsd: 0, boundedMicroUsd: 0, started: 0, completed: 0, notStarted: 0, failed: 0,
+        knownCalls: 0, noDispatchCalls: 0, unknownCalls: 0, boundedCalls: 0, usagePricedCalls: 0, calls: [],
     };
     const call = async <T>(
         kind: OptimizerCallKind,
@@ -158,7 +193,7 @@ export const optimizerSpend = (budgetMicroUsd: number) => {
             cost = result.cost ?? (valid(result.costMicroUsd)
                 ? { state: "known", amountMicroUsd: Math.ceil(result.costMicroUsd) }
                 : { state: "unknown", dispatch: "unknown", reason: "invalid_cost" });
-            if (cost.state === "known" && !valid(cost.amountMicroUsd))
+            if ((cost.state === "known" || cost.state === "bounded") && !valid(cost.amountMicroUsd))
                 cost = { state: "unknown", dispatch: "unknown", reason: "invalid_cost" };
             failed = result.value === null;
             return result.value;
@@ -177,13 +212,20 @@ export const optimizerSpend = (budgetMicroUsd: number) => {
                 closedReason = "cost_unknown";
             } else if (cost.state === "no_dispatch") coverage.noDispatchCalls += 1;
             else {
-                coverage.knownCalls += 1;
-                if (cost.usage && cost.prices) coverage.usagePricedCalls += 1;
+                if (cost.state === "bounded") {
+                    coverage.boundedCalls = (coverage.boundedCalls ?? 0) + 1;
+                    bounded += cost.amountMicroUsd;
+                } else {
+                    coverage.knownCalls += 1;
+                    if (cost.usage && cost.prices) coverage.usagePricedCalls += 1;
+                    known += cost.amountMicroUsd;
+                }
                 spent += cost.amountMicroUsd;
                 spentByKind[kind] += cost.amountMicroUsd;
                 if (cost.amountMicroUsd > 0) spentByProvider.set(provider, (spentByProvider.get(provider) ?? 0) + cost.amountMicroUsd);
             }
-            coverage.knownMicroUsd = spent;
+            coverage.knownMicroUsd = known;
+            coverage.boundedMicroUsd = bounded;
         }
     };
     return {
