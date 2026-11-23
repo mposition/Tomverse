@@ -36,6 +36,7 @@ import {
   acceptConnectedImageCandidates,
   acceptNewProviderCandidates,
   connectedImageResearchPrompt,
+  connectedImageResearchProviders,
   brisbaneIsoWeek,
   newProviderResearchPrompt,
   newProviderResearchRunRecord,
@@ -176,11 +177,13 @@ const researchInputs = async () => {
     image: servedImage.map((model) => model.name),
     code: servedCode.map((profile) => profile.name),
   };
-  // Connected providers whose official documentation hosts are known: the
-  // connected-image answer is accepted only when cited there.
-  const imageResearchProviders = connectedProviders.filter((provider) =>
-    Object.hasOwn(OFFICIAL_SOURCE_HOSTS, provider)
-  );
+  // Connected providers with no image model yet, whose official documentation
+  // hosts are known: the connected-image answer is accepted only when cited there.
+  const imageResearchProviders = connectedImageResearchProviders({
+    connectedProviders,
+    imageModelProviders: imageModels.map((model) => model.provider),
+    officialHosts: OFFICIAL_SOURCE_HOSTS,
+  });
   return { connectedProviders, knownApiModels, currentModels, imageResearchProviders };
 };
 
@@ -277,7 +280,7 @@ export async function runNewProviderModelResearch(
     accepted: AcceptedNewProviderCandidate[];
     rejected: NewProviderResearchRejection[];
   } = { ok: true, proposed: 0, accepted: [], rejected: [] };
-  if (connectedImageEnabled) {
+  if (connectedImageEnabled && inputs.imageResearchProviders.length > 0) {
     try {
       const answer = await ask(
         "connected_image",

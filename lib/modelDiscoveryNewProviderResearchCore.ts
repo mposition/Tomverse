@@ -375,6 +375,7 @@ export const connectedImageResearchPrompt = (input: {
   [
     `Date: ${input.today}.`,
     `Providers to check (use these ids as providerName): ${input.providers.join(", ")}.`,
+    "Tomverse already uses these providers for chat or code models. Check each one separately for an image generation or editing API on its own documentation.",
     `Image models Tomverse serves today: ${input.currentImageModels.slice(0, 40).join(", ") || "(none listed)"}.`,
     `Model ids Tomverse already knows (exclude): ${Array.from(new Set(input.knownApiModels.map(modelIdKey))).slice(0, 400).join(", ")}.`,
     `List up to ${NEW_PROVIDER_RESEARCH_MAX_CANDIDATES} image generation or editing models these providers offer by API that are not in that list.`,
@@ -382,6 +383,25 @@ export const connectedImageResearchPrompt = (input: {
     "benchmarkBasisKo (what the provider says it is for, and any public evaluation), apiAvailabilityKo (endpoint path and request shape),",
     "pricingKo (approximate USD and unit), citations (https URLs on the provider's official docs or pricing pages).",
   ].join("\n");
+
+/**
+ * The providers the connected-image call asks about: connected, with known
+ * official documentation hosts, and no image model registered yet. Asked about
+ * every connected provider at once (2026-11-19), the search model read only
+ * OpenAI and proposed three models Tomverse already serves; a provider whose
+ * image API Tomverse already calls has its new models found by the catalogue
+ * scan instead.
+ */
+export const connectedImageResearchProviders = (input: {
+  connectedProviders: readonly string[];
+  imageModelProviders: readonly string[];
+  officialHosts: Readonly<Record<string, readonly string[]>>;
+}) => {
+  const withImages = new Set(input.imageModelProviders);
+  return input.connectedProviders.filter(
+    (provider) => Object.hasOwn(input.officialHosts, provider) && !withImages.has(provider)
+  );
+};
 
 /** Short published names too short for the alias rule above: "Z.ai" is Zhipu. */
 const EXACT_PROVIDER_NAMES: Readonly<Record<string, string>> = {

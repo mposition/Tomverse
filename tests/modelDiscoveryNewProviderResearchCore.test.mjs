@@ -228,6 +228,30 @@ test("connected-provider image models are accepted only from a connected provide
   assert.match(prompt, /gpt-image-2/);
 });
 
+// 2026-11-19: asked about every connected provider at once, the search model
+// read only OpenAI and proposed three models Tomverse already serves.
+test("the connected-image call asks only about connected providers with no image model yet", async () => {
+  const { connectedImageResearchProviders } = await import("../lib/modelDiscoveryNewProviderResearchCore.ts");
+  const { OFFICIAL_SOURCE_HOSTS } = await import("../lib/modelCatalogCore.ts");
+  assert.deepEqual(
+    connectedImageResearchProviders({
+      connectedProviders: ["google", "minimax", "mistral", "openai", "unlisted-provider", "zhipu"],
+      imageModelProviders: ["openai", "openai", "google"],
+      officialHosts: OFFICIAL_SOURCE_HOSTS,
+    }),
+    // A provider with no known documentation host is left out: its citation could never be checked.
+    ["minimax", "mistral", "zhipu"]
+  );
+  assert.deepEqual(
+    connectedImageResearchProviders({
+      connectedProviders: ["openai"],
+      imageModelProviders: ["openai"],
+      officialHosts: OFFICIAL_SOURCE_HOSTS,
+    }),
+    []
+  );
+});
+
 test("a connected-image proposal reads as a connected provider's model in the queue", async () => {
   const { acceptConnectedImageCandidates, newProviderResearchEvidence, newProviderResearchAnalysis } =
     await import("../lib/modelDiscoveryNewProviderResearchCore.ts");
@@ -264,7 +288,11 @@ test("the connected-image call has its own default-off switch", async () => {
   assert.equal(MODEL_DISCOVERY_CONNECTED_IMAGE_RESEARCH_ENV, "MODEL_DISCOVERY_CONNECTED_IMAGE_RESEARCH_ENABLED");
   // Only the literal "true" turns it on; without it no fourth call is made.
   assert.ok(runner.includes('env[MODEL_DISCOVERY_CONNECTED_IMAGE_RESEARCH_ENV]?.trim() === "true"'));
-  assert.match(runner, /= \{ ok: true, proposed: 0, accepted: \[\], rejected: \[\] \};\s*if \(connectedImageEnabled\) \{/);
+  // Nor when no connected provider is left to ask about.
+  assert.match(
+    runner,
+    /= \{ ok: true, proposed: 0, accepted: \[\], rejected: \[\] \};\s*if \(connectedImageEnabled && inputs\.imageResearchProviders\.length > 0\) \{/
+  );
 });
 
 test("research rows are never judged by the catalogue scan, so the vanished-ID exclusion cannot close them", async () => {
