@@ -715,6 +715,33 @@ test("revoking two private sources of one report leaves neither source's text in
   }
 });
 
+test("a report revision requested after a private source was revoked is synthesised normally, without the revoked source", async () => {
+  installFakes();
+  createFakeWeb();
+  const user = await createUser("revision-after-revoke");
+  const secret = await memory(user.id, "Revision memory with private detail");
+  const run = await create(user.id, { sources: [{ type: "memory", memoryItemId: secret.id }] });
+  await drainResearchWork("revision-after-revoke", 4);
+  assert.equal((await readResearchRunDto(user.id, run.id)).status, "completed");
+  await prisma.memoryItem.delete({ where: { id: secret.id } });
+  await recoverResearchEngine();
+  const before = await prisma.researchPreviewRun.findUniqueOrThrow({ where: { id: run.id } });
+  await requestResearchRevision({ request: fakeRequest(), userId: user.id, runId: run.id,
+    revision: { kind: "format", expectedReportRevision: before.currentReportRevision, sectionKeys: [], instruction: "Shorter, please." } });
+  await drainResearchWork("revision-after-revoke-2", 4);
+  const after = await prisma.researchPreviewRun.findUniqueOrThrow({ where: { id: run.id } });
+  assert.equal(after.status, "completed");
+  assert.ok(after.currentReportRevision > before.currentReportRevision);
+  const synthesis = await prisma.researchWorkItem.findFirstOrThrow({ where: { runId: run.id, idempotencyKey: `synth:${after.currentReportRevision}` } });
+  assert.equal(synthesis.status, "completed", "synthesis is not refused for a source that is already withheld");
+  const report = await readResearchReport({ userId: user.id, runId: run.id });
+  assert.ok(report.document.summary.includes("synthetic summary"), "the new revision has its own synthesis");
+  const revoked = (await prisma.researchSource.findFirstOrThrow({ where: { runId: run.id, visibility: "private" } })).sourceKey;
+  const current = await prisma.researchReportRevision.findUniqueOrThrow({ where: { runId_revision: { runId: run.id, revision: after.currentReportRevision } }, include: { claims: true } });
+  assert.ok(current.claims.every((claim) => !(claim.evidence as Array<{ sourceKey: string }>).some((evidence) => evidence.sourceKey === revoked)),
+    "claims withheld for the revoked source are not carried into the new revision");
+});
+
 test("evidence cleanup backs off through a long storage outage but never gives up", async () => {
   const fakes = installFakes();
   const objectKey = `research-evidence/outage/${randomUUID()}`;

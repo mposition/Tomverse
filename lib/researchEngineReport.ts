@@ -192,8 +192,9 @@ export function withholdRevokedSource(document: ResearchReportDocument,
     sections: document.sections.map((section, index) => ({ ...section,
       // A writer chooses its own heading after reading the section's claims; the plan's heading came before them.
       heading: labels.headings?.get(section.key)?.slice(0, 160) || `§ ${index + 1}`,
-      blocks: sawWithheld(section.key) ? rebuilt(section.key)
-        : section.blocks.map((block) => rests(block.claimKeys) ? { type: "paragraph" as const, text: labels.note, claimKeys: [] } : block) })),
+      ...(sawWithheld(section.key)
+        ? (() => { const blocks = rebuilt(section.key); return { blocks, status: blocks.length > 1 ? "written" as const : "missing" as const }; })()
+        : { blocks: section.blocks.map((block) => rests(block.claimKeys) ? { type: "paragraph" as const, text: labels.note, claimKeys: [] } : block) }) })),
     // Conflicts are written by the synthesis model, which read every claim.
     conflicts: [],
     limitations: [labels.note],

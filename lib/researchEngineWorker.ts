@@ -844,6 +844,10 @@ async function handleWriteSection(run: RunRow, item: ResearchWorkItem, fence: Re
 
 async function handleSynthesize(run: RunRow, item: ResearchWorkItem, fence: ResearchItemFence,
   payload: Extract<ResearchWorkPayload, { kind: "synthesize" }>, manifest: ResearchInputManifest, signal: AbortSignal) {
+  // Read before the report: a source revoked earlier is already withheld from what is read
+  // next and needs no grant; one revoked after this read is still re-checked below.
+  const revokedKeys = new Set((await prisma.researchSource.findMany({ where: { runId: run.id, visibility: "private", status: "revoked" },
+    select: { sourceKey: true } })).map((row) => row.sourceKey));
   const revision = await prisma.researchReportRevision.findUniqueOrThrow({ where: { runId_revision: { runId: run.id, revision: payload.reportRevision } } });
   const document = researchReportDocumentSchema.parse(revision.document);
   const claims = await prisma.researchClaim.findMany({ where: { revisionId: revision.id } });
@@ -853,7 +857,7 @@ async function handleSynthesize(run: RunRow, item: ResearchWorkItem, fence: Rese
   // source they cite immediately before sending them to the provider.
   const citedPrivate = new Set(claims.flatMap((claim) => (claim.evidence as Array<{ sourceKey: string }>).map((evidence) => evidence.sourceKey))
     .filter((key) => key.startsWith("P")));
-  const privateEntries = manifest.entries.filter((entry) => entry.type !== "url" &&
+  const privateEntries = manifest.entries.filter((entry) => entry.type !== "url" && !revokedKeys.has(entry.key) &&
     (citedPrivate.has(entry.key) || claims.some((claim) => claim.privateDerived))) as ResearchPrivateManifestEntry[];
   const result = await callResearchModel({ run, fence, role: "writer", purpose: "finalization", dispatchKey: dispatchKeyFor(item),
     ...(privateEntries.length ? { revalidate: async () =>
@@ -1164,8 +1168,12 @@ async function beginFinalization(tx: Prisma.TransactionClient, run: RunRow, mani
   // source a revocation could find, so it is never stored, new or carried.
   const unattributedPrivate = (claim: { privateDerived: boolean; evidence: unknown }) =>
     claim.privateDerived && !(claim.evidence as Array<{ sourceKey: string }>).length;
+  // A claim withheld for a revoked source is not carried either: nothing may cite it, and
+  // carrying it would make a later revocation pass rebuild sections whose writers never saw it.
+  const revokedKeys = new Set((await tx.researchSource.findMany({ where: { runId: run.id, visibility: "private", status: "revoked" },
+    select: { sourceKey: true } })).map((row) => row.sourceKey));
   for (const claim of parentClaims) {
-    if (unattributedPrivate(claim)) continue;
+    if (unattributedPrivate(claim) || (claim.evidence as Array<{ sourceKey: string }>).some((evidence) => revokedKeys.has(evidence.sourceKey))) continue;
     rows.push({ claimKey: claim.claimKey, sectionKey: claim.sectionKey, text: claim.text, kind: claim.kind, verification: claim.verification,
       privateDerived: claim.privateDerived, evidence: claim.evidence, checks: claim.checks ?? undefined });
     if (request?.kind === "refresh" || request?.kind === "conditions") needsVerify.push(rows.at(-1)!.claimKey);
