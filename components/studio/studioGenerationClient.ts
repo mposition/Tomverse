@@ -36,22 +36,40 @@ function postJson(path: string, body: object, signal: AbortSignal, method = "POS
   });
 }
 
-export function useStudioImageQuote(size: ImageSize, edit: boolean, enabled = true) {
-  const [result, setResult] = useState<{ key: string; quote?: StudioImageQuote; error?: number }>();
+type SizedStudioImageQuote = StudioImageQuote & { size: ImageSize };
+
+export async function loadStudioImageQuote(size: ImageSize, edit: boolean, signal: AbortSignal, fallbackSize?: ImageSize): Promise<SizedStudioImageQuote> {
+  const requestQuote = async (requestedSize: ImageSize) => {
+    const quote = await fetch("/api/studio/images?" + new URLSearchParams({ size: requestedSize, edit: String(edit) }), { signal, cache: "no-store" })
+      .then(readJson<StudioImageQuote>);
+    return { ...quote, size: requestedSize };
+  };
+  try {
+    return await requestQuote(size);
+  } catch (error) {
+    if (signal.aborted || !fallbackSize || fallbackSize === size || !(error instanceof StudioGenerationError) ||
+      error.status !== 503 || error.code !== "STUDIO_GENERATION_UNAVAILABLE") throw error;
+    return requestQuote(fallbackSize);
+  }
+}
+
+export function useStudioImageQuote(size: ImageSize, edit: boolean, enabled = true, fallbackSize?: ImageSize) {
+  const [result, setResult] = useState<{ key: string; quote?: SizedStudioImageQuote; error?: number }>();
   const [version, setVersion] = useState(0);
-  const key = [size, edit, version].join("/");
+  const key = [size, edit, fallbackSize, version].join("/");
   useEffect(() => {
     if (!enabled) return;
     const controller = new AbortController();
     const signal = controller.signal;
-    void fetch("/api/studio/images?" + new URLSearchParams({ size, edit: String(edit) }), { signal, cache: "no-store" })
-      .then(readJson<StudioImageQuote>)
-      .then(quote => setResult({ key, quote }))
+    void loadStudioImageQuote(size, edit, signal, fallbackSize)
+      .then(quote => {
+        if (!signal.aborted) setResult({ key, quote });
+      })
       .catch(error => {
         if (!signal.aborted) setResult({ key, error: error instanceof StudioGenerationError ? error.status : 503 });
       });
     return () => controller.abort();
-  }, [enabled, size, edit, key]);
+  }, [enabled, size, edit, fallbackSize, key]);
   return {
     quote: enabled && result?.key === key ? result.quote : undefined,
     error: enabled && result?.key === key ? result.error : undefined,
