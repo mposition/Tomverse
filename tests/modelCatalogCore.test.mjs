@@ -17,6 +17,7 @@ import {
   imageExecutionDrift,
   imageExecutionProfile,
   isOfficialSourceUrl,
+  codingModelPage,
   DEFAULT_CODING_CAPABILITY_SOURCES,
   DEFAULT_PRICE_SOURCES,
   defaultCodingCapabilitySources,
@@ -480,8 +481,14 @@ test("every chat draft provider has an official tool calling and structured outp
   assert.deepEqual(Object.keys(DEFAULT_CODING_CAPABILITY_SOURCES).sort(), [...draftProviders].sort());
   for (const [provider, sources] of Object.entries(DEFAULT_CODING_CAPABILITY_SOURCES)) {
     assert.notEqual(sources.toolCalling, sources.structuredOutput, provider);
-    for (const url of [sources.toolCalling, sources.structuredOutput]) assert.equal(isOfficialSourceUrl(provider, url), true, url);
+    for (const url of [sources.toolCalling, sources.structuredOutput, codingModelPage(sources, "model-1.5")]) {
+      assert.equal(isOfficialSourceUrl(provider, url), true, url);
+    }
   }
+  // A models page with a page per model names the API model id; an overview is the same for every model.
+  assert.equal(codingModelPage(DEFAULT_CODING_CAPABILITY_SOURCES.openai, "gpt-6.1-terra"), "https://developers.openai.com/api/docs/models/gpt-6.1-terra.md");
+  assert.equal(codingModelPage(DEFAULT_CODING_CAPABILITY_SOURCES.openai, "a/b"), "https://developers.openai.com/api/docs/models/a%2Fb.md");
+  assert.equal(codingModelPage(DEFAULT_CODING_CAPABILITY_SOURCES.anthropic, "claude-x"), DEFAULT_CODING_CAPABILITY_SOURCES.anthropic.models);
   assert.equal(defaultCodingCapabilitySources("toString"), null);
   assert.equal(defaultCodingCapabilitySources("openrouter"), null);
   // The hosts the capability pages need: the Claude docs path and Cohere's docs host.
@@ -1171,6 +1178,9 @@ test("coding notes: the answer is read to the limits, never cut, and the router 
   assert.match(CAPABILITY_TASK, /benchmark result/);
   assert.match(CAPABILITY_TASK, /never a claim\s+from general knowledge/);
   assert.match(CAPABILITY_TASK, /at most 120/);
+  // The notes stand first on the models page, and a guide that shows another model is not an absence for this one.
+  assert.match(CAPABILITY_TASK, /first on the models page/);
+  assert.match(CAPABILITY_TASK, /not its absence for this model/);
 
   // The stored shape holds the same limits.
   const ok = { strengths: ["a".repeat(120)], weaknesses: [], sources: pages, draftedAt: "2026-11-22" };
