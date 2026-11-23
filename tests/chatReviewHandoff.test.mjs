@@ -105,7 +105,7 @@ test("the same question with quote A or quote B carries no file detail at all", 
     assert.deepEqual(a, b);
     const serialised = JSON.stringify(a) + reviewPrefillHref(a.seed, "token");
     for (const leaked of ["quote.pdf", "att-a", "att-b", "application/pdf", "1200"]) {
-        assert.doesNotMatch(serialised, new RegExp(leaked.replace(".", "\.")));
+        assert.equal(serialised.includes(leaked), false, leaked);
     }
 });
 

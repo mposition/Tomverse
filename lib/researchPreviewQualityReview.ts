@@ -671,7 +671,7 @@ export function researchReviewVerdictTemplate(review: ResearchQualityReview) {
 
 const ratio = (n: number, d: number) => d ? `${n}/${d} (${Math.round((n / d) * 1000) / 10}%)` : `${n}/${d} (N/A)`;
 const usd = (micro: number | null) => micro === null ? "unknown" : `US$${(micro / 1_000_000).toFixed(6)}`;
-const cell = (value: unknown) => String(value ?? "").replace(/\|/g, "\\|").replace(/\s+/g, " ").slice(0, 220);
+const cell = (value: unknown) => String(value ?? "").replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/\s+/g, " ").slice(0, 220);
 
 export function renderResearchQualityReviewMarkdown(review: ResearchQualityReview) {
   const lines = ["# Research Preview quality review", "",
