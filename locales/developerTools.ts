@@ -99,14 +99,115 @@ export const developerToolsCopy = {
     }
 } satisfies Record<Language, Record<string, string>>;
 
+type EditorExtensionsCopy = {
+    menuTitle: string;
+    menuDescription: string;
+    guideTitle: string;
+    description: string;
+    mobileDescription: string;
+    sharedKey: string;
+    installAction: string;
+    vscode: readonly [requirements: string, install: string, open: string];
+    visualStudio: readonly [requirements: string, install: string, open: string];
+};
+
+export const editorExtensionsCopy = {
+    en: {
+        menuTitle: "Editor extensions",
+        menuDescription: "Install for VS Code or Visual Studio",
+        guideTitle: "VS Code guide",
+        description: "Use Tomverse in VS Code and Visual Studio. Ask about your code, then review and approve the file changes and commands Agent proposes.",
+        mobileDescription: "Ask about your code. Review and approve Agent’s file changes and commands.",
+        sharedKey: "Use one Tomverse API key to connect both extensions.",
+        installAction: "Install from Marketplace",
+        vscode: ["VS Code Desktop 1.146 or later · Local workspace", "After installation, open the Tomverse sidebar.", "Connect your Tomverse API key in the sidebar."],
+        visualStudio: ["Visual Studio 2022 / 2026 · Windows x64", "Close all Visual Studio windows to start installation.", "After installation, reopen Visual Studio and go to Tools → Tomverse."],
+    },
+    ko: {
+        menuTitle: "에디터 확장",
+        menuDescription: "VS Code · Visual Studio 설치",
+        guideTitle: "VS Code 사용 안내",
+        description: "VS Code와 Visual Studio에서 Tomverse를 사용하세요. Ask로 코드를 묻고, Agent가 제안한 파일 변경과 명령은 검토한 뒤 승인할 수 있습니다.",
+        mobileDescription: "Ask로 코드를 묻고, Agent의 파일 변경과 명령은 검토한 뒤 승인하세요.",
+        sharedKey: "Tomverse API 키 하나로 두 확장을 연결할 수 있습니다.",
+        installAction: "Marketplace에서 설치",
+        vscode: ["VS Code Desktop 1.146 이상 · 로컬 작업공간", "설치한 뒤 Tomverse 사이드바를 여세요.", "사이드바에서 Tomverse API 키를 연결하세요."],
+        visualStudio: ["Visual Studio 2022 / 2026 · Windows x64", "Visual Studio 창을 모두 닫으면 설치가 진행됩니다.", "설치 후 다시 열고 도구 → Tomverse로 이동하세요."],
+    },
+    zh: {
+        menuTitle: "编辑器扩展",
+        menuDescription: "安装到 VS Code 或 Visual Studio",
+        guideTitle: "VS Code 使用指南",
+        description: "在 VS Code 和 Visual Studio 中使用 Tomverse。用 Ask 提问，并在批准前审查 Agent 提议的文件更改和命令。",
+        mobileDescription: "用 Ask 提问。审查并批准 Agent 的文件更改和命令。",
+        sharedKey: "一个 Tomverse API 密钥即可连接两个扩展。",
+        installAction: "从 Marketplace 安装",
+        vscode: ["VS Code 桌面版 1.146 或更高版本 · 本地工作区", "安装后打开 Tomverse 侧栏。", "在侧栏中连接 Tomverse API 密钥。"],
+        visualStudio: ["Visual Studio 2022 / 2026 · Windows x64", "关闭所有 Visual Studio 窗口后开始安装。", "安装后重新打开 Visual Studio，选择工具 → Tomverse。"],
+    },
+    "zh-Hant": {
+        menuTitle: "編輯器擴充功能",
+        menuDescription: "安裝到 VS Code 或 Visual Studio",
+        guideTitle: "VS Code 使用指南",
+        description: "在 VS Code 和 Visual Studio 中使用 Tomverse。用 Ask 提問，並在核准前檢查 Agent 提出的檔案變更和命令。",
+        mobileDescription: "用 Ask 提問。檢查並核准 Agent 的檔案變更和命令。",
+        sharedKey: "一組 Tomverse API 金鑰即可連接兩個擴充功能。",
+        installAction: "從 Marketplace 安裝",
+        vscode: ["VS Code 桌面版 1.146 以上 · 本機工作區", "安裝後開啟 Tomverse 側邊欄。", "在側邊欄連接 Tomverse API 金鑰。"],
+        visualStudio: ["Visual Studio 2022 / 2026 · Windows x64", "關閉所有 Visual Studio 視窗後開始安裝。", "安裝後重新開啟 Visual Studio，選擇工具 → Tomverse。"],
+    },
+    fr: {
+        menuTitle: "Extensions d’éditeur",
+        menuDescription: "Installer pour VS Code ou Visual Studio",
+        guideTitle: "Guide VS Code",
+        description: "Utilisez Tomverse dans VS Code et Visual Studio. Posez vos questions avec Ask, puis vérifiez et approuvez les modifications de fichiers et les commandes proposées par Agent.",
+        mobileDescription: "Posez vos questions avec Ask. Vérifiez et approuvez les modifications et les commandes d’Agent.",
+        sharedKey: "Une seule clé API Tomverse permet de connecter les deux extensions.",
+        installAction: "Installer depuis Marketplace",
+        vscode: ["VS Code Desktop 1.146 ou ultérieur · Espace de travail local", "Après l’installation, ouvrez la barre latérale Tomverse.", "Connectez votre clé API Tomverse dans la barre latérale."],
+        visualStudio: ["Visual Studio 2022 / 2026 · Windows x64", "Fermez toutes les fenêtres de Visual Studio pour lancer l’installation.", "Une fois l’installation terminée, rouvrez Visual Studio et choisissez Outils → Tomverse."],
+    },
+    de: {
+        menuTitle: "Editor-Erweiterungen",
+        menuDescription: "Für VS Code oder Visual Studio installieren",
+        guideTitle: "VS Code-Anleitung",
+        description: "Nutzen Sie Tomverse in VS Code und Visual Studio. Stellen Sie mit Ask Fragen zum Code und prüfen und genehmigen Sie die von Agent vorgeschlagenen Dateiänderungen und Befehle.",
+        mobileDescription: "Stellen Sie mit Ask Fragen zum Code. Prüfen und genehmigen Sie die Änderungen und Befehle von Agent.",
+        sharedKey: "Mit einem Tomverse-API-Schlüssel können Sie beide Erweiterungen verbinden.",
+        installAction: "Aus dem Marketplace installieren",
+        vscode: ["VS Code Desktop 1.146 oder höher · Lokaler Arbeitsbereich", "Öffnen Sie nach der Installation die Tomverse-Seitenleiste.", "Verbinden Sie Ihren Tomverse-API-Schlüssel in der Seitenleiste."],
+        visualStudio: ["Visual Studio 2022 / 2026 · Windows x64", "Schließen Sie alle Visual-Studio-Fenster, um die Installation zu starten.", "Öffnen Sie nach der Installation Visual Studio erneut und wählen Sie Extras → Tomverse."],
+    },
+    es: {
+        menuTitle: "Extensiones de editor",
+        menuDescription: "Instalar en VS Code o Visual Studio",
+        guideTitle: "Guía de VS Code",
+        description: "Usa Tomverse en VS Code y Visual Studio. Haz preguntas sobre tu código con Ask y revisa los cambios de archivos y los comandos que propone Agent antes de aprobarlos.",
+        mobileDescription: "Pregunta por tu código con Ask. Revisa y aprueba los cambios y comandos de Agent.",
+        sharedKey: "Usa una sola clave API de Tomverse para conectar ambas extensiones.",
+        installAction: "Instalar desde Marketplace",
+        vscode: ["VS Code Desktop 1.146 o posterior · Espacio de trabajo local", "Tras la instalación, abre la barra lateral de Tomverse.", "Conecta tu clave API de Tomverse en la barra lateral."],
+        visualStudio: ["Visual Studio 2022 / 2026 · Windows x64", "Cierra todas las ventanas de Visual Studio para iniciar la instalación.", "Después de instalar, vuelve a abrir Visual Studio y ve a Herramientas → Tomverse."],
+    },
+    pt: {
+        menuTitle: "Extensões de editor",
+        menuDescription: "Instalar no VS Code ou no Visual Studio",
+        guideTitle: "Guia do VS Code",
+        description: "Use o Tomverse no VS Code e no Visual Studio. Tire dúvidas sobre seu código com Ask e revise as alterações em arquivos e os comandos que Agent propõe antes de aprová-los.",
+        mobileDescription: "Tire dúvidas sobre seu código com Ask. Revise e aprove as alterações e os comandos de Agent.",
+        sharedKey: "Use uma única chave de API do Tomverse para conectar as duas extensões.",
+        installAction: "Instalar pelo Marketplace",
+        vscode: ["VS Code Desktop 1.146 ou posterior · Espaço de trabalho local", "Após instalar, abra a barra lateral do Tomverse.", "Conecte sua chave de API do Tomverse na barra lateral."],
+        visualStudio: ["Visual Studio 2022 / 2026 · Windows x64", "Feche todas as janelas do Visual Studio para iniciar a instalação.", "Após instalar, reabra o Visual Studio e acesse Ferramentas → Tomverse."],
+    },
+} satisfies Record<Language, EditorExtensionsCopy>;
+
 type VscodeGuideCopy = {
     title: readonly [string, string];
-    description: string;
     steps: readonly [string, string][];
     supportTitle: string;
     support: readonly [string, string, string, string];
     createKey: string;
-    availability: string;
     mock: {
         proposal: string;
         model: string;
@@ -124,9 +225,8 @@ type VscodeGuideCopy = {
 export const vscodeGuideCopy = {
     en: {
         title: ["Stay in your editor.", "Approved edits only"],
-        description: "Ask about your project in the VS Code sidebar. Review file edits and commands one at a time before approving them. It works with one Tomverse API key, with no Copilot or other AI extension required.",
         steps: [
-            ["Install from VSIX", "Run Extensions: Install from VSIX in VS Code and choose the file you received. No CLI or other AI extension is required."],
+            ["Install the extension", "Install from Marketplace. If you already have a VSIX file, use Extensions: Install from VSIX to install it."],
             ["Connect your API key", "Select Connect API key in the Tomverse sidebar and enter your key. The key stays in VS Code SecretStorage."],
             ["Ask questions. Edit with Agent.", "Attach files, a selection, or diagnostics. Ask is read-only. Agent requests approval for each edit and command."],
             ["Track costs and undo changes", "See the credits spent on each request in the sidebar. Undo changes made by the extension one at a time."],
@@ -134,7 +234,6 @@ export const vscodeGuideCopy = {
         supportTitle: "Compatibility",
         support: ["VS Code Desktop 1.146 or later", "Windows x64 verified", "macOS arm64 and Linux x64 verification pending", "Remote, WSL, containers and web unsupported"],
         createKey: "Create an API key",
-        availability: "The stable VSIX is available from GitHub Releases.",
         mock: {
             proposal: "Tomverse proposal",
             model: "Smart Adaptive",
@@ -150,9 +249,8 @@ export const vscodeGuideCopy = {
     },
     ko: {
         title: ["에디터를 떠나지 않고,", "승인한 변경만."],
-        description: "VS Code 사이드바에서 프로젝트를 묻고, 파일 수정과 명령은 하나씩 확인한 뒤 승인합니다. Tomverse API 키 하나로 동작하고 Copilot이나 다른 AI 확장은 필요 없습니다.",
         steps: [
-            ["VSIX로 설치", "VS Code에서 Extensions: Install from VSIX를 실행하고 받은 파일을 고릅니다. CLI나 다른 AI 확장은 필요 없습니다."],
+            ["확장 설치", "Marketplace에서 설치합니다. VSIX 파일을 이미 받았다면 Extensions: Install from VSIX로 설치할 수 있습니다."],
             ["API 키 연결", "Tomverse 사이드바에서 API 키 연결을 누르고 키를 입력합니다. 키는 VS Code의 보안 저장소에만 남습니다."],
             ["Ask로 묻고, Agent로 고칩니다", "파일·선택 영역·진단을 첨부합니다. Ask는 읽기만 하고, Agent는 수정과 명령마다 승인을 받습니다."],
             ["비용과 되돌리기", "요청마다 쓴 크레딧이 사이드바에 남고, 확장이 만든 변경은 하나씩 되돌릴 수 있습니다."],
@@ -160,7 +258,6 @@ export const vscodeGuideCopy = {
         supportTitle: "지원 범위",
         support: ["VS Code Desktop 1.146 이상", "Windows x64 검증", "macOS arm64 · Linux x64 검증 예정", "원격·WSL·컨테이너·웹 미지원"],
         createKey: "API 키 만들기",
-        availability: "정식 VSIX는 GitHub Releases에서 받을 수 있습니다.",
         mock: {
             proposal: "Tomverse 제안",
             model: "스마트 자동",
@@ -176,9 +273,8 @@ export const vscodeGuideCopy = {
     },
     zh: {
         title: ["无需离开编辑器，", "只做已批准的更改。"],
-        description: "在 VS Code 侧栏中询问项目相关问题，逐项查看文件修改和命令后再批准。只需一个 Tomverse API 密钥，无需 Copilot 或其他 AI 扩展。",
         steps: [
-            ["从 VSIX 安装", "在 VS Code 中运行 Extensions: Install from VSIX 并选择收到的文件。无需 CLI 或其他 AI 扩展。"],
+            ["安装扩展", "从 Marketplace 安装。若已有 VSIX 文件，可使用 Extensions: Install from VSIX 安装。"],
             ["连接 API 密钥", "在 Tomverse 侧栏中选择连接 API 密钥并输入密钥。密钥仅保存在 VS Code 的安全存储中。"],
             ["用 Ask 提问，用 Agent 修改", "附加文件、选区或诊断。Ask 为只读模式，Agent 会为每项修改和命令请求批准。"],
             ["查看费用并撤销更改", "每次请求消耗的额度都记录在侧栏中。可以逐一撤销扩展所做的更改。"],
@@ -186,7 +282,6 @@ export const vscodeGuideCopy = {
         supportTitle: "支持范围",
         support: ["VS Code Desktop 1.146 或更高版本", "Windows x64 已验证", "macOS arm64 和 Linux x64 待验证", "不支持远程、WSL、容器和网页"],
         createKey: "创建 API 密钥",
-        availability: "正式版 VSIX 可在 GitHub Releases 下载。",
         mock: {
             proposal: "Tomverse 建议",
             model: "智能自动",
@@ -202,9 +297,8 @@ export const vscodeGuideCopy = {
     },
     "zh-Hant": {
         title: ["無需離開編輯器，", "只做已核准的變更。"],
-        description: "在 VS Code 側邊欄詢問專案相關問題，逐項檢視檔案修改和命令後再核准。只需一個 Tomverse API 金鑰，無需 Copilot 或其他 AI 擴充功能。",
         steps: [
-            ["從 VSIX 安裝", "在 VS Code 中執行 Extensions: Install from VSIX 並選取收到的檔案。無需 CLI 或其他 AI 擴充功能。"],
+            ["安裝擴充功能", "從 Marketplace 安裝。若已有 VSIX 檔案，可使用 Extensions: Install from VSIX 安裝。"],
             ["連接 API 金鑰", "在 Tomverse 側邊欄選取連接 API 金鑰並輸入金鑰。金鑰只會保存在 VS Code 的安全儲存空間。"],
             ["用 Ask 提問，用 Agent 修改", "附加檔案、選取範圍或診斷。Ask 為唯讀模式，Agent 會為每項修改和命令請求核准。"],
             ["查看費用並復原變更", "每次請求消耗的額度都記錄在側邊欄中。可以逐一復原擴充功能所做的變更。"],
@@ -212,7 +306,6 @@ export const vscodeGuideCopy = {
         supportTitle: "支援範圍",
         support: ["VS Code Desktop 1.146 或更新版本", "Windows x64 已驗證", "macOS arm64 和 Linux x64 待驗證", "不支援遠端、WSL、容器和網頁"],
         createKey: "建立 API 金鑰",
-        availability: "正式版 VSIX 可在 GitHub Releases 下載。",
         mock: {
             proposal: "Tomverse 建議",
             model: "智慧自動",
@@ -228,9 +321,8 @@ export const vscodeGuideCopy = {
     },
     fr: {
         title: ["Restez dans votre éditeur.", "Validez chaque changement."],
-        description: "Posez vos questions sur le projet dans la barre latérale de VS Code. Examinez chaque modification de fichier et chaque commande avant de donner votre accord. Une clé API Tomverse suffit, sans Copilot ni autre extension d’IA.",
         steps: [
-            ["Installer depuis un VSIX", "Exécutez Extensions: Install from VSIX dans VS Code et sélectionnez le fichier reçu. Aucun CLI ni autre extension d’IA n’est nécessaire."],
+            ["Installer l’extension", "Installez l’extension depuis Marketplace. Si vous avez déjà un fichier VSIX, utilisez Extensions: Install from VSIX."],
             ["Connecter votre clé API", "Dans la barre latérale Tomverse, choisissez de connecter une clé API, puis saisissez-la. Elle reste dans le stockage sécurisé de VS Code."],
             ["Interroger avec Ask, modifier avec Agent", "Joignez des fichiers, une sélection ou des diagnostics. Ask est en lecture seule. Agent demande votre accord pour chaque modification et commande."],
             ["Suivre les coûts et annuler des modifications", "Les crédits utilisés pour chaque requête figurent dans la barre latérale. Annulez les modifications de l’extension une par une."],
@@ -238,7 +330,6 @@ export const vscodeGuideCopy = {
         supportTitle: "Compatibilité",
         support: ["VS Code Desktop 1.146 ou ultérieur", "Windows x64 vérifié", "macOS arm64 et Linux x64 à vérifier", "Distant, WSL, conteneurs et web non pris en charge"],
         createKey: "Créer une clé API",
-        availability: "Le VSIX de la version stable est disponible dans GitHub Releases.",
         mock: {
             proposal: "Proposition Tomverse",
             model: "Smart Adaptive",
@@ -254,9 +345,8 @@ export const vscodeGuideCopy = {
     },
     de: {
         title: ["Bleiben Sie im Editor.", "Nur genehmigte Änderungen."],
-        description: "Stellen Sie Fragen zu Ihrem Projekt in der VS Code-Seitenleiste. Prüfen Sie jede Dateiänderung und jeden Befehl, bevor Sie sie genehmigen. Ein Tomverse-API-Schlüssel genügt, ganz ohne Copilot oder andere KI-Erweiterungen.",
         steps: [
-            ["Aus einer VSIX installieren", "Führen Sie in VS Code Extensions: Install from VSIX aus und wählen Sie die erhaltene Datei. Eine CLI oder eine weitere KI-Erweiterung ist nicht erforderlich."],
+            ["Erweiterung installieren", "Installieren Sie die Erweiterung aus dem Marketplace. Wenn Sie bereits eine VSIX-Datei haben, verwenden Sie Extensions: Install from VSIX."],
             ["API-Schlüssel verbinden", "Wählen Sie in der Tomverse-Seitenleiste die Option zum Verbinden eines API-Schlüssels und geben Sie ihn ein. Er bleibt im sicheren Speicher von VS Code."],
             ["Mit Ask fragen, mit Agent ändern", "Fügen Sie Dateien, eine Auswahl oder Diagnosen an. Ask hat nur Lesezugriff. Agent fragt bei jeder Änderung und jedem Befehl nach Zustimmung."],
             ["Kosten prüfen und Änderungen rückgängig machen", "Die Seitenleiste zeigt die verbrauchten Credits pro Anfrage. Änderungen der Erweiterung lassen sich einzeln rückgängig machen."],
@@ -264,7 +354,6 @@ export const vscodeGuideCopy = {
         supportTitle: "Kompatibilität",
         support: ["VS Code Desktop ab 1.146", "Windows x64 geprüft", "macOS arm64 und Linux x64 noch zu prüfen", "Kein Remote-, WSL-, Container- oder Web-Support"],
         createKey: "API-Schlüssel erstellen",
-        availability: "Die stabile VSIX-Datei ist über GitHub Releases verfügbar.",
         mock: {
             proposal: "Tomverse-Vorschlag",
             model: "Smart Adaptive",
@@ -280,9 +369,8 @@ export const vscodeGuideCopy = {
     },
     es: {
         title: ["Sin salir del editor.", "Solo cambios aprobados."],
-        description: "Haz preguntas sobre tu proyecto en la barra lateral de VS Code. Revisa cada cambio de archivo y cada comando antes de aprobarlos. Solo necesitas una clave API de Tomverse, sin Copilot ni otras extensiones de IA.",
         steps: [
-            ["Instalar desde VSIX", "Ejecuta Extensions: Install from VSIX en VS Code y selecciona el archivo recibido. No necesitas una CLI ni otra extensión de IA."],
+            ["Instalar la extensión", "Instala desde Marketplace. Si ya tienes un archivo VSIX, puedes instalarlo con Extensions: Install from VSIX."],
             ["Conectar tu clave API", "Selecciona Conectar clave API en la barra lateral de Tomverse e introdúcela. La clave se guarda en el almacenamiento seguro de VS Code."],
             ["Pregunta con Ask y edita con Agent", "Adjunta archivos, una selección o diagnósticos. Ask es de solo lectura. Agent pide aprobación para cada cambio y comando."],
             ["Controlar los costes y deshacer cambios", "Consulta los créditos utilizados por solicitud en la barra lateral. Deshaz uno por uno los cambios realizados por la extensión."],
@@ -290,7 +378,6 @@ export const vscodeGuideCopy = {
         supportTitle: "Compatibilidad",
         support: ["VS Code Desktop 1.146 o posterior", "Windows x64 verificado", "macOS arm64 y Linux x64 pendientes", "Remoto, WSL, contenedores y web no compatibles"],
         createKey: "Crear una clave API",
-        availability: "El VSIX de la versión estable está disponible en GitHub Releases.",
         mock: {
             proposal: "Propuesta de Tomverse",
             model: "Smart Adaptive",
@@ -306,9 +393,8 @@ export const vscodeGuideCopy = {
     },
     pt: {
         title: ["Sem sair do editor.", "Só as mudanças aprovadas."],
-        description: "Faça perguntas sobre o projeto na barra lateral do VS Code. Revise cada alteração de arquivo e cada comando antes de aprovar. Basta uma chave de API do Tomverse, sem precisar do Copilot ou de outra extensão de IA.",
         steps: [
-            ["Instalar pelo VSIX", "Execute Extensions: Install from VSIX no VS Code e selecione o arquivo recebido. Não é preciso ter uma CLI nem outra extensão de IA."],
+            ["Instalar a extensão", "Instale pelo Marketplace. Se você já tem um arquivo VSIX, pode instalá-lo com Extensions: Install from VSIX."],
             ["Conectar sua chave de API", "Na barra lateral do Tomverse, selecione Conectar chave de API e digite a chave. Ela fica no armazenamento seguro do VS Code."],
             ["Pergunte com Ask e edite com Agent", "Anexe arquivos, uma seleção ou diagnósticos. Ask é somente leitura. Agent pede aprovação para cada alteração e comando."],
             ["Acompanhar custos e desfazer alterações", "Os créditos gastos em cada solicitação aparecem na barra lateral. Desfaça uma a uma as alterações feitas pela extensão."],
@@ -316,7 +402,6 @@ export const vscodeGuideCopy = {
         supportTitle: "Compatibilidade",
         support: ["VS Code Desktop 1.146 ou posterior", "Windows x64 testado", "macOS arm64 e Linux x64 ainda em validação", "Sem suporte a remoto, WSL, contêineres ou web"],
         createKey: "Criar uma chave de API",
-        availability: "O VSIX da versão estável está disponível no GitHub Releases.",
         mock: {
             proposal: "Proposta do Tomverse",
             model: "Smart Adaptive",
