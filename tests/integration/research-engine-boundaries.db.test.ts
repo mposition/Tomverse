@@ -6,7 +6,7 @@ import {
   amendResearchScope, approveResearchPlan, cancelResearchRun, createResearchRun, deleteResearchRun, finishResearchNow, pauseResearchRun, readResearchRunDto,
   requestResearchRevision, resumeResearchRun,
 } from "@/lib/researchEngineService";
-import { drainResearchWork, processOneResearchWorkItem } from "@/lib/researchEngineWorker";
+import { drainResearchWork, processOneResearchWorkItem, revokePrivateSource } from "@/lib/researchEngineWorker";
 import {
   beginResearchDispatch, claimNextResearchWorkItem, claimResearchFundingRoom, readResearchRunMoney, RESEARCH_ITEM_LEASE_MS, ResearchFundingRoomError,
 } from "@/lib/researchEngineStore";
@@ -618,6 +618,36 @@ test("a private copy stops being served once its original is deleted after the r
   await drainResearchEvidenceCleanup();
   assert.ok(keysB.every((key) => !fakes.store.objects.has(key)), "the swept copy is deleted");
   assert.equal(await prisma.researchEvidenceObjectCleanup.count({ where: { objectKey: { in: keysB } } }), 0);
+});
+
+test("a private source revoked while its analysis is in flight never comes back through the late result or the report built after it", async () => {
+  const user = await createUser("inflight-revoke");
+  const secret = await memory(user.id, "In-flight memory naming project HELIOTROPE-7 budget");
+  let revokedDuringCall = false;
+  installFakes({ model: createFakeModel({ beforeRespond: async (call) => {
+    if (call.tool !== "submit_research_private_analysis" || revokedDuringCall) return;
+    revokedDuringCall = true;
+    // The dispatch was sent with a valid grant; the original is deleted and revoked before it answers.
+    await prisma.memoryItem.delete({ where: { id: secret.id } });
+    const runRow = await prisma.researchPreviewRun.findFirstOrThrow({ where: { userId: user.id, engineVersion: 2 } });
+    const source = await prisma.researchSource.findFirstOrThrow({ where: { runId: runRow.id, visibility: "private" } });
+    await revokePrivateSource(runRow, source.id);
+  } }) });
+  createFakeWeb();
+  const run = await create(user.id, { sources: [{ type: "memory", memoryItemId: secret.id }] });
+  await drainResearchWork("inflight-revoke", 4);
+  assert.ok(revokedDuringCall, "the revocation happened while the analysis was in flight");
+  assert.equal((await readResearchRunDto(user.id, run.id)).status, "completed");
+  const analyses = JSON.stringify((await prisma.researchWorkItem.findMany({ where: { runId: run.id, kind: "analyze_private" } })).map((item) => item.result));
+  assert.ok(!analyses.includes("HELIOTROPE"), "the late analysis result was not stored with its quote");
+  const claims = await prisma.researchClaim.findMany({ where: { runId: run.id } });
+  assert.ok(claims.every((claim) => !claim.text.includes("Private note from")), "no claim keeps text derived from the revoked source");
+  const report = JSON.stringify(await readResearchReport({ userId: user.id, runId: run.id }));
+  const answer = (await prisma.message.findUniqueOrThrow({ where: { id: (await prisma.researchPreviewRun.findUniqueOrThrow({ where: { id: run.id } })).assistantMessageId } })).content;
+  for (const leaked of ["HELIOTROPE", "Private note from"]) {
+    assert.ok(!report.includes(leaked), `report: ${leaked}`);
+    assert.ok(!answer.includes(leaked), `answer: ${leaked}`);
+  }
 });
 
 test("evidence cleanup backs off through a long storage outage but never gives up", async () => {
