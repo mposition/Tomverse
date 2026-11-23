@@ -14,6 +14,7 @@ import {
 import type { DmToolSummary } from "./decisionMakerLauncherCore.ts";
 import { DM_SYSTEM_HOST, dmCleanupVendor, type DmLauncherHost } from "./decisionMakerLauncherFs.ts";
 import { launchDecisionMaker, type DmLaunchOptions } from "./decisionMakerLauncherProcess.ts";
+import type { DmDependencySummary } from "./decisionMakerWorkCopy.ts";
 import { dmCloseStream, dmReadLine, dmWriteLine } from "./decisionMakerSocketLine.ts";
 import type { DmInstanceScope } from "./decisionMakerSwitchCore.ts";
 
@@ -59,7 +60,15 @@ export type DmLauncherServeOptions = {
  * did (lib/amux/decisionMakerLauncherCore.ts `dmToolSummary`).
  */
 export type DmLauncherServed =
-  | { answered: "launched"; requestId: string; outcome: string; cleanup: string; tools: DmToolSummary | null }
+  | {
+      answered: "launched";
+      requestId: string;
+      outcome: string;
+      cleanup: string;
+      tools: DmToolSummary | null;
+      /** What the launcher installed in the work directory (lib/amux/decisionMakerWorkCopy.ts), codes only. */
+      dependencies: DmDependencySummary | null;
+    }
   | { answered: "rejected"; error: DmLauncherProtocolError; cleanup: string }
   | { answered: "not_ready" };
 
@@ -104,6 +113,7 @@ export async function serveDecisionMakerLauncherConnection(
       outcome: report.result.outcome,
       cleanup: report.cleanup.status,
       tools: report.tools ?? null,
+      dependencies: report.dependencies ?? null,
     };
   } finally {
     await dmCloseStream(stream, DM_LINE_WRITE_TIMEOUT_MS);

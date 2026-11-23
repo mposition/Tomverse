@@ -43,7 +43,7 @@ const makeTempRoot = () => mkdtempSync(join(tmpdir(), "amux-dm-workspace-"));
 import { createDecisionMakerBroker, dmSystemdListenFd } from "../lib/amux/decisionMakerBroker.ts";
 import { dmEncodeLauncherLaunched, dmEncodeLauncherReady } from "../lib/amux/decisionMakerBrokerCore.ts";
 import { dmPayloadDigest, dmResultDigest } from "../lib/amux/decisionMakerBodyCore.ts";
-import { DM_REQUEST_ROOT } from "../lib/amux/decisionMakerLauncherCore.ts";
+import { DM_REQUEST_ROOT, dmRequestPaths } from "../lib/amux/decisionMakerLauncherCore.ts";
 import {
   DM_REQUEST_DIRECTORY_MODE,
   dmCreateRequestDirectory,
@@ -380,14 +380,21 @@ process.stdout.write(${JSON.stringify(JSON.stringify({ type: "result", subtype: 
       launch: { outcome: "output", reasons: [] },
       cleanup: VERIFIED,
     });
-    // The process received the exact bytes the intent recorded, in the broker's directory.
+    // The process received the exact bytes the intent recorded, in the vendor account's copy of the broker's directory.
     const stdin = readFileSync(broker.fixture.at("/observed/stdin"));
     assert.deepEqual(stdin, PAYLOAD);
     assert.equal(dmPayloadDigest(REQUEST_KEY, stdin), broker.fixture.evidence.inputPayloadDigest);
-    assert.equal(readFileSync(broker.fixture.at("/observed/cwd"), "utf8"), broker.requestDirectory());
+    assert.equal(
+      readFileSync(broker.fixture.at("/observed/cwd"), "utf8"),
+      broker.fixture.at(dmRequestPaths(ANTHROPIC, REQUEST_ID).workDirectory),
+    );
     assert.equal(existsSync(broker.requestDirectory()), false);
-    // claude's JSON result carries no tool events, so there is nothing to count.
-    assert.deepEqual(broker.served, [{ answered: "launched", requestId: REQUEST_ID, outcome: "output", cleanup: "verified", tools: null }]);
+    assert.equal(existsSync(broker.fixture.at(dmRequestPaths(ANTHROPIC, REQUEST_ID).temporaryDirectory)), false);
+    // claude's JSON result carries no tool events, so there is nothing to count; the request has no repo/ to install.
+    assert.deepEqual(broker.served, [{
+      answered: "launched", requestId: REQUEST_ID, outcome: "output", cleanup: "verified", tools: null,
+      dependencies: { proc: false, trees: {} },
+    }]);
     // The broker's log has codes, not the output, the payload or the key.
     const logged = JSON.stringify(broker.logs);
     assert.equal(broker.logs.length, 1);

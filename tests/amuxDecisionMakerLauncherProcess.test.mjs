@@ -16,7 +16,7 @@
 // group and killing it needs POSIX.
 
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statfsSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -54,10 +54,11 @@ touch(process.env.HOME + "/.cache/claude/model-catalog/x.json", "{}");
 touch(process.env.HOME + "/.local/state/claude/locks/2.1.296.lock", "");`;
 
 const writeOutput = (value) => `touch(argv[argv.indexOf("-o") + 1], ${JSON.stringify(JSON.stringify(value))});`;
-/** The result and cleanup alone: the tool summary has its own test. */
+/** The result and cleanup alone: the tool and dependency summaries have their own tests. */
 const withoutTools = (value) => {
   const rest = { ...value };
   delete rest.tools;
+  delete rest.dependencies;
   return rest;
 };
 const events = (...list) => `process.stdout.write(${JSON.stringify(list.map((event) => JSON.stringify(event)).join("\n") + "\n")});`;
@@ -70,7 +71,7 @@ const claudeResult = (overrides = {}) =>
  * One request as the broker would run it: the launcher, then the broker's own
  * cleanup of the request directory, whatever the launcher returned.
  */
-const run = async (instance, body, { input = {}, options = {}, mode, prepare, mutate } = {}) => {
+const run = async (instance, body, { input = {}, options = {}, mode, prepare, mutate, afterLaunch } = {}) => {
   const fixture = makeLauncherFixture(instance, { executable: (root) => fakeCli(root, body), executableMode: mode });
   try {
     prepare?.(fixture);
@@ -83,10 +84,11 @@ const run = async (instance, body, { input = {}, options = {}, mode, prepare, mu
     });
     mutate?.(launchInput);
     const report = await pending;
+    afterLaunch?.(fixture);
     const requestCleanup = dmCleanupRequestDirectory(fixture.host, instance, REQUEST_ID);
     // Read before dispose() removes the fixture.
     const files = Object.fromEntries(
-      ["started", "argv.json", "env.json", "cwd", "stdin", "grandchild.pid", "self.pid"].map((name) => {
+      ["started", "argv.json", "env.json", "cwd", "stdin", "grandchild.pid", "self.pid", "copy", "jail", "guide", "prefix", "jail-script"].map((name) => {
         const path = fixture.at(`/observed/${name}`);
         return [name, existsSync(path) ? readFileSync(path) : null];
       }),
@@ -266,6 +268,8 @@ test("codex: the planned command runs with the fixed environment and the questio
     result: { outcome: "output", raw: JSON.stringify(select) },
     cleanup: VERIFIED,
     tools: { commands: 1, failedCommands: 0, toolErrors: 1 },
+    // No repo/ in this request: nothing to install. The test host's jail has no /proc.
+    dependencies: { proc: false, trees: {} },
   });
   assert.deepEqual(result.requestCleanup, VERIFIED);
   const planned = dmExecutionPlan(OPENAI, REQUEST_ID);
@@ -279,9 +283,11 @@ test("codex: the planned command runs with the fixed environment and the questio
     GIT_CONFIG_GLOBAL: "/dev/null",
     GIT_CONFIG_PARAMETERS: "'safe.directory=*'",
     GIT_OPTIONAL_LOCKS: "0",
+    TMPDIR: `/home/amux-dm-openai/dm-scratch/${REQUEST_ID}/work/.amux-tmp`,
   });
   assert.deepEqual(result.observed("stdin"), PAYLOAD);
-  assert.equal(result.observed("cwd").toString().endsWith(`/var/lib/amux-dm/requests/${REQUEST_ID}`), true);
+  // §5a: the CLI works in the account's own copy of the request directory.
+  assert.equal(result.observed("cwd").toString().endsWith(`/home/amux-dm-openai/dm-scratch/${REQUEST_ID}/work`), true);
   assert.deepEqual(result.home, [".codex/", ".codex/auth.json", "dm-scratch/"]);
   assert.equal(result.requestGone && result.temporaryGone, true);
 });
@@ -290,8 +296,8 @@ test("claude: structured_output is the result; the account's state is gone after
   const result = await run(ANTHROPIC, recording(`${CLAUDE_STATE}\n${claudeResult()}`));
   assert.deepEqual(withoutTools(result.report), { result: { outcome: "output", raw: JSON.stringify(select) }, cleanup: VERIFIED });
   assert.deepEqual(JSON.parse(result.observed("argv.json")), dmExecutionPlan(ANTHROPIC, REQUEST_ID).plan.argv.slice(1));
-  // §5a: claude's working directory is the request directory.
-  assert.equal(result.observed("cwd").toString().endsWith(`/var/lib/amux-dm/requests/${REQUEST_ID}`), true);
+  // §5a: claude's working directory is the work directory.
+  assert.equal(result.observed("cwd").toString().endsWith(`/home/amux-dm-anthropic/dm-scratch/${REQUEST_ID}/work`), true);
   assert.deepEqual(result.home, [".cache/", ".claude/", ".claude/.credentials.json", ".local/", ".local/state/", "dm-scratch/"]);
 });
 
@@ -362,4 +368,167 @@ fs.chmodSync(at(process.env.HOME + "/.codex/locked"), 0o500);`;
   assert.deepEqual(result.report.result, { outcome: "output", raw: JSON.stringify(select) });
   assert.equal(result.report.cleanup.status, "cleanup_unknown");
   assert.deepEqual(result.report.cleanup.residue.map((entry) => entry.kind).sort(), ["removal_failed", "state_entry_present"]);
+});
+
+// ---------------------------------------------------------------------------
+// The work directory (owner direction 2026-11-22: the DM runs commands)
+// ---------------------------------------------------------------------------
+
+const WORK = (home) => `/home/${home}/dm-scratch/${REQUEST_ID}/work`;
+
+test("the CLI works in its own copy of the request directory; what it writes stays there and is deleted", { skip: !canChmod }, async () => {
+  // The DM's commands may leave anything in the copy: nested and deep directories, a 0000 one, a group-writable one, links.
+  const body = recording(`
+const work = process.cwd();
+fs.writeFileSync(at("/observed/copy"), fs.readFileSync(path.join(work, "card.json")));
+fs.writeFileSync(path.join(work, "card.json"), "changed by the DM");
+let deep = path.join(work, "deep");
+for (let i = 0; i < 80; i += 1) { deep = path.join(deep, "d"); }
+fs.mkdirSync(deep, { recursive: true });
+fs.mkdirSync(path.join(work, "locked", "inside"), { recursive: true });
+fs.writeFileSync(path.join(work, "locked", "inside", "f"), "x");
+fs.chmodSync(path.join(work, "locked", "inside"), 0o000);
+fs.chmodSync(path.join(work, "locked"), 0o000);
+fs.mkdirSync(path.join(work, "shared"));
+fs.chmodSync(path.join(work, "shared"), 0o777);
+fs.symlinkSync(at(process.env.HOME + "/.codex/auth.json"), path.join(work, "login"));
+fs.writeFileSync(at("/observed/jail"), fs.existsSync(path.join(work, "..", "shell", "bash")) ? "beside" : "missing");
+fs.writeFileSync(at("/observed/guide"), fs.readFileSync(path.join(work, "DEPENDENCIES.md")));
+${writeOutput({ output: select })}`);
+  let requestAfter = null;
+  const result = await run(OPENAI, body, {
+    afterLaunch: (fixture) => {
+      requestAfter = readFileSync(fixture.at(`${fixture.paths.requestDirectory}/card.json`), "utf8");
+    },
+  });
+  assert.deepEqual(withoutTools(result.report), { result: { outcome: "output", raw: JSON.stringify(select) }, cleanup: VERIFIED });
+  assert.equal(result.observed("copy").toString(), '{"synthetic":"card"}');
+  // The broker's request directory is untouched: the DM wrote its copy.
+  assert.equal(requestAfter, '{"synthetic":"card"}');
+  assert.equal(result.observed("jail").toString(), "beside");
+  assert.match(result.observed("guide").toString(), /^# Dependencies/);
+  // Everything the commands left is gone, the login it linked to is kept.
+  assert.equal(result.temporaryGone, true);
+  assert.deepEqual(result.home, [".codex/", ".codex/auth.json", "dm-scratch/"]);
+});
+
+test("claude's shell prefix is the launcher's jail of the work directory, written outside it", { skip: !posix }, async () => {
+  const body = recording(`
+const prefix = process.env.CLAUDE_CODE_SHELL_PREFIX;
+fs.writeFileSync(at("/observed/prefix"), fs.readFileSync(at(prefix)));
+fs.writeFileSync(at("/observed/jail-script"), fs.readFileSync(at(path.dirname(prefix) + "/bash")));
+${claudeResult()}`);
+  const result = await run(ANTHROPIC, body);
+  assert.deepEqual(withoutTools(result.report), { result: { outcome: "output", raw: JSON.stringify(select) }, cleanup: VERIFIED });
+  const env = JSON.parse(result.observed("env.json"));
+  assert.equal(env.CLAUDE_CODE_SHELL_PREFIX, `/home/amux-dm-anthropic/dm-scratch/${REQUEST_ID}/shell/claude-shell-prefix`);
+  assert.equal(env.CLAUDE_CODE_TMPDIR, `${WORK("amux-dm-anthropic")}/.amux-tmp`);
+  assert.match(result.observed("prefix").toString(), /exec '\/.*\/shell\/bash' -c "\$1"/);
+  const jail = result.observed("jail-script").toString();
+  assert.match(jail, /exec \/usr\/bin\/bwrap .*'--unshare-net'/);
+  // The work directory is the one writable bind; the home with its login is not in the jail.
+  const binds = [...jail.matchAll(/'--bind' '([^']+)' '\1'/g)].map((match) => match[1]);
+  assert.equal(binds.length, 1);
+  assert.ok(binds[0].endsWith(WORK("amux-dm-anthropic")));
+  assert.ok(!jail.includes(".credentials.json") && !/'--(?:ro-)?bind(?:-try)?' '[^']*\/home\/amux-dm-anthropic'/.test(jail));
+  assert.match(jail, /'--ro-bind-try' '[^']*\/var\/cache\/tomverse-amux-dm'/);
+  assert.match(jail, /'--setenv' 'NPM_CONFIG_OFFLINE' 'true'/);
+});
+
+test("a jail that does not start starts nothing, and both cleanups still run", { skip: !posix }, async () => {
+  const result = await run(ANTHROPIC, recording(claudeResult()), { options: { work: { jailStarts: () => false } } });
+  assert.deepEqual(result.report, { result: { outcome: "refused", refusals: ["request_directories_unusable"] }, cleanup: VERIFIED });
+  assert.equal(result.started, false);
+  assert.equal(result.requestGone && result.temporaryGone, true);
+});
+
+test("each tree's locked dependencies are installed in the jail, offline, and DEPENDENCIES.md says how it went", { skip: !posix }, async () => {
+  const steps = [];
+  const runJailed = async (jail, script, { cwd }) => {
+    steps.push({ jail, script, tree: cwd.slice(cwd.lastIndexOf("/") + 1) });
+    return cwd.endsWith("repo-patched") ? "failed" : "ok";
+  };
+  const body = recording(`
+fs.writeFileSync(at("/observed/guide"), fs.readFileSync(path.join(process.cwd(), "DEPENDENCIES.md")));
+${claudeResult()}`);
+  const result = await run(ANTHROPIC, body, {
+    options: { work: { runJailed, jailStarts: (_jail, proc) => proc } },
+    prepare: (fixture) => {
+      for (const tree of ["repo", "repo-patched"]) fixture.write(`${fixture.paths.requestDirectory}/${tree}/package-lock.json`, "{}");
+      fixture.write(`${fixture.paths.requestDirectory}/repo/node_modules/prisma/build/index.js`, "");
+    },
+  });
+  assert.deepEqual(result.report.dependencies, { proc: true, trees: { repo: "installed", "repo-patched": "install_failed" } });
+  assert.deepEqual(steps.map((step) => step.tree), ["repo", "repo", "repo-patched"]);
+  assert.ok(steps.every((step) => step.jail.endsWith(`/dm-scratch/${REQUEST_ID}/shell/bash`)));
+  assert.match(steps[0].script, /^exec (?:node '\/.*npm-cli\.js'|npm) ci --offline --ignore-scripts /);
+  assert.match(steps[1].script, /cp -RH '\/.*\/var\/cache\/tomverse-amux-dm\/prisma' "\$HOME\/\.cache\/prisma".*exec node node_modules\/prisma\/build\/index\.js generate$/);
+  const guide = result.observed("guide").toString();
+  assert.match(guide, /- repo\/: installed/);
+  assert.match(guide, /- repo-patched\/: not installed: npm ci failed offline/);
+  assert.match(guide, /npm run typecheck/);
+  assert.deepEqual(result.report.cleanup, VERIFIED);
+});
+
+test("a copy that would pass the disk cap starts nothing", { skip: !posix }, async () => {
+  const result = await run(OPENAI, recording(""), { options: { work: { disk: { maxBytes: 4 } } } });
+  assert.deepEqual(result.report, { result: { outcome: "refused", refusals: ["disk_space_low"] }, cleanup: VERIFIED });
+  assert.equal(result.started, false);
+  assert.equal(result.requestGone && result.temporaryGone, true);
+  // And a host already under the free-space floor.
+  const low = await run(OPENAI, recording(""), { options: { work: { disk: { freeFloorBytes: Number.MAX_SAFE_INTEGER } } } });
+  assert.deepEqual(low.report.result, { outcome: "refused", refusals: ["disk_space_low"] });
+});
+
+test("a DM whose commands fill the work directory past its cap is stopped: disk_limit, and cleanup runs", { skip: !posix }, async () => {
+  const body = recording(`
+fs.writeFileSync(require("path").join(process.cwd(), "big"), Buffer.alloc(256 * 1024));
+setTimeout(() => {}, 15000);`);
+  const result = await run(OPENAI, body, { options: { work: { disk: { maxBytes: 64 * 1024, checkMs: 50, sizeEveryChecks: 1 } } } });
+  assert.deepEqual(withoutTools(result.report), { result: { outcome: "unavailable", reason: "disk_limit" }, cleanup: VERIFIED });
+  assert.equal(result.started, true);
+  assert.equal(result.requestGone && result.temporaryGone, true);
+});
+
+test("a DM that hides what it wrote behind a 0000 directory is still measured, and stopped past the cap", { skip: !canChmod }, async () => {
+  // Review r-20261123-110507-a9b409: an unreadable directory must not count as empty.
+  const body = recording(`
+const hidden = require("path").join(process.cwd(), "hidden");
+fs.mkdirSync(hidden);
+fs.writeFileSync(require("path").join(hidden, "big"), Buffer.alloc(256 * 1024, 1));
+fs.chmodSync(hidden, 0o000);
+setTimeout(() => {}, 15000);`);
+  const result = await run(OPENAI, body, { options: { work: { disk: { maxBytes: 64 * 1024, checkMs: 50, sizeEveryChecks: 1 } } } });
+  assert.deepEqual(withoutTools(result.report), { result: { outcome: "unavailable", reason: "disk_limit" }, cleanup: VERIFIED });
+  assert.equal(result.requestGone && result.temporaryGone, true);
+});
+
+test("a DM that makes many empty files reaches the cap too: every entry costs a block", { skip: !posix }, async () => {
+  // Review r-20261123-111521-e19df9: empty files take inodes while their bytes are zero.
+  const body = recording(`
+const dir = require("path").join(process.cwd(), "empty");
+fs.mkdirSync(dir);
+for (let i = 0; i < 400; i += 1) fs.writeFileSync(require("path").join(dir, "f" + i), "");
+setTimeout(() => {}, 15000);`);
+  const result = await run(OPENAI, body, { options: { work: { disk: { maxBytes: 200 * 4096, checkMs: 50, sizeEveryChecks: 1 } } } });
+  assert.deepEqual(withoutTools(result.report), { result: { outcome: "unavailable", reason: "disk_limit" }, cleanup: VERIFIED });
+});
+
+test("a host under its free-inode floor starts nothing", { skip: !posix || (posix && statfsSync(tmpdir()).files === 0) }, async () => {
+  const result = await run(OPENAI, recording(""), { options: { work: { disk: { freeInodeFloorRatio: 2 } } } });
+  assert.deepEqual(result.report.result, { outcome: "refused", refusals: ["disk_space_low"] });
+});
+
+test("the copy's own inodes count against the free-inode floor before it starts", { skip: !posix || (posix && statfsSync(tmpdir()).files === 0) }, async () => {
+  // Review r-20261123-112531-1a6c9d: a request directory of many entries could take the floor during the copy.
+  const { files, ffree } = statfsSync(tmpdir());
+  const ratio = (Number(ffree) - 500) / Number(files);
+  const many = await run(OPENAI, recording(""), {
+    options: { work: { disk: { freeInodeFloorRatio: ratio } } },
+    prepare: (fixture) => {
+      for (let index = 0; index < 2000; index += 1) fixture.write(`${fixture.paths.requestDirectory}/many/f${index}`, "");
+    },
+  });
+  assert.deepEqual(many.report.result, { outcome: "refused", refusals: ["disk_space_low"] });
+  assert.equal(many.started, false);
 });

@@ -21,7 +21,8 @@ RuntimeMaxSec=122min
 TimeoutStopSec=10s
 UMask=0077
 # §5: the vendor account writes only its own home (CLI state, its temporary
-# directories); the request directory is read-only to it by mode as well.
+# directories, the work directory where the DM runs commands); the request
+# directory is read-only to it by mode as well.
 ProtectSystem=strict
 ReadWritePaths=/home/amux-dm-anthropic
 PrivateTmp=true
@@ -30,7 +31,10 @@ CapabilityBoundingSet=
 ProtectProc=invisible
 ProtectControlGroups=true
 ProtectKernelModules=true
-ProtectKernelTunables=true
+# No ProtectKernelTunables=: its read-only binds over /proc/sys make the
+# kernel refuse the fresh /proc of the DM command jail's own pid namespace
+# (lib/amux/decisionMakerWorkCopy.ts), which Next's type generation needs. The
+# account is not root and holds no capability, so it cannot write a tunable.
 RestrictSUIDSGID=true
 LockPersonality=true
 

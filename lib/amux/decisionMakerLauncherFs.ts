@@ -228,6 +228,16 @@ const sameDirectory = (hostPath: string, seen: Stats): boolean => {
 
 /** Deeper than any CLI state S0 saw; a deeper tree is left and reported rather than walked without end. */
 const REMOVAL_MAX_DEPTH = 64;
+/**
+ * In a private tree -- the account's scratch root, where the work directory
+ * is: the DM's own commands made it (owner direction 2026-11-22), so a test's
+ * nested directories go deeper, and a directory a command left `0000` or
+ * group-writable must not latch the instance off. The tree's root is the
+ * account's `0700` directory, so no other account can reach anything in it:
+ * each directory is made the account's `0700` before it is entered, and a
+ * group or other write bit there is not another account's way in.
+ */
+const REMOVAL_MAX_DEPTH_PRIVATE = 1024;
 
 const isRealDirectory = (stats: Stats) => stats.isDirectory() && !stats.isSymbolicLink();
 
@@ -251,7 +261,8 @@ const removeDirectory = (
   seen: Stats,
   depth: number,
 ): DmCleanupResidue[] => {
-  if (depth > REMOVAL_MAX_DEPTH) return [residueOf("removal_failed", reportPath)];
+  const privateTree = host.owners !== null && ruleFor(instance, rulePath).private;
+  if (depth > (privateTree ? REMOVAL_MAX_DEPTH_PRIVATE : REMOVAL_MAX_DEPTH)) return [residueOf("removal_failed", reportPath)];
   if (!sameDirectory(hostPath, seen)) return [residueOf("path_unsafe", reportPath)];
   let names: string[];
   try {
@@ -263,11 +274,25 @@ const removeDirectory = (
   for (const name of names.sort()) {
     const childHost = join(hostPath, name);
     const childReport = `${reportPath}/${name}`;
-    const child = probe(childHost);
+    let child = probe(childHost);
     if (child.state === "absent") continue;
     if (child.state === "error") {
       residue.push(residueOf("path_unreadable", childReport));
       continue;
+    }
+    if (privateTree && isRealDirectory(child.stats) && ownerFits(host, instance, rulePath, child.stats) &&
+        (child.stats.mode & 0o7777) !== 0o700) {
+      const before = child.stats;
+      try {
+        chmodSync(childHost, 0o700);
+      } catch {
+        // Judged below as it is.
+      }
+      child = probe(childHost);
+      if (child.state !== "present" || child.stats.ino !== before.ino || child.stats.dev !== before.dev) {
+        residue.push(residueOf("path_unsafe", childReport));
+        continue;
+      }
     }
     if (isRealDirectory(child.stats)) {
       const writableByOthers = host.owners !== null && (child.stats.mode & 0o022) !== 0;
