@@ -89,10 +89,16 @@ test("every language has the full v2 copy", () => {
 });
 
 test("a revoked private source withholds every block, conflict and summary resting on its claims, and keeps the rest", () => {
-  const document = researchReportDocumentSchema.parse({ ...doc(), summary: "Summary mentioning the private fact",
+  const base = doc();
+  const document = researchReportDocumentSchema.parse({ ...base, title: "Title naming the private fact", summary: "Summary mentioning the private fact",
+    scope: { ...base.scope, note: "Scope note on the private fact" },
+    sections: base.sections.map((section) => ({ ...section, heading: "Heading about the private fact" })),
+    limitations: ["Limitation from the private fact"], nextQuestions: ["Next question on the private fact"],
+    criteria: [{ criterion: "Criterion naming the private fact", met: true }],
     conflicts: [{ text: "Private fact disagrees with public fact", claimKeys: ["C1", "C2"] }, { text: "Public only", claimKeys: ["C1"] }] });
   document.bibliography = buildBibliography(document, claims, sources);
-  const withheld = withholdRevokedSource(document, [...claims.values()], "P1", { note: "removed", privateSource: "private source" });
+  const withheld = withholdRevokedSource(document, [...claims.values()], "P1",
+    { note: "removed", privateSource: "private source", title: "User question", headings: new Map([["s1", "Plan heading"]]) });
   assert.deepEqual([...withheld.affected], ["C2"]);
   const json = JSON.stringify(withheld.document);
   for (const leaked of ["Private paragraph", "private fact", "Private fact", "my-private-file"]) assert.ok(!json.includes(leaked), leaked);
@@ -100,7 +106,14 @@ test("a revoked private source withholds every block, conflict and summary resti
   assert.deepEqual(withheld.document.sections[0].blocks.map((block) => block.type === "paragraph" ? block.text : block.caption),
     ["Public paragraph [click](javascript:alert(1)) <b>x</b>", "removed", "Table"], "only the block resting on the revoked claim changes");
   assert.deepEqual(withheld.document.conflicts.map((conflict) => conflict.text), ["Public only"]);
-  assert.ok(withheld.document.limitations.includes("removed"));
+  assert.equal(withheld.document.title, "User question");
+  assert.equal(withheld.document.sections[0].heading, "Plan heading", "the plan heading, written before any private claim");
+  assert.equal(withheld.document.scope.note, "");
+  assert.deepEqual(withheld.document.limitations, ["removed"]);
+  assert.deepEqual(withheld.document.nextQuestions, []);
+  assert.deepEqual(withheld.document.criteria, []);
+  const noPlan = withholdRevokedSource(document, [...claims.values()], "P1", { note: "removed", privateSource: "private source", title: "User question" });
+  assert.equal(noPlan.document.sections[0].heading, "§ 1");
   assert.equal(researchReportDocumentSchema.safeParse(withheld.document).success, true);
-  assert.equal(withholdRevokedSource(document, [...claims.values()], "P9", { note: "removed", privateSource: "private source" }), null);
+  assert.equal(withholdRevokedSource(document, [...claims.values()], "P9", { note: "removed", privateSource: "private source", title: "User question" }), null);
 });

@@ -158,23 +158,31 @@ export function redactReportForPublic(document: ResearchReportDocument, claims: 
 
 /**
  * A private source whose grant is gone: what was derived from it is withheld in
- * place, without a model. A block, conflict or summary resting on a claim that
- * cites the source becomes the removal note, and the bibliography keeps only a
- * neutral label. Returns null when this revision never used the source.
+ * place, without a model. A block or conflict resting on a claim that cites the
+ * source becomes the removal note. Every field a model wrote after reading the
+ * claims (title, summary, section headings, scope note, limitations, next
+ * questions, criteria) is replaced by text that does not come from the source:
+ * the user's question, the approved plan's headings (or a neutral number), and
+ * the removal note. Returns null when this revision never used the source.
  */
 export function withholdRevokedSource(document: ResearchReportDocument, claims: ReadonlyArray<Pick<ReportClaim, "claimKey" | "evidence">>,
-  sourceKey: string, labels: { note: string; privateSource: string }) {
+  sourceKey: string, labels: { note: string; privateSource: string; title: string; headings?: ReadonlyMap<string, string> }) {
   const affected = new Set(claims.filter((claim) => claim.evidence.some((evidence) => evidence.sourceKey === sourceKey)).map((claim) => claim.claimKey));
   if (!affected.size && !document.bibliography.some((entry) => entry.sourceKey === sourceKey)) return null;
   const rests = (keys: string[]) => keys.some((key) => affected.has(key));
   const withheld: ResearchReportDocument = {
     ...document,
-    // The synthesis summary is free text over every claim, so any withheld claim withholds it.
-    summary: affected.size ? labels.note : document.summary,
-    sections: document.sections.map((section) => ({ ...section,
+    title: labels.title.slice(0, 200) || "Research",
+    summary: labels.note,
+    scope: { ...document.scope, note: "" },
+    sections: document.sections.map((section, index) => ({ ...section,
+      // A writer chooses its own heading after reading the section's claims; the plan's heading came before them.
+      heading: labels.headings?.get(section.key)?.slice(0, 160) || `§ ${index + 1}`,
       blocks: section.blocks.map((block) => rests(block.claimKeys) ? { type: "paragraph" as const, text: labels.note, claimKeys: [] } : block) })),
     conflicts: document.conflicts.filter((conflict) => !rests(conflict.claimKeys)),
-    limitations: affected.size && !document.limitations.includes(labels.note) ? [...document.limitations.slice(0, 29), labels.note] : document.limitations,
+    limitations: [labels.note],
+    nextQuestions: [],
+    criteria: [],
     bibliography: document.bibliography.map((entry) => entry.sourceKey === sourceKey ? { ...entry, title: labels.privateSource } : entry),
   };
   return { affected, document: withheld };

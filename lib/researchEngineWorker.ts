@@ -570,16 +570,21 @@ export async function revokePrivateSource(run: Pick<RunRow, "id">, sourceId: str
     const placeholder = labels.report.privateSource;
     const entries = manifest.entries.map((entry) => entry.key === source.sourceKey && entry.type !== "url" ? { ...entry, label: placeholder } : entry);
     await tx.researchPreviewRun.update({ where: { id: run.id }, data: { inputManifest: json({ ...manifest, entries }) } });
-    // Text derived from the source goes with it too: claim text, the report blocks,
-    // conflicts and summary resting on those claims, and the stored analysis findings
-    // (which hold verbatim quotes). Evidence references stay; they hold no text.
+    // Text derived from the source goes with it too: claim text, the report blocks and
+    // conflicts resting on those claims, every free-text field a model wrote after
+    // reading them, and the stored analysis findings (which hold verbatim quotes).
+    // Evidence references stay; they hold no text.
     const claims = await tx.researchClaim.findMany({ where: { runId: run.id } });
     const cites = (claim: { evidence: unknown }) => (claim.evidence as Array<{ sourceKey: string }>).some((evidence) => evidence.sourceKey === source.sourceKey);
+    // Plan headings come from the planner (public context only) or the user, never from a private source.
+    const planHeadings = new Map((await tx.researchPlanRevision.findMany({ where: { runId: run.id }, select: { revision: true, plan: true } }))
+      .map((row) => { const parsed = researchPlanSchema.safeParse(row.plan);
+        return [row.revision, new Map(parsed.success ? parsed.data.outline.map((section) => [section.key, section.heading]) : [])] as const; }));
     let currentChanged = false;
-    for (const revision of await tx.researchReportRevision.findMany({ where: { runId: run.id }, select: { id: true, revision: true, document: true } })) {
+    for (const revision of await tx.researchReportRevision.findMany({ where: { runId: run.id }, select: { id: true, revision: true, planRevision: true, document: true } })) {
       const own = claims.filter((claim) => claim.revisionId === revision.id).map((claim) => ({ claimKey: claim.claimKey, evidence: claim.evidence as ReportClaim["evidence"] }));
       const withheld = withholdRevokedSource(researchReportDocumentSchema.parse(revision.document), own, source.sourceKey,
-        { note: labels.redactedNote, privateSource: placeholder });
+        { note: labels.redactedNote, privateSource: placeholder, title: manifest.brief.question, headings: planHeadings.get(revision.planRevision) });
       if (!withheld) continue;
       await tx.researchReportRevision.update({ where: { id: revision.id }, data: { document: json(withheld.document) } });
       if (revision.revision === runRow.currentReportRevision) currentChanged = true;
