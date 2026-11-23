@@ -27,10 +27,12 @@ test("a diagnostic cycle's run over the real cycle table", { skip: !databaseUrl 
     const byCredits = (candidates, dir) =>
         [...candidates].sort((a, b) => dir * ((a.credits ?? 0) - (b.credits ?? 0)) || a.id.localeCompare(b.id))[0].id;
     const routed = [];
+    const offered = [];
     mock.module(mod("lib/autoLlmRouter.ts"), {
         namedExports: {
             callAutoLlmRouter: async (input) => {
                 routed.push(input.guidance);
+                offered.push(input.candidates.map((candidate) => candidate.id));
                 const baseline = input.guidance !== PROPOSAL;
                 return { outcome: "picked", pick: { modelId: byCredits(input.candidates, baseline ? -1 : 1) },
                     usage: { inputTokens: 900, outputTokens: 30, inputTokenDetails: { cacheReadTokens: 50 } } };
@@ -40,6 +42,9 @@ test("a diagnostic cycle's run over the real cycle table", { skip: !databaseUrl 
     });
     const PROPOSAL = "Send greetings and small talk to a lower-credit model.\nKeep hard reasoning on a higher tier.";
     const prompts = { synthesize: 0, generate: 0, answer: 0, quality: 0, legacyJudge: 0 };
+    // When on, each answer prompt times out on its first try (as AbortSignal.timeout throws), then answers.
+    let timeoutFirstTry = false;
+    const timedOut = new Set();
     const real = await import("ai");
     mock.module("ai", {
         namedExports: {
@@ -66,6 +71,10 @@ test("a diagnostic cycle's run over the real cycle table", { skip: !databaseUrl 
                     return { output: { winner: "equal" }, finishReason: "stop", usage };
                 }
                 prompts.answer += 1;
+                if (timeoutFirstTry && !timedOut.has(input.prompt)) {
+                    timedOut.add(input.prompt);
+                    throw Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+                }
                 return { text: "an answer", finishReason: "stop", usage };
             },
         },
@@ -107,7 +116,7 @@ test("a diagnostic cycle's run over the real cycle table", { skip: !databaseUrl 
             assert.deepEqual(row.summary.objective, core.COST_EFFICIENCY_OBJECTIVE);
             assert.equal(row.summary.costEfficiency.version, "auto-cost-efficiency-report-v1");
             assert.equal(row.summary.manifest.execution, "live");
-            assert.equal(row.summary.manifest.criteria.status, "proposed_unconfirmed");
+            assert.equal(row.summary.manifest.criteria.status, "confirmed");
             assert.ok(row.summary.manifest.models.answering.length > 0);
             // The price-blind judge only; cache reads were priced by the existing helper.
             assert.ok(prompts.quality > 0);
@@ -131,6 +140,61 @@ test("a diagnostic cycle's run over the real cycle table", { skip: !databaseUrl 
             assert.notEqual(state.servingCost, undefined);
             // Spend reached the provider buckets like any cycle's.
             assert.ok(row.spentMicroUsd > 0);
+        });
+        await t.test("an answer that times out is counted at its upper bound and the diagnostic finishes", async () => {
+            timeoutFirstTry = true;
+            timedOut.clear();
+            try {
+                const started = await optimizer.startAutoRouterOptimizerCycle(actor, { waitForCompletion: true, objective: "chat_cost_efficiency" });
+                assert.ok("cycleId" in started, JSON.stringify(started));
+                assert.deepEqual(started.outcome, { recorded: true, status: "diagnostic", failure: null });
+                const row = await prisma.autoRouterOptimizerCycle.findUniqueOrThrow({ where: { id: started.cycleId } });
+                const coverage = row.summary.costCoverage;
+                assert.ok(timedOut.size > 0);
+                assert.equal(coverage.unknownCalls, 0);
+                assert.equal(coverage.boundedCalls, timedOut.size);
+                assert.ok(coverage.boundedMicroUsd > 0);
+                const boundedCall = coverage.calls.find((call) => call.state === "bounded");
+                assert.equal(boundedCall.kind, "answer");
+                assert.equal(boundedCall.failed, true);
+                assert.ok(boundedCall.bound.outputTokens > 0 && boundedCall.bound.inputTokens > 0);
+                // The cycle's recorded spend carries the bounds; the known total does not.
+                assert.equal(row.spentMicroUsd, coverage.knownMicroUsd + coverage.boundedMicroUsd);
+                assert.equal(row.summary.costEfficiency.experimentCost.boundedCalls, timedOut.size);
+            } finally {
+                timeoutFirstTry = false;
+            }
+        });
+        await t.test("a recorded menu's retired model is never picked, drawn or answered", async () => {
+            const live = models.filter((item) => item.enabled && !item.catalogDeleted && optimizer.pricesOf(item)).slice(0, 2);
+            assert.equal(live.length, 2);
+            const candidate = (id, credits) => ({ id, name: id, bestFor: "general", tier: "standard", credits });
+            const user = await prisma.user.create({ data: { email: `diagnostic-menu-${randomUUID()}@example.test`, name: "Menu" } });
+            try {
+                // One conversation per decision, so the family split has both halves.
+                const conversations = await Promise.all(Array.from({ length: 24 }, () =>
+                    prisma.conversation.create({ data: { selectedModels: "[]", userId: user.id, title: "t", kind: "chat" } })));
+                // The retired model is the dearest, so the baseline router mock would pick it if it were offered.
+                await prisma.autoRouterDecision.createMany({ data: conversations.map((conversation, index) => ({
+                    version: "auto-llm-router-v2-bounded", traceId: `diagnostic-menu-${randomUUID()}-${index}`, userId: user.id,
+                    conversationId: conversation.id, routerInput: `hello ${index}`, taskKind: "general",
+                    candidates: [candidate("retired-model-for-test", 99), candidate(live[0].id, 3), candidate(live[1].id, 2)],
+                    ruleModelId: live[0].id, routerModelId: model.id, pickedModelId: "retired-model-for-test", outcome: "picked", latencyMs: 100,
+                })) });
+                offered.length = 0;
+                const started = await optimizer.startAutoRouterOptimizerCycle(actor, { waitForCompletion: true, objective: "chat_cost_efficiency" });
+                assert.ok("cycleId" in started, JSON.stringify(started));
+                const row = await prisma.autoRouterOptimizerCycle.findUniqueOrThrow({ where: { id: started.cycleId } });
+                assert.ok(offered.length > 0, JSON.stringify({ status: row.status, failure: row.failure, outcome: started.outcome, calls: row.summary?.costCoverage?.calls?.length }));
+                assert.ok(offered.every((ids) => !ids.includes("retired-model-for-test")));
+                const calls = row.summary.costCoverage.calls;
+                assert.equal(calls.filter((call) => call.kind === "answer" && call.state === "no_dispatch").length, 0);
+                assert.ok(calls.every((call) => call.identity?.modelId !== "retired-model-for-test"));
+            } finally {
+                await prisma.autoRouterDecision.deleteMany({ where: { userId: user.id } });
+                await prisma.conversation.deleteMany({ where: { userId: user.id } });
+                await prisma.user.delete({ where: { id: user.id } });
+            }
         });
     } finally {
         if (before === undefined) delete process.env.AUTO_ROUTER_COST_EFFICIENCY_DIAGNOSTIC;

@@ -19,7 +19,7 @@ import {
   runOptimizerCycle,
   splitOptimizerDecisionsByFamily,
 } from "../lib/autoRouterOptimizerCore.ts";
-import { COST_EFFICIENCY_CRITERIA_PROPOSAL, costEfficiencyReport } from "../lib/autoCostEfficiencyReport.ts";
+import { COST_EFFICIENCY_CRITERIA, costEfficiencyReport } from "../lib/autoCostEfficiencyReport.ts";
 import { observeOptimizerUsageCost, optimizerSpend } from "../lib/autoOptimizerCost.ts";
 import { summarizeChatServingCost, traceAnswerCost } from "../lib/autoChatServingCostCore.ts";
 import { actionableRecommendations } from "../lib/autoRouterRecommendationsCore.ts";
@@ -202,7 +202,7 @@ test("a cost-efficiency cycle compares cheaper candidates in the one slot, keeps
   assert.equal(report.taskCost.status, "unlinked");
   assert.equal(report.applicability.applicable, false);
   assert.ok(report.applicability.reasons.includes("diagnostic_only"));
-  assert.ok(report.applicability.reasons.includes("criteria_unconfirmed"));
+  assert.ok(!report.applicability.reasons.includes("criteria_unconfirmed"));
   // The family split keeps a conversation in one half.
   const evaluated = new Set(result.cases.map((item) => item.decisionId));
   assert.equal(evaluated.size, 12);
@@ -307,6 +307,84 @@ test("a retried answer pays both tries, and unknown cost stops scheduling withou
   for (const reason of ["cycle_incomplete", "cost_coverage_incomplete"]) assert.ok(stopped.costEfficiency.applicability.reasons.includes(reason));
 });
 
+test("an answer that was never sent is not asked for again, and its pair is no answer, not a known US$0", async () => {
+  const tries = new Map();
+  const { deps } = costDeps({
+    answer: async (modelId, turn) => {
+      const key = `${modelId}/${turn.message}`;
+      tries.set(key, (tries.get(key) ?? 0) + 1);
+      return modelId === "cheap"
+        ? { value: null, costMicroUsd: 0, cost: { state: "no_dispatch", reason: "model_unavailable" }, provider: "unknown" }
+        : { value: `${modelId} answer`, ...known(ANSWER_COST[modelId]), provider: `${modelId}-co` };
+    },
+  });
+  const result = await runOptimizerCycle(costInput(), deps);
+  const cheapPairs = result.comparisons.filter((item) => item.b === "cheap");
+  assert.ok(cheapPairs.length > 0);
+  assert.ok([...tries].filter(([key]) => key.startsWith("cheap/")).every(([, count]) => count === 1));
+  assert.ok(cheapPairs.every((item) => item.costEfficiency.answerCost.b.attempts === 1));
+  const observed = result.costEfficiency.candidateDiagnosis.observedAnswerCost;
+  assert.equal(observed.pairsUnanswered, cheapPairs.length);
+  // Only the pairs where both sides answered are cost pairs; a missing cheap answer is never "cheaper".
+  assert.equal(observed.pairsKnown, result.costEfficiency.candidateDiagnosis.savingsSamples - cheapPairs.length);
+  assert.equal(observed.challengerLower, observed.pairsKnown);
+});
+
+test("an answer that times out is counted at its upper bound, retried, and the cycle finishes", async () => {
+  const bounded = { state: "bounded", amountMicroUsd: 1_500, reason: "exception", bound: { inputTokens: 80, outputTokens: 1_000, prices: { inputUsdPerMillionTokens: 1, outputUsdPerMillionTokens: 1.5 } } };
+  const tries = new Map();
+  const { deps } = costDeps({
+    answer: async (modelId, turn) => {
+      const key = `${modelId}/${turn.message}`;
+      tries.set(key, (tries.get(key) ?? 0) + 1);
+      // The cheap model times out on its first try (as an adapter returns it), then answers.
+      return modelId === "cheap" && tries.get(key) === 1
+        ? { value: null, costMicroUsd: null, cost: bounded, provider: "cheap-co" }
+        : { value: `${modelId} answer`, ...known(ANSWER_COST[modelId]), provider: `${modelId}-co` };
+    },
+  });
+  const result = await runOptimizerCycle(costInput(), deps);
+  assert.equal(result.status, "diagnostic");
+  assert.equal(result.failure, null, "a timeout no longer stops the cycle as cost_unknown");
+  const cheapPairs = result.comparisons.filter((item) => item.b === "cheap");
+  assert.ok(cheapPairs.length > 0);
+  assert.ok(cheapPairs.every((item) => item.costEfficiency.answerCost.b.state === "bounded"
+    && item.costEfficiency.answerCost.b.attempts === 2 && item.costEfficiency.answerCost.b.microUsd === 1_500 + ANSWER_COST.cheap));
+  assert.ok(cheapPairs.every((item) => item.costEfficiency.quality === "equal"), "the retried answer was judged");
+  const experiment = result.costEfficiency.experimentCost;
+  // Each cheap answer (direct and guidance comparisons alike) timed out once.
+  const cheapAnswers = [...tries.keys()].filter((key) => key.startsWith("cheap/")).length;
+  assert.ok(cheapAnswers >= cheapPairs.length);
+  assert.equal(experiment.boundedCalls, cheapAnswers);
+  assert.equal(experiment.boundedMicroUsd, cheapAnswers * 1_500);
+  assert.equal(experiment.unknownCalls, 0);
+  assert.equal(experiment.complete, true);
+  // The run's spend includes every bound; the known figure does not.
+  assert.equal(result.spentMicroUsd, experiment.knownMicroUsd + experiment.boundedMicroUsd);
+  // A bounded answer cost is not exact, so the pair is not a known cost pair.
+  assert.equal(result.costEfficiency.candidateDiagnosis.observedAnswerCost.pairsKnown + result.costEfficiency.candidateDiagnosis.observedAnswerCost.pairsUnknown,
+    result.costEfficiency.candidateDiagnosis.savingsSamples);
+});
+
+test("an answer whose every try ends in an exception is bounded and unanswered, never a cost pair", async () => {
+  const bounded = { state: "bounded", amountMicroUsd: 1_500, reason: "exception", bound: { inputTokens: 80, outputTokens: 1_000, prices: { inputUsdPerMillionTokens: 1, outputUsdPerMillionTokens: 1.5 } } };
+  const { deps } = costDeps({
+    answer: async (modelId) => modelId === "cheap"
+      ? { value: null, costMicroUsd: null, cost: bounded, provider: "cheap-co" }
+      : { value: `${modelId} answer`, ...known(ANSWER_COST[modelId]), provider: `${modelId}-co` },
+  });
+  const result = await runOptimizerCycle(costInput(), deps);
+  assert.equal(result.failure, null);
+  const cheapPairs = result.comparisons.filter((item) => item.b === "cheap");
+  assert.ok(cheapPairs.length > 0);
+  assert.ok(cheapPairs.every((item) => item.costEfficiency.answerCost.b.state === "bounded"
+    && item.costEfficiency.answerCost.b.attempts === 2 && item.costEfficiency.answerCost.b.failedAttempts === 2));
+  assert.ok(cheapPairs.every((item) => item.verdict === "undecided"), "no answer, no judgement");
+  const observed = result.costEfficiency.candidateDiagnosis.observedAnswerCost;
+  assert.equal(observed.pairsUnanswered, cheapPairs.length);
+  assert.equal(result.failedByKind.answer, result.costEfficiency.experimentCost.boundedCalls);
+});
+
 test("fewer credits with a higher observed answer cost is not a saving", () => {
   const unknownView = { state: "unknown", microUsd: null, attempts: 1, failedAttempts: 0 };
   const view = (microUsd) => ({ state: "known", microUsd, attempts: 1, failedAttempts: 0 });
@@ -318,11 +396,11 @@ test("fewer credits with a higher observed answer cost is not a saving", () => {
   const spend = optimizerSpend(1_000).totals();
   const report = costEfficiencyReport({
     comparisons: [comparison("cheap", view(50)), comparison("mid", unknownView)], cases: [],
-    coverage: spend.costCoverage, spentByKind: spend.spentByKind, criteria: COST_EFFICIENCY_CRITERIA_PROPOSAL, failure: null,
+    coverage: spend.costCoverage, spentByKind: spend.spentByKind, criteria: COST_EFFICIENCY_CRITERIA, failure: null,
     summary: { incumbentCredits: 9, candidateCredits: 9 },
   });
   const observed = report.candidateDiagnosis.observedAnswerCost;
-  assert.deepEqual(observed, { pairsKnown: 1, pairsUnknown: 1, incumbentMicroUsd: 10, challengerMicroUsd: 50, challengerLower: 0, challengerHigher: 1, same: 0 });
+  assert.deepEqual(observed, { pairsKnown: 1, pairsUnknown: 1, pairsUnanswered: 0, incumbentMicroUsd: 10, challengerMicroUsd: 50, challengerLower: 0, challengerHigher: 1, same: 0 });
   assert.deepEqual(report.candidateDiagnosis.credits, { pairs: 2, incumbent: 18, challenger: 2 });
   assert.ok(report.applicability.reasons.includes("no_observed_saving"));
   assert.ok(report.applicability.reasons.includes("guidance_not_cheaper"));
@@ -408,7 +486,8 @@ test("the offline dry run builds a complete manifest and runs the real cycle on 
   const { manifest, result } = run;
   assert.equal(manifest.execution, "mock");
   assert.equal(manifest.promotion, "refused_diagnostic_only");
-  assert.equal(manifest.criteria.status, "proposed_unconfirmed");
+  assert.equal(manifest.criteria.status, "confirmed");
+  assert.equal(manifest.criteria.confirmedOn, "2026-11-23");
   assert.match(manifest.criteriaDigest, /^[a-f0-9]{64}$/);
   assert.ok(manifest.models.answering.length > 2 && manifest.models.answering.every((model) => model.modelId && model.provider && "apiModel" in model));
   assert.ok(manifest.allowedProviders.length > 0);
@@ -421,6 +500,6 @@ test("the offline dry run builds a complete manifest and runs the real cycle on 
   assert.ok(c.savingsSamples > 0);
   // The mock's wrong calculation on the lowest tier is caught by the existing exact grader.
   assert.ok(c.exact.graded > 0 && c.exact.challengerPassed < c.exact.incumbentPassed);
-  assert.ok(result.costEfficiency.applicability.reasons.includes("criteria_unconfirmed"));
+  assert.ok(!result.costEfficiency.applicability.reasons.includes("criteria_unconfirmed"));
   assert.equal(result.costEfficiency.applicability.applicable, false);
 });

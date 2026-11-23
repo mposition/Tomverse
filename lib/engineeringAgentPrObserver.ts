@@ -104,7 +104,12 @@ const BINDING_SELECT = {
   run: { select: { cardId: true, amuxAttemptId: true } },
 } as const;
 
-async function* watchedBindings() {
+// Each binding with its pull request as read this round. A page's pull
+// requests are read at once: one read is seven or eight GitHub calls in turn
+// (about 1.5 s), and read one after another, 16 open pull requests outgrew
+// the runner's 25 s app timeout, so every runner cycle failed from 2026-11-22
+// 18:32Z. Only the reads overlap; decisions and writes stay one at a time.
+async function* watchedBindings(ports: Ports) {
   let cursor: string | null = null;
   for (let read = 0; read < ROUND_CEILING; read += PAGE_SIZE) {
     const page: Array<Prisma.EngineeringAgentBindingGetPayload<{ select: typeof BINDING_SELECT }>> =
@@ -115,7 +120,13 @@ async function* watchedBindings() {
         take: PAGE_SIZE,
         ...(cursor === null ? {} : { cursor: { id: cursor }, skip: 1 }),
       });
-    yield* page;
+    // A binding made before v2 is compared in v1, so only then is the diff read
+    // (a Decision Maker approval names its binding's own digest).
+    const pulls = await Promise.allSettled(page.map((binding) => {
+      const boundDigest = (binding.snapshot as { diffDigest?: unknown } | null)?.diffDigest;
+      return ports.read(binding.prNumber, { legacyDiff: pullDigestVersion(boundDigest) === 1 });
+    }));
+    for (const [index, binding] of page.entries()) yield { binding, pull: pulls[index]! };
     if (page.length < PAGE_SIZE) return;
     cursor = page[page.length - 1]!.id;
   }
@@ -129,14 +140,12 @@ export async function observeEngineeringAgentPullRequests(
   ports: Ports = livePorts,
 ): Promise<EngineeringAgentPrObservation[]> {
   const results: EngineeringAgentPrObservation[] = [];
-  for await (const binding of watchedBindings()) {
+  for await (const { binding, pull: read } of watchedBindings(ports)) {
     let pull: EngineeringAgentPullObservation;
-    // A binding made before v2 is compared in v1, so only then is the diff read
-    // (a Decision Maker approval names its binding's own digest).
-    const boundDigest = (binding.snapshot as { diffDigest?: unknown } | null)?.diffDigest;
-    try {
-      pull = await ports.read(binding.prNumber, { legacyDiff: pullDigestVersion(boundDigest) === 1 });
-    } catch (error) {
+    if (read.status === "fulfilled") {
+      pull = read.value;
+    } else {
+      const error: unknown = read.reason;
       if (!(error instanceof EngineeringAgentGitHubReadError)) throw error;
       // The code only (never upstream text): a round that cannot read decides
       // nothing, and until 2026-11-12 it also said nothing, so a token that

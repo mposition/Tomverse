@@ -73,6 +73,8 @@ export type FakeBehaviour = {
   /** Return the structured tool input for this call, or `{ usage: "unknown" }` to drop usage. */
   respond?: (call: Prompted) => unknown;
   delayMs?: number;
+  /** Runs after the request was sent and before it answers, e.g. to change state while a dispatch is in flight. */
+  beforeRespond?: (call: Prompted) => Promise<void>;
 };
 
 const textOf = (prompt: unknown): string => {
@@ -170,6 +172,7 @@ export function createFakeModel(behaviour: FakeBehaviour = {}) {
     active += 1; maxActive = Math.max(maxActive, active);
     try {
       if (behaviour.delayMs) await new Promise((resolve) => setTimeout(resolve, behaviour.delayMs));
+      if (behaviour.beforeRespond) await behaviour.beforeRespond(call);
       const value = (behaviour.respond ?? defaultResponse)(call);
       const unknown = value && typeof value === "object" && (value as { usage?: unknown }).usage === "unknown";
       if (value instanceof Error) throw value;

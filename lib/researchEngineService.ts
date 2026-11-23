@@ -20,7 +20,7 @@ import { researchFundingAdapter } from "@/lib/researchEngineFunding";
 import { researchNow } from "@/lib/researchEngineRuntime";
 import { resolveResearchSelections, researchProjectSourcesAvailable } from "@/lib/researchEngineSources";
 import { bumpRunSequence, enqueueResearchWorkItems, lockResearchRun, readResearchRunMoney } from "@/lib/researchEngineStore";
-import { advanceResearchRun, createPublicRedaction, providerFor, startResearchFromPlan } from "@/lib/researchEngineWorker";
+import { advanceResearchRun, createPublicRedaction, providerFor, researchRunDeadline, startResearchFromPlan } from "@/lib/researchEngineWorker";
 import { researchPreviewLocale } from "@/lib/researchPreviewPrompt";
 
 /**
@@ -140,6 +140,12 @@ export const researchRunCreateSchema = z.object({
   profile: z.enum(["standard", "deep"]).default("standard"),
   approvedCredits: z.number().int().min(1).max(100_000),
   autoStart: z.boolean().default(false),
+  /**
+   * Creating a run asks for its plan, the one step both start modes share ("make a
+   * plan" and "start" both begin there). Only an explicit false keeps a draft with
+   * no paid call, for a client that adds sources before planning.
+   */
+  requestPlan: z.boolean().optional(),
   locale: z.string().trim().min(2).max(35).optional(),
 }).strict();
 export type ResearchRunCreateInput = z.infer<typeof researchRunCreateSchema>;
@@ -174,7 +180,6 @@ export async function createResearchRun(input: { request: Request; userId: strin
     locale, currentDate: now.toISOString().slice(0, 10), amendments: [], autoStart: payload.autoStart, revisionRequests: [],
   });
   const finalizationReserve = Math.min(payload.approvedCredits, Math.max(pinned.perCall * 3, Math.ceil(payload.approvedCredits * 0.2)));
-  const profile = RESEARCH_PROFILES[payload.profile];
   const run = await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`research-engine-assistant:${payload.assistantMessageId}`}))`;
     let conversationId = payload.conversationId;
@@ -198,7 +203,6 @@ export async function createResearchRun(input: { request: Request; userId: strin
       questionDigest: digest(payload.brief.question), pageReadingEnabled: true, totalOutputTokens: 1, inputTokenCeiling: 1, searchSurchargeCredits: 0,
       status: "draft", engineVersion: RESEARCH_ENGINE_VERSION, inputManifest: json(manifest), executionProfile: json(pinned.profile),
       approvedCredits: payload.approvedCredits, finalizationReserveCredits: finalizationReserve,
-      runDeadlineAt: new Date(now.getTime() + profile.runDeadlineMinutes * 60_000),
     } });
     for (const entry of entries) {
       if (entry.type === "url") {
@@ -211,7 +215,7 @@ export async function createResearchRun(input: { request: Request; userId: strin
     }
     return created;
   });
-  if (payload.autoStart) await requestResearchPlan({ request: input.request, userId: input.userId, runId: run.id, expectedPlanRevision: 0 });
+  if (payload.autoStart || payload.requestPlan !== false) await requestResearchPlan({ request: input.request, userId: input.userId, runId: run.id, expectedPlanRevision: 0 });
   return { created: true as const, run: await readResearchRunDto(input.userId, run.id, input.request) };
 }
 
@@ -288,7 +292,11 @@ export async function resumeResearchRun(input: { request: Request; userId: strin
     if (run.cancelRequestedAt) throw refuse(409, "RESEARCH_RUN_CANCELLED", "This research was cancelled.");
     const finalOpen = await tx.researchWorkItem.count({ where: { runId: run.id, kind: { in: ["verify", "write_section", "synthesize"] }, status: { in: ["queued", "running", "blocked"] } } });
     const planOpen = await tx.researchWorkItem.count({ where: { runId: run.id, kind: "plan", status: { in: ["queued", "running"] } } });
+    // Time spent paused does not count against the run deadline.
+    const now = researchNow();
+    const pausedFor = run.pausedAt ? Math.max(0, now.getTime() - run.pausedAt.getTime()) : 0;
     await bumpRunSequence(tx, run.id, { pauseRequestedAt: null, pausedAt: null,
+      ...(run.runDeadlineAt && pausedFor ? { runDeadlineAt: new Date(run.runDeadlineAt.getTime() + pausedFor) } : {}),
       status: run.status !== "paused" ? run.status : planOpen ? "planning" : finalOpen ? "finalizing" : "queued" });
   });
   await advanceResearchRun(input.runId);
@@ -453,7 +461,8 @@ export async function requestResearchRevision(input: { request: Request; userId:
       }
     }
     await enqueueResearchWorkItems(tx, run.id, items);
-    await bumpRunSequence(tx, run.id, { inputManifest: json(next), inputRevision, status: "running", completedAt: null, stopReason: null });
+    await bumpRunSequence(tx, run.id, { inputManifest: json(next), inputRevision, status: "running", completedAt: null, stopReason: null,
+      runDeadlineAt: researchRunDeadline(manifest, researchNow()) });
   });
   await advanceResearchRun(input.runId);
   return readResearchRunDto(input.userId, input.runId, input.request);

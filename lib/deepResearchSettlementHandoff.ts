@@ -248,9 +248,10 @@ export async function researchPreviewSettlementForExpiry(
     stoppedResearchPreviewUsage(tx, run, "failed");
 }
 
-const ZERO_RESEARCH_SEGMENT_USAGE: ResearchPreviewSettlementUsage = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0,
-  cacheWriteInputTokens: 0, reasoningTokens: 0, usageFromProvider: true, outcome: "failed", searchExecuted: false, searchQueryCount: 0,
-  searchBackendRequestCount: 0, searchQueriesObserved: true };
+/** Settles a Research engine v2 hold on which nothing was dispatched (one definition for worker, recovery and expiry). */
+export const RESEARCH_ZERO_SETTLEMENT_USAGE = Object.freeze({ inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0,
+  reasoningTokens: 0, usageFromProvider: true, outcome: "failed", searchExecuted: false, searchQueryCount: 0,
+  searchBackendRequestCount: 0, searchQueriesObserved: true }) satisfies ResearchPreviewSettlementUsage;
 
 /**
  * A hold that expires between its creation and its bind (the reservation's
@@ -268,7 +269,7 @@ async function unboundResearchSegmentSettlementForExpiry(
   const segment = await tx.researchFundingSegment.findUnique({ where: { id: reservation.traceId }, select: { id: true, status: true, reservationId: true } });
   if (!segment || segment.reservationId !== null) return null;
   if (segment.status === "reserving") await tx.researchFundingSegment.update({ where: { id: segment.id }, data: { status: "released" } });
-  return ZERO_RESEARCH_SEGMENT_USAGE;
+  return { ...RESEARCH_ZERO_SETTLEMENT_USAGE };
 }
 
 /**
@@ -304,7 +305,7 @@ async function researchEngineSegmentSettlementForExpiry(
       throw new ResearchPreviewRunError(409, "RESEARCH_RUN_STILL_ACTIVE", "Research owns this reservation until its dispatch is decided.");
     }
     await tx.researchFundingSegment.update({ where: { id: segment.id }, data: { status: "released" } });
-    return ZERO_RESEARCH_SEGMENT_USAGE;
+    return { ...RESEARCH_ZERO_SETTLEMENT_USAGE };
   }
   throw new ResearchPreviewRunError(409, "RESEARCH_RUN_STILL_ACTIVE", "Research owns this reservation until its work is settled.");
 }

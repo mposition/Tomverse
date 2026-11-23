@@ -3,16 +3,15 @@
 import Link from "next/link";
 import { useEffect, useId, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
-import { ArrowRight, ExternalLink, Menu, X } from "lucide-react";
+import { ArrowRight, ChevronDown, ExternalLink, Menu, X } from "lucide-react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { MarketingLanguageSwitcher } from "./MarketingLanguageSwitcher";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { LOCALIZED_SEO_PATHS, localizedPath } from "@/lib/seo";
 import { statusLinkLabel, statusNewTabCopy } from "./statusLinkCopy";
 import { LocaleSupportNotice } from "./LocaleSupportNotice";
-import { developerToolsCopy } from "@/locales/developerTools";
-import { CHAT_PRODUCT_PATH, CLI_DOWNLOAD_PATH, DEVELOPERS_PATH, REVIEW_PRODUCT_PATH, VSCODE_GUIDE_PATH } from "@/lib/marketingRoutes";
-import { useModelCatalog } from "@/components/ModelCatalogProvider";
+import { editorExtensionsCopy } from "@/locales/developerTools";
+import { CHAT_PRODUCT_PATH, CLI_DOWNLOAD_PATH, DEVELOPERS_PATH, EDITOR_EXTENSIONS_PATH, REVIEW_PRODUCT_PATH } from "@/lib/marketingRoutes";
 import { useMarketingChatEntry } from "./MarketingChatAvailability";
 
 // Prefix only paths with an explicit `/[locale]` route. Legal pages keep their
@@ -658,7 +657,7 @@ type NavEntry = { title: string; body: string; href: string };
 type NavCopy = { chat: string; review: string; developers: string; models: string; chatMenu: string; developersMenu: string; soon: string; apiKeys: string; chatItems: NavEntry[]; developerItems: NavEntry[] };
 
 // Homepage V2 navigation (owner approval 2026-11-20): 채팅 and 개발자 open
-// drop-downs into their pages' sections. `{n}` is the live provider count.
+// drop-downs into their pages' sections.
 const navEntries = (lang: Language): NavCopy => {
   const c = launchNav[lang];
   return {
@@ -667,7 +666,7 @@ const navEntries = (lang: Language): NavCopy => {
     developerItems: [
       { ...c.developerItems[0], href: DEVELOPERS_PATH },
       { ...c.developerItems[2], href: CLI_DOWNLOAD_PATH },
-      { title: "Tomverse for VS Code", body: developerToolsCopy[lang].editor, href: VSCODE_GUIDE_PATH },
+      { title: editorExtensionsCopy[lang].menuTitle, body: editorExtensionsCopy[lang].menuDescription, href: EDITOR_EXTENSIONS_PATH },
       { ...c.developerItems[1], href: `${DEVELOPERS_PATH}#connect` },
     ],
   };
@@ -680,7 +679,7 @@ const launchNav: Record<Language, Omit<NavCopy, "chatItems" | "developerItems"> 
       { title: "이미지 · 파일", body: "생성, 사진 편집, 파일 변환" }, { title: "플러그인 · MCP", body: "업무 도구를 대화 안으로" }, { title: "모바일 앱", body: "Android · iOS 곧 출시" },
     ],
     developerItems: [
-      { title: "Tomverse API", body: "API 키 하나로 공급자 {n}곳" }, { title: "코딩 도구 연결", body: "Codex · Claude Code · Cursor · VS Code" }, { title: "Tomverse CLI 설치", body: "터미널의 코딩 에이전트" },
+      { title: "API", body: "서비스에 Tomverse 연동" }, { title: "코딩 도구 연결", body: "사용 중인 도구에 API 연결" }, { title: "Tomverse CLI", body: "터미널에서 Tomverse 사용" },
     ],
   },
   en: {
@@ -690,7 +689,7 @@ const launchNav: Record<Language, Omit<NavCopy, "chatItems" | "developerItems"> 
       { title: "Images · files", body: "Generation, photo editing, file conversion" }, { title: "Plugins · MCP", body: "Your work tools inside the chat" }, { title: "Mobile apps", body: "Android · iOS coming soon" },
     ],
     developerItems: [
-      { title: "Tomverse API", body: "{n} providers with one API key" }, { title: "Connect coding tools", body: "Codex · Claude Code · Cursor · VS Code" }, { title: "Install Tomverse CLI", body: "A coding agent in your terminal" },
+      { title: "API", body: "Connect Tomverse to your service" }, { title: "Connect coding tools", body: "Connect the tools you already use" }, { title: "Tomverse CLI", body: "Use Tomverse in your terminal" },
     ],
   },
   zh: {
@@ -700,7 +699,7 @@ const launchNav: Record<Language, Omit<NavCopy, "chatItems" | "developerItems"> 
       { title: "图片 · 文件", body: "生成、照片编辑、文件转换" }, { title: "插件 · MCP", body: "把工作工具带进对话" }, { title: "移动应用", body: "Android · iOS 即将推出" },
     ],
     developerItems: [
-      { title: "Tomverse API", body: "一个 API 密钥，{n} 家提供商" }, { title: "连接编程工具", body: "Codex · Claude Code · Cursor · VS Code" }, { title: "安装 Tomverse CLI", body: "终端里的编程代理" },
+      { title: "API", body: "将 Tomverse 接入你的服务" }, { title: "连接编程工具", body: "将 API 连接到现有工具" }, { title: "Tomverse CLI", body: "在终端使用 Tomverse" },
     ],
   },
   "zh-Hant": {
@@ -710,7 +709,7 @@ const launchNav: Record<Language, Omit<NavCopy, "chatItems" | "developerItems"> 
       { title: "圖片 · 檔案", body: "生成、照片編輯、檔案轉換" }, { title: "外掛 · MCP", body: "把工作工具帶進對話" }, { title: "行動應用程式", body: "Android · iOS 即將推出" },
     ],
     developerItems: [
-      { title: "Tomverse API", body: "一組 API 金鑰，{n} 家供應商" }, { title: "連接程式設計工具", body: "Codex · Claude Code · Cursor · VS Code" }, { title: "安裝 Tomverse CLI", body: "終端機裡的程式設計代理" },
+      { title: "API", body: "將 Tomverse 整合到你的服務" }, { title: "連接程式設計工具", body: "將 API 連接到現有工具" }, { title: "Tomverse CLI", body: "在終端機使用 Tomverse" },
     ],
   },
   fr: {
@@ -720,7 +719,7 @@ const launchNav: Record<Language, Omit<NavCopy, "chatItems" | "developerItems"> 
       { title: "Images · fichiers", body: "Génération, retouche photo, conversion" }, { title: "Plugins · MCP", body: "Vos outils de travail dans la conversation" }, { title: "Applications mobiles", body: "Android · iOS bientôt" },
     ],
     developerItems: [
-      { title: "Tomverse API", body: "{n} fournisseurs avec une seule clé API" }, { title: "Connecter vos outils", body: "Codex · Claude Code · Cursor · VS Code" }, { title: "Installer Tomverse CLI", body: "Un agent de code dans votre terminal" },
+      { title: "API", body: "Intégrer Tomverse à votre service" }, { title: "Connecter vos outils", body: "Connecter l’API à vos outils" }, { title: "Tomverse CLI", body: "Utiliser Tomverse dans votre terminal" },
     ],
   },
   de: {
@@ -730,7 +729,7 @@ const launchNav: Record<Language, Omit<NavCopy, "chatItems" | "developerItems"> 
       { title: "Bilder · Dateien", body: "Erstellen, Fotobearbeitung, Umwandlung" }, { title: "Plugins · MCP", body: "Ihre Arbeitstools im Chat" }, { title: "Mobile Apps", body: "Android · iOS in Kürze" },
     ],
     developerItems: [
-      { title: "Tomverse API", body: "{n} Anbieter mit einem API-Schlüssel" }, { title: "Coding-Tools verbinden", body: "Codex · Claude Code · Cursor · VS Code" }, { title: "Tomverse CLI installieren", body: "Ein Coding-Agent im Terminal" },
+      { title: "API", body: "Tomverse in Ihren Dienst integrieren" }, { title: "Coding-Tools verbinden", body: "Die API mit Ihren Tools verbinden" }, { title: "Tomverse CLI", body: "Tomverse im Terminal nutzen" },
     ],
   },
   es: {
@@ -740,7 +739,7 @@ const launchNav: Record<Language, Omit<NavCopy, "chatItems" | "developerItems"> 
       { title: "Imágenes · archivos", body: "Generación, edición de fotos, conversión" }, { title: "Plugins · MCP", body: "Tus herramientas de trabajo en el chat" }, { title: "Apps móviles", body: "Android · iOS muy pronto" },
     ],
     developerItems: [
-      { title: "Tomverse API", body: "{n} proveedores con una clave de API" }, { title: "Conectar herramientas", body: "Codex · Claude Code · Cursor · VS Code" }, { title: "Instalar Tomverse CLI", body: "Un agente de código en tu terminal" },
+      { title: "API", body: "Integra Tomverse en tu servicio" }, { title: "Conectar herramientas", body: "Conecta la API a tus herramientas" }, { title: "Tomverse CLI", body: "Usa Tomverse en tu terminal" },
     ],
   },
   pt: {
@@ -750,26 +749,36 @@ const launchNav: Record<Language, Omit<NavCopy, "chatItems" | "developerItems"> 
       { title: "Imagens · arquivos", body: "Geração, edição de fotos, conversão" }, { title: "Plugins · MCP", body: "Suas ferramentas de trabalho no chat" }, { title: "Apps móveis", body: "Android · iOS em breve" },
     ],
     developerItems: [
-      { title: "Tomverse API", body: "{n} provedores com uma chave de API" }, { title: "Conectar ferramentas", body: "Codex · Claude Code · Cursor · VS Code" }, { title: "Instalar o Tomverse CLI", body: "Um agente de código no seu terminal" },
+      { title: "API", body: "Integre o Tomverse ao seu serviço" }, { title: "Conectar ferramentas", body: "Conecte a API às suas ferramentas" }, { title: "Tomverse CLI", body: "Use o Tomverse no terminal" },
     ],
   },
 };
 
-function NavMenu({ label, items, testId, href, menuLabel, n, lang }: {
-  label: string; items: NavEntry[]; testId: string; href: string; menuLabel: string; n: number; lang: Language;
+function NavMenu({ label, items, testId, href, menuLabel, lang }: {
+  label: string; items: NavEntry[]; testId: string; href: string; menuLabel: string; lang: Language;
 }) {
+  const developerMenu = href === DEVELOPERS_PATH;
+  const triggerStyle = developerMenu
+    ? "gap-1.5 rounded-lg group-hover:bg-white/[0.08] group-focus-within:bg-white/[0.08]"
+    : "gap-1 rounded-full";
+  const panelStyle = developerMenu ? "w-[368px] p-2.5" : "min-w-[280px] p-2";
+  const entryStyle = developerMenu
+    ? "rounded-lg py-2 hover:bg-blue-600/15 focus-visible:bg-blue-600/15"
+    : "rounded-[10px] py-2.5 hover:bg-[#272a33]";
+
   return <div className="group relative">
     <Link href={localizedHref(lang, href)} data-testid={testId}
-      className={`inline-flex items-center gap-1 rounded-full px-3 py-2 text-zinc-300 transition hover:bg-white/[0.06] hover:text-white group-focus-within:text-white ${launchFocus}`}>
-      <span className="after:ml-1 after:text-[11px] after:text-zinc-400 after:content-['▾'_/_'']">{label}</span>
+      className={`inline-flex items-center px-3 py-2 text-zinc-300 transition hover:bg-white/[0.06] hover:text-white group-focus-within:text-white ${triggerStyle} ${launchFocus}`}>
+      {developerMenu ? <>{label}<ChevronDown size={14} aria-hidden="true" /></>
+        : <span className="after:ml-1 after:text-[11px] after:text-zinc-400 after:content-['▾'_/_'']">{label}</span>}
     </Link>
     {/* Opens on hover and on keyboard focus within; every entry is also a plain link on its page. */}
     <div role="group" aria-label={menuLabel}
-      className="invisible absolute left-[-16px] top-full z-50 grid min-w-[280px] gap-0.5 rounded-2xl bg-[rgb(28_30_37/0.97)] p-2 opacity-0 shadow-[inset_0_0_0_1px_#31343f,0_24px_60px_-20px_rgb(0_0_0/0.6)] backdrop-blur-xl transition duration-150 before:absolute before:inset-x-0 before:-top-3 before:h-3 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100 mt-2">
+      className={`invisible absolute left-[-16px] top-full z-50 mt-2 grid gap-0.5 rounded-2xl bg-[rgb(28_30_37/0.97)] opacity-0 shadow-[inset_0_0_0_1px_#31343f,0_24px_60px_-20px_rgb(0_0_0/0.6)] backdrop-blur-xl transition duration-150 before:absolute before:inset-x-0 before:-top-3 before:h-3 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100 ${panelStyle}`}>
       {items.map((item) => <Link key={item.href} href={localizedHref(lang, item.href)}
-        className={`grid gap-0.5 rounded-[10px] px-3 py-2.5 hover:bg-[#272a33] ${launchFocus}`}>
+        className={`grid gap-0.5 px-3 ${entryStyle} ${launchFocus}`}>
         <b className="text-sm font-bold text-zinc-50">{item.title}</b>
-        <span className="text-xs font-medium text-zinc-400">{item.body.replaceAll("{n}", String(n))}</span>
+        <span className="text-xs font-medium text-zinc-400">{item.body}</span>
       </Link>)}
     </div>
   </div>;
@@ -793,9 +802,6 @@ function LaunchMarketingHeader({
   const menuRef = useRef<HTMLElement>(null);
   const chatHref = entry.chatAvailable ? suppliedChatHref ?? entry.chatHref : entry.chatHref;
   const nav = navEntries(lang);
-  const { publicModels } = useModelCatalog();
-  const providerCount = new Set(publicModels.map((model) => model.provider)).size;
-  const n = providerCount >= 3 ? providerCount : 12;
   // The header and footer go to pages; the CTA opens the app.
   const items = [
     { label: nav.chat, href: CHAT_PRODUCT_PATH, key: "chat", menu: nav.chatItems, menuLabel: nav.chatMenu },
@@ -844,7 +850,7 @@ function LaunchMarketingHeader({
           </Link>
           <nav aria-label={copy.navigation} className="hidden items-center gap-1 text-sm font-semibold lg:flex">
             {items.map((item) => item.menu
-              ? <NavMenu key={item.key} label={item.label} items={item.menu} href={item.href} testId={`header-${item.key}-link`} menuLabel={item.menuLabel} n={n} lang={lang} />
+              ? <NavMenu key={item.key} label={item.label} items={item.menu} href={item.href} testId={`header-${item.key}-link`} menuLabel={item.menuLabel} lang={lang} />
               : <Link key={item.key} href={localizedHref(lang, item.href)} data-testid={`header-${item.key}-link`} className={`inline-flex items-center gap-1 rounded-full px-3 py-2 text-zinc-300 transition hover:bg-white/[0.06] hover:text-white ${launchFocus}`}>
                 <span className={item.key === "review" ? "after:ml-1 after:text-[11px] after:text-[#5b8dff] after:content-['✦'_/_'']" : undefined}>{item.label}</span>
               </Link>)}
@@ -896,7 +902,7 @@ function LaunchMarketingFooter({ maxWidth = "max-w-7xl" }: MarketingFooterProps)
       { label: "Tomverse API", href: DEVELOPERS_PATH },
       { label: nav.apiKeys, href: "/settings/api" },
       { label: nav.developerItems[1].title, href: CLI_DOWNLOAD_PATH },
-      { label: "Tomverse for VS Code", href: VSCODE_GUIDE_PATH },
+      { label: editorExtensionsCopy[lang].menuTitle, href: EDITOR_EXTENSIONS_PATH },
     ] },
     { title: copy.help, items: [
       { label: copy.helpCentre, href: "/support/help-centre" }, { label: copy.faq, href: "/faq" },

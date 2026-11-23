@@ -93,11 +93,21 @@ export const DEFAULT_PRICE_SOURCES: Readonly<Record<string, readonly string[]>> 
 export const defaultPriceSources = (provider: string): readonly string[] =>
   Object.hasOwn(DEFAULT_PRICE_SOURCES, provider) ? DEFAULT_PRICE_SOURCES[provider] : [];
 
-export type CodingCapabilitySources = { toolCalling: string; structuredOutput: string };
+export type CodingCapabilitySources = {
+  toolCalling: string;
+  structuredOutput: string;
+  /**
+   * The provider's page on its models: the coding notes stand on it first.
+   * `{model}` is the API model id, where each model has a page of its own.
+   */
+  models: string;
+};
 
 /**
  * The pages a coding link draft reads for tool calling and structured output,
- * one each per draft provider. Each was checked on 2026-11-20 to answer 200
+ * one each per draft provider, and the provider's models page for the coding
+ * notes (2026-11-23: the two feature pages rarely say anything about one
+ * model's coding). Each was checked on 2026-11-20 (models pages 2026-11-23) to answer 200
  * without a redirect (the fetch refuses redirects), to carry its text in the
  * HTML or Markdown, and to fit the draft page limits. A docs move turns one
  * into fetch_failed; the operator can then enter the new page in the dialog.
@@ -106,61 +116,78 @@ export const DEFAULT_CODING_CAPABILITY_SOURCES: Readonly<Record<string, CodingCa
   openai: {
     toolCalling: "https://developers.openai.com/api/docs/guides/function-calling",
     structuredOutput: "https://developers.openai.com/api/docs/guides/structured-outputs",
+    models: "https://developers.openai.com/api/docs/models/{model}.md",
   },
   anthropic: {
     toolCalling: "https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview.md",
     structuredOutput: "https://platform.claude.com/docs/en/build-with-claude/structured-outputs.md",
+    models: "https://platform.claude.com/docs/en/models/overview.md",
   },
   cohere: {
     toolCalling: "https://docs.cohere.com/docs/tool-use-overview",
     structuredOutput: "https://docs.cohere.com/docs/structured-outputs",
+    models: "https://docs.cohere.com/docs/models.md",
   },
   google: {
     toolCalling: "https://aistudio.google.com/docs/function-calling",
     structuredOutput: "https://aistudio.google.com/docs/structured-output",
+    models: "https://aistudio.google.com/docs/models.md",
   },
   groq: {
     toolCalling: "https://console.groq.com/docs/tool-use/overview",
     structuredOutput: "https://console.groq.com/docs/structured-outputs",
+    models: "https://console.groq.com/docs/models.md",
   },
   xai: {
     toolCalling: "https://docs.x.ai/developers/tools/function-calling",
     structuredOutput: "https://docs.x.ai/developers/model-capabilities/text/structured-outputs",
+    models: "https://docs.x.ai/developers/models",
   },
   // DeepSeek answers the slashless paths with a 302 to these.
   deepseek: {
     toolCalling: "https://api-docs.deepseek.com/guides/tool_calls/",
     structuredOutput: "https://api-docs.deepseek.com/guides/json_mode/",
+    models: "https://api-docs.deepseek.com/quick_start/pricing/",
   },
   mistral: {
     toolCalling: "https://docs.mistral.ai/inference/conversations/function-calling",
     structuredOutput: "https://docs.mistral.ai/inference/conversations/structured-output",
+    models: "https://docs.mistral.ai/models.md",
   },
   moonshot: {
     toolCalling: "https://platform.kimi.ai/docs/guide/use-kimi-api-to-complete-tool-calls",
     structuredOutput: "https://platform.kimi.ai/docs/guide/use-json-mode-feature-of-kimi-api",
+    models: "https://platform.kimi.ai/docs/models",
   },
   // MiniMax has no structured output guide; the chat API reference states response_format.
   minimax: {
     toolCalling: "https://platform.minimax.io/docs/guides/text-m3-function-call.md",
     structuredOutput: "https://platform.minimax.io/docs/api-reference/text-post.md",
+    models: "https://platform.minimax.io/docs/guides/models-intro.md",
   },
   qwen: {
     toolCalling: "https://www.alibabacloud.com/help/en/model-studio/qwen-function-calling",
     structuredOutput: "https://www.alibabacloud.com/help/en/model-studio/qwen-structured-output",
+    models: "https://www.alibabacloud.com/help/en/model-studio/models",
   },
   zhipu: {
     toolCalling: "https://docs.z.ai/guides/capabilities/function-calling",
     structuredOutput: "https://docs.z.ai/guides/capabilities/struct-output",
+    models: "https://docs.z.ai/guides/overview/overview.md",
   },
   perplexity: {
     toolCalling: "https://docs.perplexity.ai/docs/agent-api/tools/custom-functions",
     structuredOutput: "https://docs.perplexity.ai/docs/agent-api/output-control",
+    models: "https://docs.perplexity.ai/docs/agent-api/models",
   },
 };
 
 export const defaultCodingCapabilitySources = (provider: string): CodingCapabilitySources | null =>
   Object.hasOwn(DEFAULT_CODING_CAPABILITY_SOURCES, provider) ? DEFAULT_CODING_CAPABILITY_SOURCES[provider] : null;
+
+/** The models page for one model: its own page where the provider has one, else the provider's overview. */
+export const codingModelPage = (sources: CodingCapabilitySources, apiModelId: string): string =>
+  sources.models.replace("{model}", encodeURIComponent(apiModelId));
 
 /**
  * Exact hosts only: a subdomain wildcard would admit user-written pages

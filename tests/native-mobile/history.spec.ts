@@ -30,7 +30,7 @@ test('compact rows keep touch targets, truncate long titles and pin the account 
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   }
   await page.screenshot({ path: info.outputPath('compact-short-screen.png') });
-  await page.setViewportSize({ width: 390, height: 844 }); await page.evaluate(() => localStorage.setItem('tomverse-language','ko')); await page.reload(); await page.getByRole('button',{name:'대화',exact:true}).click();
+  await page.setViewportSize({ width: 390, height: 844 }); await page.addInitScript(() => localStorage.setItem('tomverse-language','ko')); await page.reload(); await page.getByRole('button',{name:'대화',exact:true}).click();
   await page.screenshot({ path: resolve(process.cwd(), '../../.tmp/native-parity/history-implemented-korean.png') });
   await page.getByRole('button',{name:'추가 작업: Travel plan',exact:true}).click(); await page.screenshot({ path: resolve(process.cwd(), '../../.tmp/native-parity/history-menu-korean.png') });
 });

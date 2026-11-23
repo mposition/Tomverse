@@ -22,7 +22,7 @@ import {
   writerSynthesisPrompt, type PublicEvidenceBlock, type PublicResearchContext, type PublicSourceLine,
 } from "@/lib/researchEnginePrompts";
 import {
-  buildBibliography, describeSectionProblems, redactReportForPublic, renderReportMarkdown, validateSectionDraft,
+  buildBibliography, describeSectionProblems, redactReportForPublic, renderReportMarkdown, validateSectionDraft, withholdRevokedSource,
   type ReportClaim, type ReportSource,
 } from "@/lib/researchEngineReport";
 import { researchEvidenceObjectKey, researchEvidenceStore, researchNow } from "@/lib/researchEngineRuntime";
@@ -551,33 +551,28 @@ async function handleAnalyzePrivate(run: RunRow, item: ResearchWorkItem, fence: 
     }
     await finishResearchWorkItem(tx, fence, { status: "completed", result: { findings: resolved.map((finding) => ({ ...finding, privateDerived: true })),
       limitations: result.value.limitations } });
+    // A dispatch sent before a revocation can return after it; its output is withheld too.
+    await withholdRevokedSources(tx, run.id);
     await bumpRunSequence(tx, run.id);
   });
   await settleResearchSegmentIfReady(result.segmentId);
 }
 
-/** A revoked private source: stop using it, drop its stored text, and mark claims citing it unsupported. */
+/**
+ * A private-derived claim that cites no private source: no revocation could find
+ * it. Such a claim is never stored, and one stored before that rule is withheld
+ * once any private source of the run is revoked.
+ */
+function unattributedPrivateClaim(claim: { privateDerived: boolean; evidence: unknown }, privateSourceKeys: ReadonlySet<string>) {
+  return claim.privateDerived && !(claim.evidence as Array<{ sourceKey: string }>).some((evidence) => privateSourceKeys.has(evidence.sourceKey));
+}
+
+/** A revoked private source: stop using it, drop its stored text, and withhold everything derived from it. */
 export async function revokePrivateSource(run: Pick<RunRow, "id">, sourceId: string) {
   await prisma.$transaction(async (tx) => {
     await lockResearchRun(tx, run.id);
-    // Labels of private sources are copied from the original (a Memory title is its
-    // first words), so every stored copy goes with the grant: the source row, the
-    // manifest entry, each report revision's bibliography and the chat answer.
-    const source = await tx.researchSource.update({ where: { id: sourceId }, data: { status: "revoked", title: null, snippet: null } });
-    const runRow = await tx.researchPreviewRun.findUniqueOrThrow({ where: { id: run.id }, select: { inputManifest: true, assistantMessageId: true, currentReportRevision: true } });
-    const manifest = researchInputManifestSchema.parse(runRow.inputManifest);
-    const labels = researchEngineLabels(manifest.brief.outputLanguage ?? manifest.locale);
-    const placeholder = labels.report.privateSource;
-    const entries = manifest.entries.map((entry) => entry.key === source.sourceKey && entry.type !== "url" ? { ...entry, label: placeholder } : entry);
-    await tx.researchPreviewRun.update({ where: { id: run.id }, data: { inputManifest: json({ ...manifest, entries }) } });
-    let currentChanged = false;
-    for (const revision of await tx.researchReportRevision.findMany({ where: { runId: run.id }, select: { id: true, revision: true, document: true } })) {
-      const document = researchReportDocumentSchema.parse(revision.document);
-      if (!document.bibliography.some((entry) => entry.sourceKey === source.sourceKey)) continue;
-      await tx.researchReportRevision.update({ where: { id: revision.id }, data: { document: json({ ...document,
-        bibliography: document.bibliography.map((entry) => entry.sourceKey === source.sourceKey ? { ...entry, title: placeholder } : entry) }) } });
-      if (revision.revision === runRow.currentReportRevision) currentChanged = true;
-    }
+    await tx.researchSource.update({ where: { id: sourceId }, data: { status: "revoked", title: null, snippet: null } });
+    await withholdRevokedSources(tx, run.id);
     const versions = await tx.researchSourceVersion.findMany({ where: { sourceId }, select: { objectKey: true } });
     for (const version of versions) if (version.objectKey) {
       await tx.researchEvidenceObjectCleanup.upsert({ where: { objectKey: version.objectKey },
@@ -585,28 +580,81 @@ export async function revokePrivateSource(run: Pick<RunRow, "id">, sourceId: str
     }
     // Version rows stay (a read version must keep its key); reads refuse a revoked
     // source and the queued cleanup deletes the stored object.
-    const claims = await tx.researchClaim.findMany({ where: { runId: run.id } });
-    for (const claim of claims) {
-      if ((claim.evidence as Array<{ sourceKey: string }>).some((evidence) => evidence.sourceKey === source.sourceKey)) {
-        await tx.researchClaim.update({ where: { id: claim.id }, data: { verification: "unsupported", checks: json({ revoked: source.sourceKey }) } });
-      }
-    }
-    // The chat answer is re-rendered from the cleaned current revision, so it carries
-    // neither the copied label nor the old verification.
-    if (currentChanged) {
-      const current = await tx.researchReportRevision.findUnique({ where: { runId_revision: { runId: run.id, revision: runRow.currentReportRevision } }, include: { claims: true } });
-      const message = await tx.message.findUnique({ where: { id: runRow.assistantMessageId }, select: { id: true } });
-      if (current && message) {
-        const claimMap = new Map<string, ReportClaim>(current.claims.map((claim) => [claim.claimKey, { claimKey: claim.claimKey, sectionKey: claim.sectionKey,
-          text: claim.text, kind: claim.kind as ReportClaim["kind"], verification: claim.verification as ReportClaim["verification"],
-          privateDerived: claim.privateDerived, evidence: claim.evidence as ReportClaim["evidence"] }]));
-        const markdown = renderReportMarkdown(researchReportDocumentSchema.parse(current.document), claimMap,
-          current.qualityStatus as "complete" | "partial" | "insufficient_evidence", labels.report);
-        await tx.message.update({ where: { id: message.id }, data: { content: markdown } });
-      }
-    }
     await bumpRunSequence(tx, run.id);
   });
+}
+
+/**
+ * Withholds, under the run lock, everything derived from the run's revoked private
+ * sources. Revocation calls it, and so does every commit that stores model output
+ * (analysis findings, verdicts, sections, the finished report): a dispatch sent
+ * before a revocation can return after it, and its result must not bring the
+ * text back. With no revoked source it is one query. Idempotent.
+ *
+ * Labels of private sources are copied from the original (a Memory title is its
+ * first words), so every stored copy goes: the manifest entry, each revision's
+ * bibliography and the chat answer. Text derived from a source goes too: claim
+ * text, what a model wrote after reading such claims, and the stored analysis
+ * findings (which hold verbatim quotes). Evidence references stay; they hold no text.
+ */
+export async function withholdRevokedSources(tx: Prisma.TransactionClient, runId: string) {
+  const revoked = (await tx.researchSource.findMany({ where: { runId, visibility: "private", status: "revoked" }, select: { sourceKey: true } }))
+    .map((row) => row.sourceKey);
+  if (!revoked.length) return;
+  const keys = new Set(revoked);
+  const runRow = await tx.researchPreviewRun.findUniqueOrThrow({ where: { id: runId }, select: { inputManifest: true, assistantMessageId: true, currentReportRevision: true } });
+  const manifest = researchInputManifestSchema.parse(runRow.inputManifest);
+  const labels = researchEngineLabels(manifest.brief.outputLanguage ?? manifest.locale);
+  const placeholder = labels.report.privateSource;
+  if (manifest.entries.some((entry) => keys.has(entry.key) && entry.type !== "url" && entry.label !== placeholder)) {
+    const entries = manifest.entries.map((entry) => keys.has(entry.key) && entry.type !== "url" ? { ...entry, label: placeholder } : entry);
+    await tx.researchPreviewRun.update({ where: { id: runId }, data: { inputManifest: json({ ...manifest, entries }) } });
+  }
+  const claims = await tx.researchClaim.findMany({ where: { runId } });
+  const citedKey = (claim: { evidence: unknown }) => (claim.evidence as Array<{ sourceKey: string }>).find((evidence) => keys.has(evidence.sourceKey))?.sourceKey;
+  // Plan headings come from the planner (public context only) or the user, never from a private source.
+  const planHeadings = new Map((await tx.researchPlanRevision.findMany({ where: { runId }, select: { revision: true, plan: true } }))
+    .map((row) => { const parsed = researchPlanSchema.safeParse(row.plan);
+      return [row.revision, new Map(parsed.success ? parsed.data.outline.map((section) => [section.key, section.heading]) : [])] as const; }));
+  const revisions = await tx.researchReportRevision.findMany({ where: { runId }, select: { id: true, revision: true, planRevision: true, document: true } });
+  const currentRevisionId = revisions.find((row) => row.revision === runRow.currentReportRevision)?.id;
+  let currentChanged = false;
+  for (const revision of revisions) {
+    const own = claims.filter((claim) => claim.revisionId === revision.id).map((claim) => ({ claimKey: claim.claimKey, sectionKey: claim.sectionKey,
+      text: claim.text, verification: claim.verification as ReportClaim["verification"], evidence: claim.evidence as ReportClaim["evidence"] }));
+    const before = researchReportDocumentSchema.parse(revision.document);
+    const document = withholdRevokedSource(before, own, revoked,
+      { note: labels.redactedNote, privateSource: placeholder, title: manifest.brief.question, headings: planHeadings.get(revision.planRevision) })?.document;
+    if (!document || JSON.stringify(document) === JSON.stringify(before)) continue;
+    await tx.researchReportRevision.update({ where: { id: revision.id }, data: { document: json(document) } });
+    if (revision.revision === runRow.currentReportRevision) currentChanged = true;
+  }
+  const privateSourceKeys = new Set(manifest.entries.filter((entry) => entry.type !== "url").map((entry) => entry.key));
+  for (const claim of claims) {
+    const key = citedKey(claim) ?? (unattributedPrivateClaim(claim, privateSourceKeys) ? "unattributed" : undefined);
+    if (key && (claim.text !== labels.redactedNote || claim.verification !== "unsupported")) {
+      await tx.researchClaim.update({ where: { id: claim.id }, data: { text: labels.redactedNote, verification: "unsupported", checks: json({ revoked: key }) } });
+      if (claim.revisionId === currentRevisionId) currentChanged = true;
+    }
+  }
+  for (const key of revoked) {
+    await tx.researchWorkItem.updateMany({ where: { runId, kind: "analyze_private", payload: { path: ["sourceKey"], equals: key } },
+      data: { result: json({ findings: [], limitations: [], revoked: true }) } });
+  }
+  // The chat answer is re-rendered from the cleaned current revision, so it carries
+  // neither the copied label nor the old text or verification.
+  if (currentChanged) {
+    const current = await tx.researchReportRevision.findUnique({ where: { runId_revision: { runId, revision: runRow.currentReportRevision } }, include: { claims: true } });
+    const message = await tx.message.findUnique({ where: { id: runRow.assistantMessageId }, select: { id: true } });
+    if (current && message) {
+      const claimMap = new Map<string, ReportClaim>(current.claims.map((claim) => [claim.claimKey, { claimKey: claim.claimKey, sectionKey: claim.sectionKey,
+        text: claim.text, kind: claim.kind as ReportClaim["kind"], verification: claim.verification as ReportClaim["verification"],
+        privateDerived: claim.privateDerived, evidence: claim.evidence as ReportClaim["evidence"] }]));
+      const markdown = renderReportMarkdown(researchReportDocumentSchema.parse(current.document), claimMap,
+        current.qualityStatus as "complete" | "partial" | "insufficient_evidence", labels.report);
+      await tx.message.update({ where: { id: message.id }, data: { content: markdown } });
+    }
+  }
 }
 
 /**
@@ -730,6 +778,8 @@ async function handleVerify(run: RunRow, item: ResearchWorkItem, fence: Research
           textEvidence: textLevel, note: verdict?.note }) } });
     }
     await finishResearchWorkItem(tx, fence, { status: "completed", result: { verdicts: result.value.verdicts.length } });
+    // A dispatch sent before a revocation can return after it; its output is withheld too.
+    await withholdRevokedSources(tx, run.id);
     await bumpRunSequence(tx, run.id);
   });
   await settleResearchSegmentIfReady(result.segmentId);
@@ -790,6 +840,8 @@ async function handleWriteSection(run: RunRow, item: ResearchWorkItem, fence: Re
       : [...current.sections, { key: payload.sectionKey, heading: result.value.heading, blocks, status: blocks.length ? "written" as const : "missing" as const }];
     await tx.researchReportRevision.update({ where: { id: revision.id }, data: { document: json({ ...current, sections }) } });
     await finishResearchWorkItem(tx, fence, { status: "completed", result: { accepted: problems.length === 0 } });
+    // A dispatch sent before a revocation can return after it; its output is withheld too.
+    await withholdRevokedSources(tx, run.id);
     await bumpRunSequence(tx, run.id);
   });
   await settleResearchSegmentIfReady(result.segmentId);
@@ -797,16 +849,30 @@ async function handleWriteSection(run: RunRow, item: ResearchWorkItem, fence: Re
 
 async function handleSynthesize(run: RunRow, item: ResearchWorkItem, fence: ResearchItemFence,
   payload: Extract<ResearchWorkPayload, { kind: "synthesize" }>, manifest: ResearchInputManifest, signal: AbortSignal) {
+  // Read before the report: a source revoked earlier is already withheld from what is read
+  // next and needs no grant; one revoked after this read is still re-checked below.
+  const revokedKeys = new Set((await prisma.researchSource.findMany({ where: { runId: run.id, visibility: "private", status: "revoked" },
+    select: { sourceKey: true } })).map((row) => row.sourceKey));
   const revision = await prisma.researchReportRevision.findUniqueOrThrow({ where: { runId_revision: { runId: run.id, revision: payload.reportRevision } } });
   const document = researchReportDocumentSchema.parse(revision.document);
   const claims = await prisma.researchClaim.findMany({ where: { revisionId: revision.id } });
+  // A source revoked after this revision's claims were made: whatever synthesis wrote
+  // would be withheld when the report is stored, so no model call is paid for it.
+  if (claims.some((claim) => (claim.evidence as Array<{ sourceKey: string }>).some((evidence) => revokedKeys.has(evidence.sourceKey)))) {
+    await prisma.$transaction(async (tx) => {
+      await lockResearchRun(tx, run.id);
+      await finishResearchWorkItem(tx, fence, { status: "completed", result: { revision: revision.revision, skipped: "source_revoked" } });
+    });
+    await finalizeReport(run.id, revision.id, null, manifest);
+    return;
+  }
   const plan = await approvedPlan(run, true);
   const limitations = await deterministicLimitations(run.id, manifest);
   // Sections and claims may carry private-derived content: re-check every private
   // source they cite immediately before sending them to the provider.
   const citedPrivate = new Set(claims.flatMap((claim) => (claim.evidence as Array<{ sourceKey: string }>).map((evidence) => evidence.sourceKey))
     .filter((key) => key.startsWith("P")));
-  const privateEntries = manifest.entries.filter((entry) => entry.type !== "url" &&
+  const privateEntries = manifest.entries.filter((entry) => entry.type !== "url" && !revokedKeys.has(entry.key) &&
     (citedPrivate.has(entry.key) || claims.some((claim) => claim.privateDerived))) as ResearchPrivateManifestEntry[];
   const result = await callResearchModel({ run, fence, role: "writer", purpose: "finalization", dispatchKey: dispatchKeyFor(item),
     ...(privateEntries.length ? { revalidate: async () =>
@@ -911,6 +977,8 @@ async function finalizeReport(runId: string, revisionId: string, synthesis: Retu
       stopReason: quality === "complete" ? "report_submitted" : "partial_report", completedAt: researchNow(),
       lastErrorCode: unknown ? "RESEARCH_SOME_OUTCOMES_UNKNOWN" : null });
     await tx.researchWorkItem.updateMany({ where: { runId, status: { in: ["queued", "blocked"] } }, data: { status: "superseded" } });
+    // The document and answer were built from reads made before this lock; a source revoked since is withheld here.
+    await withholdRevokedSources(tx, runId);
   });
 }
 
@@ -1066,7 +1134,14 @@ export async function startResearchFromPlan(tx: Prisma.TransactionClient, run: R
       providerKey: analyst, payload: { kind: "analyze_private", sourceKey: entry.key, fromChunk: 0 } });
   }
   await enqueueResearchWorkItems(tx, run.id, items);
-  await bumpRunSequence(tx, run.id, { status: "queued", approvedPlanRevision: planRevision, lastErrorCode: null });
+  // The deadline counts research time only: it starts when research starts, not while the plan waits for review.
+  await bumpRunSequence(tx, run.id, { status: "queued", approvedPlanRevision: planRevision, lastErrorCode: null,
+    runDeadlineAt: researchRunDeadline(manifest, researchNow()) });
+}
+
+/** The end of one research window for this run's profile, counted from now. */
+export function researchRunDeadline(manifest: Pick<ResearchInputManifest, "profile">, now: Date) {
+  return new Date(now.getTime() + RESEARCH_PROFILES[manifest.profile].runDeadlineMinutes * 60_000);
 }
 
 async function beginFinalization(tx: Prisma.TransactionClient, run: RunRow, manifest: ResearchInputManifest,
@@ -1104,7 +1179,16 @@ async function beginFinalization(tx: Prisma.TransactionClient, run: RunRow, mani
   const claimNumber = (key: string) => Number(key.replace(/^C/, "")) || 0;
   const parentClaims = [...(parent?.claims ?? [])].sort((a, b) => claimNumber(a.claimKey) - claimNumber(b.claimKey));
   let next = parentClaims.reduce((max, claim) => Math.max(max, claimNumber(claim.claimKey)), 0) + 1;
+  // A private-derived claim with no verified quote from a private source is tied to no
+  // source a revocation could find, so it is never stored, new or carried.
+  const privateSourceKeys = new Set(manifest.entries.filter((entry) => entry.type !== "url").map((entry) => entry.key));
+  const unattributedPrivate = (claim: { privateDerived: boolean; evidence: unknown }) => unattributedPrivateClaim(claim, privateSourceKeys);
+  // A claim withheld for a revoked source is not carried either: nothing may cite it, and
+  // carrying it would make a later revocation pass rebuild sections whose writers never saw it.
+  const revokedKeys = new Set((await tx.researchSource.findMany({ where: { runId: run.id, visibility: "private", status: "revoked" },
+    select: { sourceKey: true } })).map((row) => row.sourceKey));
   for (const claim of parentClaims) {
+    if (unattributedPrivate(claim) || (claim.evidence as Array<{ sourceKey: string }>).some((evidence) => revokedKeys.has(evidence.sourceKey))) continue;
     rows.push({ claimKey: claim.claimKey, sectionKey: claim.sectionKey, text: claim.text, kind: claim.kind, verification: claim.verification,
       privateDerived: claim.privateDerived, evidence: claim.evidence, checks: claim.checks ?? undefined });
     if (request?.kind === "refresh" || request?.kind === "conditions") needsVerify.push(rows.at(-1)!.claimKey);
@@ -1115,6 +1199,8 @@ async function beginFinalization(tx: Prisma.TransactionClient, run: RunRow, mani
     for (const finding of findings) {
       if (rows.length >= RESEARCH_RESOURCE_LIMITS.maxClaimsPerRevision) break;
       const evidence = finding.resolved.filter((span) => !excluded.has(span.sourceKey)).map((span) => { const { quote, ...stored } = span; void quote; return stored; });
+      // Includes a quote dropped because its source was revoked while the analysis was in flight.
+      if (unattributedPrivate({ privateDerived: finding.privateDerived || entry.kind === "analyze_private", evidence })) continue;
       const sectionKey = finding.privateDerived ? "all" : sectionFor.get(finding.questionKey) ?? outline[0]!.key;
       const key = `C${next++}`;
       rows.push({ claimKey: key, sectionKey, text: finding.text, kind: evidence.length ? finding.kind : "uncertain",
@@ -1127,12 +1213,25 @@ async function beginFinalization(tx: Prisma.TransactionClient, run: RunRow, mani
     sectionKey: row.sectionKey, text: row.text.slice(0, 2_000), kind: row.kind, verification: row.verification, privateDerived: row.privateDerived,
     evidence: json(row.evidence), ...(row.checks ? { checks: json(row.checks) } : {}) })) });
   if (request?.kind === "refresh") await relocateClaimsToLatestVersions(tx, run.id, created.id);
+  // Findings read before this lock may come from a source revoked since.
+  await withholdRevokedSources(tx, run.id);
   const planRevision = run.approvedPlanRevision ?? run.planRevision;
   const verifyItems: NewResearchWorkItem[] = [];
-  // Private and public claims are never verified together: a public claim's
-  // revised text must not be written by a call that saw private material.
-  const privateKeys = new Set(rows.filter((row) => row.privateDerived).map((row) => row.claimKey));
-  const groups = [needsVerify.filter((key) => !privateKeys.has(key)), needsVerify.filter((key) => privateKeys.has(key))];
+  // A verifier may revise any claim it is shown, using any text it read, so one
+  // call only ever sees one private origin. Public claims are verified apart from
+  // every private one; private claims are batched by the exact set of private
+  // sources they cite, so a revised text or note can only carry a source the
+  // claim itself cites, and revoking a source withholds every claim it could
+  // have reached. A private-derived claim that cites no private source is verified alone.
+  const rowByKey = new Map(rows.map((row) => [row.claimKey, row]));
+  const originOf = (key: string) => {
+    const row = rowByKey.get(key)!;
+    const cited = [...new Set((row.evidence as Array<{ sourceKey: string }>).map((evidence) => evidence.sourceKey).filter((sourceKey) => privateSourceKeys.has(sourceKey)))].sort();
+    return cited.length ? `private:${cited.join(",")}` : row.privateDerived ? `alone:${key}` : "public";
+  };
+  const byOrigin = new Map<string, string[]>();
+  for (const key of needsVerify) { const origin = originOf(key); byOrigin.set(origin, [...(byOrigin.get(origin) ?? []), key]); }
+  const groups = [byOrigin.get("public") ?? [], ...[...byOrigin.entries()].filter(([origin]) => origin !== "public").map(([, keys]) => keys)];
   let batch = 0;
   for (const group of groups) for (let index = 0; index < group.length; index += 30) {
     verifyItems.push({ kind: "verify", idempotencyKey: `verify:${revisionNumber}:${batch}`, planRevision, inputRevision: run.inputRevision,

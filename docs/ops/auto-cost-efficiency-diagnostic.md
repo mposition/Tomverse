@@ -44,7 +44,9 @@ cheaper model is good enough or that total cost falls.
   `calculateProviderUsageCost` with the reported cache-read and cache-write
   lines -- the router call now passes its reported cache split through -- and
   an unpriced cache write is unknown. Unknown cost still stops new
-  scheduling and drains in-flight work.
+  scheduling and drains in-flight work. An answer that ends in an exception
+  is counted at its upper bound (`bounded`) and the run goes on; the report
+  shows bounded calls and their total apart from known spend.
 - **Report.** `summary.costEfficiency` (`auto-cost-efficiency-report-v1`):
   candidate diagnosis (savings samples by basis, quality tally, critical
   regressions, exact results, credits, observed answer cost pairs with
@@ -66,6 +68,13 @@ cheaper model is good enough or that total cost falls.
   message alone), so a conversation never straddles the halves. Guidance is
   still frozen before any holdout call, and no current or earlier comparison
   enters the generator.
+- **Replayed menus.** Every optimizer cycle (routing and diagnostic) replays
+  a recorded decision's menu against today's catalogue: a candidate that is
+  no longer enabled, deleted or unpriced is dropped before the router sees
+  it, and a decision left with fewer than two candidates is not loaded. An
+  answer that was never sent (`no_dispatch`) is not retried, and a pair
+  missing either answer is counted as "without both answers", never as a
+  known US$0 cost pair.
 - **Boundaries.** `optimizerPromotionEligibility` refuses any summary with an
   objective or a cost-efficiency report (`diagnostic_only`), before every
   other check, for manual and system promotion; the status is `diagnostic`,
@@ -102,14 +111,17 @@ ceiling. The mock's wrong calculation on the lowest tier is caught (exact
 11/11 vs 10/11, one critical regression). These numbers describe the code
 path only; mock quality and mock spend are not evidence.
 
-## Run plan (paid, not started)
+## Run plan (paid; one dev run approved and run 2026-11-23)
 
-Proposed: a person-started diagnostic on the **dev** environment's Admin ›
-Routing, with the switch on for that service only, the existing optimizer
+Approved by the owner on 2026-11-23: one person-started diagnostic on the
+**dev** environment's Admin › Routing, with the switch set on the dev
+environment's web app service (`Tomverse`) only -- the Admin start and the
+background run both happen in that process; the `Auto Router Optimizer` cron
+service never starts a diagnostic and needs no change -- the existing optimizer
 and router models, and the existing caps. Sample: recent picked decisions
 plus synthetic messages to 24, family split. Before the run, the owner fixes
 the criteria; the run records them and their digest; results never change
-them. Proposed values (`auto-cost-efficiency-criteria-v1`, unconfirmed): at
+them. Values (`auto-cost-efficiency-criteria-v1`, confirmed 2026-11-23): at
 least 10 savings samples, 0 critical regressions, current pick better in at
 most 10% of judged savings samples, at most 20% undecided, at most 10%
 cheaper-model answer failures, latency reported only, order disagreement
@@ -118,6 +130,25 @@ never counted as equal.
 A small sample can report `observed_no_regression`, not non-inferiority.
 After the run: read the report, then decide separately whether a guidance
 change is worth an ordinary routing cycle; nothing is applied automatically.
+
+**Dev run, 2026-11-23 20:47 AEST: not evidence.** Dev had never run with the
+routing switch on, so its 24 picked decisions were old and no synthetic
+messages were added. Their recorded menus still named models since retired
+or disabled there (`gpt-5-4-mini`, `gpt-5-6-luna`, `gpt-5-6-terra`,
+`gemini-2-5-flash`): 36 answer calls were `no_dispatch` (`model_unavailable`),
+including retries, 9 answers were sent, and one pair was judged. Known spend
+US$0.157, no unknown cost. Only 1 savings sample, so nothing was measured
+against the criteria. The replayed-menu filter above is the fix. The owner
+chose production, where the routing switch is live, for the next run; that
+run needs its own approval.
+
+**Dev run 2, 2026-11-23 22:18 AEST: not evidence.** After the replayed-menu
+filter: no unsent answers, 10 savings samples (all same-credit, lower
+estimated provider cost), the price-blind judge returned real verdicts. It
+stopped as `cost_unknown` when two `deepseek-v4-pro` answers failed (an
+`AI_APICallError` with no status after about 48 s, and the 120 s reasoning
+timeout), before the guidance comparison. US$0.244. The bounded answer cost
+above is the fix; deepseek-v4-pro Chat itself works in production (streamed).
 
 ## What remains unmeasured
 

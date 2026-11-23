@@ -282,6 +282,15 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     if (transport.requestEmailCode && transport.verifyEmailCode) setEmailLogin(true);
     else void signIn();
   }
+  // An engine run that finished or gained a report revision re-reads only its own
+  // answer; other messages and the draft stay as they are. A failed read retries.
+  function refreshResearchAnswer(conversationId: string, messageId: string, attempt = 0) {
+    void transport.load(conversationId).then((item) => {
+      const fresh = item.messages.find((entry) => entry.id === messageId);
+      if (fresh) setConversation((current) => current?.id === conversationId
+        ? { ...current, messages: current.messages.map((entry) => entry.id === messageId ? fresh : entry) } : current);
+    }).catch(() => { if (attempt < 6) window.setTimeout(() => refreshResearchAnswer(conversationId, messageId, attempt + 1), 10_000); });
+  }
   async function open(id: string) {
     if (handoffBusy || configurationBusy) return false;
     setSourcePick(null); setSourceDelivery(null); setReceiptFor(null);
@@ -570,7 +579,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
         {!conversation?.messages.length && !streaming && conversation?.surface !== "continuation" && <IosWelcome importsEnabled={iosImportsEnabled} language={language} automatic={conversation ? conversation.selectionMode === "auto" && conversation.autoSelection?.offered === true : draftAutoOffered} imageEnabled={iosImageEnabled} onPanel={openIosPanel} onSeed={seedIosWorkspace} />}
         {conversation?.surface === "continuation" && !conversation.messages.length && !streaming && <div className="ios-continuation-start"><h2>{mobileIosWorkspaceCopy(language).disclosure}</h2><p>{mobileIosWorkspaceCopy(language).readOnly}</p><button onClick={() => setDraft(language === "ko" ? "지난 대화를 바탕으로 다음 할 일을 정리해줘." : "Based on our previous conversation, help me plan the next steps.")}>{language === "ko" ? "다음 할 일부터 정리해줘" : "Help me plan the next steps"}</button></div>}
         {pendingQuestion !== null && <article className="message user"><AnswerContent content={pendingQuestion} transport={transport} language={language} /></article>}
-        {conversation?.messages.map((message) => <article key={message.id} className={`message ${message.role}`}>{message.role === "assistant" && <span className="message-label response-identity"><AppIcon name="logo" />Tomverse</span>}{message.researchEngineRun && message.researchRunId && conversation && transport.researchEngine ? <ResearchWorkspace api={transport.researchEngine} runId={message.researchRunId} conversationId={conversation.id} language={language} accountKey={owner ?? "native"} /> : message.researchRunId && conversation && transport.researchRuns && <ResearchPreviewRunCard
+        {conversation?.messages.map((message) => <article key={message.id} className={`message ${message.role}`}>{message.role === "assistant" && <span className="message-label response-identity"><AppIcon name="logo" />Tomverse</span>}{message.researchEngineRun && message.researchRunId && conversation && transport.researchEngine ? <ResearchWorkspace api={transport.researchEngine} runId={message.researchRunId} conversationId={conversation.id} language={language} accountKey={owner ?? "native"} onReportChanged={() => refreshResearchAnswer(conversation.id, message.id)} /> : message.researchRunId && conversation && transport.researchRuns && <ResearchPreviewRunCard
           runId={message.researchRunId} conversationId={conversation.id} assistantMessageId={message.id} language={language} transport={transport.researchRuns}
           reportOutcome={message.searchMetadata?.research?.outcome}
           onMessage={run => setConversation(item => item?.id === run.conversationId ? { ...item, messages: item.messages.map(existing => existing.id === run.assistantMessageId ? researchRunMessage(run) : existing) } : item)} />}

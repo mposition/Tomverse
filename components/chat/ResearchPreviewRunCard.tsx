@@ -42,6 +42,7 @@ export function ResearchPreviewRunCard({ runId, conversationId, assistantMessage
     let actionPending = false;
     let poll: AbortController | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let engineV2 = false;
     function update(next: Partial<Pick<RunCardState, "run" | "error" | "busy">>) {
       setState(previous => ({
         ...(previous?.scopeKey === scopeKey && previous.transport === transport ? previous : {}),
@@ -58,6 +59,7 @@ export function ResearchPreviewRunCard({ runId, conversationId, assistantMessage
         throw new Error("RESEARCH_RUN_SCOPE_MISMATCH");
       }
       update({ run: value, error: false });
+      engineV2 = value.engineVersion === 2;
       // An engine v2 run is rendered and polled by the shared workspace below.
       if (value.engineVersion !== 2 && researchRunNeedsPolling(value.status)) timer = setTimeout(read, 5000);
       if (value.message) messageCallback.current?.(value);
@@ -70,7 +72,12 @@ export function ResearchPreviewRunCard({ runId, conversationId, assistantMessage
         const value = await transport.read(runId, controller.signal);
         if (active && !controller.signal.aborted) publish(value);
       } catch {
-        if (active && !controller.signal.aborted) update({ error: true });
+        if (active && !controller.signal.aborted) {
+          update({ error: true });
+          // An engine v2 card shows the workspace, not this card's error; its answer
+          // refresh is retried so a failed read never leaves a stale chat answer.
+          if (engineV2) timer = setTimeout(read, 10_000);
+        }
       }
     }
     controls.current = {
@@ -111,7 +118,10 @@ export function ResearchPreviewRunCard({ runId, conversationId, assistantMessage
     failed: undefined,
     cancelled: undefined,
   }[reportOutcome]);
-  if (run?.engineVersion === 2) return <ResearchWorkspace runId={runId} conversationId={conversationId} language={language} accountKey="web" />;
+  // The workspace polls the run; when it settles or a revision lands, one read of this
+  // card's transport carries the re-rendered chat answer to onMessage.
+  if (run?.engineVersion === 2) return <ResearchWorkspace key={scopeKey} runId={runId} conversationId={conversationId} language={language} accountKey="web"
+    onReportChanged={() => controls.current?.refresh()} />;
   return <div className="research-run-card" data-testid="research-run-card" data-run-status={run?.status ?? "loading"}>
     <p role="status"><strong>{copy.researchPreviewTitle}</strong> · {label}</p>
     {reportLabel && <p data-testid="research-preview-result" data-outcome={reportOutcome}>{reportLabel}</p>}

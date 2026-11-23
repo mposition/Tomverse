@@ -84,7 +84,7 @@ mock.module(mod("lib/modelCatalogAdmin.ts"), {
 });
 
 const { fillLinkCapabilities, capabilitiesNeedFilling } = await import(mod("lib/codingCatalogAdmin.ts"));
-const { defaultCodingCapabilitySources } = await import(mod("lib/modelCatalogCore.ts"));
+const { codingModelPage, defaultCodingCapabilitySources } = await import(mod("lib/modelCatalogCore.ts"));
 
 const session = { user: { id: "admin-1", email: "owner@example.com" } };
 const facts = (overrides = {}) => ({
@@ -117,9 +117,9 @@ const registryLink = (overrides = {}) => ({
 const calls = { llm: 0, pages: [] };
 /** What the default answer gives as coding notes; null leaves the default. */
 let notesAnswer = null;
-const pagesOf = (provider) => {
+const pagesOf = (provider, apiModelId = "gpt-a") => {
   const sources = defaultCodingCapabilitySources(provider);
-  return [sources.toolCalling, sources.structuredOutput];
+  return [sources.toolCalling, sources.structuredOutput, codingModelPage(sources, apiModelId)];
 };
 const deps = (overrides = {}) => ({
   draftLlm: async () => ({
@@ -257,13 +257,13 @@ test("a dedicated row is filled with its coding notes only; with none on the pag
   reset(dedicated);
   const result = await fill();
   assert.equal(calls.llm, 1);
-  assert.deepEqual(calls.pages, pagesOf("openai"));
+  assert.deepEqual(calls.pages, pagesOf("openai", "coder-x"));
   const profile = state.row.profile;
   // The draft's capabilities and everything else stay; only the notes are added.
   const { codingNotes, ...rest } = profile;
   assert.deepEqual(rest, dedicated);
   assert.deepEqual(codingNotes.strengths, ["Parallel tool calls in one response", "Strict JSON schema outputs"]);
-  assert.deepEqual(codingNotes.sources, pagesOf("openai"));
+  assert.deepEqual(codingNotes.sources, pagesOf("openai", "coder-x"));
   assert.deepEqual(result.changes.map((change) => change.field), ["codingNotes"]);
   assert.equal(state.audits[0].metadata.source, "dedicated");
 
@@ -324,6 +324,30 @@ test("a failed call or page leaves the row as it was, and a refused page costs n
   assert.equal(calls.llm, 0, "the model is not called when a page could not be read");
   assert.deepEqual(state.row, before);
   assert.deepEqual(state.audits, []);
+});
+
+test("the notes read the model's own page; a models page that does not load is left out and the fill goes on", async () => {
+  // OpenAI has a page per model: the API model id names it.
+  reset();
+  state.facts = [facts({ apiModelId: "gpt-6.1-terra" })];
+  await fill();
+  assert.equal(calls.pages[2], "https://developers.openai.com/api/docs/models/gpt-6.1-terra.md");
+  assert.deepEqual(state.row.profile.evidence.sources, pagesOf("openai", "gpt-6.1-terra"));
+
+  // A model with no page of its own: the two feature pages still answer.
+  reset();
+  const [toolPage, structuredPage, modelPage] = pagesOf("openai");
+  await fill({
+    fetchPage: async (_provider, url) => {
+      calls.pages.push(url);
+      if (url === modelPage) throw new DraftRefusal("fetch_failed", `${url} http_404`);
+      return { url, text: "page" };
+    },
+  });
+  assert.equal(calls.llm, 1);
+  assert.deepEqual(calls.pages, [toolPage, structuredPage, modelPage]);
+  assert.deepEqual(state.row.profile.evidence.sources, [toolPage, structuredPage]);
+  assert.deepEqual(state.row.profile.capabilities, { toolCalling: "parallel", structuredOutput: "supported" });
 });
 
 test("every page the answer stands on must be the provider's own, or nothing is written", async () => {
@@ -433,4 +457,38 @@ test("a documentation answer of no tool calling never lowers a chat link's: it k
   await fill();
   assert.equal(state.row.profile.capabilities.toolCalling, "parallel");
   assert.equal(state.audits[0].metadata.answeredToolCalling, undefined);
+});
+
+test("a documentation answer of no structured output never lowers a serving chat link's: Code keeps it", async () => {
+  // 2026-11-23: pages that showed one flagship model only took Code from eight serving links in one run.
+  const answerNone = {
+    draftLlm: async () => ({
+      draftCodingCapabilities: async ({ pages }) => {
+        calls.llm += 1;
+        return { toolCalling: "none", structuredOutput: "none", note: "The pages do not name this model.", sources: pages.map((page) => page.url), draftedAt: "2026-11-23" };
+      },
+    }),
+  };
+  reset(registryLink({ channels: ["code", "api"], capabilities: { toolCalling: "basic", structuredOutput: "supported" } }), true);
+  const result = await fill(answerNone);
+  assert.equal(calls.llm, 1);
+  assert.deepEqual(state.row.profile.capabilities, { toolCalling: "basic", structuredOutput: "supported" });
+  // The judge saw the kept values; only the evidence moved, and it records the answer.
+  assert.deepEqual(state.updates[0].patch.profile.capabilities, { toolCalling: "basic", structuredOutput: "supported" });
+  assert.equal(state.row.profile.evidence.structuredOutput, "none");
+  assert.deepEqual(result.changes, []);
+  assert.equal(state.audits[0].metadata.structuredOutput, "supported");
+  assert.equal(state.audits[0].metadata.answeredStructuredOutput, "none");
+
+  // A link already at none stays none, with no answered value recorded.
+  reset(registryLink());
+  await fill(answerNone);
+  assert.equal(state.row.profile.capabilities.structuredOutput, "none");
+  assert.equal(state.audits[0].metadata.answeredStructuredOutput, undefined);
+
+  // An answer that names support still raises it.
+  reset(registryLink());
+  await fill();
+  assert.equal(state.row.profile.capabilities.structuredOutput, "supported");
+  assert.equal(state.audits[0].metadata.answeredStructuredOutput, undefined);
 });

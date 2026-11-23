@@ -1,6 +1,6 @@
 import "server-only";
 import { observeOptimizerUsageCost, optimizerCostFields } from "@/lib/autoOptimizerCost";
-import { COST_EFFICIENCY_CRITERIA_PROPOSAL } from "@/lib/autoCostEfficiencyReport";
+import { COST_EFFICIENCY_CRITERIA } from "@/lib/autoCostEfficiencyReport";
 import {
     buildAutoCandidateMenu,
     buildCostEfficiencyManifest,
@@ -68,6 +68,7 @@ import {
     rolledBackRouterGuidance,
     runOptimizerCycle,
     guidanceRejection,
+    optimizerAnswerOrBound,
     optimizerAnswerOptions,
     optimizerCallFailureDetail,
     traceOptimizerCall,
@@ -280,7 +281,16 @@ export const asSession = (value: unknown): AutoLlmRouterSession | null => {
         : null;
 };
 
-async function loadDecisions(): Promise<OptimizerDecision[]> {
+/**
+ * A recorded menu is replayed against today's catalogue: a candidate that is
+ * no longer enabled or priced could never answer (no_dispatch), so it is
+ * neither picked nor drawn, and a decision left with fewer than two is not a
+ * comparison. Without this, an old decision's retired picks used the run.
+ */
+export const answerableModelIds = (models: readonly AiModel[]) =>
+    new Set(models.filter((model) => model.enabled && !model.catalogDeleted && pricesOf(model)).map((model) => model.id));
+
+async function loadDecisions(answerable: ReadonlySet<string>): Promise<OptimizerDecision[]> {
     const rows = await prisma.autoRouterDecision.findMany({
         // Combined calls include image, location or search inputs that decision
         // rows do not retain. Do not claim to replay their full request.
@@ -301,7 +311,9 @@ async function loadDecisions(): Promise<OptimizerDecision[]> {
         },
     });
     return rows.flatMap((row) => {
-        const candidates = Array.isArray(row.candidates) ? row.candidates.filter(isCandidate) : [];
+        const candidates = Array.isArray(row.candidates)
+            ? row.candidates.filter(isCandidate).filter((candidate) => answerable.has(candidate.id))
+            : [];
         if (candidates.length < 2) return [];
         return [{
             id: row.id,
@@ -605,7 +617,7 @@ export async function startAutoRouterOptimizerCycle(
     const routerModel = resolveAutoLlmRouterModel(models, (await readAutoLlmRouterModelId()) ?? undefined);
     if (!routerModel) return { refused: "router_off" };
 
-    const decisions = await loadDecisions();
+    const decisions = await loadDecisions(answerableModelIds(models));
 
     // Actual cost is priced from reported usage, so a cycle needs both prices.
     const optimizerPrices = pricesOf(optimizerModel);
@@ -681,7 +693,7 @@ const costEfficiencyRunManifest = (input: {
             split: "family: conversation id; synthetic message alone",
             families: { train: null, evaluate: null },
         },
-        criteria: COST_EFFICIENCY_CRITERIA_PROPOSAL,
+        criteria: COST_EFFICIENCY_CRITERIA,
         // Upper bound: every case could land in the holdout and every synthetic message train.
         plan: costEfficiencyCallPlan({
             evaluate: total, trainRoutes: synthetic, synthesize: synthetic > 0,
@@ -782,7 +794,7 @@ async function runInBackground(input: {
                 responseLatency,
                 ...(costMode ? {
                     objective: input.objective,
-                    criteria: COST_EFFICIENCY_CRITERIA_PROPOSAL,
+                    criteria: COST_EFFICIENCY_CRITERIA,
                     // A conversation never straddles the holdout; a synthetic message is its own family.
                     familyOf: (decision: OptimizerDecision) => decision.family ?? decision.id,
                 } : {}),
@@ -925,11 +937,16 @@ async function runInBackground(input: {
                     }
                     // Shared with the rewrite cycle (lib/autoRewriteOptimizer.ts).
                     const { timeoutMs, ...options } = optimizerAnswerOptions(model, turn);
-                    const generated = await traced("answer", () => generateText({
+                    // An exception (timeout, dropped connection, provider error) may
+                    // come after the request was sent and billed, with no usage:
+                    // counted at its upper bound so the run goes on (optimizerAnswerBound).
+                    const attempt = await optimizerAnswerOrBound(() => traced("answer", () => generateText({
                         model: getActiveAiModel(model),
                         abortSignal: AbortSignal.timeout(timeoutMs),
                         ...options,
-                    }), model);
+                    }), model), options, prices, model.provider);
+                    if ("failed" in attempt) return attempt.failed;
+                    const generated = attempt.generated;
                     if (!generated.text.trim()) {
                         console.warn(JSON.stringify({
                             event: "auto_router_optimizer_answer_empty",

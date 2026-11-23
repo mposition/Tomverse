@@ -24,6 +24,7 @@ import {
   updateCatalogEntry,
 } from "@/lib/modelCatalogAdmin";
 import { codingDraftFromAnswer } from "@/lib/modelCatalogDraftLlm";
+import { codingModelPage, defaultCodingCapabilitySources } from "@/lib/modelCatalogCore";
 import { prisma } from "@/lib/prisma";
 
 // The dynamic model catalogue against a real database: a refused enable writes
@@ -1125,7 +1126,8 @@ test("filling a link's capabilities from the documentation changes only its capa
   const row = await prisma.modelCatalogEntry.findUniqueOrThrow({ where: { category_modelId: { category: "coding", modelId: LINKED } } });
   const stored = row.profile as { capabilities: unknown; channels: string[]; evidence: { sources: string[]; note?: string } };
   assert.deepEqual(stored.capabilities, { toolCalling: "parallel", structuredOutput: "supported" });
-  assert.deepEqual(stored.evidence.sources, sources);
+  // The two feature pages, then the model's own models page (#4239).
+  assert.deepEqual(stored.evidence.sources, [...sources, codingModelPage(defaultCodingCapabilitySources("openai")!, LINKED)]);
   assert.equal(stored.evidence.note, "Stated on the pages.");
   assert.deepEqual(stored.channels, ["api"], "Code stays the operator's to tick");
   assert.equal(await auditCount("model_catalog.coding_capabilities_filled"), filledBefore + 1);

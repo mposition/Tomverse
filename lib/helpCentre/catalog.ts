@@ -38,7 +38,7 @@ export const HELP_GUIDES: readonly HelpGuideMeta[] = [
   { id: "chat-vs-review", category: "getting-started", minutes: 1, steps: steps(4, { 2: "chat-composer" }), requiresSignIn: false, action: { kind: "product", product: "chat" } },
   // chat
   { id: "choose-model-auto", category: "chat", minutes: 1, steps: steps(4), requiresSignIn: false, popular: 1, action: { kind: "product", product: "chat" } },
-  { id: "prompt-refiner", category: "chat", minutes: 1, steps: steps(4), requiresSignIn: false, action: { kind: "product", product: "chat" } },
+  { id: "prompt-refiner", category: "chat", minutes: 1, steps: steps(3), requiresSignIn: false, action: { kind: "product", product: "chat" } },
   { id: "voice-input", category: "chat", minutes: 1, steps: steps(4), requiresSignIn: false, action: { kind: "product", product: "chat" } },
   { id: "voice-conversation", category: "chat", minutes: 2, steps: steps(4), requiresSignIn: true, isNew: true, action: { kind: "product", product: "chat" } },
   { id: "use-current-location", category: "chat", minutes: 2, steps: steps(4), requiresSignIn: false, isNew: true, action: { kind: "product", product: "chat" } },

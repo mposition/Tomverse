@@ -33,7 +33,8 @@ export function CostEfficiencyDiagnosticView({ report }: { report: CostEfficienc
       <p>{m.credits(c.credits.pairs, c.credits.incumbent, c.credits.challenger)}</p>
       <p data-testid="admin-cost-efficiency-observed">
         {m.observed(c.observedAnswerCost.pairsKnown, c.observedAnswerCost.pairsUnknown,
-          usd(c.observedAnswerCost.incumbentMicroUsd), usd(c.observedAnswerCost.challengerMicroUsd), c.observedAnswerCost.challengerLower)}
+          usd(c.observedAnswerCost.incumbentMicroUsd), usd(c.observedAnswerCost.challengerMicroUsd), c.observedAnswerCost.challengerLower,
+          c.observedAnswerCost.pairsUnanswered)}
       </p>
       <p>{m.latency(c.answerLatencyMs.pairs, c.answerLatencyMs.incumbentMedian, c.answerLatencyMs.challengerMedian)}</p>
       <p className="mt-2 font-bold text-zinc-300">{m.guidanceTitle}</p>
@@ -41,7 +42,8 @@ export function CostEfficiencyDiagnosticView({ report }: { report: CostEfficienc
       <p>{q(g.quality)}</p>
       <p>{m.serving(usd(report.servingCost.baselineKnownMicroUsd), usd(report.servingCost.candidateKnownMicroUsd), report.servingCost.complete)}</p>
       <p className="mt-2">{m.experiment(usd(report.experimentCost.knownMicroUsd), report.experimentCost.unknownCalls, report.experimentCost.failed,
-        report.experimentCost.answerRetries, report.experimentCost.notStarted)}</p>
+        report.experimentCost.answerRetries, report.experimentCost.notStarted,
+        report.experimentCost.boundedCalls ?? 0, usd(report.experimentCost.boundedMicroUsd ?? 0))}</p>
       <p>{m.taskUnlinked}</p>
       <p>{m.criteria(report.criteria.version, report.criteria.status)}</p>
       <p className="mt-1 text-amber-300" data-testid="admin-cost-efficiency-applicability">
