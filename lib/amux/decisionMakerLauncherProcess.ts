@@ -23,6 +23,12 @@ import {
   dmReadRequestOutput,
   type DmLauncherHost,
 } from "./decisionMakerLauncherFs.ts";
+import {
+  dmInstallWorkDependencies,
+  dmPrepareWorkDirectory,
+  type DmDependencySummary,
+  type DmWorkOptions,
+} from "./decisionMakerWorkCopy.ts";
 
 /**
  * The AMUX Decision Maker launcher's process half, the minimum:
@@ -31,8 +37,10 @@ import {
  *
  * One call is one request: copy the payload, plan, preflight (every check,
  * all reported), and only on an empty refusal list make the account's
- * temporary directory and start the planned command with the copied payload
- * on stdin; kill the process group at the hard timeout; read the result from
+ * temporary directory, copy the workspace into its work directory with the
+ * command jail beside it and install the dependencies
+ * (lib/amux/decisionMakerWorkCopy.ts), and start the planned command with the
+ * copied payload on stdin; kill the process group at the hard timeout; read the result from
  * its one place; and on every exit path -- refusal, spawn failure, a fault in
  * this module, a timeout -- delete the temporary directory and the account's
  * CLI state and verify that nothing is left. The report carries the result
@@ -79,8 +87,17 @@ export type DmLaunchInput = {
   payload: Uint8Array;
 };
 
-/** `tools`: what the CLI's tools did (counts only); absent when no process ran or the CLI reports none. */
-export type DmLaunchReport = { result: DmLaunchResult; cleanup: DmCleanupOutcome; tools?: DmToolSummary };
+/**
+ * `tools`: what the CLI's tools did (counts only); absent when no process ran
+ * or the CLI reports none. `dependencies`: what the launcher installed in the
+ * work directory (codes only); absent when it made none.
+ */
+export type DmLaunchReport = {
+  result: DmLaunchResult;
+  cleanup: DmCleanupOutcome;
+  tools?: DmToolSummary;
+  dependencies?: DmDependencySummary;
+};
 
 export type DmLaunchOptions = {
   host?: DmLauncherHost;
@@ -88,6 +105,8 @@ export type DmLaunchOptions = {
   timeoutMs?: number;
   /** A test host only. */
   expectedExecutableSha256?: string;
+  /** Test host only: the work directory's jail check and jailed steps. */
+  work?: DmWorkOptions;
 };
 
 const timeoutFor = (host: DmLauncherHost, override: number | undefined) => {
@@ -147,7 +166,7 @@ const runProcess = (
       child = spawn(dmHostPath(host, command.executable), command.argv.slice(1), {
         argv0: command.argv[0],
         cwd: dmHostPath(host, plan.workingDirectory),
-        // Exactly the four fixed variables (§5a). Next's augmentation makes
+        // Exactly the fixed variables (§5a). Next's augmentation makes
         // ProcessEnv require NODE_ENV; adding it would break the fixed
         // environment, so only the type is widened here.
         env: Object.fromEntries(command.environment) as NodeJS.ProcessEnv,
@@ -235,10 +254,16 @@ export async function launchDecisionMaker(
   // buffer is not read again.
   const payload: Buffer | null = input.payload instanceof Uint8Array ? Buffer.from(input.payload) : null;
   const host = options.host ?? DM_SYSTEM_HOST;
-  // Both test seams are refused on the system host before anything is read or deleted.
+  // The hard timeout counts from here: copying the workspace and installing
+  // its dependencies spend part of it, so the unit's RuntimeMaxSec stays the backstop.
+  const startedAt = Date.now();
+  // Every test seam is refused on the system host before anything is read or deleted.
   const timeoutMs = timeoutFor(host, options.timeoutMs);
   if (options.expectedExecutableSha256 !== undefined && host.root === null) {
     throw new Error("AMUX Decision Maker executable sha256 is fixed on the system host");
+  }
+  if (options.work !== undefined && host.root === null) {
+    throw new Error("AMUX Decision Maker work directory steps are fixed on the system host");
   }
   if (!isDmLauncherInstance(input.instance)) {
     return {
@@ -255,17 +280,24 @@ export async function launchDecisionMaker(
   const command: DmCommand = { executable: plan.executable, argv: plan.argv, environment: plan.environment };
   let result: DmLaunchResult;
   let tools: DmToolSummary | null = null;
+  let dependencies: DmDependencySummary | null = null;
   try {
     const refusals = dmPreflightRefusals(
       host,
       { plan, command, evidence: input.evidence, requestKey: input.requestKey, payload },
       options.expectedExecutableSha256 === undefined ? {} : { expectedExecutableSha256: options.expectedExecutableSha256 },
     );
+    const work = refusals.length > 0 || payload === null || !dmCreateTemporaryDirectory(host, plan)
+      ? null
+      : dmPrepareWorkDirectory(host, plan, options.work);
     if (refusals.length > 0) result = { outcome: "refused", refusals };
     else if (payload === null) result = { outcome: "refused", refusals: ["transmit_intent_mismatch"] };
-    else if (!dmCreateTemporaryDirectory(host, plan)) result = { outcome: "refused", refusals: ["request_directories_unusable"] };
+    // No temporary directory, no copy of the workspace, or no jail: nothing starts (§0b-6).
+    else if (work === null || !work.ok) result = { outcome: "refused", refusals: ["request_directories_unusable"] };
     else {
-      const observation = await runProcess(host, plan, command, payload, timeoutMs);
+      const deadlineAt = startedAt + timeoutMs;
+      dependencies = await dmInstallWorkDependencies(host, plan, work, { deadlineAt }, options.work);
+      const observation = await runProcess(host, plan, command, payload, Math.max(1, deadlineAt - Date.now()));
       result = dmClassifyProcess(plan.cli, observation);
       tools = dmToolSummary(plan.cli, observation.stdout);
     }
@@ -273,5 +305,10 @@ export async function launchDecisionMaker(
     result = { outcome: "unavailable", reason: "launcher_fault" };
   }
   const cleanup = dmCleanupVendor(host, instance, plan.requestId);
-  return tools === null ? { result, cleanup } : { result, cleanup, tools };
+  return {
+    result,
+    cleanup,
+    ...(tools === null ? {} : { tools }),
+    ...(dependencies === null ? {} : { dependencies }),
+  };
 }

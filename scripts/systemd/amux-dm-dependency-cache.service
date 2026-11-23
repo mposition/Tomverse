@@ -1,0 +1,19 @@
+[Unit]
+Description=Tomverse AMUX Decision Maker offline dependency cache, refreshed from develop's public head
+ConditionFileIsExecutable=/opt/tomverse-amux-dm/dependency-cache.sh
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Root only moves the result into /var/cache/tomverse-amux-dm; the clone, the
+# install and prisma generate run as nobody (scripts/amux-dm-dependency-cache.sh).
+ExecStart=/opt/tomverse-amux-dm/dependency-cache.sh --refresh
+TimeoutStartSec=30min
+Nice=10
+IOSchedulingClass=idle
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=amux-dm-dependency-cache
+
+# No [Install]: amux-dm-dependency-cache.timer starts it.

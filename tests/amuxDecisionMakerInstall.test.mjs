@@ -367,3 +367,70 @@ test("the host installer is a dry run unless --apply, never runs the host, and r
   assert.match(code, /\/usr\/bin\/stat -c '%u %g %04a' -- "\$DM_HOST_DEST" > "\$backup\/meta"/);
   assert.match(code, /dm_place "\$backup\/codex-code-mode-host" .* "\$owner" "\$group" "\$mode"$/m);
 });
+
+// ---------------------------------------------------------------------------
+// The DM's offline dependency cache (§0f-4, §5a "의존성")
+// ---------------------------------------------------------------------------
+
+const CACHE_SCRIPT = "scripts/amux-dm-dependency-cache.sh";
+const cacheScript = read(CACHE_SCRIPT);
+const cacheConstant = (name) => {
+  const match = cacheScript.match(new RegExp(`^readonly ${name}=("?)([^"\\n]*)\\1$`, "m"));
+  assert.ok(match, `${name} is a readonly constant of the cache script`);
+  return match[2];
+};
+
+test("the cache script fills the paths the launcher's jail reads, as nobody for anything that runs code or reaches the network", async () => {
+  const { DM_DEPENDENCY_CACHE_ROOT, DM_NPM_CACHE, DM_PRISMA_ENGINE_CACHE, DM_PINNED_NPM_CLI } = await import("../lib/amux/decisionMakerWorkCopy.ts");
+  assert.equal(cacheConstant("DM_CACHE_ROOT"), DM_DEPENDENCY_CACHE_ROOT);
+  assert.equal(`${cacheConstant("DM_CACHE_ROOT")}/npm`, DM_NPM_CACHE);
+  assert.equal(`${cacheConstant("DM_CACHE_ROOT")}/prisma`, DM_PRISMA_ENGINE_CACHE);
+  assert.equal(cacheConstant("DM_CACHE_NPM_CLI"), DM_PINNED_NPM_CLI);
+  assert.equal(cacheConstant("DM_CACHE_REPOSITORY"), "https://github.com/mposition/Tomverse.git");
+  assert.equal(cacheConstant("DM_CACHE_BRANCH"), "develop");
+  const code = cacheScript.replace(/^\s*#.*$/gm, "");
+  // git, npm and prisma run only through dm_cache_as_nobody; root only copies, owns and moves.
+  for (const line of code.split("\n").filter((entry) => /\/usr\/bin\/(?:git|node)\b/.test(entry))) {
+    if (/git -C "\$work\/src" -c safe\.directory='\*' rev-parse HEAD/.test(line)) continue;
+    assert.match(line, /dm_cache_as_nobody "\$work"/, line.trim());
+  }
+  assert.match(code, /\/usr\/sbin\/runuser -u nobody -- \/usr\/bin\/env -i /);
+  assert.match(code, /ci --ignore-scripts/);
+  assert.doesNotMatch(code, /amux-dm-(?:openai|anthropic)|\/home\/|requests/, "nothing of the vendor accounts or the request root");
+  // It installs the timer and never enables or starts anything; the operator does (the message only says how).
+  assert.doesNotMatch(code, /^\s*(?:\/usr\/bin\/)?systemctl\s+(?:enable|start|restart)\b/m);
+  assert.match(code, /\/usr\/bin\/systemctl daemon-reload/);
+  const service = read("scripts/systemd/amux-dm-dependency-cache.service");
+  assert.equal(directive(service, "ExecStart"), `${cacheConstant("DM_CACHE_SCRIPT_DEST")} --refresh`);
+  assert.equal(directive(service, "Type"), "oneshot");
+  assert.doesNotMatch(service, /^\[Install\]$/m);
+  const timer = read("scripts/systemd/amux-dm-dependency-cache.timer");
+  assert.equal(directive(timer, "OnCalendar"), "*-*-* 17:30:00 UTC");
+  assert.equal(directive(timer, "Persistent"), "true");
+});
+
+test("the cache script refuses anything but --refresh or --install, and only as root", { skip: process.platform === "win32" && !readdirSync(join(bashPath, "..")).includes("bash.exe") && "bash is not installed" }, () => {
+  assert.equal(spawnSync(bashPath, ["-n", CACHE_SCRIPT], { cwd: repositoryRoot }).status, 0);
+  for (const args of [[], ["--apply"], ["--refresh", "--install"]]) {
+    const result = spawnSync(bashPath, [CACHE_SCRIPT, ...args], { cwd: repositoryRoot, encoding: "utf8" });
+    assert.equal(result.status, 2, JSON.stringify(args));
+    assert.match(result.stderr, /usage|run as root/);
+  }
+  if (process.platform !== "win32" && process.getuid?.() !== 0) {
+    assert.match(spawnSync(bashPath, [CACHE_SCRIPT, "--refresh"], { cwd: repositoryRoot, encoding: "utf8" }).stderr, /run as root/);
+  }
+});
+
+test("the launcher units leave out ProtectKernelTunables= so the DM jail can mount its own /proc, and keep the rest", () => {
+  for (const instance of Object.keys(VENDOR_ACCOUNTS)) {
+    const service = read(`scripts/systemd/amux-dm-launcher-${SHORT[instance]}@.service`);
+    assert.equal(directive(service, "ProtectKernelTunables"), undefined);
+    for (const [name, value] of [["NoNewPrivileges", "true"], ["CapabilityBoundingSet", ""], ["ProtectProc", "invisible"],
+      ["ProtectKernelModules", "true"], ["ProtectControlGroups", "true"], ["PrivateTmp", "true"], ["UMask", "0077"]]) {
+      assert.equal(directive(service, name), value, `${instance} ${name}`);
+    }
+    // No unit setting that would stop the jail: user namespaces and netlink (bwrap's --unshare-net brings up loopback).
+    assert.equal(directive(service, "RestrictNamespaces"), undefined);
+    assert.equal(directive(service, "RestrictAddressFamilies"), undefined);
+  }
+});

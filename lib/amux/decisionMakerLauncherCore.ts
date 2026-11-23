@@ -43,38 +43,59 @@ export type DmLauncherCli = "codex" | "claude";
 // §5a: the fixed execution conditions
 // ---------------------------------------------------------------------------
 
-/** §5a's argv placeholders, verbatim. The two per-request paths stay placeholders in the digest. */
-export const DM_ARGV_REQUEST_DIRECTORY = "<요청 디렉터리>";
+/**
+ * §5a's argv placeholders, verbatim. The two per-request paths stay
+ * placeholders in the digest; so do the per-request values of the fixed
+ * environment (`DM_ENV_SHELL_PREFIX`, and the work directory inside a value).
+ */
+export const DM_ARGV_WORK_DIRECTORY = "<작업 디렉터리>";
 export const DM_ARGV_OUTPUT_FILE = "<요청별 출력 파일>";
 export const DM_ARGV_SCHEMA_FILE = "<스키마 파일>";
 export const DM_ARGV_SCHEMA_JSON = "<스키마 JSON>";
+/** §5a's fixed environment: claude's shell prefix, a per-request path the launcher writes. */
+export const DM_ENV_SHELL_PREFIX = "<요청별 shell prefix>";
 
 /**
- * The codex permissions profile the DM's commands run under (owner decision
- * 2026-11-15: the DM reads its workspace like a local CLI). Its commands may
- * read the system's minimal paths, the request directory and the CLI's own
- * directory (the sandbox re-executes the binary), and nothing else -- not
- * the account's home with its login -- and may write nothing and reach no
- * network. The process audit runner uses the same shape
- * (scripts/amux-process-audit-runner.mjs), measured on the box 2026-11-14 with
- * Codex 0.160. The profile replaces `-s`: the CLI refuses both at once.
+ * The work directory's temporary directory, by name inside it: TMPDIR for
+ * codex's commands and for claude's own shell files (`CLAUDE_CODE_TMPDIR`),
+ * and the jail's HOME and TMPDIR. Inside the work directory because it is the
+ * one place a command may write; codex's sandbox also needs it to exist
+ * before the CLI starts (measured on the box 2026-11-23: it panics resolving
+ * a TMPDIR that is missing).
+ */
+export const DM_WORK_TMP_NAME = ".amux-tmp";
+
+/**
+ * The codex permissions profile the DM's commands run under (owner direction
+ * 2026-11-22, "DM은 접근권한 막지 마세요": the DM runs commands like a local
+ * CLI). Its commands may read the system's minimal paths and the CLI's own
+ * directory (the sandbox re-executes the binary), and read and write the work
+ * directory -- the vendor account's own copy of the request's workspace --
+ * and nothing else: not the account's home with its login, not the request
+ * directory, not the `-o` file beside the work directory, and no network.
+ * Measured on the box 2026-11-23 with this CLI (`codex sandbox -P dm`, no model
+ * call): writes inside the work directory land; the home is an empty
+ * synthetic directory; `auth.json`, the `-o` file, the request directory,
+ * `/tmp`, TCP and DNS are blocked, and a symbolic link to `auth.json` made in
+ * the work directory does not read it. The profile replaces `-s`: the CLI
+ * refuses both at once.
  */
 export const DM_CODEX_PERMISSIONS_PROFILE = "dm";
 const CODEX_RELEASE_DIRECTORY = "/opt/tomverse-amux-dm/codex-cli-0.162.1";
 
 /**
  * §5a "고정 argv", after the program name, in order. A token is a literal or
- * one of the four placeholders above, or a literal holding the request
- * directory's placeholder (the codex profile's readable root). "Bytes other
+ * one of the four placeholders above, or a literal holding the work
+ * directory's placeholder (the codex profile's writable root). "Bytes other
  * than the two paths must be exactly these."
  */
 const CODEX_ARGV = Object.freeze([
   "-a", "never", "--no-daemon", "exec", "--ephemeral", "--ignore-user-config", "--ignore-rules", "--strict-config",
   "--skip-git-repo-check",
   "-c", `default_permissions="${DM_CODEX_PERMISSIONS_PROFILE}"`,
-  "-c", `permissions.${DM_CODEX_PERMISSIONS_PROFILE}.filesystem={":minimal"="read","${DM_ARGV_REQUEST_DIRECTORY}"="read","${CODEX_RELEASE_DIRECTORY}"="read"}`,
+  "-c", `permissions.${DM_CODEX_PERMISSIONS_PROFILE}.filesystem={":minimal"="read","${DM_ARGV_WORK_DIRECTORY}"="write","${CODEX_RELEASE_DIRECTORY}"="read"}`,
   "--json", "--output-schema", DM_ARGV_SCHEMA_FILE,
-  "-o", DM_ARGV_OUTPUT_FILE, "-m", "gpt-6-astra", "-C", DM_ARGV_REQUEST_DIRECTORY,
+  "-o", DM_ARGV_OUTPUT_FILE, "-m", "gpt-6-astra", "-C", DM_ARGV_WORK_DIRECTORY,
   "--disable", "shell_snapshot",
   "--disable", "write_stdin_approval", "--disable", "sleep_tool", "--disable", "browser_use",
   "--disable", "browser_use_external", "--disable", "browser_use_full_cdp_access", "--disable", "browser_annotation_api",
@@ -89,17 +110,26 @@ const CODEX_ARGV = Object.freeze([
 ] as const);
 
 /**
- * claude's tools (owner decision 2026-11-15): reading and searching files.
- * `--restricted` keeps them inside the working directory (the request
- * directory) and removes every command and network tool `--tools` does not
- * name; Bash is not named, because nothing here confines a command to the
- * workspace the way codex's profile does (the account's home, with its login,
- * is readable to its own commands).
+ * claude's tools (owner direction 2026-11-22): reading and searching files,
+ * and Bash. `--restricted` keeps the file tools inside the working directory
+ * (the work directory) and removes every command and network tool `--tools`
+ * does not name; `--allowedTools` with the same list lets them run without a
+ * prompt (`--permission-prompts none` refuses anything that would ask). Bash
+ * runs only through `CLAUDE_CODE_SHELL_PREFIX`, the launcher's jail of the
+ * work directory (lib/amux/decisionMakerWorkCopy.ts, the v22 worker's jail of
+ * lib/amux/v22ShellJail.mjs): no network, the work directory the one writable
+ * place, and the account's home -- with its login -- not in it at all.
+ * Measured on the box 2026-11-23 with this CLI against a local stand-in for
+ * the Messages API (no model call): Bash ran in the jail without a prompt and
+ * could not see the login; Read refused a symbolic link the jailed shell made
+ * to the login ("resolves through a symlink ... outside"), and the login's own
+ * path; Grep did not follow the link.
  */
-export const DM_CLAUDE_TOOLS = "Read,Grep,Glob";
+export const DM_CLAUDE_TOOLS = "Read,Grep,Glob,Bash";
 
 const CLAUDE_ARGV = Object.freeze([
-  "-p", "--tools", DM_CLAUDE_TOOLS, "--restricted", "--strict-mcp-config", "--setting-sources", "", "--disable-slash-commands",
+  "-p", "--tools", DM_CLAUDE_TOOLS, "--allowedTools", DM_CLAUDE_TOOLS, "--restricted", "--strict-mcp-config",
+  "--setting-sources", "", "--disable-slash-commands",
   "--no-session-persistence", "--permission-prompts", "none", "--output-format", "json",
   "--json-schema", DM_ARGV_SCHEMA_JSON, "--model", "claude-fable-5-1",
 ] as const);
@@ -117,27 +147,36 @@ export const DM_CODEX_REFUSED_ARGV = Object.freeze([
   "--remote-auth-token-env", "resume", "fork", "review",
 ] as const);
 
-/** §5a: `--tools` is refused with any value other than `DM_CLAUDE_TOOLS`, `--permission-mode` with any value. */
+/**
+ * §5a: `--allowedTools`, `--allowed-tools` and `--tools` are refused with any
+ * value other than `DM_CLAUDE_TOOLS`, `--permission-mode` with any value.
+ */
+const CLAUDE_TOOL_LIST_FLAGS = Object.freeze(["--allowedTools", "--allowed-tools", "--tools"]);
+
 export const DM_CLAUDE_REFUSED_ARGV = Object.freeze([
   "--dangerously-skip-permissions", "--allow-dangerously-skip-permissions", "--permission-mode", "--add-dir",
-  "--allowedTools", "--allowed-tools", "--tools", "-w", "--worktree", "--tmux", "--mcp-config", "--plugin-dir",
+  ...CLAUDE_TOOL_LIST_FLAGS, "-w", "--worktree", "--tmux", "--mcp-config", "--plugin-dir",
   "--plugin-url", "--agents", "--agent", "--file", "--chrome", "--cloud", "--environment", "--remote-control", "--ide",
   "--desktop", "--brief", "--bg", "--background", "-r", "--resume", "-c", "--continue", "--fork-session",
   "--session-id", "--teleport", "--from-pr", "--fallback-model", "--betas", "--system-prompt", "--bare", "--settings",
   "-d", "--debug", "--debug-file", "--verbose",
 ] as const);
 
-/** §5a "고정 환경": these eight and nothing else. HOME is the vendor account's home. */
+/**
+ * §5a "고정 환경": these eight for both CLIs, then one more for codex and two
+ * more for claude, and nothing else. HOME is the vendor account's home.
+ */
 export const DM_FIXED_PATH = "/usr/bin:/bin";
 export const DM_FIXED_LOCALE = "C.UTF-8";
 /**
- * git, for the DM's read-only commands in the workspace (owner decision
- * 2026-11-15): no system or global config file, so nothing outside the
- * workspace is read; the workspace's repositories are the broker's, so
- * `safe.directory` must name them, and only the command-line scope may
- * (`GIT_CONFIG_PARAMETERS` is that scope; its name passes codex's default
- * filter, which drops variables named like KEY, SECRET or TOKEN); and no
- * optional lock, since the workspace is read-only to the DM.
+ * git, for the DM's commands in the workspace (owner decision 2026-11-15): no
+ * system or global config file, so nothing outside the workspace is read; the
+ * request directory's repositories were the broker's, and a copied tree keeps
+ * no owner check worth having, so `safe.directory` names every one, and only
+ * the command-line scope may (`GIT_CONFIG_PARAMETERS` is that scope; its name
+ * passes codex's default filter, which drops variables named like KEY, SECRET
+ * or TOKEN); and no optional lock, so a read such as `git status` never
+ * rewrites the index of the copy.
  */
 export const DM_FIXED_GIT_ENVIRONMENT = Object.freeze([
   ["GIT_CONFIG_NOSYSTEM", "1"],
@@ -343,7 +382,24 @@ export const DM_LAUNCHER_SPECS: Readonly<Record<DmInstanceScope, DmLauncherSpec>
 export const isDmLauncherInstance = (value: unknown): value is DmInstanceScope =>
   typeof value === "string" && Object.prototype.hasOwnProperty.call(DM_LAUNCHER_SPECS, value);
 
-/** §5a "고정 환경", in a fixed order. */
+/**
+ * §5a "고정 환경", per CLI, after the eight: codex's commands get TMPDIR in
+ * the work directory (codex's sandbox leaves `/tmp` unwritable, and tsx and
+ * tsc's tools cache under the temporary directory); claude gets the jail as
+ * its shell prefix and its own shell files in the work directory, where the
+ * jailed shell can write the working-directory file claude reads back (the v22
+ * worker's two variables, lib/amux/v22OneShotSidecar.mjs `amuxV22CliEnv`).
+ */
+const DM_WORK_TMP_VALUE = `${DM_ARGV_WORK_DIRECTORY}/${DM_WORK_TMP_NAME}`;
+const CLI_ENVIRONMENT: Readonly<Record<DmLauncherCli, ReadonlyArray<readonly [string, string]>>> = Object.freeze({
+  codex: Object.freeze([["TMPDIR", DM_WORK_TMP_VALUE]] as const),
+  claude: Object.freeze([
+    ["CLAUDE_CODE_SHELL_PREFIX", DM_ENV_SHELL_PREFIX],
+    ["CLAUDE_CODE_TMPDIR", DM_WORK_TMP_VALUE],
+  ] as const),
+});
+
+/** §5a "고정 환경", in a fixed order, with the per-request values as placeholders. */
 export const dmFixedEnvironment = (instance: DmInstanceScope): ReadonlyArray<readonly [string, string]> =>
   Object.freeze([
     ["HOME", DM_LAUNCHER_SPECS[instance].home],
@@ -351,6 +407,7 @@ export const dmFixedEnvironment = (instance: DmInstanceScope): ReadonlyArray<rea
     ["LANG", DM_FIXED_LOCALE],
     ["LC_ALL", DM_FIXED_LOCALE],
     ...DM_FIXED_GIT_ENVIRONMENT,
+    ...CLI_ENVIRONMENT[DM_LAUNCHER_SPECS[instance].cli],
   ] as const);
 
 // ---------------------------------------------------------------------------
@@ -399,9 +456,11 @@ export const dmExecutionDigest = (instance: DmInstanceScope): string =>
  */
 export const DM_RECORDED_EXECUTION_DIGESTS: Readonly<Record<DmInstanceScope, string>> = Object.freeze({
   // Owner decision 2026-11-15: the workspace's read tools and git environment;
-  // 2026-11-22: Code Mode's host on (no `--disable code_mode_host`) and pinned as a companion.
-  "decision-maker-openai": "6a37d7af4afa1d6c749789c723e739f071d18f47aba837d0efa814ef91efb4ba",
-  "decision-maker-anthropic": "ada9a76ab70925b6eeac9848c3ebec804d3860312dc19a04225e00c1c6a4f88e",
+  // 2026-11-22: Code Mode's host on (no `--disable code_mode_host`) and pinned as a companion;
+  // owner direction 2026-11-22 ("DM은 접근권한 막지 마세요"): the work directory, codex's write
+  // profile and TMPDIR, claude's jailed Bash and its two shell variables.
+  "decision-maker-openai": "effd9c48e6742610e974283c787e07d4e79a1bf5e84c6153ea42938e85d94d08",
+  "decision-maker-anthropic": "dbecae4799a2cf39a98ab0beef2fba02aa9c104e8f240bf18af602013942417f",
 });
 
 // ---------------------------------------------------------------------------
@@ -511,7 +570,26 @@ export type DmRequestPaths = {
   temporaryDirectory: string;
   /** codex only: `-o`, a fixed name in the temporary directory. Null for claude. */
   outputFile: string | null;
+  /**
+   * The work directory: the launcher's copy of the request directory, in the
+   * temporary directory, and the one place the DM's commands may write
+   * (owner direction 2026-11-22). The CLI's working directory.
+   */
+  workDirectory: string;
+  /** `DM_WORK_TMP_NAME` in the work directory. */
+  workTemporaryDirectory: string;
+  /** The jail's two scripts, in the temporary directory beside the work directory (outside the jail). */
+  shellDirectory: string;
+  /** The jail's launcher, `bash -c <command>` in the jail. */
+  shellJail: string;
+  /** claude's `CLAUDE_CODE_SHELL_PREFIX`. */
+  shellPrefix: string;
 };
+
+export const DM_WORK_DIRECTORY_NAME = "work";
+export const DM_SHELL_DIRECTORY_NAME = "shell";
+export const DM_SHELL_JAIL_NAME = "bash";
+export const DM_SHELL_PREFIX_NAME = "claude-shell-prefix";
 
 export type DmExecutionPlan = {
   instance: DmInstanceScope;
@@ -522,7 +600,7 @@ export type DmExecutionPlan = {
   /** The process's whole argv, the program first. */
   argv: string[];
   environment: Array<[string, string]>;
-  /** §5a: claude's working directory is the request directory; codex gets the same, as `-C` names it. */
+  /** §5a: both CLIs' working directory is the work directory; codex's `-C` names it too. */
   workingDirectory: string;
   paths: DmRequestPaths;
 };
@@ -538,10 +616,17 @@ export const dmScratchRoot = (instance: DmInstanceScope): string =>
 export const dmRequestPaths = (instance: DmInstanceScope, requestId: string): DmRequestPaths => {
   if (!isDmRequestId(requestId)) throw new Error("AMUX Decision Maker request id must be a lowercase UUID");
   const temporaryDirectory = `${dmScratchRoot(instance)}/${requestId}`;
+  const workDirectory = `${temporaryDirectory}/${DM_WORK_DIRECTORY_NAME}`;
+  const shellDirectory = `${temporaryDirectory}/${DM_SHELL_DIRECTORY_NAME}`;
   return {
     requestDirectory: `${DM_REQUEST_ROOT}/${requestId}`,
     temporaryDirectory,
     outputFile: DM_LAUNCHER_SPECS[instance].cli === "codex" ? `${temporaryDirectory}/${DM_CODEX_OUTPUT_FILE_NAME}` : null,
+    workDirectory,
+    workTemporaryDirectory: `${workDirectory}/${DM_WORK_TMP_NAME}`,
+    shellDirectory,
+    shellJail: `${shellDirectory}/${DM_SHELL_JAIL_NAME}`,
+    shellPrefix: `${shellDirectory}/${DM_SHELL_PREFIX_NAME}`,
   };
 };
 
@@ -564,13 +649,15 @@ export const dmExecutionPlan = (
         return DM_OUTPUT_SCHEMA_PATH;
       case DM_ARGV_SCHEMA_JSON:
         return DM_OUTPUT_SCHEMA_JSON;
-      case DM_ARGV_REQUEST_DIRECTORY:
-        return paths.requestDirectory;
+      case DM_ARGV_WORK_DIRECTORY:
+        return paths.workDirectory;
       case DM_ARGV_OUTPUT_FILE:
         return paths.outputFile as string;
+      case DM_ENV_SHELL_PREFIX:
+        return paths.shellPrefix;
       default:
-        // codex's permissions profile names the request directory inside one token.
-        return token.split(DM_ARGV_REQUEST_DIRECTORY).join(paths.requestDirectory);
+        // codex's permissions profile and the temporary-directory variables name the work directory inside one token.
+        return token.split(DM_ARGV_WORK_DIRECTORY).join(paths.workDirectory);
     }
   };
   return {
@@ -581,8 +668,8 @@ export const dmExecutionPlan = (
       requestId,
       executable: spec.executablePath,
       argv: [spec.executablePath, ...spec.argv.map(substitute)],
-      environment: dmFixedEnvironment(instance).map(([name, value]) => [name, value]),
-      workingDirectory: paths.requestDirectory,
+      environment: dmFixedEnvironment(instance).map(([name, value]) => [name, substitute(value)]),
+      workingDirectory: paths.workDirectory,
       paths,
     },
   };
@@ -628,8 +715,8 @@ const matchesFlag = (token: string, flag: string) => {
 
 /**
  * Which of §5a's refused entries appear in an argv (diagnostic only). The
- * program name is skipped. Claude's `--tools Read,Grep,Glob` is the fixed
- * argv's own and is not reported.
+ * program name is skipped. Claude's `--tools` and `--allowedTools` with
+ * `DM_CLAUDE_TOOLS` are the fixed argv's own and are not reported.
  */
 export const dmForbiddenArgv = (cli: DmLauncherCli, argv: readonly string[]): string[] => {
   const list: readonly string[] = cli === "codex" ? DM_CODEX_REFUSED_ARGV : DM_CLAUDE_REFUSED_ARGV;
@@ -645,8 +732,8 @@ export const dmForbiddenArgv = (cli: DmLauncherCli, argv: readonly string[]): st
         }
         continue;
       }
-      if (cli === "claude" && flag === "--tools") {
-        if ((token === "--tools" && next !== DM_CLAUDE_TOOLS) || (token.startsWith("--tools=") && token !== `--tools=${DM_CLAUDE_TOOLS}`)) {
+      if (cli === "claude" && CLAUDE_TOOL_LIST_FLAGS.includes(flag)) {
+        if ((token === flag && next !== DM_CLAUDE_TOOLS) || (token.startsWith(`${flag}=`) && token !== `${flag}=${DM_CLAUDE_TOOLS}`)) {
           found.add(entry);
         }
         continue;

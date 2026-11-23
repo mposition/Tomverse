@@ -141,7 +141,8 @@ approvedBy: mposition · approvedAt: 2026-10-17 · 정책 버전: 2
    전체(`evidence/PATCH.diff`·`FINDINGS.md`·`CRITERIA.md`·`CONTEXT.md`), 안내 `WORKSPACE.md`. 근거는 앱이 보낼 때마다 원래 행에서
    다시 읽어 준다(`POST /api/internal/amux/decision-maker/workspace`). 카드는 요약과 안내만 담고, 근거를 카드에 맞춰 자르지 않는다.
 2. **도구(§5a).** codex는 읽기 전용 shell(권한 profile)로, claude는 `Read`·`Grep`·`Glob`으로 작업 공간을 읽는다. 쓰기와
-   네트워크는 없다. 테스트 실행은 켜지 않는다(§5a에 이유).
+   네트워크는 없다. 테스트 실행은 켜지 않는다(§5a에 이유). — 2026-11-22 §0f-4로 바뀌었다: DM은 작업 공간의 자기 사본에서
+   명령을 실행하고 쓰며 테스트와 typecheck를 돌린다. 네트워크는 여전히 없다.
 3. **한도.** 카드 필드마다의 글자 수 한도, 경로 개수, 스냅샷 크기·개수·시간 한도, §3-6의 처리량, DM 답 필드의 8·4·1 KiB를
    없앴다. 남은 것은 실제 한계에 맞춘 단일 상한뿐이다: 카드 텍스트 256 KiB(공급사 CLI의 prompt), DM 출력 256 KiB(results
    route 본문), 근거 합계 16 MiB(세 프로세스의 메모리), 작업 공간 디스크 4 GiB, git fetch 10분, v22 답 30 KiB(v22 sidecar의
@@ -234,8 +235,17 @@ AMUX-CRAWL-003이 DM 결과 검토에서 제안 없이 끝난 뒤 12시간 동�
    대기 중인 요청, proposal, 확정, 운영자의 reject는 여전히 결과 검토의 것이다.
 3. **계획의 local id는 카드 번호로 읽힌다.** 완료 기준과 brief의 `c0:card-1` 같은 id를 DM 카드·DM workspace의
    `CRITERIA.md`·worker brief·코드 검토 범위·Admin 상세에서 등록된 카드의 번호로 바꾼다. 봉인된 본문은 바꾸지 않는다.
-4. 남은 것: DM의 명령 실행(Claude DM의 Bash, Codex DM의 쓰기, 의존성 설치)을 worker와 같은 jail로 여는 일은 box에서
-   실측해야 하므로 별도 작업이다. jail 없이 Bash만 열면 DM 계정의 로그인을 명령이 읽을 수 있다.
+4. **DM은 명령을 실행한다(2026-11-23 구현, box 실측 기록
+   `docs/ops/amux/decision-maker-s0-records/2026-11-23__dm-command-jail.md`).** launcher가 공급사 계정으로 요청 디렉터리를
+   그 계정의 요청별 임시 디렉터리 안 작업 디렉터리(`<홈>/dm-scratch/<요청 id>/work`)로 복사하고, 두 CLI는 거기서 일한다.
+   작업 디렉터리 전체에 쓸 수 있다. Codex DM은 권한 profile `dm`이 작업 디렉터리에 `write`를 준다(codex 자체 sandbox).
+   Claude DM은 `Bash`를 켜고, 그 명령은 v22 worker와 같은 bwrap jail(`lib/amux/v22ShellJail.mjs`)에서만 돈다
+   (`CLAUDE_CODE_SHELL_PREFIX`). 네트워크가 없고, 작업 디렉터리만 쓸 수 있으며, 계정 홈과 그 로그인은 jail 안에 아예 없다.
+   의존성은 launcher가 CLI 시작 전에 그 jail 안에서 설치한다: 각 트리의 lockfile을 box가 develop의 공개 head로 채우는 root 소유
+   cache에서 `npm ci --offline --ignore-scripts`로 설치하고, Prisma client를 만든다. 실패해도 요청은 계속되며
+   `DEPENDENCIES.md`가 무엇이 설치됐는지 DM에게 알린다. 자격증명은 명령에서 보이지 않는다. 두 CLI의 고정 argv·환경은
+   §5a에 있다. 작업 디렉터리는 임시 디렉터리와 함께 모든 종료 경로에서 지우고 확인한다(§5). 운영자 지시가 §5a의 값 변경
+   승인이다.
 
 ## 0e. 운영자 지시 (2026-11-18, 대화) — transaction의 call 수 상한 없음
 
@@ -444,7 +454,9 @@ v1에서 이 선언은 **라우팅에 쓰지 않는다.** 운영자가 판단할
   요청 디렉터리에 작업 공간을 만든다: `git`을 시스템·전역 설정 없이, 빈 credential helper·askpass, prompt 없음, https만,
   redirect 없음, hook 없음, symlink를 일반 파일로(`core.symlinks=false`) 실행해 그 commit을 `--depth=100`으로 fetch하고, HEAD가 그
   commit인지 확인한다(git이 객체 id를 내용의 hash로 검증한다). 남은 symlink가 하나라도 있으면 거부한다. 트리는 공급사 그룹 읽기
-  전용(디렉터리 `0750`, 파일 `0640`)으로 넘긴다. 만들지 못하면 `workspace_unavailable`로 아무것도 보내지 않는다. 근거 파일은 닫힌
+  전용(디렉터리 `0750`, 파일 `0640`)으로 넘긴다. 만들지 못하면 `workspace_unavailable`로 아무것도 보내지 않는다. launcher는 그
+  계정으로 트리를 자기 요청별 임시 디렉터리의 작업 디렉터리(`work/`)로 복사하고, 그 옆에 명령 jail을 쓰고, 의존성을 설치한
+  뒤에 CLI를 시작한다(§0f-4). 복사나 jail을 만들지 못하면 시작하지 않는다(`request_directories_unusable`). 근거 파일은 닫힌
   이름 목록, 텍스트, 비밀 경로 목록, secret 검사를 앱과 broker가 각각 통과해야 한다. 디스크 상한 4 GiB, fetch 10분, 근거 합계
   16 MiB가 단일 안전 상한이다(`lib/amux/decisionMakerWorkspaceCore.ts`).
 - **저장소 스냅샷 — 공개된 내용만:** 스냅샷은 GitHub의 공개 저장소 `github.com/mposition/Tomverse`에 이미
@@ -484,7 +496,7 @@ v1에서 이 선언은 **라우팅에 쓰지 않는다.** 운영자가 판단할
   |---|---|---|
   | worker | 자기 worktree와 홈. 요청 디렉터리·DM 프로세스·broker를 읽거나 ptrace할 수 없고 sudo 없음 | 기존 그대로 |
   | DM broker | 요청 디렉터리를 만들고 지움, 작업 공간 가져오기(공개 commit 조회와 git fetch), DM 프로세스 시작, DM stdout을 pipe로 받아 bridge의 로컬 소켓으로 넘김. 공급사 CLI 인증·bridge 자격증명 없음 | GitHub이 공개한 git·API IPv4 대역의 443(IP 단위, 호스트 이름은 보지 않음)과 bridge 로컬 소켓만 |
-  | DM 공급사 계정(공급사마다 하나) | 자기 공급사 CLI의 인증 하나, 요청 디렉터리 읽기만, 자기 임시 디렉터리 | 자기 공급사 API host만 |
+  | DM 공급사 계정(공급사마다 하나) | 자기 공급사 CLI의 인증 하나, 요청 디렉터리 읽기만, 자기 임시 디렉터리(작업 디렉터리 사본 포함, DM의 명령은 이곳에만 쓴다) | 자기 공급사 API host만. DM의 명령(jail·codex sandbox)은 네트워크 없음 |
   | bridge | 기존 bridge 자격증명. 요청 디렉터리 접근 없음 | 앱 route만 |
 
   DM 공급사 계정과 broker에는 GitHub 로그인·git credential helper·SSH 키·제품 DB·배포 자격증명·bridge 환경 파일이
@@ -502,7 +514,7 @@ v1에서 이 선언은 **라우팅에 쓰지 않는다.** 운영자가 판단할
   `--dangerously-bypass-approvals-and-sandbox`나 `--sandbox workspace-write`와 `--add-dir`을, `claude`에
   `--dangerously-skip-permissions`를 붙이기 때문이다. broker가 질문마다 비대화형 프로세스 하나를 **고정 실행 파일,
   고정 argv, 고정 환경**으로 시작한다. 환경은 허용 목록(고정 `HOME`·`PATH`·locale)만 두고, proxy 변수·`LD_PRELOAD`·공급사
-  설정 경로를 바꾸는 변수는 넣지 않는다. **CLI는 설정 파일을 읽지 않는 argv로 실행하고, DM이 지켜야 하는 설정은 전부
+  설정 경로를 바꾸는 변수는 넣지 않는다(claude의 shell prefix와 그 임시 파일 위치, codex 명령의 TMPDIR는 §5a의 고정값이다). **CLI는 설정 파일을 읽지 않는 argv로 실행하고, DM이 지켜야 하는 설정은 전부
   고정 argv에 있다.** 공급사 계정의 홈은 그 계정이 쓴다. CLI가 인증을 갱신하고 자기 상태를 거기에 쓰기 때문이다(S0
   실측, §5a). 인증 파일 밖의 CLI 상태는 질문 내용이 들어 있을 수 있는 것으로 보고 요청마다 지운다(§5a). broker는 시작 전에 실행 파일의 sha256과 실행 digest(§5a)를 정책 버전에 기록된 값과 대조한다. 명령
   실행을 끌 수 있는 모드가 있으면 그 모드를 쓴다. 실행 파일·argv·환경 가운데 하나라도 기록과 다르면 시작을 거부한다.
@@ -540,18 +552,21 @@ sha256을 아래 값과 대조한다. 다르면 시작을 거부하고, 새 버�
 release 자산 `codex-code-mode-host-x86_64-unknown-linux-musl.tar.gz`(자산 sha256
 `458239ea45c1fc508d89695f180ab352f2834709a8a46929a4466f4f04399ada`)의 유일한 파일이다. host는 도구 호출을 codex에 되돌려
 보낼 뿐이고, 명령은 그대로 권한 profile `dm` 안에서 돈다. 2026-11-22 box에서 같은 argv로 요청 디렉터리 읽기는 되고, 쓰기·
-네트워크·요청 디렉터리 밖 파일은 막히는 것을 확인했다. claude는 함께 두는 파일이 없다.
+네트워크·요청 디렉터리 밖 파일은 막히는 것을 확인했다(그때의 profile. 2026-11-23부터 profile은 작업 디렉터리 쓰기를 연다, 아래
+도구). claude는 함께 두는 파일이 없다.
 
-**고정 argv.** 질문은 stdin으로만 넘기고 argv에는 질문 내용이 없다. 요청마다 바뀌는 것은 `<요청 디렉터리>`와
-`<요청별 출력 파일>` 두 경로뿐이고 broker가 만든다. `<스키마 파일>`은 root 소유의 고정 파일이고 `<스키마 JSON>`은 그
+**고정 argv.** 질문은 stdin으로만 넘기고 argv에는 질문 내용이 없다. 요청마다 바뀌는 것은 `<작업 디렉터리>`와
+`<요청별 출력 파일>` 두 경로뿐이다. `<작업 디렉터리>`는 launcher가 공급사 계정의 요청별 임시 디렉터리 안에 만든 요청
+디렉터리의 사본 `<홈>/dm-scratch/<요청 id>/work`이고, `<요청별 출력 파일>`은 그 옆(작업 디렉터리 밖)의 고정 이름이다.
+`<스키마 파일>`은 root 소유의 고정 파일이고 `<스키마 JSON>`은 그
 파일의 바이트 그대로다(§6의 출력 스키마. 내용은 S2-3 launcher의 상수이며 그 sha256이 실행 digest에 들어간다). 그 밖의
-바이트는 아래와 같아야 한다. claude의 작업 디렉터리는 `<요청 디렉터리>`다.
+바이트는 아래와 같아야 한다. 두 CLI의 작업 디렉터리는 `<작업 디렉터리>`다.
 
 ```text
 codex -a never --no-daemon exec --ephemeral --ignore-user-config --ignore-rules --strict-config --skip-git-repo-check
   -c default_permissions="dm"
-  -c permissions.dm.filesystem={":minimal"="read","<요청 디렉터리>"="read","/opt/tomverse-amux-dm/codex-cli-0.162.1"="read"}
-  --json --output-schema <스키마 파일> -o <요청별 출력 파일> -m gpt-6-astra -C <요청 디렉터리>
+  -c permissions.dm.filesystem={":minimal"="read","<작업 디렉터리>"="write","/opt/tomverse-amux-dm/codex-cli-0.162.1"="read"}
+  --json --output-schema <스키마 파일> -o <요청별 출력 파일> -m gpt-6-astra -C <작업 디렉터리>
   --disable shell_snapshot
   --disable write_stdin_approval --disable sleep_tool --disable browser_use
   --disable browser_use_external --disable browser_use_full_cdp_access --disable browser_annotation_api
@@ -562,25 +577,37 @@ codex -a never --no-daemon exec --ephemeral --ignore-user-config --ignore-rules 
   --disable image_generation --disable view_image --disable daemon_auto_start --disable in_app_updates
   --disable system_proxy_fallback --disable unbounded_connection_retries --disable realtime_conversation -
 
-claude -p --tools Read,Grep,Glob --restricted --strict-mcp-config --setting-sources "" --disable-slash-commands
+claude -p --tools Read,Grep,Glob,Bash --allowedTools Read,Grep,Glob,Bash --restricted --strict-mcp-config
+  --setting-sources "" --disable-slash-commands
   --no-session-persistence --permission-prompts none --output-format json --json-schema <스키마 JSON>
   --model claude-fable-5-1
 ```
 
-(줄바꿈은 읽기 위한 것이다. argv는 공백으로 나뉜 위 토큰의 순서 그대로다. 요청마다 바뀌는 `<요청 디렉터리>`는 codex의
+(줄바꿈은 읽기 위한 것이다. argv는 공백으로 나뉜 위 토큰의 순서 그대로다. 요청마다 바뀌는 `<작업 디렉터리>`는 codex의
 권한 profile 토큰 안에도 들어간다.)
 
-- **도구(운영자 결정 2026-11-15, §0b).** DM은 작업 공간(§5)을 로컬 CLI처럼 읽는다. codex는 shell을 켜고(`shell_tool`·
-  `unified_exec`·`unified_exec_tty`를 더 끄지 않는다) 권한 profile `dm`으로 명령을 돌린다. 그 명령은 시스템 최소 경로
-  (`:minimal`), 요청 디렉터리, CLI 자신의 디렉터리(sandbox가 실행 파일을 다시 실행한다)만 **읽을** 수 있고, 아무것도 쓰지
-  못하며 네트워크가 없다. 계정 홈(인증 파일 포함)과 다른 프로세스의 환경은 명령에게 보이지 않는다. 같은 형태를 process
-  audit runner가 쓰며 2026-11-14 box에서 Codex 0.160으로 확인했다(`scripts/amux-process-audit-runner.mjs`). profile은 `-s`를
-  대신한다(CLI가 둘을 함께 받지 않는다). claude는 `Read`·`Grep`·`Glob`만 켠다. `--restricted`가 그 도구를 작업 디렉터리에
-  가두고 명령·WebFetch 도구를 없앤다. Bash는 켜지 않는다. claude의 명령을 작업 공간에 가두는 장치(codex의 profile에 해당)가
-  고정 argv에 없고, 그 명령은 계정 홈의 인증 파일을 읽을 수 있기 때문이다.
-- **테스트 실행은 켜지 않는다.** box의 공급사 계정에 의존성(`node_modules`)이 없고 설치는 registry 네트워크가 필요한데
-  공급사 계정의 egress는 공급사 API뿐이다. codex profile은 쓰기를 막으므로 테스트 산출물도 쓸 수 없다. 켜려면 별도 계정과
-  미리 설치한 의존성 cache, 쓰기 가능한 작업 공간 사본, 네트워크 없는 sandbox를 box에서 측정한 뒤 이 절을 바꾼다.
+- **도구(운영자 결정 2026-11-15 §0b, 운영자 지시 2026-11-22 §0f-4).** DM은 작업 공간(§5)의 자기 사본에서 로컬 CLI처럼 일한다:
+  읽고, 쓰고, 명령과 테스트와 typecheck를 돌린다. codex는 shell을 켜고(`shell_tool`·`unified_exec`·`unified_exec_tty`를 더
+  끄지 않는다) 권한 profile `dm`으로 명령을 돌린다. 그 명령은 시스템 최소 경로(`:minimal`)와 CLI 자신의 디렉터리(sandbox가
+  실행 파일을 다시 실행한다)를 읽고, 작업 디렉터리를 **읽고 쓸** 수 있으며, 그 밖은 없다. 네트워크가 없다. 계정 홈(인증 파일
+  포함), 요청 디렉터리, 작업 디렉터리 옆의 `<요청별 출력 파일>`, 다른 프로세스의 환경은 명령에게 보이지 않는다. profile은
+  `-s`를 대신한다(CLI가 둘을 함께 받지 않는다). claude는 `Read`·`Grep`·`Glob`·`Bash`를 켜고 `--allowedTools`로 같은 목록을
+  묻지 않고 허용한다(`--permission-prompts none`은 묻는 것을 거부한다). `--restricted`가 파일 도구를 작업 디렉터리에 가두고 그
+  밖의 명령·WebFetch 도구를 없앤다. `Bash`는 `CLAUDE_CODE_SHELL_PREFIX`가 가리키는 launcher의 jail에서만 돈다: v22 worker의
+  bwrap jail(`lib/amux/v22ShellJail.mjs`)과 같은 경계로, 새 network namespace(loopback만), 작업 디렉터리만 쓰기 가능, 그 밖은
+  `/usr`·`/etc`와 의존성 cache를 읽기 전용으로, 계정 홈과 그 로그인은 없음, 환경은 고정 목록으로 다시 만든다. jail의 `/proc`은
+  jail 자신의 pid namespace에 새로 만든 것뿐이고(unit이 허용할 때. 아니면 `/proc` 없음), CLI 프로세스는 보이지 않는다.
+  2026-11-23 box 실측(모델 호출 없음, 기록 `docs/ops/amux/decision-maker-s0-records/2026-11-23__dm-command-jail.md`): codex
+  profile은 작업 디렉터리 쓰기만 열고 인증 파일·출력 파일·요청 디렉터리·`/tmp`·TCP·DNS를 막았고, 작업 디렉터리에 만든
+  인증 파일 symlink로도 읽지 못했다. claude는 Bash를 묻지 않고 jail에서 돌렸고, jail 안에서 로그인 파일이 보이지 않았으며,
+  `Read`는 jail이 만든 로그인 symlink와 로그인 경로를 모두 거부했고 `Grep`은 symlink를 따라가지 않았다.
+- **의존성.** 공급사 계정에는 registry 네트워크가 없다. 그래서 launcher가 CLI 시작 전에 jail 안에서 각 트리(`repo/`,
+  `repo-patched/`)의 lockfile을 root 소유 cache `/var/cache/tomverse-amux-dm/npm`에서 `npm ci --offline --ignore-scripts`로
+  설치하고, Prisma engine cache `/var/cache/tomverse-amux-dm/prisma`를 jail의 HOME으로 복사해 Prisma client를 만든다(트리의
+  `prisma.config.ts`가 돌기 때문에 jail 안이다). cache는 box의 root 서비스 `amux-dm-dependency-cache.timer`가 develop의 공개
+  head로 하루 한 번 채운다(`scripts/amux-dm-dependency-cache.sh`, 공급사 계정은 읽기만). 설치는 요청의 hard timeout에서
+  쓰고(최대 30분), 실패해도 요청은 계속된다. 작업 디렉터리의 `DEPENDENCIES.md`가 트리마다 결과를 적는다. launcher의 log에는
+  결과 코드만 남는다.
 
 - 설정 파일: codex는 `--ignore-user-config`·`--ignore-rules`로 `config.toml`과 execpolicy 규칙을 읽지 않는다. claude는
   `--setting-sources ""`와 `--restricted`로 user·project·local 설정을 읽지 않는다. 도움말에 따르면 `--restricted`도
@@ -601,20 +628,24 @@ claude -p --tools Read,Grep,Glob --restricted --strict-mcp-config --setting-sour
 최상위 `--search`·`--remote`·`--remote-auth-token-env`, 하위 명령 `resume`·`fork`·`review`. 고정 argv 밖의 -c 값은 바이트 비교가
 거부한다. claude:
 `--dangerously-skip-permissions`, `--allow-dangerously-skip-permissions`, 값과 무관한 `--permission-mode`, `--add-dir`,
-`--allowedTools`/`--allowed-tools`, `Read,Grep,Glob` 밖의 `--tools`, `-w`/`--worktree`, `--tmux`, `--mcp-config`, `--plugin-dir`,
+`Read,Grep,Glob,Bash` 밖의 `--allowedTools`/`--allowed-tools`/`--tools`, `-w`/`--worktree`, `--tmux`, `--mcp-config`, `--plugin-dir`,
 `--plugin-url`, `--agents`, `--agent`, `--file`, `--chrome`, `--cloud`, `--environment`, `--remote-control`, `--ide`,
 `--desktop`, `--brief`, `--bg`/`--background`, `-r`/`--resume`, `-c`/`--continue`, `--fork-session`, `--session-id`,
 `--teleport`, `--from-pr`, `--fallback-model`, `--betas`, `--system-prompt`, `--bare`, `--settings`, `-d`/`--debug`,
 `--debug-file`, `--verbose`.
 
-**고정 환경.** `HOME=<그 공급사 계정의 홈>`, `PATH=/usr/bin:/bin`, `LANG=C.UTF-8`, `LC_ALL=C.UTF-8`, `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_PARAMETERS='safe.directory=*'`, `GIT_OPTIONAL_LOCKS=0` 여덟만 둔다.
-뒤의 넷은 DM의 git 읽기 명령을 위한 것이다(2026-11-15): 작업 공간 밖의 설정 파일을 읽지 않고, broker 소유 저장소를 명령줄 범위의
+**고정 환경.** 두 CLI 모두 `HOME=<그 공급사 계정의 홈>`, `PATH=/usr/bin:/bin`, `LANG=C.UTF-8`, `LC_ALL=C.UTF-8`, `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_PARAMETERS='safe.directory=*'`, `GIT_OPTIONAL_LOCKS=0` 여덟을 두고, codex는 `TMPDIR=<작업 디렉터리>/.amux-tmp` 하나를, claude는 `CLAUDE_CODE_SHELL_PREFIX=<요청별 shell prefix>`와 `CLAUDE_CODE_TMPDIR=<작업 디렉터리>/.amux-tmp` 둘을 더 둔다. 그 밖에는 없다.
+git 넷은 DM의 git 명령을 위한 것이다(2026-11-15): 작업 공간 밖의 설정 파일을 읽지 않고, 작업 공간의 저장소를 명령줄 범위의
 `safe.directory`로 허용하며(codex는 이름에 KEY·SECRET·TOKEN이 든 변수를 명령에 넘기지 않으므로 `GIT_CONFIG_PARAMETERS`를 쓴다),
-읽기 전용 작업 공간에 잠금 파일을 쓰려 하지 않는다.
+`git status` 같은 읽기가 사본의 index를 다시 쓰지 않는다. codex의 `TMPDIR`은 명령의 임시 디렉터리를 작업 디렉터리 안에 둔다
+(codex sandbox는 `/tmp`에 쓰지 못하게 하고, 그 디렉터리가 없으면 sandbox가 시작하지 못한다. launcher가 미리 만든다).
+`<요청별 shell prefix>`는 launcher가 요청별 임시 디렉터리의 `shell/`(작업 디렉터리 밖, jail 안에서 보이지 않음)에 쓰는 jail
+실행 script이고, `CLAUDE_CODE_TMPDIR`은 jail 안의 명령이 claude에게 작업 디렉터리를 돌려주는 파일을 쓸 수 있는 곳이다(v22
+worker의 두 변수와 같다).
 
 **실행 digest.** broker는 다음 값의 canonical JSON(`amux-json-v1`)을 sha256으로 계산해 기록과 대조한다: 인스턴스, 실행
-파일 경로와 sha256, 스키마 파일의 sha256, 요청마다 바뀌는 두 경로를 자리표시자로 둔 argv 배열, 고정 환경, 아래 상태
-삭제 목록. 이 digest가 v1의 "설정 digest"를
+파일 경로와 sha256, 스키마 파일의 sha256, 요청마다 바뀌는 두 경로를 자리표시자로 둔 argv 배열, 요청마다 바뀌는 값을
+자리표시자로 둔 고정 환경, 아래 상태 삭제 목록. 이 digest가 v1의 "설정 digest"를
 대신한다. 계산은 S2-3 launcher 코드의 상수이고, 그 값은 launcher 테스트가 고정한다.
 
 **공급사 계정 홈의 상태.** S0에서(고정 argv 후보, 고정 환경이 아닌 일반 로그인 환경) 두 CLI는 홈에 다음을 썼다.
