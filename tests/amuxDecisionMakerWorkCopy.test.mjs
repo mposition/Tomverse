@@ -155,3 +155,14 @@ test("the work tree's size counts what is behind an unreadable directory, and st
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("the free-inode floor: kept under a zero ratio, lost above the whole filesystem", { skip: !posix }, async () => {
+  const { tmpdir } = await import("node:os");
+  const { dmInodesKept, DM_WORK_DISK_LIMITS } = await import("../lib/amux/decisionMakerWorkCopy.ts");
+  assert.equal(dmInodesKept(tmpdir(), 0), true);
+  assert.equal(DM_WORK_DISK_LIMITS.freeInodeFloorRatio, 0.05);
+  // A ratio over 1 can be kept only by a filesystem that reports no inodes at all.
+  const { statfsSync } = await import("node:fs");
+  assert.equal(dmInodesKept(tmpdir(), 2), Number(statfsSync(tmpdir()).files) === 0);
+  assert.equal(dmInodesKept("/nonexistent/amux-dm", 0), false);
+});

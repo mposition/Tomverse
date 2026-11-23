@@ -52,22 +52,33 @@ dm_cache_as_nobody() {
 # Each refresh is a new generation directory, <name>.gen-<epoch seconds>, and
 # <name> is a symbolic link to the current one, replaced in one rename: there is
 # no moment without a cache (review r-20261123-110507-a9b409). The launcher's jail
-# binds the whole cache root, so the link resolves inside it. A replaced
-# generation stays this long -- a request that started on it keeps reading it
-# until its hard timeout (2 h, plus the install's share of it) ends (review
-# r-20261123-105620-63d64b) -- and is removed by a later refresh.
+# binds the whole cache root, so the link resolves inside it. When the link
+# moves on, the generation it left is renamed <name>.old-<replaced at>-<made at>
+# and stays this long from the moment it was replaced -- a request that started
+# on it keeps reading it until its hard timeout (2 h, plus the install's share
+# of it) ends (reviews r-20261123-105620-63d64b, r-20261123-111521-e19df9) --
+# and a later refresh removes it.
 readonly DM_CACHE_KEEP_REPLACED_SECONDS=$((3 * 60 * 60))
 
-# Removes generations of <name> older than DM_CACHE_KEEP_REPLACED_SECONDS, judged
-# by the epoch in their name (a directory's mtime is when its content last
-# changed), and never the one <name> points to.
-dm_cache_prune_replaced() {
-  local root=$1 name=$2 now=$3 entry stamp current=""
+# Renames every generation of <name> the link no longer points to as replaced now.
+dm_cache_retire_replaced() {
+  local root=$1 name=$2 now=$3 entry current=""
   [[ -L $root/$name ]] && current=$(/usr/bin/readlink -- "$root/$name")
   for entry in "$root/$name.gen-"*; do
     [[ -d $entry && ! -L $entry ]] || continue
     [[ ${entry##*/} != "$current" ]] || continue
-    stamp=${entry##*.gen-}
+    /usr/bin/mv -T -- "$entry" "$root/$name.old-$now-${entry##*.gen-}"
+  done
+}
+
+# Removes replaced generations of <name> replaced more than
+# DM_CACHE_KEEP_REPLACED_SECONDS ago, judged by the replacement time in their name.
+dm_cache_prune_replaced() {
+  local root=$1 name=$2 now=$3 entry stamp
+  for entry in "$root/$name.old-"*; do
+    [[ -d $entry && ! -L $entry ]] || continue
+    stamp=${entry##*.old-}
+    stamp=${stamp%%-*}
     [[ $stamp =~ ^[0-9]+$ ]] || continue
     if ((now - stamp > DM_CACHE_KEEP_REPLACED_SECONDS)); then
       /usr/bin/rm -rf -- "$entry"
@@ -90,6 +101,7 @@ dm_cache_swap() {
   fi
   /usr/bin/ln -sfn -- "$generation" "$DM_CACHE_ROOT/.$name.link-$now"
   /usr/bin/mv -T -- "$DM_CACHE_ROOT/.$name.link-$now" "$DM_CACHE_ROOT/$name"
+  dm_cache_retire_replaced "$DM_CACHE_ROOT" "$name" "$now"
   dm_cache_prune_replaced "$DM_CACHE_ROOT" "$name" "$now"
 }
 

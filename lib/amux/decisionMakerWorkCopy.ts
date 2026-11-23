@@ -131,10 +131,18 @@ export type DmWorkOptions = {
  * running step or the CLI's process group when either is passed: a refusal
  * (`disk_space_low`) before anything ran, `disk_limit` after.
  */
-export type DmDiskLimits = { maxBytes: number; freeFloorBytes: number; checkMs: number; sizeEveryChecks: number };
+export type DmDiskLimits = {
+  maxBytes: number;
+  freeFloorBytes: number;
+  /** Free inodes the home's filesystem keeps, as a share of its inodes (review r-20261123-111521-e19df9). */
+  freeInodeFloorRatio: number;
+  checkMs: number;
+  sizeEveryChecks: number;
+};
 export const DM_WORK_DISK_LIMITS: DmDiskLimits = Object.freeze({
   maxBytes: 16 * 1024 ** 3,
   freeFloorBytes: 20 * 1024 ** 3,
+  freeInodeFloorRatio: 0.05,
   checkMs: 2_000,
   sizeEveryChecks: 15,
 });
@@ -142,7 +150,7 @@ export const DM_WORK_DISK_LIMITS: DmDiskLimits = Object.freeze({
 const limitsFor = (host: DmLauncherHost, options: DmWorkOptions): DmDiskLimits => {
   if (options.disk !== undefined && host.root === null) throw new Error("AMUX Decision Maker disk limits are fixed on the system host");
   // A test host's disk is the test machine's, whose free space is not the box's: no floor unless the test sets one.
-  return { ...DM_WORK_DISK_LIMITS, ...(host.root === null ? {} : { freeFloorBytes: 0 }), ...options.disk };
+  return { ...DM_WORK_DISK_LIMITS, ...(host.root === null ? {} : { freeFloorBytes: 0, freeInodeFloorRatio: 0 }), ...options.disk };
 };
 
 /** Free bytes for an unprivileged account on the filesystem holding `path`; null when it cannot be read. */
@@ -156,10 +164,31 @@ export const dmFreeBytes = (path: string): number | null => {
 };
 
 /**
+ * Whether the filesystem holding `path` keeps its free-inode floor: a
+ * command can exhaust inodes with empty files while bytes stay free. A
+ * filesystem that reports no inode count (btrfs, for one) has no inode limit
+ * to keep. False when it cannot be read.
+ */
+export const dmInodesKept = (path: string, floorRatio: number): boolean => {
+  try {
+    const stats = statfsSync(path);
+    const total = Number(stats.files);
+    return total === 0 || Number(stats.ffree) >= total * floorRatio;
+  } catch {
+    return false;
+  }
+};
+
+/** Every entry costs at least a block: empty files and directories still take an inode and space. */
+const ENTRY_MIN_BYTES = 4096;
+
+/**
  * The disk the work tree holds, measured without blocking the launcher (the
- * watch's kill path must stay responsive): allocated blocks where the
- * platform reports them, else the size, every hard link counted again
- * (counting more is the safe side). It stops as soon as the sum passes
+ * watch's kill path must stay responsive): every entry -- file, directory,
+ * link -- counts its allocated blocks where the platform reports them, else
+ * its size, and never less than ENTRY_MIN_BYTES, so a tree of empty files
+ * reaches the cap too (16 GiB is then 4 Mi entries); every hard link counted
+ * again (counting more is the safe side). It stops as soon as the sum passes
  * `stopAbove`. A directory it cannot read -- a DM command may `chmod 000` one
  * -- is made the account's `0700` first (the launcher is that account and the
  * tree is in its private scratch root); one still unreadable is
@@ -194,7 +223,8 @@ export async function dmWorkTreeBytes(root: string, stopAbove: number): Promise<
         continue; // Gone between the listing and the stat.
       }
       if (stats.isDirectory()) directories.push(path);
-      else bytes += typeof stats.blocks === "number" && stats.blocks > 0 ? Math.max(stats.blocks * 512, 0) : stats.size;
+      const used = typeof stats.blocks === "number" && stats.blocks > 0 ? stats.blocks * 512 : stats.size;
+      bytes += Math.max(used, ENTRY_MIN_BYTES);
       if (bytes > stopAbove) return bytes;
     }
   }
@@ -227,7 +257,7 @@ export const dmWatchWorkDisk = (
     if (fired) return;
     checks += 1;
     const free = dmFreeBytes(work);
-    if (free === null || free < limits.freeFloorBytes) return fire();
+    if (free === null || free < limits.freeFloorBytes || !dmInodesKept(work, limits.freeInodeFloorRatio)) return fire();
     if (measuring || checks % limits.sizeEveryChecks !== 0) return;
     measuring = true;
     void dmWorkTreeBytes(work, limits.maxBytes)
@@ -283,7 +313,8 @@ export const dmPrepareWorkDirectory = (
   const limits = limitsFor(host, options);
   const size = dmWorkspaceBytes(at(paths.requestDirectory));
   const free = dmFreeBytes(at(paths.temporaryDirectory));
-  if (size > limits.maxBytes || free === null || free - size < limits.freeFloorBytes) return { ok: false, reason: "disk" };
+  if (size > limits.maxBytes || free === null || free - size < limits.freeFloorBytes ||
+      !dmInodesKept(at(paths.temporaryDirectory), limits.freeInodeFloorRatio)) return { ok: false, reason: "disk" };
   try {
     // The broker's tree holds no link (it refuses one at hand-over); none is followed here either.
     cpSync(at(paths.requestDirectory), at(paths.workDirectory), {

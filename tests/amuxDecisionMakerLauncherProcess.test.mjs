@@ -16,7 +16,7 @@
 // group and killing it needs POSIX.
 
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statfsSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -501,4 +501,20 @@ setTimeout(() => {}, 15000);`);
   const result = await run(OPENAI, body, { options: { work: { disk: { maxBytes: 64 * 1024, checkMs: 50, sizeEveryChecks: 1 } } } });
   assert.deepEqual(withoutTools(result.report), { result: { outcome: "unavailable", reason: "disk_limit" }, cleanup: VERIFIED });
   assert.equal(result.requestGone && result.temporaryGone, true);
+});
+
+test("a DM that makes many empty files reaches the cap too: every entry costs a block", { skip: !posix }, async () => {
+  // Review r-20261123-111521-e19df9: empty files take inodes while their bytes are zero.
+  const body = recording(`
+const dir = require("path").join(process.cwd(), "empty");
+fs.mkdirSync(dir);
+for (let i = 0; i < 400; i += 1) fs.writeFileSync(require("path").join(dir, "f" + i), "");
+setTimeout(() => {}, 15000);`);
+  const result = await run(OPENAI, body, { options: { work: { disk: { maxBytes: 200 * 4096, checkMs: 50, sizeEveryChecks: 1 } } } });
+  assert.deepEqual(withoutTools(result.report), { result: { outcome: "unavailable", reason: "disk_limit" }, cleanup: VERIFIED });
+});
+
+test("a host under its free-inode floor starts nothing", { skip: !posix || (posix && statfsSync(tmpdir()).files === 0) }, async () => {
+  const result = await run(OPENAI, recording(""), { options: { work: { disk: { freeInodeFloorRatio: 2 } } } });
+  assert.deepEqual(result.report.result, { outcome: "refused", refusals: ["disk_space_low"] });
 });
