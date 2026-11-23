@@ -231,9 +231,11 @@ test("a review pull request's card lists its files in the question; the patch is
   const input = { ...base, kind: "t2_pr", taskStatus: "review", reason: "human_review_required", rejections: 0,
     pull: { number: 3812, patch: PATCH } };
   const card = amuxDmOwnerSettlementCard({ ...input });
-  assert.deepEqual(card.options.map((option) => option.id), ["approve", "retry", "close"]);
+  assert.deepEqual(card.options.map((option) => option.id), ["approve", "retry", "complete", "close"]);
   assert.match(card.question, /Pull request #3812, files \(2\):\n- lib\/amux\/routerFailure\.ts \(\+1 -0\)\n- tests\/routerFailure\.test\.mjs \(\+1 -0\)/);
-  assert.ok(card.question.endsWith("\nShould the pull request be approved, the Task run again, or the card closed?"));
+  assert.ok(card.question.endsWith("\nShould the pull request be approved, the Task run again, the Task marked done because its work is already in, or the card closed?"));
+  // Owner decision 2026-11-23 (AMUX-CRAWL-003): a retry's newer pull request replaces this one, which is closed.
+  assert.match(card.unblocks, /the pull request its run opens replaces this one, which is then closed/);
   assert.ok(!card.question.includes("diff --git"), "the diffs do not compete with the question's words");
   assert.ok(!card.question.includes("remake"), "a pull request is not remade");
   // A workspace: the patch and the run's report are files; the card points at them.
@@ -266,7 +268,9 @@ test("an answer decides only by its kind's fixed words, with the delivery's prec
   assert.deepEqual(ask("stopped", { optionId: "retry" }), { decision: "retry" });
   assert.deepEqual(ask("stopped", { optionId: "complete" }), { decision: "complete" });
   assert.deepEqual(ask("t2_pr", { optionId: "approve" }), { decision: "approve" });
-  assert.equal(ask("t2_pr", { optionId: "complete" }), null, "a pull request is never just marked done");
+  // Owner decision 2026-11-23 (AMUX-CRAWL-003): its work already in, a review pull request's Task is done.
+  assert.deepEqual(ask("t2_pr", { optionId: "complete" }), { decision: "complete" });
+  assert.equal(ask("t2_pr", { optionId: "remake" }), null, "a pull request is not remade");
   assert.equal(ask("stopped", { optionId: "approve" }), null);
   assert.deepEqual(ask("stopped", { outputKind: "free_text", dmAnswer: " Close " }), { decision: "close" });
   assert.deepEqual(ask("stopped", { outputKind: "free_text", dmAnswer: "remake:\n Merge the three cards into one change.\n" }),

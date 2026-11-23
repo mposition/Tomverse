@@ -355,7 +355,10 @@ DM은 **제안을 쓰는 worker이지 승인자가 아니다.** (되돌릴 수 �
     Task의 PR은 카드가 아니라 run의 binding에 있으므로, 운영자 확인 대기 화면은 그 PR(`publication_hold`)을 "PR 없음" 대신 보인다.
     `tier_pending` 초안이 있는 동안 retry가 막히는 것은 이중 실행 방지이며, 화면은 초안을 거절하면 retry가 열린다고 알린다.
     선택지는 멈춘 Task가 `retry`(시도 예산 안에서 `todo`, 넘으면 사람에게)·`complete`(done, `v4TerminalAt`)·`close`(archive)·
-    `remake`(자유 텍스트로 첫 줄 `remake`, 그다음 새 아이디어), 검토 PR이 `approve`·`retry`·`close`다. `remake`는 세 단계다.
+    `remake`(자유 텍스트로 첫 줄 `remake`, 그다음 새 아이디어), 검토 PR이 `approve`·`retry`·`complete`·`close`다(검토 PR의
+    `complete`는 운영자 결정 2026-11-23, AMUX-CRAWL-003: 작업이 이미 들어간 T2 카드는 재실행밖에 길이 없어 run마다 draft PR이
+    하나씩 더 열렸다. migration `20261123210000_amux_dm_settlement_t2_complete`). 검토 PR의 retry가 연 새 PR이 이전 draft를,
+    `complete`로 끝난 카드의 draft를 게시 서비스가 닫는다(`docs/policy/engineering-agent.md` §3). `close`는 PR을 남긴다. `remake`는 세 단계다.
     먼저 요청을 붙잡은 트랜잭션(DM 승인자의 선점, 또는 운영자 확정 뒤) 안에서 감사 체인 잠금과 kill switch 아래 행을 `claimed`로
     바꾸고 아이디어 요청 id를 적는다. 사람이 먼저 판정했거나 kill switch가 켜져 있으면 여기서 멈추고 아이디어는 접수되지 않는다.
     다음으로 새 아이디어를 세션 접수(`submitAmuxIdeaFromSession`)로 접수한다(접수의 입력 검사와 분석 예산을 그대로 거친다).
