@@ -238,7 +238,9 @@ export async function dmWorkTreeBytes(root: string, stopAbove: number): Promise<
     let names: string[];
     try {
       names = await readdir(directory);
-    } catch {
+    } catch (error) {
+      // A directory a running build or test removed after it was listed is gone, not hidden (review r-20261123-113303-02aeab).
+      if (directory !== root && (error as NodeJS.ErrnoException).code === "ENOENT") continue;
       return "unmeasurable";
     }
     for (const name of names) {
@@ -497,6 +499,10 @@ export async function dmInstallWorkDependencies(
       const ci = await run(work.jail, `exec ${npm} ci --offline --ignore-scripts --loglevel=error`, { cwd, timeoutMs: left(), signal: input.signal });
       if (ci !== "ok") {
         summary.trees[tree] = ci === "timed_out" ? "install_timed_out" : "install_failed";
+        continue;
+      }
+      if (left() <= 0 || input.signal?.aborted) {
+        summary.trees[tree] = "install_timed_out";
         continue;
       }
       if (!isFile(join(cwd, "node_modules", "prisma", "build", "index.js"))) {

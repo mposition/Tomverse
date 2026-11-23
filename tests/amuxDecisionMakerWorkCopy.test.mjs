@@ -172,3 +172,60 @@ test("the free-inode floor: kept under a zero ratio, lost above the whole filesy
   assert.equal(dmInodesKept(tmpdir(), 2), Number(statfsSync(tmpdir()).files) === 0);
   assert.equal(dmInodesKept("/nonexistent/amux-dm", 0), false);
 });
+
+test("the jail self-test refuses while a request is in flight, reports every check, and always runs the cleanup", { skip: !posix }, async () => {
+  const { dmJailSelfTest } = await import("../lib/amux/decisionMakerJailSelfTest.ts");
+  const { dmScratchRoot } = await import("../lib/amux/decisionMakerLauncherCore.ts");
+  for (const instance of [ANTHROPIC, OPENAI]) {
+    const fixture = makeLauncherFixture(instance);
+    try {
+      // A request's temporary directory is there: nothing runs, nothing is deleted.
+      mkdirSync(fixture.at(`${dmScratchRoot(instance)}/${REQUEST_ID}`), { recursive: true, mode: 0o700 });
+      const busy = dmJailSelfTest(fixture.host, instance, { jailStarts: () => true });
+      assert.equal(busy.ok, false);
+      assert.equal(busy.cleanup, "not_run");
+      assert.deepEqual(busy.lines.map((line) => line.name), ["no request in flight (the scratch root is empty)"]);
+      assert.ok(existsSync(fixture.at(`${dmScratchRoot(instance)}/${REQUEST_ID}`)));
+    } finally {
+      fixture.dispose();
+    }
+    const idle = makeLauncherFixture(instance);
+    try {
+      // A jail that does not start: said so, and the synthetic request's directory is still cleaned up.
+      const report = dmJailSelfTest(idle.host, instance, { jailStarts: () => false });
+      assert.equal(report.ok, false);
+      assert.deepEqual(report.lines.find((line) => line.name === "the jail starts"), { ok: false, name: "the jail starts", got: "does not start", want: "starts" });
+      assert.deepEqual(report.lines.at(-1), { ok: true, name: "the vendor cleanup verifies", got: "verified", want: "verified" });
+      assert.equal(report.cleanup, "verified");
+    } finally {
+      idle.dispose();
+    }
+  }
+});
+
+test("the jail self-test in the real jail: every jail check matches", { skip: !bwrap && "bwrap is not here" }, (t) => {
+  return import("../lib/amux/decisionMakerJailSelfTest.ts").then(({ dmJailSelfTest }) => {
+    const fixture = makeLauncherFixture(ANTHROPIC);
+    try {
+      const tries = (jail) => {
+        try {
+          execFileSync(jail, ["-c", "true"], { env: { PATH: "/usr/bin:/bin" }, stdio: "ignore", timeout: 15_000 });
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      const report = dmJailSelfTest(fixture.host, ANTHROPIC, { jailStarts: tries });
+      if (report.lines.find((line) => line.name === "the jail starts")?.got !== "starts") {
+        t.skip("bwrap does not start here");
+        return;
+      }
+      const jailLines = report.lines.filter((line) => line.name.startsWith("jail: "));
+      assert.ok(jailLines.length >= 11);
+      for (const line of jailLines) assert.equal(line.ok, true, `${line.name}: ${line.got}`);
+      assert.equal(report.cleanup, "verified");
+    } finally {
+      fixture.dispose();
+    }
+  });
+});

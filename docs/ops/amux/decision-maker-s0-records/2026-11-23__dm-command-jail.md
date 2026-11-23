@@ -96,7 +96,7 @@ tunable을 쓸 수 없다. launcher는 요청마다 새 `/proc`이 되는지 한
   정리도 `verified`였고, 임시 디렉터리는 없어졌으며, 홈에는 `.claude/.credentials.json`만 남았다.
 
 Linux(box) 테스트, 이 PR의 마지막 코드로: `amuxDecisionMakerLauncherCore` 26, `LauncherFs` 22, `LauncherProcess` 27, `Broker` 30,
-`BrokerCore` 18, `Install` 23, `InstallShell` 9, `WorkCopy` 6(실제 bwrap 포함), `v22ShellJail` 4, `v22OneShotSidecar` 31,
+`BrokerCore` 18, `Install` 23, `InstallShell` 9, `WorkCopy` 8(실제 bwrap과 self-test 포함), `v22ShellJail` 4, `v22OneShotSidecar` 31,
 `v22ChannelRun` 9, 모두 통과.
 `Broker`의 "a workspace that cannot be fetched" 한 건은 tommy 셸의 umask `0002`에서만 실패한다(git이 group 쓰기 디렉터리를 만들어
 정리가 거부한다). broker unit은 `UMask=0077`이고, umask `022`에서는 통과한다. 이 PR과 무관하다. 전체 `tsc --noEmit`은 이 PR의 파일에서

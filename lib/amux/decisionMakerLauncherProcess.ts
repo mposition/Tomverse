@@ -307,7 +307,8 @@ export async function launchDecisionMaker(
       const watch = dmWatchWorkDisk(host, plan, () => stop.abort(), options.work);
       try {
         dependencies = await dmInstallWorkDependencies(host, plan, work, { deadlineAt, signal: stop.signal }, options.work);
-        if (stop.signal.aborted) result = { outcome: "unavailable", reason: "disk_limit" };
+        // Stopped before the CLI started: nothing was sent, so it is a refusal, not a run (§10).
+        if (stop.signal.aborted) result = { outcome: "refused", refusals: ["disk_space_low"] };
         else {
           const observation = await runProcess(host, plan, command, payload, Math.max(1, deadlineAt - Date.now()), stop.signal);
           result = watch.exceeded() ? { outcome: "unavailable", reason: "disk_limit" } : dmClassifyProcess(plan.cli, observation);
