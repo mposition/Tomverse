@@ -254,6 +254,7 @@ const pullOf = (value) => ({
   draft: value?.draft === true,
   headRepo: value?.head?.repo?.full_name ?? null,
   authorType: value?.user?.type ?? null,
+  authorLogin: value?.user?.login ?? null,
 });
 
 const githubPorts = (token) => ({
@@ -345,6 +346,19 @@ const githubPorts = (token) => ({
     if (!response.ok) throw new Error("github_read_failed");
     return pullOf(await response.json());
   },
+  // Anyone's review, of any state, makes the draft theirs to decide; a list
+  // not read whole is taken as reviewed.
+  pullReviewed: async (number) => {
+    const response = await githubRequest(token, "GET", `/repos/${OWNER}/${REPOSITORY}/pulls/${number}/reviews?per_page=100`);
+    if (!response.ok) throw new Error("github_read_failed");
+    if (hasNextPage(response.headers.get("link"))) {
+      await response.body?.cancel().catch(() => undefined);
+      return true;
+    }
+    const body = await response.json();
+    if (!Array.isArray(body)) throw new Error("github_read_failed");
+    return body.length > 0;
+  },
   closePull: async (number) => {
     const response = await githubRequest(token, "PATCH", `/repos/${OWNER}/${REPOSITORY}/pulls/${number}`, {
       body: { state: "closed" },
@@ -353,6 +367,23 @@ const githubPorts = (token) => ({
     return response?.status === 200;
   },
 });
+
+/**
+ * The publisher App's own bot login (`<slug>[bot]`), the author of every pull
+ * request it opens, read from GitHub with the App's JWT. Null when not read:
+ * then no review draft is closed this round.
+ */
+async function appBotLogin({ appId, privateKey }) {
+  const jwt = appJwt(appId, privateKey, Math.floor(Date.now() / 1000));
+  const response = await fetch(`${API}/app`, {
+    method: "GET",
+    redirect: "error",
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+    headers: { accept: "application/vnd.github+json", authorization: `Bearer ${jwt}`, "x-github-api-version": "2022-11-28" },
+  });
+  const body = await response.json().catch(() => null);
+  return response.ok && typeof body?.slug === "string" ? `${body.slug}[bot]` : null;
+}
 
 async function mintToken({ appId, installationId, privateKey }, hold) {
   const jwt = appJwt(appId, privateKey, Math.floor(Date.now() / 1000));
@@ -479,6 +510,7 @@ async function main() {
         return Object.fromEntries(Object.entries(ports).map(([name, fn]) => [name, unlessStopping(fn)]));
       },
       workspace: stoppableWorkspace(workspaceAt, () => stopping),
+      selfLogin: unlessStopping(() => appBotLogin(credentials).catch(() => null)),
     });
   } catch (error) {
     result = { finishedNormally: false, halt: "unknown", reason: error instanceof Error ? error.message : "failed" };

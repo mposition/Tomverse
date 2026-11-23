@@ -650,6 +650,10 @@ test("a review pull request's approval is recorded with its verified head and di
     await withoutTriggers(tx, () => tx.$executeRaw`UPDATE "EngineeringAgentBinding" SET "state" = 'closed'
       WHERE "id" = ${runs[0]!.bindingId}`);
     assert.deepEqual((await listed()).map((draft) => draft.runId), [runs[1]!.runId], "a closed binding is left alone");
+    // The newest closed by a person: the one before it is the card's only draft again, and stays.
+    await withoutTriggers(tx, () => tx.$executeRaw`UPDATE "EngineeringAgentBinding" SET "state" = 'closed'
+      WHERE "id" = ${runs[2]!.bindingId}`);
+    assert.deepEqual(await listed(), [], "only an open, current newer pull request replaces a draft");
   });
   await lifecycle(async (tx) => {
     const runId = String(830_000_000 + Math.floor(Math.random() * 90_000_000));

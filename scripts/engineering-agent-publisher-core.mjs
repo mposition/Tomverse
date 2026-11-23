@@ -209,9 +209,12 @@ export const readClaimedPatch = async (app, work, appFeatures) => {
  *     pullDiffDigest(number) -> { digest } | { refused: true } | null   (v1, for an app without change_digest_v2 only;
  *                                                                        null: not read; refused: not a diff AMUX would bind)
  *     createPull({ title, body, head, draft }) ->{ status: "created", number } | { status: "rejected" } | { status: "unknown" },
- *     pullByNumber(number) -> { number, state, draft, baseRef, headRef, headRepo, authorType, body } | null  (null: no such pull request)
+ *     pullByNumber(number) -> { number, state, draft, baseRef, headRef, headRepo, authorType, authorLogin, body } | null
+ *                                                    (null: no such pull request)
+ *     pullReviewed(number) -> boolean                 (true: anyone reviewed it, or the list was not read whole)
  *     closePull(number) -> boolean                   (true: GitHub answered the close)
  *   }
+ *   selfLogin() -> "<app slug>[bot]" | null          the publisher App's own login, the author of its pull requests
  *   workspace(baseSha) -> {
  *     baseCommitterDate,
  *     build({ patch, identity, date, message }) -> { treeId, commitSha, commitObject } | { refused } | null,
@@ -260,33 +263,48 @@ export const closeableReviewDrafts = (list) => {
 /**
  * Whether the pull request GitHub shows now is one the publisher may close:
  * still open, still a draft (one a person marked ready is theirs), into
- * develop, from this run's branch in this repository, opened by an App, and
- * carrying this run's marker. The app named it; this check can only refuse.
+ * develop, from this run's branch in this repository, opened by this
+ * publisher's own App, and carrying this run's marker. The app named it;
+ * this check can only refuse.
  */
-export const decideReviewDraftClose = (draft, pull) => {
+export const decideReviewDraftClose = (draft, pull, selfLogin) => {
   if (pull === null) return "not_found";
   if (pull.state !== "open") return "not_open";
   if (pull.draft !== true) return "not_draft";
   if (pull.baseRef !== "develop" || pull.headRef !== draft.branch || pull.headRepo !== PUBLISHER_REPOSITORY ||
-      pull.authorType !== "Bot" || !prBodyCarriesMarker(pull.body ?? "", draft.runId)) return "not_ours";
+      pull.authorType !== "Bot" || typeof selfLogin !== "string" || pull.authorLogin !== selfLogin ||
+      !prBodyCarriesMarker(pull.body ?? "", draft.runId)) return "not_ours";
   return "close";
 };
 
+/** The shape of a GitHub App's bot login. */
+export const APP_BOT_LOGIN = /^[a-z0-9][a-z0-9-]{0,98}\[bot\]$/;
+
 /**
- * Closes each review draft that passes decideReviewDraftClose, once: read,
- * then one close. A close whose answer is lost is not repeated here; the next
- * round reads the pull request again and finds it closed or still open.
+ * Closes each review draft that passes decideReviewDraftClose, once: read it,
+ * refuse one anybody reviewed, ask the app's last look
+ * (`publish/close-look`: the switches, the halt and the list read again just
+ * before the write), then one close. A close whose answer is lost is not
+ * repeated here; the next round reads the pull request again and finds it
+ * closed or still open. Without the publisher's own login nothing is tried.
  */
 async function closeSupersededReviewDrafts(ports, drafts) {
   const outcomes = [];
   let token = null;
   try {
+    const selfLogin = typeof ports.selfLogin === "function" ? await ports.selfLogin() : null;
+    if (typeof selfLogin !== "string" || !APP_BOT_LOGIN.test(selfLogin)) throw new Error("self_login_unknown");
     token = await ports.mintToken();
     const github = ports.github(token.token);
     for (const draft of drafts) {
       let outcome;
       try {
-        outcome = decideReviewDraftClose(draft, await github.pullByNumber(draft.prNumber));
+        outcome = decideReviewDraftClose(draft, await github.pullByNumber(draft.prNumber), selfLogin);
+        if (outcome === "close" && (await github.pullReviewed(draft.prNumber))) outcome = "reviewed";
+        if (outcome === "close") {
+          const look = await ports.app("publish/close-look", { prNumber: draft.prNumber, runId: draft.runId });
+          if (look.status !== 200 || look.json?.verdict !== "no_objection") outcome = "close_look_refused";
+        }
         if (outcome === "close") outcome = (await github.closePull(draft.prNumber)) ? "closed" : "close_unknown";
       } catch {
         outcome = "unreadable";

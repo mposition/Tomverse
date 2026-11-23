@@ -207,11 +207,13 @@ DM에 조언 카드로 올라가고(docs/policy/amux-decision-maker.md 결과 �
 **대체된 검토 draft는 게시 서비스가 닫는다 (운영자 결정 2026-11-23).** AMUX-CRAWL-003은 정산의 retry마다 같은 파일을
 고친 draft PR을 하나씩 더 열었고, 이전 PR은 닫히지 않아 9시간에 17개가 쌓였다. 앱은 claim 응답(`closeReviewDrafts`)에
 닫을 검토 draft를 싣는다. 대상은 열린 현재 결속 중 승인·병합 관측이 없는 `publish_review:` run의 PR이며, 같은 카드의 더
-새 run이 PR을 가졌거나(가장 새 PR은 남는다) 카드가 `done`인 경우다. 닫힌(archive) 카드의 PR은 그 답 그대로 남는다. 목록은
-기능 header에 `close_superseded_review_drafts`를 적은 게시 서비스에만, 게시가 허용되고(스위치, 정지 없음) 검토 PR 스위치가
-켜져 있을 때만 간다. 게시 서비스는 claim의 일을 마친 뒤 각 PR을 GitHub에서 다시 읽어 열린 draft이고, develop 대상이고, 이
-저장소의 그 run branch에서 App이 열었고, 첫 줄이 그 run의 marker일 때만 한 번 닫는다(사람이 ready로 바꾼 PR은 닫지 않는다).
-답을 잃은 닫기는 다시 하지 않고 다음 회차가 다시 읽는다. 결속은 관측기의 보통 해제(`closed`)로 옮겨진다.
+새 run이 열린 현재 결속의 PR을 가졌거나(가장 새 PR은 남고, 더 새 PR이 닫히면 이전 것이 다시 유일한 draft로 남는다) 카드가
+`done`인 경우다. 닫힌(archive) 카드의 PR은 그 답 그대로 남는다. 목록은 기능 header에 `close_superseded_review_drafts`를 적은
+게시 서비스에만, 게시가 허용되고(스위치, 정지 없음) 검토 PR 스위치가 켜져 있을 때만 간다. 게시 서비스는 claim의 일을 마친 뒤
+각 PR을 GitHub에서 다시 읽어 열린 draft이고, develop 대상이고, 이 저장소의 그 run branch에서 게시 App 자신(`/app`의
+`<slug>[bot]`)이 열었고, 첫 줄이 그 run의 marker이고, 누구의 review도 없을 때만, 앱의 마지막 확인(`publish/close-look`: 그
+순간의 스위치·정지·목록을 다시 읽는다, 거절만 할 수 있다)을 받은 뒤 한 번 닫는다. 사람이 ready로 바꾸거나 review한 PR은 닫지
+않는다. 답을 잃은 닫기는 다시 하지 않고 다음 회차가 다시 읽는다. 결속은 관측기의 보통 해제(`closed`)로 옮겨진다.
 
 ## 4. push 금지 집합
 

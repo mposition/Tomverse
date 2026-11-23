@@ -2593,15 +2593,17 @@ export type EngineeringAgentSupersededReviewDraft = { prNumber: number; runId: s
  * draft and left the earlier ones open, seventeen in nine hours). One is the
  * open, current binding of a run whose publish item was an owner review
  * draft, with no approval or merge observed, while a later run of the same
- * card holds a pull request of its own -- the card's newer pull request
- * replaced it; the newest stays open for a person -- or while its card is
+ * card holds an open, current pull request of its own -- the card's newer
+ * pull request replaced it; the newest stays open for a person, and once the
+ * newer one is closed the older is the card's only draft again -- or while its card is
  * done: its work is in without this draft (a settlement's `complete`). A
  * closed card's draft stays, as that answer says.
  *
  * Only while publishing is allowed (the switches, no halt) and review drafts
  * are on: closing is a write on the public repository. Read-only; the
  * publisher checks each pull request again on GitHub (a draft, our branch and
- * marker, into develop) and closes nothing else. The binding then moves to
+ * marker, into develop, opened by its own App, with no review) and asks this
+ * read again just before the close (`publish/close-look`); it closes nothing else. The binding then moves to
  * `closed` through the observer's ordinary release
  * (lib/engineeringAgentBindingRelease.ts).
  */
@@ -2622,7 +2624,8 @@ export async function readEngineeringAgentSupersededReviewDrafts(
         WHERE w."kind" = 'publish' AND w."causeKey" = ${ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX} || b."runId")
       AND (EXISTS (SELECT 1 FROM "EngineeringAgentBinding" nb
           JOIN "EngineeringAgentRun" nr ON nr."id" = nb."runId"
-          WHERE nr."cardId" = r."cardId" AND nr."id" <> r."id" AND nr."startedAt" > r."startedAt")
+          WHERE nr."cardId" = r."cardId" AND nr."id" <> r."id" AND nr."startedAt" > r."startedAt"
+            AND nb."state" = 'open' AND nb."supersededAt" IS NULL)
         OR EXISTS (SELECT 1 FROM "AmuxWorkItem" card WHERE card."id" = r."cardId" AND card."status" = 'done'))
     ORDER BY b."createdAt", b."id"`;
   return rows.filter((row) => isRunId(row.runId) && Number.isSafeInteger(row.prNumber) && row.prNumber > 0)
