@@ -208,8 +208,8 @@ and a diagnostic never applies setting changes, promotes, or makes its
 recommendations actionable. A person starts it in Admin only while the
 default-off `AUTO_ROUTER_COST_EFFICIENCY_DIAGNOSTIC` switch is on, under the
 existing optimizer model approval and spending ceilings. Its acceptance
-criteria are recorded with the run and are a proposal until the owner confirms
-them; results never change them. See
+criteria are recorded with the run; the owner confirmed
+`auto-cost-efficiency-criteria-v1` on 2026-11-23, and results never change them. See
 `docs/ops/auto-cost-efficiency-diagnostic.md`.
 
 ## 12. Release evidence

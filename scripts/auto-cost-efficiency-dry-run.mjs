@@ -20,7 +20,7 @@ import { observeOptimizerUsageCost, optimizerCostFields } from "../lib/autoOptim
 import {
   AUTO_ROUTER_OPTIMIZER_RUN_CAP_MICRO_USD, AUTO_ROUTER_OPTIMIZER_SAMPLE_MAX, runOptimizerCycle, splitOptimizerDecisionsByFamily,
 } from "../lib/autoRouterOptimizerCore.ts";
-import { COST_EFFICIENCY_CRITERIA_PROPOSAL } from "../lib/autoCostEfficiencyReport.ts";
+import { COST_EFFICIENCY_CRITERIA } from "../lib/autoCostEfficiencyReport.ts";
 import {
   buildAutoCandidateMenu, buildCostEfficiencyManifest, costEfficiencyCallPlan, estimateAnswerMicroUsd,
 } from "../lib/autoCostEfficiencyPlan.ts";
@@ -94,7 +94,7 @@ export async function runCostEfficiencyDryRun({ optimizerModelId = DEFAULT_MODEL
   const lowestCredit = (decision) => Math.min(...decision.candidates.map((candidate) => candidate.credits ?? Infinity));
   const result = await runOptimizerCycle({
     decisions, incumbentGuidance: AUTO_LLM_ROUTER_DEFAULT_GUIDANCE, objective: "chat_cost_efficiency",
-    criteria: COST_EFFICIENCY_CRITERIA_PROPOSAL, familyOf: (decision) => decision.family ?? decision.id,
+    criteria: COST_EFFICIENCY_CRITERIA, familyOf: (decision) => decision.family ?? decision.id,
   }, {
     budgetMicroUsd: AUTO_ROUTER_OPTIMIZER_RUN_CAP_MICRO_USD,
     candidatesFor: menuFor,
@@ -146,7 +146,7 @@ export async function runCostEfficiencyDryRun({ optimizerModelId = DEFAULT_MODEL
       split: "family: fixture kind (KO/EN together); development case number (KO/EN together)",
       families: { train: familiesOf(split.train), evaluate: familiesOf(split.evaluate) }, digest,
     },
-    criteria: COST_EFFICIENCY_CRITERIA_PROPOSAL,
+    criteria: COST_EFFICIENCY_CRITERIA,
     plan: costEfficiencyCallPlan({
       evaluate: split.evaluate.length, trainRoutes: 0, synthesize: false,
       optimizer: resolveModelPricing(optimizer), router: resolveModelPricing(router), answerModels: models,
