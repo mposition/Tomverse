@@ -607,7 +607,11 @@ claude -p --tools Read,Grep,Glob,Bash --allowedTools Read,Grep,Glob,Bash --restr
   `prisma.config.ts`가 돌기 때문에 jail 안이다). cache는 box의 root 서비스 `amux-dm-dependency-cache.timer`가 develop의 공개
   head로 하루 한 번 채운다(`scripts/amux-dm-dependency-cache.sh`, 공급사 계정은 읽기만). 설치는 요청의 hard timeout에서
   쓰고(최대 30분), 실패해도 요청은 계속된다. 작업 디렉터리의 `DEPENDENCIES.md`가 트리마다 결과를 적는다. launcher의 log에는
-  결과 코드만 남는다.
+  결과 코드만 남는다. cache를 바꿀 때 이전 cache는 이름을 바꿔 3시간 남긴다(그것을 bind한 요청이 끝날 때까지).
+- **디스크.** 작업 디렉터리는 요청 root의 크기 제한 파일시스템 밖(공급사 계정 홈)에 있으므로 launcher가 따로 막는다: 사본
+  상한 16 GiB(작업 공간 4 GiB, 두 트리의 의존성, DM이 쓰는 것), 홈 파일시스템의 여유 공간 하한 20 GiB. 복사 전에 요청 디렉터리
+  크기로 확인하고 넘으면 시작하지 않는다(`disk_space_low`). 설치와 CLI 실행 동안에는 여유 공간을 2초마다, 사본 크기를 30초마다
+  재고, 넘으면 실행 중인 단계나 CLI의 process group을 멈춘다(`disk_limit`, §9의 "DM 불가").
 
 - 설정 파일: codex는 `--ignore-user-config`·`--ignore-rules`로 `config.toml`과 execpolicy 규칙을 읽지 않는다. claude는
   `--setting-sources ""`와 `--restricted`로 user·project·local 설정을 읽지 않는다. 도움말에 따르면 `--restricted`도
