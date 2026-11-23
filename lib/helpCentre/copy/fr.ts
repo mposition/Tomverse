@@ -177,7 +177,6 @@ export const fr: HelpLocaleCopy = {
         { title: "Vérifier l’adaptation intelligente", body: "Vérifiez que l’interrupteur « Adaptation intelligente » du champ de saisie est activé. Il l’est dès le départ dans un Chat vide." },
         { title: "Envoyer", body: "Écrivez votre question et cliquez sur « Envoyer ». Il n’y a aucun bouton supplémentaire à utiliser." },
         { title: "Voir le résultat", body: "Le badge « Auto · nom du modèle » sous la réponse indique le modèle qui a répondu. Si la question a été reformulée pour être lue, vous pouvez déplier « Comment Auto a lu votre message »." },
-        { title: "Si vous voulez reformuler vous-même", body: "Une fois connecté, dans une conversation enregistrée où vous avez désactivé l’adaptation intelligente et choisi un modèle vous-même, « Clarifier le texte » propose une suggestion, et vous choisissez « Utiliser cette formulation » ou « Garder l’original »." },
       ],
       faq: [
         { q: "Mon message est-il enregistré modifié ?", a: "Non. La formulation clarifiée n’est transmise qu’au modèle qui répond, et la conversation conserve votre texte tel que vous l’avez écrit." },

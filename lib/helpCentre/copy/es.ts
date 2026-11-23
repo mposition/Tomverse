@@ -175,7 +175,6 @@ export const es: HelpLocaleCopy = {
         { title: "Comprobar la adaptación inteligente", body: "Comprueba que el interruptor «Adaptación inteligente» del cuadro de texto está activado. En un Chat vacío lo está desde el principio." },
         { title: "Enviar", body: "Escribe tu pregunta y pulsa «Enviar». No hay ningún botón extra que pulsar." },
         { title: "Ver el resultado", body: "En la insignia «Automático · nombre del modelo», bajo la respuesta, ves qué modelo respondió. Si Auto reformuló tu pregunta, puedes desplegar «Cómo leyó Auto tu mensaje»." },
-        { title: "Si quieres mejorarla tú", body: "Con la sesión iniciada, en una conversación guardada en la que desactivaste la adaptación inteligente y elegiste tú el modelo, puedes pulsar «Mejorar redacción» para recibir una sugerencia y elegir «Usar esta redacción» o «Conservar original»." },
       ],
       faq: [
         { q: "¿Se guarda cambiado el mensaje que envié?", a: "No. La frase mejorada solo se pasa al modelo que responde; en la conversación se guarda tal como la escribiste." },
