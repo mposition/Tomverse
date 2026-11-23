@@ -16,8 +16,8 @@ import { prisma } from "@/lib/prisma";
 // 2026-11-23, docs/policy/engineering-agent.md §3). The claim named it; this
 // reads the same list again just before the close, so a switch turned off, a
 // halt, or a draft that is no longer one to close (its replacement closed, an
-// approval observed) stops it. It reads and writes nothing: it can refuse,
-// and it cannot allow anything the claim did not name.
+// approval observed, its card closed) stops it. It only reads, and writes
+// nothing: it can refuse, and it cannot allow anything the claim did not name.
 
 const requestSchema = z
   .object({

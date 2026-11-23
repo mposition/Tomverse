@@ -162,7 +162,7 @@ test("the publisher names the feature; the app sends the list only to a publishe
   for (const header of [null, "", "review_draft,pull_request_resume,patch_chunks,change_digest_v2", "close_superseded_review_draft"])
     assert.equal(publisherClosesSupersededReviewDrafts(header), false, String(header));
   const route = readFileSync("app/api/internal/engineering-agent/publish/claim/route.ts", "utf8");
-  assert.match(route, /publisherClosesSupersededReviewDrafts\(features\) \?\s+await readEngineeringAgentSupersededReviewDrafts\(prisma\)\.catch\(\(\) => \[\]\) : undefined/);
+  assert.match(route, /publisherClosesSupersededReviewDrafts\(features\) \?\s+await readEngineeringAgentSupersededReviewDrafts\(prisma\)\.catch\(\(\) => undefined\) : undefined/);
   // Only the fresh answer carries it: a replay or a refusal never does.
   assert.equal(route.match(/\.\.\.\(closeReviewDrafts \? \{ closeReviewDrafts \} : \{\}\)/g)?.length, 1);
   assert.ok(route.indexOf("closeReviewDrafts } : {}") > route.indexOf("work: outcome.value"));
@@ -180,6 +180,8 @@ test("the read names only open, current, unobserved review drafts a newer run re
   assert.match(read, /nr\."cardId" = r\."cardId" AND nr\."id" <> r\."id" AND nr\."startedAt" > r\."startedAt"/);
   assert.match(read, /AND nb\."state" = 'open' AND nb\."supersededAt" IS NULL\)/, "the newer pull request is an open, current one");
   assert.match(read, /card\."status" = 'done'/);
+  assert.match(read, /AND NOT EXISTS \(SELECT 1 FROM "AmuxWorkItem" card WHERE card\."id" = r\."cardId" AND card\."archivedAt" IS NOT NULL\)/,
+    "a closed card keeps its pull requests");
   assert.doesNotMatch(read, /UPDATE|INSERT|DELETE/, "a read only");
 });
 
@@ -204,4 +206,5 @@ test("the publisher's one new GitHub write is closing a pull request by number",
   assert.match(source, /typeof body\?\.slug === "string" \? `\$\{body\.slug\}\[bot\]` : null/);
   assert.match(source, /selfLogin: unlessStopping\(/);
   assert.equal(PUBLISHER_REPOSITORY, "mposition/Tomverse");
+  assert.match(source, /const \[OWNER, REPOSITORY\] = PUBLISHER_REPOSITORY\.split\("\/"\);/, "named once");
 });

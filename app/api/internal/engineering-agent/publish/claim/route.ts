@@ -91,7 +91,7 @@ export async function POST(request: Request) {
     // a publisher that closes them (owner decision 2026-11-23). A read that
     // fails sends none: the next round reads again.
     const closeReviewDrafts = publisherClosesSupersededReviewDrafts(features) ?
-      await readEngineeringAgentSupersededReviewDrafts(prisma).catch(() => []) : undefined;
+      await readEngineeringAgentSupersededReviewDrafts(prisma).catch(() => undefined) : undefined;
     // What this app takes (ENGINEERING_AGENT_APP_FEATURES): a publisher binds
     // the v2 change digest only when it is named here.
     return engineeringAgentJson({ work: outcome.value, halt, appFeatures: ENGINEERING_AGENT_APP_FEATURES,

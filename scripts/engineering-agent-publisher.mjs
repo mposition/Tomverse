@@ -28,7 +28,7 @@ import {
 } from "../lib/engineeringAgentCore.ts";
 import { detectSecrets } from "../lib/engineeringAgentSecretPatterns.ts";
 import { readPullChangeDigest } from "../lib/pullDiffDigestCore.ts";
-import { runPublisherCycle } from "./engineering-agent-publisher-core.mjs";
+import { PUBLISHER_REPOSITORY, runPublisherCycle } from "./engineering-agent-publisher-core.mjs";
 import { isSupervisedWorker, superviseCycle } from "./engineering-agent-supervisor.mjs";
 
 /** The hard deadline of one cycle, inside the claim's 45-minute lease (§12).
@@ -37,8 +37,8 @@ import { isSupervisedWorker, superviseCycle } from "./engineering-agent-supervis
  * a large change needs room to fetch, apply, push and be read back. */
 export const PUBLISHER_HARD_DEADLINE_MS = 40 * 60 * 1000;
 const TIMEOUT_MS = 20_000;
-const OWNER = "mposition";
-const REPOSITORY = "Tomverse";
+/** The one repository, named once in the core (PUBLISHER_REPOSITORY). */
+const [OWNER, REPOSITORY] = PUBLISHER_REPOSITORY.split("/");
 const REPOSITORY_URL = `https://github.com/${OWNER}/${REPOSITORY}.git`;
 const API = "https://api.github.com";
 /** The v1 diff limit, for an app before the v2 change digest only: a larger diff is not one it binds. */

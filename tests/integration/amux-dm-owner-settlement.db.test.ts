@@ -654,6 +654,13 @@ test("a review pull request's approval is recorded with its verified head and di
     await withoutTriggers(tx, () => tx.$executeRaw`UPDATE "EngineeringAgentBinding" SET "state" = 'closed'
       WHERE "id" = ${runs[2]!.bindingId}`);
     assert.deepEqual(await listed(), [], "only an open, current newer pull request replaces a draft");
+    // Reopened: the newest open again replaces the one before it, until the card is closed.
+    await withoutTriggers(tx, () => tx.$executeRaw`UPDATE "EngineeringAgentBinding" SET "state" = 'open'
+      WHERE "id" = ${runs[2]!.bindingId}`);
+    assert.deepEqual((await listed()).map((draft) => draft.runId), [runs[1]!.runId]);
+    await withoutTriggers(tx, () => tx.$executeRaw`UPDATE "AmuxWorkItem" SET "archivedAt" = CURRENT_TIMESTAMP
+      WHERE "id" = ${card.taskId}`);
+    assert.deepEqual(await listed(), [], "a closed card keeps its pull requests, as its answer says");
   });
   await lifecycle(async (tx) => {
     const runId = String(830_000_000 + Math.floor(Math.random() * 90_000_000));

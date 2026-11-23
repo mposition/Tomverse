@@ -2597,7 +2597,7 @@ export type EngineeringAgentSupersededReviewDraft = { prNumber: number; runId: s
  * pull request replaced it; the newest stays open for a person, and once the
  * newer one is closed the older is the card's only draft again -- or while its card is
  * done: its work is in without this draft (a settlement's `complete`). A
- * closed card's draft stays, as that answer says.
+ * closed (archived) card's drafts all stay, as that answer says.
  *
  * Only while publishing is allowed (the switches, no halt) and review drafts
  * are on: closing is a write on the public repository. Read-only; the
@@ -2627,6 +2627,8 @@ export async function readEngineeringAgentSupersededReviewDrafts(
           WHERE nr."cardId" = r."cardId" AND nr."id" <> r."id" AND nr."startedAt" > r."startedAt"
             AND nb."state" = 'open' AND nb."supersededAt" IS NULL)
         OR EXISTS (SELECT 1 FROM "AmuxWorkItem" card WHERE card."id" = r."cardId" AND card."status" = 'done'))
+      -- A closed (archived) card keeps its pull requests, as its answer says.
+      AND NOT EXISTS (SELECT 1 FROM "AmuxWorkItem" card WHERE card."id" = r."cardId" AND card."archivedAt" IS NOT NULL)
     ORDER BY b."createdAt", b."id"`;
   return rows.filter((row) => isRunId(row.runId) && Number.isSafeInteger(row.prNumber) && row.prNumber > 0)
     .map((row) => ({ prNumber: row.prNumber, runId: row.runId, branch: engineeringBranchName(row.runId) }));
