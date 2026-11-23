@@ -1,6 +1,8 @@
 import "server-only";
 
 import { NextResponse } from "next/server";
+import { z } from "zod";
+import { PROJECT_LIMITS } from "@/lib/projectWorkspaceCore";
 import { ApiSecurityError, apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
 import { MemoryFeatureDisabledError } from "@/lib/appSettings";
 import { AssistantKnowledgeError } from "@/lib/assistantKnowledgeService";
@@ -28,6 +30,18 @@ export async function projectRouteUser(
     await consumeApiRateLimit(req, userId, bucket, limits);
     return { userId };
 }
+
+/**
+ * A Native bearer call while the project workspace switch is off reaches the
+ * project routes only through the folder-era history calls, so it may set the
+ * name and nothing else: description, instructions, context, memory scope,
+ * automatic memory and archive are workspace settings behind that switch.
+ */
+export function nativeFolderOnly(req: Request): boolean {
+    return req.headers.has("authorization") && process.env.TOMVERSE_NATIVE_PROJECT_WORKSPACE_ENABLED !== "true";
+}
+
+export const folderOnlyProjectSchema = z.object({ name: z.string().trim().min(1).max(PROJECT_LIMITS.maxNameLength) }).strict();
 
 export function projectErrorResponse(error: unknown, fallback: string): Response {
     if (error instanceof AssistantKnowledgeError) {

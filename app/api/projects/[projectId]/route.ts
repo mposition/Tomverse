@@ -10,7 +10,7 @@ import {
     updateProject,
 } from "@/lib/projectWorkspaceService";
 import { PROJECT_LIMITS, PROJECT_MEMORY_SCOPES } from "@/lib/projectWorkspaceCore";
-import { NO_STORE, projectErrorResponse, projectRouteUser } from "@/lib/projectRouteSupport";
+import { NO_STORE, folderOnlyProjectSchema, nativeFolderOnly, projectErrorResponse, projectRouteUser } from "@/lib/projectRouteSupport";
 
 type ProjectRouteContext = { params: Promise<{ projectId: string }> };
 
@@ -60,7 +60,7 @@ export async function PATCH(req: Request, context: ProjectRouteContext) {
         const auth = await projectRouteUser(req, "project-update", { minute: 20, day: 300 });
         if (auth.response) return auth.response;
         const { projectId } = await context.params;
-        const body = await readLimitedJson(req, 40 * 1024, updateProjectSchema);
+        const body = await readLimitedJson(req, 40 * 1024, nativeFolderOnly(req) ? folderOnlyProjectSchema : updateProjectSchema);
         return NextResponse.json(await updateProject(auth.userId, projectId, body), { headers: NO_STORE });
     } catch (error) {
         return projectErrorResponse(error, "projects.update");

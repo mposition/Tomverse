@@ -263,11 +263,20 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       const prepareContext = async (previous?: string) => {
         if (revision !== sessionRevision) throw new DOMException("Session changed", "AbortError");
         const prompt = String(persisted.messages.find(message => message.id === sourceId && message.role === "user")?.content ?? "");
-        const prepared = await request<{ contextBundle?: string | null }>("/api/chat/context", {
-          ...json("POST", { conversationId: persisted.id, modelIds: [modelId], prompt,
-            ...(previous ? { previousContextBundle: previous } : {}),
-            ...(projectReferences?.length ? { projectReferences } : {}) }), signal: controller.signal,
-        });
+        let prepared: { contextBundle?: string | null };
+        try {
+          prepared = await request<{ contextBundle?: string | null }>("/api/chat/context", {
+            ...json("POST", { conversationId: persisted.id, modelIds: [modelId], prompt,
+              ...(previous ? { previousContextBundle: previous } : {}),
+              ...(projectReferences?.length ? { projectReferences } : {}) }), signal: controller.signal,
+          });
+        } catch (error) {
+          // The project workspace switch is off for this device: a folder-era
+          // project (context off) still sends, and the server alone refuses a
+          // project whose context is on but cannot be prepared here.
+          if (error instanceof ApiClientError && error.status === 503 && error.code === "NATIVE_PROJECT_WORKSPACE_UNAVAILABLE") return undefined;
+          throw error;
+        }
         controller.signal.throwIfAborted();
         if (revision !== sessionRevision) throw new DOMException("Session changed", "AbortError");
         return typeof prepared.contextBundle === "string" ? prepared.contextBundle : undefined;

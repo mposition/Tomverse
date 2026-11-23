@@ -51,3 +51,22 @@ test('successful native password verification issues an in-memory grant and no b
   assert.equal(response.status,200);assert.equal(response.headers.get('set-cookie'),null);assert.equal(response.headers.get('cache-control'),'no-store');const body=await response.json();assert.equal(typeof body.unlockToken,'string');
   const proof=new Request('https://tomverse.app',{headers:{authorization:'Bearer valid','X-Tomverse-Conversation-Unlocks':`c1=${body.unlockToken}`}});assert.equal(locks.hasConversationUnlockGrant(proof,'bearer-owner','c1',0),true);assert.equal(locks.hasConversationUnlockGrant(proof,'cookie-owner','c1',0),false);assert.equal(locks.hasConversationUnlockGrant(proof,'bearer-owner','c1',1),false);assert.equal(cookies,0);
 });
+
+test('with the project workspace switch off, a native folder call may set the name and nothing else', async () => {
+  const previous = process.env.TOMVERSE_NATIVE_PROJECT_WORKSPACE_ENABLED;
+  delete process.env.TOMVERSE_NATIVE_PROJECT_WORKSPACE_ENABLED;
+  try {
+    for (const extra of [{ contextEnabled: true }, { instructions: 'Always answer in French.' }, { autoMemoryEnabled: true }, { memoryScope: 'project' }]) {
+      const created = await projects.POST(request('/api/projects', 'POST', 'valid', 'https://localhost', { name: 'Folder', ...extra }));
+      assert.equal(created.status, 400, `POST ${JSON.stringify(extra)}`);
+      const updated = await project.PATCH(request('/api/projects/p1', 'PATCH', 'valid', 'https://localhost', { name: 'Folder', ...extra }), context);
+      assert.equal(updated.status, 400, `PATCH ${JSON.stringify(extra)}`);
+    }
+    const archived = await project.PATCH(request('/api/projects/p1', 'PATCH', 'valid', 'https://localhost', { archived: true }), context);
+    assert.equal(archived.status, 400);
+    const renamed = await project.PATCH(request('/api/projects/p1', 'PATCH', 'valid', 'https://localhost', { name: 'Renamed' }), context);
+    assert.notEqual(renamed.status, 400);
+  } finally {
+    if (previous === undefined) delete process.env.TOMVERSE_NATIVE_PROJECT_WORKSPACE_ENABLED; else process.env.TOMVERSE_NATIVE_PROJECT_WORKSPACE_ENABLED = previous;
+  }
+});

@@ -165,14 +165,25 @@ test("a project route answering 503 is unavailable and never signs the user out"
   assert.deepEqual(calls, ["/api/projects"]);
 });
 
-test("context preparation refused with 503 stops the send before /api/chat and keeps the session", async () => {
+test("with the project workspace switch off, a folder conversation still sends, without a bundle, and keeps the session", async () => {
+  // The server alone decides: a folder-era project (context off) answers; a
+  // project whose context is on refuses the turn because none was prepared.
   let lost = 0;
   const f = fixture({ contextReplies: [Response.json({ code: "NATIVE_PROJECT_WORKSPACE_UNAVAILABLE" }, { status: 503 })] });
   f.transport.onSessionLost(() => { lost++; });
   await f.transport.account();
+  await f.transport.send(f.conversation, "Question", [], signal(), () => {});
+  const chat = f.calls.find(call => call.path === "/api/chat");
+  assert.ok(chat);
+  assert.equal(chat.body.contextBundle, undefined);
+  assert.equal(lost, 0);
+});
+
+test("any other context preparation failure stops the send before /api/chat", async () => {
+  const f = fixture({ contextReplies: [Response.json({ code: "PROJECT_REQUEST_FAILED" }, { status: 500 })] });
+  await f.transport.account();
   await assert.rejects(f.transport.send(f.conversation, "Question", [], signal(), () => {}));
   assert.equal(f.calls.some(call => call.path === "/api/chat"), false);
-  assert.equal(lost, 0);
 });
 
 test("a personal memory is moved into the project with its own revision, and conflicts are classified", async () => {
