@@ -28,10 +28,26 @@ retrieval [--corpus retrieval-ko|development|validation|relevance|all]
 knowledge-retrieval [--scores <json> | --live --max-calls <n> --save-scores <new-json>]
         Knowledge-file retrieval Recall@6 and MRR: lexical, embed-only, rerank-only, embed+rerank.
         Without --scores only lexical is measured.
+followup-eval [--inputs <json> --key <json>] [--out <directory>]
+        [--scores-full-query <json>] [--scores-full-query-history <json>] [--answers <json>] [--verdicts <json>]
+        Follow-up Memory evaluation: lexical, full-query and full-query+history selections, the
+        chat messages each would send, answer import, a blind sheet and verdict import. Files only;
+        no provider call. Defaults to the development fixture. Run with node --conditions=react-server.
+followup-scores --inputs <json> --key <json> --query-mode full-query|full-query+history
+        --live --max-calls <n> --save-scores <new-json> [--resume-scores <partial-json>] [--min-interval-ms <n>]
+        PAID: one rerank request per follow-up case that has relevant candidates, saved in the
+        score file followup-eval replays with --scores-full-query / --scores-full-query-history.
+        --resume-scores keeps the cases an interrupted run on the same inputs already scored and
+        requests only the rest; --min-interval-ms waits between requests (provider rate limits).
+followup-answers --requests <answer-requests.json> --live --max-calls <n> --max-usd <usd>
+        --save-answers <new-json> [--resume-answers <partial-json>]
+        PAID: one OpenAI call per distinct message list with the product's default Chat model and
+        settings, saved as the answers file followup-eval imports with --answers. Needs OPENAI_API_KEY;
+        refused before the first request when the plan's worst case exceeds --max-calls or --max-usd.
 Defaults: mode=mock, out=.tmp/memory-quality, iterations=3, max-calls=1000, timeout-ms=60000,
 corpus=retrieval-ko.
 The run command has no live mode, paid execution, product writes, promotion, network or raw
-Memory collection. --live (retrieval --semantic, knowledge-retrieval only) makes PAID provider
+Memory collection. --live (retrieval --semantic, knowledge-retrieval, followup-scores) makes PAID provider
 calls: it needs COHERE_API_KEY and the model variables, an explicit --max-calls (0 or absent is
 refused) and a new --save-scores file; run it with node --conditions=react-server.`;
 const commandOptions: Record<string, string[]> = {
@@ -40,7 +56,12 @@ const commandOptions: Record<string, string[]> = {
   "export-replay": ["out", "run", "file"],
   retrieval: ["corpus", "semantic", "rerank-scores", "live", "max-calls", "save-scores", "query-mode"],
   "knowledge-retrieval": ["scores", "live", "max-calls", "save-scores"],
+  "followup-eval": ["inputs", "key", "out", "scores-full-query", "scores-full-query-history", "answers", "verdicts"],
+  "followup-scores": ["inputs", "key", "query-mode", "live", "max-calls", "save-scores", "resume-scores", "min-interval-ms"],
+  "followup-answers": ["requests", "live", "max-calls", "max-usd", "save-answers", "resume-answers"],
 };
+const FOLLOWUP_DEV_INPUTS = fileURLToPath(new URL("./fixtures/followup-dev.inputs.json", import.meta.url));
+const FOLLOWUP_DEV_KEY = fileURLToPath(new URL("./fixtures/followup-dev.key.json", import.meta.url));
 const booleanOptions = new Set(["semantic", "live"]);
 function parse(args: string[]) {
   const command = args[0] ?? "help", options: Record<string, string> = {};
@@ -66,6 +87,39 @@ function parse(args: string[]) {
 export async function main(args: string[], context: LiveContext = {}) {
   const { command, options } = parse(args);
   if (command === "help") return { help: HELP };
+  if (command === "followup-eval") {
+    if (Boolean(options.inputs) !== Boolean(options.key)) throw new QualityStop("followup_inputs_and_key_required");
+    // Imported here: the chat prelude it reuses is server-only, and no other command needs it.
+    const { runFollowupEval } = await import("./followupEval");
+    const { out, report } = await runFollowupEval({
+      inputs: options.inputs ?? FOLLOWUP_DEV_INPUTS, key: options.key ?? FOLLOWUP_DEV_KEY,
+      out: options.out ?? ".tmp/memory-quality/followup-eval",
+      scoresFullQuery: options["scores-full-query"], scoresFullQueryHistory: options["scores-full-query-history"],
+      answers: options.answers, verdicts: options.verdicts,
+    });
+    return { followupEval: { out, bundle: report.bundle.bundleId, status: report.bundle.status,
+      variants: report.bundle.variants, independentScenarios: report.bundle.independentScenarios,
+      conditions: report.conditions, answerQuality: report.answers.answerQuality, paidCalls: report.paidCalls } };
+  }
+  if (command === "followup-scores") {
+    if (!options.inputs || !options.key) throw new QualityStop("followup_inputs_and_key_required");
+    const mode = options["query-mode"];
+    if (mode !== "full-query" && mode !== "full-query+history") throw new QualityStop("followup_query_mode_required");
+    if (options.live !== "true") throw new QualityStop("live_required");
+    const { followupRetrievalCases, loadFollowupBundle } = await import("./followupSchema");
+    const bundle = await loadFollowupBundle(options.inputs, options.key);
+    // The same cases and corpus name followup-eval replays, so the saved file's provenance matches.
+    const result = await measureSemanticMemory({
+      corpus: bundle.bundleId, cases: followupRetrievalCases(bundle), options, live: true, context,
+    });
+    return { followupScores: { bundle: bundle.bundleId, evalDigest: bundle.evalDigest, queryMode: mode,
+      live: result.live, paidCalls: result.paidCalls },
+      ...("stopReason" in result ? { stopReason: result.stopReason, failure: result.failure } : {}) };
+  }
+  if (command === "followup-answers") {
+    const { collectFollowupAnswers } = await import("./followupAnswers");
+    return collectFollowupAnswers(options, context);
+  }
   if (command === "knowledge-retrieval") {
     const live = options.live === "true";
     if (live && options.scores) throw new QualityStop("live_and_scores_exclusive");
