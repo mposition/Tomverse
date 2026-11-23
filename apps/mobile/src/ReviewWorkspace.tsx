@@ -4,7 +4,7 @@ import { ReviewChatDraftPreview } from "./ReviewChatDraftPreview";
 import { providerName } from "./ModelChoices";
 import { mobileReviewCopy } from "../../../locales/mobileReview";
 import { nativeWorkspaceCopy } from "../../../locales/nativeWorkspace";
-import type { ReviewChatSource } from "../../../lib/reviewToChat";
+import type { NativeChatDraftApply, NativeChatDraftSnapshot, NativeReviewChatOffer } from "./nativeReviewChat";
 import { ScanSearch, ListFilter } from "lucide-react";
 import { IosAssistantBadge } from "./IosWorkspace";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -30,10 +30,11 @@ import type { MobileProduct } from "./WorkspaceNavigation";
 import { useReviewHandoffDraft } from "./useReviewHandoffDraft";
 import { reviewContinuationHandoffCopy as handoffCopy } from "../../../locales/reviewContinuationHandoff";
 
-export function ReviewWorkspace({ transport, language, owner, historyOpen, onCloseHistory, onBusyChange, onLoadingChange, onProductChange, historyFooter, newConversationRequest = 0, conversationRequest, extraTools, onContinueInChat }: {
+export function ReviewWorkspace({ transport, language, owner, historyOpen, onCloseHistory, onBusyChange, onLoadingChange, onProductChange, historyFooter, newConversationRequest = 0, conversationRequest, extraTools, readChatDraft, onContinueInChat }: {
   transport: ChatTransport; language: MobileLanguage; owner: string | null; historyOpen: boolean;
   conversationRequest?: { id?: string; draft?: string; nonce: number }; extraTools?: ComposerAction[];
-  onContinueInChat: (text: string) => void;
+  readChatDraft: () => NativeChatDraftSnapshot | null;
+  onContinueInChat: (text: string, expected: NativeChatDraftSnapshot) => NativeChatDraftApply;
   historyFooter?: ReactNode; newConversationRequest?: number;
   onCloseHistory: () => void; onBusyChange: (busy: boolean) => void;
   onLoadingChange: (loading: boolean) => void; onProductChange: (product: MobileProduct) => void;
@@ -48,7 +49,8 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
   const [providerOptions, setProviderOptions] = useState<string[]>([]);
   const providers = providersConfigured ? manualProviders : defaults;
   const [analysis, setAnalysis] = useState<"cross" | "quick" | null>(null);
-  const [chatSource, setChatSource] = useState<ReviewChatSource | null>(null);
+  const [chatOffer, setChatOffer] = useState<(NativeReviewChatOffer & { nonce: number }) | null>(null);
+  const offerSequence = useRef(0);
   const [actionBusy, setActionBusy] = useState(false);
   const [image, setImage] = useState<{ prompt: string; modelIds: string[]; preset: ImagePreset; unsupported: boolean } | null>(null);
   const [imageHistory, setImageHistory] = useState<string | null>(null); const [imageOpen, setImageOpen] = useState(false);
@@ -110,7 +112,7 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
   const previousNewRequest = useRef(newConversationRequest);
   function newReview() {
     if (streaming || uncertain || actionBusy || draftBlocked) return;
-    request.current++; setConversation(null); setPartial({}); setError(""); setAnalysis(null); setChatSource(null); setUncertain(false); clearProviders(); onCloseHistory();
+    request.current++; setConversation(null); setPartial({}); setError(""); setAnalysis(null); setChatOffer(null); setUncertain(false); clearProviders(); onCloseHistory();
   }
   useEffect(() => {
     if (previousNewRequest.current === newConversationRequest) return;
@@ -220,6 +222,12 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
   const lastQuestion = conversation ? conversation.messages.map(message => message.role).lastIndexOf("user") : -1;
   const canAnalyse = lastQuestion >= 0 && !handoff && !streaming && !uncertain &&
     (conversation?.messages.slice(lastQuestion + 1).filter(message => message.role === "assistant" && message.content.trim() && !message.imageTurn && !message.pendingJobId && [undefined, "normal", "completed"].includes(message.status)).length ?? 0) >= 2;
+  // Only a signed-in workspace Review continues into Chat: imported continuations and
+  // context-bound handoffs keep their analysis, but not this link (web: routeSurface === "workspace").
+  const chatEligible = (item: Conversation | null) => Boolean(owner && item && item.surface === "workspace" && !item.imported && !item.reviewHandoff);
+  const latestConversation = useRef(conversation);
+  useEffect(() => { latestConversation.current = conversation; }, [conversation]);
+  const offerChat = conversation && chatEligible(conversation) ? (offer: NativeReviewChatOffer) => setChatOffer({ ...offer, nonce: ++offerSequence.current }) : undefined;
   const visibleModels = conversation?.selectedModels.length ? conversation.selectedModels : selected;
   const name = (id: string) => models.find(model => model.id === id)?.name ?? id;
   const messages = conversation?.messages.filter(message => message.role === "user" || message.modelId === activeModel || (message.imageTurn?.modelIds.includes(activeModel)) || (!message.modelId && activeModel === visibleModels[0])) ?? [];
@@ -247,9 +255,17 @@ export function ReviewWorkspace({ transport, language, owner, historyOpen, onClo
     <Composer extraTools={extraTools} inputMaxLength={handoff ? 50000 : undefined} product="review" onProductChange={onProductChange} productBusy={loading || streaming || uncertain || actionBusy || draftBlocked} productLoading={loading}
       selectionControl={<button type="button" className="review-setup-trigger" aria-label={`${c.choose} · ${mobileReviewModeLabel(language, effectiveMode)}`} disabled={streaming || uncertain || loading} onClick={() => setPicker(true)}><span>{mobileReviewModeLabel(language, effectiveMode)}</span><span className="participant-count">{effectiveMode === "easy" ? providers.length : selected.length}</span><span aria-hidden="true">⌄</span></button>}
       locationIdentity={owner} copy={copy} language={language} transport={transport} draft={handoff && streaming ? "" : draft} setDraft={setDraft} disabled={loading || !capability || uncertain || Boolean(handoff && !durableDraft.ready && durableDraft.status !== "saving")} offline={!navigator.onLine} streaming={streaming} conversation={conversation} onConfigureTools={configureTools} onSend={send} onStop={() => abort.current?.abort()} />
-    {analysis === "cross" && conversation && <CrossReview key={conversation.id} id={conversation.id} owner={owner} transport={transport} language={language} onClose={() => setAnalysis(null)} onBusy={setActionBusy} onContinue={setChatSource} onSource={id => { const message = conversation.messages.find(row => row.id === id); if (message?.modelId) setActiveModel(message.modelId); setAnalysis(null); requestAnimationFrame(() => document.getElementById(`review-message-${id}`)?.scrollIntoView({ block: "center" })); }} />}
-    {analysis === "quick" && conversation && <QuickSummary key={conversation.id} id={conversation.id} owner={owner} transport={transport} language={language} onClose={() => setAnalysis(null)} onBusy={setActionBusy} onContinue={setChatSource} />}
-    {chatSource && <ReviewChatDraftPreview key={chatSource.review.id} source={chatSource} owner={owner} transport={transport} language={language} onClose={() => setChatSource(null)} onConfirm={onContinueInChat} />}
+    {analysis === "cross" && conversation && <CrossReview key={conversation.id} id={conversation.id} owner={owner} transport={transport} language={language} onClose={() => setAnalysis(null)} onBusy={setActionBusy} onContinue={offerChat} onSource={id => { const message = conversation.messages.find(row => row.id === id); if (message?.modelId) setActiveModel(message.modelId); setAnalysis(null); requestAnimationFrame(() => document.getElementById(`review-message-${id}`)?.scrollIntoView({ block: "center" })); }} />}
+    {analysis === "quick" && conversation && <QuickSummary key={conversation.id} id={conversation.id} owner={owner} transport={transport} language={language} onClose={() => setAnalysis(null)} onBusy={setActionBusy} onContinue={offerChat} />}
+    {chatOffer && <ReviewChatDraftPreview key={chatOffer.nonce} offer={chatOffer} transport={transport} language={language} readTarget={readChatDraft}
+      isCurrent={() => { const item = latestConversation.current; return item?.id === chatOffer.source.conversationId && chatEligible(item); }}
+      onClose={() => setChatOffer(null)} onConfirm={(text, expected) => {
+        const item = latestConversation.current;
+        if (item?.id !== chatOffer.source.conversationId || !chatEligible(item)) return "unavailable";
+        const result = onContinueInChat(text, expected);
+        if (result === "applied") setChatOffer(null);
+        return result;
+      }} />}
     {picker && <ReviewModelPicker language={language} mode={effectiveMode} onMode={setMode} easyOffered={!handoff && (capability?.reviewEasy ?? false)} busy={streaming || uncertain} models={models} selected={selected} providers={providers} providerOptions={providerOptions} maxModels={capability?.maxModels ?? 1} onModels={setSelected} onProviders={setProviders} onClose={() => setPicker(false)} />}
     {imageOpen && <NativeImageWorkspace owner={owner} transport={transport} language={language} initial={image ?? undefined} historyId={imageHistory ?? undefined} onBusy={setActionBusy} onClose={() => setImageOpen(false)} onCreated={id => { setImageHistory(id); void transport.listReview!().then(setChats).catch(() => setError(copy.unavailable)); }} />}
   </section>;

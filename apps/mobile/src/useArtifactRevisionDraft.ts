@@ -1,5 +1,5 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
-import { readDeviceDraft, writeDeviceDraft } from "@tomverse/chat-core/device-draft";
+import { preserveNativeDraft, readNativeDraftText } from "./useDeviceDraft";
 import type { ChatStreamArtifact } from "../../../lib/generatedArtifactCore";
 import { mobileArtifactRevisionCopy } from "../../../locales/mobileArtifactRevision";
 import { mobileErrorText } from "../../../locales/mobileErrors";
@@ -63,7 +63,7 @@ export function useArtifactRevisionDraft(input: {
       try {
         const upload = await transport.prepareArtifactRevision!({ artifactId: artifact.id, conversationId, operationId: operation.id });
         if (active.current.owner !== owner || active.current.epoch !== epoch) return copy.failed;
-        const text = active.current.conversationId === conversationId ? active.current.text : texts.current.get(scope) ?? readDeviceDraft(localStorage, owner, conversationId);
+        const text = active.current.conversationId === conversationId ? active.current.text : texts.current.get(scope) ?? readNativeDraftText(owner, conversationId);
         const request = (upload.revisionMode === "workbook-values" ? copy.valuesPrompt : upload.revisionMode === "workbook" ? copy.workbookPrompt
           : artifact.format === "docx" || artifact.format === "pptx" ? copy.officePrompt : copy.prompt).replaceAll("{filename}", upload.name);
         const result = appendNativeRevisionDraft({ text, files: readFiles(owner, conversationId) }, upload, request);
@@ -74,7 +74,8 @@ export function useArtifactRevisionDraft(input: {
         }
         files.current = { ...files.current, [scope]: result.draft.files };
         texts.current.set(scope, result.draft.text);
-        try { writeDeviceDraft(localStorage, owner, conversationId, result.draft.text); writeNativeDraftFiles(localStorage, owner, conversationId, result.draft.files); } catch { /* Preserve active in-memory draft. */ }
+        preserveNativeDraft(owner, conversationId, result.draft.text);
+        try { writeNativeDraftFiles(localStorage, owner, conversationId, result.draft.files); } catch { /* Preserve active in-memory draft. */ }
         if (active.current.conversationId === conversationId) {
           active.current.setText(result.draft.text, conversationId);
           active.current.text = result.draft.text;
@@ -101,6 +102,8 @@ export function useArtifactRevisionDraft(input: {
     updateFiles([...current, file]);
     return "added";
   }, [conversationId, identity.epoch, owner, readFiles, updateFiles]);
-  return { files: store[scope] ?? [], setFiles: updateFiles, addFile, removeFile,
+  /** The owner's files for another scope (e.g. the new-Chat draft), memory first. */
+  const peekFiles = useCallback((targetId: string | null) => readFiles(owner, targetId), [owner, readFiles]);
+  return { files: store[scope] ?? [], peekFiles, setFiles: updateFiles, addFile, removeFile,
     prepare: enabled && owner && conversationId && transport.prepareArtifactRevision ? prepare : undefined };
 }

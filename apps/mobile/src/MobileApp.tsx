@@ -1,4 +1,3 @@
-import { readDeviceDraft } from "@tomverse/chat-core/device-draft";
 import { ContinuationReceipt } from "../../../components/continuations/ContinuationReceipt";
 import type { ContinuationReceipt as SourceReceipt } from "../../../lib/continuationReceipt";
 import type { Passage } from "../../../lib/continuationPassages";
@@ -39,7 +38,8 @@ import { mobileLoginCopy, mobileLoginError } from "../../../locales/mobileLogin"
 import { AnswerContent } from "./AnswerContent";
 import { mobileCompletionCopy } from "../../../locales/mobileCompletion";
 import { AccountScreen } from "./AccountScreen";
-import { useDeviceDraft, clearNativeDrafts, preserveNativeDraft } from "./useDeviceDraft";
+import { useDeviceDraft, clearNativeDrafts, preserveNativeDraft, readNativeDraftText } from "./useDeviceDraft";
+import { appendNativeReviewChatDraft, sameNativeChatDraft, type NativeChatDraftApply, type NativeChatDraftSnapshot } from "./nativeReviewChat";
 import { useArtifactRevisionDraft } from "./useArtifactRevisionDraft";
 import { ImportedTranscript } from "./ImportedTranscript";
 import { reviewSeedFromChat } from "../../../lib/chatReviewHandoff";
@@ -163,6 +163,9 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   const [offline, setOffline] = useState(!navigator.onLine);
   const abort = useRef<AbortController | null>(null);
   const epoch = useRef(0);
+  /** The owner's new-Chat draft (text and files), memory first; distinct from an open Chat's own draft. */
+  const readNewChatDraft = (): NativeChatDraftSnapshot | null => owner ? { owner, generation: epoch.current,
+    text: readNativeDraftText(owner, null), files: revisionDraft.peekFiles(null).map(({ uploadId, name }) => ({ uploadId, name })) } : null;
   const end = useRef<HTMLDivElement>(null);
   const requestEpoch = useRef(0);
   useEffect(() => {
@@ -538,14 +541,19 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
       <button className="primary" onClick={() => void signIn()} disabled={loading} aria-describedby="browser-sign-in-note">{copy.signIn} <span aria-hidden="true">→</span></button>
       <p id="browser-sign-in-note" className="browser-sign-in-note">{loginCopy.browserIntro}</p>
       {transport.requestEmailCode && transport.verifyEmailCode && <button type="button" className="sign-in-email" disabled={loading} onClick={() => { setError(""); setEmailLogin(true); }}>{loginCopy.inAppEmail}</button>}
-    </section> : product === "review" ? <ReviewWorkspace key={`review:${owner}`} transport={transport} language={language} owner={owner} historyOpen={view === "list"} onCloseHistory={returnToWorkspace} onBusyChange={setReviewBusy} onLoadingChange={setReviewLoading} onProductChange={switchProduct} historyFooter={accountFooter} onContinueInChat={text => {
-      if (!owner) return;
-      const previous = readDeviceDraft(localStorage, owner, null);
-      const next = previous.trim() ? `${previous}\n\n${text}` : text;
-      if (next.length > 40000) throw Error("DRAFT_TOO_LARGE");
+    </section> : product === "review" ? <ReviewWorkspace key={`review:${owner}`} transport={transport} language={language} owner={owner} historyOpen={view === "list"} onCloseHistory={returnToWorkspace} onBusyChange={setReviewBusy} onLoadingChange={setReviewLoading} onProductChange={switchProduct} historyFooter={accountFooter} readChatDraft={readNewChatDraft} onContinueInChat={(text, expected): NativeChatDraftApply => {
+      // Applies only to the new-Chat draft the user just confirmed: same owner and
+      // sign-in generation, same text and files. Anything else asks again.
+      const current = readNewChatDraft();
+      if (!current || !owner) return "unavailable";
+      if (!sameNativeChatDraft(current, expected)) return "changed";
+      const next = appendNativeReviewChatDraft(current.text, text);
+      if (next === null) return "tooLarge";
       sessionStorage.removeItem(REVIEW_HANDOFF_TARGET); setReviewOpen(undefined); handoffOrigin.current = null; handoffAttempt.current = null;
       requestEpoch.current++; setConversation(null); setPartial(null); setUncertain(false); setProduct("chat"); setView("chat");
-      localStorage.removeItem(LAST_CHAT); preserveNativeDraft(owner, "new", next); setDraft(next, null);
+      try { localStorage.removeItem(LAST_CHAT); } catch { /* Optional persistence. */ }
+      setDraft(next, null);
+      return "applied";
     }} newConversationRequest={newReviewRequest} conversationRequest={reviewOpen} extraTools={iosExtraTools} /> : view === "list" ? <ConversationListScreen title={copy.chats} newLabel={copy.newChat} disabled={streaming || loading} onNew={newConversation} footer={accountFooter}>
       <ConversationHistory transport={transport} language={language} owner={owner} chats={chats} currentId={conversation?.id} disabled={streaming || loading} onOpen={id => void open(id)} onRefresh={async () => {
         const scope = epoch.current; const rows = await transport.list();

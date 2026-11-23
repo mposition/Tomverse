@@ -124,9 +124,9 @@ export interface ChatTransport {
   voiceRequest?(body: unknown, signal?: AbortSignal): Promise<Response>;
   sendVoice?(conversation: Conversation, text: string, signal: AbortSignal, progress: (text: string) => void): Promise<{ conversationId: string; sourceUserMessageId: string }>;
   resumeResearch?(conversation: Conversation, signal: AbortSignal, update: (conversation: Conversation) => void): Promise<void>;
-  quickSummaryPreview?(id: string): Promise<{ available: boolean; reason?: string; estimatedCredits?: number; cached?: boolean; source?: import("../../../packages/chat-core/src/review").ReviewSetup["source"]; storedSummary?: import("../../../lib/reviewToChat").QuickReview }>;
+  quickSummaryPreview?(id: string, signal?: AbortSignal): Promise<{ available: boolean; reason?: string; estimatedCredits?: number; cached?: boolean; source?: import("../../../packages/chat-core/src/review").ReviewSetup["source"]; storedSummary?: import("../../../lib/reviewToChat").QuickReview }>;
   runQuickSummary?(id: string): Promise<import("../../../lib/reviewToChat").QuickReview>;
-  reviewPreview?(id: string, mode?: string, synthesis?: boolean): Promise<import("../../../packages/chat-core/src/review").ReviewSetup>;
+  reviewPreview?(id: string, mode?: string, synthesis?: boolean, signal?: AbortSignal): Promise<import("../../../packages/chat-core/src/review").ReviewSetup>;
   runComparison?(id: string, input: { promptMessageId: string; assistantMessageIds: string[]; reviewMode: import("../../../packages/chat-core/src/review").ReviewMode; includeSynthesis: boolean }): Promise<import("../../../packages/chat-core/src/review").ComparisonReview>;
   reviewFeedback?(id: string, reviewId: string): Promise<{ feedback: Array<{ reviewItemId: string; verdict: string }> }>;
   setReviewFeedback?(id: string, reviewId: string, reviewItemId: string, verdict: string | null): Promise<void>;

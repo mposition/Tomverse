@@ -1,0 +1,94 @@
+{
+  "version": 2,
+  "purpose": "research-preview-development-evaluation",
+  "sourceDigest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "models": [
+    {
+      "id": "gemini-3-1-pro",
+      "apiModel": "gemini-3.1-pro-preview",
+      "provider": "google",
+      "reasoning": "provider-default",
+      "contextWindowTokens": 1048576
+    }
+  ],
+  "currentDate": "2026-11-22",
+  "expiresAt": "2026-11-23T00:00:00Z",
+  "credentialScope": "development-selected-research-providers-and-brave",
+  "providers": [
+    "brave",
+    "google"
+  ],
+  "cases": [
+    {
+      "id": "official-web-accessibility",
+      "question": "WCAG 2.2의 키보드 접근성과 포커스 가시성 요구사항을 W3C 공식 자료로 조사하고, 필수 기준과 권고를 구분해 주세요. 확인할 수 없는 내용은 한계로 밝혀 주세요.",
+      "locale": "ko",
+      "runKey": "gemini-3-1-pro:official-web-accessibility",
+      "modelId": "gemini-3-1-pro",
+      "apiModel": "gemini-3.1-pro-preview",
+      "provider": "google",
+      "reasoning": "provider-default",
+      "pricingBasis": "Existing frozen catalogue rate including the applicable context tier",
+      "budget": {
+        "modelId": "gemini-3-1-pro",
+        "minimumPlan": "Pro",
+        "modelUsageClass": "premium",
+        "usageCredits": 8,
+        "longContextSettlement": null,
+        "inputTokens": 1083422,
+        "contextInputTokens": 358410,
+        "maxOutputTokens": 4096,
+        "providerMaxOutputTokens": null,
+        "reservedOutputTokens": 4096,
+        "inputUsdPerMillionTokens": 4,
+        "outputUsdPerMillionTokens": 18,
+        "cachedInputPriceMultiplier": 1,
+        "cacheWriteUsdPerMillionTokens": null,
+        "promptCacheWriteReservedPremiumMicroUsd": 0,
+        "nativeSearchReservedCostMicroUsd": 0,
+        "nativeSearchCostPerQueryMicroUsd": 0,
+        "nativeSearchMaxQueries": 0,
+        "searchBackend": {
+          "backend": "brave",
+          "reservedCostMicroUsd": 25000,
+          "costPerQueryMicroUsd": 5000,
+          "maxQueries": 5,
+          "pricingVersion": "search-backend-brave-2026-08-27"
+        },
+        "provider": "google",
+        "pricingVersion": "google-gemini-3.1-pro-preview-2026-08-01",
+        "costSource": "registry_long_context",
+        "longContextThresholdTokens": 200000,
+        "providerCallPasses": 3
+      },
+      "reservedMicroUsd": 4432416
+    }
+  ],
+  "rerank": {
+    "enabled": false,
+    "model": "rerank-v5.0-fast",
+    "maxCalls": 0,
+    "maxDocuments": 25,
+    "maxSnippetCharacters": 400,
+    "maxInputTokens": 819200,
+    "inputUsdPerMillionTokens": 0.02,
+    "pricingVersion": "cohere-rerank-v5-fast-0.02-2026-11-15",
+    "pricingSource": "https://cohere.com/blog/rerank-5",
+    "reservedMicroUsd": 0,
+    "scope": "One side experiment on captured public search snippets; no HTML, new searches, report rewrite or model judge"
+  },
+  "maxTotalMicroUsd": 10000000,
+  "hardCeilingMicroUsd": 10000000,
+  "totalReservedMicroUsd": 4432416,
+  "maxModelCalls": 3,
+  "maxSearchAttempts": 5,
+  "maxPageReads": 2,
+  "maxRerankCalls": 0,
+  "timeoutMsPerCase": 600000,
+  "qualityReview": [
+    "Read each cited source and manually classify claim support",
+    "Check complete/partial/insufficient-evidence honesty and page truncation",
+    "Record latency, usage and frozen-rate total cost; no extra model judge"
+  ],
+  "manifestDigest": "19369dc6f32df08c0ed2a7a71a573c058bc43335b608debda5a587312dc76816"
+}
