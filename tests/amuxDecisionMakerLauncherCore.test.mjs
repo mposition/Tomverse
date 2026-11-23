@@ -18,9 +18,10 @@ import { dmPayloadDigest } from "../lib/amux/decisionMakerBodyCore.ts";
 import { dmOutputSchema, validateDmOutput } from "../lib/amux/decisionMakerCore.ts";
 import {
   DM_ARGV_OUTPUT_FILE,
-  DM_ARGV_REQUEST_DIRECTORY,
   DM_ARGV_SCHEMA_FILE,
   DM_ARGV_SCHEMA_JSON,
+  DM_ARGV_WORK_DIRECTORY,
+  DM_ENV_SHELL_PREFIX,
   DM_CLAUDE_REFUSED_ARGV,
   DM_CLAUDE_TOOLS,
   DM_CODEX_REFUSED_ARGV,
@@ -79,7 +80,7 @@ test("§5a is policy version 2, the version this launcher implements", () => {
 
 test("§5a fixed argv: each CLI's argv is the policy's tokens, in order", () => {
   const block = between(section5a, "```text\n", "\n```");
-  const placeholders = [DM_ARGV_REQUEST_DIRECTORY, DM_ARGV_OUTPUT_FILE, DM_ARGV_SCHEMA_FILE, DM_ARGV_SCHEMA_JSON];
+  const placeholders = [DM_ARGV_WORK_DIRECTORY, DM_ARGV_OUTPUT_FILE, DM_ARGV_SCHEMA_FILE, DM_ARGV_SCHEMA_JSON];
   let sealed = block;
   placeholders.forEach((placeholder, index) => {
     assert.ok(sealed.includes(placeholder), `the block names ${placeholder}`);
@@ -153,13 +154,24 @@ test("§5a executables: instance, CLI version and sha256 are the policy table's"
 
 const GIT_ENVIRONMENT = ["GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_PARAMETERS='safe.directory=*'", "GIT_OPTIONAL_LOCKS=0"];
 
-test("§5a fixed environment: the eight variables, HOME the S0 account's home", () => {
+const CODEX_ENVIRONMENT = ["TMPDIR=<작업 디렉터리>/.amux-tmp"];
+const CLAUDE_ENVIRONMENT = ["CLAUDE_CODE_SHELL_PREFIX=<요청별 shell prefix>", "CLAUDE_CODE_TMPDIR=<작업 디렉터리>/.amux-tmp"];
+
+test("§5a fixed environment: the eight variables, then codex's one and claude's two, HOME the S0 account's home", () => {
   const line = section5a.split("\n").find((entry) => entry.startsWith("**고정 환경.**"));
-  assert.deepEqual(spans(line), ["HOME=<그 공급사 계정의 홈>", "PATH=/usr/bin:/bin", "LANG=C.UTF-8", "LC_ALL=C.UTF-8", ...GIT_ENVIRONMENT]);
+  assert.deepEqual(spans(line), [
+    "HOME=<그 공급사 계정의 홈>", "PATH=/usr/bin:/bin", "LANG=C.UTF-8", "LC_ALL=C.UTF-8", ...GIT_ENVIRONMENT,
+    ...CODEX_ENVIRONMENT, ...CLAUDE_ENVIRONMENT,
+  ]);
   assert.deepEqual(
     dmFixedEnvironment(OPENAI).map(([name, value]) => `${name}=${value}`),
-    ["HOME=/home/amux-dm-openai", "PATH=/usr/bin:/bin", "LANG=C.UTF-8", "LC_ALL=C.UTF-8", ...GIT_ENVIRONMENT],
+    ["HOME=/home/amux-dm-openai", "PATH=/usr/bin:/bin", "LANG=C.UTF-8", "LC_ALL=C.UTF-8", ...GIT_ENVIRONMENT, ...CODEX_ENVIRONMENT],
   );
+  assert.deepEqual(
+    dmFixedEnvironment(ANTHROPIC).map(([name, value]) => `${name}=${value}`),
+    ["HOME=/home/amux-dm-anthropic", "PATH=/usr/bin:/bin", "LANG=C.UTF-8", "LC_ALL=C.UTF-8", ...GIT_ENVIRONMENT, ...CLAUDE_ENVIRONMENT],
+  );
+  assert.ok(CLAUDE_ENVIRONMENT[0].endsWith(DM_ENV_SHELL_PREFIX) && CODEX_ENVIRONMENT[0].includes(DM_ARGV_WORK_DIRECTORY));
   // codex drops variables named like KEY, SECRET or TOKEN from its commands' environment: none is.
   assert.ok(dmFixedEnvironment(OPENAI).every(([name]) => !/KEY|SECRET|TOKEN/i.test(name)));
   assert.equal(dmFixedEnvironment(ANTHROPIC)[0][1], "/home/amux-dm-anthropic");
@@ -199,8 +211,10 @@ test("§5a refused argv: the launcher's lists are the policy's, entry for entry"
   const codex = spans(between(paragraph, "codex:", "claude:"));
   const claude = spans(paragraph.slice(paragraph.indexOf("claude:")));
   assert.deepEqual(codex, [...DM_CODEX_REFUSED_ARGV]);
-  // `Read,Grep,Glob` is the one value `--tools` may have, named in "`Read,Grep,Glob` 밖의 `--tools`".
-  assert.ok(paragraph.includes(`\`${DM_CLAUDE_TOOLS}\` 밖의 \`--tools\``));
+  // `Read,Grep,Glob,Bash` is the one value the three tool-list flags may have, named in
+  // "`Read,Grep,Glob,Bash` 밖의 `--allowedTools`/`--allowed-tools`/`--tools`".
+  assert.equal(DM_CLAUDE_TOOLS, "Read,Grep,Glob,Bash");
+  assert.ok(paragraph.includes(`\`${DM_CLAUDE_TOOLS}\` 밖의 \`--allowedTools\`/\`--allowed-tools\`/\`--tools\``));
   assert.deepEqual(
     claude.filter((entry) => entry !== DM_CLAUDE_TOOLS),
     [...DM_CLAUDE_REFUSED_ARGV],
@@ -230,16 +244,31 @@ const commandOf = (plan, overrides = {}) => ({
 
 test("a request's two directories are fixed roots plus its id, one level down", () => {
   assert.equal(DM_REQUEST_ROOT, "/var/lib/amux-dm/requests");
+  const scratch = (home, id) => `/home/${home}/dm-scratch/${id}`;
   assert.deepEqual(codexPaths, {
     requestDirectory: `/var/lib/amux-dm/requests/${CODEX_REQUEST}`,
-    temporaryDirectory: `/home/amux-dm-openai/dm-scratch/${CODEX_REQUEST}`,
-    outputFile: `/home/amux-dm-openai/dm-scratch/${CODEX_REQUEST}/last-message.json`,
+    temporaryDirectory: scratch("amux-dm-openai", CODEX_REQUEST),
+    outputFile: `${scratch("amux-dm-openai", CODEX_REQUEST)}/last-message.json`,
+    workDirectory: `${scratch("amux-dm-openai", CODEX_REQUEST)}/work`,
+    workTemporaryDirectory: `${scratch("amux-dm-openai", CODEX_REQUEST)}/work/.amux-tmp`,
+    shellDirectory: `${scratch("amux-dm-openai", CODEX_REQUEST)}/shell`,
+    shellJail: `${scratch("amux-dm-openai", CODEX_REQUEST)}/shell/bash`,
+    shellPrefix: `${scratch("amux-dm-openai", CODEX_REQUEST)}/shell/claude-shell-prefix`,
   });
   assert.deepEqual(claudePaths, {
     requestDirectory: `/var/lib/amux-dm/requests/${CLAUDE_REQUEST}`,
-    temporaryDirectory: `/home/amux-dm-anthropic/dm-scratch/${CLAUDE_REQUEST}`,
+    temporaryDirectory: scratch("amux-dm-anthropic", CLAUDE_REQUEST),
     outputFile: null,
+    workDirectory: `${scratch("amux-dm-anthropic", CLAUDE_REQUEST)}/work`,
+    workTemporaryDirectory: `${scratch("amux-dm-anthropic", CLAUDE_REQUEST)}/work/.amux-tmp`,
+    shellDirectory: `${scratch("amux-dm-anthropic", CLAUDE_REQUEST)}/shell`,
+    shellJail: `${scratch("amux-dm-anthropic", CLAUDE_REQUEST)}/shell/bash`,
+    shellPrefix: `${scratch("amux-dm-anthropic", CLAUDE_REQUEST)}/shell/claude-shell-prefix`,
   });
+  // The -o file and the jail's scripts are beside the work directory, never in it: a command cannot reach them.
+  for (const path of [codexPaths.outputFile, codexPaths.shellJail, claudePaths.shellPrefix]) {
+    assert.ok(!path.startsWith(`${codexPaths.workDirectory}/`) && !path.startsWith(`${claudePaths.workDirectory}/`), path);
+  }
   assert.equal(dmScratchRoot(OPENAI), "/home/amux-dm-openai/dm-scratch");
   // The broker's root as S0 made it (install -d -o amux-dm-broker -m 0711).
   const isolation = readFileSync(
@@ -271,27 +300,36 @@ test("the plan is §5a's argv with the schema and the request's two paths, and n
       ({
         [DM_ARGV_SCHEMA_FILE]: DM_OUTPUT_SCHEMA_PATH,
         [DM_ARGV_OUTPUT_FILE]: codexPaths.outputFile,
-        [DM_ARGV_REQUEST_DIRECTORY]: codexPaths.requestDirectory,
-      })[token] ?? token.split(DM_ARGV_REQUEST_DIRECTORY).join(codexPaths.requestDirectory),
+        [DM_ARGV_WORK_DIRECTORY]: codexPaths.workDirectory,
+      })[token] ?? token.split(DM_ARGV_WORK_DIRECTORY).join(codexPaths.workDirectory),
     ),
   );
-  // The permissions profile: the request directory, the system's minimal paths and the CLI's own directory, read only.
+  // The permissions profile: the system's minimal paths and the CLI's own directory read, the work directory written; nothing else.
   const profile = codex.argv.find((token) => token.startsWith("permissions.dm.filesystem="));
   assert.equal(profile,
-    `permissions.dm.filesystem={":minimal"="read","${codexPaths.requestDirectory}"="read","/opt/tomverse-amux-dm/codex-cli-0.162.1"="read"}`);
+    `permissions.dm.filesystem={":minimal"="read","${codexPaths.workDirectory}"="write","/opt/tomverse-amux-dm/codex-cli-0.162.1"="read"}`);
   assert.equal("/opt/tomverse-amux-dm/codex-cli-0.162.1", codex.executable.slice(0, codex.executable.lastIndexOf("/")));
-  assert.ok(!profile.includes("=\"write\""));
+  assert.equal(profile.split('="write"').length, 2, "one writable root");
+  assert.ok(!profile.includes(codexPaths.requestDirectory) && !profile.includes("/home/amux-dm-openai\"="));
+  assert.equal(codex.argv[codex.argv.indexOf("-C") + 1], codexPaths.workDirectory);
   assert.ok(!codex.argv.includes("-s") && !codex.argv.includes("read-only"), "the profile replaces the sandbox flag");
   for (const shell of ["shell_tool", "unified_exec", "unified_exec_tty"]) assert.ok(!codex.argv.includes(shell), shell);
+  assert.deepEqual(codex.environment.at(-1), ["TMPDIR", codexPaths.workTemporaryDirectory]);
   const claudePlan = planFor(ANTHROPIC, CLAUDE_REQUEST);
-  assert.equal(claudePlan.argv[claudePlan.argv.indexOf("--tools") + 1], "Read,Grep,Glob");
+  assert.equal(claudePlan.argv[claudePlan.argv.indexOf("--tools") + 1], "Read,Grep,Glob,Bash");
+  assert.equal(claudePlan.argv[claudePlan.argv.indexOf("--allowedTools") + 1], "Read,Grep,Glob,Bash");
   assert.ok(claudePlan.argv.includes("--restricted"));
-  assert.equal(codex.workingDirectory, codexPaths.requestDirectory);
+  assert.equal(codex.workingDirectory, codexPaths.workDirectory);
   assert.deepEqual(codex.paths, codexPaths);
   const claude = planFor(ANTHROPIC, CLAUDE_REQUEST);
   assert.equal(claude.argv[claude.argv.indexOf("--json-schema") + 1], DM_OUTPUT_SCHEMA_JSON);
-  assert.equal(claude.workingDirectory, claudePaths.requestDirectory);
+  assert.equal(claude.workingDirectory, claudePaths.workDirectory);
   assert.ok(!claude.argv.some((token) => token.includes(claudePaths.temporaryDirectory)));
+  // Bash runs only through the launcher's jail, written beside the work directory.
+  assert.deepEqual(claude.environment.slice(-2), [
+    ["CLAUDE_CODE_SHELL_PREFIX", claudePaths.shellPrefix],
+    ["CLAUDE_CODE_TMPDIR", claudePaths.workTemporaryDirectory],
+  ]);
   assert.deepEqual(dmCommandRefusals(codex, commandOf(codex)), []);
   assert.deepEqual(dmCommandRefusals(claude, commandOf(claude)), []);
   assert.deepEqual(dmForbiddenArgv("codex", codex.argv), []);
@@ -389,17 +427,27 @@ test("codex: a writable profile, a sandbox flag and claude's --tools value are r
   const at = codex.argv.findIndex((token) => token.startsWith("permissions.dm.filesystem="));
   const writable = codex.argv.map((token, index) => (index === at ? token.replace(/"read"}$/, '"read","/home/amux-dm-openai"="write"}') : token));
   assert.deepEqual(dmCommandRefusals(codex, commandOf(codex, { argv: writable })), ["argv_not_fixed"]);
+  // The request directory, or the home, as the writable root instead of the work directory.
+  for (const root of [codexPaths.requestDirectory, "/home/amux-dm-openai", codexPaths.temporaryDirectory]) {
+    const widened = codex.argv.map((token) => token.split(codexPaths.workDirectory).join(root));
+    assert.deepEqual(dmCommandRefusals(codex, commandOf(codex, { argv: widened })), ["argv_not_fixed"], root);
+  }
   for (const value of ["workspace-write", "danger-full-access"]) {
     const argv = [...codex.argv.slice(0, -1), "-s", value, "-"];
     assert.deepEqual(dmCommandRefusals(codex, commandOf(codex, { argv })), ["argv_not_fixed"]);
     assert.deepEqual(dmForbiddenArgv("codex", argv), [`-s ${value}`]);
   }
   const claude = planFor(ANTHROPIC, CLAUDE_REQUEST);
-  for (const value of ["Bash", "default", "Read,Write", "Read,Grep,Glob,Bash", ""]) {
-    const argv = claude.argv.map((token, index) => (index === claude.argv.indexOf("--tools") + 1 ? value : token));
-    assert.deepEqual(dmCommandRefusals(claude, commandOf(claude, { argv })), ["argv_not_fixed"]);
-    assert.deepEqual(dmForbiddenArgv("claude", argv), ["--tools"]);
+  for (const flag of ["--tools", "--allowedTools"]) {
+    for (const value of ["Bash", "default", "Read,Write", "Read,Grep,Glob", "Read,Grep,Glob,Bash,Edit,Write", "Read,Grep,Glob,Bash,WebFetch", ""]) {
+      const argv = claude.argv.map((token, index) => (index === claude.argv.indexOf(flag) + 1 ? value : token));
+      assert.deepEqual(dmCommandRefusals(claude, commandOf(claude, { argv })), ["argv_not_fixed"], `${flag} ${value}`);
+      assert.deepEqual(dmForbiddenArgv("claude", argv), [flag], `${flag} ${value}`);
+    }
   }
+  // The other spelling of the allow list is refused even with the fixed value: the argv is fixed byte for byte.
+  const spelled = [...claude.argv, "--allowed-tools", DM_CLAUDE_TOOLS];
+  assert.deepEqual(dmCommandRefusals(claude, commandOf(claude, { argv: spelled })), ["argv_not_fixed"]);
   for (const value of ["default", "acceptEdits", "bypassPermissions", "plan"]) {
     assert.deepEqual(dmForbiddenArgv("claude", [...claude.argv, "--permission-mode", value]), ["--permission-mode"]);
   }
@@ -412,7 +460,8 @@ test("any other difference in the argv is refused: order, a dropped or doubled t
     [...plan.argv, "-"],
     plan.argv.map((token) => (token === "gpt-6-astra" ? "gpt-6-sol" : token)),
     plan.argv.map((token) => (token === DM_OUTPUT_SCHEMA_PATH ? "/home/amux-dm-openai/schema.json" : token)),
-    plan.argv.map((token) => (token === codexPaths.requestDirectory ? "/home/tommy/Tomverse" : token)),
+    plan.argv.map((token) => (token === codexPaths.workDirectory ? "/home/tommy/Tomverse" : token)),
+    plan.argv.map((token) => (token === codexPaths.workDirectory ? codexPaths.requestDirectory : token)),
     [plan.argv[0], ...plan.argv.slice(1).reverse()],
     plan.argv.filter((token) => token !== "--ephemeral"),
     plan.argv.map((token) => (token === "--ignore-user-config" ? "--ignore-user-config " : token)),
@@ -448,6 +497,12 @@ test("§5a: an environment other than the eight fixed values is refused", () => 
     fixed.map(([name, value]) => [name, name === "LANG" ? "en_US.UTF-8" : value]),
     [...fixed.slice(0, 3), ["HOME", "/home/amux-dm-anthropic"]],
     [],
+    // claude's shell outside the launcher's jail, or its files outside the work directory.
+    fixed.filter(([name]) => name !== "CLAUDE_CODE_SHELL_PREFIX"),
+    fixed.map(([name, value]) => [name, name === "CLAUDE_CODE_SHELL_PREFIX" ? "/usr/bin/bash" : value]),
+    fixed.map(([name, value]) => [name, name === "CLAUDE_CODE_SHELL_PREFIX" ? `${plan.paths.workDirectory}/prefix` : value]),
+    fixed.map(([name, value]) => [name, name === "CLAUDE_CODE_TMPDIR" ? "/tmp" : value]),
+    [...fixed, ["TMPDIR", plan.paths.workTemporaryDirectory]],
   ];
   for (const environment of variants) {
     assert.deepEqual(dmCommandRefusals(plan, commandOf(plan, { environment })), ["environment_not_fixed"], JSON.stringify(environment));
@@ -465,8 +520,8 @@ test("§5a: an environment other than the eight fixed values is refused", () => 
 
 test("§5a execution digest: the recorded values are fixed here, and the code computes them", () => {
   assert.deepEqual(DM_RECORDED_EXECUTION_DIGESTS, {
-    "decision-maker-openai": "6a37d7af4afa1d6c749789c723e739f071d18f47aba837d0efa814ef91efb4ba",
-    "decision-maker-anthropic": "ada9a76ab70925b6eeac9848c3ebec804d3860312dc19a04225e00c1c6a4f88e",
+    "decision-maker-openai": "effd9c48e6742610e974283c787e07d4e79a1bf5e84c6153ea42938e85d94d08",
+    "decision-maker-anthropic": "dbecae4799a2cf39a98ab0beef2fba02aa9c104e8f240bf18af602013942417f",
   });
   for (const instance of DM_INSTANCE_SCOPES) {
     assert.equal(dmExecutionDigest(instance), DM_RECORDED_EXECUTION_DIGESTS[instance], instance);
@@ -492,12 +547,15 @@ test("§5a execution digest input: exactly the policy's six values, with the two
   // claude runs nothing from beside itself, so its digest input keeps the six keys it was recorded with.
   assert.ok(!Object.hasOwn(dmExecutionDigestInput(ANTHROPIC), "companions"));
   assert.equal(input.schemaSha256, DM_OUTPUT_SCHEMA_SHA256);
-  assert.ok(input.argv.includes(DM_ARGV_REQUEST_DIRECTORY));
+  assert.ok(input.argv.includes(DM_ARGV_WORK_DIRECTORY));
   assert.ok(input.argv.includes(DM_ARGV_OUTPUT_FILE));
   assert.ok(input.argv.includes(DM_OUTPUT_SCHEMA_PATH));
   assert.ok(!input.argv.includes(DM_ARGV_SCHEMA_FILE));
   assert.deepEqual(input.environment, { HOME: "/home/amux-dm-openai", PATH: "/usr/bin:/bin", LANG: "C.UTF-8", LC_ALL: "C.UTF-8",
-    GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_PARAMETERS: "'safe.directory=*'", GIT_OPTIONAL_LOCKS: "0" });
+    GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_PARAMETERS: "'safe.directory=*'", GIT_OPTIONAL_LOCKS: "0",
+    TMPDIR: "<작업 디렉터리>/.amux-tmp" });
+  // claude's per-request values stay placeholders too.
+  assert.equal(dmExecutionDigestInput(ANTHROPIC).environment.CLAUDE_CODE_SHELL_PREFIX, DM_ENV_SHELL_PREFIX);
   assert.deepEqual(input.stateDeletion, { delete: ["~/.codex/"], keep: ["~/.codex/auth.json"] });
   const claude = dmExecutionDigestInput(ANTHROPIC);
   assert.equal(claude.argv[claude.argv.indexOf("--json-schema") + 1], DM_OUTPUT_SCHEMA_JSON);

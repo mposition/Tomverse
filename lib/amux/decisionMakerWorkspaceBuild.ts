@@ -255,7 +255,11 @@ export const dmWorkspaceBytes = (root: string): number => {
   return bytes;
 };
 
-/** Everything under `root` handed to the vendor's group read-only; any link refused; sizes summed. */
+/**
+ * Everything under `root` handed to the vendor's group read-only; any link
+ * refused; sizes summed. The vendor's launcher copies it into its own work
+ * directory, where the DM may write (lib/amux/decisionMakerWorkCopy.ts).
+ */
 const handOver = (root: string, groupId: number | null, owners: boolean): { ok: true; bytes: number } | { ok: false; reason: "tree_unsafe" | "too_large" } => {
   let bytes = 0;
   const directories = [root];

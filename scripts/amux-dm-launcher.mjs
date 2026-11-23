@@ -11,11 +11,18 @@
 //
 //   runuser -u <vendor account> -- node launcher.mjs <instance> --cleanup-only
 //
+// and the command jail's self-test (lib/amux/decisionMakerJailSelfTest.ts; no
+// model call), in a transient unit with the launcher unit's sandbox, while no
+// request runs; exit 0 only when every check matches:
+//
+//   systemd-run --wait --pipe -p User=<vendor account> ... node launcher.mjs <instance> --jail-selftest
+//
 // It refuses to run as any account but the instance's own.
 
 import { Socket } from "node:net";
 
 import { DM_SYSTEM_PATH_OWNERS, isDmLauncherInstance } from "../lib/amux/decisionMakerLauncherCore.ts";
+import { dmJailSelfTest } from "../lib/amux/decisionMakerJailSelfTest.ts";
 import { DM_SYSTEM_HOST, dmCleanupVendor } from "../lib/amux/decisionMakerLauncherFs.ts";
 import { serveDecisionMakerLauncherConnection } from "../lib/amux/decisionMakerLauncherService.ts";
 
@@ -27,7 +34,7 @@ const fail = (code) => {
 
 const [instance, mode, ...rest] = process.argv.slice(2);
 if (!isDmLauncherInstance(instance) || rest.length > 0) fail("arguments_not_fixed");
-if (mode !== undefined && mode !== "--cleanup-only") fail("arguments_not_fixed");
+if (mode !== undefined && mode !== "--cleanup-only" && mode !== "--jail-selftest") fail("arguments_not_fixed");
 if (typeof process.geteuid !== "function" || process.geteuid() !== DM_SYSTEM_PATH_OWNERS.vendor[instance]) {
   fail("account_not_instance");
 }
@@ -37,6 +44,14 @@ if (mode === "--cleanup-only") {
   // The operator's own terminal: the paths say what is left.
   process.stdout.write(`${JSON.stringify(cleanup)}\n`);
   process.exit(cleanup.status === "verified" ? 0 : 1);
+}
+
+if (mode === "--jail-selftest") {
+  const selftest = dmJailSelfTest(DM_SYSTEM_HOST, instance);
+  for (const line of selftest.lines) {
+    process.stdout.write(`${line.ok ? "ok  " : "FAIL"} ${instance} ${line.name}: ${line.got} (want ${line.want})\n`);
+  }
+  process.exit(selftest.ok ? 0 : 1);
 }
 
 let socket;
