@@ -292,6 +292,28 @@ domains:
     retentionPolicy: immediate
     implementationStatus: implemented
     inUnifiedExport: included
+    note: >-
+      Project workspace settings (description, instructions, context and memory
+      switches, revision, archive) are exported with the project. Project
+      deletion keeps conversations (detached) and deletes the project's own
+      knowledge files (object tombstones in the same transaction) and memories;
+      MemoryItem.projectId cascades and never falls back to personal memory.
+
+  - domain: projectAnswerReceipt
+    prismaModel: ProjectAnswerReceipt
+    userLinkageRole: subject
+    owner: backend-ai
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included
+    note: >-
+      Owner-only record of which project sources (material excerpts and
+      project_search reads) an answer was given: refs and titles only, no
+      source text. Cascades from the account, the message and the project.
+      Never part of a share snapshot or a conversation export; opening a ref
+      re-checks access.
 
   - domain: chatComposerDraft
     prismaModel: ChatComposerDraft

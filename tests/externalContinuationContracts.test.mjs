@@ -1004,8 +1004,10 @@ test("the default continuation is always Chat", () => {
     // Owner decision 2026-11-12: rollout state no longer sends it to Review.
     const helper = readFileSync("lib/externalContinuationCreateRoute.ts", "utf8");
     assert.doesNotMatch(helper, /autoAvailabilityFor|chatSurfaceAvailable/);
-    // The body still carries only the key; nothing the client sends picks it.
-    assert.match(helper, /idempotencyKey: z\.string\(\)\.uuid\(\),\s*\}\)\s*\.strict\(\)/);
+    // The body carries the key and, since the project workspace, an optional
+    // owner-checked project; nothing the client sends picks the product.
+    assert.match(helper, /idempotencyKey: z\.string\(\)\.uuid\(\),[\s\S]{0,200}projectId: z\.string\(\)\.min\(1\)\.max\(64\)\.optional\(\),\s*\}\)\s*\.strict\(\)/);
+    assert.doesNotMatch(helper, /productKey: z\./);
     const route = readFileSync(
         "app/api/external-conversations/[conversationId]/continuations/route.ts",
         "utf8"

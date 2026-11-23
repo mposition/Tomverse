@@ -33,6 +33,7 @@ import type { MemoryExtractionEvalEntry } from "@/lib/memoryExtractionEvalRegist
 import type { ExtractionSourceConversationInput } from "@/lib/memoryExtractionPrompt";
 import type { AiModel } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
+import { loadNativeChunkConversation, nativeSourceStillReadable } from "@/lib/projectMemoryExtraction";
 
 /**
  * What actually runs an extraction chunk, and the two things that start it
@@ -295,10 +296,23 @@ export async function handleMemoryExtractionChunk({
     // handler got its turn.
     if (signal.aborted) return failed("chunk_timeout");
 
-    const { conversations, contentBytes } = await loadChunkConversations(
-        lease.userId,
-        chunk.conversationIds
-    );
+    // The run's own row says what it reads: imported conversations, or one
+    // project conversation's native window (project workspace).
+    const runSource = await prisma.memoryExtractionRun.findUnique({
+        where: { id: lease.runId },
+        select: { sourceKind: true, projectId: true, sourceSelection: true },
+    });
+    const nativeRun = runSource?.sourceKind === "native";
+    const { conversations, contentBytes } = nativeRun
+        ? await loadNativeChunkConversation({
+              userId: lease.userId,
+              projectId: runSource?.projectId ?? null,
+              selection: runSource?.sourceSelection,
+          })
+        : await loadChunkConversations(
+              lease.userId,
+              chunk.conversationIds
+          );
     if (conversations.length === 0) {
         /*
           The plan named conversations that are gone — deleted, their import
@@ -451,7 +465,13 @@ export async function handleMemoryExtractionChunk({
                       read is the linearisation point; a lock that loses the
                       race to it is handled when the answer is committed.
                     */
-                    const lockedSince = await prisma.externalConversation.count({
+                    const lockedSince = nativeRun
+                        ? ((await nativeSourceStillReadable({
+                              userId: lease.userId,
+                              projectId: runSource?.projectId ?? null,
+                              conversationIds: conversations.map((conversation) => conversation.externalConversationId),
+                          })) ? 0 : 1)
+                        : await prisma.externalConversation.count({
                         where: {
                             id: {
                                 in: conversations.map(

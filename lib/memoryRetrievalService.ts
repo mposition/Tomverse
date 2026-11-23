@@ -22,6 +22,7 @@ import { STYLE_MEMORY_KINDS } from "@/lib/memoryValidatorCore";
 import { prisma } from "@/lib/prisma";
 import { rerankForRetrieval, rerankMemoryForRetrieval, semanticFeatureReady } from "@/lib/semanticRetrieval";
 import type { SemanticCallMode } from "@/lib/semanticRetrievalCore";
+import { memoryScopeWhere, PERSONAL_MEMORY_SCOPE, type MemoryScope } from "@/lib/projectWorkspaceCore";
 
 /**
  * Retrieval v1 against the database (policy §9).
@@ -166,9 +167,10 @@ const reachableEvidenceFilter = {
             evidences: {
                 some: {
                     OR: [
-                        // Manual grounds the user typed, and (later, §8.5)
-                        // Tomverse messages: no source lock hides either.
-                        { externalMessageId: null },
+                        // Manual grounds the user typed: no source lock hides them.
+                        { externalMessageId: null, tomverseMessageId: null },
+                        // A Tomverse message counts while its conversation is unlocked.
+                        { tomverseMessage: { conversation: { password: null } } },
                         { externalMessage: { conversation: { password: null } } },
                     ],
                 },
@@ -199,6 +201,13 @@ export async function retrieveMemoryContext(input: {
         extractionModelId: string;
         promptVersion: string;
     }>;
+    /**
+     * Which memories are in reach. Defaults to the account's personal memory;
+     * a project turn passes its project (and personal only when the project's
+     * owner chose to include it). Applied in the query, before the candidate
+     * limit, so another project's rows can never take a candidate slot.
+     */
+    scope?: MemoryScope;
 }): Promise<MemoryRetrievalResult> {
     const now = input.now ?? new Date();
     const settings = await getMemorySettings(input.userId);
@@ -213,7 +222,9 @@ export async function retrieveMemoryContext(input: {
     const queryTerms = queryPlan.terms;
 
     // What every candidate has to satisfy, whichever query fetches it.
+    const scopeFilter = memoryScopeWhere(input.scope ?? PERSONAL_MEMORY_SCOPE);
     const eligible = [
+        scopeFilter,
         // Expiry is filtered here as well as in the scorer: a row that
         // expired last month should not occupy one of the candidate
         // slots just to be dropped after it was fetched.

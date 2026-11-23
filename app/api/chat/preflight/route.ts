@@ -66,6 +66,7 @@ import {
     createTokenEstimateAccumulator,
 } from "@/lib/chatTokenEstimate";
 import { buildChatTurnContext } from "@/lib/chatTurnContext";
+import { resolveProjectScopeById } from "@/lib/projectWorkspaceService";
 import { fitChatOutputToContextWindow } from "@/lib/chatContextWindow";
 import { issueChatContextBundle } from "@/lib/chatContextBundleService";
 
@@ -76,6 +77,8 @@ const preflightSchema = z
         modelIds: z.array(z.string().min(1).max(100)).min(2).max(3),
         prompt: z.string().max(CHAT_MAX_MESSAGE_CHARACTERS),
         previousContextBundle: z.string().min(1).max(8_192).optional(),
+        /** Project locations the user picked; re-read and re-checked by the server. */
+        projectReferences: z.array(z.string().min(3).max(200)).max(8).optional(),
         attachments: z
             .array(
                 z
@@ -252,6 +255,7 @@ export async function POST(request: Request) {
         // signed-in caller and a real conversation row.
         let canPersistTurn = false;
         let hasReviewHandoff = false;
+        let conversationProjectId: string | null = null;
         // A guest's transcript lives in their browser, so there is no server
         // conversation to read history from -- and no ownership question to
         // answer. Signed-in callers keep the full check below unchanged.
@@ -265,6 +269,7 @@ export async function POST(request: Request) {
                     kind: true,
                     memoryMode: true,
                     assistantProfileVersionId: true,
+                    projectId: true,
                     continuationBridge: { select: { reviewHandoff: true } },
                     messages: {
                         orderBy: { createdAt: "desc" },
@@ -318,6 +323,7 @@ export async function POST(request: Request) {
             history = conversation.messages.reverse();
             conversationMemoryMode = conversation.memoryMode;
             profileVersionId = conversation.assistantProfileVersionId;
+            conversationProjectId = conversation.projectId ?? null;
             canPersistTurn = true;
             hasReviewHandoff = conversation.continuationBridge?.reviewHandoff != null;
             if (hasReviewHandoff && (payload.attachments.length > 0 || models.some(model => model.usageClass === "deep-research"))) {
@@ -330,6 +336,13 @@ export async function POST(request: Request) {
         // model's input estimate here — the figure the credit reservation and
         // the context-window check are built on. A guest gets an empty
         // context and the arithmetic below is unchanged for them.
+        // The comparison runs in the conversation's project context, read here.
+        const turnProject = session?.user?.id && canPersistTurn && conversationProjectId
+            ? await resolveProjectScopeById(session.user.id, conversationProjectId)
+            : null;
+        if (turnProject?.contextEnabled && turnProject.archived) {
+            throw new ChatAccessError(409, "PROJECT_ARCHIVED", "This project is archived. Restore it to continue here.");
+        }
         const turnContext = await buildChatTurnContext({
             userId: session?.user?.id ?? null,
             query: payload.prompt,
@@ -343,6 +356,8 @@ export async function POST(request: Request) {
             // only one side read it, a conversation with memory off would be
             // charged for a memory block it never receives, or the reverse.
             conversationMode: conversationMemoryMode,
+            project: turnProject,
+            projectReferences: payload.projectReferences,
         });
 
         // The capability blocks the chat route will send, priced here so the
@@ -612,7 +627,8 @@ export async function POST(request: Request) {
         const contextBundle =
             session?.user?.id &&
             (turnContext.memory.decision.allowed ||
-                turnContext.profileTokens > 0)
+                turnContext.profileTokens > 0 ||
+                (turnContext.project?.project ?? null) !== null)
                 ? issueChatContextBundle({
                       subjectKey: session.user.id,
                       conversationId:

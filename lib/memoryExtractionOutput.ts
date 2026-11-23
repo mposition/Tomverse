@@ -76,6 +76,8 @@ export type ParsedExtractionCandidate = {
          * check nothing downstream can repeat.
          */
         evidenceQuote: string;
+        /** Absent = an imported (external) message. */
+        sourceType?: "external_message" | "tomverse_message";
     }>;
 };
 
@@ -318,6 +320,7 @@ export function parseExtractionOutput(
                 evidenceDigest: source.contentDigest,
                 role: source.role,
                 evidenceQuote,
+                ...(source.sourceType ? { sourceType: source.sourceType } : {}),
             });
         }
         if (evidenceProblem) {
