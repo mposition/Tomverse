@@ -21,10 +21,10 @@ test("contextual chat help is available in every supported language", () => {
 });
 
 test("English and Korean copy state the critical product boundaries", () => {
-  assert.match(chatHelpCopy.en.projectsDescription, /do not automatically share/i);
+  assert.match(chatHelpCopy.en.projectsDescription, /context off the project is only a folder/i);
   assert.match(chatHelpCopy.en.shareDialogSnapshot, /not added.*automatically/i);
   assert.match(chatHelpCopy.en.aiReviewDescription, /does not search external sources/i);
-  assert.match(chatHelpCopy.ko.projectsDescription, /자동으로 공유하지/);
+  assert.match(chatHelpCopy.ko.projectsDescription, /끄면 폴더처럼 묶기만/);
 });
 
 test("the labels feature left nothing behind in the help copy", () => {

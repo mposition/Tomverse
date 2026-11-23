@@ -32,7 +32,7 @@ import Link from "next/link";
 import { HELP_FLAG_KEYS } from "@/lib/helpNavigationIntents";
 import { useHelpGuideEnabledFlagKeys } from "@/components/chat/HelpGuideAccess";
 import { rememberSettingsReturnProduct } from "@/components/settings/useSettingsReturnProduct";
-import { AlertTriangle, ChevronDown, CircleHelp, Compass, Crown, Download, Folder, FolderPlus, Image as ImageIcon, Link2Off, Lock, MessageSquare, MoreVertical, PanelLeftClose, PanelLeftOpen, Pencil, Pin, Search, Share2, SlidersHorizontal, Sparkles, Trash2, Unlock, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, CircleHelp, Compass, Crown, Download, Folder, FolderOpen, FolderPlus, Image as ImageIcon, Link2Off, Lock, MessageSquare, MoreVertical, PanelLeftClose, PanelLeftOpen, Pencil, Pin, Search, Share2, SlidersHorizontal, Sparkles, Trash2, Unlock, X } from "lucide-react";
 import { FeedbackButton } from "@/components/chat/FeedbackButton";
 import { HelpGuideDialog } from "@/components/chat/HelpGuideDialog";
 import { UserUsageSummary } from "@/components/chat/UserUsageSummary";
@@ -70,6 +70,15 @@ import { providerLabel } from "@/components/imports/importFormatting";
 import { SearchSnippetText } from "@/components/chat/SearchSnippetText";
 import { requestContinuationFocus } from "@/lib/continuationFocusHandoff";
 import type { ChatWorkspaceProduct } from "@/lib/chatProductUiCopy";
+import type { ProjectWorkspaceRoute } from "@/lib/projectWorkspaceRoute";
+import {
+    CONVERSATION_PROJECT_CHANGED_EVENT,
+    PROJECT_CHANGED_EVENT,
+    announceConversationProjectChanged,
+    loadProjectDeletionPlan,
+    type ConversationProjectChangedDetail,
+} from "@/lib/projectWorkspaceUi";
+import { webProjectWorkspaceClient } from "@/lib/projectWorkspaceWeb";
 
 /** A search answer resting on unlock grants is dropped this long before they lapse. */
 const SEARCH_GRANT_MARGIN_MS = 5_000;
@@ -117,6 +126,10 @@ type ChatSidebarProps = {
     // would leave too little room for the current model comparison. Only
     // takes effect while the user's own preference is "auto".
     autoCollapseSuggested?: boolean;
+    /** Opens the Project workspace pane (or its create screen). Absent where projects have no workspace. */
+    onOpenProjectWorkspace?: (route: ProjectWorkspaceRoute | null) => void;
+    /** The project whose workspace is on screen, so its row reads as the current one. */
+    activeProjectWorkspaceId?: string | null;
 };
 
 type ConversationFilter =
@@ -139,6 +152,9 @@ type ConversationProject = {
     id: string;
     name: string;
     conversationCount?: number;
+    /** True when the project answers with its own materials, memories and chats. */
+    contextEnabled?: boolean;
+    archived?: boolean;
 };
 
 type ConversationMenuPosition = {
@@ -247,6 +263,8 @@ export function ChatSidebar({
     mobileProductSwitcher,
     currentProduct = "review",
     autoCollapseSuggested = false,
+    onOpenProjectWorkspace,
+    activeProjectWorkspaceId = null,
 }: ChatSidebarProps) {
     const [openMenuId, setOpenMenuId] = useState<string | null>(null);
     const [conversationMenuPosition, setConversationMenuPosition] = useState<ConversationMenuPosition | null>(null);
@@ -269,6 +287,8 @@ export function ChatSidebar({
     const [conversationProjectOverrides, setConversationProjectOverrides] = useState<Record<string, string | null>>({});
     const [projects, setProjects] = useState<ConversationProject[]>([]);
     const [isCreatingProject, setIsCreatingProject] = useState(false);
+    // Bumped when a workspace changes a project, so the list below re-reads it.
+    const [projectsRefreshTick, setProjectsRefreshTick] = useState(0);
     const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
     /*
       What a toggle has claimed, settled with the server's own answer.
@@ -885,7 +905,7 @@ export function ChatSidebar({
                 const nextProjects = Array.isArray(data.projects)
                     ? data.projects
                         .map((item: unknown) => {
-                            const project = item as { id?: unknown; name?: unknown; conversationCount?: unknown };
+                            const project = item as { id?: unknown; name?: unknown; conversationCount?: unknown; contextEnabled?: unknown; archivedAt?: unknown };
                             return typeof project.id === "string" && typeof project.name === "string"
                                 ? {
                                     id: project.id,
@@ -894,6 +914,8 @@ export function ChatSidebar({
                                         typeof project.conversationCount === "number"
                                             ? project.conversationCount
                                             : undefined,
+                                    contextEnabled: project.contextEnabled === true,
+                                    archived: typeof project.archivedAt === "string",
                                 }
                                 : null;
                         })
@@ -903,7 +925,23 @@ export function ChatSidebar({
             })
             .catch(() => {});
         return () => controller.abort();
-    }, [isGuestMode]);
+    }, [isGuestMode, projectsRefreshTick]);
+
+    useEffect(() => {
+        const refresh = () => setProjectsRefreshTick((tick) => tick + 1);
+        const moved = (event: Event) => {
+            const detail = (event as CustomEvent<ConversationProjectChangedDetail>).detail;
+            if (!detail?.conversationId) return;
+            setConversationProjectOverrides((current) => ({ ...current, [detail.conversationId]: detail.projectId }));
+            refresh();
+        };
+        window.addEventListener(PROJECT_CHANGED_EVENT, refresh);
+        window.addEventListener(CONVERSATION_PROJECT_CHANGED_EVENT, moved);
+        return () => {
+            window.removeEventListener(PROJECT_CHANGED_EVENT, refresh);
+            window.removeEventListener(CONVERSATION_PROJECT_CHANGED_EVENT, moved);
+        };
+    }, []);
 
     const createProject = async () => {
         const name = projectName.trim().slice(0, 32);
@@ -997,6 +1035,23 @@ export function ChatSidebar({
             dispatchAppToast(t("sidebar.projectDeleteConfirm"), "info");
             return;
         }
+        setDeleteProjectArmedId(null);
+        // A project holding materials or memories is deleted only after its own
+        // confirmation (what will be lost, with the counts), which lives in the
+        // workspace's settings. The one-tap arm above is for empty folders.
+        if (onOpenProjectWorkspace) {
+            try {
+                const plan = await loadProjectDeletionPlan(webProjectWorkspaceClient(), projectId);
+                if (plan.needsConfirmation) {
+                    dispatchAppToast(t("projectWorkspace.sidebar.confirmInSettings"), "info");
+                    onOpenProjectWorkspace({ kind: "project", projectId, tab: "settings" });
+                    return;
+                }
+            } catch {
+                dispatchAppToast(t("sidebar.projectDeleteFailed"), "error");
+                return;
+            }
+        }
         const previousProjects = projects;
         setProjects((current) => current.filter((project) => project.id !== projectId));
         setConversationProjectOverrides((current) => {
@@ -1011,7 +1066,6 @@ export function ChatSidebar({
         if (conversationFilter === `project:${projectId}`) {
             setConversationFilter("all");
         }
-        setDeleteProjectArmedId(null);
         const response = await fetch(`/api/projects/${projectId}`, {
             method: "DELETE",
         });
@@ -1019,7 +1073,9 @@ export function ChatSidebar({
         if (!response.ok) {
             setProjects(previousProjects);
             dispatchAppToast(t("sidebar.projectDeleteFailed"), "error");
+            return;
         }
+        if (activeProjectWorkspaceId === projectId) onOpenProjectWorkspace?.(null);
     };
 
     const setConversationProject = async (conversationId: string, projectId: string | null) => {
@@ -1045,6 +1101,7 @@ export function ChatSidebar({
             }));
             return;
         }
+        announceConversationProjectChanged({ conversationId, projectId });
         if (projectId && projectId !== previousProjectId) {
             const enabledModelCount = (conversation?.selectedModels || []).filter(
                 (modelId) =>
@@ -1696,6 +1753,17 @@ export function ChatSidebar({
                             {t("sidebar.newProject")}
                         </button>
                     </div>
+                    {onOpenProjectWorkspace && (
+                        <button
+                            type="button"
+                            onClick={() => onOpenProjectWorkspace({ kind: "new" })}
+                            data-testid="project-new-workspace"
+                            className="mt-1.5 inline-flex min-h-8 w-full items-center justify-center gap-1 rounded-lg border border-dashed border-zinc-300 px-2 text-[11px] font-bold text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+                        >
+                            <FolderOpen className="h-3.5 w-3.5" aria-hidden="true" />
+                            {t("projectWorkspace.sidebar.newWorkspace")}
+                        </button>
+                    )}
                     {showProjectForm && (
                         <form
                             className="mt-2 flex gap-1"
@@ -1826,6 +1894,26 @@ export function ChatSidebar({
                                                         {project.conversationCount ?? 0}
                                                     </span>
                                                 </button>
+                                                {onOpenProjectWorkspace && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => onOpenProjectWorkspace({ kind: "project", projectId: project.id, tab: "overview" })}
+                                                        data-testid="project-open-workspace"
+                                                        data-context-enabled={project.contextEnabled ? "true" : "false"}
+                                                        aria-current={activeProjectWorkspaceId === project.id ? "page" : undefined}
+                                                        title={project.contextEnabled ? t("projectWorkspace.sidebar.openContext") : t("projectWorkspace.sidebar.openFolder")}
+                                                        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${
+                                                            activeProjectWorkspaceId === project.id
+                                                                ? "bg-blue-600 text-white"
+                                                                : isProjectActive
+                                                                    ? "text-white/80 hover:bg-white/10"
+                                                                    : "text-zinc-400 hover:bg-white hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                                                        }`}
+                                                        aria-label={`${t("projectWorkspace.sidebar.open")}: ${project.name}`}
+                                                    >
+                                                        <FolderOpen className="h-3.5 w-3.5" aria-hidden="true" />
+                                                    </button>
+                                                )}
                                                 <button
                                                     type="button"
                                                     onClick={() => startProjectRename(project)}
@@ -2384,6 +2472,9 @@ export function ChatSidebar({
                                         <div className="my-1 border-t border-zinc-800" />
                                         <div className="px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-zinc-500">
                                             {t("sidebar.moveToProject")}
+                                        </div>
+                                        <div className="px-3 pb-1 text-[11px] leading-snug text-zinc-500" data-testid="sidebar-move-project-hint">
+                                            {t("projectWorkspace.sidebar.moveHint")}
                                         </div>
                                         {projects.length === 0 ? (
                                             <div className="px-3 py-2 text-xs text-zinc-500">

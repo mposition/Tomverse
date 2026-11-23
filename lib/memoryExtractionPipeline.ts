@@ -111,7 +111,7 @@ export async function analyzeExtractionChunk(input: {
                 // which stored message a label stood for — so a model cannot
                 // dress an assistant turn up as user evidence.
                 evidence: candidate.evidence.map((ref) => ({
-                    sourceType: "external_message" as const,
+                    sourceType: ref.sourceType ?? ("external_message" as const),
                     role: ref.role,
                 })),
             },

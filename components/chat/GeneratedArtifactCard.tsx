@@ -1,5 +1,6 @@
 "use client";
 
+import { ProjectSaveToProject } from "@/components/projects/ProjectSaveToProject";
 import { createApiClient } from "@tomverse/api-client";
 
 import { useCallback, useEffect, useState } from "react";
@@ -423,6 +424,13 @@ export function GeneratedArtifactCard({
             )}
             {t("chat.artifactDownload")}
           </button>
+        )}
+        {isReady && !isGuestMode && (
+          // A separate copy the project owns; renders nothing outside an account.
+          <ProjectSaveToProject
+            testId="artifact-save-to-project"
+            source={{ sourceKind: "generated_artifact", artifactId: artifact.id }}
+          />
         )}
         {isBlocked && (
           <Link

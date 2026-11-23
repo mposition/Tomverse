@@ -106,3 +106,14 @@ test("web durable controls unwrap run envelopes and never retry an unsafe resume
   assert.equal((await webResearchPreviewRuns.cancel("run_1")).status, "cancelled");
   assert.deepEqual(calls.map(call => call.method), ["GET", "POST", "POST"]);
 });
+
+test("the Research run card shared with Native imports nothing that needs the Web providers", async () => {
+  // Web-only pieces (the LanguageProvider hooks, "save to project") throw
+  // outside the Web app. The card takes such an action as a prop instead, so a
+  // completed run in Native renders its report.
+  const { readFileSync } = await import("node:fs");
+  const card = readFileSync("components/chat/ResearchPreviewRunCard.tsx", "utf8");
+  for (const forbidden of ["components/projects/", "LanguageProvider", "@/components/"]) {
+    assert.equal(card.includes(forbidden), false, forbidden);
+  }
+});

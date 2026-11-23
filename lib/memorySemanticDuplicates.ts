@@ -267,10 +267,12 @@ export type EmbeddedMemory = { id: string; kind: string; statement: string; vect
 export async function loadEmbeddedActiveMemories(
     tx: Prisma.TransactionClient,
     userId: string,
-    modelLabel: string
+    modelLabel: string,
+    /** The candidate's owner scope; null = personal. Duplicates never cross scopes. */
+    projectId: string | null = null
 ): Promise<EmbeddedMemory[]> {
     const rows = await tx.memoryItem.findMany({
-        where: { userId, status: "active", embedding: { not: null }, ...eligibleMemories },
+        where: { userId, projectId, status: "active", embedding: { not: null }, ...eligibleMemories },
         orderBy: { id: "asc" },
         take: MAX_ACTIVE_MEMORIES,
         select: { id: true, kind: true, statement: true, embedding: true, embeddingModel: true },

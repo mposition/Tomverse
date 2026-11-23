@@ -1,4 +1,5 @@
 import type { MobileLanguage } from "./mobile";
+import { mobileProjectsCopy } from "./mobileProjects";
 
 const copy: Record<MobileLanguage, { unsupported: string; size: string; file: string; plan: string; limited: string }> = {
   en: { unsupported: "This file format is not supported. Choose another file.", size: "This file is too large. Choose a smaller file.", file: "This file could not be read. Check its format and password protection.", plan: "This model or feature is not available with your current plan.", limited: "Too many requests. Wait a moment before trying again." },
@@ -35,6 +36,7 @@ export function mobileErrorText(error: unknown, language: MobileLanguage, fallba
   const annotate = (text: string) => text + (typeof input.traceId === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(input.traceId) ? ` · Trace ID: ${input.traceId}` : "");
   const code = typeof input.code === "string" ? input.code : "";
   const status = typeof input.status === "number" ? input.status : undefined;
+  if (code === "PROJECT_ARCHIVED") return annotate(mobileProjectsCopy[language].archivedChat);
   if (code === "CREDIT_BALANCE_INSUFFICIENT") return annotate(credits[language].balance);
   if (code === "PLAN_DAILY_CREDIT_LIMIT_REACHED") return annotate(credits[language].daily);
   if (["ATTACHMENT_UNSUPPORTED_FORMAT", "UNSUPPORTED_ATTACHMENT_TYPE"].includes(code)) return annotate(copy[language].unsupported);

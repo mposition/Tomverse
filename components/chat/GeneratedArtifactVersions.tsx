@@ -7,6 +7,7 @@ import { artifactDownloadPath, type ChatStreamArtifact } from "@/lib/generatedAr
 import { isGeneratedArtifactRevisionSupported } from "@/lib/generatedArtifactRevisionCore";
 import { artifactVersionsPath, mergeGeneratedArtifactVersions, parseGeneratedArtifactVersions,
   type GeneratedArtifactVersion } from "@/lib/generatedArtifactVersions";
+import { ProjectSaveToProject } from "@/components/projects/ProjectSaveToProject";
 import { saveResponseAsFile } from "@/lib/browserDownload";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 
@@ -94,6 +95,8 @@ export function GeneratedArtifactVersions({ artifact }: { artifact: ChatStreamAr
           <div className="mt-1 flex flex-wrap gap-2">
             <button type="button" className="min-h-11 rounded-lg border border-zinc-300 px-3 dark:border-zinc-600"
               disabled={busy !== null} onClick={() => void download(version)}>{t("chat.artifactDownload")}</button>
+            <ProjectSaveToProject testId="generated-artifact-version-save"
+              source={{ sourceKind: "generated_artifact", artifactId: version.id }} />
             {revise && isGeneratedArtifactRevisionSupported(version) && <button type="button"
               data-testid="generated-artifact-version-revise" disabled={busy !== null}
               className="min-h-11 rounded-lg border border-accent-generated-artifact-300 px-3 dark:border-accent-generated-artifact-700"

@@ -178,7 +178,9 @@ test("the question says only numbers, statuses and the reason, and hits no routi
   const text = [relay.title, relay.question, relay.unblocks, ...relay.options.map((option) => option.label)].join("\n");
   assert.deepEqual(irreversibleTermCategories(text), [],
     "these words alone must not send every question to the operator");
-  // A card's own number can still hit the list; the owner's panel is then the way.
+  // A card's own number can still carry a term. It no longer routes the
+  // question away -- a card the app filed is not read for the terms (owner
+  // decision 2026-11-22) -- so this says only that the check above is a real one.
   assert.deepEqual(irreversibleTermCategories("AMUX-PROD-001"), ["release"]);
   assert.ok(text.length < DM_ANSWER_MAX_BYTES * 2, "well inside the card text cap");
 });

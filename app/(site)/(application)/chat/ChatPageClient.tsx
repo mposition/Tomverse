@@ -10,6 +10,18 @@ import { REVIEW_CHAT_PARAM, type ReviewChatSource } from "@/lib/reviewToChat";
 import { useResearchPreview } from "@/components/chat/useResearchPreview";
 
 import { requestChatLocationIntent } from "@tomverse/api-client";
+import { projectReferenceFields } from "@/lib/projectReferences";
+import {
+  CONVERSATION_PROJECT_CHANGED_EVENT,
+  announceProjectChanged,
+  withProjectAttribution,
+  type ConversationProjectChangedDetail,
+} from "@/lib/projectWorkspaceUi";
+import { parseProjectWorkspaceRoute, projectWorkspaceSearch, type ProjectWorkspaceRoute } from "@/lib/projectWorkspaceRoute";
+import { ProjectChatScopeProvider, useProjectChatScopeState } from "@/components/projects/ProjectChatScope";
+import { ProjectComposerBar } from "@/components/projects/ProjectComposerBar";
+import { ProjectCreateScreen } from "@/components/projects/ProjectCreateScreen";
+import { ProjectWorkspaceScreen } from "@/components/projects/ProjectWorkspaceScreen";
 import { chatLocationSession, prepareFreshChatLocationIntent, type ChatPanelLocationIntent, type FreshChatLocationPreparation, type RouterLocationTurn } from "@/lib/chatLocationClient";
 import { selectedMcpConnection } from "@/lib/mcpConnectorSelection";
 
@@ -136,6 +148,7 @@ import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import {
   CONVERSATION_HANDOFF_PARAM,
   conversationHandoffHref,
+  conversationSurface,
   conversationSurfaceHref,
   surfaceHasContinuationBridge,
   type ConversationSurface,
@@ -1916,6 +1929,8 @@ export function ChatPageClient({
     /** Short-lived server authority for one Guest Chat Smart Adaptive turn. */
     guestAutoCapability?: string;
     contextBundle?: string | null;
+    /** Project search-hit refs attached to this one question. */
+    projectReferences?: string[];
     contextLayout?: "single" | "comparison";
     promptRefinerDecision?: PromptRefinerProductChatDecision;
   } | null>(null);
@@ -2394,6 +2409,74 @@ export function ChatPageClient({
   useEffect(() => {
     pendingProfileIdRef.current = pendingProfileId;
   }, [pendingProfileId]);
+
+  // ---- Project workspace -------------------------------------------------
+  // The project a not-yet-created Chat will be created in. Sent in the create
+  // request, so the conversation belongs to its project before its first
+  // answer; product and Assistant pin are untouched.
+  const [pendingProjectId, setPendingProjectId] = useState<string | null>(null);
+  const pendingProjectIdRef = useRef(pendingProjectId);
+  useEffect(() => {
+    pendingProjectIdRef.current = pendingProjectId;
+  }, [pendingProjectId]);
+  // What the server last said about the open conversation's project. The list
+  // row and the URL are hints; this (read with the conversation) wins.
+  const [serverConversationProject, setServerConversationProject] = useState<{
+    conversationId: string;
+    projectId: string | null;
+  } | null>(null);
+  const workspaceSearchParams = useSearchParams();
+  const projectRoute = useMemo(
+    () => parseProjectWorkspaceRoute(workspaceSearchParams),
+    [workspaceSearchParams]
+  );
+  const projectsAvailable = !isGuestMode && Boolean(sessionUserId);
+  // The pane lives on the Chat route; the project id in the URL is a request
+  // that the pane's own owner-checked reads answer, never a grant.
+  const activeProjectRoute = projectsAvailable && mountedSurface === "chat" && routeSurface === "chat" ? projectRoute : null;
+  const openProjectWorkspace = useCallback(
+    (route: ProjectWorkspaceRoute | null, mode: "push" | "replace" = "push") => {
+      if (route && routeSurface !== "chat") {
+        // From Review or a continuation the workspace opens on the Chat route.
+        router.push(`${CHAT_WORKSPACE_PATH}${projectWorkspaceSearch(route, "")}`);
+        return;
+      }
+      const search = projectWorkspaceSearch(route, window.location.search);
+      const href = `${window.location.pathname}${search}${window.location.hash}`;
+      if (mode === "replace") window.history.replaceState(window.history.state, "", href);
+      else window.history.pushState(window.history.state, "", href);
+    },
+    [router, routeSurface]
+  );
+  const projectChatId = currentChatId ?? pendingCreatedDraftScope?.id ?? null;
+  const effectiveProjectId = !projectsAvailable
+    ? null
+    : projectChatId
+      ? serverConversationProject?.conversationId === projectChatId
+        ? serverConversationProject.projectId
+        : conversations.find((conversation) => conversation.id === projectChatId)?.projectId ?? null
+      : pendingProjectId;
+  const projectScope = useProjectChatScopeState({
+    enabled: projectsAvailable,
+    projectId: effectiveProjectId,
+    openWorkspace: openProjectWorkspace,
+  });
+  const projectReferenceRefsRef = useRef<string[]>([]);
+  useEffect(() => {
+    projectReferenceRefsRef.current = projectScope.references.map((hit) => hit.ref);
+  }, [projectScope.references]);
+  useEffect(() => {
+    const onMoved = (event: Event) => {
+      const detail = (event as CustomEvent<ConversationProjectChangedDetail>).detail;
+      if (!detail?.conversationId) return;
+      setConversations((rows) =>
+        rows.map((row) => (row.id === detail.conversationId ? { ...row, projectId: detail.projectId } : row))
+      );
+      setServerConversationProject({ conversationId: detail.conversationId, projectId: detail.projectId });
+    };
+    window.addEventListener(CONVERSATION_PROJECT_CHANGED_EVENT, onMoved);
+    return () => window.removeEventListener(CONVERSATION_PROJECT_CHANGED_EVENT, onMoved);
+  }, []);
   useEffect(() => {
     isImageDraftActiveRef.current = isImageDraftActive;
   }, [isImageDraftActive]);
@@ -3582,6 +3665,7 @@ export function ChatPageClient({
       promptAttachments,
       modelIds: requestedModelIds,
       webSearchMode: requestedWebSearchMode,
+      projectReferences,
     }: {
       comparisonId: string;
       conversationId: string;
@@ -3610,6 +3694,8 @@ export function ChatPageClient({
        * 9219480c-6ad3-49ae-8120-8a31ee18513e.
        */
       modelIds?: string[];
+      /** Project search-hit refs attached to this question, priced into the shared bundle. */
+      projectReferences?: readonly string[];
     }) => {
       const modelIds =
         requestedModelIds ??
@@ -3638,6 +3724,7 @@ export function ChatPageClient({
             size: attachment.size,
           })),
           webSearchMode: requestedWebSearchMode ?? webSearchMode,
+          ...projectReferenceFields(projectReferences),
         });
         const requestPreflight = () =>
           fetch("/api/chat/preflight", {
@@ -3974,6 +4061,8 @@ export function ChatPageClient({
         autoSelection?: { offered?: unknown } | null;
         assistantProfile?: ChatAssistantProfile | null;
         assistantProfileRemovedAt?: string | null;
+        /** The server's own record of the conversation's project. */
+        projectId?: string | null;
         messages?: Array<{ role?: string; modelId?: string | null }>;
     }, targetChatId?: string) => {
         // A server *confirmation* is re-seeding this conversation's settings,
@@ -4061,7 +4150,13 @@ export function ChatPageClient({
         // the *next* new chat without the user asking again.
         setPendingProfileId(null);
         pendingProfileIdRef.current = null;
+        setPendingProjectId(null);
+        pendingProjectIdRef.current = null;
         if (targetChatId) {
+          setServerConversationProject({
+            conversationId: targetChatId,
+            projectId: typeof data.projectId === "string" ? data.projectId : null,
+          });
           // A server read seeds the queue's confirmed state; markConfirmed
           // refuses while local changes are unconfirmed, so a stale read can
           // never masquerade as the server's latest word.
@@ -4582,6 +4677,11 @@ export function ChatPageClient({
     }, [fetchConversations, mountedSurface, sessionUserId, setLang, status]);
 
     const handleNewChat = () => {
+        // A plain new chat is not inside a project; "new chat in project"
+        // sets this again right after.
+        setPendingProjectId(null);
+        pendingProjectIdRef.current = null;
+        setServerConversationProject(null);
         resetPromptRefinerState();
         const defaults = reviewDefaultProvidersRef.current;
         if (defaults?.userId === sessionUserId) reviewWorkspace.setProviders(defaults.providers.slice(0, Math.min(3, maxSelectableModels)));
@@ -5646,6 +5746,69 @@ export function ChatPageClient({
   const handleDelete = async (id: string) => {
     setPendingDeleteId(id);
   };
+
+  // ---- Project workspace handlers ----------------------------------------
+  /** "New chat in project": the create request will carry the project id. */
+  const startProjectChat = (projectId: string) => {
+    // Already on the blank new-chat screen with nothing pre-created: keep that
+    // screen (and its draft) and only bind the project. Anywhere else, go
+    // through the ordinary new-chat path so nothing stale is reused.
+    if (currentChatId !== null || pendingCreatedChatRef.current) handleNewChat();
+    else openProjectWorkspace(null, "replace");
+    setPendingProjectId(projectId);
+    pendingProjectIdRef.current = projectId;
+    setFocusToken((value) => value + 1);
+  };
+  const openProjectConversation = (
+    conversationId: string,
+    hint: { continuation: boolean; productKey: string | null } | null
+  ) => {
+    openProjectWorkspace(null);
+    void handleSelectConversation(
+      conversationId,
+      false,
+      hint ? conversationSurface({ hasContinuationBridge: hint.continuation, productKey: hint.productKey }) : undefined
+    );
+  };
+  const handleProjectWorkspaceDeleted = (projectId: string) => {
+    setConversations((rows) => rows.map((row) => (row.projectId === projectId ? { ...row, projectId: null } : row)));
+    setServerConversationProject((current) => (current?.projectId === projectId ? { ...current, projectId: null } : current));
+    if (pendingProjectIdRef.current === projectId) {
+      setPendingProjectId(null);
+      pendingProjectIdRef.current = null;
+    }
+    projectScope.clearReferences();
+    announceProjectChanged();
+    openProjectWorkspace(null, "replace");
+  };
+  const projectWorkspaceNode = activeProjectRoute ? (
+    activeProjectRoute.kind === "new" ? (
+      <ProjectCreateScreen
+        key="project-create"
+        onCancel={() => openProjectWorkspace(null)}
+        onCreated={(project) => openProjectWorkspace({ kind: "project", projectId: project.id, tab: "overview" }, "replace")}
+      />
+    ) : (
+      <ProjectWorkspaceScreen
+        key={activeProjectRoute.projectId}
+        projectId={activeProjectRoute.projectId}
+        tab={activeProjectRoute.tab}
+        onNavigate={openProjectWorkspace}
+        onOpenConversation={openProjectConversation}
+        onNewChat={startProjectChat}
+        onDeleted={handleProjectWorkspaceDeleted}
+        conversations={conversations.map((conversation) => ({
+          id: conversation.id,
+          title: conversation.title,
+          projectId: conversation.projectId ?? null,
+          surface: conversation.surface,
+          isLocked: conversation.isLocked,
+          kind: conversation.kind,
+        }))}
+      />
+    )
+  ) : undefined;
+  const projectComposerBarNode = projectsAvailable && effectiveProjectId && !activeProjectRoute ? <ProjectComposerBar /> : undefined;
   
   /**
    * The single mutation path for a conversation's model selection. Every
@@ -6835,6 +6998,7 @@ export function ChatPageClient({
             // rather than sent as null when there is none, so a create says
             // nothing about a profile it was never asked about.
             ...(pendingProfileId ? { assistantProfileId: pendingProfileId } : {}),
+            ...(mountedSurface === "chat" ? withProjectAttribution({}, pendingProjectIdRef.current) : {}),
           }),
         });
 
@@ -6855,6 +7019,13 @@ export function ChatPageClient({
           setAssistantProfile(data.assistantProfile ?? null);
           setAssistantProfileRemovedAt(data.assistantProfileRemovedAt ?? null);
           setPendingProfileId(null);
+          // The create carried the project; it is bound now and stops being pending.
+          setPendingProjectId(null);
+          pendingProjectIdRef.current = null;
+          setServerConversationProject({
+            conversationId: data.id,
+            projectId: typeof data.projectId === "string" ? data.projectId : null,
+          });
           /**
            * The created conversation's own models, read back rather than
            * assumed.
@@ -7068,6 +7239,12 @@ export function ChatPageClient({
           return;
         }
       }
+      // References belong to this one question: a re-run of a finished turn, an
+      // image turn and a research preview never read project context.
+      const sendProjectReferences: string[] =
+        isOverrideSend || imageTurnSend || options?.researchMode
+          ? []
+          : projectReferenceRefsRef.current;
       const finishPreflight = preparation.stage("preflightMs");
       const preflight = (imageTurnSend || options?.researchMode === "preview")
         ? { allowed: true as const, admissionToken: null, contextBundle: null }
@@ -7080,6 +7257,7 @@ export function ChatPageClient({
             ...(options?.webSearchOverride
               ? { webSearchMode: options.webSearchOverride }
               : {}),
+            projectReferences: sendProjectReferences,
           });
       finishPreflight();
       if (!preflight.allowed || !chatSendIsCurrent()) return;
@@ -7101,6 +7279,7 @@ export function ChatPageClient({
               conversationId: isGuestMode ? null : activeChatId,
               modelIds: activeModelIds,
               prompt: authoredPrompt,
+              projectReferences: sendProjectReferences,
             })),
         draft: () => draftSendCapture
           ? preparation.measure("draftPrepareMs", () => prepareDraftSend(draftSendCapture))
@@ -7550,6 +7729,7 @@ export function ChatPageClient({
         modelIds: activeModelIds,
         prompt: authoredPrompt,
         ...(contextBundle ? { previousContextBundle: contextBundle } : {}),
+        projectReferences: sendProjectReferences,
       });
       localComparisonQuestionsRef.current.set(comparisonId, authoredPrompt);
       /*
@@ -7702,6 +7882,7 @@ export function ChatPageClient({
         // whenever the context had nothing to price.
         contextLayout,
         ...(contextBundle ? { contextBundle } : {}),
+        ...projectReferenceFields(sendProjectReferences),
         ...(promptRefinerDecisionForSend
           ? { promptRefinerDecision: promptRefinerDecisionForSend }
           : {}),
@@ -7716,6 +7897,8 @@ export function ChatPageClient({
           : {}),
       });
       if (options?.researchMode) researchPreview.onSelectedChange(false);
+      // The references went out with this question; the next one starts clean.
+      if (sendProjectReferences.length > 0) projectScope.clearReferences();
       if (explicitPromptRefinerDecision) resetPromptRefinerState();
       // The single point where a draft is cleared by sending: the prompt is
       // now on its way, so this conversation's draft is spent. Every earlier
@@ -8609,6 +8792,7 @@ export function ChatPageClient({
     const capturedProfileId = sendAuthority
       ? sendAuthority.profileId
       : pendingProfileIdRef.current;
+    const capturedProjectId = pendingProjectIdRef.current;
     const capturedDraft = sendAuthority?.preparedDraftSend.draft ?? readDraft(null);
     const capturedAttachmentIds = capturedDraft.attachments.map(
       (attachment) => attachment.id
@@ -8629,6 +8813,7 @@ export function ChatPageClient({
         sameStringList(capturedDisabled, latestModelSettingsRef.current.disabled) &&
         capturedWebSearchMode === webSearchModeRef.current &&
         capturedProfileId === pendingProfileIdRef.current &&
+        capturedProjectId === pendingProjectIdRef.current &&
         (sendAuthority
           ? sameStringList(
               capturedAttachmentIds,
@@ -8698,6 +8883,7 @@ export function ChatPageClient({
                 ...(capturedProfileId
                   ? { assistantProfileId: capturedProfileId }
                   : {}),
+                ...withProjectAttribution({}, capturedProjectId),
               }),
             });
           } catch {
@@ -10738,6 +10924,7 @@ export function ChatPageClient({
     // (components/credits/UsageMeter.tsx); the picker is several components
     // below this one, none of which use the balance themselves.
     <AvailableCreditsProvider value={comparisonAvailableCredits}>
+    <ProjectChatScopeProvider value={projectScope}>
     <ReviewChatHandoffProvider identity={identityKey} entry={reviewWorkspace.appearance === "studio" ? "review_studio" : "review_classic"}
       supported={routeSurface === "workspace" && !isGuestMode && Boolean(currentChatId)}
       sourceScope={reviewChatSourceScope}
@@ -10778,6 +10965,10 @@ export function ChatPageClient({
         <ChatShellSkeleton label={t("auth.loading")} />
       ) : isMobileViewport && !(mountedSurface === "workspace" && reviewWorkspace.appearance === "studio") ? (
         <MobileChatShell
+          projectWorkspace={projectWorkspaceNode}
+          projectComposerBar={projectComposerBarNode}
+          onOpenProjectWorkspace={projectsAvailable ? openProjectWorkspace : undefined}
+          activeProjectWorkspaceId={activeProjectRoute?.kind === "project" ? activeProjectRoute.projectId : null}
           continuationNotice={reviewHandoffNotice}
           workspaceNotice={mountedSurface === "chat" ? <ChatPwaControls ownerKey={identityKey} language={lang} onRestore={(text) => setInputValue((current) => current ? `${current}\n${text}` : text)} /> : undefined}
           chatWorkspace={mountedSurface === "chat" ? chatWorkspace : undefined}
@@ -10827,7 +11018,7 @@ export function ChatPageClient({
           blockSubmitWhileVoiceBusy={mountedSurface === "chat" && !isGuestMode}
           allowEditingWhileSending={mountedSurface === "chat" && !isGuestMode}
           onNewChat={() => { reviewWorkspace.setImageRequest(false); reviewWorkspace.setImagePromptMode(false); reviewWorkspace.setUnsupportedProviders([]); reviewWorkspace.setError(null); reviewImageSeedRouteRef.current = null; handleNewChat(); }}
-          onNewImage={canOfferNewImage ? handleNewImage : null}
+          onNewImage={canOfferNewImage ? () => { if (activeProjectRoute) openProjectWorkspace(null, "replace"); handleNewImage(); } : null}
           imageLock={imageLock}
           onLockedImageClick={handleLockedImageClick}
           onStartImageDraft={canOfferNewImage && (inConversationImagesAllowed || mountedSurface === "chat") ? (text, modelId, options) => {
@@ -10842,7 +11033,7 @@ export function ChatPageClient({
           importedMessages={importedMessages}
           importedTranscript={importedTranscript}
           hasConversationPrelude={hasConversationPrelude}
-          onSelectConversation={handleSelectConversation}
+          onSelectConversation={(id, skipLockCheck, surfaceHint) => { if (activeProjectRoute) openProjectWorkspace(null, "replace"); return handleSelectConversation(id, skipLockCheck, surfaceHint); }}
           onRename={handleRename}
           onDelete={handleDelete}
           onLock={handleLock}
@@ -10956,6 +11147,10 @@ export function ChatPageClient({
         />
       ) : (
         <DesktopChatShell
+          projectWorkspace={projectWorkspaceNode}
+          projectComposerBar={projectComposerBarNode}
+          onOpenProjectWorkspace={projectsAvailable ? openProjectWorkspace : undefined}
+          activeProjectWorkspaceId={activeProjectRoute?.kind === "project" ? activeProjectRoute.projectId : null}
           getGuestReviewSource={readGuestComparisonTurn}
           onAnalysisCompleted={() => {
             if (isGuestMode) {
@@ -11026,7 +11221,7 @@ export function ChatPageClient({
           blockSubmitWhileVoiceBusy={mountedSurface === "chat" && !isGuestMode}
           allowEditingWhileSending={mountedSurface === "chat" && !isGuestMode}
           onNewChat={() => { reviewWorkspace.setImageRequest(false); reviewWorkspace.setImagePromptMode(false); reviewWorkspace.setUnsupportedProviders([]); reviewWorkspace.setError(null); reviewImageSeedRouteRef.current = null; handleNewChat(); }}
-          onNewImage={canOfferNewImage ? handleNewImage : null}
+          onNewImage={canOfferNewImage ? () => { if (activeProjectRoute) openProjectWorkspace(null, "replace"); handleNewImage(); } : null}
           imageLock={imageLock}
           onLockedImageClick={handleLockedImageClick}
           onStartImageDraft={canOfferNewImage && (inConversationImagesAllowed || mountedSurface === "chat") ? (text, modelId, options) => {
@@ -11041,7 +11236,7 @@ export function ChatPageClient({
           importedMessages={importedMessages}
           importedTranscript={importedTranscript}
           hasConversationPrelude={hasConversationPrelude}
-          onSelectConversation={handleSelectConversation}
+          onSelectConversation={(id, skipLockCheck, surfaceHint) => { if (activeProjectRoute) openProjectWorkspace(null, "replace"); return handleSelectConversation(id, skipLockCheck, surfaceHint); }}
           onRename={handleRename}
           onDelete={handleDelete}
           onLock={handleLock}
@@ -12020,6 +12215,7 @@ export function ChatPageClient({
     </GeneratedArtifactRevisionContext.Provider>
     </WebSearchBackendReadinessProvider>
     </ReviewChatHandoffProvider>
+    </ProjectChatScopeProvider>
     </AvailableCreditsProvider>
   );
 }

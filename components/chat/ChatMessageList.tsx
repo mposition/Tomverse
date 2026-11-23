@@ -53,6 +53,8 @@ import { imageModelOwner } from "@/lib/imageModelRegistry";
 import { useImageModelCatalog } from "@/components/images/ImageModelCatalogProvider";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { FeedbackButton } from "@/components/chat/FeedbackButton";
+import { ProjectAnswerSources } from "@/components/projects/ProjectAnswerSources";
+import { ProjectSaveToProject } from "@/components/projects/ProjectSaveToProject";
 import {
   GeneratedArtifactList,
   GeneratedArtifactPending,
@@ -1384,14 +1386,25 @@ export function ChatMessageList({
                   {isUser && msg.attachments && msg.attachments.length > 0 && (
                     <div className={`flex flex-wrap gap-2 ${msg.content ? "mb-3" : ""}`}>
                       {msg.attachments.map((attachment) => (
-                        <SentAttachmentCard key={attachment.id} attachment={attachment} />
+                        <div key={attachment.id} className="flex items-center gap-1">
+                          <SentAttachmentCard attachment={attachment} />
+                          {attachment.attachmentId && !attachment.unavailableAt && (
+                            <ProjectSaveToProject
+                              compact
+                              testId="attachment-save-to-project"
+                              source={{ sourceKind: "message_attachment", attachmentId: attachment.attachmentId }}
+                              className="inline-flex h-10 min-w-10 items-center justify-center gap-1 rounded-full bg-white/15 px-2 text-xs font-bold text-white hover:bg-white/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                            />
+                          )}
+                        </div>
                       ))}
                     </div>
                   )}
                   {!isUser && msg.researchRunId && currentChatId && <ResearchPreviewRunCard
                     runId={msg.researchRunId} conversationId={currentChatId} assistantMessageId={msg.id}
                     language={lang} transport={webResearchPreviewRuns}
-                    onMessage={run => onResearchMessage?.(researchRunMessage(run))} />}
+                    onMessage={run => onResearchMessage?.(researchRunMessage(run))}
+                    completedAction={<ProjectSaveToProject testId="research-save-to-project" source={{ sourceKind: "research_report", runId: msg.researchRunId }} />} />}
                   {msg.role === "assistant" && msg.researchRunId && !msg.content ? null : msg.role === "assistant" && msg.imageTurn && msg.status !== "error" ? (
                     // An image turn's answer is the picture; its text is only
                     // the record kept for later turns and exports.
@@ -1631,6 +1644,11 @@ export function ChatMessageList({
                     )}
                     {msg.searchMetadata && (
                       <SearchCitationList citations={msg.searchMetadata.citations} label={t("chat.searchCitationsLabel")} />
+                    )}
+                    {!isUser && msg.status !== "error" && !isActivelyGenerating && msg.content && typeof msg.id === "string" && !isGuestMode && (
+                      // What a project delivered with this answer; renders
+                      // nothing outside a project conversation with context on.
+                      <ProjectAnswerSources messageId={msg.id} />
                     )}
                     </>
                   ) : (

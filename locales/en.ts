@@ -4,6 +4,7 @@ import { reviewHandoffCopy } from "./reviewHandoff";
 import { researchPreviewCopy } from "./researchPreview";
 import { englishLocationBody } from "./privacyLocation";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
+import { projectWorkspaceCopy } from "./projectWorkspace";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 
 export const en = {
@@ -2479,6 +2480,7 @@ export const en = {
         back: "Back to Tomverse",
     },
     chatStarter: workspaceWelcomeCopy.en.starter,
+    projectWorkspace: projectWorkspaceCopy["en"],
     // HELP-NAV-01 guided help: pick a task, see where it is done. Directions only.
     helpGuide: {
         menuItem: "Find how to do something",

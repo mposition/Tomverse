@@ -596,16 +596,40 @@ type TestContextVerification = "ok" | "stale" | "expired" | "invalid_signature";
 let contextVerification: TestContextVerification = "ok";
 let contextSequence: TestContextVerification[] = [];
 const contextReads: { query: string }[] = [];
+// Project workspace: the conversation's project as the server would read it.
+type FixtureProject = {
+  projectId: string; name: string; revision: number; contextEnabled: boolean; archived: boolean;
+  memoryScope: "project_only" | "project_and_personal"; autoMemoryEnabled: boolean; instructions: string;
+};
+let fixtureProject: FixtureProject | null = null;
+const projectExtractionEnqueues: string[] = [];
+mock.module(mod("lib/projectWorkspaceService.ts"), {
+  namedExports: {
+    resolveConversationProjectScope: async () => fixtureProject,
+    resolveProjectScopeById: async () => fixtureProject,
+  },
+});
+mock.module(mod("lib/projectMemoryExtraction.ts"), {
+  namedExports: {
+    enqueueNativeProjectExtraction: async (input: { conversationId: string }) => {
+      projectExtractionEnqueues.push(input.conversationId);
+      return { outcome: "skipped", reason: "operator_off" };
+    },
+  },
+});
 mock.module(mod("lib/chatTurnContext.ts"), {
   namedExports: {
-    buildChatTurnContext: async (input: { query: string }) => {
+    buildChatTurnContext: async (input: { query: string; project?: FixtureProject | null }) => {
       contextReads.push(input);
+      const project = input.project?.contextEnabled ? input.project : null;
       return {
         fingerprint: "verified-context-fingerprint",
         fingerprintInput: {},
         systemPrompt: null,
         memoryTokens: 0,
         profileTokens: 0,
+        projectTokens: project ? 12 : 0,
+        project: { project, materialSources: project ? [{ fileId: "file-1", ordinal: 0, fileName: "spec.md" }] : [] },
         memory: {
           prompt: { text: null, usedCount: 0 },
           truncatedByBudget: false,
@@ -888,6 +912,7 @@ const conversationRow = (selectBridge = false) => contextConversationAccess === 
   productKey: conversationProductKey,
   ...(selectBridge ? { continuationBridge } : {}),
   selectionMode: conversationSelectionMode,
+  projectId: fixtureProject?.projectId ?? null,
   chatRecoveryEpoch: 0,
   messages: [{ id: fusionLatestSource, role: "user" }, ...(priorFusionMessage ? [{ id: fusionPriorAnswer, role: "assistant" }] : [])],
   responseAttempts: fusionAttemptExists ? [{ assistantMessageId: ASSISTANT_MESSAGE_ID }] : [],
@@ -4677,4 +4702,62 @@ test("an invalid context envelope is rejected before context reads or paid Auto 
     assert.equal(attempts.length, 0);
     assert.equal(ledger.accessAcquisitions, 0);
   } finally { contextVerification = "ok"; llmRouterRewrite = null; }
+});
+
+
+/* -------------------------------------------------------------------------- */
+/* Project workspace                                                           */
+/* -------------------------------------------------------------------------- */
+
+const contextProject = (overrides: Partial<FixtureProject> = {}): FixtureProject => ({
+  projectId: "project-alpha", name: "Alpha", revision: 3, contextEnabled: true, archived: false,
+  memoryScope: "project_only", autoMemoryEnabled: true, instructions: "Use the team's terms.", ...overrides,
+});
+
+test("a project conversation without a prepared context is refused before anything is reserved or dispatched", async () => {
+  fixtureProject = contextProject();
+  try {
+    const refused = await ask("answers", "claimed", 409, false, undefined, true, false);
+    const body = JSON.parse(refused.body);
+    assert.equal(body.code, "CHAT_CONTEXT_BUNDLE_STALE");
+    assert.equal(body.details?.refusalReason, "project_context_required");
+    assert.equal(attempts.length, 0);
+    assert.equal(ledger.accessAcquisitions, 0);
+    assert.equal(durableClaimCalls, 0);
+  } finally { fixtureProject = null; }
+});
+
+test("an archived project conversation is refused with a restore hint instead of answering without its context", async () => {
+  fixtureProject = contextProject({ archived: true });
+  try {
+    const refused = await ask("answers", "claimed", 409, false, undefined, true, false);
+    assert.equal(JSON.parse(refused.body).code, "PROJECT_ARCHIVED");
+    assert.equal(attempts.length, 0);
+  } finally { fixtureProject = null; }
+});
+
+test("a prepared project turn offers project_search/project_read under a step guard and queues extraction only after the answer is stored", async () => {
+  fixtureProject = contextProject();
+  projectExtractionEnqueues.length = 0;
+  try {
+    await ask("answers", "claimed", 200, true, undefined, true, false);
+    assert.ok(attempts.length >= 1);
+    assert.ok(attempts[0].toolNames.includes("project_search"), attempts[0].toolNames.join(","));
+    assert.ok(attempts[0].toolNames.includes("project_read"));
+    assert.equal(attempts[0].preparesStep, true, "every extra call is measured against the reservation");
+    assert.deepEqual(projectExtractionEnqueues, [CONVERSATION_ID]);
+    const contextRead = contextReads.at(-1) as { project?: FixtureProject | null };
+    assert.equal(contextRead.project?.projectId, "project-alpha", "the scope comes from the conversation row, not the request");
+  } finally { fixtureProject = null; projectExtractionEnqueues.length = 0; }
+});
+
+test("a folder project (context off) sends exactly as before: no bundle required, no project tools, no extraction", async () => {
+  fixtureProject = contextProject({ contextEnabled: false });
+  projectExtractionEnqueues.length = 0;
+  try {
+    await ask("answers", "claimed", 200, false, undefined, true, false);
+    assert.ok(attempts.length >= 1);
+    assert.ok(!attempts[0].toolNames.includes("project_search"));
+    assert.deepEqual(projectExtractionEnqueues, []);
+  } finally { fixtureProject = null; }
 });

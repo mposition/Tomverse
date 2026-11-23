@@ -96,6 +96,9 @@ export type SemanticStepModes = {
     memoryRerank: SemanticCallMode;
     knowledgeNeighbours: SemanticCallMode;
     knowledgeRerank: SemanticCallMode;
+    /** Project material retrieval; absent = the same mode as knowledge. */
+    projectNeighbours?: SemanticCallMode;
+    projectRerank?: SemanticCallMode;
 };
 
 /**
@@ -110,6 +113,9 @@ export const verifyingSemanticModes = (steps: SemanticStepsUsed | null): Semanti
     memoryRerank: steps?.memoryRerank ? "cached_only" : "off",
     knowledgeNeighbours: steps?.knowledgeNeighbours ? "cached_only" : "off",
     knowledgeRerank: steps?.knowledgeRerank ? "cached_only" : "off",
+    // Present only when the bundle used them; absent reads as "off".
+    ...(steps?.projectNeighbours ? { projectNeighbours: "cached_only" as const } : {}),
+    ...(steps?.projectRerank ? { projectRerank: "cached_only" as const } : {}),
 });
 
 /** Which API a feature spends on, so a feature is ready only with that config. */

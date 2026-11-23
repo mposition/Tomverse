@@ -24,6 +24,7 @@ import { lockAccountMemoryItems } from "@/lib/memoryItemLock";
 import { lockCreditAccount } from "@/lib/creditDebt";
 import { settleExtractionRunCredits } from "@/lib/memoryExtractionCredits";
 import { prisma } from "@/lib/prisma";
+import { memoryOwnerScopeWhere } from "@/lib/projectWorkspaceCore";
 
 /**
  * Memory CRUD and review (Release B, slice B3).
@@ -56,20 +57,20 @@ type StoredEvidence = {
         role: string;
         externalConversationId: string;
     } | null;
+    tomverseMessage?: { role: string } | null;
 };
 
 const evidenceInputs = (
     evidences: readonly StoredEvidence[]
 ): MemoryEvidenceInput[] =>
-    evidences.map((evidence) => ({
-        sourceType:
-            evidence.sourceType as MemoryEvidenceInput["sourceType"],
-        role:
-            evidence.externalMessage?.role === "user" ||
-            evidence.externalMessage?.role === "assistant"
-                ? evidence.externalMessage.role
-                : null,
-    }));
+    evidences.map((evidence) => {
+        const role = evidence.externalMessage?.role ?? evidence.tomverseMessage?.role;
+        return {
+            sourceType:
+                evidence.sourceType as MemoryEvidenceInput["sourceType"],
+            role: role === "user" || role === "assistant" ? role : null,
+        };
+    });
 
 const assertNotHardRejected = (result: MemoryValidationResult) => {
     if (result.disposition === "rejected") {
@@ -105,6 +106,9 @@ async function loadOwnedMemory(
                     externalMessage: {
                         select: { role: true, externalConversationId: true, conversation: {select:{userId:true, password:true, title:true}} },
                     },
+                    tomverseMessage: {
+                        select: { role: true, conversationId: true, conversation: { select: { userId: true, title: true, password: true } } },
+                    },
                 },
             },
         },
@@ -132,6 +136,7 @@ const serializeMemory = (
     userEdited: item.userEdited,
     expiresAt: item.expiresAt?.toISOString() ?? null,
     suspendedReason: item.suspendedReason,
+    projectId: item.projectId,
     extractionModelId: item.extractionModelId,
     promptVersion: item.promptVersion,
     createdAt: item.createdAt.toISOString(),
@@ -143,13 +148,23 @@ const serializeMemory = (
         externalConversationId:
             evidence.externalMessage?.externalConversationId ?? null,
         sourceTitle: evidence.externalMessage?.conversation?.userId === item.userId
-            ? readableContinuationSourceTitle(evidence.externalMessage.conversation) : null,
+            ? readableContinuationSourceTitle(evidence.externalMessage.conversation)
+            : evidence.tomverseMessage?.conversation?.userId === item.userId && evidence.tomverseMessage.conversation.password === null
+                ? evidence.tomverseMessage.conversation.title : null,
+        conversationId: evidence.tomverseMessage?.conversation?.userId === item.userId
+            ? evidence.tomverseMessage.conversationId : null,
     })),
 });
 
 export type SerializedMemory = ReturnType<typeof serializeMemory>;
 
-type ConflictSubject = { id?: string; kind: string; statement: string; conflictKey: string | null };
+/**
+ * `projectId` is the memory's owner scope (null = personal). A memory is only
+ * ever compared with memories of the same scope: project A's "launch is June"
+ * never supersedes project B's "launch is September", and neither touches a
+ * personal memory.
+ */
+type ConflictSubject = { id?: string; kind: string; statement: string; conflictKey: string | null; projectId: string | null };
 
 /**
  * The active memories a statement would contradict or duplicate: the same
@@ -166,7 +181,7 @@ export async function activeMemoryConflicts(
     // Compare normalized assertions across legacy and topic key schemes. Do
     // not truncate before comparing: a hidden peer would escape the snapshot.
     const rows = await client.memoryItem.findMany({
-        where: { userId, status: "active", ...(item.id ? { id: { not: item.id } } : {}),
+        where: { userId, status: "active", ...memoryOwnerScopeWhere(item.projectId), ...(item.id ? { id: { not: item.id } } : {}),
             AND: [{ OR: [{ kind: item.kind }, ...(item.conflictKey ? [{ conflictKey: item.conflictKey }] : []),
                 ...(otherMemoryId ? [{ id: otherMemoryId }] : [])] },
                 { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }] },
@@ -192,12 +207,16 @@ export async function listMemories(
         kind,
         offset = 0,
         limit = 50,
-    }: { status?: string; kind?: string; offset?: number; limit?: number } = {}
+        projectId,
+    }: { status?: string; kind?: string; offset?: number; limit?: number;
+        /** undefined = every scope (the account's settings list); null = personal only. */
+        projectId?: string | null } = {}
 ) {
     const where: Prisma.MemoryItemWhereInput = {
         userId,
         ...(status ? { status } : {}),
         ...(kind ? { kind } : {}),
+        ...(projectId !== undefined ? { projectId } : {}),
     };
     const [total, items] = await Promise.all([
         prisma.memoryItem.count({ where }),
@@ -219,8 +238,12 @@ export async function listMemories(
                                 conversation: {select:{userId:true, password:true, title:true}},
                             },
                         },
+                        tomverseMessage: {
+                            select: { role: true, conversationId: true, conversation: { select: { userId: true, title: true, password: true } } },
+                        },
                     },
                 },
+                project: { select: { id: true, name: true } },
             },
         }),
     ]);
@@ -228,7 +251,10 @@ export async function listMemories(
         total,
         offset,
         limit,
-        memories: items.map(serializeMemory),
+        memories: items.map((item) => ({
+            ...serializeMemory(item),
+            projectName: item.project?.name ?? null,
+        })),
     };
 }
 
@@ -275,9 +301,12 @@ export async function createManualMemory(input: {
     groundsText: string;
     canonicalKey?: string | null;
     resolveConflict?: "supersede_existing";
+    /** Null/undefined = personal memory; a value = that project's own memory. */
+    projectId?: string | null;
 }) {
     const statement = input.statement.normalize("NFC").trim();
     const grounds = input.groundsText.normalize("NFC").trim();
+    const projectId = input.projectId ?? null;
     if (grounds.length === 0 || grounds.length > 2_000) {
         throw new ApiSecurityError(
             422,
@@ -309,15 +338,24 @@ export async function createManualMemory(input: {
     const conflictKey = memoryConflictKey(input.kind, statement, input.canonicalKey);
     return prisma.$transaction(async (tx) => {
         await acquireUserMemoryLock(tx, input.userId);
+        if (projectId !== null) {
+            const project = await tx.conversationProject.findFirst({
+                where: { id: projectId, userId: input.userId },
+                select: { archivedAt: true },
+            });
+            if (!project) throw new ApiSecurityError(404, "PROJECT_NOT_FOUND", "Project not found.");
+            if (project.archivedAt) throw new ApiSecurityError(409, "PROJECT_ARCHIVED", "Restore the project first.");
+        }
         await assertNoActiveConflict(
             tx,
             input.userId,
-            { kind: input.kind, statement, conflictKey },
+            { kind: input.kind, statement, conflictKey, projectId },
             input.resolveConflict
         );
         const item = await tx.memoryItem.create({
             data: {
                 userId: input.userId,
+                projectId,
                 kind: input.kind,
                 statement,
                 status: "active",
@@ -448,7 +486,7 @@ export async function resolveMemoryConflict(input: {
         if (input.resolution === "merge") {
             // A rewritten legacy statement may now collide with a third row.
             // Fail the whole transaction rather than superseding an unseen peer.
-            await assertNoActiveConflict(tx, input.userId, { ...item, statement, conflictKey }, undefined);
+            await assertNoActiveConflict(tx, input.userId, { ...item, statement, conflictKey, projectId: item.projectId }, undefined);
         }
         await tx.memoryItem.update({ where: { id: item.id }, data: {
             status: "active", approvedAt: new Date(), revision: { increment: 1 }, sensitivity: validation.sensitivity,
@@ -641,6 +679,7 @@ export async function* iterateMemoryExportItems(userId: string) {
         // into the flag the export core reads.
         type ExportRow = Omit<MemoryExportSource, "evidences"> & {
             id: string;
+            projectId: string | null;
             evidences: Array<{
                 sourceType: string;
                 manualContent: string | null;
@@ -685,6 +724,7 @@ export async function* iterateMemoryExportItems(userId: string) {
                     approvedAt: true,
                     extractionModelId: true,
                     promptVersion: true,
+                    projectId: true,
                     evidences: {
                         select: {
                             sourceType: true,
@@ -708,7 +748,8 @@ export async function* iterateMemoryExportItems(userId: string) {
             });
         if (rows.length === 0) return;
         for (const row of rows) {
-            yield serializeMemoryExportItem({
+            yield {
+                ...serializeMemoryExportItem({
                 ...row,
                 evidences: row.evidences.map((evidence) => ({
                     ...evidence,
@@ -721,7 +762,10 @@ export async function* iterateMemoryExportItems(userId: string) {
                           }
                         : null,
                 })),
-            });
+                }),
+                // The scope the memory is used in: null = personal, else that project only.
+                projectId: row.projectId,
+            };
         }
         if (rows.length < EXPORT_PAGE_SIZE) return;
         const last = rows[rows.length - 1];
@@ -827,4 +871,53 @@ export async function putMemorySettings(
         });
     });
     return getMemorySettings(userId);
+}
+
+/**
+ * An explicit scope move chosen by the user: personal -> a project, a project
+ * -> personal, or between projects. It is a revision of the memory, not an
+ * approval: status, grounds, extraction pair and user-edited flag stay as they
+ * are, and the move is refused when the target scope already holds an active
+ * memory on the same topic (the user resolves that conflict first).
+ */
+export async function moveMemoryScope(input: {
+    userId: string;
+    memoryId: string;
+    expectedRevision: number;
+    targetProjectId: string | null;
+}) {
+    return prisma.$transaction(async (tx) => {
+        await acquireUserMemoryLock(tx, input.userId);
+        const item = await loadOwnedMemory(input.userId, input.memoryId, tx);
+        if (item.revision !== input.expectedRevision) {
+            throw new ApiSecurityError(409, "MEMORY_ITEM_STATE", "The memory changed. Reload and try again.");
+        }
+        if (item.projectId === input.targetProjectId) return { moved: false as const, projectId: item.projectId };
+        if (input.targetProjectId !== null) {
+            const project = await tx.conversationProject.findFirst({
+                where: { id: input.targetProjectId, userId: input.userId },
+                select: { archivedAt: true },
+            });
+            if (!project) throw new ApiSecurityError(404, "PROJECT_NOT_FOUND", "Project not found.");
+            if (project.archivedAt) throw new ApiSecurityError(409, "PROJECT_ARCHIVED", "Restore the project first.");
+        }
+        // A locked or deleted source does not become usable by moving it.
+        const lockedExternal = item.evidences.some((evidence) => evidence.externalMessage?.conversation?.password != null);
+        const lockedNative = item.evidences.some((evidence) => evidence.tomverseMessage?.conversation?.password != null);
+        if (item.status !== "active" && (lockedExternal || lockedNative)) {
+            throw new ApiSecurityError(409, "MEMORY_SOURCE_LOCKED", "Unlock the source conversation first.");
+        }
+        if (item.status === "active") {
+            const conflicts = await activeMemoryConflicts(tx, input.userId, { ...item, projectId: input.targetProjectId });
+            if (conflicts.length > 0) {
+                throw new ApiSecurityError(409, "MEMORY_ITEM_CONFLICT", "The target already holds an active memory on this topic.");
+            }
+        }
+        const updated = await tx.memoryItem.updateMany({
+            where: { id: item.id, userId: input.userId, revision: item.revision },
+            data: { projectId: input.targetProjectId, revision: { increment: 1 } },
+        });
+        if (updated.count !== 1) throw new ApiSecurityError(409, "MEMORY_ITEM_STATE", "The memory changed. Reload and try again.");
+        return { moved: true as const, projectId: input.targetProjectId };
+    });
 }

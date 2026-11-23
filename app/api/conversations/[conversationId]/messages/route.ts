@@ -1,6 +1,7 @@
 import { CHAT_MAX_MESSAGE_BODY_BYTES, CHAT_MAX_MESSAGE_CHARACTERS } from "@/lib/chatRequestLimits";
 import { CHAT_MAX_ATTACHMENTS_PER_MESSAGE } from "@/lib/chatAttachmentLimits";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
+import { applyNativeMessageDeletion } from "@/lib/projectWorkspaceService";
 ﻿import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { reviewHandoffDescriptorSchema } from "@/lib/reviewContinuationHandoffCore";
@@ -477,6 +478,11 @@ export async function DELETE(
                 conversationId,
                 modelId: parsedModelId.data,
             });
+            const doomedMessages = await tx.message.findMany({
+                where: { conversationId, modelId: parsedModelId.data, role: "assistant" },
+                select: { id: true },
+            });
+            await applyNativeMessageDeletion(tx, userId, doomedMessages.map((message) => message.id));
             const deletedSources = await tx.message.deleteMany({
                 where: {
                     conversationId,
