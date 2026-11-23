@@ -1,4 +1,6 @@
 export const studioLocale = {
+  "checkoutDraftRestored": "Dein Studio-Entwurf wurde wiederhergestellt.",
+  "checkoutDraftSaveFailed": "Der Entwurf konnte vor dem Bezahlen nicht gespeichert werden. Deine Arbeit ist weiterhin hier.",
   "workspaceCaption": "Kreativwerkzeuge",
   "generate": "Generieren",
   "generatePack": "{count} Sticker generieren",

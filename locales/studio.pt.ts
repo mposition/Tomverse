@@ -1,4 +1,6 @@
 export const studioLocale = {
+  "checkoutDraftRestored": "O seu rascunho do Studio foi restaurado.",
+  "checkoutDraftSaveFailed": "Não foi possível guardar o rascunho antes do pagamento. O trabalho continua neste ecrã.",
   "workspaceCaption": "Ferramentas criativas",
   "generate": "Gerar",
   "generatePack": "Gerar {count} figurinhas",

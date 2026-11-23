@@ -1088,7 +1088,7 @@ export function AnalyticsProvider({
             // same 44x44 floor and focus treatment as the consent actions
             // above, and it is inset by the safe area so a notched phone's
             // rounded corner cannot eat the corner of the box.
-            className={`fixed bottom-[max(0.5rem,env(safe-area-inset-bottom))] right-[max(0.5rem,env(safe-area-inset-right))] z-[60] inline-flex min-h-11 min-w-11 items-center justify-center rounded-full border border-zinc-300 bg-white/95 px-3 text-[11px] font-bold text-zinc-700 shadow-lg backdrop-blur transition-colors hover:bg-zinc-50 hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-zinc-600 dark:bg-zinc-900/95 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:focus-visible:ring-offset-zinc-900 ${isStudioRoute ? "max-md:bottom-[calc(70px+env(safe-area-inset-bottom))]" : ""}`}
+            className={`fixed bottom-[max(0.5rem,env(safe-area-inset-bottom))] right-[max(0.5rem,env(safe-area-inset-right))] z-[60] inline-flex min-h-11 min-w-11 items-center justify-center rounded-full border border-zinc-300 bg-white/95 px-3 text-[11px] font-bold text-zinc-700 shadow-lg backdrop-blur transition-colors hover:bg-zinc-50 hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-zinc-600 dark:bg-zinc-900/95 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:focus-visible:ring-offset-zinc-900 ${isStudioRoute ? "max-[769px]:bottom-[calc(70px+env(safe-area-inset-bottom))]" : ""}`}
           >
             {copy.settings}
           </button>

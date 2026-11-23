@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildCreditPackReturnUrls,
+  buildStudioSubscriptionReturnUrl,
   buildPlanChangeSupportHref,
   buildPricingIntentHref,
   buildPurchaseSignInHref,
@@ -477,4 +478,23 @@ test("the Free card stops advertising sign-up to people who already pay", () => 
   assert.equal(shouldHideFreePlanCta("authenticated", "Free"), false);
   assert.equal(shouldHideFreePlanCta("unauthenticated", null), false);
   assert.equal(shouldHideFreePlanCta("loading", null), false);
+});
+
+test("Studio checkout returns to the exact tool for credit packs and subscriptions", () => {
+  const origin = "https://tomverse.app";
+  const returnTo = "/studio/stickers?lang=ko&draft=private";
+  const urls = buildCreditPackReturnUrls({ origin, returnTo, packId: "starter_500", language: "ko" });
+  assert.equal(urls.returnPath, "/studio/stickers?lang=ko");
+  for (const [url, expectedBilling] of [[urls.successUrl, "credits-success"], [urls.cancelUrl, "credits-cancelled"]]) {
+    const parsed = new URL(url);
+    assert.equal(parsed.pathname, "/studio/stickers");
+    assert.equal(parsed.searchParams.get("billing"), expectedBilling);
+  }
+
+  const args = { origin, returnTo, outcome: "success", plan: "pro", interval: "monthly", language: "ko" };
+  assert.equal(buildStudioSubscriptionReturnUrl(args), origin + "/studio/stickers?lang=ko&billing=success&plan=pro&interval=monthly");
+  assert.equal(buildStudioSubscriptionReturnUrl({ ...args, outcome: "cancelled" }), origin + "/studio/stickers?lang=ko&billing=cancelled&plan=pro&interval=monthly");
+  for (const invalid of ["/review", "/studio/unknown", "/studio/stickers/extra", "/studio/../../admin", "//evil.test/studio/stickers"]) {
+    assert.equal(buildStudioSubscriptionReturnUrl({ ...args, returnTo: invalid }), null);
+  }
 });

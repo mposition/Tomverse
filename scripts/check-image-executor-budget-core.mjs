@@ -19,6 +19,7 @@
 
 export const IMAGE_EXECUTOR_ROUTES = [
     "app/api/images/generations/route.ts",
+    "app/api/studio/images/route.ts",
     "app/api/images/targets/[targetId]/retry/route.ts",
     "app/api/conversations/[conversationId]/image-turn/route.ts",
 ];

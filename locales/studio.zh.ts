@@ -1,4 +1,6 @@
 export const studioLocale = {
+  "checkoutDraftRestored": "已恢复付款前的草稿。",
+  "checkoutDraftSaveFailed": "无法保存付款前的草稿。当前内容仍保留在此页面。",
   "workspaceCaption": "创作工具",
   "generate": "生成",
   "generatePack": "生成 {count} 张表情贴图",

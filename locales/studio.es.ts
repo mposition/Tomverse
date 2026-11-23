@@ -1,4 +1,6 @@
 export const studioLocale = {
+  "checkoutDraftRestored": "Se ha recuperado tu borrador de Studio.",
+  "checkoutDraftSaveFailed": "No se pudo guardar el borrador antes del pago. Tu trabajo sigue aquí.",
   "workspaceCaption": "Herramientas creativas",
   "generate": "Generar",
   "generatePack": "Generar {count} stickers",

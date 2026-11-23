@@ -10,7 +10,23 @@ import { applyStudioSubjectMask, makeStudioImageReference, renderStudioImage, sa
 import { StudioFileButton, StudioStatus, useStudioCopy, useStudioTask, useStudioUrls } from "./StudioControls";
 import { StudioGenerateButton, StudioQuoteHint } from "./StudioGenerationControls";
 import { createStudioImageRunner, generateStudioText, StudioGenerationError, useStudioImageQuote } from "./studioGenerationClient";
+import { captureStudioDraftImage, useStudioCheckoutDraft, type StudioDraftImage } from "./studioCheckoutDraft";
+import { isStudioCreditShortfall, StudioCreditRecovery } from "./StudioCreditRecovery";
 import styles from "./studio.module.css";
+
+type ToolCheckoutDraft = {
+  photo: StudioDraftImage;
+  result: StudioDraftImage;
+  customPhoto: boolean;
+  resultIsExample: boolean;
+  format: number;
+  title: string;
+  details: string;
+  caption: string;
+  players: string;
+  textDraft: string;
+  sceneAction: string;
+};
 
 const asset = (name: string) => "/studio/" + name + ".png";
 
@@ -51,6 +67,23 @@ export function StudioToolEditor({ tool }: { tool: Exclude<StudioTool, { id: "st
   const hasReference = photoTool || pngTool || customPhoto;
   const size = id === "poster" ? "1024x1536" : "1024x1024";
   const imageQuote = useStudioImageQuote(size, hasReference, !social);
+  const [creditError, setCreditError] = useState<StudioGenerationError | null>(null);
+  const checkoutDraft = useStudioCheckoutDraft<ToolCheckoutDraft>(id, saved => {
+    urls.release(photo);
+    urls.release(result);
+    setPhoto(typeof saved.photo === "string" ? saved.photo : urls.make(saved.photo));
+    setResult(typeof saved.result === "string" ? saved.result : urls.make(saved.result));
+    setCustomPhoto(saved.customPhoto);
+    setResultIsExample(saved.resultIsExample);
+    setFormat(saved.format);
+    setTitle(saved.title);
+    setDetails(saved.details);
+    setCaption(saved.caption);
+    setPlayers(saved.players);
+    setTextDraft(saved.textDraft);
+    setSceneAction(saved.sceneAction);
+    report(copy.checkoutDraftRestored);
+  });
 
   useEffect(() => () => active.current?.abort(), []);
 
@@ -116,8 +149,22 @@ export function StudioToolEditor({ tool }: { tool: Exclude<StudioTool, { id: "st
         setResult(urls.make(output));
         setResultIsExample(false);
       }
+      void checkoutDraft.clear();
     } catch (error) {
       if (signal.aborted) return;
+      if (isStudioCreditShortfall(error)) {
+        try {
+          const [photoDraft, resultDraft] = await Promise.all([captureStudioDraftImage(photo), captureStudioDraftImage(result)]);
+          await checkoutDraft.save({
+            photo: photoDraft, result: resultDraft, customPhoto, resultIsExample,
+            format, title, details, caption, players, textDraft, sceneAction,
+          });
+          if (!signal.aborted) setCreditError(error);
+        } catch {
+          if (!signal.aborted) report(copy.checkoutDraftSaveFailed, true);
+        }
+        return;
+      }
       if (error instanceof StudioGenerationError && error.status === 409 && !social) imageQuote.reload();
       throw error;
     } finally {
@@ -142,7 +189,7 @@ export function StudioToolEditor({ tool }: { tool: Exclude<StudioTool, { id: "st
   const downloadText = () => saveStudioFile(new Blob([textDraft], { type: "text/plain;charset=utf-8" }), "tomverse-" + id + ".txt");
   const choice = (active: boolean) => active ? styles.choiceActive : styles.secondary;
 
-  return <div className={styles.workbench}>
+  return <><div className={styles.workbench}>
     <section className={styles.panel}>
       <h2>{copy.inputs}</h2>
       {!social && <div className={styles.fileRow}>
@@ -218,5 +265,8 @@ export function StudioToolEditor({ tool }: { tool: Exclude<StudioTool, { id: "st
         </button>
       </>}
     </section>
-  </div>;
+  </div>
+    <StudioCreditRecovery error={creditError} returnTo={"/studio/" + id + "?lang=" + encodeURIComponent(lang)}
+      onClose={() => setCreditError(null)} />
+  </>;
 }

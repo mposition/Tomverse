@@ -9,11 +9,24 @@ import { makeStudioImageReference, removeStudioGreenScreen, renderStudioImage, s
 import { StudioFileButton, StudioStatus, useStudioCopy, useStudioTask, useStudioUrls } from "./StudioControls";
 import { StudioGenerateButton, StudioQuoteHint } from "./StudioGenerationControls";
 import { createStudioImageRunner, StudioGenerationError, useStudioImageQuote } from "./studioGenerationClient";
+import { captureStudioDraftImage, useStudioCheckoutDraft, type StudioDraftImage } from "./studioCheckoutDraft";
+import { isStudioCreditShortfall, StudioCreditRecovery } from "./StudioCreditRecovery";
 import styles from "./studio.module.css";
 
 type Sticker = { source: string; caption?: string };
 type FaceStyle = "real" | "character";
 type Replacement = { index: number; caption: string; source: string | null };
+type StickerCheckoutDraft = {
+  style: FaceStyle;
+  photo: { source: StudioDraftImage; name?: string };
+  reference: { source: StudioDraftImage; style: FaceStyle };
+  stickers: Array<{ source: StudioDraftImage; caption?: string }>;
+  captions: string[];
+  captionDraft: string;
+  sample: boolean;
+  replacement: (Omit<Replacement, "source"> & { source: StudioDraftImage | null }) | null;
+};
+
 const samplePhoto = "/studio/selfie.png";
 const sheetSize = "1536x1024";
 const singleSize = "1024x1024";
@@ -23,10 +36,12 @@ const drawFace = (style: FaceStyle) => style === "real"
   : "Make a recognisable illustrated character from the portrait.";
 
 export function StudioStickerTool() {
-  const { copy } = useStudioCopy();
+  const { copy, lang } = useStudioCopy();
   const urls = useStudioUrls();
   const { busy, status, report, task } = useStudioTask();
   const dialog = useRef<HTMLDialogElement>(null);
+  const pausedForCheckout = useRef(false);
+  const [creditError, setCreditError] = useState<StudioGenerationError | null>(null);
   const packController = useRef<AbortController | null>(null);
   const cutController = useRef<AbortController | null>(null);
   const [runPack] = useState(createStudioImageRunner);
@@ -46,8 +61,59 @@ export function StudioStickerTool() {
   const [sample, setSample] = useState(true);
   const [replacement, setReplacement] = useState<Replacement | null>(null);
   const [regenerating, setRegenerating] = useState(false);
-  const [replacementError, setReplacementError] = useState(false);
+  const [replacementError, setReplacementError] = useState<string | null>(null);
   const singleQuote = useStudioImageQuote(singleSize, true, Boolean(replacement));
+  const checkoutDraft = useStudioCheckoutDraft<StickerCheckoutDraft>("stickers", saved => {
+    const restoreSource = (source: StudioDraftImage) => typeof source === "string" ? source : urls.make(source);
+    urls.release(photo.source);
+    urls.release(reference.source);
+    stickers.forEach(sticker => urls.release(sticker.source));
+    setStyle(saved.style);
+    setPhoto({ ...saved.photo, source: restoreSource(saved.photo.source) });
+    setReference({ ...saved.reference, source: restoreSource(saved.reference.source) });
+    setStickers(saved.stickers.map(sticker => ({ ...sticker, source: restoreSource(sticker.source) })));
+    setCaptions(saved.captions);
+    setCaptionDraft(saved.captionDraft);
+    setSample(saved.sample);
+    if (saved.replacement && saved.replacement.index < saved.stickers.length) {
+      setReplacement({ ...saved.replacement, source: saved.replacement.source ? restoreSource(saved.replacement.source) : null });
+      if (!dialog.current?.open) dialog.current?.showModal();
+    }
+    report(copy.checkoutDraftRestored);
+  });
+
+  async function showCreditRecovery(error: StudioGenerationError, signal: AbortSignal) {
+    try {
+      const [photoSource, referenceSource, savedStickers, replacementSource] = await Promise.all([
+        captureStudioDraftImage(photo.source),
+        captureStudioDraftImage(reference.source),
+        Promise.all(stickers.map(async sticker => ({ ...sticker, source: await captureStudioDraftImage(sticker.source) }))),
+        replacement?.source ? captureStudioDraftImage(replacement.source) : null,
+      ]);
+      await checkoutDraft.save({
+        style, photo: { ...photo, source: photoSource }, reference: { ...reference, source: referenceSource },
+        stickers: savedStickers, captions, captionDraft, sample,
+        replacement: replacement ? { ...replacement, source: replacementSource } : null,
+      });
+      if (signal.aborted) return;
+      if (dialog.current?.open) {
+        pausedForCheckout.current = true;
+        dialog.current.close();
+      }
+      setCreditError(error);
+    } catch {
+      if (signal.aborted) return;
+      if (replacement) setReplacementError(copy.checkoutDraftSaveFailed);
+      else report(copy.checkoutDraftSaveFailed, true);
+    }
+  }
+  function closeCreditRecovery() {
+    setCreditError(null);
+    if (pausedForCheckout.current) {
+      pausedForCheckout.current = false;
+      if (!dialog.current?.open) dialog.current?.showModal();
+    }
+  }
   const captionFor = (sticker: Sticker, index: number) => sticker.caption ?? copy[STUDIO_STICKER_KEYS[index]];
   const addCaption = () => {
     if (!captionDraft.trim() || captions.length >= STUDIO_STICKER_LIMIT) return;
@@ -94,11 +160,16 @@ export function StudioStickerTool() {
         setCaptions(words);
         setCaptionDraft("");
         report(copy.packReady);
+        void checkoutDraft.clear();
       } finally {
         URL.revokeObjectURL(sheet);
       }
     } catch (error) {
       if (controller.signal.aborted) return;
+      if (isStudioCreditShortfall(error)) {
+        await showCreditRecovery(error, controller.signal);
+        return;
+      }
       if (error instanceof StudioGenerationError && error.status === 409) sheetQuote.reload();
       throw error;
     } finally {
@@ -119,20 +190,21 @@ export function StudioStickerTool() {
     dialog.current?.showModal();
   };
   const closeSticker = () => {
+    if (pausedForCheckout.current) return;
     cutController.current?.abort();
     cutController.current = null;
     if (replacement?.source && replacement.source !== committed.current) urls.release(replacement.source);
     committed.current = null;
     setReplacement(null);
     setRegenerating(false);
-    setReplacementError(false);
+    setReplacementError(null);
   };
   const createSticker = async () => {
     if (!replacement || !singleQuote.quote || cutController.current || !replacement.caption.trim()) return;
     const controller = new AbortController();
     cutController.current = controller;
     setRegenerating(true);
-    setReplacementError(false);
+    setReplacementError(null);
     try {
       const current = stickers[replacement.index];
       const blob = await runCut({
@@ -151,8 +223,12 @@ export function StudioStickerTool() {
       setReplacement({ ...replacement, source: urls.make(art) });
     } catch (error) {
       if (controller.signal.aborted) return;
+      if (isStudioCreditShortfall(error)) {
+        await showCreditRecovery(error, controller.signal);
+        return;
+      }
       if (error instanceof StudioGenerationError && error.status === 409) singleQuote.reload();
-      setReplacementError(true);
+      setReplacementError(copy.taskFailed);
     } finally {
       if (cutController.current === controller) {
         cutController.current = null;
@@ -172,6 +248,7 @@ export function StudioStickerTool() {
     setReplacement(null);
     dialog.current?.close();
     report(copy.stickerReplaced);
+    void checkoutDraft.clear();
   };
   const invalid = () => report(copy.invalidImage, true);
 
@@ -251,14 +328,14 @@ export function StudioStickerTool() {
             <input autoFocus value={replacement.caption} maxLength={32} disabled={regenerating} onChange={event => {
               if (replacement.source) urls.release(replacement.source);
               setReplacement({ ...replacement, caption: event.target.value, source: null });
-              setReplacementError(false);
+              setReplacementError(null);
             }} />
           </label>
           <StudioGenerateButton label={copy.regenerate} busy={regenerating}
             disabled={!singleQuote.quote || !replacement.caption.trim()} onClick={() => void createSticker()} />
         </div>
         <StudioQuoteHint {...singleQuote} />
-        {replacementError && <StudioStatus status={{ error: true, text: copy.taskFailed }} />}
+        {replacementError && <StudioStatus status={{ error: true, text: replacementError }} />}
         <div className={styles.compare}>
           <figure><figcaption>{copy.currentImage}</figcaption><img src={stickers[replacement.index].source} alt={captionFor(stickers[replacement.index], replacement.index)} /></figure>
           <figure aria-busy={regenerating}><figcaption>{copy.newImage}</figcaption>{replacement.source
@@ -270,5 +347,6 @@ export function StudioStickerTool() {
         </div>
       </>}
     </dialog>
+    <StudioCreditRecovery error={creditError} returnTo={"/studio/stickers?lang=" + encodeURIComponent(lang)} onClose={closeCreditRecovery} />
   </>;
 }

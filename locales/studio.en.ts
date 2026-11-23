@@ -1,4 +1,6 @@
 export const studioLocale = {
+  "checkoutDraftRestored": "Your Studio draft was restored.",
+  "checkoutDraftSaveFailed": "Your draft could not be saved for checkout. Your current work is still here.",
   "workspaceCaption": "Creative tools",
   "generate": "Generate",
   "generatePack": "Generate {count} stickers",

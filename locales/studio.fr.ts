@@ -1,4 +1,6 @@
 export const studioLocale = {
+  "checkoutDraftRestored": "Votre brouillon Studio a été restauré.",
+  "checkoutDraftSaveFailed": "Impossible de sauvegarder le brouillon avant le paiement. Votre travail est toujours ici.",
   "workspaceCaption": "Outils créatifs",
   "generate": "Générer",
   "generatePack": "Générer {count} stickers",

@@ -11,7 +11,7 @@ export default function StudioWorkspaceError({ error, retry }: {
       titleKey="chat.workspaceError.workspaceTitle"
       bodyKey="chat.workspaceError.workspaceBody"
       digest={error.digest}
-      onRetry={retry}
+      onRetry={() => retry()}
       retryTestId="studio-error-retry"
     />
   );

@@ -33,7 +33,7 @@
   --studio-selection: #254a43;
 }
 .shell > :global(.review-navigation) { position: sticky; top: 20px; align-self: start; height: calc(100dvh - 40px - var(--analytics-consent-bar-height, 0px)); overflow-y: auto; }
-@media (min-width: 768px) and (max-height: 790px) {
+@media (min-width: 769px) and (max-height: 790px) {
   .shell > :global(.review-navigation) { gap: 5px; }
   .shell > :global(.review-navigation > :is(a, button):not(.review-avatar)) { min-height: 48px; }
 }
@@ -126,6 +126,12 @@
 .panel button + button { margin-inline-start: 5px; }
 .choices button + button, .captionEntry button + button { margin-inline-start: 0; }
 .dialog { margin: auto; width: min(640px, calc(100vw - 28px)); }
+.creditBackdrop { position: fixed; z-index: 110; inset: 0; display: grid; place-items: center; padding: 16px; background: #080c1688; }
+.creditDialog { width: min(100%, 400px); max-height: 90dvh; overflow: auto; padding: 20px; border-radius: 16px; border: 1px solid var(--studio-line); background: var(--studio-surface); color: var(--studio-text); }
+.creditDialog h2 { margin: 0 0 8px; font-size: 1.15rem; }
+.creditDialog p { margin: 0 0 16px; color: var(--studio-muted); font-size: .9rem; }
+.creditActions { display: grid; gap: 8px; }
+.creditActions > :is(button, a) { width: 100%; }
 .dialog::backdrop { background: #12251c88; }
 .dialogActions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 7px; margin-top: 14px; }
 .compare, .posterGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
@@ -151,7 +157,7 @@
   .cardCopy { padding: 10px; }
   .stickerGrid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
-@media (max-width: 767px) {
+@media (max-width: 768px) {
   .shell { display: block; min-height: 100dvh; padding: 0 0 calc(72px + env(safe-area-inset-bottom)); }
   .shell > :global(.review-navigation) { position: fixed; top: auto; bottom: var(--analytics-consent-bar-height, 0px); left: 0; right: 0; width: auto; height: calc(62px + env(safe-area-inset-bottom)); min-height: 0; overflow: visible; padding: 4px 4px calc(4px + env(safe-area-inset-bottom)); border-radius: 0; background: #11192b; color: #a9b9d2; }
   .shell > :global(.review-navigation) :global(a), .shell > :global(.review-navigation) :global(button) { gap: 3px; font-size: .65rem; }
@@ -173,7 +179,7 @@
 }
 
 .mobileCopy { display: none; }
-@media (max-width: 767px) {
+@media (max-width: 768px) {
   .cardCopy .desktopCopy { display: none; }
   .cardCopy .mobileCopy { display: block; }
   .cardCopy h3:lang(ko) { word-break: keep-all; }

@@ -12,14 +12,14 @@ export type StudioImageQuote = {
 };
 
 export class StudioGenerationError extends Error {
-  constructor(readonly status: number, readonly code?: string) {
+  constructor(readonly status: number, readonly code?: string, readonly details?: Record<string, unknown>) {
     super(code || "Studio generation failed");
   }
 }
 
 async function readJson<T>(response: Response): Promise<T> {
   const data = await response.json().catch(() => null);
-  if (!response.ok || data === null) throw new StudioGenerationError(response.status, data?.code);
+  if (!response.ok || data === null) throw new StudioGenerationError(response.status, data?.code, data?.details);
   return data as T;
 }
 
@@ -111,7 +111,14 @@ export function createStudioImageRunner() {
         }, signal));
       } catch (error) {
         if (signal.aborted || (error instanceof StudioGenerationError && error.status < 500)) {
-          if (!signal.aborted) current = undefined;
+          if (!signal.aborted) {
+            current = undefined;
+            if (run.uploadId) {
+              await postJson("/api/chat", { uploadId: run.uploadId }, signal, "DELETE")
+                .then(response => response.body?.cancel())
+                .catch(() => undefined);
+            }
+          }
           throw error;
         }
         // A lost response may already have reserved credits. Recover the

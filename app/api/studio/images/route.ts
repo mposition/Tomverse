@@ -6,14 +6,15 @@ import { z } from "zod";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import { isImageGenerationEnabledCached } from "@/lib/appSettings";
 import { resolveChatRouteSession } from "@/lib/chatRouteSession";
-import { ChatAccessError, chatErrorResponse } from "@/lib/chatSecurity";
+import { chatErrorResponse } from "@/lib/chatSecurity";
 import { imageEditEnabled } from "@/lib/imageEditSource";
-import { IMAGE_EDIT_SOURCE_MAX_BYTES, IMAGE_EDIT_SOURCE_MEDIA_TYPES } from "@/lib/imageGenerationPricing";
 import { processImageGenerationGroup, requestImageGeneration } from "@/lib/imageGenerationService";
 import { DEFAULT_IMAGE_MODEL_ID, getImageModelPrice, imageEditCredits, listEnabledImageModels } from "@/lib/imageModelRegistry";
-import { accountAttachmentPrefix, bindMessageAttachments, MessageAttachmentBindError } from "@/lib/messageAttachmentStorage";
+import { MessageAttachmentBindError } from "@/lib/messageAttachmentStorage";
 import { refreshImageModelCatalog } from "@/lib/modelCatalog";
+import { prisma } from "@/lib/prisma";
 import { studioAvailable } from "@/lib/studioAvailability";
+import { bindStudioImageUpload } from "@/lib/studioImageReference";
 
 const sizeSchema = z.enum(["1024x1024", "1536x1024", "1024x1536"]);
 const requestSchema = z.object({
@@ -71,10 +72,18 @@ export async function POST(req: Request) {
     if (!studioImagesEnabled()) return unavailable();
     await consumeApiRateLimit(req, user.id, "image-generation", { minute: 6, day: 500 });
     const body = await readLimitedJson(req, 24 * 1024, requestSchema);
+    // A completed reservation is a receipt even if the quote has changed.
+    const receipt = await prisma.imageGenerationGroup.findUnique({
+      where: { userId_groupIdempotencyKey: { userId: user.id, groupIdempotencyKey: body.idempotencyKey } },
+      select: { id: true },
+    });
+    if (receipt) return Response.json({ groupId: receipt.id });
+
     const quote = await studioQuote(body.size, Boolean(body.uploadId));
     if (!quote || quote.modelId !== body.modelId || quote.pricingVersion !== body.pricingVersion) {
       return Response.json({ code: "STUDIO_QUOTE_CHANGED" }, { status: 409 });
     }
+    const { uploadId } = body;
     const result = await requestImageGeneration({
       userId: user.id,
       prompt: body.prompt,
@@ -83,33 +92,11 @@ export async function POST(req: Request) {
       idempotencyKey: body.idempotencyKey,
       modelIds: [body.modelId],
       expectedPricingVersions: { [body.modelId]: body.pricingVersion },
-      ...(body.uploadId ? {
+      ...(uploadId ? {
         editSource: {
-          bindAttachment: async (tx, conversationId) => {
-            const upload = await tx.messageAttachmentUpload.findFirst({
-              where: { id: body.uploadId, userId: user.id, sourceArtifactId: null },
-              select: { id: true, size: true, mediaType: true },
-            });
-            if (!upload || upload.size > IMAGE_EDIT_SOURCE_MAX_BYTES || !IMAGE_EDIT_SOURCE_MEDIA_TYPES.includes(upload.mediaType)) {
-              throw new ChatAccessError(400, "STUDIO_INVALID_REFERENCE", "The reference image is unavailable.");
-            }
-            const message = await tx.message.create({
-              data: { conversationId, role: "user", content: body.prompt },
-              select: { id: true },
-            });
-            await bindMessageAttachments(tx, {
-              userId: user.id,
-              ownPrefix: accountAttachmentPrefix(user.email),
-              conversationId,
-              messageId: message.id,
-              uploadIds: [upload.id],
-            });
-            const attachment = await tx.messageAttachment.findFirstOrThrow({
-              where: { messageId: message.id, userId: user.id, uploadId: upload.id },
-              select: { id: true },
-            });
-            return attachment.id;
-          },
+          bindAttachment: (tx, conversationId) => bindStudioImageUpload(tx, {
+            userId: user.id, email: user.email, conversationId, uploadId, prompt: body.prompt,
+          }),
         },
       } : {}),
     });

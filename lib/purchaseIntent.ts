@@ -16,6 +16,11 @@
  */
 
 import { PRODUCT_SURFACE_PATH } from "@/lib/productSurfaceRoutes";
+import { findStudioTool } from "@/lib/studioTools";
+
+const isStudioPurchasePath = (pathname: string) => pathname === PRODUCT_SURFACE_PATH.studio ||
+  (pathname.startsWith(PRODUCT_SURFACE_PATH.studio + "/") &&
+    Boolean(findStudioTool(pathname.slice(PRODUCT_SURFACE_PATH.studio.length + 1))));
 
 export const PURCHASE_INTENTS = ["subscription", "credit_pack"] as const;
 export type PurchaseIntentType = (typeof PURCHASE_INTENTS)[number];
@@ -269,7 +274,7 @@ export function sanitizeReturnTo(value: unknown): string | null {
   if (parsed.origin !== base) return null;
 
   const pathname = parsed.pathname.replace(/\/+$/, "") || "/";
-  if (!RETURN_TO_PATHS.has(pathname)) return null;
+  if (!RETURN_TO_PATHS.has(pathname) && !isStudioPurchasePath(pathname)) return null;
 
   const params = new URLSearchParams();
   for (const [key, entry] of parsed.searchParams) {
@@ -283,6 +288,29 @@ export function sanitizeReturnTo(value: unknown): string | null {
   const safeHash = ALLOWED_RETURN_HASHES.has(hash) ? `#${hash}` : "";
 
   return `${pathname}${query ? `?${query}` : ""}${safeHash}`;
+}
+
+export function buildStudioSubscriptionReturnUrl(input: {
+  origin: string;
+  returnTo?: string;
+  outcome: "success" | "cancelled";
+  plan: string;
+  interval: "monthly" | "annual";
+  language?: string;
+  access?: "founding-tester-pass";
+}): string | null {
+  const path = sanitizeReturnTo(input.returnTo);
+  if (!path || !isStudioPurchasePath(new URL(path, input.origin).pathname)) return null;
+
+  const url = new URL(path, input.origin);
+  url.searchParams.set("billing", input.outcome);
+  url.searchParams.set("plan", input.plan);
+  url.searchParams.set("interval", input.interval);
+  const language = normalizePurchaseLanguage(input.language);
+  if (language) url.searchParams.set("lang", language);
+  if (input.access) url.searchParams.set("access", input.access);
+  url.hash = "";
+  return url.toString();
 }
 
 export type CreditPackReturnUrls = {

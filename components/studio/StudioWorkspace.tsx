@@ -28,7 +28,7 @@ function ToolArtwork({ tool }: { tool: StudioTool }) {
     return <div className={styles.cutoutMosaic}><Image src="/studio/cat.png" alt="" width={129} height={166} unoptimized /></div>;
   }
   return <picture className={styles.cardPhoto}>
-    {mobileArtwork.has(tool.artwork) && <source media="(max-width: 767px)" srcSet={`/studio/${tool.artwork}-mobile.png`} />}
+    {mobileArtwork.has(tool.artwork) && <source media="(max-width: 768px)" srcSet={`/studio/${tool.artwork}-mobile.png`} />}
     {/* Art direction differs between desktop and mobile. */}
     <img src={`/studio/${tool.artwork}.png`} alt="" width={294} height={172} />
   </picture>;
