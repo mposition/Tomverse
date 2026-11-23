@@ -19,7 +19,7 @@ import {
   runOptimizerCycle,
   splitOptimizerDecisionsByFamily,
 } from "../lib/autoRouterOptimizerCore.ts";
-import { COST_EFFICIENCY_CRITERIA_PROPOSAL, costEfficiencyReport } from "../lib/autoCostEfficiencyReport.ts";
+import { COST_EFFICIENCY_CRITERIA, costEfficiencyReport } from "../lib/autoCostEfficiencyReport.ts";
 import { observeOptimizerUsageCost, optimizerSpend } from "../lib/autoOptimizerCost.ts";
 import { summarizeChatServingCost, traceAnswerCost } from "../lib/autoChatServingCostCore.ts";
 import { actionableRecommendations } from "../lib/autoRouterRecommendationsCore.ts";
@@ -202,7 +202,7 @@ test("a cost-efficiency cycle compares cheaper candidates in the one slot, keeps
   assert.equal(report.taskCost.status, "unlinked");
   assert.equal(report.applicability.applicable, false);
   assert.ok(report.applicability.reasons.includes("diagnostic_only"));
-  assert.ok(report.applicability.reasons.includes("criteria_unconfirmed"));
+  assert.ok(!report.applicability.reasons.includes("criteria_unconfirmed"));
   // The family split keeps a conversation in one half.
   const evaluated = new Set(result.cases.map((item) => item.decisionId));
   assert.equal(evaluated.size, 12);
@@ -318,7 +318,7 @@ test("fewer credits with a higher observed answer cost is not a saving", () => {
   const spend = optimizerSpend(1_000).totals();
   const report = costEfficiencyReport({
     comparisons: [comparison("cheap", view(50)), comparison("mid", unknownView)], cases: [],
-    coverage: spend.costCoverage, spentByKind: spend.spentByKind, criteria: COST_EFFICIENCY_CRITERIA_PROPOSAL, failure: null,
+    coverage: spend.costCoverage, spentByKind: spend.spentByKind, criteria: COST_EFFICIENCY_CRITERIA, failure: null,
     summary: { incumbentCredits: 9, candidateCredits: 9 },
   });
   const observed = report.candidateDiagnosis.observedAnswerCost;
@@ -408,7 +408,8 @@ test("the offline dry run builds a complete manifest and runs the real cycle on 
   const { manifest, result } = run;
   assert.equal(manifest.execution, "mock");
   assert.equal(manifest.promotion, "refused_diagnostic_only");
-  assert.equal(manifest.criteria.status, "proposed_unconfirmed");
+  assert.equal(manifest.criteria.status, "confirmed");
+  assert.equal(manifest.criteria.confirmedOn, "2026-11-23");
   assert.match(manifest.criteriaDigest, /^[a-f0-9]{64}$/);
   assert.ok(manifest.models.answering.length > 2 && manifest.models.answering.every((model) => model.modelId && model.provider && "apiModel" in model));
   assert.ok(manifest.allowedProviders.length > 0);
@@ -421,6 +422,6 @@ test("the offline dry run builds a complete manifest and runs the real cycle on 
   assert.ok(c.savingsSamples > 0);
   // The mock's wrong calculation on the lowest tier is caught by the existing exact grader.
   assert.ok(c.exact.graded > 0 && c.exact.challengerPassed < c.exact.incumbentPassed);
-  assert.ok(result.costEfficiency.applicability.reasons.includes("criteria_unconfirmed"));
+  assert.ok(!result.costEfficiency.applicability.reasons.includes("criteria_unconfirmed"));
   assert.equal(result.costEfficiency.applicability.applicable, false);
 });

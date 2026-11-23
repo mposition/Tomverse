@@ -107,7 +107,7 @@ test("a diagnostic cycle's run over the real cycle table", { skip: !databaseUrl 
             assert.deepEqual(row.summary.objective, core.COST_EFFICIENCY_OBJECTIVE);
             assert.equal(row.summary.costEfficiency.version, "auto-cost-efficiency-report-v1");
             assert.equal(row.summary.manifest.execution, "live");
-            assert.equal(row.summary.manifest.criteria.status, "proposed_unconfirmed");
+            assert.equal(row.summary.manifest.criteria.status, "confirmed");
             assert.ok(row.summary.manifest.models.answering.length > 0);
             // The price-blind judge only; cache reads were priced by the existing helper.
             assert.ok(prompts.quality > 0);

@@ -34,7 +34,7 @@ import { providerStatusClass, type ProviderStatusClass } from "@/lib/autoLlmRout
 import { TUNABLE_GENERATOR_RULE, tunableChangesSchema } from "@/lib/autoRouterTunablesCore";
 
 import { optimizerSpend, type OptimizerCallIdentity, type OptimizerCost, type OptimizerCostCoverage, type OptimizerCallKind, type OptimizerCallResult } from "@/lib/autoOptimizerCost";
-import { costEfficiencyReport, COST_EFFICIENCY_CRITERIA_PROPOSAL, type CostEfficiencyCriteria, type CostEfficiencyReport } from "@/lib/autoCostEfficiencyReport";
+import { costEfficiencyReport, COST_EFFICIENCY_CRITERIA, type CostEfficiencyCriteria, type CostEfficiencyReport } from "@/lib/autoCostEfficiencyReport";
 export { optimizerSpend } from "@/lib/autoOptimizerCost";
 export type { OptimizerCallKind, OptimizerCallResult } from "@/lib/autoOptimizerCost";
 
@@ -1627,7 +1627,7 @@ export async function runOptimizerCycle(
             costEfficiency: costEfficiencyReport({
                 comparisons, cases, failure, summary: result.summary,
                 coverage: result.costCoverage, spentByKind: result.spentByKind,
-                criteria: input.criteria ?? COST_EFFICIENCY_CRITERIA_PROPOSAL,
+                criteria: input.criteria ?? COST_EFFICIENCY_CRITERIA,
             }),
         };
     };

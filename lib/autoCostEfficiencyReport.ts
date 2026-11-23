@@ -21,13 +21,15 @@ export const COST_EFFICIENCY_REPORT_VERSION = "auto-cost-efficiency-report-v1";
 
 /**
  * The acceptance criteria a paid run is read against. Fixed before the run
- * and stored with it; a result never changes them. These values are a
- * proposal until the owner confirms them (`status`), and the report says so:
- * an unconfirmed criterion set can describe a run, never qualify it.
+ * and stored with it; a result never changes them. A set is a proposal until
+ * the owner confirms it (`status`), and the report says so: an unconfirmed
+ * set can describe a run, never qualify it. A changed value is a new version.
  */
 export type CostEfficiencyCriteria = {
     version: string;
     status: "proposed_unconfirmed" | "confirmed";
+    /** The day the owner confirmed this set, when confirmed. */
+    confirmedOn?: string;
     /** Fewest direct comparisons against a cheaper candidate worth reading. */
     minSavingsSamples: number;
     /** A cheaper answer failing an explicit requirement the current one met. */
@@ -43,9 +45,11 @@ export type CostEfficiencyCriteria = {
     scope: "tool_free_text_answers";
 };
 
-export const COST_EFFICIENCY_CRITERIA_PROPOSAL: CostEfficiencyCriteria = {
+export const COST_EFFICIENCY_CRITERIA: CostEfficiencyCriteria = {
     version: "auto-cost-efficiency-criteria-v1",
-    status: "proposed_unconfirmed",
+    // Confirmed by the owner in chat on 2026-11-23, before any paid run.
+    status: "confirmed",
+    confirmedOn: "2026-11-23",
     minSavingsSamples: 10,
     maxCriticalRegressions: 0,
     maxQualityLossShare: 0.1,

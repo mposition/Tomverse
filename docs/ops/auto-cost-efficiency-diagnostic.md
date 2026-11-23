@@ -102,14 +102,17 @@ ceiling. The mock's wrong calculation on the lowest tier is caught (exact
 11/11 vs 10/11, one critical regression). These numbers describe the code
 path only; mock quality and mock spend are not evidence.
 
-## Run plan (paid, not started)
+## Run plan (paid; one dev run approved 2026-11-23, not started)
 
-Proposed: a person-started diagnostic on the **dev** environment's Admin ›
-Routing, with the switch on for that service only, the existing optimizer
+Approved by the owner on 2026-11-23: one person-started diagnostic on the
+**dev** environment's Admin › Routing, with the switch set on the dev
+environment's web app service (`Tomverse`) only -- the Admin start and the
+background run both happen in that process; the `Auto Router Optimizer` cron
+service never starts a diagnostic and needs no change -- the existing optimizer
 and router models, and the existing caps. Sample: recent picked decisions
 plus synthetic messages to 24, family split. Before the run, the owner fixes
 the criteria; the run records them and their digest; results never change
-them. Proposed values (`auto-cost-efficiency-criteria-v1`, unconfirmed): at
+them. Values (`auto-cost-efficiency-criteria-v1`, confirmed 2026-11-23): at
 least 10 savings samples, 0 critical regressions, current pick better in at
 most 10% of judged savings samples, at most 20% undecided, at most 10%
 cheaper-model answer failures, latency reported only, order disagreement
