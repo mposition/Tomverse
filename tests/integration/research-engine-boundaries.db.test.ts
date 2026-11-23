@@ -3,7 +3,8 @@ import { randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
 import { prisma } from "@/lib/prisma";
 import {
-  amendResearchScope, cancelResearchRun, createResearchRun, deleteResearchRun, finishResearchNow, readResearchRunDto, requestResearchRevision,
+  amendResearchScope, approveResearchPlan, cancelResearchRun, createResearchRun, deleteResearchRun, finishResearchNow, pauseResearchRun, readResearchRunDto,
+  requestResearchRevision, resumeResearchRun,
 } from "@/lib/researchEngineService";
 import { drainResearchWork, processOneResearchWorkItem } from "@/lib/researchEngineWorker";
 import {
@@ -134,7 +135,7 @@ test("an unknown usage outcome is held and never retried; the same dispatch key 
 test("concurrent reservations cannot exceed the approved total, and the finalization reserve is kept for synthesis", async () => {
   installFakes();
   const user = await createUser("overcommit");
-  const run = await create(user.id, { autoStart: false });
+  const run = await create(user.id, { autoStart: false, requestPlan: false });
   await prisma.researchPreviewRun.update({ where: { id: run.id }, data: { approvedCredits: 100, finalizationReserveCredits: 30 } });
   const attempts = await Promise.allSettled(Array.from({ length: 12 }, () =>
     claimResearchFundingRoom({ runId: run.id, purpose: "work", credits: 10, modelId: "m", provider: "google", pricingVersion: "p" })));
@@ -191,7 +192,7 @@ test("poison rows are quarantined without blocking healthy recovery (v1 settleme
   const quarantined = await prisma.researchPreviewRun.findUniqueOrThrow({ where: { id: v1.id } });
   assert.ok(quarantined.recoveryQuarantinedAt, "an unreadable v1 settlement stops being selected first");
   const healthy = await create(user.id);
-  const poison = await create(user.id, { autoStart: false });
+  const poison = await create(user.id, { autoStart: false, requestPlan: false });
   await prisma.researchPreviewRun.update({ where: { id: poison.id }, data: { status: "queued", inputManifest: { version: 1, broken: true } } });
   const stale = await claimNextResearchWorkItem("dead-worker");
   assert.equal(stale?.runId, healthy.id);
@@ -299,7 +300,7 @@ test("offer and draft creation never call a model, and a brief far past the Prev
   assert.equal(offer.offered, true);
   const question = `${"Detailed research context sentence. ".repeat(600)}Final question?`;
   assert.ok(question.length > 20_000);
-  const run = await create(user.id, { brief: brief(question), autoStart: false });
+  const run = await create(user.id, { brief: brief(question), autoStart: false, requestPlan: false });
   assert.equal(run.status, "draft");
   assert.equal(fakes.model.calls.length, 0, "no paid call before the user asks for a plan");
   assert.equal(web.searches.length, 0);
@@ -343,7 +344,7 @@ test("a Project source adapter is used only through the selection, revalidation 
 test("a hold bound but never dispatched is not settled as zero while a worker may still use it; recovery releases it under the run lock and a late dispatch is refused", async () => {
   const fakes = installFakes();
   const user = await createUser("orphan");
-  const run = await create(user.id, { autoStart: false });
+  const run = await create(user.id, { autoStart: false, requestPlan: false });
   await prisma.researchWorkItem.create({ data: { runId: run.id, kind: "plan", status: "running", planRevision: 0, inputRevision: 0, idempotencyKey: "probe",
     payload: { kind: "plan" }, leaseOwner: "late-worker", leaseEpoch: 1, leaseExpiresAt: new Date(fakes.clock.now().getTime() + 3_600_000) } });
   const item = await prisma.researchWorkItem.findFirstOrThrow({ where: { runId: run.id, idempotencyKey: "probe" } });
@@ -361,6 +362,33 @@ test("a hold bound but never dispatched is not settled as zero while a worker ma
   assert.equal((await prisma.researchFundingSegment.findUniqueOrThrow({ where: { id: segment.id } })).status, "released");
   await rejects(beginResearchDispatch({ itemId: item.id, ownerId: "late-worker", leaseEpoch: 1, runId: run.id },
     { kind: "model", dispatchKey: "late", fundingSegmentId: segment.id, modelId: "m", provider: "google", apiModel: "a", pricingVersion: "p" }), "RESEARCH_FUNDING_NOT_OPEN");
+});
+
+test("making a plan starts planning at once, and the run deadline counts research time only, not plan review or a pause", async () => {
+  const fakes = installFakes();
+  createFakeWeb();
+  const user = await createUser("deadline-window");
+  const run = await create(user.id, { autoStart: false });
+  assert.equal(run.status, "planning", "the create request that says 'make a plan' queues the plan without a second request");
+  await drainResearchWork("deadline-window-plan", 2);
+  assert.equal((await readResearchRunDto(user.id, run.id)).status, "awaiting_input");
+  const planned = await prisma.researchPreviewRun.findUniqueOrThrow({ where: { id: run.id } });
+  assert.equal(planned.runDeadlineAt, null, "no research deadline runs while the plan waits for review");
+  // The standard profile allows 120 minutes of research; the user reviews the plan for three hours.
+  fakes.clock.advance(3 * 60 * 60_000);
+  await approveResearchPlan({ request: fakeRequest(), userId: user.id, runId: run.id, planRevision: planned.planRevision });
+  const started = await prisma.researchPreviewRun.findUniqueOrThrow({ where: { id: run.id } });
+  assert.equal(started.runDeadlineAt?.getTime(), fakes.clock.now().getTime() + 120 * 60_000);
+  await pauseResearchRun({ request: fakeRequest(), userId: user.id, runId: run.id });
+  assert.equal((await readResearchRunDto(user.id, run.id)).status, "paused");
+  fakes.clock.advance(90 * 60_000);
+  await resumeResearchRun({ request: fakeRequest(), userId: user.id, runId: run.id });
+  const resumed = await prisma.researchPreviewRun.findUniqueOrThrow({ where: { id: run.id } });
+  assert.equal(resumed.runDeadlineAt?.getTime(), started.runDeadlineAt!.getTime() + 90 * 60_000, "paused time is added back");
+  await drainResearchWork("deadline-window-run", 4);
+  assert.equal((await readResearchRunDto(user.id, run.id)).status, "completed");
+  assert.equal(await prisma.researchWorkItem.count({ where: { runId: run.id, errorCode: "RESEARCH_RUN_DEADLINE" } }), 0,
+    "no research was cut short by time spent waiting");
 });
 
 test("a budget-stopped run past its deadline is finished by recovery with the evidence it has", async () => {
@@ -537,6 +565,10 @@ test("a private copy stops being served once its original is deleted after the r
   assert.deepEqual(await researchShareContent(runA.id), { ok: false, code: "RESEARCH_SHARE_PRIVATE" });
   const chunkA = await prisma.researchEvidenceChunk.findFirstOrThrow({ where: { runId: runA.id, version: { source: { visibility: "private" } } } });
   await readResearchEvidence({ userId: user.id, runId: runA.id, chunkId: chunkA.id });
+  const privateKeyA = (await prisma.researchSource.findFirstOrThrow({ where: { runId: runA.id, visibility: "private" } })).sourceKey;
+  const derived = (await prisma.researchClaim.findMany({ where: { runId: runA.id } }))
+    .filter((claim) => (claim.evidence as Array<{ sourceKey: string }>).some((evidence) => evidence.sourceKey === privateKeyA)).map((claim) => claim.text);
+  assert.ok(derived.length > 0, "the report holds claims derived from the private source");
   await prisma.memoryItem.delete({ where: { id: first.id } });
   await rejects(readResearchEvidence({ userId: user.id, runId: runA.id, chunkId: chunkA.id }), "RESEARCH_EVIDENCE_UNAVAILABLE");
   assert.equal((await prisma.researchSource.findFirstOrThrow({ where: { runId: runA.id, visibility: "private" } })).status, "revoked");
@@ -547,6 +579,25 @@ test("a private copy stops being served once its original is deleted after the r
   assert.ok(!JSON.stringify(rereadA.document.bibliography).includes("Post-run memory one"), "no copied label in the bibliography");
   const answerA = await prisma.message.findUniqueOrThrow({ where: { id: (await prisma.researchPreviewRun.findUniqueOrThrow({ where: { id: runA.id } })).assistantMessageId } });
   assert.ok(!answerA.content.includes("Post-run memory one"), "the chat answer was re-rendered without the copied label");
+  // Text derived from the source is withheld too: claims, report blocks and summary, the
+  // chat answer, the account export and the stored analysis findings that quote it.
+  // The fake analyst writes the same claim text for every run, so only runA's export entry is checked (runB is not revoked yet).
+  const findRun = (value: unknown): unknown => {
+    if (!value || typeof value !== "object") return undefined;
+    if ((value as { id?: unknown }).id === runA.id && "engineVersion" in value) return value;
+    for (const child of Object.values(value)) { const found = findRun(child); if (found) return found; }
+    return undefined;
+  };
+  const runAExport = findRun(await (await import("@/lib/accountDataExport")).buildAccountDataExport(user.id));
+  assert.ok(runAExport, "the export carries runA");
+  const exportedA = JSON.stringify(runAExport);
+  const analyses = JSON.stringify((await prisma.researchWorkItem.findMany({ where: { runId: runA.id, kind: "analyze_private" } })).map((item) => item.result));
+  for (const text of derived) {
+    assert.ok(!JSON.stringify(rereadA).includes(text), "no derived claim text in the report");
+    assert.ok(!answerA.content.includes(text), "no derived claim text in the chat answer");
+    assert.ok(!exportedA.includes(text), "no derived claim text in the account export");
+  }
+  assert.ok(!analyses.includes("Post-run memory one"), "stored analysis findings no longer quote the source");
   // No read at all, and the source was excluded from scope first: the account export
   // re-checks it and carries no copied label anywhere.
   const excludedKey = (await prisma.researchSource.findFirstOrThrow({ where: { runId: runB.id, visibility: "private" } })).sourceKey;

@@ -100,7 +100,7 @@ test("a crash between claiming room and binding the reservation neither leaks a 
   setResearchFundingAdapter(null);
   const user = await createUser("finance-crash");
   const { run } = await createResearchRun({ request: fakeRequest(), userId: user.id, payload: { userMessageId: randomUUID(), assistantMessageId: randomUUID(),
-    brief: brief("Crash question"), sources: [], profile: "standard", approvedCredits: 500, autoStart: false } });
+    brief: brief("Crash question"), sources: [], profile: "standard", approvedCredits: 500, autoStart: false, requestPlan: false } });
   const segment = await claimResearchFundingRoom({ runId: run.id, purpose: "work", credits: 20, modelId: "gemini-3-1-pro", provider: "google", pricingVersion: "p" });
   const before = await readResearchRunMoney(prisma, run.id);
   assert.equal(before.reservedCredits, 20, "room is counted while the reservation request is in flight");
@@ -121,7 +121,7 @@ async function raceWorkerBindDuringRecovery(label: string, reserveBeforeRecovery
   const fakes = installFakes();
   const user = await createUser(label);
   const { run } = await createResearchRun({ request: fakeRequest(), userId: user.id, payload: { userMessageId: randomUUID(), assistantMessageId: randomUUID(),
-    brief: brief("Slow worker question"), sources: [], profile: "standard", approvedCredits: 500, autoStart: false } });
+    brief: brief("Slow worker question"), sources: [], profile: "standard", approvedCredits: 500, autoStart: false, requestPlan: false } });
   const segment = await claimResearchFundingRoom({ runId: run.id, purpose: "work", credits: 20, modelId: "gemini-3-1-pro", provider: "google", pricingVersion: "p" });
   const reserveAsWorker = () => fakes.funding.adapter.reserve({ userId: user.id, segmentId: segment.id, model: {} as never, searchEnabled: false,
     estimate: { credits: 20, pricingVersion: "p", searchSurchargeCredits: 0, budget: {} } as never });
@@ -201,7 +201,7 @@ test("a hold that is no longer reserved cannot be bound to its segment", async (
   const fakes = installFakes();
   const user = await createUser("finance-bind-settled");
   const { run } = await createResearchRun({ request: fakeRequest(), userId: user.id, payload: { userMessageId: randomUUID(), assistantMessageId: randomUUID(),
-    brief: brief("Bind question"), sources: [], profile: "standard", approvedCredits: 500, autoStart: false } });
+    brief: brief("Bind question"), sources: [], profile: "standard", approvedCredits: 500, autoStart: false, requestPlan: false } });
   const segment = await claimResearchFundingRoom({ runId: run.id, purpose: "work", credits: 20, modelId: "gemini-3-1-pro", provider: "google", pricingVersion: "p" });
   const reservation = await fakes.funding.adapter.reserve({ userId: user.id, segmentId: segment.id, model: {} as never, searchEnabled: false,
     estimate: { credits: 20, pricingVersion: "p", searchSurchargeCredits: 0, budget: {} } as never });

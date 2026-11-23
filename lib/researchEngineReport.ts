@@ -156,6 +156,30 @@ export function redactReportForPublic(document: ResearchReportDocument, claims: 
   };
 }
 
+/**
+ * A private source whose grant is gone: what was derived from it is withheld in
+ * place, without a model. A block, conflict or summary resting on a claim that
+ * cites the source becomes the removal note, and the bibliography keeps only a
+ * neutral label. Returns null when this revision never used the source.
+ */
+export function withholdRevokedSource(document: ResearchReportDocument, claims: ReadonlyArray<Pick<ReportClaim, "claimKey" | "evidence">>,
+  sourceKey: string, labels: { note: string; privateSource: string }) {
+  const affected = new Set(claims.filter((claim) => claim.evidence.some((evidence) => evidence.sourceKey === sourceKey)).map((claim) => claim.claimKey));
+  if (!affected.size && !document.bibliography.some((entry) => entry.sourceKey === sourceKey)) return null;
+  const rests = (keys: string[]) => keys.some((key) => affected.has(key));
+  const withheld: ResearchReportDocument = {
+    ...document,
+    // The synthesis summary is free text over every claim, so any withheld claim withholds it.
+    summary: affected.size ? labels.note : document.summary,
+    sections: document.sections.map((section) => ({ ...section,
+      blocks: section.blocks.map((block) => rests(block.claimKeys) ? { type: "paragraph" as const, text: labels.note, claimKeys: [] } : block) })),
+    conflicts: document.conflicts.filter((conflict) => !rests(conflict.claimKeys)),
+    limitations: affected.size && !document.limitations.includes(labels.note) ? [...document.limitations.slice(0, 29), labels.note] : document.limitations,
+    bibliography: document.bibliography.map((entry) => entry.sourceKey === sourceKey ? { ...entry, title: labels.privateSource } : entry),
+  };
+  return { affected, document: withheld };
+}
+
 /** Tables from a report as CSV text (RFC 4180 quoting). */
 export function reportTablesCsv(document: ResearchReportDocument) {
   const quote = (value: string) => /[",\r\n]/u.test(value) || /^[=+\-@]/u.test(value) ? `"${(/^[=+\-@]/u.test(value) ? `'${value}` : value).replaceAll("\"", "\"\"")}"` : value;
