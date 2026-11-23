@@ -35,13 +35,14 @@ const drawFace = (style: FaceStyle) => style === "real"
   ? "Preserve the recognisable, photoreal face and draw the body and props."
   : "Make a recognisable illustrated character from the portrait.";
 
-export function StudioStickerTool() {
+export function StudioStickerTool({ billingNotice }: { billingNotice?: string }) {
   const { copy, lang } = useStudioCopy();
   const urls = useStudioUrls();
   const { busy, status, report, task } = useStudioTask();
   const dialog = useRef<HTMLDialogElement>(null);
   const pausedForCheckout = useRef(false);
   const [creditError, setCreditError] = useState<StudioGenerationError | null>(null);
+  const [draftSaved, setDraftSaved] = useState(false);
   const packController = useRef<AbortController | null>(null);
   const cutController = useRef<AbortController | null>(null);
   const [runPack] = useState(createStudioImageRunner);
@@ -77,12 +78,11 @@ export function StudioStickerTool() {
     setSample(saved.sample);
     if (saved.replacement && saved.replacement.index < saved.stickers.length) {
       setReplacement({ ...saved.replacement, source: saved.replacement.source ? restoreSource(saved.replacement.source) : null });
-      if (!dialog.current?.open) dialog.current?.showModal();
     }
     report(copy.checkoutDraftRestored);
   });
 
-  async function showCreditRecovery(error: StudioGenerationError, signal: AbortSignal) {
+  async function saveCheckoutDraft() {
     try {
       const [photoSource, referenceSource, savedStickers, replacementSource] = await Promise.all([
         captureStudioDraftImage(photo.source),
@@ -95,25 +95,34 @@ export function StudioStickerTool() {
         stickers: savedStickers, captions, captionDraft, sample,
         replacement: replacement ? { ...replacement, source: replacementSource } : null,
       });
-      if (signal.aborted) return;
-      if (dialog.current?.open) {
-        pausedForCheckout.current = true;
-        dialog.current.close();
-      }
-      setCreditError(error);
+      setDraftSaved(true);
     } catch {
-      if (signal.aborted) return;
-      if (replacement) setReplacementError(copy.checkoutDraftSaveFailed);
-      else report(copy.checkoutDraftSaveFailed, true);
+      setDraftSaved(false);
     }
   }
-  function closeCreditRecovery() {
+
+  async function showCreditRecovery(error: StudioGenerationError, signal: AbortSignal) {
+    await saveCheckoutDraft();
+    if (signal.aborted) {
+      void checkoutDraft.clear();
+      return;
+    }
+    if (dialog.current?.open) {
+      pausedForCheckout.current = true;
+      dialog.current.close();
+    }
+    setCreditError(error);
+  }
+
+  async function closeCreditRecovery() {
+    await checkoutDraft.clear();
+    pausedForCheckout.current = false;
     setCreditError(null);
-    if (pausedForCheckout.current) {
-      pausedForCheckout.current = false;
-      if (!dialog.current?.open) dialog.current?.showModal();
-    }
   }
+
+  useEffect(() => {
+    if (replacement && !creditError && !pausedForCheckout.current && !dialog.current?.open) dialog.current?.showModal();
+  }, [replacement, creditError]);
   const captionFor = (sticker: Sticker, index: number) => sticker.caption ?? copy[STUDIO_STICKER_KEYS[index]];
   const addCaption = () => {
     if (!captionDraft.trim() || captions.length >= STUDIO_STICKER_LIMIT) return;
@@ -187,7 +196,6 @@ export function StudioStickerTool() {
 
   const openSticker = (index: number) => {
     setReplacement({ index, caption: captionFor(stickers[index], index), source: null });
-    dialog.current?.showModal();
   };
   const closeSticker = () => {
     if (pausedForCheckout.current) return;
@@ -323,6 +331,7 @@ export function StudioStickerTool() {
     <dialog ref={dialog} className={styles.dialog} onClose={closeSticker} aria-labelledby="studio-sticker-regenerate">
       {replacement && <>
         <h2 id="studio-sticker-regenerate">{copy.regenerateFromWords}</h2>
+        {billingNotice && <p role="status" className={styles.billingNotice}>{billingNotice}</p>}
         <div className={styles.regenerationRow}>
           <label className={styles.field}>{copy.newCaption}
             <input autoFocus value={replacement.caption} maxLength={32} disabled={regenerating} onChange={event => {
@@ -347,6 +356,7 @@ export function StudioStickerTool() {
         </div>
       </>}
     </dialog>
-    <StudioCreditRecovery error={creditError} returnTo={"/studio/stickers?lang=" + encodeURIComponent(lang)} onClose={closeCreditRecovery} />
+    <StudioCreditRecovery error={creditError} returnTo={"/studio/stickers?lang=" + encodeURIComponent(lang)}
+      draftSaved={draftSaved} onSaveDraft={saveCheckoutDraft} onClose={closeCreditRecovery} />
   </>;
 }

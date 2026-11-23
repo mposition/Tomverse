@@ -68,6 +68,7 @@ export function StudioToolEditor({ tool }: { tool: Exclude<StudioTool, { id: "st
   const size = id === "poster" ? "1024x1536" : "1024x1024";
   const imageQuote = useStudioImageQuote(size, hasReference, !social);
   const [creditError, setCreditError] = useState<StudioGenerationError | null>(null);
+  const [draftSaved, setDraftSaved] = useState(false);
   const checkoutDraft = useStudioCheckoutDraft<ToolCheckoutDraft>(id, saved => {
     urls.release(photo);
     urls.release(result);
@@ -84,6 +85,19 @@ export function StudioToolEditor({ tool }: { tool: Exclude<StudioTool, { id: "st
     setSceneAction(saved.sceneAction);
     report(copy.checkoutDraftRestored);
   });
+
+  async function saveCheckoutDraft() {
+    try {
+      const [photoDraft, resultDraft] = await Promise.all([captureStudioDraftImage(photo), captureStudioDraftImage(result)]);
+      await checkoutDraft.save({
+        photo: photoDraft, result: resultDraft, customPhoto, resultIsExample,
+        format, title, details, caption, players, textDraft, sceneAction,
+      });
+      setDraftSaved(true);
+    } catch {
+      setDraftSaved(false);
+    }
+  }
 
   useEffect(() => () => active.current?.abort(), []);
 
@@ -153,16 +167,9 @@ export function StudioToolEditor({ tool }: { tool: Exclude<StudioTool, { id: "st
     } catch (error) {
       if (signal.aborted) return;
       if (isStudioCreditShortfall(error)) {
-        try {
-          const [photoDraft, resultDraft] = await Promise.all([captureStudioDraftImage(photo), captureStudioDraftImage(result)]);
-          await checkoutDraft.save({
-            photo: photoDraft, result: resultDraft, customPhoto, resultIsExample,
-            format, title, details, caption, players, textDraft, sceneAction,
-          });
-          if (!signal.aborted) setCreditError(error);
-        } catch {
-          if (!signal.aborted) report(copy.checkoutDraftSaveFailed, true);
-        }
+        await saveCheckoutDraft();
+        if (signal.aborted) void checkoutDraft.clear();
+        else setCreditError(error);
         return;
       }
       if (error instanceof StudioGenerationError && error.status === 409 && !social) imageQuote.reload();
@@ -267,6 +274,9 @@ export function StudioToolEditor({ tool }: { tool: Exclude<StudioTool, { id: "st
     </section>
   </div>
     <StudioCreditRecovery error={creditError} returnTo={"/studio/" + id + "?lang=" + encodeURIComponent(lang)}
-      onClose={() => setCreditError(null)} />
+      draftSaved={draftSaved} onSaveDraft={saveCheckoutDraft} onClose={async () => {
+        await checkoutDraft.clear();
+        setCreditError(null);
+      }} />
   </>;
 }

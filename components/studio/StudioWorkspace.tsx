@@ -1,11 +1,18 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { ArrowRight } from "lucide-react";
 import { ReviewNavigation, WorkspaceTitle, WorkspaceThemeButton } from "@/components/chat/ReviewStudioChrome";
+import { AppToastViewport } from "@/components/AppToastViewport";
+import { purchaseCtaCopy } from "@/components/billing/purchaseCopy";
+import { notifyUserUsageChanged } from "@/components/chat/useUserUsage";
+import { useLanguage } from "@/components/LanguageProvider";
+import { trackProductEvent } from "@/lib/productAnalyticsClient";
+import { normalizeCreditPackId, normalizePurchaseTargetPlan } from "@/lib/purchaseIntent";
 import { PRODUCT_SURFACE_PATH } from "@/lib/productSurfaceRoutes";
 import { STUDIO_TOOLS, findStudioTool, type StudioTool } from "@/lib/studioTools";
 import { StudioStickerTool } from "./StudioStickerTool";
@@ -36,7 +43,35 @@ function ToolArtwork({ tool }: { tool: StudioTool }) {
 
 export function StudioWorkspace({ toolId }: { toolId?: string }) {
   const { copy, lang } = useStudioCopy();
+  const { t } = useLanguage();
   const router = useRouter();
+  const [billingNotice, setBillingNotice] = useState<string>();
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const billing = url.searchParams.get("billing");
+    if (billing !== "success" && billing !== "cancelled" &&
+        billing !== "credits-success" && billing !== "credits-cancelled") return;
+    const copy = purchaseCtaCopy[lang];
+    const purchased = billing === "success" || billing === "credits-success";
+    const pack = normalizeCreditPackId(url.searchParams.get("pack"));
+    const plan = normalizePurchaseTargetPlan(url.searchParams.get("plan"));
+
+    for (const key of ["billing", "pack", "plan", "interval", "access"]) url.searchParams.delete(key);
+    window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
+
+    queueMicrotask(() => {
+      setBillingNotice(billing === "success" ? t("billing.paymentSuccessfulTitle") :
+        purchased ? copy.purchaseSuccessTitle : copy.purchaseCancelledTitle);
+      if (purchased) notifyUserUsageChanged();
+      else trackProductEvent("checkout_cancelled", 0, {
+        cta_location: "studio_checkout_return",
+        purchase_type: billing === "credits-cancelled" ? "credit_pack" : "subscription",
+        ...(pack ? { pack_id: pack } : {}),
+        ...(plan ? { target_plan: plan } : {}),
+      });
+    });
+  }, [lang, t]);
   const studioPath = PRODUCT_SURFACE_PATH.studio;
   const tool = toolId ? findStudioTool(toolId) : undefined;
   return <div className={styles.shell} lang={lang} data-testid="studio-workspace">
@@ -51,10 +86,11 @@ export function StudioWorkspace({ toolId }: { toolId?: string }) {
           href={tool ? { pathname: studioPath, query: { lang } } : undefined} />
         <WorkspaceThemeButton />
       </header>
+      {billingNotice && <p className={styles.billingNotice} role="status" data-testid="studio-billing-notice">{billingNotice}</p>}
       {tool ? <>
         <h1 className="sr-only">{copy[tool.title]}</h1>
         <p className={styles.toolIntro}>{copy[tool.description]}</p>
-        {tool.id === "stickers" ? <StudioStickerTool /> : <StudioToolEditor tool={tool} />}
+        {tool.id === "stickers" ? <StudioStickerTool billingNotice={billingNotice} /> : <StudioToolEditor tool={tool} />}
       </> : <>
         <h1 className="sr-only">Studio</h1>
         <p className={styles.directoryIntro}>{copy.directoryIntro}</p>
@@ -78,5 +114,6 @@ export function StudioWorkspace({ toolId }: { toolId?: string }) {
         ))}
       </>}
     </main>
+    <AppToastViewport />
   </div>;
 }

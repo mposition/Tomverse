@@ -126,6 +126,7 @@
 .panel button + button { margin-inline-start: 5px; }
 .choices button + button, .captionEntry button + button { margin-inline-start: 0; }
 .dialog { margin: auto; width: min(640px, calc(100vw - 28px)); }
+.billingNotice { margin: 10px 0; padding: 8px 10px; border-radius: 8px; background: var(--studio-selection); color: var(--studio-text); font-size: .86rem; }
 .creditBackdrop { position: fixed; z-index: 110; inset: 0; display: grid; place-items: center; padding: 16px; background: #080c1688; }
 .creditDialog { width: min(100%, 400px); max-height: 90dvh; overflow: auto; padding: 20px; border-radius: 16px; border: 1px solid var(--studio-line); background: var(--studio-surface); color: var(--studio-text); }
 .creditDialog h2 { margin: 0 0 8px; font-size: 1.15rem; }
