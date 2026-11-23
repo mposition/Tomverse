@@ -66,6 +66,13 @@ cheaper model is good enough or that total cost falls.
   message alone), so a conversation never straddles the halves. Guidance is
   still frozen before any holdout call, and no current or earlier comparison
   enters the generator.
+- **Replayed menus.** Every optimizer cycle (routing and diagnostic) replays
+  a recorded decision's menu against today's catalogue: a candidate that is
+  no longer enabled, deleted or unpriced is dropped before the router sees
+  it, and a decision left with fewer than two candidates is not loaded. An
+  answer that was never sent (`no_dispatch`) is not retried, and a pair
+  missing either answer is counted as "without both answers", never as a
+  known US$0 cost pair.
 - **Boundaries.** `optimizerPromotionEligibility` refuses any summary with an
   objective or a cost-efficiency report (`diagnostic_only`), before every
   other check, for manual and system promotion; the status is `diagnostic`,
@@ -102,7 +109,7 @@ ceiling. The mock's wrong calculation on the lowest tier is caught (exact
 11/11 vs 10/11, one critical regression). These numbers describe the code
 path only; mock quality and mock spend are not evidence.
 
-## Run plan (paid; one dev run approved 2026-11-23, not started)
+## Run plan (paid; one dev run approved and run 2026-11-23)
 
 Approved by the owner on 2026-11-23: one person-started diagnostic on the
 **dev** environment's Admin › Routing, with the switch set on the dev
@@ -121,6 +128,17 @@ never counted as equal.
 A small sample can report `observed_no_regression`, not non-inferiority.
 After the run: read the report, then decide separately whether a guidance
 change is worth an ordinary routing cycle; nothing is applied automatically.
+
+**Dev run, 2026-11-23 20:47 AEST: not evidence.** Dev had never run with the
+routing switch on, so its 24 picked decisions were old and no synthetic
+messages were added. Their recorded menus still named models since retired
+or disabled there (`gpt-5-4-mini`, `gpt-5-6-luna`, `gpt-5-6-terra`,
+`gemini-2-5-flash`): 36 answer calls were `no_dispatch` (`model_unavailable`),
+including retries, 9 answers were sent, and one pair was judged. Known spend
+US$0.157, no unknown cost. Only 1 savings sample, so nothing was measured
+against the criteria. The replayed-menu filter above is the fix. The owner
+chose production, where the routing switch is live, for the next run; that
+run needs its own approval.
 
 ## What remains unmeasured
 

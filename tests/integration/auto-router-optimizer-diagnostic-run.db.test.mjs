@@ -27,10 +27,12 @@ test("a diagnostic cycle's run over the real cycle table", { skip: !databaseUrl 
     const byCredits = (candidates, dir) =>
         [...candidates].sort((a, b) => dir * ((a.credits ?? 0) - (b.credits ?? 0)) || a.id.localeCompare(b.id))[0].id;
     const routed = [];
+    const offered = [];
     mock.module(mod("lib/autoLlmRouter.ts"), {
         namedExports: {
             callAutoLlmRouter: async (input) => {
                 routed.push(input.guidance);
+                offered.push(input.candidates.map((candidate) => candidate.id));
                 const baseline = input.guidance !== PROPOSAL;
                 return { outcome: "picked", pick: { modelId: byCredits(input.candidates, baseline ? -1 : 1) },
                     usage: { inputTokens: 900, outputTokens: 30, inputTokenDetails: { cacheReadTokens: 50 } } };
@@ -131,6 +133,37 @@ test("a diagnostic cycle's run over the real cycle table", { skip: !databaseUrl 
             assert.notEqual(state.servingCost, undefined);
             // Spend reached the provider buckets like any cycle's.
             assert.ok(row.spentMicroUsd > 0);
+        });
+        await t.test("a recorded menu's retired model is never picked, drawn or answered", async () => {
+            const live = models.filter((item) => item.enabled && !item.catalogDeleted && optimizer.pricesOf(item)).slice(0, 2);
+            assert.equal(live.length, 2);
+            const candidate = (id, credits) => ({ id, name: id, bestFor: "general", tier: "standard", credits });
+            const user = await prisma.user.create({ data: { email: `diagnostic-menu-${randomUUID()}@example.test`, name: "Menu" } });
+            try {
+                // One conversation per decision, so the family split has both halves.
+                const conversations = await Promise.all(Array.from({ length: 24 }, () =>
+                    prisma.conversation.create({ data: { selectedModels: "[]", userId: user.id, title: "t", kind: "chat" } })));
+                // The retired model is the dearest, so the baseline router mock would pick it if it were offered.
+                await prisma.autoRouterDecision.createMany({ data: conversations.map((conversation, index) => ({
+                    version: "auto-llm-router-v2-bounded", traceId: `diagnostic-menu-${randomUUID()}-${index}`, userId: user.id,
+                    conversationId: conversation.id, routerInput: `hello ${index}`, taskKind: "general",
+                    candidates: [candidate("retired-model-for-test", 99), candidate(live[0].id, 3), candidate(live[1].id, 2)],
+                    ruleModelId: live[0].id, routerModelId: model.id, pickedModelId: "retired-model-for-test", outcome: "picked", latencyMs: 100,
+                })) });
+                offered.length = 0;
+                const started = await optimizer.startAutoRouterOptimizerCycle(actor, { waitForCompletion: true, objective: "chat_cost_efficiency" });
+                assert.ok("cycleId" in started, JSON.stringify(started));
+                const row = await prisma.autoRouterOptimizerCycle.findUniqueOrThrow({ where: { id: started.cycleId } });
+                assert.ok(offered.length > 0, JSON.stringify({ status: row.status, failure: row.failure, outcome: started.outcome, calls: row.summary?.costCoverage?.calls?.length }));
+                assert.ok(offered.every((ids) => !ids.includes("retired-model-for-test")));
+                const calls = row.summary.costCoverage.calls;
+                assert.equal(calls.filter((call) => call.kind === "answer" && call.state === "no_dispatch").length, 0);
+                assert.ok(calls.every((call) => call.identity?.modelId !== "retired-model-for-test"));
+            } finally {
+                await prisma.autoRouterDecision.deleteMany({ where: { userId: user.id } });
+                await prisma.conversation.deleteMany({ where: { userId: user.id } });
+                await prisma.user.delete({ where: { id: user.id } });
+            }
         });
     } finally {
         if (before === undefined) delete process.env.AUTO_ROUTER_COST_EFFICIENCY_DIAGNOSTIC;

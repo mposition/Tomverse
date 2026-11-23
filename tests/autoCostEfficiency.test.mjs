@@ -307,6 +307,29 @@ test("a retried answer pays both tries, and unknown cost stops scheduling withou
   for (const reason of ["cycle_incomplete", "cost_coverage_incomplete"]) assert.ok(stopped.costEfficiency.applicability.reasons.includes(reason));
 });
 
+test("an answer that was never sent is not asked for again, and its pair is no answer, not a known US$0", async () => {
+  const tries = new Map();
+  const { deps } = costDeps({
+    answer: async (modelId, turn) => {
+      const key = `${modelId}/${turn.message}`;
+      tries.set(key, (tries.get(key) ?? 0) + 1);
+      return modelId === "cheap"
+        ? { value: null, costMicroUsd: 0, cost: { state: "no_dispatch", reason: "model_unavailable" }, provider: "unknown" }
+        : { value: `${modelId} answer`, ...known(ANSWER_COST[modelId]), provider: `${modelId}-co` };
+    },
+  });
+  const result = await runOptimizerCycle(costInput(), deps);
+  const cheapPairs = result.comparisons.filter((item) => item.b === "cheap");
+  assert.ok(cheapPairs.length > 0);
+  assert.ok([...tries].filter(([key]) => key.startsWith("cheap/")).every(([, count]) => count === 1));
+  assert.ok(cheapPairs.every((item) => item.costEfficiency.answerCost.b.attempts === 1));
+  const observed = result.costEfficiency.candidateDiagnosis.observedAnswerCost;
+  assert.equal(observed.pairsUnanswered, cheapPairs.length);
+  // Only the pairs where both sides answered are cost pairs; a missing cheap answer is never "cheaper".
+  assert.equal(observed.pairsKnown, result.costEfficiency.candidateDiagnosis.savingsSamples - cheapPairs.length);
+  assert.equal(observed.challengerLower, observed.pairsKnown);
+});
+
 test("fewer credits with a higher observed answer cost is not a saving", () => {
   const unknownView = { state: "unknown", microUsd: null, attempts: 1, failedAttempts: 0 };
   const view = (microUsd) => ({ state: "known", microUsd, attempts: 1, failedAttempts: 0 });
@@ -322,7 +345,7 @@ test("fewer credits with a higher observed answer cost is not a saving", () => {
     summary: { incumbentCredits: 9, candidateCredits: 9 },
   });
   const observed = report.candidateDiagnosis.observedAnswerCost;
-  assert.deepEqual(observed, { pairsKnown: 1, pairsUnknown: 1, incumbentMicroUsd: 10, challengerMicroUsd: 50, challengerLower: 0, challengerHigher: 1, same: 0 });
+  assert.deepEqual(observed, { pairsKnown: 1, pairsUnknown: 1, pairsUnanswered: 0, incumbentMicroUsd: 10, challengerMicroUsd: 50, challengerLower: 0, challengerHigher: 1, same: 0 });
   assert.deepEqual(report.candidateDiagnosis.credits, { pairs: 2, incumbent: 18, challenger: 2 });
   assert.ok(report.applicability.reasons.includes("no_observed_saving"));
   assert.ok(report.applicability.reasons.includes("guidance_not_cheaper"));
