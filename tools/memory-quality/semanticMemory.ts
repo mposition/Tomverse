@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { setTimeout as sleep } from "node:timers/promises";
 import { resolve } from "node:path";
 import { z } from "zod";
 import { digest } from "./schema";
@@ -248,6 +249,24 @@ export function compareMemoryDetailed(corpus: string, cases: readonly RetrievalC
   };
 }
 
+async function resumableScores(
+  file: string, expected: { corpus: string; kind: "provider" | "mock"; model: string; corpusDigest: string },
+  cases: readonly RetrievalCase[], mode: MemoryEvaluationQueryMode, preparation?: EvaluationPreparation,
+) {
+  const prior = await loadMemoryScores(file);
+  const provenance = prior.provenance;
+  if (prior.corpus !== expected.corpus || provenance?.kind !== expected.kind || provenance.model !== expected.model ||
+      provenance.corpusDigest !== expected.corpusDigest) throw new QualityStop("resume_scores_mismatch");
+  const resumed: Record<string, Record<string, number>> = {};
+  for (const [caseId, scores] of prior) {
+    const row = cases.find((candidate) => candidate.id === caseId);
+    if (!row || JSON.stringify(provenance.requests[caseId]) !==
+        JSON.stringify(memoryEvaluationInputIdentity(row, mode, preparation))) throw new QualityStop("resume_scores_mismatch");
+    resumed[caseId] = Object.fromEntries(scores);
+  }
+  return resumed;
+}
+
 export async function measureSemanticMemory(input: {
   corpus: string; cases: readonly RetrievalCase[]; options: Record<string, string>; live: boolean;
   context: LiveContext;
@@ -268,15 +287,24 @@ export async function measureSemanticMemory(input: {
     // Check the full corpus before a save file or the first paid request.
     for (const row of cases) evaluationInput(row, mode, preparation);
   }
-  const planned = plannedMemoryCalls(cases);
+  const kind = context.fetchImpl ? "mock" as const : "provider" as const;
+  const corpusDigest = memoryEvaluationCorpusDigest(cases, mode, preparation);
+  const intervalMs = options["min-interval-ms"] === undefined ? 0 : Number(options["min-interval-ms"]);
+  if (!Number.isSafeInteger(intervalMs) || intervalMs < 0) throw new QualityStop("min_interval_invalid");
+  // Scores already paid for by an interrupted run on the same inputs; only the rest is requested.
+  const collected: Record<string, Record<string, number>> = options["resume-scores"]
+    ? await resumableScores(options["resume-scores"], { corpus, kind, model: config.rerankModel, corpusDigest },
+      cases, mode, preparation)
+    : {};
+  const pending = cases.filter(hasRerankRequest).filter((row) => !(row.id in collected));
+  const planned = pending.length;
   if (planned === 0) throw new QualityStop("nothing_to_rerank");
   if (planned > config.maxCalls) throw new QualityStop("max_calls_below_planned");
   const client = await openLiveClient(config, context);
 
-  const collected: Record<string, Record<string, number>> = {};
   const provenance: z.infer<typeof scoreProvenance> = {
-    kind: context.fetchImpl ? "mock" : "provider", provider: "cohere", model: config.rerankModel,
-    collectedAt: new Date().toISOString(), corpusDigest: memoryEvaluationCorpusDigest(cases, mode, preparation),
+    kind, provider: "cohere", model: config.rerankModel,
+    collectedAt: new Date().toISOString(), corpusDigest,
     requests: Object.fromEntries(cases.filter(hasRerankRequest).map((row) => [row.id, memoryEvaluationInputIdentity(row, mode, preparation)])),
     settings: { maxCalls: config.maxCalls, queryVersion: queryVersion(mode), queryMode: mode,
       ...(preparation ? { billingUnit: preparation.billing.unit } : {}),
@@ -290,7 +318,8 @@ export async function measureSemanticMemory(input: {
   const target = await SaveTarget.claim(config.saveScores, snapshot(false));
   let stop: LiveStop | null = null;
   try {
-    for (const testCase of cases.filter(hasRerankRequest)) {
+    for (const [index, testCase] of pending.entries()) {
+      if (index > 0 && intervalMs > 0) await sleep(intervalMs);
       const documents = rerankDocuments(testCase.retrieval);
       const scores = await client.rerank(memoryEvaluationQueryPlan(testCase, mode, preparation).semanticQuery,
         documents.map((doc) => doc.text), mode === "current-query" ? undefined : "memory-v3");

@@ -34,9 +34,11 @@ followup-eval [--inputs <json> --key <json>] [--out <directory>]
         chat messages each would send, answer import, a blind sheet and verdict import. Files only;
         no provider call. Defaults to the development fixture. Run with node --conditions=react-server.
 followup-scores --inputs <json> --key <json> --query-mode full-query|full-query+history
-        --live --max-calls <n> --save-scores <new-json>
+        --live --max-calls <n> --save-scores <new-json> [--resume-scores <partial-json>] [--min-interval-ms <n>]
         PAID: one rerank request per follow-up case that has relevant candidates, saved in the
         score file followup-eval replays with --scores-full-query / --scores-full-query-history.
+        --resume-scores keeps the cases an interrupted run on the same inputs already scored and
+        requests only the rest; --min-interval-ms waits between requests (provider rate limits).
 Defaults: mode=mock, out=.tmp/memory-quality, iterations=3, max-calls=1000, timeout-ms=60000,
 corpus=retrieval-ko.
 The run command has no live mode, paid execution, product writes, promotion, network or raw
@@ -50,7 +52,7 @@ const commandOptions: Record<string, string[]> = {
   retrieval: ["corpus", "semantic", "rerank-scores", "live", "max-calls", "save-scores", "query-mode"],
   "knowledge-retrieval": ["scores", "live", "max-calls", "save-scores"],
   "followup-eval": ["inputs", "key", "out", "scores-full-query", "scores-full-query-history", "answers", "verdicts"],
-  "followup-scores": ["inputs", "key", "query-mode", "live", "max-calls", "save-scores"],
+  "followup-scores": ["inputs", "key", "query-mode", "live", "max-calls", "save-scores", "resume-scores", "min-interval-ms"],
 };
 const FOLLOWUP_DEV_INPUTS = fileURLToPath(new URL("./fixtures/followup-dev.inputs.json", import.meta.url));
 const FOLLOWUP_DEV_KEY = fileURLToPath(new URL("./fixtures/followup-dev.key.json", import.meta.url));
@@ -106,7 +108,7 @@ export async function main(args: string[], context: LiveContext = {}) {
     });
     return { followupScores: { bundle: bundle.bundleId, evalDigest: bundle.evalDigest, queryMode: mode,
       live: result.live, paidCalls: result.paidCalls },
-      ...("stopReason" in result ? { stopReason: result.stopReason } : {}) };
+      ...("stopReason" in result ? { stopReason: result.stopReason, failure: result.failure } : {}) };
   }
   if (command === "knowledge-retrieval") {
     const live = options.live === "true";

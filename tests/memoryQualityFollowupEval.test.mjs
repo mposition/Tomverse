@@ -349,3 +349,54 @@ test("followup-scores collects one rerank request per case into a file followup-
         assert.equal(report.paidCalls, 0);
     });
 });
+
+test("followup-scores names the failure and a resumed run requests only the unscored cases", async () => {
+    await withTemp(async directory => {
+        const files = { inputs: fileURLToPath(fixture("followup-dev.inputs.json")), key: fileURLToPath(fixture("followup-dev.key.json")) };
+        const bundle = buildFollowupBundle(devInputs, devKey);
+        const planned = followupRetrievalCases(bundle).filter(row => rerankDocuments(row.retrieval).length > 0).length;
+        assert.ok(planned >= 3);
+        const env = { COHERE_API_KEY: "synthetic-key", COHERE_RERANK_MODEL: "rerank-v5.0-fast",
+            COHERE_RERANK_MICROUSD_PER_MILLION_TOKENS: "1000000" };
+        let requests = 0;
+        let failAt = 3;
+        const fetchImpl = async (_url, init) => {
+            requests += 1;
+            if (requests === failAt) return new Response("{}", { status: 429 });
+            const body = JSON.parse(init.body);
+            return new Response(JSON.stringify({
+                results: body.documents.map((_doc, index) => ({ index, relevance_score: index === 0 ? 0.9 : 0.05 })),
+                meta: { billed_units: { input_tokens: 50 } },
+            }));
+        };
+        const collect = (mode, save, extra = []) => main(["followup-scores", "--inputs", files.inputs, "--key", files.key,
+            "--query-mode", mode, "--live", "--max-calls", String(planned), "--save-scores", save, ...extra], { env, fetchImpl });
+
+        const partial = join(directory, "partial.json");
+        const stopped = await collect("full-query", partial);
+        assert.equal(stopped.stopReason, "live_call_failed");
+        assert.equal(stopped.failure, "rate_limited");
+        assert.equal(stopped.followupScores.paidCalls, 3);
+        const saved = JSON.parse(await readFile(partial, "utf8"));
+        assert.equal(saved.complete, false);
+        assert.equal(Object.keys(saved.scores).length, 2);
+
+        await assert.rejects(collect("full-query", join(directory, "bad.json"), ["--min-interval-ms", "-1"]),
+            { code: "min_interval_invalid" });
+        await assert.rejects(collect("full-query+history", join(directory, "other.json"), ["--resume-scores", partial]),
+            { code: "resume_scores_mismatch" });
+        assert.equal(requests, 3);
+
+        failAt = 0;
+        const resumed = join(directory, "resumed.json");
+        const result = await collect("full-query", resumed, ["--resume-scores", partial, "--min-interval-ms", "1"]);
+        assert.equal(result.followupScores.paidCalls, planned - 2);
+        assert.equal(result.followupScores.live.planned, planned - 2);
+        assert.equal(requests, 3 + planned - 2);
+        const complete = JSON.parse(await readFile(resumed, "utf8"));
+        assert.equal(complete.complete, true);
+        assert.equal(Object.keys(complete.scores).length, planned);
+        for (const [caseId, scores] of Object.entries(saved.scores)) assert.deepEqual(complete.scores[caseId], scores);
+        assert.equal(complete.provenance.corpusDigest, saved.provenance.corpusDigest);
+    });
+});
