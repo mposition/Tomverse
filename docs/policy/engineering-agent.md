@@ -211,8 +211,10 @@ DM에 조언 카드로 올라가고(docs/policy/amux-decision-maker.md 결과 �
 `done`인 경우다. 닫힌(archive) 카드의 PR은 더 새 PR이 있어도 그 답 그대로 모두 남는다. 목록은 기능 header에 `close_superseded_review_drafts`를 적은
 게시 서비스에만, 게시가 허용되고(스위치, 정지 없음) 검토 PR 스위치가 켜져 있을 때만 간다. 게시 서비스는 claim의 일을 마친 뒤
 각 PR을 GitHub에서 다시 읽어 열린 draft이고, develop 대상이고, 이 저장소의 그 run branch에서 게시 App 자신(`/app`의
-`<slug>[bot]`)이 열었고, 첫 줄이 그 run의 marker이고, 누구의 review도 없을 때만, 앱의 마지막 확인(`publish/close-look`: 그
-순간의 스위치·정지·목록을 다시 읽는다, 거절만 할 수 있다)을 받은 뒤 한 번 닫는다. 사람이 ready로 바꾸거나 review한 PR은 닫지
+`<slug>[bot]`)이 열었고, 첫 줄이 그 run의 marker이고, 누구의 review도 없고, 목록이 함께 적은 대체 PR(`replacedBy`)이 GitHub에서
+지금 열려 있을 때만(사람이 방금 닫은 대체 PR은 결속에 아직 열려 있을 수 있다), 앱의 마지막 확인(`publish/close-look`: 그
+순간의 스위치·정지·목록을 다시 읽고, 닫는 사유가 방금 확인한 그 대체 PR 또는 done 카드 그대로인지 본다, 거절만 할 수
+있다)을 받은 뒤 한 번 닫는다. 사람이 ready로 바꾸거나 review한 PR은 닫지
 않는다. 답을 잃은 닫기는 다시 하지 않고 다음 회차가 다시 읽는다. 결속은 관측기의 보통 해제(`closed`)로 옮겨진다.
 
 ## 4. push 금지 집합

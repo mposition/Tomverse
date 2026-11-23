@@ -37,7 +37,7 @@ const world = ({ claim, pulls = {}, closeOk = true, mintFails = false, reviewed 
   const ports = {
     app: async (path, body) => {
       if (path === "publish/close-look") {
-        calls.push(`look:${body.prNumber}:${body.runId}`);
+        calls.push(`look:${body.prNumber}:${body.runId}${body.replacedBy === null ? "" : `:${body.replacedBy}`}`);
         const verdict = closeLook(body);
         return verdict === null ? { status: 503, json: null } : { status: 200, json: { verdict } };
       }
@@ -155,7 +155,8 @@ test("a draft is closed only while GitHub shows the pull request that replaced i
     { prNumber: 4209, outcome: "replacement_not_open" }, { prNumber: 4210, outcome: "replacement_not_open" }],
     "a person closed 4229 just now, and 4230 is gone; the app's bindings have not seen either yet");
   assert.deepEqual(calls.filter((call) => call.startsWith("close:")), ["close:4208"]);
-  assert.ok(calls.indexOf("read:4228") < calls.indexOf(`look:4208:${RUN_A}`));
+  assert.ok(calls.indexOf("read:4228") < calls.indexOf(`look:4208:${RUN_A}:4228`),
+    "the last look is asked about the replacement just read open");
 });
 
 test("a close whose answer is lost is not repeated; no token, nothing tried; a refused claim or no list closes nothing", async () => {
@@ -212,7 +213,9 @@ test("the app's last look before a close reads the same list again and can only 
   const route = readFileSync("app/api/internal/engineering-agent/publish/close-look/route.ts", "utf8");
   assert.match(route, /isEngineeringAgentRouteAuthorized\(request, "publisher"\)/);
   assert.match(route, /const drafts = await readEngineeringAgentSupersededReviewDrafts\(prisma\);/);
-  assert.match(route, /draft\.prNumber === body\.prNumber && draft\.runId === body\.runId/);
+  assert.match(route, /draft\.prNumber === body\.prNumber && draft\.runId === body\.runId &&\s+draft\.replacedBy === body\.replacedBy/,
+    "the same reason: a card done since, or another replacement, is refused");
+  assert.match(route, /replacedBy: z\.number\(\)\.int\(\)\.positive\(\)\.max\(2_147_483_647\)\.nullable\(\)/);
   assert.match(route, /verdict: named \? "no_objection" : "objection"/);
   assert.doesNotMatch(route, /\.(create|update|upsert|delete)\w*\(|\$executeRaw/, "it writes nothing");
 });

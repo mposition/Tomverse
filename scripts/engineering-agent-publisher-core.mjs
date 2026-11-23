@@ -308,7 +308,9 @@ async function closeSupersededReviewDrafts(ports, drafts) {
         if (outcome === "close" && draft.replacedBy !== null &&
             (await github.pullByNumber(draft.replacedBy))?.state !== "open") outcome = "replacement_not_open";
         if (outcome === "close") {
-          const look = await ports.app("publish/close-look", { prNumber: draft.prNumber, runId: draft.runId });
+          // The reason too: the replacing pull request just read open, or none for a done card.
+          const look = await ports.app("publish/close-look", { prNumber: draft.prNumber, runId: draft.runId,
+            replacedBy: draft.replacedBy });
           if (look.status !== 200 || look.json?.verdict !== "no_objection") outcome = "close_look_refused";
         }
         if (outcome === "close") outcome = (await github.closePull(draft.prNumber)) ? "closed" : "close_unknown";
