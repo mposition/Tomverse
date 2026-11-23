@@ -243,7 +243,8 @@ export const PUBLISHER_REPOSITORY = "mposition/Tomverse";
 /**
  * The claim's list of review drafts to close, as the app sent it: each a pull
  * request number and a run id, its branch the one that run's publish item
- * pushed. Anything else is dropped; a number named twice is closed once.
+ * pushed, and the pull request that replaced it (null: its card is done).
+ * Anything else is dropped; a number named twice is closed once.
  */
 export const closeableReviewDrafts = (list) => {
   if (!Array.isArray(list)) return [];
@@ -254,8 +255,10 @@ export const closeableReviewDrafts = (list) => {
     const runId = entry?.runId;
     if (!Number.isSafeInteger(prNumber) || prNumber <= 0 || typeof runId !== "string" || !isRunId(runId)) continue;
     if (entry.branch !== engineeringBranchName(runId) || seen.has(prNumber)) continue;
+    const replacedBy = entry.replacedBy ?? null;
+    if (replacedBy !== null && (!Number.isSafeInteger(replacedBy) || replacedBy <= 0 || replacedBy === prNumber)) continue;
     seen.add(prNumber);
-    drafts.push({ prNumber, runId, branch: entry.branch });
+    drafts.push({ prNumber, runId, branch: entry.branch, replacedBy });
   }
   return drafts;
 };
@@ -282,7 +285,8 @@ export const APP_BOT_LOGIN = /^[a-z0-9][a-z0-9-]{0,98}\[bot\]$/;
 
 /**
  * Closes each review draft that passes decideReviewDraftClose, once: read it,
- * refuse one anybody reviewed, ask the app's last look
+ * refuse one anybody reviewed or whose replacement GitHub does not show open
+ * now (the app's binding may not have seen a person close it yet), ask the app's last look
  * (`publish/close-look`: the switches, the halt and the list read again just
  * before the write), then one close. A close whose answer is lost is not
  * repeated here; the next round reads the pull request again and finds it
@@ -301,6 +305,8 @@ async function closeSupersededReviewDrafts(ports, drafts) {
       try {
         outcome = decideReviewDraftClose(draft, await github.pullByNumber(draft.prNumber), selfLogin);
         if (outcome === "close" && (await github.pullReviewed(draft.prNumber))) outcome = "reviewed";
+        if (outcome === "close" && draft.replacedBy !== null &&
+            (await github.pullByNumber(draft.replacedBy))?.state !== "open") outcome = "replacement_not_open";
         if (outcome === "close") {
           const look = await ports.app("publish/close-look", { prNumber: draft.prNumber, runId: draft.runId });
           if (look.status !== 200 || look.json?.verdict !== "no_objection") outcome = "close_look_refused";

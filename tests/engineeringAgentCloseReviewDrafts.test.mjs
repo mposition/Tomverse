@@ -24,7 +24,7 @@ import {
 const RUN_A = "111111111111";
 const RUN_B = "222222222222";
 const SELF = "tomverse-engineering-publisher[bot]";
-const draftOf = (runId, prNumber) => ({ prNumber, runId, branch: `agent/engineering/${runId}` });
+const draftOf = (runId, prNumber, replacedBy = null) => ({ prNumber, runId, branch: `agent/engineering/${runId}`, replacedBy });
 const pullOf = (draft, over = {}) => ({
   number: draft.prNumber, state: "open", draft: true, baseRef: "develop", headRef: draft.branch,
   headRepo: PUBLISHER_REPOSITORY, authorType: "Bot", authorLogin: SELF, body: `${prBodyMarker(draft.runId)}\n\nOwner review (T2).`, ...over,
@@ -80,6 +80,12 @@ test("the claim's list is taken only as numbers and run ids whose branch is that
     { prNumber: 7, runId: RUN_A, branch: `agent/engineering/${RUN_B}` }, { prNumber: "7", runId: RUN_A, branch: a.branch }]) {
     assert.deepEqual(closeableReviewDrafts([bad]), [], JSON.stringify(bad));
   }
+  // The replacing pull request: a positive number other than its own, or null (the card is done).
+  assert.deepEqual(closeableReviewDrafts([{ ...a, replacedBy: 4228 }]), [{ ...a, replacedBy: 4228 }]);
+  assert.deepEqual(closeableReviewDrafts([{ prNumber: a.prNumber, runId: a.runId, branch: a.branch }]), [a],
+    "a draft named without a replacement is the done card's");
+  for (const replacedBy of [0, -1, 1.5, "4228", a.prNumber])
+    assert.deepEqual(closeableReviewDrafts([{ ...a, replacedBy }]), [], String(replacedBy));
   assert.deepEqual(closeableReviewDrafts(undefined), []);
   assert.deepEqual(closeableReviewDrafts({}), []);
 });
@@ -137,6 +143,21 @@ test("a reviewed draft, or one the app's last look no longer names, is left; so 
   }
 });
 
+test("a draft is closed only while GitHub shows the pull request that replaced it open", async () => {
+  const a = draftOf(RUN_A, 4208, 4228);
+  const b = draftOf(RUN_B, 4209, 4229);
+  const c = draftOf("333333333333", 4210, 4230);
+  const claim = { status: 200, json: { work: null, halt: "none", closeReviewDrafts: [a, b, c] } };
+  const replacement = (number, over = {}) => ({ number, state: "open", draft: true, ...over });
+  const { ports, calls } = world({ claim, pulls: { 4208: pullOf(a), 4209: pullOf(b), 4210: pullOf(c),
+    4228: replacement(4228), 4229: replacement(4229, { state: "closed" }) } });
+  assert.deepEqual((await runPublisherCycle(ports)).closedReviewDrafts, [{ prNumber: 4208, outcome: "closed" },
+    { prNumber: 4209, outcome: "replacement_not_open" }, { prNumber: 4210, outcome: "replacement_not_open" }],
+    "a person closed 4229 just now, and 4230 is gone; the app's bindings have not seen either yet");
+  assert.deepEqual(calls.filter((call) => call.startsWith("close:")), ["close:4208"]);
+  assert.ok(calls.indexOf("read:4228") < calls.indexOf(`look:4208:${RUN_A}`));
+});
+
 test("a close whose answer is lost is not repeated; no token, nothing tried; a refused claim or no list closes nothing", async () => {
   const a = draftOf(RUN_A, 4208);
   const lost = world({ claim: { status: 200, json: { work: null, halt: "none", closeReviewDrafts: [a] } },
@@ -177,8 +198,10 @@ test("the read names only open, current, unobserved review drafts a newer run re
   assert.match(read, /if \(!switches\.publishAllowed \|\| engineeringAgentHalted\(await readEngineeringAgentHaltState\(db\)\)\) return \[\];/);
   assert.match(read, /WHERE b\."state" = 'open' AND b\."supersededAt" IS NULL\s+AND b\."approvalObservation" IS NULL AND b\."mergeObservation" IS NULL/);
   assert.match(read, /w\."kind" = 'publish' AND w\."causeKey" = \$\{ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX\} \|\| b\."runId"/);
-  assert.match(read, /nr\."cardId" = r\."cardId" AND nr\."id" <> r\."id" AND nr\."startedAt" > r\."startedAt"/);
-  assert.match(read, /AND nb\."state" = 'open' AND nb\."supersededAt" IS NULL\)/, "the newer pull request is an open, current one");
+  assert.match(read, /nr\."cardId" = r\."cardId" AND nr\."id" <> r\."id" AND \(nr\."startedAt", nr\."id"\) > \(r\."startedAt", r\."id"\)/);
+  assert.match(read, /AND nb\."state" = 'open' AND nb\."supersededAt" IS NULL\s+ORDER BY nr\."startedAt" DESC, nr\."id" DESC/,
+    "the newer pull request is an open, current one, the newest named");
+  assert.match(read, /AND \(repl\."prNumber" IS NOT NULL\s+OR EXISTS/);
   assert.match(read, /card\."status" = 'done'/);
   assert.match(read, /AND NOT EXISTS \(SELECT 1 FROM "AmuxWorkItem" card WHERE card\."id" = r\."cardId" AND card\."archivedAt" IS NOT NULL\)/,
     "a closed card keeps its pull requests");

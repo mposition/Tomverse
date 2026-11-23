@@ -598,7 +598,7 @@ test("a review pull request's approval is recorded with its verified head and di
     assert.deepEqual(await apply(card.settlementId, { decision: "complete" }), { applied: true, outcome: "done" });
     assert.equal((await taskRow(tx, card.taskId)).status, "done");
     assert.equal((await settlementRow(tx, card.settlementId))?.decision, "complete");
-    assert.deepEqual(await mineToClose(), [{ prNumber, runId, branch: `agent/engineering/${runId}` }]);
+    assert.deepEqual(await mineToClose(), [{ prNumber, runId, branch: `agent/engineering/${runId}`, replacedBy: null }]);
     assert.deepEqual(await readEngineeringAgentSupersededReviewDrafts(tx, { ENGINEERING_AGENT_V22_REVIEW_PR: "off" }), [],
       "review drafts switched off: nothing is closed");
   });
@@ -643,9 +643,12 @@ test("a review pull request's approval is recorded with its verified head and di
       }
     });
     const listed = async () => (await readEngineeringAgentSupersededReviewDrafts(tx, {}))
-      .filter((draft) => runs.some((run) => run.runId === draft.runId));
+      .filter((draft) => runs.some((run) => run.runId === draft.runId))
+      // One transaction wrote every binding at one clock: their order is the ids'.
+      .sort((left, right) => left.runId.localeCompare(right.runId));
     assert.deepEqual(await listed(), runs.slice(0, 2).map((run) => ({ prNumber: run.prNumber, runId: run.runId,
-      branch: `agent/engineering/${run.runId}` })), "the drafts newer runs replaced; never the newest");
+      branch: `agent/engineering/${run.runId}`, replacedBy: runs[2]!.prNumber })),
+      "the drafts newer runs replaced, each named with the newest that replaced it; never the newest");
     // A binding the observer already moved to closed is not one to close again.
     await withoutTriggers(tx, () => tx.$executeRaw`UPDATE "EngineeringAgentBinding" SET "state" = 'closed'
       WHERE "id" = ${runs[0]!.bindingId}`);
