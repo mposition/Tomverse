@@ -69,6 +69,7 @@ export const REVIEW_PRODUCT_PATH = "/products/review";
 export const CHAT_PRODUCT_PATH = "/products/chat";
 export const DEVELOPERS_PATH = "/developers";
 export const CLI_DOWNLOAD_PATH = "/developers/cli";
+export const EDITOR_EXTENSIONS_PATH = "/developers#editor-extensions";
 export const VSCODE_GUIDE_PATH = "/developers#tomverse-vscode";
 /** Cursor connection guide (owner approval 2026-11-21). */
 export const CURSOR_GUIDE_PATH = "/developers/cursor";
