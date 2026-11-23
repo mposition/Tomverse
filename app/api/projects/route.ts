@@ -37,7 +37,9 @@ export async function POST(req: Request) {
     try {
         const auth = await projectRouteUser(req, "project-create", { minute: 10, day: 100 });
         if (auth.response) return auth.response;
-        const body = await readLimitedJson(req, 40 * 1024, nativeFolderOnly(req) ? folderOnlyProjectSchema : createProjectSchema);
+        const body = nativeFolderOnly(req)
+            ? await readLimitedJson(req, 40 * 1024, folderOnlyProjectSchema)
+            : await readLimitedJson(req, 40 * 1024, createProjectSchema);
         const project = await createProject(auth.userId, body);
         return NextResponse.json(project, { status: 201, headers: NO_STORE });
     } catch (error) {

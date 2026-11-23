@@ -60,7 +60,9 @@ export async function PATCH(req: Request, context: ProjectRouteContext) {
         const auth = await projectRouteUser(req, "project-update", { minute: 20, day: 300 });
         if (auth.response) return auth.response;
         const { projectId } = await context.params;
-        const body = await readLimitedJson(req, 40 * 1024, nativeFolderOnly(req) ? folderOnlyProjectSchema : updateProjectSchema);
+        const body = nativeFolderOnly(req)
+            ? await readLimitedJson(req, 40 * 1024, folderOnlyProjectSchema)
+            : await readLimitedJson(req, 40 * 1024, updateProjectSchema);
         return NextResponse.json(await updateProject(auth.userId, projectId, body), { headers: NO_STORE });
     } catch (error) {
         return projectErrorResponse(error, "projects.update");
