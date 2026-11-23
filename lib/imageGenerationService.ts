@@ -248,8 +248,9 @@ export type ImageGenerationRequestInput = {
   chatTurnHost?: boolean;
   /**
    * Server-only, like `chatTurnHost`: edit this attachment instead of drawing
-   * from the prompt alone. The caller resolved it from the user's own saved
-   * message (lib/imageEditSource.ts); it is never read from a request body.
+   * from the prompt alone. The caller resolves an owned attachment or binds a
+   * finalized upload inside the reservation transaction. A request body cannot
+   * supply a trusted attachment ID or binding function.
    * Every model must support editing, and each target's price adds its
    * model's edit surcharge (lib/imageGenerationPricing.ts).
    */
