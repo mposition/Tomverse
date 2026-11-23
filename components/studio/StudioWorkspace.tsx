@@ -23,6 +23,8 @@ import styles from "./studio.module.css";
 
 const StudioAccount = dynamic(() => import("@/components/auth/AuthButton").then(module => module.AuthButton));
 
+type StudioBillingOutcome = "success" | "cancelled" | "credits-success" | "credits-cancelled" | "tester-pass";
+
 const mobileArtwork = new Set(["meme", "illustration", "caricature", "poster"]);
 
 function ToolArtwork({ tool }: { tool: StudioTool }) {
@@ -45,14 +47,23 @@ export function StudioWorkspace({ toolId }: { toolId?: string }) {
   const { copy, lang } = useStudioCopy();
   const { t } = useLanguage();
   const router = useRouter();
-  const [billingNotice, setBillingNotice] = useState<string>();
+  const [billingOutcome, setBillingOutcome] = useState<StudioBillingOutcome>();
+  const billingMessages = {
+    success: t("billing.paymentSuccessfulTitle"),
+    "tester-pass": t("billing.testerPassActivatedTitle"),
+    cancelled: purchaseCtaCopy[lang].purchaseCancelledTitle,
+    "credits-success": purchaseCtaCopy[lang].purchaseSuccessTitle,
+    "credits-cancelled": purchaseCtaCopy[lang].purchaseCancelledTitle,
+  };
+  const billingNotice = billingOutcome ? billingMessages[billingOutcome] : undefined;
 
   useEffect(() => {
     const url = new URL(window.location.href);
     const billing = url.searchParams.get("billing");
     if (billing !== "success" && billing !== "cancelled" &&
         billing !== "credits-success" && billing !== "credits-cancelled") return;
-    const copy = purchaseCtaCopy[lang];
+    const outcome = billing === "success" && url.searchParams.get("access") === "founding-tester-pass"
+      ? "tester-pass" : billing;
     const purchased = billing === "success" || billing === "credits-success";
     const pack = normalizeCreditPackId(url.searchParams.get("pack"));
     const plan = normalizePurchaseTargetPlan(url.searchParams.get("plan"));
@@ -61,8 +72,7 @@ export function StudioWorkspace({ toolId }: { toolId?: string }) {
     window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
 
     queueMicrotask(() => {
-      setBillingNotice(billing === "success" ? t("billing.paymentSuccessfulTitle") :
-        purchased ? copy.purchaseSuccessTitle : copy.purchaseCancelledTitle);
+      setBillingOutcome(outcome);
       if (purchased) notifyUserUsageChanged();
       else trackProductEvent("checkout_cancelled", 0, {
         cta_location: "studio_checkout_return",
@@ -71,7 +81,7 @@ export function StudioWorkspace({ toolId }: { toolId?: string }) {
         ...(plan ? { target_plan: plan } : {}),
       });
     });
-  }, [lang, t]);
+  }, []);
   const studioPath = PRODUCT_SURFACE_PATH.studio;
   const tool = toolId ? findStudioTool(toolId) : undefined;
   return <div className={styles.shell} lang={lang} data-testid="studio-workspace">
