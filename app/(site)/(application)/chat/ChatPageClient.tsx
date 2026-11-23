@@ -2143,24 +2143,12 @@ export function ChatPageClient({
   });
   const guestAutoCapabilityPending =
     guestAutoExecutionState === "awaiting_capability";
-  const promptRefinerProductExplicitFlowVisible =
-    promptRefinerProductSelection !== "kept_original" &&
-    (promptRefinerProductSelection === "accepted" ||
-      promptRefinerState.status !== "idle" ||
-      selectionMode !== "auto" ||
-      !promptRefinerProductRelease.autoEnabled);
-  const promptRefinerProductExplicitOffered =
-    promptRefinerMode !== "e2e_fixture" &&
-    promptRefinerProductRelease.explicitEnabled &&
-    Boolean(promptRefinerProductScope) &&
-    mountedSurface === "chat" &&
-    !isGuestMode &&
-    Boolean(currentChatId) &&
-    promptRefinerProductExplicitFlowVisible;
-  const promptRefinerOffered =
-    promptRefinerFixtureOffered || promptRefinerProductExplicitOffered;
-  const promptRefinerProductMode =
-    !promptRefinerFixtureOffered && promptRefinerProductExplicitOffered;
+  // Owner decision 2026-11-23: Refiner is automatic. The composer no longer
+  // offers the manual "Improve wording" row in product Chat; only the E2E
+  // fixture mounts the suggestion panel. Auto conversations still prepare and
+  // apply a suggestion without this row.
+  const promptRefinerOffered = promptRefinerFixtureOffered;
+  const promptRefinerProductMode = false;
   const { settings: accountMemorySettings, refresh: refreshAccountMemorySettings } =
     useAccountMemorySettings(sessionUserId);
   // §14. Two pieces of state, because a profile can be chosen before the
