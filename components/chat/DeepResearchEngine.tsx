@@ -6,6 +6,7 @@ import {
   acceptResearchRunUpdate, formatResearchCopy, researchProgress, researchRunNeedsPolling, researchStatusKey, researchStartIds,
   type ResearchRunView,
 } from "@tomverse/chat-core";
+import { AnswerMarkdown } from "@tomverse/chat-ui";
 import { researchEngineCopy } from "@/locales/researchEngine";
 import type { Language } from "@/lib/language";
 import { conversationHandoffHref } from "@/lib/continuationRoutes";
@@ -148,8 +149,10 @@ export function DeepResearchEngineSheet({ open, onClose, language, conversationI
 type Tab = "plan" | "progress" | "sources" | "report";
 
 /** The run workspace. Polls only while the server may change the run on its own. */
-export function ResearchWorkspace({ runId, conversationId, language, accountKey, api = webApi }: {
+export function ResearchWorkspace({ runId, conversationId, language, accountKey, api = webApi, onReportChanged }: {
   runId: string; conversationId: string; language: Language; accountKey: string; api?: ResearchApi;
+  /** Called when the run settles or its report revision changes, so the chat answer can be read again. */
+  onReportChanged?: () => void;
 }) {
   const copy = researchEngineCopy[language];
   const scope = useMemo(() => ({ runId, conversationId, accountKey }), [runId, conversationId, accountKey]);
@@ -176,22 +179,38 @@ export function ResearchWorkspace({ runId, conversationId, language, accountKey,
     setView((previous) => ({ scopeKey, run: acceptResearchRunUpdate(previous.scopeKey === scopeKey ? previous.run : null, incoming, scope) }));
   }, [scope, scopeKey]);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  /** Starts (or restarts) the poll loop; set by the effect below for the current run. */
+  const poll = useRef<(() => void) | null>(null);
   useLayoutEffect(() => {
     let active = true;
     const controller = new AbortController();
+    let latest = 0;
     const read = async () => {
       clearTimeout(timer.current);
+      // Only the newest read schedules the next one, so a restart never forks the loop.
+      const mine = ++latest;
       try {
         const value = await api.read(runId, controller.signal);
         if (!active) return;
         publish(value);
         const current = acceptResearchRunUpdate(null, value, scope);
-        if (current && researchRunNeedsPolling(current)) timer.current = setTimeout(() => void read(), 4_000);
-      } catch { if (active) timer.current = setTimeout(() => void read(), 10_000); }
+        if (mine === latest && current && researchRunNeedsPolling(current)) timer.current = setTimeout(() => void read(), 4_000);
+      } catch { if (active && mine === latest) timer.current = setTimeout(() => void read(), 10_000); }
     };
+    poll.current = () => void read();
     void read();
-    return () => { active = false; controller.abort(); clearTimeout(timer.current); };
+    return () => { active = false; poll.current = null; controller.abort(); clearTimeout(timer.current); };
   }, [runId, scope, publish, api]);
+  const reportChanged = useRef(onReportChanged);
+  useLayoutEffect(() => { reportChanged.current = onReportChanged; }, [onReportChanged]);
+  const settledKey = run ? `${run.currentReportRevision ?? 0}:${researchRunNeedsPolling(run) ? "open" : run.status}` : null;
+  const seenSettledKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (!settledKey) return;
+    // The first view is what the chat already shows; later changes refresh it.
+    if (seenSettledKey.current !== null && seenSettledKey.current !== settledKey) reportChanged.current?.();
+    seenSettledKey.current = settledKey;
+  }, [settledKey]);
   const act = async (action: ResearchAction) => {
     if (busy) return;
     setBusy(true); setNotice(null);
@@ -199,6 +218,10 @@ export function ResearchWorkspace({ runId, conversationId, language, accountKey,
     publish(result.run);
     if (result.readback) setNotice(copy.actionFailed);
     setBusy(false);
+    // An action can start server-side work (plan, approval, resume, revision) from a
+    // state that was not being polled; a read-back is re-read too.
+    const current = acceptResearchRunUpdate(null, result.run, scope);
+    if (result.readback || (current && researchRunNeedsPolling(current))) poll.current?.();
   };
   useEffect(() => {
     if (tab !== "sources" || !run) return;
@@ -308,6 +331,9 @@ export function ResearchWorkspace({ runId, conversationId, language, accountKey,
         {report?.containsPrivate && <p className="text-sm" data-testid="research-report-private">{copy.shareContainsPrivate}</p>}
         <div className="flex flex-wrap gap-2">{(["md", "pdf", "docx", "csv", "xlsx"] as const).map((format) =>
           <button key={format} type="button" className={button} data-testid={`research-export-${format}`} onClick={() => void download(format)}>{copy.exportLabel} {format.toUpperCase()}</button>)}</div>
+        {report?.markdown && <div className="mt-3 min-w-0 space-y-2 text-sm leading-6 [&_a]:underline [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:text-base [&_h2]:font-semibold [&_h3]:font-semibold [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:list-disc [&_ul]:pl-5 [&_table]:block [&_table]:overflow-x-auto" data-testid="research-report-body">
+          <AnswerMarkdown>{report.markdown}</AnswerMarkdown>
+        </div>}
         {report?.claims && report.claims.length > 0 && <ol className="mt-3 space-y-2 text-sm" data-testid="research-claims">
           {report.claims.map((claim) => <li key={claim.claimKey} data-verification={claim.verification}>
             <span className="font-mono text-xs">{claim.claimKey}</span> {claim.text} <span className="text-xs text-zinc-500">· {copy.report.verification[claim.verification as keyof typeof copy.report.verification] ?? claim.verification}</span>

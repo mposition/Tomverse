@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
 import { prisma } from "@/lib/prisma";
+import { researchInputManifestSchema } from "@/lib/researchEngineContract";
 import {
-  amendResearchScope, cancelResearchRun, createResearchRun, deleteResearchRun, finishResearchNow, readResearchRunDto, requestResearchRevision,
+  amendResearchScope, approveResearchPlan, cancelResearchRun, createResearchRun, deleteResearchRun, finishResearchNow, pauseResearchRun, readResearchRunDto,
+  requestResearchRevision, resumeResearchRun,
 } from "@/lib/researchEngineService";
-import { drainResearchWork, processOneResearchWorkItem } from "@/lib/researchEngineWorker";
+import { drainResearchWork, processOneResearchWorkItem, revokePrivateSource } from "@/lib/researchEngineWorker";
 import {
   beginResearchDispatch, claimNextResearchWorkItem, claimResearchFundingRoom, readResearchRunMoney, RESEARCH_ITEM_LEASE_MS, ResearchFundingRoomError,
 } from "@/lib/researchEngineStore";
@@ -15,7 +17,11 @@ import { settlePendingResearchPreviewRuns } from "@/lib/researchPreviewRecovery"
 import { createFakeFunding, createFakeModel, createFakeWeb, createUser, defaultResponse, fakeRequest, installFakes, users } from "./researchEngineHarness";
 
 // The test database is dedicated; v2 rows left by an interrupted earlier run would be claimed here.
-before(async () => { await prisma.researchPreviewRun.deleteMany({ where: { engineVersion: 2 } }); });
+// Deleting them queues their evidence objects; that queue is cleared too, so a drain in one test sees only its own rows.
+before(async () => {
+  await prisma.researchPreviewRun.deleteMany({ where: { engineVersion: 2 } });
+  await prisma.researchEvidenceObjectCleanup.deleteMany({});
+});
 
 after(async () => {
   await prisma.user.deleteMany({ where: { id: { in: users } } });
@@ -134,7 +140,7 @@ test("an unknown usage outcome is held and never retried; the same dispatch key 
 test("concurrent reservations cannot exceed the approved total, and the finalization reserve is kept for synthesis", async () => {
   installFakes();
   const user = await createUser("overcommit");
-  const run = await create(user.id, { autoStart: false });
+  const run = await create(user.id, { autoStart: false, requestPlan: false });
   await prisma.researchPreviewRun.update({ where: { id: run.id }, data: { approvedCredits: 100, finalizationReserveCredits: 30 } });
   const attempts = await Promise.allSettled(Array.from({ length: 12 }, () =>
     claimResearchFundingRoom({ runId: run.id, purpose: "work", credits: 10, modelId: "m", provider: "google", pricingVersion: "p" })));
@@ -191,7 +197,7 @@ test("poison rows are quarantined without blocking healthy recovery (v1 settleme
   const quarantined = await prisma.researchPreviewRun.findUniqueOrThrow({ where: { id: v1.id } });
   assert.ok(quarantined.recoveryQuarantinedAt, "an unreadable v1 settlement stops being selected first");
   const healthy = await create(user.id);
-  const poison = await create(user.id, { autoStart: false });
+  const poison = await create(user.id, { autoStart: false, requestPlan: false });
   await prisma.researchPreviewRun.update({ where: { id: poison.id }, data: { status: "queued", inputManifest: { version: 1, broken: true } } });
   const stale = await claimNextResearchWorkItem("dead-worker");
   assert.equal(stale?.runId, healthy.id);
@@ -299,7 +305,7 @@ test("offer and draft creation never call a model, and a brief far past the Prev
   assert.equal(offer.offered, true);
   const question = `${"Detailed research context sentence. ".repeat(600)}Final question?`;
   assert.ok(question.length > 20_000);
-  const run = await create(user.id, { brief: brief(question), autoStart: false });
+  const run = await create(user.id, { brief: brief(question), autoStart: false, requestPlan: false });
   assert.equal(run.status, "draft");
   assert.equal(fakes.model.calls.length, 0, "no paid call before the user asks for a plan");
   assert.equal(web.searches.length, 0);
@@ -343,7 +349,7 @@ test("a Project source adapter is used only through the selection, revalidation 
 test("a hold bound but never dispatched is not settled as zero while a worker may still use it; recovery releases it under the run lock and a late dispatch is refused", async () => {
   const fakes = installFakes();
   const user = await createUser("orphan");
-  const run = await create(user.id, { autoStart: false });
+  const run = await create(user.id, { autoStart: false, requestPlan: false });
   await prisma.researchWorkItem.create({ data: { runId: run.id, kind: "plan", status: "running", planRevision: 0, inputRevision: 0, idempotencyKey: "probe",
     payload: { kind: "plan" }, leaseOwner: "late-worker", leaseEpoch: 1, leaseExpiresAt: new Date(fakes.clock.now().getTime() + 3_600_000) } });
   const item = await prisma.researchWorkItem.findFirstOrThrow({ where: { runId: run.id, idempotencyKey: "probe" } });
@@ -361,6 +367,33 @@ test("a hold bound but never dispatched is not settled as zero while a worker ma
   assert.equal((await prisma.researchFundingSegment.findUniqueOrThrow({ where: { id: segment.id } })).status, "released");
   await rejects(beginResearchDispatch({ itemId: item.id, ownerId: "late-worker", leaseEpoch: 1, runId: run.id },
     { kind: "model", dispatchKey: "late", fundingSegmentId: segment.id, modelId: "m", provider: "google", apiModel: "a", pricingVersion: "p" }), "RESEARCH_FUNDING_NOT_OPEN");
+});
+
+test("making a plan starts planning at once, and the run deadline counts research time only, not plan review or a pause", async () => {
+  const fakes = installFakes();
+  createFakeWeb();
+  const user = await createUser("deadline-window");
+  const run = await create(user.id, { autoStart: false });
+  assert.equal(run.status, "planning", "the create request that says 'make a plan' queues the plan without a second request");
+  await drainResearchWork("deadline-window-plan", 2);
+  assert.equal((await readResearchRunDto(user.id, run.id)).status, "awaiting_input");
+  const planned = await prisma.researchPreviewRun.findUniqueOrThrow({ where: { id: run.id } });
+  assert.equal(planned.runDeadlineAt, null, "no research deadline runs while the plan waits for review");
+  // The standard profile allows 120 minutes of research; the user reviews the plan for three hours.
+  fakes.clock.advance(3 * 60 * 60_000);
+  await approveResearchPlan({ request: fakeRequest(), userId: user.id, runId: run.id, planRevision: planned.planRevision });
+  const started = await prisma.researchPreviewRun.findUniqueOrThrow({ where: { id: run.id } });
+  assert.equal(started.runDeadlineAt?.getTime(), fakes.clock.now().getTime() + 120 * 60_000);
+  await pauseResearchRun({ request: fakeRequest(), userId: user.id, runId: run.id });
+  assert.equal((await readResearchRunDto(user.id, run.id)).status, "paused");
+  fakes.clock.advance(90 * 60_000);
+  await resumeResearchRun({ request: fakeRequest(), userId: user.id, runId: run.id });
+  const resumed = await prisma.researchPreviewRun.findUniqueOrThrow({ where: { id: run.id } });
+  assert.equal(resumed.runDeadlineAt?.getTime(), started.runDeadlineAt!.getTime() + 90 * 60_000, "paused time is added back");
+  await drainResearchWork("deadline-window-run", 4);
+  assert.equal((await readResearchRunDto(user.id, run.id)).status, "completed");
+  assert.equal(await prisma.researchWorkItem.count({ where: { runId: run.id, errorCode: "RESEARCH_RUN_DEADLINE" } }), 0,
+    "no research was cut short by time spent waiting");
 });
 
 test("a budget-stopped run past its deadline is finished by recovery with the evidence it has", async () => {
@@ -537,6 +570,10 @@ test("a private copy stops being served once its original is deleted after the r
   assert.deepEqual(await researchShareContent(runA.id), { ok: false, code: "RESEARCH_SHARE_PRIVATE" });
   const chunkA = await prisma.researchEvidenceChunk.findFirstOrThrow({ where: { runId: runA.id, version: { source: { visibility: "private" } } } });
   await readResearchEvidence({ userId: user.id, runId: runA.id, chunkId: chunkA.id });
+  const privateKeyA = (await prisma.researchSource.findFirstOrThrow({ where: { runId: runA.id, visibility: "private" } })).sourceKey;
+  const derived = (await prisma.researchClaim.findMany({ where: { runId: runA.id } }))
+    .filter((claim) => (claim.evidence as Array<{ sourceKey: string }>).some((evidence) => evidence.sourceKey === privateKeyA)).map((claim) => claim.text);
+  assert.ok(derived.length > 0, "the report holds claims derived from the private source");
   await prisma.memoryItem.delete({ where: { id: first.id } });
   await rejects(readResearchEvidence({ userId: user.id, runId: runA.id, chunkId: chunkA.id }), "RESEARCH_EVIDENCE_UNAVAILABLE");
   assert.equal((await prisma.researchSource.findFirstOrThrow({ where: { runId: runA.id, visibility: "private" } })).status, "revoked");
@@ -547,6 +584,25 @@ test("a private copy stops being served once its original is deleted after the r
   assert.ok(!JSON.stringify(rereadA.document.bibliography).includes("Post-run memory one"), "no copied label in the bibliography");
   const answerA = await prisma.message.findUniqueOrThrow({ where: { id: (await prisma.researchPreviewRun.findUniqueOrThrow({ where: { id: runA.id } })).assistantMessageId } });
   assert.ok(!answerA.content.includes("Post-run memory one"), "the chat answer was re-rendered without the copied label");
+  // Text derived from the source is withheld too: claims, report blocks and summary, the
+  // chat answer, the account export and the stored analysis findings that quote it.
+  // The fake analyst writes the same claim text for every run, so only runA's export entry is checked (runB is not revoked yet).
+  const findRun = (value: unknown): unknown => {
+    if (!value || typeof value !== "object") return undefined;
+    if ((value as { id?: unknown }).id === runA.id && "engineVersion" in value) return value;
+    for (const child of Object.values(value)) { const found = findRun(child); if (found) return found; }
+    return undefined;
+  };
+  const runAExport = findRun(await (await import("@/lib/accountDataExport")).buildAccountDataExport(user.id));
+  assert.ok(runAExport, "the export carries runA");
+  const exportedA = JSON.stringify(runAExport);
+  const analyses = JSON.stringify((await prisma.researchWorkItem.findMany({ where: { runId: runA.id, kind: "analyze_private" } })).map((item) => item.result));
+  for (const text of derived) {
+    assert.ok(!JSON.stringify(rereadA).includes(text), "no derived claim text in the report");
+    assert.ok(!answerA.content.includes(text), "no derived claim text in the chat answer");
+    assert.ok(!exportedA.includes(text), "no derived claim text in the account export");
+  }
+  assert.ok(!analyses.includes("Post-run memory one"), "stored analysis findings no longer quote the source");
   // No read at all, and the source was excluded from scope first: the account export
   // re-checks it and carries no copied label anywhere.
   const excludedKey = (await prisma.researchSource.findFirstOrThrow({ where: { runId: runB.id, visibility: "private" } })).sourceKey;
@@ -567,6 +623,188 @@ test("a private copy stops being served once its original is deleted after the r
   await drainResearchEvidenceCleanup();
   assert.ok(keysB.every((key) => !fakes.store.objects.has(key)), "the swept copy is deleted");
   assert.equal(await prisma.researchEvidenceObjectCleanup.count({ where: { objectKey: { in: keysB } } }), 0);
+});
+
+test("a private source revoked while its analysis is in flight never comes back through the late result or the report built after it", async () => {
+  const user = await createUser("inflight-revoke");
+  const secret = await memory(user.id, "In-flight memory naming project HELIOTROPE-7 budget");
+  let revokedDuringCall = false;
+  installFakes({ model: createFakeModel({ beforeRespond: async (call) => {
+    if (call.tool !== "submit_research_private_analysis" || revokedDuringCall) return;
+    revokedDuringCall = true;
+    // The dispatch was sent with a valid grant; the original is deleted and revoked before it answers.
+    await prisma.memoryItem.delete({ where: { id: secret.id } });
+    const runRow = await prisma.researchPreviewRun.findFirstOrThrow({ where: { userId: user.id, engineVersion: 2 } });
+    const source = await prisma.researchSource.findFirstOrThrow({ where: { runId: runRow.id, visibility: "private" } });
+    await revokePrivateSource(runRow, source.id);
+  } }) });
+  createFakeWeb();
+  const run = await create(user.id, { sources: [{ type: "memory", memoryItemId: secret.id }] });
+  await drainResearchWork("inflight-revoke", 4);
+  assert.ok(revokedDuringCall, "the revocation happened while the analysis was in flight");
+  assert.equal((await readResearchRunDto(user.id, run.id)).status, "completed");
+  const analyses = JSON.stringify((await prisma.researchWorkItem.findMany({ where: { runId: run.id, kind: "analyze_private" } })).map((item) => item.result));
+  assert.ok(!analyses.includes("HELIOTROPE"), "the late analysis result was not stored with its quote");
+  const claims = await prisma.researchClaim.findMany({ where: { runId: run.id } });
+  assert.ok(claims.every((claim) => !claim.text.includes("Private note from")), "no claim keeps text derived from the revoked source");
+  const report = JSON.stringify(await readResearchReport({ userId: user.id, runId: run.id }));
+  const answer = (await prisma.message.findUniqueOrThrow({ where: { id: (await prisma.researchPreviewRun.findUniqueOrThrow({ where: { id: run.id } })).assistantMessageId } })).content;
+  for (const leaked of ["HELIOTROPE", "Private note from"]) {
+    assert.ok(!report.includes(leaked), `report: ${leaked}`);
+    assert.ok(!answer.includes(leaked), `answer: ${leaked}`);
+  }
+});
+
+test("a verification call never mixes claims from different private sources, so a revoked source cannot reach another claim's revised text", async () => {
+  installFakes();
+  createFakeWeb();
+  const user = await createUser("verify-origin");
+  const one = await memory(user.id, "Origin memory one with private detail");
+  const two = await memory(user.id, "Origin memory two with private detail");
+  const run = await create(user.id, { sources: [{ type: "memory", memoryItemId: one.id }, { type: "memory", memoryItemId: two.id }] });
+  await drainResearchWork("verify-origin", 4);
+  assert.equal((await readResearchRunDto(user.id, run.id)).status, "completed");
+  const privateKeys = new Set((await prisma.researchSource.findMany({ where: { runId: run.id, visibility: "private" } })).map((source) => source.sourceKey));
+  assert.equal(privateKeys.size, 2);
+  const claims = await prisma.researchClaim.findMany({ where: { runId: run.id } });
+  const originOf = (claimKey: string) => {
+    const claim = claims.find((entry) => entry.claimKey === claimKey)!;
+    const cited = [...new Set((claim.evidence as Array<{ sourceKey: string }>).map((evidence) => evidence.sourceKey).filter((key) => privateKeys.has(key)))].sort();
+    return cited.length ? cited.join(",") : claim.privateDerived ? `alone:${claimKey}` : "public";
+  };
+  const batches = (await prisma.researchWorkItem.findMany({ where: { runId: run.id, kind: "verify" } }))
+    .map((item) => (item.payload as { claimKeys: string[] }).claimKeys);
+  const privateBatches = batches.filter((keys) => keys.some((key) => originOf(key) !== "public"));
+  assert.ok(privateBatches.length >= 2, "each private source's claims are verified in their own call");
+  for (const keys of batches) assert.equal(new Set(keys.map(originOf)).size, 1, `one origin per verification call: ${keys.join(",")}`);
+});
+
+test("a private finding whose quote cannot be verified is never kept as a claim, so no unattributed private text outlives the source", async () => {
+  installFakes({ model: createFakeModel({ respond: (call) => call.tool === "submit_research_private_analysis"
+    ? { findings: [{ text: "Unquoted private claim ZETA-44 about the budget.", kind: "fact",
+        evidence: [{ sourceKey: /<evidence source="(P\d+)"/u.exec(call.text)?.[1] ?? "P1", quote: "this sentence is not in the private source" }] }], limitations: [] }
+    : defaultResponse(call) }) });
+  createFakeWeb();
+  const user = await createUser("unquoted-private");
+  const secret = await memory(user.id, "Unquoted memory with private detail");
+  const run = await create(user.id, { sources: [{ type: "memory", memoryItemId: secret.id }] });
+  await drainResearchWork("unquoted-private", 4);
+  assert.equal((await readResearchRunDto(user.id, run.id)).status, "completed");
+  const claims = await prisma.researchClaim.findMany({ where: { runId: run.id } });
+  assert.ok(claims.every((claim) => !claim.text.includes("ZETA-44")), "the unverifiable private finding is not stored as a claim");
+  const report = JSON.stringify(await readResearchReport({ userId: user.id, runId: run.id }));
+  assert.ok(!report.includes("ZETA-44"));
+  const { buildAccountDataExport } = await import("@/lib/accountDataExport");
+  assert.ok(!JSON.stringify(await buildAccountDataExport(user.id)).includes("ZETA-44"), "nor in the account export");
+});
+
+test("revoking two private sources of one report leaves neither source's text in the report or the chat answer", async () => {
+  installFakes();
+  createFakeWeb();
+  const user = await createUser("two-revoked");
+  const one = await memory(user.id, "Two-revoke memory one with private detail");
+  const two = await memory(user.id, "Two-revoke memory two with private detail");
+  const run = await create(user.id, { sources: [{ type: "memory", memoryItemId: one.id }, { type: "memory", memoryItemId: two.id }] });
+  await drainResearchWork("two-revoked", 4);
+  assert.equal((await readResearchRunDto(user.id, run.id)).status, "completed");
+  const derived = (await prisma.researchClaim.findMany({ where: { runId: run.id, privateDerived: true } })).map((claim) => claim.text);
+  assert.ok(derived.length >= 2, "both private sources produced claims");
+  await prisma.memoryItem.deleteMany({ where: { id: { in: [one.id, two.id] } } });
+  await recoverResearchEngine();
+  assert.equal(await prisma.researchSource.count({ where: { runId: run.id, visibility: "private", status: "revoked" } }), 2);
+  const report = JSON.stringify(await readResearchReport({ userId: user.id, runId: run.id }));
+  const answer = (await prisma.message.findUniqueOrThrow({ where: { id: (await prisma.researchPreviewRun.findUniqueOrThrow({ where: { id: run.id } })).assistantMessageId } })).content;
+  for (const text of derived) {
+    assert.ok(!report.includes(text), `report keeps: ${text}`);
+    assert.ok(!answer.includes(text), `answer keeps: ${text}`);
+  }
+});
+
+test("a report revision requested after a private source was revoked is synthesised normally, without the revoked source", async () => {
+  installFakes();
+  createFakeWeb();
+  const user = await createUser("revision-after-revoke");
+  const secret = await memory(user.id, "Revision memory with private detail");
+  const run = await create(user.id, { sources: [{ type: "memory", memoryItemId: secret.id }] });
+  await drainResearchWork("revision-after-revoke", 4);
+  assert.equal((await readResearchRunDto(user.id, run.id)).status, "completed");
+  await prisma.memoryItem.delete({ where: { id: secret.id } });
+  await recoverResearchEngine();
+  const before = await prisma.researchPreviewRun.findUniqueOrThrow({ where: { id: run.id } });
+  await requestResearchRevision({ request: fakeRequest(), userId: user.id, runId: run.id,
+    revision: { kind: "format", expectedReportRevision: before.currentReportRevision, sectionKeys: [], instruction: "Shorter, please." } });
+  await drainResearchWork("revision-after-revoke-2", 4);
+  const after = await prisma.researchPreviewRun.findUniqueOrThrow({ where: { id: run.id } });
+  assert.equal(after.status, "completed");
+  assert.ok(after.currentReportRevision > before.currentReportRevision);
+  const synthesis = await prisma.researchWorkItem.findFirstOrThrow({ where: { runId: run.id, idempotencyKey: `synth:${after.currentReportRevision}` } });
+  assert.equal(synthesis.status, "completed", "synthesis is not refused for a source that is already withheld");
+  const report = await readResearchReport({ userId: user.id, runId: run.id });
+  assert.ok(report.document.summary.includes("synthetic summary"), "the new revision has its own synthesis");
+  const revoked = (await prisma.researchSource.findFirstOrThrow({ where: { runId: run.id, visibility: "private" } })).sourceKey;
+  const current = await prisma.researchReportRevision.findUniqueOrThrow({ where: { runId_revision: { runId: run.id, revision: after.currentReportRevision } }, include: { claims: true } });
+  assert.ok(current.claims.every((claim) => !(claim.evidence as Array<{ sourceKey: string }>).some((evidence) => evidence.sourceKey === revoked)),
+    "claims withheld for the revoked source are not carried into the new revision");
+});
+
+test("a source revoked while sections are being written skips the paid synthesis call whose output would be withheld", async () => {
+  const user = await createUser("skip-synthesis");
+  const secret = await memory(user.id, "Skip-synthesis memory with private detail");
+  let revoked = false;
+  let callsAtRevocation = -1;
+  const fakes = installFakes({ model: createFakeModel({ beforeRespond: async (call) => {
+    if (call.tool !== "submit_research_section" || revoked) return;
+    revoked = true;
+    callsAtRevocation = call.callIndex;
+    await prisma.memoryItem.delete({ where: { id: secret.id } });
+    const runRow = await prisma.researchPreviewRun.findFirstOrThrow({ where: { userId: user.id, engineVersion: 2 } });
+    const source = await prisma.researchSource.findFirstOrThrow({ where: { runId: runRow.id, visibility: "private" } });
+    await revokePrivateSource(runRow, source.id);
+  } }) });
+  createFakeWeb();
+  const run = await create(user.id, { sources: [{ type: "memory", memoryItemId: secret.id }] });
+  await drainResearchWork("skip-synthesis", 4);
+  assert.ok(revoked, "the source was revoked while a section was being written");
+  assert.equal((await readResearchRunDto(user.id, run.id)).status, "completed");
+  assert.ok(!fakes.model.calls.slice(callsAtRevocation + 1).some((call) => call.tool === "submit_research_synthesis"), "no synthesis call was paid for");
+  const current = await prisma.researchPreviewRun.findUniqueOrThrow({ where: { id: run.id } });
+  const synthesis = await prisma.researchWorkItem.findFirstOrThrow({ where: { runId: run.id, idempotencyKey: `synth:${current.currentReportRevision}` } });
+  assert.equal((synthesis.result as { skipped?: string }).skipped, "source_revoked");
+});
+
+test("with one of two private sources revoked, a revision keeps the active source, drops the revoked and unattributed claims, and synthesises", async () => {
+  const fakes = installFakes();
+  createFakeWeb();
+  const user = await createUser("mixed-revoked");
+  const kept = await memory(user.id, "Mixed memory kept with private detail");
+  const gone = await memory(user.id, "Mixed memory gone with private detail");
+  const run = await create(user.id, { sources: [{ type: "memory", memoryItemId: kept.id }, { type: "memory", memoryItemId: gone.id }] });
+  await drainResearchWork("mixed-revoked", 4);
+  const done = await prisma.researchPreviewRun.findUniqueOrThrow({ where: { id: run.id } });
+  assert.equal(done.status, "completed");
+  const parent = await prisma.researchReportRevision.findUniqueOrThrow({ where: { runId_revision: { runId: run.id, revision: done.currentReportRevision } }, include: { claims: true } });
+  // A row stored before unattributed private claims stopped being kept: private-derived, citing only a public source.
+  const publicEvidence = parent.claims.find((claim) => !claim.privateDerived && (claim.evidence as unknown[]).length)!.evidence;
+  await prisma.researchClaim.create({ data: { revisionId: parent.id, runId: run.id, claimKey: "C900", sectionKey: "all", text: "Legacy unattributed private text",
+    kind: "fact", verification: "unsupported", privateDerived: true, evidence: publicEvidence as never } });
+  const goneEntry = researchInputManifestSchema.parse(done.inputManifest).entries.find((entry) => entry.type === "memory" && entry.memoryItemId === gone.id)!;
+  const keptKey = researchInputManifestSchema.parse(done.inputManifest).entries.find((entry) => entry.type === "memory" && entry.memoryItemId === kept.id)!.key;
+  await prisma.memoryItem.delete({ where: { id: gone.id } });
+  await recoverResearchEngine();
+  assert.equal((await prisma.researchSource.findFirstOrThrow({ where: { runId: run.id, sourceKey: goneEntry.key } })).status, "revoked");
+  assert.equal((await prisma.researchSource.findFirstOrThrow({ where: { runId: run.id, sourceKey: keptKey } })).status, "active");
+  const callsBefore = fakes.model.calls.length;
+  await requestResearchRevision({ request: fakeRequest(), userId: user.id, runId: run.id,
+    revision: { kind: "format", expectedReportRevision: done.currentReportRevision, sectionKeys: [], instruction: "Shorter, please." } });
+  await drainResearchWork("mixed-revoked-2", 4);
+  const after = await prisma.researchPreviewRun.findUniqueOrThrow({ where: { id: run.id } });
+  assert.equal(after.status, "completed");
+  assert.ok(fakes.model.calls.slice(callsBefore).some((call) => call.tool === "submit_research_synthesis"), "the revision is synthesised");
+  const current = await prisma.researchReportRevision.findUniqueOrThrow({ where: { runId_revision: { runId: run.id, revision: after.currentReportRevision } }, include: { claims: true } });
+  const cites = (key: string) => current.claims.some((claim) => (claim.evidence as Array<{ sourceKey: string }>).some((evidence) => evidence.sourceKey === key));
+  assert.ok(cites(keptKey), "claims from the active private source are carried");
+  assert.ok(!cites(goneEntry.key), "claims withheld for the revoked source are not carried");
+  assert.ok(current.claims.every((claim) => claim.claimKey !== "C900"), "an unattributed private claim is not carried");
 });
 
 test("evidence cleanup backs off through a long storage outage but never gives up", async () => {

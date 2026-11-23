@@ -3,7 +3,7 @@ import "server-only";
 import { generateText, tool, wrapLanguageModel, type LanguageModel, type LanguageModelUsage } from "ai";
 import { z } from "zod";
 import type { AiModel } from "@/lib/models";
-import { createTokenEstimateAccumulator } from "@/lib/chatTokenEstimate";
+import { createTokenEstimateAccumulator, estimateTokenBreakdown, toReservedInputTokens } from "@/lib/chatTokenEstimate";
 import { prisma } from "@/lib/prisma";
 import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
 import { fitChatOutputToContextWindow } from "@/lib/chatContextWindow";
@@ -153,17 +153,19 @@ export async function callResearchModel<T>(input: {
     const base = await languageModelFor(model);
     if (typeof base === "string") throw new Error("Research requires an explicit provider model");
     const wrapped = wrapLanguageModel({ model: base, middleware: { specificationVersion: "v4", wrapGenerate: async ({ doGenerate, params }) => {
-      const protocolBytes = Buffer.byteLength(JSON.stringify(params), "utf8");
+      // Input and output share the window, and the request asks for the full
+      // output cap, so both must fit; tokens come from the same estimator (and
+      // margins) the reservation used, not from raw protocol bytes.
+      const protocolTokens = toReservedInputTokens(estimateTokenBreakdown(JSON.stringify(params)));
       const context = fitChatOutputToContextWindow({ contextWindowTokens: model.contextWindowTokens,
-        reservedInputTokens: protocolBytes, requestOutputCapTokens: input.outputTokenCap });
-      if (context.kind === "exceeded") throw new Error("RESEARCH_CONTEXT_EXCEEDED");
+        reservedInputTokens: protocolTokens, requestOutputCapTokens: input.outputTokenCap });
+      if (context.kind === "exceeded" || context.outputTokens < input.outputTokenCap) throw new Error("RESEARCH_CONTEXT_EXCEEDED");
       input.signal.throwIfAborted();
       await markResearchDispatchStarted({ ...input.fence, runId: input.run.id }, generationId!);
       dispatched = true;
       return doGenerate();
     } } });
     let submitted: T | undefined;
-    let invalid = false;
     const result = await generateText({
       ...getModelGenerationSettings(model), reasoning: pinned.reasoning as never, model: wrapped,
       system: input.system, prompt: input.prompt, maxRetries: 0, maxOutputTokens: input.outputTokenCap,
@@ -178,12 +180,8 @@ export async function callResearchModel<T>(input: {
     if (result.steps.length !== 1) throw new ResearchUsageUnknownError();
     const usage = knownUsage(result.steps[0]!.usage);
     if (usage.outputTokens > input.outputTokenCap || usage.cachedInputTokens > usage.inputTokens) throw new ResearchUsageUnknownError();
+    // A missing tool call and a rejected (tool-error) call are both invalid output that still cost money.
     if (submitted === undefined) {
-      invalid = true;
-      const failed = result.steps[0]!.content.find((part) => part.type === "tool-error");
-      if (!failed) invalid = true;
-    }
-    if (invalid || submitted === undefined) {
       return { ok: false, kind: "invalid_output", code: "RESEARCH_OUTPUT_INVALID", generationId, segmentId: segment.id, usage };
     }
     return { ok: true, value: submitted, usage, generationId, segmentId: segment.id, reservationId: reservation.reservationId };
@@ -198,7 +196,7 @@ export async function callResearchModel<T>(input: {
       await refuseResearchDispatch(prisma, generationId, "pre_dispatch");
       await releaseUnused();
       const code = (error as { code?: string }).code ?? (error instanceof Error ? error.message.slice(0, 60) : "RESEARCH_PRE_DISPATCH_FAILED");
-      return { ok: false, kind: code === "RESEARCH_DISPATCH_REFUSED" ? "refused" : "refused", code };
+      return { ok: false, kind: "refused", code };
     }
     await prisma.$transaction(async (tx) => {
       await markResearchDispatchUnknown(tx, generationId!);

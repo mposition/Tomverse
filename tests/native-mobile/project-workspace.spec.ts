@@ -167,7 +167,8 @@ test("an archived project cannot take a new turn and says how to continue", asyn
 });
 
 test("the workspace speaks the app language", async ({ page }) => {
-  await page.evaluate(() => localStorage.setItem("tomverse-language", "ko")); await page.reload();
+  // Set before the app starts: on load the app writes its current language back, which can overwrite a value set after load.
+  await page.addInitScript(() => localStorage.setItem("tomverse-language", "ko")); await page.reload();
   await page.getByRole("button", { name: "대화", exact: true }).click();
   await page.getByRole("button", { name: "대화 필터", exact: true }).click();
   await page.getByRole("button", { name: "새 프로젝트", exact: true }).click();

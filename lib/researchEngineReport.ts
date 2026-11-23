@@ -156,6 +156,55 @@ export function redactReportForPublic(document: ResearchReportDocument, claims: 
   };
 }
 
+/**
+ * A private source whose grant is gone: what was derived from it is withheld in
+ * place, without a model. A model's text cannot be trusted to cite every claim it
+ * used, so whatever a model wrote after reading a withheld claim goes:
+ * - a section whose writer saw one (its own claims, or a claim for every
+ *   section) is rebuilt from its remaining claims, one claim text per paragraph,
+ *   after the removal note; other sections keep their blocks, except a block
+ *   citing a withheld claim;
+ * - the synthesis fields (title, summary, conflicts, scope note, limitations,
+ *   next questions, criteria) and every section heading become text that does
+ *   not come from the source: the user's question, the approved plan's headings
+ *   (or a neutral number) and the removal note.
+ * All revoked sources are handled in one pass. Applying it again to its own
+ * output changes nothing. Returns null when this revision never used any of them.
+ */
+export function withholdRevokedSource(document: ResearchReportDocument,
+  claims: ReadonlyArray<Pick<ReportClaim, "claimKey" | "sectionKey" | "text" | "verification" | "evidence">>,
+  sourceKeys: readonly string[], labels: { note: string; privateSource: string; title: string; headings?: ReadonlyMap<string, string> }) {
+  // Every revoked source at once: a rebuilt section must not bring back a claim withheld for another source.
+  const revoked = new Set(sourceKeys);
+  const affected = new Set(claims.filter((claim) => claim.evidence.some((evidence) => revoked.has(evidence.sourceKey))).map((claim) => claim.claimKey));
+  if (!affected.size && !document.bibliography.some((entry) => revoked.has(entry.sourceKey))) return null;
+  const rests = (keys: string[]) => keys.some((key) => affected.has(key));
+  const seenEverywhere = claims.some((claim) => affected.has(claim.claimKey) && claim.sectionKey === "all");
+  const sawWithheld = (sectionKey: string) => seenEverywhere || claims.some((claim) => affected.has(claim.claimKey) && claim.sectionKey === sectionKey);
+  const rebuilt = (sectionKey: string) => [{ type: "paragraph" as const, text: labels.note, claimKeys: [] },
+    ...claims.filter((claim) => claim.sectionKey === sectionKey && !affected.has(claim.claimKey) && citableClaim(claim))
+      .slice(0, 59).map((claim) => ({ type: "paragraph" as const, text: claim.text.slice(0, 4_000), claimKeys: [claim.claimKey] }))];
+  const withheld: ResearchReportDocument = {
+    ...document,
+    title: labels.title.slice(0, 200) || "Research",
+    summary: labels.note,
+    scope: { ...document.scope, note: "" },
+    sections: document.sections.map((section, index) => ({ ...section,
+      // A writer chooses its own heading after reading the section's claims; the plan's heading came before them.
+      heading: labels.headings?.get(section.key)?.slice(0, 160) || `§ ${index + 1}`,
+      ...(sawWithheld(section.key)
+        ? (() => { const blocks = rebuilt(section.key); return { blocks, status: blocks.length > 1 ? "written" as const : "missing" as const }; })()
+        : { blocks: section.blocks.map((block) => rests(block.claimKeys) ? { type: "paragraph" as const, text: labels.note, claimKeys: [] } : block) }) })),
+    // Conflicts are written by the synthesis model, which read every claim.
+    conflicts: [],
+    limitations: [labels.note],
+    nextQuestions: [],
+    criteria: [],
+    bibliography: document.bibliography.map((entry) => revoked.has(entry.sourceKey) ? { ...entry, title: labels.privateSource } : entry),
+  };
+  return { affected, document: withheld };
+}
+
 /** Tables from a report as CSV text (RFC 4180 quoting). */
 export function reportTablesCsv(document: ResearchReportDocument) {
   const quote = (value: string) => /[",\r\n]/u.test(value) || /^[=+\-@]/u.test(value) ? `"${(/^[=+\-@]/u.test(value) ? `'${value}` : value).replaceAll("\"", "\"\"")}"` : value;
