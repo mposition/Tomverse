@@ -321,6 +321,24 @@ node --conditions=react-server --import tsx tools/memory-quality/cli.ts followup
     --query-mode full-query+history --live --max-calls <n> --save-scores <new-fqh.json>
   ```
 
+  A run stopped by a provider failure prints `failure` (`rate_limited`, `unauthorized`,
+  ...) and keeps what was paid for with `complete: false`. `--resume-scores <partial>`
+  reuses those cases when corpus, model, digest and each request identity match, and
+  requests only the rest; `--min-interval-ms` spaces requests for rate-limited keys.
+- **Generating the answers (PAID).** `followup-answers` sends each distinct message list
+  in `answer-requests.json` once to the product's default Chat model (`gpt-6-luna`, the
+  product's generation settings, the chat route's system-to-instructions split, 4,096
+  output tokens, no retry) and writes the answers file `followup-eval --answers` imports.
+  It needs `OPENAI_API_KEY`, `--max-calls` and `--max-usd` at or above the plan's worst
+  case (every character a token plus the full output allowance), checked before the
+  first request; a failed call is charged at its worst case. `--resume-answers` continues
+  an interrupted file. Answers stay unread until the blind verdicts are frozen.
+
+  ```powershell
+  node --conditions=react-server --import tsx tools/memory-quality/cli.ts followup-answers --requests <answer-requests.json> `
+    --live --max-calls <n> --max-usd <usd> --save-answers <new-answers.json>
+  ```
+
 ## Data isolation and candidate authority
 
 `fixtures/development.json` and `fixtures/validation.json` contain ten synthetic

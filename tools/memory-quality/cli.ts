@@ -39,6 +39,11 @@ followup-scores --inputs <json> --key <json> --query-mode full-query|full-query+
         score file followup-eval replays with --scores-full-query / --scores-full-query-history.
         --resume-scores keeps the cases an interrupted run on the same inputs already scored and
         requests only the rest; --min-interval-ms waits between requests (provider rate limits).
+followup-answers --requests <answer-requests.json> --live --max-calls <n> --max-usd <usd>
+        --save-answers <new-json> [--resume-answers <partial-json>]
+        PAID: one OpenAI call per distinct message list with the product's default Chat model and
+        settings, saved as the answers file followup-eval imports with --answers. Needs OPENAI_API_KEY;
+        refused before the first request when the plan's worst case exceeds --max-calls or --max-usd.
 Defaults: mode=mock, out=.tmp/memory-quality, iterations=3, max-calls=1000, timeout-ms=60000,
 corpus=retrieval-ko.
 The run command has no live mode, paid execution, product writes, promotion, network or raw
@@ -53,6 +58,7 @@ const commandOptions: Record<string, string[]> = {
   "knowledge-retrieval": ["scores", "live", "max-calls", "save-scores"],
   "followup-eval": ["inputs", "key", "out", "scores-full-query", "scores-full-query-history", "answers", "verdicts"],
   "followup-scores": ["inputs", "key", "query-mode", "live", "max-calls", "save-scores", "resume-scores", "min-interval-ms"],
+  "followup-answers": ["requests", "live", "max-calls", "max-usd", "save-answers", "resume-answers"],
 };
 const FOLLOWUP_DEV_INPUTS = fileURLToPath(new URL("./fixtures/followup-dev.inputs.json", import.meta.url));
 const FOLLOWUP_DEV_KEY = fileURLToPath(new URL("./fixtures/followup-dev.key.json", import.meta.url));
@@ -109,6 +115,10 @@ export async function main(args: string[], context: LiveContext = {}) {
     return { followupScores: { bundle: bundle.bundleId, evalDigest: bundle.evalDigest, queryMode: mode,
       live: result.live, paidCalls: result.paidCalls },
       ...("stopReason" in result ? { stopReason: result.stopReason, failure: result.failure } : {}) };
+  }
+  if (command === "followup-answers") {
+    const { collectFollowupAnswers } = await import("./followupAnswers");
+    return collectFollowupAnswers(options, context);
   }
   if (command === "knowledge-retrieval") {
     const live = options.live === "true";
