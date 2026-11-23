@@ -14,8 +14,8 @@ export const costEfficiencyMessages = defineAdminMessages({
     regressions: (count: number) => `${count} critical regressions (a requirement the current answer met)`,
     exact: (graded: number, current: number, cheaper: number) => `exact-answer cases ${graded}: current passed ${current}, cheaper passed ${cheaper}`,
     credits: (pairs: number, current: number, cheaper: number) => `credits over ${pairs} pairs: ${current} → ${cheaper} (a credit change is not a saving)`,
-    observed: (known: number, unknown: number, current: string, cheaper: string, lower: number) =>
-      `observed answer cost over ${known} known pairs: ${current} → ${cheaper}; cheaper lower in ${lower}; ${unknown} pairs unknown`,
+    observed: (known: number, unknown: number, current: string, cheaper: string, lower: number, unanswered: number) =>
+      `observed answer cost over ${known} known pairs: ${current} → ${cheaper}; cheaper lower in ${lower}; ${unknown} pairs unknown; ${unanswered} pairs without both answers`,
     latency: (pairs: number, current: number | null, cheaper: number | null) =>
       `answer time median over ${pairs} pairs: ${current ?? "-"} ms → ${cheaper ?? "-"} ms`,
     guidance: (evaluated: number, unchanged: number, changed: number, unrouted: number) =>
@@ -61,8 +61,8 @@ export const costEfficiencyMessages = defineAdminMessages({
     regressions: (count: number) => `치명적 회귀 ${count}건 (현재 답변이 지킨 요구를 저가 답변이 어김)`,
     exact: (graded: number, current: number, cheaper: number) => `정답형 ${graded}건: 현재 통과 ${current}, 저가 통과 ${cheaper}`,
     credits: (pairs: number, current: number, cheaper: number) => `${pairs}쌍 credit: ${current} → ${cheaper} (credit 변화는 절감이 아닙니다)`,
-    observed: (known: number, unknown: number, current: string, cheaper: string, lower: number) =>
-      `관측 답변 비용(비용 확인 ${known}쌍): ${current} → ${cheaper}; 저가가 낮음 ${lower}쌍; 불명 ${unknown}쌍`,
+    observed: (known: number, unknown: number, current: string, cheaper: string, lower: number, unanswered: number) =>
+      `관측 답변 비용(비용 확인 ${known}쌍): ${current} → ${cheaper}; 저가가 낮음 ${lower}쌍; 불명 ${unknown}쌍; 답변 없음 ${unanswered}쌍`,
     latency: (pairs: number, current: number | null, cheaper: number | null) =>
       `${pairs}쌍 답변 시간 중앙값: ${current ?? "-"} ms → ${cheaper ?? "-"} ms`,
     guidance: (evaluated: number, unchanged: number, changed: number, unrouted: number) =>

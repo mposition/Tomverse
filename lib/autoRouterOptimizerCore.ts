@@ -1737,11 +1737,15 @@ export async function runOptimizerCycle(
             // Counted only when the call was made: a budget refusal says
             // nothing about the model. Every failed attempt is counted, so a
             // model that only answers on its second try still shows it.
+            // A call that was never sent (no model, no price) fails the same
+            // way every time, so it is not asked for again.
+            let undispatched = false;
             const attempt = (tries: number) =>
                 call("answer", async () => {
                     try {
                         const startedAt = Date.now();
                         const result = await deps.answer(modelId, turn);
+                        undispatched = result.cost?.state === "no_dispatch";
                         const admitted = admitOptimizerAnswer(result.value) !== null;
                         noteAnswer(modelId, admitted);
                         if (admitted) answerMs.set(key, Date.now() - startedAt);
@@ -1759,7 +1763,7 @@ export async function runOptimizerCycle(
             answer = (async () => {
                 for (let tries = 1; ; tries += 1) {
                     const admitted = await attempt(tries);
-                    if (admitted !== null || spend.exhausted() || tries >= AUTO_ROUTER_ANSWER_ATTEMPTS) return admitted;
+                    if (admitted !== null || undispatched || spend.exhausted() || tries >= AUTO_ROUTER_ANSWER_ATTEMPTS) return admitted;
                 }
             })();
             answers.set(key, answer);

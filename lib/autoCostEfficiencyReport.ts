@@ -70,6 +70,8 @@ export type ObservedPairCost = {
     pairsKnown: number;
     /** Pairs where either answer's cost is unknown or never started. */
     pairsUnknown: number;
+    /** Pairs where either side gave no answer: nothing was compared, so no cost pair. */
+    pairsUnanswered: number;
     incumbentMicroUsd: number;
     challengerMicroUsd: number;
     /** lower_observed_provider_cost: the cheaper side's own measured answer cost. */
@@ -108,9 +110,16 @@ const criticalRegression = (item: QualityObservation) =>
     (item.constraintFailure.b === true && item.constraintFailure.a === false) ||
     (item.exact?.a === true && item.exact.b === false);
 
+/** Every try of an answer failed, or none was started: no answer to judge. */
+const answerMissing = (cost: AnswerCostView) => cost.attempts === 0 || cost.failedAttempts === cost.attempts;
+
 const pairCost = (items: readonly { answerCost: { a: AnswerCostView; b: AnswerCostView } }[]): ObservedPairCost => {
-    const result: ObservedPairCost = { pairsKnown: 0, pairsUnknown: 0, incumbentMicroUsd: 0, challengerMicroUsd: 0, challengerLower: 0, challengerHigher: 0, same: 0 };
+    const result: ObservedPairCost = { pairsKnown: 0, pairsUnknown: 0, pairsUnanswered: 0, incumbentMicroUsd: 0, challengerMicroUsd: 0, challengerLower: 0, challengerHigher: 0, same: 0 };
     for (const { answerCost: { a, b } } of items) {
+        if (answerMissing(a) || answerMissing(b)) {
+            result.pairsUnanswered += 1;
+            continue;
+        }
         if (a.state !== "known" || b.state !== "known" || a.microUsd === null || b.microUsd === null) {
             result.pairsUnknown += 1;
             continue;
@@ -124,9 +133,6 @@ const pairCost = (items: readonly { answerCost: { a: AnswerCostView; b: AnswerCo
     }
     return result;
 };
-
-/** Every try of an answer failed, or none was started: no answer to judge. */
-const answerMissing = (cost: AnswerCostView) => cost.attempts === 0 || cost.failedAttempts === cost.attempts;
 
 const median = (values: readonly number[]) => {
     if (values.length === 0) return null;
