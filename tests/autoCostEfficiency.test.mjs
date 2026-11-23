@@ -366,6 +366,25 @@ test("an answer that times out is counted at its upper bound, retried, and the c
     result.costEfficiency.candidateDiagnosis.savingsSamples);
 });
 
+test("an answer whose every try ends in an exception is bounded and unanswered, never a cost pair", async () => {
+  const bounded = { state: "bounded", amountMicroUsd: 1_500, reason: "exception", bound: { inputTokens: 80, outputTokens: 1_000, prices: { inputUsdPerMillionTokens: 1, outputUsdPerMillionTokens: 1.5 } } };
+  const { deps } = costDeps({
+    answer: async (modelId) => modelId === "cheap"
+      ? { value: null, costMicroUsd: null, cost: bounded, provider: "cheap-co" }
+      : { value: `${modelId} answer`, ...known(ANSWER_COST[modelId]), provider: `${modelId}-co` },
+  });
+  const result = await runOptimizerCycle(costInput(), deps);
+  assert.equal(result.failure, null);
+  const cheapPairs = result.comparisons.filter((item) => item.b === "cheap");
+  assert.ok(cheapPairs.length > 0);
+  assert.ok(cheapPairs.every((item) => item.costEfficiency.answerCost.b.state === "bounded"
+    && item.costEfficiency.answerCost.b.attempts === 2 && item.costEfficiency.answerCost.b.failedAttempts === 2));
+  assert.ok(cheapPairs.every((item) => item.verdict === "undecided"), "no answer, no judgement");
+  const observed = result.costEfficiency.candidateDiagnosis.observedAnswerCost;
+  assert.equal(observed.pairsUnanswered, cheapPairs.length);
+  assert.equal(result.failedByKind.answer, result.costEfficiency.experimentCost.boundedCalls);
+});
+
 test("fewer credits with a higher observed answer cost is not a saving", () => {
   const unknownView = { state: "unknown", microUsd: null, attempts: 1, failedAttempts: 0 };
   const view = (microUsd) => ({ state: "known", microUsd, attempts: 1, failedAttempts: 0 });

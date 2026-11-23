@@ -1349,6 +1349,25 @@ export const optimizerAnswerBound = (
     prices,
 });
 
+/**
+ * An optimizer answer request, or its upper bound when it ended in an
+ * exception. Shared by the routing, rewrite and coding answer adapters; the
+ * exception is still logged by the caller's trace wrapper.
+ */
+export const optimizerAnswerOrBound = async <G>(
+    run: () => Promise<G>,
+    options: { system?: string; prompt: string; maxOutputTokens: number },
+    prices: { inputUsdPerMillionTokens: number; outputUsdPerMillionTokens: number },
+    provider: string
+): Promise<{ generated: G } | { failed: OptimizerCallResult<string> }> => {
+    try {
+        return { generated: await run() };
+    } catch {
+        const cost = optimizerAnswerBound(options, prices);
+        return { failed: { value: null, cost, costMicroUsd: null, provider } };
+    }
+};
+
 /** An answer the judge can read, or null: an empty answer is no answer. */
 export const admitOptimizerAnswer = (raw: unknown): string | null =>
     typeof raw === "string" && raw.trim() ? raw.trim() : null;

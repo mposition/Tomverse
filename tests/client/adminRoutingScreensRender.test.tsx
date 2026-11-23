@@ -198,6 +198,13 @@ test("a cost-efficiency diagnostic shows price-blind quality, credits, observed 
   // Model-free totals: no model id reaches the diagnostic block.
   assert.doesNotMatch(html, /\bpremium\b|\bcheap\b/);
   assert.equal(renderToStaticMarkup(<CostEfficiencyDiagnosticView report={undefined} />), "");
+  assert.match(html, /0 calls at their upper bound/);
+  // Calls that ended in an exception are shown as an upper bound beside known spend, not as unknown.
+  const boundedHtml = renderToStaticMarkup(<CostEfficiencyDiagnosticView report={{
+    ...report, experimentCost: { ...report.experimentCost, boundedCalls: 2, boundedMicroUsd: 3_000 },
+  }} />);
+  assert.ok(boundedHtml.includes("2 calls at their upper bound US$0.003000"));
+  assert.match(boundedHtml, /0 unknown calls/);
   // The owner-confirmed set no longer adds the unconfirmed reason.
   const confirmed = renderToStaticMarkup(<CostEfficiencyDiagnosticView report={{
     ...report, applicability: costEfficiencyReport({

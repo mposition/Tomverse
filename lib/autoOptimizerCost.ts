@@ -204,6 +204,8 @@ export const optimizerSpend = (budgetMicroUsd: number) => {
         } finally {
             coverage.completed += 1;
             if (failed) coverage.failed += 1;
+            // A bounded call is an adapter's caught exception: a failed call of its kind, like a thrown one.
+            if (cost.state === "bounded" && failed) failedByKind[kind] += 1;
             coverage.calls.push({ kind, provider, failed, ...(meta?.identity ? { identity: meta.identity } : {}), ...cost });
             meta?.observe?.({ cost, failed });
             if (cost.state === "unknown") {

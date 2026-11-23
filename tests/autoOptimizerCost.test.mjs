@@ -127,3 +127,25 @@ test("promotion accepts calls counted at their upper bound and still refuses unk
   assert.equal(optimizerPromotionEligibility({ ...cycle, summary: { ...summary, costCoverage: { ...withBounded, boundedMicroUsd: -1 } } }).refusal, "cost_unconfirmed");
   assert.equal(optimizerPromotionEligibility({ ...cycle, summary: { ...summary, costCoverage: { ...withBounded, complete: false, unknownCalls: 1 } } }).refusal, "cost_unconfirmed");
 });
+
+test("every answer adapter turns an exception into the same bounded failure, counted as a failed call", async () => {
+  const { optimizerAnswerOrBound } = await import("../lib/autoRouterOptimizerCore.ts");
+  const options = { system: "s", prompt: "p", maxOutputTokens: 100 };
+  const ok = await optimizerAnswerOrBound(async () => "answer", options, prices, "p");
+  assert.deepEqual(ok, { generated: "answer" });
+  const timedOut = await optimizerAnswerOrBound(async () => { throw Object.assign(new Error("aborted"), { name: "TimeoutError" }); }, options, prices, "slow");
+  assert.equal(timedOut.failed.value, null);
+  assert.equal(timedOut.failed.cost.state, "bounded");
+  assert.equal(timedOut.failed.costMicroUsd, null, "a bound is never a known subtotal");
+  assert.equal(timedOut.failed.provider, "slow");
+  const spend = optimizerSpend(100_000);
+  await spend.call("answer", async () => timedOut.failed);
+  const totals = spend.totals();
+  assert.equal(totals.failedByKind.answer, 1);
+  assert.equal(totals.failedCalls, 1);
+  // The routing, rewrite and coding adapters all go through it.
+  const { readFileSync } = await import("node:fs");
+  for (const file of ["lib/autoRouterOptimizer.ts", "lib/autoRewriteOptimizer.ts", "lib/autoCodingRouterOptimizer.ts"]) {
+    assert.ok(readFileSync(new URL(`../${file}`, import.meta.url), "utf8").includes("optimizerAnswerOrBound(() => traced(\"answer\""), file);
+  }
+});
