@@ -70,3 +70,18 @@ test('with the project workspace switch off, a native folder call may set the na
     if (previous === undefined) delete process.env.TOMVERSE_NATIVE_PROJECT_WORKSPACE_ENABLED; else process.env.TOMVERSE_NATIVE_PROJECT_WORKSPACE_ENABLED = previous;
   }
 });
+
+test('context preparation reads the native bearer, never a guest or the cookie beside it', async () => {
+  const chatContext = await import('../../app/api/chat/context/route.ts');
+  const body = { conversationId: 'c1', modelIds: ['fixture-model'], prompt: 'Question' };
+  const previous = process.env.TOMVERSE_NATIVE_PROJECT_WORKSPACE_ENABLED;
+  try {
+    delete process.env.TOMVERSE_NATIVE_PROJECT_WORKSPACE_ENABLED;
+    assert.equal((await chatContext.POST(request('/api/chat/context', 'POST', 'valid', 'https://localhost', body))).status, 503);
+    process.env.TOMVERSE_NATIVE_PROJECT_WORKSPACE_ENABLED = 'true';
+    // An invalid bearer is a refused sign-in, not a guest with no context.
+    assert.equal((await chatContext.POST(request('/api/chat/context', 'POST', 'invalid', 'https://localhost', body))).status, 401);
+  } finally {
+    if (previous === undefined) delete process.env.TOMVERSE_NATIVE_PROJECT_WORKSPACE_ENABLED; else process.env.TOMVERSE_NATIVE_PROJECT_WORKSPACE_ENABLED = previous;
+  }
+});

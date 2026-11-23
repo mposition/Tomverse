@@ -1,14 +1,13 @@
 import { CHAT_MAX_MESSAGE_BODY_BYTES, CHAT_MAX_MESSAGE_CHARACTERS } from "@/lib/chatRequestLimits";
 import { prepareMemoryHistoryContext } from "@/lib/memoryHistorySnapshot";
 import { randomUUID } from "node:crypto";
-import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import {
     apiSecurityResponse,
     consumeApiRateLimit,
     readLimitedJson,
 } from "@/lib/apiSecurity";
-import { authOptions } from "@/lib/auth";
+import { resolveChatRouteSession } from "@/lib/chatRouteSession";
 import { ChatAccessError, chatErrorResponse } from "@/lib/chatSecurity";
 import { buildChatTurnContext } from "@/lib/chatTurnContext";
 import { issueChatContextBundle } from "@/lib/chatContextBundleService";
@@ -73,8 +72,11 @@ const traceIdFor = (request: Request) => {
 export async function POST(request: Request) {
     const traceId = traceIdFor(request);
     try {
-        const session = await getServerSession(authOptions);
-        const userId = session?.user?.id ?? null;
+        // Web (cookie) and Native (bearer) resolve the same way as /api/chat:
+        // a bearer is never read as a guest, and never falls back to a cookie.
+        const authentication = await resolveChatRouteSession(request);
+        if (authentication.response) return authentication.response;
+        const userId = authentication.session?.user?.id ?? null;
 
         await consumeApiRateLimit(
             request,

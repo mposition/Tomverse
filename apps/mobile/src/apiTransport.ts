@@ -281,7 +281,13 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
         if (revision !== sessionRevision) throw new DOMException("Session changed", "AbortError");
         return typeof prepared.contextBundle === "string" ? prepared.contextBundle : undefined;
       };
-      let contextBundle = ownsContext && persisted.projectId ? await prepareContext() : undefined;
+      // Only where the server serves the project workspace to this device: with
+      // its switch off the edge refuses the call before any handler, and a
+      // folder-era project (context off) needs no bundle. A project whose
+      // context is on is then refused by /api/chat itself.
+      const workspaceServed = ownsContext && persisted.projectId
+        ? (await requireParity().catch(() => null))?.projectWorkspace === true : false;
+      let contextBundle = workspaceServed ? await prepareContext() : undefined;
       watchdog = createChatLivenessWatchdog({ onExpire: abort });
       const dispatch = () => run("/api/chat", () => {
         controller.signal.throwIfAborted();

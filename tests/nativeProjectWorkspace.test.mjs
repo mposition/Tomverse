@@ -14,7 +14,7 @@ const bridge = { hasSession: async () => ({ signedIn: true }), signIn: async () 
 const signal = () => new AbortController().signal;
 
 /** A fake server for one project conversation. `contextReplies` and `chatReplies` script the answers in order. */
-function fixture({ contextReplies = [], chatReplies = [], projectId = "project-a" } = {}) {
+function fixture({ contextReplies = [], chatReplies = [], projectId = "project-a", workspace = true } = {}) {
   const calls = [];
   const conversation = { id: "conversation-a", title: "Test", selectedModels: ["fixture-model"], messages: [], responseAttempts: [], projectId };
   let contexts = 0; let chats = 0;
@@ -23,6 +23,7 @@ function fixture({ contextReplies = [], chatReplies = [], projectId = "project-a
     calls.push({ path, method: init.method ?? "GET", body: init.body ? JSON.parse(init.body) : undefined });
     if (path === "/api/chat/location-intent") return Response.json({ requiresLocation: false });
     if (path === "/api/user/account") return Response.json({ id: "owner", actionsEnabled: false });
+    if (path === "/api/products/mobile/capabilities") return Response.json({ reviewEasy: false, assistants: false, maxModels: 3, plan: "Pro", projectWorkspace: workspace });
     if (path === "/api/products/chat/conversations") return Response.json({ id: conversation.id });
     if (path === "/api/conversations/conversation-a/messages") {
       const input = JSON.parse(init.body).messages[0];
@@ -177,6 +178,18 @@ test("with the project workspace switch off, a folder conversation still sends, 
   assert.ok(chat);
   assert.equal(chat.body.contextBundle, undefined);
   assert.equal(lost, 0);
+});
+
+test("where the server does not serve the workspace, a folder conversation never calls context preparation", async () => {
+  // With the switch off the edge refuses /api/chat/context before any handler
+  // (an unregistered bearer POST fails the origin check), so it is not called.
+  const f = fixture({ workspace: false });
+  await f.transport.account();
+  await f.transport.send(f.conversation, "Question", [], signal(), () => {});
+  assert.equal(f.calls.some(call => call.path === "/api/chat/context"), false);
+  const chat = f.calls.find(call => call.path === "/api/chat");
+  assert.ok(chat);
+  assert.equal(chat.body.contextBundle, undefined);
 });
 
 test("any other context preparation failure stops the send before /api/chat", async () => {
