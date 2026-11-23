@@ -30,6 +30,7 @@ import {
   codingStoredProfileSchema,
   codingStructuredOutputChoice,
   CODING_EVIDENCE_MAX_SOURCES,
+  codingModelPage,
   defaultCodingCapabilitySources,
   isOfficialSourceUrl,
   registryCodingCapabilities,
@@ -448,7 +449,8 @@ export const keptCapability = <T extends string>(current: T, answered: T): T => 
  * paid call of linking, made on request and for one row only (a caller with
  * many rows sends one request each, so no request outlives the HTTP limit).
  * One LLM call over the provider's default tool calling and structured output
- * pages (defaultCodingCapabilitySources); the answer is read by
+ * pages and its models page (defaultCodingCapabilitySources, codingModelPage;
+ * the models page is optional); the answer is read by
  * codingCapabilitiesFromAnswer and every page it stands on -- the notes' too --
  * must be one of those fetched pages on the provider's own hosts. Notes no page
  * supports are not written. Any failure leaves the row as it was. A timeout is
@@ -487,7 +489,16 @@ export const fillLinkCapabilities = async (input: {
   try {
     const read: DraftPage[] = [];
     for (const url of [...new Set([pages.toolCalling, pages.structuredOutput])]) read.push(await deps.fetchPage(provider, url));
-    draft = await llm.draftCodingCapabilities({ provider, apiModelId: facts.apiModelId, pages: read });
+    // The models page is where the notes stand first; one that does not load
+    // (a model with no page of its own, a docs move) leaves the notes to the other two.
+    const modelPage = codingModelPage(pages, facts.apiModelId);
+    if (!read.some((page) => page.url === modelPage)) {
+      await deps.fetchPage(provider, modelPage).then(
+        (page) => read.push(page),
+        () => undefined
+      );
+    }
+    draft =await llm.draftCodingCapabilities({ provider, apiModelId: facts.apiModelId, pages: read });
   } catch (error) {
     const name = (error as { name?: unknown } | null)?.name;
     if (name === "TimeoutError" || name === "AbortError") throw new CatalogRefusal("timeout_outcome_unknown", [], 504);
