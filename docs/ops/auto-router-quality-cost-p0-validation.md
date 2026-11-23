@@ -22,7 +22,16 @@ read. npm reported an existing officeparser patch-version engine warning.
   caches, output caps, call slots and retry limits remain.
 - Routing and rewrite retain known/no-dispatch/unknown cost observations,
   usage/rate coverage and failures in existing summary JSON. Unknown cost
-  closes further scheduling and drains in-flight work.
+  closes further scheduling and drains in-flight work. Since 2026-11-23 an
+  answer call (routing, rewrite, coding) that ends in an exception -- a
+  timeout, a dropped connection, a provider error -- is `bounded`, not
+  unknown: counted at its upper bound (every UTF-8 byte of the request as a
+  token, plus 64 framing tokens, plus the whole output cap sent, at full
+  price) toward the run's spend, its day/month caps and the provider's
+  bucket, and the run goes on. Production routing cycles on 2026-11-16, -18
+  and -20 had each stopped as `cost_unknown` on one slow answer.
+  Promotion counts bounded calls in the coverage identity
+  (`started = known + noDispatch + bounded`); unknown still refuses it.
 - Manual/system promotion share evaluation/version/coverage and existing
   quality/credit gates. Legacy promotion is unverified; active guidance and
   rollback remain usable. Settings and recommendation gates remain separate.

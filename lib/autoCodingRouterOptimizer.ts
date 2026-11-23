@@ -51,6 +51,7 @@ import {
     autoRouterGeneratorSchema,
     autoRouterSynthesizerSchema,
     guidanceRejection,
+    optimizerAnswerOrBound,
     optimizerAnswerOptions,
     optimizerCallFailureDetail,
     optimizerCycleView,
@@ -521,7 +522,12 @@ async function runCodingCycle(input: {
                         return { value: null, ...optimizerCostFields({ state: "no_dispatch", reason: !model ? "model_unavailable" : "unpriced" }), provider: model?.provider ?? "unknown" };
                     }
                     const { timeoutMs, ...options } = optimizerAnswerOptions(model, turn);
-                    const generated = await traced("answer", () => generateText({ model: getActiveAiModel(model), abortSignal: AbortSignal.timeout(timeoutMs), ...options }), model);
+                    // An exception (timeout, dropped connection, provider error) may
+                    // come after the request was sent and billed, with no usage:
+                    // counted at its upper bound so the run goes on (optimizerAnswerBound).
+                    const attempt = await optimizerAnswerOrBound(() => traced("answer", () => generateText({ model: getActiveAiModel(model), abortSignal: AbortSignal.timeout(timeoutMs), ...options }), model), options, prices, model.provider);
+                    if ("failed" in attempt) return attempt.failed;
+                    const generated = attempt.generated;
                     return { value: generated.text, ...cost(prices, generated.usage), provider: model.provider };
                 },
                 judge: async (message) => {

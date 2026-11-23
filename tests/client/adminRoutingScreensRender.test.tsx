@@ -79,7 +79,7 @@ test("optimizer rendering separates known cost, incomplete total, credit ratio a
     gate: { basis: "direct" },
     evidence: { ownAnswerCases: 2, proxyTowardWinner: 3, proxyTowardLoser: 1, orderDisagreements: 1 },
   }} />);
-  assert.match(html, /Recorded known optimizer cost/);
+  assert.match(html, /Recorded optimizer cost/);
   assert.match(html, /0\.000120/);
   assert.match(html, /Total optimizer cost unconfirmed/);
   assert.match(html, /Catalog credit ratio/);
@@ -94,6 +94,13 @@ test("optimizer rendering separates known cost, incomplete total, credit ratio a
   assert.match(legacy, /Total optimizer cost unconfirmed/);
   const complete = renderToStaticMarkup(<OptimizerEvidenceView spentMicroUsd={2} summary={summary} />);
   assert.doesNotMatch(complete, /Total optimizer cost unconfirmed|Holdout and cost coverage unverified/);
+  assert.doesNotMatch(complete, /upper bound/);
+  // Calls that ended in an exception are shown as an upper bound included in the recorded cost, not as unknown.
+  const bounded = renderToStaticMarkup(<OptimizerEvidenceView spentMicroUsd={1_575} summary={{
+    ...summary, costCoverage: { ...summary.costCoverage, boundedCalls: 1, boundedMicroUsd: 1_575 },
+  }} />);
+  assert.match(bounded, /1 calls ended in an exception and are counted at their upper bound, US\$0\.001575, included in the cost above/);
+  assert.doesNotMatch(bounded, /Total optimizer cost unconfirmed/);
 });
 
 test("the shadow split is agreed, moved and no-candidate, and is null when nothing was recorded", () => {
@@ -191,6 +198,13 @@ test("a cost-efficiency diagnostic shows price-blind quality, credits, observed 
   // Model-free totals: no model id reaches the diagnostic block.
   assert.doesNotMatch(html, /\bpremium\b|\bcheap\b/);
   assert.equal(renderToStaticMarkup(<CostEfficiencyDiagnosticView report={undefined} />), "");
+  assert.match(html, /0 calls at their upper bound/);
+  // Calls that ended in an exception are shown as an upper bound beside known spend, not as unknown.
+  const boundedHtml = renderToStaticMarkup(<CostEfficiencyDiagnosticView report={{
+    ...report, experimentCost: { ...report.experimentCost, boundedCalls: 2, boundedMicroUsd: 3_000 },
+  }} />);
+  assert.ok(boundedHtml.includes("2 calls at their upper bound US$0.003000"));
+  assert.match(boundedHtml, /0 unknown calls/);
   // The owner-confirmed set no longer adds the unconfirmed reason.
   const confirmed = renderToStaticMarkup(<CostEfficiencyDiagnosticView report={{
     ...report, applicability: costEfficiencyReport({

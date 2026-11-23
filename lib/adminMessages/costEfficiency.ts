@@ -15,7 +15,7 @@ export const costEfficiencyMessages = defineAdminMessages({
     exact: (graded: number, current: number, cheaper: number) => `exact-answer cases ${graded}: current passed ${current}, cheaper passed ${cheaper}`,
     credits: (pairs: number, current: number, cheaper: number) => `credits over ${pairs} pairs: ${current} → ${cheaper} (a credit change is not a saving)`,
     observed: (known: number, unknown: number, current: string, cheaper: string, lower: number, unanswered: number) =>
-      `observed answer cost over ${known} known pairs: ${current} → ${cheaper}; cheaper lower in ${lower}; ${unknown} pairs unknown; ${unanswered} pairs without both answers`,
+      `observed answer cost over ${known} known pairs: ${current} → ${cheaper}; cheaper lower in ${lower}; ${unknown} pairs unknown or bounded; ${unanswered} pairs without both answers`,
     latency: (pairs: number, current: number | null, cheaper: number | null) =>
       `answer time median over ${pairs} pairs: ${current ?? "-"} ms → ${cheaper ?? "-"} ms`,
     guidance: (evaluated: number, unchanged: number, changed: number, unrouted: number) =>
@@ -23,8 +23,8 @@ export const costEfficiencyMessages = defineAdminMessages({
     guidanceCredits: (baseline: number | null, candidate: number | null) => `credits ${baseline ?? "-"} → ${candidate ?? "-"}`,
     serving: (baseline: string, candidate: string, complete: boolean) =>
       `partial serving cost (router + changed answers): ${baseline} → ${candidate}${complete ? "" : " · incomplete"}`,
-    experiment: (known: string, unknown: number, failed: number, retries: number, notStarted: number) =>
-      `experiment cost ${known} known · ${unknown} unknown calls · ${failed} failed · ${retries} answer retries · ${notStarted} not started`,
+    experiment: (known: string, unknown: number, failed: number, retries: number, notStarted: number, bounded: number, boundedUsd: string) =>
+      `experiment cost ${known} known · ${bounded} calls at their upper bound ${boundedUsd} · ${unknown} unknown calls · ${failed} failed · ${retries} answer retries · ${notStarted} not started`,
     taskUnlinked: "Task cost (regenerations and follow-ups) is not linked in this cycle.",
     criteria: (version: string, status: string) => `criteria ${version} (${status})`,
     notApplicable: "Not applicable as guidance:",
@@ -62,7 +62,7 @@ export const costEfficiencyMessages = defineAdminMessages({
     exact: (graded: number, current: number, cheaper: number) => `정답형 ${graded}건: 현재 통과 ${current}, 저가 통과 ${cheaper}`,
     credits: (pairs: number, current: number, cheaper: number) => `${pairs}쌍 credit: ${current} → ${cheaper} (credit 변화는 절감이 아닙니다)`,
     observed: (known: number, unknown: number, current: string, cheaper: string, lower: number, unanswered: number) =>
-      `관측 답변 비용(비용 확인 ${known}쌍): ${current} → ${cheaper}; 저가가 낮음 ${lower}쌍; 불명 ${unknown}쌍; 답변 없음 ${unanswered}쌍`,
+      `관측 답변 비용(비용 확인 ${known}쌍): ${current} → ${cheaper}; 저가가 낮음 ${lower}쌍; 불명·상한 ${unknown}쌍; 답변 없음 ${unanswered}쌍`,
     latency: (pairs: number, current: number | null, cheaper: number | null) =>
       `${pairs}쌍 답변 시간 중앙값: ${current ?? "-"} ms → ${cheaper ?? "-"} ms`,
     guidance: (evaluated: number, unchanged: number, changed: number, unrouted: number) =>
@@ -70,8 +70,8 @@ export const costEfficiencyMessages = defineAdminMessages({
     guidanceCredits: (baseline: number | null, candidate: number | null) => `credit ${baseline ?? "-"} → ${candidate ?? "-"}`,
     serving: (baseline: string, candidate: string, complete: boolean) =>
       `부분 serving 비용(router + 바뀐 답변): ${baseline} → ${candidate}${complete ? "" : " · 불완전"}`,
-    experiment: (known: string, unknown: number, failed: number, retries: number, notStarted: number) =>
-      `실험비 확인 ${known} · 비용 불명 호출 ${unknown} · 실패 ${failed} · 답변 재시도 ${retries} · 미시작 ${notStarted}`,
+    experiment: (known: string, unknown: number, failed: number, retries: number, notStarted: number, bounded: number, boundedUsd: string) =>
+      `실험비 확인 ${known} · 상한으로 센 호출 ${bounded}건 ${boundedUsd} · 비용 불명 호출 ${unknown} · 실패 ${failed} · 답변 재시도 ${retries} · 미시작 ${notStarted}`,
     taskUnlinked: "작업 비용(재생성·후속 수정)은 이 회차에 연결되지 않습니다.",
     criteria: (version: string, status: string) => `판정 기준 ${version} (${status})`,
     notApplicable: "지침 적용 불가 이유:",

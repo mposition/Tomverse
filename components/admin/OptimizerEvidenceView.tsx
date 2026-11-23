@@ -35,6 +35,7 @@ export function OptimizerEvidenceView({ summary, spentMicroUsd }: {
     <p>{m.costBasis}</p>
     {cost ? <>
       <p>{m.coverage(cost.knownCalls, cost.noDispatchCalls, cost.unknownCalls)}</p>
+      {cost.boundedCalls ? <p data-testid="optimizer-cost-bounded">{m.bounded(cost.boundedCalls, ((cost.boundedMicroUsd ?? 0) / 1_000_000).toFixed(6))}</p> : null}
       <p>{m.calls(cost.started, cost.completed, cost.notStarted, cost.failed)}</p>
       {reasons?.size ? <p>{[...reasons].map(([reason, count]) => `${reason}: ${count}`).join(" · ")}</p> : null}
     </> : null}
