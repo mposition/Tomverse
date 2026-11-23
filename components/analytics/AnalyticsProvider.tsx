@@ -817,15 +817,15 @@ export function AnalyticsProvider({
   // bar fixed to the bottom of the viewport (owner decision 2026-11-16): the
   // header band it replaced pushed every first-visit hero ~180px down.
   const isSettingsRoute = pathname === "/settings" || Boolean(pathname?.startsWith("/settings/"));
-  const isPluginRoute = pathname === "/plugins";
+  const hasWorkspaceConsentSlot = pathname === "/plugins" || pathname === "/studio" || Boolean(pathname?.startsWith("/studio/"));
   const readableNotice = pathname === CHAT_WORKSPACE_PATH;
-  // /plugins keeps its slot under the header: on a phone its own tab bar is
+  // Plugins and Studio keep a slot under the header: their mobile tab bar is
   // fixed to the bottom of the screen and would sit on top of the bar.
   const inlineSlot = isChatWorkspacePath(pathname)
     ? chatConsentSlot
     : pathname === "/auth/signin"
       ? authConsentSlot
-      : isPluginRoute
+      : hasWorkspaceConsentSlot
         ? marketingConsentSlot
         : null;
 
@@ -858,8 +858,8 @@ export function AnalyticsProvider({
   // pill are mutually exclusive -- one needs `consent === "unset"` or the
   // preferences panel open, the other needs a settled choice and the panel
   // closed -- so the slot never has to hold both.
-  const settingsUsesInlineSlot = pathname === "/auth/signin" || isSettingsRoute || isPluginRoute;
-  const settingsInlineSlot = isSettingsRoute ? settingsConsentSlot : isPluginRoute ? marketingConsentSlot : settingsUsesInlineSlot ? authConsentSlot : null;
+  const settingsUsesInlineSlot = pathname === "/auth/signin" || isSettingsRoute || hasWorkspaceConsentSlot;
+  const settingsInlineSlot = isSettingsRoute ? settingsConsentSlot : hasWorkspaceConsentSlot ? marketingConsentSlot : settingsUsesInlineSlot ? authConsentSlot : null;
 
   // REAUDIT-P1-01. Chat and Review share a workspace where the bottom-right corner is
   // never free: the last model panel's follow-up form ends there, and below it

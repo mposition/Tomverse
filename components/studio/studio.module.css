@@ -1,0 +1,159 @@
+.shell {
+  --studio-bg: #f4f5f0;
+  --studio-surface: #fff;
+  --studio-text: #162821;
+  --studio-muted: #53645d;
+  --studio-line: #dfe7df;
+  --studio-accent: #006b5c;
+  --studio-primary-text: #fff;
+  --studio-selection: #e9f4ed;
+  --review-selected: #263757;
+  --review-selected-text: #eee9ff;
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: clamp(24px, 3.7vw, 56px);
+  min-height: 100dvh;
+  padding: 20px;
+  background: var(--studio-bg);
+  color: var(--studio-text);
+}
+:global(.dark) .shell {
+  --studio-bg: #121a17;
+  --studio-surface: #1c2722;
+  --studio-text: #eef6f0;
+  --studio-muted: #b3c7bc;
+  --studio-line: #34453d;
+  --studio-accent: #83dbbe;
+  --studio-primary-text: #10281d;
+  --studio-selection: #263f34;
+}
+.shell > :global(.review-navigation) { position: sticky; top: 20px; align-self: start; min-height: min(744px, calc(100dvh - 40px)); }
+.shell :is(a, button, input, textarea, select, label):focus-visible, .fileButton:focus-within { outline: 2px solid var(--studio-accent); outline-offset: 3px; }
+.main { min-width: 0; max-width: 1246px; width: 100%; padding: 26px 0 60px; }
+.history { padding: 24px; }
+.directoryHeader { padding-top: 17px; margin-bottom: 38px; }
+.directoryHeader h1, .toolHeader h1 { margin: 0; color: var(--studio-text); line-height: 1.15; letter-spacing: -.035em; font-weight: 760; }
+.directoryHeader h1 { font-size: clamp(42px, 4.2vw, 62px); }
+.toolHeader h1 { font-size: clamp(30px, 3.4vw, 42px); }
+.directoryHeader p, .toolHeader p { margin: 12px 0 0; color: var(--studio-muted); }
+.toolHeader { margin: 20px 0 27px; }
+.directorySection + .directorySection { margin-top: 29px; }
+.directorySection h2, .panel h2, .dialog h2 { margin: 0 0 16px; font-size: 1.28rem; font-weight: 720; letter-spacing: -.015em; }
+.directoryGrid, .stickerGrid { margin: 0; padding: 0; list-style: none; display: grid; }
+.directoryGrid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; }
+.directoryGrid li { min-width: 0; }
+.toolCard { display: block; height: 100%; color: inherit; text-decoration: none; border: 1px solid var(--studio-line); border-radius: 16px; overflow: hidden; background: var(--studio-surface); }
+.toolCard:hover { border-color: var(--studio-accent); }
+.cardArt { height: clamp(130px, 11vw, 172px); border-radius: 14px; overflow: hidden; }
+.cardPhoto, .cardPhoto img, .stickerMosaic, .cutoutMosaic { display: block; width: 100%; height: 100%; }
+.cardPhoto img { object-fit: cover; }
+.stickerMosaic, .cutoutMosaic { display: flex; align-items: center; justify-content: center; }
+.stickerMosaic { padding: 10px; background: #e5f0e7; }
+.stickerMosaic img { width: 32%; height: auto; max-height: 83%; object-fit: contain; }
+.stickerMosaic img:first-child { transform: translateY(16%) rotate(9deg); }
+.stickerMosaic img:nth-child(2) { transform: translateY(-12%) rotate(-3deg); }
+.stickerMosaic img:last-child { transform: translateY(10%) rotate(-8deg); }
+.cutoutMosaic, .checker { background: url("/studio/checker.png") center / cover; }
+.cutoutMosaic img { width: auto; height: 88%; object-fit: contain; }
+.cardCopy { display: grid; grid-template-columns: minmax(0, 1fr) auto; min-height: 98px; gap: 8px; padding: 15px 16px; }
+.cardCopy h3 { margin: 0; font-size: 1.06rem; font-weight: 730; line-height: 1.4; }
+.cardCopy svg { color: var(--studio-accent); flex: none; }
+.cardCopy p { grid-column: 1 / -1; margin: 0; color: var(--studio-muted); font-size: .79rem; line-height: 1.45; }
+.back, .textLink { color: var(--studio-accent); font-weight: 700; text-decoration: none; }
+.back { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; }
+.textLink { margin-left: 12px; }
+.workbench { display: grid; grid-template-columns: minmax(240px, .36fr) minmax(0, 1fr); gap: 22px; align-items: start; }
+.panel, .dialog { min-width: 0; border: 1px solid var(--studio-line); border-radius: 15px; padding: 22px; background: var(--studio-surface); color: var(--studio-text); }
+.panelHeader { display: flex; justify-content: space-between; gap: 10px; align-items: start; margin-bottom: 16px; }
+.panelHeader h2 { margin-bottom: 4px; }
+.panelHeader p, .hint { margin: 7px 0 12px; color: var(--studio-muted); font-size: .78rem; }
+.fieldset { border: 0; margin: 18px 0; padding: 0; min-width: 0; }
+.field, .fieldset legend { display: grid; gap: 7px; margin-bottom: 12px; font-size: .86rem; font-weight: 680; }
+.field input:not([type="range"]), .field textarea, .field select { width: 100%; min-height: 40px; border: 1px solid var(--studio-line); border-radius: 8px; color: var(--studio-text); background: var(--studio-bg); padding: 8px 10px; font: inherit; font-weight: 450; }
+.field textarea { resize: vertical; }
+.field input[type="range"] { accent-color: var(--studio-accent); }
+.styleOption, .fileRow { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 8px; border: 1px solid var(--studio-line); border-radius: 9px; background: var(--studio-bg); margin-bottom: 8px; font-size: .82rem; }
+.fileRow span, .styleOption span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.styleOption input { margin-left: auto; accent-color: var(--studio-accent); }
+.styleOption:has(input:checked) { border-color: var(--studio-accent); background: var(--studio-selection); }
+.fileRow img, .styleOption img { flex: none; object-fit: contain; border-radius: 7px; }
+.fileRow .fileButton { margin: 0 0 0 auto; }
+.primary, .secondary, .choiceActive, .fileButton {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 7px 11px;
+  border: 1px solid var(--studio-line); border-radius: 8px; color: var(--studio-text); background: var(--studio-surface);
+  font: inherit; font-size: .8rem; font-weight: 700; cursor: pointer; white-space: nowrap;
+}
+.primary { background: var(--studio-accent); color: var(--studio-primary-text); border-color: var(--studio-accent); }
+.choiceActive { border-color: var(--studio-accent); background: var(--studio-selection); }
+.fileButton { position: relative; margin: 7px 0; }
+.fileButton input { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: inherit; }
+.primary:disabled, .secondary:disabled, .fileButton[data-disabled], .stickerActions button:disabled { cursor: default; opacity: .5; }
+.choices { display: flex; gap: 6px; flex-wrap: wrap; }
+.status { margin: 10px 0 0; font-size: .82rem; overflow-wrap: anywhere; }
+.status[role="alert"] { color: #b43a28; }
+.stickerGrid { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+.sticker { min-width: 0; border-radius: 10px; overflow: hidden; border: 1px solid var(--studio-line); }
+.stickerImage { display: grid; justify-items: center; gap: 3px; padding: 6px; background: #e8f0e5; color: #142421; text-align: center; }
+.sticker:nth-child(5n + 2) .stickerImage { background: #eee8f9; }
+.sticker:nth-child(5n + 3) .stickerImage { background: #f8eced; }
+.sticker:nth-child(5n + 4) .stickerImage { background: #fbf0dc; }
+.sticker:nth-child(5n) .stickerImage { background: #e9edf8; }
+.stickerImage img { width: 100%; height: 83px; object-fit: contain; }
+.stickerImage span { min-width: 50%; max-width: 100%; border-radius: 100px; padding: 2px 6px; font-size: .67rem; font-weight: 750; background: #fff; overflow-wrap: anywhere; }
+.stickerActions { display: flex; justify-content: space-between; gap: 3px; padding: 3px; }
+.stickerActions button { min-height: 32px; min-width: 28px; padding: 3px; border: 0; background: var(--studio-surface); color: var(--studio-accent); font: inherit; font-size: .68rem; font-weight: 700; cursor: pointer; }
+.dialog { margin: auto; width: min(640px, calc(100vw - 28px)); }
+.dialog::backdrop { background: #12251c88; }
+.dialogActions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 7px; margin-top: 14px; }
+.compare, .posterGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+.posterGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
+.compare figure, .posterGrid figure { margin: 0; min-width: 0; border-radius: 10px; overflow: hidden; }
+.compare figure { padding: 10px; background-color: var(--studio-bg); }
+.compare figcaption { width: max-content; padding: 2px 4px; border-radius: 4px; background: var(--studio-surface); font-size: .77rem; font-weight: 700; }
+.compare img { display: block; width: 100%; height: clamp(126px, 22vw, 290px); object-fit: contain; }
+.posterGrid figcaption { display: flex; margin-top: 7px; }
+.posterGrid button { min-width: 0; white-space: normal; }
+.posterArt, .memeArt { position: relative; overflow: hidden; border-radius: 10px; }
+.posterArt img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.artText, .memeArt strong { position: absolute; top: 6%; left: 5%; max-width: 90%; background: #142820ed; color: #fff; border-radius: 7px; padding: 6px 8px; overflow-wrap: anywhere; }
+.artText strong, .artText small { display: block; }
+.artText strong { font-size: clamp(.62rem, 1.5vw, 1.15rem); }
+.artText small { font-size: clamp(.55rem, 1vw, .78rem); }
+.scene, .memeArt img { display: block; width: 100%; max-height: 340px; object-fit: cover; border-radius: 9px; }
+.scene, .memeArt { margin-bottom: 14px; }
+@media (max-width: 1050px) {
+  .workbench { grid-template-columns: minmax(214px, .44fr) minmax(0, 1fr); gap: 13px; }
+  .panel { padding: 15px; }
+  .directoryGrid { gap: 12px; }
+  .cardCopy { padding: 10px; }
+  .stickerGrid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (max-width: 767px) {
+  .shell { display: block; min-height: 100dvh; padding: 0 0 calc(72px + env(safe-area-inset-bottom)); }
+  .shell > :global(.review-navigation) { position: fixed; top: auto; bottom: 0; left: 0; right: 0; width: auto; height: calc(62px + env(safe-area-inset-bottom)); min-height: 0; padding: 4px 4px calc(4px + env(safe-area-inset-bottom)); border-radius: 0; background: #11192b; color: #a9b9d2; }
+  .shell > :global(.review-navigation) :global(a), .shell > :global(.review-navigation) :global(button) { gap: 3px; font-size: .65rem; }
+  .main { padding: 26px 20px 28px; }
+  .directoryHeader { padding-top: 5px; margin-bottom: 25px; }
+  .directoryHeader p, .toolHeader p { margin-top: 6px; font-size: .8rem; }
+  .directorySection h2 { font-size: 1.06rem; margin-bottom: 9px; }
+  .directorySection + .directorySection { margin-top: 15px; }
+  .directoryGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; }
+  .cardArt { height: 80px; border-radius: 11px; }
+  .toolCard { border-radius: 12px; }
+  .cardCopy { gap: 3px 5px; min-height: 58px; padding: 5px 8px 7px; }
+  .cardCopy h3 { font-size: .87rem; }
+  .cardCopy p { font-size: .65rem; }
+  .cardCopy svg { width: 13px; }
+  .toolHeader { margin: 14px 0 19px; }
+  .workbench { grid-template-columns: minmax(0, 1fr); }
+  .stickerGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .stickerImage img { height: 63px; }
+  .stickerActions button { min-height: 36px; }
+}
+
+.mobileCopy { display: none; }
+@media (max-width: 767px) {
+  .cardCopy .desktopCopy { display: none; }
+  .cardCopy .mobileCopy { display: block; }
+  .cardCopy h3:lang(ko) { word-break: keep-all; }
+}
