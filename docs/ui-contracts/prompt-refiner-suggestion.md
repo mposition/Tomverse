@@ -58,6 +58,13 @@ auto를 허용할 때 사용자의 통상 Send 준비 과정에서만 서버가 
 `offered=false`는 비활성 teaser가 아니라 아무 UI도 렌더하지 않는다. 실제 호출을
 할 수 없는 사용자가 기능을 약속받는 상태를 만들지 않는다.
 
+**제품 Chat의 composer는 수동 `문장 다듬기` 행을 제공하지 않는다**(운영자 결정
+2026-11-23: Refiner는 자동 기능이다). `ChatPageClient`는 E2E fixture mode에서만
+`offered=true`를 넘긴다. 제품에서 Refiner는 Auto 대화의 Send 준비 과정에서만
+동작하고, 스마트 자동을 끈 대화는 원문 그대로 보낸다. 이 문서의 수동 제안 UI
+규칙(§1의 두 버튼과 패널 상태)은 fixture와 패널 컴포넌트에 계속 적용된다. 서버의
+explicit proposal 경로는 남아 있지만 제품 화면에는 진입점이 없다.
+
 ## 2. 원문과 실행 입력은 서로 다른 자료다
 
 채택 시에도 사용자가 작성한 Message는 원문을 보존해야 한다. Refiner 제안은

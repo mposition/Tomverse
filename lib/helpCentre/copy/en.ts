@@ -176,7 +176,6 @@ export const en: HelpLocaleCopy = {
         { title: "Check Smart Adaptive", body: "Check that the \"Smart Adaptive\" switch in the message box is on. In an empty Chat it's on from the start." },
         { title: "Send", body: "Write your question and select \"Send\". There's no separate button to press." },
         { title: "Check the result", body: "Check the model that answered in the \"Auto · model name\" badge under the answer. If your question was restated, you can expand \"How Auto read your message\"." },
-        { title: "If you want to improve it yourself", body: "While signed in, in a saved chat where you've turned Smart Adaptive off and chosen a model yourself, you can select \"Improve wording\" to get a suggestion and choose \"Use this wording\" or \"Keep original\"." },
       ],
       faq: [
         { q: "Is the message I sent changed when it's saved?", a: "No. The improved wording goes only to the model that answers, and the chat saves your message exactly as you wrote it." },

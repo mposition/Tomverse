@@ -176,7 +176,6 @@ export const pt: HelpLocaleCopy = {
         { title: "Conferir a Adaptação inteligente", body: "Confira se a chave “Adaptação inteligente” do campo de mensagem está ligada. Em um Chat vazio, ela já começa ligada." },
         { title: "Enviar", body: "Escreva a pergunta e toque em “Enviar”. Não há nenhum outro botão a tocar." },
         { title: "Ver o resultado", body: "Abaixo da resposta, o selo “Automático · nome do modelo” mostra qual modelo respondeu. Se a pergunta foi reformulada, abra “Como o Auto leu sua mensagem”." },
-        { title: "Se quiser melhorar você mesmo", body: "Em uma conversa salva, com login, em que você desligou a Adaptação inteligente e escolheu o modelo, use “Melhorar redação” para receber uma sugestão e escolha “Usar esta redação” ou “Manter original”." },
       ],
       faq: [
         { q: "A mensagem que enviei é alterada ao ser salva?", a: "Não. A versão melhorada só vai para o modelo que responde, e a conversa guarda sua mensagem exatamente como você a escreveu." },

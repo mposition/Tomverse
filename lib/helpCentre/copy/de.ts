@@ -177,7 +177,6 @@ export const de: HelpLocaleCopy = {
         { title: "Intelligente Automatik prüfen", body: "Prüfen Sie, ob der Schalter „Intelligente Automatik“ im Eingabefeld eingeschaltet ist. In einem leeren Chat ist er von Anfang an eingeschaltet." },
         { title: "Senden", body: "Schreiben Sie Ihre Frage und klicken Sie auf „Senden“. Eine zusätzliche Schaltfläche, die Sie anklicken müssten, gibt es nicht." },
         { title: "Ergebnis prüfen", body: "Am Etikett „Automatisch · Modellname“ unter der Antwort sehen Sie, welches Modell geantwortet hat. Hat Auto Ihre Frage umformuliert, können Sie „So hat Auto Ihre Nachricht gelesen“ aufklappen." },
-        { title: "Selbst verbessern lassen", body: "In einer gespeicherten Unterhaltung, in der Sie angemeldet die intelligente Automatik ausgeschaltet und selbst ein Modell gewählt haben, erhalten Sie mit „Formulierung verbessern“ einen Vorschlag und können „Diese Formulierung verwenden“ oder „Original behalten“ wählen." },
       ],
       faq: [
         { q: "Wird meine gesendete Nachricht verändert gespeichert?", a: "Nein. Die verbesserte Formulierung geht nur an das antwortende Modell; in der Unterhaltung wird Ihr Text so gespeichert, wie Sie ihn geschrieben haben." },
