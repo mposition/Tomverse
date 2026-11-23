@@ -136,3 +136,13 @@ test("two revoked sources are withheld in one pass, so rebuilding for one never 
   const json = JSON.stringify(withheld.document);
   for (const leaked of ["Private fact", "Second private fact"]) assert.ok(!json.includes(leaked), leaked);
 });
+
+test("a rebuilt section is written when it keeps a claim paragraph and missing when only the removal note is left", () => {
+  const only = new Map([["C2", claims.get("C2")]]);
+  const document = researchReportDocumentSchema.parse({ ...doc(), sections: [{ key: "s1", heading: "S", status: "missing", blocks: [] }] });
+  const kept = withholdRevokedSource(document, [...claims.values()], ["P1"], { note: "removed", privateSource: "private source", title: "Q" });
+  assert.equal(kept.document.sections[0].status, "written", "the public claim is still there");
+  const empty = withholdRevokedSource(document, [...only.values()], ["P1"], { note: "removed", privateSource: "private source", title: "Q" });
+  assert.equal(empty.document.sections[0].status, "missing");
+  assert.deepEqual(empty.document.sections[0].blocks, [{ type: "paragraph", text: "removed", claimKeys: [] }]);
+});

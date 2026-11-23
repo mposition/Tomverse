@@ -558,6 +558,15 @@ async function handleAnalyzePrivate(run: RunRow, item: ResearchWorkItem, fence: 
   await settleResearchSegmentIfReady(result.segmentId);
 }
 
+/**
+ * A private-derived claim that cites no private source: no revocation could find
+ * it. Such a claim is never stored, and one stored before that rule is withheld
+ * once any private source of the run is revoked.
+ */
+function unattributedPrivateClaim(claim: { privateDerived: boolean; evidence: unknown }, privateSourceKeys: ReadonlySet<string>) {
+  return claim.privateDerived && !(claim.evidence as Array<{ sourceKey: string }>).some((evidence) => privateSourceKeys.has(evidence.sourceKey));
+}
+
 /** A revoked private source: stop using it, drop its stored text, and withhold everything derived from it. */
 export async function revokePrivateSource(run: Pick<RunRow, "id">, sourceId: string) {
   await prisma.$transaction(async (tx) => {
@@ -622,11 +631,7 @@ export async function withholdRevokedSources(tx: Prisma.TransactionClient, runId
   }
   const privateSourceKeys = new Set(manifest.entries.filter((entry) => entry.type !== "url").map((entry) => entry.key));
   for (const claim of claims) {
-    // A private-derived claim citing no private source cannot be tied to one; once any
-    // private source of the run is revoked, its text is withheld too (rows stored before
-    // such claims stopped being kept). Nothing cites it: it is unsupported and uncitable.
-    const unattributed = claim.privateDerived && !(claim.evidence as Array<{ sourceKey: string }>).some((evidence) => privateSourceKeys.has(evidence.sourceKey));
-    const key = citedKey(claim) ?? (unattributed ? "unattributed" : undefined);
+    const key = citedKey(claim) ?? (unattributedPrivateClaim(claim, privateSourceKeys) ? "unattributed" : undefined);
     if (key && (claim.text !== labels.redactedNote || claim.verification !== "unsupported")) {
       await tx.researchClaim.update({ where: { id: claim.id }, data: { text: labels.redactedNote, verification: "unsupported", checks: json({ revoked: key }) } });
       if (claim.revisionId === currentRevisionId) currentChanged = true;
@@ -851,6 +856,16 @@ async function handleSynthesize(run: RunRow, item: ResearchWorkItem, fence: Rese
   const revision = await prisma.researchReportRevision.findUniqueOrThrow({ where: { runId_revision: { runId: run.id, revision: payload.reportRevision } } });
   const document = researchReportDocumentSchema.parse(revision.document);
   const claims = await prisma.researchClaim.findMany({ where: { revisionId: revision.id } });
+  // A source revoked after this revision's claims were made: whatever synthesis wrote
+  // would be withheld when the report is stored, so no model call is paid for it.
+  if (claims.some((claim) => (claim.evidence as Array<{ sourceKey: string }>).some((evidence) => revokedKeys.has(evidence.sourceKey)))) {
+    await prisma.$transaction(async (tx) => {
+      await lockResearchRun(tx, run.id);
+      await finishResearchWorkItem(tx, fence, { status: "completed", result: { revision: revision.revision, skipped: "source_revoked" } });
+    });
+    await finalizeReport(run.id, revision.id, null, manifest);
+    return;
+  }
   const plan = await approvedPlan(run, true);
   const limitations = await deterministicLimitations(run.id, manifest);
   // Sections and claims may carry private-derived content: re-check every private
@@ -1164,10 +1179,10 @@ async function beginFinalization(tx: Prisma.TransactionClient, run: RunRow, mani
   const claimNumber = (key: string) => Number(key.replace(/^C/, "")) || 0;
   const parentClaims = [...(parent?.claims ?? [])].sort((a, b) => claimNumber(a.claimKey) - claimNumber(b.claimKey));
   let next = parentClaims.reduce((max, claim) => Math.max(max, claimNumber(claim.claimKey)), 0) + 1;
-  // A private-derived claim with no verified quote is uncitable and tied to no
+  // A private-derived claim with no verified quote from a private source is tied to no
   // source a revocation could find, so it is never stored, new or carried.
-  const unattributedPrivate = (claim: { privateDerived: boolean; evidence: unknown }) =>
-    claim.privateDerived && !(claim.evidence as Array<{ sourceKey: string }>).length;
+  const privateSourceKeys = new Set(manifest.entries.filter((entry) => entry.type !== "url").map((entry) => entry.key));
+  const unattributedPrivate = (claim: { privateDerived: boolean; evidence: unknown }) => unattributedPrivateClaim(claim, privateSourceKeys);
   // A claim withheld for a revoked source is not carried either: nothing may cite it, and
   // carrying it would make a later revocation pass rebuild sections whose writers never saw it.
   const revokedKeys = new Set((await tx.researchSource.findMany({ where: { runId: run.id, visibility: "private", status: "revoked" },
@@ -1208,7 +1223,6 @@ async function beginFinalization(tx: Prisma.TransactionClient, run: RunRow, mani
   // sources they cite, so a revised text or note can only carry a source the
   // claim itself cites, and revoking a source withholds every claim it could
   // have reached. A private-derived claim that cites no private source is verified alone.
-  const privateSourceKeys = new Set(manifest.entries.filter((entry) => entry.type !== "url").map((entry) => entry.key));
   const rowByKey = new Map(rows.map((row) => [row.claimKey, row]));
   const originOf = (key: string) => {
     const row = rowByKey.get(key)!;
