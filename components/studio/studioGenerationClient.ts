@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { consumeChatStream } from "@/lib/chatStreamConsumer";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 import type { ImageSize } from "@/lib/imageGenerationPricing";
 
 export type StudioImageQuote = {
@@ -17,10 +18,16 @@ export class StudioGenerationError extends Error {
   }
 }
 
-async function readJson<T>(response: Response): Promise<T> {
-  const data = await response.json().catch(() => null);
-  if (!response.ok || data === null) throw new StudioGenerationError(response.status, data?.code, data?.details);
+function requireJson<T>(response: Response, data: unknown): T {
+  if (!response.ok || data === null) {
+    const error = data as { code?: string; details?: Record<string, unknown> } | null;
+    throw new StudioGenerationError(response.status, error?.code, error?.details);
+  }
   return data as T;
+}
+
+async function readJson<T>(response: Response): Promise<T> {
+  return requireJson<T>(response, await response.json().catch(() => null));
 }
 
 function postJson(path: string, body: object, signal: AbortSignal, method = "POST") {
@@ -124,20 +131,25 @@ export function createStudioImageRunner() {
         // A lost response may already have reserved credits. Recover the
         // receipt or keep the same key for the next click.
         const query = new URLSearchParams({ requestKey: run.idempotencyKey });
-        submitted = await readJson<StudioSubmission>(await fetch("/api/images/generations?" + query, { signal }));
+        const receipt = await fetch("/api/images/generations?" + query, { signal });
+        submitted = requireJson<StudioSubmission>(receipt, await receipt.json().catch(() => null));
       }
       run.groupId = submitted.groupId;
     }
     const deadline = Date.now() + 16 * 60 * 1000;
     while (Date.now() < deadline) {
-      const group = await readJson<{
+      const groupResponse = await fetch("/api/images/groups/" + encodeURIComponent(run.groupId), { signal, cache: "no-store" });
+      const group = requireJson<{
         targets: { currentGenerationId: string | null }[];
         generations: { generationId: string; status: string }[];
-      }>(await fetch("/api/images/groups/" + encodeURIComponent(run.groupId), { signal, cache: "no-store" }));
+      }>(groupResponse, await groupResponse.json().catch(() => null));
       const generation = group.generations.find(item => item.generationId === group.targets[0]?.currentGenerationId);
       if (generation?.status === "succeeded") {
         const response = await fetch("/api/images/generations/" + encodeURIComponent(generation.generationId) + "/download", { signal });
-        if (!response.ok) throw new StudioGenerationError(response.status);
+        if (!response.ok) {
+          await discardResponseBody(response);
+          throw new StudioGenerationError(response.status);
+        }
         const blob = await response.blob();
         if (!blob.type.startsWith("image/")) throw new StudioGenerationError(502);
         current = undefined;
