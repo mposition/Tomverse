@@ -434,3 +434,37 @@ test("a documentation answer of no tool calling never lowers a chat link's: it k
   assert.equal(state.row.profile.capabilities.toolCalling, "parallel");
   assert.equal(state.audits[0].metadata.answeredToolCalling, undefined);
 });
+
+test("a documentation answer of no structured output never lowers a serving chat link's: Code keeps it", async () => {
+  // 2026-11-23: pages that showed one flagship model only took Code from eight serving links in one run.
+  const answerNone = {
+    draftLlm: async () => ({
+      draftCodingCapabilities: async ({ pages }) => {
+        calls.llm += 1;
+        return { toolCalling: "none", structuredOutput: "none", note: "The pages do not name this model.", sources: pages.map((page) => page.url), draftedAt: "2026-11-23" };
+      },
+    }),
+  };
+  reset(registryLink({ channels: ["code", "api"], capabilities: { toolCalling: "basic", structuredOutput: "supported" } }), true);
+  const result = await fill(answerNone);
+  assert.equal(calls.llm, 1);
+  assert.deepEqual(state.row.profile.capabilities, { toolCalling: "basic", structuredOutput: "supported" });
+  // The judge saw the kept values; only the evidence moved, and it records the answer.
+  assert.deepEqual(state.updates[0].patch.profile.capabilities, { toolCalling: "basic", structuredOutput: "supported" });
+  assert.equal(state.row.profile.evidence.structuredOutput, "none");
+  assert.deepEqual(result.changes, []);
+  assert.equal(state.audits[0].metadata.structuredOutput, "supported");
+  assert.equal(state.audits[0].metadata.answeredStructuredOutput, "none");
+
+  // A link already at none stays none, with no answered value recorded.
+  reset(registryLink());
+  await fill(answerNone);
+  assert.equal(state.row.profile.capabilities.structuredOutput, "none");
+  assert.equal(state.audits[0].metadata.answeredStructuredOutput, undefined);
+
+  // An answer that names support still raises it.
+  reset(registryLink());
+  await fill();
+  assert.equal(state.row.profile.capabilities.structuredOutput, "supported");
+  assert.equal(state.audits[0].metadata.answeredStructuredOutput, undefined);
+});
