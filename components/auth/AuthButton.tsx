@@ -1,4 +1,4 @@
-﻿// components/auth/AuthButton.tsx
+// components/auth/AuthButton.tsx
 "use client";
 import { storeBillingDeletionNotice } from "@/locales/storeBilling";
 
@@ -62,7 +62,7 @@ import {
 import { UpgradeInterestButton } from "@/components/marketing/UpgradeInterestButton";
 import { withChatLanguage } from "@/lib/localizedCallbackUrl";
 import { PRODUCT_SURFACE_PATH } from "@/lib/productSurfaceRoutes";
-import type { ChatWorkspaceProduct } from "@/lib/chatProductUiCopy";
+import type { ConversationProductKey } from "@/lib/conversationProduct";
 import { openModelFinder } from "@/lib/modelFinderEvents";
 import { CreditPackPurchaseButton } from "@/components/billing/CreditPackPurchaseButton";
 import { UpgradeCtaLink } from "@/components/billing/UpgradeCtaLink";
@@ -112,7 +112,7 @@ export function AuthButton({
     // Generic account entry belongs to Review. Product shells pass their
     // current product explicitly so sign-in and account actions return to the
     // surface the user was actually using.
-    currentProduct?: ChatWorkspaceProduct;
+    currentProduct?: ConversationProductKey;
 } = {}) {
     const { enabledModels: ENABLED_MODELS } = useModelCatalog();
   const { data: session, status } = useSession();

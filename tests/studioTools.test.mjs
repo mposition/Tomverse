@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { findStudioTool, STUDIO_EXPORT_FORMATS, STUDIO_STICKER_KEYS, STUDIO_TOOLS, studioStickerCrop } from "../lib/studioTools.ts";
+import { findStudioTool, STUDIO_EXPORT_FORMATS, STUDIO_STICKER_KEYS, STUDIO_TOOLS, STUDIO_STICKER_LIMIT, studioStickerCrop, studioStickerLayout } from "../lib/studioTools.ts";
 
 test("The Studio directory exposes eight distinct tools with stable detail routes", () => {
   assert.equal(STUDIO_TOOLS.length, 8);
@@ -48,4 +48,19 @@ test("Every supported language includes Studio labels, examples, and twenty stic
     assert.ok(studioOutputLanguage[lang]);
   }
   assert.notEqual(studioCopy.zh.playGroup, studioCopy["zh-Hant"].playGroup);
+});
+
+test("Sticker sheets keep each requested caption in one cell for any pack size", () => {
+  for (let count = 1; count <= STUDIO_STICKER_LIMIT; count++) {
+    const { columns, rows } = studioStickerLayout(count);
+    assert.ok(columns * rows >= count);
+    const cells = Array.from({ length: count }, (_, i) => studioStickerCrop(i, 1537, 1023, columns, rows));
+    assert.equal(cells.length, count);
+    for (const { left, top, width, height } of cells) {
+      assert.ok(width > 0 && height > 0 && left + width <= 1537 && top + height <= 1023);
+    }
+    assert.equal(new Set(cells.map(({ left, top }) => [left, top].join(","))).size, count);
+  }
+  assert.deepEqual(studioStickerLayout(1), { columns: 1, rows: 1 });
+  assert.deepEqual(studioStickerLayout(20), { columns: 5, rows: 4 });
 });

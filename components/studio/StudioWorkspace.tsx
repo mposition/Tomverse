@@ -2,10 +2,10 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ArrowRight } from "lucide-react";
-import { ReviewNavigation } from "@/components/chat/ReviewStudioChrome";
-import { MarketingConsentSlot } from "@/components/analytics/AnalyticsProvider";
+import { ArrowRight } from "lucide-react";
+import { ReviewNavigation, WorkspaceTitle, WorkspaceThemeButton } from "@/components/chat/ReviewStudioChrome";
 import { PRODUCT_SURFACE_PATH } from "@/lib/productSurfaceRoutes";
 import { STUDIO_TOOLS, findStudioTool, type StudioTool } from "@/lib/studioTools";
 import { StudioStickerTool } from "./StudioStickerTool";
@@ -13,6 +13,8 @@ import { StudioToolEditor } from "./StudioToolEditor";
 import { useStudioCopy } from "./StudioControls";
 import "@/components/chat/review-studio.css";
 import styles from "./studio.module.css";
+
+const StudioAccount = dynamic(() => import("@/components/auth/AuthButton").then(module => module.AuthButton));
 
 const mobileArtwork = new Set(["meme", "illustration", "caricature", "poster"]);
 
@@ -39,20 +41,23 @@ export function StudioWorkspace({ toolId }: { toolId?: string }) {
   const tool = toolId ? findStudioTool(toolId) : undefined;
   return <div className={styles.shell} lang={lang} data-testid="studio-workspace">
     <ReviewNavigation product="studio" onNewChat={() => router.push(`/chat?lang=${lang}`)}
-      sidebar={<div className={styles.history}><Link href={{ pathname: "/chat", query: { lang } }}>{copy.openHistory}</Link></div>} />
+      sidebar={<aside className={styles.history}>
+        <Link href={{ pathname: "/chat", query: { lang } }}>{copy.openHistory}</Link>
+        <StudioAccount currentProduct="studio" showAnalyticsCookieButton />
+      </aside>} />
     <main className={styles.main}>
+      <header className={"review-command-bar " + styles.commandBar} data-testid="studio-command-bar">
+        <WorkspaceTitle name="Studio" caption={copy.workspaceCaption} title={tool ? copy[tool.title] : undefined}
+          href={tool ? { pathname: studioPath, query: { lang } } : undefined} />
+        <WorkspaceThemeButton />
+      </header>
       {tool ? <>
-        <Link className={styles.back} href={{ pathname: studioPath, query: { lang } }}><ArrowLeft size={16} aria-hidden />Studio</Link>
-        <header className={styles.toolHeader}>
-          <h1>{copy[tool.title]}</h1><p>{copy[tool.description]}</p>
-        </header>
-        <MarketingConsentSlot />
+        <h1 className="sr-only">{copy[tool.title]}</h1>
+        <p className={styles.toolIntro}>{copy[tool.description]}</p>
         {tool.id === "stickers" ? <StudioStickerTool /> : <StudioToolEditor tool={tool} />}
       </> : <>
-        <header className={styles.directoryHeader}>
-          <h1>Studio</h1><p>{copy.directoryIntro}</p>
-        </header>
-        <MarketingConsentSlot />
+        <h1 className="sr-only">Studio</h1>
+        <p className={styles.directoryIntro}>{copy.directoryIntro}</p>
         {(["play", "design"] as const).map(group => (
           <section key={group} className={styles.directorySection} aria-labelledby={`studio-tools-${group}`}>
             <h2 id={`studio-tools-${group}`}>{group === "play" ? copy.playGroup : copy.designGroup}</h2>

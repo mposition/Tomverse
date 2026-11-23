@@ -25,14 +25,21 @@ export const STUDIO_EXPORT_FORMATS = [
   { id: "story", width: 1080, height: 1920 },
 ] as const;
 
-export function studioStickerCrop(index: number, width: number, height: number) {
-  const column = index % 5;
-  const row = Math.floor(index / 5);
-  const left = Math.floor(width * column / 5);
-  const top = Math.floor(height * row / 4);
+export const STUDIO_STICKER_LIMIT = STUDIO_STICKER_KEYS.length;
+
+export function studioStickerLayout(count: number) {
+  const columns = Math.min(5, count, Math.ceil(Math.sqrt(count)));
+  return { columns, rows: Math.ceil(count / columns) };
+}
+
+export function studioStickerCrop(index: number, width: number, height: number, columns = 5, rows = 4) {
+  const column = index % columns;
+  const row = Math.floor(index / columns);
+  const left = Math.floor(width * column / columns);
+  const top = Math.floor(height * row / rows);
   return {
     left, top,
-    width: Math.floor(width * (column + 1) / 5) - left,
-    height: Math.floor(height * (row + 1) / 4) - top,
+    width: Math.floor(width * (column + 1) / columns) - left,
+    height: Math.floor(height * (row + 1) / rows) - top,
   };
 }

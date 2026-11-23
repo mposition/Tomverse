@@ -1,4 +1,4 @@
-import { studioStickerCrop } from "@/lib/studioTools";
+import { studioStickerCrop, studioStickerLayout } from "@/lib/studioTools";
 
 export const studioImageTypes = ["image/png", "image/jpeg", "image/webp"];
 export const studioImageAccept = studioImageTypes.join(",");
@@ -77,11 +77,75 @@ export async function renderStudioImage(
   return encode(element);
 }
 
-export async function splitStudioSheet(source: string) {
+export async function makeStudioImageReference(source: string, secondSource?: string) {
+  const image = await readImage(source);
+  if (!secondSource) {
+    const scale = Math.min(1, 1024 / Math.max(image.naturalWidth, image.naturalHeight));
+    const width = Math.max(1, Math.round(image.naturalWidth * scale));
+    const height = Math.max(1, Math.round(image.naturalHeight * scale));
+    const { element, context } = canvas(width, height);
+    drawImage(context, image, width, height, "contain");
+    return encode(element);
+  }
+  const second = await readImage(secondSource);
+  const { element, context } = canvas(1024, 512);
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, 1024, 512);
+  drawImage(context, image, 512, 512, "contain");
+  context.translate(512, 0);
+  drawImage(context, second, 512, 512, "contain");
+  return encode(element);
+}
+
+export async function removeStudioGreenScreen(blob: Blob) {
+  const source = URL.createObjectURL(blob);
+  try {
+    const image = await readImage(source);
+    const { element, context } = canvas(image.naturalWidth, image.naturalHeight);
+    drawImage(context, image, element.width, element.height, "contain");
+    const pixels = context.getImageData(0, 0, element.width, element.height);
+    for (let i = 0; i < pixels.data.length; i += 4) {
+      const [red, green, blue] = [pixels.data[i], pixels.data[i + 1], pixels.data[i + 2]];
+      if (green >= 110 && green - Math.max(red, blue) >= 48) pixels.data[i + 3] = 0;
+    }
+    context.putImageData(pixels, 0, 0);
+    return await encode(element);
+  } finally {
+    URL.revokeObjectURL(source);
+  }
+}
+
+export async function applyStudioSubjectMask(source: string, mask: Blob) {
+  const maskUrl = URL.createObjectURL(mask);
+  try {
+    const [photo, matte] = await Promise.all([readImage(source), readImage(maskUrl)]);
+    const side = 1024;
+    const frame = canvas(side, side);
+    drawImage(frame.context, matte, side, side, "contain");
+    const scale = Math.min(side / photo.naturalWidth, side / photo.naturalHeight);
+    const width = Math.max(1, Math.round(photo.naturalWidth * scale));
+    const height = Math.max(1, Math.round(photo.naturalHeight * scale));
+    const { element, context } = canvas(width, height);
+    context.drawImage(photo, 0, 0, width, height);
+    const pixels = context.getImageData(0, 0, width, height);
+    const mattePixels = frame.context.getImageData(Math.floor((side - width) / 2), Math.floor((side - height) / 2), width, height);
+    for (let i = 0; i < pixels.data.length; i += 4) {
+      const luminance = (mattePixels.data[i] + mattePixels.data[i + 1] + mattePixels.data[i + 2]) / 3;
+      pixels.data[i + 3] = Math.round(pixels.data[i + 3] * luminance / 255);
+    }
+    context.putImageData(pixels, 0, 0);
+    return await encode(element);
+  } finally {
+    URL.revokeObjectURL(maskUrl);
+  }
+}
+
+export async function splitStudioSheet(source: string, count: number) {
   const image = await readImage(source);
   if (image.naturalWidth < 250 || image.naturalHeight < 200) throw new Error("Sticker sheet too small");
-  return Promise.all(Array.from({ length: 20 }, (_, index) => {
-    const cell = studioStickerCrop(index, image.naturalWidth, image.naturalHeight);
+  const { columns, rows } = studioStickerLayout(count);
+  return Promise.all(Array.from({ length: count }, (_, index) => {
+    const cell = studioStickerCrop(index, image.naturalWidth, image.naturalHeight, columns, rows);
     const { element, context } = canvas(512, 512);
     const size = 512 / Math.max(cell.width, cell.height);
     const width = cell.width * size;
@@ -89,48 +153,6 @@ export async function splitStudioSheet(source: string) {
     context.drawImage(image, cell.left, cell.top, cell.width, cell.height, (512 - width) / 2, (512 - height) / 2, width, height);
     return encode(element);
   }));
-}
-
-export async function removeSolidStudioBackground(source: string, tolerance: number) {
-  const image = await readImage(source);
-  const scale = Math.min(1, 2048 / Math.max(image.naturalWidth, image.naturalHeight));
-  const width = Math.max(1, Math.round(image.naturalWidth * scale));
-  const height = Math.max(1, Math.round(image.naturalHeight * scale));
-  const { element, context } = canvas(width, height);
-  context.drawImage(image, 0, 0, width, height);
-  const pixels = context.getImageData(0, 0, width, height);
-  const { data } = pixels;
-  const reference = [data[0], data[1], data[2]];
-  const queue = new Uint32Array(width * height);
-  const seen = new Uint8Array(width * height);
-  let write = 0;
-  const visit = (index: number) => {
-    if (seen[index]) return;
-    seen[index] = 1;
-    const i = index * 4;
-    if (data[i + 3] === 0 || reference.every((color, channel) => Math.abs(color - data[i + channel]) <= tolerance)) {
-      data[i + 3] = 0;
-      queue[write++] = index;
-    }
-  };
-  for (let x = 0; x < width; x++) {
-    visit(x);
-    visit((height - 1) * width + x);
-  }
-  for (let y = 1; y < height - 1; y++) {
-    visit(y * width);
-    visit(y * width + width - 1);
-  }
-  for (let read = 0; read < write; read++) {
-    const index = queue[read];
-    const x = index % width;
-    if (x > 0) visit(index - 1);
-    if (x + 1 < width) visit(index + 1);
-    if (index >= width) visit(index - width);
-    if (index + width < queue.length) visit(index + width);
-  }
-  context.putImageData(pixels, 0, 0);
-  return encode(element);
 }
 
 export function saveStudioFile(blob: Blob, filename: string) {

@@ -53,13 +53,36 @@ function CommandBarConversationTitle({ title, fallback }: { title?: string | nul
   </span>;
 }
 
+export function WorkspaceTitle({ name, caption, description, title, fallback, href }: {
+  name: string; caption?: string; description?: string; title?: string | null; fallback?: string;
+  href?: { pathname: string; query: { lang: string } };
+}) {
+  return <div className="review-brand">
+    <Image loading="eager" unoptimized src="/tomverse-logo.png" width={34} height={34} alt="" aria-hidden="true" />
+    <strong title={description}>
+      {href ? <Link href={href}>{name}</Link> : name}
+      {caption && <small className="review-product-caption" aria-hidden="true">{caption}</small>}
+    </strong>
+    {(title || fallback) && <CommandBarConversationTitle title={title} fallback={fallback ?? ""} />}
+  </div>;
+}
+
+export function WorkspaceThemeButton() {
+  const { lang } = useLanguage();
+  return <button type="button" className="review-icon-button" aria-label={reviewWorkspaceCopy[lang].color} onClick={() => {
+    const root = document.documentElement;
+    const dark = root.classList.contains("dark") || (!root.classList.contains("light") && matchMedia("(prefers-color-scheme: dark)").matches);
+    storeAndApplyThemePreference(dark ? "light" : "dark");
+  }}><Moon size={17} aria-hidden="true" /></button>;
+}
+
 export function ReviewCommandBar({ review, locked = false, view, setView, showModeSwitcher = true, conversationTitle }: {
   review: ReviewWorkspaceControls; locked?: boolean; view?: "write" | "results"; setView?: (view: "write" | "results") => void; showModeSwitcher?: boolean; conversationTitle?: string | null;
 }) {
   const { lang } = useLanguage();
   const c = reviewWorkspaceCopy[lang];
   return <header className="review-command-bar" data-testid="review-command-bar">
-    <div className="review-brand"><Image loading="eager" unoptimized src="/tomverse-logo.png" width={34} height={34} alt="Tomverse" /><strong title={chatProductUiCopy[lang].review.description}>Review{chatProductUiCopy[lang].review.shortDescription && <small className="review-product-caption" aria-hidden="true">{chatProductUiCopy[lang].review.shortDescription}</small>}</strong><CommandBarConversationTitle title={conversationTitle} fallback={c.newTask} /></div>
+    <WorkspaceTitle name="Review" caption={chatProductUiCopy[lang].review.shortDescription} description={chatProductUiCopy[lang].review.description} title={conversationTitle} fallback={c.newTask} />
     {showModeSwitcher && <ReviewModeSwitcher review={review} locked={locked} />}
     {setView && <div className="review-view-switch" role="group" aria-label={c.results}>
       <button type="button" aria-pressed={view === "write"} onClick={() => setView("write")}>{c.write}</button>
@@ -85,10 +108,7 @@ function WorkspaceAppearanceActions({ workspace, disabled, testId }: { workspace
   return <>
     <span id={usageDescriptionId} className="sr-only">{usageDescription}</span>
     <button type="button" className="review-credit-button" data-testid="workspace-usage" onClick={() => openAccountSettings("plan")} aria-label={`${usageLabel} · ${c.settings}`} aria-describedby={usageDescriptionId} title={usageDescription}><BarChart3 size={17} aria-hidden="true" /><span>{usageLabel}</span></button>
-    <button type="button" className="review-icon-button" aria-label={c.color} onClick={() => {
-      const dark = document.documentElement.classList.contains("dark") || (!document.documentElement.classList.contains("light") && matchMedia("(prefers-color-scheme: dark)").matches);
-      storeAndApplyThemePreference(dark ? "light" : "dark");
-    }}><Moon size={17} /></button>
+    <WorkspaceThemeButton />
     <select disabled={disabled} data-testid={testId} aria-label={c.appearance} value={workspace.appearance} onChange={event => workspace.setAppearance(event.target.value === "classic" ? "classic" : "studio")}><option value="studio">Studio</option><option value="classic">Classic</option></select>
   </>;
 }
@@ -96,7 +116,7 @@ function WorkspaceAppearanceActions({ workspace, disabled, testId }: { workspace
 export function ChatCommandBar({ workspace, locked = false, conversationTitle }: { workspace: WorkspaceAppearanceControls; locked?: boolean; conversationTitle?: string | null }) {
   const { lang, t } = useLanguage();
   return <header className="review-command-bar chat-command-bar" data-testid="chat-command-bar">
-    <div className="review-brand"><Image loading="eager" unoptimized src="/tomverse-logo.png" width={34} height={34} alt="Tomverse" /><strong title={chatProductUiCopy[lang].chat.description}>Chat{chatProductUiCopy[lang].chat.shortDescription && <small className="review-product-caption" aria-hidden="true">{chatProductUiCopy[lang].chat.shortDescription}</small>}</strong><CommandBarConversationTitle title={conversationTitle} fallback={t("sidebar.newChat")} /></div>
+    <WorkspaceTitle name="Chat" caption={chatProductUiCopy[lang].chat.shortDescription} description={chatProductUiCopy[lang].chat.description} title={conversationTitle} fallback={t("sidebar.newChat")} />
     <span className="chat-studio-description" title={chatProductUiCopy[lang].chat.description}>{chatProductUiCopy[lang].chat.description}</span>
     <WorkspaceAppearanceActions workspace={workspace} disabled={locked} testId="chat-appearance" />
   </header>;
