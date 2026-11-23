@@ -760,6 +760,7 @@ export function UpgradeInterestButton({
   children,
   trigger,
   initialBillingInterval,
+  returnTo,
   autoOpen = false,
 }: {
   plan: "Pro" | "Max";
@@ -767,6 +768,7 @@ export function UpgradeInterestButton({
   children: ReactNode;
   trigger?: PurchaseAnalyticsTrigger;
   initialBillingInterval?: BillingInterval;
+  returnTo?: string;
   /**
    * Opens the checkout dialog once, without a click. Set by the pricing page
    * when a visitor comes back from sign-in with a subscription intent for this
@@ -1093,6 +1095,7 @@ export function UpgradeInterestButton({
           country: requestMarket.country,
           trigger: purchaseTrigger,
           purchaseAttemptId,
+          ...(returnTo ? { returnTo } : {}),
           ...(analytics ? { analytics } : {}),
         }),
       });

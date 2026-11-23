@@ -1,3 +1,4 @@
+import type { ConversationProductKey } from "@/lib/conversationProduct";
 import type { Language } from "@/lib/language";
 
 export type ChatWorkspaceProduct = "chat" | "review";
@@ -228,6 +229,6 @@ export const chatProductUiCopy: Readonly<Record<Language, ChatProductUiCopy>> = 
 };
 
 export const localizedProductHref = (
-  product: ChatWorkspaceProduct,
+  product: ConversationProductKey,
   language: Language
 ): string => `/${product}?lang=${encodeURIComponent(language)}`;

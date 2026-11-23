@@ -23,7 +23,7 @@ import { zhHant } from "../locales/zhHant.ts";
  * of its own answers the RSC request with the 404 document, and Next raises
  * "Expected RSC response, got text/html" (tests/singleSegmentLinkTargets.test.mjs).
  *
- * So this holds two things: the three workspaces have a boundary, and the copy
+ * So this holds two things: the rail workspaces have a boundary, and the copy
  * each boundary asks for exists in every locale rather than falling back to
  * English on the screen least able to absorb it.
  */
@@ -35,7 +35,7 @@ const read = (relativePath) => readFileSync(resolve(ROOT, relativePath), "utf8")
  * The workspaces that render `ReviewNavigation` (the rail with the help link),
  * and therefore share its failure mode.
  */
-const WORKSPACE_SEGMENTS = ["chat", "review", "plugins"];
+const WORKSPACE_SEGMENTS = ["chat", "review", "plugins", "studio"];
 const boundaryPath = (segment) => `app/(site)/(application)/${segment}/error.tsx`;
 
 const SCREEN = "components/WorkspaceErrorScreen.tsx";

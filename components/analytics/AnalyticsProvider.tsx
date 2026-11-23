@@ -500,7 +500,9 @@ export function AnalyticsProvider({
     if (!consentBar) return;
     const body = document.body;
     const sync = () => {
-      body.style.paddingBottom = `${consentBar.offsetHeight}px`;
+      const height = `${consentBar.offsetHeight}px`;
+      body.style.paddingBottom = height;
+      body.style.setProperty("--analytics-consent-bar-height", height);
     };
     sync();
     const observer = new ResizeObserver(sync);
@@ -508,6 +510,7 @@ export function AnalyticsProvider({
     return () => {
       observer.disconnect();
       body.style.paddingBottom = "";
+      body.style.removeProperty("--analytics-consent-bar-height");
     };
   }, [consentBar]);
 
@@ -817,15 +820,16 @@ export function AnalyticsProvider({
   // bar fixed to the bottom of the viewport (owner decision 2026-11-16): the
   // header band it replaced pushed every first-visit hero ~180px down.
   const isSettingsRoute = pathname === "/settings" || Boolean(pathname?.startsWith("/settings/"));
-  const isPluginRoute = pathname === "/plugins";
+  const hasWorkspaceConsentSlot = pathname === "/plugins";
+  const isStudioRoute = pathname === "/studio" || Boolean(pathname?.startsWith("/studio/"));
   const readableNotice = pathname === CHAT_WORKSPACE_PATH;
-  // /plugins keeps its slot under the header: on a phone its own tab bar is
+  // Plugins keeps a slot under the header: its mobile tab bar is
   // fixed to the bottom of the screen and would sit on top of the bar.
   const inlineSlot = isChatWorkspacePath(pathname)
     ? chatConsentSlot
     : pathname === "/auth/signin"
       ? authConsentSlot
-      : isPluginRoute
+      : hasWorkspaceConsentSlot
         ? marketingConsentSlot
         : null;
 
@@ -858,8 +862,8 @@ export function AnalyticsProvider({
   // pill are mutually exclusive -- one needs `consent === "unset"` or the
   // preferences panel open, the other needs a settled choice and the panel
   // closed -- so the slot never has to hold both.
-  const settingsUsesInlineSlot = pathname === "/auth/signin" || isSettingsRoute || isPluginRoute;
-  const settingsInlineSlot = isSettingsRoute ? settingsConsentSlot : isPluginRoute ? marketingConsentSlot : settingsUsesInlineSlot ? authConsentSlot : null;
+  const settingsUsesInlineSlot = pathname === "/auth/signin" || isSettingsRoute || hasWorkspaceConsentSlot;
+  const settingsInlineSlot = isSettingsRoute ? settingsConsentSlot : hasWorkspaceConsentSlot ? marketingConsentSlot : settingsUsesInlineSlot ? authConsentSlot : null;
 
   // REAUDIT-P1-01. Chat and Review share a workspace where the bottom-right corner is
   // never free: the last model panel's follow-up form ends there, and below it
@@ -1084,7 +1088,7 @@ export function AnalyticsProvider({
             // same 44x44 floor and focus treatment as the consent actions
             // above, and it is inset by the safe area so a notched phone's
             // rounded corner cannot eat the corner of the box.
-            className="fixed bottom-[max(0.5rem,env(safe-area-inset-bottom))] right-[max(0.5rem,env(safe-area-inset-right))] z-[60] inline-flex min-h-11 min-w-11 items-center justify-center rounded-full border border-zinc-300 bg-white/95 px-3 text-[11px] font-bold text-zinc-700 shadow-lg backdrop-blur transition-colors hover:bg-zinc-50 hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-zinc-600 dark:bg-zinc-900/95 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:focus-visible:ring-offset-zinc-900"
+            className={`fixed bottom-[max(0.5rem,env(safe-area-inset-bottom))] right-[max(0.5rem,env(safe-area-inset-right))] z-[60] inline-flex min-h-11 min-w-11 items-center justify-center rounded-full border border-zinc-300 bg-white/95 px-3 text-[11px] font-bold text-zinc-700 shadow-lg backdrop-blur transition-colors hover:bg-zinc-50 hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:border-zinc-600 dark:bg-zinc-900/95 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:focus-visible:ring-offset-zinc-900 ${isStudioRoute ? "max-[769px]:bottom-[calc(70px+env(safe-area-inset-bottom))]" : ""}`}
           >
             {copy.settings}
           </button>

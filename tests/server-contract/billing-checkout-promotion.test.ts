@@ -436,6 +436,19 @@ test("a promotion checkout sends discounts and never sends allow_promotion_codes
   );
 });
 
+test("Studio subscription checkout returns to the same tool on success and cancellation", async () => {
+  const response = await post({
+    planId: "pro",
+    language: "ko",
+    returnTo: "/studio/stickers?lang=ko&draft=private",
+    purchaseAttemptId: "062f9fa2-8b53-44fc-8729-ca0f31c6317a",
+  });
+  assert.equal(response.status, 200);
+  const params = lastSessionParams();
+  assert.equal(params.success_url, "http://127.0.0.1:3100/studio/stickers?lang=ko&billing=success&plan=pro&interval=monthly");
+  assert.equal(params.cancel_url, "http://127.0.0.1:3100/studio/stickers?lang=ko&billing=cancelled&plan=pro&interval=monthly");
+});
+
 test("a checkout without a promotion still opts out of the Stripe code box explicitly", async () => {
   // The security guarantee the flag exists for: a customer must never be able
   // to type a code into Stripe and bypass server-side validation.

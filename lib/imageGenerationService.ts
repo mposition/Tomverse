@@ -248,12 +248,13 @@ export type ImageGenerationRequestInput = {
   chatTurnHost?: boolean;
   /**
    * Server-only, like `chatTurnHost`: edit this attachment instead of drawing
-   * from the prompt alone. The caller resolved it from the user's own saved
-   * message (lib/imageEditSource.ts); it is never read from a request body.
+   * from the prompt alone. The caller resolves an owned attachment or binds a
+   * finalized upload inside the reservation transaction. A request body cannot
+   * supply a trusted attachment ID or binding function.
    * Every model must support editing, and each target's price adds its
    * model's edit surcharge (lib/imageGenerationPricing.ts).
    */
-  editSource?: { attachmentId: string };
+  editSource?: { attachmentId: string } | { bindAttachment: (tx: Prisma.TransactionClient, conversationId: string) => Promise<string> };
 };
 
 export type ImageGenerationTargetResult = {
@@ -812,6 +813,9 @@ export const requestImageGeneration = async (
         });
       }
 
+      const editAttachmentId = edit && ("attachmentId" in edit
+        ? edit.attachmentId
+        : await edit.bindAttachment(tx, conversationId));
       const group = await tx.imageGenerationGroup.create({
         data: {
           userId: input.userId,
@@ -931,10 +935,10 @@ export const requestImageGeneration = async (
               measuredNonImageBound: imageMeasuredOutputLimitBound(target.model),
               // An edit: which photo, and the image-input budget its
               // surcharge bought. Read by the executor and by a retry.
-              ...(edit && target.editPricing
+              ...(editAttachmentId && target.editPricing
                 ? {
                     edit: {
-                      attachmentId: edit.attachmentId,
+                      attachmentId: editAttachmentId,
                       surchargeCredits: target.editPricing.surchargeCredits,
                       inputBudgetMicroUsd: target.editPricing.inputBudgetMicroUsd,
                       // Null for a photo billed per edit rather than per token.

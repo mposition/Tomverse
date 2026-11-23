@@ -89,11 +89,14 @@ import {
   type StripePromotionErrorCode,
 } from "@/lib/stripePromotionProvisioningCore";
 
+import { buildStudioSubscriptionReturnUrl } from "@/lib/purchaseIntent";
+
 const checkoutSchema = z
   .object({
     planId: z.enum(["pro", "max"]),
     billingInterval: z.enum(["monthly", "annual"]).default("monthly"),
     language: z.enum(SUPPORTED_LANGUAGES).optional(),
+    returnTo: z.string().max(512).optional(),
     promoCode: z.string().trim().toUpperCase().max(32).optional(),
     analytics: analyticsAttributionSchema.optional(),
     trigger: purchaseAnalyticsTriggerSchema.default("proactive"),
@@ -145,8 +148,12 @@ const billingSuccessUrl = (
   planId: BillingPlanId,
   billingInterval: "monthly" | "annual",
   language?: Language,
-  accessType?: "founding-tester-pass"
+  accessType?: "founding-tester-pass",
+  returnTo?: string
 ) =>
+  buildStudioSubscriptionReturnUrl({
+    origin, returnTo, outcome: "success", plan: planId, interval: billingInterval, language, access: accessType,
+  }) ??
   // A new subscriber lands on the main Chat page. `/chat` and `/review` mount
   // the same client, so the success notice reads these parameters on either.
   `${origin}${PRODUCT_SURFACE_PATH.chat}?billing=success&plan=${encodeURIComponent(
@@ -409,6 +416,7 @@ export async function POST(req: Request) {
       currency,
       country,
       purchaseAttemptId: requestedPurchaseAttemptId,
+      returnTo,
     } = await readLimitedJson(req, 4 * 1024, checkoutSchema);
     // A client that predates this field, or one whose request was replayed
     // without it, still gets a valid key -- it just does not get retry
@@ -680,7 +688,8 @@ export async function POST(req: Request) {
           planId as BillingPlanId,
           billingInterval,
           language,
-          "founding-tester-pass"
+          "founding-tester-pass",
+          returnTo
         ),
         periodEnd: periodEnd.toISOString(),
         accessType: "founding_tester_pass",
@@ -801,11 +810,15 @@ export async function POST(req: Request) {
             origin,
             planId as BillingPlanId,
             billingInterval,
-            language
+            language,
+            undefined,
+            returnTo
           ),
           // Cancelling used to drop the visitor on a bare /pricing with no
           // acknowledgement and no way back to the plan they were considering.
-          cancel_url: `${origin}/pricing?billing=cancelled&plan=${encodeURIComponent(
+          cancel_url: buildStudioSubscriptionReturnUrl({
+            origin, returnTo, outcome: "cancelled", plan: planId, interval: billingInterval, language,
+          }) ?? `${origin}/pricing?billing=cancelled&plan=${encodeURIComponent(
             planId
           )}${language ? `&lang=${encodeURIComponent(language)}` : ""}#plans`,
           expires_at: appliedPromotion
