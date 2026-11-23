@@ -26,6 +26,8 @@ import {
 import { imageAssetR2Key } from "@/lib/imageGenerationStateCore";
 import { prisma } from "@/lib/prisma";
 import { getUserBillingPlan } from "@/lib/billingEntitlements";
+import { accountAttachmentPrefix, MessageAttachmentBindError } from "@/lib/messageAttachmentStorage";
+import { bindStudioImageUpload } from "@/lib/studioImageReference";
 
 const resetImageTestData = () =>
   prisma.$executeRawUnsafe(`
@@ -455,6 +457,70 @@ test("the same idempotency key replays the winner instead of double-charging", a
     where: { key: getUserChatUsageKey(user.id), period: "month" },
   });
   assert.equal(Number(monthBucket?.count ?? 0), 15);
+});
+
+test("Studio edit reservations roll back on foreign or already bound uploads and replay once", async t => {
+  const prior = process.env.IMAGE_EDIT_ENABLED;
+  process.env.IMAGE_EDIT_ENABLED = "true";
+  t.after(() => {
+    if (prior === undefined) delete process.env.IMAGE_EDIT_ENABLED;
+    else process.env.IMAGE_EDIT_ENABLED = prior;
+  });
+  await enableImageGeneration();
+  const owner = await createUser();
+  const other = await createUser();
+  const createUpload = (user: typeof owner) => prisma.messageAttachmentUpload.create({
+    data: {
+      userId: user.id, objectKey: accountAttachmentPrefix(user.email!) + "studio/" + randomUUID(),
+      name: "reference.png", mediaType: "image/png", size: 1000, kind: "file",
+    },
+  });
+  const foreign = await createUpload(other);
+  const owned = await createUpload(owner);
+  let bindings = 0;
+  const makeRequest = (uploadId: string) => {
+    const request = requestInput(owner.id, { quality: "medium" });
+    request.editSource = {
+      bindAttachment: (tx, conversationId) => {
+        bindings += 1;
+        return bindStudioImageUpload(tx, {
+          userId: owner.id, email: owner.email!, uploadId, conversationId, prompt: request.prompt,
+        });
+      },
+    };
+    return request;
+  };
+  const counts = () => Promise.all([
+    prisma.conversation.count(), prisma.message.count(), prisma.messageAttachment.count(),
+    prisma.imageGenerationGroup.count(), prisma.imageCreditReservation.count(),
+    prisma.chatUsageBucket.count(), prisma.chatRequestLease.count(),
+  ]);
+
+  const firstDay = new Date("2026-11-20T12:00:00.000Z");
+  const followingDay = new Date("2026-11-21T12:00:00.000Z");
+  await assert.rejects(requestImageGeneration(makeRequest(foreign.id), firstDay), { code: "STUDIO_INVALID_REFERENCE" });
+  assert.deepEqual(await counts(), [0, 0, 0, 0, 0, 0, 0]);
+
+  const request = makeRequest(owned.id);
+  const first = await requestImageGeneration(request, firstDay);
+  const attached = await prisma.messageAttachment.findFirstOrThrow({ where: { uploadId: owned.id } });
+  const reservation = await prisma.imageCreditReservation.findUniqueOrThrow({ where: { generationId: first.generationId } });
+  assert.equal(attached.userId, owner.id);
+  assert.equal(attached.conversationId, first.conversationId);
+  assert.equal((reservation.pricingSnapshot as { edit?: { attachmentId?: string } }).edit?.attachmentId, attached.id);
+  const afterFirst = await counts();
+
+  const replay = await requestImageGeneration(request, firstDay);
+  assert.equal(replay.groupId, first.groupId);
+  assert.equal(replay.reused, true);
+  assert.equal(bindings, 2, "the replay must not bind the source a second time");
+  assert.deepEqual(await counts(), afterFirst);
+
+  await assert.rejects(requestImageGeneration(makeRequest(owned.id), followingDay), (error: unknown) =>
+    error instanceof MessageAttachmentBindError && error.code === "ATTACHMENT_ALREADY_BOUND");
+  assert.deepEqual(await counts(), afterFirst);
+  const usage = await prisma.chatUsageBucket.findFirstOrThrow({ where: { key: getUserChatUsageKey(owner.id), period: "month" } });
+  assert.equal(Number(usage.count), reservation.reservedCredits);
 });
 
 test("a missing flag row fails closed and leaves no rows", async () => {

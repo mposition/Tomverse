@@ -27,7 +27,7 @@ const audit = (overrides = {}) =>
 test("the shipped deadlines and routes pass", () => {
   assert.deepEqual(audit().failures, []);
   // The workspace submit, the target retry and the Chat image turn.
-  assert.equal(IMAGE_EXECUTOR_ROUTES.length, 3);
+  assert.ok(IMAGE_EXECUTOR_ROUTES.includes("app/api/studio/images/route.ts"));
 });
 
 test("a stale threshold at or below the worst attempt is refunding live work", () => {

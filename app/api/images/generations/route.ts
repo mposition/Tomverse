@@ -32,8 +32,8 @@ import {
   requestImageGeneration,
 } from "@/lib/imageGenerationService";
 
-// POST /api/images/generations -- the only way an image conversation comes
-// into existence. Both gates (the default-off operational flag and the
+// POST /api/images/generations -- the image workspace submission route.
+// Studio tools use the same reservation service. Both gates (the default-off operational flag and the
 // Pro/Max plan entitlement) are enforced inside requestImageGeneration from
 // this first commit; UI non-exposure is not a security boundary.
 // Policy: docs/policy/image-generation.md sections 2 and 6-7.
