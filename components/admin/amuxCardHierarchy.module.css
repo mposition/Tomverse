@@ -33,9 +33,10 @@ button.step:focus-visible { outline:2px solid var(--amux-blue); outline-offset:2
 .field { display:flex; flex-direction:column; gap:6px; }
 .field > span:first-child, .field > label, .field legend { font-size:12px; font-weight:600; }
 .field small { font-size:11px; color:var(--amux-subtle); }
-.field input[type="text"], .field input[type="date"], .field textarea { width:100%; padding:8px 10px; border:1px solid var(--amux-border); border-radius:6px; background:var(--amux-canvas); color:var(--amux-text); font-size:13px; }
+.field input[type="text"], .field input[type="date"], .field textarea, .field select { width:100%; padding:8px 10px; border:1px solid var(--amux-border); border-radius:6px; background:var(--amux-canvas); color:var(--amux-text); font-size:13px; }
 .field textarea { min-height:84px; resize:vertical; }
-.field input:focus-visible, .field textarea:focus-visible { outline:2px solid var(--amux-blue); outline-offset:1px; }
+.field select option { background:var(--amux-raised); color:var(--amux-text); }
+.field input:focus-visible, .field textarea:focus-visible, .field select:focus-visible { outline:2px solid var(--amux-blue); outline-offset:1px; }
 .field fieldset, fieldset.field { border:0; padding:0; margin:0; }
 .segments { display:flex; flex-wrap:wrap; gap:6px; }
 .segments label { position:relative; }
