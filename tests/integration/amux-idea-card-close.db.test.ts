@@ -1029,42 +1029,47 @@ test("an answer that says neither close nor keep changes nothing and goes to the
 });
 
 test("the owner answers directly, with a person's audit, whatever the router or the kill switch did", async () => {
-  // A card's own number hits the term list: no DM, the question stays with the operator.
+  // A card's own number carries a term of the routing list ("prod"). The
+  // question is one the app filed, and such a card is not read for those terms
+  // (owner decision 2026-11-22, lib/amux/decisionMakerCore.ts), so the number
+  // no longer keeps it with the operator: it reaches a DM, and the owner may
+  // still answer it directly.
   // Unique per run, so a database another run left behind holds no such key.
-  const routedAway = await seedIdea([{ status: "blocked", displayKey: `AMUX-PROD-${randomInt(100, 1_000_000)}` },
+  const termInKey = await seedIdea([{ status: "blocked", displayKey: `AMUX-PROD-${randomInt(100, 1_000_000)}` },
     { status: "backlog" }]);
   await drain();
-  const { question, routed } = await fileToRelay(routedAway.ideaId);
-  assert.equal(routed.route, "operator");
+  const { question, routed } = await fileToRelay(termInKey.ideaId);
+  assert.equal(routed.route, "dm_proposal");
+  assert.deepEqual(routed.refusalCodes, [], "a card the app filed is not read for the term list");
   await setSwitch("kill_switch", "on");
 
-  const view = await readAmuxIdeaCardCloseQuestionForOwner({ ideaId: routedAway.ideaId, actorUserId: OWNER_ID });
+  const view = await readAmuxIdeaCardCloseQuestionForOwner({ ideaId: termInKey.ideaId, actorUserId: OWNER_ID });
   assert.equal(view?.questionId, question.id);
   assert.equal(view?.reasonCode, "blocked_task");
   assert.equal(view?.handedOff, false);
   assert.deepEqual(view?.cards.map((entry) => entry.displayKey).sort(),
-    [...routedAway.displayKeys].sort());
-  assert.equal(await readAmuxIdeaCardCloseQuestionForOwner({ ideaId: routedAway.ideaId, actorUserId: "someone-else" }), null);
+    [...termInKey.displayKeys].sort());
+  assert.equal(await readAmuxIdeaCardCloseQuestionForOwner({ ideaId: termInKey.ideaId, actorUserId: "someone-else" }), null);
 
   const answer = (over: Record<string, unknown> = {}) => answerAmuxIdeaCardCloseForOwner({
-    session: owner(), request: adminRequest(), ideaId: routedAway.ideaId, questionId: question.id,
+    session: owner(), request: adminRequest(), ideaId: termInKey.ideaId, questionId: question.id,
     decision: "close", reason: "No longer wanted, secret note.", ...over } as never);
   await assert.rejects(answer({ reason: "no" }), /invalid/, "a reason is required");
   await withStepUpWindow("5", () => assert.rejects(answer({ session: owner({ authenticatedAt: new Date(Date.now() - 10 * 60_000).toISOString() }) }),
     /Sign in again/, "recent re-authentication"));
   await assert.rejects(answer({ session: { user: { id: "not-an-admin", email: "x@example.test" },
     expires: new Date(Date.now() + 60_000).toISOString() } }), /forbidden/);
-  assert.equal((await questionOf(routedAway.ideaId))!.state, "open");
+  assert.equal((await questionOf(termInKey.ideaId))!.state, "open");
 
   const result = await answer();
   assert.equal(result.outcome, "closed");
   assert.equal(result.outcome === "closed" && result.closedCards, 2);
-  const closed = (await questionOf(routedAway.ideaId))!;
+  const closed = (await questionOf(termInKey.ideaId))!;
   assert.equal(closed.state, "closed");
   assert.equal(closed.answerSource, "operator");
   assert.equal(closed.answeredByUserId, OWNER_ID);
-  assert.equal((await card(routedAway.cardIds[0])).status, "cancelled");
-  assert.ok((await card(routedAway.cardIds[0])).v4TerminalAt);
+  assert.equal((await card(termInKey.cardIds[0])).status, "cancelled");
+  assert.ok((await card(termInKey.cardIds[0])).v4TerminalAt);
   const audit = (await auditOf(question.id)).at(-1)!;
   assert.equal(audit.action, "amux.idea.card_close.closed");
   assert.equal(audit.actorUserId, OWNER_ID, "a person's entry");
@@ -1075,7 +1080,7 @@ test("the owner answers directly, with a person's audit, whatever the router or 
   await setSwitch("kill_switch", "off");
 
   assert.equal((await answer()).outcome, "not_open", "answering twice changes nothing");
-  assert.equal(await readAmuxIdeaCardCloseQuestionForOwner({ ideaId: routedAway.ideaId, actorUserId: OWNER_ID }), null);
+  assert.equal(await readAmuxIdeaCardCloseQuestionForOwner({ ideaId: termInKey.ideaId, actorUserId: OWNER_ID }), null);
   assert.equal((await answer({ ideaId: randomUUID() })).outcome, "not_found");
 
   // Another owner's idea reads as missing, and a rejected proposal leaves the way open.
