@@ -135,3 +135,23 @@ test("the real jail: commands write the work directory only, never see the login
     fixture.dispose();
   }
 });
+
+test("the work tree's size counts what is behind an unreadable directory, and stops early past the cap", { skip: !posix || process.getuid?.() === 0 }, async () => {
+  const { mkdtempSync, writeFileSync, chmodSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { dmWorkTreeBytes } = await import("../lib/amux/decisionMakerWorkCopy.ts");
+  const root = mkdtempSync(join(tmpdir(), "amux-dm-work-bytes-"));
+  try {
+    mkdirSync(join(root, "a", "b"), { recursive: true });
+    writeFileSync(join(root, "a", "b", "f"), Buffer.alloc(100_000, 1));
+    chmodSync(join(root, "a", "b"), 0o000);
+    chmodSync(join(root, "a"), 0o000);
+    const bytes = await dmWorkTreeBytes(root, Number.MAX_SAFE_INTEGER);
+    assert.ok(typeof bytes === "number" && bytes >= 100_000, String(bytes));
+    assert.ok((await dmWorkTreeBytes(root, 10)) > 10, "stops once past the cap");
+  } finally {
+    chmodSync(root, 0o700);
+    rmSync(root, { recursive: true, force: true });
+  }
+});

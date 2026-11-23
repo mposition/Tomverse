@@ -65,9 +65,10 @@ bwrap 0.11.1, kernel 7.0.0-42, 저장소는 공개 develop `a7c650dd3`(depth 1)�
 tunable을 쓸 수 없다. launcher는 요청마다 새 `/proc`이 되는지 한 번 시험하고, 안 되면 `/proc` 없이 jail을 만들며
 `DEPENDENCIES.md`에 그렇게 적는다(그때는 `next typegen`과 `npm run typecheck`가 돌지 않는다).
 
-독립 검토 `r-20261123-105620-63d64b`(reject)의 두 지적에 따라 더한 것: 작업 사본의 디스크 상한과 host 여유 공간 하한(정책 §5a
-"디스크"), 그리고 cache를 바꿀 때 이전 cache를 3시간 남기는 것. dry-run은 그 전 코드로 했고, 더한 부분은 box의 Linux 테스트
-(`LauncherProcess` 23, `Install` 23)로 확인했다.
+독립 검토 `r-20261123-105620-63d64b`와 `r-20261123-110507-a9b409`의 지적에 따라 더한 것: 작업 사본의 디스크 상한과 host 여유
+공간 하한(정책 §5a "디스크". 크기는 event loop를 막지 않게 비동기로 재고, 읽을 수 없는 디렉터리는 소유자로 열어 다시 재며 그래도
+못 재면 넘은 것으로 본다), 복사 중 디스크 부족은 `disk_space_low`, 그리고 cache를 세대 디렉터리와 symlink 하나로 바꿔 교체 순간에도
+경로가 비지 않고 이전 세대는 3시간 남는 것. 아래 dry-run은 이것들을 더하기 전 코드로 했다. 더한 부분은 아래 Linux 테스트에 들어 있다.
 
 ## 설치 전 dry-run (2026-11-23)
 
@@ -94,8 +95,9 @@ tunable을 쓸 수 없다. launcher는 요청마다 새 `/proc`이 되는지 한
   launcher 보고는 `outcome: output`, 정리는 `verified`, 의존성은 `{"proc":true,"trees":{"repo":"installed"}}`였다. 요청 디렉터리의
   정리도 `verified`였고, 임시 디렉터리는 없어졌으며, 홈에는 `.claude/.credentials.json`만 남았다.
 
-Linux(box) 테스트: `amuxDecisionMakerLauncherCore` 26, `LauncherFs` 22, `LauncherProcess` 21, `Broker` 30, `BrokerCore` 18,
-`Install` 22, `InstallShell` 9, `WorkCopy` 4(실제 bwrap 포함), `v22ShellJail` 4, `v22OneShotSidecar` 31, `v22ChannelRun` 9, 모두 통과.
+Linux(box) 테스트, 이 PR의 마지막 코드로: `amuxDecisionMakerLauncherCore` 26, `LauncherFs` 22, `LauncherProcess` 24, `Broker` 30,
+`BrokerCore` 18, `Install` 23, `InstallShell` 9, `WorkCopy` 5(실제 bwrap 포함), `v22ShellJail` 4, `v22OneShotSidecar` 31,
+`v22ChannelRun` 9, 모두 통과.
 `Broker`의 "a workspace that cannot be fetched" 한 건은 tommy 셸의 umask `0002`에서만 실패한다(git이 group 쓰기 디렉터리를 만들어
 정리가 거부한다). broker unit은 `UMask=0077`이고, umask `022`에서는 통과한다. 이 PR과 무관하다. 전체 `tsc --noEmit`은 이 PR의 파일에서
 오류가 없다.

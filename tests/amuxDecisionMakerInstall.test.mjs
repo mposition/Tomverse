@@ -444,18 +444,26 @@ test("a replaced cache is kept while a request may still read it, and pruned onl
     const keep = Number(cacheConstant("DM_CACHE_KEEP_REPLACED_SECONDS").replace(/^\$\(\((\d+) \* 60 \* 60\)\)$/, (_, hours) => String(hours * 3600)));
     assert.ok(keep >= 2 * 60 * 60, "at least the DM's hard timeout");
     for (const age of [0, keep - 60, keep + 60, 10 * keep]) {
-      spawnSync(bashPath, ["-c", `mkdir -p "${root}/npm.old-${now - age}/x"`]);
+      spawnSync(bashPath, ["-c", `mkdir -p "${root}/npm.gen-${now - age}/x"`]);
     }
-    spawnSync(bashPath, ["-c", `mkdir -p "${root}/npm" "${root}/npm.old-notanumber"`]);
+    spawnSync(bashPath, ["-c", `mkdir -p "${root}/npm.gen-notanumber"`]);
+    // The generation the link points to is never pruned, however old (POSIX: Git Bash copies instead of linking).
+    const current = now - 100 * keep;
+    const links = process.platform !== "win32";
+    if (links) spawnSync(bashPath, ["-c", `mkdir -p "${root}/npm.gen-${current}" && ln -s "npm.gen-${current}" "${root}/npm"`]);
     const result = spawnSync(bashPath, ["-c", `source ${CACHE_SCRIPT}\ndm_cache_prune_replaced "$1" npm "$2"`, "test", root, String(now)], {
       cwd: repositoryRoot,
       encoding: "utf8",
     });
     assert.equal(result.status, 0, result.stderr);
-    assert.deepEqual(readdirSync(dir).sort(), ["npm", `npm.old-${now - keep + 60}`, `npm.old-${now}`, "npm.old-notanumber"].sort());
-    // The swap renames the replaced cache aside and never deletes it itself.
-    assert.match(cacheScript, /\/usr\/bin\/mv -T -- "\$DM_CACHE_ROOT\/\$name" "\$DM_CACHE_ROOT\/\$name\.old-\$now"/);
-    assert.doesNotMatch(cacheScript, /rm -rf -- "\$DM_CACHE_ROOT\/\$name\.old"/);
+    assert.deepEqual(
+      readdirSync(dir).sort(),
+      [...(links ? ["npm", `npm.gen-${current}`] : []), `npm.gen-${now - keep + 60}`, `npm.gen-${now}`, "npm.gen-notanumber"].sort(),
+    );
+    // The swap points the link at a new generation in one rename: the cache path never goes missing,
+    // and the refresh never deletes the current cache itself.
+    assert.match(cacheScript, /\/usr\/bin\/ln -sfn -- "\$generation" "\$DM_CACHE_ROOT\/\.\$name\.link-\$now"\n\s*\/usr\/bin\/mv -T -- "\$DM_CACHE_ROOT\/\.\$name\.link-\$now" "\$DM_CACHE_ROOT\/\$name"/);
+    assert.doesNotMatch(cacheScript.replace(/^\s*#.*$/gm, ""), /rm -rf -- "\$DM_CACHE_ROOT\/\$name"/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

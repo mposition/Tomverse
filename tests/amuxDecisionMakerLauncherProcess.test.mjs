@@ -462,7 +462,7 @@ ${claudeResult()}`);
   assert.deepEqual(steps.map((step) => step.tree), ["repo", "repo", "repo-patched"]);
   assert.ok(steps.every((step) => step.jail.endsWith(`/dm-scratch/${REQUEST_ID}/shell/bash`)));
   assert.match(steps[0].script, /^exec (?:node '\/.*npm-cli\.js'|npm) ci --offline --ignore-scripts /);
-  assert.match(steps[1].script, /cp -R '\/.*\/var\/cache\/tomverse-amux-dm\/prisma' "\$HOME\/\.cache\/prisma".*exec node node_modules\/prisma\/build\/index\.js generate$/);
+  assert.match(steps[1].script, /cp -RH '\/.*\/var\/cache\/tomverse-amux-dm\/prisma' "\$HOME\/\.cache\/prisma".*exec node node_modules\/prisma\/build\/index\.js generate$/);
   const guide = result.observed("guide").toString();
   assert.match(guide, /- repo\/: installed/);
   assert.match(guide, /- repo-patched\/: not installed: npm ci failed offline/);
@@ -487,5 +487,18 @@ setTimeout(() => {}, 15000);`);
   const result = await run(OPENAI, body, { options: { work: { disk: { maxBytes: 64 * 1024, checkMs: 50, sizeEveryChecks: 1 } } } });
   assert.deepEqual(withoutTools(result.report), { result: { outcome: "unavailable", reason: "disk_limit" }, cleanup: VERIFIED });
   assert.equal(result.started, true);
+  assert.equal(result.requestGone && result.temporaryGone, true);
+});
+
+test("a DM that hides what it wrote behind a 0000 directory is still measured, and stopped past the cap", { skip: !canChmod }, async () => {
+  // Review r-20261123-110507-a9b409: an unreadable directory must not count as empty.
+  const body = recording(`
+const hidden = require("path").join(process.cwd(), "hidden");
+fs.mkdirSync(hidden);
+fs.writeFileSync(require("path").join(hidden, "big"), Buffer.alloc(256 * 1024, 1));
+fs.chmodSync(hidden, 0o000);
+setTimeout(() => {}, 15000);`);
+  const result = await run(OPENAI, body, { options: { work: { disk: { maxBytes: 64 * 1024, checkMs: 50, sizeEveryChecks: 1 } } } });
+  assert.deepEqual(withoutTools(result.report), { result: { outcome: "unavailable", reason: "disk_limit" }, cleanup: VERIFIED });
   assert.equal(result.requestGone && result.temporaryGone, true);
 });

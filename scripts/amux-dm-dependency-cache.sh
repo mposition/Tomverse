@@ -49,18 +49,25 @@ dm_cache_as_nobody() {
     GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 "$@"
 }
 
-# A replaced cache stays this long, as <name>.old-<epoch seconds>: a request that
-# bound it keeps reading it until its hard timeout (2 h, plus the install's
-# share of it) ends (review r-20261123-105620-63d64b). Older ones are removed.
+# Each refresh is a new generation directory, <name>.gen-<epoch seconds>, and
+# <name> is a symbolic link to the current one, replaced in one rename: there is
+# no moment without a cache (review r-20261123-110507-a9b409). The launcher's jail
+# binds the whole cache root, so the link resolves inside it. A replaced
+# generation stays this long -- a request that started on it keeps reading it
+# until its hard timeout (2 h, plus the install's share of it) ends (review
+# r-20261123-105620-63d64b) -- and is removed by a later refresh.
 readonly DM_CACHE_KEEP_REPLACED_SECONDS=$((3 * 60 * 60))
 
-# Removes replaced caches older than DM_CACHE_KEEP_REPLACED_SECONDS, judged by
-# the epoch in their name (a directory's mtime is when its content last changed).
+# Removes generations of <name> older than DM_CACHE_KEEP_REPLACED_SECONDS, judged
+# by the epoch in their name (a directory's mtime is when its content last
+# changed), and never the one <name> points to.
 dm_cache_prune_replaced() {
-  local root=$1 name=$2 now=$3 entry stamp
-  for entry in "$root/$name.old-"*; do
+  local root=$1 name=$2 now=$3 entry stamp current=""
+  [[ -L $root/$name ]] && current=$(/usr/bin/readlink -- "$root/$name")
+  for entry in "$root/$name.gen-"*; do
     [[ -d $entry && ! -L $entry ]] || continue
-    stamp=${entry##*.old-}
+    [[ ${entry##*/} != "$current" ]] || continue
+    stamp=${entry##*.gen-}
     [[ $stamp =~ ^[0-9]+$ ]] || continue
     if ((now - stamp > DM_CACHE_KEEP_REPLACED_SECONDS)); then
       /usr/bin/rm -rf -- "$entry"
@@ -68,19 +75,21 @@ dm_cache_prune_replaced() {
   done
 }
 
-# Moves a finished directory into the cache: root's, readable by all, writable
-# by none but root. The one it replaces is renamed aside, never deleted here.
+# Moves a finished directory into the cache as a new generation (root's,
+# readable by all, writable by none but root) and points <name> at it.
 dm_cache_swap() {
-  local source=$1 name=$2 now
+  local source=$1 name=$2 now generation
   now=$(/usr/bin/date +%s)
+  generation=$name.gen-$now
   /usr/bin/chown -R root:root -- "$source"
   /usr/bin/chmod -R u+rwX,go+rX,go-w -- "$source"
-  /usr/bin/rm -rf -- "$DM_CACHE_ROOT/$name.new"
-  /usr/bin/mv -T -- "$source" "$DM_CACHE_ROOT/$name.new"
-  if [[ -e $DM_CACHE_ROOT/$name ]]; then
-    /usr/bin/mv -T -- "$DM_CACHE_ROOT/$name" "$DM_CACHE_ROOT/$name.old-$now"
+  /usr/bin/mv -T -- "$source" "$DM_CACHE_ROOT/$generation"
+  # A cache from before generations is a directory, not a link: it becomes one generation.
+  if [[ -d $DM_CACHE_ROOT/$name && ! -L $DM_CACHE_ROOT/$name ]]; then
+    /usr/bin/mv -T -- "$DM_CACHE_ROOT/$name" "$DM_CACHE_ROOT/$name.gen-$((now - 1))"
   fi
-  /usr/bin/mv -T -- "$DM_CACHE_ROOT/$name.new" "$DM_CACHE_ROOT/$name"
+  /usr/bin/ln -sfn -- "$generation" "$DM_CACHE_ROOT/.$name.link-$now"
+  /usr/bin/mv -T -- "$DM_CACHE_ROOT/.$name.link-$now" "$DM_CACHE_ROOT/$name"
   dm_cache_prune_replaced "$DM_CACHE_ROOT" "$name" "$now"
 }
 
@@ -97,8 +106,10 @@ dm_cache_refresh() {
   printf -v quoted '%q' "$work"
   trap "/usr/bin/rm -rf -- $quoted" EXIT
   /usr/bin/mkdir -p -- "$work/home" "$work/xdg"
-  if [[ -d $DM_CACHE_ROOT/npm ]]; then /usr/bin/cp -a -- "$DM_CACHE_ROOT/npm" "$work/npm"; else /usr/bin/mkdir -- "$work/npm"; fi
-  if [[ -d $DM_CACHE_ROOT/prisma ]]; then /usr/bin/cp -a -- "$DM_CACHE_ROOT/prisma" "$work/xdg/prisma"; fi
+  # The current generation's content (through the link), so the cache only grows.
+  /usr/bin/mkdir -- "$work/npm" "$work/xdg/prisma"
+  if [[ -d $DM_CACHE_ROOT/npm ]]; then /usr/bin/cp -a -- "$DM_CACHE_ROOT/npm/." "$work/npm/"; fi
+  if [[ -d $DM_CACHE_ROOT/prisma ]]; then /usr/bin/cp -a -- "$DM_CACHE_ROOT/prisma/." "$work/xdg/prisma/"; fi
   /usr/bin/chown -R nobody:nogroup -- "$work"
 
   dm_cache_as_nobody "$work" /usr/bin/git -c credential.helper= -c core.hooksPath=/dev/null clone -q --depth=1 \
@@ -106,7 +117,7 @@ dm_cache_refresh() {
   (cd -- "$work/src" && dm_cache_as_nobody "$work" /usr/bin/node "$DM_CACHE_NPM_CLI" ci --ignore-scripts \
     --no-audit --no-fund --loglevel=error --cache "$work/npm")
   (cd -- "$work/src" && dm_cache_as_nobody "$work" /usr/bin/node node_modules/prisma/build/index.js generate >/dev/null)
-  [[ -d $work/xdg/prisma ]] || dm_cache_fail "prisma generate downloaded no engine"
+  [[ -n $(/usr/bin/ls -A -- "$work/xdg/prisma") ]] || dm_cache_fail "prisma generate downloaded no engine"
   local head
   head=$(/usr/bin/git -C "$work/src" -c safe.directory='*' rev-parse HEAD)
 

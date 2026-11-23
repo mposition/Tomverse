@@ -1,5 +1,6 @@
 import { execFile, execFileSync } from "node:child_process";
 import { cpSync, existsSync, lstatSync, mkdirSync, rmSync, statfsSync, writeFileSync } from "node:fs";
+import { chmod, lstat, readdir } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { DmExecutionPlan } from "./decisionMakerLauncherCore.ts";
@@ -155,9 +156,55 @@ export const dmFreeBytes = (path: string): number | null => {
 };
 
 /**
+ * The disk the work tree holds, measured without blocking the launcher (the
+ * watch's kill path must stay responsive): allocated blocks where the
+ * platform reports them, else the size, every hard link counted again
+ * (counting more is the safe side). It stops as soon as the sum passes
+ * `stopAbove`. A directory it cannot read -- a DM command may `chmod 000` one
+ * -- is made the account's `0700` first (the launcher is that account and the
+ * tree is in its private scratch root); one still unreadable is
+ * `unmeasurable`, which the watch takes as over the cap (review
+ * r-20261123-110507-a9b409).
+ */
+export async function dmWorkTreeBytes(root: string, stopAbove: number): Promise<number | "unmeasurable"> {
+  const uid = typeof process.geteuid === "function" ? process.geteuid() : null;
+  let bytes = 0;
+  const directories = [root];
+  while (directories.length > 0) {
+    const directory = directories.pop()!;
+    let names: string[];
+    try {
+      names = await readdir(directory);
+    } catch {
+      try {
+        const stats = await lstat(directory);
+        if (uid === null || !stats.isDirectory() || stats.uid !== uid) return "unmeasurable";
+        await chmod(directory, 0o700);
+        names = await readdir(directory);
+      } catch {
+        return "unmeasurable";
+      }
+    }
+    for (const name of names) {
+      const path = join(directory, name);
+      let stats;
+      try {
+        stats = await lstat(path);
+      } catch {
+        continue; // Gone between the listing and the stat.
+      }
+      if (stats.isDirectory()) directories.push(path);
+      else bytes += typeof stats.blocks === "number" && stats.blocks > 0 ? Math.max(stats.blocks * 512, 0) : stats.size;
+      if (bytes > stopAbove) return bytes;
+    }
+  }
+  return bytes;
+}
+
+/**
  * Watch the work directory until `stop()`: calls `exceeded` once, when the
  * host's free space drops under the floor (or cannot be read) or the copy
- * passes its cap.
+ * passes its cap (or cannot be measured).
  */
 export const dmWatchWorkDisk = (
   host: DmLauncherHost,
@@ -168,20 +215,37 @@ export const dmWatchWorkDisk = (
   const limits = limitsFor(host, options);
   const work = dmHostPath(host, plan.paths.workDirectory);
   let fired = false;
+  let stopped = false;
+  let measuring = false;
   let checks = 0;
+  const fire = () => {
+    if (fired || stopped) return;
+    fired = true;
+    exceeded();
+  };
   const timer = setInterval(() => {
     if (fired) return;
     checks += 1;
     const free = dmFreeBytes(work);
-    const over =
-      free === null || free < limits.freeFloorBytes ||
-      (checks % limits.sizeEveryChecks === 0 && dmWorkspaceBytes(work) > limits.maxBytes);
-    if (!over) return;
-    fired = true;
-    exceeded();
+    if (free === null || free < limits.freeFloorBytes) return fire();
+    if (measuring || checks % limits.sizeEveryChecks !== 0) return;
+    measuring = true;
+    void dmWorkTreeBytes(work, limits.maxBytes)
+      .then((bytes) => {
+        if (bytes === "unmeasurable" || bytes > limits.maxBytes) fire();
+      }, fire)
+      .finally(() => {
+        measuring = false;
+      });
   }, limits.checkMs);
   timer.unref?.();
-  return { stop: () => clearInterval(timer), exceeded: () => fired };
+  return {
+    stop: () => {
+      stopped = true;
+      clearInterval(timer);
+    },
+    exceeded: () => fired,
+  };
 };
 
 const runJailProbe = (jail: string) => {
@@ -230,8 +294,10 @@ export const dmPrepareWorkDirectory = (
       // git compares mtime and size (core.checkStat minimal): kept, `git status` in the copy is clean.
       preserveTimestamps: true,
     });
-  } catch {
-    return { ok: false, reason: "unusable" };
+  } catch (error) {
+    // The disk filling during the copy is the disk, not an unusable directory.
+    const code = (error as NodeJS.ErrnoException).code;
+    return { ok: false, reason: code === "ENOSPC" || code === "EDQUOT" ? "disk" : "unusable" };
   }
   return dmWriteWorkJail(host, plan, options);
 };
@@ -381,7 +447,7 @@ export async function dmInstallWorkDependencies(
       const generate = await run(
         work.jail,
         `if [ -d ${engines} ]; then rm -rf "$HOME/.cache/prisma" && mkdir -p "$HOME/.cache" && ` +
-          `cp -R ${engines} "$HOME/.cache/prisma" && chmod -R u+w "$HOME/.cache/prisma" || exit 1; fi; ` +
+          `cp -RH ${engines} "$HOME/.cache/prisma" && chmod -R u+w "$HOME/.cache/prisma" || exit 1; fi; ` +
           "exec node node_modules/prisma/build/index.js generate",
         { cwd, timeoutMs: Math.max(1, left()), signal: input.signal },
       );
