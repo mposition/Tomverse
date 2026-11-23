@@ -26,6 +26,7 @@ import {
 import {
   dmInstallWorkDependencies,
   dmPrepareWorkDirectory,
+  dmWatchWorkDisk,
   type DmDependencySummary,
   type DmWorkOptions,
 } from "./decisionMakerWorkCopy.ts";
@@ -138,6 +139,8 @@ const runProcess = (
   command: DmCommand,
   payload: Buffer,
   timeoutMs: number,
+  /** The disk watch: kills the whole group, like the hard timeout. */
+  stopSignal?: AbortSignal,
 ): Promise<DmProcessObservation> =>
   new Promise((resolve) => {
     let spawned = false;
@@ -215,6 +218,8 @@ const runProcess = (
         timedOut = true;
         killGroup(child);
       }, timeoutMs);
+      if (stopSignal?.aborted) killGroup(child);
+      stopSignal?.addEventListener("abort", () => killGroup(child), { once: true });
       child.stdin?.on("error", () => {
         stdinFailed = true;
       });
@@ -293,13 +298,24 @@ export async function launchDecisionMaker(
     if (refusals.length > 0) result = { outcome: "refused", refusals };
     else if (payload === null) result = { outcome: "refused", refusals: ["transmit_intent_mismatch"] };
     // No temporary directory, no copy of the workspace, or no jail: nothing starts (§0b-6).
-    else if (work === null || !work.ok) result = { outcome: "refused", refusals: ["request_directories_unusable"] };
-    else {
+    else if (work === null || !work.ok) {
+      result = { outcome: "refused", refusals: [work?.ok === false && work.reason === "disk" ? "disk_space_low" : "request_directories_unusable"] };
+    } else {
       const deadlineAt = startedAt + timeoutMs;
-      dependencies = await dmInstallWorkDependencies(host, plan, work, { deadlineAt }, options.work);
-      const observation = await runProcess(host, plan, command, payload, Math.max(1, deadlineAt - Date.now()));
-      result = dmClassifyProcess(plan.cli, observation);
-      tools = dmToolSummary(plan.cli, observation.stdout);
+      // The copy is outside the request root's size-limited filesystem: from here the launcher bounds it.
+      const stop = new AbortController();
+      const watch = dmWatchWorkDisk(host, plan, () => stop.abort(), options.work);
+      try {
+        dependencies = await dmInstallWorkDependencies(host, plan, work, { deadlineAt, signal: stop.signal }, options.work);
+        if (stop.signal.aborted) result = { outcome: "unavailable", reason: "disk_limit" };
+        else {
+          const observation = await runProcess(host, plan, command, payload, Math.max(1, deadlineAt - Date.now()), stop.signal);
+          result = watch.exceeded() ? { outcome: "unavailable", reason: "disk_limit" } : dmClassifyProcess(plan.cli, observation);
+          tools = dmToolSummary(plan.cli, observation.stdout);
+        }
+      } finally {
+        watch.stop();
+      }
     }
   } catch {
     result = { outcome: "unavailable", reason: "launcher_fault" };

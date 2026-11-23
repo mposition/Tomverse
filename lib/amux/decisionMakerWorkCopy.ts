@@ -1,9 +1,10 @@
 import { execFile, execFileSync } from "node:child_process";
-import { cpSync, existsSync, lstatSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, rmSync, statfsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { DmExecutionPlan } from "./decisionMakerLauncherCore.ts";
 import { dmHostPath, type DmLauncherHost } from "./decisionMakerLauncherFs.ts";
+import { dmWorkspaceBytes } from "./decisionMakerWorkspaceBuild.ts";
 import { amuxShellJailArgs, amuxShellJailScriptFor, amuxShellPrefixScriptFor } from "./v22ShellJail.mjs";
 
 /**
@@ -98,7 +99,7 @@ export const dmWorkJailArgs = (host: DmLauncherHost, plan: DmExecutionPlan, proc
     proc,
   });
 
-export type DmWorkPreparation = { ok: true; jail: string; proc: boolean } | { ok: false };
+export type DmWorkPreparation = { ok: true; jail: string; proc: boolean } | { ok: false; reason: "unusable" | "disk" };
 
 export type DmWorkOptions = {
   /**
@@ -108,6 +109,79 @@ export type DmWorkOptions = {
   jailStarts?: (jail: string, proc: boolean) => boolean;
   /** Test host only: another way to run a jailed step. */
   runJailed?: DmJailedRunner;
+  /** Test host only: other disk limits and check interval. */
+  disk?: Partial<DmDiskLimits>;
+};
+
+// ---------------------------------------------------------------------------
+// The disk (review r-20261123-105620-63d64b)
+// ---------------------------------------------------------------------------
+
+/**
+ * The work directory is in the vendor account's home, outside the request
+ * root's size-limited filesystem, and the DM's commands write to it. Two
+ * bounds keep it from filling the host: the copy's own size cap -- the
+ * workspace's 4 GiB (DM_WORKSPACE_DISK_MAX_BYTES), both trees' dependencies
+ * (1.7 GB each, measured on the box 2026-11-23) and room for what the DM's
+ * checks write -- and a floor of free space on the home's filesystem, so the
+ * box's other services keep theirs. Before the copy both are checked against
+ * the request directory's size; from then until the CLI ends the launcher
+ * measures (free space every 2 s, the copy's size every 30 s) and stops the
+ * running step or the CLI's process group when either is passed: a refusal
+ * (`disk_space_low`) before anything ran, `disk_limit` after.
+ */
+export type DmDiskLimits = { maxBytes: number; freeFloorBytes: number; checkMs: number; sizeEveryChecks: number };
+export const DM_WORK_DISK_LIMITS: DmDiskLimits = Object.freeze({
+  maxBytes: 16 * 1024 ** 3,
+  freeFloorBytes: 20 * 1024 ** 3,
+  checkMs: 2_000,
+  sizeEveryChecks: 15,
+});
+
+const limitsFor = (host: DmLauncherHost, options: DmWorkOptions): DmDiskLimits => {
+  if (options.disk !== undefined && host.root === null) throw new Error("AMUX Decision Maker disk limits are fixed on the system host");
+  // A test host's disk is the test machine's, whose free space is not the box's: no floor unless the test sets one.
+  return { ...DM_WORK_DISK_LIMITS, ...(host.root === null ? {} : { freeFloorBytes: 0 }), ...options.disk };
+};
+
+/** Free bytes for an unprivileged account on the filesystem holding `path`; null when it cannot be read. */
+export const dmFreeBytes = (path: string): number | null => {
+  try {
+    const stats = statfsSync(path);
+    return Number(stats.bavail) * Number(stats.bsize);
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Watch the work directory until `stop()`: calls `exceeded` once, when the
+ * host's free space drops under the floor (or cannot be read) or the copy
+ * passes its cap.
+ */
+export const dmWatchWorkDisk = (
+  host: DmLauncherHost,
+  plan: DmExecutionPlan,
+  exceeded: () => void,
+  options: DmWorkOptions = {},
+): { stop: () => void; exceeded: () => boolean } => {
+  const limits = limitsFor(host, options);
+  const work = dmHostPath(host, plan.paths.workDirectory);
+  let fired = false;
+  let checks = 0;
+  const timer = setInterval(() => {
+    if (fired) return;
+    checks += 1;
+    const free = dmFreeBytes(work);
+    const over =
+      free === null || free < limits.freeFloorBytes ||
+      (checks % limits.sizeEveryChecks === 0 && dmWorkspaceBytes(work) > limits.maxBytes);
+    if (!over) return;
+    fired = true;
+    exceeded();
+  }, limits.checkMs);
+  timer.unref?.();
+  return { stop: () => clearInterval(timer), exceeded: () => fired };
 };
 
 const runJailProbe = (jail: string) => {
@@ -142,6 +216,10 @@ export const dmPrepareWorkDirectory = (
   }
   const at = (path: string) => dmHostPath(host, path);
   const { paths } = plan;
+  const limits = limitsFor(host, options);
+  const size = dmWorkspaceBytes(at(paths.requestDirectory));
+  const free = dmFreeBytes(at(paths.temporaryDirectory));
+  if (size > limits.maxBytes || free === null || free - size < limits.freeFloorBytes) return { ok: false, reason: "disk" };
   try {
     // The broker's tree holds no link (it refuses one at hand-over); none is followed here either.
     cpSync(at(paths.requestDirectory), at(paths.workDirectory), {
@@ -153,7 +231,7 @@ export const dmPrepareWorkDirectory = (
       preserveTimestamps: true,
     });
   } catch {
-    return { ok: false };
+    return { ok: false, reason: "unusable" };
   }
   return dmWriteWorkJail(host, plan, options);
 };
@@ -177,7 +255,7 @@ export const dmWriteWorkJail = (
     mkdirSync(at(paths.workTemporaryDirectory), { mode: 0o700 });
     mkdirSync(at(paths.shellDirectory), { mode: 0o700 });
   } catch {
-    return { ok: false };
+    return { ok: false, reason: "unusable" };
   }
   const jail = at(paths.shellJail);
   // Written new each time: the script is the owner's read-and-execute only, so it is replaced, never written through.
@@ -195,9 +273,9 @@ export const dmWriteWorkJail = (
     writeFileSync(at(paths.shellPrefix), amuxShellPrefixScriptFor(jail, PREFIX_TITLE), { flag: "wx", mode: 0o500 });
     if (starts(jail, true)) return { ok: true, jail, proc: true };
     write(false);
-    return starts(jail, false) ? { ok: true, jail, proc: false } : { ok: false };
+    return starts(jail, false) ? { ok: true, jail, proc: false } : { ok: false, reason: "unusable" };
   } catch {
-    return { ok: false };
+    return { ok: false, reason: "unusable" };
   }
 };
 
@@ -221,7 +299,7 @@ export type DmDependencySummary = { proc: boolean; trees: Partial<Record<DmWorkT
 export type DmJailedRunner = (
   jail: string,
   script: string,
-  options: { cwd: string; timeoutMs: number },
+  options: { cwd: string; timeoutMs: number; signal?: AbortSignal },
 ) => Promise<"ok" | "failed" | "timed_out">;
 
 const runJailedStep: DmJailedRunner = (jail, script, options) =>
@@ -235,6 +313,8 @@ const runJailedStep: DmJailedRunner = (jail, script, options) =>
         timeout: Math.max(1, options.timeoutMs),
         killSignal: "SIGKILL",
         maxBuffer: 16 * 1024 * 1024,
+        // The disk watch stops the step (killSignal) as it stops the CLI.
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
         windowsHide: true,
       },
       (error) => resolve(error === null ? "ok" : (error as { killed?: boolean }).killed ? "timed_out" : "failed"),
@@ -264,7 +344,7 @@ export async function dmInstallWorkDependencies(
   host: DmLauncherHost,
   plan: DmExecutionPlan,
   work: { jail: string; proc: boolean },
-  input: { deadlineAt: number },
+  input: { deadlineAt: number; signal?: AbortSignal },
   options: DmWorkOptions = {},
 ): Promise<DmDependencySummary> {
   if (options.runJailed !== undefined && host.root === null) {
@@ -285,11 +365,11 @@ export async function dmInstallWorkDependencies(
         continue;
       }
       const left = () => budgetEnd - Date.now();
-      if (left() <= 0) {
+      if (left() <= 0 || input.signal?.aborted) {
         summary.trees[tree] = "install_timed_out";
         continue;
       }
-      const ci = await run(work.jail, `exec ${npm} ci --offline --ignore-scripts --loglevel=error`, { cwd, timeoutMs: left() });
+      const ci = await run(work.jail, `exec ${npm} ci --offline --ignore-scripts --loglevel=error`, { cwd, timeoutMs: left(), signal: input.signal });
       if (ci !== "ok") {
         summary.trees[tree] = ci === "timed_out" ? "install_timed_out" : "install_failed";
         continue;
@@ -303,7 +383,7 @@ export async function dmInstallWorkDependencies(
         `if [ -d ${engines} ]; then rm -rf "$HOME/.cache/prisma" && mkdir -p "$HOME/.cache" && ` +
           `cp -R ${engines} "$HOME/.cache/prisma" && chmod -R u+w "$HOME/.cache/prisma" || exit 1; fi; ` +
           "exec node node_modules/prisma/build/index.js generate",
-        { cwd, timeoutMs: Math.max(1, left()) },
+        { cwd, timeoutMs: Math.max(1, left()), signal: input.signal },
       );
       summary.trees[tree] = generate === "ok" ? "installed" : generate === "timed_out" ? "install_timed_out" : "generate_failed";
     }

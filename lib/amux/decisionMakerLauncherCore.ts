@@ -485,6 +485,8 @@ export const DM_LAUNCH_REFUSALS = [
   "executable_not_fixed",
   "argv_not_fixed",
   "environment_not_fixed",
+  /** The work directory's copy would pass its size cap or the host's free-space floor (lib/amux/decisionMakerWorkCopy.ts). */
+  "disk_space_low",
 ] as const;
 export type DmLaunchRefusal = (typeof DM_LAUNCH_REFUSALS)[number];
 
@@ -506,6 +508,8 @@ export const DM_LAUNCH_UNAVAILABLE_REASONS = [
   "output_too_large",
   "stdout_not_closed",
   "launcher_fault",
+  /** The work directory passed its size cap or the host its free-space floor while the DM ran; the launcher stopped it. */
+  "disk_limit",
 ] as const;
 export type DmLaunchUnavailableReason = (typeof DM_LAUNCH_UNAVAILABLE_REASONS)[number];
 

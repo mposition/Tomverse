@@ -434,3 +434,29 @@ test("the launcher units leave out ProtectKernelTunables= so the DM jail can mou
     assert.equal(directive(service, "RestrictAddressFamilies"), undefined);
   }
 });
+
+test("a replaced cache is kept while a request may still read it, and pruned only after", { skip: process.platform === "win32" && !readdirSync(join(bashPath, "..")).includes("bash.exe") && "bash is not installed" }, () => {
+  // Review r-20261123-105620-63d64b: a request bound the old cache; deleting it under the request broke its install.
+  const dir = mkdtempSync(join(tmpdir(), "amux-dm-cache-prune-"));
+  try {
+    const root = dir.replaceAll("\\", "/");
+    const now = 1_800_000_000;
+    const keep = Number(cacheConstant("DM_CACHE_KEEP_REPLACED_SECONDS").replace(/^\$\(\((\d+) \* 60 \* 60\)\)$/, (_, hours) => String(hours * 3600)));
+    assert.ok(keep >= 2 * 60 * 60, "at least the DM's hard timeout");
+    for (const age of [0, keep - 60, keep + 60, 10 * keep]) {
+      spawnSync(bashPath, ["-c", `mkdir -p "${root}/npm.old-${now - age}/x"`]);
+    }
+    spawnSync(bashPath, ["-c", `mkdir -p "${root}/npm" "${root}/npm.old-notanumber"`]);
+    const result = spawnSync(bashPath, ["-c", `source ${CACHE_SCRIPT}\ndm_cache_prune_replaced "$1" npm "$2"`, "test", root, String(now)], {
+      cwd: repositoryRoot,
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(readdirSync(dir).sort(), ["npm", `npm.old-${now - keep + 60}`, `npm.old-${now}`, "npm.old-notanumber"].sort());
+    // The swap renames the replaced cache aside and never deletes it itself.
+    assert.match(cacheScript, /\/usr\/bin\/mv -T -- "\$DM_CACHE_ROOT\/\$name" "\$DM_CACHE_ROOT\/\$name\.old-\$now"/);
+    assert.doesNotMatch(cacheScript, /rm -rf -- "\$DM_CACHE_ROOT\/\$name\.old"/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

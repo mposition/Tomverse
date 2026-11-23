@@ -469,3 +469,23 @@ ${claudeResult()}`);
   assert.match(guide, /npm run typecheck/);
   assert.deepEqual(result.report.cleanup, VERIFIED);
 });
+
+test("a copy that would pass the disk cap starts nothing", { skip: !posix }, async () => {
+  const result = await run(OPENAI, recording(""), { options: { work: { disk: { maxBytes: 4 } } } });
+  assert.deepEqual(result.report, { result: { outcome: "refused", refusals: ["disk_space_low"] }, cleanup: VERIFIED });
+  assert.equal(result.started, false);
+  assert.equal(result.requestGone && result.temporaryGone, true);
+  // And a host already under the free-space floor.
+  const low = await run(OPENAI, recording(""), { options: { work: { disk: { freeFloorBytes: Number.MAX_SAFE_INTEGER } } } });
+  assert.deepEqual(low.report.result, { outcome: "refused", refusals: ["disk_space_low"] });
+});
+
+test("a DM whose commands fill the work directory past its cap is stopped: disk_limit, and cleanup runs", { skip: !posix }, async () => {
+  const body = recording(`
+fs.writeFileSync(require("path").join(process.cwd(), "big"), Buffer.alloc(256 * 1024));
+setTimeout(() => {}, 15000);`);
+  const result = await run(OPENAI, body, { options: { work: { disk: { maxBytes: 64 * 1024, checkMs: 50, sizeEveryChecks: 1 } } } });
+  assert.deepEqual(withoutTools(result.report), { result: { outcome: "unavailable", reason: "disk_limit" }, cleanup: VERIFIED });
+  assert.equal(result.started, true);
+  assert.equal(result.requestGone && result.temporaryGone, true);
+});

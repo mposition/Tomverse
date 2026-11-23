@@ -49,18 +49,39 @@ dm_cache_as_nobody() {
     GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 "$@"
 }
 
-# Moves a finished directory into the cache: root's, readable by all, writable by none but root.
+# A replaced cache stays this long, as <name>.old-<epoch seconds>: a request that
+# bound it keeps reading it until its hard timeout (2 h, plus the install's
+# share of it) ends (review r-20261123-105620-63d64b). Older ones are removed.
+readonly DM_CACHE_KEEP_REPLACED_SECONDS=$((3 * 60 * 60))
+
+# Removes replaced caches older than DM_CACHE_KEEP_REPLACED_SECONDS, judged by
+# the epoch in their name (a directory's mtime is when its content last changed).
+dm_cache_prune_replaced() {
+  local root=$1 name=$2 now=$3 entry stamp
+  for entry in "$root/$name.old-"*; do
+    [[ -d $entry && ! -L $entry ]] || continue
+    stamp=${entry##*.old-}
+    [[ $stamp =~ ^[0-9]+$ ]] || continue
+    if ((now - stamp > DM_CACHE_KEEP_REPLACED_SECONDS)); then
+      /usr/bin/rm -rf -- "$entry"
+    fi
+  done
+}
+
+# Moves a finished directory into the cache: root's, readable by all, writable
+# by none but root. The one it replaces is renamed aside, never deleted here.
 dm_cache_swap() {
-  local source=$1 name=$2
+  local source=$1 name=$2 now
+  now=$(/usr/bin/date +%s)
   /usr/bin/chown -R root:root -- "$source"
   /usr/bin/chmod -R u+rwX,go+rX,go-w -- "$source"
-  /usr/bin/rm -rf -- "$DM_CACHE_ROOT/$name.new" "$DM_CACHE_ROOT/$name.old"
+  /usr/bin/rm -rf -- "$DM_CACHE_ROOT/$name.new"
   /usr/bin/mv -T -- "$source" "$DM_CACHE_ROOT/$name.new"
   if [[ -e $DM_CACHE_ROOT/$name ]]; then
-    /usr/bin/mv -T -- "$DM_CACHE_ROOT/$name" "$DM_CACHE_ROOT/$name.old"
+    /usr/bin/mv -T -- "$DM_CACHE_ROOT/$name" "$DM_CACHE_ROOT/$name.old-$now"
   fi
   /usr/bin/mv -T -- "$DM_CACHE_ROOT/$name.new" "$DM_CACHE_ROOT/$name"
-  /usr/bin/rm -rf -- "$DM_CACHE_ROOT/$name.old"
+  dm_cache_prune_replaced "$DM_CACHE_ROOT" "$name" "$now"
 }
 
 dm_cache_refresh() {

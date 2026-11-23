@@ -65,6 +65,10 @@ bwrap 0.11.1, kernel 7.0.0-42, 저장소는 공개 develop `a7c650dd3`(depth 1)�
 tunable을 쓸 수 없다. launcher는 요청마다 새 `/proc`이 되는지 한 번 시험하고, 안 되면 `/proc` 없이 jail을 만들며
 `DEPENDENCIES.md`에 그렇게 적는다(그때는 `next typegen`과 `npm run typecheck`가 돌지 않는다).
 
+독립 검토 `r-20261123-105620-63d64b`(reject)의 두 지적에 따라 더한 것: 작업 사본의 디스크 상한과 host 여유 공간 하한(정책 §5a
+"디스크"), 그리고 cache를 바꿀 때 이전 cache를 3시간 남기는 것. dry-run은 그 전 코드로 했고, 더한 부분은 box의 Linux 테스트
+(`LauncherProcess` 23, `Install` 23)로 확인했다.
+
 ## 설치 전 dry-run (2026-11-23)
 
 이 PR의 코드(develop `f2ab32d71` 위)를 box의 시험 트리에 두고, 시험 host(`dmTestHost`, 정책 경로를 임시 root 밑으로 옮긴 것)에서
