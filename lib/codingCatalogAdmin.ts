@@ -427,18 +427,18 @@ export const capabilitiesNeedFilling = (profile: CodingStoredProfile): boolean =
   (profile.source === "chat" && (profile.capabilities.structuredOutput === "none" || (profile.evidence?.sources.length ?? 0) === 0));
 
 /**
- * A chat link's tool calling after a fill. The chat registry already knows
- * every coding candidate calls tools (registryCodingCapabilities: the external
- * API serves each one with `capabilities.tools`), so a documentation answer of
- * "none" never lowers it: the link keeps what it has (owner decision
- * 2026-11-22), and only the operator's own setting turns it off. Any answer
- * that names support is taken as it is. The answer itself stays in the
- * evidence and the audit row.
+ * A chat link's tool calling or structured output after a fill. A
+ * documentation answer of "none" never lowers either: the link keeps what it
+ * has, and only the operator's own setting turns it off. Tool calling, because
+ * the chat registry already knows every coding candidate calls tools
+ * (registryCodingCapabilities: the external API serves each one with
+ * `capabilities.tools`; owner decision 2026-11-22). Structured output, because
+ * a provider's pages often show one flagship model only, and an answer of
+ * "not named here" took Code from eight serving links in one run (owner
+ * decision 2026-11-23). Any answer that names support is taken as it is. The
+ * answer itself stays in the evidence and the audit row.
  */
-export const keptToolCalling = (
-  current: CodingLinkedProfile["capabilities"]["toolCalling"],
-  answered: CodingLinkedProfile["capabilities"]["toolCalling"]
-): CodingLinkedProfile["capabilities"]["toolCalling"] => (answered === "none" ? current : answered);
+export const keptCapability = <T extends string>(current: T, answered: T): T => (answered === "none" ? current : answered);
 
 /**
  * Fill one coding row from the provider's own documentation: a chat link's
@@ -518,7 +518,7 @@ export const fillLinkCapabilities = async (input: {
   // A dedicated row takes only notes from a fill: with none, there is nothing to write.
   if (source === "dedicated" && !notes) throw new CatalogRefusal("no_coding_notes", [], 422);
   // A save writes one of the two structured output choices, whatever the draft carries.
-  const structuredOutput = codingStructuredOutputChoice(draft.structuredOutput);
+  const answeredStructuredOutput = codingStructuredOutputChoice(draft.structuredOutput);
 
   return prisma.$transaction(async (tx) => {
     await takeAuditChainLock(tx);
@@ -531,8 +531,11 @@ export const fillLinkCapabilities = async (input: {
     const changes: { field: string; from: unknown; to: unknown }[] = [];
     let next: CodingStoredProfile;
     let toolCalling = draft.toolCalling;
+    // A kept link value may be one of the finer stored ones (json_mode, strict_schema, ...).
+    let structuredOutput: CodingLinkedProfile["capabilities"]["structuredOutput"] = answeredStructuredOutput;
     if (current.data.source === "chat") {
-      toolCalling = keptToolCalling(current.data.capabilities.toolCalling, draft.toolCalling);
+      toolCalling = keptCapability(current.data.capabilities.toolCalling, draft.toolCalling);
+      structuredOutput = keptCapability(current.data.capabilities.structuredOutput, answeredStructuredOutput);
       next = codingLinkedProfileSchema.parse({
         ...current.data,
         capabilities: { toolCalling, structuredOutput },
@@ -540,7 +543,7 @@ export const fillLinkCapabilities = async (input: {
           sources: draft.sources.slice(0, 3),
           draftedAt: draft.draftedAt,
           toolCalling: draft.toolCalling,
-          structuredOutput,
+          structuredOutput: answeredStructuredOutput,
           ...(draft.note ? { note: draft.note } : {}),
         },
         ...(notes ? { codingNotes: notes } : {}),
@@ -580,7 +583,12 @@ export const fillLinkCapabilities = async (input: {
         modelId: input.modelId,
         source,
         ...(source === "chat"
-          ? { toolCalling, structuredOutput, ...(toolCalling !== draft.toolCalling ? { answeredToolCalling: draft.toolCalling } : {}) }
+          ? {
+              toolCalling,
+              structuredOutput,
+              ...(toolCalling !== draft.toolCalling ? { answeredToolCalling: draft.toolCalling } : {}),
+              ...(structuredOutput !== answeredStructuredOutput ? { answeredStructuredOutput } : {}),
+            }
           : {}),
         sources: next.source === "chat" ? (next.evidence?.sources ?? []) : [],
         codingNotes: (notes ?? null) as unknown as Prisma.InputJsonValue,
