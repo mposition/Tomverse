@@ -28,7 +28,7 @@ import {
 } from "../lib/engineeringAgentCore.ts";
 import { detectSecrets } from "../lib/engineeringAgentSecretPatterns.ts";
 import { readPullChangeDigest } from "../lib/pullDiffDigestCore.ts";
-import { runPublisherCycle } from "./engineering-agent-publisher-core.mjs";
+import { PUBLISHER_REPOSITORY, runPublisherCycle } from "./engineering-agent-publisher-core.mjs";
 import { isSupervisedWorker, superviseCycle } from "./engineering-agent-supervisor.mjs";
 
 /** The hard deadline of one cycle, inside the claim's 45-minute lease (§12).
@@ -37,8 +37,8 @@ import { isSupervisedWorker, superviseCycle } from "./engineering-agent-supervis
  * a large change needs room to fetch, apply, push and be read back. */
 export const PUBLISHER_HARD_DEADLINE_MS = 40 * 60 * 1000;
 const TIMEOUT_MS = 20_000;
-const OWNER = "mposition";
-const REPOSITORY = "Tomverse";
+/** The one repository, named once in the core (PUBLISHER_REPOSITORY). */
+const [OWNER, REPOSITORY] = PUBLISHER_REPOSITORY.split("/");
 const REPOSITORY_URL = `https://github.com/${OWNER}/${REPOSITORY}.git`;
 const API = "https://api.github.com";
 /** The v1 diff limit, for an app before the v2 change digest only: a larger diff is not one it binds. */
@@ -251,6 +251,10 @@ const pullOf = (value) => ({
   headRef: value?.head?.ref,
   headSha: value?.head?.sha,
   body: typeof value?.body === "string" ? value.body : "",
+  draft: value?.draft === true,
+  headRepo: value?.head?.repo?.full_name ?? null,
+  authorType: value?.user?.type ?? null,
+  authorLogin: value?.user?.login ?? null,
 });
 
 const githubPorts = (token) => ({
@@ -334,7 +338,52 @@ const githubPorts = (token) => ({
     // A 4xx is a definite refusal (§10); anything else is not known.
     return response.status >= 400 && response.status < 500 ? { status: "rejected" } : { status: "unknown" };
   },
+  // A review draft a newer pull request of its card replaced (owner decision
+  // 2026-11-23): read it, and close it only after the core's check.
+  pullByNumber: async (number) => {
+    const response = await githubRequest(token, "GET", `/repos/${OWNER}/${REPOSITORY}/pulls/${number}`);
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error("github_read_failed");
+    return pullOf(await response.json());
+  },
+  // Anyone's review, of any state, makes the draft theirs to decide; a list
+  // not read whole is taken as reviewed.
+  pullReviewed: async (number) => {
+    const response = await githubRequest(token, "GET", `/repos/${OWNER}/${REPOSITORY}/pulls/${number}/reviews?per_page=100`);
+    if (!response.ok) throw new Error("github_read_failed");
+    if (hasNextPage(response.headers.get("link"))) {
+      await response.body?.cancel().catch(() => undefined);
+      return true;
+    }
+    const body = await response.json();
+    if (!Array.isArray(body)) throw new Error("github_read_failed");
+    return body.length > 0;
+  },
+  closePull: async (number) => {
+    const response = await githubRequest(token, "PATCH", `/repos/${OWNER}/${REPOSITORY}/pulls/${number}`, {
+      body: { state: "closed" },
+    }).catch(() => null);
+    await response?.body?.cancel().catch(() => undefined);
+    return response?.status === 200;
+  },
 });
+
+/**
+ * The publisher App's own bot login (`<slug>[bot]`), the author of every pull
+ * request it opens, read from GitHub with the App's JWT. Null when not read:
+ * then no review draft is closed this round.
+ */
+async function appBotLogin({ appId, privateKey }) {
+  const jwt = appJwt(appId, privateKey, Math.floor(Date.now() / 1000));
+  const response = await fetch(`${API}/app`, {
+    method: "GET",
+    redirect: "error",
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+    headers: { accept: "application/vnd.github+json", authorization: `Bearer ${jwt}`, "x-github-api-version": "2022-11-28" },
+  });
+  const body = await response.json().catch(() => null);
+  return response.ok && typeof body?.slug === "string" ? `${body.slug}[bot]` : null;
+}
 
 async function mintToken({ appId, installationId, privateKey }, hold) {
   const jwt = appJwt(appId, privateKey, Math.floor(Date.now() / 1000));
@@ -461,6 +510,7 @@ async function main() {
         return Object.fromEntries(Object.entries(ports).map(([name, fn]) => [name, unlessStopping(fn)]));
       },
       workspace: stoppableWorkspace(workspaceAt, () => stopping),
+      selfLogin: unlessStopping(() => appBotLogin(credentials).catch(() => null)),
     });
   } catch (error) {
     result = { finishedNormally: false, halt: "unknown", reason: error instanceof Error ? error.message : "failed" };
@@ -483,7 +533,8 @@ async function main() {
     signal: AbortSignal.timeout(10_000),
   }).catch(() => undefined);
   console.log(
-    JSON.stringify({ event: "engineering_publisher_cycle", finishedNormally: result.finishedNormally, halt: result.halt, reason: result.reason }),
+    JSON.stringify({ event: "engineering_publisher_cycle", finishedNormally: result.finishedNormally, halt: result.halt, reason: result.reason,
+      ...(Array.isArray(result.closedReviewDrafts) ? { closedReviewDrafts: result.closedReviewDrafts } : {}) }),
   );
   process.exit(result.finishedNormally ? 0 : 1);
 }

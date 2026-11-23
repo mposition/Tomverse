@@ -2584,6 +2584,69 @@ export async function replaceEngineeringAgentBinding(
   return { bindingId: created.id };
 }
 
+/** A review draft pull request a newer pull request of its card replaced, for the publisher to close. */
+export type EngineeringAgentSupersededReviewDraft = {
+  prNumber: number; runId: string; branch: string;
+  /** The newer pull request of the card that replaced it, which the publisher reads open on GitHub first; null when the card is done. */
+  replacedBy: number | null;
+};
+
+/**
+ * The review draft pull requests the publisher closes (owner decision
+ * 2026-11-23, from AMUX-CRAWL-003: every retry of a T2 card opened one more
+ * draft and left the earlier ones open, seventeen in nine hours). One is the
+ * open, current binding of a run whose publish item was an owner review
+ * draft, with no approval or merge observed, while a later run of the same
+ * card holds an open, current pull request of its own -- the card's newer
+ * pull request replaced it; the newest stays open for a person, and once the
+ * newer one is closed the older is the card's only draft again -- or while its card is
+ * done: its work is in without this draft (a settlement's `complete`). A
+ * closed (archived) card's drafts all stay, as that answer says.
+ *
+ * Only while publishing is allowed (the switches, no halt) and review drafts
+ * are on: closing is a write on the public repository. Read-only; the
+ * publisher checks each pull request again on GitHub (a draft, our branch and
+ * marker, into develop, opened by its own App, with no review) and asks this
+ * read again just before the close (`publish/close-look`); it closes nothing else. A draft named as
+ * replaced carries the replacing pull request's number, and the publisher closes it only while GitHub
+ * shows that one open: a replacement a person just closed may still be open here. The binding then moves to
+ * `closed` through the observer's ordinary release
+ * (lib/engineeringAgentBindingRelease.ts).
+ */
+export async function readEngineeringAgentSupersededReviewDrafts(
+  db: PrismaClient | Prisma.TransactionClient,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): Promise<EngineeringAgentSupersededReviewDraft[]> {
+  if (!engineeringAgentV22ReviewPrEnabled(env[ENGINEERING_AGENT_V22_REVIEW_PR_ENV])) return [];
+  const switches = await readEngineeringAgentSwitches(db, env);
+  if (!switches.publishAllowed || engineeringAgentHalted(await readEngineeringAgentHaltState(db))) return [];
+  const rows = await db.$queryRaw<Array<{ prNumber: number; runId: string; replacedBy: number | null }>>`
+    SELECT coalesce(b."currentPrNumber", b."prNumber") AS "prNumber", b."runId", repl."prNumber" AS "replacedBy"
+    FROM "EngineeringAgentBinding" b
+    JOIN "EngineeringAgentRun" r ON r."id" = b."runId"
+    -- The card's newest later run holding an open, current pull request.
+    LEFT JOIN LATERAL (SELECT coalesce(nb."currentPrNumber", nb."prNumber") AS "prNumber"
+      FROM "EngineeringAgentBinding" nb
+      JOIN "EngineeringAgentRun" nr ON nr."id" = nb."runId"
+      WHERE nr."cardId" = r."cardId" AND nr."id" <> r."id" AND (nr."startedAt", nr."id") > (r."startedAt", r."id")
+        AND nb."state" = 'open' AND nb."supersededAt" IS NULL
+      ORDER BY nr."startedAt" DESC, nr."id" DESC
+      LIMIT 1) repl ON true
+    WHERE b."state" = 'open' AND b."supersededAt" IS NULL
+      AND b."approvalObservation" IS NULL AND b."mergeObservation" IS NULL
+      AND EXISTS (SELECT 1 FROM "EngineeringAgentWorkItem" w
+        WHERE w."kind" = 'publish' AND w."causeKey" = ${ENGINEERING_AGENT_V22_REVIEW_CAUSE_PREFIX} || b."runId")
+      AND (repl."prNumber" IS NOT NULL
+        OR EXISTS (SELECT 1 FROM "AmuxWorkItem" card WHERE card."id" = r."cardId" AND card."status" = 'done'))
+      -- A closed (archived) card keeps its pull requests, as its answer says.
+      AND NOT EXISTS (SELECT 1 FROM "AmuxWorkItem" card WHERE card."id" = r."cardId" AND card."archivedAt" IS NOT NULL)
+    ORDER BY b."createdAt", b."id"`;
+  return rows.filter((row) => isRunId(row.runId) && Number.isSafeInteger(row.prNumber) && row.prNumber > 0 &&
+      (row.replacedBy === null || (Number.isSafeInteger(row.replacedBy) && row.replacedBy > 0)))
+    .map((row) => ({ prNumber: row.prNumber, runId: row.runId, branch: engineeringBranchName(row.runId),
+      replacedBy: row.replacedBy }));
+}
+
 /** `open -> closed` when the pull request closes; `closed -> pruned` when its branch is gone. */
 export async function moveEngineeringAgentBinding(
   tx: EngineeringAgentTransaction,

@@ -14,7 +14,7 @@ import type { AmuxV22QuestionDm } from "@/lib/amux/v22OwnerQuestionDmCore";
 /** The settlement's fixed choices per kind, in the words the card offers them. */
 const KIND_OPTIONS = {
   stopped: ["retry", "complete", "close"],
-  t2_pr: ["approve", "retry", "close"],
+  t2_pr: ["approve", "retry", "complete", "close"],
 } as const;
 
 /** Whether the Decision Maker has not answered yet: its card is filed, or being worked, or waits for the relay. */

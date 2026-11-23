@@ -9048,7 +9048,7 @@ model AmuxDmOwnerSettlement {
   bindingId          String?
   /// open | claimed (a remake decided, its idea not filed yet) | applied | cancelled
   state              String    @default("open")
-  /// stopped: retry | complete | close | remake; t2_pr: approve | retry | close
+  /// stopped: retry | complete | close | remake; t2_pr: approve | retry | complete | close
   decision           String?
   /// dm | dm_confirmed
   answerSource       String?
