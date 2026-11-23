@@ -674,6 +674,25 @@ test("a verification call never mixes claims from different private sources, so 
   for (const keys of batches) assert.equal(new Set(keys.map(originOf)).size, 1, `one origin per verification call: ${keys.join(",")}`);
 });
 
+test("a private finding whose quote cannot be verified is never kept as a claim, so no unattributed private text outlives the source", async () => {
+  installFakes({ model: createFakeModel({ respond: (call) => call.tool === "submit_research_private_analysis"
+    ? { findings: [{ text: "Unquoted private claim ZETA-44 about the budget.", kind: "fact",
+        evidence: [{ sourceKey: /<evidence source="(P\d+)"/u.exec(call.text)?.[1] ?? "P1", quote: "this sentence is not in the private source" }] }], limitations: [] }
+    : defaultResponse(call) }) });
+  createFakeWeb();
+  const user = await createUser("unquoted-private");
+  const secret = await memory(user.id, "Unquoted memory with private detail");
+  const run = await create(user.id, { sources: [{ type: "memory", memoryItemId: secret.id }] });
+  await drainResearchWork("unquoted-private", 4);
+  assert.equal((await readResearchRunDto(user.id, run.id)).status, "completed");
+  const claims = await prisma.researchClaim.findMany({ where: { runId: run.id } });
+  assert.ok(claims.every((claim) => !claim.text.includes("ZETA-44")), "the unverifiable private finding is not stored as a claim");
+  const report = JSON.stringify(await readResearchReport({ userId: user.id, runId: run.id }));
+  assert.ok(!report.includes("ZETA-44"));
+  const { buildAccountDataExport } = await import("@/lib/accountDataExport");
+  assert.ok(!JSON.stringify(await buildAccountDataExport(user.id)).includes("ZETA-44"), "nor in the account export");
+});
+
 test("evidence cleanup backs off through a long storage outage but never gives up", async () => {
   const fakes = installFakes();
   const objectKey = `research-evidence/outage/${randomUUID()}`;

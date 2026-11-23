@@ -624,8 +624,13 @@ export async function withholdRevokedSources(tx: Prisma.TransactionClient, runId
     await tx.researchReportRevision.update({ where: { id: revision.id }, data: { document: json(document) } });
     if (revision.revision === runRow.currentReportRevision) currentChanged = true;
   }
+  const privateSourceKeys = new Set(manifest.entries.filter((entry) => entry.type !== "url").map((entry) => entry.key));
   for (const claim of claims) {
-    const key = citedKey(claim);
+    // A private-derived claim citing no private source cannot be tied to one; once any
+    // private source of the run is revoked, its text is withheld too (rows stored before
+    // such claims stopped being kept). Nothing cites it: it is unsupported and uncitable.
+    const unattributed = claim.privateDerived && !(claim.evidence as Array<{ sourceKey: string }>).some((evidence) => privateSourceKeys.has(evidence.sourceKey));
+    const key = citedKey(claim) ?? (unattributed ? "unattributed" : undefined);
     if (key && (claim.text !== labels.redactedNote || claim.verification !== "unsupported")) {
       await tx.researchClaim.update({ where: { id: claim.id }, data: { text: labels.redactedNote, verification: "unsupported", checks: json({ revoked: key }) } });
       if (claim.revisionId === currentRevisionId) currentChanged = true;
@@ -1159,7 +1164,12 @@ async function beginFinalization(tx: Prisma.TransactionClient, run: RunRow, mani
   const claimNumber = (key: string) => Number(key.replace(/^C/, "")) || 0;
   const parentClaims = [...(parent?.claims ?? [])].sort((a, b) => claimNumber(a.claimKey) - claimNumber(b.claimKey));
   let next = parentClaims.reduce((max, claim) => Math.max(max, claimNumber(claim.claimKey)), 0) + 1;
+  // A private-derived claim with no verified quote is uncitable and tied to no
+  // source a revocation could find, so it is never stored, new or carried.
+  const unattributedPrivate = (claim: { privateDerived: boolean; evidence: unknown }) =>
+    claim.privateDerived && !(claim.evidence as Array<{ sourceKey: string }>).length;
   for (const claim of parentClaims) {
+    if (unattributedPrivate(claim)) continue;
     rows.push({ claimKey: claim.claimKey, sectionKey: claim.sectionKey, text: claim.text, kind: claim.kind, verification: claim.verification,
       privateDerived: claim.privateDerived, evidence: claim.evidence, checks: claim.checks ?? undefined });
     if (request?.kind === "refresh" || request?.kind === "conditions") needsVerify.push(rows.at(-1)!.claimKey);
@@ -1170,6 +1180,8 @@ async function beginFinalization(tx: Prisma.TransactionClient, run: RunRow, mani
     for (const finding of findings) {
       if (rows.length >= RESEARCH_RESOURCE_LIMITS.maxClaimsPerRevision) break;
       const evidence = finding.resolved.filter((span) => !excluded.has(span.sourceKey)).map((span) => { const { quote, ...stored } = span; void quote; return stored; });
+      // Includes a quote dropped because its source was revoked while the analysis was in flight.
+      if (unattributedPrivate({ privateDerived: finding.privateDerived || entry.kind === "analyze_private", evidence })) continue;
       const sectionKey = finding.privateDerived ? "all" : sectionFor.get(finding.questionKey) ?? outline[0]!.key;
       const key = `C${next++}`;
       rows.push({ claimKey: key, sectionKey, text: finding.text, kind: evidence.length ? finding.kind : "uncertain",
