@@ -1186,10 +1186,22 @@ async function beginFinalization(tx: Prisma.TransactionClient, run: RunRow, mani
   await withholdRevokedSources(tx, run.id);
   const planRevision = run.approvedPlanRevision ?? run.planRevision;
   const verifyItems: NewResearchWorkItem[] = [];
-  // Private and public claims are never verified together: a public claim's
-  // revised text must not be written by a call that saw private material.
-  const privateKeys = new Set(rows.filter((row) => row.privateDerived).map((row) => row.claimKey));
-  const groups = [needsVerify.filter((key) => !privateKeys.has(key)), needsVerify.filter((key) => privateKeys.has(key))];
+  // A verifier may revise any claim it is shown, using any text it read, so one
+  // call only ever sees one private origin. Public claims are verified apart from
+  // every private one; private claims are batched by the exact set of private
+  // sources they cite, so a revised text or note can only carry a source the
+  // claim itself cites, and revoking a source withholds every claim it could
+  // have reached. A private-derived claim that cites no private source is verified alone.
+  const privateSourceKeys = new Set(manifest.entries.filter((entry) => entry.type !== "url").map((entry) => entry.key));
+  const rowByKey = new Map(rows.map((row) => [row.claimKey, row]));
+  const originOf = (key: string) => {
+    const row = rowByKey.get(key)!;
+    const cited = [...new Set((row.evidence as Array<{ sourceKey: string }>).map((evidence) => evidence.sourceKey).filter((sourceKey) => privateSourceKeys.has(sourceKey)))].sort();
+    return cited.length ? `private:${cited.join(",")}` : row.privateDerived ? `alone:${key}` : "public";
+  };
+  const byOrigin = new Map<string, string[]>();
+  for (const key of needsVerify) { const origin = originOf(key); byOrigin.set(origin, [...(byOrigin.get(origin) ?? []), key]); }
+  const groups = [byOrigin.get("public") ?? [], ...[...byOrigin.entries()].filter(([origin]) => origin !== "public").map(([, keys]) => keys)];
   let batch = 0;
   for (const group of groups) for (let index = 0; index < group.length; index += 30) {
     verifyItems.push({ kind: "verify", idempotencyKey: `verify:${revisionNumber}:${batch}`, planRevision, inputRevision: run.inputRevision,

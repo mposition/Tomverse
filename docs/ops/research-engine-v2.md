@@ -43,6 +43,10 @@ Chat의 Auto/manual 선택은 바꾸지 않습니다. Research 실행 모델은 
   않습니다.
 - 비공개 텍스트를 읽는 모든 dispatch 직전에 다시 검증합니다. 삭제·재잠금·Memory 끄기 뒤에는
   모델에 보내지 않고 source를 `revoked`로 바꾸며 저장된 텍스트를 정리 큐에 넣습니다.
+- 검증 모델은 보여 준 claim을 읽은 글로 고쳐 쓸 수 있으므로, 검증 호출 하나는 출처 한 묶음만 봅니다. 공개
+  claim은 비공개 claim과 따로, 비공개 claim은 인용하는 비공개 자료 조합이 같은 것끼리 검증합니다. 비공개 자료를
+  인용하지 않는 비공개 파생 claim은 하나씩 검증합니다. 그래서 자료 하나를 철회하면 그 내용이 닿았을 수 있는
+  claim이 모두 정리 대상(그 자료를 인용한 claim)에 들어갑니다.
 - 검색할 수 있는 역할(planner, researcher, coordinator)의 prompt는 `PublicResearchContext`
   타입으로 공개 brief와 공개 source 행에서만 만들어집니다. 이 역할에 가는 자유 텍스트는 공개 조사
   텍스트로 정한 것뿐입니다: `publicBrief`(따로 주지 않으면 질문·objective·constraints), 추가 질문,

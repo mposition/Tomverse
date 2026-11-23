@@ -650,6 +650,30 @@ test("a private source revoked while its analysis is in flight never comes back 
   }
 });
 
+test("a verification call never mixes claims from different private sources, so a revoked source cannot reach another claim's revised text", async () => {
+  installFakes();
+  createFakeWeb();
+  const user = await createUser("verify-origin");
+  const one = await memory(user.id, "Origin memory one with private detail");
+  const two = await memory(user.id, "Origin memory two with private detail");
+  const run = await create(user.id, { sources: [{ type: "memory", memoryItemId: one.id }, { type: "memory", memoryItemId: two.id }] });
+  await drainResearchWork("verify-origin", 4);
+  assert.equal((await readResearchRunDto(user.id, run.id)).status, "completed");
+  const privateKeys = new Set((await prisma.researchSource.findMany({ where: { runId: run.id, visibility: "private" } })).map((source) => source.sourceKey));
+  assert.equal(privateKeys.size, 2);
+  const claims = await prisma.researchClaim.findMany({ where: { runId: run.id } });
+  const originOf = (claimKey: string) => {
+    const claim = claims.find((entry) => entry.claimKey === claimKey)!;
+    const cited = [...new Set((claim.evidence as Array<{ sourceKey: string }>).map((evidence) => evidence.sourceKey).filter((key) => privateKeys.has(key)))].sort();
+    return cited.length ? cited.join(",") : claim.privateDerived ? `alone:${claimKey}` : "public";
+  };
+  const batches = (await prisma.researchWorkItem.findMany({ where: { runId: run.id, kind: "verify" } }))
+    .map((item) => (item.payload as { claimKeys: string[] }).claimKeys);
+  const privateBatches = batches.filter((keys) => keys.some((key) => originOf(key) !== "public"));
+  assert.ok(privateBatches.length >= 2, "each private source's claims are verified in their own call");
+  for (const keys of batches) assert.equal(new Set(keys.map(originOf)).size, 1, `one origin per verification call: ${keys.join(",")}`);
+});
+
 test("evidence cleanup backs off through a long storage outage but never gives up", async () => {
   const fakes = installFakes();
   const objectKey = `research-evidence/outage/${randomUUID()}`;
