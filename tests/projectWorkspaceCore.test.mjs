@@ -23,7 +23,7 @@ import {
     projectDeletionMatches,
     turnMemoryScope,
 } from "../lib/projectWorkspaceCore.ts";
-import { decodeProjectRef, encodeProjectRef } from "../lib/projectSourceAccess.ts";
+import { decodeProjectRef, encodeProjectRef, projectReceiptSources } from "../lib/projectSourceAccess.ts";
 import { projectContextActive, projectDeletionNeedsConfirmation } from "../packages/api-client/src/projectWorkspace.ts";
 
 const project = (overrides = {}) => ({
@@ -143,4 +143,23 @@ test("native bearer reaches only the exact project workspace calls", () => {
     assert.equal(nativeProjectWorkspaceBearerRoute("/api/projects/p1/search", "GET"), false);
     assert.equal(nativeProjectWorkspaceBearerRoute("/api/memories/m1", "DELETE"), false);
     assert.equal(nativeProjectWorkspaceBearerRoute("/api/projects/p1/../admin", "GET"), false);
+});
+
+test("a receipt lists the picked references that were included, the retrieved excerpts and the tool reads", () => {
+  const sources = projectReceiptSources({
+    references: [
+      { ref: "m:msg1", status: "included", title: "Kickoff notes" },
+      { ref: "f:file1:2", status: "included", title: "Spec.pdf" },
+      { ref: "m:gone", status: "unavailable", title: null },
+      { ref: "not-a-ref", status: "included", title: "Forged" },
+    ],
+    materials: [{ fileId: "file2", ordinal: 0, fileName: "Plan.md" }],
+    tools: [{ ref: "x:ext1:conv1", location: { kind: "imported", externalMessageId: "ext1", conversationId: "conv1" }, title: "Imported chat" }],
+  });
+  assert.deepEqual(sources, [
+    { ref: "m:msg1", kind: "message", title: "Kickoff notes", via: "context" },
+    { ref: "f:file1:2", kind: "material", title: "Spec.pdf", via: "context" },
+    { ref: "f:file2:0", kind: "material", title: "Plan.md", via: "context" },
+    { ref: "x:ext1:conv1", kind: "imported", title: "Imported chat", via: "tool" },
+  ]);
 });

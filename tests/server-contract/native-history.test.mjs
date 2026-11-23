@@ -65,7 +65,8 @@ test('with the project workspace switch off, a native folder call may set the na
     const archived = await project.PATCH(request('/api/projects/p1', 'PATCH', 'valid', 'https://localhost', { archived: true }), context);
     assert.equal(archived.status, 400);
     const renamed = await project.PATCH(request('/api/projects/p1', 'PATCH', 'valid', 'https://localhost', { name: 'Renamed' }), context);
-    assert.notEqual(renamed.status, 400);
+    // Past the schema: the fixture's project belongs to another owner, so the rename is not found.
+    assert.equal(renamed.status, 404);
   } finally {
     if (previous === undefined) delete process.env.TOMVERSE_NATIVE_PROJECT_WORKSPACE_ENABLED; else process.env.TOMVERSE_NATIVE_PROJECT_WORKSPACE_ENABLED = previous;
   }

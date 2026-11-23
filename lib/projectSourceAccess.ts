@@ -57,6 +57,38 @@ export function decodeProjectRef(ref: string): ProjectSourceLocation | null {
 }
 
 /** The project's processed material files, decided by the server. */
+export type ProjectReceiptSource = {
+    ref: string;
+    kind: ProjectSourceLocation["kind"];
+    title: string;
+    via: "context" | "tool";
+};
+
+/**
+ * What an answer was given, for the owner-only receipt: the references the
+ * user picked for this question that were included, the material excerpts
+ * retrieved into context, and what the model read with the project tools.
+ * A picked reference that was unavailable was not given, so it is not listed.
+ */
+export function projectReceiptSources(input: {
+    references: ReadonlyArray<{ ref: string; status: "included" | "unavailable"; title: string | null }>;
+    materials: ReadonlyArray<{ fileId: string; ordinal: number; fileName: string }>;
+    tools: ReadonlyArray<{ ref: string; location: ProjectSourceLocation; title: string }>;
+}): ProjectReceiptSource[] {
+    const sources: ProjectReceiptSource[] = [];
+    for (const source of input.references) {
+        const location = source.status === "included" ? decodeProjectRef(source.ref) : null;
+        if (location) sources.push({ ref: source.ref, kind: location.kind, title: source.title ?? "", via: "context" });
+    }
+    for (const source of input.materials) {
+        sources.push({ ref: `f:${source.fileId}:${source.ordinal}`, kind: "material", title: source.fileName, via: "context" });
+    }
+    for (const source of input.tools) {
+        sources.push({ ref: source.ref, kind: source.location.kind, title: source.title, via: "tool" });
+    }
+    return sources;
+}
+
 export async function readyProjectMaterialIds(userId: string, projectId: string) {
     const rows = await prisma.assistantKnowledgeFile.findMany({
         where: { userId, projectId, processingStatus: "ready", importId: null },

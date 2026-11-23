@@ -393,6 +393,7 @@ import {
     PROJECT_TOOL_MAX_STEPS,
     type ProjectChatTools,
 } from "@/lib/projectChatTools";
+import { projectReceiptSources } from "@/lib/projectSourceAccess";
 import { resolveConversationProjectScope } from "@/lib/projectWorkspaceService";
 import { projectContextRequiresBundle, type ProjectTurnScope } from "@/lib/projectWorkspaceCore";
 import { enqueueNativeProjectExtraction } from "@/lib/projectMemoryExtraction";
@@ -3674,6 +3675,7 @@ async function handleChatPost(
                   projectTokens: number;
                   project: ProjectTurnScope | null;
                   projectMaterialSources: Array<{ fileId: string; ordinal: number; fileName: string }>;
+                  projectReferenceSources: Array<{ ref: string; status: "included" | "unavailable"; title: string | null }>;
                   knowledgeChunkCount: number;
                   memoryTruncatedByBudget: boolean;
                   requestIdentity: {
@@ -3732,6 +3734,7 @@ async function handleChatPost(
                 projectTokens: verification.payload.projectTokens ?? 0,
                 project: turnContext.project?.project ?? null,
                 projectMaterialSources: turnContext.project?.materialSources ?? [],
+                projectReferenceSources: turnContext.project?.references ?? [],
                 knowledgeChunkCount: turnContext.profile.knowledgeChunkCount,
                 memoryTruncatedByBudget: turnContext.memory.truncatedByBudget,
                 // The retry identity binds what the signed bundle proved, not
@@ -8407,20 +8410,11 @@ async function handleChatPost(
                                     // Not in share snapshots or exports; opening
                                     // one re-checks access.
                                     if (verifiedContext?.project) {
-                                        const receiptSources = [
-                                            ...verifiedContext.projectMaterialSources.map((source) => ({
-                                                ref: `f:${source.fileId}:${source.ordinal}`,
-                                                kind: "material" as const,
-                                                title: source.fileName,
-                                                via: "context" as const,
-                                            })),
-                                            ...(projectTools?.sources() ?? []).map((source) => ({
-                                                ref: source.ref,
-                                                kind: source.location.kind,
-                                                title: source.title,
-                                                via: "tool" as const,
-                                            })),
-                                        ];
+                                        const receiptSources = projectReceiptSources({
+                                            references: verifiedContext.projectReferenceSources,
+                                            materials: verifiedContext.projectMaterialSources,
+                                            tools: projectTools?.sources() ?? [],
+                                        });
                                         if (receiptSources.length > 0) {
                                             await tx.projectAnswerReceipt.create({
                                                 data: {
