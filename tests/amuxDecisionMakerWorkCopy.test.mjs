@@ -91,9 +91,13 @@ test("DEPENDENCIES.md names each tree's outcome and how to run checks, with or w
 });
 
 const posix = process.platform !== "win32";
-const bwrap = posix && existsSync("/usr/bin/bwrap");
+// The jail binds /usr and finds node on PATH=/usr/bin:/bin, as on the box (the launcher units run
+// /usr/bin/node). A runner whose node lives elsewhere (GitHub's /opt/hostedtoolcache) cannot run node in
+// the jail, and a check such as "DNS blocked" would then pass for the wrong reason, so these tests skip there.
+const bwrap = posix && existsSync("/usr/bin/bwrap") && existsSync("/usr/bin/node");
+const NO_JAIL = "the jail needs /usr/bin/bwrap and /usr/bin/node, as on the box";
 
-test("the real jail: commands write the work directory only, never see the login, and reach no network", { skip: !bwrap && "bwrap is not here" }, (t) => {
+test("the real jail: commands write the work directory only, never see the login, and reach no network", { skip: !bwrap && NO_JAIL }, (t) => {
   const fixture = makeLauncherFixture(OPENAI);
   try {
     const plan = planFor(OPENAI);
@@ -203,7 +207,7 @@ test("the jail self-test refuses while a request is in flight, reports every che
   }
 });
 
-test("the jail self-test in the real jail: every jail check matches", { skip: !bwrap && "bwrap is not here" }, (t) => {
+test("the jail self-test in the real jail: every jail check matches", { skip: !bwrap && NO_JAIL }, (t) => {
   return import("../lib/amux/decisionMakerJailSelfTest.ts").then(({ dmJailSelfTest }) => {
     const fixture = makeLauncherFixture(ANTHROPIC);
     try {
