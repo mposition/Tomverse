@@ -313,12 +313,26 @@
 .tv-page .cli-steps p { font-size: .875rem; color: var(--ink-3); margin-top: 4px; }
 
 /* VS Code developer guide */
-.tv-page .vsc-head { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.tv-page .vsc-head h2 { font-size: clamp(2.25rem, 5vw, 4rem); }
+.tv-page .vsc-extensions { padding-block: 66px 84px; }
+.tv-page .vsc-head { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 36px; align-items: center; margin-bottom: 55px; }
+.tv-page .vsc-head h2 { font-size: clamp(2.125rem, 4.2vw, 3.75rem); font-weight: 700; line-height: 1.2; margin-top: 16px; }
 .tv-page .vsc-head h2 em { display: block; }
-.tv-page .vsc-intro { display: grid; justify-items: start; gap: 18px; }
-.tv-page .vsc-intro p { max-width: none; }
-.tv-page .vsc-layout { align-items: start; }
+.tv-page .vsc-head p { max-width: none; padding-top: 34px; }
+.tv-page .vsc-intro-mobile { display: none; }
+.tv-page .vsc-install-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.tv-page .vsc-install-card { display: flex; flex-direction: column; align-items: flex-start; gap: 17px; padding: 24px; min-width: 0; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); }
+.tv-page .vsc-install-card h3 { font-size: 1.375rem; font-weight: 700; line-height: 1.2; text-wrap: wrap; }
+.tv-page .vsc-install-target { margin-top: 4px; color: var(--ink-2); font-size: .8125rem; font-weight: 500; }
+.tv-page .vsc-install-instructions { display: grid; gap: 4px; width: 100%; padding-top: 16px; border-top: 1px solid var(--line); color: var(--ink-3); font-size: .875rem; line-height: 1.65; }
+.tv-page .vsc-marketplace-action { justify-content: center; gap: 10px; min-height: 44px; max-width: 100%; margin-top: auto; padding: 9px 18px; border-radius: 8px; box-shadow: none; }
+.tv-page .vsc-marketplace-action svg, .tv-page .vsc-key-action svg { flex: none; }
+.tv-page .vsc-install-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; margin-top: 22px; padding-top: 22px; border-top: 1px solid var(--line); color: var(--ink-2); font-size: .9375rem; font-weight: 500; }
+.tv-page .vsc-key-action { display: inline-flex; align-items: center; gap: 8px; color: var(--brand-hi); font-size: .875rem; font-weight: 700; text-decoration: none; }
+.tv-page .vsc-key-action:hover { text-decoration: underline; }
+.tv-page .vsc-marketplace-action:focus-visible, .tv-page .vsc-key-action:focus-visible { outline: 2px solid var(--brand-hi); outline-offset: 4px; }
+.tv-page .vsc-guide-section { margin-top: 88px; padding-top: 32px; border-top: 1px solid var(--line); scroll-margin-top: 72px; }
+.tv-page .vsc-guide-section > h3 { margin-bottom: 18px; font-size: 1.625rem; font-weight: 700; }
+.tv-page .vsc-layout { grid-template-columns: minmax(0, 700fr) minmax(0, 538fr); align-items: start; }
 .tv-page .vsc-window {
   --vsc-editor: color-mix(in srgb, var(--stage) 82%, var(--panel-2));
   --vsc-sidebar: color-mix(in srgb, var(--stage) 45%, var(--panel));
@@ -365,20 +379,18 @@
 .tv-page .vsc-decisions span:first-child { box-shadow: none; }
 .tv-page .vsc-receipt { display: flex; align-items: center; gap: 6px; }
 .tv-page .vsc-receipt::before, .tv-page .vsc-pill::before { content: ""; width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--ok); }
-.tv-page .vsc-steps { margin: 0; padding: 0; list-style: none; }
-.tv-page .vsc-steps > li { padding-block: 20px; }
-.tv-page .vsc-steps h3 { line-height: 1.4; text-wrap: wrap; }
+.tv-page .vsc-steps { margin: 0; padding: 0; list-style: none; border-radius: 16px; }
+.tv-page .vsc-steps > li { padding: 16px 18px; grid-template-columns: 34px minmax(0, 1fr); gap: 12px; }
+.tv-page .vsc-steps > li > span { width: 34px; height: 30px; line-height: 30px; border-radius: 8px; }
+.tv-page .vsc-steps h4 { font-size: 1rem; line-height: 1.4; text-wrap: wrap; }
 .tv-page .vsc-steps p { line-height: 1.55; }
 .tv-page .vsc-support { margin-top: 22px; }
-.tv-page .vsc-support h3 { color: var(--ink-3); font-size: .75rem; font-weight: 500; }
+.tv-page .vsc-support h4 { color: var(--ink-3); font-size: .75rem; font-weight: 500; }
 .tv-page .vsc-support ul { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 0; padding: 0; list-style: none; }
-.tv-page .vsc-pill { max-width: 100%; padding: 6px 14px 6px 12px; }
+.tv-page .vsc-pill { max-width: 100%; min-height: 26px; padding: 3px 10px; }
 .tv-page .vsc-pill:hover { background: rgb(255 255 255 / .05); color: var(--ink-2); }
 .tv-page .vsc-pill[data-tone="pending"]::before { background: #fde68a; }
 .tv-page .vsc-pill[data-tone="unsupported"]::before { background: var(--ink-3); }
-.tv-page .vsc-cta { margin-top: 24px; max-width: 100%; }
-.tv-page .vsc-cta:focus-visible { outline: 2px solid var(--brand-hi); outline-offset: 4px; }
-.tv-page .vsc-note { margin-top: 22px; color: var(--ink-3); font-size: .75rem; }
 
 /* Plans + final */
 .tv-page .plans { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 24px; }
@@ -422,8 +434,8 @@
 @media (max-width: 1080px) {
   .tv-page .nav { display: none; }
   .tv-page .index-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .tv-page .chapter-head, .tv-page .continue-stage, .tv-page .adaptive, .tv-page .api, .tv-page .mobile, .tv-page .cli, .tv-page .plans, .tv-page .synthesis { grid-template-columns: minmax(0, 1fr); }
-  .tv-page .vsc-head { gap: 22px; }
+  .tv-page .chapter-head, .tv-page .continue-stage, .tv-page .adaptive, .tv-page .api, .tv-page .mobile, .tv-page .cli, .tv-page .vsc-layout, .tv-page .plans, .tv-page .synthesis { grid-template-columns: minmax(0, 1fr); }
+  .tv-page .vsc-head { grid-template-columns: minmax(0, 1fr); gap: 22px; }
   .tv-page .synthesis dl { grid-template-columns: minmax(0, 1fr); }
   .tv-page .answers { grid-template-columns: minmax(0, 1fr); }
   .tv-page .sig-points { grid-template-columns: minmax(0, 1fr); }
@@ -433,6 +445,18 @@
 @media (max-width: 640px) {
   .tv-page .wrap { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
   .tv-page .chapter { padding-block: 64px; }
+
+  .tv-page .vsc-extensions { padding-block: 34px 52px; }
+  .tv-page .vsc-extensions > .wrap { padding-inline: max(20px, env(safe-area-inset-left, 0px)) max(20px, env(safe-area-inset-right, 0px)); }
+  .tv-page .vsc-head { gap: 10px; margin-bottom: 27px; }
+  .tv-page .vsc-head h2 { font-size: clamp(1.75rem, 9vw, 2.125rem); letter-spacing: -.025em; margin-top: 14px; }
+  .tv-page .vsc-head p { padding-top: 0; font-size: .875rem; line-height: 1.5; }
+  .tv-page .vsc-intro-desktop { display: none; }
+  .tv-page .vsc-intro-mobile { display: block; }
+  .tv-page .vsc-install-grid { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  .tv-page .vsc-install-footer { align-items: flex-start; flex-direction: column; margin-top: 12px; font-size: .875rem; }
+  .tv-page .vsc-guide-section { margin-top: 38px; padding-top: 28px; }
+  .tv-page .vsc-guide-section > h3 { font-size: 1.4375rem; }
   .tv-page .vsc-workbench { grid-template-columns: minmax(0, 1fr); }
   .tv-page .vsc-activity, .tv-page .vsc-editor { display: none; }
   .tv-page .vsc-sidebar { border-left: 0; }
