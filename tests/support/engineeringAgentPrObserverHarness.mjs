@@ -107,6 +107,33 @@ assert.deepEqual(await run([binding()], async () => { throw new ReadError("http_
   [{ bindingId: "binding", outcome: "unreadable", code: "http_error" }]);
 assert.deepEqual(recorded(), []);
 
+// A page's pull requests are read at once (16 read in turn outgrew the
+// runner's 25 s app timeout, 2026-11-22); the outcomes keep binding order and
+// one failed read still decides only its own binding.
+{
+  let inFlight = 0;
+  let most = 0;
+  const rows = [41, 42, 43, 44].map((prNumber) => binding({ id: `binding-${prNumber}`, prNumber }));
+  const outcomes = await run(rows, async (prNumber) => {
+    inFlight += 1;
+    most = Math.max(most, inFlight);
+    await new Promise((settle) => setTimeout(settle, 5 * (45 - prNumber)));
+    inFlight -= 1;
+    if (prNumber === 43) throw new ReadError("http_error");
+    return pull({ reviews: [] });
+  });
+  assert.equal(most, 4);
+  assert.deepEqual(outcomes, [
+    { bindingId: "binding-41", outcome: "waiting" },
+    { bindingId: "binding-42", outcome: "waiting" },
+    { bindingId: "binding-43", outcome: "unreadable", code: "http_error" },
+    { bindingId: "binding-44", outcome: "waiting" },
+  ]);
+  assert.deepEqual(recorded(), []);
+}
+// Any other failure still ends the round.
+await assert.rejects(run([binding()], async () => { throw new Error("boom"); }), /boom/);
+
 // Merged after an approval recorded before it: the card completes and the merge is recorded in the same transaction.
 const approved = { verdict: "approved", reviewId: 9, observedAt: "2026-10-15T05:40:00.000Z" };
 const merged = { state: "closed", merged: true, mergedAt: new Date("2026-10-15T05:50:00Z"), mergeCommitSha: MERGE, mergedByKind: "user" };
