@@ -1,11 +1,10 @@
 import { execFile, execFileSync } from "node:child_process";
-import { cpSync, existsSync, lstatSync, mkdirSync, rmSync, statfsSync, writeFileSync } from "node:fs";
-import { chmod, lstat, readdir } from "node:fs/promises";
+import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, rmSync, statfsSync, writeFileSync } from "node:fs";
+import { lstat, readdir } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { DmExecutionPlan } from "./decisionMakerLauncherCore.ts";
 import { dmHostPath, type DmLauncherHost } from "./decisionMakerLauncherFs.ts";
-import { dmWorkspaceBytes } from "./decisionMakerWorkspaceBuild.ts";
 import { amuxShellJailArgs, amuxShellJailScriptFor, amuxShellPrefixScriptFor } from "./v22ShellJail.mjs";
 
 /**
@@ -169,11 +168,11 @@ export const dmFreeBytes = (path: string): number | null => {
  * filesystem that reports no inode count (btrfs, for one) has no inode limit
  * to keep. False when it cannot be read.
  */
-export const dmInodesKept = (path: string, floorRatio: number): boolean => {
+export const dmInodesKept = (path: string, floorRatio: number, toUse = 0): boolean => {
   try {
     const stats = statfsSync(path);
     const total = Number(stats.files);
-    return total === 0 || Number(stats.ffree) >= total * floorRatio;
+    return total === 0 || Number(stats.ffree) - toUse >= total * floorRatio;
   } catch {
     return false;
   }
@@ -182,6 +181,37 @@ export const dmInodesKept = (path: string, floorRatio: number): boolean => {
 /** Every entry costs at least a block: empty files and directories still take an inode and space. */
 const ENTRY_MIN_BYTES = 4096;
 
+const entryCost = (stats: { blocks?: number; size: number }) =>
+  Math.max(typeof stats.blocks === "number" && stats.blocks > 0 ? stats.blocks * 512 : stats.size, ENTRY_MIN_BYTES);
+
+/** A tree nobody writes while it is read (the broker's request directory): its charged bytes and its entries; null when unreadable. */
+export const dmTreeCost = (root: string): { bytes: number; entries: number } | null => {
+  let bytes = 0;
+  let entries = 0;
+  const directories = [root];
+  while (directories.length > 0) {
+    const directory = directories.pop()!;
+    let names: string[];
+    try {
+      names = readdirSync(directory);
+    } catch {
+      return null;
+    }
+    for (const name of names) {
+      let stats;
+      try {
+        stats = lstatSync(join(directory, name));
+      } catch {
+        return null;
+      }
+      if (stats.isDirectory()) directories.push(join(directory, name));
+      bytes += entryCost(stats);
+      entries += 1;
+    }
+  }
+  return { bytes, entries };
+};
+
 /**
  * The disk the work tree holds, measured without blocking the launcher (the
  * watch's kill path must stay responsive): every entry -- file, directory,
@@ -189,14 +219,18 @@ const ENTRY_MIN_BYTES = 4096;
  * its size, and never less than ENTRY_MIN_BYTES, so a tree of empty files
  * reaches the cap too (16 GiB is then 4 Mi entries); every hard link counted
  * again (counting more is the safe side). It stops as soon as the sum passes
- * `stopAbove`. A directory it cannot read -- a DM command may `chmod 000` one
- * -- is made the account's `0700` first (the launcher is that account and the
- * tree is in its private scratch root); one still unreadable is
- * `unmeasurable`, which the watch takes as over the cap (review
- * r-20261123-110507-a9b409).
+ * `stopAbove`.
+ *
+ * It runs while the DM's commands run in the same tree, so it changes nothing
+ * (review r-20261123-112531-1a6c9d: a chmod could follow a directory a command
+ * swapped for a link): a directory it cannot read -- a command may `chmod 000`
+ * one -- is `unmeasurable`, which the watch takes as over the cap (review
+ * r-20261123-110507-a9b409: never as empty). A swapped link can at most make it
+ * read and count names outside the tree: more, never less, and only a number
+ * leaves it. The cleanup, which does make directories `0700`, runs after the
+ * CLI's process group is gone.
  */
 export async function dmWorkTreeBytes(root: string, stopAbove: number): Promise<number | "unmeasurable"> {
-  const uid = typeof process.geteuid === "function" ? process.geteuid() : null;
   let bytes = 0;
   const directories = [root];
   while (directories.length > 0) {
@@ -205,14 +239,7 @@ export async function dmWorkTreeBytes(root: string, stopAbove: number): Promise<
     try {
       names = await readdir(directory);
     } catch {
-      try {
-        const stats = await lstat(directory);
-        if (uid === null || !stats.isDirectory() || stats.uid !== uid) return "unmeasurable";
-        await chmod(directory, 0o700);
-        names = await readdir(directory);
-      } catch {
-        return "unmeasurable";
-      }
+      return "unmeasurable";
     }
     for (const name of names) {
       const path = join(directory, name);
@@ -223,8 +250,7 @@ export async function dmWorkTreeBytes(root: string, stopAbove: number): Promise<
         continue; // Gone between the listing and the stat.
       }
       if (stats.isDirectory()) directories.push(path);
-      const used = typeof stats.blocks === "number" && stats.blocks > 0 ? stats.blocks * 512 : stats.size;
-      bytes += Math.max(used, ENTRY_MIN_BYTES);
+      bytes += entryCost(stats);
       if (bytes > stopAbove) return bytes;
     }
   }
@@ -311,10 +337,12 @@ export const dmPrepareWorkDirectory = (
   const at = (path: string) => dmHostPath(host, path);
   const { paths } = plan;
   const limits = limitsFor(host, options);
-  const size = dmWorkspaceBytes(at(paths.requestDirectory));
+  // The broker's tree, which no DM command can write: what the copy will take, in bytes and in inodes
+  // (review r-20261123-112531-1a6c9d), against both floors before the synchronous copy starts.
+  const needed = dmTreeCost(at(paths.requestDirectory));
   const free = dmFreeBytes(at(paths.temporaryDirectory));
-  if (size > limits.maxBytes || free === null || free - size < limits.freeFloorBytes ||
-      !dmInodesKept(at(paths.temporaryDirectory), limits.freeInodeFloorRatio)) return { ok: false, reason: "disk" };
+  if (needed === null || needed.bytes > limits.maxBytes || free === null || free - needed.bytes < limits.freeFloorBytes ||
+      !dmInodesKept(at(paths.temporaryDirectory), limits.freeInodeFloorRatio, needed.entries)) return { ok: false, reason: "disk" };
   try {
     // The broker's tree holds no link (it refuses one at hand-over); none is followed here either.
     cpSync(at(paths.requestDirectory), at(paths.workDirectory), {

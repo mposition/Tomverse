@@ -136,22 +136,28 @@ test("the real jail: commands write the work directory only, never see the login
   }
 });
 
-test("the work tree's size counts what is behind an unreadable directory, and stops early past the cap", { skip: !posix || process.getuid?.() === 0 }, async () => {
-  const { mkdtempSync, writeFileSync, chmodSync, rmSync } = await import("node:fs");
+test("the work tree's size: an unreadable directory is unmeasurable, never empty, and the walk changes nothing", { skip: !posix || process.getuid?.() === 0 }, async () => {
+  const { mkdtempSync, writeFileSync, chmodSync, rmSync, statSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
-  const { dmWorkTreeBytes } = await import("../lib/amux/decisionMakerWorkCopy.ts");
+  const { dmTreeCost, dmWorkTreeBytes } = await import("../lib/amux/decisionMakerWorkCopy.ts");
   const root = mkdtempSync(join(tmpdir(), "amux-dm-work-bytes-"));
   try {
     mkdirSync(join(root, "a", "b"), { recursive: true });
     writeFileSync(join(root, "a", "b", "f"), Buffer.alloc(100_000, 1));
-    chmodSync(join(root, "a", "b"), 0o000);
-    chmodSync(join(root, "a"), 0o000);
+    for (let index = 0; index < 10; index += 1) writeFileSync(join(root, `empty-${index}`), "");
     const bytes = await dmWorkTreeBytes(root, Number.MAX_SAFE_INTEGER);
-    assert.ok(typeof bytes === "number" && bytes >= 100_000, String(bytes));
+    assert.ok(typeof bytes === "number" && bytes >= 100_000 + 10 * 4096, String(bytes));
     assert.ok((await dmWorkTreeBytes(root, 10)) > 10, "stops once past the cap");
+    // The broker's tree before the copy: bytes charged the same way, and one inode per entry.
+    assert.deepEqual(dmTreeCost(root)?.entries, 13);
+    chmodSync(join(root, "a"), 0o000);
+    // Review r-20261123-112531-1a6c9d: the watch runs beside the DM's commands, so it never chmods.
+    assert.equal(await dmWorkTreeBytes(root, Number.MAX_SAFE_INTEGER), "unmeasurable");
+    assert.equal(statSync(join(root, "a")).mode & 0o777, 0);
+    assert.equal(dmTreeCost(root), null);
   } finally {
-    chmodSync(root, 0o700);
+    chmodSync(join(root, "a"), 0o700);
     rmSync(root, { recursive: true, force: true });
   }
 });

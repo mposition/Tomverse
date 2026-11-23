@@ -518,3 +518,17 @@ test("a host under its free-inode floor starts nothing", { skip: !posix || (posi
   const result = await run(OPENAI, recording(""), { options: { work: { disk: { freeInodeFloorRatio: 2 } } } });
   assert.deepEqual(result.report.result, { outcome: "refused", refusals: ["disk_space_low"] });
 });
+
+test("the copy's own inodes count against the free-inode floor before it starts", { skip: !posix || (posix && statfsSync(tmpdir()).files === 0) }, async () => {
+  // Review r-20261123-112531-1a6c9d: a request directory of many entries could take the floor during the copy.
+  const { files, ffree } = statfsSync(tmpdir());
+  const ratio = (Number(ffree) - 500) / Number(files);
+  const many = await run(OPENAI, recording(""), {
+    options: { work: { disk: { freeInodeFloorRatio: ratio } } },
+    prepare: (fixture) => {
+      for (let index = 0; index < 2000; index += 1) fixture.write(`${fixture.paths.requestDirectory}/many/f${index}`, "");
+    },
+  });
+  assert.deepEqual(many.report.result, { outcome: "refused", refusals: ["disk_space_low"] });
+  assert.equal(many.started, false);
+});
