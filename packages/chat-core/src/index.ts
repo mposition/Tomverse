@@ -24,3 +24,5 @@ export { chatStreamDisplayText } from "./streamText";
 export * from "./voiceConversation";
 
 export * from "./location";
+
+export * from "./research";

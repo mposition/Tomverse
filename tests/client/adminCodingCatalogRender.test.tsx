@@ -15,6 +15,7 @@ import {
   codingCatalogItems,
   codingDedicatedSettings,
   codingNotesProblems,
+  codingNotesChanged,
   codingNotesRequest,
   codingSettingsFrom,
   codingSettingsProblems,
@@ -714,4 +715,27 @@ test("the coding notes tile shows the notes and the pages they stand on, takes o
   assert.equal(codingNotesRequest({ strengths: "\n ", weaknesses: "" }), null);
   assert.deepEqual(codingNotesProblems({ strengths: "a\nb\nc\nd", weaknesses: "x".repeat(121) }), { strengths: "too_many", weaknesses: "too_long" });
   assert.deepEqual(codingNotesProblems({ strengths: "a\nb\nc", weaknesses: "x".repeat(120) }), {});
+
+  // A change is what would be saved: spaces and blank lines alone are not an edit.
+  const storedNotes = { strengths: ["Parallel tool calls", "Strict schemas"], weaknesses: [] };
+  assert.equal(codingNotesChanged({ strengths: "Parallel tool calls\nStrict schemas", weaknesses: "" }, storedNotes), false);
+  assert.equal(codingNotesChanged({ strengths: " Parallel  tool calls \n\nStrict schemas\n", weaknesses: " " }, storedNotes), false);
+  assert.equal(codingNotesChanged({ strengths: "Strict schemas\nParallel tool calls", weaknesses: "" }, storedNotes), true);
+  assert.equal(codingNotesChanged({ strengths: "Parallel tool calls\nStrict schemas", weaknesses: "Slow" }, storedNotes), true);
+  assert.equal(codingNotesChanged({ strengths: "", weaknesses: "" }, storedNotes), true, "emptying both removes them");
+  assert.equal(codingNotesChanged({ strengths: "\n", weaknesses: "" }, null), false);
+  assert.equal(codingNotesChanged({ strengths: "", weaknesses: "" }, { strengths: [], weaknesses: [] }), false);
+  assert.equal(codingNotesChanged({ strengths: "New", weaknesses: "" }, null), true);
+
+  // The same note or page twice renders twice (each item is keyed by its position too).
+  const twice = renderToStaticMarkup(
+    <CodingNotesTile
+      c={c}
+      item={notesOn({ strengths: ["Same", "Same"], weaknesses: [], sources: ["https://docs.anthropic.com/a", "https://docs.anthropic.com/a"], draftedAt: "2026-11-22" })}
+      busy={false}
+      onSave={noop}
+    />
+  );
+  assert.match(twice, /<li>Same<\/li><li>Same<\/li>/);
+  assert.equal(twice.match(/docs\.anthropic\.com\/a<\/a>/g)?.length, 2);
 });

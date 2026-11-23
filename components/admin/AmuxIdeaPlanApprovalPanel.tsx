@@ -13,6 +13,8 @@ import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import { AMUX_IDEA_PLAN_APPROVAL_REQUEST_TIMEOUT_MS } from "@/lib/amux/ideaRequestTimeoutsCore";
 import { parseAmuxIdeaAnalysisResultView,
   type AmuxVisibleAnalysisUnit } from "@/lib/amux/ideaAnalysisResultReadCore";
+import { amuxV4PlanNamesExistingNode, amuxV4PlanUnitAttachment,
+  type AmuxV4PlanExistingNode } from "@/lib/amux/ideaPlanScreenCore";
 import { amuxV4PlanRound, amuxV4PlanScreenUnits, amuxV4PlanShowsPublicPrConsent,
   buildAmuxV4PlanRequest } from "@/lib/amux/ideaPlanScreenCore";
 import { decidePlanReadBack, planReadBackSeconds,
@@ -106,6 +108,24 @@ export function AmuxIdeaPlanReadBackButton({ m, view, onClick }: { m: Messages; 
   </button>;
 }
 
+/** The existing nodes a proposal may attach to, by id; empty when unreadable,
+ * so the screen still says "existing" without the title. */
+async function readExistingNodes(): Promise<Map<string, AmuxV4PlanExistingNode>> {
+  try {
+    const response = await adminFetch("/api/admin/amux/ideas/existing-hierarchy", { cache: "no-store" });
+    const body: unknown = response.ok ? await response.json() : null;
+    const nodes = body && typeof body === "object" && Array.isArray((body as { nodes?: unknown }).nodes)
+      ? (body as { nodes: unknown[] }).nodes : [];
+    return new Map(nodes.flatMap((node) => {
+      const row = node as Partial<AmuxV4PlanExistingNode> | null;
+      return row && typeof row.ref === "string" && typeof row.title === "string" &&
+        (row.level === "initiative" || row.level === "epic" || row.level === "feature")
+        ? [[row.ref, { ref: row.ref, level: row.level, title: row.title,
+          displayPrefix: typeof row.displayPrefix === "string" ? row.displayPrefix : null }] as const] : [];
+    }));
+  } catch { return new Map(); }
+}
+
 /** Every page of an idea's analysis, so the screen shows all that the server approves. */
 async function readAllUnits(ideaId: string): Promise<AmuxVisibleAnalysisUnit[] | null> {
   const units: AmuxVisibleAnalysisUnit[] = [];
@@ -158,6 +178,15 @@ export function AmuxIdeaPlanApprovalPanel({ ideaId, onChanged }: { ideaId: strin
   }, [load]);
 
   const listed = useMemo(() => Array.isArray(units) ? amuxV4PlanScreenUnits(units) : [], [units]);
+  // Owner decision 2026-11-22: say which proposals attach to existing nodes.
+  const [existingNodes, setExistingNodes] = useState<Map<string, AmuxV4PlanExistingNode>>(new Map());
+  const namesExisting = useMemo(() => amuxV4PlanNamesExistingNode(listed), [listed]);
+  useEffect(() => {
+    if (!namesExisting) return;
+    let active = true;
+    void readExistingNodes().then((nodes) => { if (active) setExistingNodes(nodes); });
+    return () => { active = false; };
+  }, [namesExisting]);
   const round = useMemo(() => {
     try { return amuxV4PlanRound(listed); } catch { return null; }
   }, [listed]);
@@ -299,9 +328,14 @@ export function AmuxIdeaPlanApprovalPanel({ ideaId, onChanged }: { ideaId: strin
       {listed.map((unit) => {
         const metrics = edits.get(unit.unitId) ?? unit.metrics;
         const later = deferred.has(unit.unitId);
-        return <li key={unit.unitId} className="rounded-lg border p-3 border-zinc-800">
-          <p className="text-xs text-zinc-400">{unit.kind}{unit.taskRole ? ` · ${unit.taskRole}` : ""}</p>
+        const attachment = amuxV4PlanUnitAttachment(unit, existingNodes);
+        return <li key={unit.unitId} className="rounded-lg border p-3 border-zinc-800"
+          data-testid="amux-plan-unit" data-attachment={attachment ? "existing" : "new"}>
+          <p className="text-xs text-zinc-400">{m.planApprovalNewUnit} · {unit.kind}{unit.taskRole ? ` · ${unit.taskRole}` : ""}</p>
           <p className="font-medium">{unit.title}</p>
+          {attachment ? <p className="text-xs text-emerald-300" data-testid="amux-plan-unit-existing">
+            {m.planApprovalAttachesExisting(attachment.level, attachment.title, attachment.displayPrefix)}
+          </p> : unit.kind !== "initiative" ? <p className="text-xs text-zinc-400">{m.planApprovalUnderPlanned}</p> : null}
           {later ? <p className="text-xs">{m.planApprovalNextRound}</p> : null}
           {metrics && !later ? <fieldset className="mt-2 flex flex-wrap gap-2">
             <legend className="sr-only">{m.planApprovalScoreLabel}</legend>

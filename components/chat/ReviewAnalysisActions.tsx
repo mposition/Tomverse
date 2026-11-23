@@ -9,6 +9,7 @@ import { buildReviewAnalysisReport, reviewReportLabels, reviewReportSelection } 
 import type { ReviewChatSource } from "@/lib/reviewToChat";
 import { filenameFromContentDisposition, saveBlobAsFile } from "@/lib/browserDownload";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { ProjectSaveToProject } from "@/components/projects/ProjectSaveToProject";
 import "./review-analysis-actions.css";
 
 export function ReviewAnalysisActions({ source, ready, scope = "", onClose, closeDisabled = false, disclaimer, className = "" }: {
@@ -114,6 +115,8 @@ export function ReviewAnalysisActions({ source, ready, scope = "", onClose, clos
     <div className="review-analysis-action-buttons">
       <button type="button" disabled={!eligible} onClick={() => show("share")} data-testid="review-analysis-share">{t("reviewActions.share")}</button>
       <button type="button" disabled={!eligible} onClick={() => show("export")} data-testid="review-analysis-export">{t("reviewActions.export")}</button>
+      {eligible && source && <ProjectSaveToProject testId="review-analysis-save-to-project" className="review-analysis-save"
+        source={async () => ({ sourceKind: "review_result" as const, conversationId: source.conversationId, analysis: await reviewReportSelection(source, lang) })} />}
       <div className="review-analysis-primary-actions"><ReviewChatAction source={source} ready={ready} scope={scope} inline />
         <button type="button" disabled={closeDisabled} onClick={onClose}>{t("chat.close")}</button></div>
     </div>

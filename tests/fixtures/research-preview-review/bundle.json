@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "observedUntil": "2026-11-23T00:00:00Z",
+  "runs": [
+    {
+      "origin": "synthetic",
+      "label": "synthetic CLI journal",
+      "journal": "journal.jsonl",
+      "runKey": "gemini-4-argon:official-compact-original",
+      "reportInput": {
+        "file": "report-capture.json",
+        "pointer": "/reportInput"
+      },
+      "allowedSources": {
+        "file": "report-capture.json",
+        "pointer": "/allowedSources"
+      },
+      "replay": true,
+      "verification": [
+        {
+          "file": "page-verification.json",
+          "sourceId": "R1",
+          "url": "https://www.rfc-editor.org/rfc/rfc1149.html",
+          "checkedAt": "2026-11-15"
+        }
+      ]
+    },
+    {
+      "origin": "synthetic",
+      "label": "missing-input fixture",
+      "journal": "journal.jsonl",
+      "runKey": "gpt-6-luna:official-compact-original",
+      "renderedReport": "absent-report.md"
+    },
+    {
+      "origin": "preview_only",
+      "label": "accessibility preview",
+      "manifest": "preview-manifest.json"
+    }
+  ]
+}

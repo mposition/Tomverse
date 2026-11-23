@@ -1318,3 +1318,113 @@ export async function reconcileExpiredMemoryExtractionRuns(now = new Date()) {
     }
     return { reclaimedRuns: reclaimed.count };
 }
+
+/**
+ * A native (Tomverse) extraction run over one project conversation's new
+ * messages (project workspace). The same run, chunk, lease, provider-cost
+ * reservation and fenced commit as an import run; it differs only in what it
+ * reads and where it stores: `sourceKind = "native"`, the project scope, and
+ * a unique `sourceKey` per source snapshot so the same window is never
+ * extracted twice. Free to the account, like automatic import extraction;
+ * bounded by the provider budget and the one-active-run rule.
+ */
+export async function createNativeMemoryExtractionRun(input: {
+    userId: string;
+    projectId: string;
+    conversationId: string;
+    sourceKey: string;
+    sourceSelection: Prisma.InputJsonValue;
+    contentBytes: number;
+    extractionModelId: string;
+    promptVersion: string;
+    register?: readonly MemoryExtractionEvalEntry[];
+    now?: Date;
+    environment?: Record<string, string | undefined>;
+}) {
+    const now = input.now ?? new Date();
+    await assertUserOperationalAccess(input.userId);
+    const { pricing } = await resolveEffectiveExtractionPair(input);
+    const tier = pricing.tiers[0];
+    const chunks = [{ conversationIds: [input.conversationId], contentBytes: Math.max(1, input.contentBytes) }];
+    const estimate = estimateExtraction(chunks, {
+        inputMicroUsdPerMTokens: tier.inputUsdPerMillionTokens * 1_000_000,
+        outputMicroUsdPerMTokens: tier.outputUsdPerMillionTokens * 1_000_000,
+        creditsPerCall: 0,
+    });
+    await assertExtractionBudget(pricing.provider, estimate.estimatedCostMicroUsd, now, input.environment ?? process.env);
+    return prisma.$transaction(async (tx) => {
+        await acquireCreditAccountLock(tx, input.userId);
+        await acquireUserRunLock(tx, input.userId);
+        const conversation = await tx.$queryRaw<Array<{ password: string | null; projectId: string | null }>>`
+            SELECT password, "projectId" FROM "Conversation"
+            WHERE id = ${input.conversationId} AND "userId" = ${input.userId}
+            FOR UPDATE
+        `;
+        if (!conversation[0] || conversation[0].projectId !== input.projectId) {
+            throw new ApiSecurityError(404, "NOT_FOUND", "Conversation not found.");
+        }
+        if (conversation[0].password !== null) {
+            throw new ApiSecurityError(409, "MEMORY_EXTRACTION_SOURCE_LOCKED", "The conversation is locked.");
+        }
+        const existing = await tx.memoryExtractionRun.findUnique({ where: { sourceKey: input.sourceKey }, select: { id: true } });
+        if (existing) {
+            throw new ApiSecurityError(409, "MEMORY_EXTRACTION_SOURCE_DONE", "This source snapshot already has a run.");
+        }
+        const active = await tx.memoryExtractionRun.findFirst({
+            where: { userId: input.userId, status: { in: [...ACTIVE_RUN_STATUSES] } },
+            select: { id: true },
+        });
+        if (active) {
+            throw new ApiSecurityError(409, "MEMORY_EXTRACTION_ALREADY_RUNNING", "An extraction run is already active for this account.");
+        }
+        const run = await tx.memoryExtractionRun.create({
+            data: {
+                userId: input.userId,
+                status: "pending",
+                extractionModelId: input.extractionModelId,
+                promptVersion: input.promptVersion,
+                sourceSelection: input.sourceSelection,
+                sourceKind: "native",
+                projectId: input.projectId,
+                sourceConversationId: input.conversationId,
+                sourceKey: input.sourceKey,
+                chunkTotal: estimate.chunkCount,
+                pricingVersion: `${estimate.basis}:${pricing.modelId}`,
+            },
+        });
+        await reserveExtractionRunCredits({
+            tx,
+            userId: input.userId,
+            runId: run.id,
+            plan: { monthlyMessageLimit: 0, dailyMessageLimit: 0 },
+            credits: 0,
+            costMicroUsd: estimate.estimatedCostMicroUsd,
+            chunkTotal: estimate.chunkCount,
+            provider: pricing.provider,
+            extractionModelId: input.extractionModelId,
+            promptVersion: input.promptVersion,
+            pricingVersion: `${estimate.basis}:${pricing.modelId}`,
+            costSource: pricing.priceSource,
+            pricingSnapshot: {
+                basis: estimate.basis,
+                modelId: pricing.modelId,
+                provider: pricing.provider,
+                inputUsdPerMillionTokens: tier.inputUsdPerMillionTokens,
+                outputUsdPerMillionTokens: tier.outputUsdPerMillionTokens,
+                estimatedInputTokens: estimate.estimatedInputTokens,
+                estimatedOutputTokens: estimate.estimatedOutputTokens,
+                estimatedCostMicroUsd: estimate.estimatedCostMicroUsd,
+                chunkCount: estimate.chunkCount,
+            },
+            now,
+        });
+        await tx.memoryExtractionChunk.createMany({
+            data: chunks.map((chunk, chunkIndex) => ({
+                runId: run.id,
+                chunkIndex,
+                conversationIds: chunk.conversationIds,
+            })),
+        });
+        return run;
+    });
+}

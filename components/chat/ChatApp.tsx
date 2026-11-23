@@ -31,7 +31,7 @@ import {
 } from "@/components/chat/ChatMessageList";
 import { VoiceConversationHistory } from "@/components/chat/VoiceConversationHistory";
 import { Message, type ChatAttachment } from "@/components/chat/types";
-import { reviewSeedFromChat } from "@/lib/chatReviewHandoff";
+import { chatReviewHandoffFor } from "@/lib/chatReviewHandoff";
 import { useSession } from "next-auth/react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useGuestVerification } from "@/components/chat/GuestVerificationProvider";
@@ -50,6 +50,7 @@ import {
 } from "@/lib/chatKeyboardPolicy";
 import type { WebSearchMode, WebSearchToggleMode } from "@/lib/appDefaults";
 import { prepareChatContextBundle } from "@/lib/chatContextBundleClient";
+import { projectReferenceFields } from "@/lib/projectReferences";
 import { createClientLatency } from "@/lib/responseLatencyClient";
 import { boundedLatencyMs } from "@/lib/responseLatencyStages";
 import type { ClientLatencyStages } from "@/lib/responseLatencyCore";
@@ -251,7 +252,8 @@ type ChatAppProps = {
   /** Chat: send a failed reply's question again without touching the draft. */
   onRetryPrompt?: (prompt: ChatRecoveryPrompt) => void;
   /** Chat: open a Review draft prefilled from one answer's question. */
-  onCompareInReview?: (seed: string) => void;
+  /** `reattachFile`: the answer's own turn sent one readable document (lib/chatReviewHandoff.ts). */
+  onCompareInReview?: (seed: string, options?: { reattachFile: boolean }) => void;
   onCompareContinuationInReview?: (assistantMessageId: string) => void;
   initialConversationId?: string | null;
   /**
@@ -311,6 +313,8 @@ type ChatAppProps = {
      * with no memory context, and the server then sends none.
      */
     contextBundle?: string | null;
+    /** Project search-hit refs attached to this question (at most 8). */
+    projectReferences?: string[];
     /**
      * Whether that bundle covers this panel alone or a whole comparison.
      * It decides what a stale bundle may do about itself, and only the step
@@ -1534,7 +1538,12 @@ function ChatAppComponent({
      * request rather than through `updateWebSearchMode`, and the next send
      * from the composer is back on whatever the switch says.
      */
-    requestOptions?: { webSearchMode?: WebSearchToggleMode; reasoningEffort?: ExplicitReasoningEffort },
+    requestOptions?: {
+      webSearchMode?: WebSearchToggleMode;
+      reasoningEffort?: ExplicitReasoningEffort;
+      /** Project search-hit refs the user attached to this one question. */
+      projectReferences?: readonly string[];
+    },
     /*
       Stored files this send has been told are gone and may proceed without.
 
@@ -1634,7 +1643,7 @@ function ChatAppComponent({
       and the conversation's own mode is used everywhere else, so an ordinary
       send is identical to what it was before the override existed.
     */
-    const { webSearchMode: webSearchModeOverride, reasoningEffort } = requestOptions ?? {};
+    const { webSearchMode: webSearchModeOverride, reasoningEffort, projectReferences } = requestOptions ?? {};
     const effectiveWebSearchMode: WebSearchMode | undefined =
       researchMode ? "always" : webSearchModeOverride ?? webSearchMode;
     const mcpConnectionId = !researchMode && currentProduct === "chat" ? selectedMcpConnection(initialConversationId) : undefined;
@@ -2085,6 +2094,9 @@ function ChatAppComponent({
           ...(mcpConnectionId ? { mcpConnectionId } : {}),
           ...(admissionToken ? { admissionToken } : {}),
           ...(activeContextBundle ? { contextBundle: activeContextBundle } : {}),
+          // Explicit references ride on the send itself, beside the signed
+          // bundle: the server re-validates every ref against the project.
+          ...projectReferenceFields(projectReferences),
           ...(effectiveWebSearchMode && effectiveWebSearchMode !== "off"
             ? { webSearchMode: effectiveWebSearchMode }
             : {}),
@@ -2263,6 +2275,7 @@ function ChatAppComponent({
                   modelIds: [modelId],
                   prompt: text,
                   ...(activeContextBundle ? { previousContextBundle: activeContextBundle } : {}),
+                  projectReferences,
                 })
               : null;
           // Nothing to retry with. Re-sending the bundle that was just
@@ -2299,6 +2312,7 @@ function ChatAppComponent({
                   modelIds: [modelId],
                   prompt: text,
                   ...(activeContextBundle ? { previousContextBundle: activeContextBundle } : {}),
+                  projectReferences,
                 })
               : null;
           if (!refreshed) throw error;
@@ -3476,8 +3490,11 @@ function ChatAppComponent({
         onCompareInReview={transcriptScope === "conversation" && (onCompareContinuationInReview || onCompareInReview)
           ? (messageId) => {
               if (onCompareContinuationInReview) { onCompareContinuationInReview(messageId); return; }
-              const seed = reviewSeedFromChat(messages, messageId, t("chat.compareInReviewContext"));
-              if (seed) onCompareInReview?.(seed);
+              const handoff = chatReviewHandoffFor(messages, messageId, t("chat.compareInReviewContext"));
+              // A file-only turn has no question of its own; an earlier one
+              // would be compared against a document it was never asked about.
+              if (handoff?.kind === "no-question") dispatchAppToast(t("chat.compareInReviewNeedsQuestion"), "info");
+              else if (handoff) onCompareInReview?.(handoff.seed, { reattachFile: handoff.reattachFile });
             }
           : undefined}
         compareRequiresCompleted={Boolean(onCompareContinuationInReview)}

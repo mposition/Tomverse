@@ -1740,11 +1740,11 @@ for (const [label, key] of [
       // The routing read carries the database clock, whose period keys the option set digest.
       assert.match(sent[1].sql, /floor\(extract\(epoch FROM clock_timestamp\(\)\) \* 1000\)::bigint AS "dbNowEpochMs"/);
       assert.match(sent[1].sql, /ON r\."cardId" = \$ AND r\."questionRevision" = \$/);
-      // The first value is the app-filed card probe (AMUXFLOW/B2), in the same statement.
-      // Since 2026-11-14 the probe also counts a T2 draft review's card; a worker's own question table
-      // is never read for it.
-      assert.deepEqual(sent[1].values, ["card-41", "card-41", "card-41", 3]);
-      assert.match(sent[1].sql, /\(EXISTS \(SELECT 1 FROM "AmuxDmOwnerSettlement" s\s+WHERE s\."localCardId" = \$\)\s+OR EXISTS \(SELECT 1 FROM "EngineeringAgentDmReview" e\s+WHERE e\."localCardId" = \$\)\) AS "appFiledCard"/);
+      // The first values are the app-filed card probe, in the same statement: an owner
+      // settlement, a T2 draft review, and since 2026-11-22 a result review, a refused session
+      // answer and a card close question. A worker's own question table is never read for it.
+      assert.deepEqual(sent[1].values, ["card-41", "card-41", "card-41", "card-41", "card-41", "card-41", 3]);
+      assert.match(sent[1].sql, /\(EXISTS \(SELECT 1 FROM "AmuxDmOwnerSettlement" s\s+WHERE s\."localCardId" = \$\)\s+OR EXISTS \(SELECT 1 FROM "EngineeringAgentDmReview" e\s+WHERE e\."localCardId" = \$\)\s+OR EXISTS \(SELECT 1 FROM "AmuxV22ResultReview" v\s+WHERE v\."localCardId" = \$\)\s+OR EXISTS \(SELECT 1 FROM "AmuxIdeaSessionPlanRefusal" f\s+WHERE f\."localCardId" = \$\)\s+OR EXISTS \(SELECT 1 FROM "AmuxIdeaCardCloseQuestion" c\s+WHERE c\."localCardId" = \$\)\) AS "appFiledCard"/);
       assert.doesNotMatch(sent[1].sql, /AmuxV22TaskQuestion/);
       assert.match(sent[2].sql, SWITCH_READ);
       assert.match(sent[3].sql, /count\(\*\) FILTER/);

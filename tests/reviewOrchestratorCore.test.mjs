@@ -287,6 +287,16 @@ test("verdict parsing never guesses a verdict, reads what it can, and blocking f
   assert.equal(parseReviewerOutput(two).verdict, "accept");
 });
 
+test("a reviewer that says it could not review is unknown even with a blocking finding, never a reject or accept", () => {
+  const block = (value) => `text\n\`\`\`json\n${JSON.stringify(value)}\n\`\`\``;
+  const cannot = parseReviewerOutput(block({ verdict: "unknown",
+    findings: [{ severity: "major", summary: "this reviewer session has no shell" }] }));
+  assert.equal(cannot.verdict, "unknown");
+  assert.equal(cannot.reason, "reviewer_could_not_review");
+  assert.equal(cannot.findings.length, 1, "what it wrote is kept");
+  assert.equal(parseReviewerOutput(block({ verdict: "could_not_review", findings: [] })).reason, "reviewer_could_not_review");
+});
+
 test("aggregate: pending, then any reject, then any unknown, then accept", () => {
   assert.equal(aggregate([{ status: "done", verdict: "accept" }, { status: "running" }]), "pending");
   assert.equal(aggregate([{ status: "done", verdict: "unknown" }, { status: "done", verdict: "reject" }]), "reject");

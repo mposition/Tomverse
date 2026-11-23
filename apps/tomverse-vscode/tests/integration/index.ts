@@ -4,6 +4,7 @@ import { writeFileSync, readFileSync, existsSync, mkdirSync, symlinkSync } from 
 import { join } from "node:path";
 import { FakeGateway, TEST_KEY, DEFAULT_MODELS, lastUserText, toolResultsSinceUser, type ScriptedReply } from "../../../tomverse-cli/tests/fakeGateway.js";
 import { Journal } from "../../../tomverse-cli/src/runtime.js";
+import type { Effort } from "../../src/effort.js";
 import { t } from "../../src/i18n.js";
 import { digest, namespace } from "../../src/security.js";
 import type { SessionController } from "../../src/sessionController.js";
@@ -44,6 +45,13 @@ export async function run() {
     const approve = (id: string, decision = "once") => controller.receive({ ...envelope(), type: "approve", id, decision });
     const fresh = async () => {
         await action("new");
+    };
+    const openEffort = (model = "fake-coder") => controller.receive({ ...envelope(), type: "chooseEffort", model });
+    const chooseEffort = async (level: Effort, model = "fake-coder") => {
+        assert.equal(await openEffort(model), true);
+        const picker = controller.snapshot().effortPicker;
+        assert.ok(picker?.levels.includes(level));
+        assert.equal(await controller.receive({ ...envelope(), type: "selectEffort", id: picker.id, level }), true);
     };
     try {
         assert.equal(vscode.workspace.isTrusted, !restricted, "actual Workspace Trust state");
@@ -99,7 +107,7 @@ export async function run() {
         assert.equal(fake.completions.length, 1);
         assert.match(JSON.stringify(fake.completions[0]!.body), /fixture diagnostic/);
         assert.equal(controller.snapshot().cost?.charged, 3);
-        assert.equal(fake.completions[0]!.headers["user-agent"], "tomverse-vscode/0.1.0");
+        assert.equal(fake.completions[0]!.headers["user-agent"], `tomverse-vscode/${extension.packageJSON.version}`);
         assert.equal(JSON.stringify(fake.completions[0]!.body.tools).includes("apply_patch"), false);
         assert.equal(JSON.stringify(controller.snapshot()).includes(TEST_KEY), false);
         record("sidebar Ask stream, read-only tools, duplicate send refusal, own receipt", controller.snapshot().cost);
@@ -550,10 +558,7 @@ export async function run() {
             m.id === "fake-small" ? { ...m, tomverse: { ...m.tomverse, context_window_tokens: 9000, reasoning_efforts: ["high"] } } : m,
         );
         await controller.refresh();
-        const originalPick = controller.dialogs.pick.bind(controller.dialogs);
-        controller.dialogs.pick = async (items) => items.find((item) => item.label === t("effort_high"));
-        await controller.receive({ ...envelope(), type: "chooseEffort", model: "fake-small" });
-        controller.dialogs.pick = originalPick;
+        await chooseEffort("high", "fake-small");
         const beforeCompact = fake.completions.length;
         await send("Read compact.txt a few times", "ask", "fake-small");
         const compactState = Journal.read(join(sessionHome, "sessions", controller.snapshot().session));
@@ -567,27 +572,26 @@ export async function run() {
         fake.options.models = undefined;
         record("compaction in actual extension preserves effort and counts requests and receipts at pinned model", controller.snapshot().cost);
         await fresh();
-        const nativePick = controller.dialogs.pick.bind(controller.dialogs);
-        const chooseEffort = (model = "fake-coder") => controller.receive({ ...envelope(), type: "chooseEffort", model });
-        controller.dialogs.pick = async (items) => {
-            assert.deepEqual(
-                items.map((item) => item.label),
-                [t("effort_default")],
-            );
-            return undefined;
-        };
-        await chooseEffort();
+        const modelsWithoutEffort = DEFAULT_MODELS.map((model) => ({
+            ...model,
+            tomverse: { ...model.tomverse, reasoning_efforts: undefined },
+        }));
+        fake.options.models = modelsWithoutEffort;
+        await controller.refresh();
+        await openEffort();
+        const defaultPicker = controller.snapshot().effortPicker!;
+        assert.deepEqual(defaultPicker.levels, ["default"]);
+        assert.equal(await controller.receive({ ...envelope(), type: "selectEffort", id: defaultPicker.id, level: "high" }), false);
+        assert.equal(await controller.receive({ ...envelope(), type: "selectEffort", id: defaultPicker.id }), true);
         assert.equal(controller.snapshot().effort.level, "default");
         fake.options.models = DEFAULT_MODELS.map((model) => ({ ...model, tomverse: { ...model.tomverse, reasoning_efforts: ["low", "high", "invalid"] } }));
         await controller.refresh();
-        controller.dialogs.pick = async (items) => {
-            assert.deepEqual(
-                items.map((item) => item.label),
-                [t("effort_low"), t("effort_default"), t("effort_high")],
-            );
-            return items.find((item) => item.label === t("effort_high"));
-        };
-        await chooseEffort();
+        await openEffort();
+        const offeredPicker = controller.snapshot().effortPicker!;
+        assert.deepEqual(offeredPicker.levels, ["low", "default", "high"]);
+        assert.equal(await controller.receive({ ...envelope(), type: "selectEffort", id: "forged", level: "high" }), false);
+        assert.equal(await controller.receive({ ...envelope(), type: "selectEffort", id: offeredPicker.id, level: "high" }), true);
+        assert.equal(await controller.receive({ ...envelope(), type: "selectEffort", id: offeredPicker.id, level: "low" }), false);
         assert.equal(controller.snapshot().effort.level, "high");
         assert.equal(await controller.receive({ ...envelope(), type: "chooseEffort", model: "fake-coder", level: "low" }), false);
         replies = [{ text: "Effort high" }];
@@ -595,15 +599,13 @@ export async function run() {
         assert.equal(fake.completions.at(-1)!.body.tomverse_effort, "high");
         assert.equal(Journal.read(join(sessionHome, "sessions", controller.snapshot().session)).tasks.at(-1)!.effort, "high");
         assert.equal(JSON.stringify(fake.completions.at(-1)!.body.tools).includes("apply_patch"), false);
-        controller.dialogs.pick = async (items) => items.find((item) => item.label === t("effort_default"));
-        await chooseEffort();
+        await chooseEffort("default");
         replies = [{ text: "Model defaults" }];
         await send("Use defaults for the next task", "ask");
         assert.equal(fake.completions.at(-1)!.body.tomverse_effort, undefined);
-        record("native effort picker follows catalog, rejects webview level injection, preserves Ask and omits default wire override");
+        record("effort options follow the catalog, reject forged and replayed selections, and omit the Default wire override");
         await fresh();
-        controller.dialogs.pick = async (items) => items.find((item) => item.label === t("effort_high"));
-        await chooseEffort("smart-adaptive");
+        await chooseEffort("high", "smart-adaptive");
         replies = [
             { toolCalls: [{ name: "apply_patch", args: { edits: [{ path: "effort.txt", action: "create", content: "fixture" }] } }] },
             { text: "Denied" },
@@ -611,7 +613,7 @@ export async function run() {
         const effortRun = send("Effort stays fixed through approval", "agent", "smart-adaptive");
         const effortApproval = await approval();
         assert.equal(controller.snapshot().effort.locked, true);
-        await assert.rejects(chooseEffort("smart-adaptive"), /Stop the active run/);
+        await assert.rejects(openEffort("smart-adaptive"), /Stop the active run/);
         await approve(effortApproval.id, "deny");
         await effortRun;
         const effortSession = controller.snapshot().session;
@@ -622,21 +624,19 @@ export async function run() {
         await controller.chooseSession(effortSession);
         assert.equal(controller.snapshot().effort.level, "high");
         const beforeUnavailable = fake.completions.length;
-        fake.options.models = DEFAULT_MODELS;
+        fake.options.models = modelsWithoutEffort;
         await send("Use the routed model defaults", "agent", "smart-adaptive");
         assert.equal(fake.completions.length, beforeUnavailable + 1);
         assert.equal(fake.completions.at(-1)!.body.model, "fake-coder");
         assert.equal(fake.completions.at(-1)!.body.tomverse_effort, undefined);
         assert.equal(controller.snapshot().effort.level, "default");
         assert.equal(controller.snapshot().effort.requested, "high");
-        controller.dialogs.pick = nativePick;
         fake.options.models = undefined;
         record("effort is fixed through Agent approval and reload; removed capability uses Default without changing the pinned model");
         await fresh();
         fake.options.models = DEFAULT_MODELS.map((model) => ({ ...model, tomverse: { ...model.tomverse, reasoning_efforts: ["high"] } }));
         await controller.refresh();
-        controller.dialogs.pick = async (items) => items.find((item) => item.label === t("effort_high"));
-        await chooseEffort();
+        await chooseEffort("high");
         replies = [{ fault: "hang" }];
         const beforeInterrupted = fake.completions.length;
         const interrupted = send("Recover with the original effort", "ask");
@@ -652,7 +652,7 @@ export async function run() {
         assert.equal(fake.completions.at(-1)!.body.tomverse_effort, "high");
         assert.equal(controller.snapshot().state, "completed");
         await fresh();
-        fake.options.models = DEFAULT_MODELS;
+        fake.options.models = modelsWithoutEffort;
         await controller.chooseSession(resumeSession);
         const beforeRemovedResume = fake.completions.length;
         await action("recover");
@@ -665,22 +665,23 @@ export async function run() {
         assert.equal(controller.snapshot().effort.level, "default");
         assert.equal(controller.snapshot().effort.requested, "high");
         controller.dialogs.choose = nativeDecision;
-        controller.dialogs.pick = nativePick;
         fake.options.models = undefined;
         record("confirmed recovery preserves the requested effort and records Default fallback across reload when capability is removed");
         await fresh();
         fake.options.models = DEFAULT_MODELS.map((model) => ({ ...model, tomverse: { ...model.tomverse, reasoning_efforts: ["high"] } }));
         await controller.refresh();
-        controller.dialogs.pick = async (items) => items.find((item) => item.label === t("effort_high"));
-        await chooseEffort();
-        fake.options.models = DEFAULT_MODELS;
-        const beforeRefusal = fake.completions.length;
+        await chooseEffort("high");
+        fake.options.models = modelsWithoutEffort.map((model) => ({
+            ...model,
+            tomverse: { ...model.tomverse, reasoning_efforts: [] },
+        }));
+        const beforeFallback = fake.completions.length;
         await send("Capability disappeared before starting", "ask");
-        assert.equal(fake.completions.length, beforeRefusal + 1);
-        assert.equal(fake.completions.at(-1)!.body.tomverse_effort, undefined);
+        assert.equal(fake.completions.length, beforeFallback + 1);
+        assert.equal(fake.completions.at(-1)!.body.tomverse_effort, "high");
         assert.equal(controller.snapshot().effort.level, "default");
+        assert.equal(controller.snapshot().effort.requested, "high");
         assert.equal(controller.snapshot().state, "completed");
-        controller.dialogs.pick = nativePick;
         fake.options.models = undefined;
         record("removed capability uses model defaults for a new task without rejecting the task");
     } catch (error) {

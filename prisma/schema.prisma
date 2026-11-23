@@ -155,6 +155,7 @@ model User {
   @@index([aiUsageRestricted, aiUsageRestrictedUntil])
   @@index([creditDebtCredits])
   @@index([creditDebtCostMicroUsd])
+  projectAnswerReceipts ProjectAnswerReceipt[]
 }
 
 // Human-selected remote MCP connections. Credentials and pending arguments are
@@ -571,6 +572,24 @@ model ConversationProject {
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
+  /// Project workspace (migration 20261123100000_project_workspace_context).
+  /// Existing rows keep contextEnabled = false and behave as plain folders.
+  description       String    @default("")
+  /// Owner-authored working instructions, sent as instructions (never as data).
+  instructions      String    @default("")
+  contextEnabled    Boolean   @default(false)
+  /// "project_only" | "project_and_personal" -- which stored memories a turn may use.
+  memoryScope       String    @default("project_only")
+  autoMemoryEnabled Boolean   @default(false)
+  /// Optimistic concurrency for settings and the prepared-context identity.
+  revision          Int       @default(1)
+  archivedAt        DateTime?
+
+  knowledgeFiles AssistantKnowledgeFile[]
+  memoryItems    MemoryItem[]
+  extractionRuns MemoryExtractionRun[]
+  answerReceipts ProjectAnswerReceipt[]
+
   @@unique([userId, name])
   @@index([userId, updatedAt])
 }
@@ -586,6 +605,8 @@ model Message {
   researchRunId   String?                 @unique
   searchMetadata  Json?
   providerContext MessageProviderContext?
+  memoryEvidences      MemoryEvidence[]
+  projectAnswerReceipt ProjectAnswerReceipt?
   researchRun     ResearchPreviewRun?     @relation(fields: [researchRunId], references: [id], onDelete: SetNull)
   researchSourceRuns ResearchPreviewRun[] @relation("ResearchPreviewSourceMessage")
 
@@ -1935,6 +1956,7 @@ model ChatCreditReservation {
   settlementAttempt      ChatAttemptUsage?  @relation("ReservationSettlementAttempt", fields: [id, settlementAttemptIndex], references: [reservationId, attemptIndex], onDelete: NoAction, onUpdate: NoAction, map: "ChatCreditReservation_settlementAttempt_fkey")
   attemptUsage           ChatAttemptUsage[]
   researchPreviewRun     ResearchPreviewRun?
+  researchFundingSegment ResearchFundingSegment?
   externalApiRequest     ExternalApiRequest?
 
   @@index([status, expiresAt])
@@ -2052,6 +2074,34 @@ model ResearchPreviewRun {
   startedAt              DateTime?
   completedAt            DateTime?
   lastErrorCode          String?
+  /// 1 = the fixed three-generation Preview. 2 = the expanded engine, whose
+  /// work lives in ResearchWorkItem rows and whose money lives in
+  /// ResearchFundingSegment rows; v2 rows never use the run-level checkpoint,
+  /// lease or reservation above, so v1 workers and recovery never select them.
+  engineVersion              Int       @default(1)
+  /// v2 only. Server-resolved refs (never content) to everything this run may
+  /// read, with owner/revision digests re-checked before every dispatch.
+  inputManifest              Json?
+  inputRevision              Int       @default(0)
+  planRevision               Int       @default(0)
+  approvedPlanRevision       Int?
+  /// v2 only. Pinned per-role model/provider/API/reasoning/pricing identity.
+  executionProfile           Json?
+  /// v2 only. The user-approved run total; only an explicit user action raises it.
+  approvedCredits            Int?
+  /// v2 only. Room kept back from research work for synthesis or a partial.
+  finalizationReserveCredits Int       @default(0)
+  pauseRequestedAt           DateTime?
+  pausedAt                   DateTime?
+  runDeadlineAt              DateTime?
+  qualityStatus              String?
+  currentReportRevision      Int       @default(0)
+  /// Monotonic per mutation; clients drop responses older than what they hold.
+  eventSequence              Int       @default(0)
+  /// Recovery-only maintenance stops selecting a row it repeatedly cannot
+  /// process (a poison row) instead of retrying it ahead of healthy rows.
+  recoveryFailureCount       Int       @default(0)
+  recoveryQuarantinedAt      DateTime?
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
 
@@ -2061,7 +2111,13 @@ model ResearchPreviewRun {
   message           Message?
   reservation       ChatCreditReservation?       @relation(fields: [reservationId], references: [id], onDelete: SetNull)
   generations       ResearchPreviewGeneration[]
+  planRevisions     ResearchPlanRevision[]
+  workItems         ResearchWorkItem[]
+  fundingSegments   ResearchFundingSegment[]
+  sources           ResearchSource[]
+  reportRevisions   ResearchReportRevision[]
 
+  @@index([engineVersion, status, createdAt])
   @@index([userId, createdAt])
   @@index([conversationId, createdAt])
   @@index([status, leaseExpiresAt, createdAt])
@@ -2089,13 +2145,254 @@ model ResearchPreviewGeneration {
   stopReason              String?
   dispatchStartedAt       DateTime?
   completedAt             DateTime?
+  /// v2 only: this row is a model, search or page/document read dispatch for
+  /// one work item, priced and held by one funding segment.
+  engineVersion           Int       @default(1)
+  kind                    String    @default("model")
+  workItemId              String?
+  fundingSegmentId        String?
+  modelId                 String?
+  provider                String?
+  apiModel                String?
+  reasoning               String?
+  pricingVersion          String?
+  /// Exactly-once key for a dispatch; an unknown outcome blocks the key.
+  dispatchKey             String?
+  searchRequestCount      Int?
   createdAt               DateTime  @default(now())
   updatedAt               DateTime  @updatedAt
 
-  run ResearchPreviewRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  run      ResearchPreviewRun      @relation(fields: [runId], references: [id], onDelete: Cascade)
+  workItem ResearchWorkItem?       @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+  segment  ResearchFundingSegment? @relation(fields: [fundingSegmentId], references: [id], onDelete: SetNull)
 
   @@unique([runId, generationIndex])
+  @@unique([runId, dispatchKey])
+  @@index([workItemId])
   @@index([status, dispatchStartedAt])
+}
+
+/// One immutable revision of a v2 Research plan. Model-authored revisions and
+/// user edits are both kept; a run executes only an approved revision.
+model ResearchPlanRevision {
+  id            String   @id @default(cuid())
+  runId         String
+  revision      Int
+  author        String
+  inputRevision Int
+  plan          Json
+  createdAt     DateTime @default(now())
+
+  run ResearchPreviewRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, revision])
+}
+
+/// A bounded unit of v2 Research work. A model decides what the item does; the
+/// row decides who may run it (lease + epoch fencing), when (dependencies,
+/// pause, budget) and exactly once (idempotency key).
+model ResearchWorkItem {
+  id             String    @id @default(cuid())
+  runId          String
+  kind           String
+  status         String    @default("queued")
+  planRevision   Int
+  inputRevision  Int
+  idempotencyKey String
+  dependsOn      String[]  @default([])
+  priority       Int       @default(0)
+  payload        Json
+  result         Json?
+  attempts       Int       @default(0)
+  notBefore      DateTime?
+  leaseOwner     String?
+  leaseEpoch     Int       @default(0)
+  leaseExpiresAt DateTime?
+  providerKey    String?
+  errorCode      String?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  run         ResearchPreviewRun          @relation(fields: [runId], references: [id], onDelete: Cascade)
+  generations ResearchPreviewGeneration[]
+
+  @@unique([runId, idempotencyKey])
+  @@index([status, notBefore, createdAt])
+  @@index([runId, status])
+  @@index([status, leaseExpiresAt])
+}
+
+/// One Chat credit reservation inside a v2 run's user-approved total.
+/// settled + reserved + unknown + unallocated finalization <= approvedCredits
+/// is enforced under the run row lock before each reservation is requested.
+model ResearchFundingSegment {
+  id              String    @id @default(cuid())
+  /// Null once the run is deleted: the hold and its settlement record outlive the
+  /// run so expiry can never mistake a possibly-dispatched hold for an unused one.
+  runId           String?
+  sequence        Int
+  purpose         String
+  status          String    @default("reserving")
+  reservationId   String?   @unique
+  reservedCredits Int
+  settledCredits  Int?
+  modelId         String
+  provider        String
+  pricingVersion  String
+  /// Web search surcharge held on this reservation; refunded at settlement when no search ran.
+  searchSurchargeCredits Int @default(0)
+  settlementUsage Json?
+  createdAt       DateTime  @default(now())
+  settledAt       DateTime?
+  updatedAt       DateTime  @updatedAt
+
+  run         ResearchPreviewRun?         @relation(fields: [runId], references: [id], onDelete: SetNull)
+  /// Restrict: a Chat reservation is a financial record and is not deleted while a segment names it.
+  reservation ChatCreditReservation?      @relation(fields: [reservationId], references: [id], onDelete: Restrict)
+  generations ResearchPreviewGeneration[]
+
+  @@unique([runId, sequence])
+  @@index([status, createdAt])
+}
+
+/// Identity of something a v2 run considered: a public page, a user URL, a link
+/// found on a read page, or one selected private item. Content lives in
+/// versions; a private source's ownerRef is re-validated before dispatch.
+model ResearchSource {
+  id                  String    @id @default(cuid())
+  runId               String
+  sourceKey           String
+  origin              String
+  visibility          String
+  status              String    @default("active")
+  canonicalUrl        String?
+  title               String?
+  publisher           String?
+  snippet             String?
+  publishedAt         DateTime?
+  ownerRef            Json?
+  /// Same article republished elsewhere; never counted as independent support.
+  duplicateOfSourceId String?
+  firstSeenAt         DateTime
+  /// Last time a private source was re-checked against its original by the maintenance sweep.
+  revalidatedAt       DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  run      ResearchPreviewRun      @relation(fields: [runId], references: [id], onDelete: Cascade)
+  versions ResearchSourceVersion[]
+
+  @@unique([runId, sourceKey])
+  @@index([runId, canonicalUrl])
+  @@index([runId, visibility, status])
+  @@index([visibility, status, revalidatedAt])
+}
+
+/// What was actually obtained from a source at one time. A later read of the
+/// same URL is a new version; an older report keeps citing what it saw.
+model ResearchSourceVersion {
+  id               String    @id @default(cuid())
+  sourceId         String
+  runId            String
+  version          Int
+  readStatus       String
+  extractionMethod String
+  finalUrl         String?
+  contentType      String?
+  retrievedAt      DateTime
+  sourceModifiedAt DateTime?
+  contentDigest    String?
+  byteLength       Int?
+  charLength       Int?
+  truncated        Boolean   @default(false)
+  failureReason    String?
+  /// Exact lead-of-body fingerprint; equal values mean one article republished.
+  leadFingerprint  String?
+  /// Private object holding the extracted text; chunks are offsets into it.
+  objectKey        String?   @unique
+  chunkCount       Int       @default(0)
+  createdAt        DateTime  @default(now())
+
+  source ResearchSource          @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  chunks ResearchEvidenceChunk[]
+
+  @@unique([sourceId, version])
+  @@index([runId])
+}
+
+/// A located range of one source version: page, section, sheet row or span.
+model ResearchEvidenceChunk {
+  id         String @id @default(cuid())
+  versionId  String
+  runId      String
+  chunkIndex Int
+  locator    Json
+  charStart  Int
+  charEnd    Int
+  digest     String
+
+  version ResearchSourceVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@unique([versionId, chunkIndex])
+  @@index([runId])
+}
+
+/// One immutable v2 report revision: model synthesis, user-requested change,
+/// follow-up research, or a public redaction of a private-derived report.
+model ResearchReportRevision {
+  id              String   @id @default(cuid())
+  runId           String
+  revision        Int
+  parentRevision  Int?
+  planRevision    Int
+  inputRevision   Int
+  author          String
+  qualityStatus   String
+  visibility      String   @default("owner")
+  containsPrivate Boolean  @default(false)
+  document        Json
+  createdAt       DateTime @default(now())
+
+  run    ResearchPreviewRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  claims ResearchClaim[]
+
+  @@unique([runId, revision])
+}
+
+/// A report claim and the exact evidence spans it was verified against.
+model ResearchClaim {
+  id             String  @id @default(cuid())
+  revisionId     String
+  runId          String
+  claimKey       String
+  sectionKey     String
+  text           String
+  kind           String
+  verification   String
+  privateDerived Boolean @default(false)
+  evidence       Json
+  checks         Json?
+
+  revision ResearchReportRevision @relation(fields: [revisionId], references: [id], onDelete: Cascade)
+
+  @@unique([revisionId, claimKey])
+  @@index([runId])
+}
+
+/// Private evidence objects whose rows are gone or going. Queued in the same
+/// transaction that removes the rows, then drained by maintenance.
+model ResearchEvidenceObjectCleanup {
+  id        String   @id @default(cuid())
+  objectKey String   @unique
+  reason        String
+  attempts      Int      @default(0)
+  // Failed deletions back off (capped at six hours) and are never given up.
+  nextAttemptAt DateTime @default(now())
+  createdAt     DateTime @default(now())
+
+  @@index([nextAttemptAt])
 }
 
 // What one dispatched attempt cost, at its own provider's rates.
@@ -3845,6 +4142,11 @@ model MemoryItem {
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  /// NULL = personal memory. A value = used only inside that project.
+  /// CASCADE, never SetNull: a deleted project's memories never become personal.
+  projectId String?
+  project   ConversationProject? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
   /// Factual or style kind (§8.2) — allowlist CHECK lives in the migration.
   kind String
 
@@ -3913,6 +4215,7 @@ model MemoryItem {
   evidences MemoryEvidence[]
 
   @@index([userId, status])
+  @@index([userId, projectId, status])
   @@index([userId, conflictKey])
   /// The idempotent replace in the extraction persistence step reads exactly
   /// this pair.
@@ -3946,8 +4249,9 @@ model MemoryEvidence {
   /// suspended_by_source_delete on an explicit keep).
   externalMessage   ExternalMessage? @relation(fields: [externalMessageId], references: [id], onDelete: Cascade)
 
-  /// Reserved (§8.5): no relation until a release actually uses it.
+  /// A Tomverse (native) message of a project conversation (project workspace).
   tomverseMessageId String?
+  tomverseMessage   Message? @relation(fields: [tomverseMessageId], references: [id], onDelete: Cascade)
 
   /// Manual evidence body (sourceType=manual only): the user-entered grounds
   /// text. Subject to the same validator and length rules as statements.
@@ -3958,6 +4262,7 @@ model MemoryEvidence {
 
   @@index([memoryItemId])
   @@index([externalMessageId])
+  @@index([tomverseMessageId])
   @@index([userId])
 }
 
@@ -3978,6 +4283,15 @@ model MemoryExtractionRun {
 
   /// Selected ExternalConversation IDs (owner-verified at run creation).
   sourceSelection Json
+
+  /// "external" | "native". A native run reads Tomverse messages of one project conversation.
+  sourceKind           String  @default("external")
+  /// SetNull keeps the run's provider-cost rows; persistence refuses a native run without it.
+  projectId            String?
+  project              ConversationProject? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  sourceConversationId String?
+  /// One extraction per native source snapshot: native:v1:{conversationId}:{throughMessageId}
+  sourceKey            String? @unique
 
   chunkTotal     Int
   /// Derived from the chunk rows on every write — never incremented on its
@@ -4007,6 +4321,7 @@ model MemoryExtractionRun {
   /// Orphan reconciliation (§11): expired leases are found by status +
   /// lease deadline, mirroring the chat lease sweep.
   @@index([status, leaseExpiresAt])
+  @@index([sourceConversationId, createdAt])
 }
 
 /// The credit reservation for one extraction run (§11).
@@ -4321,9 +4636,19 @@ model AssistantProfileVersion {
 /// `AssistantKnowledgeChunk.searchTerms` (§14). Adding one later is a separate
 /// policy, privacy, cost and eval decision, not a migration.
 model AssistantKnowledgeFile {
-  id        String           @id @default(cuid())
-  profileId String
-  profile   AssistantProfile @relation("AssistantProfileKnowledge", fields: [profileId], references: [id], onDelete: Cascade)
+  id        String            @id @default(cuid())
+  /// Exactly one of profileId / projectId is set (CHECK AssistantKnowledgeFile_one_container).
+  profileId String?
+  profile   AssistantProfile? @relation("AssistantProfileKnowledge", fields: [profileId], references: [id], onDelete: Cascade)
+  /// NO ACTION: project deletion enqueues the object tombstones itself.
+  projectId String?
+  project   ConversationProject? @relation(fields: [projectId], references: [id], onDelete: NoAction)
+  /// "upload" | "note" | "message_attachment" | "generated_artifact" | "review_result" | "research_report"
+  sourceKind String @default("upload")
+  /// Server-captured provenance of a project copy. Not an access grant.
+  sourceRef  Json?
+  /// Client retry identity, unique per project.
+  requestKey String?
 
   /// Ownership as a column rather than a join, for the same reason
   /// AssistantProfileVersion carries one: the account export and the deletion
@@ -4400,7 +4725,9 @@ model AssistantKnowledgeFile {
 
   chunks AssistantKnowledgeChunk[]
 
+  @@unique([projectId, requestKey])
   @@index([profileId, createdAt])
+  @@index([projectId, createdAt])
   @@index([userId, createdAt])
   /// The processing worker's claim query reads exactly this pair.
   @@index([processingStatus, createdAt])
@@ -4679,6 +5006,22 @@ model AssistantKnowledgeCleanup {
 /// Per (bundle, model) rather than per bundle, because a comparison's three
 /// requests legitimately present the same bundle
 /// (`bundleConsumptionKey()`, policy §10).
+/// Owner-only record of the project sources an answer was given. Never in a
+/// share snapshot or conversation export; opening a source re-checks access.
+model ProjectAnswerReceipt {
+  id        String               @id @default(cuid())
+  messageId String               @unique
+  message   Message              @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectId String?
+  project   ConversationProject? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sources   Json
+  createdAt DateTime             @default(now())
+
+  @@index([userId, createdAt])
+}
+
 model ChatContextBundleConsumption {
   id String @id @default(cuid())
 
@@ -8569,7 +8912,7 @@ model AmuxDmOwnerSettlement {
   bindingId          String?
   /// open | claimed (a remake decided, its idea not filed yet) | applied | cancelled
   state              String    @default("open")
-  /// stopped: retry | complete | close | remake; t2_pr: approve | retry | close
+  /// stopped: retry | complete | close | remake; t2_pr: approve | retry | complete | close
   decision           String?
   /// dm | dm_confirmed
   answerSource       String?

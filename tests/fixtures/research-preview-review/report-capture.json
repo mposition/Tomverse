@@ -1,0 +1,91 @@
+{
+  "scope": "Synthetic fixture; public URLs only",
+  "allowedSources": [
+    {
+      "sourceId": "R1",
+      "url": "https://www.rfc-editor.org/rfc/rfc1149.html",
+      "title": "RFC 1149",
+      "snippet": "Synthetic fixture snippet: Request for Comments 1149, 1 April 1990.",
+      "retrievedAt": "2026-11-15T02:00:00.000Z",
+      "pageRead": {
+        "status": "read",
+        "readAt": "2026-11-15T02:00:05.000Z",
+        "truncated": false,
+        "contentType": "text/html"
+      }
+    },
+    {
+      "sourceId": "R2",
+      "url": "https://www.rfc-editor.org/rfc/rfc1149.txt",
+      "title": "RFC 1149 text",
+      "retrievedAt": "2026-11-15T02:00:00.000Z",
+      "pageRead": {
+        "status": "unavailable",
+        "readAt": "2026-11-15T02:00:05.000Z",
+        "truncated": false,
+        "reason": "unsupported_content"
+      }
+    },
+    {
+      "sourceId": "R3",
+      "url": "https://www.rfc-editor.org/info/rfc1149/",
+      "title": "RFC 1149 info",
+      "snippet": "Synthetic fixture snippet: info page.",
+      "publishedAt": "1990-04-01T00:00:00.000Z",
+      "retrievedAt": "2026-11-15T02:00:00.000Z"
+    }
+  ],
+  "reportInput": {
+    "status": "complete",
+    "summary": "Synthetic fixture: RFC 1149 was published on 1 April 1990 and describes an experimental method; the plain-text read failed.",
+    "findings": [
+      {
+        "heading": "Identity",
+        "statements": [
+          {
+            "text": "The RFC Editor info page lists RFC 1149.",
+            "sourceIds": [
+              "R3"
+            ],
+            "kind": "fact",
+            "evidenceLevel": "search_snippets"
+          },
+          {
+            "text": "RFC 1149 was published on 1 April 1990.",
+            "sourceIds": [
+              "R1"
+            ],
+            "kind": "fact",
+            "evidenceLevel": "page_text"
+          }
+        ]
+      },
+      {
+        "heading": "Purpose and reads",
+        "statements": [
+          {
+            "text": "The memo describes an experimental method for carrying IP datagrams.",
+            "sourceIds": [
+              "R1"
+            ],
+            "kind": "fact",
+            "evidenceLevel": "page_text"
+          },
+          {
+            "text": "The plain-text version could not be read.",
+            "sourceIds": [
+              "R2"
+            ],
+            "kind": "uncertain",
+            "evidenceLevel": "search_snippets"
+          }
+        ]
+      }
+    ],
+    "contradictions": [],
+    "limitations": [
+      "The plain-text read failed with unsupported_content."
+    ],
+    "nextQuestions": []
+  }
+}

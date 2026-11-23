@@ -67,6 +67,20 @@ mock.module(mod("lib/amux/ideaSessionSubmissionService.ts"), { namedExports: {
   },
 } });
 
+// Owner decision 2026-11-22: a plan that names an existing node is checked
+// against the existing hierarchy, read once before the inspection.
+const EXISTING_FEATURE = "7b2e1f30-6d8c-4e5f-a041-3c4d5e6f7081";
+let hierarchyReads = 0;
+let hierarchyError = false;
+mock.module(mod("lib/amux/ideaNodeDuplicateScanService.ts"), { namedExports: {
+  loadAmuxExistingHierarchyTargets: async () => {
+    hierarchyReads++;
+    if (hierarchyError) throw new Error("synthetic hierarchy failure");
+    return [{ ref: EXISTING_FEATURE, kind: "node", level: "feature", title: "Crawler access policy",
+      parentRef: "6a1d0e2f-5c7b-4d4e-9f30-2b3c4d5e6f70", displayPrefix: "CRAWL" }];
+  },
+} });
+
 let route: typeof import("../../app/api/internal/amux/ideas/session-intake/route.ts");
 before(async () => { route = await import(mod(
   "app/api/internal/amux/ideas/session-intake/route.ts")); });
@@ -340,7 +354,9 @@ test("session POST with an attached plan hands the checked plan to the writer an
   assert.doesNotMatch(text, /toggle|synthetic-plan|c0:card/);
   assert.equal(writes, 1);
   const inspected = (written as { inspected: { plan?: { raw: string; unitCount: number } } }).inspected;
-  assert.deepEqual(inspected.plan, { raw: JSON.stringify(plan), unitCount: 4 });
+  // A plan of new nodes only needs no hierarchy read.
+  assert.deepEqual(inspected.plan, { raw: JSON.stringify(plan), unitCount: 4, existingNodes: [] });
+  assert.equal(hierarchyReads, 0);
 
   reset();
   committedPlan = { auditId: "a", planId: "p", unitCount: 4,
@@ -363,6 +379,36 @@ test("session POST refuses a malformed or sensitive plan before the writer", asy
     assert.deepEqual(await response.json(), { error, retryWrite: false });
     assert.equal(writes, 0, error);
   }
+});
+
+test("a plan attached to an existing node is checked against the hierarchy, and an unreadable one stops", async () => {
+  const fixture = amuxSessionPlanFixture();
+  const plan = { ...fixture, units: [{ ...fixture.units[3], featureRef: EXISTING_FEATURE }] };
+  reset();
+  hierarchyReads = 0;
+  committedPlan = { auditId: "a", planId: "p", unitCount: 1, registration: { state: "awaiting_approval" } };
+  const response = await route.POST(post(JSON.stringify({ ...submission, plan })));
+  assert.equal(response.status, 201);
+  assert.equal(hierarchyReads, 1);
+  const inspected = (written as { inspected: { plan?: { existingNodes: unknown[] } } }).inspected;
+  assert.equal(inspected.plan?.existingNodes.length, 1);
+  // A node the hierarchy does not hold is refused before the writer.
+  reset();
+  const unknown = { ...fixture, units: [{ ...fixture.units[3],
+    featureRef: "9d403152-8f0e-4071-8263-5e6f708192a3" }] };
+  const refusedUnknown = await route.POST(post(JSON.stringify({ ...submission, plan: unknown })));
+  assert.equal(refusedUnknown.status, 400);
+  assert.deepEqual(await refusedUnknown.json(), { error: "plan_rejected", retryWrite: false });
+  assert.equal(writes, 0);
+  // A hierarchy that cannot be read writes nothing and says so.
+  reset();
+  hierarchyError = true;
+  try {
+    const unavailable = await route.POST(post(JSON.stringify({ ...submission, plan })));
+    assert.equal(unavailable.status, 503);
+    assert.deepEqual(await unavailable.json(), { error: "hierarchy_unavailable", retryWrite: false });
+    assert.equal(writes, 0);
+  } finally { hierarchyError = false; }
 });
 
 test("a plan the writer refuses inside its transaction is a closed refusal, nothing written", async () => {

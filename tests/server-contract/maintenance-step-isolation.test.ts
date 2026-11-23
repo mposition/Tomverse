@@ -37,12 +37,15 @@ process.env.NEXTAUTH_SECRET ||= "server-contract-test-secret";
 /** Per-test behaviour. Mocks are installed once; these closures vary. */
 let creditReservationBehaviour: () => number = () => 1;
 let researchPreviewRecoveryBehaviour: () => number = () => 3;
+const engineRecoveryCounts = { staleItems: 0, staleSegments: 0, settledSegments: 0, advancedRuns: 0, cleanedObjects: 0 };
+let researchEngineRecoveryBehaviour: () => typeof engineRecoveryCounts = () => engineRecoveryCounts;
 let oauthKeyBehaviour: () => void = () => undefined;
 let deletedAccountIds: string[] = [];
 
 const reset = () => {
   creditReservationBehaviour = () => 1;
   researchPreviewRecoveryBehaviour = () => 3;
+  researchEngineRecoveryBehaviour = () => engineRecoveryCounts;
   oauthKeyBehaviour = () => undefined;
   deletedAccountIds = [];
   costAdjustmentBacklogPending = 0;
@@ -142,6 +145,9 @@ mock.module(mod("lib/researchPreviewRecovery.ts"), {
   namedExports: {
     recoverStaleResearchPreviewRuns: async () => researchPreviewRecoveryBehaviour(),
   },
+});
+mock.module(mod("lib/researchEngineRecovery.ts"), {
+  namedExports: { recoverResearchEngine: async () => researchEngineRecoveryBehaviour() },
 });
 
 // The provider-cost ledger's two recovery passes. Both had no production
@@ -520,6 +526,16 @@ test("Research recovery is an isolated step ahead of generic reservation expiry"
     ["research_preview_runs"]
   );
   assert.equal(result.scheduledAccountsDeleted, 1);
+});
+
+test("Deep Research engine recovery is its own isolated step", async () => {
+  reset();
+  researchEngineRecoveryBehaviour = () => { throw new Error("the engine tables are unhappy"); };
+  const result = await (await load()).cleanupExpiredData();
+  assert.equal(result.researchEngineRuns, null);
+  assert.equal(result.researchPreviewRuns, 3);
+  assert.equal(result.creditReservations, 1);
+  assert.deepEqual(result.failedSteps.map((failure) => failure.step), ["research_engine_runs"]);
 });
 
 test("a clean run reports no failed steps and every count", async () => {

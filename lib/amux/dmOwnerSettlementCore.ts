@@ -25,7 +25,10 @@ export type AmuxDmOwnerSettlementKind = (typeof AMUX_DM_OWNER_SETTLEMENT_KINDS)[
 /** The ways each kind may be settled. Only these words decide anything. */
 export const AMUX_DM_OWNER_SETTLEMENT_DECISIONS = Object.freeze({
   stopped: ["retry", "complete", "close", "remake"],
-  t2_pr: ["approve", "retry", "close"],
+  // complete (owner decision 2026-11-23, from AMUX-CRAWL-003): a review pull
+  // request whose work is already in -- the Decision Maker's only way out
+  // was to run the Task again, which opened one more pull request each time.
+  t2_pr: ["approve", "retry", "complete", "close"],
 } as const);
 export type AmuxDmOwnerSettlementDecision = "retry" | "complete" | "close" | "remake" | "approve";
 
@@ -303,13 +306,14 @@ export function amuxDmOwnerSettlementCard(input: {
     question: [...head, ...rejected, ...siblings,
       `Pull request #${input.pull!.number}, files (${files.length}):`,
       ...files.map((file) => `- ${file.path} (+${file.added} -${file.removed})`),
-      "Should the pull request be approved, the Task run again, or the card closed?"].join("\n"),
+      "Should the pull request be approved, the Task run again, the Task marked done because its work is already in, or the card closed?"].join("\n"),
     context,
     context_paths: patchContextPaths(patch),
-    unblocks: "An approval is kept for the merge lane, which acts on it later; a retry runs the Task again; a close takes the card off the board and leaves the pull request.",
+    unblocks: "An approval is kept for the merge lane, which acts on it later; a retry runs the Task again, and the pull request its run opens replaces this one, which is then closed; done lets the Tasks after it start and closes this pull request; a close takes the card off the board and leaves the pull request.",
     options: [
       { id: "approve", label: "Approve the pull request" },
       { id: "retry", label: "Run the Task again" },
+      { id: "complete", label: "Mark the Task done; its work is already in" },
       { id: "close", label: "Close the card and leave the pull request" },
     ],
   };

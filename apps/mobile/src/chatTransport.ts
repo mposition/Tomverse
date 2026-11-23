@@ -1,6 +1,8 @@
 export type ChatMessage = {
   continuationReceipt?: import("../../../lib/continuationReceipt").ContinuationReceipt;
   researchRunId?: string | null;
+  /** Set when the run is a Deep Research engine v2 run, rendered by the shared workspace. */
+  researchEngineRun?: boolean;
   id: string;
   role: "user" | "assistant";
   content: string;
@@ -65,6 +67,8 @@ export type Conversation = {
   productKey?: string | null;
   imported?: ImportedTranscript;
   reviewHandoff?: true | ReviewHandoffSummary;
+  /** The project this conversation belongs to (server-owned). */
+  projectId?: string | null;
 };
 export type MobileImageGroup = {
   status: string;
@@ -72,7 +76,7 @@ export type MobileImageGroup = {
   generations: Array<{ generationId: string; status: string; prompt: string; quality?: string; preset?: string; assets: Array<{ role: string; url: string; urlExpiresAt?: string }> }>;
 };
 export type MobileImageModel = { id: string; name: string; provider: string; pricingVersion: string; prices: Array<{ quality: "low" | "medium" | "high"; size: "1024x1024" | "1536x1024" | "1024x1536"; credits: number }> };
-export type MobileCapabilities = { reviewAnalysis?: { crossReview: boolean; quickSummary: boolean }; researchPreview?: { enabled: boolean; pageReading: boolean; durableRuns: boolean }; generatedFileRevisions?: boolean; workspace?: import("./iosWorkspaceContract").WorkspaceFeatures; historyFeatures?: { sharing: boolean; downloads: boolean }; historyActions?: boolean; conversationTitles?: boolean; accountUsage?: boolean; chatImageTurns?: boolean; chatImageEdits?: boolean; reviewEasy: boolean; maxModels: number; assistants: boolean; images?: { enabled: boolean; maxModels: number; models: MobileImageModel[] }; plan: import("../../../lib/models").ModelTier | "Guest" };
+export type MobileCapabilities = { reviewAnalysis?: { crossReview: boolean; quickSummary: boolean }; researchPreview?: { enabled: boolean; pageReading: boolean; durableRuns: boolean }; researchEngine?: { enabled: boolean }; generatedFileRevisions?: boolean; workspace?: import("./iosWorkspaceContract").WorkspaceFeatures; historyFeatures?: { sharing: boolean; downloads: boolean }; historyActions?: boolean; projectWorkspace?: boolean; conversationTitles?: boolean; accountUsage?: boolean; chatImageTurns?: boolean; chatImageEdits?: boolean; reviewEasy: boolean; maxModels: number; assistants: boolean; images?: { enabled: boolean; maxModels: number; models: MobileImageModel[] }; plan: import("../../../lib/models").ModelTier | "Guest" };
 export type AccountUsage = { plan: string; usage: { creditsMonth: number }; limits: { creditsMonth: number } };
 export type UserPreferences = { reviewEasyEffectiveProviders?: string[]; reviewEasyProviderOptions?: string[]; reviewEasyMaxProviders?: number; theme: "system" | "light" | "dark"; language: string; defaultModel: string; timeZone: string; timeZoneChangeAllowedAt?: string | null; imageHandoffAutoGenerate: boolean };
 export type MemoryPreferences = { masterEnabled: boolean; styleEnabled: boolean; defaultConversationMode: "on" | "off" };
@@ -98,6 +102,8 @@ export interface HistoryTransport {
 }
 export type MobileAttachment = { uploadId: string; name: string; mediaType: string; size: number };
 export type ContinuationTurnContext = {
+  /** Project locations the user picked for this question; the server re-reads them. */
+  projectReferences?: readonly string[];
   sourcePassages?: readonly import("../../../lib/continuationPassages").Passage[];
   onReceipt?: (receipt: import("../../../lib/continuationReceipt").ContinuationReceipt) => void;
 };
@@ -110,14 +116,17 @@ export interface ChatTransport {
 
   workspace?: import("./iosWorkspaceContract").WorkspaceTransport;
   location?: ReturnType<typeof import("@tomverse/chat-core").createChatLocationSession>;
+  /** Deep Research engine v2 run API over the bearer transport; absent unless the capability is on. */
+  researchEngine?: import("@tomverse/api-client").ResearchApi;
+  researchEngineEnabled?(): Promise<boolean>;
   history?: HistoryTransport;
   voiceConfiguration?(): Promise<{ enabled: boolean; maxSeconds: number | null }>;
   voiceRequest?(body: unknown, signal?: AbortSignal): Promise<Response>;
   sendVoice?(conversation: Conversation, text: string, signal: AbortSignal, progress: (text: string) => void): Promise<{ conversationId: string; sourceUserMessageId: string }>;
   resumeResearch?(conversation: Conversation, signal: AbortSignal, update: (conversation: Conversation) => void): Promise<void>;
-  quickSummaryPreview?(id: string): Promise<{ available: boolean; reason?: string; estimatedCredits?: number; cached?: boolean; source?: import("../../../packages/chat-core/src/review").ReviewSetup["source"]; storedSummary?: import("../../../lib/reviewToChat").QuickReview }>;
+  quickSummaryPreview?(id: string, signal?: AbortSignal): Promise<{ available: boolean; reason?: string; estimatedCredits?: number; cached?: boolean; source?: import("../../../packages/chat-core/src/review").ReviewSetup["source"]; storedSummary?: import("../../../lib/reviewToChat").QuickReview }>;
   runQuickSummary?(id: string): Promise<import("../../../lib/reviewToChat").QuickReview>;
-  reviewPreview?(id: string, mode?: string, synthesis?: boolean): Promise<import("../../../packages/chat-core/src/review").ReviewSetup>;
+  reviewPreview?(id: string, mode?: string, synthesis?: boolean, signal?: AbortSignal): Promise<import("../../../packages/chat-core/src/review").ReviewSetup>;
   runComparison?(id: string, input: { promptMessageId: string; assistantMessageIds: string[]; reviewMode: import("../../../packages/chat-core/src/review").ReviewMode; includeSynthesis: boolean }): Promise<import("../../../packages/chat-core/src/review").ComparisonReview>;
   reviewFeedback?(id: string, reviewId: string): Promise<{ feedback: Array<{ reviewItemId: string; verdict: string }> }>;
   setReviewFeedback?(id: string, reviewId: string, reviewItemId: string, verdict: string | null): Promise<void>;
@@ -167,7 +176,8 @@ export interface ChatTransport {
   list(): Promise<ChatSummary[]>;
   load(id: string): Promise<Conversation>;
   continuationSource?(id: string, offset?: number): Promise<ImportedTranscript>;
-  create(title?: string, assistantProfileId?: string): Promise<Conversation>;
+  create(title?: string, assistantProfileId?: string, projectId?: string): Promise<Conversation>;
+  projects?: import("./projectWorkspaceTransport").ProjectWorkspaceTransport;
   models(): Promise<MobileModel[]>;
   capabilities(): Promise<{ offered: boolean }>;
   configure(id: string, modelId: string, auto: boolean): Promise<Conversation>;

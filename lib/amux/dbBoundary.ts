@@ -180,6 +180,13 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 10,
     isolation: "mutation",
   },
+  // The registered cards an idea's plan named by local id (planLocalRefRead.ts):
+  // setup + the one read + fence.
+  planLocalRefRead: {
+    operation: "plan_local_ref_read",
+    prismaCallCeiling: 3,
+    isolation: "read",
+  },
   deliveryKeyRead: {
     operation: "delivery_key_read",
     // setup + queued delivery + source metadata + read fence
@@ -629,8 +636,9 @@ export const AMUX_DB_BOUNDARIES = {
   },
   // A Decision Maker request's workspace evidence
   // (lib/amux/decisionMakerWorkspaceService.ts): setup + the request's card +
-  // the one source row of that card + a pull request's patch + a settlement
-  // Task's rejected reviews + fence (the card text read went with the
+  // the one source row of that card + a pull request's patch or else the
+  // run's change (AmuxV22TaskPatch, never both) + a settlement Task's
+  // rejected reviews + fence (the card text read went with the
   // workspace's kill switch, 2026-11-16).
   decisionMakerWorkspaceRead: {
     operation: "decision_maker_workspace_read",

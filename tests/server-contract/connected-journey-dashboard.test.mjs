@@ -52,3 +52,23 @@ test("server recording excludes journey events and fields from both GA4 fanout p
   assert.equal(sent.length, 1);
   assert.ok(Object.keys(sent[0].events[0].params).every(key => !key.startsWith("journey_") && key !== "continuation_kind"));
 });
+test("dashboard returns per-entry dropoff counts without ids, and an empty ledger is not a failure", async () => {
+  const key = randomUUID(), at = ago => new Date(Date.now() - ago);
+  const p = (stage, extra = {}) => ({ ...properties(stage), journey_key: key, ...extra });
+  rows = [
+    { userId: "account-secret", occurredAt: at(2 * 86400000), properties: p("started") },
+    { userId: "account-secret", occurredAt: at(2 * 86400000 - 10), properties: p("preview_ready") },
+    { userId: "account-secret", occurredAt: at(2 * 86400000 - 20), properties: p("issue", { journey_reason: "draft_conflict" }) },
+  ];
+  const dashboard = await getProductAnalyticsDashboard();
+  const group = dashboard.connectedJourneys.groups[0];
+  assert.deepEqual([group.mature, group.replied, group.dropoff.unreplied, group.dropoff.withReason], [1, 0, 1, 1]);
+  assert.deepEqual(group.dropoff.lastStage, { started: 0, preview: 1, ready: 0, sent: 0 });
+  assert.deepEqual(group.dropoff.reasons, [{ reason: "draft_conflict", unreplied: 1, replied: 0 }]);
+  const serialized = JSON.stringify(dashboard.connectedJourneys);
+  assert.equal(serialized.includes("account-secret"), false);
+  assert.equal(serialized.includes(key), false);
+  rows = [];
+  const empty = await getProductAnalyticsDashboard();
+  assert.deepEqual(empty.connectedJourneys.groups, []);
+});

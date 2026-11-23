@@ -3,6 +3,7 @@ import { externalApiCopy } from "./externalApi";
 import { reviewHandoffCopy } from "./reviewHandoff";
 import { researchPreviewCopy } from "./researchPreview";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
+import { projectWorkspaceCopy } from "./projectWorkspace";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
 
@@ -239,6 +240,11 @@ export const es = {
         compareInReviewLabel: "Comparar esta pregunta entre modelos en un nuevo Review",
         compareInReviewContext: "Preguntas anteriores:",
         compareInReviewBlocked: "Termina o resuelve el mensaje actual antes de abrir Review.",
+        compareInReviewNeedsQuestion: "En este turno solo se envió un archivo, así que no hay pregunta que comparar. Compara una respuesta a una pregunta escrita.",
+        compareInReviewFileReattach: "Hemos traído tu pregunta de Chat. Para comparar con el mismo archivo, adjúntalo de nuevo.",
+        compareInReviewFileChoose: "Elegir archivo",
+        compareInReviewFileAttached: "Archivo adjuntado",
+        compareInReviewDraftKept: "Se mantuvo el borrador de Review que estabas escribiendo.",
         singleModelRequired: "Chat utiliza un modelo de respuesta. Selecciona uno para reemplazar la selección actual.",
         singleModelProfileRequired: "Este asistente utiliza varios modelos. Elige un asistente de un solo modelo para Chat.",
         restoreDraftNotEmpty: "Se conservó tu borrador. Envíalo o bórralo antes de restaurar esta pregunta.",
@@ -2459,6 +2465,7 @@ export const es = {
         back: "Volver a Tomverse",
     },
     chatStarter: workspaceWelcomeCopy.es.starter,
+    projectWorkspace: projectWorkspaceCopy["es"],
     // HELP-NAV-01 guided help: pick a task, see where it is done. Directions only.
     helpGuide: {
         menuItem: "Buscar cómo hacer algo",

@@ -5,13 +5,15 @@ import { z } from "zod";
 
 import { readLimitedJson } from "@/lib/apiSecurity";
 import { ENGINEERING_AGENT_APP_FEATURES, ENGINEERING_PUBLISHER_FEATURES_HEADER,
-  publisherOpensReviewDrafts, publisherReadsPatchChunks, publisherResumesPullRequests } from "@/lib/engineeringAgentCore";
+  publisherClosesSupersededReviewDrafts, publisherOpensReviewDrafts, publisherReadsPatchChunks,
+  publisherResumesPullRequests } from "@/lib/engineeringAgentCore";
 import {
   ENGINEERING_AGENT_PUBLISH_CLAIM_LEASE_MS,
   EngineeringAgentStoreRefusedError,
   claimNextEngineeringAgentPublishWork,
   currentEngineeringAgentHalt,
   readEngineeringAgentHaltState,
+  readEngineeringAgentSupersededReviewDrafts,
 } from "@/lib/engineeringAgentStore";
 import {
   engineeringAgentErrorResponse,
@@ -45,6 +47,11 @@ import { prisma } from "@/lib/prisma";
 // (docs/policy/amux-v22-result-transfer.md §4). Every answer names what the
 // app can do (`appFeatures`), so a publisher reads chunks only from an app
 // that serves them.
+//
+// A publisher that names `close_superseded_review_drafts` is also sent the
+// review drafts to close (`closeReviewDrafts`, owner decision 2026-11-23):
+// its own drafts a newer pull request of the same card replaced, or whose
+// card is done. It checks each on GitHub again before closing it.
 
 const requestSchema = z
   .object({
@@ -80,9 +87,15 @@ export async function POST(request: Request) {
     // The halt beside the work, so a quiet round while halted is not reported
     // as a healthy one (§12). Lookups continue while halted.
     const halt = currentEngineeringAgentHalt(await readEngineeringAgentHaltState(prisma));
+    // The review drafts a newer pull request of the same card replaced, for
+    // a publisher that closes them (owner decision 2026-11-23). A read that
+    // fails sends none: the next round reads again.
+    const closeReviewDrafts = publisherClosesSupersededReviewDrafts(features) ?
+      await readEngineeringAgentSupersededReviewDrafts(prisma).catch(() => undefined) : undefined;
     // What this app takes (ENGINEERING_AGENT_APP_FEATURES): a publisher binds
     // the v2 change digest only when it is named here.
-    return engineeringAgentJson({ work: outcome.value, halt, appFeatures: ENGINEERING_AGENT_APP_FEATURES }, 200);
+    return engineeringAgentJson({ work: outcome.value, halt, appFeatures: ENGINEERING_AGENT_APP_FEATURES,
+      ...(closeReviewDrafts ? { closeReviewDrafts } : {}) }, 200);
   } catch (error) {
     // A switch that refuses the claim (mode off, frozen, kill switch) says
     // nothing about a halt, so the refusal carries it too: a quiet round is

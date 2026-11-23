@@ -483,7 +483,11 @@ export const applyCodingDraftEdits = (
  * codingApiCredit); it is never stored, so a row without it hashes as before.
  * `pricing.creditWeight` stays Code's managed-path credits.
  */
-/** The most a coding API credit may be, override or floor (lib/codingRowRuntime.ts codingApiCreditFloor). */
+/**
+ * The most a coding credit may be: a coding API override or floor, and Code's
+ * floor above the chat classes (lib/codingRowRuntime.ts codingApiCreditFloor,
+ * lib/modelCatalog.ts codingCreditFloor). The profile schemas hold the same 1,000.
+ */
 export const CODING_API_CREDIT_WEIGHT_MAX = 1_000;
 
 export const codingApiCreditWeightSchema = z.number().int().positive().max(CODING_API_CREDIT_WEIGHT_MAX);

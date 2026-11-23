@@ -27,4 +27,12 @@ Before claiming support for an OS, record that OS's actual VSIX install, Ask, ap
 
 Real-model tests require a separately authorized environment, key, models, request ceiling and spending ceiling. Check the coding API deployment and receipt readiness first. Never reuse a prior stage's budget or run on a production database. Independent review of changed credential/approval/execution boundaries uses the repository review server after committing the finished diff.
 
-Publication is separate: no Marketplace publisher authorization is assumed by the manifest's local identifier. A new PR targets develop as draft with `ci:hold`. Do not release CI, merge, deploy, publish or enable paid runs without the applicable explicit owner authorization.
+## Publish a release
+
+From the local repository root in PowerShell, run `npm run vscode:package` for a stable build or `npm --workspace tomverse-vscode run package -- --pre-release` for a preview. Use a higher, unique manifest version for a stable release after a preview. Run `npm run vscode:pack:verify` and verify the archive and installed version before uploading.
+
+Publish the VSIX and SHA256 in a versioned GitHub release matching the selected channel. Record the source commit, verified environments and remaining checks in the release notes. Verify the public asset without an authenticated session before adding a download link to the website.
+
+Marketplace publication requires an account authorized to manage the `tomverse` publisher in the [Marketplace publisher portal](https://marketplace.visualstudio.com/manage). Upload the verified VSIX as a new version of the existing extension. For automated publishing, follow the [official Trusted Publishing instructions](https://code.visualstudio.com/api/working-with-extensions/publishing-extension#publish-with-github-actions-and-trusted-publishing). Confirm public listing and an installation by ID from the expected channel before advertising availability.
+
+A new PR targets develop as draft with `ci:hold`. CI admission, merge, deployment, publication and paid runs each require the applicable owner authorization.

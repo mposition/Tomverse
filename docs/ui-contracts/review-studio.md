@@ -89,6 +89,18 @@ native analysis entries and Deep Research execution are outside this slice.
 Coverage: `tests/reviewToChat.test.mjs` and
 `tests/e2e/review-to-chat.spec.ts` (real route navigation and draft hydration).
 
+Native (Android/iOS) since PR #4183, completed 2026-11-23: the same formatter and
+item selection (whole reviewer result, or one AI Review item with the server's item
+ID, or one Quick Summary item in its own sections) with `locales/nativeReviewChat.ts`
+labels in all eight Native languages. It is a direct in-shell callback, not the web
+packet/URL: the readback goes through the native bearer transport, is cancellable,
+and only a signed-in `surface === "workspace"` Review offers it. The target is the
+owner's new-Chat draft held in memory first (device storage is optional); text or
+attachments need explicit Add, a draft changed during the check asks again, and an
+over-limit result is refused rather than truncated. Coverage:
+`tests/native-mobile/native-workspace-parity.spec.ts`,
+`tests/nativeReviewAnalysis.test.mjs`, `tests/nativeMobileTransport.test.mjs`.
+
 ## Analysis progress and report actions (2026-11-15)
 
 Studio consumes the existing review progress stream and displays the first

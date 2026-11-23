@@ -66,7 +66,7 @@ type Options = {
  * its memories with another; when the current pair is revoked or expired,
  * extraction stops rather than falling back.
  */
-async function automaticExtractionPair(
+export async function automaticExtractionPair(
     register: readonly MemoryExtractionEvalEntry[]
 ) {
     for (const entry of register) {

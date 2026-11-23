@@ -739,6 +739,13 @@ export const DELEGATE_NAME_ALLOWLIST = [
  */
 export const RAW_SQL_ALLOWLIST = [
   {
+    path: "prisma/migrations/20261122150000_amux_portfolio_node_move/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 1,
+    reason: "The portfolio parent guard (owner decision 2026-11-22: a node move is an owner revision) reads the owner's node.revise audit row in SELECT EXISTS; its only write-verb token is the TG_OP = 'UPDATE' comparison. It writes no audit row.",
+  },
+  {
     path: "prisma/migrations/20261121130000_amux_portfolio_node_content_revision/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 1,
@@ -1529,9 +1536,9 @@ export const RAW_SQL_ALLOWLIST = [
     path: "lib/amux/cardDisplayKeyAllocator.ts",
     table: "AmuxCardDisplayKeyCounter",
     tableMentions: 2,
-    writeVerbs: 2,
+    writeVerbs: 3,
     reason:
-      "The card number counter's single writer (docs/policy/amux-card-display-key.md §3). Its raw SQL is one constant INSERT ... SELECT ... ON CONFLICT DO UPDATE ... RETURNING, led by a CTE that takes the audit chain's advisory lock before the counter row, whose only value, the prefix, is a bound parameter; the two table mentions are the INSERT target and the qualified column in the increment. Its other raw SQL is a read-only SELECT of taken Feature prefixes from AmuxPortfolioNode (docs/policy/amux-intake.md v17 item 3). It never deletes a counter.",
+      "The card number counter's single writer (docs/policy/amux-card-display-key.md §3). Its raw SQL is one constant INSERT ... SELECT ... ON CONFLICT DO UPDATE ... RETURNING, led by a CTE that takes the audit chain's advisory lock before the counter row, whose only value, the prefix, is a bound parameter; the two table mentions are the INSERT target and the qualified column in the increment. Its other raw SQL is a read-only SELECT of taken Feature prefixes from AmuxPortfolioNode (docs/policy/amux-intake.md v17 item 3) and, for a Feature registered without a prefix (docs/policy/amux-intake.md, owner decision 2026-11-22), one constant UPDATE of AmuxPortfolioNode.displayPrefix from NULL with bound values and its read-back SELECT; that UPDATE is the third write verb and never touches the counter. It never deletes a counter.",
   },
   {
     path: "lib/amux/cardDisplayKeyBackfillService.ts",
@@ -2603,10 +2610,10 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/engineeringAgentStore.ts",
     table: "EngineeringAgentWorkItem",
-    tableMentions: 21,
+    tableMentions: 22,
     writeVerbs: 17,
     reason:
-      "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, in the cross lock order (run, work item, capability, binding), a SELECT ... FOR UPDATE SKIP LOCKED that picks the publisher's next item (with read-only subqueries over the open unknown-outcome decisions an automatic lookup waits for, AMUXFLOW/B1, and over a card held by its own mismatch or orphaned run, AMUXFLOW/B2), a read-only octet_length of a write claim's patch and a read-only substring of one chunk of it for the live write claim's publisher (docs/policy/amux-v22-result-transfer.md §4), a read-only count of the owner queues as the run trigger counts them, a read-only count of the open state mismatches with those bound to no card (AMUXFLOW/B2; a review_pr: mismatch is its publish item's card, owner decision 2026-11-15), a read-only test of whether one card is held by its own record, a read of active runs whose AMUX attempt ended, a SELECT ... FOR UPDATE SKIP LOCKED of lapsed claims, a transaction advisory lock for halts, the AMUX attempt and card rows a state mismatch concerns, locked in AMUX's order (admission, the attempt FOR SHARE, the audit chain, then card and delivery FOR UPDATE), the mismatch's run locked before its work item, plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter.",
+      "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, in the cross lock order (run, work item, capability, binding), a SELECT ... FOR UPDATE SKIP LOCKED that picks the publisher's next item (with read-only subqueries over the open unknown-outcome decisions an automatic lookup waits for, AMUXFLOW/B1, and over a card held by its own mismatch or orphaned run, AMUXFLOW/B2), a read-only octet_length of a write claim's patch and a read-only substring of one chunk of it for the live write claim's publisher (docs/policy/amux-v22-result-transfer.md §4), a read-only count of the owner queues as the run trigger counts them, a read-only count of the open state mismatches with those bound to no card (AMUXFLOW/B2; a review_pr: mismatch is its publish item's card, owner decision 2026-11-15), a read-only test of whether one card is held by its own record, a read of active runs whose AMUX attempt ended, a SELECT ... FOR UPDATE SKIP LOCKED of lapsed claims, a transaction advisory lock for halts, the AMUX attempt and card rows a state mismatch concerns, locked in AMUX's order (admission, the attempt FOR SHARE, the audit chain, then card and delivery FOR UPDATE), the mismatch's run locked before its work item, plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter. It also reads, without a lock, the open review draft bindings a newer run of the same card replaced or whose card is done, joined to their runs and publish items, for the publisher to close (owner decision 2026-11-23).",
   },
   {
     path: "lib/engineeringAgentStore.ts",
@@ -2619,18 +2626,18 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/engineeringAgentStore.ts",
     table: "EngineeringAgentBinding",
-    tableMentions: 2,
+    tableMentions: 4,
     writeVerbs: 17,
     reason:
-      "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, in the cross lock order (run, work item, capability, binding), a SELECT ... FOR UPDATE SKIP LOCKED that picks the publisher's next item, a read-only count of the owner queues as the run trigger counts them, a read of active runs whose AMUX attempt ended, a SELECT ... FOR UPDATE SKIP LOCKED of lapsed claims, a transaction advisory lock for halts, the AMUX attempt and card rows a state mismatch concerns, locked in AMUX's order (admission, the attempt FOR SHARE, the audit chain, then card and delivery FOR UPDATE), the mismatch's run locked before its work item, plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter.",
+      "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, in the cross lock order (run, work item, capability, binding), a SELECT ... FOR UPDATE SKIP LOCKED that picks the publisher's next item, a read-only count of the owner queues as the run trigger counts them, a read of active runs whose AMUX attempt ended, a SELECT ... FOR UPDATE SKIP LOCKED of lapsed claims, a transaction advisory lock for halts, the AMUX attempt and card rows a state mismatch concerns, locked in AMUX's order (admission, the attempt FOR SHARE, the audit chain, then card and delivery FOR UPDATE), the mismatch's run locked before its work item, plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter. It also reads, without a lock, the open review draft bindings a newer run of the same card replaced or whose card is done, joined to their runs and publish items, for the publisher to close (owner decision 2026-11-23).",
   },
   {
     path: "lib/engineeringAgentStore.ts",
     table: "EngineeringAgentRun",
-    tableMentions: 9,
+    tableMentions: 11,
     writeVerbs: 17,
     reason:
-      "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, including a read-only v22 run lock after its AMUX attempt and card, in the cross lock order (run, work item, capability, binding), a SELECT ... FOR UPDATE SKIP LOCKED that picks the publisher's next item (two read-only joins over the runs of a card held by its own record, AMUXFLOW/B2), a read-only count of the owner queues as the run trigger counts them, a read of active runs whose AMUX attempt ended, a SELECT ... FOR UPDATE SKIP LOCKED of lapsed claims, a transaction advisory lock for halts, the AMUX attempt and card rows a state mismatch concerns, locked in AMUX's order (admission, the attempt FOR SHARE, the audit chain, then card and delivery FOR UPDATE), the mismatch's run locked before its work item, plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter.",
+      "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, including a read-only v22 run lock after its AMUX attempt and card, in the cross lock order (run, work item, capability, binding), a SELECT ... FOR UPDATE SKIP LOCKED that picks the publisher's next item (two read-only joins over the runs of a card held by its own record, AMUXFLOW/B2), a read-only count of the owner queues as the run trigger counts them, a read of active runs whose AMUX attempt ended, a SELECT ... FOR UPDATE SKIP LOCKED of lapsed claims, a transaction advisory lock for halts, the AMUX attempt and card rows a state mismatch concerns, locked in AMUX's order (admission, the attempt FOR SHARE, the audit chain, then card and delivery FOR UPDATE), the mismatch's run locked before its work item, plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter. It also reads, without a lock, the open review draft bindings a newer run of the same card replaced or whose card is done, joined to their runs and publish items, for the publisher to close (owner decision 2026-11-23).",
   },
   {
     path: "lib/amux/reviewMergeObserved.ts",
@@ -3019,18 +3026,18 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/amux/decisionMakerRequestStore.ts",
     table: "AmuxDecisionMakerRequest",
-    tableMentions: 12,
+    tableMentions: 14,
     writeVerbs: 4,
     reason:
-      "The request ledger's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL names the request table in ten constant SELECTs (the throughput count, the request state, the request already recorded for a card revision, -- since S1d, 2026-10-08 -- the open requests created in a key period, read for a digest key's destruction, -- since S1e -- each instance's proposals for section 4's report, -- since S1g, 2026-10-12 -- the stale-close candidates the retention sweep reads, -- since S2, 2026-10-13 -- Admin's newest requests, and -- since S2-2b4, 2026-10-18 -- the id of the one request of a (card, question revision) the operator answered directly, which the store then closes with an event, and -- since 2026-11-07 -- the oldest open proposal no person has judged on one of the app-answered cards, which the Decision Maker as the approver applies) and one constant INSERT ... RETURNING; every value is a bound parameter. The other verbs are the event INSERT and the word in the two errors raised when an insert returns no row. It never updates or deletes a request, and it writes the audit log only through lib/amux/decisionMakerRequestSystemAudit.ts.",
+      "The request ledger's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL names the request table in ten constant SELECTs (the throughput count, the request state, the request already recorded for a card revision, -- since S1d, 2026-10-08 -- the open requests created in a key period, read for a digest key's destruction, -- since S1e -- each instance's proposals for section 4's report, -- since S1g, 2026-10-12 -- the stale-close candidates the retention sweep reads, -- since S2, 2026-10-13 -- Admin's newest requests, and -- since S2-2b4, 2026-10-18 -- the id of the one request of a (card, question revision) the operator answered directly, which the store then closes with an event, and -- since 2026-11-07 -- the oldest open proposal no person has judged on one of the app-answered cards, which the Decision Maker as the approver applies, and -- since 2026-11-22 -- the newest request of a result review's card, twice, in the read-only fragment the owner queue settlement's scan embeds to tell whether that request ended) and one constant INSERT ... RETURNING; every value is a bound parameter. The other verbs are the event INSERT and the word in the two errors raised when an insert returns no row. It never updates or deletes a request, and it writes the audit log only through lib/amux/decisionMakerRequestSystemAudit.ts.",
   },
   {
     path: "lib/amux/decisionMakerRequestStore.ts",
     table: "AmuxDecisionMakerRequestEvent",
-    tableMentions: 16,
+    tableMentions: 17,
     writeVerbs: 4,
     reason:
-      "The same module names the event table in the request state read, in the open-request count's NOT EXISTS over closing events (S1d, 2026-10-08; a judgment's closing kinds since S1e), in the stale-close candidates' NOT EXISTS over the same closing kinds (S1g, 2026-10-12), in the proposal timeline of section 4's report (S1e), in the events of Admin's newest requests (S2, 2026-10-13), in one instance's newest terminal result kinds -- a bounded SELECT section 8's validation latch counts, read on its own and inside the routing's throughput SELECT (2026-10-17) -- in the database clock of one instance's newest cleanup_unknown report, an aggregate SELECT section 5's latch reads on its own, inside the routing's throughput SELECT and beside the result kinds in the transmission intent's one latch read (stage S2-2a3), in the open proposal read for the Decision Maker as the approver, an EXISTS over its proposal result and a NOT EXISTS over the closing kinds (2026-11-07), and in its one constant INSERT ... RETURNING of an event, which since S2-2a3 also records section 5's report; every value is a bound parameter. It never updates or deletes an event; a judgment's closing event is written by the judgment table's trigger.",
+      "The same module names the event table in the request state read, in the open-request count's NOT EXISTS over closing events (S1d, 2026-10-08; a judgment's closing kinds since S1e), in the stale-close candidates' NOT EXISTS over the same closing kinds (S1g, 2026-10-12), in the proposal timeline of section 4's report (S1e), in the events of Admin's newest requests (S2, 2026-10-13), in one instance's newest terminal result kinds -- a bounded SELECT section 8's validation latch counts, read on its own and inside the routing's throughput SELECT (2026-10-17) -- in the database clock of one instance's newest cleanup_unknown report, an aggregate SELECT section 5's latch reads on its own, inside the routing's throughput SELECT and beside the result kinds in the transmission intent's one latch read (stage S2-2a3), in the open proposal read for the Decision Maker as the approver, an EXISTS over its proposal result and a NOT EXISTS over the closing kinds (2026-11-07), in the same read-only fragment's EXISTS over an ending event of a result review's newest request (2026-11-22), and in its one constant INSERT ... RETURNING of an event, which since S2-2a3 also records section 5's report; every value is a bound parameter. It never updates or deletes an event; a judgment's closing event is written by the judgment table's trigger.",
   },
   {
     path: "lib/amux/decisionMakerBodyStore.ts",

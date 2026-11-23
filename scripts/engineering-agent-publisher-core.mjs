@@ -14,7 +14,9 @@
 // and the claim's lease passes into a lookup (§10). It never retries a write,
 // never deletes a branch and never merges. The one write a lookup claim may
 // make is the pull request a lost answer left unopened, and only once a person
-// approved it for that item (§10): never a push.
+// approved it for that item (§10): never a push. After the claim's work, it
+// closes the review drafts the claim names -- its own drafts a newer pull
+// request of the same card replaced -- each only after reading it again.
 //
 // Imports: node builtins and the dependency-free core only (§8).
 
@@ -24,7 +26,9 @@ import {
   ENGINEERING_AGENT_CHANGE_DIGEST_V2_FEATURE,
   ENGINEERING_AGENT_COMMIT_IDENTITY,
   ENGINEERING_PUBLISHER_PATCH_CHUNKS_FEATURE,
+  engineeringBranchName,
   expectedCommitObject,
+  isRunId,
   prBodyCarriesMarker,
   prBodyMarker,
   reportedHalt,
@@ -205,7 +209,12 @@ export const readClaimedPatch = async (app, work, appFeatures) => {
  *     pullDiffDigest(number) -> { digest } | { refused: true } | null   (v1, for an app without change_digest_v2 only;
  *                                                                        null: not read; refused: not a diff AMUX would bind)
  *     createPull({ title, body, head, draft }) ->{ status: "created", number } | { status: "rejected" } | { status: "unknown" },
+ *     pullByNumber(number) -> { number, state, draft, baseRef, headRef, headRepo, authorType, authorLogin, body } | null
+ *                                                    (null: no such pull request)
+ *     pullReviewed(number) -> boolean                 (true: anyone reviewed it, or the list was not read whole)
+ *     closePull(number) -> boolean                   (true: GitHub answered the close)
  *   }
+ *   selfLogin() -> "<app slug>[bot]" | null          the publisher App's own login, the author of its pull requests
  *   workspace(baseSha) -> {
  *     baseCommitterDate,
  *     build({ patch, identity, date, message }) -> { treeId, commitSha, commitObject } | { refused } | null,
@@ -214,10 +223,111 @@ export const readClaimedPatch = async (app, work, appFeatures) => {
  *     dispose(),
  *   }
  *   pause(ms)                                       optional; between reads that wait for our own write
- * Returns { finishedNormally, halt, reason } for the dead-man signal.
+ * Returns { finishedNormally, halt, reason } for the dead-man signal, and
+ * `closedReviewDrafts` when the claim named review drafts to close.
  */
 export async function runPublisherCycle(ports) {
   const claimed = await ports.app("publish/claim", { requestKey: requestKey() });
+  const result = await publishClaimed(ports, claimed);
+  // After the claim's own work: the review drafts a newer pull request of
+  // the same card replaced (owner decision 2026-11-23). Nothing here changes
+  // the round's result.
+  const drafts = claimed.status === 200 ? closeableReviewDrafts(claimed.json?.closeReviewDrafts) : [];
+  if (drafts.length === 0) return result;
+  return { ...result, closedReviewDrafts: await closeSupersededReviewDrafts(ports, drafts) };
+}
+
+/** The repository every pull request the publisher opens lives in. */
+export const PUBLISHER_REPOSITORY = "mposition/Tomverse";
+
+/**
+ * The claim's list of review drafts to close, as the app sent it: each a pull
+ * request number and a run id, its branch the one that run's publish item
+ * pushed, and the pull request that replaced it (null: its card is done).
+ * Anything else is dropped; a number named twice is closed once.
+ */
+export const closeableReviewDrafts = (list) => {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set();
+  const drafts = [];
+  for (const entry of list) {
+    const prNumber = entry?.prNumber;
+    const runId = entry?.runId;
+    if (!Number.isSafeInteger(prNumber) || prNumber <= 0 || typeof runId !== "string" || !isRunId(runId)) continue;
+    if (entry.branch !== engineeringBranchName(runId) || seen.has(prNumber)) continue;
+    const replacedBy = entry.replacedBy ?? null;
+    if (replacedBy !== null && (!Number.isSafeInteger(replacedBy) || replacedBy <= 0 || replacedBy === prNumber)) continue;
+    seen.add(prNumber);
+    drafts.push({ prNumber, runId, branch: entry.branch, replacedBy });
+  }
+  return drafts;
+};
+
+/**
+ * Whether the pull request GitHub shows now is one the publisher may close:
+ * still open, still a draft (one a person marked ready is theirs), into
+ * develop, from this run's branch in this repository, opened by this
+ * publisher's own App, and carrying this run's marker. The app named it;
+ * this check can only refuse.
+ */
+export const decideReviewDraftClose = (draft, pull, selfLogin) => {
+  if (pull === null) return "not_found";
+  if (pull.state !== "open") return "not_open";
+  if (pull.draft !== true) return "not_draft";
+  if (pull.baseRef !== "develop" || pull.headRef !== draft.branch || pull.headRepo !== PUBLISHER_REPOSITORY ||
+      pull.authorType !== "Bot" || typeof selfLogin !== "string" || pull.authorLogin !== selfLogin ||
+      !prBodyCarriesMarker(pull.body ?? "", draft.runId)) return "not_ours";
+  return "close";
+};
+
+/** The shape of a GitHub App's bot login. */
+export const APP_BOT_LOGIN = /^[a-z0-9][a-z0-9-]{0,98}\[bot\]$/;
+
+/**
+ * Closes each review draft that passes decideReviewDraftClose, once: read it,
+ * refuse one anybody reviewed or whose replacement GitHub does not show open
+ * now (the app's binding may not have seen a person close it yet), ask the app's last look
+ * (`publish/close-look`: the switches, the halt and the list read again just
+ * before the write), then one close. A close whose answer is lost is not
+ * repeated here; the next round reads the pull request again and finds it
+ * closed or still open. Without the publisher's own login nothing is tried.
+ */
+async function closeSupersededReviewDrafts(ports, drafts) {
+  const outcomes = [];
+  let token = null;
+  try {
+    const selfLogin = typeof ports.selfLogin === "function" ? await ports.selfLogin() : null;
+    if (typeof selfLogin !== "string" || !APP_BOT_LOGIN.test(selfLogin)) throw new Error("self_login_unknown");
+    token = await ports.mintToken();
+    const github = ports.github(token.token);
+    for (const draft of drafts) {
+      let outcome;
+      try {
+        outcome = decideReviewDraftClose(draft, await github.pullByNumber(draft.prNumber), selfLogin);
+        if (outcome === "close" && (await github.pullReviewed(draft.prNumber))) outcome = "reviewed";
+        if (outcome === "close" && draft.replacedBy !== null &&
+            (await github.pullByNumber(draft.replacedBy))?.state !== "open") outcome = "replacement_not_open";
+        if (outcome === "close") {
+          // The reason too: the replacing pull request just read open, or none for a done card.
+          const look = await ports.app("publish/close-look", { prNumber: draft.prNumber, runId: draft.runId,
+            replacedBy: draft.replacedBy });
+          if (look.status !== 200 || look.json?.verdict !== "no_objection") outcome = "close_look_refused";
+        }
+        if (outcome === "close") outcome = (await github.closePull(draft.prNumber)) ? "closed" : "close_unknown";
+      } catch {
+        outcome = "unreadable";
+      }
+      outcomes.push({ prNumber: draft.prNumber, outcome });
+    }
+  } catch {
+    return [...outcomes, ...drafts.slice(outcomes.length).map((draft) => ({ prNumber: draft.prNumber, outcome: "not_tried" }))];
+  } finally {
+    await token?.revoke().catch(() => undefined);
+  }
+  return outcomes;
+}
+
+async function publishClaimed(ports, claimed) {
   if (claimed.status === 409 && typeof claimed.json?.refused === "string") {
     // A switch that is off -- the mode, the freeze, the kill switch -- is a
     // quiet round the monitor still hears, but only while nothing halts: the

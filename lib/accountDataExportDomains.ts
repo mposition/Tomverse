@@ -75,6 +75,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "included",
   },
   { domain: "memoryItem", publicName: "memories", prismaModel: "MemoryItem", state: "included" },
+  // Owner-only receipts of the project sources an answer was given (refs and
+  // titles, never source text).
+  {
+    domain: "projectAnswerReceipt",
+    publicName: "project_answer_sources",
+    prismaModel: "ProjectAnswerReceipt",
+    state: "included",
+  },
   {
     domain: "creditPurchase",
     publicName: "credit_purchases",
@@ -456,7 +464,7 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     prismaModel: "ResearchPreviewRun",
     state: "included_filtered",
     withheldReason:
-      "The conversation and answer identities, selected model, lifecycle status, bounded step/search/read counts and timestamps are included. The private restart checkpoint, raw page content, provider/API binding, reservation, lease, digest, settlement usage and internal error fields are withheld.",
+      "The conversation and answer identities, selected model, lifecycle status, bounded step/search/read counts and timestamps are included. For engine v2 runs the owner's brief manifest (source references, never private text), plan revisions, report revisions with claims, the approved credit total and source metadata are included too. The private restart checkpoint, raw page and evidence text, provider/API binding, reservation and funding segments, leases, digests, settlement usage and internal error fields are withheld.",
   },
   {
     domain: "promptRefinerChatScope", publicName: "prompt_refiner_scopes",

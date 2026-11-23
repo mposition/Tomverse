@@ -3,6 +3,7 @@ import { externalApiCopy } from "./externalApi";
 import { reviewHandoffCopy } from "./reviewHandoff";
 import { researchPreviewCopy } from "./researchPreview";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
+import { projectWorkspaceCopy } from "./projectWorkspace";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
 
@@ -239,6 +240,11 @@ export const pt = {
         compareInReviewLabel: "Comparar esta pergunta entre modelos em um novo Review",
         compareInReviewContext: "Perguntas anteriores:",
         compareInReviewBlocked: "Conclua ou resolva a mensagem atual antes de abrir o Review.",
+        compareInReviewNeedsQuestion: "Este turno enviou apenas um arquivo, então não há pergunta para comparar. Compare uma resposta a uma pergunta escrita.",
+        compareInReviewFileReattach: "Trouxemos sua pergunta do Chat. Para comparar com o mesmo arquivo, anexe-o novamente.",
+        compareInReviewFileChoose: "Escolher arquivo",
+        compareInReviewFileAttached: "Arquivo anexado",
+        compareInReviewDraftKept: "O rascunho do Review que você estava escrevendo foi mantido.",
         singleModelRequired: "Chat usa um modelo de resposta. Selecione um modelo para substituir a seleção atual.",
         singleModelProfileRequired: "Este assistente usa vários modelos. Escolha um assistente de modelo único para Chat.",
         restoreDraftNotEmpty: "Seu rascunho foi preservado. Envie ou apague antes de restaurar esta pergunta.",
@@ -2458,6 +2464,7 @@ export const pt = {
         back: "Voltar para Tomverse",
     },
     chatStarter: workspaceWelcomeCopy.pt.starter,
+    projectWorkspace: projectWorkspaceCopy["pt"],
     // HELP-NAV-01 guided help: pick a task, see where it is done. Directions only.
     helpGuide: {
         menuItem: "Descobrir como fazer algo",

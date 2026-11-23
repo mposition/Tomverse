@@ -387,6 +387,16 @@ import {
 import { observeServedProcessingTier } from "@/lib/servedProcessingTier";
 import { z } from "zod";
 import { buildMcpChatTools, MCP_CHAT_MAX_STEPS } from "@/lib/mcpConnectorChatTool";
+import {
+    buildProjectChatTools,
+    projectToolsAvailable,
+    PROJECT_TOOL_MAX_STEPS,
+    type ProjectChatTools,
+} from "@/lib/projectChatTools";
+import { projectReceiptSources } from "@/lib/projectSourceAccess";
+import { resolveConversationProjectScope } from "@/lib/projectWorkspaceService";
+import { projectContextRequiresBundle, type ProjectTurnScope } from "@/lib/projectWorkspaceCore";
+import { enqueueNativeProjectExtraction } from "@/lib/projectMemoryExtraction";
 import { buildMcpProgressChunk } from "@/lib/mcpConnectorProgress";
 import { MCP_UNTRUSTED_NOTICE, mcpPreviewEnabled } from "@/lib/mcpConnectorPolicy";
 import { sanitizeWebSearchCitations } from "@/lib/webSearchCitations";
@@ -1311,6 +1321,8 @@ async function handleChatPost(
     const requestReceivedAt = Date.now();
     const latency = createServerLatency(traceId);
     let mcpConnector: Awaited<ReturnType<typeof buildMcpChatTools>> | null = null;
+    // Project workspace: project_search / project_read, priced like MCP tools.
+    let projectTools: ProjectChatTools | null = null;
     // One timing line per turn, whichever path ends it: the stream's
     // settlement or the request failure path below. Shared, so a turn that
     // settled and then threw on its way out is not written twice.
@@ -1561,6 +1573,14 @@ async function handleChatPost(
             return tracedJsonError("Reasoning effort is unavailable for this request.", "REASONING_EFFORT_UNAVAILABLE", 409, traceId);
         }
         const isResearchPreview = researchMode === "preview";
+        const requestedProjectReferences = (() => {
+            const raw = (body as { projectReferences?: unknown } | null)?.projectReferences;
+            if (raw === undefined) return undefined;
+            if (!Array.isArray(raw) || raw.length > 8 || raw.some((entry) => typeof entry !== "string" || entry.length < 3 || entry.length > 200)) {
+                throw new ChatAccessError(400, "INVALID_PROJECT_REFERENCES", "Invalid project references.");
+            }
+            return raw as string[];
+        })();
         const researchFeatures = researchPreviewFeatures();
         if (isResearchPreview && req.headers.has("authorization") && !researchFeatures.nativeStart) {
             throw new ChatAccessError(503, "RESEARCH_PREVIEW_NATIVE_UNAVAILABLE", "Research Preview is not enabled for this client.");
@@ -2158,6 +2178,7 @@ async function handleChatPost(
                           routerModelId: true,
                           routerChallengerTurns: true,
                           productKey: true,
+                          projectId: true,
                           continuationBridge: { select: { id: true, reviewHandoff: true } },
                       },
                   })
@@ -2595,9 +2616,17 @@ async function handleChatPost(
                 historyStale = replay === null;
                 return replay ?? { queryPolicy: "full" as const, history: [] };
             };
+            // Read now, from the conversation row: a move, archive or settings
+            // change between preparation and send makes the bundle stale.
+            const project = conversationId && conversationRouting?.projectId
+                ? await resolveConversationProjectScope(userId, conversationId)
+                : null;
             const turnContext = await buildChatTurnContext({
                 userId,
                 query,
+                project,
+                // The same picks the preparation step signed; re-read here.
+                projectReferences: requestedProjectReferences,
                 memorySemanticContext,
                 profileVersionId,
                 plan: accountPlan?.tier ?? null,
@@ -3643,6 +3672,10 @@ async function handleChatPost(
                   memoryUsedCount: number;
                   memoryTokens: number;
                   profileTokens: number;
+                  projectTokens: number;
+                  project: ProjectTurnScope | null;
+                  projectMaterialSources: Array<{ fileId: string; ordinal: number; fileName: string }>;
+                  projectReferenceSources: Array<{ ref: string; status: "included" | "unavailable"; title: string | null }>;
                   knowledgeChunkCount: number;
                   memoryTruncatedByBudget: boolean;
                   requestIdentity: {
@@ -3658,6 +3691,24 @@ async function handleChatPost(
             // that carry no bundle — the share of requests that had no memory
             // to inject is the thing the ratio is for.
             void recordMemoryCounter("chat_memory_eligible");
+        }
+        // A conversation in a project with context on is never answered
+        // without its prepared project context. Research Preview is its own
+        // durable run and never receives project context, so it is exempt.
+        if (!contextBundle && session?.user?.id && conversationId && !isResearchPreview && conversationRouting?.projectId) {
+            const unpreparedProject = await resolveConversationProjectScope(session.user.id, conversationId);
+            if (projectContextRequiresBundle(unpreparedProject)) {
+                if (unpreparedProject?.archived) {
+                    return tracedJsonError("This project is archived. Restore it to continue here.", "PROJECT_ARCHIVED", 409, traceId);
+                }
+                return tracedJsonError(
+                    "This conversation's project context must be prepared before sending.",
+                    "CHAT_CONTEXT_BUNDLE_STALE",
+                    409,
+                    traceId,
+                    { requiresPreflight: true, refusalReason: "project_context_required" }
+                );
+            }
         }
         if (contextBundle && session?.user?.id) {
             void recordMemoryCounter("context_bundle_presented");
@@ -3680,6 +3731,10 @@ async function handleChatPost(
                 memoryUsedCount: turnContext.memory.prompt.usedCount,
                 memoryTokens: verification.payload.memoryTokens,
                 profileTokens: verification.payload.profileTokens,
+                projectTokens: verification.payload.projectTokens ?? 0,
+                project: turnContext.project?.project ?? null,
+                projectMaterialSources: turnContext.project?.materialSources ?? [],
+                projectReferenceSources: turnContext.project?.references ?? [],
                 knowledgeChunkCount: turnContext.profile.knowledgeChunkCount,
                 memoryTruncatedByBudget: turnContext.memory.truncatedByBudget,
                 // The retry identity binds what the signed bundle proved, not
@@ -3937,7 +3992,7 @@ async function handleChatPost(
                 if (bucket) void recordMemoryCounter(bucket);
             }
             const quotedContextTokens =
-                verifiedContext.memoryTokens + verifiedContext.profileTokens;
+                verifiedContext.memoryTokens + verifiedContext.profileTokens + verifiedContext.projectTokens;
             estimatedInputTokens += quotedContextTokens;
             inputEstimate.addTokens(quotedContextTokens);
         }
@@ -4038,6 +4093,22 @@ async function handleChatPost(
             memoryData,
             blocks: turnSystemBlocks,
         });
+        projectTools =
+            session?.user?.id && conversationId && verifiedContext?.project &&
+            !isResearchPreview && !isDeepResearchTurn &&
+            projectToolsAvailable({
+                model: modelConfig,
+                nativeSearch: nativeSearchEnabled,
+                project: verifiedContext.project,
+                otherToolOwner: Boolean(mcpConnector),
+            })
+                ? buildProjectChatTools({
+                      userId: session.user.id,
+                      conversationId,
+                      project: verifiedContext.project,
+                      signal: req.signal,
+                  })
+                : null;
         if (mcpConnector) {
             formattedMessages.push({ role: "system", content: MCP_UNTRUSTED_NOTICE });
             inputEstimate.addText(MCP_UNTRUSTED_NOTICE);
@@ -5212,15 +5283,32 @@ async function handleChatPost(
                 // authorise it.
                 promptCachePath,
                 reservationOnlyInputTokens,
-                additionalToolInputTokens: mcpConnector ? mcpConnector.definitionTokens + mcpConnector.resultInputAllowance : 0,
-                toolInputPasses: mcpConnector ? MCP_CHAT_MAX_STEPS : 1,
+                // Project tools are reserved the same way as MCP tools: their
+                // definitions and their whole result allowance, on every pass.
+                additionalToolInputTokens:
+                    (mcpConnector ? mcpConnector.definitionTokens + mcpConnector.resultInputAllowance : 0) +
+                    (projectTools ? projectTools.definitionTokens + projectTools.resultInputAllowance : 0),
+                // With project tools every pass of the loop carries their
+                // definitions and result allowance, so the passes are the
+                // loop's own step count (artifact/search steps included).
+                toolInputPasses: Math.max(
+                    mcpConnector ? MCP_CHAT_MAX_STEPS : 1,
+                    projectTools
+                        ? Math.max(
+                              PROJECT_TOOL_MAX_STEPS,
+                              artifactToolPlan?.registerTool ? GENERATED_ARTIFACT_MAX_STEPS : 1,
+                              appManagedSearchEnabled && webSearchCapability.searchBackend ? APP_MANAGED_SEARCH_MAX_STEPS : 1
+                          )
+                        : 1
+                ),
                 // Reserved only above the flat limit; the loop is then stopped
                 // at what was reserved (`toolLoopStepCap` below).
                 longContextToolInputPasses: Math.max(
                     artifactToolPlan?.registerTool ? GENERATED_ARTIFACT_MAX_STEPS : 1,
                     appManagedSearchEnabled && webSearchCapability.searchBackend
                         ? APP_MANAGED_SEARCH_MAX_STEPS
-                        : 1
+                        : 1,
+                    projectTools ? PROJECT_TOOL_MAX_STEPS : 1
                 ),
                   }
               );
@@ -5282,6 +5370,12 @@ async function handleChatPost(
         // Reuse the existing reservation: every MCP model step shares this
         // input/output allowance instead of acquiring its own paid budget.
         mcpConnector?.setBudget({ inputTokens: budget.inputTokens, outputTokens: requestMaxOutputTokens,
+            instructions: formattedMessages.filter(m => m.role === "system").map(m => m.content).join("\n") });
+        projectTools?.setStepCap(Math.max(
+            artifactToolPlan?.registerTool ? GENERATED_ARTIFACT_MAX_STEPS : 1,
+            appManagedSearchEnabled && webSearchCapability.searchBackend ? APP_MANAGED_SEARCH_MAX_STEPS : 1
+        ));
+        projectTools?.setBudget({ inputTokens: budget.inputTokens, outputTokens: requestMaxOutputTokens,
             instructions: formattedMessages.filter(m => m.role === "system").map(m => m.content).join("\n") });
         // Shadow routing (docs/policy/tomverse-chat-delivery-plan.md §6 step 3).
         // The Router's rules run on this turn and the decision is recorded; the
@@ -5837,7 +5931,7 @@ async function handleChatPost(
           registers no application tool behaves exactly as it does today.
         */
         let combinedToolConfig =
-            webSearchToolConfig || appManagedSearchTool || artifactToolConfig || mcpConnector
+            webSearchToolConfig || appManagedSearchTool || artifactToolConfig || mcpConnector || projectTools
                 ? {
                       ...(webSearchToolConfig ?? {}),
                       tools: {
@@ -5851,6 +5945,9 @@ async function handleChatPost(
                           ...(appManagedSearchTool?.tools ?? {}),
                           ...(artifactToolConfig?.tools ?? {}),
                           ...(mcpConnector?.tools ?? {}),
+                          // project_search / project_read: application tools,
+                          // reserved per pass above.
+                          ...(projectTools?.tools ?? {}),
                       },
                       // A search tool with no tool loop is a search the model
                       // never gets to read: the SDK stops after one step, and
@@ -5860,10 +5957,16 @@ async function handleChatPost(
                       // session counter, the artifact ceiling is the per-turn
                       // artifact limit), so taking the maximum cannot raise a
                       // spend bound.
-                      ...(appManagedSearchTool && !artifactToolConfig
+                      ...((appManagedSearchTool || projectTools) && !artifactToolConfig
                           ? {
                                 stopWhen: stepCountIs(
-                                    Math.min(APP_MANAGED_SEARCH_MAX_STEPS, toolLoopStepCap)
+                                    Math.min(
+                                        Math.max(
+                                            appManagedSearchTool ? APP_MANAGED_SEARCH_MAX_STEPS : 1,
+                                            projectTools ? PROJECT_TOOL_MAX_STEPS : 1
+                                        ),
+                                        toolLoopStepCap
+                                    )
                                 ),
                             }
                           : {}),
@@ -5874,9 +5977,13 @@ async function handleChatPost(
                                         appManagedSearchTool
                                             ? Math.max(
                                                   GENERATED_ARTIFACT_MAX_STEPS,
-                                                  APP_MANAGED_SEARCH_MAX_STEPS
+                                                  APP_MANAGED_SEARCH_MAX_STEPS,
+                                                  projectTools ? PROJECT_TOOL_MAX_STEPS : 1
                                               )
-                                            : GENERATED_ARTIFACT_MAX_STEPS,
+                                            : Math.max(
+                                                  GENERATED_ARTIFACT_MAX_STEPS,
+                                                  projectTools ? PROJECT_TOOL_MAX_STEPS : 1
+                                              ),
                                         toolLoopStepCap
                                     )
                                 ),
@@ -6201,7 +6308,7 @@ async function handleChatPost(
         // one call, and is left exactly as it was (its tool choice included).
         const longContextLoopStep =
             combinedToolConfig &&
-            (artifactToolConfig || appManagedSearchTool) &&
+            (artifactToolConfig || appManagedSearchTool || projectTools) &&
             !researchPreviewExecution &&
             !mcpConnector &&
             Number.isFinite(toolLoopStepCap) &&
@@ -6287,6 +6394,19 @@ async function handleChatPost(
                         maxRetries: 0,
                         stopWhen: stepCountIs(MCP_CHAT_MAX_STEPS),
                         prepareStep: mcpConnector.prepareStep,
+                    } : {}),
+                    // A flat-budget project turn: every call is measured
+                    // against the reservation the tool passes were priced on.
+                    ...(projectTools && !mcpConnector && !longContextLoopStep ? {
+                        maxRetries: 0,
+                        prepareStep: (options: {
+                            stepNumber: number;
+                            steps: Array<StepResult<ToolSet>>;
+                            messages: ModelMessage[];
+                        }) => ({
+                            ...(lookupStep?.(options) ?? {}),
+                            ...projectTools!.prepareStep(options),
+                        }),
                     } : {}),
                     onError: observeStreamError({
                         traceId,
@@ -6668,7 +6788,7 @@ async function handleChatPost(
                             : null;
                     const sentMcpInput =
                         !loopUsage && dispatched.attemptIndex === 0
-                            ? (mcpConnector?.observedInputTokens() ?? 0)
+                            ? (mcpConnector?.observedInputTokens() ?? projectTools?.observedInputTokens() ?? 0)
                             : 0;
                     const loopFits =
                         loopUsage !== null && loopUsage.inputTokens <= reservation.inputTokens;
@@ -8269,6 +8389,27 @@ async function handleChatPost(
                                             ...contextAttribution,
                                         },
                                     });
+                                    // Owner-only: which project sources this
+                                    // answer was given (excerpts and tool reads).
+                                    // Not in share snapshots or exports; opening
+                                    // one re-checks access.
+                                    if (verifiedContext?.project) {
+                                        const receiptSources = projectReceiptSources({
+                                            references: verifiedContext.projectReferenceSources,
+                                            materials: verifiedContext.projectMaterialSources,
+                                            tools: projectTools?.sources() ?? [],
+                                        });
+                                        if (receiptSources.length > 0) {
+                                            await tx.projectAnswerReceipt.create({
+                                                data: {
+                                                    messageId: assistantMessageId,
+                                                    userId: session!.user!.id,
+                                                    projectId: verifiedContext.project.projectId,
+                                                    sources: receiptSources.slice(0, 40),
+                                                },
+                                            });
+                                        }
+                                    }
                                     if (providerContext) {
                                         await tx.messageProviderContext.create({
                                             data: {
@@ -8369,6 +8510,15 @@ async function handleChatPost(
                                 // The rows are committed, so the objects they
                                 // point at must survive the release below.
                                 artifactsPersisted = true;
+                                // Project memory from this conversation's new
+                                // messages: queued after the commit, never
+                                // awaited, so the answer is not held for it.
+                                // Off unless the operator switch is on.
+                                if (verifiedContext?.project && session?.user?.id && conversationId) {
+                                    const ownerId = session.user.id;
+                                    void enqueueNativeProjectExtraction({ userId: ownerId, conversationId })
+                                        .catch((error) => logRequestError("project_memory_enqueue_failed", traceId, error));
+                                }
                             } catch (error) {
                                 logRequestError(
                                     "assistant_message_persist_failed",

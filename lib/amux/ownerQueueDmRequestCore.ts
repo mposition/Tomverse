@@ -152,7 +152,12 @@ export function amuxOwnerQueueDmView(facts: AmuxOwnerQueueDmFacts,
     return reason ? view("question", "not_eligible", { reason, sourceId: question.id }) :
       view("question", "waiting_relay", { sourceId: question.id });
   }
-  if (review) {
+  // A result review handed to a person, or whose request ended with nothing to
+  // confirm, no longer holds the card: its settlement does, once there is one
+  // or the settlement scan would file it (dmOwnerSettlementRead.ts).
+  const reviewReleased = review !== null && (review.handoffReason !== null ||
+    (review.localCardId !== null && review.request?.result === "closed"));
+  if (review && !(reviewReleased && (settlement !== null || facts.settlementEligible))) {
     if (review.localCardId) return filed("result_review", review.request, review.id);
     // Sent again only where the tick would file it: no kill switch.
     if (review.handoffReason) return view("result_review", "unfilable", { reason: review.handoffReason,

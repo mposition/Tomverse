@@ -802,10 +802,13 @@ export function buildExtractionPrompt(
 }
 
 export type ExtractionSourceMessage = {
+    /** The stored message id: an ExternalMessage, or a Tomverse Message when sourceType says so. */
     externalMessageId: string;
     role: "user" | "assistant";
     content: string;
     contentDigest: string;
+    /** Absent = an imported (external) message. */
+    sourceType?: "external_message" | "tomverse_message";
 };
 
 export type ExtractionSourceConversationInput = {
@@ -830,6 +833,7 @@ export type ExtractionLabelMap = Map<
         contentDigest: string;
         role: "user" | "assistant";
         content: string;
+        sourceType?: "external_message" | "tomverse_message";
     }
 >;
 
@@ -856,6 +860,7 @@ export function toExtractionPromptInput(
                     contentDigest: message.contentDigest,
                     role: message.role,
                     content: message.content,
+                    ...(message.sourceType ? { sourceType: message.sourceType } : {}),
                 });
                 return {
                     label,

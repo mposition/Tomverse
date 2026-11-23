@@ -26,6 +26,7 @@ import { useComposerPortalHost } from "@/components/chat/useComposerPortalHost";
 import { ChatWelcomeScreen } from "@/components/chat/ChatWelcomeScreen";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
+import type { ProjectWorkspaceRoute } from "@/lib/projectWorkspaceRoute";
 import { ProviderStatusBanner } from "@/components/chat/ProviderStatusBanner";
 import {
   ComparisonActionRail,
@@ -140,7 +141,7 @@ export type DesktopChatShellProps = {
   transcriptScope?: "model" | "conversation";
   onRestorePrompt?: (prompt: { text: string; attachments: ChatAttachment[]; targetChatId: string }) => void;
   onRetryPrompt?: (prompt: { text: string; attachments: ChatAttachment[]; targetChatId: string }) => void;
-  onCompareInReview?: (seed: string) => void;
+  onCompareInReview?: (seed: string, options?: { reattachFile: boolean }) => void;
   onCompareContinuationInReview?: (assistantMessageId: string) => void;
   conversations: Conversation[];
   currentChatId: string | null;
@@ -195,6 +196,8 @@ export type DesktopChatShellProps = {
   pendingSubmission: { originConversationId: string | null } | null;
   /** Locks durable Chat draft bytes until its Message transaction accepts. */
   durableDraftLocked: boolean;
+  /** ChatInput `fileReattachPrompt`: this Review draft needs its Chat question's document again. */
+  fileReattachPrompt?: boolean;
   /** Refuses submit while a durable Chat voice transcript is unfinished. */
   blockSubmitWhileVoiceBusy: boolean;
   /** Authenticated durable Chat may compose its next turn during a response. */
@@ -210,6 +213,16 @@ export type DesktopChatShellProps = {
     options?: { fromImageRequest?: boolean }
   ) => void;
   imageWorkspace?: React.ReactNode;
+  /**
+   * The Project workspace pane. Like `imageWorkspace` it replaces the chat
+   * surface while the sidebar stays; the transcript survives in the chat
+   * runtime store, so closing the pane returns to the same conversation.
+   */
+  projectWorkspace?: React.ReactNode;
+  /** A strip above the composer for a conversation inside a project. */
+  projectComposerBar?: React.ReactNode;
+  onOpenProjectWorkspace?: (route: ProjectWorkspaceRoute | null) => void;
+  activeProjectWorkspaceId?: string | null;
   /**
    * A read-only block above the panel row, for a conversation that has one.
    *
@@ -491,6 +504,7 @@ export function DesktopChatShell({
   isConversationSelectionResolved,
   pendingSubmission,
   durableDraftLocked,
+  fileReattachPrompt = false,
   blockSubmitWhileVoiceBusy,
   allowEditingWhileSending,
   onNewChat,
@@ -499,6 +513,10 @@ export function DesktopChatShell({
   onLockedImageClick,
   onStartImageDraft,
   imageWorkspace,
+  projectWorkspace,
+  projectComposerBar,
+  onOpenProjectWorkspace,
+  activeProjectWorkspaceId,
   hasImportedTranscript = false,
   importedMessages,
   importedTranscript,
@@ -1015,6 +1033,8 @@ export function DesktopChatShell({
         attachmentCount={attachments.length}
         autoCollapseSuggested={autoCollapseSuggested}
         isMobileDrawer={studio}
+        onOpenProjectWorkspace={onOpenProjectWorkspace}
+        activeProjectWorkspaceId={activeProjectWorkspaceId}
       />
   );
 
@@ -1051,7 +1071,14 @@ export function DesktopChatShell({
           (docs/policy/image-generation.md §1). The sidebar above stays, so
           navigation between chat and image conversations is one list.
         */}
-        {imageWorkspace ? (
+        {projectWorkspace ? (
+          <div
+            data-testid="desktop-project-workspace"
+            className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+          >
+            {projectWorkspace}
+          </div>
+        ) : imageWorkspace ? (
           <div
             data-testid="desktop-image-workspace"
             className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
@@ -1594,6 +1621,7 @@ export function DesktopChatShell({
         </div>
         <div className={studio ? "review-studio-task" : "contents"}>
         {studio && <h2>{singleTranscript ? t("chat.inputPlaceholder") : reviewWorkspaceCopy[lang].question}</h2>}
+        {projectComposerBar}
         <div ref={setBottomInputSlot} className={studio ? "review-studio-composer-slot" : undefined} />
         {composerPortalHost &&
           createPortal(
@@ -1615,6 +1643,7 @@ export function DesktopChatShell({
               onSubmit={onSubmit}
               onCancel={() => setStopSignal((current) => current + 1)}
               draftLocked={durableDraftLocked}
+              fileReattachPrompt={fileReattachPrompt}
               blockSubmitWhileVoiceBusy={blockSubmitWhileVoiceBusy}
               isSending={isAnyModelResponding}
               allowEditingWhileSending={allowEditingWhileSending}

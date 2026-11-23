@@ -322,7 +322,8 @@ async function parentForCreate(input: {
 }) {
   const parent = await input.tx.conversation.findFirst({
     where: { id: input.parentConversationId, userId: input.userId },
-    select: { id: true, kind: true, productKey: true, password: true, passwordVersion: true },
+    select: { id: true, kind: true, productKey: true, password: true, passwordVersion: true, projectId: true,
+      project: { select: { archivedAt: true } } },
   });
   if (!parent || parent.kind !== "chat" || parent.productKey !== "chat") {
     unavailable("REVIEW_HANDOFF_PARENT_NOT_FOUND", "Chat continuation not found.", 404);
@@ -444,6 +445,11 @@ export async function createReviewContinuationHandoff(input: {
           selectionMode: "manual",
           selectedModels: JSON.stringify(models),
           webSearchMode: APP_DEFAULTS.defaultWebSearchMode,
+          // Project workspace: the comparison stays in the parent Chat's
+          // project, read from the parent row (never a request field). An
+          // archived project takes no new work, so the comparison starts
+          // outside it.
+          projectId: source.parent.projectId && !source.parent.project?.archivedAt ? source.parent.projectId : null,
         },
         { id: true }
       );

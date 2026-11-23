@@ -2,11 +2,14 @@
 
 import type { ReviewWorkspaceControls } from "./useReviewWorkspace";
 import type { ResearchPreviewControls } from "./useResearchPreview";
+import { DeepResearchEngineRow, DeepResearchEngineSheet, useDeepResearchEngineOffer } from "./DeepResearchEngine";
 import { McpChatPicker } from "@/components/plugins/McpChatPicker";
 import { ChatLocationControl } from "./ChatLocationControl";
 import { composerModelCountLabel } from "./composerModelCountLabel";
 import { reasoningEffortCopy } from "@/lib/reasoningEffortCopy";
-import type { ExplicitReasoningEffort, ReasoningEffort } from "@/lib/reasoningEffort";
+import type { ExplicitReasoningEffort } from "@/lib/reasoningEffort";
+import { ReasoningEffortPicker } from "./ReasoningEffortPicker";
+import { useReasoningEffortPreference } from "./useReasoningEffortPreference";
 import { ReviewModeSwitcher, ReviewParticipants } from "./ReviewStudioChrome";
 import { reviewWorkspaceCopy } from "@/lib/reviewWorkspaceCopy";
 import { reviewProviderPreferencesCopy } from "@/lib/reviewProviderPreferencesCopy";
@@ -85,6 +88,7 @@ import {
   chatAttachmentExtensionsByGroup,
   resolveChatAttachmentFormat,
 } from "@/lib/chatAttachmentFormats";
+import { isReattachableDocument } from "@/lib/chatReviewHandoff";
 import { chatAttachmentErrorCopyKey } from "@/lib/chatAttachmentErrorCopy";
 import {
   CHAT_MAX_ATTACHMENTS_PER_MESSAGE,
@@ -802,6 +806,12 @@ type ChatInputProps = {
    * second full-width border to the same seam.
    */
   hideTopBorder?: boolean;
+  /**
+   * This Review draft came from a Chat answer whose question was sent with
+   * one document (lib/chatReviewHandoff.ts). Files do not follow the question,
+   * so the composer asks for it again until a document is attached here.
+   */
+  fileReattachPrompt?: boolean;
   // MobileChatShell renders its own copy pinned to the true screen bottom
   // (independent of the composer's floating/docked position) instead of
   // this one, which always sits directly under the input box.
@@ -1056,6 +1066,7 @@ export function ChatInput({
   guestPreviewMode = false,
   variant = "bar",
   hideTopBorder = false,
+  fileReattachPrompt = false,
   hideDisclaimer = false,
   webSearchMode = "off",
   memoryMode,
@@ -1109,8 +1120,7 @@ export function ChatInput({
   // every conversation and is deliberately never remounted between them (that
   // would take the portal host, focus and in-flight uploads with it).
   const draftScopeId = draftKeyFor(currentChatId, identityKey);
-  const [effortSelection, setEffortSelection] = useState<{ scope: string; level: ReasoningEffort } | null>(null);
-  const reasoningEffort = effortSelection?.scope === draftScopeId ? effortSelection.level : "default";
+  const [reasoningEffort, setReasoningEffort] = useReasoningEffortPreference(currentProduct, identityKey);
   const draftScopeIdRef = useRef(draftScopeId);
   useEffect(() => {
     draftScopeIdRef.current = draftScopeId;
@@ -1976,40 +1986,30 @@ export function ChatInput({
       activeSelectedModels.every(id => getCatalogModel(id)?.reasoningEfforts?.includes(level)));
   const explicitEffort = showReasoningEffort && reasoningEffort !== "default" ? reasoningEffort : undefined;
   const effortUnavailable = explicitEffort !== undefined && !supportsEffort(explicitEffort);
-  const effortSuffix = explicitEffort ? " · " + effortCopy[explicitEffort] : "";
+  const effortSuffix = explicitEffort ? " · " + effortCopy.options[explicitEffort][0] : "";
+  const autoPickerLabel = explicitEffort ? autoCopy.label : autoCopy.compactLabel;
   const submitWithEffort = () => {
     if (effortUnavailable) return;
     onSubmit(explicitEffort);
-    if (explicitEffort) setEffortSelection(null);
   };
-  const effortLevels = ["low", "default", "high"] as const;
   const reasoningEffortSlot = showReasoningEffort && (
-    <fieldset className="mx-1 mb-2 rounded-xl bg-zinc-100 p-2 dark:bg-zinc-800" data-testid="model-picker-reasoning-effort">
-      <legend className="px-1 text-sm font-semibold">{effortCopy.title}</legend>
-      <p className="mb-1 px-1 text-xs text-zinc-600 dark:text-zinc-300">
-        {effortCopy.question}{isAutoMode ? " " + effortCopy.auto : ""}
-      </p>
-      <div className="grid grid-cols-3 gap-1">
-        {effortLevels.map(level => (
-          <label key={level} className="flex min-h-11 min-w-0 cursor-pointer items-center justify-center gap-1 rounded-lg bg-white px-1 text-center text-xs has-[:checked]:font-bold has-[:disabled]:cursor-default has-[:disabled]:opacity-50 dark:bg-zinc-900">
-            <input type="radio" name="composer-reasoning-effort" value={level}
-              checked={reasoningEffort === level}
-              disabled={level !== "default" && !supportsEffort(level)}
-              onChange={() => setEffortSelection({ scope: draftScopeId, level })} />
-            <span className="break-words">{effortCopy[level]}</span>
-          </label>
-        ))}
-      </div>
-      {!supportsEffort("low") && !supportsEffort("high") && (
-        <p className="px-1 pt-1 text-xs text-zinc-600 dark:text-zinc-300">{effortCopy.unavailable}</p>
-      )}
-    </fieldset>
+    <ReasoningEffortPicker
+      copy={effortCopy}
+      value={reasoningEffort}
+      onChange={setReasoningEffort}
+      supportsEffort={supportsEffort}
+      note={isAutoMode ? effortCopy.auto : currentProduct === "review" ? effortCopy.review : undefined}
+    />
   );
   const deepResearchModel = AVAILABLE_MODELS.find(model => model.id === "perplexity/sonar-deep-research");
   const deepResearchLocked = !deepResearchModel || !canUseModelWithPlan(currentPlan, deepResearchModel);
   const deepResearchReason = !deepResearchModel ? null
     : isGuestMode ? t("modelStatusReasons.loginRequired")
       : deepResearchLocked ? t("modelStatusReasons.upgradeRequired") : null;
+  // Deep Research engine v2: one deterministic offer read per account; never a model call.
+  const deepResearchEngineOffer = useDeepResearchEngineOffer(identityKey, !isGuestMode && currentProduct === "chat");
+  const [deepResearchEngineOpen, setDeepResearchEngineOpen] = useState(false);
+  const deepResearchEngineDefault = Boolean(deepResearchEngineOffer?.offered && deepResearchEngineOffer.features?.defaultEntry);
   const openDeepResearchSetup = () => {
     closeMenu(false);
     if (deepResearchLocked) {
@@ -3179,12 +3179,14 @@ export function ChatInput({
               ref={modelMenuButtonRef}
               type="button"
               onClick={(event) => toggleModelPicker(event.currentTarget)}
-              className="flex h-11 min-w-0 max-w-[6.5rem] touch-manipulation items-center gap-1 overflow-hidden rounded-xl px-2 text-xs font-medium text-zinc-800 transition hover:bg-zinc-100 max-[240px]:w-11 max-[240px]:max-w-11 max-[240px]:shrink-0 max-[240px]:justify-center max-[240px]:px-0 dark:text-zinc-100 dark:hover:bg-zinc-800 md:max-w-[8.5rem] md:[@media(pointer:fine)]:h-9"
+              className={`flex h-11 min-w-0 touch-manipulation items-center gap-1 overflow-hidden rounded-xl px-2 text-xs font-medium text-zinc-800 transition hover:bg-zinc-100 max-[240px]:w-11 max-[240px]:max-w-11 max-[240px]:shrink-0 max-[240px]:justify-center max-[240px]:px-0 dark:text-zinc-100 dark:hover:bg-zinc-800 md:[@media(pointer:fine)]:h-9 ${
+                explicitEffort ? "max-w-[9.5rem] md:max-w-[12rem]" : "max-w-[6.5rem] md:max-w-[8.5rem]"
+              }`}
               data-testid="composer-model-select"
               title={isAutoMode ? `${autoCopy.activeSummary}. ${autoCopy.modeHint}` : activeModelNames.join(", ")}
               aria-label={
                 isAutoMode
-                  ? `${autoCopy.compactLabel}${effortSuffix}. ${autoCopy.activeSummary}. ${t("chat.modelSelect")}`
+                  ? `${autoPickerLabel}${effortSuffix}. ${autoCopy.activeSummary}. ${t("chat.modelSelect")}`
                   : `${t("chat.modelSelect")}. ${modelsSelectedLabel(activeSelectedModels.length)}${effortSuffix}`
               }
               aria-expanded={isMenuOpen && menuView === "models"}
@@ -3230,7 +3232,7 @@ export function ChatInput({
                 }`}
               >
                 {isAutoMode
-                  ? autoCopy.compactLabel
+                  ? autoPickerLabel
                   : explicitEffort && activeModelNames.length === 1 ? activeModelNames[0] : modelsSelectedLabel(activeSelectedModels.length)}
               </span>
               {explicitEffort && <span className="shrink-0 max-[240px]:sr-only" data-testid="composer-effort-summary">{effortSuffix}</span>}
@@ -3574,6 +3576,41 @@ export function ChatInput({
               </button>
             </div>
           )}
+          {/*
+            Compare in Review with the question's document: it is not carried
+            across, so it is picked again through this composer's own picker,
+            limits and upload. Only a readable document (any of the kinds the
+            handoff accepts, not necessarily the original's) that finished
+            uploading here settles it; removing it brings the prompt back. Nothing here claims
+            the picked file is the original -- the person picking it knows.
+          */}
+          {fileReattachPrompt && (attachments.some(isReattachableDocument) ? (
+            <p
+              role="status"
+              data-testid="review-file-reattach-attached"
+              className="mb-2 px-1 text-[12px] font-semibold leading-4 text-zinc-600 dark:text-zinc-300"
+            >
+              {t("chat.compareInReviewFileAttached")}
+            </p>
+          ) : (
+            <div
+              role="status"
+              data-testid="review-file-reattach"
+              className="mb-2 flex flex-col gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-[12px] leading-4 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 sm:flex-row sm:items-center"
+            >
+              <p className="min-w-0 flex-1">{t("chat.compareInReviewFileReattach")}</p>
+              <button
+                type="button"
+                data-testid="review-file-reattach-choose"
+                disabled={draftLocked || !canAttach || attachments.length >= maxAttachments}
+                onClick={() => fileInputRef.current?.click()}
+                className={`inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-2.5 font-bold text-zinc-800 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-800 ${isMobileShell ? "min-h-11" : "py-1.5"}`}
+              >
+                <Paperclip className="h-4 w-4" aria-hidden="true" />
+                {t("chat.compareInReviewFileChoose")}
+              </button>
+            </div>
+          ))}
           {(attachments.length > 0 ||
             scopedPendingAttachments.length > 0 ||
             scopedFailedAttachments.length > 0) && (
@@ -3934,6 +3971,8 @@ export function ChatInput({
             useCompactMobileReviewSpacing ? "gap-x-1.5 gap-y-1" : "gap-1.5"
           } max-[360px]:gap-x-0.5 max-[240px]:contents`}
         >
+          {deepResearchEngineOpen && <DeepResearchEngineSheet open language={lang} conversationId={currentChatId} draft={value}
+            offer={deepResearchEngineOffer} onClose={() => setDeepResearchEngineOpen(false)} />}
           {currentProduct === "chat" && !isGuestMode && !researchPreview?.selected && <McpChatPicker conversationId={currentChatId} disabled={draftLocked || isSending} />}
           <button
             ref={actionMenuButtonRef}
@@ -4383,7 +4422,11 @@ export function ChatInput({
                       </span>
                     </button>
                   )}
-                  {review?.mode !== "easy" && (
+                  {deepResearchEngineOffer?.offered && (
+                    <DeepResearchEngineRow language={lang} disabled={isDraftMutationDisabled || isSending}
+                      onOpen={() => { closeMenu(false); setDeepResearchEngineOpen(true); }} />
+                  )}
+                  {review?.mode !== "easy" && !deepResearchEngineDefault && (
                       <button
                         type="button"
                         data-testid="tools-deep-research-row"

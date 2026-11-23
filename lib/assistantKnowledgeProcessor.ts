@@ -19,7 +19,7 @@ import {
     embedKnowledgeChunksQuietly,
     imagePageChunkContent,
 } from "@/lib/assistantKnowledgeEmbedding";
-import { knowledgeUsage } from "@/lib/assistantKnowledgeService";
+import { containerOfFile, knowledgeUsage } from "@/lib/assistantKnowledgeService";
 import { lockAccountKnowledgeQuota } from "@/lib/assistantProfileImportLocks";
 import { extractPdfTextSafely, renderPdfImagePagesSafely } from "@/lib/mediaSecurity";
 import { parseOfficeSafely } from "@/lib/officeSecurity";
@@ -189,7 +189,8 @@ const markFailed = async (fileId: string, failureCode: string) => {
 const processClaimedFile = async (file: {
     id: string;
     userId: string;
-    profileId: string;
+    profileId: string | null;
+    projectId: string | null;
     mime: string;
     r2Key: string;
 }): Promise<KnowledgeProcessResult> => {
@@ -237,7 +238,8 @@ const processClaimedFile = async (file: {
     // returned. This is the only place the figure it guards actually moves.
     const refusal = await prisma.$transaction(async (tx) => {
         await lockAccountKnowledgeQuota(tx, file.userId);
-        const usage = await knowledgeUsage(file.userId, file.profileId);
+        // Account-wide figures: a profile file and a project file share them.
+        const usage = await knowledgeUsage(file.userId, containerOfFile(file));
         const decision = knowledgeExtractedTextRefusal({
             extractedBytesInAccount: usage.extractedBytesInAccount,
             incomingExtractedBytes: extractedBytes,
@@ -349,6 +351,7 @@ export const processKnowledgeFile = async (
             id: true,
             userId: true,
             profileId: true,
+            projectId: true,
             mime: true,
             r2Key: true,
         },

@@ -100,3 +100,6 @@ export function createApiClient(transport: ApiFetch) {
     },
   };
 }
+export * from "./projectWorkspace";
+
+export { createResearchApi, ResearchApiError, type ResearchAction, type ResearchApi } from "./research";

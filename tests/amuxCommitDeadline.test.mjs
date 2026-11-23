@@ -465,6 +465,13 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // Owner decision 2026-11-21: an audited portfolio node content revision;
   // one parent guard body, no commit-deadline marker or trigger changes.
   "20261121130000_amux_portfolio_node_content_revision",
+  // Owner decision 2026-11-22: the owner's audited node move; the same one
+  // parent guard body, no commit-deadline marker or trigger changes.
+  "20261122150000_amux_portfolio_node_move",
+  // Owner decision 2026-11-23: a review pull request's settlement may be
+  // complete; one state CHECK on AmuxDmOwnerSettlement, no commit-deadline
+  // marker, classifier or trigger changes.
+  "20261123210000_amux_dm_settlement_t2_complete",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

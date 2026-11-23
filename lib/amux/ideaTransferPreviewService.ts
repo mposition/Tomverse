@@ -25,10 +25,12 @@ import {
 import { readCurrentAmuxIdeaFrontierSelection } from "./ideaFrontierCatalogRead.ts";
 import { createAmuxContentKeyRing, loadAmuxContentKeyRing } from "./ideaKeyStore.ts";
 import { inspectAmuxIdeaInput } from "./ideaInputCore.ts";
+import { loadAmuxExistingHierarchyTargets } from "./ideaNodeDuplicateScanService.ts";
 import {
   AMUX_V4_ANALYSIS_PROMPT_VERSION,
   buildAmuxIdeaAnalysisPrompt,
   continuationFromAmuxAnalysisChunk,
+  amuxPromptPermittedTargetRefs,
 } from "./ideaAnalysisPromptCore.ts";
 import { matchesInitialPlanSystemAudit } from "./ideaInitialPlanAuditCore.ts";
 import { buildAmuxSourcePlanManifest } from "./ideaSourcePlanManifestCore.ts";
@@ -241,11 +243,52 @@ export async function readPreviousOutputPage(tx: Prisma.TransactionClient, input
   return { continuation, permittedTargetRefs };
 }
 
+/** The permitted targets the stored prompt of one preview gave the model
+ * (owner decision 2026-11-22): an answer is checked against exactly the
+ * existing hierarchy its prompt listed, not the hierarchy at answer time. */
+export async function readAmuxPreviewPromptTargetsInTx(tx: Prisma.TransactionClient, input: {
+  ideaId: string; previewId: string; chunkIndex: number; keys: AmuxContentKeys;
+}): Promise<AmuxPermittedTargetRef[]> {
+  const preview = await tx.amuxIdeaTransferPreview.findUnique({
+    where: { id: input.previewId },
+    select: { ideaId: true, chunkIndex: true, payloadCiphertext: true,
+      payloadKeyId: true, payloadKeyVersion: true, payloadDigest: true,
+      payloadDigestKeyId: true, payloadPurgedAt: true } });
+  if (!preview || preview.ideaId !== input.ideaId || preview.chunkIndex !== input.chunkIndex ||
+      !preview.payloadCiphertext || !preview.payloadKeyId || !preview.payloadKeyVersion ||
+      preview.payloadPurgedAt !== null) {
+    throw new IdeaTransferPreviewError("integrity_unavailable");
+  }
+  let payload: Buffer;
+  try {
+    payload = openAmuxContent({ ciphertext: Buffer.from(preview.payloadCiphertext),
+      keyId: preview.payloadKeyId, keyVersion: preview.payloadKeyVersion },
+    "transfer_payload", input.previewId, input.keys);
+  } catch { throw new IdeaTransferPreviewError("integrity_unavailable"); }
+  try {
+    if (!verifyAmuxContentDigest(payload, "transfer_payload", input.previewId,
+      preview.payloadDigest, preview.payloadDigestKeyId, input.keys)) {
+      throw new IdeaTransferPreviewError("integrity_unavailable");
+    }
+    const parsed: unknown = JSON.parse(payload.toString("utf8"));
+    const targets = parsed && typeof parsed === "object" && !Array.isArray(parsed) &&
+      (parsed as Record<string, unknown>).previewId === input.previewId
+      ? amuxPromptPermittedTargetRefs((parsed as Record<string, unknown>).prompt,
+        input.chunkIndex) : null;
+    if (!targets) throw new IdeaTransferPreviewError("integrity_unavailable");
+    return targets;
+  } catch { throw new IdeaTransferPreviewError("integrity_unavailable"); }
+  finally { payload.fill(0); }
+}
+
 /** One idea-only, non-sending preview. The owner sees the same stored prompt
  * that a future, separately approved runner would have to verify and use. */
 export async function commitIdeaOnlyTransferPreview(tx: Prisma.TransactionClient, input: {
   session: Session; request: Request; choice: IdeaOnlyTransferPreviewRequest;
   keys: AmuxContentKeys; browserNonce: string;
+  /** The existing hierarchy, read before the transaction; the first page's
+   * permitted targets (owner decision 2026-11-22). */
+  existingNodes?: readonly AmuxPermittedTargetRef[];
 }): Promise<{ previewId: string; expiresAt: Date; payload: PreviewPayload;
   payloadDigest: string; payloadDigestKeyId: string }> {
   const actorUserId = ownerId(input.session);
@@ -383,7 +426,7 @@ export async function commitIdeaOnlyTransferPreview(tx: Prisma.TransactionClient
       revisionChunkIndex: chunkIndex,
       continuation: previous?.continuation ?? null,
       sourceTexts: [{ refId: "operator_idea", kind: "operator_idea", text: parsed.input.idea }],
-      permittedTargetRefs: previous?.permittedTargetRefs ?? [],
+      permittedTargetRefs: previous?.permittedTargetRefs ?? [...(input.existingNodes ?? [])],
     });
     if (prompt.status !== "prompt_candidate") {
       throw new IdeaTransferPreviewError("not_ready");
@@ -585,12 +628,18 @@ export async function prepareIdeaOnlyTransferPreview(
     ], [{ ideaId: choice.ideaId, purpose: "transfer_payload",
       subjectId: choice.previewId }]);
   } catch { throw new IdeaTransferPreviewError("integrity_unavailable"); }
+  // The first page is given the existing hierarchy (owner decision 2026-11-22).
+  let existingNodes: AmuxPermittedTargetRef[] = [];
+  if (chunkIndex === 0) {
+    try { existingNodes = await loadAmuxExistingHierarchyTargets(); }
+    catch { throw new IdeaTransferPreviewError("integrity_unavailable"); }
+  }
   let callbackReturned = false;
   try {
     return await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('statement_timeout', '5000', true)`;
       const result = await commitIdeaOnlyTransferPreview(tx, {
-        session, request, choice, keys, browserNonce,
+        session, request, choice, keys, browserNonce, existingNodes,
       });
       callbackReturned = true;
       return result;

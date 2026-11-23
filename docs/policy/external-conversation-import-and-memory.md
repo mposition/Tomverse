@@ -584,15 +584,16 @@ identity 변경 후보는 모델 분류와 무관하게 거부하거나 `manual_
 처음부터 source discriminator를 둡니다:
 `external_message | tomverse_message | manual`. source type별로 정해진 FK
 패턴을 DB CHECK(또는 동등한 무결성 검사)로 강제하고, owner 일치, lock·delete
-상태 전파를 지킵니다. 릴리스 B는 `external_message`·`manual`을 사용하고
-`tomverse_message`는 schema만 예약합니다.
+상태 전파를 지킵니다. 릴리스 B는 `external_message`·`manual`을 사용하고,
+Project workspace(2026-11-23, §14.5)부터 `tomverse_message`를 프로젝트 Memory의
+native 근거로 사용합니다(`MemoryEvidence.tomverseMessageId` → `Message` FK, CASCADE).
 
 **manual evidence 구조 확정(§23 항목 2, 2026-08-03)**: "nullable FK 중
 정확히 하나" 규칙은 message 계열 sourceType에만 적용되는 표현이었고, 확정
 규칙은 다음과 같습니다.
 
 - `sourceType = external_message` → `externalMessageId`만 NOT NULL
-- `sourceType = tomverse_message` → `tomverseMessageId`만 NOT NULL (예약)
+- `sourceType = tomverse_message` → `tomverseMessageId`만 NOT NULL (프로젝트 대화의 native 메시지, §14.5)
 - `sourceType = manual` → **두 FK 모두 NULL.** 사용자가 직접 입력한 근거
   텍스트가 evidence 본체이며 `MemoryEvidence`에 저장되고,
   `evidenceDigest`는 그 텍스트의 content digest입니다. 별도 리소스로
@@ -1716,6 +1717,42 @@ memory 개수는 표시하지 않으므로(§13.4) 두 숫자를 합치는 일�
   `tests/memoryReleaseContracts.test.mjs`(제3자 경로 배제),
   `tests/chatMessageSerialization.test.ts`(allowlist 배제),
   `tests/e2e/chat-memory-context.spec.ts`(생성 중·재조회 양쪽 표시).
+
+### 14.5 Project workspace — 프로젝트 맥락 (2026-11-23)
+
+운영자 지시(2026-11-23): 프로젝트는 대화·자료·기억을 묶는 workspace입니다. 구현은
+`lib/projectWorkspaceCore.ts`(순수), `lib/projectWorkspaceService.ts`(DB),
+`lib/chatProjectContext.ts`(turn), `lib/projectChatTools.ts`(검색 도구)에 있습니다.
+
+- **범위**: 기존 프로젝트는 `contextEnabled=false`(폴더)로 남습니다. 새 workspace는 생성
+  화면에서 맥락 사용을 명시적으로 켭니다. `MemoryItem.projectId`가 NULL이면 개인 기억,
+  값이 있으면 그 프로젝트 안에서만 씁니다. Project 맥락이 켜진 turn은 기본으로 그 프로젝트
+  기억만 쓰고, 개인 기억은 사용자가 고를 때만 함께 씁니다. 충돌·supersede·semantic 중복·
+  추출 저장은 같은 scope 안에서만 비교합니다. 계정/대화 Memory off와 Assistant 제한은
+  우회되지 않습니다.
+- **삭제**: 프로젝트 삭제는 대화를 남기고(프로젝트에서 분리) 프로젝트 자료·기억을 지웁니다.
+  `MemoryItem.projectId`는 CASCADE이며 SetNull로 개인 기억이 되지 않습니다. 자료가 있는
+  프로젝트의 단순 DELETE는 409이고 요약 확인값이 필요합니다.
+- **자료**: `AssistantKnowledgeFile`은 profile 또는 project 중 정확히 하나를 소유자로 갖습니다
+  (DB CHECK). quota는 계정 합계를 공유합니다. 첨부·생성 파일 선택 버전·Review 결과·Research
+  보고서는 서버가 원본을 읽어 별도 사본으로 저장하며(`sourceRef`는 출처 기록이지 권한이 아님),
+  재시도는 `(projectId, requestKey)`로 idempotent합니다.
+- **맥락 bundle**: §10 bundle에 `projectHash`(프로젝트 id·revision·scope·선택 발췌·참조 digest)와
+  `projectTokens`가 더해집니다. 맥락이 없는 turn의 fingerprint는 이전과 같습니다. 맥락이 켜진
+  프로젝트 대화는 bundle 없이 전송하면 409로 재준비를 요구합니다.
+- **다른 대화 검색**: `project_search`/`project_read`는 기존 application tool loop에서 MCP 도구와
+  같은 방식(도구 정의 + 결과 허용량 × pass 예약, call별 측정)으로 가격이 매겨집니다. 검색은
+  계정 검색 query 안에서 project 조건을 limit 이전에 적용하고, 잠긴 대화는 검색하지 않습니다.
+- **자동 프로젝트 기억**: 답변 저장 뒤 새 메시지 창(cursor)을 native extraction run으로
+  큐잉합니다. 근거는 사용자 메시지여야 하며(validator), 저장 직전에 owner·project·잠금·digest를
+  다시 확인합니다. 새 provider 지출이므로 운영 스위치
+  `TOMVERSE_PROJECT_AUTO_MEMORY_ENABLED`는 기본 꺼져 있습니다.
+- **답변 출처**: `ProjectAnswerReceipt`는 답변에 전달된 프로젝트 출처(ref·제목)만 기록합니다.
+  공유 snapshot·대화 export에 들어가지 않고, 열 때마다 접근을 다시 확인합니다. 전달 기록이지
+  모델이 실제로 활용했다는 증명이 아닙니다. 답변별 "Memory N개" 배지는 만들지 않습니다(§13.4).
+- **Research Preview**: 프로젝트 대화에서 실행할 수 있고 보고서는 그 대화에 남아 저장·검색·후속
+  Chat에 쓰입니다. Research 실행 자체에는 프로젝트 지침·자료·기억을 넣지 않으며, 프로젝트 자료를
+  웹 검색 provider에 보내지 않습니다.
 
 ## 15. Feature flag와 롤아웃 · rollback
 

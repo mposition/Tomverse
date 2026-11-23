@@ -63,7 +63,11 @@ import {
 export type AutoLlmRouterCallResult = {
     outcome: "picked" | "invalid" | "error" | "timeout";
     pick: AutoLlmRouterPick | null;
-    usage: { inputTokens?: number; outputTokens?: number; reasoningTokens?: number } | undefined;
+    usage: {
+        inputTokens?: number; outputTokens?: number; reasoningTokens?: number;
+        /** The reported cache split, passed through for callers that price it (the optimizer). */
+        inputTokenDetails?: { cacheReadTokens?: number; cacheWriteTokens?: number };
+    } | undefined;
     failure?: AutoLlmRouterFailure;
     imageDecision?: ChatImageDecision;
     searchQueries?: string[];
@@ -270,12 +274,17 @@ async function callPreparedAutoLlmRouter(
             providerOptions: autoLlmRouterProviderOptions(input.routerModel.provider),
         });
         const raw = (history ? generated.totalUsage : generated.usage) as { inputTokens?: number; outputTokens?: number;
-            reasoningTokens?: number; outputTokenDetails?: { reasoningTokens?: number } } | undefined;
+            reasoningTokens?: number; outputTokenDetails?: { reasoningTokens?: number };
+            inputTokenDetails?: { cacheReadTokens?: number; cacheWriteTokens?: number } } | undefined;
         // Reasoning tokens are output the answer never shows; at the router's
         // effort they are what a slow call would be spending its time on.
         const reasoningTokens = raw?.outputTokenDetails?.reasoningTokens ?? raw?.reasoningTokens;
+        const cache = raw?.inputTokenDetails;
         usage = raw ? { inputTokens: raw.inputTokens, outputTokens: raw.outputTokens,
-            ...(typeof reasoningTokens === "number" ? { reasoningTokens } : {}) } : undefined;
+            ...(typeof reasoningTokens === "number" ? { reasoningTokens } : {}),
+            // Absent and zero price the same; anything else, invalid values included, is passed on.
+            ...(cache && [cache.cacheReadTokens, cache.cacheWriteTokens].some((value) => value !== undefined && value !== 0)
+                ? { inputTokenDetails: { cacheReadTokens: cache.cacheReadTokens, cacheWriteTokens: cache.cacheWriteTokens } } : {}) } : undefined;
         finishReason = generated.finishReason;
         stage = "output";
         const output = generated.output;

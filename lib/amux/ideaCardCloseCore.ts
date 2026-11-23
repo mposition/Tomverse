@@ -250,9 +250,12 @@ function cardLine(card: AmuxIdeaCardCloseAskedCard, nowMs: number | undefined) {
  * Written here from card numbers, statuses, each blocked card's reason as a
  * fixed sentence, how long the cards have not changed and the reason code
  * only: never the idea's text. No word of it may hit the routing term list on
- * its own (tests/amuxIdeaCardCloseCore.test.mjs), so a question reaches a DM
- * unless a card's own number says otherwise, and then it stays with the
- * operator. A row written before the reasons and dates reads without them.
+ * its own (tests/amuxIdeaCardCloseCore.test.mjs). Since the owner decision of
+ * 2026-11-22 the router does not read a card the app filed for those terms at
+ * all (lib/amux/decisionMakerCore.ts), so a card's own number no longer keeps
+ * the question with the operator either; the rule above is what the text is
+ * still written to. A row written before the reasons and dates reads without
+ * them.
  */
 export function amuxIdeaCardCloseRelayCard(input: {
   questionId: string; reasonCode: string; cards: readonly AmuxIdeaCardCloseAskedCard[]; nowMs?: number;

@@ -41,6 +41,8 @@ const createSchema = z
          * the server still decides ownership, the lock and the product.
          */
         idempotencyKey: z.string().uuid(),
+        /** Start the continuation inside one of the caller's projects (owner-checked). */
+        projectId: z.string().min(1).max(64).optional(),
     })
     .strict();
 
@@ -79,6 +81,7 @@ export async function respondToContinuationCreate(
             idempotencyKey: payload.idempotencyKey,
             request: req,
             productKey: target.productKey,
+            projectId: payload.projectId,
         });
 
         return NextResponse.json(result, {

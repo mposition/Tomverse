@@ -427,6 +427,20 @@ export const capabilitiesNeedFilling = (profile: CodingStoredProfile): boolean =
   (profile.source === "chat" && (profile.capabilities.structuredOutput === "none" || (profile.evidence?.sources.length ?? 0) === 0));
 
 /**
+ * A chat link's tool calling after a fill. The chat registry already knows
+ * every coding candidate calls tools (registryCodingCapabilities: the external
+ * API serves each one with `capabilities.tools`), so a documentation answer of
+ * "none" never lowers it: the link keeps what it has (owner decision
+ * 2026-11-22), and only the operator's own setting turns it off. Any answer
+ * that names support is taken as it is. The answer itself stays in the
+ * evidence and the audit row.
+ */
+export const keptToolCalling = (
+  current: CodingLinkedProfile["capabilities"]["toolCalling"],
+  answered: CodingLinkedProfile["capabilities"]["toolCalling"]
+): CodingLinkedProfile["capabilities"]["toolCalling"] => (answered === "none" ? current : answered);
+
+/**
  * Fill one coding row from the provider's own documentation: a chat link's
  * tool calling and structured output (owner decision 2026-11-21), and any row's
  * coding strengths and weaknesses (owner decision 2026-11-22) -- a dedicated
@@ -516,10 +530,12 @@ export const fillLinkCapabilities = async (input: {
     }
     const changes: { field: string; from: unknown; to: unknown }[] = [];
     let next: CodingStoredProfile;
+    let toolCalling = draft.toolCalling;
     if (current.data.source === "chat") {
+      toolCalling = keptToolCalling(current.data.capabilities.toolCalling, draft.toolCalling);
       next = codingLinkedProfileSchema.parse({
         ...current.data,
-        capabilities: { toolCalling: draft.toolCalling, structuredOutput },
+        capabilities: { toolCalling, structuredOutput },
         evidence: {
           sources: draft.sources.slice(0, 3),
           draftedAt: draft.draftedAt,
@@ -529,8 +545,8 @@ export const fillLinkCapabilities = async (input: {
         },
         ...(notes ? { codingNotes: notes } : {}),
       });
-      if (current.data.capabilities.toolCalling !== draft.toolCalling) {
-        changes.push({ field: "toolCalling", from: current.data.capabilities.toolCalling, to: draft.toolCalling });
+      if (current.data.capabilities.toolCalling !== toolCalling) {
+        changes.push({ field: "toolCalling", from: current.data.capabilities.toolCalling, to: toolCalling });
       }
       if (current.data.capabilities.structuredOutput !== structuredOutput) {
         changes.push({ field: "structuredOutput", from: current.data.capabilities.structuredOutput, to: structuredOutput });
@@ -563,7 +579,9 @@ export const fillLinkCapabilities = async (input: {
       metadata: {
         modelId: input.modelId,
         source,
-        ...(source === "chat" ? { toolCalling: draft.toolCalling, structuredOutput } : {}),
+        ...(source === "chat"
+          ? { toolCalling, structuredOutput, ...(toolCalling !== draft.toolCalling ? { answeredToolCalling: draft.toolCalling } : {}) }
+          : {}),
         sources: next.source === "chat" ? (next.evidence?.sources ?? []) : [],
         codingNotes: (notes ?? null) as unknown as Prisma.InputJsonValue,
         changes: changes as unknown as Prisma.InputJsonValue,

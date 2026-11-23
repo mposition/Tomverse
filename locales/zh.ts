@@ -3,6 +3,7 @@ import { externalApiCopy } from "./externalApi";
 import { reviewHandoffCopy } from "./reviewHandoff";
 import { researchPreviewCopy } from "./researchPreview";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
+import { projectWorkspaceCopy } from "./projectWorkspace";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
 
@@ -256,6 +257,11 @@ export const zh = {
         compareInReviewLabel: "在新的 Review 中用多个模型比较这个问题",
         compareInReviewContext: "之前的问题：",
         compareInReviewBlocked: "请先完成或处理当前消息，再打开 Review。",
+        compareInReviewNeedsQuestion: "这一轮只发送了文件，没有可比较的问题。请在书面问题的回答上进行比较。",
+        compareInReviewFileReattach: "已带入 Chat 中的问题。如需用同一文件比较，请重新附加。",
+        compareInReviewFileChoose: "选择文件",
+        compareInReviewFileAttached: "已附加文件",
+        compareInReviewDraftKept: "已保留你正在编写的 Review 草稿。",
         singleModelRequired: "Chat 使用一个回答模型。选择模型将替换当前选择。",
         singleModelProfileRequired: "此助手使用多个模型。请为 Chat 选择单模型助手。",
         restoreDraftNotEmpty: "已保留您正在编辑的内容。请先发送或清空输入框，再恢复此问题。",
@@ -2441,6 +2447,7 @@ export const zh = {
         back: "返回 Tomverse",
     },
     chatStarter: workspaceWelcomeCopy.zh.starter,
+    projectWorkspace: projectWorkspaceCopy["zh"],
     // HELP-NAV-01 guided help: pick a task, see where it is done. Directions only.
     helpGuide: {
         menuItem: "查找操作方法",

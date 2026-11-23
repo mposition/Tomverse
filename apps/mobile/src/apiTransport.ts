@@ -1,7 +1,8 @@
 import { researchRunMessage } from "../../../lib/researchPreviewRunClient";
+import { createResearchApi } from "@tomverse/api-client";
 import type { ResearchPreviewRunDto } from "../../../lib/researchPreviewRunTypes";
 import { createWorkspaceTransport } from "./workspaceTransport";
-import { createApiClient, ApiClientError, requestChatLocationIntent } from "@tomverse/api-client";
+import { createApiClient, ApiClientError, requestChatLocationIntent, createProjectWorkspaceClient } from "@tomverse/api-client";
 import { CONTINUATION_RECEIPT_HEADER, receiptForAttempt, type ContinuationReceipt } from "../../../lib/continuationReceipt";
 import { PASSAGE_HEADER, encodePassages } from "../../../lib/continuationPassages";
 import { parseChatStreamTrailer } from "../../../lib/webSearchStreamTrailer";
@@ -43,10 +44,10 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
   const sourceReceiptByMessage = new Map<string, ContinuationReceipt>();
   const clearSessionState = () => { sessionRevision++; locationIdentity = null; location.setIdentity(null); capabilityCache = null; capabilityRequest = null; unlockGrants.clear(); pinSequences.clear(); routedModelByMessage.clear(); sourceReceiptByMessage.clear(); };
   const notifySessionLost = () => { clearSessionState(); for (const listener of listeners) listener(); };
-  const run = async (path: string, init?: MobileRequestInit): Promise<Response> => {
+  const run = async (path: string, init?: MobileRequestInit, softAuth = false): Promise<Response> => {
     try {
       for (const [id, token] of unlockGrants) if (Number(token.split(".")[0]) <= Date.now() / 1000) unlockGrants.delete(id);
-      if (unlockGrants.size && (/^\/api\/(?:conversations|artifacts)(?:\/|\?)/.test(path) || path.startsWith("/api/chat/research-preview/") || path === "/api/chat" || path === "/api/chat/preflight")) {
+      if (unlockGrants.size && (/^\/api\/(?:conversations|artifacts)(?:\/|\?)/.test(path) || path.startsWith("/api/chat/research-preview/") || path.startsWith("/api/chat/research/") || path === "/api/chat" || path === "/api/chat/preflight" || path === "/api/chat/context")) {
         const grantHeaders = (value?: RequestInit) => {
           const headers = new Headers(value?.headers);
           headers.set("X-Tomverse-Conversation-Unlocks", [...unlockGrants].map(([id, token]) => `${id}=${token}`).join("; "));
@@ -56,7 +57,17 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
         init = typeof original === "function" ? () => grantHeaders(original()) : grantHeaders(original);
       }
       const response = await source(path, init);
-      if (response.status === 401) notifySessionLost();
+      if (response.status === 401) {
+        // A route the server has not switched on for this device refuses with the
+        // same 401 a revoked sign-in gets. For those routes, ask an enrolled one
+        // before concluding the session is gone, so a switched-off project
+        // workspace never signs the user out.
+        if (softAuth) {
+          const probe = await run("/api/user/account");
+          return probe.status === 401 ? response : Response.json({ code: "NATIVE_ROUTE_UNAVAILABLE" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+        }
+        notifySessionLost();
+      }
       if (response.status === 423) { const id = path.match(/^\/api\/conversations\/([A-Za-z0-9_-]+)/)?.[1]; if (id) unlockGrants.delete(id); }
       return response;
     }
@@ -125,6 +136,17 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
         if (index >= 0) messages[index] = { ...messages[index], researchRunId: run.id };
         else messages.push(researchRunMessage(run));
       }
+      } catch (error) { if ((error as { status?: number }).status === 401) throw error; }
+    }
+    if (capabilityCache?.value.researchEngine?.enabled) {
+      try {
+        const result = await request<{ runs: Array<{ id: string; conversationId: string; assistantMessageId: string; createdAt: string; status: string }> }>(`/api/chat/research/runs?conversationId=${encodeURIComponent(id)}`, { cache: "no-store" });
+        for (const run of result.runs) {
+          if (run.conversationId !== id) continue;
+          const index = messages.findIndex(message => message.id === run.assistantMessageId);
+          if (index >= 0) messages[index] = { ...messages[index], researchRunId: run.id, researchEngineRun: true };
+          else messages.push({ id: run.assistantMessageId, role: "assistant", content: "", researchRunId: run.id, researchEngineRun: true, status: "pending", createdAt: run.createdAt } as never);
+        }
       } catch (error) { if ((error as { status?: number }).status === 401) throw error; }
     }
     for (const attempt of item.responseAttempts ?? []) {
@@ -232,17 +254,66 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
         })),
       });
       controller.signal.throwIfAborted();
+      // An ordinary Chat send prepares its own context, as the web does: a
+      // conversation in a project with context on is refused without one, and
+      // memory and profile context ride in the same signed bundle. Review and
+      // Research arrive with their own admission (or none) and are unchanged.
+      const ownsContext = !admission && !research && !review;
+      const projectReferences = ownsContext ? continuation?.projectReferences : undefined;
+      const prepareContext = async (previous?: string) => {
+        if (revision !== sessionRevision) throw new DOMException("Session changed", "AbortError");
+        const prompt = String(persisted.messages.find(message => message.id === sourceId && message.role === "user")?.content ?? "");
+        let prepared: { contextBundle?: string | null };
+        try {
+          prepared = await request<{ contextBundle?: string | null }>("/api/chat/context", {
+            ...json("POST", { conversationId: persisted.id, modelIds: [modelId], prompt,
+              ...(previous ? { previousContextBundle: previous } : {}),
+              ...(projectReferences?.length ? { projectReferences } : {}) }), signal: controller.signal,
+          });
+        } catch (error) {
+          // The project workspace switch is off for this device: a folder-era
+          // project (context off) still sends, and the server alone refuses a
+          // project whose context is on but cannot be prepared here.
+          if (error instanceof ApiClientError && error.status === 503 && error.code === "NATIVE_PROJECT_WORKSPACE_UNAVAILABLE") return undefined;
+          throw error;
+        }
+        controller.signal.throwIfAborted();
+        if (revision !== sessionRevision) throw new DOMException("Session changed", "AbortError");
+        return typeof prepared.contextBundle === "string" ? prepared.contextBundle : undefined;
+      };
+      // Only where the server serves the project workspace to this device: with
+      // its switch off the edge refuses the call before any handler, and a
+      // folder-era project (context off) needs no bundle. A project whose
+      // context is on is then refused by /api/chat itself.
+      const workspaceServed = ownsContext && persisted.projectId
+        ? (await requireParity().catch(() => null))?.projectWorkspace === true : false;
+      let contextBundle = workspaceServed ? await prepareContext() : undefined;
       watchdog = createChatLivenessWatchdog({ onExpire: abort });
-      const response = await run("/api/chat", () => {
+      const dispatch = () => run("/api/chat", () => {
         controller.signal.throwIfAborted();
         if (revision !== sessionRevision) throw new DOMException("Session changed", "AbortError");
         return { ...json("POST", { messages, modelId, webSearchMode: research ? "always" : persisted.webSearchMode ?? "off", conversationId: persisted.id,
           ...(research ? { researchMode: "preview" } : {}),
           assistantMessageId, sourceUserMessageId: sourceId, ...(admission ?? {}),
+          ...(contextBundle ? { contextBundle } : {}),
+          ...(projectReferences?.length ? { projectReferences } : {}),
           ...(fix && location.canShare(fix, scope) ? { currentLocation: fix } : {}) }),
           ...(continuation?.sourcePassages !== undefined && !review && !research ? { headers: { "Content-Type": "application/json",
             [PASSAGE_HEADER]: encodePassages(continuation.sourcePassages) } } : {}), ...(research ? { headers: { "Content-Type": "application/json", "Accept-Language": research.locale } } : {}), signal: controller.signal };
       });
+      let response = await dispatch();
+      // One automatic re-preparation when the context drifted before anything
+      // streamed (the web's decideBundleStaleRecovery rule for a single send).
+      if (ownsContext && response.status === 409) {
+        const refusal = await response.clone().json().catch(() => null) as { code?: string; details?: { refusalReason?: string } } | null;
+        if (refusal?.code === "CHAT_CONTEXT_BUNDLE_STALE" && refusal.details?.refusalReason !== "already_consumed") {
+          const refreshed = await prepareContext(contextBundle);
+          if (refreshed) {
+            contextBundle = refreshed;
+            response = await dispatch();
+          }
+        }
+      }
       watchdog.noteHeaders();
       const traceId = response.headers.get("X-Request-ID");
       publishReceipt(receiptForAttempt(response.headers.get(CONTINUATION_RECEIPT_HEADER), traceId, assistantMessageId));
@@ -310,10 +381,22 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
       }, async () => { assertScope(); const value = await requireParity(); assertScope(); return value; }, async (url, headers, file) => { assertScope(); await uploadFile(url, headers, file); assertScope(); });
     },
     location,
+    // Project workspace: bound to this sign-in. A request issued under an
+    // earlier session (logout, another account) is refused before it leaves
+    // and its answer is discarded after it returns.
+    get projects() {
+      const revision = sessionRevision;
+      const assertScope = () => { if (revision !== sessionRevision) throw new DOMException("Session changed", "AbortError"); };
+      return createProjectWorkspaceClient(async (path, init) => {
+        assertScope(); const response = await run(path, init, true); assertScope(); return response;
+      }, async (url, headers, file) => { assertScope(); await uploadFile(url, headers, file as File); assertScope(); });
+    },
     researchPreviewOffer: async (input, signal, locale) => {
       if (!(await requireParity()).researchPreview?.enabled) return { offered: false, reason: "disabled" };
       return request("/api/chat/research-preview/offer", { ...json("POST", input), ...(locale ? { headers: { "Content-Type": "application/json", "Accept-Language": locale } } : {}), signal });
     },
+    researchEngine: createResearchApi((path, init) => run(path, init)),
+    researchEngineEnabled: async () => Boolean((await requireParity()).researchEngine?.enabled),
     researchRuns: {
       read: async (id, signal) => { if (!(await requireParity()).researchPreview?.enabled) throw Error("NATIVE_RESEARCH_UNAVAILABLE"); return (await request<{ run: ResearchPreviewRunDto }>(`/api/chat/research-preview/runs/${encodeURIComponent(id)}`, { cache: "no-store", signal })).run; },
       resume: async id => { if (!(await requireParity()).researchPreview?.enabled) throw Error("NATIVE_RESEARCH_UNAVAILABLE"); return (await request<{ run: ResearchPreviewRunDto }>(`/api/chat/research-preview/runs/${encodeURIComponent(id)}/resume`, { method: "POST" })).run; },
@@ -452,9 +535,9 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     },
     configureReview: async (id, models) => { await request(pathFor(id), json("PATCH", { selectedModels: models, selectionMode: "manual" })); return load(id); },
     routeReview: async (input) => { await requireParity(); const result = await askReviewRoute(input, (path, init) => { if (typeof path !== "string" || path !== "/api/review/route") throw Error("INVALID_REVIEW_ROUTE"); return run(path, init); }); if (!result || result.kind === "blocked") throw Error("REVIEW_ROUTE_UNAVAILABLE"); return result; },
-    quickSummaryPreview: async id => { if (!(await requireParity()).reviewAnalysis?.quickSummary) throw Error("NATIVE_QUICK_SUMMARY_UNAVAILABLE"); return request(`${pathFor(id)}/compare-summary?handoff=1`, { cache: "no-store" }); },
+    quickSummaryPreview: async (id, signal) => { if (!(await requireParity()).reviewAnalysis?.quickSummary) throw Error("NATIVE_QUICK_SUMMARY_UNAVAILABLE"); signal?.throwIfAborted(); return request(`${pathFor(id)}/compare-summary?handoff=1`, { cache: "no-store", ...(signal ? { signal } : {}) }); },
     runQuickSummary: async id => { if (!(await requireParity()).reviewAnalysis?.quickSummary) throw Error("NATIVE_QUICK_SUMMARY_UNAVAILABLE"); return request(`${pathFor(id)}/compare-summary`, json("POST", {})); },
-    reviewPreview: async (id, mode = "balanced", synthesis = false) => { await requireParity(); return request(`${pathFor(id)}/comparison-reviews?reviewMode=${encodeURIComponent(mode)}&includeSynthesis=${synthesis}`); },
+    reviewPreview: async (id, mode = "balanced", synthesis = false, signal) => { await requireParity(); signal?.throwIfAborted(); return request(`${pathFor(id)}/comparison-reviews?reviewMode=${encodeURIComponent(mode)}&includeSynthesis=${synthesis}`, signal ? { signal } : undefined); },
     runComparison: async (id, input) => { await requireParity(); return request(`${pathFor(id)}/comparison-reviews`, json("POST", input)); },
     reviewFeedback: async (id, reviewId) => { await requireParity(); return request(`${pathFor(id)}/comparison-reviews/item-feedback?reviewId=${encodeURIComponent(reviewId)}`); },
     setReviewFeedback: async (id, reviewId, reviewItemId, verdict) => { await requireParity(); await request(`${pathFor(id)}/comparison-reviews/item-feedback`, json(verdict ? "PUT" : "DELETE", { reviewId, reviewItemId, ...(verdict ? { verdict } : {}) })); },
@@ -535,8 +618,10 @@ export function createApiTransport(source: ApiFetch = mobileApiFetch, bridge = M
     models: async () => (await request<{ models: PublicCatalogModel[] }>("/api/models/catalog")).models.filter(isPubliclySelectableModel),
     capabilities: async () => ({ offered: (await request<{ autoSelection: { offered: boolean } }>("/api/products/chat/capabilities")).autoSelection.offered }),
     configure,
-    create: async (title, assistantProfileId) => {
-      const item = await request<{ id: string }>("/api/products/chat/conversations", json("POST", { webSearchMode: "always", ...(assistantProfileId ? { assistantProfileId } : {}), ...(title ? { title: title.slice(0, 30) } : {}) }));
+    create: async (title, assistantProfileId, projectId) => {
+      // The project is fixed by the create call itself, before the first send,
+      // so the first answer already runs in the project's context.
+      const item = await request<{ id: string }>("/api/products/chat/conversations", json("POST", { webSearchMode: "always", ...(assistantProfileId ? { assistantProfileId } : {}), ...(projectId ? { projectId } : {}), ...(title ? { title: title.slice(0, 30) } : {}) }));
       const detail = await load(item.id);
       return !assistantProfileId && detail.autoSelection?.offered ? configure(item.id, "", true) : detail;
     },

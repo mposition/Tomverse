@@ -8,6 +8,12 @@ export const RESEARCH_PREVIEW_RUN_PUBLIC_STATUSES = [
   "failed",
   "cancelled",
   "attention",
+  // Engine v2 only. A v1 row never enters these states.
+  "draft",
+  "planning",
+  "awaiting_input",
+  "paused",
+  "finalizing",
 ] as const;
 
 export const RESEARCH_PREVIEW_RUN_STATUSES = [
@@ -37,6 +43,10 @@ export const RESEARCH_PREVIEW_RUN_STOP_REASONS = [
   "outcome_unknown",
   "checkpoint_expired",
   "dispatch_refused",
+  // Engine v2 only.
+  "partial_report",
+  "run_deadline",
+  "source_revoked",
 ] as const;
 
 export type ResearchPreviewRunStatus =
@@ -100,6 +110,8 @@ export type ResearchPreviewRunMessage = {
 
 export type ResearchPreviewRunDto = {
   id: string;
+  /** 1 = Preview, 2 = Deep Research engine; clients render v2 with the shared workspace. */
+  engineVersion?: 1 | 2;
   conversationId: string;
   assistantMessageId: string;
   modelId: string;

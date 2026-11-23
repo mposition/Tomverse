@@ -990,6 +990,10 @@ run(
     // rule instead of becoming a second memory.
     "tests/integration/memory-semantic-retrieval.db.test.ts",
     "tests/integration/memory-source-deletion.db.test.ts",
+    // Project workspace: A/B/personal memory scope, native evidence and its
+    // move/lock/delete lifecycle, explicit scope moves, confirmed project
+    // deletion, the knowledge owner container and the turn context identity.
+    "tests/integration/project-workspace.db.test.ts",
     "tests/integration/external-conversation-lock.db.test.ts",
     "tests/integration/memory-expiry.db.test.ts",
     "tests/integration/chat-context-bundle.db.test.ts",
@@ -1164,6 +1168,15 @@ run(
     "--test-concurrency=1",
     "tests/integration/auto-router-optimizer-coding-run.db.test.mjs"],
   "Running the coding optimizer cycle's isolation gate, unknown-cost stops and evaluation spend",
+);
+// The cost-efficiency diagnostic's run fakes the model calls with module mocks:
+// its own process, like the coding run above.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1",
+    "tests/integration/auto-router-optimizer-diagnostic-run.db.test.mjs"],
+  "Running the cost-efficiency diagnostic's run: diagnostic-only record, no promotion or setting change",
 );
 // The native protocols (Claude Code Messages, Codex Responses) fake only the
 // one upstream module and run on the same ledger, key cap and receipts.
@@ -1597,6 +1610,32 @@ run(
     "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
     "--test-concurrency=1", "tests/integration/research-preview-durable-run.db.test.ts"],
   "Running durable Research Preview service, checkpoint and dispatch CAS scenarios"
+);
+
+// Deep Research engine v2 installs process-wide fakes (model, funding, network,
+// clock, evidence store); each suite runs in its own process.
+run(
+  ["--conditions=react-server", "--import", "tsx", "--test",
+    "--test-concurrency=1", "tests/integration/research-engine-run.db.test.ts"],
+  "Running Deep Research engine v2 end-to-end run"
+);
+
+run(
+  ["--conditions=react-server", "--import", "tsx", "--test",
+    "--test-concurrency=1", "tests/integration/research-engine-boundaries.db.test.ts"],
+  "Running Deep Research engine v2 privacy, money, race and lifecycle boundaries"
+);
+
+run(
+  ["--conditions=react-server", "--import", "tsx", "--test",
+    "--test-concurrency=1", "tests/integration/research-engine-chat-finance.db.test.ts"],
+  "Running Deep Research engine v2 against the real Chat credit ledger"
+);
+
+run(
+  ["--conditions=react-server", "--import", "tsx", "--test",
+    "--test-concurrency=1", "tests/integration/research-engine-scale.db.test.ts"],
+  "Running Deep Research engine v2 synthetic scale, concurrency and 60-minute fake-clock fixtures"
 );
 
 if ([...focusedSuites].some((suite) => !selectedFocusedSuites.has(suite))) {

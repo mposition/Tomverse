@@ -249,6 +249,27 @@ const REGISTRY = {
     reason:
       "pending or finalizing. Whether an upload key is currently claimed by a finalize in flight; the compare-and-set that takes a claim and the sweep that reclaims a stale one both read it.",
   },
+  AssistantKnowledgeFile_sourceKind_allowed: {
+    owner: "list",
+    module: "lib/projectWorkspaceCore.ts",
+    list: "PROJECT_MATERIAL_SOURCE_KINDS",
+    reason:
+      "Where a knowledge file came from, decided by the server: an upload, a project note, or a project-owned duplicate of a source the server read itself; clients name a source, never this value.",
+  },
+  ConversationProject_memoryScope_allowed: {
+    owner: "list",
+    module: "lib/projectWorkspaceCore.ts",
+    list: "PROJECT_MEMORY_SCOPES",
+    reason:
+      "Which stored memories a project turn may use. The settings route validates the same enum, so an unknown value is a 400 before it reaches the constraint.",
+  },
+  MemoryExtractionRun_sourceKind_allowed: {
+    owner: "list",
+    module: "lib/projectWorkspaceCore.ts",
+    list: "MEMORY_EXTRACTION_SOURCE_KINDS",
+    reason:
+      "Whether a run reads imported conversations or one project conversation's native window. Decided by the server when the run is created, never chosen by a client.",
+  },
   AssistantKnowledgeCleanup_reason_allowed: {
     owner: "list",
     module: "lib/assistantKnowledgeLimits.ts",
@@ -311,6 +332,132 @@ const REGISTRY = {
     list: "RESEARCH_PREVIEW_GENERATION_STATUSES",
     reason:
       "The provider dispatch boundary depends on intent, dispatch_started and outcome_unknown remaining exact; drift could permit an unsafe retry or lose already-spent provider cost.",
+  },
+  ResearchPreviewGeneration_kind_check: {
+    owner: "list",
+    module: "lib/researchEngineContract.ts",
+    list: "RESEARCH_DISPATCH_KINDS",
+    reason:
+      "Engine v2 reuses the dispatch ledger for model, search and read dispatches; settlement counts searches and tokens by this kind, so an unknown kind would be unpriced.",
+  },
+  ResearchPreviewRun_quality_status_check: {
+    owner: "list",
+    module: "lib/researchEngineContract.ts",
+    list: "RESEARCH_QUALITY_STATUSES",
+    reason:
+      "Report quality is shown separately from run and settlement state; the worker decides it from structure and the DTO must never meet an unlisted value.",
+  },
+  ResearchPlanRevision_author_check: {
+    owner: "list",
+    module: "lib/researchEngineContract.ts",
+    list: "RESEARCH_PLAN_AUTHORS",
+    reason:
+      "Model-authored and user-edited plan revisions are both kept; only these two authors exist.",
+  },
+  ResearchWorkItem_kind_check: {
+    owner: "list",
+    module: "lib/researchEngineContract.ts",
+    list: "RESEARCH_WORK_ITEM_KINDS",
+    reason:
+      "The executor dispatches by kind and the orchestrator groups research vs finalization by it; a kind without a handler would never finish.",
+  },
+  ResearchWorkItem_status_check: {
+    owner: "list",
+    module: "lib/researchEngineContract.ts",
+    list: "RESEARCH_WORK_ITEM_STATUSES",
+    reason:
+      "Claims, fencing, pause, budget blocking and recovery branch on these exact states; attention marks an unknown dispatch that is never retried.",
+  },
+  ResearchFundingSegment_purpose_check: {
+    owner: "list",
+    module: "lib/researchEngineContract.ts",
+    list: "RESEARCH_FUNDING_SEGMENT_PURPOSES",
+    reason:
+      "Work segments may not use the finalization reserve; the run-total invariant reads this purpose.",
+  },
+  ResearchFundingSegment_status_check: {
+    owner: "list",
+    module: "lib/researchEngineContract.ts",
+    list: "RESEARCH_FUNDING_SEGMENT_STATUSES",
+    reason:
+      "The run-total invariant sums reserving/reserved/unknown/settled holds by status; a drifted status would be counted wrongly or not at all.",
+  },
+  ResearchSource_origin_check: {
+    owner: "list",
+    module: "lib/researchEngineContract.ts",
+    list: "RESEARCH_SOURCE_ORIGINS",
+    reason:
+      "Origin decides public vs private handling (paired with the visibility shape check); private origins never reach search-capable roles.",
+  },
+  ResearchSource_visibility_check: {
+    owner: "list",
+    module: "lib/researchEngineContract.ts",
+    list: "RESEARCH_SOURCE_VISIBILITIES",
+    reason:
+      "The public/private boundary for prompts, exports and share projections.",
+  },
+  ResearchSource_status_check: {
+    owner: "list",
+    module: "lib/researchEngineContract.ts",
+    list: "RESEARCH_SOURCE_STATUSES",
+    reason:
+      "Revoked and excluded sources are dropped from evidence resolution and claims.",
+  },
+  ResearchSourceVersion_read_status_check: {
+    owner: "list",
+    module: "lib/researchEngineContract.ts",
+    list: "RESEARCH_READ_STATUSES",
+    reason:
+      "Snippet-only evidence must never be shown as an original-text read; the report and verifier branch on this.",
+  },
+  ResearchSourceVersion_method_check: {
+    owner: "list",
+    module: "lib/researchEngineContract.ts",
+    list: "RESEARCH_EXTRACTION_METHODS",
+    reason:
+      "Chunk locators (page, rows, messages, sections) are derived from the extraction method.",
+  },
+  ResearchReportRevision_author_check: {
+    owner: "list",
+    module: "lib/researchEngineContract.ts",
+    list: "RESEARCH_REPORT_AUTHORS",
+    reason:
+      "Model, user edit, follow-up and redaction revisions are distinguished in the revision list and export.",
+  },
+  ResearchReportRevision_quality_check: {
+    owner: "list",
+    module: "lib/researchEngineContract.ts",
+    list: "RESEARCH_QUALITY_STATUSES",
+    reason:
+      "Same quality vocabulary as the run.",
+  },
+  ResearchReportRevision_visibility_check: {
+    owner: "list",
+    module: "lib/researchEngineContract.ts",
+    list: "RESEARCH_REPORT_VISIBILITIES",
+    reason:
+      "Only a public revision may be shared; the public check forbids private-derived content in it.",
+  },
+  ResearchClaim_kind_check: {
+    owner: "list",
+    module: "lib/researchEngineContract.ts",
+    list: "RESEARCH_CLAIM_KINDS",
+    reason:
+      "Fact, inference and uncertainty are rendered differently.",
+  },
+  ResearchClaim_verification_check: {
+    owner: "list",
+    module: "lib/researchEngineContract.ts",
+    list: "RESEARCH_CLAIM_VERIFICATIONS",
+    reason:
+      "Writers may not cite unsupported claims; quality and redaction read verification.",
+  },
+  ResearchEvidenceObjectCleanup_reason_check: {
+    owner: "list",
+    module: "lib/researchEngineContract.ts",
+    list: "RESEARCH_CLEANUP_REASONS",
+    reason:
+      "Why a private evidence object is queued for deletion; the trigger and revocation path write these values.",
   },
   PromptRefinerShadowRun_status_check: {
     owner: "list",

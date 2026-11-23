@@ -1,10 +1,11 @@
-import { readDeviceDraft } from "@tomverse/chat-core/device-draft";
 import { ContinuationReceipt } from "../../../components/continuations/ContinuationReceipt";
 import type { ContinuationReceipt as SourceReceipt } from "../../../lib/continuationReceipt";
 import type { Passage } from "../../../lib/continuationPassages";
 import { mobileSourceContextCopy } from "../../../locales/mobileSourceContext";
 import { useResearchPreview } from "../../../components/chat/useResearchPreview";
 import { ResearchPreviewRunCard } from "../../../components/chat/ResearchPreviewRunCard";
+import { DeepResearchEngineSheet, ResearchWorkspace } from "../../../components/chat/DeepResearchEngine";
+import { researchEngineCopy } from "../../../locales/researchEngine";
 import { researchRunMessage } from "../../../lib/researchPreviewRunClient";
 import { providerName } from "./ModelChoices";
 import { type AssistantEntry, type IosPanel } from "./iosWorkspaceContract";
@@ -37,7 +38,8 @@ import { mobileLoginCopy, mobileLoginError } from "../../../locales/mobileLogin"
 import { AnswerContent } from "./AnswerContent";
 import { mobileCompletionCopy } from "../../../locales/mobileCompletion";
 import { AccountScreen } from "./AccountScreen";
-import { useDeviceDraft, clearNativeDrafts, preserveNativeDraft } from "./useDeviceDraft";
+import { useDeviceDraft, clearNativeDrafts, preserveNativeDraft, readNativeDraftText } from "./useDeviceDraft";
+import { appendNativeReviewChatDraft, sameNativeChatDraft, type NativeChatDraftApply, type NativeChatDraftSnapshot } from "./nativeReviewChat";
 import { useArtifactRevisionDraft } from "./useArtifactRevisionDraft";
 import { ImportedTranscript } from "./ImportedTranscript";
 import { reviewSeedFromChat } from "../../../lib/chatReviewHandoff";
@@ -48,6 +50,11 @@ import { mobileSettingsCopy } from "../../../locales/mobileSettings";
 import { useCompactBottomDock, useVisibleViewportHeight } from "../../../components/chat/useVisualViewport";
 import { NativeLocationOnboarding } from "./NativeLocationOnboarding";
 import { NativeAppUpdate } from "./NativeAppUpdate";
+import { mobileProjectsCopy } from "../../../locales/mobileProjects";
+import { ProjectWorkspace } from "./ProjectWorkspace";
+import { ProjectCreate } from "./ProjectCreate";
+import { ProjectChatBar, ProjectReceiptSheet, useProjectInfo } from "./ProjectSources";
+import { emptySelection, projectSendBlock, selectionFor, type ReferenceSelection } from "./projectWorkspaceState";
 
 const LAST_CHAT = "tomverse-native-last-chat";
 const REVIEW_HANDOFF_TARGET = "tomverse-native-review-handoff-target";
@@ -114,6 +121,21 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   const sourceParts = sourcePick?.owner === owner && sourcePick.id === conversation?.id ? sourcePick.parts : [];
   const sourceCopy = mobileSourceContextCopy(language);
   const sourceT = (key: string) => sourceCopy[key] ?? key;
+  // Project workspace: the open sheet, the project a new (not yet created) chat will belong to, and the sources picked for the next question.
+  const projectCopy = mobileProjectsCopy[language];
+  const [projectSheet, setProjectSheet] = useState<{ kind: "new" } | { kind: "open"; id: string } | null>(null);
+  const [projectRevision, setProjectRevision] = useState(0);
+  const [draftProject, setDraftProject] = useState<{ id: string } | null>(null);
+  const [projectRefs, setProjectRefs] = useState<ReferenceSelection>(emptySelection);
+  const [receiptFor, setReceiptFor] = useState<string | null>(null);
+  // What the server says about the workspace for this sign-in; until it answers, nothing is assumed off.
+  const [projectOffer, setProjectOffer] = useState<{ owner: string | null; enabled: boolean }>({ owner: null, enabled: true });
+  const activeProjectId = signedIn ? (conversation ? conversation.projectId ?? null : draftProject?.id ?? null) : null;
+  const workspaceOff = projectOffer.owner === owner && !projectOffer.enabled;
+  const projectInfo = useProjectInfo(transport, activeProjectId, owner, projectRevision, !workspaceOff);
+  const references = selectionFor(projectRefs, owner, conversation?.id ?? null, activeProjectId);
+  // The draft project belongs to the one chat created from it; once created it is spent.
+  const createChat = async (title?: string) => { const created = await transport.create(title, undefined, draftProject?.id); setDraftProject(null); return created; };
   const sourceSelection = conversation ? { selected: sourceParts, busy: streaming || uncertain,
     onChoose: (parts: Passage[]) => setSourcePick({ owner, id: conversation.id, parts }) } : undefined;
   const [draft, setDraft] = useDeviceDraft(owner, conversation?.id ?? null);
@@ -134,12 +156,16 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   // a reopened claimed or streaming attempt does not yet.
   const reportable = (message: { content: string; status?: string }) =>
     Boolean(transport.reportAnswer) && Boolean(message.content.trim()) && [undefined, "normal", "incomplete"].includes(message.status);
+  const receiptable = (message: ChatMessage) => Boolean(conversation?.projectId && transport.projects) && !workspaceOff && message.role === "assistant" && Boolean(message.content.trim()) && [undefined, "normal", "completed", "incomplete"].includes(message.status);
   const comparable = (message: ChatMessage) =>
     message.role === "assistant" && Boolean(message.content.trim()) &&
     (conversation?.surface === "continuation" ? [undefined, "normal", "completed"].includes(message.status) && !message.imageTurn && !message.researchRunId && !message.pendingJobId : [undefined, "normal", "incomplete"].includes(message.status));
   const [offline, setOffline] = useState(!navigator.onLine);
   const abort = useRef<AbortController | null>(null);
   const epoch = useRef(0);
+  /** The owner's new-Chat draft (text and files), memory first; distinct from an open Chat's own draft. */
+  const readNewChatDraft = (): NativeChatDraftSnapshot | null => owner ? { owner, generation: epoch.current,
+    text: readNativeDraftText(owner, null), files: revisionDraft.peekFiles(null).map(({ uploadId, name }) => ({ uploadId, name })) } : null;
   const end = useRef<HTMLDivElement>(null);
   const requestEpoch = useRef(0);
   useEffect(() => {
@@ -159,7 +185,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     if (!signedIn || !owner) return;
     let live = true;
     void transport.mobileCapabilities?.(true).then(value => { if (live) {
-      setFileRevisionOffer({ owner, enabled: value.generatedFileRevisions === true });
+      setFileRevisionOffer({ owner, enabled: value.generatedFileRevisions === true }); setProjectOffer({ owner, enabled: value.projectWorkspace === true });
       setIosImageEnabled(value.chatImageTurns === true && value.images?.enabled === true); setIosImportsEnabled(value.workspace?.externalImport === true);
     } }).catch(() => { if (live) setFileRevisionOffer({ owner, enabled: false }); });
     return () => { live = false; };
@@ -185,6 +211,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     epoch.current++; requestEpoch.current++; abort.current?.abort();
     clearNativeDrafts(); handoffAttempt.current = null; handoffOrigin.current = null; setHandoffBusy(false); setConfigurationBusy(false); sessionStorage.removeItem(REVIEW_HANDOFF_TARGET); setOwner(null); setSignedIn(false); setConversation(null); setChats([]); setPartial(null); setPendingQuestion(null); setReportFor(null);
     setIosEntry(null); setReviewOpen(undefined); setUncertain(false); setStreaming(false); setModelPicker(false); setSettings(false); setAccountOpen(false); setProduct("chat");
+    setProjectSheet(null); setDraftProject(null); setProjectRefs(emptySelection); setReceiptFor(null);
     localStorage.removeItem(LAST_CHAT); setLoading(false);
   }), [transport]);
 
@@ -244,6 +271,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     handoffAttempt.current = null; handoffOrigin.current = null; setHandoffBusy(false); setConfigurationBusy(false); sessionStorage.removeItem(REVIEW_HANDOFF_TARGET);
     clearNativeDrafts(); setOwner(null); setSignedIn(false); setConversation(null); setChats([]); setPartial(null); setPendingQuestion(null); setReportFor(null);
     setIosEntry(null); setReviewOpen(undefined); setUncertain(false); setStreaming(false); localStorage.removeItem(LAST_CHAT); setSettings(false); setModelPicker(false); setProduct("chat");
+    setProjectSheet(null); setDraftProject(null); setProjectRefs(emptySelection); setReceiptFor(null);
     try { await transport.signOut(); return true; } catch { setError(mobileCompletionCopy(language).logoutUnconfirmed); return false; }
   }
   async function reauthenticate() {
@@ -256,7 +284,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   }
   async function open(id: string) {
     if (handoffBusy || configurationBusy) return false;
-    setSourcePick(null); setSourceDelivery(null);
+    setSourcePick(null); setSourceDelivery(null); setReceiptFor(null);
     const current = ++requestEpoch.current;
     setLoading(true); setError(""); setPartial(null);
     try {
@@ -270,7 +298,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     const current = ++requestEpoch.current;
     setConfigurationBusy(true);
     try {
-      const item = conversation ?? await transport.create();
+      const item = conversation ?? await createChat();
       if (current !== requestEpoch.current) return;
       if (!conversation) preserveNativeDraft(owner, item.id, draft);
       setConversation(item); localStorage.setItem(LAST_CHAT, item.id);
@@ -287,7 +315,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     const current = ++requestEpoch.current;
     setConfigurationBusy(true);
     try {
-      const item = conversation ?? await transport.create();
+      const item = conversation ?? await createChat();
       if (current !== requestEpoch.current) return;
       if (!conversation) preserveNativeDraft(owner, item.id, draft);
       setConversation(item); localStorage.setItem(LAST_CHAT, item.id);
@@ -299,6 +327,10 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
   async function send(text: string, files: MobileAttachment[], fromVoice = false, research = false) {
     if (research && (!researchPreview.offered || files.length || !text.trim() || text.trim().length > 4000 || !transport.sendResearchPreview)) return false;
     if (streaming || uncertain || configurationBusy || handoffBusy) { if (fromVoice) throw Error("CHAT_TURN_BUSY"); return false; }
+    // An archived project, or one the server will not serve, cannot take a turn; the draft stays where it is.
+    const projectBlock = projectSendBlock(projectInfo?.project ?? null, projectInfo?.failure ?? null);
+    if (projectBlock) { setError(projectBlock === "archived" ? projectCopy.archivedChat : projectCopy.unavailableChat); if (fromVoice) throw Error("PROJECT_SEND_BLOCKED"); return false; }
+    const projectReferences = !fromVoice && !research && references.length ? references.map(item => item.ref) : undefined;
     const current = ++requestEpoch.current;
     const titleEpoch = epoch.current;
     const picked = !fromVoice && sourceParts.length ? [...sourceParts] : undefined;
@@ -307,7 +339,7 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     setStreaming(true); setError(""); setPartial(""); setPendingQuestion(text); setDraft("");
     let item = conversation; let dispatched = false;
     try {
-      item ??= await transport.create((text.trim() || files[0]?.name || copy.newChat).slice(0, 30));
+      item ??= await createChat((text.trim() || files[0]?.name || copy.newChat).slice(0, 30));
       if (current !== requestEpoch.current) return;
       if (controller.signal.aborted) throw new DOMException("Stopped", "AbortError");
       setConversation({ ...item, messages: [...item.messages, { id: "pending-user", role: "user", content: text }] });
@@ -322,13 +354,13 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
         if (current === requestEpoch.current) setPartial(value);
       }, { durable: researchPreview.features?.durableRuns === true, locale: language }) : await transport.send(item, text, files, controller.signal, (value) => {
         if (current === requestEpoch.current) setPartial(value);
-      }, { ...(picked ? { sourcePassages: picked } : {}), onReceipt: receipt => {
+      }, { ...(picked ? { sourcePassages: picked } : {}), ...(projectReferences ? { projectReferences } : {}), onReceipt: receipt => {
         if (current === requestEpoch.current && !controller.signal.aborted) setSourceDelivery({ owner, id: item!.id, receipt });
       } });
       if (research) researchPreview.onSelectedChange(false);
       const restored = await transport.load(item.id);
       if (current !== requestEpoch.current) return;
-      setConversation(restored); setPartial(null); setSourceDelivery(null);
+      setConversation(restored); setPartial(null); setSourceDelivery(null); if (projectReferences) setProjectRefs(emptySelection);
       const list = await transport.list();
       if (current === requestEpoch.current) setChats(list);
       if (titleEpoch === epoch.current) void transport.generateTitle?.(restored).then(title => {
@@ -354,9 +386,19 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     if (streaming || reviewBusy || handoffBusy || configurationBusy || loading) return;
     setSourcePick(null); setSourceDelivery(null);
     if (product === "review") { sessionStorage.removeItem(REVIEW_HANDOFF_TARGET); setReviewOpen(undefined); setNewReviewRequest(value => value + 1); }
-    else { requestEpoch.current++; setConversation(null); setPartial(null); setError(""); setUncertain(false); localStorage.removeItem(LAST_CHAT); }
+    else { requestEpoch.current++; setConversation(null); setPartial(null); setError(""); setUncertain(false); localStorage.removeItem(LAST_CHAT); setDraftProject(null); setProjectRefs(emptySelection); }
     setView("chat");
   }
+  /** A new chat inside a project: the project is fixed by the create call, before the first Send. */
+  function startProjectConversation(project: { id: string }) {
+    if (streaming || reviewBusy || handoffBusy || configurationBusy || loading) return;
+    setSourcePick(null); setSourceDelivery(null); requestEpoch.current++;
+    sessionStorage.removeItem(REVIEW_HANDOFF_TARGET); setReviewOpen(undefined); handoffOrigin.current = null; handoffAttempt.current = null;
+    setProduct("chat"); setView("chat"); setConversation(null); setPartial(null); setError(""); setUncertain(false); localStorage.removeItem(LAST_CHAT);
+    setDraftProject({ id: project.id }); setProjectRefs(emptySelection); setProjectSheet(null);
+  }
+  async function openFromProject(id: string) { if (await open(id)) { setProduct("chat"); setProjectSheet(null); } }
+  async function refreshChats() { const scope = epoch.current; try { const rows = await transport.list(); if (scope === epoch.current) setChats(rows); } catch { /* The list refreshes on the next visit. */ } }
   async function compareInReview(messageId: string) {
     if (!conversation || streaming || reviewBusy || handoffBusy || configurationBusy || uncertain || loading) return;
     if (conversation.surface === "continuation") {
@@ -441,7 +483,21 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
     const target = conversation?.id ?? "new";
     preserveNativeDraft(owner, target, text); setDraft(text, target);
   }
+  const [researchEngineOpen, setResearchEngineOpen] = useState(false);
+  const [researchEngineAvailable, setResearchEngineAvailable] = useState(false);
+  const [researchEngineOffer, setResearchEngineOffer] = useState<{ offered: boolean } | null>(null);
+  useEffect(() => {
+    let active = true;
+    if (!signedIn || !transport.researchEngineEnabled || !transport.researchEngine) return;
+    void transport.researchEngineEnabled().then(async (enabled) => {
+      if (!active) return;
+      setResearchEngineAvailable(enabled);
+      if (enabled) { const value = await transport.researchEngine!.offer().catch(() => null); if (active) setResearchEngineOffer(value as never); }
+    }).catch(() => { if (active) setResearchEngineAvailable(false); });
+    return () => { active = false; };
+  }, [signedIn, owner, transport]);
   const iosExtraTools = [
+    ...(signedIn && researchEngineAvailable && transport.researchEngine ? [{ label: researchEngineCopy[language].title, onSelect: () => setResearchEngineOpen(true) }] : []),
     { label: mobileIosWorkspaceCopy(language).assistants, onSelect: () => openIosPanel("assistants") },
     { label: mobileIosWorkspaceCopy(language).files, onSelect: () => openIosPanel("starters") },
     { label: mobileIosWorkspaceCopy(language).imports, onSelect: () => openIosPanel("imports") },
@@ -449,7 +505,12 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
 
   const productSelector = <select data-testid="product-switcher" className="product-switcher" aria-label={workspaceCopy.product} value={product} disabled={streaming || reviewBusy || handoffBusy || uncertain} onChange={event => switchProduct(event.target.value as "chat" | "review")}><option value="chat">Chat</option><option value="review">Review</option></select>;
 
+  const researchEngineSheet = researchEngineOpen && transport.researchEngine ? <DeepResearchEngineSheet open api={transport.researchEngine} language={language}
+    conversationId={conversation?.id ?? null} draft={draft} offer={researchEngineOffer} onClose={() => setResearchEngineOpen(false)}
+    onStarted={(id) => { setResearchEngineOpen(false); void open(id); }} /> : null;
+
   return <main className="mobile-app ios-workspace native-workspace" data-compact={compact || undefined} style={visibleHeight ? { height: visibleHeight } : undefined}>
+    {researchEngineSheet}
     <header className="app-header" data-product-control={signedIn && compact && view === "chat" || undefined}>
       <button className="menu-button" aria-label={view === "list" ? navigationCopy.returnToChat : copy.chats} onClick={() => view === "list" ? returnToWorkspace() : setView("list")} disabled={!signedIn}>{view === "list" ? <ArrowLeft size={22} aria-hidden="true" /> : <><AppIcon name="menu" /><AppIcon name="menuDark" /></>}</button>
       <button type="button" className="brand-lockup" aria-label={navigationCopy.home} onClick={returnToWorkspace}><AppIcon name="logo" /><span className="wordmark tomverse-wordmark">tomverse<span className="tomverse-wordmark-dot">.</span></span></button>
@@ -480,20 +541,26 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
       <button className="primary" onClick={() => void signIn()} disabled={loading} aria-describedby="browser-sign-in-note">{copy.signIn} <span aria-hidden="true">→</span></button>
       <p id="browser-sign-in-note" className="browser-sign-in-note">{loginCopy.browserIntro}</p>
       {transport.requestEmailCode && transport.verifyEmailCode && <button type="button" className="sign-in-email" disabled={loading} onClick={() => { setError(""); setEmailLogin(true); }}>{loginCopy.inAppEmail}</button>}
-    </section> : product === "review" ? <ReviewWorkspace key={`review:${owner}`} transport={transport} language={language} owner={owner} historyOpen={view === "list"} onCloseHistory={returnToWorkspace} onBusyChange={setReviewBusy} onLoadingChange={setReviewLoading} onProductChange={switchProduct} historyFooter={accountFooter} onContinueInChat={text => {
-      if (!owner) return;
-      const previous = readDeviceDraft(localStorage, owner, null);
-      const next = previous.trim() ? `${previous}\n\n${text}` : text;
-      if (next.length > 40000) throw Error("DRAFT_TOO_LARGE");
+    </section> : product === "review" ? <ReviewWorkspace key={`review:${owner}`} transport={transport} language={language} owner={owner} historyOpen={view === "list"} onCloseHistory={returnToWorkspace} onBusyChange={setReviewBusy} onLoadingChange={setReviewLoading} onProductChange={switchProduct} historyFooter={accountFooter} readChatDraft={readNewChatDraft} onContinueInChat={(text, expected): NativeChatDraftApply => {
+      // Applies only to the new-Chat draft the user just confirmed: same owner and
+      // sign-in generation, same text and files. Anything else asks again.
+      const current = readNewChatDraft();
+      if (!current || !owner) return "unavailable";
+      if (!sameNativeChatDraft(current, expected)) return "changed";
+      const next = appendNativeReviewChatDraft(current.text, text);
+      if (next === null) return "tooLarge";
       sessionStorage.removeItem(REVIEW_HANDOFF_TARGET); setReviewOpen(undefined); handoffOrigin.current = null; handoffAttempt.current = null;
       requestEpoch.current++; setConversation(null); setPartial(null); setUncertain(false); setProduct("chat"); setView("chat");
-      localStorage.removeItem(LAST_CHAT); preserveNativeDraft(owner, "new", next); setDraft(next, null);
+      try { localStorage.removeItem(LAST_CHAT); } catch { /* Optional persistence. */ }
+      setDraft(next, null);
+      return "applied";
     }} newConversationRequest={newReviewRequest} conversationRequest={reviewOpen} extraTools={iosExtraTools} /> : view === "list" ? <ConversationListScreen title={copy.chats} newLabel={copy.newChat} disabled={streaming || loading} onNew={newConversation} footer={accountFooter}>
       <ConversationHistory transport={transport} language={language} owner={owner} chats={chats} currentId={conversation?.id} disabled={streaming || loading} onOpen={id => void open(id)} onRefresh={async () => {
         const scope = epoch.current; const rows = await transport.list();
         if (scope !== epoch.current) throw Error("SIGN_IN_REQUIRED");
         setChats(rows); setConversation(previous => previous ? { ...previous, title: rows.find(row => row.id === previous.id)?.title ?? previous.title } : null); return rows;
-      }} onChanged={(id, deleted, locked) => { if ((deleted || locked) && conversation?.id === id) { requestEpoch.current++; setConversation(null); setPartial(null); setUncertain(false); localStorage.removeItem(LAST_CHAT); } }} />
+      }} onChanged={(id, deleted, locked) => { if ((deleted || locked) && conversation?.id === id) { requestEpoch.current++; setConversation(null); setPartial(null); setUncertain(false); localStorage.removeItem(LAST_CHAT); } }}
+        onOpenProject={id => setProjectSheet({ kind: "open", id })} onNewProject={() => setProjectSheet({ kind: "new" })} projectRevision={projectRevision} projectsEnabled={!workspaceOff} />
     </ConversationListScreen> : <>
       <div className="native-chat-body">
       {conversation?.surface === "continuation" && <details className="ios-source-panel" open={sourceExpanded} onToggle={event => setSourceExpanded(event.currentTarget.open)}><summary>{mobileIosWorkspaceCopy(language).source}</summary><ImportedTranscript key={conversation.id} conversationId={conversation.id} imported={conversation.imported} transport={transport} language={language} selection={sourceSelection} /></details>}
@@ -503,23 +570,31 @@ export function MobileApp({ transport, demo = false }: { transport: ChatTranspor
         {!conversation?.messages.length && !streaming && conversation?.surface !== "continuation" && <IosWelcome importsEnabled={iosImportsEnabled} language={language} automatic={conversation ? conversation.selectionMode === "auto" && conversation.autoSelection?.offered === true : draftAutoOffered} imageEnabled={iosImageEnabled} onPanel={openIosPanel} onSeed={seedIosWorkspace} />}
         {conversation?.surface === "continuation" && !conversation.messages.length && !streaming && <div className="ios-continuation-start"><h2>{mobileIosWorkspaceCopy(language).disclosure}</h2><p>{mobileIosWorkspaceCopy(language).readOnly}</p><button onClick={() => setDraft(language === "ko" ? "지난 대화를 바탕으로 다음 할 일을 정리해줘." : "Based on our previous conversation, help me plan the next steps.")}>{language === "ko" ? "다음 할 일부터 정리해줘" : "Help me plan the next steps"}</button></div>}
         {pendingQuestion !== null && <article className="message user"><AnswerContent content={pendingQuestion} transport={transport} language={language} /></article>}
-        {conversation?.messages.map((message) => <article key={message.id} className={`message ${message.role}`}>{message.role === "assistant" && <span className="message-label response-identity"><AppIcon name="logo" />Tomverse</span>}{message.researchRunId && conversation && transport.researchRuns && <ResearchPreviewRunCard
+        {conversation?.messages.map((message) => <article key={message.id} className={`message ${message.role}`}>{message.role === "assistant" && <span className="message-label response-identity"><AppIcon name="logo" />Tomverse</span>}{message.researchEngineRun && message.researchRunId && conversation && transport.researchEngine ? <ResearchWorkspace api={transport.researchEngine} runId={message.researchRunId} conversationId={conversation.id} language={language} accountKey={owner ?? "native"} /> : message.researchRunId && conversation && transport.researchRuns && <ResearchPreviewRunCard
           runId={message.researchRunId} conversationId={conversation.id} assistantMessageId={message.id} language={language} transport={transport.researchRuns}
           reportOutcome={message.searchMetadata?.research?.outcome}
           onMessage={run => setConversation(item => item?.id === run.conversationId ? { ...item, messages: item.messages.map(existing => existing.id === run.assistantMessageId ? researchRunMessage(run) : existing) } : item)} />}
-<AnswerContent copyable={message.role === "assistant"} content={message.content} imageTurn={message.imageTurn} artifacts={message.artifacts} onRevise={revisionDraft.prepare} citations={message.searchMetadata?.citations} transport={transport} language={language} />{message.continuationReceipt && <ContinuationReceipt receipt={message.continuationReceipt} t={sourceT} />}{message.role === "assistant" && ((reportable(message)) || comparable(message) || message.routedModelId || message.modelId) && <div className="answer-footer">{reportable(message) && <button type="button" className="answer-report" data-testid="answer-report" onClick={() => setReportFor({ messageId: message.id, modelId: message.modelId })}><AppIcon name="report" />{workspaceCopy.report}</button>}{comparable(message) && <button type="button" className="answer-report" data-testid="chat-compare-in-review" aria-label={mobileCompareInReviewCopy(language).aria} disabled={streaming || reviewBusy || handoffBusy || uncertain} onClick={() => void compareInReview(message.id)}>{mobileCompareInReviewCopy(language).label}</button>}<AnswerAttribution message={message} language={language} /></div>}{message.attachments?.map((file) => <span className="saved-attachment" key={file.id}><AppIcon name="file" />{file.name}</span>)}{["failed", "cancelled"].includes(message.status ?? "") && <p className="response-state">{workspaceCopy.failed}<button onClick={() => { const questions = conversation.messages.filter((item) => item.role === "user"); setDraft(questions.at(-1)?.content ?? ""); }}>{workspaceCopy.retry}</button></p>}</article>)}
+<AnswerContent copyable={message.role === "assistant"} content={message.content} imageTurn={message.imageTurn} artifacts={message.artifacts} onRevise={revisionDraft.prepare} citations={message.searchMetadata?.citations} transport={transport} language={language} />{message.continuationReceipt && <ContinuationReceipt receipt={message.continuationReceipt} t={sourceT} />}{message.role === "assistant" && ((reportable(message)) || comparable(message) || receiptable(message) || message.routedModelId || message.modelId) && <div className="answer-footer">{receiptable(message) && <button type="button" className="answer-report" data-testid="project-receipt" onClick={() => setReceiptFor(message.id)}>{projectCopy.receiptButton}</button>}{reportable(message) && <button type="button" className="answer-report" data-testid="answer-report" onClick={() => setReportFor({ messageId: message.id, modelId: message.modelId })}><AppIcon name="report" />{workspaceCopy.report}</button>}{comparable(message) && <button type="button" className="answer-report" data-testid="chat-compare-in-review" aria-label={mobileCompareInReviewCopy(language).aria} disabled={streaming || reviewBusy || handoffBusy || uncertain} onClick={() => void compareInReview(message.id)}>{mobileCompareInReviewCopy(language).label}</button>}<AnswerAttribution message={message} language={language} /></div>}{message.attachments?.map((file) => <span className="saved-attachment" key={file.id}><AppIcon name="file" />{file.name}</span>)}{["failed", "cancelled"].includes(message.status ?? "") && <p className="response-state">{workspaceCopy.failed}<button onClick={() => { const questions = conversation.messages.filter((item) => item.role === "user"); setDraft(questions.at(-1)?.content ?? ""); }}>{workspaceCopy.retry}</button></p>}</article>)}
         {partial !== null && <article className="message assistant"><span className="message-label response-identity"><AppIcon name="logo" />Tomverse</span><AnswerContent content={partial || copy.waiting} transport={transport} language={language} /><span className="stream-caret" aria-hidden="true" /></article>}
         {sourceDelivery?.owner === owner && sourceDelivery.id === conversation?.id && <ContinuationReceipt receipt={sourceDelivery.receipt} t={sourceT} />}
         {conversation && <VoiceHistory transport={transport} conversationId={conversation.id} revision={voiceRevision} language={language} />}
         <div ref={end} />
       </section>
       </div>
+      {activeProjectId && transport.projects && <ProjectChatBar transport={transport} language={language} projectId={activeProjectId} info={projectInfo} references={references}
+        onReferences={items => setProjectRefs({ owner, conversationId: conversation?.id ?? null, projectId: activeProjectId, items })} disabled={streaming || loading || uncertain}
+        onOpenProject={() => setProjectSheet({ kind: "open", id: activeProjectId })} available={!workspaceOff} />}
       {uncertain && conversation && <button className="restore" onClick={() => void open(conversation.id)}>{copy.restore} ↻</button>}
       <Composer researchPreview={researchPreview} extraTools={iosExtraTools} product="chat" onProductChange={switchProduct} productBusy={streaming || loading || handoffBusy || uncertain} productLoading={loading}
         selectionControl={<button type="button" className="model-trigger" disabled={streaming || loading || uncertain} onClick={() => setModelPicker(true)}><span>{conversation?.selectionMode === "auto" || (!conversation && draftAutoOffered) ? "Smart Adaptive" : getModel(conversation?.selectedModels[0] ?? "")?.name ?? workspaceCopy.model}</span><span aria-hidden="true">⌄</span></button>}
         locationIdentity={owner} files={revisionDraft.files} onFilesChange={revisionDraft.setFiles} onRemoveFile={revisionDraft.removeFile} onFileUploaded={revisionDraft.addFile} copy={copy} language={language} transport={transport} draft={draft} setDraft={setDraft} disabled={loading || handoffBusy || uncertain} offline={offline} streaming={streaming} conversation={conversation} onConfigureTools={configureTools} onSend={(text, files) => send(text, files, false, researchPreview.selected).then(result => result === false ? false : undefined)} onStop={() => abort.current?.abort()} voiceConversation={disabled => <VoiceConversation transport={transport} language={language} conversationId={conversation?.id ?? null} scopeKey={`${owner}:${signedIn}:${product}`} disabled={disabled} selectionLabel={conversation?.selectionMode === "auto" || (!conversation && draftAutoOffered) ? "Smart Adaptive" : conversation?.selectedModels[0] ?? "Tomverse"} searchEnabled={conversation ? conversation.webSearchMode === "always" : true} onSessionEnded={() => setVoiceRevision(value => value + 1)} onRequest={async text => { const receipt = await send(text, [], true); if (!receipt) throw Error("VOICE_ANSWER_FAILED"); return receipt; }} />} />
     </>}
     {iosEntry && signedIn && <IosWorkspacePanel key={`workspace:${owner}`} entry={iosEntry} language={language} transport={transport} imageEnabled={iosImageEnabled} onClose={() => setIosEntry(null)} onStartAssistant={startIosAssistant} onContinue={async id => { if (await open(id)) { setProduct("chat"); setIosEntry(null); } else throw Error("CONVERSATION_OPEN_FAILED"); }} onSeed={seedIosWorkspace} onSettings={tab => { setIosEntry(null); openSettings(tab); }} />}
+    {signedIn && projectSheet?.kind === "new" && <ProjectCreate key={`new:${owner}`} transport={transport} language={language} onClose={() => setProjectSheet(null)} onCreated={project => { setProjectRevision(value => value + 1); setProjectSheet({ kind: "open", id: project.id }); }} />}
+    {signedIn && projectSheet?.kind === "open" && <ProjectWorkspace key={`${owner}:${projectSheet.id}`} transport={transport} language={language} projectId={projectSheet.id} onClose={() => setProjectSheet(null)}
+      onOpenConversation={id => void openFromProject(id)} onNewChat={startProjectConversation} onChanged={() => { setProjectRevision(value => value + 1); void refreshChats(); }}
+      onDeleted={id => { setProjectSheet(null); setProjectRevision(value => value + 1); setConversation(item => item?.projectId === id ? { ...item, projectId: null } : item); void refreshChats(); }} />}
+    {receiptFor && signedIn && conversation?.projectId && <ProjectReceiptSheet key={receiptFor} transport={transport} language={language} projectId={conversation.projectId} messageId={receiptFor} onClose={() => setReceiptFor(null)} />}
     {modelPicker && <ModelSheet transport={transport} conversation={conversation} language={language} onClose={() => setModelPicker(false)} onApply={configureModel} />}
     {accountOpen && <Sheet title={mobileSettingsCopy(language).accountData} closeLabel={copy.close} onClose={() => setAccountOpen(false)} exitLabel={navigationCopy.returnToChat} onExit={returnToWorkspace}><button type="button" className="settings-detail-back" onClick={() => { setAccountOpen(false); openSettings("data"); }}><span aria-hidden="true">← </span>{mobileSettingsCopy(language).back}</button><AccountScreen transport={transport} language={language} onReauthenticate={() => void reauthenticate()} onDeleted={() => { setAccountOpen(false); clearNativeDrafts(); setOwner(null); setSignedIn(false); setConversation(null); setChats([]); localStorage.removeItem(LAST_CHAT); }} /></Sheet>}
     {!demo && <NativeLocationOnboarding language={language} />}

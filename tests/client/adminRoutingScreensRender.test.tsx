@@ -11,6 +11,12 @@ import { optimizerCycleTone } from "@/components/admin/routing/optimizerTone";
 import { adminRoutingScreensMessages } from "@/lib/adminMessages/routingScreens";
 import { OptimizerEvidenceView } from "@/components/admin/OptimizerEvidenceView";
 import { verifiedOptimizerSummary } from "../fixtures/optimizerVerifiedSummary";
+import { ChatServingCostView, CostEfficiencyDiagnosticView } from "@/components/admin/CostEfficiencyDiagnosticView";
+import { COST_EFFICIENCY_CRITERIA_PROPOSAL, costEfficiencyReport } from "@/lib/autoCostEfficiencyReport";
+import { summarizeChatServingCost } from "@/lib/autoChatServingCostCore";
+import { optimizerSpend } from "@/lib/autoOptimizerCost";
+import { costEfficiencyMessages } from "@/lib/adminMessages/costEfficiency";
+import { adminAutoRouterOptimizerMessages } from "@/lib/adminMessages/autoRouterOptimizer";
 
 const report = (overrides: Partial<ShadowReport> = {}): ShadowReport => ({
   windowDays: 7,
@@ -147,6 +153,7 @@ test("optimizer cycle statuses map to tones and an unknown status is idle", () =
   assert.equal(optimizerCycleTone("passed"), "ok");
   assert.equal(optimizerCycleTone("failed"), "warn");
   assert.equal(optimizerCycleTone("error"), "bad");
+  assert.equal(optimizerCycleTone("diagnostic"), "info");
   assert.equal(optimizerCycleTone("something-new"), "idle");
 });
 
@@ -157,4 +164,47 @@ test("the routing screen copy has the same keys in English and Korean and no Kor
       : [prefix];
   assert.deepEqual(keys(adminRoutingScreensMessages.ko), keys(adminRoutingScreensMessages.en));
   assert.doesNotMatch(JSON.stringify(adminRoutingScreensMessages.en), /[^\x00-\x7F]/);
+});
+
+test("a cost-efficiency diagnostic shows price-blind quality, credits, observed and experiment cost, and why it is not applicable", () => {
+  const known = (microUsd: number) => ({ state: "known" as const, microUsd, attempts: 1, failedAttempts: 0 });
+  const spend = optimizerSpend(1_000).totals();
+  const report = costEfficiencyReport({
+    comparisons: [{
+      kind: "easy", a: "premium", b: "cheap", verdict: "tie", answerMs: { a: 900, b: 400 },
+      costEfficiency: {
+        basis: "lower_credit", credits: { a: 9, b: 1 }, estimatedMicroUsd: { a: 200, b: 10 },
+        answerCost: { a: known(100), b: known(5) }, quality: "equal", qualityOrders: [null, null],
+        constraintFailure: { a: false, b: false }, truncated: { a: false, b: false },
+      },
+    }, { kind: "hard", a: "cheap", b: null, verdict: "no_alternative" }],
+    cases: [], coverage: spend.costCoverage, spentByKind: spend.spentByKind,
+    criteria: COST_EFFICIENCY_CRITERIA_PROPOSAL, failure: null, summary: undefined,
+  });
+  const html = renderToStaticMarkup(<CostEfficiencyDiagnosticView report={report} />);
+  assert.ok(html.includes("Cost-efficiency diagnostic (diagnostic only)"));
+  assert.match(html, /1 savings samples/);
+  assert.match(html, /equal 1/);
+  assert.match(html, /a credit change is not a saving/);
+  assert.ok(html.includes("US$0.000100 → US$0.000005"));
+  assert.match(html, /Not applicable as guidance:.*diagnostic only.*criteria not yet confirmed.*too few savings samples/);
+  // Model-free totals: no model id reaches the diagnostic block.
+  assert.doesNotMatch(html, /\bpremium\b|\bcheap\b/);
+  assert.equal(renderToStaticMarkup(<CostEfficiencyDiagnosticView report={undefined} />), "");
+  const serving = summarizeChatServingCost([], { since: "s", until: "u" });
+  assert.match(renderToStaticMarkup(<ChatServingCostView summary={serving} />), /answer cost only[\s\S]*unknown, not zero/);
+  assert.match(renderToStaticMarkup(<ChatServingCostView summary={null} />), /could not be read/);
+});
+
+test("the cost-efficiency and optimizer copy has the same keys in English and Korean", () => {
+  const keys = (value: unknown, prefix = ""): string[] =>
+    value && typeof value === "object"
+      ? Object.entries(value).flatMap(([key, child]) => keys(child, `${prefix}${key}.`))
+      : [prefix];
+  for (const messages of [costEfficiencyMessages, adminAutoRouterOptimizerMessages]) {
+    assert.deepEqual(keys(messages.ko).sort(), keys(messages.en).sort());
+    assert.doesNotMatch(JSON.stringify(messages.en), /[가-힣]/);
+  }
+  assert.ok(adminAutoRouterOptimizerMessages.en.reasons.diagnostic_only);
+  assert.ok(adminAutoRouterOptimizerMessages.ko.statuses.diagnostic);
 });

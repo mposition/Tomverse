@@ -3,6 +3,7 @@ import { externalApiCopy } from "./externalApi";
 import { reviewHandoffCopy } from "./reviewHandoff";
 import { researchPreviewCopy } from "./researchPreview";
 import { workspaceWelcomeCopy } from "./workspaceWelcome";
+import { projectWorkspaceCopy } from "./projectWorkspace";
 import { consentCopyForLanguage } from "@/lib/emailConsentCopyLocale";
 import { en } from "./en";
 
@@ -251,6 +252,11 @@ export const zhHant = {
         compareInReviewLabel: "在新的 Review 中用多個模型比較這個問題",
         compareInReviewContext: "先前的問題：",
         compareInReviewBlocked: "請先完成或處理目前訊息，再開啟 Review。",
+        compareInReviewNeedsQuestion: "這一輪只傳送了檔案，沒有可比較的問題。請在書面問題的回答上進行比較。",
+        compareInReviewFileReattach: "已帶入 Chat 中的問題。如需用同一檔案比較，請重新附加。",
+        compareInReviewFileChoose: "選擇檔案",
+        compareInReviewFileAttached: "已附加檔案",
+        compareInReviewDraftKept: "已保留你正在撰寫的 Review 草稿。",
         singleModelRequired: "Chat 使用一個回答模型。選擇模型將取代目前的選擇。",
         singleModelProfileRequired: "此助理使用多個模型。請為 Chat 選擇單一模型助理。",
         restoreDraftNotEmpty: "已保留您正在編輯的內容。請先傳送或清空輸入框，再還原此問題。",
@@ -2312,6 +2318,7 @@ export const zhHant = {
     // text, which is also the version the page says governs.
     privacyPolicy: en.privacyPolicy,
     chatStarter: workspaceWelcomeCopy["zh-Hant"].starter,
+    projectWorkspace: projectWorkspaceCopy["zh-Hant"],
     // HELP-NAV-01 guided help: pick a task, see where it is done. Directions only.
     helpGuide: {
         menuItem: "尋找操作方法",

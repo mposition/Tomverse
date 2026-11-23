@@ -1,0 +1,15 @@
+{
+  "schema": "ai-review-blind-pilot-plan/1",
+  "pilotId": "qp-quote-pilot-synthetic-1",
+  "description": "Synthetic demo plan. Both product slots are mock outputs written by this repository; no real product output and no human judgement is included.",
+  "seed": 20261122,
+  "judges": 1,
+  "documentExposure": "shown_in_question",
+  "cases": "cases.json",
+  "gold": "gold.json",
+  "forbiddenTerms": ["Tomverse", "Qriple", "comparison-review-v3"],
+  "products": [
+    { "slot": "X", "output": "outputs/mock-x.json" },
+    { "slot": "Y", "output": "outputs/mock-y.json" }
+  ]
+}
