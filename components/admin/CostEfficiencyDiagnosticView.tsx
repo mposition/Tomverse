@@ -33,7 +33,8 @@ export function CostEfficiencyDiagnosticView({ report }: { report: CostEfficienc
       <p>{m.credits(c.credits.pairs, c.credits.incumbent, c.credits.challenger)}</p>
       <p data-testid="admin-cost-efficiency-observed">
         {m.observed(c.observedAnswerCost.pairsKnown, c.observedAnswerCost.pairsUnknown,
-          usd(c.observedAnswerCost.incumbentMicroUsd), usd(c.observedAnswerCost.challengerMicroUsd), c.observedAnswerCost.challengerLower)}
+          usd(c.observedAnswerCost.incumbentMicroUsd), usd(c.observedAnswerCost.challengerMicroUsd), c.observedAnswerCost.challengerLower,
+          c.observedAnswerCost.pairsUnanswered)}
       </p>
       <p>{m.latency(c.answerLatencyMs.pairs, c.answerLatencyMs.incumbentMedian, c.answerLatencyMs.challengerMedian)}</p>
       <p className="mt-2 font-bold text-zinc-300">{m.guidanceTitle}</p>

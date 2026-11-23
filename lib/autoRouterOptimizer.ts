@@ -280,7 +280,16 @@ export const asSession = (value: unknown): AutoLlmRouterSession | null => {
         : null;
 };
 
-async function loadDecisions(): Promise<OptimizerDecision[]> {
+/**
+ * A recorded menu is replayed against today's catalogue: a candidate that is
+ * no longer enabled or priced could never answer (no_dispatch), so it is
+ * neither picked nor drawn, and a decision left with fewer than two is not a
+ * comparison. Without this, an old decision's retired picks used the run.
+ */
+export const answerableModelIds = (models: readonly AiModel[]) =>
+    new Set(models.filter((model) => model.enabled && !model.catalogDeleted && pricesOf(model)).map((model) => model.id));
+
+async function loadDecisions(answerable: ReadonlySet<string>): Promise<OptimizerDecision[]> {
     const rows = await prisma.autoRouterDecision.findMany({
         // Combined calls include image, location or search inputs that decision
         // rows do not retain. Do not claim to replay their full request.
@@ -301,7 +310,9 @@ async function loadDecisions(): Promise<OptimizerDecision[]> {
         },
     });
     return rows.flatMap((row) => {
-        const candidates = Array.isArray(row.candidates) ? row.candidates.filter(isCandidate) : [];
+        const candidates = Array.isArray(row.candidates)
+            ? row.candidates.filter(isCandidate).filter((candidate) => answerable.has(candidate.id))
+            : [];
         if (candidates.length < 2) return [];
         return [{
             id: row.id,
@@ -605,7 +616,7 @@ export async function startAutoRouterOptimizerCycle(
     const routerModel = resolveAutoLlmRouterModel(models, (await readAutoLlmRouterModelId()) ?? undefined);
     if (!routerModel) return { refused: "router_off" };
 
-    const decisions = await loadDecisions();
+    const decisions = await loadDecisions(answerableModelIds(models));
 
     // Actual cost is priced from reported usage, so a cycle needs both prices.
     const optimizerPrices = pricesOf(optimizerModel);
