@@ -213,7 +213,9 @@ async function daemon(config) {
   let nextPrune = 0;
   while (!stopping) {
     try {
-      const quotas = await probeProviderQuotas(config);
+      // A limit a reviewer reported itself outranks its probe, in the
+      // assignment and in the status clients read.
+      const quotas = orchestrator.withUsageLimits(await probeProviderQuotas(config));
       orchestrator.tick(quotas);
       writeQuotaStatus(config, quotas);
     } catch (error) {
