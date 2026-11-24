@@ -9,7 +9,7 @@ import { createConversation } from "@/lib/conversationCreation";
 import { ResearchPreviewRunError } from "@/lib/deepResearchSettlementHandoff";
 import { canUseModelWithPlan, type AiModel } from "@/lib/models";
 import { createTokenEstimateAccumulator } from "@/lib/chatTokenEstimate";
-import { RESEARCH_PREVIEW_P0_MODEL_SHORTLIST, researchPreviewModelIsShortlisted } from "@/lib/researchPreviewAdmission";
+import { RESEARCH_PREVIEW_P0_MODEL_SHORTLIST } from "@/lib/researchPreviewAdmission";
 import {
   RESEARCH_ENGINE_VERSION, RESEARCH_MODEL_ROLES, RESEARCH_PROFILES, RESEARCH_RESOURCE_LIMITS, RESEARCH_RUN_TERMINAL_STATUSES,
   researchBriefSchema, researchInputManifestSchema, researchPlanSchema, researchReportDocumentSchema, researchSectionKeySchema,
@@ -47,10 +47,28 @@ export function researchEngineFeatures(env: Record<string, string | undefined> =
   };
 }
 
+/**
+ * Engine v2 models beyond the Preview P0 pair. Each entry pins the provider API id. For each, AI SDK v7
+ * reports reasoning inside outputTokens (the run output cap holds), and a forced-tool call with reasoning
+ * "high", built as researchEngineModel builds it, returned exactly one tool call (checked 2026-11-24).
+ * Anthropic models take forced tools only without thinking, so the SDK sends the one tool with "auto";
+ * a reply without the tool call is the ordinary invalid-output path.
+ */
+export const RESEARCH_ENGINE_MODEL_SHORTLIST = [
+  ...RESEARCH_PREVIEW_P0_MODEL_SHORTLIST,
+  { id: "gemini-4-carbon", provider: "google", apiModel: "gemini-4-carbon" },
+  { id: "gpt-6-2-sol", provider: "openai", apiModel: "gpt-6.2-sol" },
+  { id: "claude-sonnet-5-5", provider: "anthropic", apiModel: "claude-sonnet-5-5" },
+  { id: "claude-opus-5-5", provider: "anthropic", apiModel: "claude-opus-5-5" },
+] as const;
+
+export const researchEngineModelIsShortlisted = (model: Pick<AiModel, "id" | "provider" | "apiModel">) =>
+  RESEARCH_ENGINE_MODEL_SHORTLIST.some((entry) => entry.id === model.id && entry.provider === model.provider && entry.apiModel === model.apiModel);
+
 /** Roles map to shortlisted models only: an operator flag can choose among verified models, never add one. */
 export function researchRoleModelIds(env: Record<string, string | undefined> = process.env): Record<ResearchModelRole, string> | null {
   const allowed = new Set((env.RESEARCH_ENGINE_MODEL_IDS ?? "").split(",").map((entry) => entry.trim()).filter(Boolean));
-  const shortlist: string[] = RESEARCH_PREVIEW_P0_MODEL_SHORTLIST.map((entry): string => entry.id).filter((id) => allowed.has(id));
+  const shortlist: string[] = RESEARCH_ENGINE_MODEL_SHORTLIST.map((entry): string => entry.id).filter((id) => allowed.has(id));
   if (!shortlist.length) return null;
   const overrides = Object.fromEntries((env.RESEARCH_ENGINE_ROLE_MODELS ?? "").split(",").map((entry) => entry.split("=").map((part) => part.trim()))
     .filter((pair) => pair.length === 2 && (RESEARCH_MODEL_ROLES as readonly string[]).includes(pair[0]!) && shortlist.includes(pair[1]!)));
@@ -71,7 +89,7 @@ async function pinExecutionProfile(userId: string, profile: "standard" | "deep")
   let perCall = 0;
   for (const role of RESEARCH_MODEL_ROLES) {
     const model = models.find((candidate) => candidate.id === roles[role]);
-    if (!model || !model.enabled || model.catalogDeleted || !researchPreviewModelIsShortlisted(model)) {
+    if (!model || !model.enabled || model.catalogDeleted || !researchEngineModelIsShortlisted(model)) {
       throw refuse(409, "RESEARCH_ENGINE_UNAVAILABLE", "Deep Research is unavailable.");
     }
     const estimate = await funding.estimate({ userId, model, outputTokenCap: 6_000, searchEnabled: role === "researcher",

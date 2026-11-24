@@ -24,7 +24,7 @@ DB 제약(`ResearchPreviewRun_v2_shape_check`)상 run 단위 checkpoint·예약�
 | 변수 | 의미 |
 |---|---|
 | `RESEARCH_ENGINE_ENABLED` | v2 offer·API·worker 전체 |
-| `RESEARCH_ENGINE_MODEL_IDS` | 쓸 수 있는 모델. `RESEARCH_PREVIEW_P0_MODEL_SHORTLIST`(usage 계약이 검증된 Google 조합) 안에서만 고를 수 있고 새 모델을 더할 수 없음 |
+| `RESEARCH_ENGINE_MODEL_IDS` | 쓸 수 있는 모델. `RESEARCH_ENGINE_MODEL_SHORTLIST`(`lib/researchEngineService.ts`: Preview P0의 Gemini 둘과 Gemini 4 Carbon, GPT 6.2 Sol, Claude Sonnet 5.5, Claude Opus 5.5. 모두 reasoning이 출력 토큰에 포함되고 강제 tool 호출이 확인됨) 안에서만 고를 수 있고 운영 변수로 새 모델을 더할 수 없음. 목록에 넣는 것은 코드 변경 |
 | `RESEARCH_ENGINE_ROLE_MODELS` | 역할별 모델(`writer=…,researcher=…`), 위 목록 안에서만. run 시작 시 고정 |
 | `RESEARCH_ENGINE_PRIVATE_SOURCES_ENABLED` | 첨부·대화·Memory·knowledge 선택 허용 |
 | `RESEARCH_ENGINE_NATIVE_ENABLED` | Native bearer route와 capability |
