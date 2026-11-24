@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { studioCopy } from "@/locales/studio";
 import { studioCreativeCopy } from "@/locales/studioCreative";
-import { studioImageAccept, validStudioImage } from "./studioCanvas";
+import { createStudioObjectUrl, revokeStudioObjectUrl, studioImageAccept, validStudioImage } from "./studioCanvas";
 import styles from "./studio.module.css";
 
 export function useStudioCopy() {
@@ -17,18 +17,18 @@ export function useStudioUrls() {
   useEffect(() => {
     const owned = urls.current;
     return () => {
-      for (const url of owned) URL.revokeObjectURL(url);
+      for (const url of owned) revokeStudioObjectUrl(url);
       owned.clear();
     };
   }, []);
   return {
     make(blob: Blob) {
-      const url = URL.createObjectURL(blob);
+      const url = createStudioObjectUrl(blob);
       urls.current.add(url);
       return url;
     },
     release(url: string) {
-      if (urls.current.delete(url)) URL.revokeObjectURL(url);
+      if (urls.current.delete(url)) revokeStudioObjectUrl(url);
     },
   };
 }
@@ -56,18 +56,20 @@ export function useStudioTask() {
   return { busy, status, report, task };
 }
 
-export function StudioFileButton({ label, onFile, disabled, onInvalid }: {
+export function StudioFileButton({ label, onFile, disabled, onInvalid, capture }: {
   label: string;
   onFile: (file: File) => void;
   disabled?: boolean;
   onInvalid: () => void;
+  capture?: "user";
 }) {
   return (
-    <label className={styles.fileButton} data-disabled={disabled || undefined}>
+    <label className={styles.fileButton} data-disabled={disabled || undefined} data-capture={capture}>
       <span>{label}</span>
       <input
         type="file"
-        accept={studioImageAccept}
+        accept={capture ? "image/*" : studioImageAccept}
+        capture={capture}
         aria-label={label}
         disabled={disabled}
         onChange={event => {

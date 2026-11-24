@@ -3,11 +3,12 @@
 /* eslint-disable @next/next/no-img-element -- User inputs and generated art use local URLs. */
 import { useEffect, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
-import { Camera, Download, Share2 } from "lucide-react";
+import { Camera, Download } from "lucide-react";
 import { parseStudioAnalysis, studioAnalysisPrompt, type StudioAnalysisReport } from "@/lib/studioCreativeAnalysis";
 import { STUDIO_EXPORT_FORMATS, studioArtworkPath, type StudioCreativeTool } from "@/lib/studioTools";
 import { studioOutputLanguage } from "@/locales/studio";
-import { makeStudioImageReference, renderStudioImage, saveStudioFile, shareStudioPng } from "./studioCanvas";
+import { makeStudioImageReference, makeStudioStyleReference, readStudioBlob, renderStudioImage, saveStudioFile, studioStyleReferenceDirection } from "./studioCanvas";
+import { StudioImageShare } from "./StudioImageShare";
 import { captureStudioDraftImage, useStudioCheckoutDraft, type StudioDraftImage } from "./studioCheckoutDraft";
 import { StudioFileButton, StudioStatus, useStudioCopy, useStudioTask, useStudioUrls } from "./StudioControls";
 import { isStudioCreditShortfall, StudioCreditRecovery } from "./StudioCreditRecovery";
@@ -18,21 +19,21 @@ import styles from "./studio.module.css";
 
 const characterPresets = [
   { id: "fantasy", label: "fantasyCharacter", artwork: "character-fantasy.webp", photoreal: true,
-    direction: "A fantasy mage with a real forest-green embroidered cloak and a small brass lantern, against a softly lit studio background." },
+    direction: "A fantasy mage turning toward an unseen sound, raising a lit brass lantern. The lantern casts warm light across their face, hand and forest-green embroidered cloak." },
   { id: "knight", label: "knightCharacter", artwork: "character-knight.webp", photoreal: true,
-    direction: "A royal knight in decorated steel armor and a crimson cape against a castle courtyard." },
+    direction: "A royal knight with one gauntleted hand resting on a stone parapet, looking across the courtyard. Overcast daylight reflects softly from decorated steel armor and settles into the folds of a crimson cape." },
   { id: "pilot", label: "pilotCharacter", artwork: "character-pilot.webp", photoreal: true,
-    direction: "A retro-future space pilot in a white and cobalt flight suit with a distant planet behind them." },
+    direction: "A retro-future pilot leaning forward in a white and cobalt flight suit, glancing toward the cockpit window. Cold light from a distant planet brushes one side of their face; dim instrument light reaches the other." },
   { id: "courier", label: "courierCharacter", artwork: "character-courier.webp", photoreal: true,
-    direction: "A cyberpunk courier in purple and orange techwear in a neon city at dusk." },
+    direction: "A cyberpunk courier glancing back mid-stride from an elevated walkway, one hand securing a messenger bag. Dusk and magenta signage reflect consistently on one cheek, the damp purple techwear and the railing." },
   { id: "explorer", label: "explorerCharacter", artwork: "character-explorer.webp", photoreal: true,
-    direction: "A desert explorer in sun-weathered linen holding a folded map in an ochre canyon." },
+    direction: "A desert explorer looks up from a half-folded map inside an ochre canyon. The brim of their hat casts a natural shadow on their face and the sun picks out the weathered linen at one shoulder." },
   { id: "detective", label: "detectiveCharacter", artwork: "character-detective.webp", photoreal: true,
-    direction: "A noir detective in a fedora and trench coat, lit by a midcentury city street in the rain." },
+    direction: "A noir detective tugs the collar of a rain-damp trench coat and looks across a midcentury street. A single streetlamp grazes their face and fedora, with softer reflected light rising from the pavement." },
   { id: "pirate", label: "pirateCharacter", artwork: "character-pirate.webp", photoreal: true,
-    direction: "A pirate captain in a weathered burgundy coat and tricorne on a wooden ship at sea." },
+    direction: "A pirate captain braces against a wooden rail while scanning the horizon. Wind lifts the loose edge of the weathered burgundy coat and low sea light grazes the captain's face and tricorne." },
   { id: "fairy", label: "fairyCharacter", artwork: "character-fairy.webp", photoreal: true,
-    direction: "A woodland fairy in a moss-green practical costume with translucent lavender wings and a botanical crown." },
+    direction: "A woodland fairy bends toward a fern with a small curious smile, in a practical moss-green costume and botanical crown. Dappled woodland light falls across cheek, fabric and translucent lavender wings in the same direction." },
   { id: "anime", label: "animeCharacter", artwork: "preset-anime.webp",
     direction: "An original hand-drawn animation protagonist with a windswept scarf and an atmospheric painted setting." },
   { id: "3d", label: "threeDCharacter", artwork: "preset-3d.webp",
@@ -50,7 +51,6 @@ const characterPresets = [
 ] as const;
 type CharacterPreset = (typeof characterPresets)[number]["id"];
 const shareFormats = STUDIO_EXPORT_FORMATS.filter(format => format.id !== "poster");
-const samplePhoto = "/studio/selfie.png";
 
 type CreativeDraft = {
   photo: StudioDraftImage;
@@ -68,6 +68,7 @@ export function StudioCreativeEditor({ tool }: { tool: StudioCreativeTool }) {
   const urls = useStudioUrls();
   const { busy, status, report, task } = useStudioTask();
   const active = useRef<AbortController | null>(null);
+  const previousReports = useRef(new Map<string, StudioAnalysisReport>());
   const [runImage] = useState(createStudioImageRunner);
   const [photo, setPhoto] = useState("");
   const [result, setResult] = useState("");
@@ -118,21 +119,40 @@ export function StudioCreativeEditor({ tool }: { tool: StudioCreativeTool }) {
       try {
         if (character) {
           if (!imageQuote.quote) return;
-          const look = "photoreal" in preset ? "Shoot it as a photoreal live-action character portrait with natural skin texture, real materials and lens lighting. " : "";
-          const prompt = "Transform the person in the attached photo into the chosen original character. Keep their likeness recognizable, especially their facial features and hairstyle, while adapting the outfit and scene. Compose a square portrait with no text or watermark. " + look + "Character: " +
-            preset.direction;
+          const photoreal = "photoreal" in preset;
+          const identity = "Cast the person in the reference as this character. Preserve their recognizable face shape, facial features, skin tone and hairline.";
+          const look = photoreal ? [
+            "Photograph one live-action scene from scratch, with a candid three-quarter pose, an in-scene eyeline and a natural expression. The reference establishes identity; do not copy its front-facing pose, expression, crop, original lighting or pixels.",
+            "Unify face, neck, hands, wardrobe and environment under the same lens, exposure, depth of field, light direction and color grade. Keep natural pores, hair and fabric, believable contact shadows at hairline, collar and accessories, and proportions consistent across the frame. Avoid face swaps, hard mask edges and studio headshot lighting.",
+          ].join(" ") : "Draw the person anew in the described style, using a pose and expression that carry the character.";
+          const prompt = [
+            photoreal ? studioStyleReferenceDirection : "", identity, look,
+            "Compose a square portrait with no text or watermark.", `Scene: ${preset.direction}`,
+          ].filter(Boolean).join(" ");
           const output = await runImage({
             inputKey: photo, prompt, size: imageQuote.quote.size, quote: imageQuote.quote,
-            reference: () => makeStudioImageReference(photo), signal,
+            reference: () => photoreal ? makeStudioStyleReference(photo, studioArtworkPath(preset.artwork)) : makeStudioImageReference(photo),
+            signal,
           });
           signal.throwIfAborted();
           urls.release(result);
           setResult(urls.make(output));
         } else {
-          const prompt = studioAnalysisPrompt(id, studioOutputLanguage[lang]);
-          const text = await generateStudioText(prompt, signal, await makeStudioImageReference(photo));
+          const image = await makeStudioImageReference(photo);
+          const digest = await crypto.subtle.digest("SHA-256", await image.arrayBuffer());
+          const key = `${id}/${lang}/${new Uint8Array(digest).join(",")}`;
+          let next: StudioAnalysisReport | null = previousReports.current.get(key) ?? null;
+          if (!next) {
+            const text = await generateStudioText(studioAnalysisPrompt(id, studioOutputLanguage[lang]), signal, image);
+            signal.throwIfAborted();
+            try {
+              next = parseStudioAnalysis(id, text);
+            } catch {
+              report(copy.analysisIncomplete, true);
+              return;
+            }
+          }
           signal.throwIfAborted();
-          const next = parseStudioAnalysis(id, text);
           const reportImage = next && await renderStudioPortraitReport(photo, next, {
             interpretation: copy.photoInterpretation,
             color: {
@@ -152,6 +172,7 @@ export function StudioCreativeEditor({ tool }: { tool: StudioCreativeTool }) {
           urls.release(result);
           setResult(reportImage ? urls.make(reportImage) : "");
           setAnalysis(next);
+          if (next) previousReports.current.set(key, next);
           if (!next) report(copy.photoRetry, true);
         }
         void checkout.clear();
@@ -176,21 +197,27 @@ export function StudioCreativeEditor({ tool }: { tool: StudioCreativeTool }) {
     ? new Intl.NumberFormat(lang, { maximumFractionDigits: 1 }).format(analysis.score) + " / 10"
     : analysis.season);
 
-  function exportResult(share: boolean) {
-    void task(async () => {
-      const output = !character && !story
-        ? await captureStudioDraftImage(result)
-        : await renderStudioImage(result, { width: 1080, height: story ? 1920 : 1080, fit: "contain", bleed: story });
-      if (typeof output === "string") return;
-      const filename = "tomverse-" + id + (story ? "-story" : "-feed") + ".png";
-      if (share) await shareStudioPng(output, filename);
-      else saveStudioFile(output, filename);
-    });
-  }
+  const filename = "tomverse-" + id + (story ? "-story" : "-feed") + ".png";
+  const prepareImage = () => !character && !story
+    ? readStudioBlob(result)
+    : renderStudioImage(result, { width: 1080, height: story ? 1920 : 1080, fit: "contain", bleed: story });
+  const sampleReport = `/studio/${id}-sample.${lang === "ko" ? "ko" : "en"}.webp`;
 
   const generateButton = <StudioGenerateButton label={copy.generate} busy={busy}
     disabled={!photo || (character ? !imageQuote.quote : sessionStatus !== "authenticated")}
     onClick={generate} />;
+  const resultActions = <div className={styles.creativeActions}>
+    {ready && <label className={styles.field}>{copy.template}
+      <select aria-label={copy.template} value={story ? "story" : "feed"} disabled={busy} onChange={event => setStory(event.target.value === "story")}>
+        {shareFormats.map(format => <option key={format.id} value={format.id}>{copy[format.id]}</option>)}
+      </select>
+    </label>}
+    <button type="button" className={styles.primary} disabled={!ready || busy}
+      onClick={() => void task(async () => saveStudioFile(await prepareImage(), filename))}>
+      <Download size={16} aria-hidden />{copy.savePng}
+    </button>
+    <StudioImageShare disabled={!ready || busy} filename={filename} prepare={prepareImage} />
+  </div>;
 
   return <>
     <div className={styles.workbench} data-character={character || undefined}>
@@ -200,6 +227,8 @@ export function StudioCreativeEditor({ tool }: { tool: StudioCreativeTool }) {
           {photo ? <img src={photo} alt={copy.originalPhoto} width={72} height={72} /> : <Camera size={28} aria-hidden />}
           <StudioFileButton label={photo ? copy.changePhoto : copy.uploadPhoto} disabled={busy}
             onFile={file => pickPhoto(urls.make(file))} onInvalid={() => report(copy.invalidImage, true)} />
+          {!character && <StudioFileButton label={copy.takeSelfie} disabled={busy} capture="user"
+            onFile={file => pickPhoto(urls.make(file))} onInvalid={() => report(copy.invalidImage, true)} />}
         </div>
         {character ? <fieldset className={styles.fieldset} disabled={busy}>
           <legend>{copy.chooseCharacter}</legend>
@@ -217,8 +246,6 @@ export function StudioCreativeEditor({ tool }: { tool: StudioCreativeTool }) {
           </div>
         </fieldset> : <>
           <p className={styles.hint}>{copy.photoGuidance}</p>
-          <button type="button" className={styles.secondary} disabled={busy || photo === samplePhoto}
-            onClick={() => pickPhoto(samplePhoto)}>{copy.samplePhoto}</button>
         </>}
         {!character && <>
           <div className={styles.creativeGenerate}>{generateButton}</div>
@@ -227,7 +254,8 @@ export function StudioCreativeEditor({ tool }: { tool: StudioCreativeTool }) {
         </>}
       </section>
       <section className={character ? styles.panel + " " + styles.characterPreview : styles.panel} aria-busy={busy} data-testid={id + "-result"}>
-        <h2>{character && !result ? copy[preset.label] : copy.resultPreview}</h2>
+        {character ? <h2>{result ? copy.resultPreview : copy[preset.label]}</h2>
+          : <div className={styles.reportHeader}><h2>{copy.resultPreview}</h2>{resultActions}</div>}
         {character ? <>
           {!result && !busy && <p className={styles.hint}>{copy.exampleResult}</p>}
           {(result || !busy) && <img className={styles.characterArt} src={result || studioArtworkPath(preset.artwork)}
@@ -236,7 +264,12 @@ export function StudioCreativeEditor({ tool }: { tool: StudioCreativeTool }) {
           <StudioQuoteHint {...imageQuote} />
           <StudioStatus status={status} />
         </> : <>
-          {!result && !busy && <p className={styles.hint}>{copy.emptyResult}</p>}
+          {!result && <figure className={styles.sampleReport}>
+            <figcaption>{copy.exampleResult}</figcaption>
+            <a className={styles.reportPreview} href={sampleReport} target="_blank" rel="noreferrer">
+              <img src={sampleReport} alt={copy.exampleResult + " · " + copy[tool.title]} width={800} height={1200} />
+            </a>
+          </figure>}
           {result && <a className={styles.reportPreview} href={result} target="_blank" rel="noreferrer">
             <img src={result} alt={outcome ? copy[tool.title] + " · " + outcome : copy[tool.title]} />
           </a>}
@@ -259,19 +292,7 @@ export function StudioCreativeEditor({ tool }: { tool: StudioCreativeTool }) {
           </>}
         </>}
         {!ready && busy && <p className={styles.hint}>{copy.generating}</p>}
-        {ready && <div className={styles.creativeActions}>
-          <label className={styles.field}>{copy.template}
-            <select aria-label={copy.template} value={story ? "story" : "feed"} disabled={busy} onChange={event => setStory(event.target.value === "story")}>
-              {shareFormats.map(format => <option key={format.id} value={format.id}>{copy[format.id]}</option>)}
-            </select>
-          </label>
-          <button type="button" className={styles.primary} disabled={busy} onClick={() => exportResult(false)}>
-            <Download size={16} aria-hidden />{copy.savePng}
-          </button>
-          <button type="button" className={styles.secondary} disabled={busy} onClick={() => exportResult(true)}>
-            <Share2 size={16} aria-hidden />{copy.shareImage}
-          </button>
-        </div>}
+        {ready && character && resultActions}
       </section>
     </div>
     <StudioCreditRecovery error={creditError} returnTo={"/studio/" + id + "?lang=" + encodeURIComponent(lang)}

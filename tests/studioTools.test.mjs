@@ -72,7 +72,8 @@ test("Poster briefs use the selected art direction and keep exact-copy or typese
   assert.ok(exact.includes('"headlineContext":"콜드브루"'));
   const automatic = studioPublishingPrompt({ ...input, title: "", hasPhoto: false });
   assert.match(automatic, /complete, professionally typeset artwork in ko/);
-  assert.match(automatic, /Leave a quiet lower strip/);
+  assert.match(automatic, /Keep important typography clear of the bottom edge/);
+  assert.match(automatic, /Continue the artwork to the frame edges/);
   assert.doesNotMatch(automatic, /Use the reference as the featured subject/);
 });
 
@@ -144,6 +145,10 @@ test("Studio renders only schema-checked, bounded analysis data", () => {
     guides: { axis: .5, thirds: [.2, .35, .5, .7], markers: [{ label: "Eyes", point: [.6, .35] }] },
   };
   assert.deepEqual(parseStudioAnalysis("face-analysis", JSON.stringify(face)), face);
+  const partial = { ...face, metrics: face.metrics.slice(0, 10), observations: face.observations.slice(0, 5), tips: face.tips.slice(0, 7) };
+  const fencedAnswer = "Here is the analysis.\n```json\n" + JSON.stringify(partial) + "\n```";
+  assert.deepEqual(parseStudioAnalysis("face-analysis", fencedAnswer), partial);
+  assert.throws(() => parseStudioAnalysis("face-analysis", JSON.stringify({ ...partial, metrics: [] })));
   assert.equal(parseStudioAnalysis("face-analysis", JSON.stringify({ ...face, guides: { ...face.guides, thirds: [.35, .2, .5, .7] } })).guides, null);
 });
 

@@ -6,7 +6,7 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { ArrowDown, ArrowRight } from "lucide-react";
-import { ReviewNavigation, WorkspaceTitle, WorkspaceThemeButton } from "@/components/chat/ReviewStudioChrome";
+import { ReviewNavigation, WorkspaceTitle, WorkspaceThemeButton, WorkspaceUsageButton } from "@/components/chat/ReviewStudioChrome";
 import { AppToastViewport } from "@/components/AppToastViewport";
 import { purchaseCtaCopy } from "@/components/billing/purchaseCopy";
 import { notifyUserUsageChanged } from "@/components/chat/useUserUsage";
@@ -93,6 +93,7 @@ export function StudioWorkspace({ toolId, preset }: { toolId?: string; preset?: 
       <header className={"review-command-bar " + styles.commandBar} data-testid="studio-command-bar">
         <WorkspaceTitle name="Studio" caption={copy.workspaceCaption} title={tool ? copy[tool.title] : undefined}
           href={tool ? { pathname: studioPath, query: { lang } } : undefined} />
+        <WorkspaceUsageButton />
         <WorkspaceThemeButton />
       </header>
       {billingNotice && <p className={styles.billingNotice} role="status" data-testid="studio-billing-notice">{billingNotice}</p>}
