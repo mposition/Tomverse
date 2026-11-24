@@ -27,6 +27,15 @@ export const STUDIO_EXPORT_FORMATS = [
 
 export const STUDIO_STICKER_LIMIT = STUDIO_STICKER_KEYS.length;
 
+export function fillStudioStickerCaptions(existing: readonly string[], suggestions: readonly string[], random = Math.random) {
+  const pool = [...new Set(suggestions)].filter(caption => caption.trim() && !existing.includes(caption));
+  for (let index = pool.length - 1; index > 0; index--) {
+    const pick = Math.floor(random() * (index + 1));
+    [pool[index], pool[pick]] = [pool[pick], pool[index]];
+  }
+  return [...existing, ...pool.slice(0, Math.max(0, STUDIO_STICKER_LIMIT - existing.length))];
+}
+
 export function studioStickerLayout(count: number) {
   const columns = Math.min(5, count, Math.ceil(Math.sqrt(count)));
   return { columns, rows: Math.ceil(count / columns) };

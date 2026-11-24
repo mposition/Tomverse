@@ -1,4 +1,6 @@
 export const studioLocale = {
+  "captionLanguage": "Textsprache",
+  "randomCaptions": "Mit Zufallstexten auffüllen",
   "checkoutDraftRestored": "Dein Studio-Entwurf wurde wiederhergestellt.",
   "checkoutDraftSaveFailed": "Der Entwurf konnte vor dem Bezahlen nicht gespeichert werden. Deine Arbeit ist weiterhin hier.",
   "workspaceCaption": "Kreativwerkzeuge",

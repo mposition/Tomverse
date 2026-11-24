@@ -1,4 +1,6 @@
 export const studioLocale = {
+  "captionLanguage": "文字語言",
+  "randomCaptions": "隨機填入文字",
   "checkoutDraftRestored": "已還原付款前的草稿。",
   "checkoutDraftSaveFailed": "無法儲存付款前的草稿。目前內容仍保留在此畫面。",
   "workspaceCaption": "創作工具",

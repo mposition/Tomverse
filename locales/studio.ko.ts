@@ -1,4 +1,6 @@
 export const studioLocale = {
+  "captionLanguage": "문구 언어",
+  "randomCaptions": "랜덤 문구로 채우기",
   "checkoutDraftRestored": "결제 전에 작성하던 내용을 복원했습니다.",
   "checkoutDraftSaveFailed": "결제 전에 초안을 저장하지 못했습니다. 작성한 내용은 이 화면에 남아 있습니다.",
   "workspaceCaption": "창작 도구",

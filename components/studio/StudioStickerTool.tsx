@@ -3,9 +3,11 @@
 /* eslint-disable @next/next/no-img-element -- Sticker previews use local object URLs. */
 import { useEffect, useRef, useState } from "react";
 import { zipSync } from "fflate";
-import { Download, Plus, X } from "lucide-react";
-import { STUDIO_STICKER_KEYS, STUDIO_STICKER_LIMIT, studioStickerLayout } from "@/lib/studioTools";
-import { makeStudioImageReference, removeStudioGreenScreen, renderStudioImage, saveStudioFile, splitStudioSheet } from "./studioCanvas";
+import { Download, Plus, Shuffle, X } from "lucide-react";
+import { isLanguage, SUPPORTED_LANGUAGES, type Language } from "@/lib/language";
+import { fillStudioStickerCaptions, STUDIO_STICKER_KEYS, STUDIO_STICKER_LIMIT, studioStickerLayout } from "@/lib/studioTools";
+import { studioCopy, studioStickerSuggestions } from "@/locales/studio";
+import { makeStudioImageReference, removeStudioGreenScreen, renderStudioSticker, saveStudioFile, splitStudioSheet } from "./studioCanvas";
 import { StudioFileButton, StudioStatus, useStudioCopy, useStudioTask, useStudioUrls } from "./StudioControls";
 import { StudioGenerateButton, StudioQuoteHint } from "./StudioGenerationControls";
 import { createStudioImageRunner, StudioGenerationError, useStudioImageQuote } from "./studioGenerationClient";
@@ -14,6 +16,7 @@ import { isStudioCreditShortfall, StudioCreditRecovery } from "./StudioCreditRec
 import styles from "./studio.module.css";
 
 type Sticker = { source: string; caption?: string };
+type PackCaption = { text: string; suggested?: boolean };
 type FaceStyle = "real" | "character";
 type Replacement = { index: number; caption: string; source: string | null };
 type StickerCheckoutDraft = {
@@ -23,6 +26,8 @@ type StickerCheckoutDraft = {
   stickers: Array<{ source: StudioDraftImage; caption?: string }>;
   captions: string[];
   captionDraft: string;
+  captionLanguage?: Language;
+  suggestedCaptionIndexes?: number[];
   sample: boolean;
   replacement: (Omit<Replacement, "source"> & { source: StudioDraftImage | null }) | null;
 };
@@ -31,9 +36,28 @@ const samplePhoto = "/studio/selfie.png";
 const sheetSize = "1536x1024";
 const singleSize = "1024x1024";
 const stickerBackground = "Use a perfectly flat pure green (#00ff00) background so the artwork can be cut out. Never use that background color in the character or props. Do not draw any lettering.";
+const captionSpace = "For the caption, leave a broad, solid, unlettered area centered on the front of the character or a prop around the lower third of the artwork, below the face. Integrate this area into the illustration and keep the silhouette compact.";
 const drawFace = (style: FaceStyle) => style === "real"
   ? "Preserve the recognisable, photoreal face and draw the body and props."
   : "Make a recognisable illustrated character from the portrait.";
+
+function StudioStickerPreview({ source, caption }: { source: string; caption: string }) {
+  const [rendered, setRendered] = useState<{ source: string; caption: string; url: string }>();
+  useEffect(() => {
+    let cancelled = false;
+    let url: string | undefined;
+    void renderStudioSticker(source, caption).then(blob => {
+      if (cancelled) return;
+      url = URL.createObjectURL(blob);
+      setRendered({ source, caption, url });
+    }).catch(() => undefined);
+    return () => {
+      cancelled = true;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [source, caption]);
+  return <img src={rendered?.source === source && rendered.caption === caption ? rendered.url : source} alt={caption} />;
+}
 
 export function StudioStickerTool({ billingNotice }: { billingNotice?: string }) {
   const { copy, lang } = useStudioCopy();
@@ -54,9 +78,13 @@ export function StudioStickerTool({ billingNotice }: { billingNotice?: string })
   const [stickers, setStickers] = useState<Sticker[]>(() => STUDIO_STICKER_KEYS.map((_, i) => ({
     source: "/studio/sticker-" + (i + 1) + ".png",
   })));
-  const [captions, setCaptions] = useState<string[]>([]);
+  const [captions, setCaptions] = useState<PackCaption[]>([]);
   const [captionDraft, setCaptionDraft] = useState("");
-  const words = [...captions, ...(captionDraft.trim() && captions.length < STUDIO_STICKER_LIMIT ? [captionDraft.trim()] : [])];
+  const [captionLanguage, setCaptionLanguage] = useState<Language>();
+  const outputLanguage = captionLanguage ?? lang;
+  const pendingCaption = captions.length < STUDIO_STICKER_LIMIT ? captionDraft.trim() : "";
+  const captionEntries = [...captions, ...(pendingCaption ? [{ text: pendingCaption }] : [])];
+  const words = captionEntries.map(({ text }) => text);
   const outputSize = words.length <= 1 ? singleSize : sheetSize;
   const sheetQuote = useStudioImageQuote(outputSize, true, true, outputSize === sheetSize ? singleSize : undefined);
   const [sample, setSample] = useState(true);
@@ -73,8 +101,9 @@ export function StudioStickerTool({ billingNotice }: { billingNotice?: string })
     setPhoto({ ...saved.photo, source: restoreSource(saved.photo.source) });
     setReference({ ...saved.reference, source: restoreSource(saved.reference.source) });
     setStickers(saved.stickers.map(sticker => ({ ...sticker, source: restoreSource(sticker.source) })));
-    setCaptions(saved.captions);
+    setCaptions(saved.captions.map((text, index) => ({ text, suggested: saved.suggestedCaptionIndexes?.includes(index) })));
     setCaptionDraft(saved.captionDraft);
+    setCaptionLanguage(saved.captionLanguage);
     setSample(saved.sample);
     if (saved.replacement && saved.replacement.index < saved.stickers.length) {
       setReplacement({ ...saved.replacement, source: saved.replacement.source ? restoreSource(saved.replacement.source) : null });
@@ -92,7 +121,8 @@ export function StudioStickerTool({ billingNotice }: { billingNotice?: string })
       ]);
       await checkoutDraft.save({
         style, photo: { ...photo, source: photoSource }, reference: { ...reference, source: referenceSource },
-        stickers: savedStickers, captions, captionDraft, sample,
+        stickers: savedStickers, captions: captions.map(({ text }) => text), captionDraft, captionLanguage, sample,
+        suggestedCaptionIndexes: captions.flatMap((caption, index) => caption.suggested ? [index] : []),
         replacement: replacement ? { ...replacement, source: replacementSource } : null,
       });
       setDraftSaved(true);
@@ -125,8 +155,15 @@ export function StudioStickerTool({ billingNotice }: { billingNotice?: string })
   }, [replacement, creditError]);
   const captionFor = (sticker: Sticker, index: number) => sticker.caption ?? copy[STUDIO_STICKER_KEYS[index]];
   const addCaption = () => {
-    if (!captionDraft.trim() || captions.length >= STUDIO_STICKER_LIMIT) return;
-    setCaptions(words);
+    if (!pendingCaption) return;
+    setCaptions(captionEntries);
+    setCaptionDraft("");
+  };
+  const manualCaptions = captionEntries.filter(caption => !caption.suggested);
+  const fillCaptions = () => {
+    const defaults = STUDIO_STICKER_KEYS.map(key => studioCopy[outputLanguage][key]);
+    const filled = fillStudioStickerCaptions(manualCaptions.map(({ text }) => text), [...defaults, ...studioStickerSuggestions[outputLanguage]]);
+    setCaptions([...manualCaptions, ...filled.slice(manualCaptions.length).map(text => ({ text, suggested: true }))]);
     setCaptionDraft("");
   };
 
@@ -149,7 +186,7 @@ export function StudioStickerTool({ billingNotice }: { billingNotice?: string })
       const blob = await runPack({
         inputKey: photo.source,
         prompt: "Create exactly " + words.length + " separate chat sticker drawings from this portrait. Arrange them in " + columns + " equal columns and " + rows + " equal rows filling the canvas. Place one drawing in each successive cell with padding and invisible grid lines. Leave any unused cells plain green. Keep the same face, style, palette and proportions. " +
-          drawFace(style) + " " + stickerBackground +
+          drawFace(style) + " " + stickerBackground + " " + captionSpace +
           " In left-to-right, top-to-bottom order, each pose and expression should match its caption: " + JSON.stringify(words),
         size: sheetQuote.quote.size,
         quote: sheetQuote.quote,
@@ -166,7 +203,7 @@ export function StudioStickerTool({ billingNotice }: { billingNotice?: string })
         setReference({ source: photo.source, style });
         setStickers(next);
         setSample(false);
-        setCaptions(words);
+        setCaptions(captionEntries);
         setCaptionDraft("");
         report(copy.packReady);
         void checkoutDraft.clear();
@@ -186,7 +223,7 @@ export function StudioStickerTool({ billingNotice }: { billingNotice?: string })
     }
   });
 
-  const png = (sticker: Sticker, index: number) => renderStudioImage(sticker.source, { width: 512, height: 512, fit: "contain", title: captionFor(sticker, index), sticker: true });
+  const png = (sticker: Sticker, index: number) => renderStudioSticker(sticker.source, captionFor(sticker, index));
   const filename = (index: number) => "sticker-" + String(index + 1).padStart(2, "0") + ".png";
   const savePack = () => task(async () => {
     const entries = await Promise.all(stickers.map(async (sticker, index) => [filename(index), new Uint8Array(await (await png(sticker, index)).arrayBuffer())] as const));
@@ -218,7 +255,7 @@ export function StudioStickerTool({ billingNotice }: { billingNotice?: string })
       const blob = await runCut({
         inputKey: current.source,
         prompt: "The left half is the reference portrait. The right half is an existing sticker. Draw one new sticker with the same identity, line work, colours and character as the reference. " +
-          drawFace(reference.style) + " " + stickerBackground +
+          drawFace(reference.style) + " " + stickerBackground + " " + captionSpace +
           " Change the pose, expression and props so the drawing depicts this new caption: " + JSON.stringify(replacement.caption.trim()),
         size: singleQuote.quote.size,
         quote: singleQuote.quote,
@@ -251,8 +288,8 @@ export function StudioStickerTool({ billingNotice }: { billingNotice?: string })
     urls.release(stickers[index].source);
     setStickers(stickers.map((sticker, i) => i === index ? { source, caption } : sticker));
     committed.current = source;
-    setCaptions(items => items[index] === stickers[index].caption
-      ? items.map((item, i) => i === index ? caption : item) : items);
+    setCaptions(items => items[index]?.text === stickers[index].caption
+      ? items.map((item, i) => i === index ? { text: caption } : item) : items);
     setReplacement(null);
     dialog.current?.close();
     report(copy.stickerReplaced);
@@ -284,10 +321,23 @@ export function StudioStickerTool({ billingNotice }: { billingNotice?: string })
             <label htmlFor="studio-pack-caption">{copy.packCaptions}</label>
             <span>{copy.captionLimit.replace("{count}", String(words.length))}</span>
           </div>
+          <div className={styles.captionSuggestions}>
+            <label className={styles.field}>{copy.captionLanguage}
+              <select value={outputLanguage} disabled={busy} onChange={event => {
+                if (isLanguage(event.target.value)) setCaptionLanguage(event.target.value);
+              }}>
+                {SUPPORTED_LANGUAGES.map(language => <option key={language} value={language} lang={language}>
+                  {new Intl.DisplayNames([language], { type: "language" }).of(language)}
+                </option>)}
+              </select>
+            </label>
+            <button type="button" className={styles.secondary} disabled={busy || manualCaptions.length >= STUDIO_STICKER_LIMIT}
+              onClick={fillCaptions}><Shuffle size={14} aria-hidden />{copy.randomCaptions}</button>
+          </div>
           {captions.length > 0 && <ul className={styles.captionChips}>
-            {captions.map((caption, i) => <li key={i}>
-              <span>{caption}</span>
-              <button type="button" disabled={busy} aria-label={copy.removeCaption + " " + caption}
+            {captions.map(({ text }, i) => <li key={i}>
+              <span>{text}</span>
+              <button type="button" disabled={busy} aria-label={copy.removeCaption + " " + text}
                 onClick={() => setCaptions(captions.filter((_, index) => i !== index))}><X size={13} aria-hidden /></button>
             </li>)}
           </ul>}
@@ -319,7 +369,7 @@ export function StudioStickerTool({ billingNotice }: { billingNotice?: string })
         </div>
         <ul className={styles.stickerGrid}>{stickers.map((sticker, index) => (
           <li key={index} className={styles.sticker} data-testid="studio-sticker">
-            <div className={styles.stickerImage}><img src={sticker.source} alt="" /><span>{captionFor(sticker, index)}</span></div>
+            <div className={styles.stickerImage}><StudioStickerPreview source={sticker.source} caption={captionFor(sticker, index)} /></div>
             <div className={styles.stickerActions}>
               <button type="button" disabled={busy} onClick={() => openSticker(index)}>{copy.regenerate}</button>
               <button type="button" disabled={busy} onClick={() => void task(async () => saveStudioFile(await png(sticker, index), filename(index)))}>PNG</button>
@@ -346,9 +396,9 @@ export function StudioStickerTool({ billingNotice }: { billingNotice?: string })
         <StudioQuoteHint {...singleQuote} />
         {replacementError && <StudioStatus status={{ error: true, text: replacementError }} />}
         <div className={styles.compare}>
-          <figure><figcaption>{copy.currentImage}</figcaption><img src={stickers[replacement.index].source} alt={captionFor(stickers[replacement.index], replacement.index)} /></figure>
+          <figure><figcaption>{copy.currentImage}</figcaption><StudioStickerPreview source={stickers[replacement.index].source} caption={captionFor(stickers[replacement.index], replacement.index)} /></figure>
           <figure aria-busy={regenerating}><figcaption>{copy.newImage}</figcaption>{replacement.source
-            ? <img src={replacement.source} alt={replacement.caption} /> : <p>{regenerating ? copy.generating : copy.emptyResult}</p>}</figure>
+            ? <StudioStickerPreview source={replacement.source} caption={replacement.caption.trim()} /> : <p>{regenerating ? copy.generating : copy.emptyResult}</p>}</figure>
         </div>
         <div className={styles.dialogActions}>
           <button type="button" className={styles.secondary} onClick={() => dialog.current?.close()}>{copy.close}</button>
