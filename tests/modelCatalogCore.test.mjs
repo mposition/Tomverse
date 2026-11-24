@@ -49,6 +49,10 @@ import {
   codingStructuredOutputChoice,
 } from "../lib/modelCatalogCore.ts";
 import {
+  benchmarkPageSearchFromEnv,
+  benchmarkSearchPrompt,
+  benchmarkUrlsFromAnswer,
+  BENCHMARK_SEARCH_SCHEMA,
   CAPABILITY_SCHEMA,
   CAPABILITY_TASK,
   CODING_SCHEMA,
@@ -1198,4 +1202,37 @@ test("coding notes: the answer is read to the limits, never cut, and the router 
     codingNotesRouterText({ strengths: ["A", "B"], weaknesses: ["C"] }),
     "Coding strengths: A; B. Coding weaknesses: C."
   );
+});
+
+test("the benchmark search is off until a model is named, asks for the provider's own pages, and keeps only those", async () => {
+  assert.equal(await benchmarkPageSearchFromEnv({}), null);
+  assert.equal(await benchmarkPageSearchFromEnv({ MODEL_CATALOG_BENCHMARK_SEARCH_MODEL_ID: "  " }), null);
+  const prompt = benchmarkSearchPrompt({ provider: "anthropic", apiModelId: "claude-x", name: "Claude X" });
+  assert.ok(prompt.includes('"Claude X" (API model id claude-x)'));
+  assert.ok(prompt.includes("www.anthropic.com"));
+  assert.ok(prompt.includes("platform.claude.com/docs/"));
+  assert.equal(BENCHMARK_SEARCH_SCHEMA.properties.urls.maxItems, 3);
+  assert.deepEqual(
+    benchmarkUrlsFromAnswer(
+      {
+        urls: [
+          "https://www.anthropic.com/news/claude-x",
+          "https://www.anthropic.com/news/claude-x",
+          "http://www.anthropic.com/news/claude-x-card",
+          "https://community.anthropic.com/claude-x",
+          "https://platform.claude.com/login",
+          42,
+          "https://docs.claude.com/en/models/claude-x",
+          "https://www.anthropic.com/claude-x-system-card",
+        ],
+      },
+      "anthropic"
+    ),
+    ["https://www.anthropic.com/news/claude-x", "https://docs.claude.com/en/models/claude-x", "https://www.anthropic.com/claude-x-system-card"]
+  );
+  for (const answer of [null, undefined, {}, { urls: "https://www.anthropic.com/news/claude-x" }]) {
+    assert.deepEqual(benchmarkUrlsFromAnswer(answer, "anthropic"), []);
+  }
+  assert.deepEqual(benchmarkUrlsFromAnswer({ urls: ["https://www.anthropic.com/news/claude-x"] }, "openrouter"), []);
+  assert.match(CAPABILITY_TASK, /benchmark or announcement page/);
 });

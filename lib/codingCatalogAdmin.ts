@@ -40,7 +40,7 @@ import {
   type CodingNotes,
   type CodingStoredProfile,
 } from "@/lib/modelCatalogCore";
-import type { CatalogDraftLlm, DraftPage } from "@/lib/modelCatalogDraftLlm";
+import type { BenchmarkPageSearch, CatalogDraftLlm, DraftPage } from "@/lib/modelCatalogDraftLlm";
 import { prisma } from "@/lib/prisma";
 
 /** Why this chat model cannot be linked now, or null. Read before the write and again inside it. */
@@ -410,11 +410,14 @@ export const unlinkCodingModel = async (input: { modelId: string; session: Sessi
 export type CapabilityFillDeps = {
   draftLlm: () => Promise<CatalogDraftLlm | null>;
   fetchPage: (provider: string, url: string) => Promise<DraftPage>;
+  /** The provider's own benchmark and model card pages, found by a search model; null when that search is off. */
+  benchmarkSearch: () => Promise<BenchmarkPageSearch | null>;
 };
 
 const defaultFillDeps: CapabilityFillDeps = {
   draftLlm: async () => (await import("@/lib/modelCatalogDraftLlm")).catalogDraftLlmFromEnv(),
   fetchPage: async (provider, url) => (await import("@/lib/modelCatalogDraftLlm")).fetchOfficialPage(provider, url),
+  benchmarkSearch: async () => (await import("@/lib/modelCatalogDraftLlm")).benchmarkPageSearchFromEnv(),
 };
 
 /**
@@ -450,7 +453,10 @@ export const keptCapability = <T extends string>(current: T, answered: T): T => 
  * many rows sends one request each, so no request outlives the HTTP limit).
  * One LLM call over the provider's default tool calling and structured output
  * pages and its models page (defaultCodingCapabilitySources, codingModelPage;
- * the models page is optional); the answer is read by
+ * the models page is optional), and, when the benchmark search is on, the
+ * first of the provider's own benchmark pages it finds that loads (one search
+ * call, optional too: a search that fails or finds nothing leaves the three
+ * pages); the answer is read by
  * codingCapabilitiesFromAnswer and every page it stands on -- the notes' too --
  * must be one of those fetched pages on the provider's own hosts. Notes no page
  * supports are not written. Any failure leaves the row as it was. A timeout is
@@ -471,12 +477,12 @@ export const fillLinkCapabilities = async (input: {
   const stored = codingStoredProfileSchema.safeParse(row.profile);
   if (!stored.success) throw new CatalogRefusal("settings_linked_only", [], 400);
   const source = stored.data.source === "chat" ? "chat" : "dedicated";
-  let facts: { provider: string; apiModelId: string } | undefined;
+  let facts: { provider: string; apiModelId: string; name?: string } | undefined;
   if (stored.data.source === "chat") {
     const registryModelId = stored.data.registryModelId;
     facts = (await loadChatModelFacts()).find((model) => model.id === registryModelId);
   } else {
-    facts = { provider: stored.data.provider, apiModelId: stored.data.apiModelId };
+    facts = { provider: stored.data.provider, apiModelId: stored.data.apiModelId, name: stored.data.name };
   }
   if (!facts) throw new CatalogRefusal("chat_model_missing", [], 409);
   const provider = facts.provider;
@@ -498,7 +504,21 @@ export const fillLinkCapabilities = async (input: {
         () => undefined
       );
     }
-    draft =await llm.draftCodingCapabilities({ provider, apiModelId: facts.apiModelId, pages: read });
+    // A benchmark page the search names stands beside them for the notes; the
+    // search only proposes URLs, and each is read here, on the provider's own hosts.
+    const search = await deps.benchmarkSearch();
+    if (search) {
+      const found = await search.findPages({ provider, apiModelId: facts.apiModelId, name: facts.name }).catch(() => []);
+      for (const url of found) {
+        if (!isOfficialSourceUrl(provider, url) || read.some((page) => page.url === url)) continue;
+        const page = await deps.fetchPage(provider, url).catch(() => null);
+        if (page) {
+          read.push(page);
+          break;
+        }
+      }
+    }
+    draft = await llm.draftCodingCapabilities({ provider, apiModelId: facts.apiModelId, pages: read });
   } catch (error) {
     const name = (error as { name?: unknown } | null)?.name;
     if (name === "TimeoutError" || name === "AbortError") throw new CatalogRefusal("timeout_outcome_unknown", [], 504);
