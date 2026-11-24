@@ -18,6 +18,11 @@ const EXEMPT = [
   "/api/auth/mobile/refresh",
   "/api/auth/mobile/logout",
   "/api/auth/mobile/email",
+  "/api/auth/desktop/exchange",
+  "/api/auth/desktop/refresh",
+  "/api/auth/desktop/logout",
+  "/api/auth/desktop/code-key",
+  "/api/auth/desktop/email",
 ];
 
 const HANDLERS = {
@@ -25,6 +30,11 @@ const HANDLERS = {
   "/api/auth/mobile/refresh": "app/api/auth/mobile/refresh/route.ts",
   "/api/auth/mobile/logout": "app/api/auth/mobile/logout/route.ts",
   "/api/auth/mobile/email": "app/api/auth/mobile/email/route.ts",
+  "/api/auth/desktop/exchange": "app/api/auth/desktop/exchange/route.ts",
+  "/api/auth/desktop/refresh": "app/api/auth/desktop/refresh/route.ts",
+  "/api/auth/desktop/logout": "app/api/auth/desktop/logout/route.ts",
+  "/api/auth/desktop/code-key": "app/api/auth/desktop/code-key/route.ts",
+  "/api/auth/desktop/email": "app/api/auth/desktop/email/route.ts",
 };
 
 const post = (pathname) => requiresMutationOriginCheck("POST", pathname);
@@ -60,6 +70,7 @@ test("the grant endpoint is not exempt, because it is a browser request", () => 
   // It is authenticated by the cookie session, which is exactly the ambient
   // credential CSRF is about.
   assert.equal(post("/api/auth/mobile/login-grant"), true);
+  assert.equal(post("/api/auth/desktop/login-grant"), true);
 });
 
 test("the exemption is by exact path, so a prefix cannot inherit it", () => {
@@ -68,6 +79,7 @@ test("the exemption is by exact path, so a prefix cannot inherit it", () => {
     "/api/auth/mobile/refreshx",
     "/api/auth/mobile",
     "/api/auth/mobile/logout/../../chat",
+    "/api/auth/desktop/exchange/anything",
   ]) {
     assert.equal(post(pathname), true, pathname);
   }

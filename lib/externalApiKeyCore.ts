@@ -60,7 +60,7 @@ export const parseExternalApiBearer = (header: string | null): BearerParse => {
     const match = /^Bearer[ ]+(\S+)$/i.exec(header.trim());
     if (!match?.[1]) return { kind: "malformed" };
     const key = KEY_PATTERN.exec(match[1]);
-    if (!key) return { kind: "malformed" };
+    if (!key?.[1]) return { kind: "malformed" };
     return { kind: "key", key: match[1], keyPrefix: key[1] };
 };
 

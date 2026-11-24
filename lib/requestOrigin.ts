@@ -46,8 +46,14 @@ const EXEMPT_MUTATION_PATHS = [
   "/api/auth/mobile/exchange",
   "/api/auth/mobile/refresh",
   "/api/auth/mobile/logout",
+  // Desktop exchanges a single-use browser grant and its S256 proof without a cookie identity.
+  "/api/auth/desktop/exchange",
+  "/api/auth/desktop/refresh",
+  "/api/auth/desktop/logout",
+  "/api/auth/desktop/code-key",
   // App-owned email proof; default-off, no ambient session, existing OTP limits.
   "/api/auth/mobile/email",
+  "/api/auth/desktop/email",
   // External inference API (docs/policy/external-api.md). Called by coding
   // tools (Aside, VS Code), not browsers, so there is no Origin to send. The
   // credential is a Bearer key the caller must hold -- not an ambient cookie

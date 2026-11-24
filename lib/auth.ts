@@ -12,6 +12,7 @@ import { parseEmailLoginIntent, verifyEmailLoginCode, verifyEmailLoginLink } fro
 import { appUrl } from "@/lib/accountEmails";
 import { endDormantEmailRelationshipAtSignIn } from "@/lib/emailPreferences";
 import { addressProofForSignIn } from "@/lib/emailPreferenceCore";
+import { authorizeMobileSession } from "@/lib/mobileSessionAuthorization";
 
 // next-auth v4's CredentialsProvider only exposes authorize()'s second
 // argument as a RequestInternal (plain headers object, not a Headers
@@ -282,11 +283,21 @@ export const authOptions: NextAuthOptions = {
             // resolution; otherwise a suspended or signed-out user keeps full
             // API access until their token expires.
             const snapshot = await readSessionSecuritySnapshot(token.id);
-            const revocation = sessionRevocationReason({
+            const webRevocation = sessionRevocationReason({
                 issuedAt: token.sessionIssuedAt ?? token.authenticatedAt,
                 snapshot,
                 absoluteExpiresAt: token.absoluteExpiresAt,
             });
+            const desktop = token.desktopSettings;
+            const desktopRevoked = !webRevocation && desktop &&
+                (process.env.TOMVERSE_DESKTOP_AUTH_ENABLED !== "true" || process.env.TOMVERSE_DESKTOP_ACCOUNT_SETTINGS_ENABLED !== "true" ||
+                    typeof token.sessionIssuedAt !== "number" || typeof token.absoluteExpiresAt !== "number" || typeof desktop.id !== "string" ||
+                    !(await authorizeMobileSession({
+                        subject: token.id, family: desktop.family, device: desktop.device,
+                        tokenId: desktop.id, issuedAtSeconds: Math.floor(token.sessionIssuedAt / 1_000),
+                        expiresAtSeconds: Math.floor(token.absoluteExpiresAt / 1_000),
+                    })).ok);
+            const revocation = webRevocation ?? (desktopRevoked ? "desktop-session-revoked" : null);
             if (revocation) {
                 logAuthAuditEvent("auth.session_rejected", {
                     userId: token.id,
