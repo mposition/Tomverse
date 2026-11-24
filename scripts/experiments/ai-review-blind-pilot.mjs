@@ -1,5 +1,6 @@
-// Blind answer-comparison pilot CLI. Offline and local: reads and writes files
-// only, calls no provider and sends nothing anywhere.
+// Blind answer-comparison pilot CLI. Local: reads and writes files, calls no
+// provider API. Only the model-judge commands below call out, to the Codex and
+// Antigravity CLIs on their subscription logins.
 //
 //   npm run experiment:ai-review-blind-pilot -- <command> [options]
 //
@@ -11,9 +12,20 @@
 //   report      --plan <plan.json> --out <dir> [--records ...] [--adjudication <file>]
 //   demo        [--out <dir>]                                whole flow on synthetic fixtures + mock judging
 //
+// Model judges (Codex + Antigravity in place of the person steps; they call the
+// two CLIs on their subscription logins, nothing else leaves the machine):
+//   review-gold --plan <plan.json> --out <dir> [--engines codex,antigravity]
+//   freeze      ... --gold-review <dir>/operator/gold-review.json
+//   judge       --plan <plan.json> --out <dir> --slot <n> --engine codex|antigravity
+//   adjudicate  ... --engines codex,antigravity              both rule; only agreement stands
+//   auto        --plan <plan.json> --out <dir> [--engines codex,antigravity]
+//                                                            review-gold, freeze, prepare, judge, adjudicate, report
+//   Engine options: --ssh-<engine> "<ssh args ... user@host>" runs that CLI on a host
+//   where it is signed in; --model-<engine> <id> overrides its model.
+//
 // Formats and the procedure: scripts/experiments/ai-review-blind-pilot/README.md.
 
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -27,6 +39,7 @@ import {
     renderReport,
 } from "./ai-review-blind-pilot/core.mjs";
 import { buildMockJudging } from "./ai-review-blind-pilot/mock.mjs";
+import { adjudicateWithModels, engineFor, judgeWithModel, productTerms, reviewGoldWithModels } from "./ai-review-blind-pilot/model-judges.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE_PLAN = path.join(here, "ai-review-blind-pilot", "fixtures", "plan.json");
@@ -54,6 +67,8 @@ const layout = (out) => ({
     freeze: path.join(out, "operator", "freeze.json"),
     key: path.join(out, "operator", "key.json"),
     adjudication: path.join(out, "operator", "adjudication-template.json"),
+    modelAdjudication: path.join(out, "operator", "adjudication.model-locked.json"),
+    goldReview: path.join(out, "operator", "gold-review.json"),
     packet: (slot) => path.join(out, `judge-${slot}`, "packet.md"),
     record: (slot) => path.join(out, `judge-${slot}`, "record.json"),
     reportMd: path.join(out, "report.md"),
@@ -106,8 +121,67 @@ export function runDemo(out, { now = "2026-11-22T00:00:00.000Z" } = {}) {
     return { files, report };
 }
 
-function main(argv) {
+/** Engines named on the command line, with their ssh host and model overrides. */
+/** Engines named on the command line, with their ssh host and model overrides. */
+export function enginesFrom(options, names, { run } = {}) {
+    const value = (key) => (options[key] && options[key] !== "true" ? options[key] : undefined);
+    return names.map((name) => {
+        const ssh = value(`ssh-${name}`);
+        const call = { ...(ssh ? { ssh: ["-T", ...ssh.split(/\s+/).filter(Boolean)] } : {}), ...(run ? { run } : {}) };
+        return engineFor(name, { model: value(`model-${name}`), call });
+    });
+}
+const engineList = (options, fallback) => (options.engines && options.engines !== "true" ? options.engines : fallback).split(",").map((name) => name.trim()).filter(Boolean);
+
+/**
+ * The model-judged flow end to end: gold review, freeze, prepare, one judge
+ * per engine, both engines adjudicating, report. `run` replaces the CLI call
+ * in tests; otherwise each engine's CLI runs locally or on its ssh host.
+ */
+export async function runModelJudges(planFile, out, { engines: names = ["codex", "antigravity"], options = {}, run, now = () => new Date().toISOString(), log = () => {} } = {}) {
+    const files = layout(out);
+    if (existsSync(files.freeze)) throw new PilotInputError([`이미 고정된 실행 폴더입니다. 새 --out 폴더를 씁니다: ${out}`]);
+    const bundle = loadBundle(planFile);
+    const engines = enginesFrom(options, names, { run });
+    if (bundle.plan.judges !== engines.length) throw new PilotInputError([`plan.judges(${bundle.plan.judges})와 판정 엔진 수(${engines.length})가 같아야 합니다`]);
+
+    log("정답표 검토 (모델 둘)");
+    const goldReview = await reviewGoldWithModels(bundle, engines, { at: now() });
+    writeJson(files.goldReview, goldReview);
+    const freeze = freezeInputs(bundle, now(), { goldReview });
+    writeJson(files.freeze, freeze);
+    const prepared = prepare(bundle, freeze);
+    writePrepared(prepared, files);
+
+    const records = [];
+    for (const [index, engine] of engines.entries()) {
+        log(`판정자 ${index + 1}: ${engine.label}`);
+        const record = await judgeWithModel(prepared, index + 1, engine, { at: now() });
+        writeJson(files.record(index + 1), record);
+        records.push(record);
+    }
+    log("정답 대조 (모델 둘)");
+    const template = adjudicationTemplate(bundle, freeze, records);
+    writeJson(files.adjudication, template);
+    const adjudication = await adjudicateWithModels(template, records, prepared.packets[0].markdown, engines, { at: now(), terms: productTerms(bundle) });
+    writeJson(files.modelAdjudication, adjudication);
+    const report = buildReport(bundle, freeze, { records, adjudication });
+    writeReport(report, files);
+    return { files, report };
+}
+
+async function main(argv) {
     const { command, options } = parseArgs(argv);
+    if (command === "auto") {
+        const out = path.resolve(required(options, "out"));
+        const { files } = await runModelJudges(path.resolve(required(options, "plan")), out, {
+            engines: engineList(options, "codex,antigravity"),
+            options,
+            log: (line) => console.log(`- ${line}`),
+        });
+        console.log(`모델 판정 완료. 보고서: ${files.reportMd}`);
+        return;
+    }
     if (command === "demo") {
         const out = path.resolve(options.out && options.out !== "true" ? options.out : ".tmp/ai-review-blind-pilot/demo");
         const { files } = runDemo(out);
@@ -124,8 +198,15 @@ function main(argv) {
     const planFile = path.resolve(required(options, "plan"));
     const files = layout(path.resolve(required(options, "out")));
     const bundle = loadBundle(planFile);
+    if (command === "review-gold") {
+        const review = await reviewGoldWithModels(bundle, enginesFrom(options, engineList(options, "codex,antigravity")));
+        writeJson(files.goldReview, review);
+        console.log(`정답표 모델 검토: ${review.reviewers.map((r) => `${r.engine} ${r.pass ? "통과" : "불통과"}`).join(", ")} — ${files.goldReview}`);
+        return;
+    }
     if (command === "freeze") {
-        writeJson(files.freeze, freezeInputs(bundle, options.at ?? new Date().toISOString()));
+        const goldReview = options["gold-review"] && options["gold-review"] !== "true" ? readJson(path.resolve(options["gold-review"])) : null;
+        writeJson(files.freeze, freezeInputs(bundle, options.at ?? new Date().toISOString(), { goldReview }));
         console.log(`사례와 정답표를 고정했습니다: ${files.freeze}`);
         return;
     }
@@ -137,9 +218,28 @@ function main(argv) {
         console.log(`판정자 묶음 ${prepared.packets.length}개와 운영자 키를 만들었습니다: ${path.dirname(files.key)}`);
         return;
     }
+    if (command === "judge") {
+        const slot = Number(required(options, "slot"));
+        const [engine] = enginesFrom(options, [required(options, "engine")]);
+        if (existsSync(files.record(slot)) && readJson(files.record(slot)).status === "locked") {
+            throw new PilotInputError([`판정자 ${slot}의 기록은 이미 잠겨 있어 덮어쓰지 않습니다: ${files.record(slot)}`]);
+        }
+        const record = await judgeWithModel(prepare(bundle, freeze), slot, engine);
+        writeJson(files.record(slot), record);
+        console.log(`${engine.label}가 판정하고 잠갔습니다: ${files.record(slot)}`);
+        return;
+    }
     if (command === "adjudicate") {
-        writeJson(files.adjudication, adjudicationTemplate(bundle, freeze, records));
-        console.log(`정답 대조지를 만들었습니다 (제품 키 없음): ${files.adjudication}`);
+        const template = adjudicationTemplate(bundle, freeze, records);
+        writeJson(files.adjudication, template);
+        if (!options.engines || options.engines === "true") {
+            console.log(`정답 대조지를 만들었습니다 (제품 키 없음): ${files.adjudication}`);
+            return;
+        }
+        const prepared = prepare(bundle, freeze);
+        const adjudication = await adjudicateWithModels(template, records, prepared.packets[0].markdown, enginesFrom(options, engineList(options, "")), { terms: productTerms(bundle) });
+        writeJson(files.modelAdjudication, adjudication);
+        console.log(`모델 대조 완료 (불일치 ${adjudication.disputes.length}건): ${files.modelAdjudication}`);
         return;
     }
     if (command === "report") {
@@ -152,10 +252,8 @@ function main(argv) {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-    try {
-        main(process.argv.slice(2));
-    } catch (error) {
+    main(process.argv.slice(2)).catch((error) => {
         console.error(error instanceof PilotInputError ? error.message : `실패: ${error.message}`);
         process.exitCode = 1;
-    }
+    });
 }

@@ -1,0 +1,15 @@
+{
+  "schema": "ai-review-blind-pilot-plan/1",
+  "pilotId": "qp-quote-pilot-synthetic-1",
+  "description": "Synthetic plan for the two model judges (Codex, Antigravity). Same cases, gold and mock outputs as plan.json; two judge slots so each model judges independently.",
+  "seed": 20261122,
+  "judges": 2,
+  "documentExposure": "shown_in_question",
+  "cases": "cases.json",
+  "gold": "gold.json",
+  "forbiddenTerms": ["Tomverse", "Qriple", "comparison-review-v3"],
+  "products": [
+    { "slot": "X", "output": "outputs/mock-x.json" },
+    { "slot": "Y", "output": "outputs/mock-y.json" }
+  ]
+}
