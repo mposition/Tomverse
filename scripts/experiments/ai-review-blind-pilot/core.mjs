@@ -38,6 +38,7 @@ export const SCHEMA = {
     key: "ai-review-blind-pilot-key/1",
     record: "ai-review-blind-pilot-judgement/1",
     adjudication: "ai-review-blind-pilot-adjudication/1",
+    goldReview: "ai-review-blind-pilot-gold-review/1",
     report: "ai-review-blind-pilot-report/1",
 };
 
@@ -332,14 +333,35 @@ function validateOutput(out, slot, casesDoc) {
 // ---------------------------------------------------------------------------
 
 /** Pins the cases and gold before any output is imported. */
-export function freezeInputs(bundle, frozenAt) {
+/**
+ * A model gold review (model-judges.mjs) counts only for the exact cases and
+ * gold it read, only when two different engines both passed it, and only for
+ * a gold no person has reviewed yet. It never becomes human_reviewed.
+ */
+function goldReviewProblems(review, bundle) {
+    const p = [];
+    if (review?.schema !== SCHEMA.goldReview) p.push(`정답표 모델 검토 형식은 ${SCHEMA.goldReview}입니다`);
+    if (review?.casesDigest !== digestOf(bundle.cases) || review?.goldDigest !== digestOf(bundle.gold)) p.push("정답표 모델 검토가 지금과 다른 사례·정답표로 만들어졌습니다");
+    const reviewers = Array.isArray(review?.reviewers) ? review.reviewers : [];
+    if (new Set(reviewers.filter((r) => r?.kind === "model").map((r) => r.vendor)).size < 2) p.push("정답표 모델 검토에는 서로 다른 회사 모델 둘이 필요합니다");
+    for (const reviewer of reviewers.filter((r) => r?.pass !== true)) {
+        const issues = Object.entries(reviewer?.cases ?? {}).flatMap(([caseId, item]) => (item.problems ?? []).map((problem) => `${caseId}${problem.goldId ? `/${problem.goldId}` : ""}: ${problem.issue}`));
+        p.push(`${reviewer?.engine ?? "?"} 검토 불통과 — ${issues.join(" | ") || "사유 없음"}`);
+    }
+    return p;
+}
+
+export function freezeInputs(bundle, frozenAt, { goldReview = null } = {}) {
     const problems = [...validateCases(bundle.cases), ...validateGold(bundle.gold, bundle.cases)];
+    if (goldReview && problems.length === 0) problems.push(...goldReviewProblems(goldReview, bundle));
     if (problems.length) throw new PilotInputError(problems);
+    const byModels = goldReview && bundle.gold.review.status === "candidate";
     return {
         schema: SCHEMA.freeze,
         casesDigest: digestOf(bundle.cases),
         goldDigest: digestOf(bundle.gold),
-        goldReviewStatus: bundle.gold.review.status,
+        goldReviewStatus: byModels ? "model_reviewed" : bundle.gold.review.status,
+        ...(byModels ? { goldReview: { digest: digestOf(goldReview), reviewers: goldReview.reviewers.map(({ engine, vendor, model }) => ({ engine, vendor, model })) } } : {}),
         frozenAt,
     };
 }
@@ -848,6 +870,7 @@ function checkRecord(record, prepared) {
         byOutput: problems.length === 0 ? byOutput : new Map(),
         digest: digestOf(record),
         mock: record?.mock === true,
+        model: record?.judge?.kind === "model",
     };
 }
 
@@ -1004,6 +1027,20 @@ export function buildReport(bundle, freeze, { records = [], adjudication = null 
     }
 
     const anyMock = accepted.some((check) => check.mock) || adjudication?.mock === true;
+    // Steps a model did instead of a person. A result that rests on any of them
+    // is "model_measured", never "measured".
+    const modelSteps = [
+        ...(freeze.goldReviewStatus === "model_reviewed" ? ["정답표 검토"] : []),
+        ...(accepted.some((check) => check.model) ? ["판정"] : []),
+        ...(adjudicationState === "accepted" && adjudication.adjudicatorKind === "model" ? ["정답 대조"] : []),
+    ];
+    const modelEngines = [
+        ...new Set([
+            ...(freeze.goldReview?.reviewers ?? []),
+            ...accepted.filter((check) => check.model).map((check) => check.record.judge),
+            ...(adjudication?.adjudicatorKind === "model" ? (adjudication.adjudicators ?? []) : []),
+        ].map((item) => `${item.engine} (${item.model ?? "default"})`)),
+    ];
     const perOutput = [];
     let agreementPairs = 0;
     let agreementMatches = 0;
@@ -1027,6 +1064,10 @@ export function buildReport(bundle, freeze, { records = [], adjudication = null 
                 continue;
             }
             const adj = adjudication.outputs[output.outputId];
+            if (adj.disputed === true) {
+                perOutput.push({ ...base, state: "adjudication_disputed", reason: "모델 대조자 둘의 합의 판단이 달라 사람 확인이 필요합니다" });
+                continue;
+            }
             const withVerdicts = (judgeIndex) =>
                 (judged[judgeIndex]?.rows ?? []).map((row, index) => ({ ...row, ...(adj.judges?.[judgeIndex]?.[index] ?? {}), kind: row.kind }));
             let rows;
@@ -1145,16 +1186,18 @@ export function buildReport(bundle, freeze, { records = [], adjudication = null 
         const count = (state) => outputs.filter((o) => o.state === state || o.status === state).length;
         const measurementReasons = [];
         if (product.source !== "real_capture") measurementReasons.push(product.source === null ? "출력 없음" : "출력이 합성 모의 자료");
-        if (accepted.length === 0) measurementReasons.push("잠긴 사람 판정 없음");
+        if (accepted.length === 0) measurementReasons.push("잠긴 판정 없음");
         if (anyMock) measurementReasons.push("판정·대조가 모의(합성)");
         if (adjudicationState !== "accepted") measurementReasons.push("정답 대조 미완료");
-        if (freeze.goldReviewStatus !== "human_reviewed") measurementReasons.push("정답표가 사람 검토 전 후보");
+        if (!["human_reviewed", "model_reviewed"].includes(freeze.goldReviewStatus)) measurementReasons.push("정답표가 검토 전 후보");
         if (product.category !== "fixed_answer") measurementReasons.push(`고정 답변 비교 대상 아님 (${product.category})`);
         products[product.slot] = {
             productName: product.productName,
             source: product.source,
             category: product.category,
-            measurement: measurementReasons.length ? { status: "unmeasured", reasons: measurementReasons } : { status: "measured", reasons: [] },
+            measurement: measurementReasons.length
+                ? { status: "unmeasured", reasons: measurementReasons, modelSteps }
+                : { status: modelSteps.length ? "model_measured" : "measured", reasons: [], modelSteps },
             counts: {
                 planned: outputs.length,
                 collected: outputs.filter((o) => !["not_collected", "failed", "absent"].includes(o.status)).length,
@@ -1164,10 +1207,10 @@ export function buildReport(bundle, freeze, { records = [], adjudication = null 
                 fullProductExperience: count("full_product_experience"),
                 conditionMismatch: count("condition_mismatch"),
                 presented: outputs.filter((o) => o.status === "presented").length,
-                judged: outputs.filter((o) => ["scored", "refused", "gold_defect", "gold_defect_hold", "adjudication_invalid", "unadjudicated"].includes(o.state)).length,
+                judged: outputs.filter((o) => ["scored", "refused", "gold_defect", "gold_defect_hold", "adjudication_invalid", "adjudication_disputed", "unadjudicated"].includes(o.state)).length,
                 unjudged: count("unjudged") + count("judgement_refused"),
                 scored: scored.length,
-                refused: outputs.filter((o) => ["refused", "gold_defect", "gold_defect_hold", "adjudication_invalid"].includes(o.state)).length,
+                refused: outputs.filter((o) => ["refused", "gold_defect", "gold_defect_hold", "adjudication_invalid", "adjudication_disputed"].includes(o.state)).length,
             },
             contradiction: {
                 ...kindRates(contradiction),
@@ -1249,9 +1292,18 @@ export function buildReport(bundle, freeze, { records = [], adjudication = null 
                 accepted: accepted.length,
                 refused: recordChecks.filter((check) => !check.accepted).map((check) => check.problems),
                 mock: anyMock,
+                model: accepted.some((check) => check.model),
+                judges: accepted.map((check) => ({ judgeSlot: check.record.judgeSlot, name: check.record.judge?.name ?? "", kind: check.model ? "model" : "person" })),
                 judging: accepted.length === 2 ? "double" : accepted.length === 1 ? "solo" : "none",
             },
-            adjudication: { state: adjudicationState, problems: adjudicationProblems, mock: adjudication?.mock === true },
+            adjudication: {
+                state: adjudicationState,
+                problems: adjudicationProblems,
+                mock: adjudication?.mock === true,
+                model: adjudication?.adjudicatorKind === "model",
+                disputes: adjudication?.adjudicatorKind === "model" ? (adjudication.disputes ?? []) : [],
+            },
+            model: { steps: modelSteps, engines: modelEngines },
         },
         agreement: accepted.length === 2 ? { doubleJudgedOutputs: agreementPairs, agreedBeforeConsensus: agreementMatches } : null,
         products,
@@ -1277,7 +1329,9 @@ const fmt = (rate) => (rate === null ? "N/A" : rate.denominator === 0 ? `${rate.
 export function renderReport(report) {
     const slots = Object.keys(report.products);
     const names = Object.fromEntries(slots.map((slot) => [slot, `${slot} (${report.products[slot].productName ?? "출력 없음"})`]));
-    const unmeasured = slots.filter((slot) => report.products[slot].measurement.status !== "measured");
+    const unmeasured = slots.filter((slot) => report.products[slot].measurement.status === "unmeasured");
+    const modelMeasured = slots.filter((slot) => report.products[slot].measurement.status === "model_measured");
+    const model = report.provenance.model ?? { steps: [], engines: [] };
     const lines = [
         "# AI Review 블라인드 파일럿 보고서",
         "",
@@ -1288,18 +1342,33 @@ export function renderReport(report) {
         lines.push(`**품질 미측정** — ${unmeasured.map((slot) => `${names[slot]}: ${report.products[slot].measurement.reasons.join(", ")}`).join(" / ")}`, "");
         lines.push("아래 수치는 파이프라인 시연이며 어떤 제품의 실제 품질도 아닙니다. 제품 순위를 만들지 않습니다.", "");
     }
+    if (modelMeasured.length) {
+        lines.push(`**모델 판정 측정 (사람 판정 아님)** — ${modelMeasured.map((slot) => names[slot]).join(", ")}`, "");
+    }
+    if (model.steps.length) {
+        lines.push(`모델이 사람 대신 한 단계: ${model.steps.join(", ")} — ${model.engines.join(", ")}. 사람 서명이 아니며, 모델 둘이 엇갈린 항목은 사람 확인 대상입니다.`, "");
+    }
     lines.push("눈가림 한계: 제품명·모델·사례 ID·정답은 가렸지만, 출력 형식(구조화 필드 대 자유서술)과 문체만으로 출처를 추측할 수 있습니다.", "");
     lines.push(
         "## 출처",
         "",
         `- 과제: ${report.provenance.cases}`,
-        `- 정답표 상태: ${report.provenance.goldReviewStatus === "human_reviewed" ? "사람 검토 완료" : "후보 (사람 검토 전 — adopted/confirmed 아님)"}`,
+        `- 정답표 상태: ${
+            report.provenance.goldReviewStatus === "human_reviewed"
+                ? "사람 검토 완료"
+                : report.provenance.goldReviewStatus === "model_reviewed"
+                  ? "모델 둘의 검토 통과 (사람 검토 아님)"
+                  : "후보 (검토 전 — adopted/confirmed 아님)"
+        }`,
         `- 검토기 입력의 문서 노출: ${report.provenance.documentExposure === "shown_in_question" ? "질문과 함께 같은 발췌 제공" : "제공 안 함"}`,
         ...report.provenance.products.map((product) => `- 제품 ${product.slot}: ${product.productName ?? "출력 없음"} · 출처 ${product.source ?? "-"} · 수집 ${product.captureMethod ?? "-"} · 분류 ${product.category}`),
-        `- 판정: 제출 ${report.provenance.judgements.submitted}, 수용 ${report.provenance.judgements.accepted} (${report.provenance.judgements.judging === "double" ? "독립 2인" : report.provenance.judgements.judging === "solo" ? "단독 관찰" : "없음"})${report.provenance.judgements.mock ? " · 모의 판정" : ""}`,
-        `- 정답 대조: ${report.provenance.adjudication.state}${report.provenance.adjudication.mock ? " (모의)" : ""}`,
+        `- 판정: 제출 ${report.provenance.judgements.submitted}, 수용 ${report.provenance.judgements.accepted} (${report.provenance.judgements.judging === "double" ? "독립 2인" : report.provenance.judgements.judging === "solo" ? "단독 관찰" : "없음"})${report.provenance.judgements.mock ? " · 모의 판정" : ""}${report.provenance.judgements.model ? ` · ${(report.provenance.judgements.judges ?? []).map((judge) => `판정자 ${judge.judgeSlot}: ${judge.name}`).join(", ")}` : ""}`,
+        `- 정답 대조: ${report.provenance.adjudication.state}${report.provenance.adjudication.mock ? " (모의)" : ""}${report.provenance.adjudication.model ? ` (모델 대조, 두 모델 불일치 ${report.provenance.adjudication.disputes.length}건)` : ""}`,
         ""
     );
+    for (const dispute of report.provenance.adjudication.disputes ?? []) {
+        lines.push(`- 사람 확인 필요: ${dispute.caseLabel} 출력 ${dispute.outputId} ${dispute.consensus ? "합의 행 선택" : `판정자 ${dispute.judge + 1} 행 ${dispute.row}`} — 두 모델의 판단이 다름`);
+    }
     for (const problems of report.provenance.judgements.refused) lines.push(`- 거부된 판정 기록: ${problems.join("; ")}`);
     for (const problem of report.provenance.adjudication.problems) lines.push(`- 대조 거부: ${problem}`);
     if (report.agreement) lines.push(`- 합의 전 일치: ${report.agreement.agreedBeforeConsensus}/${report.agreement.doubleJudgedOutputs} 출력`);

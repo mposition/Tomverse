@@ -4,10 +4,12 @@
 사람이 판정하도록 돕는 로컬 오프라인 도구입니다. 코드·PR을 검토하는 engineering
 cross-review와는 다른 기능입니다.
 
-- 파일만 읽고 씁니다. provider 호출, 유료 판정, 외부 전송, 가입·결제는 없습니다.
+- 파일만 읽고 씁니다. provider API 호출, 유료 판정, 경쟁사 전송, 가입·결제는 없습니다. 예외는 아래
+  "모델 판정"뿐으로, Codex·Antigravity CLI를 구독 로그인으로 부릅니다.
 - M5 평가와 분리되어 있습니다. M5 등록부·임계값·예산·승격 상태를 읽거나 바꾸지 않고,
   이 파일럿의 수치는 M5 승인·승격 근거가 아닙니다.
-- 실제 제품 출력과 사람 판정이 없으면 보고서는 항상 **품질 미측정**을 표시합니다.
+- 실제 제품 출력과 판정이 없으면 보고서는 항상 **품질 미측정**을 표시합니다. 판정·대조·정답표 검토 중 하나라도
+  모델이 했으면 **모델 판정 측정 (사람 판정 아님)**으로 표시합니다.
 
 ## 실행 위치
 
@@ -68,6 +70,48 @@ npm run experiment:ai-review-blind-pilot -- demo --out .tmp/ai-review-blind-pilo
    ```powershell
    npm run experiment:ai-review-blind-pilot -- report --plan <plan.json> --out <dir> --records <dir>/judge-1/record.json --adjudication <dir>/operator/adjudication-template.json
    ```
+
+## 모델 판정 (Codex + Antigravity)
+
+운영자 결정(2026-11-24): 사례·정답표·모의 출력을 Claude가 썼으므로, 사람 대신 판정하는 모델은 다른 두 회사의
+CLI입니다. Codex(OpenAI)와 Antigravity(Google Gemini, 기본 `gemini-4-hydrogen-high`)가 각자의 구독 로그인으로
+돕니다. API 과금은 없고 구독 사용량만 씁니다. 두 CLI에 보내는 것 외에는 아무것도 밖으로 나가지 않습니다.
+
+```powershell
+npm run experiment:ai-review-blind-pilot -- auto --plan <plan.json> --out <새 폴더> `
+  --ssh-antigravity "-o IdentitiesOnly=yes -i <키> tommy@192.168.0.7"
+```
+
+`plan.judges`는 2여야 합니다(`fixtures/plan-model-judges.json`). `auto`는 다음을 차례로 합니다.
+
+1. **정답표 검토.** 두 모델이 각자 사례와 정답표를 대조합니다. 출력은 아직 보지 않습니다.
+   - 둘 다 통과해야 `freeze`가 `model_reviewed`로 고정합니다. 하나라도 지적하면 그 지적을 보여 주고 멈춥니다.
+   - 결과는 `operator/gold-review.json`에 남습니다.
+   - 정답표 파일의 `human_reviewed`를 대신 쓰지 않으며, 사람이 검토한 정답표는 사람 검토로 남습니다.
+2. **판정.** 판정자 1은 Codex, 판정자 2는 Antigravity입니다.
+   - 각자 `judge-N/packet.md`와 같은 눈가림 묶음만 받습니다.
+   - 호출 전에 입력에 제품명·모델·사례 ID·정답 ID·파일명이 남았는지 검사하고, 남았으면 호출하지 않습니다.
+   - 기록은 `judge.kind: "model"`로 잠깁니다.
+3. **정답 대조.** 두 모델이 같은 대조지를 따로 판단합니다. 제품 키는 주지 않습니다.
+   - 두 판단이 같은 행만 인정합니다. 다르면 그 행은 `undetermined`가 됩니다.
+   - 합의 행 선택이 다르면 그 출력은 `adjudication_disputed`가 되어 채점에서 빠지고, 보고서의 "사람 확인 필요" 목록에 오릅니다.
+   - 결과는 `operator/adjudication.model-locked.json`에 남습니다.
+4. **보고서.** 실제 출력이라도 모델이 한 단계가 하나라도 있으면 상태는 `model_measured`("모델 판정 측정,
+   사람 판정 아님")이며 `measured`가 되지 않습니다.
+
+단계별 명령도 있습니다.
+- `review-gold`
+- `freeze --gold-review`
+- `judge --slot N --engine codex|antigravity`
+- `adjudicate --engines codex,antigravity`
+
+엔진마다 `--ssh-<engine>`으로 그 CLI가 로그인된 호스트에서 실행하고, `--model-<engine>`으로 모델을 바꿀 수 있습니다.
+
+안전장치:
+- 두 CLI는 빈 임시 폴더에서 돕니다.
+- Antigravity는 명령 실행, 쓰기, 읽기, URL, MCP를 모두 deny합니다.
+- 도구를 한 번이라도 쓴 실행은 그 답을 버리고 실패로 멈춥니다. Codex의 명령 실행·MCP 호출, agy의 tool 단계가 여기에 해당합니다.
+- 형식이 틀린 답만 한 번 다시 묻습니다.
 
 ## 파일 형식 요점
 
