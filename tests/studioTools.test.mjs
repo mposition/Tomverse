@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fillStudioStickerCaptions, findStudioTool, STUDIO_EXPORT_FORMATS, STUDIO_STICKER_KEYS, STUDIO_TOOLS, STUDIO_STICKER_LIMIT, studioStickerCrop, studioStickerLayout } from "../lib/studioTools.ts";
+import { fillStudioStickerCaptions, findStudioTool, STUDIO_EXPORT_FORMATS, STUDIO_PHOTO_PRESETS, STUDIO_STICKER_KEYS, STUDIO_TOOLS, STUDIO_STICKER_LIMIT, studioStickerCrop, studioStickerLayout } from "../lib/studioTools.ts";
+import { parseStudioAnalysis } from "../lib/studioCreativeAnalysis.ts";
+import { studioCreativeCopy } from "../locales/studioCreative.ts";
 
-test("The Studio directory exposes eight distinct tools with stable detail routes", () => {
-  assert.equal(STUDIO_TOOLS.length, 8);
-  assert.equal(new Set(STUDIO_TOOLS.map(tool => tool.id)).size, 8);
-  assert.equal(STUDIO_TOOLS.filter(tool => tool.group === "play").length, 4);
-  assert.equal(STUDIO_TOOLS.filter(tool => tool.group === "design").length, 4);
+test("Studio lists the new creative tools in Everyday creations and isolates poster publishing", () => {
+  assert.equal(new Set(STUDIO_TOOLS.map(tool => tool.id)).size, STUDIO_TOOLS.length);
+  for (const id of ["face-analysis", "character-maker", "color-analysis"]) assert.equal(findStudioTool(id)?.group, "play");
+  for (const id of ["roleplay", "character-quiz"]) assert.equal(findStudioTool(id), undefined);
+  assert.deepEqual(STUDIO_TOOLS.filter(tool => tool.group === "publishing").map(tool => tool.id), ["poster"]);
+  for (const { tool } of STUDIO_PHOTO_PRESETS) assert.equal(findStudioTool(tool)?.group, "design");
   for (const tool of STUDIO_TOOLS) assert.equal(findStudioTool(tool.id), tool);
   assert.equal(findStudioTool("unknown-tool"), undefined);
 });
@@ -37,17 +40,33 @@ import { studioCopy, studioOutputLanguage, studioStickerSuggestions } from "../l
 test("Every supported language includes Studio labels, examples, and twenty sticker captions", () => {
   const keys = Object.keys(studioCopy.en).sort();
   for (const lang of SUPPORTED_LANGUAGES) {
-    const messages = studioCopy[lang];
-    assert.deepEqual(Object.keys(messages).sort(), keys);
+    assert.deepEqual(Object.keys(studioCopy[lang]).sort(), keys);
+    const messages = { ...studioCopy[lang], ...studioCreativeCopy[lang] };
     assert.ok(Object.values(messages).every(value => value.trim().length > 0));
     for (const tool of STUDIO_TOOLS) {
       assert.ok(messages[tool.title]);
       assert.ok(messages[tool.description]);
     }
+    for (const preset of STUDIO_PHOTO_PRESETS) assert.ok(messages[preset.label]);
     assert.equal(STUDIO_STICKER_KEYS.map(key => messages[key]).length, 20);
     assert.ok(studioOutputLanguage[lang]);
   }
   assert.notEqual(studioCopy.zh.playGroup, studioCopy["zh-Hant"].playGroup);
+});
+
+test("Studio renders only schema-checked, bounded analysis data", () => {
+  assert.equal(parseStudioAnalysis("face-analysis", '{"status":"retry"}'), null);
+  const feature = { color: "#889977", region: [.2, .3, .4, .1] };
+  const color = {
+    status: "ok", season: "Soft autumn", summary: "Soft colors", features: { hair: feature, eyes: feature, skin: feature },
+    recommended: Array(6).fill({ color: "#889977", name: "Olive" }),
+    comparison: Array(6).fill({ color: "#6464cc", name: "Periwinkle" }), garment: null,
+  };
+  assert.deepEqual(parseStudioAnalysis("color-analysis", JSON.stringify(color)), color);
+  assert.throws(() => parseStudioAnalysis("color-analysis", JSON.stringify({
+    ...color, comparison: Array(6).fill({ color: "url(example)", name: "Invalid" }),
+  })));
+  assert.throws(() => parseStudioAnalysis("face-analysis", '{"status":"ok","score":11}'));
 });
 
 test("Random sticker captions fill every supported language to twenty while preserving custom text", () => {

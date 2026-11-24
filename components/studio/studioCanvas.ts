@@ -11,7 +11,7 @@ export function validStudioImage(file: File) {
   return studioImageTypes.includes(file.type) && file.size > 0 && file.size <= studioImageLimit;
 }
 
-function canvas(width: number, height: number) {
+export function canvas(width: number, height: number) {
   const element = document.createElement("canvas");
   element.width = width;
   element.height = height;
@@ -20,13 +20,13 @@ function canvas(width: number, height: number) {
   return { element, context };
 }
 
-function readImage(source: string): Promise<HTMLImageElement> {
+export function readImage(source: string): Promise<HTMLImageElement> {
   const image = new Image();
   image.src = source;
   return image.decode().then(() => image);
 }
 
-function encode(element: HTMLCanvasElement): Promise<Blob> {
+export function encode(element: HTMLCanvasElement): Promise<Blob> {
   return new Promise((resolve, reject) => {
     element.toBlob(blob => blob ? resolve(blob) : reject(new Error("Could not encode image")), "image/png");
   });
@@ -47,11 +47,20 @@ function drawImage(
 
 export async function renderStudioImage(
   source: string,
-  options: { width: number; height: number; fit?: "contain" | "cover"; title?: string; subtitle?: string },
+  options: { width: number; height: number; fit?: "contain" | "cover"; title?: string; subtitle?: string; bleed?: boolean },
 ): Promise<Blob> {
   const { width, height, fit = "cover", title, subtitle } = options;
   const image = await readImage(source);
   const { element, context } = canvas(width, height);
+  if (options.bleed) {
+    context.fillStyle = "#14222c";
+    context.fillRect(0, 0, width, height);
+    context.save();
+    context.filter = "blur(54px)";
+    context.globalAlpha = .48;
+    drawImage(context, image, width, height, "cover");
+    context.restore();
+  }
   drawImage(context, image, width, height, fit);
   if (title) {
     const size = Math.round(width * .054);
@@ -312,4 +321,17 @@ export function saveStudioFile(blob: Blob, filename: string) {
   link.download = filename;
   link.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+export async function shareStudioPng(blob: Blob, filename: string) {
+  const files = [new File([blob], filename, { type: "image/png" })];
+  if (navigator.canShare?.({ files }) && navigator.share) {
+    try {
+      await navigator.share({ files });
+      return;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+    }
+  }
+  saveStudioFile(blob, filename);
 }

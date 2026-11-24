@@ -5,7 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { ArrowRight } from "lucide-react";
+import { ArrowDown, ArrowRight } from "lucide-react";
 import { ReviewNavigation, WorkspaceTitle, WorkspaceThemeButton } from "@/components/chat/ReviewStudioChrome";
 import { AppToastViewport } from "@/components/AppToastViewport";
 import { purchaseCtaCopy } from "@/components/billing/purchaseCopy";
@@ -14,9 +14,10 @@ import { useLanguage } from "@/components/LanguageProvider";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { normalizeCreditPackId, normalizePurchaseTargetPlan } from "@/lib/purchaseIntent";
 import { PRODUCT_SURFACE_PATH } from "@/lib/productSurfaceRoutes";
-import { STUDIO_TOOLS, findStudioTool, type StudioTool } from "@/lib/studioTools";
+import { STUDIO_PHOTO_PRESETS, STUDIO_TOOLS, findStudioTool, studioArtworkPath, type StudioPhotoPreset, type StudioTool } from "@/lib/studioTools";
 import { StudioStickerTool } from "./StudioStickerTool";
 import { StudioToolEditor } from "./StudioToolEditor";
+import { StudioCreativeEditor } from "./StudioCreativeEditor";
 import { useStudioCopy } from "./StudioControls";
 import "@/components/chat/review-studio.css";
 import styles from "./studio.module.css";
@@ -25,7 +26,7 @@ const StudioAccount = dynamic(() => import("@/components/auth/AuthButton").then(
 
 type StudioBillingOutcome = "success" | "cancelled" | "credits-success" | "credits-cancelled" | "tester-pass";
 
-const mobileArtwork = new Set(["meme", "illustration", "caricature", "poster"]);
+const mobileArtwork = new Set(["meme"]);
 
 function ToolArtwork({ tool }: { tool: StudioTool }) {
   if (tool.id === "stickers") {
@@ -36,14 +37,20 @@ function ToolArtwork({ tool }: { tool: StudioTool }) {
   if (tool.id === "transparent-png") {
     return <div className={styles.cutoutMosaic}><Image src="/studio/cat.png" alt="" width={129} height={166} unoptimized /></div>;
   }
+  if (tool.id === "face-analysis" || tool.id === "color-analysis") {
+    return <div className={styles.portraitArt} data-palette={tool.id === "color-analysis" || undefined}>
+      <Image src="/studio/selfie.png" alt="" width={110} height={142} unoptimized />
+      {tool.id === "color-analysis" && <span className={styles.coverSwatches} aria-hidden />}
+    </div>;
+  }
   return <picture className={styles.cardPhoto}>
     {mobileArtwork.has(tool.artwork) && <source media="(max-width: 768px)" srcSet={`/studio/${tool.artwork}-mobile.png`} />}
     {/* Art direction differs between desktop and mobile. */}
-    <img src={`/studio/${tool.artwork}.png`} alt="" width={294} height={172} />
+    <img src={studioArtworkPath(tool.artwork)} alt="" width={294} height={172} data-character={tool.id === "character-maker" || undefined} />
   </picture>;
 }
 
-export function StudioWorkspace({ toolId }: { toolId?: string }) {
+export function StudioWorkspace({ toolId, preset }: { toolId?: string; preset?: StudioPhotoPreset }) {
   const { copy, lang } = useStudioCopy();
   const { t } = useLanguage();
   const router = useRouter();
@@ -100,15 +107,50 @@ export function StudioWorkspace({ toolId }: { toolId?: string }) {
       {tool ? <>
         <h1 className="sr-only">{copy[tool.title]}</h1>
         <p className={styles.toolIntro}>{copy[tool.description]}</p>
-        {tool.id === "stickers" ? <StudioStickerTool billingNotice={billingNotice} /> : <StudioToolEditor tool={tool} />}
+        {tool.id === "stickers" ? <StudioStickerTool billingNotice={billingNotice} />
+          : tool.id === "character-maker" || tool.id === "face-analysis" || tool.id === "color-analysis"
+            ? <StudioCreativeEditor tool={tool} />
+            : <StudioToolEditor tool={tool} preset={preset} />}
       </> : <>
-        <h1 className="sr-only">Studio</h1>
-        <p className={styles.directoryIntro}>{copy.directoryIntro}</p>
-        {(["play", "design"] as const).map(group => (
+        <section className={styles.studioHero}>
+          <div className={styles.heroCopy}>
+            <h1 className="type-display">{copy.heroTitle}</h1>
+            <p>{copy.directoryIntro}</p>
+            <div className={styles.heroLinks}>
+              <a href="#studio-tools-design">{copy.browsePresets}<ArrowDown size={17} aria-hidden /></a>
+              <Link href={{ pathname: `${studioPath}/poster`, query: { lang } }}>{copy.posterGroup}<ArrowRight size={17} aria-hidden /></Link>
+            </div>
+          </div>
+          <div className={styles.heroExhibits}>
+            <Link className={styles.heroFilm} aria-label={copy.filmPortrait}
+              href={{ pathname: `${studioPath}/illustration`, query: { lang, preset: "film" } }}>
+              <Image src="/studio/preset-film.webp" width={260} height={260} alt="" unoptimized />
+            </Link>
+            <Link className={styles.heroPoster} aria-label={copy.posterGroup} href={{ pathname: `${studioPath}/poster`, query: { lang } }}>
+              <Image src="/studio/poster-jazz.webp" width={280} height={348} alt="" unoptimized />
+            </Link>
+            <Link className={styles.heroCharacter} aria-label={copy.characterMakerTitle} href={{ pathname: `${studioPath}/character-maker`, query: { lang } }}>
+              <Image src="/studio/character-dream.webp" width={330} height={330} alt="" unoptimized />
+            </Link>
+            <Link className={styles.heroSticker} aria-label={copy.stickersTitle} href={{ pathname: `${studioPath}/stickers`, query: { lang } }}>
+              <Image src="/studio/sticker-3.png" width={142} height={142} alt="" unoptimized />
+            </Link>
+          </div>
+        </section>
+        {(["play", "design", "publishing"] as const).map(group => (
           <section key={group} className={styles.directorySection} aria-labelledby={`studio-tools-${group}`}>
-            <h2 id={`studio-tools-${group}`}>{group === "play" ? copy.playGroup : copy.designGroup}</h2>
-            <ul className={styles.directoryGrid}>
-              {STUDIO_TOOLS.filter(item => item.group === group).map(item => (
+            <h2 id={`studio-tools-${group}`}>{group === "play" ? copy.playGroup : group === "design" ? copy.designGroup : copy.posterGroup}</h2>
+            <ul className={group === "design" ? styles.presetGrid : styles.directoryGrid}
+              data-play={group === "play" || undefined} data-publishing={group === "publishing" || undefined}>
+              {group === "design" ? STUDIO_PHOTO_PRESETS.map(item => (
+                <li key={item.id}>
+                  <Link className={styles.presetCard} data-testid={`studio-preset-${item.id}`}
+                    href={{ pathname: `${studioPath}/${item.tool}`, query: { lang, preset: item.id } }}>
+                    <Image src={`/studio/${item.artwork}`} alt="" width={380} height={285} unoptimized data-cutout={item.id === "transparent" || undefined} />
+                    <span>{copy[item.label]}<ArrowRight size={16} aria-hidden /></span>
+                  </Link>
+                </li>
+              )) : STUDIO_TOOLS.filter(item => item.group === group).map(item => (
                 <li key={item.id}>
                   <Link className={styles.toolCard} href={{ pathname: `${studioPath}/${item.id}`, query: { lang } }} data-testid={`studio-tool-${item.id}`}>
                     <div className={styles.cardArt}><ToolArtwork tool={item} /></div>
