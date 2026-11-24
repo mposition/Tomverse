@@ -384,6 +384,18 @@ test("with the benchmark search on, the first of the provider's own pages it nam
   assert.ok(state.row.profile.codingNotes.sources.includes(announcement));
   assert.deepEqual(state.row.profile.evidence.sources, pagesOf("openai"));
 
+  // A search that times out may have been charged: the fill stops there, before the draft call, with the row unchanged.
+  reset();
+  const before = structuredClone(state.row);
+  const timeout = Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+  await assert.rejects(
+    fill({ benchmarkSearch: async () => ({ findPages: async () => { throw timeout; } }) }),
+    (error) => error instanceof CatalogRefusal && error.code === "timeout_outcome_unknown" && error.status === 504
+  );
+  assert.equal(calls.llm, 0);
+  assert.deepEqual(state.row, before);
+  assert.deepEqual(state.audits, []);
+
   // A search that fails or finds nothing leaves the fill as it was.
   for (const benchmarkSearch of [search([]), async () => ({ findPages: async () => { throw new Error("search 500"); } })]) {
     reset();

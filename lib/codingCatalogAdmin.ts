@@ -467,7 +467,8 @@ export const keptCapability = <T extends string>(current: T, answered: T): T => 
  * the models page is optional), and, when the benchmark search is on, the
  * first of the provider's own benchmark pages it finds that loads (one search
  * call, optional too: a search that fails or finds nothing leaves the three
- * pages); the answer is read by
+ * pages, but one that times out is an unknown outcome and stops the fill before
+ * the draft call); the answer is read by
  * codingCapabilitiesFromAnswer and every page it stands on -- the notes' too --
  * must be one of those fetched pages on the provider's own hosts. Notes no page
  * supports are not written. Any failure leaves the row as it was. A timeout is
@@ -522,9 +523,16 @@ export const fillLinkCapabilities = async (input: {
     const search = await deps.benchmarkSearch();
     if (search) {
       const deadline = Date.now() + BENCHMARK_STEP_MS;
+      // A search that times out may have been charged: that is an unknown
+      // outcome, so it stops this fill (and a fill-all run) before the draft
+      // call, like a draft timeout. Any other failure only loses the page.
       const found = await search
         .findPages({ provider, apiModelId: facts.apiModelId, name: facts.name, timeoutMs: BENCHMARK_SEARCH_MS })
-        .catch(() => []);
+        .catch((error: unknown) => {
+          const name = (error as { name?: unknown } | null)?.name;
+          if (name === "TimeoutError" || name === "AbortError") throw error;
+          return [];
+        });
       for (const url of found) {
         const left = deadline - Date.now();
         if (left < BENCHMARK_MIN_PAGE_MS) break;
