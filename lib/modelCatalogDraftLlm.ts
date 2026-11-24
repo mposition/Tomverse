@@ -12,7 +12,7 @@
  */
 import "server-only";
 
-import { generateText, jsonSchema, Output } from "ai";
+import { APICallError, generateText, jsonSchema, NoObjectGeneratedError, Output, type LanguageModel } from "ai";
 import type { JSONSchema7 } from "@ai-sdk/provider";
 
 import { getActiveAiModel } from "@/lib/activeAiModel";
@@ -700,6 +700,58 @@ export type BenchmarkPageSearch = {
   findPages: (input: { provider: string; apiModelId: string; name?: string; timeoutMs: number }) => Promise<string[]>;
 };
 
+/**
+ * A search whose outcome is not known: cut off by its deadline, or failed
+ * without the provider answering (a dropped connection). It may have been
+ * charged, so the fill stops on it (the name is the one a fill reads as an
+ * unknown outcome). A provider error response, or an answer that does not
+ * parse, is a known failure and only loses the page.
+ */
+export class BenchmarkSearchOutcomeUnknown extends Error {
+  override readonly name = "TimeoutError";
+  constructor() {
+    super("benchmark_search_outcome_unknown");
+  }
+}
+
+/** The benchmark search over one search-capable language model. */
+export const benchmarkPageSearchWith = (languageModel: LanguageModel, modelId: string): BenchmarkPageSearch => ({
+  findPages: async (input) => {
+    const signal = AbortSignal.timeout(Math.max(1, input.timeoutMs));
+    let generated: Awaited<ReturnType<typeof generateText>>;
+    try {
+      generated = await generateText({
+        model: languageModel,
+        system: "You find official web pages. Answer only with URLs of pages you found in your search.",
+        prompt: benchmarkSearchPrompt(input),
+        maxOutputTokens: BENCHMARK_SEARCH_MAX_OUTPUT_TOKENS,
+        maxRetries: 0,
+        abortSignal: signal,
+        output: Output.object({
+          schema: jsonSchema(BENCHMARK_SEARCH_SCHEMA as unknown as JSONSchema7),
+          name: "benchmark_pages",
+        }),
+        providerOptions: { openai: { strictJsonSchema: true } },
+      });
+    } catch (error) {
+      // The SDK may wrap an abort in its own error, so the signal decides, not the error's name.
+      const answered = (APICallError.isInstance(error) && typeof error.statusCode === "number") || NoObjectGeneratedError.isInstance(error);
+      if (signal.aborted || !answered) throw new BenchmarkSearchOutcomeUnknown();
+      throw error;
+    }
+    const usage = generated.usage as { inputTokens?: number; outputTokens?: number } | undefined;
+    console.info(
+      JSON.stringify({
+        event: "model_catalog_benchmark_search_call",
+        modelId,
+        inputTokens: usage?.inputTokens ?? null,
+        outputTokens: usage?.outputTokens ?? null,
+      })
+    );
+    return benchmarkUrlsFromAnswer(generated.output, input.provider);
+  },
+});
+
 /** The configured search model, or null when the benchmark search is off. */
 export const benchmarkPageSearchFromEnv = async (
   env: Readonly<Record<string, string | undefined>> = process.env
@@ -709,31 +761,5 @@ export const benchmarkPageSearchFromEnv = async (
   const model = await getEnabledRuntimeModel(modelId);
   // Only a model that searches the web as it answers: anything else would name pages it never found.
   if (!model || model.provider !== "perplexity") return null;
-  return {
-    findPages: async (input) => {
-      const generated = await generateText({
-        model: getActiveAiModel(model),
-        system: "You find official web pages. Answer only with URLs of pages you found in your search.",
-        prompt: benchmarkSearchPrompt(input),
-        maxOutputTokens: BENCHMARK_SEARCH_MAX_OUTPUT_TOKENS,
-        maxRetries: 0,
-        abortSignal: AbortSignal.timeout(Math.max(1, input.timeoutMs)),
-        output: Output.object({
-          schema: jsonSchema(BENCHMARK_SEARCH_SCHEMA as unknown as JSONSchema7),
-          name: "benchmark_pages",
-        }),
-        providerOptions: { openai: { strictJsonSchema: true } },
-      });
-      const usage = generated.usage as { inputTokens?: number; outputTokens?: number } | undefined;
-      console.info(
-        JSON.stringify({
-          event: "model_catalog_benchmark_search_call",
-          modelId: model.id,
-          inputTokens: usage?.inputTokens ?? null,
-          outputTokens: usage?.outputTokens ?? null,
-        })
-      );
-      return benchmarkUrlsFromAnswer(generated.output, input.provider);
-    },
-  };
+  return benchmarkPageSearchWith(getActiveAiModel(model), model.id);
 };
