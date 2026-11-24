@@ -56,6 +56,7 @@ async function desktopChatCapabilities(userId: string) {
   const starters = startersEnabled ? selectVisibleStarterCards({
     signedIn: true, plan: plan?.tier ?? null, enabledFlags: new Set(), knownFlags: new Set(), modelCapabilities,
   }, chatStarterCatalogFor("chat"), CHAT_STARTER_MAX_VISIBLE).flatMap(({ entry, availability }) => {
+    // Older clients use the fallback copy; current clients localize the ID using the selected device language.
     const cards = workspaceWelcomeCopy.en.starter.cards;
     const copy = cards[entry.labelKey.split(".")[2] as keyof typeof cards];
     return copy && availability.state === "available" ? [{ id: entry.id, ...copy }] : [];

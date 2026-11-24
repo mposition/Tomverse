@@ -171,11 +171,12 @@ export async function POST(request: Request) {
         );
         if (request.headers.get("origin") === DESKTOP_APP_ORIGIN) {
             const review = payload.conversationId && session?.user?.id
-                ? await prisma.conversation.findFirst({ where: { id: payload.conversationId, userId: session.user.id,
-                    password: null }, select: { kind: true, productKey: true } }) : null;
+                ? await prisma.conversation.findFirst({ where: { id: payload.conversationId, userId: session.user.id },
+                    select: { kind: true, productKey: true, password: true } }) : null;
             if (desktopConversationWriteProduct(review) !== "review" || (!desktopAttachmentEnabled() && payload.attachments?.length)) {
                 throw new ChatAccessError(403, "CONVERSATION_ACCESS_DENIED", "A Desktop Review conversation and supported attachments are required.");
             }
+            if (review?.password != null) return conversationLockedResponse();
         }
         const uniqueModelIds = Array.from(new Set(payload.modelIds));
         if (payload.previousContextBundle !== undefined && !session?.user?.id) {

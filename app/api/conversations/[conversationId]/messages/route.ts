@@ -188,8 +188,8 @@ export async function POST(
 
     const body = await readLimitedJson(req, CHAT_MAX_MESSAGE_BODY_BYTES, saveMessagesSchema);
     if (desktop && (body.messages.length !== 1 || body.draftConsume ||
-        body.messages.some((message) => message.modelId || message.attachmentReferences ||
-          (!desktopAttachmentEnabled() && message.attachmentUploadIds)))) {
+        body.messages.some((message) => message.modelId || message.attachmentReferences?.length ||
+          (!desktopAttachmentEnabled() && message.attachmentUploadIds?.length)))) {
       return NextResponse.json({ error: "Desktop Chat saves one question with its prepared attachments at a time." }, { status: 400 });
     }
     const messageMappings = body.messages.map((message) => ({

@@ -297,13 +297,14 @@ export function AuthButton({
     }, [accountUsage?.subscription?.cancelAtPeriodEnd]);
 
     const closeSettingsModal = useCallback(() => {
+        if (embedded) return;
         if (pageMode) {
             window.location.assign(settingsExitHref(returnProduct));
             return;
         }
         setIsModalOpen(false);
         requestAnimationFrame(() => accountMenuButtonRef.current?.focus());
-    }, [returnProduct, pageMode]);
+    }, [returnProduct, pageMode, embedded]);
 
     const closeDeleteAccountModal = useCallback(() => {
         setIsDeleteAccountModalOpen(false);
@@ -915,6 +916,20 @@ export function AuthButton({
             return;
         }
         openModelFinderNow();
+    };
+
+    const cancelSettings = () => {
+        if (!embedded) {
+            closeSettingsModal();
+            return;
+        }
+        const saved = savedSettingsRef.current;
+        if (!saved) return;
+        setTheme(saved.theme);
+        setLanguage(saved.language);
+        setTimeZone(saved.timeZone);
+        setDefaultModelIds(saved.modelIds);
+        setHighCostAcknowledged(false);
     };
 
     const handleSaveSettings = async () => {
@@ -2335,7 +2350,7 @@ export function AuthButton({
                             >
                                 <button
                                     type="button"
-                                    onClick={closeSettingsModal}
+                                    onClick={cancelSettings}
                                     className="rounded-lg px-4 py-2 text-sm font-semibold text-zinc-600 transition-colors hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
                                 >
                                     {t("auth.cancel")}

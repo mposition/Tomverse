@@ -1590,12 +1590,13 @@ async function handleChatPost(
                 return tracedJsonError("Desktop Chat requires a saved question and saved attachments.", "INVALID_REQUEST", 400, traceId);
             }
             const desktopConversation = conversationId && session?.user?.id
-                ? await prisma.conversation.findFirst({ where: { id: conversationId, userId: session.user.id, password: null },
-                    select: { productKey: true, kind: true } }) : null;
+                ? await prisma.conversation.findFirst({ where: { id: conversationId, userId: session.user.id },
+                    select: { productKey: true, kind: true, password: true } }) : null;
             const desktopProduct = desktopConversationWriteProduct(desktopConversation);
             if (!desktopProduct || (desktopProduct === "chat" && admissionToken)) {
                 return tracedJsonError("This conversation belongs to another workspace.", "CONVERSATION_ACCESS_DENIED", 403, traceId);
             }
+            if (desktopConversation?.password != null) return conversationLockedResponse();
         }
         if (reasoningEffort && (!reasoningEffortEnabled() || deepResearchDepth || researchMode === "preview")) {
             return tracedJsonError("Reasoning effort is unavailable for this request.", "REASONING_EFFORT_UNAVAILABLE", 409, traceId);

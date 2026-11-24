@@ -518,6 +518,13 @@ test("Desktop reads its own resources through the exact origin and route allowli
     assert.equal(created.status, 200, await created.clone().text());
     const createdId = (await created.json()).id;
     assert.equal((await prisma.conversation.findUniqueOrThrow({ where: { id: createdId } })).productKey, "chat");
+    const { POST: saveMessage } = await import("@/app/api/conversations/[conversationId]/messages/route");
+    for (const attachments of [{ attachmentReferences: [] }, { attachmentUploadIds: [] }]) {
+      const saved = await saveMessage(read(`/api/conversations/${createdId}/messages`, undefined, {}, "POST", {
+        messages: [{ clientRequestId: randomUUID(), role: "user", content: "A question without attachments", ...attachments }],
+      }), { params: Promise.resolve({ conversationId: createdId }) });
+      assert.equal(saved.status, 200, await saved.clone().text());
+    }
     assert.equal((await rename(createdId, { title: "Renamed in Desktop" })).status, 200);
     assert.equal((await (await conversation(createdId)).json()).title, "Renamed in Desktop");
     assert.equal((await rename(createdId, { password: "will-not-change" })).status, 400);
@@ -583,6 +590,18 @@ test("Desktop Review and Images require their server switch and keep product and
     }
     assert.equal((await images.GET(make("/api/images/generations?requestKey=not-found"))).status, 404);
     assert.equal((await images.POST(make("/api/images/generations", "POST", { prompt: "" }))).status, 400);
+    const image = await prisma.conversation.create({ data: { userId: user.id, title: "Locked image", selectedModels: "[]",
+      kind: "image", productKey: "studio", password: "locked" } });
+    const key = randomUUID();
+    await prisma.imageGenerationGroup.create({ data: { userId: user.id, conversationId: image.id, groupIdempotencyKey: key } });
+    const generate = (conversationId?: string) => images.POST(make("/api/images/generations", "POST", {
+      prompt: "A local image fixture", size: "1024x1024", quality: "low", idempotencyKey: key, conversationId,
+    }));
+    assert.equal((await generate()).status, 423);
+    assert.equal((await generate(image.id)).status, 423);
+    assert.equal((await generate(foreign.id)).status, 404);
+    assert.equal((await generate(ownChat.id)).status, 409);
+    assert.equal((await images.GET(make(`/api/images/generations?requestKey=${key}`))).status, 423);
     const absentId = "missing-desktop-image";
     assert.equal((await download.GET(make(`/api/images/generations/${absentId}/download?preview=1`),
       { params: Promise.resolve({ generationId: absentId }) })).status, 404);
@@ -656,8 +675,8 @@ test("Desktop can write legacy Review conversations only during the configured t
     assert.equal(saved.status, 200, await saved.clone().text());
     const sourceId = (await saved.json()).messageMappings[0].messageId;
     assert.equal((await prisma.message.findUniqueOrThrow({ where: { id: sourceId } })).content, prompt);
-    const turn = () => chat.POST(make("/api/chat", "POST", {
-      modelId: modelIds[0], conversationId: own.id, sourceUserMessageId: sourceId, assistantMessageId: randomUUID(),
+    const turn = (conversationId = own.id) => chat.POST(make("/api/chat", "POST", {
+      modelId: modelIds[0], conversationId, sourceUserMessageId: sourceId, assistantMessageId: randomUUID(),
       messages: [{ id: sourceId, role: "user", content: prompt }], reasoningEffort: "high",
     }));
     // An intentionally unavailable request option proves the chat route has
@@ -674,6 +693,8 @@ test("Desktop can write legacy Review conversations only during the configured t
     assert.equal((await admit(foreign.id)).status, 403);
     assert.equal((await configure(locked.id)).status, 423);
     assert.equal((await append(locked.id)).status, 423);
+    assert.equal((await admit(locked.id)).status, 423);
+    assert.equal((await turn(locked.id)).status, 423);
     assert.equal((await conversations.DELETE(make("/api/conversations/" + own.id, "DELETE"), params(own.id))).status, 403);
     for (const mode of ["strict", "expired", "unconfigured", "disabled"]) {
       process.env.PRODUCT_KEY_READ_MODE = mode === "strict" ? "strict" : "legacy_fallback";
