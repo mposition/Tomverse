@@ -93,21 +93,35 @@
 .choiceActive { border-color: var(--studio-accent); background: var(--studio-selection); }
 .fileButton { position: relative; margin: 7px 0; }
 .fileButton input { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: inherit; }
-.primary:disabled, .secondary:disabled, .fileButton[data-disabled], .stickerActions button:disabled { cursor: default; opacity: .5; }
+.primary:disabled, .secondary:disabled, .fileButton[data-disabled] { cursor: default; opacity: .5; }
 .choices { display: flex; gap: 6px; flex-wrap: wrap; }
 .status { margin: 10px 0 0; font-size: .82rem; overflow-wrap: anywhere; }
 .status[role="alert"] { color: #b43a28; }
-.stickerGrid { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
-.sticker { min-width: 0; border-radius: 10px; overflow: hidden; border: 1px solid var(--studio-line); }
-.stickerImage { display: grid; justify-items: center; padding: 6px; background: #e8f0e5; }
-.sticker:nth-child(5n + 2) .stickerImage { background: #eee8f9; }
-.sticker:nth-child(5n + 3) .stickerImage { background: #f8eced; }
-.sticker:nth-child(5n + 4) .stickerImage { background: #fbf0dc; }
-.sticker:nth-child(5n) .stickerImage { background: #e9edf8; }
-.stickerImage img { width: 100%; height: 83px; object-fit: contain; }
-:global(.dark) .shell .sticker .stickerImage { background: var(--studio-field); }
-.stickerActions { display: flex; justify-content: space-between; gap: 3px; padding: 3px; }
-.stickerActions button { min-height: 32px; min-width: 28px; padding: 3px; border: 0; background: var(--studio-surface); color: var(--studio-accent); font: inherit; font-size: .68rem; font-weight: 700; cursor: pointer; }
+.stickerResults { display: grid; grid-template-columns: minmax(0, 1fr) minmax(148px, .42fr); align-items: start; gap: 14px; }
+.stickerGrid { grid-template-columns: repeat(5, minmax(0, 1fr)); align-content: start; gap: 8px; }
+.sticker { min-width: 0; }
+.stickerImage, .stickerLargeImage {
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  min-width: 0;
+  padding: 6px;
+  background: var(--studio-field);
+  border: 1px solid var(--studio-line);
+  border-radius: 10px;
+  color: var(--studio-text);
+}
+.stickerImage { cursor: pointer; font: inherit; font-size: .74rem; overflow-wrap: anywhere; }
+.stickerImage[aria-pressed="true"] { border-color: var(--studio-accent); box-shadow: inset 0 0 0 1px var(--studio-accent); }
+.stickerImage img, .stickerLargeImage img { display: block; width: 100%; height: 100%; min-height: 0; object-fit: contain; }
+.stickerInspector { min-width: 0; scroll-margin: 16px; }
+.stickerInspector h3 { font-size: .9rem; margin: 0 0 8px; }
+.stickerLargeImage { margin: 0; padding: 14px; }
+.stickerLargeImage figcaption { text-align: center; overflow-wrap: anywhere; }
+.stickerActions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.stickerActions button { white-space: normal; }
+.panel .stickerActions button + button { margin-inline-start: 0; }
 .packCaptions { margin: 0 0 14px; }
 .captionLabel, .captionEntry, .regenerationRow { display: flex; gap: 8px; align-items: end; }
 .captionLabel { justify-content: space-between; margin-bottom: 7px; font-size: .86rem; font-weight: 680; }
@@ -157,6 +171,8 @@
   .panel { padding: 15px; }
   .directoryGrid { gap: 12px; }
   .cardCopy { padding: 10px; }
+  .stickerResults { grid-template-columns: minmax(0, 1fr); }
+  .stickerLargeImage { max-width: 280px; }
   .stickerGrid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 @media (max-width: 768px) {
@@ -176,8 +192,6 @@
   .cardCopy svg { width: 13px; }
   .workbench { grid-template-columns: minmax(0, 1fr); }
   .stickerGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
-  .stickerImage img { height: 63px; }
-  .stickerActions button { min-height: 36px; }
 }
 
 .mobileCopy { display: none; }
