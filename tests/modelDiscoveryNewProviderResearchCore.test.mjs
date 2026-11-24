@@ -410,6 +410,24 @@ test("the last research run is stored bounded and read back, and a bad row reads
   assert.equal(parseNewProviderResearchRunRecord(null), null);
   assert.equal(parseNewProviderResearchRunRecord("not json"), null);
   assert.equal(parseNewProviderResearchRunRecord(JSON.stringify({ week: "2026-W47" })), null);
+  // A provider that was not researched survives the bound, ahead of rejected answers.
+  const late = newProviderResearchRunRecord({
+    ...record,
+    calls: [
+      {
+        product: "connected_image",
+        ok: true,
+        proposed: 30,
+        accepted: 0,
+        rejected: [
+          ...Array.from({ length: 30 }, (_, i) => rejection(i)),
+          { providerName: "zhipu", apiModelId: "", reason: "not_researched" },
+        ],
+      },
+    ],
+  });
+  assert.equal(late.calls[0].rejected.length, 20);
+  assert.deepEqual(late.calls[0].rejected[0], { providerName: "zhipu", apiModelId: "", reason: "not_researched" });
 });
 
 test("a code proposal is a coding-catalogue candidate that needs the provider connected first, never a chat adoption", () => {

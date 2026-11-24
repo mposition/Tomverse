@@ -239,12 +239,18 @@ export type NewProviderResearchRunRecord = {
   created: Array<{ provider: string; apiModel: string; product: NewProviderResearchProduct }>;
 };
 
-/** The stored record, bounded so one verbose answer cannot grow the row. */
+/**
+ * The stored record, bounded so one verbose answer cannot grow the row.
+ * Providers that were not researched come first, so the bound never hides one.
+ */
 export const newProviderResearchRunRecord = (input: NewProviderResearchRunRecord): NewProviderResearchRunRecord => ({
   ...input,
   calls: input.calls.map((call) => ({
     ...call,
-    rejected: call.rejected.slice(0, LAST_RUN_MAX_REJECTIONS),
+    rejected: [
+      ...call.rejected.filter((rejection) => rejection.reason === "not_researched"),
+      ...call.rejected.filter((rejection) => rejection.reason !== "not_researched"),
+    ].slice(0, LAST_RUN_MAX_REJECTIONS),
   })),
 });
 
