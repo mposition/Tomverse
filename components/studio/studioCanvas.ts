@@ -1,4 +1,6 @@
-import { studioStickerBounds, studioStickerCaptionSlot, studioStickerCells, studioStickerCrossesSeam, type StickerRect } from "@/lib/studioStickerGeometry";
+import {
+  studioStickerBounds, studioStickerCaptionOutside, studioStickerCaptionSlot, studioStickerCells, studioStickerCrossesSeam, type StickerRect,
+} from "@/lib/studioStickerGeometry";
 import { studioStickerLayout } from "@/lib/studioTools";
 
 export const studioImageTypes = ["image/png", "image/jpeg", "image/webp"];
@@ -91,34 +93,91 @@ function splitCaption(text: string): string[] {
   return [graphemes.slice(0, split).join("").trimEnd(), graphemes.slice(split).join("").trimStart()];
 }
 
+const stickerFont = "system-ui, sans-serif";
+const stickerLineHeight = 1.16;
+const stickerCaptionColors = [
+  { hue: 292, ink: "#89519f", edge: "#e9ccfa" },
+  { hue: 350, ink: "#a34a74", edge: "#f6c9df" },
+  { hue: 28, ink: "#985429", edge: "#ffdbb4" },
+  { hue: 119, ink: "#557544", edge: "#daedb9" },
+  { hue: 177, ink: "#397a74", edge: "#bdeee5" },
+  { hue: 226, ink: "#536aa3", edge: "#cddcfc" },
+];
+
+function stickerCaptionPalette(pixels: Uint8ClampedArray, stride: number, art: StickerRect) {
+  const weights = stickerCaptionColors.map(() => 0);
+  for (let y = art.top; y < art.top + art.height; y += 4) {
+    for (let x = art.left; x < art.left + art.width; x += 4) {
+      const index = (y * stride + x) * 4;
+      if (pixels[index + 3] < 192) continue;
+      const red = pixels[index], green = pixels[index + 1], blue = pixels[index + 2];
+      const max = Math.max(red, green, blue);
+      const chroma = max - Math.min(red, green, blue);
+      if (chroma < 22 || max < 65) continue;
+      const sector = max === red ? (green - blue) / chroma
+        : max === green ? 2 + (blue - red) / chroma
+        : 4 + (red - green) / chroma;
+      const hue = (sector * 60 + 360) % 360;
+      if (hue >= 12 && hue <= 52 && red > 160 && chroma < 105) continue;
+      const distance = (other: number) => Math.min(Math.abs(other - hue), 360 - Math.abs(other - hue));
+      const closest = stickerCaptionColors.reduce((best, color, i) => (
+        distance(color.hue) < distance(stickerCaptionColors[best].hue) ? i : best
+      ), 0);
+      weights[closest] += chroma;
+    }
+  }
+  return stickerCaptionColors[weights.indexOf(Math.max(...weights))];
+}
+
 function stickerCaption(
   context: CanvasRenderingContext2D, pixels: Uint8ClampedArray, stride: number, art: StickerRect, text: string,
 ) {
-  const font = "system-ui, sans-serif";
-  context.font = `750 100px ${font}`;
-  const layout = (lines: string[]) => {
-    const bandHeight = Math.max(2, Math.round(art.height * (lines.length === 1 ? .20 : .29)));
-    const slot = studioStickerCaptionSlot(pixels, stride, art, bandHeight);
-    if (!slot) return null;
-    const widest = Math.max(...lines.map(line => context.measureText(line).width), 1) / 100;
-    const size = Math.min(slot.height / (lines.length * 1.2), slot.width * .86 / widest, art.width * .175);
-    return { lines, slot, size };
+  const shortSide = Math.min(art.width, art.height);
+  const maxSize = shortSide * .18;
+  context.font = `750 100px ${stickerFont}`;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  const measure = (lines: string[], maxWidth: number, maxHeight: number) => {
+    const metrics = lines.map(line => context.measureText(line));
+    const widest = metrics.map(line => Math.max(line.width, 2 * Math.max(line.actualBoundingBoxLeft, line.actualBoundingBoxRight)));
+    const width = Math.max(1, ...widest) / 100 + .14;
+    const height = Math.max(1, ...metrics.map(line => 2 * Math.max(line.actualBoundingBoxAscent, line.actualBoundingBoxDescent) / 100))
+      + (lines.length - 1) * stickerLineHeight + .14;
+    const size = Math.min(maxSize, maxWidth / width, maxHeight / height);
+    return { lines, size, width: width * size, height: height * size };
   };
-  const oneLine = layout([text]);
-  const twoLines = text.length > 6 ? layout(splitCaption(text)) : null;
-  const chosen = twoLines && twoLines.size > (oneLine?.size ?? 0) * 1.16 ? twoLines : oneLine;
-  if (!chosen || chosen.size < art.height * .063) return null;
-
-  const { slot } = chosen;
-  let luminance = 0, samples = 0;
-  for (let y = slot.top; y < slot.top + slot.height; y += 3) {
-    for (let x = slot.left; x < slot.left + slot.width; x += 3) {
-      const index = (y * stride + x) * 4;
-      luminance += pixels[index] * .2126 + pixels[index + 1] * .7152 + pixels[index + 2] * .0722;
-      samples++;
+  const lineOptions = text.length > 6 ? [[text], splitCaption(text)] : [[text]];
+  const choose = (width: number, height: number) => {
+    const [single, wrapped] = lineOptions.map(lines => measure(lines, width, height));
+    return wrapped && wrapped.size > single.size * 1.16 ? wrapped : single;
+  };
+  const { ink, edge } = stickerCaptionPalette(pixels, stride, art);
+  const slot = studioStickerCaptionSlot(pixels, stride, art, Math.max(2, Math.round(art.height * .19)));
+  if (slot && slot.width >= art.width * .5) {
+    const label = choose(slot.width * .92, slot.height);
+    if (label.size >= maxSize * .86) {
+      const left = slot.left + (slot.width - label.width) / 2;
+      const top = slot.top + (slot.height - label.height) / 2;
+      let sum = 0, squares = 0, samples = 0;
+      for (let y = Math.ceil(top); y < top + label.height; y += 2) {
+        for (let x = Math.ceil(left); x < left + label.width; x += 2) {
+          const i = (y * stride + x) * 4;
+          const luma = pixels[i] * .2126 + pixels[i + 1] * .7152 + pixels[i + 2] * .0722;
+          sum += luma;
+          squares += luma * luma;
+          samples++;
+        }
+      }
+      const brightness = sum / samples;
+      if (squares / samples - brightness ** 2 < 16 ** 2) {
+        return { ...label, left, top, ink: brightness < 128 ? edge : ink, edge: brightness < 128 ? ink : edge };
+      }
     }
   }
-  return { ...chosen, font, ink: luminance / samples > 145 ? "#231e27" : "#fff8ef" };
+
+  const label = choose(art.width * .86, shortSide * .40);
+  const placement = studioStickerCaptionOutside(pixels, stride, art, label.width, label.height);
+  return { ...label, ...placement, ink, edge };
 }
 
 async function renderStickerCell(image: HTMLImageElement, cell: StickerRect, caption: string): Promise<Blob | null> {
@@ -132,25 +191,33 @@ async function renderStickerCell(image: HTMLImageElement, cell: StickerRect, cap
   if (!art || art.width < sourceWidth * .19 || art.height < sourceHeight * .19) return null;
   const { left, top, width, height } = art;
   const padding = Math.max(1, Math.round(Math.max(width, height) * .025));
-  const outputScale = 512 / (Math.max(width, height) + 2 * padding);
-  const output = canvas(Math.round((width + 2 * padding) * outputScale), Math.round((height + 2 * padding) * outputScale));
+  const text = caption.trim();
+  const label = text ? stickerCaption(original.context, pixels, sourceWidth, art, text) : null;
+  const minX = Math.min(left, label?.left ?? left) - padding;
+  const minY = Math.min(top, label?.top ?? top) - padding;
+  const outputWidth = Math.max(left + width, label ? label.left + label.width : 0) + padding - minX;
+  const outputHeight = Math.max(top + height, label ? label.top + label.height : 0) + padding - minY;
+  const outputScale = 512 / Math.max(outputWidth, outputHeight);
+  const output = canvas(Math.round(outputWidth * outputScale), Math.round(outputHeight * outputScale));
   const { context } = output;
   context.scale(outputScale, outputScale);
-  context.drawImage(original.element, left, top, width, height, padding, padding, width, height);
-  const text = caption.trim();
-  if (text) {
-    const label = stickerCaption(context, pixels, sourceWidth, art, text);
-    if (!label) return null;
-    const { lines, slot, size, font, ink } = label;
-    context.font = `750 ${size}px ${font}`;
+  context.drawImage(original.element, left, top, width, height, left - minX, top - minY, width, height);
+  if (label) {
+    const { lines, size, ink, edge } = label;
+    context.font = `750 ${size}px ${stickerFont}`;
     context.textAlign = "center";
     context.textBaseline = "middle";
     context.fillStyle = ink;
-    lines.forEach((line, index) => context.fillText(
-      line,
-      padding + slot.left - left + slot.width / 2,
-      padding + slot.top - top + slot.height / 2 + (index - (lines.length - 1) / 2) * size * 1.15,
-    ));
+    context.strokeStyle = edge;
+    context.lineWidth = size * .105;
+    context.lineJoin = "round";
+    const x = label.left - minX + label.width / 2;
+    const centerY = label.top - minY + label.height / 2;
+    lines.forEach((line, index) => {
+      const y = centerY + (index - (lines.length - 1) / 2) * size * stickerLineHeight;
+      context.strokeText(line, x, y);
+      context.fillText(line, x, y);
+    });
   }
   return encode(output.element);
 }

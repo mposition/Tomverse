@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { studioStickerBounds, studioStickerCaptionSlot, studioStickerCells, studioStickerCrossesSeam } from "../lib/studioStickerGeometry.ts";
+import {
+  studioStickerBounds, studioStickerCaptionOutside, studioStickerCaptionSlot, studioStickerCells, studioStickerCrossesSeam,
+} from "../lib/studioStickerGeometry.ts";
 
 function fill(data, stride, left, top, width, height) {
   for (let y = top; y < top + height; y++) {
@@ -46,4 +48,24 @@ test("Studio sticker bounds ignore a stray pixel and caption text fits wholly in
     for (let x = caption.left; x < caption.left + caption.width; x++) assert.equal(data[(y * 100 + x) * 4 + 3], 255);
   }
   assert.equal(studioStickerCaptionSlot(data, 100, art, 36), null);
+});
+
+test("Studio tucks a caption into free space on any edge of the silhouette", () => {
+  const art = { left: 0, top: 0, width: 100, height: 100 };
+  const gaps = [
+    { left: 30, top: 0, width: 40, height: 20 },
+    { left: 80, top: 30, width: 20, height: 40 },
+    { left: 30, top: 80, width: 40, height: 20 },
+    { left: 0, top: 30, width: 20, height: 40 },
+  ];
+  for (const gap of gaps) {
+    const data = new Uint8ClampedArray(100 * 100 * 4);
+    fill(data, 100, 0, 0, 100, 100);
+    for (let y = gap.top; y < gap.top + gap.height; y++) {
+      for (let x = gap.left; x < gap.left + gap.width; x++) data[(y * 100 + x) * 4 + 3] = 0;
+    }
+    const label = studioStickerCaptionOutside(data, 100, art, 16, 12);
+    assert.ok(label.left >= gap.left && label.left + label.width <= gap.left + gap.width);
+    assert.ok(label.top >= gap.top && label.top + label.height <= gap.top + gap.height);
+  }
 });

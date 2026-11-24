@@ -108,3 +108,52 @@ export function studioStickerCaptionSlot(
   }
   return best;
 }
+
+export function studioStickerCaptionOutside(
+  data: Uint8ClampedArray, stride: number, art: StickerRect, width: number, height: number,
+): StickerRect {
+  const gap = Math.min(art.width, art.height) * .023;
+  const artArea = art.width * art.height;
+  let best = { left: art.left, top: art.top - height - gap, width, height };
+  let bestScore = Infinity;
+
+  for (const vertical of [true, false]) {
+    const crossStart = vertical ? art.left : art.top;
+    const crossSize = vertical ? art.width : art.height;
+    const crossSpan = vertical ? width : height;
+    const depthStart = vertical ? art.top : art.left;
+    const depthSize = vertical ? art.height : art.width;
+    const captionDepth = vertical ? height : width;
+    for (const anchor of [.5, .27, .73]) {
+      const center = crossStart + crossSize * anchor;
+      const cross = Math.round(center - crossSpan / 2);
+      const start = Math.max(crossStart, Math.floor(cross - gap));
+      const end = Math.min(crossStart + crossSize, Math.ceil(cross + crossSpan + gap));
+      for (const direction of [1, -1]) {
+        const edge = direction === 1 ? depthStart : depthStart + depthSize - 1;
+        let depth = edge;
+        while (Math.abs(depth - edge) < depthSize) {
+          let occupied = false;
+          for (let i = start; i < end && !occupied; i++) {
+            const pixel = vertical ? depth * stride + i : i * stride + depth;
+            occupied = data[pixel * 4 + 3] >= 64;
+          }
+          if (occupied) break;
+          depth += direction;
+        }
+        if (Math.abs(depth - edge) >= depthSize) continue;
+        const beside = direction === 1 ? depth - captionDepth - gap : depth + 1 + gap;
+        const left = vertical ? cross : beside;
+        const top = vertical ? beside : cross;
+        const combinedWidth = Math.max(art.left + art.width, left + width) - Math.min(art.left, left);
+        const combinedHeight = Math.max(art.top + art.height, top + height) - Math.min(art.top, top);
+        const score = combinedWidth * combinedHeight / artArea + Math.abs(anchor - .5) * .17;
+        if (score < bestScore) {
+          best = { left, top, width, height };
+          bestScore = score;
+        }
+      }
+    }
+  }
+  return best;
+}
