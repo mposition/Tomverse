@@ -286,13 +286,66 @@ test("the connected-image call has its own default-off switch", async () => {
   const runner = readFileSync("lib/modelDiscoveryNewProviderResearch.ts", "utf8");
   const { MODEL_DISCOVERY_CONNECTED_IMAGE_RESEARCH_ENV } = await import("../lib/modelDiscoveryNewProviderResearch.ts");
   assert.equal(MODEL_DISCOVERY_CONNECTED_IMAGE_RESEARCH_ENV, "MODEL_DISCOVERY_CONNECTED_IMAGE_RESEARCH_ENABLED");
-  // Only the literal "true" turns it on; without it no fourth call is made.
+  // Only the literal "true" turns it on; without it no connected-image call is made.
   assert.ok(runner.includes('env[MODEL_DISCOVERY_CONNECTED_IMAGE_RESEARCH_ENV]?.trim() === "true"'));
-  // Nor when no connected provider is left to ask about.
+  // 2026-11-24: one call per provider, each accepting only that provider's models.
   assert.match(
     runner,
-    /= \{ ok: true, proposed: 0, accepted: \[\], rejected: \[\] \};\s*if \(connectedImageEnabled && inputs\.imageResearchProviders\.length > 0\) \{/
+    /= \{ ok: true, proposed: 0, accepted: \[\], rejected: \[\] \};[\s\S]*?if \(connectedImageEnabled\) \{\s*connectedImage = await researchConnectedImageProviders\(/
   );
+  assert.match(runner, /providers: \[provider\],/);
+  assert.match(runner, /connectedProviders: \[provider\],/);
+});
+
+test("connected-image providers are asked one at a time in a weekly rotation, and one failure costs only that provider", async () => {
+  const { researchConnectedImageProviders, rotateForWeek } = await import(
+    "../lib/modelDiscoveryNewProviderResearchCore.ts"
+  );
+  const providers = ["deepseek", "minimax", "mistral", "zhipu"];
+  // Weeks 48 and 49 start at different providers, so a run that runs out of
+  // time does not skip the same tail every week.
+  assert.deepEqual(rotateForWeek(providers, "2026-W48"), ["deepseek", "minimax", "mistral", "zhipu"]);
+  assert.deepEqual(rotateForWeek(providers, "2026-W49"), ["minimax", "mistral", "zhipu", "deepseek"]);
+  assert.deepEqual(rotateForWeek([], "2026-W49"), []);
+
+  const asked = [];
+  const failures = [];
+  let inFlight = 0;
+  const result = await researchConnectedImageProviders({
+    providers,
+    week: "2026-W49",
+    ask: async (provider) => {
+      inFlight += 1;
+      assert.equal(inFlight, 1, "calls run one at a time");
+      asked.push(provider);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      inFlight -= 1;
+      if (provider === "mistral") throw new Error("timeout");
+      return { candidates: provider === "minimax" ? [{}, {}] : [] };
+    },
+    check: (provider, answer) => ({
+      accepted: (answer?.candidates ?? []).map((_, i) => `${provider}-${i}`),
+      rejected: [],
+    }),
+    onFailure: (provider) => failures.push(provider),
+  });
+  assert.deepEqual(asked, ["minimax", "mistral", "zhipu", "deepseek"]);
+  assert.deepEqual(failures, ["mistral"]);
+  assert.equal(result.ok, true);
+  assert.equal(result.proposed, 2);
+  assert.deepEqual(result.accepted, ["minimax-0", "minimax-1"]);
+  assert.deepEqual(result.rejected, [{ providerName: "mistral", apiModelId: "", reason: "not_researched" }]);
+
+  const allFailed = await researchConnectedImageProviders({
+    providers: ["zhipu"],
+    week: "2026-W49",
+    ask: async () => {
+      throw new Error("budget");
+    },
+    check: () => ({ accepted: [], rejected: [] }),
+    onFailure: () => {},
+  });
+  assert.equal(allFailed.ok, false);
 });
 
 test("research rows are never judged by the catalogue scan, so the vanished-ID exclusion cannot close them", async () => {
@@ -357,6 +410,24 @@ test("the last research run is stored bounded and read back, and a bad row reads
   assert.equal(parseNewProviderResearchRunRecord(null), null);
   assert.equal(parseNewProviderResearchRunRecord("not json"), null);
   assert.equal(parseNewProviderResearchRunRecord(JSON.stringify({ week: "2026-W47" })), null);
+  // A provider that was not researched survives the bound, ahead of rejected answers.
+  const late = newProviderResearchRunRecord({
+    ...record,
+    calls: [
+      {
+        product: "connected_image",
+        ok: true,
+        proposed: 30,
+        accepted: 0,
+        rejected: [
+          ...Array.from({ length: 30 }, (_, i) => rejection(i)),
+          { providerName: "zhipu", apiModelId: "", reason: "not_researched" },
+        ],
+      },
+    ],
+  });
+  assert.equal(late.calls[0].rejected.length, 20);
+  assert.deepEqual(late.calls[0].rejected[0], { providerName: "zhipu", apiModelId: "", reason: "not_researched" });
 });
 
 test("a code proposal is a coding-catalogue candidate that needs the provider connected first, never a chat adoption", () => {

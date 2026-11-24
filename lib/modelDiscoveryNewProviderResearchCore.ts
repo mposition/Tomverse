@@ -206,7 +206,9 @@ export type NewProviderResearchRejection = {
     | "known_model"
     | "duplicate"
     | "not_connected_provider"
-    | "no_official_citation";
+    | "no_official_citation"
+    /** A connected-image provider whose own call failed or ran out of time. */
+    | "not_researched";
   /**
    * On `no_official_citation`: the public URLs the answer did cite, so the
    * operator can see which host fell outside OFFICIAL_SOURCE_HOSTS.
@@ -237,12 +239,18 @@ export type NewProviderResearchRunRecord = {
   created: Array<{ provider: string; apiModel: string; product: NewProviderResearchProduct }>;
 };
 
-/** The stored record, bounded so one verbose answer cannot grow the row. */
+/**
+ * The stored record, bounded so one verbose answer cannot grow the row.
+ * Providers that were not researched come first, so the bound never hides one.
+ */
 export const newProviderResearchRunRecord = (input: NewProviderResearchRunRecord): NewProviderResearchRunRecord => ({
   ...input,
   calls: input.calls.map((call) => ({
     ...call,
-    rejected: call.rejected.slice(0, LAST_RUN_MAX_REJECTIONS),
+    rejected: [
+      ...call.rejected.filter((rejection) => rejection.reason === "not_researched"),
+      ...call.rejected.filter((rejection) => rejection.reason !== "not_researched"),
+    ].slice(0, LAST_RUN_MAX_REJECTIONS),
   })),
 });
 
@@ -401,6 +409,56 @@ export const connectedImageResearchProviders = (input: {
   return input.connectedProviders.filter(
     (provider) => Object.hasOwn(input.officialHosts, provider) && !withImages.has(provider)
   );
+};
+
+/**
+ * The providers in this week's order: rotated by the ISO week number, so when
+ * the time budget runs out it is not the same tail providers that are skipped
+ * every week.
+ */
+export const rotateForWeek = <T>(items: readonly T[], week: string): T[] => {
+  if (items.length === 0) return [];
+  const number = Number.parseInt(week.slice(week.lastIndexOf("W") + 1), 10);
+  const offset = Number.isFinite(number) ? number % items.length : 0;
+  return [...items.slice(offset), ...items.slice(0, offset)];
+};
+
+/**
+ * One connected-image call per provider (owner decision 2026-11-24: asked
+ * about ten providers in one call, the search model returned an empty list
+ * although MiniMax and Zhipu were among them), one at a time. A provider whose
+ * call failed or was skipped is listed as `not_researched`; the others' results
+ * stand, and `ok` is false only when no call succeeded.
+ */
+export const researchConnectedImageProviders = async <Accepted>(input: {
+  providers: readonly string[];
+  week: string;
+  ask: (provider: string) => Promise<{ candidates?: unknown[] } | undefined>;
+  check: (
+    provider: string,
+    answer: { candidates?: unknown[] } | undefined
+  ) => { accepted: Accepted[]; rejected: NewProviderResearchRejection[] };
+  onFailure: (provider: string, error: unknown) => void;
+}) => {
+  const order = rotateForWeek(input.providers, input.week);
+  let succeeded = 0;
+  let proposed = 0;
+  const accepted: Accepted[] = [];
+  const rejected: NewProviderResearchRejection[] = [];
+  for (const provider of order) {
+    try {
+      const answer = await input.ask(provider);
+      const checked = input.check(provider, answer);
+      succeeded += 1;
+      proposed += answer?.candidates?.length ?? 0;
+      accepted.push(...checked.accepted);
+      rejected.push(...checked.rejected);
+    } catch (error) {
+      input.onFailure(provider, error);
+      rejected.push({ providerName: provider, apiModelId: "", reason: "not_researched" });
+    }
+  }
+  return { ok: order.length === 0 || succeeded > 0, proposed, accepted, rejected };
 };
 
 /** Short published names too short for the alias rule above: "Z.ai" is Zhipu. */
