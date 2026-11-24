@@ -176,6 +176,12 @@ export function createFakeModel(behaviour: FakeBehaviour = {}) {
       const value = (behaviour.respond ?? defaultResponse)(call);
       const unknown = value && typeof value === "object" && (value as { usage?: unknown }).usage === "unknown";
       if (value instanceof Error) throw value;
+      // The output cap spent on thinking: a complete response with known usage and no tool call.
+      if (value && typeof value === "object" && (value as { truncated?: unknown }).truncated === true) {
+        return { content: [{ type: "reasoning", text: "thinking" }],
+          usage: { inputTokens: { total: 2_000, noCache: 2_000, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 400, text: 0, reasoning: 400 } },
+          warnings: [], finishReason: { unified: "length", raw: "MAX_TOKENS" } } as never;
+      }
       const output = tool === "submit_research_section" ? 1_500 : 400;
       return { content: [{ type: "tool-call", toolCallId: randomUUID(), toolName: tool, input: JSON.stringify(unknown ? {} : value) }],
         usage: unknown ? { inputTokens: { total: undefined, noCache: undefined, cacheRead: undefined, cacheWrite: undefined },

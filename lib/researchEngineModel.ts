@@ -1,6 +1,6 @@
 import "server-only";
 
-import { generateText, tool, wrapLanguageModel, type LanguageModel, type LanguageModelUsage } from "ai";
+import { generateText, tool, wrapLanguageModel, ToolChoiceViolationError, type LanguageModel, type LanguageModelUsage } from "ai";
 import { z } from "zod";
 import type { AiModel } from "@/lib/models";
 import { createTokenEstimateAccumulator, estimateTokenBreakdown, toReservedInputTokens } from "@/lib/chatTokenEstimate";
@@ -47,6 +47,25 @@ export class ResearchUsageUnknownError extends Error {
 export type ResearchModelUsage = {
   inputTokens: number; outputTokens: number; cachedInputTokens: number; cacheWriteInputTokens: number; reasoningTokens: number;
 };
+
+type ProviderGenerateResult = { usage: { inputTokens: { total?: number; cacheRead?: number; cacheWrite?: number };
+  outputTokens: { total?: number; reasoning?: number }; raw?: unknown }; finishReason: unknown };
+
+/** The provider-level usage of one generate call, in the shape generateText reports for a step. */
+function stepUsage(result: ProviderGenerateResult) {
+  const usage = result.usage;
+  return { inputTokens: usage.inputTokens.total, outputTokens: usage.outputTokens.total, raw: usage.raw as Record<string, unknown> | undefined,
+    inputTokenDetails: { cacheReadTokens: usage.inputTokens.cacheRead, cacheWriteTokens: usage.inputTokens.cacheWrite },
+    outputTokenDetails: { reasoningTokens: usage.outputTokens.reasoning } } as unknown as LanguageModelUsage & { raw?: Record<string, unknown> };
+}
+
+const finishReasonOf = (value: unknown) => typeof value === "string" ? value
+  : typeof (value as { unified?: unknown })?.unified === "string" ? (value as { unified: string }).unified : "unknown";
+
+/** One content-free line per dispatch that did not return a usable submission: what failed, never what was said. */
+function logResearchDispatch(fields: Record<string, string | number | undefined>) {
+  console.error(JSON.stringify({ event: "research_dispatch_not_accepted", ...fields }));
+}
 
 function knownUsage(usage: LanguageModelUsage): ResearchModelUsage {
   const count = (value: number | undefined, required: boolean) => {
@@ -137,6 +156,7 @@ export async function callResearchModel<T>(input: {
 
   let generationId: string | undefined;
   let dispatched = false;
+  let providerResult: ProviderGenerateResult | undefined;
   try {
     const begun = await beginResearchDispatch({ ...input.fence, runId: input.run.id }, {
       kind: "model", dispatchKey: input.dispatchKey, fundingSegmentId: segment.id,
@@ -163,10 +183,14 @@ export async function callResearchModel<T>(input: {
       input.signal.throwIfAborted();
       await markResearchDispatchStarted({ ...input.fence, runId: input.run.id }, generationId!);
       dispatched = true;
-      return doGenerate();
+      const generated = await doGenerate();
+      providerResult = generated as unknown as ProviderGenerateResult;
+      return generated;
     } } });
     let submitted: T | undefined;
-    const result = await generateText({
+    let result;
+    try {
+    result = await generateText({
       ...getModelGenerationSettings(model), reasoning: pinned.reasoning as never, model: wrapped,
       system: input.system, prompt: input.prompt, maxRetries: 0, maxOutputTokens: input.outputTokenCap,
       abortSignal: input.signal,
@@ -175,6 +199,19 @@ export async function callResearchModel<T>(input: {
       toolChoice: { type: "tool", toolName: input.toolName },
       stopWhen: () => true,
     });
+    } catch (error) {
+      // The provider answered in full but without the required tool call (for example the output cap went on
+      // thinking). Its usage is known, so this is invalid output that cost money, not an unknown outcome.
+      if (!dispatched || !providerResult || !ToolChoiceViolationError.isInstance(error)) throw error;
+      const steps = [{ usage: stepUsage(providerResult) }];
+      usedResearchOutputTokens(steps, model.provider);
+      const usage = knownUsage(steps[0]!.usage);
+      if (usage.outputTokens > input.outputTokenCap || usage.cachedInputTokens > usage.inputTokens) throw new ResearchUsageUnknownError();
+      const finishReason = finishReasonOf(providerResult.finishReason);
+      const code = finishReason === "length" ? "RESEARCH_OUTPUT_TRUNCATED" : "RESEARCH_OUTPUT_INVALID";
+      logResearchDispatch({ role: input.role, modelId: model.id, code, finishReason, outputTokens: usage.outputTokens, outputTokenCap: input.outputTokenCap });
+      return { ok: false, kind: "invalid_output", code, generationId, segmentId: segment.id, usage };
+    }
     if (!dispatched) throw new Error("RESEARCH_DISPATCH_NOT_RECORDED");
     usedResearchOutputTokens(result.steps, model.provider);
     if (result.steps.length !== 1) throw new ResearchUsageUnknownError();
@@ -182,6 +219,7 @@ export async function callResearchModel<T>(input: {
     if (usage.outputTokens > input.outputTokenCap || usage.cachedInputTokens > usage.inputTokens) throw new ResearchUsageUnknownError();
     // A missing tool call and a rejected (tool-error) call are both invalid output that still cost money.
     if (submitted === undefined) {
+      logResearchDispatch({ role: input.role, modelId: model.id, code: "RESEARCH_OUTPUT_INVALID", finishReason: finishReasonOf(result.finishReason), outputTokens: usage.outputTokens, outputTokenCap: input.outputTokenCap });
       return { ok: false, kind: "invalid_output", code: "RESEARCH_OUTPUT_INVALID", generationId, segmentId: segment.id, usage };
     }
     return { ok: true, value: submitted, usage, generationId, segmentId: segment.id, reservationId: reservation.reservationId };
@@ -198,6 +236,9 @@ export async function callResearchModel<T>(input: {
       const code = (error as { code?: string }).code ?? (error instanceof Error ? error.message.slice(0, 60) : "RESEARCH_PRE_DISPATCH_FAILED");
       return { ok: false, kind: "refused", code };
     }
+    logResearchDispatch({ role: input.role, modelId: model.id, code: error instanceof ResearchUsageUnknownError ? "RESEARCH_USAGE_UNKNOWN" : "RESEARCH_OUTCOME_UNKNOWN",
+      errorName: error instanceof Error ? error.name.slice(0, 60) : typeof error, statusCode: (error as { statusCode?: number }).statusCode,
+      finishReason: providerResult ? finishReasonOf(providerResult.finishReason) : undefined });
     await prisma.$transaction(async (tx) => {
       await markResearchDispatchUnknown(tx, generationId!);
       await markResearchFundingUnknown(tx, segment.id, { usageFromProvider: false, outcome: "failed", searchQueriesObserved: false });
