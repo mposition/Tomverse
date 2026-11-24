@@ -1,4 +1,6 @@
 export const studioLocale = {
+  "captionLanguage": "Langue des phrases",
+  "randomCaptions": "Remplir avec des phrases au hasard",
   "checkoutDraftRestored": "Votre brouillon Studio a été restauré.",
   "checkoutDraftSaveFailed": "Impossible de sauvegarder le brouillon avant le paiement. Votre travail est toujours ici.",
   "workspaceCaption": "Outils créatifs",
