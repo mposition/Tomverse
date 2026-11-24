@@ -276,6 +276,7 @@ export const zhHant = {
         // Image generation workspace (docs/policy/image-generation.md)
         imageGenerationTitle: "圖片生成",
         imageGenerationBackToChat: "返回聊天",
+        imageModeBackToChatModels: "返回對話模型",
         toolsImageGeneration: "圖片生成",
         toolsImageGenerationDescription: "比較多個模型生成的圖片",
         imageGenerationModelLabel: "模型",
