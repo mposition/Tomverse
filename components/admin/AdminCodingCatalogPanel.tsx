@@ -59,8 +59,9 @@ import { CODING_DRAFT_QUERY_KEYS, codingDraftRequest } from "@/lib/codingCatalog
 const CODING_API = "/api/admin/model-catalog/coding";
 const CATALOG_API = "/api/admin/model-catalog";
 const CODING_PATH = "/admin/models?tab=coding";
-// A draft fetches up to three pages (10 s each) and makes one LLM call (90 s).
-const DRAFT_REQUEST_TIMEOUT_MS = 130_000;
+// A draft fetches up to three pages (10 s each) and makes one LLM call (90 s);
+// a fill may add the benchmark search and its page inside one 30 s budget.
+const DRAFT_REQUEST_TIMEOUT_MS = 160_000;
 
 type SendResult = { ok: true; payload: unknown } | { ok: false; timedOut: boolean; code?: string };
 
@@ -519,6 +520,7 @@ export function AdminCodingCatalogPanel() {
             configured: report.capabilityFill.configured,
             env: report.capabilityFill.env,
             supported: report.capabilityFill.providers.includes(openItem.provider),
+            search: report.capabilityFill.benchmarkSearch?.configured === true,
             running: fillingId === openItem.id,
             busy: fillingId !== null || fillRun !== null,
             onFill: () => void fillOne(openItem),
@@ -748,7 +750,7 @@ export function AdminCodingCatalogPanel() {
       <AdminConfirmDialog
         open={fillConfirm}
         title={c.fill.allTitle(fillTargets.targets.length)}
-        effects={c.fill.allEffects(fillTargets.targets.length, fillTargets.unsupported.length)}
+        effects={c.fill.allEffects(fillTargets.targets.length, fillTargets.unsupported.length, report?.capabilityFill.benchmarkSearch?.configured === true)}
         confirmLabel={c.fill.allConfirm}
         busy={fillRun !== null}
         onConfirm={() => void fillAll()}

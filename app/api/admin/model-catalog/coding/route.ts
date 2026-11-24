@@ -41,7 +41,7 @@ import {
   snapshotIsCurrent,
   snapshotPendingChanges,
 } from "@/lib/modelCatalogCore";
-import { MODEL_CATALOG_DRAFT_LLM_MODEL_ENV } from "@/lib/modelCatalogDraftLlm";
+import { MODEL_CATALOG_BENCHMARK_SEARCH_MODEL_ENV, MODEL_CATALOG_DRAFT_LLM_MODEL_ENV } from "@/lib/modelCatalogDraftLlm";
 import { AI_PROVIDERS } from "@/lib/modelRegistryShared";
 
 // The coding catalogue's own surface (Admin > Models > Coding catalog): chat
@@ -146,6 +146,11 @@ export async function GET(req: Request) {
         configured: Boolean(process.env[MODEL_CATALOG_DRAFT_LLM_MODEL_ENV]?.trim()),
         env: MODEL_CATALOG_DRAFT_LLM_MODEL_ENV,
         providers: Object.keys(DEFAULT_CODING_CAPABILITY_SOURCES),
+        // One search call more per fill for the provider's benchmark pages (off unless a Perplexity model is named).
+        benchmarkSearch: {
+          configured: Boolean(process.env[MODEL_CATALOG_BENCHMARK_SEARCH_MODEL_ENV]?.trim()),
+          env: MODEL_CATALOG_BENCHMARK_SEARCH_MODEL_ENV,
+        },
       },
       // What the dedicated add form offers (a draft reads the price page).
       draftProviders: DRAFT_PROVIDERS.map((provider) => ({

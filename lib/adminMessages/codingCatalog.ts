@@ -275,14 +275,16 @@ export const adminCodingCatalogMessages = defineAdminMessages({
       filling: "Reading the documentation…",
       rowNote:
         "One LLM call over the provider's tool calling and structured output pages (agent budget). It changes only these two values, their sources and the coding notes; the channels stay as they are, so tick Code yourself once it passes.",
-      done: (name: string) => `Filled the capabilities of ${name}. They reach Code and the coding API at the next snapshot.`,
+      done: (name: string) => `Filled the capabilities of ${name}. A changed row is refused by Code until the next snapshot is published.`,
+      searchNote: "The benchmark search is on: each fill also makes one search call for the provider's benchmark pages, so two paid calls per row.",
       all: (count: number) => `Fill ${count} row${count === 1 ? "" : "s"} missing capabilities or coding notes`,
       allTitle: (count: number) => `Fill ${count} row${count === 1 ? "" : "s"} with the LLM?`,
-      allEffects: (count: number, skipped: number) => [
+      allEffects: (count: number, skipped: number, search: boolean) => [
         `One LLM call per row (${count}), one after another, each over the provider's tool calling and structured output pages. The same call writes the coding notes. This is a paid call from the agent budget.`,
+        ...(search ? [`The benchmark search is on: each row also makes one search call, so ${count * 2} paid calls in all.`] : []),
         "A row that fails or times out keeps its values and is listed with the reason. A timed-out call may have been charged and is not retried; the run stops there.",
         `${skipped} row${skipped === 1 ? "" : "s"} of providers with no documentation pages are not included.`,
-        "Channels do not change. Changed rows show as changed since the snapshot and reach Code and the coding API at the next publish.",
+        "Channels do not change. Changed rows show as changed since the snapshot, and Code refuses them until it is published: publish right after the run.",
       ],
       allConfirm: "Fill with the LLM",
       progress: (done: number, total: number) => `Filling ${done}/${total}`,
@@ -583,14 +585,16 @@ export const adminCodingCatalogMessages = defineAdminMessages({
       filling: "공식 문서를 읽는 중…",
       rowNote:
         "공급자의 Tool calling·구조화 출력 문서를 읽는 LLM 호출 1회입니다(에이전트 예산). 이 두 값과 출처, 코딩 장단점만 바꾸고 채널은 그대로이므로, Code 판정을 통과하면 Code 채널은 직접 켜 주세요.",
-      done: (name: string) => `${name}의 기능 정보를 채웠습니다. Code와 코딩 API에는 다음 스냅샷부터 반영됩니다.`,
+      done: (name: string) => `${name}의 기능 정보를 채웠습니다. 값이 바뀐 행은 다음 스냅샷을 발행할 때까지 Code에서 거절됩니다.`,
+      searchNote: "벤치마크 검색이 켜져 있습니다. 채울 때마다 공급자의 벤치마크 페이지를 찾는 검색 호출이 1회 더 나가므로 행마다 유료 호출이 2회입니다.",
       all: (count: number) => `기능 정보나 장단점이 없는 행 ${count}개 모두 채우기`,
       allTitle: (count: number) => `행 ${count}개를 LLM으로 채울까요?`,
-      allEffects: (count: number, skipped: number) => [
+      allEffects: (count: number, skipped: number, search: boolean) => [
         `행마다 LLM 호출 1회(${count}회)를 차례로 합니다. 각 호출은 공급자의 Tool calling·구조화 출력 문서를 읽고 같은 호출로 코딩 장단점도 씁니다. 에이전트 예산에서 나가는 유료 호출입니다.`,
+        ...(search ? [`벤치마크 검색이 켜져 있어 행마다 검색 호출이 1회 더 나갑니다. 모두 ${count * 2}회의 유료 호출입니다.`] : []),
         "실패하거나 시간이 지난 행은 값을 그대로 두고 사유를 보여 줍니다. 시간 초과 호출은 비용이 나갔을 수 있어 다시 시도하지 않고, 거기서 멈춥니다.",
         `공식 문서 주소가 없는 공급자의 ${skipped}개 행은 포함하지 않습니다.`,
-        "채널은 바뀌지 않습니다. 바뀐 행은 \"스냅샷 이후 변경\"으로 보이며 다음 발행 때 Code와 코딩 API에 반영됩니다.",
+        "채널은 바뀌지 않습니다. 바뀐 행은 \"스냅샷 이후 변경\"으로 보이고 스냅샷을 발행할 때까지 Code에서 거절되므로, 끝나면 바로 발행해 주세요.",
       ],
       allConfirm: "LLM으로 채우기",
       progress: (done: number, total: number) => `채우는 중 ${done}/${total}`,
