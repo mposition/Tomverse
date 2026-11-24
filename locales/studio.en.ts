@@ -1,4 +1,6 @@
 export const studioLocale = {
+  "captionLanguage": "Caption language",
+  "randomCaptions": "Fill with random captions",
   "checkoutDraftRestored": "Your Studio draft was restored.",
   "checkoutDraftSaveFailed": "Your draft could not be saved for checkout. Your current work is still here.",
   "workspaceCaption": "Creative tools",

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { findStudioTool, STUDIO_EXPORT_FORMATS, STUDIO_STICKER_KEYS, STUDIO_TOOLS, STUDIO_STICKER_LIMIT, studioStickerCrop, studioStickerLayout } from "../lib/studioTools.ts";
+import { fillStudioStickerCaptions, findStudioTool, STUDIO_EXPORT_FORMATS, STUDIO_STICKER_KEYS, STUDIO_TOOLS, STUDIO_STICKER_LIMIT, studioStickerCrop, studioStickerLayout } from "../lib/studioTools.ts";
 
 test("The Studio directory exposes eight distinct tools with stable detail routes", () => {
   assert.equal(STUDIO_TOOLS.length, 8);
@@ -32,7 +32,7 @@ test("Poster and social exports retain their designed output ratios", () => {
 
 
 import { SUPPORTED_LANGUAGES } from "../lib/language.ts";
-import { studioCopy, studioOutputLanguage } from "../locales/studio.ts";
+import { studioCopy, studioOutputLanguage, studioStickerSuggestions } from "../locales/studio.ts";
 
 test("Every supported language includes Studio labels, examples, and twenty sticker captions", () => {
   const keys = Object.keys(studioCopy.en).sort();
@@ -48,6 +48,21 @@ test("Every supported language includes Studio labels, examples, and twenty stic
     assert.ok(studioOutputLanguage[lang]);
   }
   assert.notEqual(studioCopy.zh.playGroup, studioCopy["zh-Hant"].playGroup);
+});
+
+test("Random sticker captions fill every supported language to twenty while preserving custom text", () => {
+  for (const lang of SUPPORTED_LANGUAGES) {
+    const pool = [...STUDIO_STICKER_KEYS.map(key => studioCopy[lang][key]), ...studioStickerSuggestions[lang]];
+    const manual = ["My own phrase", pool[0]];
+    const filled = fillStudioStickerCaptions(manual, pool, () => 0);
+    const alternate = fillStudioStickerCaptions(manual, pool, () => .99);
+    assert.equal(filled.length, 20);
+    assert.equal(new Set(filled).size, 20);
+    assert.deepEqual(filled.slice(0, 2), manual);
+    assert.ok(filled.slice(2).every(caption => pool.includes(caption)));
+    assert.notDeepEqual(filled.slice(2).sort(), alternate.slice(2).sort());
+    assert.deepEqual(fillStudioStickerCaptions(filled, pool), filled);
+  }
 });
 
 test("Sticker sheets keep each requested caption in one cell for any pack size", () => {

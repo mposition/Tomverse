@@ -99,21 +99,22 @@
 .status[role="alert"] { color: #b43a28; }
 .stickerGrid { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
 .sticker { min-width: 0; border-radius: 10px; overflow: hidden; border: 1px solid var(--studio-line); }
-.stickerImage { display: grid; justify-items: center; gap: 3px; padding: 6px; background: #e8f0e5; color: #142421; text-align: center; }
+.stickerImage { display: grid; justify-items: center; padding: 6px; background: #e8f0e5; }
 .sticker:nth-child(5n + 2) .stickerImage { background: #eee8f9; }
 .sticker:nth-child(5n + 3) .stickerImage { background: #f8eced; }
 .sticker:nth-child(5n + 4) .stickerImage { background: #fbf0dc; }
 .sticker:nth-child(5n) .stickerImage { background: #e9edf8; }
 .stickerImage img { width: 100%; height: 83px; object-fit: contain; }
-.stickerImage span { min-width: 50%; max-width: 100%; border-radius: 100px; padding: 2px 6px; font-size: .67rem; font-weight: 750; background: #fff; overflow-wrap: anywhere; }
-:global(.dark) .shell .sticker .stickerImage { background: var(--studio-field); color: var(--studio-text); }
-:global(.dark) .shell .stickerImage span { background: var(--studio-surface); }
+:global(.dark) .shell .sticker .stickerImage { background: var(--studio-field); }
 .stickerActions { display: flex; justify-content: space-between; gap: 3px; padding: 3px; }
 .stickerActions button { min-height: 32px; min-width: 28px; padding: 3px; border: 0; background: var(--studio-surface); color: var(--studio-accent); font: inherit; font-size: .68rem; font-weight: 700; cursor: pointer; }
 .packCaptions { margin: 0 0 14px; }
 .captionLabel, .captionEntry, .regenerationRow { display: flex; gap: 8px; align-items: end; }
 .captionLabel { justify-content: space-between; margin-bottom: 7px; font-size: .86rem; font-weight: 680; }
 .captionLabel span { color: var(--studio-muted); font-size: .78rem; font-weight: 500; }
+.captionSuggestions { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; margin-bottom: 8px; }
+.captionSuggestions .field { flex: 1 1 120px; min-width: 0; margin: 0; }
+.captionSuggestions button { max-width: 100%; white-space: normal; }
 .captionEntry .field, .regenerationRow .field { flex: 1; min-width: 0; margin: 0; }
 .captionChips { display: flex; flex-wrap: wrap; list-style: none; margin: 0 0 8px; padding: 0; gap: 5px; }
 .captionChips li { display: inline-flex; align-items: center; min-width: 0; max-width: 100%; gap: 4px; padding: 1px 4px 1px 8px; background: var(--studio-selection); border-radius: 16px; font-size: .78rem; }
