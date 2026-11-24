@@ -1235,8 +1235,10 @@ test("the benchmark search is off until a model is named, asks for the provider'
   assert.equal(await benchmarkPageSearchFromEnv({ MODEL_CATALOG_BENCHMARK_SEARCH_MODEL_ID: "  " }), null);
   const prompt = benchmarkSearchPrompt({ provider: "anthropic", apiModelId: "claude-x", name: "Claude X" });
   assert.ok(prompt.includes('"Claude X" (API model id claude-x)'));
-  assert.ok(prompt.includes("www.anthropic.com"));
-  assert.ok(prompt.includes("platform.claude.com/docs/"));
+  // The prompt names exactly the provider's official hosts, as a list.
+  const hosts = /these hosts: (.+?)\. Give/.exec(prompt)?.[1].split(", ");
+  assert.deepEqual(hosts, [...OFFICIAL_SOURCE_HOSTS.anthropic]);
+  for (const host of ["www.anthropic.com", "platform.claude.com/docs/"]) assert.ok(new Set(hosts).has(host), host);
   assert.equal(BENCHMARK_SEARCH_SCHEMA.properties.urls.maxItems, 3);
   assert.deepEqual(
     benchmarkUrlsFromAnswer(
