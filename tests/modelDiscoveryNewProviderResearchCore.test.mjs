@@ -286,13 +286,16 @@ test("the connected-image call has its own default-off switch", async () => {
   const runner = readFileSync("lib/modelDiscoveryNewProviderResearch.ts", "utf8");
   const { MODEL_DISCOVERY_CONNECTED_IMAGE_RESEARCH_ENV } = await import("../lib/modelDiscoveryNewProviderResearch.ts");
   assert.equal(MODEL_DISCOVERY_CONNECTED_IMAGE_RESEARCH_ENV, "MODEL_DISCOVERY_CONNECTED_IMAGE_RESEARCH_ENABLED");
-  // Only the literal "true" turns it on; without it no fourth call is made.
+  // Only the literal "true" turns it on; without it no connected-image call is made.
   assert.ok(runner.includes('env[MODEL_DISCOVERY_CONNECTED_IMAGE_RESEARCH_ENV]?.trim() === "true"'));
-  // Nor when no connected provider is left to ask about.
+  // 2026-11-24: one call per provider, one at a time, each accepting only that
+  // provider's models; asked about ten at once, the model returned nothing.
   assert.match(
     runner,
-    /= \{ ok: true, proposed: 0, accepted: \[\], rejected: \[\] \};\s*if \(connectedImageEnabled && inputs\.imageResearchProviders\.length > 0\) \{/
+    /= \{ ok: true, proposed: 0, accepted: \[\], rejected: \[\] \};[\s\S]*?if \(connectedImageEnabled\) \{\s*for \(const provider of inputs\.imageResearchProviders\) \{\s*try \{\s*const answer = await ask\(/
   );
+  assert.match(runner, /providers: \[provider\],/);
+  assert.match(runner, /connectedProviders: \[provider\],/);
 });
 
 test("research rows are never judged by the catalogue scan, so the vanished-ID exclusion cannot close them", async () => {
