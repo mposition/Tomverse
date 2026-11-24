@@ -120,7 +120,7 @@ export type OptimizerObjective = "routing_quality" | "chat_cost_efficiency";
 export const COST_EFFICIENCY_OBJECTIVE = {
     id: "chat_cost_efficiency",
     mode: "diagnostic_only",
-    candidatePolicy: "auto-cost-challenger-v1",
+    candidatePolicy: "auto-cost-challenger-v2",
     judgeRubric: "auto-quality-blind-judge-v1",
 } as const;
 export type StoredOptimizerObjective = typeof COST_EFFICIENCY_OBJECTIVE;

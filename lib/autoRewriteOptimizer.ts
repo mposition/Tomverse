@@ -32,6 +32,8 @@ import {
     readOptimizerModelId,
     reserveOptimizerCycle,
     runScheduledAutoRouterOptimizerCycle,
+    scheduledCostDiagnosticDue,
+    startAutoRouterOptimizerCycle,
     type OptimizerActor,
     type OptimizerStartRefusal,
     type Prices,
@@ -630,13 +632,28 @@ export async function readAutoRewriteOptimizerState() {
  * only its switch is on, rewrite when only the rewrite switch is on, and the
  * two in turn when both are. Off, or any refusal, starts nothing and costs
  * nothing. `waitForCompletion` runs the cycle to its end before returning.
+ *
+ * Once a week, while the weekly cost-diagnostic switch is on, the day goes to
+ * the cost-efficiency diagnostic instead (scheduledCostDiagnosticDue). A
+ * refusal that belongs to the diagnostic alone (no router, no prices, its
+ * switch off) hands the day back to the rotation.
  */
 export async function runScheduledOptimizerCycle(options: { waitForCompletion?: boolean } = {}): Promise<
-    | { started: false; reason: "daily_off" | OptimizerStartRefusal | "image_triage_off"; target?: "routing" | "rewrite" | "coding" | "image" }
-    | { started: true; cycleId: string; target: "routing" | "rewrite" | "coding" | "image"; outcome?: OptimizerRunOutcome }
+    | { started: false; reason: "daily_off" | OptimizerStartRefusal | "image_triage_off"; target?: "routing" | "rewrite" | "coding" | "image"; objective?: "chat_cost_efficiency" }
+    | { started: true; cycleId: string; target: "routing" | "rewrite" | "coding" | "image"; outcome?: OptimizerRunOutcome; objective?: "chat_cost_efficiency" }
 > {
     await logDailyCodingRoutingReport();
     await logDailyImageRoutingReport();
+    if (await scheduledCostDiagnosticDue()) {
+        const diagnostic = await startAutoRouterOptimizerCycle("system", { ...options, objective: "chat_cost_efficiency" });
+        if (!("refused" in diagnostic)) {
+            return { started: true, cycleId: diagnostic.cycleId, target: "routing", objective: "chat_cost_efficiency",
+                ...(diagnostic.outcome ? { outcome: diagnostic.outcome } : {}) };
+        }
+        if (!COST_DIAGNOSTIC_SKIP_REFUSALS.has(diagnostic.refused)) {
+            return { started: false, reason: diagnostic.refused, target: "routing", objective: "chat_cost_efficiency" };
+        }
+    }
     const [routing, rewrite, coding, image] = await Promise.all([
         readOptimizerAutomation(),
         readRewriteOptimizerAutomation(),
@@ -685,6 +702,11 @@ export async function runScheduledOptimizerCycle(options: { waitForCompletion?: 
     }
     return refusal ?? { started: false, reason: "daily_off" };
 }
+
+/** Refusals that belong to the diagnostic alone: the day goes back to the rotation. */
+const COST_DIAGNOSTIC_SKIP_REFUSALS: ReadonlySet<string> = new Set([
+    ...OPTIMIZER_TARGET_SKIP_REFUSALS, "diagnostic_off", "diagnostic_needs_person", "diagnostic_recent", "optimizer_off",
+]);
 
 /**
  * The daily coding routing report (lib/externalApiRoutingReportCore.ts) as one

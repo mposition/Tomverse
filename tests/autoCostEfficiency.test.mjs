@@ -35,6 +35,42 @@ const MENU = [cheap, mid, mid2, premium];
 const ESTIMATE = { cheap: 10, mid: 60, mid2: 40, premium: 200 };
 const estimate = (id) => ESTIMATE[id] ?? null;
 
+test("a same-credit challenger is estimated with its observed output, thinking included, never on the floor alone", async () => {
+  const { AVAILABLE_MODELS } = await import("../lib/models.ts");
+  const { estimateAnswerMicroUsd, estimateAnswerOutputTokens, COST_EFFICIENCY_ESTIMATE_OUTPUT_TOKENS, COST_EFFICIENCY_OBSERVED_OUTPUT_MIN_SAMPLES } =
+    await import("../lib/autoCostEfficiencyPlan.ts");
+  const min = COST_EFFICIENCY_OBSERVED_OUTPUT_MIN_SAMPLES;
+  // Observed median, floored at the shared visible-answer length; too few answers is unknown, never zero.
+  const observed = new Map([["short", { medianOutputTokens: 300, samples: min }], ["thinker", { medianOutputTokens: 6_400.2, samples: min }],
+    ["rare", { medianOutputTokens: 100, samples: min - 1 }], ["broken", { medianOutputTokens: NaN, samples: min }]]);
+  assert.equal(estimateAnswerOutputTokens("short", observed), COST_EFFICIENCY_ESTIMATE_OUTPUT_TOKENS);
+  assert.equal(estimateAnswerOutputTokens("thinker", observed), 6_401);
+  assert.equal(estimateAnswerOutputTokens("rare", observed), null);
+  assert.equal(estimateAnswerOutputTokens("broken", observed), null);
+  assert.equal(estimateAnswerOutputTokens("absent", observed), null);
+
+  // Two real catalogue models at the same rates: on the 1,000-token floor alone they tie, so the one
+  // that thinks for thousands of tokens could pass as no dearer. With observed output it is dearer.
+  const haiku = AVAILABLE_MODELS.find((model) => model.id === "claude-haiku-5-5");
+  const luna = AVAILABLE_MODELS.find((model) => model.id === "gpt-6-luna");
+  const decision = { routerInput: "Summarise the attached plan in three bullets.", routerContext: null };
+  const outputs = new Map([[haiku.id, { medianOutputTokens: 700, samples: min }], [luna.id, { medianOutputTokens: 5_000, samples: min }]]);
+  const micro = (model) => estimateAnswerMicroUsd(model, decision, estimateAnswerOutputTokens(model.id, outputs));
+  assert.ok(micro(luna) > micro(haiku));
+  assert.equal(estimateAnswerMicroUsd(luna, decision, null), null, "unknown output length is an unknown estimate");
+  const menu = [candidate(haiku.id, 5), candidate(luna.id, 5)];
+  const byId = new Map([[haiku.id, haiku], [luna.id, luna]]);
+  const draw = (observedOutputs) => costEfficiencyChallenger(menu, haiku.id, 0,
+    (id) => estimateAnswerMicroUsd(byId.get(id), decision, estimateAnswerOutputTokens(id, observedOutputs)));
+  // The thinker is not drawn as a saving; it is still compared, labelled a quality comparison.
+  assert.deepEqual(draw(outputs), { modelId: luna.id, basis: "quality_comparison" });
+  // When it is the one that writes less, it is the cheaper candidate.
+  const reversed = new Map([[haiku.id, { medianOutputTokens: 5_000, samples: min }], [luna.id, { medianOutputTokens: 700, samples: min }]]);
+  assert.deepEqual(draw(reversed), { modelId: luna.id, basis: "lower_estimated_provider_cost" });
+  // Unobserved: never cheaper.
+  assert.deepEqual(draw(new Map([[haiku.id, { medianOutputTokens: 5_000, samples: min }]])), { modelId: luna.id, basis: "quality_comparison" });
+});
+
 test("the challenger is lower-credit first, then a same-credit lower estimated cost, else a labelled quality comparison", () => {
   // Lower-only: the existing draw found nothing here (no same or higher credits above premium).
   const drawn = [0, 1, 2, 3].map((position) => costEfficiencyChallenger(MENU, "premium", position, estimate));

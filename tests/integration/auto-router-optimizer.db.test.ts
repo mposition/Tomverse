@@ -471,17 +471,20 @@ test("the daily step starts nothing while the daily switch is off", async () => 
 });
 
 test("the automation switches change only together with their audit entry", async () => {
-  assert.deepEqual(await readOptimizerAutomation(), { daily: false, autoPromote: false });
+  assert.deepEqual(await readOptimizerAutomation(), { daily: false, autoPromote: false, costDiagnosticWeekly: false });
   await updateOptimizerAutomation(actor, { daily: true, autoPromote: false });
-  assert.deepEqual(await readOptimizerAutomation(), { daily: true, autoPromote: false });
+  assert.deepEqual(await readOptimizerAutomation(), { daily: true, autoPromote: false, costDiagnosticWeekly: false });
   const entry = await prisma.adminAuditLog.findFirstOrThrow({
     where: { action: "auto.llm_router_optimizer_automation.updated", targetId: AUTO_ROUTER_OPTIMIZER_AUTOMATION_SETTING_KEY },
     orderBy: { createdAt: "desc" },
   });
-  assert.deepEqual((entry.metadata as { after?: unknown }).after, { daily: true, autoPromote: false });
+  assert.deepEqual((entry.metadata as { after?: unknown }).after, { daily: true, autoPromote: false, costDiagnosticWeekly: false });
   assert.equal(entry.actorUserId, session.user?.id);
 
-  await updateOptimizerAutomation(actor, { daily: false, autoPromote: false });
+  // The weekly diagnostic switch alone keeps the row, and is audited like the others.
+  await updateOptimizerAutomation(actor, { daily: false, autoPromote: false, costDiagnosticWeekly: true });
+  assert.deepEqual(await readOptimizerAutomation(), { daily: false, autoPromote: false, costDiagnosticWeekly: true });
+  await updateOptimizerAutomation(actor, { daily: false, autoPromote: false, costDiagnosticWeekly: false });
   assert.equal(await prisma.appSetting.count({ where: { key: AUTO_ROUTER_OPTIMIZER_AUTOMATION_SETTING_KEY } }), 0);
 });
 
