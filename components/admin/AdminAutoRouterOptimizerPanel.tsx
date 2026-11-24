@@ -497,7 +497,8 @@ export function AdminAutoRouterOptimizerPanel({
             <OptimizerEvidenceView summary={cycle.summary} spentMicroUsd={cycle.spentMicroUsd} />
             <CostEfficiencyDiagnosticView report={cycle.summary?.costEfficiency} />
             {cycle.failure ? <p className="mt-1 text-xs text-amber-300">{reason(cycle.failure)}</p> : null}
-            {cycle.summary ? (
+            {/* A diagnostic's row carries its objective from the start; the tally appears once it has one. */}
+            {cycle.summary && typeof cycle.summary.evaluated === "number" ? (
               <p className="mt-1 text-xs text-zinc-400">
                 {cycle.summary.evaluated} {m.evaluated} · {cycle.summary.unchanged} {m.unchanged} ·{" "}
                 {cycle.summary.candidateWins} {m.candidateWins} · {cycle.summary.incumbentWins} {m.incumbentWins} ·{" "}

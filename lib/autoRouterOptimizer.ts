@@ -249,8 +249,8 @@ export const COST_DIAGNOSTIC_INTERVAL_DAYS = 7;
 /**
  * Whether today's system cycle is the weekly cost-efficiency diagnostic: its
  * Admin switch and its environment switch are on, and no diagnostic started
- * in the last COST_DIAGNOSTIC_INTERVAL_DAYS (a finished one, or a failed one
- * that recorded its objective; a running one holds the day anyway).
+ * in the last COST_DIAGNOSTIC_INTERVAL_DAYS -- finished, failed, interrupted
+ * or closed as run_error alike: the objective is recorded when it is reserved.
  */
 export async function scheduledCostDiagnosticDue(at: Date = new Date()): Promise<boolean> {
     if (!costEfficiencyDiagnosticOn()) return false;
@@ -536,6 +536,10 @@ export async function reserveOptimizerCycle(input: {
                 reservedMicroUsd: 0,
                 startedBy: input.actor === "system" ? "system" : "person",
                 target: input.target ?? "routing",
+                // A diagnostic is one from its start: an interrupted or
+                // run_error close keeps the summary, so the weekly schedule
+                // still counts a paid run that never finished.
+                ...(input.objective === "chat_cost_efficiency" ? { summary: { objective: COST_EFFICIENCY_OBJECTIVE } } : {}),
             },
             select: { id: true },
         });

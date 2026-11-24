@@ -249,6 +249,22 @@ test("a diagnostic cycle's run over the real cycle table", { skip: !databaseUrl 
             // A diagnostic that failed but recorded its objective also counts as this week's.
             await prisma.autoRouterOptimizerCycle.update({ where: { id: ran.cycleId }, data: { status: "failed" } });
             assert.equal(await optimizer.scheduledCostDiagnosticDue(), false);
+            // So does one that never finished: the objective is on the row from its reservation,
+            // and an interrupted or run_error close keeps it. An ordinary cycle's row has none.
+            await prisma.autoRouterOptimizerCycle.deleteMany({});
+            assert.equal(await optimizer.scheduledCostDiagnosticDue(), true);
+            const reserved = await optimizer.reserveOptimizerCycle({
+                actor, optimizerModelId: model.id, routerModelId: model.id,
+                incumbentGuidance: "guidance", objective: "chat_cost_efficiency",
+            });
+            assert.ok("cycle" in reserved);
+            for (const failure of ["interrupted", "run_error"]) {
+                await prisma.autoRouterOptimizerCycle.update({ where: { id: reserved.cycle.id }, data: { status: "error", failure, finishedAt: new Date() } });
+                assert.equal(await optimizer.scheduledCostDiagnosticDue(), false, failure);
+            }
+            const routing = await optimizer.reserveOptimizerCycle({ actor, optimizerModelId: model.id, routerModelId: model.id, incumbentGuidance: "guidance" });
+            assert.ok("cycle" in routing);
+            assert.equal((await prisma.autoRouterOptimizerCycle.findUniqueOrThrow({ where: { id: routing.cycle.id } })).summary, null);
             await optimizer.updateOptimizerAutomation(actor, { daily: false, autoPromote: false, costDiagnosticWeekly: false });
         });
     } finally {
