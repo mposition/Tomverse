@@ -28,12 +28,34 @@ import type { CostEfficiencyCriteria } from "@/lib/autoCostEfficiencyReport";
 
 export const COST_EFFICIENCY_PLAN_VERSION = "auto-cost-efficiency-plan-v1";
 /**
- * The one output length every candidate is estimated at when the challenger
- * is chosen, so two models are compared under the same assumption. A
- * selection estimate only: it does not model reasoning tokens, and the
- * answer's own usage is what the report measures.
+ * The least output a candidate is estimated at when the challenger is
+ * chosen: a shared floor for the visible answer. A selection estimate only;
+ * the answer's own usage is what the report measures.
  */
 export const COST_EFFICIENCY_ESTIMATE_OUTPUT_TOKENS = 1_000;
+/** How far back real Chat answers are read for a model's typical output length. */
+export const COST_EFFICIENCY_OBSERVED_OUTPUT_DAYS = 14;
+/** Fewer completed answers than this and the model's output length is unknown. */
+export const COST_EFFICIENCY_OBSERVED_OUTPUT_MIN_SAMPLES = 10;
+
+/** Per model: the median output tokens of its recent completed Chat answers, thinking included. */
+export type ObservedOutputTokens = ReadonlyMap<string, { medianOutputTokens: number; samples: number }>;
+
+/**
+ * The output tokens a candidate is estimated at: its observed median (output
+ * tokens include thinking, as the providers bill it), never below the shared
+ * floor. A model that thinks before it answers -- whether or not the catalogue
+ * says so -- is estimated with its thinking. Null when the model has too few
+ * observed answers: an unobserved model is never taken to be cheaper (the
+ * 2026-11-24 production diagnostic drew minimax-m3 as "cheaper" than Haiku on
+ * a 1,000-token assumption; its observed answers cost more).
+ */
+export const estimateAnswerOutputTokens = (modelId: string, observed: ObservedOutputTokens): number | null => {
+    const entry = observed.get(modelId);
+    if (!entry || !(entry.samples >= COST_EFFICIENCY_OBSERVED_OUTPUT_MIN_SAMPLES)) return null;
+    if (!Number.isFinite(entry.medianOutputTokens) || entry.medianOutputTokens < 0) return null;
+    return Math.max(COST_EFFICIENCY_ESTIMATE_OUTPUT_TOKENS, Math.ceil(entry.medianOutputTokens));
+};
 
 const digest = (text: string) => createHash("sha256").update(text, "utf8").digest("hex");
 
@@ -86,16 +108,20 @@ export const buildAutoCandidateMenu = (input: {
     };
 };
 
-/** Null when the price is unresolved or unverified fallback pricing: never zero. */
-export const estimateAnswerMicroUsd = (model: AiModel | undefined, decision: Pick<OptimizerDecision, "routerInput" | "routerContext">) => {
-    if (!model) return null;
+/** Null when the price is unresolved or unverified fallback pricing, or the output length is unknown: never zero. */
+export const estimateAnswerMicroUsd = (
+    model: AiModel | undefined,
+    decision: Pick<OptimizerDecision, "routerInput" | "routerContext">,
+    outputTokens: number | null
+) => {
+    if (!model || outputTokens === null || !Number.isFinite(outputTokens) || outputTokens < 0) return null;
     try {
         const content = decision.routerContext ? `${decision.routerContext}\n${decision.routerInput}` : decision.routerInput;
         const inputTokens = preflightInputEstimate([{ role: "user", content }]).estimatedInputTokens;
         const pricing = resolveModelPricing(model, { estimatedPromptTokens: inputTokens });
         if (pricing.isFallbackPricing) return null;
         const value = Math.ceil(inputTokens * pricing.inputUsdPerMillionTokens +
-            COST_EFFICIENCY_ESTIMATE_OUTPUT_TOKENS * pricing.outputUsdPerMillionTokens);
+            outputTokens * pricing.outputUsdPerMillionTokens);
         return Number.isFinite(value) && value >= 0 ? value : null;
     } catch {
         return null;
@@ -207,6 +233,7 @@ export const buildCostEfficiencyManifest = (input: {
     plan: ReturnType<typeof costEfficiencyCallPlan>;
     runCapMicroUsd: number;
     resultLocation: string;
+    observedOutputTokens?: ObservedOutputTokens;
 }) => {
     const at = Date.parse(input.createdAt);
     return {
@@ -234,7 +261,16 @@ export const buildCostEfficiencyManifest = (input: {
         candidatePolicy: {
             id: COST_EFFICIENCY_OBJECTIVE.candidatePolicy,
             order: ["lower_credit", "lower_estimated_provider_cost", "quality_comparison"],
-            estimateOutputTokens: COST_EFFICIENCY_ESTIMATE_OUTPUT_TOKENS,
+            estimateOutputTokens: {
+                source: "chat_attempt_usage_median_output_tokens",
+                includesThinking: true,
+                days: COST_EFFICIENCY_OBSERVED_OUTPUT_DAYS,
+                minSamples: COST_EFFICIENCY_OBSERVED_OUTPUT_MIN_SAMPLES,
+                floorTokens: COST_EFFICIENCY_ESTIMATE_OUTPUT_TOKENS,
+                unobserved: "never_cheaper",
+                // The medians used, fixed with the plan before the first call.
+                observed: Object.fromEntries([...(input.observedOutputTokens ?? new Map())].sort(([a], [b]) => a.localeCompare(b))),
+            },
             unpricedEstimate: "never_zero",
         },
         criteria: input.criteria,

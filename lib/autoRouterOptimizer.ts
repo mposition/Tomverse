@@ -5,7 +5,10 @@ import {
     buildAutoCandidateMenu,
     buildCostEfficiencyManifest,
     costEfficiencyCallPlan,
+    COST_EFFICIENCY_OBSERVED_OUTPUT_DAYS,
     estimateAnswerMicroUsd,
+    estimateAnswerOutputTokens,
+    type ObservedOutputTokens,
 } from "@/lib/autoCostEfficiencyPlan";
 import { readAutoChatServingCost } from "@/lib/autoChatServingCost";
 import { readResponseLatencyEvidence } from "@/lib/responseLatencyStore";
@@ -46,6 +49,7 @@ import {
     AUTO_ROUTER_QUALITY_JUDGE_SYSTEM,
     AUTO_ROUTER_OPTIMIZER_TARGET_SAMPLE,
     autoRouterQualityJudgeSchema,
+    COST_EFFICIENCY_OBJECTIVE,
     costEfficiencyDiagnosticOn,
     parseQualityJudgement,
     type OptimizerObjective,
@@ -193,7 +197,14 @@ async function writeOptimizerModelId(tx: Prisma.TransactionClient, modelId: stri
  */
 export const AUTO_ROUTER_OPTIMIZER_AUTOMATION_SETTING_KEY = "auto.llmRouterOptimizerAutomation";
 
-export type OptimizerAutomation = { daily: boolean; autoPromote: boolean };
+/**
+ * daily: one routing cycle a day (in turn with the other targets).
+ * autoPromote: a passed routing cycle is promoted without a person.
+ * costDiagnosticWeekly: the daily run spends one day a week on the
+ * cost-efficiency diagnostic (owner, 2026-11-24). Diagnostic-only, never
+ * promotes; needs AUTO_ROUTER_COST_EFFICIENCY_DIAGNOSTIC too. Off by default.
+ */
+export type OptimizerAutomation = { daily: boolean; autoPromote: boolean; costDiagnosticWeekly: boolean };
 
 export async function readOptimizerAutomation(
     db: Pick<Prisma.TransactionClient, "appSetting"> = prisma
@@ -204,9 +215,9 @@ export async function readOptimizerAutomation(
             select: { value: true },
         });
         const value = row ? (JSON.parse(row.value) as Partial<OptimizerAutomation>) : null;
-        return { daily: value?.daily === true, autoPromote: value?.autoPromote === true };
+        return { daily: value?.daily === true, autoPromote: value?.autoPromote === true, costDiagnosticWeekly: value?.costDiagnosticWeekly === true };
     } catch {
-        return { daily: false, autoPromote: false };
+        return { daily: false, autoPromote: false, costDiagnosticWeekly: false };
     }
 }
 
@@ -214,11 +225,11 @@ async function writeOptimizerAutomation(
     tx: Prisma.TransactionClient,
     value: OptimizerAutomation
 ): Promise<void> {
-    if (!value.daily && !value.autoPromote) {
+    if (!value.daily && !value.autoPromote && !value.costDiagnosticWeekly) {
         await tx.appSetting.deleteMany({ where: { key: AUTO_ROUTER_OPTIMIZER_AUTOMATION_SETTING_KEY } });
         return;
     }
-    const stored = JSON.stringify({ daily: value.daily, autoPromote: value.autoPromote });
+    const stored = JSON.stringify({ daily: value.daily, autoPromote: value.autoPromote, costDiagnosticWeekly: value.costDiagnosticWeekly });
     await tx.appSetting.upsert({
         where: { key: AUTO_ROUTER_OPTIMIZER_AUTOMATION_SETTING_KEY },
         create: { key: AUTO_ROUTER_OPTIMIZER_AUTOMATION_SETTING_KEY, value: stored },
@@ -232,6 +243,37 @@ async function writeOptimizerAutomation(
  * cycle to its end before returning, with its outcome (the own-process
  * optimizer service); without it the cycle runs on in the background.
  */
+/** How often the scheduled cost-efficiency diagnostic runs. */
+export const COST_DIAGNOSTIC_INTERVAL_DAYS = 7;
+
+/**
+ * Whether today's system cycle is the weekly cost-efficiency diagnostic: its
+ * Admin switch and its environment switch are on, and no diagnostic started
+ * in the last COST_DIAGNOSTIC_INTERVAL_DAYS -- finished, failed, interrupted
+ * or closed as run_error alike: the objective is recorded when it is reserved.
+ */
+export async function scheduledCostDiagnosticDue(at: Date = new Date()): Promise<boolean> {
+    if (!costEfficiencyDiagnosticOn()) return false;
+    if (!(await readOptimizerAutomation()).costDiagnosticWeekly) return false;
+    return !(await costDiagnosticStartedWithin(prisma, at));
+}
+
+/** Any diagnostic, person- or system-started, in the last COST_DIAGNOSTIC_INTERVAL_DAYS. */
+async function costDiagnosticStartedWithin(db: Pick<Prisma.TransactionClient, "autoRouterOptimizerCycle">, at: Date): Promise<boolean> {
+    const recent = await db.autoRouterOptimizerCycle.findFirst({
+        where: {
+            target: "routing",
+            createdAt: { gte: new Date(at.getTime() - COST_DIAGNOSTIC_INTERVAL_DAYS * 86_400_000) },
+            OR: [
+                { status: "diagnostic" },
+                { summary: { path: ["objective", "id"], equals: COST_EFFICIENCY_OBJECTIVE.id } },
+            ],
+        },
+        select: { id: true },
+    });
+    return recent !== null;
+}
+
 export async function runScheduledAutoRouterOptimizerCycle(options: { waitForCompletion?: boolean } = {}): Promise<
     | { started: false; reason: "daily_off" | OptimizerStartRefusal }
     | { started: true; cycleId: string; outcome?: OptimizerRunOutcome }
@@ -438,7 +480,7 @@ async function addProviderSpend(
 }
 
 type Reserved =
-    | { refused: "already_running" | "daily_done" | "day_cap" | "month_cap" }
+    | { refused: "already_running" | "daily_done" | "day_cap" | "month_cap" | "diagnostic_recent" | "diagnostic_needs_person" }
     | { cycle: { id: string; budgetMicroUsd: number } };
 
 /**
@@ -477,6 +519,14 @@ export async function reserveOptimizerCycle(input: {
                 where: { startedBy: "system", createdAt: { gte: dayStart } },
             });
             if (startedToday > 0) return { refused: "daily_done" };
+            if (input.objective === "chat_cost_efficiency") {
+                // The switch again, under the audit-chain lock its save also
+                // takes: a switch turned off after the schedule looked wins.
+                if (!(await readOptimizerAutomation(tx)).costDiagnosticWeekly) return { refused: "diagnostic_needs_person" };
+                // And the week: a diagnostic a person started after the
+                // schedule looked still holds it.
+                if (await costDiagnosticStartedWithin(tx, now)) return { refused: "diagnostic_recent" };
+            }
         }
         const recent = await tx.autoRouterOptimizerCycle.findMany({
             where: { createdAt: { gte: monthStart } },
@@ -499,6 +549,10 @@ export async function reserveOptimizerCycle(input: {
                 reservedMicroUsd: 0,
                 startedBy: input.actor === "system" ? "system" : "person",
                 target: input.target ?? "routing",
+                // A diagnostic is one from its start: an interrupted or
+                // run_error close keeps the summary, so the weekly schedule
+                // still counts a paid run that never finished.
+                ...(input.objective === "chat_cost_efficiency" ? { summary: { objective: COST_EFFICIENCY_OBJECTIVE } } : {}),
             },
             select: { id: true },
         });
@@ -567,8 +621,10 @@ export type OptimizerStartRefusal =
     | "month_cap"
     /** The cost-efficiency diagnostic's default-off switch is off. */
     | "diagnostic_off"
-    /** Only a person starts a diagnostic; no schedule does. */
-    | "diagnostic_needs_person";
+    /** The system starts a diagnostic only while the weekly switch is on. */
+    | "diagnostic_needs_person"
+    /** The system's weekly diagnostic: one already started in the last 7 days. */
+    | "diagnostic_recent";
 
 const AUTO_PLANS_WIDEST_FIRST: readonly ModelTier[] = ["Max", "Pro", "Free"];
 
@@ -608,7 +664,8 @@ export async function startAutoRouterOptimizerCycle(
 ): Promise<{ cycleId: string; outcome?: OptimizerRunOutcome } | { refused: OptimizerStartRefusal }> {
     const objective = options.objective ?? "routing_quality";
     if (objective === "chat_cost_efficiency") {
-        if (actor === "system") return { refused: "diagnostic_needs_person" };
+        // The system starts one only while the owner's weekly switch is on.
+        if (actor === "system" && !(await readOptimizerAutomation()).costDiagnosticWeekly) return { refused: "diagnostic_needs_person" };
         if (!costEfficiencyDiagnosticOn()) return { refused: "diagnostic_off" };
     }
     const models = await getRuntimeModels();
@@ -673,7 +730,7 @@ const costEfficiencyRunManifest = (input: {
     cycleId: string; budgetMicroUsd: number; decisions: OptimizerDecision[]; incumbentGuidance: string;
     models: readonly AiModel[]; optimizerModel: AiModel; routerModel: AiModel;
     optimizerPrices: Prices; routerPrices: Prices;
-}, at: Date) => {
+}, at: Date, observedOutputTokens: ObservedOutputTokens) => {
     const real = Math.min(input.decisions.length, AUTO_ROUTER_OPTIMIZER_SAMPLE_MAX);
     const synthetic = Math.max(0, AUTO_ROUTER_OPTIMIZER_TARGET_SAMPLE - real);
     const total = real + synthetic;
@@ -701,8 +758,37 @@ const costEfficiencyRunManifest = (input: {
         }),
         runCapMicroUsd: input.budgetMicroUsd,
         resultLocation: `AutoRouterOptimizerCycle ${input.cycleId}.summary`,
+        observedOutputTokens,
     });
 };
+
+/**
+ * Per model, the median output tokens of its completed Chat answers in the
+ * last COST_EFFICIENCY_OBSERVED_OUTPUT_DAYS, from provider-reported usage
+ * (output tokens include thinking). Counts only, no message text. A failed
+ * read is an empty map: every estimate is then unknown and no challenger is
+ * drawn as "lower estimated provider cost".
+ */
+export async function readObservedAnswerOutputTokens(at: Date): Promise<ObservedOutputTokens> {
+    try {
+        const since = new Date(at.getTime() - COST_EFFICIENCY_OBSERVED_OUTPUT_DAYS * 86_400_000);
+        const rows = await prisma.$queryRaw<{ modelId: string; median: number | null; samples: number }[]>`
+            SELECT "modelId",
+                   percentile_disc(0.5) WITHIN GROUP (ORDER BY "outputTokens")::int AS median,
+                   COUNT(*)::int AS samples
+            FROM "ChatAttemptUsage"
+            WHERE "createdAt" >= ${since}
+              AND "outcome" = 'completed'
+              AND "usageSource" = 'provider_usage_metadata'
+              AND "outputTokens" IS NOT NULL
+            GROUP BY "modelId"`;
+        return new Map(rows.flatMap((row) => row.median === null ? [] :
+            [[row.modelId, { medianOutputTokens: Number(row.median), samples: Number(row.samples) }] as const]));
+    } catch (error) {
+        console.warn(JSON.stringify({ event: "auto_router_optimizer_observed_output_failed", error: error instanceof Error ? error.name : "unknown" }));
+        return new Map();
+    }
+}
 
 /**
  * Runs a reserved cycle's calls and records the result. Never throws: a
@@ -783,7 +869,9 @@ async function runInBackground(input: {
         ]);
         const responseLatency = { ...latency, chatPresearchLatency };
         // The diagnostic's plan, fixed before its first call and stored with its result.
-        const manifest = costMode ? costEfficiencyRunManifest(input, measuredAt) : null;
+        // Read once, before the first call, and stored in the manifest.
+        const observedOutputTokens = costMode ? await readObservedAnswerOutputTokens(measuredAt) : new Map();
+        const manifest = costMode ? costEfficiencyRunManifest(input, measuredAt, observedOutputTokens) : null;
         const result = await runOptimizerCycle(
             {
                 decisions: input.decisions,
@@ -804,7 +892,7 @@ async function runInBackground(input: {
                 candidatesFor,
                 ...(costMode ? {
                     estimateAnswerMicroUsd: (modelId: string, decision: OptimizerDecision) =>
-                        estimateAnswerMicroUsd(answerModels.get(modelId), decision),
+                        estimateAnswerMicroUsd(answerModels.get(modelId), decision, estimateAnswerOutputTokens(modelId, observedOutputTokens)),
                     qualityJudge: async (message: string) => {
                         const generated = await traced("judge", () => optimizerJudgeCall({
                             model: input.optimizerModel,
@@ -1300,10 +1388,12 @@ export async function updateOptimizerModel(actor: AdminActor, modelId: string | 
 }
 
 /** Sets the automation switches in one transaction with their audit entry. */
-export async function updateOptimizerAutomation(actor: AdminActor, after: OptimizerAutomation) {
+/** A switch left out keeps its current value (an older page sends only daily and auto-promote). */
+export async function updateOptimizerAutomation(actor: AdminActor, change: Omit<OptimizerAutomation, "costDiagnosticWeekly"> & { costDiagnosticWeekly?: boolean }) {
     return prisma.$transaction(async (tx) => {
         await takeAuditChainLock(tx);
         const before = await readOptimizerAutomation(tx);
+        const after: OptimizerAutomation = { ...change, costDiagnosticWeekly: change.costDiagnosticWeekly ?? before.costDiagnosticWeekly };
         await writeOptimizerAutomation(tx, after);
         await writeAdminAuditLog({
             ...actor,
@@ -1311,7 +1401,7 @@ export async function updateOptimizerAutomation(actor: AdminActor, after: Optimi
             action: "auto.llm_router_optimizer_automation.updated",
             targetType: "AppSettings",
             targetId: AUTO_ROUTER_OPTIMIZER_AUTOMATION_SETTING_KEY,
-            summary: `Set the Auto router optimizer automation: daily ${after.daily ? "on" : "off"}, auto-promote ${after.autoPromote ? "on" : "off"}.`,
+            summary: `Set the Auto router optimizer automation: daily ${after.daily ? "on" : "off"}, auto-promote ${after.autoPromote ? "on" : "off"}, weekly cost diagnostic ${after.costDiagnosticWeekly ? "on" : "off"}.`,
             metadata: { before, after },
         });
     });
