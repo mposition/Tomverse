@@ -381,7 +381,7 @@ test("with the benchmark search on, the first of the provider's own pages it nam
   assert.deepEqual(calls.pages, [...pagesOf("openai"), "https://openai.com/index/missing", announcement]);
   assert.equal(calls.llm, 1);
   // The notes may stand on it; the evidence keeps its three capability pages.
-  assert.ok(state.row.profile.codingNotes.sources.includes(announcement));
+  assert.ok(new Set(state.row.profile.codingNotes.sources).has(announcement));
   assert.deepEqual(state.row.profile.evidence.sources, pagesOf("openai"));
 
   // A search that times out may have been charged: the fill stops there, before the draft call, with the row unchanged.
