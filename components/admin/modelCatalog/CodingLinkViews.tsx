@@ -336,7 +336,7 @@ export function CodingLinkDetail({
   /** The row's coding notes tile (CodingNotesTile), shown beside its settings. */
   notes?: React.ReactNode;
   /** "Fill capabilities with the LLM" for this link: whether it can run, why not, and the run. */
-  fill: { configured: boolean; env: string; supported: boolean; running: boolean; busy: boolean; onFill: () => void };
+  fill: { configured: boolean; env: string; supported: boolean; search: boolean; running: boolean; busy: boolean; onFill: () => void };
   /** The settings form, as edited. */
   value: CodingSettingsValue;
   busy: boolean;
@@ -629,7 +629,14 @@ export function CodingLinkDetail({
               ) : !fill.supported ? (
                 <p className="text-xs text-zinc-400">{c.fill.noSource}</p>
               ) : (
-                <p className="text-xs text-zinc-500">{c.fill.rowNote}</p>
+                <>
+                  <p className="text-xs text-zinc-500">{c.fill.rowNote}</p>
+                  {fill.search ? (
+                    <p className="text-xs text-amber-300" data-testid="coding-link-fill-search-note">
+                      {c.fill.searchNote}
+                    </p>
+                  ) : null}
+                </>
               )}
             </div>
           </AdminTile>

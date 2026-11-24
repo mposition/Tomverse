@@ -12,7 +12,7 @@
  */
 import "server-only";
 
-import { generateText, jsonSchema, Output } from "ai";
+import { APICallError, generateText, jsonSchema, NoObjectGeneratedError, Output, type LanguageModel } from "ai";
 import type { JSONSchema7 } from "@ai-sdk/provider";
 
 import { getActiveAiModel } from "@/lib/activeAiModel";
@@ -269,9 +269,10 @@ provider's API, not its absence for this model; answer "none" from it only when 
 In note, say in at most two sentences where each answer is stated.
 codingNotes: two or three strengths and two or three weaknesses of this model for coding agent work (editing code
 across files, tool calls, long contexts, structured plans), each one short line of at most ${CODING_NOTE_MAX_CHARS}
-characters. Base them first on the models page: what it says this model is for, its context window and output limit,
-its reasoning options, the limits it states (an API or setting a feature needs), and any benchmark result it shows,
-compared with the provider's other models on the page. Write only what the pages state for this model or show with a
+characters. Base them first on the models page and on the provider's benchmark or announcement page when one was
+fetched: what they say this model is for, its context window and output limit, its reasoning options, the limits they
+state (an API or setting a feature needs), and the coding benchmark results they show for it (name the benchmark and
+the score), compared with the provider's other models there. Write only what the pages state for this model or show with a
 benchmark result on them; never a claim from general knowledge. Give in sourceUrls the fetched pages each note stands
 on. When the pages support no note, give empty lists.`;
 
@@ -655,3 +656,110 @@ export const catalogDraftLlmFromEnv = async (
 };
 
 export const officialHostsFor = (provider: string): readonly string[] => OFFICIAL_SOURCE_HOSTS[provider] ?? [];
+
+/**
+ * The search model a coding fill asks for the provider's own benchmark and
+ * model card pages (2026-11-24: the docs pages a fill reads almost never link
+ * to them). Off unless MODEL_CATALOG_BENCHMARK_SEARCH_MODEL_ID names an enabled
+ * runtime model of the Perplexity provider, so configuring it is the owner's
+ * decision to spend: one search call per fill, `maxRetries: 0`, bounded output,
+ * token counts logged and never content. Agent spending, not user credits.
+ */
+export const MODEL_CATALOG_BENCHMARK_SEARCH_MODEL_ENV = "MODEL_CATALOG_BENCHMARK_SEARCH_MODEL_ID";
+const BENCHMARK_SEARCH_MAX_OUTPUT_TOKENS = 600;
+/** How many proposed pages a fill keeps; it reads the first that loads. */
+export const BENCHMARK_SEARCH_MAX_URLS = 3;
+
+export const BENCHMARK_SEARCH_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["urls"],
+  properties: { urls: { type: "array", maxItems: BENCHMARK_SEARCH_MAX_URLS, items: { type: "string" } } },
+} as const;
+
+export const benchmarkSearchPrompt = (input: { provider: string; apiModelId: string; name?: string }) =>
+  [
+    `Find the pages where the model provider ${input.provider} itself publishes benchmark results for its model`,
+    `${input.name ? `"${input.name}" (API model id ${input.apiModelId})` : `with API model id ${input.apiModelId}`}:`,
+    "the launch announcement, the model card or system card, or a benchmark table for this exact model.",
+    `Answer only pages on these hosts: ${officialHostsFor(input.provider).join(", ")}.`,
+    "Give at most three URLs, the most specific first, and only URLs you found; give an empty list when there is none.",
+  ].join(" ");
+
+/** The proposed pages a fill may read: the provider's own https pages, each once, in the answer's order. */
+export const benchmarkUrlsFromAnswer = (answer: unknown, provider: string): string[] => {
+  const urls = (answer as { urls?: unknown } | null)?.urls;
+  const official = (Array.isArray(urls) ? urls : []).filter(
+    (url): url is string => typeof url === "string" && isOfficialSourceUrl(provider, url)
+  );
+  return [...new Set(official)].slice(0, BENCHMARK_SEARCH_MAX_URLS);
+};
+
+export type BenchmarkPageSearch = {
+  /** `timeoutMs` bounds the call: the fill gives the search and its page one shared budget. */
+  findPages: (input: { provider: string; apiModelId: string; name?: string; timeoutMs: number }) => Promise<string[]>;
+};
+
+/**
+ * A search whose outcome is not known: cut off by its deadline, or failed
+ * without the provider answering (a dropped connection). It may have been
+ * charged, so the fill stops on it (the name is the one a fill reads as an
+ * unknown outcome). A provider error response, or an answer that does not
+ * parse, is a known failure and only loses the page.
+ */
+export class BenchmarkSearchOutcomeUnknown extends Error {
+  override readonly name = "TimeoutError";
+  constructor() {
+    super("benchmark_search_outcome_unknown");
+  }
+}
+
+/** The benchmark search over one search-capable language model. */
+export const benchmarkPageSearchWith = (languageModel: LanguageModel, modelId: string): BenchmarkPageSearch => ({
+  findPages: async (input) => {
+    const signal = AbortSignal.timeout(Math.max(1, input.timeoutMs));
+    let generated: Awaited<ReturnType<typeof generateText>>;
+    try {
+      generated = await generateText({
+        model: languageModel,
+        system: "You find official web pages. Answer only with URLs of pages you found in your search.",
+        prompt: benchmarkSearchPrompt(input),
+        maxOutputTokens: BENCHMARK_SEARCH_MAX_OUTPUT_TOKENS,
+        maxRetries: 0,
+        abortSignal: signal,
+        output: Output.object({
+          schema: jsonSchema(BENCHMARK_SEARCH_SCHEMA as unknown as JSONSchema7),
+          name: "benchmark_pages",
+        }),
+        providerOptions: { openai: { strictJsonSchema: true } },
+      });
+    } catch (error) {
+      // The SDK may wrap an abort in its own error, so the signal decides, not the error's name.
+      const answered = (APICallError.isInstance(error) && typeof error.statusCode === "number") || NoObjectGeneratedError.isInstance(error);
+      if (signal.aborted || !answered) throw new BenchmarkSearchOutcomeUnknown();
+      throw error;
+    }
+    const usage = generated.usage as { inputTokens?: number; outputTokens?: number } | undefined;
+    console.info(
+      JSON.stringify({
+        event: "model_catalog_benchmark_search_call",
+        modelId,
+        inputTokens: usage?.inputTokens ?? null,
+        outputTokens: usage?.outputTokens ?? null,
+      })
+    );
+    return benchmarkUrlsFromAnswer(generated.output, input.provider);
+  },
+});
+
+/** The configured search model, or null when the benchmark search is off. */
+export const benchmarkPageSearchFromEnv = async (
+  env: Readonly<Record<string, string | undefined>> = process.env
+): Promise<BenchmarkPageSearch | null> => {
+  const modelId = env[MODEL_CATALOG_BENCHMARK_SEARCH_MODEL_ENV]?.trim();
+  if (!modelId) return null;
+  const model = await getEnabledRuntimeModel(modelId);
+  // Only a model that searches the web as it answers: anything else would name pages it never found.
+  if (!model || model.provider !== "perplexity") return null;
+  return benchmarkPageSearchWith(getActiveAiModel(model), model.id);
+};

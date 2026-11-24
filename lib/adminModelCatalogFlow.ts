@@ -1044,7 +1044,7 @@ export type CodingCatalogReport = Parameters<typeof codingCatalogItems>[0] & {
   externalChannels: { enabled: boolean; env: string };
   draftLlm: { configured: boolean; env: string };
   /** "Fill capabilities with the LLM": the draft model is set, and these providers have default documentation pages. */
-  capabilityFill: { configured: boolean; env: string; providers: string[] };
+  capabilityFill: { configured: boolean; env: string; providers: string[]; benchmarkSearch?: { configured: boolean; env: string } };
   draftProviders: { provider: string; defaultSources: string[]; hosts: string[] }[];
 };
 
