@@ -8,7 +8,7 @@ import { mobileAuthReady } from "@/lib/mobileAccessToken";
 import { enforceMobileAuthAdmission, mobileApiSecurityResponse } from "@/lib/mobileAuthRoute";
 import { issueMobileSession } from "@/lib/mobileAuthService";
 import { MOBILE_DEVICE_PLATFORMS } from "@/lib/mobileAuthContract";
-import { prisma } from "@/lib/prisma";
+import { nativeEmailLoginAccountActive } from "@/lib/nativeEmailLoginAccount";
 import { POST as requestExistingEmailCode } from "@/app/api/auth/email-login/request/route";
 import { requestMobileStoreReviewCode, verifyMobileStoreReviewCode } from "@/lib/mobileStoreReview";
 
@@ -62,19 +62,7 @@ export async function POST(request: Request) {
     if (!proof.ok) return reply({ ok: false, code: proof.reason === "account_not_found" ? "EMAIL_ACCOUNT_NOT_FOUND" : proof.reason === "locked" ? "EMAIL_CODE_LOCKED" : "EMAIL_CODE_INVALID" }, 401);
     // The web sign-in callback also enforces account state. Never bypass it
     // simply because mailbox control was proven, including after signup.
-    const select = { accountStatus: true, accountSuspendedUntil: true } as const;
-    let account = await prisma.user.findUnique({ where: { id: proof.userId }, select });
-    const now = new Date();
-    if (account?.accountStatus === "suspended" && account.accountSuspendedUntil && account.accountSuspendedUntil <= now) {
-      // Same expiry behavior as web sign-in; do not overwrite a newer suspension
-      // or a concurrent deletion decision after reading the account.
-      await prisma.user.updateMany({ where: { id: proof.userId, accountStatus: "suspended", accountSuspendedUntil: { lte: now } }, data: {
-        accountStatus: "active", accountSuspendedAt: null, accountSuspendedUntil: null,
-        accountSuspensionReason: null, accountSuspendedById: null, accountSuspendedByEmail: null,
-      } });
-      account = await prisma.user.findUnique({ where: { id: proof.userId }, select });
-    }
-    if (account?.accountStatus !== "active") return reply({ ok: false, code: "MOBILE_LOGIN_REFUSED" }, 403);
+    if (!(await nativeEmailLoginAccountActive(proof.userId))) return reply({ ok: false, code: "MOBILE_LOGIN_REFUSED" }, 403);
     const issued = await issueMobileSession({ request, userId: proof.userId, platform: body.platform, deviceLabel: body.deviceLabel ?? "Mobile" });
     return reply({ ok: true, ...issued.tokens });
   } catch (error) {

@@ -685,9 +685,9 @@ const REGISTRY = {
   MobileDevice_platform_check: {
     owner: "list",
     module: "lib/mobileAuthContract.ts",
-    list: "MOBILE_DEVICE_PLATFORMS",
+    list: "NATIVE_DEVICE_PLATFORMS",
     reason:
-      "ios or android, and nothing finer (mobile auth design D16). The coarseness is the privacy decision rather than an omission -- a device list rich enough to be useful is also a hardware and location history for whoever takes the account over -- so a third value arriving as data would be a fingerprint the design refused, not a new platform.",
+      "iOS, Android, or Desktop. Coarse platform labels identify clients without exposing hardware or location history.",
   },
   MobileDevice_revokedReason_check: {
     owner: "list",
