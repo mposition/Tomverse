@@ -282,6 +282,13 @@ GitHub의 [AI Credit 사용량 REST 보고서](https://docs.github.com/en/rest/b
 별도 `Plan` 읽기 권한이 필요해 기존 reviewer 토큰의 권한을 넓히지 않았습니다.
 
 자동 probe는 60초마다(Claude는 위의 간격으로) 갱신하고 `status`는 데몬의 최근 관측 파일만 읽습니다.
+
+reviewer가 실행 중에 스스로 사용 한도를 알리면("You've hit your weekly limit · resets Nov 26, 1am (UTC)"처럼)
+그 응답이 probe보다 우선합니다. 슬롯은 `reviewer_usage_limit`으로 다른 공급사에 다시 가고, 그 provider는
+메시지의 리셋 시각까지 `exhausted`(`reason: "usage_limit_reported"`, `until`)로 막힙니다. 리셋 시각을
+읽지 못하면 1시간 막습니다. 이 보류는 데몬 메모리에만 있어서, 재시작 뒤에는 다음 거절이 다시 기록합니다
+(`lib/usage-limit.mjs`). 2026-11-23에 Claude probe가 "available 80%"를 읽는 동안 모든 Claude 검토가
+주간 한도로 2초 만에 실패한 일 때문에 생겼습니다.
 Cursor 내부 API와 Copilot CLI quota 응답은 운영 서버의 `review` 계정으로 실측한 뒤
 가동합니다. 확인 불가한 계정은 `unknown`이 되어 대기하며 검토를 시험 호출하지 않습니다.
 
