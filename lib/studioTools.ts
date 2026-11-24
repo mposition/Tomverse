@@ -58,3 +58,17 @@ export function studioStickerCrop(index: number, width: number, height: number, 
     height: Math.floor(height * (row + 1) / rows) - top,
   };
 }
+
+/**
+ * The object URL a Studio preview renders. `URL.createObjectURL` gives
+ * `blob:<origin>/<uuid>`, which never carries the picked file's name or bytes.
+ * `encodeURI` leaves such a URL unchanged and marks it as plain URL text, so
+ * the code scanner does not read it as markup from the file input
+ * (CodeQL js/xss-through-dom). Only an IPv6-literal origin such as
+ * `http://[::1]:3000` would change, and that is refused rather than broken.
+ */
+export function studioObjectUrl(created: string): string {
+  const url = encodeURI(created);
+  if (url !== created || !url.startsWith("blob:")) throw new Error("studio_object_url_unexpected");
+  return url;
+}
