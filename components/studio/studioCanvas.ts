@@ -1,4 +1,5 @@
-import { studioStickerCrop, studioStickerLayout } from "@/lib/studioTools";
+import { studioStickerBounds, studioStickerCaptionSlot, studioStickerCells, studioStickerCrossesSeam, type StickerRect } from "@/lib/studioStickerGeometry";
+import { studioStickerLayout } from "@/lib/studioTools";
 
 export const studioImageTypes = ["image/png", "image/jpeg", "image/webp"];
 export const studioImageAccept = studioImageTypes.join(",");
@@ -77,56 +78,86 @@ export async function renderStudioImage(
   return encode(element);
 }
 
-export async function renderStudioSticker(source: string, caption: string): Promise<Blob> {
-  const image = await readImage(source);
-  const { naturalWidth, naturalHeight } = image;
-  const sourceScale = Math.min(1, 512 / Math.max(naturalWidth, naturalHeight));
-  const sourceWidth = Math.max(1, Math.round(naturalWidth * sourceScale));
-  const sourceHeight = Math.max(1, Math.round(naturalHeight * sourceScale));
-  const original = canvas(sourceWidth, sourceHeight);
-  original.context.drawImage(image, 0, 0, sourceWidth, sourceHeight);
-  const pixels = original.context.getImageData(0, 0, sourceWidth, sourceHeight).data;
-  let left = sourceWidth, right = -1, top = sourceHeight, bottom = -1;
-  for (let y = 0; y < sourceHeight; y++) {
-    for (let x = 0; x < sourceWidth; x++) {
-      if (pixels[(y * sourceWidth + x) * 4 + 3] < 32) continue;
-      left = Math.min(left, x);
-      right = Math.max(right, x);
-      top = Math.min(top, y);
-      bottom = Math.max(bottom, y);
+function splitCaption(text: string): string[] {
+  const graphemes = typeof Intl.Segmenter === "function"
+    ? [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text)].map(part => part.segment)
+    : Array.from(text);
+  const middle = Math.ceil(graphemes.length / 2);
+  let split = middle;
+  for (let offset = 0; offset < graphemes.length / 4; offset++) {
+    if (graphemes[middle - offset] === " ") { split = middle - offset; break; }
+    if (graphemes[middle + offset] === " ") { split = middle + offset; break; }
+  }
+  return [graphemes.slice(0, split).join("").trimEnd(), graphemes.slice(split).join("").trimStart()];
+}
+
+function stickerCaption(
+  context: CanvasRenderingContext2D, pixels: Uint8ClampedArray, stride: number, art: StickerRect, text: string,
+) {
+  const font = "system-ui, sans-serif";
+  context.font = `750 100px ${font}`;
+  const layout = (lines: string[]) => {
+    const bandHeight = Math.max(2, Math.round(art.height * (lines.length === 1 ? .20 : .29)));
+    const slot = studioStickerCaptionSlot(pixels, stride, art, bandHeight);
+    if (!slot) return null;
+    const widest = Math.max(...lines.map(line => context.measureText(line).width), 1) / 100;
+    const size = Math.min(slot.height / (lines.length * 1.2), slot.width * .86 / widest, art.width * .175);
+    return { lines, slot, size };
+  };
+  const oneLine = layout([text]);
+  const twoLines = text.length > 6 ? layout(splitCaption(text)) : null;
+  const chosen = twoLines && twoLines.size > (oneLine?.size ?? 0) * 1.16 ? twoLines : oneLine;
+  if (!chosen || chosen.size < art.height * .063) return null;
+
+  const { slot } = chosen;
+  let luminance = 0, samples = 0;
+  for (let y = slot.top; y < slot.top + slot.height; y += 3) {
+    for (let x = slot.left; x < slot.left + slot.width; x += 3) {
+      const index = (y * stride + x) * 4;
+      luminance += pixels[index] * .2126 + pixels[index + 1] * .7152 + pixels[index + 2] * .0722;
+      samples++;
     }
   }
-  if (right < left) return encode(canvas(1, 1).element);
+  return { ...chosen, font, ink: luminance / samples > 145 ? "#231e27" : "#fff8ef" };
+}
 
-  const width = right - left + 1;
-  const height = bottom - top + 1;
+async function renderStickerCell(image: HTMLImageElement, cell: StickerRect, caption: string): Promise<Blob | null> {
+  const sourceScale = Math.min(1, 512 / Math.max(cell.width, cell.height));
+  const sourceWidth = Math.max(1, Math.round(cell.width * sourceScale));
+  const sourceHeight = Math.max(1, Math.round(cell.height * sourceScale));
+  const original = canvas(sourceWidth, sourceHeight);
+  original.context.drawImage(image, cell.left, cell.top, cell.width, cell.height, 0, 0, sourceWidth, sourceHeight);
+  const pixels = original.context.getImageData(0, 0, sourceWidth, sourceHeight).data;
+  const art = studioStickerBounds(pixels, sourceWidth, sourceHeight);
+  if (!art || art.width < sourceWidth * .19 || art.height < sourceHeight * .19) return null;
+  const { left, top, width, height } = art;
   const padding = Math.max(1, Math.round(Math.max(width, height) * .025));
-  const outputScale = Math.min(1, 512 / (Math.max(width, height) + 2 * padding));
-  const output = canvas(Math.ceil((width + 2 * padding) * outputScale), Math.ceil((height + 2 * padding) * outputScale));
+  const outputScale = 512 / (Math.max(width, height) + 2 * padding);
+  const output = canvas(Math.round((width + 2 * padding) * outputScale), Math.round((height + 2 * padding) * outputScale));
   const { context } = output;
   context.scale(outputScale, outputScale);
   context.drawImage(original.element, left, top, width, height, padding, padding, width, height);
-  if (caption) {
-    // The prompt reserves the lower front of the artwork for exact local text.
-    const centerY = Math.round(height * .73);
-    const fontSize = Math.max(1, Math.round(Math.min(width * .19, height * .16)));
-    let luminance = 0, samples = 0;
-    for (let y = Math.max(0, Math.floor(centerY - fontSize / 2)); y <= Math.min(height - 1, centerY + fontSize / 2); y += 3) {
-      for (let x = Math.floor(width * .25); x <= Math.floor(width * .75); x += 3) {
-        const offset = ((top + y) * sourceWidth + left + x) * 4;
-        if (pixels[offset + 3] < 192) continue;
-        luminance += pixels[offset] * .2126 + pixels[offset + 1] * .7152 + pixels[offset + 2] * .0722;
-        samples++;
-      }
-    }
-    context.font = `800 ${fontSize}px system-ui, sans-serif`;
+  const text = caption.trim();
+  if (text) {
+    const label = stickerCaption(context, pixels, sourceWidth, art, text);
+    if (!label) return null;
+    const { lines, slot, size, font, ink } = label;
+    context.font = `750 ${size}px ${font}`;
     context.textAlign = "center";
     context.textBaseline = "middle";
-    context.fillStyle = samples && luminance / samples > 145 ? "#192821" : "#fff5d8";
-    context.globalCompositeOperation = "source-atop";
-    context.fillText(caption, padding + width / 2, padding + centerY, width * .82);
+    context.fillStyle = ink;
+    lines.forEach((line, index) => context.fillText(
+      line,
+      padding + slot.left - left + slot.width / 2,
+      padding + slot.top - top + slot.height / 2 + (index - (lines.length - 1) / 2) * size * 1.15,
+    ));
   }
   return encode(output.element);
+}
+
+export async function renderStudioSticker(source: string, caption: string): Promise<Blob | null> {
+  const image = await readImage(source);
+  return renderStickerCell(image, { left: 0, top: 0, width: image.naturalWidth, height: image.naturalHeight }, caption);
 }
 
 export async function makeStudioImageReference(source: string, secondSource?: string) {
@@ -192,18 +223,18 @@ export async function applyStudioSubjectMask(source: string, mask: Blob) {
   }
 }
 
-export async function splitStudioSheet(source: string, count: number) {
+export async function splitStudioSheet(source: string, captions: readonly string[]) {
   const image = await readImage(source);
   if (image.naturalWidth < 250 || image.naturalHeight < 200) throw new Error("Sticker sheet too small");
-  const { columns, rows } = studioStickerLayout(count);
-  return Promise.all(Array.from({ length: count }, (_, index) => {
-    const cell = studioStickerCrop(index, image.naturalWidth, image.naturalHeight, columns, rows);
-    const { element, context } = canvas(512, 512);
-    const size = 512 / Math.max(cell.width, cell.height);
-    const width = cell.width * size;
-    const height = cell.height * size;
-    context.drawImage(image, cell.left, cell.top, cell.width, cell.height, (512 - width) / 2, (512 - height) / 2, width, height);
-    return encode(element);
+  const { columns, rows } = studioStickerLayout(captions.length);
+  const { naturalWidth: width, naturalHeight: height } = image;
+  const { context } = canvas(width, height);
+  context.drawImage(image, 0, 0);
+  const pixels = context.getImageData(0, 0, width, height).data;
+  const cells = studioStickerCells(pixels, width, height, columns, rows);
+  return Promise.all(captions.map((caption, index) => {
+    const cell = cells[index];
+    return studioStickerCrossesSeam(pixels, width, height, cell) ? null : renderStickerCell(image, cell, caption);
   }));
 }
 
