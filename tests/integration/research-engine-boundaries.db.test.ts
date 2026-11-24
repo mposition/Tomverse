@@ -807,6 +807,31 @@ test("with one of two private sources revoked, a revision keeps the active sourc
   assert.ok(current.claims.every((claim) => claim.claimKey !== "C900"), "an unattributed private claim is not carried");
 });
 
+test("a reply that spent its output cap thinking is known invalid output: settled on its usage, retried, never unknown", async () => {
+  let truncatedOnce = false;
+  const fakes = installFakes({ model: createFakeModel({ respond: (call) => {
+    if (call.tool === "submit_research_verification" && !truncatedOnce) { truncatedOnce = true; return { truncated: true }; }
+    return defaultResponse(call);
+  } }) });
+  createFakeWeb();
+  const user = await createUser("truncated");
+  const run = await create(user.id);
+  await drainResearchWork("truncated", 4);
+  assert.ok(truncatedOnce, "one verification reply ran out of output");
+  assert.equal((await readResearchRunDto(user.id, run.id)).status, "completed");
+  const generations = await prisma.researchPreviewGeneration.findMany({ where: { runId: run.id, kind: "model" } });
+  assert.equal(generations.filter((row) => row.status === "outcome_unknown").length, 0, "no dispatch was recorded as unknown");
+  const invalid = generations.filter((row) => row.stopReason === "invalid_report");
+  assert.equal(invalid.length, 1);
+  assert.equal(invalid[0]!.outputTokens, 400, "the truncated reply is settled on its reported usage");
+  assert.equal(await prisma.researchFundingSegment.count({ where: { runId: run.id, status: "unknown" } }), 0);
+  const verify = await prisma.researchWorkItem.findMany({ where: { runId: run.id, kind: "verify" } });
+  assert.ok(verify.length > 0 && verify.every((item) => item.status === "completed"), "verification was retried and finished");
+  const claims = await prisma.researchClaim.findMany({ where: { runId: run.id } });
+  assert.ok(claims.some((claim) => claim.verification !== "unverified"), "claims were verified after the retry");
+  assert.ok(fakes.model.calls.length > 0);
+});
+
 test("evidence cleanup backs off through a long storage outage but never gives up", async () => {
   const fakes = installFakes();
   const objectKey = `research-evidence/outage/${randomUUID()}`;

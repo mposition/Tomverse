@@ -86,6 +86,10 @@ Chat의 Auto/manual 선택은 바꾸지 않습니다. Research 실행 모델은 
   흐르지 않습니다. 예산 소진 대기는 기한이 지나면 있는 근거로 끝냅니다.
 - run을 만들면 계획 작업이 바로 예약됩니다("계획 만들기"와 "바로 시작" 모두 계획에서 시작). 계획 전에
   자료를 더할 client만 `requestPlan: false`로 모델 호출 없는 draft를 남깁니다.
+- 호출별 출력 상한은 `RESEARCH_OUTPUT_TOKEN_CAPS`(`lib/researchEngineContract.ts`)에 있고 reasoning 토큰을 포함합니다.
+  상한을 생각에 다 써서 tool 호출 없이 끝난 응답은 결과 불명이 아니라 실제 usage로 정산되는 invalid output
+  (`RESEARCH_OUTPUT_TRUNCATED`)이며 재시도됩니다. 받아들이지 못한 dispatch마다 worker가 내용 없는 로그 한 줄
+  (`research_dispatch_not_accepted`: 역할, 모델, 코드, 오류 이름, 중단 이유, 출력 토큰)을 남깁니다.
 - pause는 진행 중 slice가 끝나는 경계에서, cancel은 새 dispatch를 막고 이미 보낸 요청은
   결과/비용 확인으로 남깁니다.
 

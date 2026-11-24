@@ -41,6 +41,16 @@ export const RESEARCH_REPORT_VISIBILITIES = ["owner", "public"] as const;
 export const RESEARCH_PLAN_AUTHORS = ["model", "user"] as const;
 export const RESEARCH_DISPATCH_KINDS = ["model", "search", "read"] as const;
 export const RESEARCH_MODEL_ROLES = ["planner", "researcher", "analyst", "coordinator", "verifier", "writer"] as const;
+
+/**
+ * Output token caps per dispatch. Reasoning models count thinking inside these (Gemini, OpenAI, Anthropic all
+ * report it in outputTokens), so each cap leaves room to think before the structured submission. A cap spent
+ * thinking ends without the tool call (RESEARCH_OUTPUT_TRUNCATED). Credits are charged per call by the Chat
+ * pricing, so a cap bounds provider spend per call, not what the user pays.
+ */
+export const RESEARCH_OUTPUT_TOKEN_CAPS = {
+  plan: 12_000, investigate: 12_000, privateAnalysis: 10_000, coordinate: 8_000, verify: 12_000, writeSection: 16_000, synthesize: 12_000,
+} as const;
 export const RESEARCH_CLEANUP_REASONS = [
   "run_deleted", "conversation_deleted", "account_deleted", "source_revoked", "superseded", "write_pending", "write_abandoned",
 ] as const;
