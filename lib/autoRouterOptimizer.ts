@@ -480,7 +480,7 @@ async function addProviderSpend(
 }
 
 type Reserved =
-    | { refused: "already_running" | "daily_done" | "day_cap" | "month_cap" | "diagnostic_recent" }
+    | { refused: "already_running" | "daily_done" | "day_cap" | "month_cap" | "diagnostic_recent" | "diagnostic_needs_person" }
     | { cycle: { id: string; budgetMicroUsd: number } };
 
 /**
@@ -519,10 +519,13 @@ export async function reserveOptimizerCycle(input: {
                 where: { startedBy: "system", createdAt: { gte: dayStart } },
             });
             if (startedToday > 0) return { refused: "daily_done" };
-            // The weekly check again, under the lock: a diagnostic a person
-            // started after the schedule looked still holds the week.
-            if (input.objective === "chat_cost_efficiency" && await costDiagnosticStartedWithin(tx, now)) {
-                return { refused: "diagnostic_recent" };
+            if (input.objective === "chat_cost_efficiency") {
+                // The switch again, under the audit-chain lock its save also
+                // takes: a switch turned off after the schedule looked wins.
+                if (!(await readOptimizerAutomation(tx)).costDiagnosticWeekly) return { refused: "diagnostic_needs_person" };
+                // And the week: a diagnostic a person started after the
+                // schedule looked still holds it.
+                if (await costDiagnosticStartedWithin(tx, now)) return { refused: "diagnostic_recent" };
             }
         }
         const recent = await tx.autoRouterOptimizerCycle.findMany({

@@ -262,6 +262,14 @@ test("a diagnostic cycle's run over the real cycle table", { skip: !databaseUrl 
                 await prisma.autoRouterOptimizerCycle.update({ where: { id: reserved.cycle.id }, data: { status: "error", failure, finishedAt: new Date() } });
                 assert.equal(await optimizer.scheduledCostDiagnosticDue(), false, failure);
             }
+            // The reservation reads the switch again under its lock: turned off after the schedule
+            // looked, nothing is reserved.
+            await optimizer.updateOptimizerAutomation(actor, { daily: false, autoPromote: false, costDiagnosticWeekly: false });
+            assert.deepEqual(await optimizer.reserveOptimizerCycle({
+                actor: "system", optimizerModelId: model.id, routerModelId: model.id,
+                incumbentGuidance: "guidance", objective: "chat_cost_efficiency",
+            }), { refused: "diagnostic_needs_person" });
+            await optimizer.updateOptimizerAutomation(actor, { daily: false, autoPromote: false, costDiagnosticWeekly: true });
             // The reservation checks the week again under its lock: a person's diagnostic that
             // started after the schedule looked holds the week, and the day goes back to the rotation.
             assert.deepEqual(await optimizer.reserveOptimizerCycle({
