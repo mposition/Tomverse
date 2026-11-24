@@ -3,12 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { studioCopy } from "@/locales/studio";
+import { studioCreativeCopy } from "@/locales/studioCreative";
 import { studioImageAccept, validStudioImage } from "./studioCanvas";
 import styles from "./studio.module.css";
 
 export function useStudioCopy() {
   const { lang } = useLanguage();
-  return { lang, copy: studioCopy[lang] };
+  return { lang, copy: { ...studioCopy[lang], ...studioCreativeCopy[lang] } };
 }
 
 export function useStudioUrls() {

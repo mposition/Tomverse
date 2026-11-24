@@ -85,6 +85,7 @@ async function uploadStudioReference(blob: Blob, signal: AbortSignal) {
   const uploaded = await fetch(prepared.uploadUrl, {
     method: "PUT", headers: prepared.uploadHeaders ?? { "Content-Type": blob.type }, body: blob, signal,
   });
+  await discardResponseBody(uploaded);
   if (!uploaded.ok) throw new StudioGenerationError(uploaded.status);
   const { uploadId } = await readJson<{ uploadId: string }>(
     await postJson("/api/chat", { ...descriptor, key: prepared.key }, signal, "PATCH"),
@@ -183,21 +184,31 @@ export function createStudioImageRunner() {
   };
 }
 
-export async function generateStudioText(prompt: string, signal: AbortSignal) {
+export async function generateStudioText(prompt: string, signal: AbortSignal, reference?: Blob) {
   // Use the ordinary metered text endpoint without opening a chat or
   // persisting a transcript. The Studio editor owns the draft.
-  const response = await postJson("/api/chat", {
-    messages: [{ role: "user", content: prompt }],
-  }, signal);
-  if (!response.ok || !response.body) {
-    await readJson(response);
-    throw new StudioGenerationError(response.status);
+  const uploadId = reference ? await uploadStudioReference(reference, signal) : undefined;
+  try {
+    const response = await postJson("/api/chat", {
+      messages: [{ role: "user", content: prompt, ...(uploadId ? { attachments: [{ uploadId }] } : {}) }],
+      ...(uploadId ? { webSearchMode: "off" } : {}),
+    }, signal);
+    if (!response.ok || !response.body) {
+      await readJson(response);
+      throw new StudioGenerationError(response.status);
+    }
+    const result = await consumeChatStream({
+      reader: response.body.getReader(),
+      liveness: { noteKeepalive() {}, noteVisibleChunk() {} },
+      onProgress() {},
+    });
+    if (result.serverStallCode || !result.displayText.trim()) throw new StudioGenerationError(502);
+    return result.displayText.trim();
+  } finally {
+    if (uploadId) {
+      void postJson("/api/chat", { uploadId }, AbortSignal.timeout(5000), "DELETE")
+        .then(discardResponseBody)
+        .catch(() => undefined);
+    }
   }
-  const result = await consumeChatStream({
-    reader: response.body.getReader(),
-    liveness: { noteKeepalive() {}, noteVisibleChunk() {} },
-    onProgress() {},
-  });
-  if (result.serverStallCode || !result.displayText.trim()) throw new StudioGenerationError(502);
-  return result.displayText.trim();
 }
