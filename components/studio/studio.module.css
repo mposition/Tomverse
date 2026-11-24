@@ -283,24 +283,20 @@
 .creditActions > :is(button, a) { width: 100%; }
 .dialog::backdrop { background: #12251c88; }
 .dialogActions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 7px; margin-top: 14px; }
-.compare, .posterGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
-.posterGrid { align-items: start; }
-.posterGrid[data-poster] { grid-template-columns: minmax(0, 425px); justify-content: center; }
-.compare figure, .posterGrid figure { margin: 0; min-width: 0; border-radius: 10px; overflow: hidden; }
+.compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+.compare figure { margin: 0; min-width: 0; border-radius: 10px; overflow: hidden; }
 .compare figure { padding: 10px; background-color: var(--studio-field); }
 .compare figcaption { width: fit-content; max-width: 100%; overflow-wrap: anywhere; padding: 2px 4px; border-radius: 4px; background: var(--studio-surface); font-size: .77rem; font-weight: 700; }
 .compare img { display: block; width: 100%; height: clamp(126px, 22vw, 290px); object-fit: contain; }
-.posterGrid figcaption { display: flex; margin-top: 7px; }
-.posterGrid button { min-width: 0; white-space: normal; }
-.posterArt, .memeArt { position: relative; overflow: hidden; border-radius: 10px; }
-.posterArt img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.posterArt[data-contained] { background: #14222c; }
-.posterArt[data-contained] img { position: relative; object-fit: contain; }
-.posterArt[data-contained] .posterBleed { position: absolute; inset: 0; object-fit: cover; filter: blur(18px); opacity: .48; }
-.artText, .memeArt strong { position: absolute; top: 6%; left: 5%; max-width: 90%; background: #142820ed; color: #fff; border-radius: 7px; padding: 6px 8px; overflow-wrap: anywhere; }
-.artText strong, .artText small { display: block; }
-.artText strong { font-size: clamp(.62rem, 1.5vw, 1.15rem); }
-.artText small { font-size: clamp(.55rem, 1vw, .78rem); }
+.publicationChooser > button { margin-top: 12px; }
+.socialPlacement { display: grid; grid-template-columns: minmax(140px, 210px) minmax(0, 1fr); align-items: start; gap: 16px; }
+.socialPlacement .field, .socialPlacement .fieldset { margin: 0; }
+.publishingFigure { margin: 0 0 16px; display: grid; justify-items: center; gap: 9px; padding: 12px; border-radius: 12px; background: var(--studio-field); }
+.publishingFigure figcaption { color: var(--studio-muted); font-size: .78rem; text-align: center; }
+.publishingPreview { display: block; width: 100%; height: auto; max-width: 690px; }
+.publishingFigure[data-vertical] .publishingPreview { width: auto; max-width: 100%; max-height: 610px; aspect-ratio: auto; object-fit: contain; }
+.memeArt { position: relative; overflow: hidden; border-radius: 10px; }
+.memeArt strong { position: absolute; top: 6%; left: 5%; max-width: 90%; background: #142820ed; color: #fff; border-radius: 7px; padding: 6px 8px; overflow-wrap: anywhere; }
 .memeArt img { display: block; width: 100%; max-height: 340px; object-fit: cover; border-radius: 9px; }
 .memeArt { margin-bottom: 14px; }
 @media (max-width: 1050px) {
@@ -332,6 +328,7 @@
   .directorySection + .directorySection { margin-top: 15px; }
   .directoryGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; }
   .directoryGrid[data-publishing] { grid-template-columns: minmax(0, 1fr); }
+  .socialPlacement { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .publicationChoices { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
   .publicationChoice span { padding: 6px 5px; }
   .presetGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }

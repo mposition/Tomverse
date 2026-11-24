@@ -1,10 +1,12 @@
 "use client";
 
 /* eslint-disable @next/next/no-img-element -- User uploads and results use local object URLs. */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Download, ImagePlus, Share2 } from "lucide-react";
 import { STUDIO_EXPORT_FORMATS, STUDIO_PHOTO_PRESETS, studioArtworkPath as asset, type StudioCreativeTool, type StudioPhotoPreset, type StudioTool } from "@/lib/studioTools";
 import { studioPresetName, studioPublicationPresets, type StudioPublicationPreset } from "@/lib/studioPresetLibrary";
+import { STUDIO_SOCIAL_FORMATS, studioOrderedSocialPresets, studioPublishingDesign, studioPublishingPrompt, studioSocialFormat } from "@/lib/studioPublishing";
+import { drawStudioPublishingArtwork, renderStudioPublishingArtwork, type StudioPublishingArtwork } from "./studioPublishingArtwork";
 import { applyStudioSubjectMask, makeStudioImageReference, renderStudioImage, saveStudioFile, shareStudioPng } from "./studioCanvas";
 import { StudioFileButton, StudioStatus, useStudioCopy, useStudioTask, useStudioUrls } from "./StudioControls";
 import { StudioGenerateButton, StudioQuoteHint } from "./StudioGenerationControls";
@@ -27,10 +29,33 @@ type ToolCheckoutDraft = {
   posterStyle?: string;
   posterHasText?: boolean;
   publicationPreset?: string;
+  socialFormatId?: string;
+  logo?: StudioDraftImage;
 };
 
 const posterCategories = [["autoStyle", "auto"], ["eventCategory", "event"], ["productCategory", "product"], ["announcementCategory", "announcement"]] as const;
 const posterStyles = [["autoStyle", "auto"], ["minimalStyle", "minimal"], ["editorialStyle", "editorial"], ["retroStyle", "retro"]] as const;
+
+const socialPlatforms = [...new Set(STUDIO_SOCIAL_FORMATS.map(format => format.platform))];
+
+function PublishingPreview({ artwork, label }: { artwork: StudioPublishingArtwork; label: string }) {
+  const preview = useRef<HTMLCanvasElement>(null);
+  const [failedArtwork, setFailedArtwork] = useState<StudioPublishingArtwork>();
+  const ratio = Math.min(1, 800 / Math.max(artwork.width, artwork.height));
+  const width = Math.round(artwork.width * ratio), height = Math.round(artwork.height * ratio);
+  useEffect(() => {
+    let active = true;
+    const rendered = document.createElement("canvas");
+    void drawStudioPublishingArtwork(rendered, { ...artwork, width, height }).then(() => {
+      if (active) preview.current?.getContext("2d")?.drawImage(rendered, 0, 0);
+    }).catch(() => {
+      if (active) setFailedArtwork(artwork);
+    });
+    return () => { active = false; };
+  }, [artwork, width, height]);
+  if (failedArtwork === artwork) return <img className={styles.publishingPreview} src={artwork.source} alt={label} />;
+  return <canvas ref={preview} className={styles.publishingPreview} width={width} height={height} role="img" aria-label={label} />;
+}
 
 export function StudioToolEditor({ tool, preset }: {
   tool: Exclude<StudioTool, { id: "stickers" } | StudioCreativeTool>;
@@ -45,11 +70,18 @@ export function StudioToolEditor({ tool, preset }: {
   const poster = id === "poster";
   const social = id === "social-post";
   const publishing = poster || social;
-  const formats = STUDIO_EXPORT_FORMATS.map((option, index) => ({ ...option, index }))
-    .filter(option => poster ? option.id === "poster" : option.id !== "poster");
-  const publicationChoices = publishing ? studioPublicationPresets(id) : [];
+  const [socialFormatId, setSocialFormatId] = useState("instagram-feed");
+  const socialFormat = studioSocialFormat(socialFormatId);
+  const dim = poster ? STUDIO_EXPORT_FORMATS[0] : socialFormat;
+  const publicationChoices = useMemo(() => social ? studioOrderedSocialPresets(socialFormat.platform)
+    : poster ? studioPublicationPresets("poster") : [], [social, poster, socialFormat.platform]);
+  const [showAllPresets, setShowAllPresets] = useState(false);
   const [publicationPreset, setPublicationPreset] = useState("");
   const publication = publicationChoices.find(option => option.id === publicationPreset);
+  const firstChoices = publicationChoices.slice(0, 8);
+  const visibleChoices = !social || showAllPresets ? publicationChoices
+    : publication && !firstChoices.includes(publication) ? [...firstChoices, publication] : firstChoices;
+  const activePreset = social ? (publication ?? publicationChoices[0]).id : publicationPreset;
   const photoTool = id === "illustration" || id === "caricature";
   const pngTool = id === "transparent-png";
   const template = id === "meme" || publishing;
@@ -63,24 +95,37 @@ export function StudioToolEditor({ tool, preset }: {
     : [["subtle", copy.subtle], ["playful", copy.playful], ["bold", copy.bold]];
   const [photo, setPhoto] = useState(() => publishing ? "" : photoTool ? asset(preset?.id.startsWith("pet-") ? "cat" : "selfie") : asset(tool.artwork));
   const [customPhoto, setCustomPhoto] = useState(false);
-  const [result, setResult] = useState(() => preset ? "/studio/" + preset.artwork : asset(tool.artwork));
+  const [logo, setLogo] = useState("");
+  const [result, setResult] = useState(() => publishing ? asset(publicationChoices[0].artwork)
+    : preset ? asset(preset.artwork) : asset(tool.artwork));
   const [resultIsExample, setResultIsExample] = useState(true);
   const [format, setFormat] = useState(() => {
-    if (social) return 1;
     const style = preset?.style ?? (id === "illustration" ? "watercolor illustration" : "");
     return Math.max(0, artisticOptions.findIndex(([value]) => value === style));
   });
   const [posterBrief, setPosterBrief] = useState("");
   const [posterCategory, setPosterCategory] = useState("auto");
   const [posterStyle, setPosterStyle] = useState("auto");
-  const [posterHasText, setPosterHasText] = useState(poster);
+  const [posterHasText, setPosterHasText] = useState(false);
   const [title, setTitle] = useState("");
   const [customDetails, setDetails] = useState<string>();
   const details = customDetails ?? (id === "meme" ? copy.exampleMemeSituation : "");
   const [customCaption, setCaption] = useState<string>();
   const caption = customCaption ?? copy.exampleMemeCaption;
   const hasReference = photoTool || pngTool || customPhoto;
-  const size = publishing && STUDIO_EXPORT_FORMATS[format]?.id !== "feed" ? "1024x1536" : "1024x1024";
+  const size = !publishing || dim.width === dim.height ? "1024x1024"
+    : dim.width > dim.height ? "1536x1024" : "1024x1536";
+  const design = useMemo(() => id === "poster" || id === "social-post"
+    ? studioPublishingDesign(id, activePreset, posterCategory, posterStyle) : undefined,
+  [id, activePreset, posterCategory, posterStyle]);
+  const sample = resultIsExample && publishing
+    ? publicationChoices.find(option => option.id === design?.presetId) ?? publicationChoices[0] : undefined;
+  const exactTitle = posterHasText ? "" : title.trim() || (sample ? studioPresetName(sample, lang) : "");
+  const artworkSource = sample && !posterHasText ? asset(sample.artwork) : result;
+  const artwork = useMemo<StudioPublishingArtwork | undefined>(() => artworkSource && design ? {
+    source: artworkSource, logo: logo || undefined, width: dim.width, height: dim.height,
+    design, placement: social ? socialFormat : undefined, title: exactTitle, details, locale: lang,
+  } : undefined, [artworkSource, logo, dim, design, social, socialFormat, exactTitle, details, lang]);
   const imageQuote = useStudioImageQuote(size, hasReference, true, publishing ? "1024x1024" : undefined);
   const [creditError, setCreditError] = useState<StudioGenerationError | null>(null);
   const [draftSaved, setDraftSaved] = useState(false);
@@ -91,7 +136,10 @@ export function StudioToolEditor({ tool, preset }: {
     setResult(typeof saved.result === "string" ? saved.result : urls.make(saved.result));
     setCustomPhoto(saved.customPhoto);
     setResultIsExample(saved.resultIsExample);
-    setFormat(publishing && !formats.some(option => option.index === saved.format) ? formats[0].index : saved.format);
+    setFormat(saved.format);
+    setSocialFormatId(studioSocialFormat(saved.socialFormatId, saved.format).id);
+    urls.release(logo);
+    setLogo(typeof saved.logo === "string" ? saved.logo : saved.logo ? urls.make(saved.logo) : "");
     setTitle(saved.title);
     setDetails(saved.details);
     setCaption(saved.caption);
@@ -105,10 +153,12 @@ export function StudioToolEditor({ tool, preset }: {
 
   async function saveCheckoutDraft() {
     try {
-      const [photoDraft, resultDraft] = await Promise.all([captureStudioDraftImage(photo), captureStudioDraftImage(result)]);
+      const [photoDraft, resultDraft, logoDraft] = await Promise.all(
+        [photo, result, logo].map(captureStudioDraftImage),
+      );
       await checkoutDraft.save({
-        photo: photoDraft, result: resultDraft, customPhoto, resultIsExample,
-        format, title, details, caption, posterBrief, posterCategory, posterStyle, posterHasText, publicationPreset,
+        photo: photoDraft, result: resultDraft, logo: logoDraft, customPhoto, resultIsExample,
+        format, title, details, caption, posterBrief, posterCategory, posterStyle, posterHasText, publicationPreset, socialFormatId,
       });
       setDraftSaved(true);
     } catch {
@@ -153,13 +203,11 @@ export function StudioToolEditor({ tool, preset }: {
         return "Draw a recognisable caricature of the person in the attached photo. Exaggeration: " + artisticOptions[format][0] + ". Features to keep: " + details;
       case "poster":
       case "social-post":
-        return (hasReference ? "Incorporate the attached logo or photo when appropriate. " : "") +
-          (poster ? "Design a finished print poster" : "Design a finished social media " + STUDIO_EXPORT_FORMATS[format].id + " image") +
-          " with strong visual hierarchy and a clear focal point. " +
-          (publication ? "Follow this template direction: " + publication.direction + ". " : "") +
-          (title.trim() ? "Leave the upper quarter free for the exact title and details to be added separately. Do not draw text. "
-            : "Create a concise headline using the language of the brief. Typeset the essential details clearly and keep all text within generous safe margins. ") +
-          "Design brief: " + JSON.stringify({ description: posterBrief.trim(), category: posterCategory, style: posterStyle, title: title.trim(), details: details.trim() });
+        return studioPublishingPrompt({
+          kind: id, design: design!, placement: social ? socialFormat : undefined,
+          locale: lang, brief: posterBrief, title, details, hasPhoto: hasReference, hasLogo: Boolean(logo),
+          category: posterCategory, style: posterStyle,
+        });
       case "transparent-png":
         return "Produce a square grayscale segmentation matte of the foreground subject. Subject pixels are white, background pixels black, and partially transparent edges gray. Do not reproduce the image, move, resize or crop anything. Match the exact original subject boundaries and keep transparent padding black.";
       default:
@@ -208,47 +256,87 @@ export function StudioToolEditor({ tool, preset }: {
   const valid = (!publishing || Boolean(title.trim() || posterBrief.trim())) && (id !== "meme" || Boolean(details.trim()));
   const generationLabel = pngTool ? copy.removeBackground : copy.generate;
 
-  const posterTitle = posterHasText ? undefined : title || (resultIsExample && publication ? studioPresetName(publication, lang) : undefined);
-  const posterDetails = posterHasText ? undefined : details;
   const download = (share = false) => void task(async () => {
-    const dim = publishing ? STUDIO_EXPORT_FORMATS[format] : { width: 1080, height: 1080, id };
-    const blob = pngTool && !resultIsExample ? await fetch(result).then(response => response.blob())
-      : await renderStudioImage(result, {
-        width: dim.width, height: dim.height, fit: template && !posterHasText ? "cover" : "contain",
-        title: id === "meme" ? caption : publishing ? posterTitle : undefined,
-        subtitle: publishing ? posterDetails : undefined,
-        bleed: posterHasText,
-      });
-    const filename = "tomverse-" + dim.id + ".png";
+    const blob = artwork ? await renderStudioPublishingArtwork(artwork)
+      : pngTool && !resultIsExample ? await fetch(result).then(response => response.blob())
+        : await renderStudioImage(result, {
+          width: 1080, height: 1080, fit: template ? "cover" : "contain",
+          title: id === "meme" ? caption : undefined,
+        });
+    const filename = "tomverse-" + (publishing ? dim.id : id) + ".png";
     if (share) await shareStudioPng(blob, filename);
     else saveStudioFile(blob, filename);
   });
   const choice = (active: boolean) => active ? styles.choiceActive : styles.secondary;
 
   return <>
+    {social && <section className={styles.publicationChooser}>
+      <h2>{copy.socialPlacement}</h2>
+      <div className={styles.socialPlacement}>
+        <label className={styles.field}>{copy.socialPlatform}
+          <select aria-label={copy.socialPlatform} value={socialFormat.platform} disabled={busy} onChange={event => {
+            const next = STUDIO_SOCIAL_FORMATS.find(option => option.platform === event.target.value);
+            if (next) {
+              setSocialFormatId(next.id);
+              setShowAllPresets(false);
+            }
+          }}>
+            {socialPlatforms.map(platform => <option key={platform}>{platform}</option>)}
+          </select>
+        </label>
+        <fieldset className={styles.fieldset} disabled={busy}>
+          <legend>{copy.socialPublishFormat}</legend>
+          <div className={styles.choices}>
+            {STUDIO_SOCIAL_FORMATS.filter(option => option.platform === socialFormat.platform).map(option =>
+              <button key={option.id} type="button" className={choice(socialFormat.id === option.id)}
+                aria-pressed={socialFormat.id === option.id} onClick={() => setSocialFormatId(option.id)}>
+                {copy[option.label]} · {option.ratio}
+              </button>)}
+          </div>
+        </fieldset>
+      </div>
+    </section>}
     {publishing && <section className={styles.publicationChooser}>
-      <h2>{copy.choosePublicationPreset}</h2>
-      <div className={styles.publicationChoices} role="group" aria-label={copy.choosePublicationPreset}>
-        {publicationChoices.map(option => <button key={option.id} type="button" className={styles.publicationChoice}
-          disabled={busy} aria-pressed={publicationPreset === option.id} onClick={() => selectPublication(option)}>
+      <h2>{poster ? copy.choosePosterPreset : copy.choosePublicationPreset}</h2>
+      <div className={styles.publicationChoices} role="group" aria-label={poster ? copy.choosePosterPreset : copy.choosePublicationPreset}>
+        {visibleChoices.map(option => <button key={option.id} type="button" className={styles.publicationChoice}
+          disabled={busy} aria-pressed={design?.presetId === option.id} onClick={() => selectPublication(option)}>
           <img src={asset(option.artwork)} alt="" width={150} height={150} loading="lazy" />
           <span>{studioPresetName(option, lang)}</span>
         </button>)}
       </div>
+      {social && <button type="button" className={styles.secondary} disabled={busy} aria-expanded={showAllPresets}
+        onClick={() => setShowAllPresets(previous => !previous)}>
+        {showAllPresets ? copy.showFewerSocialStyles : copy.showMoreSocialStyles}
+      </button>}
     </section>}
     <div className={styles.workbench}>
     <section className={styles.panel}>
       <h2>{copy.inputs}</h2>
       <div className={publishing ? styles.photoInput : styles.fileRow}>
         {photo ? <img src={photo} alt="" width={56} height={56} /> : <ImagePlus size={26} aria-hidden />}
-        <span>{publishing ? copy.optionalArtwork : photoTool || pngTool ? copy.originalPhoto : copy.backgroundArtwork}</span>
+        <span>{publishing ? copy.optionalPublishingPhoto : photoTool || pngTool ? copy.originalPhoto : copy.backgroundArtwork}</span>
         <StudioFileButton label={photo ? copy.changeImage : copy.uploadPhoto} disabled={busy} onInvalid={() => report(copy.invalidImage, true)} onFile={changePhoto} />
         {publishing && photo && <button type="button" className={styles.secondary} disabled={busy} onClick={removePhoto}>{copy.removePhoto}</button>}
       </div>
       {publishing && <>
+        <div className={styles.photoInput}>
+          {logo ? <img src={logo} alt="" width={56} height={56} /> : <ImagePlus size={26} aria-hidden />}
+          <span>{copy.optionalPublishingLogo}</span>
+          <StudioFileButton label={copy.uploadPublishingLogo} disabled={busy} onInvalid={() => report(copy.invalidImage, true)} onFile={file => {
+            urls.release(logo);
+            setLogo(urls.make(file));
+          }} />
+          {logo && <button type="button" className={styles.secondary} disabled={busy} onClick={() => {
+            urls.release(logo);
+            setLogo("");
+          }}>{copy.removePublishingLogo}</button>}
+        </div>
         <label className={styles.field}>{social ? copy.socialPostBrief : copy.posterBrief}
           <textarea rows={4} maxLength={500} value={posterBrief} disabled={busy} onChange={event => setPosterBrief(event.target.value)} />
         </label>
+      </>}
+      {poster && <>
         <label className={styles.field}>{copy.posterCategory}
           <select aria-label={copy.posterCategory} value={posterCategory} disabled={busy} onChange={event => setPosterCategory(event.target.value)}>
             {posterCategories.map(([label, value]) => <option key={value} value={value}>{copy[label]}</option>)}
@@ -261,22 +349,17 @@ export function StudioToolEditor({ tool, preset }: {
         </label>
       </>}
       {publishing && (
-        <label className={styles.field}>{poster ? copy.eventTitle : copy.imageCaption}
+        <label className={styles.field}>{copy.publishingHeadline}
           <input value={title} maxLength={65} disabled={busy} onChange={event => setTitle(event.target.value)} />
         </label>
       )}
       {!pngTool && <label className={styles.field}>{
-        id === "meme" ? copy.situation : poster ? copy.dateAndPlace : copy.detailsToKeep
+        id === "meme" ? copy.situation : publishing ? copy.publishingDetails : copy.detailsToKeep
       }<textarea value={details} maxLength={500} rows={publishing ? 2 : 3} disabled={busy} onChange={event => setDetails(event.target.value)} /></label>}
       {id === "meme" && <label className={styles.field}>{copy.imageCaption}<input value={caption} maxLength={55} disabled={busy} onChange={event => setCaption(event.target.value)} /></label>}
       {photoTool && <fieldset className={styles.fieldset} disabled={busy}>
         <legend>{id === "illustration" ? copy.drawingStyle : copy.exaggeration}</legend>
         <div className={styles.choices}>{artisticOptions.map((option, i) => <button type="button" key={option[0]} className={choice(format === i)} aria-pressed={format === i} onClick={() => setFormat(i)}>{option[1]}</button>)}</div>
-      </fieldset>}
-      {social && <fieldset className={styles.fieldset} disabled={busy}>
-        <legend>{copy.template}</legend>
-        <div className={styles.choices}>{formats.map(option => <button type="button" key={option.id} className={choice(format === option.index)}
-          aria-pressed={format === option.index} onClick={() => setFormat(option.index)}>{copy[option.id]}</button>)}</div>
       </fieldset>}
       <StudioGenerateButton label={generationLabel} busy={busy}
         disabled={!valid || !imageQuote.quote}
@@ -287,17 +370,12 @@ export function StudioToolEditor({ tool, preset }: {
     <section className={styles.panel} aria-busy={busy}>
       <h2>{copy.resultPreview}</h2>
         {resultIsExample && <p className={styles.hint}>{copy.exampleResult}</p>}
-        {publishing && result && <div className={styles.posterGrid} data-poster={poster || undefined}>{formats.map(option => (
-          <figure key={option.id}>
-            <div className={styles.posterArt} data-contained={posterHasText || undefined} style={{ aspectRatio: option.width + " / " + option.height }}>
-              {posterHasText && <img className={styles.posterBleed} src={result} alt="" />}
-              <img src={result} alt="" />
-              {posterTitle && <div className={styles.artText}><strong>{posterTitle}</strong><small>{posterDetails}</small></div>}
-            </div>
-            {social && <figcaption><button type="button" aria-pressed={format === option.index} disabled={busy}
-              className={choice(format === option.index)} onClick={() => setFormat(option.index)}>{copy[option.id]}</button></figcaption>}
-          </figure>
-        ))}</div>}
+        {artwork && <figure className={styles.publishingFigure} data-vertical={dim.width < dim.height || undefined}>
+          <PublishingPreview artwork={artwork} label={copy.processedImage} />
+          <figcaption>{social ? socialFormat.platform + " · " + copy[socialFormat.label] + " · " : ""}
+            {dim.width} × {dim.height} · PNG
+          </figcaption>
+        </figure>}
         {id === "meme" && result && <div className={styles.memeArt}><img src={result} alt="" /><strong>{caption}</strong></div>}
         {template && !result && <p className={styles.hint}>{busy ? copy.generating : copy.emptyResult}</p>}
         {!template && <div className={styles.compare}>

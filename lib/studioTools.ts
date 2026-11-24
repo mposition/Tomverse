@@ -26,7 +26,7 @@ export const STUDIO_STICKER_KEYS = [
 ] as const;
 
 export const STUDIO_EXPORT_FORMATS = [
-  { id: "poster", mobileDescription: "posterMobile", shortTitle: "posterShort", width: 1080, height: 1350 },
+  { id: "poster", mobileDescription: "posterMobile", shortTitle: "posterShort", width: 2160, height: 2700 },
   { id: "feed", width: 1080, height: 1080 },
   { id: "story", width: 1080, height: 1920 },
 ] as const;

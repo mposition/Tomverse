@@ -5,6 +5,10 @@ import { fillStudioStickerCaptions, findStudioTool, STUDIO_EXPORT_FORMATS, STUDI
 import { parseStudioAnalysis } from "../lib/studioCreativeAnalysis.ts";
 import { studioCreativeCopy } from "../locales/studioCreative.ts";
 import { STUDIO_PHOTO_CATEGORIES, studioPresetName, studioPublicationPresets } from "../lib/studioPresetLibrary.ts";
+import {
+  STUDIO_SOCIAL_FORMATS, studioOrderedSocialPresets,
+  studioPublishingDesign, studioPublishingPrompt, studioSocialFormat,
+} from "../lib/studioPublishing.ts";
 
 test("Studio lists the new creative tools in Everyday creations and isolates poster publishing", () => {
   assert.equal(new Set(STUDIO_TOOLS.map(tool => tool.id)).size, STUDIO_TOOLS.length);
@@ -20,7 +24,8 @@ test("Studio libraries expose a unique visual for each localized preset", () => 
   const publishing = [...studioPublicationPresets("poster"), ...studioPublicationPresets("social-post")];
   assert.equal(STUDIO_PHOTO_PRESETS.length, 102);
   assert.equal(STUDIO_PHOTO_CATEGORIES.length, 8);
-  assert.equal(publishing.length, 32);
+  assert.equal(studioPublicationPresets("poster").length, 16);
+  assert.equal(studioPublicationPresets("social-post").length, 28);
   const all = [...STUDIO_PHOTO_PRESETS, ...publishing];
   assert.equal(new Set(all.map(preset => preset.artwork)).size, all.length);
   assert.equal(new Set(STUDIO_PHOTO_PRESETS.map(preset => preset.id)).size, STUDIO_PHOTO_PRESETS.length);
@@ -47,6 +52,48 @@ test("Twenty sticker crops tile even a non-divisible sheet without overlaps or l
 
 test("Poster and social exports retain their designed output ratios", () => {
   assert.deepEqual(STUDIO_EXPORT_FORMATS.map(({ width, height }) => width / height), [4 / 5, 1, 9 / 16]);
+});
+
+test("Poster briefs use the selected art direction and keep exact-copy or typeset generation distinct", () => {
+  assert.deepEqual([STUDIO_EXPORT_FORMATS[0].width, STUDIO_EXPORT_FORMATS[0].height], [2160, 2700]);
+  const posters = studioPublicationPresets("poster");
+  const designs = posters.map(preset => studioPublishingDesign("poster", preset.id));
+  assert.equal(new Set(designs.map(design => design.direction)).size, posters.length);
+  assert.equal(new Set(designs.map(design => design.composition)).size, 4);
+  const input = {
+    kind: "poster", design: studioPublishingDesign("poster", "cafe-menu"),
+    locale: "ko", brief: "여름 한정 메뉴", title: "콜드브루", details: "₩6,500",
+    hasPhoto: true, hasLogo: true,
+  };
+  const exact = studioPublishingPrompt(input);
+  assert.match(exact, /Premium tabletop food photography/);
+  assert.match(exact, /No letters, invented logos or additional copy/);
+  assert.match(exact, /Use the reference as the featured subject/);
+  assert.ok(exact.includes('"headlineContext":"콜드브루"'));
+  const automatic = studioPublishingPrompt({ ...input, title: "", hasPhoto: false });
+  assert.match(automatic, /complete, professionally typeset artwork in ko/);
+  assert.match(automatic, /Leave a quiet lower strip/);
+  assert.doesNotMatch(automatic, /Use the reference as the featured subject/);
+});
+
+test("Social placements have their own dimensions, safe areas and recommended styles", () => {
+  assert.equal(new Set(STUDIO_SOCIAL_FORMATS.map(format => format.id)).size, 16);
+  assert.equal(new Set(STUDIO_SOCIAL_FORMATS.map(format => format.platform)).size, 8);
+  for (const format of STUDIO_SOCIAL_FORMATS) {
+    const [w, h] = format.ratio.split(":").map(Number);
+    assert.ok(Math.abs(format.width / format.height - w / h) < .005);
+    for (const lang of SUPPORTED_LANGUAGES) assert.ok((studioCreativeCopy[lang][format.label] ?? studioCopy[lang][format.label])?.trim());
+  }
+  assert.deepEqual(studioSocialFormat("instagram-story").safe, studioSocialFormat("facebook-story").safe);
+  assert.ok(studioSocialFormat("tiktok-photo").safe[2] > studioSocialFormat("instagram-story").safe[2]);
+  assert.equal(studioSocialFormat(undefined, 1).id, "instagram-square");
+  assert.equal(studioSocialFormat(undefined, 2).id, "instagram-story");
+  assert.equal(studioOrderedSocialPresets("YouTube")[0].id, "creator-reaction");
+  assert.equal(studioOrderedSocialPresets("Instagram")[0].id, "photo-dump");
+  assert.equal(studioOrderedSocialPresets("Pinterest")[0].id, "inspiration-pin");
+  for (const preset of studioPublicationPresets("social-post")) {
+    assert.ok(studioPublishingDesign("social-post", preset.id).paper);
+  }
 });
 
 
