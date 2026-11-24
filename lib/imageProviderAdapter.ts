@@ -190,6 +190,44 @@ export const classifyImageProviderFailure = (
   return "provider_user_error";
 };
 
+// Identifier-shaped values only: a provider's free-text message can quote the
+// prompt, which must not be copied into the failure detail (policy §10).
+const REJECTION_IDENTIFIER = /^[A-Za-z0-9_.:\-]{1,64}$/;
+
+/**
+ * The failure detail for a refused request: the HTTP status plus whichever
+ * of the provider's error code, type, status and offending parameter are
+ * identifiers. A provider_user_error otherwise records only "HTTP 400", and
+ * the parameter the provider's validation disagreed with is lost.
+ * Reads the `{error}` envelope (OpenAI, xAI, Google, BFL, Qwen via
+ * qwenErrorEnvelope) and fal's validation list (`detail[0].type` / `.loc`).
+ */
+export const imageProviderRejectionDetail = (status: number, body: unknown): string => {
+  const record = body && typeof body === "object" ? (body as Record<string, unknown>) : null;
+  const error =
+    record?.error && typeof record.error === "object"
+      ? (record.error as Record<string, unknown>)
+      : null;
+  const firstDetail =
+    Array.isArray(record?.detail) && record.detail[0] && typeof record.detail[0] === "object"
+      ? (record.detail[0] as Record<string, unknown>)
+      : null;
+  const loc = Array.isArray(firstDetail?.loc) ? firstDetail.loc.map(String).join(".") : undefined;
+  const fields: Array<[string, unknown]> = [
+    ["code", error?.code],
+    ["type", error?.type ?? firstDetail?.type],
+    ["status", error?.status],
+    ["param", error?.param ?? loc],
+  ];
+  const parts = fields
+    .map(([name, value]) => [name, typeof value === "number" ? String(value) : value] as const)
+    .filter((entry): entry is readonly [string, string] =>
+      typeof entry[1] === "string" && REJECTION_IDENTIFIER.test(entry[1])
+    )
+    .map(([name, value]) => `${name}=${value}`);
+  return `Image provider rejected the request (HTTP ${[String(status), ...parts].join("; ")}).`;
+};
+
 /**
  * Splits an edit's reported input into its text and image parts. With no
  * breakdown, every input token is counted as an image token -- the dearer
@@ -613,7 +651,7 @@ const generateWithOpenAi = async (
       const failurePhase = classifyImageProviderFailure(response.status, body);
       const error = new ImageProviderError(
         failurePhase,
-        `Image provider rejected the request (HTTP ${response.status}).`,
+        imageProviderRejectionDetail(response.status, body),
         response.status,
         providerRequestId,
         requestParams
@@ -773,7 +811,7 @@ const generateWithGoogle = async (
       const failurePhase = classifyImageProviderFailure(response.status, errorBody);
       const error = new ImageProviderError(
         failurePhase,
-        `Image provider rejected the request (HTTP ${response.status}).`,
+        imageProviderRejectionDetail(response.status, errorBody),
         response.status,
         providerRequestId,
         requestParams
@@ -933,7 +971,7 @@ const generateWithFal = async (
     const errorBody = await response.json().catch(() => null);
     throw new ImageProviderError(
       classifyImageProviderFailure(response.status, errorBody),
-      `Image provider rejected the request (HTTP ${response.status}).`,
+      imageProviderRejectionDetail(response.status, errorBody),
       response.status,
       providerRequestId,
       requestParams
@@ -1125,7 +1163,7 @@ const generateWithXai = async (
       const failurePhase = classifyImageProviderFailure(response.status, errorBody);
       const error = new ImageProviderError(
         failurePhase,
-        `Image provider rejected the request (HTTP ${response.status}).`,
+        imageProviderRejectionDetail(response.status, errorBody),
         response.status,
         providerRequestId,
         requestParams
@@ -1244,7 +1282,7 @@ const generateWithQwen = async (
     throw new ImageProviderError(
       qwenFailurePhase(payload) ??
         classifyImageProviderFailure(response.status, qwenErrorEnvelope(payload)),
-      `Image provider rejected the request (HTTP ${response.status}).`,
+      imageProviderRejectionDetail(response.status, qwenErrorEnvelope(payload)),
       response.status,
       providerRequestId,
       requestParams
@@ -1439,7 +1477,7 @@ const generateWithBfl = async (
       response.status === 402
         ? "provider_failed"
         : classifyImageProviderFailure(response.status, payload),
-      `Image provider rejected the request (HTTP ${response.status}).`,
+      imageProviderRejectionDetail(response.status, payload),
       response.status,
       null,
       requestParams
