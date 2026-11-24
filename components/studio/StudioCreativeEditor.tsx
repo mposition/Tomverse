@@ -16,13 +16,39 @@ import { createStudioImageRunner, generateStudioText, StudioGenerationError, use
 import { renderStudioPortraitReport } from "./studioPortraitReport";
 import styles from "./studio.module.css";
 
-const genres = [
-  ["autoStyle", "auto"], ["fantasy", "fantasy"], ["scienceFiction", "science fiction"], ["modern", "modern day"],
+const characterPresets = [
+  { id: "fantasy", label: "fantasyCharacter", artwork: "character-fantasy.webp", photoreal: true,
+    direction: "A fantasy mage with a real forest-green embroidered cloak and a small brass lantern, against a softly lit studio background." },
+  { id: "knight", label: "knightCharacter", artwork: "character-knight.webp", photoreal: true,
+    direction: "A royal knight in decorated steel armor and a crimson cape against a castle courtyard." },
+  { id: "pilot", label: "pilotCharacter", artwork: "character-pilot.webp", photoreal: true,
+    direction: "A retro-future space pilot in a white and cobalt flight suit with a distant planet behind them." },
+  { id: "courier", label: "courierCharacter", artwork: "character-courier.webp", photoreal: true,
+    direction: "A cyberpunk courier in purple and orange techwear in a neon city at dusk." },
+  { id: "explorer", label: "explorerCharacter", artwork: "character-explorer.webp", photoreal: true,
+    direction: "A desert explorer in sun-weathered linen holding a folded map in an ochre canyon." },
+  { id: "detective", label: "detectiveCharacter", artwork: "character-detective.webp", photoreal: true,
+    direction: "A noir detective in a fedora and trench coat, lit by a midcentury city street in the rain." },
+  { id: "pirate", label: "pirateCharacter", artwork: "character-pirate.webp", photoreal: true,
+    direction: "A pirate captain in a weathered burgundy coat and tricorne on a wooden ship at sea." },
+  { id: "fairy", label: "fairyCharacter", artwork: "character-fairy.webp", photoreal: true,
+    direction: "A woodland fairy in a moss-green practical costume with translucent lavender wings and a botanical crown." },
+  { id: "anime", label: "animeCharacter", artwork: "preset-anime.webp",
+    direction: "An original hand-drawn animation protagonist with a windswept scarf and an atmospheric painted setting." },
+  { id: "3d", label: "threeDCharacter", artwork: "preset-3d.webp",
+    direction: "A stylized 3D character with expressive proportions, tactile clay-like materials and soft studio lighting." },
+  { id: "comic", label: "comicHeroCharacter", artwork: "character-comic.webp",
+    direction: "An original retro comic hero in scarlet and navy, with hand-inked lines, halftone shading and a sunburst." },
+  { id: "pixel", label: "pixelCharacter", artwork: "character-pixel.webp",
+    direction: "A 16-bit pixel-art RPG adventurer in an embroidered teal hood, with chunky pixels and a limited palette." },
+  { id: "paper", label: "paperCharacter", artwork: "character-paper.webp",
+    direction: "A cheerful paper-cut character with layered colored cardstock, visible cut edges and a geometric setting." },
+  { id: "felt", label: "feltCharacter", artwork: "character-felt.webp",
+    direction: "A handmade felt stop-motion character in a coral sweater, with visible wool fibers and a soft blue background." },
+  { id: "chibi", label: "chibiCharacter", artwork: "character-chibi.webp",
+    direction: "A clean chibi character with an oversized head, expressive eyes and a warm peach and pink palette." },
 ] as const;
-const artStyles = [
-  ["autoStyle", "auto"], ["realistic", "realistic"], ["anime", "anime"], ["comic", "comic illustration"],
-  ["render3d", "3D render"], ["pixelArt", "pixel art"],
-] as const;
+type CharacterPreset = (typeof characterPresets)[number]["id"];
 const shareFormats = STUDIO_EXPORT_FORMATS.filter(format => format.id !== "poster");
 const samplePhoto = "/studio/selfie.png";
 
@@ -30,11 +56,7 @@ type CreativeDraft = {
   photo: StudioDraftImage;
   result: StudioDraftImage;
   report: StudioAnalysisReport | null;
-  description: string;
-  name: string;
-  role: string;
-  genre: string;
-  artStyle: string;
+  characterPreset?: CharacterPreset;
   story: boolean;
 };
 
@@ -50,26 +72,19 @@ export function StudioCreativeEditor({ tool }: { tool: StudioCreativeTool }) {
   const [photo, setPhoto] = useState("");
   const [result, setResult] = useState("");
   const [analysis, setAnalysis] = useState<StudioAnalysisReport | null>(null);
-  const [description, setDescription] = useState("");
-  const [name, setName] = useState("");
-  const [role, setRole] = useState("");
-  const [genre, setGenre] = useState("auto");
-  const [artStyle, setArtStyle] = useState("auto");
+  const [presetId, setPresetId] = useState<CharacterPreset>(characterPresets[0].id);
+  const preset = characterPresets.find(choice => choice.id === presetId) ?? characterPresets[0];
   const [story, setStory] = useState(false);
   const [creditError, setCreditError] = useState<StudioGenerationError | null>(null);
   const [draftSaved, setDraftSaved] = useState(false);
-  const imageQuote = useStudioImageQuote("1024x1024", false, character);
+  const imageQuote = useStudioImageQuote("1024x1024", true, character);
   const checkout = useStudioCheckoutDraft<CreativeDraft>(id, saved => {
     urls.release(photo);
     urls.release(result);
     setPhoto(typeof saved.photo === "string" ? saved.photo : urls.make(saved.photo));
     setResult(typeof saved.result === "string" ? saved.result : urls.make(saved.result));
     setAnalysis(saved.report);
-    setDescription(saved.description);
-    setName(saved.name);
-    setRole(saved.role);
-    setGenre(saved.genre);
-    setArtStyle(saved.artStyle);
+    setPresetId(saved.characterPreset ?? characterPresets[0].id);
     setStory(saved.story);
     report(copy.checkoutDraftRestored);
   });
@@ -77,7 +92,7 @@ export function StudioCreativeEditor({ tool }: { tool: StudioCreativeTool }) {
   async function saveDraft() {
     try {
       const [savedPhoto, savedResult] = await Promise.all([captureStudioDraftImage(photo), captureStudioDraftImage(result)]);
-      await checkout.save({ photo: savedPhoto, result: savedResult, report: analysis, description, name, role, genre, artStyle, story });
+      await checkout.save({ photo: savedPhoto, result: savedResult, report: analysis, characterPreset: presetId, story });
       setDraftSaved(true);
     } catch {
       setDraftSaved(false);
@@ -95,6 +110,7 @@ export function StudioCreativeEditor({ tool }: { tool: StudioCreativeTool }) {
   }
 
   function generate() {
+    if (!photo) return;
     void task(async () => {
       const controller = new AbortController();
       active.current = controller;
@@ -102,10 +118,12 @@ export function StudioCreativeEditor({ tool }: { tool: StudioCreativeTool }) {
       try {
         if (character) {
           if (!imageQuote.quote) return;
-          const prompt = "Create an original character portrait for a story or game. Show the character and signature details clearly. Use a well-composed square image, with no text, logo or watermark. Brief: " +
-            JSON.stringify({ description: description.trim(), name: name.trim(), role: role.trim(), genre, artStyle });
+          const look = "photoreal" in preset ? "Shoot it as a photoreal live-action character portrait with natural skin texture, real materials and lens lighting. " : "";
+          const prompt = "Transform the person in the attached photo into the chosen original character. Keep their likeness recognizable, especially their facial features and hairstyle, while adapting the outfit and scene. Compose a square portrait with no text or watermark. " + look + "Character: " +
+            preset.direction;
           const output = await runImage({
-            inputKey: id, prompt, size: imageQuote.quote.size, quote: imageQuote.quote, signal,
+            inputKey: photo, prompt, size: imageQuote.quote.size, quote: imageQuote.quote,
+            reference: () => makeStudioImageReference(photo), signal,
           });
           signal.throwIfAborted();
           urls.release(result);
@@ -170,54 +188,53 @@ export function StudioCreativeEditor({ tool }: { tool: StudioCreativeTool }) {
     });
   }
 
+  const generateButton = <StudioGenerateButton label={copy.generate} busy={busy}
+    disabled={!photo || (character ? !imageQuote.quote : sessionStatus !== "authenticated")}
+    onClick={generate} />;
+
   return <>
-    <div className={styles.workbench}>
+    <div className={styles.workbench} data-character={character || undefined}>
       <section className={styles.panel}>
         <h2>{copy.inputs}</h2>
-        {character ? <>
-          <label className={styles.field}>{copy.characterBrief}
-            <textarea rows={4} maxLength={500} value={description} disabled={busy} onChange={event => setDescription(event.target.value)} />
-          </label>
-          <label className={styles.field}>{copy.characterName}
-            <input maxLength={65} value={name} disabled={busy} onChange={event => setName(event.target.value)} />
-          </label>
-          <label className={styles.field}>{copy.characterRole}
-            <input maxLength={80} value={role} disabled={busy} onChange={event => setRole(event.target.value)} />
-          </label>
-          <label className={styles.field}>{copy.characterGenre}
-            <select aria-label={copy.characterGenre} value={genre} disabled={busy} onChange={event => setGenre(event.target.value)}>
-              {genres.map(([label, value]) => <option key={value} value={value}>{copy[label]}</option>)}
-            </select>
-          </label>
-          <label className={styles.field}>{copy.drawingStyle}
-            <select aria-label={copy.drawingStyle} value={artStyle} disabled={busy} onChange={event => setArtStyle(event.target.value)}>
-              {artStyles.map(([label, value]) => <option key={value} value={value}>{copy[label]}</option>)}
-            </select>
-          </label>
-        </> : <>
-          <div className={styles.photoInput}>
-            {photo ? <img src={photo} alt={copy.originalPhoto} width={72} height={72} /> : <Camera size={28} aria-hidden />}
-            <StudioFileButton label={photo ? copy.changePhoto : copy.uploadPhoto} disabled={busy}
-              onFile={file => pickPhoto(urls.make(file))} onInvalid={() => report(copy.invalidImage, true)} />
+        <div className={styles.photoInput}>
+          {photo ? <img src={photo} alt={copy.originalPhoto} width={72} height={72} /> : <Camera size={28} aria-hidden />}
+          <StudioFileButton label={photo ? copy.changePhoto : copy.uploadPhoto} disabled={busy}
+            onFile={file => pickPhoto(urls.make(file))} onInvalid={() => report(copy.invalidImage, true)} />
+        </div>
+        {character ? <fieldset className={styles.fieldset} disabled={busy}>
+          <legend>{copy.chooseCharacter}</legend>
+          <div className={styles.characterPresets}>
+            {characterPresets.map(choice => <label key={choice.id} className={styles.characterPreset}>
+              <input type="radio" name="studio-character-preset" value={choice.id} checked={preset.id === choice.id}
+                onChange={() => {
+                  setPresetId(choice.id);
+                  urls.release(result);
+                  setResult("");
+                }} />
+              <img src={studioArtworkPath(choice.artwork)} alt="" width={120} height={120} />
+              <span>{copy[choice.label]}</span>
+            </label>)}
           </div>
+        </fieldset> : <>
           <p className={styles.hint}>{copy.photoGuidance}</p>
           <button type="button" className={styles.secondary} disabled={busy || photo === samplePhoto}
             onClick={() => pickPhoto(samplePhoto)}>{copy.samplePhoto}</button>
         </>}
-        <div className={styles.creativeGenerate}>
-          <StudioGenerateButton label={copy.generate} busy={busy}
-            disabled={character ? !description.trim() || !imageQuote.quote : !photo || sessionStatus !== "authenticated"}
-            onClick={generate} />
-        </div>
-        {character ? <StudioQuoteHint {...imageQuote} /> : sessionStatus === "unauthenticated" && <StudioQuoteHint error={401} />}
-        <StudioStatus status={status} />
+        {!character && <>
+          <div className={styles.creativeGenerate}>{generateButton}</div>
+          {sessionStatus === "unauthenticated" && <StudioQuoteHint error={401} />}
+          <StudioStatus status={status} />
+        </>}
       </section>
-      <section className={styles.panel} aria-busy={busy} data-testid={id + "-result"}>
-        <h2>{copy.resultPreview}</h2>
+      <section className={character ? styles.panel + " " + styles.characterPreview : styles.panel} aria-busy={busy} data-testid={id + "-result"}>
+        <h2>{character && !result ? copy[preset.label] : copy.resultPreview}</h2>
         {character ? <>
           {!result && !busy && <p className={styles.hint}>{copy.exampleResult}</p>}
-          {(result || !busy) && <img className={styles.characterArt} src={result || studioArtworkPath(tool.artwork)}
-            alt={result ? copy[tool.title] : ""} />}
+          {(result || !busy) && <img className={styles.characterArt} src={result || studioArtworkPath(preset.artwork)}
+            alt={copy[preset.label]} />}
+          <div className={styles.creativeGenerate}>{generateButton}</div>
+          <StudioQuoteHint {...imageQuote} />
+          <StudioStatus status={status} />
         </> : <>
           {!result && !busy && <p className={styles.hint}>{copy.emptyResult}</p>}
           {result && <a className={styles.reportPreview} href={result} target="_blank" rel="noreferrer">

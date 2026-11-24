@@ -1,14 +1,15 @@
 import type { StudioAnalysisReport, StudioColorReport, StudioFaceReport } from "@/lib/studioCreativeAnalysis";
 import { canvas, encode, readImage } from "./studioCanvas";
+import { loadStudioReportTypography, type StudioReportTypography } from "./studioReportTypography";
 
 const width = 1080;
 const height = 1620;
-const text = "#0f100f";
-const muted = "#434744";
-const colorInk = "#302419";
-const colorLine = "#d8cbbb";
-const font = "system-ui, sans-serif";
-const serif = 'Georgia, "Noto Serif CJK KR", Batang, serif';
+const faceInk = "#20332f";
+const faceAccent = "#3a6a5d";
+const muted = "#52615b";
+const colorInk = "#382a24";
+const colorAccent = "#87543e";
+const colorLine = "#e6d9ce";
 const studioName = "Tomverse Studio";
 const studioUrl = "https://tomverse.app";
 
@@ -35,33 +36,6 @@ type Labels = {
     thirds: [string, string, string];
   };
 };
-
-function label(ctx: CanvasRenderingContext2D, value: string, x: number, y: number,
-  size: number, max: number, weight = 700, color = text, family = font) {
-  ctx.fillStyle = color;
-  ctx.font = weight + " " + size + "px " + family;
-  ctx.fillText(value, x, y, max);
-}
-
-function paragraph(ctx: CanvasRenderingContext2D, message: string, x: number, y: number, max: number, size: number, maxLines: number) {
-  ctx.fillStyle = muted;
-  ctx.font = "500 " + size + "px " + font;
-  let chunk = "", index = 1;
-  for (const char of message) {
-    if (chunk && ctx.measureText(chunk + char).width > max) {
-      if (index === maxLines) {
-        ctx.fillText(chunk.slice(0, -1) + "…", x, y);
-        return;
-      }
-      ctx.fillText(chunk.trimEnd(), x, y);
-      chunk = "";
-      y += size * 1.3;
-      index++;
-    }
-    chunk += char;
-  }
-  if (chunk) ctx.fillText(chunk, x, y);
-}
 
 function box(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, color: string) {
   ctx.fillStyle = color;
@@ -101,6 +75,12 @@ function photo(ctx: CanvasRenderingContext2D, image: HTMLImageElement | HTMLCanv
   ctx.clip();
   ctx.drawImage(image, iw * rx, ih * ry, sw, sh, x + (w - sw * scale) / 2, y + (h - sh * scale) / 2, sw * scale, sh * scale);
   ctx.restore();
+}
+
+function drawBrand(ctx: CanvasRenderingContext2D, logo: HTMLImageElement, x: number, baseline: number,
+  ink: string, label: StudioReportTypography["label"]) {
+  photo(ctx, logo, x, baseline - 20, 26, 26);
+  label(ctx, studioName, x + 35, baseline, 18, 200, 700, ink);
 }
 
 function garmentPreviews(image: HTMLImageElement, polygon: StudioColorReport["garment"], colors: string[]) {
@@ -152,63 +132,63 @@ function garmentPreviews(image: HTMLImageElement, polygon: StudioColorReport["ga
   });
 }
 
-function colorPage(ctx: CanvasRenderingContext2D, reference: HTMLImageElement, report: StudioColorReport,
-  copy: Labels["color"], interpretation: string, locale: string) {
+function colorPage(ctx: CanvasRenderingContext2D, reference: HTMLImageElement, logo: HTMLImageElement, report: StudioColorReport,
+  copy: Labels["color"], interpretation: string, locale: string, typography: StudioReportTypography) {
+  const { label, paragraph, displayFamily } = typography;
   const paper = ctx.createLinearGradient(0, 0, width, height);
-  paper.addColorStop(0, "#f8f3ec");
-  paper.addColorStop(.58, "#f3ede4");
-  paper.addColorStop(1, "#f7f0e7");
+  paper.addColorStop(0, "#fcf8f1");
+  paper.addColorStop(.58, "#f7efe5");
+  paper.addColorStop(1, "#fbf5ed");
   ctx.fillStyle = paper;
   ctx.fillRect(0, 0, width, height);
   const margin = 26, content = width - 2 * margin;
-  const caps = (value: string, x: number, y: number, max: number, size = 21) =>
-    label(ctx, value.toLocaleUpperCase(locale), x, y, size, max, 630, colorInk);
+  const caps = (value: string, x: number, y: number, max: number, size = 21, ink = colorInk) =>
+    label(ctx, value.toLocaleUpperCase(locale), x, y, size, max, 680, ink);
+  const display = (str: string, x: number, y: number, size: number, max: number) =>
+    label(ctx, str, x, y, size, max, 720, colorInk, displayFamily);
   const value = (str: string, x: number, y: number, size: number, max: number) =>
-    label(ctx, str, x, y, size, max, 500, colorInk, serif);
+    label(ctx, str, x, y, size, max, 530, colorInk);
 
-  photo(ctx, reference, 586, 20, 468, 471);
-  label(ctx, studioName, 57, 31, 19, 480, 680, colorInk);
-  value(copy.title[0], 54, 105, 75, 485);
-  value(copy.title[1], 54, 177, 75, 490);
+  photo(ctx, reference, 586, 26, 468, 465);
+  drawBrand(ctx, logo, 54, 42, colorAccent, label);
+  display(copy.title[0], 51, 116, 69, 485);
+  display(copy.title[1], 51, 186, 69, 490);
   ctx.fillStyle = colorLine;
-  ctx.fillRect(55, 199, 486, 1.5);
+  ctx.fillRect(53, 211, 490, 1.5);
 
-  frame(ctx, 48, 243, 508, 248, colorLine);
-  ctx.fillStyle = "#f7f2eb";
-  ctx.fillRect(57, 226, 214, 24);
-  caps(copy.season, 62, 244, 203);
-  value(report.season, 81, 327, 67, 449);
-  report.recommendedPalette.slice(0, 5).forEach((color, i) => dot(ctx, 123 + i * 89, 392, 36, color));
-  ctx.textAlign = "center";
-  value(report.summary, 302, 462, 22, 457);
-  ctx.textAlign = "left";
+  box(ctx, 45, 235, 511, 256, "#f1e3d6");
+  caps(copy.season, 75, 269, 432, 18, colorAccent);
+  display(report.season, 72, 341, 58, 445);
+  report.recommendedPalette.slice(0, 5).forEach((color, i) => dot(ctx, 112 + i * 78, 395, 29, color));
+  paragraph(ctx, report.summary, 75, 451, 443, 19, 2, "#5f4e43");
 
   const cardGap = 9, cardWidth = (content - 2 * cardGap) / 3;
   [report.features.hair, report.features.eyes, report.features.skin].forEach((feature, index) => {
     const x = margin + index * (cardWidth + cardGap);
+    box(ctx, x, 507, cardWidth, 164, "#fffcf7");
     frame(ctx, x, 507, cardWidth, 164, colorLine);
     caps(copy.features[index], x + 21, 536, cardWidth - 42, 19);
     if (feature.region) photo(ctx, reference, x + 18, 548, cardWidth - 116, 109, feature.region);
-    dot(ctx, x + cardWidth - 51, 582, 24, feature.color);
+    dot(ctx, x + cardWidth - 53, 582, 22, feature.color);
     ctx.textAlign = "center";
-    value(feature.name, x + cardWidth - 51, 634, 21, 86);
+    value(feature.name, x + cardWidth - 53, 634, 19, 89);
     ctx.textAlign = "left";
   });
 
   const profiles = [report.profile.undertone, report.profile.contrast, report.profile.tone];
   profiles.forEach((profile, index) => {
     const x = margin + index * (cardWidth + cardGap);
-    frame(ctx, x, 685, cardWidth, 130, colorLine);
+    box(ctx, x, 685, cardWidth, 130, "#f3e9de");
     caps(copy.profile[index], x + 25, 713, cardWidth - 50, 19);
     const colors = "colors" in profile ? profile.colors : [profile.color];
     if (index < 2) {
-      colors.forEach((color, i) => dot(ctx, x + 64 + 58 * i, 765, 27, color));
+      colors.forEach((color, i) => dot(ctx, x + 64 + 58 * i, 765, 23, color));
       const offset = colors.length === 1 ? 106 : 160;
-      value(profile.name, x + offset, 773, 26, cardWidth - offset - 17);
+      value(profile.name, x + offset, 773, 23, cardWidth - offset - 17);
     } else {
-      colors.forEach((color, i) => dot(ctx, x + cardWidth / 2 - 94 + i * 62, 755, 24, color));
+      colors.forEach((color, i) => dot(ctx, x + cardWidth / 2 - 87 + i * 58, 753, 19, color));
       ctx.textAlign = "center";
-      value(profile.name, x + cardWidth / 2, 802, 24, cardWidth - 36);
+      value(profile.name, x + cardWidth / 2, 799, 21, cardWidth - 36);
       ctx.textAlign = "left";
     }
   });
@@ -216,11 +196,13 @@ function colorPage(ctx: CanvasRenderingContext2D, reference: HTMLImageElement, r
   const rows = [report.recommended, report.comparison];
   const previews = garmentPreviews(reference, report.garment, rows.flat().map(item => item.color));
   rows.forEach((collection, row) => {
-    const y = 830 + row * 277, markerX = margin + 35, markerY = y + 26;
+    const y = 830 + row * 277, markerX = margin + 32, markerY = y + 24;
+    const accent = row === 0 ? "#46634c" : "#934c42";
+    box(ctx, margin, y, content, 262, "#fffcf7");
     frame(ctx, margin, y, content, 262, colorLine);
-    dot(ctx, markerX, markerY, 17, row === 0 ? "#416540" : "#b34333");
+    dot(ctx, markerX, markerY, 13, accent);
     ctx.strokeStyle = "#fffaf3";
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = 2;
     ctx.lineCap = "round";
     ctx.beginPath();
     ctx.moveTo(markerX - 7, markerY + (row === 0 ? 1 : -7));
@@ -233,35 +215,37 @@ function colorPage(ctx: CanvasRenderingContext2D, reference: HTMLImageElement, r
       ctx.lineTo(markerX - 7, markerY + 7);
     }
     ctx.stroke();
-    caps(row === 0 ? copy.recommended : copy.comparison, margin + 64, y + 34, content - 77, 23);
+    caps(row === 0 ? copy.recommended : copy.comparison, margin + 55, y + 32, content - 77, 22, accent);
 
     const gap = 13, tileWidth = (content - 26 - gap * 5) / 6;
     collection.forEach((item, index) => {
       const x = margin + 13 + index * (tileWidth + gap);
       photo(ctx, previews[row * 6 + index], x, y + 48, tileWidth, 167);
-      dot(ctx, x + 21, y + 238, 13, item.color);
-      value(item.name, x + 42, y + 245, 19, tileWidth - 47);
+      dot(ctx, x + 17, y + 237, 9, item.color);
+      value(item.name, x + 34, y + 244, 18, tileWidth - 38);
     });
   });
 
   [report.recommendedPalette, report.comparisonPalette].forEach((palette, index) => {
     const gap = 14, panelWidth = (content - gap) / 2;
     const x = margin + index * (panelWidth + gap);
-    frame(ctx, x, 1385, panelWidth, 120, colorLine);
+    box(ctx, x, 1385, panelWidth, 120, "#f1e6db");
     caps(copy.palettes[index], x + 20, 1417, panelWidth - 40, 18);
     const step = (panelWidth - 40) / palette.length;
-    palette.forEach((color, position) => dot(ctx, x + 20 + step * (position + .5), 1463, Math.min(22, step / 2 - 2), color));
+    palette.forEach((color, position) => dot(ctx, x + 20 + step * (position + .5), 1463, Math.min(19, step / 2 - 2), color));
   });
 
+  ctx.fillStyle = colorLine;
+  ctx.fillRect(width / 2 - 30, 1524, 60, 1.5);
   ctx.textAlign = "center";
-  value(copy.basis, width / 2, 1550, 20, content);
-  value(interpretation, width / 2, 1573, 19, content);
+  value(copy.basis, width / 2, 1552, 17, content);
+  value(interpretation, width / 2, 1575, 16, content);
   label(ctx, studioUrl, width / 2, 1600, 15, content, 520, colorInk);
   ctx.textAlign = "left";
 }
 
 function drawFaceGuides(ctx: CanvasRenderingContext2D, image: HTMLImageElement, guides: StudioFaceReport["guides"],
-  x: number, y: number, w: number, h: number, names: Labels["face"]["thirds"]) {
+  x: number, y: number, w: number, h: number, names: Labels["face"]["thirds"], label: StudioReportTypography["label"]) {
   if (!guides) return;
   const scale = Math.max(w / image.naturalWidth, h / image.naturalHeight);
   const iw = image.naturalWidth * scale, ih = image.naturalHeight * scale;
@@ -273,7 +257,7 @@ function drawFaceGuides(ctx: CanvasRenderingContext2D, image: HTMLImageElement, 
   ctx.beginPath();
   ctx.roundRect(x, y, w, h, 12);
   ctx.clip();
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = 1.4;
   ctx.strokeStyle = "#ffffffe8";
   ctx.setLineDash([5, 5]);
   ctx.beginPath();
@@ -285,7 +269,7 @@ function drawFaceGuides(ctx: CanvasRenderingContext2D, image: HTMLImageElement, 
   thirds.slice(0, -1).forEach((top, i) => {
     const bottom = thirds[i + 1];
     if (top < y + 9 || bottom > y + h - 9) return;
-    ctx.strokeStyle = "#3a3a38";
+    ctx.strokeStyle = "#29473e";
     ctx.beginPath();
     ctx.moveTo(edge + 14, top);
     ctx.lineTo(edge, top);
@@ -293,8 +277,8 @@ function drawFaceGuides(ctx: CanvasRenderingContext2D, image: HTMLImageElement, 
     ctx.lineTo(edge + 14, bottom);
     ctx.stroke();
     const center = (top + bottom) / 2;
-    box(ctx, x + 11, center - 17, 89, 30, "#ffffffdf");
-    label(ctx, names[i], x + 18, center + 3, 15, 75, 650);
+    box(ctx, x + 11, center - 17, 89, 30, "#f4faf5ef");
+    label(ctx, names[i], x + 18, center + 3, 15, 75, 650, faceInk);
   });
   ctx.setLineDash([]);
   guides.markers.forEach(({ label: marker, point: [mx, my] }) => {
@@ -302,14 +286,14 @@ function drawFaceGuides(ctx: CanvasRenderingContext2D, image: HTMLImageElement, 
     if (anchorX <= x || anchorX >= x + w || anchorY < y + 27 || anchorY > y + h - 27) return;
     const captionX = x + w - 142;
     const captionY = anchorY - 18;
-    ctx.strokeStyle = "#292925";
+    ctx.strokeStyle = "#29473e";
     ctx.beginPath();
     ctx.moveTo(anchorX, anchorY);
     ctx.lineTo(captionX, captionY);
     ctx.stroke();
-    dot(ctx, anchorX, anchorY, 4, "#222322");
-    box(ctx, captionX, captionY - 16, 132, 32, "#ffffffed");
-    label(ctx, marker, captionX + 7, captionY + 6, 15, 118, 620);
+    dot(ctx, anchorX, anchorY, 4, faceAccent);
+    box(ctx, captionX, captionY - 16, 132, 32, "#f5faf5ef");
+    label(ctx, marker, captionX + 7, captionY + 6, 15, 118, 620, faceInk);
   });
   ctx.restore();
 }
@@ -325,83 +309,96 @@ const tipPaths = [
   "M12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10Zm0-6v3m0 16v3M1 12h3m16 0h3M4 4l2 2m12 12 2 2m0-16-2 2M6 18l-2 2",
 ];
 
-function facePage(ctx: CanvasRenderingContext2D, reference: HTMLImageElement, report: StudioFaceReport,
-  copy: Labels["face"], interpretation: string, locale: string) {
-  ctx.fillStyle = "#fdfdfc";
+function facePage(ctx: CanvasRenderingContext2D, reference: HTMLImageElement, logo: HTMLImageElement, report: StudioFaceReport,
+  copy: Labels["face"], interpretation: string, locale: string, typography: StudioReportTypography) {
+  const { label, paragraph } = typography;
+  ctx.fillStyle = "#f4f7f3";
   ctx.fillRect(0, 0, width, height);
   const number = new Intl.NumberFormat(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   const margin = 19, content = width - 2 * margin;
-  const stroke = "#d1d0cb", ink = "#252625";
+  const stroke = "#dbe4db";
+  drawBrand(ctx, logo, width / 2 - 87, 30, faceAccent, label);
   ctx.textAlign = "center";
-  label(ctx, studioName, width / 2, 25, 19, content - 50, 680, muted);
-  label(ctx, copy.title, width / 2, 82, 60, content - 50, 790);
-  label(ctx, copy.lead, width / 2, 117, 24, content - 50, 500, muted);
+  label(ctx, copy.title, width / 2, 87, 56, content - 50, 750, faceInk);
+  label(ctx, copy.lead, width / 2, 120, 21, content - 50, 480, muted);
   ctx.textAlign = "left";
 
+  box(ctx, margin, 140, 427, 581, "#e9f1eb");
   frame(ctx, margin, 140, 427, 581, stroke);
-  label(ctx, copy.overall, 42, 186, 28, 382, 760);
+  label(ctx, copy.overall, 47, 186, 25, 375, 710, faceAccent);
   const total = number.format(report.score);
-  label(ctx, total, 42, 274, 78, 265, 780);
-  label(ctx, "/ 10", 53 + ctx.measureText(total).width, 274, 38, 125, 620, "#767873");
-  paragraph(ctx, report.summary, 43, 309, 376, 21, 3);
+  label(ctx, total, 45, 275, 80, 265, 770, faceInk);
+  label(ctx, "/ 10", 58 + ctx.measureText(total).width, 275, 32, 125, 580, "#667b71");
+  paragraph(ctx, report.summary, 47, 312, 370, 19, 3);
+  ctx.fillStyle = "#cfdfd4";
+  ctx.fillRect(47, 370, 370, 1);
   report.metrics.forEach((item, index) => {
-    const y = 388 + index * 29;
-    label(ctx, item.label, 43, y, 17, 157, 560);
-    box(ctx, 207, y - 13, 159, 12, "#e3e3e0");
-    box(ctx, 207, y - 13, 159 * item.score / 10, 12, "#373936");
+    const y = 398 + index * 28;
+    label(ctx, item.label, 47, y, 17, 152, 550, faceInk);
+    box(ctx, 207, y - 11, 159, 8, "#d7e4db");
+    box(ctx, 207, y - 11, 159 * item.score / 10, 8, "#558073");
     ctx.textAlign = "right";
-    label(ctx, number.format(item.score), 418, y, 17, 44, 630);
+    label(ctx, number.format(item.score), 418, y, 17, 44, 650, faceAccent);
     ctx.textAlign = "left";
   });
-  photo(ctx, reference, 461, 140, 600, 581);
-  drawFaceGuides(ctx, reference, report.guides, 461, 140, 600, 581, copy.thirds);
+  box(ctx, 461, 140, 600, 581, "#fffefb");
+  photo(ctx, reference, 470, 149, 582, 563);
+  drawFaceGuides(ctx, reference, report.guides, 470, 149, 582, 563, copy.thirds, label);
   frame(ctx, 461, 140, 600, 581, stroke);
 
+  box(ctx, margin, 743, content, 329, "#fffefb");
   frame(ctx, margin, 743, content, 329, stroke);
-  label(ctx, copy.breakdown, 40, 786, 28, content - 42, 760);
+  label(ctx, copy.breakdown, 41, 786, 26, content - 42, 730, faceInk);
   const featureGap = 12, featureWidth = (content - 36 - 5 * featureGap) / 6;
   report.observations.forEach((item, index) => {
     const x = margin + 18 + index * (featureWidth + featureGap);
     if (item.region) photo(ctx, reference, x, 808, featureWidth, 121, item.region);
-    else box(ctx, x, 808, featureWidth, 121, "#efefeb");
-    label(ctx, item.label, x, 955, 19, featureWidth, 670);
-    label(ctx, number.format(item.score), x, 984, 25, featureWidth, 760);
-    label(ctx, "/ 10", x + ctx.measureText(number.format(item.score)).width + 4, 984, 18, 53, 520, "#767873");
+    else box(ctx, x, 808, featureWidth, 121, "#edf2eb");
+    label(ctx, item.label, x, 957, 19, featureWidth, 680, faceInk);
+    label(ctx, number.format(item.score), x, 985, 23, featureWidth, 760, faceAccent);
+    label(ctx, "/ 10", x + ctx.measureText(number.format(item.score)).width + 5, 985, 15, 53, 520, muted);
     paragraph(ctx, item.note, x, 1010, featureWidth, 16, 3);
   });
 
+  box(ctx, margin, 1090, content, 358, "#fffefb");
   frame(ctx, margin, 1090, content, 358, stroke);
-  label(ctx, copy.tips, 40, 1133, 28, content - 42, 760);
+  label(ctx, copy.tips, 41, 1133, 26, content - 42, 730, faceInk);
   const gap = 11, cardWidth = (content - 35 - 3 * gap) / 4;
   report.tips.forEach((tip, index) => {
     const x = margin + 17 + index % 4 * (cardWidth + gap);
     const y = 1151 + Math.floor(index / 4) * 143;
-    frame(ctx, x, y, cardWidth, 130, "#dededb");
+    box(ctx, x, y, cardWidth, 130, "#edf3ed");
+    dot(ctx, x + 29, y + 35, 18, "#dde9df");
     ctx.save();
-    ctx.translate(x + 15, y + 22);
-    ctx.scale(1.27, 1.27);
-    ctx.lineWidth = 1.55;
-    ctx.strokeStyle = ink;
+    ctx.translate(x + 18, y + 24);
+    ctx.scale(.92, .92);
+    ctx.lineWidth = 1.65;
+    ctx.strokeStyle = faceAccent;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.stroke(new Path2D(tipPaths[index]));
     ctx.restore();
-    label(ctx, tip.label, x + 57, y + 34, 18, cardWidth - 70);
-    paragraph(ctx, tip.note, x + 57, y + 58, cardWidth - 70, 16, 3);
+    label(ctx, tip.label, x + 55, y + 35, 17, cardWidth - 66, 700, faceInk);
+    paragraph(ctx, tip.note, x + 55, y + 62, cardWidth - 66, 15, 3);
   });
 
-  frame(ctx, margin, 1465, content, 113, stroke);
-  label(ctx, copy.notes, 40, 1505, 25, content - 50, 730);
-  paragraph(ctx, interpretation, 40, 1542, content - 47, 19, 2);
+  ctx.fillStyle = stroke;
+  ctx.fillRect(41, 1473, content - 44, 1);
+  label(ctx, copy.notes, 41, 1508, 20, content - 50, 690, faceInk);
+  paragraph(ctx, interpretation, 41, 1540, content - 47, 16, 2);
   ctx.textAlign = "center";
   label(ctx, studioUrl, width / 2, 1600, 15, content, 520, muted);
   ctx.textAlign = "left";
 }
 
 export async function renderStudioPortraitReport(source: string, report: StudioAnalysisReport, copy: Labels, locale: string) {
-  const reference = await readImage(source);
+  const [reference, logo, typography] = await Promise.all([
+    readImage(source),
+    readImage("/tomverse-logo.png"),
+    loadStudioReportTypography(locale, JSON.stringify({ report, copy }) + studioName + studioUrl),
+  ]);
   const { element, context } = canvas(width, height);
-  if ("season" in report) colorPage(context, reference, report, copy.color, copy.interpretation, locale);
-  else facePage(context, reference, report, copy.face, copy.interpretation, locale);
+  if ("season" in report) colorPage(context, reference, logo, report, copy.color, copy.interpretation, locale, typography);
+  else facePage(context, reference, logo, report, copy.face, copy.interpretation, locale, typography);
   return encode(element);
 }

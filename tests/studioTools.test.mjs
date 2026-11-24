@@ -1,17 +1,33 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { test } from "node:test";
 import { fillStudioStickerCaptions, findStudioTool, STUDIO_EXPORT_FORMATS, STUDIO_PHOTO_PRESETS, STUDIO_STICKER_KEYS, STUDIO_TOOLS, STUDIO_STICKER_LIMIT, studioStickerCrop, studioStickerLayout } from "../lib/studioTools.ts";
 import { parseStudioAnalysis } from "../lib/studioCreativeAnalysis.ts";
 import { studioCreativeCopy } from "../locales/studioCreative.ts";
+import { STUDIO_PHOTO_CATEGORIES, studioPresetName, studioPublicationPresets } from "../lib/studioPresetLibrary.ts";
 
 test("Studio lists the new creative tools in Everyday creations and isolates poster publishing", () => {
   assert.equal(new Set(STUDIO_TOOLS.map(tool => tool.id)).size, STUDIO_TOOLS.length);
   for (const id of ["face-analysis", "character-maker", "color-analysis"]) assert.equal(findStudioTool(id)?.group, "play");
   for (const id of ["roleplay", "character-quiz"]) assert.equal(findStudioTool(id), undefined);
-  assert.deepEqual(STUDIO_TOOLS.filter(tool => tool.group === "publishing").map(tool => tool.id), ["poster"]);
+  assert.deepEqual(STUDIO_TOOLS.filter(tool => tool.group === "publishing").map(tool => tool.id), ["poster", "social-post"]);
   for (const { tool } of STUDIO_PHOTO_PRESETS) assert.equal(findStudioTool(tool)?.group, "design");
   for (const tool of STUDIO_TOOLS) assert.equal(findStudioTool(tool.id), tool);
   assert.equal(findStudioTool("unknown-tool"), undefined);
+});
+
+test("Studio libraries expose a unique visual for each localized preset", () => {
+  const publishing = [...studioPublicationPresets("poster"), ...studioPublicationPresets("social-post")];
+  assert.equal(STUDIO_PHOTO_PRESETS.length, 102);
+  assert.equal(STUDIO_PHOTO_CATEGORIES.length, 8);
+  assert.equal(publishing.length, 32);
+  const all = [...STUDIO_PHOTO_PRESETS, ...publishing];
+  assert.equal(new Set(all.map(preset => preset.artwork)).size, all.length);
+  assert.equal(new Set(STUDIO_PHOTO_PRESETS.map(preset => preset.id)).size, STUDIO_PHOTO_PRESETS.length);
+  for (const preset of all) {
+    assert.ok(existsSync(new URL("../public/studio/" + preset.artwork, import.meta.url)), preset.artwork);
+    for (const lang of SUPPORTED_LANGUAGES) assert.ok(studioPresetName(preset, lang)?.trim(), preset.id + " " + lang);
+  }
 });
 
 test("Twenty sticker crops tile even a non-divisible sheet without overlaps or lost pixels", () => {
@@ -47,7 +63,7 @@ test("Every supported language includes Studio labels, examples, and twenty stic
       assert.ok(messages[tool.title]);
       assert.ok(messages[tool.description]);
     }
-    for (const preset of STUDIO_PHOTO_PRESETS) assert.ok(messages[preset.label]);
+    for (const preset of STUDIO_PHOTO_PRESETS) assert.ok(studioPresetName(preset, lang));
     assert.equal(STUDIO_STICKER_KEYS.map(key => messages[key]).length, 20);
     assert.ok(studioOutputLanguage[lang]);
   }

@@ -1,30 +1,22 @@
+export { STUDIO_PHOTO_PRESETS, type StudioPhotoPreset } from "./studioPresetLibrary";
+
 export const STUDIO_TOOLS = [
   { id: "stickers", mobileDescription: "stickersMobile", group: "play", artwork: "stickers", title: "stickersTitle", description: "stickersDescription" },
   { id: "meme", mobileDescription: "memeMobile", group: "play", artwork: "meme", title: "memeTitle", description: "memeDescription" },
   { id: "face-analysis", mobileDescription: "faceAnalysisDescription", group: "play", artwork: "face-analysis-cover.webp", title: "faceAnalysisTitle", description: "faceAnalysisDescription" },
-  { id: "character-maker", mobileDescription: "characterMakerDescription", group: "play", artwork: "character-dream.webp", title: "characterMakerTitle", description: "characterMakerDescription" },
+  { id: "character-maker", mobileDescription: "characterMakerDescription", group: "play", artwork: "character-fantasy.webp", title: "characterMakerTitle", description: "characterMakerDescription" },
   { id: "color-analysis", mobileDescription: "colorAnalysisDescription", group: "play", artwork: "color-analysis-cover.webp", title: "colorAnalysisTitle", description: "colorAnalysisDescription" },
   { id: "illustration", mobileDescription: "illustrationMobile", group: "design", artwork: "illustration", title: "illustrationTitle", description: "illustrationDescription" },
   { id: "caricature", mobileDescription: "caricatureMobile", group: "design", artwork: "caricature", title: "caricatureTitle", description: "caricatureDescription" },
   { id: "transparent-png", mobileDescription: "pngMobile", group: "design", artwork: "cat", title: "pngTitle", description: "pngDescription" },
-  { id: "poster", mobileDescription: "posterMobile", shortTitle: "posterShort", group: "publishing", artwork: "poster-jazz.webp", title: "posterTitle", description: "posterDescription" },
+  { id: "poster", mobileDescription: "posterMakerDescription", group: "publishing", artwork: "poster-jazz.webp", title: "posterMakerTitle", description: "posterMakerDescription" },
+  { id: "social-post", mobileDescription: "socialPostDescription", group: "publishing", artwork: "effects/social-post-travel-story.webp", title: "socialPostTitle", description: "socialPostDescription" },
 ] as const;
 
 export type StudioTool = (typeof STUDIO_TOOLS)[number];
 export type StudioCreativeTool = Extract<StudioTool, { id: "character-maker" | "face-analysis" | "color-analysis" }>;
 export const findStudioTool = (id: string) => STUDIO_TOOLS.find(tool => tool.id === id);
 export const studioArtworkPath = (name: string) => "/studio/" + (name.includes(".") ? name : name + ".png");
-
-export const STUDIO_PHOTO_PRESETS = [
-  { id: "film", tool: "illustration", label: "filmPortrait", artwork: "preset-film.webp", style: "warm analog film photography, with fine grain and natural light" },
-  { id: "anime", tool: "illustration", label: "anime", artwork: "preset-anime.webp", style: "hand-drawn cel animation with a hand-painted background" },
-  { id: "3d", tool: "illustration", label: "threeDCharacter", artwork: "preset-3d.webp", style: "tactile stylized 3D character render with soft lighting" },
-  { id: "watercolor", tool: "illustration", label: "watercolor", artwork: "illustration.png", style: "watercolor illustration" },
-  { id: "caricature", tool: "caricature", label: "caricatureTitle", artwork: "caricature.png" },
-  { id: "transparent", tool: "transparent-png", label: "pngTitle", artwork: "cat.png" },
-] as const;
-
-export type StudioPhotoPreset = (typeof STUDIO_PHOTO_PRESETS)[number];
 
 export const STUDIO_STICKER_KEYS = [
   "stickerDefault01", "stickerDefault02", "stickerDefault03", "stickerDefault04", "stickerDefault05",

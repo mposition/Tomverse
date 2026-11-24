@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Download, ImagePlus, Share2 } from "lucide-react";
 import { STUDIO_EXPORT_FORMATS, STUDIO_PHOTO_PRESETS, studioArtworkPath as asset, type StudioCreativeTool, type StudioPhotoPreset, type StudioTool } from "@/lib/studioTools";
+import { studioPresetName, studioPublicationPresets, type StudioPublicationPreset } from "@/lib/studioPresetLibrary";
 import { applyStudioSubjectMask, makeStudioImageReference, renderStudioImage, saveStudioFile, shareStudioPng } from "./studioCanvas";
 import { StudioFileButton, StudioStatus, useStudioCopy, useStudioTask, useStudioUrls } from "./StudioControls";
 import { StudioGenerateButton, StudioQuoteHint } from "./StudioGenerationControls";
@@ -25,6 +26,7 @@ type ToolCheckoutDraft = {
   posterCategory?: string;
   posterStyle?: string;
   posterHasText?: boolean;
+  publicationPreset?: string;
 };
 
 const posterCategories = [["autoStyle", "auto"], ["eventCategory", "event"], ["productCategory", "product"], ["announcementCategory", "announcement"]] as const;
@@ -41,21 +43,31 @@ export function StudioToolEditor({ tool, preset }: {
   const [runImage] = useState(createStudioImageRunner);
   const { id } = tool;
   const poster = id === "poster";
+  const social = id === "social-post";
+  const publishing = poster || social;
+  const formats = STUDIO_EXPORT_FORMATS.map((option, index) => ({ ...option, index }))
+    .filter(option => poster ? option.id === "poster" : option.id !== "poster");
+  const publicationChoices = publishing ? studioPublicationPresets(id) : [];
+  const [publicationPreset, setPublicationPreset] = useState("");
+  const publication = publicationChoices.find(option => option.id === publicationPreset);
   const photoTool = id === "illustration" || id === "caricature";
   const pngTool = id === "transparent-png";
-  const template = id === "meme" || id === "poster";
+  const template = id === "meme" || publishing;
+  const illustrationPresets = STUDIO_PHOTO_PRESETS.slice(0, 6).filter(item => item.id !== "watercolor" && item.style);
+  if (preset?.style && preset.id !== "watercolor" && !illustrationPresets.some(item => item.id === preset.id)) illustrationPresets.push(preset);
   const artisticOptions = id === "illustration"
     ? [
       ["watercolor illustration", copy.watercolor], ["comic illustration", copy.comic], ["line art", copy.lineArt],
-      ...STUDIO_PHOTO_PRESETS.flatMap(item => "style" in item && item.id !== "watercolor" ? [[item.style, copy[item.label]]] : []),
+      ...illustrationPresets.map(item => [item.style, studioPresetName(item, lang)]),
     ]
     : [["subtle", copy.subtle], ["playful", copy.playful], ["bold", copy.bold]];
-  const [photo, setPhoto] = useState(() => poster ? "" : photoTool ? asset("selfie") : asset(tool.artwork));
+  const [photo, setPhoto] = useState(() => publishing ? "" : photoTool ? asset(preset?.id.startsWith("pet-") ? "cat" : "selfie") : asset(tool.artwork));
   const [customPhoto, setCustomPhoto] = useState(false);
   const [result, setResult] = useState(() => preset ? "/studio/" + preset.artwork : asset(tool.artwork));
   const [resultIsExample, setResultIsExample] = useState(true);
   const [format, setFormat] = useState(() => {
-    const style = preset && "style" in preset ? preset.style : id === "illustration" ? "watercolor illustration" : "";
+    if (social) return 1;
+    const style = preset?.style ?? (id === "illustration" ? "watercolor illustration" : "");
     return Math.max(0, artisticOptions.findIndex(([value]) => value === style));
   });
   const [posterBrief, setPosterBrief] = useState("");
@@ -68,18 +80,18 @@ export function StudioToolEditor({ tool, preset }: {
   const [customCaption, setCaption] = useState<string>();
   const caption = customCaption ?? copy.exampleMemeCaption;
   const hasReference = photoTool || pngTool || customPhoto;
-  const size = poster && STUDIO_EXPORT_FORMATS[format]?.id !== "feed" ? "1024x1536" : "1024x1024";
-  const imageQuote = useStudioImageQuote(size, hasReference, true, poster ? "1024x1024" : undefined);
+  const size = publishing && STUDIO_EXPORT_FORMATS[format]?.id !== "feed" ? "1024x1536" : "1024x1024";
+  const imageQuote = useStudioImageQuote(size, hasReference, true, publishing ? "1024x1024" : undefined);
   const [creditError, setCreditError] = useState<StudioGenerationError | null>(null);
   const [draftSaved, setDraftSaved] = useState(false);
   const checkoutDraft = useStudioCheckoutDraft<ToolCheckoutDraft>(id, saved => {
     urls.release(photo);
     urls.release(result);
-    setPhoto(poster && !saved.customPhoto ? "" : typeof saved.photo === "string" ? saved.photo : urls.make(saved.photo));
+    setPhoto(publishing && !saved.customPhoto ? "" : typeof saved.photo === "string" ? saved.photo : urls.make(saved.photo));
     setResult(typeof saved.result === "string" ? saved.result : urls.make(saved.result));
     setCustomPhoto(saved.customPhoto);
     setResultIsExample(saved.resultIsExample);
-    setFormat(saved.format);
+    setFormat(publishing && !formats.some(option => option.index === saved.format) ? formats[0].index : saved.format);
     setTitle(saved.title);
     setDetails(saved.details);
     setCaption(saved.caption);
@@ -87,6 +99,7 @@ export function StudioToolEditor({ tool, preset }: {
     setPosterCategory(saved.posterCategory ?? "auto");
     setPosterStyle(saved.posterStyle ?? "auto");
     setPosterHasText(saved.posterHasText ?? (poster && saved.resultIsExample && saved.result === asset(tool.artwork)));
+    setPublicationPreset(saved.publicationPreset ?? "");
     report(copy.checkoutDraftRestored);
   });
 
@@ -95,7 +108,7 @@ export function StudioToolEditor({ tool, preset }: {
       const [photoDraft, resultDraft] = await Promise.all([captureStudioDraftImage(photo), captureStudioDraftImage(result)]);
       await checkoutDraft.save({
         photo: photoDraft, result: resultDraft, customPhoto, resultIsExample,
-        format, title, details, caption, posterBrief, posterCategory, posterStyle, posterHasText,
+        format, title, details, caption, posterBrief, posterCategory, posterStyle, posterHasText, publicationPreset,
       });
       setDraftSaved(true);
     } catch {
@@ -121,6 +134,14 @@ export function StudioToolEditor({ tool, preset }: {
     setCustomPhoto(false);
   };
 
+  function selectPublication(option: StudioPublicationPreset) {
+    setPublicationPreset(option.id);
+    urls.release(result);
+    setResult(asset(option.artwork));
+    setResultIsExample(true);
+    setPosterHasText(false);
+  }
+
   const imagePrompt = () => {
     switch (id) {
       case "meme":
@@ -131,8 +152,11 @@ export function StudioToolEditor({ tool, preset }: {
       case "caricature":
         return "Draw a recognisable caricature of the person in the attached photo. Exaggeration: " + artisticOptions[format][0] + ". Features to keep: " + details;
       case "poster":
+      case "social-post":
         return (hasReference ? "Incorporate the attached logo or photo when appropriate. " : "") +
-          "Design a finished poster with strong visual hierarchy and a clear focal point. " +
+          (poster ? "Design a finished print poster" : "Design a finished social media " + STUDIO_EXPORT_FORMATS[format].id + " image") +
+          " with strong visual hierarchy and a clear focal point. " +
+          (publication ? "Follow this template direction: " + publication.direction + ". " : "") +
           (title.trim() ? "Leave the upper quarter free for the exact title and details to be added separately. Do not draw text. "
             : "Create a concise headline using the language of the brief. Typeset the essential details clearly and keep all text within generous safe margins. ") +
           "Design brief: " + JSON.stringify({ description: posterBrief.trim(), category: posterCategory, style: posterStyle, title: title.trim(), details: details.trim() });
@@ -164,7 +188,7 @@ export function StudioToolEditor({ tool, preset }: {
       urls.release(result);
       setResult(urls.make(output));
       setResultIsExample(false);
-      if (poster) setPosterHasText(!title.trim());
+      if (publishing) setPosterHasText(!title.trim());
       void checkoutDraft.clear();
     } catch (error) {
       if (signal.aborted) return;
@@ -181,18 +205,18 @@ export function StudioToolEditor({ tool, preset }: {
     }
   });
 
-  const valid = (!poster || Boolean(title.trim() || posterBrief.trim())) && (id !== "meme" || Boolean(details.trim()));
+  const valid = (!publishing || Boolean(title.trim() || posterBrief.trim())) && (id !== "meme" || Boolean(details.trim()));
   const generationLabel = pngTool ? copy.removeBackground : copy.generate;
 
-  const posterTitle = posterHasText ? undefined : title || (resultIsExample ? copy.examplePosterTitle : undefined);
-  const posterDetails = posterHasText ? undefined : details || (resultIsExample ? copy.exampleEventDetails : undefined);
+  const posterTitle = posterHasText ? undefined : title || (resultIsExample && publication ? studioPresetName(publication, lang) : undefined);
+  const posterDetails = posterHasText ? undefined : details;
   const download = (share = false) => void task(async () => {
-    const dim = poster ? STUDIO_EXPORT_FORMATS[format] : { width: 1080, height: 1080, id };
+    const dim = publishing ? STUDIO_EXPORT_FORMATS[format] : { width: 1080, height: 1080, id };
     const blob = pngTool && !resultIsExample ? await fetch(result).then(response => response.blob())
       : await renderStudioImage(result, {
         width: dim.width, height: dim.height, fit: template && !posterHasText ? "cover" : "contain",
-        title: id === "meme" ? caption : poster ? posterTitle : undefined,
-        subtitle: poster ? posterDetails : undefined,
+        title: id === "meme" ? caption : publishing ? posterTitle : undefined,
+        subtitle: publishing ? posterDetails : undefined,
         bleed: posterHasText,
       });
     const filename = "tomverse-" + dim.id + ".png";
@@ -201,17 +225,28 @@ export function StudioToolEditor({ tool, preset }: {
   });
   const choice = (active: boolean) => active ? styles.choiceActive : styles.secondary;
 
-  return <><div className={styles.workbench}>
+  return <>
+    {publishing && <section className={styles.publicationChooser}>
+      <h2>{copy.choosePublicationPreset}</h2>
+      <div className={styles.publicationChoices} role="group" aria-label={copy.choosePublicationPreset}>
+        {publicationChoices.map(option => <button key={option.id} type="button" className={styles.publicationChoice}
+          disabled={busy} aria-pressed={publicationPreset === option.id} onClick={() => selectPublication(option)}>
+          <img src={asset(option.artwork)} alt="" width={150} height={150} loading="lazy" />
+          <span>{studioPresetName(option, lang)}</span>
+        </button>)}
+      </div>
+    </section>}
+    <div className={styles.workbench}>
     <section className={styles.panel}>
       <h2>{copy.inputs}</h2>
-      <div className={poster ? styles.photoInput : styles.fileRow}>
+      <div className={publishing ? styles.photoInput : styles.fileRow}>
         {photo ? <img src={photo} alt="" width={56} height={56} /> : <ImagePlus size={26} aria-hidden />}
-        <span>{poster ? copy.optionalArtwork : photoTool || pngTool ? copy.originalPhoto : copy.backgroundArtwork}</span>
+        <span>{publishing ? copy.optionalArtwork : photoTool || pngTool ? copy.originalPhoto : copy.backgroundArtwork}</span>
         <StudioFileButton label={photo ? copy.changeImage : copy.uploadPhoto} disabled={busy} onInvalid={() => report(copy.invalidImage, true)} onFile={changePhoto} />
-        {poster && photo && <button type="button" className={styles.secondary} disabled={busy} onClick={removePhoto}>{copy.removePhoto}</button>}
+        {publishing && photo && <button type="button" className={styles.secondary} disabled={busy} onClick={removePhoto}>{copy.removePhoto}</button>}
       </div>
-      {poster && <>
-        <label className={styles.field}>{copy.posterBrief}
+      {publishing && <>
+        <label className={styles.field}>{social ? copy.socialPostBrief : copy.posterBrief}
           <textarea rows={4} maxLength={500} value={posterBrief} disabled={busy} onChange={event => setPosterBrief(event.target.value)} />
         </label>
         <label className={styles.field}>{copy.posterCategory}
@@ -225,22 +260,23 @@ export function StudioToolEditor({ tool, preset }: {
           </select>
         </label>
       </>}
-      {poster && (
-        <label className={styles.field}>{copy.eventTitle}
+      {publishing && (
+        <label className={styles.field}>{poster ? copy.eventTitle : copy.imageCaption}
           <input value={title} maxLength={65} disabled={busy} onChange={event => setTitle(event.target.value)} />
         </label>
       )}
       {!pngTool && <label className={styles.field}>{
-        id === "meme" ? copy.situation : id === "poster" ? copy.dateAndPlace : copy.detailsToKeep
-      }<textarea value={details} maxLength={500} rows={id === "poster" ? 2 : 3} disabled={busy} onChange={event => setDetails(event.target.value)} /></label>}
+        id === "meme" ? copy.situation : poster ? copy.dateAndPlace : copy.detailsToKeep
+      }<textarea value={details} maxLength={500} rows={publishing ? 2 : 3} disabled={busy} onChange={event => setDetails(event.target.value)} /></label>}
       {id === "meme" && <label className={styles.field}>{copy.imageCaption}<input value={caption} maxLength={55} disabled={busy} onChange={event => setCaption(event.target.value)} /></label>}
       {photoTool && <fieldset className={styles.fieldset} disabled={busy}>
         <legend>{id === "illustration" ? copy.drawingStyle : copy.exaggeration}</legend>
         <div className={styles.choices}>{artisticOptions.map((option, i) => <button type="button" key={option[0]} className={choice(format === i)} aria-pressed={format === i} onClick={() => setFormat(i)}>{option[1]}</button>)}</div>
       </fieldset>}
-      {id === "poster" && <fieldset className={styles.fieldset} disabled={busy}>
+      {social && <fieldset className={styles.fieldset} disabled={busy}>
         <legend>{copy.template}</legend>
-        <div className={styles.choices}>{STUDIO_EXPORT_FORMATS.map((option, i) => <button type="button" key={option.id} className={choice(format === i)} aria-pressed={format === i} onClick={() => setFormat(i)}>{copy[option.id]}</button>)}</div>
+        <div className={styles.choices}>{formats.map(option => <button type="button" key={option.id} className={choice(format === option.index)}
+          aria-pressed={format === option.index} onClick={() => setFormat(option.index)}>{copy[option.id]}</button>)}</div>
       </fieldset>}
       <StudioGenerateButton label={generationLabel} busy={busy}
         disabled={!valid || !imageQuote.quote}
@@ -251,14 +287,15 @@ export function StudioToolEditor({ tool, preset }: {
     <section className={styles.panel} aria-busy={busy}>
       <h2>{copy.resultPreview}</h2>
         {resultIsExample && <p className={styles.hint}>{copy.exampleResult}</p>}
-        {id === "poster" && result && <div className={styles.posterGrid}>{STUDIO_EXPORT_FORMATS.map((option, i) => (
+        {publishing && result && <div className={styles.posterGrid} data-poster={poster || undefined}>{formats.map(option => (
           <figure key={option.id}>
             <div className={styles.posterArt} data-contained={posterHasText || undefined} style={{ aspectRatio: option.width + " / " + option.height }}>
               {posterHasText && <img className={styles.posterBleed} src={result} alt="" />}
               <img src={result} alt="" />
               {posterTitle && <div className={styles.artText}><strong>{posterTitle}</strong><small>{posterDetails}</small></div>}
             </div>
-            <figcaption><button type="button" aria-pressed={format === i} disabled={busy} className={choice(format === i)} onClick={() => setFormat(i)}>{copy[option.id]}</button></figcaption>
+            {social && <figcaption><button type="button" aria-pressed={format === option.index} disabled={busy}
+              className={choice(format === option.index)} onClick={() => setFormat(option.index)}>{copy[option.id]}</button></figcaption>}
           </figure>
         ))}</div>}
         {id === "meme" && result && <div className={styles.memeArt}><img src={result} alt="" /><strong>{caption}</strong></div>}
@@ -272,12 +309,12 @@ export function StudioToolEditor({ tool, preset }: {
         <button type="button" className={styles.primary} disabled={!result || busy} onClick={() => download()}>
           <Download size={16} aria-hidden />{copy.savePng}
         </button>
-        {poster && <button type="button" className={styles.secondary} disabled={!result || busy} onClick={() => download(true)}>
+        {publishing && <button type="button" className={styles.secondary} disabled={!result || busy} onClick={() => download(true)}>
           <Share2 size={16} aria-hidden />{copy.shareImage}
         </button>}
     </section>
   </div>
-    <StudioCreditRecovery error={creditError} returnTo={"/studio/" + id + "?lang=" + encodeURIComponent(lang)}
+    <StudioCreditRecovery error={creditError} returnTo={"/studio/" + id + "?" + new URLSearchParams({ lang, ...(preset ? { preset: preset.id } : {}) })}
       draftSaved={draftSaved} onSaveDraft={saveCheckoutDraft} onClose={async () => {
         await checkoutDraft.clear();
         setCreditError(null);

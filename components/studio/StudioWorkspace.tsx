@@ -14,10 +14,11 @@ import { useLanguage } from "@/components/LanguageProvider";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { normalizeCreditPackId, normalizePurchaseTargetPlan } from "@/lib/purchaseIntent";
 import { PRODUCT_SURFACE_PATH } from "@/lib/productSurfaceRoutes";
-import { STUDIO_PHOTO_PRESETS, STUDIO_TOOLS, findStudioTool, studioArtworkPath, type StudioPhotoPreset, type StudioTool } from "@/lib/studioTools";
+import { STUDIO_TOOLS, findStudioTool, studioArtworkPath, type StudioPhotoPreset, type StudioTool } from "@/lib/studioTools";
 import { StudioStickerTool } from "./StudioStickerTool";
 import { StudioToolEditor } from "./StudioToolEditor";
 import { StudioCreativeEditor } from "./StudioCreativeEditor";
+import { StudioPresetGallery } from "./StudioPresetGallery";
 import { useStudioCopy } from "./StudioControls";
 import "@/components/chat/review-studio.css";
 import styles from "./studio.module.css";
@@ -113,7 +114,7 @@ export function StudioWorkspace({ toolId, preset }: { toolId?: string; preset?: 
             <p>{copy.directoryIntro}</p>
             <div className={styles.heroLinks}>
               <a href="#studio-tools-design">{copy.browsePresets}<ArrowDown size={17} aria-hidden /></a>
-              <Link href={{ pathname: `${studioPath}/poster`, query: { lang } }}>{copy.posterGroup}<ArrowRight size={17} aria-hidden /></Link>
+              <a href="#studio-tools-publishing">{copy.posterGroup}<ArrowDown size={17} aria-hidden /></a>
             </div>
           </div>
           <div className={styles.heroExhibits}>
@@ -121,11 +122,11 @@ export function StudioWorkspace({ toolId, preset }: { toolId?: string; preset?: 
               href={{ pathname: `${studioPath}/illustration`, query: { lang, preset: "film" } }}>
               <Image src="/studio/preset-film.webp" width={260} height={260} alt="" unoptimized />
             </Link>
-            <Link className={styles.heroPoster} aria-label={copy.posterGroup} href={{ pathname: `${studioPath}/poster`, query: { lang } }}>
+            <Link className={styles.heroPoster} aria-label={copy.posterMakerTitle} href={{ pathname: `${studioPath}/poster`, query: { lang } }}>
               <Image src="/studio/poster-jazz.webp" width={280} height={348} alt="" unoptimized />
             </Link>
             <Link className={styles.heroCharacter} aria-label={copy.characterMakerTitle} href={{ pathname: `${studioPath}/character-maker`, query: { lang } }}>
-              <Image src="/studio/character-dream.webp" width={330} height={330} alt="" unoptimized />
+              <Image src="/studio/character-fantasy.webp" width={330} height={330} alt="" unoptimized />
             </Link>
             <Link className={styles.heroSticker} aria-label={copy.stickersTitle} href={{ pathname: `${studioPath}/stickers`, query: { lang } }}>
               <Image src="/studio/sticker-3.png" width={142} height={142} alt="" unoptimized />
@@ -135,28 +136,20 @@ export function StudioWorkspace({ toolId, preset }: { toolId?: string; preset?: 
         {(["play", "design", "publishing"] as const).map(group => (
           <section key={group} className={styles.directorySection} aria-labelledby={`studio-tools-${group}`}>
             <h2 id={`studio-tools-${group}`}>{group === "play" ? copy.playGroup : group === "design" ? copy.designGroup : copy.posterGroup}</h2>
-            <ul className={group === "design" ? styles.presetGrid : styles.directoryGrid}
+            {group === "design" ? <StudioPresetGallery studioPath={studioPath} /> : <ul className={styles.directoryGrid}
               data-play={group === "play" || undefined} data-publishing={group === "publishing" || undefined}>
-              {group === "design" ? STUDIO_PHOTO_PRESETS.map(item => (
-                <li key={item.id}>
-                  <Link className={styles.presetCard} data-testid={`studio-preset-${item.id}`}
-                    href={{ pathname: `${studioPath}/${item.tool}`, query: { lang, preset: item.id } }}>
-                    <Image src={`/studio/${item.artwork}`} alt="" width={380} height={285} unoptimized data-cutout={item.id === "transparent" || undefined} />
-                    <span>{copy[item.label]}<ArrowRight size={16} aria-hidden /></span>
-                  </Link>
-                </li>
-              )) : STUDIO_TOOLS.filter(item => item.group === group).map(item => (
+              {STUDIO_TOOLS.filter(item => item.group === group).map(item => (
                 <li key={item.id}>
                   <Link className={styles.toolCard} href={{ pathname: `${studioPath}/${item.id}`, query: { lang } }} data-testid={`studio-tool-${item.id}`}>
                     <div className={styles.cardArt}><ToolArtwork tool={item} /></div>
                     <div className={styles.cardCopy}>
-                      <h3>{"shortTitle" in item ? <><span className={styles.desktopCopy}>{copy[item.title]}</span><span className={styles.mobileCopy}>{copy[item.shortTitle]}</span></> : copy[item.title]}</h3><ArrowRight size={17} aria-hidden />
+                      <h3>{copy[item.title]}</h3><ArrowRight size={17} aria-hidden />
                       <p className={styles.desktopCopy}>{copy[item.description]}</p><p className={styles.mobileCopy}>{copy[item.mobileDescription]}</p>
                     </div>
                   </Link>
                 </li>
               ))}
-            </ul>
+            </ul>}
           </section>
         ))}
       </>}
