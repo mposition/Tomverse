@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { test } from "node:test";
-import { fillStudioStickerCaptions, findStudioTool, STUDIO_EXPORT_FORMATS, STUDIO_PHOTO_PRESETS, STUDIO_STICKER_KEYS, STUDIO_TOOLS, STUDIO_STICKER_LIMIT, studioStickerCrop, studioStickerLayout } from "../lib/studioTools.ts";
+import { fillStudioStickerCaptions, findStudioTool, studioObjectUrl, STUDIO_EXPORT_FORMATS, STUDIO_PHOTO_PRESETS, STUDIO_STICKER_KEYS, STUDIO_TOOLS, STUDIO_STICKER_LIMIT, studioStickerCrop, studioStickerLayout } from "../lib/studioTools.ts";
 import { parseStudioAnalysis } from "../lib/studioCreativeAnalysis.ts";
 import { studioCreativeCopy } from "../locales/studioCreative.ts";
 import { STUDIO_PHOTO_CATEGORIES, studioPresetName, studioPublicationPresets } from "../lib/studioPresetLibrary.ts";
@@ -175,4 +175,14 @@ test("Sticker sheets keep each requested caption in one cell for any pack size",
   }
   assert.deepEqual(studioStickerLayout(1), { columns: 1, rows: 1 });
   assert.deepEqual(studioStickerLayout(20), { columns: 5, rows: 4 });
+});
+
+test("a Studio object URL is the browser's own blob URL, unchanged", () => {
+  for (const url of ["blob:https://tomverse.app/7f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b", "blob:http://127.0.0.1:3100/0a1b2c3d", "blob:null/0a1b2c3d"]) {
+    assert.equal(studioObjectUrl(url), url);
+  }
+  // Never a string that is not an object URL, and never a rewritten one.
+  for (const url of ["javascript:alert(1)", "data:text/html,<b>x</b>", "blob:http://[::1]:3000/0a1b2c3d"]) {
+    assert.throws(() => studioObjectUrl(url), /studio_object_url_unexpected/);
+  }
 });

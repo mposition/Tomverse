@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { studioCopy } from "@/locales/studio";
 import { studioCreativeCopy } from "@/locales/studioCreative";
+import { studioObjectUrl } from "@/lib/studioTools";
 import { studioImageAccept, validStudioImage } from "./studioCanvas";
 import styles from "./studio.module.css";
 
@@ -23,7 +24,14 @@ export function useStudioUrls() {
   }, []);
   return {
     make(blob: Blob) {
-      const url = URL.createObjectURL(blob);
+      const created = URL.createObjectURL(blob);
+      let url: string;
+      try {
+        url = studioObjectUrl(created);
+      } catch (error) {
+        URL.revokeObjectURL(created);
+        throw error;
+      }
       urls.current.add(url);
       return url;
     },
