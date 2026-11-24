@@ -17,12 +17,15 @@ cheaper model is good enough or that total cost falls.
   Absent, every target (routing, coding, rewrite) runs the existing
   routing-quality cycle unchanged. The new objective is
   `diagnostic_only` (`COST_EFFICIENCY_OBJECTIVE`, candidate policy
-  `auto-cost-challenger-v1`, judge rubric `auto-quality-blind-judge-v1`).
+  `auto-cost-challenger-v2`, judge rubric `auto-quality-blind-judge-v1`).
 - **Challenger.** Inside the existing one slot and the offered menu (plan,
   context, capability, health and unreliable-model filters unchanged):
   `lower_credit` first, then `lower_estimated_provider_cost` (same credits,
-  lower estimate at the reserved input and 1 000 output tokens for every
-  model; unpriced or fallback-priced estimates are null, never zero), else the
+  lower estimate at the reserved input and the model's median output tokens
+  over its completed Chat answers of the last 14 days -- thinking included, as
+  billed -- never below 1 000; a model with fewer than 10 such answers, or an
+  unpriced or fallback-priced one, has no estimate and is never taken to be
+  cheaper; the medians used are stored in the manifest), else the
   existing same/next-higher draw as `quality_comparison`, which is never a
   savings sample. Ties break by credits, id and case position. No model is a
   fixed winner.
@@ -80,9 +83,16 @@ cheaper model is good enough or that total cost falls.
   other check, for manual and system promotion; the status is `diagnostic`,
   never `passed`. The run skips `applyCycleTunableChanges` and automatic
   promotion, and `actionableRecommendations` returns nothing for it, so the
-  recommendation agent and sends cannot act on it. The daily schedule never
-  starts one. A person starts it from Admin › Routing only while
-  `AUTO_ROUTER_COST_EFFICIENCY_DIAGNOSTIC=on` (default off), under the
+  recommendation agent and sends cannot act on it. A person starts it from
+  Admin › Routing while `AUTO_ROUTER_COST_EFFICIENCY_DIAGNOSTIC=on` (default
+  off). Since 2026-11-24 (owner) the daily schedule also starts one once a week
+  while Admin › Routing › "비용 효율 진단 주 1회 자동 실행" is on (default off,
+  audited): that day's single system cycle is the diagnostic instead of the
+  rotation, when no diagnostic started in the last 7 days. The scheduled run
+  happens in whichever process runs the daily job -- the `Auto Router
+  Optimizer` cron service when `AUTO_ROUTER_OPTIMIZER_OWN_PROCESS` is on -- so
+  `AUTO_ROUTER_COST_EFFICIENCY_DIAGNOSTIC=on` is needed there too. Both are
+  under the
   existing optimizer model approval, run/day/month ceilings and audit entry
   (`metadata.objective`). Legacy cycles, active guidance, CAS and rollback are
   unchanged. Its answer failures do not feed the routing cycle's
@@ -149,6 +159,19 @@ stopped as `cost_unknown` when two `deepseek-v4-pro` answers failed (an
 `AI_APICallError` with no status after about 48 s, and the 120 s reasoning
 timeout), before the guidance comparison. US$0.244. The bounded answer cost
 above is the fix; deepseek-v4-pro Chat itself works in production (streamed).
+
+**Production run 1, 2026-11-24 19:50 AEST (owner-approved, person-started).**
+Finished as `diagnostic`, 132 calls, 8 answer timeouts counted at their bound
+(US$0.044), no unknown cost, US$1.156. Cheaper candidates: 11 savings samples;
+cheaper answer worse 4, equal 3, better 1, order disagreement 1, undecided 2,
+one critical regression -- outside the criteria. Observed answer cost of the
+pairs fell from US$0.071 to US$0.021, credits 117 to 106. The proposed
+guidance: worse in 8 of 12 judged changed picks, better in none. Nothing was
+applied. Two findings: `minimax-m3` was drawn as lower estimated cost than
+Haiku on the 1 000-token assumption but its observed answers cost more (its
+thinking was not in the estimate -- candidate policy v2 above is the fix), and
+`deepseek-flash` returned empty answers that spent the 4 000-token cap on
+thinking.
 
 ## What remains unmeasured
 

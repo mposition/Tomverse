@@ -196,10 +196,65 @@ test("a diagnostic cycle's run over the real cycle table", { skip: !databaseUrl 
                 await prisma.user.delete({ where: { id: user.id } });
             }
         });
+        await t.test("the observed output read runs against the real attempt table", async () => {
+            const warned = mock.method(console, "warn");
+            try {
+                const observed = await optimizer.readObservedAnswerOutputTokens(new Date());
+                assert.ok(observed instanceof Map);
+                assert.ok(!warned.mock.calls.some((call) => String(call.arguments[0]).includes("observed_output_failed")));
+            } finally {
+                warned.mock.restore();
+            }
+        });
+        await t.test("the daily run spends one day a week on the diagnostic only while its switch is on", async () => {
+            const { runScheduledOptimizerCycle } = await import(mod("lib/autoRewriteOptimizer.ts"));
+            await prisma.autoRouterOptimizerCycle.deleteMany({});
+            // Switch off: the day is an ordinary routing cycle's, and the system may not start a diagnostic.
+            await optimizer.updateOptimizerAutomation(actor, { daily: false, autoPromote: false, costDiagnosticWeekly: false });
+            assert.equal(await optimizer.scheduledCostDiagnosticDue(), false);
+            assert.deepEqual(await optimizer.startAutoRouterOptimizerCycle("system", { objective: "chat_cost_efficiency" }), { refused: "diagnostic_needs_person" });
+            // The day goes to the ordinary rotation (coding and image start on), never to a diagnostic.
+            const ordinary = await runScheduledOptimizerCycle({ waitForCompletion: true });
+            assert.equal(ordinary.objective, undefined);
+            assert.equal(await prisma.autoRouterOptimizerCycle.count({ where: { status: "diagnostic" } }), 0);
+            // One system cycle a day: clear today's so the diagnostic below can have the day.
+            await prisma.autoRouterOptimizerCycle.deleteMany({});
+            // An older page saving only daily and auto-promote leaves the weekly switch as it is.
+            await optimizer.updateOptimizerAutomation(actor, { daily: false, autoPromote: false, costDiagnosticWeekly: true });
+            await optimizer.updateOptimizerAutomation(actor, { daily: false, autoPromote: false });
+            assert.equal((await optimizer.readOptimizerAutomation()).costDiagnosticWeekly, true);
+            // Its environment switch off: not due.
+            process.env.AUTO_ROUTER_COST_EFFICIENCY_DIAGNOSTIC = "off";
+            assert.equal(await optimizer.scheduledCostDiagnosticDue(), false);
+            process.env.AUTO_ROUTER_COST_EFFICIENCY_DIAGNOSTIC = "on";
+            // On, with no diagnostic this week: the day is the diagnostic's, started by the system, diagnostic-only.
+            assert.equal(await optimizer.scheduledCostDiagnosticDue(), true);
+            const ran = await runScheduledOptimizerCycle({ waitForCompletion: true });
+            assert.equal(ran.started, true, JSON.stringify(ran));
+            assert.equal(ran.objective, "chat_cost_efficiency");
+            assert.deepEqual(ran.outcome, { recorded: true, status: "diagnostic", failure: null });
+            const row = await prisma.autoRouterOptimizerCycle.findUniqueOrThrow({ where: { id: ran.cycleId } });
+            assert.equal(row.startedBy, "system");
+            assert.equal(row.summary.objective.id, "chat_cost_efficiency");
+            assert.equal(row.summary.objective.candidatePolicy, "auto-cost-challenger-v2");
+            assert.equal(row.promotedAt, null);
+            // The plan records how candidates were estimated, fixed before the first call.
+            const estimate = row.summary.manifest.candidatePolicy.estimateOutputTokens;
+            assert.equal(estimate.unobserved, "never_cheaper");
+            assert.equal(estimate.includesThinking, true);
+            assert.equal(typeof estimate.observed, "object");
+            // Within the week it is not due again; the next days go back to the rotation.
+            assert.equal(await optimizer.scheduledCostDiagnosticDue(), false);
+            assert.equal(await optimizer.scheduledCostDiagnosticDue(new Date(Date.now() + 8 * 86_400_000)), true);
+            // A diagnostic that failed but recorded its objective also counts as this week's.
+            await prisma.autoRouterOptimizerCycle.update({ where: { id: ran.cycleId }, data: { status: "failed" } });
+            assert.equal(await optimizer.scheduledCostDiagnosticDue(), false);
+            await optimizer.updateOptimizerAutomation(actor, { daily: false, autoPromote: false, costDiagnosticWeekly: false });
+        });
     } finally {
         if (before === undefined) delete process.env.AUTO_ROUTER_COST_EFFICIENCY_DIAGNOSTIC;
         else process.env.AUTO_ROUTER_COST_EFFICIENCY_DIAGNOSTIC = before;
-        await optimizer.updateOptimizerAutomation(actor, { daily: false, autoPromote: false });
+        await optimizer.updateOptimizerAutomation(actor, { daily: false, autoPromote: false, costDiagnosticWeekly: false });
         await updateSettingAutoApply(actor, false);
         await prisma.autoRouterOptimizerCycle.deleteMany({});
         await prisma.$disconnect();

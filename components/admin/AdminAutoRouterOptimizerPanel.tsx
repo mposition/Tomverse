@@ -90,7 +90,7 @@ type OptimizerState = {
   smartAdaptiveDaily?: DailyRoutingObservation | null;
   responseLatency?: ResponseLatencyEvidence;
   optimizerModelId: string | null;
-  automation: { daily: boolean; autoPromote: boolean };
+  automation: { daily: boolean; autoPromote: boolean; costDiagnosticWeekly: boolean };
   options: { id: string; name: string; provider: string }[];
   active: { cycleId: string | null; guidance: string; canRollBack: boolean };
   cycles: Cycle[];
@@ -116,7 +116,7 @@ type Action =
   | { action: "set_model"; modelId: string | null }
   | { action: "run" }
   | { action: "run_cost_diagnostic" }
-  | { action: "set_automation"; daily: boolean; autoPromote: boolean }
+  | { action: "set_automation"; daily: boolean; autoPromote: boolean; costDiagnosticWeekly: boolean }
   | { action: "promote"; cycleId: string }
   | { action: "roll_back" }
   | TunableAction
@@ -149,7 +149,7 @@ export function AdminAutoRouterOptimizerPanel({
   const { locale: apiLocale } = useAdminLocale();
   const [state, setState] = useState<OptimizerState | null>(null);
   const [draft, setDraft] = useState(OFF);
-  const [automation, setAutomation] = useState({ daily: false, autoPromote: false });
+  const [automation, setAutomation] = useState({ daily: false, autoPromote: false, costDiagnosticWeekly: false });
   const [busy, setBusy] = useState(false);
   const [refreshingLatency, setRefreshingLatency] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
@@ -360,6 +360,17 @@ export function AdminAutoRouterOptimizerPanel({
           />
           {m.autoPromote}
         </label>
+        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
+          <input
+            type="checkbox"
+            checked={automation.costDiagnosticWeekly}
+            disabled={!state || busy || locked}
+            onChange={(event) => setAutomation({ ...automation, costDiagnosticWeekly: event.target.checked })}
+            data-testid="admin-auto-router-optimizer-cost-diagnostic-weekly"
+            className="h-5 w-5"
+          />
+          {m.costDiagnosticWeekly}
+        </label>
         <AdminWriteButton
           {...writeProps}
           variant="secondary"
@@ -368,13 +379,15 @@ export function AdminAutoRouterOptimizerPanel({
             !state ||
             busy ||
             (automation.daily === state.automation.daily &&
-              automation.autoPromote === state.automation.autoPromote)
+              automation.autoPromote === state.automation.autoPromote &&
+              automation.costDiagnosticWeekly === state.automation.costDiagnosticWeekly)
           }
           data-testid="admin-auto-router-optimizer-automation-save"
         >
           {m.save}
         </AdminWriteButton>
         <p className="w-full text-xs text-zinc-500">{m.automationNote}</p>
+        <p className="w-full text-xs text-zinc-500">{m.costDiagnosticWeeklyNote}</p>
       </fieldset>
 
       {state ? (

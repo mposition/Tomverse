@@ -23,6 +23,7 @@ import {
 import { COST_EFFICIENCY_CRITERIA } from "../lib/autoCostEfficiencyReport.ts";
 import {
   buildAutoCandidateMenu, buildCostEfficiencyManifest, costEfficiencyCallPlan, estimateAnswerMicroUsd,
+  estimateAnswerOutputTokens, COST_EFFICIENCY_OBSERVED_OUTPUT_MIN_SAMPLES,
 } from "../lib/autoCostEfficiencyPlan.ts";
 import { gradeDevelopmentAnswer, parseDevelopmentCorpus, canonicalBenchmarkJson } from "../lib/routerDevelopmentBenchmark.ts";
 import { autoQualityCostCases } from "../tests/fixtures/autoQualityCostCases.mjs";
@@ -70,6 +71,9 @@ export async function runCostEfficiencyDryRun({ optimizerModelId = DEFAULT_MODEL
     throw new Error("dry_run_pricing_environment_overrides");
   const models = AVAILABLE_MODELS.filter((model) => model.enabled && !model.catalogDeleted);
   const byId = new Map(models.map((model) => [model.id, model]));
+  // No database offline: each model is "observed" at the output length its mock answers use.
+  const observedOutputTokens = new Map(models.map((model) => [model.id,
+    { medianOutputTokens: 200 + (model.reasoning ? 300 : 0), samples: COST_EFFICIENCY_OBSERVED_OUTPUT_MIN_SAMPLES }]));
   const optimizer = byId.get(optimizerModelId);
   const router = byId.get(routerModelId);
   if (!optimizer || !router) throw new Error("dry_run_unknown_model");
@@ -126,12 +130,14 @@ export async function runCostEfficiencyDryRun({ optimizerModelId = DEFAULT_MODEL
       return { value: { quality, constraintFailure: { A: wrong(answerA), B: wrong(answerB) } },
         ...priceOf(optimizer, tokensOf(message) + 600, 60), provider: optimizer.provider };
     },
-    estimateAnswerMicroUsd: (modelId, decision) => estimateAnswerMicroUsd(byId.get(modelId), decision),
+    estimateAnswerMicroUsd: (modelId, decision) =>
+      estimateAnswerMicroUsd(byId.get(modelId), decision, estimateAnswerOutputTokens(modelId, observedOutputTokens)),
     gradeExact: (decision, answer) => (decision.expected ? gradeDevelopmentAnswer(decision.expected, answer).pass : null),
   });
   const sample = Math.min(decisions.length, AUTO_ROUTER_OPTIMIZER_SAMPLE_MAX);
   const manifest = buildCostEfficiencyManifest({
     createdAt: AT,
+    observedOutputTokens,
     source: {
       commit: git(["rev-parse", "HEAD"]), dirty: git(["status", "--porcelain", "--", ...SOURCE_PATHS]) ? true : false,
       files: Object.fromEntries(SOURCE_PATHS.map((path) => [path, sha(readFileSync(resolve(root, path), "utf8"))])),

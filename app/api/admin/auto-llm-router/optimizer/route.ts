@@ -36,7 +36,7 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("run") }).strict(),
   // A person's start of the diagnostic-only cost-efficiency cycle; refused while its switch is off.
   z.object({ action: z.literal("run_cost_diagnostic") }).strict(),
-  z.object({ action: z.literal("set_automation"), daily: z.boolean(), autoPromote: z.boolean() }).strict(),
+  z.object({ action: z.literal("set_automation"), daily: z.boolean(), autoPromote: z.boolean(), costDiagnosticWeekly: z.boolean().optional() }).strict(),
   z.object({ action: z.literal("promote"), cycleId: z.string().trim().min(1).max(64) }).strict(),
   z.object({ action: z.literal("roll_back") }).strict(),
   z.object({ action: z.literal("set_setting_auto_apply"), enabled: z.boolean() }).strict(),
@@ -143,7 +143,7 @@ export async function POST(req: Request) {
     }
 
     if (body.action === "set_automation") {
-      await updateOptimizerAutomation(actor, { daily: body.daily, autoPromote: body.autoPromote });
+      await updateOptimizerAutomation(actor, { daily: body.daily, autoPromote: body.autoPromote, costDiagnosticWeekly: body.costDiagnosticWeekly });
       return await stateResponse();
     }
 
