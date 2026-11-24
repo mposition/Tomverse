@@ -23,6 +23,7 @@ import { antigravityAnswer, antigravityStdin } from "./antigravity.mjs";
 import { buildPrompt } from "./prompt.mjs";
 import { consumeManualQuota } from "./quota.mjs";
 import { Store, newJobId } from "./store.mjs";
+import { usageLimitFrom } from "./usage-limit.mjs";
 import { parseReviewerOutput } from "./verdict.mjs";
 
 export class UsageError extends Error {
@@ -235,7 +236,9 @@ export const promptForProvider = (provider, prompt) =>
  */
 // `reviewer_could_not_review`: the reviewer said it could not read the change
 // (verdict "unknown"), which says nothing about the change either.
-const VENDOR_FAILURES = /^(timeout|output_too_large|reviewer_spawn_failed|reviewer_exit_.+|reviewer_could_not_review)$/;
+// `reviewer_usage_limit`: the reviewer's plan is spent (usage-limit.mjs); the
+// provider is also held until its reset, whatever its quota probe reads.
+const VENDOR_FAILURES = /^(timeout|output_too_large|reviewer_spawn_failed|reviewer_exit_.+|reviewer_could_not_review|reviewer_usage_limit)$/;
 const LOCAL_FAILURES = new Set(["worktree_failed", "prompt_file_failed"]);
 
 const RETRY_BASE_MS = 60_000;
@@ -259,6 +262,9 @@ export class Orchestrator {
     this.killers = new Set();
     this.stopping = false;
     this.waitingLogged = new Set();
+    // Provider id -> { until, message }: limits the reviewers reported
+    // themselves. In memory: after a restart the next refusal records it again.
+    this.usageLimits = new Map();
     this.workRoot = join(config.stateDir, "worktrees");
     mkdirSync(this.workRoot, { recursive: true });
   }
@@ -335,8 +341,30 @@ export class Orchestrator {
     });
   }
 
-  tick(quotas) {
-    if (!quotas || typeof quotas !== "object") throw new Error("quota_snapshot_required");
+  /**
+   * The quota snapshot with every reported usage limit laid over it: a
+   * provider that said its plan is spent reads exhausted until its reset,
+   * whatever its probe says. Expired holds are dropped.
+   */
+  withUsageLimits(quotas) {
+    if (!quotas || typeof quotas !== "object") return quotas;
+    const now = this.now();
+    const result = { ...quotas };
+    for (const [providerId, limit] of this.usageLimits) {
+      if (limit.until <= now) {
+        this.usageLimits.delete(providerId);
+        this.log(`${providerId} usage limit hold ended`);
+        continue;
+      }
+      result[providerId] = { state: "exhausted", reason: "usage_limit_reported",
+        until: new Date(limit.until).toISOString(), message: limit.message };
+    }
+    return result;
+  }
+
+  tick(rawQuotas) {
+    if (!rawQuotas || typeof rawQuotas !== "object") throw new Error("quota_snapshot_required");
+    const quotas = this.withUsageLimits(rawQuotas);
     // Draining: start nothing new, let running reviews finish. Submits are still
     // accepted and wait in the queue until the drain is lifted.
     if (isDraining(this.config)) return [];
@@ -415,6 +443,10 @@ export class Orchestrator {
       this.requeueSlot(job.id, slot, { retriedAfter: "orchestrator_restarted" });
       this.log(`stopped ${job.id}#${slot.index}; back in the queue`);
       return;
+    }
+    if (outcome.reason === "reviewer_usage_limit" && Number.isFinite(outcome.limitedUntil)) {
+      this.usageLimits.set(slot.provider, { until: outcome.limitedUntil, message: outcome.limitMessage ?? "" });
+      this.log(`${slot.provider} reported its usage limit; held until ${new Date(outcome.limitedUntil).toISOString()}`);
     }
     // A reviewer that failed to answer is not the answer (owner decisions
     // 2026-11-15 and 2026-11-16): the slot goes back to the queue.
@@ -587,19 +619,29 @@ export class Orchestrator {
         (raw ?? out).write(chunk);
       });
       let stderrSize = 0;
+      const stderrHead = [];
       child.stderr.on("data", (chunk) => {
         // stderr is diagnostic only; keep the head of it and drop the rest.
         if (stderrSize >= this.config.maxStderrBytes) return;
         const room = this.config.maxStderrBytes - stderrSize;
-        err.write(chunk.length > room ? chunk.subarray(0, room) : chunk);
-        stderrSize += Math.min(chunk.length, room);
+        const kept = chunk.length > room ? chunk.subarray(0, room) : chunk;
+        err.write(kept);
+        if (stderrSize < 4096) stderrHead.push(kept);
+        stderrSize += kept.length;
       });
       child.on("error", () => done({ verdict: "unknown", reason: "reviewer_spawn_failed", findings: [] }));
       child.on("close", (code) => {
         if (timedOut) return done({ verdict: "unknown", reason: "timeout", findings: [] });
         if (overflow) return done({ verdict: "unknown", reason: "output_too_large", findings: [] });
-        if (code !== 0) return done({ verdict: "unknown", reason: `reviewer_exit_${code}`, findings: [] });
         const stdout = Buffer.concat(chunks).toString("utf8");
+        if (code !== 0) {
+          const limit = usageLimitFrom({ stdout, stderr: Buffer.concat(stderrHead).toString("utf8") }, this.now());
+          if (limit) {
+            return done({ verdict: "unknown", reason: "reviewer_usage_limit", findings: [],
+              limitedUntil: limit.until, limitMessage: limit.message });
+          }
+          return done({ verdict: "unknown", reason: `reviewer_exit_${code}`, findings: [] });
+        }
         if (!eventStream) return done(parseReviewerOutput(stdout));
         const answer = antigravityAnswer(stdout);
         if (answer.text === undefined) return done({ verdict: "unknown", reason: answer.reason, findings: [] });
