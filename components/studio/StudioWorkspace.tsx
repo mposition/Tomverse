@@ -37,13 +37,8 @@ function ToolArtwork({ tool }: { tool: StudioTool }) {
   if (tool.id === "transparent-png") {
     return <div className={styles.cutoutMosaic}><Image src="/studio/cat.png" alt="" width={129} height={166} unoptimized /></div>;
   }
-  if (tool.id === "face-analysis" || tool.id === "color-analysis") {
-    return <div className={styles.portraitArt} data-palette={tool.id === "color-analysis" || undefined}>
-      <Image src="/studio/selfie.png" alt="" width={110} height={142} unoptimized />
-      {tool.id === "color-analysis" && <span className={styles.coverSwatches} aria-hidden />}
-    </div>;
-  }
-  return <picture className={styles.cardPhoto}>
+  const analysis = tool.id === "face-analysis" || tool.id === "color-analysis" ? tool.id : undefined;
+  return <picture className={styles.cardPhoto} data-analysis={analysis}>
     {mobileArtwork.has(tool.artwork) && <source media="(max-width: 768px)" srcSet={`/studio/${tool.artwork}-mobile.png`} />}
     {/* Art direction differs between desktop and mobile. */}
     <img src={studioArtworkPath(tool.artwork)} alt="" width={294} height={172} data-character={tool.id === "character-maker" || undefined} />

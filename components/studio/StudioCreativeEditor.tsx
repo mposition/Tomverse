@@ -116,9 +116,19 @@ export function StudioCreativeEditor({ tool }: { tool: StudioCreativeTool }) {
           signal.throwIfAborted();
           const next = parseStudioAnalysis(id, text);
           const reportImage = next && await renderStudioPortraitReport(photo, next, {
-            heading: copy[tool.title], season: copy.colorSeason, overall: copy.faceOverall, breakdown: copy.faceBreakdown,
-            tips: copy.photoTip, recommended: copy.colorSuggestions, comparison: copy.colorComparison,
-            features: [copy.hairColor, copy.eyeColor, copy.skinColor],
+            interpretation: copy.photoInterpretation,
+            color: {
+              title: [copy.colorReportTitleLead, copy.colorReportTitleRest],
+              season: copy.colorSeason, recommended: copy.colorSuggestions, comparison: copy.avoidColors,
+              features: [copy.hairColor, copy.eyeColor, copy.skinColor],
+              profile: [copy.colorUndertone, copy.colorContrast, copy.colorOverallTone],
+              palettes: [copy.recommendPalette, copy.comparePalette], basis: copy.colorReportBasis,
+            },
+            face: {
+              title: copy.faceAnalysisTitle, lead: copy.faceReportLead, overall: copy.faceOverall, breakdown: copy.faceBreakdown,
+              tips: copy.faceRecommendations, notes: copy.faceAssessmentNotes,
+              thirds: [copy.faceUpperThird, copy.faceMiddleThird, copy.faceLowerThird],
+            },
           }, lang);
           signal.throwIfAborted();
           urls.release(result);
@@ -218,11 +228,14 @@ export function StudioCreativeEditor({ tool }: { tool: StudioCreativeTool }) {
               <h3>{outcome}</h3>
               <p>{analysis.summary}</p>
               {"observations" in analysis ? <>
+                {analysis.metrics && <ul>{analysis.metrics.map((item, index) => <li key={index}>{item.label} {item.score} / 10</li>)}</ul>}
                 <ul>{analysis.observations.map((item, index) => <li key={index}>{item.label} {item.score} / 10. {item.note}</li>)}</ul>
                 <ul>{analysis.tips.map((tip, index) => <li key={index}>{tip.label}. {tip.note}</li>)}</ul>
               </> : <>
+                <p>{copy.hairColor} {analysis.features.hair.name} · {copy.eyeColor} {analysis.features.eyes.name} · {copy.skinColor} {analysis.features.skin.name}</p>
+                {analysis.profile && <p>{copy.colorUndertone} {analysis.profile.undertone.name} · {copy.colorContrast} {analysis.profile.contrast.name} · {copy.colorOverallTone} {analysis.profile.tone.name}</p>}
                 <p>{copy.colorSuggestions} · {analysis.recommended.map(item => item.name + " " + item.color).join(", ")}</p>
-                <p>{copy.colorComparison} · {analysis.comparison.map(item => item.name + " " + item.color).join(", ")}</p>
+                <p>{copy.avoidColors} · {analysis.comparison.map(item => item.name + " " + item.color).join(", ")}</p>
               </>}
             </div>
             <p className={styles.hint}>{copy.photoInterpretation}</p>

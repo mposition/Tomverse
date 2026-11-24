@@ -125,11 +125,9 @@
 .stickerMosaic img:last-child { transform: translateY(10%) rotate(-8deg); }
 .cutoutMosaic, .checker { background: url("/studio/checker.png") center / cover; }
 .cutoutMosaic img { width: auto; height: 88%; object-fit: contain; }
-.portraitArt { display: flex; height: 100%; align-items: flex-end; justify-content: center; gap: 12px; padding: 10px 10px 0; background: #e7d9cb; }
-.portraitArt[data-palette] { background: #d5ded1; }
-.portraitArt img { width: auto; height: 100%; border-radius: 36% 36% 0 0; object-fit: cover; aspect-ratio: 4 / 5; }
-.coverSwatches { align-self: center; width: 16%; max-width: 46px; height: 60%; margin-inline-start: -4px; border-radius: 7px;
-  background: linear-gradient(#b45f4d 0% 25%, #cd9b6d 25% 50%, #7a8b64 50% 75%, #335858 75% 100%); }
+.cardPhoto[data-analysis="face-analysis"] { background: #fdfdfc; }
+.cardPhoto[data-analysis="color-analysis"] { background: #f2ebe2; }
+.cardPhoto[data-analysis] img { object-fit: contain; }
 .presetGrid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 12px; list-style: none; margin: 0; padding: 0; }
 .presetGrid li { grid-column: span 4; min-width: 0; }
 .presetGrid li:nth-child(6n + 1), .presetGrid li:nth-child(6n) { grid-column: span 5; }
@@ -219,7 +217,7 @@
 .creativeActions .field { margin: 0; }
 .characterArt { display: block; width: 100%; max-height: 480px; object-fit: contain; border-radius: 10px; background: var(--studio-field); }
 .reportPreview { display: block; width: min(100%, 646px); margin-inline: auto; border-radius: 9px; background: #f8f3ea; overflow: hidden; }
-.reportPreview img { display: block; width: 100%; height: auto; aspect-ratio: 1080 / 1480; object-fit: contain; }
+.reportPreview img { display: block; width: 100%; height: auto; object-fit: contain; }
 .packCaptions { margin: 0 0 14px; }
 .captionLabel, .captionEntry, .regenerationRow { display: flex; gap: 8px; align-items: end; }
 .captionLabel { justify-content: space-between; margin-bottom: 7px; font-size: .86rem; font-weight: 680; }

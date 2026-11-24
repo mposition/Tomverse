@@ -56,17 +56,32 @@ test("Every supported language includes Studio labels, examples, and twenty stic
 
 test("Studio renders only schema-checked, bounded analysis data", () => {
   assert.equal(parseStudioAnalysis("face-analysis", '{"status":"retry"}'), null);
-  const feature = { color: "#889977", region: [.2, .3, .4, .1] };
+  const feature = { color: "#889977", name: "Olive", region: [.2, .3, .4, .1] };
   const color = {
     status: "ok", season: "Soft autumn", summary: "Soft colors", features: { hair: feature, eyes: feature, skin: feature },
+    profile: {
+      undertone: { name: "Warm", color: "#dda88c" },
+      contrast: { name: "Medium", colors: ["#665550", "#d6baa2"] },
+      tone: { name: "Soft", colors: ["#bc855c", "#b6a791", "#657650", "#37505b"] },
+    },
     recommended: Array(6).fill({ color: "#889977", name: "Olive" }),
-    comparison: Array(6).fill({ color: "#6464cc", name: "Periwinkle" }), garment: null,
+    comparison: Array(6).fill({ color: "#6464cc", name: "Periwinkle" }),
+    recommendedPalette: Array(10).fill("#889977"), comparisonPalette: Array(10).fill("#6464cc"), garment: null,
   };
   assert.deepEqual(parseStudioAnalysis("color-analysis", JSON.stringify(color)), color);
   assert.throws(() => parseStudioAnalysis("color-analysis", JSON.stringify({
     ...color, comparison: Array(6).fill({ color: "url(example)", name: "Invalid" }),
   })));
   assert.throws(() => parseStudioAnalysis("face-analysis", '{"status":"ok","score":11}'));
+  const metric = { score: 7.9, label: "Eyes" };
+  const face = {
+    status: "ok", score: 7.9, summary: "Soft lighting",
+    metrics: Array(11).fill(metric), observations: Array(6).fill({ ...metric, note: "Clear detail", region: null }),
+    tips: Array(8).fill({ label: "Lighting", note: "Face a window" }),
+    guides: { axis: .5, thirds: [.2, .35, .5, .7], markers: [{ label: "Eyes", point: [.6, .35] }] },
+  };
+  assert.deepEqual(parseStudioAnalysis("face-analysis", JSON.stringify(face)), face);
+  assert.equal(parseStudioAnalysis("face-analysis", JSON.stringify({ ...face, guides: { ...face.guides, thirds: [.35, .2, .5, .7] } })).guides, null);
 });
 
 test("Random sticker captions fill every supported language to twenty while preserving custom text", () => {

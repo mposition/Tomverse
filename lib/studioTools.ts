@@ -1,9 +1,9 @@
 export const STUDIO_TOOLS = [
   { id: "stickers", mobileDescription: "stickersMobile", group: "play", artwork: "stickers", title: "stickersTitle", description: "stickersDescription" },
   { id: "meme", mobileDescription: "memeMobile", group: "play", artwork: "meme", title: "memeTitle", description: "memeDescription" },
-  { id: "face-analysis", mobileDescription: "faceAnalysisDescription", group: "play", artwork: "selfie", title: "faceAnalysisTitle", description: "faceAnalysisDescription" },
+  { id: "face-analysis", mobileDescription: "faceAnalysisDescription", group: "play", artwork: "face-analysis-cover.webp", title: "faceAnalysisTitle", description: "faceAnalysisDescription" },
   { id: "character-maker", mobileDescription: "characterMakerDescription", group: "play", artwork: "character-dream.webp", title: "characterMakerTitle", description: "characterMakerDescription" },
-  { id: "color-analysis", mobileDescription: "colorAnalysisDescription", group: "play", artwork: "selfie", title: "colorAnalysisTitle", description: "colorAnalysisDescription" },
+  { id: "color-analysis", mobileDescription: "colorAnalysisDescription", group: "play", artwork: "color-analysis-cover.webp", title: "colorAnalysisTitle", description: "colorAnalysisDescription" },
   { id: "illustration", mobileDescription: "illustrationMobile", group: "design", artwork: "illustration", title: "illustrationTitle", description: "illustrationDescription" },
   { id: "caricature", mobileDescription: "caricatureMobile", group: "design", artwork: "caricature", title: "caricatureTitle", description: "caricatureDescription" },
   { id: "transparent-png", mobileDescription: "pngMobile", group: "design", artwork: "cat", title: "pngTitle", description: "pngDescription" },
