@@ -288,14 +288,64 @@ test("the connected-image call has its own default-off switch", async () => {
   assert.equal(MODEL_DISCOVERY_CONNECTED_IMAGE_RESEARCH_ENV, "MODEL_DISCOVERY_CONNECTED_IMAGE_RESEARCH_ENABLED");
   // Only the literal "true" turns it on; without it no connected-image call is made.
   assert.ok(runner.includes('env[MODEL_DISCOVERY_CONNECTED_IMAGE_RESEARCH_ENV]?.trim() === "true"'));
-  // 2026-11-24: one call per provider, one at a time, each accepting only that
-  // provider's models; asked about ten at once, the model returned nothing.
+  // 2026-11-24: one call per provider, each accepting only that provider's models.
   assert.match(
     runner,
-    /= \{ ok: true, proposed: 0, accepted: \[\], rejected: \[\] \};[\s\S]*?if \(connectedImageEnabled\) \{\s*for \(const provider of inputs\.imageResearchProviders\) \{\s*try \{\s*const answer = await ask\(/
+    /= \{ ok: true, proposed: 0, accepted: \[\], rejected: \[\] \};[\s\S]*?if \(connectedImageEnabled\) \{\s*connectedImage = await researchConnectedImageProviders\(/
   );
   assert.match(runner, /providers: \[provider\],/);
   assert.match(runner, /connectedProviders: \[provider\],/);
+});
+
+test("connected-image providers are asked one at a time in a weekly rotation, and one failure costs only that provider", async () => {
+  const { researchConnectedImageProviders, rotateForWeek } = await import(
+    "../lib/modelDiscoveryNewProviderResearchCore.ts"
+  );
+  const providers = ["deepseek", "minimax", "mistral", "zhipu"];
+  // Weeks 48 and 49 start at different providers, so a run that runs out of
+  // time does not skip the same tail every week.
+  assert.deepEqual(rotateForWeek(providers, "2026-W48"), ["deepseek", "minimax", "mistral", "zhipu"]);
+  assert.deepEqual(rotateForWeek(providers, "2026-W49"), ["minimax", "mistral", "zhipu", "deepseek"]);
+  assert.deepEqual(rotateForWeek([], "2026-W49"), []);
+
+  const asked = [];
+  const failures = [];
+  let inFlight = 0;
+  const result = await researchConnectedImageProviders({
+    providers,
+    week: "2026-W49",
+    ask: async (provider) => {
+      inFlight += 1;
+      assert.equal(inFlight, 1, "calls run one at a time");
+      asked.push(provider);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      inFlight -= 1;
+      if (provider === "mistral") throw new Error("timeout");
+      return { candidates: provider === "minimax" ? [{}, {}] : [] };
+    },
+    check: (provider, answer) => ({
+      accepted: (answer?.candidates ?? []).map((_, i) => `${provider}-${i}`),
+      rejected: [],
+    }),
+    onFailure: (provider) => failures.push(provider),
+  });
+  assert.deepEqual(asked, ["minimax", "mistral", "zhipu", "deepseek"]);
+  assert.deepEqual(failures, ["mistral"]);
+  assert.equal(result.ok, true);
+  assert.equal(result.proposed, 2);
+  assert.deepEqual(result.accepted, ["minimax-0", "minimax-1"]);
+  assert.deepEqual(result.rejected, [{ providerName: "mistral", apiModelId: "", reason: "not_researched" }]);
+
+  const allFailed = await researchConnectedImageProviders({
+    providers: ["zhipu"],
+    week: "2026-W49",
+    ask: async () => {
+      throw new Error("budget");
+    },
+    check: () => ({ accepted: [], rejected: [] }),
+    onFailure: () => {},
+  });
+  assert.equal(allFailed.ok, false);
 });
 
 test("research rows are never judged by the catalogue scan, so the vanished-ID exclusion cannot close them", async () => {

@@ -39,6 +39,7 @@ import {
   acceptNewProviderCandidates,
   connectedImageResearchPrompt,
   connectedImageResearchProviders,
+  researchConnectedImageProviders,
   brisbaneIsoWeek,
   newProviderResearchPrompt,
   newProviderResearchRunRecord,
@@ -282,14 +283,14 @@ export async function runNewProviderModelResearch(
     accepted: AcceptedNewProviderCandidate[];
     rejected: NewProviderResearchRejection[];
   } = { ok: true, proposed: 0, accepted: [], rejected: [] };
-  // One call per provider (owner decision 2026-11-24): asked about ten
-  // providers in one call, the search model returned an empty list although
-  // MiniMax and Zhipu were among them. A provider's call accepts only that
-  // provider's models. A failed or skipped call costs only its own provider.
+  // One call per provider, in this week's rotated order; a provider's call
+  // accepts only that provider's models.
   if (connectedImageEnabled) {
-    for (const provider of inputs.imageResearchProviders) {
-      try {
-        const answer = await ask(
+    connectedImage = await researchConnectedImageProviders({
+      providers: inputs.imageResearchProviders,
+      week,
+      ask: (provider) =>
+        ask(
           `connected_image:${provider}`,
           CONNECTED_IMAGE_RESEARCH_SYSTEM,
           connectedImageResearchPrompt({
@@ -298,24 +299,16 @@ export async function runNewProviderModelResearch(
             knownApiModels: inputs.knownApiModels,
             today,
           })
-        );
-        const checked = acceptConnectedImageCandidates({
+        ),
+      check: (provider, answer) =>
+        acceptConnectedImageCandidates({
           answer,
           connectedProviders: [provider],
           knownApiModels: inputs.knownApiModels,
           isOfficial: isOfficialSourceUrl,
-        });
-        connectedImage = {
-          ok: connectedImage.ok,
-          proposed: connectedImage.proposed + (answer?.candidates?.length ?? 0),
-          accepted: [...connectedImage.accepted, ...checked.accepted],
-          rejected: [...connectedImage.rejected, ...checked.rejected],
-        };
-      } catch (error) {
-        failed(`connected_image:${provider}`, error);
-        connectedImage = { ...connectedImage, ok: false };
-      }
-    }
+        }),
+      onFailure: (provider, error) => failed(`connected_image:${provider}`, error),
+    });
   }
 
   // Products are researched separately, so two answers can name one model.
