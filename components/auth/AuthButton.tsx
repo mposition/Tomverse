@@ -923,6 +923,7 @@ export function AuthButton({
             closeSettingsModal();
             return;
         }
+        setModelFinderConfirmOpen(false);
         const saved = savedSettingsRef.current;
         if (!saved) return;
         setTheme(saved.theme);
