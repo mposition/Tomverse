@@ -66,7 +66,7 @@ export function StudioToolEditor({ tool }: { tool: Exclude<StudioTool, { id: "st
   const [sceneAction, setSceneAction] = useState("");
   const hasReference = photoTool || pngTool || customPhoto;
   const size = id === "poster" ? "1024x1536" : "1024x1024";
-  const imageQuote = useStudioImageQuote(size, hasReference, !social);
+  const imageQuote = useStudioImageQuote(size, hasReference, !social, id === "poster" ? "1024x1024" : undefined);
   const [creditError, setCreditError] = useState<StudioGenerationError | null>(null);
   const [draftSaved, setDraftSaved] = useState(false);
   const checkoutDraft = useStudioCheckoutDraft<ToolCheckoutDraft>(id, saved => {
@@ -150,7 +150,7 @@ export function StudioToolEditor({ tool }: { tool: Exclude<StudioTool, { id: "st
         const generated = await runImage({
           inputKey: hasReference ? photo : id,
           prompt: imagePrompt(),
-          size,
+          size: imageQuote.quote.size,
           quote: imageQuote.quote,
           reference: hasReference ? () => pngTool
             ? renderStudioImage(photo, { width: 1024, height: 1024, fit: "contain" })

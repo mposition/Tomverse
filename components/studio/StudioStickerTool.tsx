@@ -58,7 +58,7 @@ export function StudioStickerTool({ billingNotice }: { billingNotice?: string })
   const [captionDraft, setCaptionDraft] = useState("");
   const words = [...captions, ...(captionDraft.trim() && captions.length < STUDIO_STICKER_LIMIT ? [captionDraft.trim()] : [])];
   const outputSize = words.length <= 1 ? singleSize : sheetSize;
-  const sheetQuote = useStudioImageQuote(outputSize, true);
+  const sheetQuote = useStudioImageQuote(outputSize, true, true, outputSize === sheetSize ? singleSize : undefined);
   const [sample, setSample] = useState(true);
   const [replacement, setReplacement] = useState<Replacement | null>(null);
   const [regenerating, setRegenerating] = useState(false);
@@ -151,7 +151,7 @@ export function StudioStickerTool({ billingNotice }: { billingNotice?: string })
         prompt: "Create exactly " + words.length + " separate chat sticker drawings from this portrait. Arrange them in " + columns + " equal columns and " + rows + " equal rows filling the canvas. Place one drawing in each successive cell with padding and invisible grid lines. Leave any unused cells plain green. Keep the same face, style, palette and proportions. " +
           drawFace(style) + " " + stickerBackground +
           " In left-to-right, top-to-bottom order, each pose and expression should match its caption: " + JSON.stringify(words),
-        size: outputSize,
+        size: sheetQuote.quote.size,
         quote: sheetQuote.quote,
         reference: () => makeStudioImageReference(photo.source),
         signal: controller.signal,
@@ -220,7 +220,7 @@ export function StudioStickerTool({ billingNotice }: { billingNotice?: string })
         prompt: "The left half is the reference portrait. The right half is an existing sticker. Draw one new sticker with the same identity, line work, colours and character as the reference. " +
           drawFace(reference.style) + " " + stickerBackground +
           " Change the pose, expression and props so the drawing depicts this new caption: " + JSON.stringify(replacement.caption.trim()),
-        size: singleSize,
+        size: singleQuote.quote.size,
         quote: singleQuote.quote,
         reference: () => makeStudioImageReference(reference.source, current.source),
         signal: controller.signal,
